@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { useSessions } from './queries'
+import { useSessionEvents } from './use-session-events'
 import { initNotificationRouting, notifyRouted, shouldNotify } from '../lib/notify'
 import { loadNotifPref } from '../lib/persist'
-import { useUiDispatch } from './store'
+import { useUiDispatch, useUiState } from './store'
 import { isAutonomous } from '../lib/autonomy'
 
 interface Snap { status: string; pendingApprovals: number }
@@ -13,11 +14,25 @@ interface Snap { status: string; pendingApprovals: number }
 // only primed (no notification) to avoid a burst on app start. Per-reason copy;
 // autonomous sessions suppress per-approval pings (they auto-run); clicking a
 // notification focuses the window and jumps to that session.
+//
+// Two signal sources feed the same notification path:
+//   • Active session — its live SSE stream surfaces the `done` event immediately
+//     (event-reducer.ts), so we watch useSessionEvents(activeId) for a running→
+//     terminal transition and fire instantly instead of waiting for the 2 s poll.
+//   • All sessions — the 2 s `useSessions()` poll diff remains the backstop for
+//     background/non-active sessions that don't have an open SSE stream.
+// `notifiedSet` dedupes so a single completion never pings twice when both
+// sources race.
 export function useGlobalNotifications(): void {
   const sessions = useSessions()
   const dispatch = useUiDispatch()
+  const { activeSessionId } = useUiState()
   const prev = useRef<Map<string, Snap>>(new Map())
   const primed = useRef(false)
+  // `sessionId:status` keys for completions already announced this run, so the
+  // live SSE path and the poll path don't double-fire on the same transition.
+  const notified = useRef<Set<string>>(new Set())
+  const activeStatusPrev = useRef<string>('')
 
   useEffect(() => {
     initNotificationRouting((sessionId) => {
@@ -26,6 +41,35 @@ export function useGlobalNotifications(): void {
     })
   }, [dispatch])
 
+  // ── Active session: real-time completion via the live SSE event stream ──
+  const live = useSessionEvents(activeSessionId)
+  useEffect(() => {
+    if (!activeSessionId) {
+      activeStatusPrev.current = ''
+      return
+    }
+    const before = activeStatusPrev.current
+    const now = live.status ?? ''
+    activeStatusPrev.current = now
+    if (before === 'running' && (now === 'completed' || now === 'failed')) {
+      const key = `${activeSessionId}:${now}`
+      if (notified.current.has(key)) return
+      notified.current.add(key)
+      const pref = loadNotifPref()
+      if (!shouldNotify(pref)) return
+      // Reuse the poll's label/error resolution so copy stays consistent: the
+      // live view doesn't carry title/error, but the sessions list does.
+      const meta = sessions.data?.find((s) => s.id === activeSessionId)
+      const label = meta?.title ?? activeSessionId.slice(0, 8)
+      if (now === 'completed') {
+        void notifyRouted('任务完成', `${label} 已完成，点击查看结果`, activeSessionId, pref)
+      } else {
+        void notifyRouted('任务失败', `${label} 失败：${meta?.error || '未知错误'}`, activeSessionId, pref)
+      }
+    }
+  }, [live.status, activeSessionId, sessions.data])
+
+  // ── All sessions: 2 s poll diff (backstop for non-active sessions) ──
   useEffect(() => {
     const list = sessions.data
     if (list === undefined) return
@@ -55,6 +99,10 @@ export function useGlobalNotifications(): void {
         void notifyRouted('需要批准', `${label} 有 ${s.pendingApprovals} 项待你审批`, s.id, pref)
       }
       if (was && was.status !== s.status) {
+        const key = `${s.id}:${s.status}`
+        // Live SSE path already announced this transition — skip the duplicate.
+        if (notified.current.has(key)) continue
+        notified.current.add(key)
         if (s.status === 'completed') {
           void notifyRouted('任务完成', `${label} 已完成，点击查看结果`, s.id, pref)
         } else if (s.status === 'failed') {
@@ -63,5 +111,17 @@ export function useGlobalNotifications(): void {
       }
     }
     prev.current = snapshot()
+  }, [sessions.data])
+
+  // Release dedupe entries when a session leaves terminal status (starts a new
+  // run), so the next completion can announce again.
+  useEffect(() => {
+    const list = sessions.data
+    if (!list) return
+    const liveIds = new Set(list.map((s) => s.id))
+    for (const key of notified.current) {
+      const sid = key.slice(0, key.lastIndexOf(':'))
+      if (!liveIds.has(sid)) notified.current.delete(key)
+    }
   }, [sessions.data])
 }

@@ -251,6 +251,23 @@ fn set_window_glass(window: tauri::WebviewWindow, enabled: bool) {
     }
 }
 
+/// Bring the main window back from tray/minimized and focus it.
+///
+/// `getCurrentWindow().setFocus()` from JS can neither unhide a window hidden
+/// to tray nor unminimize one — this command does all three so notification
+/// clicks reliably surface the app. Returns Ok(()) on success; the JS caller
+/// falls back to `setFocus()` when not under Tauri.
+#[tauri::command]
+fn focus_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    window.show().map_err(|e| e.to_string())?;
+    window.unminimize().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Ask the OS for a free localhost port by binding to :0, then release it.
 fn pick_free_port() -> u16 {
     TcpListener::bind("127.0.0.1:0")
@@ -1089,6 +1106,7 @@ pub fn run() {
             get_storage_options,
             apply_storage_location,
             set_window_glass,
+            focus_main_window,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
