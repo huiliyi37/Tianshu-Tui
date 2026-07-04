@@ -22,10 +22,11 @@
  * 逃生舱：PACK_NATIVE_SKIP_ABI_CHECK=1 跳过（仅限明确知道自己在干什么的场景）。
  */
 
-import { existsSync, mkdirSync, copyFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, copyFileSync, statSync, openSync, readSync, closeSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // 脚本在 scripts/，仓库根在上一级
@@ -151,15 +152,136 @@ function assertAbi() {
   )
 }
 
+// ── 跨架构打包（Apple Silicon 上打 Intel 包，反之亦然）────────────────────
+// 宿主机 npm install 出来的 better-sqlite3 只有宿主架构（M1 上是 arm64）。直接
+// 把它塞进 x86_64 包 → Intel 机器上 sidecar(x64 node) 加载 arm64 .node 失败 →
+// 退化 nullDb（跨会话知识/claims/registry 静默失能）。这正是「前面打的 Intel 包
+// 有问题」的根因。修法：目标架构 ≠ 宿主架构时，用 prebuild-install 拉目标架构对应
+// 目标 Node 版本(ABI)的预编译 .node，直接落到 dist/native。
+const HOST_ARCH = process.arch // 'arm64' | 'x64' | …
+
+/** 从 Tauri 目标三元组解析目标架构；无则退回宿主。 */
+function resolveTargetArch() {
+  const triple = (process.env.TAURI_ENV_TARGET_TRIPLE || '').trim()
+  if (triple) {
+    const tok = triple.split('-')[0]
+    if (tok === 'aarch64' || tok === 'arm64') return 'arm64'
+    if (tok === 'x86_64') return 'x64'
+    if (tok === 'i686') return 'x86'
+  }
+  return HOST_ARCH
+}
+
+/** 目标平台的 Node process.platform token（prebuild-install --platform 用）。 */
+function resolveTargetPlatform() {
+  const triple = process.env.TAURI_ENV_TARGET_TRIPLE || ''
+  if (triple.includes('windows')) return 'win32'
+  if (triple.includes('darwin')) return 'darwin'
+  if (triple.includes('linux')) return 'linux'
+  return process.platform
+}
+
+// Mach-O CPU 类型常量。用于跨架构打包后校验产物确实是目标架构，
+// 而不是（跨架构无法 require 探测 ABI 时）盲信 prebuild-install。
+const CPU_TYPE_X86_64 = 0x01000007
+const CPU_TYPE_ARM64 = 0x0100000c
+
+/** 读一个 thin Mach-O 64 的 cputype → 'x64' | 'arm64' | null（无法判定）。 */
+function machoArch(path) {
+  let fd
+  try {
+    fd = openSync(path, 'r')
+    const buf = Buffer.alloc(8)
+    if (readSync(fd, buf, 0, 8, 0) < 8) return null
+    // 磁盘上 mac thin .node 是小端：magic MH_MAGIC_64 = 0xFEEDFACF。
+    const magicLE = buf.readUInt32LE(0)
+    if (magicLE !== 0xfeedfacf) return null // fat/universal 或非 macho64 → 不判定
+    const cpu = buf.readUInt32LE(4)
+    if (cpu === CPU_TYPE_X86_64) return 'x64'
+    if (cpu === CPU_TYPE_ARM64) return 'arm64'
+    return null
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+}
+
+/**
+ * 跨架构：用 prebuild-install 拉目标架构的 better-sqlite3 预编译二进制。
+ * prebuild-install 装到 <pkg>/build/Release，会覆盖宿主架构二进制，所以先备份、
+ * 拷贝到 dist/native 后再还原，保证宿主的 node_modules 不被污染（dev/CLI/后续
+ * 宿主构建仍用宿主架构）。
+ */
+function crossPackNative(targetArch, targetPlatform) {
+  const targetNodeVersion = resolveTargetNodeVersion()
+  const pkgDir = join(repoRoot, 'node_modules', 'better-sqlite3')
+  const buildRel = join(pkgDir, 'build', 'Release', 'better_sqlite3.node')
+  const piName = process.platform === 'win32' ? 'prebuild-install.cmd' : 'prebuild-install'
+  const piBin = join(repoRoot, 'node_modules', '.bin', piName)
+
+  if (!existsSync(piBin)) {
+    console.error(
+      `❌ pack-native: 跨架构打包需要 prebuild-install，但未找到 ${piBin}。\n` +
+        '   请确认 better-sqlite3 依赖已完整安装（它带 prebuild-install）。',
+    )
+    process.exit(1)
+  }
+
+  const backup = existsSync(buildRel) ? `${buildRel}.hostbak` : null
+  if (backup) copyFileSync(buildRel, backup)
+  try {
+    console.log(
+      `[pack-native] 跨架构：prebuild-install --arch ${targetArch} --platform ${targetPlatform} --target ${targetNodeVersion}`,
+    )
+    execFileSync(
+      piBin,
+      ['--arch', targetArch, '--platform', targetPlatform, '--target', targetNodeVersion, '--runtime', 'node'],
+      { cwd: pkgDir, stdio: 'inherit' },
+    )
+    if (!existsSync(buildRel)) {
+      throw new Error('prebuild-install 未产出 better_sqlite3.node（可能该架构/版本无预编译包）')
+    }
+    copyFileSync(buildRel, TARGET)
+  } finally {
+    // 还原宿主架构二进制，绝不把跨架构产物留在 node_modules。
+    if (backup) {
+      copyFileSync(backup, buildRel)
+      rmSync(backup, { force: true })
+    }
+  }
+
+  // 架构校验（fail-closed）：磁盘产物必须确实是目标架构。ABI 正确性由
+  // prebuild-install --target <目标 Node 版本> 保证（跨架构无法 require 探测）。
+  const producedArch = machoArch(TARGET)
+  if (producedArch && producedArch !== targetArch) {
+    console.error(
+      `❌ pack-native: 跨架构产物架构不符 —— 期望 ${targetArch}，实际 ${producedArch}。拒绝打入包中。`,
+    )
+    process.exit(1)
+  }
+  const sizeKb = Math.round(statSync(TARGET).size / 1024)
+  console.log(
+    `✅ pack-native: 跨架构打包完成 — better_sqlite3.node (${sizeKb}KB, ${producedArch || 'arch?'}) ` +
+      `for Node v${targetNodeVersion} → ${TARGET}`,
+  )
+}
+
 if (!existsSync(SOURCE)) {
   console.error('⚠ pack-native: better-sqlite3 native binary not found at %s — skipping', SOURCE)
   process.exit(0)
 }
 
 mkdirSync(TARGET_DIR, { recursive: true })
-copyFileSync(SOURCE, TARGET)
 
-const sizeKb = Math.round(statSync(TARGET).size / 1024)
-console.log('✅ Packed better_sqlite3.node (%dKB) → %s', sizeKb, TARGET)
-
-assertAbi()
+const TARGET_ARCH = resolveTargetArch()
+if (TARGET_ARCH === HOST_ARCH) {
+  // 同架构：直接拷宿主 node_modules 的二进制，走 require 探测式 ABI 断言。
+  copyFileSync(SOURCE, TARGET)
+  const sizeKb = Math.round(statSync(TARGET).size / 1024)
+  console.log('✅ Packed better_sqlite3.node (%dKB) → %s', sizeKb, TARGET)
+  assertAbi()
+} else {
+  console.log(`[pack-native] 目标架构 ${TARGET_ARCH} ≠ 宿主架构 ${HOST_ARCH} — 走跨架构拉取路径`)
+  crossPackNative(TARGET_ARCH, resolveTargetPlatform())
+}

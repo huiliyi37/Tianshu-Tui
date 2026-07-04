@@ -28,7 +28,7 @@
  * Idempotent. Run after `npm run build` (tsup `clean` wipes dist) and after
  * pack-native.js.
  */
-import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, statSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, statSync, readdirSync, openSync, readSync, closeSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
@@ -53,6 +53,44 @@ function pkgDir(name) {
   // Flat (hoisted) layout: node_modules/<name>. Scoped names keep the slash.
   const dir = join(srcModules, name)
   return existsSync(join(dir, 'package.json')) ? dir : null
+}
+
+// ── 跨架构支持（与 pack-native.js 同口径）─────────────────────────────────
+// 目标架构 ≠ 宿主时，dist/native/better_sqlite3.node 是目标架构的，无法在宿主
+// 进程 require 探测（会抛 arch mismatch）。此时跳过 round-trip 断言，改为读
+// Mach-O 头校验架构（fail-closed），ABI 正确性由 pack-native 的 --target 保证。
+/** 从 Tauri 目标三元组解析目标架构；无则退回宿主 process.arch。 */
+function resolveTargetArch() {
+  const triple = (process.env.TAURI_ENV_TARGET_TRIPLE || '').trim()
+  if (triple) {
+    const tok = triple.split('-')[0]
+    if (tok === 'aarch64' || tok === 'arm64') return 'arm64'
+    if (tok === 'x86_64') return 'x64'
+    if (tok === 'i686') return 'x86'
+  }
+  return process.arch
+}
+
+const CPU_TYPE_X86_64 = 0x01000007
+const CPU_TYPE_ARM64 = 0x0100000c
+
+/** 读 thin Mach-O 64 的 cputype → 'x64' | 'arm64' | null。 */
+function machoArch(path) {
+  let fd
+  try {
+    fd = openSync(path, 'r')
+    const buf = Buffer.alloc(8)
+    if (readSync(fd, buf, 0, 8, 0) < 8) return null
+    if (buf.readUInt32LE(0) !== 0xfeedfacf) return null
+    const cpu = buf.readUInt32LE(4)
+    if (cpu === CPU_TYPE_X86_64) return 'x64'
+    if (cpu === CPU_TYPE_ARM64) return 'arm64'
+    return null
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
 }
 
 function readDeps(dir) {
@@ -142,6 +180,23 @@ function stageBetterSqlite3Wrapper() {
   if (!existsSync(nodeBin)) {
     console.error('✗ stage-runtime-deps: %s missing — run pack-native.js before stage-runtime-deps', nodeBin)
     process.exit(1)
+  }
+  // 跨架构构建：宿主进程无法 require 目标架构 .node。改为 Mach-O 架构校验
+  // （fail-closed），round-trip 断言留给同架构宿主。
+  const targetArch = resolveTargetArch()
+  if (targetArch !== process.arch) {
+    const a = machoArch(nodeBin)
+    if (a && a !== targetArch) {
+      console.error(
+        `✗ stage-runtime-deps: 跨架构 better_sqlite3.node 架构不符 — 期望 ${targetArch}，实际 ${a}。`,
+      )
+      process.exit(1)
+    }
+    console.log(
+      `✅ stage-runtime-deps: 跨架构 better_sqlite3.node 架构=${a || '?'} 匹配目标 ${targetArch} ` +
+        '（无法宿主 require，ABI 信任 pack-native 的 --target）',
+    )
+    return
   }
   // The staged wrapper + packed .node MUST load and round-trip. A failure means
   // the bundle would silently fall back to NullDatabase at runtime — refuse to
