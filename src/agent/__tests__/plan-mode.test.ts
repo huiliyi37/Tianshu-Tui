@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath } from '../plan-mode.js'
+import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath, planInjectionVariantFor } from '../plan-mode.js'
+import { profileIsWriteCapable } from '../profile-registry.js'
 import { createDefaultToolRegistry } from '../../tools/default-registry.js'
 import { WEB_SEARCH_TOOL } from '../../tools/web-search.js'
 import { createRepoGraphTool } from '../../tools/repo-graph.js'
@@ -66,6 +67,31 @@ describe('checkPlanMode', () => {
     assert.ok(deliverResult.reason!.includes('Plan Mode'), 'deliver_task reason should mention Plan Mode')
   })
 
+  it('planning state blocks delegation of write/execute-capable profiles', () => {
+    for (const tool of ['delegate_task', 'delegate_batch']) {
+      const denied = checkPlanMode('planning', tool, { delegatesWriteCapableProfile: true })
+      assert.equal(denied.allowed, false, `${tool} with write profile should be blocked`)
+      assert.ok(denied.reason!.includes('Plan Mode'), `${tool} reason should mention Plan Mode`)
+      assert.ok(/patcher|read-only/i.test(denied.reason!), `${tool} reason should explain read-only-only`)
+    }
+  })
+
+  it('planning state still allows delegation of read-only scout profiles', () => {
+    for (const tool of ['delegate_task', 'delegate_batch']) {
+      assert.deepEqual(
+        checkPlanMode('planning', tool, { delegatesWriteCapableProfile: false }),
+        { allowed: true },
+        `${tool} with read-only scout should be allowed`,
+      )
+      // no ctx flag at all → default read-only delegation, allowed
+      assert.deepEqual(checkPlanMode('planning', tool), { allowed: true })
+    }
+  })
+
+  it('off state ignores the write-capable-profile flag', () => {
+    assert.deepEqual(checkPlanMode('off', 'delegate_task', { delegatesWriteCapableProfile: true }), { allowed: true })
+  })
+
   it('PLAN_MODE_ALLOWED_TOOLS includes clarification and delegation', () => {
     assert.ok(PLAN_MODE_ALLOWED_TOOLS.has('ask_user_question'))
     assert.ok(PLAN_MODE_ALLOWED_TOOLS.has('delegate_task'))
@@ -77,6 +103,32 @@ describe('checkPlanMode', () => {
   it('createActivePlanDraftPath returns draft path under .rivet/plans', () => {
     const path = createActivePlanDraftPath()
     assert.match(path, /^\.rivet\/plans\/draft-\d+\.md$/)
+  })
+
+  it('profileIsWriteCapable flags patcher/hands profiles, not read-only scouts', () => {
+    assert.equal(profileIsWriteCapable('code_scout'), false)
+    assert.equal(profileIsWriteCapable('doc_scout'), false)
+    assert.equal(profileIsWriteCapable('patcher'), true)
+    // unknown profile → false (delegate schema reports the real error)
+    assert.equal(profileIsWriteCapable('no_such_profile_xyz'), false)
+  })
+
+  describe('planInjectionVariantFor (cadence formula)', () => {
+    it('emits full on entry and every refresh interval, sparse in between', () => {
+      const refreshEvery = 5
+      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 0, reentry: false, refreshEvery }), 'full')
+      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 1, reentry: false, refreshEvery }), 'sparse')
+      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 4, reentry: false, refreshEvery }), 'sparse')
+      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 5, reentry: false, refreshEvery }), 'full')
+      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 10, reentry: false, refreshEvery }), 'full')
+    })
+
+    it('emits reentry only on the first resumed turn, then normal cadence', () => {
+      const refreshEvery = 5
+      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 0, reentry: true, refreshEvery }), 'reentry')
+      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 1, reentry: true, refreshEvery }), 'sparse')
+      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 5, reentry: true, refreshEvery }), 'full')
+    })
   })
 
   it('every PLAN_MODE_ALLOWED_TOOLS entry resolves to a registered tool', () => {

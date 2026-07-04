@@ -70,6 +70,20 @@ function parseSubmitOptions(raw: unknown): PlanOption[] | undefined {
   return options
 }
 
+/**
+ * Gate a plan's content at the approval boundary (kimi-code borrow: empty-plan
+ * hard-fail). `/plan-approve` and the plan-picker previously trusted that submit
+ * had validated — approving a stale draft or gutted file slipped through. Reuses
+ * the same empty/placeholder checks as submit. Pure + exported for reuse in TUI.
+ */
+export function validatePlanContentForApproval(content: string): PlaceholderCheckResult {
+  const body = stripPlanStatusMarkers(content).trim()
+  if (!body) {
+    return { ok: false, reason: '计划文件为空——批准前请先写入完整设计（或用 /plan-reject 让 agent 补全）。' }
+  }
+  return checkPlanForPlaceholders(body)
+}
+
 function checkPlanForPlaceholders(content: string): PlaceholderCheckResult {
   const placeholderHits = content.match(PLACEHOLDER_RE)
   if (placeholderHits && placeholderHits.length >= 3) {

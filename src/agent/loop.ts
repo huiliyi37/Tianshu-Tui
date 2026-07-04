@@ -20,8 +20,11 @@ import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
 import { buildGateConvergenceHint } from './delivery-gate-v2.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { ImportGraph } from './import-graph.js'
-import type { PlanModeState } from './plan-mode.js'
-import { createActivePlanDraftPath } from './plan-mode.js'
+import type { PlanModeState, PlanInjectionVariant } from './plan-mode.js'
+import { createActivePlanDraftPath, planInjectionVariantFor } from './plan-mode.js'
+
+/** Turns between full plan-mode reminder refreshes (sparse in between). */
+const PLAN_FULL_REFRESH_TURNS = 5
 import { WRITING_PLANS_SKILL } from './plan-delegation.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
@@ -187,6 +190,12 @@ export class AgentLoop {
   planModeState: PlanModeState = 'off'
   /** Relative path to the active plan file (draft or revision target). Writable in plan mode. */
   activePlanFilePath: string | null = null
+  /** Session turn count at which the current plan-mode session was entered — drives
+   *  the injection cadence (full spec on entry + every refresh interval, else sparse). */
+  private planEnterTurn = 0
+  /** True when plan mode was (re)entered on an existing non-empty plan file (revision
+   *  after reject / resume) → first injection uses the shorter 'reentry' variant. */
+  private planReentry = false
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
   failureJournal: FailureJournal = createFailureJournal()
@@ -953,6 +962,19 @@ export class AgentLoop {
     this.config.activePlanFilePath = this.activePlanFilePath
     this.config.promptEngine.setPlanModeState(this.planModeState)
     this.config.promptEngine.setActivePlanFilePath(this.activePlanFilePath)
+    this.config.promptEngine.setPlanInjectionVariant(this.computePlanInjectionVariant())
+  }
+
+  /** Cadence for the per-turn plan-mode reminder: full spec on entry (or reentry
+   *  header on resume) and every PLAN_FULL_REFRESH_TURNS turns, sparse in between.
+   *  Returns undefined when not planning (no block rendered). */
+  private computePlanInjectionVariant(): PlanInjectionVariant | undefined {
+    if (this.planModeState !== 'planning') return undefined
+    return planInjectionVariantFor({
+      turnsSinceEnter: this.session.getTurnCount() - this.planEnterTurn,
+      reentry: this.planReentry,
+      refreshEvery: PLAN_FULL_REFRESH_TURNS,
+    })
   }
 
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort | 'auto'): void {
@@ -1286,12 +1308,24 @@ export class AgentLoop {
       return
     }
     this.planModeState = 'planning'
+    this.planEnterTurn = this.session.getTurnCount()
+    // Re-entering cancels any pending exit reminder from a prior exit.
+    this.config.promptEngine.setPlanExitReminderPending(false)
     this.config.promptEngine.setActivePlan(null)
 
     const cwd = this.cwd
     if (opts?.planFilePath) {
       this.activePlanFilePath = opts.planFilePath.replace(/\\/g, '/')
+      // Reentry = resuming an existing non-empty plan (e.g. revision after reject).
+      // First injection uses the shorter 'resuming' reminder instead of the full spec.
+      this.planReentry = (() => {
+        try {
+          const abs = join(cwd, this.activePlanFilePath)
+          return existsSync(abs) && readFileSync(abs, 'utf-8').trim().length > 0
+        } catch { return false }
+      })()
     } else {
+      this.planReentry = false
       this.activePlanFilePath = createActivePlanDraftPath()
       const abs = join(cwd, this.activePlanFilePath)
       mkdirSync(dirname(abs), { recursive: true })
@@ -1304,6 +1338,7 @@ export class AgentLoop {
   /** Exit plan mode — user approved, all tools allowed */
   exitPlanMode(): void {
     this.planModeState = 'off'
+    this.config.promptEngine.setPlanExitReminderPending(true)
     this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
   }
@@ -1338,7 +1373,9 @@ export class AgentLoop {
       return
     }
     this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
+    const wasPlanning = this.planModeState === 'planning'
     this.planModeState = 'off'
+    if (wasPlanning) this.config.promptEngine.setPlanExitReminderPending(true)
     this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
   }

@@ -794,6 +794,43 @@ describe('GWT salience and Top-K selection', () => {
       assert.match(out, /<plan-mode>/)
     })
 
+    it('sparse variant is shorter than full and drops the mermaid skeletons', () => {
+      const full = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning', planInjectionVariant: 'full' })
+      const sparse = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning', planInjectionVariant: 'sparse' })
+      assert.match(sparse, /<plan-mode>/)
+      assert.ok(sparse.length < full.length, 'sparse should be shorter than full')
+      assert.doesNotMatch(sparse, /```mermaid/, 'sparse omits skeletons')
+      // still carries the turn-ending contract so the invariant is never lost
+      assert.match(sparse, /plan action=submit/)
+    })
+
+    it('reentry variant renders a resuming header and stays sparse', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning', planInjectionVariant: 'reentry' })
+      assert.match(out, /<plan-mode>/)
+      assert.match(out, /恢复规划/)
+      assert.doesNotMatch(out, /```mermaid/)
+    })
+
+    it('defaults to the full block when no variant is provided', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning' })
+      const fences = out.match(/```mermaid/g) ?? []
+      assert.ok(fences.length >= 2, 'default (full) keeps the skeletons')
+    })
+
+    it('renders the one-shot exit reminder when pending, even with plan mode off', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo', planExitReminderPending: true })
+      assert.match(out, /<plan-mode-exit>/)
+      assert.match(out, /限制已解除/)
+      // the exit reminder never coexists with the planning block
+      assert.doesNotMatch(out, /<plan-mode>/)
+    })
+
+    it('does not render the exit reminder while still planning', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning', planExitReminderPending: true })
+      assert.match(out, /<plan-mode>/)
+      assert.doesNotMatch(out, /<plan-mode-exit>/)
+    })
+
     it('lightweight methodology advisory now requires at least one diagram', () => {
       const advisory = renderPlanMethodologyAdvisory('lightweight')
       assert.ok(advisory)

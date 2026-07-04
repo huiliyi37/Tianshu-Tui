@@ -933,6 +933,11 @@ async function main() {
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
   app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
+  // Shift+Tab exit confirmation window: exiting plan mode abandons an unapproved
+  // plan and unlocks writes, so require a second press within this window instead
+  // of silently unlocking on a single stray keypress.
+  const PLAN_EXIT_CONFIRM_MS = 3000
+  let planExitArmedAt = 0
   app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
     // 有待批计划时,Shift+Tab 优先弹出选择器(方向键选 + 回车批准并自动分波执行),
@@ -942,9 +947,18 @@ async function main() {
       return
     }
     if (agent.planModeState === 'planning') {
-      agent.exitPlanMode()
-      app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
+      // Two-step confirm: first press arms + warns, second press within the window exits.
+      const now = Date.now()
+      if (planExitArmedAt !== 0 && now - planExitArmedAt <= PLAN_EXIT_CONFIRM_MS) {
+        planExitArmedAt = 0
+        agent.exitPlanMode()
+        app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
+      } else {
+        planExitArmedAt = now
+        app!.commitStatic('⚠ 计划尚未批准。再按一次 Shift+Tab 放弃当前计划并退出规划模式，或用 /plan-approve <slug> 批准后执行。')
+      }
     } else {
+      planExitArmedAt = 0
       agent.enterPlanMode()
       const path = agent.getActivePlanFilePath()
       app!.commitStatic([

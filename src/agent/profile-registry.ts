@@ -596,6 +596,24 @@ function parseAgentMarkdown(content: string): ProfileDefinition {
 /** 全局单例 */
 export const profileRegistry = new ProfileRegistry()
 
+/** Tools that write files or run state-changing commands — used to classify a
+ *  worker profile as write/execute-capable (vs a pure read-only scout). */
+const WRITE_CAPABLE_TOOLS: ReadonlySet<string> = new Set([
+  'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'ast_edit', 'bash', 'run_tests', 'git',
+])
+
+/**
+ * Whether a delegate profile can write files or execute state-changing commands.
+ * Unknown profiles → false (the delegate tool's own schema rejects them with a
+ * clearer "Unknown profile" error; plan-mode need not double-report). Used by the
+ * plan-mode gate to allow only read-only scouts during planning.
+ */
+export function profileIsWriteCapable(name: string): boolean {
+  const def = profileRegistry.get(name)
+  if (!def) return false
+  return def.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
+}
+
 /**
  * P0 超时对齐：delegate 工具层超时 = max(阶梯, 各 profile 预算) + 宽限。
  *

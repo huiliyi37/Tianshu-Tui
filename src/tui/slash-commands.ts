@@ -34,7 +34,8 @@ import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { exportsDir } from '../config/paths.js'
-import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix } from '../plan/plan-store.js'
+import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix, readPlan } from '../plan/plan-store.js'
+import { validatePlanContentForApproval } from '../tools/plan.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
@@ -481,6 +482,19 @@ export async function approvePlanAndKickoff(
   slug: string,
   resolvedApproach?: string,
 ): Promise<boolean> {
+  // Empty/invalid-plan hard-fail at the approval boundary (kimi-code borrow):
+  // never mark a stale draft or gutted file APPROVED + kick off execution.
+  const existing = await readPlan(deps.cwd, slug)
+  if (!existing) {
+    deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
+    return false
+  }
+  const check = validatePlanContentForApproval(existing.content)
+  if (!check.ok) {
+    deps.notify(`无法批准 **${existing.title}** (\`${slug}\`)：${check.reason} 未写入 APPROVED 标记，也未启动执行。`, true)
+    return false
+  }
+
   const approved = await approvePlan(deps.cwd, slug)
   if (!approved) {
     deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)

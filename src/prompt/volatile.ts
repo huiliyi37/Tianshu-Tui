@@ -53,7 +53,22 @@ export function renderPlanMethodologyAdvisory(
  * architecture/data-flow diagram (the salience for this lives in the appendix,
  * close to where the model is reasoning, instead of a far-away tool description).
  */
-export function renderPlanModeBlock(activePlanFilePath?: string | null): string {
+export function renderPlanModeBlock(
+  activePlanFilePath?: string | null,
+  variant: import('../agent/plan-mode.js').PlanInjectionVariant = 'full',
+): string {
+  // Sparse / reentry variants: throttle the heavy spec on non-refresh turns so
+  // planning turns don't re-pay the full block's token cost each time. Cache-safe
+  // (dynamic appendix only). The full spec is still emitted on entry + every
+  // refresh interval, so the model never loses the invariant for long.
+  if (variant === 'sparse' || variant === 'reentry') {
+    const planFileHint = activePlanFilePath ? ` 活动计划文件: \`${activePlanFilePath}\`（仅此文件可写）。` : ''
+    const head = variant === 'reentry'
+      ? `恢复规划模式——继续完善当前计划。`
+      : `规划模式仍激活。`
+    return `<plan-mode>${head}只读探索，禁止写/改/执行（活动计划文件除外）。${planFileHint} 每个 turn 必须以 \`ask_user_question\` 或 \`plan action=submit\` 收尾，禁止纯文本收尾。完整规范见本轮早前的 plan-mode 说明。</plan-mode>`
+  }
+
   const planFileLine = activePlanFilePath
     ? `\n活动计划文件: \`${activePlanFilePath}\` — 用 write_file / edit_file 增量写入计划正文（仅此文件可写）。`
     : ''
@@ -101,6 +116,15 @@ flowchart LR
 - /plan-approve <slug> [方案名] — 批准（可选指定方案），开始执行
 - /plan-reject <slug> <反馈> — 驳回并给出修订意见，plan mode 保持激活
 </plan-mode>`
+}
+
+/**
+ * One-shot reminder emitted on the first turn after plan mode exits. Without it,
+ * the model only sees the `<plan-mode>` block silently disappear and may keep
+ * self-restricting to read-only. Cache-safe: dynamic appendix only.
+ */
+export function renderPlanExitReminder(): string {
+  return `<plan-mode-exit>Plan Mode 已退出——只读/仅计划文件限制已解除。现在可以正常 write_file / edit_file / 执行命令，按已批准的计划推进。</plan-mode-exit>`
 }
 
 /**
@@ -221,6 +245,12 @@ export interface VolatileContext {
   planModeState?: 'off' | 'planning' | 'approved'
   /** Active plan file path (relative) for incremental plan writing */
   activePlanFilePath?: string | null
+  /** Plan-mode injection cadence variant (full/sparse/reentry). Defaults to 'full'.
+   *  Cache-safe: dynamic appendix only. */
+  planInjectionVariant?: import('../agent/plan-mode.js').PlanInjectionVariant
+  /** One-shot flag: render the exit reminder on the first turn after plan mode
+   *  turns off. Cache-safe: dynamic appendix only. */
+  planExitReminderPending?: boolean
   /** Project memory loaded from .rivet/knowledge/memory.jsonl (frozen: changes only on file update) */
   projectMemoryBlock?: string
   /** Codebase index — module summaries + CLI entries from MeridianDB.
@@ -337,6 +367,8 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     // but MUST stay out of FROZEN — they can change mid-session and would
     // break exact-prefix cache if included in the stable block.
     planModeState: undefined,
+    planInjectionVariant: undefined,
+    planExitReminderPending: undefined,
     worktreeReality: undefined,
     // Session snapshot fields — KEEP in FROZEN:
     // rivetMd, workingSet, sessionMemoryBlock, cwdRelation
@@ -571,7 +603,9 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Plan-mode instruction block: governs the whole planning turn (read-only +
   // plan quality standard + diagram skeletons). Cache-safe — appendix only.
   if (ctx.planModeState === 'planning') {
-    parts.push(renderPlanModeBlock(ctx.activePlanFilePath))
+    parts.push(renderPlanModeBlock(ctx.activePlanFilePath, ctx.planInjectionVariant ?? 'full'))
+  } else if (ctx.planExitReminderPending) {
+    parts.push(renderPlanExitReminder())
   }
 
   // Phase 2B: output verbosity steering (opt-in via RIVET_TERSE=1, off by default).

@@ -51,8 +51,25 @@ import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
 import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
+import { profileIsWriteCapable } from './profile-registry.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 import { toolTargetFromInput } from './tool-target.js'
+
+/** Collect the worker profile name(s) a delegate_task/delegate_batch call requests.
+ *  delegate_task carries a single `profile`; delegate_batch carries `tasks[].profile`.
+ *  Absent profile → default read-only scout, so it need not be listed here. */
+function delegateProfilesFromInput(input: Record<string, unknown>): string[] {
+  const names: string[] = []
+  if (typeof input.profile === 'string') names.push(input.profile)
+  if (Array.isArray(input.tasks)) {
+    for (const task of input.tasks) {
+      if (task && typeof task === 'object' && typeof (task as { profile?: unknown }).profile === 'string') {
+        names.push((task as { profile: string }).profile)
+      }
+    }
+  }
+  return names
+}
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -733,10 +750,14 @@ export async function executeToolUse(
     const writePath = (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string'
       ? tu.input.file_path
       : undefined
+    const delegatesWriteCapableProfile = deps.config.planModeState === 'planning'
+      && (tu.name === 'delegate_task' || tu.name === 'delegate_batch')
+      && delegateProfilesFromInput(tu.input).some(profileIsWriteCapable)
     const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name, {
       cwd: deps.cwd,
       targetFilePath: writePath,
       activePlanFilePath: deps.config.activePlanFilePath,
+      delegatesWriteCapableProfile,
     })
     if (!planModeResult.allowed) {
       const planMsg = planModeResult.reason ?? 'Plan Mode: write operations blocked'
