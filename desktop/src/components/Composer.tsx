@@ -128,8 +128,12 @@ export function Composer(props: {
   onSetApprovalLevel?: (level: AutonomyLevel) => void
   /** P1-1 chip row — context usage ring (used/window + cache detail popover). */
   contextUsage?: ContextUsage
+  /** Recall previous (older) prompt from history — terminal-style Up-arrow. */
+  onHistoryPrev?: () => void
+  /** Recall next (newer) prompt from history — terminal-style Down-arrow. */
+  onHistoryNext?: () => void
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext } = props
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -387,6 +391,26 @@ export function Composer(props: {
       if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); return }
       if ((e.key === 'Enter' || e.key === 'Tab') && !isComposing) { e.preventDefault(); accept(); return }
       if (e.key === 'Escape') { e.preventDefault(); closeSuggest(); return }
+    }
+
+    // History recall (terminal-style Up/Down). Only fires when no autocomplete
+    // menu is open AND the caret sits on the first/last line — so multi-line
+    // drafts still let the caret move freely within. Up = older, Down = newer.
+    if (e.key === 'ArrowUp' && onHistoryPrev) {
+      const ta = e.currentTarget
+      if (ta.value.slice(0, ta.selectionStart).indexOf('\n') === -1) {
+        e.preventDefault()
+        onHistoryPrev()
+        return
+      }
+    }
+    if (e.key === 'ArrowDown' && onHistoryNext) {
+      const ta = e.currentTarget
+      if (ta.value.slice(ta.selectionEnd).indexOf('\n') === -1) {
+        e.preventDefault()
+        onHistoryNext()
+        return
+      }
     }
 
     if (e.key === 'Tab' && e.shiftKey && onSetPlanMode) {

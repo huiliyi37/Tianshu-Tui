@@ -99,6 +99,52 @@ export function ThreadView(props: {
     setInputRaw(text)
     dispatch({ type: 'setComposerDraft', sessionId: session.id, text })
   }, [dispatch, session.id])
+
+  // ── Prompt history recall (terminal-style Up/Down) ──
+  // Source from raw `view.blocks` (not `rendered`) so history is stable across
+  // rewind-slider / view-mode filtering. Newest first; empty strings skipped.
+  const historyTexts = useMemo(() => {
+    const out: string[] = []
+    for (let i = view.blocks.length - 1; i >= 0; i--) {
+      const b = view.blocks[i]!
+      if (b.kind === 'user' && b.text) out.push(b.text)
+    }
+    return out
+  }, [view.blocks])
+  // historyIndex: null = not browsing history (normal typing); number = index
+  // into historyTexts currently shown in the input.
+  const historyIndex = useRef<number | null>(null)
+  // Stash of the in-progress draft when the user first presses Up, restored on
+  // the way back Down past the newest entry.
+  const stashedDraft = useRef<string>('')
+  // Reset browsing state when switching sessions — history belongs to a session.
+  useEffect(() => { historyIndex.current = null }, [session.id])
+
+  const recallHistory = useCallback((dir: 'prev' | 'next') => {
+    const n = historyTexts.length
+    if (n === 0) return
+    const cur = historyIndex.current
+    if (dir === 'prev') {
+      // First Up from typing: stash current draft, jump to newest (index 0).
+      // Subsequent Up: walk older (index++).
+      const next = cur === null ? 0 : Math.min(cur + 1, n - 1)
+      if (cur === null) stashedDraft.current = input
+      historyIndex.current = next
+      setInput(historyTexts[next] ?? '')
+    } else {
+      if (cur === null) return // not browsing — nothing to do
+      const next = cur - 1
+      if (next < 0) {
+        // Down past newest → restore stashed draft, back to typing mode.
+        historyIndex.current = null
+        setInput(stashedDraft.current)
+        stashedDraft.current = ''
+      } else {
+        historyIndex.current = next
+        setInput(historyTexts[next] ?? '')
+      }
+    }
+  }, [historyTexts, input, setInput])
   const qc = useQueryClient()
   const [showRewind, setShowRewind] = useState(false)
   const [showDelegation, setShowDelegation] = useState(false)
@@ -945,6 +991,7 @@ export function ThreadView(props: {
               if (busy) onSteer(text)
               else onSend(text, images)
               setInput('')
+              historyIndex.current = null
             }}
             onAbort={onAbort}
             onDoubleEscape={() => setShowRewind(true)}
@@ -958,6 +1005,8 @@ export function ThreadView(props: {
               onSend(`${cmd} 我想用${label}模式完成一个任务，请先问我具体目标是什么。`)
             }}
             menuRev={view.menuRev}
+            onHistoryPrev={() => recallHistory('prev')}
+            onHistoryNext={() => recallHistory('next')}
           />
         </div>
       </div>
