@@ -152,6 +152,23 @@ function whichGitWindows(): string | undefined {
   return undefined
 }
 
+/**
+ * Seed `RIVET_GIT_BASH_PATH` from the persisted config (`env.gitBashPath`) at
+ * startup so the shell probe honors a user-chosen Git Bash location. A real OS
+ * env var of the same name always wins (explicit override), so this only fills
+ * the gap for desktop users who can't easily set system env vars. Idempotent;
+ * resets the probe caches so a later getShellCommand() picks up the change.
+ * No-op when the value is empty or the env var is already set.
+ */
+export function applyConfiguredGitBashPath(gitBashPath?: string): void {
+  const trimmed = gitBashPath?.trim()
+  if (!trimmed) return
+  if (process.env['RIVET_GIT_BASH_PATH']) return
+  process.env['RIVET_GIT_BASH_PATH'] = trimmed
+  _cachedGitBash = undefined
+  _cachedShell = null
+}
+
 /** Cached, real-IO Git Bash path probe. */
 export function findGitBashPath(): string | null {
   if (_cachedGitBash !== undefined) return _cachedGitBash

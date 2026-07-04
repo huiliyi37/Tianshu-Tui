@@ -15,7 +15,7 @@ import { relaunch } from '@tauri-apps/plugin-process'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { GlassCustomPanel } from '../components/GlassCustomPanel'
 import { FontSettingsPanel } from '../components/FontSettingsPanel'
-import { coerceLevel, isWindows, type AutonomyLevel } from '../lib/autonomy'
+import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
@@ -35,16 +35,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system' | 'help'
 
 const SETTINGS_CATS: { id: SettingsCat; icon: LucideIcon }[] = [

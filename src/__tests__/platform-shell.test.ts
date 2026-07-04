@@ -6,6 +6,7 @@ import {
   resolveShellCommand,
   rewriteWindowsNullRedirect,
   rewritePowershellNullRedirect,
+  applyConfiguredGitBashPath,
   type GitBashProbeDeps,
   type ShellProbeDeps,
 } from '../platform.js'
@@ -198,6 +199,61 @@ describe('resolveShellCommand — Windows priority Git Bash > PowerShell > cmd',
       gitBashPath: 'C:\\Git\\bin\\bash.exe',
     }))
     assert.equal(shell.kind, 'bash')
+  })
+})
+
+describe('applyConfiguredGitBashPath — seed RIVET_GIT_BASH_PATH from config', () => {
+  const KEY = 'RIVET_GIT_BASH_PATH'
+  let saved: string | undefined
+  const restore = () => {
+    if (saved === undefined) delete process.env[KEY]
+    else process.env[KEY] = saved
+  }
+
+  it('sets the env var when unset', () => {
+    saved = process.env[KEY]
+    delete process.env[KEY]
+    try {
+      applyConfiguredGitBashPath('C:\\custom\\Git\\bin\\bash.exe')
+      assert.equal(process.env[KEY], 'C:\\custom\\Git\\bin\\bash.exe')
+    } finally {
+      restore()
+    }
+  })
+
+  it('does NOT clobber a pre-existing OS env var (explicit override wins)', () => {
+    saved = process.env[KEY]
+    process.env[KEY] = 'D:\\os\\bash.exe'
+    try {
+      applyConfiguredGitBashPath('C:\\config\\bash.exe')
+      assert.equal(process.env[KEY], 'D:\\os\\bash.exe')
+    } finally {
+      restore()
+    }
+  })
+
+  it('is a no-op for empty / undefined config values', () => {
+    saved = process.env[KEY]
+    delete process.env[KEY]
+    try {
+      applyConfiguredGitBashPath(undefined)
+      assert.equal(process.env[KEY], undefined)
+      applyConfiguredGitBashPath('   ')
+      assert.equal(process.env[KEY], undefined)
+    } finally {
+      restore()
+    }
+  })
+
+  it('trims surrounding whitespace before setting', () => {
+    saved = process.env[KEY]
+    delete process.env[KEY]
+    try {
+      applyConfiguredGitBashPath('  C:\\g\\bash.exe  ')
+      assert.equal(process.env[KEY], 'C:\\g\\bash.exe')
+    } finally {
+      restore()
+    }
   })
 })
 

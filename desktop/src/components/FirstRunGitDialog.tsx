@@ -71,7 +71,7 @@ export function FirstRunGitDialog({ open, onDismiss }: { open: boolean; onDismis
             </Button>
           </div>
           <p className="git-install-hint">
-            已装在非默认位置?可设置环境变量 RIVET_GIT_BASH_PATH 指向 bash.exe。
+            已装在非默认位置?到「设置 › 系统 › 命令执行 Shell」填 bash.exe 的完整路径即可(无需改环境变量)。
           </p>
         </div>
       </DialogContent>

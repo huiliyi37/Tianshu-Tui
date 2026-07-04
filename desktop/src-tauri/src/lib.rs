@@ -858,12 +858,52 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
     }
 }
 
+/// Seed `RIVET_GIT_BASH_PATH` from the persisted config (`env.gitBashPath` in
+/// `<rivet_home>/config.json`) so BOTH the sidecar bash tool (platform.ts) and
+/// the desktop integrated terminal PTY (pty.rs::find_git_bash) honor a
+/// user-chosen Git Bash location set from the Settings UI. Setting it on THIS
+/// process's env means the sidecar inherits it on spawn and the PTY reads it
+/// later. A real OS env var of the same name always wins (explicit override).
+/// Best-effort: any missing file / parse error just leaves the normal probe
+/// chain (where git → common dirs → bundled PortableGit) intact.
+fn apply_configured_git_bash(rivet_home: &std::path::Path) {
+    if let Some(v) = std::env::var_os("RIVET_GIT_BASH_PATH") {
+        if !v.is_empty() {
+            return;
+        }
+    }
+    let cfg_path = std::env::var_os("RIVET_CONFIG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| rivet_home.join("config.json"));
+    let text = match std::fs::read_to_string(&cfg_path) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let json: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+    if let Some(p) = json
+        .get("env")
+        .and_then(|e| e.get("gitBashPath"))
+        .and_then(|v| v.as_str())
+    {
+        let p = p.trim();
+        if !p.is_empty() {
+            std::env::set_var("RIVET_GIT_BASH_PATH", p);
+        }
+    }
+}
+
 fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunchSpec) {
     let port = pick_free_port();
     let token = random_token();
     let (node, node_source) = resolve_node_cmd(app);
     let entry = sidecar_entry(app);
     let rivet_home = strip_verbatim_prefix(resolve_rivet_home(app));
+    // Seed a user-configured Git Bash path before spawn (sidecar inherits it)
+    // and before any PTY is created (pty.rs reads it from this process env).
+    apply_configured_git_bash(&rivet_home);
     let spec = SidecarLaunchSpec {
         node,
         entry,

@@ -33,7 +33,7 @@ import { TaskRegistry } from './task-registry.js'
 import { JsonTaskStore } from './task-store.js'
 import { SessionRuntimePool } from './session-runtime-pool.js'
 import { loadConfig } from '../config/manager.js'
-import { setTargetConventions } from '../platform.js'
+import { setTargetConventions, applyConfiguredGitBashPath } from '../platform.js'
 import { resolveApiKey } from '../api/factory.js'
 import { createAuthProvider } from '../auth/registry.js'
 import type { AuthProvider } from '../auth/types.js'
@@ -87,6 +87,7 @@ export interface ServeContext {
 export function resolveServeContext(loader: () => Config = loadConfig): ServeContext {
   const config = loader()
   setTargetConventions(config.editor.platform, config.editor.eol)
+  applyConfiguredGitBashPath(config.env.gitBashPath)
   const provider = config.provider.providers[config.provider.default]
   if (!provider) {
     throw new Error(`Provider "${config.provider.default}" not configured. Run 'rivet config setup' first.`)
