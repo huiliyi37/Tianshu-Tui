@@ -64,6 +64,23 @@ test('renderChoicePanel: recommended choice has ★ marker', () => {
   assert.ok(bLine && bLine.includes('★'), '★ on recommended choice')
 })
 
+test('renderChoicePanel: current choice has "← current" marker', () => {
+  const data = makeData({
+    choices: [
+      { id: 'a', label: '选项A' },
+      { id: 'b', label: '选项B', current: true },
+      { id: 'c', label: '选项C' },
+    ],
+  })
+  const lines = renderChoicePanel(data, 60, 20, theme)
+  const plain = lines.map(stripAnsi).join('\n')
+  assert.ok(plain.includes('← current'), 'current marker present')
+  const bLine = plain.split('\n').find(l => l.includes('选项B'))
+  assert.ok(bLine && bLine.includes('← current'), '← current on current choice')
+  const aLine = plain.split('\n').find(l => l.includes('选项A'))
+  assert.ok(aLine && !aLine.includes('← current'), 'non-current choice has no marker')
+})
+
 test('renderChoicePanel: choice without description renders label only', () => {
   const data: ChoicePanelData = {
     title: '确认操作',

@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
@@ -692,17 +692,31 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
 })
 
 describe('/permission', () => {
-  it('shows current mode and rules (bare)', async () => {
-    const entries: string[] = []
+  // Isolate real config writes (setCheckpointConfig / any persist) to a temp file.
+  let prevConfigPath: string | undefined
+  let tmpCfgDir = ''
+  before(() => {
+    prevConfigPath = process.env.RIVET_CONFIG_PATH
+    tmpCfgDir = makeTestDir('permission-cfg-')
+    process.env.RIVET_CONFIG_PATH = join(tmpCfgDir, 'config.json')
+  })
+  after(() => {
+    if (prevConfigPath === undefined) delete process.env.RIVET_CONFIG_PATH
+    else process.env.RIVET_CONFIG_PATH = prevConfigPath
+    cleanupTestDir(tmpCfgDir)
+  })
+
+  it('bare /permission opens the interactive ANSI picker', async () => {
+    let pushed: string | null = null
+    let kind: string | null = null
     const handled = await handleSlashCommand(makeCtx({
       parts: ['/permission'],
-      pushStatic: (entry) => entries.push(entry.content),
+      surfacePush: (id: string) => { pushed = id },
+      setChoicePanelKind: (k) => { kind = k },
     }))
     assert.equal(handled, true)
-    const text = entries[0]!
-    assert.ok(text.includes('当前权限: Manual (manual)'), text)
-    assert.ok(text.includes('快速切换: /permission manual | /permission auto [轮次] | /permission yolo [confirm]'), text)
-    assert.ok(text.includes('当前没有任何 allow/deny 规则'), text)
+    assert.equal(pushed, 'choice-panel')
+    assert.equal(kind, 'permission')
   })
 
   it('shows status explicitly (alias)', async () => {
@@ -715,9 +729,10 @@ describe('/permission', () => {
     assert.ok(entries[0]!.includes('当前权限: Manual (manual)'), entries[0])
   })
 
-  it('quick-switch to manual', async () => {
+  it('quick-switch to manual persists as default', async () => {
     let mode: string | null = null
     let autoSafe: boolean | null = null
+    let persisted: string | null = null
     const entries: string[] = []
     const handled = await handleSlashCommand(makeCtx({
       parts: ['/permission', 'manual'],
@@ -726,17 +741,20 @@ describe('/permission', () => {
         setApprovalMode: (m: string) => { mode = m },
       } as any,
       setAutoSafe: (v: boolean) => { autoSafe = v },
+      persistApprovalMode: (m: string) => { persisted = m },
       pushStatic: (entry) => entries.push(entry.content),
     }))
     assert.equal(handled, true)
     assert.equal(mode, 'manual')
     assert.equal(autoSafe, false)
+    assert.equal(persisted, 'manual')
     assert.ok(entries[0]!.includes('已切换至 Manual'), entries[0])
   })
 
-  it('quick-switch to auto', async () => {
+  it('quick-switch to auto persists as default', async () => {
     let mode: string | null = null
     let autoSafe: boolean | null = null
+    let persisted: string | null = null
     const entries: string[] = []
     const handled = await handleSlashCommand(makeCtx({
       parts: ['/permission', 'auto'],
@@ -745,11 +763,13 @@ describe('/permission', () => {
         setApprovalMode: (m: string) => { mode = m },
       } as any,
       setAutoSafe: (v: boolean) => { autoSafe = v },
+      persistApprovalMode: (m: string) => { persisted = m },
       pushStatic: (entry) => entries.push(entry.content),
     }))
     assert.equal(handled, true)
     assert.equal(mode, 'auto-safe')
     assert.equal(autoSafe, true)
+    assert.equal(persisted, 'auto-safe')
     assert.ok(entries[0]!.includes('已切换至 Auto'), entries[0])
   })
 
@@ -789,9 +809,10 @@ describe('/permission', () => {
     assert.ok(entries[0]!.includes('确认进入: /permission yolo confirm'), entries[0])
   })
 
-  it('quick-switch to yolo with confirm', async () => {
+  it('quick-switch to yolo with confirm persists as default', async () => {
     let mode: string | null = null
     let autoSafe: boolean | null = null
+    let persisted: string | null = null
     const entries: string[] = []
     const handled = await handleSlashCommand(makeCtx({
       parts: ['/permission', 'yolo', 'confirm'],
@@ -800,12 +821,29 @@ describe('/permission', () => {
         setApprovalMode: (m: string) => { mode = m },
       } as any,
       setAutoSafe: (v: boolean) => { autoSafe = v },
+      persistApprovalMode: (m: string) => { persisted = m },
       pushStatic: (entry) => entries.push(entry.content),
     }))
     assert.equal(handled, true)
     assert.equal(mode, 'dangerously-skip-permissions')
     assert.equal(autoSafe, false)
+    assert.equal(persisted, 'dangerously-skip-permissions')
     assert.ok(entries[0]!.includes('已切换至 YOLO'), entries[0])
+  })
+
+  it('quick-switch to yolo WITHOUT confirm does not persist', async () => {
+    let persisted: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'yolo'],
+      agent: { ...makeCtx().agent, setApprovalMode: () => {} } as any,
+      setAutoSafe: () => {},
+      persistApprovalMode: (m: string) => { persisted = m },
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(persisted, null)
+    assert.ok(entries[0]!.includes('YOLO 模式风险说明'), entries[0])
   })
 
   it('switches approval mode via /permission mode', async () => {
@@ -870,6 +908,46 @@ describe('/permission', () => {
     }))
     assert.equal(handled, true)
     assert.ok(entries[0]!.includes('deny'), entries[0])
+  })
+})
+
+describe('/yes — one-command YOLO shortcut', () => {
+  it('/yes enables YOLO and persists as default', async () => {
+    let mode: string | null = null
+    let autoSafe: boolean | null = null
+    let persisted: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/yes'],
+      agent: { ...makeCtx().agent, setApprovalMode: (m: string) => { mode = m } } as any,
+      setAutoSafe: (v: boolean) => { autoSafe = v },
+      persistApprovalMode: (m: string) => { persisted = m },
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'dangerously-skip-permissions')
+    assert.equal(autoSafe, false)
+    assert.equal(persisted, 'dangerously-skip-permissions')
+    assert.ok(entries[0]!.includes('YOLO 已开启'), entries[0])
+  })
+
+  it('/yes off returns to Auto and persists', async () => {
+    let mode: string | null = null
+    let autoSafe: boolean | null = null
+    let persisted: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/yes', 'off'],
+      agent: { ...makeCtx().agent, setApprovalMode: (m: string) => { mode = m } } as any,
+      setAutoSafe: (v: boolean) => { autoSafe = v },
+      persistApprovalMode: (m: string) => { persisted = m },
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'auto-safe')
+    assert.equal(autoSafe, true)
+    assert.equal(persisted, 'auto-safe')
+    assert.ok(entries[0]!.includes('切回 Auto'), entries[0])
   })
 })
 

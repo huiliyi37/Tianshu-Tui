@@ -17,7 +17,7 @@ installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
-import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig } from './config/manager.js'
+import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig, setApprovalMode as persistApprovalDefault } from './config/manager.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
@@ -687,6 +687,13 @@ async function main() {
         ]
         return { title: '权限模式 / Permission', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
       }
+      if (tuiApp.choicePanelKind === 'permission-yolo-confirm') {
+        const entries = [
+          { id: 'cancel', label: '取消', description: '保持当前权限模式不变。', current: true },
+          { id: 'confirm-yolo', label: '⚠ 确认进入 YOLO', description: '无轮次刹车 · 无进度播报 · 所有工具直接执行（沙箱仍拦项目外写入）。回滚兜底：/rollback + git 检查点。设为默认后重启仍是 YOLO。' },
+        ]
+        return { title: '确认 YOLO 模式 / Confirm YOLO', choices: entries, selectedIndex: 0 }
+      }
       const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
       const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
       const entries: Array<{ id: string; label: string; description: string; recommended?: boolean; current?: boolean }> = [
@@ -799,18 +806,43 @@ async function main() {
       tuiApp.commitStatic(`⚠️ 设置默认主题失败: ${(err as Error).message}`)
     }
   }, /* choicePanelExec: */ (id: string) => {
+    // 应用并持久化权限模式：会话内即时生效（agent）+ 底栏 badge 同步（tuiApp）+
+    // 写入 ~/.rivet/config.json（重启后仍是该模式，无需重选）。
+    const applyPermission = (mode: string) => {
+      ctx!.agent.setApprovalMode(mode as import('./agent/loop-types.js').ApprovalMode)
+      tuiApp.setApprovalMode(mode)
+      try {
+        persistApprovalDefault(mode)
+      } catch (err) {
+        tuiApp.commitStatic(`⚠ 权限模式已切换但持久化失败: ${(err as Error).message}`)
+      }
+      const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[mode] ?? mode
+      tuiApp.commitStatic(`权限模式 → ${label}（已设为默认，重启后仍生效）`)
+    }
+
     if (tuiApp.choicePanelKind === 'permission') {
       // Permission 选择面板回调
       tuiApp.choicePanelKind = 'effort' // reset
       if (id === 'dangerously-skip-permissions') {
-        // YOLO needs confirmation — re-show panel with confirm prompt
-        tuiApp.choicePanelKind = 'permission'
-        tuiApp.commitStatic('⚠ YOLO 模式将跳过所有审批，全自动执行。确认请输入: /permission yolo confirm')
+        // YOLO 需二次确认。面板在 exec 后会被 deactivateOverlay 关闭（app.ts），
+        // 故用 setImmediate 在关闭之后再把确认面板推起来。
+        setImmediate(() => {
+          tuiApp.choicePanelKind = 'permission-yolo-confirm'
+          tuiApp.activateOverlay('choice-panel')
+        })
         return
       }
-      ctx!.agent.setApprovalMode(id as import('./agent/loop-types.js').ApprovalMode)
-      const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[id] ?? id
-      tuiApp.commitStatic(`权限模式 → ${label}`)
+      applyPermission(id)
+      return
+    }
+    if (tuiApp.choicePanelKind === 'permission-yolo-confirm') {
+      // YOLO 确认面板回调
+      tuiApp.choicePanelKind = 'effort' // reset
+      if (id === 'confirm-yolo') {
+        applyPermission('dangerously-skip-permissions')
+      } else {
+        tuiApp.commitStatic('已取消 — 权限模式未改变。')
+      }
       return
     }
     // Effort 选择面板回车回调。

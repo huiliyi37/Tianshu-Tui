@@ -61,7 +61,7 @@ import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
-import { getMirrorConfig, setMirrorConfig, setCheckpointConfig } from '../config/manager.js'
+import { getMirrorConfig, setMirrorConfig, setCheckpointConfig, setApprovalMode as persistApprovalDefault } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
 import { getResolvedEnv, getResolvedPathDiff } from '../tools/resolved-env.js'
@@ -172,6 +172,9 @@ export interface SlashHandlerContext {
   verboseRef: MutableRefLike<boolean>
   setVerbose: (v: boolean) => void
   setAutoSafe: (v: boolean) => void
+  /** 持久化审批模式为默认（写 ~/.rivet/config.json），重启后仍生效。
+   *  注入而非直接调用 config manager，便于测试隔离（默认 no-op，不落盘）。 */
+  persistApprovalMode?: (mode: string) => void
   rollbackTokenRef: MutableRefLike<string | null>
   setCockpitPanel: (v: Panel | ((prev: Panel) => Panel)) => void
   activeOverlay?: string | null
@@ -1320,8 +1323,16 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return lines.join('\n')
       }
 
-      if (!sub || sub === 'status') {
-        // 裸 /permission 或 /permission status → 显示当前模式 + 所有规则（Kimi Code 风格）
+      if (!sub) {
+        // 无参数 → 弹出交互式权限选择面板（上下选 + 回车确认，同 /effort 风格，kimi-code 对标）
+        ctx.setChoicePanelKind?.('permission')
+        ctx.surfacePush?.('choice-panel')
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'status') {
+        // /permission status → 显示当前模式 + 所有规则（文字视图）
         pushStatic(createLogEntry({ type: 'system', content: formatRules() }))
         setIsStreaming(false)
         return true
@@ -1332,7 +1343,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       if (sub === 'manual') {
         agent.setApprovalMode('manual')
         ctx.setAutoSafe(false)
-        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 Manual — 所有高风险操作都需人工确认' }))
+        ctx.persistApprovalMode?.('manual')
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 Manual — 所有高风险操作都需人工确认（已设为默认，重启后仍生效）' }))
         setIsStreaming(false)
         return true
       }
@@ -1350,9 +1362,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         }
         agent.setApprovalMode('auto-safe')
         ctx.setAutoSafe(true)
+        ctx.persistApprovalMode?.('auto-safe')
         const interval = intervalRaw !== undefined ? Number(intervalRaw) : undefined
         const cpNote = interval !== undefined ? (interval > 0 ? `，检查点每 ${interval} 轮暂停` : '，检查点已关闭') : ''
-        pushStatic(createLogEntry({ type: 'system', content: `✓ 已切换至 Auto — 低/无风险工具自动执行，高风险仍需确认${cpNote}\n\n  调整检查点: /permission auto <轮数>（0 = 关）` }))
+        pushStatic(createLogEntry({ type: 'system', content: `✓ 已切换至 Auto — 低/无风险工具自动执行，高风险仍需确认${cpNote}（已设为默认，重启后仍生效）\n\n  调整检查点: /permission auto <轮数>（0 = 关）` }))
         setIsStreaming(false)
         return true
       }
@@ -1377,7 +1390,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         }
         agent.setApprovalMode('dangerously-skip-permissions')
         ctx.setAutoSafe(false)
-        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰。/rollback 可随时回滚。' }))
+        ctx.persistApprovalMode?.('dangerously-skip-permissions')
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰（已设为默认，重启后仍生效）。/rollback 可随时回滚。' }))
         setIsStreaming(false)
         return true
       }
@@ -2738,6 +2752,30 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     },
   },
   {
+    name: '/yes',
+    immediate: true,
+    handler(ctx) {
+      // 一键 YOLO 快捷键（/permission 的捷径）。显式输入命令即视为确认，无需二次确认。
+      // /yes / /yes on → YOLO；/yes off → 回到 Auto。均持久化为默认，重启后仍生效。
+      const { parts, agent, pushStatic, setIsStreaming } = ctx
+      const arg = parts[1]?.toLowerCase()
+      if (arg === 'off') {
+        agent.setApprovalMode('auto-safe')
+        ctx.setAutoSafe(true)
+        ctx.persistApprovalMode?.('auto-safe')
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已退出 YOLO，切回 Auto — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。' }))
+        setIsStreaming(false)
+        return true
+      }
+      agent.setApprovalMode('dangerously-skip-permissions')
+      ctx.setAutoSafe(false)
+      ctx.persistApprovalMode?.('dangerously-skip-permissions')
+      pushStatic(createLogEntry({ type: 'system', content: '✓ YOLO 已开启 — 全自动执行，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback' }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
     name: '/interview',
     handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
@@ -3150,6 +3188,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       verboseRef,
       setVerbose: (v: boolean) => { verboseRef.current = v },
       setAutoSafe: (v: boolean) => { autoSafeRef.current = v },
+      persistApprovalMode: (mode: string) => { try { persistApprovalDefault(mode) } catch { /* best-effort persist */ } },
       rollbackTokenRef,
       setCockpitPanel: () => {},
       pushStatic: (entry) => { app.commitStatic(entry.content, { isError: entry.isError }) },
