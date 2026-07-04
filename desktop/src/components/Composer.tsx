@@ -3,6 +3,7 @@ import { listFiles, listModels, switchModel, listDomains, setDomain } from '../r
 import { detectMention, applyMention, formatFileMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
 import { toast } from 'sonner'
+import { loadSendMode, saveSendMode, type SendMode } from '../lib/persist'
 import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
 import { AutonomyControl } from './AutonomyControl'
 import type { AutonomyLevel } from '../lib/autonomy'
@@ -148,6 +149,7 @@ export function Composer(props: {
   // 当成"提交消息"。用 ref 追踪 compositionstart/end，比 e.nativeEvent.isComposing
   // 更可靠（部分 WebView 下 isComposing 在 keydown 时尚未更新）。
   const composingRef = useRef(false)
+  const [sendMode, setSendMode] = useState<SendMode>(loadSendMode())
   const [suggest, setSuggest] = useState<Suggest | null>(null)
   const [images, setImages] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -393,7 +395,12 @@ export function Composer(props: {
       return
     }
 
-    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
+    // Send key: 'enter' mode → Enter sends, Shift+Enter = newline.
+    //           'shift-enter' mode → Shift+Enter sends, Enter = newline.
+    const isSendKey = sendMode === 'enter'
+      ? (e.key === 'Enter' && !e.shiftKey)
+      : (e.key === 'Enter' && e.shiftKey)
+    if (isSendKey && !isComposing) {
       e.preventDefault()
       submit()
     } else if (e.key === 'Escape') {
@@ -694,6 +701,17 @@ export function Composer(props: {
           </button>
         )}
         <span className="composer-spacer" />
+        <button
+          className="send-mode-toggle"
+          title={sendMode === 'enter' ? 'Enter 发送 · Shift+Enter 换行（点击切换）' : 'Shift+Enter 发送 · Enter 换行（点击切换）'}
+          onClick={() => {
+            const next = sendMode === 'enter' ? 'shift-enter' : 'enter'
+            setSendMode(next)
+            saveSendMode(next)
+          }}
+        >
+          {sendMode === 'enter' ? '↵' : '⇧↵'}
+        </button>
         {busy ? (
           <>
             <button className="btn ghost" onClick={submit} disabled={!canSend}>引导</button>

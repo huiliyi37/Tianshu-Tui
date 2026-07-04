@@ -336,7 +336,7 @@ export function ThreadView(props: {
   const onMessagesKeyDown = useCallback((e: React.KeyboardEvent) => {
     // Only handle when focus is on the messages container itself (not in input).
     const el = document.activeElement
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.isContentEditable) return
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)) return
     const isNav = e.key === 'j' || e.key === 'k' || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp'))
     if (!isNav) return
     e.preventDefault()
