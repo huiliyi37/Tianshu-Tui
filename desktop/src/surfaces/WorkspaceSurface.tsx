@@ -488,6 +488,7 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
   const preview = previewOf(request)
   const editKey = editableKey(request)
   const [editing, setEditing] = useState(false)
+  const [showDetail, setShowDetail] = useState(false)
   const [draft, setDraft] = useState(
     editKey ? String((request.input as Record<string, unknown>)[editKey] ?? '') : '',
   )
@@ -528,31 +529,41 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
         <span className="approval-inline-badge shrink-0">需批准</span>
       </div>
 
-      <div className="approval-inline-body">
-        {editing && editKey ? (
-          <textarea
-            className="approval-inline-textarea font-mono"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-        ) : preview.isDiff ? (
-          <div className="approval-inline-diff overflow-auto max-h-[300px] border border-border rounded">
-            <DiffView raw={preview.text} />
-          </div>
-        ) : (
-          <pre className="approval-inline-pre font-mono overflow-auto max-h-[300px] border border-border rounded p-2 bg-panel-2 text-xs">
-            {preview.text}
-          </pre>
-        )}
-      </div>
+      {showDetail && (
+        <div className="approval-inline-body">
+          {editing && editKey ? (
+            <textarea
+              className="approval-inline-textarea font-mono"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+          ) : preview.isDiff ? (
+            <div className="approval-inline-diff overflow-auto max-h-[260px] border border-border rounded">
+              <DiffView raw={preview.text} />
+            </div>
+          ) : (
+            <pre className="approval-inline-pre font-mono overflow-auto max-h-[260px] border border-border rounded p-2 bg-panel-2 text-xs">
+              {preview.text}
+            </pre>
+          )}
+        </div>
+      )}
 
       <div className="approval-inline-footer">
         {editKey && (
           <button
             className="btn ghost sm"
-            onClick={() => setEditing((v) => !v)}
+            onClick={() => { setEditing((v) => !v); if (!editing) setShowDetail(true) }}
           >
             {editing ? '取消编辑' : '编辑代码'}
+          </button>
+        )}
+        {!editing && (
+          <button
+            className="btn ghost sm"
+            onClick={() => setShowDetail((v) => !v)}
+          >
+            {showDetail ? '收起详情' : '查看详情'}
           </button>
         )}
         <div className="flex items-center gap-2 ml-auto">
