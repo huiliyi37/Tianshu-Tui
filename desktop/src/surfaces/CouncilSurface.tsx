@@ -1,8 +1,53 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useUiState } from '../state/store'
 import { useArtifacts, useConveneCouncil, useDomains, useSessions, useSetDomain } from '../state/queries'
+import { getArtifact } from '../runtime/client'
 import type { DomainEntry } from '../runtime/types'
 import { Check, Users, ScrollText, Sparkles } from 'lucide-react'
+import { Markdown } from '../components/Markdown'
+
+function parseCouncilOpinions(raw: string): Record<string, string> {
+  const opinions: Record<string, string> = {}
+  
+  const STAR_MAP: Record<string, string[]> = {
+    tianshu: ['天枢', 'tianshu'],
+    tianxuan: ['天璇', 'tianxuan'],
+    tianji: ['天玑', 'tianji'],
+    tianquan: ['天权', 'tianquan'],
+    yuheng: ['玉衡', 'yuheng'],
+    kaiyang: ['开阳', 'kaiyang'],
+    yaoguang: ['摇光', 'yaoguang'],
+    dongming: ['洞明', 'dongming'],
+  }
+
+  const sections = raw.split(/(?=###\s+)/)
+  for (const sec of sections) {
+    const headerLine = sec.split('\n')[0] ?? ''
+    for (const [key, aliases] of Object.entries(STAR_MAP)) {
+      if (aliases.some(alias => headerLine.toLowerCase().includes(alias.toLowerCase()))) {
+        const content = sec.slice(headerLine.length).trim()
+        if (content) {
+          opinions[key] = content
+        }
+      }
+    }
+  }
+
+  for (const [key, aliases] of Object.entries(STAR_MAP)) {
+    if (!opinions[key]) {
+      for (const alias of aliases) {
+        const regex = new RegExp(`(?:\\*\\*${alias}\\*\\*|###\\s+${alias})[：:\\s]+([\\s\\S]+?)(?=\\n(?:\\*\\*|###|\\#)|$)`, 'i')
+        const match = raw.match(regex)
+        if (match && match[1]) {
+          opinions[key] = match[1].trim()
+          break
+        }
+      }
+    }
+  }
+
+  return opinions
+}
 
 export function CouncilSurface() {
   const ui = useUiState()
@@ -15,7 +60,7 @@ export function CouncilSurface() {
   const setDomain = useSetDomain()
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
   const [rounds, setRounds] = useState<number>(1)
-
+  
   const planArtifacts = useMemo(() => {
     return (artifacts.data ?? []).filter((a) => a.kind === 'plan' || a.kind === 'task-list')
   }, [artifacts.data])
@@ -23,6 +68,28 @@ export function CouncilSurface() {
   const latestCouncil = useMemo(() => {
     return (artifacts.data ?? []).find((a) => a.tool === 'council_convene')
   }, [artifacts.data])
+
+  const [councilRaw, setCouncilRaw] = useState<string>('')
+  const [selectedSeat, setSelectedSeat] = useState<string | null>(null)
+  const [showFullReport, setShowFullReport] = useState(false)
+
+  const opinions = useMemo(() => {
+    return councilRaw ? parseCouncilOpinions(councilRaw) : {}
+  }, [councilRaw])
+
+  const activeSeats = useMemo(() => {
+    return new Set(Object.keys(opinions))
+  }, [opinions])
+
+  useEffect(() => {
+    if (latestCouncil && sessionId) {
+      getArtifact(sessionId, latestCouncil.id)
+        .then((res) => setCouncilRaw(res.raw))
+        .catch(() => setCouncilRaw(''))
+    } else {
+      setCouncilRaw('')
+    }
+  }, [latestCouncil?.id, sessionId])
 
   const isRunning = session?.status === 'running'
   const canConvene = !!sessionId && !isRunning && !!selectedArtifactId && !convene.isPending
@@ -133,7 +200,7 @@ export function CouncilSurface() {
               </section>
 
               {latestCouncil && (
-                <section className="council-panel">
+                <section className="council-panel result-panel">
                   <div className="council-panel-head">
                     <Check size={16} />
                     <h4>最新议事结果</h4>
@@ -142,6 +209,81 @@ export function CouncilSurface() {
                     <div className="council-result-title">{latestCouncil.target}</div>
                     <div className="council-result-summary">{latestCouncil.summary}</div>
                   </div>
+
+                  <div className="council-roundtable-wrapper">
+                    <div className="council-table">
+                      <div className="table-center">
+                        <div className="table-center-title">会商中枢</div>
+                        <div className="table-center-desc truncate" title={latestCouncil.summary}>
+                          {latestCouncil.summary}
+                        </div>
+                      </div>
+                      {(domains.data ?? []).filter(d => d.key !== 'auto').map((d, index, arr) => {
+                        const total = arr.length
+                        const angle = (index * 360) / total
+                        const isActive = activeSeats.has(d.key)
+                        const isSelected = selectedSeat === d.key
+                        
+                        return (
+                          <button
+                            key={d.key}
+                            type="button"
+                            className={`cr-seat accent-${d.uiPersona?.accent ?? 'primary'} ${isActive ? 'active' : 'disabled'} ${isSelected ? 'selected' : ''}`}
+                            style={{
+                              transform: `rotate(${angle}deg) translate(100px) rotate(-${angle}deg)`
+                            }}
+                            onClick={() => {
+                              if (isActive) {
+                                setSelectedSeat(isSelected ? null : d.key)
+                              }
+                            }}
+                            title={isActive ? `阅读 ${d.name} 的发言意见` : `${d.name} 未在此次会议发言`}
+                          >
+                            <span className="cr-seat-glyph">{d.uiPersona?.glyph ?? '✹'}</span>
+                            <span className="cr-seat-name">{d.name}</span>
+                            {isActive && <span className="cr-seat-pulse" />}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {selectedSeat && (() => {
+                    const d = (domains.data ?? []).find(x => x.key === selectedSeat)
+                    const op = opinions[selectedSeat]
+                    if (!d || !op) return null
+                    return (
+                      <div className="council-opinion-bubble animation-slide-up">
+                        <div className="cob-header">
+                          <span className="cob-glyph" style={{ borderColor: `var(--${d.uiPersona?.accent ?? 'accent'})` }}>{d.uiPersona?.glyph}</span>
+                          <div className="cob-meta">
+                            <span className="cob-name">{d.name} · 辩论修订意见</span>
+                            <span className="cob-motto">{d.motto}</span>
+                          </div>
+                        </div>
+                        <div className="cob-body">
+                          <Markdown source={op} />
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {councilRaw && (
+                    <div className="council-full-report">
+                      <button 
+                        type="button"
+                        className="cfr-toggle-btn" 
+                        onClick={() => setShowFullReport(!showFullReport)}
+                      >
+                        {showFullReport ? '收起完整议事纪要报告' : '展开完整议事纪要报告'}
+                      </button>
+                      {showFullReport && (
+                        <div className="cfr-markdown border border-border rounded p-3 mt-2 bg-panel-2 overflow-auto max-h-[260px] text-xs">
+                          <Markdown source={councilRaw} />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </section>
               )}
             </aside>

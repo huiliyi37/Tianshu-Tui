@@ -2934,11 +2934,14 @@ a.mention-link:hover { background: var(--accent-soft); }
 }
 
 /* 右栏收起时的 todo 进度浮动小胶囊 */
-.todo-mini-capsule {
+.todo-capsule-wrapper {
   position: fixed;
   right: 0;
   top: 92px;
-  z-index: 30;
+  z-index: 35;
+}
+.todo-mini-capsule {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 5px;
@@ -2955,9 +2958,114 @@ a.mention-link:hover { background: var(--accent-soft); }
   opacity: 0.7;
   transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.todo-mini-capsule:hover { opacity: 1; background: var(--panel-3); box-shadow: var(--shadow-md); }
+.todo-mini-capsule:hover, .todo-mini-capsule.active { opacity: 1; background: var(--panel-3); box-shadow: var(--shadow-md); }
 .todo-mini-capsule .tmc-glyph { color: var(--success); }
 .todo-mini-capsule .tmc-count { font-variant-numeric: tabular-nums; }
+
+/* 悬浮看板 (Float Deck) */
+.todo-float-deck {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 8px;
+  width: 285px;
+  max-height: 320px;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: slideUp 0.18s ease-out;
+}
+@keyframes slideUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.tfd-header {
+  padding: 8px 12px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.tfd-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.tfd-expand-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 1px 5px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.tfd-expand-btn:hover {
+  background: var(--hover);
+}
+.tfd-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  scrollbar-width: none;
+}
+.tfd-body::-webkit-scrollbar {
+  display: none;
+}
+.tfd-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  padding: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+}
+.tfd-item .tfd-check {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+.tfd-item.st-completed {
+  opacity: 0.55;
+  background: transparent;
+}
+.tfd-item.st-completed .tfd-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.tfd-item.st-in_progress {
+  background: rgba(234, 179, 8, 0.04);
+  border-color: rgba(234, 179, 8, 0.1);
+}
+.tfd-item.st-in_progress .tfd-check {
+  color: var(--warning);
+}
+.tfd-item.st-completed .tfd-check {
+  color: var(--success);
+}
+.tfd-item .tfd-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  flex: 1;
+}
 
 /* Background jobs dock — bottom-right floating bar (bash run_in_background). */
 .jobs-dock {
@@ -6079,4 +6187,257 @@ html[data-maximized] .conversation,
 html[data-maximized] .review {
   border-radius: 0;
   box-shadow: none;
+}
+
+/* Approval Diff Editor Overlay (第二阶段) */
+.approval-diff-editor-overlay {
+  position: fixed; inset: 0; background: var(--overlay);
+  display: flex; align-items: center; justify-content: center; z-index: var(--z-modal);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.approval-diff-editor-modal {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  width: 90vw; height: 85vh; max-width: 1400px;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+}
+.adem-header {
+  padding: 16px 24px; border-bottom: 1px solid var(--border);
+  background: var(--panel-2); flex: none;
+}
+.adem-title { font-size: 16px; font-weight: 600; color: var(--text-strong); }
+.adem-subtitle { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+.adem-body {
+  flex: 1; display: flex; overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--canvas-bg);
+}
+.adem-pane {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+}
+.adem-pane.original-pane {
+  border-right: 1px solid var(--border);
+}
+.adem-pane-title {
+  padding: 8px 16px; font-size: 11px; text-transform: uppercase;
+  color: var(--muted); background: var(--panel-2);
+  border-bottom: 1px solid var(--border); flex: none;
+}
+.adem-code-box, .adem-textarea {
+  flex: 1; overflow: auto; padding: 16px; font-family: var(--font-mono, monospace);
+  font-size: 12px; line-height: 1.6;
+}
+.adem-code-box pre { margin: 0; white-space: pre-wrap; word-break: break-all; color: var(--muted); }
+
+.adem-textarea {
+  border: none; outline: none; resize: none; width: 100%; height: 100%;
+  background: var(--panel); color: var(--text);
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
+}
+.adem-textarea:focus {
+  background: var(--panel-2);
+}
+
+.adem-footer {
+  padding: 16px 24px; display: flex; align-items: center; justify-content: space-between;
+  background: var(--panel-2); flex: none;
+}
+.adem-footer .text-muted { font-size: 11px; color: var(--muted); }
+
+/* Council Roundtable (第四阶段) */
+.result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.council-roundtable-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0;
+  background: radial-gradient(circle, rgba(255,255,255,0.02) 0%, transparent 70%);
+  border-radius: var(--radius-lg, 12px);
+  border: 1px dashed var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.council-table {
+  width: 250px;
+  height: 250px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--panel-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.5), var(--shadow-lg);
+}
+.table-center {
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong, var(--border));
+  background: var(--panel-3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+  z-index: 5;
+}
+.table-center-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.table-center-desc {
+  font-size: 9px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  width: 110px;
+}
+
+/* 环绕席位 */
+.cr-seat {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+.cr-seat-glyph {
+  font-size: 14px;
+}
+.cr-seat-name {
+  font-size: 7px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+/* 席位状态与发光 */
+.cr-seat.disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+.cr-seat.active {
+  opacity: 0.85;
+}
+.cr-seat.active:hover {
+  opacity: 1;
+  transform: scale(1.1) !important;
+  box-shadow: 0 0 12px var(--seat-glow);
+}
+.cr-seat.selected {
+  opacity: 1;
+  transform: scale(1.15) !important;
+  border-color: var(--seat-glow);
+  box-shadow: 0 0 16px var(--seat-glow);
+  z-index: 15;
+}
+
+/* 各色星体专属高亮 */
+.cr-seat.accent-primary { --seat-glow: var(--accent); }
+.cr-seat.accent-warning { --seat-glow: #eab308; }
+.cr-seat.accent-success { --seat-glow: #22c55e; }
+.cr-seat.accent-danger { --seat-glow: #ef4444; }
+.cr-seat.accent-info { --seat-glow: #3b82f6; }
+.cr-seat.accent-purple { --seat-glow: #a855f7; }
+
+/* 席位脉冲光圈 */
+.cr-seat-pulse {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid var(--seat-glow);
+  opacity: 0;
+  animation: seatPulse 2s infinite;
+  pointer-events: none;
+}
+@keyframes seatPulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+/* 辩论气泡 */
+.council-opinion-bubble {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: var(--shadow-md);
+  margin-top: 8px;
+}
+.cob-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+.cob-glyph {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: var(--panel-3);
+}
+.cob-meta {
+  display: flex;
+  flex-direction: column;
+}
+.cob-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.cob-motto {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.cob-body {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+/* 展开纪要按钮 */
+.cfr-toggle-btn {
+  width: 100%;
+  padding: 6px;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+  margin-top: 14px;
+  transition: all 0.2s;
+}
+.cfr-toggle-btn:hover {
+  background: var(--panel-2);
+  color: var(--text);
 }
