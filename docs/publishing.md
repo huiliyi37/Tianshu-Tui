@@ -51,7 +51,8 @@ git push origin main --tags
 - `docs/seed-capsule*.md`、`docs/stars/`、`docs/brand/assets/`
 - `.rivet/knowledge/`
 - `README.md`、`README.en.md`、`CLAUDE.md`、`.rivet.md`、`AGENTS.md`、`.rivet/SELF`、`.rivet-config.json`、`tsconfig.json`、`tsup.config.ts`、`package.json`
-- `.github/workflows/build-windows.yml`
+- `runtime-assets/`（排除 `node_modules/`）
+- `.github/`（排除 `ISSUE_TEMPLATE/`、`dependabot.yml`）
 
 **不会同步**：`.cursor/`、`.rivet/plans/`、`.rivet/sessions/`、`docs/design/`、`docs/teamtask/` 等内部资料。
 
