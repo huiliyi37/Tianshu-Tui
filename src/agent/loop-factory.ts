@@ -257,6 +257,7 @@ return new ToolExecutionController({
         }
       },
       destructiveGate: self.destructiveGate,
+      writeTelemetry: (record) => { self.telemetryWriter.write(record) },
     })
 }
 export function buildRuntimeSnapshot(self: AgentLoop, extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
@@ -403,6 +404,11 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       }
     },
     getObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 120) ?? null,
+    // 缺口 C/D:run 轮数 / 用户输入轮 / 意图复合源 / maxTurns 预算
+    getRunTurn: () => self.runLoopTurn,
+    getLastUserInputRunTurn: () => self.lastUserInputRunTurn,
+    getIntentObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 500) ?? null,
+    getMaxTurns: () => self.config.maxTurns,
     hearthObserveEnabled: self.config.hearthObserveEnabled,
     getAnchorGraph: () => self.antiAnchoring.buildAnchorGraph(),
     getPrevAnchorGraphHash: () => self.prevAnchorGraphHash,
@@ -732,6 +738,8 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       set thetaRequestsThisTurn(v) { self.thetaRequestsThisTurn = v },
       get taskContract() { return self.taskContract },
       set taskContract(v) { self.taskContract = v },
+      get runLoopTurn() { return self.runLoopTurn },
+      set runLoopTurn(v) { self.runLoopTurn = v },
     } as TurnStateBag,
     getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
     getDoomLoopLevel: () => self.getDoomLoopLevel(),

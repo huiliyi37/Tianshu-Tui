@@ -460,6 +460,10 @@ export class AgentLoop {
   turnsSinceLastObjection = 0
   lastToolCompleteTime = 0
   initialUserMessage: string | null = null
+  /** 当前 run 的 orchestrator 循环轮数(每 run 从 0 重计)——缺口 C/D hook 消费 */
+  runLoopTurn = 0
+  /** 最近一次用户输入(run 启动 = 0,steer 注入时更新)的 run 轮数 */
+  lastUserInputRunTurn = 0
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
   recentTextFingerprints: string[] = []
   /** T2-02: Current effort shadow record (telemetry only in P0, influences effort in P3+) */
@@ -1649,7 +1653,11 @@ export class AgentLoop {
     // stale streak can't drive a spurious stagnation/abort right after the user
     // speaks. (Turn-start and tool-use paths reset this elsewhere; this covers
     // mid-run steer injection.)
-    if (userMessageConsumed) this.consecutiveNoToolTurns = 0
+    if (userMessageConsumed) {
+      this.consecutiveNoToolTurns = 0
+      // 缺口 C 意图锚点:steer 注入 = 用户刚重申过意图,stale 计时重置
+      this.lastUserInputRunTurn = turn
+    }
 
     const convergenceCheck = evaluateConvergence({
       turn,

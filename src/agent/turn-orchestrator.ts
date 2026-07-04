@@ -125,6 +125,8 @@ export interface TurnStateBag {
   latestRisk: RiskAssessment
   thetaRequestsThisTurn: number
   taskContract: import('../context/task-contract.js').TaskContract | undefined
+  /** 当前 run 的循环轮数(缺口 C/D:intent-anchor / turn-budget hook 消费) */
+  runLoopTurn: number
 }
 
 // ── Deps interface ──
@@ -339,6 +341,7 @@ export class TurnOrchestrator {
     try {
       for (let turn = 0; turn < this.deps.getMaxTurns(); turn++) {
         this.deps.state.thetaRequestsThisTurn = 0
+        this.deps.state.runLoopTurn = turn
         // Sync plan-mode state into config so tool-pipeline gate reads it
         this.deps.syncPlanModeToConfig()
         const signal = this.deps.getAbortSignal()

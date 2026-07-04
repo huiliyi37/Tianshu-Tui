@@ -41,6 +41,7 @@ import {
 import type { ReasoningEffort } from './auto-reasoning.js'
 import { createRuntimeHookContext } from './runtime-hooks.js'
 import { toolTargetFromInput } from './tool-target.js'
+import { sanitizeToolOutput } from '../tools/output-sanitizer.js'
 
 export interface ToolExecutionDeps {
   config: AgentConfig
@@ -109,6 +110,8 @@ export interface ToolExecutionDeps {
   isGoalActive?: () => boolean
   /** 破坏性命令 pre-execution 闸门(会话级状态,loop 持有,pipeline 读写)。 */
   destructiveGate?: import('../tools/destructive-gate.js').DestructiveGateState
+  /** 遥测写入(缺口 B 输出裁剪计数等)。 */
+  writeTelemetry?: (record: { kind: string } & Record<string, unknown>) => void
 }
 
 export interface ToolExecBatchInput {
@@ -501,6 +504,27 @@ export class ToolExecutionController {
             : '[skipped] Tool produced no result.',
           is_error: true,
         })
+      }
+    }
+
+    // 缺口 B 输出噪声裁剪:session 只存裁剪版。必须在这里(所有分类器/修复
+    // 提示/artifact 拦截/lossy guard 之后、存入历史之前)——它们依赖原始输出。
+    // UI 回调(onToolResult)在管线内已收到全文,保真不受影响。
+    if (process.env.RIVET_OUTPUT_SANITIZE !== '0') {
+      let totalTrimmed = 0
+      for (let i = 0; i < toolResults.length; i++) {
+        const tr = toolResults[i]!
+        if (tr.type !== 'tool_result' || typeof tr.content !== 'string') continue
+        const tu = input.toolUses.find(t => t.id === tr.tool_use_id)
+        if (!tu) continue
+        const { content, trimmedBytes } = sanitizeToolOutput(tu.name, tu.input, tr.content)
+        if (trimmedBytes > 0) {
+          toolResults[i] = { ...tr, content }
+          totalTrimmed += trimmedBytes
+        }
+      }
+      if (totalTrimmed > 0) {
+        this.deps.writeTelemetry?.({ kind: 'output-sanitize', turn: this.deps.getSessionTurnCount(), trimmedBytes: totalTrimmed })
       }
     }
 

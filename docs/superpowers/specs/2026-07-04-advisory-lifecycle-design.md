@@ -261,3 +261,75 @@ session meta `guardianActivity`：ccr/shifts/advisoriesRendered/Dropped/
   sandbox bwrap/worktree 为环境依赖;worker-detail 为并行隔离 flaky,隔离复跑
   两树各 3 次全绿)。advisory 相关文件零失败零类型错误
 - 采纳率遥测观察：待真实会话积累（闸门数据自动生效,无需人工启动）
+
+## 主控工作流四缺口（2026-07-04 第三轮）
+
+因果账本落地当天的第三轮:天枢调研的三个主控循环缺口（含核查修正）
+加核查中发现的第四缺口。关注层从"提醒质量"转到"工作流质量"——
+执行/效率/方向,全部不依赖 NLP 判断。调研原文与三处核查修正详见
+`2026-07-04-main-loop-quality-gaps.md`。
+
+### A. 死路快速检测（dead-end-detector.ts, postTool）
+
+信号（核查修正版）:同一文件 edit→verify-fail 循环 ≥2 次且中间无
+verify pass——编辑工具本身几乎不失败,语义失败挂在验证路径,所以跟踪
+的是"编辑后验证失败"循环而非"编辑失败"。editPending 消费制防止一次
+失败重复计数;verify pass 全清;timeout/env_missing 排除（与 stigmergy
+dead-end 收紧同判据）;每文件触发一次。
+
+- advisory:`dead-end-file`,category `dead_end`,operational,0.7,
+  **expect `tool_appears`（read/grep/lsp 诊断类, 2 轮）**
+- 副作用:文件级 dead-end 信息素沉积（signal-consumer 跨会话复用）
+- 与 stigmergy-hook 的 dead-end 互补:那边管 bash 同命令反复失败
+  （命令级）,这边管 edit→verify 循环（文件级）
+
+### B. 工具输出噪声裁剪（output-sanitizer.ts + tool-execution 接线）
+
+纯函数 `sanitizeToolOutput(toolName, input, content)`,白名单规则:
+tsc（留 error TS 行 + Found N errors）、node/tsx --test（裁逐条 ✔
+通过行,失败诊断全保留）、npm install（去 timing/http/spinner）、
+run_tests（剥 ANSI）。裁空保底一行摘要;收益 < 200 bytes 不替换;
+尾附 `[output trimmed: N bytes]`。
+
+**顺序约束（核查修正的关键）**:接线在 `addToolResults` 边界——
+分类器/修复提示/artifact 拦截/lossy guard 全部基于原文完成后,
+session 只存裁剪版;UI 回调已收到全文,保真不受影响。遥测
+`output-sanitize` kind 每批计 trimmed bytes。
+
+### C. 意图锚点（intent-anchor-hook.ts, preTurn）
+
+前提修正:initialUserMessage 每 run 重置,锚点语义是"**本次 run** 的
+启动意图"。意图源复合 `taskContract?.objective ?? initialUserMessage`
+截 500 字。信号:run 内轮数 > 20（`RIVET_INTENT_ANCHOR_TURNS`）且距
+上次用户输入 > 10 轮（`RIVET_INTENT_ANCHOR_STALE`）;冷却 10 轮;
+轮数回卷 = 新 run,冷却清零。
+
+支撑接线:新增 `AgentLoop.runLoopTurn`（orchestrator 循环顶部更新,
+经 TurnStateBag）与 `lastUserInputRunTurn`（run 启动置 0,steer 注入
+时在 runConvergenceCheck 更新）。
+
+无行为签名 → 诚实地不带 expect,只计送达。informational tier 受
+阶段抑制可推迟 ≤2 周期,意图重锚不急于特定一轮,可接受。
+
+### D. maxTurns 预算预警（turn-budget-hook.ts, preTurn）
+
+maxTurns 耗尽是 GUARD-forced stop,模型看不到预算。剩余轮数
+≤ max(3, ceil(maxTurns×10%)) 时预警一次/run,内容引导收敛（验证
+交付已完成部分/落 checkpoint,不开新支线）。**expect
+`verify_attempted`（2 轮）**——采纳 = 预警后先验证手头工作。
+
+### 统一原则与开关
+
+新 advisory 出生即可测:A/D 带 expect 谓词自动进 holdout lift 与
+跨会话效能信息素;C 无行为签名不发明伪谓词。开关默认全开:
+`RIVET_DEAD_END_DETECTOR` / `RIVET_OUTPUT_SANITIZE` /
+`RIVET_INTENT_ANCHOR` / `RIVET_TURN_BUDGET_WARN`,置 '0' 关。
+
+### 验证记录
+
+- 新单测 33 用例全绿:output-sanitizer(9)、dead-end-detector(10)、
+  intent-anchor(8)、turn-budget(6)
+- 回归:advisory 全家桶 129 用例 + tool-pipeline/create-runtime-hooks
+  69 用例全绿;typecheck 除 delivery-gate 预存基线外干净
+- loop-factory(4)/tool-execution-abort(3) 既有失败经 git stash 基线
+  比对确认与本次改动无关（并发会话预存的 mock 缺口）

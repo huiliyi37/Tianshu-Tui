@@ -39,6 +39,9 @@ import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
 import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
+import { createDeadEndDetectorHook } from './hooks/dead-end-detector.js'
+import { createIntentAnchorHook } from './hooks/intent-anchor-hook.js'
+import { createTurnBudgetHook } from './hooks/turn-budget-hook.js'
 import { createReasoningSpiralHook } from './hooks/reasoning-spiral-hook.js'
 import { createAdvisoryReadbackHooks } from './hooks/advisory-readback-hook.js'
 import { createAsyncCopilotHook, type CopilotContextPack } from './hooks/async-copilot-hook.js'
@@ -213,6 +216,16 @@ export interface RuntimeHookDeps {
     getCoordinator: () => DelegationCoordinator | null
     getAbortSignal?: () => AbortSignal | undefined
   }
+
+  // ── 主控工作流缺口 C/D(intent-anchor / turn-budget,2026-07-04) ──
+  /** 当前 run 的 orchestrator 循环轮数(每 run 从 0 重计)。 */
+  getRunTurn?: () => number
+  /** 最近一次用户输入(run 启动 = 0,steer 注入更新)的 run 轮数。 */
+  getLastUserInputRunTurn?: () => number
+  /** 意图锚点复合源:taskContract?.objective ?? initialUserMessage(截 500 字)。 */
+  getIntentObjective?: () => string | null
+  /** run 的 maxTurns 预算(turn-budget 预警)。 */
+  getMaxTurns?: () => number
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -461,6 +474,43 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Gated by RIVET_GIT_CLEAR_GUARD (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_GIT_CLEAR_GUARD !== '0') {
     hooks.push(createGitClearAfterFailHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Dead-End Detector: postTool hook — 同一文件反复 edit→verify-fail 循环
+  // (≥2 次且无 verify pass)= 盲改死路。advisory 带 tool_appears 谓词
+  // (采纳 = 转向诊断),触发时同步沉积文件级 dead-end 信息素。
+  // Gated by RIVET_DEAD_END_DETECTOR (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_DEAD_END_DETECTOR !== '0') {
+    hooks.push(createDeadEndDetectorHook({
+      advisoryBus: deps.advisoryBus,
+      deposit: deps.stigmergyDeposit,
+    }))
+  }
+
+  // Intent Anchor: preTurn hook — 长自治 run(>20 轮且距上次用户输入 >10 轮)
+  // 重锚本次 run 的启动意图(taskContract?.objective ?? initialUserMessage)。
+  // 无行为签名 → 无 expect,只计送达。冷却 10 轮。
+  // Gated by RIVET_INTENT_ANCHOR (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.getRunTurn && deps.getLastUserInputRunTurn && deps.getIntentObjective
+    && process.env.RIVET_INTENT_ANCHOR !== '0') {
+    hooks.push(createIntentAnchorHook({
+      advisoryBus: deps.advisoryBus,
+      getRunTurn: deps.getRunTurn,
+      getLastUserInputTurn: deps.getLastUserInputRunTurn,
+      getObjective: deps.getIntentObjective,
+    }))
+  }
+
+  // Turn Budget: preTurn hook — maxTurns 预算进入危险区(剩余 ≤ max(3, 10%))
+  // 时预警一次,引导收敛。expect = verify_attempted(采纳 = 先验证手头工作)。
+  // Gated by RIVET_TURN_BUDGET_WARN (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.getRunTurn && deps.getMaxTurns
+    && process.env.RIVET_TURN_BUDGET_WARN !== '0') {
+    hooks.push(createTurnBudgetHook({
+      advisoryBus: deps.advisoryBus,
+      getMaxTurns: deps.getMaxTurns,
+      getRunTurn: deps.getRunTurn,
+    }))
   }
 
   // Advisory-Readback: postTool 观察 + postTurn 核销 — 对送达的 advisory 按

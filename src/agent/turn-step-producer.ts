@@ -158,6 +158,8 @@ export class TurnStepProducer {
     this.self.traceStore = createTraceStore()
     this.self.predictionAccumulator = createPredictionAccumulator()
     this.self.initialUserMessage = userInput
+    this.self.runLoopTurn = 0
+    this.self.lastUserInputRunTurn = 0
     // Reset accumulations from previous run
     this.self.thinkingOnlyRetries = 0
     this.self.lastThinkingContent = ''
