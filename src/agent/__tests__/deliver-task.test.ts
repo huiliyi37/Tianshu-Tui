@@ -992,9 +992,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
       const result = await tool.execute(params)
 
       assert.match(result.content, /Delivery Gate: YELLOW/)
-      assert.match(result.content, /Verification diagnostics:/)
-      assert.match(result.content, /Tool invocation failure candidates:/)
-      assert.match(result.content, /Shortest next step: tsx --test src\/a\.test\.ts/)
+      assert.match(result.content, /Attribution: Verification invocation failure/)
       assert.doesNotMatch(result.content, /Owned verification failed\. Fix failures before delivery\./)
     })
 
@@ -1040,7 +1038,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
       assert.match(result.content, /Delivery Gate: GREEN/)
       assert.match(result.content, /Owned files \(0\)/)
-      assert.match(result.content, /Tool invocation failure candidates:/)
+      assert.match(result.content, /Attribution: Verification invocation failure/)
       assert.doesNotMatch(result.content, /⚠️  Blocking:/)
     })
   })

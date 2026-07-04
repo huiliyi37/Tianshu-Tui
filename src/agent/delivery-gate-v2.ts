@@ -166,8 +166,8 @@ export function buildGateConvergenceHint(
   }
   if (gate.state === 'RED') {
     const lines = [`交付门禁 RED：${gate.blockingReason ?? gate.reason ?? 'owned 文件存在未验证或失败项。'}`]
-    if (gate.shortestNextStep) lines.push(`最短下一步：${gate.shortestNextStep}`)
     lines.push('请先解决阻断项再继续；若无法解决，明确报告阻断原因后结束回合。')
+    if (gate.shortestNextStep) lines.push(`方向：${gate.shortestNextStep}`)
     return lines.join('\n') + depthSuffix
   }
   // YELLOW — differentiate no_test_infra from transient external blocks

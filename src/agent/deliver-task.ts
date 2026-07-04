@@ -294,44 +294,13 @@ For complex specs or cross-module integration, include checklist entries: fact-f
 
       const hasVerificationDiagnostics = report.currentBlockingFailure
         || report.supersededFailures > 0
-        || report.staleSnapshotDropped > 0
-        || report.toolInvocationFailureCandidates.length > 0
-        || report.shortestNextStep
       if (hasVerificationDiagnostics) {
-        lines.push('', 'Verification diagnostics:')
+        lines.push('')
         if (report.currentBlockingFailure) {
-          lines.push(`  Current blocking failure: ${report.currentBlockingFailure}`)
+          lines.push(`  阻断项：${report.currentBlockingFailure}`)
         }
         if (report.staleFailureCandidates > 0) {
-          lines.push(`  Superseded failures: ${report.staleFailureCandidates} (failed earlier but later passed — already fixed, not blocking)`)
-        }
-        if (report.staleSnapshotDropped > 0) {
-          lines.push(`  Stale snapshot verifications: ${report.staleSnapshotDropped} (ran on outdated code, may be irrelevant)`)
-        }
-        if (report.toolInvocationFailureCandidates.length > 0) {
-          lines.push('  Tool invocation failure candidates:')
-          const shown = report.toolInvocationFailureCandidates.slice(0, 2)
-          for (const candidate of shown) {
-            lines.push(`    - ${candidate}`)
-          }
-          if (report.toolInvocationFailureCandidates.length > 2) {
-            lines.push(`    ... and ${report.toolInvocationFailureCandidates.length - 2} more`)
-          }
-        }
-        if (report.shortestNextStep) {
-          lines.push(`  Shortest next step: ${report.shortestNextStep}`)
-        }
-        // When tool invocation failures are present (timeout, crash), suggest
-        // batch running tests with a longer timeout to increase verification coverage.
-        if (report.toolInvocationFailureCandidates.length > 0) {
-          // Check if the shortest next step looks like a test command
-          const nextStep = report.shortestNextStep ?? ''
-          if (nextStep.includes('--test') || nextStep.includes('test')) {
-            lines.push('', '  💡 Tests timed out or crashed. Try:')
-            lines.push('     - Increase bash timeout: pass timeout=300000 for full suites')
-            lines.push('     - Run in batches: split by directory (src/tui/__tests__/, src/agent/__tests__/, etc.)')
-            lines.push('     - Run only related tests first, then expand scope')
-          }
+          lines.push(`  预存量失败：${report.staleFailureCandidates} 条（改动前已存在，不归本次改动，可 force 交付）`)
         }
         // no_test_infra: project lacks testing infrastructure entirely.
         // Give user-facing guidance rather than generic "run tests" advice.
@@ -398,14 +367,11 @@ For complex specs or cross-module integration, include checklist entries: fact-f
       // Helps the agent understand: which failures should I fix, which are external?
       {
         const parts: string[] = []
-        if (report.currentBlockingFailure) parts.push(`1 owned blocking failure — your responsibility`)
-        if (report.supersededFailures > 0) parts.push(`${report.supersededFailures} superseded (later fixed)`)
-        if (report.staleSnapshotDropped > 0) parts.push(`${report.staleSnapshotDropped} stale snapshot (outdated code)`)
-        if (report.toolInvocationFailureCandidates.length > 0) parts.push(`${report.toolInvocationFailureCandidates.length} invocation failure(s)`)
+        if (report.currentBlockingFailure) parts.push(`1 条阻断失败（你需处理）`)
+        if (report.supersededFailures > 0) parts.push(`${report.supersededFailures} 条预存量（改动前已存在，不归你）`)
         if (parts.length > 0) {
-          lines.push(`Failure breakdown: ${parts.join(' | ')}`)
-          lines.push('→ 只有 "blocking failure" 是你的改动直接导致的。superseded 已经修复了，stale snapshot 跑的是旧代码，invocation failure 是环境问题。')
-          lines.push('→ 不要为 superseded/stale/invocation 类失败反复重试——它们不反映你的代码质量。')
+          lines.push(`失败归因：${parts.join(' | ')}`)
+          lines.push('→ 只处理"阻断失败"——那是你的改动引入的。预存量失败不归你，可 force 交付。')
         }
       }
 

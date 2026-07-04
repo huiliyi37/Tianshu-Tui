@@ -361,7 +361,7 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
           parts.push(`- **${L.blocking}**：${gateV2.blockingReason}`)
         }
         if (gateV2.shortestNextStep) {
-          parts.push(`- **${L.nextAction}**：${gateV2.shortestNextStep}`)
+          parts.push(`- **方向提示**：${gateV2.shortestNextStep}`)
         }
       }
     } else {
