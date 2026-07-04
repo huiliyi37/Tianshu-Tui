@@ -504,7 +504,7 @@ export function ReviewPanel(props: {
           <FileExplorer sessionId={sessionId} cwd={cwd} />
         </TabsContent>
         <TabsContent value="plan" className="review-body">
-          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} />
+          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} todos={todos} />
         </TabsContent>
         <TabsContent value="task" className="review-body">
           <section className="review-section">

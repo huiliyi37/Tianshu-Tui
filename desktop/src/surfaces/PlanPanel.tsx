@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePlans, usePlan, useApprovePlan, useRejectPlan } from '../state/queries'
 import { Markdown } from '../components/Markdown'
 import type { PlanStatus, PlanSummary, PlanOption } from '../runtime/types'
+import type { TodoStateItem } from '../runtime/types'
 import { ChevronDown, ChevronUp, LayoutList, Search } from 'lucide-react'
 
 const STATUS_LABEL: Record<PlanStatus, string> = {
@@ -40,6 +41,7 @@ export function PlanPanel(props: {
   sessionId: string | null
   planRev: number
   latestPlanSlug?: string
+  todos?: TodoStateItem[]
 }) {
   const { sessionId, planRev, latestPlanSlug } = props
   const plans = usePlans(sessionId, planRev)
@@ -237,6 +239,25 @@ export function PlanPanel(props: {
                     {opt.description && <span className="plan-option-desc">{opt.description}</span>}
                   </span>
                 </label>
+              ))}
+            </div>
+          )}
+
+          {props.todos && props.todos.length > 0 && (
+            <div className="plan-checklist">
+              <div className="plan-checklist-header">
+                执行进度
+                <span className="plan-checklist-count">
+                  {props.todos.filter(t => t.status === 'completed').length}/{props.todos.length}
+                </span>
+              </div>
+              {props.todos.map((t) => (
+                <div key={t.id} className={`plan-checklist-item st-${t.status}`}>
+                  <span className="plan-checklist-glyph">
+                    {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '◌' : '○'}
+                  </span>
+                  <span className="plan-checklist-text">{t.content}</span>
+                </div>
               ))}
             </div>
           )}
