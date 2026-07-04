@@ -21,6 +21,7 @@ import type { PostToolRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '
 import type { AdvisoryBus } from '../advisory-bus.js'
 import type { PheromoneDeposit } from '../../context/stigmergy.js'
 import { VERIFY_BASH_RE } from './self-verify-hook.js'
+import { WRITE_TOOL_NAMES, extractWriteFilePaths } from '../../tools/write-tool-helpers.js'
 
 export interface DeadEndDetectorDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
@@ -33,8 +34,6 @@ const CYCLE_THRESHOLD = 2
 
 /** 诊断类工具 — expect 谓词与触发内容共用(采纳 = 转向这些工具) */
 const DIAGNOSIS_TOOLS = ['read_file', 'grep', 'glob', 'semantic_search', 'lsp_goto_definition', 'lsp_find_references']
-
-const EDIT_TOOLS = new Set(['edit_file', 'write_file'])
 
 interface FileCycleState {
   /** 完成的 edit→verify-fail 循环数 */
@@ -78,10 +77,9 @@ export function createDeadEndDetectorHook(
     name: 'dead-end-detector',
     getCycleCount(file: string) { return files.get(file)?.cycles ?? 0 },
     async run(ctx: RuntimeHookContext, tool: RuntimeToolEvent): Promise<void> {
-      // ── 编辑:标记该文件进入"等待验证"────────────────────────
-      if (EDIT_TOOLS.has(tool.name) && tool.success) {
-        const file = (tool.input?.file_path as string) ?? tool.target
-        if (typeof file === 'string' && file.length > 0) {
+      // ── 编辑:标记所有被修改文件进入"等待验证"───────────────
+      if (WRITE_TOOL_NAMES.has(tool.name) && tool.success) {
+        for (const file of extractWriteFilePaths(tool.name, tool.input as Record<string, unknown> | undefined)) {
           stateFor(file).editPending = true
         }
         return

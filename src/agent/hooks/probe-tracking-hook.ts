@@ -18,7 +18,8 @@
 
 import type { PostToolRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
-import { detectProbes, extractWriteContent, type ProbeHit } from '../probe-detector.js'
+import { detectProbes, type ProbeHit } from '../probe-detector.js'
+import { extractWriteContents } from '../../tools/write-tool-helpers.js'
 
 export interface ProbeTrackingHookDeps {
   /** Only `submit` is used — narrowed for testability. */
@@ -50,41 +51,32 @@ export function createProbeTrackingHook(
     name: 'probe-tracking',
     getProbeTracker() { return tracker },
     resetProbeTracker() { tracker.probesByFile.clear() },
-    run(_ctx: RuntimeHookContext, tool: RuntimeToolEvent): void {
-      // Only inspect write-class tools
-      const writeContent = extractWriteContent(tool.name, tool.input as Record<string, unknown> | undefined)
-      if (!writeContent) return
+      run(_ctx: RuntimeHookContext, tool: RuntimeToolEvent): void {
+        const writes = extractWriteContents(tool.name, tool.input as Record<string, unknown> | undefined)
+        if (writes.length === 0) return
 
-      const hits = detectProbes(writeContent.content, writeContent.filePath)
-      if (hits.length === 0) return
+        const allHits: ProbeHit[] = []
+        for (const w of writes) {
+          allHits.push(...detectProbes(w.content, w.filePath))
+        }
+        if (allHits.length === 0) return
 
-      // Record in session-scoped tracker (cumulative)
-      const existing = tracker.probesByFile.get(writeContent.filePath) ?? []
-      // Avoid exact-duplicate recording (same pattern + same line content)
-      for (const hit of hits) {
-        const isDup = existing.some(
-          h => h.pattern === hit.pattern && h.line === hit.line,
-        )
-        if (!isDup) existing.push(hit)
-      }
-      tracker.probesByFile.set(writeContent.filePath, existing)
+        for (const hit of allHits) {
+          const existing = tracker.probesByFile.get(hit.filePath) ?? []
+          const isDup = existing.some(
+            h => h.pattern === hit.pattern && h.line === hit.line,
+          )
+          if (!isDup) existing.push(hit)
+          tracker.probesByFile.set(hit.filePath, existing)
+        }
 
-      // Submit advisory (auxiliary channel — non-blocking reminder)
-      deps.advisoryBus.submit({
-        key: 'probe-tracking',
-        priority: 0.52,
-        category: 'discipline',
-        content: `探针检测：${writeContent.filePath} 新增了调试探针（${hits.map(h => h.pattern).join(', ')}）。修复完成后、交付前记得清理这些探针——残留探针 = 任务未完成。`,
-        ttl: 1,
-        // 谓词映射表（P1a）：probe → pattern_absent(负向, 4 轮窗口——修完再清是合法节奏)。
-        // needle 用命中行内容（去掉截断省略号），到期时文件不再包含 = 已清理。
-        expect: {
-          kind: 'pattern_absent',
-          path: writeContent.filePath,
-          needles: hits.map(h => h.line.replace(/\.\.\.$/, '')),
-          withinTurns: 4,
-        },
-      })
+        deps.advisoryBus.submit({
+          key: 'probe-tracking',
+          priority: 0.52,
+          category: 'discipline',
+          content: `探针检测：${[...new Set(allHits.map(h => h.filePath))].join(', ')} 新增了调试探针（${[...new Set(allHits.map(h => h.pattern))].join(', ')}）。修复完成后、交付前记得清理这些探针——残留探针 = 任务未完成。`,
+          ttl: 1,
+        })
     },
   }
 

@@ -22,6 +22,7 @@
 
 import type { PostToolRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
+import { WRITE_TOOL_NAMES, extractWriteFilePaths } from '../../tools/write-tool-helpers.js'
 
 export interface ExternalClaimTrackingHookDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
@@ -44,9 +45,6 @@ interface ClaimTracker {
 
 /** delegate 类工具名 */
 const DELEGATE_TOOLS = new Set(['delegate_task', 'delegate_batch'])
-
-/** 写工具名 */
-const WRITE_TOOLS = new Set(['edit_file', 'hash_edit', 'write_file', 'apply_patch'])
 
 /** 核验类工具（read_file / grep / glob / lsp_*） */
 const VERIFY_TOOLS = new Set([
@@ -89,18 +87,6 @@ export function extractClaimedPaths(content: string): string[] {
     paths.add(canonicalizePath(match[1]!))
   }
   return [...paths]
-}
-
-/**
- * 从写工具 input 中提取目标文件路径。
- */
-function getWriteFilePath(tool: RuntimeToolEvent): string | null {
-  const fp = tool.input?.file_path
-  if (typeof fp === 'string') return fp
-  // apply_patch uses 'path' or 'file'
-  const p = tool.input?.path ?? tool.input?.file
-  if (typeof p === 'string') return p as string
-  return tool.target ?? null
 }
 
 export function createExternalClaimTrackingHook(
@@ -153,14 +139,16 @@ export function createExternalClaimTrackingHook(
       }
 
       // ── Step 2: 写操作 → 检查是否命中未核验声称 ────────────────
-      if (!WRITE_TOOLS.has(tool.name)) return
+      if (!WRITE_TOOL_NAMES.has(tool.name)) return
 
-      const writePath = getWriteFilePath(tool)
-      if (!writePath) return
+      const writePaths = extractWriteFilePaths(tool.name, tool.input as Record<string, unknown> | undefined)
+      if (writePaths.length === 0) return
 
       // 查活跃声称中是否有匹配
       const activeClaims = tracker.claims.filter(c => c.expiresAtTurn > turn)
-      const matchedClaim = activeClaims.find(c => c.filePath === writePath || writePath.endsWith(c.filePath) || c.filePath.endsWith(writePath))
+      const matchedClaim = activeClaims.find(c =>
+        writePaths.some(wp => c.filePath === wp || wp.endsWith(c.filePath) || c.filePath.endsWith(wp))
+      )
       if (!matchedClaim) return
 
       // 检查 recentToolHistory：delegate 之后是否有 read/grep 核验过**该特定文件**
@@ -184,7 +172,7 @@ export function createExternalClaimTrackingHook(
           key: 'external-claim-unverified',
           priority: 0.56,
           category: 'discipline',
-          content: `⚠ delegate 报告中提到了 ${writePath}，你正在编辑它，但中间没有独立核验（read_file/grep）。worker 报告的行号可能偏移或引用了过时文件状态。先用 read_file 或 grep 独立确认该路径的当前内容，再编辑。`,
+          content: `⚠ delegate 报告中提到了 ${claimedPath}，你正在编辑它，但中间没有独立核验（read_file/grep）。worker 报告的行号可能偏移或引用了过时文件状态。先用 read_file 或 grep 独立确认该路径的当前内容，再编辑。`,
           ttl: 1,
           // 谓词映射表（P1a）：external-claim → tool_appears(核验类, 目标=声称路径, 2 轮)
           expect: {
