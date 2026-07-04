@@ -32,6 +32,14 @@ import type {
 export class FileSessionPersistence implements SessionPersistenceAdapter {
   constructor(private readonly baseDir: string) {}
 
+  /** Per-session event write buffer — batches high-frequency appendFileSync
+   *  (streaming deltas can fire hundreds per turn) into one disk write per
+   *  FLUSH_INTERVAL_MS. Critical events flush immediately via flushEventBuffer. */
+  private eventBuffers = new Map<string, string[]>()
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
+  private static readonly FLUSH_INTERVAL_MS = 100
+  private static readonly FLUSH_MAX_LINES = 50
+
   private dir(id: string): string {
     return join(this.baseDir, sanitize(id))
   }
@@ -52,8 +60,51 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   }
 
   appendEvent(sessionId: string, event: SessionEvent): void {
-    const d = this.ensureDir(sessionId)
-    appendFileSync(join(d, 'events.jsonl'), JSON.stringify(event) + '\n', 'utf8')
+    // Buffer the line — flush is triggered by timer OR when buffer hits capacity.
+    let buf = this.eventBuffers.get(sessionId)
+    if (!buf) {
+      buf = []
+      this.eventBuffers.set(sessionId, buf)
+    }
+    buf.push(JSON.stringify(event) + '\n')
+    if (buf.length >= FileSessionPersistence.FLUSH_MAX_LINES) {
+      this.flushSession(sessionId)
+    } else if (!this.flushTimer) {
+      this.flushTimer = setTimeout(() => this.flushAll(), FileSessionPersistence.FLUSH_INTERVAL_MS)
+      this.flushTimer.unref?.()
+    }
+  }
+
+  /** Flush a single session's buffered events to disk immediately. */
+  private flushSession(sessionId: string): void {
+    const buf = this.eventBuffers.get(sessionId)
+    if (!buf || buf.length === 0) return
+    this.eventBuffers.set(sessionId, [])
+    try {
+      const d = this.ensureDir(sessionId)
+      appendFileSync(join(d, 'events.jsonl'), buf.join(''), 'utf8')
+    } catch {
+      // Re-queue on failure — better to retry than lose events.
+      const existing = this.eventBuffers.get(sessionId) ?? []
+      this.eventBuffers.set(sessionId, [...buf, ...existing])
+    }
+  }
+
+  /** Flush ALL session buffers — called by the debounce timer + flushSync. */
+  private flushAll(): void {
+    this.flushTimer = null
+    for (const id of this.eventBuffers.keys()) {
+      this.flushSession(id)
+    }
+  }
+
+  /** Synchronous flush — call on graceful shutdown / before critical reads. */
+  flushSync(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    this.flushAll()
   }
 
   saveImage(sessionId: string, imgId: string, base64: string, mime: string): void {
@@ -80,6 +131,7 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   }
 
   loadAll(): PersistedSession[] {
+    this.flushSync()
     if (!existsSync(this.baseDir)) return []
     const out: PersistedSession[] = []
     let entries: string[]
@@ -122,6 +174,7 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
 
   /** On-demand single-session event log read (first open of a lazy session). */
   loadEvents(id: string): SessionEvent[] {
+    this.flushSession(id)
     return this.readEvents(this.dir(id))
   }
 
@@ -152,6 +205,8 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
 
   /** Irreversibly remove a session's on-disk files (events, index, images…). */
   deleteSession(id: string): void {
+    this.flushSession(id)
+    this.eventBuffers.delete(id)
     try { rmSync(this.dir(id), { recursive: true, force: true }) } catch { /* best-effort */ }
   }
 

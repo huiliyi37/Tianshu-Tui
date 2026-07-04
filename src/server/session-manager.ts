@@ -371,6 +371,8 @@ export interface StorageReport {
 export interface SessionPersistenceAdapter {
   saveRecord(record: SessionRecord): void
   appendEvent(sessionId: string, event: SessionEvent): void
+  /** Flush buffered writes to disk (batched adapters). Optional — no-op if absent. */
+  flushSync?(): void
   loadAll(): PersistedSession[]
   /**
    * Lazy-boot support (optional). `loadRecords` reads ONLY the lightweight
@@ -1712,12 +1714,11 @@ export class RuntimeSessionManager {
    */
   shutdownAll(): void {
     for (const s of this.sessions.values()) {
-      // agent 在 rehydrated/idle session 上为 null（懒构造）；只对已建过 agent
-      // 的 session 调 shutdown，节省 best-effort try 的无谓 catch。
       try { s.agent?.shutdown?.() } catch { /* best-effort */ }
-      // 终结性关闭：杀掉所有后台任务（dev server/watcher）避免孤儿进程。
       try { s.jobs?.killAll() } catch { /* best-effort */ }
     }
+    // Flush any buffered events to disk before exit.
+    this.persistence?.flushSync?.()
   }
 
   /**
