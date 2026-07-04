@@ -310,7 +310,21 @@ export function ThreadView(props: {
   // clear the scrolled-up flag so auto-scroll resumes.
   const onScroll = useCallback(() => {
     setScrolledUp(!isNearBottom())
-  }, [isNearBottom])
+    // Persist scroll position to store (throttled via rAF).
+    const el = msgRef.current
+    if (el) dispatch({ type: 'setScrollPosition', sessionId: session.id, scrollTop: el.scrollTop })
+  }, [isNearBottom, dispatch, session.id])
+
+  // Restore scroll position on mount — preserves across tab switches.
+  useEffect(() => {
+    const saved = ui.scrollPositions[session.id]
+    const el = msgRef.current
+    if (saved != null && saved > 0 && el) {
+      // Wait one frame for the virtualizer to measure content.
+      requestAnimationFrame(() => { el.scrollTop = saved })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id])
 
   const scrollToBottom = useCallback(() => {
     if (rendered.length > 0) virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
@@ -864,7 +878,11 @@ export function ThreadView(props: {
             planMode={view.planMode}
             onSetPlanMode={onSetPlanMode}
             onDelegate={() => setShowDelegateDialog(true)}
-            onWorkflow={(cmd) => onSend(cmd)}
+            onWorkflow={(cmd) => {
+              // 带上引导 prompt——让 agent 进入对应工作流模式并询问用户具体目标。
+              const label = cmd === '/council' ? '议事会评审' : '团队协作'
+              onSend(`${cmd} 我想用${label}模式完成一个任务，请先问我具体目标是什么。`)
+            }}
             menuRev={view.menuRev}
           />
         </div>

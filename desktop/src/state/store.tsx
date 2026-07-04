@@ -67,6 +67,8 @@ export interface UiState {
   /** Per-session composer drafts — preserved across tab switches.
    *  Keyed by sessionId so switching tabs doesn't lose unsent input. */
   composerDrafts: Record<string, string>
+  /** Per-session scroll positions (scrollTop in px) — restored on tab switch. */
+  scrollPositions: Record<string, number>
 }
 
 /** A queued @-reference (file or folder) awaiting insertion into the composer. */
@@ -99,6 +101,7 @@ type UiAction =
   | { type: 'clearComposerAttachments' }
   | { type: 'requestReviewTab'; tab: string }
   | { type: 'setComposerDraft'; sessionId: string; text: string }
+  | { type: 'setScrollPosition'; sessionId: string; scrollTop: number }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -201,6 +204,11 @@ function reducer(state: UiState, action: UiAction): UiState {
         ...state,
         composerDrafts: { ...state.composerDrafts, [action.sessionId]: action.text },
       }
+    case 'setScrollPosition':
+      return {
+        ...state,
+        scrollPositions: { ...state.scrollPositions, [action.sessionId]: action.scrollTop },
+      }
     default:
       return state
   }
@@ -232,6 +240,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     composerAttachments: [],
     reviewTabRequest: null,
     composerDrafts: {},
+    scrollPositions: {},
   }))
 
   useEffect(() => {
