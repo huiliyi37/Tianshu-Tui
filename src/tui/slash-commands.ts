@@ -100,7 +100,7 @@ const HELP_TEXT = `Available commands:
 /evidence — Show last turn evidence summary
 /debug [prompt|fingerprint|cache|context-payload|mcp] — Debug info
 /mcp — Show MCP server status
-/cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
+/cockpit [summary|trace|verify|context|safety|model|mcp|advisory|off] — Toggle cockpit panel
 /scroll — Browse session history in pager
 /skill [list|install <name>|import <name>|<name>|off <name>|review|approve <name>|reject <name>] — List/load skills; install from .claude/skills; review drafts
 /interview <topic> — Deep interview before coding

@@ -78,6 +78,10 @@ let app: TuiApp | null = null
 let ctx: BootstrapContext | null = null
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null
 
+/** advisory status 通道环形缓冲（最近 N 条,cockpit advisory 面板展示） */
+const ADVISORY_STATUS_BUFFER_MAX = 20
+const advisoryStatusNotices: string[] = []
+
 let isShuttingDown = false
 
 function shutdown(code: number = 0) {
@@ -396,6 +400,18 @@ async function main() {
   // Store heartbeat for shutdown cleanup
   heartbeatInterval = ctx.heartbeatInterval
 
+  // ── Advisory status 通道点亮（dark cockpit 单感官通道）──────────
+  // status 条目不进 prompt、不占 Top-N 预算,只落环形缓冲进 cockpit
+  // advisory 面板。未设 sink 的路径(server/desktop)保持 bus 回退。
+  ctx.agent.advisoryBus.setStatusSink(entries => {
+    for (const e of entries) {
+      advisoryStatusNotices.push(e.content)
+    }
+    if (advisoryStatusNotices.length > ADVISORY_STATUS_BUFFER_MAX) {
+      advisoryStatusNotices.splice(0, advisoryStatusNotices.length - ADVISORY_STATUS_BUFFER_MAX)
+    }
+  })
+
   // ── Recovery CLI fallback ────────────────────────────────────
   if (forceRecoveryCli) {
     const { runRecoveryCli } = await import('./recovery-cli.js')
@@ -529,6 +545,7 @@ async function main() {
         cacheHitRate: ctx.session.getRecentTurnHitRate(3) ?? ctx.session.getCacheHitRate(),
         cost: metrics?.cost ?? 0,
         mcpManager: ctx.refs.mcpManager,
+        advisoryStatusNotices,
       })
     },
     // Rewind — 最近用户消息（携带真实 messageIndex 作为回溯边界）

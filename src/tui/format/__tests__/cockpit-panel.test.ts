@@ -26,7 +26,14 @@ function fixture(): CockpitSnapshot {
       physarumShadow: {} as never, cacheDiagnostic: null, reasoningEffort: 'medium', starDomain: 'Auto(天枢)',
     },
     mcp: { servers: [{ serverId: 'SRV-A', status: 'connected', toolCount: 3 }], totalTools: 3, connectedServers: 1 },
-    panelStatuses: { summary: 'ok', trace: 'ok', verify: 'ok', context: 'ok', safety: 'ok', model: 'ok', mcp: 'ok' },
+    advisory: {
+      rendered: 4, dropped: 1, adopted: 2, ignored: 1, heldOut: 1,
+      silenced: [{ key: 'NOISY-KEY', remaining: 3, reason: 'lift' }],
+      pendingWatch: 1,
+      keys: [{ key: 'ADV-KEY', delivered: 3, adopted: 2, ignored: 1, ignoredStreak: 0, adoptionRate: 0.66, lift: 0.25 }],
+      statusNotices: ['STATUS-NOTICE-1'],
+    },
+    panelStatuses: { summary: 'ok', trace: 'ok', verify: 'ok', context: 'ok', safety: 'ok', model: 'ok', mcp: 'ok', advisory: 'warn' },
   }
 }
 
@@ -53,6 +60,25 @@ describe('renderCockpit panel focus (G4)', () => {
     const text = lines.map(stripAnsi).join('\n')
     // 当前面板用 [Label] 方括号包裹
     assert.ok(text.includes(`[${PANEL_LABELS[panel]}]`), 'rail 高亮当前面板')
+  })
+
+  it('advisory 聚焦视图展开 per-key 效能与 status 通道', () => {
+    const lines = renderCockpit(fixture(), 80, 30, theme, 'advisory')
+    const text = lines.map(stripAnsi).join('\n')
+    assert.ok(text.includes('Advisory'), 'advisory 节存在')
+    assert.ok(text.includes('heldOut:1'), '账本累计含 heldOut')
+    assert.ok(text.includes('NOISY-KEY(lift:3)'), '静音 key 带原因与剩余周期')
+    assert.ok(text.includes('ADV-KEY'), 'per-key Top 行')
+    assert.ok(text.includes('lift:+0.25'), 'per-key lift')
+    assert.ok(text.includes('STATUS-NOTICE-1'), 'status 通道最近条目')
+    assert.ok(!text.includes('MODEL-X'), '其他节被隐藏')
+  })
+
+  it('summary 视图只给 advisory 一行概览,不展开 per-key', () => {
+    const lines = renderCockpit(fixture(), 80, 30, theme, 'summary')
+    const text = lines.map(stripAnsi).join('\n')
+    assert.ok(text.includes('Advisory'), 'advisory 概览行存在')
+    assert.ok(!text.includes('ADV-KEY'), 'per-key 不在 summary 展开')
   })
 
   it('footer 在单面板模式提示回到 summary', () => {

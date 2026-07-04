@@ -333,3 +333,70 @@ maxTurns 耗尽是 GUARD-forced stop,模型看不到预算。剩余轮数
   69 用例全绿;typecheck 除 delivery-gate 预存基线外干净
 - loop-factory(4)/tool-execution-abort(3) 既有失败经 git stash 基线
   比对确认与本次改动无关（并发会话预存的 mock 缺口）
+
+## Lift 消费端与面板点亮（2026-07-04 第五轮）
+
+因果账本演进（holdout lift + 跨会话效能信息素）落地后的两个尾巴:
+`getLift()` 度量了没人消费,`setStatusSink()` 生产就绪只有测试在用。
+本轮把度量接进决策,把暗仪表盘点亮。
+
+### 1. Lift 消费端（agent 侧）
+
+**成熟度门 `getMatureLift(key)`**（advisory-readback.ts）:会话实测 +
+跨会话先验合并计算 lift（先验的 shadowHeld/shadowSatisfied 已进效能
+信息素,是冷启动的主数据源——单会话 holdout 积累极慢）。成熟度阈值
+`decided ≥ 5 && shadowHeld ≥ 3`（`MATURE_LIFT_MIN_DECIDED/SHADOW`）,
+不足返回 null;消费端对 null 必须视为中性。纯会话 `getLift` 保持不动。
+
+**负 lift 自动静音**（advisory-bus.ts render,习惯化静音同段位置）:
+mature lift ≤ 0（"没提醒也会做"= 纯噪音）→ 静音 `LIFT_MUTE_RENDERS`
+（10）个渲染周期。独立 `liftMuteRemaining` map（与习惯化 silenceRemaining
+分开,遥测可区分）;**期满 probation 放行一次**收集新证据,之后 lift 仍
+≤0 才再静音——避免数据不更新导致的永久静音死锁。豁免名单与 holdout
+资格同源:constitutional / immediate / star_domain 永不静音。账本新增
+`liftMuted` 计数（已计入 dropped,随 advisory-ledger 遥测落盘）。
+
+**排序升级**（compareEntries）:Top-N 同 priority 次级键,mature lift
+可用时优先用 lift（归一 `(lift+1)/2` 到 [0,1],0 lift = 中性 0.5,与
+采纳率同刻度）,否则回退采纳率——实测有真实增益的提醒优先占预算。
+
+**接线**:loop.ts 构造时 `setLiftProvider(key => readback.getMatureLift(key))`,
+开关 `RIVET_ADVISORY_LIFT_CONSUMER`（默认开,'0' 关 = 不注入 provider,
+静音与排序全回退旧行为）。
+
+### 2. Advisory 面板 + status 通道点亮（TUI 侧,E 构想）
+
+**Cockpit advisory 面板**:`Panel` 增 `'advisory'`;snapshot 结构含
+会话累计（rendered/dropped/adopted/ignored/heldOut,来自 guardianActivity,
+新增 `advisoriesHeldOut` 累计）、静音中 key 列表（`getSilencedKeys()`,
+含剩余周期与原因 habituation/lift）、挂起观察数（`getPendingWatchCount()`）、
+per-key 效能 Top 行（delivered 降序截 8,含 adoptionRate 与 mature lift）。
+面板 status:有 key 被静音 = 'warn'（降噪干预值得一眼注意）。summary
+视图只给一行概览,聚焦视图（`/cockpit advisory`）展开 per-key 与
+status 通道。mock/server/desktop 等部分上下文降级为零值。
+
+**statusSink 接线**（main.ts）:ctx 创建后
+`advisoryBus.setStatusSink(...)` → 模块级环形缓冲（最近 20 条）→
+经 `CockpitSnapshotSources.advisoryStatusNotices` 并入面板。status
+语义兑现:不进 prompt、不占 Top-N 预算、面板可见。未设 sink 的路径
+（server/desktop）保持既有 bus 回退,条目不静默消失。
+
+### 验证记录
+
+- 新单测 12 用例全绿（advisory-lift-consumer.test.ts）:成熟度门矩阵、
+  负 lift 静音（豁免/周期/probation/账本）、排序升级;cockpit
+  state/panel 新增 4 用例（snapshot 组装、降级、聚焦渲染、summary 概览）
+- 回归:advisory 全家桶 + cockpit 共 104 用例全绿;efficacy-integration/
+  readback-hook/async-copilot 12 用例全绿;typecheck 除 delivery-gate
+  预存基线外干净
+- loop-factory 4 个既有失败经 git stash 基线比对确认与本次改动无关
+- 顺手修复:cockpit state.test.ts 的 makeAgent mock 补 `getSessionDomain`
+  （并发会话在 state.ts 引入调用但未更新 mock 的预存失败）
+
+### 已知局限
+
+- 负 lift 静音的判定输入以先验为主,先验按 key 聚合不分会话类型——
+  某类会话里有效、另一类里无效的提醒会被全局口径拉平（会话类型
+  聚类仍是 research 级遗留项）
+- probation 单次放行只产生 delivered 样本;shadow 样本仍依赖 holdout
+  抽中,负 lift 的翻案周期受 holdout 率（默认 10%）制约

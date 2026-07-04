@@ -15,6 +15,8 @@ export interface CockpitSnapshotSources {
   mcpManager?: McpManager | null
   claimCounts?: import('../../context/promotion.js').ClaimStatusCounts
   reasoningEffort?: string
+  /** status 通道最近条目（main.ts statusSink 环形缓冲注入,dark cockpit） */
+  advisoryStatusNotices?: string[]
 }
 
 /**
@@ -69,7 +71,46 @@ function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>):
       ? 'warn'
       : 'ok'
 
-  return { summary, trace, verify, context, safety, model, mcp }
+  // 有 key 被静音 = 提醒系统在做降噪干预,值得一眼注意
+  const advisory: PanelStatus = snapshot.advisory.silenced.length > 0 ? 'warn' : 'ok'
+
+  return { summary, trace, verify, context, safety, model, mcp, advisory }
+}
+
+/** advisory 面板 per-key Top 行数上限 */
+const ADVISORY_PANEL_MAX_KEYS = 8
+
+function buildAdvisorySection(agent: AgentLoop, statusNotices: string[]): CockpitSnapshot['advisory'] {
+  // 部分上下文（测试 mock / server / desktop）只传部分 AgentLoop——面板降级为零值
+  const ga = agent.guardianActivity as AgentLoop['guardianActivity'] | undefined
+  const readback = agent.advisoryReadback as AgentLoop['advisoryReadback'] | undefined
+  const bus = agent.advisoryBus as AgentLoop['advisoryBus'] | undefined
+  const keys = readback
+    ? [...readback.getStats()]
+        .filter(([, s]) => s.delivered > 0 || s.shadowHeld > 0)
+        .sort((a, b) => b[1].delivered - a[1].delivered)
+        .slice(0, ADVISORY_PANEL_MAX_KEYS)
+        .map(([key, s]) => ({
+          key,
+          delivered: s.delivered,
+          adopted: s.adopted,
+          ignored: s.ignored,
+          ignoredStreak: s.ignoredStreak,
+          adoptionRate: readback.getAdoptionRate(key),
+          lift: readback.getMatureLift(key),
+        }))
+    : []
+  return {
+    rendered: ga?.advisoriesRendered ?? 0,
+    dropped: ga?.advisoriesDropped ?? 0,
+    adopted: ga?.advisoriesAdopted ?? 0,
+    ignored: ga?.advisoriesIgnored ?? 0,
+    heldOut: ga?.advisoriesHeldOut ?? 0,
+    silenced: bus?.getSilencedKeys() ?? [],
+    pendingWatch: bus?.getPendingWatchCount() ?? 0,
+    keys,
+    statusNotices,
+  }
 }
 
 export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSnapshot {
@@ -178,6 +219,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       totalTools: mcpManager?.getAllTools().length ?? 0,
       connectedServers: mcpStates.filter(s => s.status === 'connected').length,
     },
+    advisory: buildAdvisorySection(agent, sources.advisoryStatusNotices ?? []),
   }
 
   return {

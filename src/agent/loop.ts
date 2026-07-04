@@ -247,16 +247,19 @@ export class AgentLoop {
     /** P1a 核销闭环：expect 谓词判定为采纳/忽略的累计数 */
     advisoriesAdopted: number
     advisoriesIgnored: number
-  } = { ccr: 0, shifts: {}, advisoriesRendered: 0, advisoriesDropped: 0, advisoriesAdopted: 0, advisoriesIgnored: 0 }
+    /** Holdout 反事实组：被静默扣留的累计数（cockpit advisory 面板消费） */
+    advisoriesHeldOut: number
+  } = { ccr: 0, shifts: {}, advisoriesRendered: 0, advisoriesDropped: 0, advisoriesAdopted: 0, advisoriesIgnored: 0, advisoriesHeldOut: 0 }
   private lastGuardianMetaFingerprint = ''
   /** 记录一次结构化改道发射（source: 'kick' | 'convergence' | …）。 */
   recordDecisionShift(source: string): void {
     this.guardianActivity.shifts[source] = (this.guardianActivity.shifts[source] ?? 0) + 1
   }
   /** 累计 advisory 投递账本（来自 AdvisoryBus.drainLedger）。 */
-  recordAdvisoryLedger(delta: { rendered: number; dropped: number }): void {
+  recordAdvisoryLedger(delta: { rendered: number; dropped: number; heldOut?: number }): void {
     this.guardianActivity.advisoriesRendered += delta.rendered
     this.guardianActivity.advisoriesDropped += delta.dropped
+    this.guardianActivity.advisoriesHeldOut += delta.heldOut ?? 0
   }
   /** P1a：核销判定后同步会话累计采纳/忽略（来自 AdvisoryReadback.getTotals）。 */
   recordAdvisoryOutcomes(totals: { adopted: number; ignored: number }): void {
@@ -506,6 +509,11 @@ export class AgentLoop {
       )
     } catch { /* 先验加载失败不致命——回退冷启动 */ }
     this.advisoryBus.setAdoptionRateProvider(key => this.advisoryReadback.getAdoptionRate(key))
+    // Lift 消费端：成熟 lift（会话 + 先验,过成熟度门）驱动负 lift 静音与
+    // Top-N 排序升级。RIVET_ADVISORY_LIFT_CONSUMER=0 关（不注入 = 全回退旧行为）。
+    if (process.env.RIVET_ADVISORY_LIFT_CONSUMER !== '0') {
+      this.advisoryBus.setLiftProvider(key => this.advisoryReadback.getMatureLift(key))
+    }
     // Phase 2 阶段抑制：产出流 = 近期编辑+验证交替且无失败（navigator 沉默规则）。
     // 只影响 encouragement/typecheck/informational 白名单——守护类不受抑制。
     this.advisoryBus.setFlowStateProvider(() => {

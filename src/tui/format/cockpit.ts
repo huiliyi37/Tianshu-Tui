@@ -96,6 +96,31 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
     }
   }
 
+  if (show('advisory') && (panel === 'advisory' || snapshot.advisory.rendered > 0 || snapshot.advisory.silenced.length > 0)) {
+    body.push('')
+    const adv = snapshot.advisory
+    body.push(` ${statusGlyph(snapshot.panelStatuses.advisory, theme)} ${color('Advisory', theme.primary, { bold: true })}  rendered:${adv.rendered} dropped:${adv.dropped} adopted:${adv.adopted} ignored:${adv.ignored} heldOut:${adv.heldOut}${adv.pendingWatch > 0 ? `  pending:${adv.pendingWatch}` : ''}`)
+    if (adv.silenced.length > 0) {
+      const parts = adv.silenced.slice(0, 4).map(s => `${s.key}(${s.reason === 'lift' ? 'lift' : 'hab'}:${s.remaining})`)
+      body.push(`    ${color(`⊘ 静音 ${parts.join(' ')}`, theme.warning)}`)
+    }
+    // 聚焦视图才展开 per-key 效能与 status 通道（summary 只给一行概览）
+    if (panel === 'advisory') {
+      for (const k of adv.keys) {
+        const rate = k.adoptionRate !== null ? `${Math.round(k.adoptionRate * 100)}%` : '—'
+        const lift = k.lift !== null ? (k.lift >= 0 ? `+${k.lift.toFixed(2)}` : k.lift.toFixed(2)) : '—'
+        const streak = k.ignoredStreak > 0 ? color(` streak:${k.ignoredStreak}`, theme.warning) : ''
+        body.push(`    ${k.key}  ${k.delivered}投 ${k.adopted}纳 ${k.ignored}忽  采纳:${rate} lift:${lift}${streak}`)
+      }
+      if (adv.statusNotices.length > 0) {
+        body.push(`    ${color('status 通道:', theme.muted)}`)
+        for (const notice of adv.statusNotices.slice(-5)) {
+          body.push(`      ${color(notice.length > w - 8 ? notice.slice(0, w - 9) + '…' : notice, theme.dim)}`)
+        }
+      }
+    }
+  }
+
   if (show('trace') && snapshot.trace.events.length > 0) {
     body.push('')
     body.push(` ${statusGlyph(snapshot.panelStatuses.trace, theme)} ${color('Trace', theme.primary, { bold: true })}  ${snapshot.trace.totalEvents} events`)

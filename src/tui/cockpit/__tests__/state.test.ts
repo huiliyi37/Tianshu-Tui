@@ -14,6 +14,7 @@ function makeAgent(overrides: Partial<AgentLoop> = {}): AgentLoop {
     getDoomLoopLevel: () => 'none' as const,
     getLatestRisk: () => ({ level: 'none' as const, reasons: [], suggestedAction: '' }),
     getContextLayerReport: () => ({ layers: [] }),
+    getSessionDomain: () => null,
     ...overrides,
   } as unknown as AgentLoop
 }
@@ -117,6 +118,64 @@ describe('buildCockpitSnapshot', () => {
     assert.equal(snap.mcp.connectedServers, 1)
     assert.equal(snap.mcp.totalTools, 1)
     assert.equal(snap.panelStatuses.mcp, 'error')
+  })
+
+  it('advisory 面板:从 guardianActivity/readback/bus 组装,静音 key 触发 warn', () => {
+    const stats = new Map([
+      ['adv-a', { delivered: 5, adopted: 3, ignored: 2, ignoredStreak: 1, shadowHeld: 2, shadowSatisfied: 1 }],
+      ['adv-cold', { delivered: 0, adopted: 0, ignored: 0, ignoredStreak: 0, shadowHeld: 0, shadowSatisfied: 0 }],
+    ])
+    const snap = buildCockpitSnapshot({
+      agent: makeAgent({
+        guardianActivity: {
+          ccr: 0, shifts: {},
+          advisoriesRendered: 7, advisoriesDropped: 2,
+          advisoriesAdopted: 3, advisoriesIgnored: 2, advisoriesHeldOut: 1,
+        },
+        advisoryReadback: {
+          getStats: () => stats,
+          getAdoptionRate: () => 0.6,
+          getMatureLift: () => 0.2,
+        },
+        advisoryBus: {
+          getSilencedKeys: () => [{ key: 'noisy', remaining: 3, reason: 'lift' as const }],
+          getPendingWatchCount: () => 2,
+        },
+      } as unknown as Partial<AgentLoop>),
+      session: makeSession(),
+      model: 'test',
+      cacheHitRate: 0,
+      cost: 0,
+      mcpManager: null,
+      advisoryStatusNotices: ['status 通道条目 1'],
+    })
+
+    assert.equal(snap.advisory.rendered, 7)
+    assert.equal(snap.advisory.heldOut, 1)
+    assert.equal(snap.advisory.pendingWatch, 2)
+    assert.equal(snap.advisory.silenced.length, 1)
+    assert.equal(snap.advisory.silenced[0]!.reason, 'lift')
+    // delivered=0 且无 shadow 的冷 key 不进 Top 行
+    assert.equal(snap.advisory.keys.length, 1)
+    assert.equal(snap.advisory.keys[0]!.key, 'adv-a')
+    assert.equal(snap.advisory.keys[0]!.adoptionRate, 0.6)
+    assert.equal(snap.advisory.keys[0]!.lift, 0.2)
+    assert.deepEqual(snap.advisory.statusNotices, ['status 通道条目 1'])
+    assert.equal(snap.panelStatuses.advisory, 'warn')
+  })
+
+  it('advisory 面板:agent 未接 advisory 组件时降级为零值(ok)', () => {
+    const snap = buildCockpitSnapshot({
+      agent: makeAgent(),
+      session: makeSession(),
+      model: 'test',
+      cacheHitRate: 0,
+      cost: 0,
+      mcpManager: null,
+    })
+    assert.equal(snap.advisory.rendered, 0)
+    assert.deepEqual(snap.advisory.keys, [])
+    assert.equal(snap.panelStatuses.advisory, 'ok')
   })
 
   it('snapshot exposes blocking reason and next action for unverified modified files', () => {

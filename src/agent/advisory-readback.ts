@@ -93,6 +93,11 @@ export interface EfficacyPriorCounts {
 /** 先验对副驾闸门决出样本的贡献上限——防陈旧数据永久锁定闸门方向 */
 export const PRIOR_DECIDED_CAP = 20
 
+/** 成熟 lift 的最小决出样本数（会话 + 先验合并后） */
+export const MATURE_LIFT_MIN_DECIDED = 5
+/** 成熟 lift 的最小 shadow 扣留样本数（会话 + 先验合并后） */
+export const MATURE_LIFT_MIN_SHADOW = 3
+
 export class AdvisoryReadback {
   private pending: PendingExpectation[] = []
   private events: ObservedToolEvent[] = []
@@ -250,6 +255,24 @@ export class AdvisoryReadback {
     const decided = s.adopted + s.ignored
     if (decided === 0 || s.shadowHeld === 0) return null
     return s.adopted / decided - s.shadowSatisfied / s.shadowHeld
+  }
+
+  /**
+   * 成熟 lift — 会话实测 + 跨会话先验合并计算,过成熟度门才下结论。
+   * 会话内 holdout 积累极慢(单会话通常 0-2 个 shadow 样本),先验是冷启动的
+   * 主数据源;EWMA 衰减保证陈旧历史权重递减。样本不足返回 null——
+   * 消费端(负 lift 静音/排序升级)对 null 必须视为中性,不得下静音结论。
+   */
+  getMatureLift(key: string): number | null {
+    const s = this.stats.get(key)
+    const p = this.priors.get(key)
+    const adopted = (s?.adopted ?? 0) + (p?.adopted ?? 0)
+    const ignored = (s?.ignored ?? 0) + (p?.ignored ?? 0)
+    const shadowHeld = (s?.shadowHeld ?? 0) + (p?.shadowHeld ?? 0)
+    const shadowSatisfied = (s?.shadowSatisfied ?? 0) + (p?.shadowSatisfied ?? 0)
+    const decided = adopted + ignored
+    if (decided < MATURE_LIFT_MIN_DECIDED || shadowHeld < MATURE_LIFT_MIN_SHADOW) return null
+    return adopted / decided - shadowSatisfied / shadowHeld
   }
 
   /**

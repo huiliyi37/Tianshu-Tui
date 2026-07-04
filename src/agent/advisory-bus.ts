@@ -219,6 +219,8 @@ export interface AdvisoryLedgerDelta {
   dropped: number
   /** 被丢弃条目的 key（去重后，最多保留最近 50 个） */
   droppedKeys: string[]
+  /** 负 lift 静音丢弃数（"没提醒也会做"的纯噪音 key,已计入 dropped） */
+  liftMuted: number
   /** Phase 2:进入挂起观察 / 被阶段抑制推迟的条目数（挂起 ≠ 丢弃） */
   deferred: number
   /** Phase 2:挂起期内自愈撤销的条目数（模型自发做了该做的事,提醒作废） */
@@ -243,6 +245,11 @@ export const HABITUATION_ESCALATE_STREAK = 2
 export const HABITUATION_SILENCE_STREAK = 3
 /** 每次静音持续的渲染周期数 */
 export const HABITUATION_SILENCE_RENDERS = 4
+
+/** 负 lift 静音的渲染周期数（期满 probation 放行一次收集新证据） */
+export const LIFT_MUTE_RENDERS = 10
+/** lift ≤ 此阈值判定为"提醒无真实增益"（成熟样本前提下） */
+export const LIFT_MUTE_THRESHOLD = 0
 
 /** 习惯化查询接口 — 由 AdvisoryReadback 实现（结构化鸭子类型，便于测试） */
 export interface HabituationPolicy {
@@ -324,6 +331,14 @@ export class AdvisoryBus {
   /** Top-N 同 priority 次级排序键 — 历史采纳率（跨会话先验 + 会话实测,B）。
    *  null = 无数据,视为中性(排两者之后不如有正数据的,先于有负数据的)。 */
   private adoptionRateProvider: ((key: string) => number | null) | null = null
+  // ── Lift 消费端（因果账本闭环,2026-07-04 第四轮）──
+  /** 成熟 lift 查询 — null = 样本不足不下结论。 */
+  private liftProvider: ((key: string) => number | null) | null = null
+  /** key → 负 lift 静音的剩余渲染周期数（与习惯化 silenceRemaining 独立,遥测可区分） */
+  private liftMuteRemaining = new Map<string, number>()
+  /** 静音期满后的 probation 名单 — 放行一次送达以收集新证据,之后 lift 仍 ≤0 才再静音 */
+  private liftProbation = new Set<string>()
+  private ledgerLiftMuted = 0
 
   /** P1b：注入习惯化查询源（AdvisoryReadback）。缺省 = 不做习惯化对抗。 */
   setHabituationPolicy(policy: HabituationPolicy): void {
@@ -355,6 +370,25 @@ export class AdvisoryBus {
     this.adoptionRateProvider = provider
   }
 
+  /** Lift 消费端：注入成熟 lift 查询（AdvisoryReadback.getMatureLift）。
+   *  缺省 = 不消费 lift（不静音,排序回退采纳率）。 */
+  setLiftProvider(provider: (key: string) => number | null): void {
+    this.liftProvider = provider
+  }
+
+  /** 静音中的 key（习惯化 + 负 lift）— cockpit advisory 面板观测口。 */
+  getSilencedKeys(): Array<{ key: string; remaining: number; reason: 'habituation' | 'lift' }> {
+    return [
+      ...[...this.silenceRemaining].map(([key, remaining]) => ({ key, remaining, reason: 'habituation' as const })),
+      ...[...this.liftMuteRemaining].map(([key, remaining]) => ({ key, remaining, reason: 'lift' as const })),
+    ]
+  }
+
+  /** 挂起观察中的条目数 — cockpit advisory 面板观测口。 */
+  getPendingWatchCount(): number {
+    return this.pendingWatch.length
+  }
+
   /** Phase 2：取走 system-reminder 通道的待送内容（调用方负责 appendSystemReminder）。 */
   drainSystemReminders(): string[] {
     const out = this.systemReminderOut
@@ -384,6 +418,7 @@ export class AdvisoryBus {
       deferred: this.ledgerDeferred,
       revoked: this.ledgerRevoked,
       heldOut: this.ledgerHeldOut,
+      liftMuted: this.ledgerLiftMuted,
     }
     this.ledgerSubmitted = 0
     this.ledgerRendered = 0
@@ -392,6 +427,7 @@ export class AdvisoryBus {
     this.ledgerDeferred = 0
     this.ledgerRevoked = 0
     this.ledgerHeldOut = 0
+    this.ledgerLiftMuted = 0
     return delta
   }
 
@@ -526,6 +562,49 @@ export class AdvisoryBus {
       all = kept
     }
 
+    // ── Lift 消费端:负 lift 自动静音（"没提醒也会做"= 纯噪音）──
+    // 成熟 lift ≤ 0 → 静音 LIFT_MUTE_RENDERS 周期;期满 probation 放行一次
+    // 收集新证据,之后 lift 仍 ≤0 才再静音（避免数据不更新导致永久静音）。
+    // 豁免与 holdout 资格同源:constitutional / immediate / star_domain 永不静音。
+    if (this.liftProvider) {
+      for (const [k, v] of this.liftMuteRemaining) {
+        if (v <= 1) {
+          this.liftMuteRemaining.delete(k)
+          this.liftProbation.add(k) // 期满 → 下次出现放行一次
+        } else {
+          this.liftMuteRemaining.set(k, v - 1)
+        }
+      }
+      const droppedByLift = new Set<string>()
+      const kept: AdvisoryEntry[] = []
+      for (const e of all) {
+        const exempt = e.tier === 'constitutional' || e.immediate === true || e.category === 'star_domain'
+        if (exempt) {
+          kept.push(e)
+          continue
+        }
+        if (this.liftMuteRemaining.has(e.key)) {
+          droppedByLift.add(e.key)
+          continue
+        }
+        if (this.liftProbation.has(e.key)) {
+          this.liftProbation.delete(e.key) // probation 送达,消费一次
+          kept.push(e)
+          continue
+        }
+        const lift = this.liftProvider(e.key)
+        if (lift !== null && lift <= LIFT_MUTE_THRESHOLD) {
+          this.liftMuteRemaining.set(e.key, LIFT_MUTE_RENDERS)
+          droppedByLift.add(e.key)
+          continue
+        }
+        kept.push(e)
+      }
+      this.ledgerLiftMuted += droppedByLift.size
+      this.recordDropped(droppedByLift)
+      all = kept
+    }
+
     // Star-domain dedup — static entries only; situational star_domain exempt
     if (activeStarDomain) {
       const tag = `【${activeStarDomain}】`
@@ -603,14 +682,18 @@ export class AdvisoryBus {
       }
     }
 
-    // 竞争排序:priority 主键;同 priority 时历史采纳率(先验+实测)作次级键——
-    // 实测有效的提醒优先占预算。无数据(null)视为中性 0.5。
+    // 竞争排序:priority 主键;同 priority 时因果口径优先——成熟 lift 可用时
+    // 用 lift（归一到 [0,1],0 lift = 中性 0.5,与采纳率同刻度）,否则回退
+    // 历史采纳率(先验+实测)。实测有真实增益的提醒优先占预算。
+    const secondaryScore = (key: string): number => {
+      const lift = this.liftProvider?.(key)
+      if (lift !== undefined && lift !== null) return (lift + 1) / 2
+      return this.adoptionRateProvider?.(key) ?? 0.5
+    }
     const compareEntries = (a: AdvisoryEntry, b: AdvisoryEntry): number => {
       if (b.priority !== a.priority) return b.priority - a.priority
-      if (!this.adoptionRateProvider) return 0
-      const ra = this.adoptionRateProvider(a.key) ?? 0.5
-      const rb = this.adoptionRateProvider(b.key) ?? 0.5
-      return rb - ra
+      if (!this.adoptionRateProvider && !this.liftProvider) return 0
+      return secondaryScore(b.key) - secondaryScore(a.key)
     }
 
     const catCounts = new Map<AdvisoryCategory, number>()
@@ -723,6 +806,9 @@ export class AdvisoryBus {
     this.suppressedCarry = []
     this.systemReminderOut = []
     this.ledgerHeldOut = 0
+    this.liftMuteRemaining.clear()
+    this.liftProbation.clear()
+    this.ledgerLiftMuted = 0
   }
 }
 
