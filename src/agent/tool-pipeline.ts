@@ -260,6 +260,9 @@ export interface ToolPipelineDeps {
   artifactIdsAccessed?: string[]
   /** Optional LSP manager — notified on file changes for goto-def / find-refs accuracy */
   lspManager?: LspManager
+  /** 破坏性命令 pre-execution 闸门(会话级状态,loop 持有)。pipeline 是唯一
+   *  写者(noteVerification/noteToolExecuted)兼唯一读者(evaluate)。 */
+  destructiveGate?: import('../tools/destructive-gate.js').DestructiveGateState
   /** T4: late-bound LSP manager getter. Checked first, falls back to `lspManager`.
    *  Enables T9 path where LSP initializes asynchronously after AgentLoop construction. */
   getLspManager?: () => LspManager | null
@@ -596,6 +599,28 @@ export async function executeToolUse(
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: decision.message!, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
    }
+
+    // Destructive gate: 验证失败后 ≤3 个工具调用内的 git 清场命令当轮拦截
+    // (首次拦截、原样重发放行)。TDD gate 之后、PreToolUse hook 之前。
+    if (deps.destructiveGate && tu.name === 'bash') {
+      const gateDecision = deps.destructiveGate.evaluate(tu.name, tu.input as Record<string, unknown>)
+      if (gateDecision.block) {
+        const blockedAt = Date.now()
+        traceStore = recordTraceEvent(traceStore, {
+          id: `${tu.id}:destructive-gate`,
+          turn,
+          kind: 'tool',
+          name: 'destructive-gate:block',
+          status: 'failed',
+          startedAt: blockedAt,
+          endedAt: blockedAt,
+          durationMs: 0,
+          summary: String((tu.input as Record<string, unknown>).command ?? '').slice(0, 200),
+        })
+        callbacks.onToolResult(tu.id, tu.name, gateDecision.message, true)
+        return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: gateDecision.message, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+      }
+    }
 
     const shouldSampleToolInput = toolInputTraceDebugEnabled() || tu.name === 'grep'
     const beforeHookKeys = shouldSampleToolInput ? sortedInputKeys(tu.input) : undefined
@@ -1191,6 +1216,10 @@ export async function executeToolUse(
 
     deps.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content, rawToolResult?.errorClass)
 
+    // Destructive gate 窗口计数:只数实际执行到这里的工具(被拦截的调用在
+    // evaluate 处已短路返回,不计数,窗口保持)。
+    deps.destructiveGate?.noteToolExecuted()
+
     // B1 归属星轨：record tool events into TaskLedger
     if (deps.taskLedger) {
       let filePath = (tu.input.file_path ?? tu.input.path) as string | undefined
@@ -1239,6 +1268,7 @@ export async function executeToolUse(
             scope: 'full',
             exitCode: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0,
           })
+          deps.destructiveGate?.noteVerification(testStatus === 'passed' ? 'passed' : 'failed')
        } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
        }
@@ -1434,6 +1464,7 @@ export async function executeToolUse(
       // buildDeliveryGate.canClaimComplete always false.
       if (rawToolResult.verification) {
         deps.evidence.trackVerification(rawToolResult.verification)
+        deps.destructiveGate?.noteVerification(rawToolResult.verification.status)
      }
 
       if (rawToolResult.verification && rawToolResult.verification.status !== 'passed') {

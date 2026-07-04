@@ -88,6 +88,8 @@ export interface DeliveredAdvisory {
   category: AdvisoryCategory
   tier?: AdvisoryTier
   expect?: AdvisoryExpectation
+  /** holdout 反事实组:该条赢得渲染位但被静默扣留（未渲染）,readback 核销进 shadow 桶 */
+  shadow?: boolean
 }
 
 export type AdvisoryCategory =
@@ -221,6 +223,8 @@ export interface AdvisoryLedgerDelta {
   deferred: number
   /** Phase 2:挂起期内自愈撤销的条目数（模型自发做了该做的事,提醒作废） */
   revoked: number
+  /** holdout:赢得渲染位但被反事实扣留的条目数 */
+  heldOut: number
 }
 
 const LEDGER_DROPPED_KEYS_CAP = 50
@@ -243,6 +247,35 @@ export const HABITUATION_SILENCE_RENDERS = 4
 /** 习惯化查询接口 — 由 AdvisoryReadback 实现（结构化鸭子类型，便于测试） */
 export interface HabituationPolicy {
   getIgnoredStreak(key: string): number
+}
+
+// ─── Holdout 反事实抽样（因果账本,2026-07-04 天枢复核版）────────────
+// 采纳率度量的是相关性——"送达后 2 轮内出现验证"可能是模型本来就要做。
+// 按小概率把赢得渲染位的条目静默扣留（不渲染,照常核销 expect）,对比
+// 投递组采纳率 vs 扣留组自发完成率 → 每 key 的真实 lift。
+// 本轮只度量不自动退役;lift 数据积累后再做规则退役。
+
+/** holdout 缺省抽样率。可用 RIVET_ADVISORY_HOLDOUT 环境变量覆盖（0 关闭）。 */
+export const DEFAULT_HOLDOUT_RATE = 0.1
+/** key 历史送达 ≥N 次才开始抽样——冷 key 先积累投递组基数 */
+export const HOLDOUT_MIN_DELIVERED = 3
+
+/** RIVET_ADVISORY_HOLDOUT 解析:合法 [0,1] 数字生效,'0' 关闭,非法/缺省用默认率 */
+export function parseHoldoutRate(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return DEFAULT_HOLDOUT_RATE
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0 || n > 1) return DEFAULT_HOLDOUT_RATE
+  return n
+}
+
+/** holdout 策略 — 资格历史判定由调用方注入（AdvisoryReadback / 效能信息素先验） */
+export interface HoldoutPolicy {
+  /** 抽样率 [0,1],0 = 关闭 */
+  rate: number
+  /** key 级资格（如历史送达 ≥ HOLDOUT_MIN_DELIVERED） */
+  isEligible(key: string): boolean
+  /** 可注入 RNG（测试确定性）,缺省 Math.random */
+  rng?: () => number
 }
 
 // ─── Phase 2 打断调度常量 ─────────────────────────────────────────
@@ -285,6 +318,12 @@ export class AdvisoryBus {
   private statusSink: ((entries: AdvisoryEntry[]) => void) | null = null
   /** system-reminder 通道待送内容（drainSystemReminders 取走） */
   private systemReminderOut: string[] = []
+  // ── Holdout 反事实抽样 ──
+  private holdout: HoldoutPolicy | null = null
+  private ledgerHeldOut = 0
+  /** Top-N 同 priority 次级排序键 — 历史采纳率（跨会话先验 + 会话实测,B）。
+   *  null = 无数据,视为中性(排两者之后不如有正数据的,先于有负数据的)。 */
+  private adoptionRateProvider: ((key: string) => number | null) | null = null
 
   /** P1b：注入习惯化查询源（AdvisoryReadback）。缺省 = 不做习惯化对抗。 */
   setHabituationPolicy(policy: HabituationPolicy): void {
@@ -304,6 +343,16 @@ export class AdvisoryBus {
   /** Phase 2：注入 TUI 状态区 sink。设置后 channel='status' 条目改走此通道。 */
   setStatusSink(sink: (entries: AdvisoryEntry[]) => void): void {
     this.statusSink = sink
+  }
+
+  /** Holdout：注入反事实抽样策略。缺省 = 不抽样（全量投递）。 */
+  setHoldoutPolicy(policy: HoldoutPolicy): void {
+    this.holdout = policy
+  }
+
+  /** B：注入历史采纳率查询 — Top-N 预算竞争同 priority 时的次级排序键。 */
+  setAdoptionRateProvider(provider: (key: string) => number | null): void {
+    this.adoptionRateProvider = provider
   }
 
   /** Phase 2：取走 system-reminder 通道的待送内容（调用方负责 appendSystemReminder）。 */
@@ -334,6 +383,7 @@ export class AdvisoryBus {
       droppedKeys: [...new Set(this.ledgerDroppedKeys)],
       deferred: this.ledgerDeferred,
       revoked: this.ledgerRevoked,
+      heldOut: this.ledgerHeldOut,
     }
     this.ledgerSubmitted = 0
     this.ledgerRendered = 0
@@ -341,6 +391,7 @@ export class AdvisoryBus {
     this.ledgerDroppedKeys = []
     this.ledgerDeferred = 0
     this.ledgerRevoked = 0
+    this.ledgerHeldOut = 0
     return delta
   }
 
@@ -552,9 +603,19 @@ export class AdvisoryBus {
       }
     }
 
+    // 竞争排序:priority 主键;同 priority 时历史采纳率(先验+实测)作次级键——
+    // 实测有效的提醒优先占预算。无数据(null)视为中性 0.5。
+    const compareEntries = (a: AdvisoryEntry, b: AdvisoryEntry): number => {
+      if (b.priority !== a.priority) return b.priority - a.priority
+      if (!this.adoptionRateProvider) return 0
+      const ra = this.adoptionRateProvider(a.key) ?? 0.5
+      const rb = this.adoptionRateProvider(b.key) ?? 0.5
+      return rb - ra
+    }
+
     const catCounts = new Map<AdvisoryCategory, number>()
     const catFiltered: AdvisoryEntry[] = []
-    for (const entry of [...deduped.values()].sort((a, b) => b.priority - a.priority)) {
+    for (const entry of [...deduped.values()].sort(compareEntries)) {
       const count = catCounts.get(entry.category) ?? 0
       if (count < MAX_PER_CATEGORY) {
         catCounts.set(entry.category, count + 1)
@@ -575,15 +636,39 @@ export class AdvisoryBus {
       taken.push(e)
     }
 
+    // ── Holdout 反事实抽样:赢得渲染位的条目按小概率静默扣留（不渲染,照常
+    // 核销 expect → shadow 桶）。资格白名单与习惯化静音豁免同构:
+    // constitutional / immediate / star_domain 永不扣留;必须带 expect 谓词
+    // （无谓词无法核销,扣留没有度量意义）;key 级历史资格由注入方判定。
+    const heldOut: AdvisoryEntry[] = []
+    if (this.holdout && this.holdout.rate > 0) {
+      const rng = this.holdout.rng ?? Math.random
+      for (let i = taken.length - 1; i >= 0; i--) {
+        const e = taken[i]!
+        const eligible = !e.immediate
+          && e.tier !== 'constitutional'
+          && e.category !== 'star_domain'
+          && e.expect !== undefined
+          && this.holdout.isEligible(e.key)
+        if (eligible && rng() < this.holdout.rate) {
+          heldOut.push(e)
+          taken.splice(i, 1)
+        }
+      }
+    }
+
     // Combine: constitutional always first, then by priority
     const sorted: AdvisoryEntry[] = [...constDeduped.values()]
-    taken.sort((a, b) => b.priority - a.priority)
+    taken.sort(compareEntries)
     sorted.push(...taken)
 
-    // 账本：本轮参与竞争但没拿到渲染位的条目（类别上限 / Top-N 截断）
+    // 账本：本轮参与竞争但没拿到渲染位的条目（类别上限 / Top-N 截断）。
+    // holdout 扣留 ≠ 丢弃（单独计 heldOut,且照常进 delivered 核销）。
     const renderedKeys = new Set(sorted.map(e => e.key))
-    this.recordDropped([...deduped.keys()].filter(k => !renderedKeys.has(k)))
+    const heldKeys = new Set(heldOut.map(e => e.key))
+    this.recordDropped([...deduped.keys()].filter(k => !renderedKeys.has(k) && !heldKeys.has(k)))
     this.ledgerRendered += sorted.length
+    this.ledgerHeldOut += heldOut.length
 
     // P1a 核销闭环：记录实际送达的条目（含 expect 谓词），供 readback 追踪
     this.delivered.push(...sorted.map(e => ({
@@ -591,6 +676,14 @@ export class AdvisoryBus {
       category: e.category,
       tier: e.tier,
       expect: e.expect,
+    })))
+    // holdout 反事实组:扣留但照常核销（shadow 桶,自发完成率基线）
+    this.delivered.push(...heldOut.map(e => ({
+      key: e.key,
+      category: e.category,
+      tier: e.tier,
+      expect: e.expect,
+      shadow: true,
     })))
 
     if (sorted.length === 0) {
@@ -629,6 +722,7 @@ export class AdvisoryBus {
     this.pendingWatch = []
     this.suppressedCarry = []
     this.systemReminderOut = []
+    this.ledgerHeldOut = 0
   }
 }
 

@@ -21,6 +21,7 @@
 
 import type { PostToolRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
+import { GIT_CLEAR_RE } from '../../tools/destructive-patterns.js'
 
 export interface GitClearAfterFailHookDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
@@ -44,22 +45,8 @@ const WINDOW_SIZE = 3
  */
 const TEST_CMD_RE = /\b(test|vitest|jest|pytest|mocha|tsx\s+--test|npm\s+(run\s+)?(test|typecheck))\b/i
 
-/**
- * git 清场命令正则——匹配不可逆的 git 清理操作。
- * 来源：AGENTS.md 高危命令纪律 + `<security>` 覆盖范围段
- *
- * 匹配的真实命令样本（禁止的行为）：
- *   `git stash`（非 pop/list/show/apply/drop） → src/agent/hooks/git-clear-after-fail-hook.ts 本文件
- *   `git reset --hard` → prompt security 段
- *   `git checkout -- .` → prompt security 段
- *   `git restore .` → prompt security 段
- *   `git clean -fd` → prompt security 段
- *
- * 排除（只读/恢复类）：
- *   `git stash list` / `git stash pop` / `git stash show` / `git stash apply`
- *   `git diff` / `git status` / `git log`
- */
-const GIT_CLEAR_RE = /(?:^|\s)(?:git\s+(?:stash(?!\s+(?:pop|list|show|apply|drop|branch))|reset\s+(?:--hard|--mixed)|checkout\s+--|restore\s+\S|clean\s+-[a-z]*f)|git\s+stash\s*$)/
+// GIT_CLEAR_RE 迁至 src/tools/destructive-patterns.ts(单一事实来源)——
+// pre-execution gate(destructive-gate.ts)与本 hook 判据同源、状态独立。
 
 /** 核验类工具——read/grep/find 等根因定位动作 */
 const VERIFY_TOOLS = new Set([

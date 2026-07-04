@@ -359,6 +359,11 @@ export class TurnStepProducer {
     this.self.recordAdvisoryLedger(advisoryLedger)
     this.self.flushGuardianMeta()
 
+    // B 跨会话效能信息素:每 20 轮增量写回(崩溃不丢账;postSession 兜底全量)
+    if (turn > 0 && turn % 20 === 0) {
+      this.self.flushAdvisoryEfficacy()
+    }
+
     this.self.refreshReliabilityDecision()
 
     _tb = Date.now()

@@ -478,9 +478,12 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // 可行性双闸门为运行时数据判定（全局采纳率 >30% 才激活）,自我淘汰降频。
   // Gated by RIVET_ASYNC_COPILOT (default on; set to '0' to disable).
   if (deps.advisoryBus && deps.advisoryReadback && deps.asyncCopilot && process.env.RIVET_ASYNC_COPILOT !== '0') {
+    const rb = deps.advisoryReadback
     hooks.push(createAsyncCopilotHook({
       advisoryBus: deps.advisoryBus,
-      readback: deps.advisoryReadback,
+      // 闸门 totals 含跨会话先验(贡献上限 20)——消灭"决出样本 ≥10"的每会话
+      // 冷启动沉睡;自我淘汰的 per-key stats 保持会话实测。
+      readback: { getTotals: () => rb.getTotalsWithPriors(), getStats: () => rb.getStats() },
       getContext: deps.asyncCopilot.getContext,
       complete: deps.asyncCopilot.complete,
       writeTelemetry: deps.telemetryWriter ? (r) => deps.telemetryWriter!.write(r) : undefined,

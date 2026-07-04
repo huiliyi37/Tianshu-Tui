@@ -176,12 +176,76 @@ c54e1d46 三闸（冷却/去重/用户介入重置）与反刷屏用例全绿保
 session meta `guardianActivity`：ccr/shifts/advisoriesRendered/Dropped/
 **Adopted/Ignored**。排查"守护被静音"或"提醒无效"时先看这里。
 
+## 因果账本演进（2026-07-04 第二轮,天枢复核版）
+
+三阶段落地当天的第二轮演进:采纳率账本升级为因果账本 + 跨会话记忆 +
+破坏性命令当轮拦截。计划审查中天枢提出的耦合修正与标注已全部吸收。
+
+### D. 破坏性命令 pre-execution gate
+
+补 git-clear-after-fail hook 的时机缺口（postTool 事后检测,advisory 发出时
+清场命令已执行完）。
+
+- `src/tools/destructive-patterns.ts`:`GIT_CLEAR_RE` 单一事实来源
+  （hook 反向导入——不让 tool-pipeline 依赖 hook 文件,天枢修正②）。
+- `src/tools/destructive-gate.ts`:`createDestructiveGateState()`,与
+  path-validate/TDD gate 同层（天枢修正④）。
+- **耦合解法（比"hook 写 gate 读"更收敛）**:tool-pipeline 本身就是失败
+  检测第一现场（bash 测试命令与 run_tests 两处 `trackVerification` 调用点）,
+  pipeline 做唯一写者（`noteVerification`/`noteToolExecuted`）兼唯一读者
+  （`evaluate`,TDD gate 之后、PreToolUse 之前）——全同步、零跨模块隐式
+  耦合。hook 自己的 failWindow 保留管教育性 advisory,判据同源、状态独立。
+- 语义:失败后 ≤3 个实际执行的工具调用内命中清场命令 → **首次拦截**
+  （is_error tool_result,含根因指引）;同一命令原样重发 = 显式坚持 → 放行。
+  验证通过关窗;被拦截的调用不计窗口数。trace 事件 `destructive-gate:block`。
+
+### A. 反事实抽样（holdout lift）
+
+采纳率是相关性——"送达后 2 轮内出现验证"可能是模型本来就要做。
+
+- `AdvisoryBus.render()` 投递决策点:赢得渲染位的条目按
+  `RIVET_ADVISORY_HOLDOUT` 率（默认 0.1,0 关闭,天枢修正:可配）静默扣留
+  ——不渲染,照常进 readback 核销（`shadow` 标记）。
+- 资格白名单:constitutional / immediate / star_domain 永不扣留;必须带
+  `expect`;key 历史送达 ≥3（含先验）。RNG 可注入。
+- `AdvisoryReadback` shadow 桶完全隔离:`shadowHeld`/`shadowSatisfied`
+  不进 adopted/ignored/streak/getTotals（不污染副驾闸门与习惯化）;
+  shadow 状态翻转（扣留期内又真实送达,或反向）作废该次 trial。
+- `getLift(key)` = 投递组采纳率 − 扣留组自发完成率;任一组无样本返回 null。
+  本轮只度量不自动退役。遥测:shadow 判定 kind `advisory-holdout`,
+  账本增 `heldOut`（扣留 ≠ 丢弃）。
+- **未来消费方（天枢标注,本轮不实施）**:claim-staleness self-check 检出
+  "断言频繁过期"的场景,可用 holdout 度量"回读源文件"类 advisory 的真实
+  lift——正 lift 说明提醒有效,零/负 lift 说明模型根本没听。
+
+### B. 跨会话效能信息素
+
+- `src/context/advisory-efficacy-store.ts`(照 project-memory-writer 的
+  原子写+锁),落 `<cwd>/.rivet/knowledge/advisory-efficacy.jsonl`,
+  加载时 EWMA 衰减（半衰期 14 天）,衰减殆尽的 key 剔除,上限 200 key。
+- 写回:每 20 轮 + postSession,**增量差分**（`lastEfficacyFlush` 快照,
+  重复调用安全）。
+- 先验只喂三个消费方:
+  1. 副驾闸门 `getTotalsWithPriors()`——决出贡献上限 20 按比例缩放保采纳率
+     （陈旧历史只能开门,不能压制会话内新证据),消灭每会话 ≥10 决出的冷启动;
+     guardian meta 走 `getTotals()` 保持会话纯度;
+  2. holdout 资格 `getDeliveredCount()` 含先验,新会话即可抽样;
+  3. Top-N 预算竞争同 priority 时按 `getAdoptionRate()`（先验+实测合并）
+     次级排序——实测有效的提醒优先占预算。
+- **习惯化保持会话内**:先验不进 ignoredStreak（跨会话行为差异大,预静音
+  有误杀风险）。
+- **已知局限（天枢标注,防误用）**:per-key 聚合抹平会话类型差异——同一
+  advisory 在 bugfix 会话可能有效、重构会话可能无效,EWMA 会混合两者。
+  session 类型聚类留待后续;消费方不应把先验当会话内实测用。
+
 ## 回滚线
 
 - Phase 1 常开（纯观测 + 渲染側习惯化;`reset()` 全量清态）
 - Phase 2 状态机仅对 opt-in（observe/channel/immediate）条目生效——移除字段
   即回旧行为
 - Phase 3 `RIVET_ASYNC_COPILOT=0` 一键关
+- 因果账本:holdout `RIVET_ADVISORY_HOLDOUT=0` 关;gate `destructiveGate`
+  不注入即旁路;信息素文件删除即冷启动（load 失败静默回退）
 
 ## 验证记录（2026-07-04）
 

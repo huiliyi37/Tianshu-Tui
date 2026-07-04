@@ -41,7 +41,7 @@ function makeHarness(over: {
   const submitted: AdvisoryEntry[] = []
   const llmCalls: string[] = []
   const totals = over.totals ?? { adopted: 8, ignored: 4 } // 66% > 30%,decided 12 >= 10
-  const ownStats: AdvisoryKeyStats = { delivered: 0, adopted: 0, ignored: 0, ignoredStreak: 0, ...over.ownStats }
+  const ownStats: AdvisoryKeyStats = { delivered: 0, adopted: 0, ignored: 0, ignoredStreak: 0, shadowHeld: 0, shadowSatisfied: 0, ...over.ownStats }
   const response = over.response === undefined ? 'ADVICE: 先跑基线再归因\nEXPECT: verify_attempted' : over.response
 
   const hook = createAsyncCopilotHook({

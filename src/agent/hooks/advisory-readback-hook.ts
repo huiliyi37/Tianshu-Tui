@@ -61,7 +61,8 @@ export function createAdvisoryReadbackHooks(
       if (decided === 0) return
       const outcomes = deps.readback.drainOutcomes()
       for (const o of outcomes) {
-        deps.writeTelemetry?.({ kind: 'advisory-outcome', ...o })
+        // shadow 判定单独 kind:'advisory-holdout'——反事实基线与投递组账本分开回放
+        deps.writeTelemetry?.({ kind: o.shadow ? 'advisory-holdout' : 'advisory-outcome', ...o })
       }
       deps.onOutcomes?.(deps.readback.getTotals())
     },

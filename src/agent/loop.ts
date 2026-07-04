@@ -66,8 +66,10 @@ import type { RecallMetricsSummary } from '../cache/recall-metrics.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, P3Integration } from './p3-integration.js'
 import { ImmuneHook } from './immune-hook.js'
-import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry } from './advisory-bus.js'
-import { AdvisoryReadback } from './advisory-readback.js'
+import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, HOLDOUT_MIN_DELIVERED, parseHoldoutRate, disciplineReanchorEntry } from './advisory-bus.js'
+import { AdvisoryReadback, type EfficacyPriorCounts } from './advisory-readback.js'
+import { createDestructiveGateState } from '../tools/destructive-gate.js'
+import { AdvisoryEfficacyStore, type EfficacyDelta } from '../context/advisory-efficacy-store.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
 import type { PhysarumShadowStats } from '../repo/physarum-shadow-stats.js'
@@ -120,6 +122,7 @@ export function formatActivePlanPointer(plan: { slug: string; title: string; sel
     : ''
   return `<active-plan slug="${slug}" title="${title}" path=".rivet/plans/${slug}.md">${approach}已批准,正在执行此方案。完整步骤见该文件,需要时用 read_file 查看;开工前先用 todo 列出有序步骤跟踪进度,完成后 plan_close。</active-plan>`
 }
+
 
 
 /** Debounce before an idle compaction pass fires after a turn settles.
@@ -259,6 +262,35 @@ export class AgentLoop {
   recordAdvisoryOutcomes(totals: { adopted: number; ignored: number }): void {
     this.guardianActivity.advisoriesAdopted = totals.adopted
     this.guardianActivity.advisoriesIgnored = totals.ignored
+  }
+
+  /**
+   * B：把会话内效能计数的**增量**合并写回跨会话信息素文件。
+   * 差分基线在 lastEfficacyFlush——每 20 轮 + postSession 各调一次,
+   * 重复调用安全(零增量直接跳过)。失败不致命(信息素是尽力而为)。
+   */
+  flushAdvisoryEfficacy(): void {
+    try {
+      const deltas = new Map<string, EfficacyDelta>()
+      for (const [key, s] of this.advisoryReadback.getStats()) {
+        const base = this.lastEfficacyFlush.get(key)
+        const delta: EfficacyDelta = {
+          delivered: s.delivered - (base?.delivered ?? 0),
+          adopted: s.adopted - (base?.adopted ?? 0),
+          ignored: s.ignored - (base?.ignored ?? 0),
+          shadowHeld: s.shadowHeld - (base?.shadowHeld ?? 0),
+          shadowSatisfied: s.shadowSatisfied - (base?.shadowSatisfied ?? 0),
+        }
+        if (delta.delivered > 0 || delta.adopted > 0 || delta.ignored > 0 || delta.shadowHeld > 0 || delta.shadowSatisfied > 0) {
+          deltas.set(key, delta)
+        }
+        this.lastEfficacyFlush.set(key, {
+          delivered: s.delivered, adopted: s.adopted, ignored: s.ignored,
+          shadowHeld: s.shadowHeld, shadowSatisfied: s.shadowSatisfied,
+        })
+      }
+      if (deltas.size > 0) this.advisoryEfficacyStore.mergeAndSave(deltas)
+    } catch { /* 尽力而为——写回失败不影响会话 */ }
   }
   /** 把 guardian 活动摘要写进 session meta（仅在计数变化时写，原子写、失败不致命）。 */
   flushGuardianMeta(): void {
@@ -415,6 +447,13 @@ export class AgentLoop {
   advisoryBus = new AdvisoryBus()
   /** P1a 核销闭环：advisory 送达后按 expect 谓词核销 adopted/ignored */
   advisoryReadback = new AdvisoryReadback()
+  /** 破坏性命令 pre-execution 闸门(验证失败后 git 清场当轮拦截,首拦重放行)。
+   *  tool-pipeline 是唯一写者兼读者,loop 只持有生命周期。 */
+  destructiveGate = createDestructiveGateState()
+  /** B 跨会话效能信息素 store（构造器内初始化） */
+  advisoryEfficacyStore!: AdvisoryEfficacyStore
+  /** 上次效能 flush 时的 per-key 计数快照 — mergeAndSave 只收增量,差分在此 */
+  private lastEfficacyFlush = new Map<string, EfficacyDelta>()
   /** F-fix: tool calls since the last discipline re-anchor advisory. */
   private toolCallsSinceReanchor = 0
   /** Anti-habituation: turn count since last model-initiated objection/risk flag. */
@@ -445,6 +484,24 @@ export class AgentLoop {
     // Phase 2 挂起观察自愈判定：expect 谓词在观察窗口内已被自发满足 → 撤销
     this.advisoryBus.setSelfHealCheck((expect, since, now) =>
       this.advisoryReadback.wasSatisfiedBetween(expect, since, now))
+    // Holdout 反事实抽样：小概率静默扣留以度量真实 lift（RIVET_ADVISORY_HOLDOUT=0 关闭）
+    this.advisoryBus.setHoldoutPolicy({
+      rate: parseHoldoutRate(process.env.RIVET_ADVISORY_HOLDOUT),
+      isEligible: key => this.advisoryReadback.getDeliveredCount(key) >= HOLDOUT_MIN_DELIVERED,
+    })
+    // B 跨会话效能信息素：加载 EWMA 衰减后的先验（holdout 资格/副驾闸门/
+    // Top-N 次级排序三个消费方;习惯化保持会话内,guardian meta 保持会话纯度）
+    this.advisoryEfficacyStore = new AdvisoryEfficacyStore(this.cwd)
+    try {
+      const priors = this.advisoryEfficacyStore.load()
+      this.advisoryReadback.seedPriors(
+        [...priors].map(([k, p]) => [k, {
+          delivered: p.delivered, adopted: p.adopted, ignored: p.ignored,
+          shadowHeld: p.shadowHeld, shadowSatisfied: p.shadowSatisfied,
+        }] as [string, EfficacyPriorCounts]),
+      )
+    } catch { /* 先验加载失败不致命——回退冷启动 */ }
+    this.advisoryBus.setAdoptionRateProvider(key => this.advisoryReadback.getAdoptionRate(key))
     // Phase 2 阶段抑制：产出流 = 近期编辑+验证交替且无失败（navigator 沉默规则）。
     // 只影响 encouragement/typecheck/informational 白名单——守护类不受抑制。
     this.advisoryBus.setFlowStateProvider(() => {
@@ -1372,6 +1429,7 @@ export class AgentLoop {
     if (this.config.sessionRegistry) {
       try { this.config.sessionRegistry.cleanupOldEvents(2 * 60 * 60 * 1000) } catch { /* ignore */ }
     }
+    this.flushAdvisoryEfficacy()
     try { this.immuneHook.getPhysarum().save() } catch { /* non-critical */ }
     try {
       const db = this.config.meridianIndexer?.getDb()

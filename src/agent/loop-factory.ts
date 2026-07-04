@@ -256,6 +256,7 @@ return new ToolExecutionController({
           self.traceStore = recordToolNamedFingerprint(self.traceStore, fingerprint, toolName)
         }
       },
+      destructiveGate: self.destructiveGate,
     })
 }
 export function buildRuntimeSnapshot(self: AgentLoop, extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {

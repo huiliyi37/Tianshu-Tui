@@ -107,6 +107,8 @@ export interface ToolExecutionDeps {
   onSkillCompleted?: (name: string) => void
   /** Whether goal mode is active — relaxes doom-loop thresholds when true. */
   isGoalActive?: () => boolean
+  /** 破坏性命令 pre-execution 闸门(会话级状态,loop 持有,pipeline 读写)。 */
+  destructiveGate?: import('../tools/destructive-gate.js').DestructiveGateState
 }
 
 export interface ToolExecBatchInput {
@@ -243,6 +245,7 @@ export class ToolExecutionController {
       lspManager: this.deps.lspManager,
       getLspManager: this.deps.getLspManager,
       abortSignal: state.abortSignal,
+      destructiveGate: this.deps.destructiveGate,
     }
   }
 
