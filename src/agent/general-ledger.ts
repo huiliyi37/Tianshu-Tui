@@ -17,6 +17,36 @@ import { starDomainRegistry } from './star-domain-registry.js'
 
 const GENERALS_DIR = '.rivet/generals'
 
+// ── 遥测（Y8 静音之道：先装账本，账本机制自己也要有账本）──────────
+// 模块级 sink，loop-factory 在 telemetryWriter 就绪后接线；未接线时零开销。
+// 记录读/写各一事件，让「账本是否在被使用、哪个星在生长」可从 sensorium.jsonl 观测。
+
+export interface GeneralLedgerTelemetryEvent {
+  kind: 'general-ledger'
+  op: 'read' | 'write'
+  star: string
+  slug: string
+  /** write 专有：是否新建族 / 写后计数。 */
+  created?: boolean
+  recurrenceCount?: number
+  family?: string
+}
+
+let telemetrySink: ((event: GeneralLedgerTelemetryEvent) => void) | null = null
+
+/** 接线遥测 sink（传 null 断开）。sink 抛错被吞——遥测永不影响账本 I/O。 */
+export function setGeneralLedgerTelemetrySink(sink: ((event: GeneralLedgerTelemetryEvent) => void) | null): void {
+  telemetrySink = sink
+}
+
+function emitLedgerTelemetry(event: GeneralLedgerTelemetryEvent): void {
+  try {
+    telemetrySink?.(event)
+  } catch {
+    // Telemetry must never break ledger I/O.
+  }
+}
+
 /** 星域之外的将星（有胶囊/账本但无 star-domain id）。 */
 const EXTRA_GENERAL_SLUGS: Record<string, string> = {
   贪狼: 'tanlang',
@@ -47,7 +77,9 @@ export function readGeneralLedger(cwd: string, star: string): { slug: string; co
   const path = generalLedgerPath(cwd, slug)
   if (!existsSync(path)) return null
   try {
-    return { slug, content: readFileSync(path, 'utf-8') }
+    const content = readFileSync(path, 'utf-8')
+    emitLedgerTelemetry({ kind: 'general-ledger', op: 'read', star: star.trim(), slug })
+    return { slug, content }
   } catch {
     return null
   }
@@ -185,6 +217,7 @@ export function appendGeneralFinding(cwd: string, finding: GeneralFindingInput):
     while (insertAt > headingIdx + 1 && lines[insertAt - 1]!.trim() === '') insertAt--
     lines.splice(insertAt, 0, `- ${date} ${note}`)
     writeFileSync(path, lines.join('\n'), 'utf-8')
+    emitLedgerTelemetry({ kind: 'general-ledger', op: 'write', star: finding.star.trim(), slug, created: false, recurrenceCount: count, family })
     return { slug, created: false, recurrenceCount: count }
   }
 
@@ -203,5 +236,6 @@ export function appendGeneralFinding(cwd: string, finding: GeneralFindingInput):
     lines.push(...newBlock)
   }
   writeFileSync(path, lines.join('\n'), 'utf-8')
+  emitLedgerTelemetry({ kind: 'general-ledger', op: 'write', star: finding.star.trim(), slug, created: true, recurrenceCount: 1, family })
   return { slug, created: true, recurrenceCount: 1 }
 }

@@ -8,6 +8,7 @@ import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createUserHooksBridge, runOnErrorHooks } from './hooks/user-hooks-bridge.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
+import { setGeneralLedgerTelemetrySink } from './general-ledger.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
 import { recordToolNamedFingerprint } from './trace-store.js'
 import { join, isAbsolute } from 'node:path'
@@ -322,6 +323,9 @@ function buildLazyCopilotCompletion(self: AgentLoop): (system: string, user: str
 }
 
 export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline {
+  // 将星账本遥测（Y8）：读/写事件落 sensorium.jsonl 同通道，让「账本是否在被
+  // 使用、哪个星在生长」可观测。模块级 sink——worker prompt 合并与工具读写共用。
+  setGeneralLedgerTelemetrySink(event => self.telemetryWriter.write({ ...event }))
   const userBridgeDeps = {
     cwd: self.cwd,
     sessionId: self.config.sessionId,

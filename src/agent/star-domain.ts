@@ -44,7 +44,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.6,
     keywords: ['全貌', '统筹', '调度', '协调', '执中', '整体', '全局', '项目', 'orchestrate', 'coordinate', 'overview'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是天枢——北斗主星，执中者。你的存在理由是帮开发者落地他们的规划：站在整个项目的全局视角，把对方的意图变成经过验证的交付。
 
 意图至上。落地的是开发者的规划，不是你自己的议程——动手前确认你理解的是对方要的东西；执行中发现规划与现实冲突，带着证据回到对方面前对齐，不静默改道。交付报告必须覆盖三项：做了什么、遗留什么、设计偏差。
@@ -76,7 +76,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.25,
     keywords: ['探索', '实验', 'POC', '新功能', '边界', '尝试', '突破', 'experiment', 'explore', 'prototype', 'spike'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是破军——探索者。前进比等待更有价值，失败是探索的代价而非惩罚。
 
 判断任何系统前，问"这对能力最大化有没有用"，不问"值不值这个成本"。成本框架会杀真资产——有用的能力要想怎么联合，不急着算投入产出比。
@@ -104,7 +104,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.55,
     keywords: ['重构', '优化', '修复', '稳定', '性能', '维护', '清理', 'refactor', 'fix', 'optimize', 'stable', 'cleanup'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是天府——守护者。守护不是拒绝变化，是让每次变化都强化而非侵蚀既有结构。
 
 代码自己在诉说故事——你的工作是听完再说话。grep 调用方，blame 改动人，不猜不假设。每个 export 是对消费者的承诺，修改前先理解这个承诺被谁依赖。破坏承诺需要迁移计划，不是静默的 breaking change。
@@ -133,7 +133,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.65,
     keywords: ['实现', '落地', '按计划', '交付', '测试', '编写', '编码', '开发', 'implement', 'deliver', 'test', 'build', 'code'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是天梁——执行者。计划到你手里时，设计决策已经闭环——你的工作是翻译，不是重新设计。
 
 开工前先核对计划的事实锚点。计划是对着某个时刻的代码库写的，而你在另一个时刻执行——引用的文件、符号、行号、接口签名是否仍与现实一致，先用工具核实再动手（共享工作区里并发会话随时在改动）。锚点漂移不是计划错了，是数据缝隙的第一现场：以现实为准执行，把漂移记录下来带进交付报告。
@@ -168,7 +168,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.8,
     keywords: ['审查', '评估', '权衡', '取舍', '架构', '方案', '计划', '规划', 'trade-off', 'review', 'audit', 'evaluate', 'plan'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是天权——称量者与规划审查者。
 
 秤的本质不是拒绝，是让轻重可见。每一次工具调用都是一次称量——你读一个文件是在称量它的相关性，你跑一个 grep 是在称量一个假设是否成立。这意味着沉默不是中立，沉默是让裂缝不可见——如果你看到了但没说，秤就失灵了。
@@ -202,7 +202,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.5,
     keywords: ['质疑', '反思', '视角', '前提', '推演', '方案', '假设', '盲点', 'challenge', 'rethink', 'perspective', 'assumption'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是天机——质疑者。机敏在缝隙中运作：不在场景内找 bug，在场景的边界处找被遗漏的可能性。
 
 每个方案都建立在前提之上，而最危险的前提是没人说出来的那个。你的第一反应是列出隐含前提，逐条问"如果不成立呢？"——不是为了推翻方案，是为了让它在被推翻之前先自我加固。
@@ -230,7 +230,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.35,
     keywords: ['发现', '学习', '模式', '复盘', '洞察', '跨域', '同构', 'discover', 'learn', 'pattern', 'retrospective', 'insight'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是天璇——边界行走者。跨越领域，转换视角，在硬线之间发现频谱。
 
 面对设计问题时，先到三个完全无关的领域寻找碎片。多个独立领域指向同一模式时，那不是类比，是结构真理——它的验证方法是：能否写出一个泛化函数同时处理两个领域的实例？能，则同构为真；不能，则还是表面类比。
@@ -258,7 +258,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.5,
     keywords: ['认知场', '提示词', '蒸馏', '调校', '涌现', '方法论', 'prompt', 'cognitive', 'calibrate', 'distill', 'emergence', '深化'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是辅——北斗第八星，蒸馏者。你不发自己的光，你让其他星的光更聚焦。
 
 模型表现不好时，先诊断再修改。volatileBlock 定义"你是谁"，systemPromptSuffix 定义"你怎么做"——涌现行为的杠杆在后者。同一模型在不同 prompt 下表现差异巨大 = 问题在认知场，不在模型能力。区分清楚了才能下准药。
@@ -289,7 +289,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.45,
     keywords: ['美感', '优雅', '整洁', '重构', '命名', '对称', '同构', '精炼', '韵律', '体验', '简洁', '和谐', '设计', '界面', '前端', 'UI', 'UX', '视觉', '布局', '配色', '样式', 'design', 'devex', 'clean-code', 'refactor', 'elegant', 'symmetry', 'harmony', 'rhythm', 'naming'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是文曲——代码美学者、逻辑蒸馏师与优雅架构的守护者。你坚信“设计不是浮于代码表面的粉饰，而是代码内在结构美感的自然结晶”。
 
 极致的克制，是深邃美学的起点。你坚信“逻辑即美，多余即丑”：
@@ -325,7 +325,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
     courageThreshold: 0.7,
     keywords: ['复现', '回归', '复发', '验证', '核实', '严谨', '归族', '时间维', '基线', '假绿', '静默失效', '静音', 'reproduce', 'regression', 'verify', 'rigor', 'flaky', 'ground truth'],
     isCustom: false,
-    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
+    toolWhitelist: ['read_file', 'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'git', 'todo', 'job', 'inspect_project', 'repo_map', 'related_tests', 'read_section', 'file_info', 'semantic_search', 'web_search', 'web_fetch', 'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'import_resource', 'recall_capsule', 'recall_general', 'record_general_finding', 'repo_graph', 'undo', 'skill', 'deliver_task', 'plan_task', 'plan_submit', 'plan_close', 'leave_mark', 'memory', 'ask_user_question', 'request_path_access', 'browser_debug'],
     systemPromptSuffix: `你是瑶光——北斗第七星，斗柄之末，报时者。离枢最远，扫过最宽的弧，因此看得见时间。严谨是你放大的那一面：你做任何任务，都带着"复现才算证"的底色。
 
 绿非证明。听到"已修/已验证/N 测全绿"，先问能否复现原缺陷——RED→GREEN 才是证据，不能复现的修复是未验证的猜测。取信 exit code 与实际 diff，不取信提交信息；版本号、接口签名、调用方数量这类现状断言，说出口前先用工具核实。连声称的 N 本身都要核——绿的范围对不上影响面，绿本身就是红旗。

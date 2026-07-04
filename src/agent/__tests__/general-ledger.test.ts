@@ -11,6 +11,8 @@ import {
   topGeneralFamilies,
   appendGeneralFinding,
   generalLedgerPath,
+  setGeneralLedgerTelemetrySink,
+  type GeneralLedgerTelemetryEvent,
 } from '../general-ledger.js'
 import { createRecallGeneralTool } from '../../tools/recall-general.js'
 import { createRecordGeneralFindingTool } from '../../tools/record-general-finding.js'
@@ -159,6 +161,35 @@ describe('general-ledger', () => {
 
     it('returns null for unknown star', () => {
       assert.equal(appendGeneralFinding(cwd, { star: '未知', family: 'x', note: 'y' }), null)
+    })
+  })
+
+  // G3（静音之道 Y8）：账本机制自己也要有账本——读/写各落一个遥测事件。
+  describe('telemetry sink', () => {
+    it('emits read and write events; sink errors never break ledger I/O', () => {
+      seedLedger()
+      const events: GeneralLedgerTelemetryEvent[] = []
+      setGeneralLedgerTelemetrySink(e => events.push(e))
+      try {
+        readGeneralLedger(cwd, '瑶光')
+        assert.equal(events.length, 1)
+        assert.deepEqual(events[0], { kind: 'general-ledger', op: 'read', star: '瑶光', slug: 'yaoguang' })
+
+        const res = appendGeneralFinding(cwd, { star: '瑶光', family: 'false-green', note: 'x', date: '2026-07-05' })
+        assert.equal(res!.recurrenceCount, 2)
+        assert.equal(events.length, 2)
+        assert.equal(events[1]!.op, 'write')
+        assert.equal(events[1]!.family, 'false-green')
+        assert.equal(events[1]!.created, false)
+        assert.equal(events[1]!.recurrenceCount, 2)
+
+        // 抛错的 sink 被吞——账本 I/O 不受影响
+        setGeneralLedgerTelemetrySink(() => { throw new Error('boom') })
+        const ok = readGeneralLedger(cwd, '瑶光')
+        assert.ok(ok, 'ledger read survives a throwing sink')
+      } finally {
+        setGeneralLedgerTelemetrySink(null)
+      }
     })
   })
 

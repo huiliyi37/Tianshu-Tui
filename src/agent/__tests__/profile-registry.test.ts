@@ -20,8 +20,8 @@ describe('ProfileRegistry', () => {
     registry = new ProfileRegistry()
   })
 
-  it('has 18 built-in profiles (9 core + 6 flash-army + designer + council_expert + goal_judge)', async () => {
-    assert.equal(registry.list().length, 18)
+  it('has 19 built-in profiles (9 core + 6 flash-army + designer + council_expert + goal_judge + perspective_planner)', async () => {
+    assert.equal(registry.list().length, 19)
   })
 
   // 2026-07-04 缺陷复盘: scout 读了过时文档把 Ink 组件当成现状上报,规划者照单全收。
@@ -96,12 +96,12 @@ describe('ProfileRegistry', () => {
     const ro = registry.listReadOnlyProfiles()
     // adversarial_verifier is readonly_plus_test, not 'readonly' — excluded from readonly list.
     // designer + format_checker are readonly and included.
-    assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'format_checker', 'reviewer', 'troubleshooter'])
+    assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'format_checker', 'perspective_planner', 'reviewer', 'troubleshooter'])
   })
 
-  it('getProfileNames returns all 18 names', async () => {
+  it('getProfileNames returns all 19 names', async () => {
     const names = registry.getProfileNames().sort()
-    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'goal_judge', 'import_organizer', 'lint_fixer', 'patcher', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier'])
+    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'goal_judge', 'import_organizer', 'lint_fixer', 'patcher', 'perspective_planner', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier'])
   })
 
   it('rejects overriding built-in profiles', async () => {

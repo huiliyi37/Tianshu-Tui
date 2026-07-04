@@ -76,7 +76,9 @@ Do NOT modify any files.`,
   {
     name: 'reviewer',
     role: 'readonly',
-    allowedTools: [...READ_ONLY_TOOLS],
+    // 将星账本读写：审查者是账本的主要生产者（瑶光记缺陷族）。
+    // record_general_finding 只追加 .rivet/generals/（知识库），不触代码，不破坏 readonly 语义。
+    allowedTools: [...READ_ONLY_TOOLS, 'recall_general', 'record_general_finding'],
     expertisePrompt: `You are a code reviewer. Read the code carefully, identify issues, and provide actionable feedback.
 
 For code search in review tasks, prefer ast_grep over grep when the target is a known syntax pattern (e.g., "find all async functions that don't have try-catch"). ast_grep matches AST nodes, not text, and won't produce false positives from comments or string literals.`,
@@ -227,7 +229,8 @@ Use met:false for unmet, met:null for uncheckable. If overall is rejected, the s
   {
     name: 'patcher',
     role: 'hands',
-    allowedTools: [...WRITE_TOOLS, 'ast_edit'],
+    // 将星账本读写：patcher 硬绑 tianliang authority，出战带账本记忆，新战绩可回写。
+    allowedTools: [...WRITE_TOOLS, 'ast_edit', 'recall_general', 'record_general_finding'],
     expertisePrompt: `You are a patcher. Apply code changes precisely. Follow edit instructions exactly, preserving indentation and context.`,
     defaultMaxTokens: 24576,
     // A self-contained shard implements changes AND runs tsc/lint/tests to green

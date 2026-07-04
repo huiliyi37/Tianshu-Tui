@@ -4,22 +4,22 @@ import { buildWorkerPrompt } from '../worker-prompts.js'
 import { createReadOnlyWorkOrder, createWriteWorkOrder } from '../work-order.js'
 import { starDomainRegistry } from '../star-domain-registry.js'
 
-function readOnlyOrder(overrides?: { authority?: string }) {
+function readOnlyOrder(overrides?: { authority?: string; profile?: 'code_scout' | 'reviewer' }) {
   return createReadOnlyWorkOrder({
     parentTurnId: 'test-turn',
     kind: 'code_search',
-    profile: 'code_scout',
+    profile: overrides?.profile ?? 'code_scout',
     objective: 'search the codebase',
     scope: {},
     authority: overrides?.authority,
   })
 }
 
-function writeOrder(overrides?: { authority?: string }) {
+function writeOrder(overrides?: { authority?: string; profile?: 'patcher' }) {
   return createWriteWorkOrder({
     parentTurnId: 'test-turn',
     kind: 'patch_proposal',
-    profile: 'patcher',
+    profile: overrides?.profile ?? 'patcher',
     objective: 'edit the file',
     scope: {},
     authority: overrides?.authority,
@@ -111,6 +111,21 @@ describe('V3 Component A — authority injection', () => {
     assert.ok(order.allowedTools.includes('write_file'))
     assert.ok(order.allowedTools.includes('edit_file'))
     assert.ok(order.allowedTools.includes('bash'))
+  })
+
+  // G1 回归：将星账本读写工具必须活过 profile ∩ domain.toolWhitelist 交集。
+  // 曾经的死接线：B3 prompt 指引 worker 用 record_general_finding，但 profile 和
+  // 十域白名单都没有它——指引送到了，能力没送到（瑶光 Y10「送达也是声称」）。
+  test('general ledger tools survive the intersection for reviewer with ledger-star authority', () => {
+    const order = readOnlyOrder({ profile: 'reviewer', authority: 'yaoguang' })
+    assert.ok(order.allowedTools.includes('recall_general'), 'reviewer(yaoguang) can read the ledger')
+    assert.ok(order.allowedTools.includes('record_general_finding'), 'reviewer(yaoguang) can write back findings')
+  })
+
+  test('general ledger tools survive the intersection for patcher with tianliang authority', () => {
+    const order = writeOrder({ profile: 'patcher', authority: 'tianliang' })
+    assert.ok(order.allowedTools.includes('recall_general'), 'patcher(tianliang) can read the ledger')
+    assert.ok(order.allowedTools.includes('record_general_finding'), 'patcher(tianliang) can write back findings')
   })
 
   test('unknown authority fails closed: no injection and no allowed tools', () => {
