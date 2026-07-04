@@ -1,6 +1,7 @@
 import type { StreamClient } from './stream-client.js'
 import type { StreamCallbacks } from './stream-client.js'
-import type { OaiChatRequest } from './oai-types.js'
+import type { OaiChatRequest, OaiMessage } from './oai-types.js'
+import { estimateOaiTokens } from '../compact/micro.js'
 import type { ProviderProfile } from './provider-profile.js'
 import { shouldInjectPrefix, buildPrefixMessage } from './prefix-completion.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
@@ -107,6 +108,13 @@ export interface OpenAIClientConfig {
    * 显式设置一个 < read 的值可对易卡死的 provider 开启更早的 stall 检测。
    */
   thinkingStallTimeoutMs?: number
+  /**
+   * First-byte (pre-first-chunk) timeout base override (ms). Optional.
+   * 默认 undefined = 按 provider/thinking 推导（45/90/180s）。这一 base 之上还会按
+   * 请求预估输入规模自动上浮（见 computeFirstByteTimeoutMs），故只有当某个自定义/慢
+   * OpenAI 兼容模型即便小上下文也迟迟不出首 token 时才需要显式抬高 base。
+   */
+  firstByteTimeoutMs?: number
   /** Provider-specific capability flags (网#1). */
   capabilities?: {
     /** DeepSeek sometimes emits tool JSON as plain text content. */
@@ -139,6 +147,13 @@ const REASONING_READ_TIMEOUT_MS = 180_000
 // minutes before first token. Use generous timeouts to avoid false-positive errors.
 const SLOW_FIRST_BYTE_TIMEOUT_MS = 180_000
 const SLOW_READ_TIMEOUT_MS = 300_000
+// Size-scaled first-byte budget (B): a large cold-context prefill legitimately
+// needs longer before the first token arrives. On top of the derived/configured
+// base first-byte timeout, add PER_100K per 100k estimated input tokens, capped
+// by MAX (kept below the 10min base hard cap and retry budget). Pre-first-chunk
+// only — read timeout and thinking-stall detection are unchanged.
+const FIRST_BYTE_PER_100K_MS = 60_000
+const FIRST_BYTE_MAX_MS = 420_000
 // GLM-5.2 reasoning_effort=max: 服务端完整推理阶段可能 5min+ 不发 token，
 // 300s read timeout 会误杀。单独给到 720s（12min 硬顶兜底 runaway）。
 const GLM_READ_TIMEOUT_MS = 720_000
@@ -163,6 +178,30 @@ const HARD_CAP_EXTENSION_SLICE_MS = 60_000
 /** GLM reasoning can pause 30-60s between deltas without being stalled.
  *  Use a wider progress window so the hard cap doesn't abort healthy streams. */
 const GLM_HARD_CAP_PROGRESS_WINDOW_MS = 120_000
+
+/**
+ * Size-scaled first-byte timeout (B). Pure function for testability.
+ *
+ * Adds a size term on top of the base first-byte budget so a genuinely large
+ * cold-context prefill is not false-killed before the first token arrives, while
+ * small requests keep the existing base. The result is capped so a truly dead
+ * connection still fails within a bounded window.
+ *
+ * @param baseMs derived-or-configured base first-byte timeout (ms)
+ * @param estInputTokens estimated prompt tokens for this request
+ */
+export function computeFirstByteTimeoutMs(input: {
+  baseMs: number
+  estInputTokens: number
+  per100kMs?: number
+  capMs?: number
+}): number {
+  const per100kMs = input.per100kMs ?? FIRST_BYTE_PER_100K_MS
+  const capMs = input.capMs ?? FIRST_BYTE_MAX_MS
+  const buckets = Math.floor(Math.max(0, input.estInputTokens) / 100_000)
+  const scaled = input.baseMs + buckets * per100kMs
+  return Math.min(scaled, capMs)
+}
 
 export type StreamHardCapAction =
   | { kind: 'abort' }
@@ -406,6 +445,20 @@ export class OpenAIClient implements StreamClient {
     const reasoningRef = { content: '' }
     const isThinking = this.config.thinking === 'enabled'
 
+    // Size-scaled first-byte budget (B): estimate prompt size once (stable across
+    // retries; the per-retry reasoning re-injection is negligible) and derive a
+    // first-byte timeout that grows with input so large cold-context prefills are
+    // not false-killed before the first token. Used for both the fetch headers
+    // guard and the pre-first-chunk SSE idle timer.
+    const estInputTokens = estimateOaiTokens((body.messages as OaiMessage[]) ?? [])
+    const derivedFirstByteBaseMs = isThinking
+      ? (SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '') ? SLOW_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
+      : FIRST_BYTE_TIMEOUT_MS
+    const firstByteMs = computeFirstByteTimeoutMs({
+      baseMs: this.config.firstByteTimeoutMs ?? derivedFirstByteBaseMs,
+      estInputTokens,
+    })
+
     await withStructuredRetry(async () => {
       // Reset instance state for each attempt
       this.toolCallBuffer.clear()
@@ -439,11 +492,10 @@ export class OpenAIClient implements StreamClient {
         ? await this.config.auth.getHeaders()
         : { 'Authorization': `Bearer ${this.config.apiKey}` }
 
-      // Pre-first-byte timeout prevents fetch from hanging forever
-      // when server accepts connection but never sends response headers.
-      const fetchTimeout = this.config.thinking === 'enabled'
-        ? (SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '') ? SLOW_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
-        : FIRST_BYTE_TIMEOUT_MS
+      // Pre-first-byte timeout prevents fetch from hanging forever when the
+      // server accepts the connection but never sends response headers. Uses the
+      // size-scaled first-byte budget computed above.
+      const fetchTimeout = firstByteMs
       // 共享 lifecycle controller：传给 fetch 的信号。它由外部 user signal 联动，
       // 也由 parseStreamFromReader 在任何退出路径（idle/硬顶超时、错误、正常结束）
       // 于 finally 中 abort —— 确保 keep-alive 下仅 reader.cancel() 可能拆不掉的 TCP
@@ -486,10 +538,17 @@ export class OpenAIClient implements StreamClient {
       const reader = response.body?.getReader()
       if (!reader) throw new Error('Response body is not readable')
 
-      await this.parseStreamFromReader(reader, callbacks, signal, reasoningRef, lifecycle)
+      await this.parseStreamFromReader(reader, callbacks, signal, reasoningRef, lifecycle, firstByteMs)
     }, signal, {
       maxTotalDurationMs: this.config.providerName === 'glm' ? 20 * 60_000 : 10 * 60_000,
-      maxTotalRetries: isThinking ? 1 : undefined,
+      // Thinking retries are normally throttled to 1 because re-reasoning is costly.
+      // 例外：slow-thinking providers 在被中止的那次尝试里已把整个 prompt 灌进服务端
+      // 前缀缓存，重试命中近 100% 缓存（实测 deepseek 99.4% hit、~12s 完成），代价极低。
+      // 给它们 2 次重试，让「单次服务端 thinking 卡死」甚至「连续两次卡死」都能自愈而
+      // 不冒泡成错误。maxTotalDurationMs 仍是总时长兜底，防 runaway。
+      maxTotalRetries: isThinking
+        ? (SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '') ? 2 : 1)
+        : undefined,
       onRetry: (info) => {
         if (info.classified.category === 'rate_limit') {
           callbacks.onRateLimit?.(info.classified.retryDelayMs)
@@ -512,6 +571,12 @@ export class OpenAIClient implements StreamClient {
      * reader.cancel() 拆不掉的连接被 fetch 侧 abort 真正拆除。
      */
     lifecycle?: AbortController,
+    /**
+     * Size-scaled first-byte (pre-first-chunk) timeout (ms). When provided,
+     * overrides the derived first-byte value in resetIdleTimer. Direct test
+     * callers may omit it to keep the legacy derived behavior.
+     */
+    firstByteTimeoutMs?: number,
   ): Promise<void> {
     const decoder = new TextDecoder()
     let buffer = ''
@@ -571,8 +636,10 @@ export class OpenAIClient implements StreamClient {
       if (idleTimer) clearTimeout(idleTimer)
       const isReasoning = this.config.thinking === 'enabled'
       const isSlowProvider = SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '')
-      const firstByteMs = isSlowProvider ? SLOW_FIRST_BYTE_TIMEOUT_MS
-        : isReasoning ? REASONING_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
+      // Prefer the size-scaled first-byte budget computed by sendStream (B);
+      // fall back to the derived value for direct callers (tests) that omit it.
+      const firstByteMs = firstByteTimeoutMs ?? (isSlowProvider ? SLOW_FIRST_BYTE_TIMEOUT_MS
+        : isReasoning ? REASONING_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS)
       const isGlm = this.config.providerName === 'glm'
       const readMs = isGlm && isReasoning ? GLM_READ_TIMEOUT_MS
         : isSlowProvider ? SLOW_READ_TIMEOUT_MS

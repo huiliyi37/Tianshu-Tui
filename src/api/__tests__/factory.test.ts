@@ -257,12 +257,20 @@ describe('createProviderClient', () => {
     assert.equal(config.thinkingStallTimeoutMs, 420_000, 'glm should get default 420s thinking stall')
   })
 
-  it('does NOT inject thinkingStallTimeoutMs for non-glm providers', () => {
+  it('injects thinkingStallTimeoutMs default (120s) for deepseek provider', () => {
     const capabilities = resolveCapabilities('deepseek')
     const client = createProviderClient(deepseekProvider, capabilities, runtimeParams)
     assert.ok(client instanceof OpenAIClient)
     const config = (client as unknown as { config: { thinkingStallTimeoutMs?: number } }).config
-    assert.equal(config.thinkingStallTimeoutMs, undefined, 'deepseek should not get thinkingStallTimeoutMs')
+    assert.equal(config.thinkingStallTimeoutMs, 120_000, 'deepseek should get default 120s thinking stall')
+  })
+
+  it('does NOT inject thinkingStallTimeoutMs for providers not in the map', () => {
+    const capabilities = resolveCapabilities('kimi')
+    const client = createProviderClient(kimiProvider, capabilities, runtimeParams)
+    assert.ok(client instanceof OpenAIClient)
+    const config = (client as unknown as { config: { thinkingStallTimeoutMs?: number } }).config
+    assert.equal(config.thinkingStallTimeoutMs, undefined, 'kimi should not get a thinking-stall default')
   })
 
   it('forwards hasToolJsonInContentBug capability into OpenAIClient for deepseek', () => {
@@ -343,6 +351,78 @@ describe('createProviderClient', () => {
     const client = createProviderClient(glmProvider, capabilities, runtimeParams)
     const config = (client as unknown as { config: { thinkingStallTimeoutMs?: number } }).config
     assert.equal(config.thinkingStallTimeoutMs, 90_000, 'explicit provider config should override default')
+  })
+
+  it('forwards firstByteTimeoutMs override into OpenAIClient config', () => {
+    const capabilities = resolveCapabilities('deepseek')
+    const client = createProviderClient(
+      { ...deepseekProvider, firstByteTimeoutMs: 240_000 },
+      capabilities,
+      runtimeParams,
+    )
+    const config = (client as unknown as { config: { firstByteTimeoutMs?: number } }).config
+    assert.equal(config.firstByteTimeoutMs, 240_000, 'explicit firstByteTimeoutMs should flow into client config')
+  })
+
+  it('leaves firstByteTimeoutMs undefined when the provider does not set it', () => {
+    const capabilities = resolveCapabilities('deepseek')
+    const client = createProviderClient(deepseekProvider, capabilities, runtimeParams)
+    const config = (client as unknown as { config: { firstByteTimeoutMs?: number } }).config
+    assert.equal(config.firstByteTimeoutMs, undefined, 'absent override should stay undefined (size scaling is the floor)')
+  })
+
+  it('slow-thinking provider (deepseek) retries a stalled stream twice then recovers', async () => {
+    const capabilities = resolveCapabilities('deepseek')
+    const client = createProviderClient(deepseekProvider, capabilities, runtimeParams)
+    const originalFetch = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = mock.fn(async () => {
+      calls++
+      // 'invalid sse ...' → classified stream_parse (retryable, maxRetries 2).
+      if (calls <= 2) throw new Error('invalid sse stream chunk')
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(
+            'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+          ))
+          controller.close()
+        },
+      })
+      return new Response(stream as unknown as ReadableStream, { status: 200 })
+    }) as unknown as typeof fetch
+
+    try {
+      await client.stream(
+        { model: 'deepseek-r1', messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 },
+        { onTextDelta: () => {}, onThinkingDelta: () => {}, onContentBlock: () => {}, onStopReason: () => {}, onError: () => {} },
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    // 1 initial + 2 retries (slow-thinking warm-cache retries are cheap) = 3 attempts
+    assert.equal(calls, 3, 'deepseek should retry twice before succeeding')
+  })
+
+  it('non-slow thinking provider (kimi) retries a stalled stream only once', async () => {
+    const capabilities = resolveCapabilities('kimi')
+    const client = createProviderClient(kimiProvider, capabilities, runtimeParams)
+    const originalFetch = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = mock.fn(async () => {
+      calls++
+      throw new Error('invalid sse stream chunk')
+    }) as unknown as typeof fetch
+
+    try {
+      await assert.rejects(() => client.stream(
+        { model: 'kimi-code', messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 },
+        { onTextDelta: () => {}, onThinkingDelta: () => {}, onContentBlock: () => {}, onStopReason: () => {}, onError: () => {} },
+      ))
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    // 1 initial + 1 retry (thinking default) = 2 attempts, then exhausted
+    assert.equal(calls, 2, 'kimi (thinking, non-slow) should retry once then throw')
   })
 })
 
