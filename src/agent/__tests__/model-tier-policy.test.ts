@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { inferModelTierFromCard, recommendModelTier } from '../model-tier-policy.js'
+import { inferModelTierFromCard, inferModelTierFromName, recommendModelTier } from '../model-tier-policy.js'
+import { applyTierFloor } from '../coordinator.js'
 
 describe('model tier policy', () => {
   it('routes verifier work to cheap (flash) for fast review throughput', () => {
@@ -78,5 +79,45 @@ describe('model tier policy', () => {
       kind: 'patch_proposal',
       objective: 'small localized patch',
     }).tier, 'cheap')
+  })
+
+  // ── 层1a: planner tier floor（重构事故链缺口 1）──
+  it('planner profile has a balanced hard floor — flash must not author plans', () => {
+    const rec = recommendModelTier({
+      profile: 'planner',
+      kind: 'code_search',
+      objective: '为大重构出计划',
+    })
+    assert.equal(rec.tier, 'balanced')
+    assert.equal(rec.hardFloor, 'balanced')
+  })
+})
+
+describe('inferModelTierFromName (层1b 留痕推断)', () => {
+  it('classifies common cheap/strong name shapes', () => {
+    assert.equal(inferModelTierFromName('gemini-2.5-flash'), 'cheap')
+    assert.equal(inferModelTierFromName('claude-haiku'), 'cheap')
+    assert.equal(inferModelTierFromName('minimax-m2'), 'cheap')
+    assert.equal(inferModelTierFromName('gemini-2.5-pro'), 'strong')
+    assert.equal(inferModelTierFromName('claude-opus-4'), 'strong')
+    assert.equal(inferModelTierFromName('gpt-5.5'), 'strong')
+  })
+
+  it('returns null for unrecognized names (no false provenance)', () => {
+    assert.equal(inferModelTierFromName('deepseek-chat'), null)
+    assert.equal(inferModelTierFromName('unknown-model'), null)
+  })
+})
+
+describe('applyTierFloor (瑶光门接线)', () => {
+  it('raises below-floor tiers and never lowers above-floor tiers', () => {
+    assert.equal(applyTierFloor('cheap', 'balanced'), 'balanced')
+    assert.equal(applyTierFloor('cheap', 'strong'), 'strong')
+    assert.equal(applyTierFloor('strong', 'balanced'), 'strong', 'floor only lifts, never downgrades')
+    assert.equal(applyTierFloor('balanced', 'balanced'), 'balanced')
+  })
+
+  it('is identity without a floor', () => {
+    assert.equal(applyTierFloor('cheap', undefined), 'cheap')
   })
 })

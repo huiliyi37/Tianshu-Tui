@@ -20,6 +20,9 @@ export interface TaskContract {
   createdAtTurn: number
   updatedAtTurn: number
   isActionable: boolean
+  /** 重构行为等价契约：改动前存在、改动后必须仍存在的功能锚点（路由/导航项/
+   *  导出符号等 grep 可验证的文本断言）。deliver 前逐项核验，未覆盖项留痕报告。 */
+  regressionInventory?: string[]
 }
 
 const FILE_PATTERN = /(?:^|\s)((?:src|lib|test|tests|pkg|cmd|internal|docs|scripts)\/[\w./-]+\.\w+)/g
@@ -445,6 +448,12 @@ const ENFORCEMENT_SUBSYSTEM_FILES: ReadonlySet<string> = new Set([
 
 const MULTI_GATE_VERB_PATTERN = /双门|多门|两个.*gate|both.*enforcement|sandbox.*file.*tool|file.*sandbox|enforcement.*sync|授权.*同步|安全.*接通/i
 const SAFETY_KEYWORD_PATTERN = /(security|permission|sandbox|安全|权限|沙箱|auth(?:orization)?|validate\s*safe|writable\s*root|policy)/i
+const REFACTOR_PATTERN = /\b(refactor|rewrite|migrat(?:e|ion))\b|重构|重写|迁移改造|架构迁移/i
+
+/** 重构语义判定 — plan methodology 路由与 deliver 回归契约共用同一信号源。 */
+export function isRefactorObjective(text: string): boolean {
+  return REFACTOR_PATTERN.test(text)
+}
 
 /**
  * Routing decision: given what we know about the task, which plan
@@ -494,11 +503,15 @@ export function classifyPlanMethodology(
   const hasSafetyConstraint = contract.constraints.some(c => SAFETY_KEYWORD_PATTERN.test(c))
   if (hasSafetyConstraint) return 'full'
 
+  // 2d: 重构信号 → 'full'。重构改动面广、行为等价全靠计划兜底，lightweight
+  // 模板没有回归清单条款（事故链缺口 3：大重构被路由 lightweight →
+  // 导航丢失无人核对）。单文件 unit 级重构除外——那是局部改写不是重构工程。
+  if (REFACTOR_PATTERN.test(obj) && depthLayer !== 'unit') return 'full'
+
   // Rule 3 — WIRING depth + multi-file.
-  // If we reach here, enforcementFileCount < 2 (Rule 2b already checked).
-  // WIRING multi-file without multi-gate signal → lightweight.
-  // (Pure refactors spanning multiple non-enforcement files don't need the
-  // full 9-stage template.)
+  // If we reach here, enforcementFileCount < 2 (Rule 2b already checked)
+  // and the objective carries no refactor signal (Rule 2d). WIRING
+  // multi-file without multi-gate/refactor signal → lightweight.
 
   // Rule 4 — WIRING depth + single enforcement file + safety keyword → 'full'
   // Even when only one enforcement file is touched, if the objective

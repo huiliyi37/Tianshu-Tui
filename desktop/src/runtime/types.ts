@@ -145,6 +145,10 @@ export interface PlanSummary {
   createdAt: number
   approvedAt?: number
   options?: PlanOption[]
+  /** 产出模型留痕（submit 时写入的模型名）。缺失 = 旧计划或未知模型。 */
+  model?: string
+  /** 产出模型 tier（名字推断）。cheap 时展示低阶模型复核警告。 */
+  modelTier?: 'cheap' | 'balanced' | 'strong' | null
 }
 
 /** Live plan-mode draft — the working document the agent grows while planning.

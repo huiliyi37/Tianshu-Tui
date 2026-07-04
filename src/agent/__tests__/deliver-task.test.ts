@@ -34,6 +34,8 @@ function makeContext(opts: {
   detectWroteButNeverRead?: (cwd: string, files: string[]) => Array<{ symbol: string; file: string; kind: 'export' | 'field' }>
   meridianDb?: import('../../repo/meridian-db.js').MeridianDb
   typecheckRunner?: import('../typecheck-gate.js').TypecheckRunner
+  taskContract?: import('../../context/task-contract.js').TaskContract
+  inventorySearcher?: import('../regression-inventory.js').InventorySearcher
 }) {
   const baseline = createWorktreeBaseline({
     branch: 'feat/b1',
@@ -67,6 +69,8 @@ function makeContext(opts: {
     detectWroteButNeverRead: opts.detectWroteButNeverRead ?? (() => []),
     meridianIndexer: opts.meridianDb ? { getDb: () => opts.meridianDb! } as unknown as import('../../repo/meridian-indexer.js').MeridianIndexer : null,
     typecheckRunner: opts.typecheckRunner,
+    getTaskContract: opts.taskContract ? () => opts.taskContract : undefined,
+    inventorySearcher: opts.inventorySearcher,
   }))
 
   const params: ToolCallParams = {
@@ -1018,7 +1022,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
       const result = await tool.execute(params)
 
       assert.match(result.content, /Delivery Gate: GREEN/)
-      assert.match(result.content, /Stale failure candidates: 1/)
+      assert.match(result.content, /预存量失败：1 条/)
       assert.doesNotMatch(result.content, /Cannot commit/)
     })
 
@@ -1038,8 +1042,66 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
       assert.match(result.content, /Delivery Gate: GREEN/)
       assert.match(result.content, /Owned files \(0\)/)
-      assert.match(result.content, /Attribution: Verification invocation failure/)
+      // b34ba6b2 语义化归因后：无 owned 改动时归因为"无文件修改"，
+      // 关键语义是失败未被放大成阻断（GREEN + 无 Blocking）。
+      assert.match(result.content, /Attribution: No file modifications/)
       assert.doesNotMatch(result.content, /⚠️  Blocking:/)
+    })
+  })
+
+  // ── 层3: 重构行为等价契约 — 回归清单核验（重构事故链缺口 3）──
+  describe('regression inventory verification', () => {
+    function contractWith(objective: string, inventory?: string[]): import('../../context/task-contract.js').TaskContract {
+      return {
+        id: 'c1', objective, scope: { mentionedFiles: [] }, constraints: [], successCriteria: [],
+        status: 'executing', createdAtTurn: 0, updatedAtTurn: 0, isActionable: true,
+        ...(inventory ? { regressionInventory: inventory } : {}),
+      }
+    }
+
+    it('verifies contract inventory items and flags missing anchors in the report', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        taskContract: contractWith('重构导航系统', ['导航项 `settingsSurface` 仍注册', '路由 `/api/plans` 仍存在']),
+        inventorySearcher: (_cwd, needle) => needle === 'settingsSurface' ? 'present' : 'missing',
+      })
+
+      const result = await tool.execute(params)
+
+      assert.match(result.content, /回归清单核验 \(1\/2 仍存在\)/)
+      assert.match(result.content, /✅ 导航项/)
+      assert.match(result.content, /❌ 路由/)
+      assert.match(result.content, /重构丢功能/)
+    })
+
+    it('warns YELLOW-style when a refactor delivery has no inventory at all', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        taskContract: contractWith('重构 TUI 面板布局'),
+        // findApprovedPlanInventory 在 /fake/project 找不到计划 → 走缺清单分支
+      })
+
+      const result = await tool.execute(params)
+
+      assert.match(result.content, /重构类交付缺少回归清单/)
+      assert.match(result.content, /行为等价未核验/)
+    })
+
+    it('stays silent for non-refactor deliveries without inventory', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        taskContract: contractWith('修复登录按钮的 typo'),
+      })
+
+      const result = await tool.execute(params)
+
+      assert.doesNotMatch(result.content, /回归清单/)
     })
   })
 

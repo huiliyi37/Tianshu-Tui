@@ -280,7 +280,7 @@ export function createTeamOrchestrateTool(
 
       const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict)
       return {
-        content: formatTeamSummary(summary, effectiveFromWave) + notes.reviewNote + notes.scopeHealthNote + notes.impactNote + notes.deliverySynthesis + planAdvisoryNote,
+        content: formatTeamSummary(summary, effectiveFromWave) + notes.reviewNote + notes.scopeHealthNote + notes.impactNote + notes.waveGateNote + notes.deliverySynthesis + planAdvisoryNote,
         uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
       }

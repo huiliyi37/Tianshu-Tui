@@ -20,6 +20,10 @@ export interface CouncilFanoutRequest {
    *  seat declares both provider+model; threaded to the worker so this seat runs
    *  on an isolated provider/model — enables heterogeneous councils. */
   modelOverride?: { provider: string; model: string }
+  /** 瑶光门 tier 下限（席位 tierHint+noDowngrade）——接线到真实派发，
+   *  coordinator 的 preferredTier 不得低于此档。曾只在 shadow 记录，
+   *  导致天府护栏席声明 strong 却实际跑 flash（事故链缺口 1）。 */
+  tierFloor?: 'cheap' | 'balanced' | 'strong'
 }
 export interface CouncilDeps {
   delegateBatch: (
@@ -143,6 +147,15 @@ function seatModelOverride(seat: CouncilSeat): Pick<CouncilFanoutRequest, 'model
     : {}
 }
 
+/** 瑶光门接线：席位声明 tierHint+noDowngrade 且无显式 provider/model 时，
+ *  把路由 tier 作为 tierFloor 传给真实派发（不再只是 shadow 记录）。 */
+function seatTierFloor(seat: CouncilSeat, objective: string): Pick<CouncilFanoutRequest, 'tierFloor'> {
+  if (seat.provider && seat.model) return {}
+  if (!seat.noDowngrade || !seat.tierHint) return {}
+  const route = routeCouncilSeat(seat, { objective })
+  return { tierFloor: route.tier }
+}
+
 /** 单轮会诊：恰一次 delegateBatch 扇出席位 → 裁决 → 渲染。绝不派 worker 执行 / 分波。 */
 export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promise<CouncilPlan> {
   const convenedAt = deps.now() // 全程只取一次时钟，喂 shadow / meta / md，杜绝双取不一致。
@@ -157,6 +170,7 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
     scope: {},
     authority: seat.authority,
     ...seatModelOverride(seat),
+    ...seatTierFloor(seat, input.draft.objective),
   }))
 
   // 旁路：席位路由 shadow（推荐 vs 实际 tier）。默认缺省；提供时也绝不改派发结果。
@@ -215,6 +229,7 @@ export async function runCouncilDebate(input: CouncilInput, deps: CouncilDeps): 
     scope: {},
     authority: seat.authority,
     ...seatModelOverride(seat),
+    ...seatTierFloor(seat, input.draft.objective),
   }))
   const run2 = await deps.delegateBatch(r2requests, 'all_required', input.abortSignal,
     deps.onSeatProgress

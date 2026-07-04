@@ -180,6 +180,30 @@ describe('evaluateConvergence', () => {
     assert.ok(result.injectedMessage, 'should have injected message')
   })
 
+  // ── Level 3 建议升级（重构事故链缺口 4）：回归场景优先 bisect/基线对照 ──
+  it('level 3 message offers git bisect / checkpoint rollback for regression hunts, not just a new session', () => {
+    // 混入一次失败编辑，避开 productiveStagnation 早退分支，落到通用 level-3 尾部
+    const history = makeHistory([
+      { tool: 'grep', target: 'x' },
+      { tool: 'grep', target: 'x' },
+      { tool: 'edit_file', target: 'x', status: 'failed' },
+      { tool: 'grep', target: 'x' },
+      { tool: 'grep', target: 'x' },
+      { tool: 'grep', target: 'x' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 20,
+      phaseClass: 'execute',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+    }))
+    assert.equal(result.level, 3)
+    assert.ok(result.injectedMessage!.includes('git bisect'),
+      'level 3 must offer the baseline-comparison escape hatch for regressions')
+    assert.ok(result.injectedMessage!.includes('checkpoint'),
+      'checkpoint rollback should be offered alongside bisect')
+  })
+
   it('returns shouldAbort true when score is extremely low at level 3', () => {
     const history = makeHistory([
       { tool: 'grep', target: 'x', status: 'failed' },

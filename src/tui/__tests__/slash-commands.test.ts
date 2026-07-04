@@ -98,7 +98,7 @@ describe('/context 占用明细', () => {
     const handled = await handleSlashCommand(ctx)
     assert.equal(handled, true)
     assert.ok(captured.includes('Cache hit: 80%'), `应显示缓存命中率: ${captured}`)
-    assert.ok(captured.includes('Cost: $1.50'), `应显示 cost: ${captured}`)
+    assert.ok(captured.includes('Cost: ¥1.50'), `应显示 cost: ${captured}`)
     assert.ok(captured.includes('50,000/200,000'), `应显示 token 占用: ${captured}`)
     assert.ok(captured.includes('API (last):'), `应显示 API 实际值: ${captured}`)
     assert.ok(captured.includes('48,000'), `应显示实值 48,000: ${captured}`)

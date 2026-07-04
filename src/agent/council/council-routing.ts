@@ -1,6 +1,8 @@
 // 议事会席位多模型路由 —— 纯函数 + append-only shadow。
-// 铁律：routeCouncilSeat 零 I/O、零 Date，给定输入输出唯一；shadow 旁路记录，
-// 绝不影响真实派发（与 model-routing-shadow 同源设计）。
+// 铁律：routeCouncilSeat 零 I/O、零 Date，给定输入输出唯一。
+// shadow 记录本身仍是旁路（绝不影响派发）；但瑶光门（tierHint+noDowngrade）
+// 的路由结果经 council-orchestrator 的 seatTierFloor 接线到真实派发，
+// 作为 WorkOrder.tierFloor 下限生效（事故链缺口 1 修复）。
 
 import { recommendModelTier, type ModelTier, type ModelRiskTier } from '../model-tier-policy.js'
 

@@ -219,6 +219,9 @@ export function PlanPanel(props: {
               onClick={() => { setSelected(p.slug); setRejecting(false) }}
             >
               <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
+              {p.modelTier === 'cheap' && (
+                <span className="plan-badge st-cheap-model" title={`本计划由低阶模型（${p.model}）产出，建议复核`}>⚠ 低阶模型</span>
+              )}
               <span className="plan-title">{p.title}</span>
             </button>
           ))}
@@ -243,9 +246,10 @@ export function PlanPanel(props: {
               key={p.slug}
               className={`plan-chip ${p.slug === selected ? 'active' : ''}`}
               onClick={() => { setSelected(p.slug); setRejecting(false) }}
-              title={p.title}
+              title={p.modelTier === 'cheap' ? `${p.title} — 由低阶模型（${p.model}）产出，建议复核` : p.title}
             >
               <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
+              {p.modelTier === 'cheap' && <span className="plan-badge st-cheap-model">⚠</span>}
               <span className="plan-chip-title">{p.title}</span>
             </button>
           ))}
@@ -264,6 +268,11 @@ export function PlanPanel(props: {
 
       {current && (
         <div className="plan-detail">
+          {current.modelTier === 'cheap' && current.status === 'submitted' && (
+            <div className="plan-model-warning">
+              ⚠ 本计划由低阶模型（{current.model}）产出，计划真实度可能不足，建议对关键改动点复核后再 Build。
+            </div>
+          )}
           <div className="plan-doc">
             {doc.isLoading && <div className="empty sm">加载方案…</div>}
             {doc.data?.content && <Markdown source={doc.data.content} />}

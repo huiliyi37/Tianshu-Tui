@@ -28,6 +28,10 @@ export interface PlanDocument {
   approvedAt?: Date
   /** 多方案选项（submit 时持久化） */
   options?: PlanOption[]
+  /** 产出模型留痕（submit 时写入）。缺失 = 旧计划或未知模型。 */
+  model?: string
+  /** 产出模型 tier（名字推断）。cheap 时审批面显示低阶模型警告。 */
+  modelTier?: 'cheap' | 'balanced' | 'strong' | null
 }
 
 export interface PlanOption {
@@ -47,6 +51,40 @@ const PLAN_STATUS_LINE_RE = /^>\s*\*\*Status:\s*(?:APPROVED|REJECTED|EXECUTED)\*
  */
 export function stripPlanStatusMarkers(content: string): string {
   return content.replace(PLAN_STATUS_LINE_RE, '')
+}
+
+/** plan submit 写入的产出模型留痕行（H1 前，与 Status 标记同款）。 */
+const PLAN_MODEL_LINE_RE = /^>\s*\*\*Model:\s*(.+?)(?:\s*\((cheap|balanced|strong)\))?\*\*.*(?:\r?\n)+/m
+
+export interface PlanModelProvenance {
+  model: string
+  tier: 'cheap' | 'balanced' | 'strong' | null
+}
+
+/** 解析计划的产出模型留痕。无标记（旧计划）返回 undefined。 */
+export function parsePlanModel(content: string): PlanModelProvenance | undefined {
+  const m = content.match(PLAN_MODEL_LINE_RE)
+  if (!m) return undefined
+  return { model: m[1]!.trim(), tier: (m[2] as PlanModelProvenance['tier']) ?? null }
+}
+
+/**
+ * 写入/刷新产出模型留痕（幂等：先剥旧标记再插入）。放 H1 前，
+ * 与 Status 标记同一可视位置——审批人在计划正文里直接看到产出模型。
+ */
+export function insertPlanModelMarker(
+  content: string,
+  model: string,
+  tier: 'cheap' | 'balanced' | 'strong' | null,
+): string {
+  const stripped = content.replace(new RegExp(PLAN_MODEL_LINE_RE, 'gm'), '')
+  const line = `> **Model: ${model}${tier ? ` (${tier})` : ''}**\n\n`
+  const h1Match = stripped.match(/^#\s+.*$/m)
+  if (h1Match) {
+    const idx = stripped.indexOf(h1Match[0])
+    return stripped.slice(0, idx) + line + stripped.slice(idx)
+  }
+  return line + stripped
 }
 
 /** .rivet/plans 相对于项目根目录的路径 */
@@ -201,6 +239,7 @@ export async function readPlan(
     const content = await readFile(filePath, 'utf-8')
     const s = await stat(filePath)
     const status = parsePlanStatus(content)
+    const provenance = parsePlanModel(content)
     return {
       slug,
       title: extractTitle(content),
@@ -209,6 +248,7 @@ export async function readPlan(
       createdAt: s.birthtime,
       status,
       options: parsePlanOptions(content),
+      ...(provenance ? { model: provenance.model, modelTier: provenance.tier } : {}),
     }
   } catch {
     return null
@@ -251,6 +291,7 @@ export function listPlansSync(cwd: string): PlanDocument[] {
       const filePath = planFilePath(cwd, slug)
       const content = readFileSync(filePath, 'utf-8')
       const s = statSync(filePath)
+      const provenance = parsePlanModel(content)
       plans.push({
         slug,
         title: extractTitle(content),
@@ -259,6 +300,7 @@ export function listPlansSync(cwd: string): PlanDocument[] {
         createdAt: s.birthtime,
         status: parsePlanStatus(content),
         options: parsePlanOptions(content),
+        ...(provenance ? { model: provenance.model, modelTier: provenance.tier } : {}),
       })
     } catch {
       // Skip unreadable entries (mirrors readPlan's swallow-on-error).

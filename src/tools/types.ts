@@ -157,6 +157,8 @@ export interface ToolCallParams {
   delegationDepth?: number
   /** Active plan draft file (relative to cwd) while in plan mode. */
   activePlanFilePath?: string | null
+  /** 当前会话模型名 —— plan submit 用于产出模型留痕（低阶模型计划警告）。 */
+  sessionModel?: string
   /** AbortSignal from the tool pipeline — fires when the tool-level timeout
    *  rejects. Delegate tools propagate this to the coordinator so zombie
    *  workers are cleaned up immediately. */

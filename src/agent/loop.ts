@@ -89,6 +89,7 @@ import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join, dirname } from 'node:path'
 import { writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { extractRegressionInventory } from './regression-inventory.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
@@ -1373,6 +1374,15 @@ export class AgentLoop {
       return
     }
     this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
+    // 层3 重构回归契约：计划带「回归清单」章节时灌入 task contract，
+    // deliver_task 交付前对清单逐项 grep 核验（事故链缺口 3）。best-effort。
+    try {
+      const planContent = readFileSync(join(this.cwd, '.rivet', 'plans', `${plan.slug}.md`), 'utf-8')
+      const inventory = extractRegressionInventory(planContent)
+      if (inventory.length > 0 && this.taskContract) {
+        this.taskContract = { ...this.taskContract, regressionInventory: inventory }
+      }
+    } catch { /* best-effort: 清单灌入失败不影响计划批准 */ }
     const wasPlanning = this.planModeState === 'planning'
     this.planModeState = 'off'
     if (wasPlanning) this.config.promptEngine.setPlanExitReminderPending(true)

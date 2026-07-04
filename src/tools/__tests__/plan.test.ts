@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
-import { PLAN_TOOL } from '../plan.js'
-import { parsePlanOptions } from '../../plan/plan-store.js'
+import { PLAN_TOOL, checkPlanScale, PLAN_SCALE_TASK_THRESHOLD } from '../plan.js'
+import { parsePlanOptions, parsePlanModel } from '../../plan/plan-store.js'
 
 describe('plan tool submit', () => {
   let dir = ''
@@ -318,6 +318,84 @@ describe('plan tool submit', () => {
     assert.ok(!result.content.includes('锚点残留提示'))
   })
 
+  // ── 层1b: 产出模型留痕 ──
+  it('stamps the producing model into the plan and warns on cheap tier', async () => {
+    const plan = [
+      '## 根因分析',
+      '边界未重置。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      '修改 `src/foo.ts`。',
+    ].join('\n')
+
+    const result = await execute(
+      { action: 'submit', title: 'Provenance Plan', plan },
+      { sessionModel: 'gemini-2.5-flash' },
+    )
+    assert.ok(!result.isError, result.content)
+    assert.ok(result.content.includes('低阶模型'), 'cheap-tier warning surfaced in tool output')
+
+    const written = readFileSync(join(dir, '.rivet/plans/provenance-plan.md'), 'utf-8')
+    const provenance = parsePlanModel(written)
+    assert.equal(provenance?.model, 'gemini-2.5-flash')
+    assert.equal(provenance?.tier, 'cheap')
+  })
+
+  // ── 层2: 规模门禁 — 大计划必须分波 ──
+  function oversizedPlanBody(): string {
+    const tasks = Array.from(
+      { length: PLAN_SCALE_TASK_THRESHOLD + 1 },
+      (_, i) => `- [ ] 任务 ${i + 1} — 修改 \`src/foo.ts\``,
+    )
+    return [
+      '## 根因分析',
+      '范围很大。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      ...tasks,
+    ].join('\n')
+  }
+
+  it('soft-blocks an oversized plan without wave structure, passes resubmission with note', async () => {
+    const plan = oversizedPlanBody()
+
+    const first = await execute({ action: 'submit', title: 'Oversized Plan', plan })
+    assert.equal(first.isError, true)
+    assert.ok(first.content.includes('规模超阈值'), first.content)
+    assert.ok(first.content.includes('分波'), 'block message explains the wave requirement')
+    assert.ok(!existsSync(join(dir, '.rivet/plans/oversized-plan.md')), 'not persisted on first offense')
+
+    const second = await execute({ action: 'submit', title: 'Oversized Plan', plan })
+    assert.ok(!second.isError, second.content)
+    assert.ok(second.content.includes('规模留痕'), 'residual scale note kept on pass-through')
+  })
+
+  it('accepts an oversized plan that declares waves with per-wave verification', async () => {
+    const plan = [
+      oversizedPlanBody(),
+      '',
+      '## 分波执行',
+      '### Wave 1',
+      '任务 1-5。每波验证命令：`npx tsc --noEmit`',
+      '### Wave 2',
+      '任务 6-9。每波验证命令：`npm test`',
+    ].join('\n')
+
+    const result = await execute({ action: 'submit', title: 'Waved Plan', plan })
+    assert.ok(!result.isError, result.content)
+    assert.ok(!result.content.includes('规模留痕'), 'wave-structured plan passes without scale note')
+  })
+
   it('rejects reserved option labels', async () => {
     const plan = [
       '## 根因分析',
@@ -336,5 +414,36 @@ describe('plan tool submit', () => {
     })
     assert.equal(result.isError, true)
     assert.ok(result.content.includes('reserved'))
+  })
+})
+
+describe('checkPlanScale (纯函数)', () => {
+  it('counts checkbox tasks and file anchors', () => {
+    const content = [
+      '- [ ] one `src/a/b.ts`',
+      '- [x] two',
+      '* [ ] three',
+      '普通行不算',
+    ].join('\n')
+    const scale = checkPlanScale(content)
+    assert.equal(scale.taskCount, 3)
+    assert.equal(scale.fileCount, 1)
+    assert.equal(scale.oversized, false)
+  })
+
+  it('flags oversized by file count alone', () => {
+    const files = Array.from({ length: 16 }, (_, i) => `修改 \`src/mod${i}/file${i}.ts\``).join('\n')
+    const scale = checkPlanScale(files)
+    assert.ok(scale.fileCount > 15)
+    assert.equal(scale.oversized, true)
+  })
+
+  it('detects wave structure only when both wave headings and verification are declared', () => {
+    const noVerify = '### Wave 1\n做事\n### Wave 2\n做别的'
+    assert.equal(checkPlanScale(noVerify).hasWaveStructure, false)
+    const withVerify = '### Wave 1\n做事。每波验证命令：`npx tsc --noEmit`\n### Wave 2\n做别的'
+    assert.equal(checkPlanScale(withVerify).hasWaveStructure, true)
+    const chinese = '## 第一波\n做事\n\n每波验证：npm test'
+    assert.equal(checkPlanScale(chinese).hasWaveStructure, true)
   })
 })

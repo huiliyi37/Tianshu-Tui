@@ -106,6 +106,14 @@ export function deriveStableWorkOrderId(parentTurnId: string): string | undefine
     : undefined
 }
 
+const TIER_FLOOR_RANK: Record<ModelTier, number> = { cheap: 0, balanced: 1, strong: 2 }
+
+/** 瑶光门语义：floor 是「不得低于」的硬地板，只抬升不降级。 */
+export function applyTierFloor(tier: ModelTier, floor?: ModelTier): ModelTier {
+  if (!floor) return tier
+  return TIER_FLOOR_RANK[tier] >= TIER_FLOOR_RANK[floor] ? tier : floor
+}
+
 export interface DelegationRequest {
   parentTurnId: string
   objective: string
@@ -133,6 +141,9 @@ export interface DelegationRequest {
   authority?: string
   /** Team planner risk tier for shadow-only model tier recommendation. */
   riskTier?: ModelRiskTier
+  /** 瑶光门 tier 下限：路由结果不得低于此档（council 席位 tierHint+noDowngrade）。
+   *  只抬升不降级；modelOverride 仍然最高优先。 */
+  tierFloor?: ModelTier
   /** B2: current session turn for progressive timeout alignment. */
   sessionTurn?: number
   /** Per-request budget overrides (timeout/turns/tokens/retries). Takes
@@ -1003,6 +1014,7 @@ export class DelegationCoordinator {
             sessionTurn: request.sessionTurn,
             budget: request.budget,
             modelOverride: request.modelOverride,
+            tierFloor: request.tierFloor,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -1018,6 +1030,7 @@ export class DelegationCoordinator {
             riskTier: request.riskTier,
             sessionTurn: request.sessionTurn,
             modelOverride: request.modelOverride,
+            tierFloor: request.tierFloor,
             budget: request.budget,
           })
 
@@ -1132,9 +1145,12 @@ export class DelegationCoordinator {
 
     const tierRecommendation = this.buildTierRecommendation(order)
     const tierInfluence = this.evaluateTierInfluence(tierRecommendation)
-    const preferredTier = tierInfluence.gate.applied
-      ? tierInfluence.gate.effectiveTier
-      : tierRecommendation.tier
+    // 瑶光门 tierFloor：调用方声明的「不得低于」硬地板，对规则推荐与 bandit gate
+    // 的结果统一生效（只抬升不降级）。modelOverride 仍然最高优先。
+    const preferredTier = applyTierFloor(
+      tierInfluence.gate.applied ? tierInfluence.gate.effectiveTier : tierRecommendation.tier,
+      order.tierFloor,
+    )
     // Per-order modelOverride wins over all routing (review override, workers
     // routing, EFE, tier). The card is mostly telemetry/reporting (the real
     // client is built by runtimeFactory from order.modelOverride); synthesize

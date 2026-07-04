@@ -40,6 +40,7 @@ import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
 import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
 import { createDeadEndDetectorHook } from './hooks/dead-end-detector.js'
+import { createRegressionBisectHook } from './hooks/regression-bisect-hook.js'
 import { createIntentAnchorHook } from './hooks/intent-anchor-hook.js'
 import { createTurnBudgetHook } from './hooks/turn-budget-hook.js'
 import { createReasoningSpiralHook } from './hooks/reasoning-spiral-hook.js'
@@ -484,6 +485,17 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     hooks.push(createDeadEndDetectorHook({
       advisoryBus: deps.advisoryBus,
       deposit: deps.stigmergyDeposit,
+    }))
+  }
+
+  // Regression-Bisect 断路器: postTool hook — 回归语义 + 连续 ≥5 轮只读诊断
+  // 空转(零写入)时,强制策略升级到基线对照(git log → git bisect/checkpoint
+  // diff → regressionInventory 逐项定位)。事故链缺口 4:20+ 轮盲排查救援。
+  // Gated by RIVET_REGRESSION_BISECT (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_REGRESSION_BISECT !== '0') {
+    hooks.push(createRegressionBisectHook({
+      advisoryBus: deps.advisoryBus,
+      getObjective: deps.getIntentObjective,
     }))
   }
 

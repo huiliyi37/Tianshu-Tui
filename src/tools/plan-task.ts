@@ -254,7 +254,7 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
           ? `\n\n✅ Todo list 已同步 (${leafNodes.length} 项)。`
           : ''
         return {
-          content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}${todoNote}\n\n${run.summary.packet}${run.notes.scopeHealthNote}${run.notes.deliverySynthesis}`,
+          content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}${todoNote}\n\n${run.summary.packet}${run.notes.scopeHealthNote}${run.notes.waveGateNote}${run.notes.deliverySynthesis}`,
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)

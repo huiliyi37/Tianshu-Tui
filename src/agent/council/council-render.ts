@@ -1,4 +1,5 @@
 import type { CouncilPlan, CouncilDecision } from './council-plan.js'
+import { inferModelTierFromName } from '../model-tier-policy.js'
 
 /** 转义 markdown 表格元字符：管道符和换行。 */
 function esc(cell: string): string {
@@ -18,6 +19,15 @@ export function renderCouncilPlan(plan: CouncilPlan): string {
 
   lines.push(`# 议事会计划 — ${objective}`, '')
   lines.push(`> 席位: ${plan.seats.join(' · ')} · ${plan.meta.round} 轮会诊 · convenedAt=${plan.meta.convenedAt}`, '')
+
+  // 模型留痕警告：任一席位跑在低阶模型上时明示——议事会产出即执行依据，
+  // flash 席位的贡献真实度不可控（事故链缺口 1b）。
+  const cheapSeats = contributions
+    .filter(c => (c.round ?? 1) === 1 && c.modelUsed && inferModelTierFromName(c.modelUsed) === 'cheap')
+    .map(c => `${c.authority}(${c.modelUsed})`)
+  if (cheapSeats.length > 0) {
+    lines.push(`> ⚠ 低阶模型席位: ${cheapSeats.join(' · ')} —— 这些席位的贡献建议复核后再采纳。`, '')
+  }
 
   lines.push('## 席位贡献', '')
   // 仅渲染首轮全稿；第二轮席位只表态反驳，单列于「第二轮反驳」段，不在此重复出现。

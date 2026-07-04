@@ -593,6 +593,7 @@ export async function executeToolUse(
     delegationDepth: deps.config.delegationDepth,
     abortSignal: deps.abortSignal,
     activePlanFilePath: deps.config.activePlanFilePath,
+    sessionModel: deps.config.promptEngine.getModel(),
  }
 
   // Star signature: counter training-mode regression at token level (思路 E)

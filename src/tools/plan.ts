@@ -7,8 +7,9 @@
  */
 
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { writePlan, slugify, stripPlanStatusMarkers, insertPlanStatusMarker, isDraftSlug, type PlanOption } from '../plan/plan-store.js'
-import { checkPlanFactAnchors, formatAnchorDrifts } from '../plan/plan-fact-anchors.js'
+import { writePlan, slugify, stripPlanStatusMarkers, insertPlanStatusMarker, insertPlanModelMarker, isDraftSlug, type PlanOption } from '../plan/plan-store.js'
+import { checkPlanFactAnchors, formatAnchorDrifts, extractPlanAnchors } from '../plan/plan-fact-anchors.js'
+import { inferModelTierFromName } from '../agent/model-tier-policy.js'
 import { readFile, stat, rm } from 'node:fs/promises'
 import { join, basename } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
@@ -23,6 +24,8 @@ const warnedSlugs = new Set<string>()
 // submit with drifted anchors fails with the drift list; resubmitting the same
 // title passes — the model judges false positives (illustrative paths) itself.
 const anchorWarnedSlugs = new Set<string>()
+// 规模门禁（层2）：大计划必须显式分波 + 每波验证命令。one-shot 软拦同款模式。
+const scaleWarnedSlugs = new Set<string>()
 const MERMAID_FENCE = /```\s*mermaid/i
 const MISSING_DIAGRAM_SKELETON = `\`\`\`mermaid
 flowchart TD
@@ -31,6 +34,33 @@ flowchart TD
     R --> S[(存储/状态)]
     L --产出--> OUT([结果])
 \`\`\``
+
+// ── 计划规模门禁（层2）──
+// 「flash 出大计划 → 一口气执行 → 重构丢功能」事故链的规模环节：任务数或涉及
+// 文件数超阈值的计划，必须显式声明 wave 分波结构 + 每波验证命令，否则 one-shot
+// 软拦（同事实锚点门禁模式：首次拦截给出改法，同 title 重提交放行）。
+
+export const PLAN_SCALE_TASK_THRESHOLD = 8
+export const PLAN_SCALE_FILE_THRESHOLD = 15
+
+const WAVE_HEADING_RE = /^#{2,5}\s*.*(wave\s*\d|波\s*\d|第[一二三四五六七八九十\d]+波|分波)/im
+const WAVE_VERIFY_RE = /(每波|波间|波后|per[- ]wave|wave 完成).{0,60}(验证|verify|verification|typecheck|测试)|验证命令/i
+
+export interface PlanScaleCheck {
+  taskCount: number
+  fileCount: number
+  oversized: boolean
+  hasWaveStructure: boolean
+}
+
+/** 纯函数：估计计划规模（checkbox 任务数 + 引用文件数）并检测分波声明。 */
+export function checkPlanScale(content: string): PlanScaleCheck {
+  const taskCount = (content.match(/^\s*[-*]\s*\[[ xX]\]/gm) ?? []).length
+  const fileCount = extractPlanAnchors(content).length
+  const oversized = taskCount > PLAN_SCALE_TASK_THRESHOLD || fileCount > PLAN_SCALE_FILE_THRESHOLD
+  const hasWaveStructure = WAVE_HEADING_RE.test(content) && WAVE_VERIFY_RE.test(content)
+  return { taskCount, fileCount, oversized, hasWaveStructure }
+}
 
 // Placeholder detection — reject skeletal plans before they are persisted.
 const PLACEHOLDER_RE = /\b(TODO|FIXME|TBD|XXX|HACK|placeholder|占位符|待补充|待完善|待填写|待实现|稍后补充|略)\b/gi
@@ -351,8 +381,48 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
     // Anchor verification is best-effort — never let the guard itself block a submit.
   }
 
+  // 规模门禁：大计划（任务 > 8 或文件 > 15）必须显式分波 + 每波验证命令。
+  // one-shot 软拦——首拦给出改法，同 title 重提交放行（带留痕 note）。
+  let scaleNote = ''
   try {
-    const relativePath = await writePlan(params.cwd, slug, fullContent, submitOptions)
+    const scale = checkPlanScale(fullContent)
+    if (scale.oversized && !scale.hasWaveStructure) {
+      if (!scaleWarnedSlugs.has(slug)) {
+        scaleWarnedSlugs.add(slug)
+        return {
+          content: [
+            `⚠️ Plan not yet saved — 计划规模超阈值（任务 ${scale.taskCount} 个 / 涉及文件 ${scale.fileCount} 个，阈值 ${PLAN_SCALE_TASK_THRESHOLD}/${PLAN_SCALE_FILE_THRESHOLD}），但没有分波结构。`,
+            '',
+            '大计划一口气执行是重构事故的高发形态。请在计划中补充「分波执行」章节：',
+            '- 用 `### Wave 1 / Wave 2 / …` 标题把任务切成 2-4 个可独立验证的波次',
+            '- 每波末尾声明验证命令（typecheck / 测试），波间硬门禁会真实执行它们',
+            '- 波的边界放在功能可自证的位置（一波结束 = 可编译可测试）',
+            '',
+            '补充后重新提交（同一 title）。若你判断该计划确实不可分波（如单一原子迁移），可原样重提放行。',
+          ].join('\n'),
+          isError: true,
+        }
+      }
+      scaleNote = `\n⚠ 规模留痕：计划超阈值（任务 ${scale.taskCount} / 文件 ${scale.fileCount}）且无分波结构（已放行）。执行时建议手动分批 + 阶段性验证。`
+    }
+  } catch {
+    // Scale gate is best-effort — never let the guard itself block a submit.
+  }
+
+  // 产出模型留痕：记录本计划由哪个模型写出（H1 前标记行，PlanDocument 解析为
+  // model/modelTier）。低阶模型产出的计划在审批面（/plan-approve + 桌面 PlanPanel）
+  // 显示复核警告——掐断「flash 出大计划无人知晓」的事故链源头。
+  const producerModel = params.sessionModel?.trim()
+  const producerTier = producerModel ? inferModelTierFromName(producerModel) : null
+  const contentToPersist = producerModel
+    ? insertPlanModelMarker(fullContent, producerModel, producerTier)
+    : fullContent
+  const cheapModelNote = producerTier === 'cheap'
+    ? `\n⚠ 本计划由低阶模型（${producerModel}）产出，审批面会提示用户复核。`
+    : ''
+
+  try {
+    const relativePath = await writePlan(params.cwd, slug, contentToPersist, submitOptions)
     // Draft recycling: the content now lives in the canonical plan file — remove
     // the plan-mode working draft so it never lingers as an orphan (and never
     // duplicates the submitted plan). Best-effort: a failed cleanup must not
@@ -371,6 +441,8 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
         `Slug: \`${slug}\``,
         optionsHint,
         anchorDriftNote,
+        scaleNote,
+        cheapModelNote,
         '',
         `The user will review and respond with:`,
         `- \`/plan-approve ${slug}\` — approve and start execution`,

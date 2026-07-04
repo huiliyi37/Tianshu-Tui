@@ -123,6 +123,9 @@ export const workOrderSchema = z.object({
    *  used by heterogeneous council seats. Silently ignored if the provider is
    *  unknown or lacks credentials (runtimeFactory falls back to the session model). */
   modelOverride: z.object({ provider: z.string().min(1), model: z.string().min(1) }).optional(),
+  /** 瑶光门 tier 下限：路由结果不得低于此档（council 席位 tierHint+noDowngrade
+   *  等场景）。只抬升不降级；modelOverride 仍然最高优先。 */
+  tierFloor: z.enum(['cheap', 'balanced', 'strong']).optional(),
 })
 
 export type WorkOrder = z.infer<typeof workOrderSchema>
@@ -264,6 +267,8 @@ export interface CreateReadOnlyWorkOrderInput {
   sessionTurn?: number
   /** Per-order provider/model override (highest routing precedence). */
   modelOverride?: { provider: string; model: string }
+  /** 瑶光门 tier 下限：路由结果不得低于此档。只抬升不降级。 */
+  tierFloor?: 'cheap' | 'balanced' | 'strong'
 }
 
 function toolsForAuthority(tools: string[], authority?: string): string[] {
@@ -331,6 +336,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     authority: input.authority,
     riskTier: input.riskTier,
     modelOverride: input.modelOverride,
+    tierFloor: input.tierFloor,
   })
 }
 
@@ -379,6 +385,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     authority: input.authority,
     riskTier: input.riskTier,
     modelOverride: input.modelOverride,
+    tierFloor: input.tierFloor,
   })
 }
 

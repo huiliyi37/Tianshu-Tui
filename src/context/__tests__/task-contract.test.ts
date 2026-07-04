@@ -295,8 +295,9 @@ describe('classifyPlanMethodology', () => {
     assert.equal(methodology, 'lightweight')
   })
 
-  // ── Wiring + no enforcement → 'lightweight' ──
-  it('routes wiring multi-file pure refactor to lightweight', () => {
+  // ── Rule 2d: wiring-level refactor → 'full'（重构事故链缺口 3）──
+  // 旧契约把多文件纯重构降级 lightweight——正是「大重构无回归清单」的事故源。
+  it('routes wiring multi-file refactor to full (regression-inventory clause lives in full template)', () => {
     const contract = makeContract(
       '重构 tool-group 为 collapsed-read-search，抽纯函数',
       ['src/tools/tool-group.ts', 'src/tui/search-panel.tsx'],
@@ -304,8 +305,8 @@ describe('classifyPlanMethodology', () => {
     const depth = classifyTaskDepth(contract)
     assert.equal(depth, 'wiring')
     const methodology = classifyPlanMethodology(contract, depth)
-    assert.equal(methodology, 'lightweight',
-      'wiring + 0 enforcement files → lightweight (pure refactor)')
+    assert.equal(methodology, 'full',
+      'wiring-depth refactor must route to full — lightweight has no regression inventory clause')
   })
 
   // ── Default: no signal → 'lightweight' ──
@@ -372,16 +373,26 @@ describe('classifyPlanMethodology', () => {
       'wiring + single enforcement file + no safety keyword → lightweight')
   })
 
-  // ── Edge: wiring + non-enforcement multi-file → lightweight ──
-  it('routes wiring + multi non-enforcement files to lightweight', () => {
+  // ── Edge: 重构信号覆盖非 enforcement 多文件（Rule 2d 优先于 Rule 3）──
+  it('routes wiring + multi non-enforcement refactor to full (Rule 2d)', () => {
     const contract = makeContract(
       '重构 TUI 面板布局',
       ['src/tui/app.tsx', 'src/tui/input.tsx', 'src/tui/search-panel.tsx'],
     )
     const depth = classifyTaskDepth(contract)
     const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'full',
+      'refactor signal wins over non-enforcement heuristic — regression inventory required')
+  })
+
+  // ── Rule 2d 边界：unit 级单文件重构仍走 lightweight ──
+  it('keeps unit-depth single-file refactor on lightweight', () => {
+    const contract = makeContract('重构 slugify 函数命名', ['src/plan/plan-store.ts'])
+    const depth = classifyTaskDepth(contract)
+    assert.equal(depth, 'unit')
+    const methodology = classifyPlanMethodology(contract, depth)
     assert.equal(methodology, 'lightweight',
-      'multi-file non-enforcement refactor → lightweight')
+      'unit-level rewrite is a local edit, not a refactor project')
   })
 
   // ── Edge: Chinese "双门" in objective triggers Rule 2a ──

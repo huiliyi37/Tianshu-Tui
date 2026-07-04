@@ -523,8 +523,13 @@ export async function approvePlanAndKickoff(
   const driftLine = driftNote
     ? `\n\n⚠ 锚点漂移复查:计划中有引用与当前工作区不符(已注入执行提示,执行方将以现实为准):\n${driftNote}`
     : ''
+  // 低阶模型留痕警告：flash 出的计划真实度不可控（事故链：大重构计划丢功能），
+  // 批准时明示产出模型，提醒复核关键改动点。不阻断——用户已看过计划正文。
+  const tierWarnLine = existing.modelTier === 'cheap'
+    ? `\n\n⚠ 本计划由低阶模型产出（${existing.model}），建议对关键改动点复核后再放行执行。`
+    : ''
   deps.notify(
-    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。${driftLine}`,
+    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。${tierWarnLine}${driftLine}`,
   )
   deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach, driftNote))
   return true
@@ -1573,7 +1578,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       } else {
         const lines = plans.map(p => {
           const statusIcon = p.status === 'approved' ? '✅' : p.status === 'rejected' ? '❌' : p.status === 'executed' ? '🏁' : '📋'
-          return `  ${statusIcon} \`${p.slug}\` — ${p.title} (${p.status}, ${p.createdAt.toLocaleString()})`
+          const tierTag = p.modelTier === 'cheap' ? ' ⚠低阶模型产出' : ''
+          return `  ${statusIcon} \`${p.slug}\` — ${p.title} (${p.status}, ${p.createdAt.toLocaleString()})${tierTag}`
         })
         pushStatic(createLogEntry({ type: 'system', content: `Plans (.rivet/plans/):\n\n${lines.join('\n')}\n\nUse /plan-approve <slug> to approve, /plan-reject <slug> to reject.` }))
       }

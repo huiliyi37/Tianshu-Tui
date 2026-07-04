@@ -34,6 +34,7 @@ import type { AggregationPolicy } from './work-order.js'
 import type { ImpactResult } from '../repo/meridian-impact.js'
 import { runChangedFilesTypecheckMemo, typecheckGateEnabled, type TypecheckRunner } from './typecheck-gate.js'
 import { getWaveResults, setWaveResults } from './wave-results-store.js'
+import { evaluateWaveGate, formatWaveGate, getWaveGate, isWaveGateEnabled, setWaveGate } from './wave-gate.js'
 
 /** Narrow surface for meridian structural impact analysis, so tests can mock it
  *  without the full MeridianIndexer. MeridianIndexer satisfies this structurally. */
@@ -98,6 +99,8 @@ export interface PlanExecutorRun {
     scopeHealthNote: string
     impactNote: string
     deliverySynthesis: string
+    /** 波间硬门禁结果（非末波评估；空串 = 未评估或禁用）。 */
+    waveGateNote: string
   }
 }
 
@@ -166,6 +169,30 @@ export function teamReviewFocusHint(waveTasks: TeamTask[]): string | undefined {
  */
 export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorDeps): Promise<PlanExecutorRun> {
   let telemetryEvent: TeamWaveTelemetry | undefined
+
+  // ── 波间硬门禁（入口侧）：上一波门禁未通过 → 禁止 dispatch 本波 ──
+  // 自愈：主控可能已直接修复代码（而非重跑波），拦截前先复评一次；
+  // 复评通过则放行并更新记录。RIVET_WAVE_GATE=0 可整体禁用。
+  if (isWaveGateEnabled() && opts.fromWave > 0) {
+    const prior = getWaveGate(opts.sessionId)
+    if (prior && prior.wave === opts.fromWave - 1 && !prior.passed) {
+      const recheck = await evaluateWaveGate({
+        cwd: opts.cwd,
+        wave: prior.wave,
+        changedFiles: prior.changedFiles,
+        commands: prior.commands,
+        typecheckRunner: deps.getTypecheckRunner?.(),
+      })
+      setWaveGate(recheck, opts.sessionId)
+      if (!recheck.passed) {
+        throw new Error(
+          `波间硬门禁：wave ${prior.wave + 1} 验证未通过，禁止派发 wave ${opts.fromWave + 1}。\n` +
+          formatWaveGate(recheck).join('\n') +
+          `\n先修复失败项（或重跑该波），门禁复评通过后方可继续。逃生阀：RIVET_WAVE_GATE=0。`,
+        )
+      }
+    }
+  }
 
   // Cross-wave failure propagation: pull the prior wave's results (Phase B —
   // session-scoped so the plan_task → team_orchestrate bridge survives).
@@ -331,6 +358,37 @@ export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorD
     }
   }
 
+  // ── 波间硬门禁（出口侧）：非末波完成后立即评估 typecheck + 该波验证命令 ──
+  // 结果存会话级 store；失败不在此处抛错（本波成果已产出，留给下一波入口拦），
+  // 但 note 必须留痕让主控立刻看到。
+  let waveGateNote = ''
+  if (isWaveGateEnabled() && !isLastWave && summary.run) {
+    try {
+      const taskById = new Map(summary.tasks.map(task => [task.id, task]))
+      const waveTasks = (summary.waves[effectiveFromWave]?.taskIds ?? [])
+        .map(id => taskById.get(id))
+        .filter((task): task is TeamTask => Boolean(task))
+      const commands = [...new Set(waveTasks.flatMap(task => task.verification).map(v => v.trim()).filter(Boolean))]
+      if (changedFiles.length > 0 || commands.length > 0) {
+        const record = await evaluateWaveGate({
+          cwd: opts.cwd,
+          wave: effectiveFromWave,
+          changedFiles: changedFiles.filter(f => !isAbsolute(f)),
+          commands,
+          typecheckRunner: deps.getTypecheckRunner?.(),
+        })
+        setWaveGate(record, opts.sessionId)
+        waveGateNote = `\n\n${formatWaveGate(record).join('\n')}`
+        if (!record.passed) {
+          waveGateNote += `\n⛔ 下一波派发将被硬拦，先修复失败项。逃生阀：RIVET_WAVE_GATE=0。`
+        }
+      }
+    } catch {
+      // 门禁评估自身故障不阻断波结果返回（fail-open 只针对评估器崩溃，
+      // 验证命令失败仍是硬拦）。
+    }
+  }
+
   if (telemetryEvent) {
     const closedTelemetry = {
       ...telemetryEvent,
@@ -367,6 +425,6 @@ export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorD
   return {
     summary,
     reviewVerdict,
-    notes: { reviewNote, scopeHealthNote, impactNote, deliverySynthesis },
+    notes: { reviewNote, scopeHealthNote, impactNote, deliverySynthesis, waveGateNote },
   }
 }

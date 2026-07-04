@@ -702,6 +702,15 @@ body {
 .plan-badge.st-drafting { background: var(--accent-soft); color: var(--accent); animation: draft-pulse 2s ease-in-out infinite; }
 .plan-chip.draft { border-style: dashed; }
 @keyframes draft-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+/* 低阶模型产出留痕 — flash 出的计划建议复核（重构事故链缺口 1b）。 */
+.plan-badge.st-cheap-model { background: var(--error-soft); color: var(--error); }
+.plan-model-warning {
+  flex-shrink: 0; margin: var(--space-2) var(--space-3) 0;
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius);
+  background: var(--warning-soft); color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  font-size: 12px; line-height: 1.5;
+}
 
 .plan-detail { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .plan-doc { flex: 1; overflow-y: auto; padding: var(--space-3); }

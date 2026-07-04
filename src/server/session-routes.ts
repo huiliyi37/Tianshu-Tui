@@ -118,6 +118,8 @@ function planSummary(p: PlanDocument) {
     createdAt: p.createdAt instanceof Date ? p.createdAt.getTime() : p.createdAt,
     approvedAt: p.approvedAt instanceof Date ? p.approvedAt.getTime() : p.approvedAt,
     options: p.options,
+    model: p.model,
+    modelTier: p.modelTier,
   }
 }
 
