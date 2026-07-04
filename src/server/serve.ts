@@ -551,7 +551,10 @@ function buildManagedAgent(
       const oldAgent = agent
       void oldAgent.cancelIdleCompaction()
       spec = next
-      agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
+      // Preserve the live approvalMode — user may have switched autonomy level
+      // since session creation. The closure variable is stale if they did.
+      const liveApprovalMode = oldAgent.config.approvalMode
+      agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, liveApprovalMode, registry, shared)
       if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
         try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
       }
