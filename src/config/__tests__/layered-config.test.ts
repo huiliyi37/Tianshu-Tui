@@ -25,12 +25,6 @@ describe('loadConfig — 3-layer resolution', () => {
       'DEFAULT_CONFIG.agent.checkpointEveryTurns must match schema default — drift makes the schema value dead')
   })
 
-  it('DEFAULT_CONFIG.agent.autonomyBrake matches schema default (drift guard, C3)', () => {
-    const schemaDefault = agentSchema.shape.autonomyBrake._def.defaultValue()
-    assert.equal(DEFAULT_CONFIG.agent.autonomyBrake, schemaDefault,
-      'DEFAULT_CONFIG.agent.autonomyBrake must match schema default — drift makes the schema value dead')
-  })
-
   // ── C3 legacy migration: persisted checkpointEveryTurns=10 (old default)
   // without an autonomyBrake field is unmigrated legacy → new default 0 (off).
   // RIVET_CONFIG_PATH is pinned to an isolated temp file so the developer's
@@ -54,14 +48,13 @@ describe('loadConfig — 3-layer resolution', () => {
     withIsolatedUserConfig({ agent: { checkpointEveryTurns: 10 } }, () => {
       const config = loadConfig()
       assert.equal(config.agent.checkpointEveryTurns, 0, 'legacy 10 is treated as unmigrated → schema default 0 (off)')
-      assert.equal(config.agent.autonomyBrake, 'cruise')
     })
   })
 
-  it('keeps checkpointEveryTurns=10 when autonomyBrake is explicitly set (already migrated)', () => {
-    withIsolatedUserConfig({ agent: { autonomyBrake: 'cruise', checkpointEveryTurns: 10 } }, () => {
+  it('migrates any checkpointEveryTurns=10 to the new default 0 (autonomyBrake removed)', () => {
+    withIsolatedUserConfig({ agent: { checkpointEveryTurns: 10 } }, () => {
       const config = loadConfig()
-      assert.equal(config.agent.checkpointEveryTurns, 10, 'explicit post-migration 10 must be honored')
+      assert.equal(config.agent.checkpointEveryTurns, 0, '10 migrates to 0 since autonomyBrake field is gone')
     })
   })
 

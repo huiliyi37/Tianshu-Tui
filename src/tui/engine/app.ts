@@ -3243,7 +3243,7 @@ export class TuiApp {
       for (const line of info.digest.split('\n')) {
         lines.push(` │ ${color(line, this.theme.secondary)}`)
       }
-      lines.push(` ╰─ ${color('输入 continue 继续，或 /autonomy 调整刹车档位', this.theme.secondary)}`)
+      lines.push(` ╰─ ${color('输入 continue 继续，或 /permission 调整权限模式', this.theme.secondary)}`)
     } else {
       lines.push(color(`◦ 自治进度播报（第 ${info.turns} 轮，不暂停）`, this.theme.secondary))
       for (const line of info.digest.split('\n')) {

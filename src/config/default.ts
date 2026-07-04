@@ -121,7 +121,6 @@ export const DEFAULT_CONFIG: Config = {
     maxTeamParallel: 3,
     council: { seats: [] },
     maxAutoContinue: 1,
-    autonomyBrake: 'cruise',
     checkpointEveryTurns: 0,
     intentRetrievalRouter: {
       enabled: true,

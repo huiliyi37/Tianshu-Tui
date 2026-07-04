@@ -60,7 +60,7 @@ import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
-import { getMirrorConfig, setMirrorConfig, setAutonomyConfig } from '../config/manager.js'
+import { getMirrorConfig, setMirrorConfig, setCheckpointConfig } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
 import { getResolvedEnv, getResolvedPathDiff } from '../tools/resolved-env.js'
@@ -77,9 +77,7 @@ const HELP_TEXT = `Available commands:
 /model [name|list] — Show or switch model
 /domain [list|<name>|auto|off] — Show or switch star domain personality
 /verbose — Toggle verbose tool output
-/auto — Toggle auto-approve
-/permission [status|mode|allow|deny|bash|remove|reset|test] — Manage permission mode and rules
-/autonomy [cruise [轮数]|unleashed] — 自治刹车档位（巡航检查点 / 完全自治）
+/permission [manual|auto|yolo|allow|deny|bash|remove|reset|test] — 权限模式：统一入口（Manual/Auto/YOLO 三档）
 /theme [cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
 /vim — Toggle vim keybindings
 /effort [off|low|medium|high|max] — Set reasoning effort
@@ -1189,45 +1187,6 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     },
   },
   {
-    name: '/auto',
-    immediate: true,
-    handler(ctx) {
-      const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      const next = !ctx.autoSafeRef.current
-      ctx.setAutoSafe(next)
-      ctx.agent.setApprovalMode(next ? 'auto-safe' : 'manual')
-      pushStatic(createLogEntry({ type: 'system', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
-      setIsStreaming(false)
-      return true
-    },
-  },
-  {
-    name: '/yes',
-    immediate: true,
-    handler(ctx) {
-      const { parts, agent, pushStatic, setIsStreaming } = ctx
-      const sub = parts[1]?.toLowerCase()
-      const currentlyYolo = (agent.config.approvalMode ?? 'manual') === 'dangerously-skip-permissions'
-      let enable: boolean
-      if (sub === 'on') enable = true
-      else if (sub === 'off') enable = false
-      else enable = !currentlyYolo // bare /yes toggles
-
-      if (enable) {
-        agent.setApprovalMode('dangerously-skip-permissions')
-        ctx.setAutoSafe(false)
-        pushStatic(createLogEntry({ type: 'system', content: 'YES 模式：开启 — 跳过所有审批，不再弹确认。⚠️ 高风险操作也会直接执行，请谨慎。' }))
-      } else {
-        agent.setApprovalMode('auto-safe')
-        ctx.setAutoSafe(true)
-        pushStatic(createLogEntry({ type: 'system', content: 'YES 模式：关闭 — 恢复 auto-safe（高风险操作仍会弹确认）。' }))
-      }
-      setIsStreaming(false)
-      return true
-    },
-  },
-  {
     name: '/permission',
     immediate: true,
     handler(ctx) {
@@ -1276,12 +1235,11 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
 
         const lines: string[] = []
         const currentMode = agent.config.approvalMode ?? 'manual'
-        lines.push(`当前模式: ${currentMode}`)
-        lines.push('\n可选模式：')
-        for (const m of VALID_MODES) {
-          const marker = m === currentMode ? '→ ' : '  '
-          lines.push(`${marker}${MODE_LABELS[m]}`)
-        }
+        const currentLabel = { manual: 'Manual', 'auto-safe': 'Auto', 'auto-accept': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[currentMode] ?? currentMode
+        lines.push(`当前权限: ${currentLabel} (${currentMode})`)
+        lines.push('')
+        lines.push('快速切换: /permission manual | /permission auto [轮次] | /permission yolo [confirm]')
+        lines.push('')
 
         if (allow.length > 0) {
           lines.push('\nAllow 规则：')
@@ -1316,6 +1274,63 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
+      // ── 三档快速切换 ──
+
+      if (sub === 'manual') {
+        agent.setApprovalMode('manual')
+        ctx.setAutoSafe(false)
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 Manual — 所有高风险操作都需人工确认' }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'auto') {
+        const intervalRaw = parts[2]
+        if (intervalRaw !== undefined) {
+          const v = Number(intervalRaw)
+          if (!Number.isInteger(v) || v < 0) {
+            pushStatic(createLogEntry({ type: 'system', content: '轮数必须是非负整数。用法: /permission auto [轮次]', isError: true }))
+            setIsStreaming(false)
+            return true
+          }
+          setCheckpointConfig({ checkpointEveryTurns: v })
+        }
+        agent.setApprovalMode('auto-safe')
+        ctx.setAutoSafe(true)
+        const interval = intervalRaw !== undefined ? Number(intervalRaw) : undefined
+        const cpNote = interval !== undefined ? (interval > 0 ? `，检查点每 ${interval} 轮暂停` : '，检查点已关闭') : ''
+        pushStatic(createLogEntry({ type: 'system', content: `✓ 已切换至 Auto — 低/无风险工具自动执行，高风险仍需确认${cpNote}\n\n  调整检查点: /permission auto <轮数>（0 = 关）` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'yolo') {
+        const confirmed = parts[2]?.toLowerCase() === 'confirm'
+        if (!confirmed) {
+          pushStatic(createLogEntry({ type: 'system', content: [
+            '⚠ YOLO 模式风险说明',
+            '',
+            '  · 无轮次刹车 — run 一直执行到完成或 maxTurns 上限',
+            '  · 无进度播报 — 完全静默运行',
+            '  · 所有工具调用直接执行，不再弹确认',
+            '  · 沙箱仍拦截项目外写入',
+            '  · 回滚兜底：/rollback + git 检查点',
+            '  · Windows 注意：沙箱能力降级',
+            '',
+            '确认进入: /permission yolo confirm',
+          ].join('\n') }))
+          setIsStreaming(false)
+          return true
+        }
+        agent.setApprovalMode('dangerously-skip-permissions')
+        ctx.setAutoSafe(false)
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰。/rollback 可随时回滚。' }))
+        setIsStreaming(false)
+        return true
+      }
+
+      // ── 高级 mode 命令（保留兼容） ──
+
       if (sub === 'mode') {
         const mode = parts[2]
         if (!mode || !isRuntimeMode(mode)) {
@@ -1324,7 +1339,6 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           return true
         }
         agent.setApprovalMode(mode)
-        // Keep /auto toggle ref in sync for users who still use /auto.
         ctx.setAutoSafe(mode === 'auto-safe')
         pushStatic(createLogEntry({ type: 'system', content: `Approval mode → ${mode}` }))
         setIsStreaming(false)
@@ -1438,73 +1452,6 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       pushStatic(createLogEntry({ type: 'system', content: '未知子命令。用法: /permission [status|mode|allow|deny|bash|remove|reset|test]', isError: true }))
       setIsStreaming(false)
       return true
-    },
-  },
-  {
-    name: '/autonomy',
-    immediate: true,
-    handler(ctx) {
-      const { parts, pushStatic, setIsStreaming } = ctx
-      const sub = parts[1]?.toLowerCase()
-      const finish = (content: string, isError = false): true => {
-        pushStatic(createLogEntry({ type: 'system', content, isError }))
-        setIsStreaming(false)
-        return true
-      }
-
-      if (!sub) {
-        const { autonomyBrake, checkpointEveryTurns } = ctx.agent.getAutonomyBrake()
-        const modeLabel = autonomyBrake === 'cruise' ? '巡航（cruise）' : '完全自治（unleashed）'
-        const intervalLabel = autonomyBrake === 'cruise'
-          ? (checkpointEveryTurns > 0 ? `每 ${checkpointEveryTurns} 轮暂停并同步进度` : '轮次检查点已关闭')
-          : '无刹车、无播报 — 持续执行直到 maxTurns 或完成'
-        return finish(`自治刹车状态\n\n  模式: ${modeLabel}\n  ${intervalLabel}\n  生效范围: 仅自治档（dangerously-skip-permissions）\n\n命令:\n  /autonomy cruise [轮数] — 巡航档（默认 0 关，推荐 20-30）\n  /autonomy unleashed — 完全自治档（需二次确认）`)
-      }
-
-      if (sub === 'cruise') {
-        let interval: number | undefined
-        if (parts[2] !== undefined) {
-          const v = Number(parts[2])
-          if (!Number.isInteger(v) || v < 0) {
-            return finish('轮数必须是非负整数（0 = 关闭刹车）。用法: /autonomy cruise [轮数]', true)
-          }
-          interval = v
-        }
-        try {
-          const saved = setAutonomyConfig({ autonomyBrake: 'cruise', checkpointEveryTurns: interval })
-          ctx.agent.setAutonomyBrake('cruise', saved.checkpointEveryTurns)
-          return finish(`✓ 已切换到巡航档：每 ${saved.checkpointEveryTurns} 轮暂停并同步进度摘要（0 = 关闭）。已持久化，下一轮生效。`)
-        } catch (err) {
-          return finish(`设置失败: ${(err as Error).message}`, true)
-        }
-      }
-
-      if (sub === 'unleashed') {
-        const confirmed = parts[2]?.toLowerCase() === 'confirm'
-        if (!confirmed) {
-          return finish([
-            '⚠ 完全自治档（unleashed）风险说明',
-            '',
-            '  · 无轮次刹车 — run 会持续执行直到任务完成或 maxTurns 上限',
-            '  · 无进度播报 — 完全静默运行',
-            '  · 工具审批已跳过（自治档本身的行为）',
-            '  · 沙箱仍会拦截项目目录外的写入',
-            '  · 回滚兜底：run 开始前有 git 检查点，随时可用 /rollback 回到起点',
-            '  · Windows 注意：沙箱能力降级，逃逸风险相对更高',
-            '',
-            '确认进入请输入: /autonomy unleashed confirm',
-          ].join('\n'))
-        }
-        try {
-          const saved = setAutonomyConfig({ autonomyBrake: 'unleashed' })
-          ctx.agent.setAutonomyBrake('unleashed')
-          return finish('✓ 已切换到完全自治档：无轮次刹车、无进度播报、持续执行直到完成。/rollback 可随时回滚兜底。已持久化，下一轮生效。')
-        } catch (err) {
-          return finish(`设置失败: ${(err as Error).message}`, true)
-        }
-      }
-
-      return finish('未知子命令。用法: /autonomy [cruise [轮数]|unleashed]', true)
     },
   },
   {
@@ -3443,48 +3390,13 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
-  register("/auto", {
-    description: "Toggle auto-approve",
+  register("/permission", {
+    description: "权限模式：Manual / Auto / YOLO 三档统一入口",
     immediate: true,
     handler: () => {
-      const next = !autoSafeRef.current
-      autoSafeRef.current = next
-      const mode = next ? "auto-safe" : "manual"
-      ctx.agent.setApprovalMode(mode)
-      app.setApprovalMode(mode)
-      app.commitStatic(next
-        ? 'Auto-approve: on (auto-safe — high-risk still requires approval)'
-        : 'Auto-approve: off (manual — all mutating tools require approval)')
-      app.setStreamingState(false)
-      return true
-    },
-  })
-
-  // /yes needs the same TUI state sync as /auto so worker pills / glance bar
-  // reflect the real approval mode.
-  register("/yes", {
-    description: "YOLO 模式 — 一键跳过所有审批（再次输入关闭）",
-    immediate: true,
-    handler: ({ trimmed }) => {
-      const parts = trimmed.split(/\s+/)
-      const sub = parts[1]?.toLowerCase()
-      const currentlyYolo = (ctx.agent.config.approvalMode ?? 'manual') === 'dangerously-skip-permissions'
-      let enable: boolean
-      if (sub === 'on') enable = true
-      else if (sub === 'off') enable = false
-      else enable = !currentlyYolo
-
-      if (enable) {
-        ctx.agent.setApprovalMode('dangerously-skip-permissions')
-        autoSafeRef.current = false
-        app.setApprovalMode('dangerously-skip-permissions')
-        app.commitStatic('YES 模式：开启 — 跳过所有审批，不再弹确认。⚠️ 高风险操作也会直接执行，请谨慎。')
-      } else {
-        ctx.agent.setApprovalMode('auto-safe')
-        autoSafeRef.current = true
-        app.setApprovalMode('auto-safe')
-        app.commitStatic('YES 模式：关闭 — 恢复 auto-safe（高风险操作仍会弹确认）。')
-      }
+      // Delegate to the main permission handler — it reads approvalMode live.
+      app.setApprovalMode(ctx.agent.config.approvalMode ?? 'manual')
+      app.commitStatic(`当前权限: ${ctx.agent.config.approvalMode ?? 'manual'} — /permission manual|auto|yolo 快速切换`)
       app.setStreamingState(false)
       return true
     },

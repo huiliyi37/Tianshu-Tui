@@ -37,17 +37,8 @@ export interface AgentConfig {
    */
   maxAutoContinue?: number
   /**
-   * C3 自治刹车模式 — 'cruise' pauses at the checkpoint interval with a progress
-   * digest; 'unleashed' never pauses (non-blocking progress pings only, rollback
-   * is the safety net). Defaults to 'cruise' when unset. Only meaningful when
-   * approvalMode is 'dangerously-skip-permissions'.
-   */
-  autonomyBrake?: 'cruise' | 'unleashed'
-  /**
-   * C3 自治档检查点间隔 — cruise: pause the run for user confirmation after this
-   * many turns within a single run(); unleashed: non-blocking progress ping
-   * interval. 0/unset disables. Only enforced when approvalMode is
-   * 'dangerously-skip-permissions' (supervised modes brake via approvals).
+   * C3 检查点间隔 — Auto 模式下每 N 轮暂停并同步进度摘要（0 = 关）。
+   * YOLO 和 Manual 模式不读此字段。
    */
   checkpointEveryTurns?: number
   contextWindow: number
@@ -219,14 +210,14 @@ export interface DecisionShift {
   severity?: 'info' | 'warn'
 }
 
-/** C3 — payload for autonomy checkpoint pauses (cruise) and progress pings (unleashed). */
+/** C3 — payload for Auto mode checkpoint pauses. */
 export interface AutonomyCheckpointInfo {
   /** Turns completed in this run when the event fired. */
   turns: number
   /** Human-readable progress digest: files modified, recent tools, token usage. */
   digest: string
-  /** true = run paused awaiting confirmation (cruise); false = non-blocking ping (unleashed). */
-  paused: boolean
+  /** Always true for checkpoints (the run pauses awaiting confirmation). */
+  paused: true
 }
 
 export interface AgentCallbacks {
@@ -252,10 +243,8 @@ export interface AgentCallbacks {
   onIntentNote?: (intent: IntentPreview) => void
   /** Called to drain any pending steer guidance for injection into tool results */
   onSteerDrain?: () => string | null
-  /** C3 自治档检查点/播报 — fires only in autonomous mode. `paused: true` means
-   *  the run stopped awaiting user confirmation ("continue" resumes, cruise
-   *  brake); `paused: false` is a non-blocking progress ping (unleashed brake,
-   *  the run keeps going). `digest` is a human-readable progress summary. */
+  /** C3 Auto 模式检查点 — 仅在 auto-safe 模式下、checkpointEveryTurns > 0
+   *  时触发。run 暂停等待用户确认（"continue" 继续）。digest 为进度摘要。 */
   onAutonomyCheckpoint?: (info: AutonomyCheckpointInfo) => void
   /** T4 — structured per-worker delegation status/progress (subagent panel). */
   onDelegationActivity?: (activity: DelegationActivity) => void

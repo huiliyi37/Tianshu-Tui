@@ -619,14 +619,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Config ===
     getMaxTurns: () => self.config.maxTurns,
-    // C3 — checkpoint brake applies only to the autonomous tier; supervised
-    // modes already stop at approvals. Read live (not captured) so a mid-session
-    // approval-mode switch takes effect on the next turn.
-    getCheckpointEveryTurns: () => self.config.approvalMode === 'dangerously-skip-permissions'
+    // C3 — checkpoint brake applies only to auto-safe mode (high-risk tools
+    // still need human approval). YOLO and manual modes get 0 (no brake).
+    // Read live so a mid-session approval-mode switch takes effect.
+    getCheckpointEveryTurns: () => self.config.approvalMode === 'auto-safe'
       ? (self.config.checkpointEveryTurns ?? 0)
       : 0,
-    // C3 — brake mode: cruise pauses at the interval, unleashed runs without brake.
-    getAutonomyBrake: () => self.config.autonomyBrake ?? 'cruise',
     buildProgressDigest: (turns) => buildProgressDigest({
       turns,
       filesModified: [...self.evidence.getState().filesModified],

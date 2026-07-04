@@ -935,24 +935,35 @@ export function setEditorConfig(
   return apiPut<{ ok: boolean } & EditorConfig>('/config/editor', input)
 }
 
-// ── Autonomy brakes (C3) ─────────────────────────────────────────────
-export type AutonomyBrakeMode = 'cruise' | 'unleashed'
+// ── Shell / Git Bash 路径（Windows 命令执行）─────────────────────────
+/** `exists`: true/false when a path is set (probed), null when unset. */
+export interface ShellConfig { gitBashPath: string; exists: boolean | null }
 
-export interface AutonomyConfig {
-  /** cruise = pause with digest at the interval; unleashed = non-blocking pings only. */
-  autonomyBrake: AutonomyBrakeMode
-  /** cruise pause / unleashed ping interval (turns). 0 = off. */
+export function getShellConfig(): Promise<ShellConfig> {
+  return apiGet<ShellConfig>('/config/shell')
+}
+
+export function setShellConfig(
+  input: { gitBashPath: string },
+): Promise<{ ok: boolean } & ShellConfig> {
+  return apiPut<{ ok: boolean } & ShellConfig>('/config/shell', input)
+}
+
+// ── Auto 检查点 (C3) ─────────────────────────────────────────────
+
+export interface CheckpointConfig {
+  /** Auto mode pause interval (turns). 0 = off. */
   checkpointEveryTurns: number
 }
 
-export function getAutonomyConfig(): Promise<AutonomyConfig> {
-  return apiGet<AutonomyConfig>('/config/autonomy')
+export function getCheckpointConfig(): Promise<CheckpointConfig> {
+  return apiGet<CheckpointConfig>('/config/checkpoint')
 }
 
-export function setAutonomyConfig(
-  input: { autonomyBrake?: AutonomyBrakeMode; checkpointEveryTurns?: number },
-): Promise<{ ok: boolean } & AutonomyConfig> {
-  return apiPut<{ ok: boolean } & AutonomyConfig>('/config/autonomy', input)
+export function setCheckpointConfig(
+  input: { checkpointEveryTurns?: number },
+): Promise<{ ok: boolean } & CheckpointConfig> {
+  return apiPut<{ ok: boolean } & CheckpointConfig>('/config/checkpoint', input)
 }
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────

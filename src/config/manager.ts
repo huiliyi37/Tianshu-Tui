@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, uiSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, envSchema, uiSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
@@ -229,48 +229,63 @@ export function setEditorConfig(input: { platform?: unknown; eol?: unknown }): E
   return cfg.editor
 }
 
-// --- Autonomy brakes (C3) ---
+// --- Shell / Git Bash 路径（Windows 命令执行） ---
 
-export type AutonomyBrakeMode = 'cruise' | 'unleashed'
-
-export interface AutonomyConfigSnapshot {
-  autonomyBrake: AutonomyBrakeMode
-  checkpointEveryTurns: number
+export interface ShellConfigSnapshot {
+  /** Configured custom Git Bash path, or empty string when unset. */
+  gitBashPath: string
 }
 
-/** Snapshot of the autonomy brake settings for the desktop/TUI settings UI. */
-export function getAutonomyConfig(): AutonomyConfigSnapshot {
-  const agent = loadConfig().agent
-  return { autonomyBrake: agent.autonomyBrake, checkpointEveryTurns: agent.checkpointEveryTurns }
+/** Snapshot of the shell block (Git Bash override) for the desktop settings UI. */
+export function getShellConfig(): ShellConfigSnapshot {
+  return { gitBashPath: loadConfig().env.gitBashPath ?? '' }
 }
 
 /**
- * Persist the autonomy brake settings. `autonomyBrake` selects the mode
- * (cruise = pause-with-digest, unleashed = no brake + non-blocking pings);
- * `checkpointEveryTurns` is the interval for both (0 = off). Takes effect at
- * the next run() (the orchestrator reads it live per turn).
- *
- * NOTE: the caller (UI) is responsible for the unleashed risk-acknowledgement
- * flow; this layer just persists the validated value.
+ * Persist a custom Git Bash path to the user global config (`env.gitBashPath`).
+ * An empty/whitespace value clears the override. Takes effect on the next
+ * sidecar/session start (seeded into RIVET_GIT_BASH_PATH via
+ * applyConfiguredGitBashPath). Only meaningful on Windows.
  */
-export function setAutonomyConfig(input: {
-  autonomyBrake?: unknown
-  checkpointEveryTurns?: unknown
-}): AutonomyConfigSnapshot {
+export function setShellConfig(input: { gitBashPath?: unknown }): ShellConfigSnapshot {
   const cfg = loadConfig()
-  if (input.autonomyBrake !== undefined) {
-    if (input.autonomyBrake !== 'cruise' && input.autonomyBrake !== 'unleashed') {
-      throw new Error("autonomyBrake must be 'cruise' or 'unleashed'")
-    }
-    cfg.agent.autonomyBrake = input.autonomyBrake
+  const merged: Record<string, unknown> = { ...cfg.env }
+  if (input.gitBashPath !== undefined) {
+    const raw = String(input.gitBashPath).trim()
+    if (raw) merged.gitBashPath = raw
+    else delete merged.gitBashPath
   }
+  cfg.env = envSchema.parse(merged)
+  saveConfig(cfg)
+  return { gitBashPath: cfg.env.gitBashPath ?? '' }
+}
+
+// --- Auto 检查点 (C3) ---
+
+export interface CheckpointConfigSnapshot {
+  checkpointEveryTurns: number
+}
+
+/** Snapshot of the checkpoint interval for the desktop/TUI settings UI. */
+export function getCheckpointConfig(): CheckpointConfigSnapshot {
+  return { checkpointEveryTurns: loadConfig().agent.checkpointEveryTurns }
+}
+
+/**
+ * Persist the checkpoint interval for Auto mode (auto-safe).
+ * 0 = off (no pause). Takes effect at the next run().
+ */
+export function setCheckpointConfig(input: {
+  checkpointEveryTurns?: unknown
+}): CheckpointConfigSnapshot {
+  const cfg = loadConfig()
   if (input.checkpointEveryTurns !== undefined) {
     const v = Number(input.checkpointEveryTurns)
     if (!Number.isInteger(v) || v < 0) throw new Error('checkpointEveryTurns must be a non-negative integer')
     cfg.agent.checkpointEveryTurns = v
   }
   saveConfig(cfg)
-  return { autonomyBrake: cfg.agent.autonomyBrake, checkpointEveryTurns: cfg.agent.checkpointEveryTurns }
+  return { checkpointEveryTurns: cfg.agent.checkpointEveryTurns }
 }
 
 /** Snapshot of the mirror configuration block. */
