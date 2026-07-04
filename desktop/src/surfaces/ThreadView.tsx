@@ -870,7 +870,6 @@ export function ThreadView(props: {
                       domainName={activeDomain?.name}
                       onContinue={handleWatchdogContinue}
                       onCancelContinue={onAbort}
-                      domainTurnNumber={item.turnNumber}
                       onEditUserMsg={async (seq, text) => {
                         const point = rewindPoints.find(p => p.seq === seq)
                         if (point) {
@@ -1281,10 +1280,10 @@ const Block = memo(BlockImpl, (a, b) =>
   a.onFileClick === b.onFileClick &&
   a.domainGlyph === b.domainGlyph && a.domainName === b.domainName &&
   a.onContinue === b.onContinue && a.onCancelContinue === b.onCancelContinue &&
-  a.domainTurnNumber === b.domainTurnNumber && a.onEditUserMsg === b.onEditUserMsg
+  a.onEditUserMsg === b.onEditUserMsg
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, domainGlyph, domainName, onContinue, onCancelContinue, domainTurnNumber, onEditUserMsg }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, domainGlyph, domainName, onContinue, onCancelContinue, onEditUserMsg }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
@@ -1292,7 +1291,6 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
   onFileClick?: (path: string) => void
   domainGlyph?: string
   domainName?: string
-  domainTurnNumber?: number
   /** Resume a run stopped by the watchdog quota (sends "continue"). */
   onContinue?: () => void
   /** C2 刹车 — cancel a pending watchdog auto-continue countdown (aborts the session). */
@@ -1377,7 +1375,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
     return <ThinkingBlock block={block} streaming={!!isStreaming} />
   }
   if (block.kind === 'turn') {
-    return <div className="turn-divider-line" />
+    return null
   }
   if (block.kind === 'checkpoint') {
     return (
@@ -1510,7 +1508,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
     )
   }
   return (
-    <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph} turnNumber={domainTurnNumber}>
+    <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph}>
       <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} />
     </MsgBlock>
   )
@@ -1657,11 +1655,10 @@ function MsgBlock(props: {
   isError?: boolean
   className?: string
   children: React.ReactNode
-  turnNumber?: number
   canEdit?: boolean
   onEdit?: () => void
 }) {
-  const { role, roleGlyph, isError, className, children, turnNumber, canEdit, onEdit } = props
+  const { role, roleGlyph, isError, className, children, canEdit, onEdit } = props
   const [copied, setCopied] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -1680,18 +1677,11 @@ function MsgBlock(props: {
 
   return (
     <div className={`msg${kind}`}>
-      {role && (
+      {role && (roleGlyph === 'user' || roleGlyph === 'steer') && (
         <div className="msg-role" title={role}>
           {roleGlyph === 'user' && <span className="msg-role-dot" />}
           {roleGlyph === 'steer' && <span className="msg-role-glyph">↳</span>}
-          {roleGlyph && roleGlyph !== 'user' && roleGlyph !== 'steer' && (
-            <span className="msg-role-glyph">{roleGlyph}</span>
-          )}
-          {roleGlyph && roleGlyph !== 'user' && roleGlyph !== 'steer' ? (
-            <span className="msg-role-turn">#{turnNumber ?? 1}</span>
-          ) : (
-            <span className="msg-role-label">{role}</span>
-          )}
+          <span className="msg-role-label">{role}</span>
         </div>
       )}
       <div className="msg-body" ref={ref}>
