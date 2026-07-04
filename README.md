@@ -147,31 +147,37 @@ rivet config show                                         # 查看完整配置
 
 完整说明见 [模型配置指南](docs/user-guide-provider-config.md)。
 
-## 🔐 审批与授权
+## 🔐 权限模式
 
-| 模式 | 行为 |
-|------|------|
-| `auto-safe`（默认） | 低风险操作自动批准；安全写命令（mkdir/touch/cp/重定向）即使无沙箱也自动放行；高风险仍询问 |
-| `manual` | 任何工具声明需要审批时都询问 |
-| `dangerously-skip-permissions` | 跳过所有交互提示 —— 仅限可信工作区 |
+三档统一入口，所有模式通过 `/permission` 管理：
 
-> **Windows 注意**：Windows 原生无文件系统沙箱。天枢桌面版安装包内嵌 PortableGit（完整 Git + Git Bash，开箱即用，不依赖用户自装 Git for Windows；已装系统 Git 时优先用系统版）。无沙箱环境下，安全写命令在 `auto-safe` 模式自动放行，风险写（rm/mv/git 写操作）仍需审批。
+| 模式 | 命令 | 行为 |
+|------|------|------|
+| **Manual** | `/permission manual` | 每个高风险工具都弹确认。最大控制，适合敏感项目。 |
+| **Auto**（默认） | `/permission auto [轮次]` | 低/无风险工具自动执行，高风险仍确认。可配每 N 轮暂停检查点（`/permission auto 20`），默认关闭。 |
+| **YOLO** | `/permission yolo confirm` | 全自动执行，无刹车无打扰。回滚兜底（`/rollback` + git 检查点）。需二次确认。 |
+
+> **Windows 注意**：Windows 原生无文件系统沙箱。天枢桌面版安装包内嵌 PortableGit（完整 Git + Git Bash，开箱即用，不依赖用户自装 Git for Windows；已装系统 Git 时优先用系统版）。无沙箱环境下，安全写命令在 Auto 模式自动放行，风险写（rm/mv/git 写操作）仍需审批。
 
 ```bash
-rivet config set-approval dangerously-skip-permissions
-rivet --dangerously-skip-permissions   # 单次会话覆盖
+rivet config set-approval dangerously-skip-permissions  # 启动即 YOLO
+rivet --dangerously-skip-permissions                    # 单次会话 YOLO
 ```
 
-会话内用 `/permission` 管理权限模式与工具/bash 的允许-拒绝规则：
+会话内用 `/permission` 管理：
 
 ```
-/permission status                  # 查看当前模式与生效规则
-/permission mode auto-safe          # 切换模式
-/permission allow <tool>            # 允许某工具，不再询问
-/permission deny <tool>             # 始终拦截某工具
-/permission bash <pattern>          # 配置某条 bash 命令的允许/拒绝
-/permission reset                   # 清空自定义规则
+/permission                    # 查看当前模式与规则
+/permission manual             # 切 Manual
+/permission auto [轮次]        # 切 Auto，可选检查点间隔（0=关）
+/permission yolo confirm       # 切 YOLO（需二次确认）
+/permission allow <tool>       # 白名单工具
+/permission deny <tool>        # 黑名单工具
+/permission bash allow <前缀>  # bash 命令白名单
+/permission reset               # 清空自定义规则
 ```
+
+**Auto 检查点**：在 Auto 模式下，可设置每 N 轮暂停并同步进度摘要（改了哪些文件 / token 用量），确认方向后继续。桌面端设置面板可直接配置。
 
 跳过提示**不会**禁用工具验证、路径安全、证据追踪、检查点和交付门禁。沙箱后端、路径授权、风险分级详见 [沙箱与权限](docs/user-guide-sandbox-permissions.md)。
 
@@ -331,7 +337,7 @@ rivet config mcp list                                              # 列出 + �
 | `/sessions` `/resume <n>` | 列出/恢复已保存会话（恢复侧栏、待办、活动计划） |
 | `/effort [off\|low\|medium\|high\|max\|auto]` | 控制推理深度（无参数弹出选择面板） |
 | `/theme [name\|list]` | 切换色彩主题 |
-| `/permission [status\|mode\|allow\|deny\|bash\|remove\|reset\|test]` | 管理权限模式与工具/bash 允许-拒绝规则 |
+| `/permission [manual\|auto\|yolo\|allow\|deny\|bash\|remove\|reset\|test]` | 权限模式：Manual / Auto / YOLO 三档统一 |
 | `/skill <name>` | 加载并立即执行一个 skill |
 | `/skill off <name>` | 停止重复注入某个 skill |
 | `/debug [prompt\|cache\|mcp]` | 调试 prompt、缓存统计或 MCP |
