@@ -5,6 +5,7 @@ import { useUiDispatch, useUiState } from './state/store'
 import { loadKnownProjects, projectId, deriveProjects } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { SurfaceSkeleton } from './components/Skeleton'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { TitleBar } from './components/TitleBar'
 
@@ -289,7 +290,7 @@ export function App() {
 
         <div className="surface">
           <ErrorBoundary label={ui.surface === 'mission' ? '任务中控台' : '工作台'}>
-            <Suspense fallback={<div className="surface-loading">加载中…</div>}>
+            <Suspense fallback={<SurfaceSkeleton />}>
               <WorkspaceSurface />
             </Suspense>
           </ErrorBoundary>
