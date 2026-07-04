@@ -6,7 +6,7 @@
 # 同步策略:
 #   ✅ 同步: src/ desktop/ docs/seed-capsule*.md docs/seed-capsule-archive/
 #            docs/stars/ scripts/ CLAUDE.md .rivet/knowledge/
-#            .github/workflows/build-windows.yml
+#            .github/（排除 ISSUE_TEMPLATE/dependabot）
 #   ❌ 不同步: docs/design/ docs/teamtask/ docs/superpowers/
 #             .rivet/plans/ .rivet/sessions/ .rivet/backups/
 #             .rivet/constellation.json .rivet/vsw/ .cursor/
@@ -107,10 +107,12 @@ for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json 
   fi
 done
 
-echo "=== 同步: CI ==="
-if [[ -f "$DEV_DIR/.github/workflows/build-windows.yml" ]]; then
-  mkdir -p "$PUB_DIR/.github/workflows"
-  rsync $RSYNC_FLAGS "$DEV_DIR/.github/workflows/build-windows.yml" "$PUB_DIR/.github/workflows/"
+echo "=== 同步: CI（.github 全量，排除无关内容）==="
+if [[ -d "$DEV_DIR/.github" ]]; then
+  rsync $RSYNC_FLAGS \
+    --exclude='ISSUE_TEMPLATE/' \
+    --exclude='dependabot.yml' \
+    "$DEV_DIR/.github/" "$PUB_DIR/.github/"
 fi
 
 echo ""
