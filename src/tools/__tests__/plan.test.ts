@@ -148,6 +148,63 @@ describe('plan tool submit', () => {
     assert.ok(written.includes('flowchart TD'))
   })
 
+  // 2026-07-04 缺陷复盘: plan-mode 工作草稿（draft-<ts>.md）提交成功后残留，
+  // 曾以 "Untitled Plan"/重复 chip 的形态污染桌面计划列表。提交即回收。
+  it('deletes the draft-shaped source file after a successful submit', async () => {
+    const draftPath = '.rivet/plans/draft-1751600000000.md'
+    const abs = join(dir, draftPath)
+    mkdirSync(dirname(abs), { recursive: true })
+    writeFileSync(abs, [
+      '# Recycled Draft',
+      '',
+      '## 根因分析',
+      '边界条件未重置。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      '修改 `src/foo.ts`。',
+    ].join('\n'), 'utf-8')
+
+    const result = await execute(
+      { action: 'submit', title: 'Recycled Draft' },
+      { activePlanFilePath: draftPath },
+    )
+    assert.ok(!result.isError, result.content)
+    assert.ok(existsSync(join(dir, '.rivet/plans/recycled-draft.md')), 'canonical plan file written')
+    assert.ok(!existsSync(abs), 'source draft recycled after successful submit')
+  })
+
+  it('leaves the draft untouched when plan content is passed directly', async () => {
+    const draftPath = '.rivet/plans/draft-1751600000001.md'
+    const abs = join(dir, draftPath)
+    mkdirSync(dirname(abs), { recursive: true })
+    writeFileSync(abs, '# Unrelated Draft\n\nstill being written\n', 'utf-8')
+
+    const plan = [
+      '## 根因分析',
+      '边界条件未重置。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      '修改 `src/foo.ts`。',
+    ].join('\n')
+
+    const result = await execute(
+      { action: 'submit', title: 'Inline Plan Content', plan },
+      { activePlanFilePath: draftPath },
+    )
+    assert.ok(!result.isError, result.content)
+    assert.ok(existsSync(abs), 'draft not consumed by an inline-content submit')
+  })
+
   // 2026-07-03 缺陷复盘: 驳回后模型修订同一文件再重提交(省略 plan 字段),
   // 残留的 Status: REJECTED 标记曾让新提交被 parsePlanStatus 误判为 rejected,
   // 从待批准列表消失。submit 必须剥离历史状态标记。

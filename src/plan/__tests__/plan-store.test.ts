@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { writePlan, readPlan, listPlans, approvePlan, rejectPlan, deletePlan, slugify, stripPlanStatusMarkers, resolvePlanOptionLabel, stripCopiedTitleSuffix, resolvePlanRef, type PlanDocument } from '../plan-store.js'
+import { writePlan, readPlan, listPlans, listPlansSync, approvePlan, rejectPlan, deletePlan, slugify, stripPlanStatusMarkers, resolvePlanOptionLabel, stripCopiedTitleSuffix, resolvePlanRef, isDraftSlug, type PlanDocument } from '../plan-store.js'
 import { checked, checkedAt } from '../../utils/guard.js'
 
 describe('slugify', () => {
@@ -139,6 +139,23 @@ describe('plan-store CRUD', () => {
     }
   })
 
+  // Plan-mode 工作草稿（draft-<ts>.md）不是已提交计划——泄漏进列表会以
+  // "Untitled Plan" 待审 chip 的形态出现在 TUI/桌面（2026-07-04 缺陷）。
+  it('listPlans and listPlansSync skip plan-mode draft files', async () => {
+    const { dir, cleanup } = setup()
+    try {
+      await writePlan(dir, 'real-plan', '# Real Plan\n\nBody.')
+      await writePlan(dir, 'draft-1751600000000', '')
+      await writePlan(dir, 'draft-1751600000001', '# Growing Draft\n\nnot submitted yet')
+      const plans = await listPlans(dir)
+      assert.deepEqual(plans.map(p => p.slug), ['real-plan'])
+      const sync = listPlansSync(dir)
+      assert.deepEqual(sync.map(p => p.slug), ['real-plan'])
+    } finally {
+      cleanup()
+    }
+  })
+
   it('listPlans returns empty for no plans', async () => {
     const { dir, cleanup } = setup()
     try {
@@ -190,6 +207,20 @@ describe('plan-store CRUD', () => {
     } finally {
       cleanup()
     }
+  })
+})
+
+describe('isDraftSlug', () => {
+  it('matches the createActivePlanDraftPath shape (draft-<timestamp>)', () => {
+    assert.equal(isDraftSlug('draft-1751600000000'), true)
+    assert.equal(isDraftSlug('draft-1'), true)
+  })
+
+  it('rejects real plan slugs, even draft-prefixed titles', () => {
+    assert.equal(isDraftSlug('fix-memory-leak'), false)
+    assert.equal(isDraftSlug('draft-proposal-for-cache'), false)
+    assert.equal(isDraftSlug('draft-'), false)
+    assert.equal(isDraftSlug('draft-123x'), false)
   })
 })
 

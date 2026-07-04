@@ -7,10 +7,10 @@
  */
 
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { writePlan, slugify, stripPlanStatusMarkers, insertPlanStatusMarker, type PlanOption } from '../plan/plan-store.js'
+import { writePlan, slugify, stripPlanStatusMarkers, insertPlanStatusMarker, isDraftSlug, type PlanOption } from '../plan/plan-store.js'
 import { checkPlanFactAnchors, formatAnchorDrifts } from '../plan/plan-fact-anchors.js'
-import { readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readFile, stat, rm } from 'node:fs/promises'
+import { join, basename } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { relative } from 'node:path'
 import { validatePath } from './path-validate.js'
@@ -257,6 +257,7 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
     return { content: 'Error: title is required', isError: true }
   }
 
+  let submittedFromDraft: string | null = null
   if (typeof planContent !== 'string' || !planContent.trim()) {
     const draftPath = params.activePlanFilePath
     if (!draftPath) {
@@ -281,6 +282,7 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
       }
     }
     planContent = draftText
+    submittedFromDraft = draftPath
   }
 
   // 剥离历史 approve/reject 状态标记 — 驳回修订后从活动计划文件整读重提交时,
@@ -351,6 +353,14 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
 
   try {
     const relativePath = await writePlan(params.cwd, slug, fullContent, submitOptions)
+    // Draft recycling: the content now lives in the canonical plan file — remove
+    // the plan-mode working draft so it never lingers as an orphan (and never
+    // duplicates the submitted plan). Best-effort: a failed cleanup must not
+    // fail the submit. Only draft-shaped files are removed; a revision session
+    // whose active plan file IS the canonical file is left untouched.
+    if (submittedFromDraft && isDraftSlug(basename(submittedFromDraft, '.md'))) {
+      await rm(join(params.cwd, submittedFromDraft), { force: true }).catch(() => {})
+    }
     const optionsHint = submitOptions && submitOptions.length >= 2
       ? `\nOptions recorded (${submitOptions.length}). User can choose at approval: ${submitOptions.map(o => `\`${o.label}\``).join(', ')}`
       : ''

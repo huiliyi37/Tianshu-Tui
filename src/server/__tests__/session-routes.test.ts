@@ -20,11 +20,13 @@ class FakeAgent implements ManagedAgent {
   runPrompts: string[] = []
   activePlanCalls: ({ slug: string; title: string; selectedApproach?: string } | null)[] = []
   enterPlanModeCalls: Array<{ planFilePath?: string } | undefined> = []
+  activePlanFilePath: string | null = null
   private resolveRun?: () => void
   run(p: string, cb: AgentCallbacks) { this.runPrompts.push(p); this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
   abort() { this.resolveRun?.() }
   setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null) { this.activePlanCalls.push(plan) }
   enterPlanMode(opts?: { planFilePath?: string }) { this.enterPlanModeCalls.push(opts) }
+  getActivePlanFilePath() { return this.activePlanFilePath }
   listArtifacts() { return this.artifacts }
   readArtifact(id: string) { return Promise.resolve(this.artifacts.some((a) => a.id === id) ? `raw:${id}` : null) }
   getMessages(): OaiMessage[] { return [] }
@@ -272,6 +274,43 @@ test('Plan: GET /plans lists plans (newest first) and 404s a missing session', a
 
   const missing = await router('GET', '/sessions/nope/plans', {}, AUTH)
   assert.equal(missing.status, 404)
+})
+
+// 2026-07-04 缺陷复盘: plan-mode 空草稿（draft-<ts>.md）泄漏进列表，
+// 桌面 Plan 面板出现 "Untitled Plan" 待审 chip。草稿走独立 draft 通道。
+test('Plan: GET /plans filters drafts from the list and exposes the active draft while planning', async () => {
+  const { manager, router, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'alpha.md'), '# Alpha Plan\n\nbody', 'utf-8')
+  writeFileSync(join(plansDir, 'draft-1751600000000.md'), '# Growing Draft\n\nwip', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  // Not planning — drafts never appear in the list, draft channel is null.
+  const off = await router('GET', `/sessions/${s.id}/plans`, {}, AUTH)
+  assert.equal(off.status, 200)
+  const offBody = off.body as { plans: Array<{ slug: string }>; draft: unknown }
+  assert.deepEqual(offBody.plans.map((p) => p.slug), ['alpha'])
+  assert.equal(offBody.draft, null)
+
+  // Planning with an active draft file — draft rides along with title+content.
+  manager.setPlanMode(s.id, 'planning')
+  agents[0]!.activePlanFilePath = '.rivet/plans/draft-1751600000000.md'
+  const planning = await router('GET', `/sessions/${s.id}/plans`, {}, AUTH)
+  const body = planning.body as {
+    plans: Array<{ slug: string }>
+    draft: { path: string; title: string | null; content: string } | null
+  }
+  assert.deepEqual(body.plans.map((p) => p.slug), ['alpha'], 'drafts still filtered from the list')
+  assert.ok(body.draft)
+  assert.equal(body.draft!.title, 'Growing Draft')
+  assert.match(body.draft!.content, /wip/)
+
+  // Back to off — draft channel closes.
+  manager.setPlanMode(s.id, 'off')
+  const closed = await router('GET', `/sessions/${s.id}/plans`, {}, AUTH)
+  assert.equal((closed.body as { draft: unknown }).draft, null)
 })
 
 test('Plan: GET /plans/:slug returns content; 404 for unknown plan', async () => {

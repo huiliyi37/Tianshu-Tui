@@ -698,6 +698,10 @@ body {
 }
 .plan-badge.st-approved, .plan-badge.st-executed { background: var(--success-soft); color: var(--success); }
 .plan-badge.st-rejected { background: var(--error-soft); color: var(--error); }
+/* 起草中 — live plan-mode draft, not a submitted plan awaiting review. */
+.plan-badge.st-drafting { background: var(--accent-soft); color: var(--accent); animation: draft-pulse 2s ease-in-out infinite; }
+.plan-chip.draft { border-style: dashed; }
+@keyframes draft-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 
 .plan-detail { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .plan-doc { flex: 1; overflow-y: auto; padding: var(--space-3); }

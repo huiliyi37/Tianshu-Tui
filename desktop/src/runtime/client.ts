@@ -15,7 +15,7 @@ import type {
   ModelEntry,
   PlanDoc,
   PlanModeState,
-  PlanSummary,
+  PlanListResponse,
   ProjectTemplatesApplyResult,
   ProjectTemplatesStatus,
   ScheduledTask,
@@ -455,10 +455,9 @@ export function setPlanMode(id: string, state: PlanModeState): Promise<{ id: str
   return apiPost<{ id: string; planMode: PlanModeState }>(`/sessions/${id}/plan-mode`, { state })
 }
 
-/** List this session's plans (newest first). */
-export async function listPlans(id: string): Promise<PlanSummary[]> {
-  const { plans } = await apiGet<{ plans: PlanSummary[] }>(`/sessions/${id}/plans`)
-  return plans
+/** List this session's plans (newest first) plus the active plan-mode draft. */
+export function listPlans(id: string): Promise<PlanListResponse> {
+  return apiGet<PlanListResponse>(`/sessions/${id}/plans`)
 }
 
 /** Read a single plan's full markdown content. */

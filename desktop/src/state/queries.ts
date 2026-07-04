@@ -152,12 +152,18 @@ export function useSetHooks() {
 
 // ── Plan mode ───────────────────────────────────────────────────────
 
-/** List this session's plans; re-fetches when `rev` (planRev) bumps. */
-export function usePlans(sessionId: string | null, rev: number) {
+/**
+ * List this session's plans + active draft; re-fetches when `rev` (planRev)
+ * bumps. While the session is planning, a short poll keeps the "起草中"
+ * document growing live as the agent writes it (Cursor 3.0 drafting view);
+ * outside planning the query stays purely event-driven via planRev.
+ */
+export function usePlans(sessionId: string | null, rev: number, planning = false) {
   return useQuery({
     queryKey: [...qk.plans(sessionId), rev],
-    queryFn: () => (sessionId ? listPlans(sessionId) : Promise.resolve([])),
+    queryFn: () => (sessionId ? listPlans(sessionId) : Promise.resolve({ plans: [], draft: null })),
     enabled: !!sessionId,
+    refetchInterval: planning ? 2000 : false,
   })
 }
 

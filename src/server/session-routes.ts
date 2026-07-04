@@ -192,7 +192,11 @@ export function buildSessionRoutes(
     'GET /sessions/:id/plans': withAuth(async (_body, params) => {
       const plans = await manager.listPlans(params!.id!)
       if (!plans) return { status: 404, body: { error: 'Session not found' } }
-      return { status: 200, body: { plans: plans.map(planSummary) } }
+      // Active plan-mode draft rides along so the desktop can render a live
+      // "起草中" view — it is deliberately NOT part of `plans` (drafts are
+      // working files, not submitted plans).
+      const draft = (await manager.readPlanDraft(params!.id!)) ?? null
+      return { status: 200, body: { plans: plans.map(planSummary), draft } }
     }, apiToken),
 
     // Plan read — full markdown content for one plan.

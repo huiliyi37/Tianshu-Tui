@@ -52,6 +52,16 @@ export function stripPlanStatusMarkers(content: string): string {
 /** .rivet/plans 相对于项目根目录的路径 */
 const PLANS_DIR = '.rivet/plans'
 
+/**
+ * Plan-mode 活动草稿的 slug 形状（createActivePlanDraftPath 生成
+ * `draft-<timestamp>.md`，loop 的清理正则同源）。草稿是规划中的工作文件，
+ * 不是已提交的计划——listPlans 过滤它们，防止空草稿以 "Untitled Plan"
+ * 的形态冒充待审计划泄漏进 TUI/桌面的计划列表。
+ */
+export function isDraftSlug(slug: string): boolean {
+  return /^draft-\d+$/.test(slug)
+}
+
 function plansRoot(cwd: string): string {
   return join(cwd, PLANS_DIR)
 }
@@ -216,6 +226,7 @@ export async function listPlans(cwd: string): Promise<PlanDocument[]> {
   for (const entry of entries) {
     if (!entry.endsWith('.md')) continue
     const slug = entry.replace(/\.md$/, '')
+    if (isDraftSlug(slug)) continue
     const plan = await readPlan(cwd, slug)
     if (plan) plans.push(plan)
   }
@@ -235,6 +246,7 @@ export function listPlansSync(cwd: string): PlanDocument[] {
   for (const entry of readdirSync(dir)) {
     if (!entry.endsWith('.md')) continue
     const slug = entry.replace(/\.md$/, '')
+    if (isDraftSlug(slug)) continue
     try {
       const filePath = planFilePath(cwd, slug)
       const content = readFileSync(filePath, 'utf-8')

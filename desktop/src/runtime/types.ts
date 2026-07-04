@@ -147,6 +147,21 @@ export interface PlanSummary {
   options?: PlanOption[]
 }
 
+/** Live plan-mode draft — the working document the agent grows while planning.
+ *  Not a submitted plan; rendered as a separate "起草中" view. Title is the
+ *  draft's H1 (null while still empty). */
+export interface PlanDraft {
+  path: string
+  title: string | null
+  content: string
+}
+
+/** `GET /sessions/:id/plans` — submitted plans plus the active draft (if planning). */
+export interface PlanListResponse {
+  plans: PlanSummary[]
+  draft: PlanDraft | null
+}
+
 /** Full plan document including markdown content. */
 export interface PlanDoc {
   slug: string

@@ -45,12 +45,21 @@ import type { ActiveStarDomain } from '../agent/star-domain.js'
 import type { StarDomainId } from '../agent/star-domain.js'
 import { skillRegistry, loadProjectSkills, listInstallableSkills, importSkillsIntoRivet, countInstalledSkills, type InstallableSkill } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
 import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
 import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
+
+/** Live plan-mode draft surfaced to the desktop — a growing working document,
+ *  not a submitted plan. Title is the draft's H1 (null while still empty). */
+export interface PlanDraft {
+  path: string
+  title: string | null
+  content: string
+}
 
 export type SessionEventType =
   | 'user'
@@ -222,6 +231,12 @@ export interface ManagedAgent {
    */
   enterPlanMode?(opts?: { planFilePath?: string }): void
   exitPlanMode?(): void
+  /**
+   * Relative path of the working draft the agent writes while in plan mode
+   * (null when not planning). Mirrors AgentLoop.getActivePlanFilePath.
+   * Optional so lightweight test doubles need not implement it.
+   */
+  getActivePlanFilePath?(): string | null
   /**
    * Set (or clear) the approved-plan pointer. Injects a tiny slug/title/path
    * reminder into the agent's dynamic appendix (NOT the plan body, which stays
@@ -1366,6 +1381,28 @@ export class RuntimeSessionManager {
       return await storeListPlans(session.record.cwd)
     } catch {
       return []
+    }
+  }
+
+  /**
+   * Active plan-mode draft — the working document the agent writes while
+   * planning. Drafts are NOT submitted plans (listPlans filters them); the
+   * desktop renders this as a live "起草中" view instead. Returns `undefined`
+   * when the session is missing, `null` when it exists but is not planning
+   * or has no readable draft. Title is the draft's H1, null while empty.
+   */
+  async readPlanDraft(id: string): Promise<PlanDraft | null | undefined> {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    if (session.record.planMode !== 'planning') return null
+    const path = session.agent?.getActivePlanFilePath?.() ?? null
+    if (!path) return null
+    try {
+      const content = await readFile(join(session.record.cwd, path), 'utf-8')
+      const h1 = content.match(/^#\s+(.+)$/m)
+      return { path, title: h1 ? h1[1]!.trim() : null, content }
+    } catch {
+      return null
     }
   }
 
