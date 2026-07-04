@@ -48,6 +48,7 @@ const ENTRY_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs']
 const ENTRY_DIRS = ['src', 'lib', 'app', 'bin', '']
 
 const CONFIG_FILE_PATTERNS = [
+  'DESIGN.md',
   'tsconfig.json', 'tsconfig.*.json',
   'vite.config.ts', 'vite.config.js', 'vite.config.mjs',
   'next.config.ts', 'next.config.js', 'next.config.mjs',
