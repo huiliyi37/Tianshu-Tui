@@ -2007,6 +2007,7 @@ body {
    that the flex `gap` provided before windowing, and is included in measureElement. */
 .vlist { position: relative; width: 100%; flex-shrink: 0; }
 .vrow { position: absolute; top: 0; left: 0; width: 100%; padding-bottom: var(--space-3); }
+.vrow-focused { box-shadow: inset 3px 0 0 var(--accent); border-radius: var(--radius-sm); }
 .scroll-bottom-btn {
   position: sticky; bottom: var(--space-3); align-self: center;
   width: 36px; height: 36px; border-radius: 50%;

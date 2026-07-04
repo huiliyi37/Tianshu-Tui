@@ -331,6 +331,23 @@ export function ThreadView(props: {
     setScrolledUp(false)
   }, [rendered.length, virtualizer])
 
+  // Keyboard navigation: j/k or ↑/↓ to jump between message blocks.
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null)
+  const onMessagesKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Only handle when focus is on the messages container itself (not in input).
+    const el = document.activeElement
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el?.isContentEditable) return
+    const isNav = e.key === 'j' || e.key === 'k' || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp'))
+    if (!isNav) return
+    e.preventDefault()
+    const dir = e.key === 'j' || e.key === 'ArrowDown' ? 1 : -1
+    setFocusedIndex((prev) => {
+      const next = prev == null ? (dir > 0 ? 0 : rendered.length - 1) : Math.max(0, Math.min(rendered.length - 1, prev + dir))
+      virtualizer.scrollToIndex(next, { align: 'center' })
+      return next
+    })
+  }, [rendered.length, virtualizer])
+
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
   // Context usage bar: live token estimate vs model window.
@@ -668,7 +685,7 @@ export function ThreadView(props: {
         </div>
       </header>
 
-      <div className="messages" ref={msgRef} onScroll={onScroll}>
+      <div className="messages" ref={msgRef} onScroll={onScroll} onKeyDown={onMessagesKeyDown} tabIndex={-1}>
         {streamStatus === 'offline' && (
           <div className="stream-banner offline" role="alert">
             <span className="stream-banner-glyph" aria-hidden>⚠</span>
@@ -708,7 +725,7 @@ export function ThreadView(props: {
               return (
                 <div
                   key={vi.key}
-                  className="vrow"
+                  className={`vrow${focusedIndex === vi.index ? ' vrow-focused' : ''}`}
                   data-index={vi.index}
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${vi.start}px)` }}
