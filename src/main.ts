@@ -657,8 +657,17 @@ async function main() {
         selectedIndex: 0,
       }
     },
-    // Effort 选择面板——/effort 无参数时弹出，上下选择 + 回车确认。
+    // Effort / Permission 选择面板——/effort 或 /permission 无参数时弹出，上下选择 + 回车确认。
     choicePanelData: () => {
+      if (tuiApp.choicePanelKind === 'permission') {
+        const current = ctx?.agent.config.approvalMode ?? 'auto-safe'
+        const entries = [
+          { id: 'manual', label: 'Manual', description: '每个高风险工具都弹确认。最大控制，适合敏感项目。', current: current === 'manual' },
+          { id: 'auto-safe', label: 'Auto', description: '低/无风险工具自动执行，高风险仍需确认。可配每 N 轮暂停检查点。', current: current === 'auto-safe', recommended: true },
+          { id: 'dangerously-skip-permissions', label: 'YOLO', description: '全自动执行，无刹车无打扰。回滚兜底（/rollback + git 检查点）。需二次确认。', current: current === 'dangerously-skip-permissions' },
+        ]
+        return { title: '权限模式 / Permission', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
+      }
       const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
       const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
       const entries: Array<{ id: string; label: string; description: string; recommended?: boolean; current?: boolean }> = [
@@ -768,6 +777,20 @@ async function main() {
       tuiApp.commitStatic(`⚠️ 设置默认主题失败: ${(err as Error).message}`)
     }
   }, /* choicePanelExec: */ (id: string) => {
+    if (tuiApp.choicePanelKind === 'permission') {
+      // Permission 选择面板回调
+      tuiApp.choicePanelKind = 'effort' // reset
+      if (id === 'dangerously-skip-permissions') {
+        // YOLO needs confirmation — re-show panel with confirm prompt
+        tuiApp.choicePanelKind = 'permission'
+        tuiApp.commitStatic('⚠ YOLO 模式将跳过所有审批，全自动执行。确认请输入: /permission yolo confirm')
+        return
+      }
+      ctx!.agent.setApprovalMode(id as string)
+      const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[id] ?? id
+      tuiApp.commitStatic(`权限模式 → ${label}`)
+      return
+    }
     // Effort 选择面板回车回调。
     ctx!.agent.setReasoningEffort(id as import('./agent/auto-reasoning.js').ReasoningEffort | 'auto')
     const label = id === 'auto' ? 'Auto（按任务复杂度自动选档）' : id

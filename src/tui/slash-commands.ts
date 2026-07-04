@@ -175,6 +175,8 @@ export interface SlashHandlerContext {
   setCockpitPanel: (v: Panel | ((prev: Panel) => Panel)) => void
   activeOverlay?: string | null
   surfacePush?: (id: string) => void
+  /** 设置 choice-panel 类型（effort / permission），供选择面板渲染器读取。 */
+  setChoicePanelKind?: (kind: 'effort' | 'permission') => void
   surfacePop?: () => void
   pushStatic: (entry: LogEntry) => void
   setIsStreaming: (v: boolean) => void
@@ -1268,7 +1270,15 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return lines.join('\n')
       }
 
-      if (!sub || sub === 'status') {
+      if (!sub) {
+        // 无参数 → 弹出交互式权限选择面板（上下选 + 回车确认，同 /effort 风格）
+        ctx.setChoicePanelKind?.('permission')
+        ctx.surfacePush?.('choice-panel')
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'status') {
         pushStatic(createLogEntry({ type: 'system', content: formatRules() }))
         setIsStreaming(false)
         return true
@@ -3106,6 +3116,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       submitToAgent: (prompt: string) => { app.submitText(prompt) },
       goalTrackerRef: ctx.refs.goalTrackerRef,
       surfacePush: (id: string) => { app.activateOverlay(id) },
+      setChoicePanelKind: (kind) => { app.choicePanelKind = kind },
       surfacePop: () => { app.deactivateOverlay() },
       setReasoningEffort: (effort) => { ctx.agent.setReasoningEffort(effort) },
       reasoningEffort: ctx.agent.getReasoningEffort() ?? ctx.agent.config.reasoningEffort,
