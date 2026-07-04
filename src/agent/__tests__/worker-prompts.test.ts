@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createReadOnlyWorkOrder, createWriteWorkOrder, WRITE_WORKER_TOOLS } from '../work-order.js'
@@ -155,6 +155,83 @@ describe('worker prompts', () => {
 
     assert.ok(!prompt.includes('## Required Knowledge Packet: memory / prompt / recall'))
     assert.ok(!prompt.includes('2026-06-01-project-memory-architecture-conflict.md'))
+  })
+
+  // B3（将星点亮）：worker 出战带着账本记忆——authority 有 ledger 时注入 top-3 族。
+  describe('general ledger merge (B3)', () => {
+    const LEDGER = [
+      '# 将星 · 瑶光',
+      '',
+      '## ledger（战绩账本 · 持续生长）',
+      '',
+      '### always-true-on-missing-field | recurrenceCount: 4 | lastSeen: 2026-06-07',
+      '',
+      '**signature**：某字段缺失时比较退化为恒真。',
+      '',
+      '### false-green | recurrenceCount: 2 | lastSeen: 2026-06-07',
+      '',
+      '**signature**：测试全绿与真缺陷并存。',
+      '',
+      '### stringify-eats-structure | recurrenceCount: 1 | lastSeen: 2026-06-07',
+      '',
+      '### closed-enum-vs-open-set | recurrenceCount: 1 | lastSeen: 2026-06-07',
+      '',
+    ].join('\n')
+
+    function seededCwd(): string {
+      const cwd = mkdtempSync(join(tmpdir(), 'worker-ledger-'))
+      mkdirSync(join(cwd, '.rivet/generals'), { recursive: true })
+      writeFileSync(join(cwd, '.rivet/generals/yaoguang.md'), LEDGER)
+      return cwd
+    }
+
+    it('injects top-3 ledger families for an authority with a ledger', () => {
+      const cwd = seededCwd()
+      const order = createReadOnlyWorkOrder({
+        id: 'wo_ledger',
+        parentTurnId: 'turn_1',
+        kind: 'review',
+        profile: 'reviewer',
+        objective: 'Review the change.',
+        scope: { files: [] },
+      })
+      order.authority = 'yaoguang'
+      const prompt = buildWorkerPrompt(order, undefined, { ledgerCwd: cwd })
+      assert.ok(prompt.includes('## 将星战绩'), 'ledger section present')
+      assert.ok(prompt.includes('always-true-on-missing-field ×4'), 'top family with count')
+      assert.ok(prompt.includes('某字段缺失时比较退化为恒真'), 'signature carried')
+      assert.ok(prompt.includes('false-green ×2'))
+      // top-3 cap: exactly one of the two ×1 families makes the cut
+      const x1Count = ['stringify-eats-structure', 'closed-enum-vs-open-set']
+        .filter(f => prompt.includes(f)).length
+      assert.equal(x1Count, 1, 'top-3 cap keeps exactly one ×1 family')
+      assert.ok(prompt.includes('record_general_finding'), 'points at the write-back tool')
+      // 段落位置：权域指令之后（末尾注意力权重）
+      assert.ok(prompt.indexOf('## 权域指令') < prompt.indexOf('## 将星战绩'))
+    })
+
+    it('no ledger / no authority / no cwd → no section', () => {
+      const cwd = seededCwd()
+      const noAuthority = createReadOnlyWorkOrder({
+        id: 'wo_na', parentTurnId: 't', kind: 'review', profile: 'reviewer',
+        objective: 'x', scope: { files: [] },
+      })
+      assert.ok(!buildWorkerPrompt(noAuthority, undefined, { ledgerCwd: cwd }).includes('## 将星战绩'))
+
+      const noLedger = createReadOnlyWorkOrder({
+        id: 'wo_nl', parentTurnId: 't', kind: 'review', profile: 'reviewer',
+        objective: 'x', scope: { files: [] },
+      })
+      noLedger.authority = 'tianquan'
+      assert.ok(!buildWorkerPrompt(noLedger, undefined, { ledgerCwd: cwd }).includes('## 将星战绩'))
+
+      const noCwd = createReadOnlyWorkOrder({
+        id: 'wo_nc', parentTurnId: 't', kind: 'review', profile: 'reviewer',
+        objective: 'x', scope: { files: [] },
+      })
+      noCwd.authority = 'yaoguang'
+      assert.ok(!buildWorkerPrompt(noCwd).includes('## 将星战绩'))
+    })
   })
 
   it('builds a compact primary packet from worker results', async () => {

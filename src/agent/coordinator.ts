@@ -135,9 +135,13 @@ export interface DelegationRequest {
   groupId?: string
   /** Star domain authority for cognitive injection (V3 Component A).
    *  When set, the domain's systemPromptSuffix and volatileBlock are injected
-   *  into the worker prompt (see buildWorkerPrompt). Tool access is governed
-   *  solely by the profile's allowedTools — authority does NOT restrict tools.
-   *  Custom domains are loaded at startup, so this must remain an open string. */
+   *  into the worker prompt (see buildWorkerPrompt). Tool access becomes the
+   *  intersection profile.allowedTools ∩ domain.toolWhitelist (work-order.ts
+   *  toolsForAuthority) — fail-closed: an unknown/unloaded authority yields []
+   *  (deny-all). Built-in domains currently ship full-set whitelists, so the
+   *  intersection degenerates to the profile set, but custom domains can and
+   *  do restrict tools. Custom domains are loaded at startup, so this must
+   *  remain an open string. */
   authority?: string
   /** Team planner risk tier for shadow-only model tier recommendation. */
   riskTier?: ModelRiskTier

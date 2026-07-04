@@ -49,6 +49,8 @@ import { debugLog } from './utils/debug.js'
 import { persistCouncilRoutingShadow } from './agent/council/council-routing.js'
 import { recordCouncilSession } from './agent/council/council-telemetry.js'
 import { createRecallCapsuleTool } from './tools/recall-capsule.js'
+import { createRecallGeneralTool } from './tools/recall-general.js'
+import { createRecordGeneralFindingTool } from './tools/record-general-finding.js'
 import { createDeliverTaskTool } from './agent/deliver-task.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { createTaskLedger } from './agent/task-ledger.js'
@@ -451,7 +453,8 @@ export function createInteractiveToolRegistry(
   }
   reg.register(createTeamOrchestrateTool(planExecutorDeps, { defaultMaxParallel: config.agent.maxTeamParallel }))
 
-  // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，绝不派执行）。
+  // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，默认绝不派执行；
+  // autoExecute 经 executor 走完整 executePlan 闭环，与 team_orchestrate 同路径）。
   reg.register(createCouncilConveneTool({
     delegateBatch: async (requests, policy, abortSignal, onProgress) => {
       if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
@@ -460,10 +463,16 @@ export function createInteractiveToolRegistry(
     getSessionId: () => refs.sessionId ?? undefined,
     recordRoutingShadow: event => persistCouncilRoutingShadow(refs.meridianIndexer?.getDb(), event),
     recordCouncilSession: event => recordCouncilSession(refs.meridianIndexer?.getDb(), event),
+    executor: planExecutorDeps,
   }, config.agent.council.seats.length > 0 ? config.agent.council.seats : undefined))
 
   // recall_capsule
   reg.register(createRecallCapsuleTool(() => cwd))
+
+  // 将星账本（B1/B2）：recall_general 读战绩，record_general_finding 追加战绩。
+  // 胶囊 = 方法论基因，账本 = 跨会话战绩记忆。
+  reg.register(createRecallGeneralTool(() => cwd))
+  reg.register(createRecordGeneralFindingTool(() => cwd))
 
   // ask_user_question
   reg.register(ASK_USER_QUESTION_TOOL)

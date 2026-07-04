@@ -29,7 +29,7 @@ function buildHandsPrompt(config: HandsSessionConfig): string {
       ? buildDomainKnowledgeBlock(config.domainKnowledgeStore, config.order.authority)
       : '',
   ].filter(Boolean)
-  return [...knowledgeBlocks, buildWorkerPrompt(config.order)].join('\n\n')
+  return [...knowledgeBlocks, buildWorkerPrompt(config.order, undefined, { ledgerCwd: config.cwd })].join('\n\n')
 }
 
 export interface HandsSessionConfig {

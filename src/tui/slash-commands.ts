@@ -2686,26 +2686,46 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
       const cwd = ctx.agent.cwd ?? process.cwd()
-      const { listCheckpoints, formatCheckpointList, loadCheckpoint } = await import('../agent/wave-checkpoint.js')
+      const { listCheckpoints, formatCheckpointList, loadCheckpoint, buildResumeFromCheckpoint } = await import('../agent/wave-checkpoint.js')
       const groupId = parts[1]
 
       if (!groupId) {
         const checkpoints = listCheckpoints(cwd)
         pushStatic(createLogEntry({ type: 'system', content: formatCheckpointList(checkpoints) }))
-      } else {
-        const cp = loadCheckpoint(cwd, groupId)
-        if (!cp) {
-          pushStatic(createLogEntry({ type: 'system', content: `No checkpoint found for "${groupId}".`, isError: true }))
-        } else {
-          pushStatic(createLogEntry({
-            type: 'system',
-            content: `Checkpoint: ${cp.groupId}\nResume from wave ${cp.lastCompletedWave + 2}/${cp.totalWaves} (${cp.remainingOrders.length} tasks remaining).\nObjective: ${cp.objective}`,
-          }))
-        }
+        setIsStreaming(false)
+        return true
       }
+      const cp = loadCheckpoint(cwd, groupId)
+      if (!cp) {
+        pushStatic(createLogEntry({ type: 'system', content: `No checkpoint found for "${groupId}".`, isError: true }))
+        setIsStreaming(false)
+        return true
+      }
+      // A2: real resume — rebuild the remaining tasks into a stored plan and
+      // kick the master so it re-dispatches via team_orchestrate.
+      const resume = buildResumeFromCheckpoint(cp)
+      if (!resume) {
+        pushStatic(createLogEntry({
+          type: 'system',
+          content: `Checkpoint ${cp.groupId} has no remaining tasks (wave ${cp.lastCompletedWave + 1}/${cp.totalWaves} was the last).\n最后一波若有失败，请直接让主控重跑该波或修复遗留，checkpoint 仅保留剩余任务。`,
+        }))
+        setIsStreaming(false)
+        return true
+      }
+      if (!ctx.submitToAgent) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Resume unavailable: agent submission channel missing.', isError: true }))
+        setIsStreaming(false)
+        return true
+      }
+      const { storePlan } = await import('../agent/plan-store.js')
+      storePlan(resume.planJson)
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `▶️ Resuming ${cp.groupId}: ${cp.remainingOrders.length} tasks re-planned (objective: ${cp.objective.slice(0, 80)}). Dispatching to master…`,
+      }))
       setIsStreaming(false)
+      ctx.submitToAgent(resume.prompt)
       return true
     },
   },

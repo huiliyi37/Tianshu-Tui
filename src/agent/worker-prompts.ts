@@ -12,6 +12,7 @@ const WRITE_CAPABLE_TOOLS: ReadonlySet<string> = new Set([
 import { buildMemoryKnowledgePacket, needsMemoryKnowledgePacket } from './worker-knowledge-packet.js'
 import { profileRegistry } from './profile-registry.js'
 import { starDomainRegistry } from './star-domain-registry.js'
+import { topGeneralFamilies } from './general-ledger.js'
 import type { ArtifactStore } from '../artifact/store.js'
 
 // ─── Profile-specific expertise prompts ────────────────────────────
@@ -196,7 +197,13 @@ function buildWriteResultShape(): string {
 }`
 }
 
-export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): string {
+export interface WorkerPromptOptions {
+  /** B3: 项目根 cwd（非 worktree），用于读 .rivet/generals/ 将星账本。
+   *  提供且 order.authority 有账本时，权域指令后附「将星战绩」top-3 段。 */
+  ledgerCwd?: string
+}
+
+export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string, opts?: WorkerPromptOptions): string {
   // V3 Component A: if order has authority, derive persona + suffix from domain registry.
   // volatileBlock = "你是谁" (frames identity, goes first); systemPromptSuffix = "你怎么做"
   // (methodology, goes last for highest attention weight).
@@ -277,6 +284,26 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
 
   if (effectiveSuffix) {
     parts.push('', '## 权域指令', '', effectiveSuffix)
+  }
+
+  // B3（将星点亮）：worker 出战带着上次的记忆——账本缺陷/能力族 top-3，
+  // 各一行（族名 + 复发计数 + signature 摘要）。体量受控，账本缺失时零注入。
+  if (order.authority && opts?.ledgerCwd) {
+    try {
+      const families = topGeneralFamilies(opts.ledgerCwd, order.authority, 3)
+      if (families.length > 0) {
+        parts.push(
+          '',
+          '## 将星战绩（跨会话账本 · 上次出战的记忆）',
+          '',
+          ...families.map(f => `- ${f.family} ×${f.recurrenceCount}（lastSeen ${f.lastSeen}）${f.signature ? ` — ${f.signature}` : ''}`),
+          '',
+          '这些族上次也来过。同族再现时优先按族处置；新战绩用 record_general_finding 追加（同族复用族名）。',
+        )
+      }
+    } catch {
+      // Ledger merge is best-effort — never block the worker prompt.
+    }
   }
 
   return parts.join('\n')

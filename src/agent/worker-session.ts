@@ -280,7 +280,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
       ? buildDomainKnowledgeBlock(config.domainKnowledgeStore, config.order.authority)
       : '',
   ].filter(Boolean)
-  const baseParts = [...knowledgeBlocks, buildWorkerPrompt(config.order)]
+  const baseParts = [...knowledgeBlocks, buildWorkerPrompt(config.order, undefined, { ledgerCwd: config.cwd })]
   // Checkpoint resume: inject partial results so the worker doesn't redo completed work
   if (config.checkpoint && config.checkpoint.partialResult) {
     baseParts.push(

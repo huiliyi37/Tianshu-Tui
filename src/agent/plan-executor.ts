@@ -21,7 +21,7 @@ import { createCoordinatorReviewDeps } from './review-coordinator-deps.js'
 import { classifyChangeScale, isCrossModule, isFixContext, type ChangeSet, type ReviewScale } from './review-discipline.js'
 import { routeReviewWorkflow } from './review-router.js'
 import { extractChangedFiles } from './diff-collector.js'
-import { runTeamSkeleton, type TeamRunSummary } from './team-orchestrator.js'
+import { runTeamSkeleton, taskAuthority, type TeamRunSummary } from './team-orchestrator.js'
 import type { TeamTask } from './team-plan.js'
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from './team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from './team-scheduler-shadow.js'
@@ -35,6 +35,7 @@ import type { ImpactResult } from '../repo/meridian-impact.js'
 import { runChangedFilesTypecheckMemo, typecheckGateEnabled, type TypecheckRunner } from './typecheck-gate.js'
 import { getWaveResults, setWaveResults } from './wave-results-store.js'
 import { evaluateWaveGate, formatWaveGate, getWaveGate, isWaveGateEnabled, setWaveGate } from './wave-gate.js'
+import { clearCheckpoint, deriveTeamGroupId, loadCheckpoint, saveCheckpoint, type WaveCheckpoint } from './wave-checkpoint.js'
 
 /** Narrow surface for meridian structural impact analysis, so tests can mock it
  *  without the full MeridianIndexer. MeridianIndexer satisfies this structurally. */
@@ -163,6 +164,42 @@ export function teamReviewFocusHint(waveTasks: TeamTask[]): string | undefined {
 }
 
 /**
+ * A1: build the wave checkpoint from this wave's summary. Pure — accumulates
+ * prior completed results and derives the remaining (not yet dispatched) orders
+ * from the wave plan, so /team-resume can rebuild a plan without the original
+ * markdown.
+ */
+export function buildWaveCheckpoint(
+  opts: Pick<PlanExecutorOptions, 'objective' | 'fromWave'>,
+  summary: TeamRunSummary,
+  prior: WaveCheckpoint | null,
+): WaveCheckpoint {
+  const taskById = new Map(summary.tasks.map(task => [task.id, task]))
+  const remainingOrders = summary.waves
+    .slice(opts.fromWave + 1)
+    .flatMap(wave => wave.taskIds)
+    .map(id => taskById.get(id))
+    .filter((task): task is TeamTask => Boolean(task))
+    .map(task => ({
+      id: task.id,
+      objective: task.objective,
+      profile: task.profile,
+      kind: task.kind,
+      scope: { files: task.files },
+      authority: taskAuthority(task),
+    }))
+  return {
+    groupId: deriveTeamGroupId(opts.objective),
+    timestamp: Date.now(),
+    lastCompletedWave: opts.fromWave,
+    completedResults: [...(prior?.completedResults ?? []), ...(summary.run?.results ?? [])],
+    remainingOrders,
+    objective: opts.objective,
+    totalWaves: summary.waves.length,
+  }
+}
+
+/**
  * Run a plan's wave-by-wave execution + closed loop. Throws on dispatch failure
  * (the tool layer wraps and reports). Returns the structured summary + notes the
  * tool stitches into its content/uiContent.
@@ -243,6 +280,17 @@ export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorD
   // failures forward.
   if (summary.run?.results) {
     setWaveResults(summary.run.results, opts.sessionId)
+  }
+
+  // A1: persist a wave checkpoint so an interrupted/failed run can be resumed
+  // via /team-resume. Best-effort — checkpoint I/O never blocks the wave result.
+  if (summary.run?.results) {
+    try {
+      const prior = loadCheckpoint(opts.cwd, deriveTeamGroupId(opts.objective))
+      saveCheckpoint(opts.cwd, buildWaveCheckpoint(opts, summary, prior))
+    } catch {
+      // Checkpoints are a resume convenience; never affect dispatch.
+    }
   }
 
   let reviewNote = ''
@@ -419,6 +467,16 @@ export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorD
       } catch {
         // Delivery synthesis is presentation-only; never block the wave result.
       }
+    }
+  }
+
+  // A1: the run is fully delivered — drop the checkpoint. Failed/blocked results
+  // on the last wave keep it, because that is exactly the resume scenario.
+  if (isLastWave && summary.run?.results && summary.run.results.every(result => result.status === 'passed')) {
+    try {
+      clearCheckpoint(opts.cwd, deriveTeamGroupId(opts.objective))
+    } catch {
+      // Checkpoints are a resume convenience; never affect delivery.
     }
   }
 

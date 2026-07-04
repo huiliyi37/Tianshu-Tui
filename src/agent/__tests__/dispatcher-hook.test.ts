@@ -138,7 +138,22 @@ describe('createDispatcherHook (delegation advisor)', () => {
     await hook.run(ctx)
     assert.equal(entries.length, 1)
     // tests task depends on the backend source task → arrow notation
-    assert.ok(entries[0]!.content.includes('tests←[backend]'))
+    // (C2: each subtask now also carries its authority inline)
+    assert.match(entries[0]!.content, /tests\(authority:[a-z]+\)←\[backend\]/)
+  })
+
+  it('C2: advisory carries per-task authority (default tianliang) and tells the model to pass it', async () => {
+    const { hook, ctx, entries } = runHook({
+      contract: makeContract(),
+      sensorium: makeSensorium(0.5),
+    })
+    await hook.run(ctx)
+    assert.equal(entries.length, 1)
+    const content = entries[0]!.content
+    // decomposeByDataContract falls back to tianliang when no domain keyword matches.
+    assert.match(content, /\(authority:[a-z]+\)/)
+    assert.ok(content.includes('authority'), 'advisory 必须指示模型透传 authority')
+    assert.ok(content.includes('星域人格'), 'advisory 说明 authority 的作用')
   })
 
   it('only advises once per contract', async () => {

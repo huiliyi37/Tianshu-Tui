@@ -1,10 +1,14 @@
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createCouncilConveneTool, DEFAULT_COUNCIL_SEATS, type CouncilConveneCoordinator } from '../council-convene.js'
 import type { CoordinatorRun, DelegationRequest } from '../../agent/coordinator.js'
 import { deriveStableWorkOrderId } from '../../agent/coordinator.js'
 import type { WorkerResult } from '../../agent/work-order.js'
 import { validateUnifiedPlan, type UnifiedPlan } from '../../agent/unified-plan.js'
+import { consumePlan } from '../../agent/plan-store.js'
 import type { ToolCallParams } from '../types.js'
 
 function extractPlanJson(content: string): UnifiedPlan | undefined {
@@ -304,5 +308,97 @@ describe('council_convene 工具', () => {
     const tool = createCouncilConveneTool(coordinator)
     const res = await tool.execute(paramsWith({ objective: 'x', seats: [{ authority: 'tianquan' }] }))
     assert.equal(extractPlanJson(res.content), undefined, '无任务时不应内嵌 planJson')
+  })
+
+  // A3：council 产出直接存入 plan-store 会话桥，免模型手工提取 JSON。
+  it('A3：有任务（非 autoExecute）→ storePlan 入会话桥且话术指向 bare team_orchestrate', async () => {
+    const sessionId = `council-a3-${Date.now()}`
+    const { coordinator } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator)
+    const res = await tool.execute({
+      ...paramsWith({ objective: 'split loop.ts', draftItems: [{ id: 'T1', title: 'Split', detail: 'do it', files: ['src/loop.ts'] }] }),
+      sessionId,
+    })
+    assert.equal(res.isError, false)
+    const stored = consumePlan(sessionId)
+    assert.ok(stored, '计划应存入会话桥')
+    const v = validateUnifiedPlan(JSON.parse(stored!) as UnifiedPlan)
+    assert.equal(v.valid, true)
+    assert.match(res.content, /计划已存入会话/)
+    assert.match(res.content, /team_orchestrate/)
+  })
+
+  it('A3：无任务 → 不 storePlan', async () => {
+    const sessionId = `council-a3-empty-${Date.now()}`
+    const { coordinator } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator)
+    await tool.execute({ ...paramsWith({ objective: 'x', seats: [{ authority: 'tianquan' }] }), sessionId })
+    assert.equal(consumePlan(sessionId), null)
+  })
+
+  // A4：autoExecute 走 executePlan 完整闭环（波分组 + checkpoint），不再裸 delegateBatch。
+  it('A4：autoExecute → 经 executor.delegateBatch 派发执行波，content 带 Auto-Executed', async () => {
+    const sessionId = `council-a4-${Date.now()}`
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-council-a4-'))
+    const execCalls: DelegationRequest[][] = []
+    const { coordinator } = makeCoordinator({
+      executor: {
+        delegateBatch: async (requests): Promise<CoordinatorRun> => {
+          execCalls.push(requests)
+          const results = requests.map(req => ({
+            ...workerResultFor(req),
+            artifacts: [],
+          }))
+          return { status: 'completed', results, packet: 'exec-done', workerModels: [] }
+        },
+      },
+    })
+    const tool = createCouncilConveneTool(coordinator)
+    try {
+      const res = await tool.execute({
+        ...paramsWith({
+          objective: 'split loop.ts',
+          draftItems: [{ id: 'T1', title: 'Split', detail: 'do it', files: ['src/loop.ts'] }],
+          autoExecute: true,
+        }),
+        sessionId,
+        cwd,
+      })
+      assert.equal(res.isError, false)
+      assert.equal(execCalls.length, 1, '执行波应经 executor.delegateBatch 派发')
+      assert.ok(execCalls[0]!.every(r => r.parentTurnId.includes(':w0')), '执行请求应带波前缀')
+      assert.match(res.content, /## Auto-Executed \(\d+ workers, \d+ waves\)/)
+      // autoExecute 成功时不留存 plan-store（避免 stale 泄漏到后续 bare call）。
+      assert.equal(consumePlan(sessionId), null)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('A4：autoExecute 执行失败 → 回落 storePlan + 修复指引', async () => {
+    const sessionId = `council-a4-fail-${Date.now()}`
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-council-a4f-'))
+    const { coordinator } = makeCoordinator({
+      executor: {
+        delegateBatch: async () => { throw new Error('dispatch exploded') },
+      },
+    })
+    const tool = createCouncilConveneTool(coordinator)
+    try {
+      const res = await tool.execute({
+        ...paramsWith({
+          objective: 'split loop.ts',
+          draftItems: [{ id: 'T1', title: 'Split', detail: 'do it', files: ['src/loop.ts'] }],
+          autoExecute: true,
+        }),
+        sessionId,
+        cwd,
+      })
+      assert.equal(res.isError, false, '评审产物仍交付')
+      assert.match(res.content, /Auto-Execution Failed/)
+      assert.ok(consumePlan(sessionId), '失败时计划回存会话桥供手工续跑')
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 })

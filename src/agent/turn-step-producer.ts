@@ -29,6 +29,7 @@ import { selectPolicy } from './policy-selection.js'
 import { checkTddGate, buildTddGateHint } from './tdd-gate.js'
 import { buildCognitiveProjectionParts, createCognitiveLedger, getCognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { formatImmuneContext } from './immune-context.js'
+import { getCapsuleByStar } from './seed-capsule-store.js'
 
 /**
  * Resolve the turn-level hard-stall watchdog ceiling (ms) from provider +
@@ -68,6 +69,22 @@ export function crossSessionDisabled(configEnabled?: boolean): boolean {
   if (v === '0' || v === 'false') return false
   if (configEnabled !== undefined) return !configEnabled
   return true
+}
+
+/**
+ * B4（将星点亮·贪狼触发面）：勘探/盘点类任务关键词。
+ * 贪狼是任务型触发（objective 语义），不是状态型触发（CCR 的 P 规则管状态）——
+ * 勘探停滞已有 P6 覆盖，这里只在任务意图分类处点一盏 informational 灯。
+ */
+const TANLANG_EXPLORATION_RE = /勘探|盘点|考古|半接|休眠|架构审计|死代码|孤儿代码|技术债盘|dead.?code|archaeolog/i
+
+/**
+ * 勘探型任务 → 指向 recall_capsule("贪狼") 的 informational advisory 文案。
+ * 命中关键词才返回；informational tier 填空位，不占 operational Top-N。
+ */
+export function buildTanlangExplorationAdvisory(userInput: string, gist?: string): string | null {
+  if (!TANLANG_EXPLORATION_RE.test(userInput)) return null
+  return `【贪狼·胶囊】检测到勘探/盘点型任务。${gist ?? '能力勘探/系统联合方法论已封存'}——动手前调用 recall_capsule("贪狼") 取完整方法（能力非成本框架、陈旧度判据、半接诊断到行号）。`
 }
 
 /** Map StarPhase values to PromptEngine phaseClass strings. */
@@ -250,6 +267,26 @@ export class TurnStepProducer {
     }
 
     await this.self.intentRoute.buildForTurn(userInput, actionable, turnMode)
+
+    // B4：勘探/盘点型任务 → 贪狼胶囊 informational advisory（任务型触发，
+    // 复用 CCR 的 capsule-recall 通道语义；不新增 CCR 状态规则）。
+    if (turnMode === 'task') {
+      let gist: string | undefined
+      try {
+        gist = getCapsuleByStar(this.self.cwd, '贪狼')?.gist
+      } catch { /* capsule discovery is optional */ }
+      const tanlang = buildTanlangExplorationAdvisory(userInput, gist)
+      if (tanlang) {
+        this.self.advisoryBus.submit({
+          key: 'capsule-recall-tanlang',
+          priority: 0.45,
+          category: 'star_domain',
+          tier: 'informational',
+          content: tanlang,
+          ttl: 1,
+        })
+      }
+    }
 
     // Classify task dependency depth for TDD strategy / verifier selection
     if (this.self.taskContract && actionable) {

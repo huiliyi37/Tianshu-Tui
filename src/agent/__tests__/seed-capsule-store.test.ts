@@ -12,6 +12,7 @@ import {
   getCapsuleByStar,
   listCapsuleStars,
   clearCapsuleCache,
+  extractPrinciples,
   type SeedCapsule,
 } from '../seed-capsule-store.js'
 
@@ -372,6 +373,39 @@ describe('renderAllCapsulesBlock', () => {
     assert.ok(idx.includes('recall_capsule'))
     assert.ok(idx.length < full.length / 2, '索引必须远小于全文注入')
     cleanup()
+  })
+
+  // C1（天梁最大化）：十域交付主力的胶囊真实存在且可被发现/提取。
+  it('repo docs/ ships a 天梁 capsule with L1-L6 principles (C1)', () => {
+    clearCapsuleCache()
+    const repoRoot = process.cwd()
+    const capsule = getCapsuleByStar(repoRoot, '天梁')
+    assert.ok(capsule, 'docs/seed-capsule-tianliang.md 必须存在且可解析')
+    assert.ok(capsule!.gist, '天梁胶囊必须带 gist 一行索引')
+    const principles = extractPrinciples(repoRoot, '天梁')
+    assert.ok(principles, '天梁胶囊应含 <principle> 标签')
+    assert.deepEqual(principles!.map(p => p.key), ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'])
+    for (const p of principles!) {
+      assert.ok(p.maxim.length > 0)
+      assert.ok(p.actionPrompt.length > 0)
+    }
+    clearCapsuleCache()
+  })
+
+  // B4：贪狼胶囊的 7 条方法带 principle 标签，动态原则池对贪狼生效。
+  it('repo docs/ 贪狼 capsule carries T1-T7 principles (B4)', () => {
+    clearCapsuleCache()
+    const repoRoot = process.cwd()
+    const capsule = getCapsuleByStar(repoRoot, '贪狼')
+    assert.ok(capsule, 'docs/seed-capsule-tanlang.md 必须存在且可解析')
+    const principles = extractPrinciples(repoRoot, '贪狼')
+    assert.ok(principles, '贪狼胶囊应含 <principle> 标签')
+    assert.deepEqual(principles!.map(p => p.key), ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'])
+    for (const p of principles!) {
+      assert.ok(p.maxim.length > 0)
+      assert.ok(p.actionPrompt.length > 0)
+    }
+    clearCapsuleCache()
   })
 
   it('getCapsuleByStar fetches one capsule by name (trim + case insensitive)', () => {
