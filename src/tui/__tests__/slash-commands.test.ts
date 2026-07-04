@@ -692,20 +692,123 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
 })
 
 describe('/permission', () => {
-  it('shows current mode and available modes', async () => {
+  it('shows current mode and rules (bare)', async () => {
     const entries: string[] = []
     const handled = await handleSlashCommand(makeCtx({
       parts: ['/permission'],
       pushStatic: (entry) => entries.push(entry.content),
     }))
     assert.equal(handled, true)
-    assert.ok(entries[0]!.includes('当前模式: manual'), entries[0])
-    assert.ok(entries[0]!.includes('可选模式：'), entries[0])
-    assert.ok(entries[0]!.includes('→ manual'), entries[0])
-    assert.ok(entries[0]!.includes('yolo (dangerously-skip-permissions)'), entries[0])
+    const text = entries[0]!
+    assert.ok(text.includes('当前权限: Manual (manual)'), text)
+    assert.ok(text.includes('快速切换: /permission manual | /permission auto [轮次] | /permission yolo [confirm]'), text)
+    assert.ok(text.includes('当前没有任何 allow/deny 规则'), text)
   })
 
-  it('switches approval mode', async () => {
+  it('shows status explicitly (alias)', async () => {
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'status'],
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.ok(entries[0]!.includes('当前权限: Manual (manual)'), entries[0])
+  })
+
+  it('quick-switch to manual', async () => {
+    let mode: string | null = null
+    let autoSafe: boolean | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'manual'],
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+      } as any,
+      setAutoSafe: (v: boolean) => { autoSafe = v },
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'manual')
+    assert.equal(autoSafe, false)
+    assert.ok(entries[0]!.includes('已切换至 Manual'), entries[0])
+  })
+
+  it('quick-switch to auto', async () => {
+    let mode: string | null = null
+    let autoSafe: boolean | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'auto'],
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+      } as any,
+      setAutoSafe: (v: boolean) => { autoSafe = v },
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'auto-safe')
+    assert.equal(autoSafe, true)
+    assert.ok(entries[0]!.includes('已切换至 Auto'), entries[0])
+  })
+
+  it('quick-switch to auto with checkpoint interval', async () => {
+    let mode: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'auto', '20'],
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+      } as any,
+      setAutoSafe: () => {},
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'auto-safe')
+    assert.ok(entries[0]!.includes('检查点每 20 轮暂停'), entries[0])
+  })
+
+  it('quick-switch to yolo shows risk warning without confirm', async () => {
+    let mode: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'yolo'],
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+      } as any,
+      setAutoSafe: () => {},
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    // mode should NOT be changed without confirm
+    assert.equal(mode, null)
+    assert.ok(entries[0]!.includes('YOLO 模式风险说明'), entries[0])
+    assert.ok(entries[0]!.includes('确认进入: /permission yolo confirm'), entries[0])
+  })
+
+  it('quick-switch to yolo with confirm', async () => {
+    let mode: string | null = null
+    let autoSafe: boolean | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'yolo', 'confirm'],
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+      } as any,
+      setAutoSafe: (v: boolean) => { autoSafe = v },
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'dangerously-skip-permissions')
+    assert.equal(autoSafe, false)
+    assert.ok(entries[0]!.includes('已切换至 YOLO'), entries[0])
+  })
+
+  it('switches approval mode via /permission mode', async () => {
     let mode: string | null = null
     const entries: string[] = []
     const handled = await handleSlashCommand(makeCtx({
