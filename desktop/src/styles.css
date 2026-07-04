@@ -512,7 +512,7 @@ body {
  * emits .hljs-* spans). Mirrors the markdown palette but scoped here so code
  * surfaces outside .md get colored too. */
 .diff-text .hljs-comment, .diff-text .hljs-quote,
-.file-line-content .hljs-comment, .file-line-content .hljs-quote { color: var(--faint); font-style: italic; }
+.file-line-content .hljs-comment, .file-line-content .hljs-quote { color: var(--muted); font-style: italic; }
 .diff-text .hljs-keyword, .diff-text .hljs-selector-tag, .diff-text .hljs-literal, .diff-text .hljs-type,
 .file-line-content .hljs-keyword, .file-line-content .hljs-selector-tag, .file-line-content .hljs-literal, .file-line-content .hljs-type { color: var(--accent); }
 .diff-text .hljs-string, .diff-text .hljs-meta .hljs-string,
@@ -2083,16 +2083,16 @@ body {
 .msg-nav-item:hover, .msg-nav-item.is-selected { background: var(--panel-2); }
 .msg-nav-idx {
   flex-shrink: 0; min-width: 18px; text-align: right;
-  font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums;
 }
 .msg-nav-item.is-current .msg-nav-idx { color: var(--accent); font-weight: 700; }
 .msg-nav-text {
   flex: 1; min-width: 0; font-size: 12px; line-height: 1.4; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.msg-nav-time { flex-shrink: 0; font-size: 10px; color: var(--faint); }
+.msg-nav-time { flex-shrink: 0; font-size: 10px; color: var(--text-dim); }
 .msg { white-space: pre-wrap; word-break: break-word; transition: background var(--dur) var(--ease); padding: var(--space-2) 0; }
-.msg-role { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 11px; margin-bottom: var(--space-1); }
+.msg-role { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; font-size: 11px; margin-bottom: var(--space-1); }
 .msg-role-glyph { font-size: 12px; line-height: 1; }
 .msg-role-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .msg-role-label { text-transform: none; letter-spacing: normal; }
@@ -2203,7 +2203,7 @@ body {
 .md input[type="checkbox"] { margin-right: var(--space-1); }
 
 /* highlight.js token colors mapped to design tokens (auto dark/light via vars). */
-.md .hljs-comment, .md .hljs-quote { color: var(--faint); font-style: italic; }
+.md .hljs-comment, .md .hljs-quote { color: var(--muted); font-style: italic; }
 .md .hljs-keyword, .md .hljs-selector-tag, .md .hljs-literal, .md .hljs-type { color: var(--accent); }
 .md .hljs-string, .md .hljs-meta .hljs-string { color: var(--success); }
 .md .hljs-number, .md .hljs-symbol, .md .hljs-bullet { color: var(--warning); }
