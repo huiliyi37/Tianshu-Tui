@@ -51,13 +51,60 @@ const archMap = {
   ia32: 'x86',
 }
 
-function detectTriple() {
-  const platform = platformMap[process.platform]
-  const arch = archMap[process.arch]
+// Rust target-triple arch token → Node.js dist arch token. Tauri sets
+// TAURI_ENV_TARGET_TRIPLE (e.g. "x86_64-apple-darwin") on every build — native
+// AND cross (`--target`). Honoring it is what makes an Intel package built on an
+// Apple-Silicon host actually bundle an x86_64 Node runtime instead of silently
+// shipping the host's arm64 binary (the exact bug that broke the Intel package).
+const tripleArchMap = {
+  aarch64: 'arm64',
+  arm64: 'arm64',
+  x86_64: 'x64',
+  i686: 'x86',
+}
+
+/**
+ * Resolve which platform/arch we are BUILDING FOR. Prefers Tauri's target
+ * triple; falls back to the host when the var is absent (plain
+ * `node fetch-node-runtime.js`). Exported so pack-native.js and others can reuse
+ * the same cross-build detection without duplicating the triple parser.
+ */
+export function resolveTargetTriple() {
+  const triple = (process.env.TAURI_ENV_TARGET_TRIPLE || '').trim()
+  if (!triple) {
+    return {
+      platform: platformMap[process.platform],
+      arch: archMap[process.arch],
+      isWindows: process.platform === 'win32',
+      source: 'host',
+    }
+  }
+  const archTok = triple.split('-')[0]
+  const arch = tripleArchMap[archTok]
+  const platform = triple.includes('windows')
+    ? 'win'
+    : triple.includes('darwin')
+      ? 'darwin'
+      : triple.includes('linux')
+        ? 'linux'
+        : platformMap[process.platform]
   if (!platform || !arch) {
+    throw new Error(`Unsupported target triple: ${triple}`)
+  }
+  return { platform, arch, isWindows: platform === 'win', source: 'triple' }
+}
+
+function detectTriple() {
+  const t = resolveTargetTriple()
+  if (!t.platform || !t.arch) {
     throw new Error(`Unsupported platform/arch: ${process.platform} ${process.arch}`)
   }
-  return { platform, arch, isWindows: process.platform === 'win32' }
+  if (t.source === 'triple') {
+    console.log(
+      `[fetch-node-runtime] target ${t.platform}-${t.arch} from TAURI_ENV_TARGET_TRIPLE=${process.env.TAURI_ENV_TARGET_TRIPLE}`,
+    )
+  }
+  return { platform: t.platform, arch: t.arch, isWindows: t.isWindows }
 }
 
 function download(url, dest) {
