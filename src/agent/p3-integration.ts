@@ -1,4 +1,4 @@
-import { ToolPatternMiner } from './tool-pattern-miner.js'
+import { ToolPatternMiner, type ToolPrediction } from './tool-pattern-miner.js'
 import { ShadowQueue } from './shadow-queue.js'
 import { IdleSpec } from './idle-spec.js'
 import { MistakeNotebook } from './mistake-notebook.js'
@@ -113,6 +113,15 @@ export class P3Integration {
           : probability,
         source: topToolPrediction ? 'combined' : 'physarum-file',
       })
+    }
+  }
+
+  /** Tier 2 LLM speculation: predictions from a shared-prefix side-path LLM call.
+   *  ShadowQueue re-applies the read-only whitelist and minProbability gate, so
+   *  this is a thin pass-through that just tags the source. */
+  enqueueLlmPredictions(predictions: ToolPrediction[]): void {
+    for (const prediction of predictions) {
+      this.queue.enqueue({ ...prediction, source: 'llm' })
     }
   }
 

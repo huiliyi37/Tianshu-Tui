@@ -11,6 +11,7 @@ import type { ToolDefinition } from '../api/types.js'
 import type { ProviderConfig, Config } from '../config/schema.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router.js'
+import type { LlmSpeculationConfigInput } from './llm-speculation.js'
 import type { AuthProvider } from '../auth/types.js'
 import type { PermissionConfig } from './permissions.js'
 import { getProviderProfile } from '../api/provider-profile.js'
@@ -39,6 +40,7 @@ export interface AgentConfigInput {
   hearthObserveEnabled?: boolean
   antiAnchoring?: AntiAnchoringConfig
   intentRetrievalRouter?: IntentRetrievalRouterConfigInput
+  llmSpeculation?: LlmSpeculationConfigInput
   autoDelegateEnabled?: boolean
   autoReasoning?: boolean
   crossSessionEnabled?: boolean
@@ -88,6 +90,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     crossSessionEnabled: params.config.agent.crossSessionEnabled,
     antiAnchoring: params.config.agent.antiAnchoring,
     intentRetrievalRouter: params.config.agent.intentRetrievalRouter,
+    llmSpeculation: params.config.agent.llmSpeculation,
     autoDelegateEnabled: params.config.agent.autoDelegateEnabled,
     autoReasoning: params.config.agent.autoReasoning,
     goalJudge: params.config.agent.goal?.judge,
@@ -106,7 +109,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -172,6 +175,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     crossSessionEnabled: input.crossSessionEnabled,
     antiAnchoring: input.antiAnchoring,
     intentRetrievalRouter: input.intentRetrievalRouter,
+    llmSpeculation: input.llmSpeculation,
     autoDelegateEnabled: input.autoDelegateEnabled,
     goalJudge: input.goalJudge,
     allProviders: input.allProviders,

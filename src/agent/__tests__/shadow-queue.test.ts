@@ -73,6 +73,24 @@ describe('ShadowQueue', () => {
     process.off('unhandledRejection', handler)
   })
 
+  it('tracks per-source enqueue/hit stats', async () => {
+    const queue = new ShadowQueue({ execute: async () => 'content' })
+    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'a.ts', source: 'llm' })
+    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'b.ts', source: 'physarum-file' })
+    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'c.ts' }) // defaults to tool-pattern
+    await new Promise(r => setTimeout(r, 20))
+
+    queue.checkHit('read_file', 'a.ts')
+
+    const stats = queue.statsBySource()
+    assert.equal(stats.llm.enqueued, 1)
+    assert.equal(stats.llm.hits, 1)
+    assert.equal(stats['physarum-file'].enqueued, 1)
+    assert.equal(stats['physarum-file'].hits, 0)
+    assert.equal(stats['tool-pattern'].enqueued, 1)
+    assert.equal(stats['tool-pattern'].hits, 0)
+  })
+
   it('enqueue returns void (fire-and-forget) — no floating promise returned', () => {
     const queue = new ShadowQueue({
       execute: async () => 'result',

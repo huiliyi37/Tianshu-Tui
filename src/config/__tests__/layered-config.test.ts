@@ -58,6 +58,19 @@ describe('loadConfig — 3-layer resolution', () => {
     })
   })
 
+  it('llmSpeculation defaults off and honors user-config opt-in override', () => {
+    withIsolatedUserConfig(undefined, () => {
+      const config = loadConfig()
+      assert.equal(config.agent.llmSpeculation.enabled, false, 'llmSpeculation must default off')
+    })
+    withIsolatedUserConfig({ agent: { llmSpeculation: { enabled: true, maxPerTurn: 2 } } }, () => {
+      const config = loadConfig()
+      assert.equal(config.agent.llmSpeculation.enabled, true)
+      assert.equal(config.agent.llmSpeculation.maxPerTurn, 2)
+      assert.equal(config.agent.llmSpeculation.timeoutMs, 8_000, 'unset fields keep schema defaults')
+    })
+  })
+
   it('keeps explicitly tuned non-10 checkpoint intervals untouched', () => {
     withIsolatedUserConfig({ agent: { checkpointEveryTurns: 15 } }, () => {
       const config = loadConfig()

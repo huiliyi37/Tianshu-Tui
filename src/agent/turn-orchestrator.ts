@@ -196,6 +196,15 @@ export interface TurnOrchestratorDeps {
   // === Sub-controllers ===
   streamTurn: (params: StreamTurnParams) => Promise<StreamTurnResult>
   executeBatch: (params: ExecuteBatchParams) => Promise<ExecuteBatchResult>
+  /** Tier 2 LLM speculation — fire-and-forget shared-prefix prediction call
+   *  launched alongside executeBatch (the tool await window). Optional: absent
+   *  when llmSpeculation config is off, so the default path pays zero cost. */
+  speculateDuringBatch?: (params: {
+    request: import('../api/oai-types.js').OaiChatRequest
+    toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>
+    turn: number
+    signal?: AbortSignal
+  }) => void
   completeTurn: (params: CompleteTurnParams) => Promise<void>
   appendTurnResult: (turn: number) => void
   onCacheAdvisorTurnEnd: (params: CacheTurnEndParams) => void
@@ -773,6 +782,9 @@ export class TurnOrchestrator {
             traceStore: this.deps.state.traceStore, importGraph: this.deps.state.importGraph,
             lastConflictCheckCount: this.deps.state.lastConflictCheckCount, latestRisk: this.deps.state.latestRisk,
           })
+          // Tier 2 LLM speculation: ride the batch await window with a
+          // shared-prefix prediction call. Fire-and-forget; never awaited here.
+          this.deps.speculateDuringBatch?.({ request, toolUses, turn, signal })
           try {
             r = await rejectOnAbort(batchPromise, signal!, 'tools')
           this.deps.state.traceStore = r.traceStore

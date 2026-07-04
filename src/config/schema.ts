@@ -110,6 +110,27 @@ export const antiAnchoringSchema = z.object({
   }).default({}),
 }).default({})
 
+/** Tier 2 LLM speculation: during a tool-batch await window, fire a side-path
+ *  LLM request sharing the main session prefix (near-free on DeepSeek prefix
+ *  cache) to predict the next read-only tool calls, feeding ShadowQueue.
+ *  Default off — opt-in. */
+export const llmSpeculationSchema = z.preprocess(
+  value => {
+    if (value === true) return { enabled: true }
+    if (value === false || value === undefined) return {}
+    return value
+  },
+  z.object({
+    enabled: z.boolean().default(false),
+    maxPerTurn: z.number().int().positive().default(3),
+    maxTokens: z.number().int().positive().default(320),
+    timeoutMs: z.number().int().positive().default(8_000),
+    minProbability: z.number().min(0).max(1).default(0.5),
+    /** Only fire when the executing batch contains a slow tool (bash/run_tests/delegate/...). */
+    slowToolsOnly: z.boolean().default(true),
+  }).default({}),
+)
+
 export const intentRetrievalRouterSchema = z.preprocess(
   value => {
     if (value === true) return { enabled: true }
@@ -226,6 +247,8 @@ export const agentSchema = z.object({
   checkpointEveryTurns: z.number().int().min(0).default(0),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
+  /** Tier 2 LLM speculation (shared-prefix next-tool prediction). Default off. */
+  llmSpeculation: llmSpeculationSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */
   teamSchedulerBanditEnabled: z.boolean().default(false),
   /** @deprecated Use banditPromotion.modelTier ('forced') instead. True still works as forced. */

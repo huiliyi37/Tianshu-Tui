@@ -7,6 +7,7 @@ import { createRuntimeHookContext, RuntimeHookPipeline } from './runtime-hooks.j
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createUserHooksBridge, runOnErrorHooks } from './hooks/user-hooks-bridge.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
+import { createLlmSpeculationEngine, normalizeLlmSpeculationConfig } from './llm-speculation.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
 import { setGeneralLedgerTelemetrySink } from './general-ledger.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
@@ -625,6 +626,18 @@ export function buildProgressDigest(input: ProgressDigestInput): string {
 }
 
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
+  // Tier 2 LLM speculation: only constructed when enabled — the default path
+  // pays zero cost (no engine, no dep, orchestrator's optional call is a no-op).
+  const llmSpecConfig = normalizeLlmSpeculationConfig(self.config.llmSpeculation)
+  const llmSpeculation = llmSpecConfig.enabled
+    ? createLlmSpeculationEngine({
+        client: self.config.client,
+        config: llmSpecConfig,
+        enqueue: predictions => { self.p3.enqueueLlmPredictions(predictions) },
+        writeTelemetry: record => { self.telemetryWriter.write(record) },
+      })
+    : null
+
   return new TurnOrchestrator({
     // === Lifecycle ===
     initializeRun: (userInput, callbacks, images) => self.turnStepProducer.initializeRun(userInput, callbacks, images),
@@ -682,6 +695,14 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === Sub-controllers ===
     streamTurn: (params) => self.turnStream!.streamTurn(params),
     executeBatch: (params) => self.toolExecution.executeBatch(params),
+    ...(llmSpeculation ? {
+      speculateDuringBatch: (params: {
+        request: import('../api/oai-types.js').OaiChatRequest
+        toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>
+        turn: number
+        signal?: AbortSignal
+      }) => { llmSpeculation.maybeSpeculate(params) },
+    } : {}),
     completeTurn: (params) => self.turnCompletion.complete(params),
     appendTurnResult: (turn) => { self.planTraceCoordinator.appendTurnResult(turn) },
     onCacheAdvisorTurnEnd: (params) => { self.cacheAdvisor.onTurnEnd(params) },

@@ -141,6 +141,24 @@ describe('config permissions schema', () => {
     assert.equal(fromObject.intentRetrievalRouter.timeoutMs, 123)
   })
 
+  it('keeps LLM speculation disabled by default and parses opt-in shorthand', () => {
+    const agent = agentSchema.parse({})
+    const parsed = configSchema.parse(DEFAULT_CONFIG)
+    assert.equal(agent.llmSpeculation.enabled, false)
+    assert.equal(parsed.agent.llmSpeculation.enabled, false)
+    assert.equal(agent.llmSpeculation.slowToolsOnly, true)
+
+    const fromBoolean = agentSchema.parse({ llmSpeculation: true })
+    assert.equal(fromBoolean.llmSpeculation.enabled, true)
+    assert.equal(fromBoolean.llmSpeculation.maxPerTurn, 3)
+
+    const fromObject = agentSchema.parse({ llmSpeculation: { enabled: true, maxPerTurn: 5, timeoutMs: 500 } })
+    assert.equal(fromObject.llmSpeculation.enabled, true)
+    assert.equal(fromObject.llmSpeculation.maxPerTurn, 5)
+    assert.equal(fromObject.llmSpeculation.timeoutMs, 500)
+    assert.equal(fromObject.llmSpeculation.maxTokens, 320)
+  })
+
   it('routes repo summarization workers to V4 Flash by default', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 

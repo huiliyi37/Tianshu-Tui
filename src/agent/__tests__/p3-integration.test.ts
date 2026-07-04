@@ -81,6 +81,27 @@ describe('P3Integration', () => {
     assert.deepEqual(executed, [])
   })
 
+  it('enqueueLlmPredictions passes read-only predictions to ShadowQueue tagged as llm', async () => {
+    const executed: string[] = []
+    const p3 = new P3Integration({
+      execute: async (tool, target) => {
+        executed.push(`${tool}:${target}`)
+        return 'prefetched'
+      },
+    })
+
+    p3.enqueueLlmPredictions([
+      { tool: 'read_file', likelyTarget: 'src/next.ts', probability: 0.8 },
+      // ShadowQueue's own whitelist must drop this even if the engine let it through
+      { tool: 'edit_file', likelyTarget: 'src/never.ts', probability: 0.99 },
+    ])
+    await new Promise(r => setTimeout(r, 20))
+
+    assert.deepEqual(executed, ['read_file:src/next.ts'])
+    const stats = p3.queue.statsBySource()
+    assert.equal(stats.llm.enqueued, 1)
+  })
+
   it('AgentLoop validates speculative targets before executing file-capable tools', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'p3-spec-safe-'))
     const outside = mkdtempSync(join(tmpdir(), 'p3-spec-outside-'))
