@@ -1254,6 +1254,10 @@ export async function executeToolUse(
         const cmd = (tu.input.command as string | undefined) ?? ''
         if (!harnessResult.isError && (cmd.startsWith('git ') || /\b(rm|mv|cp|touch|mkdir)\b/.test(cmd))) {
           deps.config.promptEngine.markGitDirty()
+          // bash 写操作也追踪到 evidence——否则 CompletionCurtain 的 filesModified 为空。
+          // 从命令里粗略提取文件路径（重定向目标、git add 文件等），best-effort。
+          const redirectMatch = cmd.match(/>>?\s*([^\s|&;]+)/)
+          if (redirectMatch?.[1]) deps.evidence.trackFileModified(redirectMatch[1]!)
        }
         if (cmd.startsWith('git ')) {
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })

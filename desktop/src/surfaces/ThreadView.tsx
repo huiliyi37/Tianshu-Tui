@@ -799,12 +799,13 @@ export function ThreadView(props: {
       </div>
 
       {session.status === 'completed' && view.completionSummary && (() => {
-        // 只在有实际交付时显示完成面板——todo 全部完成，或有代码改动。
-        // 普通问答（无 todo 无改动）不弹 CompletionCurtain。
+        // 显示条件：有 todo（无论是否全部完成）、有文件改动、或有验证记录。
+        // 之前要求 allTodosDone 才显示——agent 不用 todo 就永远看不到总结。
         const hasTodos = view.todos.length > 0
-        const allTodosDone = hasTodos && view.todos.every(t => t.status === 'completed')
         const hasFileChanges = (view.completionSummary.filesModified?.length ?? 0) > 0
-        if (!allTodosDone && !hasFileChanges) return null
+        const hasReads = (view.completionSummary.filesRead?.length ?? 0) > 0
+        const hasVerifications = (view.completionSummary.verifications?.length ?? 0) > 0
+        if (!hasTodos && !hasFileChanges && !hasReads && !hasVerifications) return null
         return <CompletionCurtain summary={view.completionSummary} />
       })()}
 
