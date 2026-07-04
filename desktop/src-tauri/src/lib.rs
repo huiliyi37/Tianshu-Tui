@@ -21,6 +21,11 @@ use tauri::{
     Manager, State,
 };
 
+/// 进程级退出标志。托盘「退出」触发后置 true，退出过程中所有可见性切换
+/// （托盘点击 toggle、CloseRequested→hide）都让它先让路，避免退出清理
+/// 与可见性切换打架，表现为窗口/托盘"一闪一闪"且退不干净。
+static EXITING: AtomicBool = AtomicBool::new(false);
+
 /// Live coordinates of the rivet sidecar, handed to the frontend so it can talk
 /// to 127.0.0.1:<port> with the per-launch Bearer token.
 #[derive(Clone, Serialize)]
@@ -1057,6 +1062,15 @@ pub fn run() {
     let tray_icon_bytes = include_bytes!("../icons/32x32.png");
 
     tauri::Builder::default()
+        // 单例保护：必须是第一个 plugin。第二个实例启动直接退出并唤起已有窗口，
+        // 杜绝多实例各建托盘图标 / sidecar、争抢同一 ~/.rivet。仅桌面端生效。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             // macOS: LaunchAgent plist (no deprecated AppleScript); Windows: HKCU Run key.
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -1125,6 +1139,17 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
                     let id = event.id().as_ref();
+                    if id == "quit" {
+                        // 退出优先：先立 flag，让退出过程中所有可见性切换让路，
+                        // 再杀 sidecar、退 app。避免 hide/show 打架导致"一闪一闪"退不干净。
+                        EXITING.store(true, Ordering::SeqCst);
+                        kill_sidecar(app);
+                        app.exit(0);
+                        return;
+                    }
+                    if EXITING.load(Ordering::SeqCst) {
+                        return;
+                    }
                     if let Some(w) = app.get_webview_window("main") {
                         match id {
                             "show" => {
@@ -1137,12 +1162,12 @@ pub fn run() {
                             _ => {}
                         }
                     }
-                    if id == "quit" {
-                        kill_sidecar(app);
-                        app.exit(0);
-                    }
                 })
                 .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent| {
+                    // 退出过程中忽略托盘点击 toggle，避免与退出清理的 window.hide 打架。
+                    if EXITING.load(Ordering::SeqCst) {
+                        return;
+                    }
                     // 只在「左键抬起」时切换窗口显隐。之前用 `button: _` 会把右键点击
                     // 也当成切窗口,而右键此刻正要弹出托盘上下文菜单——切窗口会抢走菜单
                     // 焦点使其立即关闭,在 Windows 上表现为右键菜单闪来闪去、无法点退出。
@@ -1170,7 +1195,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                // 关闭窗口 → 隐藏到托盘，不杀 sidecar
+                if EXITING.load(Ordering::SeqCst) {
+                    // 正在退出 → 不 prevent_close，让窗口正常关闭，别挡住退出流程。
+                    return;
+                }
+                // 用户点 X → 隐藏到托盘，不杀 sidecar
                 api.prevent_close();
                 let _ = window.hide();
             }
