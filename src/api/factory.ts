@@ -56,10 +56,15 @@ export function resolveApiKey(provider: ProviderConfig): string {
 /** SLOW_THINKING providers 的 thinking-stall 默认值（ms）。
  *  仅对已知易在纯 thinking 阶段卡死的 provider 启用；
  *  其余 provider 默认 undefined（沿用既有行为：取 readMs，等于禁用）。
- *  取值依据：基于「chunk 空闲窗」而非「总时长」的语义——120s 远小于 300s read 兜底、
- *  远大于合法 reasoning delta 间隙，仅命中 reasoning 完全停流的真卡死。 */
+ *  取值依据：基于「chunk 空闲窗」而非「总时长」的语义——远小于 300s read 兜底、
+ *  远大于合法 reasoning delta 间隙，仅命中 reasoning 完全停流的真卡死。
+ *  - glm 420s：GLM reasoning 合法停顿可达数分钟，窗口给宽。
+ *  - deepseek 120s：实测服务端偶发「吐 2 字符 reasoning 后彻底静默」的卡死，
+ *    旧行为要干等满 300s read 才判死；而中止后重试命中近 100% 前缀缓存、~12s 即恢复，
+ *    故用 120s 更早判死 + 快速热缓存重试。健康流每几秒吐一次 reasoning，永不受影响。 */
 const SLOW_THINKING_STALL_DEFAULT_MS: Record<string, number> = {
   glm: 420_000,
+  deepseek: 120_000,
 }
 
 export function createProviderClient(
@@ -109,6 +114,7 @@ export function createProviderClient(
     auth: params.auth,
     thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
     thinkingStallTimeoutMs: provider.thinkingStallTimeoutMs ?? SLOW_THINKING_STALL_DEFAULT_MS[provider.name],
+    firstByteTimeoutMs: provider.firstByteTimeoutMs,
     thinkingFormat: capabilities.thinkingFormat,
     effortFormat: capabilities.effortFormat,
     reasoningEffort: params.reasoningEffort,

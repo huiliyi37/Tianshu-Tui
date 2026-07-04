@@ -56,6 +56,13 @@ export const providerSchema = z.object({
    * 建议显式设置一个 < readMs 的值；factory.ts 对 glm 注入了 120s 内置默认。
    */
   thinkingStallTimeoutMs: z.number().int().positive().optional(),
+  /**
+   * First-byte (pre-first-chunk) timeout base override (ms).
+   * 默认 undefined = 按 provider/thinking 推导（45/90/180s）。该 base 之上还会随请求
+   * 预估输入规模自动上浮以避免大上下文冷启动被误杀；仅当某个自定义/慢 OpenAI 兼容模型
+   * 即便小上下文也迟迟不出首 token 时，才需要显式抬高这个 base。
+   */
+  firstByteTimeoutMs: z.number().int().positive().optional(),
   unsupported: z.array(z.string()).default([]),
   /**
    * Provider usage calibration factor for `prompt_tokens` (0–1).
