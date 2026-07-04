@@ -225,6 +225,24 @@ describe('四域分工模型（2026-07-04 校订）', () => {
     assert.match(tianliang.systemPromptSuffix, /信号精炼/, 'signal refinement is executor autonomy')
     assert.match(tianliang.systemPromptSuffix, /回退请求修订/, 'directional changes still escalate')
   })
+
+  it('tianliang verifies plan anchors against reality before executing (锚点漂移)', () => {
+    const tianliang = STAR_DOMAINS.tianliang
+    assert.match(tianliang.systemPromptSuffix, /事实锚点/, 'plan fact-anchors must be verified first')
+    assert.match(tianliang.systemPromptSuffix, /锚点漂移/, 'anchor drift is recorded, not treated as plan error')
+  })
+
+  it('tianliang attributes failures before claiming regressions (先归因再归咎)', () => {
+    const tianliang = STAR_DOMAINS.tianliang
+    assert.match(tianliang.systemPromptSuffix, /先归因再归咎/, 'failure attribution baseline in shared workspace')
+    assert.match(tianliang.systemPromptSuffix, /既有/, 'pre-existing failures distinguished from own regressions')
+  })
+
+  it('tianliang delivery report covers the three mandatory items', () => {
+    const tianliang = STAR_DOMAINS.tianliang
+    assert.match(tianliang.systemPromptSuffix, /做了什么、遗留什么、设计偏差/, 'delivery report contract back to planning layer')
+    assert.match(tianliang.volatileBlock, /为分担而生/, 'load-sharing identity present in cognitive field')
+  })
 })
 
 describe('tianliang cognitive field + delivery discipline split', () => {
