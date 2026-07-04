@@ -916,6 +916,87 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
   return lines
 }
 
+// ── Plan Picker (/plan · Shift+Tab 待批计划选择器) ────────────────
+
+export interface PlanPickerEntry {
+  /** 选择键：plan slug（planPickerExec 收到它去 approve+kickoff）。 */
+  slug: string
+  title: string
+  status: 'submitted' | 'approved' | 'executed' | 'rejected'
+  /** 展示用创建时间（已本地化字符串）。 */
+  createdAt: string
+  /** 多方案计划的方案标签（可空）。 */
+  options?: string[]
+}
+
+export interface PlanPickerData {
+  entries: PlanPickerEntry[]
+  selectedIndex: number
+}
+
+function planStatusIcon(status: PlanPickerEntry['status']): string {
+  switch (status) {
+    case 'approved': return '✅'
+    case 'rejected': return '❌'
+    case 'executed': return '🏁'
+    default: return '📋'
+  }
+}
+
+/**
+ * 渲染 Plan Picker overlay（待批计划选择器）。
+ * 列表（cursor + 状态图标 + title）→ 选中项 dim 元信息（slug · 时间 · 方案）。
+ * 回车批准并自动分波执行（planPickerExec 收到 slug）。
+ */
+export function renderPlanPicker(data: PlanPickerData, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+  lines.push(formatTitleBar('选择要批准执行的计划', width, theme))
+  lines.push(frameDivider(width, theme))
+
+  const innerWidth = width - 6
+  const contentRows = Math.max(1, height - 5)
+
+  if (data.entries.length === 0) {
+    lines.push(padLine(color('  （无待批计划。/plan-mode 进入计划模式创建）', theme.dim), width, theme))
+    lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
+    lines.push(formatBottomBorder(width, theme))
+    return lines
+  }
+
+  let rowsUsed = 0
+  for (let i = 0; i < data.entries.length; i++) {
+    if (rowsUsed >= contentRows) break
+    const e = data.entries[i]!
+    const selected = i === data.selectedIndex
+    const icon = planStatusIcon(e.status)
+    const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
+    const labelColor = selected ? theme.primary : theme.secondary
+    const title = selected ? color(e.title, labelColor, { bold: true }) : color(e.title, labelColor)
+    lines.push(padLine(` ${cursor} ${icon} ${title}`, width, theme))
+    rowsUsed++
+
+    if (selected && rowsUsed < contentRows) {
+      const optionsPart = e.options && e.options.length > 0 ? ` · 方案: ${e.options.join(' / ')}` : ''
+      const meta = `${e.slug} · ${e.createdAt}${optionsPart}`
+      for (const d of wrapToWidth(meta, innerWidth, 2)) {
+        if (rowsUsed >= contentRows) break
+        lines.push(padLine(`     ${color(d, theme.muted)}`, width, theme))
+        rowsUsed++
+      }
+    }
+  }
+
+  while (rowsUsed < contentRows) {
+    lines.push(padLine('', width, theme))
+    rowsUsed++
+  }
+
+  lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '批准执行'], ['Esc', '取消']]), width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}
+
 // ── Connect Wizard (/connect 服务商配置向导) ──────────────────────
 // Single stateful overlay driven by ConnectFlow: renders either a choice list
 // (provider pick) or a masked/plain text input (URL / model / key), plus a live

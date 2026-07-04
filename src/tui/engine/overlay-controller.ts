@@ -1,4 +1,4 @@
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData } from '../format/overlay.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import type { RewindData, RewindFile, RewindMode } from '../format/rewind.js'
 import type { HistorySearchData } from '../format/history-search.js'
@@ -23,6 +23,7 @@ export interface OverlayNavState {
   modelPickerIndex: number
   themePickerIndex: number
   choicePanelIndex: number
+  planPickerIndex: number
   connectIndex: number
   query: string
 }
@@ -42,6 +43,7 @@ export interface OverlayDataProviders {
   modelPickerData?: () => ModelPickerData
   themePickerData?: () => ThemePickerData
   choicePanelData?: () => ChoicePanelData
+  planPickerData?: () => PlanPickerData
 }
 
 /**
@@ -50,7 +52,7 @@ export interface OverlayDataProviders {
  * TuiApp; this class only manages nav state / data providers / exec callbacks.
  */
 export class OverlayController {
-  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list', rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, connectIndex: 0, query: '' }
+  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list', rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, planPickerIndex: 0, connectIndex: 0, query: '' }
   private overlayData?: OverlayDataProviders
   private paletteExec?: (index: number) => void
   private rewindExec?: (messageIndex: number, mode: RewindMode) => void
@@ -60,6 +62,7 @@ export class OverlayController {
   private themePickerExec?: (key: string) => void
   private themePickerSaveDefaultExec?: (key: string) => void
   private choicePanelExec?: (id: string) => void
+  private planPickerExec?: (slug: string) => void
   private connectExec?: (commit: ConnectCommit, summary: string) => void
   private cockpitPanel: Panel = 'summary'
 
@@ -67,7 +70,7 @@ export class OverlayController {
   /** Direct mutable access to nav state object */
   nav(): OverlayNavState { return this.overlayNav }
   resetNav(): void {
-    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list' as const, rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, connectIndex: 0, query: '' }
+    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list' as const, rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, planPickerIndex: 0, connectIndex: 0, query: '' }
   }
 
   get pagerPage(): number { return this.overlayNav.pagerPage }
@@ -97,6 +100,8 @@ export class OverlayController {
   get modelPickerIndex(): number { return this.overlayNav.modelPickerIndex }
   get choicePanelIndex(): number { return this.overlayNav.choicePanelIndex }
   setChoicePanelIndex(v: number): void { this.overlayNav.choicePanelIndex = v }
+  get planPickerIndex(): number { return this.overlayNav.planPickerIndex }
+  setPlanPickerIndex(v: number): void { this.overlayNav.planPickerIndex = v }
   get connectIndex(): number { return this.overlayNav.connectIndex }
   setConnectIndex(v: number): void { this.overlayNav.connectIndex = v }
   get themePickerIndex(): number { return this.overlayNav.themePickerIndex }
@@ -135,6 +140,8 @@ export class OverlayController {
   setThemePickerSaveDefaultExec(fn: ((key: string) => void) | undefined): void { this.themePickerSaveDefaultExec = fn }
   getChoicePanelExec(): ((id: string) => void) | undefined { return this.choicePanelExec }
   setChoicePanelExec(fn: ((id: string) => void) | undefined): void { this.choicePanelExec = fn }
+  getPlanPickerExec(): ((slug: string) => void) | undefined { return this.planPickerExec }
+  setPlanPickerExec(fn: ((slug: string) => void) | undefined): void { this.planPickerExec = fn }
   getConnectExec(): ((commit: ConnectCommit, summary: string) => void) | undefined { return this.connectExec }
   setConnectExec(fn: ((commit: ConnectCommit, summary: string) => void) | undefined): void { this.connectExec = fn }
 

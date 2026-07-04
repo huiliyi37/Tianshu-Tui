@@ -35,7 +35,9 @@ import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
 import { buildWorkerDetailContent } from './tui/worker-detail.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
-import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
+import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
+import { listPlansSync } from './plan/plan-store.js'
+import type { PlanPickerEntry } from './tui/format/overlay.js'
 import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries, DOMAIN_SWITCH_CACHE_WARNING } from './agent/domain-picker-entries.js'
@@ -485,6 +487,23 @@ async function main() {
     const base = getPaletteCommands().filter(c => c.name.startsWith('/') || c.name.startsWith('__surface:'))
     return filterCommands(base, tuiApp.getOverlayQuery())
   }
+  // 待批计划(submitted)映射为 plan-picker 条目。同步读盘,供渲染 provider 与
+  // Shift+Tab 触发判定共用。多方案计划附上方案标签。
+  const pendingPlanPickerEntries = (): PlanPickerEntry[] => {
+    try {
+      return listPlansSync(ctx!.agent.cwd)
+        .filter(p => p.status === 'submitted')
+        .map(p => ({
+          slug: p.slug,
+          title: p.title,
+          status: p.status,
+          createdAt: p.createdAt.toLocaleString(),
+          options: p.options?.map(o => o.label),
+        }))
+    } catch {
+      return []
+    }
+  }
   tuiApp.registerOverlays({
     // Pager — scrollback 内容 或 当前选中 worker 的 detail（用于 /tasks Enter）
     pagerContent: () => {
@@ -680,6 +699,9 @@ async function main() {
       ]
       return { title: '推理强度 / Reasoning Effort', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
     },
+    // Plan Picker — Shift+Tab / /plan-approve 无参打开的待批计划选择器。
+    // 同步读盘（渲染路径不能 await），只列出等待批准的 submitted 计划。
+    planPickerData: () => ({ entries: pendingPlanPickerEntries(), selectedIndex: 0 }),
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令。
     // 必须用与 display 相同的过滤后列表，否则 query 过滤时索引错位。
@@ -839,6 +861,17 @@ async function main() {
         ? `✅ ${summary}`
         : `✅ ${summary}\n（已保存到配置。若模型未切换，重启天枢后生效。）`,
     )
+  }, /* planPickerExec: */ (slug: string) => {
+    // Plan Picker Enter 回调：批准选中计划并自动 kickoff 分波执行（与 /plan-approve 共用）。
+    void approvePlanAndKickoff(
+      {
+        cwd: ctx!.agent.cwd,
+        agent: ctx!.agent,
+        submitToAgent: (prompt: string) => { tuiApp.submitText(prompt) },
+        notify: (content: string, isError?: boolean) => tuiApp.commitStatic(content, { isError }),
+      },
+      slug,
+    )
   })
 
   // ── SlashRouter ──────────────────────────────────────────────
@@ -902,6 +935,12 @@ async function main() {
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
   app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
+    // 有待批计划时,Shift+Tab 优先弹出选择器(方向键选 + 回车批准并自动分波执行),
+    // 免去手抄 slug。无待批计划才回落到「进入/退出 plan mode」原语义。
+    if (pendingPlanPickerEntries().length > 0) {
+      app!.activateOverlay('plan-picker')
+      return
+    }
     if (agent.planModeState === 'planning') {
       agent.exitPlanMode()
       app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
@@ -929,8 +968,20 @@ async function main() {
     // /review → "deliver_task(...)"；未知 slash → null → 显示错误提示。
     const resolved = resolveAppPromptInput(trimmed, process.cwd())
     if (resolved === null) {
+      // Backstop: a registered slash command (e.g. /plan-approve) may slip past
+      // normal dispatch. Give the registry one more chance before reporting
+      // "Unknown command" — kills the silent failure users hit on /plan-* copy-paste.
       app!.rejectSubmit()
-      app!.commitStatic(`⚠️  Unknown command: ${trimmed.split(/\s/)[0]}\nType /help for available commands.`)
+      void (async () => {
+        const handled = await app!.tryDispatchSlash(trimmed)
+        if (!handled) {
+          const firstTok = trimmed.split(/\s/)[0]
+          const planHint = firstTok?.startsWith('/plan')
+            ? '\n提示: Shift+Tab 打开待批计划选择器,或 /plan-list 查看计划、/plan-approve 无参批准唯一待批计划。'
+            : ''
+          app!.commitStatic(`⚠️  Unknown command: ${firstTok}\nType /help for available commands.${planHint}`)
+        }
+      })()
       return
     }
 

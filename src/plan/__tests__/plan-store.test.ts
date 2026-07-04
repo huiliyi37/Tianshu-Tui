@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { writePlan, readPlan, listPlans, approvePlan, rejectPlan, deletePlan, slugify, stripPlanStatusMarkers, resolvePlanOptionLabel } from '../plan-store.js'
+import { writePlan, readPlan, listPlans, approvePlan, rejectPlan, deletePlan, slugify, stripPlanStatusMarkers, resolvePlanOptionLabel, stripCopiedTitleSuffix, resolvePlanRef, type PlanDocument } from '../plan-store.js'
 import { checked, checkedAt } from '../../utils/guard.js'
 
 describe('slugify', () => {
@@ -243,5 +243,63 @@ describe('resolvePlanOptionLabel', () => {
       { label: 'Fast (v2)', description: 'b' },
     ]
     assert.equal(resolvePlanOptionLabel(ambiguous, 'fast'), undefined)
+  })
+})
+
+describe('stripCopiedTitleSuffix', () => {
+  it('strips a copied " — title" suffix, keeping the slug', () => {
+    assert.equal(
+      stripCopiedTitleSuffix('权限入口三档统一-manual-auto-yolo — 权限入口三档统一：Manual / Auto / YOLO'),
+      '权限入口三档统一-manual-auto-yolo',
+    )
+  })
+
+  it('returns the trimmed input when no separator is present', () => {
+    assert.equal(stripCopiedTitleSuffix('  fix-bug  '), 'fix-bug')
+  })
+})
+
+describe('resolvePlanRef', () => {
+  function plan(slug: string, title: string): PlanDocument {
+    return { slug, title, content: '', path: `.rivet/plans/${slug}.md`, createdAt: new Date(), status: 'submitted' }
+  }
+  const plans = [
+    plan('fix-memory-leak', 'Fix Memory Leak'),
+    plan('权限入口三档统一-manual-auto-yolo', '权限入口三档统一：Manual / Auto / YOLO'),
+    plan('add-caching-layer', 'Add Caching Layer'),
+  ]
+
+  it('matches by exact slug', () => {
+    const r = resolvePlanRef(plans, 'add-caching-layer')
+    assert.equal(r.kind, 'match')
+    assert.equal(r.kind === 'match' && r.plan.slug, 'add-caching-layer')
+  })
+
+  it('matches by slugified title', () => {
+    const r = resolvePlanRef(plans, 'Fix Memory Leak')
+    assert.equal(r.kind, 'match')
+    assert.equal(r.kind === 'match' && r.plan.slug, 'fix-memory-leak')
+  })
+
+  it('tolerates a copied " — title" suffix', () => {
+    const r = resolvePlanRef(plans, '权限入口三档统一-manual-auto-yolo — 权限入口三档统一：Manual / Auto / YOLO')
+    assert.equal(r.kind, 'match')
+    assert.equal(r.kind === 'match' && r.plan.slug, '权限入口三档统一-manual-auto-yolo')
+  })
+
+  it('matches by unique slug prefix', () => {
+    const r = resolvePlanRef(plans, 'fix-mem')
+    assert.equal(r.kind, 'match')
+    assert.equal(r.kind === 'match' && r.plan.slug, 'fix-memory-leak')
+  })
+
+  it('reports ambiguity when a prefix hits multiple plans', () => {
+    const r = resolvePlanRef([plan('add-a', 'A'), plan('add-b', 'B')], 'add-')
+    assert.equal(r.kind, 'ambiguous')
+    assert.deepEqual(r.kind === 'ambiguous' && r.slugs, ['add-a', 'add-b'])
+  })
+
+  it('returns none for unmatched input', () => {
+    assert.equal(resolvePlanRef(plans, 'nonexistent-plan').kind, 'none')
   })
 })

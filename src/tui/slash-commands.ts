@@ -34,7 +34,7 @@ import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { exportsDir } from '../config/paths.js'
-import { listPlans, approvePlan, rejectPlan, readPlan, resolvePlanOptionLabel } from '../plan/plan-store.js'
+import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
@@ -458,6 +458,42 @@ export function resolveEnterWorkerInput(
   return { prompt }
 }
 
+
+/** Build the kickoff prompt that drives wave-by-wave execution of an approved plan. */
+export function buildPlanKickoff(slug: string, title: string, approach?: string): string {
+  let msg = `开始执行已批准方案「${title}」(.rivet/plans/${slug}.md)。先 read_file 读取该计划,然后用 plan_task(execute=true) 或 team_orchestrate 把任务按波次并行执行、逐波过审查门;开工前用 todo 列出有序步骤跟踪进度,全部完成后 plan_close。`
+  if (approach) msg += `\nSelected approach: ${approach} — 只执行此方案,勿执行未选中的备选。`
+  return msg
+}
+
+/**
+ * 批准计划并自动 kickoff 分波执行的共享闭环。slash `/plan-approve` 与 plan-picker
+ * overlay 回车共用:approve → setActivePlan(注入指针 + 退出 plan mode)→ 提交 kickoff。
+ * 返回 false 表示计划不存在(调用方据此报错)。
+ */
+export async function approvePlanAndKickoff(
+  deps: {
+    cwd: string
+    agent: Pick<AgentLoop, 'setActivePlan'>
+    submitToAgent?: (prompt: string) => void
+    notify: (content: string, isError?: boolean) => void
+  },
+  slug: string,
+  resolvedApproach?: string,
+): Promise<boolean> {
+  const approved = await approvePlan(deps.cwd, slug)
+  if (!approved) {
+    deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
+    return false
+  }
+  deps.agent.setActivePlan({ slug, title: approved.title, selectedApproach: resolvedApproach })
+  const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
+  deps.notify(
+    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。`,
+  )
+  deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach))
+  return true
+}
 
 interface TuiSlashCommandDef {
   readonly name: string
@@ -1511,74 +1547,90 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      const slug = parts[1]?.toLowerCase()
-      const selectedApproach = parts.slice(2).join(' ').trim() || undefined
-      if (!slug) {
-        // No slug — list plans and hint
-        const cwd = ctx.agent.cwd
-        const plans = await listPlans(cwd)
-        if (plans.length === 0) {
-          pushStatic(createLogEntry({ type: 'system', content: 'No plans to approve. Use /plan-mode to create one.' }))
+      const cwd = ctx.agent.cwd
+      const notify = (content: string, isError?: boolean) =>
+        pushStatic(createLogEntry({ type: 'system', content, isError }))
+      const kickoffDeps = { cwd, agent: ctx.agent, submitToAgent: ctx.submitToAgent, notify }
+      const rawArg = parts.slice(1).join(' ').trim()
+      const plans = await listPlans(cwd)
+
+      // ── No arg: approve the single pending plan, else open the picker ──
+      if (!rawArg) {
+        const submitted = plans.filter(p => p.status === 'submitted')
+        if (submitted.length === 0) {
+          notify(plans.length > 0
+            ? 'No submitted plans awaiting approval.\n\nUse /plan-list to see all plans.'
+            : 'No plans to approve. Use /plan-mode to create one.')
+          setIsStreaming(false)
+          return true
+        }
+        if (submitted.length === 1) {
+          // Sole pending plan → approve + kickoff directly (no slug typing needed).
+          await approvePlanAndKickoff(kickoffDeps, submitted[0]!.slug)
+          setIsStreaming(false)
+          return true
+        }
+        // Multiple pending → interactive picker (arrow-select + Enter approves).
+        if (ctx.surfacePush) {
+          ctx.surfacePush('plan-picker')
         } else {
-          const submitted = plans.filter(p => p.status === 'submitted')
-          if (submitted.length === 0) {
-            pushStatic(createLogEntry({ type: 'system', content: `No submitted plans awaiting approval.\n\nUse /plan-list to see all plans.` }))
-          } else {
-            const hint = submitted.map(p => `  /plan-approve ${p.slug} — ${p.title}`).join('\n')
-            pushStatic(createLogEntry({ type: 'system', content: `Submitted plans awaiting approval:\n\n${hint}` }))
-          }
+          const hint = submitted.map(p => `  /plan-approve ${p.slug}`).join('\n')
+          notify(`Submitted plans awaiting approval:\n\n${hint}`)
         }
         setIsStreaming(false)
         return true
       }
 
-      const cwd = ctx.agent.cwd
+      // ── Explicit arg: resolve tolerantly (handles copied "slug — title") ──
+      // A copied hint contains " — "; a real approach is space-separated. Split so
+      // the em-dash title junk never gets mistaken for an approach.
+      let slugCandidate: string
+      let approachRaw = ''
+      if (rawArg.includes(' — ')) {
+        slugCandidate = stripCopiedTitleSuffix(rawArg)
+      } else {
+        slugCandidate = parts[1]!
+        approachRaw = parts.slice(2).join(' ').trim()
+      }
+
+      let resolution = resolvePlanRef(plans, slugCandidate)
+      // Fallback: the whole arg may be a multi-word title, not slug + approach.
+      if (resolution.kind === 'none' && approachRaw) {
+        const full = resolvePlanRef(plans, rawArg)
+        if (full.kind === 'match') { resolution = full; approachRaw = '' }
+      }
+      if (resolution.kind === 'none') {
+        notify(`Plan not found: "${stripCopiedTitleSuffix(rawArg)}". Use /plan-list to see available plans.`, true)
+        setIsStreaming(false)
+        return true
+      }
+      if (resolution.kind === 'ambiguous') {
+        notify(`Ambiguous plan ref "${stripCopiedTitleSuffix(rawArg)}". Matches:\n${resolution.slugs.map(s => `  \`${s}\``).join('\n')}\n\nUse the full slug, or /plan-approve (no arg) to pick interactively.`, true)
+        setIsStreaming(false)
+        return true
+      }
+
+      const plan = resolution.plan
+      const slug = plan.slug
 
       // Validate the selected approach BEFORE mutating the plan file — approving
       // first would leave the file marked APPROVED even when the option is bogus.
       let resolvedApproach: string | undefined
-      if (selectedApproach) {
-        const pending = await readPlan(cwd, slug)
-        if (!pending) {
-          pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
-          setIsStreaming(false)
-          return true
-        }
-        if (pending.options && pending.options.length > 0) {
-          resolvedApproach = resolvePlanOptionLabel(pending.options, selectedApproach)
+      if (approachRaw) {
+        if (plan.options && plan.options.length > 0) {
+          resolvedApproach = resolvePlanOptionLabel(plan.options, approachRaw)
           if (!resolvedApproach) {
-            const available = pending.options.map(o => `  \`${o.label}\``).join('\n')
-            pushStatic(createLogEntry({
-              type: 'system',
-              content: `Unknown option "${selectedApproach}". Available options:\n${available}`,
-              isError: true,
-            }))
+            const available = plan.options.map(o => `  \`${o.label}\``).join('\n')
+            notify(`Unknown option "${approachRaw}". Available options:\n${available}`, true)
             setIsStreaming(false)
             return true
           }
         } else {
-          resolvedApproach = selectedApproach
+          resolvedApproach = approachRaw
         }
       }
 
-      const approved = await approvePlan(cwd, slug)
-      if (!approved) {
-        pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
-        setIsStreaming(false)
-        return true
-      }
-
-      // Inject a tiny pointer (slug/title/path) into the dynamic appendix — the
-      // plan body stays on disk to keep the prefix cache intact. setActivePlan
-      // also releases plan mode internally.
-      ctx.agent.setActivePlan({
-        slug,
-        title: approved.title,
-        selectedApproach: resolvedApproach,
-      })
-      const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
-      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
+      await approvePlanAndKickoff(kickoffDeps, slug, resolvedApproach)
       setIsStreaming(false)
       return true
     },
