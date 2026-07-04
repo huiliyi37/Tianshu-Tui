@@ -633,12 +633,12 @@ function CheckpointSection() {
             </button>
           </div>
           <div className="meta">
-            巡航档：自治模式（免批准）连续执行到设定轮数时暂停，附带进度摘要（改了哪些文件 / 最近工具 / token 用量），确认方向后再继续。受监督档位不受影响。
+            巡航档：自治模式（免批准）连续执行到设定轮数时暂停，附带进度摘要（改了哪些文件 / 最近工具 / token 用量），确认方向后再继续。默认关闭（0 = 不暂停），可在上方下拉框或手动输入轮数开启。受监督档位不受影响。
           </div>
         </>
       ) : (
         <div className="meta">
-          完全自治档：无轮次刹车，每 {cfg.checkpointEveryTurns > 0 ? `${cfg.checkpointEveryTurns} 轮` : '—'}发一条非阻塞进度播报（不暂停）。回滚兜底：run 开始前有 git 检查点，可随时回滚。
+          完全自治档：无轮次刹车、无进度播报，持续执行直到 maxTurns 或任务完成。回滚兜底：run 开始前有 git 检查点，可随时回滚。
         </div>
       )}
       {msg && <div className="meta">{msg}</div>}
@@ -653,8 +653,8 @@ function CheckpointSection() {
           </AlertDialogHeader>
           <ul className="meta" style={{ paddingLeft: '1.2em', margin: '4px 0' }}>
             <li>工具审批已跳过（自治模式本身的行为）</li>
+            <li>无进度播报 — 完全静默运行</li>
             <li>沙箱仍会拦截项目目录外的写入</li>
-            <li>每隔设定轮数发一条非阻塞进度播报（不暂停）</li>
             <li>回滚兜底：run 开始前自动创建 git 检查点，随时可回滚到起点</li>
             {isWindows() && <li><strong>Windows 注意：沙箱能力降级，逃逸风险相对更高</strong></li>}
           </ul>

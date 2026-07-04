@@ -1455,12 +1455,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       if (!sub) {
         const { autonomyBrake, checkpointEveryTurns } = ctx.agent.getAutonomyBrake()
         const modeLabel = autonomyBrake === 'cruise' ? '巡航（cruise）' : '完全自治（unleashed）'
-        const intervalLabel = checkpointEveryTurns > 0
-          ? autonomyBrake === 'cruise'
-            ? `每 ${checkpointEveryTurns} 轮暂停并同步进度`
-            : `每 ${checkpointEveryTurns} 轮非阻塞播报进度`
-          : '轮次刹车/播报已关闭'
-        return finish(`自治刹车状态\n\n  模式: ${modeLabel}\n  间隔: ${intervalLabel}\n  生效范围: 仅自治档（dangerously-skip-permissions）\n\n命令:\n  /autonomy cruise [轮数] — 巡航档（默认 25，推荐 20-30）\n  /autonomy unleashed — 完全自治档（需二次确认）`)
+        const intervalLabel = autonomyBrake === 'cruise'
+          ? (checkpointEveryTurns > 0 ? `每 ${checkpointEveryTurns} 轮暂停并同步进度` : '轮次检查点已关闭')
+          : '无刹车、无播报 — 持续执行直到 maxTurns 或完成'
+        return finish(`自治刹车状态\n\n  模式: ${modeLabel}\n  ${intervalLabel}\n  生效范围: 仅自治档（dangerously-skip-permissions）\n\n命令:\n  /autonomy cruise [轮数] — 巡航档（默认 0 关，推荐 20-30）\n  /autonomy unleashed — 完全自治档（需二次确认）`)
       }
 
       if (sub === 'cruise') {
@@ -1488,9 +1486,9 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
             '⚠ 完全自治档（unleashed）风险说明',
             '',
             '  · 无轮次刹车 — run 会持续执行直到任务完成或 maxTurns 上限',
+            '  · 无进度播报 — 完全静默运行',
             '  · 工具审批已跳过（自治档本身的行为）',
             '  · 沙箱仍会拦截项目目录外的写入',
-            '  · 每隔检查点间隔会发一条非阻塞进度播报（不暂停）',
             '  · 回滚兜底：run 开始前有 git 检查点，随时可用 /rollback 回到起点',
             '  · Windows 注意：沙箱能力降级，逃逸风险相对更高',
             '',
@@ -1500,10 +1498,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         try {
           const saved = setAutonomyConfig({ autonomyBrake: 'unleashed' })
           ctx.agent.setAutonomyBrake('unleashed')
-          const pingLabel = saved.checkpointEveryTurns > 0
-            ? `每 ${saved.checkpointEveryTurns} 轮播报进度（不暂停）`
-            : '进度播报已关闭'
-          return finish(`✓ 已切换到完全自治档：无轮次刹车，${pingLabel}。/rollback 可随时回滚兜底。已持久化，下一轮生效。`)
+          return finish('✓ 已切换到完全自治档：无轮次刹车、无进度播报、持续执行直到完成。/rollback 可随时回滚兜底。已持久化，下一轮生效。')
         } catch (err) {
           return finish(`设置失败: ${(err as Error).message}`, true)
         }

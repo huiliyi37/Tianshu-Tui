@@ -14,9 +14,9 @@ import { buildProgressDigest } from '../loop-factory.js'
 
 // C3 (自治模式刹车): in autonomous mode (dangerously-skip-permissions) the run
 // brakes according to the autonomyBrake mode: 'cruise' pauses cleanly after
-// `checkpointEveryTurns` turns with a progress digest; 'unleashed' never pauses
-// but emits non-blocking progress pings at the interval. Supervised modes are
-// unaffected (approvals are their brake).
+// `checkpointEveryTurns` turns with a progress digest; 'unleashed' runs with
+// no brake and no progress callbacks at all. Supervised modes are unaffected
+// (approvals are their brake).
 
 const TEST_CWD = mkdtempSync(join(tmpdir(), 'rivet-autonomy-cp-'))
 writeFileSync(join(TEST_CWD, 'f.txt'), 'hello')
@@ -110,7 +110,7 @@ describe('TurnOrchestrator: autonomy checkpoint (C3)', () => {
     assert.match(digest, /Token：输入/, 'digest reports token usage')
   })
 
-  it('unleashed mode never pauses but pings at the interval', async () => {
+  it('unleashed mode runs without any brake or callback (no pause, no ping)', async () => {
     const client = makeToolClient(7) // 8 turns total (7 tool + 1 text)
     const checkpoints: AutonomyCheckpointInfo[] = []
     const agent = makeAgent(client, {
@@ -122,9 +122,7 @@ describe('TurnOrchestrator: autonomy checkpoint (C3)', () => {
     await agent.run('read the file repeatedly', makeCallbacks(checkpoints))
 
     assert.equal(client.calls(), 8, 'unleashed run proceeds to its natural finish')
-    assert.deepEqual(checkpoints.map(c => c.turns), [3, 6], 'pings at every interval multiple')
-    assert.ok(checkpoints.every(c => c.paused === false), 'all pings are non-blocking')
-    assert.ok(checkpoints.every(c => c.digest.includes('已执行')), 'pings carry a digest')
+    assert.equal(checkpoints.length, 0, 'unleashed does not emit any checkpoint/ping callbacks')
   })
 
   it('supervised mode ignores the checkpoint (approvals are the brake)', async () => {
@@ -208,6 +206,6 @@ describe('TurnOrchestrator: autonomy checkpoint (C3)', () => {
     await agent.run('read the file repeatedly', makeCallbacks(checkpoints))
 
     assert.equal(client.calls(), 11, 'unleashed run proceeds to its natural finish')
-    assert.deepEqual(checkpoints.map(c => c.turns), [5, 10], 'pings honor the updated interval')
+    assert.equal(checkpoints.length, 0, 'unleashed emits no checkpoint/ping callbacks')
   })
 })

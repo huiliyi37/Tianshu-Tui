@@ -351,37 +351,26 @@ export class TurnOrchestrator {
           return
         }
 
-        // ── C3 自治档刹车（双模式） ──
+        // ── C3 自治档刹车（巡航检查点） ──
         // Autonomous mode has no approval brakes; without a stop point a run
-        // barrels through up to maxTurns (200) turns. Two brake modes:
-        // - cruise: pause cleanly after N turns with a progress digest and hand
-        //   control back — the user resumes with "continue".
-        // - unleashed: never pause; emit a NON-blocking progress ping every N
-        //   turns (rollback is the safety net).
+        // barrels through up to maxTurns (200) turns.
+        // - cruise: pause every N turns with a progress digest — user resumes
+        //   with "continue". 0 = off (Auto 档默认关).
+        // - unleashed: no brake at all — runs until maxTurns or completion
+        //   (rollback is the safety net).
         const checkpointEvery = this.deps.getCheckpointEveryTurns()
-        if (checkpointEvery > 0 && turn > 0) {
-          const brake = this.deps.getAutonomyBrake()
-          if (brake === 'cruise' && turn >= checkpointEvery) {
-            const digest = this.deps.buildProgressDigest(turn)
-            this.emitStop({
-              source: 'checkpoint',
-              turn,
-              voluntary: false,
-              detail: `autonomy checkpoint every ${checkpointEvery} turns`,
-            }, callbacks)
-            callbacks.onAutonomyCheckpoint?.({ turns: turn, digest, paused: true })
-            callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), true)
-            finalTurnCompleted = true
-            break
-          }
-          if (brake === 'unleashed' && turn % checkpointEvery === 0) {
-            // Informational only — no emitStop, no break; the run keeps going.
-            callbacks.onAutonomyCheckpoint?.({
-              turns: turn,
-              digest: this.deps.buildProgressDigest(turn),
-              paused: false,
-            })
-          }
+        if (checkpointEvery > 0 && turn > 0 && this.deps.getAutonomyBrake() === 'cruise' && turn >= checkpointEvery) {
+          const digest = this.deps.buildProgressDigest(turn)
+          this.emitStop({
+            source: 'checkpoint',
+            turn,
+            voluntary: false,
+            detail: `autonomy checkpoint every ${checkpointEvery} turns`,
+          }, callbacks)
+          callbacks.onAutonomyCheckpoint?.({ turns: turn, digest, paused: true })
+          callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), true)
+          finalTurnCompleted = true
+          break
         }
 
         const estTokens = this.deps.getEstimatedTokens()

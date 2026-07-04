@@ -32,7 +32,7 @@ describe('loadConfig — 3-layer resolution', () => {
   })
 
   // ── C3 legacy migration: persisted checkpointEveryTurns=10 (old default)
-  // without an autonomyBrake field is unmigrated legacy → new default 25.
+  // without an autonomyBrake field is unmigrated legacy → new default 0 (off).
   // RIVET_CONFIG_PATH is pinned to an isolated temp file so the developer's
   // real ~/.rivet/config.json can't leak into the assertions. ──
 
@@ -50,10 +50,10 @@ describe('loadConfig — 3-layer resolution', () => {
     }
   }
 
-  it('migrates legacy user-config checkpointEveryTurns=10 (no autonomyBrake) to the new default 25', () => {
+  it('migrates legacy user-config checkpointEveryTurns=10 (no autonomyBrake) to the new default 0', () => {
     withIsolatedUserConfig({ agent: { checkpointEveryTurns: 10 } }, () => {
       const config = loadConfig()
-      assert.equal(config.agent.checkpointEveryTurns, 25, 'legacy 10 is treated as unmigrated → schema default 25')
+      assert.equal(config.agent.checkpointEveryTurns, 0, 'legacy 10 is treated as unmigrated → schema default 0 (off)')
       assert.equal(config.agent.autonomyBrake, 'cruise')
     })
   })
@@ -81,7 +81,7 @@ describe('loadConfig — 3-layer resolution', () => {
       }))
 
       const config = loadConfig({ cwd: projectDir })
-      assert.equal(config.agent.checkpointEveryTurns, 25)
+      assert.equal(config.agent.checkpointEveryTurns, 0)
 
       rmSync(projectDir, { recursive: true, force: true })
     })

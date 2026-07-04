@@ -122,7 +122,7 @@ export const DEFAULT_CONFIG: Config = {
     council: { seats: [] },
     maxAutoContinue: 1,
     autonomyBrake: 'cruise',
-    checkpointEveryTurns: 25,
+    checkpointEveryTurns: 0,
     intentRetrievalRouter: {
       enabled: true,
       classifier: 'heuristic',

@@ -215,18 +215,18 @@ export const agentSchema = z.object({
   /**
    * C3 自治刹车模式 — only meaningful in autonomous mode (dangerously-skip-permissions):
    * - 'cruise': pause every `checkpointEveryTurns` turns with a progress digest,
-   *   user confirms to continue.
-   * - 'unleashed': no turn brake. Requires explicit risk acknowledgement in the
-   *   UI. Emits a NON-blocking progress ping every `checkpointEveryTurns` turns;
-   *   rollback (per-run git checkpoint + /rollback) is the safety net.
+   *   user confirms to continue. 0 = no pause (Auto 档默认关闭轮次检查点).
+   * - 'unleashed': no turn brake, no progress ping. Runs until maxTurns or completion.
+   *   Requires explicit risk acknowledgement. Rollback (per-run git checkpoint
+   *   + /rollback) is the safety net.
    * Supervised modes brake via approvals and ignore this entirely.
    */
   autonomyBrake: z.enum(['cruise', 'unleashed']).default('cruise'),
   /**
-   * C3 自治档检查点间隔 — cruise: pause-for-confirmation interval; unleashed:
-   * non-blocking progress ping interval. 0 disables both.
+   * C3 巡航档检查点间隔 — cruise: pause-for-confirmation interval (0 = off).
+   * unleashed 不读此字段（无暂停、无播报）。
    */
-  checkpointEveryTurns: z.number().int().min(0).default(25),
+  checkpointEveryTurns: z.number().int().min(0).default(0),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */

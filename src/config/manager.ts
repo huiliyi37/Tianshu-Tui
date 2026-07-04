@@ -51,11 +51,11 @@ export function findProjectConfig(startDir: string): string | undefined {
 /**
  * One-shot legacy migration for the C3 autonomy brake (2026-07): configs
  * written before `autonomyBrake` existed persisted the then-default
- * `checkpointEveryTurns: 10`. Users found 10 too sensitive, so the default
- * moved to 25 — but a persisted 10 would pin them to the old behavior forever.
- * When the brake field is absent AND the interval equals the old default,
- * treat the 10 as unmigrated legacy and drop it so the new schema default
- * applies. Explicit non-10 values (user actually tuned it) are untouched.
+ * `checkpointEveryTurns: 10`. The default since moved to 0 (off) — a
+ * persisted 10 would pin them to the old behavior forever.  When the brake
+ * field is absent AND the interval equals the old default, treat the 10 as
+ * unmigrated legacy and drop it so the new schema default applies.
+ * Explicit non-10 values (user actually tuned it) are untouched.
  */
 function migrateLegacyCheckpointInterval(raw: Record<string, unknown>): Record<string, unknown> {
   const agent = raw.agent

@@ -625,7 +625,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     getCheckpointEveryTurns: () => self.config.approvalMode === 'dangerously-skip-permissions'
       ? (self.config.checkpointEveryTurns ?? 0)
       : 0,
-    // C3 — brake mode: cruise pauses at the interval, unleashed only pings.
+    // C3 — brake mode: cruise pauses at the interval, unleashed runs without brake.
     getAutonomyBrake: () => self.config.autonomyBrake ?? 'cruise',
     buildProgressDigest: (turns) => buildProgressDigest({
       turns,
