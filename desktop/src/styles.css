@@ -1583,6 +1583,7 @@ body {
   animation: do-slide-in 200ms ease-out;
 }
 @keyframes do-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes drawer-slide-in { from { transform: translateX(100%); opacity: 0.8; } to { transform: translateX(0); opacity: 1; } }
 .delegation-overlay-header {
   display: flex;
   align-items: center;
@@ -2158,6 +2159,14 @@ body {
   font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.5;
   white-space: pre-wrap; word-break: break-word;
 }
+.tool-expand-btn {
+  display: block; margin: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  background: var(--accent-soft); color: var(--accent);
+  border: none; border-radius: var(--radius-sm);
+  font-size: var(--text-xs); cursor: pointer;
+}
+.tool-expand-btn:hover { filter: brightness(1.1); }
 
 /* Tool stream group (Cursor 3.0) — compact inline rows with status dots. */
 .tool-group {
@@ -2574,6 +2583,7 @@ body {
   background: var(--panel); border-left: 1px solid var(--border-strong);
   box-shadow: var(--shadow-md);
   z-index: calc(var(--z-modal) - 1);
+  animation: drawer-slide-in 180ms ease-out;
 }
 .sidechat-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -2590,6 +2600,7 @@ body {
   background: var(--panel); border-left: 1px solid var(--border-strong);
   box-shadow: var(--shadow-md);
   z-index: calc(var(--z-modal) - 1);
+  animation: drawer-slide-in 180ms ease-out;
 }
 .file-viewer-head {
   display: flex; align-items: center; gap: var(--space-1);

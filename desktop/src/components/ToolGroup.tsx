@@ -8,6 +8,8 @@ import type { ParsedNetworkRow } from '../../../src/tools/browser-debug/log-capt
 import { getArtifact } from '../runtime/client'
 
 const TOOL_BODY_MAX = 10000
+/** Lines shown when collapsed (before "展开全文" button). */
+const COLLAPSED_LINES = 50
 
 // Mirror of the TUI classifier (src/tui/format/collapsed-read-search.ts):
 // only exploration tools (read / search / list) fold into the compact group.
@@ -44,6 +46,39 @@ function truncateBody(text: string): string {
   return text.length > TOOL_BODY_MAX
     ? `${text.slice(0, TOOL_BODY_MAX)}\n…(已截断 ${text.length - TOOL_BODY_MAX} 字)`
     : text
+}
+
+/** Expandable output body: shows first N lines, "展开全文" reveals everything.
+ *  Replaces the old hard truncation at 10k chars. */
+function ExpandableBody({ text }: { text: string }) {
+  const lines = text.split('\n')
+  const isLong = lines.length > COLLAPSED_LINES
+  const [expanded, setExpanded] = useState(false)
+
+  if (!isLong) return <pre className="tool-output-section">{text}</pre>
+
+  const visible = expanded ? text : lines.slice(0, COLLAPSED_LINES).join('\n')
+  return (
+    <>
+      <pre className="tool-output-section">{visible}</pre>
+      {!expanded && (
+        <button
+          className="tool-expand-btn"
+          onClick={() => setExpanded(true)}
+        >
+          展开全文（共 {lines.length} 行）
+        </button>
+      )}
+      {expanded && (
+        <button
+          className="tool-expand-btn"
+          onClick={() => setExpanded(false)}
+        >
+          收起
+        </button>
+      )}
+    </>
+  )
 }
 
 // Leading file-path token: POSIX absolute (/…), Windows drive (C:\… or C:/…),
@@ -240,7 +275,7 @@ function PairedRowImpl({ entry, sessionId, onOpenImage }: {
             isBrowserDebug ? (
               <BrowserDebugBody result={entry.result} sessionId={sessionId} onOpenImage={onOpenImage} />
             ) : (
-              <pre className="tool-output-section">{truncateBody(entry.result.text)}</pre>
+              <ExpandableBody text={entry.result.text} />
             )
           )}
         </div>
@@ -423,7 +458,7 @@ function ToolRowImpl({ block, defaultOpen = false }: { block: ConvoBlock; defaul
         <McpBadge name={name} />
         {!open && preview && <PreviewText text={preview} />}
       </button>
-      {open && <pre className="tool-body">{truncateBody(block.text)}</pre>}
+      {open && <ExpandableBody text={block.text} />}
     </div>
   )
 }
