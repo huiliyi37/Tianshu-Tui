@@ -50,6 +50,7 @@ import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } fro
 import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
 import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
+import { parseAskUserQuestions } from '../tools/ask-user-question.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -86,6 +87,8 @@ export type SessionEventType =
   // Plan mode — state toggle (off|planning) + a plan was submitted to disk.
   | 'plan_mode'
   | 'plan_submitted'
+  // Structured ask_user_question payload → desktop question card (Cursor-style).
+  | 'user_question'
   // PlusMenu — per-session model / star-domain / skill selection changes.
   | 'model_switched'
   | 'domain_changed'
@@ -231,6 +234,13 @@ export interface ManagedAgent {
    */
   enterPlanMode?(opts?: { planFilePath?: string }): void
   exitPlanMode?(): void
+  /**
+   * Plan mode change notification — assigned by the session layer so agent-side
+   * transitions (e.g. the model calling plan action=enter_mode) surface as
+   * plan_mode SSE events. Mirrors AgentLoop.onPlanModeChange. Optional so
+   * lightweight test doubles need not implement it.
+   */
+  onPlanModeChange?: (state: PlanModeState) => void
   /**
    * Relative path of the working draft the agent writes while in plan mode
    * (null when not planning). Mirrors AgentLoop.getActivePlanFilePath.
@@ -1174,6 +1184,16 @@ export class RuntimeSessionManager {
     try {
       if (session.disabledSkills.size > 0) agent.setDisabledSkills?.(new Set(session.disabledSkills))
     } catch { /* non-fatal */ }
+    // 主动 plan mode：模型经 plan action=enter_mode 自主切换时，把状态镜像到
+    // session record 并发 plan_mode SSE（桌面切 Plan tab）。server 自己触发的
+    // 切换（setPlanMode/approve/reject）已直接 append —— 状态相同时跳过防重复。
+    agent.onPlanModeChange = (state: PlanModeState) => {
+      if (session.record.planMode === state) return
+      session.record.planMode = state
+      this.touch(session)
+      this.append(session, 'plan_mode', { state })
+      this.persistRecord(session)
+    }
   }
 
   // ── PlusMenu: star domain ─────────────────────────────────────
@@ -1459,8 +1479,12 @@ export class RuntimeSessionManager {
       })
     } catch { /* non-fatal */ }
     try { agent.exitPlanMode?.() } catch { /* non-fatal */ }
-    session.record.planMode = 'off'
-    this.append(session, 'plan_mode', { state: 'off' })
+    // agent.onPlanModeChange 可能已镜像 record 并发过 plan_mode —— 条件补发防重复，
+    // 同时兜底不支持回调的轻量 double。
+    if (session.record.planMode !== 'off') {
+      session.record.planMode = 'off'
+      this.append(session, 'plan_mode', { state: 'off' })
+    }
     this.touch(session)
     this.persistRecord(session)
     let kickoff = `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`
@@ -1490,8 +1514,11 @@ export class RuntimeSessionManager {
     try {
       agent.enterPlanMode?.({ planFilePath: `.rivet/plans/${slug}.md` })
     } catch { /* non-fatal */ }
-    session.record.planMode = 'planning'
-    this.append(session, 'plan_mode', { state: 'planning' })
+    // 同 approvePlan：enterPlanMode 的 onPlanModeChange 回调可能已发过 plan_mode。
+    if (session.record.planMode !== 'planning') {
+      session.record.planMode = 'planning'
+      this.append(session, 'plan_mode', { state: 'planning' })
+    }
     this.append(session, 'plan_submitted', { slug, title: rejected.title, status: 'rejected' })
     this.touch(session)
     this.persistRecord(session)
@@ -2177,6 +2204,23 @@ export class RuntimeSessionManager {
         if (name === 'todo') {
           const items = extractTodoState(input)
           if (items) this.append(session, 'todo_state', { items })
+        }
+        // 结构化提问卡片：ask_user_question 的 input 直接携带全部问题/选项，
+        // 在 tool_use 时机发 user_question SSE（工具本身只回占位符 + endTurn）。
+        // 答案不走新 API —— 桌面卡片把选择组装成普通用户消息回传。
+        if (name === 'ask_user_question') {
+          const questions = parseAskUserQuestions(input)
+          if (questions.length > 0) {
+            this.append(session, 'user_question', {
+              toolUseId: toolId,
+              questions: questions.map(q => ({
+                id: q.id,
+                prompt: redactText(q.prompt),
+                options: q.options.map(o => redactText(o)),
+                allowMultiple: q.allowMultiple,
+              })),
+            })
+          }
         }
       },
       onToolResult: (toolId, name, result, isError, _rawPath, uiContent) => {

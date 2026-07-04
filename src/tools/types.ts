@@ -157,6 +157,11 @@ export interface ToolCallParams {
   delegationDepth?: number
   /** Active plan draft file (relative to cwd) while in plan mode. */
   activePlanFilePath?: string | null
+  /** 主动 plan mode：模型经 plan action=enter_mode 自主进入计划模式。
+   *  Pre-bound 到主控 AgentLoop.enterPlanMode；worker/非 agent 上下文缺席 →
+   *  enter_mode 返回错误（fail-closed，worker 不允许切主控状态）。
+   *  alreadyPlanning=true 表示进入前已在 plan mode（幂等返回，未重建草稿）。 */
+  enterPlanMode?: () => { activePlanFilePath: string | null; alreadyPlanning: boolean }
   /** 当前会话模型名 —— plan submit 用于产出模型留痕（低阶模型计划警告）。 */
   sessionModel?: string
   /** AbortSignal from the tool pipeline — fires when the tool-level timeout

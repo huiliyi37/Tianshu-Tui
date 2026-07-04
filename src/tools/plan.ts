@@ -205,14 +205,17 @@ When the plan contains multiple approaches, pass \`options\` (up to 3) so the us
 ### Action: close
 Preview or apply implementation plan closure updates. Defaults to preview mode (no writes). Set apply=true to update the plan file.
 
-Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
+Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.
+
+### Action: enter_mode
+Enter plan mode yourself (write tools become blocked; a plan draft file is created). Use ONLY after the user explicitly agreed to plan first (e.g. answered "进入计划模式" to your ask_user_question). Idempotent when already planning. Exiting plan mode remains user-only — submit the plan and let the user approve.`,
     input_schema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['submit', 'close'],
-          description: 'submit: create a plan for user approval. close: close completed plan tasks.',
+          enum: ['submit', 'close', 'enter_mode'],
+          description: 'submit: create a plan for user approval. close: close completed plan tasks. enter_mode: enter plan mode (after user confirmation).',
         },
         // ── submit fields ──
         title: { type: 'string', description: '[submit] Short descriptive plan title (used for file slug)' },
@@ -254,7 +257,10 @@ Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
     if (action === 'close') {
       return planCloseExecute(params)
     }
-    return { content: `Error: unknown action "${action}". Use "submit" or "close".`, isError: true }
+    if (action === 'enter_mode') {
+      return planEnterModeExecute(params)
+    }
+    return { content: `Error: unknown action "${action}". Use "submit", "close" or "enter_mode".`, isError: true }
   },
 
   requiresApproval(): boolean {
@@ -266,6 +272,40 @@ Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
 
   isConcurrencySafe: () => false,
   isEnabled: () => true,
+}
+
+// ── enter_mode implementation ──
+
+/**
+ * 模型自主进入 plan mode（主动 Plan Mode 建议链路的确认后动作）。
+ * 只进不出：退出计划模式仍归用户（approve/toggle），避免模型自行逃出只读沙箱。
+ * worker/非 agent 上下文没有 enterPlanMode ref → fail-closed 报错。
+ */
+function planEnterModeExecute(params: ToolCallParams): ToolResult {
+  if (!params.enterPlanMode) {
+    return { content: 'Error: enter_mode is not available in this context (sub-agents cannot switch the primary agent into plan mode).', isError: true }
+  }
+  try {
+    const { activePlanFilePath, alreadyPlanning } = params.enterPlanMode()
+    if (alreadyPlanning) {
+      return {
+        content: `Already in plan mode.${activePlanFilePath ? ` Active plan draft: ${activePlanFilePath}` : ''}`,
+      }
+    }
+    return {
+      content: [
+        'Entered plan mode — write tools are now blocked except the plan draft.',
+        activePlanFilePath ? `Plan draft: ${activePlanFilePath}` : '',
+        '',
+        'Next steps:',
+        '1. Research first: for multi-module tasks, dispatch 2-4 read-only code_scout workers in parallel via delegate_batch (split by module/file domain), then synthesize the findings.',
+        '2. Write the plan incrementally to the draft file with write_file/edit_file.',
+        '3. Submit with plan action=submit for user approval. Exiting plan mode is user-only.',
+      ].filter(Boolean).join('\n'),
+    }
+  } catch (err) {
+    return { content: `Error: ${err instanceof Error ? err.message : String(err)}`, isError: true }
+  }
 }
 
 // ── submit implementation ──

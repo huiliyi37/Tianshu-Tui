@@ -67,7 +67,7 @@ describe('executeToolUse', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {}, getModel: () => 'test-model' },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -418,6 +418,7 @@ describe('executeToolUse', () => {
         ...base.config,
         promptEngine: {
           markGitDirty: () => { gitDirtyCalls++ },
+          getModel: () => 'test-model',
         },
       } as any,
     })
@@ -440,6 +441,7 @@ describe('executeToolUse', () => {
         ...base.config,
         promptEngine: {
           markGitDirty: () => { gitDirtyCalls++ },
+          getModel: () => 'test-model',
         },
       } as any,
     })
@@ -1384,7 +1386,7 @@ describe('artifactIntercept in tool pipeline', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {}, getModel: () => 'test-model' },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -1840,7 +1842,7 @@ describe('phase-aware prediction recording', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {}, getModel: () => 'test-model' },
       } as any,
       cwd: '/tmp/test',
       harness: {

@@ -96,6 +96,29 @@ test('sources dedup treats Windows separator/case variants as one file', () => {
   assert.equal(s.sources[0], 'C:\\proj\\app.ts')
 })
 
+test('user_question sets pendingQuestion; next user message clears it', () => {
+  seq = 0
+  const s = fold([ev('user_question', {
+    toolUseId: 't1',
+    questions: [
+      { id: 'q1', prompt: '进入计划模式吗？', options: ['进入计划模式', '直接执行'], allowMultiple: false },
+      { id: 'q2', prompt: '范围？', options: [], allowMultiple: true },
+    ],
+  })])
+  assert.equal(s.pendingQuestion?.toolUseId, 't1')
+  assert.equal(s.pendingQuestion?.questions.length, 2)
+  assert.deepEqual(s.pendingQuestion?.questions[0]!.options, ['进入计划模式', '直接执行'])
+  assert.equal(s.pendingQuestion?.questions[1]!.allowMultiple, true)
+  const answered = eventReducer(s, { type: 'event', event: ev('user', { text: '进入计划模式' }) })
+  assert.equal(answered.pendingQuestion, null)
+})
+
+test('user_question with no valid questions leaves pendingQuestion null', () => {
+  seq = 0
+  const s = fold([ev('user_question', { toolUseId: 't2', questions: [{ options: ['x'] }, null] })])
+  assert.equal(s.pendingQuestion, null)
+})
+
 test('approval_required sets pending, approval_resolved clears it', () => {
   seq = 0
   const after = fold([ev('approval_required', { requestId: 'r1', toolName: 'bash', input: {} })])

@@ -235,6 +235,11 @@ return new ToolExecutionController({
       assessDelivery: self.config.deliveryGateV2
         ? files => self.config.deliveryGateV2!(files)
         : undefined,
+      enterPlanMode: () => {
+        const alreadyPlanning = self.getPlanModeState() === 'planning'
+        if (!alreadyPlanning) self.enterPlanMode()
+        return { activePlanFilePath: self.getActivePlanFilePath(), alreadyPlanning }
+      },
       getVerificationEvidence: () => self.evidence.getVerificationSummary(),
       onSkillInvoked: name => self.config.promptEngine.markSkillInvoked(name),
       onSkillCompleted: name => self.config.promptEngine.markSkillCompleted(name),

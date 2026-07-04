@@ -2,6 +2,8 @@ import type {
   ApprovalRequest,
   DelegationNode,
   JobState,
+  PendingQuestion,
+  PendingQuestionItem,
   PlanModeState,
   SessionEvent,
   TodoStateItem,
@@ -102,6 +104,8 @@ export interface EventViewState {
    *  consumers can memoize without paying for a full array copy each delta. */
   blocksRev: number
   pendingApproval: ApprovalRequest | null
+  /** 结构化提问卡片 — 最新未回答的 ask_user_question（下一条用户消息即回答并清除）。 */
+  pendingQuestion: PendingQuestion | null
   /** Bumped on every artifact event so consumers can invalidate the artifact query. */
   artifactRev: number
   delegation: Record<string, DelegationNode>
@@ -152,6 +156,7 @@ export const initialEventState: EventViewState = {
   blocks: [],
   blocksRev: 0,
   pendingApproval: null,
+  pendingQuestion: null,
   artifactRev: 0,
   delegation: {},
   todos: [],
@@ -238,6 +243,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'user':
       next.private_textOpen = false
       next.private_thinkingOpen = false
+      // 提问卡片的回答走用户消息通道 —— 任何新用户消息都视为已回答/已跳过。
+      next.pendingQuestion = null
       next.blocks = [...next.blocks, {
         key: `u-${ev.seq}`,
         kind: 'user',
@@ -581,6 +588,26 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.planMode = ev.data.state === 'planning' ? 'planning' : 'off'
       next.planRev = next.planRev + 1
       return next
+    case 'user_question': {
+      const raw = Array.isArray(ev.data.questions) ? (ev.data.questions as unknown[]) : []
+      const questions: PendingQuestionItem[] = []
+      for (const entry of raw) {
+        if (!entry || typeof entry !== 'object') continue
+        const q = entry as Record<string, unknown>
+        const prompt = typeof q.prompt === 'string' ? q.prompt : ''
+        if (!prompt) continue
+        questions.push({
+          id: typeof q.id === 'string' && q.id ? q.id : `q${questions.length + 1}`,
+          prompt,
+          options: Array.isArray(q.options) ? (q.options as unknown[]).filter((o): o is string => typeof o === 'string') : [],
+          allowMultiple: q.allowMultiple === true,
+        })
+      }
+      next.pendingQuestion = questions.length > 0
+        ? { toolUseId: String(ev.data.toolUseId ?? ''), questions }
+        : null
+      return next
+    }
     case 'plan_submitted': {
       next.planRev = next.planRev + 1
       const slug = typeof ev.data.slug === 'string' ? ev.data.slug : ''

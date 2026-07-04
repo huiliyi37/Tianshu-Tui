@@ -24,6 +24,8 @@ function fakeLoop(over: Partial<Record<string, unknown>> = {}): AgentLoop {
     gitChangeRate: 0.42,
     currentSeason: 'summer',
     thetaTelemetry: { lastTimedOut: true, consecutiveTimeouts: 2 },
+    // 推理螺旋守护（886e85c7）后 snapshot 读取的新字段 — stub 必须补齐。
+    lastThinkingContent: '',
     ...over,
   }
   return base as unknown as AgentLoop
@@ -44,8 +46,8 @@ test('buildRuntimeSnapshot maps the bounded AgentLoop slice into a snapshot', ()
 test('buildRuntimeSnapshot projects recentToolHistory to tool/status/target only', () => {
   const snap = buildRuntimeSnapshot(fakeLoop())
   assert.deepEqual(snap.recentToolHistory, [
-    { tool: 'bash', status: 'ok', target: 'ls' },
-    { tool: 'read_file', status: 'error', target: 'a.ts' },
+    { tool: 'bash', status: 'ok', target: 'ls', argsHash: undefined },
+    { tool: 'read_file', status: 'error', target: 'a.ts', argsHash: undefined },
   ])
   // the source object's extra keys must not leak into the snapshot
   assert.equal('extra' in (snap.recentToolHistory[0] as object), false)

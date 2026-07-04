@@ -191,6 +191,12 @@ export class AgentLoop {
   planModeState: PlanModeState = 'off'
   /** Relative path to the active plan file (draft or revision target). Writable in plan mode. */
   activePlanFilePath: string | null = null
+  /** 主动 plan mode 建议的 one-shot 记忆：已建议过的 contract id（选「直接执行」后不复问）。 */
+  planModeSuggestedContracts = new Set<string>()
+  /** Plan mode 状态变更通知 — server 层订阅后转发 plan_mode SSE（桌面切 Plan tab）。
+   *  覆盖模型自主 enter_mode 的场景：session-manager 自己触发的切换它已经知道，
+   *  工具触发的切换只能靠这条回调出圈。agent 创建后由外部回填。 */
+  onPlanModeChange?: (state: PlanModeState) => void
   /** Session turn count at which the current plan-mode session was entered — drives
    *  the injection cadence (full spec on entry + every refresh interval, else sparse). */
   private planEnterTurn = 0
@@ -1334,6 +1340,24 @@ export class AgentLoop {
     }
     this.syncPlanModeToConfig()
     this.markSkillInvoked(WRITING_PLANS_SKILL)
+    // 主动 plan mode 链路：带活跃任务契约进入时，注入一次性并行调研 advisory。
+    // 主控自主决定切分（不硬派）——advisory 只给方法与素材（scope 文件分组提示）。
+    if (this.taskContract?.isActionable) {
+      const files = this.taskContract.scope.mentionedFiles
+      const fileHint = files.length > 0
+        ? `契约 scope 内已提到的文件（可按此分组）：${files.slice(0, 12).join(', ')}${files.length > 12 ? ` …（共 ${files.length} 个）` : ''}。`
+        : ''
+      this.advisoryBus.submit({
+        key: 'plan-scout-parallel',
+        priority: 0.7,
+        category: 'delegation',
+        content: `已进入计划模式且有活跃任务契约。多模块任务先并行调研再写计划：用 \`delegate_batch\` 一次并行派 2-4 个只读 \`code_scout\`（按模块/文件域切分，每个 scout 给独立的调研目标），汇总发现后再写计划。${fileHint}单模块小任务可跳过并行直接调研。`,
+        ttl: 2,
+        expect: { kind: 'tool_appears', tools: ['delegate_batch'], withinTurns: 2 },
+        channel: 'system-reminder',
+      })
+    }
+    try { this.onPlanModeChange?.('planning') } catch { /* non-fatal */ }
   }
 
   /** Exit plan mode — user approved, all tools allowed */
@@ -1342,6 +1366,7 @@ export class AgentLoop {
     this.config.promptEngine.setPlanExitReminderPending(true)
     this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
+    try { this.onPlanModeChange?.('off') } catch { /* non-fatal */ }
   }
 
   /**
@@ -1388,6 +1413,7 @@ export class AgentLoop {
     if (wasPlanning) this.config.promptEngine.setPlanExitReminderPending(true)
     this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
+    if (wasPlanning) { try { this.onPlanModeChange?.('off') } catch { /* non-fatal */ } }
   }
 
   /** Get current plan mode state */

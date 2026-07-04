@@ -13,6 +13,7 @@ import { mapQueriedPheromones } from './pheromone-map.js'
 import { getGitInjectedContext } from '../prompt/volatile-git.js'
 import { detectWorktreeReality, type InjectedWorktreeContext } from './worktree-reality.js'
 import { advanceContractStatus, classifyPlanMethodology, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, mergeFollowUpIntoContract, type TurnMode } from '../context/task-contract.js'
+import { shouldSuggestPlanMode, buildPlanModeSuggestAdvisory, planModeSuggestEnabled } from './plan-mode-advisor.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { renderMemoryBlock } from '../memory/unified-memory.js'
 import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
@@ -264,6 +265,31 @@ export class TurnStepProducer {
       // U6: open a fresh execution trace for a new task (or a changed contract).
       if (this.self._taskDepthLayer) {
         this.self.planTraceCoordinator.openTrace(this.self.taskContract.id, this.self._taskDepthLayer)
+      }
+      // 主动 plan mode 建议：多模块任务（full 方法论）在动手前先经 ask_user_question
+      // 征询用户是否进入计划模式（每 contract one-shot；RIVET_PLAN_MODE_SUGGEST=0 禁用）。
+      if (planModeSuggestEnabled()) {
+        const suggestion = shouldSuggestPlanMode({
+          turnMode,
+          contract: this.self.taskContract,
+          methodology: this.self._planMethodology,
+          depthLayer: this.self._taskDepthLayer,
+          planModeState: this.self.planModeState,
+          suggestedContractIds: this.self.planModeSuggestedContracts,
+        })
+        if (suggestion.suggest) {
+          this.self.planModeSuggestedContracts.add(this.self.taskContract.id)
+          this.self.advisoryBus.submit({
+            key: 'plan-mode-suggest',
+            priority: 0.9,
+            category: 'discipline',
+            tier: 'constitutional',
+            content: buildPlanModeSuggestAdvisory(suggestion.reason),
+            ttl: 1,
+            expect: { kind: 'tool_appears', tools: ['ask_user_question'], withinTurns: 1 },
+            channel: 'system-reminder',
+          })
+        }
       }
     } else {
       this.self._taskDepthLayer = undefined

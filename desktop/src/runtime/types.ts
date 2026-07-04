@@ -200,6 +200,8 @@ export type SessionEventType =
   | 'steer_queued'
   | 'plan_mode'
   | 'plan_submitted'
+  // 结构化提问卡片 — ask_user_question 的问题/选项（Cursor 3.0 风格 QuestionCard）。
+  | 'user_question'
   | 'model_switched'
   | 'domain_changed'
   | 'skills_changed'
@@ -224,6 +226,19 @@ export interface ApprovalRequest {
   requestId: string
   toolName: string
   input: Record<string, unknown>
+}
+
+/** 结构化提问卡片 — user_question SSE 载荷（ask_user_question 工具输入的镜像）。 */
+export interface PendingQuestionItem {
+  id: string
+  prompt: string
+  options: string[]
+  allowMultiple: boolean
+}
+
+export interface PendingQuestion {
+  toolUseId: string
+  questions: PendingQuestionItem[]
 }
 
 /** Non-blocking 方向提示 — a passive direction note (no requestId, no reply). */

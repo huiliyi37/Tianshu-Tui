@@ -417,6 +417,53 @@ describe('plan tool submit', () => {
   })
 })
 
+describe('plan tool enter_mode', () => {
+  function execute(input: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+    return PLAN_TOOL.execute({
+      cwd: process.cwd(),
+      input,
+      toolUseId: 'test-enter-mode',
+      ...extra,
+    } as any)
+  }
+
+  it('fails closed when the enterPlanMode ref is absent (worker context)', async () => {
+    const result = await execute({ action: 'enter_mode' })
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('not available'))
+  })
+
+  it('enters plan mode via the pre-bound ref and reports the draft path', async () => {
+    let called = 0
+    const result = await execute({ action: 'enter_mode' }, {
+      enterPlanMode: () => {
+        called++
+        return { activePlanFilePath: '.rivet/plans/draft-1.md', alreadyPlanning: false }
+      },
+    })
+    assert.equal(called, 1)
+    assert.ok(!result.isError, result.content)
+    assert.ok(result.content.includes('Entered plan mode'))
+    assert.ok(result.content.includes('.rivet/plans/draft-1.md'))
+    assert.ok(result.content.includes('delegate_batch'), 'nudges parallel scout research')
+  })
+
+  it('is idempotent when already planning', async () => {
+    const result = await execute({ action: 'enter_mode' }, {
+      enterPlanMode: () => ({ activePlanFilePath: '.rivet/plans/draft-2.md', alreadyPlanning: true }),
+    })
+    assert.ok(!result.isError)
+    assert.ok(result.content.includes('Already in plan mode'))
+    assert.ok(result.content.includes('.rivet/plans/draft-2.md'))
+  })
+
+  it('unknown action error mentions enter_mode', async () => {
+    const result = await execute({ action: 'bogus' })
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('enter_mode'))
+  })
+})
+
 describe('checkPlanScale (纯函数)', () => {
   it('counts checkbox tasks and file anchors', () => {
     const content = [

@@ -38,6 +38,7 @@ import { formatMention } from '../lib/mention-input'
 import { useUiState, useUiDispatch } from '../state/store'
 import { SideChat } from '../components/SideChat'
 import { MessageNavigator, type TurnEntry } from '../components/MessageNavigator'
+import { QuestionCard } from './QuestionCard'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
@@ -866,6 +867,12 @@ export function ThreadView(props: {
 
       <div className="composer-float" ref={composerWrapRef}>
         <div className="composer-float-inner">
+          {view.pendingQuestion && !busy && (
+            <QuestionCard
+              question={view.pendingQuestion}
+              onSubmit={(text) => onSend(text)}
+            />
+          )}
           {selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length && (
             <div className="historical-turn-banner flex items-center justify-between bg-warning-soft border border-warning/30 rounded-lg p-3 mb-2 text-xs">
               <div className="flex items-center gap-2 text-warning">
