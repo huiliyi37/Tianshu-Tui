@@ -84,9 +84,9 @@ $msiFile = Get-ChildItem "src-tauri\target\release\bundle\msi\*.msi" -ErrorActio
 if (-not $nsisExe) { throw "NSIS installer not found in src-tauri\target\release\bundle\nsis\" }
 if (-not $msiFile) { throw "MSI installer not found in src-tauri\target\release\bundle\msi\" }
 
-npx tauri signer sign $nsisExe.FullName
+& npx tauri signer sign $nsisExe.FullName
 if ($LASTEXITCODE -ne 0) { throw "sign NSIS failed" }
-npx tauri signer sign $msiFile.FullName
+& npx tauri signer sign $msiFile.FullName
 if ($LASTEXITCODE -ne 0) { throw "sign MSI failed" }
 
 # Step 4: 生成 latest.json

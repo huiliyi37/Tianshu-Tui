@@ -62,6 +62,32 @@ npx tauri signer generate -w ~/.tauri/tianshu.key --ci
 
 `tauri.conf.json` 第 30 行附近必须为 `true`，否则不产 `.sig`。当前已开启，别关。
 
+### 1.4 bundled busybox（2.12.0+ 引入，首次必准备）
+
+2.12.0 起，安装包内置 **busybox-w32**（Windows 上的 POSIX shell + coreutils，让用户免装 Git for Windows）。`fetch-shell-runtime.js` 在 build 时从 `frippery.org` 下载 busybox 到 `resources/shell/win-x86_64/busybox.exe`。
+
+**⚠️ 国内打包坑**：`frippery.org` 被墙（SSL 握手 reset），build 时下载必然失败。
+
+**解法：手动放 busybox 到缓存路径，build 时 `fetch-shell-runtime.js` 命中缓存跳过下载。**
+
+```bash
+# 1. 用 VPN/代理下载 busybox-w32 64位（约 700KB）
+#    源：https://frippery.org/busybox/busybox64.exe（注意：文件名是 busybox64.exe，不是带版本号）
+#    或从任何可信源拿到 PE32+ x86-64 的 busybox-w32
+mkdir -p desktop/src-tauri/resources/shell/win-x86_64
+cp <下载的 busybox.exe> desktop/src-tauri/resources/shell/win-x86_64/busybox.exe
+
+# 2. 验证（必须是 PE32+ x86-64，>1MB）
+file desktop/src-tauri/resources/shell/win-x86_64/busybox.exe
+# 应输出：PE32+ executable (console) x86-64
+desktop/src-tauri/resources/shell/win-x86_64/busybox.exe echo ok
+# 应输出：ok
+```
+
+> busybox 是**可选功能**（`bundled_busybox_path` 返回 None 时 sidecar 回退系统 shell），但 `tauri.conf` 的 `resources` 引用了 `resources/shell` 目录，**目录必须有内容 build 才不报错**。所以必须放 busybox（或至少放个占位文件）。
+>
+> 注意：这个目录是 git 未跟踪的（产物），仓库里只有 `.gitkeep` 占位。
+
 ---
 
 ## 2. 日常打包流程
@@ -73,6 +99,19 @@ git fetch origin
 git rebase origin/main   # 或 git merge origin/main
 # 检查远程领先本地多少：git rev-list --count HEAD..origin/main
 ```
+
+### 2.1b 补装 npm 依赖（每次合并新版本必做！）
+
+**高频踩坑**：开发那边 sync 新版本时，`package.json` 经常新增依赖（如 `@tauri-apps/plugin-autostart`、`plugin-opener` 等），但 sync 只提交 `package.json`，**不会自动跑 `npm install`**。直接 build 会报 `Cannot find module '@tauri-apps/plugin-xxx'`（TS2307），白等几分钟才失败。
+
+```bash
+cd desktop
+npm install   # 每次 fetch/merge 后必跑，补装新增依赖
+# 同理，主仓库根目录也补一下（runtime 依赖）
+cd .. && npm install
+```
+
+> Rust 依赖（Cargo.toml）不用手动装——`tauri build` 会自动 `cargo fetch`。
 
 ### 2.2 改版本号
 
@@ -106,37 +145,43 @@ npm run build
 
 ### 2.5 签名打包（核心）
 
-**⚠️ Windows 踩坑**：`tauri build` 的内置签名在 Windows 上读不到空密码 env var（`set X=` 在 cmd.exe 里是删除变量，PowerShell 脚本里 `npx` 子进程也丢失）。`tauri signer sign` 命令反而正常。
+**⚠️ Windows 踩坑（已验证）**：
+- `tauri build` 的内置签名在 Windows 上读不到空密码 env var（`TAURI_SIGNING_PRIVATE_KEY` 在子进程丢失），会报 "A public key has been found, but no private key" → 不产 `.sig`。
+- `build-signed.ps1`（项目自带的两步法脚本）理论上绕开了这个问题，但实测它的**签名步骤会卡住/超时**（PowerShell 下 `npx tauri signer sign` 仍丢失 env 或交互卡死）。
+- **最可靠的方式：直接 build 出裸包（createUpdaterArtifacts 自然产 .sig 失败也无妨），再手动 `tauri signer sign` 显式传 `--private-key-path` + `--password ""`。**
 
-**可靠方式：分两步走**——先 build 出裸包（跳过内置签名），再手动 sign：
+```bash
+cd D:/Tianshu-Tui/desktop
 
-```powershell
-# Step 1: build 不签名（临时关闭 createUpdaterArtifacts）
-cd D:\Tianshu-Tui\desktop
-# 改 tauri.conf.json: "createUpdaterArtifacts": false
+# Step 1: tauri build（createUpdaterArtifacts: true 时会试图内置签名，
+#         失败也无所谓——只要 build 出 setup.exe 就行，签名我们手动补）
 npx tauri build
-# 改回 tauri.conf.json: "createUpdaterArtifacts": true
+# 末尾会报缺私钥的 error，但 Finished 2 bundles 已经产出 setup.exe/msi，忽略即可
 
-# Step 2: 手动签名（PowerShell 下 env 传得过去）
-$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content "$env:USERPROFILE\.tauri\tianshu.key" -Raw).Trim()
-$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
-npx tauri signer sign "src-tauri\target\release\bundle\nsis\Tianshu_0.0.x_x64-setup.exe"
-npx tauri signer sign "src-tauri\target\release\bundle\msi\Tianshu_0.0.x_x64_zh-CN.msi"
+# Step 2: 手动签名（显式传密钥路径 + 空密码，绝不卡交互）
+npx tauri signer sign \
+  --private-key-path ~/.tauri/tianshu.key \
+  --password "" \
+  "src-tauri/target/release/bundle/nsis/Tianshu_2.x.x_x64-setup.exe"
+npx tauri signer sign \
+  --private-key-path ~/.tauri/tianshu.key \
+  --password "" \
+  "src-tauri/target/release/bundle/msi/Tianshu_2.x.x_x64_zh-CN.msi"
 ```
 
 成功标志：
 ```
-# Step 1 末尾：
+# Step 1 末尾（error 可忽略，重点是 Finished 2 bundles）：
 Finished 2 bundles at:
-    ...nsis\Tianshu_0.0.x_x64-setup.exe
-    ...msi\Tianshu_0.0.x_x64_zh-CN.msi
+    ...nsis\Tianshu_2.x.x_x64-setup.exe
+    ...msi\Tianshu_2.x.x_x64_zh-CN.msi
 
 # Step 2 每个文件：
 Your file was signed successfully, You can find the signature here:
-    ...Tianshu_0.0.x_x64-setup.exe.sig
+    ...Tianshu_2.x.x_x64-setup.exe.sig
 ```
 
-> 也可用一键脚本：`powershell -ExecutionPolicy Bypass -File desktop/scripts/build-signed.ps1`
+> **不要用** `build-signed.ps1`：实测它的签名步骤会卡住/超时。手动 `tauri signer sign --private-key-path ... --password ""` 是最可靠的。
 
 ### 2.6 清理 bundle 目录残留（重要！）
 
@@ -259,9 +304,11 @@ desktop/src-tauri/target/release/bundle/
 
 ---
 
-## 附：当前打包机配置（2026-06）
+## 附：当前打包机配置（2026-07）
 
-- Node：v24.1.0（系统默认，MSI 装在 `C:\Program Files\nodejs`）
-- 密钥：`~/.tauri/tianshu.key`（私钥，备份在维护者处）
-- `.env`：`desktop/.env`（gitignore，PATH 引用私钥）
-- 版本：0.0.3，productName `Tianshu`（安装路径英文，窗口标题保留中文「天枢」）
+- Node：v24.1.0（系统默认，MSI 装在 `C:\Program Files\nodejs`，ABI 137）
+- 密钥：`~/.tauri/tianshu.key`（私钥，pubkey `198A2F01...`，备份在维护者处）
+- `.env`：`desktop/.env`（gitignore，`TAURI_SIGNING_PRIVATE_KEY_PATH` 引用私钥）
+- busybox：`desktop/src-tauri/resources/shell/win-x86_64/busybox.exe`（手动放，VPN 下载）
+- 版本：2.13.0，productName `Tianshu`（安装路径英文，窗口标题保留中文「天枢」）
+- Git 集成：runtime 侧 env-check 检测+引导（v2.13.0+），**不是打包内置 git 二进制**
