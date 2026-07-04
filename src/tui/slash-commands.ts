@@ -1320,15 +1320,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return lines.join('\n')
       }
 
-      if (!sub) {
-        // 无参数 → 弹出交互式权限选择面板（上下选 + 回车确认，同 /effort 风格）
-        ctx.setChoicePanelKind?.('permission')
-        ctx.surfacePush?.('choice-panel')
-        setIsStreaming(false)
-        return true
-      }
-
-      if (sub === 'status') {
+      if (!sub || sub === 'status') {
+        // 裸 /permission 或 /permission status → 显示当前模式 + 所有规则（Kimi Code 风格）
         pushStatic(createLogEntry({ type: 'system', content: formatRules() }))
         setIsStreaming(false)
         return true
