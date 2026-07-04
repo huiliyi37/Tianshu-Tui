@@ -126,3 +126,59 @@ npm publish
 - 如果 token 过期或失效，去 https://www.npmjs.com/settings/huiliyi37/tokens 重新生成
 - `package.json` 里的 `files` 字段控制了哪些文件会被打包发布，不要往里加敏感文件
 - `dist/` 和 `.cursor/` 在 `.gitignore` 中，但 npm 会按 `files` 字段包含 `dist/`，所以不影响发布
+
+## 多机协作与冲突处理
+
+当多台机器（如 macOS 开发机 + Windows 打包机）都往开源仓库推送时，会出现 `[rejected] main -> main (fetch first)`。
+
+### 开源仓库路径
+
+| 机器 | 路径 |
+|------|------|
+| macOS 开发机 | `/Users/banxia/app/Tianshu` |
+| Windows 打包机 | （按 Windows 实际路径） |
+
+远程：`https://github.com/huiliyi37/Tianshu-Tui.git`（`origin` → `main`）
+
+### macOS 端：拉取远端新提交并合并
+
+```bash
+cd ~/app/Tianshu
+
+# 1. 拉取远端（Windows 可能已推送了新提交）
+git fetch origin
+git log main..origin/main --oneline   # 预览远端多了什么
+
+# 2. 合并（通常无冲突，因为两边的改动分属不同目录）
+git merge origin/main
+
+# 3. 如果有冲突，解决后继续
+# git add <冲突文件> && git commit
+
+# 4. 推送合并结果
+git push origin main
+```
+
+### 合并后：反向同步到开发仓库
+
+开源仓库拉到的 Windows 端改动（如 desktop 构建脚本修复），需要同步回开发仓库。从开源仓库 `desktop/` 和 `.github/` 目录手动拷贝回开发仓库对应位置，然后在开发仓库提交：
+
+```bash
+cd /Users/banxia/app/deepseek-tui/opencode-tui
+
+# 示例：反向同步 desktop 构建脚本
+cp ~/app/Tianshu/desktop/scripts/build-mac.sh desktop/scripts/
+cp ~/app/Tianshu/desktop/scripts/fetch-node-runtime.js desktop/scripts/
+# ... 其他有变更的文件
+
+git add -A
+git commit -m "sync: 从开源仓库反向同步 desktop 构建脚本更新"
+```
+
+> **注意**：反向同步是手动操作，只拷贝真正有变更的文件。不要跑 `sync-to-public.sh` 的逆向，那会把开源仓库的测试排除、目录裁剪等策略反向应用到开发仓库，造成文件丢失。
+
+### 权限问题（macOS）
+
+如果 `git fetch`、`git push` 或 `rsync` 报 `Operation not permitted`，说明终端没有被授予「完全磁盘访问权限」：
+
+**系统设置 → 隐私与安全性 → 完全磁盘访问权限** → 把终端（Terminal.app / iTerm）加进去并开启。授权后重新执行命令即可。
