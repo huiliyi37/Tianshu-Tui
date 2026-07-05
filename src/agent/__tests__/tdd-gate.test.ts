@@ -99,6 +99,31 @@ describe('evaluateTddGate', () => {
     assert.equal(decision.action, 'block')
   })
 
+  // ── Test-file target exemption: editing a test IS the RED step ──
+
+  it('downgrades block to suggest when the edit target is a test file', () => {
+    const hot = state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true })
+    for (const target of [
+      'src/repo/__tests__/project-fingerprint.test.ts',
+      'src/tools/write-file.spec.ts',
+      '/abs/path/src/agent/__tests__/helpers.ts',
+    ]) {
+      const decision = evaluateTddGate(hot, 'edit_file', enforce, target)
+      assert.equal(decision.action, 'suggest', `test-file target must not be blocked: ${target}`)
+    }
+  })
+
+  it('still blocks when the edit target is a non-test code file', () => {
+    const hot = state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true })
+    const decision = evaluateTddGate(hot, 'edit_file', enforce, 'src/repo/project-fingerprint.ts')
+    assert.equal(decision.action, 'block')
+  })
+
+  it('still blocks when no target path is provided (backward compatible)', () => {
+    const hot = state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true })
+    assert.equal(evaluateTddGate(hot, 'edit_file', enforce).action, 'block')
+  })
+
   // Gate disabled → always allow
   it('allows everything when the gate is disabled', () => {
     const off = { enabled: false, mode: 'enforce' as const, threshold: 3, skipIfNoTests: false }

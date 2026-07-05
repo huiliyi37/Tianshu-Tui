@@ -80,6 +80,37 @@ describe('write_file tool — uiContent diff', () => {
     assert.equal(result.uiContent, undefined)
   })
 
+  it('rejects pointer-placeholder content regurgitated from history', async () => {
+    const file = join(TEST_DIR, 'regurgitated.ts')
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: `[file written to ${file} — 202 lines, 6462 chars. Use read_file to review.]`,
+    }))
+    assert.ok(result.isError, 'pointer placeholder must be rejected')
+    assert.ok(result.content.includes('pointer placeholder'), 'error explains what went wrong')
+    assert.ok(!existsSync(file), 'no file must be created from placeholder content')
+  })
+
+  it('rejects pointer-placeholder content with leading whitespace', async () => {
+    const file = join(TEST_DIR, 'regurgitated2.ts')
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: `\n  [file written to ${file} — 10 lines, 100 chars. Use read_file to review.]`,
+    }))
+    assert.ok(result.isError)
+    assert.ok(!existsSync(file))
+  })
+
+  it('allows real content that merely mentions the pointer prefix mid-text', async () => {
+    const file = join(TEST_DIR, 'mentions-pointer.md')
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'Docs: the history shows "[file written to ..." pointers for large writes.\n',
+    }))
+    assert.ok(!result.isError, 'mid-text mention must not be rejected')
+    assert.ok(existsSync(file))
+  })
+
   it('overwriting an oversized existing file skips the diff base (no misleading diff)', async () => {
     const file = join(TEST_DIR, 'huge.txt')
     // 11 MB — above MAX_WRITE_FILE_BYTES, so the old content is intentionally

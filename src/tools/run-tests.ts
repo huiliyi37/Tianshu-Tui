@@ -596,6 +596,16 @@ function runTestCommandIn(
   // a shell (else modern Node throws EINVAL); node/pytest spawn directly.
   const spawnSpec = resolveTestSpawn(testCommand.command, testCommand.args, cwd)
   return new Promise<ToolResult>((resolve) => {
+      // Single-settlement guard: timeout, abort, close and error can all race
+      // (e.g. the killed child's `close` fires after the timeout already
+      // resolved). Without this the losing path still runs its async work
+      // (persistRawOutput after the caller cleaned up) → unhandledRejection.
+      let settled = false
+      const settle = (result: ToolResult): void => {
+        if (settled) return
+        settled = true
+        resolve(result)
+      }
       const child = track(spawnHidden(spawnSpec.command, spawnSpec.args, {
         cwd,
         env: buildExecutionEnv(cwd),
@@ -641,6 +651,7 @@ function runTestCommandIn(
       })
 
       const timer = setTimeout(async () => {
+        if (settled) return
         killProcessTree(child, 'SIGTERM')
         setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
         const finalStdout = stdout + stdoutDecoder.end()
@@ -648,7 +659,7 @@ function runTestCommandIn(
         const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
         const meta = { command: testCommand.display, exitCode: -1, durationMs: Date.now() - startTime }
         const rawPath = await persistRawOutput(params.toolUseId, raw)
-        resolve({
+        settle({
           content: `Tests timed out after ${timeout}ms`,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
@@ -669,7 +680,7 @@ function runTestCommandIn(
         clearTimeout(timer)
         killProcessTree(child, 'SIGTERM')
         setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
-        resolve({ content: 'Tests aborted by user.', uiContent: '⏹ aborted', isError: false })
+        settle({ content: 'Tests aborted by user.', uiContent: '⏹ aborted', isError: false })
       }
       if (signal) {
         if (signal.aborted) onAbort()
@@ -679,6 +690,9 @@ function runTestCommandIn(
       child.on('close', async (code, _exitSignal) => {
         clearTimeout(timer)
         if (signal) signal.removeEventListener('abort', onAbort)
+        // Timeout/abort already settled — a killed child still emits `close`;
+        // skip the late async work (persistRawOutput on cleaned-up temp dirs).
+        if (settled) return
         const finalStdout = stdout + stdoutDecoder.end()
         const finalStderr = stderr + stderrDecoder.end()
         const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
@@ -689,7 +703,7 @@ function runTestCommandIn(
         if (testCommand.command === 'tsx' && raw.includes('EPERM') && testCommand.args[0] === '--test') {
           const args = ['--import', 'tsx', '--test', ...testCommand.args.slice(1)]
           const retryCmd: RunnableTestCommand = { ...testCommand, command: 'node', args, display: `node --import tsx --test ${testCommand.args.slice(1).join(' ')}` }
-          resolve(await runTestCommandIn(cwd, retryCmd, params, filter, timeout))
+          settle(await runTestCommandIn(cwd, retryCmd, params, filter, timeout))
           return
         }
 
@@ -704,6 +718,7 @@ function runTestCommandIn(
         const meta = { command: testCommand.display, exitCode, durationMs }
 
         const invocationFailed = exitCode !== 0 && parsed.passed === 0 && parsed.failed === 0 && parsed.skipped === 0
+        const invocationGuidance = '测试运行器启动失败或崩溃。请检查测试命令是否正确，必要时用 bash 手动运行以诊断环境问题。'
         const verification: VerificationMetadata = {
           command: testCommand.display,
           status: exitCode === 0 ? 'passed' : invocationFailed ? 'blocked' : 'failed',
@@ -718,7 +733,7 @@ function runTestCommandIn(
             ? {
                 failureKind: 'tool_invocation_failure' as const,
                 blockedReason: 'invocation_failure' as const,
-                userGuidance: '测试运行器启动失败或崩溃。请检查测试命令是否正确，必要时用 bash 手动运行以诊断环境问题。',
+                userGuidance: invocationGuidance,
               }
             : {}),
           ...(testCommand.recommendedCommand ? { recommendedCommand: testCommand.recommendedCommand } : {}),
@@ -735,12 +750,24 @@ function runTestCommandIn(
           }
         }
 
-        resolve({
+        // Invocation failure (exit != 0 with zero parseable test counts) means
+        // the real diagnostic — import SyntaxError, missing module, runner crash —
+        // lives only in the raw output. Show its tail so the model can act on it
+        // instead of staring at "0 passed, 0 failed" (session 05e1500e).
+        let failureContent = truncated
+        if (invocationFailed) {
+          const rawTail = stripAnsi(raw).trim().slice(-1200)
+          failureContent = rawTail.length > 0
+            ? `${truncated}\n\n[runner output tail]\n${rawTail}\n\n${invocationGuidance}`
+            : `${truncated}\n\n${invocationGuidance}`
+        }
+
+        settle({
           content: exitCode === 0
             ? (parsed.passed === 0 && !parsed.duration
               ? truncated  // parse likely failed — fall back to full formatted output
               : `✓ ${parsed.passed} passed${parsed.skipped ? `, ${parsed.skipped} skipped` : ''}${parsed.duration ? ` (${parsed.duration})` : ''}`)
-            : truncated,
+            : failureContent,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
           verification,
@@ -750,8 +777,9 @@ function runTestCommandIn(
 
       child.on('error', async (err) => {
         clearTimeout(timer)
+        if (settled) return
         const rawPath = await persistRawOutput(params.toolUseId, err.message)
-        resolve({
+        settle({
           content: err.message,
           uiContent: err.message,
           rawPath,

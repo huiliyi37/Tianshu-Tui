@@ -634,7 +634,9 @@ export async function executeToolUse(
     const tddConfig: TddGateConfig = deps.config.tddGate ?? _TDD_GATE_CONFIG
     if (tddConfig.enabled && EDIT_TOOLS.has(tu.name)) {
       const gateState = deps.evidence.getGateState()
-      const decision = evaluateTddGate(gateState, tu.name, tddConfig)
+      // Pass the edit target so test-file edits (the RED step) downgrade to suggest.
+      const editTarget = typeof tu.input?.file_path === 'string' ? tu.input.file_path : undefined
+      const decision = evaluateTddGate(gateState, tu.name, tddConfig, editTarget)
       if (decision.action === 'block') {
         callbacks.onToolResult(tu.id, tu.name, decision.message!, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: decision.message!, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }

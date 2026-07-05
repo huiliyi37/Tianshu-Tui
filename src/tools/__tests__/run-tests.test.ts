@@ -245,6 +245,28 @@ it('works', () => assert.equal(2 + 2, 4))`)
     assert.doesNotMatch(result.content, /npm test -- missing-test-name/)
   })
 
+  it('surfaces raw runner output when the run fails without parseable test counts', async () => {
+    // Simulates a test file that dies at import time (e.g. bad import):
+    // exit != 0 but the runner reports no test counts. The model must see the
+    // actual error text, not just "0 passed, 0 failed" (session 05e1500e).
+    const dir = makeTestDir('run-tests-invocation-fail-')
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({
+        name: 'invocation-fail',
+        scripts: { test: 'node -e "console.error(\'SyntaxError: The requested module does not provide an export named boom\'); process.exit(1)"' },
+      }))
+      const result = await RUN_TESTS_TOOL.execute(makeParams({}, dir))
+
+      assert.equal(result.isError, true)
+      assert.equal(result.verification!.status, 'blocked')
+      assert.equal(result.verification!.blockedReason, 'invocation_failure')
+      assert.match(result.content, /does not provide an export named boom/, 'raw error must be visible to the model')
+      assert.match(result.content, /测试运行器启动失败或崩溃/, 'guidance must be included')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('classifies run_tests timeout as tool invocation failure', async () => {
     const dir = setupHangingProject()
     try {

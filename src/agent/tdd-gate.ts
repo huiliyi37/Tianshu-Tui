@@ -81,6 +81,9 @@ const SUGGEST_MESSAGE = (edits: number) =>
 const SUGGEST_FAILED_MESSAGE = (count: number) =>
   `TDD discipline: ${count} verification(s) failed. Fix the failing tests before continuing to edit.`
 
+const TEST_FILE_SUGGEST_MESSAGE = (edits: number) =>
+  `TDD discipline: ${edits} edit(s) without a test run, but this edit targets a test file — writing/fixing the test is the RED step, so it is allowed. Run the test after this edit to verify it fails (RED) or passes (GREEN).`
+
 // ---------------------------------------------------------------------------
 // Pure decision function
 // ---------------------------------------------------------------------------
@@ -94,11 +97,16 @@ const SUGGEST_FAILED_MESSAGE = (count: number) =>
  * @param gateState  Snapshot from `EvidenceTracker.getGateState()`.
  * @param toolName   Name of the tool about to execute (e.g. "edit_file", "bash").
  * @param config     Gate config (typically from env RIVET_TDD_GATE).
+ * @param targetPath Optional path the edit tool is about to modify. When it is
+ *                   a test file, block downgrades to suggest — writing/fixing
+ *                   the failing test IS the RED step, blocking it locks the
+ *                   agent out of TDD itself (session 05e1500e).
  */
 export function evaluateTddGate(
   gateState: TddGateState,
   toolName: string,
   config: TddGateConfig,
+  targetPath?: string,
 ): TddGateDecision {
   // Gate disabled entirely → never intervene.
   if (!config.enabled) return { action: 'allow' }
@@ -134,6 +142,11 @@ export function evaluateTddGate(
     // Downgrade block → suggest so the agent isn't permanently stuck.
     if (config.skipIfNoTests && !gateState.hasReadTestFiles) {
       return { action: 'suggest', message: SUGGEST_MESSAGE(gateState.editsSinceLastTest) }
+    }
+    // Editing a test file is the RED step — never block it, or the agent can't
+    // fix a broken failing test and escalates to rewrite loops.
+    if (targetPath && isTestFile(targetPath)) {
+      return { action: 'suggest', message: TEST_FILE_SUGGEST_MESSAGE(gateState.editsSinceLastTest) }
     }
     return { action: 'block', message: BLOCK_MESSAGE(gateState.editsSinceLastTest) }
   }

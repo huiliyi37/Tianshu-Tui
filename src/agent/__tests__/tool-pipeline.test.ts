@@ -621,7 +621,7 @@ describe('executeToolUse', () => {
       type: 'verification',
       command: 'npx tsc --noEmit',
       status: 'failed',
-      meta: { scope: 'full' },
+      meta: { scope: 'full', passed: 0, failed: 0, skipped: 0 },
     })
   })
 
