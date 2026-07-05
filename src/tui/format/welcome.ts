@@ -53,7 +53,7 @@ export interface FormatWelcomeInput {
 }
 
 /** 全 banner（带边框卡片）实际行数：见文件顶部结构注释。 */
-const FULL_BANNER_ROWS = 26
+const FULL_BANNER_ROWS = 24
 /** 中号（无边框）降级布局行数。 */
 const MEDIUM_BANNER_ROWS = 7
 /** 欢迎屏之外必须保持可见的行：输入框 3 行 + 终端底部状态栏/呼吸余量 ~2 行。 */
@@ -105,16 +105,14 @@ function renderDipperRow(rowIdx: number, theme: RivetTheme): string {
   return out
 }
 
-// tiānshū 大字 Block ASCII 标识 (8行高，55列宽)
+// TIANSHU 大字 Block ASCII 标识 (6行高，55列宽)
 const BRAND_LOGO = [
-  '            ▄▄▄▄▄                     ▄▄▄▄▄        ',
-  '  ██╗       ╚════╝   ██╗              ╚════╝        ',
-  '██████╗ ██╗  █████╗  ██████╗ ███████╗ ██╗  ██╗██╗   ██╗',
-  '╚═██╔═╝ ╚═╝ ██╔══██╗ ██╔══██╗██╔════╝ ██║  ██║██║   ██║',
-  '  ██║   ██╗ ███████║ ██║  ██║███████╗ ███████║██║   ██║',
-  '  ██║   ██║ ██╔══██║ ██║  ██║╚════██║ ██╔══██║██║   ██║',
-  '  ╚═╝   ╚═╝ ╚═╝  ╚═╝ ╚═╝  ╚═╝███████║ ╚═╝  ╚═╝╚██████╔╝',
-  '                             ╚══════╝          ╚═════╝ '
+  '████████╗██╗ █████╗ ███╗   ██╗███████╗██╗  ██╗██╗   ██╗',
+  '╚══██╔══╝██║██╔══██╗████╗  ██║██╔════╝██║  ██║██║   ██║',
+  '   ██║   ██║███████║██╔██╗ ██║███████╗███████║██║   ██║',
+  '   ██║   ██║██╔══██║██║╚██╗██║╚════██║██╔══██║██║   ██║',
+  '   ██║   ██║██║  ██║██║ ╚████║███████║██║  ██║╚██████╔╝',
+  '   ╚═╝   ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝'
 ]
 
 // 渲染具有立体描边质感的大字 Logo 行
@@ -122,9 +120,9 @@ function renderLogoLine(line: string, theme: RivetTheme): string {
   let out = ''
   for (let i = 0; i < line.length; i++) {
     const char = line[i]!
-    if (char === '█' || char === '▄') {
-      // 实体笔画或声调横线：高亮 primary 色
-      out += color(char, theme.primary, { bold: true })
+    if (char === '█') {
+      // 实体笔画：高亮 primary 色
+      out += color('█', theme.primary, { bold: true })
     } else if (char === ' ' || char === '\n') {
       out += char
     } else {
@@ -223,7 +221,7 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   // 极窄终端降级为极简无边框排版
   const out: string[] = []
   const starGlyph = color('✦', theme.pulseAlert || theme.userColor)
-  out.push(`${starGlyph}  ${color('t i ā n s h ū', theme.primary, { bold: true })}  ${starGlyph}`)
+  out.push(`${starGlyph}  ${color('T I A N S H U', theme.primary, { bold: true })}  ${starGlyph}`)
   out.push(color(`天 枢`, theme.secondary || theme.muted))
   out.push(color(`${input.modelName} · ${dir}/ · ${session}`, theme.dim))
   out.push('')
