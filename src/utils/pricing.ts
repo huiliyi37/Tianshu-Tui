@@ -36,8 +36,11 @@ export function computeUsageCost(
   const cacheWriteTokens = usage.cache_creation_input_tokens ?? 0
   const reasoningTokens = usage.reasoning_tokens ?? 0
 
-  // Cache read is a subset of input; non-cached input = input - cacheRead.
-  const uncachedInputTokens = Math.max(0, inputTokens - cacheReadTokens)
+  // Usage.input_tokens is cache-INCLUSIVE (see api/types.ts): cache read and
+  // cache write are both subsets. Bill each bucket exactly once — previously
+  // cacheWrite tokens were billed twice (inside uncached input AND at the
+  // cacheWrite rate), overstating DeepSeek miss cost 2x.
+  const uncachedInputTokens = Math.max(0, inputTokens - cacheReadTokens - cacheWriteTokens)
 
   const inputCost = (uncachedInputTokens / 1_000_000) * (pricing.input ?? 0)
   const outputCost = (outputTokens / 1_000_000) * (pricing.output ?? 0)

@@ -521,11 +521,18 @@ export class AnthropicClient implements StreamClient {
       callbacks.onContentBlock({ type: 'thinking', thinking: thinkingBlocks.join('') })
     }
 
+    // Anthropic reports cache-EXCLUSIVE input_tokens (cache read/creation are
+    // separate buckets). Normalize to the codebase convention where
+    // Usage.input_tokens is the cache-INCLUSIVE prompt total (see api/types.ts)
+    // so hit-rate / cost / meta accounting treat all providers uniformly.
+    const rawInput = usage.input_tokens ?? 0
+    const cacheRead = usage.cache_read_input_tokens ?? 0
+    const cacheCreation = usage.cache_creation_input_tokens ?? 0
     callbacks.onStopReason(stopReason ?? 'end_turn', {
-      input_tokens: usage.input_tokens ?? 0,
+      input_tokens: rawInput + cacheRead + cacheCreation,
       output_tokens: usage.output_tokens ?? 0,
-      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
-      cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: cacheRead,
+      cache_creation_input_tokens: cacheCreation,
     })
   }
 }

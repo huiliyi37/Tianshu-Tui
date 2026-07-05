@@ -45,6 +45,25 @@ describe('pricing', () => {
     assert.strictEqual(cost.total, 0.28)
   })
 
+  it('bills cacheWrite tokens exactly once (DeepSeek: input = read + create)', () => {
+    // Regression: cacheWrite tokens used to be billed twice — once inside
+    // uncached input (input - cacheRead) and again at the cacheWrite rate.
+    const cost = computeUsageCost(
+      {
+        input_tokens: 1_000_000,
+        cache_read_input_tokens: 800_000,
+        cache_creation_input_tokens: 200_000,
+        output_tokens: 0,
+      },
+      { input: 1.0, cacheRead: 0.1, cacheWrite: 1.0 },
+    )
+    // All input is either read or created — no third bucket left.
+    assert.strictEqual(cost.input, 0)
+    assert.strictEqual(cost.cacheRead, 0.08)
+    assert.strictEqual(cost.cacheWrite, 0.2)
+    assert.strictEqual(cost.total, 0.28)
+  })
+
   it('finds pricing by provider and model id', () => {
     const pricing = findModelPricing(providers, 'deepseek', 'deepseek-v4-pro')
     assert.deepStrictEqual(pricing, { input: 1.0, output: 4.0, cacheRead: 0.1, cacheWrite: 1.0 })

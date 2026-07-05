@@ -58,6 +58,13 @@ export interface ToolDefinition {
 }
 
 export interface Usage {
+  /**
+   * Total prompt tokens, cache-INCLUSIVE: input_tokens = uncached + cache_read
+   * + cache_creation. This is DeepSeek/OpenAI native semantics (prompt_tokens
+   * = hit + miss). Clients whose upstream reports cache-EXCLUSIVE input
+   * (Anthropic) must normalize at the boundary before emitting Usage.
+   * Consumers (hit rate, cost, meta tokenUsage) all assume this convention.
+   */
   input_tokens: number
   output_tokens: number
   cache_read_input_tokens: number
