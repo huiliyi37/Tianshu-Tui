@@ -69,6 +69,51 @@ function migrateLegacyCheckpointInterval(raw: Record<string, unknown>): Record<s
 }
 
 /**
+ * One-shot migration for the DeepSeek V4 maxTokens regression (2026-07):
+ * a98fe5472 mistakenly reduced v4-pro/v4-flash maxTokens from 384_000 to
+ * 64_000 (the V3-era limit). df576e01 restored the preset, but configs
+ * written during the regression window have the stale 64_000 baked in.
+ * Since deepMerge replaces arrays wholesale, the user's models array with
+ * stale per-model maxTokens wins over the corrected preset — the preset
+ * fix alone doesn't reach existing users.
+ *
+ * This migration patches both the provider-level maxTokens AND every model
+ * in the models array whose maxTokens === 64_000 (the exact regression
+ * value). Explicit non-64_000 values (user intentionally configured a
+ * different cap) are left untouched.
+ *
+ * Mutates `raw` in place. Returns true if any value was changed.
+ */
+function migrateDeepseekMaxTokens(raw: Record<string, unknown>): boolean {
+  const providers = raw?.provider?.providers as Record<string, unknown> | undefined
+  if (!providers) return false
+
+  const ds = providers['deepseek'] as Record<string, unknown> | undefined
+  if (!ds) return false
+
+  let changed = false
+
+  // Provider-level maxTokens
+  if (typeof ds.maxTokens === 'number' && ds.maxTokens === 64_000) {
+    ds.maxTokens = 384_000
+    changed = true
+  }
+
+  // Per-model maxTokens (within the models array)
+  const models = ds.models as Array<Record<string, unknown>> | undefined
+  if (Array.isArray(models)) {
+    for (const m of models) {
+      if (typeof m.maxTokens === 'number' && m.maxTokens === 64_000) {
+        m.maxTokens = 384_000
+        changed = true
+      }
+    }
+  }
+
+  return changed
+}
+
+/**
  * Load config with 3-layer resolution: user → project → session overlay.
  *
  * Priority (highest wins):
@@ -93,7 +138,18 @@ export function loadConfig(options?: {
   if (existsSync(configPath)) {
     try {
       const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
-      base = deepMerge(base, migrateLegacyCheckpointInterval(raw as Record<string, unknown>))
+      const cpMigrated = migrateLegacyCheckpointInterval(raw as Record<string, unknown>)
+      const dsChanged = migrateDeepseekMaxTokens(cpMigrated)
+      // Write back if any migration modified the raw config so the fix
+      // persists across restarts (one-shot, idempotent).
+      if (cpMigrated !== raw || dsChanged) {
+        try {
+          writeFileAtomicSync(configPath, JSON.stringify(cpMigrated, null, 2) + '\n')
+        } catch {
+          // best-effort — migration still applied in memory
+        }
+      }
+      base = deepMerge(base, cpMigrated)
     } catch {
       // malformed user config — fall through to defaults
     }
@@ -105,7 +161,10 @@ export function loadConfig(options?: {
   if (projectPath && existsSync(projectPath)) {
     try {
       const raw = JSON.parse(readFileSync(projectPath, 'utf-8'))
-      base = deepMerge(base, migrateLegacyCheckpointInterval(raw as Record<string, unknown>))
+      const cpMigrated = migrateLegacyCheckpointInterval(raw as Record<string, unknown>)
+      migrateDeepseekMaxTokens(cpMigrated)
+      // NOTE: no write-back for project configs — they may be version-controlled.
+      base = deepMerge(base, cpMigrated)
     } catch {
       // malformed project config — skip
     }
