@@ -92,6 +92,7 @@ export const DEFAULT_CONFIG: Config = {
     maxTurns: 200,
     mode: 'code',
     autoReasoning: true,
+    defaultDomain: 'auto',
     songlineEnabled: false,
     desktopTools: false,
     crossSessionEnabled: true,

@@ -27,6 +27,7 @@ const testConfig = {
     maxTurns: 50,
     mode: 'code',
     autoReasoning: false,
+    defaultDomain: 'auto',
     songlineEnabled: true,
     desktopTools: false,
     hearthObserveEnabled: false,
