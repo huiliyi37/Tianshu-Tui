@@ -8,7 +8,6 @@ import type { TaskState } from '../agent/task-state.js'
 import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
 import { selectRelevantClaims, type ClaimRelevanceInput } from '../context/claim-relevance.js'
 import { summarizeGitStatus } from './git-status-summary.js'
-import { scoreLessons } from '../context/lesson-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 import type { WorktreeReality } from '../agent/worktree-reality.js'
 import type { TaskDepthLayer } from '../context/task-contract.js'
@@ -173,8 +172,6 @@ export interface VolatileContext {
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
   playbookLessons?: PlaybookBullet[]
-  /** Recent user query text for lesson relevance scoring. */
-  recentQuery?: string
   /** Callback to record which bullet IDs were actually rendered. */
   onLessonsRendered?: (ids: string[]) => void
   activeClaims?: ContextClaim[]
@@ -451,22 +448,18 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // provider-agnostic, in the exact-prefix cache from turn 1. Emitting it here
   // would duplicate the motto and break prefix stability.
 
-  // Historical lessons: rarely change after first few turns
+  // Historical lessons: session-constant pool (loaded once by refreshPlaybookLessons,
+  //  ranked by matchBullets). No per-boundary re-ranking — the pool is already
+  //  domain-filtered and top-K=3; re-sorting adds churn without information gain.
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
-    const { selected } = scoreLessons(ctx.playbookLessons, {
-      query: ctx.recentQuery,
-      recentToolTargets: ctx.toolHistory?.map(t => t.target),
-    })
-    if (selected.length > 0) {
-      const lessons = selected
-        .map(b => {
-          const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
-          return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
-        })
-        .join('\n')
-      parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
-      ctx.onLessonsRendered?.(selected.map(b => b.id))
-    }
+    const lessons = ctx.playbookLessons
+      .map(b => {
+        const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
+        return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
+      })
+      .join('\n')
+    parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+    ctx.onLessonsRendered?.(ctx.playbookLessons.map(b => b.id))
   }
 
   // Cognitive projection: task-contract + verification gap + cognitive mirror +

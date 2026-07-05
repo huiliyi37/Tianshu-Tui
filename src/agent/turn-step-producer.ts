@@ -223,7 +223,6 @@ export class TurnStepProducer {
     this.self.bindSessionDomain(userInput)
     this.self.contextInjection.recordUserInputClaims(userInput)
     this.self.contextInjection.refreshPlaybookLessons(userInput)
-    this.self.config.promptEngine.setRecentQuery(userInput.slice(0, 300))
 
     // Phase 2.3: Proactive session split — MUST run BEFORE addUserMessage.
     await this.self.compactBoundaryCoordinator.preUserMessageSplit()
