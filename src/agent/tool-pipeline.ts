@@ -1294,14 +1294,24 @@ export async function executeToolUse(
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
        } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
           const testStatus = harnessResult.isError ? 'failed' : 'passed'
-          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: testStatus, meta: { scope: 'full' } })
+          // Parse test counts from bash output so deliver_task shows real numbers
+          // instead of always "0 pass 0 fail". Supports node:test format
+          // ("ℹ pass N" / "ℹ fail N") and common TAP/jest patterns.
+          const output = typeof harnessResult.content === 'string' ? harnessResult.content : ''
+          const passedMatch = output.match(/ℹ\s+pass\s+(\d+)|✅\s+(\d+)\s+passed|Tests?\s+(\d+)\s+passed/i)
+          const failedMatch = output.match(/ℹ\s+fail\s+(\d+)|❌\s+(\d+)\s+failed|Tests?\s+(\d+)\s+failed/i)
+          const skippedMatch = output.match(/ℹ\s+skip\s+(\d+)/i)
+          const passed = passedMatch ? Number.parseInt(passedMatch[1] ?? passedMatch[2] ?? passedMatch[3] ?? '0', 10) : 0
+          const failed = failedMatch ? Number.parseInt(failedMatch[1] ?? failedMatch[2] ?? failedMatch[3] ?? '0', 10) : 0
+          const skipped = skippedMatch ? Number.parseInt(skippedMatch[1] ?? '0', 10) : 0
+          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: testStatus, meta: { scope: 'full', passed, failed, skipped } })
           // bash 跑测试/typecheck/lint 也归零 TDD 门禁——否则 agent 用 bash npm test
           // 而非 run_tests 工具时门禁计数器永远不重置，第 4 次编辑必误报拦截。
           deps.evidence.trackVerification({
             command: cmd.slice(0, 200),
             status: testStatus === 'passed' ? 'passed' : 'failed',
             scope: 'full',
-            exitCode: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0,
+            exitCode: harnessResult.isError ? 1 : 0, passed, failed, skipped, durationMs: 0,
           })
           deps.destructiveGate?.noteVerification(testStatus === 'passed' ? 'passed' : 'failed')
        } else {
