@@ -10,7 +10,7 @@ function parseCouncilOpinions(raw: string): Record<string, string> {
   const opinions: Record<string, string> = {}
   
   const STAR_MAP: Record<string, string[]> = {
-    tianshu: ['天枢', 'tianshu'],
+    tianshu: ['天枢', 'tiānshū'],
     tianxuan: ['天璇', 'tianxuan'],
     tianji: ['天玑', 'tianji'],
     tianquan: ['天权', 'tianquan'],
@@ -318,7 +318,7 @@ function DomainCard({
     >
       <div className="domain-glyph" aria-hidden>{glyph}</div>
       <div className="domain-body">
-        <div className="domain-name">{domain.key === 'auto' ? `${domain.name} · tianshu` : domain.name}</div>
+        <div className="domain-name">{domain.key === 'auto' ? `${domain.name} · 天枢` : domain.name}</div>
         <div className="domain-motto">{domain.motto}</div>
         <div className="domain-meta">{domain.meta}</div>
         <div className="domain-essence">{domain.essence}</div>

@@ -263,7 +263,7 @@ export function WorkspaceSurface() {
                    <div className="empty thread-empty onboard">
                      <div className="onboard-glyph" aria-hidden>✦</div>
                      <h2 className="onboard-title">开始你的第一个线程</h2>
-                     <p className="onboard-subtitle">tianshu 会理解你的项目，自主完成编码任务</p>
+                     <p className="onboard-subtitle">天枢会理解你的项目，自主完成编码任务</p>
                      
                      <div className="onboard-templates">
                        <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: '分析并解释当前项目的整体架构' })}>

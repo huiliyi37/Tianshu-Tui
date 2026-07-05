@@ -7,6 +7,7 @@ import {
   Globe,
   HelpCircle,
   Shield,
+  Sparkles,
   Terminal,
   MessageSquare,
   Copy,
@@ -79,9 +80,11 @@ export function HomeSurface() {
     <div className="home-surface">
       <header className="home-hero">
         <div className="home-brand">
-          <span className="home-logo" aria-hidden>TS</span>
+          <span className="home-logo" aria-hidden>
+            <Sparkles size={28} />
+          </span>
           <div>
-            <h1 className="home-title">tianshu</h1>
+            <h1 className="home-title">天枢 · tiānshū</h1>
             <p className="home-subtitle">Next-Gen Agentic Coding Runtime</p>
           </div>
         </div>
