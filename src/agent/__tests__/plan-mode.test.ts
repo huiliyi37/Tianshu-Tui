@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath, planInjectionVariantFor } from '../plan-mode.js'
+import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath } from '../plan-mode.js'
 import { profileIsWriteCapable } from '../profile-registry.js'
 import { createDefaultToolRegistry } from '../../tools/default-registry.js'
 import { WEB_SEARCH_TOOL } from '../../tools/web-search.js'
@@ -111,24 +111,6 @@ describe('checkPlanMode', () => {
     assert.equal(profileIsWriteCapable('patcher'), true)
     // unknown profile → false (delegate schema reports the real error)
     assert.equal(profileIsWriteCapable('no_such_profile_xyz'), false)
-  })
-
-  describe('planInjectionVariantFor (cadence formula)', () => {
-    it('emits full on entry and every refresh interval, sparse in between', () => {
-      const refreshEvery = 5
-      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 0, reentry: false, refreshEvery }), 'full')
-      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 1, reentry: false, refreshEvery }), 'sparse')
-      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 4, reentry: false, refreshEvery }), 'sparse')
-      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 5, reentry: false, refreshEvery }), 'full')
-      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 10, reentry: false, refreshEvery }), 'full')
-    })
-
-    it('emits reentry only on the first resumed turn, then normal cadence', () => {
-      const refreshEvery = 5
-      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 0, reentry: true, refreshEvery }), 'reentry')
-      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 1, reentry: true, refreshEvery }), 'sparse')
-      assert.equal(planInjectionVariantFor({ turnsSinceEnter: 5, reentry: true, refreshEvery }), 'full')
-    })
   })
 
   it('every PLAN_MODE_ALLOWED_TOOLS entry resolves to a registered tool', () => {

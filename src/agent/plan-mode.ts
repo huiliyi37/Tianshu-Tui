@@ -5,14 +5,6 @@ import { resolve } from 'node:path'
 /** Plan Mode 状态（两态：off / planning） */
 export type PlanModeState = 'off' | 'planning'
 
-/**
- * Plan-mode injection cadence variant (kimi-code borrow). Controls how heavy the
- * per-turn `<plan-mode>` reminder is — the full spec on entry / every N turns,
- * a sparse one-liner in between, or a short "resuming" header on reentry.
- * Rendering lives in prompt/volatile.ts; the loop computes which variant to emit.
- */
-export type PlanInjectionVariant = 'full' | 'sparse' | 'reentry'
-
 /** Plan Mode 下允许的工具 — 只读探索 + 澄清/委派 + plan 提交/关闭计划 + memory 回忆 */
 export const PLAN_MODE_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
   'read_file', 'read_section', 'grep', 'glob', 'repo_map',
@@ -46,23 +38,6 @@ export interface PlanModeResult {
 /** 生成新的活动计划草稿路径（相对 cwd） */
 export function createActivePlanDraftPath(): string {
   return `.rivet/plans/draft-${Date.now()}.md`
-}
-
-/**
- * Pure cadence formula for the per-turn plan-mode reminder (kimi-code borrow):
- * full spec on entry (or reentry header on resume) and every `refreshEvery`
- * turns, sparse in between. Extracted so the loop's stateful path stays a thin
- * wrapper and the cadence is unit-testable without booting an AgentLoop.
- */
-export function planInjectionVariantFor(input: {
-  turnsSinceEnter: number
-  reentry: boolean
-  refreshEvery: number
-}): PlanInjectionVariant {
-  const { turnsSinceEnter, reentry, refreshEvery } = input
-  if (reentry && turnsSinceEnter <= 0) return 'reentry'
-  if (turnsSinceEnter <= 0 || turnsSinceEnter % refreshEvery === 0) return 'full'
-  return 'sparse'
 }
 
 function normalizePath(cwd: string, inputPath: string): string {

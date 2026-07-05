@@ -56,20 +56,12 @@ export function renderPlanMethodologyAdvisory(
  */
 export function renderPlanModeBlock(
   activePlanFilePath?: string | null,
-  variant: import('../agent/plan-mode.js').PlanInjectionVariant = 'full',
 ): string {
-  // Sparse / reentry variants: throttle the heavy spec on non-refresh turns so
-  // planning turns don't re-pay the full block's token cost each time. Cache-safe
-  // (dynamic appendix only). The full spec is still emitted on entry + every
-  // refresh interval, so the model never loses the invariant for long.
-  if (variant === 'sparse' || variant === 'reentry') {
-    const planFileHint = activePlanFilePath ? ` 活动计划文件: \`${activePlanFilePath}\`（仅此文件可写）。` : ''
-    const head = variant === 'reentry'
-      ? `恢复规划模式——继续完善当前计划。`
-      : `规划模式仍激活。`
-    return `<plan-mode>${head}只读探索，禁止写/改/执行（活动计划文件除外）。${planFileHint} 持续推进：接着读+增量写活动计划文件，成熟后用 \`plan action=submit\` 提交；只有真正需要用户拍板的实质分歧才 \`ask_user_question\`，不要为收尾/给交代而提问。完整规范见本轮早前的 plan-mode 说明。</plan-mode>`
-  }
-
+  // Byte-constant while planning: under appendixDelta the block is emitted once
+  // at entry (and re-sent automatically on baseline resets after compaction),
+  // then suppressed on every subsequent boundary — zero steady-state churn.
+  // Hard constraints don't depend on this reminder anyway: checkPlanMode gates
+  // tools mechanically, and plan-submit has its own placeholder guard.
   const planFileLine = activePlanFilePath
     ? `\n活动计划文件: \`${activePlanFilePath}\` — 用 write_file / edit_file 增量写入计划正文（仅此文件可写）。`
     : ''
@@ -254,9 +246,6 @@ export interface VolatileContext {
   planModeState?: 'off' | 'planning' | 'approved'
   /** Active plan file path (relative) for incremental plan writing */
   activePlanFilePath?: string | null
-  /** Plan-mode injection cadence variant (full/sparse/reentry). Defaults to 'full'.
-   *  Cache-safe: dynamic appendix only. */
-  planInjectionVariant?: import('../agent/plan-mode.js').PlanInjectionVariant
   /** One-shot flag: render the exit reminder on the first turn after plan mode
    *  turns off. Cache-safe: dynamic appendix only. */
   planExitReminderPending?: boolean
@@ -394,7 +383,6 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     // but MUST stay out of FROZEN — they can change mid-session and would
     // break exact-prefix cache if included in the stable block.
     planModeState: undefined,
-    planInjectionVariant: undefined,
     planExitReminderPending: undefined,
     worktreeReality: undefined,
     // Session snapshot fields — KEEP in FROZEN:
@@ -630,7 +618,7 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Plan-mode instruction block: governs the whole planning turn (read-only +
   // plan quality standard + diagram skeletons). Cache-safe — appendix only.
   if (ctx.planModeState === 'planning') {
-    parts.push(renderPlanModeBlock(ctx.activePlanFilePath, ctx.planInjectionVariant ?? 'full'))
+    parts.push(renderPlanModeBlock(ctx.activePlanFilePath))
   } else if (ctx.planExitReminderPending) {
     parts.push(renderPlanExitReminder())
   }
