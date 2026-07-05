@@ -907,8 +907,14 @@ export class TurnOrchestrator {
             artifactIdsAccessed: [],
           })
         }
+        // Count only actionable blocks (text/tool_use) — thinking-only blocks
+        // don't count as "the model produced output". Without this filter, a
+        // response with only reasoning_content (no content/tool_calls) sets
+        // collectedBlockCount=1, evaluateThinkingRetry short-circuits to
+        // shouldRetry=false, and the loop silently ends as natural-finish.
+        const actionableBlockCount = collectedBlocks.filter(b => b.type !== 'thinking').length
         const thinkingResult = await this.deps.postTurnDecision.evaluateThinkingRetry({
-          collectedBlockCount: collectedBlocks.length,
+          collectedBlockCount: actionableBlockCount,
           thinkingAccum,
           turn,
           callbacks,
