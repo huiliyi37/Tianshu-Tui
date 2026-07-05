@@ -150,6 +150,13 @@ return new TurnStreamController({
           self.lastArchive = null
           self.prevEstTokens = estTokensNow
 
+          // Prefix-divergence probe (2026-07-05 cache investigation): when the
+          // request was NOT a pure append over the previous one, record which
+          // message diverged. Joined with cacheRead regressions this separates
+          // client-side byte changes from provider-side落盘 failures.
+          const divergence = self.config.promptEngine.consumePrefixDivergence?.()
+          if (divergence) entry.prefixDiverged = divergence
+
           // Engine event diffs (volatile swap / frozen clamp / fallback / tools)
           const stats = self.config.promptEngine.getCacheEventStats?.()
           if (stats) {
