@@ -514,6 +514,18 @@ export class TuiApp {
     this.input.onPaste((text) => {
       const mode = this.input.getMode()
       if (mode !== 'input') return
+      // Connect overlay active → route paste into connectInput, not the main input box
+      if (this.overlay.activeId() === 'connect' && this.connectFlow) {
+        const view = this.connectFlow.view()
+        if (view.kind === 'input') {
+          this.connectInput += text
+          this.connectError = undefined
+          this.overlay.rerender()
+        }
+        return
+      }
+      // Other overlays active → don't paste into main input
+      if (this.overlay.isActive()) return
       this.inputLine.insertText(text)
       this.inputController.fileCompletion = null
       this.writeBatcher.schedule()
