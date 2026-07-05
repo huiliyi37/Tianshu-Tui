@@ -59,11 +59,13 @@ export const EDIT_TOOLS = new Set(['edit_file', 'write_file', 'apply_patch', 'ha
 // Defaults
 // ---------------------------------------------------------------------------
 
-/** Default config: enabled, enforce, block after 3 consecutive unverified edits,
- *  but skip blocking when no test files have been read (project may lack tests). */
+/** Default config: enabled, suggest-only. TDD discipline is front-loaded as
+ *  task-start guidance (see {@link checkTddGate}) instead of hard mid-task
+ *  blocks — session 05e1500e showed enforce-blocking mid-repair sends agents
+ *  into rewrite loops. Hard blocking remains opt-in via RIVET_TDD_GATE=enforce. */
 export const DEFAULT_TDD_GATE_CONFIG: TddGateConfig = {
   enabled: true,
-  mode: 'enforce',
+  mode: 'suggest',
   threshold: 3,
   skipIfNoTests: true,
 }
@@ -163,18 +165,19 @@ export function evaluateTddGate(
  * Parse the TDD gate config from the `RIVET_TDD_GATE` env var.
  *
  * Called once at session construction; the result is held for the session
- * lifetime. Unset → default (enforce). Unknown values → default (enforce).
+ * lifetime. Unset/unknown → default (suggest). Hard blocking is opt-in:
+ * `RIVET_TDD_GATE=enforce` (or on/1/true).
  */
 export function parseTddGateConfig(): TddGateConfig {
   const raw = (process.env.RIVET_TDD_GATE ?? '').toLowerCase().trim()
   if (raw === 'off' || raw === '0' || raw === 'false' || raw === 'disabled') {
     return { ...DEFAULT_TDD_GATE_CONFIG, enabled: false }
   }
-  if (raw === 'suggest' || raw === 'advisory') {
-    return { ...DEFAULT_TDD_GATE_CONFIG, mode: 'suggest' }
+  if (raw === 'enforce' || raw === 'on' || raw === '1' || raw === 'true') {
+    return { ...DEFAULT_TDD_GATE_CONFIG, mode: 'enforce' }
   }
-  // "enforce", "on", "1", "true", or unset → enforce (the default).
-  return { ...DEFAULT_TDD_GATE_CONFIG, mode: 'enforce' }
+  // "suggest", "advisory", unset, or unknown → suggest (the default).
+  return { ...DEFAULT_TDD_GATE_CONFIG, mode: 'suggest' }
 }
 
 // ---------------------------------------------------------------------------
@@ -194,11 +197,24 @@ function isTestFile(path: string): boolean {
 /**
  * Check whether the agent is entering an executing phase without having touched
  * a test file. Returns an immune-style hint when a TDD violation is detected.
+ *
+ * Two tiers:
+ * - **Task start** (zero edits): front-loaded guidance — write the TDD probe
+ *   (a failing test) BEFORE the first implementation edit. This is the primary
+ *   channel now that the default gate mode is suggest (no hard blocks).
+ * - **Already editing**: keeps warning until a test file is touched.
  */
 export function checkTddGate(input: TddGateInput): ImmuneContextHint | null {
   if (!input.isActionable) return null
-  if (input.filesModified.size === 0) return null
   if ([...input.filesRead].some(isTestFile)) return null
+  if (input.filesModified.size === 0) {
+    return {
+      level: 'warning',
+      signalKinds: ['tdd_violation'],
+      matchedMistakes: [],
+      suggestion: 'Task start: before implementing, write a TDD probe — a failing test (RED) that pins the expected behavior. Then implement until it passes (GREEN).',
+    }
+  }
   return {
     level: 'warning',
     signalKinds: ['tdd_violation'],

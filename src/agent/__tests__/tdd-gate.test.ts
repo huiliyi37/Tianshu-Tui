@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_TDD_GATE_CONFIG, evaluateTddGate } from '../tdd-gate.js'
+import { DEFAULT_TDD_GATE_CONFIG, evaluateTddGate, parseTddGateConfig, checkTddGate } from '../tdd-gate.js'
 import type { TddGateState } from '../evidence.js'
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,24 @@ describe('evaluateTddGate', () => {
     ...overrides,
   })
 
-  const enforce = DEFAULT_TDD_GATE_CONFIG // { enabled, mode: "enforce", threshold: 3, skipIfNoTests: false }
+  // Block-path tests use explicit enforce config — the DEFAULT is now suggest
+  // (TDD guidance is front-loaded at task start instead of hard mid-task blocks).
+  const enforce = { enabled: true, mode: 'enforce' as const, threshold: 3, skipIfNoTests: true }
+
+  // ── Default config: suggest-only, never blocks ──
+
+  it('default config is suggest mode (no hard blocking)', () => {
+    assert.equal(DEFAULT_TDD_GATE_CONFIG.mode, 'suggest')
+    assert.equal(DEFAULT_TDD_GATE_CONFIG.enabled, true)
+  })
+
+  it('never blocks under the default config even past the threshold', () => {
+    const hot = state({ filesModified: 3, verifications: 0, editsSinceLastTest: 10, hasCodeEdits: true })
+    for (const tool of ['edit_file', 'write_file', 'apply_patch', 'hash_edit']) {
+      const decision = evaluateTddGate(hot, tool, DEFAULT_TDD_GATE_CONFIG)
+      assert.equal(decision.action, 'suggest', `${tool} must not be blocked by default`)
+    }
+  })
 
   // No modifications → allow (the first edit must get through)
   it('allows edit when no files have been modified yet', () => {
@@ -221,5 +238,96 @@ describe('evaluateTddGate', () => {
       hasCodeEdits: true,
     })
     assert.equal(evaluateTddGate(mixed, 'edit_file', enforce).action, 'block')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// parseTddGateConfig — env-driven config
+// ---------------------------------------------------------------------------
+
+describe('parseTddGateConfig', () => {
+  const withEnv = (value: string | undefined, fn: () => void) => {
+    const prev = process.env.RIVET_TDD_GATE
+    if (value === undefined) delete process.env.RIVET_TDD_GATE
+    else process.env.RIVET_TDD_GATE = value
+    try { fn() } finally {
+      if (prev === undefined) delete process.env.RIVET_TDD_GATE
+      else process.env.RIVET_TDD_GATE = prev
+    }
+  }
+
+  it('defaults to suggest when unset', () => {
+    withEnv(undefined, () => {
+      const cfg = parseTddGateConfig()
+      assert.equal(cfg.enabled, true)
+      assert.equal(cfg.mode, 'suggest')
+    })
+  })
+
+  it('enforce is opt-in via RIVET_TDD_GATE=enforce/on/1/true', () => {
+    for (const v of ['enforce', 'on', '1', 'true']) {
+      withEnv(v, () => {
+        assert.equal(parseTddGateConfig().mode, 'enforce', `RIVET_TDD_GATE=${v}`)
+      })
+    }
+  })
+
+  it('off/disabled still disables the gate entirely', () => {
+    for (const v of ['off', '0', 'false', 'disabled']) {
+      withEnv(v, () => {
+        assert.equal(parseTddGateConfig().enabled, false, `RIVET_TDD_GATE=${v}`)
+      })
+    }
+  })
+
+  it('unknown values fall back to suggest', () => {
+    withEnv('banana', () => {
+      assert.equal(parseTddGateConfig().mode, 'suggest')
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// checkTddGate — task-start TDD probe guidance
+// ---------------------------------------------------------------------------
+
+describe('checkTddGate task-start guidance', () => {
+  it('emits TDD probe guidance at task start (actionable, zero edits, no tests read)', () => {
+    const hint = checkTddGate({
+      filesRead: new Set(['src/repo/project-fingerprint.ts']),
+      filesModified: new Set(),
+      isActionable: true,
+    })
+    assert.ok(hint, 'task-start hint must fire before the first edit')
+    assert.equal(hint!.signalKinds[0], 'tdd_violation')
+    assert.match(hint!.suggestion, /failing test|RED/i)
+  })
+
+  it('stays silent at task start when a test file was already read', () => {
+    const hint = checkTddGate({
+      filesRead: new Set(['src/agent/__tests__/tdd-gate.test.ts']),
+      filesModified: new Set(),
+      isActionable: true,
+    })
+    assert.equal(hint, null)
+  })
+
+  it('stays silent for non-actionable tasks', () => {
+    const hint = checkTddGate({
+      filesRead: new Set(),
+      filesModified: new Set(),
+      isActionable: false,
+    })
+    assert.equal(hint, null)
+  })
+
+  it('keeps warning while editing without having touched a test file', () => {
+    const hint = checkTddGate({
+      filesRead: new Set(['src/foo.ts']),
+      filesModified: new Set(['src/foo.ts']),
+      isActionable: true,
+    })
+    assert.ok(hint)
+    assert.equal(hint!.signalKinds[0], 'tdd_violation')
   })
 })
