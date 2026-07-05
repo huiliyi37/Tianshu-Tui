@@ -27,15 +27,16 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         prefixCompletion: true,
       },
       thinking: 'enabled',
-      // 官方 API(api.deepseek.com):上下文 100 万,单次输出上限 6.4 万 —
-      // 对齐真实可用值,避免误配触发过早压缩或撞 API 上限。
-      maxTokens: 64_000,
+      // 官方 API(api.deepseek.com/zh-cn/quick_start/pricing):
+      // 上下文 100 万,单次输出上限 38.4 万。2026-07-01 误改为 6.4 万(V3 旧值),
+      // 导致 reasoning_effort=max 时推理未完即被 length 截断、loop 收到空响应判死停止。
+      maxTokens: 384_000,
       models: [
         {
           id: 'deepseek-v4-pro',
           alias: 'v4-pro',
           contextWindow: 1_000_000,
-          maxTokens: 64_000,
+          maxTokens: 384_000,
           reasoningEffort: 'max',
           pricing: { input: 3, output: 6, cacheRead: 0.025, cacheWrite: 3 },
         },
@@ -43,7 +44,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           id: 'deepseek-v4-flash',
           alias: 'v4-flash',
           contextWindow: 1_000_000,
-          maxTokens: 64_000,
+          maxTokens: 384_000,
           reasoningEffort: 'high',
           pricing: { input: 1, output: 2, cacheRead: 0.02, cacheWrite: 1 },
         },
