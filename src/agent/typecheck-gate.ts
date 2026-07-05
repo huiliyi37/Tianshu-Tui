@@ -2,6 +2,8 @@ import { isAbsolute, relative, join } from 'node:path'
 import { statSync, readFileSync } from 'node:fs'
 import { runTypeCheck, type LspCheckResult } from '../lsp/client.js'
 import type { Diagnostic } from '../lsp/diagnostics.js'
+import { loadDeclaredVerify } from '../config/verify-config.js'
+import { spawnHidden } from '../tools/spawn-hidden.js'
 
 /**
  * Deterministic, session-independent typecheck backstop for the review gate.
@@ -238,4 +240,111 @@ export async function runChangedFilesTypecheckMemo(
 /** Test-only: clear the memo cache. */
 export function __clearTypecheckMemo(): void {
   memoByCwd.clear()
+  declaredMemoByCwd.clear()
+}
+
+// ── Declared-command backstop for non-TS projects (A2) ─────────────────────
+// The tsc path above is TypeScript-only: its per-file error attribution needs
+// tsc's output format. For Rust/Go/Python projects that declared
+// `verify.typecheck` (or `verify.build`) in .rivet-config.json we run the
+// declared command at pass/fail granularity — no per-file attribution, just
+// "the project's own typecheck failed" with an output tail. Explicit scope
+// decision: we do not write output parsers per toolchain.
+
+export interface DeclaredCheckResult {
+  /** The declared command that was run. */
+  command: string
+  /** 'typecheck' when verify.typecheck was used, 'build' as fallback. */
+  kind: 'typecheck' | 'build'
+  /** Single-line summary for focusHint / advisory. */
+  summary: string
+}
+
+/** Injectable runner: returns exit code + combined output. */
+export type DeclaredCommandRunner = (cwd: string, command: string) => Promise<{ exitCode: number; output: string }>
+
+const DECLARED_TIMEOUT_MS = 120_000
+const OUTPUT_TAIL_CHARS = 600
+
+const defaultDeclaredRunner: DeclaredCommandRunner = (cwd, command) =>
+  new Promise((resolve) => {
+    let out = ''
+    let settled = false
+    const settle = (exitCode: number): void => {
+      if (settled) return
+      settled = true
+      resolve({ exitCode, output: out })
+    }
+    try {
+      const child = spawnHidden(command, [], { cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      child.stdout?.on('data', (d: Buffer) => { out += d.toString() })
+      child.stderr?.on('data', (d: Buffer) => { out += d.toString() })
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL') } catch { /* already gone */ }
+        settle(-1)
+      }, DECLARED_TIMEOUT_MS)
+      child.on('close', (code) => { clearTimeout(timer); settle(code ?? -1) })
+      child.on('error', () => { clearTimeout(timer); settle(-1) })
+    } catch {
+      settle(-1)
+    }
+  })
+
+const declaredMemoByCwd = new Map<string, { sig: string; result: DeclaredCheckResult | null }>()
+
+function allFilesSignature(cwd: string, files: readonly string[]): string | null {
+  if (files.length === 0) return null
+  try {
+    return files
+      .slice()
+      .sort()
+      .map(f => {
+        const st = statSync(isAbsolute(f) ? f : join(cwd, f))
+        return `${f}:${st.mtimeMs}:${st.size}`
+      })
+      .join('|')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Run the project-declared typecheck/build command when the TS gate does not
+ * apply (no changed .ts/.tsx files). Returns null (no escalation) when:
+ *   - any changed file is .ts/.tsx (the tsc path owns those)
+ *   - no verify.typecheck / verify.build declaration exists
+ *   - the command passes (exit 0)
+ *   - the command could not run (timeout/crash) — fail-open, same as tsc path
+ */
+export async function runDeclaredCheck(
+  cwd: string,
+  changedFiles: readonly string[],
+  run: DeclaredCommandRunner = defaultDeclaredRunner,
+): Promise<DeclaredCheckResult | null> {
+  if (changedFiles.length === 0) return null
+  if (changedFiles.some(f => /\.(ts|tsx)$/.test(f))) return null
+
+  const verify = loadDeclaredVerify(cwd)
+  const command = verify.typecheck ?? verify.build
+  if (!command) return null
+  const kind: 'typecheck' | 'build' = verify.typecheck ? 'typecheck' : 'build'
+
+  const sig = allFilesSignature(cwd, changedFiles)
+  if (sig) {
+    const hit = declaredMemoByCwd.get(cwd)
+    if (hit && hit.sig === sig) return hit.result
+  }
+
+  const { exitCode, output } = await run(cwd, command)
+  // -1 = could not run to completion → fail-open like the tsc path.
+  const result: DeclaredCheckResult | null = exitCode > 0
+    ? {
+        command,
+        kind,
+        summary: `Declared ${kind} failed (\`${command}\`, exit ${exitCode}) — ${output.slice(-OUTPUT_TAIL_CHARS).trim().split('\n').slice(-6).join(' | ')}`,
+      }
+    : null
+
+  if (sig) declaredMemoByCwd.set(cwd, { sig, result })
+  return result
 }

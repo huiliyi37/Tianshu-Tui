@@ -83,6 +83,7 @@ import { APPLY_PATCH_TOOL } from './tools/apply-patch.js'
 import { createPlanTaskTool } from './tools/plan-task.js'
 import { createMemoryTool } from './tools/memory.js'
 import { MeridianIndexer } from './repo/meridian-indexer.js'
+import { detectProjectFingerprint } from './repo/project-fingerprint.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { loadProjectSkills } from './skills/skill-loader.js'
 import { killAllSync } from './tools/process-tracker.js'
@@ -521,18 +522,24 @@ export function createInteractiveToolRegistry(
   try { reapOrphanSnapshots({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
   try { reapOrphanHandsWorktrees({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
   try { cleanupStaleHandsBranches(cwd) } catch { /* best-effort */ }
-  const b1SnapshotManager = createVerificationSnapshotManager({
+  // C4: config-declared VSW mode. 'off' skips the manager entirely (pipeline
+  // degrades to in-place); 'always' forces isolation; 'auto' = §6 matrix.
+  // RIVET_VSW=1 keeps its historical force semantics on top of any mode.
+  const vswMode = config.agent.verificationSnapshot
+  const b1SnapshotManager = vswMode === 'off' ? null : createVerificationSnapshotManager({
     baseCwd: cwd,
     sessionId: refs.sessionId ?? getOrCreateSessionId(),
     baselineHead: b1Baseline.getHead() || undefined,
     isGitRepo: b1Baseline.getHead().length > 0,
     preExistingDirtyCount: b1Baseline.getExternalDirtyCount(),
     preExistingUntrackedCount: b1Baseline.getExternalUntrackedCount(),
-    // Wave F: refs.getSameCwdRunningSessions 由 sidecar 通过 SharedRuntime →
-    // RuntimeSessionManager.sameCwdRunningCount 注入；TUI 不设置则回退 () => 0
-    // 保持原"CLI bootstrap is single-session"行为。
-    sameCwdRunningSessions: refs.getSameCwdRunningSessions ?? (() => 0),
-    forceSnapshot: process.env.RIVET_VSW === '1',
+    // C2: sameCwdRunningSessions fallback now queries SessionRegistry (cross-process,
+    // registry.db in shared stateDir). Previously hardcoded () => 0 so VSW never
+    // activated for multi-TUI scenarios. Sidecar-provided getSameCwdRunningSessions
+    // still takes priority when available.
+    sameCwdRunningSessions: refs.getSameCwdRunningSessions
+      ?? (() => refs.sessionRegistry?.countSameCwdActive(cwd, refs.sessionId ?? '') ?? 0),
+    forceSnapshot: process.env.RIVET_VSW === '1' || vswMode === 'always',
   })
   refs.verificationSnapshotManager = b1SnapshotManager
   const b1Attribution = createVerificationAttribution({ ownership: b1Ownership })
@@ -546,7 +553,7 @@ export function createInteractiveToolRegistry(
     taskLedger: b1TaskLedger,
     ownership: b1Ownership,
     gate: b1Gate,
-    getCurrentSnapshotRef: () => b1SnapshotManager.currentSnapshotRef(),
+    getCurrentSnapshotRef: () => b1SnapshotManager?.currentSnapshotRef() ?? undefined,
     sessionRegistry: refs.sessionRegistry ?? undefined,
     sessionId: refs.sessionId ?? undefined,
     reviewDepth: params?.reviewDepth ?? 0,
@@ -1203,7 +1210,7 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
       if (!provKey) {
         return { ok: false, error: `API key not set for ${provName}. Set ${prov.apiKeyEnv ?? 'apiKey'} in config or environment.` }
       }
-      if (provName !== ctx.provider.name) {
+      if (provName !== ctx.provider.name || provKey !== apiKey) {
         provider = prov
         apiKey = provKey
         auth = undefined
@@ -1418,6 +1425,27 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   for (const rule of loadProjectRules(cwd)) {
     claimStore.propose(rule)
   }
+  // A3: no-test-infra advisory — recomputed live each session (disappears the
+  // moment tests exist). Only for recognized languages: docs/unknown repos
+  // would be pure noise. Makes the delivery-gate impact explicit and nudges
+  // 主控 to offer a minimal test scaffold instead of silently degrading.
+  try {
+    const fp = detectProjectFingerprint(cwd)
+    if (fp.language !== 'unknown' && !fp.hasTestInfra) {
+      const now = Date.now()
+      claimStore.propose({
+        kind: 'project_rule',
+        scope: 'project',
+        text: `本项目（${fp.language}）未检测到测试基础设施。影响：deliver_task 交付门禁会因无验证证据降级为 YELLOW。首次合适时机向用户说明此影响，并主动提出「要我帮你搭一个最小测试骨架吗」（不强制——尊重用户选择，但让影响显性化）。`,
+        confidence: 1.0,
+        fitness: 5,
+        source: { actor: 'hook', sessionId: 'project', turn: 0, eventId: 'fingerprint:no-test-infra' },
+        evidence: [{ id: 'fingerprint:no-test-infra', kind: 'file', summary: `project fingerprint: language=${fp.language}, hasTestInfra=false`, path: cwd, createdAt: now }],
+        createdAt: now,
+        tags: ['no_test_infra'],
+      })
+    }
+  } catch { /* advisory only — never block bootstrap */ }
   const skillLoad = loadProjectSkills(cwd, { importFromClaude: config.skills?.importFromClaude })
   if (skillLoad.loaded.length > 0) {
     console.error(`[skills] Loaded ${skillLoad.loaded.length} skill(s)`)

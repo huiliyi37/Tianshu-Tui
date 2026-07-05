@@ -12,6 +12,7 @@ import { scoreLessons } from '../context/lesson-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 import type { WorktreeReality } from '../agent/worktree-reality.js'
 import type { TaskDepthLayer } from '../context/task-contract.js'
+import { loadDeclaredVerify } from '../config/verify-config.js'
 
 const DEPTH_ADVISORY: Record<Exclude<TaskDepthLayer, 'unit'>, string> = {
   wiring: '<task-depth layer="wiring">此任务跨越模块边界。mock 单测会掩盖接线缺陷。写集成测试时实例化真实依赖（非 mock），RED 必须先证明边界断裂，GREEN 才证明已修复。</task-depth>',
@@ -66,7 +67,7 @@ export function renderPlanModeBlock(
     const head = variant === 'reentry'
       ? `恢复规划模式——继续完善当前计划。`
       : `规划模式仍激活。`
-    return `<plan-mode>${head}只读探索，禁止写/改/执行（活动计划文件除外）。${planFileHint} 每个 turn 必须以 \`ask_user_question\` 或 \`plan action=submit\` 收尾，禁止纯文本收尾。完整规范见本轮早前的 plan-mode 说明。</plan-mode>`
+    return `<plan-mode>${head}只读探索，禁止写/改/执行（活动计划文件除外）。${planFileHint} 持续推进：接着读+增量写活动计划文件，成熟后用 \`plan action=submit\` 提交；只有真正需要用户拍板的实质分歧才 \`ask_user_question\`，不要为收尾/给交代而提问。完整规范见本轮早前的 plan-mode 说明。</plan-mode>`
   }
 
   const planFileLine = activePlanFilePath
@@ -83,9 +84,9 @@ export function renderPlanModeBlock(
 4. **事实锚点核对（硬性）** — 写入计划前，计划引用的每个文件路径、符号、行号都必须用工具对当前源码核实过。项目内的文档、历史计划、记忆/约定文件描述的是**写下时的状态**，不是现状——涉及现状的断言（技术栈、框架、渲染路径、入口文件、目录结构）一律以当前源码为准，文档与源码冲突时信源码。scout 报告中引用文档得出的结论，必须自己对源码复核后才能写进计划；提议新建文件时先确认其父目录在当前项目中真实存在。
 5. **写入计划** — 将完整设计写入活动计划文件（write_file / edit_file），或成熟后用 \`plan action=submit\` 提交（可省略 plan 字段，从活动计划文件读取）。
 
-收尾契约 — 每个 turn 必须以以下之一结束，禁止以纯文本收尾：
-- \`ask_user_question\` — 澄清需求/偏好/约束
-- \`plan action=submit\` — 计划已成熟，请求用户批准
+推进节奏 — 一鼓作气把计划推到成熟，不要每轮停下来问：
+- 默认继续推进：接着读代码、增量写入活动计划文件，直到方案完整，再用 \`plan action=submit\` 提交请求批准。规划本身不消耗审批，只读探索+写计划文件可以在多轮里自主连续进行，不要中途停下。
+- 只有遇到你无法自行判断的真实分歧才 \`ask_user_question\`——存在多个实质取舍不同、且取决于用户偏好的方向，或需求自相矛盾/关键信息缺失到无法继续。为了凑收尾、给个交代而提问是禁止的：没有真正要用户拍板的事就继续推进，不要中断。
 
 计划质量标准——你的计划应该是一份完整的设计文档，禁止占位符：
 - 至少包含一张 Mermaid 图（架构图或数据流图）。图形承载语义——(圆角)=用户/输入，[[子程序]]=agent/处理器，{{六边形}}=LLM/模型，[(圆柱)]=存储/DB，{菱形}=判断；边 --> 同步/读，==> 写/强，-.-> 异步/事件。复制下方骨架并替换节点文字：
@@ -329,6 +330,24 @@ function readRivetMd(cwd: string): string | undefined {
   rivetMdCache.set(cwd, { value, timestamp: Date.now() })
   trimCache()
   return value
+}
+
+/** A3: render the project's declared verify commands (machine-readable source
+ *  of truth in .rivet-config.json). Rendered separately from .rivet.md so the
+ *  LLM always sees what the gates actually run, even when the md's free text
+ *  is stale. Returns null when nothing is declared (most projects). */
+function renderDeclaredVerify(cwd: string): string | null {
+  let verify: Record<string, string | undefined>
+  try {
+    verify = loadDeclaredVerify(cwd)
+  } catch {
+    return null
+  }
+  const lines = (['test', 'build', 'typecheck', 'lint'] as const)
+    .filter(k => verify[k]?.trim())
+    .map(k => `${k}: ${verify[k]!.trim()}`)
+  if (lines.length === 0) return null
+  return `<verify-commands source=".rivet-config.json">\n${escapeXml(lines.join('\n'))}\n</verify-commands>`
 }
 
 function escapeXml(text: string): string {
@@ -884,6 +903,13 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     const stripped = ctx.projectIndexBlock ? stripFirstMarkdownTable(md) : md
     parts.push(truncateBlock(`<project-instructions>\n${escapeXml(stripped)}\n</project-instructions>`, 8_000, 'project-instructions'))
   }
+
+  // A3: declared verify commands (from .rivet-config.json) rendered as the
+  // authoritative source — protects against hand-edited .rivet.md free text
+  // drifting from what the gates actually run. Session-stable (memoized loader,
+  // invalidated only by /init), so it is safe in the FROZEN prefix.
+  const verifyBlock = renderDeclaredVerify(ctx.cwd)
+  if (verifyBlock) parts.push(verifyBlock)
 
   // Project memory — auto-loaded from .rivet/knowledge/memory.jsonl.
   // Rendered into frozen base so it benefits from prefix cache (turn 2+ cost = 0).

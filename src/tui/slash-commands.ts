@@ -33,6 +33,7 @@ import { resolveEcosystemWorkflowInput } from '../workflows/ecosystem-workflows.
 import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import { ensureVerifyDeclaration, renderRivetMdStack, upsertStackSection } from '../bootstrap/verify-declaration.js'
 import { exportsDir } from '../config/paths.js'
 import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix, readPlan } from '../plan/plan-store.js'
 import { validatePlanContentForApproval } from '../tools/plan.js'
@@ -884,6 +885,50 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       } else {
         const hasProject = isPythonProject(agent.cwd)
         pushStatic(createLogEntry({ type: 'system', content: `当前目录 ${hasProject ? '是' : '不像'} Python 项目。\n\nUsage: /python [status|setup]` }))
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/init',
+    immediate: true,
+    handler(ctx) {
+      const { pushStatic, setIsStreaming, agent } = ctx
+      // A4: (re)generate the project verify declaration from the fingerprint.
+      // config → md single direction: .rivet-config.json is authoritative,
+      // the .rivet.md Stack section is rendered from it.
+      try {
+        const decl = ensureVerifyDeclaration(agent.cwd)
+        const lines: string[] = []
+        if (decl.fingerprint.language === 'unknown') {
+          lines.push('未识别的项目类型（无 package.json / Cargo.toml / go.mod / pyproject.toml / gradle 标记）。')
+          lines.push('可手动在 .rivet-config.json 中声明：{"verify": {"test": "<命令>", "build": "<命令>"}}')
+        } else {
+          lines.push(`项目指纹: ${decl.fingerprint.language}${decl.fingerprint.hasTestInfra ? '' : '（未检测到测试基础设施）'}`)
+          const v = decl.verify
+          for (const [k, val] of Object.entries({ test: v.test, build: v.build, typecheck: v.typecheck, lint: v.lint })) {
+            if (val) lines.push(`  verify.${k}: ${val}${decl.filledKeys.includes(k) ? '（新填入）' : '（已声明，保留）'}`)
+          }
+          lines.push(decl.wrote ? '已写入 .rivet-config.json 的 verify 声明。' : 'verify 声明已是最新，未改动。')
+          // Render the Stack section into .rivet.md (create when missing).
+          try {
+            const rivetMdPath = join(agent.cwd, '.rivet.md')
+            const stack = renderRivetMdStack(decl.fingerprint, decl.verify)
+            const body = existsSync(rivetMdPath) ? readFileSync(rivetMdPath, 'utf-8') : '# Project\n'
+            const next = upsertStackSection(body, stack)
+            if (next !== body) {
+              writeFileSync(rivetMdPath, next, 'utf-8')
+              lines.push('已同步 .rivet.md 的 Stack 段（由声明单向生成）。')
+            }
+          } catch { lines.push('（.rivet.md 同步失败——声明本身已生效）') }
+          if (!decl.fingerprint.hasTestInfra) {
+            lines.push('提示：未检测到测试。deliver_task 门禁将因缺验证证据降级为 YELLOW。可以让天枢帮你搭最小测试骨架。')
+          }
+        }
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      } catch (err) {
+        pushStatic(createLogEntry({ type: 'system', content: `/init 失败: ${err instanceof Error ? err.message : String(err)}` }))
       }
       setIsStreaming(false)
       return true

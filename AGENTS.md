@@ -50,6 +50,7 @@
 - **「看看」≠「动手」**：用户让你查看/诊断（看 stash 内容、冲突、diff）时，只报告发现并等指令，**禁止顺手 stash/reset/还原**。
 - **验证失败别用 git 清场**：测试因外部改动/并发失败时，先定位根因（多为测试非隔离、共享固定临时路径），**不要用 stash/reset/checkout 清空工作区来骗过验证**。
 - **多会话共享工作区**：本仓库常有并发 agent 会话，任何丢改动的操作都可能误伤别的会话——更要先确认。
+- **开源仓库同步**：本项目有双 remote——`origin`（revit.git 私有镜像）和 `tianshu`（Tianshu-Tui.git 公开仓库）。**绝不直接 `git push tianshu`**——公开仓库历史与开发仓库不同步，直接 push 会被拒绝。同步到公开仓库的正确流程：`bash scripts/sync-to-public.sh`（rsync 选性同步 src/desktop/docs/scripts，排除测试文件）→ `cd /Users/banxia/app/Tianshu && git add -A && git commit -m 'sync: from dev repo' && git push`。
 
 ## Agent 安全保护（硬性闸门）
 

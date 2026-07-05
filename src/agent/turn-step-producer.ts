@@ -690,7 +690,7 @@ export class TurnStepProducer {
         // even when test files were read (checkTddGate only checks that).
         // Only sets _lastImmuneHint when checkTddGate didn't already produce one,
         // since "no test file touched" is the more critical message.
-        const tddConfig = this.self.config.tddGate ?? { enabled: true, mode: 'enforce' as const, threshold: 3, skipIfNoTests: true }
+        const tddConfig = this.self.config.tddGate ?? { enabled: true, mode: 'suggest' as const, threshold: 3, skipIfNoTests: true }
         const gateHint = buildTddGateHint(this.self.evidence.getGateState(), tddConfig)
         if (gateHint && !this.self._lastImmuneHint) {
           this.self._lastImmuneHint = gateHint

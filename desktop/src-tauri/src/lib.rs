@@ -61,6 +61,13 @@ struct SidecarLaunchSpec {
     /// RIVET_BUNDLED_GIT_DIR so platform.ts can use its bin\bash.exe as the
     /// shell fallback when no system Git is installed (system Git wins).
     bundled_git_dir: Option<PathBuf>,
+    /// Auth-relevant environment (each configured provider's `apiKeyEnv` var and
+    /// the implicit `<PROVIDER>_API_KEY`) resolved from config + the current
+    /// process env at first spawn, captured so a crash-restart re-applies the
+    /// EXACT same values. `Command` inherits the parent env by default, so this
+    /// is belt-and-suspenders for the inherited case AND the channel through
+    /// which shell-harvested keys (macOS/Linux GUI launch) reach the sidecar.
+    auth_env: Vec<(String, String)>,
 }
 
 struct Sidecar {
@@ -840,6 +847,13 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
         // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
         // only covers the clean-shutdown paths we control.)
         .env("RIVET_PARENT_PID", std::process::id().to_string());
+    // Re-apply the captured auth env on every (re)spawn so a restart carries the
+    // identical key-resolution environment as the first launch, independent of
+    // any later mutation of the parent process env. Inherited env still flows;
+    // these explicit values just guarantee parity for the auth-critical vars.
+    for (k, v) in &spec.auth_env {
+        cmd.env(k, v);
+    }
     // Bundled PortableGit (Windows-only): tell platform.ts where the fallback
     // Git Bash lives, and append the git `cmd\` dir to PATH so `git` resolves
     // on machines without a system Git. Appended LAST so a system Git wins.
@@ -917,6 +931,141 @@ fn apply_configured_git_bash(rivet_home: &std::path::Path) {
     }
 }
 
+/// The env var names each configured provider resolves its key from: the
+/// explicit `apiKeyEnv` and the implicit `<PROVIDER>_API_KEY` (mirrors
+/// src/api/factory.ts::resolveApiKey). Best-effort: missing config / parse
+/// errors yield an empty vec (inline `apiKey` needs no env and is unaffected).
+fn auth_env_names(rivet_home: &std::path::Path) -> Vec<String> {
+    let cfg_path = std::env::var_os("RIVET_CONFIG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| rivet_home.join("config.json"));
+    let mut names: Vec<String> = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(&cfg_path) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(providers) = json
+                .get("provider")
+                .and_then(|p| p.get("providers"))
+                .and_then(|p| p.as_object())
+            {
+                for (name, prov) in providers {
+                    if let Some(env_name) = prov.get("apiKeyEnv").and_then(|v| v.as_str()) {
+                        let env_name = env_name.trim();
+                        if !env_name.is_empty() {
+                            names.push(env_name.to_string());
+                        }
+                    }
+                    names.push(format!("{}_API_KEY", name.to_uppercase()));
+                }
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Snapshot the auth-relevant env VALUES currently present in this process.
+/// Captured into the launch spec so a crash-restart re-applies the identical
+/// auth env even if the parent env later changes; also the channel through
+/// which shell-harvested keys reach the sidecar.
+fn resolve_auth_env(rivet_home: &std::path::Path) -> Vec<(String, String)> {
+    auth_env_names(rivet_home)
+        .into_iter()
+        .filter_map(|n| std::env::var(&n).ok().map(|v| (n, v)))
+        .collect()
+}
+
+/// Harvest the requested env vars from a login shell. macOS/Linux GUI launches
+/// (Finder/Dock/.desktop) inherit a minimal env that lacks the user's shell rc
+/// exports, so a provider configured with `apiKeyEnv` pointing at a var set in
+/// `.zshrc`/`.bashrc` resolves to an empty key. We run the user's login shell
+/// non-interactively (`-lc`) to source those profiles and dump `env`, then pick
+/// out only the requested (missing) names. Hard 3s timeout: on hang we abandon
+/// the reader thread and return nothing rather than blocking startup. No-op off
+/// Unix (Windows GUI processes inherit the user/system environment already).
+#[cfg(unix)]
+fn harvest_shell_env(missing: &[String]) -> Vec<(String, String)> {
+    use std::io::Read;
+    if missing.is_empty() {
+        return Vec::new();
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+    // Sentinels isolate the env dump from any profile banner noise.
+    let script = "printf '__RIVET_ENV_START__\\n'; env; printf '__RIVET_ENV_END__\\n'";
+    let mut child = match Command::new(&shell)
+        .args(["-lc", script])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let Some(mut out) = child.stdout.take() else {
+        let _ = child.kill();
+        return Vec::new();
+    };
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = out.read_to_string(&mut buf);
+        let _ = tx.send(buf);
+        // Reap the shell so it doesn't linger as a zombie.
+        let _ = child.wait();
+    });
+    let stdout = match rx.recv_timeout(Duration::from_secs(3)) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("[rivet] login-shell env harvest timed out — skipping");
+            return Vec::new();
+        }
+    };
+    let want: std::collections::HashSet<&str> = missing.iter().map(|s| s.as_str()).collect();
+    let mut found: Vec<(String, String)> = Vec::new();
+    let mut in_env = false;
+    for line in stdout.lines() {
+        match line {
+            "__RIVET_ENV_START__" => in_env = true,
+            "__RIVET_ENV_END__" => break,
+            _ if in_env => {
+                if let Some((k, v)) = line.split_once('=') {
+                    if want.contains(k) && !v.is_empty() {
+                        found.push((k.to_string(), v.to_string()));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+#[cfg(not(unix))]
+fn harvest_shell_env(_missing: &[String]) -> Vec<(String, String)> {
+    Vec::new()
+}
+
+/// Fill any auth env vars the process is missing (GUI launch) from the user's
+/// login shell, so `apiKeyEnv`-based provider keys resolve. Only injects names
+/// that are (a) referenced by config and (b) not already present — never
+/// overrides a real env var. Sets them on THIS process so both the sidecar's
+/// inherited env and the captured auth_env snapshot pick them up.
+fn hydrate_auth_env_from_shell(rivet_home: &std::path::Path) {
+    let missing: Vec<String> = auth_env_names(rivet_home)
+        .into_iter()
+        .filter(|n| std::env::var_os(n).is_none())
+        .collect();
+    if missing.is_empty() {
+        return;
+    }
+    for (k, v) in harvest_shell_env(&missing) {
+        if std::env::var_os(&k).is_none() {
+            std::env::set_var(&k, v);
+        }
+    }
+}
+
 fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunchSpec) {
     let port = pick_free_port();
     let token = random_token();
@@ -926,6 +1075,10 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
     // Seed a user-configured Git Bash path before spawn (sidecar inherits it)
     // and before any PTY is created (pty.rs reads it from this process env).
     apply_configured_git_bash(&rivet_home);
+    // macOS/Linux GUI launch inherits a minimal env without the user's shell rc
+    // exports — hydrate any config-referenced apiKeyEnv vars from the login
+    // shell BEFORE resolving auth_env so the snapshot (and the sidecar) get them.
+    hydrate_auth_env_from_shell(&rivet_home);
     let spec = SidecarLaunchSpec {
         node,
         entry,
@@ -934,6 +1087,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
         port,
         token: token.clone(),
         bundled_git_dir: ensure_bundled_git(app, &rivet_home),
+        auth_env: resolve_auth_env(&rivet_home),
     };
 
     let mut child = spawn_from_spec(&spec);

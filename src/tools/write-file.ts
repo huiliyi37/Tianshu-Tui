@@ -9,6 +9,7 @@ import { trackFileChange } from '../agent/recovery-stack.js'
 import { applyEol, chooseEol, detectFileEol, toLf } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
 import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
+import { WRITE_FILE_POINTER_PREFIX } from './write-file-arg-processor.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -48,6 +49,19 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     }
     const content = params.input.content as string
     const dir = dirname(filePath)
+
+    // Pointer-regurgitation guard: the arg post-processor replaces large
+    // `content` values in message history with a "[file written to …]" pointer.
+    // Models occasionally echo that pointer back as the real content on a later
+    // write, silently producing a one-line garbage file (session 05e1500e).
+    if (content.trimStart().startsWith(WRITE_FILE_POINTER_PREFIX)) {
+      return {
+        content: `Error: content is a pointer placeholder from message history ("${WRITE_FILE_POINTER_PREFIX} …"), not real file contents. `
+          + `Large write_file contents are replaced by this pointer in past messages — the actual text lives only on disk. `
+          + `Provide the complete real file contents; if you need the previous version, read_file ${filePath} first.`,
+        isError: true,
+      }
+    }
 
     if (content.length > MAX_WRITE_FILE_BYTES) {
       const sizeMB = (content.length / (1024 * 1024)).toFixed(1)

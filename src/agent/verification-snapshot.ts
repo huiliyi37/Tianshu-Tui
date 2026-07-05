@@ -29,6 +29,7 @@ import { isAbsolute, join, relative } from 'node:path'
 import { createWorktreeAt, removeWorktree } from './worktree.js'
 import { materializeScope } from './worktree-scope.js'
 import { RepoLock, worktreeRegistryLockPath } from './repo-lock.js'
+import { provisionSnapshotDeps } from './snapshot-deps.js'
 
 export interface VerificationSnapshotInit {
   /** Main repository working directory (the live, shared worktree). */
@@ -166,7 +167,13 @@ export function createVerificationSnapshot(init: VerificationSnapshotInit): Veri
       destroyAt(init.baseCwd, path)
       createWorktreeAt(init.baseCwd, path, init.baselineHead)
     })
-    return overlayOwnedDiff(init.baseCwd, path, init.baselineHead, ownedFiles)
+    const overlay = overlayOwnedDiff(init.baseCwd, path, init.baselineHead, ownedFiles)
+    // Wire snapshot deps: symlink node_modules/.venv from base repo for tests.
+    const deps = provisionSnapshotDeps(init.baseCwd, path)
+    if (deps.warnings.length > 0) {
+      console.warn('[vsw] dep provisioning warnings:', deps.warnings.join('; '))
+    }
+    return overlay
   }
 
   build(init.ownedFiles)

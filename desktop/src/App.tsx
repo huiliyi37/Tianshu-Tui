@@ -58,9 +58,17 @@ export function App() {
     let unlisten: (() => void) | undefined
     let cancelled = false
     void import('@tauri-apps/api/event')
-      .then((m) => m.listen('sidecar-restarted', () => {
-        toast.success('运行时进程已自动恢复')
-        void health.refetch()
+      .then((m) => m.listen('sidecar-restarted', async () => {
+        // Verify the respawned sidecar actually resolved a usable key. If the
+        // restart dropped auth (e.g. an apiKeyEnv provider whose env was lost),
+        // say so plainly — the persistent `needsSetup` banner below then guides
+        // reconfiguration, instead of the user hitting silent 401s on every send.
+        const res = await health.refetch()
+        if (res.data && res.data.configured === false) {
+          toast.warning('运行时已恢复，但未检测到可用的 API Key（可能重启后环境变量丢失）。请在设置中重新配置密钥。')
+        } else {
+          toast.success('运行时进程已自动恢复')
+        }
       }))
       .then((off) => {
         if (cancelled) off()

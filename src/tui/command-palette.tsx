@@ -158,5 +158,6 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/exit', description: 'Save session and exit' },
     { name: '/update', description: 'Check and install the latest Rivet release' },
     { name: '/doctor', description: 'Environment health check + which shell the bash tool uses' },
+    { name: '/init', description: '项目指纹探测 → 生成/更新 verify 声明（.rivet-config.json + .rivet.md）' },
   ]
 }

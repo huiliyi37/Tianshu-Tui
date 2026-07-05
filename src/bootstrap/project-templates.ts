@@ -21,6 +21,7 @@ import {
   appendFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { ensureVerifyDeclaration, renderRivetMdStack, upsertStackSection } from './verify-declaration.js'
 
 // ── Constants ───────────────────────────────────────────────────
 
@@ -195,10 +196,24 @@ export function applyProjectTemplates(
   const appended: string[] = []
   const skipped: string[] = []
 
+  // A3: fingerprint the project and materialize the verify declaration in
+  // .rivet-config.json (authoritative source; existing keys win). The .rivet.md
+  // Stack section below is rendered FROM this — config → md, one direction.
+  // Best-effort: template creation must never fail on fingerprint issues.
+  let stackSection: string | undefined
+  try {
+    const decl = ensureVerifyDeclaration(cwd)
+    if (decl.wrote) created.push('.rivet-config.json (verify)')
+    if (decl.fingerprint.language !== 'unknown') {
+      stackSection = renderRivetMdStack(decl.fingerprint, decl.verify)
+    }
+  } catch { /* fall back to the empty-placeholder template */ }
+
   // .rivet.md — silent default-create
   const rivetPath = join(cwd, RIVET_MD_PATH)
   if (!existsSync(rivetPath)) {
-    writeFileSync(rivetPath, RIVET_MD_TEMPLATE, 'utf-8')
+    const body = stackSection ? upsertStackSection(RIVET_MD_TEMPLATE, stackSection) : RIVET_MD_TEMPLATE
+    writeFileSync(rivetPath, body, 'utf-8')
     created.push(RIVET_MD_PATH)
   }
 

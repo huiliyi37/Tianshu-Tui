@@ -139,6 +139,12 @@ export interface ToolCallParams {
    *  `snapshotRef`, then Phase B in the live `cwd` (integration, advisory).
    *  Absent → in-place single-phase verification (default, unchanged). */
   verificationSnapshot?: VerificationSnapshotPlan
+  /** VSW C3: failure-attribution retry. Injected by the pipeline only when an
+   *  in-place verification is at pollution risk (peer sessions on this cwd or
+   *  recent workspace_mutation events). When the in-place run FAILS, run_tests
+   *  calls this to force-build a snapshot and reruns there once — snapshot-pass
+   *  + live-fail attributes the failure to workspace pollution, not the code. */
+  prepareRetrySnapshot?: () => VerificationSnapshotPlan | null
   /** P0-2: Active context window — drives per-call read caps for read_file/grep. */
   contextWindow?: number
   /** P0-2: Provider profile — read caps relax for cache-preserving providers. */

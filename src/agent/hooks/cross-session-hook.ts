@@ -42,10 +42,49 @@ export function formatEventsForAppendix(events: EventRecord[]): string {
   const lines = sorted.map(e => {
     const prefix = e.priority >= 1 ? '[ALERT]' : '[info]'
     const file = e.filePath ? ` ${e.filePath}` : ''
+
+    // B2: workspace_mutation events get enriched advisory text so the LLM
+    // knows why files may appear changed/missing and what NOT to do.
+    if (e.eventType === 'workspace_mutation') {
+      const detail = formatWorkspaceMutationDetail(e.detail)
+      return `  ${prefix} workspace_mutation${file}: ${detail}`
+    }
+
     return `  ${prefix} ${e.eventType}${file}: ${e.detail ?? 'no detail'}`
   })
 
   return `<cross-session-events>\n${lines.join('\n')}\n</cross-session-events>`
+}
+
+/**
+ * Parse workspace_mutation detail JSON into a human-readable advisory.
+ * Returns the raw detail string if parsing fails (degraded but not silent).
+ */
+function formatWorkspaceMutationDetail(detail: string | null): string {
+  if (!detail) return 'workspace mutation (no detail)'
+  try {
+    const parsed = JSON.parse(detail) as { kind?: string; sessionId?: string }
+    const kind = parsed.kind ?? 'unknown'
+    const session = parsed.sessionId ? `session ${parsed.sessionId.slice(-8)}` : 'another session'
+    switch (kind) {
+      case 'stash':
+        return `${session} stashed the working tree — your uncommitted changes may temporarily disappear. Do NOT re-edit or revert; wait for stash_pop.`
+      case 'stash_pop':
+        return `${session} restored stashed changes (stash_pop). Working tree is back to pre-stash state.`
+      case 'reset':
+        return `${session} performed git reset. Some tracked changes may have been discarded.`
+      case 'checkout':
+        return `${session} performed git checkout -- <files>. Affected files were reverted to HEAD.`
+      case 'restore':
+        return `${session} performed git restore. Affected files were reverted.`
+      case 'clean':
+        return `${session} performed git clean. Untracked files may have been removed.`
+      default:
+        return `${session} performed ${kind} — working tree was modified.`
+    }
+  } catch {
+    return detail
+  }
 }
 
 /**

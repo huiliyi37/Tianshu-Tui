@@ -1,13 +1,15 @@
 import { readFile, stat, glob } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, delimiter, win32 as winPath } from 'node:path'
-import type { Tool, ToolCallParams, ToolResult, VerificationMetadata, VerificationBlockedReason } from './types.js'
+import type { Tool, ToolCallParams, ToolResult, VerificationMetadata, VerificationBlockedReason, VerificationSnapshotPlan } from './types.js'
 import { track } from './process-tracker.js'
 import { WinStreamDecoder } from '../platform.js'
 import { spawnHidden } from './spawn-hidden.js'
 import { killProcessTree } from './process-kill.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
 import { getResolvedEnv } from './resolved-env.js'
+import { loadDeclaredVerify } from '../config/verify-config.js'
+import { detectProjectFingerprint } from '../repo/project-fingerprint.js'
 
 interface RunnableTestCommand {
   type: 'run'
@@ -17,6 +19,9 @@ interface RunnableTestCommand {
   runner: string
   scope: 'full' | 'targeted'
   recommendedCommand?: string
+  /** True for declared/fingerprint commands that are full shell strings
+   *  (e.g. "cargo test", "go test ./...") rather than argv arrays. */
+  shell?: boolean
 }
 
 interface BlockedTestCommand {
@@ -136,6 +141,14 @@ async function pythonHasTests(cwd: string): Promise<boolean> {
 }
 
 async function detectTestCommand(cwd: string): Promise<{ base: string; runner: string; recommendedCommand?: string; hasTests?: boolean }> {
+  // A2: project-declared verify.test (from .rivet-config.json) wins over all
+  // auto-detection — this is what unblocks Rust/Go/Java projects that the
+  // marker-based probes below don't recognize.
+  const declared = loadDeclaredVerify(cwd).test?.trim()
+  if (declared) {
+    return { base: declared, runner: 'declared', recommendedCommand: declared, hasTests: true }
+  }
+
   const pkgPath = join(cwd, 'package.json')
   if (!(await pathExists(pkgPath))) {
     if (await hasPythonProjectMarker(cwd)) {
@@ -145,6 +158,12 @@ async function detectTestCommand(cwd: string): Promise<{ base: string; runner: s
         recommendedCommand: 'pytest',
         hasTests: await pythonHasTests(cwd),
       }
+    }
+    // A0 fingerprint fallback: Rust/Go/Java have canonical test commands even
+    // without a declaration (cargo test / go test always exist).
+    const fp = detectProjectFingerprint(cwd)
+    if (fp.testCommand && fp.language !== 'typescript' && fp.language !== 'python') {
+      return { base: fp.testCommand, runner: 'declared', recommendedCommand: fp.testCommand, hasTests: fp.hasTestInfra }
     }
     return { base: '', runner: 'unknown' }
   }
@@ -189,6 +208,24 @@ async function buildTestCommand(cwd: string, filter?: string): Promise<TestComma
   const { base, runner, recommendedCommand, hasTests } = await detectTestCommand(cwd)
   const scope = filter ? 'targeted' as const : 'full' as const
 
+  // Declared / fingerprint commands run as full shell strings. Targeted runs
+  // append the sanitized filter as a trailing token — the convention most
+  // runners accept (cargo test <name>, pytest <path>, npm test -- <path>).
+  if (runner === 'declared') {
+    const safeFilter = filter?.replace(/[`$\\;"'|&<>]/g, '').trim()
+    const full = safeFilter ? `${base} ${safeFilter}` : base
+    return {
+      type: 'run',
+      command: full,
+      args: [],
+      display: full,
+      runner,
+      scope,
+      shell: true,
+      recommendedCommand: recommendedCommand ?? base,
+    }
+  }
+
   if (runner === 'unknown') {
     return {
       type: 'blocked',
@@ -202,7 +239,7 @@ async function buildTestCommand(cwd: string, filter?: string): Promise<TestComma
       ].join('\n'),
       recommendedCommand: undefined,
       blockedReason: 'no_test_framework',
-      userGuidance: '项目缺少测试框架。如果项目使用 Node.js，运行 npm init 后配置 test 脚本；如果项目使用 Python，创建 tests/ 目录并安装 pytest。也可以绕过自动检测，直接用 bash 运行验证命令。',
+      userGuidance: '项目缺少可自动检测的测试命令。运行 /init 从项目指纹生成 verify 声明，或在 .rivet-config.json 手动声明 {"verify": {"test": "<命令>"}}——声明后 run_tests 直接使用它。也可以绕过自动检测，直接用 bash 运行验证命令。',
     }
   }
 
@@ -388,6 +425,33 @@ export function parseOutput(raw: string, runner: string): ParsedResult {
     }
   }
 
+  if (runner === 'declared') {
+    // Declared commands can be any toolchain — parse the common formats,
+    // fall back to exit-code-only semantics when nothing matches.
+    // cargo test: "test result: ok. 12 passed; 0 failed; 1 ignored; ..."
+    for (const m of clean.matchAll(/test result:\s+\w+\.\s+(\d+)\s+passed;\s+(\d+)\s+failed(?:;\s+(\d+)\s+ignored)?/g)) {
+      result.passed += asNum(m[1])
+      result.failed += asNum(m[2])
+      result.skipped += asNum(m[3])
+    }
+    // go test -v: "--- FAIL: TestX" per failure; "ok  <pkg>  0.5s" per package
+    if (result.passed === 0 && result.failed === 0) {
+      const goFails = [...clean.matchAll(/^--- FAIL: (\S+)/gm)]
+      const goOk = [...clean.matchAll(/^ok\s+\S+/gm)]
+      if (goFails.length > 0 || goOk.length > 0) {
+        result.failed = goFails.length
+        result.passed = goOk.length // package-level granularity without -v
+      }
+    }
+    // pytest-style summary (declared "pytest -x" etc.)
+    if (result.passed === 0 && result.failed === 0) {
+      const py = clean.match(/(\d+)\s+passed/) ?? undefined
+      const pyf = clean.match(/(\d+)\s+failed/) ?? undefined
+      result.passed = asNum(py?.[1])
+      result.failed = asNum(pyf?.[1])
+    }
+  }
+
   const failLines: Array<{ name: string; error: string }> = []
   const nodeTestFails = clean.matchAll(/✖\s+(.+?)(?:\s+\([\d.]+m?s\))?\n((?:  .*\n)*)/g)
   for (const m of nodeTestFails) {
@@ -534,7 +598,35 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
     const plan = params.verificationSnapshot
     if (!plan) {
       // Default in-place verification — unchanged single-phase path.
-      return runTestCommandIn(params.cwd, testCommand, params, filter, timeout)
+      const inPlace = await runTestCommandIn(params.cwd, testCommand, params, filter, timeout)
+
+      // C3: failure-attribution retry. Only wired by the pipeline when live
+      // pollution signals exist (peer sessions / workspace mutations). A
+      // snapshot-pass after a live-fail means the failure came from the
+      // polluted working tree, not the owned changes.
+      if (inPlace.isError && params.prepareRetrySnapshot) {
+        let retryPlan: VerificationSnapshotPlan | null = null
+        try { retryPlan = params.prepareRetrySnapshot() } catch { /* degrade: keep in-place result */ }
+        if (retryPlan) {
+          const isolated = await runTestCommandIn(retryPlan.path, testCommand, params, filter, timeout)
+          tagVerification(isolated, 'isolated', retryPlan.snapshotRef)
+          if (!isolated.isError) {
+            const note = `\n\n[C3 attribution retry] Tests FAILED in the live tree but PASSED in an isolated snapshot of your owned changes. The failure is workspace pollution (peer session stash/reset or external edits), NOT your code. Do not "fix" the code for this failure — coordinate with the peer session or wait for the workspace to settle, then re-verify.`
+            const result: ToolResult = {
+              ...isolated,
+              content: `[live tree] FAILED\n${typeof inPlace.content === 'string' ? inPlace.content.slice(0, 1500) : ''}\n\n[isolated snapshot] PASSED\n${isolated.content}${note}`,
+              isError: false,
+            }
+            if (inPlace.verification) result.extraVerifications = [inPlace.verification]
+            return result
+          }
+          // Failed in isolation too → genuinely broken code; report the
+          // in-place result with the attribution confirmed.
+          inPlace.content += `\n\n[C3 attribution retry] Also FAILED in an isolated snapshot — the failure is in your owned changes, not workspace pollution.`
+          if (isolated.verification) inPlace.extraVerifications = [isolated.verification]
+        }
+      }
+      return inPlace
     }
 
     // VSW two-phase: Phase A in the isolated snapshot (blocking gate), Phase B in
@@ -594,8 +686,21 @@ function runTestCommandIn(
   const startTime = Date.now()
   // Normalize for the host OS: on Windows npm/npx/tsx are `.cmd` shims that need
   // a shell (else modern Node throws EINVAL); node/pytest spawn directly.
-  const spawnSpec = resolveTestSpawn(testCommand.command, testCommand.args, cwd)
+  // Declared commands (verify.test / fingerprint) are full shell strings.
+  const spawnSpec: ResolvedTestSpawn = testCommand.shell
+    ? { command: testCommand.command, args: testCommand.args, shell: true }
+    : resolveTestSpawn(testCommand.command, testCommand.args, cwd)
   return new Promise<ToolResult>((resolve) => {
+      // Single-settlement guard: timeout, abort, close and error can all race
+      // (e.g. the killed child's `close` fires after the timeout already
+      // resolved). Without this the losing path still runs its async work
+      // (persistRawOutput after the caller cleaned up) → unhandledRejection.
+      let settled = false
+      const settle = (result: ToolResult): void => {
+        if (settled) return
+        settled = true
+        resolve(result)
+      }
       const child = track(spawnHidden(spawnSpec.command, spawnSpec.args, {
         cwd,
         env: buildExecutionEnv(cwd),
@@ -641,6 +746,7 @@ function runTestCommandIn(
       })
 
       const timer = setTimeout(async () => {
+        if (settled) return
         killProcessTree(child, 'SIGTERM')
         setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
         const finalStdout = stdout + stdoutDecoder.end()
@@ -648,7 +754,7 @@ function runTestCommandIn(
         const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
         const meta = { command: testCommand.display, exitCode: -1, durationMs: Date.now() - startTime }
         const rawPath = await persistRawOutput(params.toolUseId, raw)
-        resolve({
+        settle({
           content: `Tests timed out after ${timeout}ms`,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
@@ -669,7 +775,7 @@ function runTestCommandIn(
         clearTimeout(timer)
         killProcessTree(child, 'SIGTERM')
         setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
-        resolve({ content: 'Tests aborted by user.', uiContent: '⏹ aborted', isError: false })
+        settle({ content: 'Tests aborted by user.', uiContent: '⏹ aborted', isError: false })
       }
       if (signal) {
         if (signal.aborted) onAbort()
@@ -679,6 +785,9 @@ function runTestCommandIn(
       child.on('close', async (code, _exitSignal) => {
         clearTimeout(timer)
         if (signal) signal.removeEventListener('abort', onAbort)
+        // Timeout/abort already settled — a killed child still emits `close`;
+        // skip the late async work (persistRawOutput on cleaned-up temp dirs).
+        if (settled) return
         const finalStdout = stdout + stdoutDecoder.end()
         const finalStderr = stderr + stderrDecoder.end()
         const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
@@ -689,7 +798,7 @@ function runTestCommandIn(
         if (testCommand.command === 'tsx' && raw.includes('EPERM') && testCommand.args[0] === '--test') {
           const args = ['--import', 'tsx', '--test', ...testCommand.args.slice(1)]
           const retryCmd: RunnableTestCommand = { ...testCommand, command: 'node', args, display: `node --import tsx --test ${testCommand.args.slice(1).join(' ')}` }
-          resolve(await runTestCommandIn(cwd, retryCmd, params, filter, timeout))
+          settle(await runTestCommandIn(cwd, retryCmd, params, filter, timeout))
           return
         }
 
@@ -703,7 +812,13 @@ function runTestCommandIn(
         const rawPath = await persistRawOutput(params.toolUseId, raw)
         const meta = { command: testCommand.display, exitCode, durationMs }
 
-        const invocationFailed = exitCode !== 0 && parsed.passed === 0 && parsed.failed === 0 && parsed.skipped === 0
+        // Declared commands (verify.test) are explicit user intent — exit != 0
+        // means the verification FAILED, not that the framework is missing, even
+        // when output parsing yields zero counts (arbitrary scripts). Spawn
+        // errors (command not found) still go through the 'error' → blocked path.
+        const zeroCounts = parsed.passed === 0 && parsed.failed === 0 && parsed.skipped === 0
+        const invocationFailed = exitCode !== 0 && zeroCounts && testCommand.runner !== 'declared'
+        const invocationGuidance = '测试运行器启动失败或崩溃。请检查测试命令是否正确，必要时用 bash 手动运行以诊断环境问题。'
         const verification: VerificationMetadata = {
           command: testCommand.display,
           status: exitCode === 0 ? 'passed' : invocationFailed ? 'blocked' : 'failed',
@@ -718,7 +833,7 @@ function runTestCommandIn(
             ? {
                 failureKind: 'tool_invocation_failure' as const,
                 blockedReason: 'invocation_failure' as const,
-                userGuidance: '测试运行器启动失败或崩溃。请检查测试命令是否正确，必要时用 bash 手动运行以诊断环境问题。',
+                userGuidance: invocationGuidance,
               }
             : {}),
           ...(testCommand.recommendedCommand ? { recommendedCommand: testCommand.recommendedCommand } : {}),
@@ -735,12 +850,29 @@ function runTestCommandIn(
           }
         }
 
-        resolve({
+        // Invocation failure (exit != 0 with zero parseable test counts) means
+        // the real diagnostic — import SyntaxError, missing module, runner crash —
+        // lives only in the raw output. Show its tail so the model can act on it
+        // instead of staring at "0 passed, 0 failed" (session 05e1500e).
+        let failureContent = truncated
+        if (invocationFailed) {
+          const rawTail = stripAnsi(raw).trim().slice(-1200)
+          failureContent = rawTail.length > 0
+            ? `${truncated}\n\n[runner output tail]\n${rawTail}\n\n${invocationGuidance}`
+            : `${truncated}\n\n${invocationGuidance}`
+        } else if (exitCode !== 0 && zeroCounts && testCommand.runner === 'declared') {
+          // Declared-command failure with unparseable counts — the diagnostic
+          // lives only in the raw output, so surface its tail.
+          const rawTail = stripAnsi(raw).trim().slice(-1200)
+          if (rawTail.length > 0) failureContent = `${truncated}\n\n[runner output tail]\n${rawTail}`
+        }
+
+        settle({
           content: exitCode === 0
             ? (parsed.passed === 0 && !parsed.duration
               ? truncated  // parse likely failed — fall back to full formatted output
               : `✓ ${parsed.passed} passed${parsed.skipped ? `, ${parsed.skipped} skipped` : ''}${parsed.duration ? ` (${parsed.duration})` : ''}`)
-            : truncated,
+            : failureContent,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
           verification,
@@ -750,8 +882,9 @@ function runTestCommandIn(
 
       child.on('error', async (err) => {
         clearTimeout(timer)
+        if (settled) return
         const rawPath = await persistRawOutput(params.toolUseId, err.message)
-        resolve({
+        settle({
           content: err.message,
           uiContent: err.message,
           rawPath,

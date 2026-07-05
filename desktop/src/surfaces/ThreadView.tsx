@@ -18,6 +18,7 @@ import { CompletionCurtain } from '../components/CompletionCurtain'
 import { RewindOverlay } from '../components/RewindOverlay'
 import { FileViewer } from '../components/FileViewer'
 import { getFileContent, openFile } from '../runtime/client'
+import { openExternal } from '../lib/open-external'
 import type { FileContent } from '../runtime/types'
 import {
   AlertDialog,
@@ -289,7 +290,7 @@ export function ThreadView(props: {
   const modeBlocks = useMemo(() => {
     if (viewMode !== 'summary') return filteredBlocks
     return filteredBlocks.filter((b) =>
-      b.kind === 'user' || b.kind === 'assistant' || b.kind === 'error' || b.kind === 'turn' || b.kind === 'steer',
+      b.kind === 'user' || b.kind === 'assistant' || b.kind === 'error' || b.kind === 'turn' || b.kind === 'steer' || b.kind === 'landing',
     )
   }, [filteredBlocks, viewMode])
 
@@ -1236,6 +1237,7 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
       b.kind === 'intent_note' ||
       b.kind === 'watchdog_recovery' ||
       b.kind === 'autonomy_checkpoint' ||
+      b.kind === 'landing' ||
       isArtifactTool(b)
     ) {
       if (run) {
@@ -1390,6 +1392,35 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
       <MsgBlock role="引导" roleGlyph="steer">
         <Markdown source={block.text} onFileClick={onFileClick} />
       </MsgBlock>
+    )
+  }
+  if (block.kind === 'landing' && block.landing) {
+    const l = block.landing
+    const shortSha = (l.sha ?? '').slice(0, 8)
+    return (
+      <div className="decision-shift info landing-card">
+        <div className="ds-head">
+          <span className="ds-glyph" aria-hidden>{l.action === 'pr_created' ? '⇱' : '⏚'}</span>
+          {l.action === 'commit' && (
+            <span className="ds-domain">已提交{shortSha ? ` · ${shortSha}` : ''}</span>
+          )}
+          {l.action === 'merge_back' && (
+            <span className="ds-domain">已合回{l.branch ? ` · ${l.branch} → main` : ''}{shortSha ? ` · ${shortSha}` : ''}</span>
+          )}
+          {l.action === 'pr_created' && (
+            <span className="ds-domain">PR 已创建{l.branch ? ` · ${l.branch}` : ''}</span>
+          )}
+          <span className="ds-tag">变更落地</span>
+        </div>
+        {l.action === 'pr_created' && l.url && (
+          <div className="ds-reason">
+            <a
+              href={l.url}
+              onClick={(e) => { e.preventDefault(); openExternal(l.url!) }}
+            >{l.url}</a>
+          </div>
+        )}
+      </div>
     )
   }
   if (block.kind === 'phase') {

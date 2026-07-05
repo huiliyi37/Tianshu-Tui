@@ -738,7 +738,8 @@ export class RuntimeSessionManager {
           pendingApprovals: 0,
         },
         agent: null,
-        events,
+        // 内存环上限与懒加载路径一致：只保留尾部 maxEvents 进内存。
+        events: events.length > this.maxEvents ? events.slice(events.length - this.maxEvents) : events,
         eventsLoaded: true,
         seq: maxSeq,
         running: false,
@@ -776,12 +777,18 @@ export class RuntimeSessionManager {
         let evs: SessionEvent[]
         try { evs = loader.call(this.persistence, session.record.id) } catch { evs = [] }
         evs.sort((a, b) => a.seq - b.seq)
-        session.events = evs
+        // knownArtifacts 在截断前从全量构建——即使 artifact 事件落在被截掉的
+        // 头部，去重集仍然完整（防止重放时重新公告旧 artifact）。
         session.knownArtifacts = new Set(
           evs.filter((e) => e.type === 'artifact').map((e) => String(e.data.id)),
         )
         const maxSeq = evs.length ? evs[evs.length - 1]!.seq : session.record.lastSeq
         session.seq = Math.max(session.seq, maxSeq)
+        // 内存环上限对懒加载路径同样生效：极长会话（磁盘日志 ≫ maxEvents）只
+        // 保留尾部进内存——与活跃会话超过环容量后的行为一致（append 已截尾），
+        // 客户端 since=0 重放本来就只拿得到环内尾部。磁盘 events.jsonl 不动，
+        // 仍是完整历史的 source of truth。
+        session.events = evs.length > this.maxEvents ? evs.slice(evs.length - this.maxEvents) : evs
       }
       session.eventsLoaded = true
     }
