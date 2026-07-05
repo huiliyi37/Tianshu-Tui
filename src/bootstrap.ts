@@ -964,7 +964,6 @@ export function createAgentRuntime(deps: {
       // 路径漏了联动：YOLO 会话按 config maxTurns（如 50）跑，turn 45 注入预算
       // 预警、turn 50 被 GUARD 硬截断（session 92a38900，用户观感=自己停止）。
       maxTurns: config.agent.approval === 'dangerously-skip-permissions' ? 0 : config.agent.maxTurns,
-      maxAutoContinue: config.agent.maxAutoContinue,
       checkpointEveryTurns: config.agent.checkpointEveryTurns,
       getSessionMemoryState: () => persist.getSessionMemoryState(),
       fileHistory,

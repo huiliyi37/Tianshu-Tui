@@ -122,7 +122,6 @@ export const DEFAULT_CONFIG: Config = {
     maxDelegationDepth: 2,
     maxTeamParallel: 3,
     council: { seats: [] },
-    maxAutoContinue: 1,
     checkpointEveryTurns: 0,
     intentRetrievalRouter: {
       enabled: true,

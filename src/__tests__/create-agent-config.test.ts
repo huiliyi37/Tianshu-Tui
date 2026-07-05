@@ -39,7 +39,6 @@ const testConfig = {
     maxDelegationDepth: 2,
     maxTeamParallel: 3,
     council: { seats: [] },
-    maxAutoContinue: 1,
     checkpointEveryTurns: 25,
     intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 100, maxTokens: 128, temperature: 0 },
     llmSpeculation: { enabled: false, maxPerTurn: 3, maxTokens: 320, timeoutMs: 8_000, minProbability: 0.5, slowToolsOnly: true },

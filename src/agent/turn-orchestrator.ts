@@ -108,7 +108,6 @@ export interface TurnStateBag {
   turnBudget: TurnBudget
   latestFsWatcherState: FsWatcherState
   consecutiveNoToolTurns: number
-  autoContinueCount: number
   /** Fingerprint of the last fully-errored tool batch — for wedged-loop detection. */
   wedgeToolFingerprint: string
   /** Consecutive identical fully-errored tool batches — for wedged-loop detection. */
@@ -231,7 +230,6 @@ export interface TurnOrchestratorDeps {
 
   // === Per-run state (getter/setter view into AgentLoop mutable fields) ===
   state: TurnStateBag
-  getMaxAutoContinue: () => number
   getDoomLoopLevel: () => 'none' | 'warn' | 'blocked'
 
   // === Sub-controllers ===
@@ -927,7 +925,7 @@ export class TurnOrchestrator {
 
         // ── User steer takes precedence over any auto-continuation ──
         // Steer normally drains only at tool-result boundaries, so a no-tool
-        // continuation chain (goal/phantom) starves queued user guidance while
+        // continuation chain (goal) starves queued user guidance while
         // injecting its own "keep going" reminder — the user feels unheard.
         // Drain here FIRST: if the user said something, hand the next turn to
         // their words alone and skip this round's continuation reminders.
@@ -963,24 +961,9 @@ export class TurnOrchestrator {
         )
         if (goalCheckResult.kind === 'continue') continue
 
-        // ── Phantom continuation check ──
-        // Only reached when goal check returned accept/finalize (goal not continuing).
-        // Wrapped in rejectOnAbort for uniform abort cooperation across all
-        // turn-boundary steps.
-        const phantomResult = await rejectOnAbort(
-          this.deps.postTurnDecision.evaluatePhantomContinuation({
-            turn,
-            callbacks,
-            signal: signal!,
-          }),
-          signal!,
-          'phantom-check',
-        )
-        if (phantomResult.shouldContinue) continue
-
         // Final completion: goal inactive / achieved / budget exhausted / context limit.
         // Voluntary finish — the model produced a final answer with no tool call
-        // and neither goal nor phantom continuation asked to keep going.
+        // and goal continuation didn't ask to keep going.
         this.emitStop({ source: 'natural-finish', turn, voluntary: true }, callbacks)
         await rejectOnAbort(
           this.deps.completeTurn({

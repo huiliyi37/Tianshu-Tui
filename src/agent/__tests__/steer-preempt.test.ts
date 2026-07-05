@@ -14,7 +14,7 @@ import type { AgentCallbacks } from '../loop-types.js'
 
 // C1 (自治模式刹车): mid-run user steer must take precedence over
 // auto-continuation on NO-TOOL turn boundaries. Previously steer only drained
-// at tool-result boundaries, so a no-tool continuation chain (goal/phantom)
+// at tool-result boundaries, so a no-tool continuation chain (goal)
 // starved queued guidance while injecting its own "keep going" reminder.
 // Contract:
 //   1. A no-tool turn with pending steer injects the guidance as a system
