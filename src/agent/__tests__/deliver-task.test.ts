@@ -34,6 +34,7 @@ function makeContext(opts: {
   detectWroteButNeverRead?: (cwd: string, files: string[]) => Array<{ symbol: string; file: string; kind: 'export' | 'field' }>
   meridianDb?: import('../../repo/meridian-db.js').MeridianDb
   typecheckRunner?: import('../typecheck-gate.js').TypecheckRunner
+  declaredCheckRunner?: import('../typecheck-gate.js').DeclaredCommandRunner
   taskContract?: import('../../context/task-contract.js').TaskContract
   inventorySearcher?: import('../regression-inventory.js').InventorySearcher
 }) {
@@ -69,6 +70,7 @@ function makeContext(opts: {
     detectWroteButNeverRead: opts.detectWroteButNeverRead ?? (() => []),
     meridianIndexer: opts.meridianDb ? { getDb: () => opts.meridianDb! } as unknown as import('../../repo/meridian-indexer.js').MeridianIndexer : null,
     typecheckRunner: opts.typecheckRunner,
+    declaredCheckRunner: opts.declaredCheckRunner,
     getTaskContract: opts.taskContract ? () => opts.taskContract : undefined,
     inventorySearcher: opts.inventorySearcher,
   }))
@@ -1965,6 +1967,40 @@ Do not declare a streamed response duplicate in the middle of the stream.
       })
       await tool.execute({ ...params, input: { commit: true, message: 'test: clean' } })
       assert.doesNotMatch(captured!.focusHint ?? '', /Typecheck —/)
+    })
+
+    it('non-TS declared check failure escalates to L3 and records failed verification evidence', async () => {
+      const tmp = mkdtempSync(join(tmpdir(), 'deliver-declared-'))
+      try {
+        writeFileSync(join(tmp, '.rivet-config.json'), JSON.stringify({ verify: { typecheck: 'go vet ./...' } }), 'utf-8')
+        let captured: ChangeSet | undefined
+        const { tool, params, ledger } = makeContext({
+          taskId: 't-declared-fail',
+          ownedFiles: ['main.go'],
+          dirtyFiles: ['main.go'],
+          verifications: [{ command: 'go test ./...', status: 'passed' }],
+          commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+          declaredCheckRunner: async () => ({ exitCode: 2, output: 'vet: main.go:3: undefined symbol' }),
+          routeReviewWorkflow: async (change) => {
+            captured = change
+            return { tier: 'L3', verdict: 'verified', evidence: 'shim', rounds: 1 }
+          },
+          reviewDeps: {} as ReviewRouterDeps,
+        })
+        const result = await tool.execute({ ...params, cwd: tmp, input: { commit: true, message: 'fix: go' } })
+        assert.equal(result.isError ?? false, false)
+        assert.ok(captured, 'review workflow should run')
+        assert.equal(captured!.forceLevel, 'L3')
+        assert.match(captured!.focusHint ?? '', /^Declared typecheck —/)
+        // The failure lands in the ledger as real verification evidence, so the
+        // NEXT deliver attempt's gate assesses RED instead of staying GREEN.
+        const events = ledger.getEvents().filter(e => e.type === 'verification')
+        const declared = events.find(e => (e.meta as Record<string, unknown> | undefined)?.declared === true)
+        assert.ok(declared, 'declared check failure should be recorded as verification evidence')
+        assert.equal(declared!.status, 'failed')
+      } finally {
+        rmSync(tmp, { recursive: true, force: true })
+      }
     })
   })
 })

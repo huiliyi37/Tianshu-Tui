@@ -56,6 +56,12 @@ export interface VerificationSnapshotManager {
   /** Decide + lazily build/refresh the snapshot for the given owned files.
    *  Returns a plan when snapshot mode is active, or null for in-place. */
   prepare(ownedFiles: string[]): VerificationSnapshotPlan | null
+  /** C3: force-build a snapshot for a failure-attribution retry, bypassing the
+   *  §6 wants-check (git repo + baseline still required — never fake-green).
+   *  Used when an in-place verification failed and live pollution signals
+   *  (peer sessions / workspace mutations) make "my code vs polluted tree"
+   *  ambiguous. Reuses the session worktree like prepare(). */
+  prepareRetry(ownedFiles: string[]): VerificationSnapshotPlan | null
   /** Most recent policy decision (surfaces the reason even when in-place). */
   lastDecision(): SnapshotDecision | null
   /** Current active snapshotRef, or undefined when not snapshotting. */
@@ -84,14 +90,14 @@ export function createVerificationSnapshotManager(
   let activeRef: string | undefined
   let decision: SnapshotDecision | null = null
 
-  function prepare(ownedFiles: string[]): VerificationSnapshotPlan | null {
+  function prepareWith(ownedFiles: string[], forceSnapshot: boolean): VerificationSnapshotPlan | null {
     decision = decideSnapshotPolicy({
       isGitRepo: init.isGitRepo,
       baselineHead: init.baselineHead,
       sameCwdRunningSessions: init.sameCwdRunningSessions(),
       preExistingDirtyCount: init.preExistingDirtyCount,
       preExistingUntrackedCount: init.preExistingUntrackedCount,
-      forceSnapshot: init.forceSnapshot,
+      forceSnapshot,
     })
 
     if (!decision.snapshot) {
@@ -121,7 +127,8 @@ export function createVerificationSnapshotManager(
   }
 
   return {
-    prepare,
+    prepare: (ownedFiles) => prepareWith(ownedFiles, init.forceSnapshot ?? false),
+    prepareRetry: (ownedFiles) => prepareWith(ownedFiles, true),
     lastDecision: () => decision,
     currentSnapshotRef: () => activeRef,
     destroy(): void {

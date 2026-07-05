@@ -93,6 +93,7 @@ export const DEFAULT_CONFIG: Config = {
     mode: 'code',
     autoReasoning: true,
     defaultDomain: 'auto',
+    verificationSnapshot: 'auto',
     songlineEnabled: false,
     desktopTools: false,
     crossSessionEnabled: true,
@@ -222,4 +223,6 @@ export const DEFAULT_CONFIG: Config = {
     extraVars: {},
   },
   ui: {},
+  // 项目验证命令声明 — 默认空，由项目层 .rivet-config.json 覆盖（/init 生成）
+  verify: {},
 }

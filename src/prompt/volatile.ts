@@ -12,6 +12,7 @@ import { scoreLessons } from '../context/lesson-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 import type { WorktreeReality } from '../agent/worktree-reality.js'
 import type { TaskDepthLayer } from '../context/task-contract.js'
+import { loadDeclaredVerify } from '../config/verify-config.js'
 
 const DEPTH_ADVISORY: Record<Exclude<TaskDepthLayer, 'unit'>, string> = {
   wiring: '<task-depth layer="wiring">此任务跨越模块边界。mock 单测会掩盖接线缺陷。写集成测试时实例化真实依赖（非 mock），RED 必须先证明边界断裂，GREEN 才证明已修复。</task-depth>',
@@ -329,6 +330,24 @@ function readRivetMd(cwd: string): string | undefined {
   rivetMdCache.set(cwd, { value, timestamp: Date.now() })
   trimCache()
   return value
+}
+
+/** A3: render the project's declared verify commands (machine-readable source
+ *  of truth in .rivet-config.json). Rendered separately from .rivet.md so the
+ *  LLM always sees what the gates actually run, even when the md's free text
+ *  is stale. Returns null when nothing is declared (most projects). */
+function renderDeclaredVerify(cwd: string): string | null {
+  let verify: Record<string, string | undefined>
+  try {
+    verify = loadDeclaredVerify(cwd)
+  } catch {
+    return null
+  }
+  const lines = (['test', 'build', 'typecheck', 'lint'] as const)
+    .filter(k => verify[k]?.trim())
+    .map(k => `${k}: ${verify[k]!.trim()}`)
+  if (lines.length === 0) return null
+  return `<verify-commands source=".rivet-config.json">\n${escapeXml(lines.join('\n'))}\n</verify-commands>`
 }
 
 function escapeXml(text: string): string {
@@ -884,6 +903,13 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     const stripped = ctx.projectIndexBlock ? stripFirstMarkdownTable(md) : md
     parts.push(truncateBlock(`<project-instructions>\n${escapeXml(stripped)}\n</project-instructions>`, 8_000, 'project-instructions'))
   }
+
+  // A3: declared verify commands (from .rivet-config.json) rendered as the
+  // authoritative source — protects against hand-edited .rivet.md free text
+  // drifting from what the gates actually run. Session-stable (memoized loader,
+  // invalidated only by /init), so it is safe in the FROZEN prefix.
+  const verifyBlock = renderDeclaredVerify(ctx.cwd)
+  if (verifyBlock) parts.push(verifyBlock)
 
   // Project memory — auto-loaded from .rivet/knowledge/memory.jsonl.
   // Rendered into frozen base so it benefits from prefix cache (turn 2+ cost = 0).

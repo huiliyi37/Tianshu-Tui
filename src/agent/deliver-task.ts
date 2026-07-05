@@ -40,7 +40,7 @@ import { recordAutoReviewRun } from './review-health.js'
 import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverProduced, formatReadButNeverProduced } from './wiring-nudge.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 import { analyzeImpact } from '../repo/meridian-impact.js'
-import { runChangedFilesTypecheckMemo, typecheckGateEnabled } from './typecheck-gate.js'
+import { runChangedFilesTypecheckMemo, runDeclaredCheck, typecheckGateEnabled } from './typecheck-gate.js'
 import { scanFilesForProbes, formatProbeHits, type ProbeHit } from './probe-detector.js'
 import { findApprovedPlanInventory, verifyRegressionInventory, formatInventoryReport, type InventorySearcher } from './regression-inventory.js'
 
@@ -96,6 +96,9 @@ export interface B1Context {
   /** Injectable typecheck runner for the review-gate backstop. Absent → the
    *  real `tsc --noEmit` is used (covers worker/headless). Tests pass a mock. */
   typecheckRunner?: import('./typecheck-gate.js').TypecheckRunner
+  /** Injectable runner for the non-TS declared verify.typecheck/build backstop
+   *  (A2). Absent → the real bash spawn is used. Tests pass a mock. */
+  declaredCheckRunner?: import('./typecheck-gate.js').DeclaredCommandRunner
   /** Injectable probe scanner for the probe-residue gate. Absent → the real
    *  scanFilesForProbes with readFileSync is used. Tests pass a mock. */
   scanProbes?: (files: string[], cwd: string) => import('./probe-detector.js').ProbeHit[]
@@ -749,6 +752,28 @@ For complex specs or cross-module integration, include checklist entries: fact-f
               change.forceLevel = 'L3'
               const note = `Typecheck — ${tc.summary}`
               change.focusHint = change.focusHint ? `${note} | ${change.focusHint}` : note
+            } else {
+              // A2: non-TS projects — run the declared verify.typecheck/build
+              // (from .rivet-config.json) at pass/fail granularity. Only fires
+              // when no changed file is .ts/.tsx (runDeclaredCheck guards this),
+              // so TS projects pay nothing extra.
+              const dc = await runDeclaredCheck(params.cwd, change.files, ctx.declaredCheckRunner)
+              if (dc) {
+                change.forceLevel = 'L3'
+                const note = `Declared ${dc.kind} — ${dc.summary}`
+                change.focusHint = change.focusHint ? `${note} | ${change.focusHint}` : note
+                // Record the failure as real verification evidence so the NEXT
+                // deliver attempt's gate assesses RED (owned verification failed)
+                // instead of only escalating this review — the declared check is
+                // the project's own build/typecheck, a broken one must block
+                // re-delivery until fixed.
+                ctx.taskLedger.record({
+                  type: 'verification',
+                  command: dc.command.slice(0, 200),
+                  status: 'failed',
+                  meta: { scope: 'full', declared: true, kind: dc.kind },
+                })
+              }
             }
           } catch { /* advisory: typecheck gate must never fail delivery */ }
         }

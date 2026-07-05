@@ -28,6 +28,7 @@ const testConfig = {
     mode: 'code',
     autoReasoning: false,
     defaultDomain: 'auto',
+    verificationSnapshot: 'auto',
     songlineEnabled: true,
     desktopTools: false,
     hearthObserveEnabled: false,

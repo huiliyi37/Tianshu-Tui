@@ -153,6 +153,33 @@ describe('volatile context layers', () => {
       rmSync(cwd, { recursive: true, force: true })
     }
   })
+
+  it('renders declared verify commands from .rivet-config.json as <verify-commands>', () => {
+    const cwd = mkdtempSync(join(sandboxTmpDir(), 'volatile-verify-'))
+    try {
+      writeFileSync(
+        join(cwd, '.rivet-config.json'),
+        JSON.stringify({ verify: { test: 'cargo test', build: 'cargo build' } }),
+        'utf-8',
+      )
+      const block = buildStableVolatileBlock({ cwd })
+      assert.match(block, /<verify-commands source="\.rivet-config\.json">/)
+      assert.match(block, /test: cargo test/)
+      assert.match(block, /build: cargo build/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('omits <verify-commands> when nothing is declared', () => {
+    const cwd = mkdtempSync(join(sandboxTmpDir(), 'volatile-no-verify-'))
+    try {
+      const block = buildStableVolatileBlock({ cwd })
+      assert.doesNotMatch(block, /<verify-commands/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('tool-history XML section', () => {

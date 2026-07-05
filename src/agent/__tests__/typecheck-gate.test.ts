@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   runChangedFilesTypecheck,
   runChangedFilesTypecheckMemo,
+  runDeclaredCheck,
   typecheckGateEnabled,
   repoWideEnabled,
   errorSignature,
@@ -11,6 +12,10 @@ import {
 } from '../typecheck-gate.js'
 import type { Diagnostic } from '../../lsp/diagnostics.js'
 import type { LspCheckResult } from '../../lsp/client.js'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { invalidateVerifyConfig } from '../../config/verify-config.js'
 
 const CWD = '/repo'
 
@@ -226,4 +231,71 @@ test('signature: multi-line diagnostic (TS2322 type mismatch) is preserved verba
 test('signature: same diagnostic always produces same signature (determinism)', () => {
   const d = diag('src/a.ts', 1, 'TS1: x')
   assert.equal(errorSignature(CWD, d), errorSignature(CWD, d))
+})
+
+// ── runDeclaredCheck (A2: non-TS declared typecheck/build backstop) ─────────
+
+test('declared check: runs verify.typecheck for non-TS changes and reports failure', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'declared-check-'))
+  try {
+    writeFileSync(join(dir, '.rivet-config.json'), JSON.stringify({ verify: { typecheck: 'cargo check' } }))
+    writeFileSync(join(dir, 'src.rs'), 'fn main() {}')
+    invalidateVerifyConfig()
+
+    let ranCommand: string | undefined
+    const r = await runDeclaredCheck(dir, ['src.rs'], async (_cwd, command) => {
+      ranCommand = command
+      return { exitCode: 1, output: 'error[E0308]: mismatched types\n --> src.rs:1:1' }
+    })
+    assert.equal(ranCommand, 'cargo check')
+    assert.ok(r)
+    assert.equal(r!.kind, 'typecheck')
+    assert.match(r!.summary, /cargo check/)
+    assert.match(r!.summary, /E0308/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    invalidateVerifyConfig()
+    __clearTypecheckMemo()
+  }
+})
+
+test('declared check: passes (null) on exit 0, falls back to verify.build, skips TS files', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'declared-check-'))
+  try {
+    writeFileSync(join(dir, '.rivet-config.json'), JSON.stringify({ verify: { build: 'go build ./...' } }))
+    writeFileSync(join(dir, 'main.go'), 'package main')
+    invalidateVerifyConfig()
+
+    // exit 0 → no escalation
+    assert.equal(await runDeclaredCheck(dir, ['main.go'], async () => ({ exitCode: 0, output: 'ok' })), null)
+    __clearTypecheckMemo()
+
+    // build fallback kind
+    const r = await runDeclaredCheck(dir, ['main.go'], async () => ({ exitCode: 2, output: 'compile error' }))
+    assert.equal(r!.kind, 'build')
+    __clearTypecheckMemo()
+
+    // TS files present → declared path stays out of the way (tsc path owns it)
+    assert.equal(await runDeclaredCheck(dir, ['main.go', 'src/x.ts'], async () => { throw new Error('must not run') }), null)
+
+    // could-not-run (-1) → fail-open
+    __clearTypecheckMemo()
+    assert.equal(await runDeclaredCheck(dir, ['main.go'], async () => ({ exitCode: -1, output: '' })), null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    invalidateVerifyConfig()
+    __clearTypecheckMemo()
+  }
+})
+
+test('declared check: null when nothing is declared', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'declared-check-'))
+  try {
+    writeFileSync(join(dir, 'main.go'), 'package main')
+    invalidateVerifyConfig()
+    assert.equal(await runDeclaredCheck(dir, ['main.go'], async () => { throw new Error('must not run') }), null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    invalidateVerifyConfig()
+  }
 })

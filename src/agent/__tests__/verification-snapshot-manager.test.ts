@@ -126,6 +126,37 @@ describe('VerificationSnapshotManager', () => {
     assert.equal(mgr.prepare(['src/a.ts']), null)
     assert.equal(mgr.lastDecision()?.mode, 'in-place-degraded')
   })
+
+  // C3: failure-attribution retry — prepareRetry forces the snapshot even when
+  // §6 policy says in-place (clean baseline, no peers), so a failed in-place
+  // verification can be rerun in isolation to attribute the failure.
+  it('prepareRetry force-builds a snapshot that prepare() would skip', () => {
+    let snap: FakeSnapshot | null = null
+    const mgr = createVerificationSnapshotManager(baseInit({
+      createSnapshot: (init) => { snap = fakeSnapshotFactory(init.baseCwd); return snap },
+      computeRef: () => 'retry-ref',
+    }))
+    assert.equal(mgr.prepare(['src/a.ts']), null) // clean single session → in-place
+    const retry = mgr.prepareRetry(['src/a.ts'])
+    assert.ok(retry)
+    assert.equal(retry!.snapshotRef, 'retry-ref')
+    assert.equal(snap!.builds, 1)
+    // The retry snapshot is reused by later calls (same session worktree).
+    const again = mgr.prepareRetry(['src/a.ts'])
+    assert.equal(again!.path, retry!.path)
+    assert.equal(snap!.builds, 1)
+    assert.equal(snap!.refreshes, 0)
+  })
+
+  it('prepareRetry still degrades when no baselineHead exists (never fake-green)', () => {
+    const mgr = createVerificationSnapshotManager(baseInit({
+      baselineHead: undefined,
+      createSnapshot: () => { throw new Error('should not build') },
+      computeRef: () => 'r',
+    }))
+    assert.equal(mgr.prepareRetry(['src/a.ts']), null)
+    assert.equal(mgr.lastDecision()?.mode, 'in-place-degraded')
+  })
 })
 
 describe('reapOrphanSnapshots', () => {

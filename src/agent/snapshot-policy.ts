@@ -12,7 +12,8 @@
  *       || preExistingUntrackedCount > 0
  *     )
  *
- * A user `--snapshot` flag forces snapshotting (still requires a git repo with a
+ * Forced snapshotting comes from `RIVET_VSW=1` or config
+ * `agent.verificationSnapshot: "always"` (still requires a git repo with a
  * baseline commit — worktrees only exist in git, and we must not fake-green by
  * pretending to snapshot when we cannot build the tree).
  *
@@ -33,7 +34,7 @@ export interface SnapshotPolicyInput {
   preExistingDirtyCount: number
   /** Pre-existing untracked files at baseline capture. */
   preExistingUntrackedCount: number
-  /** User-forced snapshot (e.g. `--snapshot`). */
+  /** User-forced snapshot (RIVET_VSW=1 or config verificationSnapshot: "always"). */
   forceSnapshot?: boolean
 }
 
@@ -94,7 +95,7 @@ export function decideSnapshotPolicy(input: SnapshotPolicyInput): SnapshotDecisi
 }
 
 function snapshotReason(input: SnapshotPolicyInput): string {
-  if (input.forceSnapshot) return 'User forced snapshot isolation (--snapshot).'
+  if (input.forceSnapshot) return 'User forced snapshot isolation (RIVET_VSW=1 / verificationSnapshot: "always").'
   const parts: string[] = []
   if (input.sameCwdRunningSessions >= 1) {
     parts.push(`${input.sameCwdRunningSessions} concurrent session(s) on this directory`)

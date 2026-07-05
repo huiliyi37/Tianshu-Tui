@@ -29,6 +29,7 @@ import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix, learnFileApproval } from './permissions.js'
+import { isSelfDestructiveKill, selfProcessTree } from './self-preservation.js'
 import { isSandboxActive } from '../tools/sandbox-profile.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
@@ -52,6 +53,7 @@ import { buildCommitNudge } from './commit-nudge.js'
 import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
 import { GIT_CLEAR_RE } from '../tools/destructive-patterns.js'
+import { classifyDeclaredCommand, loadDeclaredVerify } from '../config/verify-config.js'
 import { profileIsWriteCapable } from './profile-registry.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 import { toolTargetFromInput } from './tool-target.js'
@@ -830,8 +832,18 @@ export async function executeToolUse(
     const bashDenied = tu.name === 'bash' && typeof tu.input.command === 'string'
       ? isBashCommandDenied(tu.input.command, bashDenyPrefixes)
       : false
-    if (denied || bashDenied) {
-      const reason = `Tool execution denied: ${tu.name} matches an active deny rule`
+    // Self-preservation: unconditionally block commands that would terminate the
+    // agent's own runtime (the Node sidecar/TUI process). Killing the process the
+    // agent runs in aborts the session and can drop its API auth → 401 cascade.
+    // Always on, independent of config/approval mode — a self-kill is never a
+    // legitimate autonomous action.
+    const selfKill = tu.name === 'bash' && typeof tu.input.command === 'string'
+      ? isSelfDestructiveKill(tu.input.command, selfProcessTree())
+      : false
+    if (denied || bashDenied || selfKill) {
+      const reason = selfKill
+        ? "Tool execution blocked: this command would terminate the agent's own runtime (the Rivet sidecar / Node process it runs in). That aborts the session and drops its API auth. To restart a local dev server, use a targeted command like `npx kill-port <port>` or kill a specific non-agent PID; otherwise ask the user to restart it manually."
+        : `Tool execution denied: ${tu.name} matches an active deny rule`
       callbacks.onToolResult(tu.id, tu.name, reason, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: reason, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
     }
@@ -1030,6 +1042,23 @@ export async function executeToolUse(
         if (plan) params.verificationSnapshot = { path: plan.path, snapshotRef: plan.snapshotRef }
       } catch {
         // degrade to in-place
+      }
+      // C3: when running in-place, arm the failure-attribution retry — but only
+      // when live pollution signals make failures ambiguous: peer workspace
+      // mutations (stash/reset events from B1). Without signals the retry stays
+      // unarmed so a plain broken test doesn't pay for a worktree build.
+      if (!params.verificationSnapshot && deps.sessionRegistry && deps.sessionId) {
+        try {
+          const polluted = deps.sessionRegistry.consumeEvents(deps.sessionId, 0, 10)
+            .some(e => e.eventType === 'workspace_mutation')
+          if (polluted) {
+            const mgr = deps.verificationSnapshotManager
+            params.prepareRetrySnapshot = () => {
+              const retry = mgr.prepareRetry(deps.ownershipLedger?.getOwnedFiles() ?? [])
+              return retry ? { path: retry.path, snapshotRef: retry.snapshotRef } : null
+            }
+          }
+        } catch { /* attribution retry is best-effort */ }
       }
     }
 
@@ -1288,9 +1317,11 @@ export async function executeToolUse(
         // recent workspace_mutation events, append context so the agent knows
         // the file was changed by a peer stash/reset, not random corruption.
         if (harnessResult.isError && typeof harnessResult.content === 'string' &&
-            /\bmodified\b/.test(harnessResult.content) && deps.sessionRegistry && deps.sessionId) {
-          const mutations = deps.sessionRegistry.consumeEvents(deps.sessionId, 0, 10)
-            .filter(e => e.eventType === 'workspace_mutation')
+            /\bmodified\b/.test(harnessResult.content)) {
+          const mutations = deps.sessionRegistry && deps.sessionId
+            ? deps.sessionRegistry.consumeEvents(deps.sessionId, 0, 10)
+                .filter(e => e.eventType === 'workspace_mutation')
+            : []
           if (mutations.length > 0) {
             const detail = mutations.map(e => {
               try {
@@ -1299,6 +1330,11 @@ export async function executeToolUse(
               } catch { return e.detail ?? 'workspace mutation' }
             }).join('; ')
             finalContent += `\n\n[cross-session] Recent workspace mutations: ${detail}. Your edit may have failed because a peer session temporarily cleared the working tree — do NOT re-edit or revert. Wait for stash_pop or verify the current file state.`
+          } else {
+            // No attributable workspace mutation — non-git external change
+            // (IDE autosave, file sync tool, manual edit in another terminal).
+            // Give concrete triage guidance instead of the cryptic default.
+            finalContent += `\n\n[external-change] The file changed on disk but no known workspace operation (stash/reset by a peer session) explains it. Likely causes: IDE autosave, a file-sync tool, or a manual edit in another terminal. Re-read the file to see its current state before editing — do NOT assume your earlier changes were lost or blindly re-apply them.`
           }
         }
         // Commit nudge: warn when uncommitted files accumulate
@@ -1346,7 +1382,7 @@ export async function executeToolUse(
               priority: 1,
             })
           }
-       } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
+       } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd) || classifyDeclaredCommand(cmd, loadDeclaredVerify(deps.cwd))) {
           const testStatus = harnessResult.isError ? 'failed' : 'passed'
           // Parse test counts from bash output so deliver_task shows real numbers
           // instead of always "0 pass 0 fail". Supports node:test format
@@ -1358,7 +1394,15 @@ export async function executeToolUse(
           const passed = passedMatch ? Number.parseInt(passedMatch[1] ?? passedMatch[2] ?? passedMatch[3] ?? '0', 10) : 0
           const failed = failedMatch ? Number.parseInt(failedMatch[1] ?? failedMatch[2] ?? failedMatch[3] ?? '0', 10) : 0
           const skipped = skippedMatch ? Number.parseInt(skippedMatch[1] ?? '0', 10) : 0
-          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: testStatus, meta: { scope: 'full', passed, failed, skipped } })
+          // A2: bash commands matching a declared verify command get structured
+          // semantics (kind + declared flag) instead of regex-only guesses.
+          const declaredKind = classifyDeclaredCommand(cmd, loadDeclaredVerify(deps.cwd))
+          deps.taskLedger.record({
+            type: 'verification',
+            command: cmd.slice(0, 200),
+            status: testStatus,
+            meta: { scope: 'full', passed, failed, skipped, ...(declaredKind ? { declared: true, kind: declaredKind } : {}) },
+          })
           // bash 跑测试/typecheck/lint 也归零 TDD 门禁——否则 agent 用 bash npm test
           // 而非 run_tests 工具时门禁计数器永远不重置，第 4 次编辑必误报拦截。
           deps.evidence.trackVerification({
