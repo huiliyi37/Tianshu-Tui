@@ -439,7 +439,13 @@ function assembleAgentLoop(
 
   // approvalMode 在 createAgentRuntime 内部未接收；构造后立即覆盖
   // （setApprovalMode 直接 mutate config.approvalMode，与构造时设等价）。
-  if (approvalMode) agent.setApprovalMode(approvalMode)
+  if (approvalMode) {
+    agent.setApprovalMode(approvalMode)
+    // 自治级别（dangerously-skip-permissions）联动无限轮次：真正全自动。
+    if (approvalMode === 'dangerously-skip-permissions') {
+      agent.config.maxTurns = 0
+    }
+  }
 
   return agent
 }
@@ -517,7 +523,11 @@ function buildManagedAgent(
   return {
     run: (prompt, callbacks, images) => agent.run(prompt, callbacks, images),
     abort: () => agent.abort(),
-    setApprovalMode: (mode) => agent.setApprovalMode(mode),
+    setApprovalMode: (mode) => {
+      agent.setApprovalMode(mode)
+      // 自治联动无限轮次，非自治恢复默认 200
+      agent.config.maxTurns = mode === 'dangerously-skip-permissions' ? 0 : 200
+    },
     enterPlanMode: () => agent.enterPlanMode(),
     exitPlanMode: () => agent.exitPlanMode(),
     setActivePlan: (plan) => agent.setActivePlan(plan),

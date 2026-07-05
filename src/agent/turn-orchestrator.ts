@@ -357,7 +357,13 @@ export class TurnOrchestrator {
     let finalTurnCompleted = false
 
     try {
-      for (let turn = 0; turn < this.deps.getMaxTurns(); turn++) {
+      // maxTurns <= 0 means "no hard cap" (true YOLO / autonomous mode). The for
+    // loop uses Number.MAX_SAFE_INTEGER as a practically-infinite upper bound so
+    // wedged-loop / convergence / context-pressure guards still terminate a
+    // runaway run — only the artificial turn-count ceiling is removed.
+    const maxTurns = this.deps.getMaxTurns()
+    const effectiveLimit = maxTurns > 0 ? maxTurns : Number.MAX_SAFE_INTEGER
+    for (let turn = 0; turn < effectiveLimit; turn++) {
         this.deps.state.thetaRequestsThisTurn = 0
         this.deps.state.runLoopTurn = turn
         // Sync plan-mode state into config so tool-pipeline gate reads it

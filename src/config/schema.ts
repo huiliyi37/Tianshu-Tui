@@ -202,7 +202,8 @@ export const agentSchema = z.object({
   // 长任务远端兜底。runaway 由 wedged-loop/convergence/watchdog/context-pressure
   // 先行拦截，此值对标 Claude Code/Codex 的"无硬上限"取宽松 4 倍余量（50→200，
   // 会话 5158719d 证明 50 轮迫使用户在正常长任务中反复手动「继续」）。
-  maxTurns: z.number().int().positive().default(200),
+  // 0 = 无限轮次（真正全自动 YOLO）；wedged-loop 等安全熔断仍然生效。
+  maxTurns: z.number().int().nonnegative().default(200),
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
   autoReasoning: z.boolean().default(true),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */

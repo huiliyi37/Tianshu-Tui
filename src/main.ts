@@ -811,13 +811,18 @@ async function main() {
     const applyPermission = (mode: string) => {
       ctx!.agent.setApprovalMode(mode as import('./agent/loop-types.js').ApprovalMode)
       tuiApp.setApprovalMode(mode)
+      // YOLO 联动无限轮次：真正全自动，不被 maxTurns 截断。
+      // 其他模式恢复默认 200 轮预算。
+      const yoloMaxTurns = mode === 'dangerously-skip-permissions' ? 0 : 200
+      ctx!.agent.config.maxTurns = yoloMaxTurns
       try {
         persistApprovalDefault(mode)
       } catch (err) {
         tuiApp.commitStatic(`⚠ 权限模式已切换但持久化失败: ${(err as Error).message}`)
       }
       const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[mode] ?? mode
-      tuiApp.commitStatic(`权限模式 → ${label}（已设为默认，重启后仍生效）`)
+      const turnNote = mode === 'dangerously-skip-permissions' ? '（无限轮次）' : ''
+      tuiApp.commitStatic(`权限模式 → ${label}${turnNote}（已设为默认，重启后仍生效）`)
     }
 
     if (tuiApp.choicePanelKind === 'permission') {
