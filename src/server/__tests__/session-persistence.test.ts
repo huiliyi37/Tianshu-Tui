@@ -51,6 +51,9 @@ test('a corrupt trailing line is dropped, not fatal', () => {
     p.saveRecord(rec('s1'))
     p.appendEvent('s1', ev(1))
     p.appendEvent('s1', ev(2))
+    // Events are write-buffered (100ms debounce) — flush so they hit disk
+    // BEFORE the corruption is injected, mirroring a crash after a clean batch.
+    p.flushSync()
     // Simulate a crash mid-write: a half-written final line.
     appendFileSync(join(dir, 's1', 'events.jsonl'), '{"seq":3,"ts":1,"type":"tex')
     const all = p.loadAll()
@@ -111,6 +114,9 @@ test('a corrupt index.json falls back to event reconstruction', () => {
   try {
     const p = new FileSessionPersistence(dir)
     p.appendEvent('s1', ev(5))
+    // Flush the write buffer so the session dir exists on disk before the
+    // corrupt index.json is planted.
+    p.flushSync()
     writeFileSync(join(dir, 's1', 'index.json'), '{ not json', 'utf8')
     const all = p.loadAll()
     assert.equal(all.length, 1)

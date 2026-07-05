@@ -191,6 +191,59 @@ test('lazy rehydrate caps resident logs (LRU) and reloads evicted ones', () => {
   assert.equal(replay.events.length, 1)
 })
 
+test('lazy load applies the memory ring cap: only the tail stays resident', () => {
+  const total = 250
+  const cap = 100
+  const events: SessionEvent[] = []
+  // An artifact event in the head that the cap will truncate — its id must
+  // still land in knownArtifacts (dedup built from the full log before trim).
+  events.push(ev(1, 'artifact', { id: 'old-art' }))
+  for (let i = 2; i <= total; i++) events.push(ev(i, 'text_delta', { text: `e${i}` }))
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'long', status: 'completed', createdAt: 1, updatedAt: 9,
+      cwd: '/work', lastSeq: total, pendingApprovals: 0,
+    },
+    events,
+  }]
+  const mem = new LazyMemoryPersistence(seed)
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+    maxEvents: cap,
+  })
+
+  const replay = mgr.getEvents('long', 0)!
+  assert.equal(replay.events.length, cap, 'since=0 replay returns at most maxEvents')
+  assert.equal(replay.events[0]!.seq, total - cap + 1, 'resident window is the tail')
+  assert.equal(replay.events[replay.events.length - 1]!.seq, total)
+  assert.equal(replay.lastSeq, total, 'lastSeq reflects the full on-disk log, not the trimmed window')
+})
+
+test('eager fallback rehydrate applies the same memory ring cap', () => {
+  const total = 250
+  const cap = 100
+  const events: SessionEvent[] = []
+  for (let i = 1; i <= total; i++) events.push(ev(i, 'text_delta', { text: `e${i}` }))
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'long', status: 'completed', createdAt: 1, updatedAt: 9,
+      cwd: '/work', lastSeq: total, pendingApprovals: 0,
+    },
+    events,
+  }]
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: new MemoryPersistence(seed),
+    maxEvents: cap,
+  })
+
+  const replay = mgr.getEvents('long', 0)!
+  assert.equal(replay.events.length, cap)
+  assert.equal(replay.events[0]!.seq, total - cap + 1)
+  assert.equal(replay.lastSeq, total)
+})
+
 test('lazy rehydrate flags an interrupted run aborted without reading the log', () => {
   const seed: PersistedSession[] = [{
     record: {
