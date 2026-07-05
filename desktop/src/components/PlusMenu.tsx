@@ -202,7 +202,7 @@ export function PlusMenu(props: {
           load={async (id) => (await listDomains(id)).map<Row>((d) => {
             const glyph = d.uiPersona?.glyph ? `${d.uiPersona.glyph} ` : ''
             // Auto shows its keyword fallback so it never reads as "no domain".
-            const label = d.key === 'auto' ? `${glyph}${d.name} · 天枢` : `${glyph}${d.name}`
+            const label = d.key === 'auto' ? `${glyph}${d.name} · tianshu` : `${glyph}${d.name}`
             return { key: d.key, label, desc: d.meta || d.motto, active: d.current }
           })}
           apply={async (id, row) => { await setDomain(id, row.key) }}
