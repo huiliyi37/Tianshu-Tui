@@ -35,6 +35,8 @@ export type ConvoKind =
   | 'watchdog_recovery'
   // C3 自治档检查点 — run 暂停等待用户确认。
   | 'autonomy_checkpoint'
+  // Change landing — commit / merge_back / pr_created from the Changes tab.
+  | 'landing'
 
 export interface ConvoBlock {
   key: string
@@ -95,6 +97,13 @@ export interface ConvoBlock {
   checkpointDigest?: string
   /** C3 — true=巡航档暂停等确认；false=完全自治档非阻塞播报（run 继续）。 */
   checkpointPaused?: boolean
+  /** Change landing card payload (commit / merge_back / pr_created). */
+  landing?: {
+    action: 'commit' | 'merge_back' | 'pr_created'
+    sha?: string
+    url?: string
+    branch?: string
+  }
 }
 
 export interface EventViewState {
@@ -624,6 +633,25 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       }]
       next.blocksRev = next.blocksRev + 1
       return next
+    case 'landing': {
+      const action = ev.data.action === 'commit' || ev.data.action === 'merge_back' || ev.data.action === 'pr_created'
+        ? ev.data.action
+        : null
+      if (!action) return next
+      next.blocks = [...next.blocks, {
+        key: `ld-${ev.seq}`,
+        kind: 'landing',
+        text: '',
+        landing: {
+          action,
+          sha: typeof ev.data.sha === 'string' ? ev.data.sha : undefined,
+          url: typeof ev.data.url === 'string' ? ev.data.url : undefined,
+          branch: typeof ev.data.branch === 'string' ? ev.data.branch : undefined,
+        },
+      }]
+      next.blocksRev = next.blocksRev + 1
+      return next
+    }
     case 'model_switched':
     case 'domain_changed':
     case 'skills_changed':

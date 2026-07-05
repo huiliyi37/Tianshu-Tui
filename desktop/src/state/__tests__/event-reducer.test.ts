@@ -358,6 +358,52 @@ test('T2: todo_state drops malformed items', () => {
   assert.equal(s.todos[0]!.id, 'a')
 })
 
+// ── Landing: commit / merge_back / pr_created ───────────────────────
+
+test('landing commit produces a landing block with sha', () => {
+  seq = 0
+  const s = fold([ev('landing', { action: 'commit', sha: 'abc1234def' })])
+  assert.equal(s.blocks.length, 1)
+  const b = s.blocks[0]!
+  assert.equal(b.kind, 'landing')
+  assert.equal(b.landing?.action, 'commit')
+  assert.equal(b.landing?.sha, 'abc1234def')
+})
+
+test('landing merge_back carries sha and branch', () => {
+  seq = 0
+  const s = fold([ev('landing', { action: 'merge_back', sha: 'ff00aa11', branch: 'rivet/desk-1' })])
+  const b = s.blocks[0]!
+  assert.equal(b.kind, 'landing')
+  assert.equal(b.landing?.action, 'merge_back')
+  assert.equal(b.landing?.sha, 'ff00aa11')
+  assert.equal(b.landing?.branch, 'rivet/desk-1')
+})
+
+test('landing pr_created carries url and branch', () => {
+  seq = 0
+  const s = fold([ev('landing', { action: 'pr_created', url: 'https://github.com/o/r/pull/7', branch: 'rivet/desk-2' })])
+  const b = s.blocks[0]!
+  assert.equal(b.kind, 'landing')
+  assert.equal(b.landing?.action, 'pr_created')
+  assert.equal(b.landing?.url, 'https://github.com/o/r/pull/7')
+  assert.equal(b.landing?.branch, 'rivet/desk-2')
+})
+
+test('landing replay with same seq is idempotent; unknown action is dropped', () => {
+  seq = 0
+  const first = ev('landing', { action: 'commit', sha: 'abc1234' })
+  let s = fold([first])
+  const rev = s.blocksRev
+  // Replay the exact same seq — must not duplicate the block.
+  s = eventReducer(s, { type: 'event', event: first })
+  assert.equal(s.blocks.length, 1)
+  assert.equal(s.blocksRev, rev)
+  // Unknown action never produces a block.
+  const s2 = fold([ev('landing', { action: 'rebased', sha: 'zzz' })])
+  assert.equal(s2.blocks.length, 0)
+})
+
 // ── T3: steer_queued ────────────────────────────────────────────────
 
 test('T3: steer_queued produces a steer block', () => {

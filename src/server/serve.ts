@@ -55,6 +55,10 @@ import { loadProjectSkills } from '../skills/skill-loader.js'
 import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
 import { ProviderHealthTracker } from '../agent/provider-health.js'
+import { MeridianIndexer } from '../repo/meridian-indexer.js'
+import { createMultiLspManager } from '../lsp/multi-manager.js'
+import type { LspManager } from '../lsp/manager.js'
+import { createGotoDefinitionTool, createFindReferencesTool } from '../lsp/tools.js'
 import type { Config, ProviderConfig, ModelConfig } from '../config/schema.js'
 import { runCouncil, runCouncilDebate, type CouncilInput } from '../agent/council/council-orchestrator.js'
 import type { CouncilSeat } from '../agent/council/council-routing.js'
@@ -154,7 +158,14 @@ export interface BuiltAgent {
  */
 export interface SharedRuntime {
   providerHealth: ProviderHealthTracker
+  // per-cwd 资源统一用 Map<string, X> 模式（镜像 domainStores），防模式漂移。
   domainStores: Map<string, DomainKnowledgeStore>
+  /** per-cwd MeridianIndexer——SQLite 单写者，同 cwd 多 session 必须共享单实例。 */
+  meridianIndexers: Map<string, MeridianIndexer>
+  /** per-cwd LSP 管理器——语言服务器子进程池，重复 spawn 浪费且互踩。
+   *  entry.ready 是 initialize() 的完成 Promise（true=至少一个 server 可用）；
+   *  每次 assembleAgentLoop 都对它订阅 .then 以捕获当次 agent（switchModel 安全）。 */
+  lspManagers: Map<string, { manager: LspManager; ready: Promise<boolean> }>
   /** late-bound: 在 sessions = new RuntimeSessionManager(...) 之后由 runServe
    *  回写。值为 null 时退化为 0（sessions 尚未初始化的窗口期）。 */
   sameCwdRunningCount: ((cwd: string, excludeSessionId?: string) => number) | null
@@ -171,6 +182,70 @@ function getOrCreateDomainStore(shared: SharedRuntime, cwd: string): DomainKnowl
   const store = new DomainKnowledgeStore(join(cwd, '.rivet', 'knowledge'))
   shared.domainStores.set(cwd, store)
   return store
+}
+
+/** 按 cwd 取/建 MeridianIndexer（镜像 getOrCreateDomainStore）。SQLite 单写者，
+ *  同 cwd 多 session 共享同一实例；runServe close() 统一释放。exported for tests. */
+export function getOrCreateMeridianIndexer(shared: SharedRuntime, cwd: string): MeridianIndexer {
+  const existing = shared.meridianIndexers.get(cwd)
+  if (existing) return existing
+  const indexer = new MeridianIndexer(cwd)
+  shared.meridianIndexers.set(cwd, indexer)
+  return indexer
+}
+
+/** 按 cwd 取/建 LSP manager entry。首个触达某 cwd 的会话触发 initialize()
+ *  （异步，不阻塞会话创建）；后续会话复用同一 entry。ready resolve 为
+ *  isReady()——false 表示该 cwd 没有可用的语言服务器（工具不注册）。 */
+function getOrCreateLspEntry(
+  shared: SharedRuntime,
+  cwd: string,
+): { manager: LspManager; ready: Promise<boolean> } {
+  const existing = shared.lspManagers.get(cwd)
+  if (existing) return existing
+  const manager = createMultiLspManager(cwd)
+  const ready = manager
+    .initialize()
+    .then(() => manager.isReady())
+    .catch(() => false)
+  const entry = { manager, ready }
+  shared.lspManagers.set(cwd, entry)
+  return entry
+}
+
+/** Wave G: LSP late-init 订阅（照 TUI bootstrap.ts initializeLsp 的 .then 语义）。
+ *  设计约束（switchModel 安全性）：每次 assembleAgentLoop 调用时挂载——捕获
+ *  当次的新 agent。Promise 已 resolve 时晚订阅立即触发，所以 switchModel
+ *  重建的 agent 照样收到 updateTools()；重复 register 无害（ToolRegistry.register
+ *  是 Map.set 幂等覆盖）。老 agent 的旧回调对废弃对象空刷一次，无害。
+ *  exported for tests（注入 mock entry，不真实 spawn 语言服务器）。 */
+export function attachLspTools(
+  entry: { manager: LspManager; ready: Promise<boolean> },
+  toolRegistry: Pick<ReturnType<typeof createDefaultToolRegistry>, 'register'>,
+  refs: Pick<RuntimeRefs, 'lspManager'>,
+  updateTools: () => void,
+): Promise<void> {
+  return entry.ready.then((ok) => {
+    if (!ok) return
+    toolRegistry.register(createGotoDefinitionTool(entry.manager))
+    toolRegistry.register(createFindReferencesTool(entry.manager))
+    refs.lspManager = entry.manager
+    updateTools()
+  })
+}
+
+/** Wave G: 释放 per-cwd 共享资源（runServe close()）。每个调用 try-catch
+ *  包裹（防御习惯；MeridianDb.close 本身幂等，LspManager.dispose 内部已
+ *  best-effort）。exported for tests. */
+export function disposeSharedCwdResources(shared: SharedRuntime): void {
+  for (const indexer of shared.meridianIndexers.values()) {
+    try { indexer.close() } catch { /* best-effort */ }
+  }
+  shared.meridianIndexers.clear()
+  for (const entry of shared.lspManagers.values()) {
+    try { entry.manager.dispose() } catch { /* best-effort */ }
+  }
+  shared.lspManagers.clear()
 }
 
 /**
@@ -341,8 +416,14 @@ function buildSessionStores(
     ownershipLedger: null,
     verificationSnapshotManager: null,
     deliveryGate: null,
-    meridianIndexer: null,
-    mcpManager: null,
+    // Wave G: per-cwd 共享 Meridian——repo_graph/related_tests 惰性读 refs，
+    // 但在 createInteractiveToolRegistry 之前设值（代码清晰）。legacy /prompt
+    // 路径（无 shared）保持 null。
+    meridianIndexer: shared ? getOrCreateMeridianIndexer(shared, cwd) : null,
+    // 对称性回写：sidecar 无功能性消费者（服务器级 MCP 走 SharedRuntime），
+    // 但避免 refs 硬编码 null 造成读到假状态。
+    mcpManager: shared?.mcpManager ?? null,
+    // Wave G: LSP 是异步 init——assembleAgentLoop 在 entry.ready 后回写。
     lspManager: null,
     banditState: null,
     promptEngine: null,
@@ -451,6 +532,17 @@ function assembleAgentLoop(
     if (approvalMode === 'dangerously-skip-permissions') {
       agent.config.maxTurns = 0
     }
+  }
+
+  // Wave G: LSP late-init——per-assemble 订阅（见 attachLspTools 的设计约束注释）。
+  // 不阻塞会话创建（LSP spawn 可能秒级）。
+  if (shared) {
+    void attachLspTools(
+      getOrCreateLspEntry(shared, cwd),
+      stores.toolRegistry,
+      stores.refs,
+      () => agent.updateTools(),
+    )
   }
 
   return agent
@@ -910,6 +1002,8 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   const sharedRuntime: SharedRuntime = {
     providerHealth: new ProviderHealthTracker(),
     domainStores: new Map(),
+    meridianIndexers: new Map(),
+    lspManagers: new Map(),
     sameCwdRunningCount: null,
     mcpManager: null,
     sessions: null,
@@ -1108,6 +1202,8 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
       // Kill MCP child processes synchronously — async shutdown() may not
       // complete before the process exits, leaving orphaned subprocesses.
       sharedRuntime.mcpManager?.killChildrenSync()
+      // Wave G: 释放 per-cwd 共享 Meridian/LSP 资源。
+      disposeSharedCwdResources(sharedRuntime)
       server.close()
     },
   }
