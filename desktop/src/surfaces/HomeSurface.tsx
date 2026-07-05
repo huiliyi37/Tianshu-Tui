@@ -170,7 +170,7 @@ export function HomeSurface() {
           <p className="bento-card-subtitle">点击命令快速复制代码</p>
           <div className="bento-cmd-list">
             {[
-              { cmd: '/autonomous', label: '启用无打扰自主执行模式' },
+              { cmd: '/yes', label: '一键全自动 YOLO（无限轮次，无打扰）' },
               { cmd: '/team', label: '委派多代理组队并行拆解任务' },
               { cmd: '/review', label: '对当前的变更或计划执行审查' },
               { cmd: '/python status', label: '核对依赖环境与 Git 仓库状态' }
