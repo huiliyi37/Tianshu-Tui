@@ -288,7 +288,9 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         `External files (${report.externalFileCount}):`,
         ...renderFileList(externalSplit.files, externalSplit.noiseCount),
         '',
-        `Verifications: ${report.verificationCount}`,
+        report.verificationCount > 0
+          ? `Verifications: ${report.verificationCount}`
+          : 'Verifications: none (no tests were run for this task)',
       ]
 
       // 层 1a: echo latest verification totals so agents copy real numbers
@@ -296,6 +298,8 @@ For complex specs or cross-module integration, include checklist entries: fact-f
       if (report.latestVerificationTotals) {
         const v = report.latestVerificationTotals
         lines.push(`  Latest: ${v.passed} pass ${v.failed} fail ${v.skipped} skip — ${v.command}`)
+      } else if (report.verificationCount === 0) {
+        lines.push('  (Typecheck passed, but no test suite was executed. Run tests before claiming "verified".)')
       }
 
       const hasVerificationDiagnostics = report.currentBlockingFailure
