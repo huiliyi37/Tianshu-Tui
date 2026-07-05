@@ -161,7 +161,7 @@ export function buildWritingPlanPrompt(options: WritingPlanPromptOptions): strin
 \`\`\`markdown
 # [功能名称] 实现计划
 
-> **面向 AI 代理：** 使用 subagent-driven-development（推荐）或 executing-plans 逐任务实现。
+> **面向 AI 代理：** 使用 executing-plans 逐任务实现，或用 plan_task + team_orchestrate 编排多任务。
 
 **目标：** [一句话描述]
 
