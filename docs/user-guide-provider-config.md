@@ -271,6 +271,8 @@ rivet config setup deepseek --key-env DEEPSEEK_API_KEY --default
 - `deepseek-v4-pro`（默认）：完整 thinking，`reasoningEffort: max`
 - `deepseek-v4-flash`：快速响应，`reasoningEffort: high`
 
+> **配置参数**：上下文 1000000（1M tokens），最大输出 384000（384K tokens）。请照[官方文档](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)的真实值填写，填小了会导致推理被截断、agent 频繁停止。
+
 ### OpenCode Go（开源模型订阅服务）
 
 **推荐场景**：一站式接入多个开源编程模型，无需分别申请各厂商 API Key。

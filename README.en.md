@@ -121,7 +121,7 @@ Or edit `~/.rivet/config.json` directly (only overrides needed, defaults are dee
       "deepseek": {
         "apiKeyEnv": "DEEPSEEK_API_KEY",
         "models": [
-          { "id": "deepseek-v4-pro", "contextWindow": 1000000, "maxTokens": 64000 }
+          { "id": "deepseek-v4-pro", "contextWindow": 1000000, "maxTokens": 384000 }
         ]
       }
     }

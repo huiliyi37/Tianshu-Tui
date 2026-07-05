@@ -263,8 +263,8 @@ function CustomForm(props: {
   const [apiKey, setApiKey] = useState('')
   const [modelId, setModelId] = useState('')
   const [alias, setAlias] = useState('')
-  const [contextWindow, setContextWindow] = useState('128000')
-  const [maxTokens, setMaxTokens] = useState('64000')
+  const [contextWindow, setContextWindow] = useState('1000000')
+  const [maxTokens, setMaxTokens] = useState('384000')
   const [makeDefault, setMakeDefault] = useState(true)
   const [err, setErr] = useState<string | null>(null)
 
@@ -326,11 +326,11 @@ function CustomForm(props: {
         </div>
         <div className="grid gap-1.5">
           <label className="text-xs text-muted-foreground">最大输出 Tokens</label>
-          <Input type="number" value={maxTokens} onChange={(e) => { setMaxTokens(e.target.value); setErr(null) }} placeholder="64000" disabled={busy} />
+          <Input type="number" value={maxTokens} onChange={(e) => { setMaxTokens(e.target.value); setErr(null) }} placeholder="384000" disabled={busy} />
         </div>
       </div>
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        请照该服务商<strong className="text-text">官方 API 文档</strong>的真实值填写：<strong className="text-text">上下文长度</strong>决定天枢的自动压缩点（填小了会过早压缩、丢上下文；填大了会撞 API 上限）；<strong className="text-text">最大输出</strong>是单次回复上限，不能超过上下文长度。
+        请照该服务商<strong className="text-text">官方 API 文档</strong>的真实值填写：<strong className="text-text">上下文长度</strong>决定天枢的自动压缩点（填小了会过早压缩、丢上下文；填大了会撞 API 上限）；<strong className="text-text">最大输出</strong>是单次回复上限，不能超过上下文长度。<strong className="text-text">DeepSeek V4 参考值</strong>：上下文 1000000、最大输出 384000。
       </p>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} disabled={busy} />
