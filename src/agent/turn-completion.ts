@@ -27,8 +27,17 @@ export interface TurnCompletionDeps {
   runBeforeComplete?: () => Promise<void>
   getEffortShadow?: () => EffortShadowRecord | null
   clearEffortShadow?: () => void
-  completeEffortShadow?: (pendingRewardId: string, input: RewardInput) => void
+  completeEffortShadow?: (
+    pendingRewardId: string,
+    input: RewardInput,
+  ) => { reward: number; recommendedArm: string; ruleBaseline: string } | null | void
   getDoomLoopLevel?: () => 'none' | 'warn' | 'blocked'
+  /**
+   * effort_bandit 晋升链的样本证据落盘（`effort_shadow:*` 行）。
+   * evaluateGatedInfluenceHistory 用它统计 totalShadowSamples——不落盘则
+   * auto 晋升永远停在 samples 0/30。Append-only，失败静默。
+   */
+  saveEffortShadowRow?: (kind: string, json: string) => void
 }
 
 export interface CompleteTurnInput {
@@ -86,13 +95,25 @@ export class TurnCompletionController {
         ? 1 - Math.min(outputTokens / expectedTokens, 2)
         : 0
 
-      this.deps.completeEffortShadow?.(shadow.pendingRewardId, {
+      const outcome = this.deps.completeEffortShadow?.(shadow.pendingRewardId, {
         toolSuccessRate,
         repairRate,
         doomDetected: doomDetected ?? false,
         tokenEfficiency,
         userCorrected: false,
       })
+      if (outcome && this.deps.saveEffortShadowRow) {
+        this.deps.saveEffortShadowRow(
+          `effort_shadow:${shadow.pendingRewardId}`,
+          JSON.stringify({
+            schemaVersion: 1,
+            recommendedArm: outcome.recommendedArm,
+            ruleBaseline: outcome.ruleBaseline,
+            reward: outcome.reward,
+            timestamp: Date.now(),
+          }),
+        )
+      }
       this.deps.clearEffortShadow?.()
     } catch {
       // Effort reward must never disrupt turn completion

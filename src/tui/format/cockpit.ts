@@ -84,6 +84,13 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
     if (m.reasoningEffort) {
       body.push(`    reasoning: ${m.reasoningEffort}  prewarm: ${Math.round(m.prewarmHitRate * 100)}%`)
     }
+    if (m.speculation) {
+      const active = Object.entries(m.speculation).filter(([, s]) => s.enqueued > 0 || s.hits > 0)
+      if (active.length > 0) {
+        const parts = active.map(([source, s]) => `${source}:${s.hits}/${s.enqueued}`)
+        body.push(`    投机预读 (hits/enqueued): ${parts.join('  ')}`)
+      }
+    }
     body.push(`    ✦ 星域: ${color(m.starDomain, theme.secondary)}`)
   }
 

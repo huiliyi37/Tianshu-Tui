@@ -169,7 +169,14 @@ export interface VolatileContext {
   rivetMd?: string
   gitStatus?: string
   workingSet?: string[]
-  activeDomain?: { name: string; volatileBlock: string; motto: string } | null
+  activeDomain?: {
+    name: string
+    volatileBlock: string
+    motto: string
+    /** Top-K 域经验摘要（主控会话）。会话常量：bindSessionDomain 时构建一次，
+     *  随 <star-domain> 一起进 FROZEN 前缀 — 不做 per-turn 刷新。 */
+    knowledgeBlock?: string
+  } | null
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
   playbookLessons?: PlaybookBullet[]
@@ -863,7 +870,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   // input), rendered unescaped to match the established <star-domain name="..."> shape.
   if (ctx.activeDomain) {
     const d = ctx.activeDomain
-    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
+    // knowledgeBlock: session-constant top-K domain lessons (bound once with the
+    // domain) — lesson text is agent-written store content, so it IS escaped.
+    const knowledge = d.knowledgeBlock ? `\n<domain-knowledge>\n${escapeXml(d.knowledgeBlock)}\n</domain-knowledge>` : ''
+    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}${knowledge}</star-domain>`)
   }
 
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)

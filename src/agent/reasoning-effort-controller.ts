@@ -22,6 +22,17 @@ export interface ReasoningEffortDeps {
   getMaxTurns: () => number | undefined
   getFilesModifiedCount: () => number
   setCurrentEffortShadow: (record: EffortShadowRecord) => void
+  /**
+   * Gated-influence audit sink（effort_bandit 晋升链证据）。每次 effort 决策点
+   * 写一条 audit（shadow 模式也写——gateOpen/rewardMargin 证据是 auto 晋升的
+   * 输入，没有它晋升闸永远打不开）。Append-only，失败静默。
+   */
+  persistAudit?: (input: {
+    gateOpen: boolean
+    applied: boolean
+    reason: string
+    evidenceWindow: Record<string, number | boolean | string>
+  }) => void
 }
 
 /**
@@ -40,6 +51,39 @@ export class ReasoningEffortController {
     const banditAdjusted = this.applyDelta(effective) as ReasoningEffort
     this.deps.setConfigReasoningEffort(banditAdjusted)
     this.deps.setClientReasoningEffort(banditAdjusted)
+    this.recordAudit(effective, banditAdjusted)
+  }
+
+  /**
+   * 每个 effort 决策点写一条 gated_influence_audit（shadow 模式也写）。
+   * 这是 effort_bandit auto 晋升链此前缺失的一环：resolveBanditPromotion 读
+   * audit 行里的 gateOpen/rewardMargin，没有写入 → auto 永不达标。
+   */
+  private recordAudit(baseEffort: string, finalEffort: string): void {
+    if (!this.deps.persistAudit) return
+    try {
+      const enabled = this.deps.isEffortBanditEnabled()
+      const evidence = this.deps.p3.effortGateEvidence()
+      const applied = enabled && evidence.gateOpen && finalEffort !== baseEffort
+      const reason = !enabled
+        ? 'shadow: bandit not enabled'
+        : !evidence.gateOpen
+          ? 'gate closed: insufficient reward evidence'
+          : applied ? 'bandit delta applied' : 'gate open but delta was no-op'
+      this.deps.persistAudit({
+        gateOpen: evidence.gateOpen,
+        applied,
+        reason,
+        evidenceWindow: {
+          totalPulls: evidence.totalPulls,
+          ...(evidence.rewardMargin !== null ? { rewardMargin: evidence.rewardMargin } : {}),
+          baseEffort,
+          finalEffort,
+        },
+      })
+    } catch {
+      // Audit is append-only evidence — must never affect the effort decision.
+    }
   }
 
   /**

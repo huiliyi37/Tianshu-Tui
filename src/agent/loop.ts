@@ -44,6 +44,7 @@ import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
+import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
 import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
 import { buildDepartureMilestone } from '../constellation/milestone.js'
 import { appendMilestone } from '../constellation/store.js'
@@ -817,7 +818,22 @@ export class AgentLoop {
   bindSessionDomain(taskDescription: string): void {
     if (this.sessionDomain !== undefined) return
     this.sessionDomain = isStarSoulEnabled() ? buildActiveDomain(taskDescription) : null
-    this.config.promptEngine.setActiveDomain(this.sessionDomain)
+    this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(this.sessionDomain))
+  }
+
+  /**
+   * 主控会话的域经验摘要：随域绑定挂 top-3 lessons（worker 侧同源
+   * buildDomainKnowledgeBlock）。与域同为会话常量、同一时机构建 → 一起进
+   * FROZEN 前缀，不引入 per-turn 变化。
+   */
+  private withDomainKnowledge(domain: ActiveStarDomain | null): (ActiveStarDomain & { knowledgeBlock?: string }) | null {
+    if (!domain || !this.config.domainKnowledgeStore) return domain
+    try {
+      const block = buildDomainKnowledgeBlock(this.config.domainKnowledgeStore, domain.id, { maxLessons: 3 })
+      return block ? { ...domain, knowledgeBlock: block } : domain
+    } catch {
+      return domain
+    }
   }
 
   abort(): void {
@@ -1114,7 +1130,7 @@ export class AgentLoop {
   /** Manually set the active star domain. Pass null to disable, or a valid ActiveStarDomain. */
   setSessionDomain(domain: ActiveStarDomain | null): void {
     this.sessionDomain = domain
-    this.config.promptEngine.setActiveDomain(domain)
+    this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(domain))
   }
 
   /** Reset domain to undefined so the next run() will auto-detect from user input. */
@@ -1521,7 +1537,8 @@ export class AgentLoop {
       const db = this.config.meridianIndexer?.getDb()
       if (db) {
         db.saveBanditState('bandit:reasoning_effort', this.p3.serializeEffortBandit())
-        db.saveBanditState('bandit:model_style', this.p3.serializeBandit())
+        // model_style bandit sealed (zero production callers). Its state was
+        // saved/restored every session but never consulted for a decision.
         db.saveBanditState('p3:plan_cache', this.p3.serializePlanCache())
       }
     } catch { /* non-critical */ }
@@ -1540,6 +1557,15 @@ export class AgentLoop {
     try {
       this.telemetryWriter.write({ kind: 'recall-summary', ...this.cacheAdvisor.getRecallSummary() })
     } catch { /* telemetry is best-effort */ }
+    // Speculation source stats → session meta. Written unconditionally of the
+    // RIVET_DEBUG_TELEMETRY gate so the "should llmSpeculation default on"
+    // decision has cross-session hit-rate evidence. Only written when at least
+    // one source saw activity — idle sessions don't grow their meta files.
+    try {
+      const stats = this.p3.queue.statsBySource()
+      const hasActivity = Object.values(stats).some(s => s.enqueued > 0 || s.hits > 0)
+      if (hasActivity) this.persist?.updateMetadata({ speculationStats: stats })
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
   }
 
   async startFsWatcher(): Promise<void> {

@@ -99,6 +99,8 @@ export interface CockpitSnapshot {
     prewarmMisses: number
     prewarmHitRate: number
     physarumShadow: PhysarumShadowStats
+    /** ShadowQueue 投机预读四源 enqueued/hits（tool-pattern/physarum-file/combined/llm）。 */
+    speculation: import('../../agent/shadow-queue.js').ShadowQueueSourceStats | null
     cacheDiagnostic: string | null
     reasoningEffort: string
     /** Active star-domain label: pinned domain name, `Auto(天枢)` for auto

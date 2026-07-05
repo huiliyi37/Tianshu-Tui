@@ -28,6 +28,11 @@ export const DEFAULT_QUALITY_COMPACT_THRESHOLDS: QualityCompactThresholds = {
  *  accept the cache reprefill as the far lesser evil. */
 export const HEAP_EMERGENCY_RATIO = 0.85
 
+/** Token-ratio floor for opportunistic (cold-cache) stale-round compaction.
+ *  Below this there is too little stale history for the rewrite to pay off
+ *  even when the prefix cache is already expired. */
+export const OPPORTUNISTIC_COMPACT_RATIO = 0.3
+
 export interface CompactBoundaryDeps {
   // Field accessors
   getCompactFailures: () => CompactCircuitBreakerState
@@ -53,6 +58,13 @@ export interface CompactBoundaryDeps {
   maybeCompact: (opts: { loopTurn: number; failures: CompactCircuitBreakerState }) => Promise<{ compacted: boolean; failures: CompactCircuitBreakerState }>
   tryPartialCompact: (targetTurnAge: number) => Promise<boolean>
   shouldDelayCompact: (turnThreshold: number, ctx?: { estimatedTokens?: number; contextWindow?: number }) => boolean
+  /**
+   * CacheAdvisor 机会压缩判断：缓存已冷（上次 API 调用超过 provider TTL）时为 true。
+   * 冷缓存下「延迟压缩保前缀」失去意义（服务端缓存已过期，重建成本反正要付），
+   * 顺势在 turn 0 用更低的 ratio 门槛压缩陈旧轮。缓存热/温时此路径不参与，
+   * 现有 shouldDelayCompact 纪律原样保留。
+   */
+  shouldOpportunisticCompact?: () => boolean
   getStalePreviewChars: () => number
   isCachePreservingProvider: () => boolean
   /** True when the provider is NOT billed per token (flat subscription / coding-plan).
@@ -176,11 +188,15 @@ export class CompactBoundaryCoordinator {
       const tokenBudget = estimateOaiTokens(msgs)
       const tokenRatio = tokenBudget / contextWindow
 
-      if ((tokenRatio >= 0.5 || this.deps.getPendingStaleCompact()) && contextWindow < 1_000_000) {
+      // Opportunistic compact: cold cache lowers the trigger floor (0.5 → 0.3)
+      // and bypasses the delay heuristic — its hit-rate memory predates the
+      // idle gap, so "cache healthy, delay" would be reasoning from expired state.
+      const opportunistic = (this.deps.shouldOpportunisticCompact?.() ?? false) && tokenRatio >= OPPORTUNISTIC_COMPACT_RATIO
+      if ((tokenRatio >= 0.5 || this.deps.getPendingStaleCompact() || opportunistic) && contextWindow < 1_000_000) {
         // P2-5: history rewrites only at user boundaries (turn 0).
         if (turn !== 0) {
           if (tokenRatio >= 0.5) this.deps.setPendingStaleCompact(true)
-        } else if (this.deps.shouldDelayCompact(tokenRatio >= 0.7 ? 3 : 2, { estimatedTokens: tokenBudget, contextWindow })) {
+        } else if (!opportunistic && this.deps.shouldDelayCompact(tokenRatio >= 0.7 ? 3 : 2, { estimatedTokens: tokenBudget, contextWindow })) {
           // cache healthy — delay
         } else {
           this.deps.setPendingStaleCompact(false)

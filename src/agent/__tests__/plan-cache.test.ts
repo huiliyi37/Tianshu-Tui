@@ -54,4 +54,25 @@ describe('PlanCache', () => {
     }
     assert.equal(cache.size(), 3)
   })
+
+  it('records and matches Chinese task descriptions (CJK bigram keywords)', () => {
+    const cache = new PlanCache()
+    const recorded = cache.record('给用户接口加分页功能', [
+      { tool: 'read_file', target: 'src/routes/users.ts' },
+      { tool: 'edit_file', target: 'src/routes/users.ts' },
+    ])
+    assert.ok(recorded, 'Chinese description must produce keywords (was silently dropped before)')
+    const hit = cache.lookup('给帖子接口加分页功能')
+    assert.ok(hit)
+    assert.equal(hit.steps.length, 2)
+  })
+
+  it('does not cross-match unrelated Chinese tasks', () => {
+    const cache = new PlanCache()
+    cache.record('修复数据库迁移脚本报错', [
+      { tool: 'read_file', target: 'migrations/001.sql' },
+      { tool: 'edit_file', target: 'migrations/001.sql' },
+    ])
+    assert.equal(cache.lookup('优化页面渲染性能'), null)
+  })
 })

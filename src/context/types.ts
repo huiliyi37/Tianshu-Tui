@@ -206,4 +206,10 @@ export interface SessionMetadata {
     advisoriesAdopted?: number
     advisoriesIgnored?: number
   }
+  /**
+   * 投机预读四源（tool-pattern/physarum-file/combined/llm）enqueued/hits 计数。
+   * postSession 写入（有活动才写）——绕过 RIVET_DEBUG_TELEMETRY 门，
+   * 为「llmSpeculation 是否默认开」提供跨会话命中率证据。
+   */
+  speculationStats?: Record<string, { enqueued: number; hits: number }>
 }

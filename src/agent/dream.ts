@@ -12,6 +12,7 @@ import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { VerificationMetadata } from '../tools/types.js'
+import { appendProjectMemory } from '../context/project-memory-writer.js'
 
 export interface TrajectoryEntry {
   tool: string
@@ -147,7 +148,15 @@ function ensureDir(dir: string): void {
 
 const MAX_FILE_SIZE = 8192
 
-/** Persist a distilled session entry to the project knowledge file. */
+/**
+ * Persist a distilled session entry.
+ *
+ * 双轨统一：机器可读的知识主通道是 `.rivet/knowledge/memory.jsonl`
+ * （appendProjectMemory，跨会话注入读它）；`project-memory.md` 保留为
+ * curated Markdown，recall-only（read_file 召回用，不做 prompt 注入源）。
+ * 两轨写同一批 candidates，jsonl 用稳定 id（criterion+claim hash），
+ * compactProjectMemory 的按-id 去重天然收敛重复蒸馏。
+ */
 export function persistDream(cwd: string, input: DreamInput): void {
   const entry = distillSession(input)
   if (!entry) return
@@ -165,6 +174,23 @@ export function persistDream(cwd: string, input: DreamInput): void {
   const combined = entry + '\n' + deduped
   const trimmed = trimToEntryBoundary(combined, MAX_FILE_SIZE)
   writeFileAtomicSync(path, trimmed)
+
+  const createdAt = Date.now()
+  for (const candidate of extractCuratedMemoryCandidates(input.decisions)) {
+    try {
+      appendProjectMemory(cwd, {
+        id: `dream:${candidate.criterion}:${simpleHash(candidate.claim.toLowerCase().replace(/\s+/g, ' ').trim())}`,
+        kind: candidate.criterion,
+        text: candidate.claim,
+        confidence: 0.7,
+        createdAt,
+        evidence: [{ summary: `dream distill (session ${input.sessionId.slice(0, 8)})` }],
+        tags: ['dream'],
+      })
+    } catch {
+      // memory.jsonl is best-effort — never fail the dream write
+    }
+  }
 }
 
 /** Trim from the tail, but only at `### ` entry boundaries — never mid-entry. */

@@ -9,6 +9,10 @@ function knowledgePath(cwd: string): string {
   return join(cwd, '.rivet', 'knowledge', 'project-memory.md')
 }
 
+function memoryJsonlPath(cwd: string): string {
+  return join(cwd, '.rivet', 'knowledge', 'memory.jsonl')
+}
+
 function baseInput(overrides: Partial<DreamInput> = {}): DreamInput {
   return {
     filesModified: [],
@@ -176,6 +180,39 @@ describe('persistDream', () => {
       assert.ok(content.includes('future judgment rules'))
       const sessionsDir = join(dir, '.rivet', 'sessions')
       assert.ok(!existsSync(sessionsDir), 'should not create .rivet/sessions/')
+    })
+  })
+
+  it('双轨统一: also appends curated claims to knowledge/memory.jsonl', () => {
+    withTempDir('dream-jsonl-', dir => {
+      persistDream(dir, baseInput({
+        decisions: ['Architectural invariant: compaction must never mutate frozen history messages.'],
+        sessionId: 'session-jsonl',
+      }))
+
+      const path = memoryJsonlPath(dir)
+      assert.ok(existsSync(path), 'dream must feed the machine-readable memory.jsonl channel')
+      const lines = readFileSync(path, 'utf-8').trim().split('\n').map(l => JSON.parse(l))
+      assert.equal(lines.length, 1)
+      assert.equal(lines[0].kind, 'architectural_invariant')
+      assert.match(lines[0].text, /compaction must never mutate/)
+      assert.ok(lines[0].id.startsWith('dream:architectural_invariant:'))
+      assert.deepEqual(lines[0].tags, ['dream'])
+    })
+  })
+
+  it('双轨统一: repeated distillation reuses the stable claim id (compact dedups by id)', () => {
+    withTempDir('dream-jsonl-dedup-', dir => {
+      const input = baseInput({
+        decisions: ['Selection rule: only reusable judgment enters project memory, never telemetry.'],
+        sessionId: 'session-a',
+      })
+      persistDream(dir, input)
+      persistDream(dir, { ...input, sessionId: 'session-b' })
+
+      const lines = readFileSync(memoryJsonlPath(dir), 'utf-8').trim().split('\n').map(l => JSON.parse(l))
+      assert.equal(lines.length, 2, 'append-only writes; dedup happens in compactProjectMemory')
+      assert.equal(lines[0].id, lines[1].id, 'same claim → same stable id → compact converges to one entry')
     })
   })
 })

@@ -127,6 +127,8 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
   const prewarmStats = agentWithCache.getPrewarmStats?.() ?? { hits: 0, misses: 0, hitRate: 0 }
   const physarumShadowStats = agentWithCache.getPhysarumShadowStats?.() ?? emptyPhysarumShadowStats()
   const cacheDiagnostic = agentWithCache.getCacheDiagnostic?.() ?? null
+  // 部分上下文（mock/server）可能没有 p3——面板降级为 null（不显示投机行）
+  const speculationStats = (agent as Partial<AgentLoop>).p3?.queue.statsBySource() ?? null
 
   const traceStore = agent.getTraceStore()
   const evidence = agent.getEvidenceState()
@@ -205,6 +207,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       prewarmMisses: prewarmStats.misses,
       prewarmHitRate: prewarmStats.hitRate,
       physarumShadow: physarumShadowStats,
+      speculation: speculationStats,
       cacheDiagnostic,
       reasoningEffort: agent.getReasoningEffort() || reasoningEffort || 'medium',
       starDomain: describeStarDomain(agent.getSessionDomain()),

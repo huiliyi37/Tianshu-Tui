@@ -66,4 +66,47 @@ describe('TurnCompletionController', () => {
     assert.deepEqual(completions, [{ turn: 1, isFinal: true, evidence: true }])
     assert.deepEqual(texts, [])
   })
+
+  it('persists effort_shadow evidence row when the shadow reward closes', async () => {
+    const session = new SessionContext()
+    session.addUserMessage('finish task')
+    const saved: Array<{ kind: string; json: string }> = []
+
+    const controller = new TurnCompletionController({
+      config: makeConfig(),
+      session,
+      trajectory: new TrajectoryRecorder(),
+      routingMetrics: new RoutingMetricsCollector(),
+      evidence: new EvidenceTracker(),
+      getStreamedText: () => '',
+      getDecisions: () => [],
+      setDecisions: () => {},
+      refreshLedger: () => {},
+      refreshCacheDiagnostic: () => {},
+      runPostTurn: async () => {},
+      getEffortShadow: () => ({
+        context: [0.3, 0, 0, 0, 0, 0.5],
+        recommendedArm: 'delta:-1',
+        ruleBaseline: 'medium',
+        pendingRewardId: 'effort_test_1',
+        timestamp: Date.now(),
+      }),
+      clearEffortShadow: () => {},
+      completeEffortShadow: () => ({ reward: 0.42, recommendedArm: 'delta:-1', ruleBaseline: 'medium' }),
+      saveEffortShadowRow: (kind, json) => { saved.push({ kind, json }) },
+    })
+
+    await controller.complete({
+      turn: 1,
+      isFinal: false,
+      callbacks: { onTextDelta: () => {}, onTurnComplete: () => {} },
+    })
+
+    assert.equal(saved.length, 1)
+    assert.equal(saved[0]!.kind, 'effort_shadow:effort_test_1')
+    const row = JSON.parse(saved[0]!.json)
+    assert.equal(row.schemaVersion, 1)
+    assert.equal(row.recommendedArm, 'delta:-1')
+    assert.equal(row.reward, 0.42)
+  })
 })

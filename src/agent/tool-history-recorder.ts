@@ -57,14 +57,19 @@ export function recordToolHistory(
       }
     }
 
-    // T2-02 P2: Record successful tool sequences to PlanCache on task delivery
+    // T2-02 P2: Record successful tool sequences to PlanCache on task delivery.
+    // Key = the task's user input — the SAME distribution the lookup side uses
+    // (turn-step-producer feeds userInput into planCacheSuggest). The old key
+    // was the tool-chain string ("edit_file:src/a.ts → …"), whose keywords
+    // almost never overlap a natural-language task description, so cache hit
+    // rate was structurally near zero. Tool-chain string kept only as fallback
+    // when no user message exists (e.g. programmatic runs).
     if (!isError && name === 'deliver_task') {
       try {
         const steps = self.p3.extractPlanSteps(self.recentToolHistory)
         if (steps.length >= 2) {
-          const taskDesc = self.recentToolHistory
-            .map(e => `${e.tool}:${e.target}`)
-            .join(' → ')
+          const taskDesc = self.initialUserMessage?.trim()
+            || self.recentToolHistory.map(e => `${e.tool}:${e.target}`).join(' → ')
           self.p3.recordPlan(taskDesc, steps)
         }
       } catch { /* PlanCache recording is non-critical */ }

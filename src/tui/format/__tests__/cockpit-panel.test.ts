@@ -23,7 +23,7 @@ function fixture(): CockpitSnapshot {
     model: {
       name: 'MODEL-X', cacheHitRate: 0.5, inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0,
       cost: 0.01, perTurnHitRate: null, recentTurnHitRate: null, prewarmHits: 0, prewarmMisses: 0, prewarmHitRate: 0,
-      physarumShadow: {} as never, cacheDiagnostic: null, reasoningEffort: 'medium', starDomain: 'Auto(天枢)',
+      physarumShadow: {} as never, speculation: null, cacheDiagnostic: null, reasoningEffort: 'medium', starDomain: 'Auto(天枢)',
     },
     mcp: { servers: [{ serverId: 'SRV-A', status: 'connected', toolCount: 3 }], totalTools: 3, connectedServers: 1 },
     advisory: {
