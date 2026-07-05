@@ -77,22 +77,25 @@ describe('ice-mirror: cache stability', () => {
 
   it('FROZEN is a string prefix of FRESH when dynamic fields present', () => {
     const frozen = buildStableVolatileBlock(baseCtx)
+    // tool-history block removed 2026-07-06 — use decisions as the dynamic field
     const fresh = buildLatestTurnVolatileBlock({
       ...baseCtx,
-      toolHistory: [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' as const }],
+      decisions: ['use middleware'],
     })
     assert.ok(fresh.startsWith(frozen), 'FRESH must start with exact FROZEN bytes')
     assert.ok(fresh.length > frozen.length, 'FRESH must be longer when dynamic fields present')
   })
 
-  it('dynamic appendix contains tool-history when provided', () => {
+  it('dynamic appendix contains progress when task progress provided', () => {
     const appendix = buildDynamicAppendix({
       ...baseCtx,
+      taskProgress: { current: 'fix cache', completed: ['read docs'], remaining: [], decisions: [] },
       toolHistory: [{ tool: 'read_file', target: 'src/foo.ts', status: 'success' as const }],
     })
     assert.ok(appendix.includes('<context-update>'))
-    assert.ok(appendix.includes('<tool-history'))
-    assert.ok(appendix.includes('read_file'))
+    assert.ok(appendix.includes('<progress>'))
+    // tool-history block removed 2026-07-06 — must never re-appear
+    assert.ok(!appendix.includes('<tool-history'))
   })
 
   it('dynamic appendix is empty when no dynamic fields AND no git-status', () => {
@@ -789,10 +792,11 @@ describe('sessionState injection — cache safety + path coverage', () => {
     )
 
     const { fresh, user } = latestUserTrailer(req.messages)
-    // fresh = volatileBlock (FROZEN only, stable)
-    assert.ok(!fresh.includes('<tool-history'), 'FROZEN volatile must not contain appendix')
+    // fresh = volatileBlock (FROZEN only, stable). Marker: <progress> (from
+    // setTaskProgress above) — tool-history block was removed 2026-07-06.
+    assert.ok(!fresh.includes('<progress>'), 'FROZEN volatile must not contain appendix')
     // user = userContent + '\n\n' + appendix (appendix is AFTER user content)
-    assert.ok(user.includes('<tool-history'), 'user trailer must contain appendix after user content')
+    assert.ok(user.includes('<progress>'), 'user trailer must contain appendix after user content')
     assert.ok(user.startsWith('hello'), 'user trailer must start with user content')
   })
 

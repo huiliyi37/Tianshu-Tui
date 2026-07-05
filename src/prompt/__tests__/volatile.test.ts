@@ -182,10 +182,14 @@ describe('volatile context layers', () => {
   })
 })
 
-describe('tool-history XML section', () => {
+describe('tool-history removal (2026-07-06)', () => {
   const base: VolatileContext = { cwd: '/project' }
 
-  it('renders <tool-history> with entries', () => {
+  // The block is redundant with message history (assistant tool_calls + tool
+  // results are already visible) and its per-boundary churn kept appendixDelta
+  // from ever going quiet. toolHistory the DATA stays: read-file-dedup-hint
+  // and historical-lessons scoring still consume it.
+  it('never renders <tool-history> even when toolHistory is provided', () => {
     const ctx: VolatileContext = {
       ...base,
       toolHistory: [
@@ -194,17 +198,17 @@ describe('tool-history XML section', () => {
       ],
     }
     const block = buildVolatileBlock(ctx)
-    assert.ok(block.includes('<tool-history'))
-    assert.ok(block.includes('<tool-summary tool="edit_file"'))
-    assert.ok(block.includes('status="success"'))
-    assert.ok(block.includes('status="failed"'))
-    assert.ok(block.includes('error="timeout"'))
-    assert.ok(block.includes('</tool-history>'))
+    assert.ok(!block.includes('<tool-history'))
+    assert.ok(!block.includes('<tool-summary'))
   })
 
-  it('omits <tool-history> when empty or undefined', () => {
-    assert.ok(!buildVolatileBlock({ ...base, toolHistory: [] }).includes('<tool-history'))
-    assert.ok(!buildVolatileBlock(base).includes('<tool-history'))
+  it('toolHistory still feeds the read-file-dedup-hint block', () => {
+    const reads = Array.from({ length: 6 }, (_, i) => ({
+      tool: 'read_file', target: `src/f${i}.ts`, status: 'success' as const,
+    }))
+    const block = buildDynamicAppendix({ ...base, toolHistory: reads })
+    assert.ok(block.includes('<read-file-dedup-hint>'))
+    assert.ok(!block.includes('<tool-history'))
   })
 
   it('folds active star domain into the stable frozen prefix, not the dynamic appendix', () => {
@@ -227,30 +231,7 @@ describe('tool-history XML section', () => {
     assert.ok(!appendix.includes('<star-domain'), 'dynamic appendix must not contain star-domain')
   })
 
-  it('escapes XML special chars in targets', () => {
-    const ctx: VolatileContext = {
-      ...base,
-      toolHistory: [{ tool: 'bash', target: 'echo "hello <world>"', status: 'success' }],
-    }
-    const block = buildVolatileBlock(ctx)
-    assert.ok(block.includes('&lt;world&gt;'))
-    assert.ok(!block.includes('<world>'))
-  })
-
-  it('includes recent count attribute', () => {
-    const ctx: VolatileContext = {
-      ...base,
-      toolHistory: [
-        { tool: 'a', target: 'b', status: 'success' },
-        { tool: 'c', target: 'd', status: 'success' },
-        { tool: 'e', target: 'f', status: 'success' },
-      ],
-    }
-    const block = buildVolatileBlock(ctx)
-    assert.ok(block.includes('recent="3"'))
-  })
-
-  it('preserves existing sections alongside tool-history', () => {
+  it('other sections render normally with toolHistory present', () => {
     const ctx: VolatileContext = {
       ...base,
       gitStatus: 'M src/foo.ts',
@@ -260,16 +241,7 @@ describe('tool-history XML section', () => {
     const block = buildVolatileBlock(ctx)
     assert.ok(block.includes('<git-status>'))
     assert.ok(block.includes('<working-set>'))
-    assert.ok(block.includes('<tool-history'))
-  })
-
-  it('handles running status', () => {
-    const ctx: VolatileContext = {
-      ...base,
-      toolHistory: [{ tool: 'run_tests', target: 'all', status: 'running' }],
-    }
-    const block = buildVolatileBlock(ctx)
-    assert.ok(block.includes('status="running"'))
+    assert.ok(!block.includes('<tool-history'))
   })
 })
 
@@ -416,7 +388,8 @@ describe('stable/latest volatile split', () => {
       taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'], decisions: [] },
       decisions: ['use middleware'],
     })
-    assert.ok(latest.includes('<tool-history'))
+    // tool-history block removed 2026-07-06 — redundant with message history
+    assert.ok(!latest.includes('<tool-history'))
     // task-progress and decisions are now merged into <progress>
     assert.ok(latest.includes('<progress>'))
     assert.ok(latest.includes('use middleware'))
@@ -631,10 +604,6 @@ describe('GWT salience and Top-K selection', () => {
 
     it('returns 0.7 for recent-commits', () => {
       assert.equal(assignSalience('<recent-commits>abc123 fix</recent-commits>'), 0.7)
-    })
-
-    it('returns 0.5 for tool-history', () => {
-      assert.equal(assignSalience('<tool-history>\n  <tool-summary />\n</tool-history>'), 0.5)
     })
 
     it('returns 0.4 for session-state', () => {

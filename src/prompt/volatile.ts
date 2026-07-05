@@ -480,19 +480,12 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   const progressBlock = renderProgressBlock(ctx, projHasObjective)
   if (progressBlock) parts.push(progressBlock)
 
-  // Tool history: most recent tools appended at end → prefix cacheable
-  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
-    const maxRecent = 8
-    const recent = ctx.toolHistory.length > maxRecent
-      ? ctx.toolHistory.slice(-maxRecent)
-      : ctx.toolHistory
-    const entries = recent.map(e => {
-      const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
-      if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
-      return `  <tool-summary ${attrs.join(' ')} />`
-    }).join('\n')
-    parts.push(`<tool-history recent="${recent.length}">\n${entries}\n</tool-history>`)
-  }
+  // tool-history block removed (2026-07-06): redundant with message history —
+  // assistant tool_calls + tool results are already visible, and the recent-8
+  // window sits well inside the 10-user-turn observation mask. The block's
+  // per-boundary byte churn kept appendixDelta from ever going quiet.
+  // ctx.toolHistory itself stays: read-file-dedup-hint below and
+  // historical-lessons scoring still consume it.
 
   // Read-file dedup hint: single-line snapshot for cache stability
   if (ctx.toolHistory && ctx.toolHistory.length > 0) {
@@ -665,7 +658,6 @@ export interface SalientBlock {
  * - 0.7: task-relevant (intent-retrieval-route, task-progress, decisions,
  *        git-status, recent-commits — git 状态是任务地基：被 Top-K 丢弃会诱发
  *        模型用 bash 重新获取，形成训练模式 doom-loop，见会话 43443098 取证)
- * - 0.5: operational context (tool-history)
  * - 0.4: session housekeeping (session-state, cross-session-events)
  * - 0.3: deduplication hints (read-file-dedup-hint)
  */
@@ -752,7 +744,6 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<worktree-warning')) return 0.7
   if (blockContent.startsWith('<git-status>')) return 0.7
   if (blockContent.startsWith('<recent-commits>')) return 0.7
-  if (blockContent.startsWith('<tool-history>')) return 0.5
   if (blockContent.startsWith('<session-state>')) return 0.4 // legacy fallback
   if (blockContent.startsWith('<cross-session')) return 0.4
   if (blockContent.startsWith('<read-file-dedup-hint>')) return 0.3
