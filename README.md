@@ -121,7 +121,7 @@ rivet config show                                         # 查看完整配置
       "deepseek": {
         "apiKeyEnv": "DEEPSEEK_API_KEY",
         "models": [
-          { "id": "deepseek-v4-pro", "contextWindow": 1000000, "maxTokens": 64000 }
+          { "id": "deepseek-v4-pro", "contextWindow": 1000000, "maxTokens": 384000 }
         ]
       }
     }

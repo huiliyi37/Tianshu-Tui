@@ -36,7 +36,7 @@ interface ModelFormState {
 }
 
 function emptyModel(): ModelFormState {
-  return { id: '', alias: '', contextWindow: '128000', maxTokens: '64000' }
+  return { id: '', alias: '', contextWindow: '1000000', maxTokens: '384000' }
 }
 
 function modelFromState(state: ModelFormState): { id: string; alias?: string; contextWindow: number; maxTokens: number } | null {
@@ -121,7 +121,7 @@ function ModelForm({
           <span className="provider-field-label">最大输出 Tokens</span>
           <input
             type="number"
-            placeholder="64000"
+            placeholder="384000"
             value={state.maxTokens}
             onChange={(e) => onChange({ maxTokens: e.target.value })}
             disabled={busy}
@@ -129,7 +129,7 @@ function ModelForm({
         </label>
       </div>
       <div className="provider-form-hint">
-        请照该服务商官方 API 文档的真实值填写。上下文长度决定天枢的自动压缩点（填小了会过早压缩、丢上下文；填大了会撞 API 上限），也决定模型能记住多少对话；最大输出 Tokens 是单次回复上限，不能超过上下文长度。
+        请照该服务商官方 API 文档的真实值填写。上下文长度决定天枢的自动压缩点（填小了会过早压缩、丢上下文；填大了会撞 API 上限），也决定模型能记住多少对话；最大输出 Tokens 是单次回复上限，不能超过上下文长度。DeepSeek V4 参考值：上下文 1000000、最大输出 384000。
       </div>
       <div className="provider-form-actions">
         <button className="btn-sm" disabled={busy} onClick={onSubmit}>{submitLabel}</button>
@@ -617,7 +617,7 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
             <span className="provider-field-label">最大输出 Tokens</span>
             <input
               type="number"
-              placeholder="64000"
+              placeholder="384000"
               value={state.model.maxTokens}
               onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, maxTokens: e.target.value } }))}
               disabled={busy}
