@@ -378,13 +378,18 @@ export function renderToolContext(
   const direction = hint.preferEpistemic ? 'explore' : 'execute'
   lines.push(`theta=${theta} direction=${direction}`)
 
+  // Quantized rendering (2026-07-06): this block rides the appendixDelta —
+  // sub-bucket numeric jitter (EFE 2nd decimal, <5% probability wobble) must
+  // not produce byte changes, or delta re-emits the block every boundary.
+  // 1 decimal for EFE, 10% buckets for ranking probabilities. Rank order and
+  // theta/direction stay exact — those transitions ARE information.
   lines.push(
-    `EFE: epistemic=${efe.epistemicValue.toFixed(2)} pragmatic=${efe.pragmaticValue.toFixed(2)} precision=${efe.precision.toFixed(2)}`,
+    `EFE: epistemic=${efe.epistemicValue.toFixed(1)} pragmatic=${efe.pragmaticValue.toFixed(1)} precision=${efe.precision.toFixed(1)}`,
   )
 
   const top3 = policies.slice(0, 3)
   const ranking = top3
-    .map((p, i) => `${i + 1}. ${escapeXml(p.toolName)} (${(p.probability * 100).toFixed(0)}%)`)
+    .map((p, i) => `${i + 1}. ${escapeXml(p.toolName)} (~${Math.round(p.probability * 10) * 10}%)`)
     .join('  ')
   lines.push(ranking)
 

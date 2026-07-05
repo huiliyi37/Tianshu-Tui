@@ -5,6 +5,7 @@ import {
   getBaseAffordance,
   computeAffordanceScores,
   renderAffordanceHint,
+  renderToolContext,
   adaptAffordanceFromHistory,
   type AffordanceState,
 } from '../affordance.js'
@@ -288,6 +289,49 @@ describe('computeAffordanceScores (U3 planning boost)', () => {
       Math.abs(delta - 0.15) < 0.01,
       `delta should be ~0.15, got ${delta}`,
     )
+  })
+})
+
+// tool-context rides the appendixDelta: sub-bucket numeric jitter must not
+// produce byte changes, or the delta re-emits the block every user boundary
+// (2026-07-06 appendix byte-stability work).
+describe('renderToolContext delta byte stability', () => {
+  const state: AffordanceState = {
+    sensorium: {
+      momentum: 0.5, pressure: 0.3, confidence: 0.5,
+      complexity: 0.4, freshness: 0.6, stability: 0.7,
+    },
+    vigor: { tonic: 0.6, phasic: 0.1, curiosity: 0.4, vigor: 0.7, variability: 0.1, history: [] },
+    thetaPhase: 'encoding',
+    season: 'genesis',
+    workingSetSize: 3,
+    recentToolNames: ['read_file'],
+  }
+  const policies = (probs: [number, number, number]) => ([
+    { toolName: 'read_file', expectedFreeEnergy: 0.2, probability: probs[0] },
+    { toolName: 'grep', expectedFreeEnergy: 0.4, probability: probs[1] },
+    { toolName: 'edit_file', expectedFreeEnergy: 0.6, probability: probs[2] },
+  ])
+  const efe = (e: number, p: number, pr: number) =>
+    ({ epistemicValue: e, pragmaticValue: p, noveltyBonus: 0.3, precision: pr })
+
+  it('is byte-stable under sub-bucket numeric jitter', () => {
+    const a = renderToolContext(state, policies([0.84, 0.52, 0.31]), efe(0.23, 0.41, 0.68))
+    const b = renderToolContext(state, policies([0.849, 0.516, 0.308]), efe(0.24, 0.44, 0.72))
+    assert.equal(a, b, 'same buckets + same ranks must render identical bytes')
+  })
+
+  it('changes bytes when a probability crosses a 10% bucket', () => {
+    const a = renderToolContext(state, policies([0.84, 0.52, 0.31]), efe(0.2, 0.4, 0.7))
+    const b = renderToolContext(state, policies([0.86, 0.52, 0.31]), efe(0.2, 0.4, 0.7))
+    assert.notEqual(a, b, 'bucket transition (80%→90%) must change bytes')
+  })
+
+  it('renders quantized values (1-decimal EFE, ~10% buckets)', () => {
+    const out = renderToolContext(state, policies([0.84, 0.52, 0.31]), efe(0.23, 0.41, 0.68))
+    assert.match(out, /epistemic=0\.2 pragmatic=0\.4 precision=0\.7/)
+    assert.match(out, /1\. read_file \(~80%\)/)
+    assert.match(out, /theta=encoding direction=/)
   })
 })
 
