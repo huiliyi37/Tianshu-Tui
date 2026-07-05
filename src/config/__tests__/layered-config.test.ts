@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { loadConfig, loadConfigDefault, findProjectConfig } from '../manager.js'
@@ -228,5 +228,160 @@ describe('loadConfigDefault', () => {
     assert.ok(config.provider)
     assert.ok(config.agent)
     assert.equal(typeof config.provider.default, 'string')
+  })
+})
+
+describe('migrateDeepseekMaxTokens — one-shot bump 64000 → 384000', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'rivet-ds-migrate-test-'))
+
+  function withIsolatedUserConfig(userConfig: unknown, fn: () => void): void {
+    const userCfgPath = join(tempDir, `user-config-${Math.random().toString(36).slice(2)}.json`)
+    if (userConfig !== undefined) writeFileSync(userCfgPath, JSON.stringify(userConfig))
+    const prev = process.env.RIVET_CONFIG_PATH
+    process.env.RIVET_CONFIG_PATH = userCfgPath
+    try {
+      fn()
+    } finally {
+      if (prev === undefined) delete process.env.RIVET_CONFIG_PATH
+      else process.env.RIVET_CONFIG_PATH = prev
+      rmSync(userCfgPath, { force: true })
+    }
+  }
+
+  it('bumps provider-level maxTokens from 64000 to 384000', () => {
+    withIsolatedUserConfig({
+      provider: { providers: { deepseek: { name: 'deepseek', maxTokens: 64000, models: [{ id: 'deepseek-v4-pro', alias: 'v4-pro', contextWindow: 1_000_000, maxTokens: 64000 }] } } },
+    }, () => {
+      const config = loadConfig()
+      const ds = config.provider.providers['deepseek']
+      assert.ok(ds)
+      assert.equal(ds.maxTokens, 384_000, 'provider-level maxTokens should be migrated to 384000')
+    })
+  })
+
+  it('bumps per-model maxTokens from 64000 to 384000', () => {
+    withIsolatedUserConfig({
+      provider: {
+        providers: {
+          deepseek: {
+            name: 'deepseek',
+            maxTokens: 64000,
+            models: [
+              { id: 'deepseek-v4-pro', alias: 'v4-pro', contextWindow: 1_000_000, maxTokens: 64000 },
+              { id: 'deepseek-v4-flash', alias: 'v4-flash', contextWindow: 1_000_000, maxTokens: 64000 },
+            ],
+          },
+        },
+      },
+    }, () => {
+      const config = loadConfig()
+      const ds = config.provider.providers['deepseek']
+      assert.ok(ds)
+      assert.equal(ds.maxTokens, 384_000)
+      const models = ds.models
+      assert.equal(models[0]?.maxTokens, 384_000, 'v4-pro model maxTokens should be migrated')
+      assert.equal(models[1]?.maxTokens, 384_000, 'v4-flash model maxTokens should be migrated')
+    })
+  })
+
+  it('leaves non-64000 values untouched', () => {
+    withIsolatedUserConfig({
+      provider: {
+        providers: {
+          deepseek: {
+            name: 'deepseek',
+            maxTokens: 128_000,
+            models: [
+              { id: 'deepseek-v4-pro', contextWindow: 1_000_000, maxTokens: 128_000 },
+            ],
+          },
+        },
+      },
+    }, () => {
+      const config = loadConfig()
+      const ds = config.provider.providers['deepseek']
+      assert.ok(ds)
+      assert.equal(ds.maxTokens, 128_000, 'explicit non-64000 should be preserved')
+      assert.equal(ds.models[0]?.maxTokens, 128_000, 'explicit non-64000 model should be preserved')
+    })
+  })
+
+  it('writes back migrated config to disk', () => {
+    const userCfgPath = join(tempDir, `user-config-${Math.random().toString(36).slice(2)}.json`)
+    writeFileSync(userCfgPath, JSON.stringify({
+      provider: {
+        providers: {
+          deepseek: {
+            name: 'deepseek',
+            maxTokens: 64000,
+            models: [
+              { id: 'deepseek-v4-pro', alias: 'v4-pro', contextWindow: 1_000_000, maxTokens: 64000 },
+            ],
+          },
+        },
+      },
+    }))
+    const prev = process.env.RIVET_CONFIG_PATH
+    process.env.RIVET_CONFIG_PATH = userCfgPath
+    try {
+      loadConfig()
+      // Migration should have written back to disk
+      const raw = JSON.parse(readFileSync(userCfgPath, 'utf-8'))
+      const ds = raw?.provider?.providers?.deepseek
+      assert.ok(ds)
+      assert.equal(ds.maxTokens, 384_000, 'write-back: provider-level should be 384000')
+      assert.equal(ds.models[0]?.maxTokens, 384_000, 'write-back: model-level should be 384000')
+    } finally {
+      if (prev === undefined) delete process.env.RIVET_CONFIG_PATH
+      else process.env.RIVET_CONFIG_PATH = prev
+      rmSync(userCfgPath, { force: true })
+    }
+  })
+
+  it('does not crash when deepseek config is absent', () => {
+    withIsolatedUserConfig({ agent: { maxTurns: 5 } }, () => {
+      const config = loadConfig()
+      assert.equal(config.agent.maxTurns, 5)
+      // deepseek provider loaded from preset (DEFAULT_CONFIG)
+      const ds = config.provider.providers['deepseek']
+      assert.ok(ds)
+      assert.equal(ds.maxTokens, 384_000, 'preset default should be used when no user override')
+    })
+  })
+
+  it('no write-back when no migration needed', () => {
+    const userCfgPath = join(tempDir, `user-config-${Math.random().toString(36).slice(2)}.json`)
+    const original = {
+      provider: {
+        providers: {
+          deepseek: {
+            name: 'deepseek',
+            maxTokens: 384_000,
+            models: [
+              { id: 'deepseek-v4-pro', alias: 'v4-pro', contextWindow: 1_000_000, maxTokens: 384_000 },
+            ],
+          },
+        },
+      },
+    }
+    writeFileSync(userCfgPath, JSON.stringify(original))
+    const prev = process.env.RIVET_CONFIG_PATH
+    process.env.RIVET_CONFIG_PATH = userCfgPath
+    try {
+      loadConfig()
+      const raw = JSON.parse(readFileSync(userCfgPath, 'utf-8'))
+      // Should be byte-identical (no unnecessary writes)
+      assert.deepEqual(raw, original, 'no migration needed → file should be unchanged')
+    } finally {
+      if (prev === undefined) delete process.env.RIVET_CONFIG_PATH
+      else process.env.RIVET_CONFIG_PATH = prev
+      rmSync(userCfgPath, { force: true })
+    }
+  })
+
+  // Cleanup
+  it('cleanup temp dir', () => {
+    rmSync(tempDir, { recursive: true, force: true })
+    assert.ok(true)
   })
 })
