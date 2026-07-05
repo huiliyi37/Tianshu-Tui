@@ -11,7 +11,7 @@ import { builtinModules } from 'node:module'
 export default defineConfig({
   entry: ['src/main.ts'],
   format: ['esm'],
-  target: 'node22',
+  target: 'node24',
   // dts:false — 声明文件对 CLI 运行毫无用处，且 Windows 上对 100+ 文件生成 .d.ts
   // 会静默崩溃（exit=1 无任何报错）。若将来需要发布 npm 包，改为 true。
   dts: false,
