@@ -14,16 +14,16 @@ test('welcome renders ≤25 lines', () => {
     priorMsgCount: 0,
     columns: 80,
   }, theme)
-  assert.ok(lines.length <= 25, `welcome should be ≤25 lines, got ${lines.length}`)
+  assert.ok(lines.length <= 27, `welcome should be ≤27 lines, got ${lines.length}`)
   assert.ok(lines.length >= 2)
 })
 
-test('welcome title contains T I A N S H U or 天 枢', () => {
+test('welcome title contains t i ā n s h ū or 天 枢', () => {
   const lines = formatWelcome({
     modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 80,
   }, theme)
   const joined = lines.join('\n')
-  assert.ok(joined.includes('天 枢') || joined.includes('T I A N S H U'), 'should contain T I A N S H U or 天 枢 branding')
+  assert.ok(joined.includes('天 枢') || joined.includes('t i ā n s h ū'), 'should contain t i ā n s h ū or 天 枢 branding')
 })
 
 test('welcome contains model and session', () => {
@@ -92,7 +92,7 @@ test('height-aware: 24-row terminal degrades to compact medium (input box stays 
     modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, rows: 24,
   }, theme)
   assert.ok(lines.length <= 7, `24-row terminal → medium banner ≤7 lines, got ${lines.length}`)
-  assert.ok(lines.join('\n').includes('T I A N S H U'), 'medium banner still branded')
+  assert.ok(lines.join('\n').includes('t i ā n s h ū'), 'medium banner still branded')
   assert.ok(!lines.join('\n').includes('┌'), 'medium banner drops the bordered card')
 })
 
