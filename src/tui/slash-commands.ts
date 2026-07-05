@@ -2805,6 +2805,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const arg = parts[1]?.toLowerCase()
       if (arg === 'off') {
         agent.setApprovalMode('auto-safe')
+        agent.config.maxTurns = 200
         ctx.setAutoSafe(true)
         ctx.persistApprovalMode?.('auto-safe')
         pushStatic(createLogEntry({ type: 'system', content: '✓ 已退出 YOLO，切回 Auto — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。' }))
@@ -2812,9 +2813,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
       agent.setApprovalMode('dangerously-skip-permissions')
+      agent.config.maxTurns = 0
       ctx.setAutoSafe(false)
       ctx.persistApprovalMode?.('dangerously-skip-permissions')
-      pushStatic(createLogEntry({ type: 'system', content: '✓ YOLO 已开启 — 全自动执行，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback' }))
+      pushStatic(createLogEntry({ type: 'system', content: '✓ YOLO 已开启 — 全自动执行，无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback' }))
       setIsStreaming(false)
       return true
     },
