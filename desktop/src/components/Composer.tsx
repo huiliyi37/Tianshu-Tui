@@ -707,6 +707,7 @@ export function Composer(props: {
             onDelegate={onDelegate}
             onWorkflow={onWorkflow}
             onClose={() => {}}
+            threadNonEmpty={threadNonEmpty}
           />
         </div>
         <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />

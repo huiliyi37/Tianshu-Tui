@@ -206,6 +206,8 @@ export const agentSchema = z.object({
   maxTurns: z.number().int().nonnegative().default(200),
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
   autoReasoning: z.boolean().default(true),
+  /** 默认星域（auto | tianshu | pojun ...）。新会话的初始星域将由此配置项决定。 */
+  defaultDomain: z.string().default('auto'),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
   songlineEnabled: z.boolean().default(false),
   /** Enable cross-session knowledge loading (memory block, playbook, companion presence).

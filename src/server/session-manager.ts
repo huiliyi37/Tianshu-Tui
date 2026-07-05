@@ -474,6 +474,8 @@ export interface RuntimeSessionManagerOptions {
    * initial record.model and the picker's `current` flag.
    */
   defaultModelId?: string
+  /** PlusMenu (domain) — the default domain key new sessions start on. */
+  defaultDomain?: string
 }
 
 type InterventionKind = 'approval'
@@ -640,6 +642,7 @@ export class RuntimeSessionManager {
   private readonly getRegistry?: () => SessionRegistry | undefined
   private readonly listModelsFn?: () => ModelOption[]
   private readonly defaultModelId?: string
+  private readonly defaultDomain?: string
 
   constructor(opts: RuntimeSessionManagerOptions) {
     this.createAgent = opts.createAgent
@@ -969,7 +972,7 @@ export class RuntimeSessionManager {
         pendingApprovals: 0,
         approvalMode: input.approvalMode,
         model: this.defaultModelId,
-        domain: 'auto',
+        domain: this.defaultDomain ?? 'auto',
         worktreeBranch,
         worktreePath,
         baselineHead,
@@ -984,7 +987,9 @@ export class RuntimeSessionManager {
       listeners: new Set(),
       knownArtifacts: new Set(),
       steer: new SteerBuffer(),
-      domainState: undefined,
+      domainState: this.defaultDomain && this.defaultDomain !== 'auto'
+        ? resolveDomainState(this.defaultDomain)?.state
+        : undefined,
       disabledSkills: new Set(),
       skillLoadErrors: [],
     }

@@ -63,11 +63,12 @@ export function PlusMenu(props: {
   /** Controlled open state for the root dropdown. */
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  threadNonEmpty?: boolean
 }) {
   const {
     sessionId, menuRev, sessionRunning, planMode, onSetPlanMode,
     onPickImage, imageDisabled, commands, onRunCommand, onDelegate, onWorkflow, onClose,
-    open, onOpenChange,
+    open, onOpenChange, threadNonEmpty,
   } = props
   const planning = planMode === 'planning'
   const [panel, setPanel] = useState<Panel | null>(null)
@@ -206,6 +207,7 @@ export function PlusMenu(props: {
             return { key: d.key, label, desc: d.meta || d.motto, active: d.current }
           })}
           apply={async (id, row) => { await setDomain(id, row.key) }}
+          warning={threadNonEmpty ? '⚠ 会话中途切换星域会使前缀缓存整体失效，下一次请求需全量重建上下文（成本约 10 倍+）。建议新开会话或在会话开始时选择。' : undefined}
         />
       )}
       {panel === 'skills' && (
@@ -345,8 +347,9 @@ function PickerPanel(props: {
   onClose: () => void
   load: (sessionId: string) => Promise<Row[]>
   apply: (sessionId: string, row: Row) => Promise<void>
+  warning?: string
 }) {
-  const { title, sessionId, menuRev, mode, emptyHint, onClose, load, apply } = props
+  const { title, sessionId, menuRev, mode, emptyHint, onClose, load, apply, warning } = props
   const [rows, setRows] = useState<Row[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
@@ -426,6 +429,11 @@ function PickerPanel(props: {
             )}
           </CommandGroup>
         </CommandList>
+        {warning && (
+          <div className="picker-panel-warning">
+            {warning}
+          </div>
+        )}
       </Command>
     </CommandDialog>
   )

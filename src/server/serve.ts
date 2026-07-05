@@ -910,6 +910,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     // Reload-aware: picks up providers configured after startup (no restart).
     listModels: () => listAllModelsWithReload(ctx),
     defaultModelId: ctx.model.id,
+    defaultDomain: ctx.config.agent?.defaultDomain,
   })
 
   // Wave F: sessions 现已就绪——把真实 sameCwdRunningCount 回写到 SharedRuntime。

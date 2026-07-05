@@ -6690,3 +6690,20 @@ html[data-theme="dark"] .composer-float-inner.accent-purple:focus-within {
   justify-content: flex-end;
 }
 
+/* PickerPanel domain switch warning box */
+.picker-panel-warning {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: #d97706; /* amber-600 */
+  background: rgba(217, 119, 6, 0.06);
+  border-top: 1px solid var(--border);
+  white-space: normal;
+  word-break: break-word;
+}
+html[data-theme="dark"] .picker-panel-warning {
+  color: #fbbf24; /* amber-400 */
+  background: rgba(251, 191, 36, 0.04);
+}
+
+
