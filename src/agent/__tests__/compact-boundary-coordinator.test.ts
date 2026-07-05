@@ -158,6 +158,65 @@ describe('CompactBoundaryCoordinator (C-line: extracted, was untested)', () => {
   })
 })
 
+describe('CompactBoundaryCoordinator opportunistic compact (cold cache)', () => {
+  // Track entry into the stale-round compaction body via dietMessages — it is
+  // the first thing the body does, and never runs when the branch is gated off.
+  function makeOpp(opts: {
+    cold: boolean
+    ratio: number
+    delay?: boolean
+  }) {
+    let dietCalls = 0
+    // window 1000, ascii ≈ chars/4 → 4 messages × (ratio×1000) chars = ratio×1000 tokens
+    const charsEach = Math.round((opts.ratio * 1000 * 4) / 4)
+    const { coord, calls } = makeCoord({
+      getContextWindow: () => 1_000,
+      getMessages: () => bigMsgs(4, charsEach),
+      shouldOpportunisticCompact: () => opts.cold,
+      shouldDelayCompact: () => opts.delay ?? false,
+      dietMessages: (m) => { dietCalls++; return { removedCount: 0, messages: m } },
+    })
+    return { coord, calls, dietCalls: () => dietCalls }
+  }
+
+  it('cold cache lowers the trigger floor: ratio 0.4 compacts at turn 0', async () => {
+    const t = makeOpp({ cold: true, ratio: 0.4 })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.dietCalls(), 1, 'opportunistic path enters the stale-round body')
+  })
+
+  it('warm cache keeps the 0.5 floor: ratio 0.4 does nothing', async () => {
+    const t = makeOpp({ cold: false, ratio: 0.4 })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.dietCalls(), 0, 'without cold-cache signal the 0.5 floor holds')
+  })
+
+  it('cold cache still respects the 0.3 floor: ratio 0.2 does nothing', async () => {
+    const t = makeOpp({ cold: true, ratio: 0.2 })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.dietCalls(), 0, 'too little stale history — rewrite would not pay off')
+  })
+
+  it('cold cache bypasses shouldDelayCompact (its hit-rate memory predates the idle gap)', async () => {
+    const t = makeOpp({ cold: true, ratio: 0.6, delay: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.dietCalls(), 1, 'stale "cache healthy" verdict must not block a cold-cache compact')
+  })
+
+  it('warm cache with delay verdict still delays (existing discipline untouched)', async () => {
+    const t = makeOpp({ cold: false, ratio: 0.6, delay: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.dietCalls(), 0)
+  })
+
+  it('P2-5 unchanged: cold cache never rewrites off-boundary (turn ≠ 0)', async () => {
+    const t = makeOpp({ cold: true, ratio: 0.4 })
+    await t.coord.runCompaction(5, null)
+    assert.equal(t.dietCalls(), 0, 'opportunistic compaction is turn-0 only')
+    assert.equal(t.calls.pendingStaleCompact, false, 'sub-0.5 ratio is not queued either')
+  })
+})
+
 describe('CompactBoundaryCoordinator T9 (provider cost-aware quality compaction)', () => {
   // Build a coord whose T9 gate is reachable (large window) with a tracked
   // tryPartialCompact, configurable cost/cache classification, and an optional
