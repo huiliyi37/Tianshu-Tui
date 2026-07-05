@@ -859,6 +859,33 @@ describe('GWT salience and Top-K selection', () => {
       assert.doesNotMatch(sparse, /事实锚点核对/)
     })
 
+    // Regression (2026-07-05 plan-mode 卡死排查): the old "收尾契约 — 每个 turn 必须以
+    // ask_user_question 或 submit 结束" forced every planning turn to end with
+    // ask_user_question (endTurn:true → hard stop), so the model read a bit then
+    // stopped every run and never finished a plan in one flow. The contract is now
+    // "keep pushing autonomously, only ask on a real decision".
+    it('full variant does NOT force ask_user_question every turn (must push autonomously)', () => {
+      const full = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning', planInjectionVariant: 'full' })
+      assert.doesNotMatch(full, /每个 turn 必须以/)
+      assert.doesNotMatch(full, /禁止以纯文本收尾/)
+      // Autonomous continuation is explicit …
+      assert.match(full, /默认继续推进/)
+      assert.match(full, /自主连续/)
+      // … and ask_user_question is reserved for genuine divergence, never for "closing a turn".
+      assert.match(full, /真实分歧/)
+      assert.match(full, /给个交代而提问是禁止/)
+      // submit remains the maturity gate
+      assert.match(full, /plan action=submit/)
+    })
+
+    it('sparse variant reserves ask_user_question for real divergence, not turn-closing', () => {
+      const sparse = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning', planInjectionVariant: 'sparse' })
+      assert.doesNotMatch(sparse, /每个 turn 必须以/)
+      assert.match(sparse, /持续推进/)
+      assert.match(sparse, /实质分歧/)
+      assert.match(sparse, /不要为收尾/)
+    })
+
     it('renders the one-shot exit reminder when pending, even with plan mode off', () => {
       const out = buildDynamicAppendix({ cwd: '/repo', planExitReminderPending: true })
       assert.match(out, /<plan-mode-exit>/)
