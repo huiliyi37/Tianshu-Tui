@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildCognitiveMirror,
   buildCognitivePromptProjection,
   buildCognitiveProjectionParts,
   buildVerificationGapProjection,
@@ -264,4 +265,72 @@ describe('uncertainty framing projection — 万物为一原则④', () => {
     assert.match(projection, /<verification-gap/)
     assert.match(projection, /\[Uncertainty Framing\]/)
   })
+})
+
+// The mirror rides the appendixDelta: 2-decimal float dims drifted every turn
+// and the block never went byte-quiet. All continuous dims now render as
+// low/mid/high bands — bytes change only on band transitions, which are exactly
+// the state changes the model should perceive (2026-07-06).
+describe('cognitive mirror delta byte stability', () => {
+  function mirrorLedger(overrides: {
+    stability?: number
+    vigor?: number
+    convergencePrecision?: number
+    seasonIntensity?: number
+  } = {}) {
+    return createCognitiveLedger({
+      evidence: makeEvidence({ filesModified: new Set() }),
+      trace: makeTrace(),
+      turn: 5,
+      sensorium: {
+        momentum: 0.5, pressure: 0.3, confidence: 0.5,
+        complexity: 0.4, freshness: 0.5,
+        stability: overrides.stability ?? 0.42,
+      },
+      vigor: {
+        tonic: 0.6, phasic: 0.1, curiosity: 0.45, variability: 0.1, history: [],
+        vigor: overrides.vigor ?? 0.5,
+      },
+      season: 'return',
+      seasonIntensity: overrides.seasonIntensity ?? 0.43,
+      convergencePrecision: overrides.convergencePrecision ?? 0.55,
+    })
+  }
+
+  it('is byte-stable under sub-band sensorium jitter', () => {
+    const a = buildCognitiveMirror(mirrorLedger({ stability: 0.40, vigor: 0.48, convergencePrecision: 0.52, seasonIntensity: 0.40 }))
+    const b = buildCognitiveMirror(mirrorLedger({ stability: 0.45, vigor: 0.55, convergencePrecision: 0.60, seasonIntensity: 0.45 }))
+    assert.ok(a.length > 0)
+    assert.equal(a, b, 'same bands must render identical bytes')
+  })
+
+  it('changes bytes only on band transition', () => {
+    const mid = buildCognitiveMirror(mirrorLedger({ stability: 0.60 }))
+    const high = buildCognitiveMirror(mirrorLedger({ stability: 0.70 }))
+    assert.notEqual(mid, high, 'mid → high band transition must change bytes')
+    assert.match(mid, /stability="mid"/)
+    assert.match(high, /stability="high"/)
+  })
+
+  it('renders no 2-decimal floats for continuous dims', () => {
+    const out = buildCognitiveMirror(mirrorLedger())
+    assert.doesNotMatch(out, /(?:stability|vigor|curiosity|exploration|caution|complexity|convergence_precision|output_efficiency)="0\.\d\d"/)
+    assert.match(out, /season="return:(?:low|mid|high)"/)
+  })
+
+  it('keeps the exact verification_coverage literals (none / 0.00 / 1.00)', () => {
+    // No runs + no modified files → 'none'
+    const none = buildCognitiveMirror(mirrorLedger())
+    assert.match(none, /verification_coverage="none"/)
+    // No runs + modified files → honest '0.00' warning
+    const zero = buildCognitiveMirror(createCognitiveLedger({
+      evidence: makeEvidence(), trace: makeTrace(), turn: 5,
+      sensorium: makeSensoriumForMirror(),
+    }))
+    assert.match(zero, /verification_coverage="0\.00"/)
+  })
+
+  function makeSensoriumForMirror(): Sensorium {
+    return { momentum: 0.5, pressure: 0.3, confidence: 0.5, complexity: 0.4, freshness: 0.5, stability: 0.5 }
+  }
 })

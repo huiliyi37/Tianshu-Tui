@@ -106,8 +106,9 @@ describe('cognitive mirror — 认知镜面', () => {
     const mirror = buildCognitiveMirror(ledger)
 
     assert.ok(mirror.includes('reasoning="high"'))
-    assert.ok(mirror.includes('exploration="0.80"'))
-    assert.ok(mirror.includes('caution="0.90"'))
+    // Coarse bands since 2026-07-06 — 2-decimal floats churned the appendixDelta
+    assert.ok(mirror.includes('exploration="high"'))
+    assert.ok(mirror.includes('caution="high"'))
     assert.ok(mirror.includes('escalation="true"'))
   })
 
@@ -147,12 +148,14 @@ describe('cognitive mirror — 认知镜面', () => {
     const ledger = makeLedger({ sensorium, vigor })
     const mirror = buildCognitiveMirror(ledger)
 
-    assert.ok(mirror.includes('vigor="0.75"'))
+    assert.ok(mirror.includes('vigor="high"'))
     // curiosity === 0.3 时不展示（阈值 > 0.3）
     assert.ok(!mirror.includes('curiosity'))
   })
 
-  it('formats dimensions to 2 decimal places when evidence present', () => {
+  it('renders coarse bands for continuous dims even when evidence present', () => {
+    // 2026-07-06: was 2-decimal floats with evidence — the per-turn float drift
+    // kept the appendixDelta from ever going byte-quiet. Bands only now.
     const sensorium = makeSensorium({ confidence: 0.3333, complexity: 0.7777 })
     const ledger = makeLedger({
       sensorium,
@@ -163,8 +166,8 @@ describe('cognitive mirror — 认知镜面', () => {
     })
     const mirror = buildCognitiveMirror(ledger)
 
-    assert.ok(mirror.includes('verification_coverage="0.33"'), `got: ${mirror}`)
-    assert.ok(mirror.includes('complexity="0.78"'), `got: ${mirror}`)
+    assert.ok(mirror.includes('verification_coverage="low"'), `got: ${mirror}`)
+    assert.ok(mirror.includes('complexity="high"'), `got: ${mirror}`)
   })
 
   it('shows verification_coverage="0.00" when files modified but no verification run', () => {
