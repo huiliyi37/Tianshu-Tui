@@ -1121,6 +1121,15 @@ async function main() {
       }
     } finally {
       rl.close()
+      // Linux: readline.close() leaves stdin in flowing mode with residual
+      // 'keypress' listeners. Without pause + removeAllListeners, keystrokes
+      // typed between rl.close() and app.start() leak into the TUI input handler
+      // as raw characters — the "press 1/2 becomes a chat message" bug.
+      if (process.stdin.isTTY) {
+        process.stdin.pause()
+        process.stdin.removeAllListeners('data')
+        process.stdin.removeAllListeners('keypress')
+      }
     }
   } else if (ctx.templatesPendingAgents) {
     // headless / --dangerously-skip-permissions: silent .rivet.md, decline AGENTS.md
