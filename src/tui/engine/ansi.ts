@@ -90,6 +90,15 @@ export function cursorToCol(col: number): string {
   return `\x1B[${Math.max(1, Math.floor(col))}G`
 }
 
+/**
+ * 光标回零（column 0）。优先使用 CSI G（\x1B[G），因为 WSL 中 \r 可能被
+ * 终端驱动 icrnl 选项翻译为 \r\n（回车+换行），导致光标下移一行。
+ * CSI G 是 ANSI 标准，在所有 VT100+ 终端上行为一致。
+ */
+export function cursorToCol0(): string {
+  return '\x1B[G'
+}
+
 // ── SGR (Select Graphic Rendition) 颜色构建器 ──────────────────
 
 /**
@@ -140,3 +149,25 @@ export const QUERY_CURSOR_POS = '\x1B[6n'
 
 /** 查询终端尺寸（备用方案）。某些终端不支持 stdout.columns。 */
 export const QUERY_TERMINAL_SIZE = '\x1B[18t'
+
+/**
+ * 查询终端尺寸的结果。由 QUERY_TERMINAL_SIZE 响应 `\x1B[<rows>;<cols>t` 解析而来。 */
+export interface TerminalSizeQueryResult {
+  rows: number
+  columns: number
+}
+
+/**
+ * 解析 DECSTSS（\x1B[18t）响应。终端返回格式：`\x1B[<rows>;<cols>t`。
+ * 解析失败返回 null。 */
+export function parseTerminalSizeQuery(response: string): TerminalSizeQueryResult | null {
+  const m = response.match(/\x1B\[(\d+);(\d+)t/)
+  if (!m) return null
+  const rowsStr = m[1]
+  const colsStr = m[2]
+  if (!rowsStr || !colsStr) return null
+  const rows = parseInt(rowsStr, 10)
+  const cols = parseInt(colsStr, 10)
+  if (rows > 0 && cols > 0) return { rows, columns: cols }
+  return null
+}

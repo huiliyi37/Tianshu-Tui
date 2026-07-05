@@ -12,6 +12,7 @@ import chalk from 'chalk'
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { circleSpinnerFrame } from '../braille-spinner.js'
+import { shouldUseAsciiFallback } from './terminal-capabilities.js'
 
 export type SpinnerPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
 
@@ -45,7 +46,7 @@ const PHASE_LABELS: Record<SpinnerPhase, string> = {
 
 export function formatSpinnerStatus(input: SpinnerStatusInput, theme: RivetTheme): string | null {
   if (input.phase === 'idle') return null
-  const useAscii = chalk.level < 3
+  const useAscii = shouldUseAsciiFallback()
   const frame = spinnerFrame(input.tick, useAscii)
   const label = PHASE_LABELS[input.phase] ?? 'thinking…'
   const text = `${frame} ${label} ${formatElapsedHuman(input.elapsedMs)}`
@@ -71,7 +72,7 @@ export function formatTurnWorkSummary(input: {
   inputTokens: number
   outputTokens: number
 }, theme: RivetTheme): string {
-  const useAscii = chalk.level < 3
+  const useAscii = shouldUseAsciiFallback()
   const glyph = useAscii ? 'Y' : '◆'
   const elapsed = formatElapsedHuman(input.elapsedMs)
   const tokens = `${formatTokenCount(input.inputTokens)}→${formatTokenCount(input.outputTokens)}`

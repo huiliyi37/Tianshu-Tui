@@ -18,8 +18,9 @@
  */
 
 import type { WriteStream } from 'node:tty'
-import { ANSI, cursorUp, cursorDown } from './ansi.js'
+import { ANSI, cursorUp, cursorDown, cursorToCol0 } from './ansi.js'
 import { displayWidth, ambiguousWideEnabled } from '../width.js'
+import { getReliableTerminalSize } from '../use-terminal-size.js'
 
 export interface LiveRegionLine {
   /** 该行的 ANSI 格式化文本（包含颜色码） */
@@ -121,6 +122,15 @@ export class LiveEngine {
   }
 
   /**
+   * 安全获取 stdout 列数。WSL 中 stdout.columns 可能为 0/undefined，
+   * 此时回退到默认值 80。正常 Linux/macOS 终端直接返回 stdout.columns。
+   */
+  private safeColumns(): number {
+    const cols = this.stdout.columns
+    return cols && cols > 0 ? cols : 80
+  }
+
+  /**
    * 更新 live region 行上限（终端 resize 时调用）。
    * maxRows 若大于终端高度，全量重写的 cursorUp 回顶量会超出屏幕导致错位，
    * 因此调用方应传入高度感知的值（如 `min(28, rows - 1)`）。
@@ -133,7 +143,7 @@ export class LiveEngine {
 
   /** 单个 logical line 占用的 display rows（wrapping-aware）。 */
   private rowsForLine(text: string): number {
-    const width = this.stdout.columns || 80
+    const width = this.safeColumns()
     if (width <= 0) return 1
     // 行数估算必须与终端实际换行一致：CJK 终端把 ambiguous 符号按 2 列渲染，
     // 用 ambiguousAsWide 度量（env 门控，默认 narrow=string-width）避免低估行数。
@@ -163,7 +173,7 @@ export class LiveEngine {
    * 使其与终端 reflow 后的屏上行数一致，再做相对回顶。
    */
   private reconcileWidth(): void {
-    const currentColumns = this.stdout.columns || 80
+    const currentColumns = this.safeColumns()
     if (this.hasRendered && this.lastDisplayRows > 0 && currentColumns !== this.lastColumns) {
       this.lastDisplayRows = this.countDisplayRows(this.lineCache.map(text => ({ text })))
     }
@@ -190,7 +200,7 @@ export class LiveEngine {
     // 无需任何重绘（省去 diff 计算与 stdout 写入）。idle / ticker 空转的主要省功点。
     // 用 lineCache（屏上真实内容的权威记录）比对，天然兼容 clear/reset/overlay 退出：
     // 那些路径会令 lastDisplayRows===0 或 hasRendered===false，不会被误短路。
-    const currentColumns = this.stdout.columns || 80
+    const currentColumns = this.safeColumns()
     if (
       this.hasRendered &&
       this.lastDisplayRows > 0 &&
@@ -279,7 +289,7 @@ export class LiveEngine {
    */
   private buildFullRewrite(bounded: readonly LiveRegionLine[], prevDisplayRows: number): string {
     let out = this.moveToTop(prevDisplayRows)
-    out += '\r' + ANSI.ERASE_SCREEN_END
+    out += cursorToCol0() + ANSI.ERASE_SCREEN_END
     for (let i = 0; i < bounded.length; i++) {
       out += bounded[i]!.text
       if (i < bounded.length - 1) out += '\n'
@@ -301,13 +311,13 @@ export class LiveEngine {
     for (let i = 0; i < bounded.length; i++) {
       const text = bounded[i]!.text
       const rows = this.rowsForLine(text) // == rowsForLine(lineCache[i])，canDiff 已保证
-      out += '\r'
+      out += cursorToCol0()
       if (this.lineCache[i] !== text) {
         // 变化行：先擦除其占用的全部显示行（含 wrap 续行），再写入新内容。
         // 仅擦首行会让旧的 wrap 续行残留为 ghost。
         out += ANSI.ERASE_LINE
         for (let k = 1; k < rows; k++) {
-          out += cursorDown(1) + '\r' + ANSI.ERASE_LINE
+          out += cursorDown(1) + cursorToCol0() + ANSI.ERASE_LINE
         }
         if (rows > 1) out += cursorUp(rows - 1) // 回到本行首行再写
         out += text // 自动 wrap 至 rows 个显示行，光标落在最后一个显示行末
@@ -330,7 +340,7 @@ export class LiveEngine {
   clear(): void {
     this.reconcileWidth()
     if (this.lastDisplayRows === 0) return
-    this.stdout.write(this.moveToTop(this.lastDisplayRows) + '\r' + ANSI.ERASE_SCREEN_END)
+    this.stdout.write(this.moveToTop(this.lastDisplayRows) + cursorToCol0() + ANSI.ERASE_SCREEN_END)
     this.lastDisplayRows = 0
     this.lineCache = []
   }

@@ -7,6 +7,7 @@
 import chalk from 'chalk'
 import { ANSI, color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { shouldUseAsciiFallback } from './terminal-capabilities.js'
 
 export interface FormatThinkingInput {
   /** thinking 文本内容 */
@@ -40,7 +41,7 @@ export function formatThinking(input: FormatThinkingInput, theme: RivetTheme): s
 
   const lines: string[] = []
   const textLines = input.text.split('\n').filter(l => l.trim().length > 0)
-  const useAscii = chalk.level < 3
+  const useAscii = shouldUseAsciiFallback()
 
   // ── Header line ─────────────────────────────────────────────
   if (input.header !== false) {
