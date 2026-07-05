@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePlans, usePlan, useApprovePlan, useRejectPlan } from '../state/queries'
 import { Markdown } from '../components/Markdown'
-import type { PlanStatus, PlanSummary, PlanOption } from '../runtime/types'
+import type { PlanModeState, PlanStatus, PlanSummary, PlanOption } from '../runtime/types'
 import type { TodoStateItem } from '../runtime/types'
 import { ChevronDown, ChevronUp, LayoutList, Search } from 'lucide-react'
+
+/** Sentinel selection value for the live plan-mode draft (not a real slug). */
+const DRAFT_SELECTION = '__draft__'
 
 const STATUS_LABEL: Record<PlanStatus, string> = {
   submitted: '待审',
@@ -42,9 +45,11 @@ export function PlanPanel(props: {
   planRev: number
   latestPlanSlug?: string
   todos?: TodoStateItem[]
+  planMode?: PlanModeState
 }) {
-  const { sessionId, planRev, latestPlanSlug } = props
-  const plans = usePlans(sessionId, planRev)
+  const { sessionId, planRev, latestPlanSlug, planMode } = props
+  const planning = planMode === 'planning'
+  const plans = usePlans(sessionId, planRev, planning)
   const [selected, setSelected] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterMode>('active')
   const [query, setQuery] = useState('')
@@ -57,7 +62,10 @@ export function PlanPanel(props: {
   const approve = useApprovePlan()
   const reject = useRejectPlan()
 
-  const all = plans.data ?? []
+  const all = plans.data?.plans ?? []
+  // Live drafting document — only meaningful while the session is planning.
+  const draft = planning ? plans.data?.draft ?? null : null
+  const isDraftSelected = selected === DRAFT_SELECTION && !!draft
   // Sort: submitted first (newest), then approved/executed, rejected last.
   const STATUS_ORDER: Record<PlanStatus, number> = { submitted: 0, approved: 1, executed: 2, rejected: 3 }
   const sorted = useMemo(
@@ -77,22 +85,31 @@ export function PlanPanel(props: {
   )
 
   // Auto-select: prefer the freshly submitted plan, else the newest, when no
-  // valid selection is held.
-  const selectedExists = selected != null && filtered.some((p) => p.slug === selected)
+  // valid selection is held. The draft sentinel counts as a valid selection
+  // while a draft exists; when the draft vanishes (submit / plan-mode exit),
+  // selection falls through to latestPlanSlug — the just-submitted plan.
+  const selectedExists =
+    selected != null &&
+    (filtered.some((p) => p.slug === selected) || (selected === DRAFT_SELECTION && !!draft))
   useEffect(() => {
     if (selectedExists) return
+    // While drafting with nothing else to show, surface the growing document.
+    if (draft && !latestPlanSlug) {
+      setSelected(DRAFT_SELECTION)
+      return
+    }
     // Auto-select prefers the freshly submitted plan, else the newest non-rejected.
     // Never auto-select a rejected plan — user dismissed it, shouldn't resurface.
     const candidates = filter === 'active' ? sorted.filter((p) => matchesFilter(p, 'active')) : sorted
     const next =
       latestPlanSlug && candidates.some((p) => p.slug === latestPlanSlug)
         ? latestPlanSlug
-        : candidates[0]?.slug ?? null
+        : candidates[0]?.slug ?? (draft ? DRAFT_SELECTION : null)
     setSelected(next)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestPlanSlug, sorted.length, filter, selectedExists])
+  }, [latestPlanSlug, sorted.length, filter, selectedExists, !!draft])
 
-  const doc = usePlan(sessionId, selected, planRev)
+  const doc = usePlan(sessionId, selected === DRAFT_SELECTION ? null : selected, planRev)
   const current = useMemo(
     () => all.find((p) => p.slug === selected) ?? null,
     [all, selected],
@@ -183,7 +200,16 @@ export function PlanPanel(props: {
 
       {expanded ? (
         <div className="plan-list-compact">
-          {filtered.length === 0 && (
+          {draft && (
+            <button
+              className={`plan-item-row ${isDraftSelected ? 'active' : ''}`}
+              onClick={() => { setSelected(DRAFT_SELECTION); setRejecting(false) }}
+            >
+              <span className="plan-badge st-drafting">起草中</span>
+              <span className="plan-title">{draft.title ?? '正在起草方案…'}</span>
+            </button>
+          )}
+          {filtered.length === 0 && !draft && (
             <div className="empty sm">{query ? '没有匹配的方案' : '该过滤条件下没有方案'}</div>
           )}
           {filtered.map((p) => (
@@ -193,13 +219,26 @@ export function PlanPanel(props: {
               onClick={() => { setSelected(p.slug); setRejecting(false) }}
             >
               <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
+              {p.modelTier === 'cheap' && (
+                <span className="plan-badge st-cheap-model" title={`本计划由低阶模型（${p.model}）产出，建议复核`}>⚠ 低阶模型</span>
+              )}
               <span className="plan-title">{p.title}</span>
             </button>
           ))}
         </div>
       ) : (
         <div className="plan-chips">
-          {filtered.length === 0 && (
+          {draft && (
+            <button
+              className={`plan-chip draft ${isDraftSelected ? 'active' : ''}`}
+              onClick={() => { setSelected(DRAFT_SELECTION); setRejecting(false) }}
+              title={draft.title ?? '正在起草方案…'}
+            >
+              <span className="plan-badge st-drafting">起草中</span>
+              <span className="plan-chip-title">{draft.title ?? '正在起草方案…'}</span>
+            </button>
+          )}
+          {filtered.length === 0 && !draft && (
             <div className="empty sm">{query ? '没有匹配的方案' : '该过滤条件下没有方案'}</div>
           )}
           {filtered.map((p) => (
@@ -207,17 +246,33 @@ export function PlanPanel(props: {
               key={p.slug}
               className={`plan-chip ${p.slug === selected ? 'active' : ''}`}
               onClick={() => { setSelected(p.slug); setRejecting(false) }}
-              title={p.title}
+              title={p.modelTier === 'cheap' ? `${p.title} — 由低阶模型（${p.model}）产出，建议复核` : p.title}
             >
               <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
+              {p.modelTier === 'cheap' && <span className="plan-badge st-cheap-model">⚠</span>}
               <span className="plan-chip-title">{p.title}</span>
             </button>
           ))}
         </div>
       )}
 
+      {isDraftSelected && draft && (
+        <div className="plan-detail">
+          <div className="plan-doc">
+            {draft.content.trim()
+              ? <Markdown source={draft.content} />
+              : <div className="empty sm">正在起草方案…</div>}
+          </div>
+        </div>
+      )}
+
       {current && (
         <div className="plan-detail">
+          {current.modelTier === 'cheap' && current.status === 'submitted' && (
+            <div className="plan-model-warning">
+              ⚠ 本计划由低阶模型（{current.model}）产出，计划真实度可能不足，建议对关键改动点复核后再 Build。
+            </div>
+          )}
           <div className="plan-doc">
             {doc.isLoading && <div className="empty sm">加载方案…</div>}
             {doc.data?.content && <Markdown source={doc.data.content} />}

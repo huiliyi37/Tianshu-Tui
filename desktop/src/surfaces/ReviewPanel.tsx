@@ -8,8 +8,9 @@ import {
   rollbackSession,
   type RollbackResult,
 } from '../runtime/client'
-import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, LineComment, PlanModeState, TodoStateItem } from '../runtime/types'
+import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, LineComment, PlanModeState, TodoStateItem, SessionRecord } from '../runtime/types'
 import { useEnabledTabs } from '../lib/review-tabs'
+import { useSessions } from '../state/queries'
 import { DiffView } from '../components/DiffView'
 import { FilePath } from '../components/FilePath'
 import { FileViewer } from '../components/FileViewer'
@@ -34,7 +35,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
-type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files' | 'canvas' | 'browser'
+import type { ReviewTab } from '../lib/review-tabs'
 
 interface TabDef {
   id: ReviewTab
@@ -69,7 +70,7 @@ export function ReviewPanel(props: {
   const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse, onSendPrompt } = props
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
-  const [tab, setTab] = useState<ReviewTab>('review')
+  const [tab, setTab] = useState<ReviewTab>('changes')
 
   // External tab-focus requests (e.g. ArtifactCard "Review" in the thread).
   const { reviewTabRequest } = useUiState()
@@ -77,9 +78,14 @@ export function ReviewPanel(props: {
   useEffect(() => {
     if (!reviewTabRequest || reviewTabRequest.rev === seenTabReq.current) return
     seenTabReq.current = reviewTabRequest.rev
-    const requested = reviewTabRequest.tab as ReviewTab
-    if (['review', 'plan', 'task', 'github', 'wt', 'files', 'canvas', 'browser'].includes(requested)) {
-      setTab(requested)
+    let requested = reviewTabRequest.tab as any
+    if (requested === 'review' || requested === 'wt') {
+      requested = 'changes'
+    } else if (requested === 'plan' || requested === 'task') {
+      requested = 'tasks'
+    }
+    if (['changes', 'tasks', 'files', 'canvas', 'github', 'browser'].includes(requested)) {
+      setTab(requested as ReviewTab)
     }
   }, [reviewTabRequest])
 
@@ -141,16 +147,16 @@ export function ReviewPanel(props: {
     el.scrollBy({ left: dx, behavior: 'smooth' })
   }
 
-  // Auto-focus the plan tab when planning starts or a fresh plan lands, so the
+  // Auto-focus the tasks tab when planning starts or a fresh plan lands, so the
   // reviewable plan surfaces without a manual tab switch (Cursor 3.0 flow).
   const prevSlug = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (planMode === 'planning') setTab('plan')
+    if (planMode === 'planning') setTab('tasks')
   }, [planMode])
   useEffect(() => {
     if (latestPlanSlug && latestPlanSlug !== prevSlug.current) {
       prevSlug.current = latestPlanSlug
-      setTab('plan')
+      setTab('tasks')
     }
   }, [latestPlanSlug])
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
@@ -269,20 +275,33 @@ export function ReviewPanel(props: {
   const pendingCount = pendingApproval ? 1 : 0
   const incompleteTasks = todos.filter((t) => t.status !== 'completed').length
 
+  const sessions = useSessions()
+  const session = sessions.data?.find((s: SessionRecord) => s.id === sessionId)
+
   const tabs = useMemo<TabDef[]>(() => {
+    const hasCanvas = canvasArtifacts.length > 0
+    const hasBrowser = artifacts.some((a) => a.kind === 'screenshot')
+    const hasGithub = Boolean(session?.worktreeBranch)
+
     const all: TabDef[] = [
-      { id: 'review', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
-      { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
-      { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
-      { id: 'canvas', label: 'Canvas', glyph: '🎨' },
-      { id: 'wt', label: 'Diff', glyph: '⟐' },
+      { id: 'changes', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
+      { id: 'tasks', label: 'Tasks', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : (incompleteTasks || null)) },
       { id: 'files', label: 'Files', glyph: '📁' },
-      { id: 'github', label: 'PR', glyph: '🔀' },
-      { id: 'browser', label: 'Browser', glyph: '🌐' },
     ]
+
+    if (hasCanvas) {
+      all.push({ id: 'canvas', label: 'Canvas', glyph: '🎨' })
+    }
+    if (hasGithub) {
+      all.push({ id: 'github', label: 'PR', glyph: '🔀' })
+    }
+    if (hasBrowser) {
+      all.push({ id: 'browser', label: 'Browser', glyph: '🌐' })
+    }
+
     const filtered = all.filter((t) => enabledTabs.includes(t.id))
     return filtered.length > 0 ? filtered : [all[0]!]
-  }, [pendingCount, planMode, incompleteTasks, enabledTabs])
+  }, [pendingCount, planMode, incompleteTasks, enabledTabs, canvasArtifacts.length, artifacts, session])
 
   // Fallback active tab if current tab gets disabled
   useEffect(() => {
@@ -497,17 +516,45 @@ export function ReviewPanel(props: {
             )}
           </div>
         </TabsContent>
-        <TabsContent value="wt" className="review-body">
+        <TabsContent value="changes" className="review-body">
           <ChangesTab sessionId={sessionId} onSendPrompt={onSendPrompt} />
+
+          {autonomous && !pendingApproval && (
+            <section className="review-section mt-4 border-t border-border pt-4">
+              <div className="autonomy-note">
+                <span className="ab-glyph" aria-hidden>✦</span>
+                自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。
+              </div>
+            </section>
+          )}
+
+          {artifacts.filter(a => a.kind === 'diff').length > 0 && (
+            <section className="review-section mt-4 border-t border-border pt-4">
+              <h4>Git 变更 · 代码审查</h4>
+              {artifacts.filter(a => a.kind === 'diff').map((a) => (
+                <div key={a.id} className="artifact-card diff" onClick={() => view(a)}>
+                  <div className="kind">{a.kind} · {a.target}</div>
+                  <div className="summary">{a.summary || a.target}</div>
+                  <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
+                </div>
+              ))}
+            </section>
+          )}
+
+          {sessionId && (
+            <section className="review-section mt-4 border-t border-border pt-4">
+              <h4>检查点 · 回滚</h4>
+              <RollbackSection sessionId={sessionId} />
+            </section>
+          )}
         </TabsContent>
         <TabsContent value="files" className="review-body">
           <FileExplorer sessionId={sessionId} cwd={cwd} />
         </TabsContent>
-        <TabsContent value="plan" className="review-body">
-          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} todos={todos} />
-        </TabsContent>
-        <TabsContent value="task" className="review-body">
-          <section className="review-section">
+        <TabsContent value="tasks" className="review-body">
+          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} todos={todos} planMode={planMode} />
+          
+          <section className="review-section mt-4 border-t border-border pt-4">
             <h4>任务清单</h4>
             {todos.length === 0 && <div className="empty sm">还没有任务</div>}
             {todos.map((t) => (
@@ -527,7 +574,7 @@ export function ReviewPanel(props: {
             onClose={() => setFileContent(null)}
           />
 
-          <section className="review-section">
+          <section className="review-section mt-4 border-t border-border pt-4">
             <h4>工件 · {artifacts.length}</h4>
             {artifacts.length === 0 && <div className="empty sm">还没有工件</div>}
             {artifacts.map((a) => (
@@ -539,55 +586,9 @@ export function ReviewPanel(props: {
             ))}
           </section>
         </TabsContent>
-        <TabsContent value="review" className="review-body">
-          {autonomous && !pendingApproval && (
-            <section className="review-section">
-              <div className="autonomy-note">
-                <span className="ab-glyph" aria-hidden>✦</span>
-                自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。
-              </div>
-            </section>
-          )}
-
-          <section className="review-section">
-            <h4>Git 变更 · 代码审查</h4>
-            {artifacts.filter(a => a.kind === 'diff').length === 0 ? (
-              <div className="empty sm">
-                <p>还没有 diff 工件。在对话中输入 <code>/review</code> 让 agent 对未提交变更执行代码审查。</p>
-              </div>
-            ) : (
-              artifacts.filter(a => a.kind === 'diff').map((a) => (
-                <div key={a.id} className="artifact-card diff" onClick={() => view(a)}>
-                  <div className="kind">{a.kind} · {a.target}</div>
-                  <div className="summary">{a.summary || a.target}</div>
-                  <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
-                </div>
-              ))
-            )}
-          </section>
-
-          <section className="review-section">
-            <h4>其他工件 · {artifacts.filter(a => a.kind !== 'diff').length}</h4>
-            {artifacts.filter(a => a.kind !== 'diff').length === 0 && <div className="empty sm">还没有其他工件</div>}
-            {artifacts.filter(a => a.kind !== 'diff').map((a) => (
-              <div key={a.id} className="artifact-card" onClick={() => view(a)}>
-                <div className="kind">{a.kind}</div>
-                <div className="summary">{a.summary || a.target}</div>
-                <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
-              </div>
-            ))}
-          </section>
-
-          {sessionId && (
-            <section className="review-section">
-              <h4>检查点 · 回滚</h4>
-              <RollbackSection sessionId={sessionId} />
-            </section>
-          )}
-        </TabsContent>
       </Tabs>
 
-      <TodoDock items={todos} collapsedList={tab === 'task'} onOpenFull={() => setTab('task')} />
+      <TodoDock items={todos} collapsedList={tab === 'tasks'} onOpenFull={() => setTab('tasks')} />
 
       {open && (
         <div className="modal-backdrop" onClick={() => setOpen(null)}>

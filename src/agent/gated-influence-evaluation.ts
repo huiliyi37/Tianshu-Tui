@@ -219,6 +219,15 @@ export function evaluateGatedInfluenceHistory(
     metrics.model_routing.totalShadowSamples++
   }
 
+  const effortRewards = new Map<string, Accumulator>()
+  for (const row of store.loadBanditStatesByPrefix('effort_shadow:', limit)) {
+    const parsed = parseJson<{ schemaVersion?: unknown; recommendedArm?: unknown; reward?: unknown }>(row.json)
+    if (parsed?.schemaVersion !== 1 || typeof parsed.recommendedArm !== 'string') { malformedRows++; continue }
+    metrics.effort_bandit.totalShadowSamples++
+    const reward = finiteNumber(parsed.reward)
+    if (reward !== undefined) add(effortRewards, parsed.recommendedArm, reward)
+  }
+
   for (const row of store.loadBanditStatesByPrefix('team_physarum_supervision:', limit)) {
     const parsed = parseJson<{ schemaVersion?: unknown; applied?: unknown; safeToApply?: unknown; scopeSeverity?: unknown }>(row.json)
     if (parsed?.schemaVersion !== 1) { malformedRows++; continue }
@@ -293,6 +302,7 @@ export function evaluateGatedInfluenceHistory(
   for (const [key, acc] of schedulerRewards) metrics.team_scheduler_bandit.averageRewardByCandidate[key] = average(acc)!
   for (const [key, acc] of tierRewards) metrics.model_tier_bandit.averageRewardByCandidate[key] = average(acc)!
   for (const [key, acc] of routingRewards) metrics.model_routing.averageRewardByCandidate[key] = average(acc)!
+  for (const [key, acc] of effortRewards) metrics.effort_bandit.averageRewardByCandidate[key] = average(acc)!
   if (schedulerRewardSamples > 0) metrics.team_scheduler_bandit.falseGreenRate = schedulerFalseGreen / schedulerRewardSamples
   if (schedulerScopeLeakSamples > 0) metrics.team_scheduler_bandit.scopeLeakRate = Math.round((schedulerScopeLeakTotal / schedulerScopeLeakSamples) * 1_000_000) / 1_000_000
   if (tierRewardSamples > 0) metrics.model_tier_bandit.falseGreenRate = tierFalseGreen / tierRewardSamples

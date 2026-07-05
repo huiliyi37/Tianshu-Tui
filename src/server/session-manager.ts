@@ -45,12 +45,23 @@ import type { ActiveStarDomain } from '../agent/star-domain.js'
 import type { StarDomainId } from '../agent/star-domain.js'
 import { skillRegistry, loadProjectSkills, listInstallableSkills, importSkillsIntoRivet, countInstalledSkills, type InstallableSkill } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
-import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
+import { readFile } from 'node:fs/promises'
+import { createWorktree, removeWorktree, listWorktrees, hasUnlandedWork, commitAll, revParseHead, squashMergeBranch, pushBranch, type WorktreeEntry } from '../agent/worktree.js'
+import { createPr } from './gh-cli.js'
 import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
 import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
+import { parseAskUserQuestions } from '../tools/ask-user-question.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
+
+/** Live plan-mode draft surfaced to the desktop — a growing working document,
+ *  not a submitted plan. Title is the draft's H1 (null while still empty). */
+export interface PlanDraft {
+  path: string
+  title: string | null
+  content: string
+}
 
 export type SessionEventType =
   | 'user'
@@ -77,6 +88,8 @@ export type SessionEventType =
   // Plan mode — state toggle (off|planning) + a plan was submitted to disk.
   | 'plan_mode'
   | 'plan_submitted'
+  // Structured ask_user_question payload → desktop question card (Cursor-style).
+  | 'user_question'
   // PlusMenu — per-session model / star-domain / skill selection changes.
   | 'model_switched'
   | 'domain_changed'
@@ -88,6 +101,8 @@ export type SessionEventType =
   | 'done'
   // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
   | 'watchdog_recovery'
+  // Change landing — commit / squash merge-back / PR created from the Changes tab.
+  | 'landing'
   // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
   | 'autonomy_checkpoint'
 
@@ -150,6 +165,12 @@ export interface SessionRecord {
   worktreeBranch?: string
   /** Worktree path on disk (for cleanup on archive/close). */
   worktreePath?: string
+  /** HEAD commit at session creation — diff baseline for the Changes tab (worktree sessions). */
+  baselineHead?: string
+  /** Worktree branch head at the last successful merge-back. Squash merges
+   *  leave the branch commits unreachable from main, so rev-list can't tell
+   *  "landed" — this marker lets archive safely delete a landed branch. */
+  landedHead?: string
 }
 
 /** PlusMenu — a selectable model across all configured providers. */
@@ -222,6 +243,19 @@ export interface ManagedAgent {
    */
   enterPlanMode?(opts?: { planFilePath?: string }): void
   exitPlanMode?(): void
+  /**
+   * Plan mode change notification — assigned by the session layer so agent-side
+   * transitions (e.g. the model calling plan action=enter_mode) surface as
+   * plan_mode SSE events. Mirrors AgentLoop.onPlanModeChange. Optional so
+   * lightweight test doubles need not implement it.
+   */
+  onPlanModeChange?: (state: PlanModeState) => void
+  /**
+   * Relative path of the working draft the agent writes while in plan mode
+   * (null when not planning). Mirrors AgentLoop.getActivePlanFilePath.
+   * Optional so lightweight test doubles need not implement it.
+   */
+  getActivePlanFilePath?(): string | null
   /**
    * Set (or clear) the approved-plan pointer. Injects a tiny slug/title/path
    * reminder into the agent's dynamic appendix (NOT the plan body, which stays
@@ -440,6 +474,8 @@ export interface RuntimeSessionManagerOptions {
    * initial record.model and the picker's `current` flag.
    */
   defaultModelId?: string
+  /** PlusMenu (domain) — the default domain key new sessions start on. */
+  defaultDomain?: string
 }
 
 type InterventionKind = 'approval'
@@ -606,6 +642,7 @@ export class RuntimeSessionManager {
   private readonly getRegistry?: () => SessionRegistry | undefined
   private readonly listModelsFn?: () => ModelOption[]
   private readonly defaultModelId?: string
+  private readonly defaultDomain?: string
 
   constructor(opts: RuntimeSessionManagerOptions) {
     this.createAgent = opts.createAgent
@@ -906,6 +943,7 @@ export class RuntimeSessionManager {
     let cwd = input.cwd ?? this.defaultCwd
     let worktreeBranch: string | undefined
     let worktreePath: string | undefined
+    let baselineHead: string | undefined
 
     if (input.isolatedWorktree) {
       try {
@@ -913,6 +951,9 @@ export class RuntimeSessionManager {
         worktreeBranch = wt.branch
         worktreePath = wt.path
         cwd = wt.path
+        // Diff baseline for the Changes tab: task delta stays visible even
+        // after the agent commits mid-task.
+        baselineHead = revParseHead(wt.path)
       } catch {
         // Worktree creation failed — fall back to shared cwd silently.
       }
@@ -931,9 +972,10 @@ export class RuntimeSessionManager {
         pendingApprovals: 0,
         approvalMode: input.approvalMode,
         model: this.defaultModelId,
-        domain: 'auto',
+        domain: this.defaultDomain ?? 'auto',
         worktreeBranch,
         worktreePath,
+        baselineHead,
       },
       agent: null,
       approvalMode: input.approvalMode,
@@ -945,7 +987,9 @@ export class RuntimeSessionManager {
       listeners: new Set(),
       knownArtifacts: new Set(),
       steer: new SteerBuffer(),
-      domainState: undefined,
+      domainState: this.defaultDomain && this.defaultDomain !== 'auto'
+        ? resolveDomainState(this.defaultDomain)?.state
+        : undefined,
       disabledSkills: new Set(),
       skillLoadErrors: [],
     }
@@ -1159,6 +1203,16 @@ export class RuntimeSessionManager {
     try {
       if (session.disabledSkills.size > 0) agent.setDisabledSkills?.(new Set(session.disabledSkills))
     } catch { /* non-fatal */ }
+    // 主动 plan mode：模型经 plan action=enter_mode 自主切换时，把状态镜像到
+    // session record 并发 plan_mode SSE（桌面切 Plan tab）。server 自己触发的
+    // 切换（setPlanMode/approve/reject）已直接 append —— 状态相同时跳过防重复。
+    agent.onPlanModeChange = (state: PlanModeState) => {
+      if (session.record.planMode === state) return
+      session.record.planMode = state
+      this.touch(session)
+      this.append(session, 'plan_mode', { state })
+      this.persistRecord(session)
+    }
   }
 
   // ── PlusMenu: star domain ─────────────────────────────────────
@@ -1370,6 +1424,28 @@ export class RuntimeSessionManager {
   }
 
   /**
+   * Active plan-mode draft — the working document the agent writes while
+   * planning. Drafts are NOT submitted plans (listPlans filters them); the
+   * desktop renders this as a live "起草中" view instead. Returns `undefined`
+   * when the session is missing, `null` when it exists but is not planning
+   * or has no readable draft. Title is the draft's H1, null while empty.
+   */
+  async readPlanDraft(id: string): Promise<PlanDraft | null | undefined> {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    if (session.record.planMode !== 'planning') return null
+    const path = session.agent?.getActivePlanFilePath?.() ?? null
+    if (!path) return null
+    try {
+      const content = await readFile(join(session.record.cwd, path), 'utf-8')
+      const h1 = content.match(/^#\s+(.+)$/m)
+      return { path, title: h1 ? h1[1]!.trim() : null, content }
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Read a single plan's full content. Returns `undefined` when the session is
    * missing and `null` when the session exists but the plan does not — letting
    * the route distinguish 404 reasons.
@@ -1422,8 +1498,12 @@ export class RuntimeSessionManager {
       })
     } catch { /* non-fatal */ }
     try { agent.exitPlanMode?.() } catch { /* non-fatal */ }
-    session.record.planMode = 'off'
-    this.append(session, 'plan_mode', { state: 'off' })
+    // agent.onPlanModeChange 可能已镜像 record 并发过 plan_mode —— 条件补发防重复，
+    // 同时兜底不支持回调的轻量 double。
+    if (session.record.planMode !== 'off') {
+      session.record.planMode = 'off'
+      this.append(session, 'plan_mode', { state: 'off' })
+    }
     this.touch(session)
     this.persistRecord(session)
     let kickoff = `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`
@@ -1453,8 +1533,11 @@ export class RuntimeSessionManager {
     try {
       agent.enterPlanMode?.({ planFilePath: `.rivet/plans/${slug}.md` })
     } catch { /* non-fatal */ }
-    session.record.planMode = 'planning'
-    this.append(session, 'plan_mode', { state: 'planning' })
+    // 同 approvePlan：enterPlanMode 的 onPlanModeChange 回调可能已发过 plan_mode。
+    if (session.record.planMode !== 'planning') {
+      session.record.planMode = 'planning'
+      this.append(session, 'plan_mode', { state: 'planning' })
+    }
     this.append(session, 'plan_submitted', { slug, title: rejected.title, status: 'rejected' })
     this.touch(session)
     this.persistRecord(session)
@@ -1738,12 +1821,34 @@ export class RuntimeSessionManager {
     }
     s.record.archived = true
     s.running = false
-    // Clean up isolated worktree on archive (best-effort).
+    // Clean up isolated worktree on archive. Guard against data loss: if the
+    // worktree has uncommitted changes, checkpoint-commit them first; if the
+    // branch carries commits not merged into the main workspace, keep the
+    // branch (only the worktree directory is removed) so work stays landable.
+    let branchKept = false
     if (s.record.worktreePath) {
-      try { removeWorktree(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch) } catch { /* non-fatal */ }
+      try {
+        const work = hasUnlandedWork(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch)
+        if (work.dirty) {
+          // worktree remove --force discards uncommitted changes — snapshot them.
+          commitAll(s.record.worktreePath, 'rivet: archive checkpoint', { noVerify: true })
+        }
+        const after = work.dirty || work.unmergedCommits > 0
+          ? hasUnlandedWork(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch)
+          : work
+        // Squash merge-back leaves branch commits unreachable from main —
+        // the landedHead marker proves they were landed. A branch head that
+        // hasn't moved past the last merge-back is safe to delete.
+        const landed = Boolean(s.record.landedHead)
+          && revParseHead(s.record.worktreePath) === s.record.landedHead
+        branchKept = Boolean(s.record.worktreeBranch) && after.unmergedCommits > 0 && !landed
+        removeWorktree(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch, { keepBranch: branchKept })
+      } catch { /* non-fatal */ }
     }
     this.touch(s)
-    this.append(s, 'status', { status: 'archived' })
+    this.append(s, 'status', branchKept
+      ? { status: 'archived', branchKept: true, worktreeBranch: s.record.worktreeBranch }
+      : { status: 'archived' })
     this.persistRecord(s)
     try { this.getRegistry?.()?.releaseAllClaims(id) } catch (e) { console.warn('releaseAllClaims failed during archive:', e) }
     return true
@@ -1794,6 +1899,109 @@ export class RuntimeSessionManager {
   /** Unified diff of a single file relative to HEAD (on-demand). */
   async getFileDiff(path: string, cwd?: string): Promise<string> {
     return getFileDiff(cwd ?? this.defaultCwd, path)
+  }
+
+  /**
+   * Resolve the git context of a session: worktree cwd (falls back to the
+   * shared default cwd) and the diff baseline (recorded creation HEAD for
+   * worktree sessions, plain HEAD otherwise).
+   */
+  private sessionGitContext(id: string): { cwd: string; baseRef: string } | null {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    const cwd = s.record.worktreePath ?? this.defaultCwd
+    const baseRef = s.record.baselineHead ?? 'HEAD'
+    return { cwd, baseRef }
+  }
+
+  /** Session-scoped working-tree changes (worktree cwd + task baseline). */
+  async getSessionWorkingTree(id: string): Promise<{ files: WorkingTreeFile[]; isRepo: boolean } | null> {
+    const ctx = this.sessionGitContext(id)
+    if (!ctx) return null
+    const result = await getWorkingTreeFiles(ctx.cwd, ctx.baseRef)
+    // The worktree owner marker is infrastructure, not user work — hide it.
+    return { ...result, files: result.files.filter(f => f.path !== '.vsw-owner.json') }
+  }
+
+  /** Session-scoped single-file diff (worktree cwd + task baseline). */
+  async getSessionFileDiff(id: string, path: string): Promise<string | null> {
+    const ctx = this.sessionGitContext(id)
+    if (!ctx) return null
+    return getFileDiff(ctx.cwd, path, ctx.baseRef)
+  }
+
+  // ── Change landing (desktop Changes tab: Commit / Merge back / Create PR) ──
+
+  /**
+   * Stage and commit everything in the session's cwd (worktree for isolated
+   * sessions, shared cwd otherwise). Server-direct path of the dual-channel
+   * design — the "let the agent commit" path goes through a normal prompt.
+   */
+  commitSessionChanges(id: string, message?: string): { ok: boolean; sha?: string; nothingToCommit?: boolean; error?: string } | null {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    const cwd = s.record.worktreePath ?? this.defaultCwd
+    const fallback = `rivet: ${s.record.title?.trim() || `session ${id.slice(0, 8)}`} changes`
+    const result = commitAll(cwd, message?.trim() || fallback)
+    if (result.ok && result.sha) {
+      this.append(s, 'landing', { action: 'commit', sha: result.sha })
+      this.touch(s)
+    }
+    return result
+  }
+
+  /**
+   * Squash-merge the session's worktree branch into the main workspace's
+   * current branch. Uncommitted worktree changes are committed first so the
+   * squash captures the full task delta. Fail-closed on dirty main workspace
+   * or conflicts (rolled back, conflict files reported).
+   */
+  mergeSessionBack(id: string): { ok: boolean; sha?: string; nothingToMerge?: boolean; conflictFiles?: string[]; error?: string } | null {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    if (!s.record.worktreeBranch || !s.record.worktreePath) {
+      return { ok: false, error: 'not a worktree session — nothing to merge back' }
+    }
+    // Sweep uncommitted work into the branch first (squash flattens it anyway).
+    const checkpoint = commitAll(s.record.worktreePath, 'rivet: pre-merge checkpoint', { noVerify: true })
+    if (!checkpoint.ok) return { ok: false, error: `failed to checkpoint worktree: ${checkpoint.error}` }
+    const title = s.record.title?.trim() || 'session changes'
+    const result = squashMergeBranch(this.defaultCwd, s.record.worktreeBranch, `${title} (rivet session ${id.slice(0, 8)})`)
+    if (result.ok) {
+      // Squash merges leave the branch commits unreachable from main, so
+      // rev-list alone can't prove "landed". Record the branch head at merge
+      // time — archive deletes the branch when it hasn't moved past this.
+      s.record.landedHead = revParseHead(s.record.worktreePath)
+      if (result.sha) this.append(s, 'landing', { action: 'merge_back', sha: result.sha, branch: s.record.worktreeBranch })
+      this.touch(s)
+      this.persistRecord(s)
+    }
+    return result
+  }
+
+  /**
+   * Push the session's worktree branch and open a PR via `gh pr create`.
+   * Uncommitted changes are checkpoint-committed first.
+   */
+  async createSessionPr(id: string, title?: string, body?: string): Promise<{ ok: boolean; url?: string; error?: string } | null> {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    if (!s.record.worktreeBranch || !s.record.worktreePath) {
+      return { ok: false, error: 'not a worktree session — create PRs from an isolated worktree session' }
+    }
+    const checkpoint = commitAll(s.record.worktreePath, 'rivet: pre-PR checkpoint', { noVerify: true })
+    if (!checkpoint.ok) return { ok: false, error: `failed to checkpoint worktree: ${checkpoint.error}` }
+    const pushed = pushBranch(s.record.worktreePath, s.record.worktreeBranch)
+    if (!pushed.ok) return { ok: false, error: `git push failed: ${pushed.error}` }
+    const result = await createPr(s.record.worktreePath, {
+      title: title?.trim() || s.record.title?.trim(),
+      body: body?.trim() || `Created from Rivet session ${id.slice(0, 8)}.`,
+    })
+    if (result.ok && result.url) {
+      this.append(s, 'landing', { action: 'pr_created', url: result.url, branch: s.record.worktreeBranch })
+      this.touch(s)
+    }
+    return result
   }
 
   /** Expose defaultCwd for routes that need the repo root (e.g. gh CLI). */
@@ -2140,6 +2348,23 @@ export class RuntimeSessionManager {
         if (name === 'todo') {
           const items = extractTodoState(input)
           if (items) this.append(session, 'todo_state', { items })
+        }
+        // 结构化提问卡片：ask_user_question 的 input 直接携带全部问题/选项，
+        // 在 tool_use 时机发 user_question SSE（工具本身只回占位符 + endTurn）。
+        // 答案不走新 API —— 桌面卡片把选择组装成普通用户消息回传。
+        if (name === 'ask_user_question') {
+          const questions = parseAskUserQuestions(input)
+          if (questions.length > 0) {
+            this.append(session, 'user_question', {
+              toolUseId: toolId,
+              questions: questions.map(q => ({
+                id: q.id,
+                prompt: redactText(q.prompt),
+                options: q.options.map(o => redactText(o)),
+                allowMultiple: q.allowMultiple,
+              })),
+            })
+          }
         }
       },
       onToolResult: (toolId, name, result, isError, _rawPath, uiContent) => {

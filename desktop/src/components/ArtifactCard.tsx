@@ -53,7 +53,7 @@ function ArtifactCardImpl({ block }: { block: ConvoBlock }) {
       <div className="ac-footer">
         <button
           className="ac-btn review-btn"
-          onClick={() => dispatch({ type: 'requestReviewTab', tab: isPlan ? 'plan' : isTask ? 'task' : 'review' })}
+          onClick={() => dispatch({ type: 'requestReviewTab', tab: isPlan ? 'tasks' : isTask ? 'tasks' : 'changes' })}
         >
           Review
         </button>

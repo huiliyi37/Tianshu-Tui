@@ -2,7 +2,7 @@ export interface ToolPrediction {
   tool: string
   probability: number
   likelyTarget?: string
-  source?: 'tool-pattern' | 'physarum-file' | 'combined'
+  source?: 'tool-pattern' | 'physarum-file' | 'combined' | 'llm'
 }
 
 export interface ToolPatternEntry {

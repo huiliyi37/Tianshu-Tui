@@ -51,8 +51,25 @@ import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
 import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
+import { profileIsWriteCapable } from './profile-registry.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 import { toolTargetFromInput } from './tool-target.js'
+
+/** Collect the worker profile name(s) a delegate_task/delegate_batch call requests.
+ *  delegate_task carries a single `profile`; delegate_batch carries `tasks[].profile`.
+ *  Absent profile → default read-only scout, so it need not be listed here. */
+function delegateProfilesFromInput(input: Record<string, unknown>): string[] {
+  const names: string[] = []
+  if (typeof input.profile === 'string') names.push(input.profile)
+  if (Array.isArray(input.tasks)) {
+    for (const task of input.tasks) {
+      if (task && typeof task === 'object' && typeof (task as { profile?: unknown }).profile === 'string') {
+        names.push((task as { profile: string }).profile)
+      }
+    }
+  }
+  return names
+}
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -220,6 +237,12 @@ export interface ToolPipelineDeps {
   onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
+  /** Evidence-gated plan closure: assess the real delivery gate over owned/dirty files. */
+  assessDelivery?: (dirtyFiles?: string[]) => import('./delivery-gate-v2.js').DeliveryGateResult
+  /** 主动 plan mode：plan action=enter_mode → AgentLoop.enterPlanMode（仅主控有）。 */
+  enterPlanMode?: () => { activePlanFilePath: string | null; alreadyPlanning: boolean }
+  /** Real verification records for this session (evidence-gated plan closure). */
+  getVerificationEvidence?: () => import('./evidence.js').VerificationSummary
   /** Called when the model explicitly loads a skill via the skill tool. */
   onSkillInvoked?: (name: string) => void
   /** Called when the model explicitly marks a skill as complete via the skill tool. */
@@ -554,6 +577,9 @@ export async function executeToolUse(
     onLeaveMark: deps.onLeaveMark,
     onPlanSteps: deps.onPlanSteps,
     onPlanClosed: deps.onPlanClosed,
+    assessDelivery: deps.assessDelivery,
+    enterPlanMode: deps.enterPlanMode,
+    getVerificationEvidence: deps.getVerificationEvidence,
     onSkillInvoked: deps.onSkillInvoked,
     onSkillCompleted: deps.onSkillCompleted,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
@@ -570,6 +596,7 @@ export async function executeToolUse(
     delegationDepth: deps.config.delegationDepth,
     abortSignal: deps.abortSignal,
     activePlanFilePath: deps.config.activePlanFilePath,
+    sessionModel: deps.config.promptEngine.getModel(),
  }
 
   // Star signature: counter training-mode regression at token level (思路 E)
@@ -727,10 +754,14 @@ export async function executeToolUse(
     const writePath = (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string'
       ? tu.input.file_path
       : undefined
+    const delegatesWriteCapableProfile = deps.config.planModeState === 'planning'
+      && (tu.name === 'delegate_task' || tu.name === 'delegate_batch')
+      && delegateProfilesFromInput(tu.input).some(profileIsWriteCapable)
     const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name, {
       cwd: deps.cwd,
       targetFilePath: writePath,
       activePlanFilePath: deps.config.activePlanFilePath,
+      delegatesWriteCapableProfile,
     })
     if (!planModeResult.allowed) {
       const planMsg = planModeResult.reason ?? 'Plan Mode: write operations blocked'
@@ -1263,14 +1294,24 @@ export async function executeToolUse(
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
        } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
           const testStatus = harnessResult.isError ? 'failed' : 'passed'
-          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: testStatus, meta: { scope: 'full' } })
+          // Parse test counts from bash output so deliver_task shows real numbers
+          // instead of always "0 pass 0 fail". Supports node:test format
+          // ("ℹ pass N" / "ℹ fail N") and common TAP/jest patterns.
+          const output = typeof harnessResult.content === 'string' ? harnessResult.content : ''
+          const passedMatch = output.match(/ℹ\s+pass\s+(\d+)|✅\s+(\d+)\s+passed|Tests?\s+(\d+)\s+passed/i)
+          const failedMatch = output.match(/ℹ\s+fail\s+(\d+)|❌\s+(\d+)\s+failed|Tests?\s+(\d+)\s+failed/i)
+          const skippedMatch = output.match(/ℹ\s+skip\s+(\d+)/i)
+          const passed = passedMatch ? Number.parseInt(passedMatch[1] ?? passedMatch[2] ?? passedMatch[3] ?? '0', 10) : 0
+          const failed = failedMatch ? Number.parseInt(failedMatch[1] ?? failedMatch[2] ?? failedMatch[3] ?? '0', 10) : 0
+          const skipped = skippedMatch ? Number.parseInt(skippedMatch[1] ?? '0', 10) : 0
+          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: testStatus, meta: { scope: 'full', passed, failed, skipped } })
           // bash 跑测试/typecheck/lint 也归零 TDD 门禁——否则 agent 用 bash npm test
           // 而非 run_tests 工具时门禁计数器永远不重置，第 4 次编辑必误报拦截。
           deps.evidence.trackVerification({
             command: cmd.slice(0, 200),
             status: testStatus === 'passed' ? 'passed' : 'failed',
             scope: 'full',
-            exitCode: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0,
+            exitCode: harnessResult.isError ? 1 : 0, passed, failed, skipped, durationMs: 0,
           })
           deps.destructiveGate?.noteVerification(testStatus === 'passed' ? 'passed' : 'failed')
        } else {

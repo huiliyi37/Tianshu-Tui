@@ -37,13 +37,12 @@ export function loadSessionMemories(deps: SessionMemoryWarmupDeps): void {
     if (snapshot) p3.miner.importSnapshot(snapshot)
   } catch { /* non-critical */ }
   // T2-02 P1: Restore bandit states from MeridianDb (cross-session learning).
-  // effortBandit / bandit are readonly on P3Integration, so we restore them
-  // in place via importState rather than reassigning the references.
+  // effortBandit is readonly on P3Integration, so we restore it in place via
+  // importState rather than reassigning the reference.
+  // model_style bandit restore removed — sealed (zero production callers).
   try {
     const effortBanditJson = db.loadBanditState('bandit:reasoning_effort')
     if (effortBanditJson) p3.effortBandit.importState(effortBanditJson)
-    const modelBanditJson = db.loadBanditState('bandit:model_style')
-    if (modelBanditJson) p3.bandit.importState(modelBanditJson)
   } catch { /* non-critical */ }
   // Track B1: Restore PlanCache from MeridianDb
   try {

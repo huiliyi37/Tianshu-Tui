@@ -38,8 +38,10 @@ import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
+import { createGeneralLedgerHook } from './hooks/general-ledger-hook.js'
 import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
 import { createDeadEndDetectorHook } from './hooks/dead-end-detector.js'
+import { createRegressionBisectHook } from './hooks/regression-bisect-hook.js'
 import { createIntentAnchorHook } from './hooks/intent-anchor-hook.js'
 import { createTurnBudgetHook } from './hooks/turn-budget-hook.js'
 import { createReasoningSpiralHook } from './hooks/reasoning-spiral-hook.js'
@@ -467,6 +469,14 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     hooks.push(createExternalClaimTrackingHook({ advisoryBus: deps.advisoryBus }))
   }
 
+  // General-Ledger（将星记账）: postTool hook — 带账本星 authority 的 delegate
+  // 完成后，informational 提醒主控核对是否有新战绩该 record_general_finding。
+  // 每星每会话最多一次；账本不存在的星不催账。
+  // Gated by RIVET_GENERAL_LEDGER_REMINDER (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_GENERAL_LEDGER_REMINDER !== '0') {
+    hooks.push(createGeneralLedgerHook({ advisoryBus: deps.advisoryBus }))
+  }
+
   // Git-Clear-After-Fail: postTool hook — detects the pattern of running git
   // stash/reset/checkout/restore/clean shortly after a test failure without
   // any diagnosis (read/grep) in between. Constitutional tier: the underlying
@@ -484,6 +494,17 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     hooks.push(createDeadEndDetectorHook({
       advisoryBus: deps.advisoryBus,
       deposit: deps.stigmergyDeposit,
+    }))
+  }
+
+  // Regression-Bisect 断路器: postTool hook — 回归语义 + 连续 ≥5 轮只读诊断
+  // 空转(零写入)时,强制策略升级到基线对照(git log → git bisect/checkpoint
+  // diff → regressionInventory 逐项定位)。事故链缺口 4:20+ 轮盲排查救援。
+  // Gated by RIVET_REGRESSION_BISECT (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_REGRESSION_BISECT !== '0') {
+    hooks.push(createRegressionBisectHook({
+      advisoryBus: deps.advisoryBus,
+      getObjective: deps.getIntentObjective,
     }))
   }
 

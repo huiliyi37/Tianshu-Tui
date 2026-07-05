@@ -7,7 +7,9 @@ import { createRuntimeHookContext, RuntimeHookPipeline } from './runtime-hooks.j
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createUserHooksBridge, runOnErrorHooks } from './hooks/user-hooks-bridge.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
+import { createLlmSpeculationEngine, normalizeLlmSpeculationConfig } from './llm-speculation.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
+import { setGeneralLedgerTelemetrySink } from './general-ledger.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
 import { recordToolNamedFingerprint } from './trace-store.js'
 import { join, isAbsolute } from 'node:path'
@@ -25,6 +27,8 @@ import { TurnOrchestrator, type TurnStateBag } from './turn-orchestrator.js'
 import { GoalContinuationController } from './goal-continuation.js'
 import { PostTurnDecisionController } from './post-turn-decision.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
+import { buildGatedInfluenceAuditEvent, persistGatedInfluenceAudit } from './gated-influence-audit.js'
+import { loadProjectRules } from '../context/rules-loader.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
@@ -201,7 +205,10 @@ return new TurnCompletionController({
       },
       getEffortShadow: () => self._currentEffortShadow,
       clearEffortShadow: () => { self._currentEffortShadow = null },
-      completeEffortShadow: (id, input) => { self.p3?.completeEffortShadow(id, input) },
+      completeEffortShadow: (id, input) => self.p3?.completeEffortShadow(id, input),
+      saveEffortShadowRow: (kind, json) => {
+        try { self.config.meridianIndexer?.getDb()?.saveBanditState(kind, json) } catch { /* append-only evidence — never disrupt turn */ }
+      },
       getDoomLoopLevel: () => self.getDoomLoopLevel(),
     })
 }
@@ -232,6 +239,15 @@ return new ToolExecutionController({
       onLeaveMark: mark => self.captureLeaveMark(mark),
       onPlanSteps: steps => self.capturePlanSteps(steps),
       onPlanClosed: input => self.handlePlanClosed(input),
+      assessDelivery: self.config.deliveryGateV2
+        ? files => self.config.deliveryGateV2!(files)
+        : undefined,
+      enterPlanMode: () => {
+        const alreadyPlanning = self.getPlanModeState() === 'planning'
+        if (!alreadyPlanning) self.enterPlanMode()
+        return { activePlanFilePath: self.getActivePlanFilePath(), alreadyPlanning }
+      },
+      getVerificationEvidence: () => self.evidence.getVerificationSummary(),
       onSkillInvoked: name => self.config.promptEngine.markSkillInvoked(name),
       onSkillCompleted: name => self.config.promptEngine.markSkillCompleted(name),
       buildRuntimeSnapshot: extra => self.buildRuntimeSnapshot(extra),
@@ -313,6 +329,9 @@ function buildLazyCopilotCompletion(self: AgentLoop): (system: string, user: str
 }
 
 export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline {
+  // 将星账本遥测（Y8）：读/写事件落 sensorium.jsonl 同通道，让「账本是否在被
+  // 使用、哪个星在生长」可观测。模块级 sink——worker prompt 合并与工具读写共用。
+  setGeneralLedgerTelemetrySink(event => self.telemetryWriter.write({ ...event }))
   const userBridgeDeps = {
     cwd: self.cwd,
     sessionId: self.config.sessionId,
@@ -466,6 +485,17 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       sessionId: self.config.sessionId,
       getUserMessage: () => self.initialUserMessage,
       getStreamedText: () => self.streamedText,
+      // Mid-session rules reload: newly generated .rivet/rules/*.md enter the
+      // claim store immediately (propose is idempotent by claim id) instead of
+      // waiting for the next bootstrap. Claims flow into the prompt via the
+      // refreshActiveClaims → updateActiveClaims channel, not frozenBase.
+      onRuleGenerated: () => {
+        const store = self.config.contextClaimStore
+        if (!store) return
+        try {
+          for (const rule of loadProjectRules(self.cwd)) store.propose(rule)
+        } catch { /* rules reload is best-effort */ }
+      },
     },
     userHooksBridge: userBridgeDeps,
     advisoryBus: self.advisoryBus,
@@ -527,6 +557,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     tryPartialCompact: target => self.compaction.tryPartialCompact(target),
     shouldDelayCompact: (threshold, ctx) => self.cacheAdvisor.shouldDelayCompact(threshold, ctx?.estimatedTokens !== undefined && ctx?.contextWindow !== undefined ? { estimatedTokens: ctx.estimatedTokens, contextWindow: ctx.contextWindow } : undefined),
     getStalePreviewChars: () => self.cacheAdvisor.getStalePreviewChars(),
+    shouldOpportunisticCompact: () => self.cacheAdvisor.shouldOpportunisticCompact(),
     isCachePreservingProvider: () => self.compaction.isCachePreservingProvider(),
     isCostInsensitiveProvider: () => isCostInsensitiveProvider(self.config.providerName),
     getProviderName: () => self.config.providerName,
@@ -612,6 +643,18 @@ export function buildProgressDigest(input: ProgressDigestInput): string {
 }
 
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
+  // Tier 2 LLM speculation: only constructed when enabled — the default path
+  // pays zero cost (no engine, no dep, orchestrator's optional call is a no-op).
+  const llmSpecConfig = normalizeLlmSpeculationConfig(self.config.llmSpeculation)
+  const llmSpeculation = llmSpecConfig.enabled
+    ? createLlmSpeculationEngine({
+        client: self.config.client,
+        config: llmSpecConfig,
+        enqueue: predictions => { self.p3.enqueueLlmPredictions(predictions) },
+        writeTelemetry: record => { self.telemetryWriter.write(record) },
+      })
+    : null
+
   return new TurnOrchestrator({
     // === Lifecycle ===
     initializeRun: (userInput, callbacks, images) => self.turnStepProducer.initializeRun(userInput, callbacks, images),
@@ -669,6 +712,14 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === Sub-controllers ===
     streamTurn: (params) => self.turnStream!.streamTurn(params),
     executeBatch: (params) => self.toolExecution.executeBatch(params),
+    ...(llmSpeculation ? {
+      speculateDuringBatch: (params: {
+        request: import('../api/oai-types.js').OaiChatRequest
+        toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>
+        turn: number
+        signal?: AbortSignal
+      }) => { llmSpeculation.maybeSpeculate(params) },
+    } : {}),
     completeTurn: (params) => self.turnCompletion.complete(params),
     appendTurnResult: (turn) => { self.planTraceCoordinator.appendTurnResult(turn) },
     onCacheAdvisorTurnEnd: (params) => { self.cacheAdvisor.onTurnEnd(params) },
@@ -826,6 +877,19 @@ export function createReasoningEffortController(self: AgentLoop): ReasoningEffor
     getMaxTurns: () => self.config.maxTurns,
     getFilesModifiedCount: () => self.evidence.getState().filesModified.size,
     setCurrentEffortShadow: record => { self._currentEffortShadow = record },
+    persistAudit: input => {
+      const db = self.config.meridianIndexer?.getDb()
+      if (!db) return
+      persistGatedInfluenceAudit(db, buildGatedInfluenceAuditEvent({
+        source: 'effort_bandit',
+        sessionId: self.config.sessionId ?? 'unknown',
+        targetId: `turn_${self.session.getTurnCount()}`,
+        gateOpen: input.gateOpen,
+        applied: input.applied,
+        reason: input.reason,
+        evidenceWindow: input.evidenceWindow,
+      }))
+    },
   })
 }
 

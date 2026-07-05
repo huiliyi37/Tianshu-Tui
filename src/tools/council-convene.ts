@@ -8,11 +8,16 @@ import { isCouncilEnabled } from '../agent/council/council-gate.js'
 import { buildCouncilSessionEvent, type CouncilSessionEvent } from '../agent/council/council-telemetry.js'
 import type { PlanItem } from '../agent/council/council-plan.js'
 import { councilPlanToUnifiedPlan } from '../agent/council/council-to-plan.js'
-import { serializeUnifiedPlan } from '../agent/unified-plan.js'
+import { serializeUnifiedPlan, unifiedPlanToTeamTasks } from '../agent/unified-plan.js'
+import { storePlan } from '../agent/plan-store.js'
+import { executePlan, type PlanExecutorDeps } from '../agent/plan-executor.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 /** Coordinator surface the council tool needs — only `delegateBatch` drives the
- *  single-round seat fanout. Telemetry/shadow recorders are optional旁路. */
+ *  single-round seat fanout. Telemetry/shadow recorders are optional旁路.
+ *  `executor` (A4) carries the full plan-execution deps so autoExecute runs the
+ *  same closed loop (waves + review gate + wave gate + checkpoint) as
+ *  team_orchestrate instead of a bare delegateBatch. */
 export interface CouncilConveneCoordinator {
   delegateBatch(
     requests: DelegationRequest[],
@@ -23,6 +28,7 @@ export interface CouncilConveneCoordinator {
   getSessionId?: () => string | undefined
   recordRoutingShadow?: (event: CouncilRoutingShadowEvent) => void
   recordCouncilSession?: (event: CouncilSessionEvent) => void
+  executor?: PlanExecutorDeps
 }
 
 // DEFAULT_COUNCIL_SEATS 下沉至 council-routing.ts（CouncilSeat 定义所在），此处
@@ -177,42 +183,72 @@ export function createCouncilConveneTool(
       }
 
       // content: 全文议事记录 markdown(进 model 上下文,供其原样 echo 给用户)。
-      // 末尾内嵌机器可读 planJson —— 供模型在用户确认执行时原样提取为
-      // team_orchestrate 的 planJson(W-C7 评审→执行闭环)。仅在有任务时附加;
-      // council 自身绝不触发执行,转交由模型在用户确认后完成。
+      // 末尾内嵌机器可读 planJson 作为可读审计(W-C7 评审→执行闭环)。
+      // A3: 有任务时同时把计划存入会话桥(plan-store) —— 模型无需手工提取 JSON,
+      // 用户确认后直接调 team_orchestrate({ objective }) 即自动消费。
+      // council 自身默认绝不触发执行(autoExecute 例外,走完整 executePlan 闭环)。
       // uiContent: 紧凑裁决摘要 —— 工具卡默认仅展示前 4 行,避免裸 markdown 被截成无意义片段。
       const parts = [plan.finalPlanMarkdown]
-      if (plan.aggregate.mergedItems.length > 0) {
-        parts.push('', '```council-plan-json', serializeUnifiedPlan(councilPlanToUnifiedPlan(plan)), '```')
+      const hasTasks = plan.aggregate.mergedItems.length > 0
+      const unifiedPlan = hasTasks ? councilPlanToUnifiedPlan(plan) : undefined
+      const planJson = unifiedPlan ? serializeUnifiedPlan(unifiedPlan) : undefined
+      if (planJson) {
+        parts.push('', '```council-plan-json', planJson, '```')
+      }
+      if (planJson && !autoExecute) {
+        storePlan(planJson, params.sessionId)
+        parts.push('', '✅ 计划已存入会话 — 用户确认后直接调用 `team_orchestrate({ objective })` 即可执行（不要传 planJson/planMarkdown，存储的计划会被自动消费）。上方 JSON 块仅作可读审计。')
       }
 
-      // autoExecute: if council produced actionable items, dispatch them directly
-      // via coordinator.delegateBatch (same path team_orchestrate uses). This saves
-      // a model round-trip — the plan executes immediately after review.
-      if (autoExecute && plan.aggregate.mergedItems.length > 0) {
+      // A4 autoExecute: run the council-approved plan through the SAME closed
+      // loop as team_orchestrate — executePlan gives wave grouping (file
+      // conflicts / dependsOn), scope health, the review gate, the wave hard
+      // gate, and A1 checkpoints. Multi-wave plans are driven to completion here.
+      if (autoExecute && unifiedPlan && planJson) {
+        const executorDeps: PlanExecutorDeps = coordinator.executor ?? coordinator
         try {
-          const unifiedPlan = councilPlanToUnifiedPlan(plan)
-          const { unifiedPlanToTeamTasks } = await import('../agent/unified-plan.js')
           const teamTasks = unifiedPlanToTeamTasks(unifiedPlan)
           if (teamTasks.length > 0) {
-            // Convert TeamTask[] to DelegationRequest[] — TeamTask already has
-            // profile/kind/objective/files, matching DelegationRequest's shape.
-            const teamRequests = teamTasks.map(t => ({
-              parentTurnId: params.toolUseId ?? 'council-autoexec',
-              objective: t.objective,
-              profile: t.profile,
-              kind: t.kind,
-              scope: { files: t.files, verification: t.verification },
-            }))
-            const run = await coordinator.delegateBatch(teamRequests, 'all_required', params.abortSignal)
-            parts.push('', `## Auto-Executed (${run.results.length} workers)`)
-            for (const r of run.results) {
-              parts.push(`- ${r.workOrderId}: ${r.status === 'passed' ? '✓' : r.status === 'failed' ? '✗' : '⚠'} ${r.summary}`)
-            }
+            const waveLines: string[] = []
+            let fromWave = 0
+            let totalWaves = 1
+            let workers = 0
+            do {
+              const run = await executePlan(
+                {
+                  mode: 'standard',
+                  objective,
+                  tasks: teamTasks,
+                  fromWave,
+                  sessionId: params.sessionId,
+                  parentTurnId: `${params.toolUseId ?? 'council-autoexec'}:w${fromWave}`,
+                  reviewDepth: params.reviewDepth ?? 0,
+                  cwd: params.cwd,
+                  abortSignal: params.abortSignal,
+                  // The review gate needs a single-delegate channel; skip it when
+                  // the caller wired only the bare fanout surface.
+                  reviewGate: Boolean(executorDeps.delegate),
+                },
+                executorDeps,
+              )
+              totalWaves = Math.max(1, run.summary.waves.length)
+              const results = run.summary.run?.results ?? []
+              workers += results.length
+              for (const r of results) {
+                waveLines.push(`- [wave ${fromWave + 1}/${totalWaves}] ${r.workOrderId}: ${r.status === 'passed' ? '✓' : r.status === 'failed' ? '✗' : '⚠'} ${r.summary}`)
+              }
+              const noteBlock = [run.notes.reviewNote, run.notes.scopeHealthNote, run.notes.waveGateNote, run.notes.deliverySynthesis]
+                .map(n => n.trim()).filter(Boolean)
+              if (noteBlock.length > 0) waveLines.push(...noteBlock.map(n => `  ${n.replace(/\n/g, '\n  ')}`))
+              fromWave++
+            } while (fromWave < totalWaves)
+            parts.push('', `## Auto-Executed (${workers} workers, ${totalWaves} waves)`)
+            parts.push(...waveLines)
           }
         } catch (err) {
           parts.push('', `## Auto-Execution Failed\n${err instanceof Error ? err.message : String(err)}`)
-          parts.push('', '⚠ Council plan reviewed but auto-execution failed. Use the council-plan-json above with team_orchestrate manually.')
+          storePlan(planJson, params.sessionId)
+          parts.push('', '⚠ Council plan reviewed but auto-execution failed. 计划已存入会话 — 修复失败项后直接调用 `team_orchestrate({ objective })` 续跑（存储的计划会被自动消费）。')
         }
       }
 

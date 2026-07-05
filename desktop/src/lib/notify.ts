@@ -38,8 +38,10 @@ export function shouldNotify(pref: NotifPref): boolean {
 // ── S: routed notifications (click → focus window + jump to session) ──
 // Tauri's notification click delivery varies by version/OS, so this is strictly
 // best-effort: we correlate a generated id → sessionId, register one action
-// listener, and on activation focus the window and invoke the navigate cb. If
-// the plugin doesn't surface clicks, the deterministic copy still shows.
+// listener, and on activation surface the window (via the Rust
+// focus_main_window command, which show+unminimizes+focuses — setFocus alone
+// can't revive a tray-hidden or minimized window) and invoke the navigate cb.
+// If the plugin doesn't surface clicks, the deterministic copy still shows.
 
 let routeInit = false
 const idToSession = new Map<number, string>()
@@ -58,10 +60,17 @@ export function initNotificationRouting(onPick: (sessionId: string) => void): vo
       await mod.onAction(async (n) => {
         const sid = n?.id != null ? idToSession.get(n.id) : undefined
         if (!sid) return
+        // setFocus() alone can't unhide a tray-hidden or minimized window;
+        // the Rust `focus_main_window` command does show+unminimize+focus.
         try {
-          const { getCurrentWindow } = await import('@tauri-apps/api/window')
-          await getCurrentWindow().setFocus()
-        } catch { /* not under Tauri */ }
+          const { invoke } = await import('@tauri-apps/api/core')
+          await invoke('focus_main_window')
+        } catch {
+          try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window')
+            await getCurrentWindow().setFocus()
+          } catch { /* not under Tauri */ }
+        }
         onPick(sid)
       })
     } catch {

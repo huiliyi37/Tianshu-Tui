@@ -13,6 +13,13 @@ import { pickFolder } from '../lib/dialog'
 import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 
 
 // Codex-style single sidebar: labeled navigation (core group + collapsible
@@ -368,12 +375,17 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
           const isActiveProject = p.id === ui.activeProject
           return (
             <div key={p.id} className="project-tree-node" role="treeitem" aria-expanded={expanded}>
-              <button
-                className={`project-tree-header ${isActiveProject ? 'active' : ''}`}
-                onClick={() => {
-                  dispatch({ type: 'setProject', projectId: p.id })
-                  toggleProject(p.id)
-                }}
+              <ContextMenu>
+              <ContextMenuTrigger
+                render={
+                  <button
+                    className={`project-tree-header ${isActiveProject ? 'active' : ''}`}
+                    onClick={() => {
+                      dispatch({ type: 'setProject', projectId: p.id })
+                      toggleProject(p.id)
+                    }}
+                  />
+                }
               >
                 <span className={`pt-chev ${expanded ? 'open' : ''}`} aria-hidden>▸</span>
                 <span className="pt-folder" aria-hidden>
@@ -431,17 +443,31 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
                     <Trash2 size={12} />
                   </button>
                 </div>
-              </button>
+              </ContextMenuTrigger>
+              <ContextMenuContent align="start" side="right" sideOffset={4}>
+                <ContextMenuItem onClick={() => setRenamingProject(p.id)}>
+                  <Pencil size={14} /> {t('sidebar.renameProject')}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onClick={() => removeProject(p)}>
+                  <Trash2 size={14} /> {t('sidebar.removeProject')}
+                </ContextMenuItem>
+              </ContextMenuContent>
+              </ContextMenu>
               {expanded && (
                 <div className="project-tree-children">
                   {group.map((s) => (
-                    <div
-                      key={s.id}
-                      className={`thread-row ${s.id === ui.activeSessionId ? 'active' : ''}`}
-                      onClick={() => {
-                        dispatch({ type: 'setActive', id: s.id })
-                        dispatch({ type: 'setSurface', surface: 'workspace' })
-                      }}
+                    <ContextMenu key={s.id}>
+                    <ContextMenuTrigger
+                      render={
+                        <div
+                          className={`thread-row ${s.id === ui.activeSessionId ? 'active' : ''}`}
+                          onClick={() => {
+                            dispatch({ type: 'setActive', id: s.id })
+                            dispatch({ type: 'setSurface', surface: 'workspace' })
+                          }}
+                        />
+                      }
                     >
                       <div className="thread-row-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                         <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
@@ -503,7 +529,20 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
                           <path d="M18 6 6 18M6 6l12 12" />
                         </svg>
                       </button>
-                    </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent align="start" side="right" sideOffset={4}>
+                      <ContextMenuItem onClick={() => setRenamingSession(s.id)}>
+                        <Pencil size={14} /> {t('sidebar.renameSession')}
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onClick={() => {
+                        closeSession.mutate(s.id)
+                        if (s.id === ui.activeSessionId) dispatch({ type: 'setActive', id: '' })
+                      }}>
+                        <Trash2 size={14} /> {t('sidebar.closeSession')}
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                    </ContextMenu>
                   ))}
                 </div>
               )}
@@ -518,7 +557,8 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
             <span className="sidebar-section-title">{t('sidebar.archivedSessions')}</span>
           </div>
           {archivedSessions.map((s) => (
-            <div key={s.id} className="thread-row archived">
+            <ContextMenu key={s.id}>
+            <ContextMenuTrigger render={<div key={s.id} className="thread-row archived" />}>
               <div className="thread-row-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                 <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                   <span className="status-dot status-archived" />
@@ -546,7 +586,24 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
                 }}
                 style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--panel-3)', border: 'none', cursor: 'pointer', color: 'var(--error)' }}
               >{t('sidebar.deleteSession')}</button>
-            </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent align="start" side="right" sideOffset={4}>
+              <ContextMenuItem onClick={() => {
+                unarchive.mutate(s.id)
+                setArchivedSessions((prev) => prev.filter((a) => a.id !== s.id))
+              }}>
+                {t('sidebar.restore')}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => {
+                if (!window.confirm(t('sidebar.confirmDeleteSession', { title: s.title ?? s.id.slice(0, 8) }))) return
+                deleteSession.mutate(s.id)
+                setArchivedSessions((prev) => prev.filter((a) => a.id !== s.id))
+              }}>
+                <Trash2 size={14} /> {t('sidebar.deleteSession')}
+              </ContextMenuItem>
+            </ContextMenuContent>
+            </ContextMenu>
           ))}
         </div>
       )}

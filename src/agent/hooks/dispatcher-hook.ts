@@ -65,13 +65,16 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
       if (subtasks.length <= 1) return
 
       // 建议模型显式委派——不替它行动。依赖箭头来自 decomposeByDataContract 的 dependsOn
-      // （A←[B] 表示 A 依赖 B，B 必须先跑）。
+      // （A←[B] 表示 A 依赖 B，B 必须先跑）。C2: 每个子任务的 authority（星域人格）
+      // 已由 dispatcher 算出（缺省天梁），透传进建议参数，否则自动委派的执行子任务
+      // 会丢失人格注入（team 路径的 patcher 硬绑 tianliang，这里对齐）。
       const depHint = subtasks
-        .map(st =>
-          st.dependsOn.length > 0
-            ? `${st.domain}←[${st.dependsOn.map(d => subtasks[d]?.domain ?? `#${d}`).join(',')}]`
-            : st.domain
-        )
+        .map(st => {
+          const base = `${st.domain}(authority:${st.authority})`
+          return st.dependsOn.length > 0
+            ? `${base}←[${st.dependsOn.map(d => subtasks[d]?.domain ?? `#${d}`).join(',')}]`
+            : base
+        })
         .join('; ')
 
       deps.advisoryBus?.submit({
@@ -79,7 +82,7 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
         priority: 0.5,
         category: 'delegation',
         ttl: 2,
-        content: `【天梁】检测到可并行拆分为 ${subtasks.length} 个子任务（${depHint}）。如需并行推进，显式调 delegate_batch，按上面顺序列 tasks，并用 dependsOn 传被依赖任务的 0-based 下标（被指向方先跑）；只读探查用 code_search profile。`,
+        content: `【天梁】检测到可并行拆分为 ${subtasks.length} 个子任务（${depHint}）。如需并行推进，显式调 delegate_batch，按上面顺序列 tasks，每个 task 带上括号内的 authority（星域人格注入），并用 dependsOn 传被依赖任务的 0-based 下标（被指向方先跑）；只读探查用 code_search profile。`,
       })
 
       advisedIds.add(contract.id)

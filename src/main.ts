@@ -17,7 +17,7 @@ installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
-import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig } from './config/manager.js'
+import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig, setApprovalMode as persistApprovalDefault } from './config/manager.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
@@ -687,6 +687,13 @@ async function main() {
         ]
         return { title: '权限模式 / Permission', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
       }
+      if (tuiApp.choicePanelKind === 'permission-yolo-confirm') {
+        const entries = [
+          { id: 'cancel', label: '取消', description: '保持当前权限模式不变。', current: true },
+          { id: 'confirm-yolo', label: '⚠ 确认进入 YOLO', description: '无轮次刹车 · 无进度播报 · 所有工具直接执行（沙箱仍拦项目外写入）。回滚兜底：/rollback + git 检查点。设为默认后重启仍是 YOLO。' },
+        ]
+        return { title: '确认 YOLO 模式 / Confirm YOLO', choices: entries, selectedIndex: 0 }
+      }
       const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
       const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
       const entries: Array<{ id: string; label: string; description: string; recommended?: boolean; current?: boolean }> = [
@@ -799,18 +806,48 @@ async function main() {
       tuiApp.commitStatic(`⚠️ 设置默认主题失败: ${(err as Error).message}`)
     }
   }, /* choicePanelExec: */ (id: string) => {
+    // 应用并持久化权限模式：会话内即时生效（agent）+ 底栏 badge 同步（tuiApp）+
+    // 写入 ~/.rivet/config.json（重启后仍是该模式，无需重选）。
+    const applyPermission = (mode: string) => {
+      ctx!.agent.setApprovalMode(mode as import('./agent/loop-types.js').ApprovalMode)
+      tuiApp.setApprovalMode(mode)
+      // YOLO 联动无限轮次：真正全自动，不被 maxTurns 截断。
+      // 其他模式恢复默认 200 轮预算。
+      const yoloMaxTurns = mode === 'dangerously-skip-permissions' ? 0 : 200
+      ctx!.agent.config.maxTurns = yoloMaxTurns
+      try {
+        persistApprovalDefault(mode)
+      } catch (err) {
+        tuiApp.commitStatic(`⚠ 权限模式已切换但持久化失败: ${(err as Error).message}`)
+      }
+      const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[mode] ?? mode
+      const turnNote = mode === 'dangerously-skip-permissions' ? '（无限轮次）' : ''
+      tuiApp.commitStatic(`权限模式 → ${label}${turnNote}（已设为默认，重启后仍生效）`)
+    }
+
     if (tuiApp.choicePanelKind === 'permission') {
       // Permission 选择面板回调
       tuiApp.choicePanelKind = 'effort' // reset
       if (id === 'dangerously-skip-permissions') {
-        // YOLO needs confirmation — re-show panel with confirm prompt
-        tuiApp.choicePanelKind = 'permission'
-        tuiApp.commitStatic('⚠ YOLO 模式将跳过所有审批，全自动执行。确认请输入: /permission yolo confirm')
+        // YOLO 需二次确认。面板在 exec 后会被 deactivateOverlay 关闭（app.ts），
+        // 故用 setImmediate 在关闭之后再把确认面板推起来。
+        setImmediate(() => {
+          tuiApp.choicePanelKind = 'permission-yolo-confirm'
+          tuiApp.activateOverlay('choice-panel')
+        })
         return
       }
-      ctx!.agent.setApprovalMode(id as import('./agent/loop-types.js').ApprovalMode)
-      const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[id] ?? id
-      tuiApp.commitStatic(`权限模式 → ${label}`)
+      applyPermission(id)
+      return
+    }
+    if (tuiApp.choicePanelKind === 'permission-yolo-confirm') {
+      // YOLO 确认面板回调
+      tuiApp.choicePanelKind = 'effort' // reset
+      if (id === 'confirm-yolo') {
+        applyPermission('dangerously-skip-permissions')
+      } else {
+        tuiApp.commitStatic('已取消 — 权限模式未改变。')
+      }
       return
     }
     // Effort 选择面板回车回调。
@@ -933,6 +970,11 @@ async function main() {
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
   app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
+  // Shift+Tab exit confirmation window: exiting plan mode abandons an unapproved
+  // plan and unlocks writes, so require a second press within this window instead
+  // of silently unlocking on a single stray keypress.
+  const PLAN_EXIT_CONFIRM_MS = 3000
+  let planExitArmedAt = 0
   app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
     // 有待批计划时,Shift+Tab 优先弹出选择器(方向键选 + 回车批准并自动分波执行),
@@ -942,9 +984,18 @@ async function main() {
       return
     }
     if (agent.planModeState === 'planning') {
-      agent.exitPlanMode()
-      app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
+      // Two-step confirm: first press arms + warns, second press within the window exits.
+      const now = Date.now()
+      if (planExitArmedAt !== 0 && now - planExitArmedAt <= PLAN_EXIT_CONFIRM_MS) {
+        planExitArmedAt = 0
+        agent.exitPlanMode()
+        app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
+      } else {
+        planExitArmedAt = now
+        app!.commitStatic('⚠ 计划尚未批准。再按一次 Shift+Tab 放弃当前计划并退出规划模式，或用 /plan-approve <slug> 批准后执行。')
+      }
     } else {
+      planExitArmedAt = 0
       agent.enterPlanMode()
       const path = agent.getActivePlanFilePath()
       app!.commitStatic([
@@ -1070,6 +1121,15 @@ async function main() {
       }
     } finally {
       rl.close()
+      // Linux: readline.close() leaves stdin in flowing mode with residual
+      // 'keypress' listeners. Without pause + removeAllListeners, keystrokes
+      // typed between rl.close() and app.start() leak into the TUI input handler
+      // as raw characters — the "press 1/2 becomes a chat message" bug.
+      if (process.stdin.isTTY) {
+        process.stdin.pause()
+        process.stdin.removeAllListeners('data')
+        process.stdin.removeAllListeners('keypress')
+      }
     }
   } else if (ctx.templatesPendingAgents) {
     // headless / --dangerously-skip-permissions: silent .rivet.md, decline AGENTS.md

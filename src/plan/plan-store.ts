@@ -28,6 +28,10 @@ export interface PlanDocument {
   approvedAt?: Date
   /** 多方案选项（submit 时持久化） */
   options?: PlanOption[]
+  /** 产出模型留痕（submit 时写入）。缺失 = 旧计划或未知模型。 */
+  model?: string
+  /** 产出模型 tier（名字推断）。cheap 时审批面显示低阶模型警告。 */
+  modelTier?: 'cheap' | 'balanced' | 'strong' | null
 }
 
 export interface PlanOption {
@@ -49,8 +53,52 @@ export function stripPlanStatusMarkers(content: string): string {
   return content.replace(PLAN_STATUS_LINE_RE, '')
 }
 
+/** plan submit 写入的产出模型留痕行（H1 前，与 Status 标记同款）。 */
+const PLAN_MODEL_LINE_RE = /^>\s*\*\*Model:\s*(.+?)(?:\s*\((cheap|balanced|strong)\))?\*\*.*(?:\r?\n)+/m
+
+export interface PlanModelProvenance {
+  model: string
+  tier: 'cheap' | 'balanced' | 'strong' | null
+}
+
+/** 解析计划的产出模型留痕。无标记（旧计划）返回 undefined。 */
+export function parsePlanModel(content: string): PlanModelProvenance | undefined {
+  const m = content.match(PLAN_MODEL_LINE_RE)
+  if (!m) return undefined
+  return { model: m[1]!.trim(), tier: (m[2] as PlanModelProvenance['tier']) ?? null }
+}
+
+/**
+ * 写入/刷新产出模型留痕（幂等：先剥旧标记再插入）。放 H1 前，
+ * 与 Status 标记同一可视位置——审批人在计划正文里直接看到产出模型。
+ */
+export function insertPlanModelMarker(
+  content: string,
+  model: string,
+  tier: 'cheap' | 'balanced' | 'strong' | null,
+): string {
+  const stripped = content.replace(new RegExp(PLAN_MODEL_LINE_RE, 'gm'), '')
+  const line = `> **Model: ${model}${tier ? ` (${tier})` : ''}**\n\n`
+  const h1Match = stripped.match(/^#\s+.*$/m)
+  if (h1Match) {
+    const idx = stripped.indexOf(h1Match[0])
+    return stripped.slice(0, idx) + line + stripped.slice(idx)
+  }
+  return line + stripped
+}
+
 /** .rivet/plans 相对于项目根目录的路径 */
 const PLANS_DIR = '.rivet/plans'
+
+/**
+ * Plan-mode 活动草稿的 slug 形状（createActivePlanDraftPath 生成
+ * `draft-<timestamp>.md`，loop 的清理正则同源）。草稿是规划中的工作文件，
+ * 不是已提交的计划——listPlans 过滤它们，防止空草稿以 "Untitled Plan"
+ * 的形态冒充待审计划泄漏进 TUI/桌面的计划列表。
+ */
+export function isDraftSlug(slug: string): boolean {
+  return /^draft-\d+$/.test(slug)
+}
 
 function plansRoot(cwd: string): string {
   return join(cwd, PLANS_DIR)
@@ -191,6 +239,7 @@ export async function readPlan(
     const content = await readFile(filePath, 'utf-8')
     const s = await stat(filePath)
     const status = parsePlanStatus(content)
+    const provenance = parsePlanModel(content)
     return {
       slug,
       title: extractTitle(content),
@@ -199,6 +248,7 @@ export async function readPlan(
       createdAt: s.birthtime,
       status,
       options: parsePlanOptions(content),
+      ...(provenance ? { model: provenance.model, modelTier: provenance.tier } : {}),
     }
   } catch {
     return null
@@ -216,6 +266,7 @@ export async function listPlans(cwd: string): Promise<PlanDocument[]> {
   for (const entry of entries) {
     if (!entry.endsWith('.md')) continue
     const slug = entry.replace(/\.md$/, '')
+    if (isDraftSlug(slug)) continue
     const plan = await readPlan(cwd, slug)
     if (plan) plans.push(plan)
   }
@@ -235,10 +286,12 @@ export function listPlansSync(cwd: string): PlanDocument[] {
   for (const entry of readdirSync(dir)) {
     if (!entry.endsWith('.md')) continue
     const slug = entry.replace(/\.md$/, '')
+    if (isDraftSlug(slug)) continue
     try {
       const filePath = planFilePath(cwd, slug)
       const content = readFileSync(filePath, 'utf-8')
       const s = statSync(filePath)
+      const provenance = parsePlanModel(content)
       plans.push({
         slug,
         title: extractTitle(content),
@@ -247,6 +300,7 @@ export function listPlansSync(cwd: string): PlanDocument[] {
         createdAt: s.birthtime,
         status: parsePlanStatus(content),
         options: parsePlanOptions(content),
+        ...(provenance ? { model: provenance.model, modelTier: provenance.tier } : {}),
       })
     } catch {
       // Skip unreadable entries (mirrors readPlan's swallow-on-error).
@@ -269,6 +323,22 @@ export async function rejectPlan(cwd: string, slug: string): Promise<PlanDocumen
   return markPlanStatus(cwd, slug, 'REJECTED')
 }
 
+/** 在第一个 H1 前插入状态标记，返回更新后的文本（纯函数，无 IO）。
+ *  用于 plan_close 直接对已读入的 markdown 打 EXECUTED 标记（含
+ *  docs/superpowers/plans 下、无 slug 语义的计划文件）。 */
+export function insertPlanStatusMarker(
+  content: string,
+  status: 'APPROVED' | 'REJECTED' | 'EXECUTED',
+): string {
+  const statusLine = `> **Status: ${status}** — ${new Date().toISOString()}\n\n`
+  const h1Match = content.match(/^#\s+.*$/m)
+  if (h1Match) {
+    const idx = content.indexOf(h1Match[0])
+    return content.slice(0, idx) + statusLine + content.slice(idx)
+  }
+  return statusLine + content
+}
+
 /** 在第一个 H1 前插入状态标记并回写,返回更新后的文档。 */
 async function markPlanStatus(
   cwd: string,
@@ -278,15 +348,7 @@ async function markPlanStatus(
   const plan = await readPlan(cwd, slug)
   if (!plan) return null
 
-  const statusLine = `> **Status: ${status}** — ${new Date().toISOString()}\n\n`
-  let newContent: string
-  const h1Match = plan.content.match(/^#\s+.*$/m)
-  if (h1Match) {
-    const idx = plan.content.indexOf(h1Match[0])
-    newContent = plan.content.slice(0, idx) + statusLine + plan.content.slice(idx)
-  } else {
-    newContent = statusLine + plan.content
-  }
+  const newContent = insertPlanStatusMarker(plan.content, status)
 
   // 透传 options — writePlan 会剥离旧 frontmatter，不传会把多方案记录抹掉，
   // 导致 approve 后 selectedApproach 校验永远跳过（见 2026-07-03 缺陷复盘）。

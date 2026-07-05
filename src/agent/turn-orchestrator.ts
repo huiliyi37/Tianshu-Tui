@@ -196,6 +196,15 @@ export interface TurnOrchestratorDeps {
   // === Sub-controllers ===
   streamTurn: (params: StreamTurnParams) => Promise<StreamTurnResult>
   executeBatch: (params: ExecuteBatchParams) => Promise<ExecuteBatchResult>
+  /** Tier 2 LLM speculation — fire-and-forget shared-prefix prediction call
+   *  launched alongside executeBatch (the tool await window). Optional: absent
+   *  when llmSpeculation config is off, so the default path pays zero cost. */
+  speculateDuringBatch?: (params: {
+    request: import('../api/oai-types.js').OaiChatRequest
+    toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>
+    turn: number
+    signal?: AbortSignal
+  }) => void
   completeTurn: (params: CompleteTurnParams) => Promise<void>
   appendTurnResult: (turn: number) => void
   onCacheAdvisorTurnEnd: (params: CacheTurnEndParams) => void
@@ -348,7 +357,13 @@ export class TurnOrchestrator {
     let finalTurnCompleted = false
 
     try {
-      for (let turn = 0; turn < this.deps.getMaxTurns(); turn++) {
+      // maxTurns <= 0 means "no hard cap" (true YOLO / autonomous mode). The for
+    // loop uses Number.MAX_SAFE_INTEGER as a practically-infinite upper bound so
+    // wedged-loop / convergence / context-pressure guards still terminate a
+    // runaway run — only the artificial turn-count ceiling is removed.
+    const maxTurns = this.deps.getMaxTurns()
+    const effectiveLimit = maxTurns > 0 ? maxTurns : Number.MAX_SAFE_INTEGER
+    for (let turn = 0; turn < effectiveLimit; turn++) {
         this.deps.state.thetaRequestsThisTurn = 0
         this.deps.state.runLoopTurn = turn
         // Sync plan-mode state into config so tool-pipeline gate reads it
@@ -773,6 +788,9 @@ export class TurnOrchestrator {
             traceStore: this.deps.state.traceStore, importGraph: this.deps.state.importGraph,
             lastConflictCheckCount: this.deps.state.lastConflictCheckCount, latestRisk: this.deps.state.latestRisk,
           })
+          // Tier 2 LLM speculation: ride the batch await window with a
+          // shared-prefix prediction call. Fire-and-forget; never awaited here.
+          this.deps.speculateDuringBatch?.({ request, toolUses, turn, signal })
           try {
             r = await rejectOnAbort(batchPromise, signal!, 'tools')
           this.deps.state.traceStore = r.traceStore

@@ -88,7 +88,7 @@ function buildExecutionObjective(task: TeamTaskDraft): string {
   return `你是天梁执行者。只执行本 task，不扩展范围，不重写计划。\n\n${task.objective}`
 }
 
-function taskAuthority(task: TeamTaskDraft): string {
+export function taskAuthority(task: TeamTaskDraft): string {
   if (task.profile === 'patcher') return 'tianliang'
   if (task.profile === 'reviewer' || task.profile === 'adversarial_verifier') return 'tianquan'
   return matchDomain(task.objective) ?? 'tianliang'

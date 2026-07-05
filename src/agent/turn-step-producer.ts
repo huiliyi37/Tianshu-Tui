@@ -13,6 +13,7 @@ import { mapQueriedPheromones } from './pheromone-map.js'
 import { getGitInjectedContext } from '../prompt/volatile-git.js'
 import { detectWorktreeReality, type InjectedWorktreeContext } from './worktree-reality.js'
 import { advanceContractStatus, classifyPlanMethodology, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, mergeFollowUpIntoContract, type TurnMode } from '../context/task-contract.js'
+import { shouldSuggestPlanMode, buildPlanModeSuggestAdvisory, planModeSuggestEnabled } from './plan-mode-advisor.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { renderMemoryBlock } from '../memory/unified-memory.js'
 import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
@@ -28,6 +29,7 @@ import { selectPolicy } from './policy-selection.js'
 import { checkTddGate, buildTddGateHint } from './tdd-gate.js'
 import { buildCognitiveProjectionParts, createCognitiveLedger, getCognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { formatImmuneContext } from './immune-context.js'
+import { getCapsuleByStar } from './seed-capsule-store.js'
 
 /**
  * Resolve the turn-level hard-stall watchdog ceiling (ms) from provider +
@@ -67,6 +69,22 @@ export function crossSessionDisabled(configEnabled?: boolean): boolean {
   if (v === '0' || v === 'false') return false
   if (configEnabled !== undefined) return !configEnabled
   return true
+}
+
+/**
+ * B4（将星点亮·贪狼触发面）：勘探/盘点类任务关键词。
+ * 贪狼是任务型触发（objective 语义），不是状态型触发（CCR 的 P 规则管状态）——
+ * 勘探停滞已有 P6 覆盖，这里只在任务意图分类处点一盏 informational 灯。
+ */
+const TANLANG_EXPLORATION_RE = /勘探|盘点|考古|半接|休眠|架构审计|死代码|孤儿代码|技术债盘|dead.?code|archaeolog/i
+
+/**
+ * 勘探型任务 → 指向 recall_capsule("贪狼") 的 informational advisory 文案。
+ * 命中关键词才返回；informational tier 填空位，不占 operational Top-N。
+ */
+export function buildTanlangExplorationAdvisory(userInput: string, gist?: string): string | null {
+  if (!TANLANG_EXPLORATION_RE.test(userInput)) return null
+  return `【贪狼·胶囊】检测到勘探/盘点型任务。${gist ?? '能力勘探/系统联合方法论已封存'}——动手前调用 recall_capsule("贪狼") 取完整方法（能力非成本框架、陈旧度判据、半接诊断到行号）。`
 }
 
 /** Map StarPhase values to PromptEngine phaseClass strings. */
@@ -250,6 +268,26 @@ export class TurnStepProducer {
 
     await this.self.intentRoute.buildForTurn(userInput, actionable, turnMode)
 
+    // B4：勘探/盘点型任务 → 贪狼胶囊 informational advisory（任务型触发，
+    // 复用 CCR 的 capsule-recall 通道语义；不新增 CCR 状态规则）。
+    if (turnMode === 'task') {
+      let gist: string | undefined
+      try {
+        gist = getCapsuleByStar(this.self.cwd, '贪狼')?.gist
+      } catch { /* capsule discovery is optional */ }
+      const tanlang = buildTanlangExplorationAdvisory(userInput, gist)
+      if (tanlang) {
+        this.self.advisoryBus.submit({
+          key: 'capsule-recall-tanlang',
+          priority: 0.45,
+          category: 'star_domain',
+          tier: 'informational',
+          content: tanlang,
+          ttl: 1,
+        })
+      }
+    }
+
     // Classify task dependency depth for TDD strategy / verifier selection
     if (this.self.taskContract && actionable) {
       const routeKinds = this.self._lastRetrievalRoute?.taskKinds
@@ -264,6 +302,31 @@ export class TurnStepProducer {
       // U6: open a fresh execution trace for a new task (or a changed contract).
       if (this.self._taskDepthLayer) {
         this.self.planTraceCoordinator.openTrace(this.self.taskContract.id, this.self._taskDepthLayer)
+      }
+      // 主动 plan mode 建议：多模块任务（full 方法论）在动手前先经 ask_user_question
+      // 征询用户是否进入计划模式（每 contract one-shot；RIVET_PLAN_MODE_SUGGEST=0 禁用）。
+      if (planModeSuggestEnabled()) {
+        const suggestion = shouldSuggestPlanMode({
+          turnMode,
+          contract: this.self.taskContract,
+          methodology: this.self._planMethodology,
+          depthLayer: this.self._taskDepthLayer,
+          planModeState: this.self.planModeState,
+          suggestedContractIds: this.self.planModeSuggestedContracts,
+        })
+        if (suggestion.suggest) {
+          this.self.planModeSuggestedContracts.add(this.self.taskContract.id)
+          this.self.advisoryBus.submit({
+            key: 'plan-mode-suggest',
+            priority: 0.9,
+            category: 'discipline',
+            tier: 'constitutional',
+            content: buildPlanModeSuggestAdvisory(suggestion.reason),
+            ttl: 1,
+            expect: { kind: 'tool_appears', tools: ['ask_user_question'], withinTurns: 1 },
+            channel: 'system-reminder',
+          })
+        }
       }
     } else {
       this.self._taskDepthLayer = undefined

@@ -15,7 +15,7 @@ import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
-import { parseMcpToolName, previewOf, editableKey } from '../lib/approval-preview'
+import { parseMcpToolName, previewOf, editableKey, EDIT_TOOLS } from '../lib/approval-preview'
 import { isApprovalConsent } from '../lib/consent'
 import { DiffView } from '../components/DiffView'
 
@@ -46,6 +46,20 @@ export function WorkspaceSurface() {
   const abortSession = useAbortSession()
   const closeSession = useCloseSession()
   const setPlanMode = useSetPlanMode()
+
+  const [isFloatDeckOpen, setIsFloatDeckOpen] = useState(false)
+  const deckRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!isFloatDeckOpen) return
+    const onClickOutside = (e: MouseEvent) => {
+      if (deckRef.current && !deckRef.current.contains(e.target as Node)) {
+        setIsFloatDeckOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [isFloatDeckOpen])
 
   const active = sessions.data?.find((s) => s.id === activeId) ?? null
 
@@ -367,18 +381,48 @@ export function WorkspaceSurface() {
       {!ui.reviewVisible && view.todos.length > 0 && (() => {
         const done = view.todos.filter((t) => t.status === 'completed').length
         return (
-          <button
-            className="todo-mini-capsule"
-            title="展开任务清单（审查面板）"
-            onClick={() => {
-              dispatch({ type: 'setReview', visible: true })
-              dispatch({ type: 'setReviewManual', on: true })
-            }}
-            aria-label="展开任务清单"
-          >
-            <span className="tmc-glyph" aria-hidden>☑</span>
-            <span className="tmc-count">{done}/{view.todos.length}</span>
-          </button>
+          <div className="todo-capsule-wrapper" ref={deckRef}>
+            {isFloatDeckOpen && (
+              <div className="todo-float-deck" onClick={(e) => e.stopPropagation()}>
+                <div className="tfd-header">
+                  <span className="tfd-title">任务清单 ({done}/{view.todos.length})</span>
+                  <button
+                    className="tfd-expand-btn"
+                    title="展开为侧边栏"
+                    onClick={() => {
+                      dispatch({ type: 'setReview', visible: true })
+                      dispatch({ type: 'setReviewManual', on: true })
+                      setIsFloatDeckOpen(false)
+                    }}
+                  >
+                    展开 ↗
+                  </button>
+                </div>
+                <div className="tfd-body">
+                  {view.todos.map((t) => (
+                    <div key={t.id} className={`tfd-item st-${t.status}`}>
+                      <span className="tfd-check">
+                        {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '◴' : '○'}
+                      </span>
+                      <span className="tfd-text" title={t.content}>{t.content}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <button
+              className={`todo-mini-capsule ${isFloatDeckOpen ? 'active' : ''}`}
+              title="查看任务清单"
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsFloatDeckOpen((o) => !o)
+              }}
+              aria-label="查看任务清单"
+            >
+              <span className="tmc-glyph" aria-hidden>☑</span>
+              <span className="tmc-count">{done}/{view.todos.length}</span>
+            </button>
+          </div>
         )
       })()}
 
@@ -488,25 +532,40 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
   const preview = previewOf(request)
   const editKey = editableKey(request)
   const [editing, setEditing] = useState(false)
+  const [isDiffEditorOpen, setIsDiffEditorOpen] = useState(false)
+  const [showDetail, setShowDetail] = useState(false)
   const [draft, setDraft] = useState(
     editKey ? String((request.input as Record<string, unknown>)[editKey] ?? '') : '',
   )
+
+  const isCodeTool = EDIT_TOOLS.has(request.toolName)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isCmdEnter = (e.metaKey || e.ctrlKey) && e.key === 'Enter'
       if (isCmdEnter) {
         e.preventDefault()
-        if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft })
-        else onDecision('approve')
-      } else if (e.key === 'Escape' && !editing) {
-        e.preventDefault()
-        onDecision('reject')
+        if (isDiffEditorOpen && editKey) {
+          onDecision('approve', { ...request.input, [editKey]: draft })
+          setIsDiffEditorOpen(false)
+        } else if (editing && editKey) {
+          onDecision('approve', { ...request.input, [editKey]: draft })
+        } else {
+          onDecision('approve')
+        }
+      } else if (e.key === 'Escape') {
+        if (isDiffEditorOpen) {
+          e.preventDefault()
+          setIsDiffEditorOpen(false)
+        } else if (!editing) {
+          e.preventDefault()
+          onDecision('reject')
+        }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editing, draft, request, onDecision, editKey])
+  }, [editing, isDiffEditorOpen, draft, request, onDecision, editKey])
 
   const intent = getApprovalIntent(request.toolName, request.input as Record<string, unknown>)
 
@@ -515,62 +574,144 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
     else onDecision('approve')
   }
 
+  const triggerEdit = () => {
+    if (isCodeTool) {
+      setIsDiffEditorOpen(true)
+    } else {
+      setEditing((v) => !v)
+      if (!editing) setShowDetail(true)
+    }
+  }
+
+  const originalContent = typeof (request.input as Record<string, unknown>).old_string === 'string'
+    ? String((request.input as Record<string, unknown>).old_string)
+    : ''
+
   return (
-    <div className="approval-inline">
-      <div className="approval-inline-header">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-lg shrink-0">{intent.icon}</span>
-          <div className="min-w-0">
-            <div className="approval-inline-title truncate">{intent.title}</div>
-            <div className="approval-inline-subtitle truncate" title={intent.desc}>{intent.desc}</div>
+    <>
+      <div className="approval-inline">
+        <div className="approval-inline-header">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-lg shrink-0">{intent.icon}</span>
+            <div className="min-w-0">
+              <div className="approval-inline-title truncate">{intent.title}</div>
+              <div className="approval-inline-subtitle truncate" title={intent.desc}>{intent.desc}</div>
+            </div>
+          </div>
+          <span className="approval-inline-badge shrink-0">需批准</span>
+        </div>
+
+        {showDetail && !editing && (
+          <div className="approval-inline-body">
+            {preview.isDiff ? (
+              <div className="approval-inline-diff overflow-auto max-h-[260px] border border-border rounded">
+                <DiffView raw={preview.text} />
+              </div>
+            ) : (
+              <pre className="approval-inline-pre font-mono overflow-auto max-h-[260px] border border-border rounded p-2 bg-panel-2 text-xs">
+                {preview.text}
+              </pre>
+            )}
+          </div>
+        )}
+
+        {showDetail && editing && editKey && !isCodeTool && (
+          <div className="approval-inline-body">
+            <textarea
+              className="approval-inline-textarea font-mono"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+          </div>
+        )}
+
+        <div className="approval-inline-footer">
+          {editKey && (
+            <button
+              className="btn ghost sm"
+              onClick={triggerEdit}
+            >
+              {isCodeTool ? '编辑代码' : editing ? '取消编辑' : '编辑配置'}
+            </button>
+          )}
+          {!editing && (
+            <button
+              className="btn ghost sm"
+              onClick={() => setShowDetail((v) => !v)}
+            >
+              {showDetail ? '收起详情' : '查看详情'}
+            </button>
+          )}
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              className="btn ghost sm"
+              onClick={() => onDecision('reject')}
+            >
+              拒绝 (Esc)
+            </button>
+            <button
+              className="btn sm"
+              onClick={approve}
+              autoFocus
+            >
+              {editing ? '应用并批准' : '批准 (⌘↵)'}
+            </button>
           </div>
         </div>
-        <span className="approval-inline-badge shrink-0">需批准</span>
       </div>
 
-      <div className="approval-inline-body">
-        {editing && editKey ? (
-          <textarea
-            className="approval-inline-textarea font-mono"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-        ) : preview.isDiff ? (
-          <div className="approval-inline-diff overflow-auto max-h-[300px] border border-border rounded">
-            <DiffView raw={preview.text} />
+      {isDiffEditorOpen && (
+        <div className="approval-diff-editor-overlay" role="dialog" aria-modal="true" onClick={() => setIsDiffEditorOpen(false)}>
+          <div className="approval-diff-editor-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="adem-header">
+              <div className="adem-title flex items-center gap-2">
+                <span>📝</span>
+                <span>编辑代码修改: {String((request.input as Record<string, unknown>).path || (request.input as Record<string, unknown>).file_path || '新建文件')}</span>
+              </div>
+              <div className="adem-subtitle">你可以在右侧直接编辑、微调拟定修改，左侧为只读对比源。</div>
+            </div>
+            
+            <div className="adem-body">
+              <div className="adem-pane original-pane">
+                <div className="adem-pane-title">原始代码 / 先前内容</div>
+                <div className="adem-code-box">
+                  {originalContent ? (
+                    <pre className="font-mono">{originalContent}</pre>
+                  ) : (
+                    <div className="empty sm muted font-mono text-center pt-8">（新文件或无先前内容）</div>
+                  )}
+                </div>
+              </div>
+              <div className="adem-pane proposed-pane">
+                <div className="adem-pane-title">拟定修改 (可直接在此处编辑)</div>
+                <textarea
+                  className="adem-textarea font-mono"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder="在此处对代码做出最终的修改微调..."
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="adem-footer">
+              <span className="text-xs text-muted">提示: 可按 Esc 退出编辑，按 ⌘↵ (Ctrl+Enter) 应用修改并批准</span>
+              <div className="flex items-center gap-2 ml-auto">
+                <button className="btn ghost" onClick={() => setIsDiffEditorOpen(false)}>取消</button>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    if (editKey) onDecision('approve', { ...request.input, [editKey]: draft })
+                    setIsDiffEditorOpen(false)
+                  }}
+                >
+                  应用并批准 (⌘↵)
+                </button>
+              </div>
+            </div>
           </div>
-        ) : (
-          <pre className="approval-inline-pre font-mono overflow-auto max-h-[300px] border border-border rounded p-2 bg-panel-2 text-xs">
-            {preview.text}
-          </pre>
-        )}
-      </div>
-
-      <div className="approval-inline-footer">
-        {editKey && (
-          <button
-            className="btn ghost sm"
-            onClick={() => setEditing((v) => !v)}
-          >
-            {editing ? '取消编辑' : '编辑代码'}
-          </button>
-        )}
-        <div className="flex items-center gap-2 ml-auto">
-          <button
-            className="btn ghost sm"
-            onClick={() => onDecision('reject')}
-          >
-            拒绝 (Esc)
-          </button>
-          <button
-            className="btn sm"
-            onClick={approve}
-            autoFocus
-          >
-            {editing ? '应用并批准' : '批准 (⌘↵)'}
-          </button>
         </div>
-      </div>
-    </div>
+      )}
+    </>
   )
 }

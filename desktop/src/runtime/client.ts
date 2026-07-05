@@ -15,7 +15,7 @@ import type {
   ModelEntry,
   PlanDoc,
   PlanModeState,
-  PlanSummary,
+  PlanListResponse,
   ProjectTemplatesApplyResult,
   ProjectTemplatesStatus,
   ScheduledTask,
@@ -455,10 +455,9 @@ export function setPlanMode(id: string, state: PlanModeState): Promise<{ id: str
   return apiPost<{ id: string; planMode: PlanModeState }>(`/sessions/${id}/plan-mode`, { state })
 }
 
-/** List this session's plans (newest first). */
-export async function listPlans(id: string): Promise<PlanSummary[]> {
-  const { plans } = await apiGet<{ plans: PlanSummary[] }>(`/sessions/${id}/plans`)
-  return plans
+/** List this session's plans (newest first) plus the active plan-mode draft. */
+export function listPlans(id: string): Promise<PlanListResponse> {
+  return apiGet<PlanListResponse>(`/sessions/${id}/plans`)
 }
 
 /** Read a single plan's full markdown content. */
@@ -1004,11 +1003,60 @@ export function getGitGraph(maxCount?: number): Promise<GitGraphResponse> {
 }
 
 /** Working-tree changes relative to HEAD (file list only — per-file diff is on-demand). */
-export function getWorkingTree(): Promise<WorkingTreeResponse> {
+export function getWorkingTree(sessionId?: string): Promise<WorkingTreeResponse> {
+  if (sessionId) return apiGet<WorkingTreeResponse>(`/sessions/${sessionId}/git/working-tree`)
   return apiGet<WorkingTreeResponse>('/git/working-tree')
 }
 
-/** Unified diff of a single file relative to HEAD. Empty string = no textual diff (binary/untracked). */
-export function getFileDiff(path: string): Promise<{ diff: string }> {
+/** Unified diff of a single file relative to the session baseline (or HEAD).
+ *  Empty string = no textual diff (binary/untracked). */
+export function getFileDiff(path: string, sessionId?: string): Promise<{ diff: string }> {
+  if (sessionId) return apiGet<{ diff: string }>(`/sessions/${sessionId}/git/diff?path=${encodeURIComponent(path)}`)
   return apiGet<{ diff: string }>(`/git/diff?path=${encodeURIComponent(path)}`)
+}
+
+// ── Change landing (Changes tab action bar) ─────────────────────────
+
+export interface LandingCommitResult {
+  ok: boolean
+  sha?: string
+  nothingToCommit?: boolean
+  error?: string
+}
+
+export interface LandingMergeResult {
+  ok: boolean
+  sha?: string
+  nothingToMerge?: boolean
+  conflictFiles?: string[]
+  error?: string
+}
+
+export interface LandingPrResult {
+  ok: boolean
+  url?: string
+  error?: string
+}
+
+/** Landing endpoints report expected failures (dirty workspace, conflicts,
+ *  gh errors) as structured 409 bodies — parse those instead of throwing. */
+async function apiPostLanding<T>(path: string, body?: unknown): Promise<T> {
+  const res = await rivetFetch(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined })
+  if (!res.ok && res.status !== 409) throw new Error(`POST ${path} -> ${res.status}`)
+  return res.json() as Promise<T>
+}
+
+/** Server-direct commit of everything in the session cwd. */
+export function commitSessionChanges(sessionId: string, message?: string): Promise<LandingCommitResult> {
+  return apiPostLanding<LandingCommitResult>(`/sessions/${sessionId}/git/commit`, message ? { message } : {})
+}
+
+/** Squash-merge the session worktree branch back into the main workspace. */
+export function mergeSessionBack(sessionId: string): Promise<LandingMergeResult> {
+  return apiPostLanding<LandingMergeResult>(`/sessions/${sessionId}/git/merge-back`, {})
+}
+
+/** Push the session worktree branch and open a PR via gh. */
+export function createSessionPr(sessionId: string, title?: string, body?: string): Promise<LandingPrResult> {
+  return apiPostLanding<LandingPrResult>(`/sessions/${sessionId}/git/pr`, { title, body })
 }

@@ -64,6 +64,13 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
     return { tier: 'strong', hardFloor: 'strong', reason: 'planning model defaults to strong tier — base plan is the executable shard graph' }
   }
 
+  // 通用 planner 下限：计划是后续执行的事实来源，低阶模型产出的计划真实度
+  // 不可控（事故链：flash 出大重构计划 → 执行丢功能 → 排查 20+ 轮）。不强推
+  // strong（成本），但禁止落入 cheap 探索档。
+  if (input.profile === 'planner') {
+    return { tier: 'balanced', hardFloor: 'balanced', reason: 'planner floor is balanced — plan fidelity drives everything downstream' }
+  }
+
   if (authority === 'tianfu' || authority === '天府') {
     if (riskTier === 'high') return { tier: 'strong', hardFloor: 'strong', reason: 'tianfu high-risk guardrail work uses strong tier' }
     return { tier: 'balanced', hardFloor: 'balanced', reason: 'tianfu guardrail work should not be cheap by default' }
@@ -94,10 +101,17 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
   return { tier: 'cheap', reason: 'default worker tier is cheap (flash model)' }
 }
 
-export function inferModelTierFromCard(card: Pick<ModelCapabilityCard, 'model' | 'contextWindow' | 'toolUseReliability' | 'jsonStability' | 'editSuccessRate' | 'testRepairRate'>): ModelTier {
-  const name = card.model.toLowerCase()
+/** 纯名字推断 tier —— 无能力卡时的降级路径（如计划留痕）。识别不出返回 null。 */
+export function inferModelTierFromName(model: string): ModelTier | null {
+  const name = model.toLowerCase()
   if (/\b(flash|mini|lite|cheap|small|haiku)\b|m2/.test(name)) return 'cheap'
   if (/\b(pro|strong|large|opus|max|ultra)\b|gpt-5/.test(name)) return 'strong'
+  return null
+}
+
+export function inferModelTierFromCard(card: Pick<ModelCapabilityCard, 'model' | 'contextWindow' | 'toolUseReliability' | 'jsonStability' | 'editSuccessRate' | 'testRepairRate'>): ModelTier {
+  const byName = inferModelTierFromName(card.model)
+  if (byName) return byName
 
   const capabilityAverage = (
     clampUnit(card.toolUseReliability) +

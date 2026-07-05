@@ -42,6 +42,7 @@ import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recove
 import { analyzeImpact } from '../repo/meridian-impact.js'
 import { runChangedFilesTypecheckMemo, typecheckGateEnabled } from './typecheck-gate.js'
 import { scanFilesForProbes, formatProbeHits, type ProbeHit } from './probe-detector.js'
+import { findApprovedPlanInventory, verifyRegressionInventory, formatInventoryReport, type InventorySearcher } from './regression-inventory.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -98,6 +99,11 @@ export interface B1Context {
   /** Injectable probe scanner for the probe-residue gate. Absent → the real
    *  scanFilesForProbes with readFileSync is used. Tests pass a mock. */
   scanProbes?: (files: string[], cwd: string) => import('./probe-detector.js').ProbeHit[]
+  /** 层3 重构回归契约：当前主控任务契约 getter。契约带 regressionInventory
+   *  时交付前逐项核验；缺失时回退到最近 APPROVED 计划的「回归清单」章节。 */
+  getTaskContract?: () => import('../context/task-contract.js').TaskContract | undefined
+  /** 层3 测试钩子：注入清单锚点搜索器（默认 git grep -F）。 */
+  inventorySearcher?: InventorySearcher
 }
 
 // ── Post-commit review batching ──
@@ -282,7 +288,9 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         `External files (${report.externalFileCount}):`,
         ...renderFileList(externalSplit.files, externalSplit.noiseCount),
         '',
-        `Verifications: ${report.verificationCount}`,
+        report.verificationCount > 0
+          ? `Verifications: ${report.verificationCount}`
+          : 'Verifications: none (no tests were run for this task)',
       ]
 
       // 层 1a: echo latest verification totals so agents copy real numbers
@@ -290,6 +298,8 @@ For complex specs or cross-module integration, include checklist entries: fact-f
       if (report.latestVerificationTotals) {
         const v = report.latestVerificationTotals
         lines.push(`  Latest: ${v.passed} pass ${v.failed} fail ${v.skipped} skip — ${v.command}`)
+      } else if (report.verificationCount === 0) {
+        lines.push('  (Typecheck passed, but no test suite was executed. Run tests before claiming "verified".)')
       }
 
       const hasVerificationDiagnostics = report.currentBlockingFailure
@@ -422,6 +432,29 @@ For complex specs or cross-module integration, include checklist entries: fact-f
             lines.push('', '  ⚠️  Incomplete tasks detected. Verify these are intentionally deferred, not forgotten.')
           }
         }
+      }
+
+      // ── 层3: 重构行为等价契约 — 回归清单逐项核验（advisory，绝不阻断交付）──
+      // 清单来源优先级：task contract 的 regressionInventory → 最近 APPROVED
+      // 计划的「回归清单」章节。重构类交付且零清单 → 按 YELLOW 处理并留痕，
+      // 掐断「重构丢功能却 GREEN 交付」的事故链（缺口 3）。
+      try {
+        const { isRefactorObjective } = await import('../context/task-contract.js')
+        const contract = ctx.getTaskContract?.()
+        const inventory = contract?.regressionInventory && contract.regressionInventory.length > 0
+          ? contract.regressionInventory
+          : findApprovedPlanInventory(params.cwd)
+        const refactorish = isRefactorObjective(contract?.objective ?? '')
+          || isRefactorObjective(typeof params.input.message === 'string' ? params.input.message : '')
+        if (inventory && inventory.length > 0) {
+          const results = verifyRegressionInventory(params.cwd, inventory, ctx.inventorySearcher)
+          lines.push(...formatInventoryReport(results))
+        } else if (refactorish) {
+          lines.push('', '⚠️ 重构类交付缺少回归清单（task contract regressionInventory / 计划「回归清单」章节均为空）。')
+          lines.push('   行为等价未核验 → 按 YELLOW 处理：交付报告必须说明哪些既有功能（路由/导航/导出/命令入口）已人工确认仍在。')
+        }
+      } catch {
+        // advisory: 回归契约核验绝不让交付本身失败
       }
 
       if (commit) {

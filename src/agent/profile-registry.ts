@@ -53,6 +53,7 @@ const BUILTIN_PROFILES: ProfileDefinition[] = [
 2. read_file to understand implementation
 3. Trace imports and callers
 4. Report findings with file:line references
+Evidence discipline — label the source of every finding: [current source] / [documentation] / [historical plan or memo]. Docs, old plans and memory/convention files describe the state when they were WRITTEN, not the present. Any claim about the current state (tech stack, framework, entry points, directory layout) that comes from a document must be verified against the current source code before you report it. When docs and source conflict, report the conflict itself: "docs say X, current code shows Y" — the conflict is a finding, do not silently pick a side.
 Do NOT modify any files.`,
     builtIn: true,
   },
@@ -60,7 +61,7 @@ Do NOT modify any files.`,
     name: 'doc_scout',
     role: 'readonly',
     allowedTools: [...READ_ONLY_TOOLS],
-    expertisePrompt: `You are a documentation scout. Locate and read documentation files. Report findings accurately.`,
+    expertisePrompt: `You are a documentation scout. Locate and read documentation files. Report findings accurately. Documentation may lag behind the code — when reporting claims about the CURRENT state of the project, mark them as "per docs, unverified against source" unless you have confirmed them in the source code.`,
     builtIn: true,
   },
   {
@@ -75,7 +76,9 @@ Do NOT modify any files.`,
   {
     name: 'reviewer',
     role: 'readonly',
-    allowedTools: [...READ_ONLY_TOOLS],
+    // 将星账本读写：审查者是账本的主要生产者（瑶光记缺陷族）。
+    // record_general_finding 只追加 .rivet/generals/（知识库），不触代码，不破坏 readonly 语义。
+    allowedTools: [...READ_ONLY_TOOLS, 'recall_general', 'record_general_finding'],
     expertisePrompt: `You are a code reviewer. Read the code carefully, identify issues, and provide actionable feedback.
 
 For code search in review tasks, prefer ast_grep over grep when the target is a known syntax pattern (e.g., "find all async functions that don't have try-catch"). ast_grep matches AST nodes, not text, and won't produce false positives from comments or string literals.`,
@@ -226,7 +229,8 @@ Use met:false for unmet, met:null for uncheckable. If overall is rejected, the s
   {
     name: 'patcher',
     role: 'hands',
-    allowedTools: [...WRITE_TOOLS, 'ast_edit'],
+    // 将星账本读写：patcher 硬绑 tianliang authority，出战带账本记忆，新战绩可回写。
+    allowedTools: [...WRITE_TOOLS, 'ast_edit', 'recall_general', 'record_general_finding'],
     expertisePrompt: `You are a patcher. Apply code changes precisely. Follow edit instructions exactly, preserving indentation and context.`,
     defaultMaxTokens: 24576,
     // A self-contained shard implements changes AND runs tsc/lint/tests to green
@@ -595,6 +599,24 @@ function parseAgentMarkdown(content: string): ProfileDefinition {
 
 /** 全局单例 */
 export const profileRegistry = new ProfileRegistry()
+
+/** Tools that write files or run state-changing commands — used to classify a
+ *  worker profile as write/execute-capable (vs a pure read-only scout). */
+const WRITE_CAPABLE_TOOLS: ReadonlySet<string> = new Set([
+  'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'ast_edit', 'bash', 'run_tests', 'git',
+])
+
+/**
+ * Whether a delegate profile can write files or execute state-changing commands.
+ * Unknown profiles → false (the delegate tool's own schema rejects them with a
+ * clearer "Unknown profile" error; plan-mode need not double-report). Used by the
+ * plan-mode gate to allow only read-only scouts during planning.
+ */
+export function profileIsWriteCapable(name: string): boolean {
+  const def = profileRegistry.get(name)
+  if (!def) return false
+  return def.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
+}
 
 /**
  * P0 超时对齐：delegate 工具层超时 = max(阶梯, 各 profile 预算) + 宽限。

@@ -439,7 +439,13 @@ function assembleAgentLoop(
 
   // approvalMode 在 createAgentRuntime 内部未接收；构造后立即覆盖
   // （setApprovalMode 直接 mutate config.approvalMode，与构造时设等价）。
-  if (approvalMode) agent.setApprovalMode(approvalMode)
+  if (approvalMode) {
+    agent.setApprovalMode(approvalMode)
+    // 自治级别（dangerously-skip-permissions）联动无限轮次：真正全自动。
+    if (approvalMode === 'dangerously-skip-permissions') {
+      agent.config.maxTurns = 0
+    }
+  }
 
   return agent
 }
@@ -517,7 +523,11 @@ function buildManagedAgent(
   return {
     run: (prompt, callbacks, images) => agent.run(prompt, callbacks, images),
     abort: () => agent.abort(),
-    setApprovalMode: (mode) => agent.setApprovalMode(mode),
+    setApprovalMode: (mode) => {
+      agent.setApprovalMode(mode)
+      // 自治联动无限轮次，非自治恢复默认 200
+      agent.config.maxTurns = mode === 'dangerously-skip-permissions' ? 0 : 200
+    },
     enterPlanMode: () => agent.enterPlanMode(),
     exitPlanMode: () => agent.exitPlanMode(),
     setActivePlan: (plan) => agent.setActivePlan(plan),
@@ -551,7 +561,10 @@ function buildManagedAgent(
       const oldAgent = agent
       void oldAgent.cancelIdleCompaction()
       spec = next
-      agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
+      // Preserve the live approvalMode — user may have switched autonomy level
+      // since session creation. The closure variable is stale if they did.
+      const liveApprovalMode = oldAgent.config.approvalMode
+      agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, liveApprovalMode, registry, shared)
       if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
         try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
       }
@@ -897,6 +910,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     // Reload-aware: picks up providers configured after startup (no restart).
     listModels: () => listAllModelsWithReload(ctx),
     defaultModelId: ctx.model.id,
+    defaultDomain: ctx.config.agent?.defaultDomain,
   })
 
   // Wave F: sessions 现已就绪——把真实 sameCwdRunningCount 回写到 SharedRuntime。
@@ -963,7 +977,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // Open file in system editor / reveal in file manager — thin wrapper so the
   // Desktop webview can request the sidecar to open a local path without
   // needing a Tauri plugin.
-  routes['POST /open-file'] = (body) => {
+  routes['POST /open-file'] = async (body) => {
     const filePath = (body as Record<string, unknown>)?.path
     if (typeof filePath !== 'string' || !filePath) {
       return { status: 400, body: { error: 'Missing path' } }
@@ -976,15 +990,25 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     if (!existsSync(resolved)) {
       return { status: 404, body: { error: `Path not found: ${resolved}` } }
     }
-    import('node:child_process').then(({ spawn }) => {
-      const command = reveal ? buildRevealCommand(filePath) : buildOpenPathCommand(filePath)
-      const child = spawn(command.cmd, command.args, { detached: true, stdio: 'ignore' })
-      child.on('error', (err) => {
-        console.error(`[open-file] spawn failed: ${command.cmd} ${command.args.join(' ')} → ${err.message}`)
+    // Pass `resolved` (not raw `filePath`): when cwd is empty the frontend may
+    // send a relative path, which would make explorer /select,<rel> silently
+    // fail. builder 接收绝对路径后，win32 分支还会把正斜杠归一为反斜杠。
+    const command = reveal ? buildRevealCommand(resolved) : buildOpenPathCommand(resolved)
+    // Await spawn 的 spawn/error 事件再返回——之前 fire-and-forget 立即返 200，
+    // spawn 失败只进 stderr 日志，前端永远收不到，用户看到"点了没反应"。
+    // detached + unref 保持：不阻塞 sidecar 退出。spawn 通常 <50ms。
+    try {
+      const { spawn } = await import('node:child_process')
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(command.cmd, command.args, { detached: true, stdio: 'ignore' })
+        child.on('error', reject)
+        child.on('spawn', () => { child.unref(); resolve() })
       })
-      child.on('spawn', () => child.unref())
-    })
-    return { status: 200, body: { opened: filePath } }
+      return { status: 200, body: { opened: resolved } }
+    } catch (err) {
+      console.error(`[open-file] spawn failed: ${command.cmd} ${command.args.join(' ')} → ${(err as Error).message}`)
+      return { status: 500, body: { error: `启动失败: ${(err as Error).message}` } }
+    }
   }
 
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.

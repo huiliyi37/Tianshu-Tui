@@ -35,6 +35,7 @@ export interface ContextInjectionDeps {
 export class ContextInjectionController {
   private userAnchors: ContextAnchor[] = []
   private anchorRegistry = new AnchorRegistry(2_000)
+  private playbookLessonsLoaded = false
 
   constructor(private deps: ContextInjectionDeps) {}
 
@@ -47,11 +48,31 @@ export class ContextInjectionController {
     this.refreshLedger()
   }
 
-  refreshPlaybookLessons(_userInput: string): void {
-    // Playbook injection disabled — lessons are low-signal noise (14/16 entries
-    // have useCount=0) and their per-turn keyword re-query causes habituation
-    // tracker churn → consolidatedBlock mutation → prefix cache break.
-    // Re-enable with useCount>0 + importance>=0.5 filtering when content quality improves.
+  /**
+   * Playbook lessons 注入（复活）。历史禁用原因与对策：
+   *  1. 低信号噪音 → `minImportance: 0.5` 质量闸。新蒸馏 bullet 初始 0.6-0.7 可入选，
+   *     recordUsage +0.05 强化，被用的活下来；没人用的随时间衰减到 0.5 以下自动出局。
+   *  2. 每 turn 重查导致 habituation 抖动 → consolidated 突变 → 前缀缓存破。
+   *     现在**每会话只查一次**（首个 user input 的 keyword），会话内 lessons 恒定，
+   *     habituation 干净地晋升进 <consolidated>，前缀不再抖。
+   * 渲染走 appendix/consolidated 通道（volatile.ts <historical-lessons>），不动
+   * frozenBase；onLessonsRendered → recordUsage 回路（loop.ts）随渲染自然复活。
+   */
+  refreshPlaybookLessons(userInput: string): void {
+    if (this.playbookLessonsLoaded) return
+    const store = this.deps.getPlaybookStore()
+    if (!store) return
+    try {
+      const keywords = extractKeywords(userInput)
+      if (keywords.length === 0) return
+      this.playbookLessonsLoaded = true
+      const lessons = store.query(keywords, 3, { minImportance: 0.5 })
+      if (lessons.length > 0) {
+        this.deps.promptEngine.updatePlaybookLessons(lessons)
+      }
+    } catch {
+      // Playbook is best-effort cross-session memory — never blocks a turn.
+    }
   }
 
   recordUserInputClaims(userInput: string): void {

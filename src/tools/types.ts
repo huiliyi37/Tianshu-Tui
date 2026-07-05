@@ -95,6 +95,14 @@ export interface ToolCallParams {
   onLeaveMark?: (mark: LeaveMarkInput) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: PlanClosedInput) => void
+  /** Evidence-gated plan closure (防伪闭环): assess the real delivery gate over
+   *  owned/dirty files. Pre-bound to the session's evidence + ownership. Absent
+   *  in worker/non-agent contexts → plan_close falls back to trusting the
+   *  self-reported deliveryState. */
+  assessDelivery?: (dirtyFiles?: string[]) => import('../agent/delivery-gate-v2.js').DeliveryGateResult
+  /** Real verification records for this session — used by plan_close to record
+   *  actual verified commands instead of the model's self-reported list. */
+  getVerificationEvidence?: () => import('../agent/evidence.js').VerificationSummary
   /** U6/C1: capture the goal decomposition (ordered step descriptions) produced
    *  by the plan_steps tool during planning. The loop maps these into the active
    *  PlanExecutionTrace. Absent in non-task / worker contexts → tool is a no-op. */
@@ -149,6 +157,13 @@ export interface ToolCallParams {
   delegationDepth?: number
   /** Active plan draft file (relative to cwd) while in plan mode. */
   activePlanFilePath?: string | null
+  /** 主动 plan mode：模型经 plan action=enter_mode 自主进入计划模式。
+   *  Pre-bound 到主控 AgentLoop.enterPlanMode；worker/非 agent 上下文缺席 →
+   *  enter_mode 返回错误（fail-closed，worker 不允许切主控状态）。
+   *  alreadyPlanning=true 表示进入前已在 plan mode（幂等返回，未重建草稿）。 */
+  enterPlanMode?: () => { activePlanFilePath: string | null; alreadyPlanning: boolean }
+  /** 当前会话模型名 —— plan submit 用于产出模型留痕（低阶模型计划警告）。 */
+  sessionModel?: string
   /** AbortSignal from the tool pipeline — fires when the tool-level timeout
    *  rejects. Delegate tools propagate this to the coordinator so zombie
    *  workers are cleaned up immediately. */

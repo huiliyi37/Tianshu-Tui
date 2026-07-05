@@ -20,8 +20,11 @@ import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
 import { buildGateConvergenceHint } from './delivery-gate-v2.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { ImportGraph } from './import-graph.js'
-import type { PlanModeState } from './plan-mode.js'
-import { createActivePlanDraftPath } from './plan-mode.js'
+import type { PlanModeState, PlanInjectionVariant } from './plan-mode.js'
+import { createActivePlanDraftPath, planInjectionVariantFor } from './plan-mode.js'
+
+/** Turns between full plan-mode reminder refreshes (sparse in between). */
+const PLAN_FULL_REFRESH_TURNS = 5
 import { WRITING_PLANS_SKILL } from './plan-delegation.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
@@ -41,6 +44,7 @@ import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
+import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
 import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
 import { buildDepartureMilestone } from '../constellation/milestone.js'
 import { appendMilestone } from '../constellation/store.js'
@@ -86,6 +90,7 @@ import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join, dirname } from 'node:path'
 import { writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { extractRegressionInventory } from './regression-inventory.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
@@ -187,6 +192,18 @@ export class AgentLoop {
   planModeState: PlanModeState = 'off'
   /** Relative path to the active plan file (draft or revision target). Writable in plan mode. */
   activePlanFilePath: string | null = null
+  /** 主动 plan mode 建议的 one-shot 记忆：已建议过的 contract id（选「直接执行」后不复问）。 */
+  planModeSuggestedContracts = new Set<string>()
+  /** Plan mode 状态变更通知 — server 层订阅后转发 plan_mode SSE（桌面切 Plan tab）。
+   *  覆盖模型自主 enter_mode 的场景：session-manager 自己触发的切换它已经知道，
+   *  工具触发的切换只能靠这条回调出圈。agent 创建后由外部回填。 */
+  onPlanModeChange?: (state: PlanModeState) => void
+  /** Session turn count at which the current plan-mode session was entered — drives
+   *  the injection cadence (full spec on entry + every refresh interval, else sparse). */
+  private planEnterTurn = 0
+  /** True when plan mode was (re)entered on an existing non-empty plan file (revision
+   *  after reject / resume) → first injection uses the shorter 'reentry' variant. */
+  private planReentry = false
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
   failureJournal: FailureJournal = createFailureJournal()
@@ -801,7 +818,22 @@ export class AgentLoop {
   bindSessionDomain(taskDescription: string): void {
     if (this.sessionDomain !== undefined) return
     this.sessionDomain = isStarSoulEnabled() ? buildActiveDomain(taskDescription) : null
-    this.config.promptEngine.setActiveDomain(this.sessionDomain)
+    this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(this.sessionDomain))
+  }
+
+  /**
+   * 主控会话的域经验摘要：随域绑定挂 top-3 lessons（worker 侧同源
+   * buildDomainKnowledgeBlock）。与域同为会话常量、同一时机构建 → 一起进
+   * FROZEN 前缀，不引入 per-turn 变化。
+   */
+  private withDomainKnowledge(domain: ActiveStarDomain | null): (ActiveStarDomain & { knowledgeBlock?: string }) | null {
+    if (!domain || !this.config.domainKnowledgeStore) return domain
+    try {
+      const block = buildDomainKnowledgeBlock(this.config.domainKnowledgeStore, domain.id, { maxLessons: 3 })
+      return block ? { ...domain, knowledgeBlock: block } : domain
+    } catch {
+      return domain
+    }
   }
 
   abort(): void {
@@ -953,6 +985,19 @@ export class AgentLoop {
     this.config.activePlanFilePath = this.activePlanFilePath
     this.config.promptEngine.setPlanModeState(this.planModeState)
     this.config.promptEngine.setActivePlanFilePath(this.activePlanFilePath)
+    this.config.promptEngine.setPlanInjectionVariant(this.computePlanInjectionVariant())
+  }
+
+  /** Cadence for the per-turn plan-mode reminder: full spec on entry (or reentry
+   *  header on resume) and every PLAN_FULL_REFRESH_TURNS turns, sparse in between.
+   *  Returns undefined when not planning (no block rendered). */
+  private computePlanInjectionVariant(): PlanInjectionVariant | undefined {
+    if (this.planModeState !== 'planning') return undefined
+    return planInjectionVariantFor({
+      turnsSinceEnter: this.session.getTurnCount() - this.planEnterTurn,
+      reentry: this.planReentry,
+      refreshEvery: PLAN_FULL_REFRESH_TURNS,
+    })
   }
 
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort | 'auto'): void {
@@ -1085,7 +1130,7 @@ export class AgentLoop {
   /** Manually set the active star domain. Pass null to disable, or a valid ActiveStarDomain. */
   setSessionDomain(domain: ActiveStarDomain | null): void {
     this.sessionDomain = domain
-    this.config.promptEngine.setActiveDomain(domain)
+    this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(domain))
   }
 
   /** Reset domain to undefined so the next run() will auto-detect from user input. */
@@ -1286,12 +1331,24 @@ export class AgentLoop {
       return
     }
     this.planModeState = 'planning'
+    this.planEnterTurn = this.session.getTurnCount()
+    // Re-entering cancels any pending exit reminder from a prior exit.
+    this.config.promptEngine.setPlanExitReminderPending(false)
     this.config.promptEngine.setActivePlan(null)
 
     const cwd = this.cwd
     if (opts?.planFilePath) {
       this.activePlanFilePath = opts.planFilePath.replace(/\\/g, '/')
+      // Reentry = resuming an existing non-empty plan (e.g. revision after reject).
+      // First injection uses the shorter 'resuming' reminder instead of the full spec.
+      this.planReentry = (() => {
+        try {
+          const abs = join(cwd, this.activePlanFilePath)
+          return existsSync(abs) && readFileSync(abs, 'utf-8').trim().length > 0
+        } catch { return false }
+      })()
     } else {
+      this.planReentry = false
       this.activePlanFilePath = createActivePlanDraftPath()
       const abs = join(cwd, this.activePlanFilePath)
       mkdirSync(dirname(abs), { recursive: true })
@@ -1299,13 +1356,33 @@ export class AgentLoop {
     }
     this.syncPlanModeToConfig()
     this.markSkillInvoked(WRITING_PLANS_SKILL)
+    // 主动 plan mode 链路：带活跃任务契约进入时，注入一次性并行调研 advisory。
+    // 主控自主决定切分（不硬派）——advisory 只给方法与素材（scope 文件分组提示）。
+    if (this.taskContract?.isActionable) {
+      const files = this.taskContract.scope.mentionedFiles
+      const fileHint = files.length > 0
+        ? `契约 scope 内已提到的文件（可按此分组）：${files.slice(0, 12).join(', ')}${files.length > 12 ? ` …（共 ${files.length} 个）` : ''}。`
+        : ''
+      this.advisoryBus.submit({
+        key: 'plan-scout-parallel',
+        priority: 0.7,
+        category: 'delegation',
+        content: `已进入计划模式且有活跃任务契约。多模块任务先并行调研再写计划：用 \`delegate_batch\` 一次并行派 2-4 个只读 \`code_scout\`（按模块/文件域切分，每个 scout 给独立的调研目标），汇总发现后再写计划。${fileHint}单模块小任务可跳过并行直接调研。`,
+        ttl: 2,
+        expect: { kind: 'tool_appears', tools: ['delegate_batch'], withinTurns: 2 },
+        channel: 'system-reminder',
+      })
+    }
+    try { this.onPlanModeChange?.('planning') } catch { /* non-fatal */ }
   }
 
   /** Exit plan mode — user approved, all tools allowed */
   exitPlanMode(): void {
     this.planModeState = 'off'
+    this.config.promptEngine.setPlanExitReminderPending(true)
     this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
+    try { this.onPlanModeChange?.('off') } catch { /* non-fatal */ }
   }
 
   /**
@@ -1338,9 +1415,21 @@ export class AgentLoop {
       return
     }
     this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
+    // 层3 重构回归契约：计划带「回归清单」章节时灌入 task contract，
+    // deliver_task 交付前对清单逐项 grep 核验（事故链缺口 3）。best-effort。
+    try {
+      const planContent = readFileSync(join(this.cwd, '.rivet', 'plans', `${plan.slug}.md`), 'utf-8')
+      const inventory = extractRegressionInventory(planContent)
+      if (inventory.length > 0 && this.taskContract) {
+        this.taskContract = { ...this.taskContract, regressionInventory: inventory }
+      }
+    } catch { /* best-effort: 清单灌入失败不影响计划批准 */ }
+    const wasPlanning = this.planModeState === 'planning'
     this.planModeState = 'off'
+    if (wasPlanning) this.config.promptEngine.setPlanExitReminderPending(true)
     this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
+    if (wasPlanning) { try { this.onPlanModeChange?.('off') } catch { /* non-fatal */ } }
   }
 
   /** Get current plan mode state */
@@ -1448,7 +1537,8 @@ export class AgentLoop {
       const db = this.config.meridianIndexer?.getDb()
       if (db) {
         db.saveBanditState('bandit:reasoning_effort', this.p3.serializeEffortBandit())
-        db.saveBanditState('bandit:model_style', this.p3.serializeBandit())
+        // model_style bandit sealed (zero production callers). Its state was
+        // saved/restored every session but never consulted for a decision.
         db.saveBanditState('p3:plan_cache', this.p3.serializePlanCache())
       }
     } catch { /* non-critical */ }
@@ -1467,6 +1557,15 @@ export class AgentLoop {
     try {
       this.telemetryWriter.write({ kind: 'recall-summary', ...this.cacheAdvisor.getRecallSummary() })
     } catch { /* telemetry is best-effort */ }
+    // Speculation source stats → session meta. Written unconditionally of the
+    // RIVET_DEBUG_TELEMETRY gate so the "should llmSpeculation default on"
+    // decision has cross-session hit-rate evidence. Only written when at least
+    // one source saw activity — idle sessions don't grow their meta files.
+    try {
+      const stats = this.p3.queue.statsBySource()
+      const hasActivity = Object.values(stats).some(s => s.enqueued > 0 || s.hits > 0)
+      if (hasActivity) this.persist?.updateMetadata({ speculationStats: stats })
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
   }
 
   async startFsWatcher(): Promise<void> {

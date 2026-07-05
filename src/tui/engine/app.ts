@@ -320,8 +320,8 @@ export class TuiApp {
   private agentBusy = false
   /** 当前会话审批模式（继承自 agent config），供 worker pills badge */
   private _approvalMode: string = 'auto-safe'
-  /** choice-panel 当前模式：'effort' (推理强度) 或 'permission' (权限选择) */
-  choicePanelKind: 'effort' | 'permission' = 'effort'
+  /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) */
+  choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' = 'effort'
   /**
    * Run 世代计数 —— 唯一权威的「当前 run」标识。
    * 每次 abort 自增；被中断的旧 run 的迟到回调（经 bridge 包裹时捕获的旧 gen）

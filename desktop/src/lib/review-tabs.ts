@@ -1,18 +1,16 @@
 // Right Panel (ReviewPanel) customizable tabs preference manager (P0).
 // Persisted to localStorage and broadcast via a custom event.
 
-export type ReviewTab = 'review' | 'plan' | 'task' | 'canvas' | 'wt' | 'files' | 'github' | 'browser'
+export type ReviewTab = 'changes' | 'tasks' | 'files' | 'canvas' | 'github' | 'browser'
 
 const KEY = 'tianshu.enabledReviewTabs'
 const CHANGE_EVENT = 'tianshu:reviewtabschange'
 
 export const ALL_TABS: { id: ReviewTab; label: string; glyph: string }[] = [
-  { id: 'review', label: 'Changes', glyph: '✓' },
-  { id: 'plan', label: 'Plan', glyph: '📋' },
-  { id: 'task', label: 'Tasks', glyph: '☑' },
-  { id: 'canvas', label: 'Canvas', glyph: '🎨' },
-  { id: 'wt', label: 'Diff', glyph: '⟐' },
+  { id: 'changes', label: 'Changes', glyph: '✓' },
+  { id: 'tasks', label: 'Tasks', glyph: '📋' },
   { id: 'files', label: 'Files', glyph: '📁' },
+  { id: 'canvas', label: 'Canvas', glyph: '🎨' },
   { id: 'github', label: 'PR', glyph: '🔀' },
   { id: 'browser', label: 'Browser', glyph: '🌐' },
 ]
@@ -28,7 +26,7 @@ export function loadEnabledTabs(): ReviewTab[] {
   } catch {
     // non-fatal
   }
-  return ['review', 'plan', 'task', 'canvas', 'wt', 'files', 'github', 'browser'] // Default: show all
+  return ['changes', 'tasks', 'files', 'canvas', 'github', 'browser'] // Default: show all
 }
 
 export function saveEnabledTabs(tabs: ReviewTab[]): void {

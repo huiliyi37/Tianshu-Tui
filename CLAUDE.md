@@ -1,6 +1,6 @@
 # Rivet
 
-Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 24+ (`engines` pins 24.1.0) / TypeScript strict / Ink 6 / React 19 / node:test.
+Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 24+ (`engines` pins 24.1.0) / TypeScript strict / 纯 ANSI 终端 UI（`src/tui/engine/`，零 React/Ink 渲染） / node:test。桌面端 `desktop/` 是独立的 React 应用；`src/tui/command-palette.tsx` 是仅存的 Ink 组件残留（main.ts 只用它的纯函数，待清理）。
 
 ## Build & Test
 
@@ -13,7 +13,7 @@ npm run typecheck # tsc --noEmit
 ## Architecture
 
 ```
-main.tsx → AgentLoop (agent/loop.ts)
+main.ts → AgentLoop (agent/loop.ts)
   ├── RuntimeHookPipeline (agent/runtime-hooks.ts)  ← TUI 2.x 核心
   │     纯分阶段执行器 + 错误隔离（任一 hook 抛错只走 onError，不中断 turn）
   │     5 阶段真实调用点（非概念，已钉在 loop 主路径）：
@@ -36,7 +36,7 @@ main.tsx → AgentLoop (agent/loop.ts)
   ├── AgentSession (messages, usage, turn count)
   ├── EvidenceTracker + FileHistory
   ├── Stores: claim-store, stigmergy-store, playbook-store, trace-store
-  └── Tool dispatch → API (SSE streaming) → TUI (Ink 6)
+  └── Tool dispatch → API (SSE streaming) → TUI (纯 ANSI, src/tui/engine/)
 ```
 
 > ⚠️ 旧文档写「9 个固定 hook」是误导性简化。真相是条件装配，开关在 `loop-factory.ts:createRuntimeHooksPipeline` 传入的 deps。改 hook 行为前先看 `create-runtime-hooks.ts` 的 gate 条件，不要假设某 hook 一定在跑。
@@ -60,6 +60,7 @@ Key modules: `src/agent/` (loop, hooks/, session, sub-agent, coordinator), `src/
 - User input during streaming goes to SteerBuffer (not direct interrupt), injected at next tool result
 - **星域 `toolWhitelist` 是生效的工具交集过滤器，对当前内置域退化为恒等。** `star-domain.ts` 有 10 个域（天枢/破军/天府/天梁/天权/天机/天璇/辅/文曲/瑶光）。worker 创建时 `allowedTools = profile.allowedTools ∩ domain.toolWhitelist`（`work-order.ts:toolsForAuthority`）。当前 10 域白名单**逐字相同且是全集** → 对内置域交集退化为恒等（no-op），域间行为差异只来自 `systemPromptSuffix`/`volatileBlock`/`courageThreshold`/`decisionStyle`。但机制本身**真实生效**，三处会咬人：①profile 若含白名单外工具（`web_search`/`council_convene`/`browser` 等），设了 authority 就被静默削掉；②authority 拼错/域未加载 → **fail-closed 返回 `[]` deny-all**（有意护栏，勿改成回退 profile 全集）；③自定义域（card frontmatter）的 `toolWhitelist` 完全生效，会真实削减工具。改它前先想清楚命中的是哪种场景。
 - **Hook 信号经 AdvisoryBus 统一收编后注入**（`59e52394`）。hook 不直接改 prompt，只能用 `RuntimeHookEffects`（`injectUserMessage`/`emitPhaseChange`/`setStrategy`…）；带 priority/ttl/category 的信号优先 `advisoryBus.submit`，降级才 `injectUserMessage`。注入走 system-reminder 通道，不重写 `frozenBase`/`volatileBlock`。
+- **重构事故链四层防线（2026-07-04）**：①`planner` profile 有 balanced hardFloor，议事会席位瑶光门（`tierHint`+`noDowngrade`）经 `seatTierFloor` → `WorkOrder.tierFloor` 接线到真实派发（只抬升不降级）；计划文件带产出模型留痕（`> **Model: …**` 行），cheap 产出在 TUI/桌面审批面显示警告。②plan submit 规模门禁：任务 >8 或文件 >15 且无分波结构 → one-shot 软拦；`plan-executor` 波间硬门禁（`wave-gate.ts`）：非末波完成后 typecheck + 白名单验证命令必须过，失败硬拦下一波 dispatch（入口复评自愈；`RIVET_WAVE_GATE=0` 禁用）。③重构类计划强制 `full` 方法论 + 「回归清单」章节；清单经 `TaskContract.regressionInventory` / 最近 APPROVED 计划流入 `deliver_task`，交付前逐项 git grep 核验（advisory 不阻断）。④`regression-bisect-hook`（postTool，`RIVET_REGRESSION_BISECT=0` 禁用）：回归语义 + ≥5 轮只读诊断空转 → constitutional advisory 强制切基线对照（git log → bisect/checkpoint diff → 清单定位）；convergence level 3 对回归场景优先建议 bisect 而非开新对话。
 - **压缩历史重写只在 `turn===0`（用户边界）。** `compact-boundary-coordinator.ts` 的 `runCompaction` 是五级阶梯（会话分裂→maybeCompact→T9 质量压缩→陈旧轮压缩→堆驱动微压缩），命中即止。turn 中途只置 pending flag 延迟到 turn 0；1M 窗口跳过/延迟一切重写；`shouldDelayCompact` 在缓存健康时不压——全为保前缀缓存。
 
 ## MCP Tools: code-review-graph

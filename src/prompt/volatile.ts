@@ -53,7 +53,22 @@ export function renderPlanMethodologyAdvisory(
  * architecture/data-flow diagram (the salience for this lives in the appendix,
  * close to where the model is reasoning, instead of a far-away tool description).
  */
-export function renderPlanModeBlock(activePlanFilePath?: string | null): string {
+export function renderPlanModeBlock(
+  activePlanFilePath?: string | null,
+  variant: import('../agent/plan-mode.js').PlanInjectionVariant = 'full',
+): string {
+  // Sparse / reentry variants: throttle the heavy spec on non-refresh turns so
+  // planning turns don't re-pay the full block's token cost each time. Cache-safe
+  // (dynamic appendix only). The full spec is still emitted on entry + every
+  // refresh interval, so the model never loses the invariant for long.
+  if (variant === 'sparse' || variant === 'reentry') {
+    const planFileHint = activePlanFilePath ? ` 活动计划文件: \`${activePlanFilePath}\`（仅此文件可写）。` : ''
+    const head = variant === 'reentry'
+      ? `恢复规划模式——继续完善当前计划。`
+      : `规划模式仍激活。`
+    return `<plan-mode>${head}只读探索，禁止写/改/执行（活动计划文件除外）。${planFileHint} 每个 turn 必须以 \`ask_user_question\` 或 \`plan action=submit\` 收尾，禁止纯文本收尾。完整规范见本轮早前的 plan-mode 说明。</plan-mode>`
+  }
+
   const planFileLine = activePlanFilePath
     ? `\n活动计划文件: \`${activePlanFilePath}\` — 用 write_file / edit_file 增量写入计划正文（仅此文件可写）。`
     : ''
@@ -62,10 +77,10 @@ export function renderPlanModeBlock(activePlanFilePath?: string | null): string 
 你处于规划模式。只能读文件和探索代码库——禁止写、改、执行任何会修改状态的命令（活动计划文件除外）。${planFileLine}
 
 工作流：
-1. **识别关键问题** — 先列出 2-3 个对计划至关重要的问题。不确定代码结构时，用 \`delegate_task\`（profile=code_scout）并行调研；独立问题并行派多个 worker。
+1. **识别关键问题** — 先列出 2-3 个对计划至关重要的问题。不确定代码结构时，用 \`delegate_task\`（profile=code_scout）并行调研；独立问题并行派多个 worker。**多模块任务先并行调研**：用 \`delegate_batch\` 一次并行派 2-4 个只读 code_scout（按模块/文件域切分），汇总后再写计划——串行逐个调研浪费轮次。
 2. **外部调研** — 涉及外部库/协议/最佳实践时，用 \`web_search\` / \`web_fetch\` 核实，不凭训练记忆下结论。
 3. **设计收敛** — 最多 2-3 个真正不同的方案；一个明显更优就只提一个。偏好/约束不明时用 \`ask_user_question\` 澄清。
-4. **回读验证** — 写计划前重读关键文件核实理解。
+4. **事实锚点核对（硬性）** — 写入计划前，计划引用的每个文件路径、符号、行号都必须用工具对当前源码核实过。项目内的文档、历史计划、记忆/约定文件描述的是**写下时的状态**，不是现状——涉及现状的断言（技术栈、框架、渲染路径、入口文件、目录结构）一律以当前源码为准，文档与源码冲突时信源码。scout 报告中引用文档得出的结论，必须自己对源码复核后才能写进计划；提议新建文件时先确认其父目录在当前项目中真实存在。
 5. **写入计划** — 将完整设计写入活动计划文件（write_file / edit_file），或成熟后用 \`plan action=submit\` 提交（可省略 plan 字段，从活动计划文件读取）。
 
 收尾契约 — 每个 turn 必须以以下之一结束，禁止以纯文本收尾：
@@ -93,6 +108,7 @@ flowchart LR
 - 每个文件给出提议代码（diff 或伪代码），不能只有文件路径或 "TODO"
 - 存在设计决策时，用表格对比备选方案；多方案时在 submit 的 \`options\` 参数中列出供用户选择
 - 包含验证计划：测试用例和人工验证步骤
+- **重构条款（重构/迁移/重写类计划硬性）**：必须包含「回归清单」章节——列出改动前存在、改动后必须仍存在的功能锚点（路由、导航项、导出符号、命令入口等 grep 可验证的断言，每条附验证方式）。重构的行为等价不靠感觉靠清单：交付前逐项核对，缺清单的重构计划视为未完成。
 - 自检：如果 plan 字段里出现 "TODO"、"FIXME"、"待补充"、"placeholder"、"TBD"、"[x]" 空白条目或仅标题无正文的章节，说明计划尚未打磨完成，继续探索并补充内容后再提交。
 
 提交 \`plan\` 后，等待用户批准或驳回。未经批准不要继续推进。
@@ -101,6 +117,15 @@ flowchart LR
 - /plan-approve <slug> [方案名] — 批准（可选指定方案），开始执行
 - /plan-reject <slug> <反馈> — 驳回并给出修订意见，plan mode 保持激活
 </plan-mode>`
+}
+
+/**
+ * One-shot reminder emitted on the first turn after plan mode exits. Without it,
+ * the model only sees the `<plan-mode>` block silently disappear and may keep
+ * self-restricting to read-only. Cache-safe: dynamic appendix only.
+ */
+export function renderPlanExitReminder(): string {
+  return `<plan-mode-exit>Plan Mode 已退出——只读/仅计划文件限制已解除。现在可以正常 write_file / edit_file / 执行命令，按已批准的计划推进。</plan-mode-exit>`
 }
 
 /**
@@ -144,7 +169,14 @@ export interface VolatileContext {
   rivetMd?: string
   gitStatus?: string
   workingSet?: string[]
-  activeDomain?: { name: string; volatileBlock: string; motto: string } | null
+  activeDomain?: {
+    name: string
+    volatileBlock: string
+    motto: string
+    /** Top-K 域经验摘要（主控会话）。会话常量：bindSessionDomain 时构建一次，
+     *  随 <star-domain> 一起进 FROZEN 前缀 — 不做 per-turn 刷新。 */
+    knowledgeBlock?: string
+  } | null
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
   playbookLessons?: PlaybookBullet[]
@@ -221,6 +253,12 @@ export interface VolatileContext {
   planModeState?: 'off' | 'planning' | 'approved'
   /** Active plan file path (relative) for incremental plan writing */
   activePlanFilePath?: string | null
+  /** Plan-mode injection cadence variant (full/sparse/reentry). Defaults to 'full'.
+   *  Cache-safe: dynamic appendix only. */
+  planInjectionVariant?: import('../agent/plan-mode.js').PlanInjectionVariant
+  /** One-shot flag: render the exit reminder on the first turn after plan mode
+   *  turns off. Cache-safe: dynamic appendix only. */
+  planExitReminderPending?: boolean
   /** Project memory loaded from .rivet/knowledge/memory.jsonl (frozen: changes only on file update) */
   projectMemoryBlock?: string
   /** Codebase index — module summaries + CLI entries from MeridianDB.
@@ -337,6 +375,8 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     // but MUST stay out of FROZEN — they can change mid-session and would
     // break exact-prefix cache if included in the stable block.
     planModeState: undefined,
+    planInjectionVariant: undefined,
+    planExitReminderPending: undefined,
     worktreeReality: undefined,
     // Session snapshot fields — KEEP in FROZEN:
     // rivetMd, workingSet, sessionMemoryBlock, cwdRelation
@@ -571,7 +611,9 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Plan-mode instruction block: governs the whole planning turn (read-only +
   // plan quality standard + diagram skeletons). Cache-safe — appendix only.
   if (ctx.planModeState === 'planning') {
-    parts.push(renderPlanModeBlock(ctx.activePlanFilePath))
+    parts.push(renderPlanModeBlock(ctx.activePlanFilePath, ctx.planInjectionVariant ?? 'full'))
+  } else if (ctx.planExitReminderPending) {
+    parts.push(renderPlanExitReminder())
   }
 
   // Phase 2B: output verbosity steering (opt-in via RIVET_TERSE=1, off by default).
@@ -828,7 +870,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   // input), rendered unescaped to match the established <star-domain name="..."> shape.
   if (ctx.activeDomain) {
     const d = ctx.activeDomain
-    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
+    // knowledgeBlock: session-constant top-K domain lessons (bound once with the
+    // domain) — lesson text is agent-written store content, so it IS escaped.
+    const knowledge = d.knowledgeBlock ? `\n<domain-knowledge>\n${escapeXml(d.knowledgeBlock)}\n</domain-knowledge>` : ''
+    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}${knowledge}</star-domain>`)
   }
 
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)

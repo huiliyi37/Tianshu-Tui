@@ -151,6 +151,10 @@ export class PromptEngine {
   private planModeState?: 'off' | 'planning' | 'approved'
   /** Active plan file path (relative) — shown in plan-mode block */
   private activePlanFilePath?: string | null
+  /** Plan-mode injection cadence variant (full/sparse/reentry). */
+  private planInjectionVariant?: import('../agent/plan-mode.js').PlanInjectionVariant
+  /** One-shot: emit the plan-mode exit reminder on the next rendered turn. */
+  private planExitReminderPending?: boolean
   /** Whether current turn message warrants task-mode scaffolding (task contract, CVM, etc.).
    *  Replaces the old binary chat/task PromptMode — auto-detected from message content. */
   private actionableTurn: boolean = true
@@ -324,7 +328,10 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, invokedSkillsBlock: skillRegistry.renderInvokedSkillsBlock([...this.invokedSkillNames], this.config.volatileCtx.cwd) ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, activePlanFilePath: this.activePlanFilePath, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, invokedSkillsBlock: skillRegistry.renderInvokedSkillsBlock([...this.invokedSkillNames], this.config.volatileCtx.cwd) ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, activePlanFilePath: this.activePlanFilePath, planInjectionVariant: this.planInjectionVariant, planExitReminderPending: this.planExitReminderPending, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
+            // One-shot: the plan-mode exit reminder is snapshotted into dynamicCtx
+            // above; clear it so it renders on this turn only, not every subsequent turn.
+            if (this.planExitReminderPending) this.planExitReminderPending = false
 
             if (this.tracker) {
               // activeDomain is no longer habituation-tracked — it is a session
@@ -873,6 +880,16 @@ export class PromptEngine {
   /** Active plan file path for incremental plan writing in plan mode. */
   setActivePlanFilePath(path: string | null): void {
     this.activePlanFilePath = path
+  }
+
+  /** Plan-mode injection cadence variant (full/sparse/reentry) for the next render. */
+  setPlanInjectionVariant(variant: import('../agent/plan-mode.js').PlanInjectionVariant | undefined): void {
+    this.planInjectionVariant = variant
+  }
+
+  /** Arm/disarm the one-shot plan-mode exit reminder. */
+  setPlanExitReminderPending(pending: boolean): void {
+    this.planExitReminderPending = pending
   }
 
   setPhaseHint(hint: string): void {

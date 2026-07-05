@@ -1,4 +1,4 @@
-import { ToolPatternMiner } from './tool-pattern-miner.js'
+import { ToolPatternMiner, type ToolPrediction } from './tool-pattern-miner.js'
 import { ShadowQueue } from './shadow-queue.js'
 import { IdleSpec } from './idle-spec.js'
 import { MistakeNotebook } from './mistake-notebook.js'
@@ -116,6 +116,15 @@ export class P3Integration {
     }
   }
 
+  /** Tier 2 LLM speculation: predictions from a shared-prefix side-path LLM call.
+   *  ShadowQueue re-applies the read-only whitelist and minProbability gate, so
+   *  this is a thin pass-through that just tags the source. */
+  enqueueLlmPredictions(predictions: ToolPrediction[]): void {
+    for (const prediction of predictions) {
+      this.queue.enqueue({ ...prediction, source: 'llm' })
+    }
+  }
+
   onToolComplete(toolName: string, _target: string, _isError: boolean, _errorMsg?: string): void {
     this.lastTool = toolName
   }
@@ -196,26 +205,42 @@ export class P3Integration {
     } catch { /* malformed JSON — no-op */ }
   }
 
-  // ─── Background Agent (P3-F) ─────────────────────────────────────────
+  // ─── Background Agent (P3-F) — SEALED 2026-07-04 ─────────────────────
+  // Nightcrawler has zero production callers (submitBackground/cancelBackground/
+  // getBackgroundTask are never invoked from the agent loop or any controller).
+  // De facto sealed: not deleted to avoid touching P3Integration's constructor
+  // shape (Nightcrawler is constructed unconditionally). Re-enable by wiring
+  // submitBackground into a tool or controller when ready.
 
+  /** @sealed No production caller — re-enable explicitly if resurrected. */
   submitBackground(description: string, prompt: string, opts?: { timeoutMs?: number; maxTurns?: number }) {
     return this.nightcrawler.submit(description, prompt, opts)
   }
 
+  /** @sealed No production caller. */
   cancelBackground(id: string) {
     return this.nightcrawler.cancel(id)
   }
 
+  /** @sealed No production caller. */
   getBackgroundTask(id: string) {
     return this.nightcrawler.getTask(id)
   }
 
-  // ─── Online RL — Model/Style Bandit (P3-G) ────────────────────────────
+  // ─── Online RL — Model/Style Bandit (P3-G) — SEALED 2026-07-04 ───────
+  // recommendAction/rewardAction have zero production callers. The bandit state
+  // was saved/restored to MeridianDb every session but never consulted for a
+  // decision — pure write-only overhead. Persistence calls removed from loop.ts
+  // and session-memory-warmup.ts. The LinUCBBandit instance is kept (effortBandit
+  // uses the same class independently and IS live); this model_style instance
+  // is dead until a decision point is wired.
 
+  /** @sealed No production caller — re-enable explicitly if resurrected. */
   recommendAction(context: number[]) {
     return this.bandit.shouldSuggest(context)
   }
 
+  /** @sealed No production caller. */
   rewardAction(armId: string, context: number[], accepted: boolean) {
     if (accepted) this.bandit.accept(armId, context)
     else this.bandit.reject(armId, context)
@@ -240,9 +265,12 @@ export class P3Integration {
     return record
   }
 
-  completeEffortShadow(pendingRewardId: string, input: RewardInput): void {
+  completeEffortShadow(
+    pendingRewardId: string,
+    input: RewardInput,
+  ): { reward: number; recommendedArm: string; ruleBaseline: string } | null {
     const record = this._effortShadowRecords.get(pendingRewardId)
-    if (!record) return
+    if (!record) return null
     this._effortShadowRecords.delete(pendingRewardId)
     const reward = computeEffortReward(input)
     if (reward >= 0) {
@@ -250,6 +278,7 @@ export class P3Integration {
     } else {
       this.effortBandit.reject(record.recommendedArm, record.context)
     }
+    return { reward, recommendedArm: record.recommendedArm, ruleBaseline: record.ruleBaseline }
   }
 
   recommendEffortDelta(context: number[]): { delta: number; armId: string } | null {
@@ -270,8 +299,32 @@ export class P3Integration {
     return isBanditGateOpen(this.effortBandit.getStats())
   }
 
-  // ─── Agent JIT (P3-H, T2-02 gated) ────────────────────────────────────
+  /**
+   * Evidence snapshot for the effort gated-influence audit trail: total pulls,
+   * best deviating arm's reward margin over delta:0, and the gate verdict.
+   * Same arithmetic as {@link isBanditGateOpen} — exposed so audit rows carry
+   * the margin the promotion gate will later read (`evidenceWindow.rewardMargin`).
+   */
+  effortGateEvidence(): { totalPulls: number; rewardMargin: number | null; gateOpen: boolean } {
+    const stats = this.effortBandit.getStats()
+    const totalPulls = stats.reduce((sum, s) => sum + s.pulls, 0)
+    const noop = stats.find(s => s.id === 'delta:0')
+    const deviating = stats
+      .filter(s => (s.id === 'delta:-1' || s.id === 'delta:+1') && s.pulls > 0)
+      .reduce<{ id: string; pulls: number; avgReward: number } | null>(
+        (best, s) => (!best || s.avgReward > best.avgReward ? s : best), null)
+    const rewardMargin = noop && noop.pulls > 0 && deviating ? deviating.avgReward - noop.avgReward : null
+    return { totalPulls, rewardMargin, gateOpen: isBanditGateOpen(stats) }
+  }
 
+  // ─── Agent JIT (P3-H, T2-02 gated) — SEALED 2026-07-04 ───────────────
+  // tryJIT has zero production callers. invalidateJIT is called from
+  // tool-history-recorder.ts but is a no-op in practice (JIT cache is never
+  // populated because tryJIT never fires). Gate logic (isJitAllowed) and
+  // tests remain valid for future resurrection. To re-enable: wire tryJIT
+  // into a read-only warmup path after PlanCache lookup.
+
+  /** @sealed No production caller — re-enable explicitly if resurrected. */
   async tryJIT(taskDescription: string) {
     const template = this.planCache.lookup(taskDescription)
     if (!template) return null

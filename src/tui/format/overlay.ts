@@ -852,6 +852,8 @@ export interface ChoiceEntry {
   description?: string
   /** Marked with ★ to guide the user toward the agent's suggestion. */
   recommended?: boolean
+  /** Marked with "← current" to show which option is the active/persisted one. */
+  current?: boolean
 }
 
 export interface ChoicePanelData {
@@ -891,7 +893,8 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
     const star = c.recommended ? color('★', theme.warning ?? theme.primary, { bold: true }) : ' '
     const labelColor = selected ? theme.primary : theme.secondary
     const labelText = selected ? color(c.label, labelColor, { bold: true }) : color(c.label, labelColor)
-    lines.push(padLine(` ${cursor} ${star} ${labelText}`, width, theme))
+    const currentMark = c.current ? ' ' + color('← current', theme.success) : ''
+    lines.push(padLine(` ${cursor} ${star} ${labelText}${currentMark}`, width, theme))
     rowsUsed++
 
     // Description line(s)

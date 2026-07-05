@@ -236,13 +236,12 @@ function ModelManageList({
               <button className="btn-sm ghost" onClick={() => startEdit(m)} title="编辑">
                 <Pencil size={12} />
               </button>
-              {models.length > 1 && (
-                <button
+              <button
                   className="btn-sm ghost danger"
                   disabled={busy}
                   title="删除模型"
                   onClick={async () => {
-                    if (!window.confirm(`确定删除模型「${m.alias ?? m.id}」？`)) return
+                    if (!window.confirm(`确定删除模型「${m.alias ?? m.id}」？${models.length === 1 ? '\n这是最后一个模型，删除后整个 Provider 也会被移除。' : ''}`)) return
                     setBusy(true)
                     try {
                       await removeProviderModel(providerName, m.id)
@@ -254,7 +253,6 @@ function ModelManageList({
                 >
                   ✕
                 </button>
-              )}
             </>
           )}
         </div>

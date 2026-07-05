@@ -49,6 +49,8 @@ import { debugLog } from './utils/debug.js'
 import { persistCouncilRoutingShadow } from './agent/council/council-routing.js'
 import { recordCouncilSession } from './agent/council/council-telemetry.js'
 import { createRecallCapsuleTool } from './tools/recall-capsule.js'
+import { createRecallGeneralTool } from './tools/recall-general.js'
+import { createRecordGeneralFindingTool } from './tools/record-general-finding.js'
 import { createDeliverTaskTool } from './agent/deliver-task.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { createTaskLedger } from './agent/task-ledger.js'
@@ -133,6 +135,9 @@ export interface RuntimeRefs {
   /** Mutable ref to the current GoalTracker. Set by slash-commands /goal,
    *  read by deliver_task B1Context for auto-review gating. */
   goalTrackerRef: { current: import('./agent/goal-tracker.js').GoalTracker | null }
+  /** 层3 回归契约：当前主控任务契约 getter（agent 创建后回填）。
+   *  deliver_task 用它取 regressionInventory / objective 做重构回归核验。 */
+  getTaskContract?: () => import('./context/task-contract.js').TaskContract | undefined
   /** 多会话隔离：本会话独立的 todo 清单 store。后端所有读/写（todo 工具、plan_task
    *  回灌、turn-end 任务进度注入、todo-reminder 快照）统一走它。TUI 复用全局
    *  defaultStore（保持 setTodoSession/loadTodos 持久化与会话切换语义），server 每会话 new。
@@ -448,7 +453,8 @@ export function createInteractiveToolRegistry(
   }
   reg.register(createTeamOrchestrateTool(planExecutorDeps, { defaultMaxParallel: config.agent.maxTeamParallel }))
 
-  // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，绝不派执行）。
+  // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，默认绝不派执行；
+  // autoExecute 经 executor 走完整 executePlan 闭环，与 team_orchestrate 同路径）。
   reg.register(createCouncilConveneTool({
     delegateBatch: async (requests, policy, abortSignal, onProgress) => {
       if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
@@ -457,10 +463,16 @@ export function createInteractiveToolRegistry(
     getSessionId: () => refs.sessionId ?? undefined,
     recordRoutingShadow: event => persistCouncilRoutingShadow(refs.meridianIndexer?.getDb(), event),
     recordCouncilSession: event => recordCouncilSession(refs.meridianIndexer?.getDb(), event),
+    executor: planExecutorDeps,
   }, config.agent.council.seats.length > 0 ? config.agent.council.seats : undefined))
 
   // recall_capsule
   reg.register(createRecallCapsuleTool(() => cwd))
+
+  // 将星账本（B1/B2）：recall_general 读战绩，record_general_finding 追加战绩。
+  // 胶囊 = 方法论基因，账本 = 跨会话战绩记忆。
+  reg.register(createRecallGeneralTool(() => cwd))
+  reg.register(createRecordGeneralFindingTool(() => cwd))
 
   // ask_user_question
   reg.register(ASK_USER_QUESTION_TOOL)
@@ -554,6 +566,7 @@ export function createInteractiveToolRegistry(
     getLastVerdict: () => refs.goalTrackerRef.current?.getLastVerdict() ?? null,
     reviewConfig: config.agent.review,
     meridianIndexer: refs.meridianIndexer,
+    getTaskContract: () => refs.getTaskContract?.(),
   })))
 
   // update_goal — model-driven goal lifecycle control (paused/blocked/complete)
@@ -1223,6 +1236,7 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
 
     ctx.agent = agent
     ctx.refs.promptEngine = agent.config.promptEngine
+    ctx.refs.getTaskContract = () => agent.getTaskContract()
     ctx.provider = provider
     ctx.apiKey = apiKey
     ctx.auth = auth
@@ -1321,6 +1335,7 @@ export function switchAgentSession(ctx: BootstrapContext, targetId: string): Swi
   ctx.sessionId = targetId
   ctx.refs.sessionId = targetId
   ctx.refs.promptEngine = agent.config.promptEngine
+  ctx.refs.getTaskContract = () => agent.getTaskContract()
 
   // 同一身份判等防御：装配实际替换 coordinator 才关旧的。
   if (oldCoordinator && oldCoordinator !== ctx.refs.coordinator) {
@@ -1509,6 +1524,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     session,
   })
   refs.promptEngine = agent.config.promptEngine
+  refs.getTaskContract = () => agent.getTaskContract()
 
   // 12b. Restore goal tracker from persisted state (if session was resumed).
   // normalizeAfterResume: active → paused (the process that wrote active is gone).

@@ -34,7 +34,8 @@ import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { exportsDir } from '../config/paths.js'
-import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix } from '../plan/plan-store.js'
+import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix, readPlan } from '../plan/plan-store.js'
+import { validatePlanContentForApproval } from '../tools/plan.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
@@ -60,7 +61,7 @@ import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
-import { getMirrorConfig, setMirrorConfig, setCheckpointConfig } from '../config/manager.js'
+import { getMirrorConfig, setMirrorConfig, setCheckpointConfig, setApprovalMode as persistApprovalDefault } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
 import { getResolvedEnv, getResolvedPathDiff } from '../tools/resolved-env.js'
@@ -171,6 +172,9 @@ export interface SlashHandlerContext {
   verboseRef: MutableRefLike<boolean>
   setVerbose: (v: boolean) => void
   setAutoSafe: (v: boolean) => void
+  /** 持久化审批模式为默认（写 ~/.rivet/config.json），重启后仍生效。
+   *  注入而非直接调用 config manager，便于测试隔离（默认 no-op，不落盘）。 */
+  persistApprovalMode?: (mode: string) => void
   rollbackTokenRef: MutableRefLike<string | null>
   setCockpitPanel: (v: Panel | ((prev: Panel) => Panel)) => void
   activeOverlay?: string | null
@@ -460,9 +464,10 @@ export function resolveEnterWorkerInput(
 
 
 /** Build the kickoff prompt that drives wave-by-wave execution of an approved plan. */
-export function buildPlanKickoff(slug: string, title: string, approach?: string): string {
+export function buildPlanKickoff(slug: string, title: string, approach?: string, anchorDriftNote?: string): string {
   let msg = `开始执行已批准方案「${title}」(.rivet/plans/${slug}.md)。先 read_file 读取该计划,然后用 plan_task(execute=true) 或 team_orchestrate 把任务按波次并行执行、逐波过审查门;开工前用 todo 列出有序步骤跟踪进度,全部完成后 plan_close。`
   if (approach) msg += `\nSelected approach: ${approach} — 只执行此方案,勿执行未选中的备选。`
+  if (anchorDriftNote) msg += `\n\n⚠ 锚点漂移提示——以下计划引用与当前工作区不符（计划写成后代码可能已变化）:\n${anchorDriftNote}\n执行时以当前源码为准,先用工具核实真实位置再动手,并把每处偏差记入交付报告;若漂移改变了方案方向,暂停执行向用户说明。`
   return msg
 }
 
@@ -481,6 +486,33 @@ export async function approvePlanAndKickoff(
   slug: string,
   resolvedApproach?: string,
 ): Promise<boolean> {
+  // Empty/invalid-plan hard-fail at the approval boundary (kimi-code borrow):
+  // never mark a stale draft or gutted file APPROVED + kick off execution.
+  const existing = await readPlan(deps.cwd, slug)
+  if (!existing) {
+    deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
+    return false
+  }
+  const check = validatePlanContentForApproval(existing.content)
+  if (!check.ok) {
+    deps.notify(`无法批准 **${existing.title}** (\`${slug}\`)：${check.reason} 未写入 APPROVED 标记，也未启动执行。`, true)
+    return false
+  }
+
+  // Approval-time anchor drift recheck (non-blocking): the plan was written
+  // against an earlier tree state — concurrent sessions / elapsed time drift
+  // anchors. Aged plans are normal, so drift never blocks approval; it is
+  // surfaced to the user and injected into the kickoff prompt so the executor
+  // treats reality as ground truth and logs deviations in the delivery report.
+  let driftNote: string | undefined
+  try {
+    const { checkPlanFactAnchors, formatAnchorDrifts } = await import('../plan/plan-fact-anchors.js')
+    const report = await checkPlanFactAnchors(existing.content, deps.cwd)
+    if (report.drifts.length > 0) driftNote = formatAnchorDrifts(report.drifts)
+  } catch {
+    // Best-effort — the guard itself must never break approval.
+  }
+
   const approved = await approvePlan(deps.cwd, slug)
   if (!approved) {
     deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
@@ -488,10 +520,18 @@ export async function approvePlanAndKickoff(
   }
   deps.agent.setActivePlan({ slug, title: approved.title, selectedApproach: resolvedApproach })
   const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
+  const driftLine = driftNote
+    ? `\n\n⚠ 锚点漂移复查:计划中有引用与当前工作区不符(已注入执行提示,执行方将以现实为准):\n${driftNote}`
+    : ''
+  // 低阶模型留痕警告：flash 出的计划真实度不可控（事故链：大重构计划丢功能），
+  // 批准时明示产出模型，提醒复核关键改动点。不阻断——用户已看过计划正文。
+  const tierWarnLine = existing.modelTier === 'cheap'
+    ? `\n\n⚠ 本计划由低阶模型产出（${existing.model}），建议对关键改动点复核后再放行执行。`
+    : ''
   deps.notify(
-    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。`,
+    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。${tierWarnLine}${driftLine}`,
   )
-  deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach))
+  deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach, driftNote))
   return true
 }
 
@@ -1307,7 +1347,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       }
 
       if (!sub) {
-        // 无参数 → 弹出交互式权限选择面板（上下选 + 回车确认，同 /effort 风格）
+        // 无参数 → 弹出交互式权限选择面板（上下选 + 回车确认，同 /effort 风格，kimi-code 对标）
         ctx.setChoicePanelKind?.('permission')
         ctx.surfacePush?.('choice-panel')
         setIsStreaming(false)
@@ -1315,6 +1355,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       }
 
       if (sub === 'status') {
+        // /permission status → 显示当前模式 + 所有规则（文字视图）
         pushStatic(createLogEntry({ type: 'system', content: formatRules() }))
         setIsStreaming(false)
         return true
@@ -1325,7 +1366,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       if (sub === 'manual') {
         agent.setApprovalMode('manual')
         ctx.setAutoSafe(false)
-        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 Manual — 所有高风险操作都需人工确认' }))
+        ctx.persistApprovalMode?.('manual')
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 Manual — 所有高风险操作都需人工确认（已设为默认，重启后仍生效）' }))
         setIsStreaming(false)
         return true
       }
@@ -1343,9 +1385,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         }
         agent.setApprovalMode('auto-safe')
         ctx.setAutoSafe(true)
+        ctx.persistApprovalMode?.('auto-safe')
         const interval = intervalRaw !== undefined ? Number(intervalRaw) : undefined
         const cpNote = interval !== undefined ? (interval > 0 ? `，检查点每 ${interval} 轮暂停` : '，检查点已关闭') : ''
-        pushStatic(createLogEntry({ type: 'system', content: `✓ 已切换至 Auto — 低/无风险工具自动执行，高风险仍需确认${cpNote}\n\n  调整检查点: /permission auto <轮数>（0 = 关）` }))
+        pushStatic(createLogEntry({ type: 'system', content: `✓ 已切换至 Auto — 低/无风险工具自动执行，高风险仍需确认${cpNote}（已设为默认，重启后仍生效）\n\n  调整检查点: /permission auto <轮数>（0 = 关）` }))
         setIsStreaming(false)
         return true
       }
@@ -1370,7 +1413,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         }
         agent.setApprovalMode('dangerously-skip-permissions')
         ctx.setAutoSafe(false)
-        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰。/rollback 可随时回滚。' }))
+        ctx.persistApprovalMode?.('dangerously-skip-permissions')
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰（已设为默认，重启后仍生效）。/rollback 可随时回滚。' }))
         setIsStreaming(false)
         return true
       }
@@ -1534,7 +1578,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       } else {
         const lines = plans.map(p => {
           const statusIcon = p.status === 'approved' ? '✅' : p.status === 'rejected' ? '❌' : p.status === 'executed' ? '🏁' : '📋'
-          return `  ${statusIcon} \`${p.slug}\` — ${p.title} (${p.status}, ${p.createdAt.toLocaleString()})`
+          const tierTag = p.modelTier === 'cheap' ? ' ⚠低阶模型产出' : ''
+          return `  ${statusIcon} \`${p.slug}\` — ${p.title} (${p.status}, ${p.createdAt.toLocaleString()})${tierTag}`
         })
         pushStatic(createLogEntry({ type: 'system', content: `Plans (.rivet/plans/):\n\n${lines.join('\n')}\n\nUse /plan-approve <slug> to approve, /plan-reject <slug> to reject.` }))
       }
@@ -2641,26 +2686,46 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
       const cwd = ctx.agent.cwd ?? process.cwd()
-      const { listCheckpoints, formatCheckpointList, loadCheckpoint } = await import('../agent/wave-checkpoint.js')
+      const { listCheckpoints, formatCheckpointList, loadCheckpoint, buildResumeFromCheckpoint } = await import('../agent/wave-checkpoint.js')
       const groupId = parts[1]
 
       if (!groupId) {
         const checkpoints = listCheckpoints(cwd)
         pushStatic(createLogEntry({ type: 'system', content: formatCheckpointList(checkpoints) }))
-      } else {
-        const cp = loadCheckpoint(cwd, groupId)
-        if (!cp) {
-          pushStatic(createLogEntry({ type: 'system', content: `No checkpoint found for "${groupId}".`, isError: true }))
-        } else {
-          pushStatic(createLogEntry({
-            type: 'system',
-            content: `Checkpoint: ${cp.groupId}\nResume from wave ${cp.lastCompletedWave + 2}/${cp.totalWaves} (${cp.remainingOrders.length} tasks remaining).\nObjective: ${cp.objective}`,
-          }))
-        }
+        setIsStreaming(false)
+        return true
       }
+      const cp = loadCheckpoint(cwd, groupId)
+      if (!cp) {
+        pushStatic(createLogEntry({ type: 'system', content: `No checkpoint found for "${groupId}".`, isError: true }))
+        setIsStreaming(false)
+        return true
+      }
+      // A2: real resume — rebuild the remaining tasks into a stored plan and
+      // kick the master so it re-dispatches via team_orchestrate.
+      const resume = buildResumeFromCheckpoint(cp)
+      if (!resume) {
+        pushStatic(createLogEntry({
+          type: 'system',
+          content: `Checkpoint ${cp.groupId} has no remaining tasks (wave ${cp.lastCompletedWave + 1}/${cp.totalWaves} was the last).\n最后一波若有失败，请直接让主控重跑该波或修复遗留，checkpoint 仅保留剩余任务。`,
+        }))
+        setIsStreaming(false)
+        return true
+      }
+      if (!ctx.submitToAgent) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Resume unavailable: agent submission channel missing.', isError: true }))
+        setIsStreaming(false)
+        return true
+      }
+      const { storePlan } = await import('../agent/plan-store.js')
+      storePlan(resume.planJson)
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `▶️ Resuming ${cp.groupId}: ${cp.remainingOrders.length} tasks re-planned (objective: ${cp.objective.slice(0, 80)}). Dispatching to master…`,
+      }))
       setIsStreaming(false)
+      ctx.submitToAgent(resume.prompt)
       return true
     },
   },
@@ -2726,6 +2791,32 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       } else {
         pushStatic(createLogEntry({ type: 'system', content: `Usage: /effort [off|low|medium|high|max|auto]\n\nSet max for full reasoning on every turn. auto lets autoReasoning pick per-task complexity.` }))
       }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/yes',
+    immediate: true,
+    handler(ctx) {
+      // 一键 YOLO 快捷键（/permission 的捷径）。显式输入命令即视为确认，无需二次确认。
+      // /yes / /yes on → YOLO；/yes off → 回到 Auto。均持久化为默认，重启后仍生效。
+      const { parts, agent, pushStatic, setIsStreaming } = ctx
+      const arg = parts[1]?.toLowerCase()
+      if (arg === 'off') {
+        agent.setApprovalMode('auto-safe')
+        agent.config.maxTurns = 200
+        ctx.setAutoSafe(true)
+        ctx.persistApprovalMode?.('auto-safe')
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已退出 YOLO，切回 Auto — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。' }))
+        setIsStreaming(false)
+        return true
+      }
+      agent.setApprovalMode('dangerously-skip-permissions')
+      agent.config.maxTurns = 0
+      ctx.setAutoSafe(false)
+      ctx.persistApprovalMode?.('dangerously-skip-permissions')
+      pushStatic(createLogEntry({ type: 'system', content: '✓ YOLO 已开启 — 全自动执行，无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback' }))
       setIsStreaming(false)
       return true
     },
@@ -3143,6 +3234,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       verboseRef,
       setVerbose: (v: boolean) => { verboseRef.current = v },
       setAutoSafe: (v: boolean) => { autoSafeRef.current = v },
+      persistApprovalMode: (mode: string) => { try { persistApprovalDefault(mode) } catch { /* best-effort persist */ } },
       rollbackTokenRef,
       setCockpitPanel: () => {},
       pushStatic: (entry) => { app.commitStatic(entry.content, { isError: entry.isError }) },

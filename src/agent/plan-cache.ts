@@ -130,12 +130,23 @@ export class PlanCache {
   }
 }
 
+/**
+ * Normalize a task description into match keywords. ASCII words as before;
+ * CJK runs are shingled into bigrams (Chinese has no word separators — without
+ * this, a Chinese task description produced zero keywords and the plan was
+ * silently never recorded).
+ */
 function extractKeywords(text: string): string[] {
-  return text
-    .toLowerCase()
+  const lower = text.toLowerCase()
+  const ascii = lower
     .replace(/[^a-z0-9_\-./]/g, ' ')
     .split(/\s+/)
     .filter(w => w.length > 2 && w.length < 40)
+  const cjk: string[] = []
+  for (const run of lower.match(/[\u4e00-\u9fff]{2,}/g) ?? []) {
+    for (let i = 0; i + 2 <= run.length; i++) cjk.push(run.slice(i, i + 2))
+  }
+  return [...ascii, ...cjk]
     .filter((w, i, arr) => arr.indexOf(w) === i)
-    .slice(0, 12)
+    .slice(0, 16)
 }

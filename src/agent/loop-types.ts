@@ -137,6 +137,8 @@ export interface AgentConfig {
   thetaCheckDisabled?: boolean
   /** Optional current-turn intent retrieval route guidance. Disabled by default. */
   intentRetrievalRouter?: IntentRetrievalRouterConfigInput
+  /** Tier 2 LLM speculation — shared-prefix next-tool prediction during tool-batch waits. Default off. */
+  llmSpeculation?: import('./llm-speculation.js').LlmSpeculationConfigInput
   /** Optional OwnershipLedger for real-time file ownership — updated on every file_write. */
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
   /** VSW: session-scoped snapshot manager. When present, run_tests asks it for a

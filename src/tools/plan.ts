@@ -7,9 +7,11 @@
  */
 
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { writePlan, slugify, stripPlanStatusMarkers, type PlanOption } from '../plan/plan-store.js'
-import { readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { writePlan, slugify, stripPlanStatusMarkers, insertPlanStatusMarker, insertPlanModelMarker, isDraftSlug, type PlanOption } from '../plan/plan-store.js'
+import { checkPlanFactAnchors, formatAnchorDrifts, extractPlanAnchors } from '../plan/plan-fact-anchors.js'
+import { inferModelTierFromName } from '../agent/model-tier-policy.js'
+import { readFile, stat, rm } from 'node:fs/promises'
+import { join, basename } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { relative } from 'node:path'
 import { validatePath } from './path-validate.js'
@@ -18,6 +20,12 @@ import { closePlanMarkdown, type PlanCloseOptions, type PlanCloseResult } from '
 // ── plan_submit helpers ──
 
 const warnedSlugs = new Set<string>()
+// Fact-anchor gate: one-shot soft block per slug (mermaid-gate pattern). First
+// submit with drifted anchors fails with the drift list; resubmitting the same
+// title passes — the model judges false positives (illustrative paths) itself.
+const anchorWarnedSlugs = new Set<string>()
+// 规模门禁（层2）：大计划必须显式分波 + 每波验证命令。one-shot 软拦同款模式。
+const scaleWarnedSlugs = new Set<string>()
 const MERMAID_FENCE = /```\s*mermaid/i
 const MISSING_DIAGRAM_SKELETON = `\`\`\`mermaid
 flowchart TD
@@ -26,6 +34,33 @@ flowchart TD
     R --> S[(存储/状态)]
     L --产出--> OUT([结果])
 \`\`\``
+
+// ── 计划规模门禁（层2）──
+// 「flash 出大计划 → 一口气执行 → 重构丢功能」事故链的规模环节：任务数或涉及
+// 文件数超阈值的计划，必须显式声明 wave 分波结构 + 每波验证命令，否则 one-shot
+// 软拦（同事实锚点门禁模式：首次拦截给出改法，同 title 重提交放行）。
+
+export const PLAN_SCALE_TASK_THRESHOLD = 8
+export const PLAN_SCALE_FILE_THRESHOLD = 15
+
+const WAVE_HEADING_RE = /^#{2,5}\s*.*(wave\s*\d|波\s*\d|第[一二三四五六七八九十\d]+波|分波)/im
+const WAVE_VERIFY_RE = /(每波|波间|波后|per[- ]wave|wave 完成).{0,60}(验证|verify|verification|typecheck|测试)|验证命令/i
+
+export interface PlanScaleCheck {
+  taskCount: number
+  fileCount: number
+  oversized: boolean
+  hasWaveStructure: boolean
+}
+
+/** 纯函数：估计计划规模（checkbox 任务数 + 引用文件数）并检测分波声明。 */
+export function checkPlanScale(content: string): PlanScaleCheck {
+  const taskCount = (content.match(/^\s*[-*]\s*\[[ xX]\]/gm) ?? []).length
+  const fileCount = extractPlanAnchors(content).length
+  const oversized = taskCount > PLAN_SCALE_TASK_THRESHOLD || fileCount > PLAN_SCALE_FILE_THRESHOLD
+  const hasWaveStructure = WAVE_HEADING_RE.test(content) && WAVE_VERIFY_RE.test(content)
+  return { taskCount, fileCount, oversized, hasWaveStructure }
+}
 
 // Placeholder detection — reject skeletal plans before they are persisted.
 const PLACEHOLDER_RE = /\b(TODO|FIXME|TBD|XXX|HACK|placeholder|占位符|待补充|待完善|待填写|待实现|稍后补充|略)\b/gi
@@ -70,6 +105,20 @@ function parseSubmitOptions(raw: unknown): PlanOption[] | undefined {
   return options
 }
 
+/**
+ * Gate a plan's content at the approval boundary (kimi-code borrow: empty-plan
+ * hard-fail). `/plan-approve` and the plan-picker previously trusted that submit
+ * had validated — approving a stale draft or gutted file slipped through. Reuses
+ * the same empty/placeholder checks as submit. Pure + exported for reuse in TUI.
+ */
+export function validatePlanContentForApproval(content: string): PlaceholderCheckResult {
+  const body = stripPlanStatusMarkers(content).trim()
+  if (!body) {
+    return { ok: false, reason: '计划文件为空——批准前请先写入完整设计（或用 /plan-reject 让 agent 补全）。' }
+  }
+  return checkPlanForPlaceholders(body)
+}
+
 function checkPlanForPlaceholders(content: string): PlaceholderCheckResult {
   const placeholderHits = content.match(PLACEHOLDER_RE)
   if (placeholderHits && placeholderHits.length >= 3) {
@@ -107,6 +156,14 @@ function asStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   const strings = value.filter((item): item is string => typeof item === 'string' && item.length > 0)
   return strings.length > 0 ? strings : undefined
+}
+
+type GateState = 'GREEN' | 'YELLOW' | 'RED'
+
+/** Delivery severity ordering: RED > YELLOW > GREEN. Returns the worse of two. */
+function worseState(a: GateState, b: GateState): GateState {
+  const rank: Record<GateState, number> = { GREEN: 0, YELLOW: 1, RED: 2 }
+  return rank[a] >= rank[b] ? a : b
 }
 
 function closureAction(result: PlanCloseResult): 'insert' | 'update' | 'unchanged' {
@@ -148,14 +205,17 @@ When the plan contains multiple approaches, pass \`options\` (up to 3) so the us
 ### Action: close
 Preview or apply implementation plan closure updates. Defaults to preview mode (no writes). Set apply=true to update the plan file.
 
-Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
+Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.
+
+### Action: enter_mode
+Enter plan mode yourself (write tools become blocked; a plan draft file is created). Use ONLY after the user explicitly agreed to plan first (e.g. answered "进入计划模式" to your ask_user_question). Idempotent when already planning. Exiting plan mode remains user-only — submit the plan and let the user approve.`,
     input_schema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['submit', 'close'],
-          description: 'submit: create a plan for user approval. close: close completed plan tasks.',
+          enum: ['submit', 'close', 'enter_mode'],
+          description: 'submit: create a plan for user approval. close: close completed plan tasks. enter_mode: enter plan mode (after user confirmation).',
         },
         // ── submit fields ──
         title: { type: 'string', description: '[submit] Short descriptive plan title (used for file slug)' },
@@ -197,7 +257,10 @@ Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
     if (action === 'close') {
       return planCloseExecute(params)
     }
-    return { content: `Error: unknown action "${action}". Use "submit" or "close".`, isError: true }
+    if (action === 'enter_mode') {
+      return planEnterModeExecute(params)
+    }
+    return { content: `Error: unknown action "${action}". Use "submit", "close" or "enter_mode".`, isError: true }
   },
 
   requiresApproval(): boolean {
@@ -209,6 +272,40 @@ Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
 
   isConcurrencySafe: () => false,
   isEnabled: () => true,
+}
+
+// ── enter_mode implementation ──
+
+/**
+ * 模型自主进入 plan mode（主动 Plan Mode 建议链路的确认后动作）。
+ * 只进不出：退出计划模式仍归用户（approve/toggle），避免模型自行逃出只读沙箱。
+ * worker/非 agent 上下文没有 enterPlanMode ref → fail-closed 报错。
+ */
+function planEnterModeExecute(params: ToolCallParams): ToolResult {
+  if (!params.enterPlanMode) {
+    return { content: 'Error: enter_mode is not available in this context (sub-agents cannot switch the primary agent into plan mode).', isError: true }
+  }
+  try {
+    const { activePlanFilePath, alreadyPlanning } = params.enterPlanMode()
+    if (alreadyPlanning) {
+      return {
+        content: `Already in plan mode.${activePlanFilePath ? ` Active plan draft: ${activePlanFilePath}` : ''}`,
+      }
+    }
+    return {
+      content: [
+        'Entered plan mode — write tools are now blocked except the plan draft.',
+        activePlanFilePath ? `Plan draft: ${activePlanFilePath}` : '',
+        '',
+        'Next steps:',
+        '1. Research first: for multi-module tasks, dispatch 2-4 read-only code_scout workers in parallel via delegate_batch (split by module/file domain), then synthesize the findings.',
+        '2. Write the plan incrementally to the draft file with write_file/edit_file.',
+        '3. Submit with plan action=submit for user approval. Exiting plan mode is user-only.',
+      ].filter(Boolean).join('\n'),
+    }
+  } catch (err) {
+    return { content: `Error: ${err instanceof Error ? err.message : String(err)}`, isError: true }
+  }
 }
 
 // ── submit implementation ──
@@ -230,6 +327,7 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
     return { content: 'Error: title is required', isError: true }
   }
 
+  let submittedFromDraft: string | null = null
   if (typeof planContent !== 'string' || !planContent.trim()) {
     const draftPath = params.activePlanFilePath
     if (!draftPath) {
@@ -254,6 +352,7 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
       }
     }
     planContent = draftText
+    submittedFromDraft = draftPath
   }
 
   // 剥离历史 approve/reject 状态标记 — 驳回修订后从活动计划文件整读重提交时,
@@ -296,8 +395,82 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
     }
   }
 
+  // Fact-anchor verification: file paths / line anchors cited by the plan must
+  // match the current working tree. One-shot soft block — first offense returns
+  // the drift list, resubmitting the same title passes (with drift note kept).
+  let anchorDriftNote = ''
   try {
-    const relativePath = await writePlan(params.cwd, slug, fullContent, submitOptions)
+    const anchorReport = await checkPlanFactAnchors(fullContent, params.cwd)
+    if (anchorReport.drifts.length > 0) {
+      if (!anchorWarnedSlugs.has(slug)) {
+        anchorWarnedSlugs.add(slug)
+        return {
+          content: [
+            `⚠️ Plan not yet saved — ${anchorReport.drifts.length} 个事实锚点与当前项目不符：`,
+            '',
+            formatAnchorDrifts(anchorReport.drifts),
+            '',
+            '文档和历史计划描述的是写下时的状态，不是现状——用 read/grep/glob 对当前源码逐条核实后修正引用；确认是有意新建的文件请在同一行标注「新增」。核实完成后重新提交（同一 title），若你判断某条是误报（示例路径等）可原样重提。',
+          ].join('\n'),
+          isError: true,
+        }
+      }
+      anchorDriftNote = `\n⚠ 锚点残留提示：${anchorReport.drifts.length} 个引用仍与当前工作区不符（已放行）。执行时以现实为准并在交付报告留痕。`
+    }
+  } catch {
+    // Anchor verification is best-effort — never let the guard itself block a submit.
+  }
+
+  // 规模门禁：大计划（任务 > 8 或文件 > 15）必须显式分波 + 每波验证命令。
+  // one-shot 软拦——首拦给出改法，同 title 重提交放行（带留痕 note）。
+  let scaleNote = ''
+  try {
+    const scale = checkPlanScale(fullContent)
+    if (scale.oversized && !scale.hasWaveStructure) {
+      if (!scaleWarnedSlugs.has(slug)) {
+        scaleWarnedSlugs.add(slug)
+        return {
+          content: [
+            `⚠️ Plan not yet saved — 计划规模超阈值（任务 ${scale.taskCount} 个 / 涉及文件 ${scale.fileCount} 个，阈值 ${PLAN_SCALE_TASK_THRESHOLD}/${PLAN_SCALE_FILE_THRESHOLD}），但没有分波结构。`,
+            '',
+            '大计划一口气执行是重构事故的高发形态。请在计划中补充「分波执行」章节：',
+            '- 用 `### Wave 1 / Wave 2 / …` 标题把任务切成 2-4 个可独立验证的波次',
+            '- 每波末尾声明验证命令（typecheck / 测试），波间硬门禁会真实执行它们',
+            '- 波的边界放在功能可自证的位置（一波结束 = 可编译可测试）',
+            '',
+            '补充后重新提交（同一 title）。若你判断该计划确实不可分波（如单一原子迁移），可原样重提放行。',
+          ].join('\n'),
+          isError: true,
+        }
+      }
+      scaleNote = `\n⚠ 规模留痕：计划超阈值（任务 ${scale.taskCount} / 文件 ${scale.fileCount}）且无分波结构（已放行）。执行时建议手动分批 + 阶段性验证。`
+    }
+  } catch {
+    // Scale gate is best-effort — never let the guard itself block a submit.
+  }
+
+  // 产出模型留痕：记录本计划由哪个模型写出（H1 前标记行，PlanDocument 解析为
+  // model/modelTier）。低阶模型产出的计划在审批面（/plan-approve + 桌面 PlanPanel）
+  // 显示复核警告——掐断「flash 出大计划无人知晓」的事故链源头。
+  const producerModel = params.sessionModel?.trim()
+  const producerTier = producerModel ? inferModelTierFromName(producerModel) : null
+  const contentToPersist = producerModel
+    ? insertPlanModelMarker(fullContent, producerModel, producerTier)
+    : fullContent
+  const cheapModelNote = producerTier === 'cheap'
+    ? `\n⚠ 本计划由低阶模型（${producerModel}）产出，审批面会提示用户复核。`
+    : ''
+
+  try {
+    const relativePath = await writePlan(params.cwd, slug, contentToPersist, submitOptions)
+    // Draft recycling: the content now lives in the canonical plan file — remove
+    // the plan-mode working draft so it never lingers as an orphan (and never
+    // duplicates the submitted plan). Best-effort: a failed cleanup must not
+    // fail the submit. Only draft-shaped files are removed; a revision session
+    // whose active plan file IS the canonical file is left untouched.
+    if (submittedFromDraft && isDraftSlug(basename(submittedFromDraft, '.md'))) {
+      await rm(join(params.cwd, submittedFromDraft), { force: true }).catch(() => {})
+    }
     const optionsHint = submitOptions && submitOptions.length >= 2
       ? `\nOptions recorded (${submitOptions.length}). User can choose at approval: ${submitOptions.map(o => `\`${o.label}\``).join(', ')}`
       : ''
@@ -307,6 +480,9 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
         `File: \`${relativePath}\``,
         `Slug: \`${slug}\``,
         optionsHint,
+        anchorDriftNote,
+        scaleNote,
+        cheapModelNote,
         '',
         `The user will review and respond with:`,
         `- \`/plan-approve ${slug}\` — approve and start execution`,
@@ -359,23 +535,81 @@ async function planCloseExecute(params: ToolCallParams): Promise<ToolResult> {
     return { content: 'Error: deliveryState must be GREEN, YELLOW, or RED', isError: true }
   }
 
+  const claimedCommands = asStringArray(params.input.verifiedCommands)
+
+  // ── 防伪闭环: evidence-gated closure ──
+  // When the session wired a real delivery gate, closure state and verified
+  // commands are driven by actual evidence, not the model's self-report.
+  // Degrades gracefully to legacy (trust-claimed) behavior when absent.
+  let effectiveState: GateState | undefined = deliveryState
+  let effectiveCommands = claimedCommands
+  let mismatchNote: string | undefined
+  let realGreen = false
+  let gateBlock: { reason: string; nextStep?: string } | undefined
+
+  if (params.assessDelivery) {
+    const real = params.assessDelivery(params.sessionModifiedFiles)
+    const summary = params.getVerificationEvidence?.()
+    const claimed: GateState = deliveryState ?? 'GREEN'
+
+    if (claimed === 'GREEN' && real.state === 'RED') {
+      gateBlock = {
+        reason: real.blockingReason ?? real.reason ?? 'Delivery gate is RED — owned files modified but unverified.',
+        nextStep: real.shortestNextStep,
+      }
+    } else {
+      effectiveState = worseState(claimed, real.state)
+      realGreen = effectiveState === 'GREEN'
+      const hasRealVerification = real.verificationCount > 0 || (summary?.verified ?? 0) > 0
+      if (!hasRealVerification) {
+        if (claimedCommands && claimedCommands.length > 0) {
+          mismatchNote = `声明了 ${claimedCommands.length} 条验证命令，但会话证据中无对应验证记录（已按真实证据记为空）。`
+        }
+        effectiveCommands = undefined
+      } else if (!effectiveCommands && real.latestVerificationTotals?.command) {
+        effectiveCommands = [real.latestVerificationTotals.command]
+      }
+    }
+  }
+
+  // Anti-forgery block only fires on write (apply=true); preview still renders.
+  if (gateBlock && params.input.apply === true) {
+    return {
+      content: [
+        `Plan close blocked: claimed GREEN but the delivery gate is RED.`,
+        gateBlock.reason,
+        gateBlock.nextStep ? `Next: ${gateBlock.nextStep}` : '',
+        '',
+        `Run the real verification (typecheck/tests) then re-close, or close honestly with deliveryState=RED/YELLOW as a progress checkpoint.`,
+      ].filter(Boolean).join('\n'),
+      isError: true,
+    }
+  }
+
+  const combinedNote = [
+    typeof params.input.note === 'string' ? params.input.note : undefined,
+    mismatchNote,
+  ].filter(Boolean).join(' ') || undefined
+
   try {
     const result = closePlanMarkdown(await readFile(filePath, 'utf-8'), {
       tasks,
-      verifiedCommands: asStringArray(params.input.verifiedCommands),
-      deliveryState,
-      note: typeof params.input.note === 'string' ? params.input.note : undefined,
+      verifiedCommands: effectiveCommands,
+      deliveryState: effectiveState,
+      note: combinedNote,
       updateClosure: typeof params.input.updateClosure === 'boolean' ? params.input.updateClosure : undefined,
     })
 
     const action = closureAction(result)
     if (params.input.apply === true) {
-      await writeFileAtomicAsync(filePath, result.content)
+      // EXECUTED status marker is written only on gate-backed GREEN.
+      const contentToWrite = realGreen ? insertPlanStatusMarker(result.content, 'EXECUTED') : result.content
+      await writeFileAtomicAsync(filePath, contentToWrite)
       if (params.onPlanClosed) {
         params.onPlanClosed({
           planFile: relativePath,
           tasks,
-          deliveryState: deliveryState ?? 'GREEN',
+          deliveryState: effectiveState ?? 'GREEN',
           totalChangedCheckboxes: result.totalChangedCheckboxes,
         })
       }
@@ -386,7 +620,9 @@ async function planCloseExecute(params: ToolCallParams): Promise<ToolResult> {
           `Tasks: ${tasks}`,
           `Checkboxes updated: ${result.totalChangedCheckboxes}`,
           `Closure: ${action}`,
-        ].join('\n'),
+          effectiveState ? `Delivery: ${effectiveState}${realGreen ? ' (marked EXECUTED)' : ''}` : '',
+          mismatchNote ? `Evidence: ${mismatchNote}` : '',
+        ].filter(Boolean).join('\n'),
       }
     }
 
@@ -396,12 +632,15 @@ async function planCloseExecute(params: ToolCallParams): Promise<ToolResult> {
         `Tasks: ${tasks}`,
         `Checkboxes to update: ${result.totalChangedCheckboxes}`,
         `Closure: ${action}`,
+        effectiveState ? `Delivery: ${effectiveState}` : '',
+        gateBlock ? `⚠ Gate: claimed GREEN but real gate is RED — apply=true will be blocked.` : '',
+        mismatchNote ? `Evidence: ${mismatchNote}` : '',
         '',
         'Changes:',
         ...formatChanges(result),
         '',
         'No files changed. Re-run with apply=true to write the plan closure.',
-      ].join('\n'),
+      ].filter(Boolean).join('\n'),
     }
   } catch (err) {
     return { content: `Error: ${err instanceof Error ? err.message : String(err)}`, isError: true }

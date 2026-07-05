@@ -145,6 +145,25 @@ export interface PlanSummary {
   createdAt: number
   approvedAt?: number
   options?: PlanOption[]
+  /** 产出模型留痕（submit 时写入的模型名）。缺失 = 旧计划或未知模型。 */
+  model?: string
+  /** 产出模型 tier（名字推断）。cheap 时展示低阶模型复核警告。 */
+  modelTier?: 'cheap' | 'balanced' | 'strong' | null
+}
+
+/** Live plan-mode draft — the working document the agent grows while planning.
+ *  Not a submitted plan; rendered as a separate "起草中" view. Title is the
+ *  draft's H1 (null while still empty). */
+export interface PlanDraft {
+  path: string
+  title: string | null
+  content: string
+}
+
+/** `GET /sessions/:id/plans` — submitted plans plus the active draft (if planning). */
+export interface PlanListResponse {
+  plans: PlanSummary[]
+  draft: PlanDraft | null
 }
 
 /** Full plan document including markdown content. */
@@ -181,11 +200,15 @@ export type SessionEventType =
   | 'steer_queued'
   | 'plan_mode'
   | 'plan_submitted'
+  // 结构化提问卡片 — ask_user_question 的问题/选项（Cursor 3.0 风格 QuestionCard）。
+  | 'user_question'
   | 'model_switched'
   | 'domain_changed'
   | 'skills_changed'
   // I4 — user-defined .rivet/hooks.json script results.
   | 'hook_result'
+  // Change landing — commit / squash merge-back / PR created from the Changes tab.
+  | 'landing'
   // Background jobs (bash run_in_background) — started / output / exit.
   | 'job'
   | 'done'
@@ -205,6 +228,19 @@ export interface ApprovalRequest {
   requestId: string
   toolName: string
   input: Record<string, unknown>
+}
+
+/** 结构化提问卡片 — user_question SSE 载荷（ask_user_question 工具输入的镜像）。 */
+export interface PendingQuestionItem {
+  id: string
+  prompt: string
+  options: string[]
+  allowMultiple: boolean
+}
+
+export interface PendingQuestion {
+  toolUseId: string
+  questions: PendingQuestionItem[]
 }
 
 /** Non-blocking 方向提示 — a passive direction note (no requestId, no reply). */

@@ -128,8 +128,13 @@ export function Composer(props: {
   onSetApprovalLevel?: (level: AutonomyLevel) => void
   /** P1-1 chip row — context usage ring (used/window + cache detail popover). */
   contextUsage?: ContextUsage
+  /** Recall previous (older) prompt from history — terminal-style Up-arrow. */
+  onHistoryPrev?: () => void
+  /** Recall next (newer) prompt from history — terminal-style Down-arrow. */
+  onHistoryNext?: () => void
+  activeDomainAccent?: string
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -389,6 +394,26 @@ export function Composer(props: {
       if (e.key === 'Escape') { e.preventDefault(); closeSuggest(); return }
     }
 
+    // History recall (terminal-style Up/Down). Only fires when no autocomplete
+    // menu is open AND the caret sits on the first/last line — so multi-line
+    // drafts still let the caret move freely within. Up = older, Down = newer.
+    if (e.key === 'ArrowUp' && onHistoryPrev) {
+      const ta = e.currentTarget
+      if (ta.value.slice(0, ta.selectionStart).indexOf('\n') === -1) {
+        e.preventDefault()
+        onHistoryPrev()
+        return
+      }
+    }
+    if (e.key === 'ArrowDown' && onHistoryNext) {
+      const ta = e.currentTarget
+      if (ta.value.slice(ta.selectionEnd).indexOf('\n') === -1) {
+        e.preventDefault()
+        onHistoryNext()
+        return
+      }
+    }
+
     if (e.key === 'Tab' && e.shiftKey && onSetPlanMode) {
       e.preventDefault()
       togglePlan()
@@ -532,7 +557,7 @@ export function Composer(props: {
 
   return (
     <div
-      className={`composer${dragOver ? ' drag-over' : ''}${planning ? ' planning' : ''}`}
+      className={`composer${dragOver ? ' drag-over' : ''}${planning ? ' planning' : ''} accent-${activeDomainAccent}`}
       onDrop={onDrop}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={(e) => { e.preventDefault(); setDragOver(false) }}
@@ -682,6 +707,7 @@ export function Composer(props: {
             onDelegate={onDelegate}
             onWorkflow={onWorkflow}
             onClose={() => {}}
+            threadNonEmpty={threadNonEmpty}
           />
         </div>
         <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
@@ -883,7 +909,7 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
   return (
     <div className="model-picker" ref={ref}>
       <button
-        className="model-picker-trigger"
+        className="model-picker-trigger model-active"
         onClick={() => setOpen((o) => !o)}
         disabled={disabled || !!switchingId}
         title={disabled ? '运行中不可切换模型' : '切换模型'}
@@ -987,7 +1013,7 @@ function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessio
   return (
     <div className="model-picker domain-picker" ref={ref}>
       <button
-        className="model-picker-trigger"
+        className={`model-picker-trigger accent-${current?.uiPersona?.accent || 'primary'}`}
         onClick={() => setOpen((o) => !o)}
         disabled={disabled || !!applyingKey}
         title={disabled ? '运行中不可切换星域' : '切换星域'}

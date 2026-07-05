@@ -118,6 +118,8 @@ function planSummary(p: PlanDocument) {
     createdAt: p.createdAt instanceof Date ? p.createdAt.getTime() : p.createdAt,
     approvedAt: p.approvedAt instanceof Date ? p.approvedAt.getTime() : p.approvedAt,
     options: p.options,
+    model: p.model,
+    modelTier: p.modelTier,
   }
 }
 
@@ -192,7 +194,11 @@ export function buildSessionRoutes(
     'GET /sessions/:id/plans': withAuth(async (_body, params) => {
       const plans = await manager.listPlans(params!.id!)
       if (!plans) return { status: 404, body: { error: 'Session not found' } }
-      return { status: 200, body: { plans: plans.map(planSummary) } }
+      // Active plan-mode draft rides along so the desktop can render a live
+      // "起草中" view — it is deliberately NOT part of `plans` (drafts are
+      // working files, not submitted plans).
+      const draft = (await manager.readPlanDraft(params!.id!)) ?? null
+      return { status: 200, body: { plans: plans.map(planSummary), draft } }
     }, apiToken),
 
     // Plan read — full markdown content for one plan.
@@ -1103,6 +1109,53 @@ export function buildSessionRoutes(
       if (!path || typeof path !== 'string') return { status: 400, body: { error: 'Missing path param' } }
       const diff = await manager.getFileDiff(path)
       return { status: 200, body: { diff } }
+    }, apiToken),
+
+    // Session-scoped working-tree changes — resolves the session's worktree cwd
+    // and diffs against the recorded task baseline (baselineHead) so committed
+    // work stays visible in the Changes tab.
+    'GET /sessions/:id/git/working-tree': withAuth(async (_body, params) => {
+      const result = await manager.getSessionWorkingTree(String(params?.id ?? ''))
+      if (!result) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: result }
+    }, apiToken),
+
+    // Session-scoped single-file diff (worktree cwd + task baseline).
+    'GET /sessions/:id/git/diff': withAuth(async (_body, params) => {
+      const path = params?.path
+      if (!path || typeof path !== 'string') return { status: 400, body: { error: 'Missing path param' } }
+      const diff = await manager.getSessionFileDiff(String(params?.id ?? ''), path)
+      if (diff === null) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { diff } }
+    }, apiToken),
+
+    // Change landing — commit everything in the session cwd (server-direct).
+    'POST /sessions/:id/git/commit': withAuth(async (body, params) => {
+      const message = typeof (body as { message?: unknown })?.message === 'string'
+        ? (body as { message: string }).message
+        : undefined
+      const result = manager.commitSessionChanges(String(params?.id ?? ''), message)
+      if (result === null) return { status: 404, body: { error: 'Session not found' } }
+      return { status: result.ok ? 200 : 409, body: result }
+    }, apiToken),
+
+    // Change landing — squash-merge the session worktree branch into the main workspace.
+    'POST /sessions/:id/git/merge-back': withAuth(async (_body, params) => {
+      const result = manager.mergeSessionBack(String(params?.id ?? ''))
+      if (result === null) return { status: 404, body: { error: 'Session not found' } }
+      return { status: result.ok ? 200 : 409, body: result }
+    }, apiToken),
+
+    // Change landing — push the worktree branch and open a PR via gh.
+    'POST /sessions/:id/git/pr': withAuth(async (body, params) => {
+      const b = body as { title?: unknown; body?: unknown } | undefined
+      const result = await manager.createSessionPr(
+        String(params?.id ?? ''),
+        typeof b?.title === 'string' ? b.title : undefined,
+        typeof b?.body === 'string' ? b.body : undefined,
+      )
+      if (result === null) return { status: 404, body: { error: 'Session not found' } }
+      return { status: result.ok ? 200 : 409, body: result }
     }, apiToken),
 
     // GitHub PR integration — list open PRs for the repo. Requires `gh` CLI.

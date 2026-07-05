@@ -110,6 +110,27 @@ export const antiAnchoringSchema = z.object({
   }).default({}),
 }).default({})
 
+/** Tier 2 LLM speculation: during a tool-batch await window, fire a side-path
+ *  LLM request sharing the main session prefix (near-free on DeepSeek prefix
+ *  cache) to predict the next read-only tool calls, feeding ShadowQueue.
+ *  Default off — opt-in. */
+export const llmSpeculationSchema = z.preprocess(
+  value => {
+    if (value === true) return { enabled: true }
+    if (value === false || value === undefined) return {}
+    return value
+  },
+  z.object({
+    enabled: z.boolean().default(false),
+    maxPerTurn: z.number().int().positive().default(3),
+    maxTokens: z.number().int().positive().default(320),
+    timeoutMs: z.number().int().positive().default(8_000),
+    minProbability: z.number().min(0).max(1).default(0.5),
+    /** Only fire when the executing batch contains a slow tool (bash/run_tests/delegate/...). */
+    slowToolsOnly: z.boolean().default(true),
+  }).default({}),
+)
+
 export const intentRetrievalRouterSchema = z.preprocess(
   value => {
     if (value === true) return { enabled: true }
@@ -181,9 +202,12 @@ export const agentSchema = z.object({
   // 长任务远端兜底。runaway 由 wedged-loop/convergence/watchdog/context-pressure
   // 先行拦截，此值对标 Claude Code/Codex 的"无硬上限"取宽松 4 倍余量（50→200，
   // 会话 5158719d 证明 50 轮迫使用户在正常长任务中反复手动「继续」）。
-  maxTurns: z.number().int().positive().default(200),
+  // 0 = 无限轮次（真正全自动 YOLO）；wedged-loop 等安全熔断仍然生效。
+  maxTurns: z.number().int().nonnegative().default(200),
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
   autoReasoning: z.boolean().default(true),
+  /** 默认星域（auto | tianshu | pojun ...）。新会话的初始星域将由此配置项决定。 */
+  defaultDomain: z.string().default('auto'),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
   songlineEnabled: z.boolean().default(false),
   /** Enable cross-session knowledge loading (memory block, playbook, companion presence).
@@ -226,6 +250,8 @@ export const agentSchema = z.object({
   checkpointEveryTurns: z.number().int().min(0).default(0),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
+  /** Tier 2 LLM speculation (shared-prefix next-tool prediction). Default off. */
+  llmSpeculation: llmSpeculationSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */
   teamSchedulerBanditEnabled: z.boolean().default(false),
   /** @deprecated Use banditPromotion.modelTier ('forced') instead. True still works as forced. */

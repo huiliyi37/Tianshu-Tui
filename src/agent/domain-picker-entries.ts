@@ -48,6 +48,20 @@ export interface DomainPickerEntry {
  *  - `null`      → no persona (env kill switch only; not user-selectable)
  *  - object      → a specific domain is pinned
  */
+const DOMAIN_PINYIN_MAP: Record<string, string> = {
+  auto: 'zìdòng',
+  tianshu: 'tiānshū',
+  pojun: 'pòjūn',
+  tianfu: 'tiānfǔ',
+  tianliang: 'tiānliáng',
+  tianquan: 'tiānquán',
+  tianji: 'tiānjī',
+  tianxuan: 'tiānxuán',
+  fu: 'fǔ',
+  wenqu: 'wénqǔ',
+  yaoguang: 'yáoguāng',
+}
+
 export function buildDomainPickerEntries(
   current: ActiveStarDomain | null | undefined,
 ): DomainPickerEntry[] {
@@ -56,11 +70,11 @@ export function buildDomainPickerEntries(
       key: 'auto',
       name: 'Auto',
       motto: '按任务匹配',
-      meta: 'auto · 关键词自动匹配星域',
+      meta: 'zìdòng · 关键词自动匹配星域',
       essence: '根据每条消息内容自动匹配最合适的星域方法论；未命中时回退天枢。',
       // null (env kill switch) has no picker entry → also reflect as Auto-selected.
       current: current === undefined || current === null,
-      uiPersona: { separator: 'thin', accent: 'primary', glyph: '⚙' },
+      uiPersona: { separator: 'thin', accent: 'primary', glyph: '❂' },
     },
     ...starDomainRegistry.list().map((d) => {
       const firstLine = (d.volatileBlock || '')
@@ -68,11 +82,12 @@ export function buildDomainPickerEntries(
         .map((s) => s.trim())
         .find((s) => s.length > 0) ?? ''
       const essence = [d.motto, firstLine].filter(Boolean).join(' — ').slice(0, 400)
+      const pinyin = DOMAIN_PINYIN_MAP[d.id] ?? d.id
       return {
         key: d.id,
         name: d.name,
         motto: d.motto ?? '',
-        meta: `${d.decisionStyle} · ${d.keywords.slice(0, 4).join(',')}`,
+        meta: `${pinyin} · ${d.keywords.slice(0, 4).join(',')}`,
         essence,
         current: current != null && current.id === d.id,
         uiPersona: d.uiPersona,

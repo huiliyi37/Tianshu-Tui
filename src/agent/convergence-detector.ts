@@ -664,7 +664,9 @@ function buildInjectedMessage(
 
   if (level === 3) {
     lines.push('')
-    lines.push('**建议：** 提交已完成部分，重新描述需求并开始新一轮对话。')
+    lines.push('**建议（按场景选择）：**')
+    lines.push('- 若在排查回归（功能改动后丢失/失效）：不要开新对话重来——答案在提交历史里。优先 `git log --oneline` 定位区间 → `git bisect` 或回滚到最近可用 checkpoint 再前滚，对照基线 diff 直读引入回归的改动。')
+    lines.push('- 其余场景：提交已完成部分，重新描述需求并开始新一轮对话。')
     lines.push(`- 上下文窗口: ${tier.label}，当前已使用较多轮次`)
   } else {
     lines.push('')

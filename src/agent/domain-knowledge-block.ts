@@ -35,10 +35,11 @@ const KIND_LABEL: Record<string, string> = {
 export function buildDomainKnowledgeBlock(
   store: DomainKnowledgeStore,
   domainId: string,
+  options: { maxLessons?: number } = {},
 ): string {
   if (!starDomainRegistry.has(domainId)) return ''
 
-  const lessons = store.recall(domainId, MAX_LESSONS_PER_BLOCK)
+  const lessons = store.recall(domainId, options.maxLessons ?? MAX_LESSONS_PER_BLOCK)
   if (lessons.length === 0) return ''
 
   const domainName = starDomainRegistry.get(domainId)?.name ?? domainId

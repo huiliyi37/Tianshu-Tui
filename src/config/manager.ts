@@ -528,8 +528,11 @@ export function removeModel(providerName: string, modelId: string): void {
   const cfg = loadConfig()
   const provider = cfg.provider.providers[providerName]
   if (!provider) throw new Error(`Provider "${providerName}" not found`)
-  if (provider.models.length <= 1) throw new Error('Provider must have at least one model')
   provider.models = provider.models.filter(m => m.id !== modelId)
+  // Auto-remove empty provider — a provider with zero models has no use.
+  if (provider.models.length === 0) {
+    delete cfg.provider.providers[providerName]
+  }
   saveConfig(cfg)
 }
 
