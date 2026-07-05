@@ -3346,7 +3346,10 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     immediate: true,
     handler: () => {
       app.commitStatic('Session saved. Goodbye!')
+      // 完整清理链路：app.dispose() 恢复终端状态 → ctx.shutdown() 清理 agent/session → process.exit(0)
+      app.dispose()
       ctx.shutdown()
+      process.exit(0)
       return true
     },
   })
@@ -3356,7 +3359,9 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     immediate: true,
     handler: () => {
       app.commitStatic('Session saved. Goodbye!')
+      app.dispose()
       ctx.shutdown()
+      process.exit(0)
       return true
     },
   })
