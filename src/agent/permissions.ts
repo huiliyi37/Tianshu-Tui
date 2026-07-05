@@ -62,9 +62,56 @@ export function isToolDenied(toolName: string, input: Record<string, unknown>, r
   return isToolAllowed(toolName, input, rules)
 }
 
-/** Check whether a bash command matches any denylist prefix. */
+/** Split a bash command into the individual commands the shell would run, for
+ *  denylist scanning. Splits on sequencing/pipe operators (`;` `&&` `||` `|`
+ *  `&` and newlines) and additionally surfaces command-substitution bodies
+ *  (`$( … )` and backtick) as their own segments, so a denied command hidden
+ *  inside `foo; taskkill …`, `foo && taskkill …` or `$(taskkill …)` is still
+ *  seen. Redirections (`>` `<` `2>`) are NOT separators — they belong to the
+ *  same command, so the leading token stays the command binary. */
+export function splitShellSegments(command: string): string[] {
+  const segments: string[] = []
+  const subshellRe = /\$\(([^()]*)\)|`([^`]*)`/g
+  let m: RegExpExecArray | null
+  while ((m = subshellRe.exec(command)) !== null) {
+    const inner = m[1] ?? m[2] ?? ''
+    if (inner.trim()) segments.push(...inner.split(/[;\n|&]+/))
+  }
+  // Strip subshell bodies from the top level so their operators don't confuse
+  // the primary split, then split the remaining top-level command.
+  const stripped = command.replace(subshellRe, ' ')
+  segments.push(...stripped.split(/[;\n|&]+/))
+  return segments.map(s => s.trim()).filter(Boolean)
+}
+
+/** Does a single command segment's leading command binary match a denylist
+ *  prefix? Strips leading `VAR=value` env assignments and enforces a token
+ *  boundary so `rm` matches `rm -rf` but not `rmdir`, and an argument that
+ *  merely contains the word (`echo taskkill`) never matches. */
+function segmentMatchesDenyPrefix(segment: string, denylist: readonly string[]): boolean {
+  let trimmed = segment.trimStart()
+  while (/^\w+=\S*\s+/.test(trimmed)) {
+    trimmed = trimmed.replace(/^\w+=\S*\s+/, '')
+  }
+  if (!trimmed) return false
+  return denylist.some(entry => {
+    if (!entry || !trimmed.startsWith(entry)) return false
+    const nextChar = trimmed[entry.length]
+    return nextChar === undefined || nextChar === ' ' || nextChar === '\t'
+  })
+}
+
+/** Check whether a bash command is blocked by any denylist prefix.
+ *
+ *  Denylist is fail-closed: if ANY segment the shell would run starts with a
+ *  denied prefix, the whole command is denied. This is deliberately NOT the
+ *  allowlist logic — allowlisting rejects commands containing shell operators
+ *  (to prevent `npx && rm -rf /` sneaking past the allowlist), but reusing that
+ *  for denylist would let `taskkill …; rm -rf /` slip THROUGH the denylist,
+ *  which is the opposite of what a denylist must do. */
 export function isBashCommandDenied(command: string, denylist: readonly string[] | undefined): boolean {
-  return isBashCommandAllowlisted(command, denylist)
+  if (!denylist?.length) return false
+  return splitShellSegments(command).some(seg => segmentMatchesDenyPrefix(seg, denylist))
 }
 
 /** Extract the first token (command binary) from a bash command for allowlist learning.

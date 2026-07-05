@@ -109,6 +109,12 @@ export function resolveServeContext(loader: () => Config = loadConfig): ServeCon
     } catch {
       // First launch / no env var set — degrade gracefully so the server
       // stays alive and /config routes can receive the key setup.
+      // NOTE (crash-restart resilience): a respawned sidecar re-reads config
+      // from disk, so an INLINE `apiKey` survives a restart, but an `apiKeyEnv`
+      // key only survives if the shell re-injects that env var into the new
+      // process. When it doesn't, we land here with configured=false and every
+      // session run would 401 — isModelSpecUsable()/unconfiguredSpecMessage()
+      // turn that into a legible error instead of an opaque upstream 401.
       configured = false
       console.error(`[serve] No API key configured for provider "${provider.name}". Server started in setup mode — configure via desktop Settings or 'rivet config setup'.`)
     }
@@ -469,6 +475,24 @@ function assembleAgentLoop(
  * an API key via /config routes — re-read from disk to pick it up. Falls
  * back to ctx.apiKey when the key is still unavailable.
  */
+/** A resolved spec can actually authenticate when it carries either an inline
+ *  API key or an OAuth provider. After a sidecar crash-restart, a provider that
+ *  relies on `apiKeyEnv` whose variable is not present in the respawned process
+ *  resolves to apiKey='' — running against it produces a raw upstream 401. */
+export function isModelSpecUsable(spec: ResolvedModelSpec): boolean {
+  return spec.apiKey !== '' || !!spec.auth
+}
+
+/** Actionable message when a session is asked to run without a usable key —
+ *  shown instead of letting the request hit the provider and 401. */
+export function unconfiguredSpecMessage(spec: ResolvedModelSpec): string {
+  const provider = spec.provider.name
+  const envHint = spec.provider.apiKeyEnv
+    ? ` The provider is configured to read its key from the \`${spec.provider.apiKeyEnv}\` environment variable, which is not set in this process (a common cause after a sidecar restart). Set it and relaunch, or store the key inline via Settings.`
+    : ' Configure it in Settings (or run `rivet config setup`).'
+  return `No usable API key for provider "${provider}" — the request was not sent.${envHint}`
+}
+
 function resolveInitialSpec(ctx: ServeContext): ResolvedModelSpec {
   if (ctx.configured) {
     return {
@@ -521,7 +545,17 @@ function buildManagedAgent(
   let spec: ResolvedModelSpec = resolveInitialSpec(ctx)
   let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
   return {
-    run: (prompt, callbacks, images) => agent.run(prompt, callbacks, images),
+    run: (prompt, callbacks, images) => {
+      // Auth pre-flight: if this session's model has no usable key (e.g. an
+      // apiKeyEnv provider after a sidecar restart lost its env), fail with a
+      // clear, actionable message instead of sending the request and surfacing
+      // an opaque upstream 401. Rejecting routes through the manager's error
+      // path (append 'error' event + status=failed).
+      if (!isModelSpecUsable(spec)) {
+        return Promise.reject(new Error(unconfiguredSpecMessage(spec)))
+      }
+      return agent.run(prompt, callbacks, images)
+    },
     abort: () => agent.abort(),
     setApprovalMode: (mode) => {
       agent.setApprovalMode(mode)

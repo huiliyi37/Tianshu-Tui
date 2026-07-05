@@ -88,10 +88,28 @@ describe('permission deny rules', () => {
 })
 
 describe('isBashCommandDenied', () => {
-  it('matches denylist prefixes and rejects shell operators', () => {
+  it('denies a matching prefix in any command segment (fail-closed)', () => {
     assert.equal(isBashCommandDenied('rm -rf /tmp', ['rm']), true)
-    assert.equal(isBashCommandDenied('rm -rf / && echo ok', ['rm']), false)
+    // Shell chaining must NOT bypass the denylist — a denied prefix in ANY
+    // segment blocks the whole command (regression: the old impl reused the
+    // allowlist logic and returned false here, letting the command through).
+    assert.equal(isBashCommandDenied('rm -rf / && echo ok', ['rm']), true)
+    assert.equal(isBashCommandDenied('echo ok; rm -rf /', ['rm']), true)
+    // The exact command that killed the sidecar in the field report.
+    assert.equal(isBashCommandDenied('taskkill //F //IM node.exe 2>/dev/null; sleep 1; echo killed', ['taskkill']), true)
+    // Subshell / command-substitution bodies are scanned too.
+    assert.equal(isBashCommandDenied('foo $(rm -rf /)', ['rm']), true)
+    // Non-matching command binary → not denied.
     assert.equal(isBashCommandDenied('git status', ['rm']), false)
+    // A denied word as an argument (not the command) must NOT match.
+    assert.equal(isBashCommandDenied('echo taskkill', ['taskkill']), false)
+    // Token boundary: `rm` must not match `rmdir`.
+    assert.equal(isBashCommandDenied('rmdir foo', ['rm']), false)
+    // Leading env assignment does not hide the denied command.
+    assert.equal(isBashCommandDenied('FOO=bar rm -rf /', ['rm']), true)
+    // Empty command / empty denylist → not denied.
+    assert.equal(isBashCommandDenied('', ['rm']), false)
+    assert.equal(isBashCommandDenied('rm -rf /', []), false)
   })
 })
 
