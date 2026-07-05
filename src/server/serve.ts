@@ -385,6 +385,31 @@ interface SessionStores {
 // `playbookStore: new PlaybookStore(cwd)`），sidecar 不再代为构造——
 // 历史 Wave A 短暂保留的 stores.playbookStore 是死字段，Wave C 后无消费者，已删。
 
+/**
+ * Restore prior OAI conversation messages from disk into a SessionContext.
+ *
+ * Mirrors the TUI bootstrap path (`persist.loadOai()` + `replaceMessages()`):
+ * when the Rust shell spawns a fresh sidecar, RuntimeSessionManager rehydrates
+ * session records + event logs from disk, but the agent's LLM message stack
+ * lives in a separate file (`~/.rivet/sessions/<slug>/<id>.jsonl`). Without
+ * this call, a user continuing a prior session after restart sees full UI
+ * history (from the event log) but the model receives an empty context.
+ *
+ * For brand-new sessions the file doesn't exist yet → loadOai() returns [] →
+ * no-op. Called once per session in buildSessionStores, before the mutation
+ * listener is wired (so replaceMessages doesn't trigger a redundant disk write).
+ */
+export function restoreHistoryMessages(
+  persist: SessionPersist,
+  session: SessionContext,
+): number {
+  const messages = persist.loadOai()
+  if (messages.length > 0) {
+    session.replaceMessages(messages)
+  }
+  return messages.length
+}
+
 function buildSessionStores(
   ctx: ServeContext,
   cwd: string,
@@ -401,6 +426,9 @@ function buildSessionStores(
   loadProjectSkills(cwd, { importFromClaude: ctx.config.skills?.importFromClaude })
   const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
   const session = new SessionContext()
+  // Restore prior conversation from disk (sidecar restart recovery).
+  // Matches TUI bootstrap.ts:1461 — loadOai returns [] for new sessions.
+  restoreHistoryMessages(persist, session)
 
   // sidecar 工具装配——复用 bootstrap 的 createInteractiveToolRegistry，与 TUI 端
   // 共享一套装配链。Wave C 后所有工具（含 coordinator 依赖工具）均通过
