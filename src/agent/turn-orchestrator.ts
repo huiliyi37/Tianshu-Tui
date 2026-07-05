@@ -23,6 +23,7 @@ import type { PostTurnDecisionController } from './post-turn-decision.js'
 import type { TelemetryRecord } from './telemetry-writer.js'
 import { emitStopReason, type StopReason } from './stop-reason.js'
 import { debugLog } from '../utils/debug.js'
+import { hasActionIntent } from './action-intent-detector.js'
 
 // ── Types re-exported for deps interface ──
 
@@ -353,6 +354,7 @@ export class TurnOrchestrator {
     // latch stays set, and the next user message gets routed to the steer
     // buffer instead of starting a new run.
     let finalTurnCompleted = false
+    let actionIntentFiredThisRun = false
 
     try {
       // maxTurns <= 0 means "no hard cap" (true YOLO / autonomous mode). The for
@@ -960,6 +962,24 @@ export class TurnOrchestrator {
           'goal-check',
         )
         if (goalCheckResult.kind === 'continue') continue
+
+        // ── Action-intent gate ──
+        // Lightweight check: the model announced an action ("let me grep…",
+        // "接下来修改…") but issued no tool call on this no-tool turn.
+        // Inject a system-reminder so the NEXT turn can self-correct —
+        // no auto-continue, just a one-shot nudge per run.
+        if (!actionIntentFiredThisRun && hasActionIntent(this.deps.state.streamedText)) {
+          actionIntentFiredThisRun = true
+          this.deps.appendSystemReminder(
+            '<system-reminder>上一轮你以"我将做…""接下来…"结尾但未发出对应的工具调用。如果还需要执行，请在本轮直接发起工具调用。</system-reminder>'
+          )
+          await rejectOnAbort(
+            this.deps.completeTurn({ turn, isFinal: false, callbacks }),
+            signal!,
+            'action-intent-gate-complete',
+          )
+          continue
+        }
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.
         // Voluntary finish — the model produced a final answer with no tool call
