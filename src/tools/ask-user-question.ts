@@ -128,12 +128,21 @@ Do NOT use this to bounce a decision back when the user asked for YOUR analysis,
       return { content: 'Error: question (or questions[]) is required', isError: true }
     }
 
-    // content: what the LLM sees (placeholder only — it already knows the question)
+    // content: what the LLM sees. When options exist it MUST include the same
+    // numbered rendering the user sees — the numbering lives only in uiContent
+    // otherwise, so a bare "1" reply forces the model to guess the mapping
+    // (session 91840816: user answered 1 = plan mode, model read it as
+    // option 2 = execute directly).
     // uiContent: what the user sees (plain-text rendering; the desktop client
     //            additionally receives a structured user_question SSE for the card).
+    const rendered = renderAskUserQuestionText(questions)
+    const hasOptions = questions.some(q => q.options.length > 0)
+    const content = hasOptions
+      ? `[Awaiting your response…]\n\nThe user was shown these numbered options:\n${rendered}\n\nA bare number in the reply refers to this numbering.`
+      : '[Awaiting your response…]'
     return {
-      content: '[Awaiting your response…]',
-      uiContent: renderAskUserQuestionText(questions),
+      content,
+      uiContent: rendered,
       endTurn: true,
     }
   },

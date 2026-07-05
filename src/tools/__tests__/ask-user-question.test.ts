@@ -19,7 +19,12 @@ describe('ASK_USER_QUESTION_TOOL', () => {
       question: 'Which database?',
       options: ['Postgres', 'SQLite', 'MySQL'],
     }))
-    assert.equal(result.content, '[Awaiting your response…]')
+    // With options, the model must see the SAME numbering the user sees — a
+    // bare "1" reply is otherwise ambiguous to the model.
+    assert.ok(result.content.startsWith('[Awaiting your response…]'))
+    assert.ok(result.content.includes('1. Postgres'))
+    assert.ok(result.content.includes('2. SQLite'))
+    assert.ok(result.content.includes('bare number'))
     assert.ok(result.uiContent!.includes('Which database?'))
     assert.ok(result.uiContent!.includes('1. Postgres'))
     assert.ok(result.uiContent!.includes('2. SQLite'))
@@ -66,7 +71,8 @@ describe('ASK_USER_QUESTION_TOOL', () => {
         { prompt: 'Which scope?', options: ['Frontend', 'Backend'], allow_multiple: true },
       ],
     }))
-    assert.equal(result.content, '[Awaiting your response…]')
+    assert.ok(result.content.startsWith('[Awaiting your response…]'))
+    assert.ok(result.content.includes('1. Yes'))
     assert.equal(result.endTurn, true)
     assert.ok(result.uiContent!.includes('1. Enter plan mode?'))
     assert.ok(result.uiContent!.includes('2. Which scope?'))

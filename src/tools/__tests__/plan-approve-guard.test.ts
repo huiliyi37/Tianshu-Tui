@@ -75,6 +75,41 @@ describe('validatePlanContentForApproval', () => {
     const r = validatePlanContentForApproval(plan)
     assert.equal(r.ok, false)
   })
+
+  it('accepts a parent heading whose body is structured into subsections', () => {
+    // `## 实现` → `### 任务 1` is normal markdown structure, not an empty
+    // section. The old regex rejected this and wedged plan submit.
+    const plan = [
+      '# Draft',
+      '',
+      '## 实现',
+      '',
+      '### 任务 1：引擎闸门',
+      '在 loop.ts 增加 checkActionIntentGap 纯函数并接线。',
+      '',
+      '## 验证',
+      '',
+      '### 单元测试',
+      '覆盖三种意图-调用错配场景。',
+    ].join('\n')
+    const r = validatePlanContentForApproval(plan)
+    assert.equal(r.ok, true)
+  })
+
+  it('rejects an empty subsection followed by a same-level heading', () => {
+    const plan = [
+      '# Draft',
+      '',
+      '## 实现',
+      '',
+      '### 任务 1',
+      '',
+      '### 任务 2',
+      '具体内容。',
+    ].join('\n')
+    const r = validatePlanContentForApproval(plan)
+    assert.equal(r.ok, false)
+  })
 })
 
 describe('buildPlanKickoff anchor drift injection', () => {

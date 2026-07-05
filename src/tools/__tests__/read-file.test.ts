@@ -38,6 +38,16 @@ describe('readFilePayload', () => {
     )
   })
 
+  it('allows reading gitignored files under .rivet/ (agent state dir)', async () => {
+    // Plan mode makes .rivet/plans/draft-*.md the only writable file while it
+    // is gitignored — blocking reads on it deadlocks plan revision.
+    writeFileSync(join(dir, '.gitignore'), '.rivet/plans/draft-*.md\n', 'utf-8')
+    mkdirSync(join(dir, '.rivet/plans'), { recursive: true })
+    writeFileSync(join(dir, '.rivet/plans/draft-123.md'), '# Draft\n正文内容。\n', 'utf-8')
+    const payload = await readFilePayload(dir, { filePath: '.rivet/plans/draft-123.md' })
+    assert.ok(payload.rawContent.includes('正文内容'))
+  })
+
   it('returns canonical path and truncated model content for large files', async () => {
     mkdirSync(join(dir, 'src'), { recursive: true })
     const long = 'a'.repeat(12_000)
