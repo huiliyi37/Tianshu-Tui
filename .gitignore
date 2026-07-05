@@ -72,3 +72,5 @@ docs/sessions/
 .od-skills/
 # 误产生的空文件
 /js
+# npm pack 产物
+*.tgz
