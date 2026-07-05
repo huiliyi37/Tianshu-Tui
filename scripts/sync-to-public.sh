@@ -100,8 +100,21 @@ if [[ "$DRY_RUN" != "--dry-run" && -f "$PUB_DIR/README.zh-CN.md" ]]; then
   echo "  已移除冗余 $PUB_DIR/README.zh-CN.md"
 fi
 
+echo "=== 同步: 构建依赖（补丁 / CLI 补全 / 工具提示模板）==="
+# patches/: patch-package 在根 postinstall 打的依赖补丁（如 ink 全屏渲染）。
+#   桌面端 sidecar 来自根 npm install+build，缺补丁 → 因 `|| node -e 1` 静默失效。
+# completions/: 随 npm files 发布的 shell 补全。
+# prompts/: 工具提示模板（当前未接线，随开源形态保留）。
+for d in patches completions prompts; do
+  if [[ -d "$DEV_DIR/$d" ]]; then
+    rsync $RSYNC_FLAGS "$DEV_DIR/$d/" "$PUB_DIR/$d/"
+  fi
+done
+
 echo "=== 同步: 配置文件（README.md 为中文主页）==="
-for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json tsconfig.json tsup.config.ts package.json; do
+# package-lock.json / .npmrc（engine-strict）：可复现安装的硬前提——公开仓/Windows
+#   构建根 dist（桌面端 bundle 它）时，lock 陈旧或缺 engine-strict 会解析出不同依赖版本。
+for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json tsconfig.json tsup.config.ts package.json package-lock.json .npmrc; do
   if [[ -f "$DEV_DIR/$f" ]]; then
     rsync $RSYNC_FLAGS "$DEV_DIR/$f" "$PUB_DIR/$f"
   fi
