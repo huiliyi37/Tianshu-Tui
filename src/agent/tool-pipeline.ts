@@ -51,9 +51,23 @@ import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
 import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
+import { GIT_CLEAR_RE } from '../tools/destructive-patterns.js'
 import { profileIsWriteCapable } from './profile-registry.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 import { toolTargetFromInput } from './tool-target.js'
+
+/** Infer the workspace_mutation `kind` from a git destructive command.
+ *  Used by B1 cross-session stash awareness to differentiate stash / reset / checkout / clean. */
+function gitMutationKind(cmd: string): string | undefined {
+  const c = cmd.trim().replace(/\s+/g, ' ')
+  if (/^git\s+stash\s*$/.test(c) || /\bgit\s+stash\s+(?!pop|list|show|apply|drop|branch)/.test(c)) return 'stash'
+  if (/\bgit\s+stash\s+pop\b/.test(c)) return 'stash_pop'
+  if (/\bgit\s+reset\s+--(?:hard|mixed)\b/.test(c)) return 'reset'
+  if (/\bgit\s+checkout\s+--\b/.test(c)) return 'checkout'
+  if (/\bgit\s+restore\s/.test(c)) return 'restore'
+  if (/\bgit\s+clean\s/.test(c)) return 'clean'
+  return undefined
+}
 
 /** Collect the worker profile name(s) a delegate_task/delegate_batch call requests.
  *  delegate_task carries a single `profile`; delegate_batch carries `tasks[].profile`.
@@ -1268,6 +1282,23 @@ export async function executeToolUse(
         if (deps.sessionRegistry && deps.sessionId) {
           deps.sessionRegistry.acquireClaim(deps.sessionId, filePath, 'exclusive')
        }
+        // B2: if edit_file failed due to external modification and there are
+        // recent workspace_mutation events, append context so the agent knows
+        // the file was changed by a peer stash/reset, not random corruption.
+        if (harnessResult.isError && typeof harnessResult.content === 'string' &&
+            /\bmodified\b/.test(harnessResult.content) && deps.sessionRegistry && deps.sessionId) {
+          const mutations = deps.sessionRegistry.consumeEvents(deps.sessionId, 0, 10)
+            .filter(e => e.eventType === 'workspace_mutation')
+          if (mutations.length > 0) {
+            const detail = mutations.map(e => {
+              try {
+                const d = JSON.parse(e.detail ?? '{}') as { kind?: string; sessionId?: string }
+                return `${d.kind ?? 'mutation'} by ${d.sessionId?.slice(-8) ?? 'peer'}`
+              } catch { return e.detail ?? 'workspace mutation' }
+            }).join('; ')
+            finalContent += `\n\n[cross-session] Recent workspace mutations: ${detail}. Your edit may have failed because a peer session temporarily cleared the working tree — do NOT re-edit or revert. Wait for stash_pop or verify the current file state.`
+          }
+        }
         // Commit nudge: warn when uncommitted files accumulate
         const nudge = buildCommitNudge({ ownedFiles: deps.taskLedger.getOwnedFiles() })
         if (nudge) finalContent += nudge
@@ -1281,6 +1312,18 @@ export async function executeToolUse(
        } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
        }
+     } else if (tu.name === 'git') {
+        // B1: publish workspace_mutation for stash/stash_pop so peer sessions
+        // know the worktree is being temporarily cleared for verification.
+        const action = (tu.input.action as string | undefined) ?? ''
+        const kind = action === 'stash' ? 'stash' : action === 'stash_pop' ? 'stash_pop' : undefined
+        if (kind && deps.sessionRegistry && deps.sessionId) {
+          deps.sessionRegistry.publishEvent(deps.sessionId, {
+            eventType: 'workspace_mutation',
+            detail: JSON.stringify({ kind, sessionId: deps.sessionId }),
+            priority: 1,
+          })
+        }
      } else if (tu.name === 'bash') {
         const cmd = (tu.input.command as string | undefined) ?? ''
         if (!harnessResult.isError && (cmd.startsWith('git ') || /\b(rm|mv|cp|touch|mkdir)\b/.test(cmd))) {
@@ -1292,6 +1335,15 @@ export async function executeToolUse(
        }
         if (cmd.startsWith('git ')) {
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
+          // B1: publish workspace_mutation for bash-executed git destructive commands
+          const kind = gitMutationKind(cmd)
+          if (kind && deps.sessionRegistry && deps.sessionId) {
+            deps.sessionRegistry.publishEvent(deps.sessionId, {
+              eventType: 'workspace_mutation',
+              detail: JSON.stringify({ kind, sessionId: deps.sessionId }),
+              priority: 1,
+            })
+          }
        } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
           const testStatus = harnessResult.isError ? 'failed' : 'passed'
           // Parse test counts from bash output so deliver_task shows real numbers

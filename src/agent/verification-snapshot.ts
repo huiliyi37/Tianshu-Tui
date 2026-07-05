@@ -169,7 +169,10 @@ export function createVerificationSnapshot(init: VerificationSnapshotInit): Veri
     })
     const overlay = overlayOwnedDiff(init.baseCwd, path, init.baselineHead, ownedFiles)
     // Wire snapshot deps: symlink node_modules/.venv from base repo for tests.
-    provisionSnapshotDeps(init.baseCwd, path)
+    const deps = provisionSnapshotDeps(init.baseCwd, path)
+    if (deps.warnings.length > 0) {
+      console.warn('[vsw] dep provisioning warnings:', deps.warnings.join('; '))
+    }
     return overlay
   }
 
