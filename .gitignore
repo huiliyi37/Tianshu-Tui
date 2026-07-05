@@ -43,6 +43,12 @@ docs/sessions/
 .rivet/tmp/
 .rivet/external/
 .rivet/prefix-diag.jsonl
+.rivet/tool-stream-*.jsonl
+.rivet/test-results.json
+.rivet/checkpoints/
+.rivet/skills/_drafts/
+.rivet/Tianshu/
+.rivet/plans/draft-*.md
 
 # AI agent temp files
 .tmp_*

@@ -1,0 +1,1 @@
+{"id":"a16d808f6f5feb29","domainId":"tianxuan","kind":"invariant","text":"相关代码集中在 src/tools/ 目录","evidence":"files=src/tools/inspect-project.ts,src/tools/repo-map.ts,src/tools/read-file.ts,src/tools/run-tests.ts,src/tools/env-check.ts","strength":0.5,"reinforcement":1,"grade":"novice","depositedAt":1783145858405,"halfLifeMs":604800000}
