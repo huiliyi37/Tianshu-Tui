@@ -528,10 +528,12 @@ export function createInteractiveToolRegistry(
     isGitRepo: b1Baseline.getHead().length > 0,
     preExistingDirtyCount: b1Baseline.getExternalDirtyCount(),
     preExistingUntrackedCount: b1Baseline.getExternalUntrackedCount(),
-    // Wave F: refs.getSameCwdRunningSessions 由 sidecar 通过 SharedRuntime →
-    // RuntimeSessionManager.sameCwdRunningCount 注入；TUI 不设置则回退 () => 0
-    // 保持原"CLI bootstrap is single-session"行为。
-    sameCwdRunningSessions: refs.getSameCwdRunningSessions ?? (() => 0),
+    // C2: sameCwdRunningSessions fallback now queries SessionRegistry (cross-process,
+    // registry.db in shared stateDir). Previously hardcoded () => 0 so VSW never
+    // activated for multi-TUI scenarios. Sidecar-provided getSameCwdRunningSessions
+    // still takes priority when available.
+    sameCwdRunningSessions: refs.getSameCwdRunningSessions
+      ?? (() => refs.sessionRegistry?.countSameCwdActive(cwd, refs.sessionId ?? '') ?? 0),
     forceSnapshot: process.env.RIVET_VSW === '1',
   })
   refs.verificationSnapshotManager = b1SnapshotManager

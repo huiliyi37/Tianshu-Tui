@@ -210,6 +210,23 @@ export class SessionRegistry {
     return this.safeAll<SessionEntry>('SELECT id, pid, role, task_description AS taskDescription, heartbeat_at AS heartbeatAt FROM sessions')
   }
 
+  /**
+   * Count other sessions running on the same cwd with a live pid and recent
+   * heartbeat. Used by VSW snapshot-policy to decide whether to isolate (C2).
+   *
+   * @param cwd           project root to match against
+   * @param mySessionId   exclude self
+   * @param maxHeartbeatAgeMs  sessions with heartbeat older than this are considered stale (default 120s)
+   */
+  countSameCwdActive(cwd: string, mySessionId: string, maxHeartbeatAgeMs = 120_000): number {
+    const cutoff = new Date(Date.now() - maxHeartbeatAgeMs).toISOString()
+    const rows = this.safeAll<{ id: string; pid: number }>(
+      `SELECT id, pid FROM sessions WHERE cwd = ? AND id != ? AND heartbeat_at > ?`,
+      cwd, mySessionId, cutoff,
+    )
+    return rows.filter(r => this.isProcessRunning(r.pid)).length
+  }
+
   detectCrashedSessions(): SessionEntry[] {
     const sessions = this.listActive()
     const crashed: SessionEntry[] = []
