@@ -74,7 +74,7 @@ export function buildDomainPickerEntries(
       essence: '根据每条消息内容自动匹配最合适的星域方法论；未命中时回退天枢。',
       // null (env kill switch) has no picker entry → also reflect as Auto-selected.
       current: current === undefined || current === null,
-      uiPersona: { separator: 'thin', accent: 'primary', glyph: '⚙' },
+      uiPersona: { separator: 'thin', accent: 'primary', glyph: '❂' },
     },
     ...starDomainRegistry.list().map((d) => {
       const firstLine = (d.volatileBlock || '')

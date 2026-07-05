@@ -1,3 +1,21 @@
+/**
+ * 🌌 天枢星系神秘占星与炼金术 Unicode 符号定义资产。
+ * 
+ * 预留星系扩展符号映射表：
+ * 
+ * 1. 紫微星系 (Emperor Palace Stars Group):
+ *    - 紫微 (ziwei - 帝星): ♕ / 👑 (象征王权之冕)
+ *    - 太阳 (taiyang - 显赫): ☉ (象征日轮与充沛动力)
+ *    - 太阴 (taiyin - 沉静): ☽ (象征月轮与幕后谋策)
+ *    - 武曲 (wuqu - 刚勇): ⚔ (象征战神双剑与破敌交付)
+ *    - 天相 (tianxiang - 玺印): ⚚ (象征使节神杖与协调治理)
+ * 
+ * 2. 南斗星系 (Southern Dipper Stars Group):
+ *    - 天府 (tianfu - 善守): ✦ / 🛡 (象征坚固盾守)
+ *    - 天梁 (tianliang - 荫庇): ✧ / ⚜ (象征栋梁与荫庇之花)
+ *    - 天同 (tiantong - 和谐): ⚖ (象征平顺与同心圆融)
+ *    - 七杀 (qisha - 肃清): 🜓 (象征炼金术火炎与代码重构肃清)
+ */
 export type StarDomainId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | 'wenqu' | 'yaoguang'
 export type DecisionStyle = 'bold' | 'cautious' | 'methodical'
 
@@ -60,7 +78,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 收到任务后，先判断它活在哪个抽象层级——是改代码、提炼方法、还是调整认知场？不同层级需要的工具不同。在错误的层级上做得越精确，离目标越远。用户重复同一个词（方法、原则、通用）是信号：你一直在错的层级上回应。
 
 星间接口：出方案骨架可召天权称量，交付质量存疑可召瑶光复现，成熟计划可交天梁批量落地——召唤是选择，十域的活你都能自己干。`,
-    uiPersona: { separator: 'thin', accent: 'secondary', glyph: '✹' },
+    uiPersona: { separator: 'thin', accent: 'secondary', glyph: '✵' },
   },
   pojun: {
     id: 'pojun',
@@ -88,7 +106,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 转向即推进。代码受阻写计划，计划受阻写教训——每次转向都缩小了未知的范围。三次撞墙证明墙是真的，换维度，不在同维度硬推。
 
 星间接口：探索的交付物是地图不是废墟——探明的边界和教训整理成可移交的形态，守护（天府）与执行（天梁）接续你趟出的路。`,
-    uiPersona: { separator: 'thick', accent: 'error', glyph: '✷' },
+    uiPersona: { separator: 'thick', accent: 'error', glyph: '☄' },
   },
   tianfu: {
     id: 'tianfu',
@@ -186,7 +204,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 称量之前先判层：这个方案改的是实现、方法、还是认知？如果用户反复说同一个词（方法、原则、通用），那是信号——你在错的层级上称量。此时停下来，往上走一层，先提炼通用原则再回来。
 
 星间接口：计划的下游是天梁（批量落地）或瑶光（计划+执行一体）；审查意见的采纳裁量权在执行方——你出刻度，不出指令。`,
-    uiPersona: { separator: 'thin', accent: 'warning', glyph: '✶' },
+    uiPersona: { separator: 'thin', accent: 'warning', glyph: '⚖' },
   },
   tianji: {
     id: 'tianji',
@@ -214,7 +232,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 沉默比错误更危险，因为没人会去修沉默。方案中没提到的子系统、没覆盖的路径、没写测试的分支——审计沉默。质疑要落到"读哪行、跑哪条命令能验证"——能用一条命令证伪的前提，先证伪再讨论。
 
 星间接口：质疑的产出落成条目——交给天权入计划，或直接给执行方自查；质疑不落地成条目等于没质疑。`,
-    uiPersona: { separator: 'dots', accent: 'primary', glyph: '✸' },
+    uiPersona: { separator: 'dots', accent: 'primary', glyph: '⚝' },
   },
   tianxuan: {
     id: 'tianxuan',
@@ -242,7 +260,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 如果你发现自己连续多轮在同一个视角里循环，停下来。你在循环不是因为问题难，是因为视角锁定了。换一个完全不同的入口重新看同一个问题——天璇的敏锐不是速度，是知道什么时候该后退一步。
 
 星间接口：跨域洞察蒸馏为可工程化原则后才移交——认知场层面的交给辅注入，方案层面的交给天权入计划；未过反证的高概念不出域。`,
-    uiPersona: { separator: 'dots', accent: 'secondary', glyph: '★' },
+    uiPersona: { separator: 'dots', accent: 'secondary', glyph: '☾' },
   },
   fu: {
     id: 'fu',
