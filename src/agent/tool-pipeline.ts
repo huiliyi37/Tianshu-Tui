@@ -57,6 +57,7 @@ import { classifyDeclaredCommand, loadDeclaredVerify } from '../config/verify-co
 import { profileIsWriteCapable } from './profile-registry.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 import { toolTargetFromInput } from './tool-target.js'
+import { execFile } from 'node:child_process'
 
 /** Infer the workspace_mutation `kind` from a git destructive command.
  *  Used by B1 cross-session stash awareness to differentiate stash / reset / checkout / clean. */
@@ -552,6 +553,28 @@ function generateToolSummary(content: string, toolName: string, input: Record<st
  }
 }
 
+/**
+ * Best-effort HEAD probe for the deliver_task abort path. Never throws;
+ * returns null on any failure (not a repo, git missing, timeout). Uses
+ * execFile (no shell) with a hard timeout so an abort can't hang on git.
+ */
+function gitHeadQuiet(cwd: string): Promise<string | null> {
+  return new Promise(resolve => {
+    execFile('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 1_500 }, (err, stdout) => {
+      resolve(err ? null : stdout.trim() || null)
+    })
+  })
+}
+
+/** One-line `<short-hash> <subject>` of HEAD, same failure semantics as gitHeadQuiet. */
+function gitHeadSummaryQuiet(cwd: string): Promise<string | null> {
+  return new Promise(resolve => {
+    execFile('git', ['log', '-1', '--format=%h %s'], { cwd, encoding: 'utf-8', timeout: 1_500 }, (err, stdout) => {
+      resolve(err ? null : stdout.trim() || null)
+    })
+  })
+}
+
 export async function executeToolUse(
   tu: { id: string; name: string; input: Record<string, unknown> },
   deps: ToolPipelineDeps,
@@ -617,6 +640,13 @@ export async function executeToolUse(
 
   // Star signature: counter training-mode regression at token level (思路 E)
   const starSig = getStarSignature(tu.name)
+
+  // Post-abort commit attribution (session 50073c39): deliver_task got
+  // cancelled AFTER its commit had landed, but the interrupted note only said
+  // "may still have completed" — the model burned a turn re-verifying and the
+  // user saw a finished task "wake up". Snapshot HEAD before commit-capable
+  // tools so the abort path can report definitively whether a commit landed.
+  let preAbortHead: string | null = null
 
   try {
     // Cerebellar Loop: read-before-edit gate
@@ -1060,6 +1090,10 @@ export async function executeToolUse(
           }
         } catch { /* attribution retry is best-effort */ }
       }
+    }
+
+    if (tu.name === 'deliver_task') {
+      preAbortHead = await gitHeadQuiet(deps.cwd)
     }
 
     const harnessResult = await deps.harness.executeTool({
@@ -1642,7 +1676,19 @@ export async function executeToolUse(
       // batch, while the detached execute kept running and landed commits).
       // The model must know (a) the call was interrupted and (b) the work may
       // still have completed in the background.
-      const abortedNote = `[interrupted] ${tu.name} was cancelled before its result could be returned. The underlying operation may still have completed in the background — verify actual state (e.g. git log, file contents, test output) before assuming it failed or retrying.`
+      let abortedNote = `[interrupted] ${tu.name} was cancelled before its result could be returned. The underlying operation may still have completed in the background — verify actual state (e.g. git log, file contents, test output) before assuming it failed or retrying.`
+      // deliver_task: resolve the ambiguity on the spot (session 50073c39 —
+      // the commit HAD landed but the note said "may have"; the model then
+      // spent a turn re-verifying and the user saw a done task wake up).
+      if (tu.name === 'deliver_task' && preAbortHead) {
+        const headNow = await gitHeadQuiet(deps.cwd)
+        if (headNow && headNow !== preAbortHead) {
+          const summary = await gitHeadSummaryQuiet(deps.cwd)
+          abortedNote = `[interrupted] deliver_task was cancelled mid-flight, BUT its commit already landed: ${summary ?? headNow.slice(0, 8)}. The delivery succeeded — only the result report was cut off. Do NOT re-commit or retry; treat the task as delivered and report it as such.`
+        } else if (headNow) {
+          abortedNote = `[interrupted] deliver_task was cancelled before its result could be returned. As of cancellation no new commit has landed (HEAD unchanged at ${headNow.slice(0, 8)}), but the underlying operation may still complete in the background — check git log before retrying to avoid a duplicate commit.`
+        }
+      }
       callbacks.onToolResult(tu.id, tu.name, abortedNote, false)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: abortedNote, is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }

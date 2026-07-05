@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join, resolve as resolvePath } from 'node:path'
 import { executeToolUse, type ToolPipelineDeps } from '../tool-pipeline.js'
 import { createTurnBudget } from '../turn-budget.js'
@@ -2037,5 +2038,181 @@ describe('phase-aware prediction recording', () => {
     )
 
     assert.equal(recorded, false, 'without phaseHint, run_tests failure records as prediction error')
+  })
+})
+
+describe('deliver_task abort — post-abort commit attribution', () => {
+  function makeDeps(cwd: string, overrides?: Partial<ToolPipelineDeps>): ToolPipelineDeps {
+    return {
+      config: {
+        toolRegistry: {
+          execute: async () => ({ content: 'ok', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+        hooks: null,
+        lspEnabled: false,
+        fileHistory: undefined,
+        contextClaimStore: undefined,
+        sessionId: 'test-session',
+        promptEngine: { markGitDirty: () => {}, getModel: () => 'test-model' },
+      } as any,
+      cwd,
+      harness: {
+        executeTool: async ({ execute }: any) => {
+          const r = await execute()
+          return { content: r.content, isError: r.isError ?? false, retried: false }
+        },
+      } as any,
+      prewarm: { get: () => null, invalidate: () => {} } as any,
+      evidence: mockEvidence,
+      traceStore: { events: [], toolFingerprints: [] } as any,
+      repairHintTracker: { recordSuccess: () => {}, recordFailure: () => {} } as any,
+      repairPipeline: { run: (input: any) => ({ output: input, telemetry: [] }) } as any,
+      importGraph: null,
+      lastConflictCheckCount: 0,
+      trajectory: { getEntries: () => [] } as any,
+      getDoomLoopLevel: () => 'none' as const,
+      latestRisk: { level: 'none' as const, reasons: [], suggestedAction: '' },
+      sessionTurnCount: 1,
+      sessionId: 'test-session',
+      recordToolHistory: () => {},
+      turnBudget: createTurnBudget(0),
+      ...overrides,
+    }
+  }
+
+  const noopCallbacks = { onToolResult: () => {}, onApprovalRequired: async () => true }
+
+  function initRepo(): string {
+    const dir = mkdtempSync(join(testTmp(), 'abort-commit-'))
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf-8' })
+    git('init', '-q')
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-q', '-m', 'initial')
+    return dir
+  }
+
+  function abortError(): Error {
+    const e = new Error('aborted')
+    e.name = 'AbortError'
+    return e
+  }
+
+  it('reports the landed commit when deliver_task is aborted AFTER committing', async () => {
+    const dir = initRepo()
+    try {
+      const deps = makeDeps(dir, {
+        config: {
+          ...makeDeps(dir).config,
+          toolRegistry: {
+            execute: async () => {
+              // Simulate the 50073c39 incident: the commit lands, THEN the call is cancelled.
+              execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-q', '-m', 'fix: landed before cancel'], { cwd: dir })
+              throw abortError()
+            },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+
+      const result = await executeToolUse(
+        { id: 'tu-abort-landed', name: 'deliver_task', input: {} },
+        deps, noopCallbacks as any, 1, false,
+      )
+
+      const content = (result.toolResult as any).content as string
+      assert.ok(content.includes('[interrupted]'), 'must still carry the interrupted marker')
+      assert.ok(content.includes('commit already landed'), `must state the commit landed, got: ${content}`)
+      assert.ok(content.includes('fix: landed before cancel'), 'must include the commit subject')
+      assert.ok(content.includes('Do NOT re-commit'), 'must instruct against retrying')
+      assert.equal((result.toolResult as any).is_error, false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports HEAD unchanged when deliver_task is aborted BEFORE committing', async () => {
+    const dir = initRepo()
+    try {
+      const deps = makeDeps(dir, {
+        config: {
+          ...makeDeps(dir).config,
+          toolRegistry: {
+            execute: async () => { throw abortError() },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+
+      const result = await executeToolUse(
+        { id: 'tu-abort-clean', name: 'deliver_task', input: {} },
+        deps, noopCallbacks as any, 1, false,
+      )
+
+      const content = (result.toolResult as any).content as string
+      assert.ok(content.includes('no new commit has landed'), `must state no commit landed, got: ${content}`)
+      assert.ok(content.includes('may still complete in the background'), 'must keep the background caveat')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('probe failure (unusable cwd) falls back to the generic interrupted note', async () => {
+    // A nonexistent cwd makes both git probes fail → preAbortHead stays null →
+    // the enriched note must not be attempted and the generic note survives.
+    const dir = join(testTmp(), 'abort-missing-dir-does-not-exist')
+    const deps = makeDeps(dir, {
+      config: {
+        ...makeDeps(dir).config,
+        toolRegistry: {
+          execute: async () => { throw abortError() },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-abort-nogit', name: 'deliver_task', input: {} },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const content = (result.toolResult as any).content as string
+    assert.ok(content.includes('[interrupted] deliver_task was cancelled'), 'generic note preserved')
+    assert.ok(content.includes('verify actual state'), 'generic verification guidance preserved')
+  })
+
+  it('other tools keep the generic interrupted note (no git probe)', async () => {
+    const dir = initRepo()
+    try {
+      const deps = makeDeps(dir, {
+        config: {
+          ...makeDeps(dir).config,
+          toolRegistry: {
+            execute: async () => { throw abortError() },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+
+      const result = await executeToolUse(
+        { id: 'tu-abort-bash', name: 'bash', input: { command: 'echo hi' } },
+        deps, noopCallbacks as any, 1, false,
+      )
+
+      const content = (result.toolResult as any).content as string
+      assert.ok(content.includes('[interrupted] bash was cancelled'), 'generic note for non-deliver tools')
+      assert.ok(!content.includes('commit already landed'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
