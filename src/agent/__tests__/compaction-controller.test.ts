@@ -63,6 +63,30 @@ describe('CompactionController', () => {
     assert.ok(session.getEstimatedTokens() < 96_000 || session.getMessages().length <= 8)
   })
 
+  it('fires onHistoryRewritten after a compaction rewrite (read-dedup invalidation hook)', async () => {
+    const session = new SessionContext()
+    const historyMessage = 'x'.repeat(12_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+      { role: 'user', content: historyMessage },
+      { role: 'assistant', content: historyMessage },
+    ])
+    let fired = 0
+    const controller = makeController(session, {
+      onHistoryRewritten: () => { fired++ },
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+
+    assert.equal(result.compacted, true)
+    assert.ok(fired >= 1, 'history rewrite must notify onHistoryRewritten so read-dedup can be invalidated')
+  })
+
   it('skips discretionary compaction when compactEnabled is false', async () => {
     const session = new SessionContext()
     const historyMessage = 'x'.repeat(12_000 * 4)

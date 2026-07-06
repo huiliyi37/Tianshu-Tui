@@ -20,7 +20,7 @@ import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { computeCompactAttribution } from './compact-attribution.js'
 import { isCostInsensitiveProvider } from '../api/cost-model.js'
 import { isSystemReminder } from '../prompt/system-reminder.js'
-import { getReadRefStats } from '../tools/read-file.js'
+import { getReadRefStats, invalidateSessionReadDedup } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator, DEFAULT_QUALITY_COMPACT_THRESHOLDS } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator, type TurnStateBag } from './turn-orchestrator.js'
@@ -570,6 +570,10 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     replaceMessages: msgs => {
       self.session.replaceMessages(msgs)
       self.config.promptEngine.resetAppendixBaseline()
+      // Stale-round / diet / heap micro-compact rewrite history WITHOUT going
+      // through CompactionController.safeReplaceMessages — invalidate read-dedup
+      // here too, or read-ref keeps claiming "回看上文" at deleted tool_results.
+      invalidateSessionReadDedup(self.config.sessionId)
     },
     dietMessages: msgs => self.p3.dietMessages(msgs),
     trySessionSplit: () => self.compaction.trySessionSplit(),

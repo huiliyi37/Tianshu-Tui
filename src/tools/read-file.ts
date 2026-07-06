@@ -49,6 +49,11 @@ interface ReadHistoryEntry {
    * Lets the dedup path tell the model how to recover the full content via read_section
    * even if stale-round compaction has truncated the prior tool_result. */
   artifactId?: string
+  /** Times a [read-ref] shortcut was served against this entry. When the model
+   *  comes back for the SAME unchanged slice after already receiving a ref, the
+   *  ref demonstrably didn't help (its "look above" target may have been pruned
+   *  from the request view) — degrade to a real read instead of looping. */
+  refServed?: number
 }
 const readHistory = new Map<string, ReadHistoryEntry>()
 const READ_HISTORY_MAX = 500
@@ -65,6 +70,8 @@ interface FileReadHistoryEntry {
   modelBytes: number
   artifactId?: string
   recordedAt: number
+  /** See ReadHistoryEntry.refServed. */
+  refServed?: number
 }
 const fileReadHistory = new Map<string, FileReadHistoryEntry>()
 const FILE_READ_HISTORY_MAX = 200
@@ -233,6 +240,24 @@ export function invalidateReadHistory(canonicalPath: string): void {
   const segment = `::${canonicalPath}::`
   for (const key of readHistory.keys()) {
     if (key.includes(segment)) readHistory.delete(key)
+  }
+}
+
+/** Drop ALL read-dedup records (表1) for a session. Called after any message-
+ *  history rewrite (compaction ladder, agent-diet, stale-round, heap micro-
+ *  compact): the historical tool_results that read-ref points at ("回看上文")
+ *  may have been deleted, summarized, or replaced with placeholders, so
+ *  "already read" claims must die with them. 表2 (lastKnownFileState) and
+ *  sessionFileEdits survive — they track FILE state, not history presence.
+ *  Cost ceiling: one extra real read per file after a compaction that already
+ *  rewrote history (prefix cache is broken at that point anyway). */
+export function invalidateSessionReadDedup(sessionId?: string): void {
+  const prefix = `${sessionId ?? ''}::`
+  for (const key of readHistory.keys()) {
+    if (key.startsWith(prefix)) readHistory.delete(key)
+  }
+  for (const key of fileReadHistory.keys()) {
+    if (key.startsWith(prefix)) fileReadHistory.delete(key)
   }
 }
 
@@ -644,21 +669,39 @@ export const READ_FILE_TOOL: Tool = {
     if (unchangedRepeat && isReadRefEnabled()) {
       const priorSame = readHistory.get(dedupKey!)
       const fullPrior = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical!))
-      const entryBytes = priorSame?.mtimeMs === currentMtimeMs ? priorSame.modelBytes : fullPrior?.modelBytes ?? 0
-      const totalLines = fullPrior?.mtimeMs === currentMtimeMs ? fullPrior.totalLines : 0
+      const matchedSame = priorSame?.mtimeMs === currentMtimeMs ? priorSame : undefined
+      const matchedFull = fullPrior?.mtimeMs === currentMtimeMs ? fullPrior : undefined
+      const entryBytes = matchedSame ? matchedSame.modelBytes : matchedFull?.modelBytes ?? 0
+      const totalLines = matchedFull ? matchedFull.totalLines : 0
 
-      if (entryBytes > READ_REF_THRESHOLD) {
+      // Degrade gate: if a ref was ALREADY served for this entry and the model
+      // still came back for the same unchanged slice, the ref demonstrably
+      // didn't help — its "look above" target may have been pruned/masked out
+      // of the request view (request-side prune never touches these tables).
+      // Serve the real content instead of looping. The real read below
+      // re-records fresh entries (refServed reset), so the ref gets one more
+      // chance on the next repeat.
+      const refAlreadyServed = Math.max(matchedSame?.refServed ?? 0, matchedFull?.refServed ?? 0) >= 1
+
+      if (entryBytes > READ_REF_THRESHOLD && refAlreadyServed) {
+        debugLog(`[read-ref-degrade] file=${canonical} ref did not help, re-serving full content`)
+        repeatWarning = null
+      } else if (entryBytes > READ_REF_THRESHOLD) {
         // relative() 而非 replace(cwd+'/')：Windows 下 canonical 是反斜杠路径，
         // 字符串拼 '/' 永远不匹配 → 提示里泄漏完整绝对路径（且教模型复读它）。
         const relPath = relative(params.cwd, canonical!)
         const sizeHint = totalLines > 0
           ? `${totalLines} 行，${entryBytes} bytes`
           : `${entryBytes} bytes`
+        // 读盘优先：read_section 直接读磁盘、不依赖历史消息是否完整；
+        // 「回看上文」只在 tool_result 未被压缩/修剪时可靠，降为补充。
         const ref = [
           `[read-ref] ${relPath} 本会话已读且未变（${sizeHint}）。`,
-          `完整内容在你上文的 tool_result 中——回看即可。`,
-          `需要具体区段：read_section(file_path="${relPath}", section="L{N}-L{M}")`,
+          `需要具体区段：read_section(file_path="${relPath}", section="L{N}-L{M}")——直接读磁盘，不依赖上文。`,
+          `若上文的 tool_result 仍完整可见，回看即可；若已被压缩为占位符，用 read_section。`,
         ].join('\n')
+        if (matchedSame) matchedSame.refServed = (matchedSame.refServed ?? 0) + 1
+        if (matchedFull) matchedFull.refServed = (matchedFull.refServed ?? 0) + 1
         // Accumulate into the per-session stats if injected, else the module-level fallback.
         if (params.readRefStats) {
           params.readRefStats.savedBytes += entryBytes

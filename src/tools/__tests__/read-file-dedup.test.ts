@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { READ_FILE_TOOL, __resetReadHistoryForTests, __evictLastKnownForTests, isUnchangedRepeatRead, getReadRefStats, getFileReadMtime } from '../read-file.js'
+import { READ_FILE_TOOL, __resetReadHistoryForTests, __evictLastKnownForTests, isUnchangedRepeatRead, getReadRefStats, getFileReadMtime, invalidateSessionReadDedup } from '../read-file.js'
 import { ArtifactStore } from '../../artifact/store.js'
 import type { ToolCallParams } from '../types.js'
 
@@ -391,5 +391,65 @@ describe('read-ref compact reference (任务 B2)', () => {
     const r2 = await READ_FILE_TOOL.execute(params({ file_path: file }))
     assert.ok(r2.content.startsWith('[read-ref]'), 'repeat read takes the shortcut')
     assert.ok(getFileReadMtime(absPath) !== null, 'shortcut must re-register 表2 — otherwise write_file guard loops forever')
+  })
+
+  // ── 压缩失效 + 降级闸门 (2026-07-07 read-ref 修复) ──
+  // read-ref 声称「回看上文」，但历史 tool_result 会被压缩/修剪掉。两道防线：
+  // ① 压缩重写后 invalidateSessionReadDedup 清表 → 下次读取重发全文；
+  // ② 同一条目连续第二次 ref 命中 → 引用没帮上忙，降级为真实读取。
+
+  it('read-ref wording leads with read_section disk read, not "look above"', async () => {
+    enableReadRef()
+    const file = makeFile('src/wording.ts', 100)
+    await READ_FILE_TOOL.execute(params({ file_path: file }))
+    const r2 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r2.content.startsWith('[read-ref]'))
+    assert.ok(r2.content.includes('read_section(file_path='), 'must offer the disk-backed read_section escape hatch')
+    assert.ok(r2.content.includes('不依赖上文'), 'must state read_section works regardless of history state')
+  })
+
+  it('second consecutive ref hit degrades to full content, then ref resumes', async () => {
+    enableReadRef()
+    const file = makeFile('src/degrade.ts', 100)
+
+    const r1 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r1.content.includes('line 1'), 'first read returns content')
+
+    const r2 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r2.content.startsWith('[read-ref]'), 'first repeat returns the reference')
+
+    // The model came back AGAIN for the same unchanged slice — the ref didn't
+    // help (its target may have been pruned from the request view). Degrade.
+    const r3 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(!r3.content.startsWith('[read-ref]'), 'second repeat must NOT loop the reference')
+    assert.ok(r3.content.includes('line 1'), 'second repeat must re-serve full content')
+    assert.ok(r3.content.includes('line 100'), 'full content includes the last line')
+
+    // The degrade re-recorded a fresh dedup entry — the ref gets another chance.
+    const r4 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r4.content.startsWith('[read-ref]'), 'ref resumes after a fresh full serve')
+  })
+
+  it('invalidateSessionReadDedup clears only the target session; 表2 survives', async () => {
+    enableReadRef()
+    const file = makeFile('src/invalidate.ts', 100)
+    const absPath = join(dir, file)
+    const withSession = (sessionId: string): ToolCallParams => ({ ...params({ file_path: file }), sessionId })
+
+    await READ_FILE_TOOL.execute(withSession('s1'))
+    await READ_FILE_TOOL.execute(withSession('s2'))
+
+    // History rewrite happened for s1 (compaction) — its dedup records must die.
+    invalidateSessionReadDedup('s1')
+
+    const r1 = await READ_FILE_TOOL.execute(withSession('s1'))
+    assert.ok(!r1.content.startsWith('[read-ref]'), 's1 repeat after invalidation must re-serve content')
+    assert.ok(r1.content.includes('line 1'), 's1 gets full content')
+
+    const r2 = await READ_FILE_TOOL.execute(withSession('s2'))
+    assert.ok(r2.content.startsWith('[read-ref]'), 's2 dedup records must survive s1 invalidation')
+
+    // 表2 (lastKnownFileState) tracks FILE state, not history presence — must survive.
+    assert.ok(getFileReadMtime(absPath, 's1') !== null, '表2 for s1 must survive invalidation')
   })
 })

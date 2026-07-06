@@ -370,6 +370,14 @@ export interface CompactionControllerDeps {
   onArchive?: (artifactId: string, turn: number) => void
   /** Snapshot the full pre-compaction message list for disaster recovery. */
   backupTranscript?: (messages: OaiMessage[], turn: number) => void
+  /**
+   * Fired after every history rewrite that goes through safeReplaceMessages
+   * (maybeCompact / checkpoint / partial / micro / context ceiling). Wired in
+   * loop.ts to invalidateSessionReadDedup: the historical tool_results that
+   * read-ref points at ("回看上文") may no longer exist after the rewrite, so
+   * "already read" dedup claims must be dropped.
+   */
+  onHistoryRewritten?: () => void
 }
 
 export interface ArchiveHistoryInput {
@@ -929,6 +937,8 @@ export class CompactionController {
       debugLog(`[compact-preflight] repaired ${preflight.syntheticResultsInserted} orphan tool_call(s)`)
     }
     this.deps.session.replaceMessages(preflight.messages)
+    // History rewritten — read-ref's "look above" targets may be gone.
+    try { this.deps.onHistoryRewritten?.() } catch { /* never block compaction */ }
   }
 
   private maybeBackupTranscript(): void {

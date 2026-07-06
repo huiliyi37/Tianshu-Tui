@@ -4,6 +4,7 @@ import { SessionPersist, getSessionDir } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
 import { PrewarmCache } from './prewarm.js'
 import { validatePathSafe } from '../tools/path-validate.js'
+import { invalidateSessionReadDedup } from '../tools/read-file.js'
 import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ToolErrorClass } from '../tools/types.js'
@@ -655,6 +656,10 @@ export class AgentLoop {
       },
       getAbortSignal: () => this.abortController?.signal,
       getActiveContract: () => this.taskContract,
+      // After any compaction rewrite the historical tool_results that read-ref
+      // points at may be gone — drop this session's read-dedup records so the
+      // next read_file re-serves real content instead of a dangling reference.
+      onHistoryRewritten: () => { invalidateSessionReadDedup(this.config.sessionId) },
       // Layered archival: persist discarded history as a recallable
       // compact-history artifact. Disk-only write, never touches the prefix.
       archiveHistory: async (input) => {
