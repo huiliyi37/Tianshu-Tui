@@ -202,6 +202,14 @@ export interface ManagedAgent {
   getReasoningEffort?(): string | undefined
   /** Rewind: return the current message list (for listing rewind points). */
   getMessages(): OaiMessage[]
+  /**
+   * Outcome of the boot-time LLM history restore (sidecar restart recovery).
+   * Lets the session layer warn when the event log shows a prior conversation
+   * but the model context came back empty (corrupt/unreadable session file) —
+   * otherwise the user silently talks to a model that remembers nothing.
+   * Optional so lightweight test doubles need not implement it.
+   */
+  getHistoryRestore?(): { restored: number; error?: string }
   /** Rewind: replace the message list (truncate to a prior point). */
   replaceMessages(msgs: OaiMessage[]): void
   /** Rewind: like replaceMessages but also resets turnCount/filesRead/filesModified etc. */
@@ -1141,8 +1149,32 @@ export class RuntimeSessionManager {
       this.ensureJobs(session)
       session.agent = this.createAgent(session.record.cwd, session.record.id, session.approvalMode)
       this.applySelections(session)
+      this.warnIfHistoryLost(session)
     }
     return session.agent
+  }
+
+  /**
+   * Surface the "UI has history, model has none" divergence. A rehydrated
+   * session replays its full event log to the viewer, but the model context is
+   * restored separately from the session .jsonl — if that read failed or came
+   * back empty while the event log clearly holds a prior conversation, warn in
+   * the timeline instead of letting the user talk to an amnesiac model.
+   * Best-effort: only fires when prior events are resident (run() calls
+   * ensureEvents first, so the main prompt path always has them).
+   */
+  private warnIfHistoryLost(session: InternalSession): void {
+    const info = session.agent?.getHistoryRestore?.()
+    if (!info) return
+    if (!info.error && info.restored > 0) return
+    const hadConversation = session.events.some((e) => e.type === 'user')
+    if (!hadConversation) return
+    this.append(session, 'phase', {
+      phase: info.error
+        ? `⚠️ 历史上下文恢复失败（${redactText(info.error)}）——模型不记得此前的对话，界面历史仅供查看`
+        : '⚠️ 历史上下文为空——会话记录文件缺失或已损坏，模型不记得此前的对话，界面历史仅供查看',
+      historyRestore: { restored: info.restored, ...(info.error ? { error: redactText(info.error) } : {}) },
+    })
   }
 
   /** Lazily create the server-owned background job registry for a session and

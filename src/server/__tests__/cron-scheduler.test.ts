@@ -301,6 +301,84 @@ describe('computeNextTrigger', () => {
     const next = computeNextTrigger(task, Date.now())
     assert.equal(next, null)
   })
+
+  it('cron: fires when the tick lands after the scheduled minute (regression)', () => {
+    // 旧实现从 now 起算下一次触发 → next 恒 > now → `next <= now` 永假 → cron 永不触发。
+    // 新实现从 lastTriggeredAt/createdAt 起算：过点后的任意 tick 都能看到 next <= now。
+    const task: ScheduledTask = {
+      ...createScheduledTask('test', { type: 'cron', spec: '30 14 * * *' }),
+      createdAt: '2024-06-01T10:00:00Z',
+    }
+    const tickAt = new Date('2024-06-01T14:30:45Z').getTime() // 过点 45 秒的 tick
+    const next = computeNextTrigger(task, tickAt)
+    assert.equal(next, new Date('2024-06-01T14:30:00Z').getTime())
+    assert.ok(next! <= tickAt, 'due — the scheduler tick will fire it')
+  })
+
+  it('cron: after firing, next trigger is computed from lastTriggeredAt', () => {
+    const task: ScheduledTask = {
+      ...createScheduledTask('test', { type: 'cron', spec: '30 14 * * *' }),
+      createdAt: '2024-06-01T10:00:00Z',
+      lastTriggeredAt: '2024-06-01T14:30:45.000Z',
+      triggerCount: 1,
+    }
+    const next = computeNextTrigger(task, new Date('2024-06-01T14:31:00Z').getTime())
+    assert.equal(next, new Date('2024-06-02T14:30:00Z').getTime(), 'not due again until tomorrow')
+  })
+
+  it('cron: supports step expressions (*/15 minutes)', () => {
+    const task: ScheduledTask = {
+      ...createScheduledTask('test', { type: 'cron', spec: '*/15 * * * *' }),
+      createdAt: '2024-06-01T10:07:00Z',
+    }
+    const next = computeNextTrigger(task, new Date('2024-06-01T10:20:00Z').getTime())
+    assert.equal(next, new Date('2024-06-01T10:15:00Z').getTime())
+  })
+
+  it('cron: supports day-of-week schedules (weekly Monday 09:00)', () => {
+    // 2024-06-01 is a Saturday; next Monday is 2024-06-03.
+    const task: ScheduledTask = {
+      ...createScheduledTask('test', { type: 'cron', spec: '0 9 * * 1' }),
+      createdAt: '2024-06-01T10:00:00Z',
+    }
+    const next = computeNextTrigger(task, new Date('2024-06-03T09:00:30Z').getTime())
+    assert.equal(next, new Date('2024-06-03T09:00:00Z').getTime())
+  })
+
+  it('cron: dow 7 is an alias for Sunday (0)', () => {
+    // 2024-06-02 is a Sunday.
+    const task: ScheduledTask = {
+      ...createScheduledTask('test', { type: 'cron', spec: '0 12 * * 7' }),
+      createdAt: '2024-06-01T00:00:00Z',
+    }
+    const next = computeNextTrigger(task, new Date('2024-06-01T13:00:00Z').getTime())
+    assert.equal(next, new Date('2024-06-02T12:00:00Z').getTime())
+  })
+
+  it('cron: supports lists and ranges (0,30 9-10 * * *)', () => {
+    const task: ScheduledTask = {
+      ...createScheduledTask('test', { type: 'cron', spec: '0,30 9-10 * * *' }),
+      createdAt: '2024-06-01T09:35:00Z',
+    }
+    const next = computeNextTrigger(task, new Date('2024-06-01T09:40:00Z').getTime())
+    assert.equal(next, new Date('2024-06-01T10:00:00Z').getTime())
+  })
+
+  it('cron: supports day-of-month + month schedules (monthly 1st 00:00)', () => {
+    const task: ScheduledTask = {
+      ...createScheduledTask('test', { type: 'cron', spec: '0 0 1 * *' }),
+      createdAt: '2024-06-15T10:00:00Z',
+    }
+    const next = computeNextTrigger(task, new Date('2024-06-20T10:00:00Z').getTime())
+    assert.equal(next, new Date('2024-07-01T00:00:00Z').getTime())
+  })
+
+  it('cron: rejects out-of-range field values', () => {
+    for (const spec of ['60 * * * *', '* 24 * * *', '* * 32 * *', '* * * 13 *', '* * * * 8', '1-70 * * * *']) {
+      const task = createScheduledTask('test', { type: 'cron', spec })
+      assert.equal(computeNextTrigger(task, Date.now()), null, `should reject "${spec}"`)
+    }
+  })
 })
 
 // ─── CronLock ─────────────────────────────────────────────────

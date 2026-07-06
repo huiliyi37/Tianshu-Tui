@@ -54,7 +54,7 @@ export function AutomationsSurface() {
 
   const specHint =
     type === 'interval' ? '毫秒间隔，如 3600000（每小时）'
-      : type === 'cron' ? '"分 时 * * *"，如 "30 9 * * *"（每天 9:30 UTC）'
+      : type === 'cron' ? '标准五段式（UTC），如 "30 9 * * *"（每天 9:30）、"0 9 * * 1"（每周一 9:00）、"*/15 * * * *"（每 15 分钟）'
         : 'ISO 时间，如 2026-07-01T09:00:00Z'
 
   const selected = definitions.find((d) => d.id === selectedId) ?? null
@@ -83,7 +83,7 @@ export function AutomationsSurface() {
           <div className="row">
             <select value={type} onChange={(e) => setType(e.target.value as TriggerType)}>
               <option value="interval">间隔</option>
-              <option value="cron">每日 cron</option>
+              <option value="cron">cron</option>
               <option value="oneshot">一次性</option>
             </select>
             <input value={spec} onChange={(e) => setSpec(e.target.value)} placeholder={specHint} />

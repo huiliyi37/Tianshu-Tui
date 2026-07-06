@@ -143,6 +143,70 @@ test('new events after rehydrate are persisted via the adapter', () => {
   assert.ok(persistedEvents.some((e) => e.type === 'status'), 'run status event persisted')
 })
 
+test('rehydrated session with a prior conversation warns when the model context restore came back empty', () => {
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'lost', status: 'completed', createdAt: 1, updatedAt: 9,
+      cwd: '/work', lastSeq: 2, pendingApprovals: 0,
+    },
+    events: [ev(1, 'user', { text: 'earlier question' }), ev(2, 'text_delta', { text: 'earlier answer' })],
+  }]
+  // Agent whose boot-time history restore found nothing (corrupt/missing .jsonl).
+  class AmnesiacAgent extends NoopAgent {
+    getHistoryRestore(): { restored: number; error?: string } {
+      return { restored: 0, error: 'EISDIR: illegal operation' }
+    }
+  }
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new AmnesiacAgent(),
+    persistence: new MemoryPersistence(seed),
+  })
+
+  mgr.run('lost', 'follow-up')
+  const evs = mgr.getEvents('lost', 0)!.events
+  const warn = evs.find((e) => e.type === 'phase' && String(e.data.phase).includes('历史上下文'))
+  assert.ok(warn, 'timeline carries a visible history-lost warning')
+  assert.deepEqual(warn!.data.historyRestore, { restored: 0, error: 'EISDIR: illegal operation' })
+})
+
+test('no history-lost warning when the restore succeeded or the session had no conversation', () => {
+  const seed: PersistedSession[] = [
+    {
+      record: { id: 'ok', status: 'completed', createdAt: 1, updatedAt: 9, cwd: '/work', lastSeq: 1, pendingApprovals: 0 },
+      events: [ev(1, 'user', { text: 'hello' })],
+    },
+    {
+      record: { id: 'fresh', status: 'idle', createdAt: 1, updatedAt: 9, cwd: '/work', lastSeq: 0, pendingApprovals: 0 },
+      events: [],
+    },
+  ]
+  class RestoredAgent extends NoopAgent {
+    getHistoryRestore(): { restored: number } { return { restored: 5 } }
+  }
+  class EmptyAgent extends NoopAgent {
+    getHistoryRestore(): { restored: number } { return { restored: 0 } }
+  }
+  const mgrOk = new RuntimeSessionManager({
+    createAgent: () => new RestoredAgent(),
+    persistence: new MemoryPersistence(seed),
+  })
+  mgrOk.run('ok', 'more')
+  assert.ok(
+    !mgrOk.getEvents('ok', 0)!.events.some((e) => e.type === 'phase' && String(e.data.phase).includes('历史上下文')),
+    'successful restore → no warning',
+  )
+
+  const mgrFresh = new RuntimeSessionManager({
+    createAgent: () => new EmptyAgent(),
+    persistence: new MemoryPersistence(seed),
+  })
+  mgrFresh.run('fresh', 'first prompt')
+  assert.ok(
+    !mgrFresh.getEvents('fresh', 0)!.events.some((e) => e.type === 'phase' && String(e.data.phase).includes('历史上下文')),
+    'no prior conversation → restored=0 is normal, no warning',
+  )
+})
+
 test('lazy rehydrate reads no event logs at boot, loads on first open', () => {
   const seed: PersistedSession[] = [{
     record: {

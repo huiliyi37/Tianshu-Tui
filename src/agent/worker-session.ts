@@ -95,6 +95,9 @@ export interface WorkerTranscript {
   toolResults: string[]
   errors: string[]
   repairAttempts: number
+  /** bash 工具的 command 参数留痕——worker-evidence 用它判定"验证形状"的命令
+   *  是否真实执行过（VERIFY_BASH_RE）。可选：旧序列化/测试固件可缺省。 */
+  bashCommands?: string[]
 }
 
 export interface WorkerSessionRun {
@@ -115,6 +118,7 @@ function emptyTranscript(): WorkerTranscript {
     toolResults: [],
     errors: [],
     repairAttempts: 0,
+    bashCommands: [],
   }
 }
 
@@ -197,8 +201,11 @@ async function runOnce(
       transcript.thinking += delta
       onActivity?.('thinking', delta)
     },
-    onToolUse: (_id, name) => {
+    onToolUse: (_id, name, input) => {
       transcript.toolUses.push(name)
+      if (name === 'bash' && typeof (input as Record<string, unknown> | undefined)?.command === 'string') {
+        (transcript.bashCommands ??= []).push((input as { command: string }).command)
+      }
       onActivity?.('tool_use', name)
     },
     onToolResult: (_id, name, result, isError) => {

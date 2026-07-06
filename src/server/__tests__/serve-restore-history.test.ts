@@ -57,9 +57,10 @@ test('restoreHistoryMessages: loads prior OAI messages into a fresh SessionConte
 
   assert.equal(session.getMessages().length, 0, 'fresh context starts empty')
 
-  const count = restoreHistoryMessages(persist, session)
+  const info = restoreHistoryMessages(persist, session)
 
-  assert.equal(count, 2, 'returns the number of restored messages')
+  assert.equal(info.restored, 2, 'returns the number of restored messages')
+  assert.equal(info.error, undefined)
   const msgs = session.getMessages()
   assert.equal(msgs.length, 2, 'context now holds the prior conversation')
   assert.equal(msgs[0]!.role, 'user')
@@ -74,9 +75,9 @@ test('restoreHistoryMessages: no-op for a brand-new session with no prior file',
   const persist = new SessionPersist(sessionId, '/fake-cwd')
   const session = new SessionContext()
 
-  const count = restoreHistoryMessages(persist, session)
+  const info = restoreHistoryMessages(persist, session)
 
-  assert.equal(count, 0, 'no messages to restore')
+  assert.equal(info.restored, 0, 'no messages to restore')
   assert.equal(session.getMessages().length, 0, 'context stays empty for new sessions')
 })
 
@@ -87,9 +88,24 @@ test('restoreHistoryMessages: no-op when session file is empty', () => {
   writeFileSync(persist.getFilePath(), '', 'utf8')
 
   const session = new SessionContext()
-  const count = restoreHistoryMessages(persist, session)
-  assert.equal(count, 0)
+  const info = restoreHistoryMessages(persist, session)
+  assert.equal(info.restored, 0)
   assert.equal(session.getMessages().length, 0)
+})
+
+test('restoreHistoryMessages: hard IO failure degrades to empty context with error surfaced', () => {
+  const sessionId = 'io-broken-session'
+  const persist = new SessionPersist(sessionId, '/fake-cwd')
+  // A DIRECTORY at the session file path makes readFileSync throw EISDIR —
+  // the "file exists but unreadable" class of failure.
+  mkdirSync(persist.getFilePath(), { recursive: true })
+
+  const session = new SessionContext()
+  const info = restoreHistoryMessages(persist, session)
+
+  assert.equal(info.restored, 0, 'nothing restored')
+  assert.ok(info.error, 'error is surfaced instead of thrown')
+  assert.equal(session.getMessages().length, 0, 'context left empty, session still buildable')
 })
 
 test('restoreHistoryMessages: handles tool_call/tool_result pairs correctly', () => {
@@ -109,9 +125,9 @@ test('restoreHistoryMessages: handles tool_call/tool_result pairs correctly', ()
   const persist = new SessionPersist(sessionId, '/fake-cwd')
   const session = new SessionContext()
 
-  const count = restoreHistoryMessages(persist, session)
+  const info = restoreHistoryMessages(persist, session)
 
-  assert.equal(count, 4, 'all 4 messages restored including tool exchange')
+  assert.equal(info.restored, 4, 'all 4 messages restored including tool exchange')
   const msgs = session.getMessages()
   const assistant = msgs[1]!
   assert.ok(isAssistantWithTools(assistant), 'second message restored as assistant with tool_calls')

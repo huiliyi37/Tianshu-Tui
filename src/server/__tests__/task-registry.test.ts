@@ -115,6 +115,34 @@ describe('JsonTaskStore', () => {
     assert.equal(found, null)
   })
 
+  it('findActiveByIdempotencyKey index tracks status transitions across saves', async () => {
+    await store.save(makeRecord('a', undefined, 'pending', 'api', 'key_abc'))
+    assert.ok(await store.findActiveByIdempotencyKey('key_abc'), 'pending → found')
+
+    await store.save({ ...makeRecord('a', undefined, 'running', 'api', 'key_abc') })
+    assert.ok(await store.findActiveByIdempotencyKey('key_abc'), 'running → still found')
+
+    await store.save({ ...makeRecord('a', undefined, 'completed', 'api', 'key_abc') })
+    assert.equal(await store.findActiveByIdempotencyKey('key_abc'), null, 'terminal → evicted from index')
+  })
+
+  it('findActiveByIdempotencyKey index survives delete and sees pre-index disk state', async () => {
+    // Save BEFORE the first find builds the index — verifies the initial scan.
+    await store.save(makeRecord('a', undefined, 'pending', 'api', 'key_1'))
+    await store.save(makeRecord('b', undefined, 'pending', 'api', 'key_2'))
+
+    // A fresh store instance over the same directory (cold cache) must still
+    // find the active task via its one-time directory scan.
+    const cold = new JsonTaskStore(TEST_DIR)
+    const found = await cold.findActiveByIdempotencyKey('key_2')
+    assert.ok(found)
+    assert.equal(found!.id, 'b')
+
+    await cold.delete('b')
+    assert.equal(await cold.findActiveByIdempotencyKey('key_2'), null, 'deleted → no longer found')
+    assert.ok(await cold.findActiveByIdempotencyKey('key_1'), 'unrelated key unaffected')
+  })
+
   it('list with limit', async () => {
     for (let i = 0; i < 5; i++) {
       await store.save(makeRecord(`task_${i}`, new Date(2024, 0, i + 1).toISOString()))
