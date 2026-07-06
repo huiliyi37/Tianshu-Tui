@@ -26,7 +26,7 @@ class FakeAgent implements ManagedAgent {
   abort() { this.resolveRun?.() }
   setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null) { this.activePlanCalls.push(plan) }
   enterPlanMode(opts?: { planFilePath?: string }) { this.enterPlanModeCalls.push(opts) }
-  switchModel(modelId: string) { return modelId }
+  switchModel(modelId: string): string | null { return modelId }
   getActivePlanFilePath() { return this.activePlanFilePath }
   listArtifacts() { return this.artifacts }
   readArtifact(id: string) { return Promise.resolve(this.artifacts.some((a) => a.id === id) ? `raw:${id}` : null) }

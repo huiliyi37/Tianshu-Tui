@@ -490,6 +490,42 @@ describe('checksum integration', () => {
     assert.match(raw, /"to":"deepseek-v4-pro"/)
     assert.match(raw, /"from":"claude-opus-4-8"/)
   })
+
+  it('compactOai preserves model_switch audit lines across a full rewrite', async () => {
+    const persist = new SessionPersist('test-switch-survives-compact', tempDir)
+    await persist.appendOaiWithChecksum({ role: 'user', content: 'before switch' })
+    persist.appendModelSwitch({ from: 'deepseek-v4-pro', to: 'glm-5.2', provider: 'glm' })
+    await persist.appendOaiWithChecksum({ role: 'assistant', content: 'after switch' })
+
+    // 压缩重写从内存消息再生文件——audit 行不进内存，重写前必须从旧文件捞回。
+    persist.compactOai(persist.loadOai())
+
+    const { readFileSync } = await import('node:fs')
+    const raw = readFileSync(persist.getFilePath(), 'utf-8')
+    assert.match(raw, /"type":"model_switch"/, 'model_switch audit line must survive compactOai')
+    assert.match(raw, /"to":"glm-5\.2"/)
+    // replay 语义不变：audit 行仍被跳过
+    const loaded = persist.loadOai()
+    assert.equal(loaded.length, 2)
+
+    // 再次重写也不丢、不重复膨胀（每次重写恰好保留一份）
+    persist.compactOai(persist.loadOai())
+    const raw2 = readFileSync(persist.getFilePath(), 'utf-8')
+    assert.equal(raw2.split('\n').filter(l => l.includes('"type":"model_switch"')).length, 1)
+  })
+
+  it('compactOaiAsync preserves model_switch audit lines across a full rewrite', async () => {
+    const persist = new SessionPersist('test-switch-survives-async-compact', tempDir)
+    await persist.appendOaiWithChecksum({ role: 'user', content: 'hi' })
+    persist.appendModelSwitch({ to: 'glm-5.2', provider: 'glm' })
+
+    await persist.compactOaiAsync(persist.loadOai())
+
+    const { readFileSync } = await import('node:fs')
+    const raw = readFileSync(persist.getFilePath(), 'utf-8')
+    assert.match(raw, /"type":"model_switch"/, 'model_switch audit line must survive compactOaiAsync')
+    assert.equal(persist.loadOai().length, 1)
+  })
 })
 
 describe('projectSlug (cross-platform session dir name)', () => {

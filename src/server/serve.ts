@@ -727,10 +727,20 @@ function buildManagedAgent(
       // Preserve the live approvalMode — user may have switched autonomy level
       // since session creation. The closure variable is stale if they did.
       const liveApprovalMode = oldAgent.config.approvalMode
+      // Audit: capture the outgoing model before the rebuild replaces it.
+      let fromModel: string | undefined
+      try { fromModel = oldAgent.config.promptEngine.getModel() } catch { /* idle/未初始化 */ }
       agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, liveApprovalMode, registry, shared)
       if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
         try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
       }
+      // 持久化切换（与 TUI bootstrap.switchAgentRuntime 同源）：metadata.model/
+      // provider 反映当前模型，JSONL 落 model_switch 审计行——没有这两笔，
+      // 桌面端换模型在会话日志里是隐形的。best-effort，不阻塞切换。
+      try {
+        stores.persist.updateMetadata({ model: spec.model.id, provider: spec.provider.name })
+        stores.persist.appendModelSwitch({ from: fromModel, to: spec.model.id, provider: spec.provider.name })
+      } catch { /* persistence is best-effort — never block a model switch */ }
       return spec.model.id
     },
     // Context usage display (desktop header progress bar) — real occupancy
