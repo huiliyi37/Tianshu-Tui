@@ -1021,13 +1021,18 @@ export class OpenAIClient implements StreamClient {
         }
         // Final flush and still unparseable — surface it loudly instead of
         // silently feeding {} into the tool (the misleading "X is required").
+        // argsTruncated marks the block so the tool pipeline refuses to
+        // EXECUTE it (running a half-received command is worse than failing:
+        // session 4df36bcd executed a truncated bash call as {}). The block
+        // is still emitted — the assistant message needs the tool_use so the
+        // paired error tool_result keeps the history well-formed.
         this.warnToolArgParseFailure(buf)
         this.logToolStreamEvent({
           phase: 'final-flush-empty', openBuffers: this.toolCallBuffer.size,
           id: buf.id, name: buf.function.name,
           argsLen: buf.function.arguments.length, argsPreview: buf.function.arguments.slice(0, 120),
         })
-        callbacks.onContentBlock?.({ type: 'tool_use', id: buf.id, name: buf.function.name, input: {} })
+        callbacks.onContentBlock?.({ type: 'tool_use', id: buf.id, name: buf.function.name, input: {}, argsTruncated: true })
         this.toolCallBuffer.delete(idx)
         continue
       }

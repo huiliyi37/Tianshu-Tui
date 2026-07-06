@@ -455,10 +455,16 @@ export class AnthropicClient implements StreamClient {
                 const buf = toolUseBuffer.get(index)
                 if (buf) {
                   let input: Record<string, unknown> = {}
+                  let argsTruncated: boolean | undefined
                   try {
                     input = JSON.parse(buf.partialJson || '{}')
-                  } catch { /* keep empty */ }
-                  callbacks.onContentBlock({ type: 'tool_use', id: buf.id, name: buf.name, input })
+                  } catch {
+                    // Incomplete/unparseable partial_json at block stop — mark
+                    // the block so the tool pipeline refuses to execute the {}
+                    // placeholder (same contract as openai-client final flush).
+                    argsTruncated = true
+                  }
+                  callbacks.onContentBlock({ type: 'tool_use', id: buf.id, name: buf.name, input, argsTruncated })
                   toolUseBuffer.delete(index)
                 }
               }

@@ -25,6 +25,15 @@ export interface ContentBlockToolUse {
   id: string
   name: string
   input: Record<string, unknown>
+  /**
+   * Set when the stream ended while this call's arguments were still
+   * incomplete/unparseable (final-flush-empty). `input` is {} in that case —
+   * NOT what the model asked for. The tool pipeline must refuse to execute
+   * the call and return an error result instead (session 4df36bcd: a
+   * truncated bash call executed with {} and threw deep inside the sandbox
+   * wrapper).
+   */
+  argsTruncated?: boolean
 }
 
 export interface ContentBlockToolResult {

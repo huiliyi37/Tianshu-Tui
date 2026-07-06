@@ -22,7 +22,7 @@ let origCwd: string
 
 function frame(obj: unknown): string { return `data: ${JSON.stringify(obj)}\n\n` }
 
-async function runFrames(frames: string[]): Promise<void> {
+async function runFrames(frames: string[]): Promise<any[]> {
   const client = new OpenAIClient(CONFIG)
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
@@ -32,10 +32,12 @@ async function runFrames(frames: string[]): Promise<void> {
     },
   })
   const response = new Response(stream)
+  const blocks: any[] = []
   await (client as any).parseStreamFromReader(
     response.body!.getReader(),
-    { onTextDelta: () => {}, onContentBlock: () => {} },
+    { onTextDelta: () => {}, onContentBlock: (b: any) => { blocks.push(b) } },
   )
+  return blocks
 }
 
 describe('tool-stream event log (observability)', () => {
@@ -88,11 +90,13 @@ describe('tool-stream event log (observability)', () => {
     assert.equal(reattach.id, 'c0')
   })
 
-  it('final-flush empty (unparseable args) → final-flush-empty logged', async () => {
+  it('final-flush empty (unparseable args) → final-flush-empty logged + argsTruncated marker', async () => {
     // A tool_call whose arguments never become valid JSON → final flush emits
     // input:{} and logs the event. This is the direct fingerprint of a
-    // pollution-induced parse failure reaching the tool layer.
-    await runFrames([
+    // pollution-induced parse failure reaching the tool layer. The emitted
+    // block MUST carry argsTruncated so the pipeline refuses to execute the
+    // {} placeholder (session 4df36bcd: truncated bash call ran as {}).
+    const blocks = await runFrames([
       frame({ choices: [{ delta: { tool_calls: [
         { index: 0, id: 'c0', type: 'function', function: { name: 'grep', arguments: '{"path":"src",' } },
       ] }, finish_reason: null }] }),
@@ -105,6 +109,22 @@ describe('tool-stream event log (observability)', () => {
     assert.ok(empty, 'final-flush-empty event must be logged for the {} tool_use')
     assert.equal(empty.name, 'grep')
     assert.ok(empty.argsLen > 0, 'must record the incomplete args length for diagnosis')
+
+    const tu = blocks.find(b => b.type === 'tool_use' && b.name === 'grep')
+    assert.ok(tu, 'the tool_use block must still be emitted (history needs the pair)')
+    assert.equal(tu.argsTruncated, true, 'block must be marked argsTruncated for the pipeline')
+    assert.deepEqual(tu.input, {})
+  })
+
+  it('healthy parse → no argsTruncated marker on the block', async () => {
+    const blocks = await runFrames([
+      frame({ choices: [{ delta: { tool_calls: [
+        { index: 0, id: 'c9', type: 'function', function: { name: 'grep', arguments: '{"path":"src","pattern":"x"}' } },
+      ] }, finish_reason: 'tool_calls' }] }),
+    ])
+    const tu = blocks.find(b => b.type === 'tool_use' && b.id === 'c9')
+    assert.ok(tu)
+    assert.equal(tu.argsTruncated, undefined, 'clean parse must not set the marker')
   })
 
   it('healthy stream (every chunk has index, parses cleanly) → no event log written', async () => {

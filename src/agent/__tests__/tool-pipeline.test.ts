@@ -95,6 +95,33 @@ describe('executeToolUse', () => {
     }
   }
 
+  it('refuses to execute a tool call whose args were truncated by stream interruption', async () => {
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'ok', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-trunc', name: 'bash', input: {}, argsTruncated: true },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(executed, false, 'tool must NOT execute with the {} placeholder input')
+    const tr = result.toolResult as any
+    assert.equal(tr.is_error, true)
+    assert.equal(tr.tool_use_id, 'tu-trunc')
+    assert.ok(tr.content.includes('NOT executed'), 'error result must state the call did not run')
+    assert.ok(tr.content.includes('Re-issue'), 'error result must tell the model to re-issue the call')
+  })
+
   it('adds read-loop strategy signal after repeated diet no-info read_file results', async () => {
     const deps = makeDeps({
       trajectory: {

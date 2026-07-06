@@ -576,7 +576,7 @@ function gitHeadSummaryQuiet(cwd: string): Promise<string | null> {
 }
 
 export async function executeToolUse(
-  tu: { id: string; name: string; input: Record<string, unknown> },
+  tu: { id: string; name: string; input: Record<string, unknown>; argsTruncated?: boolean },
   deps: ToolPipelineDeps,
   callbacks: AgentCallbacks,
   turn: number,
@@ -584,6 +584,18 @@ export async function executeToolUse(
 ): Promise<ToolExecResult> {
   let { traceStore, importGraph, lastConflictCheckCount, latestRisk } = deps
   let checkpointCreated = checkpointAlreadyCreated
+
+  // Stream died while this call's arguments were still incomplete — input is
+  // {} placeholder, NOT what the model asked for. Executing it ranges from a
+  // misleading "X is required" error to actually running a half-received
+  // command (session 4df36bcd). Refuse before any gate/alias/approval logic
+  // and tell the model to re-issue the call with full arguments.
+  if (tu.argsTruncated) {
+    const msg = `Tool call NOT executed: the stream was interrupted before the arguments for \`${tu.name}\` finished transmitting (received an incomplete fragment). ` +
+      `Nothing ran — no side effects. Re-issue the ${tu.name} call with its full arguments.`
+    callbacks.onToolResult(tu.id, tu.name, msg, true)
+    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+  }
 
   // Canonicalize foreign tool aliases (task/agent/todowrite → Rivet names)
   // BEFORE any gate runs. Every downstream policy — plan-mode whitelist, deny
