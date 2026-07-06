@@ -18,3 +18,37 @@ export function openExternal(href: string): void {
       try { window.open(href, '_blank', 'noopener,noreferrer') } catch { /* ignore */ }
     })
 }
+
+/**
+ * Open the RIVET_HOME data directory in the system file explorer.
+ *
+ * Resolves the runtime data root (sessions, config, cache logs) from
+ * `runtime_info` and opens it with the OS default file manager. Falls
+ * back to showing an alert with the path when the opener plugin is
+ * unavailable (e.g. browser dev mode).
+ */
+export async function openRivetHome(): Promise<void> {
+  let rivetHome: string | undefined
+  try {
+    // Dynamic import to avoid bundling the runtime client in non-Tauri contexts.
+    const { getRuntimeInfo } = await import('../runtime/client.js')
+    const info = await getRuntimeInfo()
+    rivetHome = info.rivetHome
+  } catch {
+    // getRuntimeInfo or runtime_info command failed — try RIVET_HOME env.
+    rivetHome = ((import.meta as Record<string, unknown>).env as Record<string, string> | undefined)?.['VITE_RIVET_HOME']
+  }
+
+  if (!rivetHome) {
+    alert('无法获取数据目录路径。请确认桌面端已正常启动。')
+    return
+  }
+
+  try {
+    const opener = await import('@tauri-apps/plugin-opener')
+    await opener.openPath(rivetHome)
+  } catch {
+    // Not under Tauri — fall back to showing the path.
+    alert(`数据目录位置：\n${rivetHome}\n\n请手动在文件管理器中打开此路径。`)
+  }
+}

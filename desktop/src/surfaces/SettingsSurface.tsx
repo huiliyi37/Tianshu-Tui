@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Palette, SlidersHorizontal, Plug, Cpu, LifeBuoy, type LucideIcon } from 'lucide-react'
+import { Palette, SlidersHorizontal, Plug, Cpu, LifeBuoy, FolderOpen, type LucideIcon } from 'lucide-react'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -23,6 +23,7 @@ import { McpSettings } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
 import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { pickFolder } from '../lib/dialog'
+import { openRivetHome } from '../lib/open-external'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -900,6 +901,8 @@ function ShellSection() {
 }
 
 function StorageLocationSection() {
+  const [revealing, setRevealing] = useState(false)
+
   const handleApplied = async (requiresRestart: boolean) => {
     if (requiresRestart) {
       toast.success('存储位置已保存，应用即将重启')
@@ -913,11 +916,30 @@ function StorageLocationSection() {
     }
   }
 
+  const handleOpenDataFolder = async () => {
+    setRevealing(true)
+    try {
+      await openRivetHome()
+    } catch (err) {
+      toast.error(`打开数据目录失败：${(err as Error).message}`)
+    } finally {
+      setRevealing(false)
+    }
+  }
+
   return (
     <section className="system-card">
       <div className="system-card-header">
         <h4>存储位置</h4>
-        <p className="meta">设置天枢数据根目录（RIVET_HOME）。更改后需重启应用，可选择是否迁移已有数据。</p>
+        <p className="meta">设置天枢数据根目录（RIVET_HOME）。更改后需重启应用，可选择是否迁移已有数据。会话日志、缓存命中记录、配置等都存放在此目录。</p>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <button className="btn" onClick={() => void handleOpenDataFolder()} disabled={revealing}>
+          <FolderOpen size={14} /> {revealing ? '正在打开…' : '打开数据目录'}
+        </button>
+        <span className="meta" style={{ marginLeft: 8, fontSize: 12 }}>
+          在文件管理器中打开数据根目录，可查看会话日志、缓存记录等。
+        </span>
       </div>
       <StorageLocationPanel onApplied={handleApplied} />
     </section>
@@ -1045,6 +1067,14 @@ function StorageSection() {
           )}
         </>
       )}
+      <div style={{ marginTop: 12 }}>
+        <button className="btn" onClick={() => void openRivetHome()}>
+          <FolderOpen size={14} /> 打开数据目录
+        </button>
+        <span className="meta" style={{ marginLeft: 8, fontSize: 12 }}>
+          在文件管理器中查看会话 JSONL 日志与缓存记录。
+        </span>
+      </div>
     </section>
   )
 }
