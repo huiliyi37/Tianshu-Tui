@@ -85,7 +85,8 @@ function migrateLegacyCheckpointInterval(raw: Record<string, unknown>): Record<s
  * Mutates `raw` in place. Returns true if any value was changed.
  */
 function migrateDeepseekMaxTokens(raw: Record<string, unknown>): boolean {
-  const providers = raw?.provider?.providers as Record<string, unknown> | undefined
+  const provider = raw.provider as Record<string, unknown> | undefined
+  const providers = provider?.providers as Record<string, unknown> | undefined
   if (!providers) return false
 
   const ds = providers['deepseek'] as Record<string, unknown> | undefined

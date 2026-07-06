@@ -3,8 +3,9 @@
  *
  * 契约（CC 对标 f9001b16：ctx% 并入 ◧token 常驻，cache ⚡ 仅 <50% 浮出）：
  *  1. 设置 metricsProvider 后，GlanceBar 用真实 ◧Xk/Yk·$cost·⚡% 渲染。
- *  2. 无 provider 时回退内部估算；cost 单次计算，不随 onTurnComplete 累计膨胀
- *     （agent 传入的 usage 已是累计快照，旧实现 += 会指数级膨胀）。
+ *  2. 无 provider 时不猜价格：cost 恒为 0，GlanceBar 不渲染费用段
+ *     （537ca8b0 起真实费用只来自 metricsProvider 的 findModelPricing +
+ *     computeUsageCost；旧回退用硬编码定价且 += 累计快照，费用随回合膨胀）。
  */
 
 import { test } from 'node:test'
@@ -85,9 +86,11 @@ test('cache 健康态（≥50%）常驻展示为 dim 色，不再门控隐藏', 
   assert.ok(plain.includes('◧50k/200k'), `token 显示校准后的上下文占用: ${plain}`)
 })
 
-test('无 provider 回退：cost 单次计算，多次 onTurnComplete 不膨胀', async () => {
+test('无 provider 回退：不猜价格 — 多次 onTurnComplete 后也不渲染费用段', async () => {
   const { app, out } = makeApp()
-  // agent 每回合传入的是「累计」usage 快照；这里固定为 1M normal-input → $1.00。
+  // agent 每回合传入的是「累计」usage 快照。旧回退用硬编码定价估算，
+  // 会把 1M input 渲染成费用并随回合膨胀；现契约是无 provider 时 cost 恒 0，
+  // GlanceBar 的费用段（¥X.XX，仅 cost > 0 渲染）完全不出现。
   const cumulative = {
     input_tokens: 1_000_000,
     output_tokens: 0,
@@ -99,8 +102,7 @@ test('无 provider 回退：cost 单次计算，多次 onTurnComplete 不膨胀'
   app.callbacks.onTurnComplete(cumulative, 3, false)
   await tick(30)
   const plain = stripAnsi(out.chunks.join(''))
-  assert.ok(plain.includes('1.00'), `cost should be single-shot $1.00: ${plain}`)
-  assert.ok(!plain.includes('3.00'), 'cost must not inflate to $3.00 across turns')
+  assert.ok(!/¥\d/.test(plain), `无 provider 不应渲染任何费用: ${plain}`)
 })
 
 test('GlanceBar 显示可见对话 token（conversationTokens），颜色仍按真实 API 占用（estimatedTokens）', () => {

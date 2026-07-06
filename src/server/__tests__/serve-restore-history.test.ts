@@ -20,7 +20,7 @@ import { SessionPersist } from '../../agent/session-persist.js'
 import { SessionContext } from '../../agent/context.js'
 import { restoreHistoryMessages } from '../serve.js'
 import { appendChecksum } from '../../agent/checksum.js'
-import type { OaiMessage } from '../../api/oai-types.js'
+import { isAssistantWithTools, type OaiMessage } from '../../api/oai-types.js'
 
 let tmpDir: string
 const ORIG_SESSION_DIR = process.env.RIVET_SESSION_DIR
@@ -113,7 +113,9 @@ test('restoreHistoryMessages: handles tool_call/tool_result pairs correctly', ()
 
   assert.equal(count, 4, 'all 4 messages restored including tool exchange')
   const msgs = session.getMessages()
-  assert.equal(msgs[1]!.tool_calls!.length, 1)
+  const assistant = msgs[1]!
+  assert.ok(isAssistantWithTools(assistant), 'second message restored as assistant with tool_calls')
+  assert.equal(assistant.tool_calls.length, 1)
   assert.equal(msgs[2]!.role, 'tool')
   assert.equal(msgs[2]!.tool_call_id, 'call_1')
 })
