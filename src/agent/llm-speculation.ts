@@ -19,6 +19,7 @@
 
 import type { OaiChatRequest, OaiMessage } from '../api/oai-types.js'
 import type { StreamClient } from '../api/stream-client.js'
+import type { Usage } from '../api/types.js'
 import type { ToolPrediction } from './tool-pattern-miner.js'
 import type { TelemetryRecord } from './telemetry-writer.js'
 
@@ -94,6 +95,10 @@ export interface LlmSpeculationEngineDeps {
   config?: LlmSpeculationConfigInput
   enqueue: (predictions: ToolPrediction[]) => void
   writeTelemetry?: (record: TelemetryRecord) => void
+  /** Side-path usage accounting sink (2026-07-06 cost blind spot fix):
+   *  speculative calls are billed like any other request — report their usage
+   *  so session totals and the cache-log reflect the real spend. */
+  recordUsage?: (usage: Partial<Usage>) => void
 }
 
 export interface LlmSpeculationStats {
@@ -215,11 +220,17 @@ export function createLlmSpeculationEngine(deps: LlmSpeculationEngineDeps): LlmS
       temperature: 0,
       tool_choice: 'none',
       stream: true,
+      // The spread above would leak the main turn's `prefixProbe: true` into
+      // this side-path request, poisoning the client's wire-divergence baseline
+      // (the next main turn then reports a phantom wireDiverged). Side-path
+      // requests must never carry the probe flag.
+      prefixProbe: undefined,
       ...(params.request.reasoning_effort !== undefined ? { reasoning_effort: 'low' as const } : {}),
     }
 
     let text = ''
     let streamError: Error | null = null
+    let usage: Partial<Usage> | null = null
     const timeoutSignal = AbortSignal.timeout(config.timeoutMs)
     const signal = params.signal ? AbortSignal.any([params.signal, timeoutSignal]) : timeoutSignal
     try {
@@ -227,12 +238,27 @@ export function createLlmSpeculationEngine(deps: LlmSpeculationEngineDeps): LlmS
         onTextDelta: d => { text += d },
         onThinkingDelta: () => {},
         onContentBlock: () => {},
-        onStopReason: () => {},
+        // onStopReason can fire more than once (finish_reason frame, then the
+        // usage frame) — only book the call once real token counts arrive.
+        onStopReason: (_reason, u) => {
+          if (u && (u.input_tokens ?? 0) > 0) {
+            usage = u
+            deps.recordUsage?.(u)
+          }
+        },
         onError: e => { streamError = e },
       }, signal)
     } catch (err) {
       streamError = err instanceof Error ? err : new Error(String(err))
     }
+
+    const usageFields = usage
+      ? {
+          inputTokens: (usage as Partial<Usage>).input_tokens,
+          cacheReadTokens: (usage as Partial<Usage>).cache_read_input_tokens,
+          outputTokens: (usage as Partial<Usage>).output_tokens,
+        }
+      : {}
 
     if (streamError && !text) {
       stats.errors++
@@ -241,6 +267,7 @@ export function createLlmSpeculationEngine(deps: LlmSpeculationEngineDeps): LlmS
         turn: params.turn,
         outcome: 'error',
         latencyMs: Date.now() - startedAt,
+        ...usageFields,
       })
       return
     }
@@ -258,6 +285,7 @@ export function createLlmSpeculationEngine(deps: LlmSpeculationEngineDeps): LlmS
       outcome: predictions.length > 0 ? 'enqueued' : 'empty',
       parsedCount: predictions.length,
       latencyMs: Date.now() - startedAt,
+      ...usageFields,
     })
   }
 

@@ -56,7 +56,9 @@
 | 数据 | 位置 | 条件 |
 |------|------|------|
 | 每轮 cache read/create token | 会话 `.jsonl` 中 `usage` 对象（`cache_read_input_tokens` / `cache_creation_input_tokens`） | 始终写入 |
+| 侧路请求成本（spec 预测 / 压缩总结） | 会话目录 `cache-log.jsonl` 中 `event:'side_path'` 行（kind 区分来源，含 input/cacheRead/output/hitRate） | 始终写入（有 usage 才落行） |
 | 推测命中率统计 | 会话 `.meta.json` 的 `speculationStats` 字段 | 有活动时写入（不依赖 debug 开关） |
+| spec 引擎调用计数（fired/errors） | 会话 `.meta.json` 的 `llmSpeculationEngine` 字段 | fired > 0 时写入 |
 | 遥测快照（含 cacheAdvisor 召回摘要） | 会话目录下 `sensorium.jsonl` | 需 `RIVET_DEBUG_TELEMETRY=1` |
 | 项目级遥测（跨会话累积） | `<cwd>/.rivet/sensorium.jsonl` | 需 `RIVET_DEBUG_TELEMETRY=1` |
 

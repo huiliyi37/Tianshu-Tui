@@ -29,7 +29,7 @@ interface MockCall {
   signal?: AbortSignal
 }
 
-function mockClient(text: string, opts?: { delayMs?: number; fail?: boolean }): StreamClient & { calls: MockCall[] } {
+function mockClient(text: string, opts?: { delayMs?: number; fail?: boolean; usage?: Record<string, number> }): StreamClient & { calls: MockCall[] } {
   const calls: MockCall[] = []
   return {
     calls,
@@ -38,6 +38,12 @@ function mockClient(text: string, opts?: { delayMs?: number; fail?: boolean }): 
       if (opts?.delayMs) await new Promise(r => setTimeout(r, opts.delayMs))
       if (opts?.fail) throw new Error('boom')
       callbacks.onTextDelta(text)
+      if (opts?.usage) {
+        // Mirror real clients: onStopReason can fire twice — first with the
+        // finish_reason frame (empty usage), then with the usage frame.
+        callbacks.onStopReason('end_turn', {})
+        callbacks.onStopReason('end_turn', opts.usage)
+      }
     },
   }
 }
@@ -189,6 +195,51 @@ describe('createLlmSpeculationEngine', () => {
     assert.equal(spec.reasoning_effort, 'low')
     // main request's own reasoning_effort untouched
     assert.equal(request.reasoning_effort, 'high')
+  })
+
+  it('strips prefixProbe from the speculative request (2026-07-06 wire-probe poisoning)', async () => {
+    const client = mockClient('[]')
+    const engine = createLlmSpeculationEngine({
+      client, config: { enabled: true }, enqueue: () => {},
+    })
+    const request = makeRequest()
+    // Main-turn requests carry prefixProbe: true (engine.buildOaiRequest). The
+    // spec request spreads the main request — without an explicit strip it
+    // would inherit the flag, record itself into the client's wire-divergence
+    // baseline, and the next main turn would report a phantom wireDiverged.
+    request.prefixProbe = true
+    engine.maybeSpeculate({ request, toolUses: SLOW_BATCH, turn: 1 })
+    await settle(engine)
+
+    const spec = client.calls[0]!.request
+    assert.equal(spec.prefixProbe, undefined)
+    // main request keeps its own flag
+    assert.equal(request.prefixProbe, true)
+  })
+
+  it('books usage via recordUsage and stamps token fields into telemetry (cost blind spot fix)', async () => {
+    const usage = { input_tokens: 95_000, output_tokens: 320, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 500 }
+    const client = mockClient('[]', { usage })
+    const recorded: Array<Record<string, unknown>> = []
+    const telemetry: Array<Record<string, unknown>> = []
+    const engine = createLlmSpeculationEngine({
+      client,
+      config: { enabled: true },
+      enqueue: () => {},
+      recordUsage: u => { recorded.push(u as Record<string, unknown>) },
+      writeTelemetry: r => { telemetry.push(r as Record<string, unknown>) },
+    })
+    engine.maybeSpeculate({ request: makeRequest(), toolUses: SLOW_BATCH, turn: 1 })
+    await settle(engine)
+
+    // The empty finish-frame onStopReason must be gated out — booked exactly once.
+    assert.equal(recorded.length, 1)
+    assert.deepEqual(recorded[0], usage)
+
+    assert.equal(telemetry.length, 1)
+    assert.equal(telemetry[0]!.inputTokens, 95_000)
+    assert.equal(telemetry[0]!.cacheReadTokens, 94_000)
+    assert.equal(telemetry[0]!.outputTokens, 320)
   })
 
   it('enqueues parsed predictions tagged with source llm', async () => {

@@ -3,7 +3,6 @@ import { SessionContext } from './context.js'
 import { SessionPersist, getSessionDir } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
 import { PrewarmCache } from './prewarm.js'
-import { validatePathSafe } from '../tools/path-validate.js'
 import { invalidateSessionReadDedup } from '../tools/read-file.js'
 import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
@@ -94,7 +93,7 @@ import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot, createSidePathUsageRecorder } from "./loop-factory.js";
 import type { TurnStepProducer } from './turn-step-producer.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
@@ -452,6 +451,10 @@ export class AgentLoop {
   pendingHeapCompact = false
   cacheAdvisor: CacheAdvisor
   p3: P3Integration
+  /** Tier 2 LLM speculation engine (null when disabled). Set by
+   *  createTurnOrchestrator; read at postSession to persist fired/error
+   *  counters into meta speculationStats. */
+  llmSpeculationEngine: import('./llm-speculation.js').LlmSpeculationEngine | null = null
   immuneHook: ImmuneHook
   _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
   /** A1: unified advisory bus — collects corrective signals, renders ≤3 per turn */
@@ -558,25 +561,13 @@ export class AgentLoop {
       providerProfile: this.config.providerProfile ?? { cacheType: 'none', persistent: false },
       contextWindow: this.config.contextWindow,
     })
-    this.p3 = createP3Integration({
-      execute: async (tool, target) => {
-        const SAFE_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_dir'])
-        if (!SAFE_TOOLS.has(tool)) return ''
-        const validated = validatePathSafe(this.cwd, target)
-        if (!validated.ok) return ''
-        try {
-          const params = {
-            input: { file_path: validated.path, path: validated.path },
-            cwd: this.cwd,
-            toolUseId: `spec_${Date.now()}`,
-            contextWindow: this.config.contextWindow,
-            providerProfile: this.config.providerProfile,
-          }
-          const result = await this.config.toolRegistry.execute(tool, params)
-          return result.content
-        } catch { return '' }
-      },
-    })
+    // Speculative pre-execution chain SEALED (2026-07-07): no execute callback
+    // and speculativeEnabled unset → miner still records patterns, but nothing
+    // is pre-executed or cached. Serving was cut 2026-07-06 (ShadowQueue had no
+    // mtime validation and served pre-edit file content as a live read_file
+    // result); without serving the background pre-reads were pure cost.
+    // See P3Config.speculativeEnabled for the re-enable contract.
+    this.p3 = createP3Integration()
 
 
     // Physarum + Immune system — construction only, DB reads deferred to warmupMemories() (S9)
@@ -696,6 +687,11 @@ export class AgentLoop {
         } catch {
           // Snapshot is best-effort; never block compaction.
         }
+      },
+      // Side-path usage accounting: summary calls are billed but used to
+      // discard their usage — book them into session totals + cache-log.
+      recordSummaryUsage: (usage, model) => {
+        createSidePathUsageRecorder(this)('compact-summary', usage, model)
       },
     })
     // 在 AgentLoop 构造时立即设置 prefixOverhead，关闭 UI 启动到 maybeCompact 之间的窗口。
@@ -1545,6 +1541,16 @@ export class AgentLoop {
       const stats = this.p3.queue.statsBySource()
       const hasActivity = Object.values(stats).some(s => s.enqueued > 0 || s.hits > 0)
       if (hasActivity) this.persist?.updateMetadata({ speculationStats: stats })
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
+    // LLM speculation engine call counters → meta. speculationStats.llm only
+    // counts shadow-queue enqueued/hits; without fired/errors there is no
+    // on-disk evidence of how many speculative API calls actually happened
+    // (2026-07-06 cost blind spot fix).
+    try {
+      const engineStats = this.llmSpeculationEngine?.stats()
+      if (engineStats && engineStats.fired > 0) {
+        this.persist?.updateMetadata({ llmSpeculationEngine: engineStats })
+      }
     } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
   }
 

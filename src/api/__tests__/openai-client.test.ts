@@ -686,3 +686,79 @@ describe('usage calibration (GLM prompt_tokens inflation)', () => {
       'cache_read should be non-zero after proportional scaling')
   })
 })
+
+describe('system suffix copy-on-write (2026-07-06 double-append regression)', () => {
+  // DeepSeek + thinking enabled → non-empty systemSuffix at construction.
+  const SUFFIX_CONFIG: OpenAIClientConfig = {
+    ...TEST_CONFIG,
+    providerName: 'deepseek',
+    thinking: 'enabled',
+  }
+
+  const NOOP_CALLBACKS = {
+    onTextDelta: () => {},
+    onThinkingDelta: () => {},
+    onContentBlock: () => {},
+    onStopReason: () => {},
+    onError: () => {},
+  }
+
+  function makeSuffixClient(): { client: OpenAIClient; bodies: any[] } {
+    const client = new OpenAIClient(SUFFIX_CONFIG)
+    const bodies: any[] = []
+    // Intercept just before the network — everything in stream() (reasoning
+    // strip, suffix append, sanitize, wire probe) has already run on `body`.
+    ;(client as any).sendStream = async (body: any) => { bodies.push(body) }
+    return { client, bodies }
+  }
+
+  it('re-streaming the same request object does not double-append the suffix', async () => {
+    const { client, bodies } = makeSuffixClient()
+    const suffix = (client as any).systemSuffix as string
+    assert.ok(suffix.length > 0, 'test premise: suffix must be non-empty')
+
+    // llm-speculation reuses the main request's message objects by reference;
+    // FallbackStreamClient replays the same request object on failover. Both
+    // re-enter stream() with an already-suffixed system message.
+    const request: any = {
+      model: 'deepseek-v4',
+      stream: true,
+      max_tokens: 100,
+      messages: [
+        { role: 'system', content: 'SYSTEM PROMPT' },
+        { role: 'user', content: 'hi' },
+      ],
+    }
+
+    await client.stream(request, NOOP_CALLBACKS as any)
+    await client.stream(request, NOOP_CALLBACKS as any)
+
+    const sys1 = bodies[0].messages[0].content as string
+    const sys2 = bodies[1].messages[0].content as string
+    assert.equal(sys1, 'SYSTEM PROMPT' + suffix)
+    assert.equal(sys2, sys1, 'wire bytes must be identical across re-entry (no double suffix)')
+    // caller's request object must stay untouched
+    assert.equal(request.messages[0].content, 'SYSTEM PROMPT')
+  })
+
+  it('wire probe sees stable system bytes across consecutive probed requests', async () => {
+    const { client } = makeSuffixClient()
+    const makeRequest = (extraUser?: string): any => ({
+      model: 'deepseek-v4',
+      stream: true,
+      max_tokens: 100,
+      prefixProbe: true,
+      messages: [
+        { role: 'system', content: 'SYSTEM PROMPT' },
+        { role: 'user', content: 'hi' },
+        ...(extraUser ? [{ role: 'user', content: extraUser }] : []),
+      ],
+    })
+
+    await client.stream(makeRequest(), NOOP_CALLBACKS as any)
+    await client.stream(makeRequest('follow-up'), NOOP_CALLBACKS as any)
+
+    // Pure append with byte-stable system → no divergence recorded.
+    assert.equal(client.consumeWireDivergence(), null)
+  })
+})

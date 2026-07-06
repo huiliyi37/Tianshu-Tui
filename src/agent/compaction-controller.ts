@@ -1,4 +1,5 @@
 import type { StreamClient } from '../api/stream-client.js'
+import type { Usage } from '../api/types.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES, summaryOutputBudgetChars } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
@@ -378,6 +379,14 @@ export interface CompactionControllerDeps {
    * "already read" dedup claims must be dropped.
    */
   onHistoryRewritten?: () => void
+  /**
+   * Side-path usage accounting (2026-07-06 cost blind spot fix): summary
+   * requests carry a large input (anchor + oldZone) and are billed like any
+   * other call — report their usage so session totals and the cache-log
+   * reflect the real spend. `model` is the request's model (the dedicated
+   * compact client may run a different model than the session primary).
+   */
+  recordSummaryUsage?: (usage: Partial<Usage>, model: string) => void
 }
 
 export interface ArchiveHistoryInput {
@@ -1161,7 +1170,13 @@ export class CompactionController {
           onTextDelta: (text) => { chunks.push(text) },
           onThinkingDelta: () => {},
           onContentBlock: () => {},
-          onStopReason: () => {},
+          // onStopReason can fire more than once (finish frame, then usage
+          // frame) — only book the call once real token counts arrive.
+          onStopReason: (_reason, usage) => {
+            if (usage && (usage.input_tokens ?? 0) > 0) {
+              this.deps.recordSummaryUsage?.(usage, request.model)
+            }
+          },
           onError: () => { errored = true },
         }, combinedSignal)
       } catch {
@@ -1300,7 +1315,12 @@ export class CompactionController {
           onTextDelta: (text) => { chunks.push(text) },
           onThinkingDelta: () => {},
           onContentBlock: () => {},
-          onStopReason: () => {},
+          // Same usage booking as tryPartialCompact — see recordSummaryUsage.
+          onStopReason: (_reason, usage) => {
+            if (usage && (usage.input_tokens ?? 0) > 0) {
+              this.deps.recordSummaryUsage?.(usage, request.model)
+            }
+          },
           onError: () => { errored = true },
         }, signal)
       } catch {

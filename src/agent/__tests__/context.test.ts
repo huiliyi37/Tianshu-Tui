@@ -507,6 +507,34 @@ describe('SessionContext lastRealPromptTokens', () => {
   })
 })
 
+describe('SessionContext addSidePathUsage (2026-07-06 cost blind spot fix)', () => {
+  it('accumulates into session totals like a billed request', () => {
+    const ctx = new SessionContext()
+    ctx.addUsage({ input_tokens: 50_000, output_tokens: 200, cache_read_input_tokens: 40_000, cache_creation_input_tokens: 100 })
+    ctx.addSidePathUsage({ input_tokens: 95_000, output_tokens: 320, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 500 })
+
+    const total = ctx.getTotalUsage()
+    assert.equal(total.input_tokens, 145_000)
+    assert.equal(total.output_tokens, 520)
+    assert.equal(total.cache_read_input_tokens, 134_000)
+    assert.equal(total.cache_creation_input_tokens, 600)
+  })
+
+  it('does NOT touch occupancy anchors (lastRealPromptTokens / tail / calibration)', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    ctx.addUsage({ input_tokens: 50_000 })
+    const occupancyBefore = ctx.getRealOccupancy()
+
+    // A side-path request measures a DIFFERENT message array — booking it
+    // through addUsage would clobber the main conversation's anchor.
+    ctx.addSidePathUsage({ input_tokens: 95_000, output_tokens: 320 })
+
+    assert.equal(ctx.getLastRealPromptTokens(), 50_000, 'anchor must not move')
+    assert.equal(ctx.getRealOccupancy(), occupancyBefore, 'occupancy must not move')
+  })
+})
+
 describe('SessionContext getRealOccupancy', () => {
   it('falls back to getEstimatedTokens before the first API response', () => {
     const ctx = new SessionContext()

@@ -323,6 +323,25 @@ export class SessionContext {
     if (usage.reasoning_tokens) u.reasoning_tokens = (u.reasoning_tokens ?? 0) + usage.reasoning_tokens
   }
 
+  /**
+   * Accumulate usage from a SIDE-PATH request (llm-speculation, compaction
+   * summaries, …) into the session totals — so meta tokenUsage and the TUI
+   * token display reflect what is actually billed — WITHOUT touching the
+   * occupancy-estimation anchors. addUsage() treats input_tokens as "the API
+   * just measured the main conversation's exact prompt occupancy" and writes
+   * lastRealPromptTokens / resets tailEstimate / recalibrates the local
+   * estimate ratio; a side-path request measures a DIFFERENT message array,
+   * so routing it through addUsage would poison those anchors.
+   */
+  addSidePathUsage(usage: Partial<Usage>): void {
+    const u = this.state.totalUsage
+    if (usage.input_tokens) u.input_tokens += usage.input_tokens
+    if (usage.output_tokens) u.output_tokens += usage.output_tokens
+    if (usage.cache_read_input_tokens) u.cache_read_input_tokens += usage.cache_read_input_tokens
+    if (usage.cache_creation_input_tokens) u.cache_creation_input_tokens += usage.cache_creation_input_tokens
+    if (usage.reasoning_tokens) u.reasoning_tokens = (u.reasoning_tokens ?? 0) + usage.reasoning_tokens
+  }
+
   getCacheHitRate(): number {
     // Use total input_tokens as denominator — cache_read / (cacheRead + cacheCreation)
     // degenerates to 100% when cacheCreation is 0 (provider doesn't report miss tokens).

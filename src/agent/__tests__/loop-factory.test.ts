@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AgentLoop } from '../loop.js'
-import { buildRuntimeSnapshot, createToolExecutionController } from '../loop-factory.js'
+import { buildRuntimeSnapshot, createToolExecutionController, createSidePathUsageRecorder } from '../loop-factory.js'
 
 /**
  * Safety net for the loop.ts decomposition (mid-loop). `buildRuntimeSnapshot`
@@ -101,4 +101,70 @@ test('createToolExecutionController leaves assessDelivery undefined without a ga
   const deps = (controller as unknown as { deps: Record<string, unknown> }).deps
   assert.equal(deps.assessDelivery, undefined)
   assert.equal(typeof deps.getVerificationEvidence, 'function')
+})
+
+/**
+ * 侧路 usage 记账（2026-07-06 成本盲区修复）：recorder 必须①走
+ * addSidePathUsage（不污染占用估计锚点）②往 cache-log 落 event:'side_path'
+ * 行。RIVET_SESSION_DIR 重定向到临时目录验证落盘字节。
+ */
+test('createSidePathUsageRecorder books usage and appends a side_path cache-log line', async () => {
+  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const tmp = mkdtempSync(join(tmpdir(), 'sidepath-usage-'))
+  const prevEnv = process.env.RIVET_SESSION_DIR
+  process.env.RIVET_SESSION_DIR = tmp
+  try {
+    const booked: Array<Record<string, unknown>> = []
+    const self = {
+      cwd: '/work',
+      session: { addSidePathUsage: (u: Record<string, unknown>) => { booked.push(u) } },
+      config: { sessionId: 'test-session', promptEngine: { getModel: () => 'deepseek-v4' } },
+    } as unknown as AgentLoop
+
+    const record = createSidePathUsageRecorder(self)
+    record('llm-speculation', {
+      input_tokens: 95_000,
+      output_tokens: 320,
+      cache_read_input_tokens: 94_000,
+      cache_creation_input_tokens: 500,
+    })
+
+    assert.equal(booked.length, 1)
+    assert.equal(booked[0]!.input_tokens, 95_000)
+
+    // cache-log write is fire-and-forget — poll briefly for the file.
+    const logPath = join(tmp, 'test-session', 'cache-log.jsonl')
+    const deadline = Date.now() + 2_000
+    while (!existsSync(logPath)) {
+      if (Date.now() > deadline) throw new Error('cache-log line never appeared')
+      await new Promise(r => setTimeout(r, 10))
+    }
+    const line = JSON.parse(readFileSync(logPath, 'utf-8').trim())
+    assert.equal(line.event, 'side_path')
+    assert.equal(line.kind, 'llm-speculation')
+    assert.equal(line.model, 'deepseek-v4')
+    assert.equal(line.input, 95_000)
+    assert.equal(line.cacheRead, 94_000)
+    assert.equal(line.cacheCreate, 500)
+    assert.equal(line.output, 320)
+    assert.equal(line.hitRate, '98.9%')
+  } finally {
+    if (prevEnv === undefined) delete process.env.RIVET_SESSION_DIR
+    else process.env.RIVET_SESSION_DIR = prevEnv
+  }
+})
+
+test('createSidePathUsageRecorder skips empty usage (no totals pollution, no log line)', () => {
+  const booked: unknown[] = []
+  const self = {
+    cwd: '/work',
+    session: { addSidePathUsage: (u: unknown) => { booked.push(u) } },
+    config: { sessionId: 'test-session', promptEngine: { getModel: () => 'deepseek-v4' } },
+  } as unknown as AgentLoop
+
+  createSidePathUsageRecorder(self)('llm-speculation', {})
+  assert.equal(booked.length, 0)
 })

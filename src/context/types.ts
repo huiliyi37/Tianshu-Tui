@@ -220,4 +220,10 @@ export interface SessionMetadata {
    * 为「llmSpeculation 是否默认开」提供跨会话命中率证据。
    */
   speculationStats?: Record<string, { enqueued: number; hits: number }>
+  /**
+   * Tier 2 LLM speculation 引擎自身的调用计数（fired/parseFailures/errors）。
+   * speculationStats.llm 只记 shadow-queue 侧的 enqueued/hits——没有本字段，
+   * 「spec 到底发了几次 API 调用」无法从磁盘考证（2026-07-06 成本盲区修复）。
+   */
+  llmSpeculationEngine?: { fired: number; enqueued: number; parseFailures: number; errors: number }
 }

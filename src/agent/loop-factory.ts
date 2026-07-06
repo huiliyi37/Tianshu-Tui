@@ -35,6 +35,49 @@ import { ModelRoutingShadowController } from './model-routing-shadow-controller.
 import { PrewarmController } from './prewarm-controller.js'
 import { TurnStepProducer } from './turn-step-producer.js'
 import { skillRegistry } from '../skills/skill-loader.js'
+import type { Usage } from '../api/types.js'
+
+/**
+ * Side-path usage accounting (2026-07-06 cost blind spot fix): side-path
+ * requests (llm-speculation, compaction summaries) are billed like any other
+ * call but used to discard their usage in `onStopReason: () => {}` — invisible
+ * in session totals, meta tokenUsage, and the cache-log. This recorder gives
+ * them a shared sink:
+ *   - accumulates into session totals via addSidePathUsage (no occupancy-
+ *     anchor pollution — see SessionContext.addSidePathUsage)
+ *   - appends an `event: 'side_path'` line to the cache-log, distinct from
+ *     main-turn entries so turn-sequence analysis stays clean
+ * Never consumes the engine/wire divergence probes — those belong to main turns.
+ */
+export function createSidePathUsageRecorder(self: AgentLoop): (kind: string, usage: Partial<Usage>, model?: string) => void {
+  return (kind, usage, model) => {
+    try {
+      if (!usage.input_tokens && !usage.output_tokens) return
+      self.session.addSidePathUsage(usage)
+      const input = usage.input_tokens ?? 0
+      const hitRate = input > 0
+        ? ((usage.cache_read_input_tokens ?? 0) / input * 100).toFixed(1)
+        : '0.0'
+      const line = JSON.stringify({
+        event: 'side_path',
+        kind,
+        t: Date.now(),
+        model: model ?? self.config.promptEngine.getModel(),
+        input,
+        cacheRead: usage.cache_read_input_tokens ?? 0,
+        cacheCreate: usage.cache_creation_input_tokens ?? 0,
+        output: usage.output_tokens ?? 0,
+        hitRate: `${hitRate}%`,
+      })
+      const sid = self.config.sessionId ?? 'anon'
+      import('node:fs/promises').then(fs => {
+        const dir = join(getSessionDir(self.cwd), sid)
+        return fs.mkdir(dir, { recursive: true })
+          .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+      }).catch(() => {})
+    } catch { /* accounting is best-effort — never break the side path */ }
+  }
+}
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 return new TurnStreamController({
@@ -670,14 +713,19 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
   // Tier 2 LLM speculation: only constructed when enabled — the default path
   // pays zero cost (no engine, no dep, orchestrator's optional call is a no-op).
   const llmSpecConfig = normalizeLlmSpeculationConfig(self.config.llmSpeculation)
+  const recordSidePathUsage = createSidePathUsageRecorder(self)
   const llmSpeculation = llmSpecConfig.enabled
     ? createLlmSpeculationEngine({
         client: self.config.client,
         config: llmSpecConfig,
         enqueue: predictions => { self.p3.enqueueLlmPredictions(predictions) },
         writeTelemetry: record => { self.telemetryWriter.write(record) },
+        recordUsage: usage => { recordSidePathUsage('llm-speculation', usage) },
       })
     : null
+  // Expose the engine so postSession can persist its fired/error counters
+  // alongside the shadow-queue speculationStats (meta observability).
+  self.llmSpeculationEngine = llmSpeculation
 
   return new TurnOrchestrator({
     // === Lifecycle ===
