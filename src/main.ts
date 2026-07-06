@@ -39,6 +39,7 @@ import { getTheme, getActiveThemeName, setTheme, THEMES, listCustomThemes, resol
 import { loadCustomThemes } from './tui/theme-custom.js'
 import { detectTerminalBackground, autoThemeFor } from './tui/theme-detect.js'
 import { configureSpinnerVerbs, setReducedMotion } from './tui/format/spinner-status.js'
+import { StatusLineRunner } from './tui/statusline.js'
 import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
 import { listPlansSync } from './plan/plan-store.js'
 import type { PlanPickerEntry } from './tui/format/overlay.js'
@@ -522,6 +523,30 @@ async function main() {
   tuiApp.setDomainSyncProvider(() => ctx!.agent.getSessionDomain()?.name ?? undefined)
   // 实时思考强度：优先 agent 当前生效 effort（auto-reasoning 动态调整），回退 config floor。
   tuiApp.setReasoningEffortProvider(() => ctx!.agent.getReasoningEffort() ?? ctx!.agent.config.reasoningEffort)
+
+  // ── GlanceBar 密度默认档 + 可脚本化 statusline 接线 ─────────────
+  if (ctx!.config.ui?.glanceDensity) tuiApp.glanceDensity = ctx!.config.ui.glanceDensity
+  let statusLineTimer: ReturnType<typeof setInterval> | null = null
+  if (ctx!.config.ui?.statusLine?.command) {
+    const slConfig = ctx!.config.ui.statusLine
+    const runner = new StatusLineRunner(slConfig, text => tuiApp.setStatusLine(text))
+    const pushStatusLine = (): void => {
+      const metrics = tuiApp.getMetrics()
+      runner.refresh({
+        session_id: ctx!.sessionId,
+        model: { display_name: tuiApp.getModelInfo().modelName },
+        workspace: { current_dir: process.cwd() },
+        git: { branch: gitBranch },
+        context: metrics?.maxTokens
+          ? { ratio: (metrics.estimatedTokens ?? 0) / metrics.maxTokens, estimated_tokens: metrics.estimatedTokens, max_tokens: metrics.maxTokens }
+          : undefined,
+        cost: { total_yuan: metrics?.cost },
+      })
+    }
+    pushStatusLine()
+    statusLineTimer = setInterval(pushStatusLine, Math.max(1000, slConfig.intervalMs ?? 3000))
+    statusLineTimer.unref?.()
+  }
 
   // ── 会话级 UI 状态恢复（side panel / todo）─────────────────────
   const initialMeta = ctx!.persist.loadMetadata()
