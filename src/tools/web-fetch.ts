@@ -1,6 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import type { Tool, ToolCallParams } from './types.js'
+import { fetchCauseDetail } from '../api/error-classifier.js'
 
 const MAX_CONTENT_LENGTH = 50_000
 const MAX_REDIRECTS = 5
@@ -177,7 +178,12 @@ export function createWebFetchTool(deps: FetchDeps = defaultDeps): Tool {
         return { content: `URL: ${rawUrl}\nStatus: ${response.status}\nContent-Length: ${body.length}\n\n${content}` }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        return { content: `Failed to fetch ${rawUrl}: ${message}`, isError: true }
+        // undici hides the real network failure in err.cause — surface it so
+        // the model/user sees "fetch failed: connect ECONNREFUSED ..." instead
+        // of an undiagnosable bare "fetch failed".
+        const detail = fetchCauseDetail(err)
+        const full = detail ? `${message}: ${detail}` : message
+        return { content: `Failed to fetch ${rawUrl}: ${full}`, isError: true }
       }
     },
 

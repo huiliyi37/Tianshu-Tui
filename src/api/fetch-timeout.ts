@@ -20,6 +20,8 @@
  * - Other → re-throws original error
  */
 
+import { fetchCauseDetail } from './error-classifier.js'
+
 const DEFAULT_TIMEOUT_MS = 45_000
 
 export async function fetchWithTimeout(
@@ -56,6 +58,15 @@ export async function fetchWithTimeout(
     }
     // AbortError: user-initiated cancellation — propagate as-is (non-retryable)
     if (name === 'AbortError' || userSignal?.aborted) throw err
+    // undici throws `TypeError: fetch failed` with the real network failure
+    // (ECONNREFUSED / ENOTFOUND / ETIMEDOUT / TLS / proxy) buried in err.cause.
+    // Surface it in the message so the TUI/desktop error line is diagnosable
+    // instead of a bare "fetch failed". Original error kept as cause for the
+    // classifier's cause-chain matching and for logs.
+    if (err instanceof Error && /fetch failed/i.test(err.message)) {
+      const detail = fetchCauseDetail(err)
+      if (detail) throw new Error(`${err.message}: ${detail}`, { cause: err })
+    }
     throw err
   } finally {
     // Headers arrived (or fetch failed) — disarm. Body streaming continues

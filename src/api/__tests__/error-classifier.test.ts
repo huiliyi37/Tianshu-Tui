@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyApiError, parseRetryAfterMs } from '../error-classifier.js'
+import { classifyApiError, fetchCauseDetail, parseRetryAfterMs } from '../error-classifier.js'
 import type { ErrorCategory } from '../error-classifier.js'
 
 // ---------------------------------------------------------------------------
@@ -218,6 +218,65 @@ describe('classifyApiError', () => {
     const result = classifyApiError(new Error('invalid SSE data received'))
     assert.equal(result.category, 'stream_parse')
     assert.equal(result.retryable, true)
+  })
+
+  // ---- undici "fetch failed" cause-chain unwrapping ----------------------
+  // Node's fetch throws TypeError('fetch failed') with the real network error
+  // in err.cause. It must classify as a reconnectable network failure (NOT the
+  // unknown fallback whose shouldReconnect=false disables agent-level reconnect)
+  // and the user message must surface the buried cause.
+
+  it('classifies bare "fetch failed" (no cause) as reconnectable network error', () => {
+    const result = classifyApiError(new TypeError('fetch failed'))
+    assert.equal(result.category, 'timeout')
+    assert.equal(result.retryable, true)
+    assert.equal(result.shouldReconnect, true)
+    assert.equal(result.maxRetries, 3)
+  })
+
+  it('classifies fetch failed with ECONNREFUSED cause and surfaces the detail', () => {
+    const cause = Object.assign(new Error('connect ECONNREFUSED 104.18.27.90:443'), { code: 'ECONNREFUSED' })
+    const result = classifyApiError(new TypeError('fetch failed', { cause }))
+    assert.equal(result.category, 'timeout')
+    assert.equal(result.shouldReconnect, true)
+    assert.match(result.userMessage, /ECONNREFUSED 104\.18\.27\.90:443/)
+  })
+
+  it('classifies fetch failed with ENOTFOUND cause (DNS) as reconnectable', () => {
+    const cause = Object.assign(new Error('getaddrinfo ENOTFOUND api.deepseek.com'), { code: 'ENOTFOUND' })
+    const result = classifyApiError(new TypeError('fetch failed', { cause }))
+    assert.equal(result.retryable, true)
+    assert.equal(result.shouldReconnect, true)
+    assert.match(result.userMessage, /ENOTFOUND api\.deepseek\.com/)
+  })
+
+  it('unwraps nested cause chains (fetch failed → SocketError → ECONNRESET)', () => {
+    const inner = Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+    const mid = new Error('other side closed', { cause: inner })
+    const result = classifyApiError(new TypeError('fetch failed', { cause: mid }))
+    assert.equal(result.shouldReconnect, true)
+    assert.match(result.userMessage, /other side closed/)
+    assert.match(result.userMessage, /ECONNRESET/)
+  })
+
+  it('unwraps AggregateError causes (Happy Eyeballs multi-address connect)', () => {
+    const agg = new AggregateError(
+      [
+        Object.assign(new Error('connect ETIMEDOUT 1.2.3.4:443'), { code: 'ETIMEDOUT' }),
+        Object.assign(new Error('connect ENETUNREACH ::1:443'), { code: 'ENETUNREACH' }),
+      ],
+      'connect failed',
+    )
+    const result = classifyApiError(new TypeError('fetch failed', { cause: agg }))
+    assert.equal(result.retryable, true)
+    assert.equal(result.shouldReconnect, true)
+    assert.match(result.userMessage, /ETIMEDOUT 1\.2\.3\.4:443/)
+  })
+
+  it('fetchCauseDetail returns null when there is no cause', () => {
+    assert.equal(fetchCauseDetail(new Error('plain')), null)
+    assert.equal(fetchCauseDetail('not an error'), null)
+    assert.equal(fetchCauseDetail(null), null)
   })
 
   // ---- Fallback / edge cases --------------------------------------------

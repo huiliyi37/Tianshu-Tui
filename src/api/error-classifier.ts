@@ -173,27 +173,36 @@ function classifyByStatus(status: number): ClassifiedError | null {
 function classifyByPattern(error: unknown): ClassifiedError {
   const name = error instanceof Error ? error.name : ''
   const message = error instanceof Error ? error.message : String(error ?? '')
-  const lower = message.toLowerCase()
+  // undici buries the real network failure in err.cause ("fetch failed" alone
+  // matches nothing) — classify against the full cause chain, not just the top.
+  const causeDetail = fetchCauseDetail(error)
+  const searchText = causeDetail ? `${message} | ${causeDetail}` : message
+  const lower = searchText.toLowerCase()
 
-  // Connection reset / refused
+  // Connection reset / refused / unreachable — transport-level network failures.
+  // "fetch failed" without a recognizable cause still lands here: it is by
+  // definition a pre-response network error (DNS/connect/TLS), never a server
+  // verdict, so reconnect-and-retry is the right default.
   if (
     name === 'ECONNRESET' ||
     name === 'EPIPE' ||
     name === 'ECONNREFUSED' ||
-    /ECONNRESET|EPIPE|ECONNREFUSED/.test(message)
+    /ECONNRESET|EPIPE|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|ECONNABORTED|UND_ERR_CONNECT|UND_ERR_SOCKET|other side closed|fetch failed/i.test(searchText)
   ) {
     return {
       retryable: true,
       retryDelayMs: 2000,
       shouldReconnect: true,
       category: 'timeout',
-      userMessage: 'Connection lost. Reconnecting.',
+      userMessage: causeDetail
+        ? `Connection lost (${causeDetail}). Reconnecting.`
+        : 'Connection lost. Reconnecting.',
       maxRetries: 3,
     }
   }
 
-  // Timeout
-  if (name === 'TimeoutError' || /timeout|timed?\s*out/i.test(message)) {
+  // Timeout (incl. ETIMEDOUT buried in a fetch-failed cause chain)
+  if (name === 'TimeoutError' || /timeout|timed?\s*out/i.test(searchText)) {
     return {
       retryable: true,
       retryDelayMs: 3000,
@@ -263,6 +272,41 @@ function classifyByPattern(error: unknown): ClassifiedError {
     userMessage: `Unexpected error: ${message || 'unknown'}`,
     maxRetries: 2,
   }
+}
+
+/**
+ * Extract human-readable detail from an error's `cause` chain.
+ *
+ * Node's undici fetch throws `TypeError: fetch failed` with the actual network
+ * failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT / TLS / proxy) buried in
+ * `err.cause` — often nested one level deeper, or inside an AggregateError
+ * (Happy Eyeballs makes one connect attempt per resolved address). Without
+ * unwrapping, both the user-facing error line and pattern classification see
+ * only the useless top-level message.
+ *
+ * Returns a ` ← `-joined chain of cause messages, or null when there is none.
+ */
+export function fetchCauseDetail(error: unknown): string | null {
+  const parts: string[] = []
+  let cur: unknown = error instanceof Error ? error.cause : null
+  for (let depth = 0; cur != null && depth < 5; depth++) {
+    if (cur instanceof AggregateError && cur.errors.length > 0) {
+      for (const sub of cur.errors.slice(0, 3)) {
+        parts.push(sub instanceof Error ? sub.message : String(sub))
+      }
+      break
+    }
+    if (cur instanceof Error) {
+      const code = (cur as NodeJS.ErrnoException).code
+      parts.push(cur.message || code || cur.name)
+      cur = cur.cause
+    } else {
+      parts.push(String(cur))
+      break
+    }
+  }
+  const detail = [...new Set(parts.filter(Boolean))].join(' ← ')
+  return detail || null
 }
 
 /** Read retryAfterMs from the error object (set by ApiError (legacy)). */

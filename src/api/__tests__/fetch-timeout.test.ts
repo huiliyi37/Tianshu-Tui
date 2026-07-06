@@ -173,6 +173,51 @@ describe('fetchWithTimeout', () => {
     }
   })
 
+  // undici throws `TypeError: fetch failed` with the real network failure in
+  // err.cause. The wrapper must surface that detail in the message — a bare
+  // "fetch failed" on the TUI/desktop error line is undiagnosable.
+  it('enriches "fetch failed" with the buried cause detail', async () => {
+    const originalFetch = globalThis.fetch
+    const cause = Object.assign(new Error('connect ECONNREFUSED 104.18.27.90:443'), { code: 'ECONNREFUSED' })
+    globalThis.fetch = mock.fn(async () => {
+      throw new TypeError('fetch failed', { cause })
+    }) as unknown as typeof fetch
+
+    try {
+      await assert.rejects(
+        () => fetchWithTimeout('https://example.com/api', {}),
+        (err: unknown) => {
+          assert.ok(err instanceof Error)
+          assert.match(err.message, /fetch failed: connect ECONNREFUSED 104\.18\.27\.90:443/)
+          // Original error preserved as cause for classifier/logs
+          assert.ok((err.cause as Error).message === 'fetch failed')
+          return true
+        },
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('passes through "fetch failed" without cause unchanged', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mock.fn(async () => {
+      throw new TypeError('fetch failed')
+    }) as unknown as typeof fetch
+
+    try {
+      await assert.rejects(
+        () => fetchWithTimeout('https://example.com/api', {}),
+        (err: unknown) => {
+          assert.equal((err as Error).message, 'fetch failed')
+          return true
+        },
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('user signal still aborts body streaming after headers (lifecycle abort preserved)', async () => {
     const originalFetch = globalThis.fetch
     const controller = new AbortController()
