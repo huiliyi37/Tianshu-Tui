@@ -999,6 +999,12 @@ async function main() {
     )
   })
 
+  // ── Worker 直达通道（WaveC）─────────────────────────────────
+  // /tasks x 键 → per-worker AbortController；worker 视图输入 → per-order steer 队列。
+  // 动态读 refs.coordinator：switchModel 会重建 coordinator，闭包不能捕获旧实例。
+  tuiApp.setWorkerKill(workerId => ctx?.refs.coordinator?.killWorker(workerId) ?? false)
+  tuiApp.setWorkerSteer((workerId, text) => ctx?.refs.coordinator?.steerWorker(workerId, text) ?? false)
+
   // ── SlashRouter ──────────────────────────────────────────────
   registerTuiSlashCommands(app, ctx)
 

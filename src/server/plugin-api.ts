@@ -13,6 +13,9 @@ import { isAuthorizedRequest } from './auth.js'
 import { loadConfig, saveConfig } from '../config/manager.js'
 import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
 import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
+import { parseManifest } from '../plugins/manifest.js'
+import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -52,11 +55,41 @@ export function buildPluginRoutes(apiToken?: string): Record<string, RouteHandle
     }, apiToken),
 
     // POST /plugins/install — install from local path.
-    // Body: { path: string }
+    // Body: { path: string, confirm: boolean }
+    // Pre-flight: reads manifest BEFORE install, requires confirm:true to proceed.
+    // Without confirm, returns manifest + permissions for caller-side review.
     'POST /plugins/install': withAuth(async (body) => {
-      const input = body as { path?: string }
+      const input = body as { path?: string; confirm?: boolean }
       if (!input.path || typeof input.path !== 'string') {
         return { status: 400, body: { error: 'Missing required field: path' } }
+      }
+
+      // Pre-flight: read manifest from source to show permissions before installing
+      const pkgPath = join(input.path, 'package.json')
+      if (!existsSync(pkgPath)) {
+        return { status: 400, body: { ok: false, error: `No package.json found at ${input.path}` } }
+      }
+      let manifest: Record<string, unknown> | undefined
+      try {
+        const raw = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+        if (raw.tianshu && typeof raw.tianshu === 'object') {
+          const parsed = parseManifest(raw.tianshu)
+          if (parsed.ok) manifest = parsed.manifest as unknown as Record<string, unknown>
+        }
+      } catch {
+        return { status: 400, body: { ok: false, error: 'Cannot parse package.json' } }
+      }
+
+      if (!input.confirm) {
+        return {
+          status: 400,
+          body: {
+            ok: false,
+            error: 'Confirmation required. Review the manifest and permissions, then retry with confirm: true.',
+            manifest,
+            hint: 'Set confirm: true to proceed with installation.',
+          },
+        }
       }
 
       const result = await installPlugin(input.path)

@@ -80,10 +80,38 @@ test('POST /plugins/install rejects missing path (400)', async () => {
 })
 
 test('POST /plugins/install rejects non-existent path (400)', async () => {
-  const res = await ROUTES['POST /plugins/install']!({ path: '/nonexistent/path' }, undefined, authHeaders(), undefined)
+  const res = await ROUTES['POST /plugins/install']!({ path: '/nonexistent/path', confirm: true }, undefined, authHeaders(), undefined)
   assert.equal(res.status, 400)
   const body = res.body as { ok: boolean; error: string }
   assert.equal(body.ok, false)
+})
+
+test('POST /plugins/install requires confirm:true — returns manifest for review', async () => {
+  // Create a minimal valid plugin source
+  const srcDir = join(testHome, 'src-plugin')
+  mkdirSync(srcDir, { recursive: true })
+  writeFileSync(join(srcDir, 'package.json'), JSON.stringify({
+    name: 'src-plugin', version: '1.0.0',
+    tianshu: { name: 'src-plugin', version: '1.0.0', description: 'Needs confirm', entry: 'index.js', tools: [{ name: 'src_tool', description: 'x' }], permissions: { fs: true } },
+  }))
+  writeFileSync(join(srcDir, 'index.js'), 'export const tools = []')
+  cleanupDirs.push(srcDir)
+
+  // Without confirm — should return manifest for review
+  const res = await ROUTES['POST /plugins/install']!({ path: srcDir }, undefined, authHeaders(), undefined)
+  assert.equal(res.status, 400)
+  const body = res.body as { ok: boolean; error: string; manifest: unknown; hint: string }
+  assert.equal(body.ok, false)
+  assert.ok(body.error.includes('Confirmation required'))
+  assert.ok(body.manifest)
+  assert.ok(body.hint)
+
+  // With confirm — should succeed
+  const res2 = await ROUTES['POST /plugins/install']!({ path: srcDir, confirm: true }, undefined, authHeaders(), undefined)
+  assert.equal(res2.status, 200)
+  const body2 = res2.body as { ok: boolean; manifest: Record<string,unknown>; message: string }
+  assert.equal(body2.ok, true)
+  assert.equal(body2.manifest.name, 'src-plugin')
 })
 
 // ── Enable/disable validation ─────────────────────────────────

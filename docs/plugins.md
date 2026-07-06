@@ -169,7 +169,7 @@ async (params: ToolCallParams): Promise<ToolResult>
 v1 版本插件与核心同进程运行，存在以下已知局限：
 
 - **无进程级沙箱** — 恶意插件可以读取进程内存、访问环境变量。安装即信任。
-- **安全依赖安装确认** — install 前展示 permissions 声明，用户显式确认后才执行。
+- **安全依赖安装确认** — TUI 路径（`/plugin install`）展示 permissions 声明，用户显式确认后才执行。REST 路径（`POST /plugins/install`）仅 Bearer 门，需调用方传 `confirm: true` 表明已获用户许可；桌面 UI 落地前，直接调 REST 属于无确认通道，调用方承担确认责任。
 - **install 后门防护** — `npm install` 强制 `--ignore-scripts`，禁用 postinstall 任意代码。
 - **entry 路径逃逸防护** — `entry: "../../evil.js"` 在 `resolve` 后被拒绝。
 
@@ -177,7 +177,7 @@ v1 版本插件与核心同进程运行，存在以下已知局限：
 
 ### 安装安全
 
-- 首次安装：TUI 内展示 manifest + permissions，用户确认后执行
+- 安装确认：TUI `/plugin install` 展示 manifest + permissions，用户确认后执行。REST `POST /plugins/install` 要求 `confirm: true` 参数，调用方应先展示权限声明再传参。
 - `npm install --ignore-scripts --omit=dev` — 不执行任意 postinstall 脚本
 - 锁版本：记录安装时解析的确切版本号
 - 安装失败自动清理残留目录
