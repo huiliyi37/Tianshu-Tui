@@ -65,6 +65,20 @@ export function WorkspaceSurface() {
 
   const active = sessions.data?.find((s) => s.id === activeId) ?? null
 
+  // Terminal working directory — a REAL path, not the project id. The panel
+  // used to receive `ui.activeProject` (a `name-hash` slug), which the PTY then
+  // treated as a relative dir that doesn't exist. Resolve like App.tsx's
+  // defaultCwd: the active thread's own cwd first, then the active project's
+  // first root; empty string lets the PTY inherit its default cwd.
+  const terminalCwd = useMemo(() => {
+    if (active?.cwd) return active.cwd
+    if (ui.activeProject) {
+      const p = deriveProjects(sessions.data ?? [], loadKnownProjects()).find((x) => x.id === ui.activeProject)
+      if (p?.roots[0]) return p.roots[0]
+    }
+    return ''
+  }, [active, sessions.data, ui.activeProject])
+
   // Responsive: auto-collapse review panel when workspace < 1200px.
   // Uses ResizeObserver — only fires when the element actually resizes.
   // A `reviewManuallyToggled` flag prevents the observer from fighting the
@@ -315,7 +329,7 @@ export function WorkspaceSurface() {
                 )}
               </Suspense>
             </div>
-            {ui.terminalVisible && <TerminalTabs cwd={ui.activeProject ?? ''} />}
+            {ui.terminalVisible && <TerminalTabs cwd={terminalCwd} />}
           </div>
         </Panel>
         <Separator className={`panel-resize-handle ${!ui.reviewVisible ? 'collapsed' : ''}`}>

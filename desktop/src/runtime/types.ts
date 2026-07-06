@@ -1,13 +1,24 @@
-// Shared shapes mirroring the rivet runtime session API (src/server/session-manager.ts).
-// Keep in sync with the backend; this is the desktop's view of the contract.
+// Shared shapes for the rivet runtime session API.
+//
+// The session core (statuses, 30+ event types, SessionRecord) is now imported
+// TYPE-ONLY from the backend's single source of truth — src/server/protocol.ts.
+// That file is a dependency-free leaf, so this pulls zero runtime code and no
+// server-side type graph into the frontend; drift now fails `tsc` instead of
+// silently shipping. The remaining interfaces below are desktop-shaped views
+// of individual REST responses and still live here.
 
-export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
+export type {
+  SessionStatus,
+  ApprovalMode,
+  PlanModeState,
+  SessionEventType,
+  SessionEvent,
+  SessionRecord,
+  PlanDraft,
+} from '../../../src/server/protocol'
 
-/** S — autonomy level. Mirrors the backend ApprovalMode (loop-types.ts). */
-export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
-
-/** Plan mode — read-only planning vs normal execution. Mirrors PlanModeState. */
-export type PlanModeState = 'off' | 'planning'
+// Re-exports don't create local bindings; import the names this file also uses.
+import type { PlanDraft } from '../../../src/server/protocol'
 
 /** Lifecycle of a submitted plan document on disk. */
 export type PlanStatus = 'submitted' | 'approved' | 'executed' | 'rejected'
@@ -15,41 +26,6 @@ export type PlanStatus = 'submitted' | 'approved' | 'executed' | 'rejected'
 export interface PlanOption {
   label: string
   description: string
-}
-
-export interface SessionRecord {
-  id: string
-  status: SessionStatus
-  createdAt: number
-  updatedAt: number
-  cwd: string
-  title?: string
-  currentPhase?: string
-  lastSeq: number
-  error?: string
-  pendingApprovals: number
-  /** S — per-session autonomy override; absent → global config default. */
-  approvalMode?: ApprovalMode
-  /** Plan mode — 'planning' restricts the agent to read-only exploration. */
-  planMode?: PlanModeState
-  /** PlusMenu — current provider model id (resolved id). Absent → global default. */
-  model?: string
-  /** PlusMenu — star-domain selection key ('auto' | <domainId>). */
-  domain?: string
-  /** Visual glyph for the current star-domain selection (for badges). */
-  domainGlyph?: string
-  /** Semantic accent color key for the current star-domain selection. */
-  domainAccent?: string
-  /** Estimated token count for the current conversation (from live agent). */
-  contextTokens?: number
-  /** Model context window size in tokens. */
-  contextWindow?: number
-  /** Current reasoning effort level (off/low/medium/high/max). */
-  reasoningEffort?: string
-  /** Archived (closed) sessions are hidden from the sidebar. */
-  archived?: boolean
-  /** Git worktree branch name — set when created with isolated worktree. */
-  worktreeBranch?: string
 }
 
 /** PlusMenu — a selectable model annotated with the session's current flag. */
@@ -151,15 +127,6 @@ export interface PlanSummary {
   modelTier?: 'cheap' | 'balanced' | 'strong' | null
 }
 
-/** Live plan-mode draft — the working document the agent grows while planning.
- *  Not a submitted plan; rendered as a separate "起草中" view. Title is the
- *  draft's H1 (null while still empty). */
-export interface PlanDraft {
-  path: string
-  title: string | null
-  content: string
-}
-
 /** `GET /sessions/:id/plans` — submitted plans plus the active draft (if planning). */
 export interface PlanListResponse {
   plans: PlanSummary[]
@@ -176,54 +143,6 @@ export interface PlanDoc {
   createdAt: number | string
   approvedAt?: number | string
   options?: PlanOption[]
-}
-
-export type SessionEventType =
-  | 'user'
-  | 'text_delta'
-  | 'thinking_delta'
-  | 'tool_use'
-  | 'tool_result'
-  | 'turn_complete'
-  | 'phase'
-  | 'checkpoint'
-  | 'approval_required'
-  | 'approval_resolved'
-  | 'intent_note'
-  | 'delegation'
-  | 'artifact'
-  | 'status'
-  | 'error'
-  | 'decision_shift'
-  | 'rewind'
-  | 'todo_state'
-  | 'steer_queued'
-  | 'plan_mode'
-  | 'plan_submitted'
-  // Plan-mode draft grew — throttled invalidation signal (metadata only).
-  | 'plan_draft'
-  // 结构化提问卡片 — ask_user_question 的问题/选项（Cursor 3.0 风格 QuestionCard）。
-  | 'user_question'
-  | 'model_switched'
-  | 'domain_changed'
-  | 'skills_changed'
-  // I4 — user-defined .rivet/hooks.json script results.
-  | 'hook_result'
-  // Change landing — commit / squash merge-back / PR created from the Changes tab.
-  | 'landing'
-  // Background jobs (bash run_in_background) — started / output / exit.
-  | 'job'
-  | 'done'
-  // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
-  | 'watchdog_recovery'
-  // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
-  | 'autonomy_checkpoint'
-
-export interface SessionEvent {
-  seq: number
-  ts: number
-  type: SessionEventType
-  data: Record<string, unknown>
 }
 
 export interface ApprovalRequest {
