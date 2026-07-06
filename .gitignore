@@ -51,6 +51,7 @@ docs/sessions/
 .rivet/plans/draft-*.md
 
 # AI agent temp files
+.tmp/
 .tmp_*
 截图/
 .omx/
