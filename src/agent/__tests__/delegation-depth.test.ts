@@ -115,6 +115,9 @@ describe('delegation depth cap (B3)', () => {
     assert.equal(run.status, 'completed')
     assert.equal(run.results[0]?.status, 'blocked')
     assert.match(run.results[0]?.summary ?? '', /max delegation depth/i)
+    // Empty-packet regression: the packet the model reads must carry the same
+    // blocked explanation as `results` — `[]` invites a blind identical retry.
+    assert.match(run.packet, /max delegation depth/i)
   })
 
   it('delegateBatch: depth-capped requests surface blocked, runnable siblings proceed', async () => {

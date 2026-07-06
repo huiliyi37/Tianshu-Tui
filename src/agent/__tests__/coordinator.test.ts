@@ -1889,8 +1889,49 @@ describe('DelegationCoordinator', () => {
     const cp = (coordinator as unknown as { collaboration: CollaborationProtocol }).collaboration
     assert.equal(run.results[0]!.status, 'blocked')
     assert.ok(run.results[0]!.summary.includes('maxFiles'))
+    // Empty-packet regression: the model-facing packet must explain the block,
+    // not ship an empty [] that invites a blind identical retry.
+    assert.ok(run.packet.includes('maxFiles'), 'packet must carry the scope-budget explanation')
     assert.equal(runtimeCalled, false)
     assert.equal(cp.getSessionLocks('s-main').length, 0)
+  })
+
+  it('pre-dispatch abort returns a blocked result whose packet carries the reason (empty-packet regression)', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      abortSignal: controller.signal,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => ({
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn-pre-abort',
+      objective: 'Trace the streaming client reconnect behavior across the api layer.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/api/client.ts'] },
+    })
+
+    assert.equal(run.results[0]?.status, 'blocked')
+    assert.ok(run.packet.includes('aborted'), 'packet must explain the pre-dispatch abort')
   })
 
   it('allows exploration worker when scope is within budget', async () => {

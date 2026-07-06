@@ -954,20 +954,24 @@ export class DelegationCoordinator {
       const depth = request.delegationDepth ?? 0
       const depthCap = this.config.maxDelegationDepth ?? MAX_DELEGATION_DEPTH
       if (depth >= depthCap) {
+        // Build the packet from the SAME blocked result the caller sees in
+        // `results` — an empty packet ([]) tells the primary model nothing and
+        // invites a blind retry of the identical delegation.
+        const depthCapped: WorkerResult[] = [{
+          workOrderId: `depth-capped-${request.parentTurnId}`,
+          status: 'blocked',
+          summary: `Delegation rejected: max delegation depth (${depthCap}) reached — do the work inline instead of delegating further`,
+          findings: [],
+          artifacts: [],
+          changedFiles: [],
+          risks: ['unbounded delegation recursion prevented'],
+          nextActions: ['Perform the objective directly in this worker session'],
+          evidenceStatus: 'blocked',
+        }]
         return {
           status: 'completed',
-          results: [{
-            workOrderId: `depth-capped-${request.parentTurnId}`,
-            status: 'blocked',
-            summary: `Delegation rejected: max delegation depth (${depthCap}) reached — do the work inline instead of delegating further`,
-            findings: [],
-            artifacts: [],
-            changedFiles: [],
-            risks: ['unbounded delegation recursion prevented'],
-            nextActions: ['Perform the objective directly in this worker session'],
-            evidenceStatus: 'blocked',
-          }],
-          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+          results: depthCapped,
+          packet: await buildPrimaryWorkerPacket(depthCapped, this.config.artifactStore),
         }
       }
 
@@ -985,20 +989,21 @@ export class DelegationCoordinator {
       if (profileDef?.tierLock) {
         const circuitCheck = this.circuitBreaker.canDelegate(request.profile)
         if (!circuitCheck.allowed) {
+          const circuitBlocked: WorkerResult[] = [{
+            workOrderId: `circuit-open-${request.parentTurnId}`,
+            status: 'blocked',
+            summary: `Circuit breaker open: ${circuitCheck.reason}`,
+            findings: [],
+            artifacts: [{ kind: 'risk', title: 'Circuit breaker tripped', content: circuitCheck.reason ?? 'Profile circuit is open' }],
+            changedFiles: [],
+            risks: [`circuit breaker: ${request.profile} is open`],
+            nextActions: ['Wait for cooldown or use a different profile'],
+            evidenceStatus: 'blocked',
+          }]
           return {
             status: 'completed',
-            results: [{
-              workOrderId: `circuit-open-${request.parentTurnId}`,
-              status: 'blocked',
-              summary: `Circuit breaker open: ${circuitCheck.reason}`,
-              findings: [],
-              artifacts: [{ kind: 'risk', title: 'Circuit breaker tripped', content: circuitCheck.reason ?? 'Profile circuit is open' }],
-              changedFiles: [],
-              risks: [`circuit breaker: ${request.profile} is open`],
-              nextActions: ['Wait for cooldown or use a different profile'],
-              evidenceStatus: 'blocked',
-            }],
-            packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+            results: circuitBlocked,
+            packet: await buildPrimaryWorkerPacket(circuitBlocked, this.config.artifactStore),
           }
         }
       }
@@ -1131,11 +1136,12 @@ export class DelegationCoordinator {
     // reject immediately instead of waiting for the worker's internal 180s timeout.
     // This prevents zombie workers from blocking the main agent loop.
     if (this.config.abortSignal?.aborted) {
+      const abortedResults = [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'), { failureReason: 'caller_aborted' })]
       return {
         status: 'completed',
         order,
-        results: [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'), { failureReason: 'caller_aborted' })],
-        packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+        results: abortedResults,
+        packet: await buildPrimaryWorkerPacket(abortedResults, this.config.artifactStore),
       }
     }
 
@@ -1148,21 +1154,22 @@ export class DelegationCoordinator {
     // Scope budget check for exploration workers (code_search, doc_research, plan)
     if (order.kind === 'code_search' || order.kind === 'doc_research' || order.kind === 'plan') {
       if (order.scope.maxFiles !== undefined && (order.scope.files?.length ?? 0) > order.scope.maxFiles) {
+        const scopeBlocked: WorkerResult[] = [{
+          workOrderId: order.id,
+          status: 'blocked',
+          summary: `Scope budget exceeded: ${order.scope.files!.length} files exceeds maxFiles=${order.scope.maxFiles}`,
+          findings: [],
+          artifacts: [{ kind: 'risk', title: 'Scope budget exceeded', content: `Requested ${order.scope.files!.length} files but maxFiles=${order.scope.maxFiles}` }],
+          changedFiles: [],
+          risks: [`scope budget: ${order.scope.files!.length} > ${order.scope.maxFiles} maxFiles`],
+          nextActions: ['Reduce file scope or increase maxFiles budget'],
+          evidenceStatus: 'blocked',
+        }]
         return {
           status: 'completed',
           order,
-          results: [{
-            workOrderId: order.id,
-            status: 'blocked',
-            summary: `Scope budget exceeded: ${order.scope.files!.length} files exceeds maxFiles=${order.scope.maxFiles}`,
-            findings: [],
-            artifacts: [{ kind: 'risk', title: 'Scope budget exceeded', content: `Requested ${order.scope.files!.length} files but maxFiles=${order.scope.maxFiles}` }],
-            changedFiles: [],
-            risks: [`scope budget: ${order.scope.files!.length} > ${order.scope.maxFiles} maxFiles`],
-            nextActions: ['Reduce file scope or increase maxFiles budget'],
-            evidenceStatus: 'blocked',
-          }],
-          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+          results: scopeBlocked,
+          packet: await buildPrimaryWorkerPacket(scopeBlocked, this.config.artifactStore),
         }
       }
     }
@@ -1326,21 +1333,22 @@ export class DelegationCoordinator {
       }
       const lockResult = this.collaboration.acquireLock(this.config.sessionId, intent)
       if (!lockResult.acquired) {
+        const lockBlocked: WorkerResult[] = [{
+          workOrderId: order.id,
+          status: 'blocked',
+          summary: `Semantic lock conflict: ${lockResult.conflictingFiles.join(', ')} held by another session`,
+          findings: [],
+          artifacts: [{ kind: 'risk', title: 'Lock conflict', content: `Files locked by another session: ${lockResult.conflictingFiles.join(', ')}` }],
+          changedFiles: [],
+          risks: [`semantic lock conflict: ${lockResult.conflictingFiles.join(', ')}`],
+          nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
+          evidenceStatus: 'blocked',
+        }]
         return {
           status: 'completed',
           order,
-          results: [{
-            workOrderId: order.id,
-            status: 'blocked',
-            summary: `Semantic lock conflict: ${lockResult.conflictingFiles.join(', ')} held by another session`,
-            findings: [],
-            artifacts: [{ kind: 'risk', title: 'Lock conflict', content: `Files locked by another session: ${lockResult.conflictingFiles.join(', ')}` }],
-            changedFiles: [],
-            risks: [`semantic lock conflict: ${lockResult.conflictingFiles.join(', ')}`],
-            nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
-            evidenceStatus: 'blocked',
-          }],
-          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+          results: lockBlocked,
+          packet: await buildPrimaryWorkerPacket(lockBlocked, this.config.artifactStore),
         }
       }
       semanticLockAcquired = true
@@ -1743,6 +1751,15 @@ export class DelegationCoordinator {
 
     if (this.state.shouldEscalate()) {
       this.state.recordEvent({ type: 'escalated', workOrderId: order.id, timestamp: Date.now() })
+      // Build results and packet from the SAME escalated result — previously the
+      // packet carried the raw run.result while results carried the escalated
+      // rewrite, so the model and the caller saw different stories. Keep the
+      // last worker summary inline so the failure detail is not lost.
+      const escalatedResults: WorkerResult[] = [{
+        ...run.result,
+        status: 'blocked' as const,
+        summary: `Escalated: ${this.state.getSummary().failed} consecutive failures. Last worker result: ${run.result.summary}`,
+      }]
       return {
         status: 'completed' as const,
         escalated: true,
@@ -1751,8 +1768,8 @@ export class DelegationCoordinator {
         modelTierShadows: escalationShadows.length > 0 ? escalationShadows : [tierShadow],
         modelTierGatedDecisions: [tierGatedDecision],
         gatedInfluenceAudits: [gatedInfluenceAudit],
-        results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
-        packet: await buildPrimaryWorkerPacket([run.result], this.config.artifactStore),
+        results: escalatedResults,
+        packet: await buildPrimaryWorkerPacket(escalatedResults, this.config.artifactStore),
       }
     }
 
