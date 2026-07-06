@@ -35,6 +35,7 @@ import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
+import { createPointerRegurgitationHook } from './hooks/pointer-regurgitation-hook.js'
 import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
@@ -439,6 +440,15 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
   if (deps.advisoryBus) {
     hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Pointer-Regurgitation: postTool hook — counts pointer-guard rejections
+  // (model echoing "[file written to …]"-style placeholders as real content)
+  // session-wide and escalates to a constitutional advisory from the 2nd
+  // offense. The inline guard error alone failed to break a ~20-rejection
+  // imitation loop (word-batch report 2026-07-06).
+  if (deps.advisoryBus) {
+    hooks.push(createPointerRegurgitationHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Error Diagnosis: postTool hook — when a tool fails, reads the

@@ -4,6 +4,7 @@ import { relative } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
+import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
 import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
@@ -110,6 +111,20 @@ Note: For large new_string, the message history keeps only a short pointer
       filePath = validatePath(params.cwd, params.input.file_path as string, 'write')
     } catch (e) {
       return { content: `Error: ${e instanceof Error ? e.message : 'Path escapes project directory'}`, isError: true }
+    }
+
+    // Pointer-regurgitation guard: reject placeholder text echoed from message
+    // history as new_string — otherwise the pointer line is spliced verbatim
+    // into the file (observed in the 2026-07-06 word-batch report).
+    const newStringInput = params.input.new_string
+    if (typeof newStringInput === 'string') {
+      const matchedPointer = detectPointerPlaceholder(newStringInput)
+      if (matchedPointer) {
+        return {
+          content: pointerPlaceholderError({ toolName: 'hash_edit', field: 'new_string', matchedPrefix: matchedPointer, filePath }),
+          isError: true,
+        }
+      }
     }
 
     // Check file exists asynchronously

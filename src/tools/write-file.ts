@@ -9,7 +9,7 @@ import { trackFileChange } from '../agent/recovery-stack.js'
 import { applyEol, chooseEol, detectFileEol, toLf } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
 import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
-import { WRITE_FILE_POINTER_PREFIX } from './write-file-arg-processor.js'
+import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -50,15 +50,15 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     const content = params.input.content as string
     const dir = dirname(filePath)
 
-    // Pointer-regurgitation guard: the arg post-processor replaces large
-    // `content` values in message history with a "[file written to …]" pointer.
-    // Models occasionally echo that pointer back as the real content on a later
-    // write, silently producing a one-line garbage file (session 05e1500e).
-    if (content.trimStart().startsWith(WRITE_FILE_POINTER_PREFIX)) {
+    // Pointer-regurgitation guard: the arg post-processors replace large
+    // content fields in message history with pointer placeholders. Models
+    // imitate that pattern in long sessions and echo a pointer back as the
+    // real content (session 05e1500e; word-batch report 2026-07-06). Checks
+    // ALL pointer prefixes — the model may echo any tool's placeholder here.
+    const matchedPointer = detectPointerPlaceholder(content)
+    if (matchedPointer) {
       return {
-        content: `Error: content is a pointer placeholder from message history ("${WRITE_FILE_POINTER_PREFIX} …"), not real file contents. `
-          + `Large write_file contents are replaced by this pointer in past messages — the actual text lives only on disk. `
-          + `Provide the complete real file contents; if you need the previous version, read_file ${filePath} first.`,
+        content: pointerPlaceholderError({ toolName: 'write_file', field: 'content', matchedPrefix: matchedPointer, filePath }),
         isError: true,
       }
     }

@@ -20,7 +20,8 @@ describe('editFileArgProcessor', () => {
     assert.ok((parsed.old_string as string).includes('/abs/foo.ts'))
     assert.ok((parsed.new_string as string).includes('chars'))
     // bulk text must be collapsed — pointer is tiny vs the original payload
-    assert.ok((parsed.old_string as string).length < 200, 'old_string collapsed to a short pointer')
+    // (260 = prefix + path + 80-char preview + anti-imitation suffix, see pointer-guard.ts)
+    assert.ok((parsed.old_string as string).length < 260, 'old_string collapsed to a short pointer')
     assert.ok((parsed.new_string as string).length < 100, 'new_string collapsed to a short marker')
     assert.ok((parsed.old_string as string).length < bigOld.length)
   })

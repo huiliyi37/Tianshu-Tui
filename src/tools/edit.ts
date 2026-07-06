@@ -10,6 +10,7 @@ import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { findFuzzyMatch, applyFuzzyReplacement } from './fuzzy-match.js'
 import { detectEol, chooseEol, toLf, applyEol } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
+import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
 
 // Large files are common (generated code, lockfiles, big modules). 100KB was
 // far too small. 8MB reads comfortably into the Node heap; anything larger is
@@ -50,6 +51,22 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       filePath = validatePath(params.cwd, params.input.file_path as string, 'write')
     } catch (e) {
       return { content: `Error: ${e instanceof Error ? e.message : 'Path escapes project directory'}`, isError: true }
+    }
+
+    // Pointer-regurgitation guard: reject placeholder text ("[file written to …]",
+    // "[edit on …]", …) echoed from message history as old_string/new_string.
+    // Without this the placeholder is written verbatim into the file (the
+    // 2026-07-06 word-batch report caught a literal pointer line on disk).
+    for (const field of ['old_string', 'new_string'] as const) {
+      const value = params.input[field]
+      if (typeof value !== 'string') continue
+      const matchedPointer = detectPointerPlaceholder(value)
+      if (matchedPointer) {
+        return {
+          content: pointerPlaceholderError({ toolName: 'edit_file', field, matchedPrefix: matchedPointer, filePath }),
+          isError: true,
+        }
+      }
     }
 
     let fileStat: Awaited<ReturnType<typeof stat>>
