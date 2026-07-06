@@ -39,6 +39,10 @@ export class FallbackStreamClient implements StreamClient {
     this.activeClient.setThinking?.(mode)
   }
 
+  consumeWireDivergence(): import('./stream-client.js').WireDivergence | null {
+    return this.activeClient.consumeWireDivergence?.() ?? null
+  }
+
   async stream(
     request: OaiChatRequest,
     callbacks: StreamCallbacks,

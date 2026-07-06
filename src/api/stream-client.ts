@@ -33,6 +33,25 @@ export interface StreamCallbacks {
   onStreamAttemptAborted?: (info: StreamAttemptAbortedInfo) => void
 }
 
+/** Wire-level prefix divergence: how this request's FINAL bytes (after
+ *  reasoning-strip, sanitize, system-suffix — exactly what goes on the socket)
+ *  differ from the previous main-turn request. Complements the engine-level
+ *  probe (PromptEngine.consumePrefixDivergence): the engine probe proves the
+ *  message arrays are append-only BEFORE send-time transforms; this one covers
+ *  the transforms themselves. A cacheRead regression with a clean engine probe
+ *  but a wireDiverged record = send-layer byte churn; clean on both = provider-
+ *  side rendering/落盘 behavior. */
+export interface WireDivergence {
+  /** Index into the wire messages array (0 = system message). */
+  idx: number
+  role: string
+  kind: 'message_changed' | 'message_removed'
+  prevCount: number
+  newCount: number
+  /** Approximate char offset of the diverged message's start in the wire payload. */
+  approxCharPos: number
+}
+
 /** Canonical streaming interface shared by all provider clients */
 export interface StreamClient {
   stream(request: OaiChatRequest, callbacks: StreamCallbacks, signal?: AbortSignal): Promise<void>
@@ -40,4 +59,6 @@ export interface StreamClient {
   setReasoningEffort?(effort: string): void
   /** Toggle thinking/reasoning mode at runtime (GLM turn-level thinking). Optional — not all providers support this. */
   setThinking?(mode: 'enabled' | 'disabled'): void
+  /** Consume-once accessor for the latest wire-level prefix divergence. Optional. */
+  consumeWireDivergence?(): WireDivergence | null
 }

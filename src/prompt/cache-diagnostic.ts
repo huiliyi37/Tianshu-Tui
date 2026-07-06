@@ -4,6 +4,7 @@ import type { DriftEvent } from './fingerprint.js'
 export type CacheMissReason =
   | 'first_turn'
   | 'prefix_drift'
+  | 'prefix_truncation'
   | 'compaction'
   | 'normal_growth'
   | 'cache_eviction'
@@ -65,6 +66,23 @@ export function diagnoseCacheMiss(
       reason: 'compaction',
       message: 'Compaction ran — message history restructured, partial cache miss expected',
       severity: 'warn',
+      turnHitRate,
+    }
+  }
+
+  // Prefix truncation: cacheRead REGRESSED vs the previous turn. On an
+  // append-only conversation cacheRead is monotonic — a drop means the shared
+  // prefix stopped matching mid-history (client byte churn or provider-side
+  // re-rendering), which is categorically different from tail growth. The
+  // 8396ac51 investigation (2026-07-06) found these were mislabeled
+  // normal_growth, hiding ~30K-token rebuild events.
+  const prev = history[history.length - 2]!
+  if (current.cacheRead < prev.cacheRead) {
+    const lost = prev.cacheRead - current.cacheRead
+    return {
+      reason: 'prefix_truncation',
+      message: `Prefix truncation: cacheRead dropped ${lost} tokens (${prev.cacheRead} → ${current.cacheRead}) — mid-history divergence, check prefixDiverged/wireDiverged breadcrumbs`,
+      severity: 'error',
       turnHitRate,
     }
   }

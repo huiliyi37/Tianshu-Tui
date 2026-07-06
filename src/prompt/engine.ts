@@ -674,6 +674,10 @@ export class PromptEngine {
       stream_options: { include_usage: true },
       tools,
       tool_choice: tools ? 'auto' : undefined,
+      // Main-turn marker for the client's wire-level probe — the client only
+      // fingerprints final send bytes for these requests (side-path calls
+      // through the same client would poison its baseline too).
+      prefixProbe: !sidePath || undefined,
     }
     // Side-path builds (compaction summaries etc.) have unrelated message
     // arrays — recording them would poison the main-turn baseline and report

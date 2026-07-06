@@ -1,4 +1,4 @@
-import type { StreamClient } from './stream-client.js'
+import type { StreamClient, WireDivergence } from './stream-client.js'
 import type { StreamCallbacks } from './stream-client.js'
 import type { OaiChatRequest, OaiMessage } from './oai-types.js'
 import { estimateOaiTokens } from '../compact/micro.js'
@@ -31,6 +31,16 @@ import { dirname, join } from 'node:path'
  * deltas AFTER finish_reason; flushing eagerly fed `{}` to the tool, which then
  * failed with a misleading "X is required").
  */
+/** Full-content djb2 for the wire-level prefix probe — hashes every character
+ *  so any single-byte change in the final payload is detectable. */
+function wireHash(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  }
+  return `${h}:${s.length}`
+}
+
 function tryParseToolArguments(raw: string): Record<string, unknown> | null {
   if (raw.trim().length === 0) return {}
   try {
@@ -264,6 +274,13 @@ export class OpenAIClient implements StreamClient {
    */
   private toolStreamLogPath: string | null | undefined = undefined
   private toolStreamLogLines = 0
+  /** Wire-level prefix probe: per-message signatures of the previous main-turn
+   *  request's FINAL bytes (post reasoning-strip / sanitize / system-suffix).
+   *  Only updated for requests with `prefixProbe: true` so side-path calls
+   *  through this client don't poison the baseline. */
+  private prevWireSignatures: Array<{ sig: string; len: number; role: string }> | null = null
+  /** Latest wire divergence (consume-once via consumeWireDivergence). */
+  private lastWireDivergence: WireDivergence | null = null
 
   constructor(private config: OpenAIClientConfig) {
     this.systemSuffix = (config.providerName === 'mimo' || config.providerName === 'deepseek') && config.thinking === 'enabled'
@@ -440,7 +457,56 @@ export class OpenAIClient implements StreamClient {
       this._sanitizedCount = msgArray.length
     }
 
+    // Wire-level prefix probe (2026-07-06 cache investigation): fingerprint the
+    // FINAL messages — everything above (reasoning-strip, system-suffix,
+    // sanitize) has already been applied, so this hashes exactly what goes on
+    // the socket. The engine-level probe proved the pre-transform arrays are
+    // append-only; cacheRead regressions kept happening anyway, so the
+    // remaining client-side suspects are these transforms. Joined with
+    // cacheRead regressions in the cache-log this separates send-layer byte
+    // churn from provider-side rendering/落盘 behavior.
+    if (request.prefixProbe) this.recordWireDivergence(msgArray)
+
     await this.sendStream(body, callbacks, signal)
+  }
+
+  /** Compare this request's final wire bytes with the previous main-turn
+   *  request's; record the first diverged message. Pure appends record nothing. */
+  private recordWireDivergence(messages: Array<Record<string, unknown>>): void {
+    const sigs = messages.map(m => {
+      const s = JSON.stringify(m)
+      return { sig: wireHash(s), len: s.length, role: String(m.role ?? '?') }
+    })
+    const prev = this.prevWireSignatures
+    this.prevWireSignatures = sigs
+    if (!prev) return
+
+    const shared = Math.min(prev.length, sigs.length)
+    let divergedIdx = -1
+    for (let i = 0; i < shared; i++) {
+      if (prev[i]!.sig !== sigs[i]!.sig) { divergedIdx = i; break }
+    }
+    if (divergedIdx === -1) {
+      if (sigs.length >= prev.length) return // pure append (or identical)
+      divergedIdx = sigs.length
+    }
+    let approxCharPos = 0
+    for (let i = 0; i < divergedIdx; i++) approxCharPos += sigs[i]?.len ?? prev[i]!.len
+    this.lastWireDivergence = {
+      idx: divergedIdx,
+      role: sigs[divergedIdx]?.role ?? 'removed',
+      kind: divergedIdx >= sigs.length ? 'message_removed' : 'message_changed',
+      prevCount: prev.length,
+      newCount: sigs.length,
+      approxCharPos,
+    }
+  }
+
+  /** Consume-once accessor for the latest wire-level prefix divergence. */
+  consumeWireDivergence(): WireDivergence | null {
+    const d = this.lastWireDivergence
+    this.lastWireDivergence = null
+    return d
   }
 
   /** Shared inner retry+fetch+SSE loop used by both stream and streamOai. */

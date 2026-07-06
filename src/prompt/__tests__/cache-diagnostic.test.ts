@@ -42,14 +42,43 @@ describe('diagnoseCacheMiss', () => {
     assert.equal(diagnostic, null)
   })
 
-  it('diagnoses low cache hit as cache_eviction (Anthropic TTL expiry scenario)', () => {
-    // Simulate TTL expiry: high cache_creation, low cache_read
+  it('diagnoses cacheRead regression as prefix_truncation (TTL expiry / mid-history divergence)', () => {
+    // cacheRead dropped 500 → 50: on an append-only conversation this is a
+    // monotonicity violation — the shared prefix stopped matching mid-history.
+    // (Anthropic TTL expiry and DeepSeek落盘 unit mismatch both surface here.)
     const diagnostic = diagnoseCacheMiss([
       { turn: 1, cacheRead: 500, cacheCreation: 20, inputTokens: 520, outputTokens: 20 },
       { turn: 2, cacheRead: 50, cacheCreation: 450, inputTokens: 500, outputTokens: 20 },
     ], 2, null, false)
 
-    // Hit rate = 50/(50+450) = 0.1 < 0.4 → cache_eviction
+    assert.ok(diagnostic)
+    assert.equal(diagnostic!.reason, 'prefix_truncation')
+    assert.equal(diagnostic!.severity, 'error')
+    assert.match(diagnostic!.message, /500 → 50/)
+  })
+
+  it('diagnoses prefix_truncation at moderate hit rates (8396ac51 idx35 regression)', () => {
+    // Real numbers from session 8396ac51: cacheRead 60928 → 35712 with a
+    // 53.9% hit rate. The old logic fell through to normal_growth because the
+    // rate sat between the 0.4 eviction floor and the 0.8 healthy ceiling,
+    // hiding a 25K-token mid-history divergence.
+    const diagnostic = diagnoseCacheMiss([
+      { turn: 34, cacheRead: 60928, cacheCreation: 161, inputTokens: 61089, outputTokens: 130 },
+      { turn: 35, cacheRead: 35712, cacheCreation: 30504, inputTokens: 66216, outputTokens: 879 },
+    ], 35, null, false)
+
+    assert.ok(diagnostic)
+    assert.equal(diagnostic!.reason, 'prefix_truncation')
+  })
+
+  it('diagnoses low cache hit WITHOUT regression as cache_eviction (cold-start pattern)', () => {
+    // cacheRead grew (50 → 60) so the prefix is intact — the low rate comes
+    // from a large cold rebuild, not a mid-history divergence.
+    const diagnostic = diagnoseCacheMiss([
+      { turn: 1, cacheRead: 50, cacheCreation: 20, inputTokens: 70, outputTokens: 20 },
+      { turn: 2, cacheRead: 60, cacheCreation: 450, inputTokens: 510, outputTokens: 20 },
+    ], 2, null, false)
+
     assert.ok(diagnostic)
     assert.equal(diagnostic!.reason, 'cache_eviction')
   })
