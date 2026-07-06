@@ -8,6 +8,11 @@ export const modelConfigSchema = z.object({
   contextWindow: z.number().int().positive(),
   maxTokens: z.number().int().positive(),
   reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
+  /** Model accepts image inputs (multimodal user messages). Declared per model,
+   *  NOT per provider — mixed text/vision model fleets under one provider are
+   *  the norm. Gates the computer_use screenshot → conversation vision channel.
+   *  Default undefined = text-only (images are dropped, today's behavior). */
+  supportsVision: z.boolean().optional(),
   /** Pricing per 1M tokens (USD). Optional — used by insights / cost visualization. */
   pricing: z.object({
     input: z.number().min(0).optional(),

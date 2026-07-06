@@ -1,7 +1,33 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { agentSchema, configSchema, workersSchema } from '../schema.js'
+import { agentSchema, configSchema, modelConfigSchema, workersSchema } from '../schema.js'
 import { DEFAULT_CONFIG } from '../default.js'
+
+describe('model supportsVision', () => {
+  const base = { id: 'm', contextWindow: 128_000, maxTokens: 8_192 }
+
+  it('defaults to undefined (text-only)', () => {
+    const parsed = modelConfigSchema.parse(base)
+    assert.equal(parsed.supportsVision, undefined)
+  })
+
+  it('parses an explicit supportsVision flag', () => {
+    assert.equal(modelConfigSchema.parse({ ...base, supportsVision: true }).supportsVision, true)
+    assert.equal(modelConfigSchema.parse({ ...base, supportsVision: false }).supportsVision, false)
+  })
+
+  it('rejects non-boolean supportsVision', () => {
+    assert.throws(() => modelConfigSchema.parse({ ...base, supportsVision: 'yes' }))
+  })
+
+  it('preset vision models carry supportsVision=true through configSchema', () => {
+    const parsed = configSchema.parse(DEFAULT_CONFIG)
+    const glm = parsed.provider.providers.glm?.models.find(m => m.id === 'glm-5.2')
+    assert.equal(glm?.supportsVision, true)
+    const deepseek = parsed.provider.providers.deepseek?.models.find(m => m.id === 'deepseek-v4-pro')
+    assert.equal(deepseek?.supportsVision, undefined, 'text-only models stay undeclared')
+  })
+})
 
 describe('config permissions schema', () => {
   it('defaults permissions.allow to an empty list', () => {

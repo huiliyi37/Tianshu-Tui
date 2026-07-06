@@ -22,6 +22,9 @@ export interface ModelSpec {
   maxTokens: number
   contextWindow: number
   reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | 'max'
+  /** Model accepts image inputs (multimodal user messages). Gates the
+   *  tool-boundary vision channel (computer_use screenshots). */
+  supportsVision?: boolean
 }
 
 export interface AgentConfigInput {
@@ -109,7 +112,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -187,6 +190,9 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     permissions: input.permissions,
     toolGating: input.toolGating,
     prefixCacheStrategy: capabilities.prefixCacheStrategy,
+    // Per-model vision capability — switchModel rebuilds the agent, so this
+    // value always tracks the active model (no live getter needed).
+    supportsVision: model.supportsVision ?? false,
  }
 }
 

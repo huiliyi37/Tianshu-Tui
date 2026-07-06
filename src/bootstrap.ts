@@ -635,6 +635,7 @@ export function createAgentRuntime(deps: {
       maxTokens: currentModel.maxTokens,
       contextWindow: currentModel.contextWindow,
       reasoningEffort: currentModel.reasoningEffort,
+      supportsVision: currentModel.supportsVision,
     },
     cwd,
     provider,

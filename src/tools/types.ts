@@ -238,6 +238,11 @@ export interface ToolResult {
    *  - preview_only: output is a head/tail preview, not the full content
    *  Undefined = lossless (backward compatible default). */
   lossiness?: 'lossless' | 'truncated' | 'collapsed' | 'preview_only'
+  /** Optional image attachments (data URLs, e.g. computer_use screenshots).
+   *  Tool messages are text-only at the protocol level; the tool pipeline
+   *  decides whether to forward these as a follow-up multimodal user message
+   *  (only when the active model declares supportsVision) or drop them. */
+  images?: string[]
   isError?: boolean
   verification?: VerificationMetadata
   /** Additional verification events to record beyond the primary one. VSW uses

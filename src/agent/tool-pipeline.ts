@@ -331,6 +331,11 @@ export interface ToolExecResult {
   latestRisk: import('./approval-risk.js').RiskAssessment
   /** True when the tool returned endTurn: true (e.g. ask_user_question). */
   endTurn?: boolean
+  /** Image attachments from ToolResult.images (data URLs). Tool messages are
+   *  text-only at the protocol level, so the batch layer forwards these as a
+   *  trailing multimodal user message — but ONLY when the active model
+   *  declares supportsVision (dropped otherwise, matching legacy behavior). */
+  images?: string[]
 }
 
 function truncateSuccessfulToolResult(content: string, config: AgentConfig): string {
@@ -1713,7 +1718,7 @@ export async function executeToolUse(
      }
    }
 
-    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk, endTurn: rawToolResult?.endTurn === true ? true : undefined }
+    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk, endTurn: rawToolResult?.endTurn === true ? true : undefined, images: rawToolResult?.images }
  } catch (err) {
     // AbortError: user cancelled — not a tool failure.
     // Skip failure recording so immune/doom-loop signals aren't polluted.

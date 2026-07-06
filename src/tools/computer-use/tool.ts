@@ -3,17 +3,24 @@
  *
  * Lets the agent see and operate graphical apps when CLI / structured
  * integrations aren't enough: inspect a desktop app's accessibility tree,
- * click elements, type, send key combos, focus apps.
+ * click/scroll/drag elements, type, send key combos, focus apps.
  *
  * Security model (mirrors the browser tool's fail-closed posture):
  *  - Per-app approval: any action targeting an app WITHOUT an "always allow"
  *    grant requires explicit human approval (requiresApproval → true).
  *  - Dual-channel perception: the accessibility TREE is returned to the model
- *    (text); the SCREENSHOT is persisted as a viewable artifact for the user
- *    and never fed back to the model.
+ *    (text); the SCREENSHOT is persisted as a viewable artifact for the user.
+ *    When the active model supports vision, the pipeline may also attach a
+ *    downsampled screenshot from `ToolResult.images` (the tool itself is
+ *    model-agnostic — it always fills the channel and lets the pipeline decide).
  *  - Secret hygiene: secure text fields and secret-looking values are masked
  *    in the model-facing tree.
  *  - macOS only (darwin gated); disabled elsewhere.
+ *
+ * Element targeting: snapshot refs are backed by AX child-index paths cached
+ * per `sessionId:app` (small LRU). Clicks resolve the exact path with a
+ * role/title identity check — a changed UI produces a "stale snapshot" error
+ * instead of a mis-click on whatever now sits at the old ordinal position.
  */
 
 import type { Tool, ToolCallParams, ToolResult } from '../types.js'
@@ -22,6 +29,7 @@ import {
   type ComputerUseDriver,
   type ComputerUseDriverFactory,
   type ClickTarget,
+  type SnapshotRef,
 } from './macos-driver.js'
 import { isAppGranted } from './app-grants.js'
 
@@ -29,8 +37,13 @@ export type ComputerUseAction =
   | 'list_apps'
   | 'snapshot'
   | 'click'
+  | 'double_click'
+  | 'right_click'
+  | 'scroll'
+  | 'drag'
   | 'type'
   | 'key'
+  | 'wait'
   | 'focus_app'
   | 'check_permissions'
 
@@ -43,6 +56,8 @@ export interface ComputerUseToolOptions {
   isAppGranted?: (app: string) => boolean
   /** Platform override (tests). Defaults to process.platform. */
   platform?: NodeJS.Platform
+  /** Sleep implementation for the wait action (injectable for tests). */
+  sleep?: (ms: number) => Promise<void>
 }
 
 /** Mask secret-looking values in accessibility text (tokens/keys/passwords). */
@@ -57,9 +72,21 @@ function redactTree(tree: string): string {
 }
 
 function actionRequiresApproval(action: ComputerUseAction): boolean {
-  // check_permissions is a pure local capability probe (no app interaction).
-  return action !== 'check_permissions'
+  // check_permissions is a pure local capability probe; wait is a plain sleep.
+  return action !== 'check_permissions' && action !== 'wait'
 }
+
+/** Max duration for the wait action (ms). */
+const WAIT_CAP_MS = 5_000
+
+interface SnapshotCacheEntry {
+  refs: Map<number, SnapshotRef>
+  /** Redacted tree text of the last snapshot — dedup baseline. */
+  lastTree: string
+}
+
+/** Per `sessionId:app` snapshot cache capacity. */
+const SNAPSHOT_CACHE_CAP = 20
 
 export function createComputerUseTool(options: ComputerUseToolOptions = {}): Tool {
   const platform = options.platform ?? process.platform
@@ -67,41 +94,156 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
   const enabled = options.enabled ?? isDarwin
   const driverFactory = options.driverFactory ?? createMacosDriver
   const grantLookup = options.isAppGranted ?? ((app: string) => isAppGranted(app))
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+
+  // Snapshot ref cache — closure-scoped (per tool instance) LRU. Map iteration
+  // order is insertion order; delete+set refreshes recency.
+  const snapshotCache = new Map<string, SnapshotCacheEntry>()
+
+  function cacheKey(params: ToolCallParams, app: string): string {
+    return `${params.sessionId ?? 'default'}:${app.toLowerCase()}`
+  }
+
+  function cacheGet(key: string): SnapshotCacheEntry | undefined {
+    const entry = snapshotCache.get(key)
+    if (entry) {
+      snapshotCache.delete(key)
+      snapshotCache.set(key, entry)
+    }
+    return entry
+  }
+
+  function cacheSet(key: string, entry: SnapshotCacheEntry): void {
+    snapshotCache.delete(key)
+    snapshotCache.set(key, entry)
+    while (snapshotCache.size > SNAPSHOT_CACHE_CAP) {
+      const oldest = snapshotCache.keys().next().value
+      if (oldest === undefined) break
+      snapshotCache.delete(oldest)
+    }
+  }
 
   function targetApp(input: Record<string, unknown>): string {
     const app = input.app
     return typeof app === 'string' ? app.trim() : ''
   }
 
+  /** Resolve a ref number to its cached AX-path target, or a model-facing error. */
+  function resolveRef(params: ToolCallParams, app: string, ref: number):
+    | { ok: true; target: { path: number[]; role?: string; title?: string }; sr: SnapshotRef }
+    | { ok: false; error: string } {
+    const entry = cacheGet(cacheKey(params, app))
+    if (!entry) {
+      return { ok: false, error: `No snapshot cached for ${app} in this session — take a snapshot first, then click by ref.` }
+    }
+    const sr = entry.refs.get(ref)
+    if (!sr) {
+      return { ok: false, error: `ref ${ref} is not in the latest ${app} snapshot — re-snapshot and use a current ref.` }
+    }
+    return { ok: true, target: { path: sr.path, role: sr.role || undefined, title: sr.title || undefined }, sr }
+  }
+
+  /** Resolve a drag/scroll endpoint: ref (via cache + live locate) or raw coords. */
+  async function resolvePoint(
+    driver: ComputerUseDriver,
+    params: ToolCallParams,
+    app: string,
+    refKey: string,
+    xKey: string,
+    yKey: string,
+  ): Promise<{ ok: true; point: { x: number; y: number } } | { ok: false; error: string }> {
+    const ref = params.input[refKey]
+    const x = params.input[xKey]
+    const y = params.input[yKey]
+    if (typeof ref === 'number') {
+      const resolved = resolveRef(params, app, ref)
+      if (!resolved.ok) return resolved
+      try {
+        const point = await driver.locate(app, resolved.target)
+        return { ok: true, point }
+      } catch (err) {
+        return { ok: false, error: `Cannot locate ref ${ref}: ${(err as Error).message}` }
+      }
+    }
+    if (typeof x === 'number' && typeof y === 'number') {
+      return { ok: true, point: { x, y } }
+    }
+    return { ok: false, error: `Provide either "${refKey}" (snapshot ref) or both "${xKey}" and "${yKey}".` }
+  }
+
+  async function executeClick(
+    driver: ComputerUseDriver,
+    params: ToolCallParams,
+    app: string,
+    button: 'left' | 'right',
+    count: 1 | 2,
+  ): Promise<ToolResult> {
+    const ref = params.input.ref
+    const x = params.input.x
+    const y = params.input.y
+    let target: ClickTarget
+    let where: string
+    if (typeof ref === 'number') {
+      const resolved = resolveRef(params, app, ref)
+      if (!resolved.ok) return { content: resolved.error, isError: true }
+      target = resolved.target
+      const label = resolved.sr.title ? ` "${resolved.sr.title}"` : ''
+      where = `ref ${ref}${label}`
+    } else if (typeof x === 'number' && typeof y === 'number') {
+      target = { x, y }
+      where = `(${x}, ${y})`
+    } else {
+      return { content: 'click requires "ref" (from a snapshot) or both "x" and "y".', isError: true }
+    }
+    await driver.click(app, target, { button, count })
+    const verb = count === 2 ? 'Double-clicked' : button === 'right' ? 'Right-clicked' : 'Clicked'
+    return { content: `${verb} ${where} in ${app}.` }
+  }
+
   return {
     definition: {
       name: 'computer_use',
-      description: `Operate macOS graphical apps: inspect an app's accessibility tree, click elements, type text, send key combos, focus apps. Use ONLY when CLI tools, MCP servers, or structured integrations can't do the job (e.g. a native app with no API, a GUI-only setting, or reproducing a UI-only bug) — prefer structured tools whenever available.
+      description: `Operate macOS graphical apps: inspect an app's accessibility tree, click/scroll/drag elements, type text, send key combos, focus apps. Use ONLY when CLI tools, MCP servers, or structured integrations can't do the job (e.g. a native app with no API, a GUI-only setting, or reproducing a UI-only bug) — prefer structured tools whenever available.
 
-Every action on an app requires human approval unless that app is already granted "always allow". Screenshots are saved as viewable artifacts; the accessibility tree (text) is what you reason over.
+Every action on an app requires human approval unless that app is already granted "always allow". Screenshots are saved as viewable artifacts; the accessibility tree (text) is what you reason over. When the active model supports vision, the snapshot screenshot is also attached to the conversation as an image.
 
 Actions:
 - check_permissions: report Accessibility / Screen Recording status (no approval).
 - list_apps: list visible apps.
-- snapshot(app): return the app's numbered accessibility tree + save a screenshot artifact.
-- click(app, ref|x,y): click a snapshot element ref (preferred) or coordinates.
+- snapshot(app): return the app's numbered accessibility tree + save a screenshot artifact. If the UI has not changed since the last snapshot, returns a short "unchanged" note instead of repeating the tree.
+- click(app, ref|x,y): left-click a snapshot element ref (preferred) or coordinates.
+- double_click(app, ref|x,y) / right_click(app, ref|x,y): double / context click.
+- scroll(app, direction, amount?, ref|x,y?): scroll the view under the target (default: window center).
+- drag(app, from_ref|from_x+from_y, to_ref|to_x+to_y): press-drag-release.
 - type(app, text): type text into the focused field.
 - key(app, combo): send a key combo like "cmd+s" or "return".
-- focus_app(app): bring an app to the foreground.`,
+- wait(duration_ms): pause up to 5000ms for animations/loads (no approval).
+- focus_app(app): bring an app to the foreground.
+
+Refs come from the LATEST snapshot of that app; after the UI changes, re-snapshot before clicking (stale refs are rejected, never guessed).`,
       input_schema: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['check_permissions', 'list_apps', 'snapshot', 'click', 'type', 'key', 'focus_app'],
+            enum: ['check_permissions', 'list_apps', 'snapshot', 'click', 'double_click', 'right_click', 'scroll', 'drag', 'type', 'key', 'wait', 'focus_app'],
             description: 'What to do.',
           },
-          app: { type: 'string', description: 'Target app name (required for all actions except list_apps/check_permissions).' },
-          ref: { type: 'number', description: 'Snapshot element ref to click (from a prior snapshot).' },
-          x: { type: 'number', description: 'Click X coordinate (screen pixels) when no ref is given.' },
-          y: { type: 'number', description: 'Click Y coordinate (screen pixels) when no ref is given.' },
+          app: { type: 'string', description: 'Target app name (required for all actions except list_apps/check_permissions/wait).' },
+          ref: { type: 'number', description: 'Snapshot element ref to target (click/scroll; from the latest snapshot).' },
+          x: { type: 'number', description: 'X coordinate (screen pixels) when no ref is given.' },
+          y: { type: 'number', description: 'Y coordinate (screen pixels) when no ref is given.' },
           text: { type: 'string', description: 'Text to type (type action).' },
           combo: { type: 'string', description: 'Key combo like "cmd+s", "shift+cmd+4", "return" (key action).' },
+          direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction (scroll action).' },
+          amount: { type: 'number', description: 'Scroll magnitude in wheel lines, 1-50 (default 5).' },
+          from_ref: { type: 'number', description: 'Drag start: snapshot ref.' },
+          from_x: { type: 'number', description: 'Drag start X (when no from_ref).' },
+          from_y: { type: 'number', description: 'Drag start Y (when no from_ref).' },
+          to_ref: { type: 'number', description: 'Drag end: snapshot ref.' },
+          to_x: { type: 'number', description: 'Drag end X (when no to_ref).' },
+          to_y: { type: 'number', description: 'Drag end Y (when no to_ref).' },
+          duration_ms: { type: 'number', description: 'Wait duration in ms, capped at 5000 (wait action).' },
         },
         required: ['action'],
       },
@@ -116,6 +258,14 @@ Actions:
       }
       const action = params.input.action as ComputerUseAction
       const app = targetApp(params.input)
+
+      // wait needs no driver and no app — resolve before driver init.
+      if (action === 'wait') {
+        const raw = params.input.duration_ms
+        const ms = Math.max(0, Math.min(WAIT_CAP_MS, typeof raw === 'number' ? Math.round(raw) : 1_000))
+        await sleep(ms)
+        return { content: `Waited ${ms}ms.` }
+      }
 
       let driver: ComputerUseDriver
       try {
@@ -154,29 +304,60 @@ Actions:
               })
             }
             const tree = redactTree(snap.tree)
+            const key = cacheKey(params, app)
+            const previous = cacheGet(key)
+            const unchanged = previous !== undefined && previous.lastTree === tree
+            cacheSet(key, {
+              refs: new Map(snap.refs.map((r) => [r.ref, r])),
+              lastTree: tree,
+            })
+            const artifactNote = artifactId ? ` (screenshot → artifact ${artifactId})` : ' (screenshot unavailable)'
+            if (unchanged) {
+              // Dedup: identical tree → short note, no image re-attachment.
+              // Existing refs stay valid (same tree ⇒ same paths).
+              return { content: `Snapshot of ${app}${artifactNote}: UI unchanged since the last snapshot — previous refs remain valid.` }
+            }
+            const images = snap.visionPng
+              ? [`data:image/png;base64,${snap.visionPng.toString('base64')}`]
+              : undefined
             return {
-              content:
-                `Accessibility tree for ${app}` +
-                (artifactId ? ` (screenshot → artifact ${artifactId})` : ' (screenshot unavailable)') +
-                `:\n\n${tree}`,
+              content: `Accessibility tree for ${app}${artifactNote}:\n\n${tree}`,
+              images,
             }
           }
-          case 'click': {
+          case 'click':
             if (!app) return { content: 'click requires "app".', isError: true }
-            const ref = params.input.ref
-            const x = params.input.x
-            const y = params.input.y
-            let target: ClickTarget
-            if (typeof ref === 'number') {
-              target = { ref }
-            } else if (typeof x === 'number' && typeof y === 'number') {
-              target = { x, y }
-            } else {
-              return { content: 'click requires "ref" (from a snapshot) or both "x" and "y".', isError: true }
+            return await executeClick(driver, params, app, 'left', 1)
+          case 'double_click':
+            if (!app) return { content: 'double_click requires "app".', isError: true }
+            return await executeClick(driver, params, app, 'left', 2)
+          case 'right_click':
+            if (!app) return { content: 'right_click requires "app".', isError: true }
+            return await executeClick(driver, params, app, 'right', 1)
+          case 'scroll': {
+            if (!app) return { content: 'scroll requires "app".', isError: true }
+            const direction = params.input.direction
+            if (direction !== 'up' && direction !== 'down' && direction !== 'left' && direction !== 'right') {
+              return { content: 'scroll requires "direction" (up|down|left|right).', isError: true }
             }
-            await driver.click(app, target)
-            const where = 'ref' in target ? `ref ${target.ref}` : `(${target.x}, ${target.y})`
-            return { content: `Clicked ${where} in ${app}.` }
+            const amount = typeof params.input.amount === 'number' ? params.input.amount : undefined
+            let at: { x: number; y: number } | undefined
+            if (typeof params.input.ref === 'number' || (typeof params.input.x === 'number' && typeof params.input.y === 'number')) {
+              const point = await resolvePoint(driver, params, app, 'ref', 'x', 'y')
+              if (!point.ok) return { content: point.error, isError: true }
+              at = point.point
+            }
+            await driver.scroll(app, { direction, amount, at })
+            return { content: `Scrolled ${direction}${amount ? ` by ${amount}` : ''} in ${app}${at ? ` at (${Math.round(at.x)}, ${Math.round(at.y)})` : ''}.` }
+          }
+          case 'drag': {
+            if (!app) return { content: 'drag requires "app".', isError: true }
+            const from = await resolvePoint(driver, params, app, 'from_ref', 'from_x', 'from_y')
+            if (!from.ok) return { content: from.error, isError: true }
+            const to = await resolvePoint(driver, params, app, 'to_ref', 'to_x', 'to_y')
+            if (!to.ok) return { content: to.error, isError: true }
+            await driver.drag(app, from.point, to.point)
+            return { content: `Dragged from (${Math.round(from.point.x)}, ${Math.round(from.point.y)}) to (${Math.round(to.point.x)}, ${Math.round(to.point.y)}) in ${app}.` }
           }
           case 'type': {
             if (!app) return { content: 'type requires "app".', isError: true }

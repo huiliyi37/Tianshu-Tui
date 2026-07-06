@@ -523,14 +523,26 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
         list_apps: '枚举可见应用',
         snapshot: '读取界面结构并截图',
         click: '点击界面元素',
+        double_click: '双击界面元素',
+        right_click: '右键点击界面元素',
+        scroll: '滚动视图',
+        drag: '拖拽元素',
+        wait: '等待界面加载',
         type: '输入文本',
         key: '发送快捷键',
         focus_app: '切换到前台',
       }
       const what = actionLabel[action] ?? action
       let target = ''
-      if (action === 'click') {
+      if (action === 'click' || action === 'double_click' || action === 'right_click') {
         target = typeof input.ref === 'number' ? `（元素 #${input.ref}）` : `（坐标 ${String(input.x)}, ${String(input.y)}）`
+      } else if (action === 'scroll') {
+        const dirLabel: Record<string, string> = { up: '向上', down: '向下', left: '向左', right: '向右' }
+        target = input.direction ? `（${dirLabel[String(input.direction)] ?? String(input.direction)}）` : ''
+      } else if (action === 'drag') {
+        const from = typeof input.from_ref === 'number' ? `#${input.from_ref}` : `(${String(input.from_x)}, ${String(input.from_y)})`
+        const to = typeof input.to_ref === 'number' ? `#${input.to_ref}` : `(${String(input.to_x)}, ${String(input.to_y)})`
+        target = `（${from} → ${to}）`
       } else if (action === 'type') {
         const t = String(input.text ?? '')
         target = t ? `（${t.length > 24 ? `${t.slice(0, 24)}…` : t}）` : ''

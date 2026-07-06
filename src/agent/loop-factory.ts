@@ -249,6 +249,12 @@ return new ToolExecutionController({
       getSessionTurnCount: () => self.session.getTurnCount(),
       getSessionId: () => self.config.sessionId,
       addToolResults: results => { self.session.addToolResults(results) },
+      // Vision channel (computer_use screenshots → model). Capability comes from
+      // the per-model config flag; switchModel rebuilds the loop so it tracks
+      // the active model. Injection is tail-append via addUserMessage (multimodal
+      // parts) — the same append-only boundary the steer path uses.
+      getSupportsVision: () => self.config.supportsVision ?? false,
+      addUserMessageWithImages: (text, images) => { self.session.addUserMessage(text, images) },
       recordToolHistory: (name, input, isError, content, errorClass) => self.recordToolHistory(name, input, isError, content, errorClass),
       onLeaveMark: mark => self.captureLeaveMark(mark),
       onPlanSteps: steps => self.capturePlanSteps(steps),

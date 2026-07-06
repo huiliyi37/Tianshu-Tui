@@ -185,6 +185,10 @@ export interface AgentConfig {
   }
   /** 当前 provider 的前缀缓存策略 — 逃生口 /tools enable 用它量化挂载的缓存代价。 */
   prefixCacheStrategy?: 'deepseek-native' | 'anthropic-cache-control' | 'none'
+  /** 当前模型是否接受图片输入（多模态 user 消息）。按模型声明（config.models[].supportsVision），
+   *  switchModel 重建 agent 时随 ModelSpec 更新。门控工具边界视觉通道：
+   *  computer_use 截图仅在 true 时以尾部追加 user 消息回灌模型，false 时静默丢弃。 */
+  supportsVision?: boolean
   /** TDD gate config — controls whether edit tools are blocked when the model
    *  edits files without running tests. Parsed from RIVET_TDD_GATE env var.
    *  Default: enabled, enforce mode, threshold 3 edits. */

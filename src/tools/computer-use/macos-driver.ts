@@ -1,15 +1,22 @@
 /**
  * macOS Computer Use driver — GUI automation via osascript + screencapture.
  *
- * Zero new dependencies: the accessibility tree and input synthesis go through
- * `osascript` (JXA / System Events), and window screenshots through the bundled
+ * Zero new dependencies: the accessibility tree goes through `osascript`
+ * (JXA / System Events), input synthesis through JXA's ObjC bridge to
+ * CoreGraphics (CGEvent — reliable synthetic mouse events, unlike System
+ * Events' `click at`), and window screenshots through the bundled
  * `screencapture` binary. The driver interface is injectable so the tool's
  * security logic is unit-testable with a fake driver (mirrors browser.ts).
  *
  * Perception is dual-channel by design: the accessibility TREE (text) is the
- * model-facing channel (any model can read it; DeepSeek V4 declares no vision),
- * while the SCREENSHOT is persisted as a viewable artifact for the user to
- * watch — it is not fed back to the model.
+ * universal model-facing channel, while the SCREENSHOT is persisted as a
+ * viewable artifact — and, for vision-capable models, a downsampled copy
+ * (`visionPng`) can be attached to the conversation by the tool pipeline.
+ *
+ * Element targeting: each snapshot ref carries its AX child-index PATH
+ * (e.g. [0,3,1] = window 0 → child 3 → child 1). Click resolution walks the
+ * path directly and verifies role/title — far more stable than re-walking
+ * the whole tree and counting to the Nth labeled element.
  */
 
 import { execFile } from 'node:child_process'
@@ -23,16 +30,44 @@ export interface AppInfo {
   frontmost: boolean
 }
 
-/** A click target: either a snapshot element ref (preferred) or raw coords. */
+/** Structured snapshot element: ref number + AX path + identity for validation. */
+export interface SnapshotRef {
+  ref: number
+  /** Child-index chain from the app's windows: [windowIdx, childIdx, ...]. */
+  path: number[]
+  role: string
+  title: string
+  pos: { x: number; y: number } | null
+}
+
+/** A click target: an AX path (preferred, validated) or raw screen coords. */
 export type ClickTarget =
-  | { ref: number }
+  | { path: number[]; role?: string; title?: string }
   | { x: number; y: number }
+
+export interface ClickOptions {
+  button?: 'left' | 'right'
+  count?: 1 | 2
+}
+
+export interface ScrollOptions {
+  direction: 'up' | 'down' | 'left' | 'right'
+  /** Scroll magnitude in wheel lines (default 5). */
+  amount?: number
+  /** Position the cursor here first; defaults to the app window center. */
+  at?: { x: number; y: number }
+}
 
 export interface SnapshotResult {
   /** Compact numbered accessibility tree (model-facing). */
   tree: string
+  /** Structured refs backing the tree — cached by the tool for click targeting. */
+  refs: SnapshotRef[]
   /** Window screenshot PNG (user-facing artifact); null if capture failed. */
   screenshotPng: Buffer | null
+  /** Downsampled screenshot (max 1440px, sips) for vision-model attachment;
+   *  null when capture failed or downsampling did not help. */
+  visionPng: Buffer | null
 }
 
 export interface PermissionStatus {
@@ -47,7 +82,11 @@ export interface PermissionStatus {
 export interface ComputerUseDriver {
   listApps(): Promise<AppInfo[]>
   snapshot(app: string): Promise<SnapshotResult>
-  click(app: string, target: ClickTarget): Promise<void>
+  click(app: string, target: ClickTarget, opts?: ClickOptions): Promise<void>
+  /** Resolve an AX-path target to its on-screen center point (validated). */
+  locate(app: string, target: { path: number[]; role?: string; title?: string }): Promise<{ x: number; y: number }>
+  scroll(app: string, opts: ScrollOptions): Promise<void>
+  drag(app: string, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void>
   type(app: string, text: string): Promise<void>
   key(app: string, combo: string): Promise<void>
   focusApp(app: string): Promise<void>
@@ -59,6 +98,8 @@ export type ComputerUseDriverFactory = () => ComputerUseDriver
 const OSASCRIPT_TIMEOUT_MS = 15_000
 /** Bound the accessibility walk so a deep app tree can't blow up the result. */
 const MAX_TREE_NODES = 400
+/** Max dimension for the vision-model screenshot copy (px). */
+const VISION_MAX_DIMENSION = 1440
 
 function runOsascript(args: string[], timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -76,14 +117,128 @@ function runJxa(script: string, timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise<strin
   return runOsascript(['-l', 'JavaScript', '-e', script], timeoutMs)
 }
 
-/** Escape a string for safe embedding inside a single-quoted JXA string literal. */
+/** Escape a string for safe embedding inside a JXA script (double-quoted literal). */
 function jxaString(value: string): string {
-  // We build the script with template concatenation using JSON.stringify for the
-  // payload, which produces a valid double-quoted JS string literal.
   return JSON.stringify(value)
 }
 
-async function captureWindow(app: string): Promise<Buffer | null> {
+/**
+ * JXA prelude: CGEvent synthesis helpers via the ObjC bridge. Synthetic mouse
+ * events posted at the HID tap are what real input devices produce — System
+ * Events' `click at {x,y}` is unreliable (ignored by many apps) and has no
+ * right-click/double-click/scroll/drag story at all.
+ */
+const CG_PRELUDE = `
+  ObjC.import('CoreGraphics');
+  function cgPost(ev) { $.CGEventPost($.kCGHIDEventTap, ev); }
+  function cgMouse(type, x, y, btn, clickState) {
+    const ev = $.CGEventCreateMouseEvent($(), type, { x: x, y: y }, btn);
+    if (clickState) $.CGEventSetIntegerValueField(ev, $.kCGMouseEventClickState, clickState);
+    cgPost(ev);
+  }
+  function cgMove(x, y) { cgMouse($.kCGEventMouseMoved, x, y, $.kCGMouseButtonLeft, 0); }
+  function cgClick(x, y, right, count) {
+    const down = right ? $.kCGEventRightMouseDown : $.kCGEventLeftMouseDown;
+    const up = right ? $.kCGEventRightMouseUp : $.kCGEventLeftMouseUp;
+    const btn = right ? $.kCGMouseButtonRight : $.kCGMouseButtonLeft;
+    cgMove(x, y);
+    for (let i = 1; i <= count; i++) {
+      cgMouse(down, x, y, btn, i);
+      cgMouse(up, x, y, btn, i);
+    }
+  }
+  function sleepS(s) { $.NSThread.sleepForTimeInterval(s); }
+`
+
+/**
+ * JXA helper: resolve an element by AX child-index path with identity check.
+ * Emits `found` (the element) or throws a stale-snapshot error. Expects
+ * `PATH`, `EXPECT_ROLE`, `EXPECT_TITLE` consts to be defined by the caller.
+ */
+const RESOLVE_BY_PATH = `
+  let windows = [];
+  try { windows = proc.windows(); } catch (e) {}
+  if (PATH.length === 0 || PATH[0] >= windows.length) {
+    throw new Error('stale snapshot — window index out of range, re-snapshot first');
+  }
+  let el = windows[PATH[0]];
+  for (let i = 1; i < PATH.length; i++) {
+    let kids = [];
+    try { kids = el.uiElements(); } catch (e) {}
+    if (PATH[i] >= kids.length) {
+      throw new Error('stale snapshot — element path no longer valid, re-snapshot first');
+    }
+    el = kids[PATH[i]];
+  }
+  let role = '', title = '';
+  try { role = el.role(); } catch (e) {}
+  try { title = el.title() || el.description() || ''; } catch (e) {}
+  if (EXPECT_ROLE && role !== EXPECT_ROLE) {
+    throw new Error('stale snapshot — element role changed (' + role + ' != ' + EXPECT_ROLE + '), re-snapshot first');
+  }
+  if (EXPECT_TITLE && title !== EXPECT_TITLE) {
+    throw new Error('stale snapshot — element title changed, re-snapshot first');
+  }
+  const found = el;
+`
+
+/** Build the const declarations for a path-target resolution. */
+function pathConsts(target: { path: number[]; role?: string; title?: string }): string {
+  return `
+    const PATH = ${JSON.stringify(target.path)};
+    const EXPECT_ROLE = ${jxaString(target.role ?? '')};
+    const EXPECT_TITLE = ${jxaString(target.title ?? '')};
+  `
+}
+
+/** Center point of an AX element (position + size / 2), with fallbacks. */
+const ELEMENT_CENTER = `
+  let cx = null, cy = null;
+  try {
+    const p = found.position(); const s = found.size();
+    cx = p[0] + s[0] / 2; cy = p[1] + s[1] / 2;
+  } catch (e) {
+    try { const p = found.position(); cx = p[0]; cy = p[1]; } catch (e2) {}
+  }
+  if (cx === null) throw new Error('element has no on-screen position');
+`
+
+async function windowCenter(app: string): Promise<{ x: number; y: number } | null> {
+  const script = `
+    const se = Application('System Events');
+    const proc = se.processes.byName(${jxaString(app)});
+    const win = proc.windows[0];
+    const pos = win.position(); const size = win.size();
+    JSON.stringify({ x: pos[0] + size[0] / 2, y: pos[1] + size[1] / 2 });
+  `
+  try {
+    return JSON.parse((await runJxa(script)).trim())
+  } catch {
+    return null
+  }
+}
+
+/** Downsample a PNG to VISION_MAX_DIMENSION via macOS-bundled sips. */
+async function downsampleForVision(srcFile: string): Promise<Buffer | null> {
+  const dest = join(tmpdir(), `rivet-cu-vision-${randomUUID()}.png`)
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        'sips',
+        ['-Z', String(VISION_MAX_DIMENSION), srcFile, '--out', dest],
+        { timeout: OSASCRIPT_TIMEOUT_MS },
+        (err) => (err ? reject(err) : resolve()),
+      )
+    })
+    return await readFile(dest)
+  } catch {
+    return null
+  } finally {
+    try { await unlink(dest) } catch { /* best-effort temp cleanup */ }
+  }
+}
+
+async function captureWindow(app: string): Promise<{ png: Buffer | null; visionPng: Buffer | null }> {
   // Get the frontmost window bounds of the target app, then screencapture that
   // rectangle. Falls back to null (tree-only) if bounds can't be resolved.
   const boundsScript = `
@@ -99,9 +254,9 @@ async function captureWindow(app: string): Promise<Buffer | null> {
     const out = (await runJxa(boundsScript)).trim()
     rect = JSON.parse(out)
   } catch {
-    return null
+    return { png: null, visionPng: null }
   }
-  if (!rect.w || !rect.h) return null
+  if (!rect.w || !rect.h) return { png: null, visionPng: null }
 
   const file = join(tmpdir(), `rivet-cu-${randomUUID()}.png`)
   const region = `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.w)},${Math.round(rect.h)}`
@@ -113,9 +268,14 @@ async function captureWindow(app: string): Promise<Buffer | null> {
       })
     })
     const buf = await readFile(file)
-    return buf
+    // Vision copy: capped at 1440px so a Retina-scale window PNG doesn't dump
+    // megabytes of base64 into the context. If sips somehow produces a LARGER
+    // file (tiny window upsampled), keep the original.
+    const scaled = await downsampleForVision(file)
+    const visionPng = scaled && scaled.length < buf.length ? scaled : buf
+    return { png: buf, visionPng }
   } catch {
-    return null
+    return { png: null, visionPng: null }
   } finally {
     try { await unlink(file) } catch { /* best-effort temp cleanup */ }
   }
@@ -141,15 +301,16 @@ export function createMacosDriver(): ComputerUseDriver {
     },
 
     async snapshot(app: string): Promise<SnapshotResult> {
-      // Walk the accessibility tree breadth-limited, emitting a numbered ref per
-      // actionable/labeled element so the model can target clicks by ref.
+      // Walk the accessibility tree breadth-limited, emitting a numbered ref
+      // AND its child-index path per actionable/labeled element so clicks can
+      // later resolve the exact element without re-counting the whole tree.
       const script = `
         const se = Application('System Events');
         const proc = se.processes.byName(${jxaString(app)});
         const MAX = ${MAX_TREE_NODES};
         const rows = [];
         let ref = 0;
-        function visit(el, depth) {
+        function visit(el, depth, path) {
           if (rows.length >= MAX) return;
           let role = '', title = '', value = '';
           try { role = el.role(); } catch (e) {}
@@ -159,22 +320,22 @@ export function createMacosDriver(): ComputerUseDriver {
             ref++;
             let pos = null;
             try { const p = el.position(); pos = { x: p[0], y: p[1] }; } catch (e) {}
-            rows.push({ ref, depth, role, title, value, pos });
+            rows.push({ ref, depth, role, title, value, pos, path });
           }
           let kids = [];
           try { kids = el.uiElements(); } catch (e) {}
           for (let i = 0; i < kids.length; i++) {
             if (rows.length >= MAX) break;
-            visit(kids[i], depth + 1);
+            visit(kids[i], depth + 1, path.concat(i));
           }
         }
         let windows = [];
         try { windows = proc.windows(); } catch (e) {}
-        for (let i = 0; i < windows.length; i++) visit(windows[i], 0);
+        for (let i = 0; i < windows.length; i++) visit(windows[i], 0, [i]);
         JSON.stringify(rows);
       `
       const raw = (await runJxa(script)).trim()
-      let rows: Array<{ ref: number; depth: number; role: string; title: string; value: string; pos: { x: number; y: number } | null }> = []
+      let rows: Array<{ ref: number; depth: number; role: string; title: string; value: string; pos: { x: number; y: number } | null; path: number[] }> = []
       try {
         rows = JSON.parse(raw)
       } catch {
@@ -189,45 +350,114 @@ export function createMacosDriver(): ComputerUseDriver {
           return `${indent}[${r.ref}] ${r.role || 'element'}${label}${val}${at}`
         })
         .join('\n')
-      const screenshotPng = await captureWindow(app)
-      return { tree: tree || '(no accessible elements found)', screenshotPng }
+      const refs: SnapshotRef[] = rows.map((r) => ({
+        ref: r.ref,
+        path: r.path,
+        role: r.role,
+        title: r.title,
+        pos: r.pos,
+      }))
+      const shot = await captureWindow(app)
+      return {
+        tree: tree || '(no accessible elements found)',
+        refs,
+        screenshotPng: shot.png,
+        visionPng: shot.visionPng,
+      }
     },
 
-    async click(app: string, target: ClickTarget): Promise<void> {
-      if ('ref' in target) {
-        // Re-walk to the nth labeled element and click it via AXPress.
+    async click(app: string, target: ClickTarget, opts?: ClickOptions): Promise<void> {
+      const button = opts?.button ?? 'left'
+      const count = opts?.count ?? 1
+      if ('path' in target) {
+        // Resolve by AX path + identity check. Plain left single click uses
+        // AXPress (works even for obscured elements); right/double click needs
+        // real synthetic events at the element's center.
+        if (button === 'left' && count === 1) {
+          const script = `
+            const se = Application('System Events');
+            const proc = se.processes.byName(${jxaString(app)});
+            ${pathConsts(target)}
+            ${RESOLVE_BY_PATH}
+            found.click();
+            'ok';
+          `
+          await runJxa(script)
+          return
+        }
         const script = `
+          ${CG_PRELUDE}
           const se = Application('System Events');
           const proc = se.processes.byName(${jxaString(app)});
-          const TARGET = ${target.ref};
-          let ref = 0; let found = null;
-          function visit(el) {
-            if (found) return;
-            let role = '', title = '', value = '';
-            try { role = el.role(); } catch (e) {}
-            try { title = el.title() || el.description() || ''; } catch (e) {}
-            try { value = String(el.value() || ''); } catch (e) {}
-            if (role || title || value) { ref++; if (ref === TARGET) { found = el; return; } }
-            let kids = [];
-            try { kids = el.uiElements(); } catch (e) {}
-            for (let i = 0; i < kids.length && !found; i++) visit(kids[i]);
-          }
-          let windows = [];
-          try { windows = proc.windows(); } catch (e) {}
-          for (let i = 0; i < windows.length && !found; i++) visit(windows[i]);
-          if (!found) throw new Error('ref ${target.ref} not found in snapshot');
-          found.click();
+          ${pathConsts(target)}
+          ${RESOLVE_BY_PATH}
+          ${ELEMENT_CENTER}
+          cgClick(cx, cy, ${button === 'right'}, ${count});
           'ok';
         `
         await runJxa(script)
         return
       }
-      // Coordinate click via cliclick-free System Events: use AXPress is not
-      // available for raw coords, so synthesize a click through JXA's
-      // "click at" on the process. System Events supports `click at {x, y}`.
+      // Raw coordinate click via CGEvent (System Events' `click at` is flaky).
+      const script = `
+        ${CG_PRELUDE}
+        cgClick(${Math.round(target.x)}, ${Math.round(target.y)}, ${button === 'right'}, ${count});
+        'ok';
+      `
+      await runJxa(script)
+    },
+
+    async locate(app: string, target: { path: number[]; role?: string; title?: string }): Promise<{ x: number; y: number }> {
       const script = `
         const se = Application('System Events');
-        se.click({ at: [${Math.round(target.x)}, ${Math.round(target.y)}] });
+        const proc = se.processes.byName(${jxaString(app)});
+        ${pathConsts(target)}
+        ${RESOLVE_BY_PATH}
+        ${ELEMENT_CENTER}
+        JSON.stringify({ x: Math.round(cx), y: Math.round(cy) });
+      `
+      const raw = (await runJxa(script)).trim()
+      return JSON.parse(raw) as { x: number; y: number }
+    },
+
+    async scroll(app: string, opts: ScrollOptions): Promise<void> {
+      const amount = Math.max(1, Math.min(50, Math.round(opts.amount ?? 5)))
+      // CGEvent scroll: wheel1 = vertical (positive scrolls up), wheel2 = horizontal
+      // (positive scrolls left). Position the cursor over the target first —
+      // scroll events are delivered to the view under the cursor.
+      const at = opts.at ?? (await windowCenter(app))
+      if (!at) throw new Error(`cannot resolve a scroll position for ${app} (no window)`)
+      const v = opts.direction === 'up' ? amount : opts.direction === 'down' ? -amount : 0
+      const h = opts.direction === 'left' ? amount : opts.direction === 'right' ? -amount : 0
+      const script = `
+        ${CG_PRELUDE}
+        cgMove(${Math.round(at.x)}, ${Math.round(at.y)});
+        const ev = $.CGEventCreateScrollWheelEvent2($(), $.kCGScrollEventUnitLine, 2, ${v}, ${h}, 0);
+        cgPost(ev);
+        'ok';
+      `
+      await runJxa(script)
+    },
+
+    async drag(app: string, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+      // mouseDown → stepped mouseDragged → mouseUp. Steps + inter-step sleeps
+      // matter: many drop targets ignore a teleporting drag.
+      const steps = 8
+      const script = `
+        ${CG_PRELUDE}
+        const fx = ${Math.round(from.x)}, fy = ${Math.round(from.y)};
+        const tx = ${Math.round(to.x)}, ty = ${Math.round(to.y)};
+        cgMove(fx, fy);
+        sleepS(0.05);
+        cgMouse($.kCGEventLeftMouseDown, fx, fy, $.kCGMouseButtonLeft, 1);
+        for (let i = 1; i <= ${steps}; i++) {
+          const x = fx + (tx - fx) * i / ${steps};
+          const y = fy + (ty - fy) * i / ${steps};
+          cgMouse($.kCGEventLeftMouseDragged, x, y, $.kCGMouseButtonLeft, 1);
+          sleepS(0.02);
+        }
+        sleepS(0.05);
+        cgMouse($.kCGEventLeftMouseUp, tx, ty, $.kCGMouseButtonLeft, 1);
         'ok';
       `
       await runJxa(script)
