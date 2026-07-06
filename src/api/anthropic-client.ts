@@ -455,10 +455,16 @@ export class AnthropicClient implements StreamClient {
                 const buf = toolUseBuffer.get(index)
                 if (buf) {
                   let input: Record<string, unknown> = {}
+                  let argsTruncated: boolean | undefined
                   try {
                     input = JSON.parse(buf.partialJson || '{}')
-                  } catch { /* keep empty */ }
-                  callbacks.onContentBlock({ type: 'tool_use', id: buf.id, name: buf.name, input })
+                  } catch {
+                    // Incomplete/unparseable partial_json at block stop — mark
+                    // the block so the tool pipeline refuses to execute the {}
+                    // placeholder (same contract as openai-client final flush).
+                    argsTruncated = true
+                  }
+                  callbacks.onContentBlock({ type: 'tool_use', id: buf.id, name: buf.name, input, argsTruncated })
                   toolUseBuffer.delete(index)
                 }
               }
@@ -521,11 +527,18 @@ export class AnthropicClient implements StreamClient {
       callbacks.onContentBlock({ type: 'thinking', thinking: thinkingBlocks.join('') })
     }
 
+    // Anthropic reports cache-EXCLUSIVE input_tokens (cache read/creation are
+    // separate buckets). Normalize to the codebase convention where
+    // Usage.input_tokens is the cache-INCLUSIVE prompt total (see api/types.ts)
+    // so hit-rate / cost / meta accounting treat all providers uniformly.
+    const rawInput = usage.input_tokens ?? 0
+    const cacheRead = usage.cache_read_input_tokens ?? 0
+    const cacheCreation = usage.cache_creation_input_tokens ?? 0
     callbacks.onStopReason(stopReason ?? 'end_turn', {
-      input_tokens: usage.input_tokens ?? 0,
+      input_tokens: rawInput + cacheRead + cacheCreation,
       output_tokens: usage.output_tokens ?? 0,
-      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
-      cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+      cache_read_input_tokens: cacheRead,
+      cache_creation_input_tokens: cacheCreation,
     })
   }
 }

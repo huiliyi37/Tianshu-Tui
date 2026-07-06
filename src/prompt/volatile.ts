@@ -8,7 +8,6 @@ import type { TaskState } from '../agent/task-state.js'
 import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
 import { selectRelevantClaims, type ClaimRelevanceInput } from '../context/claim-relevance.js'
 import { summarizeGitStatus } from './git-status-summary.js'
-import { scoreLessons } from '../context/lesson-relevance.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 import type { WorktreeReality } from '../agent/worktree-reality.js'
 import type { TaskDepthLayer } from '../context/task-contract.js'
@@ -31,7 +30,7 @@ import type { PlanMethodology } from '../context/task-contract.js'
 // against. Zero new tools; just nudges the model toward the existing todo tool.
 const METHODOLOGY_ADVISORY_TEMPLATES: Record<PlanMethodology, string> = {
   lightweight: '<plan-methodology route="lightweight">推荐使用轻量版计划模板（5阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md。本任务 scope 内聚，单模块边界内变更，轻量版足以覆盖。至少画一张架构或数据流图（Mermaid），哪怕只画核心 3-5 个节点。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
-  full: '<plan-methodology route="full">推荐使用基础计划模板（Superpowers writing-plans），路径: docs/superpowers/plans/2026-06-28-plan-methodology-base.md。这是所有计划的默认基础：零上下文假设、任务粒度 2-5 分钟、禁止占位符、TDD、探针先行、瑶光反证、频繁提交。强制要求：① 至少一张 Mermaid 图（架构/数据流/状态图）；② 每个任务 RED→GREEN；③ 复杂实现前先打 30 秒探针；④ 用真实输入复现原问题再验修复，不取信声称取 exit code。如果任务涉及安全/权限/沙箱/多 enforcement gate，在基础模板之上追加安全附录（安全不变量、触发路径清单、双门对齐数据流图）。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
+  full: '<plan-methodology route="full">推荐使用基础计划模板（Superpowers writing-plans），路径: docs/superpowers/plans/2026-06-28-plan-methodology-base.md。这是所有计划的默认基础：零上下文假设、任务粒度 2-5 分钟、禁止占位符、TDD、探针先行、瑶光反证、频繁提交。强制要求：① 至少一张 Mermaid 图（架构/数据流/状态图）；② 每个任务 RED→GREEN；③ 复杂实现前先打 30 秒探针；④ 用真实输入复现原问题再验修复，不取信声称取 exit code；⑤ 计划含「瑶光反证」章节（submit 门禁）——设计定稿后回读关键断言到 file:line、bugfix 先跑 run_tests 拿 RED 复现、跑不了的派 adversarial_verifier，复现不了的降级为待验证假设。如果任务涉及安全/权限/沙箱/多 enforcement gate，在基础模板之上追加安全附录（安全不变量、触发路径清单、双门对齐数据流图）。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
 }
 
 export function renderPlanMethodologyAdvisory(
@@ -56,20 +55,12 @@ export function renderPlanMethodologyAdvisory(
  */
 export function renderPlanModeBlock(
   activePlanFilePath?: string | null,
-  variant: import('../agent/plan-mode.js').PlanInjectionVariant = 'full',
 ): string {
-  // Sparse / reentry variants: throttle the heavy spec on non-refresh turns so
-  // planning turns don't re-pay the full block's token cost each time. Cache-safe
-  // (dynamic appendix only). The full spec is still emitted on entry + every
-  // refresh interval, so the model never loses the invariant for long.
-  if (variant === 'sparse' || variant === 'reentry') {
-    const planFileHint = activePlanFilePath ? ` 活动计划文件: \`${activePlanFilePath}\`（仅此文件可写）。` : ''
-    const head = variant === 'reentry'
-      ? `恢复规划模式——继续完善当前计划。`
-      : `规划模式仍激活。`
-    return `<plan-mode>${head}只读探索，禁止写/改/执行（活动计划文件除外）。${planFileHint} 持续推进：接着读+增量写活动计划文件，成熟后用 \`plan action=submit\` 提交；只有真正需要用户拍板的实质分歧才 \`ask_user_question\`，不要为收尾/给交代而提问。完整规范见本轮早前的 plan-mode 说明。</plan-mode>`
-  }
-
+  // Byte-constant while planning: under appendixDelta the block is emitted once
+  // at entry (and re-sent automatically on baseline resets after compaction),
+  // then suppressed on every subsequent boundary — zero steady-state churn.
+  // Hard constraints don't depend on this reminder anyway: checkPlanMode gates
+  // tools mechanically, and plan-submit has its own placeholder guard.
   const planFileLine = activePlanFilePath
     ? `\n活动计划文件: \`${activePlanFilePath}\` — 用 write_file / edit_file 增量写入计划正文（仅此文件可写）。`
     : ''
@@ -181,8 +172,6 @@ export interface VolatileContext {
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
   playbookLessons?: PlaybookBullet[]
-  /** Recent user query text for lesson relevance scoring. */
-  recentQuery?: string
   /** Callback to record which bullet IDs were actually rendered. */
   onLessonsRendered?: (ids: string[]) => void
   activeClaims?: ContextClaim[]
@@ -254,9 +243,6 @@ export interface VolatileContext {
   planModeState?: 'off' | 'planning' | 'approved'
   /** Active plan file path (relative) for incremental plan writing */
   activePlanFilePath?: string | null
-  /** Plan-mode injection cadence variant (full/sparse/reentry). Defaults to 'full'.
-   *  Cache-safe: dynamic appendix only. */
-  planInjectionVariant?: import('../agent/plan-mode.js').PlanInjectionVariant
   /** One-shot flag: render the exit reminder on the first turn after plan mode
    *  turns off. Cache-safe: dynamic appendix only. */
   planExitReminderPending?: boolean
@@ -394,7 +380,6 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     // but MUST stay out of FROZEN — they can change mid-session and would
     // break exact-prefix cache if included in the stable block.
     planModeState: undefined,
-    planInjectionVariant: undefined,
     planExitReminderPending: undefined,
     worktreeReality: undefined,
     // Session snapshot fields — KEEP in FROZEN:
@@ -463,22 +448,18 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // provider-agnostic, in the exact-prefix cache from turn 1. Emitting it here
   // would duplicate the motto and break prefix stability.
 
-  // Historical lessons: rarely change after first few turns
+  // Historical lessons: session-constant pool (loaded once by refreshPlaybookLessons,
+  //  ranked by matchBullets). No per-boundary re-ranking — the pool is already
+  //  domain-filtered and top-K=3; re-sorting adds churn without information gain.
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
-    const { selected } = scoreLessons(ctx.playbookLessons, {
-      query: ctx.recentQuery,
-      recentToolTargets: ctx.toolHistory?.map(t => t.target),
-    })
-    if (selected.length > 0) {
-      const lessons = selected
-        .map(b => {
-          const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
-          return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
-        })
-        .join('\n')
-      parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
-      ctx.onLessonsRendered?.(selected.map(b => b.id))
-    }
+    const lessons = ctx.playbookLessons
+      .map(b => {
+        const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
+        return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
+      })
+      .join('\n')
+    parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+    ctx.onLessonsRendered?.(ctx.playbookLessons.map(b => b.id))
   }
 
   // Cognitive projection: task-contract + verification gap + cognitive mirror +
@@ -499,19 +480,12 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   const progressBlock = renderProgressBlock(ctx, projHasObjective)
   if (progressBlock) parts.push(progressBlock)
 
-  // Tool history: most recent tools appended at end → prefix cacheable
-  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
-    const maxRecent = 8
-    const recent = ctx.toolHistory.length > maxRecent
-      ? ctx.toolHistory.slice(-maxRecent)
-      : ctx.toolHistory
-    const entries = recent.map(e => {
-      const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
-      if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
-      return `  <tool-summary ${attrs.join(' ')} />`
-    }).join('\n')
-    parts.push(`<tool-history recent="${recent.length}">\n${entries}\n</tool-history>`)
-  }
+  // tool-history block removed (2026-07-06): redundant with message history —
+  // assistant tool_calls + tool results are already visible, and the recent-8
+  // window sits well inside the 10-user-turn observation mask. The block's
+  // per-boundary byte churn kept appendixDelta from ever going quiet.
+  // ctx.toolHistory itself stays: read-file-dedup-hint below and
+  // historical-lessons scoring still consume it.
 
   // Read-file dedup hint: single-line snapshot for cache stability
   if (ctx.toolHistory && ctx.toolHistory.length > 0) {
@@ -630,7 +604,7 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Plan-mode instruction block: governs the whole planning turn (read-only +
   // plan quality standard + diagram skeletons). Cache-safe — appendix only.
   if (ctx.planModeState === 'planning') {
-    parts.push(renderPlanModeBlock(ctx.activePlanFilePath, ctx.planInjectionVariant ?? 'full'))
+    parts.push(renderPlanModeBlock(ctx.activePlanFilePath))
   } else if (ctx.planExitReminderPending) {
     parts.push(renderPlanExitReminder())
   }
@@ -684,7 +658,6 @@ export interface SalientBlock {
  * - 0.7: task-relevant (intent-retrieval-route, task-progress, decisions,
  *        git-status, recent-commits — git 状态是任务地基：被 Top-K 丢弃会诱发
  *        模型用 bash 重新获取，形成训练模式 doom-loop，见会话 43443098 取证)
- * - 0.5: operational context (tool-history)
  * - 0.4: session housekeeping (session-state, cross-session-events)
  * - 0.3: deduplication hints (read-file-dedup-hint)
  */
@@ -771,7 +744,6 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<worktree-warning')) return 0.7
   if (blockContent.startsWith('<git-status>')) return 0.7
   if (blockContent.startsWith('<recent-commits>')) return 0.7
-  if (blockContent.startsWith('<tool-history>')) return 0.5
   if (blockContent.startsWith('<session-state>')) return 0.4 // legacy fallback
   if (blockContent.startsWith('<cross-session')) return 0.4
   if (blockContent.startsWith('<read-file-dedup-hint>')) return 0.3

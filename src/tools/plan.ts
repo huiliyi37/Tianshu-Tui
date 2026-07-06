@@ -26,6 +26,11 @@ const warnedSlugs = new Set<string>()
 const anchorWarnedSlugs = new Set<string>()
 // 规模门禁（层2）：大计划必须显式分波 + 每波验证命令。one-shot 软拦同款模式。
 const scaleWarnedSlugs = new Set<string>()
+// 瑶光反证门禁：计划必须带「反证/复现」章节——设计阶段发明的断言要在计划期
+// 复现（回读代码、跑失败测试、派 adversarial_verifier），不是执行期才验。
+// one-shot 软拦同款模式：首拦给出章节要求，同 title 重提交放行。
+const falsificationWarnedSlugs = new Set<string>()
+const FALSIFICATION_HEADING_RE = /^#{2,5}\s*.*(反证|复现|falsification|reproduction)/im
 const MERMAID_FENCE = /```\s*mermaid/i
 const MISSING_DIAGRAM_SKELETON = `\`\`\`mermaid
 flowchart TD
@@ -64,8 +69,32 @@ export function checkPlanScale(content: string): PlanScaleCheck {
 
 // Placeholder detection — reject skeletal plans before they are persisted.
 const PLACEHOLDER_RE = /\b(TODO|FIXME|TBD|XXX|HACK|placeholder|占位符|待补充|待完善|待填写|待实现|稍后补充|略)\b/gi
-const EMPTY_SECTION_RE = /^#{2,6}\s+.+\n(?:\s*\n)+#{2,6}\s/m
 const ONLY_DOTS_RE = /^(\.{3,}|…+|-\s*\.{3,})\s*$/m
+
+/**
+ * A section is "empty" when its heading is followed (across blank lines only)
+ * by a heading at the SAME or SHALLOWER level. A deeper heading means the
+ * section's body is structured into subsections — the normal markdown pattern
+ * `## 实现` → `### 任务 1`. The old regex flagged that as empty and wedged
+ * plan submit in an unfixable rejection loop (session 91840816: a fully
+ * fleshed-out draft rejected twice because its parent headings had ###
+ * children).
+ */
+function hasEmptySection(content: string): boolean {
+  const lines = content.split('\n')
+  let openHeadingLevel: number | null = null
+  for (const line of lines) {
+    const m = /^(#{2,6})\s+\S/.exec(line)
+    if (m) {
+      const level = m[1]!.length
+      if (openHeadingLevel !== null && level <= openHeadingLevel) return true
+      openHeadingLevel = level
+      continue
+    }
+    if (line.trim().length > 0) openHeadingLevel = null
+  }
+  return false
+}
 
 interface PlaceholderCheckResult {
   ok: boolean
@@ -129,7 +158,7 @@ function checkPlanForPlaceholders(content: string): PlaceholderCheckResult {
     }
   }
 
-  if (EMPTY_SECTION_RE.test(content)) {
+  if (hasEmptySection(content)) {
     return {
       ok: false,
       reason: '检测到只有标题、没有正文的空章节。请为每个章节补充具体分析和方案后再提交。',
@@ -300,7 +329,8 @@ function planEnterModeExecute(params: ToolCallParams): ToolResult {
         'Next steps:',
         '1. Research first: for multi-module tasks, dispatch 2-4 read-only code_scout workers in parallel via delegate_batch (split by module/file domain), then synthesize the findings.',
         '2. Write the plan incrementally to the draft file with write_file/edit_file.',
-        '3. Submit with plan action=submit for user approval. Exiting plan mode is user-only.',
+        '3. 瑶光反证 (required section, submit-gated): reproduce key claims AT PLAN TIME — re-read cited code AFTER the design is drafted, run_tests for RED evidence on bugfixes, or delegate profile=adversarial_verifier authority=yaoguang. Unreproducible inferences go in as 待验证假设, not conclusions.',
+        '4. Submit with plan action=submit for user approval. Exiting plan mode is user-only.',
       ].filter(Boolean).join('\n'),
     }
   } catch (err) {
@@ -390,6 +420,29 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
         `⚠️ Plan not yet saved — ${placeholderCheck.reason}`,
         '',
         '请继续完善计划：补充根因分析、每个文件的具体改动（diff 或伪代码）、设计决策对比表、验证步骤等。',
+      ].join('\n'),
+      isError: true,
+    }
+  }
+
+  // 瑶光反证门禁：计划期复现，不是执行期才验。快思考事故（49fd1dfd 一族）的
+  // 根源是设计阶段发明的断言（"deltaStable 会生效""块名是 cognitive-mirror"）
+  // 从未回到代码/运行时复现。one-shot 软拦：首拦列出章节要求；同 title 重提放行
+  // （模型自判不适用场景，永不死锁——91840816 教训）。
+  if (!FALSIFICATION_HEADING_RE.test(fullContent) && !falsificationWarnedSlugs.has(slug)) {
+    falsificationWarnedSlugs.add(slug)
+    return {
+      content: [
+        `⚠️ Plan not yet saved — 计划缺少「瑶光反证」章节（标题含"反证"或"复现"）。`,
+        '',
+        '设计阶段发明的断言最容易错——出计划的同时就要复现，不能等执行期。请补充该章节，覆盖：',
+        '- **关键断言清单**：方案依据的每条代码行为断言 + 计划期证据（设计定稿后的 read/grep 回读到 file:line、run_tests 输出、或 adversarial_verifier 复现结论）',
+        '- **原缺陷复现**（bugfix 类计划）：复现命令 + 观察到的 RED 输出——绿非证明，复现即证',
+        '- **待验证假设**：计划期无法复现的推论，显式标注并写明执行期第一步如何验证',
+        '',
+        '可用工具：plan mode 下 run_tests 可直接跑（拿 RED 证据）；`delegate_task profile=adversarial_verifier authority=yaoguang` 可派复现专员。',
+        '',
+        '补充后重新提交（同一 title）。若该计划确实无可复现断言（纯新增、零行为假设），可原样重提放行。',
       ].join('\n'),
       isError: true,
     }

@@ -23,6 +23,7 @@ import type { PostTurnDecisionController } from './post-turn-decision.js'
 import type { TelemetryRecord } from './telemetry-writer.js'
 import { emitStopReason, type StopReason } from './stop-reason.js'
 import { debugLog } from '../utils/debug.js'
+import { hasActionIntent } from './action-intent-detector.js'
 
 // ── Types re-exported for deps interface ──
 
@@ -86,7 +87,6 @@ export interface ExecuteBatchResult {
 export interface CompleteTurnParams {
   turn: number
   isFinal: boolean
-  emitBadge?: boolean
   callbacks: AgentCallbacks
 }
 
@@ -108,7 +108,6 @@ export interface TurnStateBag {
   turnBudget: TurnBudget
   latestFsWatcherState: FsWatcherState
   consecutiveNoToolTurns: number
-  autoContinueCount: number
   /** Fingerprint of the last fully-errored tool batch — for wedged-loop detection. */
   wedgeToolFingerprint: string
   /** Consecutive identical fully-errored tool batches — for wedged-loop detection. */
@@ -231,7 +230,6 @@ export interface TurnOrchestratorDeps {
 
   // === Per-run state (getter/setter view into AgentLoop mutable fields) ===
   state: TurnStateBag
-  getMaxAutoContinue: () => number
   getDoomLoopLevel: () => 'none' | 'warn' | 'blocked'
 
   // === Sub-controllers ===
@@ -355,6 +353,7 @@ export class TurnOrchestrator {
     // latch stays set, and the next user message gets routed to the steer
     // buffer instead of starting a new run.
     let finalTurnCompleted = false
+    let actionIntentFiredThisRun = false
 
     try {
       // maxTurns <= 0 means "no hard cap" (true YOLO / autonomous mode). The for
@@ -831,7 +830,7 @@ export class TurnOrchestrator {
           if (r.endTurn) {
             this.emitStop({ source: 'end-turn', turn, voluntary: true }, callbacks)
             await rejectOnAbort(
-              this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
+              this.deps.completeTurn({ turn, isFinal: true, callbacks }),
               signal!,
               'post-turn-endTurn',
             )
@@ -860,7 +859,7 @@ export class TurnOrchestrator {
               detail: `${toolUses.map(tu => tu.name).join(',')} ×${this.deps.state.wedgeRepeatCount}`,
             }, callbacks)
             await rejectOnAbort(
-              this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
+              this.deps.completeTurn({ turn, isFinal: true, callbacks }),
               signal!,
               'post-turn-wedged',
             )
@@ -927,7 +926,7 @@ export class TurnOrchestrator {
 
         // ── User steer takes precedence over any auto-continuation ──
         // Steer normally drains only at tool-result boundaries, so a no-tool
-        // continuation chain (goal/phantom) starves queued user guidance while
+        // continuation chain (goal) starves queued user guidance while
         // injecting its own "keep going" reminder — the user feels unheard.
         // Drain here FIRST: if the user said something, hand the next turn to
         // their words alone and skip this round's continuation reminders.
@@ -963,30 +962,32 @@ export class TurnOrchestrator {
         )
         if (goalCheckResult.kind === 'continue') continue
 
-        // ── Phantom continuation check ──
-        // Only reached when goal check returned accept/finalize (goal not continuing).
-        // Wrapped in rejectOnAbort for uniform abort cooperation across all
-        // turn-boundary steps.
-        const phantomResult = await rejectOnAbort(
-          this.deps.postTurnDecision.evaluatePhantomContinuation({
-            turn,
-            callbacks,
-            signal: signal!,
-          }),
-          signal!,
-          'phantom-check',
-        )
-        if (phantomResult.shouldContinue) continue
+        // ── Action-intent gate ──
+        // Lightweight check: the model announced an action ("let me grep…",
+        // "接下来修改…") but issued no tool call on this no-tool turn.
+        // Inject a system-reminder so the NEXT turn can self-correct —
+        // no auto-continue, just a one-shot nudge per run.
+        if (!actionIntentFiredThisRun && hasActionIntent(this.deps.state.streamedText)) {
+          actionIntentFiredThisRun = true
+          this.deps.appendSystemReminder(
+            '<system-reminder>上一轮你以"我将做…""接下来…"结尾但未发出对应的工具调用。如果还需要执行，请在本轮直接发起工具调用。</system-reminder>'
+          )
+          await rejectOnAbort(
+            this.deps.completeTurn({ turn, isFinal: false, callbacks }),
+            signal!,
+            'action-intent-gate-complete',
+          )
+          continue
+        }
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.
         // Voluntary finish — the model produced a final answer with no tool call
-        // and neither goal nor phantom continuation asked to keep going.
+        // and goal continuation didn't ask to keep going.
         this.emitStop({ source: 'natural-finish', turn, voluntary: true }, callbacks)
         await rejectOnAbort(
           this.deps.completeTurn({
             turn,
             isFinal: true,
-            emitBadge: true,
             callbacks,
           }),
           signal!,

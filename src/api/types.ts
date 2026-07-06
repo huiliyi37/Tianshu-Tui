@@ -25,6 +25,15 @@ export interface ContentBlockToolUse {
   id: string
   name: string
   input: Record<string, unknown>
+  /**
+   * Set when the stream ended while this call's arguments were still
+   * incomplete/unparseable (final-flush-empty). `input` is {} in that case —
+   * NOT what the model asked for. The tool pipeline must refuse to execute
+   * the call and return an error result instead (session 4df36bcd: a
+   * truncated bash call executed with {} and threw deep inside the sandbox
+   * wrapper).
+   */
+  argsTruncated?: boolean
 }
 
 export interface ContentBlockToolResult {
@@ -58,6 +67,13 @@ export interface ToolDefinition {
 }
 
 export interface Usage {
+  /**
+   * Total prompt tokens, cache-INCLUSIVE: input_tokens = uncached + cache_read
+   * + cache_creation. This is DeepSeek/OpenAI native semantics (prompt_tokens
+   * = hit + miss). Clients whose upstream reports cache-EXCLUSIVE input
+   * (Anthropic) must normalize at the boundary before emitting Usage.
+   * Consumers (hit rate, cost, meta tokenUsage) all assume this convention.
+   */
   input_tokens: number
   output_tokens: number
   cache_read_input_tokens: number

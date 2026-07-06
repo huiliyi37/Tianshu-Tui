@@ -959,8 +959,11 @@ export function createAgentRuntime(deps: {
     {
       ...agentCfg,
       toolRegistry,
-      maxTurns: config.agent.maxTurns,
-      maxAutoContinue: config.agent.maxAutoContinue,
+      // YOLO 联动无限轮次——启动恢复路径。运行时切换（/yes、权限面板、sidecar
+      // serve.ts）都会把 maxTurns 置 0，唯独「持久化 YOLO 为默认 → 重启」的构造
+      // 路径漏了联动：YOLO 会话按 config maxTurns（如 50）跑，turn 45 注入预算
+      // 预警、turn 50 被 GUARD 硬截断（session 92a38900，用户观感=自己停止）。
+      maxTurns: config.agent.approval === 'dangerously-skip-permissions' ? 0 : config.agent.maxTurns,
       checkpointEveryTurns: config.agent.checkpointEveryTurns,
       getSessionMemoryState: () => persist.getSessionMemoryState(),
       fileHistory,

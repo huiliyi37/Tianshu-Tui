@@ -22,7 +22,6 @@ export interface TurnEndDeps {
 
 export interface TurnEndResult {
   decisions: string[]
-  badge: string | null
   gateV2?: AuthoritativeGateView
 }
 
@@ -82,14 +81,15 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
   config.promptEngine.setDecisions(decisions)
 
   // Track 3 门禁合一：v2（GREEN/YELLOW/RED，归因感知）注入时为权威；
-  // 评估失败时回退 v1，badge 永不因门禁崩溃缺席。
+  // 评估失败时回退 undefined（v1 语义由 evidenceSummary 消费方自行推导）。
+  // 门禁结论只随 evidenceSummary 流向 UI，不再渲染成 transcript 文本
+  //（任务完成总结在每个无工具 final turn 都弹出，被读成"动不动就交付"——4df36bcd）。
   let gateV2: ReturnType<NonNullable<AgentConfig['deliveryGateV2']>> | undefined
   try {
     gateV2 = config.deliveryGateV2?.([...evidence.getState().filesModified])
   } catch {
     gateV2 = undefined
   }
-  const badge = evidence.buildBadge({ locale: 'zh-CN', gateV2 })
 
-  return { decisions, badge, gateV2 }
+  return { decisions, gateV2 }
 }

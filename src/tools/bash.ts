@@ -409,7 +409,14 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
         debugLog(`[bash-done] exit=${exitCode} stdoutBytes=${stdoutRawBytes} stderrBytes=${stderrRawBytes} durationMs=${durationMs}`)
-        const meta = { command: rawCommand, exitCode, durationMs }
+        // When rtk rewrote the command (e.g. `ls` → `rtk ls`), surface the
+        // EXECUTED command in the result header. Hiding the rewrite let a
+        // filtered `rtk ls` "(empty)" result masquerade as native ls output —
+        // the model concluded existing files were lost and rewrote them
+        // (session 4df36bcd). The header must never claim a command ran when
+        // a different one did.
+        const headerCommand = rewritten !== rawCommand ? rewritten : rawCommand
+        const meta = { command: headerCommand, exitCode, durationMs }
         const { isError, errorClass } = classifyBashOutcome(exitCode, stderr, process.platform === 'win32')
         // P1: Command-Aware filtering — apply before content construction so the
         // model sees a condensed, semantically-relevant version. Raw output is

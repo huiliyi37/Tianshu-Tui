@@ -62,6 +62,46 @@ function simpleHash(s: string): string {
   return `${h}:${s.length}`
 }
 
+/** Full-content djb2 (no truncation) — prefix-divergence probe needs to detect
+ *  byte changes anywhere in a message, not just the first 2000 chars. */
+function fullHash(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return `${h}:${s.length}`
+}
+
+/**
+ * Prefix-divergence probe result: how this request's serialized messages
+ * differ from the previous MAIN-turn request. `null`-able consume-once value —
+ * see {@link PromptEngine.consumePrefixDivergence}.
+ *
+ * Motivation (2026-07-05 cache investigation): DeepSeek 落盘缓存按"完整前缀
+ * 单元"命中。cacheRead 相对上一次调用倒退意味着两种可能——客户端字节改动
+ * （历史消息被改写）或服务端落盘失败（尽力而为）。cache-log 只有 token 数，
+ * 分不出两者。这个探针在客户端侧记录逐消息哈希差异：倒退事件若伴随
+ * prefixDiverged 记录 → 客户端改动（并指认是哪条消息）；若无 → 服务端落盘失败。
+ */
+export interface PrefixDivergence {
+  /** Index into the request's messages array (0 = system message). */
+  idx: number
+  role: string
+  kind: 'message_changed' | 'message_removed'
+  prevCount: number
+  newCount: number
+  /** Approximate char offset of the diverged message's start in the serialized request. */
+  approxCharPos: number
+}
+
+/** Serialize one request message to the byte-relevant parts for hashing. */
+function messageSignature(m: OaiMessage): { sig: string; len: number } {
+  const rec = m as unknown as Record<string, unknown>
+  let s = typeof m.content === 'string' ? m.content : (m.content == null ? '' : JSON.stringify(m.content))
+  if (rec.tool_calls) s += '\u0000' + JSON.stringify(rec.tool_calls)
+  if (rec.reasoning_content) s += '\u0000' + String(rec.reasoning_content)
+  if (rec.tool_call_id) s += '\u0000' + String(rec.tool_call_id)
+  return { sig: `${m.role}\u0000${fullHash(s)}`, len: s.length }
+}
+
 export interface PromptEngineConfig {
   model: string
   maxTokens: number
@@ -135,7 +175,6 @@ export class PromptEngine {
   private activeDomain?: VolatileContext['activeDomain']
   private activeClaims?: VolatileContext['activeClaims']
   private playbookLessons?: VolatileContext['playbookLessons']
-  private recentQuery?: string
   private onLessonsRendered?: (ids: string[]) => void
   private sessionMemoryOverride?: string
   private contextLayerReportData: ContextLayerReport
@@ -151,8 +190,6 @@ export class PromptEngine {
   private planModeState?: 'off' | 'planning' | 'approved'
   /** Active plan file path (relative) — shown in plan-mode block */
   private activePlanFilePath?: string | null
-  /** Plan-mode injection cadence variant (full/sparse/reentry). */
-  private planInjectionVariant?: import('../agent/plan-mode.js').PlanInjectionVariant
   /** One-shot: emit the plan-mode exit reminder on the next rendered turn. */
   private planExitReminderPending?: boolean
   /** Whether current turn message warrants task-mode scaffolding (task contract, CVM, etc.).
@@ -178,6 +215,10 @@ export class PromptEngine {
   /** Hash of last message array to distinguish exact same call from true duplicate. */
   private lastMessageHash: string = ''
   private userMessagesSinceGitRefresh = 0
+  /** Prefix-divergence probe: per-message signatures of the previous request. */
+  private prevRequestSignatures: Array<{ sig: string; len: number }> | null = null
+  /** Latest divergence vs the previous request (consume-once via consumePrefixDivergence). */
+  private lastPrefixDivergence: PrefixDivergence | null = null
   /** Append-only delta: last emitted context-update sub-blocks (name→content). */
   private lastEmittedAppendixParts: Map<string, string> = new Map()
   /** Monotonic context-update sequence number (model orders updates by seq). */
@@ -241,7 +282,14 @@ export class PromptEngine {
     return arr[idx]
   }
 
-  buildOaiRequest(inputMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number): OaiChatRequest {
+  buildOaiRequest(inputMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number, options?: { sidePath?: boolean }): OaiChatRequest {
+    // Side-path builds (compaction summaries etc.) pass an unrelated message
+    // array through the same engine. They must be HERMETIC: any state write
+    // here (cachedFreshForUser, frozen snapshots, firstUserKey, volatile swap,
+    // T7 watermark) makes the NEXT main-turn request rebuild its last user
+    // message with different bytes → prefix break at that position. Found by
+    // the prefix-divergence probe, 2026-07-05.
+    const sidePath = options?.sidePath === true
     const result: OaiMessage[] = []
     // Reset per-call fetch index — each call re-fetches frozen entries in order.
     this.frozenFetchIndex.clear()
@@ -282,7 +330,7 @@ export class PromptEngine {
     // Remember the first user message's key so eviction never deletes its
     // frozen snapshot (the byte-0 prefix anchor). Refreshed each call so it
     // tracks the post-compaction anchor when history is rewritten.
-    if (firstUserIdx >= 0) {
+    if (!sidePath && firstUserIdx >= 0) {
       const fm = oaiMessages[firstUserIdx]!
       this.firstUserKey = typeof fm.content === 'string' ? fm.content : ''
     }
@@ -293,7 +341,16 @@ export class PromptEngine {
         // Pass through untouched: bare user message, byte-stable forever.
         result.push(msg)
       } else if (msg.role === 'user' && this.volatileBlock) {
-        if (i === lastUserIdx) {
+        if (i === lastUserIdx && sidePath) {
+          // Hermetic side-path: trailer-merge the CURRENT volatileBlock without
+          // touching cachedFreshForUser / frozen snapshots / swap state. The
+          // summary prompt is one-shot; caching state for it poisons the next
+          // main-turn build (its real last user message would look like a new
+          // boundary → appendix rebuild + volatile swap → mid-round prefix break).
+          const fc = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+          const vb = this.cachedConsolidated ? this.volatileBlock + '\n' + this.cachedConsolidated : this.volatileBlock
+          result.push({ role: 'user', content: vb + '\n---\n' + fc })
+        } else if (i === lastUserIdx) {
           const userContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
 
           // Force rebuild for true duplicate messages — they need their own frozen entry.
@@ -328,7 +385,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, invokedSkillsBlock: skillRegistry.renderInvokedSkillsBlock([...this.invokedSkillNames], this.config.volatileCtx.cwd) ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, activePlanFilePath: this.activePlanFilePath, planInjectionVariant: this.planInjectionVariant, planExitReminderPending: this.planExitReminderPending, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, invokedSkillsBlock: skillRegistry.renderInvokedSkillsBlock([...this.invokedSkillNames], this.config.volatileCtx.cwd) ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, activePlanFilePath: this.activePlanFilePath, planExitReminderPending: this.planExitReminderPending, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
             // One-shot: the plan-mode exit reminder is snapshotted into dynamicCtx
             // above; clear it so it renders on this turn only, not every subsequent turn.
             if (this.planExitReminderPending) this.planExitReminderPending = false
@@ -564,7 +621,7 @@ export class PromptEngine {
     // Gated at 50% window usage, with a watermark boundary that only advances
     // when crossing a 50K-token step — so the break happens once per step,
     // not on every turn (rolling break would defeat the prefix cache).
-    if (contextWindow && contextWindow >= 200_000) {
+    if (contextWindow && contextWindow >= 200_000 && !sidePath) {
       const collapseAge = this.config.attentionProfile?.collapseAgeTurns ?? 8
       // Use the same CJK-aware accounting as the session layer
       // (estimateOaiMessageTokens: cjk/1.2, ascii/4, plus tool_calls and the
@@ -609,7 +666,7 @@ export class PromptEngine {
       }
     }
 
-    return {
+    const request: OaiChatRequest = {
       model: this.config.model,
       messages: [{ role: 'system', content: this.systemPrompt }, ...result],
       max_tokens: this.config.maxTokens,
@@ -618,6 +675,53 @@ export class PromptEngine {
       tools,
       tool_choice: tools ? 'auto' : undefined,
     }
+    // Side-path builds (compaction summaries etc.) have unrelated message
+    // arrays — recording them would poison the main-turn baseline and report
+    // phantom divergences.
+    if (!sidePath) this.recordPrefixDivergence(request.messages)
+    return request
+  }
+
+  /**
+   * Prefix-divergence probe: compare this request's per-message signatures with
+   * the previous request's. An exact-prefix provider only re-matches the shared
+   * prefix, so any non-append change (message content mutated, message removed,
+   * count shrank) is a real client-side cache break. Records the FIRST diverged
+   * index; pure appends record nothing.
+   */
+  private recordPrefixDivergence(messages: OaiMessage[]): void {
+    const sigs = messages.map(messageSignature)
+    const prev = this.prevRequestSignatures
+    this.prevRequestSignatures = sigs
+    if (!prev) return
+
+    const shared = Math.min(prev.length, sigs.length)
+    let divergedIdx = -1
+    for (let i = 0; i < shared; i++) {
+      if (prev[i]!.sig !== sigs[i]!.sig) { divergedIdx = i; break }
+    }
+    if (divergedIdx === -1) {
+      if (sigs.length >= prev.length) return // pure append (or identical) — prefix intact
+      // History shrank with an intact shared prefix — a rewrite (compact/split).
+      divergedIdx = sigs.length
+    }
+    let approxCharPos = 0
+    for (let i = 0; i < divergedIdx; i++) approxCharPos += sigs[i]?.len ?? prev[i]!.len
+    this.lastPrefixDivergence = {
+      idx: divergedIdx,
+      role: messages[divergedIdx]?.role ?? 'removed',
+      kind: divergedIdx >= sigs.length ? 'message_removed' : 'message_changed',
+      prevCount: prev.length,
+      newCount: sigs.length,
+      approxCharPos,
+    }
+  }
+
+  /** Consume-once accessor for the latest prefix divergence (cache-log breadcrumb). */
+  consumePrefixDivergence(): PrefixDivergence | null {
+    const d = this.lastPrefixDivergence
+    this.lastPrefixDivergence = null
+    return d
   }
 
   getModel(): string {
@@ -715,10 +819,6 @@ export class PromptEngine {
 
   setOnLessonsRendered(cb: (ids: string[]) => void): void {
     this.onLessonsRendered = cb
-  }
-
-  setRecentQuery(query: string | null): void {
-    this.recentQuery = query ?? undefined
   }
 
   setTaskProgress(state: TaskState): void {
@@ -880,11 +980,6 @@ export class PromptEngine {
   /** Active plan file path for incremental plan writing in plan mode. */
   setActivePlanFilePath(path: string | null): void {
     this.activePlanFilePath = path
-  }
-
-  /** Plan-mode injection cadence variant (full/sparse/reentry) for the next render. */
-  setPlanInjectionVariant(variant: import('../agent/plan-mode.js').PlanInjectionVariant | undefined): void {
-    this.planInjectionVariant = variant
   }
 
   /** Arm/disarm the one-shot plan-mode exit reminder. */
@@ -1049,7 +1144,6 @@ export class PromptEngine {
       activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain,
       activeClaims: this.activeClaims ?? this.config.volatileCtx.activeClaims,
       playbookLessons: this.playbookLessons ?? this.config.volatileCtx.playbookLessons,
-      recentQuery: this.recentQuery,
       sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock,
       sessionState: this.sessionStateText,
       worktreeReality: this.worktreeReality,

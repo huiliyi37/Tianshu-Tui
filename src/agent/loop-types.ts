@@ -31,12 +31,6 @@ export interface AgentConfig {
   toolRegistry: ToolRegistry
   maxTurns: number
   /**
-   * Max auto-continue iterations per run when a no-tool turn shows action intent
-   * or an open task contract (phantom tool-call recovery). 0 disables. Default 0
-   * when unset (caller opts in via config.agent.maxAutoContinue).
-   */
-  maxAutoContinue?: number
-  /**
    * C3 检查点间隔 — Auto 模式下每 N 轮暂停并同步进度摘要（0 = 关）。
    * YOLO 和 Manual 模式不读此字段。
    */
