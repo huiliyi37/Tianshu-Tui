@@ -127,6 +127,27 @@ test('approval_required sets pending, approval_resolved clears it', () => {
   assert.equal(resolved.pendingApproval, null)
 })
 
+test('sidecar-restart approval_resolved clears pending AND leaves a visible marker', () => {
+  seq = 0
+  const s = fold([
+    ev('approval_required', { requestId: 'r1', toolName: 'bash', input: {} }),
+    ev('approval_resolved', { requestId: 'r1', decision: 'sidecar-restart', toolName: 'bash' }),
+  ])
+  assert.equal(s.pendingApproval, null, 'no dangling unanswerable approval card after replay')
+  const marker = s.blocks.find((b) => b.kind === 'phase' && b.text.includes('重启中断'))
+  assert.ok(marker, 'interrupted-approval marker appears in the timeline')
+  assert.ok(marker!.text.includes('bash'), 'marker names the gated tool')
+})
+
+test('normal approval_resolved leaves no timeline marker', () => {
+  seq = 0
+  const s = fold([
+    ev('approval_required', { requestId: 'r1', toolName: 'bash', input: {} }),
+    ev('approval_resolved', { requestId: 'r1', decision: 'approve' }),
+  ])
+  assert.equal(s.blocks.some((b) => b.text.includes('重启中断')), false)
+})
+
 test('intent_note appends a non-blocking timeline block (no pending state)', () => {
   seq = 0
   const s = fold([ev('intent_note', {

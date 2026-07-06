@@ -631,6 +631,26 @@ function extractObjective(input: Record<string, unknown>): string {
   return ''
 }
 
+/**
+ * Scan an event log for approvals that were requested but never resolved —
+ * i.e. the run was interrupted (sidecar restart) while blocked on them.
+ * Used by rehydrate() to close them out honestly instead of leaving a
+ * dangling approval card in the replayed timeline.
+ */
+function findOrphanedApprovals(events: SessionEvent[]): Array<{ requestId: string; toolName: string }> {
+  const open = new Map<string, string>()
+  for (const e of events) {
+    const id = typeof e.data.requestId === 'string' ? e.data.requestId : ''
+    if (!id) continue
+    if (e.type === 'approval_required') {
+      open.set(id, typeof e.data.toolName === 'string' ? e.data.toolName : '')
+    } else if (e.type === 'approval_resolved') {
+      open.delete(id)
+    }
+  }
+  return [...open.entries()].map(([requestId, toolName]) => ({ requestId, toolName }))
+}
+
 /** T2 — todo item as surfaced to the desktop (subset of the tool's schema). */
 interface TodoStateItem {
   id: string
@@ -738,18 +758,32 @@ export class RuntimeSessionManager {
         }
         this.sessions.set(session.record.id, session)
         if (wasRunning) {
-          // Persist the honest "interrupted by restart" marker straight to disk
-          // WITHOUT loading the log (that would defeat lazy boot). It re-appears
-          // when ensureEvents() reads the log on first open.
-          const marker: SessionEvent = {
-            seq: ++session.seq,
-            ts: this.now(),
-            type: 'status',
-            data: { status: 'aborted', reason: 'sidecar-restart' },
+          // If the run died while blocked on approvals, close them out honestly:
+          // read this ONE session's log (bounded: only crashed-with-pending
+          // sessions pay it — the pendingApprovals>0 gate keeps lazy boot lazy),
+          // find approval_required events with no matching approval_resolved,
+          // and append 'sidecar-restart' resolutions so the replayed timeline
+          // shows WHAT was pending instead of a dangling, unanswerable card.
+          let orphans: Array<{ requestId: string; toolName: string }> = []
+          if (rec.pendingApprovals > 0) {
+            try { orphans = findOrphanedApprovals(p.loadEvents!(rec.id)) } catch { /* best-effort */ }
           }
-          session.record.lastSeq = session.seq
-          session.record.updatedAt = marker.ts
-          try { p.appendEvent(session.record.id, marker) } catch { /* best-effort */ }
+          // Persist the markers straight to disk WITHOUT keeping the log
+          // resident. They re-appear when ensureEvents() reads it on first open.
+          const appendMarker = (type: SessionEventType, data: Record<string, unknown>) => {
+            const marker: SessionEvent = { seq: ++session.seq, ts: this.now(), type, data }
+            session.record.lastSeq = session.seq
+            session.record.updatedAt = marker.ts
+            try { p.appendEvent(session.record.id, marker) } catch { /* best-effort */ }
+          }
+          for (const o of orphans) {
+            appendMarker('approval_resolved', { requestId: o.requestId, decision: 'sidecar-restart', toolName: o.toolName })
+          }
+          appendMarker('status', {
+            status: 'aborted',
+            reason: 'sidecar-restart',
+            ...(orphans.length ? { interruptedApprovals: orphans } : {}),
+          })
           this.persistRecord(session)
         }
       }
@@ -794,8 +828,18 @@ export class RuntimeSessionManager {
       }
       this.sessions.set(session.record.id, session)
       if (wasRunning) {
+        // Close out approvals the crash left dangling (see lazy path above) —
+        // here the full log is already in memory, so scan it directly.
+        const orphans = findOrphanedApprovals(events)
+        for (const o of orphans) {
+          this.append(session, 'approval_resolved', { requestId: o.requestId, decision: 'sidecar-restart', toolName: o.toolName })
+        }
         // Record an honest marker so the viewer sees the interruption.
-        this.append(session, 'status', { status: 'aborted', reason: 'sidecar-restart' })
+        this.append(session, 'status', {
+          status: 'aborted',
+          reason: 'sidecar-restart',
+          ...(orphans.length ? { interruptedApprovals: orphans } : {}),
+        })
         this.persistRecord(session)
       }
     }
@@ -2603,12 +2647,17 @@ export class RuntimeSessionManager {
             session.lastApprovalDeniedAt = this.now()
             this.recountApprovals(session)
             this.append(session, 'approval_resolved', { requestId, decision: 'timeout' })
+            this.persistRecord(session)
           }
         }, this.approvalTimeoutMs)
       }
       session.pending.set(requestId, pend)
       this.recountApprovals(session)
       this.append(session, 'approval_required', { requestId, toolName: name, input: redactValue(input) })
+      // Persist the pendingApprovals count NOW — if the sidecar dies while
+      // blocked on this approval, rehydrate() uses the on-disk count as the
+      // gate for scanning the log and closing the approval out honestly.
+      this.persistRecord(session)
     })
   }
 

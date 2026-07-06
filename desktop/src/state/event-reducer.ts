@@ -546,6 +546,18 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       if (next.pendingApproval && next.pendingApproval.requestId === ev.data.requestId) {
         next.pendingApproval = null
       }
+      // Sidecar restart closed out an approval the crash left dangling — the
+      // user never answered it, so surface WHAT was pending as a timeline
+      // marker instead of silently dropping the card.
+      if (ev.data.decision === 'sidecar-restart') {
+        const tool = String(ev.data.toolName ?? '')
+        next.blocks = [...next.blocks, {
+          key: `ar-${ev.seq}`,
+          kind: 'phase',
+          text: `⚠️ 重启中断了待审批的工具调用${tool ? `：${tool}` : ''}（未执行，需要时可重新发起）`,
+        }]
+        next.blocksRev = next.blocksRev + 1
+      }
       return next
     case 'intent_note': {
       next.private_textOpen = false
