@@ -975,13 +975,22 @@ async function main() {
   // of silently unlocking on a single stray keypress.
   const PLAN_EXIT_CONFIRM_MS = 3000
   let planExitArmedAt = 0
-  app.setPlanModeToggleHandler(() => {
+  // Picker 劫持只认「本进程启动后新提交」的计划。submitted 状态永不过期，
+  // 历史堆积（本仓库实测 80 个）曾把 Shift+Tab 永久劫持成 picker——
+  // 进不了 plan mode。旧计划仍可通过 /plan 或 palette 打开 picker 查看。
+  const processStartAt = Date.now()
+  app.setPlanModeToggleHandler((opts) => {
     const agent = ctx!.agent
-    // 有待批计划时,Shift+Tab 优先弹出选择器(方向键选 + 回车批准并自动分波执行),
-    // 免去手抄 slug。无待批计划才回落到「进入/退出 plan mode」原语义。
-    if (pendingPlanPickerEntries().length > 0) {
-      app!.activateOverlay('plan-picker')
-      return
+    // 有「新鲜」待批计划时,Shift+Tab 优先弹出选择器(方向键选 + 回车批准并自动
+    // 分波执行),免去手抄 slug。否则回落到「进入/退出 plan mode」原语义。
+    // picker 已打开再按 Shift+Tab → skipPicker(app 层逃生口),直达 toggle。
+    if (!opts?.skipPicker) {
+      const fresh = listPlansSync(agent.cwd)
+        .some(p => p.status === 'submitted' && p.createdAt.getTime() >= processStartAt)
+      if (fresh && pendingPlanPickerEntries().length > 0) {
+        app!.activateOverlay('plan-picker')
+        return
+      }
     }
     if (agent.planModeState === 'planning') {
       // Two-step confirm: first press arms + warns, second press within the window exits.
