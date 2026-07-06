@@ -317,11 +317,21 @@ export class OpenAIClient implements StreamClient {
     // - DeepSeek (preserved thinking): keep for tool-call turns, strip for pure-text
     // - GLM (independent reasoning): always strip — no preserved thinking context
     // - Thinking disabled: always strip
+    const isGlm = this.config.providerName === 'glm'
+    const isPreservedThinking = this.config.thinking === 'enabled' && !isGlm
+      && (this.config.providerName === 'deepseek' || this.config.providerName === 'mimo')
     const messages = request.messages.map(m => {
-      if (m.role !== 'assistant' || !('reasoning_content' in m)) return m
-      const isGlm = this.config.providerName === 'glm'
+      if (m.role !== 'assistant') return m
       const hasToolCalls = Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
-      if (this.config.thinking === 'enabled' && hasToolCalls && !isGlm) return m
+      // DeepSeek preserved-thinking: tool-call turns must echo reasoning_content.
+      // Some turns omit the field entirely (model skipped thinking). Absent vs
+      // present changes wire bytes and breaks prefix cache at the next user
+      // boundary (8396ac51: truncations aligned with first no-reasoning assistant).
+      if (isPreservedThinking && hasToolCalls && !('reasoning_content' in m)) {
+        return { ...m, reasoning_content: '' }
+      }
+      if (!('reasoning_content' in m)) return m
+      if (isPreservedThinking && hasToolCalls) return m
       const { reasoning_content: _, ...rest } = m
       // DeepSeek requires assistant messages to have `content` or `tool_calls`.
       // After stripping reasoning_content, ensure `content` exists.

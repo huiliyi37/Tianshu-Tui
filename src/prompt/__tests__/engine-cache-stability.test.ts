@@ -1088,6 +1088,36 @@ describe('frozen snapshot byte-identity under delta (task 5/7)', () => {
     assert.equal(stats2.frozenFallbackRebuilds, stats1.frozenFallbackRebuilds,
       'delta should not cause additional frozen fallback rebuilds')
   })
+
+  it('historical user trailer matches LAST merged bytes after intra-turn invalidateFreshCache churn', () => {
+    const engine = new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test', gitStatus: 'M src/foo.ts', rivetMd: '# Test' },
+      appendixDelta: true,
+    })
+    const req1 = engine.buildOaiRequest([{ role: 'user', content: 'task' }])
+    const firstMerged = (req1.messages.find(m => m.role === 'user')!.content) as string
+
+    const grow: OaiMessage[] = [{ role: 'user', content: 'task' }]
+    grow.push({ role: 'assistant', content: 'ok' })
+    // Mid-tool-loop invalidation (session memory / route / actionable flip).
+    engine.updateSessionMemory('<session-memory><entry>rev2</entry></session-memory>')
+    const reqLast = engine.buildOaiRequest([...grow])
+    const lastMerged = (reqLast.messages.find(
+      m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('task'),
+    )!.content) as string
+    assert.notEqual(lastMerged, firstMerged, 'precondition: merged trailer changed within turn')
+
+    const next = engine.buildOaiRequest([...grow, { role: 'user', content: 'next' }])
+    const historical = next.messages.find(
+      m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('task'),
+    )!
+    assert.equal(historical.content, lastMerged,
+      'historical must freeze LAST wire bytes, not the first intra-turn revision')
+    assert.notEqual(historical.content, firstMerged)
+  })
 })
 
 describe('resetAppendixBaseline after history rewrite (task 6/7)', () => {

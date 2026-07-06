@@ -88,3 +88,39 @@ test('DeepSeek thinking disabled：不发 thinking 块也不发 reasoning_effort
   assert.equal(body.thinking, undefined, 'disabled 时不应发 thinking 块')
   assert.equal(body.reasoning_effort, undefined, 'disabled 时不应发 reasoning_effort')
 })
+
+test('DeepSeek tool-call assistant without reasoning gets empty reasoning_content on wire', async () => {
+  const body = await captureBody(DEEPSEEK_CONFIG, {
+    ...baseRequest,
+    messages: [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'go' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
+      },
+    ],
+  })
+  const asst = (body.messages as Array<Record<string, unknown>>).find(m => m.role === 'assistant')
+  assert.ok(asst, 'assistant message present')
+  assert.ok('reasoning_content' in asst!, 'tool-call turn must include reasoning_content field')
+  assert.equal(asst!.reasoning_content, '')
+})
+
+test('DeepSeek tool-call assistant with reasoning preserves content on wire', async () => {
+  const body = await captureBody(DEEPSEEK_CONFIG, {
+    ...baseRequest,
+    messages: [
+      { role: 'user', content: 'go' },
+      {
+        role: 'assistant',
+        content: '',
+        reasoning_content: 'planning read',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
+      },
+    ],
+  })
+  const asst = (body.messages as Array<Record<string, unknown>>).find(m => m.role === 'assistant')
+  assert.equal(asst!.reasoning_content, 'planning read')
+})
