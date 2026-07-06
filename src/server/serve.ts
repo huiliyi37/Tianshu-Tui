@@ -27,6 +27,7 @@ import { buildProjectTemplatesRoutes } from './project-templates-routes.js'
 import { CronScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
 import { buildMcpRoutes } from './mcp-api.js'
+import { buildPluginRoutes } from './plugin-api.js'
 import { McpManager } from '../mcp/manager.js'
 import { CronLock } from './cron-lock.js'
 import { TaskRegistry } from './task-registry.js'
@@ -35,6 +36,7 @@ import { SessionRuntimePool } from './session-runtime-pool.js'
 import { loadConfig } from '../config/manager.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from '../platform.js'
 import { resolveApiKey } from '../api/factory.js'
+import type { OaiMessage } from '../api/oai-types.js'
 import { createAuthProvider } from '../auth/registry.js'
 import type { AuthProvider } from '../auth/types.js'
 import { SessionPersist } from '../agent/session-persist.js'
@@ -386,6 +388,9 @@ interface SessionStores {
   session: SessionContext
   taskLedger: ReturnType<typeof createTaskLedger>
   ownershipLedger: ReturnType<typeof createOwnershipLedger>
+  /** Outcome of the boot-time history restore — lets the session layer warn
+   *  when the UI shows history but the model context came back empty. */
+  historyRestore: HistoryRestoreInfo
   /** RuntimeRefs 在 createInteractiveToolRegistry 中被工具体内闭包持有；
    *  Wave C: assembleAgentLoop 通过 createAgentRuntime 装配 coordinator 后
    *  回写 refs.coordinator，让 5 个 coordinator 依赖工具激活。 */
@@ -410,15 +415,31 @@ interface SessionStores {
  * no-op. Called once per session in buildSessionStores, before the mutation
  * listener is wired (so replaceMessages doesn't trigger a redundant disk write).
  */
+export interface HistoryRestoreInfo {
+  /** Number of prior OAI messages loaded into the context (0 = none/new session). */
+  restored: number
+  /** Set when the session file existed but could not be read at all (IO error). */
+  error?: string
+}
+
 export function restoreHistoryMessages(
   persist: SessionPersist,
   session: SessionContext,
-): number {
-  const messages = persist.loadOai()
+): HistoryRestoreInfo {
+  // loadOai already skips corrupt lines; the catch covers hard IO failures
+  // (unreadable file, permissions) so a broken history file degrades to an
+  // empty-context session instead of making the session unbuildable. The
+  // caller surfaces the mismatch (UI has history / model has none) to the user.
+  let messages: OaiMessage[]
+  try {
+    messages = persist.loadOai()
+  } catch (err) {
+    return { restored: 0, error: (err as Error)?.message ?? String(err) }
+  }
   if (messages.length > 0) {
     session.replaceMessages(messages)
   }
-  return messages.length
+  return { restored: messages.length }
 }
 
 function buildSessionStores(
@@ -447,7 +468,7 @@ function buildSessionStores(
   const session = new SessionContext()
   // Restore prior conversation from disk (sidecar restart recovery).
   // Matches TUI bootstrap.ts:1461 — loadOai returns [] for new sessions.
-  restoreHistoryMessages(persist, session)
+  const historyRestore = restoreHistoryMessages(persist, session)
 
   // sidecar 工具装配——复用 bootstrap 的 createInteractiveToolRegistry，与 TUI 端
   // 共享一套装配链。Wave C 后所有工具（含 coordinator 依赖工具）均通过
@@ -513,7 +534,7 @@ function buildSessionStores(
     }
   }
 
-  return { persist, claimStore, fileHistory, toolRegistry, session, taskLedger, ownershipLedger, refs }
+  return { persist, claimStore, fileHistory, toolRegistry, session, taskLedger, ownershipLedger, refs, historyRestore }
 }
 
 /**
@@ -741,6 +762,7 @@ function buildManagedAgent(
     listArtifacts: () => agent.artifactStore?.list() ?? [],
     readArtifact: (artifactId) => agent.artifactStore?.readRaw(artifactId) ?? Promise.resolve(null),
     getMessages: () => agent.session.getMessages(),
+    getHistoryRestore: () => stores.historyRestore,
     replaceMessages: (msgs) => { agent.session.replaceMessages(msgs); agent.config.promptEngine.resetAppendixBaseline() },
     rewindToMessages: (msgs) => { agent.session.rewindToMessages(msgs); agent.config.promptEngine.resetAppendixBaseline() },
     getFileHistory: () => agent.getFileHistory(),
@@ -1197,6 +1219,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // MCP routes: server management + live status for the desktop MCP settings UI.
   Object.assign(routes, buildMcpRoutes(() => sharedRuntime.mcpManager, apiToken))
+
+  // Plugin routes: presets + install/enable/remove for desktop plugin market UI.
+  Object.assign(routes, buildPluginRoutes(apiToken))
 
   // Open file in system editor / reveal in file manager — thin wrapper so the
   // Desktop webview can request the sidecar to open a local path without
