@@ -21,7 +21,8 @@ import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { pickFolder } from '../lib/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -203,6 +204,7 @@ export function SettingsSurface() {
               <AutonomyControl value={autonomy} onChange={pickAutonomy} />
               <div className="meta">{t('autonomyHint')}</div>
             </section>
+            <PermissionDirsSection />
             <CheckpointSection />
             <section className="settings-group">
               <h4>{t('toolDensity')}</h4>
@@ -284,6 +286,13 @@ export function SettingsSurface() {
                 <p className="meta">连接外部工具服务器（如 Context7），为 agent 提供文档查询等扩展能力。</p>
               </div>
               <McpSettingsManager />
+            </section>
+            <section className="integration-card">
+              <div className="integration-card-header">
+                <h4>{t('computerUse.title')}</h4>
+                <p className="meta">{t('computerUse.desc')}</p>
+              </div>
+              <ComputerUseSettingsManager />
             </section>
           </div>
         )}
@@ -606,6 +615,131 @@ function CheckpointSection() {
         Auto 模式下，每隔 N 轮暂停并同步进度摘要。默认关闭（0 = 不暂停）。仅在 auto-safe 模式下生效；YOLO 和 Manual 模式不受影响。权限模式通过上方 Autonomy 控件切换。
       </div>
       {msg && <div className="meta">{msg}</div>}
+    </section>
+  )
+}
+
+/**
+ * Codex-style standing directory grants (agent.permissions.additional*Dirs):
+ * hand whole folders (or a drive root) to the agent without per-file approval
+ * prompts. Backed by GET/PUT /config/permission-dirs; additions apply to the
+ * running sidecar immediately, removals need a sidecar restart.
+ */
+function PermissionDirsSection() {
+  const { t } = useTranslation('settings')
+  const [dirs, setDirs] = useState<PermissionDirs | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [readInput, setReadInput] = useState('')
+  const [writeInput, setWriteInput] = useState('')
+
+  useEffect(() => {
+    void getPermissionDirs()
+      .then((d) => setDirs(d))
+      .catch(() => setLoadFailed(true))
+  }, [])
+
+  const save = useCallback(async (readPaths: string[], writePaths: string[]) => {
+    setMsg(null)
+    try {
+      const saved = await setPermissionDirs({
+        additionalReadDirs: readPaths,
+        additionalWriteDirs: writePaths,
+      })
+      setDirs({ readDirs: saved.readDirs, writeDirs: saved.writeDirs })
+      setMsg(saved.restartRequired ? t('permissionDirs.savedRestart') : t('permissionDirs.savedApplied'))
+    } catch (err) {
+      setMsg(t('permissionDirs.saveFailed', { error: (err as Error).message }))
+    }
+  }, [t])
+
+  if (loadFailed || dirs === null) return null
+
+  const readPaths = dirs.readDirs.map((d) => d.path)
+  const writePaths = dirs.writeDirs.map((d) => d.path)
+
+  const addDir = (mode: 'read' | 'write', raw: string) => {
+    const path = raw.trim()
+    if (!path) return
+    if (mode === 'read') {
+      if (readPaths.includes(path)) return
+      setReadInput('')
+      void save([...readPaths, path], writePaths)
+    } else {
+      if (writePaths.includes(path)) return
+      setWriteInput('')
+      void save(readPaths, [...writePaths, path])
+    }
+  }
+
+  const removeDir = (mode: 'read' | 'write', path: string) => {
+    if (mode === 'read') void save(readPaths.filter((p) => p !== path), writePaths)
+    else void save(readPaths, writePaths.filter((p) => p !== path))
+  }
+
+  const pickAndAdd = async (mode: 'read' | 'write') => {
+    const folder = await pickFolder()
+    if (folder) addDir(mode, folder)
+  }
+
+  const renderList = (mode: 'read' | 'write', entries: { path: string; exists: boolean }[]) => (
+    entries.length === 0 ? (
+      <div className="meta mt-1">{t('permissionDirs.empty')}</div>
+    ) : (
+      <ul className="mt-1 flex flex-col gap-1 list-none p-0 m-0">
+        {entries.map((d) => (
+          <li key={d.path} className="flex items-center gap-2 text-sm">
+            <span className="font-mono break-all">{d.path}</span>
+            {!d.exists && <span className="badge warn shrink-0">{t('permissionDirs.missing')}</span>}
+            <button type="button" className="btn ghost sm ml-auto shrink-0" onClick={() => removeDir(mode, d.path)}>
+              {t('permissionDirs.remove')}
+            </button>
+          </li>
+        ))}
+      </ul>
+    )
+  )
+
+  const renderAddRow = (
+    mode: 'read' | 'write',
+    input: string,
+    setInput: (v: string) => void,
+  ) => (
+    <div className="flex items-center gap-2 mt-1.5" style={{ flexWrap: 'wrap' }}>
+      <button type="button" className="btn-sm" onClick={() => void pickAndAdd(mode)}>
+        {t('permissionDirs.addFolder')}
+      </button>
+      <input
+        className="settings-input flex-1"
+        style={{ minWidth: 220 }}
+        placeholder={t('permissionDirs.manualPlaceholder')}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') addDir(mode, input) }}
+      />
+      <button type="button" className="btn-sm" onClick={() => addDir(mode, input)} disabled={!input.trim()}>
+        {t('permissionDirs.add')}
+      </button>
+    </div>
+  )
+
+  return (
+    <section className="settings-group">
+      <h4>{t('permissionDirs.title')}</h4>
+      <div className="meta">{t('permissionDirs.desc')}</div>
+      <div className="mt-2">
+        <h5 className="text-sm font-medium m-0">{t('permissionDirs.readTitle')}</h5>
+        <div className="meta">{t('permissionDirs.readDesc')}</div>
+        {renderList('read', dirs.readDirs)}
+        {renderAddRow('read', readInput, setReadInput)}
+      </div>
+      <div className="mt-3">
+        <h5 className="text-sm font-medium m-0">{t('permissionDirs.writeTitle')}</h5>
+        <div className="meta">{t('permissionDirs.writeDesc')}</div>
+        {renderList('write', dirs.writeDirs)}
+        {renderAddRow('write', writeInput, setWriteInput)}
+      </div>
+      {msg && <div className="meta mt-1.5">{msg}</div>}
     </section>
   )
 }
@@ -1058,6 +1192,85 @@ function McpSettingsManager() {
       onRemove={handleRemove}
       onRestart={handleRestart}
     />
+  )
+}
+
+/** Computer Use (macOS GUI automation): permission status + per-app grants. */
+function ComputerUseSettingsManager() {
+  const { t } = useTranslation('settings')
+  const [status, setStatus] = useState<ComputerUseStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchStatus = useCallback(() => {
+    setLoading(true)
+    getComputerUseStatus()
+      .then((s) => { setStatus(s); setError(null) })
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  const handleRevoke = useCallback((app: string) => {
+    revokeComputerUseApp(app)
+      .then((r) => setStatus((prev) => (prev ? { ...prev, grants: r.grants } : prev)))
+      .catch((err) => toast.error(t('computerUse.revokeFailed', { error: (err as Error).message })))
+  }, [t])
+
+  if (loading && !status) return <div className="meta">{t('computerUse.loading')}</div>
+  if (error) return <div className="meta text-destructive">{error}</div>
+  if (!status) return null
+
+  if (!status.available) {
+    return <div className="meta">{t('computerUse.unavailable')}</div>
+  }
+
+  const permBadge = (granted: boolean) => (
+    <span className={`badge ${granted ? 'ok' : 'warn'}`}>
+      {granted ? t('computerUse.permGranted') : t('computerUse.permMissing')}
+    </span>
+  )
+
+  return (
+    <div className="computer-use-settings flex flex-col gap-3">
+      <div>
+        <div className="flex items-center gap-2">
+          <h5 className="text-sm font-medium m-0">{t('computerUse.permissions')}</h5>
+          <button className="btn ghost sm" onClick={fetchStatus}>{t('computerUse.refresh')}</button>
+        </div>
+        {status.permissions ? (
+          <div className="flex items-center gap-4 mt-1.5 text-sm">
+            <span className="flex items-center gap-1.5">{t('computerUse.permAccessibility')} {permBadge(status.permissions.accessibility)}</span>
+            <span className="flex items-center gap-1.5">{t('computerUse.permScreenRecording')} {permBadge(status.permissions.screenRecording)}</span>
+          </div>
+        ) : (
+          <div className="meta mt-1.5">{t('computerUse.permUnknown')}</div>
+        )}
+        {status.permissions && !(status.permissions.accessibility && status.permissions.screenRecording) && (
+          <div className="meta mt-1">{status.permissions.detail}</div>
+        )}
+      </div>
+
+      <div>
+        <h5 className="text-sm font-medium m-0">{t('computerUse.grantsTitle')}</h5>
+        {status.grants.length === 0 ? (
+          <div className="meta mt-1.5">{t('computerUse.grantsEmpty')}</div>
+        ) : (
+          <ul className="mt-1.5 flex flex-col gap-1 list-none p-0 m-0">
+            {status.grants.map((g) => (
+              <li key={g.app} className="flex items-center gap-2 text-sm">
+                <span className="font-mono">{g.app}</span>
+                <span className="meta">{new Date(g.grantedAt).toLocaleString()}</span>
+                <button className="btn ghost sm ml-auto" onClick={() => handleRevoke(g.app)}>
+                  {t('computerUse.revoke')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -119,6 +119,15 @@ export function pathGrantsPath(slug: string): string {
   return join(rivetHome(), `path-grants-${slug}.json`)
 }
 
+/**
+ * Computer Use per-app grant file — machine-level (NOT per-project): once you
+ * trust Codex-style GUI automation to drive an app, that trust spans sessions
+ * and projects. `base` lets tests inject a temporary home without RIVET_HOME.
+ */
+export function computerUseGrantsPath(base?: string): string {
+  return join(base ?? rivetHome(), 'computer-use-grants.json')
+}
+
 /** Directory holding per-cwd last-session pointer files. */
 export function lastSessionPointerDir(): string {
   return join(rivetHome(), 'last-session')

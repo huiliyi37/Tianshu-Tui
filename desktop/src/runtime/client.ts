@@ -343,6 +343,34 @@ export async function getStorageReport(): Promise<StorageReport> {
   return apiGet<StorageReport>('/storage')
 }
 
+// ── Computer Use (macOS GUI automation) settings ─────────────────────
+
+export interface ComputerUsePermissions {
+  accessibility: boolean
+  screenRecording: boolean
+  detail: string
+}
+
+export interface ComputerUseGrantItem {
+  app: string
+  grantedAt: number
+}
+
+export interface ComputerUseStatus {
+  available: boolean
+  platform: string
+  permissions: ComputerUsePermissions | null
+  grants: ComputerUseGrantItem[]
+}
+
+export function getComputerUseStatus(): Promise<ComputerUseStatus> {
+  return apiGet<ComputerUseStatus>('/config/computer-use')
+}
+
+export function revokeComputerUseApp(app: string): Promise<{ ok: boolean; grants: ComputerUseGrantItem[] }> {
+  return apiPost<{ ok: boolean; grants: ComputerUseGrantItem[] }>('/config/computer-use/revoke', { app })
+}
+
 /**
  * Irreversibly delete archived sessions' files. `ids` targets specific ones;
  * `olderThanDays` keeps only archived idle for ≥ N days; omit both to purge all
@@ -396,10 +424,12 @@ export function answerApproval(
   requestId: string,
   decision: ApprovalDecision,
   editedInput?: Record<string, unknown>,
+  remember?: boolean,
 ): Promise<{ ok: boolean }> {
   return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, {
     decision,
     ...(editedInput ? { editedInput } : {}),
+    ...(remember ? { remember: true } : {}),
   })
 }
 
@@ -985,6 +1015,29 @@ export function setCheckpointConfig(
   input: { checkpointEveryTurns?: number },
 ): Promise<{ ok: boolean } & CheckpointConfig> {
   return apiPut<{ ok: boolean } & CheckpointConfig>('/config/checkpoint', input)
+}
+
+// ── Codex 式常驻目录授权（agent.permissions.additional*Dirs）───────────
+
+/** One standing directory grant. `exists: false` = path missing on disk (grant
+ *  is skipped fail-closed at session start — likely a typo or unplugged drive). */
+export interface PermissionDirEntry { path: string; exists: boolean }
+
+export interface PermissionDirs {
+  readDirs: PermissionDirEntry[]
+  writeDirs: PermissionDirEntry[]
+}
+
+export function getPermissionDirs(): Promise<PermissionDirs> {
+  return apiGet<PermissionDirs>('/config/permission-dirs')
+}
+
+/** Replaces both lists. Additions apply to the running sidecar immediately;
+ *  removals take effect on the next sidecar start (`restartRequired: true`). */
+export function setPermissionDirs(
+  input: { additionalReadDirs?: string[]; additionalWriteDirs?: string[] },
+): Promise<{ ok: boolean; restartRequired: boolean } & PermissionDirs> {
+  return apiPut<{ ok: boolean; restartRequired: boolean } & PermissionDirs>('/config/permission-dirs', input)
 }
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────

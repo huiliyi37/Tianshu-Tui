@@ -217,6 +217,52 @@ test('approval is a two-way intervention resolved out of band', async () => {
   assert.equal(resolved!.data.decision, 'approve')
 })
 
+test('computer_use approve + remember records a per-app grant (always allow)', async (t) => {
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { isAppGranted } = await import('../../tools/computer-use/app-grants.js')
+  const home = mkdtempSync(join(tmpdir(), 'rivet-cu-remember-'))
+  const prevHome = process.env.RIVET_HOME
+  process.env.RIVET_HOME = home
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  // approve WITHOUT remember → no grant
+  const p1 = cb.onApprovalRequired('cu-1', 'computer_use', { action: 'snapshot', app: 'Safari' })
+  manager.answerIntervention(s.id, 'cu-1', 'approve')
+  assert.deepEqual(await p1, { approved: true })
+  assert.equal(isAppGranted('Safari'), false, 'plain approve must not grant')
+
+  // approve WITH remember → grant recorded + event annotated
+  const p2 = cb.onApprovalRequired('cu-2', 'computer_use', { action: 'click', app: 'Safari', ref: 1 })
+  manager.answerIntervention(s.id, 'cu-2', 'approve', undefined, true)
+  assert.deepEqual(await p2, { approved: true })
+  assert.equal(isAppGranted('Safari'), true, 'approve+remember must grant the app')
+  const resolved = manager.getEvents(s.id, 0)!.events
+    .filter((e) => e.type === 'approval_resolved')
+    .find((e) => e.data.requestId === 'cu-2')
+  assert.equal(resolved!.data.rememberedApp, 'Safari')
+
+  // remember on a NON-computer_use tool → no grant side effect
+  const p3 = cb.onApprovalRequired('b-1', 'bash', { command: 'ls' })
+  manager.answerIntervention(s.id, 'b-1', 'approve', undefined, true)
+  assert.deepEqual(await p3, { approved: true })
+
+  // reject + remember → no grant
+  const p4 = cb.onApprovalRequired('cu-3', 'computer_use', { action: 'snapshot', app: 'Notes' })
+  manager.answerIntervention(s.id, 'cu-3', 'reject', undefined, true)
+  assert.deepEqual(await p4, { approved: false })
+  assert.equal(isAppGranted('Notes'), false, 'reject+remember must not grant')
+})
+
 test('rejecting approval resolves with approved:false', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })

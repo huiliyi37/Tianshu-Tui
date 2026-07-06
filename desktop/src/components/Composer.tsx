@@ -62,6 +62,12 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_IMAGES = 4
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 220
 
+/** Sentinel item in the @-mention picker for the Computer Use entry (never a
+ *  real path — files can't contain NUL). Selecting it inserts `@Computer ` and
+ *  the server mounts the computer_use tool before the run. macOS only. */
+const COMPUTER_MENTION_ITEM = '\u0000computer'
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
+
 /** Highlight placeholder arguments like `<描述>` in slash command examples. */
 function HighlightedExample({ text }: { text: string }) {
   const parts = text.split(/(<[^>]+>)/g)
@@ -237,12 +243,20 @@ export function Composer(props: {
     clearTimeout(debounce.current)
     debounce.current = setTimeout(async () => {
       const seq = ++reqSeq.current
+      // @Computer entry (Codex parity): offered when the typed query prefixes
+      // "computer" — selecting it mounts the computer_use tool for this run.
+      const computerEntry =
+        IS_MAC && token.query.length > 0 && 'computer'.startsWith(token.query.toLowerCase())
+          ? [COMPUTER_MENTION_ITEM]
+          : []
       try {
-        const items = await listFiles(sessionId, token.query, 30)
+        const files = await listFiles(sessionId, token.query, 30)
         if (seq !== reqSeq.current) return // stale
+        const items = [...computerEntry, ...files]
         setSuggest(items.length > 0 ? { mode: 'file', token, items, index: 0 } : null)
       } catch {
-        if (seq === reqSeq.current) setSuggest(null)
+        if (seq !== reqSeq.current) return
+        setSuggest(computerEntry.length > 0 ? { mode: 'file', token, items: computerEntry, index: 0 } : null)
       }
     }, 120)
   }
@@ -280,6 +294,16 @@ export function Composer(props: {
   }
 
   const selectFile = (token: MentionToken, path: string) => {
+    if (path === COMPUTER_MENTION_ITEM) {
+      // Plain-text token (not an @file: reference) — the server's prompt route
+      // detects it and mounts computer_use before the run.
+      const insert = '@Computer '
+      const nextRawValue = value.slice(0, token.start) + insert + value.slice(token.end)
+      pendingCaret.current = token.start + insert.length
+      onChange(nextRawValue)
+      closeSuggest()
+      return
+    }
     const { text: nextRawValue } = applyMention(value, token, path)
     // Place caret at the end of the text segment (where the '@' query was)
     pendingCaret.current = token.start
@@ -578,8 +602,18 @@ export function Composer(props: {
                   className={`suggest-item ${i === suggest.index ? 'active' : ''}`}
                   onMouseDown={(e) => { e.preventDefault(); selectFile(suggest.token, path) }}
                 >
-                  <span className="suggest-glyph" aria-hidden>@</span>
-                  <span className="suggest-path">{path}</span>
+                  {path === COMPUTER_MENTION_ITEM ? (
+                    <>
+                      <span className="suggest-glyph" aria-hidden>🖥️</span>
+                      <span className="suggest-path">Computer</span>
+                      <span className="suggest-desc">操作 macOS 桌面应用（截图/点击/键入）</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="suggest-glyph" aria-hidden>@</span>
+                      <span className="suggest-path">{path}</span>
+                    </>
+                  )}
                 </li>
               ))
             : suggest.items.map((cmd, i) => {

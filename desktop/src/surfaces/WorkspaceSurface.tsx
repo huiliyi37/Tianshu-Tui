@@ -131,9 +131,9 @@ export function WorkspaceSurface() {
   }, [activeId, sendPrompt, tryConsentBridge])
 
   const handleApproval = useCallback(
-    (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => {
+    (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>, remember?: boolean) => {
       if (!activeId || !view.pendingApproval) return
-      void answerApproval(activeId, view.pendingApproval.requestId, decision, editedInput)
+      void answerApproval(activeId, view.pendingApproval.requestId, decision, editedInput, remember)
     },
     [activeId, view.pendingApproval],
   )
@@ -516,6 +516,33 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
         desc: `在系统终端中运行命令: \`${String(input.command ?? "")}\``,
         icon: "💻"
       }
+    case 'computer_use': {
+      const app = String(input.app ?? '')
+      const action = String(input.action ?? '')
+      const actionLabel: Record<string, string> = {
+        list_apps: '枚举可见应用',
+        snapshot: '读取界面结构并截图',
+        click: '点击界面元素',
+        type: '输入文本',
+        key: '发送快捷键',
+        focus_app: '切换到前台',
+      }
+      const what = actionLabel[action] ?? action
+      let target = ''
+      if (action === 'click') {
+        target = typeof input.ref === 'number' ? `（元素 #${input.ref}）` : `（坐标 ${String(input.x)}, ${String(input.y)}）`
+      } else if (action === 'type') {
+        const t = String(input.text ?? '')
+        target = t ? `（${t.length > 24 ? `${t.slice(0, 24)}…` : t}）` : ''
+      } else if (action === 'key') {
+        target = input.combo ? `（${String(input.combo)}）` : ''
+      }
+      return {
+        title: app ? `操作应用: ${app}` : '操作桌面应用',
+        desc: `Computer Use — ${what}${target}`,
+        icon: "🖥️"
+      }
+    }
     default:
       return {
         title: `调用系统工具: ${toolName}`,
@@ -527,7 +554,7 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
 
 interface ApprovalModalProps {
   request: ApprovalRequest
-  onDecision: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
+  onDecision: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>, remember?: boolean) => void
 }
 
 /** Inline approval card — non-blocking, pinned above the composer.
@@ -541,6 +568,12 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
   const [draft, setDraft] = useState(
     editKey ? String((request.input as Record<string, unknown>)[editKey] ?? '') : '',
   )
+  // Computer Use "always allow": approve+remember records a per-app grant so
+  // future actions on this app skip the prompt (server writes the grant store).
+  const computerUseApp = request.toolName === 'computer_use'
+    ? String((request.input as Record<string, unknown>).app ?? '').trim()
+    : ''
+  const [rememberApp, setRememberApp] = useState(false)
 
   const isCodeTool = EDIT_TOOLS.has(request.toolName)
 
@@ -550,12 +583,12 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
       if (isCmdEnter) {
         e.preventDefault()
         if (isDiffEditorOpen && editKey) {
-          onDecision('approve', { ...request.input, [editKey]: draft })
+          onDecision('approve', { ...request.input, [editKey]: draft }, rememberApp)
           setIsDiffEditorOpen(false)
         } else if (editing && editKey) {
-          onDecision('approve', { ...request.input, [editKey]: draft })
+          onDecision('approve', { ...request.input, [editKey]: draft }, rememberApp)
         } else {
-          onDecision('approve')
+          onDecision('approve', undefined, rememberApp)
         }
       } else if (e.key === 'Escape') {
         if (isDiffEditorOpen) {
@@ -569,13 +602,13 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editing, isDiffEditorOpen, draft, request, onDecision, editKey])
+  }, [editing, isDiffEditorOpen, draft, request, onDecision, editKey, rememberApp])
 
   const intent = getApprovalIntent(request.toolName, request.input as Record<string, unknown>)
 
   const approve = () => {
-    if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft })
-    else onDecision('approve')
+    if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft }, rememberApp)
+    else onDecision('approve', undefined, rememberApp)
   }
 
   const triggerEdit = () => {
@@ -645,6 +678,16 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
             >
               {showDetail ? '收起详情' : '查看详情'}
             </button>
+          )}
+          {computerUseApp && (
+            <label className="approval-remember flex items-center gap-1.5 text-xs cursor-pointer select-none" title={`以后允许操作 ${computerUseApp}，不再询问（可在设置中撤销）`}>
+              <input
+                type="checkbox"
+                checked={rememberApp}
+                onChange={(e) => setRememberApp(e.target.checked)}
+              />
+              <span>始终允许 {computerUseApp}</span>
+            </label>
           )}
           <div className="flex items-center gap-2 ml-auto">
             <button

@@ -21,9 +21,11 @@ class FakeAgent implements ManagedAgent {
   activePlanCalls: ({ slug: string; title: string; selectedApproach?: string } | null)[] = []
   enterPlanModeCalls: Array<{ planFilePath?: string } | undefined> = []
   activePlanFilePath: string | null = null
+  enabledTools: string[] = []
   private resolveRun?: () => void
   run(p: string, cb: AgentCallbacks) { this.runPrompts.push(p); this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
   abort() { this.resolveRun?.() }
+  enableTool(name: string) { this.enabledTools.push(name); return { status: 'mounted', cacheImpact: 'none' } }
   setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null) { this.activePlanCalls.push(plan) }
   enterPlanMode(opts?: { planFilePath?: string }) { this.enterPlanModeCalls.push(opts) }
   switchModel(modelId: string): string | null { return modelId }
@@ -122,6 +124,51 @@ test('T3: POST /steer validates the text field and is Bearer-gated', async () =>
 
   const missing = await router('POST', '/sessions/nope/steer', { text: 'x' }, AUTH)
   assert.equal(missing.status, 404)
+})
+
+test('@Computer mention in prompt mounts computer_use before the run', async () => {
+  const { router, agents } = setup()
+  const created = await router('POST', '/sessions', {}, AUTH) // idle
+  const id = (created.body as { id: string }).id
+
+  const res = await router('POST', `/sessions/${id}/prompt`, { prompt: '@Computer 帮我把 Safari 里的表单填了' }, AUTH)
+  assert.equal(res.status, 200)
+  assert.deepEqual(agents[0]!.enabledTools, ['computer_use'])
+  assert.match(agents[0]!.runPrompts[0]!, /@Computer/, 'mention text stays in the prompt')
+})
+
+test('prompt without @Computer does not mount computer_use', async () => {
+  const { router, agents } = setup()
+  const created = await router('POST', '/sessions', {}, AUTH)
+  const id = (created.body as { id: string }).id
+  const res = await router('POST', `/sessions/${id}/prompt`, { prompt: 'check my computer setup docs' }, AUTH)
+  assert.equal(res.status, 200)
+  assert.deepEqual(agents[0]!.enabledTools, [])
+})
+
+test('intervention answer route forwards remember to the manager (computer_use grant)', async (t) => {
+  const { mkdtempSync: mkTmp, rmSync } = await import('node:fs')
+  const home = mkTmp(join(tmpdir(), 'rivet-cu-route-'))
+  const prevHome = process.env.RIVET_HOME
+  process.env.RIVET_HOME = home
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+  const { isAppGranted } = await import('../../tools/computer-use/app-grants.js')
+
+  const { router, agents } = setup()
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+  const pending = agents[0]!.callbacks!.onApprovalRequired('cu-1', 'computer_use', { action: 'snapshot', app: 'Safari' })
+
+  const answer = await router(
+    'POST', `/sessions/${id}/interventions/cu-1/answer`, { decision: 'approve', remember: true }, AUTH,
+  )
+  assert.equal(answer.status, 200)
+  assert.deepEqual(await pending, { approved: true })
+  assert.equal(isAppGranted('Safari'), true)
 })
 
 test('intervention answer route resolves a pending approval', async () => {

@@ -478,6 +478,13 @@ export function buildSessionRoutes(
         }
       }
 
+      // @Computer 提及 → run 前挂载 computer_use（EXTENDED 层，默认不进主控视野）。
+      // 缓存纪律：走既有 enableTool 边界挂载机制，边界一次性 miss 已有提示；
+      // 非 darwin 平台工具未注册，enableTool 静默 no-op。
+      if (/@computer\b/i.test(prompt)) {
+        manager.enableTool(params!.id!, 'computer_use')
+      }
+
       const ok = manager.run(params!.id!, prompt, images)
       if (!ok) return { status: 409, body: { error: 'Session is missing or already running' } }
       return { status: 200, body: manager.getSession(params!.id!) }
@@ -825,9 +832,11 @@ export function buildSessionRoutes(
     }, apiToken),
 
     'POST /sessions/:id/interventions/:requestId/answer': withAuth((body, params) => {
-      const data = (body ?? {}) as { decision?: string; editedInput?: Record<string, unknown> }
+      const data = (body ?? {}) as { decision?: string; editedInput?: Record<string, unknown>; remember?: boolean }
       const decision = data.decision ?? 'approve'
-      const ok = manager.answerIntervention(params!.id!, params!.requestId!, decision, data.editedInput)
+      const ok = manager.answerIntervention(
+        params!.id!, params!.requestId!, decision, data.editedInput, data.remember === true,
+      )
       if (!ok) return { status: 404, body: { error: 'Pending intervention not found' } }
       return { status: 200, body: { ok: true } }
     }, apiToken),

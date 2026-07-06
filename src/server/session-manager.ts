@@ -54,6 +54,7 @@ import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
 import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
 import { parseAskUserQuestions } from '../tools/ask-user-question.js'
+import { grantApp as grantComputerUseApp } from '../tools/computer-use/app-grants.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -508,6 +509,11 @@ interface PendingIntervention {
   kind: InterventionKind
   resolve: (value: ApprovalResult | boolean) => void
   timer?: ReturnType<typeof setTimeout>
+  /** Tool identity of the gated call — lets answerIntervention apply
+   *  tool-specific "remember" semantics (e.g. computer_use per-app grants). */
+  toolName?: string
+  /** Original (unredacted) tool input for remember handling. */
+  toolInput?: Record<string, unknown>
 }
 
 interface InternalSession {
@@ -2136,6 +2142,7 @@ export class RuntimeSessionManager {
     requestId: string,
     decision: string,
     editedInput?: Record<string, unknown>,
+    remember?: boolean,
   ): boolean {
     const s = this.sessions.get(id)
     if (!s) return false
@@ -2151,11 +2158,25 @@ export class RuntimeSessionManager {
     }
     pend.resolve(result)
     if (!approved) s.lastApprovalDeniedAt = this.now()
+    // Computer Use "always allow": approve + remember records a machine-level
+    // per-app grant so future actions on this app skip the prompt entirely
+    // (the tool's requiresApproval consults the same grant store).
+    let rememberedApp: string | undefined
+    if (approved && remember === true && pend.toolName === 'computer_use') {
+      const app = pend.toolInput?.app
+      if (typeof app === 'string' && app.trim()) {
+        try {
+          grantComputerUseApp(app.trim())
+          rememberedApp = app.trim()
+        } catch { /* grant persistence is best-effort — approval still resolves */ }
+      }
+    }
     this.recountApprovals(s)
     this.append(s, 'approval_resolved', {
       requestId,
       decision: approved ? 'approve' : 'reject',
       edited: !!result.editedInput,
+      ...(rememberedApp ? { rememberedApp } : {}),
     })
     this.touch(s)
     this.persistRecord(s)
@@ -2572,6 +2593,8 @@ export class RuntimeSessionManager {
         requestId,
         kind: 'approval',
         resolve: resolve as (v: ApprovalResult | boolean) => void,
+        toolName: name,
+        toolInput: input,
       }
       if (this.approvalTimeoutMs > 0) {
         pend.timer = setTimeout(() => {
