@@ -27,6 +27,7 @@
  */
 
 import { execFile } from 'node:child_process'
+import { createScriptHost, hostEnabled, HostUnavailableError, SENTINEL, type ScriptHost } from './script-host.js'
 import { readFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -52,7 +53,7 @@ const VISION_MAX_DIMENSION = 1440
 /** Injectable script executor — tests swap in a fake to lock script contents. */
 export type PowerShellRunner = (script: string, timeoutMs?: number) => Promise<string>
 
-function runPowerShellDefault(script: string, timeoutMs = POWERSHELL_TIMEOUT_MS): Promise<string> {
+function runPowerShellOneShot(script: string, timeoutMs = POWERSHELL_TIMEOUT_MS): Promise<string> {
   const wrapped = [
     `$ErrorActionPreference = 'Stop'`,
     `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`,
@@ -77,6 +78,77 @@ function runPowerShellDefault(script: string, timeoutMs = POWERSHELL_TIMEOUT_MS)
   })
 }
 
+/**
+ * Resident PowerShell REPL: reads the script-host line protocol from stdin,
+ * decodes each base64 request, Invoke-Expressions it and replies with the
+ * captured pipeline output. The preludes (Add-Type C# JIT ~1-3s, UIA
+ * assemblies) are paid ONCE at bootstrap instead of per action — that JIT is
+ * the dominant per-call cost of the one-shot path. Per-request scripts still
+ * embed the preludes for the one-shot fallback; the `if (-not ('RivetInput'
+ * -as [type]))` guard makes them no-ops here.
+ */
+function buildPsReplBootstrap(): string {
+  return `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try {
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+} catch {}
+while ($true) {
+  $line = [Console]::In.ReadLine()
+  if ($null -eq $line) { break }
+  if ($line.Trim() -eq '') { continue }
+  $req = $null
+  try { $req = ConvertFrom-Json $line } catch { continue }
+  $reply = $null
+  try {
+    $code = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($req.b64))
+    $out = Invoke-Expression $code | Out-String -Width 1000000
+    $reply = @{ id = $req.id; ok = $true; out = $out.TrimEnd() }
+  } catch {
+    $reply = @{ id = $req.id; ok = $false; err = $_.Exception.Message }
+  }
+  [Console]::Out.WriteLine('${SENTINEL}' + (ConvertTo-Json -InputObject $reply -Compress))
+}
+`
+}
+
+let sharedPsHost: ScriptHost | null = null
+
+function getPsHost(): ScriptHost | null {
+  if (!hostEnabled()) return null
+  if (!sharedPsHost) {
+    const encoded = Buffer.from(buildPsReplBootstrap(), 'utf16le').toString('base64')
+    sharedPsHost = createScriptHost({
+      command: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+    })
+  }
+  return sharedPsHost
+}
+
+/** Test hook: drop the shared host so the next call respawns it. */
+export function resetPsHostForTests(): void {
+  sharedPsHost?.dispose()
+  sharedPsHost = null
+}
+
+async function runPowerShellDefault(script: string, timeoutMs = POWERSHELL_TIMEOUT_MS): Promise<string> {
+  const host = getPsHost()
+  if (host && host.available()) {
+    try {
+      return await host.run(script, timeoutMs)
+    } catch (err) {
+      // Fall back only when the host never ran the script (spawn failure /
+      // disabled). A timeout or mid-run crash may have partially executed a
+      // mutating action — re-running via execFile would double-fire input.
+      if (!(err instanceof HostUnavailableError)) throw err
+    }
+  }
+  return runPowerShellOneShot(script, timeoutMs)
+}
+
 /** Escape a string for safe embedding as a single-quoted PowerShell literal. */
 export function psString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
@@ -95,6 +167,7 @@ export function normalizeAppName(app: string): string {
  * physical-pixel space.
  */
 const INPUT_PRELUDE = `
+if (-not ('RivetInput' -as [type])) {
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -151,6 +224,7 @@ public static class RivetInput {
   public static void TypeChar(char c) { Send(Key(0, c, UNICODE)); Send(Key(0, c, UNICODE | KEYUP)); }
 }
 '@
+}
 [void][RivetInput]::SetProcessDPIAware()
 `
 
@@ -399,14 +473,14 @@ export function buildClickByPathScript(
 ): string {
   // Plain left single click prefers InvokePattern (the UIA analog of AXPress —
   // works even for obscured elements); everything else needs real synthetic
-  // events at the element's center.
+  // events at the element's center. No `exit` — these scripts also run inside
+  // the resident PS host, which an exit would kill.
   const invokeFastPath = button === 'left' && count === 1
     ? `
 $invoke = $null
 if ($found.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke) -and $invoke) {
   $invoke.Invoke()
-  'ok'
-  exit 0
+  $clicked = $true
 }`
     : ''
   return `
@@ -415,9 +489,12 @@ ${UIA_PRELUDE}
 ${procsForApp(app)}
 ${UIA_WINDOWS}
 ${resolveByPath(target)}
+$clicked = $false
 ${invokeFastPath}
+if (-not $clicked) {
 ${ELEMENT_CENTER}
 [RivetInput]::Click($cx, $cy, $${button === 'right'}, ${count})
+}
 'ok'
 `
 }

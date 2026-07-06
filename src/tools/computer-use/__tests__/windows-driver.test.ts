@@ -100,6 +100,9 @@ test('buildSnapshotScript embeds app, node cap, and escaped output paths', () =>
   const s = buildSnapshotScript("my'app", 'C:\\tmp\\full.png', 'C:\\tmp\\vision.png')
   assert.match(s, /\$app = 'my''app'/)
   assert.match(s, /\$MAX = 400/)
+  // Add-Type is guarded so re-running the prelude inside the resident PS
+  // host (types already compiled at bootstrap) is a no-op instead of a throw.
+  assert.match(s, /if \(-not \('RivetInput' -as \[type\]\)\)/)
   assert.ok(s.includes(`'C:\\tmp\\full.png'`))
   assert.ok(s.includes(`'C:\\tmp\\vision.png'`))
   assert.match(s, /ControlViewWalker/)
@@ -151,6 +154,8 @@ test('buildClickByPathScript: left single click has InvokePattern fast path, rig
   assert.match(left, /\$idxPath = @\(0, 2\)/)
   assert.match(left, /\$expectRole = 'Button'/)
   assert.match(left, /\[RivetInput\]::Click\(\$cx, \$cy, \$false, 1\)/)
+  // `exit` would kill the resident PS host — the fast path must use a flag.
+  assert.doesNotMatch(left, /\bexit\b/)
 
   const right = buildClickByPathScript('notepad', target, 'right', 1)
   assert.equal(right.includes('InvokePattern'), false)

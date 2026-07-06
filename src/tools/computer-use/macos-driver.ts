@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFile, unlink } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
+import { createScriptHost, hostEnabled, HostUnavailableError, SENTINEL, type ScriptHost } from './script-host.js'
 
 export interface AppInfo {
   name: string
@@ -130,7 +131,80 @@ function runOsascript(args: string[], timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise
   })
 }
 
-function runJxa(script: string, timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise<string> {
+/** Injectable JXA executor — tests swap in a fake to lock script contents. */
+export type JxaRunner = (script: string, timeoutMs?: number) => Promise<string>
+
+/**
+ * Resident JXA REPL: reads the script-host line protocol from stdin, evals
+ * each request in a fresh function scope (scripts are self-contained, their
+ * `const`/`function` declarations must not collide across requests) and
+ * replies with the last-expression value — same semantics as one-shot
+ * `osascript -e`. Keeping the process alive reuses the System Events
+ * connection, which is ~0.6s of handshake per one-shot invocation.
+ */
+const JXA_REPL_BOOTSTRAP = `
+ObjC.import('Foundation');
+const __stdin = $.NSFileHandle.fileHandleWithStandardInput;
+const __stdout = $.NSFileHandle.fileHandleWithStandardOutput;
+function __reply(obj) {
+  const line = ${JSON.stringify(SENTINEL)} + JSON.stringify(obj) + '\\n';
+  __stdout.writeData($(line).dataUsingEncoding($.NSUTF8StringEncoding));
+}
+let __buf = '';
+while (true) {
+  const data = __stdin.availableData;
+  if (ObjC.unwrap(data.length) === 0) break;
+  __buf += ObjC.unwrap($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding)) || '';
+  let nl;
+  while ((nl = __buf.indexOf('\\n')) !== -1) {
+    const line = __buf.slice(0, nl).trim();
+    __buf = __buf.slice(nl + 1);
+    if (!line) continue;
+    let req = null;
+    try { req = JSON.parse(line); } catch (e) { continue; }
+    try {
+      const codeData = $.NSData.alloc.initWithBase64EncodedStringOptions(req.b64, 0);
+      const code = ObjC.unwrap($.NSString.alloc.initWithDataEncoding(codeData, $.NSUTF8StringEncoding));
+      const out = (function () { return eval(code); })();
+      __reply({ id: req.id, ok: true, out: (out === undefined || out === null) ? '' : String(out) });
+    } catch (e) {
+      __reply({ id: req.id, ok: false, err: String((e && e.message) ? e.message : e) });
+    }
+  }
+}
+`
+
+let sharedJxaHost: ScriptHost | null = null
+
+function getJxaHost(): ScriptHost | null {
+  if (!hostEnabled()) return null
+  if (!sharedJxaHost) {
+    sharedJxaHost = createScriptHost({
+      command: 'osascript',
+      args: ['-l', 'JavaScript', '-e', JXA_REPL_BOOTSTRAP],
+    })
+  }
+  return sharedJxaHost
+}
+
+/** Test hook: drop the shared host so the next call respawns it. */
+export function resetJxaHostForTests(): void {
+  sharedJxaHost?.dispose()
+  sharedJxaHost = null
+}
+
+async function runJxa(script: string, timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise<string> {
+  const host = getJxaHost()
+  if (host && host.available()) {
+    try {
+      return await host.run(script, timeoutMs)
+    } catch (err) {
+      // Only fall back when the host never ran the script. A timeout/crash
+      // mid-run may have partially executed a mutating action — re-running
+      // it via execFile would double-fire clicks/keystrokes.
+      if (!(err instanceof HostUnavailableError)) throw err
+    }
+  }
   return runOsascript(['-l', 'JavaScript', '-e', script], timeoutMs)
 }
 
@@ -234,7 +308,7 @@ const ELEMENT_CENTER = `
   if (cx === null) throw new Error('element has no on-screen position');
 `
 
-async function windowCenter(app: string): Promise<{ x: number; y: number } | null> {
+async function windowCenter(app: string, jxa: JxaRunner): Promise<{ x: number; y: number } | null> {
   const script = `
     const se = Application('System Events');
     const proc = se.processes.byName(${jxaString(app)});
@@ -243,7 +317,7 @@ async function windowCenter(app: string): Promise<{ x: number; y: number } | nul
     JSON.stringify({ x: pos[0] + size[0] / 2, y: pos[1] + size[1] / 2 });
   `
   try {
-    return JSON.parse((await runJxa(script)).trim())
+    return JSON.parse((await jxa(script)).trim())
   } catch {
     return null
   }
@@ -269,7 +343,7 @@ async function downsampleForVision(srcFile: string): Promise<Buffer | null> {
   }
 }
 
-async function captureWindow(app: string): Promise<{ png: Buffer | null; visionPng: Buffer | null }> {
+async function captureWindow(app: string, jxa: JxaRunner): Promise<{ png: Buffer | null; visionPng: Buffer | null }> {
   // Get the frontmost window bounds of the target app, then screencapture that
   // rectangle. Falls back to null (tree-only) if bounds can't be resolved.
   const boundsScript = `
@@ -282,7 +356,7 @@ async function captureWindow(app: string): Promise<{ png: Buffer | null; visionP
   `
   let rect: { x: number; y: number; w: number; h: number }
   try {
-    const out = (await runJxa(boundsScript)).trim()
+    const out = (await jxa(boundsScript)).trim()
     rect = JSON.parse(out)
   } catch {
     return { png: null, visionPng: null }
@@ -312,8 +386,9 @@ async function captureWindow(app: string): Promise<{ png: Buffer | null; visionP
   }
 }
 
-/** Real macOS driver. */
-export function createMacosDriver(): ComputerUseDriver {
+/** Real macOS driver. Pass a runner to bypass the resident host (tests). */
+export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
+  const jxa: JxaRunner = runner ?? runJxa
   return {
     async listApps(): Promise<AppInfo[]> {
       const script = `
@@ -322,7 +397,7 @@ export function createMacosDriver(): ComputerUseDriver {
         const out = procs.map(p => ({ name: p.name(), frontmost: p.frontmost() }));
         JSON.stringify(out);
       `
-      const raw = (await runJxa(script)).trim()
+      const raw = (await jxa(script)).trim()
       try {
         const parsed = JSON.parse(raw) as AppInfo[]
         return Array.isArray(parsed) ? parsed : []
@@ -400,7 +475,7 @@ export function createMacosDriver(): ComputerUseDriver {
         try { menus = proc.menuBars[0].menuBarItems.name(); } catch (e) {}
         JSON.stringify({ rows, menus });
       `
-      const raw = (await runJxa(script, SNAPSHOT_TIMEOUT_MS)).trim()
+      const raw = (await jxa(script, SNAPSHOT_TIMEOUT_MS)).trim()
       let rows: Array<{ ref: number; depth: number; role: string; title: string; value: string; pos: { x: number; y: number } | null; path: number[] }> = []
       let menus: string[] = []
       try {
@@ -433,7 +508,7 @@ export function createMacosDriver(): ComputerUseDriver {
       }))
       const shot = opts?.screenshot === false
         ? { png: null, visionPng: null }
-        : await captureWindow(app)
+        : await captureWindow(app, jxa)
       return {
         tree: tree || '(no accessible elements found)',
         refs,
@@ -458,7 +533,7 @@ export function createMacosDriver(): ComputerUseDriver {
             found.click();
             'ok';
           `
-          await runJxa(script)
+          await jxa(script)
           return
         }
         const script = `
@@ -471,7 +546,7 @@ export function createMacosDriver(): ComputerUseDriver {
           cgClick(cx, cy, ${button === 'right'}, ${count});
           'ok';
         `
-        await runJxa(script)
+        await jxa(script)
         return
       }
       // Raw coordinate click via CGEvent (System Events' `click at` is flaky).
@@ -480,7 +555,7 @@ export function createMacosDriver(): ComputerUseDriver {
         cgClick(${Math.round(target.x)}, ${Math.round(target.y)}, ${button === 'right'}, ${count});
         'ok';
       `
-      await runJxa(script)
+      await jxa(script)
     },
 
     async locate(app: string, target: { path: number[]; role?: string; title?: string }): Promise<{ x: number; y: number }> {
@@ -493,7 +568,7 @@ export function createMacosDriver(): ComputerUseDriver {
         ${ELEMENT_CENTER}
         JSON.stringify({ x: Math.round(cx), y: Math.round(cy) });
       `
-      const raw = (await runJxa(script)).trim()
+      const raw = (await jxa(script)).trim()
       return JSON.parse(raw) as { x: number; y: number }
     },
 
@@ -502,7 +577,7 @@ export function createMacosDriver(): ComputerUseDriver {
       // CGEvent scroll: wheel1 = vertical (positive scrolls up), wheel2 = horizontal
       // (positive scrolls left). Position the cursor over the target first —
       // scroll events are delivered to the view under the cursor.
-      const at = opts.at ?? (await windowCenter(app))
+      const at = opts.at ?? (await windowCenter(app, jxa))
       if (!at) throw new Error(`cannot resolve a scroll position for ${app} (no window)`)
       const v = opts.direction === 'up' ? amount : opts.direction === 'down' ? -amount : 0
       const h = opts.direction === 'left' ? amount : opts.direction === 'right' ? -amount : 0
@@ -513,7 +588,7 @@ export function createMacosDriver(): ComputerUseDriver {
         cgPost(ev);
         'ok';
       `
-      await runJxa(script)
+      await jxa(script)
     },
 
     async drag(app: string, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
@@ -537,7 +612,7 @@ export function createMacosDriver(): ComputerUseDriver {
         cgMouse($.kCGEventLeftMouseUp, tx, ty, $.kCGMouseButtonLeft, 1);
         'ok';
       `
-      await runJxa(script)
+      await jxa(script)
     },
 
     async type(app: string, text: string): Promise<void> {
@@ -547,7 +622,7 @@ export function createMacosDriver(): ComputerUseDriver {
         se.keystroke(${jxaString(text)});
         'ok';
       `
-      await runJxa(script)
+      await jxa(script)
     },
 
     async key(app: string, combo: string): Promise<void> {
@@ -575,7 +650,7 @@ export function createMacosDriver(): ComputerUseDriver {
       } else {
         action = `se.keystroke(${jxaString(key)}${using});`
       }
-      await runJxa(`const se = Application('System Events'); ${focus} ${action} 'ok';`)
+      await jxa(`const se = Application('System Events'); ${focus} ${action} 'ok';`)
     },
 
     async focusApp(app: string): Promise<void> {
@@ -584,7 +659,7 @@ export function createMacosDriver(): ComputerUseDriver {
         app.activate();
         'ok';
       `
-      await runJxa(script)
+      await jxa(script)
     },
 
     async launchApp(app: string): Promise<void> {
@@ -601,7 +676,7 @@ export function createMacosDriver(): ComputerUseDriver {
         if (!up) throw new Error(${jxaString(app)} + ' did not appear within 10s');
         'ok';
       `
-      await runJxa(script, 20_000)
+      await jxa(script, 20_000)
     },
 
     async menuSelect(app: string, path: string[]): Promise<void> {
@@ -638,7 +713,7 @@ export function createMacosDriver(): ComputerUseDriver {
         el.click();
         'ok';
       `
-      await runJxa(script)
+      await jxa(script)
     },
 
     async pasteText(app: string, text: string): Promise<void> {
@@ -653,7 +728,7 @@ export function createMacosDriver(): ComputerUseDriver {
         se.keystroke('v', { using: ['command down'] });
         'ok';
       `
-      await runJxa(script)
+      await jxa(script)
     },
 
     async checkPermissions(): Promise<PermissionStatus> {
@@ -664,7 +739,7 @@ export function createMacosDriver(): ComputerUseDriver {
       // assistive access" without the Accessibility grant).
       let accessibility = false
       try {
-        await runJxa(`const se = Application('System Events'); se.processes.byName('Finder').windows(); 'ok';`, 5_000)
+        await jxa(`const se = Application('System Events'); se.processes.byName('Finder').windows(); 'ok';`, 5_000)
         accessibility = true
       } catch {
         accessibility = false
