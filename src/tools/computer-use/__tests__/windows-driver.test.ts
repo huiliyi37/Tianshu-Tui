@@ -1,5 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+
+// This file locks the MANAGED (System.Windows.Automation) builders — disable
+// the COM path so createWindowsDriver never injects a probe call into the
+// fake runners. COM routing has its own suite (windows-uia-com.test.ts).
+process.env.RIVET_CU_COM = '0'
+
 import {
   createWindowsDriver,
   parseCombo,

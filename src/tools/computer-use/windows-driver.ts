@@ -26,10 +26,32 @@
  * Actions run inside a resident PowerShell REPL (script-host.ts) so the
  * Add-Type JIT (~1-3s) is paid once per session; one-shot powershell.exe
  * spawns remain as the fallback when the host cannot start.
+ *
+ * UIA path selection: when the native IUIAutomation COM layer probes healthy
+ * (windows-uia-com.ts — unlocks the full Chromium accessibility tree and
+ * moves the tree walk into C#), every UIA-touching action routes through the
+ * COM builders. Probe failure or RIVET_CU_COM=0 keeps the managed
+ * System.Windows.Automation builders below as the drop-in safety net.
  */
 
 import { execFile } from 'node:child_process'
 import { createScriptHost, hostEnabled, HostUnavailableError, SENTINEL, type ScriptHost } from './script-host.js'
+import {
+  UIA_COM_PRELUDE,
+  comReady,
+  buildComListAppsScript,
+  buildComSnapshotScript,
+  buildComClickByPathScript,
+  buildComLocateScript,
+  buildComScrollScript,
+  buildComTypeScript,
+  buildComSetValueScript,
+  buildComKeyScript,
+  buildComFocusAppScript,
+  buildComLaunchAppScript,
+  buildComMenuSelectScript,
+  buildComPasteTextScript,
+} from './windows-uia-com.js'
 import { readFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -89,13 +111,16 @@ function runPowerShellOneShot(script: string, timeoutMs = POWERSHELL_TIMEOUT_MS)
  * embed the preludes for the one-shot fallback; the `if (-not ('RivetInput'
  * -as [type]))` guard makes them no-ops here.
  */
-function buildPsReplBootstrap(): string {
+export function buildPsReplBootstrap(): string {
   return `
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
 ${INPUT_PRELUDE}
 ${UIA_PRELUDE}
+} catch {}
+try {
+${UIA_COM_PRELUDE}
 } catch {}
 while ($true) {
   $line = [Console]::In.ReadLine()
@@ -168,7 +193,7 @@ export function normalizeAppName(app: string): string {
  * through here — UIA rects, SetCursorPos, CopyFromScreen — is in the same
  * physical-pixel space.
  */
-const INPUT_PRELUDE = `
+export const INPUT_PRELUDE = `
 if (-not ('RivetInput' -as [type])) {
 Add-Type -TypeDefinition @'
 using System;
@@ -317,7 +342,7 @@ $cy = [int][math]::Round($rect.Y + $rect.Height / 2)
 `
 
 /** Bring the resolved app's window (findApp's $fh) to the foreground. */
-const FOCUS_WINDOW = `
+export const FOCUS_WINDOW = `
 if ($fh -ne [IntPtr]::Zero) {
   if ([RivetInput]::IsIconic($fh)) { [void][RivetInput]::ShowWindow($fh, 9) }
   [void][RivetInput]::SetForegroundWindow($fh)
@@ -595,6 +620,12 @@ ConvertTo-Json -InputObject @{ x = $cx; y = $cy } -Compress
 `
 }
 
+/** Window-center scroll anchor — expects $app and $fh (set by app resolution). */
+export const SCROLL_WINDOW_CENTER = `
+$wrct = New-Object 'RivetInput+RECT'
+if ($fh -eq [IntPtr]::Zero -or -not [RivetInput]::GetWindowRect($fh, [ref]$wrct)) { throw "cannot resolve a scroll position for '$app' (no window)" }
+$ax = [int](($wrct.Left + $wrct.Right) / 2); $ay = [int](($wrct.Top + $wrct.Bottom) / 2)`
+
 export function buildScrollScript(app: string, opts: ScrollOptions): string {
   const amount = Math.max(1, Math.min(50, Math.round(opts.amount ?? 5)))
   // Windows wheel: positive vertical = up (away from user), positive
@@ -606,9 +637,7 @@ export function buildScrollScript(app: string, opts: ScrollOptions): string {
     : `
 ${UIA_PRELUDE}
 ${resolveApp(app)}
-$wrct = New-Object 'RivetInput+RECT'
-if ($fh -eq [IntPtr]::Zero -or -not [RivetInput]::GetWindowRect($fh, [ref]$wrct)) { throw "cannot resolve a scroll position for '$app' (no window)" }
-$ax = [int](($wrct.Left + $wrct.Right) / 2); $ay = [int](($wrct.Top + $wrct.Bottom) / 2)`
+${SCROLL_WINDOW_CENTER}`
   return `
 ${INPUT_PRELUDE}
 ${atSnippet}
@@ -626,13 +655,11 @@ ${INPUT_PRELUDE}
 `
 }
 
-export function buildTypeScript(app: string, text: string): string {
-  // Text travels as base64 so newlines/quotes/CJK never touch PS quoting.
+/** Focus-then-type body — expects $fh (set by app resolution). Text travels
+ *  as base64 so newlines/quotes/CJK never touch PS quoting. */
+export function typeBodySnippet(text: string): string {
   const b64 = Buffer.from(text, 'utf8').toString('base64')
   return `
-${INPUT_PRELUDE}
-${UIA_PRELUDE}
-${resolveApp(app)}
 ${FOCUS_WINDOW}
 Start-Sleep -Milliseconds 100
 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psString(b64)}))
@@ -641,12 +668,21 @@ foreach ($ch in $text.ToCharArray()) {
   elseif ($ch -eq [char]13) { }
   else { [RivetInput]::TypeChar($ch) }
   Start-Sleep -Milliseconds 5
+}`
 }
+
+export function buildTypeScript(app: string, text: string): string {
+  return `
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+${resolveApp(app)}
+${typeBodySnippet(text)}
 'ok'
 `
 }
 
-export function buildKeyScript(app: string, spec: ComboKeySpec): string {
+/** Focus-then-key-combo body — expects $fh (set by app resolution). */
+export function keyBodySnippet(spec: ComboKeySpec): string {
   const modsDown = spec.modifiers.map((vk) => `[RivetInput]::KeyDown([uint16]${vk})`).join('\n')
   const modsUp = [...spec.modifiers].reverse().map((vk) => `[RivetInput]::KeyUp([uint16]${vk})`).join('\n')
   const hasShift = spec.modifiers.includes(0x10)
@@ -661,9 +697,6 @@ if ($needShift) { [RivetInput]::KeyDown([uint16]16) }
 [RivetInput]::KeyTap([uint16]$vk)
 if ($needShift) { [RivetInput]::KeyUp([uint16]16) }`
   return `
-${INPUT_PRELUDE}
-${UIA_PRELUDE}
-${resolveApp(app)}
 ${FOCUS_WINDOW}
 Start-Sleep -Milliseconds 100
 ${modsDown}
@@ -671,7 +704,15 @@ try {
 ${keyAction}
 } finally {
 ${modsUp}
+}`
 }
+
+export function buildKeyScript(app: string, spec: ComboKeySpec): string {
+  return `
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+${resolveApp(app)}
+${keyBodySnippet(spec)}
 'ok'
 `
 }
@@ -783,19 +824,25 @@ $vp.SetValue($text)
 `
 }
 
-export function buildPasteTextScript(app: string, text: string): string {
-  // Text travels as base64 (quoting/CJK-safe); Set-Clipboard then Ctrl+V.
+/** Clipboard-then-Ctrl+V body — expects $fh (set by app resolution). Text
+ *  travels as base64 (quoting/CJK-safe). */
+export function pasteBodySnippet(text: string): string {
   const b64 = Buffer.from(text, 'utf8').toString('base64')
   return `
-${INPUT_PRELUDE}
-${UIA_PRELUDE}
-${resolveApp(app)}
 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psString(b64)}))
 Set-Clipboard -Value $text
 ${FOCUS_WINDOW}
 Start-Sleep -Milliseconds 150
 [RivetInput]::KeyDown([uint16]17)
-try { [RivetInput]::KeyTap([uint16]86) } finally { [RivetInput]::KeyUp([uint16]17) }
+try { [RivetInput]::KeyTap([uint16]86) } finally { [RivetInput]::KeyUp([uint16]17) }`
+}
+
+export function buildPasteTextScript(app: string, text: string): string {
+  return `
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+${resolveApp(app)}
+${pasteBodySnippet(text)}
 'ok'
 `
 }
@@ -811,9 +858,13 @@ ConvertTo-Json -InputObject @{ accessibility = $ok } -Compress
 
 /** Real Windows driver. Runner injectable for tests. */
 export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault): ComputerUseDriver {
+  // Session-level UIA path choice: COM when the probe passes, managed
+  // otherwise. Checked per action because the probe is lazy (first UIA call).
+  const useCom = () => comReady(run)
   return {
     async listApps(): Promise<AppInfo[]> {
-      const raw = (await run(buildListAppsScript())).trim()
+      const script = (await useCom()) ? buildComListAppsScript() : buildListAppsScript()
+      const raw = (await run(script)).trim()
       try {
         const parsed = JSON.parse(raw) as AppInfo[] | AppInfo
         if (Array.isArray(parsed)) return parsed
@@ -830,7 +881,11 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
       const outFull = join(tmpdir(), `rivet-cu-${stamp}.png`)
       const outVision = join(tmpdir(), `rivet-cu-vision-${stamp}.png`)
       try {
-        const raw = (await run(buildSnapshotScript(app, outFull, outVision, opts?.screenshot !== false), 30_000)).trim()
+        const wantShot = opts?.screenshot !== false
+        const script = (await useCom())
+          ? buildComSnapshotScript(app, outFull, outVision, wantShot, MAX_TREE_NODES)
+          : buildSnapshotScript(app, outFull, outVision, wantShot)
+        const raw = (await run(script, 30_000)).trim()
         let rows: WindowsSnapshotRow[] = []
         let shot = false
         try {
@@ -881,19 +936,24 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
       const button = opts?.button ?? 'left'
       const count = opts?.count ?? 1
       if ('path' in target) {
-        await run(buildClickByPathScript(app, target, button, count))
+        const script = (await useCom())
+          ? buildComClickByPathScript(app, target, button, count)
+          : buildClickByPathScript(app, target, button, count)
+        await run(script)
         return
       }
       await run(buildClickAtScript(target.x, target.y, button, count))
     },
 
     async locate(app: string, target: { path: number[]; role?: string; title?: string }): Promise<{ x: number; y: number }> {
-      const raw = (await run(buildLocateScript(app, target))).trim()
+      const script = (await useCom()) ? buildComLocateScript(app, target) : buildLocateScript(app, target)
+      const raw = (await run(script)).trim()
       return JSON.parse(raw) as { x: number; y: number }
     },
 
     async scroll(app: string, opts: ScrollOptions): Promise<void> {
-      await run(buildScrollScript(app, opts))
+      const script = (await useCom()) ? buildComScrollScript(app, opts) : buildScrollScript(app, opts)
+      await run(script)
     },
 
     async drag(_app: string, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
@@ -901,33 +961,40 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
     },
 
     async type(app: string, text: string): Promise<void> {
-      await run(buildTypeScript(app, text))
+      const script = (await useCom()) ? buildComTypeScript(app, text) : buildTypeScript(app, text)
+      await run(script)
     },
 
     async setValue(app: string, target: { path: number[]; role?: string; title?: string }, text: string): Promise<void> {
-      await run(buildSetValueScript(app, target, text))
+      const script = (await useCom()) ? buildComSetValueScript(app, target, text) : buildSetValueScript(app, target, text)
+      await run(script)
     },
 
     async key(app: string, combo: string): Promise<void> {
       const spec = parseCombo(combo)
-      await run(buildKeyScript(app, spec))
+      const script = (await useCom()) ? buildComKeyScript(app, spec) : buildKeyScript(app, spec)
+      await run(script)
     },
 
     async focusApp(app: string): Promise<void> {
-      await run(buildFocusAppScript(app))
+      const script = (await useCom()) ? buildComFocusAppScript(app) : buildFocusAppScript(app)
+      await run(script)
     },
 
     async launchApp(app: string): Promise<void> {
-      await run(buildLaunchAppScript(app), 25_000)
+      const script = (await useCom()) ? buildComLaunchAppScript(app) : buildLaunchAppScript(app)
+      await run(script, 25_000)
     },
 
     async menuSelect(app: string, path: string[]): Promise<void> {
       if (path.length === 0) throw new Error('menu_select requires a non-empty menu path')
-      await run(buildMenuSelectScript(app, path))
+      const script = (await useCom()) ? buildComMenuSelectScript(app, path) : buildMenuSelectScript(app, path)
+      await run(script)
     },
 
     async pasteText(app: string, text: string): Promise<void> {
-      await run(buildPasteTextScript(app, text))
+      const script = (await useCom()) ? buildComPasteTextScript(app, text) : buildPasteTextScript(app, text)
+      await run(script)
     },
 
     async checkPermissions(): Promise<PermissionStatus> {
