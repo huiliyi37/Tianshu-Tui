@@ -780,6 +780,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     writeTelemetry: (entry) => { self.telemetryWriter.write(entry) },
     resetEvidence: () => { self.evidence.reset() },
 
+    // === Stop-reason 落盘（2026-07-07 观测缺口修复）===
+    recordStopReason: (r) => { self.recordStopReason(r) },
+
+    // === Advisory 总线（action-intent 闸门核销接入）===
+    submitAdvisory: (entry) => { self.advisoryBus.submit(entry) },
+
     // === Abort signal ===
     getAbortSignal: () => self.abortController?.signal,
 

@@ -631,6 +631,21 @@ function buildInjectedMessage(
     return lines.join('\n')
   }
 
+  // Route-confirmation variant（2026-07-07，会话 519216c0 复盘）：编辑在持续
+  // 落地且失败率低——轨迹本身没问题，收敛信号来自新颖度/熵类指标（同批文件
+  // 反复改动、工具模式单一）。此时"换个角度看问题"是错误处方：路线正确的
+  // 模型（尤其自带质疑的天权域）会整条驳回，advisory 沦为噪音。确认式收敛
+  // 反其道：先肯定路线，把收敛动作定义为"钉一个验证锚点"而非改道。
+  if (level === 2 && signals.editRatio >= 0.2 && signals.errorPenalty >= 0.8) {
+    lines.push('**天枢-感知：编辑在持续落地且失败率低——路线本身没有被质疑，不需要换方向。**')
+    lines.push('')
+    lines.push('需要的是一个验证锚点，把已有进度钉住：')
+    lines.push('- 对已完成的改动跑一次 typecheck / related_tests，通过后再铺开下一批')
+    lines.push('- 验证失败则当场修复——不带伤推进')
+    lines.push('- 若剩余工作已明确，列出剩余清单，按清单收敛而非按惯性续写')
+    return lines.join('\n')
+  }
+
   if (level === 2) {
     lines.push('**天璇-感知：当前任务可能进入低效循环。换个角度看问题。**')
   } else {

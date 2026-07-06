@@ -1379,4 +1379,62 @@ describe('evaluateConvergence', () => {
       assert.ok(result.signals.errorPenalty === 1.0, `errorPenalty should be 1.0 for all-success window`)
     })
   })
+
+  // ── Route-confirmation variant（2026-07-07）──────────────────────────
+  // 编辑在落地、失败率低，但新颖度/熵类指标把 score 压进 L2 —— 此时不应
+  // 给"换个角度看问题"（路线正确的模型会整条驳回），而是确认路线 + 要求
+  // 一个验证锚点。
+
+  describe('route-confirmation injected message', () => {
+    // 同一文件 edit/read 交替、仅 1 次失败 + A→B 震荡指纹：
+    // editRatio=0.5、errorPenalty≈0.83（均过确认门槛），score 落入 L2 区。
+    const productiveButUnverified = makeHistory([
+      { tool: 'edit_file', target: 'a.ts' },
+      { tool: 'read_file', target: 'a.ts' },
+      { tool: 'edit_file', target: 'a.ts' },
+      { tool: 'read_file', target: 'a.ts', status: 'failed' },
+      { tool: 'edit_file', target: 'a.ts' },
+      { tool: 'read_file', target: 'a.ts' },
+    ])
+    const oscillatingFps = Array.from({ length: 12 }, (_, i) => (i % 2 ? 'B' : 'A'))
+
+    it('L2 with productive edits and low failure rate confirms the route instead of asking to change direction', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 14,
+        phaseClass: 'execute',
+        contextWindow: 200_000,
+        recentToolHistory: productiveButUnverified,
+        toolFingerprints: oscillatingFps,
+        evidenceState: {
+          filesModified: new Set(['a.ts']),
+          filesRead: new Set(['a.ts']),
+          deliveryStatus: 'unverified' as const,
+        },
+      }))
+      assert.equal(result.level, 2, `expected L2, got L${result.level} (score=${result.score.toFixed(2)})`)
+      assert.ok(result.signals.editRatio >= 0.2 && result.signals.errorPenalty >= 0.8,
+        `signals should pass the confirmation gate (edit=${result.signals.editRatio}, err=${result.signals.errorPenalty})`)
+      assert.ok(result.injectedMessage!.includes('路线本身没有被质疑'), 'should confirm the route')
+      assert.ok(result.injectedMessage!.includes('验证锚点'), 'should prescribe a verification anchor')
+      assert.ok(!result.injectedMessage!.includes('换个角度看问题'), 'must NOT ask to change direction')
+    })
+
+    it('L2 with low edit ratio keeps the generic change-direction message', () => {
+      // 纯读取窗口（editRatio 低）——确认式变体不该触发。
+      const readOnly = makeHistory(
+        Array.from({ length: 6 }, (_, i) => ({ tool: i % 2 ? 'grep' : 'read_file', target: 'a.ts' })),
+      )
+      const result = evaluateConvergence(baseInput({
+        turn: 14,
+        phaseClass: 'execute',
+        contextWindow: 200_000,
+        recentToolHistory: readOnly,
+        toolFingerprints: oscillatingFps,
+      }))
+      if (result.level >= 2 && result.injectedMessage) {
+        assert.ok(!result.injectedMessage.includes('路线本身没有被质疑'),
+          'read-only window must not get route confirmation')
+      }
+    })
+  })
 })

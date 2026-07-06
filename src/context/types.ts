@@ -202,6 +202,21 @@ export interface SessionMetadata {
   /** Relative path of the active plan draft while planModeState === 'planning'. */
   activePlanFilePath?: string | null
   /**
+   * 最近一次 run 结束的结构化停止原因（2026-07-07 观测缺口修复）。
+   * 此前 StopReason 只走 debugLog/遥测——不开 RIVET_DEBUG 时事后无法区分
+   * "护栏熔断 / 用户中断 / 流错误 / 自然收尾"（会话 519216c0 取证时的盲区）。
+   * 每次 run 结束时覆盖写入；t 为记录时刻 epoch ms。
+   */
+  lastStopReason?: {
+    source: string
+    turn: number
+    voluntary: boolean
+    detail?: string
+    score?: number
+    level?: number
+    t: number
+  }
+  /**
    * Guardian（星域守护链路）活动摘要 — CCR 触发数、改道发射数（按 source 分）、
    * advisory 渲染/丢弃计数。排查"守护链路被静音"时一眼可见（Phase 0 观测）。
    */

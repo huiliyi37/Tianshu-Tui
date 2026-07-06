@@ -115,6 +115,25 @@ describe('SessionPersist — metadata (P1)', () => {
     assert.equal(meta!.title, 'Fix the bug')
   })
 
+  it('updateMetadata persists lastStopReason (谁停的它 — 事后取证)', () => {
+    const persist = new SessionPersist('meta-stop-reason', tempDir)
+    persist.initMetadata({ model: 'deepseek-v4' })
+    persist.updateMetadata({
+      lastStopReason: { source: 'user-interrupt', turn: 46, voluntary: false, detail: 'esc', t: 1751830000000 },
+    })
+    // 每次 run 结束覆盖上一条
+    persist.updateMetadata({
+      lastStopReason: { source: 'natural-finish', turn: 12, voluntary: true, t: 1751830001000 },
+    })
+
+    const meta = persist.loadMetadata()
+    assert.equal(meta!.lastStopReason!.source, 'natural-finish')
+    assert.equal(meta!.lastStopReason!.turn, 12)
+    assert.equal(meta!.lastStopReason!.voluntary, true)
+    assert.equal(meta!.lastStopReason!.detail, undefined)
+    assert.equal(meta!.model, 'deepseek-v4', 'sibling fields survive the patch')
+  })
+
   it('updateMetadata merges tokenUsage without losing existing fields', () => {
     const persist = new SessionPersist('meta-tokens', tempDir)
     persist.initMetadata()
