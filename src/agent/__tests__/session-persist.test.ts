@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, projectSlug, serializeSessionMessage } from '../session-persist.js'
+import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, projectSlug, serializeSessionMessage, formatExitSummary } from '../session-persist.js'
 import type { OaiMessage } from '../../api/oai-types.js'
 
 describe('SessionPersist', () => {
@@ -577,5 +577,39 @@ describe('projectSlug (cross-platform session dir name)', () => {
     const noSlash = projectSlug('/home/u/proj')
     // basename 一致（都是 proj）；hash 因 cwd 字面量不同而不同——这是既有行为，保留。
     assert.ok(withSlash.startsWith('proj-') && noSlash.startsWith('proj-'), 'basename stable')
+  })
+})
+
+describe('formatExitSummary（退出回连指引）', () => {
+  const SID = '3f415454-aaaa-bbbb-cccc-1234567890ab'
+
+  it('含 id 前缀、轮数、标题与恢复命令', () => {
+    const out = formatExitSummary({ title: '修复 fetch failed 报错', turnCount: 12 }, SID)
+    assert.ok(out, '有内容的会话应产出摘要')
+    assert.ok(out!.includes('3f415454'), `含 id8: ${out}`)
+    assert.ok(out!.includes('12轮'), `含轮数: ${out}`)
+    assert.ok(out!.includes('修复 fetch failed 报错'), `含标题: ${out}`)
+    assert.ok(out!.includes('rivet --continue'), `含 --continue 指引: ${out}`)
+    assert.ok(out!.includes('rivet --resume 3f415454'), `含 --resume 指引: ${out}`)
+  })
+
+  it('无标题时省略标题段', () => {
+    const out = formatExitSummary({ turnCount: 3 }, SID)
+    assert.ok(out)
+    assert.ok(out!.includes('3轮'))
+    assert.ok(!out!.includes('“'), `无标题引号: ${out}`)
+  })
+
+  it('空会话（turnCount 0 / 缺省 / null meta）不打印', () => {
+    assert.equal(formatExitSummary({ turnCount: 0 }, SID), null)
+    assert.equal(formatExitSummary({}, SID), null)
+    assert.equal(formatExitSummary(null, SID), null)
+  })
+
+  it('超长标题截断到 60 字符', () => {
+    const long = 'x'.repeat(200)
+    const out = formatExitSummary({ title: long, turnCount: 1 }, SID)
+    assert.ok(out)
+    assert.ok(!out!.includes('x'.repeat(61)), '标题应截断')
   })
 })

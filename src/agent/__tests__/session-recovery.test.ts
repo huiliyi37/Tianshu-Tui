@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { decideStartupSession, RESUME_FRESHNESS_MS, type StartupDecisionInput } from '../session-recovery.js'
+import { decideStartupSession, parseSessionCliArgs, RESUME_FRESHNESS_MS, type StartupDecisionInput } from '../session-recovery.js'
 
 const CWD = '/proj/a'
 
@@ -180,5 +180,43 @@ describe('session-recovery: decideStartupSession resumeSessionId (--resume <id>)
     }))
     assert.equal(d.resumed, false)
     assert.equal(d.sessionId, null)
+  })
+})
+
+describe('parseSessionCliArgs（-c/-r 短 flags 与裸 --resume 语义）', () => {
+  it('no flags → all off', () => {
+    const p = parseSessionCliArgs([])
+    assert.deepEqual(p, { forceNew: false, continueLatest: false, openPicker: false })
+  })
+
+  it('--continue and -c both mean continue-latest', () => {
+    assert.equal(parseSessionCliArgs(['--continue']).continueLatest, true)
+    assert.equal(parseSessionCliArgs(['-c']).continueLatest, true)
+  })
+
+  it('--resume <id> / -r <id> capture the id and do NOT open the picker', () => {
+    for (const flag of ['--resume', '-r']) {
+      const p = parseSessionCliArgs([flag, 'abc123'])
+      assert.equal(p.resumeId, 'abc123', `${flag} 应取到 id`)
+      assert.equal(p.openPicker, false, `${flag} <id> 不开 picker`)
+    }
+  })
+
+  it('bare --resume / -r opens the picker (Claude Code 裸 -r 语义)', () => {
+    for (const flag of ['--resume', '-r']) {
+      const p = parseSessionCliArgs([flag])
+      assert.equal(p.resumeId, undefined)
+      assert.equal(p.openPicker, true, `裸 ${flag} 开 picker`)
+    }
+  })
+
+  it('--resume followed by another flag is treated as bare', () => {
+    const p = parseSessionCliArgs(['--resume', '--verbose'])
+    assert.equal(p.resumeId, undefined)
+    assert.equal(p.openPicker, true)
+  })
+
+  it('--new sets forceNew', () => {
+    assert.equal(parseSessionCliArgs(['--new']).forceNew, true)
   })
 })

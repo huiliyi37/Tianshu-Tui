@@ -105,6 +105,33 @@ describe('/context 占用明细', () => {
   })
 })
 
+describe('/resume 无参行为（会话选择器）', () => {
+  it('注入 openSessionPicker 时无参 /resume 打开选择器而非打用法', async () => {
+    let pickerOpened = 0
+    let captured = ''
+    const ctx = makeCtx({
+      parts: ['/resume'],
+      openSessionPicker: () => { pickerOpened++ },
+      pushStatic: (entry: LogEntry) => { captured += `${entry.content}\n` },
+    })
+    const handled = await handleSlashCommand(ctx)
+    assert.equal(handled, true)
+    assert.equal(pickerOpened, 1, '应打开会话选择器')
+    assert.ok(!captured.includes('用法'), `不应打用法提示: ${captured}`)
+  })
+
+  it('未注入 openSessionPicker 时回退到用法提示', async () => {
+    let captured = ''
+    const ctx = makeCtx({
+      parts: ['/resume'],
+      pushStatic: (entry: LogEntry) => { captured += `${entry.content}\n` },
+    })
+    const handled = await handleSlashCommand(ctx)
+    assert.equal(handled, true)
+    assert.ok(captured.includes('用法'), `应打用法提示: ${captured}`)
+  })
+})
+
 describe('resolveAppPromptInput', () => {
   it('returns non-slash input unchanged', async () => {
     assert.equal(resolveAppPromptInput('hello world', '/cwd')?.prompt, 'hello world')

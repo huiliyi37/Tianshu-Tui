@@ -426,7 +426,7 @@ export async function runUpdate(
  *
  * 背景：默认启动铸造全新会话（session-recovery：无隐式恢复）。update 重启若沿用
  * 原始 argv（用户多为 `rivet` 无参启动），新进程就开新会话 → 历史丢失、模型不记得。
- * 这里剔除已有的会话选择标志（`--new` / `--continue` / `--resume [id]`，含其值），
+ * 这里剔除已有的会话选择标志（`--new` / `--continue`/`-c` / `--resume`/`-r` [id]，含其值），
  * 再追加 `--resume <sessionId>`（映射 RIVET_RESUME_ID），让重启确定性续接当前会话。
  * 指定 id 的恢复不受 cleanExit 影响，且同 cwd 天然通过校验。
  *
@@ -436,8 +436,8 @@ export function withResumeArgs(argv: string[], sessionId?: string): string[] {
   const cleaned: string[] = []
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!
-    if (a === '--new' || a === '--continue') continue
-    if (a === '--resume') {
+    if (a === '--new' || a === '--continue' || a === '-c') continue
+    if (a === '--resume' || a === '-r') {
       // 连带吞掉其可选值（下一个非 flag token 视为会话 id/prefix）。
       const next = argv[i + 1]
       if (next !== undefined && !next.startsWith('-')) i++

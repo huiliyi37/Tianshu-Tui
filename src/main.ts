@@ -15,7 +15,7 @@ import { installEpermFilter } from './platform/eperm-filter.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from './platform.js'
 installEpermFilter()
 
-import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
+import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig, setApprovalMode as persistApprovalDefault } from './config/manager.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
@@ -28,6 +28,7 @@ import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { loadTodos, setTodoSession } from './tools/todo.js'
 import { setPlanSession } from './agent/plan-store.js'
 import { formatWelcome } from './tui/format/welcome.js'
+import { color } from './tui/engine/ansi.js'
 import type { RewindMode } from './tui/format/rewind.js'
 import { collectPostBoundaryEditIds } from './agent/file-history.js'
 import { loadHistory } from './tui/history.js'
@@ -42,7 +43,8 @@ import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries, DOMAIN_SWITCH_CACHE_WARNING } from './agent/domain-picker-entries.js'
 import { isStarSoulEnabled } from './agent/star-soul-gate.js'
-import { SessionPersist } from './agent/session-persist.js'
+import { SessionPersist, formatExitSummary } from './agent/session-persist.js'
+import { parseSessionCliArgs } from './agent/session-recovery.js'
 import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
 import { join } from 'path'
@@ -60,18 +62,19 @@ const requestedModel = modelArgIdx >= 0 ? args[modelArgIdx + 1] : undefined
 const providerArgIdx = args.indexOf('--provider')
 const requestedProvider = providerArgIdx >= 0 ? args[providerArgIdx + 1] : undefined
 
-// R1: default startup is a fresh session. Session selection flags:
-//   --continue / --resume        → resume the most recent session for this cwd
-//   --resume <id|prefix>         → resume a specific session (short prefix ok)
+// R1: default startup is a fresh session. Session selection flags (Claude Code parity):
+//   --continue / -c              → resume the most recent session for this cwd
+//   --resume <id|prefix> / -r <id|prefix> → resume a specific session (short prefix ok)
+//   --resume / -r (bare)         → open the session picker after the TUI starts
 //   --new                        → force a brand-new session
 //   --list / `rivet sessions`    → print the session list and exit
 // Resolution + env signalling happens in main() before bootstrap so that
 // getOrCreateSessionId picks it up regardless of call order.
-const resumeArgIdx = args.indexOf('--resume')
-const resumeArgValue = resumeArgIdx >= 0 ? args[resumeArgIdx + 1] : undefined
-const requestedResumeId = resumeArgValue && !resumeArgValue.startsWith('-') ? resumeArgValue : undefined
-const wantResume = resumeArgIdx >= 0 || args.includes('--continue')
-const wantNewSession = args.includes('--new')
+const sessionCliArgs = parseSessionCliArgs(args)
+const requestedResumeId = sessionCliArgs.resumeId
+const wantContinue = sessionCliArgs.continueLatest
+const wantSessionPicker = sessionCliArgs.openPicker
+const wantNewSession = sessionCliArgs.forceNew
 const skipWelcome = args.includes('--skip-welcome')
 
 // ── Lifecycle ──────────────────────────────────────────────────
@@ -95,6 +98,13 @@ function shutdown(code: number = 0) {
   // Delegate core cleanup to bootstrap shutdown handler
   if (ctx) {
     try { ctx.shutdown() } catch { /* already handled */ }
+    // Post-teardown resume hint: printed AFTER TUI dispose so it lands on the
+    // normal scrollback and survives the exit — the session id would otherwise
+    // be undiscoverable ("how do I reconnect?").
+    try {
+      const summary = formatExitSummary(ctx.persist.loadMetadata(), ctx.sessionId)
+      if (summary) process.stdout.write(`\n${summary}\n`)
+    } catch { /* best-effort */ }
   }
 
   if (heartbeatInterval) {
@@ -169,9 +179,11 @@ async function main() {
       process.exit(1)
     }
     process.env.RIVET_RESUME_ID = resolved.id
-  } else if (wantResume) {
+  } else if (wantContinue) {
     process.env.RIVET_RESUME = '1'
   }
+  // 裸 --resume / -r（wantSessionPicker）：不设 env——先开新会话，TUI 启动后
+  // 自动打开 Chronicle 选择器让用户挑（对齐 Claude Code 裸 -r 行为）。
 
   // rivet -p "prompt" / rivet --print "prompt" [--json] [--stream-json]
   // rivet --goal "task" [--budget N] [--json] [--stream-json] — headless goal autonomy
@@ -761,9 +773,10 @@ async function main() {
       tuiApp.setInput(content)
     }
   }, /* chronicleExec: */ (id: string) => {
-    // Chronicle Enter 回调：把所选会话装填为 /resume 命令到输入框，由用户回车确认。
-    // 用完整 id 前 8 位作前缀(id = resume id 绑死),避免序号随排序漂移。
-    tuiApp.setInput(`/resume ${id.slice(0, 8)}`)
+    // Chronicle Enter 回调：直接切换到所选会话（对齐 Claude Code 选择器一步到位）。
+    // 经 /resume slash 命令派发,复用同一条恢复链路(onSessionSwitch:
+    // 消息历史 + todos + goal + 侧栏 + 计划模式),含"已在当前会话"守卫。
+    void tuiApp.tryDispatchSlash(`/resume ${id}`)
   }, /* domainPickerExec: */ (key: string) => {
     // Domain Picker Enter 回调：应用选中星域，引擎照常注入方法论，scrollback 仅写单行确认。
     const midSession = ctx!.agent.getSessionTurnCount() > 0
@@ -1172,6 +1185,35 @@ async function main() {
   // 与 cursor-resident live region 的相对光标假设冲突，切换 model/theme/domain
   // 提交内容触发滚动时造成顶部残影/塌行。随交互增长终端原生滚动自然把输入框保持在视口底部。
   app.start()
+
+  // ── 会话恢复入口（Claude Code parity）───────────────────────────
+  // 裸 --resume/-r：自动打开 Chronicle 会话选择器（Enter 直接切换）。
+  // 普通新会话启动：有近期历史会话时打一行可发现性提示。
+  {
+    const recentSessions = SessionPersist.listMainSessions(process.cwd())
+      .filter(s => s.id !== ctx!.sessionId && (s.turnCount ?? 0) > 0
+        && typeof s.updatedAt === 'number' && Date.now() - s.updatedAt < 7 * 24 * 60 * 60 * 1000)
+    if (wantSessionPicker) {
+      if (recentSessions.length > 0) {
+        app.activateOverlay('chronicle')
+      } else {
+        app.commitStatic('没有可恢复的历史会话 — 已开启新会话。')
+      }
+    } else if (existingMsgCount === 0 && recentSessions.length > 0) {
+      app.commitStatic(color(
+        `↺ ${recentSessions.length} 个历史会话 · /resume 选择 · rivet -c 续接最近`,
+        theme.dim,
+      ))
+    }
+  }
+
+  // Resume 会话的计划模式恢复：上次退出时在 planning 且 draft 仍在 → 重进计划模式。
+  {
+    const restoredPlan = restorePlanModeFromMeta(ctx.agent, ctx.cwd, initialMeta)
+    if (restoredPlan) {
+      app.commitStatic(`🔍 已恢复计划模式（draft: ${restoredPlan}）— Shift+Tab 两次或批准计划可退出。`)
+    }
+  }
 
   // 首次启动引导：默认服务商没有可用密钥（且非 OAuth）→ 自动打开 /connect 向导，
   // 让新用户点选内置服务商 + 粘贴密钥即可开跑，无需手改 config.json。

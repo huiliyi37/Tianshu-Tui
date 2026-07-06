@@ -128,6 +128,22 @@ describe('withResumeArgs', () => {
       ['dist/main.js', '--verbose'],
     )
   })
+
+  it('strips short flags -c and -r (with value) too', () => {
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js', '-c'], 'sid-1'),
+      ['dist/main.js', '--resume', 'sid-1'],
+    )
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js', '-r', 'old-id', '--verbose'], 'new-id'),
+      ['dist/main.js', '--verbose', '--resume', 'new-id'],
+    )
+    // 裸 -r（无值）也剔除
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js', '-r'], 'sid-2'),
+      ['dist/main.js', '--resume', 'sid-2'],
+    )
+  })
 })
 
 describe('updater emitLines', () => {

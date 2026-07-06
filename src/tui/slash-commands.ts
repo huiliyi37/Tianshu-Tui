@@ -58,7 +58,7 @@ import { buildAgentMark, VOID_SYMBOL } from '../agent/void-identity.js'
 import type { TuiApp } from './engine/app.js'
 import type { SlashCommand } from './slash-command-registry.js'
 import type { BootstrapContext } from '../bootstrap.js'
-import { switchAgentRuntime, switchAgentSession } from '../bootstrap.js'
+import { switchAgentRuntime, switchAgentSession, restorePlanModeFromMeta } from '../bootstrap.js'
 import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
@@ -168,6 +168,10 @@ export interface SlashHandlerContext {
    * to the legacy in-memory-only restore (no identity switch).
    */
   onSessionSwitch?: (targetId: string) => { ok: boolean; error?: string; messageCount?: number; repaired?: boolean; safe?: boolean }
+  /** Open the interactive session picker overlay (Chronicle). Wired by the TUI;
+   *  /resume with no argument opens it instead of printing usage (Claude Code
+   *  parity). Undefined → fall back to the usage hint (tests / headless). */
+  openSessionPicker?: () => void
   cost: number
   cacheHitRate: number
   autoSafeRef: MutableRefLike<boolean>
@@ -2050,7 +2054,12 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const cmd = parts[0]!.toLowerCase()
       const arg = parts[1]
       if (!arg) {
-        pushStatic(createLogEntry({ type: 'system', content: '用法: /resume <id前缀 或 序号>。用 /sessions 查看会话列表。' }))
+        // 无参 = 打开会话选择器（对齐 Claude Code /resume）；无选择器注入时退化为用法提示。
+        if (ctx.openSessionPicker) {
+          ctx.openSessionPicker()
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /resume <id前缀 或 序号>。用 /sessions 查看会话列表。' }))
+        }
         setIsStreaming(false)
         return true
       }
@@ -3244,10 +3253,16 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
             const meta = ctx.persist.loadMetadata()
             if (meta?.sidePanelOpen) app.setSidePanelOpen(true)
             else app.setSidePanelOpen(false)
-          } catch { /* panel restore best-effort */ }
+            // 计划模式恢复：目标会话退出时在 planning 且 draft 仍在 → 重进。
+            const restoredPlan = restorePlanModeFromMeta(ctx.agent, ctx.cwd, meta)
+            if (restoredPlan) {
+              app.commitStatic(`🔍 已恢复计划模式（draft: ${restoredPlan}）— Shift+Tab 两次或批准计划可退出。`)
+            }
+          } catch { /* panel/plan restore best-effort */ }
         }
         return res
       },
+      openSessionPicker: () => { app.activateOverlay('chronicle') },
       allProviders,
       currentProvider: ctx.provider.name,
       currentSessionId: ctx.sessionId,
@@ -3319,12 +3334,14 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
+  // 经 SIGINT 走 main.ts 的统一 shutdown（app.dispose → ctx.shutdown →
+  // 退出摘要 + resume 指引 → process.exit）。直接调 ctx.shutdown() 不会退出
+  // 进程，也绕过退出摘要。
   register("/exit", {
     description: "Exit Rivet",
     immediate: true,
     handler: () => {
-      app.commitStatic('Session saved. Goodbye!')
-      ctx.shutdown()
+      process.emit('SIGINT')
       return true
     },
   })
@@ -3333,8 +3350,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     description: "Exit Rivet",
     immediate: true,
     handler: () => {
-      app.commitStatic('Session saved. Goodbye!')
-      ctx.shutdown()
+      process.emit('SIGINT')
       return true
     },
   })

@@ -975,6 +975,14 @@ export class AgentLoop {
     this.config.activePlanFilePath = this.activePlanFilePath
     this.config.promptEngine.setPlanModeState(this.planModeState)
     this.config.promptEngine.setActivePlanFilePath(this.activePlanFilePath)
+    // 落盘到 session meta——resume 后计划模式可恢复（内存态否则随进程消失）。
+    // 所有状态迁移(enter/exit/setActivePlan)都经本方法,单点持久化。
+    try {
+      this.persist?.updateMetadata({
+        planModeState: this.planModeState,
+        activePlanFilePath: this.activePlanFilePath,
+      })
+    } catch { /* best-effort */ }
   }
 
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort | 'auto'): void {

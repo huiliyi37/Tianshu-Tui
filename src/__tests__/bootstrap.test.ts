@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { cleanupStaleWorkerSessionDirs } from '../bootstrap.js'
+import { cleanupStaleWorkerSessionDirs, restorePlanModeFromMeta } from '../bootstrap.js'
+import type { AgentLoop } from '../agent/loop.js'
 
 describe('cleanupStaleWorkerSessionDirs', () => {
   let testCwd: string
@@ -60,6 +61,68 @@ describe('cleanupStaleWorkerSessionDirs', () => {
     } finally {
       process.env.RIVET_SESSION_DIR = saved
       rmSync(emptyCwd, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('restorePlanModeFromMeta（计划模式跨重启恢复）', () => {
+  function fakeAgent() {
+    const calls: Array<{ planFilePath?: string }> = []
+    const agent = { enterPlanMode: (opts?: { planFilePath?: string }) => { calls.push(opts ?? {}) } } as unknown as AgentLoop
+    return { agent, calls }
+  }
+
+  it('meta 为 planning 且 draft 存在 → 重进计划模式并返回 draft 路径', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-plan-restore-'))
+    try {
+      const rel = '.rivet/plans/draft-123.md'
+      mkdirSync(join(cwd, '.rivet', 'plans'), { recursive: true })
+      writeFileSync(join(cwd, rel), '# 草稿')
+      const { agent, calls } = fakeAgent()
+      const restored = restorePlanModeFromMeta(agent, cwd, { planModeState: 'planning', activePlanFilePath: rel })
+      assert.equal(restored, rel)
+      assert.equal(calls.length, 1)
+      assert.equal(calls[0]!.planFilePath, rel)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('draft 文件已删 → 静默降级为 off（不重进）', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-plan-restore-'))
+    try {
+      const { agent, calls } = fakeAgent()
+      const restored = restorePlanModeFromMeta(agent, cwd, { planModeState: 'planning', activePlanFilePath: '.rivet/plans/draft-gone.md' })
+      assert.equal(restored, null)
+      assert.equal(calls.length, 0)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('meta 非 planning / 无 draft 指针 / null meta → 不动作', () => {
+    const { agent, calls } = fakeAgent()
+    assert.equal(restorePlanModeFromMeta(agent, '/tmp', { planModeState: 'off', activePlanFilePath: null }), null)
+    assert.equal(restorePlanModeFromMeta(agent, '/tmp', { planModeState: 'planning' }), null)
+    assert.equal(restorePlanModeFromMeta(agent, '/tmp', null), null)
+    assert.equal(calls.length, 0)
+  })
+
+  it('Windows 反斜杠路径归一化后仍能命中', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-plan-restore-'))
+    try {
+      const rel = '.rivet/plans/draft-win.md'
+      mkdirSync(join(cwd, '.rivet', 'plans'), { recursive: true })
+      writeFileSync(join(cwd, rel), 'x')
+      const { agent, calls } = fakeAgent()
+      const restored = restorePlanModeFromMeta(agent, cwd, {
+        planModeState: 'planning',
+        activePlanFilePath: '.rivet\\plans\\draft-win.md',
+      })
+      assert.equal(restored, rel)
+      assert.equal(calls[0]!.planFilePath, rel)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
     }
   })
 })

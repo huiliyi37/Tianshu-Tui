@@ -194,6 +194,14 @@ export interface SessionMetadata {
   /** TUI side panel open state persisted across session resume. */
   sidePanelOpen?: boolean
   /**
+   * Plan-mode state persisted across restarts. Runtime truth lives in
+   * AgentLoop.planModeState (memory); this mirror lets resume re-enter
+   * planning with the same draft file instead of silently dropping the mode.
+   */
+  planModeState?: 'off' | 'planning'
+  /** Relative path of the active plan draft while planModeState === 'planning'. */
+  activePlanFilePath?: string | null
+  /**
    * Guardian（星域守护链路）活动摘要 — CCR 触发数、改道发射数（按 source 分）、
    * advisory 渲染/丢弃计数。排查"守护链路被静音"时一眼可见（Phase 0 观测）。
    */

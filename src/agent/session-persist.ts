@@ -654,6 +654,24 @@ export class SessionPersist {
   }
 }
 
+/**
+ * Exit summary printed after TUI teardown — tells the user which session was
+ * saved and how to reconnect (Claude Code parity: the id must survive on the
+ * scrollback, otherwise resume is undiscoverable). Returns null for sessions
+ * with no completed turns — nothing worth resuming, keep the exit quiet.
+ */
+export function formatExitSummary(
+  meta: Pick<SessionMetadata, 'title' | 'turnCount'> | null | undefined,
+  sessionId: string,
+): string | null {
+  const turns = meta?.turnCount ?? 0
+  if (turns <= 0) return null
+  const short = sessionId.slice(0, 8)
+  const title = (meta?.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 60)
+  const head = `会话已保存: ${short} · ${turns}轮${title ? ` · “${title}”` : ''}`
+  return `${head}\n恢复: rivet --continue（最近会话）或 rivet --resume ${short}`
+}
+
 /** Compact relative time for session lists, e.g. "刚刚" / "5分钟前" / "3天前". */
 function formatRelativeTime(ts: number): string {
   if (!ts) return '未知'
