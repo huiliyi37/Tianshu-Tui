@@ -35,7 +35,9 @@ import { loadHistory } from './tui/history.js'
 import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
 import { buildWorkerDetailContent } from './tui/worker-detail.js'
 import { killAllSync } from './tools/process-tracker.js'
-import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
+import { getTheme, getActiveThemeName, setTheme, THEMES, listCustomThemes, resolveThemeEntry, type ThemeName } from './tui/theme.js'
+import { loadCustomThemes } from './tui/theme-custom.js'
+import { detectTerminalBackground, autoThemeFor } from './tui/theme-detect.js'
 import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
 import { listPlansSync } from './plan/plan-store.js'
 import type { PlanPickerEntry } from './tui/format/overlay.js'
@@ -420,10 +422,21 @@ async function main() {
     }
   }
 
-  // ── 默认加载天枢定制品牌主题 ──────────────────────────────────
-  // 优先使用用户配置的默认主题；未配置时保持向后兼容的 tianshu。
-  const themeName = ctx.config.ui?.theme ?? 'tianshu'
-  setTheme(themeName)
+  // ── 主题装载 ──────────────────────────────────────────────────
+  // 1. 注册 ~/.rivet/themes/*.json 自定义主题（custom:<name> 引用）
+  // 2. 解析配置值：'auto' → OSC 11 背景检测（500ms 超时，COLORFGBG 兜底）
+  //    → cobalt(dark)/paper(light)；未配置时保持向后兼容的 tianshu。
+  // 3. setTheme 对未知名（如自定义主题文件被删）no-op，落到 tianshu 兜底。
+  loadCustomThemes()
+  const configuredTheme = ctx.config.ui?.theme ?? 'tianshu'
+  let themeName: string = configuredTheme
+  if (configuredTheme === 'auto') {
+    // 必须在 TUI 接管 stdin 前查询——此处 raw-mode 探测后即恢复。
+    const detected = await detectTerminalBackground()
+    themeName = autoThemeFor(detected)
+    process.stderr.write(`[T9] Theme auto-detect: ${detected} background → ${themeName}\n`)
+  }
+  if (!setTheme(themeName)) setTheme('tianshu')
   const theme = getTheme()
 
   process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
@@ -680,28 +693,25 @@ async function main() {
     themePickerData: () => {
       const currentTheme = getActiveThemeName()
       const defaultTheme = ctx?.config.ui?.theme
-      const validThemes = Object.keys(THEMES) as ThemeName[]
-      const themeDescriptions: Record<string, string> = {
-        cobalt: '钴蓝·冷调中性 (默认风格)。oklch 调和，明度梯度清晰，视觉极度舒适。',
-        gemini: 'Gemini 风格。结合星云微光渐变 (冷靛蓝与星云紫) 与极光薄荷，极具科技美感。',
-        antigravity: 'Codex 风格。天青色冷调 Accent，亮灰结构文本，现代而克制。',
-        slate: '冷静板岩灰。单一冷静 Teal 主色，无彩色结构，低眩光长久不累。',
-        ziwei: '帝星紫微。朱砂红标记点缀帝星紫，富含中国星图古典美学韵味。',
-        tianshu: '玄夜墨色。95% 墨灰，配以星金主色与朱砂用户印，沉稳低调。',
-        midnight: 'GitHub 暗黑风格。极简中性灰度，高度清晰。',
-        pastel: '温和粉彩。二次元风格启发，高对比、低饱和度多色卡。',
-        cyberpunk: '赛博朋克。霓虹极高对比，酷炫亮眼。',
-        observatory: '五色星辰。传统五行配色体系，天玑星君玄灰底色。',
-        claude: 'Claude Code 官方 TUI 经典调色盘移植。橘黄经典。',
-        starfield: '星空星座。Rivet 原生星图美学，天蓝主星与星云紫辅色。'
-      }
+      // 内置主题 + ~/.rivet/themes/*.json 自定义主题（custom: 前缀）。
+      // 描述从主题元数据取（theme-palettes.ts 单一事实来源）。
+      const builtins = (Object.keys(THEMES) as ThemeName[]).map(t => ({
+        name: t as string,
+        current: t === currentTheme,
+        isDefault: t === defaultTheme,
+        description: THEMES[t].description,
+      }))
+      const customs = listCustomThemes().map(n => {
+        const key = `custom:${n}`
+        return {
+          name: key,
+          current: key === currentTheme,
+          isDefault: key === defaultTheme,
+          description: resolveThemeEntry(key)?.description ?? 'Custom color theme',
+        }
+      })
       return {
-        entries: validThemes.map(t => ({
-          name: t,
-          current: t === currentTheme,
-          isDefault: t === defaultTheme,
-          description: themeDescriptions[t] ?? 'Custom color theme'
-        })),
+        entries: [...builtins, ...customs],
         selectedIndex: 0,
       }
     },

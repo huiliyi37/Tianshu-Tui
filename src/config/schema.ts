@@ -447,8 +447,14 @@ export const envSchema = z.object({
 }).default({})
 
 export const uiSchema = z.object({
-  /** Default TUI color theme used on startup. Runtime /theme switches are not persisted. */
-  theme: z.enum(THEME_NAMES).optional(),
+  /** Default TUI color theme used on startup. Runtime /theme switches are not persisted.
+   *  Accepts: builtin theme name | 'auto' (detect terminal background via OSC 11 /
+   *  COLORFGBG, pick cobalt/paper) | 'custom:<name>' (~/.rivet/themes/<name>.json). */
+  theme: z.union([
+    z.enum(THEME_NAMES),
+    z.literal('auto'),
+    z.string().regex(/^custom:[A-Za-z0-9_-]+$/),
+  ]).optional(),
 }).default({})
 
 /** Project verify command declarations (A1). Machine-readable source of truth

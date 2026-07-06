@@ -10,7 +10,7 @@ import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { resolveCustomCommand } from '../commands/loader.js'
-import { getTheme, setTheme, getActiveThemeName, THEMES, type ThemeName } from './theme.js'
+import { getTheme, setTheme, getActiveThemeName, THEMES, listCustomThemes } from './theme.js'
 import {
   checkForUpdate,
   detectInstallRoot,
@@ -58,6 +58,9 @@ import { buildAgentMark, VOID_SYMBOL } from '../agent/void-identity.js'
 import type { TuiApp } from './engine/app.js'
 import type { SlashCommand } from './slash-command-registry.js'
 import type { BootstrapContext } from '../bootstrap.js'
+import { loadConfig, saveConfig } from '../config/manager.js'
+import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
+import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
 import { switchAgentRuntime, switchAgentSession, restorePlanModeFromMeta } from '../bootstrap.js'
 import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
@@ -1748,14 +1751,17 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
       const raw = parts[1]?.toLowerCase()
-      // validThemes derives from THEMES so theme.ts remains the single source of truth.
-      const validThemes = Object.keys(THEMES) as ThemeName[]
+      // validThemes derives from THEMES + custom registry so theme.ts remains the single source of truth.
+      const validThemes: string[] = [
+        ...Object.keys(THEMES),
+        ...listCustomThemes().map(n => `custom:${n}`),
+      ]
       if (!raw || raw === 'list') {
         const current = getActiveThemeName()
         const list = validThemes.map(t => `  ${t}${t === current ? ' ← current' : ''}`).join('\n')
         pushStatic(createLogEntry({ type: 'system', content: `Available themes:\n${list}\n\nUsage: /theme <name>` }))
-      } else if ((validThemes as string[]).includes(raw)) {
-        setTheme(raw as ThemeName)
+      } else if (validThemes.includes(raw)) {
+        setTheme(raw)
         pushStatic(createLogEntry({ type: 'system', content: `Theme switched to: ${raw}` }))
       } else {
         pushStatic(createLogEntry({ type: 'system', content: `Theme "${raw}" not found. Available: ${validThemes.join(', ')}` }))
@@ -3617,4 +3623,109 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
   registerWorkflow("/plan")
   registerWorkflow("/write-plan")
   registerWorkflow("/plan-close")
+
+  // ── Plugin management ────────────────────────────────────────────
+
+  register("/plugin", {
+    description: "Manage plugins — list, install, remove, enable, disable, info",
+    immediate: true,
+    handler: ({ app, trimmed }) => {
+      const parts = trimmed.split(/\s+/)
+      const sub = parts[1]?.toLowerCase()
+      const arg = parts[2]
+
+      if (!sub || sub === 'list') {
+        const plugins = getInstalledPlugins()
+        const cfg = loadConfig()
+        if (plugins.length === 0) {
+          app.commitStatic('No plugins installed. Use /plugin install <path> to add one.')
+          return true
+        }
+        const lines = ['Installed plugins:']
+        for (const p of plugins) {
+          const enabled = cfg.plugins.enabled[p.name] !== false ? 'enabled' : 'disabled'
+          lines.push(`  ${p.name} (${p.version}) — ${enabled} — ${p.description}`)
+        }
+        lines.push('')
+        lines.push('Use /plugin info <name> for details.')
+        app.commitStatic(lines.join('\n'))
+        return true
+      }
+
+      if (sub === 'info') {
+        if (!arg) { app.commitStatic('Usage: /plugin info <name>'); return true }
+        const plugins = getInstalledPlugins()
+        const p = plugins.find(x => x.name === arg)
+        if (!p) { app.commitStatic(`Plugin "${arg}" not installed.`); return true }
+        const lines = [
+          `Plugin: ${p.name}`,
+          `Version: ${p.version}`,
+          `Description: ${p.description}`,
+          `Entry: ${p.entry}`,
+          `Tools: ${p.tools.join(', ')}`,
+          `Path: ${p.installPath}`,
+        ]
+        app.commitStatic(lines.join('\n'))
+        return true
+      }
+
+      if (sub === 'install') {
+        if (!arg) {
+          app.commitStatic('Usage: /plugin install <local-path>')
+          app.commitStatic('Install a plugin from a local directory.\n')
+          return true
+        }
+        app.commitStatic(`Installing plugin from ${arg}...`)
+        installPlugin(arg).then((result) => {
+          if (result.ok) {
+            const perms = result.manifest.permissions
+            const permStr = Object.entries(perms).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'
+            app.commitStatic(
+              `✓ Installed "${result.manifest.name}" v${result.manifest.version}\n` +
+              `  Tools: ${result.manifest.tools.map(t => t.name).join(', ')}\n` +
+              `  Permissions: ${permStr}\n` +
+              `  This plugin will be available on next session start.`
+            )
+          } else {
+            app.commitStatic(`✗ Install failed: ${result.error}`, { isError: true })
+          }
+        }).catch((err) => {
+          app.commitStatic(`✗ Install error: ${(err as Error).message}`, { isError: true })
+        })
+        return true
+      }
+
+      if (sub === 'remove') {
+        if (!arg) { app.commitStatic('Usage: /plugin remove <name>'); return true }
+        const result = removePlugin(arg)
+        if (result.ok) {
+          app.commitStatic(`✓ Removed plugin "${arg}".`)
+        } else {
+          app.commitStatic(`✗ ${result.error}`, { isError: true })
+        }
+        return true
+      }
+
+      if (sub === 'enable' || sub === 'disable') {
+        if (!arg) { app.commitStatic(`Usage: /plugin ${sub} <name>`); return true }
+        if (!isPluginInstalled(arg)) {
+          app.commitStatic(`✗ Plugin "${arg}" is not installed.`, { isError: true })
+          return true
+        }
+        const cfg = loadConfig()
+        cfg.plugins.enabled[arg] = sub === 'enable'
+        saveConfig(cfg)
+        app.commitStatic(
+          `✓ Plugin "${arg}" ${sub === 'enable' ? 'enabled' : 'disabled'}. ` +
+          `Changes take effect on next session start.`
+        )
+        return true
+      }
+
+      app.commitStatic(
+        'Usage: /plugin [list|install <path>|remove <name>|enable <name>|disable <name>|info <name>]'
+      )
+      return true
+    },
+  })
 }
