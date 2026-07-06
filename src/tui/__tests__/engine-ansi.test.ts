@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { ANSI, cursorUp, cursorDown, cursorForward, cursorBack, cursorTo, fg, bg, color } from '../engine/ansi.js'
+import { ANSI, cursorUp, cursorDown, cursorForward, cursorBack, cursorTo, fg, bg, color, rgbToXterm256 } from '../engine/ansi.js'
 
 describe('ANSI constants', () => {
   it('SAVE_CURSOR is ESC[s', () => {
@@ -65,10 +65,22 @@ describe('SGR color builders', () => {
     assert.equal(result, '\x1B[38;2;255;255;255m')
   })
 
-  it('fg returns empty string for invalid hex', () => {
-    assert.equal(fg('red'), '')
+  it('fg maps chalk named colors to basic 16-color SGR', () => {
+    assert.equal(fg('red'), '\x1B[31m')
+    assert.equal(fg('cyan'), '\x1B[36m')
+    assert.equal(fg('gray'), '\x1B[90m')
+    assert.equal(fg('redBright'), '\x1B[91m')
+  })
+
+  it('bg maps chalk named colors to background SGR (+10)', () => {
+    assert.equal(bg('red'), '\x1B[41m')
+    assert.equal(bg('gray'), '\x1B[100m')
+  })
+
+  it('fg returns empty string for unparseable values', () => {
     assert.equal(fg('#xyz'), '')
     assert.equal(fg(''), '')
+    assert.equal(fg('not-a-color'), '')
   })
 
   it('bg produces truecolor background escape', () => {
@@ -91,5 +103,33 @@ describe('SGR color builders', () => {
   it('color with dim adds DIM after fg', () => {
     const result = color('dim', '#ffffff', { dim: true })
     assert.ok(result.includes(ANSI.DIM))
+  })
+})
+
+describe('rgbToXterm256 quantization', () => {
+  it('maps pure cube corners exactly', () => {
+    assert.equal(rgbToXterm256(0, 0, 0), 16)        // cube (0,0,0)
+    assert.equal(rgbToXterm256(255, 255, 255), 231) // cube (5,5,5)
+    assert.equal(rgbToXterm256(255, 0, 0), 196)     // 16 + 36*5
+    assert.equal(rgbToXterm256(0, 255, 0), 46)      // 16 + 6*5
+    assert.equal(rgbToXterm256(0, 0, 255), 21)      // 16 + 5
+  })
+
+  it('prefers grayscale ramp for near-gray colors', () => {
+    const idx = rgbToXterm256(128, 128, 128)
+    assert.ok(idx >= 232 && idx <= 255, `mid gray should hit grayscale ramp, got ${idx}`)
+  })
+
+  it('maps cube-level values to their exact cube entry', () => {
+    // 6 档分量值 0/95/135/175/215/255 —— (95,135,175) = 16 + 36*1 + 6*2 + 3
+    assert.equal(rgbToXterm256(95, 135, 175), 16 + 36 * 1 + 6 * 2 + 3)
+  })
+
+  it('stays within valid 256-color index range for random samples', () => {
+    for (let i = 0; i < 500; i++) {
+      const r = (i * 37) % 256, g = (i * 91) % 256, b = (i * 53) % 256
+      const idx = rgbToXterm256(r, g, b)
+      assert.ok(idx >= 16 && idx <= 255, `index out of range: ${idx}`)
+    }
   })
 })

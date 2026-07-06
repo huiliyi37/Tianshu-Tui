@@ -12,7 +12,7 @@
  * - diff 检测：write/edit 族结果经 isDiffContent() 检测后走红绿渲染
  */
 
-import { color } from '../engine/ansi.js'
+import { color, fileLink } from '../engine/ansi.js'
 import { classifyBrowserDebugLine } from '../../tools/browser-debug/log-capture.js'
 import type { RivetTheme } from '../theme.js'
 import { getToolFamily } from '../tool-family.js'
@@ -119,7 +119,12 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   const bulletGlyph = isQuestion ? '?' : '●'
   const title = toolCardTitle(toolName, toolInput, rawPath)
   const tColor = isQuestion ? theme.warning : theme.toolColor(toolName)
-  let header = `${indent}${color(bulletGlyph, bulletColor)} ${color(title, tColor, { bold: true })}`
+  // 文件路径 → OSC 8 可点击链接（支持的终端 Cmd/Ctrl+Click 直接打开；其余纯文本降级）
+  const linkPath = rawPath
+    ?? (typeof toolInput?.path === 'string' ? toolInput.path : undefined)
+    ?? (typeof toolInput?.file_path === 'string' ? toolInput.file_path : undefined)
+  const titleColored = color(title, tColor, { bold: true })
+  let header = `${indent}${color(bulletGlyph, bulletColor)} ${linkPath ? fileLink(titleColored, linkPath) : titleColored}`
   if (streaming) {
     header += ` ${color('…', theme.dim)}`
   } else if (elapsedMs !== undefined) {

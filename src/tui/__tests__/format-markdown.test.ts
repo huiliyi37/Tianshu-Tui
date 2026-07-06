@@ -138,10 +138,11 @@ describe('formatMarkdown', () => {
     assert.ok(lines.some(l => stripAnsi(l).includes('item1')))
   })
 
-  it('renders blockquotes with pipe', () => {
+  it('renders blockquotes with left bar + italic', () => {
     const lines = formatMarkdown({ text: '> quoted text', columns: 80 }, theme)
-    assert.ok(stripAnsi(lines[0]!).includes('│'))
+    assert.ok(stripAnsi(lines[0]!).includes('▎'), 'left accent bar')
     assert.ok(stripAnsi(lines[0]!).includes('quoted text'))
+    assert.ok(lines[0]!.includes('\x1B[3m'), 'quote body is italic')
   })
 
   it('renders horizontal rules', () => {

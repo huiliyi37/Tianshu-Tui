@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import stringWidth from 'string-width'
-import { formatGlanceBar } from '../format/glance-bar.js'
+import { formatGlanceBar, formatGlanceRight } from '../format/glance-bar.js'
 import { getTheme } from '../theme.js'
 
 const theme = getTheme()
@@ -146,5 +146,47 @@ describe('formatGlanceBar', () => {
     }, theme)
     const statusW = stringWidth(stripAnsi(result))
     assert.ok(statusW <= 79, `CJK-heavy status display-width ${statusW} must be ≤ 79`)
+  })
+})
+
+describe('formatGlanceRight density（Wave 2 减密分档）', () => {
+  const fullInput = {
+    width: 120,
+    modelName: 'deepseek-v4',
+    reasoningEffort: 'high',
+    cacheHitRate: 0.8,
+    estimatedTokens: 50_000,
+    conversationTokens: 30_000,
+    maxTokens: 200_000,
+    cost: 1.23,
+    elapsedMs: 65_000,
+    approvalMode: 'auto-safe',
+    todoSummary: { total: 5, done: 2, inProgress: 1, current: '修复主题' },
+  }
+
+  it('compact 档只保留模式 badge + 模型 + 上下文% + 耗时', () => {
+    const plain = stripAnsi(formatGlanceRight({ ...fullInput, density: 'compact' }, theme))
+    assert.ok(plain.includes('[safe]'), '模式 badge 保留')
+    assert.ok(plain.includes('deepseek-v4'), '模型保留')
+    assert.ok(plain.includes('◧25%'), `上下文百分比保留: ${plain}`)
+    assert.ok(plain.includes('1m5s'), '耗时保留')
+    assert.ok(!plain.includes('⚡'), 'cache 收起')
+    assert.ok(!plain.includes('¥'), 'cost 收起')
+    assert.ok(!plain.includes('◎'), 'effort 收起')
+    assert.ok(!plain.includes('☐'), 'todo 收起')
+    assert.ok(!plain.includes('50k'), 'token 绝对值收起（只留百分比）')
+  })
+
+  it('full 档（默认，density 未传）保留全量信息', () => {
+    const plain = stripAnsi(formatGlanceRight(fullInput, theme))
+    assert.ok(plain.includes('⚡80%'), 'cache 显示')
+    assert.ok(plain.includes('¥1.23'), 'cost 显示')
+    assert.ok(plain.includes('◎high'), 'effort 显示')
+    assert.ok(plain.includes('☐ 2/5'), 'todo 显示')
+  })
+
+  it('compact 档缺 token 数据时不渲染 ◧', () => {
+    const plain = stripAnsi(formatGlanceRight({ width: 120, density: 'compact', modelName: 'm', elapsedMs: 1000 }, theme))
+    assert.ok(!plain.includes('◧'))
   })
 })

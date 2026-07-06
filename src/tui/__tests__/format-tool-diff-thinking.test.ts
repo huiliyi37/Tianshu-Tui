@@ -241,6 +241,26 @@ describe('formatDiff', () => {
     const lines = formatDiff({ content: long, maxLines: 30 }, theme)
     assert.ok(lines.some(l => stripAnsi(l).includes('hidden')))
   })
+
+  it('renders line-number gutter for hunk-bearing diffs', () => {
+    const content = '--- a/x\n+++ b/x\n@@ -10,3 +10,4 @@\n ctx1\n-oldline\n+newline1\n+newline2\n ctx2'
+    const lines = formatDiff({ content }, theme).map(stripAnsi)
+    // context ctx1 = new line 10；del 显示旧行号 11；两条 add 是新行号 11/12；ctx2 = 13
+    assert.ok(lines.some(l => /^\s*10│ ctx1$/.test(l)), `ctx1 gutter: ${JSON.stringify(lines)}`)
+    assert.ok(lines.some(l => /^\s*11│-oldline$/.test(l)), 'del shows old-file line number')
+    assert.ok(lines.some(l => /^\s*11│\+newline1$/.test(l)), 'add shows new-file line number')
+    assert.ok(lines.some(l => /^\s*12│\+newline2$/.test(l)), 'second add increments')
+    assert.ok(lines.some(l => /^\s*13│ ctx2$/.test(l)), 'trailing context')
+    // hunk 头行留白 gutter
+    assert.ok(lines.some(l => /^\s*│@@ -10,3 \+10,4 @@$/.test(l)), 'hunk header has blank gutter')
+  })
+
+  it('bare +/- fragments (no hunk) keep gutterless rendering', () => {
+    const lines = formatDiff({ content: '+added\n-removed' }, theme).map(stripAnsi)
+    assert.ok(lines.some(l => l.startsWith('+added')))
+    assert.ok(lines.some(l => l.startsWith('-removed')))
+    assert.ok(!lines.some(l => l.includes('│')), 'no gutter without hunk headers')
+  })
 })
 
 describe('formatThinking', () => {

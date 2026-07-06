@@ -13,7 +13,7 @@
 
 import stringWidth from 'string-width'
 import { color } from '../engine/ansi.js'
-import { THEMES, type RivetTheme, type ThemeName } from '../theme.js'
+import { resolveThemeEntry, type RivetTheme } from '../theme.js'
 import { formatElapsed } from '../tool-elapsed.js'
 import type { TranscriptMessage } from '../scrollback-transcript.js'
 import type { ConnectView } from '../connect-flow.js'
@@ -65,6 +65,8 @@ export interface PagerData {
   messages?: TranscriptMessage[]
   /** 当前选中的消息索引（message 模式） */
   selectedMessageIndex?: number
+  /** verbose 层：内容源为完整工具输出的详细转录（`v` 切换） */
+  verbose?: boolean
 }
 
 const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g
@@ -119,7 +121,7 @@ export function renderPager(data: PagerData, width: number, height: number, them
 
   let effectivePage = Math.min(data.page, totalPages - 1)
   let title: string
-  let footer = keyHints([['↑↓/j/k', '滚动'], ['PgUp/PgDn', '翻页'], ['/', '搜索'], ['m', '消息'], ['q/Esc', '关闭']])
+  let footer = keyHints([['↑↓/j/k', '滚动'], ['PgUp/PgDn', '翻页'], ['/', '搜索'], ['m', '消息'], ['v', data.verbose ? '简略' : '详细'], ['q/Esc', '关闭']])
 
   if (mode === 'search') {
     const current = data.searchCurrent ?? 0
@@ -143,7 +145,8 @@ export function renderPager(data: PagerData, width: number, height: number, them
     effectivePage = pageForMessage(messages, idx, pageSize)
     effectivePage = Math.min(effectivePage, totalPages - 1)
   } else {
-    title = data.title ? `${data.title} (${effectivePage + 1}/${totalPages})` : `📄 查看 (${effectivePage + 1}/${totalPages})`
+    const verboseTag = data.verbose ? ' [verbose]' : ''
+    title = data.title ? `${data.title}${verboseTag} (${effectivePage + 1}/${totalPages})` : `📄 查看${verboseTag} (${effectivePage + 1}/${totalPages})`
   }
 
   // Top border + title
@@ -818,8 +821,8 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
       previewLines.push(` ${color(d, theme.muted)}`)
     }
     
-    // 2. Swatch Preview!
-    const targetThemeInfo = THEMES[current.name as ThemeName]
+    // 2. Swatch Preview!（resolveThemeEntry 同时覆盖内置与 custom: 主题）
+    const targetThemeInfo = resolveThemeEntry(current.name)
     if (targetThemeInfo) {
       const tc = targetThemeInfo.truecolor
       const primarySwatch = color('● Accent', tc.primary)

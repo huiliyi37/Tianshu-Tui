@@ -96,6 +96,17 @@ test('height-aware: 24-row terminal degrades to compact medium (input box stays 
   assert.ok(!lines.join('\n').includes('┌'), 'medium banner drops the bordered card')
 })
 
+test('80×24 标准终端：降级紧凑版且每行宽度 ≤ 80（Wave 2 对标验收）', () => {
+  const lines = formatWelcome({
+    modelName: 'deepseek-v4', cwd: '/x/proj', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 80, rows: 24, numericId: 1234,
+  }, theme)
+  assert.ok(lines.length <= 7, `80×24 → 紧凑版 ≤7 行, got ${lines.length}`)
+  for (const line of lines) {
+    assert.ok(stringWidth(line.replace(/\x1B\[[0-9;]*m/g, '')) <= 80, `行宽 ≤ 80: ${line}`)
+  }
+  assert.ok(!lines.join('\n').includes('█'), '80×24 不渲染大字 logo')
+})
+
 test('height-aware: very short terminal (<12 rows) collapses to single line', () => {
   const lines = formatWelcome({
     modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, rows: 10,

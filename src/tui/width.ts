@@ -18,10 +18,14 @@
 import stringWidth from 'string-width'
 import { eastAsianWidthType } from 'get-east-asian-width'
 
-const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g
+// CSI（\x1B[…m 等）+ OSC（\x1B]…BEL / …ST，含 OSC 8 超链接）。OSC 的 payload
+// 是可打印 ASCII（URL），若只剥 CSI 会把 URL 当可见字符计宽 → 截断/padding 错位。
+const ANSI_RE = /\x1B(?:\[[0-9;]*[a-zA-Z]|\][^\x07\x1B]*(?:\x07|\x1B\\))/g
 /** 黏附匹配（按位置）用于截断时识别转义序列。 */
-const ANSI_STICKY = /\x1B\[[0-9;]*[a-zA-Z]/y
+const ANSI_STICKY = /\x1B(?:\[[0-9;]*[a-zA-Z]|\][^\x07\x1B]*(?:\x07|\x1B\\))/y
 const RESET = '\x1B[0m'
+const OSC8_OPEN_RE = /\x1B\]8;[^\x07\x1B]*(?:\x07|\x1B\\)/g
+const OSC8_CLOSE = '\x1B]8;;\x07'
 
 /** box-drawing（U+2500–257F）与 block elements（U+2580–259F）：终端均按 1 列渲染。 */
 function isBoxOrBlock(cp: number): boolean {
@@ -93,5 +97,10 @@ export function truncateToDisplayWidth(text: string, max: number, opts: DisplayW
     w += cw
     i += ch.length
   }
-  return sawAnsi ? out + RESET : out
+  if (!sawAnsi) return out
+  // OSC 8 链接开在截断点之前、闭在截断点之后时补闭合，防止链接吞掉后续输出。
+  const oscSeqs = out.match(OSC8_OPEN_RE) ?? []
+  const lastOsc = oscSeqs[oscSeqs.length - 1]
+  const unclosedLink = lastOsc !== undefined && !/^\x1B\]8;;(?:\x07|\x1B\\)$/.test(lastOsc)
+  return unclosedLink ? out + OSC8_CLOSE + RESET : out + RESET
 }

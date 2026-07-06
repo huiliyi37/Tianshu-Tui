@@ -6,6 +6,9 @@ import {
   formatTokenCount,
   formatTurnWorkSummary,
   formatElapsedHuman,
+  configureSpinnerVerbs,
+  setReducedMotion,
+  resetSpinnerConfig,
 } from '../format/spinner-status.js'
 import { circleSpinnerFrame } from '../braille-spinner.js'
 import { getTheme } from '../theme.js'
@@ -20,20 +23,22 @@ describe('formatSpinnerStatus', () => {
     assert.equal(formatSpinnerStatus({ tick: 0, phase: 'idle', elapsedMs: 0 }, theme), null)
   })
 
-  it('shows single spinner frame + static word + elapsed', () => {
-    const line = formatSpinnerStatus({ tick: 3, phase: 'thinking', elapsedMs: 12_000 }, theme)
+  it('shows single spinner frame + verb + elapsed', () => {
+    resetSpinnerConfig()
+    const line = formatSpinnerStatus({ tick: 3, phase: 'thinking', elapsedMs: 5_000 }, theme)
     assert.ok(line)
     const plain = stripAnsi(line!)
     const useAscii = chalk.level < 3
     const expectedFrame = useAscii ? '/' : circleSpinnerFrame(3)
     assert.ok(plain.startsWith(expectedFrame), 'leads with single spinner frame matching tick')
-    assert.ok(plain.includes('thinking'), 'word is the static label')
+    assert.ok(plain.includes('thinking'), 'first verb slot is "thinking"')
     assert.ok(plain.includes('…'), 'word carries ellipsis')
-    assert.ok(plain.includes('12s'))
+    assert.ok(plain.includes('5s'))
     assert.ok(!plain.includes('esc'), 'no interrupt hint appended')
   })
 
-  it('spinner label reflects phase (all non-idle unified to thinking)', () => {
+  it('verb slot is shared across phases (all non-idle use the pool)', () => {
+    resetSpinnerConfig()
     const thinking = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'thinking', elapsedMs: 0 }, theme)!)
     const streaming = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'streaming', elapsedMs: 0 }, theme)!)
     const analyzing = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'analyzing', elapsedMs: 0 }, theme)!)
@@ -44,13 +49,32 @@ describe('formatSpinnerStatus', () => {
     assert.ok(waiting.includes('thinking'))
   })
 
-  it('word is static (does not rotate with elapsed)', () => {
+  it('verb rotates by elapsed time slice (8s per verb), stable within a slice', () => {
+    resetSpinnerConfig()
     const early = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 0 }, theme)!)
-    const later = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 12_000 }, theme)!)
-    // 仅词区域（'…' 之前）应保持不变——elapsed 部分本就该随时间走。
-    assert.equal(early.split('…')[0], later.split('…')[0], 'word region is identical regardless of elapsed')
-    assert.ok(early.includes('thinking'), 'uses static English "thinking" word')
-    assert.ok(!/[\u4e00-\u9fff]/.test(early), 'no Chinese characters leaked into output')
+    const sameSlice = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 7_000 }, theme)!)
+    const nextSlice = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 9_000 }, theme)!)
+    assert.equal(early.split('…')[0], sameSlice.split('…')[0], 'same verb inside one 8s slice')
+    assert.notEqual(early.split('…')[0], nextSlice.split('…')[0], 'verb rotates after slice boundary')
+  })
+
+  it('configureSpinnerVerbs replace/append modes', () => {
+    configureSpinnerVerbs(['酝酿中'], 'replace')
+    const line = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 60_000 }, theme)!)
+    assert.ok(line.includes('酝酿中'), 'replaced pool has a single verb regardless of elapsed')
+    configureSpinnerVerbs(['自定义词'], 'append')
+    const appended = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 0 }, theme)!)
+    assert.ok(appended.includes('thinking'), 'append keeps default pool head')
+    resetSpinnerConfig()
+  })
+
+  it('reducedMotion freezes frame and verb', () => {
+    setReducedMotion(true)
+    const a = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 0 }, theme)!)
+    const b = stripAnsi(formatSpinnerStatus({ tick: 7, phase: 'thinking', elapsedMs: 20_000 }, theme)!)
+    assert.equal(a[0], b[0], 'frame is static regardless of tick')
+    assert.equal(a.split('…')[0], b.split('…')[0], 'verb is frozen regardless of elapsed')
+    resetSpinnerConfig()
   })
 
   it('spinner frame advances with tick', () => {

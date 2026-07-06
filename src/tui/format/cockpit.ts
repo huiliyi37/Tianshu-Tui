@@ -51,7 +51,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
 
   if (show('safety')) {
     body.push('')
-    body.push(` ${statusGlyph(snapshot.panelStatuses.safety, theme)} ${color('Safety', theme.primary, { bold: true })}  ${color(snapshot.safety.riskLevel, theme.muted)}  doom:${snapshot.safety.doomLoopLevel}`)
+    body.push(` ${statusGlyph(snapshot.panelStatuses.safety, theme)} ${color('Safety', theme.secondary, { bold: true })}  ${color(snapshot.safety.riskLevel, theme.muted)}  doom:${snapshot.safety.doomLoopLevel}`)
     if (snapshot.safety.suggestedAction) {
       body.push(`    ${color(snapshot.safety.suggestedAction, theme.muted)}`)
     }
@@ -59,7 +59,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
 
   if (show('verify')) {
     body.push('')
-    body.push(` ${statusGlyph(snapshot.panelStatuses.verify, theme)} ${color('Verify', theme.primary, { bold: true })}  ${snapshot.verification.deliveryStatus}  read:${snapshot.verification.filesRead} mod:${snapshot.verification.filesModified}`)
+    body.push(` ${statusGlyph(snapshot.panelStatuses.verify, theme)} ${color('Verify', theme.secondary, { bold: true })}  ${snapshot.verification.deliveryStatus}  read:${snapshot.verification.filesRead} mod:${snapshot.verification.filesModified}`)
     for (const run of snapshot.verification.runs.slice(0, 3)) {
       body.push(`    ${run.tool}: ${run.summary} ${run.status}`)
     }
@@ -70,7 +70,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
     const ctx = snapshot.context
     const ratio = ctx.maxTokens > 0 ? ctx.estimatedTokens / ctx.maxTokens : 0
     const bar = formatBar(ctx.estimatedTokens, ctx.maxTokens, Math.min(w, 40), theme)
-    body.push(` ${statusGlyph(snapshot.panelStatuses.context, theme)} ${color('Context', theme.primary, { bold: true })}  ${Math.round(ratio * 100)}%  ${ctx.estimatedTokens}/${ctx.maxTokens} tokens  rounds:${ctx.rounds}`)
+    body.push(` ${statusGlyph(snapshot.panelStatuses.context, theme)} ${color('Context', theme.secondary, { bold: true })}  ${Math.round(ratio * 100)}%  ${ctx.estimatedTokens}/${ctx.maxTokens} tokens  rounds:${ctx.rounds}`)
     body.push(`    ${bar}`)
     if (ctx.brokenRounds > 0) {
       body.push(`    ${color(`⚠ ${ctx.brokenRounds} broken rounds`, theme.warning)}`)
@@ -80,7 +80,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
   if (show('model')) {
     body.push('')
     const m = snapshot.model
-    body.push(` ${statusGlyph(snapshot.panelStatuses.model, theme)} ${color('Model', theme.primary, { bold: true })}  ${m.name}  cache:${Math.round(m.cacheHitRate * 100)}%  ${m.inputTokens.toLocaleString()}↓ ${m.outputTokens.toLocaleString()}↑  ¥${m.cost.toFixed(4)}`)
+    body.push(` ${statusGlyph(snapshot.panelStatuses.model, theme)} ${color('Model', theme.secondary, { bold: true })}  ${m.name}  cache:${Math.round(m.cacheHitRate * 100)}%  ${m.inputTokens.toLocaleString()}↓ ${m.outputTokens.toLocaleString()}↑  ¥${m.cost.toFixed(4)}`)
     if (m.reasoningEffort) {
       body.push(`    reasoning: ${m.reasoningEffort}  prewarm: ${Math.round(m.prewarmHitRate * 100)}%`)
     }
@@ -96,7 +96,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
 
   if (show('mcp') && snapshot.mcp.servers.length > 0) {
     body.push('')
-    body.push(` ${statusGlyph(snapshot.panelStatuses.mcp, theme)} ${color('MCP', theme.primary, { bold: true })}  tools:${snapshot.mcp.totalTools}  connected:${snapshot.mcp.connectedServers}/${snapshot.mcp.servers.length}`)
+    body.push(` ${statusGlyph(snapshot.panelStatuses.mcp, theme)} ${color('MCP', theme.secondary, { bold: true })}  tools:${snapshot.mcp.totalTools}  connected:${snapshot.mcp.connectedServers}/${snapshot.mcp.servers.length}`)
     for (const srv of snapshot.mcp.servers.slice(0, 4)) {
       const g = srv.status === 'connected' ? color('✓', theme.success) : srv.status === 'error' ? color('✗', theme.error) : color('○', theme.warning)
       body.push(`    ${g} ${srv.serverId}  ${srv.toolCount} tools`)
@@ -106,7 +106,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
   if (show('advisory') && (panel === 'advisory' || snapshot.advisory.rendered > 0 || snapshot.advisory.silenced.length > 0)) {
     body.push('')
     const adv = snapshot.advisory
-    body.push(` ${statusGlyph(snapshot.panelStatuses.advisory, theme)} ${color('Advisory', theme.primary, { bold: true })}  rendered:${adv.rendered} dropped:${adv.dropped} adopted:${adv.adopted} ignored:${adv.ignored} heldOut:${adv.heldOut}${adv.pendingWatch > 0 ? `  pending:${adv.pendingWatch}` : ''}`)
+    body.push(` ${statusGlyph(snapshot.panelStatuses.advisory, theme)} ${color('Advisory', theme.secondary, { bold: true })}  rendered:${adv.rendered} dropped:${adv.dropped} adopted:${adv.adopted} ignored:${adv.ignored} heldOut:${adv.heldOut}${adv.pendingWatch > 0 ? `  pending:${adv.pendingWatch}` : ''}`)
     if (adv.silenced.length > 0) {
       const parts = adv.silenced.slice(0, 4).map(s => `${s.key}(${s.reason === 'lift' ? 'lift' : 'hab'}:${s.remaining})`)
       body.push(`    ${color(`⊘ 静音 ${parts.join(' ')}`, theme.warning)}`)
@@ -130,7 +130,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
 
   if (show('trace') && snapshot.trace.events.length > 0) {
     body.push('')
-    body.push(` ${statusGlyph(snapshot.panelStatuses.trace, theme)} ${color('Trace', theme.primary, { bold: true })}  ${snapshot.trace.totalEvents} events`)
+    body.push(` ${statusGlyph(snapshot.panelStatuses.trace, theme)} ${color('Trace', theme.secondary, { bold: true })}  ${snapshot.trace.totalEvents} events`)
     for (const evt of snapshot.trace.events.slice(-5)) {
       const g = evt.status === 'failed' ? color('✗', theme.error) : evt.status === 'completed' ? color('✓', theme.success) : color('·', theme.muted)
       body.push(`    ${g} t${evt.turn} ${evt.kind}/${evt.name} ${evt.durationMs}ms`)

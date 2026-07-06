@@ -103,6 +103,13 @@ export interface GlanceBarInput {
   goal?: GoalStateSnapshot
   /** todo 摘要 */
   todoSummary?: TodoSummary
+  /**
+   * 信息密度分档（Wave 2 减密）：
+   * - 'compact'（TUI 默认）：模式 badge + 模型 + 上下文% + 耗时 四项
+   * - 'full'：全量（goal/todo/effort/cache/cost 都上）——`/glance full` 切换
+   * 未传按 full 处理（兼容既有直接调用方/测试）。
+   */
+  density?: 'compact' | 'full'
 }
 
 export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): string {
@@ -120,11 +127,29 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
 
 export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): string {
   const narrow = input.narrow ?? input.width < 60
+  const compact = input.density === 'compact'
   const parts: string[] = []
 
   // 权限/计划模式 badge（最高优先级，用户必须随时知道当前安全模式）
   const modeBadge = formatModeBadge(input, theme)
   if (modeBadge) parts.push(modeBadge)
+
+  // ── compact 档：模式 badge + 模型 + 上下文% + 耗时，其余全部收起 ──
+  if (compact) {
+    if (input.modelName) {
+      parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
+    }
+    const cRatio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
+      ? input.estimatedTokens / input.maxTokens : 0
+    if (input.maxTokens && input.maxTokens > 0 && input.estimatedTokens !== undefined) {
+      const tokenColor = cRatio >= 0.9 ? theme.error : cRatio >= 0.75 ? theme.warning : theme.muted
+      parts.push(color(`◧${(cRatio * 100).toFixed(0)}%`, tokenColor))
+    }
+    const zone = parts.join('  ')
+    const elapsedStr = input.elapsedMs !== undefined ? formatElapsed(input.elapsedMs) : ''
+    const elapsedColored = color(elapsedStr, input.stalled ? theme.warning : theme.dim)
+    return [zone, elapsedColored].filter(Boolean).join('  ')
+  }
 
   // Goal 进度（active / paused / blocked 都显示，complete 不显示）
   if (input.goal && input.goal.status !== 'complete') {

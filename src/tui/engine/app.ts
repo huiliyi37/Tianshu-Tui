@@ -348,6 +348,10 @@ export class TuiApp {
   private _approvalMode: string = 'auto-safe'
   /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) */
   choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' = 'effort'
+  /** GlanceBar 信息密度（Wave 2 减密）：compact 默认四项，`/glance full` 切全量。 */
+  glanceDensity: 'compact' | 'full' = 'compact'
+  /** 可脚本化 statusline 文本（ui.statusLine.command stdout 首行），渲染在输入框上方。 */
+  private statusLineText: string | null = null
   /**
    * Run 世代计数 —— 唯一权威的「当前 run」标识。
    * 每次 abort 自增；被中断的旧 run 的迟到回调（经 bridge 包裹时捕获的旧 gen）
@@ -1122,6 +1126,11 @@ export class TuiApp {
     return this.commit.getContent()
   }
 
+  /** pager 是否处于 verbose 层（完整工具输出视图）。供 pagerContent provider 选择内容源。 */
+  isPagerVerbose(): boolean {
+    return this.overlayController.nav().pagerVerbose
+  }
+
   /** 返回当前活跃星域名称（供 starmap overlay 高亮） */
   getDomainName(): string | undefined {
     return this.state.domainName
@@ -1414,6 +1423,14 @@ export class TuiApp {
         nav.pagerMode = 'search'
         const next = findPrevMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
         nav.pagerSearchCurrent = next + 1
+        this.overlay.rerender()
+        return true
+      }
+      // verbose 层：切换完整工具输出视图（内容源改变 → 回到首页）
+      if (c === 'v') {
+        nav.pagerVerbose = !nav.pagerVerbose
+        nav.pagerPage = 0
+        nav.pagerSelectedMessage = 0
         this.overlay.rerender()
         return true
       }
@@ -1923,6 +1940,13 @@ export class TuiApp {
   setModelInfo(modelName: string, contextWindow?: number): void {
     this.state.modelName = modelName
     if (contextWindow !== undefined) this.metricsGlanceController.contextWindow = contextWindow
+    this.forceRedraw()
+  }
+
+  /** 更新可脚本化 statusline 文本（null 隐藏该行）。 */
+  setStatusLine(text: string | null): void {
+    if (this.statusLineText === text) return
+    this.statusLineText = text
     this.forceRedraw()
   }
 
@@ -2942,13 +2966,15 @@ export class TuiApp {
       lines.push({ text: line })
     }
 
-    // 2b. 队列预览：⏳ queued: "最后一条前 60 字符"（Up 取回编辑）
+    // 2b. 队列预览：⏳ queued: "最后一条前 60 字符"（Up 取回编辑）。
+    //     全宽反色条（CC 对标）：排队 prompt 是「已提交但未生效」的用户输入，
+    //     单行 muted 提示存在感不足，容易被误认为已丢失。
     if (this.steerBuffer.hasPending()) {
       const pending = this.steerBuffer.getPending()
       const last = pending[pending.length - 1]!
       const preview = last.length > 60 ? `${last.slice(0, 60)}…` : last
       const more = pending.length > 1 ? ` (+${pending.length - 1} more)` : ''
-      lines.push({ text: this.clampLine(color(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.muted)) })
+      lines.push({ text: this.clampLine(this.renderBanner(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.secondary)) })
     }
 
     // 2b2. 子代理可视化 —
@@ -3089,6 +3115,11 @@ export class TuiApp {
     // 4. GlanceBar（context% / cache / cost / git branch） metrics 已在顶部计算，
     //    与 side panel 共享同一份 glanceCacheHitRate / glanceEstimatedTokens / glanceCost。
 
+    // 4b. 可脚本化 statusline（ui.statusLine.command）——输入框上方独立行。
+    if (this.statusLineText) {
+      lines.push({ text: this.clampLine(color(this.statusLineText, this.theme.muted)) })
+    }
+
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
     if (this.inputController.ctrlCPendingSince > 0) {
       lines.push({ text: '(Ctrl+C again to exit)' })
@@ -3135,6 +3166,7 @@ export class TuiApp {
         planMode: planModeActive,
         goal: goalSnapshot,
         todoSummary,
+        density: this.glanceDensity,
       }, this.theme)
 
       // 用 wide 上界度量指标串宽度：CJK/Windows 终端把 East-Asian Ambiguous 符号
@@ -3452,6 +3484,7 @@ export class TuiApp {
           searchMatches,
           searchCurrent: nav.pagerSearchCurrent,
           selectedMessageIndex: nav.pagerSelectedMessage,
+          verbose: nav.pagerVerbose,
         }, this.columns, this.rows, this.theme)
       },
     })

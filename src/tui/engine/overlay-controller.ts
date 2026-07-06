@@ -10,6 +10,8 @@ export interface OverlayNavState {
   pagerSearchQuery: string
   pagerSearchCurrent: number
   pagerSelectedMessage: number
+  /** verbose 层：pager 显示完整工具输出（transcript 详细视图）。 */
+  pagerVerbose: boolean
   paletteIndex: number
   rewindIndex: number
   /** Rewind overlay sub-phase: message list vs restore-granularity chooser. */
@@ -52,7 +54,7 @@ export interface OverlayDataProviders {
  * TuiApp; this class only manages nav state / data providers / exec callbacks.
  */
 export class OverlayController {
-  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list', rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, planPickerIndex: 0, connectIndex: 0, query: '' }
+  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, pagerVerbose: false, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list', rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, planPickerIndex: 0, connectIndex: 0, query: '' }
   private overlayData?: OverlayDataProviders
   private paletteExec?: (index: number) => void
   private rewindExec?: (messageIndex: number, mode: RewindMode) => void
@@ -70,7 +72,7 @@ export class OverlayController {
   /** Direct mutable access to nav state object */
   nav(): OverlayNavState { return this.overlayNav }
   resetNav(): void {
-    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list' as const, rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, planPickerIndex: 0, connectIndex: 0, query: '' }
+    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, pagerVerbose: false, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list' as const, rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, planPickerIndex: 0, connectIndex: 0, query: '' }
   }
 
   get pagerPage(): number { return this.overlayNav.pagerPage }
