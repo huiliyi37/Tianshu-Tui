@@ -26,6 +26,7 @@ class FakeAgent implements ManagedAgent {
   abort() { this.resolveRun?.() }
   setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null) { this.activePlanCalls.push(plan) }
   enterPlanMode(opts?: { planFilePath?: string }) { this.enterPlanModeCalls.push(opts) }
+  switchModel(modelId: string) { return modelId }
   getActivePlanFilePath() { return this.activePlanFilePath }
   listArtifacts() { return this.artifacts }
   readArtifact(id: string) { return Promise.resolve(this.artifacts.some((a) => a.id === id) ? `raw:${id}` : null) }
@@ -311,6 +312,29 @@ test('Plan: GET /plans filters drafts from the list and exposes the active draft
   manager.setPlanMode(s.id, 'off')
   const closed = await router('GET', `/sessions/${s.id}/plans`, {}, AUTH)
   assert.equal((closed.body as { draft: unknown }).draft, null)
+})
+
+// 2026-07-06 缺陷复盘: plan mode 是 AgentLoop 内存态，agent 重建（switchModel /
+// 懒构建恢复）后丢失——record.planMode='planning' 但新 agent 未进入 planning，
+// 工具门禁失效、getActivePlanFilePath=null → 桌面「起草中」实时草稿断流。
+// applySelections 现在按 record 补 enterPlanMode。
+test('Plan: agent rebuild re-enters plan mode when record says planning', async () => {
+  const { manager, agents } = setup()
+  const s = manager.createSession({})
+
+  manager.setPlanMode(s.id, 'planning')
+  const agent = agents[0]!
+  assert.equal(agent.enterPlanModeCalls.length, 1, 'setPlanMode enters plan mode once')
+
+  // switchModel rebuilds the loop and re-runs applySelections — planning must survive.
+  assert.equal(manager.switchModel(s.id, 'other-model'), true)
+  assert.equal(agent.enterPlanModeCalls.length, 2, 'rebuild re-enters plan mode from record')
+
+  // Off sessions must NOT be pushed into planning on rebuild.
+  manager.setPlanMode(s.id, 'off')
+  const callsAfterOff = agent.enterPlanModeCalls.length
+  assert.equal(manager.switchModel(s.id, 'other-model'), true)
+  assert.equal(agent.enterPlanModeCalls.length, callsAfterOff, 'off record does not re-enter')
 })
 
 test('Plan: GET /plans/:slug returns content; 404 for unknown plan', async () => {

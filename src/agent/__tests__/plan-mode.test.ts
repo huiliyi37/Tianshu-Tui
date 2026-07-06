@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath } from '../plan-mode.js'
+import { checkPlanMode, canonicalizePathForCompare, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath } from '../plan-mode.js'
 import { profileIsWriteCapable, profileIsPlanModeSafe } from '../profile-registry.js'
 import { createDefaultToolRegistry } from '../../tools/default-registry.js'
 import { WEB_SEARCH_TOOL } from '../../tools/web-search.js'
@@ -41,6 +41,38 @@ describe('checkPlanMode', () => {
 
       const editAllowed = checkPlanMode('planning', 'edit_file', { cwd: dir, targetFilePath: planPath, activePlanFilePath: planPath })
       assert.equal(editAllowed.allowed, true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  // 2026-07-06 Windows 兼容: 盘符大小写在真实环境不稳定（VSCode/Git Bash 给
+  // c:\proj，process.cwd() 给 C:\proj），NTFS 本身大小写不敏感。逐字节比较会
+  // 误拒活动计划文件写入 → 草稿永远为空，桌面「起草中」实时视图断流。
+  it('canonicalizePathForCompare: backslashes + drive-letter case folding', () => {
+    // Windows 形路径：分隔符归一 + 整体小写（NTFS 大小写不敏感）
+    assert.equal(
+      canonicalizePathForCompare('C:\\Proj\\.rivet\\plans\\draft-1.md'),
+      canonicalizePathForCompare('c:/proj/.rivet/plans/draft-1.md'),
+    )
+    // POSIX 路径保持大小写敏感（ext4/APFS 默认区分大小写）
+    assert.notEqual(
+      canonicalizePathForCompare('/tmp/Plans/draft-1.md'),
+      canonicalizePathForCompare('/tmp/plans/draft-1.md'),
+    )
+  })
+
+  it('planning allows the active plan file addressed with backslash separators', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-plan-mode-'))
+    try {
+      const planPath = '.rivet/plans/draft-win.md'
+      // 模型在 Windows 上常回显反斜杠相对路径 — 必须与活动计划文件匹配
+      const allowed = checkPlanMode('planning', 'write_file', {
+        cwd: dir,
+        targetFilePath: '.rivet\\plans\\draft-win.md',
+        activePlanFilePath: planPath,
+      })
+      assert.equal(allowed.allowed, true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
