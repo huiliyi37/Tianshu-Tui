@@ -1640,7 +1640,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     initializeMcp(config, toolRegistry, refs).then(() => {
       agent.updateTools()
     }).catch(() => {})
-    initializePlugins(config.plugins, toolRegistry).then((result) => {
+    initializePlugins(config.plugins, toolRegistry, cwd).then((result) => {
       for (const name of result.suppressTools) {
         toolRegistry.remove(name)
       }
@@ -1663,7 +1663,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   } else {
     await initializeMcp(config, toolRegistry, refs)
     agent.updateTools()
-    const pluginResult = await initializePlugins(config.plugins, toolRegistry)
+    const pluginResult = await initializePlugins(config.plugins, toolRegistry, cwd)
     for (const name of pluginResult.suppressTools) {
       toolRegistry.remove(name)
     }

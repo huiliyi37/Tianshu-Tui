@@ -40,6 +40,7 @@ import { loadCustomThemes } from './tui/theme-custom.js'
 import { detectTerminalBackground, autoThemeFor } from './tui/theme-detect.js'
 import { configureSpinnerVerbs, setReducedMotion } from './tui/format/spinner-status.js'
 import { StatusLineRunner } from './tui/statusline.js'
+import { buildVerboseTranscript } from './tui/transcript-verbose.js'
 import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
 import { listPlansSync } from './plan/plan-store.js'
 import type { PlanPickerEntry } from './tui/format/overlay.js'
@@ -246,7 +247,7 @@ async function main() {
     // Use a pre-filled registry so conflict detection runs against the real built-in tool set,
     // not an empty set. (Wave 1 regression: empty PluginRegistry let every plugin pass.)
     const pluginRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
-    const pluginResult = await initializePlugins(cfg.plugins, pluginRegistry)
+    const pluginResult = await initializePlugins(cfg.plugins, pluginRegistry, process.cwd())
     if (pluginResult.warnings.length > 0) {
       process.stderr.write(`[plugins] ${pluginResult.loaded}/${pluginResult.scanned} loaded; warnings: ${pluginResult.warnings.join('; ')}\n`)
     }
@@ -595,6 +596,16 @@ async function main() {
           page: 0,
           title,
           messages,
+        }
+      }
+      // verbose 层（`v` 切换）：从会话真实历史重建含完整工具输出的转录
+      if (tuiApp.isPagerVerbose()) {
+        const verbose = buildVerboseTranscript(ctx!.session.getMessages())
+        return {
+          content: verbose.content || '(no messages yet)',
+          page: 0,
+          title: 'Transcript',
+          messages: verbose.messages,
         }
       }
       const content = tuiApp.getScrollbackContent() || '(no messages yet)'

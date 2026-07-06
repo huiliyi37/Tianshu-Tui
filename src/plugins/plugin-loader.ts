@@ -16,7 +16,8 @@ import { join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { rivetHome } from '../config/paths.js'
 import type { ToolRegistry } from '../tools/registry.js'
-import type { Tool } from '../tools/types.js'
+import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
+import { validatePathSafe } from '../tools/path-validate.js'
 import { parseManifest, type PluginManifest, type PluginPackageJson } from './manifest.js'
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -64,11 +65,13 @@ export const PLUGIN_TOOL_SUPPRESS_MAP: Record<string, string[]> = {
  *
  * @param pluginConfig - Config.plugins (enabled state). If undefined, all installed plugins are enabled.
  * @param toolRegistry - The ToolRegistry to register plugin tools into.
+ * @param cwd - Session working directory for path validation.
  * @returns Structured result with per-plugin status and summary.
  */
 export async function initializePlugins(
   pluginConfig: PluginConfig | undefined,
   toolRegistry: ToolRegistry,
+  cwd: string,
 ): Promise<PluginsInitResult> {
   const pluginsDir = join(rivetHome(), 'plugins')
   const warnings: string[] = []
@@ -91,7 +94,7 @@ export async function initializePlugins(
   const enabled = pluginConfig?.enabled ?? {}
 
   for (const dirName of entries) {
-    const result = await loadOnePlugin(dirName, pluginsDir, enabled, toolRegistry)
+    const result = await loadOnePlugin(dirName, pluginsDir, enabled, toolRegistry, cwd)
     results.push(result)
     if (result.error) {
       warnings.push(`[plugins] ${result.pluginName}: ${result.error}`)
@@ -113,6 +116,65 @@ export async function initializePlugins(
   }
 }
 
+// ── Path safety wrapper ────────────────────────────────────────────
+
+/** Path-like parameter names that the wrapper intercepts. */
+const PATH_PARAM_NAMES = new Set(['file_path', 'destination_path', 'path', 'input_path', 'output_path'])
+
+/** Parameter names that indicate a write operation. */
+const WRITE_PARAM_NAMES = new Set(['destination_path', 'output_path'])
+
+/** Tool names that indicate the tool writes files — used as fallback mode hint. */
+const WRITE_TOOL_PATTERNS = [/write/, /create/, /generate/]
+
+function inferPathMode(toolName: string, paramName: string): 'read' | 'write' {
+  if (WRITE_PARAM_NAMES.has(paramName)) return 'write'
+  for (const re of WRITE_TOOL_PATTERNS) {
+    if (re.test(toolName)) return 'write'
+  }
+  return 'read'
+}
+
+/**
+ * Wrap a plugin tool's execute to enforce path safety on file-path parameters.
+ *
+ * Every parameter whose name contains a path-like keyword gets validated through
+ * validatePathSafe BEFORE the original execute runs. This closes the gap where
+ * plugin tools bypass the core tool pipeline's path guards.
+ */
+function wrapPluginTool(tool: Tool, cwd: string): Tool {
+  const originalExecute = tool.execute.bind(tool)
+  const props = (tool.definition.input_schema as Record<string, unknown>)?.properties as Record<string, unknown> | undefined
+  if (!props) return tool // no schema properties → nothing to guard
+
+  // Collect path params to validate
+  const pathParams: Array<{ key: string; mode: 'read' | 'write' }> = []
+  for (const key of Object.keys(props)) {
+    if (PATH_PARAM_NAMES.has(key)) {
+      pathParams.push({ key, mode: inferPathMode(tool.definition.name, key) })
+    }
+  }
+  if (pathParams.length === 0) return tool // no path params → nothing to guard
+
+  const guardedExecute = async (params: ToolCallParams): Promise<ToolResult> => {
+    for (const { key, mode } of pathParams) {
+      const value = (params as Record<string, unknown>)[key]
+      if (typeof value !== 'string' || value.length === 0) continue
+
+      const result = validatePathSafe(cwd, value, mode)
+      if (!result.ok) {
+        return { content: `Path rejected: ${result.error}`, isError: true }
+      }
+    }
+    return originalExecute(params)
+  }
+
+  return {
+    ...tool,
+    execute: guardedExecute,
+  }
+}
+
 // ── Per-plugin loading ─────────────────────────────────────────────
 
 async function loadOnePlugin(
@@ -120,6 +182,7 @@ async function loadOnePlugin(
   pluginsDir: string,
   enabled: Record<string, boolean>,
   registry: ToolRegistry,
+  cwd: string,
 ): Promise<PluginLoadResult> {
   const pluginDir = join(pluginsDir, dirName)
   const pkgPath = join(pluginDir, 'package.json')
@@ -191,10 +254,17 @@ async function loadOnePlugin(
     }
   }
 
+  // 6b. Wrap plugin tools with path safety guards.
+  //     Plugin tools bypass the core tool pipeline's validatePathSafe —
+  //     xlsx_read could read ~/.ssh/id_rsa, pdf_create could write anywhere.
+  //     The kernel-level wrapper intercepts file-path params and enforces
+  //     the same validation that built-in tools get.
+  const wrappedTools = tools.map(t => wrapPluginTool(t, cwd))
+
   // 7. Conflict detection — reject entire plugin if any tool name collides
   const existingNames = new Set(registry.getAllNames())
   const conflicts: string[] = []
-  for (const tool of tools) {
+  for (const tool of wrappedTools) {
     if (existingNames.has(tool.definition.name)) {
       conflicts.push(tool.definition.name)
     }
@@ -208,7 +278,7 @@ async function loadOnePlugin(
   }
 
   // 8. Register
-  for (const tool of tools) {
+  for (const tool of wrappedTools) {
     registry.register(tool)
   }
 
