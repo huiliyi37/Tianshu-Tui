@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createComputerUseTool } from '../tool.js'
-import type { ComputerUseDriver, ClickTarget, ClickOptions, ScrollOptions, PermissionStatus, SnapshotRef } from '../macos-driver.js'
+import type { ComputerUseDriver, ClickTarget, ClickOptions, ScrollOptions, SnapshotOptions, PermissionStatus, SnapshotRef } from '../macos-driver.js'
 import type { Tool, ToolCallParams } from '../../types.js'
 import type { SaveArtifactInput } from '../../../artifact/store.js'
 
@@ -20,9 +20,15 @@ class FakeDriver implements ComputerUseDriver {
       { name: 'Notes', frontmost: false },
     ]
   }
-  async snapshot(app: string) {
-    this.calls.push({ method: 'snapshot', args: [app] })
-    return { tree: this.tree, refs: this.refs, screenshotPng: this.screenshot, visionPng: this.vision }
+  async snapshot(app: string, opts?: SnapshotOptions) {
+    this.calls.push({ method: 'snapshot', args: [app, opts] })
+    const withShot = opts?.screenshot !== false
+    return {
+      tree: this.tree,
+      refs: this.refs,
+      screenshotPng: withShot ? this.screenshot : null,
+      visionPng: withShot ? this.vision : null,
+    }
   }
   async click(app: string, target: ClickTarget, opts?: ClickOptions) {
     this.calls.push({ method: 'click', args: [app, target, opts] })
@@ -45,6 +51,15 @@ class FakeDriver implements ComputerUseDriver {
   }
   async focusApp(app: string) {
     this.calls.push({ method: 'focusApp', args: [app] })
+  }
+  async launchApp(app: string) {
+    this.calls.push({ method: 'launchApp', args: [app] })
+  }
+  async menuSelect(app: string, path: string[]) {
+    this.calls.push({ method: 'menuSelect', args: [app, path] })
+  }
+  async pasteText(app: string, text: string) {
+    this.calls.push({ method: 'pasteText', args: [app, text] })
   }
   permissions: PermissionStatus = { accessibility: true, screenRecording: true, detail: 'All required permissions granted.' }
   async checkPermissions() {
@@ -72,6 +87,19 @@ function darwinTool(driver: FakeDriver, granted: string[] = [], sleep?: (ms: num
     driverFactory: () => driver,
     isAppGranted: (app) => grantedSet.has(app.toLowerCase()),
     sleep,
+    // Feedback loop is exercised by its own dedicated tests below; keep the
+    // rest of the suite focused on single-action semantics.
+    feedback: false,
+  })
+}
+
+function feedbackTool(driver: FakeDriver) {
+  return createComputerUseTool({
+    platform: 'darwin',
+    driverFactory: () => driver,
+    isAppGranted: () => true,
+    sleep: async () => {},
+    feedback: true,
   })
 }
 
@@ -94,6 +122,9 @@ test('ungranted app → every interactive action requires approval (fail-closed)
     { action: 'type', app: 'Safari', text: 'hi' },
     { action: 'key', app: 'Safari', combo: 'cmd+s' },
     { action: 'focus_app', app: 'Safari' },
+    { action: 'launch_app', app: 'Safari' },
+    { action: 'menu_select', app: 'Safari', menu_path: 'File > Save' },
+    { action: 'paste_text', app: 'Safari', text: 'hi' },
   ]) {
     assert.equal(tool.requiresApproval!(params(input)), true, `${input.action} must gate`)
   }
@@ -383,7 +414,7 @@ test('darwin platform: tool enabled by default', () => {
 
 test('win32 platform: tool enabled by default and actions execute', async () => {
   const driver = new FakeDriver()
-  const tool = createComputerUseTool({ platform: 'win32', driverFactory: () => driver })
+  const tool = createComputerUseTool({ platform: 'win32', driverFactory: () => driver, feedback: false })
   assert.equal(tool.isEnabled!(), true)
   const list = await tool.execute(params({ action: 'list_apps' }))
   assert.equal(list.isError, undefined)
@@ -398,4 +429,117 @@ test('win32 platform: tool enabled by default and actions execute', async () => 
 test('enabled override wins over platform default', () => {
   const tool = createComputerUseTool({ platform: 'darwin', enabled: false, driverFactory: () => new FakeDriver() })
   assert.equal(tool.isEnabled!(), false)
+})
+
+// ── New actions: launch_app / menu_select / paste_text ────────────
+
+test('launch_app dispatches to the driver', async () => {
+  const driver = new FakeDriver()
+  const res = await darwinTool(driver).execute(params({ action: 'launch_app', app: 'Notes' }))
+  assert.equal(res.isError, undefined)
+  assert.match(res.content, /Launched Notes/)
+  assert.deepEqual(driver.calls[0], { method: 'launchApp', args: ['Notes'] })
+})
+
+test('menu_select splits the "A > B > C" path and validates input', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver)
+  const res = await tool.execute(params({ action: 'menu_select', app: 'Notes', menu_path: 'File >  Export> PNG ' }))
+  assert.equal(res.isError, undefined)
+  assert.match(res.content, /Selected menu File > Export > PNG in Notes/)
+  assert.deepEqual(driver.calls[0], { method: 'menuSelect', args: ['Notes', ['File', 'Export', 'PNG']] })
+
+  const missing = await tool.execute(params({ action: 'menu_select', app: 'Notes' }))
+  assert.equal(missing.isError, true)
+  const blank = await tool.execute(params({ action: 'menu_select', app: 'Notes', menu_path: ' > ' }))
+  assert.equal(blank.isError, true)
+})
+
+test('paste_text dispatches to the driver and flags the clipboard overwrite', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver)
+  const res = await tool.execute(params({ action: 'paste_text', app: 'Notes', text: 'long text\nwith lines' }))
+  assert.equal(res.isError, undefined)
+  assert.match(res.content, /Pasted 20 character\(s\)/)
+  assert.match(res.content, /clipboard/)
+  assert.deepEqual(driver.calls[0], { method: 'pasteText', args: ['Notes', 'long text\nwith lines'] })
+
+  const empty = await tool.execute(params({ action: 'paste_text', app: 'Notes', text: '' }))
+  assert.equal(empty.isError, true)
+})
+
+// ── Post-action feedback loop ─────────────────────────────────────
+
+test('feedback: UI change appends a diff with new refs and refreshes the cache', async () => {
+  const driver = new FakeDriver()
+  const tool = feedbackTool(driver)
+  await snapshotFirst(tool)
+
+  // Simulate a click that opens a dialog: tree + refs change.
+  driver.tree = '[1] AXButton "OK" @(10,20)\n[2] AXSheet "Save?" @(30,40)'
+  driver.refs = [
+    { ref: 1, path: [0, 0], role: 'AXButton', title: 'OK', pos: { x: 10, y: 20 } },
+    { ref: 2, path: [0, 1], role: 'AXSheet', title: 'Save?', pos: { x: 30, y: 40 } },
+  ]
+  const res = await tool.execute(params({ action: 'click', app: 'Safari', ref: 1 }))
+  assert.equal(res.isError, undefined)
+  assert.match(res.content, /^Clicked ref 1/)
+  assert.match(res.content, /UI changed after action \(\+1\/-0 elements\)/)
+  assert.match(res.content, /\+ \[2\] AXSheet "Save\?"/)
+  assert.match(res.content, /refs refreshed/)
+
+  // Feedback snapshot must be tree-only and must refresh the ref cache:
+  // ref 2 (which only exists in the post-action tree) is now clickable.
+  const feedbackSnap = driver.calls.filter((c) => c.method === 'snapshot').at(-1)
+  assert.deepEqual(feedbackSnap?.args, ['Safari', { screenshot: false }])
+  const second = await tool.execute(params({ action: 'click', app: 'Safari', ref: 2 }))
+  assert.equal(second.isError, undefined, 'ref from the feedback diff resolves against the refreshed cache')
+})
+
+test('feedback: unchanged UI appends the unchanged note', async () => {
+  const driver = new FakeDriver()
+  const tool = feedbackTool(driver)
+  await snapshotFirst(tool)
+  const res = await tool.execute(params({ action: 'key', app: 'Safari', combo: 'cmd+s' }))
+  assert.match(res.content, /^Sent cmd\+s to Safari\./)
+  assert.match(res.content, /UI unchanged after action\./)
+})
+
+test('feedback: no prior snapshot → caches state without dumping the tree', async () => {
+  const driver = new FakeDriver()
+  const tool = feedbackTool(driver)
+  const res = await tool.execute(params({ action: 'click', app: 'Safari', x: 5, y: 6 }))
+  assert.match(res.content, /Post-action UI state cached \(1 elements\)/)
+  assert.equal(res.content.includes('AXButton'), false, 'tree not dumped')
+  // Cache primed by feedback: ref 1 is clickable without an explicit snapshot.
+  const byRef = await tool.execute(params({ action: 'click', app: 'Safari', ref: 1 }))
+  assert.equal(byRef.isError, undefined)
+})
+
+test('feedback: snapshot failure never taints the action result', async () => {
+  const driver = new FakeDriver()
+  driver.snapshot = async () => { throw new Error('walk failed') }
+  const tool = feedbackTool(driver)
+  const res = await tool.execute(params({ action: 'type', app: 'Safari', text: 'hi' }))
+  assert.equal(res.isError, undefined)
+  assert.equal(res.content, 'Typed 2 character(s) into Safari.')
+})
+
+test('feedback: disabled via option → no extra snapshot, bare result', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver, ['Safari'])
+  await snapshotFirst(tool)
+  const res = await tool.execute(params({ action: 'key', app: 'Safari', combo: 'return' }))
+  assert.equal(res.content, 'Sent return to Safari.')
+  assert.equal(driver.calls.filter((c) => c.method === 'snapshot').length, 1, 'only the explicit snapshot ran')
+})
+
+test('feedback: secrets in the post-action tree are redacted in the diff', async () => {
+  const driver = new FakeDriver()
+  const tool = feedbackTool(driver)
+  await snapshotFirst(tool)
+  driver.tree = '[1] AXButton "OK" @(10,20)\n[2] AXStaticText "token" = sk-abcdef1234567890abcdef'
+  const res = await tool.execute(params({ action: 'click', app: 'Safari', ref: 1 }))
+  assert.equal(res.content.includes('sk-abcdef1234567890abcdef'), false)
+  assert.match(res.content, /\*\*\*/)
 })

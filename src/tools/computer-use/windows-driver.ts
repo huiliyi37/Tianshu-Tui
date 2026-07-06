@@ -38,6 +38,7 @@ import type {
   ComputerUseDriver,
   PermissionStatus,
   ScrollOptions,
+  SnapshotOptions,
   SnapshotRef,
   SnapshotResult,
 } from './macos-driver.js'
@@ -319,7 +320,34 @@ ConvertTo-Json -InputObject $out -Compress
 `
 }
 
-export function buildSnapshotScript(app: string, outFull: string, outVision: string): string {
+export function buildSnapshotScript(app: string, outFull: string, outVision: string, screenshot = true): string {
+  const shotSection = screenshot
+    ? `
+$shotOk = $false
+try {
+  Add-Type -AssemblyName System.Drawing | Out-Null
+  $wr = $wins[0].Current.BoundingRectangle
+  if (-not $wr.IsEmpty -and $wr.Width -gt 0 -and $wr.Height -gt 0) {
+    $sx = [int]$wr.X; $sy = [int]$wr.Y; $sw = [int]$wr.Width; $sh = [int]$wr.Height
+    $bmp = New-Object System.Drawing.Bitmap($sw, $sh)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($sx, $sy, 0, 0, (New-Object System.Drawing.Size($sw, $sh)))
+    $g.Dispose()
+    $bmp.Save(${psString(outFull)}, [System.Drawing.Imaging.ImageFormat]::Png)
+    $maxDim = ${VISION_MAX_DIMENSION}
+    if ($sw -gt $maxDim -or $sh -gt $maxDim) {
+      $scale = [math]::Min($maxDim / $sw, $maxDim / $sh)
+      $nw = [math]::Max(1, [int]($sw * $scale)); $nh = [math]::Max(1, [int]($sh * $scale))
+      $small = New-Object System.Drawing.Bitmap($bmp, $nw, $nh)
+      $small.Save(${psString(outVision)}, [System.Drawing.Imaging.ImageFormat]::Png)
+      $small.Dispose()
+    }
+    $bmp.Dispose()
+    $shotOk = $true
+  }
+} catch { $shotOk = $false }`
+    : `
+$shotOk = $false`
   return `
 ${INPUT_PRELUDE}
 ${UIA_PRELUDE}
@@ -358,30 +386,7 @@ function Visit($el, $depth, $path) {
   }
 }
 for ($i = 0; $i -lt $wins.Count; $i++) { Visit $wins[$i] 0 @($i) }
-
-$shotOk = $false
-try {
-  Add-Type -AssemblyName System.Drawing | Out-Null
-  $wr = $wins[0].Current.BoundingRectangle
-  if (-not $wr.IsEmpty -and $wr.Width -gt 0 -and $wr.Height -gt 0) {
-    $sx = [int]$wr.X; $sy = [int]$wr.Y; $sw = [int]$wr.Width; $sh = [int]$wr.Height
-    $bmp = New-Object System.Drawing.Bitmap($sw, $sh)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($sx, $sy, 0, 0, (New-Object System.Drawing.Size($sw, $sh)))
-    $g.Dispose()
-    $bmp.Save(${psString(outFull)}, [System.Drawing.Imaging.ImageFormat]::Png)
-    $maxDim = ${VISION_MAX_DIMENSION}
-    if ($sw -gt $maxDim -or $sh -gt $maxDim) {
-      $scale = [math]::Min($maxDim / $sw, $maxDim / $sh)
-      $nw = [math]::Max(1, [int]($sw * $scale)); $nh = [math]::Max(1, [int]($sh * $scale))
-      $small = New-Object System.Drawing.Bitmap($bmp, $nw, $nh)
-      $small.Save(${psString(outVision)}, [System.Drawing.Imaging.ImageFormat]::Png)
-      $small.Dispose()
-    }
-    $bmp.Dispose()
-    $shotOk = $true
-  }
-} catch { $shotOk = $false }
+${shotSection}
 ConvertTo-Json -InputObject @{ rows = $script:rows.ToArray(); shot = $shotOk } -Depth 8 -Compress
 `
 }
@@ -524,6 +529,92 @@ ${FOCUS_WINDOW}
 `
 }
 
+export function buildLaunchAppScript(app: string): string {
+  // Already running → just focus. Otherwise Start-Process (resolves via App
+  // Paths/PATH) and poll for a main window so callers can snapshot right after.
+  const name = normalizeAppName(app)
+  return `
+${INPUT_PRELUDE}
+$app = ${psString(name)}
+$procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($_.ProcessName -eq $app -or $_.MainWindowTitle -eq $app) })
+if ($procs.Count -eq 0) {
+  Start-Process -FilePath $app | Out-Null
+  $up = $false
+  for ($i = 0; $i -lt 40; $i++) {
+    Start-Sleep -Milliseconds 250
+    $procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.ProcessName -eq $app })
+    if ($procs.Count -gt 0) { $up = $true; break }
+  }
+  if (-not $up) { throw "$app did not show a window within 10s" }
+}
+${FOCUS_WINDOW}
+'ok'
+`
+}
+
+export function buildMenuSelectScript(app: string, path: string[]): string {
+  // Walk MenuItems by Name level by level. Windows popup menus often parent to
+  // the desktop, not the app window — after the first expand, search from the
+  // UIA root as a fallback. On a missing segment, list what IS available at
+  // that level so the model can self-correct.
+  return `
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+${procsForApp(app)}
+${FOCUS_WINDOW}
+Start-Sleep -Milliseconds 150
+${UIA_WINDOWS}
+$segments = ConvertFrom-Json ${psString(JSON.stringify(path))}
+$uiaRootEl = [System.Windows.Automation.AutomationElement]::RootElement
+$menuItemCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
+$scope = $wins[0]
+for ($i = 0; $i -lt $segments.Count; $i++) {
+  $seg = [string]$segments[$i]
+  $nameCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $seg)
+  $cond = New-Object System.Windows.Automation.AndCondition($menuItemCond, $nameCond)
+  $item = $scope.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+  if ($item -eq $null -and $i -gt 0) { $item = $uiaRootEl.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond) }
+  if ($item -eq $null) {
+    $names = @()
+    foreach ($m in $scope.FindAll([System.Windows.Automation.TreeScope]::Descendants, $menuItemCond)) { $names += $m.Current.Name }
+    throw "menu item '$seg' not found; available: $($names -join ', ')"
+  }
+  $expand = $null; $invoke = $null
+  if ($i -lt $segments.Count - 1) {
+    if ($item.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expand) -and $expand) { $expand.Expand() }
+    elseif ($item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke) -and $invoke) { $invoke.Invoke() }
+    Start-Sleep -Milliseconds 250
+    $scope = $item
+  } else {
+    if ($item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke) -and $invoke) { $invoke.Invoke() }
+    elseif ($item.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$expand) -and $expand) { $expand.Expand() }
+    else {
+      $r = $item.Current.BoundingRectangle
+      if ($r.IsEmpty) { throw "menu item '$seg' is not invokable and has no position" }
+      [RivetInput]::Click([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2), $false, 1)
+    }
+  }
+}
+'ok'
+`
+}
+
+export function buildPasteTextScript(app: string, text: string): string {
+  // Text travels as base64 (quoting/CJK-safe); Set-Clipboard then Ctrl+V.
+  const b64 = Buffer.from(text, 'utf8').toString('base64')
+  return `
+${INPUT_PRELUDE}
+${procsForApp(app)}
+$text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psString(b64)}))
+Set-Clipboard -Value $text
+${FOCUS_WINDOW}
+Start-Sleep -Milliseconds 150
+[RivetInput]::KeyDown([uint16]17)
+try { [RivetInput]::KeyTap([uint16]86) } finally { [RivetInput]::KeyUp([uint16]17) }
+'ok'
+`
+}
+
 export function buildCheckPermissionsScript(): string {
   return `
 ${UIA_PRELUDE}
@@ -546,12 +637,12 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
       }
     },
 
-    async snapshot(app: string): Promise<SnapshotResult> {
+    async snapshot(app: string, opts?: SnapshotOptions): Promise<SnapshotResult> {
       const stamp = randomUUID()
       const outFull = join(tmpdir(), `rivet-cu-${stamp}.png`)
       const outVision = join(tmpdir(), `rivet-cu-vision-${stamp}.png`)
       try {
-        const raw = (await run(buildSnapshotScript(app, outFull, outVision), 30_000)).trim()
+        const raw = (await run(buildSnapshotScript(app, outFull, outVision, opts?.screenshot !== false), 30_000)).trim()
         let rows: WindowsSnapshotRow[] = []
         let shot = false
         try {
@@ -628,6 +719,19 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
 
     async focusApp(app: string): Promise<void> {
       await run(buildFocusAppScript(app))
+    },
+
+    async launchApp(app: string): Promise<void> {
+      await run(buildLaunchAppScript(app), 25_000)
+    },
+
+    async menuSelect(app: string, path: string[]): Promise<void> {
+      if (path.length === 0) throw new Error('menu_select requires a non-empty menu path')
+      await run(buildMenuSelectScript(app, path))
+    },
+
+    async pasteText(app: string, text: string): Promise<void> {
+      await run(buildPasteTextScript(app, text))
     },
 
     async checkPermissions(): Promise<PermissionStatus> {

@@ -531,6 +531,9 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
         type: '输入文本',
         key: '发送快捷键',
         focus_app: '切换到前台',
+        launch_app: '启动应用',
+        menu_select: '选择菜单项',
+        paste_text: '粘贴文本',
       }
       const what = actionLabel[action] ?? action
       let target = ''
@@ -543,11 +546,13 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
         const from = typeof input.from_ref === 'number' ? `#${input.from_ref}` : `(${String(input.from_x)}, ${String(input.from_y)})`
         const to = typeof input.to_ref === 'number' ? `#${input.to_ref}` : `(${String(input.to_x)}, ${String(input.to_y)})`
         target = `（${from} → ${to}）`
-      } else if (action === 'type') {
+      } else if (action === 'type' || action === 'paste_text') {
         const t = String(input.text ?? '')
         target = t ? `（${t.length > 24 ? `${t.slice(0, 24)}…` : t}）` : ''
       } else if (action === 'key') {
         target = input.combo ? `（${String(input.combo)}）` : ''
+      } else if (action === 'menu_select') {
+        target = input.menu_path ? `（${String(input.menu_path)}）` : ''
       }
       return {
         title: app ? `操作应用: ${app}` : '操作桌面应用',

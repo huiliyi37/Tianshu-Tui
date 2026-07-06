@@ -36,7 +36,7 @@ export async function openRivetHome(): Promise<void> {
     rivetHome = info.rivetHome
   } catch {
     // getRuntimeInfo or runtime_info command failed — try RIVET_HOME env.
-    rivetHome = ((import.meta as Record<string, unknown>).env as Record<string, string> | undefined)?.['VITE_RIVET_HOME']
+    rivetHome = ((import.meta as unknown as Record<string, unknown>).env as Record<string, string> | undefined)?.['VITE_RIVET_HOME']
   }
 
   if (!rivetHome) {

@@ -79,9 +79,15 @@ export interface PermissionStatus {
   detail: string
 }
 
+export interface SnapshotOptions {
+  /** Capture window screenshot + vision copy (default true). Tree-only
+   *  snapshots (false) are much faster — used for post-action feedback. */
+  screenshot?: boolean
+}
+
 export interface ComputerUseDriver {
   listApps(): Promise<AppInfo[]>
-  snapshot(app: string): Promise<SnapshotResult>
+  snapshot(app: string, opts?: SnapshotOptions): Promise<SnapshotResult>
   click(app: string, target: ClickTarget, opts?: ClickOptions): Promise<void>
   /** Resolve an AX-path target to its on-screen center point (validated). */
   locate(app: string, target: { path: number[]; role?: string; title?: string }): Promise<{ x: number; y: number }>
@@ -90,6 +96,12 @@ export interface ComputerUseDriver {
   type(app: string, text: string): Promise<void>
   key(app: string, combo: string): Promise<void>
   focusApp(app: string): Promise<void>
+  /** Launch the app if not running (activates either way), waiting for it to appear. */
+  launchApp(app: string): Promise<void>
+  /** Click through the menu bar along a path like ["File", "Export", "PNG"]. */
+  menuSelect(app: string, path: string[]): Promise<void>
+  /** Put text on the clipboard and paste it into the app (clipboard is overwritten). */
+  pasteText(app: string, text: string): Promise<void>
   checkPermissions(): Promise<PermissionStatus>
 }
 
@@ -300,7 +312,7 @@ export function createMacosDriver(): ComputerUseDriver {
       }
     },
 
-    async snapshot(app: string): Promise<SnapshotResult> {
+    async snapshot(app: string, opts?: SnapshotOptions): Promise<SnapshotResult> {
       // Walk the accessibility tree breadth-limited, emitting a numbered ref
       // AND its child-index path per actionable/labeled element so clicks can
       // later resolve the exact element without re-counting the whole tree.
@@ -357,7 +369,9 @@ export function createMacosDriver(): ComputerUseDriver {
         title: r.title,
         pos: r.pos,
       }))
-      const shot = await captureWindow(app)
+      const shot = opts?.screenshot === false
+        ? { png: null, visionPng: null }
+        : await captureWindow(app)
       return {
         tree: tree || '(no accessible elements found)',
         refs,
@@ -505,6 +519,71 @@ export function createMacosDriver(): ComputerUseDriver {
       const script = `
         const app = Application(${jxaString(app)});
         app.activate();
+        'ok';
+      `
+      await runJxa(script)
+    },
+
+    async launchApp(app: string): Promise<void> {
+      // activate() launches the app when it isn't running. Poll System Events
+      // until the process shows up so callers can snapshot right after.
+      const script = `
+        Application(${jxaString(app)}).activate();
+        const se = Application('System Events');
+        let up = false;
+        for (let i = 0; i < 40; i++) {
+          try { se.processes.byName(${jxaString(app)}).id(); up = true; break; } catch (e) {}
+          delay(0.25);
+        }
+        if (!up) throw new Error(${jxaString(app)} + ' did not appear within 10s');
+        'ok';
+      `
+      await runJxa(script, 20_000)
+    },
+
+    async menuSelect(app: string, path: string[]): Promise<void> {
+      if (path.length === 0) throw new Error('menu_select requires a non-empty menu path')
+      // Walk the menu bar: menuBarItems.byName(top) → nested menus[0].menuItems
+      // per segment, click the final item. On a missing segment, throw with the
+      // names available at that level so the model can self-correct.
+      const script = `
+        const se = Application('System Events');
+        const proc = se.processes.byName(${jxaString(app)});
+        proc.frontmost = true;
+        delay(0.1);
+        const PATH = ${JSON.stringify(path)};
+        let container = proc.menuBars[0].menuBarItems;
+        let el = null;
+        for (let i = 0; i < PATH.length; i++) {
+          let names = [];
+          try { names = container.name(); } catch (e) {}
+          const idx = names.indexOf(PATH[i]);
+          if (idx === -1) {
+            throw new Error('menu item "' + PATH[i] + '" not found; available: ' + names.join(', '));
+          }
+          el = container[idx];
+          if (i < PATH.length - 1) {
+            el.click();
+            delay(0.15);
+            container = el.menus[0].menuItems;
+          }
+        }
+        el.click();
+        'ok';
+      `
+      await runJxa(script)
+    },
+
+    async pasteText(app: string, text: string): Promise<void> {
+      await new Promise<void>((resolve, reject) => {
+        const child = execFile('pbcopy', [], { timeout: 5_000 }, (err) => (err ? reject(err) : resolve()))
+        child.stdin?.end(text)
+      })
+      const script = `
+        const se = Application('System Events');
+        se.processes.byName(${jxaString(app)}).frontmost = true;
+        delay(0.1);
+        se.keystroke('v', { using: ['command down'] });
         'ok';
       `
       await runJxa(script)

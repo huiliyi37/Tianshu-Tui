@@ -16,6 +16,9 @@ import {
   buildTypeScript,
   buildKeyScript,
   buildFocusAppScript,
+  buildLaunchAppScript,
+  buildMenuSelectScript,
+  buildPasteTextScript,
   type WindowsSnapshotRow,
 } from '../windows-driver.js'
 
@@ -102,6 +105,41 @@ test('buildSnapshotScript embeds app, node cap, and escaped output paths', () =>
   assert.match(s, /ControlViewWalker/)
   assert.match(s, /CopyFromScreen/)
   assert.match(s, /1440/)
+})
+
+test('buildSnapshotScript tree-only variant omits the screenshot section entirely', () => {
+  const s = buildSnapshotScript('notepad', 'C:\\tmp\\full.png', 'C:\\tmp\\vision.png', false)
+  assert.equal(s.includes('CopyFromScreen'), false)
+  assert.equal(s.includes('System.Drawing'), false)
+  assert.equal(s.includes('C:\\tmp\\full.png'), false)
+  assert.match(s, /\$shotOk = \$false/, 'shot flag still emitted for the JSON envelope')
+  assert.match(s, /ControlViewWalker/, 'tree walk intact')
+})
+
+test('buildLaunchAppScript starts the process only when not running and polls for a window', () => {
+  const s = buildLaunchAppScript('notepad.exe')
+  assert.match(s, /\$app = 'notepad'/, 'exe suffix normalized')
+  assert.match(s, /Start-Process -FilePath \$app/)
+  assert.match(s, /did not show a window within 10s/)
+  assert.match(s, /SetForegroundWindow/)
+})
+
+test('buildMenuSelectScript embeds the path as JSON and lists alternatives on a miss', () => {
+  const s = buildMenuSelectScript('notepad', ['File', "Save 'As'"])
+  assert.ok(s.includes(`'["File","Save ''As''"]'`), 'segments JSON survives PS single-quote escaping')
+  assert.match(s, /ExpandCollapsePattern/)
+  assert.match(s, /InvokePattern/)
+  assert.match(s, /not found; available:/)
+})
+
+test('buildPasteTextScript sets clipboard from base64 and sends Ctrl+V', () => {
+  const text = "clip 'text' 中文\nline2"
+  const s = buildPasteTextScript('notepad', text)
+  assert.ok(s.includes(`'${Buffer.from(text, 'utf8').toString('base64')}'`))
+  assert.match(s, /Set-Clipboard -Value \$text/)
+  assert.match(s, /KeyDown\(\[uint16\]17\)/)
+  assert.match(s, /KeyTap\(\[uint16\]86\)/)
+  assert.match(s, /KeyUp\(\[uint16\]17\)/)
 })
 
 test('buildClickByPathScript: left single click has InvokePattern fast path, right/double do not', () => {
@@ -207,6 +245,29 @@ test('snapshot parses rows into tree + refs; no screenshot when shot=false', asy
   assert.deepEqual(snap.refs[0]?.path, [0])
   assert.equal(snap.screenshotPng, null)
   assert.equal(snap.visionPng, null)
+})
+
+test('snapshot with screenshot:false sends the tree-only script', async () => {
+  const scripts: string[] = []
+  const driver = createWindowsDriver(async (script) => { scripts.push(script); return JSON.stringify({ rows: [], shot: false }) })
+  const snap = await driver.snapshot('notepad', { screenshot: false })
+  assert.equal(scripts[0]?.includes('CopyFromScreen'), false)
+  assert.equal(snap.screenshotPng, null)
+  assert.equal(snap.visionPng, null)
+})
+
+test('launchApp / menuSelect / pasteText route to their scripts; empty menu path rejected locally', async () => {
+  const scripts: string[] = []
+  const driver = createWindowsDriver(async (script) => { scripts.push(script); return "'ok'" })
+  await driver.launchApp('notepad')
+  assert.match(scripts.at(-1) ?? '', /Start-Process/)
+  await driver.menuSelect('notepad', ['File', 'Save'])
+  assert.match(scripts.at(-1) ?? '', /\["File","Save"\]/)
+  await driver.pasteText('notepad', 'hello')
+  assert.match(scripts.at(-1) ?? '', /Set-Clipboard/)
+  const before = scripts.length
+  await assert.rejects(() => driver.menuSelect('notepad', []), /non-empty menu path/)
+  assert.equal(scripts.length, before, 'no PowerShell spawn for invalid input')
 })
 
 test('snapshot degrades to empty tree on unparseable output', async () => {

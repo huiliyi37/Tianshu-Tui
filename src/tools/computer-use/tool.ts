@@ -31,6 +31,7 @@ import {
   type SnapshotRef,
 } from './macos-driver.js'
 import { createPlatformDriver, isComputerUsePlatform } from './platform-driver.js'
+import { diffTreeSummary } from './tree-diff.js'
 import { isAppGranted } from './app-grants.js'
 
 export type ComputerUseAction =
@@ -45,6 +46,9 @@ export type ComputerUseAction =
   | 'key'
   | 'wait'
   | 'focus_app'
+  | 'launch_app'
+  | 'menu_select'
+  | 'paste_text'
   | 'check_permissions'
 
 export interface ComputerUseToolOptions {
@@ -59,6 +63,9 @@ export interface ComputerUseToolOptions {
   platform?: NodeJS.Platform
   /** Sleep implementation for the wait action (injectable for tests). */
   sleep?: (ms: number) => Promise<void>
+  /** Post-action feedback loop (tree re-snapshot + diff). Defaults to
+   *  RIVET_CU_FEEDBACK !== '0'. */
+  feedback?: boolean
 }
 
 /** Mask secret-looking values in accessibility text (tokens/keys/passwords). */
@@ -80,6 +87,9 @@ function actionRequiresApproval(action: ComputerUseAction): boolean {
 /** Max duration for the wait action (ms). */
 const WAIT_CAP_MS = 5_000
 
+/** UI settle delay before the post-action feedback snapshot (ms). */
+const FEEDBACK_SETTLE_MS = 400
+
 interface SnapshotCacheEntry {
   refs: Map<number, SnapshotRef>
   /** Redacted tree text of the last snapshot — dedup baseline. */
@@ -96,6 +106,7 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
   const driverFactory = options.driverFactory ?? (() => createPlatformDriver(platform))
   const grantLookup = options.isAppGranted ?? ((app: string) => isAppGranted(app))
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const feedbackEnabled = options.feedback ?? process.env.RIVET_CU_FEEDBACK !== '0'
 
   // Snapshot ref cache — closure-scoped (per tool instance) LRU. Map iteration
   // order is insertion order; delete+set refreshes recency.
@@ -172,6 +183,44 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
     return { ok: false, error: `Provide either "${refKey}" (snapshot ref) or both "${xKey}" and "${yKey}".` }
   }
 
+  /**
+   * Post-action feedback loop: after a mutating action succeeds, wait for the
+   * UI to settle, take a tree-only snapshot, report how the UI changed, and
+   * refresh the ref cache so diff lines carry immediately-usable refs.
+   * Best-effort by design — a feedback failure never taints the action result.
+   */
+  async function withFeedback(
+    driver: ComputerUseDriver,
+    params: ToolCallParams,
+    app: string,
+    result: ToolResult,
+  ): Promise<ToolResult> {
+    if (!feedbackEnabled || result.isError) return result
+    try {
+      await sleep(FEEDBACK_SETTLE_MS)
+      const snap = await driver.snapshot(app, { screenshot: false })
+      const tree = redactTree(snap.tree)
+      const key = cacheKey(params, app)
+      const previous = cacheGet(key)
+      cacheSet(key, {
+        refs: new Map(snap.refs.map((r) => [r.ref, r])),
+        lastTree: tree,
+      })
+      if (!previous) {
+        // No baseline to diff against (e.g. coordinate click without a prior
+        // snapshot) — cache the state and say so without dumping the tree.
+        return { ...result, content: `${result.content}\nPost-action UI state cached (${snap.refs.length} elements) — snapshot to see the tree.` }
+      }
+      const diff = diffTreeSummary(previous.lastTree, tree)
+      const note = diff.changed
+        ? `${diff.summary}\n(refs refreshed — refs from before this action are stale; use refs from the diff or re-snapshot.)`
+        : diff.summary
+      return { ...result, content: `${result.content}\n${note}` }
+    } catch {
+      return result
+    }
+  }
+
   async function executeClick(
     driver: ComputerUseDriver,
     params: ToolCallParams,
@@ -216,25 +265,29 @@ Actions:
 - double_click(app, ref|x,y) / right_click(app, ref|x,y): double / context click.
 - scroll(app, direction, amount?, ref|x,y?): scroll the view under the target (default: window center).
 - drag(app, from_ref|from_x+from_y, to_ref|to_x+to_y): press-drag-release.
-- type(app, text): type text into the focused field.
+- type(app, text): type text into the focused field (short text; use paste_text for long text).
 - key(app, combo): send a key combo like "cmd+s" or "return" (on Windows, cmd maps to Ctrl).
 - wait(duration_ms): pause up to 5000ms for animations/loads (no approval).
 - focus_app(app): bring an app to the foreground.
+- launch_app(app): start an app that is not running (focuses it if already running).
+- menu_select(app, menu_path): pick a menu-bar item by path, e.g. "File > Export > PNG".
+- paste_text(app, text): put text on the clipboard and paste it (fast + reliable for long/multiline text; overwrites the clipboard).
 
-Refs come from the LATEST snapshot of that app; after the UI changes, re-snapshot before clicking (stale refs are rejected, never guessed).`,
+Feedback loop: after each mutating action the tool re-reads the UI and appends how it changed (added/removed elements). When the UI changed, the ref cache is refreshed — refs shown in that diff are immediately clickable, refs from before the action are stale. Refs otherwise come from the LATEST snapshot of that app (stale refs are rejected, never guessed).`,
       input_schema: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['check_permissions', 'list_apps', 'snapshot', 'click', 'double_click', 'right_click', 'scroll', 'drag', 'type', 'key', 'wait', 'focus_app'],
+            enum: ['check_permissions', 'list_apps', 'snapshot', 'click', 'double_click', 'right_click', 'scroll', 'drag', 'type', 'key', 'wait', 'focus_app', 'launch_app', 'menu_select', 'paste_text'],
             description: 'What to do.',
           },
           app: { type: 'string', description: 'Target app name (required for all actions except list_apps/check_permissions/wait).' },
           ref: { type: 'number', description: 'Snapshot element ref to target (click/scroll; from the latest snapshot).' },
           x: { type: 'number', description: 'X coordinate (screen pixels) when no ref is given.' },
           y: { type: 'number', description: 'Y coordinate (screen pixels) when no ref is given.' },
-          text: { type: 'string', description: 'Text to type (type action).' },
+          text: { type: 'string', description: 'Text to type (type action) or paste (paste_text action).' },
+          menu_path: { type: 'string', description: 'Menu path separated by ">", e.g. "File > Export > PNG" (menu_select action).' },
           combo: { type: 'string', description: 'Key combo like "cmd+s", "shift+cmd+4", "return" (key action; cmd maps to Ctrl on Windows).' },
           direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction (scroll action).' },
           amount: { type: 'number', description: 'Scroll magnitude in wheel lines, 1-50 (default 5).' },
@@ -328,13 +381,13 @@ Refs come from the LATEST snapshot of that app; after the UI changes, re-snapsho
           }
           case 'click':
             if (!app) return { content: 'click requires "app".', isError: true }
-            return await executeClick(driver, params, app, 'left', 1)
+            return await withFeedback(driver, params, app, await executeClick(driver, params, app, 'left', 1))
           case 'double_click':
             if (!app) return { content: 'double_click requires "app".', isError: true }
-            return await executeClick(driver, params, app, 'left', 2)
+            return await withFeedback(driver, params, app, await executeClick(driver, params, app, 'left', 2))
           case 'right_click':
             if (!app) return { content: 'right_click requires "app".', isError: true }
-            return await executeClick(driver, params, app, 'right', 1)
+            return await withFeedback(driver, params, app, await executeClick(driver, params, app, 'right', 1))
           case 'scroll': {
             if (!app) return { content: 'scroll requires "app".', isError: true }
             const direction = params.input.direction
@@ -349,7 +402,7 @@ Refs come from the LATEST snapshot of that app; after the UI changes, re-snapsho
               at = point.point
             }
             await driver.scroll(app, { direction, amount, at })
-            return { content: `Scrolled ${direction}${amount ? ` by ${amount}` : ''} in ${app}${at ? ` at (${Math.round(at.x)}, ${Math.round(at.y)})` : ''}.` }
+            return await withFeedback(driver, params, app, { content: `Scrolled ${direction}${amount ? ` by ${amount}` : ''} in ${app}${at ? ` at (${Math.round(at.x)}, ${Math.round(at.y)})` : ''}.` })
           }
           case 'drag': {
             if (!app) return { content: 'drag requires "app".', isError: true }
@@ -358,7 +411,7 @@ Refs come from the LATEST snapshot of that app; after the UI changes, re-snapsho
             const to = await resolvePoint(driver, params, app, 'to_ref', 'to_x', 'to_y')
             if (!to.ok) return { content: to.error, isError: true }
             await driver.drag(app, from.point, to.point)
-            return { content: `Dragged from (${Math.round(from.point.x)}, ${Math.round(from.point.y)}) to (${Math.round(to.point.x)}, ${Math.round(to.point.y)}) in ${app}.` }
+            return await withFeedback(driver, params, app, { content: `Dragged from (${Math.round(from.point.x)}, ${Math.round(from.point.y)}) to (${Math.round(to.point.x)}, ${Math.round(to.point.y)}) in ${app}.` })
           }
           case 'type': {
             if (!app) return { content: 'type requires "app".', isError: true }
@@ -367,7 +420,7 @@ Refs come from the LATEST snapshot of that app; after the UI changes, re-snapsho
               return { content: 'type requires non-empty "text".', isError: true }
             }
             await driver.type(app, text)
-            return { content: `Typed ${text.length} character(s) into ${app}.` }
+            return await withFeedback(driver, params, app, { content: `Typed ${text.length} character(s) into ${app}.` })
           }
           case 'key': {
             if (!app) return { content: 'key requires "app".', isError: true }
@@ -376,12 +429,39 @@ Refs come from the LATEST snapshot of that app; after the UI changes, re-snapsho
               return { content: 'key requires a "combo" like "cmd+s".', isError: true }
             }
             await driver.key(app, combo.trim())
-            return { content: `Sent ${combo} to ${app}.` }
+            return await withFeedback(driver, params, app, { content: `Sent ${combo} to ${app}.` })
           }
           case 'focus_app': {
             if (!app) return { content: 'focus_app requires "app".', isError: true }
             await driver.focusApp(app)
             return { content: `Focused ${app}.` }
+          }
+          case 'launch_app': {
+            if (!app) return { content: 'launch_app requires "app".', isError: true }
+            await driver.launchApp(app)
+            return await withFeedback(driver, params, app, { content: `Launched ${app} (focused if it was already running).` })
+          }
+          case 'menu_select': {
+            if (!app) return { content: 'menu_select requires "app".', isError: true }
+            const menuPath = params.input.menu_path
+            if (typeof menuPath !== 'string' || !menuPath.trim()) {
+              return { content: 'menu_select requires "menu_path" like "File > Export > PNG".', isError: true }
+            }
+            const segments = menuPath.split('>').map((s) => s.trim()).filter(Boolean)
+            if (segments.length === 0) {
+              return { content: 'menu_select requires "menu_path" like "File > Export > PNG".', isError: true }
+            }
+            await driver.menuSelect(app, segments)
+            return await withFeedback(driver, params, app, { content: `Selected menu ${segments.join(' > ')} in ${app}.` })
+          }
+          case 'paste_text': {
+            if (!app) return { content: 'paste_text requires "app".', isError: true }
+            const text = params.input.text
+            if (typeof text !== 'string' || text.length === 0) {
+              return { content: 'paste_text requires non-empty "text".', isError: true }
+            }
+            await driver.pasteText(app, text)
+            return await withFeedback(driver, params, app, { content: `Pasted ${text.length} character(s) into ${app} via clipboard (the system clipboard now contains this text).` })
           }
           default:
             return { content: `Unknown computer_use action: ${action}`, isError: true }
