@@ -358,7 +358,9 @@ export async function recordBashSideEffects(
   const recorded: string[] = []
   for (const raw of changed) {
     const f = raw.replace(/^\.\//, '')
-    if (!f || f.startsWith('/') || f.includes('..')) continue
+    // isAbsolute 而非 startsWith('/')：Windows 绝对路径是 D:\... / D:/...，
+    // 只查 '/' 会漏放行，绝对路径混进 agentTouchedFiles。
+    if (!f || isAbsolute(f) || f.includes('..')) continue
     if (baseline.has(f) || owned.has(f)) continue
     // Parallel-session safety: a path another live session owns is theirs.
     if (guard?.isOwnedByOther(f)) continue
