@@ -152,6 +152,8 @@ export const DEFAULT_CONFIG: Config = {
       allow: [],
       deny: [],
       bash: { allowlist: [], denylist: [] },
+      additionalReadDirs: [],
+      additionalWriteDirs: [],
     },
     review: {
       profiles: {},

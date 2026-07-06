@@ -44,8 +44,8 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     let filePath: string
     try {
       filePath = validatePath(params.cwd, params.input.file_path as string, 'write')
-    } catch {
-      return { content: 'Error: Path escapes project directory', isError: true }
+    } catch (e) {
+      return { content: `Error: ${e instanceof Error ? e.message : 'Path escapes project directory'}`, isError: true }
     }
     const content = params.input.content as string
     const dir = dirname(filePath)
@@ -75,6 +75,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
 
     // If overwriting an existing file, back it up for recovery
     let fileExists = false
+    let existingSize = 0
     // Old content (LF-normalized) as the diff base; '' → new file (all-additions).
     let oldContentForDiff = ''
     // When an existing file could not be read (binary, unreadable, or too large),
@@ -84,6 +85,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     try {
       const existingStat = await stat(filePath)
       fileExists = true
+      existingSize = existingStat.size
       if (existingStat.size <= MAX_WRITE_FILE_BYTES) {
         try {
           oldContentForDiff = toLf(await readFile(filePath, 'utf-8'))
@@ -96,6 +98,28 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
       // File doesn't exist yet — empty base is intentional; produce an all-additions diff.
       haveOldContentForDiff = true
     }
+
+    // Blind-overwrite guard (fail-closed): overwriting an existing file this
+    // session never observed (no read_file / grep hit / prior own edit —
+    // lastKnownFileState has no entry) destroys content the model has never
+    // seen. Byte-identical rewrites are exempt (no information loss). After
+    // the refusal a single read_file registers the observation and the next
+    // write_file goes through — self-correcting, one extra tool call.
+    if (
+      fileExists
+      && process.env.RIVET_WRITE_OVERWRITE_GUARD !== '0'
+      && getFileReadMtime(filePath, params.sessionId) === null
+      && !(haveOldContentForDiff && oldContentForDiff === toLf(content))
+    ) {
+      return {
+        content: `Error: ${filePath} already exists (${existingSize} bytes) but was never read in this session. `
+          + `Overwriting it blind would destroy content you have not seen. `
+          + `read_file it first to confirm what you are replacing, then use edit_file for targeted changes `
+          + `or call write_file again for a deliberate full rewrite.`,
+        isError: true,
+      }
+    }
+
     if (fileExists) {
       const relPath = relative(params.cwd, filePath)
       trackFileChange(params.cwd, { filePath: relPath, action: 'write', toolCallId: params.toolUseId ?? 'write_file' })

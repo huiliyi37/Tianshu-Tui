@@ -39,6 +39,7 @@ import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '..
 import { listProjectFiles, rankFiles, listDirEntries } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable, getPrDiff, submitPrReview, type PrReviewInput } from './gh-cli.js'
 import { resolveAppPromptInput } from '../tui/slash-commands.js'
+import { getPaletteCommands } from '../tui/command-palette.js'
 import { RECOMMENDED_MAX_SKILLS } from '../skills/skill-loader.js'
 import { validatePath } from '../tools/path-validate.js'
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -435,7 +436,10 @@ export function buildSessionRoutes(
       if (trimmed.startsWith('/')) {
         const record = manager.getSession(params!.id!)
         if (record) {
-          const resolved = resolveAppPromptInput(trimmed, record.cwd)
+          const knownCmds = new Set(getPaletteCommands()
+            .filter(c => c.name.startsWith('/'))
+            .map(c => c.name.slice(1).split(/\s/)[0]!))
+          const resolved = resolveAppPromptInput(trimmed, record.cwd, (name) => knownCmds.has(name))
           if (resolved === null) {
             const first = trimmed.split(/\s+/)[0]
             return {

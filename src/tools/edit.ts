@@ -48,8 +48,8 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
     let filePath: string
     try {
       filePath = validatePath(params.cwd, params.input.file_path as string, 'write')
-    } catch {
-      return { content: 'Error: Path escapes project directory', isError: true }
+    } catch (e) {
+      return { content: `Error: ${e instanceof Error ? e.message : 'Path escapes project directory'}`, isError: true }
     }
 
     let fileStat: Awaited<ReturnType<typeof stat>>

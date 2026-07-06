@@ -45,12 +45,20 @@ export function createActivePlanDraftPath(): string {
   return `.rivet/plans/draft-${Date.now()}.md`
 }
 
-function normalizePath(cwd: string, inputPath: string): string {
-  return resolve(cwd, inputPath).replace(/\\/g, '/')
+/**
+ * 归一路径用于相等比较：反斜杠→斜杠；盘符形路径（Windows）整体小写。
+ * NTFS 大小写不敏感，且盘符大小写在真实环境里不稳定——VSCode/Git Bash 常给
+ * 小写盘符（`c:\proj`）而 `process.cwd()` 给大写（`C:\proj`）。逐字节比较会
+ * 误拒活动计划文件的写入 → plan mode 下草稿永远为空（桌面「起草中」断流）。
+ * Exported for direct unit testing（盘符分支在 POSIX 跑不到 resolve 路径）。
+ */
+export function canonicalizePathForCompare(p: string): string {
+  const s = p.replace(/\\/g, '/')
+  return /^[a-zA-Z]:\//.test(s) ? s.toLowerCase() : s
 }
 
 function pathsMatch(cwd: string, a: string, b: string): boolean {
-  return normalizePath(cwd, a) === normalizePath(cwd, b)
+  return canonicalizePathForCompare(resolve(cwd, a)) === canonicalizePathForCompare(resolve(cwd, b))
 }
 
 /** 检查工具是否在 plan-mode 下被允许 */

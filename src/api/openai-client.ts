@@ -1,4 +1,4 @@
-import type { StreamClient } from './stream-client.js'
+import type { StreamClient, WireDivergence } from './stream-client.js'
 import type { StreamCallbacks } from './stream-client.js'
 import type { OaiChatRequest, OaiMessage } from './oai-types.js'
 import { estimateOaiTokens } from '../compact/micro.js'
@@ -10,6 +10,7 @@ import { parseRetryAfterMs } from './error-classifier.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
 import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
+import { repairInvalidJsonEscapes } from './json-escape-repair.js'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -30,15 +31,35 @@ import { dirname, join } from 'node:path'
  * deltas AFTER finish_reason; flushing eagerly fed `{}` to the tool, which then
  * failed with a misleading "X is required").
  */
+/** Full-content djb2 for the wire-level prefix probe — hashes every character
+ *  so any single-byte change in the final payload is detectable. */
+function wireHash(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  }
+  return `${h}:${s.length}`
+}
+
 function tryParseToolArguments(raw: string): Record<string, unknown> | null {
   if (raw.trim().length === 0) return {}
   try {
     const parsed = JSON.parse(raw)
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
   } catch {
+    // Windows-path recovery: raw backslashes in string values (`"F:\src\app"`)
+    // are invalid JSON escapes that fail the whole buffer. Repair and re-parse
+    // before falling back to salvage, so the call executes instead of being
+    // refused as argsTruncated.
+    const repaired = repairInvalidJsonEscapes(raw)
+    if (repaired !== null) {
+      try {
+        const parsed = JSON.parse(repaired)
+        if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
+      } catch { /* fall through to salvage */ }
+    }
     // Salvage a single leading JSON object from a concatenated buffer.
-    const salvaged = salvageFirstJsonObject(raw)
-    return salvaged
+    return salvageFirstJsonObject(repaired ?? raw)
   }
 }
 
@@ -253,6 +274,13 @@ export class OpenAIClient implements StreamClient {
    */
   private toolStreamLogPath: string | null | undefined = undefined
   private toolStreamLogLines = 0
+  /** Wire-level prefix probe: per-message signatures of the previous main-turn
+   *  request's FINAL bytes (post reasoning-strip / sanitize / system-suffix).
+   *  Only updated for requests with `prefixProbe: true` so side-path calls
+   *  through this client don't poison the baseline. */
+  private prevWireSignatures: Array<{ sig: string; len: number; role: string }> | null = null
+  /** Latest wire divergence (consume-once via consumeWireDivergence). */
+  private lastWireDivergence: WireDivergence | null = null
 
   constructor(private config: OpenAIClientConfig) {
     this.systemSuffix = (config.providerName === 'mimo' || config.providerName === 'deepseek') && config.thinking === 'enabled'
@@ -289,11 +317,21 @@ export class OpenAIClient implements StreamClient {
     // - DeepSeek (preserved thinking): keep for tool-call turns, strip for pure-text
     // - GLM (independent reasoning): always strip — no preserved thinking context
     // - Thinking disabled: always strip
+    const isGlm = this.config.providerName === 'glm'
+    const isPreservedThinking = this.config.thinking === 'enabled' && !isGlm
+      && (this.config.providerName === 'deepseek' || this.config.providerName === 'mimo')
     const messages = request.messages.map(m => {
-      if (m.role !== 'assistant' || !('reasoning_content' in m)) return m
-      const isGlm = this.config.providerName === 'glm'
+      if (m.role !== 'assistant') return m
       const hasToolCalls = Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
-      if (this.config.thinking === 'enabled' && hasToolCalls && !isGlm) return m
+      // DeepSeek preserved-thinking: tool-call turns must echo reasoning_content.
+      // Some turns omit the field entirely (model skipped thinking). Absent vs
+      // present changes wire bytes and breaks prefix cache at the next user
+      // boundary (8396ac51: truncations aligned with first no-reasoning assistant).
+      if (isPreservedThinking && hasToolCalls && !('reasoning_content' in m)) {
+        return { ...m, reasoning_content: '' }
+      }
+      if (!('reasoning_content' in m)) return m
+      if (isPreservedThinking && hasToolCalls) return m
       const { reasoning_content: _, ...rest } = m
       // DeepSeek requires assistant messages to have `content` or `tool_calls`.
       // After stripping reasoning_content, ensure `content` exists.
@@ -429,7 +467,56 @@ export class OpenAIClient implements StreamClient {
       this._sanitizedCount = msgArray.length
     }
 
+    // Wire-level prefix probe (2026-07-06 cache investigation): fingerprint the
+    // FINAL messages — everything above (reasoning-strip, system-suffix,
+    // sanitize) has already been applied, so this hashes exactly what goes on
+    // the socket. The engine-level probe proved the pre-transform arrays are
+    // append-only; cacheRead regressions kept happening anyway, so the
+    // remaining client-side suspects are these transforms. Joined with
+    // cacheRead regressions in the cache-log this separates send-layer byte
+    // churn from provider-side rendering/落盘 behavior.
+    if (request.prefixProbe) this.recordWireDivergence(msgArray)
+
     await this.sendStream(body, callbacks, signal)
+  }
+
+  /** Compare this request's final wire bytes with the previous main-turn
+   *  request's; record the first diverged message. Pure appends record nothing. */
+  private recordWireDivergence(messages: Array<Record<string, unknown>>): void {
+    const sigs = messages.map(m => {
+      const s = JSON.stringify(m)
+      return { sig: wireHash(s), len: s.length, role: String(m.role ?? '?') }
+    })
+    const prev = this.prevWireSignatures
+    this.prevWireSignatures = sigs
+    if (!prev) return
+
+    const shared = Math.min(prev.length, sigs.length)
+    let divergedIdx = -1
+    for (let i = 0; i < shared; i++) {
+      if (prev[i]!.sig !== sigs[i]!.sig) { divergedIdx = i; break }
+    }
+    if (divergedIdx === -1) {
+      if (sigs.length >= prev.length) return // pure append (or identical)
+      divergedIdx = sigs.length
+    }
+    let approxCharPos = 0
+    for (let i = 0; i < divergedIdx; i++) approxCharPos += sigs[i]?.len ?? prev[i]!.len
+    this.lastWireDivergence = {
+      idx: divergedIdx,
+      role: sigs[divergedIdx]?.role ?? 'removed',
+      kind: divergedIdx >= sigs.length ? 'message_removed' : 'message_changed',
+      prevCount: prev.length,
+      newCount: sigs.length,
+      approxCharPos,
+    }
+  }
+
+  /** Consume-once accessor for the latest wire-level prefix divergence. */
+  consumeWireDivergence(): WireDivergence | null {
+    const d = this.lastWireDivergence
+    this.lastWireDivergence = null
+    return d
   }
 
   /** Shared inner retry+fetch+SSE loop used by both stream and streamOai. */

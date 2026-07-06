@@ -135,10 +135,16 @@ export class PromptEngine {
   private cachedConsolidated: string = ''
   /**
    * Frozen merged content for historical user messages (preserves prefix stability).
-   * Maps user-message content → array of frozen snapshots. Array handles duplicate
-   * messages: first "继续" → index 0, second "继续" → index 1, etc.
+   * Maps user-message content → array of committed snapshots. One entry per
+   * user-message *instance* (boundary commit); duplicate text ("继续" twice)
+   * → index 0, index 1, … via frozenFetchIndex.
+   *
+   * Intra-turn appendix revisions live in frozenPendingMerged until the next
+   * real user boundary — never pushed into this array per tool turn.
    */
   private frozenUserMerged: Map<string, string[]> = new Map()
+  /** Latest merged trailer for the active last-user message (pre-commit). */
+  private frozenPendingMerged: Map<string, string> = new Map()
   /** Per-content fetch index — tracks which entry to retrieve next per content key. */
   private frozenFetchIndex: Map<string, number> = new Map()
   /** Maximum total entries across all content keys before eviction kicks in. */
@@ -282,6 +288,22 @@ export class PromptEngine {
     return arr[idx]
   }
 
+  /**
+   * Commit the pending merged trailer for one user-message instance. Called
+   * only at a real user boundary (new user text or duplicate-instance), NOT
+   * on invalidateFreshCache pseudo-boundaries mid-tool-loop.
+   */
+  private commitFrozenSnapshot(content: string): void {
+    const pending = this.frozenPendingMerged.get(content)
+    if (!pending) return
+    const arr = this.frozenUserMerged.get(content)
+    if (arr) {
+      if (arr[arr.length - 1] !== pending) arr.push(pending)
+    } else {
+      this.frozenUserMerged.set(content, [pending])
+    }
+  }
+
   buildOaiRequest(inputMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number, options?: { sidePath?: boolean }): OaiChatRequest {
     // Side-path builds (compaction summaries etc.) pass an unrelated message
     // array through the same engine. They must be HERMETIC: any state write
@@ -335,6 +357,34 @@ export class PromptEngine {
       this.firstUserKey = typeof fm.content === 'string' ? fm.content : ''
     }
 
+    // Commit the outgoing user message's pending trailer BEFORE the message
+    // loop — historical slots are processed before lastUserIdx, so a commit
+    // inside the boundary block would leave getNextFrozen empty → fallback
+    // rebuild (8396ac51 class of prefix breaks).
+    if (!sidePath && lastUserIdx >= 0) {
+      const lastUserContent = typeof oaiMessages[lastUserIdx]!.content === 'string'
+        ? oaiMessages[lastUserIdx]!.content as string
+        : JSON.stringify(oaiMessages[lastUserIdx]!.content)
+      const msgHash = oaiMessages.length > 0
+        ? `${oaiMessages.length}:${typeof oaiMessages[oaiMessages.length - 1]!.content === 'string' ? oaiMessages[oaiMessages.length - 1]!.content as string : ''}`
+        : ''
+      const isDuplicate = lastUserContent === this.cachedFreshForUser
+        && oaiMessages.length === this.lastMessageCount
+        && msgHash !== this.lastMessageHash
+        && ((this.frozenUserMerged.get(lastUserContent)?.length ?? 0) > 0
+          || this.frozenPendingMerged.has(this.cachedFreshForUser))
+      const hasPriorInstanceNowHistorical = this.cachedFreshForUser !== ''
+        && lastUserContent === this.cachedFreshForUser
+        && oaiMessages.some((m, idx) => m.role === 'user'
+          && !isSystemReminder(m.content)
+          && idx !== lastUserIdx
+          && (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)) === this.cachedFreshForUser)
+      if (this.cachedFreshForUser
+        && (lastUserContent !== this.cachedFreshForUser || isDuplicate || hasPriorInstanceNowHistorical)) {
+        this.commitFrozenSnapshot(this.cachedFreshForUser)
+      }
+    }
+
     for (let i = 0; i < oaiMessages.length; i++) {
       const msg = oaiMessages[i]!
       if (msg.role === 'user' && isSystemReminder(msg.content)) {
@@ -362,7 +412,8 @@ export class PromptEngine {
           const isDuplicate = userContent === this.cachedFreshForUser
             && oaiMessages.length === this.lastMessageCount
             && msgHash !== this.lastMessageHash
-            && (this.frozenUserMerged.get(typeof userContent === 'string' ? userContent : '')?.length ?? 0) > 0
+            && ((this.frozenUserMerged.get(typeof userContent === 'string' ? userContent : '')?.length ?? 0) > 0
+              || this.frozenPendingMerged.has(this.cachedFreshForUser))
           this.lastMessageCount = oaiMessages.length
           this.lastMessageHash = msgHash
           if (userContent !== this.cachedFreshForUser || isDuplicate) {
@@ -453,16 +504,9 @@ export class PromptEngine {
             merged += '\n\n' + this.cachedAppendix
           }
           const key = typeof msg.content === 'string' ? msg.content : ''
-          const arr = this.frozenUserMerged.get(key)
-          if (arr) {
-            // Dedup: within one user message, every tool-call turn re-invokes
-            // buildOaiRequest with identical merged content. Pushing each time
-            // bloats the array (7 turns = 7 copies) and prematurely triggers
-            // the 64-entry eviction that causes 0% cache breaks.
-            if (arr[arr.length - 1] !== merged) arr.push(merged)
-          } else {
-            this.frozenUserMerged.set(key, [merged])
-          }
+          // Track latest merged bytes for this last-user message; commit once at
+          // the next real user boundary (not per tool turn / pseudo-boundary).
+          this.frozenPendingMerged.set(key, merged)
           result.push({ role: 'user', content: merged })
         } else if (i === firstUserIdx) {
           // Use frozen merged content if available (preserves prefix from when this was lastUserIdx)
@@ -674,6 +718,10 @@ export class PromptEngine {
       stream_options: { include_usage: true },
       tools,
       tool_choice: tools ? 'auto' : undefined,
+      // Main-turn marker for the client's wire-level probe — the client only
+      // fingerprints final send bytes for these requests (side-path calls
+      // through the same client would poison its baseline too).
+      prefixProbe: !sidePath || undefined,
     }
     // Side-path builds (compaction summaries etc.) have unrelated message
     // arrays — recording them would poison the main-turn baseline and report

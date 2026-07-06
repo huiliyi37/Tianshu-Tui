@@ -16,6 +16,7 @@ import {
   type StarDomain,
   type StarDomainId,
 } from './star-domain.js'
+import { normalizeFrontmatterSource } from '../utils/frontmatter.js'
 
 // Re-export for backward compatibility
 export type { StarDomain, StarDomainId }
@@ -170,6 +171,7 @@ function sanitizeStringArray(value: unknown, _fieldName: string): string[] {
 
 /** Parse a domain card.md file (YAML frontmatter + body as systemPromptSuffix) */
 function parseDomainCard(content: string, fallbackId: string): StarDomain {
+  content = normalizeFrontmatterSource(content)
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
   if (!fmMatch) {
     throw new Error('Missing YAML frontmatter (--- delimiters)')

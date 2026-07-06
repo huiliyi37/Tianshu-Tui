@@ -23,7 +23,7 @@ import type { PostTurnDecisionController } from './post-turn-decision.js'
 import type { TelemetryRecord } from './telemetry-writer.js'
 import { emitStopReason, type StopReason } from './stop-reason.js'
 import { debugLog } from '../utils/debug.js'
-import { hasActionIntent } from './action-intent-detector.js'
+import { hasActionIntent, hasWriteActionIntent, turnUsedOnlyReadTools } from './action-intent-detector.js'
 
 // ── Types re-exported for deps interface ──
 
@@ -865,6 +865,20 @@ export class TurnOrchestrator {
             )
             finalTurnCompleted = true
             break
+          }
+
+          // ── Action-intent readonly gate（spec 2026-07-05）──
+          // 模型一边用只读工具（grep/read_file）维持"在做事"的表象、一边在
+          // 文本里承诺写操作（"更新计划""重写…"）时，no-tool 闸门因本轮
+          // 有工具调用而够不着。只读轮 + 写侧承诺 → 注入一次性提醒
+          //（与 no-tool 闸门共享 actionIntentFiredThisRun 配额，nudge 不阻断）。
+          if (!actionIntentFiredThisRun
+              && hasWriteActionIntent(this.deps.state.streamedText)
+              && turnUsedOnlyReadTools(toolUses)) {
+            actionIntentFiredThisRun = true
+            this.deps.appendSystemReminder(
+              '<system-reminder>上一轮你在文本里宣布了写入/修改/测试类操作，但只调用了只读工具（grep/read_file 等），写操作并未发生。如果仍需执行，请在本轮直接发起对应的工具调用；如果已不需要，请明确说明。</system-reminder>'
+            )
           }
 
           await rejectOnAbort(

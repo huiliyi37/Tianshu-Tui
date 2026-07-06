@@ -2940,8 +2940,8 @@ a.mention-link:hover { background: var(--accent-soft); }
 .todo-capsule-wrapper {
   position: fixed;
   right: 0;
-  top: 92px;
-  z-index: 35;
+  top: 152px;
+  z-index: 60;
 }
 .todo-mini-capsule {
   position: relative;
@@ -4979,8 +4979,8 @@ html[data-theme="nebula"] .plan-panel {
 .review-expand-capsule {
   position: fixed;
   right: 0;
-  top: 48px;
-  z-index: 30;
+  top: 108px;
+  z-index: 60;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -5272,8 +5272,8 @@ html[data-theme="nebula"] .plan-panel {
 .sidebar-expand-capsule {
   position: fixed;
   left: 0;
-  top: 48px;
-  z-index: 30;
+  top: 108px;
+  z-index: 60;
   display: flex;
   align-items: center;
   gap: 6px;

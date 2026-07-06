@@ -21,6 +21,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { planTemplatesDir } from '../config/paths.js'
+import { normalizeFrontmatterSource } from '../utils/frontmatter.js'
 
 const TEMPLATES_DIR = '.rivet/plan-templates'
 
@@ -37,6 +38,7 @@ export interface PlanTemplate {
 /** Parse simple frontmatter (key: value) + body from markdown. */
 export function parseFrontmatter(markdown: string): { meta: Record<string, string>; body: string } {
   const meta: Record<string, string> = {}
+  markdown = normalizeFrontmatterSource(markdown)
   const fmMatch = markdown.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
   if (!fmMatch) return { meta, body: markdown }
   const rawMeta = fmMatch[1]!

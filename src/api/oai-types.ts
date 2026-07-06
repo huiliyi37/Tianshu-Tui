@@ -107,6 +107,13 @@ export interface OaiChatRequest {
    *  Worker sessions set this on the final (no-tools) turn to eliminate free-text
    *  parse failures. Requires the prompt to mention "json". */
   response_format?: { type: 'json_object' }
+  /** Main-turn marker for the wire-level prefix probe (2026-07-06 cache
+   *  investigation). Set by PromptEngine.buildOaiRequest on non-sidePath builds;
+   *  the client fingerprints the FINAL wire bytes (post reasoning-strip /
+   *  sanitize / system-suffix) only for these requests, so side-path calls
+   *  (compaction summaries etc.) don't poison the baseline. Never serialized
+   *  into the HTTP body. */
+  prefixProbe?: boolean
 }
 
 /** Usage stats from OpenAI-compatible API responses. */

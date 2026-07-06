@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlans, usePlan, useApprovePlan, useRejectPlan } from '../state/queries'
 import { Markdown } from '../components/Markdown'
 import type { PlanModeState, PlanStatus, PlanSummary, PlanOption } from '../runtime/types'
@@ -84,17 +84,44 @@ export function PlanPanel(props: {
     [sorted, filter, query],
   )
 
-  // Auto-select: prefer the freshly submitted plan, else the newest, when no
-  // valid selection is held. The draft sentinel counts as a valid selection
-  // while a draft exists; when the draft vanishes (submit / plan-mode exit),
-  // selection falls through to latestPlanSlug — the just-submitted plan.
+  // Live-draft surfacing: the moment a draft appears (plan mode entered),
+  // select it so the growing document renders in real time — even when older
+  // plans exist and would otherwise hold the selection. Transition-edge only:
+  // if the user then clicks another plan chip, we don't force them back.
+  const hadDraft = useRef(false)
+  useEffect(() => {
+    const has = !!draft
+    if (has && !hadDraft.current) {
+      setSelected(DRAFT_SELECTION)
+      setRejecting(false)
+    }
+    hadDraft.current = has
+  }, [!!draft]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fresh submission wins over a stale selection: when latestPlanSlug changes
+  // (plan_submitted), jump to the new plan. Without this the previous
+  // selection held forever and the new plan only surfaced after a tab switch
+  // remounted the panel.
+  const prevLatestSlug = useRef<string | undefined>(latestPlanSlug)
+  useEffect(() => {
+    if (latestPlanSlug && latestPlanSlug !== prevLatestSlug.current) {
+      prevLatestSlug.current = latestPlanSlug
+      setSelected(latestPlanSlug)
+      setRejecting(false)
+    }
+  }, [latestPlanSlug])
+
+  // Auto-select fallback: prefer the freshly submitted plan, else the newest,
+  // when no valid selection is held. The draft sentinel counts as a valid
+  // selection while a draft exists; when the draft vanishes (submit /
+  // plan-mode exit), selection falls through to latestPlanSlug.
   const selectedExists =
     selected != null &&
     (filtered.some((p) => p.slug === selected) || (selected === DRAFT_SELECTION && !!draft))
   useEffect(() => {
     if (selectedExists) return
     // While drafting with nothing else to show, surface the growing document.
-    if (draft && !latestPlanSlug) {
+    if (draft) {
       setSelected(DRAFT_SELECTION)
       return
     }
@@ -104,7 +131,7 @@ export function PlanPanel(props: {
     const next =
       latestPlanSlug && candidates.some((p) => p.slug === latestPlanSlug)
         ? latestPlanSlug
-        : candidates[0]?.slug ?? (draft ? DRAFT_SELECTION : null)
+        : candidates[0]?.slug ?? null
     setSelected(next)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestPlanSlug, sorted.length, filter, selectedExists, !!draft])

@@ -108,8 +108,8 @@ Note: For large new_string, the message history keeps only a short pointer
     let filePath: string
     try {
       filePath = validatePath(params.cwd, params.input.file_path as string, 'write')
-    } catch {
-      return { content: 'Error: Path escapes project directory', isError: true }
+    } catch (e) {
+      return { content: `Error: ${e instanceof Error ? e.message : 'Path escapes project directory'}`, isError: true }
     }
 
     // Check file exists asynchronously

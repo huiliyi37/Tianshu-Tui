@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { rivetHome } from '../config/paths.js'
+import { expandHome } from '../platform.js'
 
 export type GrantMode = 'read' | 'write'
 
@@ -66,13 +67,32 @@ function canonicalize(p: string): string {
 }
 
 /**
- * True when `child` is the same as `root` or nested under it, using a
- * separator boundary so `/a/b` does NOT match `/a/bc`.
+ * Windows filesystems are case-insensitive: drive letters and path segments
+ * arrive in mixed case (F:\ vs f:\, cmd vs Explorer casing), and realpath only
+ * normalizes casing for path components that exist. Containment/dedup checks
+ * must therefore fold case on win32 or grants silently fail to match.
  */
+const CASE_INSENSITIVE_FS = process.platform === 'win32'
+
+function foldCase(p: string): string {
+  return CASE_INSENSITIVE_FS ? p.toLowerCase() : p
+}
+
+/**
+ * True when `child` is the same as `root` or nested under it, using a
+ * separator boundary so `/a/b` does NOT match `/a/bc`. Exposed with an
+ * explicit case-sensitivity flag for unit testing win32 semantics on any host.
+ */
+export function isPathUnder(root: string, child: string, caseInsensitive: boolean = CASE_INSENSITIVE_FS): boolean {
+  const r = caseInsensitive ? root.toLowerCase() : root
+  const c = caseInsensitive ? child.toLowerCase() : child
+  if (c === r) return true
+  const prefix = r.endsWith(sep) ? r : r + sep
+  return c.startsWith(prefix)
+}
+
 function isUnder(root: string, child: string): boolean {
-  if (child === root) return true
-  const prefix = root.endsWith(sep) ? root : root + sep
-  return child.startsWith(prefix)
+  return isPathUnder(root, child)
 }
 
 /** Per-workspace persisted-grants file, keyed by a cwd slug (mirrors checkpoint.ts). */
@@ -89,7 +109,7 @@ function grantsFile(cwd: string): string {
 export function grantPath(root: string, mode: GrantMode, opts?: { persist?: boolean; cwd?: string }): PathGrant {
   const canonical = canonicalize(root)
   const persist = opts?.persist === true
-  const existing = _grants.find(g => g.root === canonical)
+  const existing = _grants.find(g => foldCase(g.root) === foldCase(canonical))
   let grant: PathGrant
   if (existing) {
     // Upgrade read → write; never downgrade.
@@ -157,9 +177,34 @@ export function loadPersistedGrants(cwd: string): void {
     if (!existsSync(g.root)) continue
     const mode: GrantMode = g.mode === 'write' ? 'write' : 'read'
     grantPath(g.root, mode, { persist: false })
-    const stored = _grants.find(x => x.root === canonicalize(g.root))
+    const stored = _grants.find(x => foldCase(x.root) === foldCase(canonicalize(g.root)))
     if (stored) stored.persisted = true
   }
+}
+
+/**
+ * Apply the user's standing directory grants from config
+ * (`permissions.additionalReadDirs` / `additionalWriteDirs`) at session start —
+ * the Codex-style "give this folder to the agent" model. Session-scoped
+ * in-memory grants (config is the durable source; nothing is written to the
+ * per-workspace grant store). Non-existent entries are skipped fail-closed:
+ * a typo'd config line must not open a subtree that later comes into being.
+ */
+export function applyConfiguredPathGrants(
+  permissions: { additionalReadDirs?: string[]; additionalWriteDirs?: string[] } | undefined,
+): void {
+  if (!permissions) return
+  const apply = (dirs: string[] | undefined, mode: GrantMode): void => {
+    for (const raw of dirs ?? []) {
+      const trimmed = raw.trim()
+      if (!trimmed) continue
+      const root = resolve(expandHome(trimmed))
+      if (!existsSync(root)) continue
+      grantPath(root, mode, { persist: false })
+    }
+  }
+  apply(permissions.additionalReadDirs, 'read')
+  apply(permissions.additionalWriteDirs, 'write')
 }
 
 /** Test-only: clear the in-memory grant store. */

@@ -109,17 +109,41 @@ export function truncateToWidth(text: string, maxWidth: number): string {
 
 /** 判断输入是否更像文件路径而非 slash 命令。
  *  例如 `/src/main.ts` 或 `/tmp/foo bar` 应走普通文本流程，
- *  避免被当作未知 slash 命令报失败。 */
-export function looksLikeFilePath(input: string): boolean {
+ *  避免被当作未知 slash 命令报失败。
+ *
+ *  单段绝对路径（`/etc`、`/mnt`、`/usr`）在没有 isKnownCommand 谓词时
+ *  回退到旧行为（视为命令）；传入谓词后，非已知命令的单段路径被
+ *  正确识别为 Linux/WSL 文件路径。 */
+export function looksLikeFilePath(
+  input: string,
+  isKnownCommand?: (name: string) => boolean,
+): boolean {
   if (input.startsWith('~/')) return true
   // Windows 盘符路径 C:\... 或 C:/...（不是 slash 命令）
   if (/^[a-zA-Z]:[\\/]/.test(input)) return true
   if (!input.startsWith('/')) return false
   const rest = input.slice(1)
   const slashIdx = rest.indexOf('/')
-  if (slashIdx === -1) return false
-  const spaceIdx = rest.indexOf(' ')
-  return spaceIdx === -1 || slashIdx < spaceIdx
+  if (slashIdx !== -1) {
+    const spaceIdx = rest.indexOf(' ')
+    return spaceIdx === -1 || slashIdx < spaceIdx
+  }
+  // 单段 /xxx：可能是命令（/exit）也可能是路径（/etc, /mnt）
+  if (isKnownCommand) {
+    const firstToken = rest.split(/\s/)[0] ?? ''
+    return firstToken !== '' && !isKnownCommand(firstToken)
+  }
+  return false
+}
+
+/** 从 slashCommands 提示列表构建命令名谓词。
+ *  slashCommands 的 name 含 `/` 前缀（如 `/exit`），谓词接收不带前缀的名字。 */
+function buildCommandPredicate(commands: ReadonlyArray<{ name: string }>): (name: string) => boolean {
+  const names = new Set(commands.map(c => {
+    const n = c.name.trim()
+    return n.startsWith('/') ? n.slice(1).split(/\s/)[0]! : n.split(/\s/)[0]!
+  }))
+  return (name: string) => names.has(name)
 }
 
 /**
@@ -727,7 +751,8 @@ export class TuiApp {
       }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
-      const inputIsPath = looksLikeFilePath(inputVal)
+      const isKnownCmd = buildCommandPredicate(this.inputController.slashCommands)
+      const inputIsPath = looksLikeFilePath(inputVal, isKnownCmd)
       if (inputVal.startsWith('/') && !inputIsPath) {
         const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
         if (key.name === 'up' && filtered.length > 0) {
@@ -800,6 +825,16 @@ export class TuiApp {
             const label = phaseStatusLabel(phase, detail)
             if (label) this.commitStatic(color(label, this.theme.warning))
           }
+          return
+        }
+        // convergence-warning: the L2 escalation rung BEFORE a convergence
+        // abort. Must be visible in the CLI — session 8396ac51 received 10
+        // silent nudges then a hard熔断 that looked like it came from nowhere.
+        // The desktop renders this ladder via the decision-shift card; this
+        // static warning line is the CLI counterpart.
+        if (phase === 'convergence-warning') {
+          const label = phaseStatusLabel(phase, detail)
+          if (label) this.commitStatic(color(label, this.theme.warning))
           return
         }
         // Only map recognized phases to ActivityPhase; ignore unknown strings
@@ -909,6 +944,12 @@ export class TuiApp {
   setInput(text: string): void {
     this.inputLine.setValue(text, text.length)
     this.renderLive()
+  }
+
+  /** 构建命令名谓词，供 resolveAppPromptInput 区分路径与命令。
+   *  基于 inputController.slashCommands（palette + skill 提示列表）。 */
+  getCommandPredicate(): (name: string) => boolean {
+    return buildCommandPredicate(this.inputController.slashCommands)
   }
 
   /** 读取当前输入框文本（测试/外部检视用） */
@@ -1815,7 +1856,7 @@ export class TuiApp {
     const cursor = this.inputLine.cursor
 
     // slash 命令补全（排除 `/file/path` 这类绝对路径；支持 /skill <name> 等多 token）
-    if (value.startsWith('/') && !looksLikeFilePath(value)) {
+    if (value.startsWith('/') && !looksLikeFilePath(value, buildCommandPredicate(this.inputController.slashCommands))) {
       const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
@@ -3049,7 +3090,7 @@ export class TuiApp {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
       const inputVal = this.inputLine.value
-      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal)
+      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal, buildCommandPredicate(this.inputController.slashCommands))
       const isStreaming = this.state.phase !== 'idle'
 
       // Domain-accent border color: slash=primary, streaming=dim, else domain accent

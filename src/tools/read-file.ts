@@ -256,6 +256,12 @@ export function __setFileReadMtimeForTests(canonicalPath: string, mtimeMs: numbe
   lastKnownFileState.set(fileHistoryKey(sessionId, canonicalPath), { mtimeMs, sizeBytes: -1 })
 }
 
+/** Test-only: evict a single 表2 entry — simulates LAST_KNOWN_MAX trimming
+ *  diverging from the dedup tables (表1), which trim independently. */
+export function __evictLastKnownForTests(canonicalPath: string, sessionId?: string): void {
+  lastKnownFileState.delete(fileHistoryKey(sessionId, canonicalPath))
+}
+
 /**
  * Register a file as "seen" via grep (or other non-read_file tool).
  * This allows hash_edit's position-only mode to succeed after grep
@@ -585,6 +591,13 @@ export const READ_FILE_TOOL: Tool = {
             const slice = await sliceFromArtifact(params.artifactStore, prior.artifactId, offset, limit)
             if (slice !== null) {
               debugLog(`[read-dedup] re-serve from artifact file=${canonical} offset=${offset} limit=${limit ?? 'all'}`)
+              // 表2 re-registration: dedup 表(表1) and lastKnownFileState(表2)
+              // trim independently — 表2 may have evicted this entry while 表1
+              // survives. Without this, "read the file first" guidance from the
+              // edit/write staleness guards would loop forever (read short-
+              // circuits here and never refreshes 表2). We just statted the
+              // file, so the observation is current.
+              noteFileObserved(canonical, currentMtimeMs, currentSizeBytes, params.sessionId)
               return { content: slice }
             }
           }
@@ -596,6 +609,8 @@ export const READ_FILE_TOOL: Tool = {
             const slice = await sliceFromArtifact(params.artifactStore, fullEntry.artifactId, offset, limit)
             if (slice !== null) {
               debugLog(`[read-dedup-file] re-serve slice from artifact file=${canonical} offset=${offset} limit=${limit ?? 'all'}`)
+              // 表2 re-registration — same eviction-divergence reasoning as above.
+              noteFileObserved(canonical, currentMtimeMs, currentSizeBytes, params.sessionId)
               return { content: slice }
             }
           }
@@ -653,6 +668,10 @@ export const READ_FILE_TOOL: Tool = {
         const totalSaved = params.readRefStats?.savedBytes ?? readRefSavedBytes
         const totalCount = params.readRefStats?.count ?? readRefCount
         debugLog(`[read-ref] file=${canonical} saved=${entryBytes} total-saved=${totalSaved} count=${totalCount}`)
+        // 表2 re-registration — 表1/表2 trim independently; without this a
+        // 表2-evicted entry can dead-loop the blind-overwrite guard ("read it
+        // first" → read-ref short-circuit → 表2 still empty → still refused).
+        noteFileObserved(canonical!, currentMtimeMs!, currentSizeBytes!, params.sessionId)
         return { content: ref }
       }
       // Small fragment — fall through to normal read to avoid wasted round-trips

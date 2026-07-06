@@ -157,6 +157,13 @@ return new TurnStreamController({
           const divergence = self.config.promptEngine.consumePrefixDivergence?.()
           if (divergence) entry.prefixDiverged = divergence
 
+          // Wire-level probe (2026-07-06): same idea, but hashed on the FINAL
+          // send bytes (post reasoning-strip / sanitize / system-suffix). A
+          // cacheRead regression with a clean engine probe but a wireDiverged
+          // record = send-layer byte churn; clean on both = provider-side.
+          const wireDivergence = self.config.client.consumeWireDivergence?.()
+          if (wireDivergence) entry.wireDiverged = wireDivergence
+
           // Engine event diffs (volatile swap / frozen clamp / fallback / tools)
           const stats = self.config.promptEngine.getCacheEventStats?.()
           if (stats) {

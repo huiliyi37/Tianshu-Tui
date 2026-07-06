@@ -1220,6 +1220,14 @@ export class RuntimeSessionManager {
       this.append(session, 'plan_mode', { state })
       this.persistRecord(session)
     }
+    // Plan mode 是 AgentLoop 的内存态，record.planMode 是持久态。agent 重建
+    // （懒构建恢复会话 / switchModel）会丢内存态：工具门禁失效、
+    // getActivePlanFilePath 变 null → 桌面「起草中」实时视图断流。record 说
+    // planning 时补一次 enterPlanMode（新开草稿文件），恢复两条通道。
+    // onPlanModeChange 的同态守卫保证不会重复发 plan_mode SSE。
+    if (session.record.planMode === 'planning') {
+      try { agent.enterPlanMode?.() } catch { /* non-fatal */ }
+    }
   }
 
   // ── PlusMenu: star domain ─────────────────────────────────────

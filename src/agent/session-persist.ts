@@ -264,21 +264,54 @@ export class SessionPersist {
     return result
   }
 
+  /** Audit breadcrumb types: skipped on replay (parseSessionLine), preserved across rewrites. */
+  private static readonly AUDIT_LINE_TYPES = new Set(['compact_start', 'compact_end', 'model_switch'])
+
+  /**
+   * Collect audit breadcrumb lines from the current file, re-checksummed for a
+   * full rewrite. Rewrites (compact / compactOai / compactOaiAsync) regenerate
+   * the file from in-memory messages only, and audit lines never enter memory
+   * (parseSessionLine skips them on replay) — without this, the first rewrite
+   * after appendModelSwitch silently destroys the audit trail.
+   */
+  private collectAuditLines(): string[] {
+    if (!existsSync(this.filePath)) return []
+    try {
+      const lines = readFileSync(this.filePath, 'utf-8').trim().split('\n').filter(Boolean)
+      const { validLines } = verifyLines(lines)
+      const audit: string[] = []
+      for (const json of validLines) {
+        try {
+          const parsed = JSON.parse(json) as { type?: string }
+          if (typeof parsed.type === 'string' && SessionPersist.AUDIT_LINE_TYPES.has(parsed.type)) {
+            audit.push(appendChecksum(json))
+          }
+        } catch { /* skip malformed rows */ }
+      }
+      return audit
+    } catch {
+      return []
+    }
+  }
+
   /** Compact the session file with the given messages (with checksums) */
   compact(messages: Message[]): void {
-    const content = messages.map(m => appendChecksum(serializeSessionMessage(m))).join('\n') + '\n'
+    const audit = this.collectAuditLines()
+    const content = [...audit, ...messages.map(m => appendChecksum(serializeSessionMessage(m)))].join('\n') + '\n'
     writeFileAtomicSync(this.filePath, content)
   }
 
   /** Compact the session file with OAI-format messages */
   compactOai(messages: OaiMessage[]): void {
-    const content = messages.map(m => appendChecksum(serializeOaiSessionMessage(m))).join('\n') + '\n'
+    const audit = this.collectAuditLines()
+    const content = [...audit, ...messages.map(m => appendChecksum(serializeOaiSessionMessage(m)))].join('\n') + '\n'
     writeFileAtomicSync(this.filePath, content)
   }
 
   /** Async atomic compaction — avoids blocking the agent loop on full rewrites (S13). */
   async compactOaiAsync(messages: OaiMessage[]): Promise<void> {
-    const content = messages.map(m => appendChecksum(serializeOaiSessionMessage(m))).join('\n') + '\n'
+    const audit = this.collectAuditLines()
+    const content = [...audit, ...messages.map(m => appendChecksum(serializeOaiSessionMessage(m)))].join('\n') + '\n'
     await writeFileAtomicAsync(this.filePath, content)
   }
 

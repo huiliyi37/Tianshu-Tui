@@ -39,7 +39,9 @@ export interface PlanOption {
   description: string
 }
 
-const PLAN_OPTIONS_FRONTMATTER_RE = /^---\nrivet-options:\s*(\[[\s\S]*?\])\s*\n---\n/
+// \r?\n（而非入口归一化）：此 regex 还用于 replace 回写文件，归一化会改动
+// 用户文件的换行风格。
+const PLAN_OPTIONS_FRONTMATTER_RE = /^---\r?\nrivet-options:\s*(\[[\s\S]*?\])\s*\r?\n---\r?\n/
 
 /** approve/reject 写入的状态标记行（H1 前）。 */
 const PLAN_STATUS_LINE_RE = /^>\s*\*\*Status:\s*(?:APPROVED|REJECTED|EXECUTED)\*\*.*(?:\r?\n)+/gm
