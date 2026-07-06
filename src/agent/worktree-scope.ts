@@ -28,11 +28,39 @@ function workerGitPath(workerCwd: string, gitPath: string): string | null {
   return isAbsolute(resolved) ? resolved : resolve(workerCwd, resolved)
 }
 
+/**
+ * Append the materialized path to the worker's git exclude — but ONLY when the
+ * worker owns a private exclude file. For a linked worktree (VSW snapshots,
+ * worktree-based hands workers) `git rev-parse --git-path info/exclude`
+ * resolves to the MAIN repo's shared `.git/info/exclude`; appending there
+ * poisons the base repo: the excluded source files vanish from `git status`,
+ * the delivery gate demotes them to "historical owned", and `git commit`
+ * rejects them as ignored (session 4df36bcd postmortem). Skipping the append
+ * for shared excludes is the lesser evil — the worker's status shows the
+ * materialized files as untracked, which downstream junk-filtering tolerates.
+ */
 function excludeFromWorkerDiff(workerCwd: string, relPath: string): void {
+  const gitDir = gitRevParse(workerCwd, '--git-dir')
+  const commonDir = gitRevParse(workerCwd, '--git-common-dir')
+  // Linked worktree: git-dir (.git/worktrees/<id>) differs from common dir
+  // (.git) and info/exclude lives in the SHARED common dir. Never write there.
+  if (!gitDir || !commonDir || resolve(gitDir) !== resolve(commonDir)) return
   const excludePath = workerGitPath(workerCwd, 'info/exclude')
   if (!excludePath) return
   mkdirSync(dirname(excludePath), { recursive: true })
   appendFileSync(excludePath, `\n/${relPath}\n`)
+}
+
+function gitRevParse(workerCwd: string, flag: '--git-dir' | '--git-common-dir'): string | null {
+  const result = spawnSync('git', ['rev-parse', flag], {
+    cwd: workerCwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  if (result.status !== 0) return null
+  const resolved = result.stdout.trim()
+  if (!resolved) return null
+  return isAbsolute(resolved) ? resolved : resolve(workerCwd, resolved)
 }
 
 /**

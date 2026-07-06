@@ -51,8 +51,40 @@ describe('materializeScope', () => {
     assert.deepEqual(result.materialized, ['plan.md'])
     assert.deepEqual(result.missing, [])
     assert.ok(existsSync(join(wtDir, 'plan.md')))
+  })
+
+  it('never writes to a linked worktree\'s SHARED info/exclude (base repo poisoning)', () => {
+    // In a linked worktree `--git-path info/exclude` resolves to the MAIN
+    // repo's .git/info/exclude. Appending there hides the base repo's own
+    // untracked files from git status (session 4df36bcd: new source files
+    // vanished from status and were rejected at commit).
+    writeFileSync(join(repoDir, 'plan.md'), '# Plan')
+
+    materializeScope(repoDir, wtDir, ['plan.md'])
+
     const excludePath = gitOutput(wtDir, ['rev-parse', '--git-path', 'info/exclude'])
-    assert.match(readFileSync(excludePath, 'utf-8'), /\/plan\.md/)
+    const content = existsSync(excludePath) ? readFileSync(excludePath, 'utf-8') : ''
+    assert.doesNotMatch(content, /\/plan\.md/)
+  })
+
+  it('still writes the exclude for a standalone worker repo (private exclude)', () => {
+    const cloneDir = mkdtempSync(join(tmpdir(), 'scope-clone-'))
+    rmSync(cloneDir, { recursive: true, force: true })
+    git(repoDir, ['clone', repoDir, cloneDir])
+    try {
+      writeFileSync(join(repoDir, 'plan.md'), '# Plan')
+      const result = materializeScope(repoDir, cloneDir, ['plan.md'])
+      assert.deepEqual(result.materialized, ['plan.md'])
+      const rawExcludePath = gitOutput(cloneDir, ['rev-parse', '--git-path', 'info/exclude'])
+      const excludePath = rawExcludePath.startsWith('/') ? rawExcludePath : join(cloneDir, rawExcludePath)
+      assert.match(readFileSync(excludePath, 'utf-8'), /\/plan\.md/)
+      // And the BASE repo's exclude stays clean.
+      const baseExclude = join(repoDir, '.git', 'info', 'exclude')
+      const baseContent = existsSync(baseExclude) ? readFileSync(baseExclude, 'utf-8') : ''
+      assert.doesNotMatch(baseContent, /\/plan\.md/)
+    } finally {
+      rmSync(cloneDir, { recursive: true, force: true })
+    }
   })
 
   it('copies untracked absolute files when they are inside the repo', () => {
