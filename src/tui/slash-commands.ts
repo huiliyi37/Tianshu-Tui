@@ -36,8 +36,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join } from 'node:path'
 import { ensureVerifyDeclaration, renderRivetMdStack, upsertStackSection } from '../bootstrap/verify-declaration.js'
 import { exportsDir } from '../config/paths.js'
-import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix, readPlan } from '../plan/plan-store.js'
-import { validatePlanContentForApproval } from '../tools/plan.js'
+import { listPlans, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix } from '../plan/plan-store.js'
+import { approvePlanWithGuards } from '../plan/plan-approval.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
@@ -472,13 +472,9 @@ export function resolveEnterWorkerInput(
 }
 
 
-/** Build the kickoff prompt that drives wave-by-wave execution of an approved plan. */
-export function buildPlanKickoff(slug: string, title: string, approach?: string, anchorDriftNote?: string): string {
-  let msg = `开始执行已批准方案「${title}」(.rivet/plans/${slug}.md)。先 read_file 读取该计划,然后用 plan_task(execute=true) 或 team_orchestrate 把任务按波次并行执行、逐波过审查门;开工前用 todo 列出有序步骤跟踪进度,全部完成后 plan_close。`
-  if (approach) msg += `\nSelected approach: ${approach} — 只执行此方案,勿执行未选中的备选。`
-  if (anchorDriftNote) msg += `\n\n⚠ 锚点漂移提示——以下计划引用与当前工作区不符（计划写成后代码可能已变化）:\n${anchorDriftNote}\n执行时以当前源码为准,先用工具核实真实位置再动手,并把每处偏差记入交付报告;若漂移改变了方案方向,暂停执行向用户说明。`
-  return msg
-}
+// 批准闭环内核（校验+漂移复查+分波 kickoff）已下沉到共享模块，
+// server 桌面路由与 TUI 共用同一实现。此处保留 re-export 兼容既有导入。
+export { buildPlanKickoff } from '../plan/plan-approval.js'
 
 /**
  * 批准计划并自动 kickoff 分波执行的共享闭环。slash `/plan-approve` 与 plan-picker
@@ -495,52 +491,26 @@ export async function approvePlanAndKickoff(
   slug: string,
   resolvedApproach?: string,
 ): Promise<boolean> {
-  // Empty/invalid-plan hard-fail at the approval boundary (kimi-code borrow):
-  // never mark a stale draft or gutted file APPROVED + kick off execution.
-  const existing = await readPlan(deps.cwd, slug)
-  if (!existing) {
-    deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
+  const result = await approvePlanWithGuards(deps.cwd, slug, resolvedApproach)
+  if (!result.ok) {
+    if (result.code === 'invalid-content') {
+      deps.notify(`无法批准 **${result.title}** (\`${slug}\`)：${result.reason} 未写入 APPROVED 标记，也未启动执行。`, true)
+    } else {
+      deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
+    }
     return false
   }
-  const check = validatePlanContentForApproval(existing.content)
-  if (!check.ok) {
-    deps.notify(`无法批准 **${existing.title}** (\`${slug}\`)：${check.reason} 未写入 APPROVED 标记，也未启动执行。`, true)
-    return false
-  }
-
-  // Approval-time anchor drift recheck (non-blocking): the plan was written
-  // against an earlier tree state — concurrent sessions / elapsed time drift
-  // anchors. Aged plans are normal, so drift never blocks approval; it is
-  // surfaced to the user and injected into the kickoff prompt so the executor
-  // treats reality as ground truth and logs deviations in the delivery report.
-  let driftNote: string | undefined
-  try {
-    const { checkPlanFactAnchors, formatAnchorDrifts } = await import('../plan/plan-fact-anchors.js')
-    const report = await checkPlanFactAnchors(existing.content, deps.cwd)
-    if (report.drifts.length > 0) driftNote = formatAnchorDrifts(report.drifts)
-  } catch {
-    // Best-effort — the guard itself must never break approval.
-  }
-
-  const approved = await approvePlan(deps.cwd, slug)
-  if (!approved) {
-    deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
-    return false
-  }
+  const { approved, driftNote, kickoff, tierWarning } = result
   deps.agent.setActivePlan({ slug, title: approved.title, selectedApproach: resolvedApproach })
   const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
   const driftLine = driftNote
     ? `\n\n⚠ 锚点漂移复查:计划中有引用与当前工作区不符(已注入执行提示,执行方将以现实为准):\n${driftNote}`
     : ''
-  // 低阶模型留痕警告：flash 出的计划真实度不可控（事故链：大重构计划丢功能），
-  // 批准时明示产出模型，提醒复核关键改动点。不阻断——用户已看过计划正文。
-  const tierWarnLine = existing.modelTier === 'cheap'
-    ? `\n\n⚠ 本计划由低阶模型产出（${existing.model}），建议对关键改动点复核后再放行执行。`
-    : ''
+  const tierWarnLine = tierWarning ? `\n\n${tierWarning}` : ''
   deps.notify(
     `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。${tierWarnLine}${driftLine}`,
   )
-  deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach, driftNote))
+  deps.submitToAgent?.(kickoff)
   return true
 }
 

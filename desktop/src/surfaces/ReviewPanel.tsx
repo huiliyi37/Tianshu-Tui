@@ -66,8 +66,10 @@ export function ReviewPanel(props: {
   onCollapse?: () => void
   /** P1-3 — Changes tab line comments send through the thread's prompt channel. */
   onSendPrompt?: (text: string) => void
+  /** Plan Build requires an idle session — disables the button with a hint. */
+  sessionRunning?: boolean
 }) {
-  const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse, onSendPrompt } = props
+  const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse, onSendPrompt, sessionRunning } = props
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('changes')
@@ -552,7 +554,7 @@ export function ReviewPanel(props: {
           <FileExplorer sessionId={sessionId} cwd={cwd} />
         </TabsContent>
         <TabsContent value="tasks" className="review-body">
-          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} todos={todos} planMode={planMode} />
+          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} todos={todos} planMode={planMode} sessionRunning={sessionRunning} />
           
           <section className="review-section mt-4 border-t border-border pt-4">
             <h4>任务清单</h4>

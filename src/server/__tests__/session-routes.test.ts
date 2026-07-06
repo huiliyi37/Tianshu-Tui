@@ -413,9 +413,168 @@ test('Plan: approve with unknown option fails BEFORE marking the file approved',
 
   const res = await router('POST', `/sessions/${s.id}/plans/opt2/approve`, { selectedApproach: 'YOLO' }, AUTH)
   assert.equal(res.status, 409)
+  assert.equal((res.body as { code: string }).code, 'bad-approach')
   const after = readFileSync(join(plansDir, 'opt2.md'), 'utf-8')
   assert.doesNotMatch(after, /Status: APPROVED/, 'file must stay untouched when the option is invalid')
   assert.equal(agents.length === 0 || agents[0]!.runPrompts.length === 0, true, 'no kickoff run on failed approval')
+})
+
+// 共享批准闭环对齐（TUI approvePlanAndKickoff 与桌面路由同一内核）：
+// 空计划/占位符在批准边界硬拒，绝不标 APPROVED 或启动执行。
+test('Plan: approve an empty plan hard-fails with 422 and stays untouched', async () => {
+  const { manager, router, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  // Title-only sections = a gutted/placeholder draft (same fixture family as
+  // the TUI-side validatePlanContentForApproval suite).
+  writeFileSync(join(plansDir, 'hollow.md'), '# Hollow\n\n## 设计\n\n## 实施\n', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  const res = await router('POST', `/sessions/${s.id}/plans/hollow/approve`, {}, AUTH)
+  assert.equal(res.status, 422)
+  assert.equal((res.body as { code: string }).code, 'invalid-content')
+  assert.ok((res.body as { error: string }).error.length > 0, 'failure carries a human-readable reason')
+  const after = readFileSync(join(plansDir, 'hollow.md'), 'utf-8')
+  assert.doesNotMatch(after, /Status: APPROVED/, 'empty plan must never be marked approved')
+  assert.equal(agents.length === 0 || agents[0]!.runPrompts.length === 0, true, 'no kickoff run on rejected content')
+})
+
+// 桌面批准必须走完整分波闭环——kickoff 指示 read_file → plan_task/team_orchestrate
+// 逐波过审查门 → plan_close，否则 wave-gate 防线被绕过（旧版一句「开始执行」）。
+test('Plan: approve kickoff drives wave execution through the review gates', async () => {
+  const { manager, router, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'wave.md'), '# Wave\n\n具体设计：先改 A，再改 B。', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  const res = await router('POST', `/sessions/${s.id}/plans/wave/approve`, {}, AUTH)
+  assert.equal(res.status, 200)
+  const kickoff = agents[0]!.runPrompts[0]!
+  assert.match(kickoff, /read_file/, 'kickoff instructs reading the plan file')
+  assert.match(kickoff, /plan_task\(execute=true\)|team_orchestrate/, 'kickoff instructs wave execution')
+  assert.match(kickoff, /plan_close/, 'kickoff instructs closing the plan when done')
+})
+
+// Wave 3 — plan editing (review → tweak → Build): only submitted plans are
+// editable; approved/executed/rejected are records. Edits emit plan_submitted
+// so viewers re-fetch.
+test('Plan: PUT /plans/:slug edits a submitted plan and emits plan_submitted', async () => {
+  const { manager, router } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'edit-me.md'), '# Edit Me\n\n原始内容', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  const res = await router('PUT', `/sessions/${s.id}/plans/edit-me`, { content: '# Edit Me v2\n\n修订后的内容' }, AUTH)
+  assert.equal(res.status, 200)
+  const after = readFileSync(join(plansDir, 'edit-me.md'), 'utf-8')
+  assert.match(after, /修订后的内容/)
+  const events = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'plan_submitted')
+  assert.equal(events.length, 1)
+  assert.equal((events[0]!.data as { title: string }).title, 'Edit Me v2')
+
+  const missingContent = await router('PUT', `/sessions/${s.id}/plans/edit-me`, {}, AUTH)
+  assert.equal(missingContent.status, 400)
+})
+
+test('Plan: PUT /plans/:slug refuses non-submitted plans and preserves options on body-only edits', async () => {
+  const { manager, router } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  const fm = '---\nrivet-options: [{"label":"Fast","description":"a"}]\n---\n\n'
+  writeFileSync(join(plansDir, 'opted.md'), `${fm}# Opted\n\n正文`, 'utf-8')
+  writeFileSync(join(plansDir, 'done.md'), '> **Status: APPROVED**\n\n# Done\n\n已批准', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  // Body-only edit (no frontmatter in the payload) keeps the recorded options.
+  const ok = await router('PUT', `/sessions/${s.id}/plans/opted`, { content: '# Opted\n\n新正文' }, AUTH)
+  assert.equal(ok.status, 200)
+  const after = readFileSync(join(plansDir, 'opted.md'), 'utf-8')
+  assert.match(after, /rivet-options/, 'options frontmatter survives a body-only edit')
+  assert.match(after, /新正文/)
+
+  // Approved plans are historical records — not editable.
+  const refused = await router('PUT', `/sessions/${s.id}/plans/done`, { content: '# Done\n\n篡改' }, AUTH)
+  assert.equal(refused.status, 409)
+  assert.equal((refused.body as { code: string }).code, 'not-editable')
+  assert.match(readFileSync(join(plansDir, 'done.md'), 'utf-8'), /已批准/)
+})
+
+// Wave 2 — plan_draft invalidation signal: while planning, a successful
+// write_file/edit_file (which checkPlanMode restricts to the active draft)
+// emits a throttled metadata-only event so the desktop "起草中" view goes
+// event-driven instead of 2s polling.
+test('Plan: draft writes emit throttled plan_draft events while planning', async () => {
+  const { manager, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'draft-99.md'), '# 草稿\n\n第一段', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+  manager.setPlanMode(s.id, 'planning')
+  const agent = agents[0]!
+  agent.activePlanFilePath = '.rivet/plans/draft-99.md'
+  manager.run(s.id, 'plan it')
+
+  const draftEvents = () =>
+    manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'plan_draft')
+
+  // Leading edge: first write fires immediately (emit is async — flush microtasks).
+  agent.callbacks!.onToolResult('t1', 'write_file', 'ok', false)
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(draftEvents().length, 1)
+  const ev = draftEvents()[0]!.data as { path: string; title: string | null; size: number }
+  assert.equal(ev.path, '.rivet/plans/draft-99.md')
+  assert.equal(ev.title, '草稿')
+  assert.ok(ev.size > 0)
+  assert.ok(!('content' in ev), 'event is an invalidation signal — never carries the body')
+
+  // Burst inside the window: exactly one trailing event, not one per write.
+  agent.callbacks!.onToolResult('t2', 'edit_file', 'ok', false)
+  agent.callbacks!.onToolResult('t3', 'write_file', 'ok', false)
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(draftEvents().length, 1, 'writes inside the throttle window do not emit immediately')
+  await new Promise((r) => setTimeout(r, 1100))
+  assert.equal(draftEvents().length, 2, 'trailing timer lands exactly one event for the burst')
+
+  // Non-write tools and error results never emit.
+  agent.callbacks!.onToolResult('t4', 'read_file', 'ok', false)
+  agent.callbacks!.onToolResult('t5', 'write_file', 'denied', true)
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(draftEvents().length, 2)
+})
+
+test('Plan: no plan_draft events outside plan mode', async () => {
+  const { manager, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  mkdirSync(join(dir, '.rivet', 'plans'), { recursive: true })
+  const s = manager.createSession({ cwd: dir })
+  manager.run(s.id, 'go')
+  agents[0]!.callbacks!.onToolResult('t1', 'write_file', 'ok', false)
+  await new Promise((r) => setTimeout(r, 20))
+  const drafts = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'plan_draft')
+  assert.equal(drafts.length, 0)
+})
+
+test('Plan: approve on a running session returns 409 with session-running code', async () => {
+  const { manager, router } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'busy.md'), '# Busy\n\ndo it', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+  manager.run(s.id, 'work work') // occupies the session (FakeAgent never resolves)
+
+  const res = await router('POST', `/sessions/${s.id}/plans/busy/approve`, {}, AUTH)
+  assert.equal(res.status, 409)
+  assert.equal((res.body as { code: string }).code, 'session-running')
+  const after = readFileSync(join(plansDir, 'busy.md'), 'utf-8')
+  assert.doesNotMatch(after, /Status: APPROVED/)
 })
 
 test('Plan: POST /plans/:slug/reject keeps the file, re-enters plan mode, and kicks revision', async () => {
@@ -436,6 +595,30 @@ test('Plan: POST /plans/:slug/reject keeps the file, re-enters plan mode, and ki
   assert.equal(agents[0]!.runPrompts.length, 1)
   assert.match(agents[0]!.runPrompts[0]!, /User rejected the plan/)
   assert.match(agents[0]!.runPrompts[0]!, /too vague/)
+})
+
+// Wave 3 — mid-run rejection feedback rides the steer buffer instead of being
+// dropped (the old code only kicked a revision turn on idle sessions).
+test('Plan: reject with comment on a RUNNING session queues the feedback via steer', async () => {
+  const { manager, router, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'epsilon.md'), '# Epsilon\n\nnope', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+  manager.run(s.id, 'busy work') // FakeAgent never resolves — session stays running
+
+  const res = await router('POST', `/sessions/${s.id}/plans/epsilon/reject`, { comment: '方向错了' }, AUTH)
+  assert.equal(res.status, 200)
+  assert.match(readFileSync(join(plansDir, 'epsilon.md'), 'utf-8'), /Status: REJECTED/)
+  // No new run was started (the original run is still the only one)…
+  assert.equal(agents[0]!.runPrompts.length, 1)
+  assert.equal(agents[0]!.runPrompts[0], 'busy work')
+  // …and the revision feedback is queued as a steer event.
+  const steered = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'steer_queued')
+  assert.equal(steered.length, 1)
+  assert.match((steered[0]!.data as { text: string }).text, /方向错了/)
+  assert.match((steered[0]!.data as { text: string }).text, /epsilon\.md/)
 })
 
 // ── PlusMenu routes (models / domains / skills) ─────────────────────

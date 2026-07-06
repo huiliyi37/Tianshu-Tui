@@ -361,6 +361,7 @@ export function WorkspaceSurface() {
               todos={view.todos}
               sources={view.sources}
               onSendPrompt={handleSteer}
+              sessionRunning={view.status === 'running' || active?.status === 'running'}
               onCollapse={() => {
                 dispatch({ type: 'setReview', visible: false })
               }}

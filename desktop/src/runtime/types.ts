@@ -200,6 +200,8 @@ export type SessionEventType =
   | 'steer_queued'
   | 'plan_mode'
   | 'plan_submitted'
+  // Plan-mode draft grew — throttled invalidation signal (metadata only).
+  | 'plan_draft'
   // 结构化提问卡片 — ask_user_question 的问题/选项（Cursor 3.0 风格 QuestionCard）。
   | 'user_question'
   | 'model_switched'

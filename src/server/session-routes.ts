@@ -210,15 +210,38 @@ export function buildSessionRoutes(
       return { status: 200, body: { plan } }
     }, apiToken),
 
-    // Build — approve a plan and inject it as the next turn for execution.
+    // Plan edit — replace a submitted plan's markdown before approval
+    // (desktop review → tweak → Build loop; Cursor 3.0 parity).
+    'PUT /sessions/:id/plans/:slug': withAuth(async (body, params) => {
+      const data = (body ?? {}) as { content?: string }
+      if (typeof data.content !== 'string') {
+        return { status: 400, body: { error: 'Missing "content" string' } }
+      }
+      const outcome = await manager.updatePlan(params!.id!, decodeSlug(params!.slug!), data.content)
+      if (!outcome.ok) {
+        const status =
+          outcome.code === 'session-missing' || outcome.code === 'plan-not-found' ? 404
+          : outcome.code === 'empty-content' ? 400
+          : 409
+        return { status, body: { error: outcome.reason, code: outcome.code } }
+      }
+      return { status: 200, body: { ok: true } }
+    }, apiToken),
+
+    // Build — approve a plan (shared guard kernel: content validation + anchor
+    // drift recheck) and inject the wave-execution kickoff as the next turn.
     'POST /sessions/:id/plans/:slug/approve': withAuth(async (body, params) => {
       const data = (body ?? {}) as { selectedApproach?: string }
       const selectedApproach = typeof data.selectedApproach === 'string' && data.selectedApproach.trim()
         ? data.selectedApproach.trim()
         : undefined
-      const ok = await manager.approvePlan(params!.id!, decodeSlug(params!.slug!), selectedApproach)
-      if (!ok) {
-        return { status: 409, body: { error: 'Session missing/running, plan not found, or unknown selectedApproach' } }
+      const outcome = await manager.approvePlan(params!.id!, decodeSlug(params!.slug!), selectedApproach)
+      if (!outcome.ok) {
+        const status =
+          outcome.code === 'session-missing' || outcome.code === 'plan-not-found' ? 404
+          : outcome.code === 'invalid-content' ? 422
+          : 409
+        return { status, body: { error: outcome.reason, code: outcome.code } }
       }
       return { status: 200, body: { ok: true } }
     }, apiToken),

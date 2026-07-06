@@ -37,6 +37,7 @@ import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
 import { formatMention } from '../lib/mention-input'
 import { useUiState, useUiDispatch } from '../state/store'
+import { usePlanModeShortcut } from '../hooks/use-plan-mode-shortcut'
 import { SideChat } from '../components/SideChat'
 import { MessageNavigator, type TurnEntry } from '../components/MessageNavigator'
 import { QuestionCard } from './QuestionCard'
@@ -146,6 +147,12 @@ export function ThreadView(props: {
       }
     }
   }, [historyTexts, input, setInput])
+  // Global Shift+Tab → Plan/Agent toggle (Cursor parity). The composer handles
+  // its own Shift+Tab; this covers the rest of the thread surface.
+  const togglePlanMode = useCallback(() => {
+    onSetPlanMode?.(view.planMode === 'planning' ? 'off' : 'planning')
+  }, [onSetPlanMode, view.planMode])
+  usePlanModeShortcut(onSetPlanMode ? togglePlanMode : undefined)
   const qc = useQueryClient()
   const [showRewind, setShowRewind] = useState(false)
   const [showDelegation, setShowDelegation] = useState(false)
@@ -509,11 +516,12 @@ export function ThreadView(props: {
       name: '/plan',
       desc: '进入 Plan 模式 · 调研后写方案',
       example: '/plan <功能描述>',
+      // 只切模式，不烧一轮对话——plan mode 的系统提示已经写明职责，
+      // 用户接着输入的任务描述才是第一轮（省一次 API 往返 + 缓存零扰动）。
       run: () => {
         if (onSetPlanMode && view.planMode !== 'planning') {
           onSetPlanMode('planning')
         }
-        onSend('Enter plan mode. Explore the codebase and produce an implementation plan for the task I will describe next.')
       },
     },
     {

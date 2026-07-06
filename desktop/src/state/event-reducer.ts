@@ -623,6 +623,12 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       if (slug) next.latestPlanSlug = slug
       return next
     }
+    // Plan-mode draft grew (throttled server signal) — bump planRev so the
+    // plan list query re-fetches the draft body. This is the primary liveness
+    // channel for the "起草中" view; the slow poll is only a fallback.
+    case 'plan_draft':
+      next.planRev = next.planRev + 1
+      return next
     case 'steer_queued':
       next.private_textOpen = false
       next.private_thinkingOpen = false

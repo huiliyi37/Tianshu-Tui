@@ -526,6 +526,18 @@ test('plan_submitted bumps planRev and records latest slug', () => {
   assert.equal(s.latestPlanSlug, 'my-plan')
 })
 
+test('plan_draft bumps planRev without touching plan mode or blocks', () => {
+  seq = 0
+  const s = fold([
+    ev('plan_mode', { state: 'planning' }),
+    ev('plan_draft', { path: '.rivet/plans/draft-1.md', title: '草稿', size: 120 }),
+    ev('plan_draft', { path: '.rivet/plans/draft-1.md', title: '草稿', size: 480 }),
+  ])
+  assert.equal(s.planMode, 'planning')
+  assert.equal(s.planRev, 3, 'each draft signal re-fetches the plan list')
+  assert.equal(s.blocks.length, 0, 'draft signals never render as thread blocks')
+})
+
 test('events batch coalesces consecutive text_delta into one block (same result as one-by-one)', () => {
   seq = 0
   const batch = [

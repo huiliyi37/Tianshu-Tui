@@ -483,6 +483,11 @@ export async function getPlan(id: string, slug: string): Promise<PlanDoc> {
   return plan
 }
 
+/** Edit a submitted plan's markdown before approval (review → tweak → Build). */
+export function updatePlan(id: string, slug: string, content: string): Promise<{ ok: boolean }> {
+  return apiPut<{ ok: boolean }>(`/sessions/${id}/plans/${encodeURIComponent(slug)}`, { content })
+}
+
 /** Build — approve a plan and start executing it. */
 export function approvePlan(id: string, slug: string, selectedApproach?: string): Promise<{ ok: boolean }> {
   return apiPost<{ ok: boolean }>(

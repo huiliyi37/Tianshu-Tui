@@ -32,11 +32,13 @@ import type { PlanModeState } from '../agent/plan-mode.js'
 import {
   listPlans as storeListPlans,
   readPlan as storeReadPlan,
-  approvePlan as storeApprovePlan,
   rejectPlan as storeRejectPlan,
+  writePlan as storeWritePlan,
   resolvePlanOptionLabel,
+  parsePlanOptions,
   type PlanDocument,
 } from '../plan/plan-store.js'
+import { approvePlanWithGuards, type PlanApprovalResult } from '../plan/plan-approval.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
 import { WatchdogRecoveryPolicy } from '../agent/watchdog-recovery-policy.js'
 import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domain-picker-entries.js'
@@ -63,6 +65,24 @@ export interface PlanDraft {
   content: string
 }
 
+/** Structured approval outcome — routes surface `reason` instead of a blind 409. */
+export type PlanApprovalOutcome =
+  | { ok: true }
+  | {
+      ok: false
+      code: 'session-missing' | 'session-running' | 'plan-not-found' | 'invalid-content' | 'bad-approach'
+      reason: string
+    }
+
+/** Structured plan-edit outcome (PUT /plans/:slug). */
+export type PlanUpdateOutcome =
+  | { ok: true }
+  | {
+      ok: false
+      code: 'session-missing' | 'plan-not-found' | 'not-editable' | 'empty-content'
+      reason: string
+    }
+
 export type SessionEventType =
   | 'user'
   | 'text_delta'
@@ -88,6 +108,9 @@ export type SessionEventType =
   // Plan mode — state toggle (off|planning) + a plan was submitted to disk.
   | 'plan_mode'
   | 'plan_submitted'
+  // Plan mode — the agent grew the active draft (throttled invalidation signal;
+  // metadata only, the desktop re-fetches the body via GET /plans).
+  | 'plan_draft'
   // Structured ask_user_question payload → desktop question card (Cursor-style).
   | 'user_question'
   // PlusMenu — per-session model / star-domain / skill selection changes.
@@ -565,6 +588,10 @@ interface InternalSession {
   watchdogRecoveryCancelled?: boolean
   /** C2 刹车 — watchdog 续跑倒计时定时器。窗口内用户 abort / 新 prompt 取消。 */
   watchdogContinueTimer?: NodeJS.Timeout
+  /** plan_draft 节流 — 最近一次发射时刻（this.now() 读数）。 */
+  planDraftLastEmit?: number
+  /** plan_draft 节流 — 尾沿定时器，保证窗口内最后一次写盘总能落一发事件。 */
+  planDraftTimer?: NodeJS.Timeout
 }
 
 const REDACTED = '[REDACTED]'
@@ -580,6 +607,10 @@ const WATCHDOG_APPROVAL_GRACE_MS = 5_000
 /** Cap on concurrent user-dispatched background workers per session (guards the
  *  shared coordinator from being swamped). */
 const MAX_USER_BACKGROUND_WORKERS = 4
+
+/** plan_draft 事件节流窗口——agent 增量写草稿可能一轮多次落盘，事件只是
+ *  失效信号（桌面收到后重拉正文），1s 粒度足够「直播感」。 */
+const PLAN_DRAFT_THROTTLE_MS = 1_000
 
 /** Result of a user-dispatch request — lets the route map a precise status code. */
 export type DelegateResult =
@@ -919,6 +950,7 @@ export class RuntimeSessionManager {
     if (!s) return false
     try { s.agent?.shutdown?.() } catch { /* best-effort */ }
     try { s.jobs?.killAll() } catch { /* best-effort */ }
+    if (s.planDraftTimer) clearTimeout(s.planDraftTimer)
     try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* best-effort */ }
     this.sessions.delete(id)
     const i = this.loadedOrder.indexOf(id)
@@ -1476,34 +1508,87 @@ export class RuntimeSessionManager {
   }
 
   /**
-   * Build (approve) a plan: mark it approved on disk, release plan mode, then
-   * inject the approved plan as the next turn so the agent executes it. Refuses
-   * when the session is missing/running or the plan can't be approved.
+   * Edit a submitted plan's markdown before approval (desktop plan editing —
+   * Cursor 3.0 parity: review → tweak the document → Build). Only `submitted`
+   * plans are editable; approved/executed are historical records and rejected
+   * are archived. Emits `plan_submitted` so viewers re-fetch the body.
    */
-  async approvePlan(id: string, slug: string, selectedApproach?: string): Promise<boolean> {
+  async updatePlan(id: string, slug: string, content: string): Promise<PlanUpdateOutcome> {
     const session = this.sessions.get(id)
-    if (!session || session.running) return false
+    if (!session) return { ok: false, code: 'session-missing', reason: 'Session not found' }
+    const trimmed = content.trim()
+    if (!trimmed) return { ok: false, code: 'empty-content', reason: 'Plan content must not be empty' }
+    const existing = await storeReadPlan(session.record.cwd, slug)
+    if (!existing) return { ok: false, code: 'plan-not-found', reason: `Plan not found: "${slug}"` }
+    if (existing.status !== 'submitted') {
+      return { ok: false, code: 'not-editable', reason: `Only submitted plans can be edited (status: ${existing.status})` }
+    }
+    // Options: honour a frontmatter block the editor kept/changed; fall back to
+    // the recorded ones so a body-only edit never silently drops the choices.
+    const options = parsePlanOptions(content) ?? existing.options
+    try {
+      await storeWritePlan(session.record.cwd, slug, content, options)
+    } catch {
+      return { ok: false, code: 'plan-not-found', reason: `Failed to write plan "${slug}"` }
+    }
+    const updated = await storeReadPlan(session.record.cwd, slug)
+    this.touch(session)
+    this.append(session, 'plan_submitted', {
+      slug,
+      title: updated?.title ?? existing.title,
+      status: 'submitted',
+    })
+    this.persistRecord(session)
+    return { ok: true }
+  }
+
+  /**
+   * Build (approve) a plan: run the shared approval guards (content validation +
+   * anchor-drift recheck), mark it approved on disk, release plan mode, then
+   * inject the wave-execution kickoff as the next turn. Returns a structured
+   * failure so the route can surface WHY approval was refused (the old boolean
+   * collapsed "session running" / "empty plan" / "bad option" into one 409).
+   */
+  async approvePlan(id: string, slug: string, selectedApproach?: string): Promise<PlanApprovalOutcome> {
+    const session = this.sessions.get(id)
+    if (!session) return { ok: false, code: 'session-missing', reason: 'Session not found' }
+    if (session.running) {
+      return { ok: false, code: 'session-running', reason: 'Session is running — wait for the current turn to finish before Build' }
+    }
     // Validate the selected approach BEFORE mutating the plan file — approving
     // first would leave the file marked APPROVED even when the option is bogus.
     let resolvedApproach: string | undefined
     if (selectedApproach?.trim()) {
       const pending = await storeReadPlan(session.record.cwd, slug)
-      if (!pending) return false
+      if (!pending) return { ok: false, code: 'plan-not-found', reason: `Plan not found: "${slug}"` }
       if (pending.options && pending.options.length > 0) {
         resolvedApproach = resolvePlanOptionLabel(pending.options, selectedApproach)
-        if (!resolvedApproach) return false
+        if (!resolvedApproach) {
+          return { ok: false, code: 'bad-approach', reason: `Unknown selectedApproach "${selectedApproach}"` }
+        }
       } else {
         // No recorded options — pass the user's text through as-is.
         resolvedApproach = selectedApproach.trim()
       }
     }
-    let approved: PlanDocument | null
+    // Shared approval kernel (same closed loop as TUI /plan-approve): empty/
+    // placeholder plans hard-fail, anchor drift is rechecked and injected into
+    // the kickoff, and the kickoff drives wave-by-wave execution through the
+    // review gates (plan_task/team_orchestrate + plan_close).
+    let result: PlanApprovalResult
     try {
-      approved = await storeApprovePlan(session.record.cwd, slug)
+      result = await approvePlanWithGuards(session.record.cwd, slug, resolvedApproach)
     } catch {
-      return false
+      return { ok: false, code: 'plan-not-found', reason: `Plan not found: "${slug}"` }
     }
-    if (!approved) return false
+    if (!result.ok) {
+      return {
+        ok: false,
+        code: result.code === 'invalid-content' ? 'invalid-content' : 'plan-not-found',
+        reason: result.reason,
+      }
+    }
+    const { approved, kickoff } = result
     const agent = this.ensureAgent(session)
     try {
       agent.setActivePlan?.({
@@ -1521,18 +1606,17 @@ export class RuntimeSessionManager {
     }
     this.touch(session)
     this.persistRecord(session)
-    let kickoff = `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`
-    if (resolvedApproach) {
-      kickoff += `\nSelected approach: ${resolvedApproach} — execute ONLY this approach. Do not execute unselected alternatives.`
-    }
     this.run(id, kickoff)
-    return true
+    return { ok: true }
   }
 
   /**
    * Reject a plan with optional feedback. Keeps the plan on disk (marked
-   * rejected) and, when a comment is given on an idle session, kicks a revision
-   * turn so the agent can re-plan. Emits `plan_submitted` to refresh viewers.
+   * rejected) and re-enters plan mode. Revision feedback routing depends on
+   * session state: idle → kick a revision turn immediately; running → queue
+   * through the steer buffer (injected at the next tool boundary), so mid-run
+   * feedback is never silently dropped. Emits `plan_submitted` to refresh
+   * viewers.
    */
   async rejectPlan(id: string, slug: string, comment?: string): Promise<boolean> {
     const session = this.sessions.get(id)
@@ -1557,11 +1641,16 @@ export class RuntimeSessionManager {
     this.touch(session)
     this.persistRecord(session)
     const note = comment?.trim()
-    if (note && !session.running) {
-      this.run(
-        id,
-        `User rejected the plan. Feedback:\n\n${note}\n\nRevise the plan in \`.rivet/plans/${slug}.md\`, then call plan action=submit again.`,
-      )
+    if (note) {
+      const revisionPrompt = `User rejected the plan. Feedback:\n\n${note}\n\nRevise the plan in \`.rivet/plans/${slug}.md\`, then call plan action=submit again.`
+      if (session.running) {
+        // Mid-run rejection: the feedback rides the steer buffer (next tool
+        // boundary) instead of being dropped — the old code only handled idle.
+        session.steer.push(revisionPrompt)
+        this.append(session, 'steer_queued', { text: redactText(revisionPrompt) })
+      } else {
+        this.run(id, revisionPrompt)
+      }
     }
     return true
   }
@@ -2406,6 +2495,18 @@ export class RuntimeSessionManager {
         if (name === 'plan_submit' && !isError) {
           void this.emitPlanSubmitted(session)
         }
+        // Plan mode — while planning, write_file/edit_file can only touch the
+        // active draft (checkPlanMode gates every other path), so a successful
+        // final write means the draft grew. Emit a throttled invalidation
+        // signal — this replaces the desktop's 2s draft polling as the primary
+        // liveness channel (polling stays as a degraded fallback).
+        if (
+          isError === false
+          && session.record.planMode === 'planning'
+          && (name === 'write_file' || name === 'edit_file')
+        ) {
+          this.schedulePlanDraftEvent(session)
+        }
         this.scanArtifacts(session)
       },
       onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
@@ -2587,6 +2688,50 @@ export class RuntimeSessionManager {
       }
     } catch {
       // non-fatal — the desktop can still poll GET /plans
+    }
+  }
+
+  /**
+   * Throttled `plan_draft` scheduler. Leading edge fires immediately; writes
+   * inside the window arm ONE trailing timer so the final write of a burst
+   * always lands an event (a plain leading-edge throttle would leave the
+   * desktop stale until its fallback poll).
+   */
+  private schedulePlanDraftEvent(session: InternalSession): void {
+    const now = this.now()
+    const elapsed = now - (session.planDraftLastEmit ?? 0)
+    if (elapsed >= PLAN_DRAFT_THROTTLE_MS) {
+      session.planDraftLastEmit = now
+      void this.emitPlanDraft(session)
+      return
+    }
+    if (session.planDraftTimer) return
+    session.planDraftTimer = setTimeout(() => {
+      session.planDraftTimer = undefined
+      session.planDraftLastEmit = this.now()
+      void this.emitPlanDraft(session)
+    }, PLAN_DRAFT_THROTTLE_MS - elapsed)
+    session.planDraftTimer.unref?.()
+  }
+
+  /**
+   * Emit the `plan_draft` invalidation signal. Metadata only (title/size/path)
+   * — never the body — so events.jsonl stays small; viewers re-fetch the
+   * content via GET /sessions/:id/plans. Best-effort: a read failure only
+   * delays the live refresh (the poll fallback still covers it).
+   */
+  private async emitPlanDraft(session: InternalSession): Promise<void> {
+    if (session.record.planMode !== 'planning') return
+    try {
+      const draft = await this.readPlanDraft(session.record.id)
+      if (!draft) return
+      this.append(session, 'plan_draft', {
+        path: draft.path,
+        title: draft.title,
+        size: draft.content.length,
+      })
+    } catch {
+      // non-fatal — the desktop's fallback poll still refreshes the draft
     }
   }
 
