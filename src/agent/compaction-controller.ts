@@ -1134,6 +1134,7 @@ export class CompactionController {
         compactMessages,
         undefined,
         this.deps.contextWindow,
+        { sidePath: true },
       )
       request.tools = undefined
 
@@ -1274,6 +1275,7 @@ export class CompactionController {
         compactMessages,
         undefined,
         this.deps.contextWindow,
+        { sidePath: true },
       )
       request.tools = undefined
 

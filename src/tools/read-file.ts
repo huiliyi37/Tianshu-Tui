@@ -395,6 +395,19 @@ export interface ReadFilePayload {
   uiContent: string
 }
 
+/**
+ * The agent's own state dir (`<cwd>/.rivet/`) is exempt from the gitignore
+ * read block. Plan drafts (`.rivet/plans/draft-*.md`) are intentionally
+ * gitignored, but plan mode makes the draft the ONLY writable file — blocking
+ * reads on it deadlocks revision (session 91840816: write ok → submit
+ * rejected → read back refused → wedged). The gitignore block exists to keep
+ * node_modules/build junk out, not the agent's own working files.
+ */
+function isRivetStatePath(cwd: string, filePath: string): boolean {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '')
+  return norm(filePath).startsWith(`${norm(cwd)}/.rivet/`)
+}
+
 /** Centralized safe file read — validates path, checks gitignore, applies offset/limit, truncates for model. */
 export async function readFilePayload(cwd: string, options: ReadFilePayloadOptions): Promise<ReadFilePayload> {
   const filePath = validatePath(cwd, options.filePath)
@@ -406,7 +419,7 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
   }
 
   const filter = await getGitignoreFilter(cwd)
-  if (filter.isIgnored(cwd, filePath)) {
+  if (filter.isIgnored(cwd, filePath) && !isRivetStatePath(cwd, filePath)) {
     throw new Error(`File is gitignored (node_modules, build artifacts, etc.): ${filePath}`)
   }
 

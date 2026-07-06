@@ -109,61 +109,56 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
   // verification_coverage must be semantically honest: it reports the ratio of
   // modified files that have been verified. When no verification command has
   // actually run, showing "high" or "1.00" gives a false sense of safety.
+  // All continuous dims render as low/mid/high bands (2026-07-06): the mirror
+  // rides the appendixDelta, and 2-decimal floats drift every turn — the block
+  // never went byte-quiet. Band transitions are exactly the state changes the
+  // model should perceive, so byte-diff on coarse labels ≡ "notify on transition".
+  // The special literals below stay exact: they're already constant and
+  // semantically precise (none / 0.00 honest-warning / 1.00 fully-verified).
   const filesModifiedCount = ledger.evidence?.filesModified?.size ?? 0
   const verificationRuns = ledger.evidence?.verifications?.length ?? 0
   let confLabel: string
   if (verificationRuns === 0) {
     confLabel = filesModifiedCount === 0 ? 'none' : '0.00'
   } else {
-    confLabel = filesModifiedCount === 0 ? '1.00' : formatDim(s.confidence)
+    confLabel = filesModifiedCount === 0 ? '1.00' : coarseLabel(s.confidence)
   }
   const parts: string[] = [`verification_coverage="${confLabel}"`]
-
-  // Coarse-grain complexity to avoid false precision in early turns.
-  // A 2-decimal float like "1.00" implies measurement granularity that doesn't exist
-  // before any tools have run. Use low/mid/high bands until evidence accumulates.
-  const hasEvidence = filesModifiedCount > 0
 
   parts.push(`files_modified="${ledger.evidence.filesModified.size}"`)
 
   if (s.complexity !== undefined) {
-    const cxLabel = !hasEvidence ? coarseLabel(s.complexity) : formatDim(s.complexity)
-    parts.push(`complexity="${cxLabel}"`)
+    parts.push(`complexity="${coarseLabel(s.complexity)}"`)
   }
   // momentum, freshness, pressure — routing-only: consumed by hooks from sensorium directly
-  if (s.stability !== undefined) parts.push(`stability="${formatDim(s.stability)}"`)
+  if (s.stability !== undefined) parts.push(`stability="${coarseLabel(s.stability)}"`)
 
   if (ledger.strategy) {
     const st = ledger.strategy
     if (st.reasoningEffort && st.reasoningEffort !== 'medium') parts.push(`reasoning="${st.reasoningEffort}"`)
-    if (st.explorationBreadth !== undefined) parts.push(`exploration="${formatDim(st.explorationBreadth)}"`)
-    if (st.commitThreshold !== undefined && st.commitThreshold > 0.7) parts.push(`caution="${formatDim(st.commitThreshold)}"`)
+    if (st.explorationBreadth !== undefined) parts.push(`exploration="${coarseLabel(st.explorationBreadth)}"`)
+    if (st.commitThreshold !== undefined && st.commitThreshold > 0.7) parts.push(`caution="${coarseLabel(st.commitThreshold)}"`)
     if (st.shouldEscalate) parts.push(`escalation="true"`)
   }
 
   if (ledger.vigor) {
     const v = ledger.vigor
-    parts.push(`vigor="${formatDim(v.vigor)}"`)
-    if (v.curiosity > 0.3) parts.push(`curiosity="${formatDim(v.curiosity)}"`)
+    parts.push(`vigor="${coarseLabel(v.vigor)}"`)
+    if (v.curiosity > 0.3) parts.push(`curiosity="${coarseLabel(v.curiosity)}"`)
   }
 
   if (ledger.season) {
     const intensity = ledger.seasonIntensity
     const seasonVal = intensity !== undefined && intensity < 1.0
-      ? `${ledger.season}:${formatDim(intensity)}`
+      ? `${ledger.season}:${coarseLabel(intensity)}`
       : ledger.season
     parts.push(`season="${seasonVal}"`)
   }
 
-  if (ledger.convergencePrecision !== undefined) parts.push(`convergence_precision="${formatDim(ledger.convergencePrecision)}"`)
-  if (ledger.outputEfficiency !== undefined) parts.push(`output_efficiency="${formatDim(ledger.outputEfficiency)}"`)
+  if (ledger.convergencePrecision !== undefined) parts.push(`convergence_precision="${coarseLabel(ledger.convergencePrecision)}"`)
+  if (ledger.outputEfficiency !== undefined) parts.push(`output_efficiency="${coarseLabel(ledger.outputEfficiency)}"`)
 
   return `<cognitive-mirror ${parts.join(' ')} />`
-}
-
-/** Format a 0–1 dimension value to 2 decimal places. */
-function formatDim(value: number): string {
-  return value.toFixed(2)
 }
 
 /** Coarse-grain a 0–1 value to low/mid/high for early-turn false-precision avoidance. */

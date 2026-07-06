@@ -65,7 +65,7 @@ export interface TurnStreamInput {
 export interface TurnStreamResult {
   collectedBlocks: ContentBlock[]
   thinkingAccum: string
-  toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>
+  toolUses: Array<{ id: string; name: string; input: Record<string, unknown>; argsTruncated?: boolean }>
   stopReason: string
   streamError: Error | null
   lastTurnTextFingerprint: string
@@ -96,7 +96,7 @@ export class TurnStreamController {
   async streamTurn(input: TurnStreamInput): Promise<TurnStreamResult> {
     const collectedBlocks: ContentBlock[] = []
     let thinkingAccum = ''
-    const toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }> = []
+    const toolUses: Array<{ id: string; name: string; input: Record<string, unknown>; argsTruncated?: boolean }> = []
     let stopReason = ''
     let turnDisplayBuffer = ''
     const CHUNK_DEDUP_HISTORY = 5
@@ -149,7 +149,7 @@ export class TurnStreamController {
       onContentBlock: (block) => {
         collectedBlocks.push(block)
         if (isToolUse(block)) {
-          toolUses.push({ id: block.id, name: block.name, input: block.input })
+          toolUses.push({ id: block.id, name: block.name, input: block.input, argsTruncated: block.argsTruncated })
           input.callbacks.onToolUse(block.id, block.name, block.input)
 
           // TTSR: match stream rules against the bash command the model is about

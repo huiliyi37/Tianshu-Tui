@@ -150,6 +150,13 @@ return new TurnStreamController({
           self.lastArchive = null
           self.prevEstTokens = estTokensNow
 
+          // Prefix-divergence probe (2026-07-05 cache investigation): when the
+          // request was NOT a pure append over the previous one, record which
+          // message diverged. Joined with cacheRead regressions this separates
+          // client-side byte changes from provider-side落盘 failures.
+          const divergence = self.config.promptEngine.consumePrefixDivergence?.()
+          if (divergence) entry.prefixDiverged = divergence
+
           // Engine event diffs (volatile swap / frozen clamp / fallback / tools)
           const stats = self.config.promptEngine.getCacheEventStats?.()
           if (stats) {
@@ -757,8 +764,6 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       set latestFsWatcherState(v) { self.latestFsWatcherState = v },
       get consecutiveNoToolTurns() { return self.consecutiveNoToolTurns },
       set consecutiveNoToolTurns(v) { self.consecutiveNoToolTurns = v },
-      get autoContinueCount() { return self.autoContinueCount },
-      set autoContinueCount(v) { self.autoContinueCount = v },
       get wedgeToolFingerprint() { return self.wedgeToolFingerprint },
       set wedgeToolFingerprint(v) { self.wedgeToolFingerprint = v },
       get wedgeRepeatCount() { return self.wedgeRepeatCount },
@@ -790,7 +795,6 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       get runLoopTurn() { return self.runLoopTurn },
       set runLoopTurn(v) { self.runLoopTurn = v },
     } as TurnStateBag,
-    getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
     getDoomLoopLevel: () => self.getDoomLoopLevel(),
 
     // === Sub-controllers ===
@@ -845,12 +849,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
         set thinkingOnlyRetries(v) { self.thinkingOnlyRetries = v },
         get lastThinkingContent() { return self.lastThinkingContent },
         set lastThinkingContent(v) { self.lastThinkingContent = v },
-        get autoContinueCount() { return self.autoContinueCount },
-        set autoContinueCount(v) { self.autoContinueCount = v },
-        get taskContract() { return self.taskContract },
-        set taskContract(v) { self.taskContract = v },
       },
-      getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
       getDoomLoopLevel: () => self.getDoomLoopLevel(),
       appendSystemReminder: (content) => { self.session.appendSystemReminder(content) },
       completeTurn: (params) => self.turnCompletion.complete(params),

@@ -16,7 +16,7 @@ export function loadThemePref(): ThemePref {
   } catch {
     // disabled storage — fall through
   }
-  return 'dark'
+  return 'light'
 }
 
 export function saveThemePref(pref: ThemePref): void {

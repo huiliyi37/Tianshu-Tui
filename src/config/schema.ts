@@ -244,11 +244,6 @@ export const agentSchema = z.object({
    *  provider/model for heterogeneous (cross-model) councils. */
   council: councilConfigSchema,
   /**
-   * Max auto-continue iterations per run when a no-tool turn shows action intent
-   * or an open task contract (phantom tool-call recovery). 0 disables. Clamped 0..3.
-   */
-  maxAutoContinue: z.number().int().min(0).max(3).default(1),
-  /**
    * C3 检查点间隔 — Auto 模式下每 N 轮暂停并同步进度摘要（0 = 关）。
    * YOLO 和 Manual 模式不读此字段。仅在高风险仍需人工确认的 auto-safe 模式下生效。
    */

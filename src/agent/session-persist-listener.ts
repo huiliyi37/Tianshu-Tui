@@ -45,10 +45,14 @@ export function attachSessionPersistListener(deps: {
               patch.toolCallCount = (snapshot?.toolCallCount ?? 0) + msg.tool_calls.length
             }
             const usage = session.getTotalUsage()
+            // Usage.input_tokens is cache-INCLUSIVE by codebase convention
+            // (see Usage in api/types.ts). Adding cache_read/cache_creation on
+            // top double-counted the prompt exactly 2x for DeepSeek, where
+            // input = hit + miss (cache-log 6bfc4465: meta 11.34M vs real 5.67M).
             patch.tokenUsage = {
-              prompt: usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens,
+              prompt: usage.input_tokens,
               completion: usage.output_tokens,
-              total: usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens + usage.output_tokens,
+              total: usage.input_tokens + usage.output_tokens,
             }
             persist.updateMetadata(patch)
           } catch { /* metadata update failures are non-critical */ }

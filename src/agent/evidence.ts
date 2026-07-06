@@ -58,8 +58,6 @@ export interface EvidenceSummary {
   impactedTests: string[]
 }
 
-export type EvidenceLocale = 'zh-CN' | 'en'
-
 const MAX_VERIFICATIONS = 50
 
 /** Code file extensions whose edits should count toward the TDD gate.
@@ -89,85 +87,16 @@ export interface EvidenceTrackerPublic {
   getVerificationSummary(): VerificationSummary
   getGateState(): TddGateState
   buildSummary(gateV2?: AuthoritativeGateView): EvidenceSummary
-  buildBadge(options?: { locale?: EvidenceLocale; gateV2?: AuthoritativeGateView }): string | null
   reset(): void
 }
 
-/** Track 3: 权威门禁视图（delivery-gate-v2 的最小投影）。注入时 badge 的
- *  门禁行以 v2 GREEN/YELLOW/RED 为准，替代 v1 的 EvidenceState 推导。 */
+/** Track 3: 权威门禁视图（delivery-gate-v2 的最小投影）。注入时 summary 的
+ *  门禁字段以 v2 GREEN/YELLOW/RED 为准，替代 v1 的 EvidenceState 推导。 */
 export interface AuthoritativeGateView {
   state: 'GREEN' | 'YELLOW' | 'RED'
   reason?: string
   blockingReason?: string
   shortestNextStep?: string
-}
-
-const UI_LABELS: Record<EvidenceLocale, {
-  evidence: string
-  filesRead: string
-  filesModified: string
-  deliveryGate: string
-  blocking: string
-  nextAction: string
-  impactedFiles: string
-  testsToVerify: string
-  verification: string
-  verified: string
-  failed: string
-  blocked: string
-  unverified: string
-  verificationFailed: string
-  verificationBlocked: string
-  unverifiedChanges: string
-  testsNotRun: string
-  targeted: string
-  full: string
-  passed: string
-}> = {
-  'zh-CN': {
-    evidence: '任务完成总结',
-    filesRead: '读取文件',
-    filesModified: '改动文件',
-    deliveryGate: '交付门禁',
-    blocking: '阻塞原因',
-    nextAction: '建议下一步',
-    impactedFiles: '影响文件',
-    testsToVerify: '待验证测试',
-    verification: '验证结果',
-    verified: '已通过',
-    failed: '失败',
-    blocked: '被阻塞',
-    unverified: '未验证',
-    verificationFailed: '验证失败',
-    verificationBlocked: '验证被阻塞',
-    unverifiedChanges: '未经验证的改动',
-    testsNotRun: '未运行测试',
-    targeted: '定向',
-    full: '全量',
-    passed: '通过',
-  },
-  en: {
-    evidence: 'Evidence',
-    filesRead: 'Files read',
-    filesModified: 'Files modified',
-    deliveryGate: 'Delivery gate',
-    blocking: 'Blocking',
-    nextAction: 'Next action',
-    impactedFiles: 'Impacted files',
-    testsToVerify: 'Tests to verify',
-    verification: 'Verification',
-    verified: 'verified',
-    failed: 'failed',
-    blocked: 'blocked',
-    unverified: 'unverified',
-    verificationFailed: 'Verification failed',
-    verificationBlocked: 'Verification blocked',
-    unverifiedChanges: 'Unverified changes',
-    testsNotRun: 'Tests not run',
-    targeted: 'targeted',
-    full: 'full',
-    passed: 'passed',
-  },
 }
 
 export class EvidenceTracker implements EvidenceTrackerPublic {
@@ -332,76 +261,6 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
       impactedFiles: [...this.state.impactedFiles].sort(),
       impactedTests: [...this.state.impactedTests].sort(),
     }
-  }
-
-  buildBadge(options?: { locale?: EvidenceLocale; gateV2?: AuthoritativeGateView }): string | null {
-    const locale = options?.locale ?? 'en'
-    const gateV2 = options?.gateV2
-    const summary = this.buildSummary(gateV2)
-    const L = UI_LABELS[locale]
-
-    if (summary.filesRead.length + summary.filesModified.length === 0 && summary.verifications.length === 0) {
-      return null
-    }
-
-    const parts: string[] = ['---', `## ${L.evidence}`]
-
-    if (summary.filesRead.length > 0) {
-      parts.push(`- ${L.filesRead}：${summary.filesRead.length}`)
-    }
-    if (summary.filesModified.length > 0) {
-      parts.push(`- ${L.filesModified}：${summary.filesModified.length}`)
-      for (const f of summary.filesModified) parts.push(`  - ${f}`)
-    }
-
-    if (gateV2) {
-      if (summary.filesModified.length > 0 || gateV2.state !== 'GREEN') {
-        parts.push(`- **${L.deliveryGate}**：${gateV2.state}${gateV2.reason ? ` — ${gateV2.reason}` : ''}`)
-        if (gateV2.state === 'RED' && gateV2.blockingReason) {
-          parts.push(`- **${L.blocking}**：${gateV2.blockingReason}`)
-        }
-        if (gateV2.shortestNextStep) {
-          parts.push(`- **${L.nextAction}**：${gateV2.shortestNextStep}`)
-        }
-      }
-    } else {
-      const status = summary.verificationStatus
-      if (status === 'failed') {
-        const failedRun = summary.verifications.find(r => r.status === 'failed')
-        parts.push(`- **${L.verificationFailed}**：${failedRun?.command ?? ''}`)
-      } else if (status === 'blocked') {
-        parts.push(`- **${L.verificationBlocked}**`)
-      } else if (status === 'unverified' && summary.filesModified.length > 0) {
-        parts.push(`- **${L.unverifiedChanges}**：${summary.filesModified.join(', ')}`)
-      }
-
-      if (summary.filesModified.length > 0) {
-        parts.push(`- **${L.deliveryGate}**：${summary.gate.label}`)
-        if (summary.gate.nextAction) parts.push(`- **${L.nextAction}**：${summary.gate.nextAction}`)
-      }
-    }
-
-    if (summary.verifications.length > 0 || summary.filesModified.length > 0) {
-      parts.push(`## ${L.verification}`)
-      const last = summary.verifications[summary.verifications.length - 1]
-      if (!last) {
-        parts.push(`- ${L.testsNotRun}`)
-      } else if (last.status === 'blocked') {
-        parts.push(`- ${L.testsNotRun}：${last.command}`)
-      } else {
-        const scope = last.scope === 'targeted' ? L.targeted : L.full
-        parts.push(`- ${scope}${L.verification}：${last.passed} ${L.passed} / ${last.failed} ${L.failed}`)
-      }
-    }
-
-    if (summary.impactedFiles.length > 0) {
-      parts.push(`- **${L.impactedFiles}**：${summary.impactedFiles.join(', ')}`)
-    }
-    if (summary.impactedTests.length > 0) {
-      parts.push(`- **${L.testsToVerify}**：${summary.impactedTests.join(', ')}`)
-    }
-
-    return parts.join('\n')
   }
 
   reset(): void {
