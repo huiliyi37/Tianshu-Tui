@@ -37,12 +37,15 @@ import { isAppGranted } from './app-grants.js'
 export type ComputerUseAction =
   | 'list_apps'
   | 'snapshot'
+  | 'find'
+  | 'wait_for'
   | 'click'
   | 'double_click'
   | 'right_click'
   | 'scroll'
   | 'drag'
   | 'type'
+  | 'set_value'
   | 'key'
   | 'wait'
   | 'focus_app'
@@ -89,6 +92,14 @@ const WAIT_CAP_MS = 5_000
 
 /** UI settle delay before the post-action feedback snapshot (ms). */
 const FEEDBACK_SETTLE_MS = 400
+
+/** wait_for polling cadence / default deadline / hard cap (ms). */
+const WAIT_FOR_POLL_MS = 700
+const WAIT_FOR_DEFAULT_MS = 5_000
+const WAIT_FOR_CAP_MS = 15_000
+
+/** Max matched lines a find/wait_for result will carry. */
+const FIND_MAX_LINES = 40
 
 interface SnapshotCacheEntry {
   refs: Map<number, SnapshotRef>
@@ -174,6 +185,19 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
         const point = await driver.locate(app, resolved.target)
         return { ok: true, point }
       } catch (err) {
+        if (isStaleError(err)) {
+          // locate is read-only — safe to heal and retry once.
+          const healed = await healStaleRef(driver, params, app, resolved.sr)
+          if (healed.ok) {
+            try {
+              const point = await driver.locate(app, healed.target)
+              return { ok: true, point }
+            } catch (retryErr) {
+              return { ok: false, error: `Cannot locate ref ${ref}: ${(retryErr as Error).message}` }
+            }
+          }
+          return { ok: false, error: `Cannot locate ref ${ref}: ${healed.error}` }
+        }
         return { ok: false, error: `Cannot locate ref ${ref}: ${(err as Error).message}` }
       }
     }
@@ -221,6 +245,126 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
     }
   }
 
+  /**
+   * Filter tree lines to those matching `query` (case-insensitive, matches
+   * the rendered line: role, title and value), each with its ancestor chain
+   * for orientation. Line order and indentation are preserved.
+   */
+  function filterTreeLines(tree: string, query: string): { matched: number; text: string } {
+    const lines = tree.split('\n')
+    const needle = query.toLowerCase()
+    const keep = new Set<number>()
+    let matched = 0
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? ''
+      if (!line.toLowerCase().includes(needle)) continue
+      matched++
+      if (matched > FIND_MAX_LINES) break
+      keep.add(i)
+      // Walk the ancestor chain: nearest previous lines with strictly
+      // shallower indentation.
+      let indent = line.length - line.trimStart().length
+      for (let j = i - 1; j >= 0 && indent > 0; j--) {
+        const prev = lines[j] ?? ''
+        const prevIndent = prev.length - prev.trimStart().length
+        if (prev.trim() && prevIndent < indent) {
+          keep.add(j)
+          indent = prevIndent
+        }
+      }
+    }
+    const text = lines.filter((_, i) => keep.has(i)).join('\n')
+    return { matched, text }
+  }
+
+  /** Fallback orientation when a query matches nothing: menu bar + windows. */
+  function treeOutline(tree: string): string {
+    const lines = tree.split('\n')
+    const outline = lines.filter((l) => l.startsWith('Menu bar:') || (l.trim() !== '' && !l.startsWith(' ')))
+    return outline.slice(0, 12).join('\n')
+  }
+
+  /** Tree-only snapshot + cache refresh; shared by find / wait_for / healing. */
+  async function snapshotIntoCache(
+    driver: ComputerUseDriver,
+    params: ToolCallParams,
+    app: string,
+  ): Promise<{ tree: string; refs: SnapshotRef[] }> {
+    const snap = await driver.snapshot(app, { screenshot: false })
+    const tree = redactTree(snap.tree)
+    cacheSet(cacheKey(params, app), {
+      refs: new Map(snap.refs.map((r) => [r.ref, r])),
+      lastTree: tree,
+    })
+    return { tree, refs: snap.refs }
+  }
+
+  function describeElement(sr: SnapshotRef): string {
+    return `${sr.role || 'element'}${sr.title ? ` "${sr.title}"` : ''}`
+  }
+
+  /**
+   * When an action fails and the app name doesn't exactly match a visible
+   * app, suggest the closest one ("chrome" → "Google Chrome"). Suggestion
+   * only — approval grants are keyed by app name, so we never silently
+   * retarget. Best-effort: listApps failure just skips the hint.
+   */
+  async function appNameHint(driver: ComputerUseDriver, app: string): Promise<string> {
+    const canon = (s: string) => s.toLowerCase().replace(/\.(exe|app)$/i, '').replace(/\s+/g, '')
+    try {
+      const apps = await driver.listApps()
+      if (apps.length === 0) return ''
+      const target = canon(app)
+      if (apps.some((a) => canon(a.name) === target)) return ''
+      const fuzzy = apps.filter((a) => canon(a.name).includes(target) || target.includes(canon(a.name)))
+      const names = apps.map((a) => a.name).join(', ')
+      const first = fuzzy[0]
+      if (fuzzy.length > 0 && first) {
+        return `\nDid you mean "${first.name}"? Visible apps: ${names}`
+      }
+      return `\nNo visible app matches "${app}". Visible apps: ${names}`
+    } catch {
+      return ''
+    }
+  }
+
+  /**
+   * Stale-ref self-heal: the click/locate never executed (path identity check
+   * rejected it), so retrying is safe. Re-snapshot tree-only, refresh the ref
+   * cache, and — when exactly ONE element matches the stale target's
+   * role+title — hand back its fresh path so the caller can retry once.
+   * Ambiguity fails closed: with 0 or 2+ candidates we won't guess.
+   */
+  async function healStaleRef(
+    driver: ComputerUseDriver,
+    params: ToolCallParams,
+    app: string,
+    sr: SnapshotRef,
+  ): Promise<
+    | { ok: true; target: { path: number[]; role?: string; title?: string }; note: string }
+    | { ok: false; error: string }
+  > {
+    const { refs } = await snapshotIntoCache(driver, params, app)
+    const matches = refs.filter((r) => r.role === sr.role && r.title === sr.title)
+    const match = matches[0]
+    if (matches.length === 1 && match) {
+      return {
+        ok: true,
+        target: { path: match.path, role: match.role || undefined, title: match.title || undefined },
+        note: ` (ref was stale — auto-matched the same ${describeElement(sr)} as ref ${match.ref} in a fresh snapshot and retried)`,
+      }
+    }
+    const why = matches.length === 0 ? 'no element matches' : `${matches.length} elements match`
+    return {
+      ok: false,
+      error: `stale ref could not be auto-healed: ${why} ${describeElement(sr)} now. Ref cache refreshed from a fresh snapshot — use find/snapshot and target a current ref.`,
+    }
+  }
+
+  function isStaleError(err: unknown): boolean {
+    return err instanceof Error && /stale snapshot/i.test(err.message)
+  }
+
   async function executeClick(
     driver: ComputerUseDriver,
     params: ToolCallParams,
@@ -233,10 +377,12 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
     const y = params.input.y
     let target: ClickTarget
     let where: string
+    let sr: SnapshotRef | null = null
     if (typeof ref === 'number') {
       const resolved = resolveRef(params, app, ref)
       if (!resolved.ok) return { content: resolved.error, isError: true }
       target = resolved.target
+      sr = resolved.sr
       const label = resolved.sr.title ? ` "${resolved.sr.title}"` : ''
       where = `ref ${ref}${label}`
     } else if (typeof x === 'number' && typeof y === 'number') {
@@ -245,9 +391,18 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
     } else {
       return { content: 'click requires "ref" (from a snapshot) or both "x" and "y".', isError: true }
     }
-    await driver.click(app, target, { button, count })
+    let healedNote = ''
+    try {
+      await driver.click(app, target, { button, count })
+    } catch (err) {
+      if (!sr || !isStaleError(err)) throw err
+      const healed = await healStaleRef(driver, params, app, sr)
+      if (!healed.ok) return { content: healed.error, isError: true }
+      await driver.click(app, healed.target, { button, count })
+      healedNote = healed.note
+    }
     const verb = count === 2 ? 'Double-clicked' : button === 'right' ? 'Right-clicked' : 'Clicked'
-    return { content: `${verb} ${where} in ${app}.` }
+    return { content: `${verb} ${where} in ${app}.${healedNote}` }
   }
 
   return {
@@ -261,32 +416,38 @@ Actions:
 - check_permissions: report system capability/permission status (no approval).
 - list_apps: list visible apps.
 - snapshot(app): return the app's numbered accessibility tree + save a screenshot artifact. If the UI has not changed since the last snapshot, returns a short "unchanged" note instead of repeating the tree.
+- find(app, query): snapshot but return ONLY tree lines matching the query (role/title/value, case-insensitive) with their ancestor chain. Preferred over snapshot for large UIs (browsers) — same refs, far less output.
+- wait_for(app, text, gone?, timeout_ms?): poll the UI until a tree line containing "text" appears (or disappears with gone:true). Returns the matching lines with clickable refs. Use after actions that trigger loads/animations instead of blind wait+snapshot loops.
 - click(app, ref|x,y): left-click a snapshot element ref (preferred) or coordinates.
 - double_click(app, ref|x,y) / right_click(app, ref|x,y): double / context click.
 - scroll(app, direction, amount?, ref|x,y?): scroll the view under the target (default: window center).
 - drag(app, from_ref|from_x+from_y, to_ref|to_x+to_y): press-drag-release.
-- type(app, text): type text into the focused field (short text; use paste_text for long text).
+- type(app, text): type text into the focused field (short text; use paste_text for long text, set_value to write a specific field).
+- set_value(app, ref, text): write a value directly into a text-like control (text field, search box) — no focus juggling. Errors if the control doesn't accept value writes; fall back to click + type/paste_text.
 - key(app, combo): send a key combo like "cmd+s" or "return" (on Windows, cmd maps to Ctrl).
-- wait(duration_ms): pause up to 5000ms for animations/loads (no approval).
+- wait(duration_ms): pause up to 5000ms for animations/loads (no approval). Prefer wait_for when you know what you're waiting for.
 - focus_app(app): bring an app to the foreground.
 - launch_app(app): start an app that is not running (focuses it if already running).
 - menu_select(app, menu_path): pick a menu-bar item by path, e.g. "File > Export > PNG".
 - paste_text(app, text): put text on the clipboard and paste it (fast + reliable for long/multiline text; overwrites the clipboard).
 
-Feedback loop: after each mutating action the tool re-reads the UI and appends how it changed (added/removed elements). When the UI changed, the ref cache is refreshed — refs shown in that diff are immediately clickable, refs from before the action are stale. Refs otherwise come from the LATEST snapshot of that app (stale refs are rejected, never guessed).`,
+Feedback loop: after each mutating action the tool re-reads the UI and appends how it changed (added/removed elements). When the UI changed, the ref cache is refreshed — refs shown in that diff are immediately clickable, refs from before the action are stale. If a targeted ref went stale, the tool re-snapshots and retries automatically when exactly one element still matches the same role+title; otherwise it refreshes the cache and asks you to re-target.`,
       input_schema: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['check_permissions', 'list_apps', 'snapshot', 'click', 'double_click', 'right_click', 'scroll', 'drag', 'type', 'key', 'wait', 'focus_app', 'launch_app', 'menu_select', 'paste_text'],
+            enum: ['check_permissions', 'list_apps', 'snapshot', 'find', 'wait_for', 'click', 'double_click', 'right_click', 'scroll', 'drag', 'type', 'set_value', 'key', 'wait', 'focus_app', 'launch_app', 'menu_select', 'paste_text'],
             description: 'What to do.',
           },
           app: { type: 'string', description: 'Target app name (required for all actions except list_apps/check_permissions/wait).' },
-          ref: { type: 'number', description: 'Snapshot element ref to target (click/scroll; from the latest snapshot).' },
+          ref: { type: 'number', description: 'Snapshot element ref to target (click/scroll/set_value; from the latest snapshot).' },
           x: { type: 'number', description: 'X coordinate (screen pixels) when no ref is given.' },
           y: { type: 'number', description: 'Y coordinate (screen pixels) when no ref is given.' },
-          text: { type: 'string', description: 'Text to type (type action) or paste (paste_text action).' },
+          text: { type: 'string', description: 'Text to type (type), paste (paste_text), write (set_value), or wait for in the tree (wait_for).' },
+          query: { type: 'string', description: 'Filter string matched against tree lines (find action).' },
+          gone: { type: 'boolean', description: 'wait_for: wait for the text to DISAPPEAR instead of appear.' },
+          timeout_ms: { type: 'number', description: 'wait_for deadline in ms (default 5000, capped at 15000).' },
           menu_path: { type: 'string', description: 'Menu path separated by ">", e.g. "File > Export > PNG" (menu_select action).' },
           combo: { type: 'string', description: 'Key combo like "cmd+s", "shift+cmd+4", "return" (key action; cmd maps to Ctrl on Windows).' },
           direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction (scroll action).' },
@@ -379,6 +540,56 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
               images,
             }
           }
+          case 'find': {
+            if (!app) return { content: 'find requires "app".', isError: true }
+            const query = params.input.query
+            if (typeof query !== 'string' || !query.trim()) {
+              return { content: 'find requires a non-empty "query" to match against roles/titles/values.', isError: true }
+            }
+            const { tree, refs } = await snapshotIntoCache(driver, params, app)
+            const { matched, text } = filterTreeLines(tree, query.trim())
+            if (matched === 0) {
+              return {
+                content: `No elements matching "${query.trim()}" in ${app} (${refs.length} elements scanned). Top-level structure for orientation:\n${treeOutline(tree)}`,
+              }
+            }
+            const capNote = matched > FIND_MAX_LINES ? `\n(first ${FIND_MAX_LINES} matches shown — narrow the query)` : ''
+            return { content: `Elements matching "${query.trim()}" in ${app} (refs are clickable):\n${text}${capNote}` }
+          }
+          case 'wait_for': {
+            if (!app) return { content: 'wait_for requires "app".', isError: true }
+            const text = params.input.text
+            if (typeof text !== 'string' || !text.trim()) {
+              return { content: 'wait_for requires non-empty "text" to wait for in the UI tree.', isError: true }
+            }
+            const gone = params.input.gone === true
+            const rawTimeout = params.input.timeout_ms
+            const deadline = Math.max(0, Math.min(WAIT_FOR_CAP_MS, typeof rawTimeout === 'number' ? Math.round(rawTimeout) : WAIT_FOR_DEFAULT_MS))
+            const needle = text.trim()
+            const startedAt = Date.now()
+            let lastTree = ''
+            for (;;) {
+              const { tree } = await snapshotIntoCache(driver, params, app)
+              lastTree = tree
+              const { matched, text: matchText } = filterTreeLines(tree, needle)
+              if (!gone && matched > 0) {
+                return { content: `"${needle}" appeared in ${app} after ${Date.now() - startedAt}ms (refs are clickable):\n${matchText}` }
+              }
+              if (gone && matched === 0) {
+                return { content: `"${needle}" is gone from ${app} (after ${Date.now() - startedAt}ms).` }
+              }
+              if (Date.now() - startedAt + WAIT_FOR_POLL_MS > deadline) break
+              await sleep(WAIT_FOR_POLL_MS)
+            }
+            if (gone) {
+              const { text: stillThere } = filterTreeLines(lastTree, needle)
+              return { content: `wait_for timed out after ${deadline}ms — "${needle}" is still present in ${app}:\n${stillThere}`, isError: true }
+            }
+            return {
+              content: `wait_for timed out after ${deadline}ms — "${needle}" did not appear in ${app}. Current top-level structure:\n${treeOutline(lastTree)}\n(ref cache refreshed — find/snapshot for details.)`,
+              isError: true,
+            }
+          }
           case 'click':
             if (!app) return { content: 'click requires "app".', isError: true }
             return await withFeedback(driver, params, app, await executeClick(driver, params, app, 'left', 1))
@@ -421,6 +632,32 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
             }
             await driver.type(app, text)
             return await withFeedback(driver, params, app, { content: `Typed ${text.length} character(s) into ${app}.` })
+          }
+          case 'set_value': {
+            if (!app) return { content: 'set_value requires "app".', isError: true }
+            const ref = params.input.ref
+            const text = params.input.text
+            if (typeof ref !== 'number') {
+              return { content: 'set_value requires "ref" (a snapshot element ref).', isError: true }
+            }
+            if (typeof text !== 'string') {
+              return { content: 'set_value requires "text" (the value to write; may be empty to clear).', isError: true }
+            }
+            const resolved = resolveRef(params, app, ref)
+            if (!resolved.ok) return { content: resolved.error, isError: true }
+            let healedNote = ''
+            try {
+              await driver.setValue(app, resolved.target, text)
+            } catch (err) {
+              if (!isStaleError(err)) throw err
+              const healed = await healStaleRef(driver, params, app, resolved.sr)
+              if (!healed.ok) return { content: healed.error, isError: true }
+              await driver.setValue(app, healed.target, text)
+              healedNote = healed.note
+            }
+            return await withFeedback(driver, params, app, {
+              content: `Set value of ref ${ref} (${describeElement(resolved.sr)}) to ${text.length} character(s) in ${app}.${healedNote}`,
+            })
           }
           case 'key': {
             if (!app) return { content: 'key requires "app".', isError: true }
@@ -467,7 +704,8 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
             return { content: `Unknown computer_use action: ${action}`, isError: true }
         }
       } catch (err) {
-        return { content: `computer_use failed: ${(err as Error).message}`, isError: true }
+        const hint = app ? await appNameHint(driver, app) : ''
+        return { content: `computer_use failed: ${(err as Error).message}${hint}`, isError: true }
       }
     },
 

@@ -95,6 +95,9 @@ export interface ComputerUseDriver {
   scroll(app: string, opts: ScrollOptions): Promise<void>
   drag(app: string, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void>
   type(app: string, text: string): Promise<void>
+  /** Write a value directly into a text-like control (AXValue / ValuePattern).
+   *  Throws when the control doesn't accept value writes. */
+  setValue(app: string, target: { path: number[]; role?: string; title?: string }, text: string): Promise<void>
   key(app: string, combo: string): Promise<void>
   focusApp(app: string): Promise<void>
   /** Launch the app if not running (activates either way), waiting for it to appear. */
@@ -620,6 +623,32 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
         const se = Application('System Events');
         se.processes.byName(${jxaString(app)}).frontmost = true;
         se.keystroke(${jxaString(text)});
+        'ok';
+      `
+      await jxa(script)
+    },
+
+    async setValue(app: string, target: { path: number[]; role?: string; title?: string }, text: string): Promise<void> {
+      // Direct AXValue write — no focus juggling, no keystroke simulation.
+      // Read-back verifies the write took: controls that silently ignore
+      // AXValue writes must fail loudly so the tool can suggest type/paste.
+      const script = `
+        const se = Application('System Events');
+        const proc = se.processes.byName(${jxaString(app)});
+        ${AX_ENABLE}
+        ${pathConsts(target)}
+        ${RESOLVE_BY_PATH}
+        const TEXT = ${jxaString(text)};
+        try {
+          found.value = TEXT;
+        } catch (e) {
+          throw new Error('element does not accept direct value writes — click it and use type/paste_text instead');
+        }
+        let v = '';
+        try { v = String(found.value() || ''); } catch (e) {}
+        if (v !== TEXT) {
+          throw new Error('value write did not stick (control may be read-only) — click it and use type/paste_text instead');
+        }
         'ok';
       `
       await jxa(script)

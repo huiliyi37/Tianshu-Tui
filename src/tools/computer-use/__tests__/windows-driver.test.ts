@@ -19,6 +19,7 @@ import {
   buildLaunchAppScript,
   buildMenuSelectScript,
   buildPasteTextScript,
+  buildSetValueScript,
   type WindowsSnapshotRow,
 } from '../windows-driver.js'
 
@@ -145,6 +146,18 @@ test('buildPasteTextScript sets clipboard from base64 and sends Ctrl+V', () => {
   assert.match(s, /KeyDown\(\[uint16\]17\)/)
   assert.match(s, /KeyTap\(\[uint16\]86\)/)
   assert.match(s, /KeyUp\(\[uint16\]17\)/)
+})
+
+test('buildSetValueScript resolves the path and writes via ValuePattern with fallback guidance', () => {
+  const text = "new 'value' 中文"
+  const s = buildSetValueScript('notepad', { path: [0, 2], role: 'Edit', title: 'Name' }, text)
+  assert.ok(s.includes(`'${Buffer.from(text, 'utf8').toString('base64')}'`), 'text travels as base64')
+  assert.match(s, /\$idxPath = @\(0, 2\)/)
+  assert.match(s, /\$expectRole = 'Edit'/)
+  assert.match(s, /ValuePattern/)
+  assert.match(s, /\$vp\.SetValue\(\$text\)/)
+  assert.match(s, /type\/paste_text instead/, 'unsupported controls guide the fallback')
+  assert.doesNotMatch(s, /\bexit\b/, 'must not kill the resident PS host')
 })
 
 test('buildClickByPathScript: left single click has InvokePattern fast path, right/double do not', () => {

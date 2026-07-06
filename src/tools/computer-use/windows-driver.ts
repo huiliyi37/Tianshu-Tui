@@ -681,6 +681,31 @@ for ($i = 0; $i -lt $segments.Count; $i++) {
 `
 }
 
+export function buildSetValueScript(
+  app: string,
+  target: { path: number[]; role?: string; title?: string },
+  text: string,
+): string {
+  // ValuePattern.SetValue — the UIA analog of the macOS AXValue write. Text
+  // travels as base64 (quoting/CJK-safe). Controls without ValuePattern (or
+  // read-only ones, which SetValue throws on) get a fallback-guiding error.
+  const b64 = Buffer.from(text, 'utf8').toString('base64')
+  return `
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+${procsForApp(app)}
+${UIA_WINDOWS}
+${resolveByPath(target)}
+$text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psString(b64)}))
+$vp = $null
+if (-not $found.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp) -or -not $vp) {
+  throw 'element does not accept direct value writes - click it and use type/paste_text instead'
+}
+$vp.SetValue($text)
+'ok'
+`
+}
+
 export function buildPasteTextScript(app: string, text: string): string {
   // Text travels as base64 (quoting/CJK-safe); Set-Clipboard then Ctrl+V.
   const b64 = Buffer.from(text, 'utf8').toString('base64')
@@ -796,6 +821,10 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
 
     async type(app: string, text: string): Promise<void> {
       await run(buildTypeScript(app, text))
+    },
+
+    async setValue(app: string, target: { path: number[]; role?: string; title?: string }, text: string): Promise<void> {
+      await run(buildSetValueScript(app, target, text))
     },
 
     async key(app: string, combo: string): Promise<void> {

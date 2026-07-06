@@ -522,6 +522,9 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
       const actionLabel: Record<string, string> = {
         list_apps: '枚举可见应用',
         snapshot: '读取界面结构并截图',
+        find: '查找界面元素',
+        wait_for: '等待界面元素出现',
+        set_value: '写入控件值',
         click: '点击界面元素',
         double_click: '双击界面元素',
         right_click: '右键点击界面元素',
@@ -546,13 +549,17 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
         const from = typeof input.from_ref === 'number' ? `#${input.from_ref}` : `(${String(input.from_x)}, ${String(input.from_y)})`
         const to = typeof input.to_ref === 'number' ? `#${input.to_ref}` : `(${String(input.to_x)}, ${String(input.to_y)})`
         target = `（${from} → ${to}）`
-      } else if (action === 'type' || action === 'paste_text') {
+      } else if (action === 'type' || action === 'paste_text' || action === 'set_value') {
         const t = String(input.text ?? '')
         target = t ? `（${t.length > 24 ? `${t.slice(0, 24)}…` : t}）` : ''
       } else if (action === 'key') {
         target = input.combo ? `（${String(input.combo)}）` : ''
       } else if (action === 'menu_select') {
         target = input.menu_path ? `（${String(input.menu_path)}）` : ''
+      } else if (action === 'find') {
+        target = input.query ? `（${String(input.query)}）` : ''
+      } else if (action === 'wait_for') {
+        target = input.text ? `（${String(input.text)}）` : ''
       }
       return {
         title: app ? `操作应用: ${app}` : '操作桌面应用',

@@ -20,8 +20,15 @@ class FakeDriver implements ComputerUseDriver {
       { name: 'Notes', frontmost: false },
     ]
   }
+  /** Optional per-call overrides, consumed FIFO by snapshot(). */
+  snapshotQueue: Array<{ tree: string; refs: SnapshotRef[] }> = []
   async snapshot(app: string, opts?: SnapshotOptions) {
     this.calls.push({ method: 'snapshot', args: [app, opts] })
+    const next = this.snapshotQueue.shift()
+    if (next) {
+      this.tree = next.tree
+      this.refs = next.refs
+    }
     const withShot = opts?.screenshot !== false
     return {
       tree: this.tree,
@@ -30,11 +37,18 @@ class FakeDriver implements ComputerUseDriver {
       visionPng: withShot ? this.vision : null,
     }
   }
+  /** Errors thrown by successive click()/locate() calls, consumed FIFO. */
+  clickErrorsOnce: string[] = []
   async click(app: string, target: ClickTarget, opts?: ClickOptions) {
     this.calls.push({ method: 'click', args: [app, target, opts] })
+    const err = this.clickErrorsOnce.shift()
+    if (err) throw new Error(err)
   }
+  locateErrorsOnce: string[] = []
   async locate(app: string, target: { path: number[]; role?: string; title?: string }) {
     this.calls.push({ method: 'locate', args: [app, target] })
+    const err = this.locateErrorsOnce.shift()
+    if (err) throw new Error(err)
     return this.locateResult
   }
   async scroll(app: string, opts: ScrollOptions) {
@@ -46,11 +60,18 @@ class FakeDriver implements ComputerUseDriver {
   async type(app: string, text: string) {
     this.calls.push({ method: 'type', args: [app, text] })
   }
+  setValueError: string | null = null
+  async setValue(app: string, target: { path: number[]; role?: string; title?: string }, text: string) {
+    this.calls.push({ method: 'setValue', args: [app, target, text] })
+    if (this.setValueError) throw new Error(this.setValueError)
+  }
   async key(app: string, combo: string) {
     this.calls.push({ method: 'key', args: [app, combo] })
   }
+  focusError: string | null = null
   async focusApp(app: string) {
     this.calls.push({ method: 'focusApp', args: [app] })
+    if (this.focusError) throw new Error(this.focusError)
   }
   async launchApp(app: string) {
     this.calls.push({ method: 'launchApp', args: [app] })
@@ -125,6 +146,9 @@ test('ungranted app → every interactive action requires approval (fail-closed)
     { action: 'launch_app', app: 'Safari' },
     { action: 'menu_select', app: 'Safari', menu_path: 'File > Save' },
     { action: 'paste_text', app: 'Safari', text: 'hi' },
+    { action: 'find', app: 'Safari', query: 'OK' },
+    { action: 'wait_for', app: 'Safari', text: 'OK' },
+    { action: 'set_value', app: 'Safari', ref: 1, text: 'hi' },
   ]) {
     assert.equal(tool.requiresApproval!(params(input)), true, `${input.action} must gate`)
   }
@@ -542,4 +566,241 @@ test('feedback: secrets in the post-action tree are redacted in the diff', async
   const res = await tool.execute(params({ action: 'click', app: 'Safari', ref: 1 }))
   assert.equal(res.content.includes('sk-abcdef1234567890abcdef'), false)
   assert.match(res.content, /\*\*\*/)
+})
+
+// ── stale ref self-heal ───────────────────────────────────────────
+
+test('stale click: unique role+title match → auto-heal, retry with fresh path, note in result', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver, ['Safari'])
+  await snapshotFirst(tool)
+  driver.clickErrorsOnce = ['stale snapshot — element role changed (AXGroup != AXButton), re-snapshot first']
+  // The UI reshuffled: same button, new ref and path.
+  driver.snapshotQueue = [{
+    tree: '[5] AXButton "OK" @(30,40)',
+    refs: [{ ref: 5, path: [0, 3], role: 'AXButton', title: 'OK', pos: { x: 30, y: 40 } }],
+  }]
+  const res = await tool.execute(params({ action: 'click', app: 'Safari', ref: 1 }))
+  assert.equal(res.isError, undefined)
+  assert.match(res.content, /auto-matched the same AXButton "OK" as ref 5/)
+  const clicks = driver.calls.filter((c) => c.method === 'click')
+  assert.equal(clicks.length, 2, 'failed click + healed retry')
+  assert.deepEqual((clicks[1]?.args[1] as { path: number[] }).path, [0, 3], 'retry uses the fresh path')
+})
+
+test('stale click: ambiguous match → no retry, error says cache refreshed', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver, ['Safari'])
+  await snapshotFirst(tool)
+  driver.clickErrorsOnce = ['stale snapshot — element path no longer valid, re-snapshot first']
+  driver.snapshotQueue = [{
+    tree: '[1] AXButton "OK"\n[2] AXButton "OK"',
+    refs: [
+      { ref: 1, path: [0, 0], role: 'AXButton', title: 'OK', pos: null },
+      { ref: 2, path: [0, 1], role: 'AXButton', title: 'OK', pos: null },
+    ],
+  }]
+  const res = await tool.execute(params({ action: 'click', app: 'Safari', ref: 1 }))
+  assert.equal(res.isError, true)
+  assert.match(res.content, /2 elements match/)
+  assert.match(res.content, /Ref cache refreshed/)
+  assert.equal(driver.calls.filter((c) => c.method === 'click').length, 1, 'no blind retry')
+  // The refreshed cache is immediately usable.
+  const followUp = await tool.execute(params({ action: 'click', app: 'Safari', ref: 2 }))
+  assert.equal(followUp.isError, undefined)
+})
+
+test('non-stale click error is not healed — propagates as a plain failure', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver, ['Safari'])
+  await snapshotFirst(tool)
+  driver.clickErrorsOnce = ['element has no on-screen position']
+  const res = await tool.execute(params({ action: 'click', app: 'Safari', ref: 1 }))
+  assert.equal(res.isError, true)
+  assert.match(res.content, /no on-screen position/)
+  assert.equal(driver.calls.filter((c) => c.method === 'snapshot').length, 1, 'no heal snapshot')
+})
+
+test('stale locate (scroll by ref): healed once, scroll proceeds', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver, ['Safari'])
+  await snapshotFirst(tool)
+  driver.locateErrorsOnce = ['stale snapshot — element title changed, re-snapshot first']
+  driver.snapshotQueue = [{
+    tree: '[7] AXButton "OK" @(50,60)',
+    refs: [{ ref: 7, path: [0, 4], role: 'AXButton', title: 'OK', pos: { x: 50, y: 60 } }],
+  }]
+  const res = await tool.execute(params({ action: 'scroll', app: 'Safari', direction: 'down', ref: 1 }))
+  assert.equal(res.isError, undefined)
+  const locates = driver.calls.filter((c) => c.method === 'locate')
+  assert.equal(locates.length, 2)
+  assert.deepEqual((locates[1]?.args[1] as { path: number[] }).path, [0, 4])
+})
+
+// ── find ──────────────────────────────────────────────────────────
+
+const BIG_TREE = [
+  'Menu bar: File | Edit | View',
+  '[1] AXWindow "Doc" @(0,0)',
+  '  [2] AXGroup "toolbar" @(0,0)',
+  '    [3] AXButton "Save" @(5,5)',
+  '    [4] AXButton "Cancel" @(9,9)',
+  '  [5] AXTextArea "body" = draft text @(0,30)',
+].join('\n')
+
+const BIG_REFS: SnapshotRef[] = [
+  { ref: 1, path: [0], role: 'AXWindow', title: 'Doc', pos: { x: 0, y: 0 } },
+  { ref: 2, path: [0, 0], role: 'AXGroup', title: 'toolbar', pos: { x: 0, y: 0 } },
+  { ref: 3, path: [0, 0, 0], role: 'AXButton', title: 'Save', pos: { x: 5, y: 5 } },
+  { ref: 4, path: [0, 0, 1], role: 'AXButton', title: 'Cancel', pos: { x: 9, y: 9 } },
+  { ref: 5, path: [0, 1], role: 'AXTextArea', title: 'body', pos: { x: 0, y: 30 } },
+]
+
+test('find: returns matching lines with ancestor chain, caches ALL refs', async () => {
+  const driver = new FakeDriver()
+  driver.tree = BIG_TREE
+  driver.refs = BIG_REFS
+  const tool = darwinTool(driver, ['Safari'])
+  const res = await tool.execute(params({ action: 'find', app: 'Safari', query: 'save' }))
+  assert.equal(res.isError, undefined)
+  assert.match(res.content, /\[3\] AXButton "Save"/)
+  assert.match(res.content, /\[2\] AXGroup "toolbar"/, 'ancestor included')
+  assert.match(res.content, /\[1\] AXWindow "Doc"/, 'root ancestor included')
+  assert.equal(res.content.includes('Cancel'), false, 'non-matching sibling excluded')
+  // Full refs cached: an unlisted ref is still clickable.
+  const click = await tool.execute(params({ action: 'click', app: 'Safari', ref: 4 }))
+  assert.equal(click.isError, undefined)
+})
+
+test('find: value text matches too; zero hits fall back to the outline', async () => {
+  const driver = new FakeDriver()
+  driver.tree = BIG_TREE
+  driver.refs = BIG_REFS
+  const tool = darwinTool(driver, ['Safari'])
+  const byValue = await tool.execute(params({ action: 'find', app: 'Safari', query: 'draft text' }))
+  assert.match(byValue.content, /\[5\] AXTextArea "body"/)
+
+  const miss = await tool.execute(params({ action: 'find', app: 'Safari', query: 'nonexistent' }))
+  assert.equal(miss.isError, undefined)
+  assert.match(miss.content, /No elements matching "nonexistent"/)
+  assert.match(miss.content, /Menu bar: File \| Edit \| View/)
+  assert.match(miss.content, /\[1\] AXWindow "Doc"/)
+  assert.equal(miss.content.includes('[3]'), false, 'outline stays top-level')
+
+  const blank = await tool.execute(params({ action: 'find', app: 'Safari' }))
+  assert.equal(blank.isError, true)
+})
+
+// ── wait_for ──────────────────────────────────────────────────────
+
+test('wait_for: appears on a later poll → success with matching lines and timing', async () => {
+  const driver = new FakeDriver()
+  driver.tree = '[1] AXWindow "Doc"'
+  driver.refs = [{ ref: 1, path: [0], role: 'AXWindow', title: 'Doc', pos: null }]
+  driver.snapshotQueue = [
+    { tree: '[1] AXWindow "Doc"', refs: driver.refs },
+    { tree: '[1] AXWindow "Doc"\n  [2] AXSheet "存储" @(1,1)', refs: [...driver.refs, { ref: 2, path: [0, 0], role: 'AXSheet', title: '存储', pos: { x: 1, y: 1 } }] },
+  ]
+  const sleeps: number[] = []
+  const tool = darwinTool(driver, ['Safari'], async (ms) => { sleeps.push(ms) })
+  const res = await tool.execute(params({ action: 'wait_for', app: 'Safari', text: '存储', timeout_ms: 15_000 }))
+  assert.equal(res.isError, undefined)
+  assert.match(res.content, /"存储" appeared in Safari after \d+ms/)
+  assert.match(res.content, /\[2\] AXSheet "存储"/)
+  assert.equal(sleeps.length, 1, 'one poll gap before the hit')
+  // Cache refreshed by the poll — new ref is clickable.
+  const click = await tool.execute(params({ action: 'click', app: 'Safari', ref: 2 }))
+  assert.equal(click.isError, undefined)
+})
+
+test('wait_for: timeout → isError with orientation outline; gone-mode waits for disappearance', async () => {
+  const driver = new FakeDriver()
+  driver.tree = '[1] AXWindow "Doc"'
+  driver.refs = [{ ref: 1, path: [0], role: 'AXWindow', title: 'Doc', pos: null }]
+  const tool = darwinTool(driver, ['Safari'], async () => {})
+  const miss = await tool.execute(params({ action: 'wait_for', app: 'Safari', text: 'Ghost', timeout_ms: 1 }))
+  assert.equal(miss.isError, true)
+  assert.match(miss.content, /timed out after 1ms/)
+  assert.match(miss.content, /\[1\] AXWindow "Doc"/)
+
+  // gone: the text vanishes on the second poll.
+  driver.tree = '[1] AXWindow "Doc"\n  [2] AXProgressIndicator "载入中"'
+  driver.snapshotQueue = [
+    { tree: driver.tree, refs: driver.refs },
+    { tree: '[1] AXWindow "Doc"', refs: driver.refs },
+  ]
+  const gone = await tool.execute(params({ action: 'wait_for', app: 'Safari', text: '载入中', gone: true, timeout_ms: 15_000 }))
+  assert.equal(gone.isError, undefined)
+  assert.match(gone.content, /"载入中" is gone from Safari/)
+
+  const blank = await tool.execute(params({ action: 'wait_for', app: 'Safari' }))
+  assert.equal(blank.isError, true)
+})
+
+// ── set_value ─────────────────────────────────────────────────────
+
+test('set_value: routes ref + text to driver.setValue with the cached path', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver, ['Safari'])
+  await snapshotFirst(tool)
+  const res = await tool.execute(params({ action: 'set_value', app: 'Safari', ref: 1, text: 'hello 世界' }))
+  assert.equal(res.isError, undefined)
+  assert.match(res.content, /Set value of ref 1 \(AXButton "OK"\) to 8 character\(s\)/)
+  const call = driver.calls.find((c) => c.method === 'setValue')
+  assert.deepEqual(call?.args, ['Safari', { path: [0, 0], role: 'AXButton', title: 'OK' }, 'hello 世界'])
+})
+
+test('set_value: driver rejection (unsupported control) surfaces the fallback guidance', async () => {
+  const driver = new FakeDriver()
+  driver.setValueError = 'element does not accept direct value writes — click it and use type/paste_text instead'
+  const tool = darwinTool(driver, ['Safari'])
+  await snapshotFirst(tool)
+  const res = await tool.execute(params({ action: 'set_value', app: 'Safari', ref: 1, text: 'x' }))
+  assert.equal(res.isError, true)
+  assert.match(res.content, /type\/paste_text/)
+})
+
+test('set_value: missing ref or text rejected locally; empty text allowed (clear)', async () => {
+  const driver = new FakeDriver()
+  const tool = darwinTool(driver, ['Safari'])
+  await snapshotFirst(tool)
+  const noRef = await tool.execute(params({ action: 'set_value', app: 'Safari', text: 'x' }))
+  assert.equal(noRef.isError, true)
+  const noText = await tool.execute(params({ action: 'set_value', app: 'Safari', ref: 1 }))
+  assert.equal(noText.isError, true)
+  const clear = await tool.execute(params({ action: 'set_value', app: 'Safari', ref: 1, text: '' }))
+  assert.equal(clear.isError, undefined)
+})
+
+// ── app name fuzzy hint ───────────────────────────────────────────
+
+test('driver error + fuzzy app name → "did you mean" hint with visible apps', async () => {
+  const driver = new FakeDriver()
+  driver.focusError = `Can't get process "safar"`
+  const tool = darwinTool(driver, ['safar'])
+  const res = await tool.execute(params({ action: 'focus_app', app: 'safar' }))
+  assert.equal(res.isError, true)
+  assert.match(res.content, /Did you mean "Safari"\?/)
+  assert.match(res.content, /Visible apps: Safari, Notes/)
+})
+
+test('driver error + no fuzzy match → visible apps listed without a guess', async () => {
+  const driver = new FakeDriver()
+  driver.focusError = `Can't get process "chrome"`
+  const tool = darwinTool(driver, ['chrome'])
+  const res = await tool.execute(params({ action: 'focus_app', app: 'chrome' }))
+  assert.equal(res.isError, true)
+  assert.match(res.content, /No visible app matches "chrome"/)
+  assert.equal(res.content.includes('Did you mean'), false)
+})
+
+test('driver error on an app that IS visible → no name hint appended', async () => {
+  const driver = new FakeDriver()
+  driver.focusError = 'window server connection lost'
+  const tool = darwinTool(driver, ['Safari'])
+  const res = await tool.execute(params({ action: 'focus_app', app: 'Safari' }))
+  assert.equal(res.isError, true)
+  assert.match(res.content, /window server connection lost/)
+  assert.equal(res.content.includes('Did you mean'), false)
+  assert.equal(res.content.includes('Visible apps'), false)
 })
