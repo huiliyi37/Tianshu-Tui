@@ -1136,38 +1136,48 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   sharedRuntime.sessions = sessions
 
   // Legacy single-prompt path (M0): one-shot POST /prompt SSE.
-  const activeAgents = new Set<AgentLoop>()
-  let activeAgent: AgentLoop | null = null
+  //
+  // Rebased onto RuntimeSessionManager so BOTH prompt paths share one execution
+  // model and one disconnect semantic (a dropped connection never aborts; abort
+  // is always explicit). Each POST /prompt materializes a real session — its
+  // events persist, show up in /sessions, and survive a client disconnect. The
+  // dedicated per-run AgentLoop set this path used to maintain is gone with it.
+  const activeLegacyRuns = new Set<string>()
   const state: ServerState = {
     running: false,
     apiToken,
     abort: () => {
-      for (const agent of activeAgents) agent.abort()
       sessions.abortAll()
     },
   }
 
   const routes = createRoutes(state, {
-    createAgent: () => {
-      // Wave J: legacy /prompt 路径同样复用 sharedRuntime——避免与
-      // /sessions/:id/prompt 路径间健康统计不一致。
-      const { agent, sessionId } = buildAgentLoop(ctx, process.cwd(), undefined, undefined, undefined, sharedRuntime, specReload)
-      activeAgents.add(agent)
-      activeAgent = agent
+    startPrompt: (prompt) => {
+      const rec = sessions.createSession({
+        title: prompt.trim().slice(0, 80),
+      })
+      activeLegacyRuns.add(rec.id)
       state.running = true
-      state.sessionId = sessionId
+      state.sessionId = rec.id
+      // Adapter-owned subscription, independent of the streaming one (which
+      // dies with the client connection): keeps /status bookkeeping honest and
+      // preserves the legacy auto-deny approval semantics — a one-shot client
+      // speaks no intervention protocol, so a dangling approval would hang the
+      // run until timeout (or forever when no timeout is configured).
+      const adminUnsub = sessions.subscribe(rec.id, (ev) => {
+        if (ev.type === 'approval_required' && typeof ev.data.requestId === 'string') {
+          sessions.answerIntervention(rec.id, ev.data.requestId, 'deny')
+        } else if (ev.type === 'done') {
+          adminUnsub?.()
+          activeLegacyRuns.delete(rec.id)
+          state.running = activeLegacyRuns.size > 0
+          state.sessionId = activeLegacyRuns.values().next().value
+        }
+      })
       return {
-        run: async (prompt, callbacks) => {
-          try {
-            await agent.run(prompt, callbacks)
-          } finally {
-            activeAgents.delete(agent)
-            if (activeAgent === agent) activeAgent = activeAgents.values().next().value ?? null
-            state.running = activeAgents.size > 0
-            state.sessionId = activeAgent?.config.sessionId
-          }
-        },
-        abort: () => agent.abort(),
+        sessionId: rec.id,
+        subscribe: (listener) => sessions.subscribe(rec.id, listener),
+        start: () => sessions.run(rec.id, prompt),
       }
     },
   })
@@ -1275,7 +1285,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     scheduler,
     shared: sharedRuntime,
     close: () => {
-      for (const agent of activeAgents) agent.abort()
+      // Legacy /prompt runs live on manager sessions too — abortAll covers both.
       sessions.abortAll()
       // Wave L: 与 TUI createShutdownHandler 对称——abort 中止 turn 后，对所有
       // session 显式 shutdown 释放 coordinator stallSweep + 在途 worker 句柄。

@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRouter } from '../index.js'
 import { createRoutes, type ServerState } from '../routes.js'
-import { buildPromptHandler, handlePromptSSE, type PromptRouteDeps } from '../prompt-route.js'
+import { buildPromptHandler, handlePromptSSE, type PromptRouteDeps, type PromptSessionEvent } from '../prompt-route.js'
 import { SseStream } from '../sse-stream.js'
 import { EventEmitter } from 'node:events'
 import type { ServerResponse } from 'node:http'
@@ -134,9 +134,7 @@ describe('createRoutes', () => {
   })
 
   it('includes POST /prompt when deps provided', () => {
-    const deps: PromptRouteDeps = {
-      createAgent: () => ({ run: async () => {}, abort: () => {} }),
-    }
+    const deps: PromptRouteDeps = { startPrompt: () => null }
     const routes = createRoutes({ running: false }, deps)
     assert.ok(routes['POST /prompt'])
   })
@@ -171,16 +169,13 @@ describe('createRoutes', () => {
 
   it('wraps /prompt with the same bearer-token auth gate and streams SSE when authorized', async () => {
     const res = mockRes()
-    const deps: PromptRouteDeps = {
-      createAgent: () => ({
-        run: async (_prompt, callbacks) => {
-          callbacks.onTextDelta('ok')
-          callbacks.onTurnComplete({ input_tokens: 1, output_tokens: 1 }, 1, true)
-        },
-        abort: () => {},
-      }),
-    }
-    const routes = createRoutes({ running: false, apiToken: 'secret' }, deps)
+    const fake = fakePromptSession({
+      onStart: (emit) => {
+        emit('text_delta', { text: 'ok' })
+        emit('done', { status: 'completed' })
+      },
+    })
+    const routes = createRoutes({ running: false, apiToken: 'secret' }, fake.deps)
 
     const unauthorized = await routes['POST /prompt']!({ prompt: 'x' })
     const authorized = await routes['POST /prompt']!({ prompt: 'x' }, undefined, { authorization: 'Bearer secret' }, res as any)
@@ -193,13 +188,49 @@ describe('createRoutes', () => {
   })
 })
 
+// ── fake session-backed prompt deps ────────────────────────
+
+type EmitFn = (type: string, data?: Record<string, unknown>) => void
+
+/**
+ * A fake session-manager adapter matching the rebased PromptRouteDeps: the
+ * route subscribes first, then calls start() — events flow to every live
+ * subscriber (mirroring RuntimeSessionManager.subscribe).
+ */
+function fakePromptSession(opts: {
+  sessionId?: string
+  startOk?: boolean
+  onStart?: (emit: EmitFn) => void
+} = {}) {
+  const listeners = new Set<(ev: PromptSessionEvent) => void>()
+  let unsubscribes = 0
+  const emit: EmitFn = (type, data = {}) => {
+    for (const l of [...listeners]) l({ type, data })
+  }
+  const deps: PromptRouteDeps = {
+    startPrompt: () => ({
+      sessionId: opts.sessionId ?? 'sess-legacy-1',
+      subscribe: (listener) => {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+          unsubscribes++
+        }
+      },
+      start: () => {
+        if (opts.startOk === false) return false
+        queueMicrotask(() => opts.onStart?.(emit))
+        return true
+      },
+    }),
+  }
+  return { deps, emit, listeners, get unsubscribes() { return unsubscribes } }
+}
+
 // ── buildPromptHandler ─────────────────────────────────────
 
 describe('buildPromptHandler', () => {
-  const deps: PromptRouteDeps = {
-    createAgent: () => ({ run: async () => {}, abort: () => {} }),
-  }
-  const handler = buildPromptHandler(deps)
+  const handler = buildPromptHandler(fakePromptSession().deps)
 
   it('returns 400 for missing prompt', async () => {
     const result = await handler({})
@@ -225,15 +256,14 @@ describe('buildPromptHandler', () => {
 
   it('streams SSE for valid prompt', async () => {
     const res = mockRes()
-    const streamingHandler = buildPromptHandler({
-      createAgent: () => ({
-        run: async (_prompt, callbacks) => {
-          callbacks.onTextDelta('hello')
-          callbacks.onTurnComplete({ input_tokens: 2, output_tokens: 3 }, 1, true)
-        },
-        abort: () => {},
-      }),
+    const fake = fakePromptSession({
+      onStart: (emit) => {
+        emit('text_delta', { text: 'hello' })
+        emit('turn_complete', { usage: { input_tokens: 2, output_tokens: 3 }, turnNumber: 1, isFinal: true })
+        emit('done', { status: 'completed' })
+      },
     })
+    const streamingHandler = buildPromptHandler(fake.deps)
 
     const result = await streamingHandler({ prompt: 'fix the bug' }, undefined, undefined, res as any)
     assert.equal(result.status, 200)
@@ -250,132 +280,112 @@ describe('buildPromptHandler', () => {
 // ── handlePromptSSE ────────────────────────────────────────
 
 describe('handlePromptSSE', () => {
-  it('streams events and closes on completion', async () => {
+  it('announces the session id first, streams events, and closes on completion', async () => {
     const res = mockRes()
-    const deps: PromptRouteDeps = {
-      createAgent: () => ({
-        run: async (_prompt: string, callbacks: any) => {
-          callbacks.onTextDelta('hello')
-          callbacks.onToolUse('id-1', 'read_file', { path: '/a.ts', token: 'secret-token' })
-          callbacks.onToolResult('id-1', 'read_file', 'api_key=secret-value file contents')
-          callbacks.onTurnComplete({ input_tokens: 100, output_tokens: 50 })
-        },
-        abort: () => {},
-      }),
-    }
+    const fake = fakePromptSession({
+      sessionId: 'sess-abc',
+      onStart: (emit) => {
+        emit('text_delta', { text: 'hello' })
+        emit('tool_use', { id: 'id-1', name: 'read_file', input: { path: '/a.ts' } })
+        emit('tool_result', { id: 'id-1', name: 'read_file', isError: false, result: 'file contents' })
+        emit('turn_complete', { usage: { input_tokens: 100, output_tokens: 50 } })
+        emit('done', { status: 'completed' })
+      },
+    })
 
-    handlePromptSSE(deps, res as any, 'test prompt')
+    handlePromptSSE(fake.deps, res as any, 'test prompt')
 
-    // Wait for the async agent.run to complete
     await new Promise((r) => setTimeout(r, 50))
 
     const allChunks = res.chunks.join('')
+    assert.ok(allChunks.includes('event: session'), 'first frame must carry the session id')
+    assert.ok(allChunks.includes('"sessionId":"sess-abc"'))
+    assert.ok(res.chunks[0]!.includes('event: session'), 'session frame must come before any run event')
     assert.ok(allChunks.includes('event: text_delta'))
     assert.ok(allChunks.includes('event: tool_use'))
     assert.ok(allChunks.includes('event: tool_result'))
     assert.ok(allChunks.includes('event: turn_complete'))
-    assert.ok(!allChunks.includes('secret-token'))
-    assert.ok(!allChunks.includes('secret-value'))
-    assert.ok(allChunks.includes('[REDACTED]'))
     assert.ok(res.ended)
   })
 
-  it('sends error event and closes on agent error', async () => {
+  it('forwards error events and closes when the run finishes failed', async () => {
     const res = mockRes()
-    const deps: PromptRouteDeps = {
-      createAgent: () => ({
-        run: async (_prompt: string, callbacks: any) => {
-          callbacks.onError(new Error('API rate limit token=server-secret'))
-        },
-        abort: () => {},
-      }),
-    }
+    const fake = fakePromptSession({
+      onStart: (emit) => {
+        emit('error', { error: 'API rate limit' })
+        emit('done', { status: 'failed' })
+      },
+    })
 
-    handlePromptSSE(deps, res as any, 'test')
+    handlePromptSSE(fake.deps, res as any, 'test')
 
     await new Promise((r) => setTimeout(r, 50))
 
     const allChunks = res.chunks.join('')
     assert.ok(allChunks.includes('event: error'))
     assert.ok(allChunks.includes('API rate limit'))
-    assert.ok(!allChunks.includes('server-secret'))
-    assert.ok(allChunks.includes('token=[REDACTED]'))
     assert.ok(res.ended)
   })
 
-  it('closes SSE connection when agent.run rejects', async () => {
+  it('sends an error and closes when the run refuses to start', async () => {
     const res = mockRes()
-    const deps: PromptRouteDeps = {
-      createAgent: () => ({
-        run: async () => {
-          throw new Error('unexpected agent crash')
-        },
-        abort: () => {},
-      }),
-    }
+    const fake = fakePromptSession({ startOk: false })
 
-    handlePromptSSE(deps, res as any, 'test')
+    handlePromptSSE(fake.deps, res as any, 'test')
 
-    // Wait for the rejected promise to settle
-    await new Promise((r) => setTimeout(r, 50))
-
-    // SSE connection must be closed even when agent.run rejects
-    assert.ok(res.ended, 'SSE response must be ended on agent rejection')
-    // Error event should be sent
     const allChunks = res.chunks.join('')
-    assert.ok(allChunks.includes('event: error'), 'error event should be sent')
-    assert.ok(allChunks.includes('unexpected agent crash'), 'error message should be in payload')
+    assert.ok(allChunks.includes('event: error'))
+    assert.ok(allChunks.includes('already running'))
+    assert.ok(res.ended)
   })
 
-  it('aborts the agent and suppresses late writes when the client disconnects', async () => {
+  it('sends an error and closes when no session could be created', () => {
     const res = mockRes()
-    let abortCalls = 0
-    let callbacks: any
-    const deps: PromptRouteDeps = {
-      createAgent: () => ({
-        run: async (_prompt, cb) => {
-          callbacks = cb
-          await new Promise((r) => setTimeout(r, 10))
-          cb.onTextDelta('late')
-          cb.onTurnComplete({ input_tokens: 1 }, 1, true)
-        },
-        abort: () => { abortCalls++ },
-      }),
-    }
+    const deps: PromptRouteDeps = { startPrompt: () => null }
 
     handlePromptSSE(deps, res as any, 'test')
-    assert.ok(callbacks, 'agent callbacks should be registered synchronously')
+
+    const allChunks = res.chunks.join('')
+    assert.ok(allChunks.includes('event: error'))
+    assert.ok(res.ended)
+  })
+
+  it('client disconnect stops streaming but does NOT abort the run (session semantics)', async () => {
+    const res = mockRes()
+    const fake = fakePromptSession()
+
+    handlePromptSSE(fake.deps, res as any, 'test')
+    await new Promise<void>((r) => queueMicrotask(r))
+    assert.equal(fake.listeners.size, 1, 'route must be subscribed while the client is attached')
 
     res.emit('close')
-    assert.equal(abortCalls, 1)
+    assert.equal(fake.unsubscribes, 1, 'disconnect must detach the stream listener')
     const chunksAfterClose = res.chunks.length
 
-    callbacks.onTextDelta('manual late write')
-    await new Promise((r) => setTimeout(r, 30))
+    // The run keeps going server-side; nothing more may reach the dead socket.
+    fake.emit('text_delta', { text: 'late work continues' })
+    fake.emit('done', { status: 'completed' })
+    await new Promise((r) => setTimeout(r, 20))
 
-    assert.equal(res.chunks.length, chunksAfterClose, 'late callbacks must not write after client close')
+    assert.equal(res.chunks.length, chunksAfterClose, 'late events must not write after client close')
     assert.equal(res.ended, false, 'server must not try to end an already-closed client socket')
   })
 
-  it('removes the close listener on normal completion so post-finish close does not abort', async () => {
+  it('normal completion detaches the close listener so a late close is a no-op', async () => {
     const res = mockRes()
-    let abortCalls = 0
-    const deps: PromptRouteDeps = {
-      createAgent: () => ({
-        run: async (_prompt, callbacks) => {
-          callbacks.onTextDelta('done')
-          callbacks.onTurnComplete({ input_tokens: 1 }, 1, true)
-        },
-        abort: () => { abortCalls++ },
-      }),
-    }
+    const fake = fakePromptSession({
+      onStart: (emit) => {
+        emit('text_delta', { text: 'done' })
+        emit('done', { status: 'completed' })
+      },
+    })
 
-    handlePromptSSE(deps, res as any, 'test')
+    handlePromptSSE(fake.deps, res as any, 'test')
     await new Promise((r) => setTimeout(r, 20))
 
     assert.ok(res.ended)
-    res.emit('close')
-
-    assert.equal(abortCalls, 0)
+    assert.equal(fake.unsubscribes, 1, 'completion must release the subscription')
+    res.emit('close') // must not throw or double-unsubscribe
+    assert.equal(fake.unsubscribes, 1)
   })
 })

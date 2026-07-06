@@ -172,6 +172,24 @@ test('getEvents(since) replays only newer events with monotonic seq', () => {
   assert.ok(tail.events[0]!.seq > since)
 })
 
+// Redaction now lives ONLY here (the legacy /prompt route forwards manager
+// events verbatim since its session rebase) — this is the single trust boundary
+// keeping secrets out of event logs and every SSE stream.
+test('manager redacts sensitive tool input and error text before they reach the event log', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+  cb.onToolUse('id-1', 'bash', { command: 'curl api', api_key: 'sk-super-secret' })
+  cb.onError(new Error('upstream 401 token=server-secret'))
+
+  const events = manager.getEvents(s.id, 0)!.events
+  const toolUse = events.find((e) => e.type === 'tool_use')!
+  assert.equal((toolUse.data.input as Record<string, unknown>).api_key, '[REDACTED]')
+  const error = events.find((e) => e.type === 'error')!
+  assert.ok(String(error.data.error).includes('token=[REDACTED]'))
+  assert.ok(!String(error.data.error).includes('server-secret'))
+})
+
 test('createSession with prompt records a user event with the prompt text (Q1)', () => {
   const { manager } = makeManager()
   const s = manager.createSession({ prompt: '帮我重构这个模块' })
