@@ -25,7 +25,7 @@ class FakeAgent implements ManagedAgent {
   private resolveRun?: () => void
   run(p: string, cb: AgentCallbacks) { this.runPrompts.push(p); this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
   abort() { this.resolveRun?.() }
-  enableTool(name: string) { this.enabledTools.push(name); return { status: 'mounted', cacheImpact: 'none' } }
+  enableTool(name: string) { this.enabledTools.push(name); return { status: 'mounted', cacheImpact: 'none' } as const }
   setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null) { this.activePlanCalls.push(plan) }
   enterPlanMode(opts?: { planFilePath?: string }) { this.enterPlanModeCalls.push(opts) }
   switchModel(modelId: string): string | null { return modelId }

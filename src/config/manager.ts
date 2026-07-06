@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, envSchema, uiSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, envSchema, uiSchema, permissionsSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
@@ -318,6 +318,56 @@ export function setShellConfig(input: { gitBashPath?: unknown }): ShellConfigSna
   cfg.env = envSchema.parse(merged)
   saveConfig(cfg)
   return { gitBashPath: cfg.env.gitBashPath ?? '' }
+}
+
+// --- Codex 式常驻目录授权（agent.permissions.additionalReadDirs/WriteDirs） ---
+
+export interface PermissionDirsSnapshot {
+  additionalReadDirs: string[]
+  additionalWriteDirs: string[]
+}
+
+/** Snapshot of the standing directory grants for the desktop settings UI. */
+export function getPermissionDirs(): PermissionDirsSnapshot {
+  const p = loadConfig().agent.permissions
+  return {
+    additionalReadDirs: [...(p.additionalReadDirs ?? [])],
+    additionalWriteDirs: [...(p.additionalWriteDirs ?? [])],
+  }
+}
+
+/**
+ * Persist the standing directory grants to the user global config. Each entry
+ * is an absolute or ~-relative directory whose subtree becomes readable /
+ * read+writable without an approval round-trip (a drive root grants the whole
+ * drive). Entries are trimmed and deduplicated; validation via permissionsSchema.
+ * Additions can be applied to the running process by the caller
+ * (applyConfiguredPathGrants); removals take effect on the next sidecar start.
+ */
+export function setPermissionDirs(input: {
+  additionalReadDirs?: unknown
+  additionalWriteDirs?: unknown
+}): PermissionDirsSnapshot {
+  const cfg = loadConfig()
+  const merged: Record<string, unknown> = { ...cfg.agent.permissions }
+  const normalize = (v: unknown, field: string): string[] => {
+    if (!Array.isArray(v) || v.some(x => typeof x !== 'string')) {
+      throw new Error(`${field} must be an array of strings`)
+    }
+    return [...new Set((v as string[]).map(s => s.trim()).filter(Boolean))]
+  }
+  if (input.additionalReadDirs !== undefined) {
+    merged.additionalReadDirs = normalize(input.additionalReadDirs, 'additionalReadDirs')
+  }
+  if (input.additionalWriteDirs !== undefined) {
+    merged.additionalWriteDirs = normalize(input.additionalWriteDirs, 'additionalWriteDirs')
+  }
+  cfg.agent.permissions = permissionsSchema.parse(merged)
+  saveConfig(cfg)
+  return {
+    additionalReadDirs: [...cfg.agent.permissions.additionalReadDirs],
+    additionalWriteDirs: [...cfg.agent.permissions.additionalWriteDirs],
+  }
 }
 
 // --- Auto 检查点 (C3) ---

@@ -49,6 +49,23 @@
   "wallpaperFitCenter": "居中",
   "glassMode": "启用毛玻璃效果（无壁纸时使用默认渐变背景）",
   "provider": "模型 Provider",
+  "permissionDirs": {
+    "title": "目录授权",
+    "desc": "Codex 式常驻授权：把工作区之外的文件夹交给 agent，免去逐次审批弹窗。填盘符根（如 F:\\ 或 /Volumes/Data）即整盘授权。只授权你信任 agent 操作的目录。",
+    "readTitle": "只读授权",
+    "readDesc": "agent 可读取这些目录下的所有文件（不可写入）。",
+    "writeTitle": "读写授权",
+    "writeDesc": "agent 可读取并修改这些目录下的所有文件。写授权隐含读授权。",
+    "empty": "暂无授权目录",
+    "addFolder": "选择文件夹…",
+    "manualPlaceholder": "或输入目录绝对路径（支持 ~）",
+    "add": "添加",
+    "remove": "移除",
+    "missing": "路径不存在（将被跳过）",
+    "savedApplied": "已保存 · 新增目录即刻生效",
+    "savedRestart": "已保存 · 移除的目录在重启应用后失效",
+    "saveFailed": "保存失败：{{error}}"
+  },
   "computerUse": {
     "title": "Computer Use",
     "desc": "允许 agent 查看并操作 macOS 图形界面应用（截图 + 无障碍树 + 点击/键入）。每个应用首次操作需审批，勾选「始终允许」后记录在此。",

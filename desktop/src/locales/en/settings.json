@@ -49,6 +49,23 @@
   "wallpaperFitCenter": "Center",
   "glassMode": "Enable frosted glass (uses default gradient when no wallpaper is set)",
   "provider": "Model Provider",
+  "permissionDirs": {
+    "title": "Directory Access",
+    "desc": "Codex-style standing grants: hand folders outside the workspace to the agent without per-operation approval prompts. A drive root (e.g. F:\\ or /Volumes/Data) grants the whole drive. Only grant directories you trust the agent with.",
+    "readTitle": "Read-only access",
+    "readDesc": "The agent can read every file under these directories (no writes).",
+    "writeTitle": "Read + write access",
+    "writeDesc": "The agent can read and modify every file under these directories. Write implies read.",
+    "empty": "No directories granted yet",
+    "addFolder": "Choose folder…",
+    "manualPlaceholder": "or type an absolute directory path (~ supported)",
+    "add": "Add",
+    "remove": "Remove",
+    "missing": "Path does not exist (will be skipped)",
+    "savedApplied": "Saved · additions take effect immediately",
+    "savedRestart": "Saved · removed directories stay effective until the app restarts",
+    "saveFailed": "Save failed: {{error}}"
+  },
   "computerUse": {
     "title": "Computer Use",
     "desc": "Let the agent see and operate macOS GUI apps (screenshot + accessibility tree + click/type). Each app's first action requires approval; apps you mark \"always allow\" are listed here.",
