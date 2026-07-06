@@ -1,11 +1,12 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'fs'
+import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 
 import { setTargetConventions, getTargetPlatform, getTargetEol } from '../platform.js'
 import { chooseEol } from '../tools/line-endings.js'
 import { WRITE_FILE_TOOL } from '../tools/write-file.js'
+import { __setFileReadMtimeForTests } from '../tools/read-file.js'
 import type { ToolCallParams } from '../tools/types.js'
 
 const TEST_DIR = join(process.cwd(), '.test-tmp', 'platform-conventions-test')
@@ -90,6 +91,7 @@ describe('write_file honors the target platform default', () => {
     setTargetConventions('windows', 'auto')
     const file = join(TEST_DIR, 'keep.txt')
     writeFileSync(file, 'old\nlf\nfile\n') // existing LF
+    __setFileReadMtimeForTests(file, statSync(file).mtimeMs)
     await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'new\nlf\ncontent\n' }))
     assert.equal(readFileSync(file, 'utf-8'), 'new\nlf\ncontent\n')
   })

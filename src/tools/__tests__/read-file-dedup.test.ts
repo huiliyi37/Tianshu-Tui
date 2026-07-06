@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { READ_FILE_TOOL, __resetReadHistoryForTests, isUnchangedRepeatRead, getReadRefStats } from '../read-file.js'
+import { READ_FILE_TOOL, __resetReadHistoryForTests, __evictLastKnownForTests, isUnchangedRepeatRead, getReadRefStats, getFileReadMtime } from '../read-file.js'
 import { ArtifactStore } from '../../artifact/store.js'
 import type { ToolCallParams } from '../types.js'
 
@@ -61,6 +61,21 @@ describe('fileReadHistory dedup', () => {
     const r2 = await READ_FILE_TOOL.execute(params({ file_path: file, offset: 50, limit: 10 }))
     assert.ok(r2.content.includes('line 50'), 'fragment must return content from artifact')
     assert.ok(!r2.content.includes('line 1'), 'fragment must not return lines before offset')
+  })
+
+  it('artifact re-serve re-registers 表2 after eviction (blind-overwrite guard dead-loop prevention)', async () => {
+    const file = makeFile('src/reregister.ts', 100)
+    // 表 keys use validatePath output, which keeps the caller's cwd form
+    // (resolve(cwd, path), NOT realpathSync) — mirror that here.
+    const absPath = join(dir, file)
+
+    await READ_FILE_TOOL.execute(params({ file_path: file })) // full read → artifact + 表2
+    __evictLastKnownForTests(absPath) // simulate LAST_KNOWN_MAX trimming
+    assert.equal(getFileReadMtime(absPath), null, '表2 evicted')
+
+    const r2 = await READ_FILE_TOOL.execute(params({ file_path: file, offset: 50, limit: 10 }))
+    assert.ok(r2.content.includes('line 50'), 'fragment re-served from artifact')
+    assert.ok(getFileReadMtime(absPath) !== null, 'artifact shortcut must re-register 表2')
   })
 
   it('allows fragment read after full read if file was modified', async () => {
@@ -358,5 +373,23 @@ describe('read-ref compact reference (任务 B2)', () => {
     const statsAfter = getReadRefStats()
     assert.ok(statsAfter.count > statsBefore.count, 'readRefCount must increment')
     assert.ok(statsAfter.savedBytes > statsBefore.savedBytes, 'readRefSavedBytes must increase')
+  })
+
+  it('flag on: read-ref shortcut re-registers 表2 after eviction (blind-overwrite guard dead-loop prevention)', async () => {
+    enableReadRef()
+    const file = makeFile('src/evicted.ts', 100)
+    // Same cwd-form key rule as the artifact re-serve test above.
+    const absPath = join(dir, file)
+
+    await READ_FILE_TOOL.execute(params({ file_path: file })) // first read → 表1 + 表2
+    assert.ok(getFileReadMtime(absPath) !== null, '表2 registered by first read')
+
+    // Simulate LAST_KNOWN_MAX trimming: 表2 evicted while 表1 dedup entry survives.
+    __evictLastKnownForTests(absPath)
+    assert.equal(getFileReadMtime(absPath), null, '表2 evicted')
+
+    const r2 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r2.content.startsWith('[read-ref]'), 'repeat read takes the shortcut')
+    assert.ok(getFileReadMtime(absPath) !== null, 'shortcut must re-register 表2 — otherwise write_file guard loops forever')
   })
 })

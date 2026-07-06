@@ -49,6 +49,7 @@ describe('createTodoReminderHook', () => {
     assert.equal(submitted[0]!.key, 'todo-missing')
     assert.equal(submitted[0]!.category, 'todo')
     assert.equal(submitted[0]!.priority, 0.5)
+    assert.deepEqual(submitted[0]!.expect, { kind: 'tool_appears', tools: ['todo'] }, 'adoption predicate attached')
   })
 
   it('escalates wording/priority when a long task still has no todo', () => {
@@ -89,6 +90,7 @@ describe('createTodoReminderHook', () => {
     assert.equal(submitted[0]!.key, 'todo-stale')
     assert.match(submitted[0]!.content, /current thing/)
     assert.match(submitted[0]!.content, /完成 1\/3/)
+    assert.deepEqual(submitted[0]!.expect, { kind: 'tool_appears', tools: ['todo'] }, 'adoption predicate attached')
   })
 
   it('treats a list change as fresh (resets staleness)', () => {

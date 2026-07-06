@@ -92,6 +92,9 @@ export function createTodoReminderHook(deps: TodoReminderHookDeps): PostTurnRunt
             tier: 'operational',
             content: `【天枢】任务已展开 ${turn} 轮仍无 todo 清单——多步任务缺少分解会丢进度、易重复劳动。请先用 todo 工具写出有序步骤分解再继续(恰好一个 in_progress),后续每完成一项即时标 completed。`,
             ttl: 1,
+            // 核销谓词：下几轮出现 todo 工具调用即视为采纳。没有谓词时
+            // 效能账本只记送达(adopted/ignored 恒 0)，习惯化对抗拿不到数据。
+            expect: { kind: 'tool_appears', tools: ['todo'] },
           })
           lastReminderTurn = turn
           return
@@ -104,6 +107,7 @@ export function createTodoReminderHook(deps: TodoReminderHookDeps): PostTurnRunt
             tier: 'operational',
             content: '【天枢】你已连续多步推进但还没建 todo。若任务有 3+ 步或多个子任务,先用 todo 工具列出有序步骤(建完把当前项标 in_progress),后续完成即时标 completed。单步琐碎任务可忽略本提醒。',
             ttl: 1,
+            expect: { kind: 'tool_appears', tools: ['todo'] },
           })
           lastReminderTurn = turn
         }
@@ -120,6 +124,7 @@ export function createTodoReminderHook(deps: TodoReminderHookDeps): PostTurnRunt
           tier: 'operational',
           content: `【天枢】todo 已 ${turnsSinceWrite} 轮未更新,可能与当前工作脱节。核对并更新清单(完成项标 completed、新发现的步骤补进去)。当前清单: ${snapshotLine(todos)}`,
           ttl: 1,
+          expect: { kind: 'tool_appears', tools: ['todo'] },
         })
         lastReminderTurn = turn
       }

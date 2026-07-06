@@ -1,7 +1,8 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'fs'
+import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
+import { __setFileReadMtimeForTests } from '../read-file.js'
 
 import {
   detectEol,
@@ -124,6 +125,7 @@ describe('write_file EOL policy', () => {
   it('preserves a CRLF file on overwrite', async () => {
     const file = join(TEST_DIR, 'config.txt')
     writeFileSync(file, 'old\r\nstuff\r\n')
+    __setFileReadMtimeForTests(file, statSync(file).mtimeMs)
     await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'new\nstuff\nhere\n' }))
     const onDisk = readFileSync(file, 'utf-8')
     assert.equal(onDisk, 'new\r\nstuff\r\nhere\r\n')
@@ -133,6 +135,7 @@ describe('write_file EOL policy', () => {
   it('preserves an LF file on overwrite', async () => {
     const file = join(TEST_DIR, 'config2.txt')
     writeFileSync(file, 'old\nstuff\n')
+    __setFileReadMtimeForTests(file, statSync(file).mtimeMs)
     await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'new\nstuff\n' }))
     assert.equal(readFileSync(file, 'utf-8'), 'new\nstuff\n')
   })
