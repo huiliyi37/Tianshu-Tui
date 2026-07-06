@@ -39,7 +39,7 @@ import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBa
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight } from '../format/glance-bar.js'
+import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
@@ -3081,16 +3081,15 @@ export class TuiApp {
       // 缓存复用，避免每帧 repeat(innerWidth) 重建。
       const { leftBar, rightBar, botBorder } = this.getInputChrome(uiSep, innerWidth, borderColor)
 
-      // 3. 构建高保真左右指标 Segment
-      const leftStr = formatGlanceLeft({
+      // 输入框边框字符
+      const chars = boxCharsFor(uiSep)
+
+      // 第一段：GlanceBar 独立成一行（状态提示），与输入框视觉分离
+      const glanceBarLine = formatGlanceBar({
         width: cols,
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
-      }, this.theme)
-
-      const rightStr = formatGlanceRight({
-        width: cols,
         modelName: this.state.modelName,
         reasoningEffort: this.metricsGlanceController.reasoningEffortProvider?.(),
         cacheHitRate: glanceCacheHitRate,
@@ -3104,37 +3103,15 @@ export class TuiApp {
         planMode: planModeActive,
         goal: goalSnapshot,
         todoSummary,
+        stalled,
       }, this.theme)
+      lines.push({ text: glanceBarLine })
 
-      // 用 wide 上界度量指标串宽度：CJK/Windows 终端把 East-Asian Ambiguous 符号
-      // （↑↓ · — … 等）按 2 列渲染。若按 narrow(string-width) 计算填充量，顶边框实际
-      // 渲染宽度会超过 cols → 终端折行成 2 显示行，而 LiveEngine.rowsForLine 按 narrow
-      // 数成 1 行 → 回顶欠擦（moveToTop/ERASE 少擦一行）→ 输入框重影/逐帧堆叠重复。
-      // 按 wide 定尺后顶边框恒 ≤ cols，任何终端都占 1 显示行，行数估算与实际一致。
-      const plainLeft = displayWidth(leftStr, { ambiguousAsWide: true })
-      const plainRight = displayWidth(rightStr, { ambiguousAsWide: true })
+      // 第二段：分隔线（─ 重复填充整宽），视觉隔离状态与输入
+      const separatorLine = color('─'.repeat(Math.max(20, cols - 2)), this.theme.dim)
+      lines.push({ text: separatorLine })
 
-      // 4. 计算并拼接一体化顶部边框：╭─ leftStr ─┬─ rightStr ─╮
-      const chars = boxCharsFor(uiSep)
-      let topBorder = ''
-      if (innerWidth < plainLeft + plainRight + 10) {
-        topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
-      } else {
-        const lineRem = innerWidth - plainLeft - plainRight - 4 // 4 = label border paddings
-        const leftFill = Math.max(2, Math.floor(lineRem * 0.4))
-        const rightFill = Math.max(2, lineRem - leftFill)
-        
-        topBorder = color(chars.tl, borderColor) + 
-                    color(chars.h.repeat(2), borderColor) + 
-                    leftStr + 
-                    color(chars.h.repeat(leftFill), borderColor) + 
-                    color(chars.m, borderColor) + 
-                    color(chars.h.repeat(rightFill), borderColor) + 
-                    rightStr + 
-                    color(chars.h.repeat(2), borderColor) + 
-                    color(chars.tr, borderColor)
-      }
-
+      // 第三段：输入框（高亮边框，与状态栏分离）
       const MAX_INPUT_DISPLAY_LINES = 12
       const arrowColor = this.theme.success
       const inputLines = this.inputLine.value
@@ -3148,7 +3125,9 @@ export class TuiApp {
         return raw
       }
 
-      lines.push({ text: topBorder })
+      // 输入框使用简洁边框（无 GlanceBar 嵌入），边框颜色表示状态
+      const simpleTopBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
+      lines.push({ text: simpleTopBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
         lines.push({ text: this.renderInputRow(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth, leftBar, rightBar) })
         for (const extra of inputLines.slice(1)) {
