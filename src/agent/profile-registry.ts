@@ -6,6 +6,7 @@
  */
 
 import { progressiveTimeout, WORKER_EXIT_GRACE_MS } from './timeout-ladder.js'
+import { normalizeFrontmatterSource } from '../utils/frontmatter.js'
 
 export type AgentRole = 'brain' | 'hands' | 'readonly' | 'readonly_plus_test'
 
@@ -550,6 +551,7 @@ export class ProfileRegistry {
 
 /** 解析 .rivet/agents/*.md 格式：YAML frontmatter + body as expertisePrompt */
 function parseAgentMarkdown(content: string): ProfileDefinition {
+  content = normalizeFrontmatterSource(content)
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
   if (!frontmatterMatch) throw new Error('Missing YAML frontmatter (--- delimiters)')
 

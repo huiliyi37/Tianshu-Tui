@@ -18,6 +18,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:f
 import { homedir } from 'node:os'
 import { join, relative, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { normalizeFrontmatterSource } from '../utils/frontmatter.js'
 
 export type SkillSource = 'rivet' | 'project-claude' | 'global-claude' | 'builtin'
 
@@ -90,6 +91,7 @@ function parseFrontmatter(raw: string): Record<string, string | string[]> {
 }
 
 export function parseSkillMarkdown(content: string, fileName: string): SkillDefinition {
+  content = normalizeFrontmatterSource(content)
   const match = content.match(FRONTMATTER_RE)
   if (!match) {
     throw new Error(`Skill ${fileName}: missing YAML frontmatter`)

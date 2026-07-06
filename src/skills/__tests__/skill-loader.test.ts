@@ -23,6 +23,23 @@ Follow red-green-refactor.`
     assert.ok(skill.triggers.some(t => t.test('use TDD here')))
   })
 
+  it('parses CRLF line endings and UTF-8 BOM (Windows desktop)', () => {
+    // Windows 桌面版：git autocrlf 检出 / 记事本保存的技能文件带 CRLF 和 BOM，
+    // LF-only 的 frontmatter regex 曾让 .rivet/skills/ 全部报
+    // "missing YAML frontmatter"。
+    const lf = `---
+name: win-skill
+description: works on windows
+---
+
+Body line.`
+    const crlf = lf.replace(/\n/g, '\r\n')
+    const skill = parseSkillMarkdown('\uFEFF' + crlf, 'win-skill.md')
+    assert.equal(skill.name, 'win-skill')
+    assert.equal(skill.description, 'works on windows')
+    assert.equal(skill.body, 'Body line.')
+  })
+
   it('loadProjectSkills reports errors for a malformed .rivet/skills entry', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'rivet-loadproj-'))
     const broken = join(cwd, '.rivet', 'skills', 'broken')
