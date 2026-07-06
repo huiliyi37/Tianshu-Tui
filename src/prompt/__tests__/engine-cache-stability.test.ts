@@ -1120,6 +1120,98 @@ describe('frozen snapshot byte-identity under delta (task 5/7)', () => {
   })
 })
 
+describe('frozen snapshot orphaning across turn boundaries (2026-07-06 regression)', () => {
+  const mkEngine = () => new PromptEngine({
+    model: 'test-model',
+    maxTokens: 4096,
+    staticCtx: { tools: [] },
+    volatileCtx: { cwd: '/test', gitStatus: 'M src/foo.ts', rivetMd: '# Test' },
+    appendixDelta: true,
+  })
+
+  it('inter-turn invalidateFreshCache must NOT orphan the pending snapshot', () => {
+    const engine = mkEngine()
+    // Turn A: boundary build + a tool-turn rebuild (last user stays "task A").
+    const history: OaiMessage[] = [{ role: 'user', content: 'task A' }]
+    engine.buildOaiRequest([...history])
+    history.push({ role: 'assistant', content: 'working on it' })
+    const req2 = engine.buildOaiRequest([...history])
+    const lastMergedA = (req2.messages.find(
+      m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('task A'),
+    )!.content) as string
+
+    // Turn ends (final text reply, no further build). New user message arrives:
+    // turn-step-producer fires setIntentRetrievalRoute → invalidateFreshCache
+    // BEFORE the next buildOaiRequest — the exact production sequence that
+    // orphaned pending snapshots (cache-log FE + prefix_truncation every boundary).
+    history.push({ role: 'assistant', content: 'final answer' })
+    engine.setIntentRetrievalRoute('<intent-retrieval-route advisory="true"><task-kinds>bug_fix</task-kinds></intent-retrieval-route>')
+
+    const before = engine.getCacheEventStats().frozenFallbackRebuilds
+    const req3 = engine.buildOaiRequest([...history, { role: 'user', content: 'task B' }])
+    const after = engine.getCacheEventStats().frozenFallbackRebuilds
+
+    assert.equal(after, before,
+      'historical slot must hit its committed snapshot — no FATAL fallback rebuild')
+    const historical = historicalUserContent(req3.messages, 'task A')
+    assert.equal(historical, lastMergedA,
+      'historical A must byte-match the LAST merged bytes sent on the wire')
+  })
+
+  it('duplicate user text with inter-turn invalidate keeps both instances snapshot-backed', () => {
+    const engine = mkEngine()
+    const history: OaiMessage[] = [{ role: 'user', content: '继续' }]
+    engine.buildOaiRequest([...history])
+    history.push({ role: 'assistant', content: 'ok1' })
+    engine.setIntentRetrievalRoute(null) // inter-turn invalidate
+
+    const before = engine.getCacheEventStats().frozenFallbackRebuilds
+    const req2 = engine.buildOaiRequest([...history, { role: 'user', content: '继续' }])
+    assert.equal(engine.getCacheEventStats().frozenFallbackRebuilds, before,
+      'first 继续 instance must come from its committed snapshot')
+    const firstInstance = (req2.messages.filter(
+      m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('继续'),
+    )[0]!.content) as string
+
+    // A following tool-turn build must keep the first instance byte-stable.
+    const req3 = engine.buildOaiRequest([
+      ...history,
+      { role: 'user', content: '继续' },
+      { role: 'assistant', content: 'ok2' },
+    ])
+    const firstInstance3 = (req3.messages.filter(
+      m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('继续'),
+    )[0]!.content) as string
+    assert.equal(firstInstance3, firstInstance,
+      'first 继续 instance must stay byte-identical across subsequent builds')
+  })
+
+  it('fallback rebuild memoizes — byte-stable across requests, counter increments once', () => {
+    const engine = mkEngine()
+    const history: OaiMessage[] = [{ role: 'user', content: 'task A' }]
+    engine.buildOaiRequest([...history])
+    // Simulate old-session damage: snapshots fully lost (eviction / orphaned data).
+    ;(engine as unknown as { frozenUserMerged: Map<string, string[]> }).frozenUserMerged.clear()
+    ;(engine as unknown as { frozenPendingMerged: Map<string, string> }).frozenPendingMerged.clear()
+
+    history.push({ role: 'assistant', content: 'ok' })
+    const reqX = engine.buildOaiRequest([...history, { role: 'user', content: 'task B' }])
+    const countX = engine.getCacheEventStats().frozenFallbackRebuilds
+    assert.ok(countX >= 1, 'precondition: fallback fired once for the damaged slot')
+    const histX = historicalUserContent(reqX.messages, 'task A')
+
+    const reqY = engine.buildOaiRequest([
+      ...history,
+      { role: 'user', content: 'task B' },
+      { role: 'assistant', content: 'ack' },
+    ])
+    const countY = engine.getCacheEventStats().frozenFallbackRebuilds
+    assert.equal(countY, countX, 'memoized fallback must not re-increment the counter')
+    const histY = historicalUserContent(reqY.messages, 'task A')
+    assert.equal(histY, histX, 'fallback bytes must be identical across requests')
+  })
+})
+
 describe('resetAppendixBaseline after history rewrite (task 6/7)', () => {
   it('resetAppendixBaseline forces next emit to be a full baseline', () => {
     const engine = new PromptEngine({
