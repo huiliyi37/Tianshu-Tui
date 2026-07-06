@@ -45,8 +45,8 @@ export interface DefaultRegistryOptions {
   desktopTools?: boolean
   /** N4 桌面浏览器验证工具。默认关闭：新攻击面 + 占 kernel budget，仅桌面 sidecar 开启。 */
   browserTool?: boolean
-  /** Computer Use（macOS GUI 自动化）。默认关闭：EXTENDED 层工具（主控 prompt 零成本），
-   *  仅 darwin 且 RIVET_COMPUTER_USE!=0 时由装配层开启；逐应用审批 fail-closed。 */
+  /** Computer Use（桌面 GUI 自动化，macOS/Windows）。默认关闭：EXTENDED 层工具（主控 prompt 零成本），
+   *  仅 darwin/win32 且 RIVET_COMPUTER_USE!=0 时由装配层开启；逐应用审批 fail-closed。 */
   computerUse?: boolean
   /** 多会话隔离：注入 per-session TodoStore。缺省回退全局 TODO_TOOL（defaultStore）。
    *  注意工具 definition（name/description/schema）与 TODO_TOOL 字节一致，仅 store 不同，

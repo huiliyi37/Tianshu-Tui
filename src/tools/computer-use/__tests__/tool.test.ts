@@ -366,19 +366,33 @@ test('secure text field values and secret-looking tokens are masked', async () =
 
 // ── Platform gating ───────────────────────────────────────────────
 
-test('non-darwin platform: tool disabled and execute refuses', async () => {
+test('unsupported platform: tool disabled and execute refuses', async () => {
   const driver = new FakeDriver()
-  const tool = createComputerUseTool({ platform: 'win32', driverFactory: () => driver })
+  const tool = createComputerUseTool({ platform: 'linux', driverFactory: () => driver })
   assert.equal(tool.isEnabled!(), false)
   const res = await tool.execute(params({ action: 'list_apps' }))
   assert.equal(res.isError, true)
-  assert.match(res.content, /only available on macOS/)
+  assert.match(res.content, /only available on macOS and Windows/)
   assert.equal(driver.calls.length, 0)
 })
 
 test('darwin platform: tool enabled by default', () => {
   const tool = createComputerUseTool({ platform: 'darwin', driverFactory: () => new FakeDriver() })
   assert.equal(tool.isEnabled!(), true)
+})
+
+test('win32 platform: tool enabled by default and actions execute', async () => {
+  const driver = new FakeDriver()
+  const tool = createComputerUseTool({ platform: 'win32', driverFactory: () => driver })
+  assert.equal(tool.isEnabled!(), true)
+  const list = await tool.execute(params({ action: 'list_apps' }))
+  assert.equal(list.isError, undefined)
+  assert.match(list.content, /Visible apps/)
+  const snap = await tool.execute(params({ action: 'snapshot', app: 'notepad' }))
+  assert.equal(snap.isError, undefined)
+  const click = await tool.execute(params({ action: 'click', app: 'notepad', ref: 1 }))
+  assert.equal(click.isError, undefined)
+  assert.deepEqual(driver.calls.map((c) => c.method), ['listApps', 'snapshot', 'click'])
 })
 
 test('enabled override wins over platform default', () => {

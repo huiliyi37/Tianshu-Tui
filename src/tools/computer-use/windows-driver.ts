@@ -1,0 +1,650 @@
+/**
+ * Windows Computer Use driver — GUI automation via PowerShell + UI Automation.
+ *
+ * Zero new dependencies: everything goes through the OS-bundled
+ * `powershell.exe` (5.1). The accessibility tree comes from the .NET
+ * `System.Windows.Automation` (UIA) assemblies, input synthesis from
+ * `SendInput` via an `Add-Type` P/Invoke shim (SendKeys is deliberately
+ * avoided — its `{}^%+~` metacharacters corrupt arbitrary text and CJK is
+ * unreliable), and screenshots from `System.Drawing.Graphics.CopyFromScreen`
+ * (including the 1440px vision downsample — Windows has no `sips`, so the
+ * resize happens inside the same script).
+ *
+ * Scripts are passed as `-EncodedCommand` (base64 UTF-16LE) which sidesteps
+ * every quoting/escaping pitfall, and each script is wrapped to emit UTF-8
+ * stdout (redirected PS 5.1 otherwise uses the OEM codepage and mangles CJK
+ * window titles) and surface errors on stderr with exit 1.
+ *
+ * Element targeting mirrors the macOS driver exactly: each snapshot ref
+ * carries its child-index PATH from the app's top-level UIA windows
+ * ([windowIdx, childIdx, ...], ControlView walker). Click/locate re-walk the
+ * path and verify role/title — stale snapshots are rejected, never guessed.
+ *
+ * Every action spawns a fresh powershell.exe (matching the per-action
+ * osascript spawns on macOS). Add-Type JIT makes the first call slow (~1-3s);
+ * accepted for v1 — a resident PS child process is the upgrade path if real
+ * usage proves too slow.
+ */
+
+import { execFile } from 'node:child_process'
+import { readFile, unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import type {
+  AppInfo,
+  ClickOptions,
+  ClickTarget,
+  ComputerUseDriver,
+  PermissionStatus,
+  ScrollOptions,
+  SnapshotRef,
+  SnapshotResult,
+} from './macos-driver.js'
+
+const POWERSHELL_TIMEOUT_MS = 20_000
+/** Bound the UIA walk so a deep app tree can't blow up the result. */
+const MAX_TREE_NODES = 400
+/** Max dimension for the vision-model screenshot copy (px). */
+const VISION_MAX_DIMENSION = 1440
+
+/** Injectable script executor — tests swap in a fake to lock script contents. */
+export type PowerShellRunner = (script: string, timeoutMs?: number) => Promise<string>
+
+function runPowerShellDefault(script: string, timeoutMs = POWERSHELL_TIMEOUT_MS): Promise<string> {
+  const wrapped = [
+    `$ErrorActionPreference = 'Stop'`,
+    `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`,
+    `try {`,
+    script,
+    `} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`,
+  ].join('\n')
+  const encoded = Buffer.from(wrapped, 'utf16le').toString('base64')
+  return new Promise((resolve, reject) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(new Error(stderr?.toString().trim() || err.message))
+          return
+        }
+        resolve(stdout.toString())
+      },
+    )
+  })
+}
+
+/** Escape a string for safe embedding as a single-quoted PowerShell literal. */
+export function psString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+/** Model-facing app names may carry an .exe suffix; process names don't. */
+export function normalizeAppName(app: string): string {
+  return app.replace(/\.exe$/i, '').trim()
+}
+
+/**
+ * P/Invoke shim: SendInput mouse/keyboard synthesis, cursor positioning,
+ * foreground-window control and window rects. Also flips the (non-DPI-aware
+ * by default) PowerShell process to DPI-aware so every coordinate that flows
+ * through here — UIA rects, SetCursorPos, CopyFromScreen — is in the same
+ * physical-pixel space.
+ */
+const INPUT_PRELUDE = `
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class RivetInput {
+  [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr dwExtraInfo; }
+  [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr dwExtraInfo; }
+  [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+  [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] inputs, int size);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern short VkKeyScan(char c);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  const uint TYPE_MOUSE = 0, TYPE_KEYBOARD = 1;
+  const uint LEFTDOWN = 0x2, LEFTUP = 0x4, RIGHTDOWN = 0x8, RIGHTUP = 0x10, WHEEL = 0x800, HWHEEL = 0x1000;
+  const uint KEYUP = 0x2, UNICODE = 0x4;
+  static void Send(INPUT i) { SendInput(1, new INPUT[] { i }, Marshal.SizeOf(typeof(INPUT))); }
+  static INPUT Mouse(uint flags, uint data) { var i = new INPUT { type = TYPE_MOUSE }; i.u.mi = new MOUSEINPUT { dwFlags = flags, mouseData = data }; return i; }
+  static INPUT Key(ushort vk, ushort scan, uint flags) { var i = new INPUT { type = TYPE_KEYBOARD }; i.u.ki = new KEYBDINPUT { wVk = vk, wScan = scan, dwFlags = flags }; return i; }
+  public static void Click(int x, int y, bool right, int count) {
+    SetCursorPos(x, y);
+    System.Threading.Thread.Sleep(30);
+    for (int k = 0; k < count; k++) {
+      Send(Mouse(right ? RIGHTDOWN : LEFTDOWN, 0));
+      Send(Mouse(right ? RIGHTUP : LEFTUP, 0));
+      if (count > 1) System.Threading.Thread.Sleep(40);
+    }
+  }
+  public static void Wheel(int x, int y, int delta, bool horizontal) {
+    SetCursorPos(x, y);
+    System.Threading.Thread.Sleep(20);
+    Send(Mouse(horizontal ? HWHEEL : WHEEL, unchecked((uint)delta)));
+  }
+  public static void Drag(int fx, int fy, int tx, int ty, int steps) {
+    SetCursorPos(fx, fy);
+    System.Threading.Thread.Sleep(50);
+    Send(Mouse(LEFTDOWN, 0));
+    for (int i = 1; i <= steps; i++) {
+      SetCursorPos(fx + (tx - fx) * i / steps, fy + (ty - fy) * i / steps);
+      System.Threading.Thread.Sleep(20);
+    }
+    System.Threading.Thread.Sleep(50);
+    Send(Mouse(LEFTUP, 0));
+  }
+  public static void KeyDown(ushort vk) { Send(Key(vk, 0, 0)); }
+  public static void KeyUp(ushort vk) { Send(Key(vk, 0, KEYUP)); }
+  public static void KeyTap(ushort vk) { KeyDown(vk); KeyUp(vk); }
+  public static void TypeChar(char c) { Send(Key(0, c, UNICODE)); Send(Key(0, c, UNICODE | KEYUP)); }
+}
+'@
+[void][RivetInput]::SetProcessDPIAware()
+`
+
+const UIA_PRELUDE = `
+Add-Type -AssemblyName UIAutomationClient | Out-Null
+Add-Type -AssemblyName UIAutomationTypes | Out-Null
+`
+
+/** Match running processes for an app name (process name or exact window title). */
+function procsForApp(app: string): string {
+  return `
+$app = ${psString(normalizeAppName(app))}
+$procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($_.ProcessName -eq $app -or $_.MainWindowTitle -eq $app) })
+if ($procs.Count -eq 0) { throw "no running app named '$app' with a window" }
+`
+}
+
+/** UIA top-level windows for the matched processes, in stable enumeration order. */
+const UIA_WINDOWS = `
+$procIds = @($procs | ForEach-Object { $_.Id })
+$uiaRoot = [System.Windows.Automation.AutomationElement]::RootElement
+$uiaAll = $uiaRoot.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
+$wins = @()
+foreach ($w in $uiaAll) { if ($procIds -contains $w.Current.ProcessId) { $wins += $w } }
+if ($wins.Count -eq 0) { throw "no top-level UIA window for '$app'" }
+`
+
+/**
+ * Resolve an element by child-index path with identity check — semantics
+ * identical to the macOS RESOLVE_BY_PATH snippet: out-of-range or changed
+ * role/title throws a stale-snapshot error.
+ */
+function resolveByPath(target: { path: number[]; role?: string; title?: string }): string {
+  return `
+$idxPath = @(${target.path.join(', ')})
+$expectRole = ${psString(target.role ?? '')}
+$expectTitle = ${psString(target.title ?? '')}
+if ($idxPath.Count -eq 0 -or $idxPath[0] -ge $wins.Count) { throw 'stale snapshot - window index out of range, re-snapshot first' }
+$el = $wins[$idxPath[0]]
+$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+for ($i = 1; $i -lt $idxPath.Count; $i++) {
+  $child = $walker.GetFirstChild($el)
+  $j = 0
+  while ($child -ne $null -and $j -lt $idxPath[$i]) { $child = $walker.GetNextSibling($child); $j++ }
+  if ($child -eq $null) { throw 'stale snapshot - element path no longer valid, re-snapshot first' }
+  $el = $child
+}
+$role = ''; $title = ''
+try { $role = $el.Current.ControlType.ProgrammaticName -replace '^ControlType\\.', '' } catch {}
+try { $title = $el.Current.Name } catch {}
+if ($expectRole -and $role -ne $expectRole) { throw "stale snapshot - element role changed ($role != $expectRole), re-snapshot first" }
+if ($expectTitle -and $title -ne $expectTitle) { throw 'stale snapshot - element title changed, re-snapshot first' }
+$found = $el
+`
+}
+
+/** Center point of the resolved element's bounding rectangle. */
+const ELEMENT_CENTER = `
+$rect = $found.Current.BoundingRectangle
+if ($rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0) { throw 'element has no on-screen position' }
+$cx = [int][math]::Round($rect.X + $rect.Width / 2)
+$cy = [int][math]::Round($rect.Y + $rect.Height / 2)
+`
+
+/** Bring the first matched process's main window to the foreground. */
+const FOCUS_WINDOW = `
+$fh = [IntPtr]$procs[0].MainWindowHandle
+if ([RivetInput]::IsIconic($fh)) { [void][RivetInput]::ShowWindow($fh, 9) }
+[void][RivetInput]::SetForegroundWindow($fh)
+`
+
+/** One row of the UIA snapshot walk, as emitted (JSON) by the PS script. */
+export interface WindowsSnapshotRow {
+  ref: number
+  depth: number
+  role: string
+  title: string
+  value: string
+  pos: { x: number; y: number } | null
+  path: number[]
+}
+
+/**
+ * Format snapshot rows into the numbered tree + structured refs. Output format
+ * is byte-identical to the macOS driver ([ref] role "title" = value @(x,y))
+ * so the model-facing prompt experience is the same on both platforms.
+ */
+export function rowsToSnapshot(rows: WindowsSnapshotRow[]): { tree: string; refs: SnapshotRef[] } {
+  const tree = rows
+    .map((r) => {
+      const indent = '  '.repeat(Math.min(r.depth, 8))
+      const label = r.title ? ` "${r.title}"` : ''
+      const val = r.value ? ` = ${r.value}` : ''
+      const at = r.pos ? ` @(${Math.round(r.pos.x)},${Math.round(r.pos.y)})` : ''
+      return `${indent}[${r.ref}] ${r.role || 'element'}${label}${val}${at}`
+    })
+    .join('\n')
+  const refs: SnapshotRef[] = rows.map((r) => ({
+    ref: r.ref,
+    path: Array.isArray(r.path) ? r.path : [r.path as unknown as number],
+    role: r.role,
+    title: r.title,
+    pos: r.pos,
+  }))
+  return { tree, refs }
+}
+
+// --- key combo parsing (pure, unit-tested) ---
+
+/** Virtual-key codes for named keys. `delete` maps to Backspace (VK 0x08) to
+ *  preserve macOS semantics, where key code 51 is the delete/backspace key. */
+const NAMED_VK: Record<string, number> = {
+  return: 0x0d, enter: 0x0d, tab: 0x09, space: 0x20,
+  delete: 0x08, backspace: 0x08, escape: 0x1b, esc: 0x1b,
+  left: 0x25, up: 0x26, right: 0x27, down: 0x28,
+  home: 0x24, end: 0x23, pageup: 0x21, pagedown: 0x22,
+  f1: 0x70, f2: 0x71, f3: 0x72, f4: 0x73, f5: 0x74, f6: 0x75,
+  f7: 0x76, f8: 0x77, f9: 0x78, f10: 0x79, f11: 0x7a, f12: 0x7b,
+}
+
+/** Modifier VKs. `cmd` maps to Ctrl — models write "cmd+s" from macOS habit
+ *  and Ctrl is the Windows equivalent for virtually every such shortcut. */
+const MODIFIER_VK: Record<string, number> = {
+  cmd: 0x11, command: 0x11, ctrl: 0x11, control: 0x11,
+  alt: 0x12, opt: 0x12, option: 0x12,
+  shift: 0x10,
+  win: 0x5b, meta: 0x5b,
+}
+
+export type ComboKeySpec = {
+  modifiers: number[]
+  key: { vk: number } | { char: string }
+}
+
+/** Parse a "cmd+shift+s"-style combo into modifier VKs + final key. Throws on
+ *  unknown multi-character key names (single chars go through VkKeyScan). */
+export function parseCombo(combo: string): ComboKeySpec {
+  const parts = combo.toLowerCase().split('+').map((s) => s.trim()).filter(Boolean)
+  const key = parts.pop() ?? ''
+  const modifiers: number[] = []
+  for (const part of parts) {
+    const vk = MODIFIER_VK[part]
+    if (vk === undefined) throw new Error(`unknown modifier "${part}" in combo "${combo}"`)
+    if (!modifiers.includes(vk)) modifiers.push(vk)
+  }
+  const namedVk = NAMED_VK[key]
+  if (namedVk !== undefined) return { modifiers, key: { vk: namedVk } }
+  if (key.length !== 1) throw new Error(`unknown key "${key}" in combo "${combo}"`)
+  return { modifiers, key: { char: key } }
+}
+
+// --- script builders (exported for unit tests) ---
+
+export function buildListAppsScript(): string {
+  return `
+${INPUT_PRELUDE}
+$fgPid = [uint32]0
+[void][RivetInput]::GetWindowThreadProcessId([RivetInput]::GetForegroundWindow(), [ref]$fgPid)
+$byName = @{}
+foreach ($p in @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle })) {
+  $n = $p.ProcessName
+  if (-not $byName.ContainsKey($n)) { $byName[$n] = $false }
+  if ($p.Id -eq $fgPid) { $byName[$n] = $true }
+}
+$out = @($byName.Keys | Sort-Object | ForEach-Object { @{ name = $_; frontmost = $byName[$_] } })
+ConvertTo-Json -InputObject $out -Compress
+`
+}
+
+export function buildSnapshotScript(app: string, outFull: string, outVision: string): string {
+  return `
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+${procsForApp(app)}
+${UIA_WINDOWS}
+$MAX = ${MAX_TREE_NODES}
+$script:rows = New-Object System.Collections.ArrayList
+$script:refN = 0
+$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+function Visit($el, $depth, $path) {
+  if ($script:rows.Count -ge $MAX) { return }
+  $role = ''; $title = ''; $value = ''
+  try { $role = $el.Current.ControlType.ProgrammaticName -replace '^ControlType\\.', '' } catch {}
+  try { $title = [string]$el.Current.Name } catch {}
+  try {
+    $vp = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp) -and $vp) { $value = [string]$vp.Current.Value }
+  } catch {}
+  if ($role -or $title -or $value) {
+    $script:refN++
+    $pos = $null
+    try {
+      $r = $el.Current.BoundingRectangle
+      if (-not $r.IsEmpty) { $pos = @{ x = [int][math]::Round($r.X); y = [int][math]::Round($r.Y) } }
+    } catch {}
+    [void]$script:rows.Add(@{ ref = $script:refN; depth = $depth; role = $role; title = $title; value = $value; pos = $pos; path = $path })
+  }
+  $child = $null
+  try { $child = $walker.GetFirstChild($el) } catch {}
+  $i = 0
+  while ($child -ne $null) {
+    if ($script:rows.Count -ge $MAX) { break }
+    Visit $child ($depth + 1) ($path + @($i))
+    $i++
+    try { $child = $walker.GetNextSibling($child) } catch { $child = $null }
+  }
+}
+for ($i = 0; $i -lt $wins.Count; $i++) { Visit $wins[$i] 0 @($i) }
+
+$shotOk = $false
+try {
+  Add-Type -AssemblyName System.Drawing | Out-Null
+  $wr = $wins[0].Current.BoundingRectangle
+  if (-not $wr.IsEmpty -and $wr.Width -gt 0 -and $wr.Height -gt 0) {
+    $sx = [int]$wr.X; $sy = [int]$wr.Y; $sw = [int]$wr.Width; $sh = [int]$wr.Height
+    $bmp = New-Object System.Drawing.Bitmap($sw, $sh)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($sx, $sy, 0, 0, (New-Object System.Drawing.Size($sw, $sh)))
+    $g.Dispose()
+    $bmp.Save(${psString(outFull)}, [System.Drawing.Imaging.ImageFormat]::Png)
+    $maxDim = ${VISION_MAX_DIMENSION}
+    if ($sw -gt $maxDim -or $sh -gt $maxDim) {
+      $scale = [math]::Min($maxDim / $sw, $maxDim / $sh)
+      $nw = [math]::Max(1, [int]($sw * $scale)); $nh = [math]::Max(1, [int]($sh * $scale))
+      $small = New-Object System.Drawing.Bitmap($bmp, $nw, $nh)
+      $small.Save(${psString(outVision)}, [System.Drawing.Imaging.ImageFormat]::Png)
+      $small.Dispose()
+    }
+    $bmp.Dispose()
+    $shotOk = $true
+  }
+} catch { $shotOk = $false }
+ConvertTo-Json -InputObject @{ rows = $script:rows.ToArray(); shot = $shotOk } -Depth 8 -Compress
+`
+}
+
+export function buildClickByPathScript(
+  app: string,
+  target: { path: number[]; role?: string; title?: string },
+  button: 'left' | 'right',
+  count: 1 | 2,
+): string {
+  // Plain left single click prefers InvokePattern (the UIA analog of AXPress —
+  // works even for obscured elements); everything else needs real synthetic
+  // events at the element's center.
+  const invokeFastPath = button === 'left' && count === 1
+    ? `
+$invoke = $null
+if ($found.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invoke) -and $invoke) {
+  $invoke.Invoke()
+  'ok'
+  exit 0
+}`
+    : ''
+  return `
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+${procsForApp(app)}
+${UIA_WINDOWS}
+${resolveByPath(target)}
+${invokeFastPath}
+${ELEMENT_CENTER}
+[RivetInput]::Click($cx, $cy, $${button === 'right'}, ${count})
+'ok'
+`
+}
+
+export function buildClickAtScript(x: number, y: number, button: 'left' | 'right', count: 1 | 2): string {
+  return `
+${INPUT_PRELUDE}
+[RivetInput]::Click(${Math.round(x)}, ${Math.round(y)}, $${button === 'right'}, ${count})
+'ok'
+`
+}
+
+export function buildLocateScript(app: string, target: { path: number[]; role?: string; title?: string }): string {
+  return `
+${INPUT_PRELUDE}
+${UIA_PRELUDE}
+${procsForApp(app)}
+${UIA_WINDOWS}
+${resolveByPath(target)}
+${ELEMENT_CENTER}
+ConvertTo-Json -InputObject @{ x = $cx; y = $cy } -Compress
+`
+}
+
+export function buildScrollScript(app: string, opts: ScrollOptions): string {
+  const amount = Math.max(1, Math.min(50, Math.round(opts.amount ?? 5)))
+  // Windows wheel: positive vertical = up (away from user), positive
+  // horizontal (HWHEEL) = right. One "line" = WHEEL_DELTA (120).
+  const delta = (opts.direction === 'up' || opts.direction === 'right' ? 1 : -1) * amount * 120
+  const horizontal = opts.direction === 'left' || opts.direction === 'right'
+  const atSnippet = opts.at
+    ? `$ax = ${Math.round(opts.at.x)}; $ay = ${Math.round(opts.at.y)}`
+    : `
+${procsForApp(app)}
+$wrct = New-Object 'RivetInput+RECT'
+if (-not [RivetInput]::GetWindowRect([IntPtr]$procs[0].MainWindowHandle, [ref]$wrct)) { throw "cannot resolve a scroll position for '$app' (no window)" }
+$ax = [int](($wrct.Left + $wrct.Right) / 2); $ay = [int](($wrct.Top + $wrct.Bottom) / 2)`
+  return `
+${INPUT_PRELUDE}
+${atSnippet}
+[RivetInput]::Wheel($ax, $ay, ${delta}, $${horizontal})
+'ok'
+`
+}
+
+export function buildDragScript(from: { x: number; y: number }, to: { x: number; y: number }): string {
+  // Stepped moves matter: many drop targets ignore a teleporting drag.
+  return `
+${INPUT_PRELUDE}
+[RivetInput]::Drag(${Math.round(from.x)}, ${Math.round(from.y)}, ${Math.round(to.x)}, ${Math.round(to.y)}, 8)
+'ok'
+`
+}
+
+export function buildTypeScript(app: string, text: string): string {
+  // Text travels as base64 so newlines/quotes/CJK never touch PS quoting.
+  const b64 = Buffer.from(text, 'utf8').toString('base64')
+  return `
+${INPUT_PRELUDE}
+${procsForApp(app)}
+${FOCUS_WINDOW}
+Start-Sleep -Milliseconds 100
+$text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psString(b64)}))
+foreach ($ch in $text.ToCharArray()) {
+  if ($ch -eq [char]10) { [RivetInput]::KeyTap([uint16]13) }
+  elseif ($ch -eq [char]13) { }
+  else { [RivetInput]::TypeChar($ch) }
+  Start-Sleep -Milliseconds 5
+}
+'ok'
+`
+}
+
+export function buildKeyScript(app: string, spec: ComboKeySpec): string {
+  const modsDown = spec.modifiers.map((vk) => `[RivetInput]::KeyDown([uint16]${vk})`).join('\n')
+  const modsUp = [...spec.modifiers].reverse().map((vk) => `[RivetInput]::KeyUp([uint16]${vk})`).join('\n')
+  const hasShift = spec.modifiers.includes(0x10)
+  const keyAction = 'vk' in spec.key
+    ? `[RivetInput]::KeyTap([uint16]${spec.key.vk})`
+    : `
+$scan = [RivetInput]::VkKeyScan([char]${psString(spec.key.char)})
+if ($scan -eq -1) { throw 'no virtual key for the requested character' }
+$vk = $scan -band 0xFF
+$needShift = (($scan -band 0x100) -ne 0) -and (-not $${hasShift})
+if ($needShift) { [RivetInput]::KeyDown([uint16]16) }
+[RivetInput]::KeyTap([uint16]$vk)
+if ($needShift) { [RivetInput]::KeyUp([uint16]16) }`
+  return `
+${INPUT_PRELUDE}
+${procsForApp(app)}
+${FOCUS_WINDOW}
+Start-Sleep -Milliseconds 100
+${modsDown}
+try {
+${keyAction}
+} finally {
+${modsUp}
+}
+'ok'
+`
+}
+
+export function buildFocusAppScript(app: string): string {
+  return `
+${INPUT_PRELUDE}
+${procsForApp(app)}
+${FOCUS_WINDOW}
+'ok'
+`
+}
+
+export function buildCheckPermissionsScript(): string {
+  return `
+${UIA_PRELUDE}
+$ok = $false
+try { $null = [System.Windows.Automation.AutomationElement]::RootElement.Current.Name; $ok = $true } catch {}
+ConvertTo-Json -InputObject @{ accessibility = $ok } -Compress
+`
+}
+
+/** Real Windows driver. Runner injectable for tests. */
+export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault): ComputerUseDriver {
+  return {
+    async listApps(): Promise<AppInfo[]> {
+      const raw = (await run(buildListAppsScript())).trim()
+      try {
+        const parsed = JSON.parse(raw) as AppInfo[]
+        return Array.isArray(parsed) ? parsed : []
+      } catch {
+        return []
+      }
+    },
+
+    async snapshot(app: string): Promise<SnapshotResult> {
+      const stamp = randomUUID()
+      const outFull = join(tmpdir(), `rivet-cu-${stamp}.png`)
+      const outVision = join(tmpdir(), `rivet-cu-vision-${stamp}.png`)
+      try {
+        const raw = (await run(buildSnapshotScript(app, outFull, outVision), 30_000)).trim()
+        let rows: WindowsSnapshotRow[] = []
+        let shot = false
+        try {
+          const parsed = JSON.parse(raw) as { rows?: WindowsSnapshotRow[]; shot?: boolean }
+          rows = Array.isArray(parsed.rows) ? parsed.rows : []
+          shot = parsed.shot === true
+        } catch {
+          rows = []
+        }
+        const { tree, refs } = rowsToSnapshot(rows)
+        let png: Buffer | null = null
+        let visionPng: Buffer | null = null
+        if (shot) {
+          try {
+            png = await readFile(outFull)
+          } catch {
+            png = null
+          }
+          if (png) {
+            // Vision copy: capped at 1440px. If the resize somehow produced a
+            // LARGER file (tiny window upscaled by PNG overhead), keep the
+            // original — same rule as the macOS sips path.
+            try {
+              const scaled = await readFile(outVision)
+              visionPng = scaled.length < png.length ? scaled : png
+            } catch {
+              visionPng = png
+            }
+          }
+        }
+        return {
+          tree: tree || '(no accessible elements found)',
+          refs,
+          screenshotPng: png,
+          visionPng,
+        }
+      } finally {
+        try { await unlink(outFull) } catch { /* best-effort temp cleanup */ }
+        try { await unlink(outVision) } catch { /* best-effort temp cleanup */ }
+      }
+    },
+
+    async click(app: string, target: ClickTarget, opts?: ClickOptions): Promise<void> {
+      const button = opts?.button ?? 'left'
+      const count = opts?.count ?? 1
+      if ('path' in target) {
+        await run(buildClickByPathScript(app, target, button, count))
+        return
+      }
+      await run(buildClickAtScript(target.x, target.y, button, count))
+    },
+
+    async locate(app: string, target: { path: number[]; role?: string; title?: string }): Promise<{ x: number; y: number }> {
+      const raw = (await run(buildLocateScript(app, target))).trim()
+      return JSON.parse(raw) as { x: number; y: number }
+    },
+
+    async scroll(app: string, opts: ScrollOptions): Promise<void> {
+      await run(buildScrollScript(app, opts))
+    },
+
+    async drag(_app: string, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+      await run(buildDragScript(from, to))
+    },
+
+    async type(app: string, text: string): Promise<void> {
+      await run(buildTypeScript(app, text))
+    },
+
+    async key(app: string, combo: string): Promise<void> {
+      const spec = parseCombo(combo)
+      await run(buildKeyScript(app, spec))
+    },
+
+    async focusApp(app: string): Promise<void> {
+      await run(buildFocusAppScript(app))
+    },
+
+    async checkPermissions(): Promise<PermissionStatus> {
+      // Windows has no TCC-style permission gates: UIA availability stands in
+      // for "accessibility" and GDI screen capture is never permission-gated.
+      let accessibility = false
+      try {
+        const raw = (await run(buildCheckPermissionsScript())).trim()
+        const parsed = JSON.parse(raw) as { accessibility?: boolean }
+        accessibility = parsed.accessibility === true
+      } catch {
+        accessibility = false
+      }
+      const detail = accessibility
+        ? 'All required capabilities available. Note: windows of elevated (administrator) processes cannot be automated unless this process is also elevated.'
+        : 'UI Automation is unavailable on this host — GUI inspection and interaction will not work.'
+      return { accessibility, screenRecording: true, detail }
+    },
+  }
+}

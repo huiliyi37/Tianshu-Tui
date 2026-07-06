@@ -1,5 +1,5 @@
 /**
- * computer_use — macOS GUI automation tool (Codex Computer Use parity).
+ * computer_use — desktop GUI automation tool (Codex Computer Use parity).
  *
  * Lets the agent see and operate graphical apps when CLI / structured
  * integrations aren't enough: inspect a desktop app's accessibility tree,
@@ -15,7 +15,7 @@
  *    model-agnostic — it always fills the channel and lets the pipeline decide).
  *  - Secret hygiene: secure text fields and secret-looking values are masked
  *    in the model-facing tree.
- *  - macOS only (darwin gated); disabled elsewhere.
+ *  - macOS (osascript/AX) and Windows (PowerShell/UIA) only; disabled elsewhere.
  *
  * Element targeting: snapshot refs are backed by AX child-index paths cached
  * per `sessionId:app` (small LRU). Clicks resolve the exact path with a
@@ -25,12 +25,12 @@
 
 import type { Tool, ToolCallParams, ToolResult } from '../types.js'
 import {
-  createMacosDriver,
   type ComputerUseDriver,
   type ComputerUseDriverFactory,
   type ClickTarget,
   type SnapshotRef,
 } from './macos-driver.js'
+import { createPlatformDriver, isComputerUsePlatform } from './platform-driver.js'
 import { isAppGranted } from './app-grants.js'
 
 export type ComputerUseAction =
@@ -48,9 +48,10 @@ export type ComputerUseAction =
   | 'check_permissions'
 
 export interface ComputerUseToolOptions {
-  /** Builds the platform driver. Defaults to the macOS osascript driver. */
+  /** Builds the platform driver. Defaults to the native driver for the host
+   *  platform (macOS osascript / Windows PowerShell+UIA). */
   driverFactory?: ComputerUseDriverFactory
-  /** Whether the tool is registered/visible. Defaults to darwin only. */
+  /** Whether the tool is registered/visible. Defaults to darwin/win32 only. */
   enabled?: boolean
   /** App grant lookup (injectable for tests). Defaults to persisted grants. */
   isAppGranted?: (app: string) => boolean
@@ -90,9 +91,9 @@ const SNAPSHOT_CACHE_CAP = 20
 
 export function createComputerUseTool(options: ComputerUseToolOptions = {}): Tool {
   const platform = options.platform ?? process.platform
-  const isDarwin = platform === 'darwin'
-  const enabled = options.enabled ?? isDarwin
-  const driverFactory = options.driverFactory ?? createMacosDriver
+  const isSupported = isComputerUsePlatform(platform)
+  const enabled = options.enabled ?? isSupported
+  const driverFactory = options.driverFactory ?? (() => createPlatformDriver(platform))
   const grantLookup = options.isAppGranted ?? ((app: string) => isAppGranted(app))
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
 
@@ -203,12 +204,12 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
   return {
     definition: {
       name: 'computer_use',
-      description: `Operate macOS graphical apps: inspect an app's accessibility tree, click/scroll/drag elements, type text, send key combos, focus apps. Use ONLY when CLI tools, MCP servers, or structured integrations can't do the job (e.g. a native app with no API, a GUI-only setting, or reproducing a UI-only bug) — prefer structured tools whenever available.
+      description: `Operate desktop graphical apps (macOS and Windows): inspect an app's accessibility tree, click/scroll/drag elements, type text, send key combos, focus apps. Use ONLY when CLI tools, MCP servers, or structured integrations can't do the job (e.g. a native app with no API, a GUI-only setting, or reproducing a UI-only bug) — prefer structured tools whenever available.
 
 Every action on an app requires human approval unless that app is already granted "always allow". Screenshots are saved as viewable artifacts; the accessibility tree (text) is what you reason over. When the active model supports vision, the snapshot screenshot is also attached to the conversation as an image.
 
 Actions:
-- check_permissions: report Accessibility / Screen Recording status (no approval).
+- check_permissions: report system capability/permission status (no approval).
 - list_apps: list visible apps.
 - snapshot(app): return the app's numbered accessibility tree + save a screenshot artifact. If the UI has not changed since the last snapshot, returns a short "unchanged" note instead of repeating the tree.
 - click(app, ref|x,y): left-click a snapshot element ref (preferred) or coordinates.
@@ -216,7 +217,7 @@ Actions:
 - scroll(app, direction, amount?, ref|x,y?): scroll the view under the target (default: window center).
 - drag(app, from_ref|from_x+from_y, to_ref|to_x+to_y): press-drag-release.
 - type(app, text): type text into the focused field.
-- key(app, combo): send a key combo like "cmd+s" or "return".
+- key(app, combo): send a key combo like "cmd+s" or "return" (on Windows, cmd maps to Ctrl).
 - wait(duration_ms): pause up to 5000ms for animations/loads (no approval).
 - focus_app(app): bring an app to the foreground.
 
@@ -234,7 +235,7 @@ Refs come from the LATEST snapshot of that app; after the UI changes, re-snapsho
           x: { type: 'number', description: 'X coordinate (screen pixels) when no ref is given.' },
           y: { type: 'number', description: 'Y coordinate (screen pixels) when no ref is given.' },
           text: { type: 'string', description: 'Text to type (type action).' },
-          combo: { type: 'string', description: 'Key combo like "cmd+s", "shift+cmd+4", "return" (key action).' },
+          combo: { type: 'string', description: 'Key combo like "cmd+s", "shift+cmd+4", "return" (key action; cmd maps to Ctrl on Windows).' },
           direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Scroll direction (scroll action).' },
           amount: { type: 'number', description: 'Scroll magnitude in wheel lines, 1-50 (default 5).' },
           from_ref: { type: 'number', description: 'Drag start: snapshot ref.' },
@@ -250,9 +251,9 @@ Refs come from the LATEST snapshot of that app; after the UI changes, re-snapsho
     },
 
     async execute(params: ToolCallParams): Promise<ToolResult> {
-      if (platform !== 'darwin') {
+      if (!isSupported) {
         return {
-          content: 'computer_use is only available on macOS. This host is not darwin.',
+          content: `computer_use is only available on macOS and Windows. This host is ${platform}.`,
           isError: true,
         }
       }

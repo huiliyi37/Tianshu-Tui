@@ -68,8 +68,8 @@
   },
   "computerUse": {
     "title": "Computer Use",
-    "desc": "Let the agent see and operate macOS GUI apps (screenshot + accessibility tree + click/type). Each app's first action requires approval; apps you mark \"always allow\" are listed here.",
-    "unavailable": "Not supported on this platform (macOS only), or disabled via RIVET_COMPUTER_USE=0.",
+    "desc": "Let the agent see and operate desktop GUI apps (screenshot + accessibility tree + click/type). Each app's first action requires approval; apps you mark \"always allow\" are listed here.",
+    "unavailable": "Not supported on this platform (macOS and Windows only), or disabled via RIVET_COMPUTER_USE=0.",
     "permissions": "System permissions",
     "permAccessibility": "Accessibility",
     "permScreenRecording": "Screen Recording",

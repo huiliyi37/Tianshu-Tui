@@ -48,7 +48,7 @@ import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '..
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
 import { queryDeepSeekBalance, type BalanceResult } from '../api/balance-client.js'
 import { listGrantedApps, revokeApp } from '../tools/computer-use/app-grants.js'
-import { createMacosDriver } from '../tools/computer-use/macos-driver.js'
+import { createPlatformDriver, isComputerUsePlatform } from '../tools/computer-use/platform-driver.js'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -288,17 +288,17 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
     }, apiToken),
 
-    // Computer Use (macOS GUI automation) status for the desktop settings UI:
+    // Computer Use (desktop GUI automation) status for the desktop settings UI:
     // platform availability, system permission probe, and per-app grants.
     'GET /config/computer-use': withAuth(async () => {
-      const available = process.platform === 'darwin' && process.env.RIVET_COMPUTER_USE !== '0'
+      const available = isComputerUsePlatform(process.platform) && process.env.RIVET_COMPUTER_USE !== '0'
       const grants = listGrantedApps().map(g => ({ app: g.app, grantedAt: g.grantedAt }))
       if (!available) {
         return { status: 200, body: { available: false, platform: process.platform, permissions: null, grants } }
       }
       let permissions: { accessibility: boolean; screenRecording: boolean; detail: string } | null = null
       try {
-        permissions = await createMacosDriver().checkPermissions()
+        permissions = await createPlatformDriver().checkPermissions()
       } catch { /* probe failure → permissions unknown, UI shows a hint */ }
       return { status: 200, body: { available: true, platform: process.platform, permissions, grants } }
     }, apiToken),

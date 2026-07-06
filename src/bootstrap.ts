@@ -375,9 +375,9 @@ export function createInteractiveToolRegistry(
   const reg = createDefaultToolRegistry([], {
     desktopTools: config.agent.desktopTools,
     todoStore: refs.todoStore,
-    // Computer Use（macOS GUI 自动化）：EXTENDED 层，注册≠主控可见（tool gating
-    // 过滤），@Computer / /tools enable 挂载时才进主控视野。darwin gated。
-    computerUse: process.platform === 'darwin' && process.env.RIVET_COMPUTER_USE !== '0',
+    // Computer Use（桌面 GUI 自动化）：EXTENDED 层，注册≠主控可见（tool gating
+    // 过滤），@Computer / /tools enable 挂载时才进主控视野。darwin/win32 gated。
+    computerUse: (process.platform === 'darwin' || process.platform === 'win32') && process.env.RIVET_COMPUTER_USE !== '0',
   })
 
   // delegate_task
