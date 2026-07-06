@@ -21,7 +21,7 @@ describe('processTurnEnd', () => {
       streamedText: 'I will fix the bug in auth.ts',
       routingMetrics: { record: () => {} } as any,
       decisions: [],
-      evidence: { buildBadge: () => null } as any,
+      evidence: {} as any,
       ...overrides,
     }
   }
@@ -29,13 +29,6 @@ describe('processTurnEnd', () => {
   it('returns empty decisions when no decisions in text', () => {
     const result = processTurnEnd(makeDeps())
     assert.ok(Array.isArray(result.decisions))
-  })
-
-  it('returns badge from evidence tracker', () => {
-    const result = processTurnEnd(makeDeps({
-      evidence: { buildBadge: () => '✓ 5 files, 3 tests' } as any,
-    }))
-    assert.equal(result.badge, '✓ 5 files, 3 tests')
   })
 
   it('skips task state for early turns (≤3)', () => {

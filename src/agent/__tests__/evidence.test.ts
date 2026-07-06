@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { EvidenceTracker } from '../evidence.js'
 
 describe('EvidenceTracker delivery status', () => {
-  it('reports failed verification in the evidence badge', () => {
+  it('reports failed verification in the summary', () => {
     const tracker = new EvidenceTracker()
     tracker.trackFileModified('src/agent/loop.ts')
     tracker.trackVerification({
@@ -17,9 +17,9 @@ describe('EvidenceTracker delivery status', () => {
       durationMs: 500,
     })
 
-    const badge = tracker.buildBadge()!
-    assert.match(badge, /verification failed/i)
-    assert.match(badge, /loop\.test\.ts/)
+    const summary = tracker.buildSummary()
+    assert.equal(summary.verificationStatus, 'failed')
+    assert.match(summary.verifications[0]!.command, /loop\.test\.ts/)
     assert.equal(tracker.getState().deliveryStatus, 'failed')
   })
 
@@ -27,9 +27,9 @@ describe('EvidenceTracker delivery status', () => {
     const tracker = new EvidenceTracker()
     tracker.trackFileModified('src/tools/web-fetch.ts')
 
-    const badge = tracker.buildBadge()!
-    assert.match(badge, /unverified/i)
-    assert.match(badge, /web-fetch\.ts/)
+    const summary = tracker.buildSummary()
+    assert.equal(summary.verificationStatus, 'unverified')
+    assert.deepEqual(summary.filesModified, ['src/tools/web-fetch.ts'])
     assert.equal(tracker.getState().deliveryStatus, 'unverified')
   })
 
@@ -64,8 +64,7 @@ describe('EvidenceTracker delivery status', () => {
       durationMs: 0,
     })
 
-    const badge = tracker.buildBadge()!
-    assert.match(badge, /blocked/i)
+    assert.equal(tracker.buildSummary().verificationStatus, 'blocked')
     assert.equal(tracker.getState().deliveryStatus, 'blocked')
   })
 
@@ -144,14 +143,5 @@ describe('EvidenceTracker delivery status', () => {
     assert.equal(summary.verificationStatus, 'verified')
     assert.equal(summary.verifications.length, 1)
     assert.equal(summary.gate.state, 'ok')
-  })
-
-  it('buildBadge supports zh-CN locale', () => {
-    const tracker = new EvidenceTracker()
-    tracker.trackFileModified('src/b.ts')
-    const badge = tracker.buildBadge({ locale: 'zh-CN' })!
-    assert.match(badge, /任务完成总结/)
-    assert.match(badge, /改动文件/)
-    assert.match(badge, /未验证|未经验证/)
   })
 })

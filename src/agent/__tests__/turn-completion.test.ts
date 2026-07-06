@@ -51,7 +51,6 @@ describe('TurnCompletionController', () => {
     await controller.complete({
       turn: 7,
       isFinal: true,
-      emitBadge: true,
       callbacks: {
         onTextDelta: text => { texts.push(text) },
         onTurnComplete: (_usage, turn, isFinal, evidence) => { completions.push({ turn, isFinal, evidence: !!evidence }) },

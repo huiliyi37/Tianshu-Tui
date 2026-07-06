@@ -49,7 +49,6 @@ const mockEvidence = {
     impactedFiles: [],
     impactedTests: [],
   }),
-  buildBadge: () => null,
   reset: () => {},
 } satisfies EvidenceTrackerPublic
 

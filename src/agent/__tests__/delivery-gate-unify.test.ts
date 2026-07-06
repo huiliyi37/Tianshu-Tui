@@ -2,11 +2,13 @@
  * Track 3: 交付门禁 v1/v2 合一。
  *
  * 契约：
- * - evidence.buildBadge({ gateV2 }) 注入权威门禁 → badge 呈现 GREEN/YELLOW/RED，
- *   不再用 v1 的 EvidenceState 推导行
- * - 未注入 → v1 回退原样（badge 行为不变）
+ * - evidence.buildSummary(gateV2) 注入权威门禁 → summary.gate 呈现 GREEN/YELLOW/RED，
+ *   不再用 v1 的 EvidenceState 推导
  * - buildGateConvergenceHint: GREEN→结束指引 / RED→阻断+最短下一步 / YELLOW→带条件交付
- * - processTurnEnd: deliveryGateV2 评估异常 → 回退 v1，badge 不缺席
+ * - processTurnEnd: deliveryGateV2 评估异常 → gateV2 缺席，summary 回退 v1 推导
+ *
+ * 注：门禁结论不再渲染成 transcript 文本（任务完成总结 badge 已移除——
+ * 每个无工具 final turn 都弹一次"交付"，session 4df36bcd）。
  */
 
 import { describe, it } from 'node:test'
@@ -20,46 +22,41 @@ import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import type { AgentConfig } from '../loop-types.js'
 
-describe('buildBadge with authoritative v2 gate (Track 3)', () => {
+describe('buildSummary with authoritative v2 gate (Track 3)', () => {
   function trackerWithModified(): EvidenceTracker {
     const t = new EvidenceTracker()
     t.trackFileModified('src/a.ts')
     return t
   }
 
-  it('GREEN renders the v2 state instead of v1 unverified-warning', () => {
-    const badge = trackerWithModified().buildBadge({ gateV2: { state: 'GREEN', reason: '1 owned file(s) verified.' } })
-    assert.ok(badge)
-    assert.match(badge, /Delivery gate.*GREEN/)
-    assert.match(badge, /1 owned file\(s\) verified/)
-    assert.ok(!badge.includes('Unverified changes'), 'v1 unverified line suppressed when v2 is authoritative')
+  it('GREEN reflects the v2 state instead of v1 unverified derivation', () => {
+    const summary = trackerWithModified().buildSummary({ state: 'GREEN', reason: '1 owned file(s) verified.' })
+    assert.equal(summary.gate.state, 'GREEN')
+    assert.equal(summary.gate.label, 'GREEN')
+    assert.equal(summary.gate.reason, '1 owned file(s) verified.')
   })
 
-  it('RED renders blocking reason and next action', () => {
-    const badge = trackerWithModified().buildBadge({
-      gateV2: {
-        state: 'RED',
-        reason: '1 owned file(s) modified but unverified.',
-        blockingReason: 'Run verification before delivery.',
-        shortestNextStep: 'npm test -- src/__tests__/a.test.ts',
-      },
+  it('RED carries blocking reason and next action', () => {
+    const summary = trackerWithModified().buildSummary({
+      state: 'RED',
+      reason: '1 owned file(s) modified but unverified.',
+      blockingReason: 'Run verification before delivery.',
+      shortestNextStep: 'npm test -- src/__tests__/a.test.ts',
     })
-    assert.ok(badge)
-    assert.match(badge, /Delivery gate.*RED/)
-    assert.match(badge, /Blocking.*Run verification/)
-    assert.match(badge, /Next action.*npm test/)
+    assert.equal(summary.gate.label, 'RED')
+    assert.equal(summary.gate.blockingReason, 'Run verification before delivery.')
+    assert.equal(summary.gate.nextAction, 'npm test -- src/__tests__/a.test.ts')
   })
 
-  it('YELLOW renders the caveat state', () => {
-    const badge = trackerWithModified().buildBadge({ gateV2: { state: 'YELLOW', reason: 'external verification blocked' } })
-    assert.ok(badge)
-    assert.match(badge, /Delivery gate.*YELLOW/)
+  it('YELLOW carries the caveat state', () => {
+    const summary = trackerWithModified().buildSummary({ state: 'YELLOW', reason: 'external verification blocked' })
+    assert.equal(summary.gate.label, 'YELLOW')
   })
 
-  it('no gate injected → v1 fallback unchanged', () => {
-    const badge = trackerWithModified().buildBadge()
-    assert.ok(badge)
-    assert.match(badge, /Unverified changes/, 'v1 derivation still active without v2')
+  it('no gate injected → v1 fallback derivation unchanged', () => {
+    const summary = trackerWithModified().buildSummary()
+    assert.equal(summary.verificationStatus, 'unverified')
+    assert.notEqual(summary.gate.label, 'GREEN')
   })
 })
 
@@ -107,9 +104,9 @@ describe('processTurnEnd gate integration (Track 3)', () => {
     }
   }
 
-  it('passes current modified files to the gate and renders its verdict', () => {
+  it('passes current modified files to the gate and returns its verdict', () => {
     let received: string[] | undefined
-    const { badge } = processTurnEnd(makeDeps((dirty) => {
+    const { gateV2 } = processTurnEnd(makeDeps((dirty) => {
       received = dirty
       return {
         state: 'GREEN', canDeliver: true, isBlocked: false,
@@ -119,13 +116,14 @@ describe('processTurnEnd gate integration (Track 3)', () => {
       }
     }))
     assert.deepEqual(received, ['src/a.ts'])
-    assert.ok(badge)
-    assert.match(badge, /交付门禁.*GREEN/)
+    assert.equal(gateV2?.state, 'GREEN')
   })
 
-  it('a throwing gate falls back to v1 — badge still present', () => {
-    const { badge } = processTurnEnd(makeDeps(() => { throw new Error('gate exploded') }))
-    assert.ok(badge, 'badge survives gate failure')
-    assert.match(badge, /未验证|未经验证/, 'v1 fallback rendering')
+  it('a throwing gate falls back to v1 — gateV2 absent, summary derivation survives', () => {
+    const deps = makeDeps(() => { throw new Error('gate exploded') })
+    const { gateV2 } = processTurnEnd(deps)
+    assert.equal(gateV2, undefined, 'gate failure yields no v2 verdict')
+    const summary = deps.evidence.buildSummary(gateV2)
+    assert.equal(summary.verificationStatus, 'unverified', 'v1 fallback derivation')
   })
 })

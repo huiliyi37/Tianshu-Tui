@@ -87,7 +87,6 @@ export interface ExecuteBatchResult {
 export interface CompleteTurnParams {
   turn: number
   isFinal: boolean
-  emitBadge?: boolean
   callbacks: AgentCallbacks
 }
 
@@ -831,7 +830,7 @@ export class TurnOrchestrator {
           if (r.endTurn) {
             this.emitStop({ source: 'end-turn', turn, voluntary: true }, callbacks)
             await rejectOnAbort(
-              this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
+              this.deps.completeTurn({ turn, isFinal: true, callbacks }),
               signal!,
               'post-turn-endTurn',
             )
@@ -860,7 +859,7 @@ export class TurnOrchestrator {
               detail: `${toolUses.map(tu => tu.name).join(',')} ×${this.deps.state.wedgeRepeatCount}`,
             }, callbacks)
             await rejectOnAbort(
-              this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
+              this.deps.completeTurn({ turn, isFinal: true, callbacks }),
               signal!,
               'post-turn-wedged',
             )
@@ -989,7 +988,6 @@ export class TurnOrchestrator {
           this.deps.completeTurn({
             turn,
             isFinal: true,
-            emitBadge: true,
             callbacks,
           }),
           signal!,

@@ -43,7 +43,6 @@ export interface TurnCompletionDeps {
 export interface CompleteTurnInput {
   turn: number
   isFinal: boolean
-  emitBadge?: boolean
   callbacks: TurnCompletionCallbacks
 }
 
@@ -61,7 +60,11 @@ export class TurnCompletionController {
       evidence: this.deps.evidence,
    })
     this.deps.setDecisions(result.decisions)
-    if (input.emitBadge && result.badge) input.callbacks.onTextDelta('\n' + result.badge)
+    // The evidence badge (任务完成总结) is intentionally NOT emitted into the
+    // transcript: every no-tool final turn (including a mid-task stall like
+    // "跑 typecheck + 测试。" with no tool call) rendered a delivery ceremony
+    // with a GREEN gate, reading as a fake completion (session 4df36bcd).
+    // Gate data still reaches the UI via evidenceSummary below.
     this.deps.refreshLedger()
     this.deps.refreshCacheDiagnostic(input.turn)
     this.completeEffortReward()
