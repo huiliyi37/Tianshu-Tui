@@ -60,6 +60,7 @@ import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
 import { createWorktreeBaseline } from './agent/worktree-baseline.js'
 import { createVerificationSnapshotManager, reapOrphanSnapshots, reapOrphanHandsWorktrees } from './agent/verification-snapshot-manager.js'
 import { cleanupStaleHandsBranches } from './agent/worktree.js'
+import { initializePlugins } from './plugins/plugin-loader.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { buildReviewOverrideState } from './agent/review-model-override.js'
 import type { ResolvedReviewOverride } from './agent/review-model-override.js'
@@ -1629,12 +1630,21 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     } catch { /* best-effort: goal restore failure is non-fatal */ }
   }
 
-  // 13. MCP + LSP initialization
+  // 13. MCP + Plugin + LSP initialization
   // asyncExtras (default true): fire-and-forget, non-blocking for faster startup
   // asyncExtras=false: synchronous await, completes before bootstrap returns
   if (opts.asyncExtras !== false) {
     initializeMcp(config, toolRegistry, refs).then(() => {
       agent.updateTools()
+    }).catch(() => {})
+    initializePlugins(config.plugins, toolRegistry).then((result) => {
+      for (const name of result.suppressTools) {
+        toolRegistry.remove(name)
+      }
+      if (result.warnings.length > 0) {
+        debugLog(`[plugins] ${result.loaded}/${result.scanned} loaded, ${result.totalTools} tools; warnings: ${result.warnings.join('; ')}`)
+      }
+      if (result.totalTools > 0) agent.updateTools()
     }).catch(() => {})
     initializeLsp(cwd, toolRegistry).then((lspManager) => {
       refs.lspManager = lspManager
@@ -1643,6 +1653,14 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   } else {
     await initializeMcp(config, toolRegistry, refs)
     agent.updateTools()
+    const pluginResult = await initializePlugins(config.plugins, toolRegistry)
+    for (const name of pluginResult.suppressTools) {
+      toolRegistry.remove(name)
+    }
+    if (pluginResult.warnings.length > 0) {
+      debugLog(`[plugins] ${pluginResult.loaded}/${pluginResult.scanned} loaded, ${pluginResult.totalTools} tools; warnings: ${pluginResult.warnings.join('; ')}`)
+    }
+    if (pluginResult.totalTools > 0) agent.updateTools()
     const lsp = await initializeLsp(cwd, toolRegistry)
     refs.lspManager = lsp
     agent.updateTools()

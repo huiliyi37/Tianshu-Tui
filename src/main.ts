@@ -204,6 +204,8 @@ async function main() {
     const { createDeliveryGateV2 } = await import('./agent/delivery-gate-v2.js')
     const { createWorktreeBaseline } = await import('./agent/worktree-baseline.js')
     const { createHeadlessCoordinator } = await import('./agent/headless-coordinator.js')
+    const { initializePlugins } = await import('./plugins/plugin-loader.js')
+    const { ToolRegistry } = await import('./tools/registry.js')
 
     const parsed = parseCliArgs(args)
     // Goal mode drives the same AgentLoop + GoalTracker as the TUI /goal command;
@@ -237,12 +239,27 @@ async function main() {
     // narrowing — a closure-only assignment would otherwise keep it typed as null.
     const goalTrackerRef: { current: GoalTrackerInstance | null } = { current: null }
 
+    // Load plugins (async, before creating agent — cache discipline: only at session start)
+    const pluginRegistry = new ToolRegistry()
+    const pluginResult = await initializePlugins(cfg.plugins, pluginRegistry)
+    if (pluginResult.warnings.length > 0) {
+      process.stderr.write(`[plugins] ${pluginResult.loaded}/${pluginResult.scanned} loaded; warnings: ${pluginResult.warnings.join('; ')}\n`)
+    }
+
     const result = await runHeadless({
       prompt: effectivePrompt,
       json: parsed.json,
       streamJson: parsed.streamJson,
       createAgent: () => {
         const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
+
+        // Register plugin tools (loaded during startup)
+        for (const tool of pluginRegistry.getAll()) {
+          toolRegistry.register(tool)
+        }
+        for (const name of pluginResult.suppressTools) {
+          toolRegistry.remove(name)
+        }
 
         // B1 deliver_task: headless 模式下也需要交付门禁工具。
         // 无 DelegationCoordinator，reviewDeps 不可用（deliver_task 内部降级处理）。

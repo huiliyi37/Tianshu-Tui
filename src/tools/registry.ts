@@ -23,6 +23,11 @@ export class ToolRegistry {
     this.tools.set(tool.definition.name, tool)
   }
 
+  /** Remove a tool by name. No-op if not registered. Returns true if removed. */
+  remove(name: string): boolean {
+    return this.tools.delete(name)
+  }
+
   get(name: string): Tool | undefined {
     return this.tools.get(name)
   }

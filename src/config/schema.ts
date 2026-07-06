@@ -486,6 +486,9 @@ export const configSchema = z.object({
   env: envSchema,
   ui: uiSchema,
   verify: verifySchema,
+  plugins: z.object({
+    enabled: z.record(z.boolean()).default({}),
+  }).default({}),
 })
 
 export type Config = {
@@ -501,6 +504,7 @@ export type Config = {
   env: EnvConfig
   ui: UiConfig
   verify: VerifyConfig
+  plugins: { enabled: Record<string, boolean> }
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
