@@ -12,7 +12,7 @@ import { initFontFamily } from './lib/font-family'
 import { initGlassMode } from './lib/glass'
 import { initGlassCustom } from './lib/glass-custom'
 import { initUiDensity } from './lib/ui-density'
-import { initI18n } from './i18n'
+import i18n, { initI18n } from './i18n'
 import './styles/tokens.css'
 import './styles.css'
 import './styles/shadcn-tokens.css'
@@ -40,7 +40,7 @@ const popoutId = popoutSessionId()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <ErrorBoundary label={popoutId ? '线程窗口' : '应用'}>
+    <ErrorBoundary label={popoutId ? i18n.t('shell:boundary.popout') : i18n.t('shell:boundary.app')}>
       <QueryClientProvider client={queryClient}>
         <AppStateProvider>
           <TooltipProvider>

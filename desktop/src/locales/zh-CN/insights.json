@@ -1,0 +1,42 @@
+{
+  "refresh": "刷新",
+  "refreshing": "刷新中…",
+  "loadFailed": "加载失败：{{error}}",
+  "noData": "暂无数据",
+  "balance": {
+    "title": "账户余额",
+    "available": "可用余额（DeepSeek）",
+    "unavailable": "账户不可用 / 已欠费"
+  },
+  "summary": {
+    "daily": "全天汇总",
+    "activeSession": "当前会话",
+    "totalCost": "总成本（DeepSeek V4-Flash/Pro）",
+    "mainSessionCost": "主控会话成本",
+    "inputTokens": "输入 Tokens",
+    "outputTokens": "输出 Tokens",
+    "totalTokens": "总 Tokens",
+    "workerCount": "Worker 数",
+    "cacheHitRate": "缓存命中率"
+  },
+  "workers": {
+    "title": "Worker 明细",
+    "empty": "暂无 worker 数据"
+  },
+  "models": {
+    "title": "模型分布",
+    "empty": "暂无模型数据"
+  },
+  "providers": {
+    "title": "Provider 分布",
+    "empty": "暂无 provider 数据"
+  },
+  "table": {
+    "model": "模型",
+    "status": "状态",
+    "cost": "成本",
+    "elapsed": "耗时",
+    "calls": "调用次数"
+  },
+  "selectSessionHint": "请先选择一个会话以查看明细"
+}

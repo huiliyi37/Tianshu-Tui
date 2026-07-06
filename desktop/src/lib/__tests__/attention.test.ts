@@ -1,7 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import i18n from '../../i18n/index.ts'
+import zhInbox from '../../locales/zh-CN/inbox.json'
 import { deriveAttention, deriveReviewQueue, sigOf, taskSig } from '../attention.ts'
 import type { SessionRecord, TaskRecord } from '../../runtime/types.ts'
+
+// attention.ts resolves labels via the shared i18n singleton — init it with the
+// zh-CN inbox namespace so derived strings match the pre-i18n literals.
+if (!i18n.isInitialized) {
+  await i18n.init({
+    lng: 'zh-CN',
+    resources: { 'zh-CN': { inbox: zhInbox } },
+    interpolation: { escapeValue: false },
+  })
+} else {
+  i18n.addResourceBundle('zh-CN', 'inbox', zhInbox, true, true)
+}
 
 function sess(p: Partial<SessionRecord>): SessionRecord {
   return {
@@ -55,6 +69,13 @@ test('unseenCount drops as signatures are marked seen', () => {
   assert.equal(all.unseenCount, 1)
   const seen = new Set([sigOf(sessions[0]!)])
   assert.equal(deriveAttention(sessions, seen).unseenCount, 0)
+})
+
+test('detail and section labels resolve through i18n (zh-CN)', () => {
+  const v = deriveAttention([sess({ id: '5', status: 'running', pendingApprovals: 2 })], new Set())
+  assert.equal(v.items[0]!.detail, '2 待审批')
+  const q = deriveReviewQueue([sess({ id: 'f', status: 'failed' })], [], new Set())
+  assert.equal(q.sections[0]!.label, '失败')
 })
 
 test('signature changes when status/approvals change → re-surfaces', () => {

@@ -5,10 +5,12 @@
 // → 卸载时 pty_kill + 解除监听 + dispose。
 
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import '@xterm/xterm/css/xterm.css'
+import i18n from '../i18n'
 import {
   isTauri,
   onPtyExit,
@@ -33,6 +35,7 @@ function readThemeColors(): { background: string; foreground: string; cursor: st
 }
 
 export function TerminalPanel({ cwd, ptyId: externalPtyId }: { cwd: string; ptyId?: string }) {
+  const { t } = useTranslation('terminal')
   const hostRef = useRef<HTMLDivElement>(null)
   const cwdRef = useRef(cwd)
   cwdRef.current = cwd
@@ -95,7 +98,8 @@ export function TerminalPanel({ cwd, ptyId: externalPtyId }: { cwd: string; ptyI
       // 先注册监听再 spawn：用前端生成的 id 过滤共享通道，shell 首屏 prompt 不丢。
       unlistenOutput = await onPtyOutput(ptyId, (bytes) => term.write(bytes))
       unlistenExit = await onPtyExit(ptyId, () => {
-        term.write('\r\n\x1b[90m[shell 已退出 · 关闭并重开终端以重启]\x1b[0m\r\n')
+        // effect 依赖只有 ptyId，故经 i18n.t 在事件发生时取当前语言，不闭包捕获。
+        term.write(`\r\n\x1b[90m[${i18n.t('terminal:shellExited')}]\x1b[0m\r\n`)
       })
       if (disposed) {
         unlistenOutput?.()
@@ -106,7 +110,7 @@ export function TerminalPanel({ cwd, ptyId: externalPtyId }: { cwd: string; ptyI
         await ptySpawn({ id: ptyId, cwd: cwdRef.current || '', cols: term.cols, rows: term.rows })
         term.focus()
       } catch (err) {
-        term.write(`\r\n\x1b[91m[终端启动失败] ${String(err)}\x1b[0m\r\n`)
+        term.write(`\r\n\x1b[91m[${i18n.t('terminal:spawnFailed')}] ${String(err)}\x1b[0m\r\n`)
       }
     })()
 
@@ -128,11 +132,11 @@ export function TerminalPanel({ cwd, ptyId: externalPtyId }: { cwd: string; ptyI
       <div className="terminal-bar">
         <span className="terminal-glyph" aria-hidden>▸</span>
         <span className="terminal-path">{cwd || '~'}</span>
-        <span className="terminal-hint">Cmd+J 切换</span>
+        <span className="terminal-hint">{t('hint')}</span>
       </div>
       <div className="terminal-host" ref={hostRef}>
         {!isTauri() && (
-          <div className="terminal-fallback">终端需在桌面应用内运行（Tauri runtime 不可用）。</div>
+          <div className="terminal-fallback">{t('fallback')}</div>
         )}
       </div>
     </div>

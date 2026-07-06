@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   getArtifact,
   openFile,
@@ -70,6 +71,7 @@ export function ReviewPanel(props: {
   sessionRunning?: boolean
 }) {
   const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse, onSendPrompt, sessionRunning } = props
+  const { t } = useTranslation('review')
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('changes')
@@ -323,7 +325,7 @@ export function ReviewPanel(props: {
                 type="button"
                 className="tabs-scroll-btn left"
                 onClick={() => scrollTabs('left')}
-                title="向左滚动"
+                title={t('tabs.scrollLeft')}
               >
                 ‹
               </button>
@@ -334,19 +336,19 @@ export function ReviewPanel(props: {
               onScroll={checkScroll}
               onWheel={onWheelTabs}
             >
-              {tabs.map((t) => {
-                const badge = t.badge?.()
+              {tabs.map((tabDef) => {
+                const badge = tabDef.badge?.()
                 return (
-                  <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs flex-none">
-                    <span aria-hidden>{t.glyph}</span>
-                    <span>{t.label}</span>
+                  <TabsTrigger key={tabDef.id} value={tabDef.id} className="gap-1 px-2 text-xs flex-none">
+                    <span aria-hidden>{tabDef.glyph}</span>
+                    <span>{tabDef.label}</span>
                     {badge != null && badge > 0 && (
                       <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
                         {badge}
                       </span>
                     )}
                     {badge === -1 && (
-                      <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
+                      <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label={t('tabs.inProgress')} />
                     )}
                   </TabsTrigger>
                 )
@@ -357,7 +359,7 @@ export function ReviewPanel(props: {
                 type="button"
                 className="tabs-scroll-btn right"
                 onClick={() => scrollTabs('right')}
-                title="向右滚动"
+                title={t('tabs.scrollRight')}
               >
                 ›
               </button>
@@ -367,9 +369,9 @@ export function ReviewPanel(props: {
             <button
               onClick={onCollapse}
               className="review-collapse-capsule-btn flex items-center gap-1 text-[10px] text-muted hover:text-text bg-panel-3 hover:bg-panel-2 border border-border rounded-full px-2 py-0.5 transition-all shrink-0 ml-2"
-              title="收起审查面板 (Cmd+Shift+B)"
+              title={t('collapseTitle')}
             >
-              <span className="text-[9px]">收起</span>
+              <span className="text-[9px]">{t('collapse')}</span>
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M9 18l6-6-6-6" />
               </svg>
@@ -386,11 +388,11 @@ export function ReviewPanel(props: {
         <TabsContent value="canvas" className="review-body flex flex-col h-full">
           <div className="canvas-container flex flex-col h-full gap-2 p-2">
             {canvasArtifacts.length === 0 ? (
-              <div className="empty sm">没有可预览的 HTML 或 Markdown 工件</div>
+              <div className="empty sm">{t('canvas.empty')}</div>
             ) : (
               <>
                 <div className="canvas-selector flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">选择工件:</span>
+                  <span className="text-xs text-muted-foreground">{t('canvas.selectArtifact')}</span>
                   <select
                     className="canvas-select bg-panel-2 border border-border rounded px-2 py-1 text-xs text-text flex-1"
                     value={selectedCanvasArtifact?.id || ''}
@@ -415,23 +417,23 @@ export function ReviewPanel(props: {
                         <button
                           className="canvas-btn flex items-center gap-1 hover:text-text-strong"
                           onClick={() => setCanvasKey((k) => k + 1)}
-                          title="重新加载"
+                          title={t('canvas.reloadTitle')}
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
                           </svg>
-                          刷新
+                          {t('canvas.refresh')}
                         </button>
                         <span className="text-border">|</span>
                         <button
                           className="canvas-btn flex items-center gap-1 hover:text-text-strong"
                           onClick={() => setCanvasFullscreen(true)}
-                          title="全屏预览（应用内沙箱）"
+                          title={t('canvas.fullscreenTitle')}
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
                           </svg>
-                          全屏
+                          {t('canvas.fullscreen')}
                         </button>
                       </div>
 
@@ -459,7 +461,7 @@ export function ReviewPanel(props: {
 
                     <div className="canvas-viewport flex-1 bg-white flex items-center justify-center overflow-auto p-4">
                       {canvasLoading ? (
-                        <div className="text-xs text-muted-foreground">加载中...</div>
+                        <div className="text-xs text-muted-foreground">{t('canvas.loading')}</div>
                       ) : selectedCanvasArtifact.kind === 'markdown' ? (
                         <div
                           style={{ width: canvasWidth, transition: 'width 0.2s' }}
@@ -487,11 +489,11 @@ export function ReviewPanel(props: {
                           {selectedCanvasArtifact.target} ({selectedCanvasArtifact.kind})
                         </span>
                         <div className="canvas-fs-actions">
-                          <button className="canvas-btn" onClick={() => setCanvasKey((k) => k + 1)} title="重新加载">
-                            刷新
+                          <button className="canvas-btn" onClick={() => setCanvasKey((k) => k + 1)} title={t('canvas.reloadTitle')}>
+                            {t('canvas.refresh')}
                           </button>
-                          <button className="canvas-btn" onClick={() => setCanvasFullscreen(false)} title="退出全屏 (Esc)">
-                            退出全屏
+                          <button className="canvas-btn" onClick={() => setCanvasFullscreen(false)} title={t('canvas.exitFullscreenTitle')}>
+                            {t('canvas.exitFullscreen')}
                           </button>
                         </div>
                       </div>
@@ -525,19 +527,19 @@ export function ReviewPanel(props: {
             <section className="review-section mt-4 border-t border-border pt-4">
               <div className="autonomy-note">
                 <span className="ab-glyph" aria-hidden>✦</span>
-                自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。
+                {t('autonomyNote')}
               </div>
             </section>
           )}
 
           {artifacts.filter(a => a.kind === 'diff').length > 0 && (
             <section className="review-section mt-4 border-t border-border pt-4">
-              <h4>Git 变更 · 代码审查</h4>
+              <h4>{t('gitChangesHeading')}</h4>
               {artifacts.filter(a => a.kind === 'diff').map((a) => (
                 <div key={a.id} className="artifact-card diff" onClick={() => view(a)}>
                   <div className="kind">{a.kind} · {a.target}</div>
                   <div className="summary">{a.summary || a.target}</div>
-                  <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
+                  <div className="meta">{t('artifactMeta', { lines: a.lineCount, chars: a.charCount })}</div>
                 </div>
               ))}
             </section>
@@ -545,7 +547,7 @@ export function ReviewPanel(props: {
 
           {sessionId && (
             <section className="review-section mt-4 border-t border-border pt-4">
-              <h4>检查点 · 回滚</h4>
+              <h4>{t('checkpointHeading')}</h4>
               <RollbackSection sessionId={sessionId} />
             </section>
           )}
@@ -557,8 +559,8 @@ export function ReviewPanel(props: {
           <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} todos={todos} planMode={planMode} sessionRunning={sessionRunning} />
           
           <section className="review-section mt-4 border-t border-border pt-4">
-            <h4>任务清单</h4>
-            {todos.length === 0 && <div className="empty sm">还没有任务</div>}
+            <h4>{t('tasksHeading')}</h4>
+            {todos.length === 0 && <div className="empty sm">{t('noTasks')}</div>}
             {todos.map((t) => (
               <div key={t.id} className={`task-item st-${t.status}`}>
                 <span className="task-check">{t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '◴' : '○'}</span>
@@ -577,13 +579,13 @@ export function ReviewPanel(props: {
           />
 
           <section className="review-section mt-4 border-t border-border pt-4">
-            <h4>工件 · {artifacts.length}</h4>
-            {artifacts.length === 0 && <div className="empty sm">还没有工件</div>}
+            <h4>{t('artifactsHeading', { n: artifacts.length })}</h4>
+            {artifacts.length === 0 && <div className="empty sm">{t('noArtifacts')}</div>}
             {artifacts.map((a) => (
               <div key={a.id} className="artifact-card" onClick={() => view(a)}>
                 <div className="kind">{a.kind}</div>
                 <div className="summary">{a.summary || a.target}</div>
-                <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
+                <div className="meta">{t('artifactMeta', { lines: a.lineCount, chars: a.charCount })}</div>
               </div>
             ))}
           </section>
@@ -599,8 +601,8 @@ export function ReviewPanel(props: {
               <h3>{open.artifact.kind} · {open.artifact.target}</h3>
               {(open.artifact.kind === 'markdown' || open.artifact.kind === 'html') && (
                 <div className="segmented">
-                  <button className={viewMode === 'rendered' ? 'active' : ''} onClick={() => setViewMode('rendered')}>渲染</button>
-                  <button className={viewMode === 'raw' ? 'active' : ''} onClick={() => setViewMode('raw')}>源码</button>
+                  <button className={viewMode === 'rendered' ? 'active' : ''} onClick={() => setViewMode('rendered')}>{t('modal.rendered')}</button>
+                  <button className={viewMode === 'raw' ? 'active' : ''} onClick={() => setViewMode('raw')}>{t('modal.raw')}</button>
                 </div>
               )}
             </div>
@@ -635,24 +637,24 @@ export function ReviewPanel(props: {
               <pre>{open.raw}</pre>
             )}
             <label className="meta">
-              在工件上反馈（回灌为下一轮上下文）
+              {t('modal.feedbackLabel')}
               {lineComments.some((l) => l.comment.trim()) && (
-                <span className="meta-badge">已标注 {lineComments.filter((l) => l.comment.trim()).length} 行评论</span>
+                <span className="meta-badge">{t('modal.annotatedLines', { n: lineComments.filter((l) => l.comment.trim()).length })}</span>
               )}
             </label>
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="例如：这个改动漏了错误处理，请补上 try/catch 并加测试（行级评论可在 diff 上直接标）"
+              placeholder={t('modal.feedbackPlaceholder')}
             />
             <div className="modal-actions">
-              <button className="btn ghost" onClick={() => setOpen(null)}>关闭</button>
+              <button className="btn ghost" onClick={() => setOpen(null)}>{t('modal.close')}</button>
               <button
                 className="btn"
                 disabled={(!comment.trim() && !lineComments.some((l) => l.comment.trim())) || sending}
                 onClick={sendFeedback}
               >
-                {sending ? '发送中…' : '发送反馈'}
+                {sending ? t('modal.sending') : t('modal.send')}
               </button>
             </div>
           </div>
@@ -668,6 +670,7 @@ export function ReviewPanel(props: {
 // are skipped and surfaced, never blanket-reverted.
 function RollbackSection(props: { sessionId: string }) {
   const { sessionId } = props
+  const { t } = useTranslation('review')
   const [preview, setPreview] = useState<{ text: string; confirmationToken: string } | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'previewed' | 'running' | 'none'>('idle')
   const [result, setResult] = useState<RollbackResult | null>(null)
@@ -706,34 +709,34 @@ function RollbackSection(props: { sessionId: string }) {
     <div className="rollback">
       {state !== 'previewed' && (
         <button className="btn ghost sm" disabled={state === 'loading' || state === 'running'} onClick={loadPreview}>
-          {state === 'loading' ? '加载预览…' : '回滚到此检查点'}
+          {state === 'loading' ? t('rollback.loadingPreview') : t('rollback.trigger')}
         </button>
       )}
-      {state === 'none' && <div className="empty sm">当前没有可回滚的检查点</div>}
+      {state === 'none' && <div className="empty sm">{t('rollback.none')}</div>}
       {state === 'previewed' && preview && (
         <div className="review-pending rollback-preview">
           <div className="rp-head">
-            <span className="kind warn">确认回滚</span>
+            <span className="kind warn">{t('rollback.confirmBadge')}</span>
           </div>
           <pre className="rp-preview">{preview.text}</pre>
           <div className="rp-actions">
-            <button className="btn ghost sm" onClick={() => setState('idle')}>取消</button>
-            <button className="btn sm danger" onClick={() => setShowConfirm(true)}>确认回滚</button>
+            <button className="btn ghost sm" onClick={() => setState('idle')}>{t('rollback.cancel')}</button>
+            <button className="btn sm danger" onClick={() => setShowConfirm(true)}>{t('rollback.confirm')}</button>
           </div>
 
           <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
             <AlertDialogContent className="max-w-lg sm:max-w-lg">
               <AlertDialogHeader>
-                <AlertDialogTitle>确认回滚？</AlertDialogTitle>
+                <AlertDialogTitle>{t('rollback.dialogTitle')}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  此操作会将当前会话恢复到上一个检查点。部分副作用（如已执行的 bash 命令）可能无法撤销。
+                  {t('rollback.dialogDescription')}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <pre className="max-h-48 overflow-auto rounded-md bg-panel-2 p-2 text-xs">{preview.text}</pre>
               <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => setShowConfirm(false)}>取消</AlertDialogCancel>
+                <AlertDialogCancel onClick={() => setShowConfirm(false)}>{t('rollback.cancel')}</AlertDialogCancel>
                 <AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={execute}>
-                  确认回滚
+                  {t('rollback.confirm')}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -742,12 +745,12 @@ function RollbackSection(props: { sessionId: string }) {
       )}
       {result && (
         <div className={`rollback-result ${result.success ? 'ok' : 'fail'}`}>
-          <div className="meta">{result.success ? `已回滚（${result.hash ?? ''}）` : (result.error ?? '回滚未执行')}</div>
+          <div className="meta">{result.success ? t('rollback.done', { hash: result.hash ?? '' }) : (result.error ?? t('rollback.notExecuted'))}</div>
           {result.skipped && result.skipped.length > 0 && (
-            <div className="meta">跳过（被其它会话占用）：{result.skipped.join(', ')}</div>
+            <div className="meta">{t('rollback.skipped', { files: result.skipped.join(', ') })}</div>
           )}
           {result.unrevertable && result.unrevertable.length > 0 && (
-            <div className="meta warn">⚠️ 无法回滚的副作用：{result.unrevertable.join('; ')}</div>
+            <div className="meta warn">{t('rollback.unrevertable', { effects: result.unrevertable.join('; ') })}</div>
           )}
         </div>
       )}
@@ -766,6 +769,7 @@ function SourceListSection(props: {
   onClose: () => void
 }) {
   const { sources, fileContent, fileLoading, onView, onOpen, onClose } = props
+  const { t } = useTranslation('review')
   const [expanded, setExpanded] = useState(false)
   const PREVIEW_LIMIT = 8
   const needsCollapse = sources.length > PREVIEW_LIMIT
@@ -774,13 +778,13 @@ function SourceListSection(props: {
 
   return (
     <section className="review-section">
-      <h4>涉及文件 · {sources.length}</h4>
-      {sources.length === 0 && <div className="empty sm">还没有文件变更</div>}
+      <h4>{t('sources.heading', { n: sources.length })}</h4>
+      {sources.length === 0 && <div className="empty sm">{t('sources.empty')}</div>}
       {visible.map((path) => (
         <div
           key={path}
           className="source-item"
-          title={`查看 ${path}`}
+          title={t('sources.viewTitle', { path })}
           onClick={() => onView(path)}
         >
           <span className="source-icon" aria-hidden>📄</span>
@@ -789,18 +793,18 @@ function SourceListSection(props: {
       ))}
       {needsCollapse && (
         <button className="source-more" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? '收起' : `展开剩余 ${remaining} 个文件`}
+          {expanded ? t('sources.collapse') : t('sources.expandRemaining', { n: remaining })}
         </button>
       )}
-      {fileLoading && <div className="empty sm">加载文件…</div>}
+      {fileLoading && <div className="empty sm">{t('sources.loadingFile')}</div>}
       {fileContent && (
         <div className="review-file-viewer">
           <div className="review-file-header">
             <FilePath path={fileContent.path} />
             <button className="btn ghost sm" onClick={onOpen}>
-              在编辑器中打开
+              {t('sources.openInEditor')}
             </button>
-            <button className="btn ghost sm" onClick={onClose}>关闭</button>
+            <button className="btn ghost sm" onClick={onClose}>{t('sources.close')}</button>
           </div>
           <FileViewer
             content={fileContent.content}

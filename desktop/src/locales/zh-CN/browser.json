@@ -1,0 +1,13 @@
+{
+  "empty": {
+    "prefix": "尚未有浏览器活动。当天枢用 ",
+    "suffix": " 打开网页时，这里会实时镜像它看到的页面。"
+  },
+  "notNavigated": "（未导航）",
+  "openExternal": "外部打开",
+  "openExternalTitle": "在系统浏览器中打开",
+  "screenshotFailed": "截图加载失败",
+  "screenshotEmpty": "暂无截图（agent 尚未截屏）",
+  "extractedText": "提取的文本 / 最近结果",
+  "timeline": "导航历史（{{total}}）"
+}

@@ -16,6 +16,8 @@
     "core:window:allow-show",
     "core:window:allow-unminimize",
     "core:window:allow-set-focus",
+    "core:window:allow-set-title",
+    "core:window:allow-set-always-on-top",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { PlanModeState } from '../runtime/types'
 import type { ComposerCommand } from '../lib/composer-commands'
 import {
@@ -70,6 +71,7 @@ export function PlusMenu(props: {
     onPickImage, imageDisabled, commands, onRunCommand, onDelegate, onWorkflow, onClose,
     open, onOpenChange, threadNonEmpty,
   } = props
+  const { t } = useTranslation('composer')
   const planning = planMode === 'planning'
   const [panel, setPanel] = useState<Panel | null>(null)
   const dispatch = useUiDispatch()
@@ -83,7 +85,7 @@ export function PlusMenu(props: {
       <DropdownMenu open={open} onOpenChange={onOpenChange}>
         <DropdownMenuTrigger
           className={`plus-btn ${open ? 'open' : ''}`}
-          aria-label="添加"
+          aria-label={t('plusMenu.add')}
           aria-haspopup="menu"
         >
           +
@@ -110,15 +112,15 @@ export function PlusMenu(props: {
 
           <DropdownMenuItem disabled={imageDisabled} onClick={pick(onPickImage)}>
             <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>⊞</span>
-            <span>图片</span>
+            <span>{t('plusMenu.image')}</span>
             <span className="ml-auto text-xs text-muted-foreground">PNG/JPEG/WebP/GIF</span>
           </DropdownMenuItem>
 
           {onDelegate && (
             <DropdownMenuItem onClick={pick(onDelegate)}>
               <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>⌗</span>
-              <span>派子代理</span>
-              <span className="ml-auto text-xs text-muted-foreground">后台跑</span>
+              <span>{t('plusMenu.delegate')}</span>
+              <span className="ml-auto text-xs text-muted-foreground">{t('plusMenu.delegateDesc')}</span>
             </DropdownMenuItem>
           )}
 
@@ -126,13 +128,13 @@ export function PlusMenu(props: {
             <>
               <DropdownMenuItem onClick={pick(() => onWorkflow('/council'))}>
                 <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>♟</span>
-                <span>议事会</span>
-                <span className="ml-auto text-xs text-muted-foreground">多模型评审</span>
+                <span>{t('plusMenu.council')}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{t('plusMenu.councilDesc')}</span>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={pick(() => onWorkflow('/team'))}>
                 <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>⬡</span>
-                <span>团队模式</span>
-                <span className="ml-auto text-xs text-muted-foreground">多 agent 协作</span>
+                <span>{t('plusMenu.team')}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{t('plusMenu.teamDesc')}</span>
               </DropdownMenuItem>
             </>
           )}
@@ -142,7 +144,7 @@ export function PlusMenu(props: {
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => openSub('commands')}>
                 <span className="inline-flex w-4 justify-center font-mono text-accent" aria-hidden>/</span>
-                <span>命令</span>
+                <span>{t('plusMenu.commands')}</span>
                 <span className="ml-auto text-xs text-muted-foreground">▸</span>
               </DropdownMenuItem>
             </>
@@ -151,13 +153,13 @@ export function PlusMenu(props: {
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={pick(() => dispatch({ type: 'openConnect', open: true }))}>
             <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>◈</span>
-            <span>连接模型服务商</span>
-            <span className="ml-auto text-xs text-muted-foreground">配 Key / 加服务商</span>
+            <span>{t('plusMenu.connect')}</span>
+            <span className="ml-auto text-xs text-muted-foreground">{t('plusMenu.connectDesc')}</span>
           </DropdownMenuItem>
           {([
             { glyph: '◇', label: 'Models', panel: 'models' as const },
             { glyph: '✦', label: 'Skills', panel: 'skills' as const },
-            { glyph: '✶', label: '星域 Domain', panel: 'domain' as const },
+            { glyph: '✶', label: t('plusMenu.domainLabel'), panel: 'domain' as const },
             { glyph: '⚙', label: 'MCP Servers', panel: 'mcp' as const },
           ]).map((it) => (
             <DropdownMenuItem key={it.label} onClick={() => openSub(it.panel)}>
@@ -175,7 +177,7 @@ export function PlusMenu(props: {
           sessionId={sessionId}
           menuRev={menuRev}
           mode="single"
-          emptyHint="未发现可用模型"
+          emptyHint={t('plusMenu.modelsEmpty')}
           onClose={closeSub}
           load={async (id) => (await listModels(id)).map<Row>((m) => ({
             key: m.id,
@@ -194,20 +196,20 @@ export function PlusMenu(props: {
       )}
       {panel === 'domain' && (
         <PickerPanel
-          title="星域 Domain"
+          title={t('plusMenu.domainLabel')}
           sessionId={sessionId}
           menuRev={menuRev}
           mode="single"
-          emptyHint="未发现星域"
+          emptyHint={t('plusMenu.domainsEmpty')}
           onClose={closeSub}
           load={async (id) => (await listDomains(id)).map<Row>((d) => {
             const glyph = d.uiPersona?.glyph ? `${d.uiPersona.glyph} ` : ''
             // Auto shows its keyword fallback so it never reads as "no domain".
-            const label = d.key === 'auto' ? `${glyph}${d.name} · 天枢` : `${glyph}${d.name}`
+            const label = d.key === 'auto' ? `${glyph}${d.name} · ${t('plusMenu.autoDomainSuffix')}` : `${glyph}${d.name}`
             return { key: d.key, label, desc: d.meta || d.motto, active: d.current }
           })}
           apply={async (id, row) => { await setDomain(id, row.key) }}
-          warning={threadNonEmpty ? '⚠ 会话中途切换星域会使前缀缓存整体失效，下一次请求需全量重建上下文（成本约 10 倍+）。建议新开会话或在会话开始时选择。' : undefined}
+          warning={threadNonEmpty ? `⚠ ${t('domainCacheWarning')}` : undefined}
         />
       )}
       {panel === 'skills' && (
@@ -216,7 +218,7 @@ export function PlusMenu(props: {
           sessionId={sessionId}
           menuRev={menuRev}
           mode="toggle"
-          emptyHint="未加载任何技能"
+          emptyHint={t('plusMenu.skillsEmpty')}
           onClose={closeSub}
           load={async (id) => (await listSkills(id)).map<Row>((s) => ({
             key: s.name,
@@ -229,11 +231,11 @@ export function PlusMenu(props: {
       )}
       {panel === 'commands' && commands && commands.length > 0 && (
         <PickerPanel
-          title="命令 Commands"
+          title={t('plusMenu.commandsTitle')}
           sessionId={sessionId}
           menuRev={menuRev}
           mode="single"
-          emptyHint="无可用命令"
+          emptyHint={t('plusMenu.commandsEmpty')}
           onClose={closeSub}
           load={async () => commands.map<Row>((cmd) => ({
             key: cmd.name,
@@ -256,11 +258,16 @@ export function PlusMenu(props: {
 
 /** MCP status dot + label for a single server state. */
 function McpStatusBadge({ status, toolCount, error }: { status: string; toolCount: number; error?: string }) {
+  const { t } = useTranslation('composer')
   const dot: Record<string, string> = {
     connected: '●', connecting: '◐', degraded: '◐', error: '✗', disconnected: '○',
   }
   const label: Record<string, string> = {
-    connected: '已连接', connecting: '连接中', degraded: '降级', error: '错误', disconnected: '未连接',
+    connected: t('mcp.connected'),
+    connecting: t('mcp.connecting'),
+    degraded: t('mcp.degraded'),
+    error: t('mcp.error'),
+    disconnected: t('mcp.disconnected'),
   }
   const cls = status === 'connected' ? 'text-success' : status === 'error' ? 'text-destructive' : status === 'disconnected' ? 'text-muted-foreground' : 'text-warning'
   return (
@@ -275,6 +282,7 @@ function McpStatusBadge({ status, toolCount, error }: { status: string; toolCoun
 /** MCP second-level panel: lists configured servers with connection status and tool count. */
 function McpPanel(props: { sessionId: string; menuRev?: number; onClose: () => void }) {
   const { menuRev, onClose } = props
+  const { t } = useTranslation('composer')
   const [status, setStatus] = useState<McpStatusResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -290,24 +298,24 @@ function McpPanel(props: { sessionId: string; menuRev?: number; onClose: () => v
       setError(null)
     } catch {
       if (seq !== reqSeq.current) return
-      setError('获取 MCP 状态失败')
+      setError(t('mcp.statusError'))
     } finally {
       if (seq === reqSeq.current) setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => { void fetch() }, [fetch, menuRev])
 
   return (
-    <CommandDialog open title="MCP Servers" description="已配置的 MCP 服务器状态" onOpenChange={(open) => { if (!open) onClose() }}>
+    <CommandDialog open title="MCP Servers" description={t('mcp.desc')} onOpenChange={(open) => { if (!open) onClose() }}>
       <Command shouldFilter>
-        <CommandInput placeholder="筛选服务器…" />
+        <CommandInput placeholder={t('mcp.filterPlaceholder')} />
         <CommandList>
           <CommandGroup heading="MCP Servers">
-            {loading && <CommandEmpty>加载中…</CommandEmpty>}
+            {loading && <CommandEmpty>{t('loading')}</CommandEmpty>}
             {error && <CommandEmpty className="text-destructive">{error}</CommandEmpty>}
             {!loading && !error && status && status.servers.length === 0 && (
-              <CommandEmpty>未配置 MCP 服务器</CommandEmpty>
+              <CommandEmpty>{t('mcp.empty')}</CommandEmpty>
             )}
             {!loading && status && status.servers.map((s) => (
               <CommandItem
@@ -323,7 +331,7 @@ function McpPanel(props: { sessionId: string; menuRev?: number; onClose: () => v
           </CommandGroup>
           {!loading && status && status.servers.length > 0 && (
             <div className="px-2 py-1.5 text-xs text-muted-foreground">
-              {status.totalTools} 个 MCP 工具可用 · 在设置中管理
+              {t('mcp.toolsAvailable', { total: status.totalTools })}
             </div>
           )}
         </CommandList>
@@ -350,6 +358,7 @@ function PickerPanel(props: {
   warning?: string
 }) {
   const { title, sessionId, menuRev, mode, emptyHint, onClose, load, apply, warning } = props
+  const { t } = useTranslation('composer')
   const [rows, setRows] = useState<Row[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
@@ -365,10 +374,10 @@ function PickerPanel(props: {
       setError(null)
     } catch {
       if (seq !== reqSeq.current) return
-      setError('加载失败，请重试')
+      setError(t('plusMenu.loadFailed'))
       setRows([])
     }
-  }, [load, sessionId])
+  }, [load, sessionId, t])
 
   useEffect(() => { void refetch() }, [refetch, menuRev])
 
@@ -386,23 +395,23 @@ function PickerPanel(props: {
       await refetch()
       if (mode === 'single') onClose()
     } catch {
-      setError('操作失败，请重试')
+      setError(t('plusMenu.actionFailed'))
     } finally {
       setBusyKey(null)
     }
-  }, [apply, mode, onClose, refetch, sessionId])
+  }, [apply, mode, onClose, refetch, sessionId, t])
 
   return (
-    <CommandDialog open title={title} description={`搜索并选择 ${title}`} onOpenChange={(open) => { if (!open) onClose() }}>
+    <CommandDialog open title={title} description={t('plusMenu.searchAndSelect', { title })} onOpenChange={(open) => { if (!open) onClose() }}>
       <Command shouldFilter={false}>
         <CommandInput
-          placeholder="搜索…"
+          placeholder={t('plusMenu.searchPlaceholder')}
           value={query}
           onValueChange={setQuery}
         />
         <CommandList>
           <CommandGroup heading={title}>
-            {rows === null && <CommandEmpty>加载中…</CommandEmpty>}
+            {rows === null && <CommandEmpty>{t('loading')}</CommandEmpty>}
             {error && <CommandEmpty className="text-destructive">{error}</CommandEmpty>}
             {rows !== null && !error && filtered.map((row) => (
               <CommandItem
@@ -425,7 +434,7 @@ function PickerPanel(props: {
               </CommandItem>
             ))}
             {rows !== null && !error && filtered.length === 0 && (
-              <CommandEmpty>{query ? '无匹配项' : emptyHint}</CommandEmpty>
+              <CommandEmpty>{query ? t('plusMenu.noMatch') : emptyHint}</CommandEmpty>
             )}
           </CommandGroup>
         </CommandList>

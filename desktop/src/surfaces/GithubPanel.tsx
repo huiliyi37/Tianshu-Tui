@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useGithubPrs, useGithubPr, useGithubPrDiff, useSubmitPrReview } from '../state/queries'
 import { Markdown } from '../components/Markdown'
 import { DiffView } from '../components/DiffView'
@@ -18,13 +19,15 @@ const REVIEW_LABEL: Record<string, string> = {
   REVIEW_REQUIRED: '⏳ Review',
 }
 
+// Labels are i18n keys in the `review` namespace, resolved at render time.
 const VERDICTS: { event: PrReviewInput['event']; label: string }[] = [
-  { event: 'COMMENT', label: '评论' },
-  { event: 'APPROVE', label: '批准' },
-  { event: 'REQUEST_CHANGES', label: '请求修改' },
+  { event: 'COMMENT', label: 'github.verdictComment' },
+  { event: 'APPROVE', label: 'github.verdictApprove' },
+  { event: 'REQUEST_CHANGES', label: 'github.verdictRequestChanges' },
 ]
 
 export function GithubPanel() {
+  const { t } = useTranslation('review')
   const prs = useGithubPrs()
   const [selected, setSelected] = useState<number | null>(null)
 
@@ -35,7 +38,7 @@ export function GithubPanel() {
     return (
       <div className="empty sm">
         <span className="empty-icon" aria-hidden>⑂</span>
-        GitHub CLI 未安装或未认证。运行 <code>gh auth login</code> 后刷新。
+        {t('github.cliUnavailablePrefix')}<code>gh auth login</code>{t('github.cliUnavailableSuffix')}
       </div>
     )
   }
@@ -43,7 +46,7 @@ export function GithubPanel() {
   return (
     <div className="gh-panel">
       <div className="gh-list">
-        {list.length === 0 && <div className="empty sm">没有打开的 Pull Request</div>}
+        {list.length === 0 && <div className="empty sm">{t('github.noPrs')}</div>}
         {list.map((pr) => (
           <button
             key={pr.number}
@@ -80,6 +83,7 @@ export function GithubPanel() {
  */
 function PrReviewDetail(props: { number: number }) {
   const { number } = props
+  const { t } = useTranslation('review')
   const detail = useGithubPr(number)
   const diff = useGithubPrDiff(number)
   const submit = useSubmitPrReview(number)
@@ -141,8 +145,8 @@ function PrReviewDetail(props: { number: number }) {
     )
   }
 
-  if (detail.isLoading) return <div className="gh-detail"><div className="empty sm">加载 PR 详情…</div></div>
-  if (!detail.data) return <div className="gh-detail"><div className="empty sm">读取 PR 详情失败</div></div>
+  if (detail.isLoading) return <div className="gh-detail"><div className="empty sm">{t('github.loadingDetail')}</div></div>
+  if (!detail.data) return <div className="gh-detail"><div className="empty sm">{t('github.detailFailed')}</div></div>
 
   const pr = detail.data
 
@@ -165,17 +169,17 @@ function PrReviewDetail(props: { number: number }) {
           <button
             className={`diff-toggle ${sideBySide ? 'active' : ''}`}
             onClick={() => setSideBySide((v) => !v)}
-            title="切换单列 / 双列视图"
+            title={t('diff.toggleLayoutTitle')}
           >
-            {sideBySide ? '双列' : '单列'}
+            {sideBySide ? t('diff.split') : t('diff.unified')}
           </button>
         </div>
         {diff.isLoading ? (
-          <div className="empty sm">加载 diff…</div>
+          <div className="empty sm">{t('github.loadingDiff')}</div>
         ) : diff.isError ? (
-          <div className="empty sm">读取 diff 失败</div>
+          <div className="empty sm">{t('github.diffFailed')}</div>
         ) : files.length === 0 ? (
-          <div className="empty sm muted">无文本差异</div>
+          <div className="empty sm muted">{t('github.noTextDiff')}</div>
         ) : (
           files.map((f, i) => {
             const fileComments = [
@@ -221,31 +225,31 @@ function PrReviewDetail(props: { number: number }) {
               className={`gh-verdict ${event === v.event ? 'active' : ''} v-${v.event.toLowerCase()}`}
               onClick={() => setEvent(v.event)}
             >
-              {v.label}
+              {t(v.label)}
             </button>
           ))}
           {lineComments.length > 0 && (
-            <span className="gh-review-count">{lineComments.length} 条行内评论待提交</span>
+            <span className="gh-review-count">{t('github.pendingInline', { n: lineComments.length })}</span>
           )}
         </div>
         <textarea
           className="gh-review-summary"
-          placeholder="评审概要（可选，批准时可留空）…"
+          placeholder={t('github.summaryPlaceholder')}
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           rows={2}
         />
         {submit.isError && (
-          <div className="gh-review-error">提交失败：{(submit.error as Error)?.message ?? '未知错误'}</div>
+          <div className="gh-review-error">{t('github.submitFailed', { error: (submit.error as Error)?.message ?? t('github.unknownError') })}</div>
         )}
         <div className="gh-review-actions">
           {lineComments.length > 0 && (
             <button className="gh-review-clear" onClick={() => setLineComments([])} disabled={submit.isPending}>
-              清空行内评论
+              {t('github.clearInline')}
             </button>
           )}
           <button className="gh-review-submit" onClick={onSubmit} disabled={!canSubmit}>
-            {submit.isPending ? '提交中…' : '提交评审'}
+            {submit.isPending ? t('github.submitting') : t('github.submit')}
           </button>
         </div>
       </div>

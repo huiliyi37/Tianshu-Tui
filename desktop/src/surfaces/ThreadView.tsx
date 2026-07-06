@@ -1,4 +1,5 @@
 import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
@@ -44,14 +45,6 @@ import { QuestionCard } from './QuestionCard'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
-const STATUS_LABEL: Record<string, string> = {
-  idle: '空闲',
-  running: '运行中',
-  completed: '已完成',
-  failed: '失败',
-  aborted: '已中止',
-}
-
 /** Resolve the active star domain for this session. Uses the session's pinned
  *  domain when known; otherwise falls back to 天枢 (tianshu). */
 function resolveActiveDomain(session: SessionRecord, _view: EventViewState): StarDomainId {
@@ -93,6 +86,7 @@ export function ThreadView(props: {
   onRetryStream?: () => void
 }) {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream } = props
+  const { t } = useTranslation('threadView')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const [input, setInputRaw] = useState(ui.composerDrafts[session.id] ?? '')
@@ -485,27 +479,27 @@ export function ThreadView(props: {
 
   // D3 — composer slash commands: desktop-actionable items + prompt pass-throughs.
   const commands = useMemo<ComposerCommand[]>(() => [
-    { name: '/rewind', desc: '回滚到某条消息', run: () => setShowRewind(true) },
-    { name: '/subagents', desc: '打开子代理面板', run: () => setShowDelegation(true) },
-    { name: '/supervise', desc: '监督档 · 每步确认', run: () => onSetApprovalMode(levelToMode('supervised')) },
-    { name: '/default', desc: '默认档 · 低风险自动', run: () => onSetApprovalMode(levelToMode('default')) },
-    { name: '/autonomous', desc: '自治档 · 项目内全自动', run: () => onSetApprovalMode(levelToMode('autonomous')) },
+    { name: '/rewind', desc: t('commands.rewind'), run: () => setShowRewind(true) },
+    { name: '/subagents', desc: t('commands.subagents'), run: () => setShowDelegation(true) },
+    { name: '/supervise', desc: t('commands.supervise'), run: () => onSetApprovalMode(levelToMode('supervised')) },
+    { name: '/default', desc: t('commands.default'), run: () => onSetApprovalMode(levelToMode('default')) },
+    { name: '/autonomous', desc: t('commands.autonomous'), run: () => onSetApprovalMode(levelToMode('autonomous')) },
     {
       name: '/review',
-      desc: 'L2 审查 · 单审查员',
-      example: '/review [关注点描述]',
+      desc: t('commands.review'),
+      example: t('commands.reviewExample'),
       // Raw slash → server resolveAppPromptInput translates (single source of truth).
       run: () => onSend('/review'),
     },
     {
       name: '/review max',
-      desc: 'L3 审查 · 编队 5 审查员',
-      example: '/review max [关注点描述]',
+      desc: t('commands.reviewMax'),
+      example: t('commands.reviewMaxExample'),
       run: () => onSend('/review max'),
     },
     {
       name: '/theme',
-      desc: '切换主题 (system→light→dark→nebula→sakura→cyberpunk→cupertino→light-classic)',
+      desc: t('commands.theme'),
       run: () => {
         const order: ThemePref[] = ['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino', 'light-classic']
         const cur = loadThemePref()
@@ -514,8 +508,8 @@ export function ThreadView(props: {
     },
     {
       name: '/plan',
-      desc: '进入 Plan 模式 · 调研后写方案',
-      example: '/plan <功能描述>',
+      desc: t('commands.plan'),
+      example: t('commands.planExample'),
       // 只切模式，不烧一轮对话——plan mode 的系统提示已经写明职责，
       // 用户接着输入的任务描述才是第一轮（省一次 API 往返 + 缓存零扰动）。
       run: () => {
@@ -526,77 +520,77 @@ export function ThreadView(props: {
     },
     {
       name: '/write-plan',
-      desc: '写实现计划文档 · 先调研后设计',
-      example: '/write-plan <功能描述>',
+      desc: t('commands.writePlan'),
+      example: t('commands.writePlanExample'),
       // Needs args — prefill the composer instead of firing a bare command.
       run: () => setInput('/write-plan '),
     },
     {
       name: '/plan-close',
-      desc: '关闭计划 · 归档并总结偏差',
-      example: '/plan-close <计划 slug>',
+      desc: t('commands.planClose'),
+      example: t('commands.planCloseExample'),
       run: () => setInput('/plan-close '),
     },
     {
       name: '/team',
-      desc: '团队模式 · 多 agent 协作',
-      example: '/team <任务描述>',
+      desc: t('commands.team'),
+      example: t('commands.teamExample'),
       run: () => onSend('/team'),
     },
     {
       name: '/interview',
-      desc: '深度访谈 · 先问后做',
+      desc: t('commands.interview'),
       run: () => onSend('Run a deep technical interview before implementing. Ask me 3-5 clarifying questions about requirements, constraints, and edge cases.'),
     },
     {
       name: '/compact',
-      desc: '压缩上下文',
+      desc: t('commands.compact'),
       run: () => onSend('Context is getting long. Please compact the conversation: summarize tool outputs, collapse resolved discussions, and trim stale context while preserving key decisions and active work state.'),
     },
     {
       name: '/memory',
-      desc: '查看会话记忆',
+      desc: t('commands.memory'),
       run: () => onSend('Show the current session memory overview: session entries, project pheromones, and project knowledge files.'),
     },
     {
       name: '/context',
-      desc: '上下文状态',
+      desc: t('commands.context'),
       run: () => onSend('Show context ledger status: token usage, compaction state, cache hit rate, and pinned anchors.'),
     },
     {
       name: '/verify',
-      desc: '验证状态',
+      desc: t('commands.verify'),
       run: () => onSend('Show verification status for all modified files in this session: which are verified, which are pending, and the last verification result.'),
     },
     {
       name: '/mission',
-      desc: '当前任务契约',
+      desc: t('commands.mission'),
       run: () => onSend('Show the current task contract: objective, scope, acceptance criteria, and delivery status.'),
     },
     {
       name: '/debug cache',
-      desc: '缓存诊断',
+      desc: t('commands.debugCache'),
       run: () => onSend('Show cache debug info: hit rate, read/write tokens, estimated context size, and cost.'),
     },
     {
       name: '/constellation',
-      desc: '项目星图 · 架构蓝图',
+      desc: t('commands.constellation'),
       run: () => onSend('Show the project constellation: architecture overview, milestones, and recent activity.'),
     },
     {
       name: '/dream',
-      desc: '记忆蒸馏状态',
+      desc: t('commands.dream'),
       run: () => onSend('Show dream / memory distillation status: how many curated memories exist, when the last distillation ran.'),
     },
     {
       name: '/sensorium',
-      desc: '认知自感知',
+      desc: t('commands.sensorium'),
       run: () => onSend('Show the cognitive sensorium state: task status, verification gaps, delivery readiness, and active signals.'),
     },
     {
       name: '/council',
-      desc: '议事会 · 星域专家审查',
-      example: '/council <目标描述>',
+      desc: t('commands.council'),
+      example: t('commands.councilExample'),
       run: () => onSend('/council'),
     },
     // C4 — /goal & /cancel-goal 已移除：sidecar 从不创建 GoalTracker，这两个
@@ -604,95 +598,95 @@ export function ThreadView(props: {
     // 真正的 sidecar goal 接线（含暂停/取消按钮）另立项。
     {
       name: '/effort',
-      desc: '设置推理强度 (off/low/medium/high/max)',
+      desc: t('commands.effort'),
       run: () => onSend('Show current reasoning effort level. Available: off, low, medium, high, max.'),
     },
     {
       name: '/model',
-      desc: '切换模型',
+      desc: t('commands.model'),
       run: () => onSend('Show available models for switching.'),
     },
     {
       name: '/domain',
-      desc: '切换星域人格',
+      desc: t('commands.domain'),
       run: () => onSend('Show available star domains for switching.'),
     },
     {
       name: '/todo',
-      desc: '任务清单管理 (list/add/done/skip/move)',
+      desc: t('commands.todo'),
       run: () => onSend('Show current todo list. Use /todo add/done/skip/move to manage tasks.'),
     },
     {
       name: '/undo',
-      desc: '撤销文件更改',
+      desc: t('commands.undo'),
       run: () => onSend('Undo the last file change. Use /undo preview N to preview before undoing.'),
     },
     {
       name: '/rollback',
-      desc: '回滚文件更改（/undo 别名）',
+      desc: t('commands.rollback'),
       run: () => onSend('Rollback recent file changes.'),
     },
     {
       name: '/workflow',
-      desc: 'YAML 工作流编排 (list/<name>/replay)',
+      desc: t('commands.workflow'),
       run: () => onSend('Show available workflows from .rivet/workflows/*.yaml.'),
     },
     {
       name: '/plan-template',
-      desc: '计划模板库 (list/save/<name>)',
+      desc: t('commands.planTemplate'),
       run: () => onSend('Show available plan templates from .rivet/plan-templates/*.md.'),
     },
     {
       name: '/team-resume',
-      desc: '从 wave checkpoint 恢复团队执行',
+      desc: t('commands.teamResume'),
       run: () => onSend('Show available team checkpoints for resume.'),
     },
     {
       name: '/fork',
-      desc: 'Fork 当前会话',
+      desc: t('commands.fork'),
       run: () => onSend('Fork the current session into a new branch.'),
     },
     {
       name: '/branch',
-      desc: '分支树 · 查看父/子会话',
+      desc: t('commands.branch'),
       run: () => onSend('Show the session branch tree: parent and child sessions.'),
     },
     {
       name: '/sessions',
-      desc: '列出所有会话',
+      desc: t('commands.sessions'),
       run: () => onSend('List all saved sessions.'),
     },
     {
       name: '/skill',
-      desc: '技能管理 (list/<name>)',
+      desc: t('commands.skill'),
       run: () => onSend('Show available skills.'),
     },
     {
       name: '/evidence',
-      desc: '验证证据摘要',
+      desc: t('commands.evidence'),
       run: () => onSend('Show evidence summary: last 10 verifications and pass rate.'),
     },
     {
       name: '/status',
-      desc: 'Agent 状态总览',
+      desc: t('commands.status'),
       run: () => onSend('Show agent status: model, domain, cache hit rate, token usage, cost.'),
     },
     {
       name: '/mcp',
-      desc: 'MCP 服务器状态',
+      desc: t('commands.mcp'),
       run: () => onSend('Show MCP server connection status.'),
     },
     {
       name: '/leave',
-      desc: '在星图留下标记',
+      desc: t('commands.leave'),
       run: () => onSend('Leave a mark in the starmap summarizing this session.'),
     },
     {
       name: '/diagram',
-      desc: '生成 Mermaid 图表骨架',
+      desc: t('commands.diagram'),
       run: () => onSend('Generate a mermaid diagram skeleton. Types: architecture, dataflow, sequence, flowchart, comparison, state.'),
     },
-  ], [onSetApprovalMode, onSend, onSetPlanMode, view.planMode])
+  ], [onSetApprovalMode, onSend, onSetPlanMode, view.planMode, t])
 
   // Lookup map for welcome cards/pills to call the actual slash command
   // run() instead of sending raw text to the model.
@@ -715,20 +709,20 @@ export function ThreadView(props: {
           </div>
           {/* 权限档位芯片移到 Composer 旁（P1-1，对标 Claude Desktop 送信钮旁控件群）。 */}
           {autonomous && (
-            <span className="autonomy-badge" title="自治模式 · 项目内操作自动执行；项目外写入仍被沙箱拦截，可随时回滚">
+            <span className="autonomy-badge" title={t('header.autonomousTitle')}>
               <span className="ab-glyph" aria-hidden>✦</span>
-              自治
+              {t('header.autonomous')}
             </span>
           )}
           <span className={`status-dot status-${session.status}`} />
-          <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
+          <span className="status-text">{t(`status.${session.status}`, { defaultValue: session.status })}</span>
           <button
             className={`icon-btn sidechat-toggle ${sideChatOpen ? 'active' : ''}`}
-            title="旁路提问 (⌘;) — 不影响主任务的独立轻会话"
-            aria-label="旁路提问"
+            title={t('header.sideChatTitle')}
+            aria-label={t('header.sideChat')}
             onClick={() => setSideChatOpen((o) => !o)}
           >💬</button>
-          <button className="icon-btn thread-close" title="关闭会话" onClick={() => setShowCloseConfirm(true)} aria-label="关闭会话">
+          <button className="icon-btn thread-close" title={t('header.closeSession')} onClick={() => setShowCloseConfirm(true)} aria-label={t('header.closeSession')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M18 6 6 18M6 6l12 12" />
@@ -743,7 +737,7 @@ export function ThreadView(props: {
                 <circle cx="12" cy="12" r="10" />
                 <polyline points="12 6 12 12 16 14" />
               </svg>
-              时间旅行:
+              {t('timeTravel.label')}
             </span>
             <input
               type="range"
@@ -756,11 +750,11 @@ export function ThreadView(props: {
               }}
               className="timeline-slider flex-1 h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
             />
-            <span className="text-xs font-mono text-muted bg-panel-3 px-1.5 py-0.5 rounded border border-border max-w-[220px] truncate shrink-0" title={selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length ? `分叉点（第 ${selectedTurnIndex + 1} 轮）：${rewindPoints[selectedTurnIndex]?.content}` : '最新'}>
+            <span className="text-xs font-mono text-muted bg-panel-3 px-1.5 py-0.5 rounded border border-border max-w-[220px] truncate shrink-0" title={selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length ? t('timeTravel.forkPointTitle', { turn: selectedTurnIndex + 1, content: rewindPoints[selectedTurnIndex]?.content }) : t('timeTravel.latestTitle')}>
               {selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length ? (
-                '最新 (Latest)'
+                t('timeTravel.latest')
               ) : (
-                `↩ 第 ${selectedTurnIndex + 1} 轮之前`
+                t('timeTravel.beforeTurn', { turn: selectedTurnIndex + 1 })
               )}
             </span>
           </div>
@@ -771,25 +765,25 @@ export function ThreadView(props: {
           {session.reasoningEffort && (
             <button
               className="effort-chip"
-              title={`推理强度: ${session.reasoningEffort}（点击切换）`}
+              title={t('header.effortTitle', { effort: session.reasoningEffort })}
               onClick={() => onSend('/effort')}
             >
               {session.reasoningEffort}
             </button>
           )}
           {session.contextWindow && session.contextWindow > 0 && ctxPct >= 80 ? (
-            <div className="ctx-bar warn" title={`${formatTokens(session.contextTokens ?? 0)} / ${formatTokens(session.contextWindow)} tokens — 接近上限`}>
+            <div className="ctx-bar warn" title={t('header.ctxNearLimit', { used: formatTokens(session.contextTokens ?? 0), total: formatTokens(session.contextWindow) })}>
               <div className="ctx-bar-fill" style={{ width: `${ctxPct}%` }} />
               <span className="ctx-bar-label">{ctxPct}%</span>
             </div>
           ) : null}
           {cacheHitRate !== null ? (
-            <span className="cache-chip" title={`缓存读 ${formatTokens(view.cacheReadTokens)} / 创建 ${formatTokens(view.cacheCreationTokens)}`}>
+            <span className="cache-chip" title={t('header.cacheTitle', { read: formatTokens(view.cacheReadTokens), created: formatTokens(view.cacheCreationTokens) })}>
               ⚡{cacheHitRate}%
             </span>
           ) : null}
           {ctxDelta > 0 ? (
-            <span className="ctx-delta" title="本轮上下文增量">
+            <span className="ctx-delta" title={t('header.ctxDeltaTitle')}>
               +{formatTokens(ctxDelta)}
             </span>
           ) : null}
@@ -802,32 +796,32 @@ export function ThreadView(props: {
         {streamStatus === 'offline' && (
           <div className="stream-banner offline" role="alert">
             <span className="stream-banner-glyph" aria-hidden>⚠</span>
-            <span className="stream-banner-text">实时连接已断开，可能错过最新进度</span>
+            <span className="stream-banner-text">{t('stream.offline')}</span>
             <button
               className="stream-banner-retry"
               onClick={() => onRetryStream?.()}
-              aria-label="重新连接实时更新"
+              aria-label={t('stream.retryAria')}
             >
-              重新连接
+              {t('stream.retry')}
             </button>
           </div>
         )}
         {streamStatus === 'reconnecting' && (
           <div className="stream-banner reconnecting" role="status">
             <span className="stream-banner-glyph spin" aria-hidden>⟳</span>
-            <span className="stream-banner-text">连接中断，正在重连…</span>
+            <span className="stream-banner-text">{t('stream.reconnecting')}</span>
           </div>
         )}
         {view.blocks.length === 0 && (
           <div className="empty welcome">
-            <p className="welcome-title">开始对话</p>
-            <p className="welcome-hint">输入消息或选择一个快捷命令</p>
+            <p className="welcome-title">{t('welcome.title')}</p>
+            <p className="welcome-hint">{t('welcome.hint')}</p>
             <div className="welcome-pills">
-              <span className="welcome-pill" onClick={() => runCommand('/plan')}>创建方案</span>
-              <span className="welcome-pill" onClick={() => runCommand('/review')}>审查变更</span>
-              <span className="welcome-pill" onClick={() => runCommand('/autonomous')}>自治模式</span>
-              <span className="welcome-pill" onClick={() => runCommand('/team')}>组队</span>
-              <span className="welcome-pill" onClick={() => runCommand('/context')}>上下文</span>
+              <span className="welcome-pill" onClick={() => runCommand('/plan')}>{t('welcome.plan')}</span>
+              <span className="welcome-pill" onClick={() => runCommand('/review')}>{t('welcome.review')}</span>
+              <span className="welcome-pill" onClick={() => runCommand('/autonomous')}>{t('welcome.autonomous')}</span>
+              <span className="welcome-pill" onClick={() => runCommand('/team')}>{t('welcome.team')}</span>
+              <span className="welcome-pill" onClick={() => runCommand('/context')}>{t('welcome.context')}</span>
             </div>
           </div>
         )}
@@ -910,13 +904,13 @@ export function ThreadView(props: {
           <div className="thinking">
             <span className="dot-pulse" /><span className="dot-pulse" /><span className="dot-pulse" />
             <span className="thinking-label">
-              {view.phase ? `思考中 · ${view.phase}` : '思考中…'}
+              {view.phase ? t('thinking.withPhase', { phase: view.phase }) : t('thinking.label')}
               {elapsedStr && <span className={`elapsed${elapsedStalled ? ' stalled' : ''}`}> · {elapsedStr}</span>}
             </span>
           </div>
         )}
         {scrolledUp && (
-          <button className="scroll-bottom-btn" onClick={scrollToBottom} aria-label="回到底部">
+          <button className="scroll-bottom-btn" onClick={scrollToBottom} aria-label={t('scrollToBottom')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M6 9l6 6 6-6" />
@@ -960,7 +954,7 @@ export function ThreadView(props: {
                   <line x1="12" y1="17" x2="12.01" y2="17" />
                 </svg>
                 <span className="font-medium">
-                  已回退到第 {selectedTurnIndex + 1} 轮之前（仅显示其前的 {selectedTurnIndex} 轮）。在此发送新消息将从这里分叉（Fork），截断第 {selectedTurnIndex + 1} 轮及其后的历史。
+                  {t('timeTravel.historicalBanner', { turn: selectedTurnIndex + 1, shown: selectedTurnIndex })}
                 </span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -980,13 +974,13 @@ export function ThreadView(props: {
                     }
                   }}
                 >
-                  在此分叉 (Fork)
+                  {t('timeTravel.forkHere')}
                 </button>
                 <button
                   className="px-2.5 py-1 rounded bg-panel-3 hover:bg-panel-2 border border-border text-text transition-colors"
                   onClick={() => setSelectedTurnIndex(-1)}
                 >
-                  返回最新
+                  {t('timeTravel.backToLatest')}
                 </button>
               </div>
             </div>
@@ -1034,8 +1028,8 @@ export function ThreadView(props: {
             onDelegate={() => setShowDelegateDialog(true)}
             onWorkflow={(cmd) => {
               // 带上引导 prompt——让 agent 进入对应工作流模式并询问用户具体目标。
-              const label = cmd === '/council' ? '议事会评审' : '团队协作'
-              onSend(`${cmd} 我想用${label}模式完成一个任务，请先问我具体目标是什么。`)
+              const label = cmd === '/council' ? t('workflow.council') : t('workflow.team')
+              onSend(t('workflow.prompt', { cmd, label }))
             }}
             menuRev={view.menuRev}
             onHistoryPrev={() => recallHistory('prev')}
@@ -1086,27 +1080,27 @@ export function ThreadView(props: {
       />
 
       {fileViewer && (
-        <div className="file-viewer-drawer" role="complementary" aria-label="文件预览">
+        <div className="file-viewer-drawer" role="complementary" aria-label={t('fileViewer.aria')}>
           <div className="file-viewer-head">
             <span className="file-viewer-title" title={fileViewer.path}>
               {fileViewer.path.replace(/.*[/\\]/, '') || fileViewer.path}
             </span>
             <button
               className="icon-btn"
-              title="在编辑器中打开"
-              aria-label="在编辑器中打开"
+              title={t('fileViewer.openInEditor')}
+              aria-label={t('fileViewer.openInEditor')}
               onClick={() => void openFile(fileViewer.path)}
             >↗</button>
             <button
               className="icon-btn"
-              title="关闭"
-              aria-label="关闭"
+              title={t('fileViewer.close')}
+              aria-label={t('fileViewer.close')}
               onClick={() => setFileViewer(null)}
             >✕</button>
           </div>
           <div className="file-viewer-body">
-            {fileViewer.loading && <div className="file-viewer-loading">加载中…</div>}
-            {fileViewer.error && <div className="file-viewer-error">加载失败：{fileViewer.error}</div>}
+            {fileViewer.loading && <div className="file-viewer-loading">{t('fileViewer.loading')}</div>}
+            {fileViewer.error && <div className="file-viewer-error">{t('fileViewer.loadFailed', { error: fileViewer.error })}</div>}
             {fileViewer.content && (
               <FileViewer
                 content={fileViewer.content.content}
@@ -1121,14 +1115,14 @@ export function ThreadView(props: {
       <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>关闭会话？</AlertDialogTitle>
+            <AlertDialogTitle>{t('closeConfirm.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              关闭后该线程将从标签栏移除，未保存的上下文将丢失。
+              {t('closeConfirm.desc')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={onClose}>关闭</AlertDialogAction>
+            <AlertDialogCancel>{t('closeConfirm.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={onClose}>{t('closeConfirm.confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1144,6 +1138,7 @@ function SessionImage({ sessionId, imgId, index, onOpen }: {
   index: number
   onOpen?: (src: string) => void
 }) {
+  const { t } = useTranslation('threadView')
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -1161,16 +1156,17 @@ function SessionImage({ sessionId, imgId, index, onOpen }: {
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [sessionId, imgId])
-  if (failed) return <span className="msg-thumb-fail" title="图片加载失败">🖼 加载失败</span>
+  if (failed) return <span className="msg-thumb-fail" title={t('image.loadFailedTitle')}>{t('image.loadFailed')}</span>
   if (!url) return <span className="msg-thumb-skeleton" aria-hidden />
   return (
-    <img className="msg-thumb" src={url} alt={`图片 ${index + 1}`} loading="lazy"
+    <img className="msg-thumb" src={url} alt={t('image.alt', { index: index + 1 })} loading="lazy"
       onClick={() => onOpen?.(url)} />
   )
 }
 
 /** Full-size image overlay. Click anywhere or press Esc to close. */
 function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  const { t } = useTranslation('threadView')
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
@@ -1178,8 +1174,8 @@ function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
   }, [onClose])
   return (
     <div className="lightbox" onClick={onClose} role="dialog" aria-modal="true">
-      <img className="lightbox-img" src={src} alt="图片" onClick={(e) => e.stopPropagation()} />
-      <button className="lightbox-close" onClick={onClose} aria-label="关闭">×</button>
+      <img className="lightbox-img" src={src} alt={t('image.imageAlt')} onClick={(e) => e.stopPropagation()} />
+      <button className="lightbox-close" onClick={onClose} aria-label={t('image.close')}>×</button>
     </div>
   )
 }
@@ -1307,6 +1303,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
   onCancelContinue?: () => void
   onEditUserMsg?: (seq: number, text: string) => Promise<void>
 }) {
+  const { t } = useTranslation('threadView')
   const [isEditing, setIsEditing] = useState(false)
   const [editText, setEditText] = useState(block.text)
 
@@ -1316,7 +1313,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
 
     if (isEditing) {
       return (
-        <MsgBlock role="你" roleGlyph="user" className="user editing">
+        <MsgBlock role={t('block.you')} roleGlyph="user" className="user editing">
           <div className="user-edit-container">
             <textarea
               className="user-edit-textarea"
@@ -1334,7 +1331,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
                   }
                 }}
               >
-                保存并重发
+                {t('block.saveResend')}
               </button>
               <button
                 className="btn-sm btn-secondary user-edit-cancel"
@@ -1343,7 +1340,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
                   setEditText(block.text)
                 }}
               >
-                取消
+                {t('block.cancel')}
               </button>
             </div>
           </div>
@@ -1353,7 +1350,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
 
     return (
       <MsgBlock
-        role="你"
+        role={t('block.you')}
         roleGlyph="user"
         canEdit={canEdit}
         onEdit={() => setIsEditing(true)}
@@ -1368,12 +1365,12 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
         ) : block.images && block.images.length > 0 ? (
           <div className="msg-images">
             {block.images.map((src, i) => (
-              <img key={i} className="msg-thumb" src={src} alt={`图片 ${i + 1}`}
+              <img key={i} className="msg-thumb" src={src} alt={t('image.alt', { index: i + 1 })}
                 onClick={() => onOpenImage?.(src)} />
             ))}
           </div>
         ) : block.imageCount && block.imageCount > 0 ? (
-          <div className="msg-images">📷 {block.imageCount} 张图片</div>
+          <div className="msg-images">{t('block.imageCount', { count: block.imageCount })}</div>
         ) : null}
       </MsgBlock>
     )
@@ -1389,15 +1386,15 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
   }
   if (block.kind === 'checkpoint') {
     return (
-      <div className="checkpoint-chip" title="本轮写操作前的回滚锚点（可在右侧审查面板回滚）">
+      <div className="checkpoint-chip" title={t('block.checkpointTitle')}>
         <span className="cp-glyph" aria-hidden>⎌</span>
-        回滚点 · {(block.hash ?? '').slice(0, 8)}
+        {t('block.checkpointLabel')} · {(block.hash ?? '').slice(0, 8)}
       </div>
     )
   }
   if (block.kind === 'steer') {
     return (
-      <MsgBlock role="引导" roleGlyph="steer">
+      <MsgBlock role={t('block.steer')} roleGlyph="steer">
         <Markdown source={block.text} onFileClick={onFileClick} />
       </MsgBlock>
     )
@@ -1410,15 +1407,15 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
         <div className="ds-head">
           <span className="ds-glyph" aria-hidden>{l.action === 'pr_created' ? '⇱' : '⏚'}</span>
           {l.action === 'commit' && (
-            <span className="ds-domain">已提交{shortSha ? ` · ${shortSha}` : ''}</span>
+            <span className="ds-domain">{t('block.landing.committed')}{shortSha ? ` · ${shortSha}` : ''}</span>
           )}
           {l.action === 'merge_back' && (
-            <span className="ds-domain">已合回{l.branch ? ` · ${l.branch} → main` : ''}{shortSha ? ` · ${shortSha}` : ''}</span>
+            <span className="ds-domain">{t('block.landing.mergedBack')}{l.branch ? ` · ${l.branch} → main` : ''}{shortSha ? ` · ${shortSha}` : ''}</span>
           )}
           {l.action === 'pr_created' && (
-            <span className="ds-domain">PR 已创建{l.branch ? ` · ${l.branch}` : ''}</span>
+            <span className="ds-domain">{t('block.landing.prCreated')}{l.branch ? ` · ${l.branch}` : ''}</span>
           )}
-          <span className="ds-tag">变更落地</span>
+          <span className="ds-tag">{t('block.landing.tag')}</span>
         </div>
         {l.action === 'pr_created' && l.url && (
           <div className="ds-reason">
@@ -1444,8 +1441,8 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
       <div className={`decision-shift ${s.severity}`}>
         <div className="ds-head">
           <span className="ds-glyph" aria-hidden>{shiftGlyph}</span>
-          <span className="ds-domain">{s.domain ? `星域 · ${s.domain}` : '星域 · 改道'}</span>
-          <span className="ds-tag">提醒 → 改道</span>
+          <span className="ds-domain">{s.domain ? t('block.shift.domain', { domain: s.domain }) : t('block.shift.reroute')}</span>
+          <span className="ds-tag">{t('block.shift.tag')}</span>
         </div>
         <div className="ds-reason">{s.reason}</div>
         {s.methods.length > 0 && (
@@ -1463,7 +1460,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
         <div className="ds-head">
           <span className="ds-glyph" aria-hidden>✦</span>
           <span className="ds-domain">{n.title}</span>
-          <span className="ds-tag">方向提示</span>
+          <span className="ds-tag">{t('block.intentTag')}</span>
         </div>
         {n.reasons.length > 0 && (
           <ul className="ds-methods">
@@ -1485,8 +1482,8 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
         <div className="decision-shift info">
           <div className="ds-head">
             <span className="ds-glyph" aria-hidden>◦</span>
-            <span className="ds-domain">自治进度播报</span>
-            <span className="ds-tag">第 {turns} 轮 · 不暂停</span>
+            <span className="ds-domain">{t('block.autonomyProgress')}</span>
+            <span className="ds-tag">{t('block.turnNoPause', { turns })}</span>
           </div>
           {block.checkpointDigest && (
             <pre className="ds-digest">{block.checkpointDigest}</pre>
@@ -1498,17 +1495,17 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
       <div className="decision-shift info">
         <div className="ds-head">
           <span className="ds-glyph" aria-hidden>⏸</span>
-          <span className="ds-domain">自治检查点</span>
-          <span className="ds-tag">已暂停</span>
+          <span className="ds-domain">{t('block.autonomyCheckpoint')}</span>
+          <span className="ds-tag">{t('block.paused')}</span>
         </div>
         <div className="ds-reason">
-          已连续自主执行 {turns} 轮。停在这里核对方向——确认没跑偏再继续，或直接键入新指令改道。
+          {t('block.checkpointReason', { turns })}
         </div>
         {block.checkpointDigest && (
           <pre className="ds-digest">{block.checkpointDigest}</pre>
         )}
         {onContinue && (
-          <button className="btn-sm watchdog-continue" onClick={onContinue}>继续执行</button>
+          <button className="btn-sm watchdog-continue" onClick={onContinue}>{t('block.continue')}</button>
         )}
       </div>
     )
@@ -1521,27 +1518,27 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
     }
     const stopped = !w.autoContinue
     const tag = stopped
-      ? (w.stopReason === 'session-total' ? '配额耗尽'
-        : w.stopReason === 'consecutive' ? '连续上限'
-        : '已停止')
-      : '自动恢复'
+      ? (w.stopReason === 'session-total' ? t('block.watchdog.quotaExhausted')
+        : w.stopReason === 'consecutive' ? t('block.watchdog.consecutiveLimit')
+        : t('block.watchdog.stopped'))
+      : t('block.watchdog.autoRecover')
     const quota = `${w.sessionTotal}/12`
     return (
       <div className={`decision-shift ${stopped ? 'warn' : 'info'}`}>
         <div className="ds-head">
           <span className="ds-glyph" aria-hidden>{stopped ? '⏹' : '⟳'}</span>
-          <span className="ds-domain">边界停滞恢复</span>
+          <span className="ds-domain">{t('block.watchdog.title')}</span>
           <span className="ds-tag">{tag}</span>
         </div>
         <div className="ds-reason">
           {stopped
-            ? '停滞反复触发，已停止自动续跑——请检查方向或键入指令继续。'
-            : '检测到边界停滞，已自动注入 continue 恢复执行。'}
+            ? t('block.watchdog.stoppedReason')
+            : t('block.watchdog.recoveredReason')}
           {' '}
-          <span className="watchdog-quota">会话配额 {quota} · 连续 {w.consecutive}/3</span>
+          <span className="watchdog-quota">{t('block.watchdog.quota', { quota, consecutive: w.consecutive })}</span>
         </div>
         {stopped && onContinue && (
-          <button className="btn-sm watchdog-continue" onClick={onContinue}>继续执行</button>
+          <button className="btn-sm watchdog-continue" onClick={onContinue}>{t('block.continue')}</button>
         )}
       </div>
     )
@@ -1565,6 +1562,7 @@ function WatchdogPendingCard({ w, onContinue, onCancel }: {
   onContinue?: () => void
   onCancel?: () => void
 }) {
+  const { t } = useTranslation('threadView')
   const deadline = (w.receivedAt ?? Date.now()) + (w.delayMs ?? 5000)
   const [remainMs, setRemainMs] = useState(() => Math.max(0, deadline - Date.now()))
   useEffect(() => {
@@ -1584,25 +1582,25 @@ function WatchdogPendingCard({ w, onContinue, onCancel }: {
     <div className={`decision-shift ${cancelled ? 'warn' : 'info'}`}>
       <div className="ds-head">
         <span className="ds-glyph" aria-hidden>{cancelled ? '⏹' : '⟳'}</span>
-        <span className="ds-domain">边界停滞恢复</span>
-        <span className="ds-tag">{cancelled ? '已取消' : pending ? '倒计时' : '自动恢复'}</span>
+        <span className="ds-domain">{t('block.watchdog.title')}</span>
+        <span className="ds-tag">{cancelled ? t('block.watchdog.cancelled') : pending ? t('block.watchdog.countdown') : t('block.watchdog.autoRecover')}</span>
       </div>
       <div className="ds-reason">
         {cancelled
-          ? '续跑已取消——等待你的下一条指令。'
+          ? t('block.watchdog.cancelledReason')
           : pending
-            ? `检测到边界停滞，${Math.ceil(remainMs / 1000)}s 后自动续跑（可取消）。`
-            : '倒计时结束，已自动注入 continue 恢复执行。'}
+            ? t('block.watchdog.pendingReason', { seconds: Math.ceil(remainMs / 1000) })
+            : t('block.watchdog.countdownDone')}
         {' '}
-        <span className="watchdog-quota">会话配额 {quota} · 连续 {w.consecutive}/3</span>
+        <span className="watchdog-quota">{t('block.watchdog.quota', { quota, consecutive: w.consecutive })}</span>
       </div>
       {pending && (
         <div style={{ display: 'flex', gap: '8px' }}>
           {onContinue && (
-            <button className="btn-sm watchdog-continue" onClick={onContinue}>立即继续</button>
+            <button className="btn-sm watchdog-continue" onClick={onContinue}>{t('block.continueNow')}</button>
           )}
           {onCancel && (
-            <button className="btn-sm watchdog-continue" onClick={onCancel}>取消</button>
+            <button className="btn-sm watchdog-continue" onClick={onCancel}>{t('block.cancel')}</button>
           )}
         </div>
       )}
@@ -1677,11 +1675,12 @@ const STREAM_TAIL_MAX = 8000
 // full text + Markdown render the instant streaming completes (AssistantText
 // switches off this path). Bounds per-tick work to O(tail).
 function StreamingText({ source }: { source: string }) {
+  const { t } = useTranslation('threadView')
   const tail = source.length > STREAM_TAIL_MAX ? source.slice(-STREAM_TAIL_MAX) : source
   const truncated = tail.length < source.length
   return (
     <div className="md md-streaming">
-      {truncated && <div className="md-stream-more">↑ 输出较长，完成后显示全文</div>}
+      {truncated && <div className="md-stream-more">{t('stream.longOutput')}</div>}
       {tail}
     </div>
   )
@@ -1698,6 +1697,7 @@ function MsgBlock(props: {
   onEdit?: () => void
 }) {
   const { role, roleGlyph, isError, className, children, canEdit, onEdit } = props
+  const { t } = useTranslation('threadView')
   const [copied, setCopied] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -1712,7 +1712,7 @@ function MsgBlock(props: {
 
   const kind = className
     ? ` ${className}`
-    : isError ? ' error' : role === '引导' ? ' steer' : role === '你' ? ' user' : ' assistant'
+    : isError ? ' error' : roleGlyph === 'steer' ? ' steer' : roleGlyph === 'user' ? ' user' : ' assistant'
 
   return (
     <div className={`msg${kind}`}>
@@ -1728,8 +1728,8 @@ function MsgBlock(props: {
           <button
             className="msg-edit-btn"
             onClick={onEdit}
-            title="编辑并重新发送"
-            aria-label="编辑"
+            title={t('block.editTitle')}
+            aria-label={t('block.edit')}
           >
             ✎
           </button>
@@ -1737,8 +1737,8 @@ function MsgBlock(props: {
         <button
           className="msg-copy-btn"
           onClick={copy}
-          aria-label={copied ? '已复制' : '复制'}
-          title={copied ? '已复制' : '复制'}
+          aria-label={copied ? t('copied') : t('copy')}
+          title={copied ? t('copied') : t('copy')}
         >
           {copied ? '✓' : '⎘'}
         </button>
@@ -1755,6 +1755,7 @@ function MsgBlock(props: {
  * to a single muted summary line unless the user pinned it open.
  */
 function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boolean }) {
+  const { t } = useTranslation('threadView')
   const [open, setOpen] = useState(true)
   const manual = useRef(false)
   const wasStreaming = useRef(streaming)
@@ -1780,13 +1781,13 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
   }, [streaming, open, shown])
 
   const toggle = useCallback(() => { manual.current = true; setOpen((o) => !o) }, [])
-  const summary = useMemo(() => summarizeThinking(shown), [shown])
+  const summary = useMemo(() => summarizeThinking(shown, (n) => t('thinking.chars', { count: n })), [shown, t])
 
   return (
     <div className={`reasoning${open ? ' open' : ''}${streaming ? ' streaming' : ''}`}>
       <div className="reasoning-summary" onClick={toggle}>
         <span className={`reasoning-glyph${streaming ? ' streaming' : ''}`} aria-hidden>{streaming ? '⟳' : '✶'}</span>
-        <span className="reasoning-label">{streaming ? '推理中…' : '已推理'}</span>
+        <span className="reasoning-label">{streaming ? t('thinking.reasoning') : t('thinking.reasoned')}</span>
         {!open && summary && <span className="reasoning-peek">{summary}</span>}
         <span className="reasoning-caret" aria-hidden>{open ? '▾' : '▸'}</span>
       </div>
@@ -1798,12 +1799,12 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
 }
 
 /** First meaningful line + char count, for the collapsed reasoning peek. */
-function summarizeThinking(text: string): string {
+function summarizeThinking(text: string, charsLabel: (n: number) => string): string {
   const firstLine = text.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
   const clean = firstLine.replace(/^[#>*\-\s]+/, '').slice(0, 80)
   const chars = text.replace(/\s/g, '').length
-  if (!clean) return chars > 0 ? `${chars} 字` : ''
-  return `${clean}${firstLine.length > 80 ? '…' : ''} · ${chars} 字`
+  if (!clean) return chars > 0 ? charsLabel(chars) : ''
+  return `${clean}${firstLine.length > 80 ? '…' : ''} · ${charsLabel(chars)}`
 }
 
 function formatTokens(n: number): string {

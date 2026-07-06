@@ -1,3 +1,5 @@
+import i18n from '../i18n'
+
 /**
  * Open an external URL in the system default browser.
  *
@@ -40,7 +42,7 @@ export async function openRivetHome(): Promise<void> {
   }
 
   if (!rivetHome) {
-    alert('无法获取数据目录路径。请确认桌面端已正常启动。')
+    alert(i18n.t('shell:dataDir.unavailable'))
     return
   }
 
@@ -49,6 +51,6 @@ export async function openRivetHome(): Promise<void> {
     await opener.openPath(rivetHome)
   } catch {
     // Not under Tauri — fall back to showing the path.
-    alert(`数据目录位置：\n${rivetHome}\n\n请手动在文件管理器中打开此路径。`)
+    alert(i18n.t('shell:dataDir.location', { path: rivetHome }))
   }
 }

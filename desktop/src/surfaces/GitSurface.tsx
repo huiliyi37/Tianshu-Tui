@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getGitGraph } from '../runtime/client'
 import {
   Select,
@@ -13,6 +14,7 @@ const DEFAULT_PAGE_SIZE = 50
 const FETCH_COUNT = 500
 
 export function GitSurface() {
+  const { t } = useTranslation('git')
   const [lines, setLines] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -58,26 +60,26 @@ export function GitSurface() {
       <div className="git-surface">
         <header className="git-header">
           <div>
-            <h3>Git 分支图</h3>
+            <h3>{t('graph.title')}</h3>
             {lines.length > 0 && (
               <div className="git-meta">
-                共 {lines.length} 行，第 {safePage + 1} / {totalPages} 页
+                {t('graph.meta', { lines: lines.length, page: safePage + 1, totalPages })}
               </div>
             )}
           </div>
           <button className="btn" onClick={load} disabled={loading}>
-            {loading ? '刷新中…' : '刷新'}
+            {loading ? t('graph.refreshing') : t('graph.refresh')}
           </button>
         </header>
 
-        {error && <div className="meta warn">加载失败：{error}</div>}
+        {error && <div className="meta warn">{t('graph.loadFailed', { error })}</div>}
 
         {loading && lines.length === 0 && (
-          <div className="git-empty">加载中…</div>
+          <div className="git-empty">{t('graph.loading')}</div>
         )}
 
         {!loading && lines.length === 0 && !error && (
-          <div className="git-empty">暂无提交历史</div>
+          <div className="git-empty">{t('graph.empty')}</div>
         )}
 
         {lines.length > 0 && (
@@ -95,14 +97,14 @@ export function GitSurface() {
                   onClick={() => goPage(0)}
                   disabled={safePage === 0}
                 >
-                  首页
+                  {t('graph.firstPage')}
                 </button>
                 <button
                   className="btn sm ghost"
                   onClick={() => goPage(safePage - 1)}
                   disabled={safePage === 0}
                 >
-                  上一页
+                  {t('graph.prevPage')}
                 </button>
 
                 <span className="git-page-info">
@@ -114,25 +116,25 @@ export function GitSurface() {
                   onClick={() => goPage(safePage + 1)}
                   disabled={safePage >= totalPages - 1}
                 >
-                  下一页
+                  {t('graph.nextPage')}
                 </button>
                 <button
                   className="btn sm ghost"
                   onClick={() => goPage(totalPages - 1)}
                   disabled={safePage >= totalPages - 1}
                 >
-                  末页
+                  {t('graph.lastPage')}
                 </button>
               </div>
 
               <div className="git-page-size">
-                <span>每页</span>
+                <span>{t('graph.perPage')}</span>
                 <Select
                   value={String(pageSize)}
                   onValueChange={(v) => v && handlePageSizeChange(v)}
                 >
                   <SelectTrigger className="w-[72px]">
-                    <SelectValue placeholder="每页" />
+                    <SelectValue placeholder={t('graph.perPage')} />
                   </SelectTrigger>
                   <SelectContent>
                     {PAGE_SIZE_OPTIONS.map((s) => (
@@ -142,7 +144,7 @@ export function GitSurface() {
                     ))}
                   </SelectContent>
                 </Select>
-                <span>行</span>
+                <span>{t('graph.rows')}</span>
               </div>
             </div>
           </>

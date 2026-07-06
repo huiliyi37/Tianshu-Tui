@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { DelegationNode } from '../runtime/types'
 import { summarizeDelegation } from './DelegationTree'
 
@@ -14,6 +15,7 @@ interface DelegationPillProps {
 }
 
 function DelegationPillImpl({ nodes, open, onToggle }: DelegationPillProps) {
+  const { t } = useTranslation('delegation')
   const { total, done, running, attention } = summarizeDelegation(nodes)
   if (total === 0) return null
   const hasUser = Object.values(nodes).some((n) => n.origin === 'user')
@@ -23,13 +25,13 @@ function DelegationPillImpl({ nodes, open, onToggle }: DelegationPillProps) {
       className={`delegation-pill${attention > 0 ? ' attention' : ''}${open ? ' open' : ''}`}
       onClick={onToggle}
       aria-expanded={open}
-      title="子代理面板（点击开关）"
+      title={t('pill.hint')}
     >
       <span className={`dp-dot${running > 0 ? ' pulse' : ''}`} aria-hidden />
-      <span className="dp-label">子代理</span>
-      {hasUser && <span className="dp-origin">你派的</span>}
+      <span className="dp-label">{t('subAgents')}</span>
+      {hasUser && <span className="dp-origin">{t('dispatchedByYou')}</span>}
       <span className="dp-progress">{done}/{total}</span>
-      {attention > 0 && <span className="dp-attention">{attention} 需关注</span>}
+      {attention > 0 && <span className="dp-attention">{t('needAttention', { n: attention })}</span>}
       <span className="dp-chevron" aria-hidden>{open ? '▾' : '▸'}</span>
     </button>
   )

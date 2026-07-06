@@ -1,4 +1,5 @@
 import { relaunch } from '@tauri-apps/plugin-process'
+import { useTranslation } from 'react-i18next'
 import {
   Dialog,
   DialogContent,
@@ -9,6 +10,7 @@ import {
 import { StorageLocationPanel } from './StorageLocationPanel'
 
 export function FirstRunStorageDialog({ open }: { open: boolean }) {
+  const { t } = useTranslation('onboarding')
   const handleApplied = async (requiresRestart: boolean) => {
     if (requiresRestart) {
       try {
@@ -23,9 +25,9 @@ export function FirstRunStorageDialog({ open }: { open: boolean }) {
     <Dialog open={open} onOpenChange={() => { /* first-run dialog cannot be dismissed */ }}>
       <DialogContent showCloseButton={false} className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>选择数据存储位置</DialogTitle>
+          <DialogTitle>{t('firstRunStorage.title')}</DialogTitle>
           <DialogDescription>
-            首次启动需要指定天枢数据目录，之后可以在「设置 → 系统 → 存储位置」中修改。
+            {t('firstRunStorage.desc')}
           </DialogDescription>
         </DialogHeader>
         <StorageLocationPanel onApplied={handleApplied} />

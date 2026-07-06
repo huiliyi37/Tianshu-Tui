@@ -7104,6 +7104,39 @@ html[data-theme="dark"] .picker-panel-warning {
   flex: 1;
   min-height: 0;
 }
+/* Chrome rows (mini toolbar / approval card) keep natural height — only the
+   thread view stretches. */
+.popout-root > .popout-toolbar,
+.popout-root > .approval-inline {
+  flex: 0 0 auto;
+}
+.popout-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.popout-toolbar-title {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.popout-toolbar .popout-pin {
+  -webkit-app-region: no-drag;
+  padding: 2px 6px;
+}
+.popout-toolbar .popout-pin.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
 .popout-root .empty.thread-empty {
   display: flex;
   flex-direction: column;

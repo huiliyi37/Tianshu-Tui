@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useUiState } from '../state/store'
 import { useSessions } from '../state/queries'
 import { getInsights, getBalance } from '../runtime/client'
@@ -78,6 +79,7 @@ function aggregateInsights(list: InsightsResponse[]): InsightsResponse {
 }
 
 export function InsightsSurface() {
+  const { t } = useTranslation('insights')
   const { activeSessionId } = useUiState()
   const sessions = useSessions()
 
@@ -121,7 +123,7 @@ export function InsightsSurface() {
       return (
         <section className="insights-section">
           <h4>{title}</h4>
-          <div className="meta">暂无数据</div>
+          <div className="meta">{t('noData')}</div>
         </section>
       )
     }
@@ -132,34 +134,34 @@ export function InsightsSurface() {
         <div className="insights-grid">
           <div className="insight-card primary">
             <div className="insight-value">{formatCny(data.totals.cost)}</div>
-            <div className="insight-label">总成本（DeepSeek V4-Flash/Pro）</div>
+            <div className="insight-label">{t('summary.totalCost')}</div>
           </div>
           {data.mainSession && (
             <div className="insight-card">
               <div className="insight-value">{formatCny(data.mainSession.cost)}</div>
-              <div className="insight-label">主控会话成本</div>
+              <div className="insight-label">{t('summary.mainSessionCost')}</div>
             </div>
           )}
           <div className="insight-card">
             <div className="insight-value">{formatTokens(data.totals.inputTokens)}</div>
-            <div className="insight-label">输入 Tokens</div>
+            <div className="insight-label">{t('summary.inputTokens')}</div>
           </div>
           <div className="insight-card">
             <div className="insight-value">{formatTokens(data.totals.outputTokens)}</div>
-            <div className="insight-label">输出 Tokens</div>
+            <div className="insight-label">{t('summary.outputTokens')}</div>
           </div>
           <div className="insight-card">
             <div className="insight-value">{formatTokens(data.totals.totalTokens)}</div>
-            <div className="insight-label">总 Tokens</div>
+            <div className="insight-label">{t('summary.totalTokens')}</div>
           </div>
           <div className="insight-card">
             <div className="insight-value">{data.totals.workers}</div>
-            <div className="insight-label">Worker 数</div>
+            <div className="insight-label">{t('summary.workerCount')}</div>
           </div>
           {data.cacheHitRate !== null && (
             <div className="insight-card">
               <div className="insight-value">{data.cacheHitRate}%</div>
-              <div className="insight-label">缓存命中率</div>
+              <div className="insight-label">{t('summary.cacheHitRate')}</div>
             </div>
           )}
         </div>
@@ -173,15 +175,15 @@ export function InsightsSurface() {
         <header className="insights-header">
           <h3>Insights</h3>
           <button className="btn" onClick={load} disabled={loading}>
-            {loading ? '刷新中…' : '刷新'}
+            {loading ? t('refreshing') : t('refresh')}
           </button>
         </header>
 
-        {error && <div className="meta warn">加载失败：{error}</div>}
+        {error && <div className="meta warn">{t('loadFailed', { error })}</div>}
 
         {balance && (
           <section className="insights-section">
-            <h4>账户余额</h4>
+            <h4>{t('balance.title')}</h4>
             <div className="insights-grid">
               <div className={`insight-card ${balance.isAvailable ? '' : 'warn'}`}>
                 <div className="insight-value">
@@ -190,34 +192,34 @@ export function InsightsSurface() {
                     : '—'}
                 </div>
                 <div className="insight-label">
-                  {balance.isAvailable ? '可用余额（DeepSeek）' : '账户不可用 / 已欠费'}
+                  {balance.isAvailable ? t('balance.available') : t('balance.unavailable')}
                 </div>
               </div>
             </div>
           </section>
         )}
 
-        {renderSummary('全天汇总', dailyInsights)}
+        {renderSummary(t('summary.daily'), dailyInsights)}
 
-        {activeSessionId && renderSummary('当前会话', activeInsights)}
+        {activeSessionId && renderSummary(t('summary.activeSession'), activeInsights)}
 
         {activeInsights && (
           <>
             <section className="insights-section">
-              <h4>Worker 明细</h4>
+              <h4>{t('workers.title')}</h4>
               {activeInsights.workers.length === 0 ? (
-                <div className="meta">暂无 worker 数据</div>
+                <div className="meta">{t('workers.empty')}</div>
               ) : (
                 <table className="insights-table">
                   <thead>
                     <tr>
                       <th>Worker</th>
-                      <th>模型</th>
+                      <th>{t('table.model')}</th>
                       <th>Provider</th>
-                      <th>状态</th>
+                      <th>{t('table.status')}</th>
                       <th>Tokens</th>
-                      <th>成本</th>
-                      <th>耗时</th>
+                      <th>{t('table.cost')}</th>
+                      <th>{t('table.elapsed')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -238,18 +240,18 @@ export function InsightsSurface() {
             </section>
 
             <section className="insights-section">
-              <h4>模型分布</h4>
+              <h4>{t('models.title')}</h4>
               {activeInsights.modelBreakdown.length === 0 ? (
-                <div className="meta">暂无模型数据</div>
+                <div className="meta">{t('models.empty')}</div>
               ) : (
                 <table className="insights-table">
                   <thead>
                     <tr>
-                      <th>模型</th>
+                      <th>{t('table.model')}</th>
                       <th>Provider</th>
-                      <th>调用次数</th>
+                      <th>{t('table.calls')}</th>
                       <th>Tokens</th>
-                      <th>成本</th>
+                      <th>{t('table.cost')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -268,17 +270,17 @@ export function InsightsSurface() {
             </section>
 
             <section className="insights-section">
-              <h4>Provider 分布</h4>
+              <h4>{t('providers.title')}</h4>
               {activeInsights.providerBreakdown.length === 0 ? (
-                <div className="meta">暂无 provider 数据</div>
+                <div className="meta">{t('providers.empty')}</div>
               ) : (
                 <table className="insights-table">
                   <thead>
                     <tr>
                       <th>Provider</th>
-                      <th>调用次数</th>
+                      <th>{t('table.calls')}</th>
                       <th>Tokens</th>
-                      <th>成本</th>
+                      <th>{t('table.cost')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -298,7 +300,7 @@ export function InsightsSurface() {
         )}
 
         {!activeSessionId && !error && (
-          <div className="meta">请先选择一个会话以查看明细</div>
+          <div className="meta">{t('selectSessionHint')}</div>
         )}
       </div>
     </div>

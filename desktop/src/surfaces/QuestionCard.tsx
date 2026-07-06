@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { PendingQuestion } from '../runtime/types'
 
 /**
@@ -37,6 +38,7 @@ function draftToAnswer(draft: DraftAnswer, options: string[]): string | null {
 }
 
 export function QuestionCard({ question, onSubmit, disabled }: QuestionCardProps) {
+  const { t } = useTranslation('approval')
   const { questions } = question
   const [index, setIndex] = useState(0)
   const [collapsed, setCollapsed] = useState(false)
@@ -77,11 +79,11 @@ export function QuestionCard({ question, onSubmit, disabled }: QuestionCardProps
       if (answer) lines.push(questions.length > 1 ? `${q.prompt} → ${answer}` : answer)
     })
     if (lines.length === 0) {
-      onSubmit('我跳过了这些问题，请按你的最佳判断继续。')
+      onSubmit(t('question.skippedAll'))
     } else {
       onSubmit(lines.join('\n'))
     }
-  }, [questions, onSubmit])
+  }, [questions, onSubmit, t])
 
   const advance = useCallback((markSkipped: boolean) => {
     const updated = drafts.map((d, i) => (i === index && markSkipped ? { ...d, skipped: true, selected: [], otherSelected: false } : d))
@@ -97,7 +99,7 @@ export function QuestionCard({ question, onSubmit, disabled }: QuestionCardProps
   if (!current) return null
 
   return (
-    <div className="question-card" role="form" aria-label="Agent 提问">
+    <div className="question-card" role="form" aria-label={t('question.aria')}>
       <div className="question-card-header">
         <span className="question-card-title">Questions</span>
         <div className="question-card-header-right">
@@ -107,8 +109,8 @@ export function QuestionCard({ question, onSubmit, disabled }: QuestionCardProps
           <button
             className="question-card-collapse"
             onClick={() => setCollapsed((v) => !v)}
-            aria-label={collapsed ? '展开' : '折叠'}
-            title={collapsed ? '展开' : '折叠'}
+            aria-label={collapsed ? t('question.expand') : t('question.collapse')}
+            title={collapsed ? t('question.expand') : t('question.collapse')}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
@@ -124,7 +126,7 @@ export function QuestionCard({ question, onSubmit, disabled }: QuestionCardProps
           <div className="question-card-body">
             <div className="question-card-prompt">{current.prompt}</div>
             {current.allowMultiple && (
-              <div className="question-card-hint">可多选</div>
+              <div className="question-card-hint">{t('question.multiHint')}</div>
             )}
             <div className="question-card-options" role={current.allowMultiple ? 'group' : 'radiogroup'}>
               {current.options.map((opt, i) => {
@@ -159,7 +161,7 @@ export function QuestionCard({ question, onSubmit, disabled }: QuestionCardProps
                   className="question-card-other-input"
                   type="text"
                   autoFocus
-                  placeholder="输入你的回答…"
+                  placeholder={t('question.otherPlaceholder')}
                   value={draft.otherText}
                   disabled={disabled}
                   onChange={(e) => setDraft((d) => ({ ...d, otherText: e.target.value }))}

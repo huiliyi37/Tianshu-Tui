@@ -1,13 +1,28 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import i18n from '../../i18n/index.ts'
+import zhAutomations from '../../locales/zh-CN/automations.json'
 import {
   tasksForSchedule,
   latestStatusForSchedule,
   isCancellable,
   isTerminalStatus,
+  statusLabel,
   statusTone,
 } from '../automations.ts'
 import type { TaskRecord } from '../../runtime/types.ts'
+
+// statusLabel resolves via the shared i18n singleton — init it with the zh-CN
+// automations namespace so labels match the pre-i18n literals.
+if (!i18n.isInitialized) {
+  await i18n.init({
+    lng: 'zh-CN',
+    resources: { 'zh-CN': { automations: zhAutomations } },
+    interpolation: { escapeValue: false },
+  })
+} else {
+  i18n.addResourceBundle('zh-CN', 'automations', zhAutomations, true, true)
+}
 
 function rec(id: string, scheduledTaskId: string, createdAt: string, status: TaskRecord['status']): TaskRecord {
   return { id, prompt: 'p', source: 'cron', status, createdAt, scheduledTaskId }
@@ -42,6 +57,12 @@ test('isCancellable only for active runs', () => {
 test('isTerminalStatus', () => {
   assert.equal(isTerminalStatus('completed'), true)
   assert.equal(isTerminalStatus('running'), false)
+})
+
+test('statusLabel resolves through i18n (zh-CN)', () => {
+  assert.equal(statusLabel('completed'), '成功')
+  assert.equal(statusLabel('failed'), '失败')
+  assert.equal(statusLabel('pending'), '排队中')
 })
 
 test('statusTone maps to color classes', () => {

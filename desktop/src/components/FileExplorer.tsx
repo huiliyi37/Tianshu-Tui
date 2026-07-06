@@ -95,11 +95,11 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
       const { entries } = await listDir(sessionId, dirPath)
       setTree(prev => ({ ...prev, [dirPath]: entries }))
     } catch {
-      setError('读取目录失败')
+      setError(t('fileExplorer.readDirFailed'))
     } finally {
       setLoadingDir(null)
     }
-  }, [sessionId])
+  }, [sessionId, t])
 
   useEffect(() => {
     if (sessionId) {
@@ -132,12 +132,12 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
       setFileContent(content)
       setViewMode(content.language === 'markdown' ? 'preview' : 'source')
     } catch {
-      setError('读取文件失败')
+      setError(t('fileExplorer.readFileFailed'))
       setFileContent(null)
     } finally {
       setLoadingFile(false)
     }
-  }, [sessionId])
+  }, [sessionId, t])
 
   const getSiblingFiles = useCallback((path: string): string[] => {
     const parent = parentDir(path)
@@ -194,18 +194,18 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   }, [])
 
   const openSelectedFile = useCallback((path: string) => {
-    openFileInSystem(path).catch((e) => toast.error(`打开失败: ${(e as Error).message}`))
-  }, [])
+    openFileInSystem(path).catch((e) => toast.error(t('fileExplorer.openFailed', { message: (e as Error).message })))
+  }, [t])
 
   const revealSelectedFile = useCallback((path: string) => {
-    openFileInSystem(path, true).catch((e) => toast.error(`在文件管理器中显示失败: ${(e as Error).message}`))
-  }, [])
+    openFileInSystem(path, true).catch((e) => toast.error(t('fileExplorer.revealFailed', { message: (e as Error).message })))
+  }, [t])
 
   const openDirectory = useCallback((dirPath: string) => {
     // 传绝对路径——后端 resolve 依赖 cwd，sidecar cwd 不一定是项目根。
     const abs = cwd ? toAbsolute(dirPath || '.', cwd) : (dirPath || '.')
-    openFileInSystem(abs).catch((e) => toast.error(`打开文件夹失败: ${(e as Error).message}`))
-  }, [cwd])
+    openFileInSystem(abs).catch((e) => toast.error(t('fileExplorer.openFolderFailed', { message: (e as Error).message })))
+  }, [cwd, t])
 
   const copyToClipboard = useCallback((text: string) => {
     navigator.clipboard.writeText(text).then(
@@ -247,7 +247,7 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   }, [selectedFiles, lastSelectedFile, copyToClipboard, previewFileContent])
 
   if (!sessionId) {
-    return <div className="empty sm">无活动会话</div>
+    return <div className="empty sm">{t('fileExplorer.noActiveSession')}</div>
   }
 
   const viewerRel = previewFile ?? ''
@@ -275,7 +275,7 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
         </div>
         <TreeNode
           dirPath=""
-          name={sessionId ? '项目根目录' : ''}
+          name={sessionId ? t('fileExplorer.projectRoot') : ''}
           tree={tree}
           expanded={expanded}
           loadingDir={loadingDir}
@@ -297,9 +297,9 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
       <div className="fe-viewer-panel">
         {error && <div className="empty sm fe-error">{error}</div>}
         {!previewFile && !error && (
-          <div className="empty sm">选择左侧文件查看内容</div>
+          <div className="empty sm">{t('fileExplorer.selectFileHint')}</div>
         )}
-        {previewFile && loadingFile && <div className="empty sm">加载中…</div>}
+        {previewFile && loadingFile && <div className="empty sm">{t('common:loading')}</div>}
         {previewFile && !loadingFile && fileContent && (
           <>
             <div className="fe-viewer-toolbar">
@@ -313,7 +313,7 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
                       role="tab"
                       aria-selected={viewMode === 'preview'}
                     >
-                      预览
+                      {t('fileExplorer.preview')}
                     </button>
                     <button
                       className={`fe-seg-btn ${viewMode === 'source' ? 'active' : ''}`}
@@ -321,7 +321,7 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
                       role="tab"
                       aria-selected={viewMode === 'source'}
                     >
-                      源码
+                      {t('fileExplorer.source')}
                     </button>
                   </div>
                 )}

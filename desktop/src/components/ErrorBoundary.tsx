@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
+import i18n from '../i18n'
 
 interface Props {
   /** Shown in the fallback header so root vs. surface failures are distinguishable. */
@@ -43,11 +44,11 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="error-boundary" role="alert">
           <div className="error-boundary-title">
-            {this.props.label ? `${this.props.label} 出错了` : '界面出错了'}
+            {this.props.label ? i18n.t('error:boundary', { label: this.props.label }) : i18n.t('error:boundaryGeneric')}
           </div>
           <div className="error-boundary-message">{error.message || String(error)}</div>
           <button type="button" className="error-boundary-retry" onClick={this.reset}>
-            重试
+            {i18n.t('error:retry')}
           </button>
         </div>
       )

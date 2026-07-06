@@ -1,0 +1,8 @@
+{
+  "hint": "Cmd+J to toggle",
+  "fallback": "The terminal requires the desktop app (Tauri runtime unavailable).",
+  "shellExited": "shell exited · close and reopen the terminal to restart",
+  "spawnFailed": "Failed to start terminal",
+  "closeTab": "Close terminal",
+  "newTab": "New terminal"
+}

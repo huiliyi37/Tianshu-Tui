@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { pickFolder } from '../lib/dialog'
 import type { ApprovalMode } from '../runtime/types'
 import { coerceLevel, levelToMode, type AutonomyLevel, LEVEL_META, AUTONOMY_LEVELS } from '../lib/autonomy'
@@ -32,6 +33,7 @@ export function NewSessionDialog(props: {
   onClose: () => void
 }) {
   const { defaultCwd, initialPrompt, onCreate, onClose } = props
+  const { t } = useTranslation('thread')
   const [title, setTitle] = useState('')
   // roots[0] is the primary cwd; additional entries are bound repos.
   const [roots, setRoots] = useState<string[]>(() => (defaultCwd ? [defaultCwd] : []))
@@ -75,22 +77,22 @@ export function NewSessionDialog(props: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent showCloseButton={false} className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>新建线程</DialogTitle>
-          <DialogDescription>在当前项目下创建一个新的对话线程。</DialogDescription>
+          <DialogTitle>{t('titleNew')}</DialogTitle>
+          <DialogDescription>{t('newSessionDesc')}</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
-            <label className="text-xs text-muted-foreground">标题</label>
+            <label className="text-xs text-muted-foreground">{t('titleLabel')}</label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="可选"
+              placeholder={t('titleOptional')}
             />
           </div>
 
           <div className="grid gap-1.5">
-            <label className="text-xs text-muted-foreground">项目目录（首个为主 cwd）</label>
+            <label className="text-xs text-muted-foreground">{t('cwdMulti')}</label>
             <div className="flex flex-wrap items-center gap-1.5">
               {roots.map((root, i) => (
                 <span
@@ -98,14 +100,14 @@ export function NewSessionDialog(props: {
                   className="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-0.5 text-xs"
                   title={root}
                 >
-                  {i === 0 && <span className="text-[10px] font-semibold text-accent">主</span>}
+                  {i === 0 && <span className="text-[10px] font-semibold text-accent">{t('rootPrimary')}</span>}
                   <span className="max-w-[180px] truncate font-mono">{root.split(/[/\\]/).pop() || root}</span>
                   {roots.length > 1 && (
                     <button
                       type="button"
                       className="text-muted-foreground hover:text-destructive"
                       onClick={() => removeRoot(root)}
-                      aria-label={`移除 ${root}`}
+                      aria-label={t('removeRoot', { root })}
                     >
                       ×
                     </button>
@@ -113,13 +115,13 @@ export function NewSessionDialog(props: {
                 </span>
               ))}
               {roots.length === 0 && (
-                <span className="text-xs text-muted-foreground">留空 = sidecar 启动目录</span>
+                <span className="text-xs text-muted-foreground">{t('cwdPlaceholder')}</span>
               )}
               <Button variant="outline" size="sm" onClick={browse}>
-                {roots.length === 0 ? '选择…' : '+ 添加 repo'}
+                {roots.length === 0 ? t('browse') : t('addRepo')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setShowManual((v) => !v)}>
-                手输
+                {t('manualEntry')}
               </Button>
               {showManual && (
                 <Input
@@ -128,30 +130,30 @@ export function NewSessionDialog(props: {
                   onChange={(e) => setManualInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitManual() } }}
                   onBlur={commitManual}
-                  placeholder="输入绝对路径后回车"
+                  placeholder={t('manualPlaceholder')}
                   className="h-7 flex-1 font-mono text-xs"
                 />
               )}
             </div>
             {roots.length > 1 && (
               <p className="text-[11px] text-muted-foreground">
-                已绑定 {roots.length} 个仓库，主 cwd 为 {roots[0]?.split(/[/\\]/).pop()}。后端多 repo 编排即将支持，当前仅主 cwd 生效。
+                {t('multiRepoHint', { count: roots.length, primary: roots[0]?.split(/[/\\]/).pop() })}
               </p>
             )}
           </div>
 
           <div className="grid gap-1.5">
-            <label className="text-xs text-muted-foreground">首条任务</label>
+            <label className="text-xs text-muted-foreground">{t('firstTask')}</label>
             <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="可选，留空则先创建空闲线程"
+              placeholder={t('firstTaskPlaceholder')}
               className="min-h-[80px] resize-none"
             />
           </div>
 
           <div className="grid gap-1.5">
-            <label className="text-xs text-muted-foreground">自治档位</label>
+            <label className="text-xs text-muted-foreground">{t('autonomyLevel')}</label>
             <ToggleGroup
               value={[level]}
               onValueChange={(v: string[]) => { setLevel((v[0] ?? level) as AutonomyLevel) }}
@@ -176,14 +178,14 @@ export function NewSessionDialog(props: {
               onChange={(e) => setWorktree(e.target.checked)}
               className="rounded border-border"
             />
-            <span>隔离 Worktree</span>
-            <span className="text-xs text-muted-foreground">独立 Git 分支，并行工作互不冲突</span>
+            <span>{t('worktree')}</span>
+            <span className="text-xs text-muted-foreground">{t('worktreeHint')}</span>
           </label>
         </div>
 
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>取消</Button>
-          <Button onClick={submit}>创建</Button>
+          <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+          <Button onClick={submit}>{t('create')}</Button>
         </div>
       </DialogContent>
     </Dialog>

@@ -1,3 +1,4 @@
+import i18n from '../i18n'
 import type { SessionRecord, TaskRecord, TaskStatus } from '../runtime/types'
 import { basename } from './projects'
 
@@ -37,9 +38,9 @@ export function sigOf(s: Pick<SessionRecord, 'id' | 'status' | 'pendingApprovals
 }
 
 function reasonOf(s: SessionRecord): { reason: AttentionReason; detail: string } | null {
-  if (s.pendingApprovals > 0) return { reason: 'approval', detail: `${s.pendingApprovals} 待审批` }
-  if (s.status === 'failed') return { reason: 'failed', detail: s.error || '失败' }
-  if (s.status === 'completed') return { reason: 'completed', detail: '已完成' }
+  if (s.pendingApprovals > 0) return { reason: 'approval', detail: i18n.t('inbox:detail.pendingApprovals', { n: s.pendingApprovals }) }
+  if (s.status === 'failed') return { reason: 'failed', detail: s.error || i18n.t('inbox:detail.failed') }
+  if (s.status === 'completed') return { reason: 'completed', detail: i18n.t('inbox:detail.completed') }
   return null
 }
 
@@ -111,11 +112,8 @@ export interface ReviewQueue {
   unseenCount: number
 }
 
-export const REVIEW_SECTION_LABEL: Record<ReviewSectionId, string> = {
-  approval: '待审批',
-  automation: 'Automation 结果',
-  failed: '失败',
-  completed: '已完成',
+export function reviewSectionLabel(id: ReviewSectionId): string {
+  return i18n.t(`inbox:section.${id}`)
 }
 
 const REVIEW_SECTION_ORDER: ReviewSectionId[] = ['approval', 'automation', 'failed', 'completed']
@@ -132,13 +130,8 @@ function taskUpdatedAt(t: TaskRecord): number {
   return Number.isNaN(ms) ? 0 : ms
 }
 
-const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
-  pending: '排队中',
-  running: '运行中',
-  completed: '完成',
-  failed: '失败',
-  cancelled: '已取消',
-  timed_out: '超时',
+function taskStatusLabel(status: TaskStatus): string {
+  return i18n.t(`inbox:taskStatus.${status}`)
 }
 
 export function deriveReviewQueue(
@@ -154,14 +147,14 @@ export function deriveReviewQueue(
     if (!t.scheduledTaskId || !TASK_TERMINAL.has(t.status)) continue
     if (t.sessionId) automationSessionIds.add(t.sessionId)
     const summary = t.status === 'failed'
-      ? (t.error || '运行失败')
-      : (t.result?.summary || TASK_STATUS_LABEL[t.status])
+      ? (t.error || i18n.t('inbox:detail.runFailed'))
+      : (t.result?.summary || taskStatusLabel(t.status))
     items.push({
       kind: 'automation',
       section: 'automation',
       sig: taskSig(t),
       title: t.prompt.length > 60 ? `${t.prompt.slice(0, 60)}…` : t.prompt,
-      detail: `${TASK_STATUS_LABEL[t.status]} · ${summary.length > 80 ? `${summary.slice(0, 80)}…` : summary}`,
+      detail: `${taskStatusLabel(t.status)} · ${summary.length > 80 ? `${summary.slice(0, 80)}…` : summary}`,
       updatedAt: taskUpdatedAt(t),
       ...(t.sessionId !== undefined && { sessionId: t.sessionId }),
       taskId: t.id,
@@ -190,7 +183,7 @@ export function deriveReviewQueue(
   items.sort((a, b) => b.updatedAt - a.updatedAt)
 
   const sections: ReviewSection[] = REVIEW_SECTION_ORDER
-    .map((id) => ({ id, label: REVIEW_SECTION_LABEL[id], items: items.filter((it) => it.section === id) }))
+    .map((id) => ({ id, label: reviewSectionLabel(id), items: items.filter((it) => it.section === id) }))
     .filter((sec) => sec.items.length > 0)
 
   const unseenCount = items.reduce((n, it) => n + (seen.has(it.sig) ? 0 : 1), 0)

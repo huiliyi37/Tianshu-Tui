@@ -1,4 +1,5 @@
 import { memo, useState, useMemo, useEffect, Children } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ConvoBlock } from '../state/event-reducer'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 
@@ -11,6 +12,7 @@ import { ChevronRight, ChevronDown } from 'lucide-react'
 const TIMELINE_WINDOW = 30
 
 export function TimelineGroupImpl({ blocks, children, forceOpen }: { blocks: ConvoBlock[], children: React.ReactNode, forceOpen?: boolean }) {
+  const { t } = useTranslation('threadView')
   const [collapsed, setCollapsed] = useState(!forceOpen)
   const [showAll, setShowAll] = useState(false)
 
@@ -48,7 +50,7 @@ export function TimelineGroupImpl({ blocks, children, forceOpen }: { blocks: Con
         <div className="timeline-body">
           {windowed && (
             <button className="timeline-more" onClick={() => setShowAll(true)}>
-              显示更早的 {hiddenCount} 步
+              {t('timeline.showEarlier', { count: hiddenCount })}
             </button>
           )}
           {shown}

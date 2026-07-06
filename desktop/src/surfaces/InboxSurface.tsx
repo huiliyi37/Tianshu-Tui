@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { qk, useSessions, useTasks } from '../state/queries'
@@ -12,6 +13,7 @@ import type { ApprovalRequest, SessionRecord } from '../runtime/types'
 // 运行结果合并为一个可逐条 triage 的队列。单条 dismiss、跳转会话、待审批条目
 // 内联展示审批摘要并可直接批准/拒绝（不强制跳走）。
 export function InboxSurface() {
+  const { t } = useTranslation('inbox')
   const sessions = useSessions()
   const tasks = useTasks()
   const ui = useUiState()
@@ -34,11 +36,11 @@ export function InboxSurface() {
       <div className="panel-header">
         <span>Review Queue{queue.unseenCount > 0 ? ` · ${queue.unseenCount}` : ''}</span>
         {queue.items.length > 0 && (
-          <button className="btn ghost sm" onClick={clearAll}>全部清除</button>
+          <button className="btn ghost sm" onClick={clearAll}>{t('clearAll')}</button>
         )}
       </div>
 
-      {queue.items.length === 0 && <div className="empty">队列已清空 — 没有待处理的条目</div>}
+      {queue.items.length === 0 && <div className="empty">{t('emptyQueue')}</div>}
 
       {queue.sections.map((sec) => (
         <div key={sec.id} className="attn-group">
@@ -70,6 +72,7 @@ function ReviewCard(props: {
   onDismiss: () => void
 }) {
   const { item, unseen, session, onOpen, onDismiss } = props
+  const { t } = useTranslation('inbox')
   const [expanded, setExpanded] = useState(false)
   const isApproval = item.section === 'approval'
 
@@ -89,15 +92,15 @@ function ReviewCard(props: {
             <button
               className="btn ghost sm"
               onClick={() => setExpanded((v) => !v)}
-              title="内联查看并处理审批"
+              title={t('card.inlineApprovalHint')}
             >
-              {expanded ? '收起' : '审批'}
+              {expanded ? t('card.collapse') : t('card.review')}
             </button>
           )}
           {item.sessionId && (
-            <button className="btn ghost sm" onClick={onOpen} title="跳转到会话">打开</button>
+            <button className="btn ghost sm" onClick={onOpen} title={t('card.jumpToSession')}>{t('card.open')}</button>
           )}
-          <button className="rq-dismiss" onClick={onDismiss} title="清除此条" aria-label="清除此条">×</button>
+          <button className="rq-dismiss" onClick={onDismiss} title={t('card.dismiss')} aria-label={t('card.dismiss')}>×</button>
         </div>
       </div>
       {expanded && isApproval && item.sessionId && session && (
@@ -112,6 +115,7 @@ function ReviewCard(props: {
  *  them in place via answerApproval (no forced navigation). */
 function InlineApprovalTriage(props: { sessionId: string; lastSeq: number; onDone: () => void }) {
   const { sessionId, lastSeq, onDone } = props
+  const { t } = useTranslation('inbox')
   const queryClient = useQueryClient()
   const [pendings, setPendings] = useState<ApprovalRequest[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -145,7 +149,7 @@ function InlineApprovalTriage(props: { sessionId: string; lastSeq: number; onDon
     setAnswering(requestId)
     try {
       await answerApproval(sessionId, requestId, decision)
-      toast.success(decision === 'approve' ? '已批准' : '已拒绝')
+      toast.success(decision === 'approve' ? t('toast.approved') : t('toast.rejected'))
       setPendings((prev) => {
         const next = (prev ?? []).filter((p) => p.requestId !== requestId)
         if (next.length === 0) onDone()
@@ -153,16 +157,16 @@ function InlineApprovalTriage(props: { sessionId: string; lastSeq: number; onDon
       })
       void queryClient.invalidateQueries({ queryKey: qk.sessions })
     } catch (e) {
-      toast.error(`处理失败：${String((e as Error).message ?? e)}`)
+      toast.error(t('toast.failed', { message: String((e as Error).message ?? e) }))
     } finally {
       setAnswering(null)
     }
   }
 
-  if (error) return <div className="rq-triage"><div className="empty sm">读取审批详情失败：{error}</div></div>
-  if (pendings === null) return <div className="rq-triage"><div className="empty sm">加载审批详情…</div></div>
+  if (error) return <div className="rq-triage"><div className="empty sm">{t('triage.loadFailed', { error })}</div></div>
+  if (pendings === null) return <div className="rq-triage"><div className="empty sm">{t('triage.loading')}</div></div>
   if (pendings.length === 0) {
-    return <div className="rq-triage"><div className="empty sm">没有待处理的审批（可能已在会话中处理）</div></div>
+    return <div className="rq-triage"><div className="empty sm">{t('triage.noPending')}</div></div>
   }
 
   return (
@@ -183,14 +187,14 @@ function InlineApprovalTriage(props: { sessionId: string; lastSeq: number; onDon
                 disabled={answering !== null}
                 onClick={() => void answer(p.requestId, 'reject')}
               >
-                拒绝
+                {t('triage.reject')}
               </button>
               <button
                 className="btn sm"
                 disabled={answering !== null}
                 onClick={() => void answer(p.requestId, 'approve')}
               >
-                {answering === p.requestId ? '…' : '批准'}
+                {answering === p.requestId ? '…' : t('triage.approve')}
               </button>
             </div>
           </div>

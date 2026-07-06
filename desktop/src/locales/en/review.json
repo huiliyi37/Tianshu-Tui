@@ -1,0 +1,91 @@
+{
+  "tabs": {
+    "scrollLeft": "Scroll left",
+    "scrollRight": "Scroll right",
+    "inProgress": "In progress"
+  },
+  "collapse": "Collapse",
+  "collapseTitle": "Collapse review panel (Cmd+Shift+B)",
+  "canvas": {
+    "empty": "No HTML or Markdown artifacts to preview",
+    "selectArtifact": "Select artifact:",
+    "reloadTitle": "Reload",
+    "refresh": "Refresh",
+    "fullscreenTitle": "Fullscreen preview (in-app sandbox)",
+    "fullscreen": "Fullscreen",
+    "loading": "Loading...",
+    "exitFullscreenTitle": "Exit fullscreen (Esc)",
+    "exitFullscreen": "Exit Fullscreen"
+  },
+  "autonomyNote": "Autonomous mode: in-project actions are auto-approved, no per-item review needed. Checkpoints below can be rolled back at any time.",
+  "gitChangesHeading": "Git Changes · Code Review",
+  "artifactMeta": "{{lines}} lines · {{chars}} chars",
+  "checkpointHeading": "Checkpoints · Rollback",
+  "tasksHeading": "Task List",
+  "noTasks": "No tasks yet",
+  "artifactsHeading": "Artifacts · {{n}}",
+  "noArtifacts": "No artifacts yet",
+  "modal": {
+    "rendered": "Rendered",
+    "raw": "Source",
+    "feedbackLabel": "Leave feedback on the artifact (fed back as context for the next turn)",
+    "annotatedLines": "{{n}} line comments added",
+    "feedbackPlaceholder": "e.g. This change misses error handling — add try/catch and tests (line comments can be left directly on the diff)",
+    "close": "Close",
+    "sending": "Sending…",
+    "send": "Send Feedback"
+  },
+  "rollback": {
+    "loadingPreview": "Loading preview…",
+    "trigger": "Roll back to this checkpoint",
+    "none": "No checkpoint available to roll back",
+    "confirmBadge": "Confirm rollback",
+    "cancel": "Cancel",
+    "confirm": "Confirm Rollback",
+    "dialogTitle": "Confirm rollback?",
+    "dialogDescription": "This will restore the current session to the previous checkpoint. Some side effects (such as executed bash commands) may not be undoable.",
+    "done": "Rolled back ({{hash}})",
+    "notExecuted": "Rollback was not executed",
+    "skipped": "Skipped (owned by another session): {{files}}",
+    "unrevertable": "⚠️ Side effects that cannot be rolled back: {{effects}}"
+  },
+  "sources": {
+    "heading": "Files Involved · {{n}}",
+    "empty": "No file changes yet",
+    "viewTitle": "View {{path}}",
+    "collapse": "Collapse",
+    "expandRemaining": "Show {{n}} more files",
+    "loadingFile": "Loading file…",
+    "openInEditor": "Open in Editor",
+    "close": "Close"
+  },
+  "github": {
+    "cliUnavailablePrefix": "GitHub CLI is not installed or not authenticated. Run ",
+    "cliUnavailableSuffix": " and refresh.",
+    "noPrs": "No open Pull Requests",
+    "verdictComment": "Comment",
+    "verdictApprove": "Approve",
+    "verdictRequestChanges": "Request Changes",
+    "loadingDetail": "Loading PR details…",
+    "detailFailed": "Failed to load PR details",
+    "loadingDiff": "Loading diff…",
+    "diffFailed": "Failed to load diff",
+    "noTextDiff": "No text diff",
+    "pendingInline": "{{n}} inline comments pending",
+    "summaryPlaceholder": "Review summary (optional; may be empty when approving)…",
+    "submitFailed": "Submit failed: {{error}}",
+    "unknownError": "Unknown error",
+    "clearInline": "Clear inline comments",
+    "submitting": "Submitting…",
+    "submit": "Submit Review"
+  },
+  "diff": {
+    "split": "Split",
+    "unified": "Unified",
+    "toggleLayoutTitle": "Toggle unified / split view",
+    "commentLineTitle": "Comment on this line",
+    "commentPlaceholder": "Comment on {{file}}:{{line}}",
+    "cancel": "Cancel",
+    "submit": "Submit"
+  }
+}

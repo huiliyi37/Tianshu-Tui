@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -97,6 +98,7 @@ function FileMentionLink({ path, onClick, children }: { path: string; onClick?: 
 /** U4: code block wrapper with a hover copy button. */
 function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   const { children, ...rest } = props
+  const { t } = useTranslation('threadView')
   const preRef = useRef<HTMLPreElement>(null)
   const [copied, setCopied] = useState(false)
 
@@ -114,8 +116,8 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
       <button
         className="md-pre-copy"
         onClick={copy}
-        aria-label={copied ? '已复制' : '复制'}
-        title={copied ? '已复制' : '复制'}
+        aria-label={copied ? t('copied') : t('copy')}
+        title={copied ? t('copied') : t('copy')}
       >
         {copied ? '✓' : '⎘'}
       </button>

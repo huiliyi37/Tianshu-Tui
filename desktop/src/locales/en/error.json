@@ -1,5 +1,9 @@
 {
   "boundary": "{{label}} crashed",
   "boundaryGeneric": "UI crashed",
-  "retry": "Retry"
+  "retry": "Retry",
+  "buildFailed": "Build failed: {{message}}",
+  "saveFailed": "Save failed: {{message}}",
+  "sendFailed": "Send failed: {{message}}",
+  "sendFailedDesc": "Message was not sent; your input is preserved and can be retried"
 }

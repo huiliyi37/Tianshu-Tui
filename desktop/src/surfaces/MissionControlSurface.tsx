@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Plus, LayoutGrid, Radio } from 'lucide-react'
 import { useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
@@ -40,6 +41,7 @@ function livePriority(a: SessionRecord, b: SessionRecord): number {
  * live pool here.
  */
 export function MissionControlSurface() {
+  const { t } = useTranslation('mission')
   const sessions = useSessions()
   const ui = useUiState()
   const dispatch = useUiDispatch()
@@ -91,14 +93,14 @@ export function MissionControlSurface() {
           <span className="mission-top-icon" aria-hidden>
             <LayoutGrid size={18} strokeWidth={1.8} />
           </span>
-          <h1 className="mission-top-title">任务中控台</h1>
+          <h1 className="mission-top-title">{t('title')}</h1>
         </div>
         <span className="mission-top-stat">
-          <span className="mission-stat-pill">{cards.length} 会话</span>
-          <span className="mission-stat-pill running">{runningCount} 运行中</span>
+          <span className="mission-stat-pill">{t('statSessions', { n: cards.length })}</span>
+          <span className="mission-stat-pill running">{t('statRunning', { n: runningCount })}</span>
           <span className="mission-stat-pill live">
             <Radio size={12} strokeWidth={2} aria-hidden />
-            {liveCount} 实时
+            {t('statLive', { n: liveCount })}
           </span>
         </span>
         <div className="mission-top-spacer" />
@@ -108,29 +110,29 @@ export function MissionControlSurface() {
               className={`mission-filter-btn${filter === 'active' ? ' is-on' : ''}`}
               onClick={() => setFilter('active')}
             >
-              当前项目
+              {t('filterActive')}
             </button>
             <button
               className={`mission-filter-btn${filter === 'all' ? ' is-on' : ''}`}
               onClick={() => setFilter('all')}
             >
-              全部项目
+              {t('filterAll')}
             </button>
           </div>
         )}
         <button
           className="mission-top-new"
           onClick={() => dispatch({ type: 'openNew', open: true })}
-          title="新建线程"
+          title={t('newThreadHint')}
         >
           <Plus size={16} strokeWidth={1.8} aria-hidden />
-          <span>新建</span>
+          <span>{t('newThread')}</span>
         </button>
       </header>
 
       {cards.length === 0 ? (
         <div className="mission-empty-state">
-          {sessions.isLoading ? '加载中…' : '暂无会话。新建一个线程开始观察。'}
+          {sessions.isLoading ? t('loading') : t('empty')}
         </div>
       ) : (
         <div className="mission-grid">

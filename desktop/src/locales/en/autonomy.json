@@ -1,4 +1,5 @@
 {
+  "groupAria": "Autonomy level",
   "supervised": "Supervised",
   "supervisedHint": "Every risky action requires your confirmation",
   "default": "Default",

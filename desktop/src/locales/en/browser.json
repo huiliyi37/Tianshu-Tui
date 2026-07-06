@@ -1,0 +1,13 @@
+{
+  "empty": {
+    "prefix": "No browser activity yet. When Tianshu opens a page with ",
+    "suffix": ", this panel mirrors what the agent sees in real time."
+  },
+  "notNavigated": "(not navigated)",
+  "openExternal": "Open externally",
+  "openExternalTitle": "Open in system browser",
+  "screenshotFailed": "Failed to load screenshot",
+  "screenshotEmpty": "No screenshot yet (agent hasn't captured one)",
+  "extractedText": "Extracted text / latest result",
+  "timeline": "Navigation history ({{total}})"
+}

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ReactNode } from 'react'
 import type { SessionRecord } from '../runtime/types'
 import { useSessionEvents, type StreamStatus } from '../state/use-session-events'
@@ -48,6 +49,7 @@ function AgentCardChrome({
   /** Present only when a live pending approval (with a requestId) is known. */
   onApprove?: () => void
 }) {
+  const { t } = useTranslation('mission')
   const abort = useAbortSession()
   const title = session.title?.trim() || shortId(session.id)
   const glyph = session.domainGlyph || '✹'
@@ -74,7 +76,7 @@ function AgentCardChrome({
         {streamStatus && (streamStatus === 'reconnecting' || streamStatus === 'offline') && (
           <span
             className={`mission-stream-dot ${streamStatus}`}
-            title={streamStatus === 'reconnecting' ? '重连中…' : '实时流已断开'}
+            title={streamStatus === 'reconnecting' ? t('card.reconnecting') : t('card.offline')}
           />
         )}
       </div>
@@ -84,13 +86,13 @@ function AgentCardChrome({
       <div className="mission-card-foot" onClick={(e) => e.stopPropagation()}>
         <div className="mission-metrics">
           {typeof tokens === 'number' && tokens > 0 && (
-            <span className="mission-metric" title="上下文 token">{formatTokens(tokens)} tok</span>
+            <span className="mission-metric" title={t('card.contextTokensHint')}>{formatTokens(tokens)} tok</span>
           )}
           {typeof edits === 'number' && edits > 0 && (
-            <span className="mission-metric" title="已改动文件数">{edits} edits</span>
+            <span className="mission-metric" title={t('card.editsHint')}>{edits} edits</span>
           )}
           {pendingApprovals > 0 && (
-            <span className="mission-badge approval" title="待审批">{pendingApprovals} 待审批</span>
+            <span className="mission-badge approval" title={t('card.approvalHint')}>{t('card.pendingApprovals', { n: pendingApprovals })}</span>
           )}
         </div>
         <div className="mission-actions">
@@ -98,9 +100,9 @@ function AgentCardChrome({
             <button
               className="mission-btn approve"
               onClick={() => onApprove()}
-              title="批准当前请求"
+              title={t('card.approveHint')}
             >
-              批准
+              {t('card.approve')}
             </button>
           )}
           {isRunning && (
@@ -108,12 +110,12 @@ function AgentCardChrome({
               className="mission-btn abort"
               disabled={abort.isPending}
               onClick={() => abort.mutate(session.id)}
-              title="中止会话"
+              title={t('card.abortHint')}
             >
-              中止
+              {t('card.abort')}
             </button>
           )}
-          <button className="mission-btn open" onClick={() => onOpen(session)}>打开</button>
+          <button className="mission-btn open" onClick={() => onOpen(session)}>{t('card.open')}</button>
         </div>
       </div>
     </div>
@@ -128,6 +130,7 @@ function formatTokens(n: number): string {
 /** Live variant — subscribes to the session's SSE stream for tail blocks,
  *  live phase, token delta and edit count. */
 function LiveAgentCard({ session, onOpen }: { session: SessionRecord; onOpen: (s: SessionRecord) => void }) {
+  const { t } = useTranslation('mission')
   const view = useSessionEvents(session.id)
   const [answering, setAnswering] = useState(false)
   const pending = view.pendingApproval
@@ -142,7 +145,7 @@ function LiveAgentCard({ session, onOpen }: { session: SessionRecord; onOpen: (s
 
   const body = (
     <>
-      {view.phase && <div className="mission-phase" title="当前阶段">{view.phase}</div>}
+      {view.phase && <div className="mission-phase" title={t('card.phaseHint')}>{view.phase}</div>}
       <MiniStream blocks={view.blocks} rev={view.blocksRev} />
     </>
   )
@@ -163,11 +166,12 @@ function LiveAgentCard({ session, onOpen }: { session: SessionRecord; onOpen: (s
 
 /** Snapshot variant — poll-only; no SSE. Shows the last-known phase + status. */
 function SnapshotAgentCard({ session, onOpen }: { session: SessionRecord; onOpen: (s: SessionRecord) => void }) {
+  const { t } = useTranslation('mission')
   const body = (
     <>
-      {session.currentPhase && <div className="mission-phase" title="当前阶段">{session.currentPhase}</div>}
+      {session.currentPhase && <div className="mission-phase" title={t('card.phaseHint')}>{session.currentPhase}</div>}
       <div className="mission-snapshot">
-        <span className={`mission-snapshot-status status-text-${session.status}`}>{statusLabel(session.status)}</span>
+        <span className={`mission-snapshot-status status-text-${session.status}`}>{t(`card.status.${statusKey(session.status)}`)}</span>
       </div>
     </>
   )
@@ -183,12 +187,12 @@ function SnapshotAgentCard({ session, onOpen }: { session: SessionRecord; onOpen
   )
 }
 
-function statusLabel(status: SessionRecord['status']): string {
+function statusKey(status: SessionRecord['status']): string {
   switch (status) {
-    case 'running': return '运行中'
-    case 'completed': return '已完成'
-    case 'failed': return '失败'
-    case 'aborted': return '已中止'
-    default: return '空闲'
+    case 'running': return 'running'
+    case 'completed': return 'completed'
+    case 'failed': return 'failed'
+    case 'aborted': return 'aborted'
+    default: return 'idle'
   }
 }

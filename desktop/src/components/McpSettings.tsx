@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { listMcpServerTools } from '../runtime/client'
 import { openExternal } from '../lib/open-external'
 import type { McpStatusResponse, McpServerConfig, McpConnectionState, McpPreset, McpServerToolsResponse } from '../runtime/types'
@@ -72,6 +73,7 @@ function PresetCard({
   configured: boolean
   onAdd: (config: McpServerConfig) => void
 }) {
+  const { t } = useTranslation('settings')
   const needsKeys = (preset.requiredEnv?.length ?? 0) > 0
   const [expanded, setExpanded] = useState(false)
   const [env, setEnv] = useState<Record<string, string>>({})
@@ -97,10 +99,10 @@ function PresetCard({
       <div onClick={onCardClick} style={{ cursor: configured ? 'default' : 'pointer' }}>
         <div className="mcp-preset-name">
           {configured ? '✓ ' : needsKeys ? '🔑 ' : '+ '}{preset.name}
-          {configured && <span className="meta" style={{ marginLeft: 6 }}>已添加</span>}
+          {configured && <span className="meta" style={{ marginLeft: 6 }}>{t('mcp.configured')}</span>}
           {!configured && needsKeys && !expanded && (
             <button className="btn-mini" onClick={(e) => { e.stopPropagation(); setExpanded(true) }} style={{ marginLeft: 'auto' }}>
-              启用
+              {t('mcp.enable')}
             </button>
           )}
         </div>
@@ -128,15 +130,15 @@ function PresetCard({
               disabled={!allFilled}
               onClick={() => { onAdd(buildConfig()); setExpanded(false) }}
             >
-              确认启用
+              {t('mcp.confirmEnable')}
             </button>
-            <button className="btn-mini" onClick={() => setExpanded(false)}>取消</button>
+            <button className="btn-mini" onClick={() => setExpanded(false)}>{t('mcp.cancel')}</button>
             {preset.docsUrl && (
               <button
                 className="btn-mini"
                 onClick={() => openExternal(preset.docsUrl!)}
               >
-                文档
+                {t('mcp.docs')}
               </button>
             )}
           </div>
@@ -148,7 +150,7 @@ function PresetCard({
           style={{ marginTop: 4 }}
           onClick={() => openExternal(preset.docsUrl!)}
         >
-          文档
+          {t('mcp.docs')}
         </button>
       )}
     </div>
@@ -163,13 +165,8 @@ const STATUS_DOT: Record<string, string> = {
   disconnected: '○',
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  connected: '已连接',
-  connecting: '连接中',
-  degraded: '降级',
-  error: '错误',
-  disconnected: '未连接',
-}
+/** Connection states with an i18n label under settings:mcp.status.* */
+const KNOWN_STATUSES = new Set(['connected', 'connecting', 'degraded', 'error', 'disconnected'])
 
 const STATUS_CLASS: Record<string, string> = {
   connected: 'green',
@@ -180,11 +177,12 @@ const STATUS_CLASS: Record<string, string> = {
 }
 
 function StatusBadge({ state }: { state: McpConnectionState }) {
+  const { t } = useTranslation('settings')
   const cls = STATUS_CLASS[state.status] ?? 'muted'
   return (
     <span className={`mcp-status-badge ${cls}`} title={state.error ?? ''}>
       <span className="dot">{STATUS_DOT[state.status] ?? '○'}</span>
-      <span className="label">{STATUS_LABEL[state.status] ?? state.status}</span>
+      <span className="label">{KNOWN_STATUSES.has(state.status) ? t(`mcp.status.${state.status}`) : state.status}</span>
       {state.toolCount > 0 && <span className="count">{state.toolCount} tools</span>}
     </span>
   )
@@ -200,6 +198,7 @@ export function McpSettings({
   onRemove,
   onRestart,
 }: McpSettingsProps) {
+  const { t } = useTranslation('settings')
   const [showAdd, setShowAdd] = useState(false)
   const [serverId, setServerId] = useState('')
   const [transport, setTransport] = useState<'stdio' | 'sse'>('stdio')
@@ -249,16 +248,20 @@ export function McpSettings({
 
   return (
     <section className="settings-group">
-      <h4>MCP 服务器</h4>
+      <h4>{t('mcp.title')}</h4>
 
-      {statusLoading && <div className="meta">加载中…</div>}
+      {statusLoading && <div className="meta">{t('mcp.loading')}</div>}
       {statusError && <div className="meta warn">{statusError}</div>}
 
       {status && (
         <div className="mcp-summary meta">
           {status.servers.length === 0
-            ? '未配置 MCP 服务器'
-            : `${status.servers.filter(s => s.status === 'connected').length}/${status.servers.length} 已连接 · ${status.totalTools} 个工具可用`}
+            ? t('mcp.noServers')
+            : t('mcp.summary', {
+                connected: status.servers.filter(s => s.status === 'connected').length,
+                total: status.servers.length,
+                tools: status.totalTools,
+              })}
         </div>
       )}
 
@@ -282,33 +285,33 @@ export function McpSettings({
                     <button
                       className="btn-mini"
                       onClick={() => toggleTools(s.serverId)}
-                      title="查看该服务器暴露的工具"
+                      title={t('mcp.viewTools')}
                     >
-                      {toolsOpen === s.serverId ? '收起' : '工具'}
+                      {toolsOpen === s.serverId ? t('mcp.collapse') : t('mcp.tools')}
                     </button>
                   )}
                   {(s.status === 'connected' || s.status === 'degraded' || s.status === 'error') && (
                     <button
                       className="btn-mini"
                       onClick={() => onRestart(s.serverId)}
-                      title="重新连接"
+                      title={t('mcp.reconnect')}
                     >
-                      重启
+                      {t('mcp.restart')}
                     </button>
                   )}
                   <button
                     className="btn-mini danger"
                     onClick={() => onRemove(s.serverId)}
-                    title="删除服务器"
+                    title={t('mcp.deleteServer')}
                   >
-                    删除
+                    {t('mcp.delete')}
                   </button>
                 </div>
               </div>
               {toolsOpen === s.serverId && (
                 <div className="mcp-tools-list">
-                  {toolsCache[s.serverId] === 'loading' && <div className="meta">加载工具中…</div>}
-                  {toolsCache[s.serverId] === 'error' && <div className="meta warn">获取工具列表失败</div>}
+                  {toolsCache[s.serverId] === 'loading' && <div className="meta">{t('mcp.toolsLoading')}</div>}
+                  {toolsCache[s.serverId] === 'error' && <div className="meta warn">{t('mcp.toolsFailed')}</div>}
                   {Array.isArray(toolsCache[s.serverId]) && (
                     (toolsCache[s.serverId] as McpServerToolsResponse['tools']).map((tool) => (
                       <div key={tool.name} className="mcp-tool-row">
@@ -327,9 +330,9 @@ export function McpSettings({
       {!showAdd && (
         <>
           <div className="mcp-presets">
-            <div className="mcp-presets-label">推荐集成</div>
+            <div className="mcp-presets-label">{t('mcp.recommended')}</div>
             {presets == null ? (
-              <div className="meta">加载预设中…</div>
+              <div className="meta">{t('mcp.presetsLoading')}</div>
             ) : (
               <div className="mcp-presets-grid">
                 {presets.map((p) => (
@@ -343,11 +346,11 @@ export function McpSettings({
               </div>
             )}
             <div className="meta" style={{ marginTop: 6 }}>
-              新增的工具需重启会话才对已运行会话生效；密钥以明文存于 config.json（与 provider 密钥一致）。
+              {t('mcp.restartNote')}
             </div>
           </div>
           <button className="btn-mini" onClick={() => setShowAdd(true)}>
-            + 添加自定义 MCP 服务器
+            {t('mcp.addCustom')}
           </button>
         </>
       )}
@@ -355,58 +358,58 @@ export function McpSettings({
       {showAdd && (
         <div className="mcp-add-form">
           <div className="form-row">
-            <label>服务器 ID</label>
+            <label>{t('mcp.serverId')}</label>
             <input
               type="text"
               value={serverId}
               onChange={(e) => setServerId((e.target as HTMLInputElement).value)}
-              placeholder="如: filesystem"
+              placeholder={t('mcp.serverIdPlaceholder')}
             />
           </div>
           <div className="form-row">
-            <label>传输方式</label>
+            <label>{t('mcp.transport')}</label>
             <select value={transport} onChange={(e) => setTransport((e.target as HTMLSelectElement).value as 'stdio' | 'sse')}>
-              <option value="stdio">stdio (本地进程)</option>
-              <option value="sse">SSE (远程服务)</option>
+              <option value="stdio">{t('mcp.stdioOption')}</option>
+              <option value="sse">{t('mcp.sseOption')}</option>
             </select>
           </div>
           {transport === 'stdio' ? (
             <>
               <div className="form-row">
-                <label>命令</label>
+                <label>{t('mcp.command')}</label>
                 <input
                   type="text"
                   value={command}
                   onChange={(e) => setCommand((e.target as HTMLInputElement).value)}
-                  placeholder="如: npx"
+                  placeholder={t('mcp.commandPlaceholder')}
                 />
               </div>
               <div className="form-row">
-                <label>参数 (空格分隔)</label>
+                <label>{t('mcp.args')}</label>
                 <input
                   type="text"
                   value={args}
                   onChange={(e) => setArgs((e.target as HTMLInputElement).value)}
-                  placeholder="如: -y @modelcontextprotocol/server-filesystem /tmp"
+                  placeholder={t('mcp.argsPlaceholder')}
                 />
               </div>
             </>
           ) : (
             <div className="form-row">
-              <label>URL</label>
+              <label>{t('mcp.url')}</label>
               <input
                 type="text"
                 value={url}
                 onChange={(e) => setUrl((e.target as HTMLInputElement).value)}
-                placeholder="如: http://localhost:3001/sse"
+                placeholder={t('mcp.urlPlaceholder')}
               />
             </div>
           )}
           <div className="form-actions">
             <button className="btn-mini" onClick={handleAdd} disabled={adding || !serverId.trim()}>
-              {adding ? '添加中…' : '添加'}
+              {adding ? t('mcp.adding') : t('mcp.add')}
             </button>
-            <button className="btn-mini" onClick={() => setShowAdd(false)}>取消</button>
+            <button className="btn-mini" onClick={() => setShowAdd(false)}>{t('mcp.cancel')}</button>
           </div>
         </div>
       )}

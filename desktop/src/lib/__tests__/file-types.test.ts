@@ -1,6 +1,14 @@
-import { test, describe } from 'node:test'
+import { test, describe, before } from 'node:test'
 import assert from 'node:assert/strict'
+import i18n, { initI18n } from '../../i18n'
 import { isImageFile, isTextFile, isArchiveFile, isUnsupportedFile, formatUnsupportedFiles, detectImageMimeByMagic } from '../file-types'
+
+// formatUnsupportedFiles/describeUnsupportedFile resolve through i18n; pin the
+// language to zh-CN so assertions are deterministic regardless of host locale.
+before(async () => {
+  await initI18n()
+  await i18n.changeLanguage('zh-CN')
+})
 
 function file(name: string, type = ''): File {
   return new File([], name, { type })

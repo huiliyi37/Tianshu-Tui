@@ -1,6 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import i18n, { initI18n } from '../../i18n'
 import { humanizeToolInput } from '../../state/event-reducer.js'
+
+// humanizeToolInput renders stats through i18n — init with a fixed language so
+// assertions are deterministic regardless of the host locale.
+await initI18n()
+await i18n.changeLanguage('zh-CN')
 
 // ── humanizeToolInput: delegation tool rendering ───────────────
 

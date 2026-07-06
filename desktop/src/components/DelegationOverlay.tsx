@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { DelegationNode } from '../runtime/types'
 import { DelegationTree, summarizeDelegation } from './DelegationTree'
 
@@ -14,6 +15,7 @@ interface DelegationOverlayProps {
 }
 
 export function DelegationOverlay({ nodes, onClose, onAdopt }: DelegationOverlayProps) {
+  const { t } = useTranslation('delegation')
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -31,13 +33,13 @@ export function DelegationOverlay({ nodes, onClose, onAdopt }: DelegationOverlay
     <div className="modal-backdrop" onClick={onClose}>
       <div className="delegation-overlay" onClick={(e) => e.stopPropagation()}>
         <div className="delegation-overlay-header">
-          <span className="do-title">子代理面板</span>
+          <span className="do-title">{t('overlay.title')}</span>
           <span className="do-counts">
-            {done}/{total} 完成
-            {running > 0 && <span className="do-running"> · {running} 运行中</span>}
-            {attention > 0 && <span className="do-attention"> · {attention} 需关注</span>}
+            {t('overlay.progress', { done, total })}
+            {running > 0 && <span className="do-running">{t('overlay.running', { running })}</span>}
+            {attention > 0 && <span className="do-attention"> · {t('needAttention', { n: attention })}</span>}
           </span>
-          <button className="do-close" onClick={onClose} aria-label="关闭" title="关闭 (Esc)">✕</button>
+          <button className="do-close" onClick={onClose} aria-label={t('close')} title={t('overlay.closeHint')}>✕</button>
         </div>
         <div className="delegation-overlay-body">
           <DelegationTree nodes={nodes} onAdopt={onAdopt} />

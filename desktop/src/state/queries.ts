@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import i18n from '../i18n'
 import {
   abortSession,
   approvePlan,
@@ -196,7 +197,7 @@ export function useApprovePlan() {
       qc.invalidateQueries({ queryKey: qk.sessions })
     },
     // 服务端结构化拒绝（空计划 422 / 运行中 409 / 选项无效）带人类可读原因。
-    onError: (err) => toast.error(`Build 失败：${(err as Error).message}`),
+    onError: (err) => toast.error(i18n.t('error:buildFailed', { message: (err as Error).message })),
   })
 }
 
@@ -222,7 +223,7 @@ export function useUpdatePlan() {
       qc.invalidateQueries({ queryKey: qk.plans(id) })
       qc.invalidateQueries({ queryKey: qk.plan(id, slug) })
     },
-    onError: (err) => toast.error(`保存失败：${(err as Error).message}`),
+    onError: (err) => toast.error(i18n.t('error:saveFailed', { message: (err as Error).message })),
   })
 }
 
@@ -243,8 +244,8 @@ export function useSendPrompt() {
     // 这是核心操作的静默丢失——toast 至少让用户知道失败了，配合 ThreadView 的回填可重发。
     onError: (err: unknown, vars) => {
       const msg = err instanceof Error ? err.message : String(err)
-      toast.error(`发送失败：${msg}`, {
-        description: '消息未发出，输入内容已保留，可重试',
+      toast.error(i18n.t('error:sendFailed', { message: msg }), {
+        description: i18n.t('error:sendFailedDesc'),
         duration: 6000,
       })
       // 通知 ThreadView 回填输入内容（通过自定义事件，避免改 onSend 签名影响 40+ 调用点）

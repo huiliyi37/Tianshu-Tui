@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
 import { detectMention, applyMention, formatFileMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
@@ -141,6 +142,7 @@ export function Composer(props: {
   activeDomainAccent?: string
 }) {
   const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
+  const { t } = useTranslation('composer')
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -219,20 +221,20 @@ export function Composer(props: {
   const addImages = useCallback(async (files: FileList | File[]) => {
     setAttachmentError(null)
     const arr = Array.from(files).filter(f => isImageFile(f))
-    if (arr.length === 0) { setAttachmentError('不支持的格式（仅支持 PNG/JPEG/WebP/GIF/BMP 图片）'); return }
+    if (arr.length === 0) { setAttachmentError(t('imageErrorFormat')); return }
     for (const f of arr) {
-      if (f.size > MAX_IMAGE_SIZE) { setAttachmentError(`${f.name} 超过 5MB 限制`); return }
+      if (f.size > MAX_IMAGE_SIZE) { setAttachmentError(t('imageErrorSize', { name: f.name })); return }
     }
-    if (images.length + arr.length > MAX_IMAGES) { setAttachmentError(`最多 ${MAX_IMAGES} 张图片`); return }
+    if (images.length + arr.length > MAX_IMAGES) { setAttachmentError(t('imageErrorMax', { max: MAX_IMAGES })); return }
     try {
       // Compress once: the resulting data URL is sent to the model AND rendered
       // as the thumbnail AND persisted server-side — one artifact, three uses.
       const results = await Promise.all(arr.map(f => compressImage(f)))
       setImages(prev => [...prev, ...results.map(r => r.dataUrl)])
     } catch {
-      setAttachmentError('图片处理失败，请重试')
+      setAttachmentError(t('imageErrorProcess'))
     }
-  }, [images.length])
+  }, [images.length, t])
 
   const removeImage = (index: number) => {
     setImages(prev => prev.filter((_, i) => i !== index))
@@ -348,7 +350,7 @@ export function Composer(props: {
     // resolveAppPromptInput translation (same as TUI), so commands missing from
     // the local menu (e.g. /write-plan) still work. Truly unknown slashes get a
     // 400 whose toast + input restore is handled by useSendPrompt.onError.
-    onSubmit(text || '(图片)', images.length > 0 ? images : undefined)
+    onSubmit(text || t('imageOnly'), images.length > 0 ? images : undefined)
     setImages([])
   }
 
@@ -403,7 +405,7 @@ export function Composer(props: {
     }
     recognition.onerror = (event: Event) => {
       const code = (event as Event & { error?: string }).error
-      setSpeechError(code === 'not-allowed' ? '麦克风权限被拒绝' : '语音识别失败')
+      setSpeechError(code === 'not-allowed' ? t('micDenied') : t('speechFailed'))
       setRecording(false)
     }
     recognitionRef.current = recognition
@@ -546,21 +548,21 @@ export function Composer(props: {
       // references (the browser only exposes the basename, not a real path).
       // Use a plain header so this is never parsed as an @file: mention.
       if (f.size > 512 * 1024) {
-        contents.push(`📎 ${f.name}（文件过大，已跳过）`)
+        contents.push(t('fileTooLarge', { name: f.name }))
         continue
       }
       try {
         const text = await f.text()
-        contents.push(`📎 ${f.name}（内联内容）\n\`\`\`\n${text}\n\`\`\``)
+        contents.push(`${t('fileInlined', { name: f.name })}\n\`\`\`\n${text}\n\`\`\``)
       } catch {
-        contents.push(`📎 ${f.name}（读取失败）`)
+        contents.push(t('fileReadFailed', { name: f.name }))
       }
     }
     if (contents.length > 0) {
       const insert = contents.join('\n\n')
       onChange(value ? `${value}\n${insert}` : insert)
     }
-  }, [value, onChange])
+  }, [value, onChange, t])
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault()
@@ -606,7 +608,7 @@ export function Composer(props: {
                     <>
                       <span className="suggest-glyph" aria-hidden>🖥️</span>
                       <span className="suggest-path">Computer</span>
-                      <span className="suggest-desc">操作 macOS 桌面应用（截图/点击/键入）</span>
+                      <span className="suggest-desc">{t('computerMentionDesc')}</span>
                     </>
                   ) : (
                     <>
@@ -643,8 +645,8 @@ export function Composer(props: {
         <div className="composer-images">
           {images.map((src, i) => (
             <div key={i} className="composer-thumb">
-              <img src={src} alt={`图片 ${i + 1}`} />
-              <button className="thumb-remove" onClick={() => removeImage(i)} aria-label="移除图片">×</button>
+              <img src={src} alt={t('imageAlt', { index: i + 1 })} />
+              <button className="thumb-remove" onClick={() => removeImage(i)} aria-label={t('removeImage')}>×</button>
             </div>
           ))}
         </div>
@@ -664,7 +666,7 @@ export function Composer(props: {
                 type="button"
                 className="chip-remove hover:text-error hover:bg-error-soft rounded-full p-0.5 transition-colors"
                 onClick={() => removeMention(path)}
-                aria-label={`移除 ${path}`}
+                aria-label={t('removeMention', { path })}
               >
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <line x1="18" y1="6" x2="6" y2="18" />
@@ -683,10 +685,10 @@ export function Composer(props: {
           className="composer-input"
           value={text}
           placeholder={planning
-            ? '描述你的目标…'
+            ? t('placeholderPlan')
             : busy
-            ? '运行中 · Enter 插入引导'
-            : 'Ask anything…'}
+            ? t('placeholderBusy')
+            : t('placeholderIdle')}
           onChange={handleChange}
           onKeyDown={onKeyDown}
           onCompositionStart={() => { composingRef.current = true }}
@@ -717,16 +719,16 @@ export function Composer(props: {
           className="btn ghost icon-btn"
           onClick={() => fileInputRef.current?.click()}
           disabled={images.length >= MAX_IMAGES}
-          title="选择文件"
-          aria-label="选择文件"
+          title={t('selectFile')}
+          aria-label={t('selectFile')}
         >📎</button>
         {speechSupported && (
           <button
             className={`btn ghost icon-btn ${recording ? 'recording' : ''}`}
             onClick={toggleRecording}
             disabled={busy}
-            title={recording ? '停止录音' : '语音输入'}
-            aria-label={recording ? '停止录音' : '语音输入'}
+            title={recording ? t('voiceStop') : t('voiceStart')}
+            aria-label={recording ? t('voiceStop') : t('voiceStart')}
           >🎤</button>
         )}
       </div>
@@ -758,7 +760,7 @@ export function Composer(props: {
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
             onClick={togglePlan}
-            title="Shift+Tab 切换 Plan / Agent 模式"
+            title={t('planToggleTitle')}
           >
             <span className="mode-dot" aria-hidden />
             {planning ? 'Plan' : 'Agent'}
@@ -767,7 +769,7 @@ export function Composer(props: {
         <span className="composer-spacer" />
         <button
           className="send-mode-toggle"
-          title={sendMode === 'enter' ? 'Enter 发送 · Shift+Enter 换行（点击切换）' : 'Shift+Enter 发送 · Enter 换行（点击切换）'}
+          title={sendMode === 'enter' ? t('sendModeEnter') : t('sendModeShiftEnter')}
           onClick={() => {
             const next = sendMode === 'enter' ? 'shift-enter' : 'enter'
             setSendMode(next)
@@ -778,12 +780,12 @@ export function Composer(props: {
         </button>
         {busy ? (
           <>
-            <button className="btn ghost" onClick={submit} disabled={!canSend}>引导</button>
-            <button className="btn ghost danger" onClick={onAbort}>停止</button>
+            <button className="btn ghost" onClick={submit} disabled={!canSend}>{t('steer')}</button>
+            <button className="btn ghost danger" onClick={onAbort}>{t('stop')}</button>
           </>
         ) : (
           <button className="btn" onClick={submit} disabled={!canSend}>
-            {planning ? '生成方案' : '发送'}
+            {planning ? t('generate') : t('send')}
           </button>
         )}
       </div>
@@ -802,6 +804,7 @@ function formatTok(n: number): string {
  *  cache hit rate (our DeepSeek prefix-cache visibility, Claude doesn't have
  *  this). Hidden when the model window is unknown and nothing was used yet. */
 function ContextRing({ usage }: { usage: ContextUsage }) {
+  const { t } = useTranslation('composer')
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -835,9 +838,9 @@ function ContextRing({ usage }: { usage: ContextUsage }) {
         className="ctx-ring-trigger"
         onClick={() => setOpen((o) => !o)}
         title={pct !== null
-          ? `上下文 ${formatTok(usedTokens)} / ${formatTok(contextWindow!)} (${pct}%)${warn ? ' · 建议 /compact' : ''}`
-          : `上下文 ${formatTok(usedTokens)} tokens`}
-        aria-label="上下文用量"
+          ? `${t('ctx.title', { used: formatTok(usedTokens), window: formatTok(contextWindow!), pct })}${warn ? t('ctx.compactSuffix') : ''}`
+          : t('ctx.titleTokens', { used: formatTok(usedTokens) })}
+        aria-label={t('ctx.aria')}
         aria-expanded={open}
       >
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
@@ -856,30 +859,30 @@ function ContextRing({ usage }: { usage: ContextUsage }) {
         <span className="ctx-ring-label">{pct !== null ? `${pct}%` : formatTok(usedTokens)}</span>
       </button>
       {open && (
-        <div className="ctx-ring-popover" role="dialog" aria-label="上下文明细">
+        <div className="ctx-ring-popover" role="dialog" aria-label={t('ctx.detailAria')}>
           <div className="ctx-ring-row">
-            <span>上下文</span>
+            <span>{t('ctx.rowContext')}</span>
             <span>{formatTok(usedTokens)}{contextWindow ? ` / ${formatTok(contextWindow)}` : ''} tok</span>
           </div>
           {deltaTokens > 0 && (
             <div className="ctx-ring-row">
-              <span>本轮增量</span>
+              <span>{t('ctx.rowDelta')}</span>
               <span>+{formatTok(deltaTokens)}</span>
             </div>
           )}
           {hitRate !== null && (
             <>
               <div className="ctx-ring-row">
-                <span>缓存命中率</span>
+                <span>{t('ctx.rowHitRate')}</span>
                 <span>⚡{hitRate}%</span>
               </div>
               <div className="ctx-ring-row sub">
-                <span>缓存读 / 创建</span>
+                <span>{t('ctx.rowReadCreate')}</span>
                 <span>{formatTok(cacheReadTokens)} / {formatTok(cacheCreationTokens)}</span>
               </div>
             </>
           )}
-          {warn && <div className="ctx-ring-hint">上下文超过 80%——发送 /compact 可压缩会话</div>}
+          {warn && <div className="ctx-ring-hint">{t('ctx.hint')}</div>}
         </div>
       )}
     </div>
@@ -888,6 +891,7 @@ function ContextRing({ usage }: { usage: ContextUsage }) {
 
 /** Inline model selector in the composer bar (Codex-style). */
 function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disabled?: boolean; menuRev?: number }) {
+  const { t } = useTranslation('composer')
   const [open, setOpen] = useState(false)
   const [models, setModels] = useState<ModelEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -901,11 +905,11 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
       const ms = await listModels(sessionId)
       setModels(ms)
     } catch (err) {
-      if (withSpinner) toast.error(`加载模型失败: ${(err as Error).message}`)
+      if (withSpinner) toast.error(t('modelLoadError', { message: (err as Error).message }))
     } finally {
       if (withSpinner) setLoading(false)
     }
-  }, [sessionId])
+  }, [sessionId, t])
 
   // Keep the (closed) trigger label live: refetch on mount, on session change,
   // and whenever a model_switched / domain / skills SSE bumps menuRev. Without
@@ -938,7 +942,7 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
       setModels((prev) => prev.map((x) => ({ ...x, current: x.id === m.id })))
       setOpen(false)
     } catch (err) {
-      toast.error(`切换模型失败: ${(err as Error).message}`)
+      toast.error(t('modelSwitchError', { message: (err as Error).message }))
     } finally {
       setSwitchingId(null)
     }
@@ -950,19 +954,19 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
         className="model-picker-trigger model-active"
         onClick={() => setOpen((o) => !o)}
         disabled={disabled || !!switchingId}
-        title={disabled ? '运行中不可切换模型' : '切换模型'}
-        aria-label="切换模型"
+        title={disabled ? t('modelDisabled') : t('switchModel')}
+        aria-label={t('switchModel')}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
         <span aria-hidden>◇</span>
-        <span className="model-picker-label">{switchingId ? '切换中…' : label}</span>
+        <span className="model-picker-label">{switchingId ? t('switching') : label}</span>
       </button>
       {open && (
         <div className="model-picker-menu" role="listbox">
           {loading && (
             <div className="model-picker-item" role="status" aria-busy>
-              <span className="model-picker-name">加载中…</span>
+              <span className="model-picker-name">{t('loading')}</span>
             </div>
           )}
           {!loading && models.map((m) => (
@@ -976,7 +980,7 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
             >
               <span className="model-picker-name">{m.alias || m.id}</span>
               {switchingId === m.id ? (
-                <span className="model-picker-desc">切换中…</span>
+                <span className="model-picker-desc">{t('switching')}</span>
               ) : m.contextWindow ? (
                 <span className="model-picker-desc">{Math.round(m.contextWindow / 1000)}K</span>
               ) : null}
@@ -989,10 +993,8 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
 }
 
 /** Inline star-domain (星域) selector in the composer bar, beside the model picker. */
-const DOMAIN_SWITCH_CACHE_WARNING =
-  '会话中途切换星域会使前缀缓存整体失效，下一次请求需全量重建上下文（成本约 10 倍+）。建议新开会话或在会话开始时选择。'
-
 function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessionId: string; disabled?: boolean; menuRev?: number; threadNonEmpty?: boolean }) {
+  const { t } = useTranslation('composer')
   const [open, setOpen] = useState(false)
   const [entries, setEntries] = useState<DomainEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -1006,11 +1008,11 @@ function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessio
       const es = await listDomains(sessionId)
       setEntries(es)
     } catch (err) {
-      if (withSpinner) toast.error(`加载星域失败: ${(err as Error).message}`)
+      if (withSpinner) toast.error(t('domainLoadError', { message: (err as Error).message }))
     } finally {
       if (withSpinner) setLoading(false)
     }
-  }, [sessionId])
+  }, [sessionId, t])
 
   // Mirror ModelPicker: keep the closed trigger live via menuRev (domain_changed
   // SSE bumps it), fetch on mount, and a spinnered fetch when the menu opens.
@@ -1028,12 +1030,12 @@ function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessio
 
   const current = entries.find((e) => e.current)
   const glyph = current?.uiPersona?.glyph || '✦'
-  const label = current?.name || '星域'
+  const label = current?.name || t('domain')
 
   const select = async (e: DomainEntry) => {
     if (disabled || e.current) return
     // Mid-session switch invalidates the prefix cache (~10x rebuild). Confirm first.
-    if (threadNonEmpty && !window.confirm(`⚠ ${DOMAIN_SWITCH_CACHE_WARNING}\n\n确定切换到「${e.name}」？`)) {
+    if (threadNonEmpty && !window.confirm(`⚠ ${t('domainCacheWarning')}\n\n${t('domainSwitchConfirm', { name: e.name })}`)) {
       return
     }
     setApplyingKey(e.key)
@@ -1042,7 +1044,7 @@ function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessio
       setEntries((prev) => prev.map((x) => ({ ...x, current: x.key === e.key })))
       setOpen(false)
     } catch (err) {
-      toast.error(`切换星域失败: ${(err as Error).message}`)
+      toast.error(t('domainSwitchError', { message: (err as Error).message }))
     } finally {
       setApplyingKey(null)
     }
@@ -1054,24 +1056,24 @@ function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessio
         className={`model-picker-trigger accent-${current?.uiPersona?.accent || 'primary'}`}
         onClick={() => setOpen((o) => !o)}
         disabled={disabled || !!applyingKey}
-        title={disabled ? '运行中不可切换星域' : '切换星域'}
-        aria-label="切换星域"
+        title={disabled ? t('domainDisabled') : t('switchDomain')}
+        aria-label={t('switchDomain')}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
         <span aria-hidden>{glyph}</span>
-        <span className="model-picker-label">{applyingKey ? '切换中…' : label}</span>
+        <span className="model-picker-label">{applyingKey ? t('switching') : label}</span>
       </button>
       {open && (
         <div className="model-picker-menu" role="listbox">
           {threadNonEmpty && (
             <div className="model-picker-hint" role="note">
-              ⚠ {DOMAIN_SWITCH_CACHE_WARNING}
+              ⚠ {t('domainCacheWarning')}
             </div>
           )}
           {loading && (
             <div className="model-picker-item" role="status" aria-busy>
-              <span className="model-picker-name">加载中…</span>
+              <span className="model-picker-name">{t('loading')}</span>
             </div>
           )}
           {!loading && entries.map((e) => (
@@ -1087,7 +1089,7 @@ function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessio
                 {e.uiPersona?.glyph ? `${e.uiPersona.glyph} ` : ''}{e.name}
               </span>
               {applyingKey === e.key ? (
-                <span className="model-picker-desc">切换中…</span>
+                <span className="model-picker-desc">{t('switching')}</span>
               ) : (e.meta || e.motto) ? (
                 <span className="model-picker-desc">{e.meta || e.motto}</span>
               ) : null}

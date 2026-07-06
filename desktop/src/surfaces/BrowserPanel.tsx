@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getArtifact } from '../runtime/client'
 import { openExternal } from '../lib/open-external'
 import { useSessionEvents } from '../state/use-session-events'
@@ -9,6 +10,7 @@ import { deriveBrowserState, EMPTY_BROWSER_STATE } from '../lib/browser-mirror'
 // extracted text. Pure read-only mirror; it replays session history on mount so
 // it is populated even when opened after the agent already browsed.
 export function BrowserPanel({ sessionId }: { sessionId: string | null }) {
+  const { t } = useTranslation('browser')
   const events = useSessionEvents(sessionId)
   const state = useMemo(
     () => (sessionId ? deriveBrowserState(events.blocks) : EMPTY_BROWSER_STATE),
@@ -45,7 +47,7 @@ export function BrowserPanel({ sessionId }: { sessionId: string | null }) {
     return (
       <div className="review-body flex items-center justify-center h-full">
         <div className="empty sm text-center max-w-xs">
-          尚未有浏览器活动。当天枢用 <code className="bd-line bd-muted">browser_debug</code> 打开网页时，这里会实时镜像它看到的页面。
+          {t('empty.prefix')}<code className="bd-line bd-muted">browser_debug</code>{t('empty.suffix')}
         </div>
       </div>
     )
@@ -57,7 +59,7 @@ export function BrowserPanel({ sessionId }: { sessionId: string | null }) {
         <span aria-hidden className="text-xs">🌐</span>
         <input
           className="flex-1 min-w-0 bg-transparent text-xs text-text truncate outline-none"
-          value={state.currentUrl ?? '（未导航）'}
+          value={state.currentUrl ?? t('notNavigated')}
           readOnly
           title={state.currentUrl ?? undefined}
         />
@@ -66,9 +68,9 @@ export function BrowserPanel({ sessionId }: { sessionId: string | null }) {
             type="button"
             className="text-[10px] text-muted hover:text-text px-1.5 py-0.5 border border-border rounded shrink-0"
             onClick={() => { if (state.currentUrl) openExternal(state.currentUrl) }}
-            title="在系统浏览器中打开"
+            title={t('openExternalTitle')}
           >
-            外部打开
+            {t('openExternal')}
           </button>
         )}
       </div>
@@ -85,21 +87,21 @@ export function BrowserPanel({ sessionId }: { sessionId: string | null }) {
           />
         ) : (
           <div className="empty sm p-4">
-            {shotFailed ? '截图加载失败' : '暂无截图（agent 尚未截屏）'}
+            {shotFailed ? t('screenshotFailed') : t('screenshotEmpty')}
           </div>
         )}
       </div>
 
       {state.latestText && (
         <details className="browser-text bg-panel-2 border border-border rounded text-xs">
-          <summary className="cursor-pointer px-2 py-1 text-muted select-none">提取的文本 / 最近结果</summary>
+          <summary className="cursor-pointer px-2 py-1 text-muted select-none">{t('extractedText')}</summary>
           <pre className="px-2 py-1 whitespace-pre-wrap break-words max-h-40 overflow-auto text-text">{state.latestText}</pre>
         </details>
       )}
 
       {state.timeline.length > 0 && (
         <div className="browser-timeline bg-panel-2 border border-border rounded text-xs max-h-32 overflow-auto">
-          <div className="px-2 py-1 text-muted border-b border-border">导航历史（{state.timeline.length}）</div>
+          <div className="px-2 py-1 text-muted border-b border-border">{t('timeline', { total: state.timeline.length })}</div>
           <ul>
             {state.timeline.slice().reverse().map((nav) => (
               <li key={nav.key} className="px-2 py-1 flex items-center gap-2 border-b border-border/40 last:border-0">

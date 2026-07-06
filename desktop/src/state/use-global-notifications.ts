@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import i18n from '../i18n'
 import { useSessions } from './queries'
 import { useSessionEvents } from './use-session-events'
 import { initNotificationRouting, notifyRouted, shouldNotify } from '../lib/notify'
@@ -62,9 +63,9 @@ export function useGlobalNotifications(): void {
       const meta = sessions.data?.find((s) => s.id === activeSessionId)
       const label = meta?.title ?? activeSessionId.slice(0, 8)
       if (now === 'completed') {
-        void notifyRouted('任务完成', `${label} 已完成，点击查看结果`, activeSessionId, pref)
+        void notifyRouted(i18n.t('shell:notify.taskCompleted'), i18n.t('shell:notify.completedBody', { label }), activeSessionId, pref)
       } else {
-        void notifyRouted('任务失败', `${label} 失败：${meta?.error || '未知错误'}`, activeSessionId, pref)
+        void notifyRouted(i18n.t('shell:notify.taskFailed'), i18n.t('shell:notify.failedBody', { label, error: meta?.error || i18n.t('shell:notify.unknownError') }), activeSessionId, pref)
       }
     }
   }, [live.status, activeSessionId, sessions.data])
@@ -96,7 +97,7 @@ export function useGlobalNotifications(): void {
         s.pendingApprovals > 0 &&
         (!was || was.pendingApprovals === 0)
       ) {
-        void notifyRouted('需要批准', `${label} 有 ${s.pendingApprovals} 项待你审批`, s.id, pref)
+        void notifyRouted(i18n.t('shell:notify.needsApproval'), i18n.t('shell:notify.approvalBody', { label, count: s.pendingApprovals }), s.id, pref)
       }
       if (was && was.status !== s.status) {
         const key = `${s.id}:${s.status}`
@@ -104,9 +105,9 @@ export function useGlobalNotifications(): void {
         if (notified.current.has(key)) continue
         notified.current.add(key)
         if (s.status === 'completed') {
-          void notifyRouted('任务完成', `${label} 已完成，点击查看结果`, s.id, pref)
+          void notifyRouted(i18n.t('shell:notify.taskCompleted'), i18n.t('shell:notify.completedBody', { label }), s.id, pref)
         } else if (s.status === 'failed') {
-          void notifyRouted('任务失败', `${label} 失败：${s.error || '未知错误'}`, s.id, pref)
+          void notifyRouted(i18n.t('shell:notify.taskFailed'), i18n.t('shell:notify.failedBody', { label, error: s.error || i18n.t('shell:notify.unknownError') }), s.id, pref)
         }
       }
     }

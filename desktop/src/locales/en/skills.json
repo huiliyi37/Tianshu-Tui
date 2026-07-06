@@ -1,0 +1,61 @@
+{
+  "title": "Skills",
+  "enabledCount": "{{enabled}}/{{total}} enabled",
+  "searchPlaceholder": "Search skills…",
+  "loading": "Loading…",
+  "selectSessionHint": "Select a thread first to view skill configuration",
+  "source": {
+    "builtin": "Built-in",
+    "globalClaude": "Claude · Global",
+    "project": "Project"
+  },
+  "path": {
+    "builtin": "Built-in registry (bundled with Tianshu)"
+  },
+  "loadErrors": {
+    "title": "Failed to load ({{n}})",
+    "hint": "These skills exist in .rivet/skills/ but could not be parsed (usually missing/malformed frontmatter). Fix them and reopen a thread to take effect:"
+  },
+  "install": {
+    "notice": "Copied to .rivet/skills/. A new thread is required to take effect — hot-loading skills mid-session shatters the prefix cache and can cost dozens of times more.",
+    "newThreadToEnable": "New Thread to Enable",
+    "newThread": "New Thread",
+    "installed": "Installed",
+    "installing": "Installing…",
+    "confirm": "Confirm install?",
+    "install": "Install"
+  },
+  "pending": {
+    "title": "Pending (reopen thread)",
+    "desc": "Installed — available after opening a new thread"
+  },
+  "empty": {
+    "noMatch": "No matching skills",
+    "noSkills": "No skills available",
+    "hint": "Put skills into .rivet/skills/ or enable importFromClaude in config"
+  },
+  "groups": {
+    "project": "Project Skills",
+    "builtin": "Built-in Skills",
+    "discover": "Discover"
+  },
+  "cap": {
+    "status": "{{n}} installed · recommended ≤ {{max}}",
+    "overLimit": " — limit reached; avoid installing more unless necessary (click twice to confirm)"
+  },
+  "restraint": "Installing skills blindly is not recommended. Tianshu natively integrates the development workflow, covering about 90% of real-world tasks — use native capabilities first and install only when truly needed. This entire project uses no more than 5 installed skills, and 70% of its own code was built that way; skipping skills does not hinder real task completion.",
+  "scanning": "Scanning .claude/skills…",
+  "card": {
+    "noDescription": "(no description)",
+    "enableAria": "Enable {{name}}",
+    "disableAria": "Disable {{name}}"
+  },
+  "detail": {
+    "location": "Location",
+    "effect": "Effect",
+    "loadedEffect": "Toggling takes effect immediately in the current session",
+    "installableEffect": "Takes effect only in a new thread after install (protects the prefix cache; no mid-session hot loading)",
+    "enable": "Enable",
+    "disable": "Disable"
+  }
+}

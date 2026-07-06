@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { AUTONOMY_LEVELS, LEVEL_META, type AutonomyLevel } from '../lib/autonomy'
 
 /**
@@ -12,9 +13,11 @@ export function AutonomyControl(props: {
   disabled?: boolean
 }) {
   const { value, onChange, compact, disabled } = props
+  // Subscribes this component to language changes so LEVEL_META getters re-read.
+  const { t } = useTranslation('autonomy')
   return (
     <div className={`autonomy ${compact ? 'compact' : ''}`}>
-      <div className="autonomy-seg" role="radiogroup" aria-label="自治档位">
+      <div className="autonomy-seg" role="radiogroup" aria-label={t('groupAria')}>
         {AUTONOMY_LEVELS.map((lvl) => {
           const meta = LEVEL_META[lvl]
           const active = lvl === value

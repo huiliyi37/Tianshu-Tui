@@ -10,6 +10,7 @@ import type {
 } from '../runtime/types'
 import type { EvidenceSummary } from '../../../src/agent/evidence.js'
 import { normalizePath } from '../lib/projects'
+import i18n from '../i18n'
 
 const FILE_TOOLS = new Set([
   'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'read_file', 'create_file',
@@ -434,7 +435,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         next.blocks = next.blocks.map((b) => {
           if (!marked && b.kind === 'watchdog_recovery' && b.watchdog?.pendingAutoContinue && !b.watchdog.cancelled) {
             marked = true
-            return { ...b, text: '续跑已取消', watchdog: { ...b.watchdog, cancelled: true } }
+            return { ...b, text: i18n.t('thread:reducer.watchdogCancelled'), watchdog: { ...b.watchdog, cancelled: true } }
           }
           return b
         })
@@ -449,8 +450,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         key: `wr-${ev.seq}`,
         kind: 'watchdog_recovery',
         text: autoContinue
-          ? (pendingAutoContinue ? '边界停滞 — 即将自动续跑' : '自动恢复中（边界停滞）')
-          : '停滞停止',
+          ? (pendingAutoContinue ? i18n.t('thread:reducer.watchdogPending') : i18n.t('thread:reducer.watchdogAutoRecovering'))
+          : i18n.t('thread:reducer.watchdogStopped'),
         watchdog: {
           reason: String(ev.data.reason ?? ''),
           autoContinue,
@@ -480,7 +481,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.blocks = [...next.blocks, {
         key: `acp-${ev.seq}`,
         kind: 'autonomy_checkpoint',
-        text: paused ? '自治检查点' : '自治进度播报',
+        text: paused ? i18n.t('thread:reducer.autonomyCheckpoint') : i18n.t('thread:reducer.autonomyProgress'),
         checkpointTurns: Number(ev.data.turns ?? 0),
         checkpointDigest: typeof ev.data.digest === 'string' ? ev.data.digest : undefined,
         checkpointPaused: paused,
@@ -554,7 +555,9 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         next.blocks = [...next.blocks, {
           key: `ar-${ev.seq}`,
           kind: 'phase',
-          text: `⚠️ 重启中断了待审批的工具调用${tool ? `：${tool}` : ''}（未执行，需要时可重新发起）`,
+          text: tool
+            ? i18n.t('thread:reducer.approvalInterruptedTool', { tool })
+            : i18n.t('thread:reducer.approvalInterrupted'),
         }]
         next.blocksRev = next.blocksRev + 1
       }
@@ -568,7 +571,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         kind: 'intent_note',
         text: String(ev.data.summary ?? ''),
         note: {
-          title: String(ev.data.title ?? '方向提示'),
+          title: String(ev.data.title ?? i18n.t('thread:reducer.intentNoteTitle')),
           reasons,
           action: String(ev.data.action ?? ''),
           steerHint: String(ev.data.steerHint ?? ''),
@@ -726,16 +729,16 @@ export function humanizeToolInput(toolName: string, input: Record<string, unknow
     case 'create_file': {
       const content = String(input.content ?? '')
       const lines = content.split('\n').length
-      return `${path}\n${lines} 行 · ${content.length} 字符`
+      return `${path}\n${i18n.t('thread:reducer.writeStat', { lines, chars: content.length })}`
     }
     case 'edit_file':
     case 'hash_edit': {
       const old = String(input.old_string ?? input.old ?? '')
       const nw = String(input.new_string ?? input.new ?? '')
-      return `${path}\n-${old.split('\n').length} 行 → +${nw.split('\n').length} 行`
+      return `${path}\n${i18n.t('thread:reducer.editStat', { oldLines: old.split('\n').length, newLines: nw.split('\n').length })}`
     }
     case 'apply_patch':
-      return `${path}\n${String(input.patch ?? input.diff ?? '').split('\n').length} 行 diff`
+      return `${path}\n${i18n.t('thread:reducer.patchStat', { lines: String(input.patch ?? input.diff ?? '').split('\n').length })}`
     case 'bash':
     case 'shell': {
       const cmd = String(input.command ?? input.cmd ?? '')
@@ -746,7 +749,7 @@ export function humanizeToolInput(toolName: string, input: Record<string, unknow
       return path || safeJson(input)
     case 'delegate_batch': {
       const tasks = Array.isArray(input.tasks) ? input.tasks : []
-      if (tasks.length === 0) return '等待任务列表…'
+      if (tasks.length === 0) return i18n.t('thread:reducer.delegateWaiting')
       const cap = Math.min(tasks.length, 8)
       const lines: string[] = []
       for (let i = 0; i < cap; i++) {
@@ -762,8 +765,8 @@ export function humanizeToolInput(toolName: string, input: Record<string, unknow
       const objective = typeof input.objective === 'string' ? input.objective.trim() : ''
       const agent = typeof input.agent === 'string' ? input.agent : ''
       if (objective) return objective
-      if (agent) return `派发 ${agent}`
-      return '派发中…'
+      if (agent) return i18n.t('thread:reducer.delegateAgent', { agent })
+      return i18n.t('thread:reducer.delegating')
     }
     case 'browser_debug': {
       const act = String(input.action ?? '')

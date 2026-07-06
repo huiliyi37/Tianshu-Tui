@@ -1,7 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import i18n, { initI18n } from '../../i18n'
 import { eventReducer, initialEventState, type EventViewState } from '../event-reducer.ts'
 import type { SessionEvent, SessionEventType } from '../../runtime/types.ts'
+
+// The reducer renders user-visible block text through i18n — init with a fixed
+// language so assertions are deterministic regardless of the host locale.
+await initI18n()
+await i18n.changeLanguage('zh-CN')
 
 let seq = 0
 function ev(type: SessionEventType, data: Record<string, unknown> = {}): SessionEvent {

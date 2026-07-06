@@ -6,7 +6,8 @@ import {
   Network, Scale, Plug, Settings, Sun, Moon, Laptop, Sparkles, Flower2, Zap, Apple,
   type LucideIcon,
 } from 'lucide-react'
-import { useCloseSession, useDeleteSession, useRenameSession, useSessions, useUnarchiveSession } from '../state/queries'
+import { useCloseSession, useDeleteSession, useRenameSession, useSessions, useTasks, useUnarchiveSession } from '../state/queries'
+import { deriveReviewQueue } from '../lib/attention'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
 import { addKnownProject, deriveProjects, loadKnownProjects, projectId, removeKnownProject, renameKnownProject } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
@@ -109,12 +110,13 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
     setThemePref(next)
   }
 
-  // Inbox badge — sessions blocked on approval or failed.
+  // Inbox badge — same source of truth as the Review Queue (sessions +
+  // automation runs, minus items the user already dismissed/saw). Clearing
+  // the queue turns the badge off.
+  const tasks = useTasks()
   const attentionCount = useMemo(
-    () => (sessions.data ?? []).filter(
-      (s) => !s.archived && (s.pendingApprovals > 0 || s.status === 'failed'),
-    ).length,
-    [sessions.data],
+    () => deriveReviewQueue(sessions.data ?? [], tasks.data ?? [], new Set(ui.attentionSeen)).unseenCount,
+    [sessions.data, tasks.data, ui.attentionSeen],
   )
 
   const loadArchived = async () => {
@@ -184,7 +186,7 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const openFolder = async () => {
     let cwd = await pickFolder()
     if (!cwd) {
-      cwd = typeof window !== 'undefined' ? window.prompt('项目文件夹绝对路径') : null
+      cwd = typeof window !== 'undefined' ? window.prompt(t('sidebar.projectFolderPrompt')) : null
     }
     if (!cwd) return
     setKnown(addKnownProject(cwd))
@@ -333,19 +335,19 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
               size={13}
               style={{ cursor: 'pointer', color: statusFilter !== 'all' ? 'var(--accent)' : undefined, opacity: 1 }}
               onClick={() => setFilterRowOpen((v) => !v)}
-              aria-label={t('sidebar.filterByStatus', { defaultValue: '按状态筛选' })}
+              aria-label={t('sidebar.filterByStatus')}
             />
             <FolderOpen size={13} style={{ cursor: 'pointer' }} onClick={openFolder} />
           </div>
         </div>
 
         {filterRowOpen && (
-          <div className="sidebar-status-filter" role="radiogroup" aria-label="会话状态筛选">
+          <div className="sidebar-status-filter" role="radiogroup" aria-label={t('sidebar.statusFilterLabel')}>
             {([
-              ['all', '全部'],
-              ['running', '运行中'],
-              ['attention', '待处理'],
-              ['idle', '空闲'],
+              ['all', t('sidebar.statusAll')],
+              ['running', t('sidebar.statusRunning')],
+              ['attention', t('sidebar.statusAttention')],
+              ['idle', t('sidebar.statusIdle')],
             ] as const).map(([key, label]) => (
               <button
                 key={key}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createSession, sendPrompt, abortSession } from '../runtime/client'
 import { useSessionEvents } from '../state/use-session-events'
 import { useSessions } from '../state/queries'
@@ -38,6 +39,7 @@ export function SideChat(props: {
   mainBlocks: ConvoBlock[]
 }) {
   const { open, onClose, mainTitle, cwd, mainBlocks } = props
+  const { t } = useTranslation('delegation')
   const [sideId, setSideId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [creating, setCreating] = useState(false)
@@ -69,7 +71,7 @@ export function SideChat(props: {
         setCreating(true)
         const rec = await createSession({
           cwd,
-          title: `旁路 · ${mainTitle.slice(0, 24)}`,
+          title: t('sideChat.sessionTitle', { title: mainTitle.slice(0, 24) }),
         })
         setSideId(rec.id)
         await sendPrompt(rec.id, `${buildSideChatContext(mainBlocks)}${text}`)
@@ -77,28 +79,28 @@ export function SideChat(props: {
         await sendPrompt(sideId, text)
       }
     } catch (err) {
-      toast.error(`旁路提问失败: ${(err as Error).message}`)
+      toast.error(t('sideChat.failed', { message: (err as Error).message }))
       setInput(text)
     } finally {
       setCreating(false)
     }
-  }, [input, busy, sideId, cwd, mainTitle, mainBlocks])
+  }, [input, busy, sideId, cwd, mainTitle, mainBlocks, t])
 
   if (!open) return null
 
   return (
-    <div className="sidechat-drawer" role="complementary" aria-label="旁路提问">
+    <div className="sidechat-drawer" role="complementary" aria-label={t('sideChat.title')}>
       <div className="sidechat-head">
-        <span className="sidechat-title">旁路提问</span>
-        <button className="icon-btn" onClick={onClose} aria-label="关闭旁路提问">✕</button>
+        <span className="sidechat-title">{t('sideChat.title')}</span>
+        <button className="icon-btn" onClick={onClose} aria-label={t('sideChat.close')}>✕</button>
       </div>
       <div className="sidechat-note" role="note">
-        此对话不影响主任务——独立轻会话，携带主会话最近对话摘录作为上下文。
+        {t('sideChat.note')}
       </div>
       <div className="sidechat-messages" ref={scrollRef}>
         {messages.length === 0 && !creating && (
           <div className="sidechat-empty">
-            问点什么…比如「这个报错是什么意思」「刚才那段 diff 有风险吗」
+            {t('sideChat.empty')}
           </div>
         )}
         {messages.map((b) => (
@@ -106,12 +108,12 @@ export function SideChat(props: {
             {b.kind === 'assistant' ? <Markdown source={b.text} /> : <span>{b.text}</span>}
           </div>
         ))}
-        {(creating || busy) && <div className="sidechat-typing">思考中…</div>}
+        {(creating || busy) && <div className="sidechat-typing">{t('sideChat.thinking')}</div>}
       </div>
       <div className="sidechat-input-row">
         <textarea
           value={input}
-          placeholder="旁路问题（Enter 发送）"
+          placeholder={t('sideChat.inputPlaceholder')}
           rows={2}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
@@ -122,9 +124,9 @@ export function SideChat(props: {
           }}
         />
         {busy && sideId ? (
-          <button className="btn ghost danger sm" onClick={() => void abortSession(sideId)}>停止</button>
+          <button className="btn ghost danger sm" onClick={() => void abortSession(sideId)}>{t('sideChat.stop')}</button>
         ) : (
-          <button className="btn sm" disabled={!input.trim() || creating} onClick={() => void send()}>发送</button>
+          <button className="btn sm" disabled={!input.trim() || creating} onClick={() => void send()}>{t('sideChat.send')}</button>
         )}
       </div>
     </div>
