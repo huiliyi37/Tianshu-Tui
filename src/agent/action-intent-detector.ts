@@ -11,7 +11,7 @@
  * 来源：phantom-continuation.ts ACTION_PROMISE_PATTERN + 新增中文变体。
  */
 const ACTION_PROMISE_PATTERN =
-  /(让我|接下来|现在(?:就)?|下一步|稍后|我来|我去|我先|这就|马上|i'?ll\b|i will\b|let me\b|let's\b|going to\b|next[,，]?\s*i|now i)/i
+  /(让我|接下来|现在(?:就)?|下一步|稍后|我来(?!自|了|不|过)|我去|我先|这就|马上|i'?ll\b|i will\b|let me\b|let's\b|going to\b|next[,，]?\s*i|now i)/i
 
 /**
  * 工具动词——模型描述打算使用的工具或操作。

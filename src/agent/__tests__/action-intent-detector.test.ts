@@ -63,6 +63,13 @@ describe('hasActionIntent', () => {
   it('已完成任务的总结（不含行动承诺标记）', () => {
     assert.ok(!hasActionIntent('我已经完成了修改，以下是涉及的文件'))
   })
+  it('"我来自"不触发（出处陈述，非行动宣言）', () => {
+    // 回归：10ecffa5 的误报——"我来自天枢星域" + "运行在 opencode-tui"
+    assert.ok(!hasActionIntent('我来自天枢星域，是运行在 opencode-tui 终端编程代理中的 AI 助手'))
+  })
+  it('"我来了"不触发（到达陈述，非行动宣言）', () => {
+    assert.ok(!hasActionIntent('我来了，正在运行测试环境'))
+  })
 
   // ── Edge cases ──
   it('仅"看"不触发（已从动词列表移除，误报太高）', () => {
