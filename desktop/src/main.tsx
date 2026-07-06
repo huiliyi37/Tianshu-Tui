@@ -2,6 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App } from './App'
+import { PopoutThreadRoot } from './surfaces/PopoutThreadRoot'
+import { popoutSessionId } from './lib/popout'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AppStateProvider } from './state/store'
 import { initTheme } from './lib/theme'
@@ -31,13 +33,18 @@ const queryClient = new QueryClient({
   },
 })
 
+// Pop-out branch: `?popout={sessionId}` windows render a slim thread-only
+// root instead of the full workspace shell (Wave 3 — Codex-style floating
+// thread). Same providers so state/query/theme behave identically.
+const popoutId = popoutSessionId()
+
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <ErrorBoundary label="应用">
+    <ErrorBoundary label={popoutId ? '线程窗口' : '应用'}>
       <QueryClientProvider client={queryClient}>
         <AppStateProvider>
           <TooltipProvider>
-            <App />
+            {popoutId ? <PopoutThreadRoot sessionId={popoutId} /> : <App />}
           </TooltipProvider>
         </AppStateProvider>
       </QueryClientProvider>

@@ -7,6 +7,8 @@ import sakura from '../styles/themes/sakura.json'
 import cyberpunk from '../styles/themes/cyberpunk.json'
 import cupertino from '../styles/themes/cupertino.json'
 import lightClassic from '../styles/themes/light-classic.json'
+import codexDark from '../styles/themes/codex-dark.json'
+import codexLight from '../styles/themes/codex-light.json'
 
 const THEMES: Record<ResolvedTheme, ThemeJson> = {
   dark: dark as ThemeJson,
@@ -16,6 +18,8 @@ const THEMES: Record<ResolvedTheme, ThemeJson> = {
   cyberpunk: cyberpunk as ThemeJson,
   cupertino: cupertino as ThemeJson,
   'light-classic': lightClassic as ThemeJson,
+  'codex-dark': codexDark as ThemeJson,
+  'codex-light': codexLight as ThemeJson,
 }
 
 export function loadThemeJson(resolved: ResolvedTheme): ThemeJson {

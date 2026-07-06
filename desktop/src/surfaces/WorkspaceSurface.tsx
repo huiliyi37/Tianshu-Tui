@@ -1,10 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { SurfaceSkeleton } from '../components/Skeleton'
-import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
+import { qk, useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode, useWorkingTree } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
 import { useJobNotifications } from '../state/use-job-notifications'
-import { answerApproval, setApprovalMode, steerSession } from '../runtime/client'
+import { answerApproval, commitSessionChanges, createSessionPr, mergeSessionBack, setApprovalMode, steerSession } from '../runtime/client'
 import type { ApprovalMode, PlanModeState, ApprovalRequest } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
@@ -20,6 +22,8 @@ import { isApprovalConsent } from '../lib/consent'
 import { DiffView } from '../components/DiffView'
 import { deriveProjects, loadKnownProjects } from '../lib/projects'
 import { openExternal } from '../lib/open-external'
+import { openThreadPopout } from '../lib/popout'
+import { isTauri } from '../lib/pty'
 
 const HomeSurface = lazy(() => import('./HomeSurface').then((m) => ({ default: m.HomeSurface })))
 const SkillsSurface = lazy(() => import('./SkillsSurface').then((m) => ({ default: m.SkillsSurface })))
@@ -803,7 +807,9 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
 
 function WorkspaceHeader() {
   const ui = useUiState()
+  const dispatch = useUiDispatch()
   const sessions = useSessions()
+  const abortSession = useAbortSession()
   const activeSession = sessions.data?.find((s) => s.id === ui.activeSessionId) ?? null
 
   const known = useMemo(() => loadKnownProjects(), [])
@@ -832,6 +838,29 @@ function WorkspaceHeader() {
     return SURFACE_NAMES[ui.surface] || ui.surface
   }, [ui.surface, activeSession])
 
+  // Codex-style toolbar state — Git quick menu + overflow, both close on
+  // outside click via a shared container ref.
+  const onThread = ui.surface === 'workspace' && activeSession !== null
+  const running = activeSession?.status === 'running'
+  const tree = useWorkingTree(onThread ? activeSession.id : null)
+  const hasChanges = Boolean(tree.data?.isRepo) && (tree.data?.files.length ?? 0) > 0
+  const isWorktree = Boolean(activeSession?.worktreeBranch)
+  const [gitOpen, setGitOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const actionsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!gitOpen && !moreOpen) return
+    const onClickOutside = (e: MouseEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setGitOpen(false)
+        setMoreOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [gitOpen, moreOpen])
+
   return (
     <header className="workspace-header" data-tauri-drag-region>
       <div className="workspace-header-path">
@@ -839,21 +868,192 @@ function WorkspaceHeader() {
         <span className="path-sep">/</span>
         <span className="page-name">{pageName}</span>
       </div>
-      <div className="workspace-header-actions">
+      <div className="workspace-header-actions" ref={actionsRef}>
+        {onThread && running && (
+          <button
+            className="header-action-btn header-stop-btn"
+            title="停止当前运行"
+            onClick={() => abortSession.mutate(activeSession.id)}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+            <span>停止</span>
+          </button>
+        )}
+        {onThread && hasChanges && (
+          <div className="header-menu-anchor">
+            <button
+              className={`header-action-btn ${gitOpen ? 'active' : ''}`}
+              title="Git 快捷操作"
+              onClick={() => { setGitOpen((v) => !v); setMoreOpen(false) }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="6" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M6 9v6" />
+                <circle cx="18" cy="12" r="3" />
+                <path d="M15 12a9 9 0 0 0-9-3" />
+              </svg>
+              <span>Git · {tree.data?.files.length ?? 0}</span>
+            </button>
+            {gitOpen && (
+              <HeaderGitMenu
+                sessionId={activeSession.id}
+                busy={Boolean(running)}
+                isWorktree={isWorktree}
+                onClose={() => setGitOpen(false)}
+              />
+            )}
+          </div>
+        )}
         <button
-          className="header-action-btn"
-          onClick={() => {
-            openExternal('https://github.com/huiliyi37/Tianshu-Tui')
-          }}
+          className={`header-action-btn ${ui.terminalVisible ? 'active' : ''}`}
+          title="切换终端 (Cmd+J)"
+          onClick={() => dispatch({ type: 'setTerminal', visible: !ui.terminalVisible })}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#3b82f6' }}>
-            <polygon points="12 2 2 7 12 12 22 7 12 2" />
-            <polyline points="2 17 12 22 22 17" />
-            <polyline points="2 12 12 17 22 12" />
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
           </svg>
-          <span>Install IDE</span>
         </button>
+        {onThread && isTauri() && (
+          <button
+            className="header-action-btn"
+            title="弹出为独立小窗"
+            onClick={() => { void openThreadPopout(activeSession.id) }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </button>
+        )}
+        <div className="header-menu-anchor">
+          <button
+            className={`header-action-btn ${moreOpen ? 'active' : ''}`}
+            title="更多"
+            aria-label="更多"
+            onClick={() => { setMoreOpen((v) => !v); setGitOpen(false) }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <circle cx="5" cy="12" r="2" />
+              <circle cx="12" cy="12" r="2" />
+              <circle cx="19" cy="12" r="2" />
+            </svg>
+          </button>
+          {moreOpen && (
+            <div className="header-menu">
+              <button
+                className="header-menu-item"
+                onClick={() => {
+                  setMoreOpen(false)
+                  openExternal('https://github.com/huiliyi37/Tianshu-Tui')
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                  <polyline points="2 17 12 22 22 17" />
+                  <polyline points="2 12 12 17 22 12" />
+                </svg>
+                <span>Install IDE</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
+  )
+}
+
+/** Git quick menu — dropdown reusing the ChangesTab landing mutations
+ *  (commit / merge back / create PR) without leaving the thread. */
+function HeaderGitMenu(props: { sessionId: string; busy: boolean; isWorktree: boolean; onClose: () => void }) {
+  const { sessionId, busy, isWorktree, onClose } = props
+  const queryClient = useQueryClient()
+  const [commitMsg, setCommitMsg] = useState('')
+  const [pending, setPending] = useState<null | 'commit' | 'merge' | 'pr'>(null)
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: qk.workingTree(sessionId) })
+  }
+
+  const runCommit = async () => {
+    setPending('commit')
+    try {
+      const r = await commitSessionChanges(sessionId, commitMsg.trim() || undefined)
+      if (r.ok && r.nothingToCommit) toast.info('没有可提交的变更')
+      else if (r.ok) toast.success(`已提交 ${r.sha?.slice(0, 8) ?? ''}`)
+      else toast.error(`提交失败：${r.error ?? ''}`)
+      if (r.ok) { refresh(); onClose() }
+    } catch (e) {
+      toast.error(`提交失败：${String(e)}`)
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const runMerge = async () => {
+    setPending('merge')
+    try {
+      const r = await mergeSessionBack(sessionId)
+      if (r.ok && r.nothingToMerge) toast.info('没有可合并的提交')
+      else if (r.ok) toast.success(`已合并回主分支 ${r.sha?.slice(0, 8) ?? ''}`)
+      else if (r.conflictFiles?.length) toast.error(`合并冲突：${r.conflictFiles.join(', ')}`)
+      else toast.error(`合并失败：${r.error ?? ''}`)
+      if (r.ok) { refresh(); onClose() }
+    } catch (e) {
+      toast.error(`合并失败：${String(e)}`)
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const runPr = async () => {
+    setPending('pr')
+    try {
+      const r = await createSessionPr(sessionId)
+      if (r.ok) {
+        toast.success('已创建 PR', { action: r.url ? { label: '打开', onClick: () => openExternal(r.url!) } : undefined })
+        onClose()
+      } else toast.error(`创建 PR 失败：${r.error ?? ''}`)
+    } catch (e) {
+      toast.error(`创建 PR 失败：${String(e)}`)
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const disabled = busy || pending !== null
+
+  return (
+    <div className="header-menu header-git-menu">
+      {busy && <div className="header-menu-hint">智能体运行中，直接 git 操作已禁用</div>}
+      <div className="header-git-commit">
+        <input
+          type="text"
+          value={commitMsg}
+          placeholder="提交信息（留空自动生成）"
+          disabled={disabled}
+          onChange={(e) => setCommitMsg(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !disabled) void runCommit() }}
+          autoFocus
+        />
+        <button className="btn sm" disabled={disabled} onClick={runCommit}>
+          {pending === 'commit' ? '…' : '提交'}
+        </button>
+      </div>
+      {isWorktree && (
+        <div className="header-git-actions">
+          <button className="btn sm ghost" disabled={disabled} onClick={runMerge}>
+            {pending === 'merge' ? '…' : '合并回主分支'}
+          </button>
+          <button className="btn sm ghost" disabled={disabled} onClick={runPr}>
+            {pending === 'pr' ? '…' : '创建 PR'}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }

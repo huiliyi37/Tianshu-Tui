@@ -33,6 +33,8 @@ import dark from '../../styles/themes/dark.json'
 import light from '../../styles/themes/light.json'
 import nebula from '../../styles/themes/nebula.json'
 import lightClassic from '../../styles/themes/light-classic.json'
+import codexDark from '../../styles/themes/codex-dark.json'
+import codexLight from '../../styles/themes/codex-light.json'
 
 // ── JSON format validation ──────────────────────────────────────────
 
@@ -54,6 +56,8 @@ test('dark.json is valid ThemeJson', () => assertThemeJsonShape(dark, 'dark'))
 test('light.json is valid ThemeJson', () => assertThemeJsonShape(light, 'light'))
 test('nebula.json is valid ThemeJson', () => assertThemeJsonShape(nebula, 'nebula'))
 test('light-classic.json is valid ThemeJson', () => assertThemeJsonShape(lightClassic, 'light-classic'))
+test('codex-dark.json is valid ThemeJson', () => assertThemeJsonShape(codexDark, 'codex-dark'))
+test('codex-light.json is valid ThemeJson', () => assertThemeJsonShape(codexLight, 'codex-light'))
 
 test('light-classic.json glass block has text contrast overrides', () => {
   assert.equal((lightClassic.glass as any)['--link'], '#5c35cc', 'light-classic glass --link override')
@@ -85,6 +89,15 @@ test('loadThemeJson returns correct theme for nebula', () => {
   const json = loadThemeJson('nebula')
   assert.equal(json.name, '星云')
   assert.equal(json.variables['--bg'], '#05050a')
+})
+
+test('loadThemeJson returns codex themes', () => {
+  const cd = loadThemeJson('codex-dark')
+  assert.equal(cd.colorScheme, 'dark')
+  assert.equal(cd.variables['--bg'], '#1f1f1f')
+  const cl = loadThemeJson('codex-light')
+  assert.equal(cl.colorScheme, 'light')
+  assert.equal(cl.variables['--bg'], '#ffffff')
 })
 
 // ── applyThemeJson ──────────────────────────────────────────────────

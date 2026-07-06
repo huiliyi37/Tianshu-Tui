@@ -2,6 +2,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useUiState, useUiDispatch } from '../state/store'
 import { listSkillsDetailed, setSkillEnabled, listInstallableSkills, installSkills } from '../runtime/client'
 import type { SkillStatus, InstallableSkill } from '../runtime/types'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 /** source → 中文标签 + 样式类 */
 function sourceBadge(source: string): { label: string; cls: string } {
@@ -13,13 +20,33 @@ function sourceBadge(source: string): { label: string; cls: string } {
   }
 }
 
+/** Deterministic tile hue class from the skill name (store-card icon). */
+function tileClass(name: string): string {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return `tile-${h % 6}`
+}
+
+/** Human-readable install location for the detail dialog (API carries no path). */
+function skillPathHint(source: string, name: string): string {
+  switch (source) {
+    case 'builtin': return '内置注册表（随天枢发布）'
+    case 'project-claude': return `.claude/skills/${name}/SKILL.md`
+    case 'global-claude': return `~/.claude/skills/${name}/SKILL.md`
+    default: return `.rivet/skills/${name}/SKILL.md`
+  }
+}
+
+/** Detail-dialog target: a loaded skill or a discoverable (installable) one. */
+type SkillDetail =
+  | { kind: 'loaded'; skill: SkillStatus }
+  | { kind: 'installable'; skill: InstallableSkill }
+
 /**
- * Skills browser surface — lists every loaded skill with its per-session
- * enablement status, search/filter, and toggle. Mirrors Codex's sidebar skills
- * panel. Requires an active session to scope the skill list.
- *
- * 布局优化：按来源分组（内置/项目）+ source chip 内联 + enabled 卡片色条 +
- * 信息密度提升（source 不再独占一行），让用户一眼看清有哪些技能可用。
+ * Skills store surface（Wave 5 — 对标 Codex「精致 App Store」）：
+ * 网格卡片（图标/名称/描述/来源 badge/启停开关）+ 内置与项目分组保留 +
+ * 可安装技能提为「发现」区一键安装 + 点击卡片开详情 Dialog。
+ * 纯呈现层改造：API（listSkillsDetailed/setSkillEnabled/installSkills）不动。
  */
 export function SkillsSurface() {
   const ui = useUiState()
@@ -30,6 +57,7 @@ export function SkillsSurface() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [detail, setDetail] = useState<SkillDetail | null>(null)
   // Skills installed this session but not yet loaded (registry is intentionally
   // not hot-loaded to protect the prefix cache). Shown as pending "重开线程生效".
   const [pendingInstalled, setPendingInstalled] = useState<string[]>([])
@@ -55,8 +83,7 @@ export function SkillsSurface() {
     })
   }, [sessionId])
 
-  // ── Install (copy from .claude/skills into .rivet/skills) ──
-  const [showInstall, setShowInstall] = useState(false)
+  // ── 发现区（Install — copy from .claude/skills into .rivet/skills）──
   const [installable, setInstallable] = useState<InstallableSkill[]>([])
   const [installedCount, setInstalledCount] = useState(0)
   const [recommendedMax, setRecommendedMax] = useState(5)
@@ -68,7 +95,7 @@ export function SkillsSurface() {
 
   const overCap = installedCount >= recommendedMax
 
-  const fetchInstallable = useCallback(() => {
+  useEffect(() => {
     if (!sessionId) return
     setInstallLoading(true)
     listInstallableSkills(sessionId)
@@ -77,17 +104,9 @@ export function SkillsSurface() {
         setInstalledCount(res.installedCount)
         setRecommendedMax(res.recommendedMax)
       })
-      .catch((err) => setError((err as Error).message))
+      .catch(() => { /* 发现区为增强项 — 扫描失败不阻塞主列表 */ })
       .finally(() => setInstallLoading(false))
   }, [sessionId])
-
-  const toggleInstallPanel = useCallback(() => {
-    setShowInstall((prev) => {
-      const next = !prev
-      if (next) fetchInstallable()
-      return next
-    })
-  }, [fetchInstallable])
 
   const doInstall = useCallback((name: string) => {
     if (!sessionId) return
@@ -135,21 +154,16 @@ export function SkillsSurface() {
 
   const enabledCount = skills.filter((s) => s.enabled).length
 
-  // 按来源分组：内置技能 vs 项目技能，提升视觉层次。
-  // 搜索时合并为一组（按相关度），避免分组干扰查找。
-  const { builtinSkills, projectSkills, filtered } = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const match = (s: SkillStatus) =>
-      !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
-    if (q) {
-      return { builtinSkills: [], projectSkills: [], filtered: skills.filter(match) }
-    }
-    return {
-      builtinSkills: skills.filter(s => s.source === 'builtin'),
-      projectSkills: skills.filter(s => s.source !== 'builtin'),
-      filtered: [] as SkillStatus[],
-    }
-  }, [skills, query])
+  // 按来源分组：内置技能 vs 项目技能。搜索时统一过滤（含发现区）。
+  const q = query.trim().toLowerCase()
+  const matchLoaded = useCallback((s: SkillStatus) =>
+    !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q), [q])
+  const matchInstallable = useCallback((s: InstallableSkill) =>
+    !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q), [q])
+
+  const builtinSkills = useMemo(() => skills.filter((s) => s.source === 'builtin' && matchLoaded(s)), [skills, matchLoaded])
+  const projectSkills = useMemo(() => skills.filter((s) => s.source !== 'builtin' && matchLoaded(s)), [skills, matchLoaded])
+  const discoverSkills = useMemo(() => installable.filter(matchInstallable), [installable, matchInstallable])
 
   if (!sessionId) {
     return (
@@ -166,31 +180,75 @@ export function SkillsSurface() {
   const renderCard = (s: SkillStatus) => {
     const badge = sourceBadge(s.source)
     return (
-      <div key={s.name} className={`skill-card${s.enabled ? ' enabled' : ''}`}>
-        <div className="skill-info">
-          <div className="skill-title-row">
-            <span className="skill-name">{s.name}</span>
-            <span className={`skill-src-chip ${badge.cls}`}>{badge.label}</span>
+      <div
+        key={s.name}
+        className={`skill-store-card${s.enabled ? ' enabled' : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => setDetail({ kind: 'loaded', skill: s })}
+        onKeyDown={(e) => { if (e.key === 'Enter') setDetail({ kind: 'loaded', skill: s }) }}
+      >
+        <div className="skill-store-head">
+          <div className={`skill-tile ${tileClass(s.name)}`} aria-hidden>
+            {s.name.slice(0, 1).toUpperCase()}
           </div>
-          <div className="skill-desc">{s.description || '（无描述）'}</div>
+          <button
+            className={`skill-toggle ${s.enabled ? 'on' : ''}`}
+            role="switch"
+            aria-checked={s.enabled}
+            aria-label={s.enabled ? `禁用 ${s.name}` : `启用 ${s.name}`}
+            onClick={(e) => { e.stopPropagation(); toggle(s.name, !s.enabled) }}
+          >
+            <span className="skill-toggle-knob" />
+          </button>
         </div>
-        <button
-          className={`skill-toggle ${s.enabled ? 'on' : ''}`}
-          role="switch"
-          aria-checked={s.enabled}
-          aria-label={s.enabled ? `禁用 ${s.name}` : `启用 ${s.name}`}
-          onClick={() => toggle(s.name, !s.enabled)}
-        >
-          <span className="skill-toggle-knob" />
-        </button>
+        <div className="skill-store-name">{s.name}</div>
+        <div className="skill-store-desc">{s.description || '（无描述）'}</div>
+        <div className="skill-store-foot">
+          <span className={`skill-src-chip ${badge.cls}`}>{badge.label}</span>
+        </div>
       </div>
     )
   }
 
-  const hasResults = builtinSkills.length > 0 || projectSkills.length > 0 || filtered.length > 0
+  const renderDiscoverCard = (s: InstallableSkill) => {
+    const badge = sourceBadge(s.source)
+    const busy = installing.has(s.name)
+    const confirming = confirmName === s.name
+    return (
+      <div
+        key={`inst-${s.name}`}
+        className="skill-store-card discover"
+        role="button"
+        tabIndex={0}
+        onClick={() => setDetail({ kind: 'installable', skill: s })}
+        onKeyDown={(e) => { if (e.key === 'Enter') setDetail({ kind: 'installable', skill: s }) }}
+      >
+        <div className="skill-store-head">
+          <div className={`skill-tile ${tileClass(s.name)}`} aria-hidden>
+            {s.name.slice(0, 1).toUpperCase()}
+          </div>
+          <button
+            className={`skills-install-action${confirming ? ' confirm' : ''}`}
+            disabled={s.installed || busy}
+            onClick={(e) => { e.stopPropagation(); install(s.name) }}
+          >
+            {s.installed ? '已安装' : busy ? '安装中…' : confirming ? '确认安装?' : '安装'}
+          </button>
+        </div>
+        <div className="skill-store-name">{s.name}</div>
+        <div className="skill-store-desc">{s.description || '（无描述）'}</div>
+        <div className="skill-store-foot">
+          <span className={`skill-src-chip ${badge.cls}`}>{badge.label}</span>
+        </div>
+      </div>
+    )
+  }
+
+  const hasResults = builtinSkills.length > 0 || projectSkills.length > 0 || discoverSkills.length > 0
 
   return (
-    <div className="single-pane skills">
+    <div className="single-pane skills skills-store">
       <div className="panel-header">
         <span>技能</span>
         <span className="meta">{enabledCount}/{skills.length} 已启用</span>
@@ -204,67 +262,7 @@ export function SkillsSurface() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <button
-          className={`skills-install-btn${showInstall ? ' on' : ''}`}
-          onClick={toggleInstallPanel}
-          aria-pressed={showInstall}
-        >
-          {showInstall ? '收起' : '安装技能'}
-        </button>
       </div>
-
-      {showInstall && (
-        <div className="skills-install-panel">
-          <div className="skills-group-label">从 .claude/skills 安装</div>
-
-          <div className="skills-restraint">
-            默认不建议盲目安装技能。天枢已原生集成开发工作流，覆盖约 90% 真实任务场景——先用原生能力，确有需要再按需安装。整个项目安装的技能不超过 5 个，本体 70% 的代码即由此完成；不装技能不影响真实任务的完成。
-          </div>
-
-          <div className={`skills-cap-line${overCap ? ' over' : ''}`}>
-            已安装 {installedCount} 个 · 建议 ≤ {recommendedMax}
-            {overCap && '，已达上限，非必要不再安装（点两次确认）'}
-          </div>
-
-          {installNotice && (
-            <div className="meta warn skills-install-notice">
-              <span>{installNotice}</span>
-              <button className="skills-newthread-btn" onClick={openNewThread}>新建线程以启用</button>
-            </div>
-          )}
-          {installLoading && (
-            <div className="skills-empty-hero"><div className="skills-empty-glyph spin" aria-hidden>◌</div><p>扫描中…</p></div>
-          )}
-          {!installLoading && installable.length === 0 && (
-            <div className="meta">.claude/skills 下没有可安装的技能。</div>
-          )}
-          <div className="skills-list">
-            {installable.map((s) => {
-              const badge = sourceBadge(s.source)
-              const busy = installing.has(s.name)
-              const confirming = confirmName === s.name
-              return (
-                <div key={`inst-${s.name}`} className="skill-card">
-                  <div className="skill-info">
-                    <div className="skill-title-row">
-                      <span className="skill-name">{s.name}</span>
-                      <span className={`skill-src-chip ${badge.cls}`}>{badge.label}</span>
-                    </div>
-                    <div className="skill-desc">{s.description || '（无描述）'}</div>
-                  </div>
-                  <button
-                    className={`skills-install-action${confirming ? ' confirm' : ''}`}
-                    disabled={s.installed || busy}
-                    onClick={() => install(s.name)}
-                  >
-                    {s.installed ? '已安装' : busy ? '安装中…' : confirming ? '确认安装?' : '安装'}
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
 
       {loading && (
         <div className="skills-empty-hero"><div className="skills-empty-glyph spin" aria-hidden>◌</div><p>加载中…</p></div>
@@ -281,20 +279,28 @@ export function SkillsSurface() {
         </div>
       )}
 
-      {!query.trim() && trulyPending.length > 0 && (
+      {installNotice && (
+        <div className="meta warn skills-install-notice">
+          <span>{installNotice}</span>
+          <button className="skills-newthread-btn" onClick={openNewThread}>新建线程以启用</button>
+        </div>
+      )}
+
+      {!q && trulyPending.length > 0 && (
         <>
           <div className="skills-group-label">待生效（重开线程）</div>
-          <div className="skills-list">
+          <div className="skills-grid">
             {trulyPending.map((name) => (
-              <div key={`pending-${name}`} className="skill-card pending">
-                <div className="skill-info">
-                  <div className="skill-title-row">
-                    <span className="skill-name">{name}</span>
-                    <span className="skill-src-chip src-claude">Claude</span>
-                  </div>
-                  <div className="skill-desc">已安装，新开线程后可启用</div>
+              <div key={`pending-${name}`} className="skill-store-card pending">
+                <div className="skill-store-head">
+                  <div className={`skill-tile ${tileClass(name)}`} aria-hidden>{name.slice(0, 1).toUpperCase()}</div>
+                  <button className="skills-newthread-btn" onClick={openNewThread}>新建线程</button>
                 </div>
-                <button className="skills-newthread-btn" onClick={openNewThread}>新建线程</button>
+                <div className="skill-store-name">{name}</div>
+                <div className="skill-store-desc">已安装，新开线程后可启用</div>
+                <div className="skill-store-foot">
+                  <span className="skill-src-chip src-claude">Claude</span>
+                </div>
               </div>
             ))}
           </div>
@@ -309,24 +315,97 @@ export function SkillsSurface() {
         </div>
       )}
 
-      {/* 搜索模式：单列结果 */}
-      {filtered.length > 0 && (
-        <div className="skills-list">{filtered.map(renderCard)}</div>
-      )}
-
-      {/* 浏览模式：分组 */}
-      {!query.trim() && projectSkills.length > 0 && (
+      {projectSkills.length > 0 && (
         <>
           <div className="skills-group-label">项目技能</div>
-          <div className="skills-list">{projectSkills.map(renderCard)}</div>
+          <div className="skills-grid">{projectSkills.map(renderCard)}</div>
         </>
       )}
-      {!query.trim() && builtinSkills.length > 0 && (
+      {builtinSkills.length > 0 && (
         <>
           <div className="skills-group-label">内置技能</div>
-          <div className="skills-list">{builtinSkills.map(renderCard)}</div>
+          <div className="skills-grid">{builtinSkills.map(renderCard)}</div>
         </>
       )}
+
+      {(discoverSkills.length > 0 || installLoading) && (
+        <>
+          <div className="skills-group-label">
+            发现
+            <span className={`skills-cap-inline${overCap ? ' over' : ''}`}>
+              已安装 {installedCount} 个 · 建议 ≤ {recommendedMax}
+              {overCap && '，已达上限，非必要不再安装（点两次确认）'}
+            </span>
+          </div>
+          <div className="skills-restraint">
+            默认不建议盲目安装技能。天枢已原生集成开发工作流，覆盖约 90% 真实任务场景——先用原生能力，确有需要再按需安装。整个项目安装的技能不超过 5 个，本体 70% 的代码即由此完成；不装技能不影响真实任务的完成。
+          </div>
+          {installLoading && <div className="meta">扫描 .claude/skills 中…</div>}
+          <div className="skills-grid">{discoverSkills.map(renderDiscoverCard)}</div>
+        </>
+      )}
+
+      <Dialog open={detail !== null} onOpenChange={(open) => { if (!open) setDetail(null) }}>
+        <DialogContent className="skill-detail-dialog">
+          {detail && (
+            <>
+              <DialogHeader>
+                <div className="skill-detail-head">
+                  <div className={`skill-tile lg ${tileClass(detail.skill.name)}`} aria-hidden>
+                    {detail.skill.name.slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <DialogTitle>{detail.skill.name}</DialogTitle>
+                    <span className={`skill-src-chip ${sourceBadge(detail.skill.source).cls}`}>
+                      {sourceBadge(detail.skill.source).label}
+                    </span>
+                  </div>
+                </div>
+              </DialogHeader>
+              <DialogDescription className="skill-detail-desc">
+                {detail.skill.description || '（无描述）'}
+              </DialogDescription>
+              <div className="skill-detail-meta">
+                <div className="skill-detail-row">
+                  <span className="k">位置</span>
+                  <span className="v font-mono">{skillPathHint(detail.skill.source, detail.skill.name)}</span>
+                </div>
+                <div className="skill-detail-row">
+                  <span className="k">生效</span>
+                  <span className="v">
+                    {detail.kind === 'loaded'
+                      ? '启停即时生效于当前会话'
+                      : '安装后需新开线程才生效（保护前缀缓存，不做会话内热加载）'}
+                  </span>
+                </div>
+              </div>
+              <div className="skill-detail-actions">
+                {detail.kind === 'loaded' ? (
+                  <button
+                    className="btn sm"
+                    onClick={() => {
+                      toggle(detail.skill.name, !(detail.skill as SkillStatus).enabled)
+                      setDetail({ kind: 'loaded', skill: { ...(detail.skill as SkillStatus), enabled: !(detail.skill as SkillStatus).enabled } })
+                    }}
+                  >
+                    {(detail.skill as SkillStatus).enabled ? '禁用' : '启用'}
+                  </button>
+                ) : (
+                  <button
+                    className="btn sm"
+                    disabled={(detail.skill as InstallableSkill).installed || installing.has(detail.skill.name)}
+                    onClick={() => install(detail.skill.name)}
+                  >
+                    {(detail.skill as InstallableSkill).installed
+                      ? '已安装'
+                      : installing.has(detail.skill.name) ? '安装中…' : overCap && confirmName === detail.skill.name ? '确认安装?' : '安装'}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

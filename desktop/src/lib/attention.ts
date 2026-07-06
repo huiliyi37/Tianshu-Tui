@@ -1,4 +1,4 @@
-import type { SessionRecord } from '../runtime/types'
+import type { SessionRecord, TaskRecord, TaskStatus } from '../runtime/types'
 import { basename } from './projects'
 
 // Attention center model (Q2). Cross-session feed of things needing the human:
@@ -72,4 +72,127 @@ export function deriveAttention(sessions: SessionRecord[], seen: Set<string>): A
 
   const unseenCount = items.reduce((n, it) => n + (seen.has(it.sig) ? 0 : 1), 0)
   return { items, groups: [...byCwd.values()], unseenCount }
+}
+
+// ── Review Queue (Wave 4 — Codex-style triage inbox) ────────────────────────
+// Sessions + automation runs merged into one queue, grouped by triage category
+// instead of project: 待审批 → automation 结果 → 失败 → 已完成. Automation runs
+// (TaskRecord with a scheduledTaskId, terminal status) are first-class items;
+// the session they produced is deduped out of the session-derived groups so
+// one run doesn't show up twice.
+
+export type ReviewSectionId = 'approval' | 'automation' | 'failed' | 'completed'
+
+export interface ReviewItem {
+  kind: 'session' | 'automation'
+  section: ReviewSectionId
+  sig: string
+  title: string
+  detail: string
+  updatedAt: number
+  /** Session to jump to. Automation items link their produced session (may be absent). */
+  sessionId?: string
+  cwd?: string
+  /** Automation-only: the run record id + owning schedule. */
+  taskId?: string
+  scheduledTaskId?: string
+  taskStatus?: TaskStatus
+}
+
+export interface ReviewSection {
+  id: ReviewSectionId
+  label: string
+  items: ReviewItem[]
+}
+
+export interface ReviewQueue {
+  sections: ReviewSection[]
+  items: ReviewItem[]
+  unseenCount: number
+}
+
+export const REVIEW_SECTION_LABEL: Record<ReviewSectionId, string> = {
+  approval: '待审批',
+  automation: 'Automation 结果',
+  failed: '失败',
+  completed: '已完成',
+}
+
+const REVIEW_SECTION_ORDER: ReviewSectionId[] = ['approval', 'automation', 'failed', 'completed']
+
+const TASK_TERMINAL: ReadonlySet<TaskStatus> = new Set(['completed', 'failed', 'cancelled', 'timed_out'])
+
+export function taskSig(t: Pick<TaskRecord, 'id' | 'status'>): string {
+  return `task:${t.id}:${t.status}`
+}
+
+function taskUpdatedAt(t: TaskRecord): number {
+  const iso = t.completedAt ?? t.startedAt ?? t.createdAt
+  const ms = Date.parse(iso)
+  return Number.isNaN(ms) ? 0 : ms
+}
+
+const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  pending: '排队中',
+  running: '运行中',
+  completed: '完成',
+  failed: '失败',
+  cancelled: '已取消',
+  timed_out: '超时',
+}
+
+export function deriveReviewQueue(
+  sessions: SessionRecord[],
+  tasks: TaskRecord[],
+  seen: Set<string>,
+): ReviewQueue {
+  const items: ReviewItem[] = []
+
+  // Automation runs — scheduled (cron) tasks in a terminal state.
+  const automationSessionIds = new Set<string>()
+  for (const t of tasks) {
+    if (!t.scheduledTaskId || !TASK_TERMINAL.has(t.status)) continue
+    if (t.sessionId) automationSessionIds.add(t.sessionId)
+    const summary = t.status === 'failed'
+      ? (t.error || '运行失败')
+      : (t.result?.summary || TASK_STATUS_LABEL[t.status])
+    items.push({
+      kind: 'automation',
+      section: 'automation',
+      sig: taskSig(t),
+      title: t.prompt.length > 60 ? `${t.prompt.slice(0, 60)}…` : t.prompt,
+      detail: `${TASK_STATUS_LABEL[t.status]} · ${summary.length > 80 ? `${summary.slice(0, 80)}…` : summary}`,
+      updatedAt: taskUpdatedAt(t),
+      ...(t.sessionId !== undefined && { sessionId: t.sessionId }),
+      taskId: t.id,
+      scheduledTaskId: t.scheduledTaskId,
+      taskStatus: t.status,
+    })
+  }
+
+  // Session-derived items — skip sessions already represented by an automation run.
+  for (const s of sessions) {
+    if (automationSessionIds.has(s.id) && s.pendingApprovals === 0) continue
+    const r = reasonOf(s)
+    if (!r) continue
+    items.push({
+      kind: 'session',
+      section: r.reason,
+      sig: sigOf(s),
+      title: s.title ?? s.id.slice(0, 8),
+      detail: r.detail,
+      updatedAt: s.updatedAt,
+      sessionId: s.id,
+      cwd: s.cwd,
+    })
+  }
+
+  items.sort((a, b) => b.updatedAt - a.updatedAt)
+
+  const sections: ReviewSection[] = REVIEW_SECTION_ORDER
+    .map((id) => ({ id, label: REVIEW_SECTION_LABEL[id], items: items.filter((it) => it.section === id) }))
+    .filter((sec) => sec.items.length > 0)
+
+  const unseenCount = items.reduce((n, it) => n + (seen.has(it.sig) ? 0 : 1), 0)
+  return { sections, items, unseenCount }
 }

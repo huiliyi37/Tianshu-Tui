@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveAttention, sigOf } from '../attention.ts'
-import type { SessionRecord } from '../../runtime/types.ts'
+import { deriveAttention, deriveReviewQueue, sigOf, taskSig } from '../attention.ts'
+import type { SessionRecord, TaskRecord } from '../../runtime/types.ts'
 
 function sess(p: Partial<SessionRecord>): SessionRecord {
   return {
@@ -63,4 +63,74 @@ test('signature changes when status/approvals change → re-surfaces', () => {
   const c = sigOf({ id: '1', status: 'failed', pendingApprovals: 0 })
   assert.notEqual(a, b)
   assert.notEqual(a, c)
+})
+
+// ── deriveReviewQueue (Wave 4) ──────────────────────────────────────
+
+function task(p: Partial<TaskRecord>): TaskRecord {
+  return {
+    id: 't1',
+    prompt: 'run nightly checks',
+    source: 'cron',
+    status: 'completed',
+    createdAt: '2026-01-01T00:00:00Z',
+    scheduledTaskId: 'cron_a',
+    ...p,
+  } as TaskRecord
+}
+
+test('review queue: terminal automation runs become first-class items', () => {
+  const q = deriveReviewQueue([], [
+    task({ id: 't1', status: 'completed', sessionId: 's1', result: { summary: 'all green', changedFiles: [] } }),
+    task({ id: 't2', status: 'failed', error: 'boom' }),
+    task({ id: 't3', status: 'running' }), // non-terminal — excluded
+    task({ id: 't4', status: 'completed', scheduledTaskId: undefined }), // not automation — excluded
+  ], new Set())
+  const auto = q.sections.find((s) => s.id === 'automation')!
+  assert.equal(auto.items.length, 2)
+  assert.ok(auto.items.every((i) => i.kind === 'automation'))
+  const ok = auto.items.find((i) => i.taskId === 't1')!
+  assert.ok(ok.detail.includes('all green'))
+  assert.equal(ok.sessionId, 's1')
+})
+
+test('review queue: automation-produced session is deduped from session groups', () => {
+  const q = deriveReviewQueue(
+    [sess({ id: 's1', status: 'completed', updatedAt: 5 })],
+    [task({ id: 't1', status: 'completed', sessionId: 's1' })],
+    new Set(),
+  )
+  const completed = q.sections.find((s) => s.id === 'completed')
+  assert.equal(completed, undefined, 'session item absorbed by automation entry')
+  assert.equal(q.items.length, 1)
+})
+
+test('review queue: pending approval wins over automation dedup', () => {
+  const q = deriveReviewQueue(
+    [sess({ id: 's1', status: 'running', pendingApprovals: 1, updatedAt: 5 })],
+    [task({ id: 't1', status: 'completed', sessionId: 's1' })],
+    new Set(),
+  )
+  const approval = q.sections.find((s) => s.id === 'approval')!
+  assert.equal(approval.items.length, 1)
+})
+
+test('review queue: sections ordered approval → automation → failed → completed', () => {
+  const q = deriveReviewQueue(
+    [
+      sess({ id: 'a', status: 'running', pendingApprovals: 1 }),
+      sess({ id: 'f', status: 'failed' }),
+      sess({ id: 'c', status: 'completed' }),
+    ],
+    [task({ id: 't1', status: 'completed' })],
+    new Set(),
+  )
+  assert.deepEqual(q.sections.map((s) => s.id), ['approval', 'automation', 'failed', 'completed'])
+})
+
+test('review queue: taskSig re-surfaces when task status changes', () => {
+  assert.notEqual(taskSig({ id: 't1', status: 'running' }), taskSig({ id: 't1', status: 'completed' }))
+  const seen = new Set([taskSig({ id: 't1', status: 'completed' })])
+  const q = deriveReviewQueue([], [task({ id: 't1', status: 'completed' })], seen)
+  assert.equal(q.unseenCount, 0)
 })

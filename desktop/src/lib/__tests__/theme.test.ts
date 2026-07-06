@@ -47,6 +47,13 @@ test('resolveTheme follows system via matchMedia', () => {
   assert.equal(resolveTheme('dark'), 'dark')
 })
 
+test('codex theme prefs persist through loadThemePref whitelist', () => {
+  saveThemePref('codex-dark')
+  assert.equal(loadThemePref(), 'codex-dark')
+  saveThemePref('codex-light')
+  assert.equal(loadThemePref(), 'codex-light')
+})
+
 test('setThemePref writes data-theme on <html> and CSS variables via setProperty', () => {
   setThemePref('light')
   assert.equal(g.document.documentElement.dataset.theme, 'light')

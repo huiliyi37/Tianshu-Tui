@@ -258,6 +258,38 @@ fn set_window_glass(window: tauri::WebviewWindow, enabled: bool) {
     }
 }
 
+/// Pop out a thread into its own small companion window (Codex-style floating
+/// thread). The window boots the same SPA with `?popout={sessionId}`, which the
+/// frontend detects to render a slim PopoutThreadRoot (thread + composer only).
+/// Idempotent per session: re-invoking focuses the existing window.
+#[tauri::command]
+fn open_thread_window(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    // Window labels only allow [a-zA-Z0-9-/:_]; session ids are uuid-ish but
+    // sanitize defensively so a weird id can't make the builder panic.
+    let safe: String = session_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if safe.is_empty() {
+        return Err("invalid session id".to_string());
+    }
+    let label = format!("popout-{safe}");
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let url = tauri::WebviewUrl::App(format!("index.html?popout={safe}").into());
+    tauri::WebviewWindowBuilder::new(&app, &label, url)
+        .title("天枢 · 线程")
+        .inner_size(480.0, 720.0)
+        .min_inner_size(360.0, 480.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Bring the main window back from tray/minimized and focus it.
 ///
 /// `getCurrentWindow().setFocus()` from JS can neither unhide a window hidden
@@ -1311,6 +1343,7 @@ pub fn run() {
             apply_storage_location,
             set_window_glass,
             focus_main_window,
+            open_thread_window,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
