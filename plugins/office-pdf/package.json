@@ -1,0 +1,22 @@
+{
+  "name": "office-pdf",
+  "version": "1.0.0",
+  "description": "Native PDF generation (pdfkit) + text extraction (pdf-parse) — replaces browser-print HTML fallback",
+  "private": true,
+  "type": "module",
+  "tianshu": {
+    "name": "office-pdf",
+    "version": "1.0.0",
+    "description": "Native PDF generation (text/headings/tables) + text extraction for context reading",
+    "entry": "index.js",
+    "tools": [
+      { "name": "pdf_create", "description": "Generate a real PDF with text, headings, and tables" },
+      { "name": "pdf_read", "description": "Extract text content from a PDF file for context reading" }
+    ],
+    "permissions": { "fs": true }
+  },
+  "dependencies": {
+    "pdfkit": "^0.15.0",
+    "pdf-parse": "^1.1.1"
+  }
+}

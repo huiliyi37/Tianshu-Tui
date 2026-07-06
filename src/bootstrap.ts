@@ -43,6 +43,7 @@ import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import type { PlanExecutorDeps } from './agent/plan-executor.js'
 import { runTypeCheck } from './lsp/client.js'
+import { GATE_TSC_TIMEOUT_MS } from './agent/typecheck-gate.js'
 import { createCouncilConveneTool } from './tools/council-convene.js'
 import { needsTemplatesInit } from './bootstrap/project-templates.js'
 import { debugLog } from './utils/debug.js'
@@ -458,7 +459,9 @@ export function createInteractiveToolRegistry(
     }).enabled,
     getSessionId: () => refs.sessionId ?? undefined,
     getMeridianIndexer: () => refs.meridianIndexer,
-    getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*'),
+    // 门禁预算（5 分钟）而非默认 2 分钟：这个 runner 喂 wave-gate 硬门禁，
+    // 满载机器 tsc 超时曾被记成 passed 放行（2026-07-07）。
+    getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*', GATE_TSC_TIMEOUT_MS),
   }
   reg.register(createTeamOrchestrateTool(planExecutorDeps, { defaultMaxParallel: config.agent.maxTeamParallel }))
 

@@ -3340,6 +3340,22 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
+  // GlanceBar 信息密度切换（Wave 2 减密分档）。
+  register("/glance", {
+    description: "Toggle GlanceBar density (compact/full)",
+    immediate: true,
+    handler: ({ trimmed }) => {
+      const arg = trimmed.split(/\s+/)[1]?.toLowerCase()
+      const next = arg === 'full' ? 'full'
+        : arg === 'compact' ? 'compact'
+        : (app.glanceDensity === 'compact' ? 'full' : 'compact')
+      app.glanceDensity = next
+      app.forceRedraw()
+      app.commitStatic(`GlanceBar density → ${next}${next === 'compact' ? '（模式/模型/上下文%/耗时）' : '（全量指标）'}`)
+      return true
+    },
+  })
+
   // 经 SIGINT 走 main.ts 的统一 shutdown（app.dispose → ctx.shutdown →
   // 退出摘要 + resume 指引 → process.exit）。直接调 ctx.shutdown() 不会退出
   // 进程，也绕过退出摘要。

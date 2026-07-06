@@ -1,0 +1,20 @@
+{
+  "name": "office-ppt",
+  "version": "1.0.0",
+  "description": "Native .pptx generation via pptxgenjs — replaces HTML .ppt fallback",
+  "private": true,
+  "type": "module",
+  "tianshu": {
+    "name": "office-ppt",
+    "version": "1.0.0",
+    "description": "Native .pptx generation — title slides, content slides, text + image layouts",
+    "entry": "index.js",
+    "tools": [
+      { "name": "pptx_create", "description": "Generate a real .pptx file from slide definitions" }
+    ],
+    "permissions": { "fs": true }
+  },
+  "dependencies": {
+    "pptxgenjs": "^3.12.0"
+  }
+}

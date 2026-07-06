@@ -461,6 +461,17 @@ export const uiSchema = z.object({
   spinnerVerbsMode: z.enum(['replace', 'append']).optional(),
   /** Accessibility: freeze spinner animation frames and verb rotation. */
   reducedMotion: z.boolean().optional(),
+  /** GlanceBar density on startup. 'compact' (default) = mode/model/context%/elapsed;
+   *  'full' = everything (goal/todo/effort/cache/cost). Runtime `/glance` toggles. */
+  glanceDensity: z.enum(['compact', 'full']).optional(),
+  /** Scriptable statusline (Claude Code protocol subset). The command receives a
+   *  session-state JSON on stdin and its first stdout line renders above the input
+   *  box. See src/tui/statusline.ts for the payload shape. */
+  statusLine: z.object({
+    command: z.string().min(1),
+    intervalMs: z.number().int().positive().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }).optional(),
 }).default({})
 
 /** Project verify command declarations (A1). Machine-readable source of truth
