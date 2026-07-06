@@ -85,7 +85,9 @@ test('registry unknown command falls through to agent', async () => {
   stdin.dataHandler!('\r')
   await tick()
 
-  assert.deepEqual(slashInputs, ['/not-a-registered-cmd'])
+  // 4175e5b9 之后：未注册的单段 /xxx 视为 Linux 路径/普通文本，
+  // 不再进 slash 分发（slashHandler 不被调用），原文直达 agent。
+  assert.deepEqual(slashInputs, [])
   assert.deepEqual(normalInputs, ['/not-a-registered-cmd'])
 })
 

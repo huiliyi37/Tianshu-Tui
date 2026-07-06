@@ -587,8 +587,10 @@ describe('AgentLoop — multi-turn tool_use', () => {
     const registry = new ToolRegistry()
     registry.register(READ_FILE_TOOL)
 
-    const repeatedPrefix = '我来检查这个文件。'
-    const newContent = '接下来继续分析第二个问题。'
+    // 注意措辞：全文不能含"我来/让我/接下来 + 工具动词"等行动承诺，否则会
+    // 触发 action-intent gate（10ecffa5）合法追加一轮，callCount 断言失真。
+    const repeatedPrefix = '这个文件的核对结果如下。'
+    const newContent = '第二个问题的分析已经完成。'
     let callCount = 0
     const client: StreamClient = {
       stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {

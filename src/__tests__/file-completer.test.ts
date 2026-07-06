@@ -16,9 +16,10 @@ describe('extractAtToken', () => {
 
 describe('getCompletions', () => {
   it('returns matching files from cwd', () => {
-    const results = getCompletions('src/tui/app', process.cwd(), 5)
+    // TUI 2.x 后 app.ts 位于 src/tui/engine/
+    const results = getCompletions('src/tui/engine/app', process.cwd(), 5)
     assert.ok(results.length > 0)
-    assert.ok(results[0]!.includes('src/tui/app'))
+    assert.ok(results[0]!.includes('src/tui/engine/app'))
   })
 
   it('limits results', () => {

@@ -31,11 +31,12 @@ g.document = {
 
 const { loadThemePref, saveThemePref, resolveTheme, setThemePref } = await import('../theme.ts')
 
-test('pref persists and defaults to dark', () => {
+test('pref persists and defaults to light', () => {
   localStorage.clear()
-  assert.equal(loadThemePref(), 'dark')
-  saveThemePref('light')
+  // e97f0530：无偏好时默认 light（对齐 Antigravity 2.0 风格改版）
   assert.equal(loadThemePref(), 'light')
+  saveThemePref('dark')
+  assert.equal(loadThemePref(), 'dark')
 })
 
 test('resolveTheme follows system via matchMedia', () => {
@@ -49,7 +50,8 @@ test('resolveTheme follows system via matchMedia', () => {
 test('setThemePref writes data-theme on <html> and CSS variables via setProperty', () => {
   setThemePref('light')
   assert.equal(g.document.documentElement.dataset.theme, 'light')
-  assert.equal(styleStore.get('--bg'), '#ffffff', 'should set light --bg')
+  // e97f0530：light 主题底色改为暖色 Alabaster
+  assert.equal(styleStore.get('--bg'), '#faf8f5', 'should set light --bg')
   setThemePref('dark')
   assert.equal(g.document.documentElement.dataset.theme, 'dark')
   assert.equal(styleStore.get('--bg'), '#1c1c1e', 'should set dark --bg')

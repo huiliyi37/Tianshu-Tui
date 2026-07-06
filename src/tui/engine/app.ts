@@ -751,8 +751,7 @@ export class TuiApp {
       }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
-      const isKnownCmd = buildCommandPredicate(this.inputController.slashCommands)
-      const inputIsPath = looksLikeFilePath(inputVal, isKnownCmd)
+      const inputIsPath = looksLikeFilePath(inputVal, this.getCommandPredicate())
       if (inputVal.startsWith('/') && !inputIsPath) {
         const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
         if (key.name === 'up' && filtered.length > 0) {
@@ -947,9 +946,14 @@ export class TuiApp {
   }
 
   /** 构建命令名谓词，供 resolveAppPromptInput 区分路径与命令。
-   *  基于 inputController.slashCommands（palette + skill 提示列表）。 */
+   *  必须并集两个来源：inputController.slashCommands（palette + skill 提示列表）
+   *  和 slashRegistry（内置 /panel、/starmap 及 registerSlashCommand 动态注册的
+   *  命令）。只看提示列表会把未进提示的已注册命令误判为 Linux 单段路径，
+   *  静默绕过 slash 分发（4175e5b9 引入的回归）。 */
   getCommandPredicate(): (name: string) => boolean {
-    return buildCommandPredicate(this.inputController.slashCommands)
+    const fromHints = buildCommandPredicate(this.inputController.slashCommands)
+    const fromRegistry = buildCommandPredicate(this.slashRegistry.list())
+    return (name: string) => fromHints(name) || fromRegistry(name)
   }
 
   /** 读取当前输入框文本（测试/外部检视用） */
@@ -1856,7 +1860,7 @@ export class TuiApp {
     const cursor = this.inputLine.cursor
 
     // slash 命令补全（排除 `/file/path` 这类绝对路径；支持 /skill <name> 等多 token）
-    if (value.startsWith('/') && !looksLikeFilePath(value, buildCommandPredicate(this.inputController.slashCommands))) {
+    if (value.startsWith('/') && !looksLikeFilePath(value, this.getCommandPredicate())) {
       const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
@@ -3090,7 +3094,7 @@ export class TuiApp {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
       const inputVal = this.inputLine.value
-      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal, buildCommandPredicate(this.inputController.slashCommands))
+      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal, this.getCommandPredicate())
       const isStreaming = this.state.phase !== 'idle'
 
       // Domain-accent border color: slash=primary, streaming=dim, else domain accent

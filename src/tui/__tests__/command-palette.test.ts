@@ -60,7 +60,8 @@ describe('getPaletteCommands', () => {
   it('exposes /permission for permission mode/rule discovery', () => {
     const cmd = getPaletteCommands().find(c => c.name === '/permission')
     assert.ok(cmd, '/permission must be in palette so users discover permission controls')
-    assert.match(cmd.description, /permission|mode|rule/i)
+    // 描述已本地化为中文（ad10ae99 权限选择器），中英文关键词都接受
+    assert.match(cmd.description, /permission|mode|rule|权限|模式/i)
   })
 
   it('exposes /skill install to discover skill installation', () => {

@@ -14,15 +14,16 @@ function tmpCwd(): string {
   return process.cwd()
 }
 
-function seedWorkerSession(workerId: string, cwd: string): void {
+async function seedWorkerSession(workerId: string, cwd: string): Promise<void> {
   const sessionId = `worker-${workerId.replace(/:/g, '-')}`
   const dir = getSessionDir(cwd)
   mkdirSync(dir, { recursive: true })
   const persist = new SessionPersist(sessionId, cwd)
-  persist.appendOaiWithChecksum({ role: 'user', content: `Objective for ${workerId}` })
-  persist.appendOaiWithChecksum({ role: 'assistant', content: 'I will investigate.' })
-  persist.appendOaiWithChecksum({ role: 'assistant', content: null, tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'read_file', arguments: '{"file_path":"src/x.ts"}' } }] })
-  persist.appendOaiWithChecksum({ role: 'tool', tool_call_id: 'tc1', content: 'export const x = 1' })
+  // appendOaiWithChecksum 是异步落盘 — 必须 await，否则后续同步 loadOai 读到空文件
+  await persist.appendOaiWithChecksum({ role: 'user', content: `Objective for ${workerId}` })
+  await persist.appendOaiWithChecksum({ role: 'assistant', content: 'I will investigate.' })
+  await persist.appendOaiWithChecksum({ role: 'assistant', content: null, tool_calls: [{ id: 'tc1', type: 'function', function: { name: 'read_file', arguments: '{"file_path":"src/x.ts"}' } }] })
+  await persist.appendOaiWithChecksum({ role: 'tool', tool_call_id: 'tc1', content: 'export const x = 1' })
 }
 
 function seedWorkerResult(workerId: string): void {
@@ -47,10 +48,10 @@ function seedWorkerResult(workerId: string): void {
   writeFileSync(join(dir, `${workerId}.json`), JSON.stringify(result, null, 2))
 }
 
-test('buildWorkerDetailContent includes header, result, and transcript', () => {
+test('buildWorkerDetailContent includes header, result, and transcript', async () => {
   const workerId = 'wo_team:T1'
   const cwd = tmpCwd()
-  seedWorkerSession(workerId, cwd)
+  await seedWorkerSession(workerId, cwd)
   seedWorkerResult(workerId)
 
   const liveView: FleetWorkerView = {

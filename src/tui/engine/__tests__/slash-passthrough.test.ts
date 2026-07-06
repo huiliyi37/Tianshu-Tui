@@ -24,6 +24,13 @@ function makeApp() {
     stdin: stdin as unknown as ReadStream,
     cols: 80, rows: 24, modelName: 'test',
   })
+  // 生产路径中 main.ts 会 setSlashCommands(palette+skill 提示)。4175e5b9 之后
+  // 未在提示/注册表中的单段 /xxx 被视为 Linux 路径直达 agent，所以测试要
+  // 像生产一样声明命令名，slash 分发才会走 slashHandler。
+  app.setSlashCommands([
+    { name: '/help', description: 'help' },
+    { name: '/team', description: 'team' },
+  ])
   return { app, out, stdin }
 }
 

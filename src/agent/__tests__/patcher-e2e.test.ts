@@ -47,8 +47,12 @@ describe('patcher e2e: untracked scope → worktree edit → diff → apply', ()
 
     writeFileSync(join(wtDir, 'src', 'app.ts'), 'export const broken = false\n')
 
-    const diff = collectDiff(repoDir, wtDir, 'main')
+    // Materialized scope files are worker INPUTS — they must not leak into the
+    // outbound patch (the untracked original already exists in the base repo,
+    // so a "new file" hunk for it would fail to apply).
+    const diff = collectDiff(repoDir, wtDir, 'main', scope.materialized)
     assert.ok(diff.includes('broken = false'), 'diff captures worker edit')
+    assert.ok(!diff.includes('docs/plan.md'), 'materialized scope inputs excluded from diff')
 
     const artifact = formatDiffArtifact(diff, 'patcher')
     assert.equal(artifact.kind, 'diff')

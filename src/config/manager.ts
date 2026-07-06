@@ -100,13 +100,20 @@ function migrateDeepseekMaxTokens(raw: Record<string, unknown>): boolean {
     changed = true
   }
 
-  // Per-model maxTokens (within the models array)
+  // Per-model maxTokens (within the models array). Never raise maxTokens above
+  // the model's own contextWindow — a custom model with a small window may
+  // legitimately carry maxTokens=64_000 (the clamp backstop produces exactly
+  // that value), and bumping it past the window recreates the mis-config that
+  // clampModelTokens exists to prevent.
   const models = ds.models as Array<Record<string, unknown>> | undefined
   if (Array.isArray(models)) {
     for (const m of models) {
       if (typeof m.maxTokens === 'number' && m.maxTokens === 64_000) {
-        m.maxTokens = 384_000
-        changed = true
+        const window = typeof m.contextWindow === 'number' ? m.contextWindow : Infinity
+        if (window >= 384_000) {
+          m.maxTokens = 384_000
+          changed = true
+        }
       }
     }
   }

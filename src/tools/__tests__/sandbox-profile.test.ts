@@ -92,13 +92,21 @@ describe('sandbox-profile: Seatbelt', () => {
 
 describe('sandbox-profile: bwrap/firejail', () => {
   it('bwrap binds the workspace read-write over a read-only root', () => {
-    const cmd = buildBwrapCommand('make', ['/work/proj'])
+    // Must be a real directory: buildBwrapCommand filters non-existent roots
+    // (bwrap --bind aborts the whole sandbox on a missing dir → exit 127).
+    const realRoot = process.cwd()
+    const cmd = buildBwrapCommand('make', [realRoot])
     assert.ok(cmd.startsWith('bwrap '))
     assert.ok(cmd.includes('--ro-bind / /'))
-    assert.ok(cmd.includes('/work/proj'))
+    assert.ok(cmd.includes(realRoot))
     assert.ok(cmd.includes('make'))
     // network must NOT be unshared
     assert.ok(!cmd.includes('--unshare-net'))
+  })
+  it('bwrap silently drops non-existent writable roots instead of aborting', () => {
+    const cmd = buildBwrapCommand('make', ['/definitely-not-a-real-dir-xyz'])
+    assert.ok(!cmd.includes('/definitely-not-a-real-dir-xyz'))
+    assert.ok(cmd.startsWith('bwrap '))
   })
   it('firejail keeps root read-only with explicit writable roots', () => {
     const cmd = buildFirejailCommand('go build', ['/work'])

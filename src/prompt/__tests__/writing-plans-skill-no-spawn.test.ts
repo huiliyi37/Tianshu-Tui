@@ -51,7 +51,9 @@ test('writing-plans skill: anti-spawn guard rail is present', () => {
   // read-only star-domain scouts.
   const guards = [
     {
-      pattern: '不要调用 `task` / `Agent` / `TodoWrite`',
+      // 364491db 重写了护栏措辞：TodoWrite/WebSearch 已不再逐一点名（task/Agent
+      // 在 Rivet 中被自动映射），但仍必须显式点名非 Rivet 子代理工具。
+      pattern: '不要调用 `task` / `Agent` 等非 Rivet 的子代理工具',
       why: 'must explicitly name non-Rivet tool names so the LLM knows what to avoid',
     },
     {

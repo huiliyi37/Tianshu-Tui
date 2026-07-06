@@ -77,7 +77,8 @@ test('loadThemeJson returns correct theme for dark', () => {
 test('loadThemeJson returns correct theme for light', () => {
   const json = loadThemeJson('light')
   assert.equal(json.colorScheme, 'light')
-  assert.equal(json.variables['--bg'], '#ffffff')
+  // e97f0530：默认 light 主题升级为暖色 Alabaster/米白
+  assert.equal(json.variables['--bg'], '#faf8f5')
 })
 
 test('loadThemeJson returns correct theme for nebula', () => {

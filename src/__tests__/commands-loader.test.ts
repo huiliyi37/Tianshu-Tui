@@ -63,14 +63,15 @@ $ARGUMENTS`)
 
     const resolved = resolveAppPromptInput('/review src/main.tsx', cwd)
 
-    assert.equal(resolved, `Review this:
+    // resolveAppPromptInput 返回 ResolvedPromptInput 对象（生态工作流改造后）
+    assert.equal(resolved?.prompt, `Review this:
 src/main.tsx`)
   })
 
   it('keeps normal app input unchanged', () => {
     const cwd = makeProject()
 
-    assert.equal(resolveAppPromptInput('plain prompt', cwd), 'plain prompt')
+    assert.equal(resolveAppPromptInput('plain prompt', cwd)?.prompt, 'plain prompt')
   })
 
   it('blocks /fork from reaching the agent pipeline', () => {

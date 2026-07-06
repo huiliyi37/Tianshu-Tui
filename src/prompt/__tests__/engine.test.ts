@@ -377,11 +377,17 @@ describe('PromptEngine active claims projection', () => {
       volatileCtx: { cwd: '/tmp' },
     })
 
-    // Build 85 turns — well over the 10-turn mask window for small windows
+    // Build 85 turns — well over the 10-turn mask window for small windows.
+    // tool 消息必须有配对的 assistant.tool_calls，否则 orphan 修复会把它们
+    // 整体丢弃（API safety net），mask 计数永远为 0。
     const messages: OaiMessage[] = []
     for (let i = 0; i < 85; i++) {
       messages.push({ role: 'user', content: `q${i}` })
-      messages.push({ role: 'assistant', content: `a${i}` })
+      messages.push({
+        role: 'assistant',
+        content: `a${i}`,
+        tool_calls: [{ id: `call_${i}`, type: 'function', function: { name: 'read_file', arguments: '{}' } }],
+      })
       messages.push({
         role: 'tool' as const,
         tool_call_id: `call_${i}`,
@@ -455,7 +461,10 @@ describe('git-dirty flag and toolHistory cap', () => {
     assert.ok(!lastUserContent(req3).includes('stale.ts'), 'message 3 triggers periodic git refresh')
   })
 
-  it('toolHistory caps at 8 most recent entries', () => {
+  it('toolHistory appendix block is retired — history no longer rendered into volatile context', () => {
+    // 2026-07-06 appendix 字节稳定改造删除了 tool-history 块（与消息历史冗余，
+    // 见 docs/changelog/2026-07-06-appendix-delta-byte-stability.md）。守住
+    // "不再渲染" 这个新契约，防止无意间加回 churner。
     const engine = new PromptEngine({
       model: 'test',
       maxTokens: 1024,
@@ -471,11 +480,8 @@ describe('git-dirty flag and toolHistory cap', () => {
 
     const req = engine.buildOaiRequest([{ role: 'user', content: 'x' }], history)
     const vol = lastUserContent(req)
-    // P1b: dynamic attributes removed for cache stability; check entry count instead
-    const toolCount = (vol.match(/<tool-summary/g) || []).length
-    assert.equal(toolCount, 8, 'capped at 8 most recent tool entries')
-    assert.ok(!vol.includes('tool_0'), 'oldest entries are dropped')
-    assert.ok(vol.includes('tool_11'), 'newest entries are kept')
+    assert.ok(!vol.includes('<tool-summary'), 'tool-history appendix block must stay deleted')
+    assert.ok(!vol.includes('tool_11'), 'tool history entries must not leak into volatile context')
   })
 })
 
