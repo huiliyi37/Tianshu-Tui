@@ -1644,8 +1644,15 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
       if (result.warnings.length > 0) {
         debugLog(`[plugins] ${result.loaded}/${result.scanned} loaded, ${result.totalTools} tools; warnings: ${result.warnings.join('; ')}`)
       }
-      if (result.totalTools > 0) agent.updateTools()
-    }).catch(() => {})
+      // Always refresh tools when plugins change the registry (tools added OR suppressed).
+      // Suppress-only plugins (zero own tools) must still trigger an update to remove
+      // the suppressed built-in tools from the model's tool list.
+      if (result.totalTools > 0 || result.suppressTools.length > 0) {
+        agent.updateTools()
+      }
+    }).catch((err) => {
+      debugLog(`[plugins] Initialization failed: ${(err as Error).message}`)
+    })
     initializeLsp(cwd, toolRegistry).then((lspManager) => {
       refs.lspManager = lspManager
       agent.updateTools()
