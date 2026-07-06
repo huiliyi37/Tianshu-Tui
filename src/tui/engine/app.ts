@@ -827,6 +827,16 @@ export class TuiApp {
           }
           return
         }
+        // convergence-warning: the L2 escalation rung BEFORE a convergence
+        // abort. Must be visible in the CLI — session 8396ac51 received 10
+        // silent nudges then a hard熔断 that looked like it came from nowhere.
+        // The desktop renders this ladder via the decision-shift card; this
+        // static warning line is the CLI counterpart.
+        if (phase === 'convergence-warning') {
+          const label = phaseStatusLabel(phase, detail)
+          if (label) this.commitStatic(color(label, this.theme.warning))
+          return
+        }
         // Only map recognized phases to ActivityPhase; ignore unknown strings
         const knownPhases: Record<string, ActivityPhase> = {
           idle: 'idle',

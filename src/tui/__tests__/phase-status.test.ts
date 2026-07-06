@@ -41,6 +41,16 @@ describe('S3: phaseStatusLabel', () => {
     assert.equal(phaseStatusLabel('stop-reason'), null)
   })
 
+  // --- convergence-warning：熔断前的 L2 警告梯级必须可见（8396ac51 复盘）---
+  it('maps convergence-warning with reason into a visible warning line', () => {
+    const label = phaseStatusLabel('convergence-warning', { reason: '收敛检测 L2: execute 阶段 22 轮未收敛 (score=0.31)' })
+    assert.ok(label?.includes('收敛检测 L2'), `label should carry the reason: ${label}`)
+    assert.ok(label?.includes('熔断'), 'label should warn about the impending circuit-break')
+  })
+  it('returns null for convergence-warning without a reason', () => {
+    assert.equal(phaseStatusLabel('convergence-warning'), null)
+  })
+
   // --- 未知 phase → null（不覆盖 heartbeatStatus）---
   it('returns null for unmapped phases', () => {
     assert.equal(phaseStatusLabel('tianshu-planning'), null)

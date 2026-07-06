@@ -1591,6 +1591,57 @@ describe('AgentLoop — convergence emission cooldown', () => {
   })
 })
 
+// ── Score-abort grace turn (session 8396ac51): the L3 abort must not fire in
+// the same evaluation that emits its own warning — the injected advisory is
+// consumed by the NEXT request, which never happens if we abort immediately.
+describe('AgentLoop — convergence score-abort grace turn', () => {
+  function degenerateAgent() {
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const agent = new AgentLoop(
+      {
+        client: mockClient([makeTextBlock('x')]), promptEngine: makeEngine(), toolRegistry: registry,
+        maxTurns: 40, contextWindow: 200_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      },
+      new SessionContext(),
+      TEST_CWD,
+    )
+    // Fully degenerate window: same tool, same target, repetitive thin text →
+    // score bottoms out (level 3, shouldAbort, abortCause 'score').
+    const history = Array.from({ length: 8 }, () => ({ tool: 'read_file', status: 'success', target: 'same.ts' }))
+    agent.recentToolHistory = history as unknown as typeof agent.recentToolHistory
+    agent.recentTextFingerprints = ['分析中', '分析中', '分析中']
+    return agent
+  }
+
+  it('demotes the first score-abort to a kick, then aborts on the next turn', async () => {
+    const agent = degenerateAgent()
+    let aborts = 0
+    let shifts = 0
+    const cb = { ...makeCallbacks(), onAbort: () => { aborts++ }, onDecisionShift: () => { shifts++ } }
+
+    const first = await agent.runConvergenceCheck(22, 'execute', true, false, cb)
+    assert.equal(first.action, 'proceed', 'first L3 hit must be demoted — no prior-turn warning was delivered')
+    assert.equal(aborts, 0)
+    assert.equal(shifts, 1, 'the demoted turn must still emit the warning/改道 so the model and user see it')
+
+    const second = await agent.runConvergenceCheck(23, 'execute', true, false, cb)
+    assert.equal(second.action, 'abort', 'still stuck one turn after the warning → abort proceeds')
+    assert.equal(aborts, 1)
+  })
+
+  it('user intervention resets the ladder — the next score-abort demotes again', async () => {
+    const agent = degenerateAgent()
+    const cb = makeCallbacks()
+
+    await agent.runConvergenceCheck(22, 'execute', true, false, cb) // demoted + warning
+    await agent.runConvergenceCheck(23, 'execute', true, true, cb)  // user spoke → reset
+    const after = await agent.runConvergenceCheck(24, 'execute', true, false, cb)
+    assert.equal(after.action, 'proceed', 'post-intervention L3 hit must get a fresh grace turn, not an instant abort')
+  })
+})
+
 describe('AgentLoop — recordToolHistory errorClass threading', () => {
   it('writes errorClass into recentToolHistory entry (loop-factory drop-param guard)', () => {
     const session = new SessionContext()

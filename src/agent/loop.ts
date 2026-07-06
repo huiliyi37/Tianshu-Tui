@@ -1737,6 +1737,15 @@ export class AgentLoop {
     this.latestConvergenceResult = convergenceCheck
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
 
+    // Grace-turn precondition for the score abort (captured BEFORE this turn's
+    // kick emission updates the fields): a convergence warning at L2+ must have
+    // been delivered in a strictly earlier turn, so the model had at least one
+    // turn to act on the guidance. Without this, the L3 abort fires in the very
+    // same evaluation that submits its own advisory — the advisory is consumed
+    // by the NEXT request, which never happens because we just aborted.
+    const warnedInEarlierTurn = this.lastConvergenceEmitLevel >= 2
+      && this.lastConvergenceEmitTurn < turn
+
     if (convergenceCheck.shouldKick && convergenceCheck.injectedMessage) {
       // Fix 3 — user-interaction reset. When the user just spoke/intervened this
       // turn, the agent has already handed control back (the "right" convergence
@@ -1830,6 +1839,16 @@ export class AgentLoop {
     }
 
     if (convergenceCheck.shouldAbort) {
+      // Score-abort grace turn: if no L2+ warning was delivered in an earlier
+      // turn (first escalation straight to L3, or the ladder was reset by a
+      // user message), demote this abort to the kick that was just emitted
+      // above and let the model act on it for one turn. The no-tool hard cap
+      // is exempt — 5 consecutive no-tool turns already embodies repeated
+      // chances.
+      if (convergenceCheck.abortCause === 'score' && !warnedInEarlierTurn) {
+        debugLog(`[convergence] turn=${turn} score-abort demoted to kick (no prior-turn warning) score=${convergenceCheck.score.toFixed(2)}`)
+        return { action: 'proceed' }
+      }
       // Structured stop-reason: distinguish the no-tool hard cap from a
       // score-based abort, and tag whether the model was still reasoning (a
       // near-miss that would previously have been a silent false熔断). This is
