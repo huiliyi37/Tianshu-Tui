@@ -975,7 +975,13 @@ export function createAgentRuntime(deps: {
       getSessionMemoryState: () => persist.getSessionMemoryState(),
       fileHistory,
       contextClaimStore: claimStore,
-      playbookStore: new PlaybookStore(cwd),
+      // Playbook 默认停用（2026-07-06，RIVET_PLAYBOOK=1 重新启用）。取证结论：
+      // 注入内容是错误转储级噪音（deliver_task 报文原样入库、context 字段 merge
+      // 滚雪球），且 matchScore 的 useCount 加成 + recordUsage 强化构成自增强回路
+      // ——垃圾教训越注入越常被选中、几乎不衰减（单项目 2 条垃圾 ×8 会话注入）。
+      // 不构造 store 即全链路关闭：注入 / dream 蒸馏 / playbook-reflect 收割 /
+      // recordUsage 均为判空跳过。修复质量闸前不要复活（上次复活见 80e0c530）。
+      playbookStore: process.env['RIVET_PLAYBOOK'] === '1' ? new PlaybookStore(cwd) : undefined,
       providerHealth,
       effortBanditEnabled: effortGate.enabled,
       taskLedger: refs.taskLedger ?? undefined,
