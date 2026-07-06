@@ -295,11 +295,13 @@ export function resolveModelSpec(ctx: ServeContext, modelId: string): ResolvedMo
         process.env[prov.apiKeyEnv ?? ''] ??
         (() => { try { return resolveApiKey(prov) } catch { return undefined } })()
       if (!provKey) return null
-      if (provName !== ctx.provider.name) {
-        provider = prov
-        apiKey = provKey
-        auth = undefined
-      }
+      // Always adopt the freshly-resolved key — also for the snapshot's own
+      // provider. Keeping `ctx.apiKey` there returned an EMPTY key whenever the
+      // server started unconfigured and the key arrived later (env/config),
+      // making the resolved spec unusable even though provKey was right here.
+      provider = prov
+      apiKey = provKey
+      auth = undefined
     }
 
     return {
@@ -630,23 +632,32 @@ export function unconfiguredSpecMessage(spec: ResolvedModelSpec): string {
   return `No usable API key for provider "${provider}" — the request was not sent.${envHint}`
 }
 
-function resolveInitialSpec(ctx: ServeContext): ResolvedModelSpec {
-  if (ctx.configured) {
-    return {
-      provider: ctx.provider,
-      apiKey: ctx.apiKey,
-      auth: ctx.auth,
-      model: { id: ctx.model.id, maxTokens: ctx.model.maxTokens, contextWindow: ctx.model.contextWindow, reasoningEffort: ctx.model.reasoningEffort },
-    }
-  }
-  // Re-read config — the user may have called POST /config/providers since startup.
-  const fresh = resolveServeContext()
+function specOfContext(ctx: ServeContext): ResolvedModelSpec {
   return {
-    provider: fresh.provider,
-    apiKey: fresh.apiKey,
-    auth: fresh.auth,
-    model: { id: fresh.model.id, maxTokens: fresh.model.maxTokens, contextWindow: fresh.model.contextWindow, reasoningEffort: fresh.model.reasoningEffort },
+    provider: ctx.provider,
+    apiKey: ctx.apiKey,
+    auth: ctx.auth,
+    model: { id: ctx.model.id, maxTokens: ctx.model.maxTokens, contextWindow: ctx.model.contextWindow, reasoningEffort: ctx.model.reasoningEffort },
   }
+}
+
+/**
+ * Resolve the spec a new session starts on. When `reload` is provided (the
+ * production sidecar path), prefer a fresh on-disk read so a key rotated via
+ * desktop Settings takes effect for the next session WITHOUT a sidecar restart
+ * — the startup snapshot's key may be stale or revoked. Tests that inject a
+ * synthetic context pass no `reload` and keep the deterministic snapshot.
+ */
+function resolveInitialSpec(ctx: ServeContext, reload?: () => ServeContext): ResolvedModelSpec {
+  if (reload) {
+    try {
+      const fresh = reload()
+      if (fresh.configured) return specOfContext(fresh)
+    } catch { /* mid-edit / broken config on disk — fall back to the snapshot */ }
+  }
+  if (ctx.configured) return specOfContext(ctx)
+  // Re-read config — the user may have called POST /config/providers since startup.
+  return specOfContext(resolveServeContext())
 }
 
 export function buildAgentLoop(
@@ -656,9 +667,10 @@ export function buildAgentLoop(
   registry?: SessionRegistry,
   approvalMode?: ApprovalMode,
   shared?: SharedRuntime,
+  reload?: () => ServeContext,
 ): BuiltAgent {
   const stores = buildSessionStores(ctx, cwd, sessionId, registry, shared)
-  const spec = resolveInitialSpec(ctx)
+  const spec = resolveInitialSpec(ctx, reload)
   const agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
   return { agent, sessionId }
 }
@@ -677,10 +689,25 @@ function buildManagedAgent(
   registry: SessionRegistry | undefined,
   approvalMode: ApprovalMode | undefined,
   shared?: SharedRuntime,
+  reload?: () => ServeContext,
 ): import('./session-manager.js').ManagedAgent {
   const stores = buildSessionStores(ctx, cwd, sessionId, registry, shared)
-  let spec: ResolvedModelSpec = resolveInitialSpec(ctx)
+  let spec: ResolvedModelSpec = resolveInitialSpec(ctx, reload)
   let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
+  // Rebuild the loop on a new spec, preserving conversation + stores. Shared
+  // by switchModel and the run pre-flight self-heal below.
+  const rebuildOnSpec = (next: ResolvedModelSpec) => {
+    const oldCoordinator = stores.refs.coordinator
+    const oldAgent = agent
+    void oldAgent.cancelIdleCompaction()
+    spec = next
+    const liveApprovalMode = oldAgent.config.approvalMode
+    agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, liveApprovalMode, registry, shared)
+    if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
+      try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
+    }
+    return oldAgent
+  }
   return {
     run: (prompt, callbacks, images) => {
       // Auth pre-flight: if this session's model has no usable key (e.g. an
@@ -689,7 +716,16 @@ function buildManagedAgent(
       // an opaque upstream 401. Rejecting routes through the manager's error
       // path (append 'error' event + status=failed).
       if (!isModelSpecUsable(spec)) {
-        return Promise.reject(new Error(unconfiguredSpecMessage(spec)))
+        // Self-heal first: the key may have been configured or rotated via
+        // Settings AFTER this agent was built. Re-resolve the same model
+        // against the live config and rebuild in place — the session then
+        // just works instead of demanding a sidecar restart.
+        const healed = reload ? resolveModelSpecWithReload(ctx, spec.model.id, reload) : null
+        if (healed && isModelSpecUsable(healed)) {
+          rebuildOnSpec(healed)
+        } else {
+          return Promise.reject(new Error(unconfiguredSpecMessage(spec)))
+        }
       }
       return agent.run(prompt, callbacks, images)
     },
@@ -726,22 +762,13 @@ function buildManagedAgent(
       // config, not just the startup snapshot. See resolveModelSpecWithReload.
       const next = resolveModelSpecWithReload(ctx, modelId)
       if (!next) return null
-      const oldCoordinator = stores.refs.coordinator
-      // Cancel the outgoing loop's idle compaction: it shares this SessionContext
-      // with the incoming loop, so a pending idle timer would race the new agent.
-      const oldAgent = agent
-      void oldAgent.cancelIdleCompaction()
-      spec = next
-      // Preserve the live approvalMode — user may have switched autonomy level
-      // since session creation. The closure variable is stale if they did.
-      const liveApprovalMode = oldAgent.config.approvalMode
       // Audit: capture the outgoing model before the rebuild replaces it.
+      // (rebuildOnSpec cancels the old loop's idle compaction — it shares this
+      // SessionContext with the incoming loop — and preserves the live
+      // approvalMode the user may have switched since session creation.)
+      const oldAgent = rebuildOnSpec(next)
       let fromModel: string | undefined
       try { fromModel = oldAgent.config.promptEngine.getModel() } catch { /* idle/未初始化 */ }
-      agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, liveApprovalMode, registry, shared)
-      if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
-        try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
-      }
       // 持久化切换（与 TUI bootstrap.switchAgentRuntime 同源）：metadata.model/
       // provider 反映当前模型，JSONL 落 model_switch 审计行——没有这两笔，
       // 桌面端换模型在会话日志里是隐形的。best-effort，不阻塞切换。
@@ -1022,6 +1049,10 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   }
   const port = opts.port ?? 3100
   const ctx = opts.context ?? resolveServeContext()
+  // Hot credential pickup: sessions created after a Settings edit must resolve
+  // the CURRENT on-disk key, not the startup snapshot's. Only wired when the
+  // context came from disk — an injected context (tests) stays deterministic.
+  const specReload = opts.context ? undefined : resolveServeContext
   const startedAt = Date.now()
 
   // R1 — one shared SessionRegistry for the whole sidecar. Created async (the
@@ -1084,7 +1115,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // align with the session.
   const sessions = new RuntimeSessionManager({
     createAgent: (cwd, sessionId, approvalMode) =>
-      buildManagedAgent(ctx, cwd ?? process.cwd(), sessionId ?? randomUUID(), sessionRegistry, approvalMode, sharedRuntime),
+      buildManagedAgent(ctx, cwd ?? process.cwd(), sessionId ?? randomUUID(), sessionRegistry, approvalMode, sharedRuntime, specReload),
     defaultCwd: process.cwd(),
     persistence,
     // R1 — late-bound getter: registry resolves async after server start.
@@ -1120,7 +1151,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     createAgent: () => {
       // Wave J: legacy /prompt 路径同样复用 sharedRuntime——避免与
       // /sessions/:id/prompt 路径间健康统计不一致。
-      const { agent, sessionId } = buildAgentLoop(ctx, process.cwd(), undefined, undefined, undefined, sharedRuntime)
+      const { agent, sessionId } = buildAgentLoop(ctx, process.cwd(), undefined, undefined, undefined, sharedRuntime, specReload)
       activeAgents.add(agent)
       activeAgent = agent
       state.running = true

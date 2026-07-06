@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveServeContext, isModelSpecUsable, unconfiguredSpecMessage } from '../serve.js'
+import { resolveServeContext, resolveModelSpec, isModelSpecUsable, unconfiguredSpecMessage } from '../serve.js'
 import type { ResolvedModelSpec } from '../serve.js'
 import type { Config, ProviderConfig } from '../../config/schema.js'
 
@@ -54,6 +54,24 @@ test('sidecar restart: apiKeyEnv provider with missing env degrades to unconfigu
   )
   assert.equal(ctx.configured, false)
   assert.equal(ctx.apiKey, '')
+})
+
+test('resolveModelSpec adopts the freshly-resolved key for the snapshot provider (hot key pickup)', () => {
+  // The server started unconfigured (empty ctx.apiKey), then the user saved an
+  // inline key via Settings. Resolving the SAME provider's model must surface
+  // the key from the provider config — not replay the stale empty snapshot key.
+  const unconfigured = resolveServeContext(() =>
+    config(provider({ name: 'xnokeyyet' })),
+  )
+  assert.equal(unconfigured.configured, false)
+  const withKey = {
+    ...unconfigured,
+    config: config(provider({ name: 'xnokeyyet', apiKey: 'sk-added-later' })),
+  }
+  const resolved = resolveModelSpec(withKey, 'deepseek-pro')
+  assert.ok(resolved)
+  assert.equal(resolved.apiKey, 'sk-added-later')
+  assert.equal(isModelSpecUsable(resolved), true)
 })
 
 test('isModelSpecUsable: inline key or auth is usable, empty+no-auth is not', () => {

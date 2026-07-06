@@ -52,30 +52,42 @@ export function App() {
   const [storageConfigured, setStorageConfigured] = useState<boolean | null>(null)
 
   // W2 — sidecar crash auto-recovery: the Rust shell respawns a crashed sidecar
-  // on the same port/token and emits this event once it passes /health again.
+  // on the same port/token and emits `sidecar-restarted` once it passes /health
+  // again. When crashes exceed the restart budget (3 per 10min) the monitor
+  // emits `sidecar-gave-up` and stops — without surfacing that, the UI keeps
+  // showing "正在重连…" forever while nothing is actually reconnecting.
+  const [sidecarGaveUp, setSidecarGaveUp] = useState(false)
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return
-    let unlisten: (() => void) | undefined
+    const unlisteners: (() => void)[] = []
     let cancelled = false
     void import('@tauri-apps/api/event')
-      .then((m) => m.listen('sidecar-restarted', async () => {
-        // Verify the respawned sidecar actually resolved a usable key. If the
-        // restart dropped auth (e.g. an apiKeyEnv provider whose env was lost),
-        // say so plainly — the persistent `needsSetup` banner below then guides
-        // reconfiguration, instead of the user hitting silent 401s on every send.
-        const res = await health.refetch()
-        if (res.data && res.data.configured === false) {
-          toast.warning('运行时已恢复，但未检测到可用的 API Key（可能重启后环境变量丢失）。请在设置中重新配置密钥。')
+      .then(async (m) => {
+        const offRestarted = await m.listen('sidecar-restarted', async () => {
+          setSidecarGaveUp(false)
+          // Verify the respawned sidecar actually resolved a usable key. If the
+          // restart dropped auth (e.g. an apiKeyEnv provider whose env was lost),
+          // say so plainly — the persistent `needsSetup` banner below then guides
+          // reconfiguration, instead of the user hitting silent 401s on every send.
+          const res = await health.refetch()
+          if (res.data && res.data.configured === false) {
+            toast.warning('运行时已恢复，但未检测到可用的 API Key（可能重启后环境变量丢失）。请在设置中重新配置密钥。')
+          } else {
+            toast.success('运行时进程已自动恢复')
+          }
+        })
+        const offGaveUp = await m.listen('sidecar-gave-up', () => {
+          setSidecarGaveUp(true)
+        })
+        if (cancelled) {
+          offRestarted()
+          offGaveUp()
         } else {
-          toast.success('运行时进程已自动恢复')
+          unlisteners.push(offRestarted, offGaveUp)
         }
-      }))
-      .then((off) => {
-        if (cancelled) off()
-        else unlisten = off
       })
       .catch(() => {})
-    return () => { cancelled = true; unlisten?.() }
+    return () => { cancelled = true; unlisteners.forEach((off) => off()) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -190,7 +202,12 @@ export function App() {
         <TitleBar />
         <WallpaperLayer />
       <div className="main">
-        {sidecarFailed && sidecarDown ? (
+        {sidecarGaveUp && sidecarDown ? (
+          <div className="banner error">
+            运行时进程短时间内多次崩溃，已停止自动重启。请重启应用；若反复出现，请检查磁盘空间与数据目录（设置 → 存储），或查看日志后反馈。
+            <button className="banner-action" onClick={restartApp}>重启应用</button>
+          </div>
+        ) : sidecarFailed && sidecarDown ? (
           <div className="banner error">
             sidecar 启动失败：未找到 Node 运行时或端口被占用。请重启应用，若仍失败请检查安装。
             <button className="banner-action" onClick={restartApp}>重启应用</button>
