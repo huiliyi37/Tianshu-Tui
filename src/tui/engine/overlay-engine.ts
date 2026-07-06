@@ -19,7 +19,6 @@
 
 import type { WriteStream } from 'node:tty'
 import { ANSI, cursorTo } from './ansi.js'
-import { getReliableTerminalSize } from '../use-terminal-size.js'
 
 export type OverlayId = 'starmap' | 'cockpit' | 'chronicle' | 'pager' | 'command-palette' | string
 
@@ -127,11 +126,7 @@ export class OverlayEngine {
   private exitAltScreen(): void {
     if (!this.inAltScreen) return
     this.stdout.write(ANSI.SHOW_CURSOR)
-    // WSL conhost 的 alternate screen 协议（DECSET 1049）可能不彻底恢复主屏。
-    // 退出时先手动清除 alternate 屏内容，再切回主屏，防止残留帧泄漏到 scrollback。
-    this.stdout.write(ANSI.ERASE_SCREEN + ANSI.SAVE_CURSOR)
     this.stdout.write(ANSI.ALT_SCREEN_OFF)
-    this.stdout.write(ANSI.RESTORE_CURSOR)
     this.inAltScreen = false
   }
 
@@ -154,36 +149,31 @@ export class OverlayEngine {
     const renderer = this.renderers.get(this.active!)
     if (!renderer) return
 
-    const snap = getReliableTerminalSize()
-    const { columns: reliableCols, rows: reliableRows } = snap
     const { cols, rows } = this.getSize()
-    // 使用可靠的终端尺寸作为 fallback（WSL 中 getSize 可能返回 0/undefined）
-    const effectiveCols = reliableCols > 0 ? reliableCols : cols
-    const effectiveRows = reliableRows > 0 ? reliableRows : rows
-    const lines = renderer.render(effectiveCols, effectiveRows)
+    const lines = renderer.render(cols, rows)
 
     // 目标帧：定长 rows，超出内容行的位置补空串（与全屏擦除语义一致）。
-    const desired: string[] = new Array<string>(effectiveRows)
-    for (let i = 0; i < effectiveRows; i++) {
+    const desired: string[] = new Array<string>(rows)
+    for (let i = 0; i < rows; i++) {
       desired[i] = i < lines.length && lines[i] !== undefined ? lines[i]! : ''
     }
 
     // 首帧 / 尺寸变化 / 缓存作废 → 全量重绘（从 (1,1) 逐行擦除+写入）。
     const cacheValid =
-      this.lastFrame.length === effectiveRows && cols === this.lastCols && rows === this.lastRows
+      this.lastFrame.length === rows && cols === this.lastCols && rows === this.lastRows
     let body: string
     if (!cacheValid) {
       let out = cursorTo(1, 1)
-      for (let i = 0; i < effectiveRows; i++) {
+      for (let i = 0; i < rows; i++) {
         out += ANSI.ERASE_LINE + desired[i]
-        if (i < effectiveRows - 1) out += '\n'
+        if (i < rows - 1) out += '\n'
       }
       body = out
     } else {
       // 行级 diff：只重写变化的行。alt screen 是固定网格（不滚动），
       // 绝对定位 cursorTo(row,1) 安全，未变行直接跳过 → 少擦写、少闪。
       let out = ''
-      for (let i = 0; i < effectiveRows; i++) {
+      for (let i = 0; i < rows; i++) {
         if (desired[i] === this.lastFrame[i]) continue
         out += cursorTo(i + 1, 1) + ANSI.ERASE_LINE + desired[i]
       }
@@ -191,8 +181,8 @@ export class OverlayEngine {
     }
 
     this.lastFrame = desired
-    this.lastCols = effectiveCols
-    this.lastRows = effectiveRows
+    this.lastCols = cols
+    this.lastRows = rows
 
     // 无变化短路：diff 为空则不写（idle/无操作时零输出）。
     if (body.length === 0) return

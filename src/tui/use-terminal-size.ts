@@ -167,36 +167,13 @@ function subscribe(cb: () => void) {
   return __subscribeTerminalSize(cb)
 }
 
-/**
- * 可靠终端尺寸检测 — WSL 兼容。
- *
- * 在 WSL 中 `process.stdout.columns` / `rows` 可能返回过期值、0 或 undefined。
- * 本函数采用三级检测策略：
- *   1. 优先使用 `stdout.columns/rows`（正常 Linux/macOS 终端最快）
- *   2. 若值为 0/负数/undefined，回退到默认值
- *   3. 不阻塞：DECSTSS 查询（`\x1B[18t`）是异步的，不在此函数内执行；
- *      但通过 resize 事件可以捕获到更新后的尺寸。
- *
- * 正常值（cols > 0, rows > 0）直接返回；异常值回退到合理默认值，
- * 避免 TUI 以 80x40 运行导致布局损坏。
- */
-export function getReliableTerminalSize(): TerminalSizeSnapshot {
-  const cols = process.stdout.columns
-  const rows = process.stdout.rows
-  // WSL 边缘情况：columns/rows 可能为 0、负数或 undefined
-  if (cols && cols > 0 && rows && rows > 0) {
-    return { columns: cols, rows }
-  }
-  // 回退默认值
-  return { columns: cols ?? 80, rows: rows ?? 40 }
-}
-
 export function getTerminalSizeSnapshot(): TerminalSizeSnapshot {
-  const snap = getReliableTerminalSize()
-  if (cachedSnapshot?.rows === snap.rows && cachedSnapshot.columns === snap.columns) {
+  const rows = process.stdout.rows ?? 40
+  const columns = process.stdout.columns ?? 80
+  if (cachedSnapshot?.rows === rows && cachedSnapshot.columns === columns) {
     return cachedSnapshot
   }
-  cachedSnapshot = snap
+  cachedSnapshot = { rows, columns }
   return cachedSnapshot
 }
 

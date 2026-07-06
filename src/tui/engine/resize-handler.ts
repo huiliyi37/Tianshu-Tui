@@ -16,7 +16,6 @@
  */
 
 import type { WriteStream } from 'node:tty'
-import { getReliableTerminalSize } from '../use-terminal-size.js'
 
 export interface ResizeHandlerOptions {
   stdout: WriteStream
@@ -41,10 +40,8 @@ export class ResizeHandler {
   constructor(options: ResizeHandlerOptions) {
     this.stdout = options.stdout
     this.debounceMs = options.debounceMs ?? 150
-    // 使用可靠的终端尺寸检测，WSL 中 stdout.columns/rows 可能为 0 或 undefined
-    const snap = getReliableTerminalSize()
-    this.currentCols = snap.columns
-    this.currentRows = snap.rows
+    this.currentCols = this.stdout.columns
+    this.currentRows = this.stdout.rows
     const pollMs = options.pollMs ?? 300
     if (pollMs > 0) {
       this.pollTimer = setInterval(() => this.poll(), pollMs)
@@ -64,8 +61,7 @@ export class ResizeHandler {
 
   /** 获取当前终端尺寸 */
   getSize(): { cols: number; rows: number } {
-    const snap = getReliableTerminalSize()
-    return { cols: snap.columns, rows: snap.rows }
+    return { cols: this.stdout.columns, rows: this.stdout.rows }
   }
 
   /** 移除 resize 监听 */
@@ -90,8 +86,8 @@ export class ResizeHandler {
 
   /** 轮询兜底：尺寸变化时触发防抖（与事件来源共用同一条 debounce 通道）。 */
   private poll(): void {
-    const snap = getReliableTerminalSize()
-    const { columns: cols, rows } = snap
+    const cols = this.stdout.columns
+    const rows = this.stdout.rows
     if (cols !== this.currentCols || rows !== this.currentRows) {
       this.scheduleCallback()
     }
@@ -102,8 +98,8 @@ export class ResizeHandler {
     if (this.timer) clearTimeout(this.timer)
     this.timer = setTimeout(() => {
       this.timer = null
-      const snap = getReliableTerminalSize()
-      const { columns: cols, rows } = snap
+      const cols = this.stdout.columns
+      const rows = this.stdout.rows
       if (cols !== this.currentCols || rows !== this.currentRows) {
         this.currentCols = cols
         this.currentRows = rows

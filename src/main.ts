@@ -436,15 +436,11 @@ async function main() {
     }).toString().trim() || undefined
   } catch { /* 非 git 目录 */ }
 
-  // WSL 中 stdout.columns/rows 可能为 0/undefined，使用可靠检测
-  const { getReliableTerminalSize } = await import('./tui/use-terminal-size.js')
-  const initSnap = getReliableTerminalSize()
-
   app = new TuiApp({
     stdout,
     stdin,
-    cols: initSnap.columns,
-    rows: initSnap.rows,
+    cols: stdout.columns,
+    rows: stdout.rows,
     modelName,
     history: loadHistory(),
     contextWindow: currentModel?.contextWindow,
@@ -1151,9 +1147,6 @@ async function main() {
   }
 
   // ── Clear screen ─────────────────────────────────────────────
-  // 清屏并重置光标到 (1,1)，消除 bootstrap 阶段 stderr/console.error 可能留下的
-  // 光标位置偏移。在 WSL 中 stderr 和 stdout 共享同一光标，若 stderr 写入后光标
-  // 停在非 (1,1) 位置，后续 stdout.write 会从错误位置开始覆盖 → 欢迎屏错位。
   stdout.write('\x1B[2J\x1B[H')
 
   // ── Welcome message（带边框与大标识品牌设计） ─────────────────

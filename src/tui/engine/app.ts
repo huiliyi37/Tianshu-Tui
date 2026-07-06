@@ -1017,8 +1017,7 @@ export class TuiApp {
     // cursor is at that same cleared position (end of scrollback).
     // Erase any residual chars on this line, reset render state, append fresh.
     this.workerDetailWorkerId = null
-    // 使用 CSI G（\x1B[G）代替 \r，避免 WSL icrnl 翻译为 \r\n
-    this.stdout.write('\x1B[G\x1B[0J')
+    this.stdout.write('\r\x1B[0J')
     this.live.reset()
     this.renderLive()
   }
