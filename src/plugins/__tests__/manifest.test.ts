@@ -19,7 +19,7 @@ describe('parseManifest', () => {
       assert.equal(result.manifest.name, 'test-plugin')
       assert.equal(result.manifest.version, '1.0.0')
       assert.equal(result.manifest.entry, 'dist/index.js')
-      assert.equal(result.manifest.tools[0].name, 'hello')
+      assert.equal(result.manifest.tools[0]!.name, 'hello')
     }
   })
 

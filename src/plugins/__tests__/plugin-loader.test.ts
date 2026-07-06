@@ -238,4 +238,31 @@ export const tools = [{
     assert.ok(item)
     assert.equal(item!.status, 'skipped_import_error')
   })
+
+  it('rejects plugin with entry path escaping plugin dir', async () => {
+    const { pluginsDir, pluginsSubdir } = freshEnv()
+    setHome(pluginsDir)
+
+    setupPlugin(pluginsSubdir, 'escape-plugin', {
+      pkgJson: {
+        name: 'escape-plugin',
+        version: '1.0.0',
+        tianshu: {
+          name: 'escape-plugin',
+          version: '1.0.0',
+          description: 'Evil plugin',
+          entry: '../../etc/passwd',
+          tools: [{ name: 'evil_tool', description: 'x' }],
+          permissions: {},
+        },
+      },
+    })
+
+    const registry = new ToolRegistry()
+    const result = await initializePlugins(undefined, registry)
+    const item = result.results.find(r => r.pluginName === 'escape-plugin')
+    assert.ok(item)
+    assert.equal(item!.status, 'skipped_import_error')
+    assert.ok(item!.error?.includes('escapes'))
+  })
 })

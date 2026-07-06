@@ -12,7 +12,8 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { rivetHome } from '../config/paths.js'
 import type { ToolRegistry } from '../tools/registry.js'
 import type { Tool } from '../tools/types.js'
@@ -154,13 +155,22 @@ async function loadOnePlugin(
     return { pluginName: manifest.name, status: 'skipped_disabled' }
   }
 
-  // 4. Resolve entry path
-  const entryPath = join(pluginDir, manifest.entry)
+  // 4. Resolve entry path — must stay within pluginDir (prevent path traversal)
+  const resolvedEntry = resolve(pluginDir, manifest.entry)
+  if (!resolvedEntry.startsWith(pluginDir + sep) && resolvedEntry !== pluginDir) {
+    return {
+      pluginName: manifest.name,
+      status: 'skipped_import_error',
+      error: `Entry path "${manifest.entry}" escapes plugin directory`,
+    }
+  }
 
-  // 5. Dynamic import — WARNING: executes plugin code in-process
+  // 5. Dynamic import — use pathToFileURL for cross-platform safety.
+  //    Windows absolute paths (C:\...) are interpreted as URL protocol by
+  //    ESM, causing ERR_UNSUPPORTED_ESM_URL_SCHEME.
   let pluginModule: unknown
   try {
-    pluginModule = await import(entryPath)
+    pluginModule = await import(pathToFileURL(resolvedEntry).href)
   } catch (err) {
     return {
       pluginName: manifest.name,

@@ -207,7 +207,6 @@ async function main() {
     const { createWorktreeBaseline } = await import('./agent/worktree-baseline.js')
     const { createHeadlessCoordinator } = await import('./agent/headless-coordinator.js')
     const { initializePlugins } = await import('./plugins/plugin-loader.js')
-    const { ToolRegistry } = await import('./tools/registry.js')
 
     const parsed = parseCliArgs(args)
     // Goal mode drives the same AgentLoop + GoalTracker as the TUI /goal command;
@@ -241,12 +240,18 @@ async function main() {
     // narrowing — a closure-only assignment would otherwise keep it typed as null.
     const goalTrackerRef: { current: GoalTrackerInstance | null } = { current: null }
 
-    // Load plugins (async, before creating agent — cache discipline: only at session start)
-    const pluginRegistry = new ToolRegistry()
+    // Load plugins (async, before creating agent — cache discipline: only at session start).
+    // Use a pre-filled registry so conflict detection runs against the real built-in tool set,
+    // not an empty set. (Wave 1 regression: empty PluginRegistry let every plugin pass.)
+    const pluginRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
     const pluginResult = await initializePlugins(cfg.plugins, pluginRegistry)
     if (pluginResult.warnings.length > 0) {
       process.stderr.write(`[plugins] ${pluginResult.loaded}/${pluginResult.scanned} loaded; warnings: ${pluginResult.warnings.join('; ')}\n`)
     }
+
+    // Extract only the plugin tools (not built-ins) for the real registry.
+    const builtinNames = new Set(createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools }).getAllNames())
+    const pluginTools = pluginRegistry.getAll().filter(t => !builtinNames.has(t.definition.name))
 
     const result = await runHeadless({
       prompt: effectivePrompt,
@@ -255,8 +260,8 @@ async function main() {
       createAgent: () => {
         const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
 
-        // Register plugin tools (loaded during startup)
-        for (const tool of pluginRegistry.getAll()) {
+        // Register plugin tools (loaded during startup, already conflict-checked)
+        for (const tool of pluginTools) {
           toolRegistry.register(tool)
         }
         for (const name of pluginResult.suppressTools) {
