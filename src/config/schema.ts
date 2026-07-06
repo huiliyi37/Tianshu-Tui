@@ -128,7 +128,10 @@ export const antiAnchoringSchema = z.object({
 /** Tier 2 LLM speculation: during a tool-batch await window, fire a side-path
  *  LLM request sharing the main session prefix (near-free on DeepSeek prefix
  *  cache) to predict the next read-only tool calls, feeding ShadowQueue.
- *  Default off — opt-in. */
+ *  ⚠ INERT since 2026-07-07: the speculative pre-execution chain is sealed
+ *  (stale-read incident — ShadowQueue served pre-edit file content); the
+ *  engine is no longer constructed regardless of this setting. Schema kept so
+ *  existing configs still parse. See P3Config.speculativeEnabled. */
 export const llmSpeculationSchema = z.preprocess(
   value => {
     if (value === true) return { enabled: true }
@@ -265,7 +268,7 @@ export const agentSchema = z.object({
   checkpointEveryTurns: z.number().int().min(0).default(0),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
-  /** Tier 2 LLM speculation (shared-prefix next-tool prediction). Default off. */
+  /** Tier 2 LLM speculation (shared-prefix next-tool prediction). INERT — chain sealed 2026-07-07. */
   llmSpeculation: llmSpeculationSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */
   teamSchedulerBanditEnabled: z.boolean().default(false),

@@ -20,6 +20,16 @@ export type { EffortShadowRecord, RewardInput }
 
 export interface P3Config {
   execute?: (tool: string, target: string) => Promise<string>
+  /**
+   * Master switch for the speculative pre-execution chain (miner→IdleSpec,
+   * physarum/LLM predictions→ShadowQueue). Default OFF — SEALED 2026-07-07.
+   * Serving was already cut on 2026-07-06 (ShadowQueue has no mtime/TTL
+   * validation and served pre-edit file content as a live read_file result);
+   * with serving gone the background pre-reads were pure cost, so the whole
+   * chain is now inert unless explicitly enabled (unit tests only).
+   * Re-enable in production only after ShadowQueue entries record mtime and
+   * checkHit re-stats before returning.
+   */
   speculativeEnabled?: boolean
   /** Background agent task executor */
   backgroundExecute?: (task: BackgroundTask) => Promise<string>
@@ -58,10 +68,12 @@ export class P3Integration {
   readonly bandit: LinUCBBandit
   readonly effortBandit: LinUCBBandit
   readonly jit: AgentJIT
+  private readonly speculativeEnabled: boolean
   private lastTool: string | null = null
   private _effortShadowRecords = new Map<string, EffortShadowRecord>()
 
   constructor(config: P3Config = {}) {
+    this.speculativeEnabled = config.speculativeEnabled === true
     this.miner = new ToolPatternMiner()
     this.queue = new ShadowQueue({
       execute: config.execute ?? (async () => ''),
@@ -91,19 +103,21 @@ export class P3Integration {
     if (this.lastTool) {
       this.miner.record(this.lastTool, toolName, { targetPath: currentTarget })
     }
-    this.idleSpec.onToolStart(toolName)
+    // Speculative pre-execution SEALED by default — see P3Config.speculativeEnabled.
+    if (this.speculativeEnabled) this.idleSpec.onToolStart(toolName)
   }
 
-  /** Shadow telemetry only — tool-pipeline calls this to count would-be hits
-   *  but NEVER serves the result to the model (2026-07-06 stale-read incident:
-   *  ShadowQueue entries carry no mtime/TTL, so a pre-edit read was served
-   *  after three file mutations). Re-enable serving only after checkHit gains
-   *  an mtime re-stat comparison. */
+  /** SEALED 2026-07-07 (no production caller) — results are NEVER served to the
+   *  model (2026-07-06 stale-read incident: ShadowQueue entries carry no
+   *  mtime/TTL, so a pre-edit read was served after three file mutations).
+   *  Re-enable only after checkHit gains an mtime re-stat comparison. */
   checkSpeculativeCache(toolName: string, target: string): string | undefined {
+    if (!this.speculativeEnabled) return undefined
     return this.idleSpec.checkCache(toolName, target)
   }
 
   enqueuePhysarumFilePredictions(input: PhysarumFilePredictionInput): void {
+    if (!this.speculativeEnabled) return
     const toolPredictions = this.miner.predict(input.afterToolName, 0)
     const topToolPrediction = toolPredictions[0]
     if (topToolPrediction && topToolPrediction.tool !== 'read_file') return
@@ -125,6 +139,7 @@ export class P3Integration {
    *  ShadowQueue re-applies the read-only whitelist and minProbability gate, so
    *  this is a thin pass-through that just tags the source. */
   enqueueLlmPredictions(predictions: ToolPrediction[]): void {
+    if (!this.speculativeEnabled) return
     for (const prediction of predictions) {
       this.queue.enqueue({ ...prediction, source: 'llm' })
     }

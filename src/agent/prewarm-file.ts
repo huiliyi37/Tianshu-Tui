@@ -15,6 +15,13 @@ export interface PrewarmValue {
    * edit between prewarm and the real read never serves stale content.
    */
   mtimeMs: number
+  /**
+   * stat().size at prewarm time — second staleness signal alongside mtime,
+   * hardening against coarse-mtime filesystems (exFAT: 2s granularity) where
+   * an edit inside the same timestamp window keeps mtime identical. Mirrors
+   * ReadHistoryEntry.sizeBytes in read-file.ts.
+   */
+  sizeBytes: number
 }
 
 /** Check if a read_file call can use prewarm cache (only full-file reads). */
@@ -43,6 +50,7 @@ export async function buildPrewarmValue(cwd: string, filePath: string): Promise<
       content: payload.rawContent,
       uiContent: payload.uiContent,
       mtimeMs: fileStat.mtimeMs,
+      sizeBytes: fileStat.size,
     }
   } catch {
     return undefined
@@ -71,10 +79,10 @@ export function consumePrewarm(cache: PrewarmCache, canonicalPath: string): Prew
   const value = cache.get(canonicalPath)
   if (!value) return null
   try {
-    const liveMtime = statSync(canonicalPath).mtimeMs
-    if (liveMtime !== value.mtimeMs) {
+    const live = statSync(canonicalPath)
+    if (live.mtimeMs !== value.mtimeMs || live.size !== value.sizeBytes) {
       cache.invalidate(canonicalPath)
-      return null // file changed externally since prewarm
+      return null // file changed externally since prewarm (mtime OR size moved)
     }
     return value
   } catch {

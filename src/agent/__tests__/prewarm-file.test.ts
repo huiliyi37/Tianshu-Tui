@@ -119,4 +119,16 @@ describe('consumePrewarm', () => {
     // The stale entry should have been invalidated.
     assert.equal(cache.has(value.canonicalPath), false)
   })
+
+  it('returns null when size changed even if mtime is identical (coarse-mtime filesystems)', async () => {
+    writeFileSync(join(dir, 'c.ts'), 'vvvv1\n')
+    const cache = new PrewarmCache()
+    const value = await buildPrewarmValue(dir, 'c.ts')
+    assert.ok(value)
+    // Simulate an exFAT-style same-timestamp edit: fake the cached entry's
+    // sizeBytes so it diverges from the live file while mtime still matches.
+    cache.set(value.canonicalPath, { ...value, sizeBytes: value.sizeBytes + 7 })
+    assert.equal(consumePrewarm(cache, value.canonicalPath), null, 'size mismatch must not serve cached content')
+    assert.equal(cache.has(value.canonicalPath), false, 'stale entry must be invalidated')
+  })
 })

@@ -44,9 +44,33 @@ describe('P3Integration', () => {
     assert.equal(readFilePred.likelyTarget, 'src/foo.ts')
   })
 
-  it('enqueues physarum file predictions as read_file speculation', () => {
+  it('speculative chain is inert by default (SEALED 2026-07-07)', async () => {
     const executed: string[] = []
     const p3 = new P3Integration({
+      execute: async (tool, target) => {
+        executed.push(`${tool}:${target}`)
+        return 'prefetched'
+      },
+      // speculativeEnabled deliberately unset — production shape
+    })
+
+    p3.onToolStart('grep')
+    p3.enqueuePhysarumFilePredictions({
+      afterToolName: 'read_file',
+      predictions: [{ file: 'src/next.ts', score: 2 }],
+    })
+    p3.enqueueLlmPredictions([{ tool: 'read_file', likelyTarget: 'src/a.ts', probability: 0.9 }])
+    await new Promise(r => setTimeout(r, 20))
+
+    assert.equal(p3.queue.pending(), 0, 'nothing may be enqueued when sealed')
+    assert.deepEqual(executed, [], 'nothing may be pre-executed when sealed')
+    assert.equal(p3.checkSpeculativeCache('read_file', 'src/next.ts'), undefined)
+  })
+
+  it('enqueues physarum file predictions as read_file speculation (opt-in only)', () => {
+    const executed: string[] = []
+    const p3 = new P3Integration({
+      speculativeEnabled: true,
       execute: async (tool, target) => {
         executed.push(`${tool}:${target}`)
         return 'prefetched'
@@ -65,6 +89,7 @@ describe('P3Integration', () => {
   it('does not enqueue physarum file predictions when tool pattern points away from read_file', () => {
     const executed: string[] = []
     const p3 = new P3Integration({
+      speculativeEnabled: true,
       execute: async (tool, target) => {
         executed.push(`${tool}:${target}`)
         return 'prefetched'
@@ -84,6 +109,7 @@ describe('P3Integration', () => {
   it('enqueueLlmPredictions passes read-only predictions to ShadowQueue tagged as llm', async () => {
     const executed: string[] = []
     const p3 = new P3Integration({
+      speculativeEnabled: true,
       execute: async (tool, target) => {
         executed.push(`${tool}:${target}`)
         return 'prefetched'
@@ -102,13 +128,11 @@ describe('P3Integration', () => {
     assert.equal(stats.llm.enqueued, 1)
   })
 
-  it('AgentLoop validates speculative targets before executing file-capable tools', async () => {
+  it('AgentLoop constructs a sealed P3 with no real execute callback (2026-07-07 seal)', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'p3-spec-safe-'))
-    const outside = mkdtempSync(join(tmpdir(), 'p3-spec-outside-'))
     try {
       mkdirSync(join(cwd, 'src'), { recursive: true })
       writeFileSync(join(cwd, 'src', 'ok.ts'), 'export const ok = 1\n')
-      writeFileSync(join(outside, 'secret.ts'), 'secret\n')
 
       const registry = new ToolRegistry()
       registry.register(READ_FILE_TOOL)
@@ -122,14 +146,17 @@ describe('P3Integration', () => {
         fsWatcherEnabled: false,
       }, new SessionContext(), cwd)
 
-      const unsafe = await (loop.p3 as any).queue.deps.execute('read_file', join(outside, 'secret.ts'))
-      const safe = await (loop.p3 as any).queue.deps.execute('read_file', 'src/ok.ts')
+      // Even if something enqueued, the default execute is a no-op that can
+      // never read the filesystem — the stale-read hazard is structurally gone.
+      const result = await (loop.p3 as any).queue.deps.execute('read_file', 'src/ok.ts')
+      assert.equal(result, '')
 
-      assert.equal(unsafe, '')
-      assert.ok(safe.includes('export const ok = 1'))
+      // And nothing enqueues in the first place: physarum/LLM entry points are sealed.
+      loop.p3.enqueueLlmPredictions([{ tool: 'read_file', likelyTarget: 'src/ok.ts', probability: 0.9 }])
+      loop.p3.enqueuePhysarumFilePredictions({ afterToolName: 'read_file', predictions: [{ file: 'src/ok.ts', score: 2 }] })
+      assert.equal(loop.p3.queue.pending(), 0)
     } finally {
       rmSync(cwd, { recursive: true, force: true })
-      rmSync(outside, { recursive: true, force: true })
     }
   })
 

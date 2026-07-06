@@ -662,10 +662,13 @@ export const READ_FILE_TOOL: Tool = {
     if (unchangedRepeat) {
       const priorSame = readHistory.get(dedupKey!)
       const fullPrior = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical!))
+      // 措辞注意：不要写「回看上文」——历史 tool_result 可能已被压缩/修剪，
+      // 该指引曾诱发回看无果→再读的循环。警告总是与本次全文一起返回，
+      // 直接指向随附内容即可。
       if (priorSame && priorSame.mtimeMs === currentMtimeMs) {
-        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过，内容未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
+        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过且未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。内容附在下方；后续请勿重复读取未变更的文件。\n── read-dedup ──`
       } else if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) {
-        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已完整读取过，内容未变更 (${fullPrior.totalLines} lines, ${fullPrior.modelBytes} bytes)。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
+        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已完整读取过且未变更 (${fullPrior.totalLines} lines, ${fullPrior.modelBytes} bytes)。内容附在下方；后续请勿重复读取未变更的文件。\n── read-dedup ──`
       }
     }
 

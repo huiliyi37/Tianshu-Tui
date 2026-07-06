@@ -1101,13 +1101,12 @@ export async function executeToolUse(
     const priorReadLoopPlaceholders = countRecentReadLoopPlaceholders(deps.trajectory.getEntries(), toolTarget)
     deps.p3?.onToolStart(tu.name, toolTarget)
 
-    // P3-C speculative serving is DISABLED (2026-07-06 事故): ShadowQueue 缓存
-    // 无 mtime/TTL 校验，预读结果在文件多次变更后仍被当作 read_file 结果返回
-    // （TDX 会话：三次编辑前的旧内容被端出，模型推理"文件被回退"并连锁触发
-    // old_string not found / hash_edit stale / 重读风暴）。checkSpeculativeCache
-    // 仍然调用以保留影子命中率遥测（speculationStats），但结果绝不服务给模型。
-    // 重新启用前提：ShadowQueue 条目记录投机时 mtime，checkHit 现场 stat 比对。
-    deps.p3?.checkSpeculativeCache(tu.name, toolTarget)
+    // P3-C speculative chain SEALED (2026-07-06 服务路径切除 → 2026-07-07 全链
+    // 关停): ShadowQueue 缓存无 mtime/TTL 校验，预读结果曾在文件多次变更后仍被
+    // 当作 read_file 结果返回（TDX 事故：模型推理"文件被回退"并连锁触发
+    // old_string not found / hash_edit stale / 重读风暴）。服务切除后影子遥测
+    // 观察一日即定论：预执行纯耗资源、命中率数据不改变重启前提（mtime 校验
+    // 无论如何都要做），遂整链封存。重启契约见 P3Config.speculativeEnabled。
 
     const traceId = tu.id
     traceStore = startTraceEvent(traceStore, {

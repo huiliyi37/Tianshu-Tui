@@ -7,8 +7,11 @@
  * Predictions feed the existing ShadowQueue speculative execution chain.
  * NOTE (2026-07-06): tool-pipeline no longer SERVES ShadowQueue results to the
  * model — the cache had no mtime/TTL validation and served pre-edit file
- * content as a live read_file result (stale-read incident). The chain now runs
- * as shadow telemetry only (speculationStats hit rates).
+ * content as a live read_file result (stale-read incident).
+ * SEALED (2026-07-07): loop-factory no longer constructs this engine at all —
+ * with serving cut, an opted-in engine would burn side-path LLM calls for
+ * nothing. Module + unit tests kept for the re-enable contract described in
+ * P3Config.speculativeEnabled (ShadowQueue must gain mtime validation first).
  *
  * Hard boundaries:
  * - Never mutates the main request or its messages array (prefix safety).

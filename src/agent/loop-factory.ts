@@ -7,7 +7,6 @@ import { createRuntimeHookContext, RuntimeHookPipeline } from './runtime-hooks.j
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createUserHooksBridge, runOnErrorHooks } from './hooks/user-hooks-bridge.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
-import { createLlmSpeculationEngine, normalizeLlmSpeculationConfig } from './llm-speculation.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
 import { setGeneralLedgerTelemetrySink } from './general-ledger.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
@@ -517,11 +516,10 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     meridianIndexer: self.config.meridianIndexer,
     physarumFileAccess: {
       getPhysarum: () => self.immuneHook.getPhysarum(),
+      // Predictions feed ONLY the prewarm cache (mtime+size validated at
+      // consume time). The ShadowQueue enqueue was removed with the 2026-07-07
+      // speculative-chain seal — see P3Config.speculativeEnabled.
       onPredictions: batch => {
-        self.p3.enqueuePhysarumFilePredictions({
-          afterToolName: batch.afterToolName,
-          predictions: batch.predictions,
-        })
         void batchPrewarm(
           self.cwd,
           batch.predictions.map(prediction => prediction.file),
@@ -710,23 +708,13 @@ export function buildProgressDigest(input: ProgressDigestInput): string {
 }
 
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
-  // Tier 2 LLM speculation: only constructed when enabled — the default path
-  // pays zero cost (no engine, no dep, orchestrator's optional call is a no-op).
-  const llmSpecConfig = normalizeLlmSpeculationConfig(self.config.llmSpeculation)
-  const recordSidePathUsage = createSidePathUsageRecorder(self)
-  const llmSpeculation = llmSpecConfig.enabled
-    ? createLlmSpeculationEngine({
-        client: self.config.client,
-        config: llmSpecConfig,
-        enqueue: predictions => { self.p3.enqueueLlmPredictions(predictions) },
-        writeTelemetry: record => { self.telemetryWriter.write(record) },
-        recordUsage: usage => { recordSidePathUsage('llm-speculation', usage) },
-      })
-    : null
-  // Expose the engine so postSession can persist its fired/error counters
-  // alongside the shadow-queue speculationStats (meta observability).
-  self.llmSpeculationEngine = llmSpeculation
-
+  // Tier 2 LLM speculation: SEALED with the speculative chain (2026-07-07).
+  // The engine's only consumer was the ShadowQueue pre-execution path; with
+  // serving cut (2026-07-06 stale-read incident) and enqueue gated off, an
+  // opted-in engine would burn side-path LLM calls for nothing. The engine
+  // module + unit tests stay; `speculateDuringBatch` is simply never injected
+  // (orchestrator's optional call stays a no-op). Do NOT reconstruct it until
+  // the re-enable contract in P3Config.speculativeEnabled is met.
   return new TurnOrchestrator({
     // === Lifecycle ===
     initializeRun: (userInput, callbacks, images) => self.turnStepProducer.initializeRun(userInput, callbacks, images),
@@ -784,14 +772,6 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === Sub-controllers ===
     streamTurn: (params) => self.turnStream!.streamTurn(params),
     executeBatch: (params) => self.toolExecution.executeBatch(params),
-    ...(llmSpeculation ? {
-      speculateDuringBatch: (params: {
-        request: import('../api/oai-types.js').OaiChatRequest
-        toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>
-        turn: number
-        signal?: AbortSignal
-      }) => { llmSpeculation.maybeSpeculate(params) },
-    } : {}),
     completeTurn: (params) => self.turnCompletion.complete(params),
     appendTurnResult: (turn) => { self.planTraceCoordinator.appendTurnResult(turn) },
     onCacheAdvisorTurnEnd: (params) => { self.cacheAdvisor.onTurnEnd(params) },

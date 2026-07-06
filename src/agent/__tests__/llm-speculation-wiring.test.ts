@@ -10,6 +10,7 @@ import { PromptEngine } from '../../prompt/engine.js'
 import type { OaiChatRequest } from '../../api/oai-types.js'
 import type { StreamClient, StreamCallbacks } from '../../api/stream-client.js'
 
+
 function makeEngine(cwd: string) {
   return new PromptEngine({
     model: 'deepseek-v4-pro',
@@ -43,16 +44,6 @@ function makeLoop(cwd: string, opts: { client: StreamClient; llmSpeculation?: un
   }, new SessionContext(), cwd)
 }
 
-const SLOW_BATCH = [{ id: 't1', name: 'bash', input: { command: 'npm test' } }]
-
-function makeRequest(): OaiChatRequest {
-  return {
-    model: 'deepseek-v4',
-    messages: [{ role: 'user', content: 'task' }],
-    max_tokens: 4096,
-  }
-}
-
 describe('LLM speculation wiring (loop-factory → turn-orchestrator → p3)', () => {
   it('does not inject speculateDuringBatch when config is off (default)', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'llm-spec-wiring-'))
@@ -65,25 +56,20 @@ describe('LLM speculation wiring (loop-factory → turn-orchestrator → p3)', (
     }
   })
 
-  it('injects speculateDuringBatch when enabled and routes predictions into p3 ShadowQueue', async () => {
+  it('does not inject speculateDuringBatch even when config opts in (chain SEALED 2026-07-07)', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'llm-spec-wiring-'))
     try {
       const client = mockClient('[{"tool":"read_file","target":"src/next.ts","probability":0.9}]')
       const loop = makeLoop(cwd, { client, llmSpeculation: { enabled: true } })
       const deps = (loop as unknown as { turnOrchestrator: { deps: Record<string, unknown> } }).turnOrchestrator['deps']
-      const speculate = deps.speculateDuringBatch as (params: unknown) => void
-      assert.equal(typeof speculate, 'function', 'enabled config must inject the dep')
 
-      speculate({ request: makeRequest(), toolUses: SLOW_BATCH, turn: 1 })
-      // fire-and-forget: wait for the speculative call + enqueue to settle
-      const deadline = Date.now() + 2_000
-      while (loop.p3.queue.statsBySource().llm.enqueued === 0) {
-        if (Date.now() > deadline) break
-        await new Promise(r => setTimeout(r, 5))
-      }
-
-      assert.equal(client.calls.length, 1, 'speculative LLM call fired')
-      assert.equal(loop.p3.queue.statsBySource().llm.enqueued, 1, 'prediction reached ShadowQueue tagged as llm')
+      // The engine's only consumer was ShadowQueue pre-execution; with serving
+      // cut (stale-read incident) an opted-in engine would burn side-path LLM
+      // calls for nothing — so the factory never constructs it anymore.
+      assert.equal(deps.speculateDuringBatch, undefined, 'sealed chain must not inject the dep')
+      assert.equal(loop.llmSpeculationEngine, null, 'engine must not be constructed')
+      assert.equal(client.calls.length, 0, 'no speculative LLM call may fire')
+      assert.equal(loop.p3.queue.statsBySource().llm.enqueued, 0)
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }

@@ -9,9 +9,12 @@ import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 
 /**
- * postSession must persist ShadowQueue per-source speculation stats into the
- * session .meta.json — this is the cross-session evidence channel for the
- * "should llmSpeculation default on" decision (bypasses RIVET_DEBUG_TELEMETRY).
+ * Speculative chain SEALED 2026-07-07: production loops construct P3 without
+ * speculativeEnabled, so enqueue entry points are no-ops and postSession must
+ * never write speculationStats into .meta.json. (Before the seal this file
+ * asserted the opposite — stats were the evidence channel for the
+ * "should llmSpeculation default on" decision. That question is closed:
+ * serving was cut after the stale-read incident, so pre-execution is pure cost.)
  */
 describe('speculation stats → session meta', () => {
   let cwd: string
@@ -50,7 +53,7 @@ describe('speculation stats → session meta', () => {
     }, new SessionContext(), cwd)
   }
 
-  it('writes speculationStats into meta.json when sources saw activity', async () => {
+  it('sealed production loop: enqueue is a no-op and meta carries no speculationStats', async () => {
     const loop = makeLoop('spec-meta-active')
     loop.p3.enqueueLlmPredictions([{ tool: 'read_file', likelyTarget: 'src/a.ts', probability: 0.9 }])
     await new Promise(r => setTimeout(r, 20))
@@ -58,8 +61,7 @@ describe('speculation stats → session meta', () => {
     await loop.runPostSession({} as never)
 
     const meta = JSON.parse(readFileSync(join(sessionDir, 'spec-meta-active.meta.json'), 'utf-8'))
-    assert.ok(meta.speculationStats, 'speculationStats must be persisted')
-    assert.equal(meta.speculationStats.llm.enqueued, 1)
+    assert.equal(meta.speculationStats, undefined, 'sealed chain must not persist speculationStats')
   })
 
   it('does not write speculationStats when there was no speculation activity', async () => {

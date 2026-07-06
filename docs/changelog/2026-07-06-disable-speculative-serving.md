@@ -28,3 +28,6 @@ P3 投机执行链（ToolPatternMiner / physarum / LLM speculation → `ShadowQu
 
 - 同批修复：pointer-guard 三工具接入、`hash_edit` stale 诊断改进、MistakeNotebook anchors 消毒（见同日提交）。
 - 遗留（未修）：read-ref 指回的历史消息若已被压缩/指针化，应重发全文而非只给引用。
+- **后续（2026-07-07）**：影子遥测观察一日后整链封存——后台预执行、physarum/LLM 入队、
+  遥测调用点全部惰性化，见 `2026-07-07-speculative-chain-seal.md`。read-ref 遗留项
+  已由同日「read-ref 压缩失效三层修复」处理。
