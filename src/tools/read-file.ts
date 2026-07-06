@@ -13,6 +13,7 @@ import { debugLog } from '../utils/debug.js'
 import { decideReadPolicy } from './read-policy.js'
 import { foldCode } from '../compact/code-fold.js'
 import { canUsePrewarmForRead, consumePrewarm } from '../agent/prewarm-file.js'
+import { canonicalPathKey } from '../path-format.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: Promise<GitignoreFilter>; ts: number }>()
@@ -152,15 +153,18 @@ export function wasFileEditedBySession(canonicalPath: string, sessionId?: string
 export function __resetSessionFileEditsForTests(): void {
   sessionFileEdits.clear()
 }
+// 键路径统一走 canonicalPathKey（win32 下分隔符归一 + lowercase）：Windows 上
+// D:\a / D:/a / d:/a 是同一文件，字符串键却是三个——读表漏命中事小，编辑后
+// invalidateReadHistory 的后缀匹配失手 → read-ref 拿旧内容说"未变"才是要害。
 function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limit: number | undefined, sessionId?: string): string {
-  return `${sessionId ?? ''}::${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
+  return `${sessionId ?? ''}::${canonicalPathKey(cwd)}::${canonicalPathKey(canonicalPath)}::${offset}::${limit ?? 'all'}`
 }
 
 /** Key for fileReadHistory / lastKnownFileState / sessionFileEdits — scoped by
  *  sessionId so concurrent sessions in the same cwd (fork/worker) don't see
  *  each other's "already read"/"already edited" state. */
 function fileHistoryKey(sessionId: string | undefined, canonicalPath: string): string {
-  return `${sessionId ?? ''}::${canonicalPath}`
+  return `${sessionId ?? ''}::${canonicalPathKey(canonicalPath)}`
 }
 
 function trimReadHistory(): void {
@@ -232,12 +236,16 @@ export function noteFileObserved(canonicalPath: string, mtimeMs: number, sizeByt
  *  claims and artifact-backed slices for this path must die. Cross-session
  *  deletion is safe — those entries would fail the mtime+size check anyway. */
 export function invalidateReadHistory(canonicalPath: string): void {
-  const suffix = `::${canonicalPath}`
+  // canonicalPathKey 归一后再匹配：跨会话 file_changed 事件带来的路径可能与
+  // 本进程建键时的大小写/分隔符不同（另一进程、另一种 shell），不归一会静默
+  // 失效——正是 Windows 上 read-ref 中毒的复发通道。
+  const keyPath = canonicalPathKey(canonicalPath)
+  const suffix = `::${keyPath}`
   for (const key of fileReadHistory.keys()) {
     if (key.endsWith(suffix)) fileReadHistory.delete(key)
   }
   // readHistory keys embed offset/limit after the path: match the path segment.
-  const segment = `::${canonicalPath}::`
+  const segment = `::${keyPath}::`
   for (const key of readHistory.keys()) {
     if (key.includes(segment)) readHistory.delete(key)
   }
