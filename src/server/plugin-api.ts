@@ -13,7 +13,6 @@ import { isAuthorizedRequest } from './auth.js'
 import { loadConfig, saveConfig } from '../config/manager.js'
 import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
 import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
-import { serverLogger } from './logger.js'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -62,7 +61,6 @@ export function buildPluginRoutes(apiToken?: string): Record<string, RouteHandle
 
       const result = await installPlugin(input.path)
       if (result.ok) {
-        serverLogger.info({ msg: '[plugins] installed', name: result.manifest.name, path: input.path })
         return {
           status: 200,
           body: {
@@ -94,7 +92,6 @@ export function buildPluginRoutes(apiToken?: string): Record<string, RouteHandle
       cfg.plugins.enabled[input.name] = input.enabled
       saveConfig(cfg)
 
-      serverLogger.info({ msg: '[plugins] toggled', name: input.name, enabled: input.enabled })
       return {
         status: 200,
         body: {
@@ -115,7 +112,6 @@ export function buildPluginRoutes(apiToken?: string): Record<string, RouteHandle
 
       const result = removePlugin(name)
       if (result.ok) {
-        serverLogger.info({ msg: '[plugins] removed', name })
         return { status: 200, body: { ok: true, message: `Removed plugin "${name}".` } }
       }
       return { status: 404, body: { ok: false, error: result.error } }
