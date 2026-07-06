@@ -455,6 +455,12 @@ export const uiSchema = z.object({
     z.literal('auto'),
     z.string().regex(/^custom:[A-Za-z0-9_-]+$/),
   ]).optional(),
+  /** Spinner verb pool override. With mode 'replace' (default) it replaces the
+   *  built-in pool; 'append' extends it. Empty array = keep defaults. */
+  spinnerVerbs: z.array(z.string().min(1)).optional(),
+  spinnerVerbsMode: z.enum(['replace', 'append']).optional(),
+  /** Accessibility: freeze spinner animation frames and verb rotation. */
+  reducedMotion: z.boolean().optional(),
 }).default({})
 
 /** Project verify command declarations (A1). Machine-readable source of truth

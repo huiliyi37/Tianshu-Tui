@@ -38,6 +38,7 @@ import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, listCustomThemes, resolveThemeEntry, type ThemeName } from './tui/theme.js'
 import { loadCustomThemes } from './tui/theme-custom.js'
 import { detectTerminalBackground, autoThemeFor } from './tui/theme-detect.js'
+import { configureSpinnerVerbs, setReducedMotion } from './tui/format/spinner-status.js'
 import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
 import { listPlansSync } from './plan/plan-store.js'
 import type { PlanPickerEntry } from './tui/format/overlay.js'
@@ -443,6 +444,12 @@ async function main() {
   }
   if (!setTheme(themeName)) setTheme('tianshu')
   const theme = getTheme()
+
+  // ── Spinner 词池 / reducedMotion 配置接线 ─────────────────────
+  if (ctx.config.ui?.spinnerVerbs?.length) {
+    configureSpinnerVerbs(ctx.config.ui.spinnerVerbs, ctx.config.ui.spinnerVerbsMode ?? 'replace')
+  }
+  if (ctx.config.ui?.reducedMotion) setReducedMotion(true)
 
   process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
   process.stderr.write(`[T9] Session: ${ctx.sessionId.slice(0, 8)}...\n`)
