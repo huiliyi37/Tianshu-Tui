@@ -1,6 +1,9 @@
 # Action-Intent Gate：扩展检测到只读工具轮
 
-> **状态：调研完成，待实现**
+> **状态：已实施（2026-07-06）。** 实现落在 `action-intent-detector.ts`
+> （`hasWriteActionIntent` + `turnUsedOnlyReadTools` + 祈使收尾检测）与
+> `turn-orchestrator.ts` tool-bearing 完成路径。与本方案的偏差见文末
+> 「实施记录与偏差」。
 
 ## 问题
 
@@ -182,6 +185,28 @@ const READ_ONLY_TOOLS = new Set([
 - 构造一轮：文本以"让我看看这个文件"结尾，tool calls 是 `read_file`，outputEfficiency = 0.15 → 不应注入（outputEfficiency 兜底）
 - 构造一轮：文本以"接下来修改 loop.ts"结尾，tool calls 含 `write_file` → 不应注入（有写工具）
 - 回归：no-tool 轮 action-intent 仍正常触发
+
+## 实施记录与偏差（2026-07-06）
+
+按最少改动方案落地，两处设计偏差：
+
+1. **不用 `outputEfficiency` 阈值，改用写侧动词分类**。方案里 outputEfficiency < 0.05
+   的作用是压制「让我看看这个文件 + read_file」这类读侧承诺的误报。实现改为
+   `hasWriteActionIntent()`——只读轮的闸门只认**写侧**承诺（修改/重写/更新/提交/
+   跑测试…），读侧承诺（查/搜/读/看）配只读工具是合法调研组合，直接不触发。
+   这把误报表里唯一的 ⚠️ 场景确定性消除，且不需要给 orchestrator 接认知镜像
+   指标管道（getLatestOutputEfficiency 不存在，新增管道超出最少改动）。
+2. **同时补了动词开头的祈使收尾检测**（`hasImperativeActionTail`）：
+   「全部正确。跑 typecheck + 测试。」这类无承诺词、裸动词宣布下一步的收尾
+   （4df36bcd 现场）旧 ACTION_PROMISE_PATTERN 完全漏检。规则：最后一句以
+   动作动词开头、≤80 字符、句内无完成态标记（了/已/通过/done…）。
+   no-tool 闸门（hasActionIntent）与只读轮闸门（hasWriteActionIntent）共享此检测。
+
+其余按方案：TOOL_VERB_PATTERN 扩展（重写/更新/写入），READ_ONLY 分类用
+反向白名单 `WRITE_ADVANCING_TOOLS`（未知工具视为只读，漏判代价只是一次
+多余 nudge），delegate 按 profile 写能力分类，与 no-tool 闸门共享
+`actionIntentFiredThisRun` 一次性配额。测试：`action-intent-detector.test.ts`
+43 项（祈使收尾/写意图/只读轮分类各成组）。
 
 ## 与现有系统的关系
 

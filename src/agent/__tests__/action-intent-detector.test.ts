@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { hasActionIntent } from '../action-intent-detector.js'
+import {
+  hasActionIntent,
+  hasImperativeActionTail,
+  hasWriteActionIntent,
+  turnUsedOnlyReadTools,
+} from '../action-intent-detector.js'
 
 describe('hasActionIntent', () => {
   // ── True positives: 行动承诺 + 工具动词 ──
@@ -83,5 +88,91 @@ describe('hasActionIntent', () => {
   })
   it('行动承诺在文本开头而非尾部时仍检测', () => {
     assert.ok(hasActionIntent('让我 edit loop.ts\n\n上面是我要做的修改'))
+  })
+})
+
+describe('hasImperativeActionTail（动词开头的祈使收尾，4df36bcd）', () => {
+  it('「全部正确。跑 typecheck + 测试。」触发（无承诺词、裸动词宣布）', () => {
+    assert.ok(hasImperativeActionTail('全部正确。跑 typecheck + 测试。'))
+    assert.ok(hasActionIntent('全部正确。跑 typecheck + 测试。'), 'hasActionIntent 应同步覆盖')
+  })
+  it('「更新计划，方向修正为源头量化 + 净删除」触发（spec T3 现场）', () => {
+    assert.ok(hasImperativeActionTail('四条全核实完了。\n更新计划，方向修正为源头量化 + 净删除'))
+  })
+  it('「现在重写计划，修正方向」触发（spec T4 现场）', () => {
+    assert.ok(hasImperativeActionTail('现在重写计划，修正方向：源头量化 + 净删除'))
+  })
+  it('完成态汇报不触发：「测试全部通过。」', () => {
+    assert.ok(!hasImperativeActionTail('测试全部通过。'))
+  })
+  it('完成态汇报不触发：「跑了一遍 typecheck，没有错误。」', () => {
+    assert.ok(!hasImperativeActionTail('跑了一遍 typecheck，没有错误。'))
+  })
+  it('非动词开头的陈述不触发', () => {
+    assert.ok(!hasImperativeActionTail('这个方案的核心思路是在 no-tool 路径上插入检查'))
+    assert.ok(!hasImperativeActionTail('我来了，正在运行测试环境'))
+  })
+  it('超长尾句不触发（长句多为陈述而非祈使）', () => {
+    assert.ok(!hasImperativeActionTail('运行' + 'X'.repeat(100)))
+  })
+})
+
+describe('hasWriteActionIntent（只读轮闸门用的写侧承诺）', () => {
+  it('「接下来修改 turn-orchestrator.ts」触发', () => {
+    assert.ok(hasWriteActionIntent('接下来修改 turn-orchestrator.ts 的 no-tool 路径'))
+  })
+  it('「接下来重写计划文件」触发（spec 验证项）', () => {
+    assert.ok(hasWriteActionIntent('接下来重写计划文件'))
+  })
+  it('「让我更新文档」触发（spec 验证项）', () => {
+    assert.ok(hasWriteActionIntent('让我更新文档'))
+  })
+  it('祈使收尾同样触发：「跑 typecheck + 测试。」', () => {
+    assert.ok(hasWriteActionIntent('全部正确。跑 typecheck + 测试。'))
+  })
+  it('读侧承诺不触发：「让我看看这个文件」（正常调研，配 read_file 是合法组合）', () => {
+    assert.ok(!hasWriteActionIntent('让我看看这个文件'))
+  })
+  it('读侧承诺不触发：「让我 grep 一下 loop.ts」', () => {
+    assert.ok(!hasWriteActionIntent('让我 grep 一下 loop.ts 看看调用链'))
+  })
+  it('纯陈述不触发', () => {
+    assert.ok(!hasWriteActionIntent('这个函数的修改历史在 git log 里'))
+  })
+})
+
+describe('turnUsedOnlyReadTools', () => {
+  it('无工具轮返回 false（归 no-tool 闸门管）', () => {
+    assert.equal(turnUsedOnlyReadTools([]), false)
+  })
+  it('纯读工具轮返回 true', () => {
+    assert.equal(turnUsedOnlyReadTools([
+      { name: 'grep', input: {} },
+      { name: 'read_file', input: {} },
+      { name: 'glob', input: {} },
+    ]), true)
+  })
+  it('含写工具返回 false', () => {
+    assert.equal(turnUsedOnlyReadTools([
+      { name: 'read_file', input: {} },
+      { name: 'write_file', input: {} },
+    ]), false)
+    assert.equal(turnUsedOnlyReadTools([{ name: 'bash', input: {} }]), false)
+    assert.equal(turnUsedOnlyReadTools([{ name: 'run_tests', input: {} }]), false)
+  })
+  it('委派只读 scout 算只读', () => {
+    assert.equal(turnUsedOnlyReadTools([
+      { name: 'delegate_task', input: { profile: 'code_scout' } },
+    ]), true)
+  })
+  it('委派写能力 profile（patcher）不算只读', () => {
+    assert.equal(turnUsedOnlyReadTools([
+      { name: 'delegate_task', input: { profile: 'patcher' } },
+    ]), false)
+  })
+  it('delegate_batch 任一 task 带写 profile 即不算只读', () => {
+    assert.equal(turnUsedOnlyReadTools([
+      { name: 'delegate_batch', input: { tasks: [{ profile: 'code_scout' }, { profile: 'patcher' }] } },
+    ]), false)
   })
 })
