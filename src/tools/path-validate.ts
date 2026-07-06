@@ -76,7 +76,10 @@ export function validatePathSafe(cwd: string, inputPath: string, mode: 'read' | 
     if (granted) return { ok: true, path: resolved }
     return {
       ok: false,
-      error: `Path outside project directory: ${inputPath}. If the user authorized this, call request_path_access (or approve the prompt) to grant ${mode} access to this path.`,
+      error: `Path outside project directory: ${inputPath} (workspace root: ${realCwd}). `
+        + `If this path is wrong, re-check the workspace root above and use a path under it. `
+        + `If the user authorized working there, call request_path_access (or approve the prompt) to grant ${mode} access; `
+        + `standing grants can also be configured via permissions.additionalReadDirs / additionalWriteDirs.`,
     }
   }
 

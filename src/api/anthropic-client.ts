@@ -4,6 +4,7 @@ import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
 import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
+import { parseJsonObjectWithEscapeRepair } from './json-escape-repair.js'
 
 export interface AnthropicClientConfig {
   baseUrl: string
@@ -277,10 +278,7 @@ export class AnthropicClient implements StreamClient {
 
       if (msg.tool_calls) {
         for (const tc of msg.tool_calls) {
-          let input: Record<string, unknown> = {}
-          try {
-            input = JSON.parse(tc.function.arguments)
-          } catch { /* keep empty */ }
+          const input: Record<string, unknown> = parseJsonObjectWithEscapeRepair(tc.function.arguments) ?? {}
           blocks.push({
             type: 'tool_use',
             id: tc.id,
@@ -456,9 +454,10 @@ export class AnthropicClient implements StreamClient {
                 if (buf) {
                   let input: Record<string, unknown> = {}
                   let argsTruncated: boolean | undefined
-                  try {
-                    input = JSON.parse(buf.partialJson || '{}')
-                  } catch {
+                  const repaired = parseJsonObjectWithEscapeRepair(buf.partialJson || '{}')
+                  if (repaired !== null) {
+                    input = repaired
+                  } else {
                     // Incomplete/unparseable partial_json at block stop — mark
                     // the block so the tool pipeline refuses to execute the {}
                     // placeholder (same contract as openai-client final flush).

@@ -91,6 +91,16 @@ export const permissionsSchema = z.object({
   /** Deny rules take precedence over allow rules and approval mode. */
   deny: z.array(permissionAllowRuleSchema).default([]),
   bash: bashAllowlistSchema,
+  /**
+   * Codex-style standing directory grants, applied at session start without an
+   * approval round-trip. Each entry is an absolute or ~-relative directory
+   * whose whole subtree becomes readable (additionalReadDirs) or read+writable
+   * (additionalWriteDirs) beyond the workspace boundary. A drive root
+   * ("F:/", "D:\\") grants the entire drive. Project-level config lets a
+   * parent-folder workspace pre-authorize sibling/child project dirs.
+   */
+  additionalReadDirs: z.array(z.string().min(1)).default([]),
+  additionalWriteDirs: z.array(z.string().min(1)).default([]),
 })
 
 export const antiAnchoringSchema = z.object({

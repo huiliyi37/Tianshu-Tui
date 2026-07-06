@@ -122,7 +122,8 @@ describe('edit_file tool', () => {
       new_string: 'y',
     }))
     assert.equal(result.isError, true)
-    assert.ok(result.content.includes('Path escapes'))
+    assert.ok(result.content.includes('outside project directory'))
+    assert.ok(result.content.includes('workspace root'), 'error should name the workspace root so the model can self-correct')
   })
 
   it('requires approval', () => {

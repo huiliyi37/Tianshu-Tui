@@ -12,6 +12,8 @@ import {
   writeGrantedRoots,
   listGrants,
   loadPersistedGrants,
+  applyConfiguredPathGrants,
+  isPathUnder,
   _resetGrantsForTest,
 } from '../path-grants.js'
 
@@ -125,5 +127,48 @@ describe('path-grants', () => {
     } finally {
       for (const d of [cwd, target]) rmSync(d, { recursive: true, force: true })
     }
+  })
+
+  it('applyConfiguredPathGrants: read and write dirs from config, skipping missing paths', () => {
+    const readDir = tmp()
+    const writeDir = tmp()
+    try {
+      applyConfiguredPathGrants({
+        additionalReadDirs: [readDir, join(readDir, 'does-not-exist')],
+        additionalWriteDirs: [writeDir, '   '],
+      })
+      assert.equal(isReadGranted(join(readDir, 'a.txt')), true)
+      assert.equal(isWriteGranted(join(readDir, 'a.txt')), false, 'read dir must not grant write')
+      assert.equal(isWriteGranted(join(writeDir, 'b.txt')), true)
+      assert.equal(listGrants().length, 2, 'non-existent and blank entries skipped')
+      assert.ok(listGrants().every(g => !g.persisted), 'config grants are session-scoped, never persisted')
+    } finally {
+      for (const d of [readDir, writeDir]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  it('applyConfiguredPathGrants tolerates undefined/empty config', () => {
+    applyConfiguredPathGrants(undefined)
+    applyConfiguredPathGrants({})
+    assert.equal(listGrants().length, 0)
+  })
+})
+
+describe('isPathUnder (win32 case semantics)', () => {
+  it('case-insensitive mode matches mixed-case drive letters and segments', () => {
+    assert.equal(isPathUnder('F:\\智慧项目', 'f:\\智慧项目', true), true)
+    // Note: separator boundary uses the host separator; use posix-style for portability.
+    assert.equal(isPathUnder('/proj/Sub', '/proj/sub/file.ts', true), true)
+    assert.equal(isPathUnder('/PROJ', '/proj', true), true)
+  })
+
+  it('case-sensitive mode (posix) does not fold case', () => {
+    assert.equal(isPathUnder('/proj/Sub', '/proj/sub/file.ts', false), false)
+    assert.equal(isPathUnder('/proj/sub', '/proj/sub/file.ts', false), true)
+  })
+
+  it('separator boundary holds in both modes', () => {
+    assert.equal(isPathUnder('/a/b', '/a/bc/x', true), false)
+    assert.equal(isPathUnder('/a/b', '/a/bc/x', false), false)
   })
 })

@@ -51,6 +51,7 @@ import { createOwnershipLedger } from '../agent/ownership-ledger.js'
 import { createWorktreeBaseline } from '../agent/worktree-baseline.js'
 import { captureGitBaseline, createInteractiveToolRegistry, createAgentRuntime, type RuntimeRefs } from '../bootstrap.js'
 import { TodoStore } from '../tools/todo-store.js'
+import { applyConfiguredPathGrants, loadPersistedGrants } from '../tools/path-grants.js'
 import { loadProjectSkills } from '../skills/skill-loader.js'
 import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
@@ -421,6 +422,14 @@ function buildSessionStores(
   const claimStore = persist.createClaimStore()
   persist.injectDurableClaims(claimStore)
   for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)
+  // Path grants: hydrate the "remember"-persisted grants for this workspace and
+  // apply standing config-declared grants (additionalReadDirs/WriteDirs). The
+  // TUI does this in bootstrapInteractiveSession; without the mirror here,
+  // desktop sessions silently lose every remembered/configured authorization
+  // and re-block out-of-workspace paths (a major Windows papercut when the
+  // project lives outside the opened folder).
+  loadPersistedGrants(cwd)
+  applyConfiguredPathGrants(ctx.config.agent.permissions)
   // Load skills into the shared registry (same as CLI bootstrap). Without this,
   // skillRegistry.list() returns empty and the desktop PlusMenu shows no skills.
   loadProjectSkills(cwd, { importFromClaude: ctx.config.skills?.importFromClaude })

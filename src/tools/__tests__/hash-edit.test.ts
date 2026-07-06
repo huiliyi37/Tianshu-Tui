@@ -135,7 +135,7 @@ describe('hash_edit', () => {
     const p = params({ file_path: '../outside.ts' })
     const result = await HASH_EDIT_TOOL.execute(p)
     assert.equal(result.isError, true)
-    assert.ok(result.content.includes('escapes'))
+    assert.ok(result.content.includes('outside project directory'))
   })
 
   it('requires approval', () => {

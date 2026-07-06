@@ -44,8 +44,8 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     let filePath: string
     try {
       filePath = validatePath(params.cwd, params.input.file_path as string, 'write')
-    } catch {
-      return { content: 'Error: Path escapes project directory', isError: true }
+    } catch (e) {
+      return { content: `Error: ${e instanceof Error ? e.message : 'Path escapes project directory'}`, isError: true }
     }
     const content = params.input.content as string
     const dir = dirname(filePath)

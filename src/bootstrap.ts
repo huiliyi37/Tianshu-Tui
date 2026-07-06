@@ -38,7 +38,7 @@ import { TodoStore } from './tools/todo-store.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
-import { loadPersistedGrants } from './tools/path-grants.js'
+import { applyConfiguredPathGrants, loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import type { PlanExecutorDeps } from './agent/plan-executor.js'
@@ -1409,6 +1409,9 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   // Re-activate out-of-workspace path grants the user chose to "remember" for
   // this workspace, so previously-approved external paths work from turn one.
   loadPersistedGrants(cwd)
+  // Standing config-declared grants (permissions.additionalReadDirs/WriteDirs):
+  // Codex-style folder authorization without an approval round-trip.
+  applyConfiguredPathGrants(config.agent.permissions)
 
   // 3. Provider + Auth
   const { provider, apiKey, auth } = resolveProviderAndAuth(config, opts.providerName)

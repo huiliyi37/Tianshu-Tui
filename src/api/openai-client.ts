@@ -10,6 +10,7 @@ import { parseRetryAfterMs } from './error-classifier.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
 import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
+import { repairInvalidJsonEscapes } from './json-escape-repair.js'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -36,9 +37,19 @@ function tryParseToolArguments(raw: string): Record<string, unknown> | null {
     const parsed = JSON.parse(raw)
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
   } catch {
+    // Windows-path recovery: raw backslashes in string values (`"F:\src\app"`)
+    // are invalid JSON escapes that fail the whole buffer. Repair and re-parse
+    // before falling back to salvage, so the call executes instead of being
+    // refused as argsTruncated.
+    const repaired = repairInvalidJsonEscapes(raw)
+    if (repaired !== null) {
+      try {
+        const parsed = JSON.parse(repaired)
+        if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
+      } catch { /* fall through to salvage */ }
+    }
     // Salvage a single leading JSON object from a concatenated buffer.
-    const salvaged = salvageFirstJsonObject(raw)
-    return salvaged
+    return salvageFirstJsonObject(repaired ?? raw)
   }
 }
 
