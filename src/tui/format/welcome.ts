@@ -56,8 +56,18 @@ export interface FormatWelcomeInput {
 const FULL_BANNER_ROWS = 24
 /** 中号（无边框）降级布局行数。 */
 const MEDIUM_BANNER_ROWS = 7
+/** 紧凑单行模式行数。 */
+const COMPACT_BANNER_ROWS = 1
 /** 欢迎屏之外必须保持可见的行：输入框 3 行 + 终端底部状态栏/呼吸余量 ~2 行。 */
 const RESERVED_ROWS = 5
+
+// ── 宽度分级阈值 ──────────────────────────────────────────────
+/** 全量边框卡片最低宽度。 */
+const FULL_WIDTH_THRESHOLD = 60
+/** 紧凑无边框最低宽度。 */
+const COMPACT_WIDTH_THRESHOLD = 30
+/** 单行标题最低宽度（至少能放下 "TS v4-pro"）。 */
+const MIN_WIDTH_THRESHOLD = 16
 
 function truncateToWidth(text: string, maxWidth: number): string {
   // … 自身按 2 列计，预留其宽度后截断剩余文本。
@@ -141,9 +151,43 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     ? `${input.sessionId.slice(0, 8)} (${input.priorMsgCount} prior)`
     : input.sessionId.slice(0, 8)
 
+  // ── 元信息标准化：统一用 | 分隔，超长字段自动截断 ──────────
+  const truncateDir = dir.length > 12 ? dir.slice(0, 9) + '…' : dir
+  const truncateSession = session.length > 20 ? session.slice(0, 17) + '…' : session
+  const normalizedMeta = `${color(input.modelName, theme.secondary || theme.muted)} | ${color(truncateDir + '/', theme.dim)} | ${color(truncateSession, theme.dim)}`
+
+  // ── 快捷键数据 ──────────────────────────────────────────────
+  const KEYBOARD_SHORTCUTS: ReadonlyArray<{ key: string; action: string }> = [
+    { key: 'Ctrl+C', action: 'interrupt' },
+    { key: 'Ctrl+Esc', action: 'palette' },
+    { key: 'Ctrl+R', action: 'history' },
+    { key: 'Ctrl+O', action: 'expand' },
+    { key: 'Ctrl+T', action: 'thinking' },
+    { key: 'Esc Esc', action: 'rewind' },
+    { key: '/help', action: 'commands' },
+    { key: '\\+Enter', action: 'multi-line' },
+  ]
+
+  // 关键快捷键（默认显示）
+  const KEY_SHORTCUTS_VISIBLE: ReadonlyArray<{ key: string; action: string }> = [
+    { key: 'Ctrl+C', action: 'interrupt' },
+    { key: 'Ctrl+R', action: 'history' },
+    { key: '/help', action: 'commands' },
+    { key: '\\+Enter', action: 'multi-line' },
+  ]
+
+  const formatShortcutPair = (s: { key: string; action: string }) =>
+    color(`${s.key.padEnd(10)}${s.action}`, theme.dim)
+
+  const formatShortcutLine = (shortcuts: typeof KEYBOARD_SHORTCUTS) =>
+    shortcuts.map(formatShortcutPair).join('    ')
+
+  const remainingCount = KEYBOARD_SHORTCUTS.length - KEY_SHORTCUTS_VISIBLE.length
+
+  // ── 单行极简模式（最低宽度） ─────────────────────────────────
   const compactLine = (): string => {
     const numeric = input.numericId ? ` · #${input.numericId}` : ''
-    const line = `${color('✦', theme.primary, { bold: true })} ${color('天枢', theme.primary, { bold: true })}${numeric}  ${color('·', theme.dim)}  ${color(input.modelName, theme.secondary)}  ${color('·', theme.dim)}  ${color(dir + '/', theme.dim)}  ${color('·', theme.dim)}  ${color(session, theme.dim)}  ${color('·', theme.dim)}  ${color('/help', theme.secondary)}`
+    const line = `${color('✦', theme.primary, { bold: true })} ${color('天枢', theme.primary, { bold: true })}${numeric}  ${color('·', theme.dim)}  ${color(input.modelName, theme.secondary)}  ${color('·', theme.dim)}  ${color(truncateDir + '/', theme.dim)}  ${color('·', theme.dim)}  ${color(truncateSession, theme.dim)}  ${color('·', theme.dim)}  ${color('/help', theme.secondary)}`
     return truncateToWidth(line, cols)
   }
 
@@ -152,8 +196,7 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     return [compactLine()]
   }
 
-  // 高度自适应：欢迎屏落进 scrollback，其后立即渲染的输入框需留在视口内。终端不够高
-  // 时逐级降级（full → medium → 单行），避免高 banner 把输入框顶到底部被状态栏吃掉。
+  // 高度自适应：欢迎屏落进 scrollback，其后立即渲染的输入框需留在视口内。
   const rows = input.rows && input.rows > 0 ? input.rows : Number.POSITIVE_INFINITY
   const fitsFull = rows >= FULL_BANNER_ROWS + RESERVED_ROWS
   const fitsMedium = rows >= MEDIUM_BANNER_ROWS + RESERVED_ROWS
@@ -163,13 +206,14 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
 
   const boxWidth = Math.min(80, cols)
 
-  // 如果列宽足够 且 终端够高，渲染精致的带边框卡片
-  if (boxWidth >= 60 && fitsFull) {
+  // ── 宽度分级：四级降级 ──────────────────────────────────────
+
+  // === Tier 1: 全量边框卡片（宽 ≥ 60） ===
+  if (boxWidth >= FULL_WIDTH_THRESHOLD && fitsFull) {
     const innerWidth = boxWidth - 4
     const borderCol = (text: string) => color(text, theme.dim)
     const out: string[] = []
 
-    // 格式化带边框的行
     const wrapLine = (content: string) => {
       return borderCol('│') + ' ' + centerLine(content, innerWidth) + ' ' + borderCol('│')
     }
@@ -177,40 +221,51 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     out.push(borderCol('┌' + '─'.repeat(boxWidth - 2) + '┐'))
     out.push(wrapLine(''))
 
-    // 1. 北斗星图
-    for (let r = 0; r < DIPPER_ROWS; r++) {
-      out.push(wrapLine(renderDipperRow(r, theme)))
+    // 1. 北斗星图（窄屏时缩小为单字符）
+    if (boxWidth >= 60) {
+      for (let r = 0; r < DIPPER_ROWS; r++) {
+        out.push(wrapLine(renderDipperRow(r, theme)))
+      }
+    } else {
+      // 60-79 列：单行星图标记
+      out.push(wrapLine(color('✦ ━ 北斗七星 ━', theme.dim)))
     }
     out.push(wrapLine(''))
 
-    // 2. 大字品牌标识 (采用 3D 双色描边效果)
-    for (const line of BRAND_LOGO) {
-      out.push(wrapLine(renderLogoLine(line, theme)))
+    // 2. 大字品牌标识（窄屏时替换为单行）
+    if (boxWidth >= 60) {
+      for (const line of BRAND_LOGO) {
+        out.push(wrapLine(renderLogoLine(line, theme)))
+      }
+    } else {
+      // 60-79 列：紧凑单行标题
+      let subText = color('天 枢', theme.primary, { bold: true })
+      if (input.numericId) {
+        subText += `  ${color('·', theme.dim)}  ${color(`#${input.numericId}`, theme.primary, { bold: true })}`
+      }
+      out.push(wrapLine(subText))
     }
     out.push(wrapLine(''))
 
-    // 3. 中文副标题
-    let subText = color('天 枢', theme.primary, { bold: true })
-    if (input.numericId) {
-      subText += `  ${color('·', theme.dim)}  ${color(`#${input.numericId}`, theme.primary, { bold: true })}`
+    // 3. 中文副标题（仅全量模式）
+    if (boxWidth >= 60) {
+      let subText = color('天 枢', theme.primary, { bold: true })
+      if (input.numericId) {
+        subText += `  ${color('·', theme.dim)}  ${color(`#${input.numericId}`, theme.primary, { bold: true })}`
+      }
+      out.push(wrapLine(subText))
+      out.push(wrapLine(''))
     }
-    out.push(wrapLine(subText))
+
+    // 4. 元信息（标准化分隔符）
+    out.push(wrapLine(normalizedMeta))
     out.push(wrapLine(''))
 
-    // 4. 元信息
-    const metaText = `${color(input.modelName, theme.secondary || theme.muted)}  ${color('·', theme.dim)}  ${color(dir + '/', theme.dim)}  ${color('·', theme.dim)}  ${color(session, theme.dim)}`
-    out.push(wrapLine(metaText))
-    out.push(wrapLine(''))
-
-    // 5. 快捷键
-    const sep = '    '
-    const shortcutLine1 = color(`Ctrl+C interrupt${sep}Ctrl+Esc palette${sep}Ctrl+R history`, theme.dim)
-    const shortcutLine2 = color(`Ctrl+O expand${sep}Ctrl+T thinking${sep}Esc Esc rewind`, theme.dim)
-    const shortcutLine3 = color(`/help commands${sep}\\+Enter / Ctrl+J multi-line`, theme.dim)
-
-    out.push(wrapLine(shortcutLine1))
-    out.push(wrapLine(shortcutLine2))
-    out.push(wrapLine(shortcutLine3))
+    // 5. 快捷键（折叠式卡片：默认显示关键项 + "… +N more"）
+    out.push(wrapLine(formatShortcutLine(KEY_SHORTCUTS_VISIBLE)))
+    if (remainingCount > 0) {
+      out.push(wrapLine(color(`… +${remainingCount} more  (press ? for full list)`, theme.dim)))
+    }
     out.push(wrapLine(''))
 
     out.push(borderCol('└' + '─'.repeat(boxWidth - 2) + '┘'))
@@ -218,16 +273,31 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     return out.map(line => truncateToWidth(line, cols))
   }
 
-  // 极窄终端降级为极简无边框排版
-  const out: string[] = []
-  const starGlyph = color('✦', theme.pulseAlert || theme.userColor)
-  out.push(`${starGlyph}  ${color('T I A N S H U', theme.primary, { bold: true })}  ${starGlyph}`)
-  out.push(color(`天 枢`, theme.secondary || theme.muted))
-  out.push(color(`${input.modelName} · ${dir}/ · ${session}`, theme.dim))
-  out.push('')
-  out.push(color('Ctrl+C interrupt    Ctrl+Esc palette    Ctrl+R history', theme.dim))
-  out.push(color('Ctrl+O expand       Ctrl+T thinking     Esc Esc rewind', theme.dim))
-  out.push(color('/help commands      \\+Enter / Ctrl+J multi-line', theme.dim))
+  // === Tier 2: 紧凑无边框（30 ≤ 宽 < 60） ===
+  if (boxWidth >= COMPACT_WIDTH_THRESHOLD) {
+    const starGlyph = color('✦', theme.pulseAlert || theme.userColor)
+    const out: string[] = []
+    out.push(`${starGlyph}  ${color('天枢', theme.primary, { bold: true })}`)
+    if (input.numericId) {
+      out.push(color(`# ${input.numericId}  ·  ${input.modelName}`, theme.dim))
+    } else {
+      out.push(color(input.modelName, theme.dim))
+    }
+    out.push(color(`| ${truncateDir}/ | ${truncateSession}`, theme.muted))
+    out.push('')
+    // 关键快捷键（单行排列）
+    out.push(color(formatShortcutLine(KEY_SHORTCUTS_VISIBLE), theme.dim))
+    if (remainingCount > 0) {
+      out.push(color(`… +${remainingCount} more  (? for full list)`, theme.dim))
+    }
+    return out.map(line => truncateToWidth(line, cols))
+  }
 
-  return out.map(line => truncateToWidth(line, cols))
+  // === Tier 3: 极低宽度（< 30）— 单行标题 ===
+  if (rows >= COMPACT_BANNER_ROWS + RESERVED_ROWS) {
+    return [compactLine()]
+  }
+
+  // 兜底：连单行都放不下
+  return [compactLine()]
 }

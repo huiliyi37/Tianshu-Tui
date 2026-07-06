@@ -3550,6 +3550,15 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
+  register("/shortcuts", {
+    description: "Show all keyboard shortcuts",
+    immediate: true,
+    handler: ({ app }) => {
+      app.openShortcutsOverlay()
+      return true
+    },
+  })
+
   register("/cockpit", {
     description: "Toggle cockpit panel",
     immediate: true,

@@ -29,6 +29,9 @@ import {
   keyHints,
 } from './overlay-frame.js'
 
+// Also import raw names for new overlays
+import { frameTop, frameTitle, frameFooter, frameBottom } from './overlay-frame.js'
+
 
 function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
   const tabDomain = activeTab === 'domain' ? color(' 🎛  Domain ', theme.primary, { bold: true }) : color('    Domain ', theme.dim)
@@ -1133,6 +1136,78 @@ export function renderFleetDetail(worker: FleetWorkerView, width: number, height
   }
 
   lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}
+
+// ── Shortcuts Overlay ──────────────────────────────────────────
+
+export interface ShortcutsOverlayData {
+  entries: ReadonlyArray<{ key: string; action: string; category?: string }>
+}
+
+const SHORTCUT_CATEGORIES = [
+  {
+    name: '交互',
+    keys: ['Ctrl+C', 'Ctrl+Esc', 'Ctrl+R', 'Esc Esc', 'Shift+Tab'] as const,
+    actions: ['interrupt', 'palette', 'history', 'rewind', 'plan mode'] as const,
+  },
+  {
+    name: '导航',
+    keys: ['Ctrl+O', 'Ctrl+T', 'Ctrl+]'] as const,
+    actions: ['expand', 'thinking', 'side panel'] as const,
+  },
+  {
+    name: '输入',
+    keys: ['/help', '\\+Enter', 'Ctrl+J', 'Tab'] as const,
+    actions: ['commands', 'multi-line', 'newline', 'completion'] as const,
+  },
+] as const
+
+export function renderShortcutsOverlay(
+  data: ShortcutsOverlayData,
+  width: number,
+  height: number,
+  theme: RivetTheme,
+): string[] {
+  const formatKeyHint = keyHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '关闭']])
+
+  // 构建条目列表
+  const entries = data.entries.length > 0
+    ? [...data.entries]
+    : SHORTCUT_CATEGORIES.flatMap(cat =>
+        cat.keys.map((key, i) => ({ key, action: cat.actions[i] as string, category: cat.name }))
+      )
+
+  // 按分类分组
+  const grouped = new Map<string, typeof entries>()
+  for (const e of entries) {
+    const cat = e.category || '其他'
+    if (!grouped.has(cat)) grouped.set(cat, [])
+    grouped.get(cat)!.push(e)
+  }
+
+  const lines: string[] = []
+  lines.push(frameTop(width, theme))
+  lines.push(frameTitle('快捷键', width, theme))
+  lines.push(frameDivider(width, theme))
+
+  for (const [cat, items] of grouped) {
+    lines.push(padLine(color(`◆ ${cat}`, theme.primary, { bold: true }), width, theme))
+    for (const item of items) {
+      const keyStr = color(item.key.padEnd(12), theme.secondary)
+      const actionStr = color(item.action, theme.dim)
+      lines.push(padLine(`${keyStr}${actionStr}`, width, theme))
+    }
+    lines.push('')
+  }
+
+  // 填充空白
+  while (lines.length < height - 3) {
+    lines.push(padLine('', width, theme))
+  }
+
+  lines.push(formatFooter(formatKeyHint, width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }

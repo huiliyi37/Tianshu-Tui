@@ -62,8 +62,8 @@ import { extractAtToken, getCompletions, applyCompletion } from '../file-complet
 import stringWidth from 'string-width'
 import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderFleetDetail, renderShortcutsOverlay } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData, ShortcutsOverlayData } from '../format/overlay.js'
 import { ConnectFlow, type ConnectCommit, type ConnectStepResult } from '../connect-flow.js'
 import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
@@ -767,6 +767,11 @@ export class TuiApp {
         this.inputController.fileCompletion = null
         // 普通文本输入重置 slash 选中项（避免选了第 3 项又打字导致选中越界）
         this.inputController.slashSelectedIdx = 0
+        // ? 键：打开快捷键总览 overlay
+        if (event.value === '?') {
+          this.openShortcutsOverlay()
+          return
+        }
         // 批渲染：快速输入/分 chunk 到达时合并为单次 LiveEngine.render，
         // 避免逐 chunk 全量重写造成的闪烁/残影。
         this.writeBatcher.schedule()
@@ -1002,9 +1007,18 @@ export class TuiApp {
         if (curIdx >= 0) this.overlayController.nav().planPickerIndex = curIdx
         return this.overlay.activate(id)
       }
+      case 'shortcuts': {
+        this.overlayController.resetNav()
+        return this.overlay.activate(id)
+      }
       default:
         return false
     }
+  }
+
+  /** 快捷方式总览 overlay — 欢迎屏 ? 键触发 */
+  openShortcutsOverlay(): void {
+    this.activateOverlay('shortcuts')
   }
 
   /** 停用 overlay */
@@ -3522,6 +3536,14 @@ export class TuiApp {
     // Connect Wizard — /connect 服务商配置向导；数据来自 app 持有的 ConnectFlow。
     this.overlay.register('connect', {
       render: (_w, _h) => renderConnect(this.getConnectOverlayData(), this.columns, this.rows, this.theme),
+    })
+
+    // Shortcuts Overlay — ? 键打开的全量快捷键面板
+    this.overlay.register('shortcuts', {
+      render: (_w, _h) => {
+        const data: ShortcutsOverlayData = { entries: [] }
+        return renderShortcutsOverlay(data, this.columns, this.rows, this.theme)
+      },
     })
   }
 }
