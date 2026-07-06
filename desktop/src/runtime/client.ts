@@ -134,21 +134,38 @@ export async function rivetFetch(path: string, init: RequestInit = {}): Promise<
   return res
 }
 
+async function readErrorBody(res: Response): Promise<string> {
+  try {
+    const body = await res.json() as Record<string, unknown>
+    if (typeof body.error === 'string' && body.error) return body.error
+  } catch { /* body not JSON or missing error field */ }
+  return ''
+}
+
 async function apiGet<T>(path: string): Promise<T> {
   const res = await rivetFetch(path)
-  if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`)
+  if (!res.ok) {
+    const detail = await readErrorBody(res)
+    throw new Error(detail || `GET ${path} -> ${res.status}`)
+  }
   return res.json() as Promise<T>
 }
 
 async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await rivetFetch(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined })
-  if (!res.ok) throw new Error(`POST ${path} -> ${res.status}`)
+  if (!res.ok) {
+    const detail = await readErrorBody(res)
+    throw new Error(detail || `POST ${path} -> ${res.status}`)
+  }
   return res.json() as Promise<T>
 }
 
 async function apiPut<T>(path: string, body?: unknown): Promise<T> {
   const res = await rivetFetch(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined })
-  if (!res.ok) throw new Error(`PUT ${path} -> ${res.status}`)
+  if (!res.ok) {
+    const detail = await readErrorBody(res)
+    throw new Error(detail || `PUT ${path} -> ${res.status}`)
+  }
   return res.json() as Promise<T>
 }
 

@@ -316,6 +316,10 @@ export function Composer(props: {
   const submit = () => {
     const text = value.trim()
     if (!text && images.length === 0) return
+    // 裸 / 未构成命令 — 对标 TUI rejectSubmit（服务端 resolveAppPromptInput 恒返回 null）。
+    // 桌面端有意将未知 slash 透传到服务端（服务端知道的命令多于本地菜单），
+    // 但 '/' 本身显然不是有效命令，透传只会稳定触发 400 然后 toast 回填，体验差。
+    if (text === '/') return
     // Slash commands pass through to the server: POST /prompt runs the full
     // resolveAppPromptInput translation (same as TUI), so commands missing from
     // the local menu (e.g. /write-plan) still work. Truly unknown slashes get a
