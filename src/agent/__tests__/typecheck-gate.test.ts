@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import {
   runChangedFilesTypecheck,
   runChangedFilesTypecheckMemo,
+  runChangedFilesTypecheckOutcome,
+  runChangedFilesTypecheckOutcomeMemo,
   runDeclaredCheck,
   typecheckGateEnabled,
   repoWideEnabled,
@@ -136,6 +138,40 @@ test('memo: unstattable (mock) paths fail open — no cache, runner runs each ti
   await runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
   await runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
   assert.equal(calls, 2)
+})
+
+// ── Tri-state outcome（硬门禁语义：clean ≠ inconclusive）────────────────────
+
+test('outcome: ranOk=false → inconclusive with reason, not clean', async () => {
+  const o = await runChangedFilesTypecheckOutcome(CWD, ['src/x.ts'], runner([], false))
+  assert.equal(o.status, 'inconclusive')
+  assert.equal(o.result, null)
+  assert.match(o.reason ?? '', /did not run to completion/)
+})
+
+test('outcome: no diagnostics → clean; errors → errors with result', async () => {
+  const clean = await runChangedFilesTypecheckOutcome(CWD, ['src/x.ts'], runner([]))
+  assert.equal(clean.status, 'clean')
+  const errs = await runChangedFilesTypecheckOutcome(CWD, ['src/x.ts'], runner([diag('src/x.ts', 1, 'TS1: e')]))
+  assert.equal(errs.status, 'errors')
+  assert.ok(errs.result)
+})
+
+test('outcome memo: inconclusive is NOT cached — retry re-runs tsc (wave-gate 自愈)', async () => {
+  __clearTypecheckMemo()
+  let calls = 0
+  let ranOk = false
+  const spy: TypecheckRunner = async () => { calls++; return { diagnostics: [], formatted: '', ranOk } }
+  const files = ['src/agent/typecheck-gate.ts'] // real file → stable memo signature
+  const first = await runChangedFilesTypecheckOutcomeMemo(process.cwd(), files, spy)
+  assert.equal(first.status, 'inconclusive')
+  ranOk = true // 机器空下来，tsc 能跑完了
+  const second = await runChangedFilesTypecheckOutcomeMemo(process.cwd(), files, spy)
+  assert.equal(second.status, 'clean', 'retry must re-run instead of serving cached inconclusive')
+  assert.equal(calls, 2)
+  const third = await runChangedFilesTypecheckOutcomeMemo(process.cwd(), files, spy)
+  assert.equal(third.status, 'clean')
+  assert.equal(calls, 2, 'clean outcome IS cached')
 })
 
 // ── Cross-file drift detection (the 24-error class) ─────────────────────────

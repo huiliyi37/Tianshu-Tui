@@ -15,12 +15,15 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { runChangedFilesTypecheckMemo, typecheckGateEnabled, type TypecheckRunner } from './typecheck-gate.js'
+import { gateTypecheckRunner, runChangedFilesTypecheckOutcomeMemo, typecheckGateEnabled, type TypecheckRunner } from './typecheck-gate.js'
 
 export interface WaveGateCheck {
   command: string
   status: 'passed' | 'failed' | 'unverifiable'
   detail?: string
+  /** unverifiable 且 blocking=true → 计入门禁失败（typecheck 超时/未跑完属于
+   *  "没验证过"而非"验证通过"；声明式自由文本命令的 unverifiable 仍不拦）。 */
+  blocking?: boolean
 }
 
 export interface WaveGateRecord {
@@ -92,10 +95,24 @@ export async function evaluateWaveGate(input: EvaluateWaveGateInput): Promise<Wa
 
   if (typecheckGateEnabled() && input.changedFiles.length > 0) {
     try {
-      const tc = await runChangedFilesTypecheckMemo(input.cwd, input.changedFiles, input.typecheckRunner)
-      checks.push(tc
-        ? { command: 'tsc --noEmit (scoped)', status: 'failed', detail: tc.summary }
-        : { command: 'tsc --noEmit (scoped)', status: 'passed' })
+      // gateTypecheckRunner（5 分钟预算）而非 defaultRunner：满载机器上 2 分钟
+      // tsc 跑不完，超时曾被记成 ✅ passed 放行下一波（2026-07-07 天枢长任务事故）。
+      const outcome = await runChangedFilesTypecheckOutcomeMemo(
+        input.cwd, input.changedFiles, input.typecheckRunner ?? gateTypecheckRunner)
+      if (outcome.status === 'errors') {
+        checks.push({ command: 'tsc --noEmit (scoped)', status: 'failed', detail: outcome.result!.summary })
+      } else if (outcome.status === 'inconclusive') {
+        // 硬门禁语义：没验证过 ≠ 验证通过。记 blocking unverifiable 拦下一波；
+        // 自愈复评时 inconclusive 不进 memo，会真实重跑 tsc，机器空了即放行。
+        checks.push({
+          command: 'tsc --noEmit (scoped)',
+          status: 'unverifiable',
+          detail: `${outcome.reason ?? 'tsc did not complete'} — 未验证按失败拦截，复评自动重跑`,
+          blocking: true,
+        })
+      } else {
+        checks.push({ command: 'tsc --noEmit (scoped)', status: 'passed' })
+      }
     } catch {
       checks.push({ command: 'tsc --noEmit (scoped)', status: 'unverifiable', detail: 'typecheck runner unavailable' })
     }
@@ -113,7 +130,7 @@ export async function evaluateWaveGate(input: EvaluateWaveGateInput): Promise<Wa
 
   return {
     wave: input.wave,
-    passed: checks.every(c => c.status !== 'failed'),
+    passed: checks.every(c => c.status !== 'failed' && !(c.blocking && c.status !== 'passed')),
     checks,
     changedFiles: input.changedFiles,
     commands: input.commands,

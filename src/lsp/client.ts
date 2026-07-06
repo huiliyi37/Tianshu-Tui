@@ -53,7 +53,7 @@ function resolveTscPath(cwd: string): string | null {
   return null
 }
 
-export async function runTypeCheck(cwd: string, filePath: string): Promise<LspCheckResult> {
+export async function runTypeCheck(cwd: string, filePath: string, timeoutMs = 120_000): Promise<LspCheckResult> {
   const tscPath = resolveTscPath(cwd)
 
   if (!tscPath) {
@@ -73,7 +73,7 @@ export async function runTypeCheck(cwd: string, filePath: string): Promise<LspCh
   // event loop stays free so the TUI render loop keeps animating during commit.
   // --noEmit: type-check only, no output files.
   // --pretty false: machine-parseable format (file(line,col): error TSxxxx: msg).
-  const result = await runTscSubprocess(tscPath, cwd)
+  const result = await runTscSubprocess(tscPath, cwd, timeoutMs)
 
   // tsc writes diagnostics to stdout when --pretty false (not stderr).
   // Exit code 0 = no errors; exit code 1 = type errors found; exit code 2+ = crash/panic.
@@ -98,10 +98,12 @@ export async function runTypeCheck(cwd: string, filePath: string): Promise<LspCh
 
 /**
  * Spawn tsc as an async subprocess, collecting stdout/stderr and enforcing a
- * 2-minute timeout. Resolves to { status, stdout, stderr } mirroring spawnSync's
- * shape so the parsing logic above is unchanged. status is null on signal/timeout.
+ * timeout (default 2 minutes; wave-gate passes a longer budget — see
+ * typecheck-gate.ts gateTypecheckRunner). Resolves to { status, stdout, stderr }
+ * mirroring spawnSync's shape so the parsing logic above is unchanged.
+ * status is null on signal/timeout.
  */
-function runTscSubprocess(tscPath: string, cwd: string): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function runTscSubprocess(tscPath: string, cwd: string, timeoutMs: number): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     // Spawning a .cmd on modern Node requires a shell; quote the path so spaces
     // in the project directory (e.g. C:\Users\My Name) survive cmd.exe parsing.
@@ -124,7 +126,7 @@ function runTscSubprocess(tscPath: string, cwd: string): Promise<{ status: numbe
     const timer = setTimeout(() => {
       killed = true
       child.kill('SIGKILL')
-    }, 120_000)
+    }, timeoutMs)
 
     child.stdout?.on('data', (chunk: Buffer) => {
       if (stdout.length < MAX) stdout += chunk.toString('utf8').slice(0, MAX - stdout.length)

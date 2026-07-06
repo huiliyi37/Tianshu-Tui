@@ -103,6 +103,35 @@ describe('evaluateWaveGate', () => {
     const tc = record.checks.find(c => c.command.includes('tsc'))
     assert.equal(tc?.status, 'failed')
   })
+
+  it('blocks when typecheck times out — 未验证 ≠ 验证通过 (2026-07-07 事故回归)', async () => {
+    const record = await evaluateWaveGate({
+      cwd: '/fake',
+      wave: 0,
+      changedFiles: ['src/a.ts'],
+      commands: [],
+      // ranOk: false = tsc 超时/崩溃，旧行为把它记成 ✅ passed 放行下一波
+      typecheckRunner: async () => ({ ranOk: false, formatted: '', diagnostics: [] }),
+    })
+    assert.equal(record.passed, false, 'inconclusive typecheck must block the next wave')
+    const tc = record.checks.find(c => c.command.includes('tsc'))
+    assert.equal(tc?.status, 'unverifiable')
+    assert.equal(tc?.blocking, true)
+    assert.match(tc?.detail ?? '', /复评自动重跑/)
+  })
+
+  it('typecheck timeout blocking does not change free-text unverifiable semantics', async () => {
+    const record = await evaluateWaveGate({
+      cwd: '/fake',
+      wave: 0,
+      changedFiles: [],
+      commands: ['人工确认导航项仍然存在'],
+      runCommand: () => ({ ok: true }),
+    })
+    assert.equal(record.checks[0]!.status, 'unverifiable')
+    assert.equal(record.checks[0]!.blocking, undefined)
+    assert.equal(record.passed, true)
+  })
 })
 
 describe('wave gate session store', () => {
