@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { detectMistakeResolution } from '../mistake-detector.js'
+import { detectMistakeResolution, sanitizeMistakeResolutionInput } from '../mistake-detector.js'
 import { createTraceStore, recordTraceEvent } from '../trace-store.js'
 import type { TraceStore } from '../trace-store.js'
 
@@ -67,5 +67,47 @@ describe('detectMistakeResolution', () => {
     const store = createTraceStore()
     const result = detectMistakeResolution(store, 'missing', 'bash')
     assert.equal(result, null)
+  })
+})
+
+// File-state-specific params must not be replayed as reusable "resolutions"
+// in <mistake-hints> — they are one-shot coordinates dead after any file change
+// (2026-07-06 TDX loop: replayed hash_edit anchors).
+describe('sanitizeMistakeResolutionInput', () => {
+  it('strips hash_edit anchors, keeps the rest of the shape', () => {
+    const input = { file_path: 'a.ts', anchors: ['L3:deadbeef'], new_string: 'x' }
+    const out = sanitizeMistakeResolutionInput('hash_edit', input)
+    assert.equal(out.anchors, '<one-shot, re-harvest via grep>')
+    assert.equal(out.file_path, 'a.ts')
+    assert.equal(out.new_string, 'x')
+    assert.deepEqual(input.anchors, ['L3:deadbeef'], 'original input must not be mutated')
+  })
+
+  it('strips edit_file old_string, keeps new_string (desired content, not a coordinate)', () => {
+    const input = { file_path: 'a.ts', old_string: 'const x = 1', new_string: 'const x = 2' }
+    const out = sanitizeMistakeResolutionInput('edit_file', input)
+    assert.equal(out.old_string, '<file-state-specific, re-match against current content>')
+    assert.equal(out.new_string, 'const x = 2')
+    assert.equal(input.old_string, 'const x = 1', 'original input must not be mutated')
+  })
+
+  it('strips apply_patch diff (context lines are positional anchors)', () => {
+    const input = { diff: '--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new', check_only: false }
+    const out = sanitizeMistakeResolutionInput('apply_patch', input)
+    assert.equal(out.diff, '<file-state-specific patch, regenerate from current content>')
+    assert.equal(out.check_only, false)
+  })
+
+  it('leaves ast_edit untouched — structural patterns are reusable, not coordinates', () => {
+    const input = { ops: [{ find: 'var $NAME = $VAL', replace: 'const $NAME = $VAL' }] }
+    const out = sanitizeMistakeResolutionInput('ast_edit', input)
+    assert.deepEqual(out, input)
+  })
+
+  it('passes through unrelated tools and inputs missing the target field', () => {
+    const bash = { command: 'npm test' }
+    assert.deepEqual(sanitizeMistakeResolutionInput('bash', bash), bash)
+    const editNoOld = { file_path: 'a.ts', new_string: 'x' }
+    assert.deepEqual(sanitizeMistakeResolutionInput('edit_file', editNoOld), editNoOld)
   })
 })

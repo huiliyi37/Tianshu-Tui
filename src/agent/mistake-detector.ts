@@ -24,12 +24,24 @@ export interface MistakeResolution {
 /**
  * Sanitize a tool input before it is recorded as a MistakeNotebook resolution.
  *
- * hash_edit anchors are file-state-specific one-shot coordinates: the exact
- * L<line>:<hash> pair is only valid for the file bytes it was harvested from.
- * Replaying them verbatim inside a <mistake-hints> "Resolution:" block teaches
- * the model to copy dead anchors on the next stale failure (2026-07-06 TDX
- * session looped exactly this way). Strip them; keep the rest of the shape so
- * the hint still shows WHAT kind of call resolved the error.
+ * File-state-specific parameters are one-shot coordinates: they are only valid
+ * for the exact file bytes they were harvested from. Replaying them verbatim
+ * inside a <mistake-hints> "Resolution:" block teaches the model to copy dead
+ * parameters on the next failure (2026-07-06 TDX session looped exactly this
+ * way on hash_edit anchors). Strip them; keep the rest of the shape (file_path,
+ * new_string, flags) so the hint still shows WHAT kind of call resolved the
+ * error.
+ *
+ * Covered per tool:
+ *  - hash_edit.anchors   — L<line>:<hash> pairs, dead after any file change
+ *  - edit_file.old_string — exact-match text, dead after the very edit that
+ *    succeeded (and after any later change); new_string stays (it is the
+ *    desired content, not a coordinate)
+ *  - apply_patch.diff    — unified-diff context lines are positional anchors,
+ *    dead after application
+ *
+ * ast_edit is deliberately NOT sanitized: its find patterns are structural
+ * (`var $NAME = $VAL`), not file-state coordinates — replaying them is fine.
  */
 export function sanitizeMistakeResolutionInput(
   toolName: string,
@@ -37,6 +49,12 @@ export function sanitizeMistakeResolutionInput(
 ): Record<string, unknown> {
   if (toolName === 'hash_edit' && 'anchors' in input) {
     return { ...input, anchors: '<one-shot, re-harvest via grep>' }
+  }
+  if (toolName === 'edit_file' && 'old_string' in input) {
+    return { ...input, old_string: '<file-state-specific, re-match against current content>' }
+  }
+  if (toolName === 'apply_patch' && 'diff' in input) {
+    return { ...input, diff: '<file-state-specific patch, regenerate from current content>' }
   }
   return input
 }
