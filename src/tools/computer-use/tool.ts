@@ -33,6 +33,7 @@ import {
 import { createPlatformDriver, isComputerUsePlatform } from './platform-driver.js'
 import { diffTreeSummary } from './tree-diff.js'
 import { isAppGranted } from './app-grants.js'
+import { createCdpDriver, type CdpBrowserDriver } from './cdp/driver.js'
 
 export type ComputerUseAction =
   | 'list_apps'
@@ -53,6 +54,11 @@ export type ComputerUseAction =
   | 'menu_select'
   | 'paste_text'
   | 'check_permissions'
+  | 'navigate'
+  | 'read_page'
+  | 'js_eval'
+  | 'tabs'
+  | 'browser_adopt'
 
 export interface ComputerUseToolOptions {
   /** Builds the platform driver. Defaults to the native driver for the host
@@ -69,6 +75,10 @@ export interface ComputerUseToolOptions {
   /** Post-action feedback loop (tree re-snapshot + diff). Defaults to
    *  RIVET_CU_FEEDBACK !== '0'. */
   feedback?: boolean
+  /** CDP browser backend toggle. Defaults to RIVET_CU_CDP !== '0'. */
+  cdpEnabled?: boolean
+  /** Builds the CDP browser driver (injectable for tests). */
+  cdpDriverFactory?: () => CdpBrowserDriver
 }
 
 /** Mask secret-looking values in accessibility text (tokens/keys/passwords). */
@@ -86,6 +96,22 @@ function actionRequiresApproval(action: ComputerUseAction): boolean {
   // check_permissions is a pure local capability probe; wait is a plain sleep.
   return action !== 'check_permissions' && action !== 'wait'
 }
+
+/** Chrome-family app names are eligible for the CDP backend. */
+function isBrowserApp(app: string): boolean {
+  return /(chrome|chromium|edge|brave)/i.test(app)
+}
+
+/** Actions that only exist on the CDP browser backend. */
+const BROWSER_ONLY_ACTIONS: ReadonlySet<ComputerUseAction> = new Set([
+  'navigate', 'read_page', 'js_eval', 'tabs', 'browser_adopt',
+] as ComputerUseAction[])
+
+/** Arbitrary-code / endpoint-takeover surface — approval can NEVER be skipped
+ *  by a per-app grant (mirrors browser.ts's fail-closed posture). */
+const ALWAYS_APPROVE_ACTIONS: ReadonlySet<ComputerUseAction> = new Set([
+  'js_eval', 'browser_adopt',
+] as ComputerUseAction[])
 
 /** Max duration for the wait action (ms). */
 const WAIT_CAP_MS = 5_000
@@ -118,6 +144,29 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
   const grantLookup = options.isAppGranted ?? ((app: string) => isAppGranted(app))
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   const feedbackEnabled = options.feedback ?? process.env.RIVET_CU_FEEDBACK !== '0'
+  const cdpEnabled = options.cdpEnabled ?? process.env.RIVET_CU_CDP !== '0'
+
+  // CDP browser driver — one instance per tool (holds the browser connection).
+  let cdpDriver: CdpBrowserDriver | null = null
+  function getCdpDriver(): CdpBrowserDriver {
+    if (!cdpDriver) cdpDriver = (options.cdpDriverFactory ?? createCdpDriver)()
+    return cdpDriver
+  }
+
+  /**
+   * Hybrid routing: browser-family targets ride the CDP backend when a
+   * DevTools session is available (sub-second snapshots, occlusion-proof
+   * input); anything else — and CDP-connection failures — takes the native
+   * AX/UIA driver. menu_select always goes native (the browser's menu BAR
+   * is an OS object CDP can't see). launch_app may spawn the dedicated
+   * automation-profile browser; other actions never launch.
+   */
+  async function routeDriver(nativeDriver: ComputerUseDriver, app: string, action: ComputerUseAction): Promise<ComputerUseDriver> {
+    if (!cdpEnabled || !app || !isBrowserApp(app) || action === 'menu_select') return nativeDriver
+    const cdp = getCdpDriver()
+    if (await cdp.available(action === 'launch_app')) return cdp
+    return nativeDriver
+  }
 
   // Snapshot ref cache — closure-scoped (per tool instance) LRU. Map iteration
   // order is insertion order; delete+set refreshes recency.
@@ -365,6 +414,58 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
     return err instanceof Error && /stale snapshot/i.test(err.message)
   }
 
+  /** Browser-only actions — served exclusively by the CDP backend. */
+  async function executeBrowserAction(
+    cdp: CdpBrowserDriver,
+    params: ToolCallParams,
+    action: ComputerUseAction,
+    app: string,
+  ): Promise<ToolResult> {
+    if (action === 'browser_adopt') {
+      const endpoint = params.input.endpoint
+      if (typeof endpoint !== 'string' || !endpoint.trim()) {
+        return { content: 'browser_adopt requires "endpoint" (e.g. "localhost:9222" — a Chrome started with --remote-debugging-port).', isError: true }
+      }
+      return { content: await cdp.adopt(endpoint.trim()) }
+    }
+    if (!app) {
+      return { content: `${action} requires "app" (the browser to operate, e.g. "Google Chrome").`, isError: true }
+    }
+    switch (action) {
+      case 'navigate': {
+        const url = params.input.url
+        if (typeof url !== 'string' || !url.trim()) {
+          return { content: 'navigate requires "url" (a URL, or "back" / "forward" / "reload").', isError: true }
+        }
+        const note = await cdp.navigate(url.trim())
+        return await withFeedback(cdp, params, app, { content: note })
+      }
+      case 'read_page':
+        return { content: await cdp.readPage() }
+      case 'js_eval': {
+        const expression = params.input.expression
+        if (typeof expression !== 'string' || !expression.trim()) {
+          return { content: 'js_eval requires "expression" (JavaScript to evaluate in the page).', isError: true }
+        }
+        const result = await cdp.evalJs(expression)
+        return await withFeedback(cdp, params, app, { content: `js_eval result:\n${result}` })
+      }
+      case 'tabs': {
+        const rawOp = params.input.tab_op ?? 'list'
+        if (rawOp !== 'list' && rawOp !== 'activate' && rawOp !== 'new' && rawOp !== 'close') {
+          return { content: 'tabs "tab_op" must be one of: list, activate, new, close.', isError: true }
+        }
+        const index = typeof params.input.tab === 'number' ? params.input.tab : undefined
+        const url = typeof params.input.url === 'string' ? params.input.url : undefined
+        const note = await cdp.tabs(rawOp, { index, url })
+        // list is read-only; mutations get the standard feedback loop.
+        return rawOp === 'list' ? { content: note } : await withFeedback(cdp, params, app, { content: note })
+      }
+      default:
+        return { content: `Unknown browser action: ${action}`, isError: true }
+    }
+  }
+
   async function executeClick(
     driver: ComputerUseDriver,
     params: ToolCallParams,
@@ -431,13 +532,20 @@ Actions:
 - menu_select(app, menu_path): pick a menu-bar item by path, e.g. "File > Export > PNG".
 - paste_text(app, text): put text on the clipboard and paste it (fast + reliable for long/multiline text; overwrites the clipboard).
 
+Browser fast path: Chrome-family targets (Chrome/Chromium/Edge/Brave) automatically use a DevTools (CDP) backend when available — snapshots are sub-second and clicks/typing work even when the window is occluded. launch_app on a browser starts a dedicated automation profile (sign-ins persist across sessions). Browser-only actions:
+- navigate(app, url): go to a URL, or "back" / "forward" / "reload".
+- read_page(app): full page text (innerText) — no tree-node cap; use for reading articles/long content.
+- js_eval(app, expression): run JavaScript in the page and return the result (always needs approval).
+- tabs(app, tab_op, tab?, url?): list/activate/new/close browser tabs (tab is the 1-based index from list).
+- browser_adopt(endpoint): attach to a Chrome you started with --remote-debugging-port (always needs approval).
+
 Feedback loop: after each mutating action the tool re-reads the UI and appends how it changed (added/removed elements). When the UI changed, the ref cache is refreshed — refs shown in that diff are immediately clickable, refs from before the action are stale. If a targeted ref went stale, the tool re-snapshots and retries automatically when exactly one element still matches the same role+title; otherwise it refreshes the cache and asks you to re-target.`,
       input_schema: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['check_permissions', 'list_apps', 'snapshot', 'find', 'wait_for', 'click', 'double_click', 'right_click', 'scroll', 'drag', 'type', 'set_value', 'key', 'wait', 'focus_app', 'launch_app', 'menu_select', 'paste_text'],
+            enum: ['check_permissions', 'list_apps', 'snapshot', 'find', 'wait_for', 'click', 'double_click', 'right_click', 'scroll', 'drag', 'type', 'set_value', 'key', 'wait', 'focus_app', 'launch_app', 'menu_select', 'paste_text', 'navigate', 'read_page', 'js_eval', 'tabs', 'browser_adopt'],
             description: 'What to do.',
           },
           app: { type: 'string', description: 'Target app name (required for all actions except list_apps/check_permissions/wait).' },
@@ -459,6 +567,11 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
           to_x: { type: 'number', description: 'Drag end X (when no to_ref).' },
           to_y: { type: 'number', description: 'Drag end Y (when no to_ref).' },
           duration_ms: { type: 'number', description: 'Wait duration in ms, capped at 5000 (wait action).' },
+          url: { type: 'string', description: 'URL to open (navigate / tabs new). navigate also accepts "back", "forward", "reload".' },
+          expression: { type: 'string', description: 'JavaScript to evaluate in the page (js_eval action).' },
+          tab_op: { type: 'string', enum: ['list', 'activate', 'new', 'close'], description: 'Tab operation (tabs action; default list).' },
+          tab: { type: 'number', description: '1-based tab index from tabs list (tabs activate/close).' },
+          endpoint: { type: 'string', description: 'DevTools endpoint like "localhost:9222" or an http/ws URL (browser_adopt action).' },
         },
         required: ['action'],
       },
@@ -490,6 +603,16 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
       }
 
       try {
+        // Browser-only actions require the CDP backend outright — no native
+        // fallback exists for navigate/read_page/js_eval/tabs/browser_adopt.
+        if (BROWSER_ONLY_ACTIONS.has(action)) {
+          if (!cdpEnabled) {
+            return { content: `${action} requires the CDP browser backend, which is disabled (RIVET_CU_CDP=0).`, isError: true }
+          }
+          return await executeBrowserAction(getCdpDriver(), params, action, app)
+        }
+        // Hybrid routing: browser targets ride CDP when a session is available.
+        driver = await routeDriver(driver, app, action)
         switch (action) {
           case 'check_permissions': {
             const perm = await driver.checkPermissions()
@@ -715,6 +838,8 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
     requiresApproval(params: ToolCallParams): boolean {
       const action = params.input.action as ComputerUseAction
       if (!actionRequiresApproval(action)) return false
+      // Arbitrary JS / endpoint takeover: a per-app grant can NEVER waive these.
+      if (ALWAYS_APPROVE_ACTIONS.has(action)) return true
       // list_apps has no single app target — always gate (reveals running apps).
       const app = targetApp(params.input)
       if (!app) return true

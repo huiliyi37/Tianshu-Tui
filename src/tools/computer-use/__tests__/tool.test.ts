@@ -1,5 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+// This suite exercises the NATIVE driver paths — disable CDP routing so a
+// browser-named app ("chrome") can't trigger real endpoint probes.
+// CDP routing has its own suite: cdp-tool-routing.test.ts.
+process.env.RIVET_CU_CDP = '0'
 import { createComputerUseTool } from '../tool.js'
 import type { ComputerUseDriver, ClickTarget, ClickOptions, ScrollOptions, SnapshotOptions, PermissionStatus, SnapshotRef } from '../macos-driver.js'
 import type { Tool, ToolCallParams } from '../../types.js'
