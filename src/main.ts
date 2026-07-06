@@ -1026,7 +1026,7 @@ async function main() {
 
     // 将 slash 命令解析为 agent prompt（对齐 Ink resolveAppPromptInput）。
     // /review → "deliver_task(...)"；未知 slash → null → 显示错误提示。
-    const resolved = resolveAppPromptInput(trimmed, process.cwd())
+    const resolved = resolveAppPromptInput(trimmed, process.cwd(), app!.getCommandPredicate())
     if (resolved === null) {
       // Backstop: a registered slash command (e.g. /plan-approve) may slip past
       // normal dispatch. Give the registry one more chance before reporting

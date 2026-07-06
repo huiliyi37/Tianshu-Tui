@@ -1,5 +1,6 @@
 import type { AgentLoop } from '../agent/loop.js'
 import type { SessionContext } from '../agent/context.js'
+import { looksLikeFilePath } from './engine/app.js'
 import { SessionPersist, getSessionDir } from '../agent/session-persist.js'
 import { forkSession, listBranches, countMessageLines } from '../agent/session-fork.js'
 import { type StarDomainId } from '../agent/star-domain.js'
@@ -384,7 +385,11 @@ export interface ResolvedPromptInput {
   requiredTools?: readonly string[]
 }
 
-export function resolveAppPromptInput(input: string, cwd: string): ResolvedPromptInput | null {
+export function resolveAppPromptInput(
+  input: string,
+  cwd: string,
+  isKnownCommand?: (name: string) => boolean,
+): ResolvedPromptInput | null {
   if (!input.startsWith('/')) return { prompt: input }
   const workflow = resolveEcosystemWorkflowInput(input)
   if (workflow) return { prompt: workflow.prompt, requiredTools: workflow.requiredTools }
@@ -406,6 +411,9 @@ export function resolveAppPromptInput(input: string, cwd: string): ResolvedPromp
   if (/^\/review/i.test(input)) {
     return { prompt: `User typed "${input}" which looks like a /review command but didn't match the expected format. Usage: /review [max] [focus description]. Run /review max to trigger L3 Review Squadron.` }
   }
+  // Linux/WSL path like /etc, /mnt, /usr — not a recognized command, pass through
+  // as plain text so the agent can handle it (e.g. "look at /etc/hosts").
+  if (looksLikeFilePath(input, isKnownCommand)) return { prompt: input }
   // Unrecognized slash command — return null to signal "blocked"
   return null
 }

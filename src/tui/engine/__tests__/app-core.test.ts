@@ -60,3 +60,25 @@ test('looksLikeFilePath distinguishes absolute paths from slash commands', () =>
   assert.equal(looksLikeFilePath('C:\\Users\\me\\main.ts'), true)
   assert.equal(looksLikeFilePath('D:/work/readme.md'), true)
 })
+
+test('looksLikeFilePath with isKnownCommand: Linux/WSL single-segment paths', () => {
+  const isCmd = (name: string) => new Set(['help', 'exit', 'team', 'model', 'review']).has(name)
+  // 单段 Linux 顶级目录 → 不是已知命令 → 视为路径
+  assert.equal(looksLikeFilePath('/etc', isCmd), true)
+  assert.equal(looksLikeFilePath('/mnt', isCmd), true)
+  assert.equal(looksLikeFilePath('/usr', isCmd), true)
+  assert.equal(looksLikeFilePath('/var', isCmd), true)
+  assert.equal(looksLikeFilePath('/opt', isCmd), true)
+  assert.equal(looksLikeFilePath('/home', isCmd), true)
+  // 已知命令 → 不是路径
+  assert.equal(looksLikeFilePath('/help', isCmd), false)
+  assert.equal(looksLikeFilePath('/exit', isCmd), false)
+  assert.equal(looksLikeFilePath('/team', isCmd), false)
+  // 无谓词 → 回退旧行为（视为命令）
+  assert.equal(looksLikeFilePath('/etc'), false)
+  // 多段路径始终正确（不受谓词影响）
+  assert.equal(looksLikeFilePath('/etc/passwd', isCmd), true)
+  assert.equal(looksLikeFilePath('/mnt/c/Users', isCmd), true)
+  // 带参数的未知命令 → 视为路径（第一个 token 不是已知命令）
+  assert.equal(looksLikeFilePath('/etc hosts', isCmd), true)
+})
