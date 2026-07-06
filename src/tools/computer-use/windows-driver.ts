@@ -17,13 +17,15 @@
  *
  * Element targeting mirrors the macOS driver exactly: each snapshot ref
  * carries its child-index PATH from the app's top-level UIA windows
- * ([windowIdx, childIdx, ...], ControlView walker). Click/locate re-walk the
+ * ([windowIdx, childIdx, ...], control view). Click/locate re-walk the
  * path and verify role/title — stale snapshots are rejected, never guessed.
+ * The snapshot walk itself is CacheRequest-batched (one FindAll per parent
+ * with all properties prefetched); app resolution falls back from process
+ * matching to UIA window-title matching so frame-hosted UWP apps work.
  *
- * Every action spawns a fresh powershell.exe (matching the per-action
- * osascript spawns on macOS). Add-Type JIT makes the first call slow (~1-3s);
- * accepted for v1 — a resident PS child process is the upgrade path if real
- * usage proves too slow.
+ * Actions run inside a resident PowerShell REPL (script-host.ts) so the
+ * Add-Type JIT (~1-3s) is paid once per session; one-shot powershell.exe
+ * spawns remain as the fallback when the host cannot start.
  */
 
 import { execFile } from 'node:child_process'
@@ -233,24 +235,49 @@ Add-Type -AssemblyName UIAutomationClient | Out-Null
 Add-Type -AssemblyName UIAutomationTypes | Out-Null
 `
 
-/** Match running processes for an app name (process name or exact window title). */
-function procsForApp(app: string): string {
+/**
+ * Non-throwing app matcher. Sets `$wins` (top-level UIA windows, stable
+ * enumeration order) and `$fh` (HWND for focus). Two passes:
+ * 1. classic Win32: process name / exact main-window-title match → windows
+ *    filtered by PID (the pre-existing path)
+ * 2. UWP fallback: top-level UIA window Name match, case-insensitive exact
+ *    first then substring — covers apps hosted by ApplicationFrameHost
+ *    (Calculator, Settings, ...) whose own process has no window handle.
+ */
+function findApp(app: string): string {
   return `
 $app = ${psString(normalizeAppName(app))}
-$procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($_.ProcessName -eq $app -or $_.MainWindowTitle -eq $app) })
-if ($procs.Count -eq 0) { throw "no running app named '$app' with a window (note: UWP apps like Calculator are hosted by ApplicationFrameHost and have no usable window handle)" }
-`
-}
-
-/** UIA top-level windows for the matched processes, in stable enumeration order. */
-const UIA_WINDOWS = `
-$procIds = @($procs | ForEach-Object { $_.Id })
 $uiaRoot = [System.Windows.Automation.AutomationElement]::RootElement
 $uiaAll = $uiaRoot.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
 $wins = @()
-foreach ($w in $uiaAll) { if ($procIds -contains $w.Current.ProcessId) { $wins += $w } }
-if ($wins.Count -eq 0) { throw "no top-level UIA window for '$app'" }
+$fh = [IntPtr]::Zero
+$procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($_.ProcessName -eq $app -or $_.MainWindowTitle -eq $app) })
+if ($procs.Count -gt 0) {
+  $procIds = @($procs | ForEach-Object { $_.Id })
+  foreach ($w in $uiaAll) { if ($procIds -contains $w.Current.ProcessId) { $wins += $w } }
+  $fh = [IntPtr]$procs[0].MainWindowHandle
+}
+if ($wins.Count -eq 0) {
+  $needle = $app.ToLower()
+  $exact = @(); $sub = @()
+  foreach ($w in $uiaAll) {
+    $n = [string]$w.Current.Name
+    if (-not $n) { continue }
+    if ($n.ToLower() -eq $needle) { $exact += $w } elseif ($n.ToLower().Contains($needle)) { $sub += $w }
+  }
+  $wins = @(if ($exact.Count -gt 0) { $exact } else { $sub })
+  if ($wins.Count -gt 0) { try { $fh = [IntPtr]$wins[0].Current.NativeWindowHandle } catch {} }
+}
 `
+}
+
+/** Throwing variant — every action script that needs a target app uses this. */
+function resolveApp(app: string): string {
+  return `
+${findApp(app)}
+if ($wins.Count -eq 0) { throw "no running app named '$app' with a window (use list_apps for exact names)" }
+`
+}
 
 /**
  * Resolve an element by child-index path with identity check — semantics
@@ -289,11 +316,12 @@ $cx = [int][math]::Round($rect.X + $rect.Width / 2)
 $cy = [int][math]::Round($rect.Y + $rect.Height / 2)
 `
 
-/** Bring the first matched process's main window to the foreground. */
+/** Bring the resolved app's window (findApp's $fh) to the foreground. */
 const FOCUS_WINDOW = `
-$fh = [IntPtr]$procs[0].MainWindowHandle
-if ([RivetInput]::IsIconic($fh)) { [void][RivetInput]::ShowWindow($fh, 9) }
-[void][RivetInput]::SetForegroundWindow($fh)
+if ($fh -ne [IntPtr]::Zero) {
+  if ([RivetInput]::IsIconic($fh)) { [void][RivetInput]::ShowWindow($fh, 9) }
+  [void][RivetInput]::SetForegroundWindow($fh)
+}
 `
 
 /** One row of the UIA snapshot walk, as emitted (JSON) by the PS script. */
@@ -313,7 +341,7 @@ export interface WindowsSnapshotRow {
  * so the model-facing prompt experience is the same on both platforms.
  */
 export function rowsToSnapshot(rows: WindowsSnapshotRow[]): { tree: string; refs: SnapshotRef[] } {
-  const tree = rows
+  const body = rows
     .map((r) => {
       const indent = '  '.repeat(Math.min(r.depth, 8))
       const label = r.title ? ` "${r.title}"` : ''
@@ -322,6 +350,21 @@ export function rowsToSnapshot(rows: WindowsSnapshotRow[]): { tree: string; refs
       return `${indent}[${r.ref}] ${r.role || 'element'}${label}${val}${at}`
     })
     .join('\n')
+  // Menu bar parity with macOS: surface the first MenuBar's direct children
+  // as a "Menu bar: A | B | ..." header so menu_select paths are discoverable.
+  let menuLine = ''
+  const barIdx = rows.findIndex((r) => r.role === 'MenuBar')
+  const bar = barIdx >= 0 ? rows[barIdx] : undefined
+  if (bar) {
+    const items: string[] = []
+    for (let j = barIdx + 1; j < rows.length; j++) {
+      const r = rows[j]
+      if (!r || r.depth <= bar.depth) break
+      if (r.depth === bar.depth + 1 && r.title) items.push(r.title)
+    }
+    if (items.length > 0) menuLine = `Menu bar: ${items.join(' | ')}\n`
+  }
+  const tree = `${menuLine}${body}`
   const refs: SnapshotRef[] = rows.map((r) => ({
     ref: r.ref,
     path: Array.isArray(r.path) ? r.path : [r.path as unknown as number],
@@ -379,18 +422,37 @@ export function parseCombo(combo: string): ComboKeySpec {
 // --- script builders (exported for unit tests) ---
 
 export function buildListAppsScript(): string {
+  // Classic apps: process name + main-window title (the title is what lets
+  // the model tell chrome/WINWORD-style names apart). UWP apps: their own
+  // process has no window — list ApplicationFrameHost's top-level UIA frame
+  // windows by title as standalone entries so they're targetable by name.
   return `
 ${INPUT_PRELUDE}
+${UIA_PRELUDE}
+$fgHwnd = [RivetInput]::GetForegroundWindow()
 $fgPid = [uint32]0
-[void][RivetInput]::GetWindowThreadProcessId([RivetInput]::GetForegroundWindow(), [ref]$fgPid)
+[void][RivetInput]::GetWindowThreadProcessId($fgHwnd, [ref]$fgPid)
 $byName = @{}
-foreach ($p in @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle })) {
+foreach ($p in @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.ProcessName -ne 'ApplicationFrameHost' })) {
   $n = $p.ProcessName
-  if (-not $byName.ContainsKey($n)) { $byName[$n] = $false }
-  if ($p.Id -eq $fgPid) { $byName[$n] = $true }
+  if (-not $byName.ContainsKey($n)) { $byName[$n] = @{ name = $n; title = [string]$p.MainWindowTitle; frontmost = $false } }
+  if ($p.Id -eq $fgPid) { $byName[$n].frontmost = $true; $byName[$n].title = [string]$p.MainWindowTitle }
 }
-$out = @($byName.Keys | Sort-Object | ForEach-Object { @{ name = $_; frontmost = $byName[$_] } })
-ConvertTo-Json -InputObject $out -Compress
+$entries = New-Object System.Collections.ArrayList
+foreach ($k in @($byName.Keys | Sort-Object)) { [void]$entries.Add($byName[$k]) }
+$afh = @(Get-Process -Name ApplicationFrameHost -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+if ($afh.Count -gt 0) {
+  $uiaRoot = [System.Windows.Automation.AutomationElement]::RootElement
+  foreach ($w in $uiaRoot.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)) {
+    if ($afh -notcontains $w.Current.ProcessId) { continue }
+    $n = [string]$w.Current.Name
+    if (-not $n) { continue }
+    $isFg = $false
+    try { $isFg = ([int64]$w.Current.NativeWindowHandle) -eq ([int64]$fgHwnd) } catch {}
+    [void]$entries.Add(@{ name = $n; title = ''; frontmost = $isFg })
+  }
+}
+ConvertTo-Json -InputObject @($entries.ToArray()) -Compress
 `
 }
 
@@ -422,44 +484,60 @@ try {
 } catch { $shotOk = $false }`
     : `
 $shotOk = $false`
+  // The walk is CacheRequest-batched: one FindAll(Children) per PARENT pulls
+  // every child with all four properties (+ ValuePattern) prefetched, so the
+  // per-node cost drops from 4-5 cross-process UIA calls to ~1 per parent.
+  // FindAll with ControlViewCondition returns children in ControlViewWalker
+  // order, so the child-index paths stay compatible with resolveByPath.
   return `
 ${INPUT_PRELUDE}
 ${UIA_PRELUDE}
-${procsForApp(app)}
-${UIA_WINDOWS}
+${resolveApp(app)}
 $MAX = ${MAX_TREE_NODES}
 $script:rows = New-Object System.Collections.ArrayList
 $script:refN = 0
-$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+$NO_DESCEND = @{ ScrollBar = $true; TitleBar = $true }
+$SKIP_VALUE = @{ Window = $true; Pane = $true; Group = $true; Tree = $true; List = $true; Table = $true; DataGrid = $true; DataItem = $true; ToolBar = $true; TitleBar = $true; MenuBar = $true; Menu = $true; Tab = $true; ScrollBar = $true; Header = $true }
+$ctrlCond = [System.Windows.Automation.Automation]::ControlViewCondition
+$cr = New-Object System.Windows.Automation.CacheRequest
+$cr.Add([System.Windows.Automation.AutomationElement]::NameProperty)
+$cr.Add([System.Windows.Automation.AutomationElement]::ControlTypeProperty)
+$cr.Add([System.Windows.Automation.AutomationElement]::BoundingRectangleProperty)
+$cr.Add([System.Windows.Automation.ValuePattern]::Pattern)
+$cr.Add([System.Windows.Automation.ValuePattern]::ValueProperty)
+$cr.TreeFilter = $ctrlCond
 function Visit($el, $depth, $path) {
   if ($script:rows.Count -ge $MAX) { return }
   $role = ''; $title = ''; $value = ''
-  try { $role = $el.Current.ControlType.ProgrammaticName -replace '^ControlType\\.', '' } catch {}
-  try { $title = [string]$el.Current.Name } catch {}
-  try {
-    $vp = $null
-    if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp) -and $vp) { $value = [string]$vp.Current.Value }
-  } catch {}
+  try { $role = $el.Cached.ControlType.ProgrammaticName -replace '^ControlType\\.', '' } catch {}
+  try { $title = [string]$el.Cached.Name } catch {}
+  if (-not $SKIP_VALUE.ContainsKey($role)) {
+    try {
+      $vp = $null
+      if ($el.TryGetCachedPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp) -and $vp) { $value = [string]$vp.Cached.Value }
+    } catch {}
+  }
   if ($role -or $title -or $value) {
     $script:refN++
     $pos = $null
     try {
-      $r = $el.Current.BoundingRectangle
+      $r = $el.Cached.BoundingRectangle
       if (-not $r.IsEmpty) { $pos = @{ x = [int][math]::Round($r.X); y = [int][math]::Round($r.Y) } }
     } catch {}
     [void]$script:rows.Add(@{ ref = $script:refN; depth = $depth; role = $role; title = $title; value = $value; pos = $pos; path = $path })
   }
-  $child = $null
-  try { $child = $walker.GetFirstChild($el) } catch {}
-  $i = 0
-  while ($child -ne $null) {
+  if ($NO_DESCEND.ContainsKey($role)) { return }
+  $kids = $null
+  try { $kids = $el.FindAll([System.Windows.Automation.TreeScope]::Children, $ctrlCond) } catch { return }
+  for ($k = 0; $k -lt $kids.Count; $k++) {
     if ($script:rows.Count -ge $MAX) { break }
-    Visit $child ($depth + 1) ($path + @($i))
-    $i++
-    try { $child = $walker.GetNextSibling($child) } catch { $child = $null }
+    Visit $kids[$k] ($depth + 1) ($path + @($k))
   }
 }
-for ($i = 0; $i -lt $wins.Count; $i++) { Visit $wins[$i] 0 @($i) }
+$act = $cr.Activate()
+try {
+  for ($i = 0; $i -lt $wins.Count; $i++) { Visit ($wins[$i].GetUpdatedCache($cr)) 0 @($i) }
+} finally { $act.Dispose() }
 ${shotSection}
 ConvertTo-Json -InputObject @{ rows = $script:rows.ToArray(); shot = $shotOk } -Depth 8 -Compress
 `
@@ -486,8 +564,7 @@ if ($found.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Patte
   return `
 ${INPUT_PRELUDE}
 ${UIA_PRELUDE}
-${procsForApp(app)}
-${UIA_WINDOWS}
+${resolveApp(app)}
 ${resolveByPath(target)}
 $clicked = $false
 ${invokeFastPath}
@@ -511,8 +588,7 @@ export function buildLocateScript(app: string, target: { path: number[]; role?: 
   return `
 ${INPUT_PRELUDE}
 ${UIA_PRELUDE}
-${procsForApp(app)}
-${UIA_WINDOWS}
+${resolveApp(app)}
 ${resolveByPath(target)}
 ${ELEMENT_CENTER}
 ConvertTo-Json -InputObject @{ x = $cx; y = $cy } -Compress
@@ -528,9 +604,10 @@ export function buildScrollScript(app: string, opts: ScrollOptions): string {
   const atSnippet = opts.at
     ? `$ax = ${Math.round(opts.at.x)}; $ay = ${Math.round(opts.at.y)}`
     : `
-${procsForApp(app)}
+${UIA_PRELUDE}
+${resolveApp(app)}
 $wrct = New-Object 'RivetInput+RECT'
-if (-not [RivetInput]::GetWindowRect([IntPtr]$procs[0].MainWindowHandle, [ref]$wrct)) { throw "cannot resolve a scroll position for '$app' (no window)" }
+if ($fh -eq [IntPtr]::Zero -or -not [RivetInput]::GetWindowRect($fh, [ref]$wrct)) { throw "cannot resolve a scroll position for '$app' (no window)" }
 $ax = [int](($wrct.Left + $wrct.Right) / 2); $ay = [int](($wrct.Top + $wrct.Bottom) / 2)`
   return `
 ${INPUT_PRELUDE}
@@ -554,7 +631,8 @@ export function buildTypeScript(app: string, text: string): string {
   const b64 = Buffer.from(text, 'utf8').toString('base64')
   return `
 ${INPUT_PRELUDE}
-${procsForApp(app)}
+${UIA_PRELUDE}
+${resolveApp(app)}
 ${FOCUS_WINDOW}
 Start-Sleep -Milliseconds 100
 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psString(b64)}))
@@ -584,7 +662,8 @@ if ($needShift) { [RivetInput]::KeyDown([uint16]16) }
 if ($needShift) { [RivetInput]::KeyUp([uint16]16) }`
   return `
 ${INPUT_PRELUDE}
-${procsForApp(app)}
+${UIA_PRELUDE}
+${resolveApp(app)}
 ${FOCUS_WINDOW}
 Start-Sleep -Milliseconds 100
 ${modsDown}
@@ -600,7 +679,8 @@ ${modsUp}
 export function buildFocusAppScript(app: string): string {
   return `
 ${INPUT_PRELUDE}
-${procsForApp(app)}
+${UIA_PRELUDE}
+${resolveApp(app)}
 ${FOCUS_WINDOW}
 'ok'
 `
@@ -608,21 +688,20 @@ ${FOCUS_WINDOW}
 
 export function buildLaunchAppScript(app: string): string {
   // Already running → just focus. Otherwise Start-Process (resolves via App
-  // Paths/PATH) and poll for a main window so callers can snapshot right after.
-  const name = normalizeAppName(app)
+  // Paths/PATH) and poll until a window is resolvable — the findApp poll also
+  // matches UIA window titles, so UWP apps (frame-hosted) are waited on too.
   return `
 ${INPUT_PRELUDE}
-$app = ${psString(name)}
-$procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($_.ProcessName -eq $app -or $_.MainWindowTitle -eq $app) })
-if ($procs.Count -eq 0) {
+${UIA_PRELUDE}
+${findApp(app)}
+if ($wins.Count -eq 0) {
   Start-Process -FilePath $app | Out-Null
-  $up = $false
-  for ($i = 0; $i -lt 40; $i++) {
+  for ($try = 0; $try -lt 40; $try++) {
     Start-Sleep -Milliseconds 250
-    $procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.ProcessName -eq $app })
-    if ($procs.Count -gt 0) { $up = $true; break }
+    ${findApp(app)}
+    if ($wins.Count -gt 0) { break }
   }
-  if (-not $up) { throw "$app did not show a window within 10s" }
+  if ($wins.Count -eq 0) { throw "$app did not show a window within 10s" }
 }
 ${FOCUS_WINDOW}
 'ok'
@@ -637,10 +716,9 @@ export function buildMenuSelectScript(app: string, path: string[]): string {
   return `
 ${INPUT_PRELUDE}
 ${UIA_PRELUDE}
-${procsForApp(app)}
+${resolveApp(app)}
 ${FOCUS_WINDOW}
 Start-Sleep -Milliseconds 150
-${UIA_WINDOWS}
 $segments = @(ConvertFrom-Json ${psString(JSON.stringify(path))})
 $uiaRootEl = [System.Windows.Automation.AutomationElement]::RootElement
 $menuItemCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
@@ -693,8 +771,7 @@ export function buildSetValueScript(
   return `
 ${INPUT_PRELUDE}
 ${UIA_PRELUDE}
-${procsForApp(app)}
-${UIA_WINDOWS}
+${resolveApp(app)}
 ${resolveByPath(target)}
 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psString(b64)}))
 $vp = $null
@@ -711,7 +788,8 @@ export function buildPasteTextScript(app: string, text: string): string {
   const b64 = Buffer.from(text, 'utf8').toString('base64')
   return `
 ${INPUT_PRELUDE}
-${procsForApp(app)}
+${UIA_PRELUDE}
+${resolveApp(app)}
 $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${psString(b64)}))
 Set-Clipboard -Value $text
 ${FOCUS_WINDOW}
@@ -737,8 +815,11 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
     async listApps(): Promise<AppInfo[]> {
       const raw = (await run(buildListAppsScript())).trim()
       try {
-        const parsed = JSON.parse(raw) as AppInfo[]
-        return Array.isArray(parsed) ? parsed : []
+        const parsed = JSON.parse(raw) as AppInfo[] | AppInfo
+        if (Array.isArray(parsed)) return parsed
+        // ConvertTo-Json unwraps single-element arrays (PS 5.1 quirk).
+        if (parsed && typeof parsed === 'object') return [parsed]
+        return []
       } catch {
         return []
       }

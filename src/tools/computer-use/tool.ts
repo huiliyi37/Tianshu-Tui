@@ -502,7 +502,10 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
           case 'list_apps': {
             const apps = await driver.listApps()
             if (apps.length === 0) return { content: 'No visible apps found.' }
-            const lines = apps.map((a) => `- ${a.name}${a.frontmost ? ' (frontmost)' : ''}`)
+            const lines = apps.map((a) => {
+              const title = a.title && a.title !== a.name ? ` — "${a.title}"` : ''
+              return `- ${a.name}${title}${a.frontmost ? ' (frontmost)' : ''}`
+            })
             return { content: `Visible apps:\n${lines.join('\n')}` }
           }
           case 'snapshot': {

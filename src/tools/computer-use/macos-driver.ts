@@ -29,6 +29,8 @@ import { createScriptHost, hostEnabled, HostUnavailableError, SENTINEL, type Scr
 export interface AppInfo {
   name: string
   frontmost: boolean
+  /** Main window title, when it adds signal beyond the name (Windows only). */
+  title?: string
 }
 
 /** Structured snapshot element: ref number + AX path + identity for validation. */

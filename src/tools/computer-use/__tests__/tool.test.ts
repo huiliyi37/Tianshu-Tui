@@ -182,6 +182,20 @@ test('list_apps returns the visible apps', async () => {
   assert.equal(res.isError, undefined)
   assert.match(res.content, /Safari \(frontmost\)/)
   assert.match(res.content, /Notes/)
+  assert.equal(res.content.includes('—'), false, 'no title separator when titles absent')
+})
+
+test('list_apps shows window titles when the driver provides them (Windows)', async () => {
+  const driver = new FakeDriver()
+  driver.listApps = async () => [
+    { name: 'chrome', title: 'GitHub - Google Chrome', frontmost: true },
+    { name: 'Calculator', title: '', frontmost: false },
+    { name: 'notepad', title: 'notepad', frontmost: false },
+  ]
+  const res = await darwinTool(driver).execute(params({ action: 'list_apps' }))
+  assert.match(res.content, /- chrome — "GitHub - Google Chrome" \(frontmost\)/)
+  assert.match(res.content, /- Calculator\n/, 'empty title → bare name')
+  assert.match(res.content, /- notepad$/m, 'title identical to name → not repeated')
 })
 
 test('snapshot returns the accessibility tree, saves a screenshot artifact and fills images', async () => {

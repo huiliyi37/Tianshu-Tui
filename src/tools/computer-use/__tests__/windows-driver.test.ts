@@ -87,6 +87,31 @@ test('rowsToSnapshot formats the numbered tree exactly like the macOS driver', (
   assert.deepEqual(refs[1], { ref: 2, path: [0, 0], role: 'Edit', title: '', pos: { x: 110, y: 90 } })
 })
 
+test('rowsToSnapshot surfaces the first MenuBar children as a macOS-parity header', () => {
+  const rows: WindowsSnapshotRow[] = [
+    { ref: 1, depth: 0, role: 'Window', title: 'Doc', value: '', pos: null, path: [0] },
+    { ref: 2, depth: 1, role: 'MenuBar', title: '', value: '', pos: null, path: [0, 0] },
+    { ref: 3, depth: 2, role: 'MenuItem', title: '文件', value: '', pos: null, path: [0, 0, 0] },
+    { ref: 4, depth: 3, role: 'MenuItem', title: '新建', value: '', pos: null, path: [0, 0, 0, 0] },
+    { ref: 5, depth: 2, role: 'MenuItem', title: '编辑', value: '', pos: null, path: [0, 0, 1] },
+    { ref: 6, depth: 1, role: 'Edit', title: '', value: '', pos: null, path: [0, 1] },
+  ]
+  const { tree } = rowsToSnapshot(rows)
+  assert.ok(tree.startsWith('Menu bar: 文件 | 编辑\n'), `header line first, got: ${tree.split('\n')[0]}`)
+  assert.match(tree, /\[2\] MenuBar/, 'MenuBar rows still present in the body')
+})
+
+test('rowsToSnapshot omits the menu header when there is no MenuBar or it is empty', () => {
+  const plain = rowsToSnapshot([
+    { ref: 1, depth: 0, role: 'Window', title: 'Doc', value: '', pos: null, path: [0] },
+  ])
+  assert.equal(plain.tree.includes('Menu bar:'), false)
+  const emptyBar = rowsToSnapshot([
+    { ref: 1, depth: 0, role: 'MenuBar', title: '', value: '', pos: null, path: [0] },
+  ])
+  assert.equal(emptyBar.tree.includes('Menu bar:'), false)
+})
+
 test('rowsToSnapshot caps indent depth at 8 and defaults missing role to "element"', () => {
   const rows: WindowsSnapshotRow[] = [
     { ref: 1, depth: 12, role: '', title: 'deep', value: '', pos: null, path: [0, 1, 2] },
@@ -106,9 +131,29 @@ test('buildSnapshotScript embeds app, node cap, and escaped output paths', () =>
   assert.match(s, /if \(-not \('RivetInput' -as \[type\]\)\)/)
   assert.ok(s.includes(`'C:\\tmp\\full.png'`))
   assert.ok(s.includes(`'C:\\tmp\\vision.png'`))
-  assert.match(s, /ControlViewWalker/)
   assert.match(s, /CopyFromScreen/)
   assert.match(s, /1440/)
+})
+
+test('buildSnapshotScript walk is CacheRequest-batched with Cached reads only', () => {
+  const s = buildSnapshotScript('notepad', 'C:\\tmp\\full.png', 'C:\\tmp\\vision.png')
+  assert.match(s, /New-Object System\.Windows\.Automation\.CacheRequest/)
+  for (const prop of ['NameProperty', 'ControlTypeProperty', 'BoundingRectangleProperty']) {
+    assert.ok(s.includes(`$cr.Add([System.Windows.Automation.AutomationElement]::${prop})`), `${prop} cached`)
+  }
+  assert.ok(s.includes('$cr.Add([System.Windows.Automation.ValuePattern]::Pattern)'), 'ValuePattern cached')
+  assert.ok(s.includes('$cr.Add([System.Windows.Automation.ValuePattern]::ValueProperty)'), 'Value cached')
+  assert.match(s, /GetUpdatedCache\(\$cr\)/, 'window roots refreshed into the cache')
+  assert.match(s, /TryGetCachedPattern/, 'value read from the cache, not live')
+  assert.match(s, /\$el\.Cached\.ControlType/, 'props read from Cached')
+  assert.equal(s.includes('$el.Current.ControlType'), false, 'no per-node live reads in the walk')
+  assert.equal(s.includes('TryGetCurrentPattern'), false, 'no per-node live pattern probes')
+  // Children come one-batch-per-parent in ControlViewWalker-compatible order.
+  assert.match(s, /FindAll\(\[System\.Windows\.Automation\.TreeScope\]::Children, \$ctrlCond\)/)
+  assert.match(s, /ControlViewCondition/)
+  // macOS-parity walk pruning.
+  assert.match(s, /\$NO_DESCEND = @\{ ScrollBar = \$true; TitleBar = \$true \}/)
+  assert.match(s, /\$SKIP_VALUE = @\{ Window = \$true;/)
 })
 
 test('buildSnapshotScript tree-only variant omits the screenshot section entirely', () => {
@@ -117,7 +162,7 @@ test('buildSnapshotScript tree-only variant omits the screenshot section entirel
   assert.equal(s.includes('System.Drawing'), false)
   assert.equal(s.includes('C:\\tmp\\full.png'), false)
   assert.match(s, /\$shotOk = \$false/, 'shot flag still emitted for the JSON envelope')
-  assert.match(s, /ControlViewWalker/, 'tree walk intact')
+  assert.match(s, /CacheRequest/, 'tree walk intact')
 })
 
 test('buildLaunchAppScript starts the process only when not running and polls for a window', () => {
@@ -126,6 +171,43 @@ test('buildLaunchAppScript starts the process only when not running and polls fo
   assert.match(s, /Start-Process -FilePath \$app/)
   assert.match(s, /did not show a window within 10s/)
   assert.match(s, /SetForegroundWindow/)
+  // The poll goes through findApp, which also matches UIA window titles —
+  // frame-hosted UWP apps get waited on, not just classic processes.
+  assert.match(s, /NativeWindowHandle/)
+  assert.ok(s.split('Start-Sleep -Milliseconds 250').length >= 2, 'poll loop present')
+})
+
+// ── app resolution (UWP / title fallback) ─────────────────────────
+
+test('app resolution falls back from process match to UIA window-title match', () => {
+  const s = buildFocusAppScript('Calculator')
+  // Pass 1: classic process-name / main-window-title match.
+  assert.match(s, /\$_.ProcessName -eq \$app -or \$_.MainWindowTitle -eq \$app/)
+  // Pass 2: top-level UIA window Name — exact (case-insensitive) then substring.
+  assert.match(s, /\$n\.ToLower\(\) -eq \$needle/)
+  assert.match(s, /\$n\.ToLower\(\)\.Contains\(\$needle\)/)
+  assert.match(s, /NativeWindowHandle/, 'UWP path resolves the focus HWND from UIA')
+  assert.match(s, /use list_apps for exact names/, 'error guides discovery')
+  assert.equal(s.includes('ApplicationFrameHost and have no usable window handle'), false, 'stale UWP disclaimer gone')
+})
+
+test('every app-targeted script resolves windows via the unified findApp snippet', () => {
+  const target = { path: [0, 1], role: 'Button', title: 'OK' }
+  const scripts = [
+    buildSnapshotScript('app', 'C:\\f.png', 'C:\\v.png', false),
+    buildClickByPathScript('app', target, 'left', 1),
+    buildLocateScript('app', target),
+    buildSetValueScript('app', target, 'x'),
+    buildMenuSelectScript('app', ['File']),
+    buildTypeScript('app', 'hi'),
+    buildKeyScript('app', parseCombo('cmd+s')),
+    buildFocusAppScript('app'),
+    buildPasteTextScript('app', 'hi'),
+    buildScrollScript('app', { direction: 'down' }),
+  ]
+  for (const s of scripts) {
+    assert.match(s, /\$n\.ToLower\(\) -eq \$needle/, 'UWP title fallback present')
+  }
 })
 
 test('buildMenuSelectScript embeds the path as JSON and lists alternatives on a miss', () => {
@@ -233,6 +315,14 @@ test('list/focus scripts embed expected shape', () => {
   assert.match(buildLocateScript('notepad', { path: [0] }), /ConvertTo-Json -InputObject @\{ x = \$cx; y = \$cy \}/)
 })
 
+test('buildListAppsScript carries window titles and enumerates UWP frame windows', () => {
+  const s = buildListAppsScript()
+  assert.match(s, /MainWindowTitle/, 'classic apps carry their window title')
+  assert.match(s, /\$_.ProcessName -ne 'ApplicationFrameHost'/, 'host process not listed as an app')
+  assert.match(s, /Get-Process -Name ApplicationFrameHost/, 'UWP frame windows enumerated')
+  assert.match(s, /NativeWindowHandle/, 'UWP frontmost check via frame HWND')
+})
+
 // ── driver behavior with an injected runner ───────────────────────
 
 function fakeRunner(outputs: Record<string, string>) {
@@ -248,10 +338,15 @@ function fakeRunner(outputs: Record<string, string>) {
 }
 
 test('listApps parses JSON rows; garbage output degrades to []', async () => {
-  const good = createWindowsDriver(async () => JSON.stringify([{ name: 'notepad', frontmost: true }]))
-  assert.deepEqual(await good.listApps(), [{ name: 'notepad', frontmost: true }])
+  const good = createWindowsDriver(async () => JSON.stringify([{ name: 'notepad', title: 'readme - Notepad', frontmost: true }]))
+  assert.deepEqual(await good.listApps(), [{ name: 'notepad', title: 'readme - Notepad', frontmost: true }])
   const bad = createWindowsDriver(async () => 'not json')
   assert.deepEqual(await bad.listApps(), [])
+})
+
+test('listApps re-wraps a single unwrapped entry (ConvertTo-Json quirk)', async () => {
+  const one = createWindowsDriver(async () => JSON.stringify({ name: 'Calculator', title: '', frontmost: false }))
+  assert.deepEqual(await one.listApps(), [{ name: 'Calculator', title: '', frontmost: false }])
 })
 
 test('snapshot parses rows into tree + refs; no screenshot when shot=false', async () => {
