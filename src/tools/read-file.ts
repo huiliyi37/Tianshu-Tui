@@ -1,6 +1,6 @@
 import { existsSync } from 'fs'
 import { stat, readFile } from 'node:fs/promises'
-import { extname } from 'path'
+import { extname, relative } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent, buildPartialView } from './truncation.js'
 import { validatePath } from './path-validate.js'
@@ -648,7 +648,9 @@ export const READ_FILE_TOOL: Tool = {
       const totalLines = fullPrior?.mtimeMs === currentMtimeMs ? fullPrior.totalLines : 0
 
       if (entryBytes > READ_REF_THRESHOLD) {
-        const relPath = canonical!.replace(params.cwd + '/', '')
+        // relative() 而非 replace(cwd+'/')：Windows 下 canonical 是反斜杠路径，
+        // 字符串拼 '/' 永远不匹配 → 提示里泄漏完整绝对路径（且教模型复读它）。
+        const relPath = relative(params.cwd, canonical!)
         const sizeHint = totalLines > 0
           ? `${totalLines} 行，${entryBytes} bytes`
           : `${entryBytes} bytes`
@@ -831,7 +833,7 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
     if (!trimmed) continue
     try {
       const payload = await readFilePayload(params.cwd, { filePath: trimmed, modelCap: perFileCap })
-      const relPath = payload.canonicalPath.replace(params.cwd + '/', '')
+      const relPath = relative(params.cwd, payload.canonicalPath)
       sections.push(`── ${relPath} ──\n${payload.modelContent}`)
       totalBytes += payload.rawContent.length
 
@@ -848,7 +850,9 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
       noteFileObserved(payload.canonicalPath, currentStat.mtimeMs, currentStat.size, params.sessionId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      const display = trimmed.replace(params.cwd + '/', '')
+      // trimmed 可能本来就是相对路径——只有以 cwd 开头时才转相对，避免 relative()
+      // 把无关路径变成一串 ../..。
+      const display = trimmed.startsWith(params.cwd) ? relative(params.cwd, trimmed) : trimmed
       sections.push(`── ${display} ──\nError: ${msg}`)
       errors++
     }

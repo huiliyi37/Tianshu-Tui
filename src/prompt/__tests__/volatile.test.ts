@@ -87,6 +87,21 @@ describe('environment platform hint (target vs host)', () => {
     }
   })
 
+  it('win32 目标平台注入 path-style-note（反斜杠路径指引），非 Windows 不注入', () => {
+    setTargetConventions('windows', 'auto')
+    try {
+      const block = buildStableVolatileBlock({ cwd: '/repo' })
+      assert.match(block, /<path-style-note>/)
+      assert.match(block, /反斜杠/)
+    } finally {
+      restore()
+    }
+    if (process.platform !== 'win32') {
+      const block = buildStableVolatileBlock({ cwd: '/repo' })
+      assert.doesNotMatch(block, /<path-style-note>/)
+    }
+  })
+
   it('shell-note 跟随真实解析出的 shell（与 windowsShellNote 一致）', () => {
     // The note now keys on the actually-resolved shell (getShellCommand().kind,
     // process-cached), NOT on process.platform — so mutating process.platform no

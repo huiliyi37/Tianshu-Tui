@@ -833,6 +833,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   if (targetPlatform !== process.platform) {
     parts.push(`<platform-note>文件约定（换行/路径风格）按 ${targetPlatform} 生成；但 shell 命令在宿主 ${process.platform} 上执行——优先使用跨平台命令，避免目标平台专属语法在宿主机执行失败。</platform-note>`)
   }
+  // Windows 路径风格指引：git/仓库索引等上游输出一律正斜杠，模型会照抄，
+  // 对 Windows 用户显示 src/foo 而非 src\foo（用户报告 2026-07-07）。
+  // targetPlatform 会话内固定 → session-static，前缀缓存安全。
+  if (targetPlatform === 'win32') {
+    parts.push('<path-style-note>Windows 环境：在回复和文档中书写文件路径时用反斜杠（如 src\\tui\\app.ts、D:\\proj\\file.md），与用户的资源管理器/终端习惯一致。工具参数两种分隔符都接受；shell 命令内的路径写法以 shell-note 为准（Git Bash 用正斜杠）。</path-style-note>')
+  }
   // Shell 原生指引：跟随真实解析出的 shell 族（Git Bash / PowerShell / cmd），
   // 而非一律按 PowerShell。装了 Git Bash 时实际跑 bash，给 PowerShell 指引会诱导
   // 模型发错语法。getShellCommand() 进程内缓存、会话内固定 → session-static，
