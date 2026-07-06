@@ -42,7 +42,7 @@ import { CollaborationProtocol, type CollaborationConfig } from './collaboration
 import type { LockIntent } from './semantic-lock.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import { precipitateDomainLessons } from './domain-lesson-precipitate.js'
-import { inferModelTierFromCard, recommendModelTier, type ModelRiskTier, type ModelTier, type ModelTierRecommendation } from './model-tier-policy.js'
+import { inferModelTierFromCard, recommendModelTier, type FailureEscalationCap, type ModelRiskTier, type ModelTier, type ModelTierRecommendation } from './model-tier-policy.js'
 import { buildHistoricalModelTierState, recommendModelTierArm, type ModelTierBanditRecommendation } from './model-tier-bandit.js'
 import { evaluateModelTierGate, type ModelTierGateDecision } from './model-tier-gate.js'
 import {
@@ -112,6 +112,13 @@ const TIER_FLOOR_RANK: Record<ModelTier, number> = { cheap: 0, balanced: 1, stro
 export function applyTierFloor(tier: ModelTier, floor?: ModelTier): ModelTier {
   if (!floor) return tier
   return TIER_FLOOR_RANK[tier] >= TIER_FLOOR_RANK[floor] ? tier : floor
+}
+
+/** 失败升档天花板下允许的最高档位。'off' 时不允许任何升档(返回 null)。 */
+export function escalationTierAllowed(cap: FailureEscalationCap | undefined): ModelTier | null {
+  const effective = cap ?? 'strong'
+  if (effective === 'off') return null
+  return effective
 }
 
 export interface DelegationRequest {
@@ -275,6 +282,14 @@ export interface DelegationCoordinatorConfig {
   /** 天梁 patcher 子代理的默认 tier（config.workers.patcherTier）。
    *  传入 recommendModelTier 的 workerTierOverride——用户可自定义执行者用哪档模型。 */
   patcherTier?: ModelTier
+  /** 失败升档天花板（config.workers.escalationCap）。只约束失败驱动的升档——
+   *  规则升档（consecutiveFailures≥2）与 Flash→Pro 升档重试；不影响前置路由
+   *  （workers.routing 如 planning→capable、hardFloor、瑶光门 tierFloor）。
+   *  动机：升档重试是全新会话零缓存全量重跑整个 work order，成本可达 flash
+   *  的数十倍；而规划类 worker 本就从小上下文起步，前置用强模型成本可控。
+   *  'off' = 失败不升档；'balanced' = 最多升到 balanced 卡重试；
+   *  'strong' = 旧行为。缺省视为 'strong'（库级向后兼容，产品默认 config 层给 'off'）。 */
+  escalationCap?: FailureEscalationCap
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -861,6 +876,7 @@ export class DelegationCoordinator {
       objective: order.objective,
       consecutiveFailures: this.state.getSummary().failed,
       ...(this.config.patcherTier ? { workerTierOverride: this.config.patcherTier } : {}),
+      ...(this.config.escalationCap ? { failureEscalationCap: this.config.escalationCap } : {}),
     })
   }
 
@@ -881,15 +897,16 @@ export class DelegationCoordinator {
   /** Record a Flash→Pro escalation event: increment quota, persist shadow, return event for caller's array. */
   private recordEscalation(order: WorkOrder, strongCard: ModelCapabilityCard, errorMsg: string): ModelTierShadowEvent {
     this.proUpgradeCount++
+    const escalatedTier = inferModelTierFromCard(strongCard)
     const shadow = buildModelTierShadowEvent({
       sessionId: this.config.sessionId ?? 'unknown',
       workOrderId: order.id,
       authority: order.authority,
       profile: order.profile,
       kind: order.kind,
-      recommendedTier: 'strong',
+      recommendedTier: escalatedTier,
       actualModel: strongCard.model,
-      actualTier: 'strong',
+      actualTier: escalatedTier,
       reason: `Flash→Pro 升级重试 #${this.proUpgradeCount}: 上次尝试失败 "${errorMsg.slice(0, 200)}"`,
     })
     persistModelTierShadow(this.config.modelTierShadowStore, shadow)
@@ -1538,21 +1555,32 @@ export class DelegationCoordinator {
         }
       }
 
-      // T3: Flash→Pro escalation — retry with strong-tier model if budget allows.
+      // T3: Flash→Pro escalation — retry with a higher-tier model if budget allows.
       // tierLock:'cheap' profiles (reviewer / adversarial_verifier) must NOT be
       // escalated: review workers are deliberately pinned to a cheap/isolated
       // model so they don't evict the main session's prefix cache (see
       // .rivet/knowledge/debug-glm-cache-break-deliver-task.md). Honor the lock.
+      // workers.escalationCap：升档重试是全新会话零缓存全量重跑整个 work order，
+      // 'off' 时完全禁止；'balanced' 时最多用 balanced 卡重试（不碰 Pro）。
       const flashTier = inferModelTierFromCard(selected)
       const tierLocked = profileRegistry.get(order.profile)?.tierLock === 'cheap'
+      const maxEscalationTier = escalationTierAllowed(this.config.escalationCap)
       const canUpgrade = !isAbort
         && !tierLocked
+        && maxEscalationTier !== null
         && (order.budget.maxRetries > 0)
         && this.proUpgradeCount < DelegationCoordinator.MAX_PRO_UPGRADES
-        && flashTier !== 'strong'
+        && TIER_FLOOR_RANK[flashTier] < TIER_FLOOR_RANK[maxEscalationTier ?? 'cheap']
       if (canUpgrade) {
-        const strongCards = this.config.modelCards.filter(c => inferModelTierFromCard(c) === 'strong')
-        const strongCard = strongCards[0]
+        // 候选：比当前卡高、且不超过 escalationCap 的卡，取档位最高的一张。
+        const upgradeCards = this.config.modelCards
+          .filter(c => {
+            const t = inferModelTierFromCard(c)
+            return TIER_FLOOR_RANK[t] > TIER_FLOOR_RANK[flashTier]
+              && TIER_FLOOR_RANK[t] <= TIER_FLOOR_RANK[maxEscalationTier!]
+          })
+          .sort((a, b) => TIER_FLOOR_RANK[inferModelTierFromCard(b)] - TIER_FLOOR_RANK[inferModelTierFromCard(a)])
+        const strongCard = upgradeCards[0]
         if (strongCard) {
           // Re-create worker config with Pro model
           const upgradedConfig = this.config.runtimeFactory(order, strongCard, workerRegistry)

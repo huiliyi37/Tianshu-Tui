@@ -375,9 +375,17 @@ export const workersSchema = z.object({
   routing: workerRoutingSchema,
   /** 天梁 patcher 子代理的默认 tier（config.workers.patcherTier）。
    *  flash 能力足以承担各级风险的执行任务，默认 'cheap'（不因 riskTier 预判降级
-   *  ——浪费生产力）；可设 'balanced' 或 'strong' 让执行者用更强模型（如 DeepSeek Pro）。
-   *  连续失败 ≥2 次仍自动升 strong。 */
+   *  ——浪费生产力）；可设 'balanced' 或 'strong' 让执行者用更强模型（如 DeepSeek Pro）。 */
   patcherTier: z.enum(['cheap', 'balanced', 'strong']).default('cheap'),
+  /** 失败升档天花板。只约束**失败驱动**的档位升级——规则升档
+   *  （consecutiveFailures≥2 → strong）与 Flash→Pro 升档重试；
+   *  不影响前置路由（workers.routing 如 planning→capable、planner hardFloor、
+   *  瑶光门席位下限、review.profiles 覆盖卡、议事会 modelOverride）。
+   *  动机：升档重试是全新会话零缓存全量重跑整个 work order，成本可达 flash
+   *  的数十倍；而规划类 worker 从小上下文起步，前置用强模型成本可控。
+   *  'off'（默认）= 失败不升档，重试留在原档模型；
+   *  'balanced' = 最多升到 balanced 卡重试；'strong' = 旧的自动升 Pro 行为。 */
+  escalationCap: z.enum(['off', 'balanced', 'strong']).default('off'),
 }).default({})
 
 export const skillsSchema = z.object({

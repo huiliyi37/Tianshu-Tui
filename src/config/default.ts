@@ -205,6 +205,7 @@ export const DEFAULT_CONFIG: Config = {
       planning: 'capable',
     },
     patcherTier: 'cheap',
+    escalationCap: 'off',
   },
   skills: {
     importFromClaude: [],

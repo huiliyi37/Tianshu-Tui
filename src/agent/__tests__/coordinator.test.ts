@@ -1659,6 +1659,110 @@ describe('DelegationCoordinator', () => {
     assert.equal(modelsUsed.filter(m => m === 'cheap-flash').length, 4)
   })
 
+  it('escalationCap=off blocks Flash→Pro escalation retry entirely', async () => {
+    // 升档重试是全新会话零缓存全量重跑，off 时失败重试必须留在原档卡上，
+    // 绝不自动碰 Pro。前置路由不受影响（此单为 cheap 推荐，无升档诉求）。
+    const escalateCards: ModelCapabilityCard[] = [
+      { model: 'cheap-flash', toolUseReliability: 0.7, jsonStability: 0.7, editSuccessRate: 0.5, testRepairRate: 0.5, contextWindow: 1_000_000, cacheEconomics: 'strong', recommendedTasks: ['code_search'] },
+      { model: 'deepseek-pro', toolUseReliability: 0.95, jsonStability: 0.95, editSuccessRate: 0.9, testRepairRate: 0.85, contextWindow: 128_000, cacheEconomics: 'medium', recommendedTasks: ['patch_proposal'] },
+    ]
+    const modelsUsed: string[] = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: escalateCards,
+      maxWorkers: 2,
+      escalationCap: 'off',
+      runtimeFactory: (order, card, workerRegistry) => {
+        modelsUsed.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 4,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async () => {
+        throw new Error('Flash worker persistent failure')
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_cap_off',
+      objective: 'Verify escalationCap off blocks any automatic Pro escalation retry.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/test.ts'] },
+      budget: { maxRetries: 1, maxTurns: 4, maxTokens: 4096, timeoutMs: 30000 },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.ok(modelsUsed.length >= 1, 'worker dispatched at least once')
+    assert.equal(modelsUsed.filter(m => m === 'deepseek-pro').length, 0, 'Pro model must never be used under escalationCap=off')
+    assert.ok(modelsUsed.every(m => m === 'cheap-flash'), 'all attempts stay on the cheap card')
+    assert.notEqual(run.results[0]?.status, 'passed')
+  })
+
+  it('escalationCap=balanced retries with a balanced card, never the strong card', async () => {
+    const cards: ModelCapabilityCard[] = [
+      { model: 'cheap-flash', toolUseReliability: 0.7, jsonStability: 0.7, editSuccessRate: 0.5, testRepairRate: 0.5, contextWindow: 1_000_000, cacheEconomics: 'strong', recommendedTasks: ['code_search'] },
+      // 名字无 tier 关键词 + 中等能力 → inferModelTierFromCard 判为 balanced
+      { model: 'mid-model', toolUseReliability: 0.7, jsonStability: 0.7, editSuccessRate: 0.7, testRepairRate: 0.7, contextWindow: 300_000, cacheEconomics: 'medium', recommendedTasks: ['code_edit'] },
+      { model: 'deepseek-pro', toolUseReliability: 0.95, jsonStability: 0.95, editSuccessRate: 0.9, testRepairRate: 0.85, contextWindow: 128_000, cacheEconomics: 'medium', recommendedTasks: ['patch_proposal'] },
+    ]
+    const modelsUsed: string[] = []
+    let firstCall = true
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      escalationCap: 'balanced',
+      runtimeFactory: (order, card, workerRegistry) => {
+        modelsUsed.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 4,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async () => {
+        if (firstCall) {
+          firstCall = false
+          throw new Error('Flash worker transient failure')
+        }
+        return {
+          result: resultFor('balanced-retry'),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_cap_balanced',
+      objective: 'Verify escalation retry is capped at the balanced card tier.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/test.ts'] },
+      budget: { maxRetries: 1, maxTurns: 4, maxTokens: 4096, timeoutMs: 30000 },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.equal(modelsUsed.length, 2)
+    assert.equal(modelsUsed[0], 'cheap-flash')
+    assert.equal(modelsUsed[1], 'mid-model', 'retry must use the balanced card')
+    assert.equal(modelsUsed.filter(m => m === 'deepseek-pro').length, 0, 'strong card must not be used under balanced cap')
+  })
+
   it('T3: tierLock:cheap profiles (reviewer) are NOT escalated to a strong model', async () => {
     // Review workers are deliberately pinned cheap so they don't evict the main
     // session's prefix cache. A transient failure must stay on the cheap model,

@@ -1022,6 +1022,7 @@ export function createAgentRuntime(deps: {
     // "multiple sessions, one branch" workflow.
     sharedWorktree: true,
     patcherTier: config.workers.patcherTier,
+    escalationCap: config.workers.escalationCap,
   })
 
   return { agent }
