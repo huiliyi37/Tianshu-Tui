@@ -57,6 +57,7 @@ import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
 import { ProviderHealthTracker } from '../agent/provider-health.js'
 import { MeridianIndexer } from '../repo/meridian-indexer.js'
+import { resetLegacyMemoryIfNeeded } from '../agent/memory-epoch.js'
 import { createMultiLspManager } from '../lsp/multi-manager.js'
 import type { LspManager } from '../lsp/manager.js'
 import { createGotoDefinitionTool, createFindReferencesTool } from '../lsp/tools.js'
@@ -191,6 +192,13 @@ export function getOrCreateMeridianIndexer(shared: SharedRuntime, cwd: string): 
   const existing = shared.meridianIndexers.get(cwd)
   if (existing) return existing
   const indexer = new MeridianIndexer(cwd)
+  // Memory epoch reset（镜像 TUI bootstrapInteractiveSession）——桌面端会话
+  // 首次触达某 cwd 时清空中毒的跨会话学习存量，见 memory-epoch.ts。
+  try {
+    resetLegacyMemoryIfNeeded(cwd, {
+      clearMistakeEntries: () => indexer.getDb().clearMistakeEntries(),
+    })
+  } catch { /* 清理绝不阻塞会话创建 */ }
   shared.meridianIndexers.set(cwd, indexer)
   return indexer
 }

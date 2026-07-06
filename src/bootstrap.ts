@@ -74,6 +74,7 @@ import { starDomainRegistry } from './agent/star-domain-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { PlaybookStore } from './agent/playbook-store.js'
+import { resetLegacyMemoryIfNeeded } from './agent/memory-epoch.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
 import { createRelatedTestsTool } from './tools/related-tests.js'
@@ -1537,6 +1538,19 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
 
   // 6. Meridian indexer
   const meridianIndexer = new MeridianIndexer(cwd)
+
+  // Memory epoch reset — 首次/升级后启动时一次性清空中毒的跨会话学习存量
+  // （playbook.jsonl / recovery-journal / advisory-efficacy / mistake_entries），
+  // 见 memory-epoch.ts 取证背景。必须在 loadSessionMemories warmup 之前跑，
+  // 否则旧 mistake entries 先被载入内存、会话末又原样存回。
+  try {
+    const memReset = resetLegacyMemoryIfNeeded(cwd, {
+      clearMistakeEntries: () => meridianIndexer.getDb().clearMistakeEntries(),
+    })
+    if (!memReset.skipped && memReset.cleared.length > 0) {
+      console.error(`[startup] Memory epoch ${memReset.epoch}: cleared ${memReset.cleared.join(', ')}`)
+    }
+  } catch { /* 清理绝不阻塞启动 */ }
 
   // 7. Domain knowledge store
   const domainKnowledgeStore = new DomainKnowledgeStore(join(cwd, '.rivet', 'knowledge'))
