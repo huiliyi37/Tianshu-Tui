@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SurfaceSkeleton } from '../components/Skeleton'
 import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
@@ -18,6 +18,8 @@ import { UpdateBanner } from '../components/UpdateBanner'
 import { parseMcpToolName, previewOf, editableKey, EDIT_TOOLS } from '../lib/approval-preview'
 import { isApprovalConsent } from '../lib/consent'
 import { DiffView } from '../components/DiffView'
+import { deriveProjects, loadKnownProjects } from '../lib/projects'
+import { openExternal } from '../lib/open-external'
 
 const HomeSurface = lazy(() => import('./HomeSurface').then((m) => ({ default: m.HomeSurface })))
 const SkillsSurface = lazy(() => import('./SkillsSurface').then((m) => ({ default: m.SkillsSurface })))
@@ -231,6 +233,7 @@ export function WorkspaceSurface() {
         </Separator>
         <Panel minSize="30%">
           <div className="conversation">
+            <WorkspaceHeader />
             <div className="conversation-body">
               <ThreadTabs />
               <Suspense fallback={<SurfaceSkeleton />}>
@@ -713,5 +716,62 @@ function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
         </div>
       )}
     </>
+  )
+}
+
+function WorkspaceHeader() {
+  const ui = useUiState()
+  const sessions = useSessions()
+  const activeSession = sessions.data?.find((s) => s.id === ui.activeSessionId) ?? null
+
+  const known = useMemo(() => loadKnownProjects(), [])
+  const projects = useMemo(() => deriveProjects(sessions.data ?? [], known), [sessions.data, known])
+  const activeProject = projects.find((p: any) => p.id === ui.activeProject)
+
+  const projectName = activeProject?.name || 'Tianshu'
+
+  const pageName = useMemo(() => {
+    if (ui.surface === 'workspace' && activeSession) {
+      return activeSession.title || activeSession.id.slice(0, 8)
+    }
+    const SURFACE_NAMES: Record<string, string> = {
+      home: '首页',
+      attention: '待处理',
+      mission: '任务中控台',
+      automations: '自动化',
+      skills: '智能体技能',
+      git: 'Git 版本控制',
+      insights: '仓库图谱与分析',
+      delegation: '子智能体协同',
+      council: '多智能体议事会',
+      hooks: '生命周期 Hook',
+      settings: '系统设置',
+    }
+    return SURFACE_NAMES[ui.surface] || ui.surface
+  }, [ui.surface, activeSession])
+
+  return (
+    <header className="workspace-header" data-tauri-drag-region>
+      <div className="workspace-header-path">
+        <span className="project-name">{projectName}</span>
+        <span className="path-sep">/</span>
+        <span className="page-name">{pageName}</span>
+      </div>
+      <div className="workspace-header-actions">
+        <button
+          className="header-action-btn"
+          onClick={() => {
+            openExternal('https://github.com/huiliyi37/Tianshu-Tui')
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#3b82f6' }}>
+            <polygon points="12 2 2 7 12 12 22 7 12 2" />
+            <polyline points="2 17 12 22 22 17" />
+            <polyline points="2 12 12 17 22 12" />
+          </svg>
+          <span>Install IDE</span>
+        </button>
+      </div>
+    </header>
   )
 }

@@ -6709,4 +6709,81 @@ html[data-theme="dark"] .picker-panel-warning {
   background: rgba(251, 191, 36, 0.04);
 }
 
+/* ── Antigravity 2.0 Header Breadcrumb Nav ── */
+.workspace-header {
+  height: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  z-index: 50;
+  user-select: none;
+}
+.workspace-header-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+  font-weight: var(--weight-medium, 500);
+}
+.workspace-header-path .project-name {
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold, 600);
+}
+.workspace-header-path .path-sep {
+  color: var(--faint);
+  opacity: 0.6;
+}
+.workspace-header-path .page-name {
+  color: var(--text-secondary);
+}
+
+.workspace-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Install IDE 按钮 */
+.header-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md, 6px);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium, 500);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.header-action-btn:hover {
+  background: var(--panel-3);
+  color: var(--text-strong);
+  border-color: color-mix(in oklab, var(--border-strong) 80%, var(--text));
+}
+
+/* macOS titleBarStyle: Overlay window adjustment */
+html[data-titlebar="mac"] .shell {
+  padding-top: 0px !important;
+}
+.titlebar-mac {
+  background: transparent !important;
+}
+html[data-titlebar="mac"] .project-sidebar {
+  padding-top: 34px !important;
+}
+html[data-titlebar="mac"] .workspace-header {
+  padding-top: 24px !important;
+  height: 64px !important;
+  min-height: 64px !important;
+}
+
 
