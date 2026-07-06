@@ -140,37 +140,37 @@ describe('delegate_batch tool', () => {
     const base = { input: {}, toolUseId: 'tu', cwd: '/tmp' }
     const GRACE = WORKER_EXIT_GRACE_MS
 
-    it('returns 60s+grace for turn 0-1 (cold open)', () => {
+    it('returns 120s+grace for turn 0-1 (cold open)', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 60_000 + GRACE)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 60_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 0 }), 120_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 1 }), 120_000 + GRACE)
     })
 
-    it('returns 120s+grace for turn 2-4 (warming)', () => {
+    it('returns 240s+grace for turn 2-4 (warming)', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 120_000 + GRACE)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 120_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 2 }), 240_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 4 }), 240_000 + GRACE)
     })
 
-    it('returns 180s+grace for turn 5+ (mature)', () => {
+    it('returns 480s+grace for turn 5+ (mature)', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 180_000 + GRACE)
-      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 20 }), 180_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 5 }), 480_000 + GRACE)
+      assert.equal(tool.timeoutMs?.({ ...base, sessionTurnCount: 20 }), 480_000 + GRACE)
     })
 
-    it('is arithmetic (common difference 60s)', () => {
+    it('tiers are monotonically increasing', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
       const cold = tool.timeoutMs?.({ ...base, sessionTurnCount: 0 })!
       const warming = tool.timeoutMs?.({ ...base, sessionTurnCount: 3 })!
       const mature = tool.timeoutMs?.({ ...base, sessionTurnCount: 10 })!
-      assert.equal(warming - cold, 60_000)
-      assert.equal(mature - warming, 60_000)
+      assert.ok(cold < warming)
+      assert.ok(warming < mature)
     })
 
-    it('defaults to mature (180s+grace) when sessionTurnCount is undefined', () => {
+    it('defaults to mature (480s+grace) when sessionTurnCount is undefined', () => {
       const tool = createDelegateBatchTool({ delegateBatch: async () => ({ status: 'completed', results: [], packet: '' }) as CoordinatorRun })
-      assert.equal(tool.timeoutMs?.(base), 180_000 + GRACE)
-      assert.equal(tool.timeoutMs?.(), 180_000 + GRACE)
+      assert.equal(tool.timeoutMs?.(base), 480_000 + GRACE)
+      assert.equal(tool.timeoutMs?.(), 480_000 + GRACE)
     })
   })
 

@@ -59,6 +59,20 @@ import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from 
 import { toolTargetFromInput } from './tool-target.js'
 import { execFile } from 'node:child_process'
 
+/** Headless prefix on denial messages — a stable marker so worker-session's
+ *  detectApprovalDeadlock can distinguish "gated by approval" from "bad JSON". */
+export const HEADLESS_DENY_MARKER = 'not available in a headless worker'
+
+/** File-mutation tools that a headless worker may run without approval. These
+ *  write into an isolated git worktree (or claim-isolated in-place cwd), so the
+ *  change is reversible and the primary reviews the diff afterward. Bash writes
+ *  are intentionally NOT here — they are governed by the OS sandbox check
+ *  (bashWriteRequiresApproval), which already auto-approves when a sandbox is
+ *  active and denies when there is none. */
+const HEADLESS_AUTO_APPROVE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'ast_edit',
+])
+
 /** Infer the workspace_mutation `kind` from a git destructive command.
  *  Used by B1 cross-session stash awareness to differentiate stash / reset / checkout / clean. */
 function gitMutationKind(cmd: string): string | undefined {
@@ -927,7 +941,7 @@ export async function executeToolUse(
       pathGrantNeed = null
     }
 
-    const shouldAsk = skipAllApproval
+    let shouldAsk = skipAllApproval
       ? false
       : pathGrantNeed
         ? true
@@ -944,6 +958,22 @@ export async function executeToolUse(
                   : approvalMode === 'auto-safe'
                     ? isHighRisk
                     : false
+
+    // Headless override — no human can answer an approval prompt here, so a
+    // shouldAsk that reaches onApprovalRequired would hang (the callback returns
+    // false, denying every write and stalling the worker until its turn budget
+    // runs out). Resolve it deterministically instead: in-workspace file writes
+    // are auto-approved (worktree/claim isolation + primary diff review), and
+    // everything else that would ask falls through to the deny path below with a
+    // model-facing message. Deny rules / self-kill (handled above) and
+    // out-of-workspace grants (pathGrantNeed) are NOT relaxed.
+    if (deps.config.headless && shouldAsk && !pathGrantNeed) {
+      if (HEADLESS_AUTO_APPROVE_WRITE_TOOLS.has(tu.name)) {
+        shouldAsk = false
+      }
+      // Otherwise keep shouldAsk = true → onApprovalRequired returns false →
+      // the deny branch emits the headless instruction message.
+    }
 
     if (shouldAsk) {
       const approvalResult = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
@@ -972,11 +1002,18 @@ export async function executeToolUse(
         const noSandboxReason = bashWriteRequiresApproval && noSandbox
           ? '\n根因：当前环境无文件系统沙箱（Windows 原生 / 沙箱未启用），写命令需人工审批。这不是命令本身的问题——审批后即可执行。要减少审批频率，可切换到 auto-safe 模式（低风险写命令自动放行）或使用 WSL（Linux 子系统下有沙箱）。'
           : ''
-        const denyMsg = [
-          `Tool "${tu.name}"${target} was not executed: it requires explicit user approval, which you cannot grant yourself.${noSandboxReason}`,
-          'This is NOT a rejection of the change itself. Do NOT re-emit the identical call — repeating it will keep hitting the same approval gate and make no progress.',
-          'Instead: briefly state what you were about to do and why it needs approval, then stop and wait for the user to approve it (or adjust their instruction).',
-        ].join('\n')
+        const denyMsg = deps.config.headless
+          ? [
+              // HEADLESS_DENY_MARKER embedded here — detectApprovalDeadlock matches on it.
+              `Tool "${tu.name}"${target} is ${HEADLESS_DENY_MARKER}: it requires an approval that no human can grant in this context.`,
+              'Do NOT re-emit this call — it will keep hitting the same gate and waste your turn budget.',
+              'Instead: accomplish the task using an allowed tool if possible, or finish now by returning your result JSON with status "blocked" and explain in the summary which operation was gated.',
+            ].join('\n')
+          : [
+              `Tool "${tu.name}"${target} was not executed: it requires explicit user approval, which you cannot grant yourself.${noSandboxReason}`,
+              'This is NOT a rejection of the change itself. Do NOT re-emit the identical call — repeating it will keep hitting the same approval gate and make no progress.',
+              'Instead: briefly state what you were about to do and why it needs approval, then stop and wait for the user to approve it (or adjust their instruction).',
+            ].join('\n')
         callbacks.onToolResult(tu.id, tu.name, denyMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: denyMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }

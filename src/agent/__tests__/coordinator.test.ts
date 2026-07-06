@@ -294,6 +294,45 @@ describe('DelegationCoordinator', () => {
     assert.equal(capturedMaxTurns, budgetMaxTurns, 'worker must run within the work order budget, not the runtime default')
   })
 
+  it('flows parentApprovalMode down to the worker session config (downward trust delegation)', async () => {
+    let capturedMode: string | undefined
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      parentApprovalMode: 'dangerously-skip-permissions',
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 40,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => {
+        capturedMode = config.parentApprovalMode
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    await coordinator.delegate({
+      parentTurnId: 'turn-approval-flow',
+      objective: 'Verify parent approval mode flows into the worker session config',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/agent/coordinator.ts'] },
+    })
+
+    assert.equal(capturedMode, 'dangerously-skip-permissions')
+  })
+
   it('routes patcher profile through injected hands runner seam', async () => {
     let handsCalled = false
     let workerCalled = false

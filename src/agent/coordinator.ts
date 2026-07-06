@@ -290,6 +290,9 @@ export interface DelegationCoordinatorConfig {
    *  'off' = 失败不升档；'balanced' = 最多升到 balanced 卡重试；
    *  'strong' = 旧行为。缺省视为 'strong'（库级向后兼容，产品默认 config 层给 'off'）。 */
   escalationCap?: FailureEscalationCap
+  /** Approval mode of the primary session. Only `dangerously-skip-permissions` is
+   *  delegated downward to workers (see WorkerSessionConfig.parentApprovalMode). */
+  parentApprovalMode?: import('./loop-types.js').ApprovalMode
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -1231,6 +1234,8 @@ export class DelegationCoordinator {
     // Covers both read (runWorker) and write (runHands → runWorker) paths.
     workerConfig.maxTurns = clampWorkerMaxTurns(workerConfig.maxTurns, order.budget.maxTurns)
     workerConfig.reviewDepth = order.reviewDepth
+    // Downward trust delegation: only dangerously-skip-permissions flows to workers.
+    workerConfig.parentApprovalMode = this.config.parentApprovalMode
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
     workerConfig.mailbox = this.mailbox
     // Session resume: inject prior messages so the worker continues from its
@@ -1586,6 +1591,7 @@ export class DelegationCoordinator {
           const upgradedConfig = this.config.runtimeFactory(order, strongCard, workerRegistry)
           upgradedConfig.maxTurns = clampWorkerMaxTurns(upgradedConfig.maxTurns, order.budget.maxTurns)
           upgradedConfig.reviewDepth = order.reviewDepth
+          upgradedConfig.parentApprovalMode = this.config.parentApprovalMode
           upgradedConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
           upgradedConfig.abortSignal = mergedSignal
           upgradedConfig.onActivity = (kind, detail) => {

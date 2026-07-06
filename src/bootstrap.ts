@@ -763,7 +763,7 @@ export function createAgentRuntime(deps: {
             }),
             toolRegistry: workerRegistry,
             cwd,
-            maxTurns: 8,
+            maxTurns: 40,
             contextWindow: ovContextWindow,
             compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
             activeClaims: claimStore.listActiveClaims(),
@@ -822,7 +822,7 @@ export function createAgentRuntime(deps: {
           }),
           toolRegistry: workerRegistry,
           cwd,
-          maxTurns: 8,
+          maxTurns: 40,
           contextWindow: overrideContextWindow,
           compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
           activeClaims: claimStore.listActiveClaims(),
@@ -908,7 +908,7 @@ export function createAgentRuntime(deps: {
       }),
       toolRegistry: workerRegistry,
       cwd,
-      maxTurns: 8,
+      maxTurns: 40,
       contextWindow: workerContextWindow,
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       activeClaims: claimStore.listActiveClaims(),
@@ -1023,6 +1023,10 @@ export function createAgentRuntime(deps: {
     sharedWorktree: true,
     patcherTier: config.workers.patcherTier,
     escalationCap: config.workers.escalationCap,
+    // Downward trust delegation: a primary running dangerously-skip-permissions
+    // opted out of all prompts, so its workers inherit that. Any other mode is
+    // ignored downstream — workers rely on headless approval semantics instead.
+    parentApprovalMode: config.agent.approval as import('./agent/loop-types.js').ApprovalMode,
   })
 
   return { agent }

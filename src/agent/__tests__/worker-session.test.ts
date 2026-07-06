@@ -7,7 +7,13 @@ import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
 import { SessionContext } from '../context.js'
 import { createReadOnlyWorkOrder } from '../work-order.js'
-import { runWorkerSession } from '../worker-session.js'
+import {
+  runWorkerSession,
+  detectApprovalDeadlock,
+  HEADLESS_DENY_MARKER,
+  type WorkerTranscript,
+} from '../worker-session.js'
+import { HEADLESS_DENY_MARKER as PIPELINE_HEADLESS_DENY_MARKER } from '../tool-pipeline.js'
 
 function textBlock(text: string): ContentBlock {
   return { type: 'text', text }
@@ -233,5 +239,33 @@ describe('runWorkerSession', () => {
     assert.equal(run.result.status, 'passed', 'json-mode repair should recover to passed')
     assert.ok(sawResponseFormat, 'repair request must carry response_format: json_object')
     assert.equal(repairCallCount, 1, 'exactly one json-mode repair call')
+  })
+})
+
+describe('detectApprovalDeadlock', () => {
+  function transcriptWithErrors(errors: string[]): WorkerTranscript {
+    return { text: '', thinking: '', toolUses: [], toolResults: [], errors, repairAttempts: 0 }
+  }
+
+  it('drift guard: local marker matches the one tool-pipeline actually emits', () => {
+    // worker-session keeps a local copy of the marker to avoid an import cycle;
+    // if the two constants drift apart, deadlock detection silently goes blind.
+    assert.equal(HEADLESS_DENY_MARKER, PIPELINE_HEADLESS_DENY_MARKER)
+  })
+
+  it('returns null when no headless denial appears in the transcript', () => {
+    assert.equal(detectApprovalDeadlock(transcriptWithErrors([])), null)
+    assert.equal(detectApprovalDeadlock(transcriptWithErrors(['some other tool error'])), null)
+  })
+
+  it('names the approval gate when headless denials are present', () => {
+    const hint = detectApprovalDeadlock(transcriptWithErrors([
+      `Tool "run_migration" is ${HEADLESS_DENY_MARKER}: it requires an approval that no human can grant in this context.`,
+      'unrelated error',
+      `Tool "run_migration" is ${HEADLESS_DENY_MARKER}: it requires an approval that no human can grant in this context.`,
+    ]))
+    assert.ok(hint, 'expected a diagnostic hint')
+    assert.match(hint!, /2 approval-required tool call/)
+    assert.match(hint!, /NOT malformed JSON/)
   })
 })

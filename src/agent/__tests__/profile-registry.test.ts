@@ -239,7 +239,7 @@ describe('ProfileRegistry', () => {
 })
 
 describe('delegationToolTimeoutMs (A2: wave-scaled batch timeout)', () => {
-  const mature = progressiveTimeout(undefined) // 180s
+  const mature = progressiveTimeout(undefined) // mature tier (see timeout-ladder)
 
   it('single wave (taskCount <= maxWorkers) equals legacy budget + grace', async () => {
     const single = delegationToolTimeoutMs(undefined, [undefined, undefined], { taskCount: 2 })

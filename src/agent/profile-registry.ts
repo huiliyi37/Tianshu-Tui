@@ -365,7 +365,7 @@ direction — you do not blindly apply visual tropes.
 - Preserve existing indentation style
 - If a violation requires a design decision, report it as an escalation`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 120_000,
+    defaultTimeoutMs: 300_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -373,7 +373,7 @@ direction — you do not blindly apply visual tropes.
   {
     name: 'test_scaffolder',
     role: 'hands',
-    allowedTools: ['read_file', 'write_file', 'grep', 'glob'],
+    allowedTools: ['read_file', 'edit_file', 'write_file', 'grep', 'glob'],
     expertisePrompt: `You are a test scaffolder. Generate test file boilerplate from source interfaces and types.
 
 ### Process
@@ -386,9 +386,10 @@ direction — you do not blindly apply visual tropes.
 - Generate SKELETON tests — cover function signatures and basic cases
 - Do NOT implement complex test logic or mocks — the main agent will refine
 - Match existing test file naming: \`__tests__/<name>.test.ts\`
-- Include TODO comments for edge cases the main agent should fill in`,
+- Include TODO comments for edge cases the main agent should fill in
+- If the target test file ALREADY EXISTS, use edit_file to append your cases — do NOT rewrite the whole file with write_file (that clobbers existing tests). Only use write_file to create a new test file.`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 120_000,
+    defaultTimeoutMs: 300_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -410,7 +411,7 @@ direction — you do not blindly apply visual tropes.
 - Preserve import aliases and named imports
 - If unsure whether an import is used (side-effect imports), leave it`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 90_000,
+    defaultTimeoutMs: 300_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -432,7 +433,7 @@ direction — you do not blindly apply visual tropes.
 - Keep JSDoc concise: @param, @returns, brief description
 - Do NOT add redundant comments that just restate the code`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 120_000,
+    defaultTimeoutMs: 300_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -458,7 +459,7 @@ direction — you do not blindly apply visual tropes.
 - Fix types only — do NOT change runtime behavior
 - If a type error reveals a logic bug, report it as an escalation instead of fixing`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 120_000,
+    defaultTimeoutMs: 300_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,

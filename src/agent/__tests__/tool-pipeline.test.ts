@@ -1250,6 +1250,63 @@ describe('executeToolUse', () => {
     assert.ok(result.traceStore.toolFingerprints.includes(expectedFp), 'denied call fingerprint recorded')
   })
 
+  it('headless: auto-approves in-workspace file writes without prompting', async () => {
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        headless: true,
+        approvalMode: 'manual',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+    const result = await executeToolUse(
+      { id: 'tu-headless-write', name: 'write_file', input: { file_path: 'src/foo.ts', content: 'x' } },
+      deps, callbacks as any, 1, false,
+    )
+    assert.equal(approvalCalls, 0, 'headless must not prompt for an in-workspace file write')
+    assert.equal(executed, true, 'the write proceeds (worktree/claim isolation, diff reviewed by primary)')
+    assert.equal((result.toolResult as any).is_error, false)
+  })
+
+  it('headless: fast-denies other approval-required tools with a model-facing message (no hang)', async () => {
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        headless: true,
+        approvalMode: 'manual',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'ran', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    // onApprovalRequired mirrors the worker's rejecting callback — must NOT hang.
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+    const result = await executeToolUse(
+      { id: 'tu-headless-deny', name: 'some_gated_tool', input: {} },
+      deps, callbacks as any, 1, false,
+    )
+    assert.equal(executed, false, 'gated non-write tool must not execute')
+    const content = (result.toolResult as any).content as string
+    assert.equal((result.toolResult as any).is_error, true)
+    assert.match(content, /not available in a headless worker/, 'carries the stable headless deny marker')
+    assert.match(content, /status "blocked"/, 'instructs the worker to report blocked instead of stalling')
+  })
+
   it('manual-mode approval of edit_file learns a file-scoped allow so the same file is not re-prompted', async () => {
     let approvalCalls = 0
     const overlay = createPermissionOverlay()

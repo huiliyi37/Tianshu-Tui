@@ -48,6 +48,14 @@ export interface AgentConfig {
    *  token spend. Undefined → compaction falls back to primaryClient. */
   compactClient?: StreamClient
   approvalMode?: ApprovalMode
+  /** Headless mode — no human is attached to answer approval prompts (worker
+   *  sub-agents, `serve` sidecar callers that pass a rejecting onApprovalRequired).
+   *  When true, the approval gate never blocks on a prompt that would hang: in-workspace
+   *  file writes are auto-approved (worktree / claim isolation makes them reversible and
+   *  the primary reviews the diff afterward), and any other operation that would otherwise
+   *  ask is denied immediately with a model-facing instruction instead of stalling on a
+   *  prompt no one can answer. Deny rules and the self-kill guard still win. */
+  headless?: boolean
   sessionId?: string
   /** Review-router re-entrancy depth. Worker contexts spawned by review routing use depth > 0. */
   reviewDepth?: number

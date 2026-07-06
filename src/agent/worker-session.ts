@@ -58,6 +58,12 @@ export interface WorkerSessionConfig {
   reviewDepth?: number
   /** Parent abort signal — propagated to worker AgentLoop for immediate abort. */
   abortSignal?: AbortSignal
+  /** Approval mode of the dispatching (parent) session. Only `dangerously-skip-permissions`
+   *  is honored here as a downward delegation of trust — it lets the worker inherit the
+   *  parent's opt-out of all prompts. Any other parent mode is ignored; the worker relies on
+   *  headless approval semantics (in-workspace writes auto-approved, other asks fast-denied)
+   *  rather than the parent's manual/auto-safe gating, since no human is attached to a worker. */
+  parentApprovalMode?: import('./loop-types.js').ApprovalMode
   /** V3 Component B: optional per-domain lessons recalled into worker prompt. */
   domainKnowledgeStore?: DomainKnowledgeStore
   /** Liveness signal — fired on every worker activity (text/thinking/tool)
@@ -138,6 +144,29 @@ function detectPollutionFailure(transcript: WorkerTranscript): string | null {
   )
   if (hits.length < 2) return null  // a single transient blip is not a pattern
   return `Worker stalled on ${hits.length} streaming-polluted tool calls (foreign arguments grafted onto read tools). The review work above is likely real; the missing JSON is a symptom of the upstream OpenAIClient parallel-tool_call parsing bug, not a model failure. See .rivet/tool-stream-*.jsonl.`
+}
+
+/** Stable marker emitted by tool-pipeline's headless deny branch. Kept as a local
+ *  const (not imported) to avoid a worker-session → loop → tool-pipeline import
+ *  cycle; a drift-guard test asserts it matches tool-pipeline.HEADLESS_DENY_MARKER. */
+export const HEADLESS_DENY_MARKER = 'not available in a headless worker'
+
+/**
+ * Detect approval-deadlock from the worker transcript.
+ *
+ * A headless worker cannot self-approve write operations that require it. When it
+ * hits such a gate, the tool pipeline emits an error tool_result carrying
+ * HEADLESS_DENY_MARKER. A small model often responds by emitting an approval
+ * request in prose rather than result JSON, so the run ends as "Parse failed" —
+ * masking the real cause (a gated operation, not malformed output).
+ *
+ * Returns a diagnostic hint to surface in the blocked result so the operator does
+ * not chase "model can't output JSON" when the real cause is an approval gate.
+ */
+export function detectApprovalDeadlock(transcript: WorkerTranscript): string | null {
+  const hits = transcript.errors.filter(e => e.includes(HEADLESS_DENY_MARKER))
+  if (hits.length === 0) return null
+  return `Worker was gated on ${hits.length} approval-required tool call(s) it cannot self-approve as a headless worker. This blocked/parse result is a symptom of the gated operation (the worker likely emitted an approval request in prose), NOT malformed JSON. Fix by giving this profile a non-gated path to the change (e.g. it should already auto-approve in-workspace file writes), or run the task inline in the primary session.`
 }
 
 /** Minimal agent surface needed by the retry layer — injectable so tests can
@@ -309,6 +338,16 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     contextWindow: config.contextWindow,
     compact: config.compact,
     sessionId: `worker-${config.order.id.replace(/:/g, '-')}`,
+    // Headless: no human answers approval prompts for a worker. The tool pipeline
+    // auto-approves in-workspace writes (worktree/claim isolation) and fast-denies
+    // anything else that would ask, instead of stalling on onApprovalRequired.
+    headless: true,
+    // Trust downward-delegation: a parent running dangerously-skip-permissions
+    // opted out of all prompts, so the worker inherits that. Other parent modes
+    // are left unset — headless semantics govern instead.
+    approvalMode: config.parentApprovalMode === 'dangerously-skip-permissions'
+      ? 'dangerously-skip-permissions'
+      : undefined,
     reviewDepth: config.reviewDepth,
     // B3: the worker knows its own nesting depth, so any delegate_task it
     // issues carries it and the coordinator can cap recursion.
@@ -363,9 +402,10 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           completedTools: [...transcript.toolUses],
         }
         const pollutionHint = detectPollutionFailure(transcript)
+        const approvalHint = detectApprovalDeadlock(transcript)
         return {
           result: {
-            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}`),
+            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`),
             artifacts: [
               { kind: 'note' as const, title: 'Aborted worker partial output', content: latestText.slice(0, 2000) },
             ],
@@ -400,9 +440,10 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
         if (attempt === config.order.budget.maxRetries) {
           const partialSummary = latestText.slice(0, 300)
           const pollutionHint = detectPollutionFailure(transcript)
+          const approvalHint = detectApprovalDeadlock(transcript)
           return {
             result: {
-              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}`),
+              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`),
               artifacts: [
                 { kind: 'note' as const, title: 'Unparseable worker output', content: latestText.slice(0, 2000) },
               ],

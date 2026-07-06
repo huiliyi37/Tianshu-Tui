@@ -32,6 +32,8 @@ describe('work-order contract', () => {
     assert.ok(!order.allowedTools.includes('edit_file'))
     assert.deepEqual(order.disallowedTools, ['bash', 'write_file', 'edit_file', 'run_tests', 'delegate_task', 'delegate_batch'])
     assert.equal(order.budget.maxRetries, 2)
+    // Read-only default turn budget (raised from 8 — flash has a 1M window).
+    assert.equal(order.budget.maxTurns, 24)
     assert.equal(order.aggregationPolicy, 'primary_decides')
   })
 
@@ -199,8 +201,8 @@ describe('work-order contract', () => {
     assert.equal(order.disallowedTools.includes('delegate_task'), true)
     assert.equal(order.disallowedTools.includes('delegate_batch'), true)
     // Self-contained shards run a full implement+verify loop, so write workers
-    // get a longer turn budget than the old 8.
-    assert.equal(order.budget.maxTurns, 14)
+    // get a generous turn budget (raised from 14 — flash has a 1M window).
+    assert.equal(order.budget.maxTurns, 32)
     assert.ok(order.dedupeKey.startsWith('write:'))
   })
 
