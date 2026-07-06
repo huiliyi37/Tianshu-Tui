@@ -94,6 +94,11 @@ export class P3Integration {
     this.idleSpec.onToolStart(toolName)
   }
 
+  /** Shadow telemetry only — tool-pipeline calls this to count would-be hits
+   *  but NEVER serves the result to the model (2026-07-06 stale-read incident:
+   *  ShadowQueue entries carry no mtime/TTL, so a pre-edit read was served
+   *  after three file mutations). Re-enable serving only after checkHit gains
+   *  an mtime re-stat comparison. */
   checkSpeculativeCache(toolName: string, target: string): string | undefined {
     return this.idleSpec.checkCache(toolName, target)
   }

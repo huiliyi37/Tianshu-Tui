@@ -21,6 +21,26 @@ export interface MistakeResolution {
  * is an earlier failed event for the same tool that has not yet been resolved
  * (no passed event between them), return the resolution. Otherwise return null.
  */
+/**
+ * Sanitize a tool input before it is recorded as a MistakeNotebook resolution.
+ *
+ * hash_edit anchors are file-state-specific one-shot coordinates: the exact
+ * L<line>:<hash> pair is only valid for the file bytes it was harvested from.
+ * Replaying them verbatim inside a <mistake-hints> "Resolution:" block teaches
+ * the model to copy dead anchors on the next stale failure (2026-07-06 TDX
+ * session looped exactly this way). Strip them; keep the rest of the shape so
+ * the hint still shows WHAT kind of call resolved the error.
+ */
+export function sanitizeMistakeResolutionInput(
+  toolName: string,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  if (toolName === 'hash_edit' && 'anchors' in input) {
+    return { ...input, anchors: '<one-shot, re-harvest via grep>' }
+  }
+  return input
+}
+
 export function detectMistakeResolution(
   store: TraceStore,
   currentTraceId: string,

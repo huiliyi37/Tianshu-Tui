@@ -43,7 +43,7 @@ import { extractTrailingArtifactId } from './tool-result-tiering.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 import { getStarSignature } from './star-signature.js'
 import type { ImmuneHook } from './immune-hook.js'
-import { detectMistakeResolution } from './mistake-detector.js'
+import { detectMistakeResolution, sanitizeMistakeResolutionInput } from './mistake-detector.js'
 import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
 import type { ArtifactStore } from '../artifact/store.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
@@ -1101,8 +1101,13 @@ export async function executeToolUse(
     const priorReadLoopPlaceholders = countRecentReadLoopPlaceholders(deps.trajectory.getEntries(), toolTarget)
     deps.p3?.onToolStart(tu.name, toolTarget)
 
-    // P3-C: check if we already have a speculative result for this tool call
-    const speculativeHit = deps.p3?.checkSpeculativeCache(tu.name, toolTarget)
+    // P3-C speculative serving is DISABLED (2026-07-06 事故): ShadowQueue 缓存
+    // 无 mtime/TTL 校验，预读结果在文件多次变更后仍被当作 read_file 结果返回
+    // （TDX 会话：三次编辑前的旧内容被端出，模型推理"文件被回退"并连锁触发
+    // old_string not found / hash_edit stale / 重读风暴）。checkSpeculativeCache
+    // 仍然调用以保留影子命中率遥测（speculationStats），但结果绝不服务给模型。
+    // 重新启用前提：ShadowQueue 条目记录投机时 mtime，checkHit 现场 stat 比对。
+    deps.p3?.checkSpeculativeCache(tu.name, toolTarget)
 
     const traceId = tu.id
     traceStore = startTraceEvent(traceStore, {
@@ -1156,11 +1161,6 @@ export async function executeToolUse(
       input: tu.input,
       turn,
       execute: async () => {
-        // P3-C: use speculative cache hit if available (read-only tools only)
-        if (speculativeHit && (tu.name === 'read_file' || tu.name === 'grep' || tu.name === 'glob')) {
-          rawToolResult = { content: speculativeHit }
-          return { content: speculativeHit }
-       }
         // P5+P6: read_file must always go through real execute to honor the
         // active contextWindow's read cap. The prewarm cache is shared with
         // P3 speculative reads which may have been populated under a different
@@ -1353,7 +1353,7 @@ export async function executeToolUse(
       const resolution = detectMistakeResolution(traceStore, traceId, tu.name)
       if (resolution) {
         try {
-          const inputDigest = JSON.stringify(tu.input).slice(0, 200)
+          const inputDigest = JSON.stringify(sanitizeMistakeResolutionInput(tu.name, tu.input)).slice(0, 200)
           deps.p3.recordMistake(
             resolution.error,
             resolution.context,

@@ -77,6 +77,48 @@ describe('hash_edit', () => {
     assert.ok(result.content.includes('deadbeef'))
   })
 
+  // ── stale diagnostic recovery guidance (2026-07-06 TDX loop fix) ──
+  // read_file output carries no line hashes (only grep does), so "re-read"
+  // is a dead end. The diagnostic must hand the model ready-to-use retry
+  // anchors built from the CURRENT hashes it already computed.
+
+  it('stale diagnostic offers ready-to-use retry anchors with current hashes', async () => {
+    const cwd = setup({
+      'test.ts': 'line one\nline two\nline three\n',
+    })
+    const { createHash } = await import('crypto')
+    const h = (line: string): string => createHash('sha256').update(line).digest('hex').slice(0, 8)
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: ['L1:deadbeef', `L3:${h('line three')}`], // L1 stale, L3 valid
+      new_string: 'x',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, true)
+    // Retry line substitutes the current hash for the stale anchor and keeps the valid one.
+    assert.ok(result.content.includes(`anchors: ["L1:${h('line one')}", "L3:${h('line three')}"]`),
+      `retry anchors missing or wrong: ${result.content}`)
+    // Steers re-location to grep, not read_file, and forbids replaying dead anchors.
+    assert.ok(result.content.includes('grep'))
+    assert.ok(result.content.includes('read_file does NOT emit hashes'))
+    assert.ok(result.content.includes('Do NOT retry with the anchors you already used'))
+  })
+
+  it('stale diagnostic with out-of-range anchor offers grep guidance, no retry anchors', async () => {
+    const cwd = setup({
+      'test.ts': 'line one\nline two\n',
+    })
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: ['L99:deadbeef'],
+      new_string: 'x',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, true)
+    assert.ok(!result.content.includes('retry NOW with'), 'no retry anchors for <eof> mismatches')
+    assert.ok(result.content.includes('grep'), 'still steers to grep for re-location')
+  })
+
   it('deletes lines when new_string is empty', async () => {
     const cwd = setup({
       'test.ts': 'line one\nline two\nline three\nline four\n',

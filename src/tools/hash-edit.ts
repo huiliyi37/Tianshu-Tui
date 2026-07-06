@@ -60,15 +60,41 @@ function formatStaleDiagnostic(
 
   const all_anchors = anchors.map(a => `  L${a.line}:${a.hash}`).join('\n')
 
+  // Ready-to-use retry anchors: for each original anchor, substitute the
+  // CURRENT hash at the same line (the diagnostic already computed it for
+  // mismatches; verified anchors keep their hash). Only offered when every
+  // anchor line still exists — an <eof> mismatch has no valid substitute.
+  // Without this, the model has no recovery path in-context: "re-read" is a
+  // dead end because read_file output carries no line hashes (only grep does),
+  // so models loop on remembered dead anchors (2026-07-06 TDX session).
+  const retryable = mismatches.every(m => m.actualHash !== '<eof>')
+  const retryAnchors = retryable
+    ? anchors.map(a => {
+        const mismatch = mismatches.find(m => m.anchor === a)
+        const hash = mismatch ? mismatch.actualHash : (a.hash ?? hashLine(lines[a.line - 1] ?? ''))
+        return `"L${a.line}:${hash}"`
+      }).join(', ')
+    : null
+
   return [
     `hash_edit failed on ${filePath}: ${mismatches.length} anchor(s) stale.`,
-    'The file has changed since your last read_file. Re-read the relevant portion and retry with updated anchors.',
+    'The file has changed since your last read_file (possibly by your own earlier edit).',
     '',
     'Expected anchors:',
     all_anchors,
     '',
-    'Stale anchors:',
+    'Stale anchors (with CURRENT hash at that line):',
     lines_of_evidence,
+    '',
+    ...(retryAnchors
+      ? [
+          `If the "content" shown above is the line you intend to replace, retry NOW with: anchors: [${retryAnchors}]`,
+          'If it is not the right line, re-locate the target with grep (grep output includes fresh L<line>:<hash> anchor hints; read_file does NOT emit hashes).',
+        ]
+      : [
+          'Anchor line numbers exceed the current file length. Re-locate the target with grep (grep output includes fresh L<line>:<hash> anchor hints; read_file does NOT emit hashes).',
+        ]),
+    'Do NOT retry with the anchors you already used — they are one-shot coordinates and this exact call will fail again.',
   ].join('\n')
 }
 

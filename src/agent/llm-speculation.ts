@@ -4,8 +4,11 @@
  * During a tool-batch await window, fire a side-path LLM request that shares
  * the main session's message prefix (near-100% prefix cache hit on DeepSeek —
  * input cost ≈ 0) and asks the model to predict the next read-only tool calls.
- * Predictions feed the existing ShadowQueue speculative execution chain and
- * are consumed by tool-pipeline's `speculativeHit` short-circuit.
+ * Predictions feed the existing ShadowQueue speculative execution chain.
+ * NOTE (2026-07-06): tool-pipeline no longer SERVES ShadowQueue results to the
+ * model — the cache had no mtime/TTL validation and served pre-edit file
+ * content as a live read_file result (stale-read incident). The chain now runs
+ * as shadow telemetry only (speculationStats hit rates).
  *
  * Hard boundaries:
  * - Never mutates the main request or its messages array (prefix safety).
