@@ -870,7 +870,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     // knowledgeBlock: session-constant top-K domain lessons (bound once with the
     // domain) — lesson text is agent-written store content, so it IS escaped.
     const knowledge = d.knowledgeBlock ? `\n<domain-knowledge>\n${escapeXml(d.knowledgeBlock)}\n</domain-knowledge>` : ''
-    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}${knowledge}</star-domain>`)
+    // 全星域共享执行纪律（字节恒定，随 star-domain 进 FROZEN 前缀）。
+    // 瑶光域在自己的 systemPromptSuffix 里保留放大版，此处是十域共同的底线。
+    const sharedDiscipline = '\n执行纪律（全星域共享）：绿非证明，复现即证——宣称已修/已验证前，先用工具复现结论；报告里的每个数字要能指到一条真实验证记录。'
+    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}${sharedDiscipline}${knowledge}</star-domain>`)
   }
 
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)

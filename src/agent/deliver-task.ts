@@ -41,6 +41,8 @@ import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverPro
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 import { analyzeImpact } from '../repo/meridian-impact.js'
 import { runChangedFilesTypecheckMemo, runDeclaredCheck, typecheckGateEnabled } from './typecheck-gate.js'
+import { evaluateTestPresence, testPresenceGateEnabled } from './test-presence.js'
+import { auditDeliveryClaims, claimAuditEnabled } from './claim-audit.js'
 import { scanFilesForProbes, formatProbeHits, type ProbeHit } from './probe-detector.js'
 import { findApprovedPlanInventory, verifyRegressionInventory, formatInventoryReport, type InventorySearcher } from './regression-inventory.js'
 
@@ -305,6 +307,16 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         lines.push('  (Typecheck passed, but no test suite was executed. Run tests before claiming "verified".)')
       }
 
+      // 测试存在性警告（advisory 不阻断）：交付物含 ≥3 个源文件却零测试文件。
+      // 主会话有人看着，硬拦交给 wave-gate 管无人值守场景。
+      if (testPresenceGateEnabled()) {
+        const presence = evaluateTestPresence(report.ownedFiles)
+        if (!presence.ok) {
+          lines.push('', `⚠️ 零测试交付：${presence.detail}`)
+          lines.push('  交付报告中不要宣称"已验证"——这批源文件没有任何测试背书。')
+        }
+      }
+
       const hasVerificationDiagnostics = report.currentBlockingFailure
         || report.supersededFailures > 0
       if (hasVerificationDiagnostics) {
@@ -532,6 +544,24 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         if (!message) {
           lines.push('', '❌ Commit requires a "message" parameter.')
           return { content: lines.join('\n'), isError: true }
+        }
+
+        // 宣称-证据对账（复现即证明）：commit message / checklist 里宣称测试绿，
+        // 但 ledger 里最后一次文件变更后零条 passed 验证记录 → RED 硬拦；
+        // 宣称的 N/N 与最新验证记录对不上 → 软警不阻断。
+        if (claimAuditEnabled()) {
+          const checklistText = (auditList ?? []).map(e => e.item).join('\n')
+          const audit = auditDeliveryClaims({
+            claimText: `${message}\n${checklistText}`,
+            events: ctx.taskLedger.getEvents(),
+          })
+          if (audit.status === 'block') {
+            lines.push('', ...audit.lines)
+            return { content: lines.join('\n'), isError: true }
+          }
+          if (audit.status === 'warn') {
+            lines.push('', ...audit.lines)
+          }
         }
         // Adopt external files into owned set (cross-session takeover)
         const adoptFiles = params.input.adopt as string[] | undefined

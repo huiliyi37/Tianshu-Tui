@@ -2003,4 +2003,91 @@ Do not declare a streamed response duplicate in the middle of the stream.
       }
     })
   })
+
+  describe('claim audit (宣称-证据对账)', () => {
+    it('blocks commit when message claims green but verification predates last write', async () => {
+      const { tool, params, ledger } = makeContext({
+        taskId: 't-claim-stale',
+        ownedFiles: ['src/a.ts'],
+        verifications: [{ command: 'npm test', status: 'passed' }],
+        commitOwnedFiles: () => {
+          throw new Error('commit executor must not run when claim audit blocks')
+        },
+      })
+      // 改完代码没重跑：验证记录之后又有文件变更（新鲜度失效）
+      await new Promise(r => setTimeout(r, 10))
+      ledger.record({ type: 'file_write', path: 'src/a.ts' })
+
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: done, 全绿' } })
+      assert.equal(result.isError, true)
+      assert.ok(result.content.includes('宣称对账失败'))
+    })
+
+    it('allows commit when green claim is backed by fresh verification', async () => {
+      const { tool, params, ledger } = makeContext({
+        taskId: 't-claim-fresh',
+        ownedFiles: ['src/a.ts'],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+      })
+      await new Promise(r => setTimeout(r, 10))
+      ledger.record({ type: 'verification', command: 'npm test', status: 'passed' })
+
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: all tests pass' } })
+      assert.equal(result.isError ?? false, false)
+      assert.ok(!result.content.includes('宣称对账失败'))
+    })
+
+    it('non-claim commit messages are not audited', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't-claim-none',
+        ownedFiles: ['src/a.ts'],
+        verifications: [{ command: 'npm test', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+      })
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: retry backoff' } })
+      assert.equal(result.isError ?? false, false)
+    })
+  })
+
+  describe('test-presence advisory (零测试交付警告)', () => {
+    it('warns when delivery has ≥3 source files and zero test files', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't-presence',
+        ownedFiles: ['plugins/a/index.js', 'plugins/b/index.js', 'plugins/c/index.js'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      })
+      const result = await tool.execute(params)
+      assert.ok(result.content.includes('零测试交付'), 'should surface the zero-test warning line')
+      assert.ok(result.content.includes('plugins/a/index.js'))
+      // advisory 不阻断：GREEN 状态不因此翻转
+      assert.equal(result.isError ?? false, false)
+    })
+
+    it('does not warn when a test file is part of the delivery', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't-presence-ok',
+        ownedFiles: ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/__tests__/a.test.ts'],
+        verifications: [{ command: 'npm test', status: 'passed' }],
+      })
+      const result = await tool.execute(params)
+      assert.ok(!result.content.includes('零测试交付'))
+    })
+
+    it('respects RIVET_TEST_PRESENCE_GATE=0', async () => {
+      const prev = process.env.RIVET_TEST_PRESENCE_GATE
+      process.env.RIVET_TEST_PRESENCE_GATE = '0'
+      try {
+        const { tool, params } = makeContext({
+          taskId: 't-presence-off',
+          ownedFiles: ['plugins/a/index.js', 'plugins/b/index.js', 'plugins/c/index.js'],
+          verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        })
+        const result = await tool.execute(params)
+        assert.ok(!result.content.includes('零测试交付'))
+      } finally {
+        if (prev === undefined) delete process.env.RIVET_TEST_PRESENCE_GATE
+        else process.env.RIVET_TEST_PRESENCE_GATE = prev
+      }
+    })
+  })
 })

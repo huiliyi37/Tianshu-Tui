@@ -16,6 +16,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { gateTypecheckRunner, runChangedFilesTypecheckOutcomeMemo, typecheckGateEnabled, type TypecheckRunner } from './typecheck-gate.js'
+import { evaluateTestPresence, testPresenceGateEnabled } from './test-presence.js'
 
 export interface WaveGateCheck {
   command: string
@@ -115,6 +116,22 @@ export async function evaluateWaveGate(input: EvaluateWaveGateInput): Promise<Wa
       }
     } catch {
       checks.push({ command: 'tsc --noEmit (scoped)', status: 'unverifiable', detail: 'typecheck runner unavailable' })
+    }
+  }
+
+  // 测试存在性：新代码堆到阈值却零测试文件 → blocking unverifiable 拦下一波。
+  // 自愈复评时补了测试文件（changedFiles 更新）即放行——与 typecheck 超时同款语义。
+  if (testPresenceGateEnabled() && input.changedFiles.length > 0) {
+    const presence = evaluateTestPresence(input.changedFiles)
+    if (!presence.ok) {
+      checks.push({
+        command: 'test-presence',
+        status: 'unverifiable',
+        detail: presence.detail,
+        blocking: true,
+      })
+    } else if (presence.sourceFiles.length > 0) {
+      checks.push({ command: 'test-presence', status: 'passed' })
     }
   }
 

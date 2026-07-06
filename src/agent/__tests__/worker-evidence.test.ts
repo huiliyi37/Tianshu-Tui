@@ -19,7 +19,7 @@ function result(overrides: Partial<WorkerResult>): WorkerResult {
   }
 }
 
-function transcript(toolUses: string[], errors: string[] = []): WorkerTranscript {
+function transcript(toolUses: string[], errors: string[] = [], bashCommands?: string[]): WorkerTranscript {
   return {
     text: '',
     thinking: '',
@@ -27,6 +27,7 @@ function transcript(toolUses: string[], errors: string[] = []): WorkerTranscript
     toolResults: [],
     errors,
     repairAttempts: 0,
+    bashCommands,
   }
 }
 
@@ -247,4 +248,69 @@ test('blocks write worker with changedFiles and examinedFiles but no verificatio
 
   assert.equal(checked.status, 'blocked')
   assert.ok(checked.risks.some(r => r.includes('missing verification metadata')))
+})
+
+// --- 复现即证明泛化（全 profile transcript 取证 + 交付文本宣称扫描）---
+
+test('any profile claiming verified with transcript but no verification run is downgraded', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'implementer', transcript(['read_file', 'edit_file']))
+
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('宣称未经复现')))
+})
+
+test('verify-shaped bash command in transcript counts as proven verification', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'verified',
+    verification: { command: 'npm test', status: 'passed', exitCode: 0, passed: 10, failed: 0, skipped: 0, scope: 'targeted', durationMs: 1200 },
+  }), 'implementer', transcript(['read_file', 'bash'], [], ['npm test']))
+
+  assert.equal(checked.evidenceStatus, 'verified')
+  assert.equal(checked.risks.length, 0)
+})
+
+test('non-verify bash (ls/cat) does not count as verification proof', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'implementer', transcript(['bash'], [], ['ls -la', 'cat src/a.ts']))
+
+  assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('non-verifier profile without transcript is not downgraded here (batch re-gate safety)', () => {
+  // coordinator 批量聚合二次过闸不带 transcript——首轮已带证据通过的结果
+  // 不能在二次过闸被误杀。metadata 门（verification.status）仍然生效。
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'verified',
+    verification: { command: 'npm test', status: 'passed', exitCode: 0, passed: 10, failed: 0, skipped: 0, scope: 'targeted', durationMs: 1200 },
+  }), 'implementer')
+
+  assert.equal(checked.evidenceStatus, 'verified')
+})
+
+test('claim language in summary without verification evidence adds 宣称未经复现 risk', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'unverified',
+    summary: '修复完成，35/35 全绿，typecheck 干净。',
+  }), 'implementer', transcript(['read_file', 'edit_file']))
+
+  assert.ok(checked.risks.some(r => r.includes('宣称未经复现')))
+  assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('claim language backed by real verification passes without extra risk', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'unverified',
+    summary: 'All tests pass — 12/12 通过。',
+  }), 'implementer', transcript(['run_tests']))
+
+  assert.ok(!checked.risks.some(r => r.includes('宣称未经复现')))
 })

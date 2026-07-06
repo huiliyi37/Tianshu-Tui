@@ -276,6 +276,7 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string, op
   parts.push(
     'Do not call disallowed tools. Do not claim that files were changed unless you actually modified them.',
     'If you changed files and did not run relevant verification, evidenceStatus must be "unverified".',
+    '执行纪律（全星域共享）：绿非证明，复现即证——宣称已修/已验证前，先用工具复现结论（run_tests 或验证命令）；summary 里的每个数字要能指到一条真实验证记录，否则宣称会被证据门降级。',
     'Use changedFiles ONLY for files you actually modified/created. Use examinedFiles for files you read/inspected.',
     'Return exactly one JSON object and no prose outside the object.',
     'The JSON object must match this shape:',

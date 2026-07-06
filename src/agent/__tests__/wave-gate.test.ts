@@ -120,6 +120,56 @@ describe('evaluateWaveGate', () => {
     assert.match(tc?.detail ?? '', /复评自动重跑/)
   })
 
+  it('blocks when a wave lands ≥3 source files with zero test files (test-presence)', async () => {
+    const record = await evaluateWaveGate({
+      cwd: '/fake',
+      wave: 0,
+      changedFiles: ['plugins/a/index.js', 'plugins/b/index.js', 'plugins/c/index.js'],
+      commands: [],
+      typecheckRunner: async () => ({ ranOk: true, formatted: '', diagnostics: [] }),
+    })
+    assert.equal(record.passed, false, 'zero-test delivery must block the next wave')
+    const tp = record.checks.find(c => c.command === 'test-presence')
+    assert.equal(tp?.status, 'unverifiable')
+    assert.equal(tp?.blocking, true)
+    assert.match(tp?.detail ?? '', /零测试/)
+  })
+
+  it('test-presence passes (self-heals) once a test file joins the changed set', async () => {
+    const record = await evaluateWaveGate({
+      cwd: '/fake',
+      wave: 0,
+      changedFiles: [
+        'plugins/a/index.js', 'plugins/b/index.js', 'plugins/c/index.js',
+        'plugins/__tests__/a.test.js',
+      ],
+      commands: [],
+      typecheckRunner: async () => ({ ranOk: true, formatted: '', diagnostics: [] }),
+    })
+    assert.equal(record.passed, true)
+    const tp = record.checks.find(c => c.command === 'test-presence')
+    assert.equal(tp?.status, 'passed')
+  })
+
+  it('test-presence gate respects RIVET_TEST_PRESENCE_GATE=0 escape hatch', async () => {
+    const prev = process.env.RIVET_TEST_PRESENCE_GATE
+    process.env.RIVET_TEST_PRESENCE_GATE = '0'
+    try {
+      const record = await evaluateWaveGate({
+        cwd: '/fake',
+        wave: 0,
+        changedFiles: ['plugins/a/index.js', 'plugins/b/index.js', 'plugins/c/index.js'],
+        commands: [],
+        typecheckRunner: async () => ({ ranOk: true, formatted: '', diagnostics: [] }),
+      })
+      assert.equal(record.passed, true)
+      assert.equal(record.checks.find(c => c.command === 'test-presence'), undefined)
+    } finally {
+      if (prev === undefined) delete process.env.RIVET_TEST_PRESENCE_GATE
+      else process.env.RIVET_TEST_PRESENCE_GATE = prev
+    }
+  })
+
   it('typecheck timeout blocking does not change free-text unverifiable semantics', async () => {
     const record = await evaluateWaveGate({
       cwd: '/fake',
