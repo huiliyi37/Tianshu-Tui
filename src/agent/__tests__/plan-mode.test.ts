@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath } from '../plan-mode.js'
-import { profileIsWriteCapable } from '../profile-registry.js'
+import { profileIsWriteCapable, profileIsPlanModeSafe } from '../profile-registry.js'
 import { createDefaultToolRegistry } from '../../tools/default-registry.js'
 import { WEB_SEARCH_TOOL } from '../../tools/web-search.js'
 import { createRepoGraphTool } from '../../tools/repo-graph.js'
@@ -47,13 +47,17 @@ describe('checkPlanMode', () => {
   })
 
   it('planning state blocks other write tools', () => {
-    const blockedTools = ['bash', 'run_tests']
+    const blockedTools = ['bash', 'git', 'apply_patch']
     for (const tool of blockedTools) {
       const result = checkPlanMode('planning', tool)
       assert.equal(result.allowed, false, `${tool} should be blocked`)
       assert.ok(result.reason, `${tool} should have a reason`)
       assert.ok(result.reason!.includes('Plan Mode'), `${tool} reason should mention Plan Mode`)
     }
+  })
+
+  it('planning state allows run_tests (瑶光反证 plan-time reproduction)', () => {
+    assert.deepEqual(checkPlanMode('planning', 'run_tests'), { allowed: true })
   })
 
   it('planning state allows delegate_batch but blocks deliver_task', () => {
@@ -111,6 +115,20 @@ describe('checkPlanMode', () => {
     assert.equal(profileIsWriteCapable('patcher'), true)
     // unknown profile → false (delegate schema reports the real error)
     assert.equal(profileIsWriteCapable('no_such_profile_xyz'), false)
+  })
+
+  it('profileIsPlanModeSafe: scouts + test-only verifiers pass, real write/exec profiles fail', () => {
+    // Read-only scouts — safe.
+    assert.equal(profileIsPlanModeSafe('code_scout'), true)
+    assert.equal(profileIsPlanModeSafe('doc_scout'), true)
+    // readonly_plus_test — run_tests only beyond read-only → safe (瑶光反证 reproduction).
+    assert.equal(profileIsPlanModeSafe('adversarial_verifier'), true)
+    assert.equal(profileIsPlanModeSafe('goal_judge'), true)
+    // Write/exec-capable — blocked until approval.
+    assert.equal(profileIsPlanModeSafe('patcher'), false)
+    assert.equal(profileIsPlanModeSafe('verifier'), false) // holds full WRITE_TOOLS incl. bash
+    // Unknown profile → safe (delegate schema reports the real error)
+    assert.equal(profileIsPlanModeSafe('no_such_profile_xyz'), true)
   })
 
   it('every PLAN_MODE_ALLOWED_TOOLS entry resolves to a registered tool', () => {

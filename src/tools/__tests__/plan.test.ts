@@ -35,6 +35,15 @@ describe('plan tool submit', () => {
     } as any)
   }
 
+  // 瑶光反证门禁（one-shot 软拦）要求计划含"反证/复现"章节——需要通过该
+  // 门禁的 fixture 统一附加这段，让它们到达各自要测的后续闸门/成功路径。
+  const FALSIFICATION = [
+    '',
+    '## 瑶光反证',
+    '关键断言：边界分支位于 `src/foo.ts`（设计定稿后回读确认）。',
+    '待验证假设：无。',
+  ].join('\n')
+
   it('rejects a plan with too many placeholders', async () => {
     const plan = [
       '## 根因分析',
@@ -105,7 +114,7 @@ describe('plan tool submit', () => {
       '## 验证',
       '1. 新增单元测试覆盖边界条件。',
       '2. 运行 `npm test`。',
-    ].join('\n')
+    ].join('\n') + FALSIFICATION
 
     const result = await execute({ action: 'submit', title: 'Concrete Plan', plan })
     assert.ok(!result.isError)
@@ -134,7 +143,7 @@ describe('plan tool submit', () => {
       '```',
       '',
       '修改 `src/foo.ts`。',
-    ].join('\n'), 'utf-8')
+    ].join('\n') + FALSIFICATION, 'utf-8')
 
     const result = await execute(
       { action: 'submit', title: 'From Draft' },
@@ -167,7 +176,7 @@ describe('plan tool submit', () => {
       '```',
       '',
       '修改 `src/foo.ts`。',
-    ].join('\n'), 'utf-8')
+    ].join('\n') + FALSIFICATION, 'utf-8')
 
     const result = await execute(
       { action: 'submit', title: 'Recycled Draft' },
@@ -195,7 +204,7 @@ describe('plan tool submit', () => {
       '```',
       '',
       '修改 `src/foo.ts`。',
-    ].join('\n')
+    ].join('\n') + FALSIFICATION
 
     const result = await execute(
       { action: 'submit', title: 'Inline Plan Content', plan },
@@ -227,7 +236,7 @@ describe('plan tool submit', () => {
       '```',
       '',
       '修改 `src/foo.ts`（已按反馈调整）。',
-    ].join('\n'), 'utf-8')
+    ].join('\n') + FALSIFICATION, 'utf-8')
 
     const result = await execute(
       { action: 'submit', title: 'Revised Plan' },
@@ -250,7 +259,7 @@ describe('plan tool submit', () => {
       'flowchart TD',
       '    A --> B',
       '```',
-    ].join('\n')
+    ].join('\n') + FALSIFICATION
 
     const result = await execute({
       action: 'submit',
@@ -284,7 +293,7 @@ describe('plan tool submit', () => {
       '',
       '- [ ] 新增 `src/tui/components/selector.tsx` — 选择器组件',
       '修改 `src/ghost.ts` 的导出。',
-    ].join('\n')
+    ].join('\n') + FALSIFICATION
 
     const first = await execute({ action: 'submit', title: 'Anchor Drift Plan', plan })
     assert.equal(first.isError, true)
@@ -311,7 +320,7 @@ describe('plan tool submit', () => {
       '```',
       '',
       '修改 `src/agent/loop.ts:120` 与 `src/foo.ts`。',
-    ].join('\n')
+    ].join('\n') + FALSIFICATION
 
     const result = await execute({ action: 'submit', title: 'Clean Anchor Plan', plan })
     assert.ok(!result.isError, result.content)
@@ -331,7 +340,7 @@ describe('plan tool submit', () => {
       '```',
       '',
       '修改 `src/foo.ts`。',
-    ].join('\n')
+    ].join('\n') + FALSIFICATION
 
     const result = await execute(
       { action: 'submit', title: 'Provenance Plan', plan },
@@ -363,7 +372,7 @@ describe('plan tool submit', () => {
       '```',
       '',
       ...tasks,
-    ].join('\n')
+    ].join('\n') + FALSIFICATION
   }
 
   it('soft-blocks an oversized plan without wave structure, passes resubmission with note', async () => {
@@ -394,6 +403,55 @@ describe('plan tool submit', () => {
     const result = await execute({ action: 'submit', title: 'Waved Plan', plan })
     assert.ok(!result.isError, result.content)
     assert.ok(!result.content.includes('规模留痕'), 'wave-structured plan passes without scale note')
+  })
+
+  // ── 瑶光反证门禁 — 计划期复现 ──
+  it('soft-blocks first submit without a 反证/复现 section, passes resubmission', async () => {
+    const plan = [
+      '## 根因分析',
+      '边界未重置。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      '修改 `src/foo.ts`。',
+    ].join('\n')
+
+    const first = await execute({ action: 'submit', title: 'No Falsification Plan', plan })
+    assert.equal(first.isError, true)
+    assert.ok(first.content.includes('瑶光反证'), first.content)
+    assert.ok(first.content.includes('复现'), 'block message explains plan-time reproduction')
+    assert.ok(first.content.includes('adversarial_verifier'), 'block message names the reproduction delegate')
+    assert.ok(!existsSync(join(dir, '.rivet/plans/no-falsification-plan.md')), 'not persisted on first offense')
+
+    const second = await execute({ action: 'submit', title: 'No Falsification Plan', plan })
+    assert.ok(!second.isError, second.content)
+    assert.ok(second.content.includes('Plan submitted'))
+  })
+
+  it('accepts a plan carrying a 复现 heading without the soft block', async () => {
+    const plan = [
+      '## 根因分析',
+      '边界未重置。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      '修改 `src/foo.ts`。',
+      '',
+      '## 原缺陷复现',
+      '`npm test -- boundary` 输出 `FAIL: counter not reset`（RED 证据）。',
+    ].join('\n')
+
+    const result = await execute({ action: 'submit', title: 'Reproduced Plan', plan })
+    assert.ok(!result.isError, result.content)
+    assert.ok(result.content.includes('Plan submitted'))
   })
 
   it('rejects reserved option labels', async () => {

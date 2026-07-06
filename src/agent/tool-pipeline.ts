@@ -54,7 +54,7 @@ import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } f
 import { checkPlanMode } from './plan-mode.js'
 import { GIT_CLEAR_RE } from '../tools/destructive-patterns.js'
 import { classifyDeclaredCommand, loadDeclaredVerify } from '../config/verify-config.js'
-import { profileIsWriteCapable } from './profile-registry.js'
+import { profileIsPlanModeSafe } from './profile-registry.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 import { toolTargetFromInput } from './tool-target.js'
 import { execFile } from 'node:child_process'
@@ -816,7 +816,7 @@ export async function executeToolUse(
       : undefined
     const delegatesWriteCapableProfile = deps.config.planModeState === 'planning'
       && (tu.name === 'delegate_task' || tu.name === 'delegate_batch')
-      && delegateProfilesFromInput(tu.input).some(profileIsWriteCapable)
+      && delegateProfilesFromInput(tu.input).some(p => !profileIsPlanModeSafe(p))
     const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name, {
       cwd: deps.cwd,
       targetFilePath: writePath,

@@ -619,6 +619,21 @@ export function profileIsWriteCapable(name: string): boolean {
 }
 
 /**
+ * Whether a delegate profile may run during plan mode. Read-only scouts always
+ * qualify; `run_tests` is additionally tolerated — 瑶光反证 requires the plan
+ * phase to REPRODUCE claims (run the failing test, probe the assertion), and
+ * run_tests executes the project's test suite without patching source. Any
+ * profile holding a real write/execute tool (bash, edit_file, git, …) stays
+ * blocked until the plan is approved. Unknown profiles → safe (delegate tool
+ * schema rejects them with a clearer error).
+ */
+export function profileIsPlanModeSafe(name: string): boolean {
+  const def = profileRegistry.get(name)
+  if (!def) return true
+  return def.allowedTools.every(t => !WRITE_CAPABLE_TOOLS.has(t) || t === 'run_tests')
+}
+
+/**
  * P0 超时对齐：delegate 工具层超时 = max(阶梯, 各 profile 预算) + 宽限。
  *
  * worker 内部预算（work-order.budget.timeoutMs）回退顺序是
