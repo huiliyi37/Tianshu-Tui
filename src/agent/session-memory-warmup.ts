@@ -31,7 +31,7 @@ export function loadSessionMemories(deps: SessionMemoryWarmupDeps): void {
     debugLog(`[physarum] filtered ${physarumLoadStats.discarded} polluted persisted edges; loaded=${physarumLoadStats.loaded}; samples=${JSON.stringify(physarumLoadStats.discardedSamples)}`)
   }
   try { immuneHook.importMemories(db.loadImmuneMemories()) } catch { /* non-critical */ }
-  try { p3?.notebook.importEntries(db.loadMistakeEntries()) } catch { /* non-critical */ }
+  try { p3?.notebook?.importEntries(db.loadMistakeEntries()) } catch { /* non-critical */ }
   try {
     const snapshot = db.loadToolPatternMinerSnapshot()
     if (snapshot) p3.miner.importSnapshot(snapshot)

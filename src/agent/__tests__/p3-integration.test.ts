@@ -20,12 +20,26 @@ function makeEngine(cwd: string) {
 }
 
 describe('P3Integration', () => {
-  it('creates all subsystems', () => {
+  it('creates all subsystems (notebook OFF by default — 2026-07-07 sealed)', () => {
     const p3 = new P3Integration()
     assert.ok(p3.miner)
     assert.ok(p3.queue)
     assert.ok(p3.idleSpec)
-    assert.ok(p3.notebook)
+    assert.equal(p3.notebook, undefined)
+    // 停用态下门面方法必须安全 no-op，不能抛
+    p3.recordMistake('err', 'ctx', 'res')
+    assert.equal(p3.getMistakeHints('err', 'ctx'), '')
+    assert.equal(p3.getStats().mistakeCount, 0)
+  })
+
+  it('notebook resurrects via RIVET_MISTAKE_NOTEBOOK=1', () => {
+    process.env['RIVET_MISTAKE_NOTEBOOK'] = '1'
+    try {
+      const p3 = new P3Integration()
+      assert.ok(p3.notebook)
+    } finally {
+      delete process.env['RIVET_MISTAKE_NOTEBOOK']
+    }
   })
 
   it('records tool patterns and enables speculation', () => {
@@ -160,24 +174,34 @@ describe('P3Integration', () => {
     }
   })
 
-  it('records and retrieves mistakes', () => {
-    const p3 = new P3Integration()
-    p3.recordMistake(
-      'Cannot find module ./foo.js',
-      'edit_file src/bar.ts',
-      'Add .js extension to ESM imports',
-      ['esm', 'typescript'],
-    )
-    const hints = p3.getMistakeHints('Cannot find module ./baz.js', 'edit_file src/qux.ts')
-    assert.ok(hints.includes('mistake-hints'))
-    assert.ok(hints.includes('.js extension'))
+  it('records and retrieves mistakes (opt-in only)', () => {
+    process.env['RIVET_MISTAKE_NOTEBOOK'] = '1'
+    try {
+      const p3 = new P3Integration()
+      p3.recordMistake(
+        'Cannot find module ./foo.js',
+        'edit_file src/bar.ts',
+        'Add .js extension to ESM imports',
+        ['esm', 'typescript'],
+      )
+      const hints = p3.getMistakeHints('Cannot find module ./baz.js', 'edit_file src/qux.ts')
+      assert.ok(hints.includes('mistake-hints'))
+      assert.ok(hints.includes('.js extension'))
+    } finally {
+      delete process.env['RIVET_MISTAKE_NOTEBOOK']
+    }
   })
 
-  it('returns empty hints for unrelated errors', () => {
-    const p3 = new P3Integration()
-    p3.recordMistake('Cannot find module', 'edit_file', 'fix import', ['esm'])
-    const hints = p3.getMistakeHints('ECONNREFUSED', 'bash curl')
-    assert.equal(hints, '')
+  it('returns empty hints for unrelated errors (opt-in only)', () => {
+    process.env['RIVET_MISTAKE_NOTEBOOK'] = '1'
+    try {
+      const p3 = new P3Integration()
+      p3.recordMistake('Cannot find module', 'edit_file', 'fix import', ['esm'])
+      const hints = p3.getMistakeHints('ECONNREFUSED', 'bash curl')
+      assert.equal(hints, '')
+    } finally {
+      delete process.env['RIVET_MISTAKE_NOTEBOOK']
+    }
   })
 
   it('assesses trajectory health', () => {

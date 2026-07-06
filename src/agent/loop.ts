@@ -1503,7 +1503,9 @@ export class AgentLoop {
     } catch { /* non-critical */ }
     try {
       const db = this.config.meridianIndexer?.getDb()
-      if (db) db.saveMistakeEntries(this.p3.notebook.getAllEntries())
+      // notebook 默认停用（见 p3-integration.ts）——停用时不落盘，也不清空旧表
+      //（清空交给 memory-epoch reset，保持"停用≠销毁"语义以便复活）。
+      if (db && this.p3.notebook) db.saveMistakeEntries(this.p3.notebook.getAllEntries())
     } catch { /* non-critical */ }
     try {
       const db = this.config.meridianIndexer?.getDb()
