@@ -164,7 +164,7 @@ function procsForApp(app: string): string {
   return `
 $app = ${psString(normalizeAppName(app))}
 $procs = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and ($_.ProcessName -eq $app -or $_.MainWindowTitle -eq $app) })
-if ($procs.Count -eq 0) { throw "no running app named '$app' with a window" }
+if ($procs.Count -eq 0) { throw "no running app named '$app' with a window (note: UWP apps like Calculator are hosted by ApplicationFrameHost and have no usable window handle)" }
 `
 }
 
@@ -564,7 +564,7 @@ ${procsForApp(app)}
 ${FOCUS_WINDOW}
 Start-Sleep -Milliseconds 150
 ${UIA_WINDOWS}
-$segments = ConvertFrom-Json ${psString(JSON.stringify(path))}
+$segments = @(ConvertFrom-Json ${psString(JSON.stringify(path))})
 $uiaRootEl = [System.Windows.Automation.AutomationElement]::RootElement
 $menuItemCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
 $scope = $wins[0]
@@ -574,6 +574,11 @@ for ($i = 0; $i -lt $segments.Count; $i++) {
   $cond = New-Object System.Windows.Automation.AndCondition($menuItemCond, $nameCond)
   $item = $scope.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
   if ($item -eq $null -and $i -gt 0) { $item = $uiaRootEl.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond) }
+  if ($item -eq $null -and $i -gt 0) {
+    Start-Sleep -Milliseconds 250
+    $item = $scope.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+    if ($item -eq $null) { $item = $uiaRootEl.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond) }
+  }
   if ($item -eq $null) {
     $names = @()
     foreach ($m in $scope.FindAll([System.Windows.Automation.TreeScope]::Descendants, $menuItemCond)) { $names += $m.Current.Name }
@@ -646,8 +651,12 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
         let rows: WindowsSnapshotRow[] = []
         let shot = false
         try {
-          const parsed = JSON.parse(raw) as { rows?: WindowsSnapshotRow[]; shot?: boolean }
-          rows = Array.isArray(parsed.rows) ? parsed.rows : []
+          const parsed = JSON.parse(raw) as { rows?: WindowsSnapshotRow[] | WindowsSnapshotRow; shot?: boolean }
+          // ConvertTo-Json unwraps single-element arrays into a bare object
+          // (PS 5.1 quirk) — re-wrap instead of dropping to an empty tree.
+          if (Array.isArray(parsed.rows)) rows = parsed.rows
+          else if (parsed.rows && typeof parsed.rows === 'object') rows = [parsed.rows]
+          else rows = []
           shot = parsed.shot === true
         } catch {
           rows = []

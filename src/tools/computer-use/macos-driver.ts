@@ -108,6 +108,11 @@ export interface ComputerUseDriver {
 export type ComputerUseDriverFactory = () => ComputerUseDriver
 
 const OSASCRIPT_TIMEOUT_MS = 15_000
+/**
+ * Snapshot walks get a longer leash: once AX enablement unlocks Chromium web
+ * content the tree easily has hundreds of nodes at ~4 Apple Events each.
+ */
+const SNAPSHOT_TIMEOUT_MS = 45_000
 /** Bound the accessibility walk so a deep app tree can't blow up the result. */
 const MAX_TREE_NODES = 400
 /** Max dimension for the vision-model screenshot copy (px). */
@@ -202,6 +207,20 @@ function pathConsts(target: { path: number[]; role?: string; title?: string }): 
     const EXPECT_TITLE = ${jxaString(target.title ?? '')};
   `
 }
+
+/**
+ * Best-effort accessibility enablement before walking a tree. Chromium only
+ * exposes its render tree to clients it believes are assistive tech
+ * (AXEnhancedUserInterface), Electron gates it behind AXManualAccessibility.
+ * Without this, a Chrome snapshot shows the toolbar but zero web content
+ * (verified on this machine: 77 nodes, no AXWebArea). Setting the attributes
+ * is idempotent, silently ignored by apps that don't care, and is the same
+ * mechanism VoiceOver / yabai use. Expects `proc` in scope.
+ */
+const AX_ENABLE = `
+  try { proc.attributes.byName('AXEnhancedUserInterface').value = true; } catch (e) {}
+  try { proc.attributes.byName('AXManualAccessibility').value = true; } catch (e) {}
+`
 
 /** Center point of an AX element (position + size / 2), with fallbacks. */
 const ELEMENT_CENTER = `
@@ -316,44 +335,86 @@ export function createMacosDriver(): ComputerUseDriver {
       // Walk the accessibility tree breadth-limited, emitting a numbered ref
       // AND its child-index path per actionable/labeled element so clicks can
       // later resolve the exact element without re-counting the whole tree.
+      //
+      // Apple Events dominate the walk cost, so properties are read in BATCH
+      // per parent: el.uiElements.role() fetches every child's role in ONE
+      // event (measured 51ms for a 4-child batch vs ~25ms per single read).
+      // Per-node reads made Chrome trees time out (>45s); batching brings the
+      // same tree to seconds. Two pruning cuts on top: NO_DESCEND roles keep
+      // the node but skip the subtree (ruler ticks / scrollbar internals are
+      // noise), and container roles discard the value (uninformative).
       const script = `
         const se = Application('System Events');
         const proc = se.processes.byName(${jxaString(app)});
+        ${AX_ENABLE}
         const MAX = ${MAX_TREE_NODES};
+        const NO_DESCEND = { AXRuler: 1, AXScrollBar: 1, AXValueIndicator: 1, AXMenuBar: 1 };
+        const SKIP_VALUE = { AXWindow: 1, AXGroup: 1, AXScrollArea: 1, AXSplitGroup: 1, AXToolbar: 1, AXList: 1, AXOutline: 1, AXTable: 1, AXSheet: 1, AXDrawer: 1, AXWebArea: 1 };
         const rows = [];
         let ref = 0;
-        function visit(el, depth, path) {
+        function batch(fn) { try { const v = fn(); return Array.isArray(v) ? v : null; } catch (e) { return null; } }
+        function push(role, title, value, pos, depth, path) {
+          if (!(role || title || value)) return;
+          ref++;
+          rows.push({ ref, depth, role, title, value, pos, path });
+        }
+        function visitChildren(el, depth, basePath) {
           if (rows.length >= MAX) return;
-          let role = '', title = '', value = '';
-          try { role = el.role(); } catch (e) {}
-          try { title = el.title() || el.description() || ''; } catch (e) {}
-          try { value = String(el.value() || ''); } catch (e) {}
-          if (role || title || value) {
-            ref++;
-            let pos = null;
-            try { const p = el.position(); pos = { x: p[0], y: p[1] }; } catch (e) {}
-            rows.push({ ref, depth, role, title, value, pos, path });
-          }
           let kids = [];
           try { kids = el.uiElements(); } catch (e) {}
+          if (kids.length === 0) return;
+          const roles = batch(() => el.uiElements.role());
+          const titles = batch(() => el.uiElements.title());
+          const descs = batch(() => el.uiElements.description());
+          const values = batch(() => el.uiElements.value());
+          const positions = batch(() => el.uiElements.position());
           for (let i = 0; i < kids.length; i++) {
             if (rows.length >= MAX) break;
-            visit(kids[i], depth + 1, path.concat(i));
+            const role = (roles && roles[i]) || '';
+            const title = (titles && titles[i]) || (descs && descs[i]) || '';
+            let value = '';
+            if (!(role in SKIP_VALUE) && values && values[i] !== null && values[i] !== undefined) {
+              value = String(values[i]);
+            }
+            let pos = null;
+            const p = positions && positions[i];
+            if (p && p.length === 2) pos = { x: p[0], y: p[1] };
+            const path = basePath.concat(i);
+            push(role, title, value, pos, depth, path);
+            if (!(role in NO_DESCEND)) visitChildren(kids[i], depth + 1, path);
           }
         }
         let windows = [];
         try { windows = proc.windows(); } catch (e) {}
-        for (let i = 0; i < windows.length; i++) visit(windows[i], 0, [i]);
-        JSON.stringify(rows);
+        for (let i = 0; i < windows.length; i++) {
+          if (rows.length >= MAX) break;
+          const el = windows[i];
+          let role = '', title = '', pos = null;
+          try { role = el.role(); } catch (e) {}
+          try { title = el.title() || el.description() || ''; } catch (e) {}
+          try { const p = el.position(); pos = { x: p[0], y: p[1] }; } catch (e) {}
+          push(role, title, '', pos, 0, [i]);
+          visitChildren(el, 1, [i]);
+        }
+        let menus = [];
+        try { menus = proc.menuBars[0].menuBarItems.name(); } catch (e) {}
+        JSON.stringify({ rows, menus });
       `
-      const raw = (await runJxa(script)).trim()
+      const raw = (await runJxa(script, SNAPSHOT_TIMEOUT_MS)).trim()
       let rows: Array<{ ref: number; depth: number; role: string; title: string; value: string; pos: { x: number; y: number } | null; path: number[] }> = []
+      let menus: string[] = []
       try {
-        rows = JSON.parse(raw)
+        const parsed = JSON.parse(raw) as { rows?: typeof rows; menus?: string[] }
+        rows = Array.isArray(parsed.rows) ? parsed.rows : []
+        menus = Array.isArray(parsed.menus) ? parsed.menus : []
       } catch {
         rows = []
       }
-      const tree = rows
+      // Localized menu names up front so menu_select works first try — Chinese
+      // systems have 文件, not File. Stable per app: doesn't churn the
+      // feedback diff or the snapshot dedup.
+      const menuLine = menus.length > 0 ? `Menu bar: ${menus.join(' | ')}\n` : ''
+      const body = rows
         .map((r) => {
           const indent = '  '.repeat(Math.min(r.depth, 8))
           const label = r.title ? ` "${r.title}"` : ''
@@ -362,6 +423,7 @@ export function createMacosDriver(): ComputerUseDriver {
           return `${indent}[${r.ref}] ${r.role || 'element'}${label}${val}${at}`
         })
         .join('\n')
+      const tree = body ? `${menuLine}${body}` : menuLine.trimEnd()
       const refs: SnapshotRef[] = rows.map((r) => ({
         ref: r.ref,
         path: r.path,
@@ -425,6 +487,7 @@ export function createMacosDriver(): ComputerUseDriver {
       const script = `
         const se = Application('System Events');
         const proc = se.processes.byName(${jxaString(app)});
+        ${AX_ENABLE}
         ${pathConsts(target)}
         ${RESOLVE_BY_PATH}
         ${ELEMENT_CENTER}
@@ -549,6 +612,7 @@ export function createMacosDriver(): ComputerUseDriver {
       const script = `
         const se = Application('System Events');
         const proc = se.processes.byName(${jxaString(app)});
+        ${AX_ENABLE}
         proc.frontmost = true;
         delay(0.1);
         const PATH = ${JSON.stringify(path)};
@@ -557,6 +621,9 @@ export function createMacosDriver(): ComputerUseDriver {
         for (let i = 0; i < PATH.length; i++) {
           let names = [];
           try { names = container.name(); } catch (e) {}
+          if (names.length === 0) {
+            throw new Error('cannot read the menu bar — likely missing the Accessibility permission (System Settings > Privacy & Security > Accessibility)');
+          }
           const idx = names.indexOf(PATH[i]);
           if (idx === -1) {
             throw new Error('menu item "' + PATH[i] + '" not found; available: ' + names.join(', '));
@@ -590,11 +657,14 @@ export function createMacosDriver(): ComputerUseDriver {
     },
 
     async checkPermissions(): Promise<PermissionStatus> {
-      // Accessibility: try a benign System Events read. If it throws with a
-      // permission error (-1719 / not allowed), accessibility is off.
+      // Accessibility: must probe an actual AX attribute read. Merely listing
+      // processes (se.processes.length) succeeds with only the Automation
+      // permission and false-positives when Accessibility is missing — reading
+      // a process's windows is the real discriminator (throws "not allowed
+      // assistive access" without the Accessibility grant).
       let accessibility = false
       try {
-        await runJxa(`const se = Application('System Events'); se.processes.length; 'ok';`, 5_000)
+        await runJxa(`const se = Application('System Events'); se.processes.byName('Finder').windows(); 'ok';`, 5_000)
         accessibility = true
       } catch {
         accessibility = false

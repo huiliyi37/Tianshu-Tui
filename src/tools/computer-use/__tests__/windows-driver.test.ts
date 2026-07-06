@@ -127,6 +127,8 @@ test('buildLaunchAppScript starts the process only when not running and polls fo
 test('buildMenuSelectScript embeds the path as JSON and lists alternatives on a miss', () => {
   const s = buildMenuSelectScript('notepad', ['File', "Save 'As'"])
   assert.ok(s.includes(`'["File","Save ''As''"]'`), 'segments JSON survives PS single-quote escaping')
+  assert.ok(s.includes('@(ConvertFrom-Json'), 'single-segment paths must not unwrap to a scalar in PS 5.1')
+  assert.match(s, /Start-Sleep -Milliseconds 250\s+\$item = \$scope\.FindFirst/, 'popup search retries after a delay')
   assert.match(s, /ExpandCollapsePattern/)
   assert.match(s, /InvokePattern/)
   assert.match(s, /not found; available:/)
@@ -268,6 +270,14 @@ test('launchApp / menuSelect / pasteText route to their scripts; empty menu path
   const before = scripts.length
   await assert.rejects(() => driver.menuSelect('notepad', []), /non-empty menu path/)
   assert.equal(scripts.length, before, 'no PowerShell spawn for invalid input')
+})
+
+test('snapshot re-wraps a single-object rows field (ConvertTo-Json unwrap quirk)', async () => {
+  const row: WindowsSnapshotRow = { ref: 1, depth: 0, role: 'Window', title: 'Notepad', value: '', pos: null, path: [0] }
+  const driver = createWindowsDriver(async () => JSON.stringify({ rows: row, shot: false }))
+  const snap = await driver.snapshot('notepad')
+  assert.match(snap.tree, /\[1\] Window "Notepad"/)
+  assert.equal(snap.refs.length, 1)
 })
 
 test('snapshot degrades to empty tree on unparseable output', async () => {
