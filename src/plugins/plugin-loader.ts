@@ -121,7 +121,7 @@ export async function initializePlugins(
 // ── Path safety wrapper ────────────────────────────────────────────
 
 /** Path-like parameter names that the wrapper intercepts. */
-const PATH_PARAM_NAMES = new Set(['file_path', 'destination_path', 'path', 'input_path', 'output_path'])
+const PATH_PARAM_NAMES = new Set(['file_path', 'destination_path', 'path', 'input_path', 'output_path', 'reference_path', 'actual_path'])
 
 /** Parameter names that indicate a write operation. */
 const WRITE_PARAM_NAMES = new Set(['destination_path', 'output_path'])

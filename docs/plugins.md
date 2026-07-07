@@ -87,6 +87,7 @@ Manifest 定义在 `package.json` 的 `tianshu` 字段中（或独立的 `tiansh
 | `entry` | string | ✅ | 入口文件相对路径（编译后的 JS） |
 | `tools` | ToolDescriptor[] | ✅ | 工具声明列表（用于市场预览和冲突检测） |
 | `permissions` | Permissions | ✅ | 申请的权限声明 |
+| `skills` | string[] | ❌ | 捆绑 skill 目录（相对路径，每项含 `SKILL.md`） |
 | `minCoreVersion` | string | ❌ | 最低核心版本要求（v1 仅记录，不强制） |
 
 ### ToolDescriptor
@@ -105,6 +106,19 @@ Manifest 定义在 `package.json` 的 `tianshu` 字段中（或独立的 `tiansh
 | `shell` | boolean | false | 执行 shell 命令 |
 
 权限声明在安装时展示给用户。`fs` 权限的工具会自动获得内核级路径安全守卫。
+
+### Skill 捆绑（工具 + 方法论）
+
+插件 manifest 可选 `skills` 字段，指向插件包内的 skill 目录（Claude/agentskills 格式：`skills/foo/SKILL.md`）。会话启动时 loader 在工具注册成功后加载这些 skill 到 `skillRegistry`（`source: 'plugin'`），discovery block 与 `/skill` 命令即可见。
+
+| 冲突类型 | 行为 |
+|----------|------|
+| 工具名 vs 已有 registry | **拒绝整个插件** |
+| skill 名 vs 已有 skillRegistry | **跳过该 skill + warning**，插件工具仍加载 |
+
+路径逃逸（`skills: ["../outside"]`）与 entry 同等拒绝加载该 skill 条目。变更插件 skill 需重启会话（与工具相同的前缀缓存纪律）。
+
+示例：`tianshu-design` 插件捆绑 `design-prototype` skill，提供 Codex Product Design 式的前端原型工作流提示词。
 
 ## Tool 接口
 
@@ -125,6 +139,7 @@ async (params): Promise<ToolResult>
 | 参数名 | 模式 | 说明 |
 |--------|------|------|
 | `file_path` | read | 读取路径 |
+| `reference_path` / `actual_path` | read | diff 参考图 / 实现截图 |
 | `destination_path` / `output_path` | write | 写入路径 |
 | `path` / `input_path` | read | 通用路径 |
 

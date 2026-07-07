@@ -1,0 +1,26 @@
+{
+  "name": "tianshu-design",
+  "version": "1.0.0",
+  "description": "Frontend design plugin — multi-viewport preview, visual diff, palette extraction, responsive audit",
+  "private": true,
+  "type": "module",
+  "tianshu": {
+    "name": "tianshu-design",
+    "version": "1.0.0",
+    "description": "Codex Product Design parity: HTML prototype preview, reference diff, palette tokens, responsive audit + bundled design methodology skill",
+    "entry": "index.js",
+    "tools": [
+      { "name": "ui_preview", "description": "Multi-viewport HTML/URL screenshot preview" },
+      { "name": "ui_diff", "description": "Pixel-level visual diff vs reference mockup" },
+      { "name": "ui_palette", "description": "Extract dominant colors → CSS/Tailwind tokens" },
+      { "name": "ui_responsive_audit", "description": "Responsive layout audit with per-viewport screenshots" }
+    ],
+    "skills": ["skills/design-prototype"],
+    "permissions": { "fs": true, "net": true }
+  },
+  "dependencies": {
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "puppeteer-core": "^24.0.0"
+  }
+}

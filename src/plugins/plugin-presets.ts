@@ -12,7 +12,7 @@ export interface PluginPreset {
   name: string
   description: string
   /** Category for filtering / discovery grid. */
-  category: 'office' | 'dev' | 'productivity'
+  category: 'office' | 'dev' | 'productivity' | 'design'
   /** Relative path from repo root (local path install source). */
   installPath: string
   /** Tools this plugin registers. */
@@ -48,5 +48,14 @@ export const PLUGIN_PRESETS: PluginPreset[] = [
     installPath: 'plugins/office-ppt',
     tools: ['pptx_create'],
     permissions: { fs: true },
+  },
+  {
+    id: 'tianshu-design',
+    name: '前端设计',
+    description: '多视口 HTML 预览 + 视觉 diff + 取色 tokens + 响应式审计 + 设计方法论 skill（对标 Codex Product Design）',
+    category: 'design',
+    installPath: 'plugins/design',
+    tools: ['ui_preview', 'ui_diff', 'ui_palette', 'ui_responsive_audit'],
+    permissions: { fs: true, net: true },
   },
 ]
