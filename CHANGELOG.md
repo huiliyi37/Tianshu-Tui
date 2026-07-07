@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-11 — v2.16.2: Windows 路径归一化收口
+
+### Fixed
+
+- **writeFileArgProcessor 占位符路径**（`6f62c24e`）— `resolvePath` 输出经 `toPosixPath` 归一化。
+- **projectSlug cwd 哈希不归一**（`6f62c24e`）— win32 上 cwd 做 `\→/` + lowercase 后再 SHA256，`D:\Proj` 和 `d:\proj` 不再产生不同会话目录。
+- **write_file result content 路径**（`6f62c24e`）— 模型收到的 `Wrote … to D:/proj/file.ts` 不再含 `\`。
+
 ## 2026-07-11 — v2.16.1: 会话恢复持久化修复 + Windows 路径兼容
 
 小版本修复，覆盖会话中断恢复时的工具结果丢失与 Windows 路径兼容性。
