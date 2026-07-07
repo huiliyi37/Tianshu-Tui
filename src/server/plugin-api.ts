@@ -34,11 +34,17 @@ export function buildPluginRoutes(apiToken?: string): Record<string, RouteHandle
       const installedNames = new Set(installed.map(p => p.name))
       const cfg = loadConfig()
 
-      const presets = PLUGIN_PRESETS.map(p => ({
-        ...p,
-        installed: installedNames.has(p.id),
-        enabled: cfg.plugins.enabled[p.id] !== false,
-      }))
+      // enabled is only meaningful for installed plugins — the config default
+      // ("absent means enabled") must not leak `enabled: true` for plugins
+      // that are not even installed (confuses the settings UI).
+      const presets = PLUGIN_PRESETS.map(p => {
+        const installed = installedNames.has(p.id)
+        return {
+          ...p,
+          installed,
+          enabled: installed && cfg.plugins.enabled[p.id] !== false,
+        }
+      })
 
       return { status: 200, body: { presets } }
     }, apiToken),
@@ -74,10 +80,19 @@ export function buildPluginRoutes(apiToken?: string): Record<string, RouteHandle
         const raw = JSON.parse(readFileSync(pkgPath, 'utf-8'))
         if (raw.tianshu && typeof raw.tianshu === 'object') {
           const parsed = parseManifest(raw.tianshu)
-          if (parsed.ok) manifest = parsed.manifest as unknown as Record<string, unknown>
+          if (parsed.ok) {
+            manifest = parsed.manifest as unknown as Record<string, unknown>
+          } else {
+            return { status: 400, body: { ok: false, error: `Invalid plugin manifest: ${parsed.errors.join('; ')}` } }
+          }
         }
       } catch {
         return { status: 400, body: { ok: false, error: 'Cannot parse package.json' } }
+      }
+      // Not a plugin at all (no tianshu manifest) — reject up front instead of
+      // returning a misleading "Confirmation required" with an empty manifest.
+      if (!manifest) {
+        return { status: 400, body: { ok: false, error: `No "tianshu" manifest field in package.json at ${input.path} — not a Tianshu plugin.` } }
       }
 
       if (!input.confirm) {

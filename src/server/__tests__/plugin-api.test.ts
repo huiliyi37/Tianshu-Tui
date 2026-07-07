@@ -63,6 +63,16 @@ test('GET /plugins/presets returns presets list with installed/enabled flags', a
   }
 })
 
+test('GET /plugins/presets: uninstalled plugins are never reported enabled', async () => {
+  const res = await ROUTES['GET /plugins/presets']!({}, undefined, authHeaders(), undefined)
+  const body = res.body as { presets: Array<{ installed: boolean; enabled: boolean }> }
+  for (const p of body.presets) {
+    if (!p.installed) {
+      assert.equal(p.enabled, false, 'the config "absent means enabled" default must not leak to uninstalled plugins')
+    }
+  }
+})
+
 // ── Installed ─────────────────────────────────────────────────
 
 test('GET /plugins/installed returns empty when none installed', async () => {
@@ -112,6 +122,36 @@ test('POST /plugins/install requires confirm:true — returns manifest for revie
   const body2 = res2.body as { ok: boolean; manifest: Record<string,unknown>; message: string }
   assert.equal(body2.ok, true)
   assert.equal(body2.manifest.name, 'src-plugin')
+})
+
+test('POST /plugins/install rejects a non-plugin directory up front (no misleading confirm prompt)', async () => {
+  const srcDir = join(testHome, 'not-a-plugin')
+  mkdirSync(srcDir, { recursive: true })
+  writeFileSync(join(srcDir, 'package.json'), JSON.stringify({ name: 'plain-package', version: '1.0.0' }))
+  cleanupDirs.push(srcDir)
+
+  const res = await ROUTES['POST /plugins/install']!({ path: srcDir }, undefined, authHeaders(), undefined)
+  assert.equal(res.status, 400)
+  const body = res.body as { ok: boolean; error: string }
+  assert.equal(body.ok, false)
+  assert.ok(body.error.includes('not a Tianshu plugin'), `expected explicit non-plugin rejection, got: ${body.error}`)
+  assert.ok(!body.error.includes('Confirmation required'))
+})
+
+test('POST /plugins/install rejects an invalid manifest with the validation errors', async () => {
+  const srcDir = join(testHome, 'bad-manifest-plugin')
+  mkdirSync(srcDir, { recursive: true })
+  writeFileSync(join(srcDir, 'package.json'), JSON.stringify({
+    name: 'bad-manifest-plugin', version: '1.0.0',
+    tianshu: { name: 'bad-manifest-plugin' }, // missing version/entry/tools
+  }))
+  cleanupDirs.push(srcDir)
+
+  const res = await ROUTES['POST /plugins/install']!({ path: srcDir }, undefined, authHeaders(), undefined)
+  assert.equal(res.status, 400)
+  const body = res.body as { ok: boolean; error: string }
+  assert.equal(body.ok, false)
+  assert.ok(body.error.includes('Invalid plugin manifest'), `expected manifest validation failure, got: ${body.error}`)
 })
 
 // ── Enable/disable validation ─────────────────────────────────
