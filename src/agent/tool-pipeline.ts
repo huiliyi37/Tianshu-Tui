@@ -73,6 +73,29 @@ const HEADLESS_AUTO_APPROVE_WRITE_TOOLS: ReadonlySet<string> = new Set([
   'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'ast_edit',
 ])
 
+/** Extract target file paths from a unified diff's `+++ b/…` headers
+ *  (deletions fall back to the preceding `--- a/…` line). Best-effort —
+ *  feeds TaskLedger file_write attribution for apply_patch, which carries
+ *  no file_path parameter of its own. */
+export function patchTargetPaths(diff: string): string[] {
+  const out = new Set<string>()
+  const lines = diff.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const plus = /^\+\+\+ (?:b\/)?(.+)$/.exec(lines[i] ?? '')
+    if (!plus) continue
+    const p = (plus[1] ?? '').split('\t')[0]!.trim()
+    if (p && p !== '/dev/null') {
+      out.add(p)
+      continue
+    }
+    // Deletion (`+++ /dev/null`): the removed file is the preceding --- header.
+    const minus = /^--- (?:a\/)?(.+)$/.exec(lines[i - 1] ?? '')
+    const mp = (minus?.[1] ?? '').split('\t')[0]!.trim()
+    if (mp && mp !== '/dev/null') out.add(mp)
+  }
+  return [...out]
+}
+
 /** Infer the workspace_mutation `kind` from a git destructive command.
  *  Used by B1 cross-session stash awareness to differentiate stash / reset / checkout / clean. */
 function gitMutationKind(cmd: string): string | undefined {
@@ -1401,7 +1424,7 @@ export async function executeToolUse(
      }
       if (tu.name === 'read_file' && filePath) {
         deps.taskLedger.record({ type: 'file_read', path: filePath })
-     } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && filePath) {
+     } else if ((tu.name === 'write_file' || tu.name === 'edit_file' || tu.name === 'hash_edit') && filePath) {
         deps.taskLedger.record({ type: 'file_write', path: filePath })
         deps.ownershipLedger?.registerOwned(filePath)
         // P2 cross-session signal: auto-acquire exclusive claim on written file
@@ -1435,6 +1458,38 @@ export async function executeToolUse(
         // Commit nudge: warn when uncommitted files accumulate
         const nudge = buildCommitNudge({ ownedFiles: deps.taskLedger.getOwnedFiles() })
         if (nudge) finalContent += nudge
+     } else if (tu.name === 'apply_patch') {
+        // apply_patch 不带 file_path——从 diff 头解析变更文件补记 file_write。
+        // 漏记会让 claim-audit 的验证新鲜度对账失明：测完再 patch，旧验证仍
+        // 显示"新鲜"，"全绿"宣称假放行（审查 2026-07-07 #1）。
+        const applied = !harnessResult.isError && tu.input.check_only !== true
+        const diff = typeof tu.input.diff === 'string' ? tu.input.diff : ''
+        if (applied && diff) {
+          for (const p of patchTargetPaths(diff)) {
+            deps.taskLedger.record({ type: 'file_write', path: p })
+            deps.ownershipLedger?.registerOwned(p)
+            if (deps.sessionRegistry && deps.sessionId) {
+              deps.sessionRegistry.acquireClaim(deps.sessionId, p, 'exclusive')
+           }
+          }
+        } else {
+          deps.taskLedger.record({ type: 'tool_exec', tool: tu.name })
+        }
+     } else if (tu.name === 'ast_edit') {
+        // 同 apply_patch：非 dryRun 的成功执行按 paths 记 file_write（目录路径
+        // 无法展开为具体文件，原样记录——claim-audit 的代码判定会自然忽略）。
+        const wrote = !harnessResult.isError && tu.input.dryRun === false
+        const paths = Array.isArray(tu.input.paths)
+          ? tu.input.paths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+          : []
+        if (wrote && paths.length > 0) {
+          for (const p of paths) {
+            deps.taskLedger.record({ type: 'file_write', path: p })
+            deps.ownershipLedger?.registerOwned(p)
+          }
+        } else {
+          deps.taskLedger.record({ type: 'tool_exec', tool: tu.name })
+        }
      } else if (tu.name === 'plan_close' && filePath) {
         if (tu.input.apply === true && !harnessResult.isError) {
           deps.taskLedger.record({ type: 'file_write', path: filePath })

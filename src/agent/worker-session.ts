@@ -103,6 +103,10 @@ export interface WorkerTranscript {
   /** bash 工具的 command 参数留痕——worker-evidence 用它判定"验证形状"的命令
    *  是否真实执行过（VERIFY_BASH_RE）。可选：旧序列化/测试固件可缺省。 */
   bashCommands?: string[]
+  /** 执行失败（isError）的 bash 命令——worker-evidence 用它区分"跑过验证"和
+   *  "验证跑挂了"：npm test 失败不能当 verified 证据。可选：旧固件缺省时
+   *  按全部成功处理（不误杀历史数据）。 */
+  failedBashCommands?: string[]
 }
 
 export interface WorkerSessionRun {
@@ -124,6 +128,7 @@ function emptyTranscript(): WorkerTranscript {
     errors: [],
     repairAttempts: 0,
     bashCommands: [],
+    failedBashCommands: [],
   }
 }
 
@@ -197,6 +202,8 @@ async function runOnce(
   // actually sees ECONNRESET/429/timeout instead of an empty transcript.
   let streamError: Error | null = null
   let aborted = false
+  // tool id → bash command，供 onToolResult 把失败结果精确归到具体命令。
+  const bashCommandById = new Map<string, string>()
   await agent.run(prompt, {
     onTextDelta: (delta) => {
       text += delta
@@ -207,16 +214,22 @@ async function runOnce(
       transcript.thinking += delta
       onActivity?.('thinking', delta)
     },
-    onToolUse: (_id, name, input) => {
+    onToolUse: (id, name, input) => {
       transcript.toolUses.push(name)
       if (name === 'bash' && typeof (input as Record<string, unknown> | undefined)?.command === 'string') {
-        (transcript.bashCommands ??= []).push((input as { command: string }).command)
+        const command = (input as { command: string }).command
+        ;(transcript.bashCommands ??= []).push(command)
+        bashCommandById.set(id, command)
       }
       onActivity?.('tool_use', name)
     },
-    onToolResult: (_id, name, result, isError) => {
+    onToolResult: (id, name, result, isError) => {
       transcript.toolResults.push(name)
-      if (isError) transcript.errors.push(result)
+      if (isError) {
+        transcript.errors.push(result)
+        const failedCommand = bashCommandById.get(id)
+        if (failedCommand) (transcript.failedBashCommands ??= []).push(failedCommand)
+      }
       onActivity?.('tool_result', name)
     },
     // usage 是累计快照（getTotalUsage）——上报累计 token 总数，供 fleet 面板实时显示。

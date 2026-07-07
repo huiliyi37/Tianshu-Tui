@@ -10,11 +10,14 @@
  *   "全绿"是旧绿，宣称不是证据）。
  * - 软警一档：宣称的通过数 N 与 ledger 最新验证记录对不上 → 警告行不阻断。
  *
- * 新鲜度定义：验证事件时间戳 ≥ 最后一次 file_write 时间戳。
+ * 新鲜度定义：验证事件时间戳 ≥ 最后一次**代码文件** file_write 时间戳。
+ * 只有源码/测试文件的写入会作废旧验证——README/locale/docs 类写入不影响
+ * 测试结论，计入会把真验证误判成旧绿（审查 2026-07-07 #2 误杀）。
  * 纯函数，无 I/O。逃生阀：RIVET_CLAIM_AUDIT=0。
  */
 
 import type { TaskLedgerEvent } from './task-ledger.js'
+import { isSourceFilePath, isTestFilePath } from './test-presence.js'
 
 /** 测试绿宣称（触发硬拦档）：声称测试/检查已通过。 */
 const GREEN_CLAIM_RE = /全绿|所有测试通过|(?:typecheck|类型检查)\s*(?:干净|clean|passed|通过)|\btests?\s+(?:pass(?:ed|ing)?|green)\b|\d+\s*\/\s*\d+\s*(?:通过|passed|pass)/i
@@ -39,11 +42,22 @@ export function claimAuditEnabled(): boolean {
   return process.env.RIVET_CLAIM_AUDIT !== '0'
 }
 
-/** 新鲜验证记录：状态 passed 且时间戳不早于最后一次文件变更。 */
+/**
+ * 代码变更判定：源码或测试文件的写入。测试文件也算——测完再改测试，旧绿
+ * 同样失效。docs/locale/config 写入不作废验证（它们改不了测试结果）。
+ * 无 path 的 file_write（不应出现）保守计入，宁可要求重跑。
+ */
+function isCodeWrite(e: TaskLedgerEvent): boolean {
+  if (e.type !== 'file_write') return false
+  if (typeof e.path !== 'string' || e.path.length === 0) return true
+  return isSourceFilePath(e.path) || isTestFilePath(e.path)
+}
+
+/** 新鲜验证记录：状态 passed 且时间戳不早于最后一次代码文件变更。 */
 export function countFreshVerifications(events: readonly TaskLedgerEvent[]): number {
   let lastWriteAt = 0
   for (const e of events) {
-    if (e.type === 'file_write' && e.timestamp > lastWriteAt) lastWriteAt = e.timestamp
+    if (isCodeWrite(e) && e.timestamp > lastWriteAt) lastWriteAt = e.timestamp
   }
   return events.filter(e =>
     e.type === 'verification' && e.status === 'passed' && e.timestamp >= lastWriteAt,
@@ -55,11 +69,11 @@ export function auditDeliveryClaims(input: ClaimAuditInput): ClaimAuditResult {
     return { status: 'ok', lines: [] }
   }
 
-  const hasWrites = input.events.some(e => e.type === 'file_write')
+  const hasWrites = input.events.some(isCodeWrite)
   const fresh = countFreshVerifications(input.events)
 
-  // 硬拦：改了文件、宣称测试绿、但改动之后没有任何 passed 验证记录。
-  // 没改文件的纯报告类交付不拦（无"旧绿"可言）。
+  // 硬拦：改了代码、宣称测试绿、但改动之后没有任何 passed 验证记录。
+  // 没改代码的交付（纯报告 / 纯文档）不拦——改动影响不到测试结果，无"旧绿"可言。
   if (hasWrites && fresh === 0) {
     return {
       status: 'block',

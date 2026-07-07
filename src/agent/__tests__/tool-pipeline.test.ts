@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, resolve as resolvePath } from 'node:path'
-import { executeToolUse, type ToolPipelineDeps } from '../tool-pipeline.js'
+import { executeToolUse, patchTargetPaths, type ToolPipelineDeps } from '../tool-pipeline.js'
 import { createTurnBudget } from '../turn-budget.js'
 import { fingerprintToolCall } from '../trace-store.js'
 import { createPermissionOverlay } from '../permissions.js'
@@ -343,6 +343,115 @@ describe('executeToolUse', () => {
     assert.equal(event.tool, 'plan_close')
     assert.equal(event.path, 'docs/superpowers/plans/demo.md')
     assert.deepEqual(owned, [])
+  })
+
+  it('records hash_edit as file_write in task ledger (claim-audit freshness)', async () => {
+    const events: any[] = []
+    const owned: string[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+        getEvents: () => [],
+        getOwnedFiles: () => owned,
+      } as any,
+      ownershipLedger: {
+        registerOwned: (file: string) => { owned.push(file) },
+        getOwnedFiles: () => owned,
+        getBaselineHead: () => '',
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'edited', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-hash-edit', name: 'hash_edit', input: { file_path: 'src/agent/loop.ts', anchors: ['x'], new_string: 'y' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const write = events.find(e => e.type === 'file_write')
+    assert.ok(write, 'hash_edit must record a file_write event')
+    assert.equal(write.path, 'src/agent/loop.ts')
+    assert.deepEqual(owned, ['src/agent/loop.ts'])
+  })
+
+  it('records apply_patch target files as file_write; check_only stays tool_exec', async () => {
+    const events: any[] = []
+    const owned: string[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+        getEvents: () => [],
+        getOwnedFiles: () => owned,
+      } as any,
+      ownershipLedger: {
+        registerOwned: (file: string) => { owned.push(file) },
+        getOwnedFiles: () => owned,
+        getBaselineHead: () => '',
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'patch applied', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+
+    const diff = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      'diff --git a/src/b.ts b/src/b.ts',
+      '--- a/src/b.ts',
+      '+++ b/src/b.ts',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+    ].join('\n')
+
+    await executeToolUse(
+      { id: 'tu-apply-patch', name: 'apply_patch', input: { diff } },
+      deps, noopCallbacks as any, 1, false,
+    )
+    const writes = events.filter(e => e.type === 'file_write').map(e => e.path)
+    assert.deepEqual(writes.sort(), ['src/a.ts', 'src/b.ts'])
+    assert.deepEqual(owned.sort(), ['src/a.ts', 'src/b.ts'])
+
+    events.length = 0
+    await executeToolUse(
+      { id: 'tu-apply-patch-check', name: 'apply_patch', input: { diff, check_only: true } },
+      deps, noopCallbacks as any, 1, false,
+    )
+    assert.equal(events.filter(e => e.type === 'file_write').length, 0)
+    assert.ok(events.some(e => e.type === 'tool_exec' && e.tool === 'apply_patch'))
+  })
+
+  it('patchTargetPaths parses adds/updates/deletes from unified diff headers', () => {
+    const diff = [
+      '--- a/src/updated.ts',
+      '+++ b/src/updated.ts',
+      '@@ -1 +1 @@',
+      '--- /dev/null',
+      '+++ b/src/added.ts',
+      '@@ -0,0 +1 @@',
+      '--- a/src/deleted.ts',
+      '+++ /dev/null',
+      '@@ -1 +0,0 @@',
+    ].join('\n')
+    assert.deepEqual(patchTargetPaths(diff).sort(), ['src/added.ts', 'src/deleted.ts', 'src/updated.ts'])
+    assert.deepEqual(patchTargetPaths('not a diff'), [])
   })
 
   it('warns before editing sensitive paths when manifest was not read', async () => {

@@ -19,7 +19,7 @@ function result(overrides: Partial<WorkerResult>): WorkerResult {
   }
 }
 
-function transcript(toolUses: string[], errors: string[] = [], bashCommands?: string[]): WorkerTranscript {
+function transcript(toolUses: string[], errors: string[] = [], bashCommands?: string[], failedBashCommands?: string[]): WorkerTranscript {
   return {
     text: '',
     thinking: '',
@@ -28,6 +28,7 @@ function transcript(toolUses: string[], errors: string[] = [], bashCommands?: st
     errors,
     repairAttempts: 0,
     bashCommands,
+    failedBashCommands,
   }
 }
 
@@ -280,6 +281,49 @@ test('non-verify bash (ls/cat) does not count as verification proof', () => {
   }), 'implementer', transcript(['bash'], [], ['ls -la', 'cat src/a.ts']))
 
   assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('failed verify-shaped bash is not verification proof — verified downgraded', () => {
+  // npm test 跑挂了照样宣称 verified 是核心拦截场景：唯一验证证据失败 → 降级。
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'verified',
+    verification: { command: 'npm test', status: 'passed', exitCode: 0, passed: 10, failed: 0, skipped: 0, scope: 'targeted', durationMs: 1200 },
+  }), 'implementer', transcript(['bash'], ['npm test failed: 2 failing'], ['npm test'], ['npm test']))
+
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('errored')))
+})
+
+test('verify bash failed then retried successfully — verified kept', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'verified',
+    verification: { command: 'npm test', status: 'passed', exitCode: 0, passed: 10, failed: 0, skipped: 0, scope: 'targeted', durationMs: 1200 },
+  }), 'implementer', transcript(['bash', 'bash'], ['npm test failed once'], ['npm test', 'npm test'], ['npm test']))
+
+  assert.equal(checked.evidenceStatus, 'verified')
+})
+
+test('run_tests errored but a later verify bash succeeded — verified kept', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'verified',
+    verification: { command: 'npm test', status: 'passed', exitCode: 0, passed: 10, failed: 0, skipped: 0, scope: 'targeted', durationMs: 1200 },
+  }), 'implementer', transcript(['run_tests', 'bash'], ['run_tests: Test run failed'], ['npm test'], []))
+
+  assert.equal(checked.evidenceStatus, 'verified')
+})
+
+test('legacy transcript without failedBashCommands treats verify bash as succeeded', () => {
+  // 旧序列化固件缺 failedBashCommands——按全部成功处理，不误杀历史数据。
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'verified',
+    verification: { command: 'npm test', status: 'passed', exitCode: 0, passed: 10, failed: 0, skipped: 0, scope: 'targeted', durationMs: 1200 },
+  }), 'implementer', transcript(['bash'], [], ['npm test']))
+
+  assert.equal(checked.evidenceStatus, 'verified')
 })
 
 test('non-verifier profile without transcript is not downgraded here (batch re-gate safety)', () => {

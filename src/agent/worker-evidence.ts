@@ -11,20 +11,26 @@ const WRITE_PROFILES_ADVISORY = ['patcher']
 /** 交付文本里的"宣称模式"——命中即认为 worker 在报告验证结论。 */
 const CLAIM_RE = /全绿|已修复|(?:typecheck|类型检查)\s*(?:干净|clean|passed)|\b\d+\s*\/\s*\d+\s*(?:通过|passed|pass|全绿)|\btests?\s+(?:pass(?:ed|ing)?|green)\b|所有测试通过/i
 
-/** transcript 取证：是否有真实的验证执行痕迹（run_tests 或验证形状的 bash）。 */
+/** transcript 取证：是否有真实且未失败的验证执行痕迹（run_tests 或验证形状的 bash）。 */
 function provenVerification(transcript: WorkerTranscript): { proven: true } | { proven: false; reason: 'missing' | 'errored' } {
   const ranTests = transcript.toolUses.includes('run_tests')
-  const ranVerifyBash = (transcript.bashCommands ?? []).some(cmd => VERIFY_BASH_RE.test(cmd))
-  if (!ranTests && !ranVerifyBash) return { proven: false, reason: 'missing' }
-  // run_tests 是唯一证据时，还要求它没有报错（沿用 adversarial_verifier 的
-  // 纵深检查：匹配错误串而非按索引对位，容忍乱序）。
-  if (ranTests && !ranVerifyBash) {
-    const testsErrored = transcript.errors.some(e =>
-      e.includes('run_tests') || e.includes('Test run failed'),
-    )
-    if (testsErrored) return { proven: false, reason: 'errored' }
-  }
-  return { proven: true }
+  const verifyBashRuns = (transcript.bashCommands ?? []).filter(cmd => VERIFY_BASH_RE.test(cmd))
+  if (!ranTests && verifyBashRuns.length === 0) return { proven: false, reason: 'missing' }
+
+  // 验证形状 bash 失败不是证据——npm test 跑挂了照样宣称 verified 是本审计
+  // 要拦的核心场景。failedBashCommands 缺省（旧固件）时按全部成功处理。
+  const failedVerifyBash = (transcript.failedBashCommands ?? []).filter(cmd => VERIFY_BASH_RE.test(cmd))
+  const verifyBashSucceeded = verifyBashRuns.length > failedVerifyBash.length
+
+  // run_tests 报错检查（沿用 adversarial_verifier 的纵深检查：匹配错误串而非
+  // 按索引对位，容忍乱序）。
+  const testsErrored = ranTests && transcript.errors.some(e =>
+    e.includes('run_tests') || e.includes('Test run failed'),
+  )
+  const testsSucceeded = ranTests && !testsErrored
+
+  if (testsSucceeded || verifyBashSucceeded) return { proven: true }
+  return { proven: false, reason: 'errored' }
 }
 
 /**
@@ -65,7 +71,7 @@ export function verifyWorkerEvidence(result: WorkerResult, profile?: string, tra
       if (!proof.proven) {
         const label = profile ?? 'worker'
         const risk = proof.reason === 'errored'
-          ? `${label} ran run_tests but it errored — verdict not trustworthy`
+          ? `${label} ran verification (run_tests / verify bash) but it errored — verdict not trustworthy`
           : `${label} reported verified without running run_tests or verify-shaped bash — 宣称未经复现`
         return {
           ...result,
