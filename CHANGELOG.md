@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-11 — v2.16.3: 修复 .app 启动崩溃 — chalk 运行时缺失
+
+### Fixed
+
+- **打包 .app 启动时 `ERR_MODULE_NOT_FOUND: chalk`**（`e26c620b`）— tsup 将 chalk externalize 为裸导入，但 `.app` 不含 `node_modules`。加入 `noExternal` 列表使 tsup inline bundle。
+
 ## 2026-07-11 — v2.16.2: Windows 路径归一化收口
 
 ### Fixed
