@@ -10,6 +10,7 @@ import { applyEol, chooseEol, detectFileEol, toLf } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
 import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
 import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
+import { toPosixPath } from '../path-format.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -154,7 +155,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
       : ''
     const uiContent = diff ? (warn ? `${diff}\n\n${warn}` : diff) : (warn ? warn : undefined)
     return {
-      content: `Wrote ${finalContent.length} bytes (${lines} lines) to ${filePath}` + (warn ? '\n\n' + warn : ''),
+      content: `Wrote ${finalContent.length} bytes (${lines} lines) to ${toPosixPath(filePath)}` + (warn ? '\n\n' + warn : ''),
       uiContent,
       changedRanges: haveOldContentForDiff ? computeChangedLineRanges(oldContentForDiff, afterForDiff) : [],
     }

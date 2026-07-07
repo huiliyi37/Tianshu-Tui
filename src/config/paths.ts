@@ -83,7 +83,14 @@ function sanitizePathSegment(name: string): string {
 export function projectSlug(cwd: string): string {
   const name = cwd.split(/[\\/]/).filter(Boolean).pop() || 'unknown'
   const safeName = sanitizePathSegment(name)
-  const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 6)
+  // Canonicalize cwd before hashing: on Windows, D:\Proj and d:\proj must
+  // produce the same slug (filesystem is case-insensitive + separator-agnostic).
+  // toPosixPath normalizes separators; platform-specific lowercasing mirrors
+  // canonicalPathKey's policy.
+  const canonicalCwd = process.platform === 'win32'
+    ? cwd.replaceAll('\\', '/').toLowerCase()
+    : cwd
+  const hash = createHash('sha256').update(canonicalCwd).digest('hex').slice(0, 6)
   return `${safeName}-${hash}`
 }
 
