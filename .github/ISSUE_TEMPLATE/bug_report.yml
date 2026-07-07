@@ -1,0 +1,63 @@
+name: Bug 报告 · Bug Report
+description: 报告一个可复现的问题 · Report a reproducible bug
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告!安全漏洞请**不要**在这里提交,请走 Security tab → Report a vulnerability。
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 使用端 · Surface
+      options:
+        - TUI (终端 rivet)
+        - 桌面端 Desktop (Tauri)
+        - 无界面模式 headless (-p / --json)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 · Version
+      description: "`rivet --version` 或桌面端设置页版本号"
+      placeholder: "2.15.1"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: 平台 · Platform
+      placeholder: "macOS 15.4 / Windows 11 / Ubuntu 24.04,Node 24.1.0"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: 模型与提供商 · Model & Provider
+      placeholder: "deepseek-v4-pro / codex gpt-5.5 / …"
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤 · Steps to Reproduce
+      description: 从启动到出错的最小步骤
+      placeholder: |
+        1. rivet
+        2. 输入 …
+        3. 观察到 …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期 vs 实际 · Expected vs Actual
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 · Logs
+      description: |
+        会话日志在 `~/.rivet/sessions/<project-slug>/`(Windows 为 `%LOCALAPPDATA%\.rivet`)。
+        粘贴前请自行遮蔽 API key 等敏感信息。
+      render: text

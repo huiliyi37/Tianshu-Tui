@@ -3,13 +3,16 @@
 #
 # 用法: bash scripts/sync-to-public.sh [--dry-run]
 #
-# 同步策略:
-#   ✅ 同步: src/ desktop/ docs/seed-capsule*.md docs/seed-capsule-archive/
-#            docs/stars/ scripts/ CLAUDE.md .rivet/knowledge/
-#            .github/（排除 ISSUE_TEMPLATE/dependabot）
-#   ❌ 不同步: docs/design/ docs/teamtask/ docs/superpowers/
-#             .rivet/plans/ .rivet/sessions/ .rivet/backups/
-#             .rivet/constellation.json .rivet/vsw/ .cursor/
+# 同步策略(2026-07-07 起改为「默认公开 + 排除清单」):
+#   ✅ 同步: src/(含测试)desktop/(含测试)scripts/ docs/ runtime-assets/
+#            .rivet/knowledge/ .github/ patches/ completions/ prompts/
+#            根配置与社区文件(README/LICENSE/SECURITY/CONTRIBUTING…)
+#   ❌ 排除: 核心设计文档(docs/design、teamtask、superpowers、tasks、
+#            research、analysis、reviews、sessions、archive、known-issues)、
+#            个人/内部文件(简历、账号池、交接记录等)、本地运行数据
+#
+# 测试文件自 2026-07-07 起随源码公开——README 的测试指标必须可验证,
+# 公开仓库 CI 的 npm test / windows-smoke 也依赖它们。
 
 set -euo pipefail
 
@@ -23,52 +26,54 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   echo "[dry-run] 不实际写入，只显示将要同步的内容"
 fi
 
-echo "=== 同步: src/（排除测试文件）==="
+echo "=== 同步: src/（含测试）==="
 rsync $RSYNC_FLAGS \
   --exclude 'node_modules/' \
   --exclude 'dist/' \
-  --exclude '__tests__/' \
-  --exclude '*.test.ts' \
-  --exclude '*.test.tsx' \
   "$DEV_DIR/src/" "$PUB_DIR/src/"
 
 echo "=== 同步: scripts/ ==="
 rsync $RSYNC_FLAGS \
   --exclude='sync-to-public.sh' \
-  --exclude='glm-diag.ts' \
-  --exclude='mimo-diag.ts' \
-  --exclude='r-e2e.md' \
-  --exclude='r-e2e.mjs' \
-  --exclude='refactor-loop.ts' \
-  --exclude='refactor-loop-task45.ts' \
-  --exclude='verify-cache-hit-rate.ts' \
-  --exclude='verify-task-a-multi-tool.ts' \
-  --exclude='verify-task-b-session-state.ts' \
-  --exclude='verify-task-c-fresh-boundary.ts' \
-  --exclude='verify-native.sh' \
-  --exclude='test-deepseek.ts' \
-  --exclude='test-incremental.ts' \
   "$DEV_DIR/scripts/" "$PUB_DIR/scripts/"
 
-echo "=== 同步: desktop/（排除测试文件）==="
+echo "=== 同步: desktop/（含测试）==="
 rsync $RSYNC_FLAGS \
   --exclude 'node_modules/' \
   --exclude 'dist/' \
   --exclude 'src-tauri/target/' \
   --exclude 'src-tauri/gen/' \
   --exclude '.DS_Store' \
-  --exclude '__tests__/' \
-  --exclude '*.test.ts' \
-  --exclude '*.test.tsx' \
   "$DEV_DIR/desktop/" "$PUB_DIR/desktop/"
 
-echo "=== 同步: 胶囊 ==="
+echo "=== 同步: docs/（排除核心设计文档与内部文件）==="
 rsync $RSYNC_FLAGS \
-  "$DEV_DIR/docs/seed-capsule-"*.md "$PUB_DIR/docs/"
-rsync $RSYNC_FLAGS \
-  -r "$DEV_DIR/docs/seed-capsule-archive/" "$PUB_DIR/docs/seed-capsule-archive/"
-rsync $RSYNC_FLAGS \
-  -r "$DEV_DIR/docs/stars/" "$PUB_DIR/docs/stars/"
+  --exclude='design/' \
+  --exclude='teamtask/' \
+  --exclude='superpowers/' \
+  --exclude='tasks/' \
+  --exclude='research/' \
+  --exclude='analysis/' \
+  --exclude='reviews/' \
+  --exclude='sessions/' \
+  --exclude='archive/' \
+  --exclude='known-issues/' \
+  --exclude='cache-baseline/' \
+  --exclude='简历-天枢项目经历.md' \
+  --exclude='harness-engineering-resume.md' \
+  --exclude='deepseek-v4-pro-to-model-team.md' \
+  --exclude='codex-cliproxy-account-pool.md' \
+  --exclude='cliproxy-fork-optimization.md' \
+  --exclude='ctcl思想.rtf' \
+  --exclude='*.rej' \
+  --exclude='AB测试期间损失审计.md' \
+  --exclude='handoff-goal-interrupt-issue.md' \
+  --exclude='TODO-tianxuan-ccr-router.md' \
+  --exclude='SESSION-MR0AZIEL-DIAGNOSIS.md' \
+  --exclude='optimization-design-v2.md' \
+  --exclude='desktop-planning-methodology.md' \
+  --exclude='.DS_Store' \
+  "$DEV_DIR/docs/" "$PUB_DIR/docs/"
 
 echo "=== 同步: runtime-assets/（内置 skill，随 dist 打包）==="
 # tsup publicDir 把 runtime-assets/bundled-skills → dist/bundled-skills，desktop 通过
@@ -83,49 +88,43 @@ rsync $RSYNC_FLAGS \
   --exclude='debug-windows-cmd-chcp-nul.md' \
   "$DEV_DIR/.rivet/knowledge/" "$PUB_DIR/.rivet/knowledge/"
 
-echo "=== 同步: 品牌资产（README 横幅/Logo 等图片）==="
-if [[ -d "$DEV_DIR/docs/brand/assets" ]]; then
-  mkdir -p "$PUB_DIR/docs/brand/assets"
-  rsync $RSYNC_FLAGS "$DEV_DIR/docs/brand/assets/" "$PUB_DIR/docs/brand/assets/"
-fi
-
 echo "=== 同步: 英文 README ==="
-# 主页 README.md 现为中文（见下方配置文件循环），英文版作为 README.en.md 同步。
 if [[ -f "$DEV_DIR/README.en.md" ]]; then
   rsync $RSYNC_FLAGS "$DEV_DIR/README.en.md" "$PUB_DIR/README.en.md"
 fi
-# 清理：旧的独立中文页已并入主页 README.md，移除公开仓库里残留的 README.zh-CN.md。
-if [[ "$DRY_RUN" != "--dry-run" && -f "$PUB_DIR/README.zh-CN.md" ]]; then
-  rm -f "$PUB_DIR/README.zh-CN.md"
-  echo "  已移除冗余 $PUB_DIR/README.zh-CN.md"
-fi
 
 echo "=== 同步: 构建依赖（补丁 / CLI 补全 / 工具提示模板）==="
-# patches/: patch-package 在根 postinstall 打的依赖补丁（如 ink 全屏渲染）。
-#   桌面端 sidecar 来自根 npm install+build，缺补丁 → 因 `|| node -e 1` 静默失效。
-# completions/: 随 npm files 发布的 shell 补全。
-# prompts/: 工具提示模板（当前未接线，随开源形态保留）。
 for d in patches completions prompts; do
   if [[ -d "$DEV_DIR/$d" ]]; then
     rsync $RSYNC_FLAGS "$DEV_DIR/$d/" "$PUB_DIR/$d/"
   fi
 done
 
-echo "=== 同步: 配置文件（README.md 为中文主页）==="
-# package-lock.json / .npmrc（engine-strict）：可复现安装的硬前提——公开仓/Windows
-#   构建根 dist（桌面端 bundle 它）时，lock 陈旧或缺 engine-strict 会解析出不同依赖版本。
-for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json tsconfig.json tsup.config.ts package.json package-lock.json .npmrc; do
+echo "=== 同步: 根配置与社区文件（README.md 为中文主页）==="
+# package-lock.json / .npmrc（engine-strict）：可复现安装的硬前提。
+for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json \
+         tsconfig.json tsup.config.ts package.json package-lock.json .npmrc \
+         LICENSE CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md config.example.json; do
   if [[ -f "$DEV_DIR/$f" ]]; then
     rsync $RSYNC_FLAGS "$DEV_DIR/$f" "$PUB_DIR/$f"
   fi
 done
 
-echo "=== 同步: CI（.github 全量，排除无关内容）==="
+echo "=== 同步: CI 与 issue 模板（.github，排除 dependabot）==="
 if [[ -d "$DEV_DIR/.github" ]]; then
   rsync $RSYNC_FLAGS \
-    --exclude='ISSUE_TEMPLATE/' \
     --exclude='dependabot.yml' \
     "$DEV_DIR/.github/" "$PUB_DIR/.github/"
+fi
+
+echo "=== 清理: 公开仓库残留文件 ==="
+if [[ "$DRY_RUN" != "--dry-run" ]]; then
+  for stale in README.zh-CN.md findings.md progress.md task_plan.md; do
+    if [[ -f "$PUB_DIR/$stale" ]]; then
+      rm -f "$PUB_DIR/$stale"
+      echo "  已移除残留 $PUB_DIR/$stale"
+    fi
+  done
 fi
 
 echo ""

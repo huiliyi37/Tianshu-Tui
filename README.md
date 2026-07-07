@@ -20,7 +20,7 @@
   <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
   <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Tests-2700%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-10%2C000%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
 </p>
 
 ---
@@ -200,6 +200,18 @@ graph TD
 2. **生物启发式信息素记忆 (Stigmergy)** —— 区别于静态记忆文件（如 MEMORY.md），天枢基于生物学“化学信息素”机制，将行为足迹和认知标记直接映射在代码文件上，并随时间自动衰减。AI 在修改频繁的文件上会越用越熟。
 3. **前缀缓存优化** —— DeepSeek V4 对缓存未命中按命中的至多 50 倍计费。天枢的提示词引擎围绕前缀缓存友好（冰镜三区缓存锚点、冻结系统提示词等）重构，长会话稳态命中率 **95–99%**，显著降低 API 成本。
 
+### 工程质量指标
+
+| 指标 | 数值 |
+|------|------|
+| TUI 源码（TypeScript，不含测试） | 770 文件 / 约 16 万行 |
+| 测试代码 | 922 文件 / 约 15.2 万行 |
+| 测试用例（node:test） | **10,000+**，测试 : 源码 ≈ **1 : 1** |
+| 类型检查 | `tsc` strict + `noUncheckedIndexedAccess`，零错误 |
+| 前缀缓存命中率 | 长会话稳态实测 95–99% |
+
+编码 agent 的核心逻辑（多轮循环、工具流水线、上下文压缩）以难测著称，开源 agent 项目普遍测试覆盖很薄——本项目坚持测试与源码等量、事故修复必带回归测试。完整统计口径与复现命令见 [工程质量指标](docs/engineering-metrics.md)。
+
 ## ✨ 核心特性
 
 ### 前缀缓存引擎
@@ -366,7 +378,7 @@ Node.js 22 · TypeScript strict（`noUncheckedIndexedAccess`）· T9 ANSI 渲染
 
 ```bash
 npx tsc --noEmit                                    # 类型检查
-npm exec -- tsx --test src/**/__tests__/*.test.ts   # 所有测试（2700+）
+npm test                                             # 所有测试（10,000+ 用例）
 npm run build                                        # tsup 打包
 node dist/main.js                                    # 启动 TUI
 node dist/main.js -p "fix the typo"                  # 无界面模式
