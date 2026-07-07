@@ -1744,7 +1744,21 @@ export async function executeToolUse(
       callbacks.onToolResult(tu.id, tu.name, abortedNote, false)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: abortedNote, is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }
-    const msg = err instanceof Error ? err.message : String(err)
+    let msg = err instanceof Error ? err.message : String(err)
+    // deliver_task timeout/crash attribution (240s 事故链 2026-07-07): the
+    // pipeline timeout used to replace the ENTIRE tool result with an error,
+    // swallowing the fact that the commit had already landed — the model then
+    // re-committed or switched to raw git commit. Same resolution as the
+    // abort path above: check HEAD and state the outcome definitively.
+    if (tu.name === 'deliver_task' && preAbortHead) {
+      const headNow = await gitHeadQuiet(deps.cwd)
+      if (headNow && headNow !== preAbortHead) {
+        const summary = await gitHeadSummaryQuiet(deps.cwd)
+        msg += `\n\n⚠️ BUT the commit already landed before this error: ${summary ?? headNow.slice(0, 8)}. The delivery succeeded — only the result report was lost. Do NOT re-commit or retry; verify with git log and treat the task as delivered.`
+      } else if (headNow) {
+        msg += `\n\nNo new commit landed (HEAD unchanged at ${headNow.slice(0, 8)}). Check git log before retrying to avoid a duplicate commit.`
+      }
+    }
     deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
     callbacks.onToolResult(tu.id, tu.name, msg, true)
     return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }

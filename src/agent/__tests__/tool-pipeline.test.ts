@@ -2298,4 +2298,95 @@ describe('deliver_task abort — post-abort commit attribution', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  // 240s 事故链 (2026-07-07): a pipeline TIMEOUT (non-abort error) used to
+  // replace the entire deliver_task result with a bare error — the model never
+  // learned the commit had landed and re-committed / bypassed the tool.
+  it('reports the landed commit when deliver_task times out AFTER committing', async () => {
+    const dir = initRepo()
+    try {
+      const deps = makeDeps(dir, {
+        config: {
+          ...makeDeps(dir).config,
+          toolRegistry: {
+            execute: async () => {
+              execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-q', '-m', 'fix: landed before timeout'], { cwd: dir })
+              throw new Error('Tool deliver_task timed out after 240s')
+            },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+
+      const result = await executeToolUse(
+        { id: 'tu-timeout-landed', name: 'deliver_task', input: {} },
+        deps, noopCallbacks as any, 1, false,
+      )
+
+      const content = (result.toolResult as any).content as string
+      assert.ok(content.includes('timed out after 240s'), 'original error preserved')
+      assert.ok(content.includes('commit already landed'), `must state the commit landed, got: ${content}`)
+      assert.ok(content.includes('fix: landed before timeout'), 'must include the commit subject')
+      assert.ok(content.includes('Do NOT re-commit'), 'must instruct against retrying')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reports HEAD unchanged when deliver_task errors BEFORE committing', async () => {
+    const dir = initRepo()
+    try {
+      const deps = makeDeps(dir, {
+        config: {
+          ...makeDeps(dir).config,
+          toolRegistry: {
+            execute: async () => { throw new Error('Tool deliver_task timed out after 240s') },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+
+      const result = await executeToolUse(
+        { id: 'tu-timeout-clean', name: 'deliver_task', input: {} },
+        deps, noopCallbacks as any, 1, false,
+      )
+
+      const content = (result.toolResult as any).content as string
+      assert.ok(content.includes('No new commit landed'), `must state no commit landed, got: ${content}`)
+      assert.ok(content.includes('Check git log before retrying'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('non-deliver tool errors get no commit attribution', async () => {
+    const dir = initRepo()
+    try {
+      const deps = makeDeps(dir, {
+        config: {
+          ...makeDeps(dir).config,
+          toolRegistry: {
+            execute: async () => { throw new Error('Tool bash timed out after 120s') },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+
+      const result = await executeToolUse(
+        { id: 'tu-timeout-bash', name: 'bash', input: { command: 'echo hi' } },
+        deps, noopCallbacks as any, 1, false,
+      )
+
+      const content = (result.toolResult as any).content as string
+      assert.ok(!content.includes('commit'), 'no attribution noise for non-deliver tools')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

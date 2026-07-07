@@ -30,6 +30,7 @@ import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-ho
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
+import { createPostCommitReviewPreTurnHook, createPostCommitReviewPostToolHook } from './hooks/post-commit-review-hook.js'
 import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
 import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
@@ -424,6 +425,14 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // to self-verify before building on the conclusions.
   if (deps.advisoryBus) {
     hooks.push(createSelfVerifyHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Post-Commit Review delivery: preTurn + postTool 双相排水 — deliver_task
+  // 把系统触发的提交后审查分离到后台跑（240s 超时事故链修复 2026-07-07），
+  // 结论经 post-commit-review-queue 在这里投递回对话。
+  if (deps.advisoryBus) {
+    hooks.push(createPostCommitReviewPreTurnHook({ advisoryBus: deps.advisoryBus }))
+    hooks.push(createPostCommitReviewPostToolHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Edit-Tool Advisory: postTool hook — detects consecutive hash_edit calls

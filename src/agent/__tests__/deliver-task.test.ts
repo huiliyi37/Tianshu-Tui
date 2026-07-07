@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createDeliverTaskTool, detectSymptomPatch, resetPostCommitReviewCooldown } from '../deliver-task.js'
+import { consumePostCommitReviewOutcomes, __resetPostCommitReviewQueue } from '../post-commit-review-queue.js'
 import { createTaskLedger } from '../task-ledger.js'
 import { createOwnershipLedger } from '../ownership-ledger.js'
 import type { ChangeSet } from '../review-discipline.js'
@@ -94,8 +95,16 @@ function toolDescription(): string {
   return tool.definition.description
 }
 
+/** Let the detached (fire-and-forget) post-commit review promise settle. */
+async function settleDetachedReview(): Promise<void> {
+  await new Promise(resolve => setImmediate(resolve))
+}
+
 describe('deliver-task — semantic task delivery tool', () => {
-  beforeEach(() => { resetPostCommitReviewCooldown() })
+  beforeEach(() => {
+    resetPostCommitReviewCooldown()
+    __resetPostCommitReviewQueue()
+  })
 
   it('reports GREEN delivery readiness when verified', async () => {
     const { tool, params } = makeContext({
@@ -340,7 +349,14 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(routedChange?.isFix, true)
     assert.equal(routedChange?.goalActive, false)
     assert.deepEqual(calls, [{ files: ['src/a.ts'], message: 'fix: scoped delivery' }])
-    assert.match(result.content, /审查通过 \(L2\)/)
+    // System-triggered review is detached — the tool result reports the handoff,
+    // the verdict flows through the post-commit review queue.
+    assert.match(result.content, /提交后审查已转后台/)
+    await settleDetachedReview()
+    const outcomes = consumePostCommitReviewOutcomes()
+    assert.equal(outcomes.length, 1)
+    assert.equal(outcomes[0]!.verdict, 'verified')
+    assert.match(outcomes[0]!.lines.join('\n'), /审查通过 \(L2\)/)
   })
 
   it('commit succeeds when ReviewRouter rejects — review is advisory post-commit', async () => {
@@ -363,10 +379,16 @@ describe('deliver-task — semantic task delivery tool', () => {
     // Post-commit advisory: the commit has landed even if review found issues.
     assert.equal(result.isError ?? false, false)
     assert.equal(committed, true)
-    assert.match(result.content, /审查门发现问题 \(L2\)/)
-    assert.match(result.content, /still broken/)
-    assert.match(result.content, /提交已落地/)
-    assert.match(result.content, /未经主控独立核验/, 'rejected review must carry independent-verification nudge')
+    assert.match(result.content, /提交后审查已转后台/)
+    await settleDetachedReview()
+    const outcomes = consumePostCommitReviewOutcomes()
+    assert.equal(outcomes.length, 1)
+    assert.equal(outcomes[0]!.verdict, 'rejected')
+    const text = outcomes[0]!.lines.join('\n')
+    assert.match(text, /审查门发现问题 \(L2\)/)
+    assert.match(text, /still broken/)
+    assert.match(text, /提交已落地/)
+    assert.match(text, /未经主控独立核验/, 'rejected review must carry independent-verification nudge')
   })
 
   it('renders auto-review infra failure as INCONCLUSIVE, never as verified (B-fix)', async () => {
@@ -395,10 +417,16 @@ describe('deliver-task — semantic task delivery tool', () => {
 
     assert.equal(result.isError ?? false, false, 'inconclusive auto review must fail open')
     assert.equal(committed, true, 'delivery proceeds despite infra failure')
-    assert.match(result.content, /审查未决 \(auto\)/)
-    assert.match(result.content, /DID NOT run/)
-    assert.match(result.content, /未经审查/)
-    assert.doesNotMatch(result.content, /审查通过/, 'the word verified must not describe a review that never ran')
+    assert.match(result.content, /提交后审查已转后台/)
+    await settleDetachedReview()
+    const outcomes = consumePostCommitReviewOutcomes()
+    assert.equal(outcomes.length, 1)
+    assert.equal(outcomes[0]!.verdict, 'inconclusive')
+    const text = outcomes[0]!.lines.join('\n')
+    assert.match(text, /审查未决 \(auto\)/)
+    assert.match(text, /DID NOT run/)
+    assert.match(text, /未经审查/)
+    assert.doesNotMatch(text, /审查通过/, 'the word verified must not describe a review that never ran')
     assert.ok(result.content.length > 0, 'sentinel: content must never be empty')
     const health = getReviewHealth()
     assert.equal(health.infraFailureCount, 1)
@@ -426,9 +454,15 @@ describe('deliver-task — semantic task delivery tool', () => {
 
     assert.equal(result.isError ?? false, false, 'auto review crash must fail open')
     assert.equal(committed, true)
-    assert.match(result.content, /审查未决 \(auto\)/)
-    assert.match(result.content, /DID NOT run/)
-    assert.doesNotMatch(result.content, /审查通过/)
+    assert.match(result.content, /提交后审查已转后台/)
+    await settleDetachedReview()
+    const outcomes = consumePostCommitReviewOutcomes()
+    assert.equal(outcomes.length, 1)
+    assert.equal(outcomes[0]!.verdict, 'inconclusive')
+    const text = outcomes[0]!.lines.join('\n')
+    assert.match(text, /审查未决 \(auto\)/)
+    assert.match(text, /DID NOT run/)
+    assert.doesNotMatch(text, /审查通过/)
     assert.ok(result.content.length > 0, 'sentinel: content must never be empty')
     const health = getReviewHealth()
     assert.equal(health.infraFailureCount, 1)
@@ -448,11 +482,65 @@ describe('deliver-task — semantic task delivery tool', () => {
     })
 
     await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
+    await settleDetachedReview()
 
     const health = getReviewHealth()
     assert.equal(health.totalRuns, 1)
     assert.equal(health.infraFailureCount, 0)
     assert.equal(health.consecutiveInfraFailures, 0)
+  })
+
+  it('explicit review_level keeps the synchronous path — verdict lands in the tool result', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => ({ tier: 'L2', verdict: 'verified', evidence: 'ran: npx tsc --noEmit → ok', rounds: 1 }),
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: scoped delivery', review_level: 'L2' } })
+
+    assert.equal(result.isError ?? false, false)
+    assert.match(result.content, /审查通过 \(L2\)/, 'explicit review verdict must be in the tool result')
+    assert.doesNotMatch(result.content, /提交后审查已转后台/)
+    await settleDetachedReview()
+    assert.equal(consumePostCommitReviewOutcomes().length, 0, 'sync path must not enqueue')
+  })
+
+  it('detached review outcome carries the commit reference for attribution', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => ({ tier: 'auto', verdict: 'verified', evidence: 'ok', rounds: 1 }),
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+    })
+
+    await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
+    await settleDetachedReview()
+    const outcomes = consumePostCommitReviewOutcomes()
+    assert.equal(outcomes.length, 1)
+    assert.match(outcomes[0]!.lines[0]!, /^提交 \S+ 的提交后审查完成：$/)
+  })
+
+  it('tool timeout budget dominates internal stage budgets (240s 事故链)', () => {
+    const { tool, params } = makeContext({ taskId: 't1', ownedFiles: [] })
+    const timeoutMs = tool.timeoutMs!
+    // Readiness check: cheap, no tsc / review stages.
+    assert.equal(timeoutMs({ ...params, input: {} }), 120_000)
+    // Commit without explicit review: typecheck stage (120s) + grace — the
+    // detached review adds ZERO wait, so no review budget is raced in.
+    assert.equal(timeoutMs({ ...params, input: { commit: true } }), 180_000)
+    // Explicit review_level: awaited review budget stacks ON TOP of the
+    // typecheck stage instead of racing it (the old bug: budget 240s < sum
+    // of stages → pipeline killed the tool after the commit had landed).
+    const explicit = timeoutMs({ ...params, input: { commit: true, review_level: 'L2' } })
+    assert.ok(explicit > 180_000, `explicit review budget must exceed commit-only budget, got ${explicit}`)
   })
 
   it('routes non-fix code commits through ReviewRouter as objective review assistance', async () => {
@@ -477,8 +565,12 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(routedChange?.crossModule, false)
     assert.equal(routedChange?.isFix, false)
     assert.equal(routedChange?.goalActive, false)
-    assert.match(result.content, /审查通过 \(L2\)/)
+    assert.match(result.content, /提交后审查已转后台/)
     assert.match(result.content, /Scoped commit created/)
+    await settleDetachedReview()
+    const outcomes = consumePostCommitReviewOutcomes()
+    assert.equal(outcomes.length, 1)
+    assert.match(outcomes[0]!.lines.join('\n'), /审查通过 \(L2\)/)
   })
 
   it('post-commit review cooldown reports an honest skip, not a false merge', async () => {
