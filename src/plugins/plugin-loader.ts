@@ -19,6 +19,7 @@ import type { ToolRegistry } from '../tools/registry.js'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import { validatePathSafe } from '../tools/path-validate.js'
 import { parseManifest, type PluginManifest, type PluginPackageJson } from './manifest.js'
+import { skillRegistry, parseSkillMarkdown } from '../skills/skill-loader.js'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ export interface PluginLoadResult {
   pluginName: string
   status: 'loaded' | 'skipped_disabled' | 'skipped_no_manifest' | 'skipped_invalid_manifest' | 'skipped_no_entry' | 'skipped_import_error' | 'skipped_conflict' | 'skipped_no_tools'
   toolCount?: number
+  skillCount?: number
   error?: string
 }
 
@@ -94,7 +96,7 @@ export async function initializePlugins(
   const enabled = pluginConfig?.enabled ?? {}
 
   for (const dirName of entries) {
-    const result = await loadOnePlugin(dirName, pluginsDir, enabled, toolRegistry, cwd)
+    const result = await loadOnePlugin(dirName, pluginsDir, enabled, toolRegistry, cwd, warnings)
     results.push(result)
     if (result.error) {
       warnings.push(`[plugins] ${result.pluginName}: ${result.error}`)
@@ -190,6 +192,55 @@ function wrapPluginTool(tool: Tool, loadCwd: string): Tool {
   }
 }
 
+// ── Plugin skill loading ───────────────────────────────────────────
+
+function pathStaysInDir(resolved: string, baseDir: string): boolean {
+  return resolved === baseDir || resolved.startsWith(baseDir + sep)
+}
+
+/**
+ * Load bundled skills declared in the plugin manifest.
+ * Skill name conflicts skip individual skills (warn only); tool conflicts still reject the plugin.
+ */
+function loadPluginSkills(
+  manifest: PluginManifest,
+  pluginDir: string,
+  warnings: string[],
+): number {
+  const skillPaths = manifest.skills
+  if (!skillPaths || skillPaths.length === 0) return 0
+
+  let loaded = 0
+  for (const relPath of skillPaths) {
+    const skillDir = resolve(pluginDir, relPath)
+    if (!pathStaysInDir(skillDir, pluginDir)) {
+      warnings.push(`[plugins] ${manifest.name}: skill path "${relPath}" escapes plugin directory`)
+      continue
+    }
+    const skillFile = join(skillDir, 'SKILL.md')
+    if (!existsSync(skillFile)) {
+      warnings.push(`[plugins] ${manifest.name}: no SKILL.md at "${relPath}"`)
+      continue
+    }
+    try {
+      const folderName = relPath.split(/[/\\]/).filter(Boolean).pop() ?? manifest.name
+      const def = parseSkillMarkdown(readFileSync(skillFile, 'utf-8'), folderName)
+      if (skillRegistry.get(def.name)) {
+        warnings.push(`[plugins] ${manifest.name}: skill "${def.name}" conflicts with existing skill — skipped`)
+        continue
+      }
+      def.source = 'plugin'
+      def.bodyPath = skillFile
+      def.skillDir = skillDir
+      skillRegistry.register(def)
+      loaded++
+    } catch (err) {
+      warnings.push(`[plugins] ${manifest.name}: failed to load skill at "${relPath}": ${(err as Error).message}`)
+    }
+  }
+  return loaded
+}
+
 // ── Per-plugin loading ─────────────────────────────────────────────
 
 async function loadOnePlugin(
@@ -198,6 +249,7 @@ async function loadOnePlugin(
   enabled: Record<string, boolean>,
   registry: ToolRegistry,
   cwd: string,
+  warnings: string[],
 ): Promise<PluginLoadResult> {
   const pluginDir = join(pluginsDir, dirName)
   const pkgPath = join(pluginDir, 'package.json')
@@ -295,10 +347,13 @@ async function loadOnePlugin(
     }
   }
 
-  // 8. Register
+  // 8. Register tools
   for (const tool of wrappedTools) {
     registry.register(tool)
   }
 
-  return { pluginName: manifest.name, status: 'loaded', toolCount: tools.length }
+  // 9. Load bundled skills (after tools succeed — skill conflict skips, never rejects plugin)
+  const skillCount = loadPluginSkills(manifest, pluginDir, warnings)
+
+  return { pluginName: manifest.name, status: 'loaded', toolCount: tools.length, skillCount }
 }

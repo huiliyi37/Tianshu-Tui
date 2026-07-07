@@ -52,6 +52,8 @@ export const pluginManifestSchema = z.object({
   tools: z.array(toolDescriptorSchema).min(1),
   /** Declared permissions. Shown to the user at install time. */
   permissions: permissionsSchema,
+  /** Optional bundled skills — relative paths to directories containing SKILL.md. */
+  skills: z.array(z.string().min(1)).optional(),
   /** Minimum core version required (semver range, advisory only in v1). */
   minCoreVersion: z.string().optional(),
 })

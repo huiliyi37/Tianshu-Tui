@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { ToolRegistry } from '../../tools/registry.js'
 import { initializePlugins } from '../plugin-loader.js'
+import { skillRegistry } from '../../skills/skill-loader.js'
 import type { Tool } from '../../tools/types.js'
 
 function dummyTool(name: string): Tool {
@@ -453,5 +454,143 @@ export const tools = [{
     const result = await tool.execute(pipelineCall({ file_path: 'package.json' }, process.cwd()))
     assert.ok(!result.isError)
     assert.equal(result.content, join(process.cwd(), 'package.json'), 'relative path must resolve against the per-call session cwd')
+  })
+
+  it('loads bundled skills from manifest skills field', async () => {
+    const { pluginsDir, pluginsSubdir } = freshEnv()
+    setHome(pluginsDir)
+    const skillName = `probe-skill-${randomUUID().slice(0, 8)}`
+
+    const pluginDir = setupPlugin(pluginsSubdir, 'skill-plugin', {
+      pkgJson: {
+        name: 'skill-plugin',
+        version: '1.0.0',
+        tianshu: {
+          name: 'skill-plugin',
+          version: '1.0.0',
+          description: 'Plugin with bundled skill',
+          entry: 'index.js',
+          tools: [{ name: 'skill_plugin_tool', description: 'Probe' }],
+          permissions: {},
+          skills: ['skills/bundled-skill'],
+        },
+      },
+      entryContent: `
+export const tools = [{
+  definition: { name: 'skill_plugin_tool', description: 'x', input_schema: { type: 'object', properties: {} } },
+  execute: async () => ({ content: 'ok' }),
+  requiresApproval: () => false,
+  isConcurrencySafe: () => true,
+  isEnabled: () => true,
+}];
+`,
+    })
+    const skillDir = join(pluginDir, 'skills', 'bundled-skill')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(join(skillDir, 'SKILL.md'), `---
+name: ${skillName}
+description: Bundled plugin skill for testing
+triggers: [plugin-skill-probe]
+---
+
+Follow the bundled workflow.`)
+
+    const registry = new ToolRegistry()
+    const result = await initializePlugins(undefined, registry, process.cwd())
+    const item = result.results.find(r => r.pluginName === 'skill-plugin')
+    assert.ok(item)
+    assert.equal(item!.status, 'loaded')
+    assert.equal(item!.skillCount, 1)
+    assert.ok(skillRegistry.get(skillName), 'bundled skill must register in skillRegistry')
+    assert.equal(skillRegistry.get(skillName)!.source, 'plugin')
+  })
+
+  it('skips conflicting bundled skill without rejecting plugin', async () => {
+    const { pluginsDir, pluginsSubdir } = freshEnv()
+    setHome(pluginsDir)
+    const conflictName = `conflict-skill-${randomUUID().slice(0, 8)}`
+
+    skillRegistry.register({
+      name: conflictName,
+      description: 'Pre-existing skill',
+      triggers: [],
+      body: 'existing',
+      source: 'rivet',
+    })
+
+    const pluginDir = setupPlugin(pluginsSubdir, 'skill-conflict-plugin', {
+      pkgJson: {
+        name: 'skill-conflict-plugin',
+        version: '1.0.0',
+        tianshu: {
+          name: 'skill-conflict-plugin',
+          version: '1.0.0',
+          description: 'Skill conflict probe',
+          entry: 'index.js',
+          tools: [{ name: 'skill_conflict_tool', description: 'Probe' }],
+          permissions: {},
+          skills: ['skills/my-skill'],
+        },
+      },
+      entryContent: `
+export const tools = [{
+  definition: { name: 'skill_conflict_tool', description: 'x', input_schema: { type: 'object', properties: {} } },
+  execute: async () => ({ content: 'ok' }),
+  requiresApproval: () => false,
+  isConcurrencySafe: () => true,
+  isEnabled: () => true,
+}];
+`,
+    })
+    mkdirSync(join(pluginDir, 'skills', 'my-skill'), { recursive: true })
+    writeFileSync(join(pluginDir, 'skills', 'my-skill', 'SKILL.md'), `---
+name: ${conflictName}
+description: Would conflict
+---
+
+Body.`)
+
+    const registry = new ToolRegistry()
+    const result = await initializePlugins(undefined, registry, process.cwd())
+    const item = result.results.find(r => r.pluginName === 'skill-conflict-plugin')
+    assert.ok(item)
+    assert.equal(item!.status, 'loaded')
+    assert.equal(item!.skillCount, 0)
+    assert.ok(result.warnings.some(w => w.includes('conflicts with existing skill')))
+    assert.ok(registry.has('skill_conflict_tool'))
+  })
+
+  it('warns when bundled skill path escapes plugin directory', async () => {
+    const { pluginsDir, pluginsSubdir } = freshEnv()
+    setHome(pluginsDir)
+
+    setupPlugin(pluginsSubdir, 'skill-escape-plugin', {
+      pkgJson: {
+        name: 'skill-escape-plugin',
+        version: '1.0.0',
+        tianshu: {
+          name: 'skill-escape-plugin',
+          version: '1.0.0',
+          description: 'Skill escape probe',
+          entry: 'index.js',
+          tools: [{ name: 'skill_escape_tool', description: 'Probe' }],
+          permissions: {},
+          skills: ['../outside-skill'],
+        },
+      },
+      entryContent: `
+export const tools = [{
+  definition: { name: 'skill_escape_tool', description: 'x', input_schema: { type: 'object', properties: {} } },
+  execute: async () => ({ content: 'ok' }),
+  requiresApproval: () => false,
+  isConcurrencySafe: () => true,
+  isEnabled: () => true,
+}];
+`,
+    })
+
+    const registry = new ToolRegistry()
+    const result = await initializePlugins(undefined, registry, process.cwd())
+    assert.ok(result.warnings.some(w => w.includes('escapes plugin directory')))
   })
 })

@@ -20,7 +20,7 @@ import { join, relative, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeFrontmatterSource } from '../utils/frontmatter.js'
 
-export type SkillSource = 'rivet' | 'project-claude' | 'global-claude' | 'builtin'
+export type SkillSource = 'rivet' | 'project-claude' | 'global-claude' | 'builtin' | 'plugin'
 
 export interface SkillDefinition {
   name: string

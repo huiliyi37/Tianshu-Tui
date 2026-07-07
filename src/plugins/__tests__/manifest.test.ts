@@ -61,6 +61,24 @@ describe('parseManifest', () => {
     }
   })
 
+  it('accepts manifest with optional skills array', () => {
+    const result = parseManifest({ ...VALID_MANIFEST, skills: ['skills/design-prototype'] })
+    assert.ok(result.ok)
+    if (result.ok) {
+      assert.deepEqual(result.manifest.skills, ['skills/design-prototype'])
+    }
+  })
+
+  it('rejects manifest with empty skills path string', () => {
+    const result = parseManifest({ ...VALID_MANIFEST, skills: [''] })
+    assert.ok(!result.ok)
+  })
+
+  it('rejects manifest with non-string skills entries', () => {
+    const result = parseManifest({ ...VALID_MANIFEST, skills: [123] })
+    assert.ok(!result.ok)
+  })
+
   it('rejects null/undefined input', () => {
     assert.ok(!parseManifest(null).ok)
     assert.ok(!parseManifest(undefined).ok)
