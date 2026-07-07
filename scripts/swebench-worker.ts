@@ -56,7 +56,7 @@ parentPort.on('message', async (msg: { type: 'run'; instance: SwebenchInstance }
     }
 
     // Run agent
-    const { runAgentInDir, buildSwebenchPrompt } = await import('./swebench-run.js')
+    const { runAgentInDir, buildSwebenchPrompt } = await import('./swebench-run.ts')
     const prompt = buildSwebenchPrompt(instance)
     const result = await runAgentInDir(workDir, prompt, opts.maxTurns, opts.modelId, opts.domain)
 
