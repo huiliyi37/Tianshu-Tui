@@ -244,6 +244,7 @@ export async function runAgentInDir(
         provider: prov,
         allProviders: cfg.provider.providers,
         config: cfg,
+        approvalMode: 'dangerously-skip-permissions',
         sessionId,
         toolDefinitions: toolRegistry.getDefinitions(),
         sessionMemoryBlock: undefined,
