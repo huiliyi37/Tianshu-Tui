@@ -83,6 +83,11 @@ describe('sandbox-profile: Seatbelt', () => {
     // /dev/null must stay writable or most commands break.
     assert.ok(profile.includes('/dev/null'))
   })
+  it('includes disk device access for hdiutil/DMG creation', () => {
+    const profile = buildSeatbeltProfile(['/work'])
+    assert.ok(profile.includes('(subpath "/dev/disk")'), 'disk device read/write/ioctl for hdiutil')
+    assert.ok(profile.includes('(subpath "/dev/rdisk")'), 'raw disk device access for DMG creation')
+  })
   it('builds a sandbox-exec command that preserves the inner command', () => {
     const cmd = buildSeatbeltCommand('npm test', ['/work'])
     assert.ok(cmd.startsWith('sandbox-exec -p '))
