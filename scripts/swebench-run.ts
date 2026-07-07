@@ -164,6 +164,65 @@ ${instance.problem_statement}
 Fix the issue described above. Make only the changes necessary to resolve it.`
 }
 
+// ── Agent adapter ──────────────────────────────────────────────
+
+import type { HeadlessRunResult } from '../src/headless.js'
+
+export async function runAgentInDir(
+  cwd: string,
+  prompt: string,
+  maxTurns: number,
+): Promise<HeadlessRunResult> {
+  // Lazy-load agent internals to keep script importable without agent deps
+  const { runHeadless } = await import('../src/headless.js')
+  const { AgentLoop } = await import('../src/agent/loop.js')
+  const { SessionContext } = await import('../src/agent/context.js')
+  const { createDefaultToolRegistry } = await import('../src/tools/default-registry.js')
+  const { createAgentConfig, createMainAgentConfigInput } = await import('../src/agent/create-agent-config.js')
+  const { loadConfig } = await import('../src/config/manager.js')
+  const { setTargetConventions, applyConfiguredGitBashPath } = await import('../src/platform.js')
+
+  const cfg = loadConfig()
+  setTargetConventions(cfg.editor.platform, cfg.editor.eol)
+  applyConfiguredGitBashPath(cfg.env.gitBashPath)
+
+  const prov = cfg.provider.providers[cfg.provider.default]
+  if (!prov) throw new Error(`Provider '${cfg.provider.default}' not configured in ~/.rivet/config.json`)
+  const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
+  if (!key) throw new Error(`API key not set. Export ${prov.apiKeyEnv ?? 'API_KEY'} or run: rivet config setup`)
+
+  const model = prov.models[0]!
+  const sessionId = crypto.randomUUID()
+
+  return runHeadless({
+    prompt,
+    json: true,
+    streamJson: false,
+    createAgent: () => {
+      const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
+      const agentCfg = createAgentConfig(createMainAgentConfigInput({
+        apiKey: key,
+        model: {
+          id: model.id,
+          maxTokens: model.maxTokens,
+          contextWindow: model.contextWindow,
+          reasoningEffort: model.reasoningEffort,
+        },
+        cwd,
+        provider: prov,
+        allProviders: cfg.provider.providers,
+        config: cfg,
+        sessionId,
+        toolDefinitions: toolRegistry.getDefinitions(),
+        sessionMemoryBlock: undefined,
+        auth: undefined,
+      }))
+      const session = new SessionContext()
+      return new AgentLoop({ ...agentCfg, toolRegistry, maxTurns }, session, cwd)
+    },
+  })
+}
+
 // ── CLI ────────────────────────────────────────────────────────
 
 function showHelp(): void {
@@ -248,7 +307,7 @@ async function main() {
     return
   }
 
-  const completed = loadCompletedIds(opts.progressPath)
+  const completed = new Set(loadProgress(opts.progressPath))
   console.log(`Previously completed: ${completed.size}`)
 
   const toRun = opts.maxInstances > 0
@@ -273,9 +332,47 @@ async function main() {
       startedAt: new Date().toISOString(),
     }
 
-    // Agent invocation — stubbed until task 3
-    record.status = 'failed'
-    record.error = 'Agent invocation not yet implemented (see task 3)'
+    // 1. Clone repo and checkout base commit
+    const workDir = join(opts.workRoot, instance.instance_id)
+    if (!existsSync(join(workDir, '.git'))) {
+      const url = `${process.env.GITHUB_MIRROR || 'https://github.com'}/${instance.repo}.git`
+      console.log(`  Cloning ${url} @ ${instance.base_commit.slice(0, 8)}...`)
+      mkdirSync(workDir, { recursive: true })
+      execSync(`git init`, { cwd: workDir })
+      execSync(`git remote add origin ${url}`, { cwd: workDir })
+      execSync(`git fetch --depth 1 origin ${instance.base_commit}`, { cwd: workDir, timeout: 120_000 })
+      execSync(`git checkout FETCH_HEAD`, { cwd: workDir })
+    } else {
+      // Resume: reset to clean state
+      execSync('git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null', { cwd: workDir })
+    }
+
+    // 2. Build prompt and run agent
+    const prompt = buildSwebenchPrompt(instance)
+    console.log(`  Running agent (maxTurns=${opts.maxTurns})...`)
+    const result = await runAgentInDir(workDir, prompt, opts.maxTurns)
+    record.exitCode = result.exitCode
+    record.agentText = result.json?.text ?? ''
+
+    // 3. Extract patch via git diff
+    if (result.exitCode === 0) {
+      try {
+        const patch = execSync('git diff', { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })
+        if (patch.trim()) {
+          record.patch = patch
+          record.status = 'completed'
+        } else {
+          record.status = 'failed'
+          record.error = 'Agent completed but produced no diff'
+        }
+      } catch (diffErr) {
+        record.status = 'failed'
+        record.error = `git diff failed: ${(diffErr as Error).message}`
+      }
+    } else {
+      record.status = 'failed'
+      record.error = result.json?.error ?? `Agent exited with code ${result.exitCode}`
+    }
     record.endedAt = new Date().toISOString()
 
     appendProgress(opts.progressPath, record)
