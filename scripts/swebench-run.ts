@@ -387,8 +387,8 @@ async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions
     mkdirSync(workDir, { recursive: true })
     execSync(`git init`, { cwd: workDir })
     execSync(`git remote add origin ${url}`, { cwd: workDir })
-    execSync(`git fetch --depth 1 origin ${instance.base_commit}`, { cwd: workDir, timeout: 120_000 })
-    execSync(`git checkout FETCH_HEAD`, { cwd: workDir })
+    execSync(`git fetch --depth 50 origin ${instance.base_commit}`, { cwd: workDir, timeout: 300_000 })
+    execSync(`git checkout -b main ${instance.base_commit}`, { cwd: workDir })
   } else {
     execSync('git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null', { cwd: workDir })
   }
