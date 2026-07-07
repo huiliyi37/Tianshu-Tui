@@ -9,7 +9,8 @@
   "category": {
     "office": "办公",
     "dev": "开发",
-    "productivity": "效率"
+    "productivity": "效率",
+    "design": "设计"
   },
   "permissions": {
     "fs": "文件系统",

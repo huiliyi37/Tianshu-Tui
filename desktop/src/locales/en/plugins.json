@@ -9,7 +9,8 @@
   "category": {
     "office": "Office",
     "dev": "Dev",
-    "productivity": "Productivity"
+    "productivity": "Productivity",
+    "design": "Design"
   },
   "permissions": {
     "fs": "File System",
