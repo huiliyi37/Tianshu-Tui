@@ -47,6 +47,7 @@ const ROOTS = [
   '@ast-grep/lang-python',
   'web-tree-sitter', // tree-sitter chunker (wasm loader)
   'tree-sitter-wasms', // grammar .wasm files (loaded by path)
+  'chalk', // ESM-only, tsup externalizes it; TUI modules import it (2.16+)
 ]
 
 function pkgDir(name) {
