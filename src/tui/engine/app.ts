@@ -867,7 +867,9 @@ export class TuiApp {
     // 会 moveToTop 到错误位置、把输入框顶进欢迎屏中段并丢掉输入行/底边框。reset() 令
     // 本帧当作全新首帧，在当前光标（欢迎屏正下方）干净 append。
     this.live.reset()
-    this.renderLive()
+    // 首次渲染（欢迎屏刚写完）跳过 GlanceBar 状态行 + 分隔线，只渲染输入框。
+    // 欢迎屏已包含模型名/会话ID等信息，避免与 GlanceBar 重复。
+    this.renderLive(true)
   }
 
   /** 设置提交回调（用户按 Enter 后触发） */
@@ -2805,7 +2807,7 @@ export class TuiApp {
     return merged
   }
 
-  private renderLive(): void {
+  private renderLive(skipGlanceBar: boolean = false): void {
     // 全屏覆盖层（命令面板 / splash / 详情页）激活时，Live 区域由覆盖层引擎
     // 负责渲染，避免再次绘制内容产生右下角残留。
     if (this.overlay.isActive()) {
@@ -3105,11 +3107,13 @@ export class TuiApp {
         todoSummary,
         stalled,
       }, this.theme)
-      lines.push({ text: glanceBarLine })
+      if (!skipGlanceBar) {
+        lines.push({ text: glanceBarLine })
 
-      // 第二段：分隔线（─ 重复填充整宽），视觉隔离状态与输入
-      const separatorLine = color('─'.repeat(Math.max(20, cols - 2)), this.theme.dim)
-      lines.push({ text: separatorLine })
+        // 第二段：分隔线（─ 重复填充整宽），视觉隔离状态与输入
+        const separatorLine = color('─'.repeat(Math.max(20, cols - 2)), this.theme.dim)
+        lines.push({ text: separatorLine })
+      }
 
       // 第三段：输入框（高亮边框，与状态栏分离）
       const MAX_INPUT_DISPLAY_LINES = 12
