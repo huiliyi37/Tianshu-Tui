@@ -118,9 +118,10 @@ describe('renderTasks: per-worker 舰队', () => {
       completedCount: 0,
     }
     const text = stripAnsi(renderTasks(data, 60, 12, theme).join('\n'))
-    assert.ok(text.includes('运行中的子代理'))
-    assert.ok(text.includes('fleet'), '单组用 fleet 标题')
-    assert.ok(text.includes('1/3 done'))
+    assert.ok(text.includes('子代理任务'))
+    assert.ok(text.includes('运行中'), '标题栏 filter tab 高亮运行中')
+    assert.ok(text.includes('任务组'), '单组用「任务组」标题')
+    assert.ok(text.includes('1/3 完成'))
     assert.ok(text.includes('T1·code_scout'))
     assert.ok(text.includes('grep seams'))
     assert.ok(text.includes('Enter 详情'))
@@ -137,15 +138,15 @@ describe('renderTasks: per-worker 舰队', () => {
       completedCount: 0,
     }
     const text = stripAnsi(renderTasks(data, 64, 14, theme).join('\n'))
-    assert.ok(text.includes('group 1'))
-    assert.ok(text.includes('group 2'))
-    assert.ok(text.includes('1 failed'))
+    assert.ok(text.includes('批次 1'))
+    assert.ok(text.includes('批次 2'))
+    assert.ok(text.includes('✗1 失败'))
     assert.ok(text.includes('Enter 详情'))
   })
 
-  it('空舰队：显示 no running workers', () => {
+  it('空舰队：显示空态提示', () => {
     const text = stripAnsi(renderTasks({ groups: [], filter: 'running', completedCount: 0 }, 50, 10, theme).join('\n'))
-    assert.ok(text.includes('no running workers'))
+    assert.ok(text.includes('暂无运行中的子代理'))
     assert.ok(text.includes('q/Esc 关闭'))
   })
 
@@ -163,8 +164,8 @@ describe('renderTasks: per-worker 舰队', () => {
       completedCount: 1,
     }
     const text = stripAnsi(renderTasks(data, 80, 12, theme).join('\n'))
-    assert.ok(text.includes('已完成的子代理'))
-    assert.ok(text.includes('1 completed'))
+    assert.ok(text.includes('已完成'), '标题栏 filter tab 高亮已完成')
+    assert.ok(text.includes('1 已完成'), 'footer 显示已完成计数')
   })
 
   it('选中态渲染光标', () => {
