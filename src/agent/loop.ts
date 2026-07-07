@@ -13,7 +13,7 @@ import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel, getClassDoomLoopLevel, combineDoomLoopLevels, getDoomLoopThresholds } from './trace-store.js'
-import { evaluateConvergence } from './convergence-detector.js'
+import { evaluateConvergence, PRODUCTIVE_TOOLS } from './convergence-detector.js'
 import type { PhaseClass, ConvergenceResult } from './convergence-detector.js'
 import { emitStopReason, stopReasonAbortTag, type StopReason } from './stop-reason.js'
 import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
@@ -228,13 +228,24 @@ export class AgentLoop {
   latestConvergenceResult: ConvergenceResult | null = null
   /** Most recent structured stop-reason (why the last turn loop ended). */
   latestStopReason: StopReason | null = null
-  /** Fix 1 — convergence emission cooldown. The L2 side-effects (改道 card via
-   *  onDecisionShift, convergence-warning phase change, and the advisory nudge)
-   *  are throttled so a persistent stuck-state (e.g. a legitimately read-heavy
-   *  review task) does NOT re-emit the same "改道" card every single turn.
+  /** Fix 1 — convergence emission cooldown with backoff. The L2 side-effects
+   *  (改道 card via onDecisionShift, convergence-warning phase change, and the
+   *  advisory nudge) are throttled so a persistent stuck-state does NOT re-emit
+   *  the same "改道" card every single turn.
+   *
+   *  Backoff (incident 9266c3a7): the old fixed 3-turn cooldown re-emitted the
+   *  same advisory ~50 times in a 154-turn session. Now the cooldown for the
+   *  SAME message variant doubles each consecutive emission (3→6→12→24…),
+   *  resetting to base when the variant changes, level escalates, or the agent
+   *  produces a productive tool (edit/bash/test) since the last emit.
+   *
    *  Re-emit only when the cooldown elapses, the level escalates, or the message
    *  type changes. Mirrors the cooldown discipline in kick-hook.ts. */
-  private readonly convergenceEmitCooldownTurns = 3
+  private readonly convergenceEmitBaseCooldownTurns = 3
+  private convergenceEmitCooldownTurns = 3
+  /** Consecutive emit count for the current message variant — drives both the
+   *  backoff multiplier and the "第 N 次提醒" prefix in the injected message. */
+  private convergenceEmitRepeatCount = 0
   private lastConvergenceEmitTurn = -Infinity
   private lastConvergenceEmitLevel = 0
   private lastConvergenceMsgKey = ''
@@ -824,6 +835,15 @@ export class AgentLoop {
 
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string, errorClass?: ToolErrorClass): void {
       recordToolHistory(this, name, input, isError, result, errorClass);
+      // Reset convergence cooldown when the agent produces a productive tool
+      // (edit/bash/test/commit/deliver). This means past convergence nudges
+      // were either effective (prompted action) or irrelevant (direction was
+      // fine all along) — in either case, reset the repeat counter and cooldown
+      // so the next nudge starts fresh rather than escalating from a stale count.
+      if (PRODUCTIVE_TOOLS.has(name)) {
+        this.convergenceEmitRepeatCount = 0
+        this.convergenceEmitCooldownTurns = this.convergenceEmitBaseCooldownTurns
+      }
       // F-fix (session 803d897d): field habituation moves discipline text out of
       // focus after ~4 turns while a heavy turn can run 20+ tool calls. Re-anchor
       // a one-line discipline summary through the advisory bus every N calls —
@@ -1789,6 +1809,7 @@ export class AgentLoop {
       textFingerprints: this.recentTextFingerprints,
       providerName: this.config.providerName,
       outputTokens: this.session.getTotalUsage().output_tokens,
+      repeatCount: this.convergenceEmitRepeatCount,
     })
     this.latestConvergenceResult = convergenceCheck
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
@@ -1830,6 +1851,15 @@ export class AgentLoop {
         const verifyFailStreak = computeVerifyFailStreak(this.recentToolHistory)
         const verifyFailEscalated = verifyFailStreak >= 2 && verifyFailStreak > this.lastConvergenceEmitVerifyFailStreak
         if (cooledDown || escalated || changedDirection || verifyFailEscalated) {
+          // Backoff: if the same message variant fires again, double the cooldown
+          // (3→6→12→24…). Reset to base when direction changes or level escalates.
+          if (changedDirection || escalated) {
+            this.convergenceEmitRepeatCount = 0
+            this.convergenceEmitCooldownTurns = this.convergenceEmitBaseCooldownTurns
+          } else {
+            this.convergenceEmitRepeatCount += 1
+            this.convergenceEmitCooldownTurns = this.convergenceEmitBaseCooldownTurns * (1 << Math.min(this.convergenceEmitRepeatCount, 5))
+          }
           this.lastConvergenceEmitTurn = turn
           this.lastConvergenceEmitLevel = convergenceCheck.level
           this.lastConvergenceMsgKey = msgKey
