@@ -341,10 +341,12 @@ describe('fixture regression', () => {
   it('git status fixture: strips branch/hint, keeps file paths', () => {
     const input = readFixture('git-status.txt')
     const r = sanitizeToolOutput('bash', { command: 'git status' }, input)
-    // fixture 只有 480 bytes < MIN_CONTENT_LENGTH(500)，函数按设计返回原文
-    // 核心验证：输出不被破坏
-    assert.equal(r.content, input, 'small output should be returned unchanged')
-    assert.equal(r.trimmedBytes, 0, 'small output should not be trimmed')
+    assert.ok(r.trimmedBytes > 0, 'expected trimming to occur')
+    assert.ok(!r.content.includes('On branch'), 'branch line should be stripped')
+    assert.ok(!r.content.includes('use "git'), 'hint lines should be stripped')
+    // 文件路径必须保留
+    assert.ok(r.content.includes('output-sanitizer.ts'), 'file paths should be preserved')
+    assert.ok(r.content.includes('tool-execution.ts'), 'file paths should be preserved')
   })
 
   it('git diff fixture: strips headers, keeps code changes', () => {
