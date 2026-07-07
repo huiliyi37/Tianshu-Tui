@@ -197,4 +197,45 @@ describe('dead-end-detector 缺口 A', () => {
     // 仍然触发（旧行为不变）
     assert.equal(submitted.length, 1)
   })
+
+  it('verify pass 清除已沉积的 dead-end 信息素', async () => {
+    const { submitted, deposits, hook } = harness()
+    // 先触发一次死路沉积
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), verifyFail())
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), verifyFail())
+    assert.equal(submitted.length, 1) // 死路触发
+    const deadDeposit = deposits.find(d => d.path === 'src/a.ts' && d.signal === 'dead-end' && d.strength === 0.8)
+    assert.ok(deadDeposit, 'should have dead-end deposition with strength 0.8')
+
+    // verify pass → 应沉积 strength=0 覆盖
+    await hook.run(makeCtx(), verifyPass())
+    const clearedDeposit = deposits.filter(d => d.path === 'src/a.ts' && d.signal === 'dead-end').at(-1)
+    assert.ok(clearedDeposit, 'should have a clearing deposit for src/a.ts')
+    assert.equal(clearedDeposit!.strength, 0, 'verify pass should clear pheromone with strength=0')
+  })
+
+  it('verify pass 清除多个文件的 dead-end 信息素', async () => {
+    const { deposits, hook } = harness()
+    // 两个文件各有死路
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), edit('src/b.ts'))
+    await hook.run(makeCtx(), verifyFail())
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), edit('src/b.ts'))
+    await hook.run(makeCtx(), verifyFail())
+    // 两个文件都触发了
+    const aDead = deposits.filter(d => d.path === 'src/a.ts' && d.signal === 'dead-end')
+    const bDead = deposits.filter(d => d.path === 'src/b.ts' && d.signal === 'dead-end')
+    assert.ok(aDead.some(d => d.strength === 0.8), 'file a should have strength=0.8 deposition')
+    assert.ok(bDead.some(d => d.strength === 0.8), 'file b should have strength=0.8 deposition')
+
+    // verify pass → 两个文件都应清除
+    await hook.run(makeCtx(), verifyPass())
+    const aCleared = deposits.filter(d => d.path === 'src/a.ts' && d.signal === 'dead-end').at(-1)
+    const bCleared = deposits.filter(d => d.path === 'src/b.ts' && d.signal === 'dead-end').at(-1)
+    assert.equal(aCleared!.strength, 0)
+    assert.equal(bCleared!.strength, 0)
+  })
 })

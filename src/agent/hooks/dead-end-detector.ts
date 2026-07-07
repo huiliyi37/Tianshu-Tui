@@ -109,6 +109,13 @@ export function createDeadEndDetectorHook(
 
       // ── 验证通过:全部清零(死路解除)────────────────────────
       if (tool.success) {
+        // 清除磁盘上的 dead-end 信息素（strength=0 覆盖旧条目），
+        // 防止后续 turn 的 intent-preview 读到残留 pheromone 误报「方向提示」。
+        for (const [file] of files) {
+          try {
+            await deps.deposit?.({ path: file, signal: 'dead-end', strength: 0 })
+          } catch { /* best-effort: 残留不影响正确性，仅失去一次性清除机会 */ }
+        }
         files.clear()
         return
       }
