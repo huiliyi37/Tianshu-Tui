@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-11 — v2.16.1: 会话恢复持久化修复 + Windows 路径兼容
+
+小版本修复，覆盖会话中断恢复时的工具结果丢失与 Windows 路径兼容性。
+
+### Fixed
+
+- **write_file 会话恢复时工具结果丢失**（`e3aa0178`）— `[recovered]` 消息降级为非错误，暴露 persist drain 使 abort 路径等待落盘。
+- **Windows 路径分隔符归一化**（`ce3b4909`）— FileExplorer 打开文件发送绝对路径，`buildFileDiff` diff header `\` → `/` 归一化。
+
 ## 2026-07-10 — v2.16.0: TUI 面板专业化 + 桌面端对标 Codex + 能力闸门收官 + 开源分发
 
 50+ commit，四条主线：TUI 从功能面板演进为专业化设计系统；桌面端完成 Codex 对标改造；Agent 能力闸门全面收口；开源分发基建上线。
