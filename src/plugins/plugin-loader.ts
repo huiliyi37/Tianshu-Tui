@@ -158,7 +158,7 @@ function wrapPluginTool(tool: Tool, cwd: string): Tool {
 
   const guardedExecute = async (params: ToolCallParams): Promise<ToolResult> => {
     for (const { key, mode } of pathParams) {
-      const value = (params as Record<string, unknown>)[key]
+      const value = (params as unknown as Record<string, unknown>)[key]
       if (typeof value !== 'string' || value.length === 0) continue
 
       const result = validatePathSafe(cwd, value, mode)

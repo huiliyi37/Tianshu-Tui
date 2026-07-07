@@ -168,8 +168,6 @@ describe('removePlugin', () => {
   it('rejects removing non-existent plugin', () => {
     const result = removePlugin('nonexistent')
     assert.equal(result.ok, false)
-    if (!result.ok) {
-      assert.ok(result.error.includes('not installed'))
-    }
+    assert.ok(result.error?.includes('not installed'))
   })
 })

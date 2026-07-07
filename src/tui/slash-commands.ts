@@ -3678,7 +3678,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
           `Version: ${p.version}`,
           `Description: ${p.description}`,
           `Entry: ${p.entry}`,
-          `Tools: ${p.tools.join(', ')}`,
+          `Tools: ${p.tools}`,
           `Path: ${p.installPath}`,
         ]
         app.commitStatic(lines.join('\n'))
