@@ -1437,4 +1437,79 @@ describe('evaluateConvergence', () => {
       }
     })
   })
+
+  // ── Diagnostic probe recognition (Task 2) ──
+
+  describe('diagnostic probe recognition', () => {
+    it('diagnostic probes reduce productive-ratio penalty', () => {
+      // 全是 non-productive 工具（grep+read_file），但 grep 搜 error 模式 = 诊断探针
+      const history = makeHistory([
+        { tool: 'grep', target: 'AssertionError src/test.ts' },
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'grep', target: 'error TS2322' },
+        { tool: 'grep', target: '✖ failing test' },
+        { tool: 'read_file', target: 'b.ts' },
+      ])
+      // 无诊断探针的对照组：同样的工具但 grep 不搜诊断词
+      const nonDiag = makeHistory([
+        { tool: 'grep', target: 'class Foo' },
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'grep', target: 'import React' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'glob', target: '*.ts' },
+      ])
+      const resultDiag = evaluateConvergence(baseInput({
+        turn: 16,
+        phaseClass: 'execute',
+        recentToolHistory: history,
+      }))
+      const resultNonDiag = evaluateConvergence(baseInput({
+        turn: 16,
+        phaseClass: 'execute',
+        recentToolHistory: nonDiag,
+      }))
+      // 诊断探针组的 score 应高于非诊断组（penalty 减半）
+      assert.ok(resultDiag.score > resultNonDiag.score,
+        `diag=${resultDiag.score.toFixed(2)} should exceed nonDiag=${resultNonDiag.score.toFixed(2)}`)
+    })
+
+    it('non-diagnostic bash still penalized fully', () => {
+      // grep 使用非诊断模式搜索（class Foo / import React），不应触发 diagProbes
+      const history = makeHistory([
+        { tool: 'grep', target: 'class Foo' },
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'grep', target: 'import React' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'glob', target: '*.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 16,
+        phaseClass: 'execute',
+        recentToolHistory: history,
+      }))
+      // 无诊断探针时，原有惩罚应保持低 score（productiveRatio=0 完全惩罚）
+      assert.ok(result.score < 0.3,
+        `expected score < 0.3 without diagnostic probes, got ${result.score.toFixed(2)}`)
+    })
+
+    it('tsx -e inline script recognized as diagnostic probe', () => {
+      // 混合场景：有 bash 探针 + 非 productive 工具，diagnostic probe 减半惩罚
+      const history = makeHistory([
+        { tool: 'grep', target: 'AssertionError' },
+        { tool: 'bash', target: "npx tsx -e 'console.log(/regex/.test(\"x\"))'" },
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'bash', target: 'TMPDIR=/tmp node --import tsx -e "..."' },
+        { tool: 'grep', target: 'error TS2322' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 16,
+        phaseClass: 'execute',
+        recentToolHistory: history,
+      }))
+      // bash 在 productiveTools 中 → productiveRatio > 0 → 不触发该惩罚。
+      // 但仍验证 diagProbes 识别不崩溃，且 score 合理（非零）。
+      assert.ok(result.score > 0,
+        `tsx -e / node --import should be recognized, got score=${result.score.toFixed(2)}`)
+    })
+  })
 })

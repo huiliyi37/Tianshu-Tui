@@ -402,6 +402,25 @@ function textRepetitionHasData(fingerprints: ReadonlyArray<string>): boolean {
 const REPORT_TEXT_MIN_LEN = 200
 
 /**
+ * 识别 recentToolHistory 中是否存在诊断探针（调试性质的 bash/grep 调用）。
+ * 诊断探针的存在说明 agent 在"主动诊断"而非"被动读取"——
+ * 有 hypothesis 并用探针验证，不应与纯只读停滞同等惩罚。
+ */
+function hasDiagnosticProbes(
+  history: ConvergenceInput['recentToolHistory'],
+): boolean {
+  // 诊断探针的特征模式
+  const PROBE_BASH_RE = /node\s+-e\b|node\s+--import|tsx\s+-e\b|TMPDIR=\S+\s+node/
+  const PROBE_GREP_RE = /\b(error|fail|assert|✖|AssertionError)\b/
+  
+  for (const entry of history) {
+    if (entry.tool === 'bash' && PROBE_BASH_RE.test(entry.target)) return true
+    if (entry.tool === 'grep' && PROBE_GREP_RE.test(entry.target)) return true
+  }
+  return false
+}
+
+/**
  * isProducingReport: whether the agent is producing a substantial, fresh
  * (non-repetitive) text deliverable — an analysis, code review, or conclusion.
  *
@@ -514,18 +533,18 @@ function computeConvergenceScore(
   // deliverable (review/analysis report): read-heavy work with a textual output
   // is legitimate progress, not stagnation.
   if (!producingReport && window.length >= (isGlm ? 2 : 4) && productiveRatio === 0) {
+    // 诊断探针存在时减半惩罚：agent 在主动诊断而非被动读取
+    const diagProbes = hasDiagnosticProbes(window)
     if (isGlm) {
-      // GLM ramp: turn 4→0.65, turn 7→0.35, turn 11→0.15, turn 15+→0.05
-      if (turn >= 15) penalty = Math.min(penalty, 0.05)
-      else if (turn >= 11) penalty = Math.min(penalty, 0.15)
-      else if (turn >= 7) penalty = Math.min(penalty, 0.35)
-      else if (turn >= 4) penalty = Math.min(penalty, 0.65)
+      if (turn >= 15) penalty = Math.min(penalty, diagProbes ? 0.25 : 0.05)
+      else if (turn >= 11) penalty = Math.min(penalty, diagProbes ? 0.5 : 0.15)
+      else if (turn >= 7) penalty = Math.min(penalty, diagProbes ? 0.7 : 0.35)
+      else if (turn >= 4) penalty = Math.min(penalty, diagProbes ? 0.85 : 0.65)
     } else {
-      // Default ramp: turn 8→0.7, turn 12→0.45, turn 16→0.25, turn 20+→0.1
-      if (turn >= 20) penalty = Math.min(penalty, 0.1)
-      else if (turn >= 16) penalty = Math.min(penalty, 0.25)
-      else if (turn >= 12) penalty = Math.min(penalty, 0.45)
-      else if (turn >= 8) penalty = Math.min(penalty, 0.7)
+      if (turn >= 20) penalty = Math.min(penalty, diagProbes ? 0.4 : 0.1)
+      else if (turn >= 16) penalty = Math.min(penalty, diagProbes ? 0.5 : 0.25)
+      else if (turn >= 12) penalty = Math.min(penalty, diagProbes ? 0.65 : 0.45)
+      else if (turn >= 8) penalty = Math.min(penalty, diagProbes ? 0.85 : 0.7)
     }
   }
 
