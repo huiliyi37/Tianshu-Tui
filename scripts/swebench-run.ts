@@ -189,6 +189,8 @@ ${instance.problem_statement}
 4. Use the edit_file tool to apply your changes
 5. After making changes, use deliver_task to confirm completion
 
+Important: Do NOT run tests. The test environment is not available. Just make the fix and deliver.
+
 Fix the issue described above. Make only the changes necessary to resolve it.`
 }
 
