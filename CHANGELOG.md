@@ -1,5 +1,67 @@
 # Changelog
 
+## 2026-07-10 — v2.16.0: TUI 面板专业化 + 桌面端对标 Codex + 能力闸门收官 + 开源分发
+
+50+ commit，四条主线：TUI 从功能面板演进为专业化设计系统；桌面端完成 Codex 对标改造；Agent 能力闸门全面收口；开源分发基建上线。
+
+### Added — TUI 面板专业化重设计
+
+- **team / team max / 审查门面板**（`c19db073`）— 分段上色 + 语义化 verdict（PASS/FAIL/BLOCKED），从纯文本列表升级为结构化审查视图。
+- **/tasks 任务面板**（`c89772d0`）— 树形进度 + worker 切入视图与输入直达，对标 Claude Code 子代理工作流（`ee6a4c1d`）。
+- **欢迎屏 CC 头式重构**（`c82ef5d6`）— 3 行紧凑头（品牌+版本 / 模型+权限 / cwd），输入框权限模式行，暗色主题 dim 系统性提亮。
+- **首屏收敛**（`08edb6d3`）— 启动日志归入 `RIVET_DEBUG` + welcome 间距 + resize 全量重绘。
+- **对标 CC 改造 Wave 2/3**（`29cd9c13`）— GlanceBar 减密 + statusline + verbose 转录 + OSC 8 超链接 + Ink 清零。
+- **Shift+Tab 流畅三态环**（`7f35c7ee`）— 去掉 plan 退出二次确认与 picker 劫持。
+
+### Added — 桌面端对标 Codex
+
+- **五波改造**（`2baa60cd`）— Codex 主题 + 头部工具条 + 线程 pop-out + Review Queue + Skills 商店。
+- **体验四轮优化**（`0fccea2d`）— 线程内 Cmd+F 搜索、跨会话内容搜索、草稿持久化、重新生成、侧边栏虚拟化。
+- **Stage 15 收尾** — CompletionCurtain ✕ 关闭（`c41b4d8c`）、WorkspaceHeader 子代理 badge + JobsDock 关闭（`e8a7eabb`）、App Icon Squircle 北斗七星遮罩（`4e601b99`）。
+- **权限等级下拉菜单**（`8a694d61`）— 新增「完全访问」全盘只读档。
+- **i18n 全量落地**（`dfe51640`）— 79 个文件硬编码中文迁入 i18next，新增 16 个命名空间。
+- **设置→系统页「打开数据目录」**（`76fad03e`）— 一键在文件管理器中定位会话日志与缓存。
+
+### Added — Computer Use 收束
+
+- **CDP 浏览器后端**（`b6c08f38`）— Chrome 快照 17-36s → 0.1-0.3s（真机实测）。
+- **CDP 安全三件套**（`898689d1`）— 审批承诺落地管线 + `:9222` 永不静默接管 + navigate 协议门。
+- **Windows 驱动升级**（`9d0b6e85`）— IUIAutomation COM 原生接口，解锁 Chromium 网页树 + 树遍历全量移入 C#。
+- **闭环打磨**（`4b608de1`）— stale 自愈 + wait_for/find/set_value + app 名模糊提示。
+- **常驻脚本宿主**（`928b85af`）— osascript/PowerShell REPL 子进程，消除每次交互的冷启动开销。
+
+### Added — 插件系统
+
+- **Wave 1-4 全线落地** — 插件内核 + manifest 校验 + 安装管线（`6f94ee2f`）+ REST API 端点（`8a071c68`）+ office 三件套（`23b3e6ee`）+ tianshu-design 前端设计插件（`2ca7f7ba`）。
+- **安全守卫** — 内核层路径安全（`ebcbc539`）+ entry 路径逃逸防护（`985a6b0c`）+ REST 确认参数对齐（`403f7322`）。
+- **manifest skills 字段**（`effacdf6`）— loader skill 捆绑加载，插件可声明自带 skill。
+
+### Fixed — Agent 能力闸门
+
+- **能力边界补全双门禁**（`1597ea69`）— 测试存在性门禁 + 复现即证明全星域化。
+- **宣称对账收口** — 能力双闸第三批（`d1728b30`）+ hash_edit/apply_patch 记账（`82c75428`）+ action-intent 祈使收尾漏检（`9dde4f89`）。
+- **纪律防线** — MistakeNotebook 默认停用（`280c1bc5`）+ playbook 默认停用（`d8c2c8c2`）+ memory epoch reset（`9e7e3b0e`）。
+- **熔断 CLI 可见化**（`1ce45842`）— 警告阶梯 + score 熔断宽限轮。
+
+### Fixed — 跨平台（Windows / Linux / WSL）
+
+- **Windows 路径四连修**（`bc4c2381`）— 工具参数反斜杠转义 + Codex 式文件夹授权。
+- **绝对路径判定两处修复**（`d6262694`）+ Git Bash 盘符前缀翻译（`1633e6e2`）+ 技能 CRLF/BOM 加载失败（`08dbfff1`）。
+- **Linux/WSL 单段绝对路径误判**（`4175e5b9`）。
+
+### Fixed — 缓存与投机执行
+
+- **frozen 快照孤儿化根治**（`85d9d9de`）— 边界 commit 改 pending 驱动清扫 + fallback 回存自愈。
+- **llm-speculation 缓存污染双修**（`3952cf12`）— suffix 双写 copy-on-write + 侧路 usage 记账。
+- **投机预执行链整链封存**（`5f5446ac`）+ 陈旧读残留补口。
+
+### Changed — 基础设施
+
+- **开源分发基建**（`bbd4e2d4`）— 工程指标 + 社区文件（CONTRIBUTING/SECURITY/CODE_OF_CONDUCT）+ 公开策略。
+- **CI Node 24**（`18386a5e`）+ npm audit 清零 ×2（vite/esbuild/undici/hono/qs）。
+- **engines.node 放宽** — `"24.1.0"` → `">=24"`，兼容 24.x 全系列。
+- **遗留清理** — Ink 补丁删除（`eaf06449`）。
+
 ## 2026-06-28 — 体验前质量加固：渲染重影根治 + 意图闸误报修复 + 子代理结构化输出 + 桌面端对标 Codex/Antigravity
 
 用户开始体验前的集中质量加固，14 commit 覆盖五条线。详见 [`docs/changelog-2026-06-28.md`](docs/changelog-2026-06-28.md)。
