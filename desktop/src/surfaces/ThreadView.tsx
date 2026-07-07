@@ -150,6 +150,10 @@ export function ThreadView(props: {
   const [showRewind, setShowRewind] = useState(false)
   const [showDelegateDialog, setShowDelegateDialog] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [summaryDismissed, setSummaryDismissed] = useState(false)
+  useEffect(() => {
+    setSummaryDismissed(false)
+  }, [session.id])
   // P1-4 — Side Chat drawer (旁路提问): Cmd+; or the header button toggles.
   const [sideChatOpen, setSideChatOpen] = useState(false)
   // File viewer drawer: opened by clicking @file mentions in messages.
@@ -1056,7 +1060,7 @@ export function ThreadView(props: {
         <MessageNavigator turns={userTurns} activeIndex={navActiveIndex} onJump={jumpTo} />
       </div>
 
-      {session.status === 'completed' && view.completionSummary && (() => {
+      {session.status === 'completed' && view.completionSummary && !summaryDismissed && (() => {
         // 显示条件：有 todo（无论是否全部完成）、有文件改动、或有验证记录。
         // 之前要求 allTodosDone 才显示——agent 不用 todo 就永远看不到总结。
         const hasTodos = view.todos.length > 0
@@ -1064,7 +1068,7 @@ export function ThreadView(props: {
         const hasReads = (view.completionSummary.filesRead?.length ?? 0) > 0
         const hasVerifications = (view.completionSummary.verifications?.length ?? 0) > 0
         if (!hasTodos && !hasFileChanges && !hasReads && !hasVerifications) return null
-        return <CompletionCurtain summary={view.completionSummary} />
+        return <CompletionCurtain summary={view.completionSummary} onDismiss={() => setSummaryDismissed(true)} />
       })()}
 
       <div className="composer-float" ref={composerWrapRef}>

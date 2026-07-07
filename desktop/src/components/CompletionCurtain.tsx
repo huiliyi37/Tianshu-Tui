@@ -14,6 +14,7 @@ import type { EvidenceSummary } from '../../../src/agent/evidence.js'
 
 interface CompletionCurtainProps {
   summary: EvidenceSummary
+  onDismiss?: () => void
 }
 
 function statusFromSummary(summary: EvidenceSummary, t: (key: string) => string): {
@@ -45,7 +46,7 @@ function verificationLabel(summary: EvidenceSummary, t: (key: string, options?: 
   return t('completionTestsPassed', { passed: last.passed, failed: last.failed })
 }
 
-function CompletionCurtainImpl({ summary }: CompletionCurtainProps) {
+function CompletionCurtainImpl({ summary, onDismiss }: CompletionCurtainProps) {
   const { t } = useTranslation('thread')
   // Default COLLAPSED to a single summary row — the full curtain ate too much
   // main-conversation vertical space. Click the header row to expand in place.
@@ -59,10 +60,9 @@ function CompletionCurtainImpl({ summary }: CompletionCurtainProps) {
       role="region"
       aria-label={t('completionTitle')}
     >
-      <button
+      <div
         className="cc-summary-row"
         onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
       >
         <span className="cc-icon" aria-hidden>{status.icon}</span>
         <span className="cc-title">{t('completionTitle')}</span>
@@ -77,7 +77,20 @@ function CompletionCurtainImpl({ summary }: CompletionCurtainProps) {
         <span className="cc-expand-chevron" aria-hidden>
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </span>
-      </button>
+        {onDismiss && (
+          <button
+            className="cc-close-btn"
+            title="彻底隐藏"
+            aria-label="彻底隐藏"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDismiss()
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
 
       {expanded && (
         <div className="cc-body">

@@ -20,7 +20,7 @@
   <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
   <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Tests-2700%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-10%2C000%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
 </p>
 
 ---
@@ -197,6 +197,18 @@ graph TD
 3. **Prefix-Cache Optimization**:
    DeepSeek V4 bills cache misses up to 50× more than cache hits. Tianshu's prompt engine is architected around prefix-cache optimization (including Ice Mirror 3-zone cache anchors and frozen-prefix matching), reaching a steady-state **95–99% cache hit rate** on long sessions and substantially cutting API cost.
 
+### Engineering Metrics
+
+| Metric | Value |
+|--------|-------|
+| TUI source (TypeScript, excl. tests) | 770 files / ~159k lines |
+| Test code | 922 files / ~152k lines |
+| Test cases (node:test) | **10,000+**, test : source ≈ **1 : 1** |
+| Type checking | `tsc` strict + `noUncheckedIndexedAccess`, zero errors |
+| Prefix-cache hit rate | 95–99% steady state, measured on long sessions |
+
+Agent core logic (multi-turn loops, tool pipelines, context compaction) is notoriously hard to test, and most open-source agents ship with thin coverage. This project maintains a near 1:1 test-to-source ratio, and every incident fix ships with a regression test. Full methodology and reproduction commands: [Engineering Metrics](docs/engineering-metrics.md).
+
 ### Tianshu vs. MiMo-Code vs. Claude Code
 
 > The table reflects each project's publicly documented focus at the time of writing. "—" means the capability is not a publicly highlighted feature, not necessarily that it is absent. Corrections welcome via issue/PR.
@@ -339,7 +351,7 @@ Node.js 22 · TypeScript strict (`noUncheckedIndexedAccess`) · T9 ANSI renderin
 
 ```bash
 npx tsc --noEmit                                    # typecheck
-npm exec -- tsx --test src/**/__tests__/*.test.ts   # all tests (2700+)
+npm test                                             # all tests (10,000+ cases)
 npm run build                                        # tsup bundle
 node dist/main.js                                    # launch TUI
 node dist/main.js -p "fix the typo"                  # headless mode

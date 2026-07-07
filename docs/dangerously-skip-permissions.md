@@ -1,15 +1,20 @@
-# Dangerously Skip Permissions（全授权审批跳过）
+# Dangerously Skip Permissions（全授权审批跳过 / YOLO 模式）
 
-Rivet 支持类似 Claude Code `--dangerously-skip-permissions` 的全授权模式，用于开发者长期无人值守执行任务时跳过所有交互式审批提示。
+天枢支持类似 Claude Code `--dangerously-skip-permissions` 的全授权模式（即 YOLO 模式），用于开发者长期无人值守执行任务时跳过所有交互式审批提示。
 
-## 模式总览
+## 三档权限（Manual / Auto / YOLO）
 
-| 模式 | 配置值 | 行为 |
-|---|---|---|
-| 智能安全 | `auto-safe` | 默认推荐：低风险可自动通过，高风险仍询问；bash 写操作仍询问，除非 allowlist 命中。 |
-| 手动 | `manual` | 按工具自身 `requiresApproval` 判断，需要时询问。 |
-| 自动接受 | `auto-accept` | 跳过常规审批，但历史兼容语义下不保证显式覆盖所有硬安全分支。 |
-| 全授权跳过 | `dangerously-skip-permissions` | 跳过审批 gate 的所有确认弹窗，包括高风险命令、bash 写操作、工具自身审批要求。 |
+所有模式通过 `/permission` 统一管理，桌面端设置面板同步配置。
+
+| 模式 | 命令 | 行为 |
+|------|------|------|
+| **Manual** | `/permission manual` | 每个高风险工具都弹确认。最大控制。 |
+| **Auto**（默认） | `/permission auto [轮次]` | 低/无风险自动执行，高风险仍确认。可选每 N 轮暂停检查点。 |
+| **YOLO** | `/permission yolo confirm` | 全自动执行，无刹车无打扰。回滚兜底。需二次确认。 |
+
+Auto 模式下可配**检查点间隔**：`/permission auto 25` 表示每 25 轮暂停并同步进度摘要，确认方向后继续。设为 0 则关闭（默认关）。桌面端在设置面板的「Auto 检查点」区域直接配置。
+
+## YOLO 模式（等价于 dangerously-skip-permissions）
 
 ## 临时启用
 

@@ -474,11 +474,39 @@ const TASK_STATUS_GLYPH: Record<TasksWorkerStatus, string> = {
   escalated: '↑',
 }
 
+/** 状态 → 语义色（running 主色、passed 成功、failed 错误、blocked/escalated 警告）。 */
+function taskStatusColor(status: TasksWorkerStatus, theme: RivetTheme): string {
+  switch (status) {
+    case 'running': return theme.primary
+    case 'passed': return theme.success
+    case 'failed': return theme.error ?? theme.warning
+    default: return theme.warning
+  }
+}
+
 /** done/total 进度条（复用 worker 面板风格）。 */
-function tasksProgressBar(done: number, total: number, width = 8): string {
+function tasksProgressBar(done: number, total: number, width = 10): string {
   if (total <= 0) return '░'.repeat(width)
   const filled = Math.min(width, Math.round((done / total) * width))
   return '█'.repeat(filled) + '░'.repeat(width - filled)
+}
+
+/** stringWidth 感知的 padEnd/截断：CJK/emoji 占 2 格也能对齐。 */
+function fitDisplay(text: string, width: number): string {
+  if (width <= 0) return ''
+  let out = ''
+  let w = 0
+  for (const ch of text) {
+    const cw = stringWidth(ch)
+    if (w + cw > width) {
+      // 溢出：末位补省略号（若有空间）
+      if (w < width) { out += '…'; w += 1 }
+      break
+    }
+    out += ch
+    w += cw
+  }
+  return out + ' '.repeat(Math.max(0, width - w))
 }
 
 // ── Model Picker ───────────────────────────────────────────────
@@ -640,6 +668,16 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
   return lines
 }
 
+/** filter 切换指示（标题栏内联 tab）：当前项高亮，其余 dim。 */
+function tasksFilterTabs(filter: TasksFilter, theme: RivetTheme): string {
+  const tabs: [TasksFilter, string][] = [['running', '运行中'], ['completed', '已完成'], ['all', '全部']]
+  return tabs
+    .map(([key, label]) => key === filter
+      ? color(label, theme.primary, { bold: true })
+      : color(label, theme.dim))
+    .join(color(' · ', theme.dim))
+}
+
 export function renderTasks(
   data: TasksData,
   width: number,
@@ -648,55 +686,73 @@ export function renderTasks(
   selectedIndex = -1,
 ): string[] {
   const lines: string[] = []
-  const title = data.filter === 'completed' ? '◆ 已完成的子代理'
-    : data.filter === 'all' ? '◆ 全部子代理'
-      : '◆ 运行中的子代理'
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar(title, width, theme))
+  lines.push(formatTitleBar(`${color('◆ 子代理任务', theme.secondary, { bold: true })}   ${tasksFilterTabs(data.filter, theme)}`, width, theme))
+  lines.push(frameDivider(width, theme))
 
-  const maxEntries = Math.max(1, height - 5)
+  const maxEntries = Math.max(1, height - 6) // top + title + divider + footer + bottom = 5, -1 安全余量
 
-  // 逐组渲染：组头（进度条 + done/total）后跟 worker 行。多组时以
+  // 逐组渲染：组头（进度条 + 语义色计数）后跟 worker 行。多组时以
   // 序号区分（parentToolId 是不透明的 tool id，不直接展示）。
   const body: string[] = []
   const selectable: { workerId: string; bodyIndex: number }[] = []
   const multiGroup = data.groups.length > 1
+  const inner = width - 2
+
   data.groups.forEach((g, gi) => {
-    const bar = color(tasksProgressBar(g.done, g.total), theme.muted)
-    const counts = color(`${g.done}/${g.total} done`, theme.muted)
-    const failedNote = g.failed > 0 ? color(`  ${g.failed} failed`, theme.warning) : ''
-    const groupTitle = multiGroup ? `group ${gi + 1}` : 'fleet'
-    body.push(` ${color('◆', theme.primary)} ${groupTitle}  ${bar} ${counts}${failedNote}`)
+    // 组头：进度条填充段用语义色（全过→success，有失败→warning，其余→primary）
+    const barColor = g.total > 0 && g.done === g.total ? theme.success
+      : g.failed > 0 ? theme.warning
+        : theme.primary
+    const barW = 10
+    const filledN = g.total > 0 ? Math.min(barW, Math.round((g.done / g.total) * barW)) : 0
+    const bar = color('█'.repeat(filledN), barColor) + color('░'.repeat(barW - filledN), theme.dim)
+    const countParts: string[] = [color(`${g.done}/${g.total} 完成`, theme.muted)]
+    if (g.running > 0) countParts.push(color(`◐${g.running} 运行`, theme.primary))
+    if (g.failed > 0) countParts.push(color(`✗${g.failed} 失败`, theme.warning))
+    const groupTitle = multiGroup ? `批次 ${gi + 1}` : '任务组'
+    body.push(` ${color('◆', theme.primary)} ${color(groupTitle, theme.secondary)}  ${bar}  ${countParts.join(color(' · ', theme.dim))}`)
+
     for (const w of g.workers) {
       selectable.push({ workerId: w.workerId, bodyIndex: body.length })
       const glyph = TASK_STATUS_GLYPH[w.status] ?? '·'
-      const glyphColored = w.status === 'running'
-        ? color(glyph, theme.primary)
-        : w.status === 'passed'
-          ? color(glyph, theme.success)
-          : color(glyph, theme.warning)
+      const glyphColored = color(glyph, taskStatusColor(w.status, theme))
       // unread：终态但用户还没打开 detail —— 行首圆点提示（CC 未读结果对标）。
       // 无色纯字符：选中行会被 slice(3) 替换为光标前缀，带 ANSI 会被切坏。
       const unreadMark = w.unread ? '●' : ' '
-      const label = `${w.shortLabel}·${w.profile}`.slice(0, 22).padEnd(22)
-      // 计数列：工具调用数 + token 数（缺省省略，宽度不足时被 detailMax 挤掉）
+
+      // 三段式：`  ●◐ label(固定列)  activity(弹性)  stats(右对齐)`
+      const labelW = Math.min(22, Math.max(12, Math.floor(inner * 0.28)))
+      const label = fitDisplay(`${w.shortLabel}·${w.profile}`, labelW)
+
       const statParts: string[] = []
       if (w.toolUseCount && w.toolUseCount > 0) statParts.push(`⚙${w.toolUseCount}`)
       if (w.tokenCount && w.tokenCount > 0) statParts.push(`${formatTokenCount(w.tokenCount)}tok`)
-      const stats = statParts.length > 0 ? color(` ${statParts.join(' ')}`, theme.muted) : ''
-      const activity = w.activity ? ` ${w.activity}` : ''
-      const elapsed = color(`(${formatElapsed(w.elapsedMs)})`, theme.muted)
-      const detailMax = Math.max(0, width - 34 - stringWidth(stats) - stringWidth(elapsed))
-      const detail = activity.slice(0, detailMax)
-      body.push(`  ${unreadMark}${glyphColored} ${label}${stats}${detail} ${elapsed}`)
+      statParts.push(formatElapsed(w.elapsedMs))
+      let statsPlain = statParts.join(' · ')
+
+      // prefix(2sp+unread+glyph+1sp=5) + label + 2 gap + activity + 2 gap + stats + 1 右边距
+      let activityW = inner - 5 - labelW - 2 - stringWidth(statsPlain) - 3
+      if (activityW < 4 && statParts.length > 1) {
+        // 窄屏降级：只留耗时列
+        statsPlain = statParts[statParts.length - 1]!
+        activityW = inner - 5 - labelW - 2 - stringWidth(statsPlain) - 3
+      }
+      const activity = fitDisplay(w.activity ?? '', Math.max(0, activityW))
+      const stats = color(statsPlain, theme.muted)
+      const labelColored = w.status === 'running' ? label : color(label, theme.muted)
+      body.push(`  ${unreadMark}${glyphColored} ${labelColored}  ${activity}  ${stats}`)
     }
+    // 组间空行（最后一组后不加）
+    if (gi < data.groups.length - 1) body.push('')
   })
 
   if (selectable.length === 0) {
-    const emptyText = data.filter === 'completed' ? ' (no completed workers)'
-      : data.filter === 'all' ? ' (no workers)'
-        : ' (no running workers)'
-    body.push(color(emptyText, theme.muted))
+    const emptyText = data.filter === 'completed' ? '（暂无已完成的子代理）'
+      : data.filter === 'all' ? '（暂无子代理）'
+        : '（暂无运行中的子代理 · Tab 切换筛选）'
+    body.push('')
+    body.push(color(`  ${emptyText}`, theme.muted))
   }
 
   const selectedBodyIndex = selectedIndex >= 0 && selectedIndex < selectable.length
@@ -717,15 +773,13 @@ export function renderTasks(
   }
 
   const runningCount = data.groups.reduce((n, g) => n + g.workers.filter(w => w.status === 'running').length, 0)
-  const visibleCount = data.groups.reduce((n, g) => n + g.workers.length, 0)
   const summaryParts: string[] = []
   if (data.filter === 'running' || data.filter === 'all') {
-    summaryParts.push(`${runningCount} running`)
+    summaryParts.push(`${runningCount} 运行中`)
   }
   if (data.filter === 'completed' || data.filter === 'all') {
-    summaryParts.push(`${data.completedCount} completed`)
+    summaryParts.push(`${data.completedCount} 已完成`)
   }
-  if (summaryParts.length === 0) summaryParts.push(`${visibleCount} workers`)
   const summary = summaryParts.join(' · ')
   // 分隔符收紧为 " · "：frameFooter 溢出时从前截断，summary 在最前面，
   // f/x 键位加入后 80 列下过长会把计数吃掉。
@@ -1114,35 +1168,46 @@ export function renderFleetDetail(worker: FleetWorkerView, width: number, height
   const lines: string[] = []
   lines.push(formatBorder(width, theme))
 
-  // Title: status glyph + worker label
+  // Title: status glyph + worker label + status word（同色，一眼判断终态）
   const statusGlyph = worker.terminal
     ? (worker.status === 'passed' ? '✓' : worker.status === 'failed' ? '✗' : '⚠')
     : '◐'
   const statusColor = worker.terminal
     ? (worker.status === 'passed' ? theme.success : worker.status === 'failed' ? theme.error : theme.warning)
     : theme.primary
-  lines.push(formatTitleBar(`${color(statusGlyph, statusColor)} ${worker.shortLabel}`, width, theme))
+  lines.push(formatTitleBar(
+    `${color(`${statusGlyph} ${worker.shortLabel}`, statusColor, { bold: true })} ${color(`· ${worker.status}`, statusColor)}`,
+    width, theme,
+  ))
   lines.push(frameDivider(width, theme))
 
-  // Detail rows
+  // Detail rows：标签列右对齐固定宽度，值列对齐成表
   const rows: [string, string][] = []
   rows.push(['Profile', worker.profile])
-  rows.push(['Status', worker.status])
   if (worker.authority) rows.push(['Authority', worker.authority])
+  if (worker.model) rows.push(['Model', worker.model])
+  rows.push(['Elapsed', formatElapsed(worker.elapsedMs)])
+  const statBits: string[] = []
+  if (worker.toolUseCount > 0) statBits.push(`⚙ ${worker.toolUseCount} tools`)
+  if (worker.tokenCount > 0) statBits.push(`${formatTokenCount(worker.tokenCount)} tokens`)
+  if (statBits.length > 0) rows.push(['Usage', statBits.join(' · ')])
   rows.push(['Parent', worker.parentToolId])
-  rows.push(['Elapsed', worker.elapsedMs > 1000 ? `${(worker.elapsedMs / 1000).toFixed(1)}s` : `${worker.elapsedMs}ms`])
 
+  const labelW = Math.max(...rows.map(([l]) => l.length))
   for (const [label, value] of rows) {
-    lines.push(padLine(` ${color(label, theme.muted)}: ${color(value, theme.secondary)}`, width, theme))
+    lines.push(padLine(`  ${color(label.padStart(labelW), theme.muted)}  ${color(value, theme.secondary)}`, width, theme))
   }
 
   // Activity log (ring buffer — newest last; fallback to single activity line)
-  const activityLog = worker.activityLog ?? (worker.activity ? [worker.activity] : [])
+  const activityLog = worker.activityLog?.length ? worker.activityLog : (worker.activity ? [worker.activity] : [])
   if (activityLog.length > 0) {
     lines.push(padLine('', width, theme))
-    lines.push(padLine(` ${color('Activity Log:', theme.muted)}`, width, theme))
-    for (const entry of activityLog) {
-      lines.push(padLine(`   ${color('⎿', theme.dim)} ${color(entry, theme.secondary)}`, width, theme))
+    lines.push(padLine(`  ${color('活动日志', theme.muted, { bold: true })}`, width, theme))
+    // 高度预算内展示最新条目（newest last），末行留给 footer
+    const room = Math.max(1, height - lines.length - 3)
+    const shown = activityLog.slice(-room)
+    for (const entry of shown) {
+      lines.push(padLine(`    ${color('⎿', theme.dim)} ${color(entry, theme.secondary)}`, width, theme))
     }
   }
 

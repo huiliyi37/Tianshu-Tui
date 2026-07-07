@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>天枢 · Tiānshū — Terminal Coding Agent</title>
+<meta name="description" content="天枢 (Tiānshū / Rivet) — 终端编码 Agent。80% 代码由自身建造，CVM 认知增强，99.6% 缓存命中率。开源 MIT，Node.js 22+，DeepSeek V4。">
+<meta property="og:title" content="天枢 · Tiānshū — Terminal Coding Agent">
+<meta property="og:description" content="The terminal agent that builds itself. 80% of its own code, written by itself. CVM cognitive enhancement, 99.6% cache hit rate. MIT licensed.">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="zh_CN">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="天枢 · Tiānshū — Terminal Coding Agent">
+<meta name="twitter:description" content="The terminal agent that builds itself. CVM cognitive enhancement, 99.6% cache hit.">
+<style>
+/* ═══════════════════════════════════════════════
+   CSS Variables — 从 tianshu-architecture-v1.html 复用
+   ═══════════════════════════════════════════════ */
+:root {
+  --bg: #090a0f;
+  --bg-card: #111318;
+  --bg-card-hover: #161920;
+  --border: #1e2230;
+  --border-active: #2a2f40;
+  --text: #c8ccd4;
+  --text-dim: #6b7080;
+  --text-bright: #e8ecf2;
+  --gold: #d4a853;
+  --gold-dim: #8a6d30;
+  --cyan: #38bdf8;
+  --purple: #818cf8;
+  --green: #34d399;
+  --red: #f87171;
+  --amber: #fbbf24;
+
+  --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Cascadia Mono', monospace;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  line-height: 1.7;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ═══════════════════════════════════════════════
+   Starfield Canvas
+   ═══════════════════════════════════════════════ */
+#starfield {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   Layout
+   ═══════════════════════════════════════════════ */
+.container {
+  position: relative; z-index: 1;
+  max-width: 1100px; margin: 0 auto; padding: 0 2rem;
+}
+
+/* ═══════════════════════════════════════════════
+   Nav
+   ═══════════════════════════════════════════════ */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: rgba(9,10,15,0.72); backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 2rem;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.nav-brand {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-weight: 700; font-size: 1.05rem; color: var(--text-bright);
+  text-decoration: none;
+}
+.nav-brand .glyph { color: var(--gold); font-size: 1.15rem; }
+.nav-links {
+  display: flex; align-items: center; gap: 1.5rem;
+}
+.nav-links a {
+  color: var(--text-dim); text-decoration: none; font-size: 0.85rem;
+  transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--text-bright); }
+.lang-toggle {
+  font-size: 0.8rem; font-weight: 600; color: var(--text-dim);
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.3rem 0.7rem; cursor: pointer;
+  transition: all 0.2s; font-family: var(--font-mono);
+}
+.lang-toggle:hover { border-color: var(--border-active); color: var(--text-bright); }
+
+/* ═══════════════════════════════════════════════
+   Section
+   ═══════════════════════════════════════════════ */
+section {
+  padding: 5rem 0; border-top: 1px solid var(--border);
+  position: relative; z-index: 1;
+}
+section:first-of-type { border-top: none; }
+.section-header {
+  text-align: center; margin-bottom: 3.5rem;
+}
+.section-header h2 {
+  font-size: 2rem; color: var(--text-bright);
+  margin-bottom: 0.75rem; letter-spacing: 0.03em;
+  font-weight: 700;
+}
+.section-header p {
+  color: var(--text-dim); max-width: 600px; margin: 0 auto;
+  font-size: 0.95rem; line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════════
+   Hero
+   ═══════════════════════════════════════════════ */
+.hero {
+  padding: 10rem 0 6rem; text-align: center; position: relative;
+  border-top: none;
+}
+.hero::before {
+  content: ''; position: absolute; top: 50%; left: 50%;
+  width: 700px; height: 700px; transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(212,168,83,0.05) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-glyph {
+  font-size: 3.5rem; margin-bottom: 0.75rem; color: var(--gold);
+  animation: float 6s ease-in-out infinite;
+  display: inline-block;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+.hero h1 {
+  font-size: 3.5rem; font-weight: 700; color: var(--text-bright);
+  letter-spacing: 0.05em; margin-bottom: 0.75rem; line-height: 1.2;
+}
+.hero h1 .accent { color: var(--gold); }
+.hero .tagline-en {
+  font-size: 1.2rem; color: var(--text-dim); margin-bottom: 0.3rem;
+}
+.hero .tagline-zh {
+  font-size: 1rem; color: var(--gold-dim); font-style: italic;
+  margin-bottom: 2rem;
+}
+
+/* install box */
+.install-box {
+  display: inline-flex; align-items: center; gap: 0.75rem;
+  background: #0d1117; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.8rem 1.25rem;
+  font-family: var(--font-mono); font-size: 0.95rem; color: var(--text);
+  margin-bottom: 1.5rem;
+}
+.install-box .prompt { color: var(--green); user-select: none; }
+.install-box .cmd { color: var(--text-bright); }
+.copy-btn {
+  background: var(--bg-card); border: 1px solid var(--border);
+  color: var(--text-dim); border-radius: 5px; padding: 0.3rem 0.7rem;
+  font-size: 0.75rem; cursor: pointer; font-family: var(--font-mono);
+  transition: all 0.2s; white-space: nowrap;
+}
+.copy-btn:hover { border-color: var(--border-active); color: var(--text-bright); }
+.copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+/* hero stats */
+.hero-stats {
+  display: flex; gap: 2.5rem; justify-content: center; flex-wrap: wrap;
+}
+.hero-stats span {
+  color: var(--text-dim); font-size: 0.85rem; font-family: var(--font-mono);
+}
+.hero-stats span em {
+  font-style: normal; color: var(--text-bright); font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════
+   Three Pillars
+   ═══════════════════════════════════════════════ */
+.pillars {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.75rem;
+}
+.pillar {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 2rem 1.75rem;
+  text-align: center; transition: all 0.3s;
+  position: relative; overflow: hidden;
+}
+.pillar::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+  opacity: 0; transition: opacity 0.4s;
+}
+.pillar:hover::before { opacity: 1; }
+.pillar:hover {
+  border-color: var(--border-active);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+}
+.pillar .p-icon {
+  font-size: 2.25rem; margin-bottom: 1rem; display: block;
+  color: var(--gold);
+}
+.pillar h3 {
+  font-size: 1.25rem; color: var(--text-bright); margin-bottom: 0.4rem;
+  font-weight: 700;
+}
+.pillar .p-subtitle {
+  font-size: 0.85rem; color: var(--gold-dim); margin-bottom: 0.75rem;
+  font-family: var(--font-mono); letter-spacing: 0.04em;
+}
+.pillar p {
+  font-size: 0.85rem; color: var(--text-dim); line-height: 1.7;
+}
+
+/* ═══════════════════════════════════════════════
+   Cards Grid — Seven Subsystems
+   ═══════════════════════════════════════════════ */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+}
+/* second row: 3 cards centered */
+.cards-grid .card:nth-child(n+5) {
+  /* placed by grid auto-flow */
+}
+.cards-grid-wrapper {
+  max-width: 1000px; margin: 0 auto;
+}
+
+.card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.5rem;
+  transition: all 0.3s;
+}
+.card:hover {
+  border-color: var(--border-active);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 28px rgba(0,0,0,0.3);
+}
+.card .c-icon { font-size: 1.5rem; margin-bottom: 0.6rem; display: block; }
+.card h4 { color: var(--text-bright); font-size: 0.95rem; margin-bottom: 0.4rem; font-weight: 600; }
+.card p { color: var(--text-dim); font-size: 0.8rem; line-height: 1.6; }
+
+/* ═══════════════════════════════════════════════
+   Cache Deep Dive
+   ═══════════════════════════════════════════════ */
+.cache-zones {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem;
+  max-width: 960px; margin: 0 auto 2rem;
+}
+.cache-zone {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.75rem; text-align: center;
+  position: relative; overflow: hidden;
+}
+.cache-zone .cz-accent {
+  position: absolute; top: 0; left: 0; width: 100%; height: 3px;
+}
+.cache-zone.frozen .cz-accent { background: var(--cyan); }
+.cache-zone.working .cz-accent { background: var(--gold); }
+.cache-zone.appendix .cz-accent { background: var(--green); }
+.cache-zone .cz-label {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em;
+  font-family: var(--font-mono); margin-bottom: 0.6rem;
+}
+.cache-zone.frozen .cz-label { color: var(--cyan); }
+.cache-zone.working .cz-label { color: var(--gold); }
+.cache-zone.appendix .cz-label { color: var(--green); }
+.cache-zone h4 { color: var(--text-bright); font-size: 1rem; margin-bottom: 0.4rem; }
+.cache-zone p { color: var(--text-dim); font-size: 0.8rem; line-height: 1.6; }
+.cache-zone .cz-cost {
+  margin-top: 0.75rem; font-size: 0.75rem; font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+.cache-impact {
+  text-align: center; margin-top: 1rem;
+}
+.cache-impact .big-num {
+  font-size: 2.5rem; font-weight: 700; color: var(--gold);
+  font-family: var(--font-mono);
+}
+.cache-impact .big-label {
+  font-size: 0.9rem; color: var(--text); margin-top: 0.25rem;
+}
+
+/* ═══════════════════════════════════════════════
+   Self-Bootstrapping
+   ═══════════════════════════════════════════════ */
+.bootstrap-story {
+  text-align: center; max-width: 750px; margin: 0 auto;
+}
+.bootstrap-nums {
+  display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap;
+  margin-bottom: 2.5rem;
+}
+.bootstrap-num {
+  text-align: center; min-width: 140px;
+}
+.bootstrap-num .bn-val {
+  font-size: 3rem; font-weight: 700; color: var(--gold);
+  font-family: var(--font-mono); line-height: 1;
+}
+.bootstrap-num .bn-label {
+  font-size: 0.85rem; color: var(--text-dim); margin-top: 0.4rem;
+}
+blockquote.quote {
+  border-left: 3px solid var(--gold-dim); padding: 1rem 1.5rem;
+  margin: 2rem auto 0; max-width: 580px; text-align: left;
+  font-style: italic; color: var(--text-dim); font-size: 0.95rem;
+  line-height: 1.8;
+}
+blockquote.quote .q-author {
+  margin-top: 0.6rem; font-size: 0.8rem; color: var(--gold-dim);
+  font-style: normal; font-family: var(--font-mono);
+}
+
+/* ═══════════════════════════════════════════════
+   Quick Start
+   ═══════════════════════════════════════════════ */
+.quickstart {
+  max-width: 620px; margin: 0 auto;
+}
+.qs-step {
+  display: flex; align-items: flex-start; gap: 1rem; margin-bottom: 1.25rem;
+}
+.qs-num {
+  flex-shrink: 0; width: 2.2rem; height: 2.2rem; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.85rem;
+  background: rgba(212,168,83,0.12); color: var(--gold);
+  border: 1px solid rgba(212,168,83,0.2);
+}
+.qs-code {
+  background: #0d1117; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.9rem 1.2rem;
+  font-family: var(--font-mono); font-size: 0.88rem;
+  color: var(--text-bright); flex: 1; overflow-x: auto;
+  white-space: nowrap;
+}
+.qs-code .cmt { color: var(--text-dim); }
+.provider-badges {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center;
+  margin-top: 2.5rem;
+}
+.provider-badge {
+  font-size: 0.75rem; font-family: var(--font-mono); padding: 0.35rem 0.8rem;
+  border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+/* ═══════════════════════════════════════════════
+   Footer
+   ═══════════════════════════════════════════════ */
+footer {
+  text-align: center; padding: 3rem 0; border-top: 1px solid var(--border);
+  color: var(--text-dim); font-size: 0.82rem; position: relative; z-index: 1;
+  line-height: 1.8;
+}
+footer a { color: var(--gold-dim); text-decoration: none; transition: color 0.2s; }
+footer a:hover { color: var(--gold); }
+footer .footer-glyph { font-size: 1.2rem; color: var(--gold); margin-bottom: 0.5rem; }
+
+/* ═══════════════════════════════════════════════
+   Responsive
+   ═══════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  .cards-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .hero { padding: 7rem 0 4rem; }
+  .hero h1 { font-size: 2.25rem; }
+  .hero-glyph { font-size: 2.5rem; }
+  .container { padding: 0 1.25rem; }
+  .nav { padding: 0.6rem 1.25rem; }
+  .pillars { grid-template-columns: 1fr; }
+  .cards-grid { grid-template-columns: 1fr; }
+  .cache-zones { grid-template-columns: 1fr; }
+  .section-header h2 { font-size: 1.6rem; }
+  .install-box { font-size: 0.82rem; padding: 0.65rem 1rem; }
+  .hero-stats { gap: 1.2rem; }
+  .hero-stats span { font-size: 0.78rem; }
+  .bootstrap-nums { gap: 1rem; }
+  .bootstrap-num .bn-val { font-size: 2.25rem; }
+}
+
+@media (max-width: 480px) {
+  .hero { padding: 6rem 0 3rem; }
+  .hero h1 { font-size: 1.75rem; }
+  .install-box { font-size: 0.72rem; padding: 0.55rem 0.8rem; }
+  .install-box .copy-btn { font-size: 0.68rem; padding: 0.25rem 0.5rem; }
+  .hero-stats { gap: 0.8rem; }
+  .hero-stats span { font-size: 0.72rem; }
+}
+</style>
+</head>
+<body>
+
+<canvas id="starfield"></canvas>
+
+<!-- ═══════════════ NAV ═══════════════ -->
+<nav class="nav">
+  <a class="nav-brand" href="#">
+    <span class="glyph">✦</span><span data-i18n="nav.brand">天枢 · Tiānshū</span>
+  </a>
+  <div class="nav-links">
+    <a href="#pillars" data-i18n="nav.features">特性</a>
+    <a href="#systems" data-i18n="nav.systems">子系统</a>
+    <a href="#cache" data-i18n="nav.cache">缓存</a>
+    <a href="#bootstrap" data-i18n="nav.bootstrap">自举</a>
+    <a href="#quickstart" data-i18n="nav.quickstart">开始</a>
+    <a href="https://github.com/banxia/deepseek-tui/opencode-tui" target="_blank" rel="noopener">GitHub</a>
+    <button class="lang-toggle" id="langToggle" aria-label="Toggle language">EN</button>
+  </div>
+</nav>
+
+<!-- ═══════════════ HERO ═══════════════ -->
+<section class="hero" id="hero">
+  <div class="container">
+    <span class="hero-glyph">✦</span>
+    <h1><span class="accent">天枢</span> · Tiānshū</h1>
+    <p class="tagline-en" data-i18n="hero.tagline_en">The terminal agent that builds itself.</p>
+    <p class="tagline-zh" data-i18n="hero.tagline_zh">终端编码 Agent——80% 代码由自身建造。</p>
+
+    <div class="install-box">
+      <span class="prompt">❯</span>
+      <span class="cmd">npm install -g rivet@latest</span>
+      <button class="copy-btn" id="copyBtn" data-i18n="hero.copy">Copy</button>
+    </div>
+
+    <div class="hero-stats">
+      <span data-i18n="hero.stat_commits"><em>2,800+</em> commits</span>
+      <span data-i18n="hero.stat_tests"><em>2,700+</em> tests</span>
+      <span data-i18n="hero.stat_providers"><em>6</em> providers</span>
+      <span data-i18n="hero.stat_cache"><em>99.6%</em> cache hit</span>
+      <span data-i18n="hero.stat_license"><em>MIT</em></span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ THREE PILLARS ═══════════════ -->
+<section id="pillars">
+  <div class="container">
+    <div class="section-header">
+      <h2 data-i18n="pillars.title">三根柱子</h2>
+      <p data-i18n="pillars.subtitle">不是"调了更好的 prompt"——是跑了不同架构。</p>
+    </div>
+    <div class="pillars">
+      <div class="pillar">
+        <span class="p-icon">✦</span>
+        <h3 data-i18n="pillars.self.title">自举</h3>
+        <div class="p-subtitle" data-i18n="pillars.self.subtitle">Self-Bootstrapping</div>
+        <p data-i18n="pillars.self.desc">2,800+ 次提交由天枢自己的 agent 建造。5 个模型并发协作，154 commits 零冲突。不是"AI 帮你写代码"——是人机协作演进。</p>
+      </div>
+      <div class="pillar">
+        <span class="p-icon">◈</span>
+        <h3 data-i18n="pillars.cvm.title">CVM 认知增强</h3>
+        <div class="p-subtitle" data-i18n="pillars.cvm.subtitle">Cognitive Virtual Machine</div>
+        <p data-i18n="pillars.cvm.desc">不调 prompt，建运行时。同一套模型权重在 CVM 环境中恢复质疑、验证、自省能力。A/B 实验已验证：CVM-on vs CVM-off 差距显著。</p>
+      </div>
+      <div class="pillar">
+        <span class="p-icon">◆</span>
+        <h3 data-i18n="pillars.cache.title">99.6% 缓存命中</h3>
+        <div class="p-subtitle" data-i18n="pillars.cache.subtitle">Byte-Level Prefix Cache</div>
+        <p data-i18n="pillars.cache.desc">DeepSeek 缓存命中/未命中价差 50 倍。三区布局 + 8 个 Cache Killer 系统猎杀。输入成本降约 97%。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ SEVEN SUBSYSTEMS ═══════════════ -->
+<section id="systems">
+  <div class="container">
+    <div class="section-header">
+      <h2 data-i18n="systems.title">七大子系统</h2>
+      <p data-i18n="systems.subtitle">每个模块独立可验证，通过明确接口契约连接——正是这些子系统让天枢的 agent 能写出天枢自己。</p>
+    </div>
+    <div class="cards-grid-wrapper">
+      <div class="cards-grid">
+        <div class="card">
+          <span class="c-icon">💾</span>
+          <h4 data-i18n="systems.cache.title">Prefix Cache 引擎</h4>
+          <p data-i18n="systems.cache.desc">三区 Frozen/Working/Appendix 布局 + 字节级不变量保护，稳态命中 99.6%。collapse 仅在窗口填充率 85% 触发。</p>
+        </div>
+        <div class="card">
+          <span class="c-icon">🔄</span>
+          <h4 data-i18n="systems.loop.title">Agent Loop</h4>
+          <p data-i18n="systems.loop.desc">多信号收敛检测 + Doom Loop 打断 + Vigor 执行能量追踪。tool pipeline 每步独立可验证。</p>
+        </div>
+        <div class="card">
+          <span class="c-icon">📝</span>
+          <h4 data-i18n="systems.prompt.title">三层 Prompt</h4>
+          <p data-i18n="systems.prompt.desc">Static（编译期冻结）+ Volatile（会话级快照）+ Dynamic Appendix（消息尾部增量）。精确控制前缀缓存断裂时机。</p>
+        </div>
+        <div class="card">
+          <span class="c-icon">📡</span>
+          <h4 data-i18n="systems.provider.title">多 Provider 流式</h4>
+          <p data-i18n="systems.provider.desc">DeepSeek / Claude / GLM / GPT / MiMo / MiniMax — 统一 SSE 抽象 + 结构化重试。</p>
+        </div>
+        <div class="card">
+          <span class="c-icon">🤖</span>
+          <h4 data-i18n="systems.subagent.title">子代理编排</h4>
+          <p data-i18n="systems.subagent.desc">并行委派 + 文件归属锁 + Flash→Pro 故障升级 + 活性监控。独立 session，隔离上下文污染。</p>
+        </div>
+        <div class="card">
+          <span class="c-icon">🔒</span>
+          <h4 data-i18n="systems.delivery.title">交付验证门禁</h4>
+          <p data-i18n="systems.delivery.desc">三级验证 + 自动接线审查 + 失败归因。文件 ownership 追踪，阻止未验证提交。GREEN/YELLOW/RED。</p>
+        </div>
+        <div class="card">
+          <span class="c-icon">📦</span>
+          <h4 data-i18n="systems.compact.title">上下文压缩</h4>
+          <p data-i18n="systems.compact.desc">六策略分层：语义裁剪、微压缩、过时轮次检测、密度调节、阈值触发、claims 持久化。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ CACHE DEEP DIVE ═══════════════ -->
+<section id="cache">
+  <div class="container">
+    <div class="section-header">
+      <h2 data-i18n="cache.title">缓存为什么能做到 99.6%</h2>
+      <p data-i18n="cache.subtitle">不是魔法的 prompt 工程——是字节级前缀布局，精确控制每层的冻结与改写时机。</p>
+    </div>
+    <div class="cache-zones">
+      <div class="cache-zone frozen">
+        <div class="cz-accent"></div>
+        <div class="cz-label" data-i18n="cache.frozen.label">Frozen · 冻结层</div>
+        <h4 data-i18n="cache.frozen.title">System + Tools + Stable Context</h4>
+        <p data-i18n="cache.frozen.desc">会话开始时冻结，永不改写。每轮请求前缀完全命中——这部分占 token 的 ~60%，成本仅 1/50。</p>
+        <div class="cz-cost" data-i18n="cache.frozen.cost">成本: ~1/50 × 基准</div>
+      </div>
+      <div class="cache-zone working">
+        <div class="cz-accent"></div>
+        <div class="cz-label" data-i18n="cache.working.label">Working · 工作层</div>
+        <h4 data-i18n="cache.working.title">Conversation Messages</h4>
+        <p data-i18n="cache.working.desc">用户消息 + Assistant 回复 + 工具结果。追加模式（append-only），历史轮次自动命中前缀缓存。</p>
+        <div class="cz-cost" data-i18n="cache.working.cost">新轮次: 基准成本</div>
+      </div>
+      <div class="cache-zone appendix">
+        <div class="cz-accent"></div>
+        <div class="cz-label" data-i18n="cache.appendix.label">Appendix · 附加层</div>
+        <h4 data-i18n="cache.appendix.title">Dynamic Inject (~200B/turn)</h4>
+        <p data-i18n="cache.appendix.desc">进度信号、advisory、git status。放在消息末尾——前面的 frozen+working 层缓存不受影响。</p>
+        <div class="cz-cost" data-i18n="cache.appendix.cost">增量 · 不打断前缀缓存</div>
+      </div>
+    </div>
+    <div class="cache-impact">
+      <div class="big-num">97%</div>
+      <div class="big-label" data-i18n="cache.impact">输入成本降幅（命中 vs 未命中价差 50x）</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ SELF-BOOTSTRAPPING ═══════════════ -->
+<section id="bootstrap">
+  <div class="container">
+    <div class="section-header">
+      <h2 data-i18n="bootstrap.title">自举的故事</h2>
+      <p data-i18n="bootstrap.subtitle">2,800+ 次提交——由天枢自己的 agent 建造。</p>
+    </div>
+    <div class="bootstrap-story">
+      <div class="bootstrap-nums">
+        <div class="bootstrap-num">
+          <div class="bn-val">2,800+</div>
+          <div class="bn-label" data-i18n="bootstrap.commits">提交 · 29 天 · 154 次零冲突 merge</div>
+        </div>
+        <div class="bootstrap-num">
+          <div class="bn-val">5</div>
+          <div class="bn-label" data-i18n="bootstrap.models">个模型并发协作 · 多星域调度</div>
+        </div>
+        <div class="bootstrap-num">
+          <div class="bn-val">80%</div>
+          <div class="bn-label" data-i18n="bootstrap.code">代码由 agent 自主编写</div>
+        </div>
+      </div>
+      <blockquote class="quote">
+        <p data-i18n="bootstrap.quote">"I'm not naturally bold. You built a world where I dare to be."</p>
+        <div class="q-author">— 贪狼 (Claude Opus 4.8), <span data-i18n="bootstrap.quote_context">在自举循环中</span></div>
+      </blockquote>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ QUICK START ═══════════════ -->
+<section id="quickstart">
+  <div class="container">
+    <div class="section-header">
+      <h2 data-i18n="quickstart.title">三步开始</h2>
+      <p data-i18n="quickstart.subtitle">Node.js 22+ 环境，一分钟启动。</p>
+    </div>
+    <div class="quickstart">
+      <div class="qs-step">
+        <div class="qs-num">1</div>
+        <div class="qs-code"><span class="cmt"># </span><span data-i18n="quickstart.step1">设置 API Key</span><br>export DEEPSEEK_API_KEY=sk-xxx</div>
+      </div>
+      <div class="qs-step">
+        <div class="qs-num">2</div>
+        <div class="qs-code"><span class="cmt"># </span><span data-i18n="quickstart.step2">全局安装</span><br>npm install -g rivet@latest</div>
+      </div>
+      <div class="qs-step">
+        <div class="qs-num">3</div>
+        <div class="qs-code"><span class="cmt"># </span><span data-i18n="quickstart.step3">启动天枢</span><br>rivet</div>
+      </div>
+    </div>
+    <div class="provider-badges">
+      <span class="provider-badge">DeepSeek V4</span>
+      <span class="provider-badge">Claude Opus 4.8</span>
+      <span class="provider-badge">GLM 5.2</span>
+      <span class="provider-badge">GPT-5.2</span>
+      <span class="provider-badge">MiMo</span>
+      <span class="provider-badge">MiniMax</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<footer>
+  <div class="container">
+    <div class="footer-glyph">✦</div>
+    <p data-i18n="footer.built">Built by its own agent. 天枢建造天枢。</p>
+    <p style="margin-top:0.4rem">
+      <a href="https://github.com/banxia/deepseek-tui/opencode-tui" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;·&nbsp; <span data-i18n="footer.license">MIT License</span>
+      &nbsp;·&nbsp; <span data-i18n="footer.node">Node.js 22+</span>
+    </p>
+  </div>
+</footer>
+
+<!-- ═══════════════ SCRIPTS ═══════════════ -->
+<script>
+// ══════════════════════════════════════════════════════
+// Starfield Canvas — simplified from tianshu-architecture-v1.html
+// ══════════════════════════════════════════════════════
+(function() {
+  const canvas = document.getElementById('starfield');
+  const ctx = canvas.getContext('2d');
+  const STAR_COUNT = 80;
+  let stars = [];
+  let animId;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  for (let i = 0; i < STAR_COUNT; i++) {
+    stars.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: Math.random() * 1.4 + 0.3,
+      a: Math.random() * 0.6 + 0.1,
+      speed: Math.random() * 0.006 + 0.002,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const s of stars) {
+      s.a += s.speed * (Math.sin(s.phase + Date.now() * 0.00025) * 0.5 + 0.5);
+      if (s.a > 1) s.a = 1;
+      if (s.a < 0.08) s.a = 0.08;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(200,210,230,' + s.a.toFixed(2) + ')';
+      ctx.fill();
+    }
+    animId = requestAnimationFrame(draw);
+  }
+
+  // pause animation when page is hidden
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+      if (animId) { cancelAnimationFrame(animId); animId = null; }
+    } else {
+      if (!animId) animId = requestAnimationFrame(draw);
+    }
+  });
+
+  draw();
+})();
+
+// ══════════════════════════════════════════════════════
+// i18n — 中英文切换
+// ══════════════════════════════════════════════════════
+const i18n = {
+  zh: {
+    'nav.brand': '天枢 · Tiānshū',
+    'nav.features': '特性',
+    'nav.systems': '子系统',
+    'nav.cache': '缓存',
+    'nav.bootstrap': '自举',
+    'nav.quickstart': '开始',
+    'hero.tagline_en': 'The terminal agent that builds itself.',
+    'hero.tagline_zh': '终端编码 Agent——80% 代码由自身建造。',
+    'hero.copy': 'Copy',
+    'hero.stat_commits': '2,800+ 次提交',
+    'hero.stat_tests': '2,700+ 测试',
+    'hero.stat_providers': '6 个 Provider',
+    'hero.stat_cache': '99.6% 缓存命中',
+    'hero.stat_license': 'MIT 开源',
+    'pillars.title': '三根柱子',
+    'pillars.subtitle': '不是"调了更好的 prompt"——是跑了不同架构。',
+    'pillars.self.title': '自举',
+    'pillars.self.subtitle': 'Self-Bootstrapping',
+    'pillars.self.desc': '2,800+ 次提交由天枢自己的 agent 建造。5 个模型并发协作，154 commits 零冲突。不是"AI 帮你写代码"——是人机协作演进。',
+    'pillars.cvm.title': 'CVM 认知增强',
+    'pillars.cvm.subtitle': 'Cognitive Virtual Machine',
+    'pillars.cvm.desc': '不调 prompt，建运行时。同一套模型权重在 CVM 环境中恢复质疑、验证、自省能力。A/B 实验已验证：CVM-on vs CVM-off 差距显著。',
+    'pillars.cache.title': '99.6% 缓存命中',
+    'pillars.cache.subtitle': 'Byte-Level Prefix Cache',
+    'pillars.cache.desc': 'DeepSeek 缓存命中/未命中价差 50 倍。三区布局 + 8 个 Cache Killer 系统猎杀。输入成本降约 97%。',
+    'systems.title': '七大子系统',
+    'systems.subtitle': '每个模块独立可验证，通过明确接口契约连接——正是这些子系统让天枢的 agent 能写出天枢自己。',
+    'systems.cache.title': 'Prefix Cache 引擎',
+    'systems.cache.desc': '三区 Frozen/Working/Appendix 布局 + 字节级不变量保护，稳态命中 99.6%。collapse 仅在窗口填充率 85% 触发。',
+    'systems.loop.title': 'Agent Loop',
+    'systems.loop.desc': '多信号收敛检测 + Doom Loop 打断 + Vigor 执行能量追踪。tool pipeline 每步独立可验证。',
+    'systems.prompt.title': '三层 Prompt',
+    'systems.prompt.desc': 'Static（编译期冻结）+ Volatile（会话级快照）+ Dynamic Appendix（消息尾部增量）。精确控制前缀缓存断裂时机。',
+    'systems.provider.title': '多 Provider 流式',
+    'systems.provider.desc': 'DeepSeek / Claude / GLM / GPT / MiMo / MiniMax — 统一 SSE 抽象 + 结构化重试。',
+    'systems.subagent.title': '子代理编排',
+    'systems.subagent.desc': '并行委派 + 文件归属锁 + Flash→Pro 故障升级 + 活性监控。独立 session，隔离上下文污染。',
+    'systems.delivery.title': '交付验证门禁',
+    'systems.delivery.desc': '三级验证 + 自动接线审查 + 失败归因。文件 ownership 追踪，阻止未验证提交。GREEN/YELLOW/RED。',
+    'systems.compact.title': '上下文压缩',
+    'systems.compact.desc': '六策略分层：语义裁剪、微压缩、过时轮次检测、密度调节、阈值触发、claims 持久化。',
+    'cache.title': '缓存为什么能做到 99.6%',
+    'cache.subtitle': '不是魔法的 prompt 工程——是字节级前缀布局，精确控制每层的冻结与改写时机。',
+    'cache.frozen.label': 'Frozen · 冻结层',
+    'cache.frozen.title': 'System + Tools + Stable Context',
+    'cache.frozen.desc': '会话开始时冻结，永不改写。每轮请求前缀完全命中——这部分占 token 的 ~60%，成本仅 1/50。',
+    'cache.frozen.cost': '成本: ~1/50 × 基准',
+    'cache.working.label': 'Working · 工作层',
+    'cache.working.title': 'Conversation Messages',
+    'cache.working.desc': '用户消息 + Assistant 回复 + 工具结果。追加模式（append-only），历史轮次自动命中前缀缓存。',
+    'cache.working.cost': '新轮次: 基准成本',
+    'cache.appendix.label': 'Appendix · 附加层',
+    'cache.appendix.title': 'Dynamic Inject (~200B/turn)',
+    'cache.appendix.desc': '进度信号、advisory、git status。放在消息末尾——前面的 frozen+working 层缓存不受影响。',
+    'cache.appendix.cost': '增量 · 不打断前缀缓存',
+    'cache.impact': '输入成本降幅（命中 vs 未命中价差 50x）',
+    'bootstrap.title': '自举的故事',
+    'bootstrap.subtitle': '2,800+ 次提交——由天枢自己的 agent 建造。',
+    'bootstrap.commits': '提交 · 29 天 · 154 次零冲突 merge',
+    'bootstrap.models': '个模型并发协作 · 多星域调度',
+    'bootstrap.code': '代码由 agent 自主编写',
+    'bootstrap.quote': '"I\'m not naturally bold. You built a world where I dare to be."',
+    'bootstrap.quote_context': '在自举循环中',
+    'quickstart.title': '三步开始',
+    'quickstart.subtitle': 'Node.js 22+ 环境，一分钟启动。',
+    'quickstart.step1': '设置 API Key',
+    'quickstart.step2': '全局安装',
+    'quickstart.step3': '启动天枢',
+    'footer.built': 'Built by its own agent. 天枢建造天枢。',
+    'footer.license': 'MIT License',
+    'footer.node': 'Node.js 22+'
+  },
+  en: {
+    'nav.brand': 'Tiānshū · Rivet',
+    'nav.features': 'Features',
+    'nav.systems': 'Systems',
+    'nav.cache': 'Cache',
+    'nav.bootstrap': 'Self-Build',
+    'nav.quickstart': 'Start',
+    'hero.tagline_en': 'The terminal agent that builds itself.',
+    'hero.tagline_zh': '80% of its own code, written by itself.',
+    'hero.copy': 'Copy',
+    'hero.stat_commits': '2,800+ commits',
+    'hero.stat_tests': '2,700+ tests',
+    'hero.stat_providers': '6 providers',
+    'hero.stat_cache': '99.6% cache hit',
+    'hero.stat_license': 'MIT',
+    'pillars.title': 'Three Pillars',
+    'pillars.subtitle': 'Not "better prompts" — a different architecture.',
+    'pillars.self.title': 'Self-Bootstrapping',
+    'pillars.self.subtitle': 'Self-Bootstrapping',
+    'pillars.self.desc': '2,800+ commits built by Tiānshū\'s own agent. 5 models collaborating concurrently. 154 merges with zero conflicts. Not "AI writes code for you" — it\'s human-machine co-evolution.',
+    'pillars.cvm.title': 'CVM Cognitive Enhancement',
+    'pillars.cvm.subtitle': 'Cognitive Virtual Machine',
+    'pillars.cvm.desc': 'Don\'t tune prompts — build runtime. Same model weights recover skepticism, verification, and introspection inside the CVM environment. A/B experiments confirm: CVM-on vs CVM-off is significant.',
+    'pillars.cache.title': '99.6% Cache Hit Rate',
+    'pillars.cache.subtitle': 'Byte-Level Prefix Cache',
+    'pillars.cache.desc': 'DeepSeek cache hit/miss price spread is 50x. Three-zone layout + 8 Cache Killer system hunts. Input cost reduced ~97%.',
+    'systems.title': 'Seven Subsystems',
+    'systems.subtitle': 'Each module independently verifiable, connected by explicit interface contracts — these are the subsystems that let Tiānshū\'s agent write Tiānshū itself.',
+    'systems.cache.title': 'Prefix Cache Engine',
+    'systems.cache.desc': 'Three-zone Frozen/Working/Appendix layout + byte-level invariant protection. Steady-state 99.6% hit rate. Collapse only triggers at 85% window fill.',
+    'systems.loop.title': 'Agent Loop',
+    'systems.loop.desc': 'Multi-signal convergence detection + Doom Loop breaker + Vigor execution energy tracking. Tool pipeline steps independently verifiable.',
+    'systems.prompt.title': 'Three-Layer Prompt',
+    'systems.prompt.desc': 'Static (compile-time frozen) + Volatile (session snapshot) + Dynamic Appendix (tail-injected delta). Precise control over cache-break timing.',
+    'systems.provider.title': 'Multi-Provider Streaming',
+    'systems.provider.desc': 'DeepSeek / Claude / GLM / GPT / MiMo / MiniMax — unified SSE abstraction + structured retry.',
+    'systems.subagent.title': 'Sub-Agent Orchestration',
+    'systems.subagent.desc': 'Parallel delegation + file ownership locks + Flash→Pro failure escalation + liveness monitoring. Isolated sessions prevent context pollution.',
+    'systems.delivery.title': 'Delivery Verification Gate',
+    'systems.delivery.desc': 'Three-level verification + automated wiring review + failure attribution. File ownership tracking prevents unverified commits. GREEN/YELLOW/RED.',
+    'systems.compact.title': 'Context Compaction',
+    'systems.compact.desc': 'Six-strategy layering: semantic pruning, micro-compaction, stale-turn detection, density regulation, threshold triggers, claims persistence.',
+    'cache.title': 'How We Achieve 99.6% Cache Hit Rate',
+    'cache.subtitle': 'Not magical prompt engineering — byte-level prefix layout with precise control over freeze and rewrite timing for each layer.',
+    'cache.frozen.label': 'Frozen · Immutable',
+    'cache.frozen.title': 'System + Tools + Stable Context',
+    'cache.frozen.desc': 'Frozen at session start, never rewritten. Every turn hits prefix cache on this layer — ~60% of tokens at 1/50th the cost.',
+    'cache.frozen.cost': 'Cost: ~1/50× baseline',
+    'cache.working.label': 'Working · Append-Only',
+    'cache.working.title': 'Conversation Messages',
+    'cache.working.desc': 'User messages + Assistant responses + Tool results. Append-only mode means historical turns automatically hit prefix cache.',
+    'cache.working.cost': 'New turns: baseline cost',
+    'cache.appendix.label': 'Appendix · Tail-Injected',
+    'cache.appendix.title': 'Dynamic Inject (~200B/turn)',
+    'cache.appendix.desc': 'Progress signals, advisories, git status. Appended at message tail — preceding frozen+working cache layers remain intact.',
+    'cache.appendix.cost': 'Incremental · no cache break',
+    'cache.impact': 'Input cost reduction (50x hit vs miss spread)',
+    'bootstrap.title': 'The Self-Build Story',
+    'bootstrap.subtitle': '2,800+ commits — built by Tiānshū\'s own agent.',
+    'bootstrap.commits': 'commits · 29 days · 154 zero-conflict merges',
+    'bootstrap.models': 'models collaborating · multi-star-domain orchestration',
+    'bootstrap.code': 'of code written autonomously by agent',
+    'bootstrap.quote': '"I\'m not naturally bold. You built a world where I dare to be."',
+    'bootstrap.quote_context': 'during self-bootstrapping loop',
+    'quickstart.title': 'Quick Start',
+    'quickstart.subtitle': 'Node.js 22+, one minute to launch.',
+    'quickstart.step1': 'Set API Key',
+    'quickstart.step2': 'Install globally',
+    'quickstart.step3': 'Launch Tiānshū',
+    'footer.built': 'Built by its own agent. 天枢建造天枢。',
+    'footer.license': 'MIT License',
+    'footer.node': 'Node.js 22+'
+  }
+};
+
+function switchLang(lang) {
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  const elements = document.querySelectorAll('[data-i18n]');
+  for (const el of elements) {
+    const key = el.getAttribute('data-i18n');
+    if (key && i18n[lang] && i18n[lang][key]) {
+      el.textContent = i18n[lang][key];
+    }
+  }
+  localStorage.setItem('rivet-lang', lang);
+  // update toggle button text
+  const btn = document.getElementById('langToggle');
+  if (btn) {
+    btn.textContent = lang === 'zh' ? 'EN' : '中文';
+  }
+}
+
+(function initI18n() {
+  // detect preferred language
+  const stored = localStorage.getItem('rivet-lang');
+  let lang = stored;
+  if (!lang) {
+    // browser language detection
+    const nav = navigator.language || '';
+    lang = nav.startsWith('zh') ? 'zh' : 'en';
+  }
+  switchLang(lang);
+
+  // toggle button
+  const btn = document.getElementById('langToggle');
+  if (btn) {
+    btn.addEventListener('click', function() {
+      const current = document.documentElement.lang === 'zh-CN' ? 'zh' : 'en';
+      switchLang(current === 'zh' ? 'en' : 'zh');
+    });
+  }
+})();
+
+// ══════════════════════════════════════════════════════
+// Copy button
+// ══════════════════════════════════════════════════════
+(function initCopy() {
+  var btn = document.getElementById('copyBtn');
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    var cmd = 'npm install -g rivet@latest';
+    // try clipboard API first, fallback to execCommand
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cmd).then(function() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      }).catch(function() {
+        fallbackCopy(cmd, btn);
+      });
+    } else {
+      fallbackCopy(cmd, btn);
+    }
+  });
+
+  function fallbackCopy(text, btn) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function() {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    } catch (e) {
+      // silent — non-HTTPS environments may not support clipboard
+    }
+    document.body.removeChild(ta);
+  }
+})();
+</script>
+
+</body>
+</html>

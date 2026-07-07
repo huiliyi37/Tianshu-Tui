@@ -36,8 +36,8 @@ export interface FormatWelcomeInput {
   approvalMode?: string
 }
 
-/** 3 行头 + 输入框 3 行 + 终端底部状态栏/呼吸余量 ~2 行。 */
-const BANNER_ROWS = 3
+/** 3 行头 + 前后空行 2 行 + 输入框 3 行 + 终端底部状态栏/呼吸余量 ~2 行。 */
+const BANNER_ROWS = 5
 const RESERVED_ROWS = 5
 
 function truncateToWidth(text: string, maxWidth: number): string {
@@ -87,14 +87,20 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   const brand = color('Tianshu Code', theme.primary, { bold: true })
   const version = input.version ? ` ${color(`v${input.version}`, theme.muted)}` : ''
 
-  const modeSuffix = input.approvalMode
-    ? ` ${color('·', theme.dim)} ${color(input.approvalMode, theme.muted)}`
+  // 权限模式短标签——与输入框下方权限行同一口径（yolo 而非全称）。
+  const modeLabel = input.approvalMode === 'dangerously-skip-permissions' ? 'yolo' : input.approvalMode
+  const modeSuffix = modeLabel
+    ? ` ${color('·', theme.dim)} ${color(modeLabel, theme.muted)}`
     : ''
 
+  // 前后各留一行呼吸空行：欢迎块上贴启动日志、下贴历史会话提示/输入框时
+  // 不至于挤成一坨（压抑感的主要来源）。
   const out: string[] = [
+    '',
     `${star}${brand}${version}`,
     `${indent}${input.modelName}${modeSuffix}`,
     `${indent}${color(tildify(input.cwd), theme.muted)}`,
+    '',
   ]
 
   return out.map(line => truncateToWidth(line, cols))

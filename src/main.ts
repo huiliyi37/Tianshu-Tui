@@ -442,7 +442,9 @@ async function main() {
     // 必须在 TUI 接管 stdin 前查询——此处 raw-mode 探测后即恢复。
     const detected = await detectTerminalBackground()
     themeName = autoThemeFor(detected)
-    process.stderr.write(`[T9] Theme auto-detect: ${detected} background → ${themeName}\n`)
+    if (process.env['RIVET_DEBUG']) {
+      process.stderr.write(`[T9] Theme auto-detect: ${detected} background → ${themeName}\n`)
+    }
   }
   if (!setTheme(themeName)) setTheme('tianshu')
   const theme = getTheme()
@@ -453,8 +455,11 @@ async function main() {
   }
   if (ctx.config.ui?.reducedMotion) setReducedMotion(true)
 
-  process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
-  process.stderr.write(`[T9] Session: ${ctx.sessionId.slice(0, 8)}...\n`)
+  // Provider/Model/Session 已在欢迎屏头部展示，常规启动不再重复打印。
+  if (process.env['RIVET_DEBUG']) {
+    process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
+    process.stderr.write(`[T9] Session: ${ctx.sessionId.slice(0, 8)}...\n`)
+  }
 
   // Store heartbeat for shutdown cleanup
   heartbeatInterval = ctx.heartbeatInterval
@@ -1270,7 +1275,7 @@ async function main() {
       }
     } else if (existingMsgCount === 0 && recentSessions.length > 0) {
       app.commitStatic(color(
-        `↺ ${recentSessions.length} 个历史会话 · /resume 选择 · rivet -c 续接最近`,
+        `↺ ${recentSessions.length} 个历史会话 · /resume 恢复`,
         theme.muted,
       ))
     }

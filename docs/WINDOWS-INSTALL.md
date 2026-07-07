@@ -2,11 +2,11 @@
 
 ## 前置条件
 
-### 1. Node.js 22+
+### 1. Node.js 24+
 下载：https://nodejs.org/
 验证：
 ```powershell
-node --version  # 应显示 v22.x.x
+node --version  # 应显示 v24.x.x
 ```
 
 ### 2. Git for Windows

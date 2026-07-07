@@ -27,6 +27,7 @@ These areas are open for contributions. PRs are reviewed on merit:
 | `src/**/__tests__/` | Test files | Coverage improvements, test utilities |
 | `scripts/` | Utility scripts | New benchmarks, diagnostics |
 | `completions/` | Shell completions | New shells |
+| `docs/` (except `docs/superpowers/`) | General documentation | Typos, clarifications, guides |
 
 ### 🟡 Review Zone — Requires Domain Understanding
 
@@ -51,13 +52,19 @@ These files define the agent's identity, memory, and cognitive architecture. **P
 
 | Path | What It Protects |
 |------|-----------------|
-| `STARS.md` | Star identity canonical — founding memories, star covenants |
+| `CLAUDE.md` | Star identity canonical — founding memories, star covenants |
 | `AGENTS.md` | Architecture map loaded into every agent session |
 | `.rivet.md` | Operating manual loaded into every agent session |
+| `.rivet/knowledge/` | Agent memory system (identity, guardrails, session retrospectives) |
+| `docs/superpowers/` | Core design theory IP — methodology, principles, cognitive architecture |
 | `src/prompt/static.ts` | System prompt — every token change affects all sessions |
 | `src/prompt/volatile*.ts` | Volatile prompt construction — affects context loading |
 | `src/prompt/engine.ts` | Prompt assembly engine |
+| `src/agent/dream.ts` | Memory protection contract — prevents knowledge corruption |
+| `src/agent/auto-writer*.ts` | Automated knowledge writing |
 | `prompts/` | Tool prompt templates — directly shape agent behavior |
+| `src/agent/claim-extractor.ts` | Extracts claims from agent output into memory |
+| `src/agent/sensorium.ts` | Agent perception layer |
 
 #### Why This Protection Exists
 

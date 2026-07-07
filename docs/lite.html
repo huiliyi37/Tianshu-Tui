@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>天枢 · Rivet — Terminal Coding Agent</title>
+  <meta name="description" content="天枢 (Rivet) — 终端编码智能体。自举代码库、认知增强、前缀缓存优化。">
+  <style>
+    :root {
+      --bg: #0b0c10;
+      --surface: #15171d;
+      --surface-2: #1e212b;
+      --text: #e6e8ef;
+      --text-dim: #8b92a8;
+      --accent: #ff6b6b;
+      --accent-2: #4ecdc4;
+      --accent-3: #ffe66d;
+      --border: rgba(255,255,255,0.08);
+      --shadow: 0 24px 80px rgba(0,0,0,0.45);
+      --radius: 24px;
+      --radius-sm: 14px;
+      --font-sans: 'SF Pro Display', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+      --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      color-scheme: dark;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Background ambient orbs */
+    .ambient {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.35;
+      animation: float 20s ease-in-out infinite;
+    }
+
+    .orb-1 {
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, var(--accent), transparent 70%);
+      top: -150px; right: -150px;
+      animation-delay: 0s;
+    }
+
+    .orb-2 {
+      width: 400px; height: 400px;
+      background: radial-gradient(circle, var(--accent-2), transparent 70%);
+      bottom: -100px; left: -100px;
+      animation-delay: -7s;
+    }
+
+    .orb-3 {
+      width: 300px; height: 300px;
+      background: radial-gradient(circle, var(--accent-3), transparent 70%);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      animation-delay: -14s;
+      opacity: 0.2;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(30px, -30px) scale(1.05); }
+      66% { transform: translate(-20px, 20px) scale(0.95); }
+    }
+
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-weight: 700;
+      font-size: 1.25rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-mark {
+      width: 38px; height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      display: grid;
+      place-items: center;
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      color: #fff;
+    }
+
+    .lang-switch {
+      display: flex;
+      gap: 0.5rem;
+      background: var(--surface);
+      padding: 0.35rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+    }
+
+    .lang-switch button {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      padding: 0.45rem 1rem;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .lang-switch button.active {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      margin-bottom: 5rem;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-bottom: 1.75rem;
+    }
+
+    .hero-badge::before {
+      content: '';
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      box-shadow: 0 0 12px var(--accent-2);
+    }
+
+    .hero h1 {
+      font-size: clamp(2.8rem, 8vw, 5.5rem);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+      margin-bottom: 1.25rem;
+      font-weight: 800;
+    }
+
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2), var(--accent-3));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+      color: var(--text-dim);
+      max-width: 640px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.6;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.9rem 1.6rem;
+      border-radius: 999px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+      box-shadow: 0 10px 30px rgba(255,107,107,0.25);
+    }
+
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+    }
+
+    /* Bento Grid */
+    .bento {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.25rem;
+      margin-bottom: 5rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.75rem;
+      transition: transform 0.3s, border-color 0.3s;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(255,255,255,0.15);
+    }
+
+    .card-large { grid-column: span 2; grid-row: span 2; }
+    .card-wide { grid-column: span 2; }
+    .card-tall { grid-row: span 2; }
+
+    .card-icon {
+      width: 44px; height: 44px;
+      border-radius: var(--radius-sm);
+      display: grid;
+      place-items: center;
+      font-size: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .icon-red { background: rgba(255,107,107,0.12); }
+    .icon-teal { background: rgba(78,205,196,0.12); }
+    .icon-yellow { background: rgba(255,230,109,0.12); }
+    .icon-purple { background: rgba(167,139,250,0.12); }
+
+    .card h3 {
+      font-size: 1.3rem;
+      margin-bottom: 0.6rem;
+      font-weight: 700;
+    }
+
+    .card p {
+      color: var(--text-dim);
+      font-size: 0.95rem;
+      line-height: 1.65;
+    }
+
+    .card .stat {
+      font-size: clamp(3rem, 6vw, 5rem);
+      font-weight: 800;
+      line-height: 1;
+      margin: 1.5rem 0 0.75rem;
+      letter-spacing: -0.04em;
+    }
+
+    .stat-red { color: var(--accent); }
+    .stat-teal { color: var(--accent-2); }
+    .stat-yellow { color: var(--accent-3); }
+
+    .card-code {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1rem 1.25rem;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      margin-top: 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .card-code code {
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .copy {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 0.4rem 0.85rem;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .copy:hover {
+      color: var(--text);
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    .copy.copied {
+      color: var(--accent-2);
+      border-color: var(--accent-2);
+    }
+
+    /* Feature list */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+      margin-bottom: 5rem;
+    }
+
+    .feature {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 1.5rem;
+    }
+
+    .feature h4 {
+      font-size: 1rem;
+      margin-bottom: 0.5rem;
+      color: var(--text);
+    }
+
+    .feature p {
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 3rem 0;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+      border-top: 1px solid var(--border);
+    }
+
+    footer a {
+      color: var(--text);
+      text-decoration: none;
+      margin: 0 0.75rem;
+      transition: color 0.2s;
+    }
+
+    footer a:hover {
+      color: var(--accent-2);
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .bento {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .card-large, .card-wide {
+        grid-column: span 2;
+      }
+      .features {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 560px) {
+      .wrap { padding: 1.25rem; }
+      header { margin-bottom: 2.5rem; }
+      .bento, .features {
+        grid-template-columns: 1fr;
+      }
+      .card-large, .card-wide, .card-tall {
+        grid-column: span 1;
+        grid-row: span 1;
+      }
+      .hero-actions { flex-direction: column; align-items: stretch; }
+      .btn { justify-content: center; }
+    }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      .orb { animation: none; }
+      * { transition: none !important; }
+    }
+
+    /* Language states */
+    [data-lang="en"] .zh { display: none; }
+    [data-lang="zh"] .en { display: none; }
+  </style>
+</head>
+<body>
+  <div class="ambient">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="brand-mark">⚡</div>
+        <span>天枢 · Rivet</span>
+      </div>
+      <div class="lang-switch">
+        <button class="active" data-set-lang="zh">中文</button>
+        <button data-set-lang="en">EN</button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-badge">
+        <span class="zh">自举式终端编码智能体</span>
+        <span class="en">Self-bootstrapping Terminal Coding Agent</span>
+      </div>
+      <h1>
+        <span class="zh">让终端拥有<br>工程级智能</span>
+        <span class="en">Engineering-grade<br>intelligence in your terminal</span>
+      </h1>
+      <p>
+        <span class="zh">天枢用自身代码训练自己：前缀缓存优化、多模型协调、认知增强循环，全部在一颗 rivet 里拧紧。</span>
+        <span class="en">Rivet trains on its own codebase: prefix-cache optimization, multi-model orchestration, and cognitive enhancement loops, all riveted into one.</span>
+      </p>
+      <div class="hero-actions">
+        <a href="#install" class="btn btn-primary">
+          <span class="zh">立即安装</span>
+          <span class="en">Install Now</span>
+        </a>
+        <a href="https://github.com/opencode-ai/rivet" class="btn btn-secondary" target="_blank" rel="noopener">
+          GitHub
+        </a>
+      </div>
+    </section>
+
+    <section class="bento">
+      <div class="card card-large">
+        <div class="card-icon icon-red">🛠</div>
+        <h3>
+          <span class="zh">自举建造</span>
+          <span class="en">Self-Bootstrapping</span>
+        </h3>
+        <p>
+          <span class="zh">超过 80% 的代码由天枢自身迭代生成。它既是产品，也是自己的第一个重度用户。</span>
+          <span class="en">Over 80% of the codebase is iteratively generated by Rivet itself. It is both the product and its own first power user.</span>
+        </p>
+        <div class="card stat stat-red">80%+</div>
+        <p class="zh">自生成代码占比</p>
+        <p class="en">Self-generated code</p>
+      </div>
+
+      <div class="card card-tall">
+        <div class="card-icon icon-teal">🧠</div>
+        <h3>
+          <span class="zh">认知增强</span>
+          <span class="en">Cognitive VM</span>
+        </h3>
+        <p>
+          <span class="zh">CVM 把单次对话扩展为可观测、可度量的认知过程：意图路由、证据收集、反身自审、交付门禁。</span>
+          <span class="en">CVM turns each conversation into an observable, measurable cognitive process: intent routing, evidence gathering, self-review, and delivery gates.</span>
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon icon-yellow">⚡</div>
+        <h3>
+          <span class="zh">缓存命中</span>
+          <span class="en">Cache Hit</span>
+        </h3>
+        <div class="card stat stat-yellow">99.6<span style="font-size:0.5em;color:var(--text-dim)">%</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-icon icon-purple">🔒</div>
+        <h3>
+          <span class="zh">安全优先</span>
+          <span class="en">Safety First</span>
+        </h3>
+        <p>
+          <span class="zh">fail-closed 设计、路径沙箱、不可逆操作硬闸门。</span>
+          <span class="en">Fail-closed design, path sandboxing, hard gates for irreversible operations.</span>
+        </p>
+      </div>
+
+      <div class="card card-wide" id="install">
+        <div class="card-icon icon-teal">⌘</div>
+        <h3>
+          <span class="zh">一行命令开始</span>
+          <span class="en">One-liner Install</span>
+        </h3>
+        <p>
+          <span class="zh">克隆、安装、构建，然后说出你的需求。</span>
+          <span class="en">Clone, install, build, then tell it what you need.</span>
+        </p>
+        <div class="card-code">
+          <code>git clone https://github.com/opencode-ai/rivet.git && cd rivet && npm install && npm run build</code>
+          <button class="copy" data-copy="git clone https://github.com/opencode-ai/rivet.git && cd rivet && npm install && npm run build">
+            <span class="zh">复制</span>
+            <span class="en">Copy</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="features">
+      <div class="feature">
+        <h4>
+          <span class="zh">多模型路由</span>
+          <span class="en">Multi-Model Routing</span>
+        </h4>
+        <p>
+          <span class="zh">DeepSeek、GLM、OpenAI 兼容接口按任务自动切换。</span>
+          <span class="en">DeepSeek, GLM, OpenAI-compatible APIs auto-switched per task.</span>
+        </p>
+      </div>
+      <div class="feature">
+        <h4>
+          <span class="zh">子智能体编排</span>
+          <span class="en">Subagent Orchestration</span>
+        </h4>
+        <p>
+          <span class="zh">worker 会话隔离、预算控制、并行审查。</span>
+          <span class="en">Isolated worker sessions, budget control, parallel review.</span>
+        </p>
+      </div>
+      <div class="feature">
+        <h4>
+          <span class="zh">流式 TUI</span>
+          <span class="en">Streaming TUI</span>
+        </h4>
+        <p>
+          <span class="zh">基于 Ink 6 的 React 终端界面，实时反馈思考与工具调用。</span>
+          <span class="en">Ink 6 + React terminal UI with live reasoning and tool-call feedback.</span>
+        </p>
+      </div>
+      <div class="feature">
+        <h4>
+          <span class="zh">上下文压缩</span>
+          <span class="en">Context Compression</span>
+        </h4>
+        <p>
+          <span class="zh">修剪、蒸馏、水印阈值，保持长对话稳定。</span>
+          <span class="en">Pruning, distillation, watermark thresholds for stable long conversations.</span>
+        </p>
+      </div>
+      <div class="feature">
+        <h4>
+          <span class="zh">逐请求遥测</span>
+          <span class="en">Per-Request Telemetry</span>
+        </h4>
+        <p>
+          <span class="zh">cache-log.jsonl 落盘每条请求，便于诊断命中率。</span>
+          <span class="en">cache-log.jsonl persists every request for hit-rate diagnosis.</span>
+        </p>
+      </div>
+      <div class="feature">
+        <h4>
+          <span class="zh">知识沉淀</span>
+          <span class="en">Knowledge Persistence</span>
+        </h4>
+        <p>
+          <span class="zh">项目级 memory.jsonl 跨会话继承经验与规则。</span>
+          <span class="en">Project-level memory.jsonl inherits experience and rules across sessions.</span>
+        </p>
+      </div>
+    </section>
+
+    <footer>
+      <p>
+        <span class="zh">天枢 · Rivet — 为认真的工程师打造的终端编码伙伴</span>
+        <span class="en">Rivet — a terminal coding companion for serious engineers</span>
+      </p>
+      <p style="margin-top: 1rem;">
+        <a href="docs/index.html">Full Page</a>
+        <a href="docs/mini-index.html">Mini</a>
+        <a href="docs/lite.html">Lite</a>
+      </p>
+    </footer>
+  </div>
+
+  <script>
+    (function() {
+      const html = document.documentElement;
+      const buttons = document.querySelectorAll('[data-set-lang]');
+      const saved = localStorage.getItem('rivet-lite-lang');
+
+      function setLang(lang) {
+        html.setAttribute('data-lang', lang);
+        localStorage.setItem('rivet-lite-lang', lang);
+        buttons.forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.setLang === lang);
+        });
+      }
+
+      buttons.forEach(btn => {
+        btn.addEventListener('click', () => setLang(btn.dataset.setLang));
+      });
+
+      setLang(saved === 'en' ? 'en' : 'zh');
+
+      document.querySelectorAll('.copy').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const text = btn.dataset.copy;
+          try {
+            await navigator.clipboard.writeText(text);
+            const originalZh = btn.querySelector('.zh')?.textContent || '复制';
+            const originalEn = btn.querySelector('.en')?.textContent || 'Copy';
+            const zhSpan = btn.querySelector('.zh');
+            const enSpan = btn.querySelector('.en');
+            if (zhSpan) zhSpan.textContent = '已复制';
+            if (enSpan) enSpan.textContent = 'Copied';
+            btn.classList.add('copied');
+            setTimeout(() => {
+              if (zhSpan) zhSpan.textContent = originalZh;
+              if (enSpan) enSpan.textContent = originalEn;
+              btn.classList.remove('copied');
+            }, 1500);
+          } catch (err) {
+            console.error('Copy failed', err);
+          }
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

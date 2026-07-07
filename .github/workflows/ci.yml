@@ -11,7 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [22]
+        # engines 钉 24.1.0 且 .npmrc engine-strict=true,低于 24 会在 npm ci 直接被拒
+        node-version: [24]
     steps:
       - uses: actions/checkout@v4
 
@@ -45,7 +46,7 @@ jobs:
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install dependencies

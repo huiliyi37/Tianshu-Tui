@@ -88,7 +88,31 @@ RIVET_NO_SANDBOX=1 rivet
 
 这个文件按工作区隔离，**不会泄漏到其它项目**。
 
-### 2.3 在 dangerously-skip-permissions 下
+### 2.3 配置级常驻授权（Codex 式文件夹权限）
+
+如果你长期需要 agent 访问某些工作区外目录（典型场景：在外层目录打开工作区、代码在子目录/兄弟目录；或希望全盘只读），可以在配置的 `agent.permissions` 里声明常驻授权，会话启动时自动生效、无需审批弹窗：
+
+```jsonc
+// ~/.rivet/config.json 或项目 .rivet-config.json
+{
+  "agent": {
+    "permissions": {
+      // 只读授权：目录及其整个子树可读（写仍会被拦）
+      "additionalReadDirs": ["F:/", "~/reference-repos"],
+      // 读写授权：目录及其整个子树可读写
+      "additionalWriteDirs": ["F:/智慧项目/hardware-saas"]
+    }
+  }
+}
+```
+
+- 路径支持绝对路径和 `~` 前缀；Windows 上正斜杠/反斜杠均可
+- 写一个盘符根（`"F:/"`）即授权整个盘
+- 配置里不存在的路径会被静默跳过（防止拼写错误意外开放未来出现的目录）
+- 授权是会话级内存态，配置文件本身就是持久来源——改配置即改授权
+- CLI 与桌面端（sidecar）都会在会话创建时加载
+
+### 2.4 在 dangerously-skip-permissions 下
 
 如果你启用了 `dangerously-skip-permissions`（见第 3.1 节），天枢会**自动记录**外出路径授权，不再弹窗。这等价于你一次性授权了所有当前需要的目录，但路径校验本身仍在执行。
 
