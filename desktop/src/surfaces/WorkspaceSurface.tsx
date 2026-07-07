@@ -14,6 +14,8 @@ import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
 import { TerminalTabs } from '../components/TerminalTabs'
 import { JobsDock } from '../components/JobsDock'
+import { DelegationOverlay } from '../components/DelegationOverlay'
+import { summarizeDelegation } from '../components/DelegationTree'
 import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
@@ -56,6 +58,18 @@ export function WorkspaceSurface() {
 
   const [isFloatDeckOpen, setIsFloatDeckOpen] = useState(false)
   const deckRef = useRef<HTMLDivElement>(null)
+  const [showDelegation, setShowDelegation] = useState(false)
+  const [jobsHidden, setJobsHidden] = useState(false)
+
+  const runningJobsCount = Object.values(view.jobs).filter((j) => j.status === 'running').length
+  const prevRunningCount = useRef(runningJobsCount)
+
+  useEffect(() => {
+    if (runningJobsCount > prevRunningCount.current) {
+      setJobsHidden(false)
+    }
+    prevRunningCount.current = runningJobsCount
+  }, [runningJobsCount])
 
   useEffect(() => {
     if (!isFloatDeckOpen) return
@@ -252,7 +266,10 @@ export function WorkspaceSurface() {
         </Separator>
         <Panel minSize="30%">
           <div className="conversation">
-            <WorkspaceHeader />
+            <WorkspaceHeader
+              showDelegation={showDelegation}
+              onToggleDelegation={() => setShowDelegation((v) => !v)}
+            />
             <div className="conversation-body">
               <ThreadTabs />
               <Suspense fallback={<SurfaceSkeleton />}>
@@ -280,6 +297,7 @@ export function WorkspaceSurface() {
                     onClose={handleClose}
                     streamStatus={view.streamStatus}
                     onRetryStream={view.retryStream}
+                    onToggleDelegation={setShowDelegation}
                   />
                 ) : (
                    <div className="empty thread-empty onboard">
@@ -391,13 +409,14 @@ export function WorkspaceSurface() {
         </Panel>
       </Group>
 
-      {activeId && Object.keys(view.jobs).length > 0 && (
+      {activeId && !jobsHidden && Object.keys(view.jobs).length > 0 && (
         <JobsDock
           sessionId={activeId}
           jobs={Object.values(view.jobs).sort((a, b) => b.startedAt - a.startedAt)}
           visible={ui.jobsDockVisible}
           onToggle={() => dispatch({ type: 'setJobsDock', visible: !ui.jobsDockVisible })}
           onOpenTerminal={() => dispatch({ type: 'setTerminal', visible: true })}
+          onClose={() => setJobsHidden(true)}
         />
       )}
 
@@ -490,17 +509,34 @@ export function WorkspaceSurface() {
           onDecision={handleApproval}
         />
       )}
+
+      {showDelegation && view.delegation && (
+        <DelegationOverlay
+          nodes={view.delegation}
+          onClose={() => setShowDelegation(false)}
+        />
+      )}
     </div>
   )
 }
 
-function WorkspaceHeader() {
+function WorkspaceHeader({
+  showDelegation,
+  onToggleDelegation,
+}: {
+  showDelegation: boolean
+  onToggleDelegation: () => void
+}) {
   const { t } = useTranslation('shell')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const sessions = useSessions()
   const abortSession = useAbortSession()
   const activeSession = sessions.data?.find((s) => s.id === ui.activeSessionId) ?? null
+
+  const view = useSessionEvents(ui.activeSessionId)
+  const delegation = view.delegation
+  const { total, done, running: runningWorkers } = summarizeDelegation(delegation)
 
   const known = useMemo(() => loadKnownProjects(), [])
   const projects = useMemo(() => deriveProjects(sessions.data ?? [], known), [sessions.data, known])
@@ -596,6 +632,16 @@ function WorkspaceHeader() {
               />
             )}
           </div>
+        )}
+        {onThread && total > 0 && (
+          <button
+            className={`header-action-btn header-delegation-badge ${showDelegation ? 'active' : ''}`}
+            title="查看子代理运行状态"
+            onClick={onToggleDelegation}
+          >
+            <span className={`dp-dot ${runningWorkers > 0 ? 'pulse' : ''}`} />
+            <span>子代理 {done}/{total}</span>
+          </button>
         )}
         <button
           className={`header-action-btn ${ui.terminalVisible ? 'active' : ''}`}

@@ -12,8 +12,6 @@ import { Markdown, closeUnterminatedFence } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { TimelineGroup } from '../components/TimelineGroup'
 import { ArtifactCard } from '../components/ArtifactCard'
-import { DelegationPill } from '../components/DelegationPill'
-import { DelegationOverlay } from '../components/DelegationOverlay'
 import { DelegateDialog } from '../components/DelegateDialog'
 import { CompletionCurtain } from '../components/CompletionCurtain'
 import { RewindOverlay } from '../components/RewindOverlay'
@@ -84,8 +82,9 @@ export function ThreadView(props: {
   /** D2 — live SSE connection state; drives the "updates stopped" banner. */
   streamStatus?: StreamStatus
   onRetryStream?: () => void
+  onToggleDelegation?: (open: boolean) => void
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream, onToggleDelegation } = props
   const { t } = useTranslation('threadView')
   const ui = useUiState()
   const dispatch = useUiDispatch()
@@ -149,7 +148,6 @@ export function ThreadView(props: {
   usePlanModeShortcut(onSetPlanMode ? togglePlanMode : undefined)
   const qc = useQueryClient()
   const [showRewind, setShowRewind] = useState(false)
-  const [showDelegation, setShowDelegation] = useState(false)
   const [showDelegateDialog, setShowDelegateDialog] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   // P1-4 — Side Chat drawer (旁路提问): Cmd+; or the header button toggles.
@@ -573,7 +571,7 @@ export function ThreadView(props: {
   // D3 — composer slash commands: desktop-actionable items + prompt pass-throughs.
   const commands = useMemo<ComposerCommand[]>(() => [
     { name: '/rewind', desc: t('commands.rewind'), run: () => setShowRewind(true) },
-    { name: '/subagents', desc: t('commands.subagents'), run: () => setShowDelegation(true) },
+    { name: '/subagents', desc: t('commands.subagents'), run: () => onToggleDelegation?.(true) },
     { name: '/supervise', desc: t('commands.supervise'), run: () => onSetApprovalMode(levelToMode('supervised')) },
     { name: '/default', desc: t('commands.default'), run: () => onSetApprovalMode(levelToMode('default')) },
     { name: '/autonomous', desc: t('commands.autonomous'), run: () => onSetApprovalMode(levelToMode('autonomous')) },
@@ -1069,12 +1067,6 @@ export function ThreadView(props: {
         return <CompletionCurtain summary={view.completionSummary} />
       })()}
 
-      <DelegationPill
-        nodes={view.delegation}
-        open={showDelegation}
-        onToggle={() => setShowDelegation((v) => !v)}
-      />
-
       <div className="composer-float" ref={composerWrapRef}>
         <div className={`composer-float-inner accent-${activeDomain?.uiPersona.accent ?? 'primary'}`}>
           {view.pendingQuestion && !busy && (
@@ -1175,18 +1167,11 @@ export function ThreadView(props: {
           />
         </div>
       </div>
-      {showDelegation && (
-        <DelegationOverlay
-          nodes={view.delegation}
-          onClose={() => setShowDelegation(false)}
-          onAdopt={(text) => { setInput(text); setShowDelegation(false) }}
-        />
-      )}
       {showDelegateDialog && (
         <DelegateDialog
           sessionId={session.id}
           onClose={() => setShowDelegateDialog(false)}
-          onDispatched={() => setShowDelegation(true)}
+          onDispatched={() => onToggleDelegation?.(true)}
         />
       )}
       {showRewind && (
