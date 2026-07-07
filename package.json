@@ -71,6 +71,9 @@
   "optionalDependencies": {
     "better-sqlite3": "^12.10.0"
   },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.2",
     "@types/better-sqlite3": "^7.6.13",
