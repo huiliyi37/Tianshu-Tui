@@ -174,8 +174,11 @@ export class InputHandler {
   constructor(options: InputHandlerOptions) {
     this.stdin = options.stdin
     this.mode = options.mode ?? 'input'
-    this.escapeTimeoutMs = options.escapeTimeoutMs ?? 40
-    this.stdin.setRawMode(true)
+    this.escapeTimeoutMs = options.escapeTimeoutMs ?? 80
+    // WSL 边缘情况：stdin 可能不是 TTY（如管道输入），setRawMode 会抛错
+    if (this.stdin.isTTY) {
+      try { this.stdin.setRawMode(true) } catch { /* best-effort */ }
+    }
     this.stdin.resume()
     this.stdin.setEncoding('utf8')
     this.stdin.on('data', (data: string) => this.handleData(data))
@@ -230,7 +233,10 @@ export class InputHandler {
     this.pendingData = ''
     this.inputBuffer = ''
     this.stdin.removeAllListeners('data')
-    this.stdin.setRawMode(false)
+    // WSL: 若 stdin 不是 TTY，setRawMode 会抛错
+    if (this.stdin.isTTY) {
+      try { this.stdin.setRawMode(false) } catch { /* best-effort */ }
+    }
     this.stdin.pause()
     this.handlers.clear()
     this.pasteHandlers.clear()

@@ -49,8 +49,17 @@ export interface InputLineDisplayOptions {
 
 export type VimMode = 'normal' | 'insert'
 
-/** Grapheme 分段器（Node 22+）。用于按用户感知字符（CJK/emoji/ZWJ 簇）步进光标。 */
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+/** Grapheme 分段器（Node 22+）。用于按用户感知字符（CJK/emoji/ZWJ 簇）步进光标。
+ * WSL/Alpine 中若 Node.js 运行时缺少 ICU 数据，Intl.Segmenter 会抛出。
+ * 降级到按 code-point 分割（仍正确处理多字节 UTF-8，但不支持 ZWJ emoji 簇）。 */
+let graphemeSegmenter: Intl.Segmenter | null = null
+try {
+  graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+} catch {
+  graphemeSegmenter = null
+}
+
+const GRAPHEME_SEGMENTER = graphemeSegmenter
 
 import stringWidth from 'string-width'
 
@@ -68,8 +77,19 @@ interface GraphemeCache {
 /** 返回字符串中所有 grapheme 边界的 code-unit 偏移（含 0 与末尾）。 */
 function graphemeBoundaries(value: string): number[] {
   const bounds = [0]
-  for (const seg of graphemeSegmenter.segment(value)) {
-    bounds.push(seg.index + seg.segment.length)
+  if (GRAPHEME_SEGMENTER) {
+    for (const seg of GRAPHEME_SEGMENTER.segment(value)) {
+      bounds.push(seg.index + seg.segment.length)
+    }
+  } else {
+    // ICU 数据缺失降级：按 code-point 分割（ZWJ emoji 簇会被拆开，但 CJK/ASCII 正常）
+    let i = 0
+    while (i < value.length) {
+      const cp = value.codePointAt(i)
+      if (cp === undefined) { bounds.push(i); i++; continue }
+      bounds.push(i + (cp > 0xFFFF ? 2 : 1))
+      i += cp > 0xFFFF ? 2 : 1
+    }
   }
   return bounds
 }
