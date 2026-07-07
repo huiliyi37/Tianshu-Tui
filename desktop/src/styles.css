@@ -7422,5 +7422,27 @@ html[data-titlebar="mac"] .workspace-header {
   color: var(--text-strong);
 }
 
+/* ── 完成报告 (CompletionCurtain) 彻底隐藏关闭按钮 ── */
+.cc-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+  margin-left: 6px;
+  border-radius: var(--radius-sm);
+  transition: background 120ms ease, color 120ms ease;
+}
+.cc-close-btn:hover {
+  background: var(--panel-3);
+  color: var(--text-strong);
+}
+
+
 
 
