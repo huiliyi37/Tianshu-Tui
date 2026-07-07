@@ -398,23 +398,23 @@ async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions
   record.exitCode = result.exitCode
   record.agentText = result.json?.text ?? ''
 
-  if (result.exitCode === 0) {
-    try {
-      const patch = execSync('git diff', { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })
-      if (patch.trim()) {
-        record.patch = patch
-        record.status = 'completed'
-      } else {
-        record.status = 'failed'
-        record.error = 'Agent completed but produced no diff'
-      }
-    } catch (diffErr) {
+  // Extract patch regardless of exit code — agent may produce valid fix
+  // even if verification tools (pytest, etc.) are unavailable
+  try {
+    const patch = execSync(
+      'git rev-parse HEAD~1 >/dev/null 2>&1 && git show HEAD || git diff HEAD',
+      { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 },
+    )
+    if (patch.trim()) {
+      record.patch = patch
+      record.status = 'completed'
+    } else {
       record.status = 'failed'
-      record.error = `git diff failed: ${(diffErr as Error).message}`
+      record.error = result.json?.error ?? `Agent exited with code ${result.exitCode}`
     }
-  } else {
+  } catch (diffErr) {
     record.status = 'failed'
-    record.error = result.json?.error ?? `Agent exited with code ${result.exitCode}`
+    record.error = `git diff failed: ${(diffErr as Error).message}`
   }
   record.endedAt = new Date().toISOString()
   return record
