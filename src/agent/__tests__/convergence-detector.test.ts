@@ -1575,4 +1575,95 @@ describe('evaluateConvergence', () => {
         `tsx -e / node --import should be recognized, got score=${result.score.toFixed(2)}`)
     })
   })
+
+  describe('progressive message prefix (repeatCount)', () => {
+    // When buildInjectedMessage receives repeatCount > 0, it should prepend a
+    // "第 N 次提醒" header so the agent knows the nudge isn't new information.
+    // This prevents the static-message noise problem where the same advisory
+    // text is injected turn after turn with zero information value.
+
+    function makeReadOnlyHistory(count: number) {
+      return makeHistory(
+        Array.from({ length: count }, (_, i) => ({
+          tool: 'read_file',
+          target: `file_${i}.ts`,
+        })),
+      )
+    }
+
+    it('no prefix when repeatCount is absent (first emission)', () => {
+      const history = makeReadOnlyHistory(10)
+      const result = evaluateConvergence(baseInput({
+        turn: 11,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        // repeatCount absent → first emission
+      }))
+      if (result.level >= 2 && result.injectedMessage) {
+        // Should NOT contain progressive prefix
+        assert.ok(!result.injectedMessage.includes('第'),
+          `expected no prefix for first emission, got: ${result.injectedMessage.slice(0, 80)}`)
+        assert.ok(!result.injectedMessage.includes('同类提醒'),
+          `expected no repeat notice, got: ${result.injectedMessage.slice(0, 80)}`)
+      }
+    })
+
+    it('no prefix when repeatCount is 0 (first emission, explicit)', () => {
+      const history = makeReadOnlyHistory(10)
+      const result = evaluateConvergence(baseInput({
+        turn: 11,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        repeatCount: 0,
+      }))
+      if (result.level >= 2 && result.injectedMessage) {
+        assert.ok(!result.injectedMessage.includes('第'),
+          `expected no prefix for repeatCount=0, got: ${result.injectedMessage.slice(0, 80)}`)
+      }
+    })
+
+    it('adds progressive prefix on second emission (repeatCount=1)', () => {
+      const history = makeReadOnlyHistory(10)
+      const result = evaluateConvergence(baseInput({
+        turn: 11,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        repeatCount: 1, // second emission
+      }))
+      if (result.level >= 2 && result.injectedMessage) {
+        assert.ok(result.injectedMessage.includes('第 2 次同类提醒'),
+          `expected "第 2 次" prefix, got: ${result.injectedMessage.slice(0, 120)}`)
+        // Second emission: acknowledges prior nudge, tells agent to ignore if fine
+        assert.ok(
+          result.injectedMessage.includes('请忽略') || result.injectedMessage.includes('忽略此'),
+          `expected "请忽略" guidance, got: ${result.injectedMessage.slice(0, 150)}`,
+        )
+      }
+    })
+
+    it('escalates language on third+ emission (repeatCount=3)', () => {
+      const history = makeReadOnlyHistory(10)
+      const result = evaluateConvergence(baseInput({
+        turn: 11,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        repeatCount: 3, // fourth emission → "第 4 次同类提醒"
+      }))
+      if (result.level >= 2 && result.injectedMessage) {
+        assert.ok(result.injectedMessage.includes('第 4 次同类提醒'),
+          `expected "第 4 次" prefix, got: ${result.injectedMessage.slice(0, 120)}`)
+        // Third+ emission: "已多次发出" — stronger escalation
+        assert.ok(result.injectedMessage.includes('已多次发出'),
+          `expected "已多次发出" escalation, got: ${result.injectedMessage.slice(0, 150)}`)
+      }
+    })
+  })
 })

@@ -44,6 +44,10 @@ export interface ConvergenceInput {
    *  Used by tokenEfficiency signal to measure real output cost vs tool calls.
    *  When absent, falls back to the old tool-classification heuristic. */
   outputTokens?: number
+  /** Number of times the SAME message variant has been previously emitted
+   *  (before the current evaluation). Used by buildInjectedMessage to add a
+   *  progressive "第 N 次提醒" prefix — 0 = first time, no prefix. */
+  repeatCount?: number
 }
 
 export interface ConvergenceResult {
@@ -405,7 +409,7 @@ const REPORT_TEXT_MIN_LEN = 200
  * The set of tools that count as "productive" (write/test/commit class).
  * Used by distance-since-productive and read-only penalty logic.
  */
-const PRODUCTIVE_TOOLS = new Set([
+export const PRODUCTIVE_TOOLS = new Set([
   'edit_file', 'write_file', 'hash_edit', 'apply_patch',
   'run_tests', 'bash', 'deliver_task', 'plan_submit', 'plan_close',
 ])
@@ -633,8 +637,23 @@ function buildInjectedMessage(
   deliveryStatus?: string,
   noToolTurnCount?: number,
   productiveStagnation?: boolean,
+  repeatCount?: number,
 ): string {
   const lines: string[] = []
+
+  // Progressive prefix: when the same message variant has been emitted before,
+  // add a "第 N 次提醒" header so the agent knows this isn't new information.
+  // The prefix escalates: first repeat acknowledges prior nudge was ignored;
+  // subsequent repeats tell the agent to ignore if direction is fine.
+  if (repeatCount && repeatCount > 0) {
+    const nth = repeatCount + 1 // this emission is the (repeatCount+1)-th
+    if (repeatCount === 1) {
+      lines.push(`（第 ${nth} 次同类提醒 — 上次提醒后你可能已调整，如果方向没问题请忽略）`)
+    } else {
+      lines.push(`（第 ${nth} 次同类提醒 — 已多次发出，如果方向没问题请忽略此信息）`)
+    }
+    lines.push('')
+  }
 
   // Productive-ratio stagnation variant: model keeps calling read/grep tools
   // (so noToolTurnCount stays 0), but never edits/tests/commits. This catches
@@ -894,7 +913,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   const shouldForceSplit = level >= 3 && !noToolForceAbort
   const shouldKick = level >= 2
   const injectedMessage = (level >= 2)
-    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount, productiveStagnation)
+    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount, productiveStagnation, input.repeatCount)
     : null
 
   return {
