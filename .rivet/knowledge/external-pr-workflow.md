@@ -132,3 +132,32 @@ gh pr close <N> --repo huiliyi37/Tianshu-Tui --comment '<关闭评论>'
 | PR 质量低（无测试、无描述、commit 混乱）| 要求拆分和补充后再提交，或直接 close |
 
 **核心原则**：开发仓库是唯一源头。所有改动先进开发仓库验证，再通过 sync 脚本推到公开仓库。公开仓库的 PR 只作为贡献来源——有价值的手动移植，不直接合并。
+
+## 补充：可直接 merge 的场景
+
+如果 PR 满足以下条件，可以在公开仓库本地 clone 中直接 merge：
+
+- 与 main 无冲突或冲突极小
+- 改动单一类型（纯 bug fix 或纯功能，不混合视觉重写）
+- 有测试覆盖或改动足够简单不需要测试
+- commit 历史清晰（无 revert、无 merge commit）
+
+**但注意 sync 脆弱性**：公开仓库 main 是开发仓库 rsync 单向覆盖的。直接 merge 到公开仓库 main 后，下次 sync 脚本会用开发仓库的版本覆盖公开仓库——merge 的改动可能在下次 sync 中丢失。因此即使能直接 merge，**仍建议先在开发仓库应用改动**，确保 sync 单向一致性。
+
+**例外**：如果 PR 改的文件不在 sync 脚本的 rsync 范围内（如 `.github/`、`LICENSE`、公开仓库独有的文档），则直接 merge 安全。
+
+## 补充：GitHub 贡献者认定
+
+| 处理方式 | 贡献者认定 | 说明 |
+|---------|-----------|------|
+| PR 被 merge（squash 或 merge commit） | ✅ 自动 | 提交者头像出现在仓库 Contributors |
+| PR 被 close + 手动采纳代码 | ❌ 不自动 | 需要在 commit message 加 `Co-authored-by: Name <email>` 手动标注 |
+| PR 被 close + 未采纳 | ❌ | 不认定 |
+
+如果 close 了 PR 但实际采纳了代码，建议在开发仓库的 commit message 中加：
+```
+Co-authored-by: <贡献者名> <邮箱>
+```
+这样 GitHub 会将该 commit 的作者关联到贡献者，在其 profile 的 contribution graph 中可见。邮箱可从 PR 作者的 GitHub profile 获取。如果贡献者未公开邮箱，用 GitHub ID 格式的 noreply 邮箱：`<ID>+<username>@users.noreply.github.com`（如 `67490182+HarriethWiKk@users.noreply.github.com`）。
+
+PR #1 已采纳的 commit（`523a2690`）后续可追加 Co-authored-by 标注（需 amend 或新 commit）。
