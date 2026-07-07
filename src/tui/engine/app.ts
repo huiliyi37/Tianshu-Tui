@@ -332,10 +332,8 @@ export class TuiApp {
   private planTraceProvider?: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null
   /** 当前 plan-mode 状态访问器（返回是否处于 planning） */
   private planModeProvider?: () => boolean
-  /** Shift+Tab 切换 plan/agent 模式（由 main-ansi 注入）。
-   *  skipPicker=true 时跳过 plan-picker 劫持直达进入/退出原语义
-   *  （picker 已打开再按 Shift+Tab 的逃生路径）。 */
-  private planModeToggleHandler?: (opts?: { skipPicker?: boolean }) => void
+  /** Shift+Tab 循环权限模式（由 main 注入）。plan-picker 打开时先关闭再循环。 */
+  private planModeToggleHandler?: () => void
   /** Side panel 状态变化回调（用于持久化到 session metadata） */
   private onSidePanelChange?: (open: boolean) => void
   /** Block stream writer: chunks streaming text into display-sized blocks */
@@ -659,12 +657,10 @@ export class TuiApp {
 
       // ── Global shortcuts (before input line processing) ──────
       if (key.name === 'shift_tab') {
-        // Escape hatch: plan-picker already open (the picker hijack) and the
-        // user presses Shift+Tab again → close it and run the raw toggle.
-        // Without this the key is a dead loop: picker → shift_tab → picker.
+        // plan-picker 打开时先关闭，再循环权限模式（不再从 Shift+Tab 打开 picker）。
         const pickerOpen = this.overlay.isActive() && this.overlay.activeId() === 'plan-picker'
         if (pickerOpen) this.deactivateOverlay()
-        this.planModeToggleHandler?.({ skipPicker: pickerOpen })
+        this.planModeToggleHandler?.()
         this.renderLive()
         return
       }
@@ -2253,8 +2249,8 @@ export class TuiApp {
     this.planModeProvider = provider
   }
 
-  /** Shift+Tab toggles plan mode (enter/exit). Wired from main-ansi. */
-  setPlanModeToggleHandler(handler: (opts?: { skipPicker?: boolean }) => void): void {
+  /** Shift+Tab 循环权限模式。Wired from main.ts. */
+  setPlanModeToggleHandler(handler: () => void): void {
     this.planModeToggleHandler = handler
   }
 

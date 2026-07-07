@@ -528,6 +528,10 @@ interface TuiSlashCommandDef {
   readonly handler: (ctx: SlashHandlerContext) => boolean | Promise<boolean>
 }
 
+/** /plan-mode 退出时的二次确认时间戳（未批准计划放弃护栏）。 */
+let planModeExitArmedAt = 0
+const PLAN_MODE_EXIT_CONFIRM_MS = 3000
+
 const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
   {
     name: '/tools',
@@ -1578,19 +1582,27 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     name: '/plan-mode',
     immediate: true,
     handler(ctx) {
-      const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      // Idempotent re-entry: if already planning, keep the current draft —
-      // re-entering would create a fresh empty draft and orphan the one the
-      // agent is writing to.
+      const { pushStatic, setIsStreaming } = ctx
       if (ctx.agent.getPlanModeState() === 'planning') {
-        const activePath = ctx.agent.getActivePlanFilePath()
-        pushStatic(createLogEntry({ type: 'system', content: `🔍 Plan Mode is already active.${activePath ? `\nActive plan file: \`${activePath}\`` : ''}\n\nUse Shift+Tab or /plan-approve to exit.` }))
+        const now = Date.now()
+        if (planModeExitArmedAt !== 0 && now - planModeExitArmedAt <= PLAN_MODE_EXIT_CONFIRM_MS) {
+          planModeExitArmedAt = 0
+          ctx.agent.exitPlanMode()
+          pushStatic(createLogEntry({ type: 'system', content: 'Plan Mode 已关闭 — 写入操作已解锁。' }))
+        } else {
+          planModeExitArmedAt = now
+          const activePath = ctx.agent.getActivePlanFilePath()
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `🔍 Plan Mode 仍在运行。${activePath ? `\n活动计划文件: \`${activePath}\`` : ''}\n\n⚠ 计划尚未批准。再执行一次 /plan-mode 放弃当前计划并退出，或用 /plan-approve <slug> 批准后执行。`,
+          }))
+        }
         setIsStreaming(false)
         return true
       }
+      planModeExitArmedAt = 0
       ctx.agent.enterPlanMode()
-      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)' }))
+      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)\n\n/plan-mode — exit plan mode (double-confirm if unapproved)' }))
       setIsStreaming(false)
       return true
     },
@@ -3262,7 +3274,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
             // 计划模式恢复：目标会话退出时在 planning 且 draft 仍在 → 重进。
             const restoredPlan = restorePlanModeFromMeta(ctx.agent, ctx.cwd, meta)
             if (restoredPlan) {
-              app.commitStatic(`🔍 已恢复计划模式（draft: ${restoredPlan}）— Shift+Tab 两次或批准计划可退出。`)
+              app.commitStatic(`🔍 已恢复计划模式（draft: ${restoredPlan}）— /plan-mode 退出或批准计划后执行。`)
             }
           } catch { /* panel/plan restore best-effort */ }
         }

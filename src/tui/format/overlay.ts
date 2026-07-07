@@ -939,7 +939,7 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
   return lines
 }
 
-// ── Plan Picker (/plan · Shift+Tab 待批计划选择器) ────────────────
+// ── Plan Picker (/plan-approve 无参 · 待批计划选择器) ────────────────
 
 export interface PlanPickerEntry {
   /** 选择键：plan slug（planPickerExec 收到它去 approve+kickoff）。 */

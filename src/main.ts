@@ -793,7 +793,7 @@ async function main() {
       ]
       return { title: '推理强度 / Reasoning Effort', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
     },
-    // Plan Picker — Shift+Tab / /plan-approve 无参打开的待批计划选择器。
+    // Plan Picker — /plan-approve 无参打开的待批计划选择器。
     // 同步读盘（渲染路径不能 await），只列出等待批准的 submitted 计划。
     planPickerData: () => ({ entries: pendingPlanPickerEntries(), selectedIndex: 0 }),
   }, /* paletteExec: */ (index: number) => {
@@ -1064,67 +1064,34 @@ async function main() {
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
   app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
-  // Shift+Tab exit confirmation window: exiting plan mode abandons an unapproved
-  // plan and unlocks writes, so require a second press within this window instead
-  // of silently unlocking on a single stray keypress.
-  const PLAN_EXIT_CONFIRM_MS = 3000
-  let planExitArmedAt = 0
-  // Picker 劫持只认「本进程启动后新提交」的计划。submitted 状态永不过期，
-  // 历史堆积（本仓库实测 80 个）曾把 Shift+Tab 永久劫持成 picker——
-  // 进不了 plan mode。旧计划仍可通过 /plan 或 palette 打开 picker 查看。
-  const processStartAt = Date.now()
-  app.setPlanModeToggleHandler((opts) => {
+  // Shift+Tab：CC 式流畅三态环 auto-safe → plan → manual → auto-safe。
+  // 每按一次立即推进，无二次确认、无 picker 劫持（选择器走 /plan-approve）。
+  // plan 退出即环推进——未批准的 draft 保留在 .rivet/plans/，不弹确认。
+  // yolo/auto-accept 不进环：按一次直接退回 auto-safe（快速降险出口）。
+  // 环内切换为会话级（不持久化默认值）。
+  app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
-    // 有「新鲜」待批计划时,Shift+Tab 优先弹出选择器(方向键选 + 回车批准并自动
-    // 分波执行),免去手抄 slug。否则回落到「进入/退出 plan mode」原语义。
-    // picker 已打开再按 Shift+Tab → skipPicker(app 层逃生口),直达 toggle。
-    if (!opts?.skipPicker) {
-      const fresh = listPlansSync(agent.cwd)
-        .some(p => p.status === 'submitted' && p.createdAt.getTime() >= processStartAt)
-      if (fresh && pendingPlanPickerEntries().length > 0) {
-        app!.activateOverlay('plan-picker')
-        return
-      }
-    }
-    // CC 式三态环：auto-safe → plan → manual → auto-safe。yolo/auto-accept 不进环
-    // （仍走 /permission 显式切换），它们按 Shift+Tab 只做 plan mode 进出、模式不变。
-    // 环内切换为会话级（不持久化默认值）——与 CC 的 shift+tab cycle 语义一致。
     const setSessionApproval = (mode: import('./agent/loop-types.js').ApprovalMode) => {
       agent.setApprovalMode(mode)
       app!.setApprovalMode(mode)
     }
     if (agent.planModeState === 'planning') {
-      // Two-step confirm: first press arms + warns, second press within the window exits.
-      const now = Date.now()
-      if (planExitArmedAt !== 0 && now - planExitArmedAt <= PLAN_EXIT_CONFIRM_MS) {
-        planExitArmedAt = 0
-        agent.exitPlanMode()
-        if ((agent.config.approvalMode ?? 'auto-safe') === 'auto-safe') {
-          // 环推进：plan 退出落到 manual（逐工具确认）
-          setSessionApproval('manual')
-          app!.commitStatic('Plan Mode 已关闭 → 权限模式 manual（每个高风险工具确认）。Shift+Tab 回到 auto-safe。')
-        } else {
-          app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
-        }
-      } else {
-        planExitArmedAt = now
-        app!.commitStatic('⚠ 计划尚未批准。再按一次 Shift+Tab 放弃当前计划并退出规划模式，或用 /plan-approve <slug> 批准后执行。')
-      }
-    } else if ((agent.config.approvalMode ?? 'auto-safe') === 'manual') {
-      // 环收口：manual → auto-safe
-      planExitArmedAt = 0
-      setSessionApproval('auto-safe')
-      app!.commitStatic('权限模式 → auto-safe（低风险自动执行，高风险确认）。Shift+Tab 进入 Plan Mode。')
-    } else {
-      planExitArmedAt = 0
+      // plan → manual：draft 保留，随时 /plan-mode 或 Shift+Tab 转回来继续
+      agent.exitPlanMode()
+      setSessionApproval('manual')
+      app!.commitStatic('⏵ manual — 每个高风险工具确认（草稿计划已保留）')
+      return
+    }
+    const current = agent.config.approvalMode ?? 'auto-safe'
+    if (current === 'auto-safe') {
+      // auto-safe → plan
       agent.enterPlanMode()
       const path = agent.getActivePlanFilePath()
-      app!.commitStatic([
-        '🔍 Plan Mode 已激活。Write 操作已锁定（活动计划文件除外）。',
-        path ? `\n活动计划文件: \`${path}\`` : '',
-        '\n工作流: 识别关键问题 → delegate_task 调研 → 增量写计划 → ask_user_question 或 plan submit。',
-        '\nShift+Tab 再次切换关闭。/plan-approve · /plan-reject <slug> <反馈>',
-      ].join(''))
+      app!.commitStatic(`⏵ plan mode — 写入已锁定，先规划再执行${path ? `（计划文件: \`${path}\`）` : ''}`)
+    } else {
+      // manual / yolo / auto-accept → auto-safe
+      setSessionApproval('auto-safe')
+      app!.commitStatic('⏵ auto-safe — 低风险自动执行，高风险确认')
     }
   })
   app.setPlanTraceProvider(() => ctx!.agent.planTrace)
@@ -1149,7 +1116,7 @@ async function main() {
         if (!handled) {
           const firstTok = trimmed.split(/\s/)[0]
           const planHint = firstTok?.startsWith('/plan')
-            ? '\n提示: Shift+Tab 打开待批计划选择器,或 /plan-list 查看计划、/plan-approve 无参批准唯一待批计划。'
+            ? '\n提示: /plan-approve 无参打开待批计划选择器，或 /plan-list 查看全部计划。'
             : ''
           app!.commitStatic(`⚠️  Unknown command: ${firstTok}\nType /help for available commands.${planHint}`)
         }
@@ -1313,7 +1280,7 @@ async function main() {
   {
     const restoredPlan = restorePlanModeFromMeta(ctx.agent, ctx.cwd, initialMeta)
     if (restoredPlan) {
-      app.commitStatic(`🔍 已恢复计划模式（draft: ${restoredPlan}）— Shift+Tab 两次或批准计划可退出。`)
+      app.commitStatic(`🔍 已恢复计划模式（draft: ${restoredPlan}）— /plan-mode 退出或批准计划后执行。`)
     }
   }
 

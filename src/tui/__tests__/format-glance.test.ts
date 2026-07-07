@@ -198,9 +198,10 @@ describe('formatPermissionModeLine（输入框下方权限模式行，CC parity�
     assert.ok(plain.includes('shift+tab'), 'should hint cycle key')
   })
 
-  it('plan mode 优先于权限模式', () => {
+  it('plan mode 优先于权限模式，含 shift+tab 提示', () => {
     const plain = stripAnsi(formatPermissionModeLine({ approvalMode: 'manual', planMode: true }, theme))
     assert.ok(plain.includes('⏵ plan mode'), `plan mode wins: ${plain}`)
+    assert.ok(plain.includes('shift+tab'), 'should hint cycle key')
     assert.ok(!plain.includes('manual'))
   })
 

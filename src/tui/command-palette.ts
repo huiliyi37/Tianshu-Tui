@@ -79,7 +79,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/council', description: 'Convene a star-domain council (single round; --rounds 2+ enables debate)' },
     { name: '/plan', description: 'Create implementation plan (writing-plans workflow)' },
     { name: '/write-plan', description: 'Alias of /plan — same writing-plans workflow' },
-    { name: '/plan-mode', description: 'Enter plan authoring mode (Shift+Tab toggles Plan/Agent)' },
+    { name: '/plan-mode', description: 'Enter/exit plan authoring mode (/plan-mode toggles)' },
     { name: '/plan-list', description: 'List submitted plans awaiting approval' },
     { name: '/plan-approve', description: 'Approve a plan and start execution' },
     { name: '/plan-reject', description: 'Reject a plan with feedback for revision' },
