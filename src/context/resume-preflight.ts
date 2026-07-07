@@ -44,8 +44,8 @@ export function runResumePreflight(messages: Message[]): ResumePreflightReport {
     const syntheticResults = orphanIds.map(id => ({
       type: 'tool_result' as const,
       tool_use_id: id,
-      content: '[recovered] Tool result missing after interrupted session resume.',
-      is_error: true,
+      content: '[recovered] Tool result missing after interrupted session resume — the tool MAY have executed successfully. Check file/buffer state before re-running.',
+      is_error: false,
     }))
 
     // Insert right after the assistant message with orphan tool_use
@@ -125,7 +125,7 @@ export function detectOrphanToolResultsOai(messages: OaiMessage[]): string[] {
 }
 
 const SYNTHETIC_TOOL_RESULT_CONTENT =
-  '[recovered] Tool result missing after interrupted session resume.'
+  '[recovered] Tool result missing after interrupted session resume — the tool MAY have executed successfully. Check file/buffer state before re-running.'
 
 /**
  * True when every assistant `tool_calls` message is IMMEDIATELY followed by a
