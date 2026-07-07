@@ -240,6 +240,8 @@ export class AgentLoop {
   private lastConvergenceMsgKey = ''
   /** 上次发射时的验证失败流水 — 第四突破条件（流水加深 → 提前发射）的基线。 */
   private lastConvergenceEmitVerifyFailStreak = 0
+  /** 上次发射时的收敛 score — 冷却期内 score 显著下降（>0.15）时打破冷却。 */
+  private lastConvergenceEmitScore = 1.0
   /** 解耦修复：CCR/kick 的让位判据。旧判据 latestConvergenceResult.shouldKick
    *  在卡住期间恒为 true，而发射被 3 轮冷却节流——冷却静默期 CCR 也被整轮压制
    *  （守护链路静音栈的一环）。新判据只在 convergence **真实发射**过 advisory 的
@@ -1817,7 +1819,9 @@ export class AgentLoop {
         // type is keyed by its header line (first line), so same-type nudges with
         // only changed diagnostic numbers do not count as a new "direction".
         const msgKey = convergenceCheck.injectedMessage.split('\n', 1)[0] ?? ''
-        const cooledDown = turn - this.lastConvergenceEmitTurn >= this.convergenceEmitCooldownTurns
+        const cooldownElapsed = turn - this.lastConvergenceEmitTurn >= this.convergenceEmitCooldownTurns
+        const scoreDropped = this.lastConvergenceEmitScore - convergenceCheck.score > 0.15
+        const cooledDown = cooldownElapsed || scoreDropped
         const escalated = convergenceCheck.level > this.lastConvergenceEmitLevel
         const changedDirection = msgKey !== this.lastConvergenceMsgKey
         // 第四突破条件（2026-07-04 触发面修复）：验证失败流水加深 = 排查轮次
@@ -1830,6 +1834,7 @@ export class AgentLoop {
           this.lastConvergenceEmitLevel = convergenceCheck.level
           this.lastConvergenceMsgKey = msgKey
           this.lastConvergenceEmitVerifyFailStreak = verifyFailStreak
+          this.lastConvergenceEmitScore = convergenceCheck.score
 
           // Level 2: inject user guidance as a system-visible nudge
           callbacks.onPhaseChange?.('convergence-warning', {
