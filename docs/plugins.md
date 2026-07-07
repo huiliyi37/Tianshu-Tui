@@ -111,20 +111,25 @@ Manifest 定义在 `package.json` 的 `tianshu` 字段中（或独立的 `tiansh
 插件工具的 `execute` 函数签名：
 
 ```ts
-async (params: ToolCallParams): Promise<ToolResult>
+async (params): Promise<ToolResult>
 ```
 
-- `params` — 模型传入的参数，类型由 `input_schema` 定义
+- `params` — **扁平的模型参数对象**，字段由 `input_schema` 定义（如 `params.file_path`）。
+  内核加载器在注册阶段包装每个插件工具：管线内部的 `ToolCallParams`（参数嵌套在
+  `input` 字段）由 wrapper 抽取展平后再传给插件，插件作者无需关心管线内部结构。
 - 返回 `{ content: string, isError?: boolean, rawPath?: string }`
 - `rawPath` 用于文件产出，会触发 artifact 持久化和下载入口
 
-路径参数命名约定（内核守卫自动拦截）：
+路径参数命名约定（内核守卫自动拦截并替换）：
 
 | 参数名 | 模式 | 说明 |
 |--------|------|------|
 | `file_path` | read | 读取路径 |
-| `destination_path` | write | 写入路径 |
+| `destination_path` / `output_path` | write | 写入路径 |
 | `path` / `input_path` | read | 通用路径 |
+
+路径参数在校验通过后会被**替换为规范化的绝对路径**（以会话 cwd 为锚），插件内部
+不要再用 `process.cwd()` 解析相对路径——server 多会话模式下两者不一致。
 
 ## 安装与生命周期
 

@@ -136,42 +136,57 @@ function inferPathMode(toolName: string, paramName: string): 'read' | 'write' {
 }
 
 /**
- * Wrap a plugin tool's execute to enforce path safety on file-path parameters.
+ * Wrap a plugin tool's execute as the plugin ABI adapter + path safety guard.
  *
- * Every parameter whose name contains a path-like keyword gets validated through
- * validatePathSafe BEFORE the original execute runs. This closes the gap where
- * plugin tools bypass the core tool pipeline's path guards.
+ * ABI adapter (the load-bearing part): the core pipeline calls
+ * `tool.execute(params: ToolCallParams)` with the model's arguments nested in
+ * `params.input` — but the plugin convention (docs/plugins.md, all first-party
+ * plugins) reads flat arguments (`params.file_path`). Without this adapter
+ * every plugin tool receives undefined arguments in a real session while unit
+ * tests calling the flat shape stay green. The adapter extracts `params.input`
+ * and invokes the plugin with a flat args object, so plugin authors never
+ * need to know ToolCallParams internals.
+ *
+ * Path safety: every parameter with a path-like name is validated through
+ * validatePathSafe BEFORE the plugin runs, and the validated value is
+ * SUBSTITUTED with the canonicalized absolute path — plugins resolving
+ * relative paths against process.cwd() (≠ session cwd in server mode) was a
+ * silent cross-session hazard.
  */
-function wrapPluginTool(tool: Tool, cwd: string): Tool {
+function wrapPluginTool(tool: Tool, loadCwd: string): Tool {
   const originalExecute = tool.execute.bind(tool)
   const props = (tool.definition.input_schema as Record<string, unknown>)?.properties as Record<string, unknown> | undefined
-  if (!props) return tool // no schema properties → nothing to guard
 
-  // Collect path params to validate
   const pathParams: Array<{ key: string; mode: 'read' | 'write' }> = []
-  for (const key of Object.keys(props)) {
+  for (const key of Object.keys(props ?? {})) {
     if (PATH_PARAM_NAMES.has(key)) {
       pathParams.push({ key, mode: inferPathMode(tool.definition.name, key) })
     }
   }
-  if (pathParams.length === 0) return tool // no path params → nothing to guard
 
-  const guardedExecute = async (params: ToolCallParams): Promise<ToolResult> => {
+  const adaptedExecute = async (params: ToolCallParams): Promise<ToolResult> => {
+    const input = params?.input && typeof params.input === 'object' ? params.input : {}
+    const args: Record<string, unknown> = { ...input }
+    // Per-call session cwd wins over load-time cwd (multi-session server).
+    const cwd = typeof params?.cwd === 'string' && params.cwd.length > 0 ? params.cwd : loadCwd
+
     for (const { key, mode } of pathParams) {
-      const value = (params as unknown as Record<string, unknown>)[key]
+      const value = args[key]
       if (typeof value !== 'string' || value.length === 0) continue
 
       const result = validatePathSafe(cwd, value, mode)
       if (!result.ok) {
         return { content: `Path rejected: ${result.error}`, isError: true }
       }
+      // Hand the plugin the canonicalized absolute path, not the raw input.
+      args[key] = result.path
     }
-    return originalExecute(params)
+    return originalExecute(args as unknown as ToolCallParams)
   }
 
   return {
     ...tool,
-    execute: guardedExecute,
+    execute: adaptedExecute,
   }
 }
 
@@ -254,11 +269,14 @@ async function loadOnePlugin(
     }
   }
 
-  // 6b. Wrap plugin tools with path safety guards.
-  //     Plugin tools bypass the core tool pipeline's validatePathSafe —
+  // 6b. Wrap plugin tools with the ABI adapter + path safety guards.
+  //     ABI: pipeline passes args nested in params.input; plugins read flat
+  //     args — the wrapper bridges the two (without it plugin tools receive
+  //     undefined arguments in real sessions).
+  //     Safety: plugin tools bypass the core pipeline's validatePathSafe —
   //     xlsx_read could read ~/.ssh/id_rsa, pdf_create could write anywhere.
-  //     The kernel-level wrapper intercepts file-path params and enforces
-  //     the same validation that built-in tools get.
+  //     The wrapper validates file-path params and substitutes canonicalized
+  //     absolute paths (session-cwd-anchored, not process.cwd()).
   const wrappedTools = tools.map(t => wrapPluginTool(t, cwd))
 
   // 7. Conflict detection — reject entire plugin if any tool name collides
