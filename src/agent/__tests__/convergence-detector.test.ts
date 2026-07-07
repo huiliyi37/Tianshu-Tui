@@ -1048,6 +1048,69 @@ describe('evaluateConvergence', () => {
       assert.equal(result.level, 0,
         `expected level 0 for short window, got ${result.level}`)
     })
+
+    // ── Distance-aware stagnation: real-world incident 9266c3a7 ──
+    // Agent was doing SWE-bench adapter development (8-wave plan, 6/8 done).
+    // Natural rhythm: grep→read→edit→edit→read→read→grep→edit→read→read.
+    // The 6-entry window caught the read-read-grep tail, saw productiveRatio=0,
+    // and fired 120 advisories across 154 internal turns. The fix: measure
+    // distance since the LAST productive tool in full history — if productive
+    // tools are within 2×windowSize records back, it's a read-write alternation,
+    // not stagnation.
+    it('does NOT flag stagnation when recent reads are part of read-write alternation (9266c3a7 pattern)', () => {
+      // 9266c3a7 real pattern: edit→read→read→grep→read→edit→edit→read→read→grep→read→read.
+      // The 6-entry window at the end catches read-read-grep-read-read-read,
+      // but distance since last productive (edit at position 5 from end) = 5.
+      // 5 < 2×6=12 → read-write alternation, not stagnation.
+      const history = makeHistory([
+        { tool: 'edit_file', target: 'swebench-run.ts' },   // pos 0
+        { tool: 'read_file', target: 'swebench-run.ts' },   // pos 1
+        { tool: 'read_file', target: 'swebench-worker.ts' },// pos 2
+        { tool: 'grep', target: 'runAgentInDir' },          // pos 3
+        { tool: 'read_file', target: 'loop.ts' },           // pos 4
+        { tool: 'edit_file', target: 'swebench-run.ts' },   // pos 5  ← last productive
+        { tool: 'edit_file', target: 'swebench-worker.ts' },// pos 6  ← last productive
+        { tool: 'read_file', target: 'swebench-run.ts' },   // pos 7
+        { tool: 'read_file', target: 'swebench-worker.ts' },// pos 8
+        { tool: 'grep', target: 'parallel: parseInt' },     // pos 9
+        { tool: 'read_file', target: 'swebench-run.ts' },   // pos 10
+        { tool: 'read_file', target: 'swebench-worker.ts' },// pos 11
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 20,
+        phaseClass: 'execute',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+      }))
+      // Distance from last edit_file (pos 6) to end (pos 11) = 5 < 12.
+      // This is read-write alternation — productiveStagnation must NOT fire.
+      // The level may still be >= 1 from score-based detection (low editRatio
+      // in window), but must NOT be level 2+ (which injects advisory text).
+      assert.ok(result.level < 2,
+        `expected level < 2 for read-write alternation (distance=5 < threshold=12), got level=${result.level} (score=${result.score.toFixed(2)})`)
+    })
+
+    it('DOES flag stagnation when reads persist far beyond last productive tool', () => {
+      // 14 reads since last edit_file — well beyond 2×windowSize=12.
+      // This IS genuine read-only stagnation.
+      const readHeavy: Array<{ tool: string; target: string }> = [
+        { tool: 'edit_file', target: 'old.ts' },
+      ]
+      for (let i = 0; i < 14; i++) {
+        readHeavy.push({ tool: 'read_file', target: `file${i}.ts` })
+      }
+      const history = makeHistory(readHeavy)
+      const result = evaluateConvergence(baseInput({
+        turn: 15,
+        phaseClass: 'execute',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+      }))
+      assert.ok(result.level >= 1,
+        `expected level >= 1 for genuine read-only stagnation (14 reads since last edit), got ${result.level}`)
+    })
   })
 
   // ── Fix 2: read-heavy review/audit tasks that produce a text report ──
