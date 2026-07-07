@@ -29,6 +29,8 @@ export interface SanitizeResult {
   content: string
   /** 实际去除的字节数;0 = 未裁剪 */
   trimmedBytes: number
+  /** 命中的 filter 名（用于遥测归因） */
+  filterName?: string
 }
 
 const NPM_INSTALL_RE = /\bnpm\s+(install|i|ci|add|update)\b/
@@ -45,7 +47,7 @@ function command(input: Record<string, unknown> | undefined): string {
   return typeof cmd === 'string' ? cmd : ''
 }
 
-function withMarker(kept: string, original: string, fallback: string): SanitizeResult {
+function withMarker(kept: string, original: string, fallback: string, filterName?: string): SanitizeResult {
   let content = kept.replace(/\n{3,}/g, '\n\n').trim()
   if (content.length === 0) content = fallback
   const trimmedBytes = original.length - content.length
@@ -53,6 +55,7 @@ function withMarker(kept: string, original: string, fallback: string): SanitizeR
   return {
     content: `${content}\n[output trimmed: ${trimmedBytes} bytes of noise removed]`,
     trimmedBytes,
+    filterName,
   }
 }
 
@@ -196,7 +199,7 @@ function applyLineFilter(name: string, filter: LineFilter, raw: string): Sanitiz
     const msg = `[${name}: short-circuit matched]`
     const trimmedBytes = raw.length - msg.length
     if (trimmedBytes < MIN_SAVINGS) return { content: raw, trimmedBytes: 0 }
-    return { content: msg, trimmedBytes }
+    return { content: msg, trimmedBytes, filterName: name }
   }
 
   let lines = text.split('\n')
@@ -219,7 +222,7 @@ function applyLineFilter(name: string, filter: LineFilter, raw: string): Sanitiz
     if (omitted > 0) lines.push(`... ${omitted} non-diagnostic lines trimmed (maxLines=${filter.maxLines}) ...`)
   }
 
-  return withMarker(lines.join('\n'), raw, `${name}: output trimmed`)
+  return withMarker(lines.join('\n'), raw, `${name}: output trimmed`, name)
 }
 
 /**
@@ -250,20 +253,20 @@ export function sanitizeToolOutput(
   if (TSC_RE.test(cmd)) {
     // 只留 error TS 行与统计尾行;无错误时保底一行
     const kept = lines.filter(l => /error TS\d+/.test(l) || /Found \d+ errors?/.test(l))
-    return withMarker(kept.join('\n'), content, 'tsc: no errors reported')
+    return withMarker(kept.join('\n'), content, 'tsc: no errors reported', 'tsc')
   }
 
   if (NODE_TEST_RE.test(cmd)) {
     // 失败诊断(✖ 行、assertion diff、stack)全保留;只裁逐条通过行。
     // 全绿时逐条 ✔ 是最大的噪声源(数百行),统计块(ℹ tests/pass/fail)保留。
     const kept = lines.filter(l => !TEST_PASS_LINE_RE.test(l))
-    return withMarker(kept.join('\n'), content, 'tests: all passed (details trimmed)')
+    return withMarker(kept.join('\n'), content, 'tests: all passed (details trimmed)', 'node-test')
   }
 
   if (NPM_INSTALL_RE.test(cmd)) {
     // 去日志级别/spinner/进度噪声,保留摘要(added N packages)、警告与错误
     const kept = lines.filter(l => !NPM_NOISE_LINE_RE.test(l))
-    return withMarker(kept.join('\n'), content, 'npm: completed (output trimmed)')
+    return withMarker(kept.join('\n'), content, 'npm: completed (output trimmed)', 'npm')
   }
 
   // ── LineFilter 注册表分发 ──
