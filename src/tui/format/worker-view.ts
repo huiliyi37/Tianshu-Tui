@@ -68,7 +68,7 @@ export function formatWorkerView(
   const bodyRows = Math.max(1, maxRows - 2)
   const tail = messages.slice(-bodyRows)
   if (tail.length === 0) {
-    out.push(` ${color('│', theme.muted)} ${color('（尚无消息 — worker 正在启动）', theme.dim)}`)
+    out.push(` ${color('│', theme.muted)} ${color('（尚无消息 — worker 正在启动）', theme.muted)}`)
   }
   for (const m of tail) {
     const line = messageLine(m)

@@ -44,7 +44,8 @@ test('gemini truecolor palette matches Gemini-Codex aesthetics specifications', 
     assert.equal(t.success, '#34d399', 'success must equal Aurora Mint: #34d399')
     assert.equal(t.warning, '#fbbf24', 'warning must equal Stellar Amber: #fbbf24')
     assert.equal(t.error, '#f43f5e', 'error must equal Cosmic Rose: #f43f5e')
-    assert.equal(t.dim, '#5e617d', 'dim must equal Nebula Gray: #5e617d')
+    // dim 于 2026-07 系统性提亮（原 Nebula Gray #5e617d 深底对比度 <4.5:1 不可读）
+    assert.equal(t.dim, '#8b8ea9', 'dim must equal brightened Nebula Gray: #8b8ea9')
     assert.equal(t.pulseQuiet, '#2a2b3d', 'pulseQuiet must equal Space Dark: #2a2b3d')
     assert.equal(t.pulseActive, '#818cf8', 'pulseActive must mirror primary')
     assert.equal(t.pulseAlert, '#f43f5e', 'pulseAlert must mirror error')

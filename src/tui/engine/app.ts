@@ -39,7 +39,7 @@ import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBa
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight } from '../format/glance-bar.js'
+import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, formatPermissionModeLine } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
@@ -3370,6 +3370,12 @@ export class TuiApp {
         }
       }
       lines.push({ text: botBorder })
+
+      // 5a. 权限模式行（CC parity：输入框正下方常驻，单一事实来源）。
+      //     slash 提示打开时让位，避免与候选列表叠在一起。
+      if (!isSlash) {
+        lines.push({ text: this.clampLine(formatPermissionModeLine({ approvalMode: this._approvalMode, planMode: planModeActive }, this.theme)) })
+      }
 
       // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）
       if (isSlash) {

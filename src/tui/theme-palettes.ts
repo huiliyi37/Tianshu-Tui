@@ -89,7 +89,7 @@ const CYBERPUNK: ThemePaletteDef = {
     success: '#4ade80',   // green-400
     warning: '#fbbf24',   // amber-400
     error: '#fb7185',     // rose-400 — no pure-red halation on black
-    dim: '#6b6b8f',
+    dim: '#9494b8',
     pulseQuiet: '#2f3048',
     pulseActive: '#22d3ee',
     pulseAlert: '#fb7185',
@@ -110,7 +110,7 @@ const OBSERVATORY: ThemePaletteDef = {
     success: '#34d399',   // 验证翠
     warning: '#f59e0b',   // 星金黄
     error: '#f87171',     // 警报珊
-    dim: '#64748b',       // 远星灰
+    dim: '#8da0b8',       // 远星灰（深底 ≥4.5:1 提亮档）
     pulseQuiet: '#334155',
     pulseActive: '#38bdf8',
     pulseAlert: '#f87171',
@@ -131,7 +131,7 @@ const MIDNIGHT: ThemePaletteDef = {
     success: '#3fb950',
     warning: '#d29922',
     error: '#f85149',
-    dim: '#6e7681',
+    dim: '#8b949e',
     pulseQuiet: '#3d4450',
     pulseActive: '#58a6ff',
     pulseAlert: '#f85149',
@@ -154,7 +154,7 @@ const STARFIELD: ThemePaletteDef = {
     success: '#7ee7c7',   // aurora teal-green
     warning: '#ffd479',   // stellar gold
     error: '#ff8a9b',     // nova flare
-    dim: '#6b7394',       // cosmic dust lane
+    dim: '#959dbe',       // cosmic dust lane（提亮档）
     pulseQuiet: '#2b3052',
     pulseActive: '#8ab4ff',
     pulseAlert: '#ff8a9b',
@@ -177,7 +177,7 @@ const TIANSHU: ThemePaletteDef = {
     success: '#75a399',   // 归航青
     warning: '#b09155',   // 星金
     error: '#c1655c',     // 朱砂赤
-    dim: '#666a78',       // 暗墨
+    dim: '#8a8fa0',       // 暗墨（深底 ≥4.5:1 提亮档）
     pulseQuiet: '#3a3d4a',
     pulseActive: '#dfb282',
     pulseAlert: '#d4453a', // 朱砂印
@@ -206,7 +206,7 @@ const ZIWEI: ThemePaletteDef = {
     success: '#7ee7c7',     // 归航青
     warning: '#ffd479',     // 星金
     error: '#ff8a9b',       // 荧惑赤
-    dim: '#5a5f7a',         // 星尘灰
+    dim: '#868ba8',         // 星尘灰（提亮档）
     pulseQuiet: '#3a3d4a',
     pulseActive: '#c9b8ff',
     pulseAlert: '#d4453a',  // 朱砂印
@@ -233,7 +233,7 @@ const CLAUDE: ThemePaletteDef = {
     success: '#4eba65',
     warning: '#ffc107',
     error: '#ff6b80',
-    dim: '#505050',       // subtle
+    dim: '#767676',       // subtle（深底 ≥4.5:1 提亮档）
     pulseQuiet: '#888888', // promptBorder
     pulseActive: '#d77757',
     pulseAlert: '#ff6b80',
@@ -258,7 +258,7 @@ const SLATE: ThemePaletteDef = {
     success: '#7fb88a',   // 鼠尾草绿
     warning: '#d6a35c',   // 暗琥珀
     error: '#e08891',     // 柔玫瑰
-    dim: '#5b6270',       // 板岩灰
+    dim: '#848d9c',       // 板岩灰（提亮档）
     pulseQuiet: '#39414f',
     pulseActive: '#56b6c2',
     pulseAlert: '#e08891',
@@ -285,7 +285,7 @@ const ANTIGRAVITY: ThemePaletteDef = {
     success: '#43c463',   // desktop --success
     warning: '#e0a93a',   // desktop --warning
     error: '#f76b6b',     // desktop --error
-    dim: '#6c6e7a',       // desktop --faint
+    dim: '#9093a0',       // desktop --faint（提亮档）
     pulseQuiet: '#2a2a32', // desktop --border
     pulseActive: '#5aa9ff',
     pulseAlert: '#f76b6b',
@@ -341,7 +341,7 @@ const GEMINI: ThemePaletteDef = {
     success: '#34d399',      // Aurora Mint
     warning: '#fbbf24',      // Stellar Amber
     error: '#f43f5e',        // Cosmic Rose
-    dim: '#5e617d',          // Nebula Gray
+    dim: '#8b8ea9',          // Nebula Gray（提亮档）
     pulseQuiet: '#2a2b3d',
     pulseActive: '#818cf8',
     pulseAlert: '#f43f5e',

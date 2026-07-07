@@ -134,14 +134,13 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   const compact = input.density === 'compact'
   const parts: string[] = []
 
-  // 权限/计划模式 badge（最高优先级，用户必须随时知道当前安全模式）
-  const modeBadge = formatModeBadge(input, theme)
-  if (modeBadge) parts.push(modeBadge)
+  // 权限/计划模式已收敛到输入框下方的常驻权限行（formatPermissionModeLine），
+  // GlanceBar 不再重复显示 badge——单一事实来源。
 
-  // ── compact 档：模式 badge + 模型 + 上下文% + 耗时，其余全部收起 ──
+  // ── compact 档：模型 + 上下文% + 耗时，其余全部收起 ──
   if (compact) {
     if (input.modelName) {
-      parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
+      parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.muted))
     }
     const cRatio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
       ? input.estimatedTokens / input.maxTokens : 0
@@ -151,7 +150,7 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
     }
     const zone = parts.join('  ')
     const elapsedStr = input.elapsedMs !== undefined ? formatElapsed(input.elapsedMs) : ''
-    const elapsedColored = color(elapsedStr, input.stalled ? theme.warning : theme.dim)
+    const elapsedColored = color(elapsedStr, input.stalled ? theme.warning : theme.muted)
     return [zone, elapsedColored].filter(Boolean).join('  ')
   }
 
@@ -184,8 +183,8 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   }
 
   if (input.modelName) {
-    // 模型名属于最低层级元信息，用 dim 而不是 muted
-    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
+    // 模型名是用户要读的信息，muted（dim 只留给装饰）
+    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.muted))
   }
   // 推理 effort 强度：◎ + 档位。max 高亮(secondary)、high 主色、medium muted、
   // low/off dim。让用户随时看到当前实际生效的思考强度（auto-reasoning 会动态调整）。
@@ -224,23 +223,31 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   if (input.elapsedMs !== undefined) {
     zone4 = formatElapsed(input.elapsedMs)
   }
-  // elapsed 是基础元信息用 dim；stall 时提升到 warning 作为提示
-  const elapsedPart = color(zone4, input.stalled ? theme.warning : theme.dim)
+  // elapsed 是用户要读的元信息用 muted；stall 时提升到 warning 作为提示
+  const elapsedPart = color(zone4, input.stalled ? theme.warning : theme.muted)
 
   return [zone3, elapsedPart].filter(Boolean).join('  ')
 }
 
-function formatModeBadge(input: GlanceBarInput, theme: RivetTheme): string | null {
+/**
+ * 输入框下方常驻权限模式行（CC 的 `⏵⏵ bypass permissions on` 位）。
+ * 单一事实来源：GlanceBar 不再显示权限 badge，全部收敛到这一行。
+ * 着色沿用旧 badge 映射：safe=muted / ask=warning / yolo=error / auto=success / plan=primary。
+ */
+export function formatPermissionModeLine(
+  input: { approvalMode?: string; planMode?: boolean },
+  theme: RivetTheme,
+): string {
+  const hint = color('(shift+tab 切换)', theme.dim)
   if (input.planMode) {
-    return color('[plan]', theme.primary)
+    return `  ${color('⏵ plan mode', theme.primary)} ${hint}`
   }
-  switch (input.approvalMode) {
-    case 'manual': return color('[ask]', theme.warning)
-    case 'dangerously-skip-permissions': return color('[yolo]', theme.error)
-    case 'auto-accept': return color('[auto]', theme.success)
-    case 'auto-safe': return color('[safe]', theme.muted)
-    default: return input.approvalMode ? color(`[${input.approvalMode}]`, theme.muted) : null
-  }
+  const mode = input.approvalMode ?? 'auto-safe'
+  const [label, modeColor] = mode === 'manual' ? ['manual', theme.warning]
+    : mode === 'dangerously-skip-permissions' ? ['yolo', theme.error]
+    : mode === 'auto-accept' ? ['auto-accept', theme.success]
+    : [mode, theme.muted]
+  return `  ${color(`⏵ ${label}`, modeColor)} ${hint}`
 }
 
 /**

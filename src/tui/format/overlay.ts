@@ -696,7 +696,7 @@ export function renderTasks(
     const emptyText = data.filter === 'completed' ? ' (no completed workers)'
       : data.filter === 'all' ? ' (no workers)'
         : ' (no running workers)'
-    body.push(color(emptyText, theme.dim))
+    body.push(color(emptyText, theme.muted))
   }
 
   const selectedBodyIndex = selectedIndex >= 0 && selectedIndex < selectable.length
@@ -893,7 +893,7 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
   const contentRows = Math.max(1, height - 5) // border + title + separator + footer + bottom
 
   if (data.choices.length === 0) {
-    lines.push(padLine(color('  （无可用选项）', theme.dim), width, theme))
+    lines.push(padLine(color('  （无可用选项）', theme.muted), width, theme))
     lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
     lines.push(formatBottomBorder(width, theme))
     return lines
@@ -981,7 +981,7 @@ export function renderPlanPicker(data: PlanPickerData, width: number, height: nu
   const contentRows = Math.max(1, height - 5)
 
   if (data.entries.length === 0) {
-    lines.push(padLine(color('  （无待批计划。/plan-mode 进入计划模式创建）', theme.dim), width, theme))
+    lines.push(padLine(color('  （无待批计划。/plan-mode 进入计划模式创建）', theme.muted), width, theme))
     lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
     lines.push(formatBottomBorder(width, theme))
     return lines

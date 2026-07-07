@@ -55,7 +55,7 @@ import { formatMilestoneLine } from './constellation/format.js'
 import { join } from 'path'
 import { execSync } from 'child_process'
 import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/project-templates.js'
-import { checkForUpdate, formatUpdateBanner } from './tui/updater.js'
+import { checkForUpdate, formatUpdateBanner, detectInstallRoot, getCurrentVersion } from './tui/updater.js'
 import { detectEnv, formatGitMissingBanner } from './tools/env-check.js'
 import { computeUsageCost, findModelPricing } from './utils/pricing.js'
 
@@ -1086,17 +1086,35 @@ async function main() {
         return
       }
     }
+    // CC 式三态环：auto-safe → plan → manual → auto-safe。yolo/auto-accept 不进环
+    // （仍走 /permission 显式切换），它们按 Shift+Tab 只做 plan mode 进出、模式不变。
+    // 环内切换为会话级（不持久化默认值）——与 CC 的 shift+tab cycle 语义一致。
+    const setSessionApproval = (mode: import('./agent/loop-types.js').ApprovalMode) => {
+      agent.setApprovalMode(mode)
+      app!.setApprovalMode(mode)
+    }
     if (agent.planModeState === 'planning') {
       // Two-step confirm: first press arms + warns, second press within the window exits.
       const now = Date.now()
       if (planExitArmedAt !== 0 && now - planExitArmedAt <= PLAN_EXIT_CONFIRM_MS) {
         planExitArmedAt = 0
         agent.exitPlanMode()
-        app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
+        if ((agent.config.approvalMode ?? 'auto-safe') === 'auto-safe') {
+          // 环推进：plan 退出落到 manual（逐工具确认）
+          setSessionApproval('manual')
+          app!.commitStatic('Plan Mode 已关闭 → 权限模式 manual（每个高风险工具确认）。Shift+Tab 回到 auto-safe。')
+        } else {
+          app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
+        }
       } else {
         planExitArmedAt = now
         app!.commitStatic('⚠ 计划尚未批准。再按一次 Shift+Tab 放弃当前计划并退出规划模式，或用 /plan-approve <slug> 批准后执行。')
       }
+    } else if ((agent.config.approvalMode ?? 'auto-safe') === 'manual') {
+      // 环收口：manual → auto-safe
+      planExitArmedAt = 0
+      setSessionApproval('auto-safe')
+      app!.commitStatic('权限模式 → auto-safe（低风险自动执行，高风险确认）。Shift+Tab 进入 Plan Mode。')
     } else {
       planExitArmedAt = 0
       agent.enterPlanMode()
@@ -1243,9 +1261,10 @@ async function main() {
   // ── Clear screen ─────────────────────────────────────────────
   stdout.write('\x1B[2J\x1B[H')
 
-  // ── Welcome message（带边框与大标识品牌设计） ─────────────────
+  // ── Welcome message（CC 头式 3 行紧凑头） ─────────────────────
   const existingMsgCount = ctx.session.getMessages().length
   if (!skipWelcome) {
+    const installRoot = detectInstallRoot()
     const welcomeLines = formatWelcome({
       modelName,
       cwd: process.cwd(),
@@ -1255,6 +1274,8 @@ async function main() {
       rows: stdout.rows || 24,
       numericId: ctx.agent.sessionNumericId,
       compact: existingMsgCount > 0,
+      version: installRoot ? getCurrentVersion(installRoot) : null,
+      approvalMode: ctx.config.agent.approval ?? 'auto-safe',
     }, theme)
     for (const line of welcomeLines) {
       stdout.write(line + '\n')
@@ -1283,7 +1304,7 @@ async function main() {
     } else if (existingMsgCount === 0 && recentSessions.length > 0) {
       app.commitStatic(color(
         `↺ ${recentSessions.length} 个历史会话 · /resume 选择 · rivet -c 续接最近`,
-        theme.dim,
+        theme.muted,
       ))
     }
   }

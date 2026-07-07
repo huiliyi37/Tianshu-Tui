@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import stringWidth from 'string-width'
-import { formatGlanceBar, formatGlanceRight } from '../format/glance-bar.js'
+import { formatGlanceBar, formatGlanceRight, formatPermissionModeLine } from '../format/glance-bar.js'
 import { getTheme } from '../theme.js'
 
 const theme = getTheme()
@@ -164,9 +164,9 @@ describe('formatGlanceRight density（Wave 2 减密分档）', () => {
     todoSummary: { total: 5, done: 2, inProgress: 1, current: '修复主题' },
   }
 
-  it('compact 档只保留模式 badge + 模型 + 上下文% + 耗时', () => {
+  it('compact 档只保留模型 + 上下文% + 耗时（权限 badge 已收敛到输入框下方权限行）', () => {
     const plain = stripAnsi(formatGlanceRight({ ...fullInput, density: 'compact' }, theme))
-    assert.ok(plain.includes('[safe]'), '模式 badge 保留')
+    assert.ok(!plain.includes('[safe]'), '权限 badge 不再出现在 GlanceBar')
     assert.ok(plain.includes('deepseek-v4'), '模型保留')
     assert.ok(plain.includes('◧25%'), `上下文百分比保留: ${plain}`)
     assert.ok(plain.includes('1m5s'), '耗时保留')
@@ -188,5 +188,29 @@ describe('formatGlanceRight density（Wave 2 减密分档）', () => {
   it('compact 档缺 token 数据时不渲染 ◧', () => {
     const plain = stripAnsi(formatGlanceRight({ width: 120, density: 'compact', modelName: 'm', elapsedMs: 1000 }, theme))
     assert.ok(!plain.includes('◧'))
+  })
+})
+
+describe('formatPermissionModeLine（输入框下方权限模式行，CC parity）', () => {
+  it('默认 auto-safe，含 shift+tab 提示', () => {
+    const plain = stripAnsi(formatPermissionModeLine({}, theme))
+    assert.ok(plain.includes('⏵ auto-safe'), `should show auto-safe: ${plain}`)
+    assert.ok(plain.includes('shift+tab'), 'should hint cycle key')
+  })
+
+  it('plan mode 优先于权限模式', () => {
+    const plain = stripAnsi(formatPermissionModeLine({ approvalMode: 'manual', planMode: true }, theme))
+    assert.ok(plain.includes('⏵ plan mode'), `plan mode wins: ${plain}`)
+    assert.ok(!plain.includes('manual'))
+  })
+
+  it('yolo 模式显示缩写标签', () => {
+    const plain = stripAnsi(formatPermissionModeLine({ approvalMode: 'dangerously-skip-permissions' }, theme))
+    assert.ok(plain.includes('⏵ yolo'), `should abbreviate: ${plain}`)
+  })
+
+  it('manual 模式原样显示', () => {
+    const plain = stripAnsi(formatPermissionModeLine({ approvalMode: 'manual' }, theme))
+    assert.ok(plain.includes('⏵ manual'))
   })
 })

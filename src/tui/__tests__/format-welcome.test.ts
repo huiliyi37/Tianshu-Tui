@@ -1,49 +1,72 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { homedir } from 'node:os'
 import stringWidth from 'string-width'
 import { formatWelcome } from '../format/welcome.js'
 import { getTheme } from '../theme.js'
 
 const theme = getTheme()
 
-test('welcome renders ≤25 lines', () => {
+const strip = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '')
+
+test('welcome renders CC-style 3-line header', () => {
   const lines = formatWelcome({
     modelName: 'opus-4-8',
     cwd: '/Users/x/app/deepseek-tui/opencode-tui',
     sessionId: '878e2108abcd',
     priorMsgCount: 0,
     columns: 80,
+    version: '2.15.1',
+    approvalMode: 'auto-safe',
   }, theme)
-  assert.ok(lines.length <= 25, `welcome should be ≤25 lines, got ${lines.length}`)
-  assert.ok(lines.length >= 2)
+  assert.ok(lines.length <= 4, `welcome should be ≤4 lines, got ${lines.length}`)
+  assert.ok(lines.length >= 3, `welcome should be ≥3 lines, got ${lines.length}`)
 })
 
-test('welcome title contains T I A N S H U or 天 枢', () => {
+test('welcome contains brand, version, model, approval mode and cwd', () => {
+  const lines = formatWelcome({
+    modelName: 'glm-5.1',
+    cwd: '/tmp/x/proj',
+    sessionId: 'deadbeef1234',
+    priorMsgCount: 0,
+    columns: 80,
+    version: '2.15.1',
+    approvalMode: 'auto-safe',
+  }, theme)
+  const joined = lines.join('\n')
+  assert.ok(joined.includes('Tianshu Code'), 'should show brand')
+  assert.ok(joined.includes('v2.15.1'), 'should show version')
+  assert.ok(joined.includes('glm-5.1'), 'should show model')
+  assert.ok(joined.includes('auto-safe'), 'should show approval mode')
+  assert.ok(joined.includes('/tmp/x/proj'), 'should show cwd')
+})
+
+test('welcome omits version/mode gracefully when not provided', () => {
   const lines = formatWelcome({
     modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 80,
   }, theme)
   const joined = lines.join('\n')
-  assert.ok(joined.includes('天 枢') || joined.includes('T I A N S H U'), 'should contain T I A N S H U or 天 枢 branding')
+  assert.ok(joined.includes('Tianshu Code'), 'brand still present')
+  assert.ok(!joined.includes('v undefined') && !joined.includes('vnull'), 'no dangling version text')
 })
 
-test('welcome contains model and session', () => {
+test('welcome has no bordered card, big logo or shortcut matrix', () => {
   const lines = formatWelcome({
-    modelName: 'glm-5.1',
-    cwd: '/tmp/x',
-    sessionId: 'deadbeef1234',
-    priorMsgCount: 0,
-    columns: 80,
+    modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 120, rows: 40,
+    version: '2.15.1',
   }, theme)
   const joined = lines.join('\n')
-  assert.ok(joined.includes('glm-5.1'), 'should show model')
-  assert.ok(joined.includes('deadbeef'), 'should show session prefix')
+  assert.ok(!joined.includes('┌'), 'no border')
+  assert.ok(!joined.includes('█'), 'no block-ASCII logo')
+  assert.ok(!joined.includes('Ctrl+'), 'no shortcut matrix')
 })
 
-test('priorMsgCount>0 shows prior count', () => {
+test('cwd under home is tildified', () => {
+  const home = homedir()
   const lines = formatWelcome({
-    modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 7, columns: 80,
+    modelName: 'm', cwd: `${home}/app/proj`, sessionId: 'abcdefgh', priorMsgCount: 0, columns: 120,
   }, theme)
-  assert.ok(lines.join('\n').includes('7 prior'), 'should show prior message count')
+  assert.ok(lines.join('\n').includes('~/app/proj'), 'home prefix collapsed to ~')
 })
 
 test('compact mode renders single line with essentials', () => {
@@ -63,61 +86,32 @@ test('compact mode renders single line with essentials', () => {
   assert.ok(joined.includes('/help'), 'should hint /help')
 })
 
-test('shortcut hints match real keybindings (no Ctrl+K / Alt+Enter drift)', () => {
+test('compact mode shows prior count', () => {
   const lines = formatWelcome({
-    modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 120,
+    modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 7, columns: 80, compact: true,
   }, theme)
-  const joined = lines.join('\n')
-  // 真实键位（与 engine/app.ts + input-line.ts 一致）
-  assert.ok(joined.includes('Ctrl+Esc palette'), 'palette 是 Ctrl+Esc')
-  assert.ok(joined.includes('Ctrl+R history'), '历史搜索 Ctrl+R')
-  assert.ok(joined.includes('Ctrl+O expand'), '展开工具 Ctrl+O')
-  assert.ok(joined.includes('Ctrl+T thinking'), 'thinking Ctrl+T')
-  assert.ok(joined.includes('Esc Esc rewind'), '双击 Esc rewind')
-  assert.ok(joined.includes('Ctrl+J') || joined.includes('\\+Enter'), '多行 \\+Enter / Ctrl+J')
-  // 旧的漂移键位必须消失
-  assert.ok(!joined.includes('Ctrl+K'), '不再写错误的 Ctrl+K palette')
-  assert.ok(!joined.includes('Alt+Enter'), '不再写错误的 Alt+Enter multi-line')
+  assert.ok(lines.join('\n').includes('7 prior'), 'should show prior message count')
 })
 
-test('height-aware: full banner only when terminal is tall enough', () => {
-  const base = { modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, numericId: 6174 }
-  const tall = formatWelcome({ ...base, rows: 40 }, theme)
-  assert.ok(tall.length >= 20, `tall terminal → full banner, got ${tall.length}`)
-  assert.ok(tall.join('\n').includes('┌'), 'full banner has bordered card')
-})
-
-test('height-aware: 24-row terminal degrades to compact medium (input box stays visible)', () => {
+test('height-aware: very short terminal (<8 rows) collapses to single line', () => {
   const lines = formatWelcome({
-    modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, rows: 24,
+    modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, rows: 6,
   }, theme)
-  assert.ok(lines.length <= 7, `24-row terminal → medium banner ≤7 lines, got ${lines.length}`)
-  assert.ok(lines.join('\n').includes('T I A N S H U'), 'medium banner still branded')
-  assert.ok(!lines.join('\n').includes('┌'), 'medium banner drops the bordered card')
-})
-
-test('80×24 标准终端：降级紧凑版且每行宽度 ≤ 80（Wave 2 对标验收）', () => {
-  const lines = formatWelcome({
-    modelName: 'deepseek-v4', cwd: '/x/proj', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 80, rows: 24, numericId: 1234,
-  }, theme)
-  assert.ok(lines.length <= 7, `80×24 → 紧凑版 ≤7 行, got ${lines.length}`)
-  for (const line of lines) {
-    assert.ok(stringWidth(line.replace(/\x1B\[[0-9;]*m/g, '')) <= 80, `行宽 ≤ 80: ${line}`)
-  }
-  assert.ok(!lines.join('\n').includes('█'), '80×24 不渲染大字 logo')
-})
-
-test('height-aware: very short terminal (<12 rows) collapses to single line', () => {
-  const lines = formatWelcome({
-    modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, rows: 10,
-  }, theme)
-  assert.equal(lines.length, 1, `<12-row terminal → single line, got ${lines.length}`)
+  assert.equal(lines.length, 1, `very short terminal → single line, got ${lines.length}`)
   assert.ok(lines[0]!.includes('天枢'), 'single line still branded')
 })
 
-test('no rows provided → full banner (back-compat for callers/tests not passing rows)', () => {
+test('24-row terminal keeps the 3-line header (fits easily)', () => {
+  const lines = formatWelcome({
+    modelName: 'deepseek-v4', cwd: '/x/proj', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 80, rows: 24,
+    version: '2.15.1', approvalMode: 'auto-safe',
+  }, theme)
+  assert.ok(lines.length >= 3 && lines.length <= 4, `80×24 → 3-line header, got ${lines.length}`)
+})
+
+test('no rows provided → 3-line header (back-compat)', () => {
   const lines = formatWelcome({ modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 100 }, theme)
-  assert.ok(lines.join('\n').includes('┌'), 'defaulting rows → full banner')
+  assert.ok(lines.length >= 3, 'defaults to full header')
 })
 
 test('no line exceeds terminal width (display width ≤ columns)', () => {
@@ -128,11 +122,13 @@ test('no line exceeds terminal width (display width ≤ columns)', () => {
       sessionId: '012345678',
       priorMsgCount: 3,
       columns: cols,
+      version: '2.15.1',
+      approvalMode: 'dangerously-skip-permissions',
     }, theme)
     for (const line of lines) {
       assert.ok(
-        stringWidth(line) <= cols,
-        `at cols=${cols}, line width ${stringWidth(line)} should be ≤ ${cols}`,
+        stringWidth(strip(line)) <= cols,
+        `at cols=${cols}, line width ${stringWidth(strip(line))} should be ≤ ${cols}`,
       )
     }
   }

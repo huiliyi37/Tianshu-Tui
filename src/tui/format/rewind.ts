@@ -88,7 +88,7 @@ export function renderRewind(data: RewindData, width: number, height: number, th
 
   if (data.entries.length === 0) {
     body.push('')
-    body.push(`  ${color('没有可回溯的消息。', theme.dim)}`)
+    body.push(`  ${color('没有可回溯的消息。', theme.muted)}`)
     footer = keyHints([['q', '取消']])
   } else {
     const selected = Math.max(0, Math.min(data.selectedIndex, data.entries.length - 1))
@@ -146,7 +146,7 @@ function buildActionBody(body: string[], data: RewindData, selected: number, w: 
     body.push('')
     const files = data.previewFiles ?? []
     if (files.length === 0) {
-      body.push(`  ${color('本消息之后没有 agent 编辑过的文件可精确恢复。', theme.dim)}`)
+      body.push(`  ${color('本消息之后没有 agent 编辑过的文件可精确恢复。', theme.muted)}`)
     } else {
       body.push(`  ${color(`将影响 ${files.length} 个文件：`, theme.muted)}`)
       const shown = files.slice(0, 8)

@@ -40,7 +40,8 @@ test('claude truecolor palette mirrors Claude Code darkTheme RGB values', () => 
   assert.equal(t.success, '#4eba65', 'success must equal Claude Code success: rgb(78,186,101)')
   assert.equal(t.warning, '#ffc107', 'warning must equal Claude Code warning: rgb(255,193,7)')
   assert.equal(t.error, '#ff6b80', 'error must equal Claude Code error: rgb(255,107,128)')
-  assert.equal(t.dim, '#505050', 'dim must equal Claude Code subtle: rgb(80,80,80)')
+  // dim 于 2026-07 系统性提亮（原 subtle rgb(80,80,80) 深底对比度 ~2:1 不可读）
+  assert.equal(t.dim, '#767676', 'dim must equal brightened subtle: #767676')
   assert.equal(t.pulseQuiet, '#888888', 'pulseQuiet must equal Claude Code promptBorder: rgb(136,136,136)')
   assert.equal(t.pulseActive, '#d77757', 'pulseActive must mirror primary (Claude brand orange)')
   assert.equal(t.pulseAlert, '#ff6b80', 'pulseAlert must mirror error')
