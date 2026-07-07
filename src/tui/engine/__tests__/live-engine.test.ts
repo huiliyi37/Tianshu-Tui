@@ -389,6 +389,28 @@ test('resize: 宽度变窄后，增量帧按新宽度的 reflow 行数回顶（�
   )
 })
 
+// 宽度刚变过的那一帧必须走全量重写（回顶 + ERASE_SCREEN_END + 重铺），不允许行级
+// diff：即使每行 wrap 高度在新旧宽度下相同（短行），屏上旧帧经终端 reflow 后的实际
+// 布局也可能与 lineCache 估算不一致（部分终端拉大不 reflow / ambiguous 宽度偏差），
+// 相对步进的补丁会打在错位的行上 → 旧帧碎片叠屏（拉大窗口后界面堆叠错乱的实证）。
+test('resize: 宽度变化后首帧强制全量重写（禁用行级 diff）', () => {
+  const term = new MockTerminal(80, 40)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 30 })
+
+  // 短行：80 列与 120 列下都只占 1 显示行 → 修复前 canDiff=true 走增量补丁
+  engine.render(lines('L0', 'L1', 'INPUT'))
+  term.flush()
+
+  term.columns = 120
+  engine.render(lines('L0', 'L1', 'INPUT2'))
+  const frame = term.flush()
+
+  assert.ok(
+    frame.includes('\x1B[0J'),
+    `宽度变化后的首帧应含 ERASE_SCREEN_END（全量重写）：${JSON.stringify(frame)}`,
+  )
+})
+
 test('resize: 宽度变化后稳态重渲不持续滚屏且不残留', () => {
   const term = new MockTerminal(100, 10)
   const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 30 })

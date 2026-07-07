@@ -1110,9 +1110,11 @@ export async function initializeLsp(
     if (lspManager.isReady()) {
       toolRegistry.register(createGotoDefinitionTool(lspManager))
       toolRegistry.register(createFindReferencesTool(lspManager))
-      const servers = availableServers().map(s => s.id).join(', ')
-      console.error(`[LSP] polyglot LSP ready — available servers: ${servers}`)
-    } else {
+      if (process.env['RIVET_DEBUG']) {
+        const servers = availableServers().map(s => s.id).join(', ')
+        console.error(`[LSP] polyglot LSP ready — available servers: ${servers}`)
+      }
+    } else if (process.env['RIVET_DEBUG']) {
       console.error('[LSP] no language servers installed — code-intelligence tools not registered')
     }
   } catch (err) {
@@ -1139,7 +1141,8 @@ export async function createSessionInfrastructure(): Promise<{
   // `rivet --continue` (most recent) or `rivet --resume <id>`.
   const crashedSessions = registry.detectCrashedSessions()
   if (crashedSessions.length > 0) {
-    console.error(`🔄 检测到 ${crashedSessions.length} 个异常退出的会话，已清理其锁定（用 rivet --continue 或 --resume <id> 恢复）`)
+    // 一行短提示即可——恢复入口（--continue/--resume）在 /help 与历史会话提示里都有。
+    console.error(`↺ 已清理 ${crashedSessions.length} 个异常退出会话的锁定`)
   }
 
   const sessionId = getOrCreateSessionId()
@@ -1497,7 +1500,8 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     }
   } catch { /* advisory only — never block bootstrap */ }
   const skillLoad = loadProjectSkills(cwd, { importFromClaude: config.skills?.importFromClaude })
-  if (skillLoad.loaded.length > 0) {
+  if (skillLoad.loaded.length > 0 && process.env['RIVET_DEBUG']) {
+    // 常规启动不打（/skills 可随时查看已加载技能）——首屏保持干净。
     console.error(`[skills] Loaded ${skillLoad.loaded.length} skill(s)`)
   }
   for (const err of skillLoad.errors) {

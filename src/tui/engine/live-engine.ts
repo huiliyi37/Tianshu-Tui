@@ -201,6 +201,9 @@ export class LiveEngine {
       return
     }
 
+    // resize 检测必须在 reconcileWidth 覆盖 lastColumns 之前取值。
+    const widthChanged = this.hasRendered && this.lastDisplayRows > 0 && currentColumns !== this.lastColumns
+
     this.reconcileWidth()
     const newDisplayRows = this.countDisplayRows(bounded)
 
@@ -222,7 +225,13 @@ export class LiveEngine {
     // 关键不变量：逐行 wrap 高度不变 → 改某行不会让后续行整体上/下移（无级联），
     // 相对光标步进（cursorDown 按显示行数）才能精确对齐。任一行 wrap 高度变化 →
     // 会级联错位，回退全量重写（更稳）。允许多行 wrap 行参与增量。
+    //
+    // 宽度刚变过（resize）时禁用 diff：屏上旧帧被终端按新宽 reflow，实际布局
+    // 与 lineCache 的估算可能不一致（部分终端不 reflow / ambiguous 宽度偏差），
+    // 相对步进的增量改写会在错位的行上打补丁 → 旧帧碎片残留叠屏。
+    // 全量重写（回顶 + ERASE_SCREEN_END + 重铺）把不确定性收敛到锚点一处。
     const canDiff =
+      !widthChanged &&
       bounded.length === this.lineCache.length &&
       bounded.every((l, i) => this.rowsForLine(l.text) === this.rowsForLine(this.lineCache[i]!))
 

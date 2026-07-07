@@ -717,7 +717,10 @@ export function seedBundledSkills(cwd: string): string[] {
   const seeded = seedBundledSkillsFrom(src, cwd)
   if (!bundledSkillsLogged) {
     bundledSkillsLogged = true
-    console.log(`[skills] bundled-skills dir=${src}; seeded ${seeded.length} new into ${join(cwd, '.rivet', 'skills')}`)
+    // 常规启动零输出（"seeded 0 new" 是纯噪音）：真种入新技能或开 debug 才打。
+    if (seeded.length > 0 || process.env['RIVET_DEBUG']) {
+      console.log(`[skills] bundled-skills dir=${src}; seeded ${seeded.length} new into ${join(cwd, '.rivet', 'skills')}`)
+    }
   }
   return seeded
 }

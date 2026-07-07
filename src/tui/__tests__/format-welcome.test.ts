@@ -9,7 +9,7 @@ const theme = getTheme()
 
 const strip = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '')
 
-test('welcome renders CC-style 3-line header', () => {
+test('welcome renders CC-style header (3 lines + breathing blanks)', () => {
   const lines = formatWelcome({
     modelName: 'opus-4-8',
     cwd: '/Users/x/app/deepseek-tui/opencode-tui',
@@ -19,8 +19,10 @@ test('welcome renders CC-style 3-line header', () => {
     version: '2.15.1',
     approvalMode: 'auto-safe',
   }, theme)
-  assert.ok(lines.length <= 4, `welcome should be ≤4 lines, got ${lines.length}`)
+  assert.ok(lines.length <= 6, `welcome should be ≤6 lines, got ${lines.length}`)
   assert.ok(lines.length >= 3, `welcome should be ≥3 lines, got ${lines.length}`)
+  assert.equal(lines[0], '', 'leading blank line for breathing room')
+  assert.equal(lines[lines.length - 1], '', 'trailing blank line for breathing room')
 })
 
 test('welcome contains brand, version, model, approval mode and cwd', () => {
@@ -101,12 +103,12 @@ test('height-aware: very short terminal (<8 rows) collapses to single line', () 
   assert.ok(lines[0]!.includes('天枢'), 'single line still branded')
 })
 
-test('24-row terminal keeps the 3-line header (fits easily)', () => {
+test('24-row terminal keeps the full header (fits easily)', () => {
   const lines = formatWelcome({
     modelName: 'deepseek-v4', cwd: '/x/proj', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 80, rows: 24,
     version: '2.15.1', approvalMode: 'auto-safe',
   }, theme)
-  assert.ok(lines.length >= 3 && lines.length <= 4, `80×24 → 3-line header, got ${lines.length}`)
+  assert.ok(lines.length >= 3 && lines.length <= 6, `80×24 → full header, got ${lines.length}`)
 })
 
 test('no rows provided → 3-line header (back-compat)', () => {
