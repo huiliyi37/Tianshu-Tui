@@ -1,0 +1,17 @@
+{
+  "name": "hello-world",
+  "version": "1.0.0",
+  "description": "Minimal plugin for pipeline validation",
+  "private": true,
+  "type": "module",
+  "tianshu": {
+    "name": "hello-world",
+    "version": "1.0.0",
+    "description": "A hello-world probe plugin for pipeline validation",
+    "entry": "index.js",
+    "tools": [
+      { "name": "hello", "description": "Echo a greeting — pipeline probe tool" }
+    ],
+    "permissions": {}
+  }
+}
