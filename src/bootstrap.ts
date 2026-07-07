@@ -43,6 +43,7 @@ import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import type { PlanExecutorDeps } from './agent/plan-executor.js'
 import { runTypeCheck } from './lsp/client.js'
+import { GATE_TSC_TIMEOUT_MS } from './agent/typecheck-gate.js'
 import { createCouncilConveneTool } from './tools/council-convene.js'
 import { needsTemplatesInit } from './bootstrap/project-templates.js'
 import { debugLog } from './utils/debug.js'
@@ -60,6 +61,7 @@ import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
 import { createWorktreeBaseline } from './agent/worktree-baseline.js'
 import { createVerificationSnapshotManager, reapOrphanSnapshots, reapOrphanHandsWorktrees } from './agent/verification-snapshot-manager.js'
 import { cleanupStaleHandsBranches } from './agent/worktree.js'
+import { initializePlugins } from './plugins/plugin-loader.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { buildReviewOverrideState } from './agent/review-model-override.js'
 import type { ResolvedReviewOverride } from './agent/review-model-override.js'
@@ -74,6 +76,7 @@ import { starDomainRegistry } from './agent/star-domain-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
 import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { PlaybookStore } from './agent/playbook-store.js'
+import { resetLegacyMemoryIfNeeded } from './agent/memory-epoch.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
 import { createRelatedTestsTool } from './tools/related-tests.js'
@@ -372,7 +375,13 @@ export function createInteractiveToolRegistry(
   config: Config,
   cwd: string,
 ): { registry: ReturnType<typeof createDefaultToolRegistry> } {
-  const reg = createDefaultToolRegistry([], { desktopTools: config.agent.desktopTools, todoStore: refs.todoStore })
+  const reg = createDefaultToolRegistry([], {
+    desktopTools: config.agent.desktopTools,
+    todoStore: refs.todoStore,
+    // Computer Use（桌面 GUI 自动化）：EXTENDED 层，注册≠主控可见（tool gating
+    // 过滤），@Computer / /tools enable 挂载时才进主控视野。darwin/win32 gated。
+    computerUse: (process.platform === 'darwin' || process.platform === 'win32') && process.env.RIVET_COMPUTER_USE !== '0',
+  })
 
   // delegate_task
   reg.register(createDelegateTaskTool(
@@ -450,7 +459,9 @@ export function createInteractiveToolRegistry(
     }).enabled,
     getSessionId: () => refs.sessionId ?? undefined,
     getMeridianIndexer: () => refs.meridianIndexer,
-    getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*'),
+    // 门禁预算（5 分钟）而非默认 2 分钟：这个 runner 喂 wave-gate 硬门禁，
+    // 满载机器 tsc 超时曾被记成 passed 放行（2026-07-07）。
+    getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*', GATE_TSC_TIMEOUT_MS),
   }
   reg.register(createTeamOrchestrateTool(planExecutorDeps, { defaultMaxParallel: config.agent.maxTeamParallel }))
 
@@ -629,6 +640,7 @@ export function createAgentRuntime(deps: {
       maxTokens: currentModel.maxTokens,
       contextWindow: currentModel.contextWindow,
       reasoningEffort: currentModel.reasoningEffort,
+      supportsVision: currentModel.supportsVision,
     },
     cwd,
     provider,
@@ -763,7 +775,7 @@ export function createAgentRuntime(deps: {
             }),
             toolRegistry: workerRegistry,
             cwd,
-            maxTurns: 8,
+            maxTurns: 40,
             contextWindow: ovContextWindow,
             compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
             activeClaims: claimStore.listActiveClaims(),
@@ -822,7 +834,7 @@ export function createAgentRuntime(deps: {
           }),
           toolRegistry: workerRegistry,
           cwd,
-          maxTurns: 8,
+          maxTurns: 40,
           contextWindow: overrideContextWindow,
           compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
           activeClaims: claimStore.listActiveClaims(),
@@ -908,7 +920,7 @@ export function createAgentRuntime(deps: {
       }),
       toolRegistry: workerRegistry,
       cwd,
-      maxTurns: 8,
+      maxTurns: 40,
       contextWindow: workerContextWindow,
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       activeClaims: claimStore.listActiveClaims(),
@@ -968,7 +980,13 @@ export function createAgentRuntime(deps: {
       getSessionMemoryState: () => persist.getSessionMemoryState(),
       fileHistory,
       contextClaimStore: claimStore,
-      playbookStore: new PlaybookStore(cwd),
+      // Playbook 默认停用（2026-07-06，RIVET_PLAYBOOK=1 重新启用）。取证结论：
+      // 注入内容是错误转储级噪音（deliver_task 报文原样入库、context 字段 merge
+      // 滚雪球），且 matchScore 的 useCount 加成 + recordUsage 强化构成自增强回路
+      // ——垃圾教训越注入越常被选中、几乎不衰减（单项目 2 条垃圾 ×8 会话注入）。
+      // 不构造 store 即全链路关闭：注入 / dream 蒸馏 / playbook-reflect 收割 /
+      // recordUsage 均为判空跳过。修复质量闸前不要复活（上次复活见 80e0c530）。
+      playbookStore: process.env['RIVET_PLAYBOOK'] === '1' ? new PlaybookStore(cwd) : undefined,
       providerHealth,
       effortBanditEnabled: effortGate.enabled,
       taskLedger: refs.taskLedger ?? undefined,
@@ -1022,6 +1040,11 @@ export function createAgentRuntime(deps: {
     // "multiple sessions, one branch" workflow.
     sharedWorktree: true,
     patcherTier: config.workers.patcherTier,
+    escalationCap: config.workers.escalationCap,
+    // Downward trust delegation: a primary running dangerously-skip-permissions
+    // opted out of all prompts, so its workers inherit that. Any other mode is
+    // ignored downstream — workers rely on headless approval semantics instead.
+    parentApprovalMode: config.agent.approval as import('./agent/loop-types.js').ApprovalMode,
   })
 
   return { agent }
@@ -1372,6 +1395,27 @@ export function switchAgentSession(ctx: BootstrapContext, targetId: string): Swi
   }
 }
 
+// ── Plan-mode restore（resume/切换会话共用）─────────────────────
+
+/**
+ * Re-enter plan mode from persisted session metadata after a resume or an
+ * in-app session switch. The runtime plan-mode state lives in AgentLoop memory
+ * and dies with the process; the meta mirror (written by syncPlanModeToConfig)
+ * lets us restore it. Returns the restored draft path, or null when the session
+ * was not planning / the draft file no longer exists (silent downgrade to off).
+ */
+export function restorePlanModeFromMeta(
+  agent: AgentLoop,
+  cwd: string,
+  meta: Pick<import('./context/types.js').SessionMetadata, 'planModeState' | 'activePlanFilePath'> | null | undefined,
+): string | null {
+  if (meta?.planModeState !== 'planning' || !meta.activePlanFilePath) return null
+  const rel = meta.activePlanFilePath.replace(/\\/g, '/')
+  if (!existsSync(join(cwd, rel))) return null
+  agent.enterPlanMode({ planFilePath: rel })
+  return rel
+}
+
 // ── Aggregate Bootstrap ────────────────────────────────────────
 
 export interface BootstrapOptions {
@@ -1499,6 +1543,19 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   // 6. Meridian indexer
   const meridianIndexer = new MeridianIndexer(cwd)
 
+  // Memory epoch reset — 首次/升级后启动时一次性清空中毒的跨会话学习存量
+  // （playbook.jsonl / recovery-journal / advisory-efficacy / mistake_entries），
+  // 见 memory-epoch.ts 取证背景。必须在 loadSessionMemories warmup 之前跑，
+  // 否则旧 mistake entries 先被载入内存、会话末又原样存回。
+  try {
+    const memReset = resetLegacyMemoryIfNeeded(cwd, {
+      clearMistakeEntries: () => meridianIndexer.getDb().clearMistakeEntries(),
+    })
+    if (!memReset.skipped && memReset.cleared.length > 0) {
+      console.error(`[startup] Memory epoch ${memReset.epoch}: cleared ${memReset.cleared.join(', ')}`)
+    }
+  } catch { /* 清理绝不阻塞启动 */ }
+
   // 7. Domain knowledge store
   const domainKnowledgeStore = new DomainKnowledgeStore(join(cwd, '.rivet', 'knowledge'))
 
@@ -1576,13 +1633,29 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     } catch { /* best-effort: goal restore failure is non-fatal */ }
   }
 
-  // 13. MCP + LSP initialization
+  // 13. MCP + Plugin + LSP initialization
   // asyncExtras (default true): fire-and-forget, non-blocking for faster startup
   // asyncExtras=false: synchronous await, completes before bootstrap returns
   if (opts.asyncExtras !== false) {
     initializeMcp(config, toolRegistry, refs).then(() => {
       agent.updateTools()
     }).catch(() => {})
+    initializePlugins(config.plugins, toolRegistry, cwd).then((result) => {
+      for (const name of result.suppressTools) {
+        toolRegistry.remove(name)
+      }
+      if (result.warnings.length > 0) {
+        debugLog(`[plugins] ${result.loaded}/${result.scanned} loaded, ${result.totalTools} tools; warnings: ${result.warnings.join('; ')}`)
+      }
+      // Always refresh tools when plugins change the registry (tools added OR suppressed).
+      // Suppress-only plugins (zero own tools) must still trigger an update to remove
+      // the suppressed built-in tools from the model's tool list.
+      if (result.totalTools > 0 || result.suppressTools.length > 0) {
+        agent.updateTools()
+      }
+    }).catch((err) => {
+      debugLog(`[plugins] Initialization failed: ${(err as Error).message}`)
+    })
     initializeLsp(cwd, toolRegistry).then((lspManager) => {
       refs.lspManager = lspManager
       agent.updateTools()
@@ -1590,6 +1663,14 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   } else {
     await initializeMcp(config, toolRegistry, refs)
     agent.updateTools()
+    const pluginResult = await initializePlugins(config.plugins, toolRegistry, cwd)
+    for (const name of pluginResult.suppressTools) {
+      toolRegistry.remove(name)
+    }
+    if (pluginResult.warnings.length > 0) {
+      debugLog(`[plugins] ${pluginResult.loaded}/${pluginResult.scanned} loaded, ${pluginResult.totalTools} tools; warnings: ${pluginResult.warnings.join('; ')}`)
+    }
+    if (pluginResult.totalTools > 0) agent.updateTools()
     const lsp = await initializeLsp(cwd, toolRegistry)
     refs.lspManager = lsp
     agent.updateTools()

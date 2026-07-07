@@ -1,8 +1,14 @@
 {
+  "groupAria": "自治档位",
   "supervised": "监督",
   "supervisedHint": "每个风险操作都需你确认",
   "default": "默认",
   "defaultHint": "项目内低风险自动，高风险需确认",
   "autonomous": "自治",
-  "autonomousHint": "项目内全自动执行；项目外仍被沙箱拦截，可随时回滚"
+  "autonomousHint": "项目内全自动执行；项目外仍被沙箱拦截，可随时回滚",
+  "fullAccess": "完全访问",
+  "fullAccessHint": "自治 + 允许读取整个磁盘（全局生效）；写入仍受沙箱限制",
+  "fullAccessGranted": "已授权全盘只读，立即生效",
+  "fullAccessRevokedRestart": "已移除全盘读取授权，重启应用后完全撤销",
+  "fullAccessError": "全盘授权操作失败：{{message}}"
 }

@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useUiState } from '../state/store'
 import { useArtifacts, useConveneCouncil, useDomains, useSessions, useSetDomain } from '../state/queries'
 import { getArtifact } from '../runtime/client'
@@ -50,6 +51,7 @@ function parseCouncilOpinions(raw: string): Record<string, string> {
 }
 
 export function CouncilSurface() {
+  const { t } = useTranslation('council')
   const ui = useUiState()
   const sessionId = ui.activeSessionId
   const sessions = useSessions()
@@ -109,31 +111,31 @@ export function CouncilSurface() {
       <div className="council-surface">
         <header className="council-header">
           <div>
-            <h3><Sparkles size={18} /> 星域名册 · 议事会</h3>
+            <h3><Sparkles size={18} /> {t('title')}</h3>
             <p className="council-subtitle">
               {session
-                ? `当前线程：${session.title ?? session.id.slice(0, 8)}`
-                : '请先在左侧选择一个线程'}
+                ? t('currentThread', { title: session.title ?? session.id.slice(0, 8) })
+                : t('selectThreadHint')}
             </p>
           </div>
           {session && (
             <span className={`council-status ${isRunning ? 'running' : 'idle'}`}>
-              {isRunning ? '会话运行中' : '会话空闲'}
+              {isRunning ? t('sessionRunning') : t('sessionIdle')}
             </span>
           )}
         </header>
 
-        {!sessionId && <div className="empty">请先选择一个线程。</div>}
+        {!sessionId && <div className="empty">{t('selectThread')}</div>}
 
         {sessionId && (
           <div className="council-layout">
             <section className="council-panel">
               <div className="council-panel-head">
                 <Users size={16} />
-                <h4>星域名册</h4>
+                <h4>{t('roster')}</h4>
               </div>
-              {domains.isLoading && <div className="surface-loading">加载中…</div>}
-              {domains.isError && <div className="meta warn">加载失败</div>}
+              {domains.isLoading && <div className="surface-loading">{t('loading')}</div>}
+              {domains.isError && <div className="meta warn">{t('loadFailed')}</div>}
               <div className="domain-grid">
                 {(domains.data ?? []).map((d) => (
                   <DomainCard
@@ -151,21 +153,21 @@ export function CouncilSurface() {
               <section className="council-panel">
                 <div className="council-panel-head">
                   <ScrollText size={16} />
-                  <h4>召集议事会</h4>
+                  <h4>{t('convene')}</h4>
                 </div>
                 {isRunning ? (
                   <div className="council-hint warn">
-                    当前会话正在运行，请等待本轮结束后再召集议事会。
+                    {t('runningWarn')}
                   </div>
                 ) : (
                   <div className="council-form">
                     <label className="council-field">
-                      <span>选择计划 artifact</span>
+                      <span>{t('selectArtifact')}</span>
                       <select
                         value={selectedArtifactId ?? ''}
                         onChange={(e) => setSelectedArtifactId(e.target.value || null)}
                       >
-                        <option value="">请选择…</option>
+                        <option value="">{t('selectPlaceholder')}</option>
                         {planArtifacts.map((a) => (
                           <option key={a.id} value={a.id}>
                             {a.target} ({a.kind})
@@ -175,10 +177,10 @@ export function CouncilSurface() {
                     </label>
 
                     <label className="council-field">
-                      <span>轮次</span>
+                      <span>{t('rounds')}</span>
                       <select value={rounds} onChange={(e) => setRounds(Number(e.target.value))}>
-                        <option value={1}>单轮会诊</option>
-                        <option value={2}>双轮辩论（有冲突时启用）</option>
+                        <option value={1}>{t('roundsSingle')}</option>
+                        <option value={2}>{t('roundsDouble')}</option>
                       </select>
                     </label>
 
@@ -187,12 +189,12 @@ export function CouncilSurface() {
                       onClick={handleConvene}
                       disabled={!canConvene}
                     >
-                      {convene.isPending ? '召集中…' : '召集议事会'}
+                      {convene.isPending ? t('convening') : t('convene')}
                     </button>
 
                     {convene.isError && (
                       <div className="council-hint err">
-                        召集失败：{(convene.error as Error)?.message}
+                        {t('conveneFailed', { message: (convene.error as Error)?.message })}
                       </div>
                     )}
                   </div>
@@ -203,7 +205,7 @@ export function CouncilSurface() {
                 <section className="council-panel result-panel">
                   <div className="council-panel-head">
                     <Check size={16} />
-                    <h4>最新议事结果</h4>
+                    <h4>{t('latestResult')}</h4>
                   </div>
                   <div className="council-result-card">
                     <div className="council-result-title">{latestCouncil.target}</div>
@@ -213,7 +215,7 @@ export function CouncilSurface() {
                   <div className="council-roundtable-wrapper">
                     <div className="council-table">
                       <div className="table-center">
-                        <div className="table-center-title">会商中枢</div>
+                        <div className="table-center-title">{t('tableCenter')}</div>
                         <div className="table-center-desc truncate" title={latestCouncil.summary}>
                           {latestCouncil.summary}
                         </div>
@@ -237,7 +239,7 @@ export function CouncilSurface() {
                                 setSelectedSeat(isSelected ? null : d.key)
                               }
                             }}
-                            title={isActive ? `阅读 ${d.name} 的发言意见` : `${d.name} 未在此次会议发言`}
+                            title={isActive ? t('seatReadHint', { name: d.name }) : t('seatSilentHint', { name: d.name })}
                           >
                             <span className="cr-seat-glyph">{d.uiPersona?.glyph ?? '✹'}</span>
                             <span className="cr-seat-name">{d.name}</span>
@@ -257,7 +259,7 @@ export function CouncilSurface() {
                         <div className="cob-header">
                           <span className="cob-glyph" style={{ borderColor: `var(--${d.uiPersona?.accent ?? 'accent'})` }}>{d.uiPersona?.glyph}</span>
                           <div className="cob-meta">
-                            <span className="cob-name">{d.name} · 辩论修订意见</span>
+                            <span className="cob-name">{t('opinionTitle', { name: d.name })}</span>
                             <span className="cob-motto">{d.motto}</span>
                           </div>
                         </div>
@@ -275,7 +277,7 @@ export function CouncilSurface() {
                         className="cfr-toggle-btn" 
                         onClick={() => setShowFullReport(!showFullReport)}
                       >
-                        {showFullReport ? '收起完整议事纪要报告' : '展开完整议事纪要报告'}
+                        {showFullReport ? t('collapseReport') : t('expandReport')}
                       </button>
                       {showFullReport && (
                         <div className="cfr-markdown border border-border rounded p-3 mt-2 bg-panel-2 overflow-auto max-h-[260px] text-xs">
@@ -305,6 +307,7 @@ function DomainCard({
   onClick: () => void
   busy: boolean
 }) {
+  const { t } = useTranslation('council')
   const glyph = domain.uiPersona?.glyph ?? '✹'
   const accent = domain.uiPersona?.accent ?? 'primary'
   const disabled = busy || current
@@ -318,14 +321,14 @@ function DomainCard({
     >
       <div className="domain-glyph" aria-hidden>{glyph}</div>
       <div className="domain-body">
-        <div className="domain-name">{domain.key === 'auto' ? `${domain.name} · 天枢` : domain.name}</div>
+        <div className="domain-name">{domain.key === 'auto' ? t('domainAutoName', { name: domain.name }) : domain.name}</div>
         <div className="domain-motto">{domain.motto}</div>
         <div className="domain-meta">{domain.meta}</div>
         <div className="domain-essence">{domain.essence}</div>
       </div>
       {current && (
         <span className="domain-current">
-          <Check size={12} /> 当前
+          <Check size={12} /> {t('current')}
         </span>
       )}
     </button>

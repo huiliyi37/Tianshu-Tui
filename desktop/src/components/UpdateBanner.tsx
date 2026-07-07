@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Trans, useTranslation } from 'react-i18next'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { isTauri } from '../lib/dialog'
@@ -10,6 +11,7 @@ import { isTauri } from '../lib/dialog'
  * 仅在 Tauri 桌面环境运行（浏览器开发模式 no-op）。
  */
 export function UpdateBanner() {
+  const { t } = useTranslation('shell')
   const [update, setUpdate] = useState<Update | null>(null)
   const [installing, setInstalling] = useState(false)
   const [restarting, setRestarting] = useState(false)
@@ -72,21 +74,26 @@ export function UpdateBanner() {
     <div className="update-banner">
       <div className="update-banner-text">
         {restarting
-          ? '安装完成，正在重启…'
+          ? t('update.restarting')
           : (
             <>
-              新版本 <strong>{update.version}</strong> 可用
-              {installing && progress != null && ` · 下载中 ${progress}%`}
-              {installing && progress == null && ' · 安装中…'}
+              <Trans
+                t={t}
+                i18nKey="update.newVersion"
+                values={{ version: update.version }}
+                components={{ bold: <strong /> }}
+              />
+              {installing && progress != null && ` · ${t('update.downloading', { progress })}`}
+              {installing && progress == null && ` · ${t('update.installing')}`}
             </>
           )}
       </div>
       <div className="update-banner-actions">
         <button className="btn sm" onClick={install} disabled={busy}>
-          {restarting ? '重启中' : installing ? '请稍候' : '立即更新'}
+          {restarting ? t('update.restartingBtn') : installing ? t('update.pleaseWait') : t('update.updateNow')}
         </button>
         <button className="btn ghost sm" onClick={() => setDismissed(true)} disabled={busy}>
-          稍后
+          {t('update.later')}
         </button>
       </div>
     </div>

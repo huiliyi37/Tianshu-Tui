@@ -357,14 +357,40 @@ export class PromptEngine {
       this.firstUserKey = typeof fm.content === 'string' ? fm.content : ''
     }
 
-    // Commit the outgoing user message's pending trailer BEFORE the message
-    // loop — historical slots are processed before lastUserIdx, so a commit
-    // inside the boundary block would leave getNextFrozen empty → fallback
-    // rebuild (8396ac51 class of prefix breaks).
+    // Commit pending trailers BEFORE the message loop — historical slots are
+    // processed before lastUserIdx, so a commit inside the boundary block
+    // would leave getNextFrozen empty → fallback rebuild (8396ac51 class of
+    // prefix breaks).
+    //
+    // Pending-driven sweep (2026-07-06 orphan fix): the previous guard keyed
+    // off cachedFreshForUser, which invalidateFreshCache() clears. An
+    // inter-turn invalidate (setIntentRetrievalRoute fires on EVERY user
+    // message via turn-step-producer) landed between the final build of turn
+    // N and the first build of turn N+1 — the commit was skipped, the pending
+    // snapshot orphaned forever, and every subsequent request hit the FATAL
+    // fallback (cache-log: frozenEvicted on 158/160 requests, prefix
+    // truncations up to 189K tokens at each user boundary). Commit is now
+    // driven by frozenPendingMerged itself, which survives invalidation.
     if (!sidePath && lastUserIdx >= 0) {
       const lastUserContent = typeof oaiMessages[lastUserIdx]!.content === 'string'
         ? oaiMessages[lastUserIdx]!.content as string
         : JSON.stringify(oaiMessages[lastUserIdx]!.content)
+      // 1) Pending entries whose key is no longer the active last-user message
+      //    belong to a finished turn — commit unconditionally and clear.
+      for (const key of [...this.frozenPendingMerged.keys()]) {
+        if (key === lastUserContent) continue
+        this.commitFrozenSnapshot(key)
+        this.frozenPendingMerged.delete(key)
+      }
+      // 2) Same-text cases: a prior instance of the SAME text is now
+      //    historical (duplicate "继续", or same text re-sent). Commit the
+      //    pending so the historical slot can fetch its snapshot; the active
+      //    instance keeps updating pending as usual.
+      const hasPriorInstanceNowHistorical = this.frozenPendingMerged.has(lastUserContent)
+        && oaiMessages.some((m, idx) => m.role === 'user'
+          && !isSystemReminder(m.content)
+          && idx !== lastUserIdx
+          && (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)) === lastUserContent)
       const msgHash = oaiMessages.length > 0
         ? `${oaiMessages.length}:${typeof oaiMessages[oaiMessages.length - 1]!.content === 'string' ? oaiMessages[oaiMessages.length - 1]!.content as string : ''}`
         : ''
@@ -372,16 +398,9 @@ export class PromptEngine {
         && oaiMessages.length === this.lastMessageCount
         && msgHash !== this.lastMessageHash
         && ((this.frozenUserMerged.get(lastUserContent)?.length ?? 0) > 0
-          || this.frozenPendingMerged.has(this.cachedFreshForUser))
-      const hasPriorInstanceNowHistorical = this.cachedFreshForUser !== ''
-        && lastUserContent === this.cachedFreshForUser
-        && oaiMessages.some((m, idx) => m.role === 'user'
-          && !isSystemReminder(m.content)
-          && idx !== lastUserIdx
-          && (typeof m.content === 'string' ? m.content : JSON.stringify(m.content)) === this.cachedFreshForUser)
-      if (this.cachedFreshForUser
-        && (lastUserContent !== this.cachedFreshForUser || isDuplicate || hasPriorInstanceNowHistorical)) {
-        this.commitFrozenSnapshot(this.cachedFreshForUser)
+          || this.frozenPendingMerged.has(lastUserContent))
+      if (hasPriorInstanceNowHistorical || isDuplicate) {
+        this.commitFrozenSnapshot(lastUserContent)
       }
     }
 
@@ -524,7 +543,12 @@ export class PromptEngine {
             debugLog('prompt-engine', `FATAL-CACHE: frozen snapshots fully evicted for FIRST user message (len=${typeof msg.content === 'string' ? msg.content.length : 0}) — rebuilding with current volatileBlock`)
             const fc = typeof msg.content === 'string' ? msg.content : ''
             const vb = this.cachedConsolidated ? this.volatileBlock + '\n' + this.cachedConsolidated : this.volatileBlock
-            result.push({ role: 'user', content: vb + '\n---\n' + fc })
+            const rebuilt = vb + '\n---\n' + fc
+            // Memoize (self-heal): without this, every subsequent request
+            // re-runs the fallback with live volatile bytes — flip-flopping
+            // message bytes and paying cacheCreate tax on each request.
+            if (!sidePath && fc !== '') this.frozenUserMerged.set(fc, [rebuilt])
+            result.push({ role: 'user', content: rebuilt })
           }
         } else {
           // Historical user message: use frozen merged content if available
@@ -540,7 +564,10 @@ export class PromptEngine {
             debugLog('prompt-engine', `frozen snapshots fully evicted for historical user message (len=${typeof msg.content === 'string' ? msg.content.length : 0}) — rebuilding with current volatileBlock`)
             const fc = typeof msg.content === 'string' ? msg.content : ''
             const vb = this.cachedConsolidated ? this.volatileBlock + '\n' + this.cachedConsolidated : this.volatileBlock
-            result.push({ role: 'user', content: vb + '\n---\n' + fc })
+            const rebuilt = vb + '\n---\n' + fc
+            // Memoize (self-heal) — same rationale as the first-user fallback.
+            if (!sidePath && fc !== '') this.frozenUserMerged.set(fc, [rebuilt])
+            result.push({ role: 'user', content: rebuilt })
           }
         }
       } else {
@@ -1075,6 +1102,13 @@ export class PromptEngine {
       const err = new Error('invalidateFreshCache')
       debugLog(`[fresh-cache] CLEARED cachedFreshForUser="${this.cachedFreshForUser.slice(0, 80)}..." by: ${err.stack?.split('\n').slice(2, 5).join(' → ') ?? 'unknown'}`)
     }
+    // NOTE (2026-07-06 orphan fix): do NOT commit the pending trailer here.
+    // An intra-turn invalidate is followed by a boundary rebuild that produces
+    // the message's FINAL wire bytes — committing the intermediate version
+    // would leave a stale extra snapshot and historical retrieval (index 0)
+    // would stop byte-matching the last request. The pending entry survives in
+    // frozenPendingMerged; buildOaiRequest's pending sweep commits it at the
+    // next main-path build regardless of cachedFreshForUser.
     this.cachedFreshForUser = ''
     this.cachedAppendix = ''
     this.cachedConsolidated = ''

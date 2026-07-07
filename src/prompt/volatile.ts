@@ -833,6 +833,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   if (targetPlatform !== process.platform) {
     parts.push(`<platform-note>文件约定（换行/路径风格）按 ${targetPlatform} 生成；但 shell 命令在宿主 ${process.platform} 上执行——优先使用跨平台命令，避免目标平台专属语法在宿主机执行失败。</platform-note>`)
   }
+  // Windows 路径风格指引：git/仓库索引等上游输出一律正斜杠，模型会照抄，
+  // 对 Windows 用户显示 src/foo 而非 src\foo（用户报告 2026-07-07）。
+  // targetPlatform 会话内固定 → session-static，前缀缓存安全。
+  if (targetPlatform === 'win32') {
+    parts.push('<path-style-note>Windows 环境：在回复和文档中书写文件路径时用反斜杠（如 src\\tui\\app.ts、D:\\proj\\file.md），与用户的资源管理器/终端习惯一致。工具参数两种分隔符都接受；shell 命令内的路径写法以 shell-note 为准（Git Bash 用正斜杠）。</path-style-note>')
+  }
   // Shell 原生指引：跟随真实解析出的 shell 族（Git Bash / PowerShell / cmd），
   // 而非一律按 PowerShell。装了 Git Bash 时实际跑 bash，给 PowerShell 指引会诱导
   // 模型发错语法。getShellCommand() 进程内缓存、会话内固定 → session-static，
@@ -864,7 +870,10 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     // knowledgeBlock: session-constant top-K domain lessons (bound once with the
     // domain) — lesson text is agent-written store content, so it IS escaped.
     const knowledge = d.knowledgeBlock ? `\n<domain-knowledge>\n${escapeXml(d.knowledgeBlock)}\n</domain-knowledge>` : ''
-    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}${knowledge}</star-domain>`)
+    // 全星域共享执行纪律（字节恒定，随 star-domain 进 FROZEN 前缀）。
+    // 瑶光域在自己的 systemPromptSuffix 里保留放大版，此处是十域共同的底线。
+    const sharedDiscipline = '\n执行纪律（全星域共享）：绿非证明，复现即证——宣称已修/已验证前，先用工具复现结论；报告里的每个数字要能指到一条真实验证记录。'
+    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}${sharedDiscipline}${knowledge}</star-domain>`)
   }
 
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)

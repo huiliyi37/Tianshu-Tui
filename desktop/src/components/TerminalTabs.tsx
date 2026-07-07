@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Plus, X, TerminalSquare } from 'lucide-react'
 import { TerminalPanel } from './TerminalPanel'
 import {
@@ -23,6 +24,7 @@ export { createTerminalTabsState }
  * so their PTY state survives tab switching without re-spawning.
  */
 export function TerminalTabs({ cwd }: { cwd: string }) {
+  const { t } = useTranslation('terminal')
   const stateRef = useRef<TerminalTabsState>(null!)
   if (!stateRef.current) stateRef.current = createTerminalTabsState(cwd)
   const state = stateRef.current
@@ -66,13 +68,13 @@ export function TerminalTabs({ cwd }: { cwd: string }) {
             <button
               className="tt-tab-close"
               onClick={(e) => handleClose(tab.id, e)}
-              aria-label="关闭终端"
+              aria-label={t('closeTab')}
             >
               <X size={12} />
             </button>
           </div>
         ))}
-        <button className="tt-add" onClick={handleAdd} aria-label="新建终端">
+        <button className="tt-add" onClick={handleAdd} aria-label={t('newTab')}>
           <Plus size={14} />
         </button>
       </div>

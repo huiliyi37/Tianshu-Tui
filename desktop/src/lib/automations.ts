@@ -2,6 +2,7 @@
 // their ScheduledTask and summarize the latest run. Kept pure + total so they
 // are unit-testable without a running backend.
 
+import i18n from '../i18n'
 import type { TaskRecord, TaskStatus } from '../runtime/types'
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(['completed', 'failed', 'cancelled', 'timed_out'])
@@ -32,17 +33,8 @@ export function isCancellable(status: TaskStatus): boolean {
   return status === 'pending' || status === 'running'
 }
 
-const STATUS_LABEL: Record<TaskStatus, string> = {
-  pending: '排队中',
-  running: '运行中',
-  completed: '成功',
-  failed: '失败',
-  cancelled: '已取消',
-  timed_out: '超时',
-}
-
 export function statusLabel(status: TaskStatus): string {
-  return STATUS_LABEL[status] ?? status
+  return i18n.t(`automations:status.${status}`, { defaultValue: status })
 }
 
 /** Tone class for a status badge (maps to existing badge color classes). */

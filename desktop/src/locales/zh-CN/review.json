@@ -1,0 +1,91 @@
+{
+  "tabs": {
+    "scrollLeft": "向左滚动",
+    "scrollRight": "向右滚动",
+    "inProgress": "进行中"
+  },
+  "collapse": "收起",
+  "collapseTitle": "收起审查面板 (Cmd+Shift+B)",
+  "canvas": {
+    "empty": "没有可预览的 HTML 或 Markdown 工件",
+    "selectArtifact": "选择工件:",
+    "reloadTitle": "重新加载",
+    "refresh": "刷新",
+    "fullscreenTitle": "全屏预览（应用内沙箱）",
+    "fullscreen": "全屏",
+    "loading": "加载中...",
+    "exitFullscreenTitle": "退出全屏 (Esc)",
+    "exitFullscreen": "退出全屏"
+  },
+  "autonomyNote": "自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。",
+  "gitChangesHeading": "Git 变更 · 代码审查",
+  "artifactMeta": "{{lines}} 行 · {{chars}} 字符",
+  "checkpointHeading": "检查点 · 回滚",
+  "tasksHeading": "任务清单",
+  "noTasks": "还没有任务",
+  "artifactsHeading": "工件 · {{n}}",
+  "noArtifacts": "还没有工件",
+  "modal": {
+    "rendered": "渲染",
+    "raw": "源码",
+    "feedbackLabel": "在工件上反馈（回灌为下一轮上下文）",
+    "annotatedLines": "已标注 {{n}} 行评论",
+    "feedbackPlaceholder": "例如：这个改动漏了错误处理，请补上 try/catch 并加测试（行级评论可在 diff 上直接标）",
+    "close": "关闭",
+    "sending": "发送中…",
+    "send": "发送反馈"
+  },
+  "rollback": {
+    "loadingPreview": "加载预览…",
+    "trigger": "回滚到此检查点",
+    "none": "当前没有可回滚的检查点",
+    "confirmBadge": "确认回滚",
+    "cancel": "取消",
+    "confirm": "确认回滚",
+    "dialogTitle": "确认回滚？",
+    "dialogDescription": "此操作会将当前会话恢复到上一个检查点。部分副作用（如已执行的 bash 命令）可能无法撤销。",
+    "done": "已回滚（{{hash}}）",
+    "notExecuted": "回滚未执行",
+    "skipped": "跳过（被其它会话占用）：{{files}}",
+    "unrevertable": "⚠️ 无法回滚的副作用：{{effects}}"
+  },
+  "sources": {
+    "heading": "涉及文件 · {{n}}",
+    "empty": "还没有文件变更",
+    "viewTitle": "查看 {{path}}",
+    "collapse": "收起",
+    "expandRemaining": "展开剩余 {{n}} 个文件",
+    "loadingFile": "加载文件…",
+    "openInEditor": "在编辑器中打开",
+    "close": "关闭"
+  },
+  "github": {
+    "cliUnavailablePrefix": "GitHub CLI 未安装或未认证。运行 ",
+    "cliUnavailableSuffix": " 后刷新。",
+    "noPrs": "没有打开的 Pull Request",
+    "verdictComment": "评论",
+    "verdictApprove": "批准",
+    "verdictRequestChanges": "请求修改",
+    "loadingDetail": "加载 PR 详情…",
+    "detailFailed": "读取 PR 详情失败",
+    "loadingDiff": "加载 diff…",
+    "diffFailed": "读取 diff 失败",
+    "noTextDiff": "无文本差异",
+    "pendingInline": "{{n}} 条行内评论待提交",
+    "summaryPlaceholder": "评审概要（可选，批准时可留空）…",
+    "submitFailed": "提交失败：{{error}}",
+    "unknownError": "未知错误",
+    "clearInline": "清空行内评论",
+    "submitting": "提交中…",
+    "submit": "提交评审"
+  },
+  "diff": {
+    "split": "双列",
+    "unified": "单列",
+    "toggleLayoutTitle": "切换单列 / 双列视图",
+    "commentLineTitle": "评论此行",
+    "commentPlaceholder": "评论 {{file}}:{{line}}",
+    "cancel": "取消",
+    "submit": "提交"
+  }
+}

@@ -116,9 +116,20 @@ export interface TaskFilter {
 
 const DEFAULT_TASKS_DIR = '.rivet/tasks'
 
+const ACTIVE_STATUSES: readonly TaskStatus[] = ['pending', 'running']
+
 export class JsonTaskStore implements TaskStore {
   private dir: string
   private cache = new Map<string, TaskRecord>()
+  /**
+   * idempotencyKey → active task ids. Built lazily with ONE directory scan on
+   * first use, then maintained incrementally by save()/delete() — the previous
+   * implementation re-read every task JSON from disk on every dedup check,
+   * which turned each createTask into an O(all tasks ever) directory walk.
+   * Entries are verified against load() at lookup time, so a stale id (e.g. a
+   * record quarantined behind our back) self-evicts instead of poisoning dedup.
+   */
+  private idemIndex: Map<string, Set<string>> | null = null
 
   constructor(dir?: string) {
     this.dir = resolve(dir ?? DEFAULT_TASKS_DIR)
@@ -136,6 +147,10 @@ export class JsonTaskStore implements TaskStore {
     writeFileSync(tmpPath, JSON.stringify(task, null, 2), 'utf-8')
     renameSync(tmpPath, finalPath)
     this.cache.set(task.id, cloneTask(task))
+    if (this.idemIndex) {
+      if (ACTIVE_STATUSES.includes(task.status)) this.indexAdd(task.idempotencyKey, task.id)
+      else this.indexRemove(task.idempotencyKey, task.id)
+    }
   }
 
   async load(id: string): Promise<TaskRecord | null> {
@@ -170,6 +185,8 @@ export class JsonTaskStore implements TaskStore {
 
   async delete(id: string): Promise<void> {
     if (!isValidTaskId(id)) return
+    const cached = this.cache.get(id)
+    if (cached && this.idemIndex) this.indexRemove(cached.idempotencyKey, id)
     this.cache.delete(id)
     const filePath = this.pathFor(`${id}.json`)
     try {
@@ -182,14 +199,46 @@ export class JsonTaskStore implements TaskStore {
   }
 
   async findActiveByIdempotencyKey(key: string): Promise<TaskRecord | null> {
-    const all = await this.list()
-    return all.find(r =>
-      r.idempotencyKey === key &&
-      r.status !== 'completed' &&
-      r.status !== 'failed' &&
-      r.status !== 'cancelled' &&
-      r.status !== 'timed_out',
-    ) ?? null
+    const index = this.ensureIdemIndex()
+    const ids = index.get(key)
+    if (!ids) return null
+    for (const id of [...ids]) {
+      const record = await this.load(id)
+      if (record && record.idempotencyKey === key && ACTIVE_STATUSES.includes(record.status)) {
+        return record
+      }
+      // Stale entry (record gone / turned terminal outside save()) — self-evict.
+      this.indexRemove(key, id)
+    }
+    return null
+  }
+
+  /** Build the idempotency index once (single directory scan). */
+  private ensureIdemIndex(): Map<string, Set<string>> {
+    if (this.idemIndex) return this.idemIndex
+    this.idemIndex = new Map()
+    const files = readdirSync(this.dir).filter(f => f.endsWith('.json'))
+    for (const f of files) {
+      if (!isValidTaskId(f.slice(0, -'.json'.length))) continue
+      const record = this.loadFromFile(this.pathFor(f))
+      if (record && ACTIVE_STATUSES.includes(record.status)) {
+        this.indexAdd(record.idempotencyKey, record.id)
+      }
+    }
+    return this.idemIndex
+  }
+
+  private indexAdd(key: string, id: string): void {
+    const ids = this.idemIndex!.get(key)
+    if (ids) ids.add(id)
+    else this.idemIndex!.set(key, new Set([id]))
+  }
+
+  private indexRemove(key: string, id: string): void {
+    const ids = this.idemIndex?.get(key)
+    if (!ids) return
+    ids.delete(id)
+    if (ids.size === 0) this.idemIndex!.delete(key)
   }
 
   private loadFromFile(filePath: string): TaskRecord | null {

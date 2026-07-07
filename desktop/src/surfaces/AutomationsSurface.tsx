@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   useCreateSchedule,
   useDeleteSchedule,
@@ -17,6 +18,7 @@ type TriggerType = 'interval' | 'cron' | 'oneshot'
 // (trigger + bounded retry + allowed tools); right = execution history for the
 // selected automation (status badges, jump-to-thread, cancel running).
 export function AutomationsSurface() {
+  const { t } = useTranslation('automations')
   const schedule = useSchedule()
   const tasks = useTasks()
   const create = useCreateSchedule()
@@ -53,9 +55,9 @@ export function AutomationsSurface() {
   }
 
   const specHint =
-    type === 'interval' ? '毫秒间隔，如 3600000（每小时）'
-      : type === 'cron' ? '"分 时 * * *"，如 "30 9 * * *"（每天 9:30 UTC）'
-        : 'ISO 时间，如 2026-07-01T09:00:00Z'
+    type === 'interval' ? t('form.specHint.interval')
+      : type === 'cron' ? t('form.specHint.cron')
+        : t('form.specHint.oneshot')
 
   const selected = definitions.find((d) => d.id === selectedId) ?? null
   const history = useMemo(
@@ -72,38 +74,38 @@ export function AutomationsSurface() {
     <div className="automations-dashboard" style={{ display: 'flex', height: '100%', minHeight: 0 }}>
       {/* Left: definitions + create form */}
       <div className="automations-left" style={{ flex: '0 0 46%', display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: '1px solid var(--border)' }}>
-        <div className="panel-header"><span>自动化</span></div>
+        <div className="panel-header"><span>{t('title')}</span></div>
 
         <div className="schedule-form">
           <textarea
             value={prompt}
-            placeholder="到点要让 agent 做什么…"
+            placeholder={t('form.promptPlaceholder')}
             onChange={(e) => setPrompt(e.target.value)}
           />
           <div className="row">
             <select value={type} onChange={(e) => setType(e.target.value as TriggerType)}>
-              <option value="interval">间隔</option>
-              <option value="cron">每日 cron</option>
-              <option value="oneshot">一次性</option>
+              <option value="interval">{t('form.triggerInterval')}</option>
+              <option value="cron">{t('form.triggerCron')}</option>
+              <option value="oneshot">{t('form.triggerOneshot')}</option>
             </select>
             <input value={spec} onChange={(e) => setSpec(e.target.value)} placeholder={specHint} />
           </div>
           <div className="row">
-            <label className="meta" style={{ minWidth: 64 }}>最大尝试</label>
+            <label className="meta" style={{ minWidth: 64 }}>{t('form.maxAttempts')}</label>
             <input type="number" min={1} max={10} value={maxAttempts} onChange={(e) => setMaxAttempts(e.target.value)} style={{ width: 64 }} />
-            <label className="meta" style={{ minWidth: 64 }}>重试间隔(秒)</label>
+            <label className="meta" style={{ minWidth: 64 }}>{t('form.backoffSec')}</label>
             <input type="number" min={0} value={backoffSec} onChange={(e) => setBackoffSec(e.target.value)} style={{ width: 72 }} />
           </div>
           <div className="row">
-            <input value={allowedTools} onChange={(e) => setAllowedTools(e.target.value)} placeholder="允许的工具(逗号分隔，留空=全部)" />
-            <button className="btn" disabled={!prompt.trim() || create.isPending} onClick={submit}>新建</button>
+            <input value={allowedTools} onChange={(e) => setAllowedTools(e.target.value)} placeholder={t('form.allowedToolsPlaceholder')} />
+            <button className="btn" disabled={!prompt.trim() || create.isPending} onClick={submit}>{t('form.create')}</button>
           </div>
-          <div className="meta">{specHint} · 尝试次数 ≥ 2 时启用失败重试</div>
+          <div className="meta">{specHint} · {t('form.retryHint')}</div>
           {create.isError && <div className="meta warn">{(create.error as Error).message}</div>}
         </div>
 
         <div className="automations-def-list" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-          {definitions.length === 0 && <div className="empty">还没有自动化任务</div>}
+          {definitions.length === 0 && <div className="empty">{t('list.empty')}</div>}
           {definitions.map((t) => (
             <ScheduleCard
               key={t.id}
@@ -120,11 +122,11 @@ export function AutomationsSurface() {
 
       {/* Right: execution history for the selected automation */}
       <div className="automations-right" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <div className="panel-header"><span>执行历史{selected ? ` · ${history.length}` : ''}</span></div>
+        <div className="panel-header"><span>{t('history.title')}{selected ? ` · ${history.length}` : ''}</span></div>
         {!selected ? (
-          <div className="empty">选择左侧一个自动化查看执行历史</div>
+          <div className="empty">{t('history.selectHint')}</div>
         ) : history.length === 0 ? (
-          <div className="empty">尚无执行记录</div>
+          <div className="empty">{t('history.empty')}</div>
         ) : (
           <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
             {history.map((run) => (
@@ -132,7 +134,7 @@ export function AutomationsSurface() {
                 <div className="row" style={{ justifyContent: 'space-between' }}>
                   <StatusBadge status={run.status} />
                   <span className="meta">
-                    {run.attempt && run.attempt > 1 ? `第 ${run.attempt} 次 · ` : ''}
+                    {run.attempt && run.attempt > 1 ? `${t('history.attempt', { n: run.attempt })} · ` : ''}
                     {new Date(run.createdAt).toLocaleString()}
                   </span>
                 </div>
@@ -140,10 +142,10 @@ export function AutomationsSurface() {
                 {run.result?.summary && <div className="meta">{run.result.summary.slice(0, 160)}</div>}
                 <div className="row">
                   {run.sessionId && (
-                    <button className="btn ghost" onClick={() => jumpToSession(run.sessionId!)}>查看会话</button>
+                    <button className="btn ghost" onClick={() => jumpToSession(run.sessionId!)}>{t('history.viewSession')}</button>
                   )}
                   {isCancellable(run.status) && (
-                    <button className="btn ghost" disabled={cancel.isPending} onClick={() => cancel.mutate(run.id)}>取消</button>
+                    <button className="btn ghost" disabled={cancel.isPending} onClick={() => cancel.mutate(run.id)}>{t('history.cancel')}</button>
                   )}
                 </div>
               </div>
@@ -178,6 +180,7 @@ function ScheduleCard({
   onPause: () => void
   onDelete: () => void
 }) {
+  const { t } = useTranslation('automations')
   return (
     <div
       className="schedule-card"
@@ -186,16 +189,16 @@ function ScheduleCard({
     >
       <div className="title">{task.prompt}</div>
       <div className="meta">
-        {task.trigger.type} · {task.trigger.spec} · 已触发 {task.triggerCount} 次
-        {task.retry ? ` · 重试×${task.retry.maxAttempts}` : ''}
-        {task.enabled === false ? ' · 已暂停' : ''}
+        {task.trigger.type} · {task.trigger.spec} · {t('schedule.triggerCount', { n: task.triggerCount })}
+        {task.retry ? ` · ${t('schedule.retryTimes', { n: task.retry.maxAttempts })}` : ''}
+        {task.enabled === false ? ` · ${t('schedule.paused')}` : ''}
       </div>
-      {latest && <div className="meta">最近：<StatusBadge status={latest} /></div>}
+      {latest && <div className="meta">{t('schedule.latest')}<StatusBadge status={latest} /></div>}
       <div className="row">
         <button className="btn ghost" onClick={(e) => { e.stopPropagation(); onPause() }}>
-          {task.enabled === false ? '恢复' : '暂停'}
+          {task.enabled === false ? t('schedule.resume') : t('schedule.pause')}
         </button>
-        <button className="btn ghost" onClick={(e) => { e.stopPropagation(); onDelete() }}>删除</button>
+        <button className="btn ghost" onClick={(e) => { e.stopPropagation(); onDelete() }}>{t('schedule.delete')}</button>
       </div>
     </div>
   )

@@ -7,7 +7,6 @@ import { createRuntimeHookContext, RuntimeHookPipeline } from './runtime-hooks.j
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createUserHooksBridge, runOnErrorHooks } from './hooks/user-hooks-bridge.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
-import { createLlmSpeculationEngine, normalizeLlmSpeculationConfig } from './llm-speculation.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
 import { setGeneralLedgerTelemetrySink } from './general-ledger.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
@@ -20,7 +19,7 @@ import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { computeCompactAttribution } from './compact-attribution.js'
 import { isCostInsensitiveProvider } from '../api/cost-model.js'
 import { isSystemReminder } from '../prompt/system-reminder.js'
-import { getReadRefStats } from '../tools/read-file.js'
+import { getReadRefStats, invalidateSessionReadDedup } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator, DEFAULT_QUALITY_COMPACT_THRESHOLDS } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator, type TurnStateBag } from './turn-orchestrator.js'
@@ -35,6 +34,49 @@ import { ModelRoutingShadowController } from './model-routing-shadow-controller.
 import { PrewarmController } from './prewarm-controller.js'
 import { TurnStepProducer } from './turn-step-producer.js'
 import { skillRegistry } from '../skills/skill-loader.js'
+import type { Usage } from '../api/types.js'
+
+/**
+ * Side-path usage accounting (2026-07-06 cost blind spot fix): side-path
+ * requests (llm-speculation, compaction summaries) are billed like any other
+ * call but used to discard their usage in `onStopReason: () => {}` — invisible
+ * in session totals, meta tokenUsage, and the cache-log. This recorder gives
+ * them a shared sink:
+ *   - accumulates into session totals via addSidePathUsage (no occupancy-
+ *     anchor pollution — see SessionContext.addSidePathUsage)
+ *   - appends an `event: 'side_path'` line to the cache-log, distinct from
+ *     main-turn entries so turn-sequence analysis stays clean
+ * Never consumes the engine/wire divergence probes — those belong to main turns.
+ */
+export function createSidePathUsageRecorder(self: AgentLoop): (kind: string, usage: Partial<Usage>, model?: string) => void {
+  return (kind, usage, model) => {
+    try {
+      if (!usage.input_tokens && !usage.output_tokens) return
+      self.session.addSidePathUsage(usage)
+      const input = usage.input_tokens ?? 0
+      const hitRate = input > 0
+        ? ((usage.cache_read_input_tokens ?? 0) / input * 100).toFixed(1)
+        : '0.0'
+      const line = JSON.stringify({
+        event: 'side_path',
+        kind,
+        t: Date.now(),
+        model: model ?? self.config.promptEngine.getModel(),
+        input,
+        cacheRead: usage.cache_read_input_tokens ?? 0,
+        cacheCreate: usage.cache_creation_input_tokens ?? 0,
+        output: usage.output_tokens ?? 0,
+        hitRate: `${hitRate}%`,
+      })
+      const sid = self.config.sessionId ?? 'anon'
+      import('node:fs/promises').then(fs => {
+        const dir = join(getSessionDir(self.cwd), sid)
+        return fs.mkdir(dir, { recursive: true })
+          .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+      }).catch(() => {})
+    } catch { /* accounting is best-effort — never break the side path */ }
+  }
+}
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 return new TurnStreamController({
@@ -249,6 +291,12 @@ return new ToolExecutionController({
       getSessionTurnCount: () => self.session.getTurnCount(),
       getSessionId: () => self.config.sessionId,
       addToolResults: results => { self.session.addToolResults(results) },
+      // Vision channel (computer_use screenshots → model). Capability comes from
+      // the per-model config flag; switchModel rebuilds the loop so it tracks
+      // the active model. Injection is tail-append via addUserMessage (multimodal
+      // parts) — the same append-only boundary the steer path uses.
+      getSupportsVision: () => self.config.supportsVision ?? false,
+      addUserMessageWithImages: (text, images) => { self.session.addUserMessage(text, images) },
       recordToolHistory: (name, input, isError, content, errorClass) => self.recordToolHistory(name, input, isError, content, errorClass),
       onLeaveMark: mark => self.captureLeaveMark(mark),
       onPlanSteps: steps => self.capturePlanSteps(steps),
@@ -468,11 +516,10 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     meridianIndexer: self.config.meridianIndexer,
     physarumFileAccess: {
       getPhysarum: () => self.immuneHook.getPhysarum(),
+      // Predictions feed ONLY the prewarm cache (mtime+size validated at
+      // consume time). The ShadowQueue enqueue was removed with the 2026-07-07
+      // speculative-chain seal — see P3Config.speculativeEnabled.
       onPredictions: batch => {
-        self.p3.enqueuePhysarumFilePredictions({
-          afterToolName: batch.afterToolName,
-          predictions: batch.predictions,
-        })
         void batchPrewarm(
           self.cwd,
           batch.predictions.map(prediction => prediction.file),
@@ -564,6 +611,10 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     replaceMessages: msgs => {
       self.session.replaceMessages(msgs)
       self.config.promptEngine.resetAppendixBaseline()
+      // Stale-round / diet / heap micro-compact rewrite history WITHOUT going
+      // through CompactionController.safeReplaceMessages — invalidate read-dedup
+      // here too, or read-ref keeps claiming "回看上文" at deleted tool_results.
+      invalidateSessionReadDedup(self.config.sessionId)
     },
     dietMessages: msgs => self.p3.dietMessages(msgs),
     trySessionSplit: () => self.compaction.trySessionSplit(),
@@ -657,18 +708,13 @@ export function buildProgressDigest(input: ProgressDigestInput): string {
 }
 
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
-  // Tier 2 LLM speculation: only constructed when enabled — the default path
-  // pays zero cost (no engine, no dep, orchestrator's optional call is a no-op).
-  const llmSpecConfig = normalizeLlmSpeculationConfig(self.config.llmSpeculation)
-  const llmSpeculation = llmSpecConfig.enabled
-    ? createLlmSpeculationEngine({
-        client: self.config.client,
-        config: llmSpecConfig,
-        enqueue: predictions => { self.p3.enqueueLlmPredictions(predictions) },
-        writeTelemetry: record => { self.telemetryWriter.write(record) },
-      })
-    : null
-
+  // Tier 2 LLM speculation: SEALED with the speculative chain (2026-07-07).
+  // The engine's only consumer was the ShadowQueue pre-execution path; with
+  // serving cut (2026-07-06 stale-read incident) and enqueue gated off, an
+  // opted-in engine would burn side-path LLM calls for nothing. The engine
+  // module + unit tests stay; `speculateDuringBatch` is simply never injected
+  // (orchestrator's optional call stays a no-op). Do NOT reconstruct it until
+  // the re-enable contract in P3Config.speculativeEnabled is met.
   return new TurnOrchestrator({
     // === Lifecycle ===
     initializeRun: (userInput, callbacks, images) => self.turnStepProducer.initializeRun(userInput, callbacks, images),
@@ -726,14 +772,6 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === Sub-controllers ===
     streamTurn: (params) => self.turnStream!.streamTurn(params),
     executeBatch: (params) => self.toolExecution.executeBatch(params),
-    ...(llmSpeculation ? {
-      speculateDuringBatch: (params: {
-        request: import('../api/oai-types.js').OaiChatRequest
-        toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>
-        turn: number
-        signal?: AbortSignal
-      }) => { llmSpeculation.maybeSpeculate(params) },
-    } : {}),
     completeTurn: (params) => self.turnCompletion.complete(params),
     appendTurnResult: (turn) => { self.planTraceCoordinator.appendTurnResult(turn) },
     onCacheAdvisorTurnEnd: (params) => { self.cacheAdvisor.onTurnEnd(params) },
@@ -741,6 +779,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === Telemetry ===
     writeTelemetry: (entry) => { self.telemetryWriter.write(entry) },
     resetEvidence: () => { self.evidence.reset() },
+
+    // === Stop-reason 落盘（2026-07-07 观测缺口修复）===
+    recordStopReason: (r) => { self.recordStopReason(r) },
+
+    // === Advisory 总线（action-intent 闸门核销接入）===
+    submitAdvisory: (entry) => { self.advisoryBus.submit(entry) },
 
     // === Abort signal ===
     getAbortSignal: () => self.abortController?.signal,

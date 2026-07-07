@@ -118,20 +118,114 @@ function loadSchedule(path: string): ScheduleTable {
 
 // ─── Next Tick Calculation ────────────────────────────────────
 
-function nextCronTime(expr: string, from: number): number | null {
+/**
+ * Parse one cron field into the set of matching values.
+ * Supports the standard forms: `*`, `n`, `a-b`, `*​/step`, `a-b/step`, and
+ * comma lists of any of those. Returns null on any syntax/range error.
+ */
+function parseCronField(field: string, min: number, max: number): Set<number> | null {
+  const values = new Set<number>()
+  for (const part of field.split(',')) {
+    if (!part) return null
+    const [rangeExpr, stepExpr, extra] = part.split('/')
+    if (extra !== undefined) return null
+    let step = 1
+    if (stepExpr !== undefined) {
+      step = parseInt(stepExpr, 10)
+      if (!/^\d+$/.test(stepExpr) || isNaN(step) || step < 1) return null
+    }
+    let lo: number
+    let hi: number
+    if (rangeExpr === '*') {
+      lo = min
+      hi = max
+    } else if (/^\d+$/.test(rangeExpr!)) {
+      lo = parseInt(rangeExpr!, 10)
+      // A bare number with a step (`5/15`) means "from 5 to max, every 15".
+      hi = stepExpr !== undefined ? max : lo
+    } else {
+      const m = /^(\d+)-(\d+)$/.exec(rangeExpr!)
+      if (!m) return null
+      lo = parseInt(m[1]!, 10)
+      hi = parseInt(m[2]!, 10)
+    }
+    if (lo < min || hi > max || lo > hi) return null
+    for (let v = lo; v <= hi; v += step) values.add(v)
+  }
+  return values.size > 0 ? values : null
+}
+
+interface ParsedCron {
+  minutes: Set<number>
+  hours: Set<number>
+  daysOfMonth: Set<number>
+  months: Set<number>
+  daysOfWeek: Set<number>
+  domRestricted: boolean
+  dowRestricted: boolean
+}
+
+export function parseCronExpr(expr: string): ParsedCron | null {
   const parts = expr.trim().split(/\s+/)
   if (parts.length !== 5) return null
-  const now = new Date(from)
-  const minute = parseInt(parts[0]!, 10)
-  const hour = parseInt(parts[1]!, 10)
-  if (isNaN(minute) || isNaN(hour) || minute < 0 || minute > 59 || hour < 0 || hour > 23) return null
-  const next = new Date(now)
-  next.setUTCSeconds(0, 0)
-  next.setUTCHours(hour, minute, 0, 0)
-  if (next.getTime() <= now.getTime()) {
-    next.setUTCDate(next.getUTCDate() + 1)
+  const minutes = parseCronField(parts[0]!, 0, 59)
+  const hours = parseCronField(parts[1]!, 0, 23)
+  const daysOfMonth = parseCronField(parts[2]!, 1, 31)
+  const months = parseCronField(parts[3]!, 1, 12)
+  // Day-of-week accepts 0-7 with 7 ≡ Sunday ≡ 0 (both cron dialects in the wild).
+  const rawDow = parseCronField(parts[4]!, 0, 7)
+  if (!minutes || !hours || !daysOfMonth || !months || !rawDow) return null
+  const daysOfWeek = new Set<number>()
+  for (const d of rawDow) daysOfWeek.add(d === 7 ? 0 : d)
+  return {
+    minutes,
+    hours,
+    daysOfMonth,
+    months,
+    daysOfWeek,
+    domRestricted: parts[2] !== '*',
+    dowRestricted: parts[4] !== '*',
   }
-  return next.getTime()
+}
+
+/**
+ * Next fire time (UTC) strictly after `from` for a standard 5-field cron
+ * expression. Standard day-matching rule: when BOTH day-of-month and
+ * day-of-week are restricted, a day fires if EITHER matches; otherwise the
+ * restricted one (or neither) applies.
+ */
+function nextCronTime(expr: string, from: number): number | null {
+  const cron = parseCronExpr(expr)
+  if (!cron) return null
+
+  const dayMatches = (d: Date): boolean => {
+    if (!cron.months.has(d.getUTCMonth() + 1)) return false
+    const domOk = cron.daysOfMonth.has(d.getUTCDate())
+    const dowOk = cron.daysOfWeek.has(d.getUTCDay())
+    if (cron.domRestricted && cron.dowRestricted) return domOk || dowOk
+    if (cron.domRestricted) return domOk
+    if (cron.dowRestricted) return dowOk
+    return true
+  }
+
+  // Scan day-by-day (bounded to 4 years to cover Feb-29 schedules), then pick
+  // the earliest in-set hour/minute — cheap: at most ~1461 iterations.
+  const start = new Date(from)
+  start.setUTCSeconds(0, 0)
+  const startDay = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
+  const sortedHours = [...cron.hours].sort((a, b) => a - b)
+  const sortedMinutes = [...cron.minutes].sort((a, b) => a - b)
+  for (let dayOffset = 0; dayOffset <= 4 * 366; dayOffset++) {
+    const day = new Date(startDay + dayOffset * 24 * 60 * 60 * 1000)
+    if (!dayMatches(day)) continue
+    for (const h of sortedHours) {
+      for (const m of sortedMinutes) {
+        const candidate = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), h, m, 0, 0)
+        if (candidate > from) return candidate
+      }
+    }
+  }
+  return null
 }
 
 export function computeNextTrigger(task: ScheduledTask, now: number): number | null {
@@ -144,8 +238,18 @@ export function computeNextTrigger(task: ScheduledTask, now: number): number | n
         : new Date(task.createdAt).getTime()
       return base + ms
     }
-    case 'cron':
-      return nextCronTime(task.trigger.spec, now)
+    case 'cron': {
+      // Compute from the last fire (or creation), NOT from `now`: next is
+      // strictly in the future relative to its base, so basing it on `now`
+      // meant `next <= now` never held and cron tasks never fired. With the
+      // last-fire base, a tick landing any time after the scheduled minute
+      // sees next <= now and fires exactly once.
+      const base = task.lastTriggeredAt
+        ? new Date(task.lastTriggeredAt).getTime()
+        : new Date(task.createdAt).getTime()
+      if (isNaN(base)) return null
+      return nextCronTime(task.trigger.spec, base)
+    }
     case 'oneshot': {
       if (task.triggerCount > 0) return null
       const ts = new Date(task.trigger.spec).getTime()
@@ -380,7 +484,7 @@ function validateTriggerOrThrow(trigger: CronTrigger): void {
     const next = nextCronTime(trigger.spec, Date.now())
     if (next === null) {
       throw new Error(
-        `Invalid cron expression "${trigger.spec}". Only "minute hour * * *" supported.`
+        `Invalid cron expression "${trigger.spec}". Expected 5 fields "minute hour day-of-month month day-of-week" (supports *, lists, ranges, steps).`
       )
     }
   }

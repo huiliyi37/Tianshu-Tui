@@ -1,4 +1,5 @@
 import { memo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronUp, Maximize2 } from 'lucide-react'
 import type { TodoStateItem } from '../runtime/types'
 
@@ -20,6 +21,7 @@ export const TodoDock = memo(function TodoDock({
   /** 已在 Tasks tab 时只留标题,避免清单重复渲染两份。 */
   collapsedList?: boolean
 }) {
+  const { t } = useTranslation('threadView')
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(COLLAPSE_KEY) === '1'
@@ -53,7 +55,7 @@ export const TodoDock = memo(function TodoDock({
         <button
           className="todo-dock-toggle"
           onClick={toggle}
-          title={showList ? '收起清单' : '展开清单'}
+          title={showList ? t('todo.collapse') : t('todo.expand')}
           disabled={collapsedList}
         >
           {showList ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
@@ -66,8 +68,8 @@ export const TodoDock = memo(function TodoDock({
         <button
           className="todo-dock-open"
           onClick={onOpenFull}
-          title="打开完整任务视图"
-          aria-label="打开完整任务视图"
+          title={t('todo.openFull')}
+          aria-label={t('todo.openFull')}
         >
           <Maximize2 size={12} />
         </button>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { open } from '@tauri-apps/plugin-dialog'
 import { HardDrive, FolderOpen, Usb, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ function compactPath(path: string, max = 55): string {
 }
 
 export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPanelProps) {
+  const { t } = useTranslation('settings')
   const [options, setOptions] = useState<StorageOptions | null>(null)
   const [choice, setChoice] = useState<StorageChoice>('default')
   const [customPath, setCustomPath] = useState('')
@@ -40,7 +42,7 @@ export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPan
           setCustomPath(opts.current)
         }
       })
-      .catch((err) => setError(`读取存储选项失败：${(err as Error).message}`))
+      .catch((err) => setError(t('storagePanel.loadFailed', { error: (err as Error).message })))
   }, [])
 
   const targetPath = useMemo(() => {
@@ -64,7 +66,7 @@ export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPan
         setChoice('custom')
       }
     } catch (err) {
-      setError(`选择文件夹失败：${(err as Error).message}`)
+      setError(t('storagePanel.pickFailed', { error: (err as Error).message }))
     }
   }
 
@@ -75,12 +77,12 @@ export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPan
     try {
       const result = await applyStorageLocation(targetPath, migrate)
       if (!result.success) {
-        setError(result.error ?? '应用存储位置失败')
+        setError(result.error ?? t('storagePanel.applyFailed'))
         return
       }
       onApplied?.(result.requiresRestart)
     } catch (err) {
-      setError(`应用存储位置失败：${(err as Error).message}`)
+      setError(t('storagePanel.applyFailedWith', { error: (err as Error).message }))
     } finally {
       setBusy(false)
     }
@@ -90,8 +92,7 @@ export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPan
     <div className="storage-panel">
       <div className="storage-intro">
         <p className="text-sm text-text">
-          选择天枢桌面端的数据存储位置。会话日志、配置和项目知识库都会放在这里。
-          首次选择后需要重启应用生效。
+          {t('storagePanel.intro')}
         </p>
       </div>
 
@@ -115,9 +116,9 @@ export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPan
           />
           <HardDrive size={18} className="storage-option-icon" />
           <div className="storage-option-body">
-            <span className="storage-option-title">默认位置</span>
+            <span className="storage-option-title">{t('storagePanel.default')}</span>
             <span className="storage-option-path" title={options?.defaultPath}>
-              {options ? compactPath(options.defaultPath) : '读取中…'}
+              {options ? compactPath(options.defaultPath) : t('storagePanel.reading')}
             </span>
           </div>
         </label>
@@ -135,7 +136,7 @@ export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPan
             />
             <Usb size={18} className="storage-option-icon" />
             <div className="storage-option-body">
-              <span className="storage-option-title">便携位置（应用同目录）</span>
+              <span className="storage-option-title">{t('storagePanel.portable')}</span>
               <span className="storage-option-path" title={options.portablePath}>
                 {compactPath(options.portablePath)}
               </span>
@@ -155,14 +156,14 @@ export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPan
           />
           <FolderOpen size={18} className="storage-option-icon" />
           <div className="storage-option-body">
-            <span className="storage-option-title">自定义文件夹</span>
+            <span className="storage-option-title">{t('storagePanel.custom')}</span>
             <span className="storage-option-path" title={customPath || undefined}>
-              {customPath ? compactPath(customPath) : '点击右侧按钮选择文件夹'}
+              {customPath ? compactPath(customPath) : t('storagePanel.customEmpty')}
             </span>
           </div>
           {choice === 'custom' && (
             <Button size="sm" variant="outline" onClick={pickFolder} disabled={busy}>
-              选择…
+              {t('storagePanel.choose')}
             </Button>
           )}
         </label>
@@ -175,17 +176,17 @@ export function StorageLocationPanel({ onApplied, onCancel }: StorageLocationPan
           onChange={(e) => setMigrate(e.target.checked)}
           disabled={busy}
         />
-        <span>将现有数据迁移到新位置</span>
+        <span>{t('storagePanel.migrate')}</span>
       </label>
 
       <div className="storage-actions">
         {onCancel && (
           <Button variant="outline" onClick={onCancel} disabled={busy}>
-            取消
+            {t('storagePanel.cancel')}
           </Button>
         )}
         <Button onClick={handleApply} disabled={!canApply}>
-          {busy ? '应用并迁移…' : '应用并重启'}
+          {busy ? t('storagePanel.applying') : t('storagePanel.apply')}
         </Button>
       </div>
     </div>

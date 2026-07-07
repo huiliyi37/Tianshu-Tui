@@ -8,6 +8,8 @@
  * 参照：ECMA-48 / ISO 6429 标准，VT100/VT220 兼容。
  */
 
+import chalk from 'chalk'
+
 // ── 原始转义序列常量 ──────────────────────────────────────────
 
 /** ANSI 转义序列原始常量。直接用模板字面量拼接到输出字符串。 */
@@ -106,17 +108,74 @@ function hexToRgb(hex: string): [number, number, number] | null {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
 }
 
-/** 设置前景色（truecolor）。hex 格式如 `#a8e6cf`。 */
-export function fg(hex: string): string {
-  const rgb = hexToRgb(hex)
-  if (!rgb) return ''
+/**
+ * chalk 命名色 → 基础 16 色 SGR 前景码。
+ * fallback 主题轨（theme-palettes.ts）用命名色表达 16 色语义；此前 fg() 只认
+ * hex，命名色被静默丢弃成无色 —— 现在映射为标准 30-37/90-97。
+ */
+const NAMED_FG_CODES: Record<string, number> = {
+  black: 30, red: 31, green: 32, yellow: 33, blue: 34, magenta: 35, cyan: 36, white: 37,
+  gray: 90, grey: 90,
+  blackBright: 90, redBright: 91, greenBright: 92, yellowBright: 93,
+  blueBright: 94, magentaBright: 95, cyanBright: 96, whiteBright: 97,
+}
+
+/**
+ * RGB → xterm-256 最近邻索引（256 色中间档量化）。
+ * 候选双轨取最优：6×6×6 色立方（16-231，分量档 0/95/135/175/215/255）
+ * 与 24 级灰阶（232-255，8+10i）。距离用 RGB 欧氏平方（对量化到 256 档足够）。
+ */
+export function rgbToXterm256(r: number, g: number, b: number): number {
+  const toCubeIdx = (v: number): number => {
+    if (v < 48) return 0
+    if (v < 115) return 1
+    return Math.min(5, Math.floor((v - 35) / 40))
+  }
+  const CUBE = [0, 95, 135, 175, 215, 255] as const
+  const ci = toCubeIdx(r), gi = toCubeIdx(g), bi = toCubeIdx(b)
+  const cr = CUBE[ci]!, cg = CUBE[gi]!, cb = CUBE[bi]!
+  const cubeDist = (cr - r) ** 2 + (cg - g) ** 2 + (cb - b) ** 2
+
+  // 最近灰阶：232 + i，亮度 8 + 10i (i ∈ [0, 23])
+  const gray = Math.round((r + g + b) / 3)
+  const gi24 = Math.max(0, Math.min(23, Math.round((gray - 8) / 10)))
+  const gv = 8 + 10 * gi24
+  const grayDist = (gv - r) ** 2 + (gv - g) ** 2 + (gv - b) ** 2
+
+  return grayDist < cubeDist ? 232 + gi24 : 16 + 36 * ci + 6 * gi + bi
+}
+
+/** 当前是否应量化到 256 色（chalk 检测到 256 色但非 truecolor 终端）。 */
+function use256(): boolean {
+  return chalk.level === 2
+}
+
+/**
+ * 设置前景色。接受 hex（`#a8e6cf`）或 chalk 命名色（`cyan`/`redBright`）。
+ * hex 在 truecolor 终端发 38;2，在 256 色终端（chalk.level === 2）量化为 38;5；
+ * 命名色发基础 16 色码。无法解析时返回 ''（无着色）。
+ */
+export function fg(colorValue: string): string {
+  const rgb = hexToRgb(colorValue)
+  if (!rgb) {
+    const code = NAMED_FG_CODES[colorValue]
+    return code === undefined ? '' : `\x1B[${code}m`
+  }
+  if (use256()) return `\x1B[38;5;${rgbToXterm256(rgb[0], rgb[1], rgb[2])}m`
   return `\x1B[38;2;${rgb[0]};${rgb[1]};${rgb[2]}m`
 }
 
-/** 设置背景色（truecolor）。hex 格式如 `#1e293b`。 */
-export function bg(hex: string): string {
-  const rgb = hexToRgb(hex)
-  if (!rgb) return ''
+/**
+ * 设置背景色。接受 hex 或 chalk 命名色（命名色码 +10 为背景码）。
+ * 降级规则同 fg()。
+ */
+export function bg(colorValue: string): string {
+  const rgb = hexToRgb(colorValue)
+  if (!rgb) {
+    const code = NAMED_FG_CODES[colorValue]
+    return code === undefined ? '' : `\x1B[${code + 10}m`
+  }
+  if (use256()) return `\x1B[48;5;${rgbToXterm256(rgb[0], rgb[1], rgb[2])}m`
   return `\x1B[48;2;${rgb[0]};${rgb[1]};${rgb[2]}m`
 }
 
@@ -131,6 +190,63 @@ export function color(text: string, fgHex: string, opts?: { bold?: boolean; dim?
   if (opts?.italic) prefix += ANSI.ITALIC
   if (opts?.underline) prefix += ANSI.UNDERLINE
   return `${prefix}${text}${ANSI.RESET}`
+}
+
+// ── OSC 8 超链接 ──────────────────────────────────────────────
+
+let hyperlinkOverride: boolean | null = null
+
+/** 测试/配置钩子：强制开/关超链接（null 恢复自动检测）。 */
+export function setHyperlinksEnabled(value: boolean | null): void {
+  hyperlinkOverride = value
+}
+
+/**
+ * OSC 8 支持启发式检测。终端无标准能力查询协议，按主流终端约定判断：
+ * - 环境开关优先：`RIVET_HYPERLINKS=0/1`、`FORCE_HYPERLINK`
+ * - 已知支持的 TERM_PROGRAM：iTerm2 / WezTerm / VS Code / Hyper / ghostty / Tabby
+ * - kitty（TERM 前缀）、VTE ≥ 0.50（GNOME Terminal 系）、Windows Terminal（WT_SESSION）
+ * - tmux/screen 与 dumb 终端保守降级（tmux 需 passthrough 配置，默认关闭）
+ */
+export function detectHyperlinkSupport(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.RIVET_HYPERLINKS === '0') return false
+  if (env.RIVET_HYPERLINKS === '1' || env.FORCE_HYPERLINK) return true
+  const term = env.TERM ?? ''
+  if (term === 'dumb' || !process.stdout.isTTY) return false
+  if (env.TMUX || term.startsWith('screen')) return false
+  const program = env.TERM_PROGRAM ?? ''
+  if (['iTerm.app', 'WezTerm', 'vscode', 'Hyper', 'ghostty', 'Tabby'].includes(program)) return true
+  if (term.startsWith('xterm-kitty')) return true
+  if (env.WT_SESSION) return true
+  const vte = Number.parseInt(env.VTE_VERSION ?? '', 10)
+  if (Number.isFinite(vte) && vte >= 5000) return true
+  return false
+}
+
+let detectedSupport: boolean | null = null
+
+function hyperlinksSupported(): boolean {
+  if (hyperlinkOverride !== null) return hyperlinkOverride
+  if (detectedSupport === null) detectedSupport = detectHyperlinkSupport()
+  return detectedSupport
+}
+
+/**
+ * 把文本包装为 OSC 8 可点击超链接；不支持的终端返回纯文本（零污染降级）。
+ * url 中的控制字符会被剥离（OSC 序列注入防护）。
+ */
+export function hyperlink(text: string, url: string): string {
+  if (!hyperlinksSupported()) return text
+  // eslint-disable-next-line no-control-regex
+  const safeUrl = url.replace(/[\x00-\x1F\x7F]/g, '')
+  if (!safeUrl) return text
+  return `\x1B]8;;${safeUrl}\x07${text}\x1B]8;;\x07`
+}
+
+/** 文件路径 → file:// 超链接（相对路径基于 cwd 归一为绝对路径）。 */
+export function fileLink(text: string, filePath: string, cwd = process.cwd()): string {
+  const abs = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
+  return hyperlink(text, `file://${abs}`)
 }
 
 // ── 终端查询 ──────────────────────────────────────────────────

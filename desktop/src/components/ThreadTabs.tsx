@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import type { SessionRecord } from '../runtime/types'
@@ -9,6 +10,8 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import { openThreadPopout } from '../lib/popout'
+import { isTauri } from '../lib/pty'
 
 /**
  * Tab bar for open threads. Renders a compact row of session tabs
@@ -17,6 +20,7 @@ import {
  * context menu for common tab actions.
  */
 export function ThreadTabs() {
+  const { t } = useTranslation('shell')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const sessions = useSessions()
@@ -66,7 +70,7 @@ export function ThreadTabs() {
   const isWorkspace = ui.surface === 'workspace'
 
   return (
-    <div className="thread-tabs" role="tablist" aria-label="对话标签">
+    <div className="thread-tabs" role="tablist" aria-label={t('tabs.ariaLabel')}>
       {!isWorkspace && (
         <button
           className="thread-tab back-tab"
@@ -83,7 +87,7 @@ export function ThreadTabs() {
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
-          返回对话
+          {t('tabs.backToThread')}
         </button>
       )}
       {tabSessions.map((s, i) => {
@@ -124,7 +128,7 @@ export function ThreadTabs() {
                   <span className="thread-tab-title">{title}</span>
                   <span
                     className="thread-tab-close"
-                    aria-label={`关闭 ${title}`}
+                    aria-label={t('tabs.closeNamed', { title })}
                     onClick={(e) => {
                       e.stopPropagation()
                       dispatch({ type: 'closeTab', id: s.id })
@@ -137,17 +141,22 @@ export function ThreadTabs() {
             />
             <ContextMenuContent align="start" side="bottom" sideOffset={4}>
               <ContextMenuItem onClick={() => copyTitle(title)}>
-                复制标题
+                {t('tabs.copyTitle')}
               </ContextMenuItem>
+              {isTauri() && (
+                <ContextMenuItem onClick={() => { void openThreadPopout(s.id) }}>
+                  {t('tabs.popout')}
+                </ContextMenuItem>
+              )}
               <ContextMenuSeparator />
               <ContextMenuItem onClick={() => dispatch({ type: 'closeTab', id: s.id })}>
-                关闭
+                {t('common:close')}
               </ContextMenuItem>
               <ContextMenuItem onClick={() => closeOthers(s.id)}>
-                关闭其他标签
+                {t('tabs.closeOthers')}
               </ContextMenuItem>
               <ContextMenuItem onClick={() => closeToRight(s.id)}>
-                关闭右侧标签
+                {t('tabs.closeToRight')}
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>

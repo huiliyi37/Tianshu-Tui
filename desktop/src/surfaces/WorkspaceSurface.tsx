@@ -1,25 +1,31 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { SurfaceSkeleton } from '../components/Skeleton'
-import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
+import { qk, useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode, useWorkingTree } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
 import { useJobNotifications } from '../state/use-job-notifications'
-import { answerApproval, setApprovalMode, steerSession } from '../runtime/client'
-import type { ApprovalMode, PlanModeState, ApprovalRequest } from '../runtime/types'
+import { answerApproval, commitSessionChanges, createSessionPr, mergeSessionBack, setApprovalMode, steerSession } from '../runtime/client'
+import type { ApprovalMode, PlanModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
 import { TerminalTabs } from '../components/TerminalTabs'
 import { JobsDock } from '../components/JobsDock'
+import { DelegationOverlay } from '../components/DelegationOverlay'
+import { summarizeDelegation } from '../components/DelegationTree'
 import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
-import { parseMcpToolName, previewOf, editableKey, EDIT_TOOLS } from '../lib/approval-preview'
 import { isApprovalConsent } from '../lib/consent'
-import { DiffView } from '../components/DiffView'
+import { ApprovalInline } from '../components/ApprovalInline'
 import { deriveProjects, loadKnownProjects } from '../lib/projects'
 import { openExternal } from '../lib/open-external'
+import { openThreadPopout } from '../lib/popout'
+import { isTauri } from '../lib/pty'
 
 const HomeSurface = lazy(() => import('./HomeSurface').then((m) => ({ default: m.HomeSurface })))
 const SkillsSurface = lazy(() => import('./SkillsSurface').then((m) => ({ default: m.SkillsSurface })))
@@ -36,6 +42,7 @@ const MissionControlSurface = lazy(() => import('./MissionControlSurface').then(
 
 
 export function WorkspaceSurface() {
+  const { t } = useTranslation('shell')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const sessions = useSessions()
@@ -51,6 +58,18 @@ export function WorkspaceSurface() {
 
   const [isFloatDeckOpen, setIsFloatDeckOpen] = useState(false)
   const deckRef = useRef<HTMLDivElement>(null)
+  const [showDelegation, setShowDelegation] = useState(false)
+  const [jobsHidden, setJobsHidden] = useState(false)
+
+  const runningJobsCount = Object.values(view.jobs).filter((j) => j.status === 'running').length
+  const prevRunningCount = useRef(runningJobsCount)
+
+  useEffect(() => {
+    if (runningJobsCount > prevRunningCount.current) {
+      setJobsHidden(false)
+    }
+    prevRunningCount.current = runningJobsCount
+  }, [runningJobsCount])
 
   useEffect(() => {
     if (!isFloatDeckOpen) return
@@ -64,6 +83,20 @@ export function WorkspaceSurface() {
   }, [isFloatDeckOpen])
 
   const active = sessions.data?.find((s) => s.id === activeId) ?? null
+
+  // Terminal working directory — a REAL path, not the project id. The panel
+  // used to receive `ui.activeProject` (a `name-hash` slug), which the PTY then
+  // treated as a relative dir that doesn't exist. Resolve like App.tsx's
+  // defaultCwd: the active thread's own cwd first, then the active project's
+  // first root; empty string lets the PTY inherit its default cwd.
+  const terminalCwd = useMemo(() => {
+    if (active?.cwd) return active.cwd
+    if (ui.activeProject) {
+      const p = deriveProjects(sessions.data ?? [], loadKnownProjects()).find((x) => x.id === ui.activeProject)
+      if (p?.roots[0]) return p.roots[0]
+    }
+    return ''
+  }, [active, sessions.data, ui.activeProject])
 
   // Responsive: auto-collapse review panel when workspace < 1200px.
   // Uses ResizeObserver — only fires when the element actually resizes.
@@ -131,9 +164,9 @@ export function WorkspaceSurface() {
   }, [activeId, sendPrompt, tryConsentBridge])
 
   const handleApproval = useCallback(
-    (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => {
+    (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>, remember?: boolean) => {
       if (!activeId || !view.pendingApproval) return
-      void answerApproval(activeId, view.pendingApproval.requestId, decision, editedInput)
+      void answerApproval(activeId, view.pendingApproval.requestId, decision, editedInput, remember)
     },
     [activeId, view.pendingApproval],
   )
@@ -183,8 +216,8 @@ export function WorkspaceSurface() {
       <UpdateBanner />
       <button
         className="layout-reset-btn"
-        title="重置布局"
-        aria-label="重置布局"
+        title={t('workspace.resetLayout')}
+        aria-label={t('workspace.resetLayout')}
         onClick={handleResetLayout}
       >
         ⟲
@@ -225,7 +258,7 @@ export function WorkspaceSurface() {
                 e.stopPropagation()
                 dispatch({ type: 'setSidebar', visible: false })
               }}
-              title="收起侧边栏"
+              title={t('workspace.collapseSidebar')}
             >
               ‹
             </button>
@@ -233,7 +266,10 @@ export function WorkspaceSurface() {
         </Separator>
         <Panel minSize="30%">
           <div className="conversation">
-            <WorkspaceHeader />
+            <WorkspaceHeader
+              showDelegation={showDelegation}
+              onToggleDelegation={() => setShowDelegation((v) => !v)}
+            />
             <div className="conversation-body">
               <ThreadTabs />
               <Suspense fallback={<SurfaceSkeleton />}>
@@ -261,61 +297,62 @@ export function WorkspaceSurface() {
                     onClose={handleClose}
                     streamStatus={view.streamStatus}
                     onRetryStream={view.retryStream}
+                    onToggleDelegation={setShowDelegation}
                   />
                 ) : (
                    <div className="empty thread-empty onboard">
                      <div className="onboard-glyph" aria-hidden>✦</div>
-                     <h2 className="onboard-title">开始你的第一个线程</h2>
-                     <p className="onboard-subtitle">天枢会理解你的项目，自主完成编码任务</p>
+                     <h2 className="onboard-title">{t('onboard.title')}</h2>
+                     <p className="onboard-subtitle">{t('onboard.subtitle')}</p>
                      
                      <div className="onboard-templates">
-                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: '分析并解释当前项目的整体架构' })}>
+                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: t('onboard.diagnosePrompt') })}>
                          <span className="tc-emoji">🔍</span>
                          <div className="tc-text">
-                           <span className="tc-title">代码库诊断</span>
-                           <span className="tc-desc">分析项目结构与潜在风险</span>
+                           <span className="tc-title">{t('onboard.diagnoseTitle')}</span>
+                           <span className="tc-desc">{t('onboard.diagnoseDesc')}</span>
                          </div>
                        </button>
-                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: '为当前项目实现一个新功能' })}>
+                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: t('onboard.featurePrompt') })}>
                          <span className="tc-emoji">⚡</span>
                          <div className="tc-text">
-                           <span className="tc-title">实现新功能</span>
-                           <span className="tc-desc">编写新的模块或 API 接口</span>
+                           <span className="tc-title">{t('onboard.featureTitle')}</span>
+                           <span className="tc-desc">{t('onboard.featureDesc')}</span>
                          </div>
                        </button>
-                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: '查找并修复项目中已知的故障' })}>
+                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: t('onboard.bugPrompt') })}>
                          <span className="tc-emoji">🐛</span>
                          <div className="tc-text">
-                           <span className="tc-title">修复故障</span>
-                           <span className="tc-desc">定位并消除潜在的代码 Bug</span>
+                           <span className="tc-title">{t('onboard.bugTitle')}</span>
+                           <span className="tc-desc">{t('onboard.bugDesc')}</span>
                          </div>
                        </button>
                      </div>
 
                      <div className="onboard-actions">
                        <button className="btn btn-primary" onClick={() => dispatch({ type: 'openNew', open: true })}>
-                         + 自定义新建线程
+                         {t('onboard.customNew')}
                        </button>
                      </div>
                      <div className="onboard-hints">
                        <div className="onboard-hint">
                          <kbd>⌘K</kbd>
-                         <span>打开命令面板</span>
+                         <span>{t('onboard.hintPalette')}</span>
                        </div>
                        <div className="onboard-hint">
                          <kbd>⌘N</kbd>
-                         <span>新建线程</span>
+                         <span>{t('onboard.hintNew')}</span>
                        </div>
                        <div className="onboard-hint">
                          <kbd>/</kbd>
-                         <span>在输入框使用斜杠命令</span>
+                         <span>{t('onboard.hintSlash')}</span>
                        </div>
                      </div>
                    </div>
                 )}
               </Suspense>
             </div>
-            {ui.terminalVisible && <TerminalTabs cwd={ui.activeProject ?? ''} />}
+            {ui.terminalVisible && <TerminalTabs cwd={terminalCwd} />}
           </div>
         </Panel>
         <Separator className={`panel-resize-handle ${!ui.reviewVisible ? 'collapsed' : ''}`}>
@@ -326,7 +363,7 @@ export function WorkspaceSurface() {
                 e.stopPropagation()
                 dispatch({ type: 'setReview', visible: false })
               }}
-              title="收起审查面板"
+              title={t('workspace.collapseReview')}
             >
               ›
             </button>
@@ -361,6 +398,7 @@ export function WorkspaceSurface() {
               todos={view.todos}
               sources={view.sources}
               onSendPrompt={handleSteer}
+              sessionRunning={view.status === 'running' || active?.status === 'running'}
               onCollapse={() => {
                 dispatch({ type: 'setReview', visible: false })
               }}
@@ -371,13 +409,14 @@ export function WorkspaceSurface() {
         </Panel>
       </Group>
 
-      {activeId && Object.keys(view.jobs).length > 0 && (
+      {activeId && !jobsHidden && Object.keys(view.jobs).length > 0 && (
         <JobsDock
           sessionId={activeId}
           jobs={Object.values(view.jobs).sort((a, b) => b.startedAt - a.startedAt)}
           visible={ui.jobsDockVisible}
           onToggle={() => dispatch({ type: 'setJobsDock', visible: !ui.jobsDockVisible })}
           onOpenTerminal={() => dispatch({ type: 'setTerminal', visible: true })}
+          onClose={() => setJobsHidden(true)}
         />
       )}
 
@@ -388,17 +427,17 @@ export function WorkspaceSurface() {
             {isFloatDeckOpen && (
               <div className="todo-float-deck" onClick={(e) => e.stopPropagation()}>
                 <div className="tfd-header">
-                  <span className="tfd-title">任务清单 ({done}/{view.todos.length})</span>
+                  <span className="tfd-title">{t('workspace.todoList')} ({done}/{view.todos.length})</span>
                   <button
                     className="tfd-expand-btn"
-                    title="展开为侧边栏"
+                    title={t('workspace.expandToSidebar')}
                     onClick={() => {
                       dispatch({ type: 'setReview', visible: true })
                       dispatch({ type: 'setReviewManual', on: true })
                       setIsFloatDeckOpen(false)
                     }}
                   >
-                    展开 ↗
+                    {t('workspace.expand')}
                   </button>
                 </div>
                 <div className="tfd-body">
@@ -415,12 +454,12 @@ export function WorkspaceSurface() {
             )}
             <button
               className={`todo-mini-capsule ${isFloatDeckOpen ? 'active' : ''}`}
-              title="查看任务清单"
+              title={t('workspace.viewTodoList')}
               onClick={(e) => {
                 e.stopPropagation()
                 setIsFloatDeckOpen((o) => !o)
               }}
-              aria-label="查看任务清单"
+              aria-label={t('workspace.viewTodoList')}
             >
               <span className="tmc-glyph" aria-hidden>☑</span>
               <span className="tmc-count">{done}/{view.todos.length}</span>
@@ -432,35 +471,35 @@ export function WorkspaceSurface() {
       {!ui.reviewVisible && (
         <button
           className="review-expand-capsule"
-          title="展开审查面板 (Cmd+Shift+B)"
+          title={t('workspace.expandReviewShortcut')}
           onClick={() => {
             dispatch({ type: 'setReview', visible: true })
             dispatch({ type: 'setReviewManual', on: true })
           }}
-          aria-label="展开审查面板"
+          aria-label={t('workspace.expandReview')}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M15 18l-6-6 6-6" />
           </svg>
-          <span className="capsule-text">审查面板</span>
+          <span className="capsule-text">{t('workspace.reviewPanel')}</span>
         </button>
       )}
 
       {!ui.sidebarVisible && (
         <button
           className="sidebar-expand-capsule"
-          title="展开侧边栏 (Cmd+B)"
+          title={t('workspace.expandSidebarShortcut')}
           onClick={() => {
             dispatch({ type: 'setSidebar', visible: true })
           }}
-          aria-label="展开侧边栏"
+          aria-label={t('workspace.expandSidebar')}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M9 6l6 6-6 6" />
           </svg>
-          <span className="capsule-text">项目侧边栏</span>
+          <span className="capsule-text">{t('workspace.projectSidebar')}</span>
         </button>
       )}
 
@@ -470,259 +509,34 @@ export function WorkspaceSurface() {
           onDecision={handleApproval}
         />
       )}
+
+      {showDelegation && view.delegation && (
+        <DelegationOverlay
+          nodes={view.delegation}
+          onClose={() => setShowDelegation(false)}
+        />
+      )}
     </div>
   )
 }
 
-function getApprovalIntent(toolName: string, input: Record<string, unknown>): { title: string; desc: string; icon: string } {
-  const mcp = parseMcpToolName(toolName)
-  if (mcp) {
-    return {
-      title: `调用外部工具: ${mcp.toolName}`,
-      desc: `通过 MCP 连接器 [${mcp.serverId}] 执行操作`,
-      icon: "🔌"
-    }
-  }
-  
-  const path = String(input.path ?? input.file_path ?? input.target ?? "")
-  // Windows tool inputs may use backslashes — split on both separators.
-  const base = path.split(/[\\/]/).pop()
-  switch (toolName) {
-    case 'write_file':
-    case 'create_file':
-      return {
-        title: "创建/写入新文件",
-        desc: path ? `写入文件: ${base} (${path})` : "在工作区写入新文件",
-        icon: "📝"
-      }
-    case 'edit_file':
-    case 'apply_patch':
-    case 'hash_edit':
-      return {
-        title: "修改现有文件",
-        desc: path ? `修改文件: ${base} (${path})` : "对工作区文件进行代码修改",
-        icon: "⚡"
-      }
-    case 'read_file':
-      return {
-        title: "读取文件内容",
-        desc: path ? `读取文件: ${base} (${path})` : "读取工作区文件",
-        icon: "🔍"
-      }
-    case 'execute_bash':
-      return {
-        title: "执行终端命令",
-        desc: `在系统终端中运行命令: \`${String(input.command ?? "")}\``,
-        icon: "💻"
-      }
-    default:
-      return {
-        title: `调用系统工具: ${toolName}`,
-        desc: "请求执行系统级或工作区级操作",
-        icon: "⚙️"
-      }
-  }
-}
-
-interface ApprovalModalProps {
-  request: ApprovalRequest
-  onDecision: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
-}
-
-/** Inline approval card — non-blocking, pinned above the composer.
- *  Replaces the old full-screen backdrop modal (Cursor-style inline diff gutter). */
-function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
-  const preview = previewOf(request)
-  const editKey = editableKey(request)
-  const [editing, setEditing] = useState(false)
-  const [isDiffEditorOpen, setIsDiffEditorOpen] = useState(false)
-  const [showDetail, setShowDetail] = useState(false)
-  const [draft, setDraft] = useState(
-    editKey ? String((request.input as Record<string, unknown>)[editKey] ?? '') : '',
-  )
-
-  const isCodeTool = EDIT_TOOLS.has(request.toolName)
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const isCmdEnter = (e.metaKey || e.ctrlKey) && e.key === 'Enter'
-      if (isCmdEnter) {
-        e.preventDefault()
-        if (isDiffEditorOpen && editKey) {
-          onDecision('approve', { ...request.input, [editKey]: draft })
-          setIsDiffEditorOpen(false)
-        } else if (editing && editKey) {
-          onDecision('approve', { ...request.input, [editKey]: draft })
-        } else {
-          onDecision('approve')
-        }
-      } else if (e.key === 'Escape') {
-        if (isDiffEditorOpen) {
-          e.preventDefault()
-          setIsDiffEditorOpen(false)
-        } else if (!editing) {
-          e.preventDefault()
-          onDecision('reject')
-        }
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [editing, isDiffEditorOpen, draft, request, onDecision, editKey])
-
-  const intent = getApprovalIntent(request.toolName, request.input as Record<string, unknown>)
-
-  const approve = () => {
-    if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft })
-    else onDecision('approve')
-  }
-
-  const triggerEdit = () => {
-    if (isCodeTool) {
-      setIsDiffEditorOpen(true)
-    } else {
-      setEditing((v) => !v)
-      if (!editing) setShowDetail(true)
-    }
-  }
-
-  const originalContent = typeof (request.input as Record<string, unknown>).old_string === 'string'
-    ? String((request.input as Record<string, unknown>).old_string)
-    : ''
-
-  return (
-    <>
-      <div className="approval-inline">
-        <div className="approval-inline-header">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-lg shrink-0">{intent.icon}</span>
-            <div className="min-w-0">
-              <div className="approval-inline-title truncate">{intent.title}</div>
-              <div className="approval-inline-subtitle truncate" title={intent.desc}>{intent.desc}</div>
-            </div>
-          </div>
-          <span className="approval-inline-badge shrink-0">需批准</span>
-        </div>
-
-        {showDetail && !editing && (
-          <div className="approval-inline-body">
-            {preview.isDiff ? (
-              <div className="approval-inline-diff overflow-auto max-h-[260px] border border-border rounded">
-                <DiffView raw={preview.text} />
-              </div>
-            ) : (
-              <pre className="approval-inline-pre font-mono overflow-auto max-h-[260px] border border-border rounded p-2 bg-panel-2 text-xs">
-                {preview.text}
-              </pre>
-            )}
-          </div>
-        )}
-
-        {showDetail && editing && editKey && !isCodeTool && (
-          <div className="approval-inline-body">
-            <textarea
-              className="approval-inline-textarea font-mono"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-            />
-          </div>
-        )}
-
-        <div className="approval-inline-footer">
-          {editKey && (
-            <button
-              className="btn ghost sm"
-              onClick={triggerEdit}
-            >
-              {isCodeTool ? '编辑代码' : editing ? '取消编辑' : '编辑配置'}
-            </button>
-          )}
-          {!editing && (
-            <button
-              className="btn ghost sm"
-              onClick={() => setShowDetail((v) => !v)}
-            >
-              {showDetail ? '收起详情' : '查看详情'}
-            </button>
-          )}
-          <div className="flex items-center gap-2 ml-auto">
-            <button
-              className="btn ghost sm"
-              onClick={() => onDecision('reject')}
-            >
-              拒绝 (Esc)
-            </button>
-            <button
-              className="btn sm"
-              onClick={approve}
-              autoFocus
-            >
-              {editing ? '应用并批准' : '批准 (⌘↵)'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {isDiffEditorOpen && (
-        <div className="approval-diff-editor-overlay" role="dialog" aria-modal="true" onClick={() => setIsDiffEditorOpen(false)}>
-          <div className="approval-diff-editor-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="adem-header">
-              <div className="adem-title flex items-center gap-2">
-                <span>📝</span>
-                <span>编辑代码修改: {String((request.input as Record<string, unknown>).path || (request.input as Record<string, unknown>).file_path || '新建文件')}</span>
-              </div>
-              <div className="adem-subtitle">你可以在右侧直接编辑、微调拟定修改，左侧为只读对比源。</div>
-            </div>
-            
-            <div className="adem-body">
-              <div className="adem-pane original-pane">
-                <div className="adem-pane-title">原始代码 / 先前内容</div>
-                <div className="adem-code-box">
-                  {originalContent ? (
-                    <pre className="font-mono">{originalContent}</pre>
-                  ) : (
-                    <div className="empty sm muted font-mono text-center pt-8">（新文件或无先前内容）</div>
-                  )}
-                </div>
-              </div>
-              <div className="adem-pane proposed-pane">
-                <div className="adem-pane-title">拟定修改 (可直接在此处编辑)</div>
-                <textarea
-                  className="adem-textarea font-mono"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder="在此处对代码做出最终的修改微调..."
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className="adem-footer">
-              <span className="text-xs text-muted">提示: 可按 Esc 退出编辑，按 ⌘↵ (Ctrl+Enter) 应用修改并批准</span>
-              <div className="flex items-center gap-2 ml-auto">
-                <button className="btn ghost" onClick={() => setIsDiffEditorOpen(false)}>取消</button>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    if (editKey) onDecision('approve', { ...request.input, [editKey]: draft })
-                    setIsDiffEditorOpen(false)
-                  }}
-                >
-                  应用并批准 (⌘↵)
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  )
-}
-
-function WorkspaceHeader() {
+function WorkspaceHeader({
+  showDelegation,
+  onToggleDelegation,
+}: {
+  showDelegation: boolean
+  onToggleDelegation: () => void
+}) {
+  const { t } = useTranslation('shell')
   const ui = useUiState()
+  const dispatch = useUiDispatch()
   const sessions = useSessions()
+  const abortSession = useAbortSession()
   const activeSession = sessions.data?.find((s) => s.id === ui.activeSessionId) ?? null
+
+  const view = useSessionEvents(ui.activeSessionId)
+  const delegation = view.delegation
+  const { total, done, running: runningWorkers } = summarizeDelegation(delegation)
 
   const known = useMemo(() => loadKnownProjects(), [])
   const projects = useMemo(() => deriveProjects(sessions.data ?? [], known), [sessions.data, known])
@@ -735,20 +549,43 @@ function WorkspaceHeader() {
       return activeSession.title || activeSession.id.slice(0, 8)
     }
     const SURFACE_NAMES: Record<string, string> = {
-      home: '首页',
-      attention: '待处理',
-      mission: '任务中控台',
-      automations: '自动化',
-      skills: '智能体技能',
-      git: 'Git 版本控制',
-      insights: '仓库图谱与分析',
-      delegation: '子智能体协同',
-      council: '多智能体议事会',
-      hooks: '生命周期 Hook',
-      settings: '系统设置',
+      home: t('header.pageNames.home'),
+      attention: t('header.pageNames.attention'),
+      mission: t('header.pageNames.mission'),
+      automations: t('header.pageNames.automations'),
+      skills: t('header.pageNames.skills'),
+      git: t('header.pageNames.git'),
+      insights: t('header.pageNames.insights'),
+      delegation: t('header.pageNames.delegation'),
+      council: t('header.pageNames.council'),
+      hooks: t('header.pageNames.hooks'),
+      settings: t('header.pageNames.settings'),
     }
     return SURFACE_NAMES[ui.surface] || ui.surface
-  }, [ui.surface, activeSession])
+  }, [ui.surface, activeSession, t])
+
+  // Codex-style toolbar state — Git quick menu + overflow, both close on
+  // outside click via a shared container ref.
+  const onThread = ui.surface === 'workspace' && activeSession !== null
+  const running = activeSession?.status === 'running'
+  const tree = useWorkingTree(onThread ? activeSession.id : null)
+  const hasChanges = Boolean(tree.data?.isRepo) && (tree.data?.files.length ?? 0) > 0
+  const isWorktree = Boolean(activeSession?.worktreeBranch)
+  const [gitOpen, setGitOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const actionsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!gitOpen && !moreOpen) return
+    const onClickOutside = (e: MouseEvent) => {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setGitOpen(false)
+        setMoreOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [gitOpen, moreOpen])
 
   return (
     <header className="workspace-header" data-tauri-drag-region>
@@ -757,21 +594,203 @@ function WorkspaceHeader() {
         <span className="path-sep">/</span>
         <span className="page-name">{pageName}</span>
       </div>
-      <div className="workspace-header-actions">
+      <div className="workspace-header-actions" ref={actionsRef}>
+        {onThread && running && (
+          <button
+            className="header-action-btn header-stop-btn"
+            title={t('header.stopRun')}
+            onClick={() => abortSession.mutate(activeSession.id)}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+            <span>{t('header.stop')}</span>
+          </button>
+        )}
+        {onThread && hasChanges && (
+          <div className="header-menu-anchor">
+            <button
+              className={`header-action-btn ${gitOpen ? 'active' : ''}`}
+              title={t('header.gitQuickActions')}
+              onClick={() => { setGitOpen((v) => !v); setMoreOpen(false) }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="6" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M6 9v6" />
+                <circle cx="18" cy="12" r="3" />
+                <path d="M15 12a9 9 0 0 0-9-3" />
+              </svg>
+              <span>Git · {tree.data?.files.length ?? 0}</span>
+            </button>
+            {gitOpen && (
+              <HeaderGitMenu
+                sessionId={activeSession.id}
+                busy={Boolean(running)}
+                isWorktree={isWorktree}
+                onClose={() => setGitOpen(false)}
+              />
+            )}
+          </div>
+        )}
+        {onThread && total > 0 && (
+          <button
+            className={`header-action-btn header-delegation-badge ${showDelegation ? 'active' : ''}`}
+            title="查看子代理运行状态"
+            onClick={onToggleDelegation}
+          >
+            <span className={`dp-dot ${runningWorkers > 0 ? 'pulse' : ''}`} />
+            <span>子代理 {done}/{total}</span>
+          </button>
+        )}
         <button
-          className="header-action-btn"
-          onClick={() => {
-            openExternal('https://github.com/huiliyi37/Tianshu-Tui')
-          }}
+          className={`header-action-btn ${ui.terminalVisible ? 'active' : ''}`}
+          title={t('header.toggleTerminal')}
+          onClick={() => dispatch({ type: 'setTerminal', visible: !ui.terminalVisible })}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#3b82f6' }}>
-            <polygon points="12 2 2 7 12 12 22 7 12 2" />
-            <polyline points="2 17 12 22 22 17" />
-            <polyline points="2 12 12 17 22 12" />
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
           </svg>
-          <span>Install IDE</span>
         </button>
+        {onThread && isTauri() && (
+          <button
+            className="header-action-btn"
+            title={t('header.popoutWindow')}
+            onClick={() => { void openThreadPopout(activeSession.id) }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </button>
+        )}
+        <div className="header-menu-anchor">
+          <button
+            className={`header-action-btn ${moreOpen ? 'active' : ''}`}
+            title={t('header.more')}
+            aria-label={t('header.more')}
+            onClick={() => { setMoreOpen((v) => !v); setGitOpen(false) }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <circle cx="5" cy="12" r="2" />
+              <circle cx="12" cy="12" r="2" />
+              <circle cx="19" cy="12" r="2" />
+            </svg>
+          </button>
+          {moreOpen && (
+            <div className="header-menu">
+              <button
+                className="header-menu-item"
+                onClick={() => {
+                  setMoreOpen(false)
+                  openExternal('https://github.com/huiliyi37/Tianshu-Tui')
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                  <polyline points="2 17 12 22 22 17" />
+                  <polyline points="2 12 12 17 22 12" />
+                </svg>
+                <span>Install IDE</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
+  )
+}
+
+/** Git quick menu — dropdown reusing the ChangesTab landing mutations
+ *  (commit / merge back / create PR) without leaving the thread. */
+function HeaderGitMenu(props: { sessionId: string; busy: boolean; isWorktree: boolean; onClose: () => void }) {
+  const { sessionId, busy, isWorktree, onClose } = props
+  const { t } = useTranslation('shell')
+  const queryClient = useQueryClient()
+  const [commitMsg, setCommitMsg] = useState('')
+  const [pending, setPending] = useState<null | 'commit' | 'merge' | 'pr'>(null)
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: qk.workingTree(sessionId) })
+  }
+
+  const runCommit = async () => {
+    setPending('commit')
+    try {
+      const r = await commitSessionChanges(sessionId, commitMsg.trim() || undefined)
+      if (r.ok && r.nothingToCommit) toast.info(t('gitMenu.nothingToCommit'))
+      else if (r.ok) toast.success(t('gitMenu.committed', { sha: r.sha?.slice(0, 8) ?? '' }))
+      else toast.error(t('gitMenu.commitFailed', { error: r.error ?? '' }))
+      if (r.ok) { refresh(); onClose() }
+    } catch (e) {
+      toast.error(t('gitMenu.commitFailed', { error: String(e) }))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const runMerge = async () => {
+    setPending('merge')
+    try {
+      const r = await mergeSessionBack(sessionId)
+      if (r.ok && r.nothingToMerge) toast.info(t('gitMenu.nothingToMerge'))
+      else if (r.ok) toast.success(t('gitMenu.merged', { sha: r.sha?.slice(0, 8) ?? '' }))
+      else if (r.conflictFiles?.length) toast.error(t('gitMenu.mergeConflict', { files: r.conflictFiles.join(', ') }))
+      else toast.error(t('gitMenu.mergeFailed', { error: r.error ?? '' }))
+      if (r.ok) { refresh(); onClose() }
+    } catch (e) {
+      toast.error(t('gitMenu.mergeFailed', { error: String(e) }))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const runPr = async () => {
+    setPending('pr')
+    try {
+      const r = await createSessionPr(sessionId)
+      if (r.ok) {
+        toast.success(t('gitMenu.prCreated'), { action: r.url ? { label: t('gitMenu.open'), onClick: () => openExternal(r.url!) } : undefined })
+        onClose()
+      } else toast.error(t('gitMenu.prFailed', { error: r.error ?? '' }))
+    } catch (e) {
+      toast.error(t('gitMenu.prFailed', { error: String(e) }))
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const disabled = busy || pending !== null
+
+  return (
+    <div className="header-menu header-git-menu">
+      {busy && <div className="header-menu-hint">{t('gitMenu.agentRunning')}</div>}
+      <div className="header-git-commit">
+        <input
+          type="text"
+          value={commitMsg}
+          placeholder={t('gitMenu.commitPlaceholder')}
+          disabled={disabled}
+          onChange={(e) => setCommitMsg(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !disabled) void runCommit() }}
+          autoFocus
+        />
+        <button className="btn sm" disabled={disabled} onClick={runCommit}>
+          {pending === 'commit' ? '…' : t('gitMenu.commit')}
+        </button>
+      </div>
+      {isWorktree && (
+        <div className="header-git-actions">
+          <button className="btn sm ghost" disabled={disabled} onClick={runMerge}>
+            {pending === 'merge' ? '…' : t('gitMenu.mergeBack')}
+          </button>
+          <button className="btn sm ghost" disabled={disabled} onClick={runPr}>
+            {pending === 'pr' ? '…' : t('gitMenu.createPr')}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }

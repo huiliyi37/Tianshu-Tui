@@ -21,6 +21,14 @@ export interface DelegationActivity {
   status: 'running' | 'passed' | 'failed' | 'blocked' | 'escalated'
   /** Latest worker activity line (running) or terminal summary. */
   progressLine?: string
+  /** 该 worker 累计工具调用次数（CC AgentProgress 对标，运行中实时递增）。 */
+  toolUseCount?: number
+  /** 该 worker 累计 token 总数（input+output，来自 turn 事件的累计快照）。 */
+  tokenCount?: number
+  /** 原始活动事件种类（worker 消息镜像 store 重建消息流用；terminal 事件缺省）。 */
+  eventKind?: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'turn'
+  /** 原始事件内容：text/thinking 为 delta，tool_use/tool_result 为工具名。 */
+  eventDetail?: string
   /** Actual model dispatched for this worker (insights / cost visualization). */
   model?: string
   /** Provider name for this worker (insights / cost visualization). */
@@ -238,6 +246,11 @@ export interface ToolResult {
    *  - preview_only: output is a head/tail preview, not the full content
    *  Undefined = lossless (backward compatible default). */
   lossiness?: 'lossless' | 'truncated' | 'collapsed' | 'preview_only'
+  /** Optional image attachments (data URLs, e.g. computer_use screenshots).
+   *  Tool messages are text-only at the protocol level; the tool pipeline
+   *  decides whether to forward these as a follow-up multimodal user message
+   *  (only when the active model declares supportsVision) or drop them. */
+  images?: string[]
   isError?: boolean
   verification?: VerificationMetadata
   /** Additional verification events to record beyond the primary one. VSW uses

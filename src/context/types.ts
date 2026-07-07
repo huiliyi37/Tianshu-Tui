@@ -194,6 +194,29 @@ export interface SessionMetadata {
   /** TUI side panel open state persisted across session resume. */
   sidePanelOpen?: boolean
   /**
+   * Plan-mode state persisted across restarts. Runtime truth lives in
+   * AgentLoop.planModeState (memory); this mirror lets resume re-enter
+   * planning with the same draft file instead of silently dropping the mode.
+   */
+  planModeState?: 'off' | 'planning'
+  /** Relative path of the active plan draft while planModeState === 'planning'. */
+  activePlanFilePath?: string | null
+  /**
+   * 最近一次 run 结束的结构化停止原因（2026-07-07 观测缺口修复）。
+   * 此前 StopReason 只走 debugLog/遥测——不开 RIVET_DEBUG 时事后无法区分
+   * "护栏熔断 / 用户中断 / 流错误 / 自然收尾"（会话 519216c0 取证时的盲区）。
+   * 每次 run 结束时覆盖写入；t 为记录时刻 epoch ms。
+   */
+  lastStopReason?: {
+    source: string
+    turn: number
+    voluntary: boolean
+    detail?: string
+    score?: number
+    level?: number
+    t: number
+  }
+  /**
    * Guardian（星域守护链路）活动摘要 — CCR 触发数、改道发射数（按 source 分）、
    * advisory 渲染/丢弃计数。排查"守护链路被静音"时一眼可见（Phase 0 观测）。
    */
@@ -212,4 +235,10 @@ export interface SessionMetadata {
    * 为「llmSpeculation 是否默认开」提供跨会话命中率证据。
    */
   speculationStats?: Record<string, { enqueued: number; hits: number }>
+  /**
+   * Tier 2 LLM speculation 引擎自身的调用计数（fired/parseFailures/errors）。
+   * speculationStats.llm 只记 shadow-queue 侧的 enqueued/hits——没有本字段，
+   * 「spec 到底发了几次 API 调用」无法从磁盘考证（2026-07-06 成本盲区修复）。
+   */
+  llmSpeculationEngine?: { fired: number; enqueued: number; parseFailures: number; errors: number }
 }

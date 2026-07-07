@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   SlidersHorizontal, FolderOpen, Pencil, Trash2,
   Home, Bell, LayoutGrid, Clock, Puzzle, GitBranch, BarChart3,
   Network, Scale, Plug, Settings, Sun, Moon, Laptop, Sparkles, Flower2, Zap, Apple,
   type LucideIcon,
 } from 'lucide-react'
-import { useCloseSession, useDeleteSession, useRenameSession, useSessions, useUnarchiveSession } from '../state/queries'
+import { useCloseSession, useDeleteSession, useRenameSession, useSessions, useTasks, useUnarchiveSession } from '../state/queries'
+import { deriveReviewQueue } from '../lib/attention'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
-import { addKnownProject, deriveProjects, loadKnownProjects, projectId, removeKnownProject, renameKnownProject } from '../lib/projects'
+import { addKnownProject, deriveProjects, loadKnownProjects, projectId, removeKnownProject, renameKnownProject, type Project } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
-import { listAllSessions } from '../runtime/client'
+import { listAllSessions, searchSessionContent, type SessionSearchHit } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import {
@@ -78,6 +80,11 @@ function formatRelativeTime(timestamp: number): string {
   return `${months}mo`
 }
 
+/** Flattened sidebar tree row — project headers + sessions (when expanded). */
+type SidebarTreeRow =
+  | { kind: 'project'; key: string; project: Project; groupCount: number; expanded: boolean; isActiveProject: boolean }
+  | { kind: 'session'; key: string; session: SessionRecord; projectId: string }
+
 export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const { onCollapse } = props
   const { t } = useTranslation('nav')
@@ -102,6 +109,27 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const [toolsExpanded, setToolsExpanded] = useState(false)
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
   const searchRef = useRef<HTMLInputElement>(null)
+  const treeRef = useRef<HTMLDivElement>(null)
+
+  // Cross-session content search — debounced call to GET /sessions/search once
+  // the query hits 2 chars. Results render as a "content matches" group below
+  // the title-matched tree. Stale responses are dropped via a request counter.
+  const [contentHits, setContentHits] = useState<SessionSearchHit[]>([])
+  const contentReqRef = useRef(0)
+  useEffect(() => {
+    const q = filter.trim()
+    if (q.length < 2) {
+      setContentHits([])
+      return
+    }
+    const reqId = ++contentReqRef.current
+    const timer = setTimeout(() => {
+      searchSessionContent(q)
+        .then((results) => { if (contentReqRef.current === reqId) setContentHits(results) })
+        .catch(() => { if (contentReqRef.current === reqId) setContentHits([]) })
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [filter])
 
   const cycleTheme = () => {
     const next = nextTheme(theme)
@@ -109,12 +137,13 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
     setThemePref(next)
   }
 
-  // Inbox badge — sessions blocked on approval or failed.
+  // Inbox badge — same source of truth as the Review Queue (sessions +
+  // automation runs, minus items the user already dismissed/saw). Clearing
+  // the queue turns the badge off.
+  const tasks = useTasks()
   const attentionCount = useMemo(
-    () => (sessions.data ?? []).filter(
-      (s) => !s.archived && (s.pendingApprovals > 0 || s.status === 'failed'),
-    ).length,
-    [sessions.data],
+    () => deriveReviewQueue(sessions.data ?? [], tasks.data ?? [], new Set(ui.attentionSeen)).unseenCount,
+    [sessions.data, tasks.data, ui.attentionSeen],
   )
 
   const loadArchived = async () => {
@@ -169,6 +198,39 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
     return groups
   }, [visibleSessions])
 
+  // Flatten project tree for virtualization — expand/collapse state is baked in
+  // here so the virtualizer sees a simple 1-D list (headers + visible sessions).
+  const flatRows = useMemo(() => {
+    const rows: SidebarTreeRow[] = []
+    const forceExpand = filter.length > 0
+    for (const p of projects) {
+      const group = projectGroups.get(p.id) ?? []
+      const expanded = expandedProjects.has(p.id) || forceExpand
+      rows.push({
+        kind: 'project',
+        key: `ph-${p.id}`,
+        project: p,
+        groupCount: group.length,
+        expanded,
+        isActiveProject: p.id === ui.activeProject,
+      })
+      if (expanded) {
+        for (const s of group) {
+          rows.push({ kind: 'session', key: `s-${s.id}`, session: s, projectId: p.id })
+        }
+      }
+    }
+    return rows
+  }, [projects, projectGroups, expandedProjects, filter, ui.activeProject])
+
+  const treeVirtualizer = useVirtualizer({
+    count: flatRows.length,
+    getScrollElement: () => treeRef.current,
+    estimateSize: (i) => (flatRows[i]?.kind === 'project' ? 52 : 34),
+    overscan: 12,
+    getItemKey: (i) => flatRows[i]!.key,
+  })
+
   // Ensure active project is expanded.
   useEffect(() => {
     if (ui.activeProject) {
@@ -184,7 +246,7 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const openFolder = async () => {
     let cwd = await pickFolder()
     if (!cwd) {
-      cwd = typeof window !== 'undefined' ? window.prompt('项目文件夹绝对路径') : null
+      cwd = typeof window !== 'undefined' ? window.prompt(t('sidebar.projectFolderPrompt')) : null
     }
     if (!cwd) return
     setKnown(addKnownProject(cwd))
@@ -333,19 +395,19 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
               size={13}
               style={{ cursor: 'pointer', color: statusFilter !== 'all' ? 'var(--accent)' : undefined, opacity: 1 }}
               onClick={() => setFilterRowOpen((v) => !v)}
-              aria-label={t('sidebar.filterByStatus', { defaultValue: '按状态筛选' })}
+              aria-label={t('sidebar.filterByStatus')}
             />
             <FolderOpen size={13} style={{ cursor: 'pointer' }} onClick={openFolder} />
           </div>
         </div>
 
         {filterRowOpen && (
-          <div className="sidebar-status-filter" role="radiogroup" aria-label="会话状态筛选">
+          <div className="sidebar-status-filter" role="radiogroup" aria-label={t('sidebar.statusFilterLabel')}>
             {([
-              ['all', '全部'],
-              ['running', '运行中'],
-              ['attention', '待处理'],
-              ['idle', '空闲'],
+              ['all', t('sidebar.statusAll')],
+              ['running', t('sidebar.statusRunning')],
+              ['attention', t('sidebar.statusAttention')],
+              ['idle', t('sidebar.statusIdle')],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -368,187 +430,230 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
         )}
       </div>
 
-      <div className="project-tree" role="tree">
-        {projects.map((p) => {
-          const group = projectGroups.get(p.id) ?? []
-          const expanded = expandedProjects.has(p.id) || filter.length > 0
-          const isActiveProject = p.id === ui.activeProject
-          return (
-            <div key={p.id} className="project-tree-node" role="treeitem" aria-expanded={expanded}>
-              <ContextMenu>
-              <ContextMenuTrigger
-                render={
-                  <button
-                    className={`project-tree-header ${isActiveProject ? 'active' : ''}`}
-                    onClick={() => {
-                      dispatch({ type: 'setProject', projectId: p.id })
-                      toggleProject(p.id)
-                    }}
-                  />
-                }
-              >
-                <span className={`pt-chev ${expanded ? 'open' : ''}`} aria-hidden>▸</span>
-                <span className="pt-folder" aria-hidden>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
-                  </svg>
-                </span>
-                <div className="project-tree-header-body">
-                  <div className="project-tree-header-top">
-                    {renamingProject === p.id ? (
-                      <input
-                        className="pt-rename-input"
-                        defaultValue={p.name}
-                        autoFocus
-                        onClick={(e) => e.stopPropagation()}
-                        onBlur={(e) => commitProjectRename(p.id, e.target.value, p.roots)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            commitProjectRename(p.id, (e.target as HTMLInputElement).value, p.roots)
-                          } else if (e.key === 'Escape') {
-                            setRenamingProject(null)
-                          }
-                        }}
-                      />
-                    ) : (
-                      <span className="pt-name" onDoubleClick={() => setRenamingProject(p.id)} title={t('sidebar.renameProject')}>
-                        {p.name}
-                      </span>
-                    )}
-                    {p.roots.length > 1 && (
-                      <span className="pt-repo-badge" title={p.roots.join('\n')}>
-                        {p.roots.length}
-                      </span>
-                    )}
-                    <span className="pt-count">{group.length}</span>
-                  </div>
-                  <span className="pt-path" title={p.roots.join('\n')}>
-                    {p.roots[0]}
-                  </span>
-                </div>
-                <div className="pt-actions" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className="pt-action-btn"
-                    title={t('sidebar.renameProject')}
-                    onClick={() => setRenamingProject(p.id)}
-                  >
-                    <Pencil size={12} />
-                  </button>
-                  <button
-                    className="pt-action-btn"
-                    title={t('sidebar.removeProject')}
-                    onClick={() => removeProject(p)}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </ContextMenuTrigger>
-              <ContextMenuContent align="start" side="right" sideOffset={4}>
-                <ContextMenuItem onClick={() => setRenamingProject(p.id)}>
-                  <Pencil size={14} /> {t('sidebar.renameProject')}
-                </ContextMenuItem>
-                <ContextMenuSeparator />
-                <ContextMenuItem onClick={() => removeProject(p)}>
-                  <Trash2 size={14} /> {t('sidebar.removeProject')}
-                </ContextMenuItem>
-              </ContextMenuContent>
-              </ContextMenu>
-              {expanded && (
-                <div className="project-tree-children">
-                  {group.map((s) => (
-                    <ContextMenu key={s.id}>
-                    <ContextMenuTrigger
-                      render={
-                        <div
-                          className={`thread-row ${s.id === ui.activeSessionId ? 'active' : ''}`}
-                          onClick={() => {
-                            dispatch({ type: 'setActive', id: s.id })
-                            dispatch({ type: 'setSurface', surface: 'workspace' })
-                          }}
-                        />
-                      }
-                    >
-                      <div className="thread-row-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                        <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                          <span className={`status-dot status-${s.status}`} />
-                          {renamingSession === s.id ? (
-                            <input
-                              className="thread-rename-input"
-                              defaultValue={s.title ?? ''}
-                              autoFocus
-                              onClick={(e) => e.stopPropagation()}
-                              onBlur={(e) => {
-                                const title = e.target.value.trim()
-                                if (title) renameSession.mutate({ id: s.id, title })
-                                setRenamingSession(null)
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  const title = (e.target as HTMLInputElement).value.trim()
-                                  if (title) renameSession.mutate({ id: s.id, title })
-                                  setRenamingSession(null)
-                                } else if (e.key === 'Escape') {
-                                  setRenamingSession(null)
-                                }
+      <div className="project-tree" role="tree" ref={treeRef}>
+        {flatRows.length > 0 && (
+          <div className="pt-vlist" style={{ height: treeVirtualizer.getTotalSize() }}>
+            {treeVirtualizer.getVirtualItems().map((vi) => {
+              const row = flatRows[vi.index]!
+              return (
+                <div
+                  key={vi.key}
+                  className="pt-vrow"
+                  data-index={vi.index}
+                  ref={treeVirtualizer.measureElement}
+                  style={{ transform: `translateY(${vi.start}px)` }}
+                >
+                  {row.kind === 'project' ? (() => {
+                    const p = row.project
+                    return (
+                      <div className="project-tree-node" role="treeitem" aria-expanded={row.expanded}>
+                        <ContextMenu>
+                        <ContextMenuTrigger
+                          render={
+                            <button
+                              className={`project-tree-header ${row.isActiveProject ? 'active' : ''}`}
+                              onClick={() => {
+                                dispatch({ type: 'setProject', projectId: p.id })
+                                toggleProject(p.id)
                               }}
                             />
-                          ) : (
-                            <span
-                              className="thread-title-text"
-                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              onDoubleClick={() => setRenamingSession(s.id)}
-                              title={t('sidebar.renameSession')}
+                          }
+                        >
+                          <span className={`pt-chev ${row.expanded ? 'open' : ''}`} aria-hidden>▸</span>
+                          <span className="pt-folder" aria-hidden>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                              strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+                            </svg>
+                          </span>
+                          <div className="project-tree-header-body">
+                            <div className="project-tree-header-top">
+                              {renamingProject === p.id ? (
+                                <input
+                                  className="pt-rename-input"
+                                  defaultValue={p.name}
+                                  autoFocus
+                                  onClick={(e) => e.stopPropagation()}
+                                  onBlur={(e) => commitProjectRename(p.id, e.target.value, p.roots)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      commitProjectRename(p.id, (e.target as HTMLInputElement).value, p.roots)
+                                    } else if (e.key === 'Escape') {
+                                      setRenamingProject(null)
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <span className="pt-name" onDoubleClick={() => setRenamingProject(p.id)} title={t('sidebar.renameProject')}>
+                                  {p.name}
+                                </span>
+                              )}
+                              {p.roots.length > 1 && (
+                                <span className="pt-repo-badge" title={p.roots.join('\n')}>
+                                  {p.roots.length}
+                                </span>
+                              )}
+                              <span className="pt-count">{row.groupCount}</span>
+                            </div>
+                            <span className="pt-path" title={p.roots.join('\n')}>
+                              {p.roots[0]}
+                            </span>
+                          </div>
+                          <div className="pt-actions" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="pt-action-btn"
+                              title={t('sidebar.renameProject')}
+                              onClick={() => setRenamingProject(p.id)}
                             >
-                              {s.title ?? s.id.slice(0, 8)}
-                            </span>
-                          )}
-                          {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
-                          {s.worktreeBranch && (
-                            <span className="thread-wt-badge" title={`Worktree: ${s.worktreeBranch}`}>
-                              ⑂ {s.worktreeBranch.replace(/^rivet-hands-/, '').slice(0, 8)}
-                            </span>
-                          )}
-                        </div>
-                        <span className="thread-time" style={{ fontSize: '11px', color: 'var(--muted)', marginLeft: '8px', flexShrink: 0 }}>
-                          {formatRelativeTime(s.updatedAt)}
-                        </span>
+                              <Pencil size={12} />
+                            </button>
+                            <button
+                              className="pt-action-btn"
+                              title={t('sidebar.removeProject')}
+                              onClick={() => removeProject(p)}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent align="start" side="right" sideOffset={4}>
+                          <ContextMenuItem onClick={() => setRenamingProject(p.id)}>
+                            <Pencil size={14} /> {t('sidebar.renameProject')}
+                          </ContextMenuItem>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => removeProject(p)}>
+                            <Trash2 size={14} /> {t('sidebar.removeProject')}
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                        </ContextMenu>
                       </div>
-                      <button
-                        className="thread-row-close"
-                        title={t('sidebar.closeSession')}
-                        aria-label={t('sidebar.closeSession')}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          closeSession.mutate(s.id)
-                          if (s.id === ui.activeSessionId) dispatch({ type: 'setActive', id: '' })
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <path d="M18 6 6 18M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent align="start" side="right" sideOffset={4}>
-                      <ContextMenuItem onClick={() => setRenamingSession(s.id)}>
-                        <Pencil size={14} /> {t('sidebar.renameSession')}
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem onClick={() => {
-                        closeSession.mutate(s.id)
-                        if (s.id === ui.activeSessionId) dispatch({ type: 'setActive', id: '' })
-                      }}>
-                        <Trash2 size={14} /> {t('sidebar.closeSession')}
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                    </ContextMenu>
-                  ))}
+                    )
+                  })() : (() => {
+                    const s = row.session
+                    return (
+                      <div className="project-tree-children">
+                        <ContextMenu>
+                        <ContextMenuTrigger
+                          render={
+                            <div
+                              className={`thread-row ${s.id === ui.activeSessionId ? 'active' : ''}`}
+                              onClick={() => {
+                                dispatch({ type: 'setActive', id: s.id })
+                                dispatch({ type: 'setSurface', surface: 'workspace' })
+                              }}
+                            />
+                          }
+                        >
+                          <div className="thread-row-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                            <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                              <span className={`status-dot status-${s.status}`} />
+                              {renamingSession === s.id ? (
+                                <input
+                                  className="thread-rename-input"
+                                  defaultValue={s.title ?? ''}
+                                  autoFocus
+                                  onClick={(e) => e.stopPropagation()}
+                                  onBlur={(e) => {
+                                    const title = e.target.value.trim()
+                                    if (title) renameSession.mutate({ id: s.id, title })
+                                    setRenamingSession(null)
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      const title = (e.target as HTMLInputElement).value.trim()
+                                      if (title) renameSession.mutate({ id: s.id, title })
+                                      setRenamingSession(null)
+                                    } else if (e.key === 'Escape') {
+                                      setRenamingSession(null)
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <span
+                                  className="thread-title-text"
+                                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                  onDoubleClick={() => setRenamingSession(s.id)}
+                                  title={t('sidebar.renameSession')}
+                                >
+                                  {s.title ?? s.id.slice(0, 8)}
+                                </span>
+                              )}
+                              {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
+                              {s.worktreeBranch && (
+                                <span className="thread-wt-badge" title={`Worktree: ${s.worktreeBranch}`}>
+                                  ⑂ {s.worktreeBranch.replace(/^rivet-hands-/, '').slice(0, 8)}
+                                </span>
+                              )}
+                            </div>
+                            <span className="thread-time" style={{ fontSize: '11px', color: 'var(--muted)', marginLeft: '8px', flexShrink: 0 }}>
+                              {formatRelativeTime(s.updatedAt)}
+                            </span>
+                          </div>
+                          <button
+                            className="thread-row-close"
+                            title={t('sidebar.closeSession')}
+                            aria-label={t('sidebar.closeSession')}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              closeSession.mutate(s.id)
+                              if (s.id === ui.activeSessionId) dispatch({ type: 'setActive', id: '' })
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <path d="M18 6 6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent align="start" side="right" sideOffset={4}>
+                          <ContextMenuItem onClick={() => setRenamingSession(s.id)}>
+                            <Pencil size={14} /> {t('sidebar.renameSession')}
+                          </ContextMenuItem>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem onClick={() => {
+                            closeSession.mutate(s.id)
+                            if (s.id === ui.activeSessionId) dispatch({ type: 'setActive', id: '' })
+                          }}>
+                            <Trash2 size={14} /> {t('sidebar.closeSession')}
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                        </ContextMenu>
+                      </div>
+                    )
+                  })()}
                 </div>
-              )}
+              )
+            })}
+          </div>
+        )}
+
+        {filter.trim().length >= 2 && contentHits.length > 0 && (
+          <div className="content-match-section">
+            <div className="sidebar-section-head" style={{ padding: '6px 8px 2px' }}>
+              <span className="sidebar-section-title">{t('sidebar.contentMatches')}</span>
             </div>
-          )
-        })}
+            {contentHits.map((hit, i) => (
+              <div
+                key={`${hit.sessionId}-${i}`}
+                className={`content-match-row ${hit.sessionId === ui.activeSessionId ? 'active' : ''}`}
+                onClick={() => {
+                  const rec = (sessions.data ?? []).find((s) => s.id === hit.sessionId)
+                  if (rec) dispatch({ type: 'setProject', projectId: projectId(rec.cwd) })
+                  dispatch({ type: 'setActive', id: hit.sessionId })
+                  dispatch({ type: 'setSurface', surface: 'workspace' })
+                }}
+              >
+                <div className="content-match-title">
+                  <span className={`content-match-role role-${hit.role}`}>
+                    {hit.role === 'user' ? t('sidebar.contentRoleUser') : t('sidebar.contentRoleAssistant')}
+                  </span>
+                  <span className="content-match-session">{hit.title}</span>
+                </div>
+                <div className="content-match-snippet">{hit.snippet}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {showArchived && archivedSessions.length > 0 && (

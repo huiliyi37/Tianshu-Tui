@@ -4,7 +4,7 @@
   "mission": "Mission Control",
   "automations": "Automations",
   "attention": "Inbox",
-  "skills": "Skills",
+  "skills": "Extensions",
   "git": "Git",
   "insights": "Insights",
   "delegation": "Delegation",
@@ -21,6 +21,9 @@
     "clearSearch": "Clear search",
     "noSessions": "No sessions yet",
     "noMatches": "No matches",
+    "contentMatches": "Content matches",
+    "contentRoleUser": "Me",
+    "contentRoleAssistant": "Assistant",
     "archivedSessions": "Archived Sessions",
     "currentProject": "Current Project",
     "archive": "Archived Sessions",
@@ -31,7 +34,14 @@
     "renameSession": "Rename session",
     "deleteSession": "Delete permanently",
     "confirmRemoveProject": "Remove project \"{name}\"? All its sessions will be archived.",
-    "confirmDeleteSession": "Permanently delete session \"{title}\"? This cannot be undone."
+    "confirmDeleteSession": "Permanently delete session \"{title}\"? This cannot be undone.",
+    "projectFolderPrompt": "Absolute path of the project folder",
+    "filterByStatus": "Filter by status",
+    "statusFilterLabel": "Session status filter",
+    "statusAll": "All",
+    "statusRunning": "Running",
+    "statusAttention": "Attention",
+    "statusIdle": "Idle"
   },
   "fileExplorer": {
     "title": "File Explorer",
@@ -52,6 +62,16 @@
     "revealInSystem": "Reveal in System",
     "copied": "Path copied",
     "copyFailed": "Copy failed",
-    "addedToContext": "Added to context"
+    "addedToContext": "Added to context",
+    "readDirFailed": "Failed to read directory",
+    "readFileFailed": "Failed to read file",
+    "openFailed": "Failed to open: {{message}}",
+    "revealFailed": "Failed to reveal in file manager: {{message}}",
+    "openFolderFailed": "Failed to open folder: {{message}}",
+    "noActiveSession": "No active session",
+    "projectRoot": "Project Root",
+    "selectFileHint": "Select a file on the left to view its content",
+    "preview": "Preview",
+    "source": "Source"
   }
 }

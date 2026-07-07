@@ -516,6 +516,11 @@ export class MeridianDb {
     tx(entries)
   }
 
+  /** Memory-epoch reset: drop all persisted mistake entries (see memory-epoch.ts). */
+  clearMistakeEntries(): void {
+    this.db.prepare('DELETE FROM mistake_entries').run()
+  }
+
   loadMistakeEntries(): MistakeEntry[] {
     const rows = this.db.prepare('SELECT * FROM mistake_entries').all() as Array<{
       id: string

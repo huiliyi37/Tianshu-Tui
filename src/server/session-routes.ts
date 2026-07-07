@@ -44,6 +44,8 @@ import { RECOMMENDED_MAX_SKILLS } from '../skills/skill-loader.js'
 import { validatePath } from '../tools/path-validate.js'
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
 import { extname, relative, join } from 'node:path'
+import { sessionsDir } from '../config/paths.js'
+import { verifyAndExtract } from '../agent/checksum.js'
 import type { HookEntry, HookEvent, HooksConfig } from '../hooks/user-hooks-runner.js'
 import { loadHooksConfig, VALID_EVENTS } from '../hooks/user-hooks-runner.js'
 
@@ -122,6 +124,51 @@ function planSummary(p: PlanDocument) {
     model: p.model,
     modelTier: p.modelTier,
   }
+}
+
+// ── Cross-session content search (GET /sessions/search) ──
+// Linear scan over agent transcripts (~/.rivet/sessions/<slug>/<id>.jsonl).
+// No index: session files are local and bounded, and hit caps keep it cheap.
+const SEARCH_PER_SESSION_MAX = 3
+const SEARCH_TOTAL_MAX = 50
+const SEARCH_SNIPPET_RADIUS = 60
+
+export type SessionSearchHit = {
+  sessionId: string
+  title: string
+  role: 'user' | 'assistant'
+  snippet: string
+}
+
+/** Context window around the first case-insensitive hit, or null if no match. */
+function searchSnippet(text: string, lowerQuery: string): string | null {
+  const idx = text.toLowerCase().indexOf(lowerQuery)
+  if (idx < 0) return null
+  const start = Math.max(0, idx - SEARCH_SNIPPET_RADIUS)
+  const end = Math.min(text.length, idx + lowerQuery.length + SEARCH_SNIPPET_RADIUS)
+  const body = text.slice(start, end).replace(/\s+/g, ' ').trim()
+  return `${start > 0 ? '…' : ''}${body}${end < text.length ? '…' : ''}`
+}
+
+/** Scan one transcript JSONL for user/assistant text hits. Missing or
+ *  malformed files (and rows) are silently skipped — search is best-effort. */
+function searchTranscript(filePath: string, lowerQuery: string, sessionId: string, title: string): SessionSearchHit[] {
+  let raw: string
+  try { raw = readFileSync(filePath, 'utf-8') } catch { return [] }
+  const hits: SessionSearchHit[] = []
+  for (const line of raw.split('\n')) {
+    if (hits.length >= SEARCH_PER_SESSION_MAX) break
+    if (!line.trim()) continue
+    const { json } = verifyAndExtract(line)
+    let parsed: { role?: unknown; content?: unknown; type?: unknown }
+    try { parsed = JSON.parse(json) as typeof parsed } catch { continue }
+    if (typeof parsed.type === 'string') continue // audit rows (model_switch, compact markers)
+    if (parsed.role !== 'user' && parsed.role !== 'assistant') continue
+    if (typeof parsed.content !== 'string' || !parsed.content) continue
+    const snippet = searchSnippet(parsed.content, lowerQuery)
+    if (snippet) hits.push({ sessionId, title, role: parsed.role, snippet })
+  }
+  return hits
 }
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
@@ -210,15 +257,38 @@ export function buildSessionRoutes(
       return { status: 200, body: { plan } }
     }, apiToken),
 
-    // Build — approve a plan and inject it as the next turn for execution.
+    // Plan edit — replace a submitted plan's markdown before approval
+    // (desktop review → tweak → Build loop; Cursor 3.0 parity).
+    'PUT /sessions/:id/plans/:slug': withAuth(async (body, params) => {
+      const data = (body ?? {}) as { content?: string }
+      if (typeof data.content !== 'string') {
+        return { status: 400, body: { error: 'Missing "content" string' } }
+      }
+      const outcome = await manager.updatePlan(params!.id!, decodeSlug(params!.slug!), data.content)
+      if (!outcome.ok) {
+        const status =
+          outcome.code === 'session-missing' || outcome.code === 'plan-not-found' ? 404
+          : outcome.code === 'empty-content' ? 400
+          : 409
+        return { status, body: { error: outcome.reason, code: outcome.code } }
+      }
+      return { status: 200, body: { ok: true } }
+    }, apiToken),
+
+    // Build — approve a plan (shared guard kernel: content validation + anchor
+    // drift recheck) and inject the wave-execution kickoff as the next turn.
     'POST /sessions/:id/plans/:slug/approve': withAuth(async (body, params) => {
       const data = (body ?? {}) as { selectedApproach?: string }
       const selectedApproach = typeof data.selectedApproach === 'string' && data.selectedApproach.trim()
         ? data.selectedApproach.trim()
         : undefined
-      const ok = await manager.approvePlan(params!.id!, decodeSlug(params!.slug!), selectedApproach)
-      if (!ok) {
-        return { status: 409, body: { error: 'Session missing/running, plan not found, or unknown selectedApproach' } }
+      const outcome = await manager.approvePlan(params!.id!, decodeSlug(params!.slug!), selectedApproach)
+      if (!outcome.ok) {
+        const status =
+          outcome.code === 'session-missing' || outcome.code === 'plan-not-found' ? 404
+          : outcome.code === 'invalid-content' ? 422
+          : 409
+        return { status, body: { error: outcome.reason, code: outcome.code } }
       }
       return { status: 200, body: { ok: true } }
     }, apiToken),
@@ -330,6 +400,25 @@ export function buildSessionRoutes(
         ? manager.listAllSessions()
         : manager.listSessions()
       return { status: 200, body: { sessions } }
+    }, apiToken),
+
+    // Cross-session content search — scans active sessions' agent transcripts
+    // for user/assistant text. Exact route, so it is matched before the
+    // parameterized GET /sessions/:id. Read-only, Bearer-gated.
+    'GET /sessions/search': withAuth((_body, params) => {
+      const q = typeof params?.q === 'string' ? params.q.trim() : ''
+      if (q.length < 2) {
+        return { status: 400, body: { error: 'Query "q" must be at least 2 characters' } }
+      }
+      const lowerQuery = q.toLowerCase()
+      const results: SessionSearchHit[] = []
+      for (const rec of manager.listSessions()) {
+        if (results.length >= SEARCH_TOTAL_MAX) break
+        const file = join(sessionsDir(rec.cwd), `${rec.id}.jsonl`)
+        const hits = searchTranscript(file, lowerQuery, rec.id, rec.title ?? rec.id.slice(0, 8))
+        results.push(...hits.slice(0, SEARCH_TOTAL_MAX - results.length))
+      }
+      return { status: 200, body: { results } }
     }, apiToken),
 
     // Archive (soft-close) a session. Aborts if running, marks archived, hides
@@ -453,6 +542,13 @@ export function buildSessionRoutes(
             manager.enableTool(params!.id!, toolName)
           }
         }
+      }
+
+      // @Computer 提及 → run 前挂载 computer_use（EXTENDED 层，默认不进主控视野）。
+      // 缓存纪律：走既有 enableTool 边界挂载机制，边界一次性 miss 已有提示；
+      // 非 darwin 平台工具未注册，enableTool 静默 no-op。
+      if (/@computer\b/i.test(prompt)) {
+        manager.enableTool(params!.id!, 'computer_use')
       }
 
       const ok = manager.run(params!.id!, prompt, images)
@@ -802,9 +898,11 @@ export function buildSessionRoutes(
     }, apiToken),
 
     'POST /sessions/:id/interventions/:requestId/answer': withAuth((body, params) => {
-      const data = (body ?? {}) as { decision?: string; editedInput?: Record<string, unknown> }
+      const data = (body ?? {}) as { decision?: string; editedInput?: Record<string, unknown>; remember?: boolean }
       const decision = data.decision ?? 'approve'
-      const ok = manager.answerIntervention(params!.id!, params!.requestId!, decision, data.editedInput)
+      const ok = manager.answerIntervention(
+        params!.id!, params!.requestId!, decision, data.editedInput, data.remember === true,
+      )
       if (!ok) return { status: 404, body: { error: 'Pending intervention not found' } }
       return { status: 200, body: { ok: true } }
     }, apiToken),

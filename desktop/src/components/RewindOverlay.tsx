@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
   getRewindPoints,
@@ -37,6 +38,7 @@ type Preview =
   | { kind: 'coarse'; text: string; token: string }
 
 export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCodeRolledBack }: RewindOverlayProps) {
+  const { t } = useTranslation('threadView')
   const [points, setPoints] = useState<RewindPoint[]>([])
   const [idx, setIdx] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -69,7 +71,7 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
       onRewound(point.content)
       onClose()
     } catch (e) {
-      toast.error(`回滚对话失败：${String((e as Error).message ?? e)}`)
+      toast.error(t('rewind.convoFailed', { error: String((e as Error).message ?? e) }))
     }
   }
 
@@ -89,7 +91,7 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
       }
       const p = await getRollbackPreview(sessionId)
       if (!p.available || !p.text || !p.confirmationToken) {
-        toast.info('当前没有可回滚的更改')
+        toast.info(t('rewind.nothingToRollback'))
         setPvState('idle')
         return
       }
@@ -97,7 +99,7 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
       setPendingMode(mode)
       setPvState('previewed')
     } catch (e) {
-      toast.error(`加载回滚预览失败：${String((e as Error).message ?? e)}`)
+      toast.error(t('rewind.previewFailed', { error: String((e as Error).message ?? e) }))
       setPvState('idle')
     }
   }
@@ -109,23 +111,23 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
       if (preview.kind === 'precise') {
         const r = await rewindFilesPrecise(sessionId, chosen.index)
         if (!r.success) {
-          toast.error(r.error ?? '回滚未执行')
+          toast.error(r.error ?? t('rewind.notExecuted'))
           setPvState('previewed')
           return
         }
-        toast.success(`已恢复到此消息 · ${r.filesChanged.length} 个文件`)
+        toast.success(t('rewind.restoredPrecise', { count: r.filesChanged.length }))
       } else {
         const r = await rollbackSession(sessionId, preview.token)
         if (!r.success) {
-          toast.error(r.error ?? '回滚未执行')
+          toast.error(r.error ?? t('rewind.notExecuted'))
           setPvState('previewed')
           return
         }
-        const parts = [`已恢复代码${r.hash ? `（${r.hash}）` : ''}`]
-        if (r.skipped && r.skipped.length > 0) parts.push(`跳过 ${r.skipped.length} 个被占用文件`)
+        const parts = [r.hash ? t('rewind.codeRestoredHash', { hash: r.hash }) : t('rewind.codeRestored')]
+        if (r.skipped && r.skipped.length > 0) parts.push(t('rewind.skippedFiles', { count: r.skipped.length }))
         toast.success(parts.join(' · '))
         if (r.unrevertable && r.unrevertable.length > 0) {
-          toast.warning(`⚠️ 无法回滚的副作用：${r.unrevertable.join('; ')}`)
+          toast.warning(t('rewind.unrevertable', { list: r.unrevertable.join('; ') }))
         }
       }
       onCodeRolledBack?.()
@@ -136,7 +138,7 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
       }
       onClose()
     } catch (e) {
-      toast.error(`回滚失败：${String((e as Error).message ?? e)}`)
+      toast.error(t('rewind.failed', { error: String((e as Error).message ?? e) }))
       setPvState('previewed')
     }
   }
@@ -198,7 +200,7 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="rewind-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="rewind-header">⏪ Rewind — 选择要恢复到的消息</div>
+        <div className="rewind-header">{t('rewind.header')}</div>
 
         {loading && <div className="rewind-empty">Loading…</div>}
         {error && <div className="rewind-error">{error}</div>}
@@ -224,7 +226,7 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
                 </div>
               ))}
             </div>
-            <div className="rewind-hint">↑↓ 选择 · Enter 选操作 · Esc 取消</div>
+            <div className="rewind-hint">{t('rewind.listHint')}</div>
           </>
         )}
 
@@ -236,23 +238,23 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
             </div>
 
             {isRunning ? (
-              <div className="rewind-error">运行中不可回滚，请先停止当前任务。</div>
+              <div className="rewind-error">{t('rewind.runningBlocked')}</div>
             ) : (pvState === 'previewed' || pvState === 'running') && preview ? (
               // Preview + confirm (code / both)
               <div className="review-pending rollback-preview">
                 <div className="rp-head">
                   <span className="kind warn">
-                    {pendingMode === 'both' ? '确认恢复代码 + 截断对话' : '确认恢复代码'}
+                    {pendingMode === 'both' ? t('rewind.confirmBoth') : t('rewind.confirmCode')}
                   </span>
                   <span className="rewind-preview-tag">
-                    {preview.kind === 'precise' ? '精确到此消息' : '整会话检查点'}
+                    {preview.kind === 'precise' ? t('rewind.precise') : t('rewind.coarse')}
                   </span>
                 </div>
                 {preview.kind === 'precise' ? (
                   <ul className="rewind-file-list">
                     {preview.files.map((f) => (
                       <li key={f.path} className={`rewind-file rewind-file-${f.action}`}>
-                        <span className="rewind-file-badge">{f.action === 'delete' ? '删除' : '还原'}</span>
+                        <span className="rewind-file-badge">{f.action === 'delete' ? t('rewind.fileDelete') : t('rewind.fileRestore')}</span>
                         <span className="rewind-file-path" title={f.path}>{f.path}</span>
                       </li>
                     ))}
@@ -261,9 +263,9 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
                   <pre className="rp-preview">{preview.text}</pre>
                 )}
                 <div className="rp-actions">
-                  <button className="btn ghost sm" onClick={back} disabled={busy}>返回</button>
+                  <button className="btn ghost sm" onClick={back} disabled={busy}>{t('rewind.back')}</button>
                   <button className="btn sm danger" onClick={() => void confirmRollback()} disabled={busy}>
-                    {pvState === 'running' ? '恢复中…' : '确认恢复'}
+                    {pvState === 'running' ? t('rewind.restoring') : t('rewind.confirmRestore')}
                   </button>
                 </div>
               </div>
@@ -275,31 +277,31 @@ export function RewindOverlay({ sessionId, onClose, onRewound, isRunning, onCode
                   onClick={() => void restoreConversation(chosen)}
                   disabled={busy}
                 >
-                  <span className="rewind-action-title">仅恢复对话</span>
-                  <span className="rewind-action-desc">截断对话到此消息，不改动文件</span>
+                  <span className="rewind-action-title">{t('rewind.convoOnly')}</span>
+                  <span className="rewind-action-desc">{t('rewind.convoOnlyDesc')}</span>
                 </button>
                 <button
                   className="rewind-action"
                   onClick={() => void loadPreview('code')}
                   disabled={busy}
                 >
-                  <span className="rewind-action-title">仅恢复代码</span>
-                  <span className="rewind-action-desc">把 agent 编辑的文件恢复到此消息时的状态，不改动对话</span>
+                  <span className="rewind-action-title">{t('rewind.codeOnly')}</span>
+                  <span className="rewind-action-desc">{t('rewind.codeOnlyDesc')}</span>
                 </button>
                 <button
                   className="rewind-action"
                   onClick={() => void loadPreview('both')}
                   disabled={busy}
                 >
-                  <span className="rewind-action-title">对话 + 代码</span>
-                  <span className="rewind-action-desc">截断对话到此消息，并把 agent 编辑的文件恢复到此刻</span>
+                  <span className="rewind-action-title">{t('rewind.both')}</span>
+                  <span className="rewind-action-desc">{t('rewind.bothDesc')}</span>
                 </button>
               </div>
             )}
 
             {!isRunning && pvState !== 'previewed' && (
               <div className="rewind-hint">
-                {pvState === 'loading' ? '加载预览…' : 'Esc 返回列表'}
+                {pvState === 'loading' ? t('rewind.loadingPreview') : t('rewind.escBack')}
               </div>
             )}
           </div>

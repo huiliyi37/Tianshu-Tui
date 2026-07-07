@@ -323,7 +323,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     dependencies: input.dependencies ?? [],
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
-      maxTurns: input.budget?.maxTurns ?? 8,
+      maxTurns: input.budget?.maxTurns ?? 24,
       maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile)?.defaultMaxTokens ?? 4096,
       timeoutMs: input.budget?.timeoutMs ?? profileRegistry.get(input.profile)?.defaultTimeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 2,
@@ -370,9 +370,10 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
       // Self-contained shards run a full loop (implement + tsc/lint/tests) in one
-      // context, so write workers need a longer turn budget than the old 8 to
-      // finish a long-program shard without being cut off mid-task.
-      maxTurns: input.budget?.maxTurns ?? 14,
+      // context, so write workers need a generous turn budget to finish a
+      // long-program shard without being cut off mid-task. Flash has a 1M window;
+      // 8–14 turns was far too tight for real implement+verify work.
+      maxTurns: input.budget?.maxTurns ?? 32,
       maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultMaxTokens ?? 16384,
       timeoutMs: input.budget?.timeoutMs ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultTimeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 1,

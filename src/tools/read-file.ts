@@ -1,6 +1,6 @@
 import { existsSync } from 'fs'
 import { stat, readFile } from 'node:fs/promises'
-import { extname } from 'path'
+import { extname, relative } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { truncateContent, buildPartialView } from './truncation.js'
 import { validatePath } from './path-validate.js'
@@ -13,6 +13,7 @@ import { debugLog } from '../utils/debug.js'
 import { decideReadPolicy } from './read-policy.js'
 import { foldCode } from '../compact/code-fold.js'
 import { canUsePrewarmForRead, consumePrewarm } from '../agent/prewarm-file.js'
+import { canonicalPathKey } from '../path-format.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: Promise<GitignoreFilter>; ts: number }>()
@@ -49,6 +50,11 @@ interface ReadHistoryEntry {
    * Lets the dedup path tell the model how to recover the full content via read_section
    * even if stale-round compaction has truncated the prior tool_result. */
   artifactId?: string
+  /** Times a [read-ref] shortcut was served against this entry. When the model
+   *  comes back for the SAME unchanged slice after already receiving a ref, the
+   *  ref demonstrably didn't help (its "look above" target may have been pruned
+   *  from the request view) — degrade to a real read instead of looping. */
+  refServed?: number
 }
 const readHistory = new Map<string, ReadHistoryEntry>()
 const READ_HISTORY_MAX = 500
@@ -65,6 +71,8 @@ interface FileReadHistoryEntry {
   modelBytes: number
   artifactId?: string
   recordedAt: number
+  /** See ReadHistoryEntry.refServed. */
+  refServed?: number
 }
 const fileReadHistory = new Map<string, FileReadHistoryEntry>()
 const FILE_READ_HISTORY_MAX = 200
@@ -145,15 +153,18 @@ export function wasFileEditedBySession(canonicalPath: string, sessionId?: string
 export function __resetSessionFileEditsForTests(): void {
   sessionFileEdits.clear()
 }
+// 键路径统一走 canonicalPathKey（win32 下分隔符归一 + lowercase）：Windows 上
+// D:\a / D:/a / d:/a 是同一文件，字符串键却是三个——读表漏命中事小，编辑后
+// invalidateReadHistory 的后缀匹配失手 → read-ref 拿旧内容说"未变"才是要害。
 function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limit: number | undefined, sessionId?: string): string {
-  return `${sessionId ?? ''}::${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
+  return `${sessionId ?? ''}::${canonicalPathKey(cwd)}::${canonicalPathKey(canonicalPath)}::${offset}::${limit ?? 'all'}`
 }
 
 /** Key for fileReadHistory / lastKnownFileState / sessionFileEdits — scoped by
  *  sessionId so concurrent sessions in the same cwd (fork/worker) don't see
  *  each other's "already read"/"already edited" state. */
 function fileHistoryKey(sessionId: string | undefined, canonicalPath: string): string {
-  return `${sessionId ?? ''}::${canonicalPath}`
+  return `${sessionId ?? ''}::${canonicalPathKey(canonicalPath)}`
 }
 
 function trimReadHistory(): void {
@@ -225,14 +236,36 @@ export function noteFileObserved(canonicalPath: string, mtimeMs: number, sizeByt
  *  claims and artifact-backed slices for this path must die. Cross-session
  *  deletion is safe — those entries would fail the mtime+size check anyway. */
 export function invalidateReadHistory(canonicalPath: string): void {
-  const suffix = `::${canonicalPath}`
+  // canonicalPathKey 归一后再匹配：跨会话 file_changed 事件带来的路径可能与
+  // 本进程建键时的大小写/分隔符不同（另一进程、另一种 shell），不归一会静默
+  // 失效——正是 Windows 上 read-ref 中毒的复发通道。
+  const keyPath = canonicalPathKey(canonicalPath)
+  const suffix = `::${keyPath}`
   for (const key of fileReadHistory.keys()) {
     if (key.endsWith(suffix)) fileReadHistory.delete(key)
   }
   // readHistory keys embed offset/limit after the path: match the path segment.
-  const segment = `::${canonicalPath}::`
+  const segment = `::${keyPath}::`
   for (const key of readHistory.keys()) {
     if (key.includes(segment)) readHistory.delete(key)
+  }
+}
+
+/** Drop ALL read-dedup records (表1) for a session. Called after any message-
+ *  history rewrite (compaction ladder, agent-diet, stale-round, heap micro-
+ *  compact): the historical tool_results that read-ref points at ("回看上文")
+ *  may have been deleted, summarized, or replaced with placeholders, so
+ *  "already read" claims must die with them. 表2 (lastKnownFileState) and
+ *  sessionFileEdits survive — they track FILE state, not history presence.
+ *  Cost ceiling: one extra real read per file after a compaction that already
+ *  rewrote history (prefix cache is broken at that point anyway). */
+export function invalidateSessionReadDedup(sessionId?: string): void {
+  const prefix = `${sessionId ?? ''}::`
+  for (const key of readHistory.keys()) {
+    if (key.startsWith(prefix)) readHistory.delete(key)
+  }
+  for (const key of fileReadHistory.keys()) {
+    if (key.startsWith(prefix)) fileReadHistory.delete(key)
   }
 }
 
@@ -629,10 +662,13 @@ export const READ_FILE_TOOL: Tool = {
     if (unchangedRepeat) {
       const priorSame = readHistory.get(dedupKey!)
       const fullPrior = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical!))
+      // 措辞注意：不要写「回看上文」——历史 tool_result 可能已被压缩/修剪，
+      // 该指引曾诱发回看无果→再读的循环。警告总是与本次全文一起返回，
+      // 直接指向随附内容即可。
       if (priorSame && priorSame.mtimeMs === currentMtimeMs) {
-        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过，内容未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
+        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过且未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。内容附在下方；后续请勿重复读取未变更的文件。\n── read-dedup ──`
       } else if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) {
-        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已完整读取过，内容未变更 (${fullPrior.totalLines} lines, ${fullPrior.modelBytes} bytes)。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
+        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已完整读取过且未变更 (${fullPrior.totalLines} lines, ${fullPrior.modelBytes} bytes)。内容附在下方；后续请勿重复读取未变更的文件。\n── read-dedup ──`
       }
     }
 
@@ -644,19 +680,39 @@ export const READ_FILE_TOOL: Tool = {
     if (unchangedRepeat && isReadRefEnabled()) {
       const priorSame = readHistory.get(dedupKey!)
       const fullPrior = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical!))
-      const entryBytes = priorSame?.mtimeMs === currentMtimeMs ? priorSame.modelBytes : fullPrior?.modelBytes ?? 0
-      const totalLines = fullPrior?.mtimeMs === currentMtimeMs ? fullPrior.totalLines : 0
+      const matchedSame = priorSame?.mtimeMs === currentMtimeMs ? priorSame : undefined
+      const matchedFull = fullPrior?.mtimeMs === currentMtimeMs ? fullPrior : undefined
+      const entryBytes = matchedSame ? matchedSame.modelBytes : matchedFull?.modelBytes ?? 0
+      const totalLines = matchedFull ? matchedFull.totalLines : 0
 
-      if (entryBytes > READ_REF_THRESHOLD) {
-        const relPath = canonical!.replace(params.cwd + '/', '')
+      // Degrade gate: if a ref was ALREADY served for this entry and the model
+      // still came back for the same unchanged slice, the ref demonstrably
+      // didn't help — its "look above" target may have been pruned/masked out
+      // of the request view (request-side prune never touches these tables).
+      // Serve the real content instead of looping. The real read below
+      // re-records fresh entries (refServed reset), so the ref gets one more
+      // chance on the next repeat.
+      const refAlreadyServed = Math.max(matchedSame?.refServed ?? 0, matchedFull?.refServed ?? 0) >= 1
+
+      if (entryBytes > READ_REF_THRESHOLD && refAlreadyServed) {
+        debugLog(`[read-ref-degrade] file=${canonical} ref did not help, re-serving full content`)
+        repeatWarning = null
+      } else if (entryBytes > READ_REF_THRESHOLD) {
+        // relative() 而非 replace(cwd+'/')：Windows 下 canonical 是反斜杠路径，
+        // 字符串拼 '/' 永远不匹配 → 提示里泄漏完整绝对路径（且教模型复读它）。
+        const relPath = relative(params.cwd, canonical!)
         const sizeHint = totalLines > 0
           ? `${totalLines} 行，${entryBytes} bytes`
           : `${entryBytes} bytes`
+        // 读盘优先：read_section 直接读磁盘、不依赖历史消息是否完整；
+        // 「回看上文」只在 tool_result 未被压缩/修剪时可靠，降为补充。
         const ref = [
           `[read-ref] ${relPath} 本会话已读且未变（${sizeHint}）。`,
-          `完整内容在你上文的 tool_result 中——回看即可。`,
-          `需要具体区段：read_section(file_path="${relPath}", section="L{N}-L{M}")`,
+          `需要具体区段：read_section(file_path="${relPath}", section="L{N}-L{M}")——直接读磁盘，不依赖上文。`,
+          `若上文的 tool_result 仍完整可见，回看即可；若已被压缩为占位符，用 read_section。`,
         ].join('\n')
+        if (matchedSame) matchedSame.refServed = (matchedSame.refServed ?? 0) + 1
+        if (matchedFull) matchedFull.refServed = (matchedFull.refServed ?? 0) + 1
         // Accumulate into the per-session stats if injected, else the module-level fallback.
         if (params.readRefStats) {
           params.readRefStats.savedBytes += entryBytes
@@ -831,7 +887,7 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
     if (!trimmed) continue
     try {
       const payload = await readFilePayload(params.cwd, { filePath: trimmed, modelCap: perFileCap })
-      const relPath = payload.canonicalPath.replace(params.cwd + '/', '')
+      const relPath = relative(params.cwd, payload.canonicalPath)
       sections.push(`── ${relPath} ──\n${payload.modelContent}`)
       totalBytes += payload.rawContent.length
 
@@ -848,7 +904,9 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
       noteFileObserved(payload.canonicalPath, currentStat.mtimeMs, currentStat.size, params.sessionId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      const display = trimmed.replace(params.cwd + '/', '')
+      // trimmed 可能本来就是相对路径——只有以 cwd 开头时才转相对，避免 relative()
+      // 把无关路径变成一串 ../..。
+      const display = trimmed.startsWith(params.cwd) ? relative(params.cwd, trimmed) : trimmed
       sections.push(`── ${display} ──\nError: ${msg}`)
       errors++
     }

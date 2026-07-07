@@ -10,7 +10,7 @@ import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { resolveCustomCommand } from '../commands/loader.js'
-import { getTheme, setTheme, getActiveThemeName, THEMES, type ThemeName } from './theme.js'
+import { getTheme, setTheme, getActiveThemeName, THEMES, listCustomThemes } from './theme.js'
 import {
   checkForUpdate,
   detectInstallRoot,
@@ -36,8 +36,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join } from 'node:path'
 import { ensureVerifyDeclaration, renderRivetMdStack, upsertStackSection } from '../bootstrap/verify-declaration.js'
 import { exportsDir } from '../config/paths.js'
-import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix, readPlan } from '../plan/plan-store.js'
-import { validatePlanContentForApproval } from '../tools/plan.js'
+import { listPlans, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix } from '../plan/plan-store.js'
+import { approvePlanWithGuards } from '../plan/plan-approval.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
@@ -58,7 +58,10 @@ import { buildAgentMark, VOID_SYMBOL } from '../agent/void-identity.js'
 import type { TuiApp } from './engine/app.js'
 import type { SlashCommand } from './slash-command-registry.js'
 import type { BootstrapContext } from '../bootstrap.js'
-import { switchAgentRuntime, switchAgentSession } from '../bootstrap.js'
+import { loadConfig, saveConfig } from '../config/manager.js'
+import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
+import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
+import { switchAgentRuntime, switchAgentSession, restorePlanModeFromMeta } from '../bootstrap.js'
 import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
@@ -168,6 +171,10 @@ export interface SlashHandlerContext {
    * to the legacy in-memory-only restore (no identity switch).
    */
   onSessionSwitch?: (targetId: string) => { ok: boolean; error?: string; messageCount?: number; repaired?: boolean; safe?: boolean }
+  /** Open the interactive session picker overlay (Chronicle). Wired by the TUI;
+   *  /resume with no argument opens it instead of printing usage (Claude Code
+   *  parity). Undefined → fall back to the usage hint (tests / headless). */
+  openSessionPicker?: () => void
   cost: number
   cacheHitRate: number
   autoSafeRef: MutableRefLike<boolean>
@@ -472,13 +479,9 @@ export function resolveEnterWorkerInput(
 }
 
 
-/** Build the kickoff prompt that drives wave-by-wave execution of an approved plan. */
-export function buildPlanKickoff(slug: string, title: string, approach?: string, anchorDriftNote?: string): string {
-  let msg = `开始执行已批准方案「${title}」(.rivet/plans/${slug}.md)。先 read_file 读取该计划,然后用 plan_task(execute=true) 或 team_orchestrate 把任务按波次并行执行、逐波过审查门;开工前用 todo 列出有序步骤跟踪进度,全部完成后 plan_close。`
-  if (approach) msg += `\nSelected approach: ${approach} — 只执行此方案,勿执行未选中的备选。`
-  if (anchorDriftNote) msg += `\n\n⚠ 锚点漂移提示——以下计划引用与当前工作区不符（计划写成后代码可能已变化）:\n${anchorDriftNote}\n执行时以当前源码为准,先用工具核实真实位置再动手,并把每处偏差记入交付报告;若漂移改变了方案方向,暂停执行向用户说明。`
-  return msg
-}
+// 批准闭环内核（校验+漂移复查+分波 kickoff）已下沉到共享模块，
+// server 桌面路由与 TUI 共用同一实现。此处保留 re-export 兼容既有导入。
+export { buildPlanKickoff } from '../plan/plan-approval.js'
 
 /**
  * 批准计划并自动 kickoff 分波执行的共享闭环。slash `/plan-approve` 与 plan-picker
@@ -495,52 +498,26 @@ export async function approvePlanAndKickoff(
   slug: string,
   resolvedApproach?: string,
 ): Promise<boolean> {
-  // Empty/invalid-plan hard-fail at the approval boundary (kimi-code borrow):
-  // never mark a stale draft or gutted file APPROVED + kick off execution.
-  const existing = await readPlan(deps.cwd, slug)
-  if (!existing) {
-    deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
+  const result = await approvePlanWithGuards(deps.cwd, slug, resolvedApproach)
+  if (!result.ok) {
+    if (result.code === 'invalid-content') {
+      deps.notify(`无法批准 **${result.title}** (\`${slug}\`)：${result.reason} 未写入 APPROVED 标记，也未启动执行。`, true)
+    } else {
+      deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
+    }
     return false
   }
-  const check = validatePlanContentForApproval(existing.content)
-  if (!check.ok) {
-    deps.notify(`无法批准 **${existing.title}** (\`${slug}\`)：${check.reason} 未写入 APPROVED 标记，也未启动执行。`, true)
-    return false
-  }
-
-  // Approval-time anchor drift recheck (non-blocking): the plan was written
-  // against an earlier tree state — concurrent sessions / elapsed time drift
-  // anchors. Aged plans are normal, so drift never blocks approval; it is
-  // surfaced to the user and injected into the kickoff prompt so the executor
-  // treats reality as ground truth and logs deviations in the delivery report.
-  let driftNote: string | undefined
-  try {
-    const { checkPlanFactAnchors, formatAnchorDrifts } = await import('../plan/plan-fact-anchors.js')
-    const report = await checkPlanFactAnchors(existing.content, deps.cwd)
-    if (report.drifts.length > 0) driftNote = formatAnchorDrifts(report.drifts)
-  } catch {
-    // Best-effort — the guard itself must never break approval.
-  }
-
-  const approved = await approvePlan(deps.cwd, slug)
-  if (!approved) {
-    deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
-    return false
-  }
+  const { approved, driftNote, kickoff, tierWarning } = result
   deps.agent.setActivePlan({ slug, title: approved.title, selectedApproach: resolvedApproach })
   const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
   const driftLine = driftNote
     ? `\n\n⚠ 锚点漂移复查:计划中有引用与当前工作区不符(已注入执行提示,执行方将以现实为准):\n${driftNote}`
     : ''
-  // 低阶模型留痕警告：flash 出的计划真实度不可控（事故链：大重构计划丢功能），
-  // 批准时明示产出模型，提醒复核关键改动点。不阻断——用户已看过计划正文。
-  const tierWarnLine = existing.modelTier === 'cheap'
-    ? `\n\n⚠ 本计划由低阶模型产出（${existing.model}），建议对关键改动点复核后再放行执行。`
-    : ''
+  const tierWarnLine = tierWarning ? `\n\n${tierWarning}` : ''
   deps.notify(
     `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。${tierWarnLine}${driftLine}`,
   )
-  deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach, driftNote))
+  deps.submitToAgent?.(kickoff)
   return true
 }
 
@@ -550,6 +527,10 @@ interface TuiSlashCommandDef {
   readonly immediate?: true
   readonly handler: (ctx: SlashHandlerContext) => boolean | Promise<boolean>
 }
+
+/** /plan-mode 退出时的二次确认时间戳（未批准计划放弃护栏）。 */
+let planModeExitArmedAt = 0
+const PLAN_MODE_EXIT_CONFIRM_MS = 3000
 
 const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
   {
@@ -1601,19 +1582,27 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     name: '/plan-mode',
     immediate: true,
     handler(ctx) {
-      const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      // Idempotent re-entry: if already planning, keep the current draft —
-      // re-entering would create a fresh empty draft and orphan the one the
-      // agent is writing to.
+      const { pushStatic, setIsStreaming } = ctx
       if (ctx.agent.getPlanModeState() === 'planning') {
-        const activePath = ctx.agent.getActivePlanFilePath()
-        pushStatic(createLogEntry({ type: 'system', content: `🔍 Plan Mode is already active.${activePath ? `\nActive plan file: \`${activePath}\`` : ''}\n\nUse Shift+Tab or /plan-approve to exit.` }))
+        const now = Date.now()
+        if (planModeExitArmedAt !== 0 && now - planModeExitArmedAt <= PLAN_MODE_EXIT_CONFIRM_MS) {
+          planModeExitArmedAt = 0
+          ctx.agent.exitPlanMode()
+          pushStatic(createLogEntry({ type: 'system', content: 'Plan Mode 已关闭 — 写入操作已解锁。' }))
+        } else {
+          planModeExitArmedAt = now
+          const activePath = ctx.agent.getActivePlanFilePath()
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `🔍 Plan Mode 仍在运行。${activePath ? `\n活动计划文件: \`${activePath}\`` : ''}\n\n⚠ 计划尚未批准。再执行一次 /plan-mode 放弃当前计划并退出，或用 /plan-approve <slug> 批准后执行。`,
+          }))
+        }
         setIsStreaming(false)
         return true
       }
+      planModeExitArmedAt = 0
       ctx.agent.enterPlanMode()
-      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)' }))
+      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)\n\n/plan-mode — exit plan mode (double-confirm if unapproved)' }))
       setIsStreaming(false)
       return true
     },
@@ -1774,14 +1763,17 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
       const raw = parts[1]?.toLowerCase()
-      // validThemes derives from THEMES so theme.ts remains the single source of truth.
-      const validThemes = Object.keys(THEMES) as ThemeName[]
+      // validThemes derives from THEMES + custom registry so theme.ts remains the single source of truth.
+      const validThemes: string[] = [
+        ...Object.keys(THEMES),
+        ...listCustomThemes().map(n => `custom:${n}`),
+      ]
       if (!raw || raw === 'list') {
         const current = getActiveThemeName()
         const list = validThemes.map(t => `  ${t}${t === current ? ' ← current' : ''}`).join('\n')
         pushStatic(createLogEntry({ type: 'system', content: `Available themes:\n${list}\n\nUsage: /theme <name>` }))
-      } else if ((validThemes as string[]).includes(raw)) {
-        setTheme(raw as ThemeName)
+      } else if (validThemes.includes(raw)) {
+        setTheme(raw)
         pushStatic(createLogEntry({ type: 'system', content: `Theme switched to: ${raw}` }))
       } else {
         pushStatic(createLogEntry({ type: 'system', content: `Theme "${raw}" not found. Available: ${validThemes.join(', ')}` }))
@@ -2080,7 +2072,12 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const cmd = parts[0]!.toLowerCase()
       const arg = parts[1]
       if (!arg) {
-        pushStatic(createLogEntry({ type: 'system', content: '用法: /resume <id前缀 或 序号>。用 /sessions 查看会话列表。' }))
+        // 无参 = 打开会话选择器（对齐 Claude Code /resume）；无选择器注入时退化为用法提示。
+        if (ctx.openSessionPicker) {
+          ctx.openSessionPicker()
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /resume <id前缀 或 序号>。用 /sessions 查看会话列表。' }))
+        }
         setIsStreaming(false)
         return true
       }
@@ -3274,10 +3271,16 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
             const meta = ctx.persist.loadMetadata()
             if (meta?.sidePanelOpen) app.setSidePanelOpen(true)
             else app.setSidePanelOpen(false)
-          } catch { /* panel restore best-effort */ }
+            // 计划模式恢复：目标会话退出时在 planning 且 draft 仍在 → 重进。
+            const restoredPlan = restorePlanModeFromMeta(ctx.agent, ctx.cwd, meta)
+            if (restoredPlan) {
+              app.commitStatic(`🔍 已恢复计划模式（draft: ${restoredPlan}）— /plan-mode 退出或批准计划后执行。`)
+            }
+          } catch { /* panel/plan restore best-effort */ }
         }
         return res
       },
+      openSessionPicker: () => { app.activateOverlay('chronicle') },
       allProviders,
       currentProvider: ctx.provider.name,
       currentSessionId: ctx.sessionId,
@@ -3349,12 +3352,30 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
+  // GlanceBar 信息密度切换（Wave 2 减密分档）。
+  register("/glance", {
+    description: "Toggle GlanceBar density (compact/full)",
+    immediate: true,
+    handler: ({ trimmed }) => {
+      const arg = trimmed.split(/\s+/)[1]?.toLowerCase()
+      const next = arg === 'full' ? 'full'
+        : arg === 'compact' ? 'compact'
+        : (app.glanceDensity === 'compact' ? 'full' : 'compact')
+      app.glanceDensity = next
+      app.forceRedraw()
+      app.commitStatic(`GlanceBar density → ${next}${next === 'compact' ? '（模式/模型/上下文%/耗时）' : '（全量指标）'}`)
+      return true
+    },
+  })
+
+  // 经 SIGINT 走 main.ts 的统一 shutdown（app.dispose → ctx.shutdown →
+  // 退出摘要 + resume 指引 → process.exit）。直接调 ctx.shutdown() 不会退出
+  // 进程，也绕过退出摘要。
   register("/exit", {
     description: "Exit Rivet",
     immediate: true,
     handler: () => {
-      app.commitStatic('Session saved. Goodbye!')
-      ctx.shutdown()
+      process.emit('SIGINT')
       return true
     },
   })
@@ -3363,8 +3384,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     description: "Exit Rivet",
     immediate: true,
     handler: () => {
-      app.commitStatic('Session saved. Goodbye!')
-      ctx.shutdown()
+      process.emit('SIGINT')
       return true
     },
   })
@@ -3631,4 +3651,109 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
   registerWorkflow("/plan")
   registerWorkflow("/write-plan")
   registerWorkflow("/plan-close")
+
+  // ── Plugin management ────────────────────────────────────────────
+
+  register("/plugin", {
+    description: "Manage plugins — list, install, remove, enable, disable, info",
+    immediate: true,
+    handler: ({ app, trimmed }) => {
+      const parts = trimmed.split(/\s+/)
+      const sub = parts[1]?.toLowerCase()
+      const arg = parts[2]
+
+      if (!sub || sub === 'list') {
+        const plugins = getInstalledPlugins()
+        const cfg = loadConfig()
+        if (plugins.length === 0) {
+          app.commitStatic('No plugins installed. Use /plugin install <path> to add one.')
+          return true
+        }
+        const lines = ['Installed plugins:']
+        for (const p of plugins) {
+          const enabled = cfg.plugins.enabled[p.name] !== false ? 'enabled' : 'disabled'
+          lines.push(`  ${p.name} (${p.version}) — ${enabled} — ${p.description}`)
+        }
+        lines.push('')
+        lines.push('Use /plugin info <name> for details.')
+        app.commitStatic(lines.join('\n'))
+        return true
+      }
+
+      if (sub === 'info') {
+        if (!arg) { app.commitStatic('Usage: /plugin info <name>'); return true }
+        const plugins = getInstalledPlugins()
+        const p = plugins.find(x => x.name === arg)
+        if (!p) { app.commitStatic(`Plugin "${arg}" not installed.`); return true }
+        const lines = [
+          `Plugin: ${p.name}`,
+          `Version: ${p.version}`,
+          `Description: ${p.description}`,
+          `Entry: ${p.entry}`,
+          `Tools: ${p.tools}`,
+          `Path: ${p.installPath}`,
+        ]
+        app.commitStatic(lines.join('\n'))
+        return true
+      }
+
+      if (sub === 'install') {
+        if (!arg) {
+          app.commitStatic('Usage: /plugin install <local-path>')
+          app.commitStatic('Install a plugin from a local directory.\n')
+          return true
+        }
+        app.commitStatic(`Installing plugin from ${arg}...`)
+        installPlugin(arg).then((result) => {
+          if (result.ok) {
+            const perms = result.manifest.permissions
+            const permStr = Object.entries(perms).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'
+            app.commitStatic(
+              `✓ Installed "${result.manifest.name}" v${result.manifest.version}\n` +
+              `  Tools: ${result.manifest.tools.map(t => t.name).join(', ')}\n` +
+              `  Permissions: ${permStr}\n` +
+              `  This plugin will be available on next session start.`
+            )
+          } else {
+            app.commitStatic(`✗ Install failed: ${result.error}`, { isError: true })
+          }
+        }).catch((err) => {
+          app.commitStatic(`✗ Install error: ${(err as Error).message}`, { isError: true })
+        })
+        return true
+      }
+
+      if (sub === 'remove') {
+        if (!arg) { app.commitStatic('Usage: /plugin remove <name>'); return true }
+        const result = removePlugin(arg)
+        if (result.ok) {
+          app.commitStatic(`✓ Removed plugin "${arg}".`)
+        } else {
+          app.commitStatic(`✗ ${result.error}`, { isError: true })
+        }
+        return true
+      }
+
+      if (sub === 'enable' || sub === 'disable') {
+        if (!arg) { app.commitStatic(`Usage: /plugin ${sub} <name>`); return true }
+        if (!isPluginInstalled(arg)) {
+          app.commitStatic(`✗ Plugin "${arg}" is not installed.`, { isError: true })
+          return true
+        }
+        const cfg = loadConfig()
+        cfg.plugins.enabled[arg] = sub === 'enable'
+        saveConfig(cfg)
+        app.commitStatic(
+          `✓ Plugin "${arg}" ${sub === 'enable' ? 'enabled' : 'disabled'}. ` +
+          `Changes take effect on next session start.`
+        )
+        return true
+      }
+
+      app.commitStatic(
+        'Usage: /plugin [list|install <path>|remove <name>|enable <name>|disable <name>|info <name>]'
+      )
+      return true
+    },
+  })
 }

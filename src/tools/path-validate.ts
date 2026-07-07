@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, dirname, join, basename } from 'path'
 import { realpathSync, existsSync } from 'fs'
 import { isReadGranted, isWriteGranted } from './path-grants.js'
+import { translateWindowsShellPath } from '../path-format.js'
 import { detectSensitiveFile } from './sensitive-file-detector.js'
 
 export interface ValidatedPath {
@@ -21,6 +22,10 @@ export type PathValidationResult = ValidatedPath | InvalidPath
  * ('read' satisfied by read|write grant; 'write' requires a write grant).
  */
 export function validatePathSafe(cwd: string, inputPath: string, mode: 'read' | 'write' = 'read'): PathValidationResult {
+  // Git Bash/Cygwin/WSL 盘符前缀翻译（仅 win32 生效）：用户从 Git Bash 复制的
+  // /d/sky/... 若不翻译会被当 POSIX 绝对路径 resolve 成 <cwd盘>:\d\sky\...。
+  inputPath = translateWindowsShellPath(inputPath)
+
   // Sensitive file check — fail-closed BEFORE path escape check.
   // Hard-gate: refuse to read/commit .env, credentials, private keys etc.
   // even when the path is inside the workspace.

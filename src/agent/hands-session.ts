@@ -142,7 +142,9 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
     // Collect diff only when running in a real worktree (in-place mode has no
     // isolated worktree and no base ref, so diff is meaningless).
     const baseRef = inPlace ? undefined : (config.baseRef ?? getCurrentGitRef(config.cwd))
-    const diff = baseRef ? collectDiff(config.cwd, wt.path, baseRef) : ''
+    // Materialized scope files are inputs copied from the base repo, not worker
+    // output — exclude them so the patch applies back onto the base repo.
+    const diff = baseRef ? collectDiff(config.cwd, wt.path, baseRef, scopeResult.materialized) : ''
 
     let result: WorkerResult
     try {

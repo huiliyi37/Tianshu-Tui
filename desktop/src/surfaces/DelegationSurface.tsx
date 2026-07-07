@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
 import { useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
@@ -96,17 +98,19 @@ function formatTokens(n?: number): string {
 
 type StatusClass = 'running' | 'ok' | 'warn' | 'bad' | 'idle'
 
-const STATUS_META: Record<string, { label: string; cls: StatusClass }> = {
-  running: { label: '运行中', cls: 'running' },
-  completed: { label: '已完成', cls: 'ok' },
-  passed: { label: '通过', cls: 'ok' },
-  blocked: { label: '受阻', cls: 'warn' },
-  escalated: { label: '升级', cls: 'warn' },
-  failed: { label: '失败', cls: 'bad' },
+const STATUS_META: Record<string, { labelKey: string; cls: StatusClass }> = {
+  running: { labelKey: 'running', cls: 'running' },
+  completed: { labelKey: 'completed', cls: 'ok' },
+  passed: { labelKey: 'passed', cls: 'ok' },
+  blocked: { labelKey: 'blocked', cls: 'warn' },
+  escalated: { labelKey: 'escalated', cls: 'warn' },
+  failed: { labelKey: 'failed', cls: 'bad' },
 }
 
-function metaOf(status: string): { label: string; cls: StatusClass } {
-  return STATUS_META[status] ?? { label: status || '—', cls: 'idle' }
+function metaOf(status: string, tr: TFunction): { label: string; cls: StatusClass } {
+  const meta = STATUS_META[status]
+  if (!meta) return { label: status || '—', cls: 'idle' }
+  return { label: tr(meta.labelKey), cls: meta.cls }
 }
 
 
@@ -120,15 +124,15 @@ function shortId(workerId: string): string {
 
 type FilterKind = 'all' | 'running' | 'attention' | 'done'
 
-const FILTERS: Record<FilterKind, { label: string; match: (n: DelegationNode) => boolean }> = {
-  all: { label: '全部', match: () => true },
-  running: { label: '运行中', match: (n) => n.status === 'running' },
+const FILTERS: Record<FilterKind, { labelKey: string; match: (n: DelegationNode) => boolean }> = {
+  all: { labelKey: 'filterAll', match: () => true },
+  running: { labelKey: 'filterRunning', match: (n) => n.status === 'running' },
   attention: {
-    label: '需关注',
+    labelKey: 'filterAttention',
     match: (n) => n.status === 'blocked' || n.status === 'escalated' || n.status === 'failed',
   },
   done: {
-    label: '已完成',
+    labelKey: 'filterDone',
     match: (n) => n.status === 'completed' || n.status === 'passed',
   },
 }
@@ -146,8 +150,9 @@ function NodeRow({
   onSelect: (n: DelegationNode) => void
   dimmed: boolean
 }) {
+  const { t: tr } = useTranslation('delegation')
   const { node: n, depth } = t
-  const { label, cls } = metaOf(n.status)
+  const { label, cls } = metaOf(n.status, tr)
   const hasChildren = t.children.length > 0
   return (
     <>
@@ -176,10 +181,11 @@ function DetailPanel({ n, onViewDiff, onAbort }: {
   onViewDiff?: (artifactId: string) => void
   onAbort?: (workerId: string) => void
 }) {
+  const { t } = useTranslation('delegation')
   if (!n) {
-    return <div className="empty sm">选择一个节点查看详情</div>
+    return <div className="empty sm">{t('selectNode')}</div>
   }
-  const { label, cls } = metaOf(n.status)
+  const { label, cls } = metaOf(n.status, t)
   const usage = n.usage
   return (
     <div className="delegation-detail-body">
@@ -189,27 +195,27 @@ function DetailPanel({ n, onViewDiff, onAbort }: {
         <span className={`deleg-badge ${cls}`}>{label}</span>
       </div>
       <dl className="delegation-detail-grid">
-        <dt>角色</dt><dd>{n.profile ?? '—'}</dd>
-        <dt>模型</dt><dd>{n.model ?? '—'}</dd>
-        <dt>Provider</dt><dd>{n.provider ?? '—'}</dd>
-        <dt>耗时</dt><dd>{formatMs(n.elapsedMs)}</dd>
-        <dt>父节点</dt><dd>{n.parentId ? shortId(n.parentId) : '— (根)'}</dd>
+        <dt>{t('detailRole')}</dt><dd>{n.profile ?? '—'}</dd>
+        <dt>{t('detailModel')}</dt><dd>{n.model ?? '—'}</dd>
+        <dt>{t('detailProvider')}</dt><dd>{n.provider ?? '—'}</dd>
+        <dt>{t('detailElapsed')}</dt><dd>{formatMs(n.elapsedMs)}</dd>
+        <dt>{t('detailParent')}</dt><dd>{n.parentId ? shortId(n.parentId) : t('root')}</dd>
       </dl>
       {n.objective && (
         <div className="delegation-section" style={{ marginTop: '12px' }}>
-          <div className="delegation-section-title">目标</div>
+          <div className="delegation-section-title">{t('detailObjective')}</div>
           <div className="delegation-text-box">{n.objective}</div>
         </div>
       )}
       {n.progressLine && (
         <div className="delegation-section">
-          <div className="delegation-section-title">进度</div>
+          <div className="delegation-section-title">{t('detailProgress')}</div>
           <div className="delegation-text-box">⎿ {n.progressLine}</div>
         </div>
       )}
       {n.changedFiles && n.changedFiles.length > 0 && (
         <div className="delegation-section">
-          <div className="delegation-section-title">改动文件（{n.changedFiles.length}）</div>
+          <div className="delegation-section-title">{t('changedFiles', { n: n.changedFiles.length })}</div>
           <div className="delegation-text-box font-mono" style={{ fontSize: '11px' }}>
             {n.changedFiles.slice(0, 5).join('\n')}{n.changedFiles.length > 5 ? `\n… +${n.changedFiles.length - 5}` : ''}
           </div>
@@ -217,22 +223,22 @@ function DetailPanel({ n, onViewDiff, onAbort }: {
       )}
       {n.artifactId && onViewDiff && (
         <button className="deleg-diff-btn" onClick={() => onViewDiff(n.artifactId!)}>
-          查看改动（diff）
+          {t('viewDiff')}
         </button>
       )}
       {n.status === 'running' && onAbort && (
         <button className="deleg-diff-btn deleg-abort-btn" onClick={() => onAbort(n.workerId)}>
-          中止此 worker
+          {t('abortWorker')}
         </button>
       )}
       {usage && (
         <div className="delegation-section" style={{ marginTop: '12px' }}>
-          <div className="delegation-section-title">Token 用量</div>
+          <div className="delegation-section-title">{t('detailUsage')}</div>
           <dl className="delegation-detail-grid" style={{ marginBottom: 0 }}>
-            <dt>输入</dt><dd>{formatTokens(usage.input_tokens)}</dd>
-            <dt>输出</dt><dd>{formatTokens(usage.output_tokens)}</dd>
-            <dt>缓存读</dt><dd>{formatTokens(usage.cache_read_input_tokens)}</dd>
-            <dt>总计</dt><dd>{formatTokens(usage.total_tokens)}</dd>
+            <dt>{t('usageInput')}</dt><dd>{formatTokens(usage.input_tokens)}</dd>
+            <dt>{t('usageOutput')}</dt><dd>{formatTokens(usage.output_tokens)}</dd>
+            <dt>{t('usageCacheRead')}</dt><dd>{formatTokens(usage.cache_read_input_tokens)}</dd>
+            <dt>{t('usageTotal')}</dt><dd>{formatTokens(usage.total_tokens)}</dd>
           </dl>
         </div>
       )}
@@ -243,6 +249,7 @@ function DetailPanel({ n, onViewDiff, onAbort }: {
 // ── Surface ────────────────────────────────────────────────────
 
 export function DelegationSurface() {
+  const { t } = useTranslation('delegation')
   const { activeSessionId } = useUiState()
   // Delegation nodes come from the live event stream — same hook ThreadView uses.
   const view = useSessionEvents(activeSessionId)
@@ -271,9 +278,9 @@ export function DelegationSurface() {
     if (!activeSessionId) return
     try {
       await abortDelegateWorker(activeSessionId, workerId)
-      toast.success('已请求中止 worker')
+      toast.success(t('abortRequested'))
     } catch (err) {
-      toast.error(`中止失败：${err instanceof Error ? err.message : String(err)}`)
+      toast.error(t('abortFailed', { message: err instanceof Error ? err.message : String(err) }))
     }
   }
 
@@ -321,7 +328,7 @@ export function DelegationSurface() {
     return (
       <div className="surface-scroll">
         <div className="delegation-surface">
-          <div className="empty">请先选择一个会话</div>
+          <div className="empty">{t('selectSession')}</div>
         </div>
       </div>
     )
@@ -336,9 +343,9 @@ export function DelegationSurface() {
     <div className="surface-scroll">
       <div className="delegation-surface">
         <header className="delegation-header">
-          <h3>委派树</h3>
+          <h3>{t('title')}</h3>
           <span className="meta">
-            {total} 个节点 · {running} 运行 · {done} 完成{attention > 0 ? ` · ${attention} 需关注` : ''}
+            {t('surfaceStats', { total, running, done })}{attention > 0 ? ` · ${t('needAttention', { n: attention })}` : ''}
           </span>
         </header>
 
@@ -349,13 +356,13 @@ export function DelegationSurface() {
               className={`delegation-filter-btn ${filter === k ? 'active' : ''}`}
               onClick={() => setFilter(k)}
             >
-              {FILTERS[k]!.label}
+              {t(FILTERS[k]!.labelKey)}
             </button>
           ))}
         </div>
 
         {total === 0 ? (
-          <div className="empty sm">暂无委派数据。运行 <code className="code">/team</code> 或 <code className="code">delegate_batch</code> 后这里会显示子代理树。</div>
+          <div className="empty sm">{t('noDataBefore')}<code className="code">/team</code>{t('noDataOr')}<code className="code">delegate_batch</code>{t('noDataAfter')}</div>
         ) : (
           <div className="delegation-layout">
             <div className="delegation-tree-pane">
@@ -379,11 +386,11 @@ export function DelegationSurface() {
         <div className="modal-backdrop" onClick={() => setDiffOpen(null)}>
           <div className="modal wide" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>委派 diff · {diffOpen.artifact.target}</h3>
+              <h3>{t('diffTitle', { target: diffOpen.artifact.target })}</h3>
             </div>
             <DiffView raw={diffOpen.raw} />
             <div className="modal-actions">
-              <button className="btn ghost" onClick={() => setDiffOpen(null)}>关闭</button>
+              <button className="btn ghost" onClick={() => setDiffOpen(null)}>{t('close')}</button>
             </div>
           </div>
         </div>
@@ -391,7 +398,7 @@ export function DelegationSurface() {
       {diffLoading && (
         <div className="modal-backdrop">
           <div className="modal wide">
-            <div className="py-8 text-center text-[13px] text-muted">加载 diff…</div>
+            <div className="py-8 text-center text-[13px] text-muted">{t('diffLoading')}</div>
           </div>
         </div>
       )}

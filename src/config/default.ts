@@ -205,6 +205,7 @@ export const DEFAULT_CONFIG: Config = {
       planning: 'capable',
     },
     patcherTier: 'cheap',
+    escalationCap: 'off',
   },
   skills: {
     importFromClaude: [],
@@ -226,4 +227,5 @@ export const DEFAULT_CONFIG: Config = {
   ui: {},
   // 项目验证命令声明 — 默认空，由项目层 .rivet-config.json 覆盖（/init 生成）
   verify: {},
+  plugins: { enabled: {} },
 }

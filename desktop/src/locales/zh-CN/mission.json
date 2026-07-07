@@ -1,0 +1,33 @@
+{
+  "title": "任务中控台",
+  "statSessions": "{{n}} 会话",
+  "statRunning": "{{n}} 运行中",
+  "statLive": "{{n}} 实时",
+  "filterActive": "当前项目",
+  "filterAll": "全部项目",
+  "newThread": "新建",
+  "newThreadHint": "新建线程",
+  "loading": "加载中…",
+  "empty": "暂无会话。新建一个线程开始观察。",
+  "card": {
+    "reconnecting": "重连中…",
+    "offline": "实时流已断开",
+    "contextTokensHint": "上下文 token",
+    "editsHint": "已改动文件数",
+    "approvalHint": "待审批",
+    "pendingApprovals": "{{n}} 待审批",
+    "approve": "批准",
+    "approveHint": "批准当前请求",
+    "abort": "中止",
+    "abortHint": "中止会话",
+    "open": "打开",
+    "phaseHint": "当前阶段",
+    "status": {
+      "running": "运行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "aborted": "已中止",
+      "idle": "空闲"
+    }
+  }
+}

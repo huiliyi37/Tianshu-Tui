@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Minus, Square, Copy, X } from 'lucide-react'
 import { useUiState } from '../state/store'
 import { useRenameSession, useSessions } from '../state/queries'
@@ -58,6 +59,7 @@ export function TitleBar() {
 }
 
 function WindowsTitleBar() {
+  const { t } = useTranslation('shell')
   const ui = useUiState()
   const sessions = useSessions()
   const renameSession = useRenameSession()
@@ -96,7 +98,7 @@ function WindowsTitleBar() {
             <button
               className="titlebar-title"
               onClick={() => setEditing(true)}
-              title="点击重命名会话"
+              title={t('titleBar.renameSession')}
             >
               {active.title ?? active.id.slice(0, 8)}
             </button>
@@ -104,13 +106,13 @@ function WindowsTitleBar() {
         )}
       </div>
       <div className="titlebar-controls">
-        <button className="titlebar-btn" onClick={() => winCall('minimize')} aria-label="最小化" title="最小化">
+        <button className="titlebar-btn" onClick={() => winCall('minimize')} aria-label={t('titleBar.minimize')} title={t('titleBar.minimize')}>
           <Minus size={14} strokeWidth={1.5} />
         </button>
-        <button className="titlebar-btn" onClick={() => winCall('toggleMaximize')} aria-label="最大化/还原" title="最大化/还原">
+        <button className="titlebar-btn" onClick={() => winCall('toggleMaximize')} aria-label={t('titleBar.maximizeRestore')} title={t('titleBar.maximizeRestore')}>
           <MaximizeGlyph />
         </button>
-        <button className="titlebar-btn close" onClick={() => winCall('close')} aria-label="关闭" title="关闭">
+        <button className="titlebar-btn close" onClick={() => winCall('close')} aria-label={t('common:close')} title={t('common:close')}>
           <X size={15} strokeWidth={1.5} />
         </button>
       </div>

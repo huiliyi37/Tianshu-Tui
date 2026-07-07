@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useUiState } from '../state/store'
 import { useHooks, useSetHooks } from '../state/queries'
 import { useSessionEvents } from '../state/use-session-events'
@@ -15,14 +16,6 @@ import { Input } from '@/components/ui/input'
 
 const EVENTS: HookEvent[] = ['preTurn', 'postTurn', 'postTool', 'postSession', 'onError']
 
-const EVENT_LABEL: Record<HookEvent, string> = {
-  preTurn: '回合前',
-  postTurn: '回合后',
-  postTool: '工具后',
-  postSession: '会话后',
-  onError: '出错时',
-}
-
 interface HookResultEventData {
   event: HookEvent
   turn?: number
@@ -37,6 +30,7 @@ function isHookResultEvent(e: SessionEvent): e is SessionEvent & { data: HookRes
 }
 
 export function HooksSurface() {
+  const { t } = useTranslation('hooks')
   const ui = useUiState()
   const sessionId = ui.activeSessionId
   const hooksQuery = useHooks(sessionId)
@@ -99,7 +93,7 @@ export function HooksSurface() {
             <h3>Hooks</h3>
             {sessionId && (
               <div className="hooks-session">
-                <span>当前线程：{sessionId.slice(0, 8)}</span>
+                <span>{t('currentThread', { id: sessionId.slice(0, 8) })}</span>
                 <span>·</span>
                 <span>.rivet/hooks.json</span>
               </div>
@@ -113,7 +107,7 @@ export function HooksSurface() {
                 onClick={addEntry}
                 disabled={hooksQuery.isLoading || setHooks.isPending}
               >
-                <Plus size={14} /> 添加 hook
+                <Plus size={14} /> {t('addHook')}
               </button>
               <button
                 className="btn primary sm"
@@ -121,13 +115,13 @@ export function HooksSurface() {
                 disabled={setHooks.isPending || !changed}
               >
                 {setHooks.isPending ? (
-                  '保存中…'
+                  t('saving')
                 ) : saved ? (
                   <>
-                    <Check size={14} /> 已保存
+                    <Check size={14} /> {t('saved')}
                   </>
                 ) : (
-                  '保存'
+                  t('save')
                 )}
               </button>
             </div>
@@ -136,7 +130,7 @@ export function HooksSurface() {
 
         {!sessionId && (
           <div className="hooks-empty-state">
-            请先选择一个线程以配置 Hooks。
+            {t('selectSessionHint')}
           </div>
         )}
 
@@ -146,23 +140,23 @@ export function HooksSurface() {
             <section className="hooks-panel">
               <div className="hooks-panel-title">
                 <div>
-                  <h4>Hook 配置</h4>
+                  <h4>{t('config.title')}</h4>
                   <div className="hooks-panel-sub">
-                    按事件触发项目根目录下的脚本
+                    {t('config.subtitle')}
                   </div>
                 </div>
               </div>
 
               {hooksQuery.isLoading && (
-                <div className="hooks-empty-state">加载中…</div>
+                <div className="hooks-empty-state">{t('config.loading')}</div>
               )}
               {hooksQuery.isError && (
-                <div className="hooks-empty-state hooks-error">加载失败</div>
+                <div className="hooks-empty-state hooks-error">{t('config.loadFailed')}</div>
               )}
 
               {!hooksQuery.isLoading && entries.length === 0 && (
                 <div className="hooks-empty-state">
-                  还没有 hook，点击右上角“添加 hook”开始配置。
+                  {t('config.empty')}
                 </div>
               )}
 
@@ -177,12 +171,12 @@ export function HooksSurface() {
                         }
                       >
                         <SelectTrigger className="w-[128px]">
-                          <SelectValue placeholder="事件" />
+                          <SelectValue placeholder={t('config.eventPlaceholder')} />
                         </SelectTrigger>
                         <SelectContent>
                           {EVENTS.map((ev) => (
                             <SelectItem key={ev} value={ev}>
-                              {EVENT_LABEL[ev]}
+                              {t(`event.${ev}`)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -190,7 +184,7 @@ export function HooksSurface() {
 
                       <Input
                         type="number"
-                        placeholder="超时 ms"
+                        placeholder={t('config.timeoutPlaceholder')}
                         value={entry.timeoutMs ?? ''}
                         onChange={(e) => {
                           const v = e.target.value
@@ -202,7 +196,7 @@ export function HooksSurface() {
                       <button
                         className="btn sm ghost danger hooks-card-delete"
                         onClick={() => removeEntry(i)}
-                        title="删除"
+                        title={t('config.delete')}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -211,7 +205,7 @@ export function HooksSurface() {
                     <div className="hooks-card-body">
                       <Input
                         type="text"
-                        placeholder="脚本路径（相对项目根目录）"
+                        placeholder={t('config.scriptPlaceholder')}
                         value={entry.script}
                         onChange={(e) =>
                           updateEntry(i, { script: e.target.value })
@@ -227,14 +221,14 @@ export function HooksSurface() {
             <section className="hooks-panel">
               <div className="hooks-panel-title">
                 <div>
-                  <h4>最近运行结果</h4>
-                  <div className="hooks-panel-sub">最近 20 条 hook_result 事件</div>
+                  <h4>{t('results.title')}</h4>
+                  <div className="hooks-panel-sub">{t('results.subtitle')}</div>
                 </div>
               </div>
 
               {hookEvents.length === 0 && (
                 <div className="hooks-empty-state">
-                  暂无 hook_result 事件
+                  {t('results.empty')}
                 </div>
               )}
 
@@ -243,7 +237,7 @@ export function HooksSurface() {
                   <div key={e.seq} className="hooks-event">
                     <div className="hooks-event-header">
                       <span className={`hooks-event-badge ${e.data.event}`}>
-                        {EVENT_LABEL[e.data.event]}
+                        {t(`event.${e.data.event}`)}
                       </span>
                       <span className="hooks-event-turn">
                         turn {e.data.turn ?? '-'}
@@ -258,13 +252,13 @@ export function HooksSurface() {
                           <div className="hooks-result-head">
                             <span className="hooks-result-script">{r.script}</span>
                             <span className={`hooks-result-status ${r.ok ? 'ok' : 'err'}`}>
-                              {r.ok ? '成功' : '失败'}
+                              {r.ok ? t('results.ok') : t('results.err')}
                             </span>
                           </div>
                           {r.output ? (
                             <pre className="hooks-result-output">{r.output}</pre>
                           ) : (
-                            <pre className="hooks-result-output">{r.ok ? '完成' : '失败（无输出）'}</pre>
+                            <pre className="hooks-result-output">{r.ok ? t('results.done') : t('results.failedNoOutput')}</pre>
                           )}
                         </div>
                       ))}

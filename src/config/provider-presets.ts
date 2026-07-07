@@ -82,6 +82,8 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           contextWindow: 1_000_000,
           maxTokens: 131072,
           reasoningEffort: 'max',
+          // GLM 视觉系模型：接受 image_url 多模态输入（computer_use 截图回灌）。
+          supportsVision: true,
           // GLM Coding Plan 是月度定额订阅,不按 token 计费 —— 单价清零,
           // 避免界面显示误导性的"花费金额"(用量/缓存命中率等真实指标不受影响)。
           pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -234,6 +236,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           contextWindow: 1_000_000,
           maxTokens: 131_072,
           reasoningEffort: 'max',
+          supportsVision: true,
           pricing: { input: 1.4, output: 4.4 },
         },
         {
@@ -279,6 +282,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           contextWindow: 1_000_000,
           maxTokens: 128000,
           reasoningEffort: 'max',
+          supportsVision: true,
           pricing: { input: 1.0, output: 4.0, cacheRead: 0.5, cacheWrite: 1.0 },
         },
       ],

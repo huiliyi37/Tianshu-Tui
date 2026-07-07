@@ -1,0 +1,68 @@
+/**
+ * Pointer-regurgitation guard — shared detection for all file-editing tools.
+ *
+ * The tool-arg post-processors replace large content fields in MESSAGE HISTORY
+ * with pointer placeholders ("[file written to …]" etc). The model sees dozens
+ * of these in its own past tool calls and — especially in long sessions with
+ * many large writes — starts IMITATING the pattern, emitting pointer text as
+ * the actual content of a new write/edit (user report 2026-07-06: 11 batches of
+ * vocabulary files taught the model the pattern; batch 12 got a literal
+ * "[hash_edit applied to …]" line written into the file).
+ *
+ * Every tool that accepts a large text field must reject values that start
+ * with ANY pointer prefix — the model may echo a write_file pointer into
+ * hash_edit's new_string and vice versa. Detection is a literal prefix check
+ * on the trimmed value: real content that merely MENTIONS a pointer mid-text
+ * is untouched.
+ */
+import { WRITE_FILE_POINTER_PREFIX } from './write-file-arg-processor.js'
+import { EDIT_FILE_POINTER_PREFIX } from './edit-file-arg-processor.js'
+import { HASH_EDIT_POINTER_PREFIX } from './hash-edit-arg-processor.js'
+
+/** edit_file's new_string collapse marker (see edit-file-arg-processor render). */
+export const EDIT_NEW_BLOCK_POINTER_PREFIX = '[new block'
+/** plan_submit's plan collapse marker (local const in plan-submit-arg-processor). */
+export const PLAN_POINTER_PREFIX = '[plan persisted to'
+
+export const POINTER_PLACEHOLDER_PREFIXES: readonly string[] = [
+  WRITE_FILE_POINTER_PREFIX,
+  EDIT_FILE_POINTER_PREFIX,
+  HASH_EDIT_POINTER_PREFIX,
+  EDIT_NEW_BLOCK_POINTER_PREFIX,
+  PLAN_POINTER_PREFIX,
+]
+
+/** Stable marker embedded in every guard error — the pointer-regurgitation
+ *  advisory hook keys off this substring to count repeated offenses. */
+export const POINTER_GUARD_ERROR_MARKER = 'pointer placeholder from message history'
+
+/**
+ * Returns the matched pointer prefix when `value` (after leading whitespace)
+ * starts with one, or null for real content.
+ */
+export function detectPointerPlaceholder(value: string): string | null {
+  const trimmed = value.trimStart()
+  for (const prefix of POINTER_PLACEHOLDER_PREFIXES) {
+    if (trimmed.startsWith(prefix)) return prefix
+  }
+  return null
+}
+
+/**
+ * Model-facing rejection message. Explains the placeholder mechanism (the model
+ * cannot know its own history was rewritten) and gives the concrete recovery
+ * path, so a single rejection is enough to break the imitation loop.
+ */
+export function pointerPlaceholderError(opts: {
+  toolName: string
+  field: string
+  matchedPrefix: string
+  filePath: string
+}): string {
+  return (
+    `Error: ${opts.field} is a ${POINTER_GUARD_ERROR_MARKER} ("${opts.matchedPrefix} …"), not real file contents. `
+    + `Pointers like this only appear in your PAST tool calls because large arguments are replaced by placeholders after execution — they were never valid input. `
+    + `Do NOT imitate that pattern: ${opts.toolName} requires the complete literal text in ${opts.field}. `
+    + `Write out the full real content now; if you need the previous version of this file, read_file ${opts.filePath} first.`
+  )
+}

@@ -1,3 +1,5 @@
+import i18n from '../i18n'
+
 /**
  * Open an external URL in the system default browser.
  *
@@ -17,4 +19,38 @@ export function openExternal(href: string): void {
       // Not under Tauri, or opener unavailable: fall back to window.open.
       try { window.open(href, '_blank', 'noopener,noreferrer') } catch { /* ignore */ }
     })
+}
+
+/**
+ * Open the RIVET_HOME data directory in the system file explorer.
+ *
+ * Resolves the runtime data root (sessions, config, cache logs) from
+ * `runtime_info` and opens it with the OS default file manager. Falls
+ * back to showing an alert with the path when the opener plugin is
+ * unavailable (e.g. browser dev mode).
+ */
+export async function openRivetHome(): Promise<void> {
+  let rivetHome: string | undefined
+  try {
+    // Dynamic import to avoid bundling the runtime client in non-Tauri contexts.
+    const { getRuntimeInfo } = await import('../runtime/client.js')
+    const info = await getRuntimeInfo()
+    rivetHome = info.rivetHome
+  } catch {
+    // getRuntimeInfo or runtime_info command failed — try RIVET_HOME env.
+    rivetHome = ((import.meta as unknown as Record<string, unknown>).env as Record<string, string> | undefined)?.['VITE_RIVET_HOME']
+  }
+
+  if (!rivetHome) {
+    alert(i18n.t('shell:dataDir.unavailable'))
+    return
+  }
+
+  try {
+    const opener = await import('@tauri-apps/plugin-opener')
+    await opener.openPath(rivetHome)
+  } catch {
+    // Not under Tauri — fall back to showing the path.
+    alert(i18n.t('shell:dataDir.location', { path: rivetHome }))
+  }
 }

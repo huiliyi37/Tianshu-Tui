@@ -1,0 +1,34 @@
+{
+  "graph": {
+    "title": "Git Branch Graph",
+    "meta": "{{lines}} lines total, page {{page}} / {{totalPages}}",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "loadFailed": "Failed to load: {{error}}",
+    "loading": "Loading…",
+    "empty": "No commit history yet",
+    "firstPage": "First",
+    "prevPage": "Previous",
+    "nextPage": "Next",
+    "lastPage": "Last",
+    "perPage": "Per page",
+    "rows": "rows"
+  },
+  "changes": {
+    "noSession": "No active session",
+    "loading": "Loading…",
+    "treeFailed": "Failed to read working tree",
+    "notRepo": "Current directory is not a git repository",
+    "empty": "No changes in working tree",
+    "filesChanged": "{{n}} files changed",
+    "toggleLayoutTitle": "Toggle unified / split view",
+    "split": "Split",
+    "unified": "Unified",
+    "sendCommentsTitle": "Send all line comments to the agent as one prompt (inserted as steering while running)",
+    "sendComments": "Send {{n}} comments",
+    "commentsPrompt": "Please modify the code according to the following line comments on the working-tree diff:\n\n{{comments}}",
+    "loadingDiff": "Loading diff…",
+    "diffFailed": "Failed to load diff",
+    "binaryNoDiff": "No text diff (binary file)"
+  }
+}

@@ -10,6 +10,7 @@
 // (sandbox-profile) still blocks writes outside the project dir, and every
 // mutating turn writes a checkpoint, so rollback remains the safety net.
 import type { ApprovalMode } from '../runtime/types'
+import i18n from '../i18n'
 
 export type AutonomyLevel = 'supervised' | 'default' | 'autonomous'
 
@@ -48,15 +49,42 @@ export interface LevelMeta {
   hint: string
 }
 
+// Lazy getters: labels/hints resolve at access time so they follow the active
+// i18n language (a plain const would freeze whatever language loaded first).
 export const LEVEL_META: Record<AutonomyLevel, LevelMeta> = {
-  supervised: { label: '监督', glyph: '◆', hint: '每个风险操作都需你确认' },
-  default: { label: '默认', glyph: '◈', hint: '项目内低风险自动，高风险需确认' },
-  autonomous: { label: '自治', glyph: '✦', hint: '项目内全自动执行；项目外仍被沙箱拦截，可随时回滚' },
+  get supervised(): LevelMeta {
+    return { label: i18n.t('autonomy:supervised'), glyph: '◆', hint: i18n.t('autonomy:supervisedHint') }
+  },
+  get default(): LevelMeta {
+    return { label: i18n.t('autonomy:default'), glyph: '◈', hint: i18n.t('autonomy:defaultHint') }
+  },
+  get autonomous(): LevelMeta {
+    return { label: i18n.t('autonomy:autonomous'), glyph: '✦', hint: i18n.t('autonomy:autonomousHint') }
+  },
 }
 
 /** True for the unattended level whose UX needs guardrail surfacing. */
 export function isAutonomous(mode?: ApprovalMode): boolean {
   return modeToLevel(mode) === 'autonomous'
+}
+
+// ── Full access (完全访问) ──────────────────────────────────────────
+// A composer-level tier above 'autonomous': same approval mode, plus a
+// standing whole-disk READ grant (permissions.additionalReadDirs gets the
+// filesystem root). Write access stays sandboxed as usual.
+
+/** The union shown by the composer's access-level menu. */
+export type AccessChoice = AutonomyLevel | 'full-access'
+
+/** Filesystem root used for the whole-disk read grant on this platform. */
+export function fullDiskRootPath(): string {
+  return isWindows() ? 'C:\\' : '/'
+}
+
+/** True when `p` is a filesystem root ('/' or a Windows drive root like F:\). */
+export function isFullDiskRoot(p: string): boolean {
+  const t = p.trim()
+  return t === '/' || /^[A-Za-z]:[\\/]?$/.test(t)
 }
 
 /** Best-effort: are we on Windows, where the write sandbox falls through to none? */

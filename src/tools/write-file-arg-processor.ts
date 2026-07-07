@@ -31,5 +31,5 @@ export const writeFileArgProcessor = createFileContentArgProcessor({
     return typeof fp === 'string' && fp.length > 0 ? fp : null
   },
   render: ({ path, lines, chars }) =>
-    `${WRITE_FILE_POINTER_PREFIX} ${path} — ${lines} lines, ${chars} chars. Use read_file to review.]`,
+    `${WRITE_FILE_POINTER_PREFIX} ${path} — ${lines} lines, ${chars} chars. Display placeholder — never emit this as content; use read_file to review.]`,
 })

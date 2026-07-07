@@ -1,17 +1,44 @@
+/**
+ * Legacy one-shot prompt endpoint (M0): POST /prompt streams a single run as
+ * SSE on the request itself.
+ *
+ * Since the /sessions rebase, this is a thin veneer over the session manager —
+ * the run executes on a real (persisted) session, so BOTH paths share one
+ * execution model and one disconnect semantic: a dropped connection never
+ * aborts the run. The stream opens with a `session` event carrying the session
+ * id; a disconnected client can re-attach via `GET /sessions/:id/events?since=`
+ * or stop the run explicitly via `POST /sessions/:id/abort`. (Historically this
+ * path aborted on disconnect — the opposite of /sessions — which made the API
+ * a trap for consumers moving between the two.)
+ *
+ * Redaction happens upstream in the session manager (the same events feed the
+ * /sessions stream), so nothing here re-scrubs payloads.
+ */
 import type { ServerResponse } from 'node:http'
-import type { AgentCallbacks } from '../agent/loop.js'
 import type { RouteHandler } from './index.js'
 import { SseStream } from './sse-stream.js'
 
-const REDACTED = '[REDACTED]'
-const SENSITIVE_KEY = /(?:api[_-]?key|token|secret|password|authorization)/i
+/** A session event as forwarded to the legacy SSE wire. */
+export interface PromptSessionEvent {
+  type: string
+  data: Record<string, unknown>
+}
 
 export interface PromptRouteDeps {
-  createAgent: () => {
-    run: (prompt: string, callbacks: AgentCallbacks) => Promise<void>
-    abort: () => void
-  }
+  /**
+   * Create a fresh session for a one-shot prompt. Returns null when a session
+   * cannot be created. `subscribe` must be called before `start` so no event
+   * of the run is missed; `start` returns false when the run refused to start.
+   */
+  startPrompt: (prompt: string) => {
+    sessionId: string
+    subscribe: (listener: (ev: PromptSessionEvent) => void) => (() => void) | undefined
+    start: () => boolean
+  } | null
 }
+
+/** Session event types forwarded on the legacy wire (same names both sides). */
+const FORWARDED_TYPES = new Set(['text_delta', 'tool_use', 'tool_result', 'turn_complete', 'error'])
 
 export function buildPromptHandler(deps: PromptRouteDeps): RouteHandler {
   return async (body: unknown, _params, _headers, res) => {
@@ -29,79 +56,56 @@ export function buildPromptHandler(deps: PromptRouteDeps): RouteHandler {
 }
 
 export function handlePromptSSE(deps: PromptRouteDeps, res: ServerResponse, prompt: string): void {
+  const started = deps.startPrompt(prompt)
   const sse = new SseStream(res)
-  const agent = deps.createAgent()
-  let closed = false
+  if (!started) {
+    sse.send('error', { error: 'Failed to create a session for this prompt' })
+    sse.close()
+    return
+  }
 
-  const send = (event: string, data: unknown) => {
-    if (closed || res.destroyed || res.writableEnded) return
-    sse.send(event, data)
+  let closed = false
+  let unsubscribe: (() => void) | undefined
+
+  const detach = () => {
+    if (closed) return
+    closed = true
+    res.removeListener('close', onClientClose)
+    unsubscribe?.()
   }
   const onClientClose = () => {
-    if (closed) return
-    closed = true
-    res.removeListener('close', onClientClose)
-    agent.abort()
+    // Client went away: stop streaming, but do NOT abort — identical to the
+    // /sessions stream. The run continues and its events persist on the
+    // session; the `session` event below told the client where to find them.
+    detach()
   }
   const close = () => {
-    if (closed) return
-    closed = true
-    res.removeListener('close', onClientClose)
+    detach()
     if (res.destroyed || res.writableEnded) return
-    sse.close()
+    sse.close() // emits the terminal `done` frame
   }
 
   res.on('close', onClientClose)
 
-  void agent.run(prompt, {
-    onTextDelta: (delta) => {
-      send('text_delta', { text: delta })
-    },
-    onThinkingDelta: () => {},
-    onToolUse: (id, name, input) => {
-      send('tool_use', { id, name, input: redactValue(input) })
-    },
-    onToolResult: (id, name, result, isError, _rawPath, uiContent) => {
-      send('tool_result', { id, name, isError: !!isError, result: redactText(result).slice(0, 500), ...(uiContent ? { uiContent: redactText(uiContent).slice(0, 500) } : {}) })
-    },
-    onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
-      send('turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) })
-    },
-    onError: (err) => {
-      send('error', { error: redactText(err.message) })
+  // First frame: where this run lives, for re-attach / explicit abort.
+  sse.send('session', { sessionId: started.sessionId })
+
+  unsubscribe = started.subscribe((ev) => {
+    if (closed) return
+    if (FORWARDED_TYPES.has(ev.type)) {
+      sse.send(ev.type, ev.data)
+    } else if (ev.type === 'done') {
       close()
-    },
-    onAbort: () => {
-      close()
-    },
-    onApprovalRequired: async () => false,
-  }).then(() => {
-    close()
-  }).catch((err: Error) => {
-    // Agent.run rejected outside the onError callback path
-    // (e.g. unexpected crash, unhandled exception in setup).
-    send('error', { error: redactText(err.message) })
-    close()
-  }).finally(() => {
-    res.removeListener('close', onClientClose)
+    }
   })
-}
-
-function redactValue(value: unknown): unknown {
-  if (typeof value === 'string') return redactText(value)
-  if (Array.isArray(value)) return value.map(redactValue)
-  if (!value || typeof value !== 'object') return value
-  if (value instanceof Date) return value.toISOString()
-
-  const redacted: Record<string, unknown> = {}
-  for (const [key, child] of Object.entries(value)) {
-    redacted[key] = SENSITIVE_KEY.test(key) ? REDACTED : redactValue(child)
+  if (!unsubscribe) {
+    sse.send('error', { error: 'Session disappeared before streaming began' })
+    close()
+    return
   }
-  return redacted
-}
 
-function redactText(text: string): string {
-  return text
-    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, `$1${REDACTED}`)
-    .replace(/((?:api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,'\"]+/gi, `$1${REDACTED}`)
+  if (!started.start()) {
+    sse.send('error', { error: 'Session is missing or already running' })
+    close()
+  }
 }

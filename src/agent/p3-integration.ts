@@ -20,6 +20,16 @@ export type { EffortShadowRecord, RewardInput }
 
 export interface P3Config {
   execute?: (tool: string, target: string) => Promise<string>
+  /**
+   * Master switch for the speculative pre-execution chain (miner→IdleSpec,
+   * physarum/LLM predictions→ShadowQueue). Default OFF — SEALED 2026-07-07.
+   * Serving was already cut on 2026-07-06 (ShadowQueue has no mtime/TTL
+   * validation and served pre-edit file content as a live read_file result);
+   * with serving gone the background pre-reads were pure cost, so the whole
+   * chain is now inert unless explicitly enabled (unit tests only).
+   * Re-enable in production only after ShadowQueue entries record mtime and
+   * checkHit re-stats before returning.
+   */
   speculativeEnabled?: boolean
   /** Background agent task executor */
   backgroundExecute?: (task: BackgroundTask) => Promise<string>
@@ -52,23 +62,35 @@ export class P3Integration {
   readonly miner: ToolPatternMiner
   readonly queue: ShadowQueue
   readonly idleSpec: IdleSpec
-  readonly notebook: MistakeNotebook
+  /** MistakeNotebook 默认停用（2026-07-07，RIVET_MISTAKE_NOTEBOOK=1 重新启用）。
+   *  取证结论（TDX 用户会话）：与 playbook 同病——自动收割的"教训"无蒸馏质量闸，
+   *  error 是 100 字符残句（trace summary 截断，行号等关键信息被切）、resolution
+   *  是 200 字符拦腰截断的入参 JSON（消毒后有效字段全是占位符，不含"改了什么"）；
+   *  检索是纯 token 重叠（>0.2），中文语料整句成哑 token，实际靠文件路径碎片撮合
+   *  → write_file 失败注入 edit_file 记录，跨工具答非所问。防重复失败已有四层
+   *  语义级专职防线（edit-tool-advisory / doom-loop 指纹 / read-loop 信号 /
+   *  regression-bisect），本组件是唯一注入原始参数转储且跨会话带病持久化的。
+   *  不构造即全链路关闭：recordMistake / getMistakeHints / immune-context 消费 /
+   *  MeridianDb 存取均判空跳过。存量脏数据由 memory-epoch reset 清理。 */
+  readonly notebook: MistakeNotebook | undefined
   readonly planCache: PlanCache
   readonly nightcrawler: Nightcrawler
   readonly bandit: LinUCBBandit
   readonly effortBandit: LinUCBBandit
   readonly jit: AgentJIT
+  private readonly speculativeEnabled: boolean
   private lastTool: string | null = null
   private _effortShadowRecords = new Map<string, EffortShadowRecord>()
 
   constructor(config: P3Config = {}) {
+    this.speculativeEnabled = config.speculativeEnabled === true
     this.miner = new ToolPatternMiner()
     this.queue = new ShadowQueue({
       execute: config.execute ?? (async () => ''),
       minProbability: 0.4,
     })
     this.idleSpec = new IdleSpec({ miner: this.miner, queue: this.queue })
-    this.notebook = new MistakeNotebook()
+    this.notebook = process.env['RIVET_MISTAKE_NOTEBOOK'] === '1' ? new MistakeNotebook() : undefined
     this.planCache = new PlanCache()
     this.nightcrawler = new Nightcrawler({
       execute: config.backgroundExecute ?? (async () => ''),
@@ -91,14 +113,21 @@ export class P3Integration {
     if (this.lastTool) {
       this.miner.record(this.lastTool, toolName, { targetPath: currentTarget })
     }
-    this.idleSpec.onToolStart(toolName)
+    // Speculative pre-execution SEALED by default — see P3Config.speculativeEnabled.
+    if (this.speculativeEnabled) this.idleSpec.onToolStart(toolName)
   }
 
+  /** SEALED 2026-07-07 (no production caller) — results are NEVER served to the
+   *  model (2026-07-06 stale-read incident: ShadowQueue entries carry no
+   *  mtime/TTL, so a pre-edit read was served after three file mutations).
+   *  Re-enable only after checkHit gains an mtime re-stat comparison. */
   checkSpeculativeCache(toolName: string, target: string): string | undefined {
+    if (!this.speculativeEnabled) return undefined
     return this.idleSpec.checkCache(toolName, target)
   }
 
   enqueuePhysarumFilePredictions(input: PhysarumFilePredictionInput): void {
+    if (!this.speculativeEnabled) return
     const toolPredictions = this.miner.predict(input.afterToolName, 0)
     const topToolPrediction = toolPredictions[0]
     if (topToolPrediction && topToolPrediction.tool !== 'read_file') return
@@ -120,6 +149,7 @@ export class P3Integration {
    *  ShadowQueue re-applies the read-only whitelist and minProbability gate, so
    *  this is a thin pass-through that just tags the source. */
   enqueueLlmPredictions(predictions: ToolPrediction[]): void {
+    if (!this.speculativeEnabled) return
     for (const prediction of predictions) {
       this.queue.enqueue({ ...prediction, source: 'llm' })
     }
@@ -130,6 +160,7 @@ export class P3Integration {
   }
 
   recordMistake(error: string, context: string, resolution: string, tags: string[] = []): void {
+    if (!this.notebook) return
     this.notebook.record({
       timestamp: new Date().toISOString().slice(0, 10),
       error,
@@ -140,6 +171,7 @@ export class P3Integration {
   }
 
   getMistakeHints(error: string, context: string): string {
+    if (!this.notebook) return ''
     const entries = this.notebook.query(error, context, 3)
     if (entries.length === 0) return ''
     return MistakeNotebook.formatHints(entries)
@@ -365,7 +397,7 @@ export class P3Integration {
   getStats() {
     return {
       speculation: this.idleSpec.stats(),
-      mistakeCount: this.notebook.size(),
+      mistakeCount: this.notebook?.size() ?? 0,
       planCacheSize: this.planCache.size(),
       backgroundTasks: this.nightcrawler.stats(),
       bandit: this.bandit.getStats(),

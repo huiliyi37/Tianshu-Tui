@@ -15,7 +15,7 @@ import { installEpermFilter } from './platform/eperm-filter.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from './platform.js'
 installEpermFilter()
 
-import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
+import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig, setApprovalMode as persistApprovalDefault } from './config/manager.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
@@ -28,13 +28,19 @@ import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { loadTodos, setTodoSession } from './tools/todo.js'
 import { setPlanSession } from './agent/plan-store.js'
 import { formatWelcome } from './tui/format/welcome.js'
+import { color } from './tui/engine/ansi.js'
 import type { RewindMode } from './tui/format/rewind.js'
 import { collectPostBoundaryEditIds } from './agent/file-history.js'
 import { loadHistory } from './tui/history.js'
 import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
 import { buildWorkerDetailContent } from './tui/worker-detail.js'
 import { killAllSync } from './tools/process-tracker.js'
-import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
+import { getTheme, getActiveThemeName, setTheme, THEMES, listCustomThemes, resolveThemeEntry, type ThemeName } from './tui/theme.js'
+import { loadCustomThemes } from './tui/theme-custom.js'
+import { detectTerminalBackground, autoThemeFor } from './tui/theme-detect.js'
+import { configureSpinnerVerbs, setReducedMotion } from './tui/format/spinner-status.js'
+import { StatusLineRunner } from './tui/statusline.js'
+import { buildVerboseTranscript } from './tui/transcript-verbose.js'
 import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
 import { listPlansSync } from './plan/plan-store.js'
 import type { PlanPickerEntry } from './tui/format/overlay.js'
@@ -42,13 +48,14 @@ import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries, DOMAIN_SWITCH_CACHE_WARNING } from './agent/domain-picker-entries.js'
 import { isStarSoulEnabled } from './agent/star-soul-gate.js'
-import { SessionPersist } from './agent/session-persist.js'
+import { SessionPersist, formatExitSummary } from './agent/session-persist.js'
+import { parseSessionCliArgs } from './agent/session-recovery.js'
 import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
 import { join } from 'path'
 import { execSync } from 'child_process'
 import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/project-templates.js'
-import { checkForUpdate, formatUpdateBanner } from './tui/updater.js'
+import { checkForUpdate, formatUpdateBanner, detectInstallRoot, getCurrentVersion } from './tui/updater.js'
 import { detectEnv, formatGitMissingBanner } from './tools/env-check.js'
 import { computeUsageCost, findModelPricing } from './utils/pricing.js'
 
@@ -60,18 +67,19 @@ const requestedModel = modelArgIdx >= 0 ? args[modelArgIdx + 1] : undefined
 const providerArgIdx = args.indexOf('--provider')
 const requestedProvider = providerArgIdx >= 0 ? args[providerArgIdx + 1] : undefined
 
-// R1: default startup is a fresh session. Session selection flags:
-//   --continue / --resume        → resume the most recent session for this cwd
-//   --resume <id|prefix>         → resume a specific session (short prefix ok)
+// R1: default startup is a fresh session. Session selection flags (Claude Code parity):
+//   --continue / -c              → resume the most recent session for this cwd
+//   --resume <id|prefix> / -r <id|prefix> → resume a specific session (short prefix ok)
+//   --resume / -r (bare)         → open the session picker after the TUI starts
 //   --new                        → force a brand-new session
 //   --list / `rivet sessions`    → print the session list and exit
 // Resolution + env signalling happens in main() before bootstrap so that
 // getOrCreateSessionId picks it up regardless of call order.
-const resumeArgIdx = args.indexOf('--resume')
-const resumeArgValue = resumeArgIdx >= 0 ? args[resumeArgIdx + 1] : undefined
-const requestedResumeId = resumeArgValue && !resumeArgValue.startsWith('-') ? resumeArgValue : undefined
-const wantResume = resumeArgIdx >= 0 || args.includes('--continue')
-const wantNewSession = args.includes('--new')
+const sessionCliArgs = parseSessionCliArgs(args)
+const requestedResumeId = sessionCliArgs.resumeId
+const wantContinue = sessionCliArgs.continueLatest
+const wantSessionPicker = sessionCliArgs.openPicker
+const wantNewSession = sessionCliArgs.forceNew
 const skipWelcome = args.includes('--skip-welcome')
 
 // ── Lifecycle ──────────────────────────────────────────────────
@@ -95,6 +103,13 @@ function shutdown(code: number = 0) {
   // Delegate core cleanup to bootstrap shutdown handler
   if (ctx) {
     try { ctx.shutdown() } catch { /* already handled */ }
+    // Post-teardown resume hint: printed AFTER TUI dispose so it lands on the
+    // normal scrollback and survives the exit — the session id would otherwise
+    // be undiscoverable ("how do I reconnect?").
+    try {
+      const summary = formatExitSummary(ctx.persist.loadMetadata(), ctx.sessionId)
+      if (summary) process.stdout.write(`\n${summary}\n`)
+    } catch { /* best-effort */ }
   }
 
   if (heartbeatInterval) {
@@ -169,9 +184,11 @@ async function main() {
       process.exit(1)
     }
     process.env.RIVET_RESUME_ID = resolved.id
-  } else if (wantResume) {
+  } else if (wantContinue) {
     process.env.RIVET_RESUME = '1'
   }
+  // 裸 --resume / -r（wantSessionPicker）：不设 env——先开新会话，TUI 启动后
+  // 自动打开 Chronicle 选择器让用户挑（对齐 Claude Code 裸 -r 行为）。
 
   // rivet -p "prompt" / rivet --print "prompt" [--json] [--stream-json]
   // rivet --goal "task" [--budget N] [--json] [--stream-json] — headless goal autonomy
@@ -192,6 +209,7 @@ async function main() {
     const { createDeliveryGateV2 } = await import('./agent/delivery-gate-v2.js')
     const { createWorktreeBaseline } = await import('./agent/worktree-baseline.js')
     const { createHeadlessCoordinator } = await import('./agent/headless-coordinator.js')
+    const { initializePlugins } = await import('./plugins/plugin-loader.js')
 
     const parsed = parseCliArgs(args)
     // Goal mode drives the same AgentLoop + GoalTracker as the TUI /goal command;
@@ -225,12 +243,33 @@ async function main() {
     // narrowing — a closure-only assignment would otherwise keep it typed as null.
     const goalTrackerRef: { current: GoalTrackerInstance | null } = { current: null }
 
+    // Load plugins (async, before creating agent — cache discipline: only at session start).
+    // Use a pre-filled registry so conflict detection runs against the real built-in tool set,
+    // not an empty set. (Wave 1 regression: empty PluginRegistry let every plugin pass.)
+    const pluginRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
+    const pluginResult = await initializePlugins(cfg.plugins, pluginRegistry, process.cwd())
+    if (pluginResult.warnings.length > 0) {
+      process.stderr.write(`[plugins] ${pluginResult.loaded}/${pluginResult.scanned} loaded; warnings: ${pluginResult.warnings.join('; ')}\n`)
+    }
+
+    // Extract only the plugin tools (not built-ins) for the real registry.
+    const builtinNames = new Set(createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools }).getAllNames())
+    const pluginTools = pluginRegistry.getAll().filter(t => !builtinNames.has(t.definition.name))
+
     const result = await runHeadless({
       prompt: effectivePrompt,
       json: parsed.json,
       streamJson: parsed.streamJson,
       createAgent: () => {
         const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
+
+        // Register plugin tools (loaded during startup, already conflict-checked)
+        for (const tool of pluginTools) {
+          toolRegistry.register(tool)
+        }
+        for (const name of pluginResult.suppressTools) {
+          toolRegistry.remove(name)
+        }
 
         // B1 deliver_task: headless 模式下也需要交付门禁工具。
         // 无 DelegationCoordinator，reviewDeps 不可用（deliver_task 内部降级处理）。
@@ -391,11 +430,28 @@ async function main() {
     }
   }
 
-  // ── 默认加载天枢定制品牌主题 ──────────────────────────────────
-  // 优先使用用户配置的默认主题；未配置时保持向后兼容的 tianshu。
-  const themeName = ctx.config.ui?.theme ?? 'tianshu'
-  setTheme(themeName)
+  // ── 主题装载 ──────────────────────────────────────────────────
+  // 1. 注册 ~/.rivet/themes/*.json 自定义主题（custom:<name> 引用）
+  // 2. 解析配置值：'auto' → OSC 11 背景检测（500ms 超时，COLORFGBG 兜底）
+  //    → cobalt(dark)/paper(light)；未配置时保持向后兼容的 tianshu。
+  // 3. setTheme 对未知名（如自定义主题文件被删）no-op，落到 tianshu 兜底。
+  loadCustomThemes()
+  const configuredTheme = ctx.config.ui?.theme ?? 'tianshu'
+  let themeName: string = configuredTheme
+  if (configuredTheme === 'auto') {
+    // 必须在 TUI 接管 stdin 前查询——此处 raw-mode 探测后即恢复。
+    const detected = await detectTerminalBackground()
+    themeName = autoThemeFor(detected)
+    process.stderr.write(`[T9] Theme auto-detect: ${detected} background → ${themeName}\n`)
+  }
+  if (!setTheme(themeName)) setTheme('tianshu')
   const theme = getTheme()
+
+  // ── Spinner 词池 / reducedMotion 配置接线 ─────────────────────
+  if (ctx.config.ui?.spinnerVerbs?.length) {
+    configureSpinnerVerbs(ctx.config.ui.spinnerVerbs, ctx.config.ui.spinnerVerbsMode ?? 'replace')
+  }
+  if (ctx.config.ui?.reducedMotion) setReducedMotion(true)
 
   process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
   process.stderr.write(`[T9] Session: ${ctx.sessionId.slice(0, 8)}...\n`)
@@ -469,6 +525,30 @@ async function main() {
   // 实时思考强度：优先 agent 当前生效 effort（auto-reasoning 动态调整），回退 config floor。
   tuiApp.setReasoningEffortProvider(() => ctx!.agent.getReasoningEffort() ?? ctx!.agent.config.reasoningEffort)
 
+  // ── GlanceBar 密度默认档 + 可脚本化 statusline 接线 ─────────────
+  if (ctx!.config.ui?.glanceDensity) tuiApp.glanceDensity = ctx!.config.ui.glanceDensity
+  let statusLineTimer: ReturnType<typeof setInterval> | null = null
+  if (ctx!.config.ui?.statusLine?.command) {
+    const slConfig = ctx!.config.ui.statusLine
+    const runner = new StatusLineRunner(slConfig, text => tuiApp.setStatusLine(text))
+    const pushStatusLine = (): void => {
+      const metrics = tuiApp.getMetrics()
+      runner.refresh({
+        session_id: ctx!.sessionId,
+        model: { display_name: tuiApp.getModelInfo().modelName },
+        workspace: { current_dir: process.cwd() },
+        git: { branch: gitBranch },
+        context: metrics?.maxTokens
+          ? { ratio: (metrics.estimatedTokens ?? 0) / metrics.maxTokens, estimated_tokens: metrics.estimatedTokens, max_tokens: metrics.maxTokens }
+          : undefined,
+        cost: { total_yuan: metrics?.cost },
+      })
+    }
+    pushStatusLine()
+    statusLineTimer = setInterval(pushStatusLine, Math.max(1000, slConfig.intervalMs ?? 3000))
+    statusLineTimer.unref?.()
+  }
+
   // ── 会话级 UI 状态恢复（side panel / todo）─────────────────────
   const initialMeta = ctx!.persist.loadMetadata()
   if (initialMeta?.sidePanelOpen) {
@@ -516,6 +596,16 @@ async function main() {
           page: 0,
           title,
           messages,
+        }
+      }
+      // verbose 层（`v` 切换）：从会话真实历史重建含完整工具输出的转录
+      if (tuiApp.isPagerVerbose()) {
+        const verbose = buildVerboseTranscript(ctx!.session.getMessages())
+        return {
+          content: verbose.content || '(no messages yet)',
+          page: 0,
+          title: 'Transcript',
+          messages: verbose.messages,
         }
       }
       const content = tuiApp.getScrollbackContent() || '(no messages yet)'
@@ -651,28 +741,25 @@ async function main() {
     themePickerData: () => {
       const currentTheme = getActiveThemeName()
       const defaultTheme = ctx?.config.ui?.theme
-      const validThemes = Object.keys(THEMES) as ThemeName[]
-      const themeDescriptions: Record<string, string> = {
-        cobalt: '钴蓝·冷调中性 (默认风格)。oklch 调和，明度梯度清晰，视觉极度舒适。',
-        gemini: 'Gemini 风格。结合星云微光渐变 (冷靛蓝与星云紫) 与极光薄荷，极具科技美感。',
-        antigravity: 'Codex 风格。天青色冷调 Accent，亮灰结构文本，现代而克制。',
-        slate: '冷静板岩灰。单一冷静 Teal 主色，无彩色结构，低眩光长久不累。',
-        ziwei: '帝星紫微。朱砂红标记点缀帝星紫，富含中国星图古典美学韵味。',
-        tianshu: '玄夜墨色。95% 墨灰，配以星金主色与朱砂用户印，沉稳低调。',
-        midnight: 'GitHub 暗黑风格。极简中性灰度，高度清晰。',
-        pastel: '温和粉彩。二次元风格启发，高对比、低饱和度多色卡。',
-        cyberpunk: '赛博朋克。霓虹极高对比，酷炫亮眼。',
-        observatory: '五色星辰。传统五行配色体系，天玑星君玄灰底色。',
-        claude: 'Claude Code 官方 TUI 经典调色盘移植。橘黄经典。',
-        starfield: '星空星座。Rivet 原生星图美学，天蓝主星与星云紫辅色。'
-      }
+      // 内置主题 + ~/.rivet/themes/*.json 自定义主题（custom: 前缀）。
+      // 描述从主题元数据取（theme-palettes.ts 单一事实来源）。
+      const builtins = (Object.keys(THEMES) as ThemeName[]).map(t => ({
+        name: t as string,
+        current: t === currentTheme,
+        isDefault: t === defaultTheme,
+        description: THEMES[t].description,
+      }))
+      const customs = listCustomThemes().map(n => {
+        const key = `custom:${n}`
+        return {
+          name: key,
+          current: key === currentTheme,
+          isDefault: key === defaultTheme,
+          description: resolveThemeEntry(key)?.description ?? 'Custom color theme',
+        }
+      })
       return {
-        entries: validThemes.map(t => ({
-          name: t,
-          current: t === currentTheme,
-          isDefault: t === defaultTheme,
-          description: themeDescriptions[t] ?? 'Custom color theme'
-        })),
+        entries: [...builtins, ...customs],
         selectedIndex: 0,
       }
     },
@@ -706,7 +793,7 @@ async function main() {
       ]
       return { title: '推理强度 / Reasoning Effort', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
     },
-    // Plan Picker — Shift+Tab / /plan-approve 无参打开的待批计划选择器。
+    // Plan Picker — /plan-approve 无参打开的待批计划选择器。
     // 同步读盘（渲染路径不能 await），只列出等待批准的 submitted 计划。
     planPickerData: () => ({ entries: pendingPlanPickerEntries(), selectedIndex: 0 }),
   }, /* paletteExec: */ (index: number) => {
@@ -761,9 +848,10 @@ async function main() {
       tuiApp.setInput(content)
     }
   }, /* chronicleExec: */ (id: string) => {
-    // Chronicle Enter 回调：把所选会话装填为 /resume 命令到输入框，由用户回车确认。
-    // 用完整 id 前 8 位作前缀(id = resume id 绑死),避免序号随排序漂移。
-    tuiApp.setInput(`/resume ${id.slice(0, 8)}`)
+    // Chronicle Enter 回调：直接切换到所选会话（对齐 Claude Code 选择器一步到位）。
+    // 经 /resume slash 命令派发,复用同一条恢复链路(onSessionSwitch:
+    // 消息历史 + todos + goal + 侧栏 + 计划模式),含"已在当前会话"守卫。
+    void tuiApp.tryDispatchSlash(`/resume ${id}`)
   }, /* domainPickerExec: */ (key: string) => {
     // Domain Picker Enter 回调：应用选中星域，引擎照常注入方法论，scrollback 仅写单行确认。
     const midSession = ctx!.agent.getSessionTurnCount() > 0
@@ -911,6 +999,12 @@ async function main() {
     )
   })
 
+  // ── Worker 直达通道（WaveC）─────────────────────────────────
+  // /tasks x 键 → per-worker AbortController；worker 视图输入 → per-order steer 队列。
+  // 动态读 refs.coordinator：switchModel 会重建 coordinator，闭包不能捕获旧实例。
+  tuiApp.setWorkerKill(workerId => ctx?.refs.coordinator?.killWorker(workerId) ?? false)
+  tuiApp.setWorkerSteer((workerId, text) => ctx?.refs.coordinator?.steerWorker(workerId, text) ?? false)
+
   // ── SlashRouter ──────────────────────────────────────────────
   registerTuiSlashCommands(app, ctx)
 
@@ -970,49 +1064,34 @@ async function main() {
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
   app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
-  // Shift+Tab exit confirmation window: exiting plan mode abandons an unapproved
-  // plan and unlocks writes, so require a second press within this window instead
-  // of silently unlocking on a single stray keypress.
-  const PLAN_EXIT_CONFIRM_MS = 3000
-  let planExitArmedAt = 0
-  // Picker 劫持只认「本进程启动后新提交」的计划。submitted 状态永不过期，
-  // 历史堆积（本仓库实测 80 个）曾把 Shift+Tab 永久劫持成 picker——
-  // 进不了 plan mode。旧计划仍可通过 /plan 或 palette 打开 picker 查看。
-  const processStartAt = Date.now()
-  app.setPlanModeToggleHandler((opts) => {
+  // Shift+Tab：CC 式流畅三态环 auto-safe → plan → manual → auto-safe。
+  // 每按一次立即推进，无二次确认、无 picker 劫持（选择器走 /plan-approve）。
+  // plan 退出即环推进——未批准的 draft 保留在 .rivet/plans/，不弹确认。
+  // yolo/auto-accept 不进环：按一次直接退回 auto-safe（快速降险出口）。
+  // 环内切换为会话级（不持久化默认值）。
+  app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
-    // 有「新鲜」待批计划时,Shift+Tab 优先弹出选择器(方向键选 + 回车批准并自动
-    // 分波执行),免去手抄 slug。否则回落到「进入/退出 plan mode」原语义。
-    // picker 已打开再按 Shift+Tab → skipPicker(app 层逃生口),直达 toggle。
-    if (!opts?.skipPicker) {
-      const fresh = listPlansSync(agent.cwd)
-        .some(p => p.status === 'submitted' && p.createdAt.getTime() >= processStartAt)
-      if (fresh && pendingPlanPickerEntries().length > 0) {
-        app!.activateOverlay('plan-picker')
-        return
-      }
+    const setSessionApproval = (mode: import('./agent/loop-types.js').ApprovalMode) => {
+      agent.setApprovalMode(mode)
+      app!.setApprovalMode(mode)
     }
     if (agent.planModeState === 'planning') {
-      // Two-step confirm: first press arms + warns, second press within the window exits.
-      const now = Date.now()
-      if (planExitArmedAt !== 0 && now - planExitArmedAt <= PLAN_EXIT_CONFIRM_MS) {
-        planExitArmedAt = 0
-        agent.exitPlanMode()
-        app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
-      } else {
-        planExitArmedAt = now
-        app!.commitStatic('⚠ 计划尚未批准。再按一次 Shift+Tab 放弃当前计划并退出规划模式，或用 /plan-approve <slug> 批准后执行。')
-      }
-    } else {
-      planExitArmedAt = 0
+      // plan → manual：draft 保留，随时 /plan-mode 或 Shift+Tab 转回来继续
+      agent.exitPlanMode()
+      setSessionApproval('manual')
+      app!.commitStatic('⏵ manual — 每个高风险工具确认（草稿计划已保留）')
+      return
+    }
+    const current = agent.config.approvalMode ?? 'auto-safe'
+    if (current === 'auto-safe') {
+      // auto-safe → plan
       agent.enterPlanMode()
       const path = agent.getActivePlanFilePath()
-      app!.commitStatic([
-        '🔍 Plan Mode 已激活。Write 操作已锁定（活动计划文件除外）。',
-        path ? `\n活动计划文件: \`${path}\`` : '',
-        '\n工作流: 识别关键问题 → delegate_task 调研 → 增量写计划 → ask_user_question 或 plan submit。',
-        '\nShift+Tab 再次切换关闭。/plan-approve · /plan-reject <slug> <反馈>',
-      ].join(''))
+      app!.commitStatic(`⏵ plan mode — 写入已锁定，先规划再执行${path ? `（计划文件: \`${path}\`）` : ''}`)
+    } else {
+      // manual / yolo / auto-accept → auto-safe
+      setSessionApproval('auto-safe')
+      app!.commitStatic('⏵ auto-safe — 低风险自动执行，高风险确认')
     }
   })
   app.setPlanTraceProvider(() => ctx!.agent.planTrace)
@@ -1037,7 +1116,7 @@ async function main() {
         if (!handled) {
           const firstTok = trimmed.split(/\s/)[0]
           const planHint = firstTok?.startsWith('/plan')
-            ? '\n提示: Shift+Tab 打开待批计划选择器,或 /plan-list 查看计划、/plan-approve 无参批准唯一待批计划。'
+            ? '\n提示: /plan-approve 无参打开待批计划选择器，或 /plan-list 查看全部计划。'
             : ''
           app!.commitStatic(`⚠️  Unknown command: ${firstTok}\nType /help for available commands.${planHint}`)
         }
@@ -1149,9 +1228,10 @@ async function main() {
   // ── Clear screen ─────────────────────────────────────────────
   stdout.write('\x1B[2J\x1B[H')
 
-  // ── Welcome message（带边框与大标识品牌设计） ─────────────────
+  // ── Welcome message（CC 头式 3 行紧凑头） ─────────────────────
   const existingMsgCount = ctx.session.getMessages().length
   if (!skipWelcome) {
+    const installRoot = detectInstallRoot()
     const welcomeLines = formatWelcome({
       modelName,
       cwd: process.cwd(),
@@ -1161,6 +1241,8 @@ async function main() {
       rows: stdout.rows || 24,
       numericId: ctx.agent.sessionNumericId,
       compact: existingMsgCount > 0,
+      version: installRoot ? getCurrentVersion(installRoot) : null,
+      approvalMode: ctx.config.agent.approval ?? 'auto-safe',
     }, theme)
     for (const line of welcomeLines) {
       stdout.write(line + '\n')
@@ -1172,6 +1254,35 @@ async function main() {
   // 与 cursor-resident live region 的相对光标假设冲突，切换 model/theme/domain
   // 提交内容触发滚动时造成顶部残影/塌行。随交互增长终端原生滚动自然把输入框保持在视口底部。
   app.start()
+
+  // ── 会话恢复入口（Claude Code parity）───────────────────────────
+  // 裸 --resume/-r：自动打开 Chronicle 会话选择器（Enter 直接切换）。
+  // 普通新会话启动：有近期历史会话时打一行可发现性提示。
+  {
+    const recentSessions = SessionPersist.listMainSessions(process.cwd())
+      .filter(s => s.id !== ctx!.sessionId && (s.turnCount ?? 0) > 0
+        && typeof s.updatedAt === 'number' && Date.now() - s.updatedAt < 7 * 24 * 60 * 60 * 1000)
+    if (wantSessionPicker) {
+      if (recentSessions.length > 0) {
+        app.activateOverlay('chronicle')
+      } else {
+        app.commitStatic('没有可恢复的历史会话 — 已开启新会话。')
+      }
+    } else if (existingMsgCount === 0 && recentSessions.length > 0) {
+      app.commitStatic(color(
+        `↺ ${recentSessions.length} 个历史会话 · /resume 选择 · rivet -c 续接最近`,
+        theme.muted,
+      ))
+    }
+  }
+
+  // Resume 会话的计划模式恢复：上次退出时在 planning 且 draft 仍在 → 重进计划模式。
+  {
+    const restoredPlan = restorePlanModeFromMeta(ctx.agent, ctx.cwd, initialMeta)
+    if (restoredPlan) {
+      app.commitStatic(`🔍 已恢复计划模式（draft: ${restoredPlan}）— /plan-mode 退出或批准计划后执行。`)
+    }
+  }
 
   // 首次启动引导：默认服务商没有可用密钥（且非 OAuth）→ 自动打开 /connect 向导，
   // 让新用户点选内置服务商 + 粘贴密钥即可开跑，无需手改 config.json。

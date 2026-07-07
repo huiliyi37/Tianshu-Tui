@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   CommandDialog,
   Command,
@@ -13,19 +14,19 @@ import { filterCommands, type Command as Cmd } from '../lib/commands'
 import { useUiState } from '../state/store'
 import { listModels, switchModel, listFiles, openFile } from '../runtime/client'
 
-const SHORTCUTS: { keys: string; desc: string }[] = [
-  { keys: '⌘/Ctrl + K', desc: '打开/关闭命令面板' },
-  { keys: '⌘/Ctrl + 1-4', desc: '切换面板（工作台·自动化·需处理·设置）' },
-  { keys: 'Enter', desc: '发送消息（运行中则为引导）' },
-  { keys: 'Shift + Enter', desc: '换行' },
-  { keys: 'Esc × 2', desc: '清空输入 → 打开 Rewind' },
-]
-
 // Cmd+K command palette (Q4). Built on shadcn/ui Command (cmdk) for robust
 // filtering, keyboard navigation and accessibility. Supports chained sub-modes
 // for switching models and opening files.
 export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) {
   const { commands, onClose } = props
+  const { t } = useTranslation('commandPalette')
+  const shortcuts: { keys: string; desc: string }[] = useMemo(() => [
+    { keys: '⌘/Ctrl + K', desc: t('shortcutToggle') },
+    { keys: '⌘/Ctrl + 1-4', desc: t('shortcutSwitchPanel') },
+    { keys: 'Enter', desc: t('shortcutSend') },
+    { keys: 'Shift + Enter', desc: t('shortcutNewline') },
+    { keys: 'Esc × 2', desc: t('shortcutEscRewind') },
+  ], [t])
   const [q, setQ] = useState('')
   const [mode, setMode] = useState<'normal' | 'switch-model' | 'open-file'>('normal')
 
@@ -70,13 +71,13 @@ export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) 
   const groups = useMemo(() => {
     const map = new Map<string, Cmd[]>()
     for (const c of results) {
-      const key = c.hint ?? '其他'
+      const key = c.hint ?? t('hintOther')
       const list = map.get(key) ?? []
       list.push(c)
       map.set(key, list)
     }
     return Array.from(map.entries())
-  }, [results])
+  }, [results, t])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Backspace' && q === '' && mode !== 'normal') {
@@ -92,19 +93,19 @@ export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) 
       onOpenChange={(open: boolean) => {
         if (!open) onClose()
       }}
-      title="命令面板"
-      description="输入命令、面板或线程名称以快速跳转"
+      title={t('title')}
+      description={t('description')}
     >
       <Command shouldFilter={false} onKeyDown={handleKeyDown}>
         {mode === 'normal' && (
           <>
             <CommandInput
-              placeholder="输入命令或线程…"
+              placeholder={t('placeholder')}
               value={q}
               onValueChange={setQ}
             />
             <CommandList>
-              <CommandEmpty>无匹配</CommandEmpty>
+              <CommandEmpty>{t('noMatch')}</CommandEmpty>
               {groups.map(([heading, items]) => (
                 <CommandGroup key={heading} heading={heading}>
                   {items.map((c) => (
@@ -127,8 +128,8 @@ export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) 
                 </CommandGroup>
               ))}
               {q.trim() === '' && (
-                <CommandGroup heading="快捷键">
-                  {SHORTCUTS.map((s) => (
+                <CommandGroup heading={t('shortcuts')}>
+                  {shortcuts.map((s) => (
                     <CommandItem key={s.keys} value={s.desc} disabled>
                       <span>{s.desc}</span>
                       <CommandShortcut>{s.keys}</CommandShortcut>
@@ -143,7 +144,7 @@ export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) 
         {mode === 'switch-model' && (
           <>
             <CommandInput
-              placeholder="搜索模型..."
+              placeholder={t('searchModels')}
               value={q}
               onValueChange={setQ}
             />
@@ -157,12 +158,12 @@ export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) 
                   }}
                   className="text-accent"
                 >
-                  <span>← 返回主菜单</span>
+                  <span>{t('backToMenu')}</span>
                 </CommandItem>
               </CommandGroup>
-              {loadingModels && <CommandEmpty>加载模型中...</CommandEmpty>}
-              {!loadingModels && models.length === 0 && <CommandEmpty>未发现可用模型</CommandEmpty>}
-              <CommandGroup heading="可用模型">
+              {loadingModels && <CommandEmpty>{t('loadingModels')}</CommandEmpty>}
+              {!loadingModels && models.length === 0 && <CommandEmpty>{t('noModels')}</CommandEmpty>}
+              <CommandGroup heading={t('availableModels')}>
                 {models
                   .filter((m) => {
                     const name = m.alias || m.id
@@ -197,7 +198,7 @@ export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) 
         {mode === 'open-file' && (
           <>
             <CommandInput
-              placeholder="搜索项目文件..."
+              placeholder={t('searchFiles')}
               value={q}
               onValueChange={setQ}
             />
@@ -211,12 +212,12 @@ export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) 
                   }}
                   className="text-accent"
                 >
-                  <span>← 返回主菜单</span>
+                  <span>{t('backToMenu')}</span>
                 </CommandItem>
               </CommandGroup>
-              {loadingFiles && <CommandEmpty>搜索文件中...</CommandEmpty>}
-              {!loadingFiles && files.length === 0 && <CommandEmpty>未找到匹配文件</CommandEmpty>}
-              <CommandGroup heading="项目文件">
+              {loadingFiles && <CommandEmpty>{t('searchingFiles')}</CommandEmpty>}
+              {!loadingFiles && files.length === 0 && <CommandEmpty>{t('noFiles')}</CommandEmpty>}
+              <CommandGroup heading={t('projectFiles')}>
                 {files.map((file) => (
                   <CommandItem
                     key={file}

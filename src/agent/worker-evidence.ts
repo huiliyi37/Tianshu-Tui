@@ -1,11 +1,37 @@
 import type { WorkerResult } from './work-order.js'
 import type { WorkerTranscript } from './worker-session.js'
+import { VERIFY_BASH_RE } from './hooks/self-verify-hook.js'
 
 function addRisk(risks: string[], risk: string): string[] {
   return risks.includes(risk) ? risks : [...risks, risk]
 }
 
 const WRITE_PROFILES_ADVISORY = ['patcher']
+
+/** 交付文本里的"宣称模式"——命中即认为 worker 在报告验证结论。 */
+const CLAIM_RE = /全绿|已修复|(?:typecheck|类型检查)\s*(?:干净|clean|passed)|\b\d+\s*\/\s*\d+\s*(?:通过|passed|pass|全绿)|\btests?\s+(?:pass(?:ed|ing)?|green)\b|所有测试通过/i
+
+/** transcript 取证：是否有真实且未失败的验证执行痕迹（run_tests 或验证形状的 bash）。 */
+function provenVerification(transcript: WorkerTranscript): { proven: true } | { proven: false; reason: 'missing' | 'errored' } {
+  const ranTests = transcript.toolUses.includes('run_tests')
+  const verifyBashRuns = (transcript.bashCommands ?? []).filter(cmd => VERIFY_BASH_RE.test(cmd))
+  if (!ranTests && verifyBashRuns.length === 0) return { proven: false, reason: 'missing' }
+
+  // 验证形状 bash 失败不是证据——npm test 跑挂了照样宣称 verified 是本审计
+  // 要拦的核心场景。failedBashCommands 缺省（旧固件）时按全部成功处理。
+  const failedVerifyBash = (transcript.failedBashCommands ?? []).filter(cmd => VERIFY_BASH_RE.test(cmd))
+  const verifyBashSucceeded = verifyBashRuns.length > failedVerifyBash.length
+
+  // run_tests 报错检查（沿用 adversarial_verifier 的纵深检查：匹配错误串而非
+  // 按索引对位，容忍乱序）。
+  const testsErrored = ranTests && transcript.errors.some(e =>
+    e.includes('run_tests') || e.includes('Test run failed'),
+  )
+  const testsSucceeded = ranTests && !testsErrored
+
+  if (testsSucceeded || verifyBashSucceeded) return { proven: true }
+  return { proven: false, reason: 'errored' }
+}
 
 /**
  * Verify worker evidence for mutation safety.
@@ -26,35 +52,43 @@ const WRITE_PROFILES_ADVISORY = ['patcher']
  * @param transcript - Optional worker transcript for behavior-backed verifier gating
  */
 export function verifyWorkerEvidence(result: WorkerResult, profile?: string, transcript?: WorkerTranscript): WorkerResult {
-  if (profile === 'adversarial_verifier' && result.evidenceStatus === 'verified') {
-    // Fail-closed: no transcript = cannot prove tests were run = unverified
-    if (!transcript) {
+  // 复现即证明（全星域泛化，2026-07-07）：任何 profile 宣称 verified，只要有
+  // transcript 就取证——没有真实 run_tests/验证形状 bash 的执行痕迹 → 降级。
+  // adversarial_verifier 额外保留"无 transcript 也 fail-closed"（其裁决会被主
+  // 会话当 ground truth）；其他 profile 缺 transcript 时不在此降级——批量聚合
+  // 二次过闸不带 transcript（coordinator.ts:1961），全局 fail-closed 会把第一
+  // 次带证据通过的结果误杀。
+  if (result.evidenceStatus === 'verified') {
+    if (profile === 'adversarial_verifier' && !transcript) {
       return {
         ...result,
         evidenceStatus: 'unverified',
         risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
       }
     }
-    const runTestsIdx = transcript.toolUses.lastIndexOf('run_tests')
-    if (runTestsIdx === -1) {
-      return {
-        ...result,
-        evidenceStatus: 'unverified',
-        risks: addRisk(result.risks, 'adversarial_verifier reported verified without running run_tests'),
+    if (transcript) {
+      const proof = provenVerification(transcript)
+      if (!proof.proven) {
+        const label = profile ?? 'worker'
+        const risk = proof.reason === 'errored'
+          ? `${label} ran verification (run_tests / verify bash) but it errored — verdict not trustworthy`
+          : `${label} reported verified without running run_tests or verify-shaped bash — 宣称未经复现`
+        return {
+          ...result,
+          evidenceStatus: 'unverified',
+          risks: addRisk(result.risks, risk),
+        }
       }
     }
-    // Defense in depth: check that run_tests didn't error out. We match on the
-    // recorded error strings rather than index-correlating toolResults[i] with
-    // toolUses[i] — coupled to the error message format, but robust to reorder.
-    const testsErrored = transcript.errors.some(e =>
-      e.includes('run_tests') || e.includes('Test run failed'),
-    )
-    if (testsErrored) {
-      return {
-        ...result,
-        evidenceStatus: 'unverified',
-        risks: addRisk(result.risks, 'adversarial_verifier ran run_tests but it errored — verdict not trustworthy'),
-      }
+  }
+
+  // 交付文本宣称扫描：summary 里出现"全绿/N/N 通过/已修复/typecheck 干净"类
+  // 结论，但 transcript 无对应验证执行 → 降级 + risk。宣称不是证据。
+  if (transcript && CLAIM_RE.test(result.summary) && !provenVerification(transcript).proven) {
+    return {
+      ...result,
+      evidenceStatus: result.evidenceStatus === 'verified' ? 'unverified' : result.evidenceStatus,
+      risks: addRisk(result.risks, '交付文本包含验证宣称（全绿/已修复/N过N）但 transcript 无验证工具执行痕迹 — 宣称未经复现'),
     }
   }
 

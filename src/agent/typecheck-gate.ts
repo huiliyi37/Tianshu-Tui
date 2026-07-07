@@ -34,6 +34,15 @@ export type TypecheckRunner = (cwd: string) => Promise<LspCheckResult>
 
 const defaultRunner: TypecheckRunner = (cwd) => runTypeCheck(cwd, '*')
 
+/** tsc 超时预算（波间硬门禁场景）。默认 2 分钟在满载机器上不够（本仓库冷跑
+ *  ~70s，天枢长任务时多会话抢 CPU 实测超时）——波间验证不在乎这点延迟，
+ *  给足 5 分钟换取"跑得完"。 */
+export const GATE_TSC_TIMEOUT_MS = 300_000
+
+/** Wave-gate 专用 runner：更长的超时预算。advisory 调用点（deliver_task 等）
+ *  维持 defaultRunner 的 2 分钟不变。 */
+export const gateTypecheckRunner: TypecheckRunner = (cwd) => runTypeCheck(cwd, '*', GATE_TSC_TIMEOUT_MS)
+
 /** Master switch. The review-gate typecheck backstop is on by default; set
  *  RIVET_TYPECHECK_GATE=0/false/off/no to disable it entirely. */
 export function typecheckGateEnabled(): boolean {
@@ -106,29 +115,44 @@ function loadTypecheckBaseline(cwd: string): ReadonlySet<string> {
 }
 
 /**
+ * Tri-state typecheck outcome — distinguishes "verified clean" from "did not
+ * run to completion". Advisory callers collapse both to null (fail-open); the
+ * wave HARD gate must treat `inconclusive` as not-verified and block
+ * (2026-07-07 事故：tsc 超时被 wave-gate 记成 ✅ passed 放行下一波)。
+ */
+export interface TypecheckOutcome {
+  status: 'clean' | 'errors' | 'inconclusive'
+  /** Non-null iff status === 'errors'. */
+  result: ChangedFilesTypecheck | null
+  /** Human-readable cause for 'inconclusive' / 'clean' shortcuts. */
+  reason?: string
+}
+
+/**
  * Run a scoped typecheck and report type errors that land in `changedFiles`.
  *
  * Also detects cross-file drift: new errors (not in baseline) that land in
  * non-changed files — the "changed schema.ts but the error surfaces in
  * default.ts" pattern. These are collected into `repoWide`.
  *
- * Returns null (no escalation) when:
- *   - no changed file is a .ts/.tsx (nothing to check)
- *   - tsc did not run to completion (crash / timeout) — fail-open
- *   - no new (non-baseline) error exists anywhere
+ * Outcome semantics:
+ *   - no changed file is a .ts/.tsx → 'clean' (nothing to check)
+ *   - tsc did not run to completion (crash / timeout) → 'inconclusive'
+ *   - no new (non-baseline) error anywhere → 'clean'
+ *   - otherwise → 'errors' with the scoped report
  */
-export async function runChangedFilesTypecheck(
+export async function runChangedFilesTypecheckOutcome(
   cwd: string,
   changedFiles: readonly string[],
   run: TypecheckRunner = defaultRunner,
   baseline: ReadonlySet<string> = loadTypecheckBaseline(cwd),
-): Promise<ChangedFilesTypecheck | null> {
+): Promise<TypecheckOutcome> {
   const rel = changedFiles.filter(f => !isAbsolute(f) && /\.(ts|tsx)$/.test(f))
-  if (rel.length === 0) return null
+  if (rel.length === 0) return { status: 'clean', result: null, reason: 'no changed .ts/.tsx files' }
 
   const res = await run(cwd)
-  // tsc crashed or timed out → partial output is untrustworthy; never escalate.
-  if (!res.ranOk) return null
+  // tsc crashed or timed out → partial output is untrustworthy; never report errors.
+  if (!res.ranOk) return { status: 'inconclusive', result: null, reason: 'tsc did not run to completion (crash/timeout)' }
 
   const byFile: Record<string, string[]> = {}
   const driftByFile: Record<string, string[]> = {}
@@ -159,7 +183,7 @@ export async function runChangedFilesTypecheck(
   const brokenFiles = Object.keys(byFile)
   const driftFiles = Object.keys(driftByFile)
 
-  if (brokenFiles.length === 0 && driftFiles.length === 0) return null
+  if (brokenFiles.length === 0 && driftFiles.length === 0) return { status: 'clean', result: null }
 
   // Scoped summary
   const parts: string[] = []
@@ -189,7 +213,22 @@ export async function runChangedFilesTypecheck(
     repoWide = { byFile: driftByFile, count: driftCount, summary: driftSummary }
   }
 
-  return { brokenFiles, byFile, summary: parts.join(' || '), repoWide }
+  return { status: 'errors', result: { brokenFiles, byFile, summary: parts.join(' || '), repoWide } }
+}
+
+/**
+ * Legacy advisory view: collapses 'clean' and 'inconclusive' to null
+ * (fail-open). Hard-gate callers must use {@link runChangedFilesTypecheckOutcome}
+ * (or its memo) instead — null here does NOT mean "verified".
+ */
+export async function runChangedFilesTypecheck(
+  cwd: string,
+  changedFiles: readonly string[],
+  run: TypecheckRunner = defaultRunner,
+  baseline: ReadonlySet<string> = loadTypecheckBaseline(cwd),
+): Promise<ChangedFilesTypecheck | null> {
+  const outcome = await runChangedFilesTypecheckOutcome(cwd, changedFiles, run, baseline)
+  return outcome.result
 }
 
 // ── Memoization ────────────────────────────────────────────────────────────
@@ -199,7 +238,7 @@ export async function runChangedFilesTypecheck(
 // When a file can't be stat'd (mock paths in tests, deleted file) we return
 // null signature → no memo, run fresh — never a stale escalation.
 
-interface MemoEntry { sig: string; result: ChangedFilesTypecheck | null }
+interface MemoEntry { sig: string; outcome: TypecheckOutcome }
 const memoByCwd = new Map<string, MemoEntry>()
 
 function changedFilesSignature(cwd: string, tsFiles: string[]): string | null {
@@ -218,23 +257,36 @@ function changedFilesSignature(cwd: string, tsFiles: string[]): string | null {
   }
 }
 
-/** Memoized wrapper for the review-gate call sites. Pure callers (tests) should
- *  use {@link runChangedFilesTypecheck} directly. */
+/** Memoized outcome for the gate call sites. `inconclusive` is deliberately
+ *  NOT cached: the wave gate's self-heal re-evaluation must re-run tsc so a
+ *  transient timeout (loaded machine) clears itself instead of sticking. */
+export async function runChangedFilesTypecheckOutcomeMemo(
+  cwd: string,
+  changedFiles: readonly string[],
+  run: TypecheckRunner = defaultRunner,
+  baseline: ReadonlySet<string> = loadTypecheckBaseline(cwd),
+): Promise<TypecheckOutcome> {
+  const tsFiles = changedFiles.filter(f => !isAbsolute(f) && /\.(ts|tsx)$/.test(f))
+  const sig = changedFilesSignature(cwd, tsFiles)
+  if (sig) {
+    const hit = memoByCwd.get(cwd)
+    if (hit && hit.sig === sig) return hit.outcome
+  }
+  const outcome = await runChangedFilesTypecheckOutcome(cwd, changedFiles, run, baseline)
+  if (sig && outcome.status !== 'inconclusive') memoByCwd.set(cwd, { sig, outcome })
+  return outcome
+}
+
+/** Memoized wrapper for the advisory call sites (deliver_task review gate).
+ *  Collapses 'clean'/'inconclusive' to null — see runChangedFilesTypecheck. */
 export async function runChangedFilesTypecheckMemo(
   cwd: string,
   changedFiles: readonly string[],
   run: TypecheckRunner = defaultRunner,
   baseline: ReadonlySet<string> = loadTypecheckBaseline(cwd),
 ): Promise<ChangedFilesTypecheck | null> {
-  const tsFiles = changedFiles.filter(f => !isAbsolute(f) && /\.(ts|tsx)$/.test(f))
-  const sig = changedFilesSignature(cwd, tsFiles)
-  if (sig) {
-    const hit = memoByCwd.get(cwd)
-    if (hit && hit.sig === sig) return hit.result
-  }
-  const result = await runChangedFilesTypecheck(cwd, changedFiles, run, baseline)
-  if (sig) memoByCwd.set(cwd, { sig, result })
-  return result
+  const outcome = await runChangedFilesTypecheckOutcomeMemo(cwd, changedFiles, run, baseline)
+  return outcome.result
 }
 
 /** Test-only: clear the memo cache. */

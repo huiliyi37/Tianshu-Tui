@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "天枢桌面默认能力集：主窗口可调用 core 命令。",
-  "windows": ["main"],
+  "description": "天枢桌面默认能力集：主窗口与线程 pop-out 窗口可调用 core 命令。",
+  "windows": ["main", "popout-*"],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
@@ -16,6 +16,8 @@
     "core:window:allow-show",
     "core:window:allow-unminimize",
     "core:window:allow-set-focus",
+    "core:window:allow-set-title",
+    "core:window:allow-set-always-on-top",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",

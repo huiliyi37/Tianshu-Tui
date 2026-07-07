@@ -6,7 +6,7 @@ import { deserializeUnifiedPlan, unifiedPlanToTeamTasks, validateUnifiedPlan } f
 import { clearPlan, consumePlan, storePlan } from '../agent/plan-store.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import { validatePathSafe } from './path-validate.js'
-import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
+import { createActivityStreamer, createDelegationActivityMapper } from './worker-activity-stream.js'
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 // Shared execution kernel — the dispatch + scope-health + review gate + telemetry
@@ -203,17 +203,13 @@ export function createTeamOrchestrateTool(
 
       // T9 P3 text stream + T4 structured per-worker updates (subagent panel).
       const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
-      const onActivity = (textStreamer || params.onWorkerActivity)
+      const activityMapper = params.onWorkerActivity
+        ? createDelegationActivityMapper(params.toolUseId, params.onWorkerActivity)
+        : undefined
+      const onActivity = (textStreamer || activityMapper)
         ? (ev: WorkerActivityEvent) => {
             textStreamer?.(ev)
-            params.onWorkerActivity?.({
-              workOrderId: ev.workOrderId,
-              parentToolId: params.toolUseId,
-              profile: ev.profile,
-              authority: ev.authority,
-              status: 'running',
-              progressLine: activityProgressLine(ev),
-            })
+            activityMapper?.(ev)
           }
         : undefined
 

@@ -258,6 +258,38 @@ fn set_window_glass(window: tauri::WebviewWindow, enabled: bool) {
     }
 }
 
+/// Pop out a thread into its own small companion window (Codex-style floating
+/// thread). The window boots the same SPA with `?popout={sessionId}`, which the
+/// frontend detects to render a slim PopoutThreadRoot (thread + composer only).
+/// Idempotent per session: re-invoking focuses the existing window.
+#[tauri::command]
+fn open_thread_window(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    // Window labels only allow [a-zA-Z0-9-/:_]; session ids are uuid-ish but
+    // sanitize defensively so a weird id can't make the builder panic.
+    let safe: String = session_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if safe.is_empty() {
+        return Err("invalid session id".to_string());
+    }
+    let label = format!("popout-{safe}");
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let url = tauri::WebviewUrl::App(format!("index.html?popout={safe}").into());
+    tauri::WebviewWindowBuilder::new(&app, &label, url)
+        .title("天枢 · 线程")
+        .inner_size(480.0, 720.0)
+        .min_inner_size(360.0, 480.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Bring the main window back from tray/minimized and focus it.
 ///
 /// `getCurrentWindow().setFocus()` from JS can neither unhide a window hidden
@@ -276,11 +308,30 @@ fn focus_main_window(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 /// Ask the OS for a free localhost port by binding to :0, then release it.
+///
+/// The `:0` bind essentially never fails, but when it does the old behavior
+/// fell back to a FIXED 3100 — which is exactly `rivet serve`'s documented
+/// default port, so a manually-started server would collide: the spawn dies on
+/// EADDRINUSE (or the health probe interrogates the foreign server) and the UI
+/// shows an inexplicable startup failure. Instead: retry :0 a few times, then
+/// scan a candidate range with a real bind check (skipping 3100 on purpose),
+/// and only surrender the historical constant as the true last resort.
 fn pick_free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .unwrap_or(3100)
+    for _ in 0..3 {
+        if let Ok(port) = TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .map(|a| a.port())
+        {
+            return port;
+        }
+    }
+    // Deliberately starts at 3101: 3100 is the manual `rivet serve` default.
+    for port in 3101..3200u16 {
+        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
+    }
+    3100
 }
 
 fn random_token() -> String {
@@ -1159,6 +1210,26 @@ fn kill_sidecar(app_handle: &tauri::AppHandle) {
     }
 }
 
+/// Build the spec for a crash-restart respawn: same port/token/paths, but with
+/// the auth env re-resolved NOW instead of replayed from the first-launch
+/// snapshot. Settings edits rewrite config.json while the app runs — a provider
+/// may now reference an `apiKeyEnv` name that didn't exist at first spawn, so we
+/// re-read the referenced names, re-harvest missing ones from the login shell,
+/// and let fresh values win. Snapshot entries absent from the fresh resolution
+/// are kept as fallback (env parity for vars that vanished from the parent env).
+fn respawn_spec(spec: &SidecarLaunchSpec) -> SidecarLaunchSpec {
+    hydrate_auth_env_from_shell(&spec.rivet_home);
+    let mut merged = resolve_auth_env(&spec.rivet_home);
+    for (k, v) in &spec.auth_env {
+        if !merged.iter().any(|(mk, _)| mk == k) {
+            merged.push((k.clone(), v.clone()));
+        }
+    }
+    let mut s = spec.clone();
+    s.auth_env = merged;
+    s
+}
+
 /// Crash monitor (W2): polls the sidecar child every 2s; if it exited without
 /// kill_sidecar being the cause, respawns it with the SAME port + token so the
 /// frontend's health polling recovers in place. Capped at 3 restarts per 10min
@@ -1167,6 +1238,10 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
     use tauri::Emitter;
     std::thread::spawn(move || {
         let mut restarts: Vec<Instant> = Vec::new();
+        // A failed respawn (spawn error / never passed /health) leaves the child
+        // slot empty — without this flag the next poll would see None, treat it
+        // as "nothing to watch" and silently stop retrying with budget left.
+        let mut pending_respawn = false;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             let Some(state) = handle.try_state::<Sidecar>() else {
@@ -1189,7 +1264,7 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
                     None => false,
                 }
             };
-            if !exited {
+            if !exited && !pending_respawn {
                 continue;
             }
             // Re-check: kill_sidecar may have raced between our try_wait and here.
@@ -1199,6 +1274,11 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
             restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
             if restarts.len() >= 3 {
                 eprintln!("[rivet] sidecar crashed {} times within 10min — giving up auto-restart", restarts.len() + 1);
+                // Tell the frontend we stopped trying. Without this the UI keeps
+                // showing the transient "正在重连…" copy forever while nothing is
+                // actually reconnecting — the user needs an explicit "restart the
+                // app" call to action instead of an infinite spinner.
+                let _ = handle.emit("sidecar-gave-up", restarts.len() as u32 + 1);
                 return;
             }
             restarts.push(Instant::now());
@@ -1206,7 +1286,8 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
                 "[rivet] sidecar exited unexpectedly — restarting on port {}",
                 state.spec.port
             );
-            if let Some(mut child) = spawn_from_spec(&state.spec) {
+            pending_respawn = true;
+            if let Some(mut child) = spawn_from_spec(&respawn_spec(&state.spec)) {
                 let ready = wait_until_ready(
                     state.spec.port,
                     &state.spec.token,
@@ -1216,11 +1297,12 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
                     if let Ok(mut guard) = state.child.lock() {
                         *guard = Some(child);
                     }
+                    pending_respawn = false;
                     let _ = handle.emit("sidecar-restarted", ());
                     eprintln!("[rivet] sidecar restarted and healthy");
                 } else {
                     // Half-dead respawn: reap it; the attempt still counts
-                    // against the budget, and the next poll may retry.
+                    // against the budget, and pending_respawn keeps retrying.
                     kill_child_tree(&mut child);
                 }
             }
@@ -1261,6 +1343,7 @@ pub fn run() {
             apply_storage_location,
             set_window_glass,
             focus_main_window,
+            open_thread_window,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

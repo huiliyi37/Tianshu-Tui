@@ -26,7 +26,7 @@ import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints, getDoomLoopThresholds } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
-import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval } from './approval-risk.js'
+import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval, requiresUnconditionalApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix, learnFileApproval } from './permissions.js'
 import { isSelfDestructiveKill, selfProcessTree } from './self-preservation.js'
@@ -43,7 +43,7 @@ import { extractTrailingArtifactId } from './tool-result-tiering.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 import { getStarSignature } from './star-signature.js'
 import type { ImmuneHook } from './immune-hook.js'
-import { detectMistakeResolution } from './mistake-detector.js'
+import { detectMistakeResolution, sanitizeMistakeResolutionInput } from './mistake-detector.js'
 import { isToolAllowedInReliabilityMode, reliabilityBlockMessage, type ReliabilityDecision } from './reliability-mode.js'
 import type { ArtifactStore } from '../artifact/store.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
@@ -58,6 +58,43 @@ import { profileIsPlanModeSafe } from './profile-registry.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 import { toolTargetFromInput } from './tool-target.js'
 import { execFile } from 'node:child_process'
+
+/** Headless prefix on denial messages — a stable marker so worker-session's
+ *  detectApprovalDeadlock can distinguish "gated by approval" from "bad JSON". */
+export const HEADLESS_DENY_MARKER = 'not available in a headless worker'
+
+/** File-mutation tools that a headless worker may run without approval. These
+ *  write into an isolated git worktree (or claim-isolated in-place cwd), so the
+ *  change is reversible and the primary reviews the diff afterward. Bash writes
+ *  are intentionally NOT here — they are governed by the OS sandbox check
+ *  (bashWriteRequiresApproval), which already auto-approves when a sandbox is
+ *  active and denies when there is none. */
+const HEADLESS_AUTO_APPROVE_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'ast_edit',
+])
+
+/** Extract target file paths from a unified diff's `+++ b/…` headers
+ *  (deletions fall back to the preceding `--- a/…` line). Best-effort —
+ *  feeds TaskLedger file_write attribution for apply_patch, which carries
+ *  no file_path parameter of its own. */
+export function patchTargetPaths(diff: string): string[] {
+  const out = new Set<string>()
+  const lines = diff.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const plus = /^\+\+\+ (?:b\/)?(.+)$/.exec(lines[i] ?? '')
+    if (!plus) continue
+    const p = (plus[1] ?? '').split('\t')[0]!.trim()
+    if (p && p !== '/dev/null') {
+      out.add(p)
+      continue
+    }
+    // Deletion (`+++ /dev/null`): the removed file is the preceding --- header.
+    const minus = /^--- (?:a\/)?(.+)$/.exec(lines[i - 1] ?? '')
+    const mp = (minus?.[1] ?? '').split('\t')[0]!.trim()
+    if (mp && mp !== '/dev/null') out.add(mp)
+  }
+  return [...out]
+}
 
 /** Infer the workspace_mutation `kind` from a git destructive command.
  *  Used by B1 cross-session stash awareness to differentiate stash / reset / checkout / clean. */
@@ -317,6 +354,11 @@ export interface ToolExecResult {
   latestRisk: import('./approval-risk.js').RiskAssessment
   /** True when the tool returned endTurn: true (e.g. ask_user_question). */
   endTurn?: boolean
+  /** Image attachments from ToolResult.images (data URLs). Tool messages are
+   *  text-only at the protocol level, so the batch layer forwards these as a
+   *  trailing multimodal user message — but ONLY when the active model
+   *  declares supportsVision (dropped otherwise, matching legacy behavior). */
+  images?: string[]
 }
 
 function truncateSuccessfulToolResult(content: string, config: AgentConfig): string {
@@ -927,23 +969,47 @@ export async function executeToolUse(
       pathGrantNeed = null
     }
 
-    const shouldAsk = skipAllApproval
-      ? false
-      : pathGrantNeed
-        ? true
-        : protectionMode
+    // Hard gate: arbitrary-JS / endpoint-takeover actions (computer_use
+    // js_eval / browser_adopt) always ask — no approval mode (incl. YOLO),
+    // allow rule, or sensorium confidence can waive them. The tool documents
+    // this promise; this is where it is enforced.
+    const unconditionalApproval = requiresUnconditionalApproval(tu.name, tu.input)
+
+    let shouldAsk = unconditionalApproval
+      ? true
+      : skipAllApproval
+        ? false
+        : pathGrantNeed
           ? true
-          : bashWriteRequiresApproval
+          : protectionMode
             ? true
-            : allowlisted
-              ? false
-              : canAutoApprove
+            : bashWriteRequiresApproval
+              ? true
+              : allowlisted
                 ? false
-                : approvalMode === 'manual'
-                  ? needsApproval
-                  : approvalMode === 'auto-safe'
-                    ? isHighRisk
-                    : false
+                : canAutoApprove
+                  ? false
+                  : approvalMode === 'manual'
+                    ? needsApproval
+                    : approvalMode === 'auto-safe'
+                      ? isHighRisk
+                      : false
+
+    // Headless override — no human can answer an approval prompt here, so a
+    // shouldAsk that reaches onApprovalRequired would hang (the callback returns
+    // false, denying every write and stalling the worker until its turn budget
+    // runs out). Resolve it deterministically instead: in-workspace file writes
+    // are auto-approved (worktree/claim isolation + primary diff review), and
+    // everything else that would ask falls through to the deny path below with a
+    // model-facing message. Deny rules / self-kill (handled above) and
+    // out-of-workspace grants (pathGrantNeed) are NOT relaxed.
+    if (deps.config.headless && shouldAsk && !pathGrantNeed) {
+      if (HEADLESS_AUTO_APPROVE_WRITE_TOOLS.has(tu.name)) {
+        shouldAsk = false
+      }
+      // Otherwise keep shouldAsk = true → onApprovalRequired returns false →
+      // the deny branch emits the headless instruction message.
+    }
 
     if (shouldAsk) {
       const approvalResult = await callbacks.onApprovalRequired(tu.id, tu.name, tu.input)
@@ -972,11 +1038,18 @@ export async function executeToolUse(
         const noSandboxReason = bashWriteRequiresApproval && noSandbox
           ? '\n根因：当前环境无文件系统沙箱（Windows 原生 / 沙箱未启用），写命令需人工审批。这不是命令本身的问题——审批后即可执行。要减少审批频率，可切换到 auto-safe 模式（低风险写命令自动放行）或使用 WSL（Linux 子系统下有沙箱）。'
           : ''
-        const denyMsg = [
-          `Tool "${tu.name}"${target} was not executed: it requires explicit user approval, which you cannot grant yourself.${noSandboxReason}`,
-          'This is NOT a rejection of the change itself. Do NOT re-emit the identical call — repeating it will keep hitting the same approval gate and make no progress.',
-          'Instead: briefly state what you were about to do and why it needs approval, then stop and wait for the user to approve it (or adjust their instruction).',
-        ].join('\n')
+        const denyMsg = deps.config.headless
+          ? [
+              // HEADLESS_DENY_MARKER embedded here — detectApprovalDeadlock matches on it.
+              `Tool "${tu.name}"${target} is ${HEADLESS_DENY_MARKER}: it requires an approval that no human can grant in this context.`,
+              'Do NOT re-emit this call — it will keep hitting the same gate and waste your turn budget.',
+              'Instead: accomplish the task using an allowed tool if possible, or finish now by returning your result JSON with status "blocked" and explain in the summary which operation was gated.',
+            ].join('\n')
+          : [
+              `Tool "${tu.name}"${target} was not executed: it requires explicit user approval, which you cannot grant yourself.${noSandboxReason}`,
+              'This is NOT a rejection of the change itself. Do NOT re-emit the identical call — repeating it will keep hitting the same approval gate and make no progress.',
+              'Instead: briefly state what you were about to do and why it needs approval, then stop and wait for the user to approve it (or adjust their instruction).',
+            ].join('\n')
         callbacks.onToolResult(tu.id, tu.name, denyMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: denyMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
@@ -1059,8 +1132,12 @@ export async function executeToolUse(
     const priorReadLoopPlaceholders = countRecentReadLoopPlaceholders(deps.trajectory.getEntries(), toolTarget)
     deps.p3?.onToolStart(tu.name, toolTarget)
 
-    // P3-C: check if we already have a speculative result for this tool call
-    const speculativeHit = deps.p3?.checkSpeculativeCache(tu.name, toolTarget)
+    // P3-C speculative chain SEALED (2026-07-06 服务路径切除 → 2026-07-07 全链
+    // 关停): ShadowQueue 缓存无 mtime/TTL 校验，预读结果曾在文件多次变更后仍被
+    // 当作 read_file 结果返回（TDX 事故：模型推理"文件被回退"并连锁触发
+    // old_string not found / hash_edit stale / 重读风暴）。服务切除后影子遥测
+    // 观察一日即定论：预执行纯耗资源、命中率数据不改变重启前提（mtime 校验
+    // 无论如何都要做），遂整链封存。重启契约见 P3Config.speculativeEnabled。
 
     const traceId = tu.id
     traceStore = startTraceEvent(traceStore, {
@@ -1114,11 +1191,6 @@ export async function executeToolUse(
       input: tu.input,
       turn,
       execute: async () => {
-        // P3-C: use speculative cache hit if available (read-only tools only)
-        if (speculativeHit && (tu.name === 'read_file' || tu.name === 'grep' || tu.name === 'glob')) {
-          rawToolResult = { content: speculativeHit }
-          return { content: speculativeHit }
-       }
         // P5+P6: read_file must always go through real execute to honor the
         // active contextWindow's read cap. The prewarm cache is shared with
         // P3 speculative reads which may have been populated under a different
@@ -1311,7 +1383,7 @@ export async function executeToolUse(
       const resolution = detectMistakeResolution(traceStore, traceId, tu.name)
       if (resolution) {
         try {
-          const inputDigest = JSON.stringify(tu.input).slice(0, 200)
+          const inputDigest = JSON.stringify(sanitizeMistakeResolutionInput(tu.name, tu.input)).slice(0, 200)
           deps.p3.recordMistake(
             resolution.error,
             resolution.context,
@@ -1352,7 +1424,7 @@ export async function executeToolUse(
      }
       if (tu.name === 'read_file' && filePath) {
         deps.taskLedger.record({ type: 'file_read', path: filePath })
-     } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && filePath) {
+     } else if ((tu.name === 'write_file' || tu.name === 'edit_file' || tu.name === 'hash_edit') && filePath) {
         deps.taskLedger.record({ type: 'file_write', path: filePath })
         deps.ownershipLedger?.registerOwned(filePath)
         // P2 cross-session signal: auto-acquire exclusive claim on written file
@@ -1386,6 +1458,38 @@ export async function executeToolUse(
         // Commit nudge: warn when uncommitted files accumulate
         const nudge = buildCommitNudge({ ownedFiles: deps.taskLedger.getOwnedFiles() })
         if (nudge) finalContent += nudge
+     } else if (tu.name === 'apply_patch') {
+        // apply_patch 不带 file_path——从 diff 头解析变更文件补记 file_write。
+        // 漏记会让 claim-audit 的验证新鲜度对账失明：测完再 patch，旧验证仍
+        // 显示"新鲜"，"全绿"宣称假放行（审查 2026-07-07 #1）。
+        const applied = !harnessResult.isError && tu.input.check_only !== true
+        const diff = typeof tu.input.diff === 'string' ? tu.input.diff : ''
+        if (applied && diff) {
+          for (const p of patchTargetPaths(diff)) {
+            deps.taskLedger.record({ type: 'file_write', path: p })
+            deps.ownershipLedger?.registerOwned(p)
+            if (deps.sessionRegistry && deps.sessionId) {
+              deps.sessionRegistry.acquireClaim(deps.sessionId, p, 'exclusive')
+           }
+          }
+        } else {
+          deps.taskLedger.record({ type: 'tool_exec', tool: tu.name })
+        }
+     } else if (tu.name === 'ast_edit') {
+        // 同 apply_patch：非 dryRun 的成功执行按 paths 记 file_write（目录路径
+        // 无法展开为具体文件，原样记录——claim-audit 的代码判定会自然忽略）。
+        const wrote = !harnessResult.isError && tu.input.dryRun === false
+        const paths = Array.isArray(tu.input.paths)
+          ? tu.input.paths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+          : []
+        if (wrote && paths.length > 0) {
+          for (const p of paths) {
+            deps.taskLedger.record({ type: 'file_write', path: p })
+            deps.ownershipLedger?.registerOwned(p)
+          }
+        } else {
+          deps.taskLedger.record({ type: 'tool_exec', tool: tu.name })
+        }
      } else if (tu.name === 'plan_close' && filePath) {
         if (tu.input.apply === true && !harnessResult.isError) {
           deps.taskLedger.record({ type: 'file_write', path: filePath })
@@ -1397,9 +1501,12 @@ export async function executeToolUse(
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
        }
      } else if (tu.name === 'git') {
+        // 结构化 git 工具记 git_action——否则 claim-audit 看不到 stash/stash_pop
+        // 这类工作树变异，还原代码后旧验证仍显示"新鲜"（审查 2026-07-07 #7）。
+        const action = (tu.input.action as string | undefined) ?? ''
+        deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: `git ${action}` } })
         // B1: publish workspace_mutation for stash/stash_pop so peer sessions
         // know the worktree is being temporarily cleared for verification.
-        const action = (tu.input.action as string | undefined) ?? ''
         const kind = action === 'stash' ? 'stash' : action === 'stash_pop' ? 'stash_pop' : undefined
         if (kind && deps.sessionRegistry && deps.sessionId) {
           deps.sessionRegistry.publishEvent(deps.sessionId, {
@@ -1676,7 +1783,7 @@ export async function executeToolUse(
      }
    }
 
-    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk, endTurn: rawToolResult?.endTurn === true ? true : undefined }
+    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk, endTurn: rawToolResult?.endTurn === true ? true : undefined, images: rawToolResult?.images }
  } catch (err) {
     // AbortError: user cancelled — not a tool failure.
     // Skip failure recording so immune/doom-loop signals aren't polluted.
@@ -1703,7 +1810,21 @@ export async function executeToolUse(
       callbacks.onToolResult(tu.id, tu.name, abortedNote, false)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: abortedNote, is_error: false }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }
-    const msg = err instanceof Error ? err.message : String(err)
+    let msg = err instanceof Error ? err.message : String(err)
+    // deliver_task timeout/crash attribution (240s 事故链 2026-07-07): the
+    // pipeline timeout used to replace the ENTIRE tool result with an error,
+    // swallowing the fact that the commit had already landed — the model then
+    // re-committed or switched to raw git commit. Same resolution as the
+    // abort path above: check HEAD and state the outcome definitively.
+    if (tu.name === 'deliver_task' && preAbortHead) {
+      const headNow = await gitHeadQuiet(deps.cwd)
+      if (headNow && headNow !== preAbortHead) {
+        const summary = await gitHeadSummaryQuiet(deps.cwd)
+        msg += `\n\n⚠️ BUT the commit already landed before this error: ${summary ?? headNow.slice(0, 8)}. The delivery succeeded — only the result report was lost. Do NOT re-commit or retry; verify with git log and treat the task as delivered.`
+      } else if (headNow) {
+        msg += `\n\nNo new commit landed (HEAD unchanged at ${headNow.slice(0, 8)}). Check git log before retrying to avoid a duplicate commit.`
+      }
+    }
     deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
     callbacks.onToolResult(tu.id, tu.name, msg, true)
     return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }

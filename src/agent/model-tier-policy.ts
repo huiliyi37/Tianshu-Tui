@@ -15,7 +15,15 @@ export interface ModelTierPolicyInput {
   /** Config override for worker tier (config.workers.patcherTier).
    *  Bypasses riskTier-based routing — user explicitly picks the tier. */
   workerTierOverride?: ModelTier
+  /** 失败升档天花板（config.workers.escalationCap）。只约束 consecutiveFailures
+   *  触发的失败升档分支，不影响前置路由（planning/hardFloor/瑶光门）：
+   *  'off' = 失败不升档（走正常路由）；'balanced' = 最多升到 balanced；
+   *  'strong' = 旧行为（升到 strong）。缺省视为 'strong'（策略函数保持向后兼容，
+   *  产品默认由 config 层给 'off'）。 */
+  failureEscalationCap?: FailureEscalationCap
 }
+
+export type FailureEscalationCap = 'off' | 'balanced' | 'strong'
 
 export interface ModelTierRecommendation {
   tier: ModelTier
@@ -49,7 +57,16 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
   const consecutiveFailures = Math.max(0, Math.floor(input.consecutiveFailures ?? 0))
 
   if (consecutiveFailures >= 2) {
-    return { tier: 'strong', hardFloor: 'strong', reason: 'repeated failure escalates worker tier to strong' }
+    // 失败升档受 escalationCap 约束：升档意味着全新会话零缓存全量重跑,
+    // 成本可达 flash 的数十倍。'off' 时跳过本分支,走正常路由。
+    const cap = input.failureEscalationCap ?? 'strong'
+    if (cap === 'strong') {
+      return { tier: 'strong', hardFloor: 'strong', reason: 'repeated failure escalates worker tier to strong' }
+    }
+    if (cap === 'balanced') {
+      return { tier: 'balanced', hardFloor: 'balanced', reason: 'repeated failure escalation capped at balanced by workers.escalationCap' }
+    }
+    // cap === 'off' → 失败不升档,继续正常路由
   }
 
   if (input.kind === 'verify' || input.profile === 'verifier' || input.profile === 'adversarial_verifier') {

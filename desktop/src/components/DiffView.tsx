@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { LineComment } from '../runtime/types'
 import { highlightLine, languageFromPath } from '../lib/highlight'
 
@@ -117,6 +118,7 @@ export interface DiffViewProps {
  */
 export function DiffView(props: DiffViewProps) {
   const { raw, comments, onLineComment, hideToolbar } = props
+  const { t } = useTranslation('review')
   const [internalSideBySide, setInternalSideBySide] = useState(false)
   const controlled = props.sideBySide !== undefined
   const sideBySide = controlled ? props.sideBySide! : internalSideBySide
@@ -170,7 +172,7 @@ export function DiffView(props: DiffViewProps) {
             className={`diff-toggle ${sideBySide ? 'active' : ''}`}
             onClick={() => setInternalSideBySide((v) => !v)}
           >
-            {sideBySide ? '双列' : '单列'}
+            {sideBySide ? t('diff.split') : t('diff.unified')}
           </button>
         </div>
       )}
@@ -197,6 +199,7 @@ function DiffRow({
   onLineComment?: DiffViewProps['onLineComment']
   language?: string
 }) {
+  const { t } = useTranslation('review')
   const [drafting, setDrafting] = useState(false)
   const [draft, setDraft] = useState('')
   const canComment = interactive && (line.type === 'add' || line.type === 'del' || line.type === 'ctx')
@@ -232,7 +235,7 @@ function DiffRow({
         {canComment && !drafting && (
           <button
             className="diff-row-comment-btn"
-            title="评论此行"
+            title={t('diff.commentLineTitle')}
             onClick={() => setDrafting(true)}
           >
             {comments?.length ? `💬${comments.length}` : '＋'}
@@ -251,7 +254,7 @@ function DiffRow({
           <textarea
             autoFocus
             value={draft}
-            placeholder={`评论 ${line.file}:${line.newNo ?? line.oldNo}`}
+            placeholder={t('diff.commentPlaceholder', { file: line.file, line: line.newNo ?? line.oldNo })}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit()
@@ -259,8 +262,8 @@ function DiffRow({
             }}
           />
           <div className="diff-line-draft-actions">
-            <button className="btn ghost sm" onClick={() => { setDrafting(false); setDraft('') }}>取消</button>
-            <button className="btn sm" disabled={!draft.trim()} onClick={submit}>提交</button>
+            <button className="btn ghost sm" onClick={() => { setDrafting(false); setDraft('') }}>{t('diff.cancel')}</button>
+            <button className="btn sm" disabled={!draft.trim()} onClick={submit}>{t('diff.submit')}</button>
           </div>
         </div>
       )}

@@ -1,4 +1,6 @@
 import { memo, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import type { DelegationNode } from '../runtime/types'
 
 // T4 — subagent fleet panel (Codex `Down` panel / Antigravity Manager parity).
@@ -17,17 +19,19 @@ import type { DelegationNode } from '../runtime/types'
 
 type StatusClass = 'running' | 'ok' | 'warn' | 'bad' | 'idle'
 
-const STATUS_META: Record<string, { label: string; cls: StatusClass }> = {
-  running: { label: '运行中', cls: 'running' },
-  completed: { label: '已完成', cls: 'ok' },
-  passed: { label: '通过', cls: 'ok' },
-  blocked: { label: '受阻', cls: 'warn' },
-  escalated: { label: '升级', cls: 'warn' },
-  failed: { label: '失败', cls: 'bad' },
+const STATUS_META: Record<string, { labelKey: string; cls: StatusClass }> = {
+  running: { labelKey: 'running', cls: 'running' },
+  completed: { labelKey: 'completed', cls: 'ok' },
+  passed: { labelKey: 'passed', cls: 'ok' },
+  blocked: { labelKey: 'blocked', cls: 'warn' },
+  escalated: { labelKey: 'escalated', cls: 'warn' },
+  failed: { labelKey: 'failed', cls: 'bad' },
 }
 
-function metaOf(status: string): { label: string; cls: StatusClass } {
-  return STATUS_META[status] ?? { label: status || '—', cls: 'idle' }
+function metaOf(status: string, t: TFunction): { label: string; cls: StatusClass } {
+  const meta = STATUS_META[status]
+  if (!meta) return { label: status || '—', cls: 'idle' }
+  return { label: t(meta.labelKey), cls: meta.cls }
 }
 
 function fmtElapsed(ms?: number): string {
@@ -68,6 +72,7 @@ export function summarizeDelegation(nodes: Record<string, DelegationNode>): Dele
 }
 
 export const DelegationTree = memo(function DelegationTree({ nodes, onAdopt }: { nodes: Record<string, DelegationNode>; onAdopt?: (text: string) => void }) {
+  const { t } = useTranslation('delegation')
   const [viewMode, setViewMode] = useState<'list' | 'graph'>('graph')
 
   // 派生列表与计数放进 useMemo：仅 nodes 引用变化时才重算 Object.values + sort + filter。
@@ -146,7 +151,7 @@ export const DelegationTree = memo(function DelegationTree({ nodes, onAdopt }: {
 
   const renderList = (parentId: string | undefined, depth: number): React.ReactNode =>
     (byParent.get(parentId) ?? []).map((n) => {
-      const { label, cls } = metaOf(n.status)
+      const { label, cls } = metaOf(n.status, t)
       const elapsed = fmtElapsed(n.elapsedMs)
       const attn = cls === 'warn' || cls === 'bad'
       return (
@@ -158,7 +163,7 @@ export const DelegationTree = memo(function DelegationTree({ nodes, onAdopt }: {
           <div className="deleg-row">
             <span className={`dot ${cls}${cls === 'running' ? ' pulse' : ''}`} />
             <span className="deleg-id" title={n.workerId}>{shortId(n.workerId)}</span>
-            {n.origin === 'user' && <span className="deleg-origin" title="你手动派的子代理">你派的</span>}
+            {n.origin === 'user' && <span className="deleg-origin" title={t('dispatchedByYouHint')}>{t('dispatchedByYou')}</span>}
             {n.profile && <span className="deleg-profile">{n.profile}</span>}
             {n.objective && <span className="obj">{n.objective}</span>}
             <span className={`deleg-badge ${cls}`}>
@@ -171,9 +176,9 @@ export const DelegationTree = memo(function DelegationTree({ nodes, onAdopt }: {
             <button
               className="deleg-adopt"
               onClick={(e) => { e.stopPropagation(); onAdopt(n.summary!) }}
-              title="把子代理结果摘要填入输入框,编辑后发送"
+              title={t('adoptHint')}
             >
-              汇入主会话 →
+              {t('adoptLabel')}
             </button>
           )}
           {renderList(n.workerId, depth + 1)}
@@ -185,31 +190,31 @@ export const DelegationTree = memo(function DelegationTree({ nodes, onAdopt }: {
     <div className="delegation-tree">
       <div className="deleg-header flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="deleg-title">子代理</span>
+          <span className="deleg-title">{t('subAgents')}</span>
           <span className="deleg-count text-xs text-muted-foreground">
-            已启动 {total} 个 · {done}/{total} 完成{attention > 0 ? ` · ${attention} 需关注` : ''}
+            {t('treeStats', { total, done })}{attention > 0 ? ` · ${t('needAttention', { n: attention })}` : ''}
           </span>
         </div>
         <div className="flex items-center gap-3">
           <span className="deleg-chips hidden md:flex">
-            {running > 0 && <span className="deleg-chip running">● {running} 运行</span>}
-            {blocked > 0 && <span className="deleg-chip warn">● {blocked} 受阻</span>}
-            {escalated > 0 && <span className="deleg-chip warn">● {escalated} 升级</span>}
-            {failed > 0 && <span className="deleg-chip bad">● {failed} 失败</span>}
-            {done > 0 && <span className="deleg-chip ok">● {done} 通过</span>}
+            {running > 0 && <span className="deleg-chip running">{t('chipRunning', { n: running })}</span>}
+            {blocked > 0 && <span className="deleg-chip warn">{t('chipBlocked', { n: blocked })}</span>}
+            {escalated > 0 && <span className="deleg-chip warn">{t('chipEscalated', { n: escalated })}</span>}
+            {failed > 0 && <span className="deleg-chip bad">{t('chipFailed', { n: failed })}</span>}
+            {done > 0 && <span className="deleg-chip ok">{t('chipDone', { n: done })}</span>}
           </span>
           <div className="view-mode-toggle flex items-center bg-panel-3 rounded p-0.5 border border-border text-[10px]">
             <button
               className={`px-2 py-0.5 rounded transition-colors ${viewMode === 'graph' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
               onClick={() => setViewMode('graph')}
             >
-              思维导图
+              {t('viewGraph')}
             </button>
             <button
               className={`px-2 py-0.5 rounded transition-colors ${viewMode === 'list' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
               onClick={() => setViewMode('list')}
             >
-              列表
+              {t('viewList')}
             </button>
           </div>
         </div>
@@ -268,7 +273,7 @@ export const DelegationTree = memo(function DelegationTree({ nodes, onAdopt }: {
                 const coords = graphData.coords.get(n.workerId)
                 if (!coords) return null
 
-                const { label, cls } = metaOf(n.status)
+                const { label, cls } = metaOf(n.status, t)
                 const elapsed = fmtElapsed(n.elapsedMs)
                 const isRunning = n.status === 'running'
 

@@ -153,7 +153,6 @@ export function buildSeatbeltCommand(command: string, writableRoots: string[]): 
 export function buildBwrapCommand(command: string, writableRoots: string[]): string {
   // Filter out non-existent directories — bwrap --bind fails on them and aborts
   // the entire sandbox (causing all bash commands to fail with exit 127).
-  const { existsSync } = require('node:fs') as typeof import('node:fs')
   const validRoots = writableRoots.filter(p => { try { return existsSync(p) } catch { return false } })
   const binds = validRoots
     .map(root => `--bind ${shSingleQuote(root)} ${shSingleQuote(root)}`)

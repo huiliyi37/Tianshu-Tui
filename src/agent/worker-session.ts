@@ -58,6 +58,12 @@ export interface WorkerSessionConfig {
   reviewDepth?: number
   /** Parent abort signal — propagated to worker AgentLoop for immediate abort. */
   abortSignal?: AbortSignal
+  /** Approval mode of the dispatching (parent) session. Only `dangerously-skip-permissions`
+   *  is honored here as a downward delegation of trust — it lets the worker inherit the
+   *  parent's opt-out of all prompts. Any other parent mode is ignored; the worker relies on
+   *  headless approval semantics (in-workspace writes auto-approved, other asks fast-denied)
+   *  rather than the parent's manual/auto-safe gating, since no human is attached to a worker. */
+  parentApprovalMode?: import('./loop-types.js').ApprovalMode
   /** V3 Component B: optional per-domain lessons recalled into worker prompt. */
   domainKnowledgeStore?: DomainKnowledgeStore
   /** Liveness signal — fired on every worker activity (text/thinking/tool)
@@ -65,6 +71,10 @@ export interface WorkerSessionConfig {
    *  Without this the worker's internal heartbeat fires into the void.
    *  `detail` carries the tool name for tool events and the delta for text. */
   onActivity?: (kind: WorkerActivityKind, detail?: string) => void
+  /** WC: 输入直达通道 — coordinator 注入的 per-order steer 队列 drain。
+   *  worker 的 AgentLoop 在工具回合结算时调用，把用户直达消息以
+   *  [User guidance] 形态注入 tool_result（与主会话 steer 同一机制）。 */
+  onSteerDrain?: () => string | null
   /** Resume from a previous checkpoint — inject partial results as context so
    *  the worker doesn't redo completed work. Especially valuable for multi-turn
    *  Flash workers (test_scaffolder generating multiple files). */
@@ -80,7 +90,8 @@ export interface WorkerSessionConfig {
   priorMessages?: readonly import('../api/oai-types.js').OaiMessage[]
 }
 
-export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result'
+/** `turn` 事件在每个 worker turn 结束时上报，detail 为累计 token 总数（字符串）。 */
+export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'turn'
 
 export interface WorkerTranscript {
   text: string
@@ -89,6 +100,13 @@ export interface WorkerTranscript {
   toolResults: string[]
   errors: string[]
   repairAttempts: number
+  /** bash 工具的 command 参数留痕——worker-evidence 用它判定"验证形状"的命令
+   *  是否真实执行过（VERIFY_BASH_RE）。可选：旧序列化/测试固件可缺省。 */
+  bashCommands?: string[]
+  /** 执行失败（isError）的 bash 命令——worker-evidence 用它区分"跑过验证"和
+   *  "验证跑挂了"：npm test 失败不能当 verified 证据。可选：旧固件缺省时
+   *  按全部成功处理（不误杀历史数据）。 */
+  failedBashCommands?: string[]
 }
 
 export interface WorkerSessionRun {
@@ -109,6 +127,8 @@ function emptyTranscript(): WorkerTranscript {
     toolResults: [],
     errors: [],
     repairAttempts: 0,
+    bashCommands: [],
+    failedBashCommands: [],
   }
 }
 
@@ -140,6 +160,29 @@ function detectPollutionFailure(transcript: WorkerTranscript): string | null {
   return `Worker stalled on ${hits.length} streaming-polluted tool calls (foreign arguments grafted onto read tools). The review work above is likely real; the missing JSON is a symptom of the upstream OpenAIClient parallel-tool_call parsing bug, not a model failure. See .rivet/tool-stream-*.jsonl.`
 }
 
+/** Stable marker emitted by tool-pipeline's headless deny branch. Kept as a local
+ *  const (not imported) to avoid a worker-session → loop → tool-pipeline import
+ *  cycle; a drift-guard test asserts it matches tool-pipeline.HEADLESS_DENY_MARKER. */
+export const HEADLESS_DENY_MARKER = 'not available in a headless worker'
+
+/**
+ * Detect approval-deadlock from the worker transcript.
+ *
+ * A headless worker cannot self-approve write operations that require it. When it
+ * hits such a gate, the tool pipeline emits an error tool_result carrying
+ * HEADLESS_DENY_MARKER. A small model often responds by emitting an approval
+ * request in prose rather than result JSON, so the run ends as "Parse failed" —
+ * masking the real cause (a gated operation, not malformed output).
+ *
+ * Returns a diagnostic hint to surface in the blocked result so the operator does
+ * not chase "model can't output JSON" when the real cause is an approval gate.
+ */
+export function detectApprovalDeadlock(transcript: WorkerTranscript): string | null {
+  const hits = transcript.errors.filter(e => e.includes(HEADLESS_DENY_MARKER))
+  if (hits.length === 0) return null
+  return `Worker was gated on ${hits.length} approval-required tool call(s) it cannot self-approve as a headless worker. This blocked/parse result is a symptom of the gated operation (the worker likely emitted an approval request in prose), NOT malformed JSON. Fix by giving this profile a non-gated path to the change (e.g. it should already auto-approve in-workspace file writes), or run the task inline in the primary session.`
+}
+
 /** Minimal agent surface needed by the retry layer — injectable so tests can
  *  exercise the real retry→blocked path without constructing a full AgentLoop. */
 export interface RunnableAgent {
@@ -151,6 +194,7 @@ async function runOnce(
   prompt: string,
   transcript: WorkerTranscript,
   onActivity?: (kind: WorkerActivityKind, detail?: string) => void,
+  onSteerDrain?: () => string | null,
 ): Promise<string> {
   let text = ''
   // AgentLoop.run never rethrows stream errors — it reports them via onError
@@ -158,6 +202,8 @@ async function runOnce(
   // actually sees ECONNRESET/429/timeout instead of an empty transcript.
   let streamError: Error | null = null
   let aborted = false
+  // tool id → bash command，供 onToolResult 把失败结果精确归到具体命令。
+  const bashCommandById = new Map<string, string>()
   await agent.run(prompt, {
     onTextDelta: (delta) => {
       text += delta
@@ -168,16 +214,31 @@ async function runOnce(
       transcript.thinking += delta
       onActivity?.('thinking', delta)
     },
-    onToolUse: (_id, name) => {
+    onToolUse: (id, name, input) => {
       transcript.toolUses.push(name)
+      if (name === 'bash' && typeof (input as Record<string, unknown> | undefined)?.command === 'string') {
+        const command = (input as { command: string }).command
+        ;(transcript.bashCommands ??= []).push(command)
+        bashCommandById.set(id, command)
+      }
       onActivity?.('tool_use', name)
     },
-    onToolResult: (_id, name, result, isError) => {
+    onToolResult: (id, name, result, isError) => {
       transcript.toolResults.push(name)
-      if (isError) transcript.errors.push(result)
+      if (isError) {
+        transcript.errors.push(result)
+        const failedCommand = bashCommandById.get(id)
+        if (failedCommand) (transcript.failedBashCommands ??= []).push(failedCommand)
+      }
       onActivity?.('tool_result', name)
     },
-    onTurnComplete: () => {},
+    // usage 是累计快照（getTotalUsage）——上报累计 token 总数，供 fleet 面板实时显示。
+    onTurnComplete: (usage) => {
+      const total = (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0)
+      if (total > 0) onActivity?.('turn', String(total))
+    },
+    // WC: 输入直达 — drain coordinator 注入的 per-order steer 队列
+    onSteerDrain: onSteerDrain ? () => onSteerDrain() : undefined,
     onError: (error) => {
       transcript.errors.push(error.message)
       streamError = error
@@ -247,10 +308,11 @@ export async function runOnceWithTransientRetry(
   prompt: string,
   transcript: WorkerTranscript,
   onActivity?: (kind: WorkerActivityKind, detail?: string) => void,
+  onSteerDrain?: () => string | null,
 ): Promise<string> {
   for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
     try {
-      return await runOnce(agent, prompt, transcript, onActivity)
+      return await runOnce(agent, prompt, transcript, onActivity, onSteerDrain)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       const classified = classifyFailure(message)
@@ -309,6 +371,16 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     contextWindow: config.contextWindow,
     compact: config.compact,
     sessionId: `worker-${config.order.id.replace(/:/g, '-')}`,
+    // Headless: no human answers approval prompts for a worker. The tool pipeline
+    // auto-approves in-workspace writes (worktree/claim isolation) and fast-denies
+    // anything else that would ask, instead of stalling on onApprovalRequired.
+    headless: true,
+    // Trust downward-delegation: a parent running dangerously-skip-permissions
+    // opted out of all prompts, so the worker inherits that. Other parent modes
+    // are left unset — headless semantics govern instead.
+    approvalMode: config.parentApprovalMode === 'dangerously-skip-permissions'
+      ? 'dangerously-skip-permissions'
+      : undefined,
     reviewDepth: config.reviewDepth,
     // B3: the worker knows its own nesting depth, so any delegate_task it
     // issues carries it and the coordinator can cap recursion.
@@ -348,7 +420,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
 
   try {
     const transcript = emptyTranscript()
-    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity)
+    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity, config.onSteerDrain)
     mbox?.progress(1, config.order.budget.maxRetries + 1, 'initial run')
 
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
@@ -363,9 +435,10 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           completedTools: [...transcript.toolUses],
         }
         const pollutionHint = detectPollutionFailure(transcript)
+        const approvalHint = detectApprovalDeadlock(transcript)
         return {
           result: {
-            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}`),
+            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`),
             artifacts: [
               { kind: 'note' as const, title: 'Aborted worker partial output', content: latestText.slice(0, 2000) },
             ],
@@ -400,9 +473,10 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
         if (attempt === config.order.budget.maxRetries) {
           const partialSummary = latestText.slice(0, 300)
           const pollutionHint = detectPollutionFailure(transcript)
+          const approvalHint = detectApprovalDeadlock(transcript)
           return {
             result: {
-              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}`),
+              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`),
               artifacts: [
                 { kind: 'note' as const, title: 'Unparseable worker output', content: latestText.slice(0, 2000) },
               ],
@@ -432,7 +506,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           }
           // json-mode repair produced nothing (stream error) → fall through to AgentLoop repair
         }
-        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity)
+        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity, config.onSteerDrain)
       }
     }
 

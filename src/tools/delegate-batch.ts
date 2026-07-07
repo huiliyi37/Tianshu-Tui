@@ -7,7 +7,7 @@ import { DEFAULT_DELEGATE_PROFILE, profileRegistry, delegationToolTimeoutMs } fr
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
+import { createActivityStreamer, createDelegationActivityMapper } from './worker-activity-stream.js'
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
 
 export interface DelegateBatchCoordinator {
@@ -198,17 +198,13 @@ export function createDelegateBatchTool(
       const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
       // Build authority lookup: workOrderId prefix → authority, for terminal callbacks.
       const taskAuthorityMap = new Map<number, string | undefined>()
-      const streamActivity = (textStreamer || params.onWorkerActivity)
+      const activityMapper = params.onWorkerActivity
+        ? createDelegationActivityMapper(params.toolUseId, params.onWorkerActivity)
+        : undefined
+      const streamActivity = (textStreamer || activityMapper)
         ? (ev: WorkerActivityEvent) => {
             textStreamer?.(ev)
-            params.onWorkerActivity?.({
-              workOrderId: ev.workOrderId,
-              parentToolId: params.toolUseId,
-              profile: ev.profile,
-              authority: ev.authority,
-              status: 'running',
-              progressLine: activityProgressLine(ev),
-            })
+            activityMapper?.(ev)
           }
         : undefined
       const requests: DelegationRequest[] = parsed.data.tasks.map((t, i) => {

@@ -1,0 +1,8 @@
+{
+  "hint": "Cmd+J 切换",
+  "fallback": "终端需在桌面应用内运行（Tauri runtime 不可用）。",
+  "shellExited": "shell 已退出 · 关闭并重开终端以重启",
+  "spawnFailed": "终端启动失败",
+  "closeTab": "关闭终端",
+  "newTab": "新建终端"
+}

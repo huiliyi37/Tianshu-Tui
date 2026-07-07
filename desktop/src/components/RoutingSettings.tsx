@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useTranslation, Trans } from 'react-i18next'
 import { toast } from 'sonner'
 import {
   getRoutingConfig,
@@ -22,24 +23,24 @@ import {
  *  seats (council_expert), and team waves (patcher/reviewer/scouts). A profile
  *  override takes precedence over workers.routing task routing in the
  *  coordinator, so it's the right lever for "council strong, others cheap". */
-const SUBAGENT_PROFILES: { key: string; label: string; hint: string }[] = [
-  { key: 'reviewer', label: 'reviewer', hint: '提交后自动审查 / L3 编队审查' },
-  { key: 'adversarial_verifier', label: 'adversarial_verifier', hint: 'L2 对抗验证 / team 验证' },
-  { key: 'verifier', label: 'verifier', hint: '验证循环' },
-  { key: 'patcher', label: 'patcher', hint: '补丁建议 / team 编码' },
-  { key: 'council_expert', label: 'council_expert', hint: '议事会席位（覆盖优先于任务路由）' },
-  { key: 'code_scout', label: 'code_scout', hint: 'team 代码侦察' },
-  { key: 'doc_scout', label: 'doc_scout', hint: 'team 文档侦察' },
+const SUBAGENT_PROFILES: { key: string; label: string }[] = [
+  { key: 'reviewer', label: 'reviewer' },
+  { key: 'adversarial_verifier', label: 'adversarial_verifier' },
+  { key: 'verifier', label: 'verifier' },
+  { key: 'patcher', label: 'patcher' },
+  { key: 'council_expert', label: 'council_expert' },
+  { key: 'code_scout', label: 'code_scout' },
+  { key: 'doc_scout', label: 'doc_scout' },
 ]
 
 /** The 5 capability tasks that workers.routing maps to a named profile. */
-const CAPABILITY_TASKS: { key: string; label: string }[] = [
-  { key: 'repo_summarization', label: 'repo_summarization（仓库摘要）' },
-  { key: 'code_edit', label: 'code_edit（代码编辑）' },
-  { key: 'test_failure_diagnosis', label: 'test_failure_diagnosis（测试诊断）' },
-  { key: 'compaction', label: 'compaction（上下文压缩）' },
-  { key: 'risky_refactor', label: 'risky_refactor（高风险重构）' },
-]
+const CAPABILITY_TASKS = [
+  'repo_summarization',
+  'code_edit',
+  'test_failure_diagnosis',
+  'compaction',
+  'risky_refactor',
+] as const
 
 const INHERIT = '__inherit__'
 
@@ -90,6 +91,7 @@ function findRecommendedTarget(options: { value: string; label: string }[]): str
 }
 
 export function RoutingSettings() {
+  const { t } = useTranslation('settings')
   const [config, setConfig] = useState<RoutingConfig | null>(null)
   const [providers, setProviders] = useState<ProviderListItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -126,9 +128,13 @@ export function RoutingSettings() {
     const known = new Set(SUBAGENT_PROFILES.map((p) => p.key))
     const extra = Object.keys(config.review.profiles)
       .filter((k) => !known.has(k))
-      .map((k) => ({ key: k, label: k, hint: '自定义 profile' }))
+      .map((k) => ({ key: k, label: k }))
     return [...SUBAGENT_PROFILES, ...extra]
   }, [config])
+
+  const knownProfileKeys = useMemo(() => new Set(SUBAGENT_PROFILES.map((p) => p.key)), [])
+  const profileHint = (key: string) =>
+    knownProfileKeys.has(key) ? t(`routing.profileHints.${key}`) : t('routing.customProfile')
 
   const needsRecommendation = useMemo(() => {
     if (!config || !recommendedValue) return false
@@ -201,19 +207,19 @@ export function RoutingSettings() {
     setError(null)
     try {
       await setRoutingConfig({ review: config.review, workers: config.workers, council: config.council })
-      toast.success('子代理路由已保存')
+      toast.success(t('routing.savedToast'))
       setDirty(false)
     } catch (err) {
       const msg = (err as Error).message
       setError(msg)
-      toast.error(`保存失败：${msg}`)
+      toast.error(t('routing.saveFailedToast', { error: msg }))
     } finally {
       setSaving(false)
     }
   }
 
-  if (loading) return <div className="meta">加载子代理路由配置…</div>
-  if (!config) return <div className="meta warn">{error ?? '无法读取路由配置'}</div>
+  if (loading) return <div className="meta">{t('routing.loading')}</div>
+  if (!config) return <div className="meta warn">{error ?? t('routing.loadFailed')}</div>
 
   const seatAuthorities = config.council.seats.map((s) => s.authority.trim())
   const hasEmptySeat = seatAuthorities.some((a) => !a)
@@ -223,32 +229,28 @@ export function RoutingSettings() {
   return (
     <div className="routing-settings flex flex-col gap-5">
       <div className="routing-intro">
-        主会话与子代理可用不同 provider + 模型。典型用法：主会话用重型模型，审查 / 杂活子代理用便宜快的 Flash，
-        避免 GLM/Kimi/Codex 这类无前缀缓存的 provider 因子代理并发请求淘汰主会话缓存。
-        目标 provider 须已在「Provider」里配置且有 API Key，否则该项会静默回退到主会话模型。
+        {t('routing.intro')}
       </div>
 
       {/* agent.review.profiles — 按 profile 覆盖子代理模型（review / council / team 通用） */}
       <section className="routing-card">
-        <h5 className="routing-card-title">按 profile 覆盖子代理模型</h5>
+        <h5 className="routing-card-title">{t('routing.profileCardTitle')}</h5>
         <div className="routing-card-hint">
-          按 worker profile 名覆盖，命中所有携带该 profile 的子代理——涵盖提交后审查、议事会席位（council_expert）、
-          team 编队（patcher / reviewer / scouts）。profile 覆盖<strong>优先于</strong>下方的任务路由，
-          适合「议事会用强模型、其余子代理走 Flash」这类精细控制。
+          <Trans t={t} i18nKey="routing.profileCardHint" components={{ strong: <strong /> }} />
         </div>
 
         {needsRecommendation && (
           <div className="routing-recommendation">
             <div>
-              <strong>推荐：把常见子代理路由到便宜模型</strong>
-              <p>审查、验证、编码等子代理默认继承主会话模型，会和主对话争抢缓存。一键应用后，这些 profile 将使用检测到的便宜模型，主会话更稳定。</p>
+              <strong>{t('routing.recommendTitle')}</strong>
+              <p>{t('routing.recommendDesc')}</p>
             </div>
-            <button className="btn-sm" onClick={applyRecommendation}>一键应用推荐配置</button>
+            <button className="btn-sm" onClick={applyRecommendation}>{t('routing.recommendApply')}</button>
           </div>
         )}
         {!recommendedValue && providers.length > 0 && (
           <div className="routing-recommendation muted">
-            未检测到便宜 / Flash 模型。建议先到「Provider」添加 DeepSeek Flash 等模型，再回来一键配置子代理路由。
+            {t('routing.noCheapModel')}
           </div>
         )}
         {allProfiles.map((p) => {
@@ -257,17 +259,17 @@ export function RoutingSettings() {
             <label key={p.key} className="flex items-center justify-between gap-3">
               <span className="flex flex-col">
                 <span className="text-xs font-mono text-text">{p.label}</span>
-                <span className="meta">{p.hint}</span>
+                <span className="meta">{profileHint(p.key)}</span>
               </span>
               <Select
                 value={current ? encodeTarget(current) : INHERIT}
                 onValueChange={(v) => { if (v) setReviewProfile(p.key, v) }}
               >
                 <SelectTrigger className="w-56 shrink-0">
-                  <SelectValue placeholder="继承主会话" />
+                  <SelectValue placeholder={t('routing.inheritPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={INHERIT}>继承主会话（默认）</SelectItem>
+                  <SelectItem value={INHERIT}>{t('routing.inheritDefault')}</SelectItem>
                   {options.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
@@ -284,7 +286,7 @@ export function RoutingSettings() {
             onChange={(e) => setReviewFlag('skipAuto', e.target.checked)}
             className="rounded border-border text-accent focus:ring-accent h-3.5 w-3.5"
           />
-          <span>关闭提交后自动审查（skipAuto）</span>
+          <span>{t('routing.skipAuto')}</span>
         </label>
         <label className="flex items-center gap-2 text-xs text-text cursor-pointer select-none">
           <input
@@ -293,27 +295,27 @@ export function RoutingSettings() {
             onChange={(e) => setReviewFlag('mechanicalFastPath', e.target.checked)}
             className="rounded border-border text-accent focus:ring-accent h-3.5 w-3.5"
           />
-          <span>纯文档 / 重命名变更跳过审查（mechanicalFastPath）</span>
+          <span>{t('routing.mechanicalFastPath')}</span>
         </label>
       </section>
 
       {/* workers — 通用能力任务路由 */}
       <section className="routing-card">
-        <h5 className="routing-card-title">通用子代理任务路由</h5>
+        <h5 className="routing-card-title">{t('routing.taskCardTitle')}</h5>
         <div className="routing-card-hint">
-          每个能力任务指向一个命名档位（在 workers.profiles 中定义，如 cheap-flash → DeepSeek Flash）。
+          {t('routing.taskCardHint')}
         </div>
-        {CAPABILITY_TASKS.map((task) => {
-          const current = config.workers.routing[task.key] ?? INHERIT
+        {CAPABILITY_TASKS.map((taskKey) => {
+          const current = config.workers.routing[taskKey] ?? INHERIT
           return (
-            <label key={task.key} className="flex items-center justify-between gap-3">
-              <span className="text-xs font-mono text-text">{task.label}</span>
-              <Select value={current} onValueChange={(v) => { if (v) setTaskRoute(task.key, v) }}>
+            <label key={taskKey} className="flex items-center justify-between gap-3">
+              <span className="text-xs font-mono text-text">{t(`routing.tasks.${taskKey}`)}</span>
+              <Select value={current} onValueChange={(v) => { if (v) setTaskRoute(taskKey, v) }}>
                 <SelectTrigger className="w-56 shrink-0">
-                  <SelectValue placeholder="继承主会话" />
+                  <SelectValue placeholder={t('routing.inheritPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={INHERIT}>继承主会话（默认）</SelectItem>
+                  <SelectItem value={INHERIT}>{t('routing.inheritDefault')}</SelectItem>
                   {workerProfileNames.map((name) => {
                     const tgt = config.workers.profiles[name]
                     return (
@@ -331,13 +333,11 @@ export function RoutingSettings() {
 
       {/* agent.council.seats — 异构议事会：每席独立 provider/model */}
       <section className="routing-card">
-        <h5 className="routing-card-title">异构议事会席位</h5>
+        <h5 className="routing-card-title">{t('routing.councilCardTitle')}</h5>
         <div className="routing-card-hint">
-          给每个议事会席位单独指定模型，实现「天权用 DeepSeek Pro、天府用 GLM」这类<strong>跨模型会诊</strong>——不同模型不同视角，
-          且各跑各的服务端缓存互不挤兑。留空则用内置默认（tianquan / tianfu / tianxuan，全席同模型）。
-          席位级覆盖<strong>优先于</strong>上方 council_expert 的 profile 覆盖。
+          <Trans t={t} i18nKey="routing.councilCardHint1" components={{ strong: <strong /> }} />
           <br />
-          authority 须为<strong>星域 id</strong>（内置 10 个见输入框建议，或已加载的自定义域）；非星域会让该席位无工具且无认知注入。每席 authority 不可重复。
+          <Trans t={t} i18nKey="routing.councilCardHint2" components={{ strong: <strong /> }} />
         </div>
 
         <datalist id="council-domains">
@@ -345,7 +345,7 @@ export function RoutingSettings() {
         </datalist>
 
         {config.council.seats.length === 0 && (
-          <div className="meta">未配置自定义席位 —— 使用内置默认 3 席。</div>
+          <div className="meta">{t('routing.noSeats')}</div>
         )}
 
         {config.council.seats.map((seat, idx) => {
@@ -358,15 +358,15 @@ export function RoutingSettings() {
                   list="council-domains"
                   value={seat.authority}
                   onChange={(e) => updateSeat(idx, { authority: e.target.value.trim() })}
-                  placeholder="席位 authority（星域 id，如 tianquan）"
+                  placeholder={t('routing.seatAuthorityPlaceholder')}
                   className="flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs font-mono text-text focus:border-accent focus:outline-none"
                 />
                 <Select value={seatModelValue} onValueChange={(v) => { if (v) setSeatModel(idx, v) }}>
                   <SelectTrigger className="w-56 shrink-0">
-                    <SelectValue placeholder="继承主会话" />
+                    <SelectValue placeholder={t('routing.inheritPlaceholder')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={INHERIT}>继承主会话（默认）</SelectItem>
+                    <SelectItem value={INHERIT}>{t('routing.inheritDefault')}</SelectItem>
                     {options.map((o) => (
                       <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                     ))}
@@ -375,8 +375,8 @@ export function RoutingSettings() {
                 <button
                   className="shrink-0 rounded border border-border px-2 py-1 text-xs text-text hover:border-accent hover:text-accent"
                   onClick={() => removeSeat(idx)}
-                  title="移除该席位"
-                  aria-label="移除该席位"
+                  title={t('routing.removeSeat')}
+                  aria-label={t('routing.removeSeat')}
                 >
                   ✕
                 </button>
@@ -385,19 +385,19 @@ export function RoutingSettings() {
                 type="text"
                 value={seat.charter ?? ''}
                 onChange={(e) => updateSeat(idx, { charter: e.target.value || undefined })}
-                placeholder="席位职守 charter（可选，如：架构与正确性）"
+                placeholder={t('routing.charterPlaceholder')}
                 className="rounded border border-border bg-transparent px-2 py-1 text-xs text-text focus:border-accent focus:outline-none"
               />
             </div>
           )
         })}
 
-        <button className="btn self-start" onClick={addSeat}>+ 添加席位</button>
+        <button className="btn self-start" onClick={addSeat}>{t('routing.addSeat')}</button>
         {hasEmptySeat && (
-          <span className="meta warn">每个席位都需填 authority,否则无法保存。</span>
+          <span className="meta warn">{t('routing.emptySeatWarn')}</span>
         )}
         {dupAuthority && (
-          <span className="meta warn">authority「{dupAuthority}」重复 —— 每席必须不同,否则会丢席。</span>
+          <span className="meta warn">{t('routing.dupAuthorityWarn', { authority: dupAuthority })}</span>
         )}
       </section>
 
@@ -409,9 +409,9 @@ export function RoutingSettings() {
           onClick={save}
           disabled={saving || !dirty || councilInvalid}
         >
-          {saving ? '保存中…' : '保存路由'}
+          {saving ? t('routing.saving') : t('routing.save')}
         </button>
-        {dirty && <span className="meta">有未保存的更改</span>}
+        {dirty && <span className="meta">{t('routing.dirty')}</span>}
       </div>
     </div>
   )

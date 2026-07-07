@@ -62,6 +62,12 @@ export interface ToolExecutionDeps {
   getSessionTurnCount: () => number
   getSessionId: () => string | undefined
   addToolResults: (results: ContentBlock[]) => void
+  /** Vision channel: current model accepts image inputs (per-model config flag). */
+  getSupportsVision?: () => boolean
+  /** Vision channel: append a trailing multimodal user message (text + data-URL
+   *  images). Append-only at the tail — prefix-cache safe (same boundary as
+   *  the steer path). Only invoked when getSupportsVision() is true. */
+  addUserMessageWithImages?: (text: string, images: string[]) => void
   recordToolHistory: (name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: ToolErrorClass) => void
   buildRuntimeSnapshot: (extra?: Partial<RuntimeHookSnapshot>) => RuntimeHookSnapshot
   requestThetaCheck: (reason: string) => void
@@ -271,6 +277,10 @@ export class ToolExecutionController {
     let latestRisk = input.latestRisk
     const artifactIdsEvicted: string[] = []
     const artifactIdsAccessed: string[] = []
+    // Vision channel: image attachments carried by this batch's ToolResults
+    // (computer_use screenshots). Forwarded after addToolResults as a trailing
+    // multimodal user message — only when the model supports vision.
+    const pendingImages: string[] = []
 
     // Partition tools into concurrency-safe (parallelizable) and sequential groups.
     // Run contiguous blocks of safe tools in parallel for latency savings.
@@ -302,6 +312,7 @@ export class ToolExecutionController {
           latestRisk = result.latestRisk
           if (result.checkpointCreated) checkpointCreatedThisTurn = true
           if (result.endTurn) endTurn = true
+          if (result.images) pendingImages.push(...result.images)
           toolResults.push(result.toolResult)
         }
       } else {
@@ -322,6 +333,7 @@ export class ToolExecutionController {
         latestRisk = result.latestRisk
         if (result.checkpointCreated) checkpointCreatedThisTurn = true
         if (result.endTurn) endTurn = true
+        if (result.images) pendingImages.push(...result.images)
         toolResults.push(result.toolResult)
       }
     }
@@ -538,6 +550,20 @@ export class ToolExecutionController {
     }
 
     this.deps.addToolResults(toolResults)
+
+    // Vision channel: forward tool-carried screenshots to the model as a
+    // TRAILING user message (append-only after the tool results — same
+    // prefix-cache-safe boundary as the steer path; never rewrites history).
+    // Text-only models: images are dropped, byte-identical to legacy behavior.
+    if (pendingImages.length > 0 && this.deps.getSupportsVision?.() === true && this.deps.addUserMessageWithImages) {
+      // Cap at the 2 most recent shots — a batch with several snapshots must
+      // not flood the context with megapixel base64.
+      const images = pendingImages.slice(-2)
+      this.deps.addUserMessageWithImages(
+        '<system-reminder>Screenshot(s) from the computer_use call(s) above are attached. Use them to visually confirm UI state alongside the accessibility tree; do not describe them back to the user unless asked.</system-reminder>',
+        images,
+      )
+    }
 
     const level = getInterventionLevel(this.deps.getPredictionAccumulator())
     this.deps.contextInjection.setCerebellarHint(level)

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
-import { Palette, SlidersHorizontal, Plug, Cpu, LifeBuoy, type LucideIcon } from 'lucide-react'
+import { useTranslation, Trans } from 'react-i18next'
+import { Palette, SlidersHorizontal, Plug, Cpu, LifeBuoy, FolderOpen, type LucideIcon } from 'lucide-react'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -19,13 +19,15 @@ import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
-import { McpSettings } from '../components/McpSettings'
+import { McpSettingsManager } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { pickFolder } from '../lib/dialog'
+import { openRivetHome } from '../lib/open-external'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import type { McpStatusResponse, McpServerConfig, McpPreset, EnvironmentInfo } from '../runtime/types'
+import type { EnvironmentInfo } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
 import {
   Select,
@@ -52,13 +54,15 @@ export function SettingsSurface() {
 
   const THEME_LABEL: Record<ThemePref, string> = {
     system: t('theme.system'),
-    light: '默认亮色 (Default Light)',
+    light: t('theme.light'),
     dark: t('theme.dark'),
     nebula: t('theme.nebula'),
-    sakura: '樱花粉 (Sakura Pink)',
-    cyberpunk: '赛博朋克 (Cyberpunk Neon)',
-    cupertino: '苹果极简 (Cupertino Clean)',
-    'light-classic': '经典亮色 (Classic Light)',
+    sakura: t('theme.sakura'),
+    cyberpunk: t('theme.cyberpunk'),
+    cupertino: t('theme.cupertino'),
+    'light-classic': t('theme.light-classic'),
+    'codex-dark': t('theme.codex-dark'),
+    'codex-light': t('theme.codex-light'),
   }
   const DENSITY_LABEL: Record<ToolDensity, string> = {
     compact: t('densityCompact'),
@@ -157,7 +161,7 @@ export function SettingsSurface() {
                   <SelectValue placeholder={t('themePlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {(['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino', 'light-classic'] as ThemePref[]).map((t) => (
+                  {(['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino', 'light-classic', 'codex-dark', 'codex-light'] as ThemePref[]).map((t) => (
                     <SelectItem key={t} value={t}>{THEME_LABEL[t]}</SelectItem>
                   ))}
                 </SelectContent>
@@ -179,18 +183,18 @@ export function SettingsSurface() {
             </section>
             <FontSettingsPanel value={fontFamily} onChange={pickFontFamily} />
             <section className="settings-group">
-              <h4>界面信息密度</h4>
+              <h4>{t('uiDensity')}</h4>
               <Select value={uiDensity} onValueChange={(v) => pickUiDensity(v as UiDensity)}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="选择界面信息密度" />
+                  <SelectValue placeholder={t('uiDensityPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="compact">紧凑 (Compact)</SelectItem>
-                  <SelectItem value="cozy">标准 (Cozy)</SelectItem>
-                  <SelectItem value="spacious">宽松 (Spacious)</SelectItem>
+                  <SelectItem value="compact">{t('uiDensityCompact')}</SelectItem>
+                  <SelectItem value="cozy">{t('uiDensityCozy')}</SelectItem>
+                  <SelectItem value="spacious">{t('uiDensitySpacious')}</SelectItem>
                 </SelectContent>
               </Select>
-              <div className="meta">调整全局间距、内边距和字体大小，以获得最舒适的阅读与操作体验。</div>
+              <div className="meta">{t('uiDensityHint')}</div>
             </section>
             <LanguageSection />
             <WallpaperSection glassConfig={glassConfig} updateGlass={updateGlass} />
@@ -203,6 +207,7 @@ export function SettingsSurface() {
               <AutonomyControl value={autonomy} onChange={pickAutonomy} />
               <div className="meta">{t('autonomyHint')}</div>
             </section>
+            <PermissionDirsSection />
             <CheckpointSection />
             <section className="settings-group">
               <h4>{t('toolDensity')}</h4>
@@ -233,7 +238,7 @@ export function SettingsSurface() {
               <div className="meta">{t('notifHint')}</div>
             </section>
             <section className="settings-group">
-              <h4>右侧面板标签自定义</h4>
+              <h4>{t('reviewTabs.title')}</h4>
               <div className="flex flex-col gap-2 mt-2">
                 {ALL_TABS.map((tab) => {
                   const isChecked = enabledTabs.includes(tab.id)
@@ -258,7 +263,7 @@ export function SettingsSurface() {
                   )
                 })}
               </div>
-              <div className="meta mt-1.5">勾选以显示或隐藏右侧审查面板（ReviewPanel）中对应的标签页，至少保持显示一个标签。</div>
+              <div className="meta mt-1.5">{t('reviewTabs.hint')}</div>
             </section>
           </>
         )}
@@ -267,23 +272,30 @@ export function SettingsSurface() {
             <section className="integration-card">
               <div className="integration-card-header">
                 <h4>{t('provider')}</h4>
-                <p className="meta">管理模型 Provider、API Key 与可用模型。首个配置好的 Provider 会自动成为主控。</p>
+                <p className="meta">{t('providerDesc')}</p>
               </div>
               <ProviderSettings />
             </section>
             <section className="integration-card">
               <div className="integration-card-header">
-                <h4>子代理 / 审查模型路由</h4>
-                <p className="meta">把审查、团队、议事会等子代理路由到不同模型，避免它们和主会话争抢缓存。</p>
+                <h4>{t('routingCardTitle')}</h4>
+                <p className="meta">{t('routingCardDesc')}</p>
               </div>
               <RoutingSettings />
             </section>
             <section className="integration-card">
               <div className="integration-card-header">
-                <h4>MCP 服务器</h4>
-                <p className="meta">连接外部工具服务器（如 Context7），为 agent 提供文档查询等扩展能力。</p>
+                <h4>{t('mcpCardTitle')}</h4>
+                <p className="meta">{t('mcpCardDesc')}</p>
               </div>
               <McpSettingsManager />
+            </section>
+            <section className="integration-card">
+              <div className="integration-card-header">
+                <h4>{t('computerUse.title')}</h4>
+                <p className="meta">{t('computerUse.desc')}</p>
+              </div>
+              <ComputerUseSettingsManager />
             </section>
           </div>
         )}
@@ -292,7 +304,7 @@ export function SettingsSurface() {
             <section className="system-card">
               <div className="system-card-header">
                 <h4>{t('runtime')}</h4>
-                <p className="meta">当前 sidecar 版本、会话数量与运行状态统计。</p>
+                <p className="meta">{t('runtimeDesc')}</p>
               </div>
               {health.isError ? (
                 <div className="meta warn">{t('sidecarOffline')}</div>
@@ -323,73 +335,60 @@ export function SettingsSurface() {
 }
 
 type HelpTab = 'start' | 'commands' | 'config' | 'shortcuts'
-const HELP_TABS: { id: HelpTab; label: string }[] = [
-  { id: 'start', label: '快速开始' },
-  { id: 'commands', label: '任务命令' },
-  { id: 'config', label: '配置说明' },
-  { id: 'shortcuts', label: '快捷键' },
-]
+const HELP_TABS: HelpTab[] = ['start', 'commands', 'config', 'shortcuts']
 
-interface HelpCmd {
-  cmd: string
-  desc: React.ReactNode
-}
-const HELP_COMMANDS: HelpCmd[] = [
-  { cmd: '/team <任务>', desc: <>团队模式：拆解任务 → 多个 patcher 子代理分波并行；主控负责集成、验证、最终 <code>deliver_task</code>。也可传计划文件路径。</> },
-  { cmd: '/team max <任务>', desc: <>强编队：执行前先做依赖分析 / 风险审计 / 对抗盲点搜索，再并行落地。适合大改动 / 高风险重构。</> },
-  { cmd: '/council <目标>', desc: <>议事会：多星域专家对抗会诊，<strong>只出计划不执行</strong>。可指定席位、辩论轮数；每席可在「集成 → 路由」配成异构。</> },
-  { cmd: '/review [关注点]', desc: <>L2 审查：对当前未提交改动派单个对抗验证审查员（<code>deliver_task</code> commit + L2）。</> },
-  { cmd: '/review max [关注点]', desc: <>L3 审查编队：5 名审查员并行复核（<code>deliver_task</code> commit + L3）。大改动或交付前用它兜底。</> },
-  { cmd: '/plan <功能>', desc: <>规划模式：先读代码，出一份带 Mermaid 图 + TDD 步骤的实现计划（不写实现代码），保存到 <code>docs/superpowers/plans/</code>。</> },
-]
+/** Ids into the settings:help.cmd.* i18n subtree (each has .cmd and .desc keys). */
+const HELP_COMMAND_IDS = ['team', 'teamMax', 'council', 'review', 'reviewMax', 'plan'] as const
 
 /**
  * In-app user guide. Organised into topic tabs so first-time users can scan
  * what the help page covers instead of facing one long stacked list.
  */
 function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void }) {
+  const { t } = useTranslation('settings')
   const [tab, setTab] = useState<HelpTab>('start')
+  const richTags = { code: <code />, strong: <strong />, kbd: <kbd /> }
 
   return (
     <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as HelpTab) }} className="help-tabs">
       <TabsList variant="line" className="help-tabs-list">
-        {HELP_TABS.map((t) => (
-          <TabsTrigger key={t.id} value={t.id} className="help-tab-trigger">
-            {t.label}
+        {HELP_TABS.map((id) => (
+          <TabsTrigger key={id} value={id} className="help-tab-trigger">
+            {t(`help.tab.${id}`)}
           </TabsTrigger>
         ))}
       </TabsList>
 
       <TabsContent value="start">
         <div className="help-card">
-          <h4>快速开始</h4>
+          <h4>{t('help.startTitle')}</h4>
           <ol className="help-steps">
-            <li>在「集成」里添加一个模型 Provider，并填入 API Key（首个 Provider 会自动设为主控模型）。</li>
-            <li>到「行为」选择新线程的默认自治档位。</li>
-            <li>用 <kbd>⌘N</kbd> 新建线程，描述你的任务，天枢会自主完成编码。</li>
+            <li>{t('help.startStep1')}</li>
+            <li>{t('help.startStep2')}</li>
+            <li><Trans t={t} i18nKey="help.startStep3" components={richTags} /></li>
           </ol>
-          <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置 Provider →</button>
+          <button className="btn" onClick={() => onNavigate('integrations')}>{t('help.startCta')}</button>
         </div>
       </TabsContent>
 
       <TabsContent value="commands">
         <div className="help-card">
-          <h4>关键任务命令</h4>
+          <h4>{t('help.commandsTitle')}</h4>
           <p className="help-lead">
-            在输入框打 <kbd>/</kbd> 会弹出命令补全，也可用 <kbd>⌘K</kbd> 命令面板。
-            带 <code>&lt;…&gt;</code> 的需要在命令后跟上你的任务描述。
+            <Trans t={t} i18nKey="help.commandsLead1" components={richTags} />
+            <code>{'<…>'}</code>
+            <Trans t={t} i18nKey="help.commandsLead2" components={richTags} />
           </p>
           <div className="help-cmds-grid">
-            {HELP_COMMANDS.map((c) => (
-              <div key={c.cmd} className="help-cmd-card">
-                <code>{c.cmd}</code>
-                <p>{c.desc}</p>
+            {HELP_COMMAND_IDS.map((id) => (
+              <div key={id} className="help-cmd-card">
+                <code>{t(`help.cmd.${id}.cmd`)}</code>
+                <p><Trans t={t} i18nKey={`help.cmd.${id}.desc`} components={richTags} /></p>
               </div>
             ))}
           </div>
           <div className="help-hint">
-            重型并发命令（<code>/team</code> / <code>/review max</code> / <code>/council</code>）会派出子代理——
-            务必先配好「子代理 / 审查模型路由」，否则子代理和主控抢同一个无缓存 Provider 会拖慢主对话。
+            <Trans t={t} i18nKey="help.commandsHint" components={richTags} />
           </div>
         </div>
       </TabsContent>
@@ -397,48 +396,42 @@ function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void })
       <TabsContent value="config">
         <div className="help-cards-stack">
           <div className="help-card">
-            <h4>模型 Provider 与 API Key</h4>
+            <h4>{t('help.providerKeyTitle')}</h4>
             <p className="help-lead">
-              在「集成 → 模型 Provider」里管理多个 Provider（DeepSeek / GLM / Kimi / Codex 等）。
-              其中一个被标记为「主控」，即对话主循环使用的模型。Key 只存在本地
-              <code>~/.rivet/config.json</code>，不会上传。
+              <Trans t={t} i18nKey="help.providerKeyDesc" components={richTags} />
             </p>
-            <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置 →</button>
+            <button className="btn" onClick={() => onNavigate('integrations')}>{t('help.ctaIntegrations')}</button>
           </div>
 
           <div className="help-card">
-            <h4>子代理 / 审查模型路由（重要）</h4>
+            <h4>{t('help.routingTitle')}</h4>
             <p className="help-lead">
-              天枢在「提交后审查」和「能力任务委派」时会派出子代理。如果子代理和主控用
-              <strong>同一个无服务端前缀缓存的 Provider</strong>（GLM / Kimi / Codex 等），并发请求会
-              <strong>抢占并驱逐主会话的服务端缓存</strong>，导致主对话突然变慢甚至看起来卡死。
+              <Trans t={t} i18nKey="help.routingDesc1" components={richTags} />
             </p>
             <p className="help-lead">
-              解决办法：把子代理路由到一个便宜的「副模型」（如 DeepSeek Flash）。支持<strong>跨 Provider</strong>路由——
-              主控用 GLM，子代理走 DeepSeek Flash，两条缓存互不干扰。若指定的 Provider / 模型不存在或缺 Key，会静默回退到主控模型。
+              <Trans t={t} i18nKey="help.routingDesc2" components={richTags} />
             </p>
-            <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置路由 →</button>
+            <button className="btn" onClick={() => onNavigate('integrations')}>{t('help.ctaRouting')}</button>
           </div>
 
           <div className="help-card">
-            <h4>自治档位</h4>
+            <h4>{t('help.autonomyTitle')}</h4>
             <p className="help-lead">
-              在「行为 → 新线程默认自治档位」设置。高档位在项目目录内全自动执行；
-              项目目录外的写入仍受沙箱限制，且任何改动都可回滚。
+              {t('help.autonomyDesc')}
             </p>
-            <button className="btn" onClick={() => onNavigate('behavior')}>前往「行为」设置 →</button>
+            <button className="btn" onClick={() => onNavigate('behavior')}>{t('help.ctaBehavior')}</button>
           </div>
 
           <div className="help-card">
-            <h4>配置文件与数据位置</h4>
+            <h4>{t('help.filesTitle')}</h4>
             <dl className="help-kv">
-              <div><dt>主配置</dt><dd><code>~/.rivet/config.json</code></dd></div>
-              <div><dt>项目级覆盖</dt><dd>项目根目录 <code>.rivet-config.json</code></dd></div>
-              <div><dt>会话日志</dt><dd><code>~/.rivet/sessions/&lt;项目&gt;/</code></dd></div>
-              <div><dt>配置示例</dt><dd>仓库根目录 <code>config.example.json</code></dd></div>
+              <div><dt>{t('help.filesMainConfig')}</dt><dd><code>~/.rivet/config.json</code></dd></div>
+              <div><dt>{t('help.filesProjectOverride')}</dt><dd><Trans t={t} i18nKey="help.filesProjectOverrideValue" components={richTags} /></dd></div>
+              <div><dt>{t('help.filesSessionLogs')}</dt><dd><code>{t('help.filesSessionLogsValue')}</code></dd></div>
+              <div><dt>{t('help.filesConfigExample')}</dt><dd><Trans t={t} i18nKey="help.filesConfigExampleValue" components={richTags} /></dd></div>
             </dl>
             <p className="help-lead">
-              手改配置后无需重启桌面端，下一次新建会话即生效。加载器只接受 JSON 格式，键名为 camelCase。
+              {t('help.filesNote')}
             </p>
           </div>
         </div>
@@ -446,13 +439,13 @@ function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void })
 
       <TabsContent value="shortcuts">
         <div className="help-card">
-          <h4>常用快捷键</h4>
+          <h4>{t('help.shortcutsTitle')}</h4>
           <dl className="help-shortcuts">
-            <div><dt><kbd>⌘K</kbd></dt><dd>打开命令面板</dd></div>
-            <div><dt><kbd>⌘N</kbd></dt><dd>新建线程</dd></div>
-            <div><dt><kbd>⌘B</kbd></dt><dd>展开 / 收起左侧项目侧边栏</dd></div>
-            <div><dt><kbd>⌘⇧B</kbd></dt><dd>展开 / 收起右侧审查面板</dd></div>
-            <div><dt><kbd>/</kbd></dt><dd>在输入框使用斜杠命令</dd></div>
+            <div><dt><kbd>⌘K</kbd></dt><dd>{t('help.shortcutPalette')}</dd></div>
+            <div><dt><kbd>⌘N</kbd></dt><dd>{t('help.shortcutNewThread')}</dd></div>
+            <div><dt><kbd>⌘B</kbd></dt><dd>{t('help.shortcutSidebar')}</dd></div>
+            <div><dt><kbd>⌘⇧B</kbd></dt><dd>{t('help.shortcutReview')}</dd></div>
+            <div><dt><kbd>/</kbd></dt><dd>{t('help.shortcutSlash')}</dd></div>
           </dl>
         </div>
       </TabsContent>
@@ -483,6 +476,7 @@ function formatBytes(n: number): string {
 /** W5 — launch-at-login toggle (tauri-plugin-autostart). Windows: HKCU Run key;
     macOS: LaunchAgent. Hidden entirely in browser-dev (no Tauri runtime). */
 function AutostartSection() {
+  const { t } = useTranslation('settings')
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
   const [enabled, setEnabled] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
@@ -504,19 +498,19 @@ function AutostartSection() {
       else await m.enable()
       setEnabled(await m.isEnabled())
     } catch (err) {
-      toast.error(`开机自启设置失败：${(err as Error).message}`)
+      toast.error(t('autostart.failed', { error: (err as Error).message }))
     } finally {
       setBusy(false)
     }
-  }, [enabled, busy])
+  }, [enabled, busy, t])
 
   if (!isTauri || enabled === null) return null
 
   return (
     <section className="system-card">
       <div className="system-card-header">
-        <h4>开机自启</h4>
-        <p className="meta">登录系统时自动启动天枢（Windows 注册表 Run 键 / macOS LaunchAgent）。</p>
+        <h4>{t('autostart.title')}</h4>
+        <p className="meta">{t('autostart.desc')}</p>
       </div>
       <label className="flex items-center gap-2 text-xs text-text" style={{ cursor: 'pointer' }}>
         <input
@@ -525,7 +519,7 @@ function AutostartSection() {
           disabled={busy}
           onChange={() => void toggle()}
         />
-        <span>{enabled ? '已启用 — 登录时自动启动' : '未启用'}</span>
+        <span>{enabled ? t('autostart.enabled') : t('autostart.disabled')}</span>
       </label>
     </section>
   )
@@ -533,6 +527,7 @@ function AutostartSection() {
 
 /** C3 — Auto 模式检查点间隔。权限模式（Manual/Auto/YOLO）通过 AutonomyControl 切换。 */
 function CheckpointSection() {
+  const { t } = useTranslation('settings')
   const [cfg, setCfg] = useState<{ checkpointEveryTurns: number } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [customInterval, setCustomInterval] = useState('')
@@ -548,11 +543,11 @@ function CheckpointSection() {
     try {
       const saved = await setCheckpointConfig(patch)
       setCfg({ checkpointEveryTurns: saved.checkpointEveryTurns })
-      setMsg('已保存 · 新会话生效')
+      setMsg(t('checkpoint.saved'))
     } catch (err) {
-      setMsg(`保存失败：${(err as Error).message}`)
+      setMsg(t('checkpoint.saveFailed', { error: (err as Error).message }))
     }
-  }, [])
+  }, [t])
 
   if (cfg === null) return null
 
@@ -562,7 +557,7 @@ function CheckpointSection() {
   const applyCustomInterval = () => {
     const v = Number(customInterval)
     if (!Number.isInteger(v) || v < 0) {
-      setMsg('轮数必须是非负整数（0 = 关）')
+      setMsg(t('checkpoint.invalidInterval'))
       return
     }
     setCustomInterval('')
@@ -571,7 +566,7 @@ function CheckpointSection() {
 
   return (
     <section className="settings-group">
-      <h4>Auto 检查点</h4>
+      <h4>{t('checkpoint.title')}</h4>
       <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
         <Select
           value={isPreset ? String(cfg.checkpointEveryTurns) : 'custom'}
@@ -579,12 +574,12 @@ function CheckpointSection() {
         >
           <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="20">每 20 轮暂停</SelectItem>
-            <SelectItem value="25">每 25 轮暂停（推荐）</SelectItem>
-            <SelectItem value="30">每 30 轮暂停</SelectItem>
+            <SelectItem value="20">{t('checkpoint.every', { n: 20 })}</SelectItem>
+            <SelectItem value="25">{t('checkpoint.every25')}</SelectItem>
+            <SelectItem value="30">{t('checkpoint.every', { n: 30 })}</SelectItem>
             {!isPreset && (
               <SelectItem value="custom">
-                {cfg.checkpointEveryTurns === 0 ? '已关闭' : `每 ${cfg.checkpointEveryTurns} 轮暂停（自定义）`}
+                {cfg.checkpointEveryTurns === 0 ? t('checkpoint.off') : t('checkpoint.everyCustom', { n: cfg.checkpointEveryTurns })}
               </SelectItem>
             )}
           </SelectContent>
@@ -593,24 +588,150 @@ function CheckpointSection() {
           className="settings-input"
           style={{ width: 96 }}
           inputMode="numeric"
-          placeholder="自定义轮数"
+          placeholder={t('checkpoint.customPlaceholder')}
           value={customInterval}
           onChange={(e) => setCustomInterval(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') applyCustomInterval() }}
         />
         <button type="button" className="btn-sm" onClick={applyCustomInterval} disabled={!customInterval.trim()}>
-          应用
+          {t('checkpoint.apply')}
         </button>
       </div>
       <div className="meta">
-        Auto 模式下，每隔 N 轮暂停并同步进度摘要。默认关闭（0 = 不暂停）。仅在 auto-safe 模式下生效；YOLO 和 Manual 模式不受影响。权限模式通过上方 Autonomy 控件切换。
+        {t('checkpoint.hint')}
       </div>
       {msg && <div className="meta">{msg}</div>}
     </section>
   )
 }
 
+/**
+ * Codex-style standing directory grants (agent.permissions.additional*Dirs):
+ * hand whole folders (or a drive root) to the agent without per-file approval
+ * prompts. Backed by GET/PUT /config/permission-dirs; additions apply to the
+ * running sidecar immediately, removals need a sidecar restart.
+ */
+function PermissionDirsSection() {
+  const { t } = useTranslation('settings')
+  const [dirs, setDirs] = useState<PermissionDirs | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [readInput, setReadInput] = useState('')
+  const [writeInput, setWriteInput] = useState('')
+
+  useEffect(() => {
+    void getPermissionDirs()
+      .then((d) => setDirs(d))
+      .catch(() => setLoadFailed(true))
+  }, [])
+
+  const save = useCallback(async (readPaths: string[], writePaths: string[]) => {
+    setMsg(null)
+    try {
+      const saved = await setPermissionDirs({
+        additionalReadDirs: readPaths,
+        additionalWriteDirs: writePaths,
+      })
+      setDirs({ readDirs: saved.readDirs, writeDirs: saved.writeDirs })
+      setMsg(saved.restartRequired ? t('permissionDirs.savedRestart') : t('permissionDirs.savedApplied'))
+    } catch (err) {
+      setMsg(t('permissionDirs.saveFailed', { error: (err as Error).message }))
+    }
+  }, [t])
+
+  if (loadFailed || dirs === null) return null
+
+  const readPaths = dirs.readDirs.map((d) => d.path)
+  const writePaths = dirs.writeDirs.map((d) => d.path)
+
+  const addDir = (mode: 'read' | 'write', raw: string) => {
+    const path = raw.trim()
+    if (!path) return
+    if (mode === 'read') {
+      if (readPaths.includes(path)) return
+      setReadInput('')
+      void save([...readPaths, path], writePaths)
+    } else {
+      if (writePaths.includes(path)) return
+      setWriteInput('')
+      void save(readPaths, [...writePaths, path])
+    }
+  }
+
+  const removeDir = (mode: 'read' | 'write', path: string) => {
+    if (mode === 'read') void save(readPaths.filter((p) => p !== path), writePaths)
+    else void save(readPaths, writePaths.filter((p) => p !== path))
+  }
+
+  const pickAndAdd = async (mode: 'read' | 'write') => {
+    const folder = await pickFolder()
+    if (folder) addDir(mode, folder)
+  }
+
+  const renderList = (mode: 'read' | 'write', entries: { path: string; exists: boolean }[]) => (
+    entries.length === 0 ? (
+      <div className="meta mt-1">{t('permissionDirs.empty')}</div>
+    ) : (
+      <ul className="mt-1 flex flex-col gap-1 list-none p-0 m-0">
+        {entries.map((d) => (
+          <li key={d.path} className="flex items-center gap-2 text-sm">
+            <span className="font-mono break-all">{d.path}</span>
+            {!d.exists && <span className="badge warn shrink-0">{t('permissionDirs.missing')}</span>}
+            <button type="button" className="btn ghost sm ml-auto shrink-0" onClick={() => removeDir(mode, d.path)}>
+              {t('permissionDirs.remove')}
+            </button>
+          </li>
+        ))}
+      </ul>
+    )
+  )
+
+  const renderAddRow = (
+    mode: 'read' | 'write',
+    input: string,
+    setInput: (v: string) => void,
+  ) => (
+    <div className="flex items-center gap-2 mt-1.5" style={{ flexWrap: 'wrap' }}>
+      <button type="button" className="btn-sm" onClick={() => void pickAndAdd(mode)}>
+        {t('permissionDirs.addFolder')}
+      </button>
+      <input
+        className="settings-input flex-1"
+        style={{ minWidth: 220 }}
+        placeholder={t('permissionDirs.manualPlaceholder')}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') addDir(mode, input) }}
+      />
+      <button type="button" className="btn-sm" onClick={() => addDir(mode, input)} disabled={!input.trim()}>
+        {t('permissionDirs.add')}
+      </button>
+    </div>
+  )
+
+  return (
+    <section className="settings-group">
+      <h4>{t('permissionDirs.title')}</h4>
+      <div className="meta">{t('permissionDirs.desc')}</div>
+      <div className="mt-2">
+        <h5 className="text-sm font-medium m-0">{t('permissionDirs.readTitle')}</h5>
+        <div className="meta">{t('permissionDirs.readDesc')}</div>
+        {renderList('read', dirs.readDirs)}
+        {renderAddRow('read', readInput, setReadInput)}
+      </div>
+      <div className="mt-3">
+        <h5 className="text-sm font-medium m-0">{t('permissionDirs.writeTitle')}</h5>
+        <div className="meta">{t('permissionDirs.writeDesc')}</div>
+        {renderList('write', dirs.writeDirs)}
+        {renderAddRow('write', writeInput, setWriteInput)}
+      </div>
+      {msg && <div className="meta mt-1.5">{msg}</div>}
+    </section>
+  )
+}
+
 function PlatformSection() {
+  const { t } = useTranslation('settings')
   const [cfg, setCfg] = useState<EditorConfig | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -623,27 +744,27 @@ function PlatformSection() {
     try {
       const next = await setEditorConfig(patch)
       setCfg({ platform: next.platform, eol: next.eol })
-      setMsg('已保存 · 重启应用后生效')
+      setMsg(t('platform.saved'))
     } catch (err) {
-      setMsg(`保存失败：${(err as Error).message}`)
+      setMsg(t('platform.saveFailed', { error: (err as Error).message }))
     }
-  }, [])
+  }, [t])
 
   if (!cfg) return null
 
   return (
     <section className="system-card">
       <div className="system-card-header">
-        <h4>平台约定（换行符 / 目标系统）</h4>
-        <p className="meta">控制新建文件的换行符，以及系统提示里告诉模型的目标 OS。<code>auto</code> 跟随本机。命令始终在本机 shell 执行——跨平台覆盖只影响文件约定，不改变命令执行。</p>
+        <h4>{t('platform.title')}</h4>
+        <p className="meta"><Trans t={t} i18nKey="platform.desc" components={{ code: <code /> }} /></p>
       </div>
       <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
         <label className="flex items-center gap-2 text-xs text-text">
-          <span className="text-muted">目标平台</span>
+          <span className="text-muted">{t('platform.targetPlatform')}</span>
           <Select value={cfg.platform} onValueChange={(v) => void update({ platform: v as EditorPlatform })}>
             <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">自动（跟随本机）</SelectItem>
+              <SelectItem value="auto">{t('platform.auto')}</SelectItem>
               <SelectItem value="windows">Windows (CRLF)</SelectItem>
               <SelectItem value="macos">macOS (LF)</SelectItem>
               <SelectItem value="linux">Linux (LF)</SelectItem>
@@ -651,11 +772,11 @@ function PlatformSection() {
           </Select>
         </label>
         <label className="flex items-center gap-2 text-xs text-text">
-          <span className="text-muted">换行符</span>
+          <span className="text-muted">{t('platform.eol')}</span>
           <Select value={cfg.eol} onValueChange={(v) => void update({ eol: v as EditorEol })}>
             <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">自动（由平台推导）</SelectItem>
+              <SelectItem value="auto">{t('platform.eolAuto')}</SelectItem>
               <SelectItem value="lf">LF</SelectItem>
               <SelectItem value="crlf">CRLF</SelectItem>
             </SelectContent>
@@ -664,13 +785,14 @@ function PlatformSection() {
       </div>
       {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
       <div className="meta" style={{ marginTop: 6 }}>
-        <code>.bat</code> / <code>.cmd</code> 始终用 CRLF；已存在的文件始终沿用其原有换行符。也可在项目根的 <code>.rivet-config.json</code> 的 <code>editor</code> 段做按项目覆盖。
+        <Trans t={t} i18nKey="platform.footer" components={{ code: <code /> }} />
       </div>
     </section>
   )
 }
 
 function ShellSection() {
+  const { t } = useTranslation('settings')
   const [env, setEnv] = useState<EnvironmentInfo | null>(null)
   const [path, setPath] = useState('')
   const [saved, setSaved] = useState('')
@@ -700,19 +822,19 @@ function ShellSection() {
       setSaved(next.gitBashPath)
       setExists(next.exists)
       if (next.gitBashPath && next.exists === false) {
-        setMsg('已保存，但该路径当前不存在 — 装好 Git 或修正路径后重启应用生效')
+        setMsg(t('shell.savedMissing'))
       } else if (next.gitBashPath) {
-        setMsg('已保存 · 重启应用后生效')
+        setMsg(t('shell.saved'))
       } else {
-        setMsg('已清除自定义路径 · 重启应用后回到自动探测')
+        setMsg(t('shell.cleared'))
       }
       void getEnvironment().then(setEnv).catch(() => {})
     } catch (err) {
-      setMsg(`保存失败：${(err as Error).message}`)
+      setMsg(t('shell.saveFailed', { error: (err as Error).message }))
     } finally {
       setBusy(false)
     }
-  }, [path])
+  }, [path, t])
 
   // Git Bash override only affects command execution on Windows. Hide the whole
   // card elsewhere to avoid confusing macOS/Linux users. Render nothing until
@@ -724,21 +846,21 @@ function ShellSection() {
   const usingBash = shell?.kind === 'bash'
   const statusText = shell
     ? usingBash
-      ? `命令执行使用 Git Bash（${shell.kind}）`
-      : `⚠ 未使用 Git Bash — 已退回 ${shell.kind}，部分命令可能异常或无输出`
-    : '未获取到 shell 状态'
+      ? t('shell.statusUsing', { kind: shell.kind })
+      : t('shell.statusFallback', { kind: shell.kind })
+    : t('shell.statusUnknown')
 
   return (
     <section className="system-card">
       <div className="system-card-header">
-        <h4>命令执行 Shell（Git Bash 路径）</h4>
+        <h4>{t('shell.title')}</h4>
         <p className="meta">
-          Windows 上天枢优先用 Git 自带的 Git Bash 执行命令（更可靠的 POSIX 行为）。装在非默认位置、或想指定自带 Git 时，在此填 <code>bash.exe</code> 的完整路径。留空则自动探测（系统 Git → 常见位置 → 内置 PortableGit）。系统环境变量 <code>RIVET_GIT_BASH_PATH</code> 优先级更高。
+          <Trans t={t} i18nKey="shell.desc" components={{ code: <code /> }} />
         </p>
       </div>
       <div className={`meta ${usingBash ? '' : 'warn'}`} style={{ marginBottom: 8 }}>
-        当前：{statusText}
-        {shell?.gitBashAvailable === false && '（未检测到可用 Git Bash）'}
+        {t('shell.current')}{statusText}
+        {shell?.gitBashAvailable === false && t('shell.noBash')}
       </div>
       <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
         <Input
@@ -749,16 +871,16 @@ function ShellSection() {
           style={{ minWidth: 340, flex: 1, fontFamily: 'var(--font-mono, monospace)' }}
         />
         <Button onClick={() => void save()} disabled={busy || path.trim() === saved.trim()}>
-          {busy ? '保存中…' : '保存'}
+          {busy ? t('shell.saving') : t('shell.save')}
         </Button>
         {saved && (
           <Button variant="outline" onClick={() => { setPath(''); }} disabled={busy}>
-            清除
+            {t('shell.clear')}
           </Button>
         )}
       </div>
       {saved && exists === false && (
-        <div className="meta warn" style={{ marginTop: 6 }}>已保存的路径不存在：<code>{saved}</code></div>
+        <div className="meta warn" style={{ marginTop: 6 }}>{t('shell.savedPathMissing')}<code>{saved}</code></div>
       )}
       {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
     </section>
@@ -766,24 +888,46 @@ function ShellSection() {
 }
 
 function StorageLocationSection() {
+  const { t } = useTranslation('settings')
+  const [revealing, setRevealing] = useState(false)
+
   const handleApplied = async (requiresRestart: boolean) => {
     if (requiresRestart) {
-      toast.success('存储位置已保存，应用即将重启')
+      toast.success(t('storageLocation.savedRestart'))
       try {
         await relaunch()
       } catch {
         window.location.reload()
       }
     } else {
-      toast.success('存储位置已保存')
+      toast.success(t('storageLocation.saved'))
+    }
+  }
+
+  const handleOpenDataFolder = async () => {
+    setRevealing(true)
+    try {
+      await openRivetHome()
+    } catch (err) {
+      toast.error(t('storageLocation.openFailed', { error: (err as Error).message }))
+    } finally {
+      setRevealing(false)
     }
   }
 
   return (
     <section className="system-card">
       <div className="system-card-header">
-        <h4>存储位置</h4>
-        <p className="meta">设置天枢数据根目录（RIVET_HOME）。更改后需重启应用，可选择是否迁移已有数据。</p>
+        <h4>{t('storageLocation.title')}</h4>
+        <p className="meta">{t('storageLocation.desc')}</p>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <button className="btn" onClick={() => void handleOpenDataFolder()} disabled={revealing}>
+          <FolderOpen size={14} /> {revealing ? t('storageLocation.opening') : t('storageLocation.openFolder')}
+        </button>
+        <span className="meta" style={{ marginLeft: 8, fontSize: 12 }}>
+          {t('storageLocation.openHint')}
+        </span>
       </div>
       <StorageLocationPanel onApplied={handleApplied} />
     </section>
@@ -791,6 +935,7 @@ function StorageLocationSection() {
 }
 
 function StorageSection() {
+  const { t } = useTranslation('settings')
   const [report, setReport] = useState<StorageReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -816,37 +961,37 @@ function StorageSection() {
     setMsg(null)
     try {
       const res = await cleanupStorage(opts)
-      setMsg(`已清理 ${res.deleted} 个归档会话，释放 ${formatBytes(res.freedBytes)}`)
+      setMsg(t('storage.cleaned', { n: res.deleted, bytes: formatBytes(res.freedBytes) }))
       await refresh()
     } catch (err) {
-      setMsg(`清理失败：${(err as Error).message}`)
+      setMsg(t('storage.cleanFailed', { error: (err as Error).message }))
     } finally {
       setBusy(false)
     }
-  }, [refresh])
+  }, [refresh, t])
 
   const archived = report?.archived ?? []
 
   return (
     <section className="system-card">
       <div className="system-card-header">
-        <h4>存储管理</h4>
-        <p className="meta">查看会话文件占用，清理已归档会话以释放磁盘空间。删除不可逆，进行中的会话不受影响。</p>
+        <h4>{t('storage.title')}</h4>
+        <p className="meta">{t('storage.desc')}</p>
       </div>
       {loading && !report ? (
-        <div className="meta">正在统计…</div>
+        <div className="meta">{t('storage.counting')}</div>
       ) : !report ? (
-        <div className="meta warn">无法读取存储信息（sidecar 离线？）</div>
+        <div className="meta warn">{t('storage.unavailable')}</div>
       ) : (
         <>
           <dl className="kv">
-            <div><dt>会话文件总占用</dt><dd>{formatBytes(report.totalBytes)}</dd></div>
-            <div><dt>会话总数</dt><dd>{report.sessionCount}</dd></div>
-            <div><dt>已归档会话</dt><dd>{report.archivedCount} 个 · {formatBytes(report.archivedBytes)} 可回收</dd></div>
+            <div><dt>{t('storage.totalUsage')}</dt><dd>{formatBytes(report.totalBytes)}</dd></div>
+            <div><dt>{t('storage.sessionCount')}</dt><dd>{report.sessionCount}</dd></div>
+            <div><dt>{t('storage.archivedCount')}</dt><dd>{t('storage.archivedValue', { n: report.archivedCount, bytes: formatBytes(report.archivedBytes) })}</dd></div>
           </dl>
 
           <div className="meta" style={{ marginTop: 8 }}>
-            归档会话的对话记录会一直保留在磁盘上。下面只清理「已归档」的会话，进行中的会话不受影响。<strong>删除不可逆。</strong>
+            <Trans t={t} i18nKey="storage.note" components={{ strong: <strong /> }} />
           </div>
 
           <div className="flex items-center gap-2" style={{ marginTop: 10, flexWrap: 'wrap' }}>
@@ -855,10 +1000,10 @@ function StorageSection() {
               disabled={busy || archived.length === 0}
               onClick={() => runCleanup(
                 { olderThanDays: days },
-                `确定清理 ${days} 天前的所有归档会话吗？此操作不可恢复。`,
+                t('storage.cleanupConfirmDays', { days }),
               )}
             >
-              清理
+              {t('storage.cleanupPrefix')}
               <input
                 type="number"
                 min={0}
@@ -867,26 +1012,26 @@ function StorageSection() {
                 onClick={(e) => e.stopPropagation()}
                 style={{ width: 52, margin: '0 4px', textAlign: 'center' }}
               />
-              天前的归档
+              {t('storage.cleanupSuffix')}
             </button>
             <button
               className="btn btn-danger"
               disabled={busy || archived.length === 0}
               onClick={() => runCleanup(
                 {},
-                `确定清理全部 ${archived.length} 个归档会话吗？将释放约 ${formatBytes(report.archivedBytes)}，此操作不可恢复。`,
+                t('storage.cleanupConfirmAll', { n: archived.length, bytes: formatBytes(report.archivedBytes) }),
               )}
             >
-              清理全部归档（{archived.length}）
+              {t('storage.cleanupAll', { n: archived.length })}
             </button>
-            <button className="btn" disabled={loading || busy} onClick={() => void refresh()}>刷新</button>
+            <button className="btn" disabled={loading || busy} onClick={() => void refresh()}>{t('storage.refresh')}</button>
           </div>
 
           {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
 
           {archived.length > 0 && (
             <div style={{ marginTop: 12 }}>
-              <div className="meta">归档会话（按最早在前）：</div>
+              <div className="meta">{t('storage.archivedList')}</div>
               <div className="flex flex-col gap-1" style={{ marginTop: 6, maxHeight: 220, overflowY: 'auto' }}>
                 {archived.map((s) => (
                   <div key={s.id} className="flex items-center gap-2" style={{ justifyContent: 'space-between' }}>
@@ -900,9 +1045,9 @@ function StorageSection() {
                         disabled={busy}
                         onClick={() => runCleanup(
                           { ids: [s.id] },
-                          `删除归档会话「${s.title || s.id}」(${formatBytes(s.bytes)})？此操作不可恢复。`,
+                          t('storage.deleteConfirm', { title: s.title || s.id, bytes: formatBytes(s.bytes) }),
                         )}
-                      >删除</button>
+                      >{t('storage.delete')}</button>
                     </span>
                   </div>
                 ))}
@@ -911,6 +1056,14 @@ function StorageSection() {
           )}
         </>
       )}
+      <div style={{ marginTop: 12 }}>
+        <button className="btn" onClick={() => void openRivetHome()}>
+          <FolderOpen size={14} /> {t('storage.openFolder')}
+        </button>
+        <span className="meta" style={{ marginLeft: 8, fontSize: 12 }}>
+          {t('storage.openHint')}
+        </span>
+      </div>
     </section>
   )
 }
@@ -983,7 +1136,7 @@ function UpdaterSection() {
     <section className="system-card">
       <div className="system-card-header">
         <h4>{t('update')}</h4>
-        <p className="meta">检查并安装应用更新。下载完成后会自动重启以完成安装。</p>
+        <p className="meta">{t('updateDesc')}</p>
       </div>
       <button className="btn" onClick={handleCheck} disabled={checking || installing}>
         {checking ? t('updateChecking') : t('updateCheck')}
@@ -1007,57 +1160,82 @@ function UpdaterSection() {
   )
 }
 
-/** Inner component that manages MCP status polling and delegates to McpSettings UI. */
-function McpSettingsManager() {
-  const [mcpStatus, setMcpStatus] = useState<McpStatusResponse | null>(null)
-  const [mcpLoading, setMcpLoading] = useState(true)
-  const [mcpError, setMcpError] = useState<string | null>(null)
-  const [presets, setPresets] = useState<McpPreset[] | null>(null)
-  const [configuredIds, setConfiguredIds] = useState<string[]>([])
+/** Computer Use (macOS GUI automation): permission status + per-app grants. */
+function ComputerUseSettingsManager() {
+  const { t } = useTranslation('settings')
+  const [status, setStatus] = useState<ComputerUseStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const fetchStatus = useCallback(() => {
-    getMcpStatus()
-      .then((s) => { setMcpStatus(s); setMcpError(null) })
-      .catch((err) => setMcpError((err as Error).message))
-      .finally(() => setMcpLoading(false))
-    getMcpPresets()
-      .then((p) => { setPresets(p.presets); setConfiguredIds(p.configuredIds) })
-      .catch(() => { /* non-fatal: preset grid just won't render */ })
+    setLoading(true)
+    getComputerUseStatus()
+      .then((s) => { setStatus(s); setError(null) })
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => {
-    fetchStatus()
-  }, [fetchStatus])
+  useEffect(() => { fetchStatus() }, [fetchStatus])
 
-  const handleAdd = useCallback((config: McpServerConfig) => {
-    addMcpServer(config)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
-  }, [fetchStatus])
+  const handleRevoke = useCallback((app: string) => {
+    revokeComputerUseApp(app)
+      .then((r) => setStatus((prev) => (prev ? { ...prev, grants: r.grants } : prev)))
+      .catch((err) => toast.error(t('computerUse.revokeFailed', { error: (err as Error).message })))
+  }, [t])
 
-  const handleRemove = useCallback((serverId: string) => {
-    removeMcpServer(serverId)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
-  }, [fetchStatus])
+  if (loading && !status) return <div className="meta">{t('computerUse.loading')}</div>
+  if (error) return <div className="meta text-destructive">{error}</div>
+  if (!status) return null
 
-  const handleRestart = useCallback((serverId: string) => {
-    restartMcpServer(serverId)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
-  }, [fetchStatus])
+  if (!status.available) {
+    return <div className="meta">{t('computerUse.unavailable')}</div>
+  }
+
+  const permBadge = (granted: boolean) => (
+    <span className={`badge ${granted ? 'ok' : 'warn'}`}>
+      {granted ? t('computerUse.permGranted') : t('computerUse.permMissing')}
+    </span>
+  )
 
   return (
-    <McpSettings
-      status={mcpStatus}
-      statusLoading={mcpLoading}
-      statusError={mcpError}
-      presets={presets}
-      configuredIds={configuredIds}
-      onAdd={handleAdd}
-      onRemove={handleRemove}
-      onRestart={handleRestart}
-    />
+    <div className="computer-use-settings flex flex-col gap-3">
+      <div>
+        <div className="flex items-center gap-2">
+          <h5 className="text-sm font-medium m-0">{t('computerUse.permissions')}</h5>
+          <button className="btn ghost sm" onClick={fetchStatus}>{t('computerUse.refresh')}</button>
+        </div>
+        {status.permissions ? (
+          <div className="flex items-center gap-4 mt-1.5 text-sm">
+            <span className="flex items-center gap-1.5">{t('computerUse.permAccessibility')} {permBadge(status.permissions.accessibility)}</span>
+            <span className="flex items-center gap-1.5">{t('computerUse.permScreenRecording')} {permBadge(status.permissions.screenRecording)}</span>
+          </div>
+        ) : (
+          <div className="meta mt-1.5">{t('computerUse.permUnknown')}</div>
+        )}
+        {status.permissions && !(status.permissions.accessibility && status.permissions.screenRecording) && (
+          <div className="meta mt-1">{status.permissions.detail}</div>
+        )}
+      </div>
+
+      <div>
+        <h5 className="text-sm font-medium m-0">{t('computerUse.grantsTitle')}</h5>
+        {status.grants.length === 0 ? (
+          <div className="meta mt-1.5">{t('computerUse.grantsEmpty')}</div>
+        ) : (
+          <ul className="mt-1.5 flex flex-col gap-1 list-none p-0 m-0">
+            {status.grants.map((g) => (
+              <li key={g.app} className="flex items-center gap-2 text-sm">
+                <span className="font-mono">{g.app}</span>
+                <span className="meta">{new Date(g.grantedAt).toLocaleString()}</span>
+                <button className="btn ghost sm ml-auto" onClick={() => handleRevoke(g.app)}>
+                  {t('computerUse.revoke')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   )
 }
 

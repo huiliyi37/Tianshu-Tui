@@ -16,6 +16,7 @@ const KEY_SPLIT_MODE = 'tianshu.splitMode'
 const KEY_NOTIF_PREF = 'tianshu.notifPref'
 const KEY_VIEW_MODE = 'tianshu.viewMode'
 const KEY_SEND_MODE = 'tianshu.sendMode'
+const KEY_DRAFTS = 'tianshu.composerDrafts'
 
 // ── Split mode (Phase 3 preview, persisted now) ──
 
@@ -224,5 +225,35 @@ export function loadOpenTabs(): string[] {
 export function saveOpenTabs(tabs: string[]): void {
   try {
     localStorage.setItem(KEY_TABS, JSON.stringify(tabs.slice(0, 10)))
+  } catch { /* non-fatal */ }
+}
+
+// ── Composer drafts (per session) ──
+// Empty drafts are dropped on save so the map cannot grow without bound.
+
+export function loadComposerDrafts(): Record<string, string> {
+  try {
+    const v = localStorage.getItem(KEY_DRAFTS)
+    if (v) {
+      const parsed = JSON.parse(v) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const out: Record<string, string> = {}
+        for (const [k, val] of Object.entries(parsed)) {
+          if (typeof val === 'string' && val) out[k] = val
+        }
+        return out
+      }
+    }
+  } catch { /* non-fatal */ }
+  return {}
+}
+
+export function saveComposerDrafts(drafts: Record<string, string>): void {
+  try {
+    const compact: Record<string, string> = {}
+    for (const [k, v] of Object.entries(drafts)) {
+      if (v) compact[k] = v
+    }
+    localStorage.setItem(KEY_DRAFTS, JSON.stringify(compact))
   } catch { /* non-fatal */ }
 }

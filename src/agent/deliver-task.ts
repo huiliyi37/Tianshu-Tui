@@ -41,8 +41,11 @@ import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverPro
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 import { analyzeImpact } from '../repo/meridian-impact.js'
 import { runChangedFilesTypecheckMemo, runDeclaredCheck, typecheckGateEnabled } from './typecheck-gate.js'
+import { evaluateTestPresence, testPresenceGateEnabled } from './test-presence.js'
+import { auditDeliveryClaims, claimAuditEnabled } from './claim-audit.js'
 import { scanFilesForProbes, formatProbeHits, type ProbeHit } from './probe-detector.js'
 import { findApprovedPlanInventory, verifyRegressionInventory, formatInventoryReport, type InventorySearcher } from './regression-inventory.js'
+import { enqueuePostCommitReviewOutcome } from './post-commit-review-queue.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -120,6 +123,36 @@ let lastPostCommitReviewAt = 0
 /** Test-only: reset the module-level cooldown so it does not leak across cases. */
 export function resetPostCommitReviewCooldown(): void {
   lastPostCommitReviewAt = 0
+}
+
+/** Format a review outcome into report lines. Shared by the synchronous path
+ *  (explicit review_level → lines go into the tool result) and the detached
+ *  path (system-triggered review → lines flow through the advisory queue). */
+export function formatReviewOutcomeLines(outcome: ReviewOutcome): string[] {
+  const lines: string[] = []
+  if (outcome.verdict === 'rejected' || outcome.escalated) {
+    // Advisory: the commit has already landed. Surface the finding
+    // as a strong warning + follow-up recommendation, not a block.
+    lines.push(`⚠️ 审查门发现问题 (${outcome.tier})：${outcome.evidence ?? '对抗性审查未验证此交付'}`)
+    if (typeof outcome.rounds === 'number') lines.push(`   轮次：${outcome.rounds}`)
+    lines.push('   → 提交已落地。请在后续提交中处理审查发现。')
+    lines.push('   ⚠ 以上审查意见来自 worker，未经主控独立核验。汇报用户前请用 grep/read 确认每条声称的文件:行号真实存在。')
+  } else if (outcome.verdict === 'verified') {
+    if (outcome.infraFailures && outcome.infraFailures.length > 0) {
+      lines.push(`⚠️ 审查门 YELLOW (${outcome.tier})：审查基础设施有注意事项，交付已通过可用证据验证。`)
+      lines.push(`   ${outcome.evidence ?? '已通过审查基础设施注意事项验证'}`)
+    } else {
+      lines.push(`✅ 审查通过 (${outcome.tier})：${outcome.evidence ?? '已验证'}`)
+    }
+  } else if (outcome.verdict === 'inconclusive') {
+    lines.push(`⚠️ 审查未决 (${outcome.tier})：${outcome.evidence ?? '提交后审查未运行（基础设施故障）'}`)
+    lines.push('   → 此变更未经审查。运行 /review max 进行完整编队审查。')
+  } else if (outcome.verdict === 'nudge') {
+    lines.push(`⚠️ 审查提醒 (${outcome.tier})：请在后续工作中应用审查纪律。`)
+    lines.push('通用开发方法论：')
+    for (const directive of GENERAL_DEV_DISCIPLINES) lines.push(`  - ${directive}`)
+  }
+  return lines
 }
 
 function parseNulFileList(output: string): string[] {
@@ -303,6 +336,16 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         lines.push(`  Latest: ${v.passed} pass ${v.failed} fail ${v.skipped} skip — ${v.command}`)
       } else if (report.verificationCount === 0) {
         lines.push('  (Typecheck passed, but no test suite was executed. Run tests before claiming "verified".)')
+      }
+
+      // 测试存在性警告（advisory 不阻断）：交付物含 ≥3 个源文件却零测试文件。
+      // 主会话有人看着，硬拦交给 wave-gate 管无人值守场景。
+      if (testPresenceGateEnabled()) {
+        const presence = evaluateTestPresence(report.ownedFiles)
+        if (!presence.ok) {
+          lines.push('', `⚠️ 零测试交付：${presence.detail}`)
+          lines.push('  交付报告中不要宣称"已验证"——这批源文件没有任何测试背书。')
+        }
       }
 
       const hasVerificationDiagnostics = report.currentBlockingFailure
@@ -532,6 +575,24 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         if (!message) {
           lines.push('', '❌ Commit requires a "message" parameter.')
           return { content: lines.join('\n'), isError: true }
+        }
+
+        // 宣称-证据对账（复现即证明）：commit message / checklist 里宣称测试绿，
+        // 但 ledger 里最后一次文件变更后零条 passed 验证记录 → RED 硬拦；
+        // 宣称的 N/N 与最新验证记录对不上 → 软警不阻断。
+        if (claimAuditEnabled()) {
+          const checklistText = (auditList ?? []).map(e => e.item).join('\n')
+          const audit = auditDeliveryClaims({
+            claimText: `${message}\n${checklistText}`,
+            events: ctx.taskLedger.getEvents(),
+          })
+          if (audit.status === 'block') {
+            lines.push('', ...audit.lines)
+            return { content: lines.join('\n'), isError: true }
+          }
+          if (audit.status === 'warn') {
+            lines.push('', ...audit.lines)
+          }
         }
         // Adopt external files into owned set (cross-session takeover)
         const adoptFiles = params.input.adopt as string[] | undefined
@@ -840,67 +901,74 @@ For complex specs or cross-module integration, include checklist entries: fact-f
                 }
               }
               if (!params.abortSignal?.aborted) {
-                // 进度可见：通过 onOutput streaming 回调推送中间状态，
-                // 用户在审查运行期间看到进度而非黑盒等待。
                 const budgetSec = Math.round(REVIEW_TIMEOUT_MS / 1000)
-                params.onOutput?.(`\n⏳ 提交后审查启动中 (${reviewMode}${change.forceLevel ? ' ' + change.forceLevel : ''}, ≤${budgetSec}s)...\n`)
                 lastPostCommitReviewAt = Date.now()
-                let outcome: ReviewOutcome
-                let reviewTimer: NodeJS.Timeout | undefined
-                try {
-                  const timeoutPromise = new Promise<never>((_, reject) => {
-                    reviewTimer = setTimeout(() => {
-                      reviewAbort.abort()
-                      reject(new Error('Review workflow timed out'))
-                    }, REVIEW_TIMEOUT_MS)
-                  })
-                  outcome = await Promise.race([
-                    route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode, depthLayer: ctx.getDepthLayer?.() }),
-                    timeoutPromise,
-                  ])
-                } catch (err) {
-                  const reason = err instanceof Error ? err.message : String(err)
-                  // Review is best-effort post-commit: a timeout/crash never blocks
-                  // delivery — the commit already landed. Report honestly.
-                  outcome = {
-                    tier: reviewMode === 'auto' ? 'auto' : (effectiveReviewLevel ?? 'L2'),
-                    verdict: 'inconclusive',
-                    rounds: 0,
-                    evidence: `post-commit review DID NOT run (${reason.includes('timed out') ? 'timed out' : 'infra failure'}: ${reason})`,
-                    infraFailures: [{ kind: reason.includes('timed out') ? 'timeout' : 'crash', claim: reason }],
+                const reviewDeps = ctx.reviewDeps
+                const fallbackTier = reviewMode === 'auto' ? 'auto' as const : (effectiveReviewLevel ?? 'L2')
+                const runReview = async (): Promise<ReviewOutcome> => {
+                  let reviewTimer: NodeJS.Timeout | undefined
+                  let outcome: ReviewOutcome
+                  try {
+                    const timeoutPromise = new Promise<never>((_, reject) => {
+                      reviewTimer = setTimeout(() => {
+                        reviewAbort.abort()
+                        reject(new Error('Review workflow timed out'))
+                      }, REVIEW_TIMEOUT_MS)
+                    })
+                    outcome = await Promise.race([
+                      route(change, reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode, depthLayer: ctx.getDepthLayer?.() }),
+                      timeoutPromise,
+                    ])
+                  } catch (err) {
+                    const reason = err instanceof Error ? err.message : String(err)
+                    // Review is best-effort post-commit: a timeout/crash never blocks
+                    // delivery — the commit already landed. Report honestly.
+                    outcome = {
+                      tier: fallbackTier,
+                      verdict: 'inconclusive',
+                      rounds: 0,
+                      evidence: `post-commit review DID NOT run (${reason.includes('timed out') ? 'timed out' : 'infra failure'}: ${reason})`,
+                      infraFailures: [{ kind: reason.includes('timed out') ? 'timeout' : 'crash', claim: reason }],
+                    }
+                  } finally {
+                    if (reviewTimer) clearTimeout(reviewTimer)
                   }
-                } finally {
-                  if (reviewTimer) clearTimeout(reviewTimer)
+                  // Review infra health observability (/status): auto runs only.
+                  if (reviewMode === 'auto' && outcome.rounds !== undefined && outcome.verdict !== 'nudge') {
+                    if (outcome.verdict === 'inconclusive') {
+                      recordAutoReviewRun({ ran: false, failureKinds: (outcome.infraFailures ?? []).map(f => f.kind) })
+                    } else {
+                      recordAutoReviewRun({ ran: true, ...(outcome.recoveredByRetry ? { recoveredByRetry: true } : {}) })
+                    }
+                  }
+                  return outcome
                 }
-                // Review infra health observability (/status): auto runs only.
-                if (reviewMode === 'auto' && outcome.rounds !== undefined && outcome.verdict !== 'nudge') {
-                  if (outcome.verdict === 'inconclusive') {
-                    recordAutoReviewRun({ ran: false, failureKinds: (outcome.infraFailures ?? []).map(f => f.kind) })
-                  } else {
-                    recordAutoReviewRun({ ran: true, ...(outcome.recoveredByRetry ? { recoveredByRetry: true } : {}) })
-                  }
-                }
-                if (outcome.verdict === 'rejected' || outcome.escalated) {
-                  // Advisory: the commit has already landed. Surface the finding
-                  // as a strong warning + follow-up recommendation, not a block.
-                  lines.push('', `⚠️ 审查门发现问题 (${outcome.tier})：${outcome.evidence ?? '对抗性审查未验证此交付'}`)
-                  if (typeof outcome.rounds === 'number') lines.push(`   轮次：${outcome.rounds}`)
-                  lines.push('   → 提交已落地。请在后续提交中处理审查发现。')
-                  lines.push('   ⚠ 以上审查意见来自 worker，未经主控独立核验。汇报用户前请用 grep/read 确认每条声称的文件:行号真实存在。')
-                } else if (outcome.verdict === 'verified') {
-                  if (outcome.infraFailures && outcome.infraFailures.length > 0) {
-                    lines.push('', `⚠️ 审查门 YELLOW (${outcome.tier})：审查基础设施有注意事项，交付已通过可用证据验证。`)
-                    lines.push(`   ${outcome.evidence ?? '已通过审查基础设施注意事项验证'}`)
-                  } else {
-                    lines.push('', `✅ 审查通过 (${outcome.tier})：${outcome.evidence ?? '已验证'}`)
-                  }
-                } else if (outcome.verdict === 'inconclusive') {
-                  lines.push('', `⚠️ 审查未决 (${outcome.tier})：${outcome.evidence ?? '提交后审查未运行（基础设施故障）'}`)
-                  lines.push('   → 此变更未经审查。运行 /review max 进行完整编队审查。')
-                } else if (outcome.verdict === 'nudge') {
-                  lines.push('', `⚠️ 审查提醒 (${outcome.tier})：请在后续工作中应用审查纪律。`)
-                  lines.push('通用开发方法论：')
-                  for (const directive of GENERAL_DEV_DISCIPLINES) lines.push(`  - ${directive}`)
+
+                if (explicitReviewLevel) {
+                  // Explicit review_level: the caller asked for review — the
+                  // verdict belongs in this tool result, so wait for it.
+                  params.onOutput?.(`\n⏳ 提交后审查启动中 (${reviewMode} ${explicitReviewLevel}, ≤${budgetSec}s)...\n`)
+                  const outcome = await runReview()
+                  const outcomeLines = formatReviewOutcomeLines(outcome)
+                  if (outcomeLines.length > 0) lines.push('', ...outcomeLines)
+                } else {
+                  // System-triggered review (auto wiring inspector / typecheck-
+                  // escalated L3 / goal-achieved L3): detach. The 240s-timeout
+                  // incident chain (2026-07-07) showed a synchronous 180s review
+                  // await drives models to bypass deliver_task for raw git
+                  // commit — the review is advisory, the commit has already
+                  // landed, so the main loop must not stall on it. Outcome
+                  // flows through post-commit-review-queue → runtime hook →
+                  // AdvisoryBus into a later turn.
+                  const commitRef = headAfterHash ?? 'HEAD'
+                  void runReview().then(outcome => {
+                    enqueuePostCommitReviewOutcome({
+                      lines: [`提交 ${commitRef} 的提交后审查完成：`, ...formatReviewOutcomeLines(outcome)],
+                      verdict: outcome.verdict,
+                      tier: String(outcome.tier),
+                    })
+                  }).catch(() => { /* runReview never rejects; double guard */ })
+                  lines.push('', `⏳ 提交后审查已转后台 (${reviewMode}${change.forceLevel ? ' ' + change.forceLevel : ''}, ≤${budgetSec}s)——结论会以 system 通道注入后续对话，本次交付不等待。`)
                 }
               }
               }
@@ -929,14 +997,23 @@ For complex specs or cross-module integration, include checklist entries: fact-f
     isConcurrencySafe: () => true,
     isEnabled: () => true,
 
-    // Review is now post-commit (advisory). The commit itself is sub-second,
-    // and the review worker budget no longer blocks the main loop — the tool
-    // timeout must still dominate the review budget so the worker can finish,
-    // but the main loop is never stalled waiting for it to gate the commit.
+    // Budget arithmetic (2026-07-07 事故链修复): the pipeline timeout must
+    // DOMINATE the sum of every internal stage budget — racing them was the
+    // 240s mid-flight kill that swallowed "commit landed" and drove models to
+    // bypass deliver_task for raw git commit.
+    // Stages inside a commit=true call:
+    //   typecheck backstop  ≤120s (lsp/client runTypeCheck default)
+    //   declared check      ≤120s (non-TS projects, disjoint with tsc path)
+    //   scoped commit/gates  seconds
+    //   review              awaited ONLY for explicit review_level (manual);
+    //                       system-triggered review is detached (zero wait).
     timeoutMs: (params) => {
-      const level = params?.input?.review_level as ReviewScale | undefined
-      const mode: ReviewMode = level ? 'manual' : 'auto'
-      return reviewWorkflowBudgetMs(mode, level) + 60_000
+      const TYPECHECK_STAGE_MS = 120_000
+      const GRACE_MS = 60_000
+      if (params?.input?.commit !== true) return 120_000
+      const level = params.input.review_level as ReviewScale | undefined
+      const reviewWait = level ? reviewWorkflowBudgetMs('manual', level) : 0
+      return reviewWait + TYPECHECK_STAGE_MS + GRACE_MS
     },
   }
 }

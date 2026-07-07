@@ -1,6 +1,7 @@
 // File-type classification for the Composer attachment flow.
 // Windows clipboard/drag often reports an empty MIME type, so every check
 // falls back to the file extension.
+import i18n from '../i18n'
 
 /** Raster images supported by the vision pipeline (BMP is transcoded). */
 const IMAGE_EXTENSIONS = new Set([
@@ -145,9 +146,9 @@ export async function detectImageMimeByMagic(file: Blob): Promise<string | null>
 /** Human-friendly description of why a file is unsupported. */
 export function describeUnsupportedFile(file: { name: string }): string {
   if (isArchiveFile(file)) {
-    return `${file.name} 是压缩包，暂不支持，请解压后上传文件或图片`
+    return i18n.t('composer:unsupported.archive', { name: file.name })
   }
-  return `${file.name} 暂不支持（仅支持图片或文本文件）`
+  return i18n.t('composer:unsupported.file', { name: file.name })
 }
 
 /**
@@ -163,9 +164,9 @@ export function formatUnsupportedFiles(files: { name: string }[]): string {
   if (archives.length > 0) {
     const rest = files.length - archives.length
     if (rest === 0) {
-      return `${archives[0]!.name} 等 ${archives.length} 个压缩包暂不支持，请解压后上传`
+      return i18n.t('composer:unsupported.archives', { name: archives[0]!.name, total: archives.length })
     }
-    return `${archives[0]!.name} 等 ${files.length} 个文件暂不支持（压缩包请解压后上传）`
+    return i18n.t('composer:unsupported.mixedArchives', { name: archives[0]!.name, total: files.length })
   }
-  return `${first.name} 等 ${files.length} 个文件暂不支持（仅支持图片或文本文件）`
+  return i18n.t('composer:unsupported.files', { name: first.name, total: files.length })
 }

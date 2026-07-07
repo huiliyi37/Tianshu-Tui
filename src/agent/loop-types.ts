@@ -48,6 +48,14 @@ export interface AgentConfig {
    *  token spend. Undefined → compaction falls back to primaryClient. */
   compactClient?: StreamClient
   approvalMode?: ApprovalMode
+  /** Headless mode — no human is attached to answer approval prompts (worker
+   *  sub-agents, `serve` sidecar callers that pass a rejecting onApprovalRequired).
+   *  When true, the approval gate never blocks on a prompt that would hang: in-workspace
+   *  file writes are auto-approved (worktree / claim isolation makes them reversible and
+   *  the primary reviews the diff afterward), and any other operation that would otherwise
+   *  ask is denied immediately with a model-facing instruction instead of stalling on a
+   *  prompt no one can answer. Deny rules and the self-kill guard still win. */
+  headless?: boolean
   sessionId?: string
   /** Review-router re-entrancy depth. Worker contexts spawned by review routing use depth > 0. */
   reviewDepth?: number
@@ -177,6 +185,10 @@ export interface AgentConfig {
   }
   /** 当前 provider 的前缀缓存策略 — 逃生口 /tools enable 用它量化挂载的缓存代价。 */
   prefixCacheStrategy?: 'deepseek-native' | 'anthropic-cache-control' | 'none'
+  /** 当前模型是否接受图片输入（多模态 user 消息）。按模型声明（config.models[].supportsVision），
+   *  switchModel 重建 agent 时随 ModelSpec 更新。门控工具边界视觉通道：
+   *  computer_use 截图仅在 true 时以尾部追加 user 消息回灌模型，false 时静默丢弃。 */
+  supportsVision?: boolean
   /** TDD gate config — controls whether edit tools are blocked when the model
    *  edits files without running tests. Parsed from RIVET_TDD_GATE env var.
    *  Default: enabled, enforce mode, threshold 3 edits. */

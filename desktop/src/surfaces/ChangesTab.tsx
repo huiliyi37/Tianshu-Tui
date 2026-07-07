@@ -47,6 +47,7 @@ export function ChangesTab(props: {
    *  one click sends them as a structured prompt (running turn → steer). */
   onSendPrompt?: (text: string) => void
 }) {
+  const { t } = useTranslation('git')
   const enabled = props.sessionId !== null
   const tree = useWorkingTree(props.sessionId)
   const [sideBySide, setSideBySide] = useState(false)
@@ -64,7 +65,7 @@ export function ChangesTab(props: {
     const lines = lineComments.map(
       (c) => `- ${c.file}:${c.newLine ?? c.oldLine ?? '?'} — ${c.comment}`,
     )
-    props.onSendPrompt(`请根据以下针对工作树 diff 的行级评论修改代码：\n\n${lines.join('\n')}`)
+    props.onSendPrompt(t('changes.commentsPrompt', { comments: lines.join('\n') }))
     setLineComments([])
   }
 
@@ -88,25 +89,25 @@ export function ChangesTab(props: {
   )
 
   if (!enabled) {
-    return <div className="empty sm">无活动会话</div>
+    return <div className="empty sm">{t('changes.noSession')}</div>
   }
   if (tree.isLoading) {
-    return <div className="empty sm">加载中…</div>
+    return <div className="empty sm">{t('changes.loading')}</div>
   }
   if (tree.isError) {
-    return <div className="empty sm">读取工作树失败</div>
+    return <div className="empty sm">{t('changes.treeFailed')}</div>
   }
   if (tree.data && !tree.data.isRepo) {
-    return <div className="empty sm">当前目录不是 git 仓库</div>
+    return <div className="empty sm">{t('changes.notRepo')}</div>
   }
   if (files.length === 0) {
-    return <div className="empty sm">工作树无变更</div>
+    return <div className="empty sm">{t('changes.empty')}</div>
   }
 
   return (
     <div className="changes-overview">
       <div className="changes-summary">
-        <span className="changes-summary-count">{files.length} 个文件变更</span>
+        <span className="changes-summary-count">{t('changes.filesChanged', { n: files.length })}</span>
         <span className="changes-summary-delta">
           {totals.add > 0 && <span className="add">+{totals.add}</span>}
           {totals.del > 0 && <span className="del">-{totals.del}</span>}
@@ -114,17 +115,17 @@ export function ChangesTab(props: {
         <button
           className={`diff-toggle ${sideBySide ? 'active' : ''}`}
           onClick={() => setSideBySide((v) => !v)}
-          title="切换单列 / 双列视图"
+          title={t('changes.toggleLayoutTitle')}
         >
-          {sideBySide ? '双列' : '单列'}
+          {sideBySide ? t('changes.split') : t('changes.unified')}
         </button>
         {props.onSendPrompt && lineComments.length > 0 && (
           <button
             className="btn sm changes-send-comments"
             onClick={sendComments}
-            title="将行级评论汇总为一条 prompt 发送给智能体（运行中会作为引导插入）"
+            title={t('changes.sendCommentsTitle')}
           >
-            发送 {lineComments.length} 条评论
+            {t('changes.sendComments', { n: lineComments.length })}
           </button>
         )}
       </div>
@@ -310,6 +311,7 @@ function FileDiffCard(props: {
   onLineComment?: (anchor: { file: string; oldLine?: number; newLine?: number }, text: string) => void
 }) {
   const { file, sessionId, sideBySide, defaultOpen, comments, onLineComment } = props
+  const { t } = useTranslation('git')
   const [open, setOpen] = useState(defaultOpen)
   // null path → query disabled, so collapsed cards never fetch.
   const diff = useFileDiff(open ? file.path : null, sessionId)
@@ -330,11 +332,11 @@ function FileDiffCard(props: {
       {open && (
         <div className="file-diff-card-body">
           {diff.isLoading ? (
-            <div className="empty sm">加载 diff…</div>
+            <div className="empty sm">{t('changes.loadingDiff')}</div>
           ) : diff.isError ? (
-            <div className="empty sm">读取 diff 失败</div>
+            <div className="empty sm">{t('changes.diffFailed')}</div>
           ) : !diff.data?.diff ? (
-            <div className="empty sm muted">无文本差异（二进制文件）</div>
+            <div className="empty sm muted">{t('changes.binaryNoDiff')}</div>
           ) : (
             <DiffView
               raw={diff.data.diff}

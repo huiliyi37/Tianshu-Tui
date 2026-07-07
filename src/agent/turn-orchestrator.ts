@@ -22,6 +22,7 @@ import type { GoalContinuationController } from './goal-continuation.js'
 import type { PostTurnDecisionController } from './post-turn-decision.js'
 import type { TelemetryRecord } from './telemetry-writer.js'
 import { emitStopReason, type StopReason } from './stop-reason.js'
+import type { AdvisoryEntry } from './advisory-bus.js'
 import { debugLog } from '../utils/debug.js'
 import { hasActionIntent, hasWriteActionIntent, turnUsedOnlyReadTools } from './action-intent-detector.js'
 
@@ -212,6 +213,16 @@ export interface TurnOrchestratorDeps {
   writeTelemetry: (entry: TelemetryRecord) => void
   resetEvidence: () => void
 
+  // === Stop-reason 落盘（2026-07-07 观测缺口修复）===
+  /** 把结构化停止原因写进 AgentLoop.latestStopReason + session meta。
+   *  可选：缺省时 emitStop 仍走 debug/遥测/phase，只是不落盘。 */
+  recordStopReason?: (r: StopReason) => void
+
+  // === Advisory 总线（action-intent 闸门核销接入）===
+  /** 提交一条 advisory（走效能账本 + expect 核销）。缺省时闸门回退
+   *  appendSystemReminder 直注（行为不变，只是不计账）。 */
+  submitAdvisory?: (entry: AdvisoryEntry) => void
+
   // === Abort signal ===
   // === Abort signal ===
   getAbortSignal: () => AbortSignal | undefined
@@ -311,9 +322,20 @@ export class TurnOrchestrator {
    */
   private emitStop(reason: StopReason, callbacks: AgentCallbacks): void {
     emitStopReason(reason, {
+      record: this.deps.recordStopReason,
       debug: debugLog,
       telemetry: rec => this.deps.writeTelemetry(rec as TelemetryRecord),
       onPhaseChange: callbacks.onPhaseChange,
+    })
+  }
+
+  /** 只落盘 + debug/遥测，不走 onPhaseChange —— 用于 onAbort/onError 已负责
+   *  UI 呈现的路径（用户中断 / 流错误），避免同一次停止渲染两条系统行。 */
+  private recordStop(reason: StopReason): void {
+    emitStopReason(reason, {
+      record: this.deps.recordStopReason,
+      debug: debugLog,
+      telemetry: rec => this.deps.writeTelemetry(rec as TelemetryRecord),
     })
   }
 
@@ -370,7 +392,14 @@ export class TurnOrchestrator {
         const signal = this.deps.getAbortSignal()
         if (signal?.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
-          callbacks.onAbort(this.deps.getAbortReason())
+          const abortTag = this.deps.getAbortReason()
+          this.recordStop({
+            source: abortTag?.includes('watchdog') ? 'watchdog-stall' : 'user-interrupt',
+            turn,
+            voluntary: false,
+            ...(abortTag !== undefined && { detail: abortTag }),
+          })
+          callbacks.onAbort(abortTag)
           return
         }
 
@@ -872,13 +901,34 @@ export class TurnOrchestrator {
           // 文本里承诺写操作（"更新计划""重写…"）时，no-tool 闸门因本轮
           // 有工具调用而够不着。只读轮 + 写侧承诺 → 注入一次性提醒
           //（与 no-tool 闸门共享 actionIntentFiredThisRun 配额，nudge 不阻断）。
+          //
+          // 2026-07-07 核销接入：改走 advisory bus 的 system-reminder 通道
+          //（同一注入面，时序等价——下个请求构建时 drain 进消息流），换来
+          // expect 谓词核销：送达后 2 轮内出现写类/验证类工具调用 = 采纳。
+          // 会话 519216c0 复盘显示该提醒实际有效（模型下一轮就补了写入）但
+          // 因直注不计账，效能账本记 0 采纳——低采纳数据会误导后续降频决策。
           if (!actionIntentFiredThisRun
               && hasWriteActionIntent(this.deps.state.streamedText)
               && turnUsedOnlyReadTools(toolUses)) {
             actionIntentFiredThisRun = true
-            this.deps.appendSystemReminder(
-              '<system-reminder>上一轮你在文本里宣布了写入/修改/测试类操作，但只调用了只读工具（grep/read_file 等），写操作并未发生。如果仍需执行，请在本轮直接发起对应的工具调用；如果已不需要，请明确说明。</system-reminder>'
-            )
+            const content = '上一轮你在文本里宣布了写入/修改/测试类操作，但只调用了只读工具（grep/read_file 等），写操作并未发生。如果仍需执行，请在本轮直接发起对应的工具调用；如果已不需要，请明确说明。'
+            if (this.deps.submitAdvisory) {
+              this.deps.submitAdvisory({
+                key: 'action-intent',
+                priority: 0.62,
+                category: 'discipline',
+                content,
+                channel: 'system-reminder',
+                immediate: true,
+                expect: {
+                  kind: 'tool_appears',
+                  tools: ['write_file', 'edit_file', 'hash_edit', 'apply_patch', 'run_tests', 'todo'],
+                  withinTurns: 2,
+                },
+              })
+            } else {
+              this.deps.appendSystemReminder(`<system-reminder>${content}</system-reminder>`)
+            }
           }
 
           await rejectOnAbort(
@@ -1033,9 +1083,24 @@ export class TurnOrchestrator {
       this.deps.resetEvidence()
       if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
       if ((err as Error).name === 'AbortError') {
+        // 停止原因落盘（不走 onPhaseChange——onAbort 已负责 UI 渲染，避免双条）。
+        // watchdog 触发的 abort 与用户 Esc 用 abortReason tag 区分。
+        const abortTag = this.deps.getAbortReason()
+        this.recordStop({
+          source: abortTag?.includes('watchdog') ? 'watchdog-stall' : 'user-interrupt',
+          turn: this.deps.state.runLoopTurn,
+          voluntary: false,
+          ...(abortTag !== undefined && { detail: abortTag }),
+        })
         await this.deps.runPostSession(callbacks)
-        callbacks.onAbort(this.deps.getAbortReason())
+        callbacks.onAbort(abortTag)
       } else {
+        this.recordStop({
+          source: 'stream-error',
+          turn: this.deps.state.runLoopTurn,
+          voluntary: false,
+          detail: String((err as Error).message ?? err).slice(0, 200),
+        })
         callbacks.onError(err as Error)
       }
     } finally {

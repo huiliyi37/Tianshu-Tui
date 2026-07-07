@@ -8,6 +8,11 @@ export const modelConfigSchema = z.object({
   contextWindow: z.number().int().positive(),
   maxTokens: z.number().int().positive(),
   reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
+  /** Model accepts image inputs (multimodal user messages). Declared per model,
+   *  NOT per provider — mixed text/vision model fleets under one provider are
+   *  the norm. Gates the computer_use screenshot → conversation vision channel.
+   *  Default undefined = text-only (images are dropped, today's behavior). */
+  supportsVision: z.boolean().optional(),
   /** Pricing per 1M tokens (USD). Optional — used by insights / cost visualization. */
   pricing: z.object({
     input: z.number().min(0).optional(),
@@ -123,7 +128,10 @@ export const antiAnchoringSchema = z.object({
 /** Tier 2 LLM speculation: during a tool-batch await window, fire a side-path
  *  LLM request sharing the main session prefix (near-free on DeepSeek prefix
  *  cache) to predict the next read-only tool calls, feeding ShadowQueue.
- *  Default off — opt-in. */
+ *  ⚠ INERT since 2026-07-07: the speculative pre-execution chain is sealed
+ *  (stale-read incident — ShadowQueue served pre-edit file content); the
+ *  engine is no longer constructed regardless of this setting. Schema kept so
+ *  existing configs still parse. See P3Config.speculativeEnabled. */
 export const llmSpeculationSchema = z.preprocess(
   value => {
     if (value === true) return { enabled: true }
@@ -260,7 +268,7 @@ export const agentSchema = z.object({
   checkpointEveryTurns: z.number().int().min(0).default(0),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
-  /** Tier 2 LLM speculation (shared-prefix next-tool prediction). Default off. */
+  /** Tier 2 LLM speculation (shared-prefix next-tool prediction). INERT — chain sealed 2026-07-07. */
   llmSpeculation: llmSpeculationSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */
   teamSchedulerBanditEnabled: z.boolean().default(false),
@@ -375,9 +383,17 @@ export const workersSchema = z.object({
   routing: workerRoutingSchema,
   /** 天梁 patcher 子代理的默认 tier（config.workers.patcherTier）。
    *  flash 能力足以承担各级风险的执行任务，默认 'cheap'（不因 riskTier 预判降级
-   *  ——浪费生产力）；可设 'balanced' 或 'strong' 让执行者用更强模型（如 DeepSeek Pro）。
-   *  连续失败 ≥2 次仍自动升 strong。 */
+   *  ——浪费生产力）；可设 'balanced' 或 'strong' 让执行者用更强模型（如 DeepSeek Pro）。 */
   patcherTier: z.enum(['cheap', 'balanced', 'strong']).default('cheap'),
+  /** 失败升档天花板。只约束**失败驱动**的档位升级——规则升档
+   *  （consecutiveFailures≥2 → strong）与 Flash→Pro 升档重试；
+   *  不影响前置路由（workers.routing 如 planning→capable、planner hardFloor、
+   *  瑶光门席位下限、review.profiles 覆盖卡、议事会 modelOverride）。
+   *  动机：升档重试是全新会话零缓存全量重跑整个 work order，成本可达 flash
+   *  的数十倍；而规划类 worker 从小上下文起步，前置用强模型成本可控。
+   *  'off'（默认）= 失败不升档，重试留在原档模型；
+   *  'balanced' = 最多升到 balanced 卡重试；'strong' = 旧的自动升 Pro 行为。 */
+  escalationCap: z.enum(['off', 'balanced', 'strong']).default('off'),
 }).default({})
 
 export const skillsSchema = z.object({
@@ -431,8 +447,31 @@ export const envSchema = z.object({
 }).default({})
 
 export const uiSchema = z.object({
-  /** Default TUI color theme used on startup. Runtime /theme switches are not persisted. */
-  theme: z.enum(THEME_NAMES).optional(),
+  /** Default TUI color theme used on startup. Runtime /theme switches are not persisted.
+   *  Accepts: builtin theme name | 'auto' (detect terminal background via OSC 11 /
+   *  COLORFGBG, pick cobalt/paper) | 'custom:<name>' (~/.rivet/themes/<name>.json). */
+  theme: z.union([
+    z.enum(THEME_NAMES),
+    z.literal('auto'),
+    z.string().regex(/^custom:[A-Za-z0-9_-]+$/),
+  ]).optional(),
+  /** Spinner verb pool override. With mode 'replace' (default) it replaces the
+   *  built-in pool; 'append' extends it. Empty array = keep defaults. */
+  spinnerVerbs: z.array(z.string().min(1)).optional(),
+  spinnerVerbsMode: z.enum(['replace', 'append']).optional(),
+  /** Accessibility: freeze spinner animation frames and verb rotation. */
+  reducedMotion: z.boolean().optional(),
+  /** GlanceBar density on startup. 'compact' (default) = mode/model/context%/elapsed;
+   *  'full' = everything (goal/todo/effort/cache/cost). Runtime `/glance` toggles. */
+  glanceDensity: z.enum(['compact', 'full']).optional(),
+  /** Scriptable statusline (Claude Code protocol subset). The command receives a
+   *  session-state JSON on stdin and its first stdout line renders above the input
+   *  box. See src/tui/statusline.ts for the payload shape. */
+  statusLine: z.object({
+    command: z.string().min(1),
+    intervalMs: z.number().int().positive().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }).optional(),
 }).default({})
 
 /** Project verify command declarations (A1). Machine-readable source of truth
@@ -470,6 +509,9 @@ export const configSchema = z.object({
   env: envSchema,
   ui: uiSchema,
   verify: verifySchema,
+  plugins: z.object({
+    enabled: z.record(z.boolean()).default({}),
+  }).default({}),
 })
 
 export type Config = {
@@ -485,6 +527,7 @@ export type Config = {
   env: EnvConfig
   ui: UiConfig
   verify: VerifyConfig
+  plugins: { enabled: Record<string, boolean> }
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>

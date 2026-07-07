@@ -42,7 +42,7 @@ import { CollaborationProtocol, type CollaborationConfig } from './collaboration
 import type { LockIntent } from './semantic-lock.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import { precipitateDomainLessons } from './domain-lesson-precipitate.js'
-import { inferModelTierFromCard, recommendModelTier, type ModelRiskTier, type ModelTier, type ModelTierRecommendation } from './model-tier-policy.js'
+import { inferModelTierFromCard, recommendModelTier, type FailureEscalationCap, type ModelRiskTier, type ModelTier, type ModelTierRecommendation } from './model-tier-policy.js'
 import { buildHistoricalModelTierState, recommendModelTierArm, type ModelTierBanditRecommendation } from './model-tier-bandit.js'
 import { evaluateModelTierGate, type ModelTierGateDecision } from './model-tier-gate.js'
 import {
@@ -84,8 +84,8 @@ export interface WorkerActivityEvent {
   profile: string
   /** 星域 id（星名来源），由 coordinator 从 order.authority 透传。 */
   authority?: string
-  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result'
-  /** Tool name for tool events; text delta for text/thinking. */
+  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'turn'
+  /** Tool name for tool events; text delta for text/thinking; 累计 token 总数 for turn. */
   detail?: string
 }
 
@@ -112,6 +112,13 @@ const TIER_FLOOR_RANK: Record<ModelTier, number> = { cheap: 0, balanced: 1, stro
 export function applyTierFloor(tier: ModelTier, floor?: ModelTier): ModelTier {
   if (!floor) return tier
   return TIER_FLOOR_RANK[tier] >= TIER_FLOOR_RANK[floor] ? tier : floor
+}
+
+/** 失败升档天花板下允许的最高档位。'off' 时不允许任何升档(返回 null)。 */
+export function escalationTierAllowed(cap: FailureEscalationCap | undefined): ModelTier | null {
+  const effective = cap ?? 'strong'
+  if (effective === 'off') return null
+  return effective
 }
 
 export interface DelegationRequest {
@@ -275,6 +282,17 @@ export interface DelegationCoordinatorConfig {
   /** 天梁 patcher 子代理的默认 tier（config.workers.patcherTier）。
    *  传入 recommendModelTier 的 workerTierOverride——用户可自定义执行者用哪档模型。 */
   patcherTier?: ModelTier
+  /** 失败升档天花板（config.workers.escalationCap）。只约束失败驱动的升档——
+   *  规则升档（consecutiveFailures≥2）与 Flash→Pro 升档重试；不影响前置路由
+   *  （workers.routing 如 planning→capable、hardFloor、瑶光门 tierFloor）。
+   *  动机：升档重试是全新会话零缓存全量重跑整个 work order，成本可达 flash
+   *  的数十倍；而规划类 worker 本就从小上下文起步，前置用强模型成本可控。
+   *  'off' = 失败不升档；'balanced' = 最多升到 balanced 卡重试；
+   *  'strong' = 旧行为。缺省视为 'strong'（库级向后兼容，产品默认 config 层给 'off'）。 */
+  escalationCap?: FailureEscalationCap
+  /** Approval mode of the primary session. Only `dangerously-skip-permissions` is
+   *  delegated downward to workers (see WorkerSessionConfig.parentApprovalMode). */
+  parentApprovalMode?: import('./loop-types.js').ApprovalMode
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -500,6 +518,9 @@ export class DelegationCoordinator {
    *  resumeWorkOrderId is provided; consumed by delegateOrder() when building
    *  the worker config. Side-table pattern (same as activityUpstream). */
   private readonly resumeMessages = new Map<string, readonly OaiMessage[]>()
+  /** WC: per-order steer 队列 — 用户在 TUI worker 视图输入的直达消息。
+   *  worker 的 onSteerDrain 在工具回合结算时 drain 注入 tool_result。 */
+  private readonly steerQueues = new Map<string, string[]>()
   private stallSweep: ReturnType<typeof setInterval> | null = null
   /** T3: Flash→Pro escalation counter per session. Max 3 Pro upgrades. */
   private proUpgradeCount = 0
@@ -579,8 +600,42 @@ export class DelegationCoordinator {
     this.orderControllers.clear()
     this.activityUpstream.clear()
     this.resumeMessages.clear()
+    this.steerQueues.clear()
     this.backgroundRuns.clear()
     this.backgroundPromises.clear()
+  }
+
+  // ── WC: TUI worker 视图直达通道（steer / kill） ──
+
+  /**
+   * 向在跑 worker 的 steer 队列投递一条用户消息。
+   * worker 在下一个工具回合结算时以 [User guidance] 形态注入 tool_result。
+   * 返回 false 表示该 order 已不在跑（终态/未知），消息未入队。
+   */
+  steerWorker(workOrderId: string, text: string): boolean {
+    if (!this.orderControllers.has(workOrderId)) return false
+    const q = this.steerQueues.get(workOrderId) ?? []
+    q.push(text)
+    this.steerQueues.set(workOrderId, q)
+    return true
+  }
+
+  /**
+   * 主动停止单个在跑 worker（TUI /tasks 的 x 键）。
+   * 复用 per-order AbortController（与 stall sweep 同一通道）：worker 的
+   * processNext 落入 catch → workerFailureResult，批内兄弟不受影响。
+   * 返回 false 表示该 order 已不在跑。
+   */
+  killWorker(workOrderId: string): boolean {
+    const controller = this.orderControllers.get(workOrderId)
+    if (!controller) return false
+    try { controller.abort() } catch { /* already aborted */ }
+    return true
+  }
+
+  /** 指定 order 当前是否在跑（TUI 判断直达通道可用性）。 */
+  isWorkerRunning(workOrderId: string): boolean {
+    return this.orderControllers.has(workOrderId)
   }
 
   // ── B2: background (async) work orders ──
@@ -861,6 +916,7 @@ export class DelegationCoordinator {
       objective: order.objective,
       consecutiveFailures: this.state.getSummary().failed,
       ...(this.config.patcherTier ? { workerTierOverride: this.config.patcherTier } : {}),
+      ...(this.config.escalationCap ? { failureEscalationCap: this.config.escalationCap } : {}),
     })
   }
 
@@ -881,15 +937,16 @@ export class DelegationCoordinator {
   /** Record a Flash→Pro escalation event: increment quota, persist shadow, return event for caller's array. */
   private recordEscalation(order: WorkOrder, strongCard: ModelCapabilityCard, errorMsg: string): ModelTierShadowEvent {
     this.proUpgradeCount++
+    const escalatedTier = inferModelTierFromCard(strongCard)
     const shadow = buildModelTierShadowEvent({
       sessionId: this.config.sessionId ?? 'unknown',
       workOrderId: order.id,
       authority: order.authority,
       profile: order.profile,
       kind: order.kind,
-      recommendedTier: 'strong',
+      recommendedTier: escalatedTier,
       actualModel: strongCard.model,
-      actualTier: 'strong',
+      actualTier: escalatedTier,
       reason: `Flash→Pro 升级重试 #${this.proUpgradeCount}: 上次尝试失败 "${errorMsg.slice(0, 200)}"`,
     })
     persistModelTierShadow(this.config.modelTierShadowStore, shadow)
@@ -934,20 +991,24 @@ export class DelegationCoordinator {
       const depth = request.delegationDepth ?? 0
       const depthCap = this.config.maxDelegationDepth ?? MAX_DELEGATION_DEPTH
       if (depth >= depthCap) {
+        // Build the packet from the SAME blocked result the caller sees in
+        // `results` — an empty packet ([]) tells the primary model nothing and
+        // invites a blind retry of the identical delegation.
+        const depthCapped: WorkerResult[] = [{
+          workOrderId: `depth-capped-${request.parentTurnId}`,
+          status: 'blocked',
+          summary: `Delegation rejected: max delegation depth (${depthCap}) reached — do the work inline instead of delegating further`,
+          findings: [],
+          artifacts: [],
+          changedFiles: [],
+          risks: ['unbounded delegation recursion prevented'],
+          nextActions: ['Perform the objective directly in this worker session'],
+          evidenceStatus: 'blocked',
+        }]
         return {
           status: 'completed',
-          results: [{
-            workOrderId: `depth-capped-${request.parentTurnId}`,
-            status: 'blocked',
-            summary: `Delegation rejected: max delegation depth (${depthCap}) reached — do the work inline instead of delegating further`,
-            findings: [],
-            artifacts: [],
-            changedFiles: [],
-            risks: ['unbounded delegation recursion prevented'],
-            nextActions: ['Perform the objective directly in this worker session'],
-            evidenceStatus: 'blocked',
-          }],
-          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+          results: depthCapped,
+          packet: await buildPrimaryWorkerPacket(depthCapped, this.config.artifactStore),
         }
       }
 
@@ -965,20 +1026,21 @@ export class DelegationCoordinator {
       if (profileDef?.tierLock) {
         const circuitCheck = this.circuitBreaker.canDelegate(request.profile)
         if (!circuitCheck.allowed) {
+          const circuitBlocked: WorkerResult[] = [{
+            workOrderId: `circuit-open-${request.parentTurnId}`,
+            status: 'blocked',
+            summary: `Circuit breaker open: ${circuitCheck.reason}`,
+            findings: [],
+            artifacts: [{ kind: 'risk', title: 'Circuit breaker tripped', content: circuitCheck.reason ?? 'Profile circuit is open' }],
+            changedFiles: [],
+            risks: [`circuit breaker: ${request.profile} is open`],
+            nextActions: ['Wait for cooldown or use a different profile'],
+            evidenceStatus: 'blocked',
+          }]
           return {
             status: 'completed',
-            results: [{
-              workOrderId: `circuit-open-${request.parentTurnId}`,
-              status: 'blocked',
-              summary: `Circuit breaker open: ${circuitCheck.reason}`,
-              findings: [],
-              artifacts: [{ kind: 'risk', title: 'Circuit breaker tripped', content: circuitCheck.reason ?? 'Profile circuit is open' }],
-              changedFiles: [],
-              risks: [`circuit breaker: ${request.profile} is open`],
-              nextActions: ['Wait for cooldown or use a different profile'],
-              evidenceStatus: 'blocked',
-            }],
-            packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+            results: circuitBlocked,
+            packet: await buildPrimaryWorkerPacket(circuitBlocked, this.config.artifactStore),
           }
         }
       }
@@ -1111,11 +1173,12 @@ export class DelegationCoordinator {
     // reject immediately instead of waiting for the worker's internal 180s timeout.
     // This prevents zombie workers from blocking the main agent loop.
     if (this.config.abortSignal?.aborted) {
+      const abortedResults = [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'), { failureReason: 'caller_aborted' })]
       return {
         status: 'completed',
         order,
-        results: [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'), { failureReason: 'caller_aborted' })],
-        packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+        results: abortedResults,
+        packet: await buildPrimaryWorkerPacket(abortedResults, this.config.artifactStore),
       }
     }
 
@@ -1128,21 +1191,22 @@ export class DelegationCoordinator {
     // Scope budget check for exploration workers (code_search, doc_research, plan)
     if (order.kind === 'code_search' || order.kind === 'doc_research' || order.kind === 'plan') {
       if (order.scope.maxFiles !== undefined && (order.scope.files?.length ?? 0) > order.scope.maxFiles) {
+        const scopeBlocked: WorkerResult[] = [{
+          workOrderId: order.id,
+          status: 'blocked',
+          summary: `Scope budget exceeded: ${order.scope.files!.length} files exceeds maxFiles=${order.scope.maxFiles}`,
+          findings: [],
+          artifacts: [{ kind: 'risk', title: 'Scope budget exceeded', content: `Requested ${order.scope.files!.length} files but maxFiles=${order.scope.maxFiles}` }],
+          changedFiles: [],
+          risks: [`scope budget: ${order.scope.files!.length} > ${order.scope.maxFiles} maxFiles`],
+          nextActions: ['Reduce file scope or increase maxFiles budget'],
+          evidenceStatus: 'blocked',
+        }]
         return {
           status: 'completed',
           order,
-          results: [{
-            workOrderId: order.id,
-            status: 'blocked',
-            summary: `Scope budget exceeded: ${order.scope.files!.length} files exceeds maxFiles=${order.scope.maxFiles}`,
-            findings: [],
-            artifacts: [{ kind: 'risk', title: 'Scope budget exceeded', content: `Requested ${order.scope.files!.length} files but maxFiles=${order.scope.maxFiles}` }],
-            changedFiles: [],
-            risks: [`scope budget: ${order.scope.files!.length} > ${order.scope.maxFiles} maxFiles`],
-            nextActions: ['Reduce file scope or increase maxFiles budget'],
-            evidenceStatus: 'blocked',
-          }],
-          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+          results: scopeBlocked,
+          packet: await buildPrimaryWorkerPacket(scopeBlocked, this.config.artifactStore),
         }
       }
     }
@@ -1214,6 +1278,8 @@ export class DelegationCoordinator {
     // Covers both read (runWorker) and write (runHands → runWorker) paths.
     workerConfig.maxTurns = clampWorkerMaxTurns(workerConfig.maxTurns, order.budget.maxTurns)
     workerConfig.reviewDepth = order.reviewDepth
+    // Downward trust delegation: only dangerously-skip-permissions flows to workers.
+    workerConfig.parentApprovalMode = this.config.parentApprovalMode
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
     workerConfig.mailbox = this.mailbox
     // Session resume: inject prior messages so the worker continues from its
@@ -1245,6 +1311,14 @@ export class DelegationCoordinator {
       try {
         requestUpstream?.({ workOrderId: order.id, profile: order.profile, authority: order.authority, kind, detail })
       } catch { /* UI upstream must never break dispatch */ }
+    }
+    // WC: 输入直达 — worker 每个工具回合结算时 drain 本 order 的 steer 队列。
+    workerConfig.onSteerDrain = () => {
+      const q = this.steerQueues.get(order.id)
+      if (!q || q.length === 0) return null
+      const text = q.join('\n')
+      q.length = 0
+      return text
     }
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
@@ -1304,21 +1378,22 @@ export class DelegationCoordinator {
       }
       const lockResult = this.collaboration.acquireLock(this.config.sessionId, intent)
       if (!lockResult.acquired) {
+        const lockBlocked: WorkerResult[] = [{
+          workOrderId: order.id,
+          status: 'blocked',
+          summary: `Semantic lock conflict: ${lockResult.conflictingFiles.join(', ')} held by another session`,
+          findings: [],
+          artifacts: [{ kind: 'risk', title: 'Lock conflict', content: `Files locked by another session: ${lockResult.conflictingFiles.join(', ')}` }],
+          changedFiles: [],
+          risks: [`semantic lock conflict: ${lockResult.conflictingFiles.join(', ')}`],
+          nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
+          evidenceStatus: 'blocked',
+        }]
         return {
           status: 'completed',
           order,
-          results: [{
-            workOrderId: order.id,
-            status: 'blocked',
-            summary: `Semantic lock conflict: ${lockResult.conflictingFiles.join(', ')} held by another session`,
-            findings: [],
-            artifacts: [{ kind: 'risk', title: 'Lock conflict', content: `Files locked by another session: ${lockResult.conflictingFiles.join(', ')}` }],
-            changedFiles: [],
-            risks: [`semantic lock conflict: ${lockResult.conflictingFiles.join(', ')}`],
-            nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
-            evidenceStatus: 'blocked',
-          }],
-          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
+          results: lockBlocked,
+          packet: await buildPrimaryWorkerPacket(lockBlocked, this.config.artifactStore),
         }
       }
       semanticLockAcquired = true
@@ -1538,26 +1613,38 @@ export class DelegationCoordinator {
         }
       }
 
-      // T3: Flash→Pro escalation — retry with strong-tier model if budget allows.
+      // T3: Flash→Pro escalation — retry with a higher-tier model if budget allows.
       // tierLock:'cheap' profiles (reviewer / adversarial_verifier) must NOT be
       // escalated: review workers are deliberately pinned to a cheap/isolated
       // model so they don't evict the main session's prefix cache (see
       // .rivet/knowledge/debug-glm-cache-break-deliver-task.md). Honor the lock.
+      // workers.escalationCap：升档重试是全新会话零缓存全量重跑整个 work order，
+      // 'off' 时完全禁止；'balanced' 时最多用 balanced 卡重试（不碰 Pro）。
       const flashTier = inferModelTierFromCard(selected)
       const tierLocked = profileRegistry.get(order.profile)?.tierLock === 'cheap'
+      const maxEscalationTier = escalationTierAllowed(this.config.escalationCap)
       const canUpgrade = !isAbort
         && !tierLocked
+        && maxEscalationTier !== null
         && (order.budget.maxRetries > 0)
         && this.proUpgradeCount < DelegationCoordinator.MAX_PRO_UPGRADES
-        && flashTier !== 'strong'
+        && TIER_FLOOR_RANK[flashTier] < TIER_FLOOR_RANK[maxEscalationTier ?? 'cheap']
       if (canUpgrade) {
-        const strongCards = this.config.modelCards.filter(c => inferModelTierFromCard(c) === 'strong')
-        const strongCard = strongCards[0]
+        // 候选：比当前卡高、且不超过 escalationCap 的卡，取档位最高的一张。
+        const upgradeCards = this.config.modelCards
+          .filter(c => {
+            const t = inferModelTierFromCard(c)
+            return TIER_FLOOR_RANK[t] > TIER_FLOOR_RANK[flashTier]
+              && TIER_FLOOR_RANK[t] <= TIER_FLOOR_RANK[maxEscalationTier!]
+          })
+          .sort((a, b) => TIER_FLOOR_RANK[inferModelTierFromCard(b)] - TIER_FLOOR_RANK[inferModelTierFromCard(a)])
+        const strongCard = upgradeCards[0]
         if (strongCard) {
           // Re-create worker config with Pro model
           const upgradedConfig = this.config.runtimeFactory(order, strongCard, workerRegistry)
           upgradedConfig.maxTurns = clampWorkerMaxTurns(upgradedConfig.maxTurns, order.budget.maxTurns)
           upgradedConfig.reviewDepth = order.reviewDepth
+          upgradedConfig.parentApprovalMode = this.config.parentApprovalMode
           upgradedConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
           upgradedConfig.abortSignal = mergedSignal
           upgradedConfig.onActivity = (kind, detail) => {
@@ -1686,6 +1773,7 @@ export class DelegationCoordinator {
       this.orderControllers.delete(order.id)
       this.activityUpstream.delete(order.id)
       this.resumeMessages.delete(order.id)
+      this.steerQueues.delete(order.id)
       if (this.liveness.size() === 0) this.stopStallSweep()
       if (semanticLockAcquired && this.collaboration && this.config.sessionId) {
         this.collaboration.releaseLocks(this.config.sessionId)
@@ -1709,6 +1797,15 @@ export class DelegationCoordinator {
 
     if (this.state.shouldEscalate()) {
       this.state.recordEvent({ type: 'escalated', workOrderId: order.id, timestamp: Date.now() })
+      // Build results and packet from the SAME escalated result — previously the
+      // packet carried the raw run.result while results carried the escalated
+      // rewrite, so the model and the caller saw different stories. Keep the
+      // last worker summary inline so the failure detail is not lost.
+      const escalatedResults: WorkerResult[] = [{
+        ...run.result,
+        status: 'blocked' as const,
+        summary: `Escalated: ${this.state.getSummary().failed} consecutive failures. Last worker result: ${run.result.summary}`,
+      }]
       return {
         status: 'completed' as const,
         escalated: true,
@@ -1717,8 +1814,8 @@ export class DelegationCoordinator {
         modelTierShadows: escalationShadows.length > 0 ? escalationShadows : [tierShadow],
         modelTierGatedDecisions: [tierGatedDecision],
         gatedInfluenceAudits: [gatedInfluenceAudit],
-        results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
-        packet: await buildPrimaryWorkerPacket([run.result], this.config.artifactStore),
+        results: escalatedResults,
+        packet: await buildPrimaryWorkerPacket(escalatedResults, this.config.artifactStore),
       }
     }
 

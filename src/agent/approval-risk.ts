@@ -160,6 +160,23 @@ export function requiresBashWriteApproval(toolName: string, input: Record<string
   return bashCommandMayWrite(command)
 }
 
+/**
+ * Actions whose approval can NEVER be waived — by approval mode (incl.
+ * dangerously-skip-permissions), permissions.allow rules, sensorium
+ * auto-approve, or per-app grants.
+ *
+ * computer_use js_eval runs arbitrary JS inside the user's real browser
+ * (cookies/localStorage/logged-in sessions); browser_adopt takes over an
+ * external DevTools endpoint. The tool's own requiresApproval() already
+ * returns true for these, but that is only consulted in manual mode — the
+ * "always needs approval" promise must be enforced as a pipeline hard gate.
+ */
+export function requiresUnconditionalApproval(toolName: string, input: Record<string, unknown>): boolean {
+  if (toolName !== 'computer_use') return false
+  const action = typeof input.action === 'string' ? input.action : ''
+  return action === 'js_eval' || action === 'browser_adopt'
+}
+
 /** Confidence thresholds for sensorium-driven adaptive approval. */
 export const CONFIDENCE_THRESHOLDS = {
   /** Above this + risk='none'|'low' → eligible for auto-approve */
@@ -177,6 +194,14 @@ export function assessToolRisk(
 ): RiskAssessment {
   const reasons: string[] = []
   let level: RiskLevel = 'none'
+
+  // Arbitrary-JS / endpoint-takeover surface — double insurance alongside the
+  // pipeline's unconditional approval gate (auto-safe asks on high risk even
+  // if the hard gate were ever bypassed).
+  if (requiresUnconditionalApproval(toolName, input)) {
+    reasons.push('arbitrary JS in the user browser / DevTools endpoint takeover')
+    level = 'high'
+  }
 
   // Doom loop check. blocked is short-circuited by the pipeline early-return,
   // so destructive-git protection must trigger in the warn window too.

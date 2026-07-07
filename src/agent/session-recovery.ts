@@ -27,6 +27,37 @@ export interface LastSessionInfo {
   cleanExit?: boolean
 }
 
+/** Parsed session-selection CLI flags (pure — unit-testable). */
+export interface SessionCliArgs {
+  /** --new: force a brand-new session. */
+  forceNew: boolean
+  /** --continue / -c: resume the most recent session for this cwd. */
+  continueLatest: boolean
+  /** --resume <id|prefix> / -r <id|prefix>: resume a specific session. */
+  resumeId?: string
+  /** Bare --resume / -r (no id): open the interactive session picker after startup. */
+  openPicker: boolean
+}
+
+/**
+ * Parse session-selection flags (Claude Code parity):
+ *   --continue / -c        → resume the most recent session
+ *   --resume <id> / -r <id> → resume a specific session (short prefix ok)
+ *   --resume / -r (bare)   → open the session picker in the TUI
+ *   --new                  → force a fresh session
+ */
+export function parseSessionCliArgs(args: string[]): SessionCliArgs {
+  const resumeIdx = args.findIndex(a => a === '--resume' || a === '-r')
+  const next = resumeIdx >= 0 ? args[resumeIdx + 1] : undefined
+  const resumeId = next !== undefined && !next.startsWith('-') ? next : undefined
+  return {
+    forceNew: args.includes('--new'),
+    continueLatest: args.includes('--continue') || args.includes('-c'),
+    ...(resumeId !== undefined ? { resumeId } : {}),
+    openPicker: resumeIdx >= 0 && resumeId === undefined,
+  }
+}
+
 export interface StartupDecisionInput {
   /** The id recorded in the per-cwd last-session pointer, or null if none. */
   lastSessionId: string | null

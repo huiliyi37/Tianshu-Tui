@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getRuntimeInfo } from './runtime/client'
 import { useHealth, useEnvironment, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
@@ -27,6 +28,7 @@ import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured, 
 import type { ProjectTemplatesStatus } from './runtime/types'
 
 export function App() {
+  const { t } = useTranslation('shell')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const health = useHealth()
@@ -52,30 +54,42 @@ export function App() {
   const [storageConfigured, setStorageConfigured] = useState<boolean | null>(null)
 
   // W2 — sidecar crash auto-recovery: the Rust shell respawns a crashed sidecar
-  // on the same port/token and emits this event once it passes /health again.
+  // on the same port/token and emits `sidecar-restarted` once it passes /health
+  // again. When crashes exceed the restart budget (3 per 10min) the monitor
+  // emits `sidecar-gave-up` and stops — without surfacing that, the UI keeps
+  // showing "正在重连…" forever while nothing is actually reconnecting.
+  const [sidecarGaveUp, setSidecarGaveUp] = useState(false)
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return
-    let unlisten: (() => void) | undefined
+    const unlisteners: (() => void)[] = []
     let cancelled = false
     void import('@tauri-apps/api/event')
-      .then((m) => m.listen('sidecar-restarted', async () => {
-        // Verify the respawned sidecar actually resolved a usable key. If the
-        // restart dropped auth (e.g. an apiKeyEnv provider whose env was lost),
-        // say so plainly — the persistent `needsSetup` banner below then guides
-        // reconfiguration, instead of the user hitting silent 401s on every send.
-        const res = await health.refetch()
-        if (res.data && res.data.configured === false) {
-          toast.warning('运行时已恢复，但未检测到可用的 API Key（可能重启后环境变量丢失）。请在设置中重新配置密钥。')
+      .then(async (m) => {
+        const offRestarted = await m.listen('sidecar-restarted', async () => {
+          setSidecarGaveUp(false)
+          // Verify the respawned sidecar actually resolved a usable key. If the
+          // restart dropped auth (e.g. an apiKeyEnv provider whose env was lost),
+          // say so plainly — the persistent `needsSetup` banner below then guides
+          // reconfiguration, instead of the user hitting silent 401s on every send.
+          const res = await health.refetch()
+          if (res.data && res.data.configured === false) {
+            toast.warning(t('toast.runtimeRestoredNoKey'))
+          } else {
+            toast.success(t('toast.runtimeRestored'))
+          }
+        })
+        const offGaveUp = await m.listen('sidecar-gave-up', () => {
+          setSidecarGaveUp(true)
+        })
+        if (cancelled) {
+          offRestarted()
+          offGaveUp()
         } else {
-          toast.success('运行时进程已自动恢复')
+          unlisteners.push(offRestarted, offGaveUp)
         }
-      }))
-      .then((off) => {
-        if (cancelled) off()
-        else unlisten = off
       })
       .catch(() => {})
-    return () => { cancelled = true; unlisten?.() }
+    return () => { cancelled = true; unlisteners.forEach((off) => off()) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -190,99 +204,104 @@ export function App() {
         <TitleBar />
         <WallpaperLayer />
       <div className="main">
-        {sidecarFailed && sidecarDown ? (
+        {sidecarGaveUp && sidecarDown ? (
           <div className="banner error">
-            sidecar 启动失败：未找到 Node 运行时或端口被占用。请重启应用，若仍失败请检查安装。
-            <button className="banner-action" onClick={restartApp}>重启应用</button>
+            {t('banner.sidecarGaveUp')}
+            <button className="banner-action" onClick={restartApp}>{t('banner.restartApp')}</button>
+          </div>
+        ) : sidecarFailed && sidecarDown ? (
+          <div className="banner error">
+            {t('banner.sidecarFailed')}
+            <button className="banner-action" onClick={restartApp}>{t('banner.restartApp')}</button>
           </div>
         ) : sidecarDown ? (
-          <div className="banner error">sidecar 未启动，正在重连…</div>
+          <div className="banner error">{t('banner.sidecarReconnecting')}</div>
         ) : null}
         {needsSetup && !setupDismissed && (
           <div className="banner warn">
-            未配置模型服务商的 API Key，无法开始对话或委派子代理。
+            {t('banner.needsSetup')}
             <button
               className="banner-action"
               onClick={() => dispatch({ type: 'openConnect', open: true })}
             >
-              连接模型
+              {t('banner.connectModel')}
             </button>
             <button
               className="banner-action"
               onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
             >
-              前往设置
+              {t('banner.goToSettings')}
             </button>
-            <button className="banner-close" onClick={() => setSetupDismissed(true)} aria-label="关闭" title="关闭">
+            <button className="banner-close" onClick={() => setSetupDismissed(true)} aria-label={t('common:close')} title={t('common:close')}>
               ×
             </button>
           </div>
         )}
         {env.data && !env.data.python.available && !envDismissed && (
           <div className="banner warn">
-            未检测到 Python。运行 Python 脚本或项目前请先安装 Python。
-            {env.data.platform === 'darwin' && 'macOS 推荐：brew install python'}
-            {env.data.platform === 'win32' && 'Windows 推荐：Microsoft Store 安装 Python 3.12'}
-            {env.data.platform === 'linux' && 'Linux 推荐：sudo apt install python3 python3-pip'}
+            {t('banner.pythonMissing')}
+            {env.data.platform === 'darwin' && t('banner.pythonHintMac')}
+            {env.data.platform === 'win32' && t('banner.pythonHintWin')}
+            {env.data.platform === 'linux' && t('banner.pythonHintLinux')}
             <button
               className="banner-action"
               onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
             >
-              查看环境
+              {t('banner.viewEnvironment')}
             </button>
-            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label={t('common:close')} title={t('common:close')}>
               ×
             </button>
           </div>
         )}
         {env.data && env.data.platform === 'win32' && env.data.gitAutocrlf === 'true' && !envDismissed && (
           <div className="banner warn">
-            换行符设置可能影响代码 diff。你的 Git 当前会把文件转为 Windows 换行（CRLF），但 AI 写入的是 Unix 换行（LF），这会导致 diff 显示整文件变更（只是换行差异）。
+            {t('banner.autocrlf')}
             <button
               className="banner-action"
               onClick={async () => {
                 try {
                   await fixAutocrlf()
                   await env.refetch()
-                  toast.success('已修复 — Git 换行设为 input（保留 LF）')
+                  toast.success(t('toast.autocrlfFixed'))
                 } catch (e) {
-                  toast.error(`修复失败: ${(e as Error).message}`)
+                  toast.error(t('toast.autocrlfFixFailed', { message: (e as Error).message }))
                 }
               }}
             >
-              一键修复
+              {t('banner.oneClickFix')}
             </button>
-            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label={t('common:close')} title={t('common:close')}>
               ×
             </button>
           </div>
         )}
         {env.data && !env.data.git.available && !envDismissed && env.data.platform !== 'win32' && (
           <div className="banner warn">
-            未检测到 Git。代码仓库操作需要 Git。
-            {env.data.platform === 'darwin' && 'macOS 推荐：xcode-select --install 或 brew install git'}
-            {env.data.platform === 'linux' && 'Linux 推荐：sudo apt install git'}
+            {t('banner.gitMissing')}
+            {env.data.platform === 'darwin' && t('banner.gitHintMac')}
+            {env.data.platform === 'linux' && t('banner.gitHintLinux')}
             <button
               className="banner-action"
               onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
             >
-              查看环境
+              {t('banner.viewEnvironment')}
             </button>
-            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label={t('common:close')} title={t('common:close')}>
               ×
             </button>
           </div>
         )}
         {env.data && env.data.platform === 'win32' && env.data.shell && !env.data.shell.gitBashAvailable && !envDismissed && (
           <div className="banner warn">
-            未检测到 Git Bash。当前 shell 降级为 {env.data.shell.kind === 'powershell' ? 'PowerShell' : 'cmd.exe'}，部分 bash 命令可能不兼容。
+            {t('banner.gitBashMissing', { shell: env.data.shell.kind === 'powershell' ? 'PowerShell' : 'cmd.exe' })}
             <button
               className="banner-action"
               onClick={() => openExternal('https://git-scm.com/download/win')}
             >
-              下载 Git for Windows
+              {t('banner.downloadGitWin')}
             </button>
-            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label={t('common:close')} title={t('common:close')}>
               ×
             </button>
           </div>
@@ -290,14 +309,14 @@ export function App() {
         {ui.error && (
           <div className="banner error">
             {ui.error}
-            <button className="banner-close" onClick={dismissError} aria-label="关闭" title="关闭">
+            <button className="banner-close" onClick={dismissError} aria-label={t('common:close')} title={t('common:close')}>
               ×
             </button>
           </div>
         )}
 
         <div className="surface">
-          <ErrorBoundary label={ui.surface === 'mission' ? '任务中控台' : '工作台'}>
+          <ErrorBoundary label={ui.surface === 'mission' ? t('nav:mission') : t('nav:workspace')}>
             <Suspense fallback={<SurfaceSkeleton />}>
               <WorkspaceSurface />
             </Suspense>

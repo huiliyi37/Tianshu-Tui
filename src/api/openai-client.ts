@@ -441,11 +441,20 @@ export class OpenAIClient implements StreamClient {
       body.reasoning_effort = 'high'
     }
 
-    // Apply stable system suffix (Chinese thinking instruction) — computed once at construction.
+    // Apply stable system suffix (Chinese thinking instruction) — computed once
+    // at construction. Copy-on-write, NEVER `content +=`: the system message
+    // object is shared by reference with the caller's request.messages, and the
+    // same request object can re-enter stream() (llm-speculation reuses the main
+    // request's messages; FallbackStreamClient replays the request on failover).
+    // In-place mutation double-appended the suffix on re-entry → system bytes
+    // changed mid-session → full prefix-cache miss for that request (2026-07-06
+    // wireDiverged idx 0 incident).
     if (this.systemSuffix) {
-      const sysMsg = (body.messages as Record<string, unknown>[]).find(m => m.role === 'system')
+      const wireMessages = body.messages as Record<string, unknown>[]
+      const sysIdx = wireMessages.findIndex(m => m.role === 'system')
+      const sysMsg = sysIdx >= 0 ? wireMessages[sysIdx]! : undefined
       if (sysMsg && typeof sysMsg.content === 'string') {
-        sysMsg.content += this.systemSuffix
+        wireMessages[sysIdx] = { ...sysMsg, content: sysMsg.content + this.systemSuffix }
       }
     }
 

@@ -1,6 +1,9 @@
-import { useState } from 'react'
-import { Box, Text, useInput } from 'ink'
-import { getTheme } from './theme.js'
+/**
+ * 命令面板数据层 — 命令清单与模糊过滤（纯函数，零 React/Ink）。
+ *
+ * 渲染与按键交互在 T9：`format/overlay.ts::renderCommandPalette` +
+ * `engine/app.ts` 的 overlay 导航。本模块只提供数据。
+ */
 
 export interface PaletteCommand {
   name: string
@@ -27,75 +30,6 @@ export function filterCommands(commands: PaletteCommand[], query: string): Palet
       const bStart = b.name.toLowerCase().startsWith(lower) ? 0 : 1
       return aStart - bStart || a.name.localeCompare(b.name)
     })
-}
-
-interface CommandPaletteProps {
-  commands: PaletteCommand[]
-  onSelect: (name: string) => void
-  onCancel: () => void
-}
-
-export function CommandPalette({ commands, onSelect, onCancel }: CommandPaletteProps) {
-  const [query, setQuery] = useState('')
-  const [selectedIdx, setSelectedIdx] = useState(0)
-  const theme = getTheme()
-
-  const filtered = filterCommands(commands, query)
-
-  useInput((_input, key) => {
-    if (key.escape) {
-      onCancel()
-      return
-    }
-    const hotkeyMatch = filtered.find(c => c.category === 'surface' && c.hotkey === _input)
-    if (hotkeyMatch) {
-      onSelect(hotkeyMatch.name)
-      return
-    }
-    if (key.return && filtered.length > 0) {
-      onSelect(filtered[selectedIdx]!.name)
-      return
-    }
-    if (key.upArrow) {
-      setSelectedIdx(prev => Math.max(0, prev - 1))
-      return
-    }
-    if (key.downArrow) {
-      setSelectedIdx(prev => Math.min(filtered.length - 1, prev + 1))
-      return
-    }
-    if (key.backspace || key.delete) {
-      setQuery(prev => prev.slice(0, -1))
-      setSelectedIdx(0)
-      return
-    }
-    if (_input.length === 1) {
-      setQuery(prev => prev + _input)
-      setSelectedIdx(0)
-    }
-  })
-
-  return (
-    <Box flexDirection="column" paddingX={1} paddingY={0}>
-      <Box>
-        <Text color={theme.primary} bold>&gt; </Text>
-        <Text color={query ? theme.userColor : theme.dim}>{query || 'search commands...'}</Text>
-      </Box>
-      <Box flexDirection="column" marginTop={1}>
-        {filtered.slice(0, 10).map((cmd, i) => {
-          const isSelected = i === selectedIdx
-          return (
-            <Box key={cmd.name}>
-              <Text color={isSelected ? theme.primary : theme.dim}>{isSelected ? '>' : ' '} </Text>
-              <Text color={isSelected ? theme.primary : theme.secondary} bold={isSelected}>{cmd.name}</Text>
-              {cmd.hotkey && <Text color={theme.dim}> [{cmd.hotkey}]</Text>}
-              <Text color={theme.dim}> {cmd.description}</Text>
-            </Box>
-          )
-        })}
-      </Box>
-    </Box>
-  )
 }
 
 export function getPaletteCommands(): PaletteCommand[] {
@@ -145,7 +79,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/council', description: 'Convene a star-domain council (single round; --rounds 2+ enables debate)' },
     { name: '/plan', description: 'Create implementation plan (writing-plans workflow)' },
     { name: '/write-plan', description: 'Alias of /plan — same writing-plans workflow' },
-    { name: '/plan-mode', description: 'Enter plan authoring mode (Shift+Tab toggles Plan/Agent)' },
+    { name: '/plan-mode', description: 'Enter/exit plan authoring mode (/plan-mode toggles)' },
     { name: '/plan-list', description: 'List submitted plans awaiting approval' },
     { name: '/plan-approve', description: 'Approve a plan and start execution' },
     { name: '/plan-reject', description: 'Reject a plan with feedback for revision' },

@@ -12,6 +12,10 @@
  *   GET    /config/balance                  query DeepSeek account balance (official API)
  *   GET    /config/autonomy                 autonomy brake mode + checkpoint interval (C3)
  *   PUT    /config/autonomy                 set autonomy brake mode / checkpoint interval (C3)
+ *   GET    /config/computer-use             Computer Use status: platform, system permissions, app grants
+ *   POST   /config/computer-use/revoke      revoke an app's "always allow" grant ({ app })
+ *   GET    /config/permission-dirs          Codex-style standing directory grants (read/write, exists probe)
+ *   PUT    /config/permission-dirs          set standing directory grants; additions apply immediately
  */
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
@@ -33,11 +37,18 @@ import {
   setShellConfig,
   getCheckpointConfig,
   setCheckpointConfig,
+  getPermissionDirs,
+  setPermissionDirs,
 } from '../config/manager.js'
+import { applyConfiguredPathGrants } from '../tools/path-grants.js'
+import { expandHome } from '../platform.js'
+import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '../config/provider-presets.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
 import { queryDeepSeekBalance, type BalanceResult } from '../api/balance-client.js'
+import { listGrantedApps, revokeApp } from '../tools/computer-use/app-grants.js'
+import { createPlatformDriver, isComputerUsePlatform } from '../tools/computer-use/platform-driver.js'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -275,6 +286,83 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }
+    }, apiToken),
+
+    // Computer Use (desktop GUI automation) status for the desktop settings UI:
+    // platform availability, system permission probe, and per-app grants.
+    'GET /config/computer-use': withAuth(async () => {
+      const available = isComputerUsePlatform(process.platform) && process.env.RIVET_COMPUTER_USE !== '0'
+      const grants = listGrantedApps().map(g => ({ app: g.app, grantedAt: g.grantedAt }))
+      if (!available) {
+        return { status: 200, body: { available: false, platform: process.platform, permissions: null, grants } }
+      }
+      let permissions: { accessibility: boolean; screenRecording: boolean; detail: string } | null = null
+      try {
+        permissions = await createPlatformDriver().checkPermissions()
+      } catch { /* probe failure → permissions unknown, UI shows a hint */ }
+      return { status: 200, body: { available: true, platform: process.platform, permissions, grants } }
+    }, apiToken),
+
+    // Codex-style standing directory grants for the desktop settings UI.
+    // `exists` lets the UI warn about missing/typo'd paths without blocking the
+    // save — applyConfiguredPathGrants skips non-existent entries fail-closed.
+    'GET /config/permission-dirs': withAuth(() => {
+      const dirs = getPermissionDirs()
+      const probe = (p: string) => ({ path: p, exists: existsSync(resolve(expandHome(p))) })
+      return {
+        status: 200,
+        body: {
+          readDirs: dirs.additionalReadDirs.map(probe),
+          writeDirs: dirs.additionalWriteDirs.map(probe),
+        },
+      }
+    }, apiToken),
+
+    'PUT /config/permission-dirs': withAuth((body) => {
+      const { additionalReadDirs, additionalWriteDirs } = (body ?? {}) as {
+        additionalReadDirs?: unknown
+        additionalWriteDirs?: unknown
+      }
+      if (additionalReadDirs === undefined && additionalWriteDirs === undefined) {
+        return { status: 400, body: { error: 'additionalReadDirs or additionalWriteDirs is required' } }
+      }
+      try {
+        const before = getPermissionDirs()
+        const next = setPermissionDirs({ additionalReadDirs, additionalWriteDirs })
+        // Additions take effect immediately in this running sidecar (in-memory
+        // grants for every live session). Removals cannot be revoked from the
+        // in-memory store — the same root may also hold an approval-time grant —
+        // so a removed entry stays effective until the next sidecar start.
+        applyConfiguredPathGrants(next)
+        const removed = [
+          ...before.additionalReadDirs.filter(d => !next.additionalReadDirs.includes(d)),
+          ...before.additionalWriteDirs.filter(d => !next.additionalWriteDirs.includes(d)),
+        ]
+        const probe = (p: string) => ({ path: p, exists: existsSync(resolve(expandHome(p))) })
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            readDirs: next.additionalReadDirs.map(probe),
+            writeDirs: next.additionalWriteDirs.map(probe),
+            restartRequired: removed.length > 0,
+          },
+        }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // Revoke an app's "always allow" grant. App name in body (may contain
+    // spaces/unicode — avoids URL-encoding pitfalls in path params).
+    'POST /config/computer-use/revoke': withAuth((body) => {
+      const { app } = (body ?? {}) as { app?: unknown }
+      if (typeof app !== 'string' || !app.trim()) {
+        return { status: 400, body: { error: 'app is required' } }
+      }
+      const removed = revokeApp(app.trim())
+      if (!removed) return { status: 404, body: { error: `No grant found for "${app.trim()}"` } }
+      return { status: 200, body: { ok: true, grants: listGrantedApps().map(g => ({ app: g.app, grantedAt: g.grantedAt })) } }
     }, apiToken),
 
     'GET /config/balance': withAuth(async () => {

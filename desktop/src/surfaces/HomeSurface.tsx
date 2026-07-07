@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   BookOpen,
   Code,
@@ -22,39 +23,36 @@ const RELEASES_URL = 'https://github.com/huiliyi37/Tianshu-Tui/releases'
 
 interface DocLink {
   icon: React.ElementType
-  title: string
-  desc: string
+  /** i18n key prefix under home:docs.* — resolved to .title / .desc at render. */
+  key: string
   href: string
 }
 
 const DOCS: DocLink[] = [
   {
     icon: BookOpen,
-    title: 'README',
-    desc: '项目简介、特性与快速开始',
+    key: 'readme',
     href: `${REPO_URL}#readme`,
   },
   {
     icon: FileText,
-    title: '用户手册',
-    desc: '完整使用指南与命令参考',
+    key: 'manual',
     href: `${REPO_URL}/blob/main/docs/user-guide.md`,
   },
   {
     icon: Shield,
-    title: '沙箱权限说明',
-    desc: '了解天枢的工具执行与权限安全模型',
+    key: 'sandbox',
     href: `${REPO_URL}/blob/main/docs/user-guide-sandbox-permissions.md`,
   },
   {
     icon: HelpCircle,
-    title: 'Provider 配置',
-    desc: '配置 DeepSeek / Claude / GLM 等 API Key',
+    key: 'provider',
     href: `${REPO_URL}/blob/main/docs/user-guide-provider-config.md`,
   },
 ]
 
 export function HomeSurface() {
+  const { t } = useTranslation('home')
   const dispatch = useUiDispatch()
   const [busy, setBusy] = useState(false)
   const [copiedText, setCopiedText] = useState<string | null>(null)
@@ -84,23 +82,23 @@ export function HomeSurface() {
             <Sparkles size={28} />
           </span>
           <div>
-            <h1 className="home-title">天枢 · tiānshū</h1>
+            <h1 className="home-title">{t('brand.title')}</h1>
             <p className="home-subtitle">Next-Gen Agentic Coding Runtime</p>
           </div>
         </div>
         <p className="home-lead">
-          智能上下文管理、多星域协同博弈、自主安全沙箱。
+          {t('lead.line1')}
           <br />
-          在桌面端打开项目，让 tianshu 接管并完成复杂的工程化编码任务。
+          {t('lead.line2')}
         </p>
         <div className="home-actions">
           <button className="btn btn-primary home-btn" onClick={createFirstThread} disabled={busy}>
             <MessageSquare size={16} />
-            {busy ? '初始化会话…' : '开启新对话'}
+            {busy ? t('actions.initializing') : t('actions.newThread')}
           </button>
           <button className="btn btn-secondary home-btn" onClick={() => open(REPO_URL)}>
             <Code size={16} />
-            开源仓库
+            {t('actions.repo')}
           </button>
         </div>
       </header>
@@ -110,28 +108,28 @@ export function HomeSurface() {
         <div className="bento-card bento-steps">
           <h3 className="bento-card-title">
             <Zap size={16} className="bento-title-icon" />
-            快速开始
+            {t('quickStart.title')}
           </h3>
           <ol className="bento-step-list">
             <li>
               <span className="step-num">1</span>
               <div>
-                <strong>选择项目</strong>
-                <p>在左侧边栏打开或创建一个项目目录作为工作区。</p>
+                <strong>{t('quickStart.step1.title')}</strong>
+                <p>{t('quickStart.step1.desc')}</p>
               </div>
             </li>
             <li>
               <span className="step-num">2</span>
               <div>
-                <strong>配置 API Key</strong>
-                <p>进入「设置」面板或在下方终端中设置大模型密钥。</p>
+                <strong>{t('quickStart.step2.title')}</strong>
+                <p>{t('quickStart.step2.desc')}</p>
               </div>
             </li>
             <li>
               <span className="step-num">3</span>
               <div>
-                <strong>开始编码</strong>
-                <p>在输入框键入需求，tianshu 将自主进行规划、编码及自测。</p>
+                <strong>{t('quickStart.step3.title')}</strong>
+                <p>{t('quickStart.step3.desc')}</p>
               </div>
             </li>
           </ol>
@@ -141,21 +139,21 @@ export function HomeSurface() {
         <div className="bento-card bento-docs">
           <h3 className="bento-card-title">
             <BookOpen size={16} className="bento-title-icon" />
-            文档与手册
+            {t('docs.sectionTitle')}
           </h3>
           <div className="bento-docs-grid">
             {DOCS.map((doc) => (
               <button
-                key={doc.title}
+                key={doc.key}
                 className="bento-doc-item"
                 onClick={() => open(doc.href)}
-                title={doc.desc}
+                title={t(`docs.${doc.key}.desc`)}
               >
                 <div className="bento-doc-head">
                   <doc.icon size={16} className="bento-doc-icon" />
-                  <span className="bento-doc-title">{doc.title}</span>
+                  <span className="bento-doc-title">{t(`docs.${doc.key}.title`)}</span>
                 </div>
-                <p className="bento-doc-desc">{doc.desc}</p>
+                <p className="bento-doc-desc">{t(`docs.${doc.key}.desc`)}</p>
               </button>
             ))}
           </div>
@@ -165,21 +163,21 @@ export function HomeSurface() {
         <div className="bento-card bento-commands">
           <h3 className="bento-card-title">
             <Terminal size={16} className="bento-title-icon" />
-            常用快捷指令
+            {t('commands.title')}
           </h3>
-          <p className="bento-card-subtitle">点击命令快速复制代码</p>
+          <p className="bento-card-subtitle">{t('commands.subtitle')}</p>
           <div className="bento-cmd-list">
             {[
-              { cmd: '/yes', label: '一键全自动 YOLO（无限轮次，无打扰）' },
-              { cmd: '/team', label: '委派多代理组队并行拆解任务' },
-              { cmd: '/review', label: '对当前的变更或计划执行审查' },
-              { cmd: '/python status', label: '核对依赖环境与 Git 仓库状态' }
+              { cmd: '/yes', label: t('commands.yes') },
+              { cmd: '/team', label: t('commands.team') },
+              { cmd: '/review', label: t('commands.review') },
+              { cmd: '/python status', label: t('commands.status') }
             ].map((item) => (
               <button
                 key={item.cmd}
                 className="bento-cmd-item"
                 onClick={() => handleCopyCommand(item.cmd)}
-                title="点击复制指令"
+                title={t('commands.copyHint')}
               >
                 <span className="bento-cmd-text">{item.cmd}</span>
                 <span className="bento-cmd-label">{item.label}</span>
@@ -195,9 +193,9 @@ export function HomeSurface() {
         <div className="bento-card bento-download">
           <h3 className="bento-card-title">
             <Download size={16} className="bento-title-icon" />
-            下载桌面端
+            {t('download.title')}
           </h3>
-          <p className="bento-card-subtitle">跨平台发布包安装</p>
+          <p className="bento-card-subtitle">{t('download.subtitle')}</p>
           <div className="bento-dl-buttons">
             {[
               { name: 'macOS (.dmg)', ext: 'dmg' },
@@ -220,7 +218,7 @@ export function HomeSurface() {
       <footer className="home-footer">
         <span>
           <Globe size={12} />
-          开源协议：Apache-2.0
+          {t('footer.license')}
         </span>
         <button className="home-link" onClick={() => open(REPO_URL)}>
           github.com/huiliyi37/Tianshu-Tui

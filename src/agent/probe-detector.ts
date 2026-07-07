@@ -19,6 +19,8 @@
  *   - logger 实现文件本身（如 telemetry-writer.ts）
  */
 
+import { isAbsolute, join } from 'node:path'
+
 /** 单条探针命中记录 */
 export interface ProbeHit {
   /** 相对路径 */
@@ -205,7 +207,10 @@ export function scanFilesForProbes(
   const allHits: ProbeHit[] = []
   for (const filePath of filePaths) {
     if (isWhitelistedPath(filePath)) continue
-    const content = readFile(filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`)
+    // isAbsolute + join 而非 startsWith('/') + 字符串拼接：Windows 绝对路径
+    // D:\... 不以 '/' 开头，旧写法拼成 `${cwd}/D:\...`，readFile 必失败 →
+    // 探针检测在 Windows 上对绝对路径静默失明。
+    const content = readFile(isAbsolute(filePath) ? filePath : join(cwd, filePath))
     if (content === null) continue // 文件可能已被删除
     const hits = detectProbes(content, filePath)
     allHits.push(...hits)

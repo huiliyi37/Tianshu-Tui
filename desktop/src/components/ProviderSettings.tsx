@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
 import { Pencil } from 'lucide-react'
 import { useConfigProviders, qk } from '../state/queries'
@@ -23,9 +25,10 @@ function maskRef(ref: string): string {
 }
 
 function KeyBadge({ status }: { status: ProviderListItem['keyStatus'] }) {
-  if (status.source === 'inline') return <span className="badge ok" title="Inline key（已配置）">Key {maskRef(status.ref)}</span>
+  const { t } = useTranslation('settings')
+  if (status.source === 'inline') return <span className="badge ok" title={t('providers.keyInline')}>Key {maskRef(status.ref)}</span>
   if (status.source === 'env') return <span className="badge ok" title={`From env: ${maskRef(status.ref)}`}>{maskRef(status.ref)}</span>
-  return <span className="badge warn">未配置</span>
+  return <span className="badge warn">{t('providers.keyNone')}</span>
 }
 
 interface ModelFormState {
@@ -50,19 +53,19 @@ function modelFromState(state: ModelFormState): { id: string; alias?: string; co
   return { id, alias, contextWindow, maxTokens }
 }
 
-function validateModel(state: ModelFormState): { ok: true; model: { id: string; alias?: string; contextWindow: number; maxTokens: number } } | { ok: false; error: string } {
+function validateModel(state: ModelFormState, t: TFunction<'settings'>): { ok: true; model: { id: string; alias?: string; contextWindow: number; maxTokens: number } } | { ok: false; error: string } {
   const model = modelFromState(state)
   if (!model) {
-    if (!state.id.trim()) return { ok: false, error: '模型 ID 不能为空' }
+    if (!state.id.trim()) return { ok: false, error: t('providers.modelIdRequired') }
     const cw = Number(state.contextWindow)
-    if (!Number.isInteger(cw) || cw <= 0) return { ok: false, error: '上下文长度必须是正整数' }
+    if (!Number.isInteger(cw) || cw <= 0) return { ok: false, error: t('providers.ctxPositive') }
     const mt = Number(state.maxTokens)
-    if (!Number.isInteger(mt) || mt <= 0) return { ok: false, error: '最大 Tokens 必须是正整数' }
-    if (mt > cw) return { ok: false, error: '最大输出不能超过上下文长度（请照官方 API 的真实上限填写）' }
-    return { ok: false, error: '模型信息无效' }
+    if (!Number.isInteger(mt) || mt <= 0) return { ok: false, error: t('providers.maxPositive') }
+    if (mt > cw) return { ok: false, error: t('providers.maxExceedsCtx') }
+    return { ok: false, error: t('providers.modelInvalid') }
   }
   if (model.maxTokens > model.contextWindow) {
-    return { ok: false, error: '最大输出不能超过上下文长度（请照官方 API 的真实上限填写）' }
+    return { ok: false, error: t('providers.maxExceedsCtx') }
   }
   return { ok: true, model }
 }
@@ -84,31 +87,32 @@ function ModelForm({
   busy: boolean
   error: string | null
 }) {
+  const { t } = useTranslation('settings')
   return (
     <div className="provider-model-form">
       <div className="provider-form-grid">
         <label className="provider-field">
-          <span className="provider-field-label">模型 ID</span>
+          <span className="provider-field-label">{t('providers.modelId')}</span>
           <input
             type="text"
-            placeholder="例如 gpt-4o"
+            placeholder={t('providers.modelIdPlaceholder')}
             value={state.id}
             onChange={(e) => onChange({ id: e.target.value })}
             disabled={busy}
           />
         </label>
         <label className="provider-field">
-          <span className="provider-field-label">别名（可选）</span>
+          <span className="provider-field-label">{t('providers.alias')}</span>
           <input
             type="text"
-            placeholder="显示用名称"
+            placeholder={t('providers.aliasPlaceholder')}
             value={state.alias}
             onChange={(e) => onChange({ alias: e.target.value })}
             disabled={busy}
           />
         </label>
         <label className="provider-field">
-          <span className="provider-field-label">上下文长度（tokens）</span>
+          <span className="provider-field-label">{t('providers.contextWindow')}</span>
           <input
             type="number"
             placeholder="128000"
@@ -118,7 +122,7 @@ function ModelForm({
           />
         </label>
         <label className="provider-field">
-          <span className="provider-field-label">最大输出 Tokens</span>
+          <span className="provider-field-label">{t('providers.maxTokens')}</span>
           <input
             type="number"
             placeholder="384000"
@@ -129,11 +133,11 @@ function ModelForm({
         </label>
       </div>
       <div className="provider-form-hint">
-        请照该服务商官方 API 文档的真实值填写。上下文长度决定天枢的自动压缩点（填小了会过早压缩、丢上下文；填大了会撞 API 上限），也决定模型能记住多少对话；最大输出 Tokens 是单次回复上限，不能超过上下文长度。DeepSeek V4 参考值：上下文 1000000、最大输出 384000。
+        {t('providers.formHint')}
       </div>
       <div className="provider-form-actions">
         <button className="btn-sm" disabled={busy} onClick={onSubmit}>{submitLabel}</button>
-        <button className="btn-sm ghost" disabled={busy} onClick={onCancel}>取消</button>
+        <button className="btn-sm ghost" disabled={busy} onClick={onCancel}>{t('providers.cancel')}</button>
       </div>
       {error && <span className="provider-key-error">{error}</span>}
     </div>
@@ -149,6 +153,7 @@ function ModelManageList({
   models: ProviderListItem['models']
   onRefresh: () => void
 }) {
+  const { t } = useTranslation('settings')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [ctx, setCtx] = useState('')
   const [max, setMax] = useState('')
@@ -166,15 +171,15 @@ function ModelManageList({
     const contextWindow = Number(ctx)
     const maxTokens = Number(max)
     if (!Number.isInteger(contextWindow) || contextWindow <= 0) {
-      setError('上下文长度必须是正整数')
+      setError(t('providers.ctxPositive'))
       return
     }
     if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
-      setError('最大 Tokens 必须是正整数')
+      setError(t('providers.maxPositive'))
       return
     }
     if (maxTokens > contextWindow) {
-      setError('最大输出不能超过上下文长度（请照官方 API 的真实上限填写）')
+      setError(t('providers.maxExceedsCtx'))
       return
     }
     setBusy(true)
@@ -192,7 +197,7 @@ function ModelManageList({
       setError(null)
       onRefresh()
     } catch (e) {
-      toast.error(`更新模型失败: ${(e as Error).message}`)
+      toast.error(t('providers.updateModelFailed', { error: (e as Error).message }))
     } finally {
       setBusy(false)
     }
@@ -206,7 +211,7 @@ function ModelManageList({
           {editingId === m.id ? (
             <>
               <label className="provider-mini-field">
-                <span>上下文</span>
+                <span>{t('providers.ctxShort')}</span>
                 <input
                   type="number"
                   value={ctx}
@@ -216,7 +221,7 @@ function ModelManageList({
                 />
               </label>
               <label className="provider-mini-field">
-                <span>最大输出</span>
+                <span>{t('providers.maxShort')}</span>
                 <input
                   type="number"
                   value={max}
@@ -225,29 +230,29 @@ function ModelManageList({
                   placeholder="tokens"
                 />
               </label>
-              <button className="btn-sm" disabled={busy} onClick={() => save(m)}>保存</button>
-              <button className="btn-sm ghost" disabled={busy} onClick={() => setEditingId(null)}>取消</button>
+              <button className="btn-sm" disabled={busy} onClick={() => save(m)}>{t('providers.save')}</button>
+              <button className="btn-sm ghost" disabled={busy} onClick={() => setEditingId(null)}>{t('providers.cancel')}</button>
             </>
           ) : (
             <>
               <span className="provider-model-params">
                 ctx {m.contextWindow.toLocaleString()} / max {m.maxTokens.toLocaleString()}
               </span>
-              <button className="btn-sm ghost" onClick={() => startEdit(m)} title="编辑">
+              <button className="btn-sm ghost" onClick={() => startEdit(m)} title={t('providers.edit')}>
                 <Pencil size={12} />
               </button>
               <button
                   className="btn-sm ghost danger"
                   disabled={busy}
-                  title="删除模型"
+                  title={t('providers.deleteModel')}
                   onClick={async () => {
-                    if (!window.confirm(`确定删除模型「${m.alias ?? m.id}」？${models.length === 1 ? '\n这是最后一个模型，删除后整个 Provider 也会被移除。' : ''}`)) return
+                    if (!window.confirm(`${t('providers.deleteModelConfirm', { name: m.alias ?? m.id })}${models.length === 1 ? `\n${t('providers.deleteModelLast')}` : ''}`)) return
                     setBusy(true)
                     try {
                       await removeProviderModel(providerName, m.id)
                       onRefresh()
                     } catch (e) {
-                      toast.error(`删除模型失败: ${(e as Error).message}`)
+                      toast.error(t('providers.deleteModelFailed', { error: (e as Error).message }))
                     } finally { setBusy(false) }
                   }}
                 >
@@ -269,6 +274,7 @@ function ProviderRow({
   p: ProviderListItem
   onRefresh: () => void
 }) {
+  const { t } = useTranslation('settings')
   const [editing, setEditing] = useState(false)
   const [addingModel, setAddingModel] = useState(false)
   const [managingModels, setManagingModels] = useState(false)
@@ -280,8 +286,8 @@ function ProviderRow({
 
   const validateKey = (v: string): string | null => {
     const trimmed = v.trim()
-    if (!trimmed) return 'API Key 不能为空'
-    if (trimmed.length < 4) return 'API Key 长度不足'
+    if (!trimmed) return t('providers.keyEmpty')
+    if (trimmed.length < 4) return t('providers.keyTooShort')
     return null
   }
 
@@ -299,7 +305,7 @@ function ProviderRow({
       setEditing(false)
       onRefresh()
     } catch (e) {
-      toast.error(`保存 Key 失败: ${(e as Error).message}`)
+      toast.error(t('providers.saveKeyFailed', { error: (e as Error).message }))
     } finally { setBusy(false) }
   }
 
@@ -309,13 +315,13 @@ function ProviderRow({
       await setProviderAsDefault(p.name)
       onRefresh()
     } catch (e) {
-      toast.error(`设为默认失败: ${(e as Error).message}`)
+      toast.error(t('providers.setDefaultFailed', { error: (e as Error).message }))
     } finally { setBusy(false) }
   }
 
   const remove = async () => {
     if (p.isDefault) {
-      toast.error('不能移除默认 Provider，请先切换默认')
+      toast.error(t('providers.cannotRemoveDefault'))
       return
     }
     setBusy(true)
@@ -323,12 +329,12 @@ function ProviderRow({
       await removeConfigProvider(p.name)
       onRefresh()
     } catch (e) {
-      toast.error(`移除 Provider 失败: ${(e as Error).message}`)
+      toast.error(t('providers.removeFailed', { error: (e as Error).message }))
     } finally { setBusy(false) }
   }
 
   const addModel = async () => {
-    const result = validateModel(modelState)
+    const result = validateModel(modelState, t)
     if (!result.ok) {
       setModelError(result.error)
       return
@@ -341,7 +347,7 @@ function ProviderRow({
       setAddingModel(false)
       onRefresh()
     } catch (e) {
-      toast.error(`添加模型失败: ${(e as Error).message}`)
+      toast.error(t('providers.addModelFailed', { error: (e as Error).message }))
     } finally { setBusy(false) }
   }
 
@@ -350,7 +356,7 @@ function ProviderRow({
       <div className="provider-header">
         <span className="provider-name">
           {p.label}
-          {p.isDefault && <span className="badge accent">默认</span>}
+          {p.isDefault && <span className="badge accent">{t('providers.default')}</span>}
         </span>
         <KeyBadge status={p.keyStatus} />
       </div>
@@ -362,19 +368,19 @@ function ProviderRow({
       </div>
       <div className="provider-actions">
         {!p.isDefault && (
-          <button className="btn-sm" disabled={busy} onClick={makeDefault}>设为默认</button>
+          <button className="btn-sm" disabled={busy} onClick={makeDefault}>{t('providers.setDefault')}</button>
         )}
         <button className="btn-sm" disabled={busy} onClick={() => setEditing(!editing)}>
-          {editing ? '取消' : '设置 Key'}
+          {editing ? t('providers.cancel') : t('providers.setKey')}
         </button>
         <button className="btn-sm" disabled={busy} onClick={() => { setManagingModels(!managingModels); setAddingModel(false) }}>
-          {managingModels ? '收起模型' : '管理模型'}
+          {managingModels ? t('providers.collapseModels') : t('providers.manageModels')}
         </button>
         <button className="btn-sm" disabled={busy} onClick={() => { setAddingModel(!addingModel); setManagingModels(false) }}>
-          {addingModel ? '取消' : '添加模型'}
+          {addingModel ? t('providers.cancel') : t('providers.addModel')}
         </button>
         {!p.isDefault && (
-          <button className="btn-sm danger" disabled={busy} onClick={remove}>移除</button>
+          <button className="btn-sm danger" disabled={busy} onClick={remove}>{t('providers.remove')}</button>
         )}
       </div>
       {editing && (
@@ -387,7 +393,7 @@ function ProviderRow({
             onKeyDown={e => { if (e.key === 'Enter') saveKey() }}
             autoFocus
           />
-          <button className="btn-sm" disabled={busy} onClick={saveKey}>保存</button>
+          <button className="btn-sm" disabled={busy} onClick={saveKey}>{t('providers.save')}</button>
           {keyError && <span className="provider-key-error">{keyError}</span>}
         </div>
       )}
@@ -397,7 +403,7 @@ function ProviderRow({
           onChange={(patch) => setModelState((prev) => ({ ...prev, ...patch }))}
           onSubmit={addModel}
           onCancel={() => { setAddingModel(false); setModelError(null); setModelState(emptyModel()) }}
-          submitLabel="保存模型"
+          submitLabel={t('providers.saveModel')}
           busy={busy}
           error={modelError}
         />
@@ -416,6 +422,7 @@ function PresetCard({
   preset: UnconfiguredPreset
   onRefresh: () => void
 }) {
+  const { t } = useTranslation('settings')
   const [expanded, setExpanded] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [keyError, setKeyError] = useState<string | null>(null)
@@ -423,8 +430,8 @@ function PresetCard({
 
   const validateKey = (v: string): string | null => {
     const trimmed = v.trim()
-    if (!trimmed) return '添加 Provider 需要填写 API Key'
-    if (trimmed.length < 4) return 'API Key 长度不足'
+    if (!trimmed) return t('providers.keyRequired')
+    if (trimmed.length < 4) return t('providers.keyTooShort')
     return null
   }
 
@@ -442,7 +449,7 @@ function PresetCard({
       setExpanded(false)
       onRefresh()
     } catch (e) {
-      toast.error(`添加 Provider 失败: ${(e as Error).message}`)
+      toast.error(t('providers.addProviderFailed', { error: (e as Error).message }))
     } finally { setBusy(false) }
   }
 
@@ -467,8 +474,8 @@ function PresetCard({
           onKeyDown={e => { if (e.key === 'Enter') add() }}
           autoFocus
         />
-        <button className="btn-sm" disabled={busy} onClick={add}>添加</button>
-        <button className="btn-sm ghost" disabled={busy} onClick={() => setExpanded(false)}>取消</button>
+        <button className="btn-sm" disabled={busy} onClick={add}>{t('providers.add')}</button>
+        <button className="btn-sm ghost" disabled={busy} onClick={() => setExpanded(false)}>{t('providers.cancel')}</button>
       </div>
       {keyError && <span className="provider-key-error">{keyError}</span>}
     </div>
@@ -494,6 +501,7 @@ function emptyCustomProvider(): CustomProviderFormState {
 }
 
 function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
+  const { t } = useTranslation('settings')
   const [expanded, setExpanded] = useState(false)
   const [state, setState] = useState<CustomProviderFormState>(emptyCustomProvider())
   const [error, setError] = useState<string | null>(null)
@@ -502,21 +510,21 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
   const add = async () => {
     const name = state.name.trim()
     if (!name) {
-      setError('Provider 名称不能为空')
+      setError(t('providers.nameRequired'))
       return
     }
     const baseUrl = state.baseUrl.trim()
     if (!baseUrl) {
-      setError('Base URL 不能为空')
+      setError(t('providers.urlRequired'))
       return
     }
     try {
       new URL(baseUrl)
     } catch {
-      setError('Base URL 格式不正确')
+      setError(t('providers.urlInvalid'))
       return
     }
-    const modelResult = validateModel(state.model)
+    const modelResult = validateModel(state.model, t)
     if (!modelResult.ok) {
       setError(modelResult.error)
       return
@@ -535,28 +543,28 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
       setExpanded(false)
       onRefresh()
     } catch (e) {
-      toast.error(`添加 Provider 失败: ${(e as Error).message}`)
+      toast.error(t('providers.addProviderFailed', { error: (e as Error).message }))
     } finally { setBusy(false) }
   }
 
   if (!expanded) {
     return (
       <button className="preset-card" onClick={() => setExpanded(true)}>
-        <span className="preset-label">+ 自定义 Provider</span>
-        <span className="preset-model">手动输入名称、URL、模型</span>
+        <span className="preset-label">{t('providers.customCardTitle')}</span>
+        <span className="preset-model">{t('providers.customCardSubtitle')}</span>
       </button>
     )
   }
 
   return (
     <div className="preset-card preset-card-input custom-provider-card">
-      <span className="preset-label">自定义 Provider</span>
+      <span className="preset-label">{t('providers.customTitle')}</span>
       <div className="provider-form-stack">
         <label className="provider-field">
-          <span className="provider-field-label">Provider 名称</span>
+          <span className="provider-field-label">{t('providers.name')}</span>
           <input
             type="text"
-            placeholder="例如 my-openai"
+            placeholder={t('providers.namePlaceholder')}
             value={state.name}
             onChange={(e) => setState((prev) => ({ ...prev, name: e.target.value }))}
             disabled={busy}
@@ -566,14 +574,14 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
           <span className="provider-field-label">Base URL</span>
           <input
             type="text"
-            placeholder="例如 https://api.example.com/v1"
+            placeholder={t('providers.baseUrlPlaceholder')}
             value={state.baseUrl}
             onChange={(e) => setState((prev) => ({ ...prev, baseUrl: e.target.value }))}
             disabled={busy}
           />
         </label>
         <label className="provider-field">
-          <span className="provider-field-label">API Key（可选）</span>
+          <span className="provider-field-label">{t('providers.apiKeyOptional')}</span>
           <input
             type="password"
             placeholder="sk-..."
@@ -584,27 +592,27 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
         </label>
         <div className="provider-form-grid">
           <label className="provider-field">
-            <span className="provider-field-label">模型 ID</span>
+            <span className="provider-field-label">{t('providers.modelId')}</span>
             <input
               type="text"
-              placeholder="例如 gpt-4o"
+              placeholder={t('providers.modelIdPlaceholder')}
               value={state.model.id}
               onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, id: e.target.value } }))}
               disabled={busy}
             />
           </label>
           <label className="provider-field">
-            <span className="provider-field-label">别名（可选）</span>
+            <span className="provider-field-label">{t('providers.alias')}</span>
             <input
               type="text"
-              placeholder="显示用名称"
+              placeholder={t('providers.aliasPlaceholder')}
               value={state.model.alias}
               onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, alias: e.target.value } }))}
               disabled={busy}
             />
           </label>
           <label className="provider-field">
-            <span className="provider-field-label">上下文长度（tokens）</span>
+            <span className="provider-field-label">{t('providers.contextWindow')}</span>
             <input
               type="number"
               placeholder="128000"
@@ -614,7 +622,7 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
             />
           </label>
           <label className="provider-field">
-            <span className="provider-field-label">最大输出 Tokens</span>
+            <span className="provider-field-label">{t('providers.maxTokens')}</span>
             <input
               type="number"
               placeholder="384000"
@@ -631,11 +639,11 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
             onChange={(e) => setState((prev) => ({ ...prev, makeDefault: e.target.checked }))}
             disabled={busy}
           />
-          <span>设为默认 Provider</span>
+          <span>{t('providers.makeDefault')}</span>
         </label>
         <div className="provider-form-actions">
-          <button className="btn-sm" disabled={busy} onClick={add}>添加</button>
-          <button className="btn-sm ghost" disabled={busy} onClick={() => { setExpanded(false); setError(null); setState(emptyCustomProvider()) }}>取消</button>
+          <button className="btn-sm" disabled={busy} onClick={add}>{t('providers.add')}</button>
+          <button className="btn-sm ghost" disabled={busy} onClick={() => { setExpanded(false); setError(null); setState(emptyCustomProvider()) }}>{t('providers.cancel')}</button>
         </div>
         {error && <span className="provider-key-error">{error}</span>}
       </div>
@@ -646,13 +654,14 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
 const PAGE_SIZE = 5
 
 export function ProviderSettings() {
+  const { t } = useTranslation('settings')
   const { data, isLoading, isError } = useConfigProviders()
   const qc = useQueryClient()
   const refresh = () => qc.invalidateQueries({ queryKey: qk.configProviders })
   const [page, setPage] = useState(0)
 
-  if (isLoading) return <div className="meta">加载中…</div>
-  if (isError) return <div className="meta warn">无法加载 Provider 配置（sidecar 离线？）</div>
+  if (isLoading) return <div className="meta">{t('providers.loading')}</div>
+  if (isError) return <div className="meta warn">{t('providers.loadFailed')}</div>
 
   const { providers, unconfigured } = data!
   const totalPages = Math.max(1, Math.ceil(providers.length / PAGE_SIZE))
@@ -672,21 +681,21 @@ export function ProviderSettings() {
             disabled={safePage === 0}
             onClick={() => setPage(safePage - 1)}
           >
-            上一页
+            {t('providers.prevPage')}
           </button>
-          <span>第 {safePage + 1} / {totalPages} 页</span>
+          <span>{t('providers.pageInfo', { page: safePage + 1, total: totalPages })}</span>
           <button
             className="btn-mini"
             disabled={safePage >= totalPages - 1}
             onClick={() => setPage(safePage + 1)}
           >
-            下一页
+            {t('providers.nextPage')}
           </button>
         </div>
       )}
 
       <div className="preset-section">
-        <div className="preset-header">添加 Provider</div>
+        <div className="preset-header">{t('providers.addProvider')}</div>
         <div className="preset-grid">
           {unconfigured.map(u => (
             <PresetCard key={u.key} preset={u} onRefresh={refresh} />

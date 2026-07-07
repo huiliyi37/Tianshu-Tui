@@ -331,6 +331,9 @@ export class AdvisoryBus {
   /** Top-N 同 priority 次级排序键 — 历史采纳率（跨会话先验 + 会话实测,B）。
    *  null = 无数据,视为中性(排两者之后不如有正数据的,先于有负数据的)。 */
   private adoptionRateProvider: ((key: string) => number | null) | null = null
+  /** 星域措辞适配 — 渲染出口处按当前域改写条目内容（见 domain-advisory-tone.ts）。
+   *  null = 恒等。只影响送达文本,不影响 key/expect/账本。 */
+  private toneAdapter: ((content: string, meta: { key: string; category: AdvisoryCategory; tier?: AdvisoryTier }) => string) | null = null
   // ── Lift 消费端（因果账本闭环,2026-07-04 第四轮）──
   /** 成熟 lift 查询 — null = 样本不足不下结论。 */
   private liftProvider: ((key: string) => number | null) | null = null
@@ -368,6 +371,23 @@ export class AdvisoryBus {
   /** B：注入历史采纳率查询 — Top-N 预算竞争同 priority 时的次级排序键。 */
   setAdoptionRateProvider(provider: (key: string) => number | null): void {
     this.adoptionRateProvider = provider
+  }
+
+  /** 星域措辞适配器 — 在渲染出口（bus 附录块 + system-reminder 通道）改写
+   *  条目文本。惰性求值:适配器每次渲染时执行,域切换自动生效。 */
+  setToneAdapter(adapter: (content: string, meta: { key: string; category: AdvisoryCategory; tier?: AdvisoryTier }) => string): void {
+    this.toneAdapter = adapter
+  }
+
+  /** 应用措辞适配（无适配器 = 恒等）。适配器抛错时回退原文——措辞是增强,
+   *  永不阻断送达。 */
+  private applyTone(e: AdvisoryEntry): string {
+    if (!this.toneAdapter) return e.content
+    try {
+      return this.toneAdapter(e.content, { key: e.key, category: e.category, tier: e.tier })
+    } catch {
+      return e.content
+    }
   }
 
   /** Lift 消费端：注入成熟 lift 查询（AdvisoryReadback.getMatureLift）。
@@ -645,7 +665,7 @@ export class AdvisoryBus {
         if (!existing || e.priority > existing.priority) srDeduped.set(e.key, e)
       }
       for (const e of srDeduped.values()) {
-        this.systemReminderOut.push(e.content)
+        this.systemReminderOut.push(this.applyTone(e))
         this.ledgerRendered++
         this.delivered.push({ key: e.key, category: e.category, tier: e.tier, expect: e.expect })
       }
@@ -776,7 +796,7 @@ export class AdvisoryBus {
     }
 
     const lines = sorted.map(e =>
-      `  <entry key="${escapeXml(e.key)}" priority="${e.priority.toFixed(2)}" category="${e.category}">${escapeXml(e.content)}</entry>`
+      `  <entry key="${escapeXml(e.key)}" priority="${e.priority.toFixed(2)}" category="${e.category}">${escapeXml(this.applyTone(e))}</entry>`
     )
 
     // TTL 递减：TTL > 1 的条目保留到 alive，下轮继续

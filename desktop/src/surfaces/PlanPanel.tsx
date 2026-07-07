@@ -1,27 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { usePlans, usePlan, useApprovePlan, useRejectPlan } from '../state/queries'
+import { useTranslation } from 'react-i18next'
+import { usePlans, usePlan, useApprovePlan, useRejectPlan, useUpdatePlan } from '../state/queries'
 import { Markdown } from '../components/Markdown'
 import type { PlanModeState, PlanStatus, PlanSummary, PlanOption } from '../runtime/types'
 import type { TodoStateItem } from '../runtime/types'
-import { ChevronDown, ChevronUp, LayoutList, Search } from 'lucide-react'
+import { ChevronDown, ChevronUp, LayoutList, Pencil, Search } from 'lucide-react'
 
 /** Sentinel selection value for the live plan-mode draft (not a real slug). */
 const DRAFT_SELECTION = '__draft__'
 
-const STATUS_LABEL: Record<PlanStatus, string> = {
-  submitted: '待审',
-  approved: '已批准',
-  executed: '已执行',
-  rejected: '已拒绝',
-}
-
 type FilterMode = 'active' | 'archived' | 'all'
-
-const FILTERS: { key: FilterMode; label: string }[] = [
-  { key: 'active', label: '活动' },
-  { key: 'archived', label: '已拒绝' },
-  { key: 'all', label: '全部' },
-]
 
 function matchesFilter(p: PlanSummary, mode: FilterMode) {
   if (mode === 'all') return true
@@ -31,7 +19,7 @@ function matchesFilter(p: PlanSummary, mode: FilterMode) {
 
 /**
  * Plan column (Cursor 3.0 "Build" surface). Lists this session's plans, renders
- * the selected plan's markdown, and exposes Build / Reject / Copy.
+ * the selected plan's markdown, and exposes Build / Reject / Edit / Copy.
  *
  * UX refresh:
  * - Plan selector is a thin horizontal chip strip so the document stays visible.
@@ -39,6 +27,7 @@ function matchesFilter(p: PlanSummary, mode: FilterMode) {
  * - A search box filters chips by title.
  * - "Expand list" toggles a compact vertical list for scanning many plans.
  * - Document area fills the remaining panel height and scrolls independently.
+ * - Submitted plans are editable in place (review → tweak → Build loop).
  */
 export function PlanPanel(props: {
   sessionId: string | null
@@ -46,8 +35,11 @@ export function PlanPanel(props: {
   latestPlanSlug?: string
   todos?: TodoStateItem[]
   planMode?: PlanModeState
+  /** Build requires an idle session (server refuses mid-run approval). */
+  sessionRunning?: boolean
 }) {
-  const { sessionId, planRev, latestPlanSlug, planMode } = props
+  const { sessionId, planRev, latestPlanSlug, planMode, sessionRunning } = props
+  const { t } = useTranslation('plan')
   const planning = planMode === 'planning'
   const plans = usePlans(sessionId, planRev, planning)
   const [selected, setSelected] = useState<string | null>(null)
@@ -58,9 +50,24 @@ export function PlanPanel(props: {
   const [comment, setComment] = useState('')
   const [copied, setCopied] = useState(false)
   const [selectedApproach, setSelectedApproach] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState('')
 
   const approve = useApprovePlan()
   const reject = useRejectPlan()
+  const update = useUpdatePlan()
+
+  const STATUS_LABEL: Record<PlanStatus, string> = {
+    submitted: t('statusSubmitted'),
+    approved: t('statusApproved'),
+    executed: t('statusExecuted'),
+    rejected: t('statusRejected'),
+  }
+  const FILTERS: { key: FilterMode; label: string }[] = [
+    { key: 'active', label: t('filterActive') },
+    { key: 'archived', label: t('filterArchived') },
+    { key: 'all', label: t('filterAll') },
+  ]
 
   const all = plans.data?.plans ?? []
   // Live drafting document — only meaningful while the session is planning.
@@ -94,6 +101,7 @@ export function PlanPanel(props: {
     if (has && !hadDraft.current) {
       setSelected(DRAFT_SELECTION)
       setRejecting(false)
+      setEditing(false)
     }
     hadDraft.current = has
   }, [!!draft]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -106,10 +114,14 @@ export function PlanPanel(props: {
   useEffect(() => {
     if (latestPlanSlug && latestPlanSlug !== prevLatestSlug.current) {
       prevLatestSlug.current = latestPlanSlug
-      setSelected(latestPlanSlug)
-      setRejecting(false)
+      // Never yank the document out from under an in-progress edit — the
+      // plan_submitted event may be the echo of our own save.
+      if (!editing) {
+        setSelected(latestPlanSlug)
+        setRejecting(false)
+      }
     }
-  }, [latestPlanSlug])
+  }, [latestPlanSlug, editing])
 
   // Auto-select fallback: prefer the freshly submitted plan, else the newest,
   // when no valid selection is held. The draft sentinel counts as a valid
@@ -158,8 +170,13 @@ export function PlanPanel(props: {
     })
   }, [selected, planOptions])
 
+  // Leaving the plan (or it leaving `submitted`) always exits edit mode.
+  useEffect(() => {
+    setEditing(false)
+  }, [selected])
+
   const onBuild = () => {
-    if (!sessionId || !selected) return
+    if (!sessionId || !selected || sessionRunning) return
     approve.mutate({
       id: sessionId,
       slug: selected,
@@ -183,15 +200,28 @@ export function PlanPanel(props: {
       // clipboard may be unavailable in some contexts
     }
   }
+  const onStartEdit = () => {
+    if (!doc.data?.content) return
+    setEditText(doc.data.content)
+    setEditing(true)
+    setRejecting(false)
+  }
+  const onSaveEdit = () => {
+    if (!sessionId || !selected || !editText.trim()) return
+    update.mutate(
+      { id: sessionId, slug: selected, content: editText },
+      { onSuccess: () => setEditing(false) },
+    )
+  }
 
   if (!sessionId) {
-    return <div className="empty sm">选择一个线程查看方案</div>
+    return <div className="empty sm">{t('selectThread')}</div>
   }
 
   return (
     <div className="plan-panel">
       <div className="plan-toolbar">
-        <span className="plan-toolbar-title">方案</span>
+        <span className="plan-toolbar-title">{t('toolbarTitle')}</span>
 
         <div className="plan-filter">
           {FILTERS.map((f) => (
@@ -211,14 +241,14 @@ export function PlanPanel(props: {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="过滤方案"
+            placeholder={t('searchPlaceholder')}
           />
         </div>
 
         <button
           className="plan-expand-btn"
           onClick={() => setExpanded((v) => !v)}
-          title={expanded ? '收起列表' : '展开列表'}
+          title={expanded ? t('collapseList') : t('expandList')}
         >
           <LayoutList size={12} />
           {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -232,12 +262,12 @@ export function PlanPanel(props: {
               className={`plan-item-row ${isDraftSelected ? 'active' : ''}`}
               onClick={() => { setSelected(DRAFT_SELECTION); setRejecting(false) }}
             >
-              <span className="plan-badge st-drafting">起草中</span>
-              <span className="plan-title">{draft.title ?? '正在起草方案…'}</span>
+              <span className="plan-badge st-drafting">{t('statusDrafting')}</span>
+              <span className="plan-title">{draft.title ?? t('draftingPlaceholder')}</span>
             </button>
           )}
           {filtered.length === 0 && !draft && (
-            <div className="empty sm">{query ? '没有匹配的方案' : '该过滤条件下没有方案'}</div>
+            <div className="empty sm">{query ? t('noMatch') : t('noPlansForFilter')}</div>
           )}
           {filtered.map((p) => (
             <button
@@ -247,7 +277,7 @@ export function PlanPanel(props: {
             >
               <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
               {p.modelTier === 'cheap' && (
-                <span className="plan-badge st-cheap-model" title={`本计划由低阶模型（${p.model}）产出，建议复核`}>⚠ 低阶模型</span>
+                <span className="plan-badge st-cheap-model" title={t('cheapModelTooltip', { model: p.model })}>{t('cheapModelBadge')}</span>
               )}
               <span className="plan-title">{p.title}</span>
             </button>
@@ -259,21 +289,21 @@ export function PlanPanel(props: {
             <button
               className={`plan-chip draft ${isDraftSelected ? 'active' : ''}`}
               onClick={() => { setSelected(DRAFT_SELECTION); setRejecting(false) }}
-              title={draft.title ?? '正在起草方案…'}
+              title={draft.title ?? t('draftingPlaceholder')}
             >
-              <span className="plan-badge st-drafting">起草中</span>
-              <span className="plan-chip-title">{draft.title ?? '正在起草方案…'}</span>
+              <span className="plan-badge st-drafting">{t('statusDrafting')}</span>
+              <span className="plan-chip-title">{draft.title ?? t('draftingPlaceholder')}</span>
             </button>
           )}
           {filtered.length === 0 && !draft && (
-            <div className="empty sm">{query ? '没有匹配的方案' : '该过滤条件下没有方案'}</div>
+            <div className="empty sm">{query ? t('noMatch') : t('noPlansForFilter')}</div>
           )}
           {filtered.map((p) => (
             <button
               key={p.slug}
               className={`plan-chip ${p.slug === selected ? 'active' : ''}`}
               onClick={() => { setSelected(p.slug); setRejecting(false) }}
-              title={p.modelTier === 'cheap' ? `${p.title} — 由低阶模型（${p.model}）产出，建议复核` : p.title}
+              title={p.modelTier === 'cheap' ? `${p.title} — ${t('cheapModelTooltip', { model: p.model })}` : p.title}
             >
               <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
               {p.modelTier === 'cheap' && <span className="plan-badge st-cheap-model">⚠</span>}
@@ -288,7 +318,7 @@ export function PlanPanel(props: {
           <div className="plan-doc">
             {draft.content.trim()
               ? <Markdown source={draft.content} />
-              : <div className="empty sm">正在起草方案…</div>}
+              : <div className="empty sm">{t('draftingPlaceholder')}</div>}
           </div>
         </div>
       )}
@@ -297,83 +327,117 @@ export function PlanPanel(props: {
         <div className="plan-detail">
           {current.modelTier === 'cheap' && current.status === 'submitted' && (
             <div className="plan-model-warning">
-              ⚠ 本计划由低阶模型（{current.model}）产出，计划真实度可能不足，建议对关键改动点复核后再 Build。
+              {t('cheapModelWarning', { model: current.model })}
             </div>
           )}
-          <div className="plan-doc">
-            {doc.isLoading && <div className="empty sm">加载方案…</div>}
-            {doc.data?.content && <Markdown source={doc.data.content} />}
-          </div>
-
-          {planOptions.length >= 2 && current?.status === 'submitted' && !rejecting && (
-            <div className="plan-options">
-              <div className="plan-options-label">选择执行方案</div>
-              {planOptions.map((opt) => (
-                <label key={opt.label} className={`plan-option ${selectedApproach === opt.label ? 'active' : ''}`}>
-                  <input
-                    type="radio"
-                    name="plan-option"
-                    checked={selectedApproach === opt.label}
-                    onChange={() => setSelectedApproach(opt.label)}
-                  />
-                  <span className="plan-option-body">
-                    <span className="plan-option-label">{opt.label}</span>
-                    {opt.description && <span className="plan-option-desc">{opt.description}</span>}
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
-
-          {props.todos && props.todos.length > 0 && (
-            <div className="plan-checklist">
-              <div className="plan-checklist-header">
-                执行进度
-                <span className="plan-checklist-count">
-                  {props.todos.filter(t => t.status === 'completed').length}/{props.todos.length}
-                </span>
-              </div>
-              {props.todos.map((t) => (
-                <div key={t.id} className={`plan-checklist-item st-${t.status}`}>
-                  <span className="plan-checklist-glyph">
-                    {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '◌' : '○'}
-                  </span>
-                  <span className="plan-checklist-text">{t.content}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {rejecting ? (
-            <div className="plan-reject">
+          {editing ? (
+            <div className="plan-edit">
               <textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="（可选）说明需要怎么修订，agent 会据此重做方案"
+                className="plan-edit-textarea"
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                spellCheck={false}
                 autoFocus
               />
               <div className="plan-actions">
-                <button className="btn ghost sm" onClick={() => setRejecting(false)}>取消</button>
-                <button className="btn sm" disabled={reject.isPending} onClick={onReject}>
-                  {reject.isPending ? '提交中…' : '确认拒绝'}
+                <button className="btn ghost sm" onClick={() => setEditing(false)}>{t('cancel')}</button>
+                <button
+                  className="btn sm primary"
+                  disabled={update.isPending || !editText.trim()}
+                  onClick={onSaveEdit}
+                >
+                  {update.isPending ? t('saving') : t('save')}
                 </button>
               </div>
             </div>
           ) : (
-            <div className="plan-actions">
-              <button className="btn ghost sm" onClick={onCopy}>{copied ? '已复制' : '复制'}</button>
-              <button className="btn ghost sm" onClick={() => setRejecting(true)}>拒绝</button>
-              <button
-                className="btn sm primary"
-                disabled={approve.isPending || current.status === 'approved' || current.status === 'executed'}
-                onClick={onBuild}
-                title="批准并执行此方案"
-              >
-                {approve.isPending ? '启动中…'
-                  : current.status === 'approved' || current.status === 'executed' ? '已批准'
-                  : 'Build'}
-              </button>
-            </div>
+            <>
+              <div className="plan-doc">
+                {doc.isLoading && <div className="empty sm">{t('loadingPlan')}</div>}
+                {doc.data?.content && <Markdown source={doc.data.content} />}
+              </div>
+
+              {planOptions.length >= 2 && current?.status === 'submitted' && !rejecting && (
+                <div className="plan-options">
+                  <div className="plan-options-label">{t('chooseApproach')}</div>
+                  {planOptions.map((opt) => (
+                    <label key={opt.label} className={`plan-option ${selectedApproach === opt.label ? 'active' : ''}`}>
+                      <input
+                        type="radio"
+                        name="plan-option"
+                        checked={selectedApproach === opt.label}
+                        onChange={() => setSelectedApproach(opt.label)}
+                      />
+                      <span className="plan-option-body">
+                        <span className="plan-option-label">{opt.label}</span>
+                        {opt.description && <span className="plan-option-desc">{opt.description}</span>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {props.todos && props.todos.length > 0 && (
+                <div className="plan-checklist">
+                  <div className="plan-checklist-header">
+                    {t('progressHeader')}
+                    <span className="plan-checklist-count">
+                      {props.todos.filter(t2 => t2.status === 'completed').length}/{props.todos.length}
+                    </span>
+                  </div>
+                  {props.todos.map((item) => (
+                    <div key={item.id} className={`plan-checklist-item st-${item.status}`}>
+                      <span className="plan-checklist-glyph">
+                        {item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '◌' : '○'}
+                      </span>
+                      <span className="plan-checklist-text">{item.content}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {rejecting ? (
+                <div className="plan-reject">
+                  <textarea
+                    value={comment}
+                    onChange={(e) => setComment(e.target.value)}
+                    placeholder={t('rejectPlaceholder')}
+                    autoFocus
+                  />
+                  <div className="plan-actions">
+                    <button className="btn ghost sm" onClick={() => setRejecting(false)}>{t('cancel')}</button>
+                    <button className="btn sm" disabled={reject.isPending} onClick={onReject}>
+                      {reject.isPending ? t('rejecting') : t('confirmReject')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="plan-actions">
+                  <button className="btn ghost sm" onClick={onCopy}>{copied ? t('copied') : t('copy')}</button>
+                  {current.status === 'submitted' && (
+                    <button className="btn ghost sm" onClick={onStartEdit} title={t('edit')}>
+                      <Pencil size={12} /> {t('edit')}
+                    </button>
+                  )}
+                  <button className="btn ghost sm" onClick={() => setRejecting(true)}>{t('reject')}</button>
+                  <button
+                    className="btn sm primary"
+                    disabled={
+                      approve.isPending
+                      || sessionRunning
+                      || current.status === 'approved'
+                      || current.status === 'executed'
+                    }
+                    onClick={onBuild}
+                    title={sessionRunning ? t('buildDisabledRunning') : t('buildTooltip')}
+                  >
+                    {approve.isPending ? t('buildStarting')
+                      : current.status === 'approved' || current.status === 'executed' ? t('buildApproved')
+                      : t('build')}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

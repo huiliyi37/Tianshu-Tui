@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ConvoBlock } from '../state/event-reducer'
 
 /** How many tail blocks a mission card shows. Kept small — these are glances,
@@ -66,6 +67,7 @@ function MiniLine({ block }: { block: ConvoBlock }) {
  * last few blocks and auto-scrolls to bottom as new ones arrive.
  */
 export function MiniStream({ blocks, rev }: { blocks: ConvoBlock[]; rev: number }) {
+  const { t } = useTranslation('threadView')
   const ref = useRef<HTMLDivElement>(null)
   // Only the visible kinds make sense at a glance; drop phase/turn/checkpoint noise.
   const tail = blocks
@@ -85,7 +87,7 @@ export function MiniStream({ blocks, rev }: { blocks: ConvoBlock[]; rev: number 
   }, [rev, tail.length])
 
   if (tail.length === 0) {
-    return <div className="mini-stream mini-empty">等待输出…</div>
+    return <div className="mini-stream mini-empty">{t('mini.waiting')}</div>
   }
 
   return (

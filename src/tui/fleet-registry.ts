@@ -40,6 +40,16 @@ export interface FleetWorkerView {
   activityLog: string[]
   /** Self-observed ms since first observation (snapshot-time; frozen after terminal). */
   elapsedMs: number
+  /** 累计工具调用次数（CC AgentProgress 对标；运行中递增，终态冻结）。 */
+  toolUseCount: number
+  /** 累计 token 总数（运行中来自 turn 心跳，终态来自 usage 快照）。 */
+  tokenCount: number
+  /** 实际派发的模型（终态事件携带）。 */
+  model?: string
+  /** 终态 token usage 明细（终态事件携带，归档后保留）。 */
+  usage?: DelegationActivity['usage']
+  /** 终态后尚未被用户查看（detail 未打开）——/tasks 列表的 unread 标记。 */
+  unread: boolean
 }
 
 export interface FleetGroupProgress {
@@ -60,6 +70,18 @@ interface FleetRecord {
   activityLog: string[]
   startedAt: number
   updatedAt: number
+  toolUseCount: number
+  tokenCount: number
+  model?: string
+  usage?: DelegationActivity['usage']
+  unread: boolean
+}
+
+/** 从 usage 快照推导 token 总数（total_tokens 优先，缺省回退 input+output）。 */
+function usageTotal(usage: DelegationActivity['usage']): number {
+  if (!usage) return 0
+  if (typeof usage.total_tokens === 'number') return usage.total_tokens
+  return (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)
 }
 
 const TERMINAL_STATUSES = new Set<DelegationActivity['status']>([
@@ -105,6 +127,8 @@ export class FleetRegistry {
     }
 
     if (existing) {
+      // running → terminal 转变时标记 unread（用户尚未查看终态结果）
+      if (terminal && !existing.terminal) existing.unread = true
       existing.status = activity.status
       existing.terminal = terminal
       existing.updatedAt = now
@@ -112,6 +136,14 @@ export class FleetRegistry {
       if (activity.profile) existing.profile = activity.profile
       if (activity.authority) existing.authority = activity.authority
       if (activity.progressLine) existing.activity = activity.progressLine
+      // 计数只增不减（乱序事件防御）；终态 usage/model 保留供归档后查询。
+      if (typeof activity.toolUseCount === 'number' && activity.toolUseCount > existing.toolUseCount) {
+        existing.toolUseCount = activity.toolUseCount
+      }
+      const tokens = Math.max(activity.tokenCount ?? 0, usageTotal(activity.usage))
+      if (tokens > existing.tokenCount) existing.tokenCount = tokens
+      if (activity.model) existing.model = activity.model
+      if (activity.usage) existing.usage = activity.usage
       return
     }
 
@@ -126,6 +158,11 @@ export class FleetRegistry {
       activityLog: log,
       startedAt: now,
       updatedAt: now,
+      toolUseCount: activity.toolUseCount ?? 0,
+      tokenCount: Math.max(activity.tokenCount ?? 0, usageTotal(activity.usage)),
+      model: activity.model,
+      usage: activity.usage,
+      unread: terminal,
     })
   }
 
@@ -142,7 +179,26 @@ export class FleetRegistry {
       activity: r.activity,
       activityLog: r.activityLog,
       elapsedMs: Math.max(0, (r.terminal ? r.updatedAt : now) - r.startedAt),
+      toolUseCount: r.toolUseCount,
+      tokenCount: r.tokenCount,
+      model: r.model,
+      usage: r.usage,
+      unread: r.unread,
     }
+  }
+
+  /** 标记某 worker 的终态结果已被查看（detail 打开时调用）。 */
+  markSeen(workerId: string): void {
+    const r = this.records.get(workerId) ?? this.terminalRecords.get(workerId)
+    if (r) r.unread = false
+  }
+
+  /** 终态且未读的 worker 数量（GlanceBar / 通知行用）。 */
+  unreadCount(): number {
+    let n = 0
+    for (const r of this.records.values()) if (r.terminal && r.unread) n++
+    for (const r of this.terminalRecords.values()) if (r.unread) n++
+    return n
   }
 
   /** 全部 worker，按首见时间升序。 */

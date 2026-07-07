@@ -108,7 +108,9 @@ export function createHeadlessCoordinator(input: HeadlessCoordinatorInput): Dele
       }),
       toolRegistry: workerRegistry,
       cwd: input.cwd,
-      maxTurns: 8,
+      // Far backstop only — the work order budget (clamped via clampWorkerMaxTurns)
+      // is the real turn controller.
+      maxTurns: 40,
       contextWindow: ctxWindow,
       compact: HEADLESS_COMPACT,
       activeClaims: [],

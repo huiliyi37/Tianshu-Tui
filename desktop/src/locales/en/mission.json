@@ -1,0 +1,33 @@
+{
+  "title": "Mission Control",
+  "statSessions": "{{n}} sessions",
+  "statRunning": "{{n}} running",
+  "statLive": "{{n}} live",
+  "filterActive": "Current project",
+  "filterAll": "All projects",
+  "newThread": "New",
+  "newThreadHint": "New thread",
+  "loading": "Loading…",
+  "empty": "No sessions yet. Create a thread to start observing.",
+  "card": {
+    "reconnecting": "Reconnecting…",
+    "offline": "Live stream disconnected",
+    "contextTokensHint": "Context tokens",
+    "editsHint": "Changed files",
+    "approvalHint": "Pending approval",
+    "pendingApprovals": "{{n}} pending",
+    "approve": "Approve",
+    "approveHint": "Approve current request",
+    "abort": "Abort",
+    "abortHint": "Abort session",
+    "open": "Open",
+    "phaseHint": "Current phase",
+    "status": {
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "aborted": "Aborted",
+      "idle": "Idle"
+    }
+  }
+}

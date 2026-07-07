@@ -16,22 +16,22 @@ interface CompletionCurtainProps {
   summary: EvidenceSummary
 }
 
-function statusFromSummary(summary: EvidenceSummary): {
+function statusFromSummary(summary: EvidenceSummary, t: (key: string) => string): {
   kind: 'success' | 'warning' | 'error' | 'info'
   label: string
   icon: React.ReactNode
 } {
   const gate = summary.gate.state
   if (gate === 'GREEN' || gate === 'ok' || summary.verificationStatus === 'verified') {
-    return { kind: 'success', label: '已完成', icon: <CheckCircle2 size={18} /> }
+    return { kind: 'success', label: t('completionStatusDone'), icon: <CheckCircle2 size={18} /> }
   }
   if (gate === 'RED' || gate === 'error' || summary.verificationStatus === 'failed') {
-    return { kind: 'error', label: '完成但有失败', icon: <XCircle size={18} /> }
+    return { kind: 'error', label: t('completionStatusFailed'), icon: <XCircle size={18} /> }
   }
   if (gate === 'YELLOW' || gate === 'warn' || summary.verificationStatus === 'blocked') {
-    return { kind: 'warning', label: '完成但有阻塞', icon: <AlertCircle size={18} /> }
+    return { kind: 'warning', label: t('completionStatusBlocked'), icon: <AlertCircle size={18} /> }
   }
-  return { kind: 'info', label: '已完成', icon: <Info size={18} /> }
+  return { kind: 'info', label: t('completionStatusDone'), icon: <Info size={18} /> }
 }
 
 function verificationLabel(summary: EvidenceSummary, t: (key: string, options?: Record<string, number>) => string): string {
@@ -51,7 +51,7 @@ function CompletionCurtainImpl({ summary }: CompletionCurtainProps) {
   // main-conversation vertical space. Click the header row to expand in place.
   const [expanded, setExpanded] = useState(false)
   const [filesOpen, setFilesOpen] = useState(false)
-  const status = statusFromSummary(summary)
+  const status = statusFromSummary(summary, t)
 
   return (
     <div

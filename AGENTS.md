@@ -20,6 +20,10 @@
 会话日志存储在项目外的 `~/.rivet/sessions/<project-slug>/`（`<project-slug>` = 目录名 + cwd 哈希前 6 位），项目内 `.rivet/` 只保留知识库、信息素等共享数据。可用 `RIVET_SESSION_DIR` 覆盖。
 
 > **Windows 注意**：`~/.rivet` 不是 `%USERPROFILE%\.rivet`，而是 `%LOCALAPPDATA%\.rivet`（通常为 `C:\Users\<user>\AppData\Local\.rivet`）。源码见 `src/config/paths.ts::defaultRivetHome()`。
+>
+> **桌面端便携模式**：exe 不在 `Program Files` 下时，数据存 `<exe目录>\TianshuData\.rivet`。可以在 Settings → Storage 查看当前实际路径（`current` 字段）。
+>
+> **自定义路径**：桌面端 Settings → Storage 设置后写入 `%APPDATA%\app.tianshu.desktop\launcher.json`（`rivetHome` 字段），优先级高于默认值。`RIVET_HOME` 环境变量优先级最高。
 
 | 路径 | 内容 |
 |------|------|
@@ -42,6 +46,35 @@
 - worker artifact 目录格式：`<cwd>/.rivet/artifacts/worker-${order.id.replace(/:/g, '-')}/`
 - 主会话 `ArtifactStore` 通过 `addFallbackSession(workerSessionId)` 读取 worker artifact，不拷贝文件
 - 可通过 `RIVET_SESSION_DIR` 环境变量覆盖默认目录
+
+## 缓存排查指南
+
+前缀缓存（prefix cache）命中率直接影响 token 成本和响应延迟。缓存碎裂时表现为：同样上下文每轮都 miss，`cache_read_input_tokens` 长期为 0。
+
+### 缓存数据在哪
+
+| 数据 | 位置 | 条件 |
+|------|------|------|
+| 每轮 cache read/create token | 会话 `.jsonl` 中 `usage` 对象（`cache_read_input_tokens` / `cache_creation_input_tokens`） | 始终写入 |
+| 侧路请求成本（spec 预测 / 压缩总结） | 会话目录 `cache-log.jsonl` 中 `event:'side_path'` 行（kind 区分来源，含 input/cacheRead/output/hitRate） | 始终写入（有 usage 才落行） |
+| 推测命中率统计 | 会话 `.meta.json` 的 `speculationStats` 字段 | 有活动时写入（不依赖 debug 开关） |
+| spec 引擎调用计数（fired/errors） | 会话 `.meta.json` 的 `llmSpeculationEngine` 字段 | fired > 0 时写入 |
+| 遥测快照（含 cacheAdvisor 召回摘要） | 会话目录下 `sensorium.jsonl` | 需 `RIVET_DEBUG_TELEMETRY=1` |
+| 项目级遥测（跨会话累积） | `<cwd>/.rivet/sensorium.jsonl` | 需 `RIVET_DEBUG_TELEMETRY=1` |
+
+### 排查步骤
+
+1. **确认当前数据目录**：桌面端 Settings → Storage 查看 `current`，或终端执行 `echo $RIVET_HOME`（未设则为平台默认值）
+2. **查会话级缓存**：打开会话 `.jsonl`，搜索 `"cache_read_input_tokens"`，统计各轮命中情况
+3. **开启遥测深入诊断**：`RIVET_DEBUG_TELEMETRY=1 node dist/main.js`，随后检查 `<cwd>/.rivet/sensorium.jsonl` 中的 `recall-summary` 事件
+4. **使用内置验证脚本**：`npm exec -- tsx scripts/verify-cache-hit-rate.ts`（需 `DEEPSEEK_API_KEY`），模拟多轮对话输出每轮 cache 命中率
+5. **常见碎裂原因**：① 请求间 system prompt 或工具定义发生变化 ② 上下文窗口内消息顺序或角色不一致 ③ 消息内容有任何字节级差异（含时间戳、随机 ID）④ 模型切换后新模型缓存 key 不同
+
+### 相关源码
+
+- `src/cache/` — 前缀缓存策略（自适应阈值、advisor、recall metrics）
+- `src/api/request-freezer.ts` — 请求规范化（确定性序列化，影响缓存 key）
+- `src/prompt/engine.ts` — system prompt 引擎（变动会触发缓存 miss）
 
 ## 高危命令纪律（硬性闸门）
 

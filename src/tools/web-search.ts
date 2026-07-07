@@ -1,4 +1,5 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import { fetchCauseDetail } from '../api/error-classifier.js'
 
 const MAX_RESULTS = 20
 const TIMEOUT_MS = 15_000
@@ -174,7 +175,10 @@ export const WEB_SEARCH_TOOL: Tool = {
         return { content: `Search timed out after ${TIMEOUT_MS / 1000}s for: "${query}"`, isError: true }
       }
       const message = err instanceof Error ? err.message : String(err)
-      return { content: `Search failed: ${message}`, isError: true }
+      // Surface undici's err.cause (real network failure) — bare "fetch failed"
+      // is undiagnosable for both the model and the user.
+      const detail = fetchCauseDetail(err)
+      return { content: `Search failed: ${detail ? `${message}: ${detail}` : message}`, isError: true }
     }
   },
 

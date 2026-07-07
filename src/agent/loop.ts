@@ -3,7 +3,7 @@ import { SessionContext } from './context.js'
 import { SessionPersist, getSessionDir } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
 import { PrewarmCache } from './prewarm.js'
-import { validatePathSafe } from '../tools/path-validate.js'
+import { invalidateSessionReadDedup } from '../tools/read-file.js'
 import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ToolErrorClass } from '../tools/types.js'
@@ -69,6 +69,7 @@ import { createP3Integration, P3Integration } from './p3-integration.js'
 import { ImmuneHook } from './immune-hook.js'
 import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, HOLDOUT_MIN_DELIVERED, parseHoldoutRate, disciplineReanchorEntry } from './advisory-bus.js'
 import { AdvisoryReadback, type EfficacyPriorCounts } from './advisory-readback.js'
+import { applyDomainAdvisoryTone } from './domain-advisory-tone.js'
 import { createDestructiveGateState } from '../tools/destructive-gate.js'
 import { AdvisoryEfficacyStore, type EfficacyDelta } from '../context/advisory-efficacy-store.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
@@ -93,7 +94,7 @@ import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot, createSidePathUsageRecorder } from "./loop-factory.js";
 import type { TurnStepProducer } from './turn-step-producer.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
@@ -302,6 +303,29 @@ export class AgentLoop {
       if (deltas.size > 0) this.advisoryEfficacyStore.mergeAndSave(deltas)
     } catch { /* 尽力而为——写回失败不影响会话 */ }
   }
+  /**
+   * 记录并落盘一次结构化停止原因。此前 StopReason 只进 debugLog/遥测——
+   * 不开 RIVET_DEBUG 时事后无法回答"这个 run 是谁停的"（护栏熔断 / 用户
+   * 中断 / 流错误 / 自然收尾不可区分）。现在同步写进 session meta，
+   * 每次 run 结束覆盖上一条。写失败不致命（观测辅助，永不阻断）。
+   */
+  recordStopReason(r: StopReason): void {
+    this.latestStopReason = r
+    if (!this.persist) return
+    try {
+      this.persist.updateMetadata({
+        lastStopReason: {
+          source: r.source,
+          turn: r.turn,
+          voluntary: r.voluntary,
+          ...(r.detail !== undefined && { detail: r.detail }),
+          ...(r.score !== undefined && { score: r.score }),
+          ...(r.level !== undefined && { level: r.level }),
+          t: Date.now(),
+        },
+      })
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
+  }
   /** 把 guardian 活动摘要写进 session meta（仅在计数变化时写，原子写、失败不致命）。 */
   flushGuardianMeta(): void {
     if (!this.persist) return
@@ -451,6 +475,10 @@ export class AgentLoop {
   pendingHeapCompact = false
   cacheAdvisor: CacheAdvisor
   p3: P3Integration
+  /** Tier 2 LLM speculation engine (null when disabled). Set by
+   *  createTurnOrchestrator; read at postSession to persist fired/error
+   *  counters into meta speculationStats. */
+  llmSpeculationEngine: import('./llm-speculation.js').LlmSpeculationEngine | null = null
   immuneHook: ImmuneHook
   _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
   /** A1: unified advisory bus — collects corrective signals, renders ≤3 per turn */
@@ -516,6 +544,10 @@ export class AgentLoop {
       )
     } catch { /* 先验加载失败不致命——回退冷启动 */ }
     this.advisoryBus.setAdoptionRateProvider(key => this.advisoryReadback.getAdoptionRate(key))
+    // 星域措辞适配（2026-07-07）：按当前域把 advisory 翻译成该域听得进的
+    // 形态（如天权的证据式裁决协议）。惰性读 sessionDomain——域激活/切换自动生效。
+    this.advisoryBus.setToneAdapter((content, meta) =>
+      applyDomainAdvisoryTone(this.sessionDomain?.id, content, meta))
     // Lift 消费端：成熟 lift（会话 + 先验,过成熟度门）驱动负 lift 静音与
     // Top-N 排序升级。RIVET_ADVISORY_LIFT_CONSUMER=0 关（不注入 = 全回退旧行为）。
     if (process.env.RIVET_ADVISORY_LIFT_CONSUMER !== '0') {
@@ -557,25 +589,13 @@ export class AgentLoop {
       providerProfile: this.config.providerProfile ?? { cacheType: 'none', persistent: false },
       contextWindow: this.config.contextWindow,
     })
-    this.p3 = createP3Integration({
-      execute: async (tool, target) => {
-        const SAFE_TOOLS = new Set(['read_file', 'grep', 'glob', 'list_dir'])
-        if (!SAFE_TOOLS.has(tool)) return ''
-        const validated = validatePathSafe(this.cwd, target)
-        if (!validated.ok) return ''
-        try {
-          const params = {
-            input: { file_path: validated.path, path: validated.path },
-            cwd: this.cwd,
-            toolUseId: `spec_${Date.now()}`,
-            contextWindow: this.config.contextWindow,
-            providerProfile: this.config.providerProfile,
-          }
-          const result = await this.config.toolRegistry.execute(tool, params)
-          return result.content
-        } catch { return '' }
-      },
-    })
+    // Speculative pre-execution chain SEALED (2026-07-07): no execute callback
+    // and speculativeEnabled unset → miner still records patterns, but nothing
+    // is pre-executed or cached. Serving was cut 2026-07-06 (ShadowQueue had no
+    // mtime validation and served pre-edit file content as a live read_file
+    // result); without serving the background pre-reads were pure cost.
+    // See P3Config.speculativeEnabled for the re-enable contract.
+    this.p3 = createP3Integration()
 
 
     // Physarum + Immune system — construction only, DB reads deferred to warmupMemories() (S9)
@@ -655,6 +675,10 @@ export class AgentLoop {
       },
       getAbortSignal: () => this.abortController?.signal,
       getActiveContract: () => this.taskContract,
+      // After any compaction rewrite the historical tool_results that read-ref
+      // points at may be gone — drop this session's read-dedup records so the
+      // next read_file re-serves real content instead of a dangling reference.
+      onHistoryRewritten: () => { invalidateSessionReadDedup(this.config.sessionId) },
       // Layered archival: persist discarded history as a recallable
       // compact-history artifact. Disk-only write, never touches the prefix.
       archiveHistory: async (input) => {
@@ -691,6 +715,11 @@ export class AgentLoop {
         } catch {
           // Snapshot is best-effort; never block compaction.
         }
+      },
+      // Side-path usage accounting: summary calls are billed but used to
+      // discard their usage — book them into session totals + cache-log.
+      recordSummaryUsage: (usage, model) => {
+        createSidePathUsageRecorder(this)('compact-summary', usage, model)
       },
     })
     // 在 AgentLoop 构造时立即设置 prefixOverhead，关闭 UI 启动到 maybeCompact 之间的窗口。
@@ -975,6 +1004,14 @@ export class AgentLoop {
     this.config.activePlanFilePath = this.activePlanFilePath
     this.config.promptEngine.setPlanModeState(this.planModeState)
     this.config.promptEngine.setActivePlanFilePath(this.activePlanFilePath)
+    // 落盘到 session meta——resume 后计划模式可恢复（内存态否则随进程消失）。
+    // 所有状态迁移(enter/exit/setActivePlan)都经本方法,单点持久化。
+    try {
+      this.persist?.updateMetadata({
+        planModeState: this.planModeState,
+        activePlanFilePath: this.activePlanFilePath,
+      })
+    } catch { /* best-effort */ }
   }
 
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort | 'auto'): void {
@@ -1494,7 +1531,9 @@ export class AgentLoop {
     } catch { /* non-critical */ }
     try {
       const db = this.config.meridianIndexer?.getDb()
-      if (db) db.saveMistakeEntries(this.p3.notebook.getAllEntries())
+      // notebook 默认停用（见 p3-integration.ts）——停用时不落盘，也不清空旧表
+      //（清空交给 memory-epoch reset，保持"停用≠销毁"语义以便复活）。
+      if (db && this.p3.notebook) db.saveMistakeEntries(this.p3.notebook.getAllEntries())
     } catch { /* non-critical */ }
     try {
       const db = this.config.meridianIndexer?.getDb()
@@ -1532,6 +1571,16 @@ export class AgentLoop {
       const stats = this.p3.queue.statsBySource()
       const hasActivity = Object.values(stats).some(s => s.enqueued > 0 || s.hits > 0)
       if (hasActivity) this.persist?.updateMetadata({ speculationStats: stats })
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
+    // LLM speculation engine call counters → meta. speculationStats.llm only
+    // counts shadow-queue enqueued/hits; without fired/errors there is no
+    // on-disk evidence of how many speculative API calls actually happened
+    // (2026-07-06 cost blind spot fix).
+    try {
+      const engineStats = this.llmSpeculationEngine?.stats()
+      if (engineStats && engineStats.fired > 0) {
+        this.persist?.updateMetadata({ llmSpeculationEngine: engineStats })
+      }
     } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
   }
 
@@ -1865,7 +1914,7 @@ export class AgentLoop {
         reasoningActive: convergenceCheck.reasoningActive,
       }
       emitStopReason(stopReason, {
-        record: r => { this.latestStopReason = r },
+        record: r => { this.recordStopReason(r) },
         debug: debugLog,
         onPhaseChange: callbacks.onPhaseChange,
       })

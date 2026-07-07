@@ -8,7 +8,7 @@
  * 零 React/Ink 依赖。输出为 ANSI 格式化字符串数组（每行一个元素）。
  */
 
-import { ANSI, color, fg, bg } from '../engine/ansi.js'
+import { ANSI, color, fg, bg, hyperlink } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { latexToBlock } from '../pi/latex-block.js'
 import { renderMathInText, latexToUnicode } from '../pi/latex-to-unicode.js'
@@ -23,6 +23,8 @@ export interface Segment {
   underline?: boolean
   color?: string
   dimmed?: boolean
+  /** OSC 8 超链接目标（markdown [text](url)）；不支持的终端纯文本降级。 */
+  href?: string
 }
 export type BlockType = 'paragraph' | 'code' | 'header' | 'list' | 'blockquote' | 'hr' | 'table' | 'math'
 
@@ -188,7 +190,12 @@ export function parseInline(text: string): Segment[] {
       const textEnd = text.indexOf(']', i + 1)
       if (textEnd !== -1 && text[textEnd + 1] === '(') {
         const urlEnd = text.indexOf(')', textEnd + 2)
-        if (urlEnd !== -1) { flush(); segments.push({ text: text.slice(i + 1, textEnd), underline: true }); i = urlEnd + 1; continue }
+        if (urlEnd !== -1) {
+          flush()
+          const href = text.slice(textEnd + 2, urlEnd).trim()
+          segments.push({ text: text.slice(i + 1, textEnd), underline: true, href: href || undefined })
+          i = urlEnd + 1; continue
+        }
       }
     }
     buf += text[i]; i++
@@ -353,6 +360,8 @@ export function hasMarkdown(text: string): boolean {
     || /^(-{3,}|\*{3,}|_{3,})\s*$/m.test(text)
     // Inline/display math delimiters trigger the full parser too.
     || /\$[^\s$]/.test(text) || text.includes('$$') || text.includes('\\[') || text.includes('\\(')
+    // Markdown links [text](url) — 触发行内解析以渲染 OSC 8 超链接。
+    || /\[[^\]]+\]\([^)]+\)/.test(text)
 }
 
 const NUMBERED_LINE_RE = /^\s*\d+│/
@@ -370,6 +379,8 @@ function formatSegment(seg: Segment, theme: RivetTheme): string {
   if (seg.color || seg.code || seg.bold || seg.italic || seg.underline || seg.dimmed) {
     s = color(seg.code ? ` ${seg.text} ` : seg.text, fgHex, opts)
   }
+  // markdown 链接 → OSC 8 可点击（支持的终端；其余保持下划线纯文本）
+  if (seg.href) s = hyperlink(s, seg.href)
   return s
 }
 
@@ -424,7 +435,9 @@ function formatBlock(block: Block, columns: number, theme: RivetTheme): string[]
       const glyph = glyphs[level - 1] ?? ''
       const headerColor = colors[level - 1]
       const text = glyph ? `${glyph} ${block.content}` : block.content
-      result.push(headerColor ? color(text, headerColor, { bold: true }) : color(text, '#e6edf3', { bold: true }))
+      // h2/h3 无 accent 色：用 assistantColor（跟随主题明暗，亮色主题下是深灰近黑，
+      // 此前硬编码 #e6edf3 亮灰在白底上不可读）。
+      result.push(headerColor ? color(text, headerColor, { bold: true }) : color(text, theme.assistantColor, { bold: true }))
       break
     }
     case 'code':
@@ -451,7 +464,9 @@ function formatBlock(block: Block, columns: number, theme: RivetTheme): string[]
       break
     }
     case 'blockquote':
-      result.push(color(`│ ${block.content}`, theme.muted))
+      // 左边条 secondary + 引文斜体 muted（对齐 CC 的暗色可读性改版：
+      // 纯 dim 引文在暗背景下几乎不可见，斜体+彩色边条保留层次又可读）。
+      result.push(`${color('▎', theme.secondary)} ${color(block.content, theme.muted, { italic: true })}`)
       break
     case 'hr':
       result.push(color('─'.repeat(Math.max(20, columns - 4)), theme.dim))
@@ -461,7 +476,8 @@ function formatBlock(block: Block, columns: number, theme: RivetTheme): string[]
       const dataLines = tableLines.filter(l => !/^\|?[\s-:|]+\|?$/.test(l.trim()))
       for (let i = 0; i < dataLines.length; i++) {
         const line = dataLines[i]!
-        result.push(i === 0 ? color(line, theme.primary, { bold: true }) : line)
+        // 表头是结构强调，走 secondary（primary 保留给交互焦点——颜色层级规范）。
+        result.push(i === 0 ? color(line, theme.secondary, { bold: true }) : line)
       }
       break
     }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { FileText, Shield, Check, X, Eye } from 'lucide-react'
 import {
   Dialog,
@@ -20,6 +21,7 @@ interface ProjectTemplatesDialogProps {
 
 export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
   const { status, open, onOpenChange, onApply } = props
+  const { t } = useTranslation('onboarding')
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState<'agents' | 'rivet' | null>(null)
 
@@ -46,10 +48,10 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield size={18} className="text-accent" />
-            项目引导配置
+            {t('templates.title')}
           </DialogTitle>
           <DialogDescription>
-            当前项目缺少 AGENTS.md 和 .rivet.md。这两份文档用来告诉天枢如何在本项目工作：编码规范、安全纪律、技术栈、测试约定等。
+            {t('templates.desc')}
           </DialogDescription>
         </DialogHeader>
 
@@ -57,13 +59,13 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
           <div className="flex min-w-0 flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-text-strong">
-                {preview === 'agents' ? 'AGENTS.md' : '.rivet.md'} 模板预览
+                {t('templates.previewTitle', { name: preview === 'agents' ? 'AGENTS.md' : '.rivet.md' })}
               </span>
               <button
                 className="text-xs text-accent hover:underline"
                 onClick={() => setPreview(null)}
               >
-                返回
+                {t('templates.back')}
               </button>
             </div>
             <pre className="max-h-[320px] max-w-full overflow-y-auto whitespace-pre-wrap break-words rounded-lg border bg-panel-2 p-3 text-xs font-mono text-text">
@@ -81,10 +83,10 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
                   <Shield size={16} className="text-accent" />
                   <span className="font-medium">AGENTS.md</span>
                 </div>
-                <p className="text-xs text-muted">Agent 行为纪律、安全边界、项目自定义规则。</p>
+                <p className="text-xs text-muted">{t('templates.agentsDesc')}</p>
                 <span className="mt-1 inline-flex items-center gap-1 text-xs text-accent">
                   <Eye size={12} />
-                  预览模板
+                  {t('templates.previewTemplate')}
                 </span>
               </button>
               <button
@@ -95,15 +97,15 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
                   <FileText size={16} className="text-accent" />
                   <span className="font-medium">.rivet.md</span>
                 </div>
-                <p className="text-xs text-muted">项目元数据：技术栈、构建命令、测试命令。</p>
+                <p className="text-xs text-muted">{t('templates.rivetDesc')}</p>
                 <span className="mt-1 inline-flex items-center gap-1 text-xs text-accent">
                   <Eye size={12} />
-                  预览模板
+                  {t('templates.previewTemplate')}
                 </span>
               </button>
             </div>
             <p className="text-xs text-muted">
-              创建后你可以在项目目录中编辑它们，天枢会在每次会话启动时读取。
+              {t('templates.editNote')}
             </p>
           </div>
         )}
@@ -116,7 +118,7 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
             className="gap-1"
           >
             <X size={14} />
-            跳过
+            {t('templates.skip')}
           </Button>
           <Button
             onClick={() => handleApply('overwrite')}
@@ -124,7 +126,7 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
             className="gap-1"
           >
             <Check size={14} />
-            {busy ? '创建中…' : '创建两份文档'}
+            {busy ? t('templates.creating') : t('templates.createBoth')}
           </Button>
         </DialogFooter>
       </DialogContent>

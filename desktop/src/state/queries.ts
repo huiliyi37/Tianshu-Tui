@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import i18n from '../i18n'
 import {
   abortSession,
   approvePlan,
@@ -29,6 +30,7 @@ import {
   cancelTask,
   pauseSchedule,
   rejectPlan,
+  updatePlan,
   renameSession,
   sendArtifactFeedback,
   sendPrompt,
@@ -154,16 +156,17 @@ export function useSetHooks() {
 
 /**
  * List this session's plans + active draft; re-fetches when `rev` (planRev)
- * bumps. While the session is planning, a short poll keeps the "起草中"
- * document growing live as the agent writes it (Cursor 3.0 drafting view);
- * outside planning the query stays purely event-driven via planRev.
+ * bumps. Draft liveness is event-driven: the server emits throttled
+ * `plan_draft` invalidation signals on every draft write (bumping planRev).
+ * While planning, a slow poll remains as a degraded fallback for SSE gaps
+ * (reconnect windows); outside planning the query is purely event-driven.
  */
 export function usePlans(sessionId: string | null, rev: number, planning = false) {
   return useQuery({
     queryKey: [...qk.plans(sessionId), rev],
     queryFn: () => (sessionId ? listPlans(sessionId) : Promise.resolve({ plans: [], draft: null })),
     enabled: !!sessionId,
-    refetchInterval: planning ? 2000 : false,
+    refetchInterval: planning ? 10_000 : false,
   })
 }
 
@@ -193,6 +196,8 @@ export function useApprovePlan() {
       qc.invalidateQueries({ queryKey: qk.plans(id) })
       qc.invalidateQueries({ queryKey: qk.sessions })
     },
+    // 服务端结构化拒绝（空计划 422 / 运行中 409 / 选项无效）带人类可读原因。
+    onError: (err) => toast.error(i18n.t('error:buildFailed', { message: (err as Error).message })),
   })
 }
 
@@ -205,6 +210,20 @@ export function useRejectPlan() {
       qc.invalidateQueries({ queryKey: qk.plans(id) })
       qc.invalidateQueries({ queryKey: qk.sessions })
     },
+  })
+}
+
+/** Edit a submitted plan's markdown before approval (review → tweak → Build). */
+export function useUpdatePlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, slug, content }: { id: string; slug: string; content: string }) =>
+      updatePlan(id, slug, content),
+    onSuccess: (_d, { id, slug }) => {
+      qc.invalidateQueries({ queryKey: qk.plans(id) })
+      qc.invalidateQueries({ queryKey: qk.plan(id, slug) })
+    },
+    onError: (err) => toast.error(i18n.t('error:saveFailed', { message: (err as Error).message })),
   })
 }
 
@@ -225,8 +244,8 @@ export function useSendPrompt() {
     // 这是核心操作的静默丢失——toast 至少让用户知道失败了，配合 ThreadView 的回填可重发。
     onError: (err: unknown, vars) => {
       const msg = err instanceof Error ? err.message : String(err)
-      toast.error(`发送失败：${msg}`, {
-        description: '消息未发出，输入内容已保留，可重试',
+      toast.error(i18n.t('error:sendFailed', { message: msg }), {
+        description: i18n.t('error:sendFailedDesc'),
         duration: 6000,
       })
       // 通知 ThreadView 回填输入内容（通过自定义事件，避免改 onSend 签名影响 40+ 调用点）

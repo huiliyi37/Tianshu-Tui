@@ -1,4 +1,5 @@
 import type { StreamClient } from '../api/stream-client.js'
+import type { Usage } from '../api/types.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES, summaryOutputBudgetChars } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
@@ -370,6 +371,22 @@ export interface CompactionControllerDeps {
   onArchive?: (artifactId: string, turn: number) => void
   /** Snapshot the full pre-compaction message list for disaster recovery. */
   backupTranscript?: (messages: OaiMessage[], turn: number) => void
+  /**
+   * Fired after every history rewrite that goes through safeReplaceMessages
+   * (maybeCompact / checkpoint / partial / micro / context ceiling). Wired in
+   * loop.ts to invalidateSessionReadDedup: the historical tool_results that
+   * read-ref points at ("回看上文") may no longer exist after the rewrite, so
+   * "already read" dedup claims must be dropped.
+   */
+  onHistoryRewritten?: () => void
+  /**
+   * Side-path usage accounting (2026-07-06 cost blind spot fix): summary
+   * requests carry a large input (anchor + oldZone) and are billed like any
+   * other call — report their usage so session totals and the cache-log
+   * reflect the real spend. `model` is the request's model (the dedicated
+   * compact client may run a different model than the session primary).
+   */
+  recordSummaryUsage?: (usage: Partial<Usage>, model: string) => void
 }
 
 export interface ArchiveHistoryInput {
@@ -929,6 +946,8 @@ export class CompactionController {
       debugLog(`[compact-preflight] repaired ${preflight.syntheticResultsInserted} orphan tool_call(s)`)
     }
     this.deps.session.replaceMessages(preflight.messages)
+    // History rewritten — read-ref's "look above" targets may be gone.
+    try { this.deps.onHistoryRewritten?.() } catch { /* never block compaction */ }
   }
 
   private maybeBackupTranscript(): void {
@@ -1151,7 +1170,13 @@ export class CompactionController {
           onTextDelta: (text) => { chunks.push(text) },
           onThinkingDelta: () => {},
           onContentBlock: () => {},
-          onStopReason: () => {},
+          // onStopReason can fire more than once (finish frame, then usage
+          // frame) — only book the call once real token counts arrive.
+          onStopReason: (_reason, usage) => {
+            if (usage && (usage.input_tokens ?? 0) > 0) {
+              this.deps.recordSummaryUsage?.(usage, request.model)
+            }
+          },
           onError: () => { errored = true },
         }, combinedSignal)
       } catch {
@@ -1290,7 +1315,12 @@ export class CompactionController {
           onTextDelta: (text) => { chunks.push(text) },
           onThinkingDelta: () => {},
           onContentBlock: () => {},
-          onStopReason: () => {},
+          // Same usage booking as tryPartialCompact — see recordSummaryUsage.
+          onStopReason: (_reason, usage) => {
+            if (usage && (usage.input_tokens ?? 0) > 0) {
+              this.deps.recordSummaryUsage?.(usage, request.model)
+            }
+          },
           onError: () => { errored = true },
         }, signal)
       } catch {

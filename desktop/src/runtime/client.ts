@@ -223,6 +223,20 @@ export async function listAllSessions(): Promise<SessionRecord[]> {
   return sessions
 }
 
+/** One transcript hit from the cross-session content search. */
+export type SessionSearchHit = {
+  sessionId: string
+  title: string
+  role: 'user' | 'assistant'
+  snippet: string
+}
+
+/** Search user/assistant text across all active sessions' transcripts (q >= 2 chars). */
+export async function searchSessionContent(q: string): Promise<SessionSearchHit[]> {
+  const { results } = await apiGet<{ results: SessionSearchHit[] }>(`/sessions/search?q=${encodeURIComponent(q)}`)
+  return results
+}
+
 export function getSession(id: string): Promise<SessionRecord> {
   return apiGet<SessionRecord>(`/sessions/${id}`)
 }
@@ -343,6 +357,34 @@ export async function getStorageReport(): Promise<StorageReport> {
   return apiGet<StorageReport>('/storage')
 }
 
+// ── Computer Use (macOS GUI automation) settings ─────────────────────
+
+export interface ComputerUsePermissions {
+  accessibility: boolean
+  screenRecording: boolean
+  detail: string
+}
+
+export interface ComputerUseGrantItem {
+  app: string
+  grantedAt: number
+}
+
+export interface ComputerUseStatus {
+  available: boolean
+  platform: string
+  permissions: ComputerUsePermissions | null
+  grants: ComputerUseGrantItem[]
+}
+
+export function getComputerUseStatus(): Promise<ComputerUseStatus> {
+  return apiGet<ComputerUseStatus>('/config/computer-use')
+}
+
+export function revokeComputerUseApp(app: string): Promise<{ ok: boolean; grants: ComputerUseGrantItem[] }> {
+  return apiPost<{ ok: boolean; grants: ComputerUseGrantItem[] }>('/config/computer-use/revoke', { app })
+}
+
 /**
  * Irreversibly delete archived sessions' files. `ids` targets specific ones;
  * `olderThanDays` keeps only archived idle for ≥ N days; omit both to purge all
@@ -396,10 +438,12 @@ export function answerApproval(
   requestId: string,
   decision: ApprovalDecision,
   editedInput?: Record<string, unknown>,
+  remember?: boolean,
 ): Promise<{ ok: boolean }> {
   return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, {
     decision,
     ...(editedInput ? { editedInput } : {}),
+    ...(remember ? { remember: true } : {}),
   })
 }
 
@@ -481,6 +525,11 @@ export function listPlans(id: string): Promise<PlanListResponse> {
 export async function getPlan(id: string, slug: string): Promise<PlanDoc> {
   const { plan } = await apiGet<{ plan: PlanDoc }>(`/sessions/${id}/plans/${encodeURIComponent(slug)}`)
   return plan
+}
+
+/** Edit a submitted plan's markdown before approval (review → tweak → Build). */
+export function updatePlan(id: string, slug: string, content: string): Promise<{ ok: boolean }> {
+  return apiPut<{ ok: boolean }>(`/sessions/${id}/plans/${encodeURIComponent(slug)}`, { content })
 }
 
 /** Build — approve a plan and start executing it. */
@@ -982,6 +1031,29 @@ export function setCheckpointConfig(
   return apiPut<{ ok: boolean } & CheckpointConfig>('/config/checkpoint', input)
 }
 
+// ── Codex 式常驻目录授权（agent.permissions.additional*Dirs）───────────
+
+/** One standing directory grant. `exists: false` = path missing on disk (grant
+ *  is skipped fail-closed at session start — likely a typo or unplugged drive). */
+export interface PermissionDirEntry { path: string; exists: boolean }
+
+export interface PermissionDirs {
+  readDirs: PermissionDirEntry[]
+  writeDirs: PermissionDirEntry[]
+}
+
+export function getPermissionDirs(): Promise<PermissionDirs> {
+  return apiGet<PermissionDirs>('/config/permission-dirs')
+}
+
+/** Replaces both lists. Additions apply to the running sidecar immediately;
+ *  removals take effect on the next sidecar start (`restartRequired: true`). */
+export function setPermissionDirs(
+  input: { additionalReadDirs?: string[]; additionalWriteDirs?: string[] },
+): Promise<{ ok: boolean; restartRequired: boolean } & PermissionDirs> {
+  return apiPut<{ ok: boolean; restartRequired: boolean } & PermissionDirs>('/config/permission-dirs', input)
+}
+
 // ── MCP (Model Context Protocol) ────────────────────────────────────
 
 import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse, McpPresetsResponse } from './types'
@@ -1010,6 +1082,96 @@ export async function restartMcpServer(serverId: string): Promise<{ ok: boolean 
 
 export async function listMcpServerTools(serverId: string): Promise<McpServerToolsResponse> {
   return apiGet<McpServerToolsResponse>(`/mcp/servers/${encodeURIComponent(serverId)}/tools`)
+}
+
+// ── Plugins（插件市场 — /plugins/* REST）─────────────────────────────
+
+/** Catalog entry from GET /plugins/presets (static first-party catalog +
+ *  installed/enabled state overlay computed server-side). */
+export interface PluginPreset {
+  id: string
+  name: string
+  description: string
+  category: 'office' | 'dev' | 'productivity' | 'design'
+  /** Repo-relative install source — resolved against the sidecar cwd. */
+  installPath: string
+  tools: string[]
+  permissions: { fs?: boolean; net?: boolean; shell?: boolean }
+  installed: boolean
+  enabled: boolean
+}
+
+/** Installed plugin from GET /plugins/installed (includes non-preset plugins). */
+export interface InstalledPlugin {
+  name: string
+  version: string
+  description: string
+  installPath: string
+  entry: string
+  toolCount: number
+  toolNames: string[]
+  enabled: boolean
+}
+
+/** Manifest shape returned by the install preflight (permissions review). */
+export interface PluginManifestPreview {
+  name?: string
+  version?: string
+  description?: string
+  tools?: Array<{ name: string; description?: string }>
+  permissions?: { fs?: boolean; net?: boolean; shell?: boolean }
+}
+
+export function listPluginPresets(): Promise<{ presets: PluginPreset[] }> {
+  return apiGet<{ presets: PluginPreset[] }>('/plugins/presets')
+}
+
+export function listInstalledPlugins(): Promise<{ plugins: InstalledPlugin[] }> {
+  return apiGet<{ plugins: InstalledPlugin[] }>('/plugins/installed')
+}
+
+/** Install a plugin from a local path (confirm: true executes the install).
+ *  Preset cards confirm from catalog data and call this directly. */
+export function installPlugin(
+  path: string,
+): Promise<{ ok: boolean; manifest?: PluginManifestPreview; message?: string }> {
+  return apiPost<{ ok: boolean; manifest?: PluginManifestPreview; message?: string }>(
+    '/plugins/install', { path, confirm: true },
+  )
+}
+
+/** Two-phase preflight for custom-path installs: without confirm the server
+ *  answers 400 + manifest for caller-side review — that 400 is a protocol
+ *  response, not a failure, so this bypasses apiPost's throw-on-non-2xx. */
+export async function preflightPluginInstall(
+  path: string,
+): Promise<{ ok: boolean; manifest?: PluginManifestPreview; error?: string }> {
+  const res = await rivetFetch('/plugins/install', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  })
+  const body = await res.json() as { ok?: boolean; manifest?: PluginManifestPreview; error?: string }
+  // needs-confirm 400 with a manifest = successful preflight.
+  if (res.status === 400 && body.manifest) return { ok: true, manifest: body.manifest }
+  if (!res.ok) return { ok: false, error: body.error ?? `POST /plugins/install -> ${res.status}` }
+  return { ok: true, manifest: body.manifest }
+}
+
+export function setPluginEnabled(
+  name: string, enabled: boolean,
+): Promise<{ ok: boolean; name: string; enabled: boolean; message?: string }> {
+  return apiPost<{ ok: boolean; name: string; enabled: boolean; message?: string }>(
+    '/plugins/enable', { name, enabled },
+  )
+}
+
+export async function removePlugin(name: string): Promise<{ ok: boolean; message?: string }> {
+  const res = await rivetFetch(`/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const detail = await readErrorBody(res)
+    throw new Error(detail || `DELETE /plugins/${name} -> ${res.status}`)
+  }
+  return res.json() as Promise<{ ok: boolean; message?: string }>
 }
 
 // ── Git graph ───────────────────────────────────────────────────────

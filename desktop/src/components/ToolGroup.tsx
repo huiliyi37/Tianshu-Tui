@@ -1,4 +1,6 @@
 import { memo, useState, useMemo, useEffect, Fragment } from 'react'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
 import type { ConvoBlock } from '../state/event-reducer'
 import type { ToolDensity } from '../lib/persist'
 import { FilePath } from './FilePath'
@@ -44,13 +46,14 @@ export function isRunTestsTool(name: string): boolean {
 
 function truncateBody(text: string): string {
   return text.length > TOOL_BODY_MAX
-    ? `${text.slice(0, TOOL_BODY_MAX)}\n…(已截断 ${text.length - TOOL_BODY_MAX} 字)`
+    ? `${text.slice(0, TOOL_BODY_MAX)}\n${i18n.t('threadView:tool.truncated', { count: text.length - TOOL_BODY_MAX })}`
     : text
 }
 
 /** Expandable output body: shows first N lines, "展开全文" reveals everything.
  *  Replaces the old hard truncation at 10k chars. */
 function ExpandableBody({ text }: { text: string }) {
+  const { t } = useTranslation('threadView')
   const lines = text.split('\n')
   const isLong = lines.length > COLLAPSED_LINES
   const [expanded, setExpanded] = useState(false)
@@ -66,7 +69,7 @@ function ExpandableBody({ text }: { text: string }) {
           className="tool-expand-btn"
           onClick={() => setExpanded(true)}
         >
-          展开全文（共 {lines.length} 行）
+          {t('tool.expandAll', { count: lines.length })}
         </button>
       )}
       {expanded && (
@@ -74,7 +77,7 @@ function ExpandableBody({ text }: { text: string }) {
           className="tool-expand-btn"
           onClick={() => setExpanded(false)}
         >
-          收起
+          {t('tool.collapse')}
         </button>
       )}
     </>
@@ -158,6 +161,7 @@ function buildGroupSummary(entries: PairedEntry[]): string {
 
 // ── ToolGroup: Cursor 3.0-style compact group with summary header ──
 function ToolGroupImpl({ items, density = 'balanced' }: { items: ConvoBlock[]; density?: ToolDensity }) {
+  const { t } = useTranslation('threadView')
   // localDensity: per-group override (null = follow global). Cycles:
   //   null → compact → detailed → null
   const [localDensity, setLocalDensity] = useState<ToolDensity | null>(null)
@@ -181,10 +185,10 @@ function ToolGroupImpl({ items, density = 'balanced' }: { items: ConvoBlock[]; d
 
   const toggleLabel = localDensity === null ? '◎' : localDensity === 'compact' ? '⊟' : '☰'
   const toggleTitle = localDensity === null
-    ? '跟随全局密度 · 点击切换'
+    ? t('tool.densityFollow')
     : localDensity === 'compact'
-      ? '紧凑 · 点击切换'
-      : '详细 · 点击恢复全局'
+      ? t('tool.densityCompact')
+      : t('tool.densityDetailed')
 
   return (
     <div className={`tool-group ${effectiveDensity}`}>
@@ -193,7 +197,7 @@ function ToolGroupImpl({ items, density = 'balanced' }: { items: ConvoBlock[]; d
         onClick={() => !compact && setCollapsed(c => !c)}
         aria-expanded={compact ? false : !collapsed}
         disabled={compact}
-        title={compact ? '密度设为 compact，工具组已永久折叠。在 设置 > 工具密度 中调整。' : undefined}
+        title={compact ? t('tool.compactLocked') : undefined}
       >
         {!compact && <span className={`chev ${collapsed ? '' : 'open'}`} aria-hidden>▸</span>}
         <span className={`tool-dot ${dotClass}`} aria-hidden />

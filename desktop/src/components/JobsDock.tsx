@@ -26,6 +26,7 @@ export const JobsDock = memo(function JobsDock({
   visible,
   onToggle,
   onOpenTerminal,
+  onClose,
 }: {
   sessionId: string
   jobs: JobState[]
@@ -34,6 +35,7 @@ export const JobsDock = memo(function JobsDock({
   onToggle: () => void
   /** 在终端打开任务的 cwd（复用 TerminalTabs）。 */
   onOpenTerminal?: () => void
+  onClose: () => void
 }) {
   const { t } = useTranslation('jobs')
   const [now, setNow] = useState(() => Date.now())
@@ -82,6 +84,14 @@ export const JobsDock = memo(function JobsDock({
         {!visible && running[0] && (
           <span className="jdh-current" title={running[0].command}>▶ {running[0].command}</span>
         )}
+        <button
+          className="jobs-dock-close"
+          onClick={onClose}
+          title="彻底隐藏"
+          aria-label="彻底隐藏"
+        >
+          ✕
+        </button>
       </div>
 
       {visible && (

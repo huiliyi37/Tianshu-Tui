@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useTranslation, Trans } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
 import { useConfigProviders, qk } from '../state/queries'
 import {
@@ -33,14 +35,15 @@ interface KeyTarget {
   modelHint?: string
 }
 
-function isValidKey(v: string): string | null {
-  const t = v.trim()
-  if (!t) return 'API Key 不能为空'
-  if (t.length < 4) return 'API Key 长度不足'
+function isValidKey(v: string, t: TFunction<'onboarding'>): string | null {
+  const trimmed = v.trim()
+  if (!trimmed) return t('connect.keyEmpty')
+  if (trimmed.length < 4) return t('connect.keyTooShort')
   return null
 }
 
 export function ConnectWizard({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation('onboarding')
   const { data, isLoading, isError } = useConfigProviders()
   const qc = useQueryClient()
   const refresh = () => {
@@ -75,7 +78,7 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
 
   const submitKey = async () => {
     if (!target || busy) return
-    const err = isValidKey(apiKey)
+    const err = isValidKey(apiKey, t)
     if (err) { setKeyErr(err); return }
     setBusy(true)
     try {
@@ -86,10 +89,10 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
         if (makeDefault) await setProviderAsDefault(target.name)
       }
       refresh()
-      toast.success(`已连接 ${target.label}${makeDefault ? '（已设为默认）' : ''}，新建会话即可使用`)
+      toast.success(t('connect.connected', { label: target.label, suffix: makeDefault ? t('connect.connectedDefaultSuffix') : '' }))
       onClose()
     } catch (e) {
-      setKeyErr((e as Error)?.message ?? '连接失败，请重试')
+      setKeyErr((e as Error)?.message ?? t('connect.connectFailed'))
       setBusy(false)
     }
   }
@@ -100,10 +103,10 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
     try {
       await setProviderAsDefault(p.name)
       refresh()
-      toast.success(`已切换默认服务商为 ${p.label}`)
+      toast.success(t('connect.switchedDefault', { label: p.label }))
       onClose()
     } catch (e) {
-      toast.error(`设为默认失败：${(e as Error).message}`)
+      toast.error(t('connect.setDefaultFailed', { error: (e as Error).message }))
       setBusy(false)
     }
   }
@@ -113,25 +116,25 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
       <DialogContent showCloseButton={false} className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {view === 'pick' && '连接模型服务商'}
-            {view === 'key' && `连接 ${target?.label ?? ''}`}
-            {view === 'custom' && '自定义服务商'}
+            {view === 'pick' && t('connect.titlePick')}
+            {view === 'key' && t('connect.titleKey', { label: target?.label ?? '' })}
+            {view === 'custom' && t('connect.titleCustom')}
           </DialogTitle>
           <DialogDescription>
-            {view === 'pick' && '选择一个内置服务商填入 API 密钥，或添加自定义的 OpenAI 兼容服务。配置后新建会话即可使用。'}
-            {view === 'key' && '填入该服务商的 API 密钥即可开始使用。'}
-            {view === 'custom' && '任何兼容 OpenAI 接口的服务都可以在这里手动接入。'}
+            {view === 'pick' && t('connect.descPick')}
+            {view === 'key' && t('connect.descKey')}
+            {view === 'custom' && t('connect.descCustom')}
           </DialogDescription>
         </DialogHeader>
 
         {view === 'pick' && (
           <div className="grid gap-4 py-1">
-            {isLoading && <p className="text-xs text-muted-foreground">加载中…</p>}
-            {isError && <p className="text-xs text-destructive">无法读取服务商配置（后台离线？）</p>}
+            {isLoading && <p className="text-xs text-muted-foreground">{t('connect.loading')}</p>}
+            {isError && <p className="text-xs text-destructive">{t('connect.loadFailed')}</p>}
 
             {needKey.length > 0 && (
               <div className="grid gap-1.5">
-                <label className="text-xs text-muted-foreground">待填密钥</label>
+                <label className="text-xs text-muted-foreground">{t('connect.needKeyLabel')}</label>
                 <div className="grid gap-1.5">
                   {needKey.map((p) => (
                     <button
@@ -141,8 +144,8 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
                       className="flex items-center gap-2 rounded border border-border px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
                     >
                       <span className="font-medium text-text">{p.label}</span>
-                      {p.isDefault && <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">默认</span>}
-                      <span className="ml-auto text-xs text-warning">未配置 Key</span>
+                      {p.isDefault && <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">{t('connect.default')}</span>}
+                      <span className="ml-auto text-xs text-warning">{t('connect.noKey')}</span>
                     </button>
                   ))}
                 </div>
@@ -151,7 +154,7 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
 
             {(data?.unconfigured.length ?? 0) > 0 && (
               <div className="grid gap-1.5">
-                <label className="text-xs text-muted-foreground">内置服务商</label>
+                <label className="text-xs text-muted-foreground">{t('connect.builtinLabel')}</label>
                 <div className="grid grid-cols-2 gap-1.5">
                   {data!.unconfigured.map((u) => (
                     <button
@@ -170,7 +173,7 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
 
             {ready.length > 0 && (
               <div className="grid gap-1.5">
-                <label className="text-xs text-muted-foreground">已连接（点选设为默认）</label>
+                <label className="text-xs text-muted-foreground">{t('connect.readyLabel')}</label>
                 <div className="grid gap-1.5">
                   {ready.map((p) => (
                     <button
@@ -182,8 +185,8 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
                     >
                       <span className="font-medium text-text">{p.label}</span>
                       {p.isDefault
-                        ? <span className="ml-auto rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">当前默认</span>
-                        : <span className="ml-auto text-xs text-muted-foreground">设为默认</span>}
+                        ? <span className="ml-auto rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">{t('connect.currentDefault')}</span>
+                        : <span className="ml-auto text-xs text-muted-foreground">{t('connect.setDefault')}</span>}
                     </button>
                   ))}
                 </div>
@@ -196,12 +199,12 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
               className="flex items-center gap-2 rounded border border-dashed border-border px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
             >
               <span className="text-muted-foreground">＋</span>
-              <span>自定义服务商</span>
-              <span className="ml-auto text-xs text-muted-foreground">手动填地址与模型</span>
+              <span>{t('connect.customEntry')}</span>
+              <span className="ml-auto text-xs text-muted-foreground">{t('connect.customEntryHint')}</span>
             </button>
 
             <div className="flex justify-end">
-              <Button variant="ghost" onClick={onClose} disabled={busy}>关闭</Button>
+              <Button variant="ghost" onClick={onClose} disabled={busy}>{t('connect.close')}</Button>
             </div>
           </div>
         )}
@@ -218,17 +221,17 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submitKey() } }}
                 placeholder={`${target.label} API Key…`}
               />
-              {target.modelHint && <p className="text-[11px] text-muted-foreground">默认模型：{target.modelHint}</p>}
+              {target.modelHint && <p className="text-[11px] text-muted-foreground">{t('connect.defaultModel', { model: target.modelHint })}</p>}
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} disabled={busy} />
-              <span>设为默认服务商</span>
+              <span>{t('connect.makeDefault')}</span>
             </label>
             {keyErr && <p className="text-xs text-destructive">{keyErr}</p>}
             <div className="flex justify-between gap-2">
-              <Button variant="ghost" onClick={() => setView('pick')} disabled={busy}>返回</Button>
+              <Button variant="ghost" onClick={() => setView('pick')} disabled={busy}>{t('connect.back')}</Button>
               <Button onClick={() => void submitKey()} disabled={busy || !apiKey.trim()}>
-                {busy ? '连接中…' : '连接'}
+                {busy ? t('connect.connecting') : t('connect.connect')}
               </Button>
             </div>
           </div>
@@ -241,7 +244,7 @@ export function ConnectWizard({ onClose }: { onClose: () => void }) {
             onBack={() => setView('pick')}
             onDone={(label, isDefault) => {
               refresh()
-              toast.success(`已连接 ${label}${isDefault ? '（已设为默认）' : ''}，新建会话即可使用`)
+              toast.success(t('connect.connected', { label, suffix: isDefault ? t('connect.connectedDefaultSuffix') : '' }))
               onClose()
             }}
           />
@@ -258,6 +261,7 @@ function CustomForm(props: {
   onDone: (label: string, isDefault: boolean) => void
 }) {
   const { busy, setBusy, onBack, onDone } = props
+  const { t } = useTranslation('onboarding')
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -270,17 +274,17 @@ function CustomForm(props: {
 
   const submit = async () => {
     const nm = name.trim()
-    if (!nm) { setErr('服务商名称不能为空'); return }
+    if (!nm) { setErr(t('connect.nameRequired')); return }
     const url = baseUrl.trim()
-    if (!url) { setErr('接口地址不能为空'); return }
-    try { new URL(url) } catch { setErr('接口地址格式不正确'); return }
+    if (!url) { setErr(t('connect.urlRequired')); return }
+    try { new URL(url) } catch { setErr(t('connect.urlInvalid')); return }
     const id = modelId.trim()
-    if (!id) { setErr('模型 ID 不能为空'); return }
+    if (!id) { setErr(t('connect.modelIdRequired')); return }
     const cw = Number(contextWindow)
-    if (!Number.isInteger(cw) || cw <= 0) { setErr('上下文长度必须是正整数'); return }
+    if (!Number.isInteger(cw) || cw <= 0) { setErr(t('connect.ctxPositive')); return }
     const mt = Number(maxTokens)
-    if (!Number.isInteger(mt) || mt <= 0) { setErr('最大输出 Tokens 必须是正整数'); return }
-    if (mt > cw) { setErr('最大输出 Tokens 不能超过上下文长度（请照官方 API 的真实上限填写）'); return }
+    if (!Number.isInteger(mt) || mt <= 0) { setErr(t('connect.maxPositive')); return }
+    if (mt > cw) { setErr(t('connect.maxExceedsCtx')); return }
     setBusy(true)
     try {
       await setupConfigProvider({
@@ -292,7 +296,7 @@ function CustomForm(props: {
       })
       onDone(nm, makeDefault)
     } catch (e) {
-      setErr((e as Error)?.message ?? '连接失败，请重试')
+      setErr((e as Error)?.message ?? t('connect.connectFailed'))
       setBusy(false)
     }
   }
@@ -300,46 +304,46 @@ function CustomForm(props: {
   return (
     <div className="grid gap-3 py-1">
       <div className="grid gap-1.5">
-        <label className="text-xs text-muted-foreground">服务商名称</label>
-        <Input value={name} onChange={(e) => { setName(e.target.value); setErr(null) }} placeholder="例如 my-openai" disabled={busy} autoFocus />
+        <label className="text-xs text-muted-foreground">{t('connect.name')}</label>
+        <Input value={name} onChange={(e) => { setName(e.target.value); setErr(null) }} placeholder={t('connect.namePlaceholder')} disabled={busy} autoFocus />
       </div>
       <div className="grid gap-1.5">
-        <label className="text-xs text-muted-foreground">接口地址（Base URL）</label>
+        <label className="text-xs text-muted-foreground">{t('connect.baseUrl')}</label>
         <Input value={baseUrl} onChange={(e) => { setBaseUrl(e.target.value); setErr(null) }} placeholder="https://api.example.com/v1" disabled={busy} />
       </div>
       <div className="grid gap-1.5">
-        <label className="text-xs text-muted-foreground">API Key（可选）</label>
+        <label className="text-xs text-muted-foreground">{t('connect.apiKeyOptional')}</label>
         <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." disabled={busy} />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="grid gap-1.5">
-          <label className="text-xs text-muted-foreground">模型 ID</label>
+          <label className="text-xs text-muted-foreground">{t('connect.modelId')}</label>
           <Input value={modelId} onChange={(e) => { setModelId(e.target.value); setErr(null) }} placeholder="gpt-4o" disabled={busy} />
         </div>
         <div className="grid gap-1.5">
-          <label className="text-xs text-muted-foreground">别名（可选）</label>
-          <Input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder="显示用名称" disabled={busy} />
+          <label className="text-xs text-muted-foreground">{t('connect.alias')}</label>
+          <Input value={alias} onChange={(e) => setAlias(e.target.value)} placeholder={t('connect.aliasPlaceholder')} disabled={busy} />
         </div>
         <div className="grid gap-1.5">
-          <label className="text-xs text-muted-foreground">上下文长度</label>
+          <label className="text-xs text-muted-foreground">{t('connect.contextWindow')}</label>
           <Input type="number" value={contextWindow} onChange={(e) => { setContextWindow(e.target.value); setErr(null) }} placeholder="128000" disabled={busy} />
         </div>
         <div className="grid gap-1.5">
-          <label className="text-xs text-muted-foreground">最大输出 Tokens</label>
+          <label className="text-xs text-muted-foreground">{t('connect.maxTokens')}</label>
           <Input type="number" value={maxTokens} onChange={(e) => { setMaxTokens(e.target.value); setErr(null) }} placeholder="384000" disabled={busy} />
         </div>
       </div>
       <p className="text-[11px] leading-relaxed text-muted-foreground">
-        请照该服务商<strong className="text-text">官方 API 文档</strong>的真实值填写：<strong className="text-text">上下文长度</strong>决定天枢的自动压缩点（填小了会过早压缩、丢上下文；填大了会撞 API 上限）；<strong className="text-text">最大输出</strong>是单次回复上限，不能超过上下文长度。<strong className="text-text">DeepSeek V4 参考值</strong>：上下文 1000000、最大输出 384000。
+        <Trans t={t} i18nKey="connect.formHint" components={{ strong: <strong className="text-text" /> }} />
       </p>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} disabled={busy} />
-        <span>设为默认服务商</span>
+        <span>{t('connect.makeDefault')}</span>
       </label>
       {err && <p className="text-xs text-destructive">{err}</p>}
       <div className="flex justify-between gap-2">
-        <Button variant="ghost" onClick={onBack} disabled={busy}>返回</Button>
-        <Button onClick={() => void submit()} disabled={busy}>{busy ? '连接中…' : '连接'}</Button>
+        <Button variant="ghost" onClick={onBack} disabled={busy}>{t('connect.back')}</Button>
+        <Button onClick={() => void submit()} disabled={busy}>{busy ? t('connect.connecting') : t('connect.connect')}</Button>
       </div>
     </div>
   )

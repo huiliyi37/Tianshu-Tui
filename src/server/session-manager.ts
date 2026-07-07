@@ -32,11 +32,13 @@ import type { PlanModeState } from '../agent/plan-mode.js'
 import {
   listPlans as storeListPlans,
   readPlan as storeReadPlan,
-  approvePlan as storeApprovePlan,
   rejectPlan as storeRejectPlan,
+  writePlan as storeWritePlan,
   resolvePlanOptionLabel,
+  parsePlanOptions,
   type PlanDocument,
 } from '../plan/plan-store.js'
+import { approvePlanWithGuards, type PlanApprovalResult } from '../plan/plan-approval.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
 import { WatchdogRecoveryPolicy } from '../agent/watchdog-recovery-policy.js'
 import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domain-picker-entries.js'
@@ -52,126 +54,47 @@ import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
 import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
 import { parseAskUserQuestions } from '../tools/ask-user-question.js'
+import { grantApp as grantComputerUseApp } from '../tools/computer-use/app-grants.js'
+import type {
+  ApprovalMode as WireApprovalMode,
+  PlanModeState as WirePlanModeState,
+  SessionStatus,
+  SessionEvent,
+  SessionEventType,
+  SessionRecord,
+  PlanDraft,
+} from './protocol.js'
 
-export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
+// The session wire contract (event types, records, statuses) lives in
+// protocol.ts so the desktop can share it type-only. Re-export so existing
+// server-side importers keep working unchanged.
+export type { SessionStatus, SessionEvent, SessionEventType, SessionRecord, PlanDraft } from './protocol.js'
 
-/** Live plan-mode draft surfaced to the desktop — a growing working document,
- *  not a submitted plan. Title is the draft's H1 (null while still empty). */
-export interface PlanDraft {
-  path: string
-  title: string | null
-  content: string
-}
+// Compile-time drift guards: the wire copies of ApprovalMode / PlanModeState in
+// protocol.ts must stay identical to the runtime definitions. If either side
+// changes, these aliases stop typechecking.
+type Equals<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
+type Assert<T extends true> = T
+export type _ApprovalModeInSync = Assert<Equals<ApprovalMode, WireApprovalMode>>
+export type _PlanModeStateInSync = Assert<Equals<PlanModeState, WirePlanModeState>>
 
-export type SessionEventType =
-  | 'user'
-  | 'text_delta'
-  | 'thinking_delta'
-  | 'tool_use'
-  | 'tool_result'
-  | 'turn_complete'
-  | 'phase'
-  | 'checkpoint'
-  | 'approval_required'
-  | 'approval_resolved'
-  | 'intent_note'
-  | 'delegation'
-  | 'artifact'
-  | 'status'
-  | 'error'
-  | 'decision_shift'
-  | 'rewind'
-  // T2 — structured active task list (mirrors the `todo` tool's write payload).
-  | 'todo_state'
-  // T3 — mid-run user guidance accepted into the steer buffer.
-  | 'steer_queued'
-  // Plan mode — state toggle (off|planning) + a plan was submitted to disk.
-  | 'plan_mode'
-  | 'plan_submitted'
-  // Structured ask_user_question payload → desktop question card (Cursor-style).
-  | 'user_question'
-  // PlusMenu — per-session model / star-domain / skill selection changes.
-  | 'model_switched'
-  | 'domain_changed'
-  | 'skills_changed'
-  // I4 — user-defined .rivet/hooks.json script results.
-  | 'hook_result'
-  // Background jobs (bash run_in_background) — started / output / exit.
-  | 'job'
-  | 'done'
-  // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
-  | 'watchdog_recovery'
-  // Change landing — commit / squash merge-back / PR created from the Changes tab.
-  | 'landing'
-  // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
-  | 'autonomy_checkpoint'
+/** Structured approval outcome — routes surface `reason` instead of a blind 409. */
+export type PlanApprovalOutcome =
+  | { ok: true }
+  | {
+      ok: false
+      code: 'session-missing' | 'session-running' | 'plan-not-found' | 'invalid-content' | 'bad-approach'
+      reason: string
+    }
 
-export interface SessionEvent {
-  seq: number
-  ts: number
-  type: SessionEventType
-  data: Record<string, unknown>
-}
-
-export interface SessionRecord {
-  id: string
-  status: SessionStatus
-  createdAt: number
-  updatedAt: number
-  cwd: string
-  title?: string
-  currentPhase?: string
-  lastSeq: number
-  error?: string
-  pendingApprovals: number
-  /**
-   * S — per-session autonomy level. Overrides the global config approval mode
-   * so one session can run unattended (dangerously-skip-permissions) while
-   * another stays supervised. Absent → the agent uses the global config default.
-   */
-  approvalMode?: ApprovalMode
-  /**
-   * Plan mode — when 'planning', the agent is restricted to read-only tools and
-   * is expected to call plan_submit to produce a reviewable plan. Absent/'off' →
-   * normal execution. Mirrors AgentLoop.planModeState.
-   */
-  planMode?: PlanModeState
-  /**
-   * PlusMenu — current provider model id for this session (the resolved model
-   * id, not an alias). Absent → the global default. Surfaced in the model picker
-   * and persisted so a reconnecting viewer sees the live model.
-   */
-  model?: string
-  /**
-   * PlusMenu — star-domain selection KEY ('auto' | <domainId>; legacy 'off'
-   * persists but resolves to auto). Stored
-   * as the round-trippable key (not a display name) so rehydrate can restore the
-   * live ActiveStarDomain. Absent → 'auto'.
-   */
-  domain?: string
-  /** Visual glyph for the current star-domain selection (for UI badges). */
-  domainGlyph?: string
-  /** Semantic accent color key for the current star-domain selection. */
-  domainAccent?: string
-  /** Estimated token count for the current conversation. Absent → session is idle/rehydrated. */
-  contextTokens?: number
-  /** Model context window size (max tokens). Absent → session is idle/rehydrated. */
-  contextWindow?: number
-  /** Current reasoning effort level (off/low/medium/high/max). Absent → model default. */
-  reasoningEffort?: string
-  /** Archived (closed) sessions are excluded from listSessions() and hidden in the desktop sidebar. */
-  archived?: boolean
-  /** Git worktree branch name — set when the session was created with isolated worktree. */
-  worktreeBranch?: string
-  /** Worktree path on disk (for cleanup on archive/close). */
-  worktreePath?: string
-  /** HEAD commit at session creation — diff baseline for the Changes tab (worktree sessions). */
-  baselineHead?: string
-  /** Worktree branch head at the last successful merge-back. Squash merges
-   *  leave the branch commits unreachable from main, so rev-list can't tell
-   *  "landed" — this marker lets archive safely delete a landed branch. */
-  landedHead?: string
-}
+/** Structured plan-edit outcome (PUT /plans/:slug). */
+export type PlanUpdateOutcome =
+  | { ok: true }
+  | {
+      ok: false
+      code: 'session-missing' | 'plan-not-found' | 'not-editable' | 'empty-content'
+      reason: string
+    }
 
 /** PlusMenu — a selectable model across all configured providers. */
 export interface ModelOption {
@@ -279,6 +202,14 @@ export interface ManagedAgent {
   getReasoningEffort?(): string | undefined
   /** Rewind: return the current message list (for listing rewind points). */
   getMessages(): OaiMessage[]
+  /**
+   * Outcome of the boot-time LLM history restore (sidecar restart recovery).
+   * Lets the session layer warn when the event log shows a prior conversation
+   * but the model context came back empty (corrupt/unreadable session file) —
+   * otherwise the user silently talks to a model that remembers nothing.
+   * Optional so lightweight test doubles need not implement it.
+   */
+  getHistoryRestore?(): { restored: number; error?: string }
   /** Rewind: replace the message list (truncate to a prior point). */
   replaceMessages(msgs: OaiMessage[]): void
   /** Rewind: like replaceMessages but also resets turnCount/filesRead/filesModified etc. */
@@ -485,6 +416,11 @@ interface PendingIntervention {
   kind: InterventionKind
   resolve: (value: ApprovalResult | boolean) => void
   timer?: ReturnType<typeof setTimeout>
+  /** Tool identity of the gated call — lets answerIntervention apply
+   *  tool-specific "remember" semantics (e.g. computer_use per-app grants). */
+  toolName?: string
+  /** Original (unredacted) tool input for remember handling. */
+  toolInput?: Record<string, unknown>
 }
 
 interface InternalSession {
@@ -565,6 +501,10 @@ interface InternalSession {
   watchdogRecoveryCancelled?: boolean
   /** C2 刹车 — watchdog 续跑倒计时定时器。窗口内用户 abort / 新 prompt 取消。 */
   watchdogContinueTimer?: NodeJS.Timeout
+  /** plan_draft 节流 — 最近一次发射时刻（this.now() 读数）。 */
+  planDraftLastEmit?: number
+  /** plan_draft 节流 — 尾沿定时器，保证窗口内最后一次写盘总能落一发事件。 */
+  planDraftTimer?: NodeJS.Timeout
 }
 
 const REDACTED = '[REDACTED]'
@@ -581,6 +521,10 @@ const WATCHDOG_APPROVAL_GRACE_MS = 5_000
  *  shared coordinator from being swamped). */
 const MAX_USER_BACKGROUND_WORKERS = 4
 
+/** plan_draft 事件节流窗口——agent 增量写草稿可能一轮多次落盘，事件只是
+ *  失效信号（桌面收到后重拉正文），1s 粒度足够「直播感」。 */
+const PLAN_DRAFT_THROTTLE_MS = 1_000
+
 /** Result of a user-dispatch request — lets the route map a precise status code. */
 export type DelegateResult =
   | { ok: true; workerId: string }
@@ -592,6 +536,26 @@ function extractObjective(input: Record<string, unknown>): string {
     if (typeof v === 'string' && v.trim()) return v.slice(0, 200)
   }
   return ''
+}
+
+/**
+ * Scan an event log for approvals that were requested but never resolved —
+ * i.e. the run was interrupted (sidecar restart) while blocked on them.
+ * Used by rehydrate() to close them out honestly instead of leaving a
+ * dangling approval card in the replayed timeline.
+ */
+function findOrphanedApprovals(events: SessionEvent[]): Array<{ requestId: string; toolName: string }> {
+  const open = new Map<string, string>()
+  for (const e of events) {
+    const id = typeof e.data.requestId === 'string' ? e.data.requestId : ''
+    if (!id) continue
+    if (e.type === 'approval_required') {
+      open.set(id, typeof e.data.toolName === 'string' ? e.data.toolName : '')
+    } else if (e.type === 'approval_resolved') {
+      open.delete(id)
+    }
+  }
+  return [...open.entries()].map(([requestId, toolName]) => ({ requestId, toolName }))
 }
 
 /** T2 — todo item as surfaced to the desktop (subset of the tool's schema). */
@@ -701,18 +665,32 @@ export class RuntimeSessionManager {
         }
         this.sessions.set(session.record.id, session)
         if (wasRunning) {
-          // Persist the honest "interrupted by restart" marker straight to disk
-          // WITHOUT loading the log (that would defeat lazy boot). It re-appears
-          // when ensureEvents() reads the log on first open.
-          const marker: SessionEvent = {
-            seq: ++session.seq,
-            ts: this.now(),
-            type: 'status',
-            data: { status: 'aborted', reason: 'sidecar-restart' },
+          // If the run died while blocked on approvals, close them out honestly:
+          // read this ONE session's log (bounded: only crashed-with-pending
+          // sessions pay it — the pendingApprovals>0 gate keeps lazy boot lazy),
+          // find approval_required events with no matching approval_resolved,
+          // and append 'sidecar-restart' resolutions so the replayed timeline
+          // shows WHAT was pending instead of a dangling, unanswerable card.
+          let orphans: Array<{ requestId: string; toolName: string }> = []
+          if (rec.pendingApprovals > 0) {
+            try { orphans = findOrphanedApprovals(p.loadEvents!(rec.id)) } catch { /* best-effort */ }
           }
-          session.record.lastSeq = session.seq
-          session.record.updatedAt = marker.ts
-          try { p.appendEvent(session.record.id, marker) } catch { /* best-effort */ }
+          // Persist the markers straight to disk WITHOUT keeping the log
+          // resident. They re-appear when ensureEvents() reads it on first open.
+          const appendMarker = (type: SessionEventType, data: Record<string, unknown>) => {
+            const marker: SessionEvent = { seq: ++session.seq, ts: this.now(), type, data }
+            session.record.lastSeq = session.seq
+            session.record.updatedAt = marker.ts
+            try { p.appendEvent(session.record.id, marker) } catch { /* best-effort */ }
+          }
+          for (const o of orphans) {
+            appendMarker('approval_resolved', { requestId: o.requestId, decision: 'sidecar-restart', toolName: o.toolName })
+          }
+          appendMarker('status', {
+            status: 'aborted',
+            reason: 'sidecar-restart',
+            ...(orphans.length ? { interruptedApprovals: orphans } : {}),
+          })
           this.persistRecord(session)
         }
       }
@@ -757,8 +735,18 @@ export class RuntimeSessionManager {
       }
       this.sessions.set(session.record.id, session)
       if (wasRunning) {
+        // Close out approvals the crash left dangling (see lazy path above) —
+        // here the full log is already in memory, so scan it directly.
+        const orphans = findOrphanedApprovals(events)
+        for (const o of orphans) {
+          this.append(session, 'approval_resolved', { requestId: o.requestId, decision: 'sidecar-restart', toolName: o.toolName })
+        }
         // Record an honest marker so the viewer sees the interruption.
-        this.append(session, 'status', { status: 'aborted', reason: 'sidecar-restart' })
+        this.append(session, 'status', {
+          status: 'aborted',
+          reason: 'sidecar-restart',
+          ...(orphans.length ? { interruptedApprovals: orphans } : {}),
+        })
         this.persistRecord(session)
       }
     }
@@ -919,6 +907,7 @@ export class RuntimeSessionManager {
     if (!s) return false
     try { s.agent?.shutdown?.() } catch { /* best-effort */ }
     try { s.jobs?.killAll() } catch { /* best-effort */ }
+    if (s.planDraftTimer) clearTimeout(s.planDraftTimer)
     try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* best-effort */ }
     this.sessions.delete(id)
     const i = this.loadedOrder.indexOf(id)
@@ -1160,8 +1149,32 @@ export class RuntimeSessionManager {
       this.ensureJobs(session)
       session.agent = this.createAgent(session.record.cwd, session.record.id, session.approvalMode)
       this.applySelections(session)
+      this.warnIfHistoryLost(session)
     }
     return session.agent
+  }
+
+  /**
+   * Surface the "UI has history, model has none" divergence. A rehydrated
+   * session replays its full event log to the viewer, but the model context is
+   * restored separately from the session .jsonl — if that read failed or came
+   * back empty while the event log clearly holds a prior conversation, warn in
+   * the timeline instead of letting the user talk to an amnesiac model.
+   * Best-effort: only fires when prior events are resident (run() calls
+   * ensureEvents first, so the main prompt path always has them).
+   */
+  private warnIfHistoryLost(session: InternalSession): void {
+    const info = session.agent?.getHistoryRestore?.()
+    if (!info) return
+    if (!info.error && info.restored > 0) return
+    const hadConversation = session.events.some((e) => e.type === 'user')
+    if (!hadConversation) return
+    this.append(session, 'phase', {
+      phase: info.error
+        ? `⚠️ 历史上下文恢复失败（${redactText(info.error)}）——模型不记得此前的对话，界面历史仅供查看`
+        : '⚠️ 历史上下文为空——会话记录文件缺失或已损坏，模型不记得此前的对话，界面历史仅供查看',
+      historyRestore: { restored: info.restored, ...(info.error ? { error: redactText(info.error) } : {}) },
+    })
   }
 
   /** Lazily create the server-owned background job registry for a session and
@@ -1476,34 +1489,87 @@ export class RuntimeSessionManager {
   }
 
   /**
-   * Build (approve) a plan: mark it approved on disk, release plan mode, then
-   * inject the approved plan as the next turn so the agent executes it. Refuses
-   * when the session is missing/running or the plan can't be approved.
+   * Edit a submitted plan's markdown before approval (desktop plan editing —
+   * Cursor 3.0 parity: review → tweak the document → Build). Only `submitted`
+   * plans are editable; approved/executed are historical records and rejected
+   * are archived. Emits `plan_submitted` so viewers re-fetch the body.
    */
-  async approvePlan(id: string, slug: string, selectedApproach?: string): Promise<boolean> {
+  async updatePlan(id: string, slug: string, content: string): Promise<PlanUpdateOutcome> {
     const session = this.sessions.get(id)
-    if (!session || session.running) return false
+    if (!session) return { ok: false, code: 'session-missing', reason: 'Session not found' }
+    const trimmed = content.trim()
+    if (!trimmed) return { ok: false, code: 'empty-content', reason: 'Plan content must not be empty' }
+    const existing = await storeReadPlan(session.record.cwd, slug)
+    if (!existing) return { ok: false, code: 'plan-not-found', reason: `Plan not found: "${slug}"` }
+    if (existing.status !== 'submitted') {
+      return { ok: false, code: 'not-editable', reason: `Only submitted plans can be edited (status: ${existing.status})` }
+    }
+    // Options: honour a frontmatter block the editor kept/changed; fall back to
+    // the recorded ones so a body-only edit never silently drops the choices.
+    const options = parsePlanOptions(content) ?? existing.options
+    try {
+      await storeWritePlan(session.record.cwd, slug, content, options)
+    } catch {
+      return { ok: false, code: 'plan-not-found', reason: `Failed to write plan "${slug}"` }
+    }
+    const updated = await storeReadPlan(session.record.cwd, slug)
+    this.touch(session)
+    this.append(session, 'plan_submitted', {
+      slug,
+      title: updated?.title ?? existing.title,
+      status: 'submitted',
+    })
+    this.persistRecord(session)
+    return { ok: true }
+  }
+
+  /**
+   * Build (approve) a plan: run the shared approval guards (content validation +
+   * anchor-drift recheck), mark it approved on disk, release plan mode, then
+   * inject the wave-execution kickoff as the next turn. Returns a structured
+   * failure so the route can surface WHY approval was refused (the old boolean
+   * collapsed "session running" / "empty plan" / "bad option" into one 409).
+   */
+  async approvePlan(id: string, slug: string, selectedApproach?: string): Promise<PlanApprovalOutcome> {
+    const session = this.sessions.get(id)
+    if (!session) return { ok: false, code: 'session-missing', reason: 'Session not found' }
+    if (session.running) {
+      return { ok: false, code: 'session-running', reason: 'Session is running — wait for the current turn to finish before Build' }
+    }
     // Validate the selected approach BEFORE mutating the plan file — approving
     // first would leave the file marked APPROVED even when the option is bogus.
     let resolvedApproach: string | undefined
     if (selectedApproach?.trim()) {
       const pending = await storeReadPlan(session.record.cwd, slug)
-      if (!pending) return false
+      if (!pending) return { ok: false, code: 'plan-not-found', reason: `Plan not found: "${slug}"` }
       if (pending.options && pending.options.length > 0) {
         resolvedApproach = resolvePlanOptionLabel(pending.options, selectedApproach)
-        if (!resolvedApproach) return false
+        if (!resolvedApproach) {
+          return { ok: false, code: 'bad-approach', reason: `Unknown selectedApproach "${selectedApproach}"` }
+        }
       } else {
         // No recorded options — pass the user's text through as-is.
         resolvedApproach = selectedApproach.trim()
       }
     }
-    let approved: PlanDocument | null
+    // Shared approval kernel (same closed loop as TUI /plan-approve): empty/
+    // placeholder plans hard-fail, anchor drift is rechecked and injected into
+    // the kickoff, and the kickoff drives wave-by-wave execution through the
+    // review gates (plan_task/team_orchestrate + plan_close).
+    let result: PlanApprovalResult
     try {
-      approved = await storeApprovePlan(session.record.cwd, slug)
+      result = await approvePlanWithGuards(session.record.cwd, slug, resolvedApproach)
     } catch {
-      return false
+      return { ok: false, code: 'plan-not-found', reason: `Plan not found: "${slug}"` }
     }
-    if (!approved) return false
+    if (!result.ok) {
+      return {
+        ok: false,
+        code: result.code === 'invalid-content' ? 'invalid-content' : 'plan-not-found',
+        reason: result.reason,
+      }
+    }
+    const { approved, kickoff } = result
     const agent = this.ensureAgent(session)
     try {
       agent.setActivePlan?.({
@@ -1521,18 +1587,17 @@ export class RuntimeSessionManager {
     }
     this.touch(session)
     this.persistRecord(session)
-    let kickoff = `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`
-    if (resolvedApproach) {
-      kickoff += `\nSelected approach: ${resolvedApproach} — execute ONLY this approach. Do not execute unselected alternatives.`
-    }
     this.run(id, kickoff)
-    return true
+    return { ok: true }
   }
 
   /**
    * Reject a plan with optional feedback. Keeps the plan on disk (marked
-   * rejected) and, when a comment is given on an idle session, kicks a revision
-   * turn so the agent can re-plan. Emits `plan_submitted` to refresh viewers.
+   * rejected) and re-enters plan mode. Revision feedback routing depends on
+   * session state: idle → kick a revision turn immediately; running → queue
+   * through the steer buffer (injected at the next tool boundary), so mid-run
+   * feedback is never silently dropped. Emits `plan_submitted` to refresh
+   * viewers.
    */
   async rejectPlan(id: string, slug: string, comment?: string): Promise<boolean> {
     const session = this.sessions.get(id)
@@ -1557,11 +1622,16 @@ export class RuntimeSessionManager {
     this.touch(session)
     this.persistRecord(session)
     const note = comment?.trim()
-    if (note && !session.running) {
-      this.run(
-        id,
-        `User rejected the plan. Feedback:\n\n${note}\n\nRevise the plan in \`.rivet/plans/${slug}.md\`, then call plan action=submit again.`,
-      )
+    if (note) {
+      const revisionPrompt = `User rejected the plan. Feedback:\n\n${note}\n\nRevise the plan in \`.rivet/plans/${slug}.md\`, then call plan action=submit again.`
+      if (session.running) {
+        // Mid-run rejection: the feedback rides the steer buffer (next tool
+        // boundary) instead of being dropped — the old code only handled idle.
+        session.steer.push(revisionPrompt)
+        this.append(session, 'steer_queued', { text: redactText(revisionPrompt) })
+      } else {
+        this.run(id, revisionPrompt)
+      }
     }
     return true
   }
@@ -2047,6 +2117,7 @@ export class RuntimeSessionManager {
     requestId: string,
     decision: string,
     editedInput?: Record<string, unknown>,
+    remember?: boolean,
   ): boolean {
     const s = this.sessions.get(id)
     if (!s) return false
@@ -2062,11 +2133,25 @@ export class RuntimeSessionManager {
     }
     pend.resolve(result)
     if (!approved) s.lastApprovalDeniedAt = this.now()
+    // Computer Use "always allow": approve + remember records a machine-level
+    // per-app grant so future actions on this app skip the prompt entirely
+    // (the tool's requiresApproval consults the same grant store).
+    let rememberedApp: string | undefined
+    if (approved && remember === true && pend.toolName === 'computer_use') {
+      const app = pend.toolInput?.app
+      if (typeof app === 'string' && app.trim()) {
+        try {
+          grantComputerUseApp(app.trim())
+          rememberedApp = app.trim()
+        } catch { /* grant persistence is best-effort — approval still resolves */ }
+      }
+    }
     this.recountApprovals(s)
     this.append(s, 'approval_resolved', {
       requestId,
       decision: approved ? 'approve' : 'reject',
       edited: !!result.editedInput,
+      ...(rememberedApp ? { rememberedApp } : {}),
     })
     this.touch(s)
     this.persistRecord(s)
@@ -2406,6 +2491,18 @@ export class RuntimeSessionManager {
         if (name === 'plan_submit' && !isError) {
           void this.emitPlanSubmitted(session)
         }
+        // Plan mode — while planning, write_file/edit_file can only touch the
+        // active draft (checkPlanMode gates every other path), so a successful
+        // final write means the draft grew. Emit a throttled invalidation
+        // signal — this replaces the desktop's 2s draft polling as the primary
+        // liveness channel (polling stays as a degraded fallback).
+        if (
+          isError === false
+          && session.record.planMode === 'planning'
+          && (name === 'write_file' || name === 'edit_file')
+        ) {
+          this.schedulePlanDraftEvent(session)
+        }
         this.scanArtifacts(session)
       },
       onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
@@ -2471,6 +2568,8 @@ export class RuntimeSessionManager {
         requestId,
         kind: 'approval',
         resolve: resolve as (v: ApprovalResult | boolean) => void,
+        toolName: name,
+        toolInput: input,
       }
       if (this.approvalTimeoutMs > 0) {
         pend.timer = setTimeout(() => {
@@ -2479,12 +2578,17 @@ export class RuntimeSessionManager {
             session.lastApprovalDeniedAt = this.now()
             this.recountApprovals(session)
             this.append(session, 'approval_resolved', { requestId, decision: 'timeout' })
+            this.persistRecord(session)
           }
         }, this.approvalTimeoutMs)
       }
       session.pending.set(requestId, pend)
       this.recountApprovals(session)
       this.append(session, 'approval_required', { requestId, toolName: name, input: redactValue(input) })
+      // Persist the pendingApprovals count NOW — if the sidecar dies while
+      // blocked on this approval, rehydrate() uses the on-disk count as the
+      // gate for scanning the log and closing the approval out honestly.
+      this.persistRecord(session)
     })
   }
 
@@ -2587,6 +2691,50 @@ export class RuntimeSessionManager {
       }
     } catch {
       // non-fatal — the desktop can still poll GET /plans
+    }
+  }
+
+  /**
+   * Throttled `plan_draft` scheduler. Leading edge fires immediately; writes
+   * inside the window arm ONE trailing timer so the final write of a burst
+   * always lands an event (a plain leading-edge throttle would leave the
+   * desktop stale until its fallback poll).
+   */
+  private schedulePlanDraftEvent(session: InternalSession): void {
+    const now = this.now()
+    const elapsed = now - (session.planDraftLastEmit ?? 0)
+    if (elapsed >= PLAN_DRAFT_THROTTLE_MS) {
+      session.planDraftLastEmit = now
+      void this.emitPlanDraft(session)
+      return
+    }
+    if (session.planDraftTimer) return
+    session.planDraftTimer = setTimeout(() => {
+      session.planDraftTimer = undefined
+      session.planDraftLastEmit = this.now()
+      void this.emitPlanDraft(session)
+    }, PLAN_DRAFT_THROTTLE_MS - elapsed)
+    session.planDraftTimer.unref?.()
+  }
+
+  /**
+   * Emit the `plan_draft` invalidation signal. Metadata only (title/size/path)
+   * — never the body — so events.jsonl stays small; viewers re-fetch the
+   * content via GET /sessions/:id/plans. Best-effort: a read failure only
+   * delays the live refresh (the poll fallback still covers it).
+   */
+  private async emitPlanDraft(session: InternalSession): Promise<void> {
+    if (session.record.planMode !== 'planning') return
+    try {
+      const draft = await this.readPlanDraft(session.record.id)
+      if (!draft) return
+      this.append(session, 'plan_draft', {
+        path: draft.path,
+        title: draft.title,
+        size: draft.content.length,
+      })
+    } catch {
+      // non-fatal — the desktop's fallback poll still refreshes the draft
     }
   }
 
