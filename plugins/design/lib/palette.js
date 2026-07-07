@@ -33,14 +33,27 @@ export function extractPaletteFromPng(pngBuffer, maxColors = 8) {
   }
 
   const total = pixels.length
-  const colors = buckets.map(bucket => {
+  const rawColors = buckets.map(bucket => {
     const n = bucket.length
     const r = Math.round(bucket.reduce((s, p) => s + p[0], 0) / n)
     const g = Math.round(bucket.reduce((s, p) => s + p[1], 0) / n)
     const b = Math.round(bucket.reduce((s, p) => s + p[2], 0) / n)
     const hex = `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}`
-    return { hex, r, g, b, percent: Math.round((n / total) * 1000) / 10 }
-  }).sort((a, b) => b.percent - a.percent)
+    return { hex, r, g, b, percent: (n / total) * 100 }
+  })
+
+  // Median-cut on low-variance images produces N buckets that average to the
+  // SAME color (a solid red image yields 4× #c82828 at 25% each) — merge by
+  // hex so the palette reports distinct colors with combined coverage.
+  const merged = new Map()
+  for (const c of rawColors) {
+    const prev = merged.get(c.hex)
+    if (prev) prev.percent += c.percent
+    else merged.set(c.hex, c)
+  }
+  const colors = [...merged.values()]
+    .map(c => ({ ...c, percent: Math.round(c.percent * 10) / 10 }))
+    .sort((a, b) => b.percent - a.percent)
 
   const cssVariables = colors.map((c, i) => `  --color-brand-${i + 1}: ${c.hex};`).join('\n')
   const tailwindSnippet = colors.map((c, i) => `'brand-${i + 1}': '${c.hex}',`).join('\n        ')

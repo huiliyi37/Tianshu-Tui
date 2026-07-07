@@ -17,9 +17,11 @@ export function comparePngBuffers(referencePng, actualPng, opts = {}) {
     }
   }
   const diff = new PNG({ width: a.width, height: a.height })
+  // includeAA stays default (false): anti-aliased edge pixels are detected
+  // and excluded from the mismatch count — the report explicitly tells the
+  // model AA differences are normal, so they must not inflate the score.
   const mismatched = pixelmatch(a.data, b.data, diff.data, a.width, a.height, {
     threshold: opts.threshold ?? 0.1,
-    includeAA: true,
   })
   const total = a.width * a.height
   const mismatchPercent = Math.round((mismatched / total) * 10000) / 100

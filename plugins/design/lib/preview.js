@@ -1,5 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { withBrowser, openTargetPage, resolveViewportList } from './browser.js'
 
 /**
@@ -14,8 +14,7 @@ export async function capturePreviews(opts) {
 
   await withBrowser(async (browser) => {
     for (const vp of viewports) {
-      const page = await openTargetPage(browser, { filePath: opts.filePath, url: opts.url })
-      await page.setViewport({ width: vp.width, height: vp.height, deviceScaleFactor: 1 })
+      const page = await openTargetPage(browser, { filePath: opts.filePath, url: opts.url }, vp)
       const outPath = join(opts.outputDir, `preview-${vp.label}.png`)
       await page.screenshot({ path: outPath, fullPage: !!opts.fullPage, type: 'png' })
       await page.close()

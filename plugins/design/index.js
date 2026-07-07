@@ -2,11 +2,7 @@
 // Multi-viewport preview, visual diff, palette extraction, responsive audit.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { capturePreviews } from './lib/preview.js'
-import { compareImageFiles } from './lib/diff.js'
-import { extractPaletteFromFile } from './lib/palette.js'
-import { runResponsiveAudit } from './lib/responsive.js'
+import { dirname, join, resolve } from 'node:path'
 import { findChromeBinary, chromeNotFoundMessage } from './lib/chrome.js'
 
 function toDataUrl(pngPath) {
@@ -20,10 +16,34 @@ function chromeGuard() {
   return null
 }
 
-async function uiPreview(params) {
-  const guard = chromeGuard()
-  if (guard) return guard
+/** Lazy-import a lib module so the plugin registers (and each tool reports an
+ *  actionable error) even when node_modules is missing or install failed —
+ *  a top-level import chain would make the whole plugin silently skip. */
+async function importLib(relPath) {
+  try {
+    return await import(relPath)
+  } catch (err) {
+    if (err?.code === 'ERR_MODULE_NOT_FOUND') {
+      throw new Error(
+        'Plugin dependencies missing. Run "npm install --ignore-scripts --omit=dev" in the tianshu-design plugin directory, then retry.',
+      )
+    }
+    throw err
+  }
+}
 
+/** Output dir default: next to the HTML prototype, or .rivet/design under
+ *  cwd for URL targets. (dirname(resolve('.')) was the PARENT of cwd —
+ *  screenshots landed outside the workspace.) */
+function resolveOutputDir(outputPath, filePath) {
+  if (outputPath) {
+    return outputPath.endsWith('.png') ? dirname(resolve(outputPath)) : resolve(outputPath)
+  }
+  if (filePath) return dirname(resolve(filePath))
+  return join(process.cwd(), '.rivet', 'design')
+}
+
+async function uiPreview(params) {
   const filePath = params?.file_path
   const url = params?.url
   if (!filePath && !url) {
@@ -32,12 +52,13 @@ async function uiPreview(params) {
   if (filePath && !existsSync(filePath)) {
     return { content: `Error: file not found: ${filePath}`, isError: true }
   }
+  const guard = chromeGuard()
+  if (guard) return guard
 
-  const outputDir = params?.output_path
-    ? (params.output_path.endsWith('.png') ? dirname(resolve(params.output_path)) : resolve(params.output_path))
-    : dirname(resolve(filePath || '.'))
+  const outputDir = resolveOutputDir(params?.output_path, filePath)
 
   try {
+    const { capturePreviews } = await importLib('./lib/preview.js')
     const shots = await capturePreviews({
       filePath,
       url,
@@ -73,6 +94,7 @@ async function uiDiff(params) {
   if (!existsSync(actual)) return { content: `Error: actual not found: ${actual}`, isError: true }
 
   try {
+    const { compareImageFiles } = await importLib('./lib/diff.js')
     const result = compareImageFiles(reference, actual)
     if (!result.ok) {
       return { content: result.error, isError: true }
@@ -88,7 +110,7 @@ async function uiDiff(params) {
         `- Diff image: ${diffOut}`,
         result.mismatchPercent > 5
           ? 'Significant visual drift — iterate layout/spacing/colors before delivery.'
-          : 'Within tolerance — minor anti-aliasing differences are normal.',
+          : 'Within tolerance — minor anti-aliasing differences are excluded from the score.',
       ].join('\n'),
       rawPath: diffOut,
       images: [toDataUrl(diffOut)],
@@ -105,6 +127,7 @@ async function uiPalette(params) {
 
   const maxColors = typeof params?.max_colors === 'number' ? Math.min(16, Math.max(2, params.max_colors)) : 8
   try {
+    const { extractPaletteFromFile } = await importLib('./lib/palette.js')
     const { colors, cssVariables, tailwindSnippet } = extractPaletteFromFile(filePath, maxColors)
     const swatches = colors.map(c => `- ${c.hex} (${c.percent}% of sampled pixels)`).join('\n')
     return {
@@ -120,14 +143,14 @@ async function uiPalette(params) {
       ].join('\n'),
     }
   } catch (err) {
-    return { content: `ui_palette failed: ${err.message}`, isError: true }
+    const hint = /invalid|signature|unrecognised|unexpected/i.test(err.message)
+      ? ' (only PNG input is supported — convert JPEG/WebP to PNG first, e.g. via ui_preview screenshot)'
+      : ''
+    return { content: `ui_palette failed: ${err.message}${hint}`, isError: true }
   }
 }
 
 async function uiResponsiveAudit(params) {
-  const guard = chromeGuard()
-  if (guard) return guard
-
   const filePath = params?.file_path
   const url = params?.url
   if (!filePath && !url) {
@@ -136,12 +159,13 @@ async function uiResponsiveAudit(params) {
   if (filePath && !existsSync(filePath)) {
     return { content: `Error: file not found: ${filePath}`, isError: true }
   }
+  const guard = chromeGuard()
+  if (guard) return guard
 
-  const outputDir = params?.output_path
-    ? (params.output_path.endsWith('.png') ? dirname(resolve(params.output_path)) : resolve(params.output_path))
-    : dirname(resolve(filePath || '.'))
+  const outputDir = resolveOutputDir(params?.output_path, filePath)
 
   try {
+    const { runResponsiveAudit } = await importLib('./lib/responsive.js')
     const { reports, totalIssues } = await runResponsiveAudit({ filePath, url, outputDir })
     const lines = []
     /** @type {string[]} */
@@ -169,7 +193,6 @@ async function uiResponsiveAudit(params) {
       ].join('\n'),
       rawPath: reports[0]?.screenshot,
       images,
-      isError: totalIssues > 0 ? undefined : false,
     }
   } catch (err) {
     return { content: `ui_responsive_audit failed: ${err.message}`, isError: true }
@@ -192,7 +215,7 @@ export const tools = [
             description: 'Viewports to capture (default: all three)',
           },
           full_page: { type: 'boolean', description: 'Capture full scrollable page (default: viewport only)' },
-          output_path: { type: 'string', description: 'Directory for PNG output (default: same dir as HTML)' },
+          output_path: { type: 'string', description: 'Directory for PNG output (default: same dir as HTML, or .rivet/design for URLs)' },
         },
       },
     },
@@ -204,7 +227,7 @@ export const tools = [
   {
     definition: {
       name: 'ui_diff',
-      description: 'Pixel-level visual diff between a reference mockup and an implementation screenshot. Outputs mismatch percentage and a diff highlight image.',
+      description: 'Pixel-level visual diff between a reference mockup and an implementation screenshot (PNG). Outputs mismatch percentage and a diff highlight image.',
       input_schema: {
         type: 'object',
         properties: {
@@ -223,11 +246,11 @@ export const tools = [
   {
     definition: {
       name: 'ui_palette',
-      description: 'Extract dominant colors from a reference image or screenshot. Returns hex swatches plus CSS variables and Tailwind theme snippets.',
+      description: 'Extract dominant colors from a PNG reference image or screenshot. Returns hex swatches plus CSS variables and Tailwind theme snippets.',
       input_schema: {
         type: 'object',
         properties: {
-          file_path: { type: 'string', description: 'PNG/JPEG image to analyze' },
+          file_path: { type: 'string', description: 'PNG image to analyze (convert JPEG to PNG first)' },
           max_colors: { type: 'number', description: 'Max palette size (2-16, default 8)' },
         },
         required: ['file_path'],

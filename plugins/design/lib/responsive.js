@@ -1,8 +1,11 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { withBrowser, openTargetPage, resolveViewportList, VIEWPORTS } from './browser.js'
 
-const AUDIT_SCRIPT = `() => {
+// IIFE string: puppeteer evaluates strings as EXPRESSIONS — a bare arrow
+// function expression would evaluate to the function itself (serializes to
+// undefined) instead of running the audit. The trailing () is load-bearing.
+const AUDIT_SCRIPT = `(() => {
   const issues = []
   const root = document.documentElement
   if (root.scrollWidth > root.clientWidth + 1) {
@@ -39,7 +42,7 @@ const AUDIT_SCRIPT = `() => {
     issues.push({ type: 'small_font', severity: 'low', count: smallText.length, samples: smallText })
   }
   return issues
-}`
+})()`
 
 /**
  * @param {{ filePath?: string, url?: string, outputDir: string }} opts
@@ -47,18 +50,17 @@ const AUDIT_SCRIPT = `() => {
 export async function runResponsiveAudit(opts) {
   mkdirSync(opts.outputDir, { recursive: true })
   const viewports = resolveViewportList(['mobile', 'tablet', 'desktop'])
-  /** @type {Array<{ viewport: string, issues: unknown[], screenshot: string }>} */
+  /** @type {Array<{ viewport: string, issues: Array<{ type: string, severity: string, count: number, samples?: unknown[] }>, screenshot: string }>} */
   const reports = []
 
   await withBrowser(async (browser) => {
     for (const vp of viewports) {
-      const page = await openTargetPage(browser, { filePath: opts.filePath, url: opts.url })
-      await page.setViewport({ width: vp.width, height: vp.height, deviceScaleFactor: 1 })
+      const page = await openTargetPage(browser, { filePath: opts.filePath, url: opts.url }, vp)
       const issues = await page.evaluate(AUDIT_SCRIPT)
       const screenshot = join(opts.outputDir, `audit-${vp.label}.png`)
       await page.screenshot({ path: screenshot, fullPage: false, type: 'png' })
       await page.close()
-      reports.push({ viewport: vp.label, issues, screenshot })
+      reports.push({ viewport: vp.label, issues: Array.isArray(issues) ? issues : [], screenshot })
     }
   })
 
