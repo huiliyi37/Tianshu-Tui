@@ -31,23 +31,33 @@ import type { DirEntry, FileContent } from '../runtime/types'
 
 type ViewMode = 'preview' | 'source'
 
+/** 从 cwd 或已有路径中检测平台分隔符——Windows 用 \，其他用 /。 */
+function detectSep(cwdOrPath: string): string {
+  return cwdOrPath.includes('\\') ? '\\' : '/'
+}
+
 function joinPath(base: string, part: string): string {
   if (!base) return part
-  const separator = base.includes('\\') ? '\\' : '/'
+  const separator = detectSep(base)
   return base.endsWith(separator) ? `${base}${part}` : `${base}${separator}${part}`
 }
 
 function parentDir(path: string): string {
-  const separator = path.includes('\\') ? '\\' : '/'
+  const separator = detectSep(path)
   const idx = path.lastIndexOf(separator)
   if (idx <= 0) return ''
   return path.slice(0, idx)
 }
 
+/** 拼接绝对路径，并将 relativePath 中的分隔符归一化为 cwd 的分隔符。
+ *  避免 Windows 上出现 D:\project\src/index.ts 这类混合分隔符，
+ *  导致 explorer 或 Start-Process 静默失败。 */
 function toAbsolute(relativePath: string, cwd: string): string {
   if (!cwd) return relativePath
-  const separator = cwd.includes('\\') ? '\\' : '/'
-  return cwd.endsWith(separator) ? `${cwd}${relativePath}` : `${cwd}${separator}${relativePath}`
+  const separator = detectSep(cwd)
+  // 归一化：把相对路径中的 / 和 \ 统一为 cwd 的分隔符
+  const normalizedRel = relativePath.replace(/[/\\]/g, separator)
+  return cwd.endsWith(separator) ? `${cwd}${normalizedRel}` : `${cwd}${separator}${normalizedRel}`
 }
 
 /**
@@ -194,8 +204,11 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   }, [])
 
   const openSelectedFile = useCallback((path: string) => {
-    openFileInSystem(path).catch((e) => toast.error(t('fileExplorer.openFailed', { message: (e as Error).message })))
-  }, [t])
+    // 用 cwd 拼绝对路径——避免相对路径在服务端 path.resolve 时
+    // 依赖 process.cwd()（桌面端 sidecar 的 cwd 不一定是项目根）。
+    const absPath = cwd ? toAbsolute(path, cwd) : path
+    openFileInSystem(absPath).catch((e) => toast.error(t('fileExplorer.openFailed', { message: (e as Error).message })))
+  }, [cwd, t])
 
   const revealSelectedFile = useCallback((path: string) => {
     openFileInSystem(path, true).catch((e) => toast.error(t('fileExplorer.revealFailed', { message: (e as Error).message })))
