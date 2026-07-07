@@ -53,7 +53,8 @@ export interface RunnerOptions {
   maxTurns: number
   parallel: number
   dryRun: boolean
-  modelId?: string  // optional override for model selection
+  modelId?: string
+  domain?: string  // star domain (tianliang/yaoguang/etc.) for prompt enrichment
 }
 
 // ── Dataset loading ────────────────────────────────────────────
@@ -200,6 +201,7 @@ export async function runAgentInDir(
   prompt: string,
   maxTurns: number,
   modelId?: string,
+  domain?: string,
 ): Promise<HeadlessRunResult> {
   // Lazy-load agent internals to keep script importable without agent deps
   const { runHeadless } = await import('../src/headless.js')
@@ -226,6 +228,18 @@ export async function runAgentInDir(
   if (modelId) console.log(`  Using model: ${model.id} (alias: ${model.alias ?? 'none'})`)
   const sessionId = crypto.randomUUID()
 
+  // Inject star domain for prompt enrichment (天梁=execution, 瑶光=verification, etc.)
+  let domainDef: { id: string; name: string; volatileBlock: string; motto: string } | undefined
+  if (domain) {
+    const { starDomainRegistry } = await import('../src/agent/star-domain-registry.js')
+    const def = starDomainRegistry.get(domain)
+    if (def) {
+      domainDef = { id: def.id, name: def.name, volatileBlock: def.volatileBlock, motto: def.motto }
+    } else {
+      console.warn(`  Warning: unknown domain '${domain}', available: ${starDomainRegistry.getDomainIds().join(', ')}`)
+    }
+  }
+
   return runHeadless({
     prompt,
     json: true,
@@ -251,7 +265,14 @@ export async function runAgentInDir(
         auth: undefined,
       }))
       const session = new SessionContext()
-      return new AgentLoop({ ...agentCfg, toolRegistry, maxTurns }, session, cwd)
+      const agent = new AgentLoop({ ...agentCfg, toolRegistry, maxTurns }, session, cwd)
+
+      // Inject star domain
+      if (domainDef) {
+        agent.setSessionDomain(domainDef)
+      }
+
+      return agent
     },
   })
 }
@@ -272,6 +293,7 @@ Options:
   --max-turns <n>          Max agent turns per instance (default: 100)
   --parallel <n>           Number of parallel instances (default: 1)
   --model <id|alias>       Override model selection (default: last in config)
+  --domain <name>          Star domain for prompt enrichment (tianliang/yaoguang/tianshu)
   --dry-run                Load dataset + print summary, skip agent
   --help, -h               Show this help
 `)
@@ -293,6 +315,7 @@ export function parseRunnerArgs(argv: string[]): {
       'max-turns': { type: 'string', default: '100' },
       parallel: { type: 'string', default: '1' },
       model: { type: 'string' },
+      domain: { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h' },
     },
@@ -313,6 +336,7 @@ export function parseRunnerArgs(argv: string[]): {
       maxTurns: parseInt(values['max-turns'], 10) || 100,
       parallel: parseInt(values.parallel, 10) || 1,
       modelId: values.model || undefined,
+      domain: values.domain || undefined,
       dryRun: values['dry-run'],
     },
   }
@@ -396,7 +420,7 @@ async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions
   }
 
   const prompt = buildSwebenchPrompt(instance)
-  const result = await runAgentInDir(workDir, prompt, opts.maxTurns, opts.modelId)
+  const result = await runAgentInDir(workDir, prompt, opts.maxTurns, opts.modelId, opts.domain)
   record.exitCode = result.exitCode
   record.agentText = result.json?.text ?? ''
 
@@ -433,7 +457,7 @@ async function runParallel(instances: SwebenchInstance[], opts: RunnerOptions): 
   for (let i = 0; i < opts.parallel; i++) {
     const worker = new Worker(
       new URL('./swebench-worker.ts', import.meta.url),
-      { workerData: { workRoot: opts.workRoot, maxTurns: opts.maxTurns, modelId: opts.modelId } },
+      { workerData: { workRoot: opts.workRoot, maxTurns: opts.maxTurns, modelId: opts.modelId, domain: opts.domain } },
     )
 
     worker.on('message', (record: RunRecord) => {
