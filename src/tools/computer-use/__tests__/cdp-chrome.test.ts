@@ -84,21 +84,23 @@ test('attachEndpoint: dedicated profile DevToolsActivePort is second priority', 
   assert.deepEqual(ep, { httpBase: 'http://127.0.0.1:9333', source: 'dedicated' })
 })
 
-test('attachEndpoint: conventional localhost:9222 is third; nothing → null', async () => {
+test('attachEndpoint: a live localhost:9222 is NEVER auto-attached (user Chrome needs browser_adopt)', async () => {
+  // Security invariant: a user Chrome running with --remote-debugging-port
+  // carries their logged-in profile. Even with :9222 answering, the default
+  // attach path must return null — takeover only via the explicit
+  // browser_adopt action (unconditional approval).
   const base: ChromeDeps = { env: {}, existsSyncImpl: () => false }
-  const ep = await attachEndpoint({ ...base, fetchImpl: probeFetch(['http://127.0.0.1:9222']) })
-  assert.deepEqual(ep, { httpBase: 'http://127.0.0.1:9222', source: 'localhost' })
+  assert.equal(await attachEndpoint({ ...base, fetchImpl: probeFetch(['http://127.0.0.1:9222']) }), null)
   assert.equal(await attachEndpoint({ ...base, fetchImpl: probeFetch([]) }), null)
 })
 
-test('attachEndpoint: dead RIVET_CU_CDP_URL falls through to later sources', async () => {
+test('attachEndpoint: dead RIVET_CU_CDP_URL falls through, but never to a live :9222', async () => {
   const deps: ChromeDeps = {
     env: { RIVET_CU_CDP_URL: 'localhost:1' },
     existsSyncImpl: () => false,
     fetchImpl: probeFetch(['http://127.0.0.1:9222']),
   }
-  const ep = await attachEndpoint(deps)
-  assert.equal(ep?.source, 'localhost')
+  assert.equal(await attachEndpoint(deps), null)
 })
 
 // ── dedicated launch ────────────────────────────────────────────────
@@ -153,11 +155,15 @@ test('ensureEndpoint: attach-only when allowLaunch=false; caches the verdict', a
   let probes = 0
   const counting: FetchLike = async (url) => {
     probes++
-    return probeFetch(['http://127.0.0.1:9222'])(url)
+    return probeFetch(['http://localhost:9500'])(url)
   }
-  const deps: ChromeDeps = { env: {}, existsSyncImpl: () => false, fetchImpl: counting }
+  const deps: ChromeDeps = {
+    env: { RIVET_CU_CDP_URL: 'localhost:9500' },
+    existsSyncImpl: () => false,
+    fetchImpl: counting,
+  }
   const ep1 = await ensureEndpoint({ allowLaunch: false }, deps)
-  assert.equal(ep1?.source, 'localhost')
+  assert.equal(ep1?.source, 'env')
   const probesAfterFirst = probes
   // Within the verify TTL the cached endpoint is reused without re-probing.
   const ep2 = await ensureEndpoint({ allowLaunch: false }, deps)

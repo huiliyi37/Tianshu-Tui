@@ -66,6 +66,27 @@ const READ_PAGE_MAX_CHARS = 60_000
 const SNAPSHOT_TIMEOUT_MS = 15_000
 const NAVIGATE_WAIT_MS = 12_000
 
+/**
+ * Normalize a navigation target to a safe URL. http/https ONLY — `file:`
+ * (local file exfiltration via read_page), `javascript:`/`data:` (script
+ * injection), `chrome:`/`devtools:` (browser internals) are attack surface;
+ * mirrors browser.ts's fail-closed protocol posture. Bare hosts get https://.
+ */
+export function normalizeNavigationUrl(raw: string): string {
+  const trimmed = raw.trim()
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`
+  let parsed: URL
+  try {
+    parsed = new URL(withScheme)
+  } catch {
+    throw new Error(`invalid URL: "${raw}"`)
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`navigation blocked: protocol "${parsed.protocol}" is not allowed — only http/https URLs can be opened (file:, javascript:, data: and browser-internal schemes are refused).`)
+  }
+  return withScheme
+}
+
 /** AX roles that are pure structure — row suppressed when unnamed. */
 const SILENT_ROLES = new Set([
   'none', 'generic', 'GenericContainer', 'genericContainer', 'IgnoredObject', 'RootWebArea',
@@ -769,7 +790,7 @@ export function createCdpDriver(deps: CdpDriverDeps = {}): CdpBrowserDriver {
         const state = await pageState()
         return `Reloaded "${state.title}" — ${state.url}`
       }
-      const url = /^[a-z][a-z0-9+.-]*:/i.test(trimmed) ? trimmed : `https://${trimmed}`
+      const url = normalizeNavigationUrl(trimmed)
       const res = await send<{ errorText?: string }>('Page.navigate', { url }, { timeoutMs: NAVIGATE_WAIT_MS })
       if (res.errorText) throw new Error(`navigation to ${url} failed: ${res.errorText}`)
       await waitForLoad(NAVIGATE_WAIT_MS)
@@ -832,7 +853,7 @@ export function createCdpDriver(deps: CdpDriverDeps = {}): CdpBrowserDriver {
         return pages.length > 0 ? `Open tabs (* = active):\n${listText()}` : 'No open tabs.'
       }
       if (op === 'new') {
-        const url = arg?.url && arg.url.trim() ? (/^[a-z][a-z0-9+.-]*:/i.test(arg.url.trim()) ? arg.url.trim() : `https://${arg.url.trim()}`) : 'about:blank'
+        const url = arg?.url && arg.url.trim() ? normalizeNavigationUrl(arg.url) : 'about:blank'
         const created = await send<{ targetId: string }>('Target.createTarget', { url })
         await attachToPage(created.targetId)
         await waitForLoad(NAVIGATE_WAIT_MS)

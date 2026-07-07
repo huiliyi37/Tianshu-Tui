@@ -2,7 +2,7 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import type { CdpTransportFactory, FetchLike } from '../cdp/client.js'
 import { resetEndpointForTests } from '../cdp/chrome.js'
-import { createCdpDriver, type CdpBrowserDriver } from '../cdp/driver.js'
+import { createCdpDriver, normalizeNavigationUrl, type CdpBrowserDriver } from '../cdp/driver.js'
 
 beforeEach(() => resetEndpointForTests())
 
@@ -312,6 +312,35 @@ test('cdp navigate: back with no history entry reports instead of throwing', asy
   const { driver } = makeWorld()
   const note = await driver.navigate('back')
   assert.equal(note, 'Cannot go back — no history entry in that direction.')
+})
+
+test('cdp navigate: non-http(s) schemes are refused before any CDP call', async () => {
+  // file: (local exfiltration via read_page), javascript:/data: (script
+  // injection), chrome: (browser internals) — all blocked, no Page.navigate.
+  for (const target of [
+    'file:///etc/passwd',
+    'javascript:alert(1)',
+    'data:text/html,<script>1</script>',
+    'chrome://settings',
+    'view-source:https://example.com',
+  ]) {
+    const { driver, calls } = makeWorld({ 'Page.navigate': () => ({}) })
+    await assert.rejects(driver.navigate(target), /navigation blocked: protocol/)
+    assert.ok(!calls.some((c) => c.method === 'Page.navigate'), `${target} must not reach Page.navigate`)
+  }
+})
+
+test('cdp tabs new: url goes through the same protocol gate', async () => {
+  const { driver, calls } = makeWorld()
+  await assert.rejects(driver.tabs('new', { url: 'file:///etc/hosts' }), /navigation blocked: protocol/)
+  assert.ok(!calls.some((c) => c.method === 'Target.createTarget'), 'blocked url must not create a target')
+})
+
+test('normalizeNavigationUrl: http/https pass, bare host coerced, garbage rejected', () => {
+  assert.equal(normalizeNavigationUrl('example.com'), 'https://example.com')
+  assert.equal(normalizeNavigationUrl('http://localhost:3000/app'), 'http://localhost:3000/app')
+  assert.equal(normalizeNavigationUrl(' https://a.dev/x '), 'https://a.dev/x')
+  assert.throws(() => normalizeNavigationUrl('http://'), /invalid URL/)
 })
 
 test('cdp readPage: full innerText with page identity header', async () => {

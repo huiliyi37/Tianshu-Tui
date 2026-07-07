@@ -26,7 +26,7 @@ import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints, getDoomLoopThresholds } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
-import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval } from './approval-risk.js'
+import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval, requiresUnconditionalApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix, learnFileApproval } from './permissions.js'
 import { isSelfDestructiveKill, selfProcessTree } from './self-preservation.js'
@@ -946,23 +946,31 @@ export async function executeToolUse(
       pathGrantNeed = null
     }
 
-    let shouldAsk = skipAllApproval
-      ? false
-      : pathGrantNeed
-        ? true
-        : protectionMode
+    // Hard gate: arbitrary-JS / endpoint-takeover actions (computer_use
+    // js_eval / browser_adopt) always ask — no approval mode (incl. YOLO),
+    // allow rule, or sensorium confidence can waive them. The tool documents
+    // this promise; this is where it is enforced.
+    const unconditionalApproval = requiresUnconditionalApproval(tu.name, tu.input)
+
+    let shouldAsk = unconditionalApproval
+      ? true
+      : skipAllApproval
+        ? false
+        : pathGrantNeed
           ? true
-          : bashWriteRequiresApproval
+          : protectionMode
             ? true
-            : allowlisted
-              ? false
-              : canAutoApprove
+            : bashWriteRequiresApproval
+              ? true
+              : allowlisted
                 ? false
-                : approvalMode === 'manual'
-                  ? needsApproval
-                  : approvalMode === 'auto-safe'
-                    ? isHighRisk
-                    : false
+                : canAutoApprove
+                  ? false
+                  : approvalMode === 'manual'
+                    ? needsApproval
+                    : approvalMode === 'auto-safe'
+                      ? isHighRisk
+                      : false
 
     // Headless override — no human can answer an approval prompt here, so a
     // shouldAsk that reaches onApprovalRequired would hang (the callback returns

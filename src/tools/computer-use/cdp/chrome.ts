@@ -3,10 +3,14 @@
  * endpoint attach priority, session-level singleton.
  *
  * Attach priority (first healthy endpoint wins):
- *   1. `RIVET_CU_CDP_URL` — explicit user-provided DevTools endpoint
+ *   1. `RIVET_CU_CDP_URL` — explicit user-provided DevTools endpoint (opt-in config)
  *   2. dedicated automation profile's `DevToolsActivePort` file
- *   3. `localhost:9222` — conventional debug port (user-launched Chrome)
- *   4. (only when the caller allows launching) spawn a dedicated instance
+ *   3. (only when the caller allows launching) spawn a dedicated instance
+ *
+ * A user Chrome running with `--remote-debugging-port` (e.g. :9222) is NEVER
+ * auto-attached: a CDP session over the user's own profile means cookies,
+ * logged-in sessions and page JS — that takeover must go through the explicit
+ * `browser_adopt` action, which carries an unconditional approval gate.
  *
  * The dedicated instance runs a SEPARATE profile (`~/.rivet/chrome-automation`)
  * with `--remote-debugging-port=0` — Chrome picks a free port and writes it to
@@ -31,7 +35,7 @@ export interface ChromeEndpoint {
   /** DevTools HTTP base, e.g. `http://127.0.0.1:53712`. */
   httpBase: string
   /** Where the endpoint came from (routing/telemetry + user messaging). */
-  source: 'env' | 'dedicated' | 'localhost' | 'launched' | 'adopted'
+  source: 'env' | 'dedicated' | 'launched' | 'adopted'
 }
 
 /** Injectable process/fs surface — tests fake all of it. */
@@ -145,11 +149,9 @@ export async function attachEndpoint(deps: ChromeDeps = {}): Promise<ChromeEndpo
     return { httpBase: dedicated, source: 'dedicated' }
   }
 
-  const conventional = 'http://127.0.0.1:9222'
-  if (await probeEndpoint(conventional, fetchImpl)) {
-    return { httpBase: conventional, source: 'localhost' }
-  }
-
+  // Deliberately NO `localhost:9222` probe here — attaching to a user-launched
+  // debug-port Chrome grabs their logged-in profile without consent. That path
+  // exists only as the explicit `browser_adopt` action (unconditional approval).
   return null
 }
 

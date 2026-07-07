@@ -1123,6 +1123,72 @@ describe('executeToolUse', () => {
     assert.equal((result.toolResult as any).is_error, false)
   })
 
+  it('computer_use js_eval / browser_adopt always prompt — even in dangerously-skip-permissions and with allow rules', async () => {
+    // Hard gate: arbitrary JS in the user's browser / DevTools endpoint
+    // takeover can never ride YOLO, allowlists, or sensorium auto-approve.
+    for (const input of [
+      { action: 'js_eval', app: 'Google Chrome', expression: '1+1' },
+      { action: 'browser_adopt', endpoint: 'localhost:9222' },
+    ]) {
+      let approvalCalls = 0
+      let executed = false
+      const deps = makeDeps({
+        config: {
+          ...makeDeps().config,
+          approvalMode: 'dangerously-skip-permissions',
+          permissions: { allow: [{ tool: 'computer_use' }] },
+          toolRegistry: {
+            execute: async () => { executed = true; return { content: 'ran', isError: false } },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => true,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+        getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
+      })
+      const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+
+      const result = await executeToolUse(
+        { id: `tu-cu-${input.action}`, name: 'computer_use', input },
+        deps, callbacks as any, 1, false,
+      )
+
+      assert.equal(approvalCalls, 1, `${input.action} must prompt even in YOLO`)
+      assert.equal(executed, false, `denied ${input.action} must not execute`)
+      assert.equal((result.toolResult as any).is_error, true)
+    }
+  })
+
+  it('computer_use non-privileged actions still ride dangerously-skip-permissions', async () => {
+    // The unconditional gate is scoped to js_eval/browser_adopt — snapshot etc.
+    // keep the normal mode semantics.
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'dangerously-skip-permissions',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'snap', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+
+    const result = await executeToolUse(
+      { id: 'tu-cu-snapshot', name: 'computer_use', input: { action: 'snapshot', app: 'Google Chrome' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.equal(approvalCalls, 0)
+    assert.equal(executed, true)
+    assert.equal((result.toolResult as any).is_error, false)
+  })
+
   it('out-of-workspace write_file forces an approval prompt even in auto-safe, and records a grant on approval', async () => {
     _resetGrantsForTest()
     const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))

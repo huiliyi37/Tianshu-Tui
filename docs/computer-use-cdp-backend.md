@@ -33,10 +33,11 @@ cdp/driver.ts   CdpDriver：实现 ComputerUseDriver + 浏览器专属动作
 
 ## attach 优先级（cdp/chrome.ts）
 
-1. `RIVET_CU_CDP_URL` 显式端点（探测失败会继续往下走，不 brick）
+1. `RIVET_CU_CDP_URL` 显式端点（用户主动配置；探测失败会继续往下走，不 brick）
 2. 专用 profile 的 `DevToolsActivePort` 文件（`~/.rivet/chrome-automation`）
-3. `localhost:9222` 惯例端口探测
-4. 都没有 → 仅 `launch_app` / `navigate` / `tabs new` 允许启动专用实例（其余动作绝不 surprise 弹窗）
+3. 都没有 → 仅 `launch_app` / `navigate` / `tabs new` 允许启动专用实例（其余动作绝不 surprise 弹窗）
+
+**`localhost:9222` 永不自动 attach**：用户自己开着调试端口的 Chrome 带着完整登录态（cookies/session），静默接管等于无审批拿走用户身份。接管唯一入口是显式 `browser_adopt` 动作，且审批为管线级无条件门（YOLO / allow 规则均不可豁免）。
 
 专用实例：`--remote-debugging-port=0 --user-data-dir=~/.rivet/chrome-automation --no-first-run`，**可见窗口**（computer use 用户要看得见）。登录态在专用 profile 里跨会话持久——登录一次长期有效。退出不杀实例。
 
@@ -46,11 +47,13 @@ Chrome 136+ 封死默认 profile 的调试端口，所以不做用户默认 prof
 
 | 动作 | 说明 | 审批 |
 |---|---|---|
-| `navigate(app, url)` | URL / back / forward / reload | 按 app 授权 |
+| `navigate(app, url)` | URL / back / forward / reload；**仅 http/https**（file:/javascript:/data:/chrome: 拒绝） | 按 app 授权 |
 | `read_page(app)` | innerText 全文（60k 字符上限），绕开 400 节点树上限 | 按 app 授权 |
-| `js_eval(app, expression)` | `Runtime.evaluate` | **恒需审批**（无视 app 授权） |
-| `tabs(app, tab_op, tab?, url?)` | list / activate / new / close | 按 app 授权 |
-| `browser_adopt(endpoint)` | 接管用户调试端口 Chrome | **恒需审批** |
+| `js_eval(app, expression)` | `Runtime.evaluate` | **恒需审批**（管线级无条件门） |
+| `tabs(app, tab_op, tab?, url?)` | list / activate / new / close；new 的 url 同 navigate 协议门 | 按 app 授权 |
+| `browser_adopt(endpoint)` | 接管用户调试端口 Chrome | **恒需审批**（管线级无条件门） |
+
+「恒需审批」由 `tool-pipeline` 的 `requiresUnconditionalApproval` 硬闸门强制——任何 approvalMode（含 `dangerously-skip-permissions`）、`permissions.allow` 规则、sensorium 自动放行都不能豁免；工具自身的 `requiresApproval()` 只是 manual 模式下的第一层。
 
 其余动作（snapshot/find/wait_for/click/type/set_value/scroll/key/paste_text/focus_app/launch_app）经混合路由自动获得 CDP 加速，模型无感知。`menu_select` 恒走原生驱动（菜单栏是 OS 对象，CDP 看不见）。
 
