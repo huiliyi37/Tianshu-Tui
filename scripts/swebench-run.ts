@@ -389,6 +389,8 @@ async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions
     execSync(`git remote add origin ${url}`, { cwd: workDir })
     execSync(`git fetch --depth 50 origin ${instance.base_commit}`, { cwd: workDir, timeout: 300_000 })
     execSync(`git checkout -b main ${instance.base_commit}`, { cwd: workDir })
+    // Save base commit ref for later diff extraction
+    execSync(`git tag swebench-base`, { cwd: workDir })
   } else {
     execSync('git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null', { cwd: workDir })
   }
@@ -401,10 +403,10 @@ async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions
   // Extract patch regardless of exit code — agent may produce valid fix
   // even if verification tools (pytest, etc.) are unavailable
   try {
-    const patch = execSync(
-      'git rev-parse HEAD~1 >/dev/null 2>&1 && git show HEAD || git diff HEAD',
-      { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 },
-    )
+      const patch = execSync(
+        'git diff swebench-base',
+        { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 },
+      )
     if (patch.trim()) {
       record.patch = patch
       record.status = 'completed'

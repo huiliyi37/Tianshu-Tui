@@ -53,7 +53,7 @@ parentPort.on('message', async (msg: { type: 'run'; instance: SwebenchInstance }
     if (!existsSync(join(workDir, '.git'))) {
       const url = `${process.env.GITHUB_MIRROR || 'https://github.com'}/${instance.repo}.git`
       mkdirSync(workDir, { recursive: true })
-      execSync(`git init && git remote add origin ${url} && git fetch --depth 50 origin ${instance.base_commit} && git checkout -b main ${instance.base_commit}`, { cwd: workDir, timeout: 300_000 })
+      execSync(`git init && git remote add origin ${url} && git fetch --depth 50 origin ${instance.base_commit} && git checkout -b main ${instance.base_commit} && git tag swebench-base`, { cwd: workDir, timeout: 300_000 })
     } else {
       execSync('git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null', { cwd: workDir })
     }
@@ -68,7 +68,7 @@ parentPort.on('message', async (msg: { type: 'run'; instance: SwebenchInstance }
 
     try {
       const patch = execSync(
-        'git rev-parse HEAD~1 >/dev/null 2>&1 && git show HEAD || git diff HEAD',
+        'git diff swebench-base',
         { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 },
       )
       if (patch.trim()) {
