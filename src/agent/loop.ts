@@ -170,6 +170,8 @@ export class AgentLoop {
   private _idleCompacting = false
   private _idleAbort: AbortController | null = null
   private _idleSettled: Promise<void> | null = null
+  /** P0-1 persist drain: awaits pending async writes so tool results survive abort. */
+  private _persistDrain: (() => Promise<void>) | null = null
   private physarumForWarmup?: PhysarumEngine
   private meridianDbForWarmup?: import('../repo/meridian-db.js').MeridianDb
   private memoriesWarmed = false
@@ -754,7 +756,8 @@ export class AgentLoop {
 
       // P0-1: Mirror every in-memory message change to disk so non-/exit
       // shutdowns (Ctrl+C, crash, network drop) don't lose the session.
-      attachSessionPersistListener({ session: this.session, persist: this.persist })
+      const listener = attachSessionPersistListener({ session: this.session, persist: this.persist })
+      this._persistDrain = listener.drain
     }
   }
 
@@ -1518,6 +1521,8 @@ export class AgentLoop {
   }
 
   async runPostSession(callbacks: AgentCallbacks): Promise<void> {
+    // P0-1: drain pending async persist writes so tool results survive abort/Ctrl+C.
+    await this._persistDrain?.()
     await this.runtimeHooks.runPostSession(createRuntimeHookContext(this.buildRuntimeSnapshot(),
       { emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) } }))
     if (this.config.sessionRegistry) {

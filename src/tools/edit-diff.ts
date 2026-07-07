@@ -11,6 +11,11 @@ import { createTwoFilesPatch, structuredPatch } from 'diff'
 
 const DEFAULT_MAX_DIFF_LINES = 600
 
+/** Normalize Windows backslash paths to POSIX for clean diff headers. */
+function normPath(p: string): string {
+  return p.replaceAll('\\', '/')
+}
+
 export interface BuildFileDiffOptions {
   /** Cap rendered diff lines; excess is replaced by a single hint line. */
   maxLines?: number
@@ -22,8 +27,9 @@ export interface BuildFileDiffOptions {
  */
 export function buildFileDiff(relPath: string, before: string, after: string, opts?: BuildFileDiffOptions): string {
   if (before === after) return ''
+  const posixPath = normPath(relPath)
 
-  const raw = createTwoFilesPatch(relPath, relPath, before, after, '', '', { context: 3 })
+  const raw = createTwoFilesPatch(posixPath, posixPath, before, after, '', '', { context: 3 })
 
   // createTwoFilesPatch prepends an `Index:` + `===` preamble (INCLUDE_HEADERS
   // default). Drop everything before the first `--- ` file header for a clean

@@ -14,7 +14,7 @@ import { debugLog } from '../utils/debug.js'
 export function attachSessionPersistListener(deps: {
   session: SessionContext
   persist: SessionPersist
-}): void {
+}): { drain: () => Promise<void> } {
   const { session, persist } = deps
   let writeChain: Promise<void> = Promise.resolve()
   session.setMutationListener((m) => {
@@ -74,4 +74,5 @@ export function attachSessionPersistListener(deps: {
         })
     }
   })
+  return { drain: () => writeChain }
 }
