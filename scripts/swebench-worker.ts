@@ -17,15 +17,11 @@ const { execSync } = await import('node:child_process')
 
 if (!parentPort) throw new Error('Worker must be spawned with worker_threads')
 
-const { opts } = workerData as {
-  opts: {
-    workRoot: string
-    maxTurns: number
-    progressPath: string
-    outputPath: string
-    modelId?: string
-    domain?: string
-  }
+const opts = workerData as {
+  workRoot: string
+  maxTurns: number
+  modelId?: string
+  domain?: string
 }
 
 // Ensure work root exists
