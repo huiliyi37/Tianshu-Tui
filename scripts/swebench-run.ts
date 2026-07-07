@@ -53,6 +53,7 @@ export interface RunnerOptions {
   maxTurns: number
   parallel: number
   dryRun: boolean
+  modelId?: string  // optional override for model selection
 }
 
 // ── Dataset loading ────────────────────────────────────────────
@@ -60,35 +61,61 @@ export interface RunnerOptions {
 const SWEBENCH_VERIFIED_URL =
   'https://huggingface.co/datasets/SWE-bench/SWE-bench_Verified/resolve/main/data/test-00000-of-00001.parquet'
 
-export async function loadDataset(parquetPath: string): Promise<SwebenchInstance[]> {
+export async function loadDataset(datasetPath: string): Promise<SwebenchInstance[]> {
+  // Support JSONL as input format (simpler, no parquet deps)
+  if (datasetPath.endsWith('.jsonl') || datasetPath.endsWith('.json')) {
+    return loadDatasetFromJsonl(datasetPath)
+  }
+
+  // Parquet path (requires parquet-wasm)
   const { readParquet } = await import('parquet-wasm')
-  const buf = readFileSync(parquetPath)
+  const buf = readFileSync(datasetPath)
   const table = readParquet(buf)
 
   const instances: SwebenchInstance[] = []
-  const idCol = table.getColumn('instance_id')
-  const repoCol = table.getColumn('repo')
-  const commitCol = table.getColumn('base_commit')
-  const problemCol = table.getColumn('problem_statement')
-  const testPatchCol = table.getColumn('test_patch')
-  const versionCol = table.getColumn('version')
+  for (const batch of table.recordBatches()) {
+    const schema = batch.schema
+    const fieldNames = schema.fields.map((f: { name: string }) => f.name)
+    const idIdx = fieldNames.indexOf('instance_id')
+    const repoIdx = fieldNames.indexOf('repo')
+    const commitIdx = fieldNames.indexOf('base_commit')
+    const problemIdx = fieldNames.indexOf('problem_statement')
+    const testPatchIdx = fieldNames.indexOf('test_patch')
+    const versionIdx = fieldNames.indexOf('version')
 
-  if (!idCol || !repoCol || !commitCol || !problemCol || !testPatchCol || !versionCol) {
-    throw new Error('Missing required columns in SWE-bench parquet file')
-  }
+    if (idIdx < 0 || repoIdx < 0 || commitIdx < 0 || problemIdx < 0 || testPatchIdx < 0 || versionIdx < 0) {
+      throw new Error('Missing required columns in SWE-bench parquet file. Found: ' + fieldNames.join(', '))
+    }
 
-  for (let i = 0; i < table.numRows; i++) {
-    instances.push({
-      instance_id: String(idCol.get(i)),
-      repo: String(repoCol.get(i)),
-      base_commit: String(commitCol.get(i)),
-      problem_statement: String(problemCol.get(i)),
-      test_patch: String(testPatchCol.get(i)),
-      version: String(versionCol.get(i)),
-    })
+    // Use column(index) to access data — parquet-wasm RecordBatch API
+    const idCol = batch.column(idIdx)
+    const repoCol = batch.column(repoIdx)
+    const commitCol = batch.column(commitIdx)
+    const problemCol = batch.column(problemIdx)
+    const testPatchCol = batch.column(testPatchIdx)
+    const versionCol = batch.column(versionIdx)
+
+    for (let i = 0; i < batch.numRows; i++) {
+      instances.push({
+        instance_id: String(idCol.get(i)),
+        repo: String(repoCol.get(i)),
+        base_commit: String(commitCol.get(i)),
+        problem_statement: String(problemCol.get(i)),
+        test_patch: String(testPatchCol.get(i)),
+        version: String(versionCol.get(i)),
+      })
+    }
   }
 
   return instances
+}
+
+function loadDatasetFromJsonl(path: string): SwebenchInstance[] {
+  const content = readFileSync(path, 'utf-8')
+  return content
+    .split('\n')
+    .filter(Boolean)
+    .map(line => JSON.parse(line) as SwebenchInstance)
 }
 
 export async function downloadDataset(cachePath: string): Promise<string> {
@@ -172,6 +199,7 @@ export async function runAgentInDir(
   cwd: string,
   prompt: string,
   maxTurns: number,
+  modelId?: string,
 ): Promise<HeadlessRunResult> {
   // Lazy-load agent internals to keep script importable without agent deps
   const { runHeadless } = await import('../src/headless.js')
@@ -191,7 +219,11 @@ export async function runAgentInDir(
   const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
   if (!key) throw new Error(`API key not set. Export ${prov.apiKeyEnv ?? 'API_KEY'} or run: rivet config setup`)
 
-  const model = prov.models[0]!
+  const model = modelId
+    ? prov.models.find(m => m.id === modelId || m.alias === modelId)
+    : prov.models[prov.models.length - 1]
+  if (!model) throw new Error(`Model '${modelId ?? 'default'}' not found in provider '${cfg.provider.default}'`)
+  if (modelId) console.log(`  Using model: ${model.id} (alias: ${model.alias ?? 'none'})`)
   const sessionId = crypto.randomUUID()
 
   return runHeadless({
@@ -238,6 +270,7 @@ Options:
   --max-instances <n>      Max instances to run (0=all, default: 0)
   --max-turns <n>          Max agent turns per instance (default: 100)
   --parallel <n>           Number of parallel instances (default: 1)
+  --model <id|alias>       Override model selection (default: last in config)
   --dry-run                Load dataset + print summary, skip agent
   --help, -h               Show this help
 `)
@@ -258,6 +291,7 @@ export function parseRunnerArgs(argv: string[]): {
       'max-instances': { type: 'string', default: '0' },
       'max-turns': { type: 'string', default: '100' },
       parallel: { type: 'string', default: '1' },
+      model: { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h' },
     },
@@ -277,6 +311,7 @@ export function parseRunnerArgs(argv: string[]): {
       maxInstances: parseInt(values['max-instances'], 10) || 0,
       maxTurns: parseInt(values['max-turns'], 10) || 100,
       parallel: parseInt(values.parallel, 10) || 1,
+      modelId: values.model || undefined,
       dryRun: values['dry-run'],
     },
   }
@@ -358,7 +393,7 @@ async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions
   }
 
   const prompt = buildSwebenchPrompt(instance)
-  const result = await runAgentInDir(workDir, prompt, opts.maxTurns)
+  const result = await runAgentInDir(workDir, prompt, opts.maxTurns, opts.modelId)
   record.exitCode = result.exitCode
   record.agentText = result.json?.text ?? ''
 
@@ -395,7 +430,7 @@ async function runParallel(instances: SwebenchInstance[], opts: RunnerOptions): 
   for (let i = 0; i < opts.parallel; i++) {
     const worker = new Worker(
       new URL('./swebench-worker.ts', import.meta.url),
-      { workerData: { workRoot: opts.workRoot, maxTurns: opts.maxTurns } },
+      { workerData: { workRoot: opts.workRoot, maxTurns: opts.maxTurns, modelId: opts.modelId } },
     )
 
     worker.on('message', (record: RunRecord) => {

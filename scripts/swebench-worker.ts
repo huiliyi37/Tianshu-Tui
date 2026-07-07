@@ -23,6 +23,7 @@ const { opts } = workerData as {
     maxTurns: number
     progressPath: string
     outputPath: string
+    modelId?: string
   }
 }
 
@@ -60,7 +61,7 @@ parentPort.on('message', async (msg: { type: 'run'; instance: SwebenchInstance }
     // Run agent
     const { runAgentInDir, buildSwebenchPrompt } = await import('./swebench-run.js')
     const prompt = buildSwebenchPrompt(instance)
-    const result = await runAgentInDir(workDir, prompt, opts.maxTurns)
+    const result = await runAgentInDir(workDir, prompt, opts.maxTurns, opts.modelId)
 
     record.exitCode = result.exitCode
     record.agentText = result.json?.text ?? ''
