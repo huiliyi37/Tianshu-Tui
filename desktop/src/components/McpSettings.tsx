@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { listMcpServerTools } from '../runtime/client'
+import { listMcpServerTools, getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
 import { openExternal } from '../lib/open-external'
 import type { McpStatusResponse, McpServerConfig, McpConnectionState, McpPreset, McpServerToolsResponse } from '../runtime/types'
 
@@ -414,5 +414,61 @@ export function McpSettings({
         </div>
       )}
     </section>
+  )
+}
+
+/** Self-contained manager: MCP status/preset polling + add/remove/restart
+ *  wiring around the controlled McpSettings UI. Shared by the Settings
+ *  integration card and the extensions hub connectors tab. */
+export function McpSettingsManager() {
+  const [mcpStatus, setMcpStatus] = useState<McpStatusResponse | null>(null)
+  const [mcpLoading, setMcpLoading] = useState(true)
+  const [mcpError, setMcpError] = useState<string | null>(null)
+  const [presets, setPresets] = useState<McpPreset[] | null>(null)
+  const [configuredIds, setConfiguredIds] = useState<string[]>([])
+
+  const fetchStatus = useCallback(() => {
+    getMcpStatus()
+      .then((s) => { setMcpStatus(s); setMcpError(null) })
+      .catch((err) => setMcpError((err as Error).message))
+      .finally(() => setMcpLoading(false))
+    getMcpPresets()
+      .then((p) => { setPresets(p.presets); setConfiguredIds(p.configuredIds) })
+      .catch(() => { /* non-fatal: preset grid just won't render */ })
+  }, [])
+
+  useEffect(() => {
+    fetchStatus()
+  }, [fetchStatus])
+
+  const handleAdd = useCallback((config: McpServerConfig) => {
+    addMcpServer(config)
+      .then(() => fetchStatus())
+      .catch((err) => setMcpError((err as Error).message))
+  }, [fetchStatus])
+
+  const handleRemove = useCallback((serverId: string) => {
+    removeMcpServer(serverId)
+      .then(() => fetchStatus())
+      .catch((err) => setMcpError((err as Error).message))
+  }, [fetchStatus])
+
+  const handleRestart = useCallback((serverId: string) => {
+    restartMcpServer(serverId)
+      .then(() => fetchStatus())
+      .catch((err) => setMcpError((err as Error).message))
+  }, [fetchStatus])
+
+  return (
+    <McpSettings
+      status={mcpStatus}
+      statusLoading={mcpLoading}
+      statusError={mcpError}
+      presets={presets}
+      configuredIds={configuredIds}
+      onAdd={handleAdd}
+      onRemove={handleRemove}
+      onRestart={handleRestart}
+    />
   )
 }

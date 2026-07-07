@@ -1,5 +1,10 @@
 {
-  "title": "Skills",
+  "title": "Extensions",
+  "tabs": {
+    "skills": "Skills",
+    "plugins": "Plugins",
+    "connectors": "Connectors"
+  },
   "enabledCount": "{{enabled}}/{{total}} enabled",
   "searchPlaceholder": "Search skills…",
   "loading": "Loading…",

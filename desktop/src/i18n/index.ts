@@ -25,6 +25,7 @@ import zhCNMission from '../locales/zh-CN/mission.json'
 import zhCNNav from '../locales/zh-CN/nav.json'
 import zhCNOnboarding from '../locales/zh-CN/onboarding.json'
 import zhCNPlan from '../locales/zh-CN/plan.json'
+import zhCNPlugins from '../locales/zh-CN/plugins.json'
 import zhCNReview from '../locales/zh-CN/review.json'
 import zhCNSettings from '../locales/zh-CN/settings.json'
 import zhCNShell from '../locales/zh-CN/shell.json'
@@ -56,6 +57,7 @@ import enMission from '../locales/en/mission.json'
 import enNav from '../locales/en/nav.json'
 import enOnboarding from '../locales/en/onboarding.json'
 import enPlan from '../locales/en/plan.json'
+import enPlugins from '../locales/en/plugins.json'
 import enReview from '../locales/en/review.json'
 import enSettings from '../locales/en/settings.json'
 import enShell from '../locales/en/shell.json'
@@ -89,6 +91,7 @@ const resources = {
     nav: zhCNNav,
     onboarding: zhCNOnboarding,
     plan: zhCNPlan,
+    plugins: zhCNPlugins,
     review: zhCNReview,
     settings: zhCNSettings,
     shell: zhCNShell,
@@ -121,6 +124,7 @@ const resources = {
     nav: enNav,
     onboarding: enOnboarding,
     plan: enPlan,
+    plugins: enPlugins,
     review: enReview,
     settings: enSettings,
     shell: enShell,

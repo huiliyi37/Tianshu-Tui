@@ -1,0 +1,49 @@
+{
+  "intro": "Plugins carry independent dependencies (native PDF/Excel/PPT and other heavy capabilities), installed on demand into ~/.rivet/plugins/. Install and enable/disable take effect on the next session — no mid-session hot loading, protecting the prefix cache.",
+  "loading": "Loading…",
+  "empty": "No plugins available",
+  "sections": {
+    "installed": "Installed",
+    "discover": "Discover"
+  },
+  "category": {
+    "office": "Office",
+    "dev": "Dev",
+    "productivity": "Productivity"
+  },
+  "permissions": {
+    "fs": "File System",
+    "net": "Network",
+    "shell": "Shell",
+    "none": "No special permissions"
+  },
+  "card": {
+    "noDescription": "(no description)",
+    "install": "Install",
+    "installing": "Installing…",
+    "remove": "Remove",
+    "confirmRemove": "Confirm remove?",
+    "enableAria": "Enable {{name}}",
+    "disableAria": "Disable {{name}}"
+  },
+  "dialog": {
+    "title": "Install plugin: {{name}}",
+    "permissions": "Permissions",
+    "tools": "Registered Tools",
+    "effect": "Effect",
+    "effectDesc": "Takes effect on the next session after install — plugin tools join the system-prompt tool list; changing them mid-session shatters the prefix cache",
+    "cancel": "Cancel",
+    "confirmInstall": "Confirm Install"
+  },
+  "customPath": {
+    "title": "Install from local path",
+    "placeholder": "Absolute path of a plugin directory (with package.json)…",
+    "review": "Review & Install",
+    "checking": "Checking…",
+    "preflightFailed": "Could not read a plugin manifest at that path"
+  },
+  "notice": {
+    "installed": "Installed \"{{name}}\" — takes effect next session",
+    "removed": "Removed \"{{name}}\""
+  }
+}

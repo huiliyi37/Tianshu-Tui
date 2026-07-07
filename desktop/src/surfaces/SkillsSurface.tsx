@@ -11,6 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { PluginsMarket } from '../components/PluginsMarket'
+import { McpSettingsManager } from '../components/McpSettings'
 
 /** source → 本地化标签 + 样式类 */
 function sourceBadge(source: string): { label: string; cls: string } {
@@ -46,17 +48,24 @@ type SkillDetail =
   | { kind: 'loaded'; name: string }
   | { kind: 'installable'; name: string }
 
+/** Extensions hub tab id. Skills are per-session; plugins and MCP
+ *  connectors are global config and render without an active session. */
+type ExtTab = 'skills' | 'plugins' | 'connectors'
+
 /**
- * Skills store surface（Wave 5 — 对标 Codex「精致 App Store」）：
+ * Extensions hub（三轮 — 统一扩展中心）：技能 / 插件 / 连接器三个 tab。
+ * 技能 tab = 原 Skills store（Wave 5 对标 Codex「精致 App Store」）：
  * 网格卡片（图标/名称/描述/来源 badge/启停开关）+ 内置与项目分组保留 +
  * 可安装技能提为「发现」区一键安装 + 点击卡片开详情 Dialog。
- * 纯呈现层改造：API（listSkillsDetailed/setSkillEnabled/installSkills）不动。
+ * 插件 tab = PluginsMarket（/plugins/* REST）；连接器 tab = MCP 管理
+ * （与 Settings 集成卡片共用 McpSettingsManager）。
  */
 export function SkillsSurface() {
   const { t } = useTranslation('skills')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const sessionId = ui.activeSessionId
+  const [tab, setTab] = useState<ExtTab>('skills')
   const [skills, setSkills] = useState<SkillStatus[]>([])
   const [loadErrors, setLoadErrors] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
@@ -170,18 +179,6 @@ export function SkillsSurface() {
   const projectSkills = useMemo(() => skills.filter((s) => s.source !== 'builtin' && matchLoaded(s)), [skills, matchLoaded])
   const discoverSkills = useMemo(() => installable.filter(matchInstallable), [installable, matchInstallable])
 
-  if (!sessionId) {
-    return (
-      <div className="single-pane skills">
-        <div className="panel-header"><span>{t('title')}</span></div>
-        <div className="skills-empty-hero">
-          <div className="skills-empty-glyph" aria-hidden>◈</div>
-          <p>{t('selectSessionHint')}</p>
-        </div>
-      </div>
-    )
-  }
-
   const renderCard = (s: SkillStatus) => {
     const badge = sourceBadge(s.source)
     return (
@@ -264,9 +261,42 @@ export function SkillsSurface() {
     <div className="single-pane skills skills-store">
       <div className="panel-header">
         <span>{t('title')}</span>
-        <span className="meta">{t('enabledCount', { enabled: enabledCount, total: skills.length })}</span>
+        {tab === 'skills' && sessionId && (
+          <span className="meta">{t('enabledCount', { enabled: enabledCount, total: skills.length })}</span>
+        )}
       </div>
 
+      <div className="ext-tabs" role="tablist" aria-label={t('title')}>
+        {(['skills', 'plugins', 'connectors'] as ExtTab[]).map((id) => (
+          <button
+            key={id}
+            className={`ext-tab${tab === id ? ' active' : ''}`}
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+          >
+            {t(`tabs.${id}`)}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'plugins' && <PluginsMarket />}
+
+      {tab === 'connectors' && (
+        <div className="ext-connectors">
+          <McpSettingsManager />
+        </div>
+      )}
+
+      {tab === 'skills' && !sessionId && (
+        <div className="skills-empty-hero">
+          <div className="skills-empty-glyph" aria-hidden>◈</div>
+          <p>{t('selectSessionHint')}</p>
+        </div>
+      )}
+
+      {tab === 'skills' && sessionId && (
+      <>
       <div className="skills-toolbar">
         <input
           className="skills-search"
@@ -416,6 +446,8 @@ export function SkillsSurface() {
           )}
         </DialogContent>
       </Dialog>
+      </>
+      )}
     </div>
   )
 }

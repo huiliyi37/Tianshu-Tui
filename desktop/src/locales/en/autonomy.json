@@ -5,5 +5,10 @@
   "default": "Default",
   "defaultHint": "Auto low-risk within project, confirm high-risk",
   "autonomous": "Autonomous",
-  "autonomousHint": "Full auto within project; outside writes are sandboxed, rollbackable"
+  "autonomousHint": "Full auto within project; outside writes are sandboxed, rollbackable",
+  "fullAccess": "Full Access",
+  "fullAccessHint": "Autonomous + read the entire disk (applies globally); writes stay sandboxed",
+  "fullAccessGranted": "Whole-disk read granted, effective immediately",
+  "fullAccessRevokedRestart": "Whole-disk read grant removed; fully revoked after app restart",
+  "fullAccessError": "Whole-disk grant failed: {{message}}"
 }

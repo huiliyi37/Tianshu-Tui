@@ -1070,6 +1070,96 @@ export async function listMcpServerTools(serverId: string): Promise<McpServerToo
   return apiGet<McpServerToolsResponse>(`/mcp/servers/${encodeURIComponent(serverId)}/tools`)
 }
 
+// ── Plugins（插件市场 — /plugins/* REST）─────────────────────────────
+
+/** Catalog entry from GET /plugins/presets (static first-party catalog +
+ *  installed/enabled state overlay computed server-side). */
+export interface PluginPreset {
+  id: string
+  name: string
+  description: string
+  category: 'office' | 'dev' | 'productivity'
+  /** Repo-relative install source — resolved against the sidecar cwd. */
+  installPath: string
+  tools: string[]
+  permissions: { fs?: boolean; net?: boolean; shell?: boolean }
+  installed: boolean
+  enabled: boolean
+}
+
+/** Installed plugin from GET /plugins/installed (includes non-preset plugins). */
+export interface InstalledPlugin {
+  name: string
+  version: string
+  description: string
+  installPath: string
+  entry: string
+  toolCount: number
+  toolNames: string[]
+  enabled: boolean
+}
+
+/** Manifest shape returned by the install preflight (permissions review). */
+export interface PluginManifestPreview {
+  name?: string
+  version?: string
+  description?: string
+  tools?: Array<{ name: string; description?: string }>
+  permissions?: { fs?: boolean; net?: boolean; shell?: boolean }
+}
+
+export function listPluginPresets(): Promise<{ presets: PluginPreset[] }> {
+  return apiGet<{ presets: PluginPreset[] }>('/plugins/presets')
+}
+
+export function listInstalledPlugins(): Promise<{ plugins: InstalledPlugin[] }> {
+  return apiGet<{ plugins: InstalledPlugin[] }>('/plugins/installed')
+}
+
+/** Install a plugin from a local path (confirm: true executes the install).
+ *  Preset cards confirm from catalog data and call this directly. */
+export function installPlugin(
+  path: string,
+): Promise<{ ok: boolean; manifest?: PluginManifestPreview; message?: string }> {
+  return apiPost<{ ok: boolean; manifest?: PluginManifestPreview; message?: string }>(
+    '/plugins/install', { path, confirm: true },
+  )
+}
+
+/** Two-phase preflight for custom-path installs: without confirm the server
+ *  answers 400 + manifest for caller-side review — that 400 is a protocol
+ *  response, not a failure, so this bypasses apiPost's throw-on-non-2xx. */
+export async function preflightPluginInstall(
+  path: string,
+): Promise<{ ok: boolean; manifest?: PluginManifestPreview; error?: string }> {
+  const res = await rivetFetch('/plugins/install', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  })
+  const body = await res.json() as { ok?: boolean; manifest?: PluginManifestPreview; error?: string }
+  // needs-confirm 400 with a manifest = successful preflight.
+  if (res.status === 400 && body.manifest) return { ok: true, manifest: body.manifest }
+  if (!res.ok) return { ok: false, error: body.error ?? `POST /plugins/install -> ${res.status}` }
+  return { ok: true, manifest: body.manifest }
+}
+
+export function setPluginEnabled(
+  name: string, enabled: boolean,
+): Promise<{ ok: boolean; name: string; enabled: boolean; message?: string }> {
+  return apiPost<{ ok: boolean; name: string; enabled: boolean; message?: string }>(
+    '/plugins/enable', { name, enabled },
+  )
+}
+
+export async function removePlugin(name: string): Promise<{ ok: boolean; message?: string }> {
+  const res = await rivetFetch(`/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const detail = await readErrorBody(res)
+    throw new Error(detail || `DELETE /plugins/${name} -> ${res.status}`)
+  }
+  return res.json() as Promise<{ ok: boolean; message?: string }>
+}
+
 // ── Git graph ───────────────────────────────────────────────────────
 
 export function getGitGraph(maxCount?: number): Promise<GitGraphResponse> {

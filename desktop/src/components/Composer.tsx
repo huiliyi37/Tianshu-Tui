@@ -6,7 +6,7 @@ import { detectSlash, filterCommands, type ComposerCommand } from '../lib/compos
 import { toast } from 'sonner'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/persist'
 import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
-import { AutonomyControl } from './AutonomyControl'
+import { AutonomyMenu } from './AutonomyMenu'
 import type { AutonomyLevel } from '../lib/autonomy'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
@@ -753,7 +753,7 @@ export function Composer(props: {
         <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
         <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} threadNonEmpty={threadNonEmpty} />
         {approvalLevel && onSetApprovalLevel && (
-          <AutonomyControl compact value={approvalLevel} onChange={onSetApprovalLevel} />
+          <AutonomyMenu value={approvalLevel} onChange={onSetApprovalLevel} />
         )}
         {contextUsage && <ContextRing usage={contextUsage} />}
         {onSetPlanMode && (

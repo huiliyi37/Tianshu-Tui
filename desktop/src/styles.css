@@ -1992,6 +1992,20 @@ body {
 .autonomy-hint { color: var(--muted); font-size: var(--text-sm); }
 .autonomy.compact .autonomy-seg { padding: 1px; }
 .autonomy.compact .autonomy-opt { padding: 3px 8px; font-size: var(--text-xs); }
+
+/* Composer access-level dropdown trigger (Cursor-style leveled menu). */
+.access-trigger {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  font-size: var(--text-xs); font-weight: var(--weight-medium);
+  padding: 3px 9px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+  white-space: nowrap;
+}
+.access-trigger:hover:not(:disabled) { color: var(--text); }
+.access-trigger:disabled { opacity: 0.5; cursor: default; }
+.access-trigger.elevated { color: var(--warning); border-color: var(--warning); background: transparent; }
+.access-glyph { font-size: var(--text-sm); line-height: 1; }
+.access-caret { font-size: 9px; opacity: 0.7; }
 /* Autonomous option keeps its accent tint even when inactive, as a signal. */
 .autonomy-opt.level-autonomous.active { background: var(--warning); color: var(--accent-fg); }
 
@@ -6998,6 +7012,125 @@ html[data-theme="dark"] .picker-panel-warning {
   display: flex;
   justify-content: flex-end;
 }
+
+/* ── 扩展中心（三轮）— 技能 / 插件 / 连接器 tab 条 ─────────────────── */
+.ext-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-4) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-3);
+}
+.ext-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  position: relative;
+}
+.ext-tab:hover { color: var(--text); background: var(--surface-2); }
+.ext-tab.active {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+.ext-tab.active::after {
+  content: '';
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: calc(-1 * var(--space-2) - 1px);
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+.ext-connectors {
+  padding: 0 var(--space-4) var(--space-4);
+  overflow: auto;
+}
+
+/* 插件市场 tab */
+.plugins-market {
+  overflow: auto;
+  padding-bottom: var(--space-4);
+}
+.plugins-intro {
+  padding: 0 var(--space-4);
+  margin-bottom: var(--space-2);
+  line-height: 1.6;
+}
+.plugin-version {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-weight: 400;
+}
+.plugin-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-1);
+}
+.plugin-tools code {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.plugin-perm-chip {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--warn, #d97706) 14%, transparent);
+  color: var(--warn, #d97706);
+}
+.plugin-perm-chip.none {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.plugin-perm-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.plugin-card .skill-store-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.plugin-remove-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  margin-left: auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.plugin-remove-btn:hover { color: var(--danger, #dc2626); background: color-mix(in srgb, var(--danger, #dc2626) 10%, transparent); }
+.plugin-remove-btn.confirm { color: var(--danger, #dc2626); font-weight: 500; }
+.plugin-custom-install {
+  margin-top: var(--space-4);
+}
+.plugin-custom-row {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  align-items: center;
+}
+.plugin-custom-row .skills-search { flex: 1; }
+.plugin-confirm-dialog .skill-detail-row .k { width: 56px; }
+.plugin-confirm-dialog .skill-detail-actions { gap: var(--space-2); }
 
 /* Review Queue（Inbox Wave 4）— 逐条 triage 卡片 */
 .review-queue .rq-count {

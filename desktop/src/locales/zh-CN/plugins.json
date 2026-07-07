@@ -1,0 +1,49 @@
+{
+  "intro": "插件带独立依赖（真 PDF/Excel/PPT 等重能力），按需安装到 ~/.rivet/plugins/，安装与启停均在下个会话生效——不做会话内热加载，保护前缀缓存。",
+  "loading": "加载中…",
+  "empty": "暂无可用插件",
+  "sections": {
+    "installed": "已安装",
+    "discover": "发现"
+  },
+  "category": {
+    "office": "办公",
+    "dev": "开发",
+    "productivity": "效率"
+  },
+  "permissions": {
+    "fs": "文件系统",
+    "net": "网络",
+    "shell": "Shell",
+    "none": "无特殊权限"
+  },
+  "card": {
+    "noDescription": "（无描述）",
+    "install": "安装",
+    "installing": "安装中…",
+    "remove": "卸载",
+    "confirmRemove": "确认卸载?",
+    "enableAria": "启用 {{name}}",
+    "disableAria": "禁用 {{name}}"
+  },
+  "dialog": {
+    "title": "安装插件：{{name}}",
+    "permissions": "权限",
+    "tools": "注册工具",
+    "effect": "生效",
+    "effectDesc": "安装后下个会话生效——插件工具进入系统提示词工具清单，会话中途变更会打碎前缀缓存",
+    "cancel": "取消",
+    "confirmInstall": "确认安装"
+  },
+  "customPath": {
+    "title": "从本地路径安装",
+    "placeholder": "插件目录绝对路径（含 package.json）…",
+    "review": "审阅并安装",
+    "checking": "检查中…",
+    "preflightFailed": "无法读取该路径的插件清单"
+  },
+  "notice": {
+    "installed": "已安装「{{name}}」，下个会话生效",
+    "removed": "已卸载「{{name}}」"
+  }
+}

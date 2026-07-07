@@ -1,5 +1,10 @@
 {
-  "title": "技能",
+  "title": "扩展",
+  "tabs": {
+    "skills": "技能",
+    "plugins": "插件",
+    "connectors": "连接器"
+  },
   "enabledCount": "{{enabled}}/{{total}} 已启用",
   "searchPlaceholder": "搜索技能…",
   "loading": "加载中…",

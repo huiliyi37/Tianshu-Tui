@@ -68,6 +68,25 @@ export function isAutonomous(mode?: ApprovalMode): boolean {
   return modeToLevel(mode) === 'autonomous'
 }
 
+// ── Full access (完全访问) ──────────────────────────────────────────
+// A composer-level tier above 'autonomous': same approval mode, plus a
+// standing whole-disk READ grant (permissions.additionalReadDirs gets the
+// filesystem root). Write access stays sandboxed as usual.
+
+/** The union shown by the composer's access-level menu. */
+export type AccessChoice = AutonomyLevel | 'full-access'
+
+/** Filesystem root used for the whole-disk read grant on this platform. */
+export function fullDiskRootPath(): string {
+  return isWindows() ? 'C:\\' : '/'
+}
+
+/** True when `p` is a filesystem root ('/' or a Windows drive root like F:\). */
+export function isFullDiskRoot(p: string): boolean {
+  const t = p.trim()
+  return t === '/' || /^[A-Za-z]:[\\/]?$/.test(t)
+}
+
 /** Best-effort: are we on Windows, where the write sandbox falls through to none? */
 export function isWindows(): boolean {
   if (typeof navigator === 'undefined') return false

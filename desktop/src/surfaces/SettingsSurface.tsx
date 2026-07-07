@@ -19,15 +19,15 @@ import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
-import { McpSettings } from '../components/McpSettings'
+import { McpSettingsManager } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { pickFolder } from '../lib/dialog'
 import { openRivetHome } from '../lib/open-external'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import type { McpStatusResponse, McpServerConfig, McpPreset, EnvironmentInfo } from '../runtime/types'
+import type { EnvironmentInfo } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
 import {
   Select,
@@ -1157,60 +1157,6 @@ function UpdaterSection() {
       )}
       {message && <div className="meta">{message}</div>}
     </section>
-  )
-}
-
-/** Inner component that manages MCP status polling and delegates to McpSettings UI. */
-function McpSettingsManager() {
-  const [mcpStatus, setMcpStatus] = useState<McpStatusResponse | null>(null)
-  const [mcpLoading, setMcpLoading] = useState(true)
-  const [mcpError, setMcpError] = useState<string | null>(null)
-  const [presets, setPresets] = useState<McpPreset[] | null>(null)
-  const [configuredIds, setConfiguredIds] = useState<string[]>([])
-
-  const fetchStatus = useCallback(() => {
-    getMcpStatus()
-      .then((s) => { setMcpStatus(s); setMcpError(null) })
-      .catch((err) => setMcpError((err as Error).message))
-      .finally(() => setMcpLoading(false))
-    getMcpPresets()
-      .then((p) => { setPresets(p.presets); setConfiguredIds(p.configuredIds) })
-      .catch(() => { /* non-fatal: preset grid just won't render */ })
-  }, [])
-
-  useEffect(() => {
-    fetchStatus()
-  }, [fetchStatus])
-
-  const handleAdd = useCallback((config: McpServerConfig) => {
-    addMcpServer(config)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
-  }, [fetchStatus])
-
-  const handleRemove = useCallback((serverId: string) => {
-    removeMcpServer(serverId)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
-  }, [fetchStatus])
-
-  const handleRestart = useCallback((serverId: string) => {
-    restartMcpServer(serverId)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
-  }, [fetchStatus])
-
-  return (
-    <McpSettings
-      status={mcpStatus}
-      statusLoading={mcpLoading}
-      statusError={mcpError}
-      presets={presets}
-      configuredIds={configuredIds}
-      onAdd={handleAdd}
-      onRemove={handleRemove}
-      onRestart={handleRestart}
-    />
   )
 }
 
