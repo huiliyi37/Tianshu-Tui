@@ -1182,6 +1182,7 @@ export class AgentLoop {
     return this._disabledSkills
   }
 
+<<<<<<< Updated upstream
   /** Mark a skill as explicitly invoked so its instructions survive compaction. */
   markSkillInvoked(name: string): void {
     this.config.promptEngine.markSkillInvoked(name)
@@ -1193,10 +1194,23 @@ export class AgentLoop {
   }
 
   getLatestPheromones() { return this.loadedPheromones }
+=======
+  refreshCacheDiagnostic(turn: number): void {
+    this.lastCacheDiagnostic = this.compaction.refreshCacheDiagnostic(turn)
+  }
+>>>>>>> Stashed changes
 
-  /** Expose MeridianIndexer for /index command */
-  getIndexer() { return this.config.meridianIndexer ?? null }
+  /** Estimated token count for the current conversation (live, for desktop ctx-bar). */
+  getEstimatedTokens(): number {
+    return this.session.getEstimatedTokens()
+  }
 
+  /** Model context window size in tokens. */
+  getContextWindow(): number {
+    return this.config.contextWindow
+  }
+
+  getLedger() { return this.session.getContextLedger() }
   getDecisions(): string[] { return this.decisions }
 
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }

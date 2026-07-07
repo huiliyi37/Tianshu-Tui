@@ -5,8 +5,7 @@ import { gitStatusCache } from './volatile-git.js'
 import { getTargetPlatform, getShellCommand, type ShellCommand } from '../platform.js'
 import type { ContextLedger } from '../context/types.js'
 import type { TaskState } from '../agent/task-state.js'
-import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
-import { selectRelevantClaims, type ClaimRelevanceInput } from '../context/claim-relevance.js'
+import type { ContextClaim } from '../context/claims.js'
 import { summarizeGitStatus } from './git-status-summary.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 import type { WorktreeReality } from '../agent/worktree-reality.js'
@@ -918,6 +917,35 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<working-set>\n${files}\n</working-set>`)
   }
 
+<<<<<<< Updated upstream
+=======
+  // Harness-only fields omitted from LLM context (direction A: hard separation)
+
+  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
+    const entries = ctx.toolHistory.map(e => {
+      const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
+      if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
+      return `  <tool-summary ${attrs.join(' ')} />`
+    }).join('\n')
+    parts.push(`<tool-history recent="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
+  }
+
+  if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
+    const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
+    const remaining = ctx.taskProgress.remaining.length > 0
+      ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
+      : ''
+    parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
+  }
+
+  // Repair hint: routed through A1 harness-advisory bus
+
+  if (ctx.decisions && ctx.decisions.length > 0) {
+    const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
+    parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
+  }
+
+>>>>>>> Stashed changes
   if (ctx.sessionMemoryBlock) {
     parts.push(`<session-memory>\n${escapeXml(ctx.sessionMemoryBlock)}\n</session-memory>`)
   }

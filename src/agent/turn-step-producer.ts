@@ -453,9 +453,25 @@ export class TurnStepProducer {
       }
       // P2b: inject active cross-session claims so the LLM can proactively avoid conflicts
       const claims = this.self.config.sessionRegistry.getActiveClaims(this.self.config.sessionId)
+<<<<<<< Updated upstream
       const claimsBlock = renderCrossSessionClaims(claims)
       if (claimsBlock) {
         appendix = (appendix ? appendix + '\n' : '') + claimsBlock
+=======
+      if (claims.length > 0) {
+        const grouped = new Map<string, string[]>()
+        for (const c of claims) {
+          const key = c.filePath
+          if (!grouped.has(key)) grouped.set(key, [])
+          grouped.get(key)!.push(`${c.sessionId.slice(0, 8)}(${c.claimType})`)
+        }
+        const claimLines = [...grouped.entries()].map(([file, holders]) =>
+          `  ${file} — claimed by ${holders.join(', ')}`)
+        if (claimLines.length > 0) {
+          const block = `<cross-session-claims>\n${claimLines.join('\n')}\n</cross-session-claims>`
+          appendix = appendix ? `${appendix}\n${block}` : block
+        }
+>>>>>>> Stashed changes
       }
       if (this.self.persist) {
         const prevHandoff = SessionPersist.loadPrevHandoff(

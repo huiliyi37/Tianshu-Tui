@@ -138,7 +138,10 @@ export interface EventViewState {
   private_textOpen: boolean
   /** T1 — whether the last block is an open reasoning run that thinking deltas append to. */
   private_thinkingOpen: boolean
+<<<<<<< Updated upstream
   /** Cumulative cache read tokens (latest turn_complete). */
+=======
+>>>>>>> Stashed changes
   cacheReadTokens: number
   /** Cumulative cache creation tokens. */
   cacheCreationTokens: number
@@ -146,6 +149,7 @@ export interface EventViewState {
   lastTotalTokens: number
   /** Previous turn's total tokens. */
   prevTotalTokens: number
+<<<<<<< Updated upstream
   /** Deduplicated file paths touched by file-editing tools (for Task Sidebar sources). */
   sources: string[]
   /** I4 — latest user hook results surfaced as raw hook_result events. */
@@ -159,6 +163,14 @@ export interface EventViewState {
   /** Timestamp (ms) when the current run started (status→running). Undefined when idle.
    *  Drives the elapsed-time indicator so users can tell if the agent is stuck. */
   runStartedAt?: number
+=======
+  /** Previous turn's total tokens. */
+  prevTotalTokens: number
+}
+
+export const initialEventState
+export const initialEventState:
+>>>>>>> Stashed changes
 }
 
 export const initialEventState: EventViewState = {
@@ -179,6 +191,7 @@ export const initialEventState: EventViewState = {
   cacheCreationTokens: 0,
   lastTotalTokens: 0,
   prevTotalTokens: 0,
+<<<<<<< Updated upstream
   sources: [],
   hookResults: [],
   jobs: {},
@@ -196,6 +209,8 @@ function stripEvidenceMarkdown(text: string): string {
   )
   if (idx <= 0) return text
   return text.slice(0, idx)
+=======
+>>>>>>> Stashed changes
 }
 
 export type EventAction =
@@ -364,6 +379,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         next.prevTotalTokens = next.lastTotalTokens
         next.lastTotalTokens = totalTokens
       }
+<<<<<<< Updated upstream
       // Capture structured completion evidence for the desktop curtain card.
       if (ev.data.evidence && typeof ev.data.evidence === 'object') {
         next.completionSummary = ev.data.evidence as EvidenceSummary
@@ -377,17 +393,21 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
           next.blocksRev = next.blocksRev + 1
         }
       }
+=======
+>>>>>>> Stashed changes
       next.blocks = [...next.blocks, {
         key: `turn-${ev.seq}`,
-        kind: 'turn',
-        text: '',
-        turn: {
-          turnNumber: ev.data.turnNumber != null ? Number(ev.data.turnNumber) : undefined,
+      return next
+    }
+    case 'checkpoint':
           totalTokens,
           isFinal: !!ev.data.isFinal,
         },
       }]
       next.blocksRev = next.blocksRev + 1
+      return next
+    }
+      }]
       return next
     }
     case 'checkpoint': {
