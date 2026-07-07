@@ -533,19 +533,21 @@ export class ToolExecutionController {
     // UI 回调(onToolResult)在管线内已收到全文,保真不受影响。
     if (process.env.RIVET_OUTPUT_SANITIZE !== '0') {
       let totalTrimmed = 0
+      const filters = new Set<string>()
       for (let i = 0; i < toolResults.length; i++) {
         const tr = toolResults[i]!
         if (tr.type !== 'tool_result' || typeof tr.content !== 'string') continue
         const tu = input.toolUses.find(t => t.id === tr.tool_use_id)
         if (!tu) continue
-        const { content, trimmedBytes } = sanitizeToolOutput(tu.name, tu.input, tr.content)
+        const { content, trimmedBytes, filterName } = sanitizeToolOutput(tu.name, tu.input, tr.content)
         if (trimmedBytes > 0) {
           toolResults[i] = { ...tr, content }
           totalTrimmed += trimmedBytes
+          if (filterName) filters.add(filterName)
         }
       }
       if (totalTrimmed > 0) {
-        this.deps.writeTelemetry?.({ kind: 'output-sanitize', turn: this.deps.getSessionTurnCount(), trimmedBytes: totalTrimmed })
+        this.deps.writeTelemetry?.({ kind: 'output-sanitize', turn: this.deps.getSessionTurnCount(), trimmedBytes: totalTrimmed, filters: [...filters] })
       }
     }
 

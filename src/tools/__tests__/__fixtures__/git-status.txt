@@ -1,0 +1,20 @@
+On branch feat/output-filter
+Your branch is ahead of 'origin' by 3 commits.
+  (use "git push" to publish your local commits)
+
+Changes to be staged for commit:
+  (use "git restore --staged <file>..." to unstage)
+	modified:   src/tools/output-sanitizer.ts
+	modified:   src/tools/__tests__/output-sanitizer.test.ts
+	new file:   src/tools/__tests__/__fixtures__/git-status.txt
+	new file:   src/tools/__tests__/__fixtures__/git-diff.txt
+	new file:   src/tools/__tests__/__fixtures__/git-log.txt
+	new file:   src/tools/__tests__/__fixtures__/ls-src.txt
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   src/agent/tool-execution.ts
+	modified:   src/agent/loop-factory.ts
+
+no changes added to commit (use "git add" and/or "git commit -a")

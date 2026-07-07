@@ -19,9 +19,9 @@ function edit(file: string, success = true): RuntimeToolEvent {
   } as unknown as RuntimeToolEvent
 }
 
-function verifyFail(failureClass?: string): RuntimeToolEvent {
+function verifyFail(failureClass?: string, resultContent?: string): RuntimeToolEvent {
   return {
-    name: 'run_tests', success: false, isError: true, failureClass,
+    name: 'run_tests', success: false, isError: true, failureClass, resultContent,
   } as unknown as RuntimeToolEvent
 }
 
@@ -152,5 +152,90 @@ describe('dead-end-detector 缺口 A', () => {
     await hook.run(makeCtx(), edit('src/a.ts', false))
     await hook.run(makeCtx(), verifyFail())
     assert.equal(hook.getCycleCount('src/a.ts'), 0)
+  })
+
+  it('不同失败指纹不计入盲改循环（递进调试）', async () => {
+    const { submitted, hook } = harness()
+    // 编辑文件
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    // 第一次验证失败：test_a, expected 1 to equal 2
+    await hook.run(makeCtx(), verifyFail('assertion',
+      '✖ test_a (5ms)\n  AssertionError: expected 1 to equal 2\n'))
+    assert.equal(submitted.length, 0)
+    // 再次编辑
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    // 第二次验证失败：test_b, 不同的错误消息 — 指纹变了
+    await hook.run(makeCtx(), verifyFail('assertion',
+      '✖ test_b (3ms)\n  AssertionError: expected "foo" to equal "bar"\n'))
+    // 指纹不同 → 不计入盲改，不触发 advisory
+    assert.equal(submitted.length, 0)
+    assert.equal(hook.getCycleCount('src/a.ts'), 1) // 重置为 1
+  })
+
+  it('相同失败指纹触发盲改检测（同 bug 反复修）', async () => {
+    const { submitted, hook } = harness()
+    const sameError = '✖ test_a (5ms)\n  AssertionError: expected 1 to equal 2\n'
+    // 第一次循环
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), verifyFail('assertion', sameError))
+    assert.equal(submitted.length, 0)
+    // 第二次循环 — 相同错误
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), verifyFail('assertion', sameError))
+    // 指纹相同 → 触发盲改 advisory
+    assert.equal(submitted.length, 1)
+    assert.match(submitted[0]!.content, /盲改/)
+  })
+
+  it('resultContent 为 undefined 时回退到旧行为（不计指纹）', async () => {
+    const { submitted, hook } = harness()
+    // 无 resultContent → extractFailureFingerprint 返回 null → 正常计数
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), verifyFail()) // 无 resultContent
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), verifyFail()) // 无 resultContent
+    // 仍然触发（旧行为不变）
+    assert.equal(submitted.length, 1)
+  })
+
+  it('verify pass 清除已沉积的 dead-end 信息素', async () => {
+    const { submitted, deposits, hook } = harness()
+    // 先触发一次死路沉积
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), verifyFail())
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), verifyFail())
+    assert.equal(submitted.length, 1) // 死路触发
+    const deadDeposit = deposits.find(d => d.path === 'src/a.ts' && d.signal === 'dead-end' && d.strength === 0.8)
+    assert.ok(deadDeposit, 'should have dead-end deposition with strength 0.8')
+
+    // verify pass → 应沉积 strength=0 覆盖
+    await hook.run(makeCtx(), verifyPass())
+    const clearedDeposit = deposits.filter(d => d.path === 'src/a.ts' && d.signal === 'dead-end').at(-1)
+    assert.ok(clearedDeposit, 'should have a clearing deposit for src/a.ts')
+    assert.equal(clearedDeposit!.strength, 0, 'verify pass should clear pheromone with strength=0')
+  })
+
+  it('verify pass 清除多个文件的 dead-end 信息素', async () => {
+    const { deposits, hook } = harness()
+    // 两个文件各有死路
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), edit('src/b.ts'))
+    await hook.run(makeCtx(), verifyFail())
+    await hook.run(makeCtx(), edit('src/a.ts'))
+    await hook.run(makeCtx(), edit('src/b.ts'))
+    await hook.run(makeCtx(), verifyFail())
+    // 两个文件都触发了
+    const aDead = deposits.filter(d => d.path === 'src/a.ts' && d.signal === 'dead-end')
+    const bDead = deposits.filter(d => d.path === 'src/b.ts' && d.signal === 'dead-end')
+    assert.ok(aDead.some(d => d.strength === 0.8), 'file a should have strength=0.8 deposition')
+    assert.ok(bDead.some(d => d.strength === 0.8), 'file b should have strength=0.8 deposition')
+
+    // verify pass → 两个文件都应清除
+    await hook.run(makeCtx(), verifyPass())
+    const aCleared = deposits.filter(d => d.path === 'src/a.ts' && d.signal === 'dead-end').at(-1)
+    const bCleared = deposits.filter(d => d.path === 'src/b.ts' && d.signal === 'dead-end').at(-1)
+    assert.equal(aCleared!.strength, 0)
+    assert.equal(bCleared!.strength, 0)
   })
 })

@@ -1,0 +1,30 @@
+53a73c20 feat(output-sanitizer): line-level filter framework with 9 command rules
+c3a3153b fix: Seatbelt 沙箱缺磁盘设备权限导致 hdiutil/DMG 创建被拒
+4ceb4eaa chore: update macOS build script version to 2.16.3
+307d52f6 chore: bump version 2.16.2 → 2.16.3
+e26c620b fix: chalk 未 bundle 导致打包 .app 启动时 ERR_MODULE_NOT_FOUND
+51b3166b chore: bump version 2.16.1 → 2.16.2
+6f62c24e fix: Windows 路径归一化三处缺口 — 占位符/cwd哈希/result content
+3b88103b chore: bump version 2.16.0 → 2.16.1
+e3aa0178 fix: 会话恢复时 write_file 工具结果丢失的连锁修复
+ce3b4909 fix(desktop): FileExplorer Windows 路径分隔符归一化 + 打开文件发绝对路径
+fd9f1f56 chore(sync): 将 CHANGELOG.md 加入公开仓库同步清单
+a3f49321 docs: v2.16.0 changelog — TUI 面板专业化 + 桌面端 Codex 对标 + 能力闸门收官
+ccc88c40 fix: tauri.conf.json 版本号 2.15.0 → 2.16.0（bump 遗漏）
+6da07304 chore: bump version 2.15.1 → 2.16.0
+18386a5e ci: 统一 workflow Node 版本 22→24
+bbd4e2d4 chore(dist): 开源分发基建首批 — 工程指标 + 社区文件 + 公开策略
+c19db073 feat(tui): team/team max/审查门面板专业化重设计 — 分段上色 + 语义化 verdict
+c89772d0 feat(tui): /tasks 任务面板专业化重设计
+08edb6d3 fix(tui): 首屏收敛 — 启动日志归入 RIVET_DEBUG + welcome 间距 + resize 全量重绘
+c41b4d8c feat(desktop): add dismiss capability with ✕ close button to CompletionCurtain (Stage 15)
+e8a7eabb feat(desktop): reform subagent UI by integrating badges into WorkspaceHeader and add close button to JobsDock (Stage 15)
+3b80dd5a chore(desktop): 清零 npm audit — vite 5.4→7.3.6 + esbuild override 0.25
+ef0e5691 chore(deps): 清零 npm audit — undici/hono/qs 升修复版 + esbuild override 0.28.1
+eaf06449 chore: 删除遗留的 ink 补丁 — Ink 已从依赖移除，patch-package 每次安装报错
+d1728b30 fix(agent): 能力双闸第三批 — 宣称分型对账 + git 变异作废旧绿 + test-presence 防伪报/纯删除
+82c75428 fix(agent): 宣称对账三处失明 — hash_edit/apply_patch 记账 + 代码路径新鲜度 + 失败验证不算证据
+898689d1 fix(computer-use): CDP 安全三件套 — 审批承诺落地管线 + :9222 永不静默接管 + navigate 协议门
+d961fc97 fix(desktop): 插件市场补 design 分类文案 — 卡片曾显示裸 i18n key
+0fccea2d feat(desktop): 体验四轮优化 — 线程内 Cmd+F 搜索、跨会话内容搜索、草稿持久化、重新生成、侧边栏虚拟化
+329c4d15 fix(plugins): design 插件审查修复 — 审计脚本从未执行等 7 处问题

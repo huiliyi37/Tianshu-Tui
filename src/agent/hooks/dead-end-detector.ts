@@ -20,6 +20,7 @@
 import type { PostToolRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
 import type { PheromoneDeposit } from '../../context/stigmergy.js'
+import { createHash } from 'node:crypto'
 import { VERIFY_BASH_RE } from './self-verify-hook.js'
 import { WRITE_TOOL_NAMES, extractWriteFilePaths } from '../../tools/write-tool-helpers.js'
 
@@ -42,6 +43,10 @@ interface FileCycleState {
   editPending: boolean
   /** 本会话已对该文件触发过(一次性,不重复告警) */
   fired: boolean
+  /** 最近一次验证失败的 SHA-256 指纹（前 8 位 hex）。
+   *  用于区分"同一个 bug 反复修" vs "不同 bug 依次修"——
+   *  指纹不变 = 盲改，指纹变化 = 递进调试，重置循环计数。 */
+  lastFailureFingerprint: string | null
 }
 
 function isVerifyEvent(tool: RuntimeToolEvent): boolean {
@@ -58,6 +63,21 @@ function isNonSemanticFailure(tool: RuntimeToolEvent): boolean {
   return tool.failureClass === 'timeout' || tool.failureClass === 'env_missing'
 }
 
+/**
+ * 从 verify 工具的输出（resultContent）中提取失败指纹。
+ * 取前 3 个失败块的 test_name + assertion 首行做 SHA-256——
+ * 这些是最稳定的失败标识。跳过 traceback 行（含临时路径/行号偏移）。
+ * 返回 null 表示无法提取（非 node:test 格式或无失败输出）。
+ */
+function extractFailureFingerprint(resultContent: string | undefined): string | null {
+  if (!resultContent) return null
+  // 匹配 node:test 失败格式: "✖ test_name\n  AssertionError [...]"
+  const failures = resultContent.match(/✖\s+(.+?)\n\s+(?:AssertionError|Error)[^\n]*/g)
+  if (!failures || failures.length === 0) return null
+  const top3 = failures.slice(0, 3).join('|')
+  return createHash('sha256').update(top3).digest('hex').slice(0, 8)
+}
+
 export function createDeadEndDetectorHook(
   deps: DeadEndDetectorDeps,
 ): PostToolRuntimeHook & { getCycleCount: (file: string) => number } {
@@ -66,7 +86,7 @@ export function createDeadEndDetectorHook(
   function stateFor(file: string): FileCycleState {
     let s = files.get(file)
     if (!s) {
-      s = { cycles: 0, editPending: false, fired: false }
+      s = { cycles: 0, editPending: false, fired: false, lastFailureFingerprint: null }
       files.set(file, s)
     }
     return s
@@ -89,6 +109,13 @@ export function createDeadEndDetectorHook(
 
       // ── 验证通过:全部清零(死路解除)────────────────────────
       if (tool.success) {
+        // 清除磁盘上的 dead-end 信息素（strength=0 覆盖旧条目），
+        // 防止后续 turn 的 intent-preview 读到残留 pheromone 误报「方向提示」。
+        for (const [file] of files) {
+          try {
+            await deps.deposit?.({ path: file, signal: 'dead-end', strength: 0 })
+          } catch { /* best-effort: 残留不影响正确性，仅失去一次性清除机会 */ }
+        }
         files.clear()
         return
       }
@@ -97,10 +124,18 @@ export function createDeadEndDetectorHook(
       if (isNonSemanticFailure(tool)) return
 
       // ── 验证失败:所有 pending 文件各记一次循环 ────────────────
+      const fingerprint = extractFailureFingerprint(tool.resultContent)
       for (const [file, s] of files) {
         if (!s.editPending) continue
         s.editPending = false
-        s.cycles++
+
+        // 失败指纹对比：如果指纹变了 → 新问题，不是盲改，重置计数
+        if (fingerprint && s.lastFailureFingerprint && fingerprint !== s.lastFailureFingerprint) {
+          s.cycles = 1
+        } else {
+          s.cycles++
+        }
+        s.lastFailureFingerprint = fingerprint
 
         if (s.cycles >= CYCLE_THRESHOLD && !s.fired) {
           s.fired = true
