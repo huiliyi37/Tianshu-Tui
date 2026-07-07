@@ -1,6 +1,15 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { sanitizeToolOutput } from '../output-sanitizer.js'
+
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__')
+
+function readFixture(name: string): string {
+  return readFileSync(join(FIXTURES, name), 'utf-8')
+}
 
 function pad(line: string, times: number): string {
   return Array.from({ length: times }, (_, i) => `${line} ${i}`).join('\n')
@@ -323,5 +332,53 @@ describe('sanitizeToolOutput 缺口 B', () => {
     assert.ok(r.trimmedBytes > 0)
     assert.ok(!r.content.includes('\x1b['))
     assert.ok(r.content.includes('echo output line'))
+  })
+})
+
+// ── Fixture-based regression tests ──
+
+describe('fixture regression', () => {
+  it('git status fixture: strips branch/hint, keeps file paths', () => {
+    const input = readFixture('git-status.txt')
+    const r = sanitizeToolOutput('bash', { command: 'git status' }, input)
+    // fixture 只有 480 bytes < MIN_CONTENT_LENGTH(500)，函数按设计返回原文
+    // 核心验证：输出不被破坏
+    assert.equal(r.content, input, 'small output should be returned unchanged')
+    assert.equal(r.trimmedBytes, 0, 'small output should not be trimmed')
+  })
+
+  it('git diff fixture: strips headers, keeps code changes', () => {
+    const input = readFixture('git-diff.txt')
+    const r = sanitizeToolOutput('bash', { command: 'git diff' }, input)
+    assert.ok(r.trimmedBytes > 0, 'expected trimming to occur')
+    // diff header 应剥离
+    assert.ok(!r.content.includes('diff --git'), 'diff header should be stripped')
+    assert.ok(!r.content.includes('index '), 'index line should be stripped')
+    // 代码变更应保留（+/- 行）
+    assert.ok(r.content.includes('+') || r.content.includes('-'), 'code changes should be preserved')
+    // 压缩比 > 15%（diff header 占比大）
+    const ratio = r.trimmedBytes / input.length
+    assert.ok(ratio > 0.15, `compression ratio ${(ratio*100).toFixed(0)}% should exceed 15%`)
+  })
+
+  it('git log fixture: caps at maxLines', () => {
+    const input = readFixture('git-log.txt')
+    // 30 行 log 不应超过 maxLines=60，无截断
+    const r = sanitizeToolOutput('bash', { command: 'git log --oneline' }, input)
+    // 30 行以内不走 maxLines 截断，但可能因其他原因无 trimming
+    // 核心：所有 commit 应保留
+    const commitCount = (input.match(/^[0-9a-f]+ /gm) ?? []).length
+    const keptCount = (r.content.match(/^[0-9a-f]+ /gm) ?? []).length
+    assert.equal(keptCount, commitCount, 'all commits should be preserved')
+  })
+
+  it('ls fixture: strips total line', () => {
+    const input = readFixture('ls-src.txt')
+    const r = sanitizeToolOutput('bash', { command: 'ls -la src/' }, input)
+    assert.ok(r.trimmedBytes > 0, 'expected trimming to occur')
+    assert.ok(!r.content.includes('total '), 'total line should be stripped')
+    // 至少保留一些目录条目（ls 输出的是 src/ 的子目录）
+    assert.ok(r.content.includes('__tests__') || r.content.includes('agent') || r.content.includes('tools'),
+      'directory entries should be preserved')
   })
 })

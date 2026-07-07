@@ -1,0 +1,191 @@
+diff --git a/src/tools/output-sanitizer.ts b/src/tools/output-sanitizer.ts
+index 66b1db5d..2e2e43a9 100644
+--- a/src/tools/output-sanitizer.ts
++++ b/src/tools/output-sanitizer.ts
+@@ -56,6 +56,172 @@ function withMarker(kept: string, original: string, fallback: string): SanitizeR
+   }
+ }
+ 
++// ── Line-level filter framework ──
++// 借鉴 rtk-ai/rtk 的 per-command TOML filter 策略，用 TypeScript 原生实现。
++// 三个原语：stripLines（正则删行）、maxLines（行数上限）、shortCircuit（短路摘要）。
++
++interface LineFilter {
++  /** 命令匹配正则（测试 input.command 字段）。更具体的规则排在注册表前面 */
++  matchCommand: RegExp
++  /** 要删除的行正则数组。诊断行（DIAGNOSTIC_LINE_RE）不受此影响 */
++  stripLines?: RegExp[]
++  /** 最大保留行数。超出时先保留诊断行，再从尾部取非诊断行补齐 */
++  maxLines?: number
++  /** 短路：输出包含此模式时直接返回摘要 */
++  shortCircuit?: RegExp
++  /** 是否剥离 ANSI（默认 true） */
++  stripAnsi?: boolean
++}
++
++/** 诊断行保护：包含这些模式的行永远不会被 stripLines 删除或 maxLines 截断 */
++const DIAGNOSTIC_LINE_RE = /✖|\b(?:error|fail|panic|traceback|exception|AssertionError)\b/i
++
++/**
++ * 行级过滤注册表。按命令分类，顺序 = 优先级（具体规则在前）。
++ * 每条正则注释来源：匹配的真实命令字符串。
++ */
++const LINE_FILTERS: Record<string, LineFilter> = {
++  // ── git diff ──
++  // 来源：diff header + index/---/+++ 行是 metadata，保留 +/- 内容行
++  'git-diff': {
++    matchCommand: /\bgit\s+diff\b/,
++    stripLines: [
++      /^diff --git /,           // diff 头
++      /^index [0-9a-f]+\.\./,   // index 行（hash 前缀可变长度）
++      /^---\s/,                  // 源文件标记
++      /^\+\+\+\s/,              // 目标文件标记
++      /^@@\s+-?\d/,             // hunk header @@ -10,6 +10,8 @@
++    ],
++    maxLines: 80,
++  },
++
++  // ── git log ──
++  // 来源：git log --oneline 每行一个 commit；无 stripLines，仅 maxLines 防超长
++  'git-log': {
++    matchCommand: /\bgit\s+log\b/,
++    maxLines: 60,
++  },
++
++  // ── git status ──
++  // 来源："On branch feat/x\nChanges not staged...\n\tmodified: file.ts"
++  'git-status': {
++    matchCommand: /\bgit\s+status\b/,
++    stripLines: [
++      /^On branch /,            // 分支信息行
++      /^Your branch is /,       // ahead/behind 提示
++      /^\s*\(.*\)$/,           // 提示括号行 (use "git add"...)
++      /^Changes not staged/,    // 标题行
++      /^no changes added/,      // 尾部无操作提示
++      /^nothing to commit/,     // clean 工作区提示
++    ],
++  },
++
++  // ── eslint / biome ──
++  // 来源：eslint/biome 输出含 error/warning 行 + summary；clean 时输出 "✔ No issues"
++  'eslint': {
++    matchCommand: /\b(?:eslint|biome|npx\s+(?:eslint|@biomejs))\b/,
++    shortCircuit: /✔.*(?:No issues|clean|No problems)|\d+ problems? \(0 errors/,
++    stripLines: [/^\s*$/],       // 压缩空行
++    maxLines: 40,
++  },
++
++  // ── ls ──
++  // 来源：ls -la 输出 "drwxr-xr-x@ 3 user staff 96 Jan 1 12:00 dirname"
++  // 只匹配带 flags 的 ls（裸 ls 输出很短无需过滤）
++  'ls': {
++    matchCommand: /\bls\s+(?:-|--)/,
++    stripLines: [/^total \d+/],  // total 统计行
++    maxLines: 40,
++  },
++
++  // ── grep ──
++  // 来源：grep 输出 "file.ts:42:matched line content"——已有信息密度，仅 maxLines 防超长
++  'grep': {
++    matchCommand: /\bgrep\b/,
++    maxLines: 80,
++  },
++
++  // ── find ──
++  // 来源：find 输出路径列表，每行一个路径
++  'find': {
++    matchCommand: /\bfind\b/,
++    maxLines: 60,
++  },
++
++  // ── pip install ──
++  // 来源：pip install 输出含 "Collecting/Downloading/Installing" 阶段行
++  'pip': {
++    matchCommand: /\b(?:pip3?|uv\s+pip)\s+install\b/,
++    stripLines: [
++      /^Downloading\s/,               // 下载进度
++      /^Collecting\s/,                 // collecting 阶段
++      /^\s*Downloading.*%\|/,         // 进度条
++      /^Installing collected/,         // 安装阶段标记
++      /^\s*━/,                        // pip/uv 进度条字符
++    ],
++    shortCircuit: /already satisfied|Requirement already satisfied/,
++    maxLines: 20,
++  },
++
++  // ── cargo build/test ──
++  // 来源：cargo build 输出大量 "Compiling X vY.Z" 行，只留 error/warning + summary
++  'cargo': {
++    matchCommand: /\bcargo\s+(?:build|test|check|clippy)\b/,
++    stripLines: [
++      /^\s*Compiling\s/,   // 编译阶段（最多噪声）
++      /^\s*Finished\s/,     // 完成标记
++      /^\s*Running\s/,      // 运行标记
++    ],
++    maxLines: 30,
++  },
++
++  // ── docker pull/build ──
++  // 来源：docker pull 输出逐层下载进度
++  'docker': {
++    matchCommand: /\bdocker\s+(?:pull|build|compose\s+(?:up|build))\b/,
++    stripLines: [
++      /^\s*(?:Pulling fs layer|Downloading.*%|Extracting|Pull complete)/,
++      /^#[0-9a-f]{12}\s*\[/,  // build step 内部进度
++    ],
++    maxLines: 20,
++  },
++}
++
++/** 应用行级过滤。诊断行受 DIAGNOSTIC_LINE_RE 保护。 */
++function applyLineFilter(name: string, filter: LineFilter, raw: string): SanitizeResult {
++  const text = filter.stripAnsi === false ? raw : stripAnsi(raw)
++
++  // 短路检查：输出匹配 shortCircuit 时返回简短摘要，跳过行级处理
++  if (filter.shortCircuit && filter.shortCircuit.test(text)) {
++    const msg = `[${name}: short-circuit matched]`
++    const trimmedBytes = raw.length - msg.length
++    if (trimmedBytes < MIN_SAVINGS) return { content: raw, trimmedBytes: 0 }
++    return { content: msg, trimmedBytes }
++  }
++
++  let lines = text.split('\n')
++
++  // 行级删除：诊断行受保护
++  if (filter.stripLines && filter.stripLines.length > 0) {
++    lines = lines.filter(line =>
++      !filter.stripLines!.some(re => re.test(line)) || DIAGNOSTIC_LINE_RE.test(line),
++    )
++  }
++
++  // maxLines 截断：诊断行不计入上限
++  if (filter.maxLines && lines.length > filter.maxLines) {
++    const diagnostic = lines.filter(l => DIAGNOSTIC_LINE_RE.test(l))
++    const nonDiag = lines.filter(l => !DIAGNOSTIC_LINE_RE.test(l))
++    const budget = Math.max(0, filter.maxLines - diagnostic.length)
++    const tail = nonDiag.slice(-budget)
++    const omitted = nonDiag.length - tail.length
++    lines = [...diagnostic, ...tail]
++    if (omitted > 0) lines.push(`... ${omitted} non-diagnostic lines trimmed (maxLines=${filter.maxLines}) ...`)
++  }
++
++  return withMarker(lines.join('\n'), raw, `${name}: output trimmed`)
++}
++
+ /**
+  * 裁剪工具输出。纯函数;调用方(tool-execution)负责 env 开关与遥测。
+  * 返回原文(trimmedBytes=0)表示无需替换。
+@@ -100,6 +266,13 @@ export function sanitizeToolOutput(
+     return withMarker(kept.join('\n'), content, 'npm: completed (output trimmed)')
+   }
+ 
++  // ── LineFilter 注册表分发 ──
++  for (const [name, filter] of Object.entries(LINE_FILTERS)) {
++    if (filter.matchCommand.test(cmd)) {
++      return applyLineFilter(name, filter, content)
++    }
++  }
++
+   // 其余 bash:仅当 ANSI 剥离本身有可观收益时替换
+   const ansiTrimmed = content.length - clean.length
+   if (ansiTrimmed >= MIN_SAVINGS) return { content: clean, trimmedBytes: ansiTrimmed }
