@@ -319,68 +319,105 @@ async function main() {
     return
   }
 
-  console.log(`Running ${toRun.length} instances (maxTurns=${opts.maxTurns})...`)
+  console.log(`Running ${toRun.length} instances (maxTurns=${opts.maxTurns}, parallel=${opts.parallel})...`)
 
-  for (let i = 0; i < toRun.length; i++) {
-    const instance = toRun[i]!
-    console.log(`\n[${i + 1}/${toRun.length}] ${instance.instance_id} — starting...`)
-
-    // Each instance gets a fresh run record
-    const record: RunRecord = {
-      instance_id: instance.instance_id,
-      status: 'running',
-      startedAt: new Date().toISOString(),
+  if (opts.parallel > 1) {
+    await runParallel(toRun, opts)
+  } else {
+    for (let i = 0; i < toRun.length; i++) {
+      const instance = toRun[i]!
+      console.log(`\n[${i + 1}/${toRun.length}] ${instance.instance_id} — starting...`)
+      const record = await runSingleInstance(instance, opts)
+      appendProgress(opts.progressPath, record)
+      appendPrediction(opts.outputPath, record)
+      console.log(`[${instance.instance_id}] ${record.status}${record.error ? ': ' + record.error : ''}`)
     }
-
-    // 1. Clone repo and checkout base commit
-    const workDir = join(opts.workRoot, instance.instance_id)
-    if (!existsSync(join(workDir, '.git'))) {
-      const url = `${process.env.GITHUB_MIRROR || 'https://github.com'}/${instance.repo}.git`
-      console.log(`  Cloning ${url} @ ${instance.base_commit.slice(0, 8)}...`)
-      mkdirSync(workDir, { recursive: true })
-      execSync(`git init`, { cwd: workDir })
-      execSync(`git remote add origin ${url}`, { cwd: workDir })
-      execSync(`git fetch --depth 1 origin ${instance.base_commit}`, { cwd: workDir, timeout: 120_000 })
-      execSync(`git checkout FETCH_HEAD`, { cwd: workDir })
-    } else {
-      // Resume: reset to clean state
-      execSync('git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null', { cwd: workDir })
-    }
-
-    // 2. Build prompt and run agent
-    const prompt = buildSwebenchPrompt(instance)
-    console.log(`  Running agent (maxTurns=${opts.maxTurns})...`)
-    const result = await runAgentInDir(workDir, prompt, opts.maxTurns)
-    record.exitCode = result.exitCode
-    record.agentText = result.json?.text ?? ''
-
-    // 3. Extract patch via git diff
-    if (result.exitCode === 0) {
-      try {
-        const patch = execSync('git diff', { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })
-        if (patch.trim()) {
-          record.patch = patch
-          record.status = 'completed'
-        } else {
-          record.status = 'failed'
-          record.error = 'Agent completed but produced no diff'
-        }
-      } catch (diffErr) {
-        record.status = 'failed'
-        record.error = `git diff failed: ${(diffErr as Error).message}`
-      }
-    } else {
-      record.status = 'failed'
-      record.error = result.json?.error ?? `Agent exited with code ${result.exitCode}`
-    }
-    record.endedAt = new Date().toISOString()
-
-    appendProgress(opts.progressPath, record)
-    appendPrediction(opts.outputPath, record)
-    console.log(`[${instance.instance_id}] ${record.status}: ${record.error}`)
   }
 
   console.log(`\nDone. Predictions written to ${opts.outputPath}`)
+}
+
+async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions): Promise<RunRecord> {
+  const record: RunRecord = {
+    instance_id: instance.instance_id,
+    status: 'running',
+    startedAt: new Date().toISOString(),
+  }
+
+  const workDir = join(opts.workRoot, instance.instance_id)
+  if (!existsSync(join(workDir, '.git'))) {
+    const url = `${process.env.GITHUB_MIRROR || 'https://github.com'}/${instance.repo}.git`
+    console.log(`  Cloning ${url} @ ${instance.base_commit.slice(0, 8)}...`)
+    mkdirSync(workDir, { recursive: true })
+    execSync(`git init`, { cwd: workDir })
+    execSync(`git remote add origin ${url}`, { cwd: workDir })
+    execSync(`git fetch --depth 1 origin ${instance.base_commit}`, { cwd: workDir, timeout: 120_000 })
+    execSync(`git checkout FETCH_HEAD`, { cwd: workDir })
+  } else {
+    execSync('git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null', { cwd: workDir })
+  }
+
+  const prompt = buildSwebenchPrompt(instance)
+  const result = await runAgentInDir(workDir, prompt, opts.maxTurns)
+  record.exitCode = result.exitCode
+  record.agentText = result.json?.text ?? ''
+
+  if (result.exitCode === 0) {
+    try {
+      const patch = execSync('git diff', { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })
+      if (patch.trim()) {
+        record.patch = patch
+        record.status = 'completed'
+      } else {
+        record.status = 'failed'
+        record.error = 'Agent completed but produced no diff'
+      }
+    } catch (diffErr) {
+      record.status = 'failed'
+      record.error = `git diff failed: ${(diffErr as Error).message}`
+    }
+  } else {
+    record.status = 'failed'
+    record.error = result.json?.error ?? `Agent exited with code ${result.exitCode}`
+  }
+  record.endedAt = new Date().toISOString()
+  return record
+}
+
+import { Worker } from 'node:worker_threads'
+
+async function runParallel(instances: SwebenchInstance[], opts: RunnerOptions): Promise<void> {
+  const queue = [...instances]
+  let completed = 0
+  const total = instances.length
+
+  const workers: Worker[] = []
+  for (let i = 0; i < opts.parallel; i++) {
+    const worker = new Worker(
+      new URL('./swebench-worker.ts', import.meta.url),
+      { workerData: { workRoot: opts.workRoot, maxTurns: opts.maxTurns } },
+    )
+
+    worker.on('message', (record: RunRecord) => {
+      appendProgress(opts.progressPath, record)
+      appendPrediction(opts.outputPath, record)
+      completed++
+      console.log(`[${completed}/${total}] ${record.instance_id}: ${record.status}${record.error ? ' — ' + record.error : ''}`)
+
+      const next = queue.shift()
+      if (next) {
+        worker.postMessage({ type: 'run', instance: next })
+      } else {
+        worker.postMessage({ type: 'done' })
+      }
+    })
+
+    const first = queue.shift()
+    if (first) worker.postMessage({ type: 'run', instance: first })
+    workers.push(worker)
+  }
+
+  await Promise.all(workers.map(w => new Promise<void>(resolve => w.on('exit', () => resolve()))))
 }
 
 // Only run when executed directly (not imported as a module)
