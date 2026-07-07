@@ -11,6 +11,7 @@
  */
 
 import { createFileContentArgProcessor } from '../agent/tool-arg-post-processor.js'
+import { toPosixPath } from '../path-format.js'
 
 export const WRITE_FILE_POINTER_PREFIX = '[file written to'
 
@@ -28,7 +29,7 @@ export const writeFileArgProcessor = createFileContentArgProcessor({
   threshold: WRITE_FILE_CONTENT_THRESHOLD,
   resolvePath: parsed => {
     const fp = parsed.file_path
-    return typeof fp === 'string' && fp.length > 0 ? fp : null
+    return typeof fp === 'string' && fp.length > 0 ? toPosixPath(fp) : null
   },
   render: ({ path, lines, chars }) =>
     `${WRITE_FILE_POINTER_PREFIX} ${path} — ${lines} lines, ${chars} chars. Display placeholder — never emit this as content; use read_file to review.]`,
