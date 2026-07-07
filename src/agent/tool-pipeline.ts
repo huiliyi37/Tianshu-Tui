@@ -1501,9 +1501,12 @@ export async function executeToolUse(
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, path: filePath })
        }
      } else if (tu.name === 'git') {
+        // 结构化 git 工具记 git_action——否则 claim-audit 看不到 stash/stash_pop
+        // 这类工作树变异，还原代码后旧验证仍显示"新鲜"（审查 2026-07-07 #7）。
+        const action = (tu.input.action as string | undefined) ?? ''
+        deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: `git ${action}` } })
         // B1: publish workspace_mutation for stash/stash_pop so peer sessions
         // know the worktree is being temporarily cleared for verification.
-        const action = (tu.input.action as string | undefined) ?? ''
         const kind = action === 'stash' ? 'stash' : action === 'stash_pop' ? 'stash_pop' : undefined
         if (kind && deps.sessionRegistry && deps.sessionId) {
           deps.sessionRegistry.publishEvent(deps.sessionId, {

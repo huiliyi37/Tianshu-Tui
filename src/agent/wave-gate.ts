@@ -15,6 +15,8 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { gateTypecheckRunner, runChangedFilesTypecheckOutcomeMemo, typecheckGateEnabled, type TypecheckRunner } from './typecheck-gate.js'
 import { evaluateTestPresence, testPresenceGateEnabled } from './test-presence.js'
 
@@ -77,6 +79,8 @@ export interface EvaluateWaveGateInput {
   typecheckRunner?: TypecheckRunner
   /** 测试钩子：命令执行器。缺省 spawnSync sh -c。 */
   runCommand?: (cwd: string, command: string) => { ok: boolean; detail?: string }
+  /** 测试钩子：文件存在性判定。缺省 existsSync(resolve(cwd, f))。 */
+  fileExists?: (relPath: string) => boolean
 }
 
 function defaultRunCommand(cwd: string, command: string): { ok: boolean; detail?: string } {
@@ -121,8 +125,16 @@ export async function evaluateWaveGate(input: EvaluateWaveGateInput): Promise<Wa
 
   // 测试存在性：新代码堆到阈值却零测试文件 → blocking unverifiable 拦下一波。
   // 自愈复评时补了测试文件（changedFiles 更新）即放行——与 typecheck 超时同款语义。
+  //
+  // 输入先过磁盘存在性过滤（审查 2026-07-07 #4/#5）：changedFiles 含 worker
+  // 自报路径，可伪造——不存在的"测试文件"不能让门禁放行；同时被删除的源文件
+  // 自然掉出统计，纯删除/移动重构不再因"改了 N 个源文件零测试"误拦。
   if (testPresenceGateEnabled() && input.changedFiles.length > 0) {
-    const presence = evaluateTestPresence(input.changedFiles)
+    const exists = input.fileExists ?? ((f: string) => existsSync(resolve(input.cwd, f)))
+    const presentFiles = input.changedFiles.filter(f => {
+      try { return exists(f) } catch { return false }
+    })
+    const presence = evaluateTestPresence(presentFiles)
     if (!presence.ok) {
       checks.push({
         command: 'test-presence',

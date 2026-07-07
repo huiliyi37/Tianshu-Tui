@@ -127,6 +127,7 @@ describe('evaluateWaveGate', () => {
       changedFiles: ['plugins/a/index.js', 'plugins/b/index.js', 'plugins/c/index.js'],
       commands: [],
       typecheckRunner: async () => ({ ranOk: true, formatted: '', diagnostics: [] }),
+      fileExists: () => true,
     })
     assert.equal(record.passed, false, 'zero-test delivery must block the next wave')
     const tp = record.checks.find(c => c.command === 'test-presence')
@@ -145,10 +146,41 @@ describe('evaluateWaveGate', () => {
       ],
       commands: [],
       typecheckRunner: async () => ({ ranOk: true, formatted: '', diagnostics: [] }),
+      fileExists: () => true,
     })
     assert.equal(record.passed, true)
     const tp = record.checks.find(c => c.command === 'test-presence')
     assert.equal(tp?.status, 'passed')
+  })
+
+  it('test-presence ignores self-reported test files that do not exist on disk (防伪报)', async () => {
+    // worker 自报了一个不存在的测试文件——不能靠假路径骗过门禁。
+    const onDisk = new Set(['plugins/a/index.js', 'plugins/b/index.js', 'plugins/c/index.js'])
+    const record = await evaluateWaveGate({
+      cwd: '/fake',
+      wave: 0,
+      changedFiles: [...onDisk, 'plugins/__tests__/ghost.test.js'],
+      commands: [],
+      typecheckRunner: async () => ({ ranOk: true, formatted: '', diagnostics: [] }),
+      fileExists: f => onDisk.has(f),
+    })
+    assert.equal(record.passed, false, 'nonexistent test file must not satisfy the gate')
+    const tp = record.checks.find(c => c.command === 'test-presence')
+    assert.equal(tp?.blocking, true)
+  })
+
+  it('test-presence does not block pure deletes/moves (deleted files drop out)', async () => {
+    // 纯删除重构：被删的源文件已不在磁盘上，不该按"改了 N 个源文件零测试"误拦。
+    const record = await evaluateWaveGate({
+      cwd: '/fake',
+      wave: 0,
+      changedFiles: ['src/old-a.ts', 'src/old-b.ts', 'src/old-c.ts'],
+      commands: [],
+      typecheckRunner: async () => ({ ranOk: true, formatted: '', diagnostics: [] }),
+      fileExists: () => false,
+    })
+    assert.equal(record.passed, true)
+    assert.equal(record.checks.find(c => c.command === 'test-presence'), undefined)
   })
 
   it('test-presence gate respects RIVET_TEST_PRESENCE_GATE=0 escape hatch', async () => {
@@ -161,6 +193,7 @@ describe('evaluateWaveGate', () => {
         changedFiles: ['plugins/a/index.js', 'plugins/b/index.js', 'plugins/c/index.js'],
         commands: [],
         typecheckRunner: async () => ({ ranOk: true, formatted: '', diagnostics: [] }),
+        fileExists: () => true,
       })
       assert.equal(record.passed, true)
       assert.equal(record.checks.find(c => c.command === 'test-presence'), undefined)

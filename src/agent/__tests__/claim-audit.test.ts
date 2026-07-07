@@ -120,9 +120,94 @@ test('宣称 N/N 与实际一致 → ok', () => {
 test('ledger 验证记录无计数 meta 时不做计数对账', () => {
   const events = [
     ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
-    ev({ type: 'verification', timestamp: 200, command: 'npx tsc --noEmit', status: 'passed' }),
+    ev({ type: 'verification', timestamp: 200, command: 'npm test', status: 'passed' }),
   ]
   const res = auditDeliveryClaims({ claimText: 'feat: 35/35 通过', events })
+  assert.equal(res.status, 'ok')
+})
+
+// --- 宣称分型对账（审查 2026-07-07 #6）---
+
+test('宣称测试通过但新鲜验证只有 typecheck → block（typecheck 不背书测试宣称）', () => {
+  const events = [
+    ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
+    ev({ type: 'verification', timestamp: 200, command: 'npx tsc --noEmit', status: 'passed' }),
+  ]
+  const res = auditDeliveryClaims({ claimText: 'feat: 所有测试通过', events })
+  assert.equal(res.status, 'block')
+  assert.ok(res.lines.some(l => l.includes('typecheck')))
+})
+
+test('宣称 typecheck 干净但新鲜验证只有测试 → block（测试不背书类型宣称）', () => {
+  const events = [
+    ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
+    ev({ type: 'verification', timestamp: 200, command: 'npm test', status: 'passed' }),
+  ]
+  const res = auditDeliveryClaims({ claimText: 'feat: typecheck 干净', events })
+  assert.equal(res.status, 'block')
+})
+
+test('同时宣称测试绿 + typecheck 干净，两种验证都有 → ok', () => {
+  const events = [
+    ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
+    ev({ type: 'verification', timestamp: 200, command: 'npm test', status: 'passed' }),
+    ev({ type: 'verification', timestamp: 210, command: 'npx tsc --noEmit', status: 'passed' }),
+  ]
+  const res = auditDeliveryClaims({ claimText: 'feat: 全绿，typecheck clean', events })
+  assert.equal(res.status, 'ok')
+})
+
+test('无法分类的验证命令（make check）两类宣称都认', () => {
+  const events = [
+    ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
+    ev({ type: 'verification', timestamp: 200, command: 'make check', status: 'passed' }),
+  ]
+  assert.equal(auditDeliveryClaims({ claimText: 'feat: tests pass', events }).status, 'ok')
+  assert.equal(auditDeliveryClaims({ claimText: 'feat: typecheck clean', events }).status, 'ok')
+})
+
+test('declared kind=lint/build 谁的宣称都不背书', () => {
+  const events = [
+    ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
+    ev({ type: 'verification', timestamp: 200, command: 'npm run lint', status: 'passed', meta: { kind: 'lint' } }),
+  ]
+  assert.equal(auditDeliveryClaims({ claimText: 'feat: 全绿', events }).status, 'block')
+  assert.equal(auditDeliveryClaims({ claimText: 'feat: typecheck 通过', events }).status, 'block')
+})
+
+// --- git 工作树变异作废旧绿（审查 2026-07-07 #7）---
+
+test('验证后 git checkout 还原代码 → 旧验证作废 block', () => {
+  const events = [
+    ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
+    ev({ type: 'verification', timestamp: 200, command: 'npm test', status: 'passed' }),
+    ev({ type: 'git_action', timestamp: 300, meta: { command: 'git checkout -- src/a.ts' } }),
+  ]
+  const res = auditDeliveryClaims({ claimText: 'fix: 全绿', events })
+  assert.equal(res.status, 'block')
+})
+
+test('验证后结构化 git stash_pop → 旧验证作废 block', () => {
+  const events = [
+    ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
+    ev({ type: 'verification', timestamp: 200, command: 'npm test', status: 'passed' }),
+    ev({ type: 'git_action', timestamp: 300, meta: { command: 'git stash_pop' } }),
+  ]
+  const res = auditDeliveryClaims({ claimText: 'fix: 全绿', events })
+  assert.equal(res.status, 'block')
+})
+
+test('验证后只读 git 操作（status/log/commit/checkout -b）不作废旧绿', () => {
+  const events = [
+    ev({ type: 'file_write', timestamp: 100, path: 'src/a.ts' }),
+    ev({ type: 'verification', timestamp: 200, command: 'npm test', status: 'passed' }),
+    ev({ type: 'git_action', timestamp: 300, meta: { command: 'git status' } }),
+    ev({ type: 'git_action', timestamp: 310, meta: { command: 'git log --oneline -5' } }),
+    ev({ type: 'git_action', timestamp: 320, meta: { command: 'deliver_task commit' } }),
+    ev({ type: 'git_action', timestamp: 330, meta: { command: 'git checkout -b feat/new-branch' } }),
+    ev({ type: 'git_action', timestamp: 340, meta: { command: 'git stash list' } }),
+  ]
+  const res = auditDeliveryClaims({ claimText: 'fix: 全绿', events })
   assert.equal(res.status, 'ok')
 })
 

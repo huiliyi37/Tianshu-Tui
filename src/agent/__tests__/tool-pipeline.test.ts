@@ -438,6 +438,35 @@ describe('executeToolUse', () => {
     assert.ok(events.some(e => e.type === 'tool_exec' && e.tool === 'apply_patch'))
   })
 
+  it('records structured git tool actions as git_action in task ledger', async () => {
+    const events: any[] = []
+    const deps = makeDeps({
+      taskLedger: {
+        record: (event: any) => { events.push(event) },
+        getEvents: () => [],
+        getOwnedFiles: () => [],
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: 'stashed', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-git-stash-pop', name: 'git', input: { action: 'stash_pop' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const action = events.find(e => e.type === 'git_action')
+    assert.ok(action, 'structured git tool must record a git_action event')
+    assert.equal(action.meta.command, 'git stash_pop')
+  })
+
   it('patchTargetPaths parses adds/updates/deletes from unified diff headers', () => {
     const diff = [
       '--- a/src/updated.ts',
