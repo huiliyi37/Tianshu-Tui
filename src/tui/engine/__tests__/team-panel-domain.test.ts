@@ -62,7 +62,7 @@ test('team_orchestrate 编码串解码渲染为面板而非裸串', () => {
   const encoded = encodeTeamPanelModel(model)
   app.callbacks.onToolResult('t1', 'team_orchestrate', encoded, false)
   const plain = stripAnsi(out.chunks.join(''))
-  assert.ok(plain.includes('Team · /team max'), `panel rendered: ${plain.slice(0, 200)}`)
+  assert.ok(plain.includes('团队编队') && plain.includes('max'), `panel rendered: ${plain.slice(0, 200)}`)
   assert.ok(!plain.includes('rivet:team-panel:v1:'), 'raw encoded string must not leak')
 })
 

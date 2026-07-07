@@ -27,14 +27,16 @@ const model: TeamPanelModel = {
 describe('formatTeamPanel', () => {
   it('renders waves, star identities, and task status glyphs', () => {
     const plain = buildTeamPanelLines(model, 80).join('\n')
-    assert.ok(plain.includes('Team · /team standard'), 'title')
+    assert.ok(plain.includes('团队编队'), 'title')
+    assert.ok(plain.includes('/team standard'), 'mode label')
     assert.ok(plain.includes('wave 1/2'), 'wave label')
     assert.ok(plain.includes('wave-1'), 'wave id')
-    assert.ok(plain.includes('✓ done'), 'done glyph')
-    assert.ok(plain.includes('◐ running'), 'running glyph')
-    assert.ok(plain.includes('◌ waiting'), 'waiting glyph')
-    assert.ok(plain.includes('depends: t1'), 'dependency line')
+    assert.ok(plain.includes('✓ t1'), 'done glyph on task row')
+    assert.ok(plain.includes('◐ t2'), 'running glyph on task row')
+    assert.ok(plain.includes('◌ t3'), 'waiting glyph on task row')
+    assert.ok(plain.includes('依赖 t1'), 'dependency line')
     assert.ok(plain.includes('found 3 endpoints'), 'task summary')
+    assert.ok(plain.includes('审查门'), 'review gate segment in footer')
   })
 
   it('applies ANSI color (error on high-risk line, muted title)', () => {

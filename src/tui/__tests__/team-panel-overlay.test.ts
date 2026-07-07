@@ -74,7 +74,7 @@ describe('buildTeamPanelLines progress + live rows', () => {
     fleet.apply({ workOrderId: 'wo_team:t2', parentToolId: 'p1', status: 'running', progressLine: 'scanning' }, 0)
     const model = overlayFleetStatus(baseModel(), fleet.getWorkers(2500))
     const plain = buildTeamPanelLines(model, 80).join('\n')
-    assert.ok(/\d\/3 done/.test(plain), `progress bar present: ${plain}`)
+    assert.ok(/\d\/3 完成/.test(plain), `progress bar present: ${plain}`)
     assert.ok(plain.includes('scanning'), 'activity line present')
     assert.ok(plain.includes('ready · deps met'), 'dependency unlock cue present')
   })
