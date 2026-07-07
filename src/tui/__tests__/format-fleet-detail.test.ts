@@ -19,6 +19,9 @@ function mkWorker(overrides: Partial<FleetWorkerView> = {}): FleetWorkerView {
     activity: '⚙ grep -r auth src/',
     activityLog: [],
     elapsedMs: 4200,
+    toolUseCount: 0,
+    tokenCount: 0,
+    unread: false,
     ...overrides,
   }
 }

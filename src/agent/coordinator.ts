@@ -84,8 +84,8 @@ export interface WorkerActivityEvent {
   profile: string
   /** 星域 id（星名来源），由 coordinator 从 order.authority 透传。 */
   authority?: string
-  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result'
-  /** Tool name for tool events; text delta for text/thinking. */
+  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'turn'
+  /** Tool name for tool events; text delta for text/thinking; 累计 token 总数 for turn. */
   detail?: string
 }
 
@@ -518,6 +518,9 @@ export class DelegationCoordinator {
    *  resumeWorkOrderId is provided; consumed by delegateOrder() when building
    *  the worker config. Side-table pattern (same as activityUpstream). */
   private readonly resumeMessages = new Map<string, readonly OaiMessage[]>()
+  /** WC: per-order steer 队列 — 用户在 TUI worker 视图输入的直达消息。
+   *  worker 的 onSteerDrain 在工具回合结算时 drain 注入 tool_result。 */
+  private readonly steerQueues = new Map<string, string[]>()
   private stallSweep: ReturnType<typeof setInterval> | null = null
   /** T3: Flash→Pro escalation counter per session. Max 3 Pro upgrades. */
   private proUpgradeCount = 0
@@ -597,8 +600,42 @@ export class DelegationCoordinator {
     this.orderControllers.clear()
     this.activityUpstream.clear()
     this.resumeMessages.clear()
+    this.steerQueues.clear()
     this.backgroundRuns.clear()
     this.backgroundPromises.clear()
+  }
+
+  // ── WC: TUI worker 视图直达通道（steer / kill） ──
+
+  /**
+   * 向在跑 worker 的 steer 队列投递一条用户消息。
+   * worker 在下一个工具回合结算时以 [User guidance] 形态注入 tool_result。
+   * 返回 false 表示该 order 已不在跑（终态/未知），消息未入队。
+   */
+  steerWorker(workOrderId: string, text: string): boolean {
+    if (!this.orderControllers.has(workOrderId)) return false
+    const q = this.steerQueues.get(workOrderId) ?? []
+    q.push(text)
+    this.steerQueues.set(workOrderId, q)
+    return true
+  }
+
+  /**
+   * 主动停止单个在跑 worker（TUI /tasks 的 x 键）。
+   * 复用 per-order AbortController（与 stall sweep 同一通道）：worker 的
+   * processNext 落入 catch → workerFailureResult，批内兄弟不受影响。
+   * 返回 false 表示该 order 已不在跑。
+   */
+  killWorker(workOrderId: string): boolean {
+    const controller = this.orderControllers.get(workOrderId)
+    if (!controller) return false
+    try { controller.abort() } catch { /* already aborted */ }
+    return true
+  }
+
+  /** 指定 order 当前是否在跑（TUI 判断直达通道可用性）。 */
+  isWorkerRunning(workOrderId: string): boolean {
+    return this.orderControllers.has(workOrderId)
   }
 
   // ── B2: background (async) work orders ──
@@ -1275,6 +1312,14 @@ export class DelegationCoordinator {
         requestUpstream?.({ workOrderId: order.id, profile: order.profile, authority: order.authority, kind, detail })
       } catch { /* UI upstream must never break dispatch */ }
     }
+    // WC: 输入直达 — worker 每个工具回合结算时 drain 本 order 的 steer 队列。
+    workerConfig.onSteerDrain = () => {
+      const q = this.steerQueues.get(order.id)
+      if (!q || q.length === 0) return null
+      const text = q.join('\n')
+      q.length = 0
+      return text
+    }
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
@@ -1728,6 +1773,7 @@ export class DelegationCoordinator {
       this.orderControllers.delete(order.id)
       this.activityUpstream.delete(order.id)
       this.resumeMessages.delete(order.id)
+      this.steerQueues.delete(order.id)
       if (this.liveness.size() === 0) this.stopStallSweep()
       if (semanticLockAcquired && this.collaboration && this.config.sessionId) {
         this.collaboration.releaseLocks(this.config.sessionId)

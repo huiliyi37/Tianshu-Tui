@@ -15,6 +15,7 @@ import stringWidth from 'string-width'
 import { color } from '../engine/ansi.js'
 import { resolveThemeEntry, type RivetTheme } from '../theme.js'
 import { formatElapsed } from '../tool-elapsed.js'
+import { formatTokenCount } from './spinner-status.js'
 import type { TranscriptMessage } from '../scrollback-transcript.js'
 import type { ConnectView } from '../connect-flow.js'
 import {
@@ -436,6 +437,12 @@ export interface TasksWorkerRow {
   /** 最新活动行或终态摘要。 */
   activity?: string
   elapsedMs: number
+  /** 累计工具调用次数（计数列；0 时省略）。 */
+  toolUseCount?: number
+  /** 累计 token 总数（计数列；0 时省略）。 */
+  tokenCount?: number
+  /** 终态后尚未查看——行首 unread 圆点标记。 */
+  unread?: boolean
 }
 
 export type TasksFilter = 'running' | 'completed' | 'all'
@@ -668,12 +675,20 @@ export function renderTasks(
         : w.status === 'passed'
           ? color(glyph, theme.success)
           : color(glyph, theme.warning)
+      // unread：终态但用户还没打开 detail —— 行首圆点提示（CC 未读结果对标）。
+      // 无色纯字符：选中行会被 slice(3) 替换为光标前缀，带 ANSI 会被切坏。
+      const unreadMark = w.unread ? '●' : ' '
       const label = `${w.shortLabel}·${w.profile}`.slice(0, 22).padEnd(22)
+      // 计数列：工具调用数 + token 数（缺省省略，宽度不足时被 detailMax 挤掉）
+      const statParts: string[] = []
+      if (w.toolUseCount && w.toolUseCount > 0) statParts.push(`⚙${w.toolUseCount}`)
+      if (w.tokenCount && w.tokenCount > 0) statParts.push(`${formatTokenCount(w.tokenCount)}tok`)
+      const stats = statParts.length > 0 ? color(` ${statParts.join(' ')}`, theme.muted) : ''
       const activity = w.activity ? ` ${w.activity}` : ''
       const elapsed = color(`(${formatElapsed(w.elapsedMs)})`, theme.muted)
-      const detailMax = Math.max(0, width - 32 - stringWidth(elapsed))
+      const detailMax = Math.max(0, width - 34 - stringWidth(stats) - stringWidth(elapsed))
       const detail = activity.slice(0, detailMax)
-      body.push(`   ${glyphColored} ${label}${detail} ${elapsed}`)
+      body.push(`  ${unreadMark}${glyphColored} ${label}${stats}${detail} ${elapsed}`)
     }
   })
 
@@ -712,7 +727,9 @@ export function renderTasks(
   }
   if (summaryParts.length === 0) summaryParts.push(`${visibleCount} workers`)
   const summary = summaryParts.join(' · ')
-  lines.push(formatFooter(`${summary}   ·   ${keyHints([['↑↓', '选择'], ['Enter', '详情'], ['Tab', '筛选'], ['q/Esc', '关闭']])}`, width, theme))
+  // 分隔符收紧为 " · "：frameFooter 溢出时从前截断，summary 在最前面，
+  // f/x 键位加入后 80 列下过长会把计数吃掉。
+  lines.push(formatFooter(`${summary} · ${keyHints([['↑↓', '选择'], ['Enter', '详情'], ['f', '切入'], ['x', '停止'], ['Tab', '筛选'], ['q/Esc', '关闭']])}`, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines

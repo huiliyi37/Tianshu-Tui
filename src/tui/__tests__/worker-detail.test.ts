@@ -66,6 +66,9 @@ test('buildWorkerDetailContent includes header, result, and transcript', async (
     activity: 'done',
     activityLog: ['⚙ read_file', '✓ done'],
     elapsedMs: 1200,
+    toolUseCount: 0,
+    tokenCount: 0,
+    unread: false,
   }
 
   const { content, title, messages } = buildWorkerDetailContent(workerId, cwd, liveView)

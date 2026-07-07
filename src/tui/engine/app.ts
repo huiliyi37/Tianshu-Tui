@@ -212,6 +212,12 @@ import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { DelegationActivity } from '../../tools/types.js'
 import type { AutonomyCheckpointInfo } from '../../agent/loop-types.js'
 import { FleetRegistry } from '../fleet-registry.js'
+import { WorkerMirrorStore } from '../worker-mirror.js'
+import { formatWorkerView } from '../format/worker-view.js'
+import { shortOrderLabel } from '../../tools/worker-activity-stream.js'
+import { profileLabel, authorityStarName } from '../format/profile-labels.js'
+import { formatTokenCount } from '../format/spinner-status.js'
+import { formatElapsed } from '../tool-elapsed.js'
 import { WatchdogRecoveryPolicy } from '../../agent/watchdog-recovery-policy.js'
 import { phaseStatusLabel } from '../phase-status.js'
 
@@ -300,6 +306,16 @@ export class TuiApp {
   private liveTeamModel: TeamPanelModel | null = null
   /** 当前在 pager overlay 中查看的 worker detail workerId；null 表示查看主 scrollback。 */
   private workerDetailWorkerId: string | null = null
+  /** kill 指定 worker 的回调（main.ts 接线到 per-worker AbortController）。
+   *  返回 true 表示 kill 信号已发出；null 表示当前会话不支持（键位静默无效）。 */
+  private workerKill: ((workerId: string) => boolean) | null = null
+  /** worker 消息镜像（切入视图的实时消息 tail 数据源，cap 50/worker）。 */
+  private mirror = new WorkerMirrorStore()
+  /** 当前切入查看的 worker（CC teammate 视图对标）；null 表示主视图。 */
+  private viewingWorkerId: string | null = null
+  /** 输入直达 worker 的回调（main.ts 接线到 coordinator.steerWorker）。
+   *  返回 false 表示 worker 已不在跑（消息未送达）。 */
+  private workerSteer: ((workerId: string, text: string) => boolean) | null = null
 
   // ── W3: 渲染 ticker + 指标 ───────────────────────────────────
   /** W-B3: stream render state manager (ticker/tick/lastActivity/header) */
@@ -433,6 +449,19 @@ export class TuiApp {
           this.inputController.inputHistory = nextHistoryAfterSubmit(this.inputController.inputHistory, trimmed)
           this.inputLine.setHistory(this.inputController.inputHistory)
           appendHistoryAsync(trimmed).catch(() => { /* 持久化失败静默 */ })
+        }
+
+        // Worker 视图：输入直达该 worker 的 steer 队列，不进主 agent。
+        // slash 命令（/ 开头）仍归主会话——用户在视图内还需要 /tasks 等导航。
+        if (this.viewingWorkerId && trimmed && !trimmed.startsWith('/')) {
+          const target = this.viewingWorkerId
+          const delivered = this.workerSteer?.(target, trimmed) ?? false
+          this.commitUserPrompt(`[→ ${shortOrderLabel(target)}] ${trimmed}`)
+          if (!delivered) {
+            this.commitStatic(color('⚠ 该子代理已结束或不支持直达，消息未送达', this.theme.warning))
+          }
+          this.renderLive()
+          return
         }
 
         // W4a: agent 执行中 → 入队（turn 边界 drain 注入）。
@@ -679,6 +708,11 @@ export class TuiApp {
             this.renderLive()
             return
           }
+          // worker 视图优先于中断：Esc 先退出视图，不 abort 主 agent
+          if (this.viewingWorkerId) {
+            this.exitWorkerView()
+            return
+          }
           if (this.isAgentActive()) {
             this.handleAbort()
             return
@@ -688,6 +722,9 @@ export class TuiApp {
           if (this.overlay.isActive()) {
             this.overlay.deactivate()
             this.renderLive()
+          } else if (this.viewingWorkerId) {
+            // worker 视图优先于中断：Esc 先退出视图，不 abort 主 agent
+            this.exitWorkerView()
           } else if (this.isAgentActive()) {
             this.handleAbort()
           } else {
@@ -1007,10 +1044,22 @@ export class TuiApp {
       case 'rewind':
       case 'history-search':
       case 'chronicle':
-      case 'connect':
-      case 'tasks': {
+      case 'connect': {
         // 复位导航状态，避免上次的翻页/选中残留到新 overlay
         this.overlayController.resetNav()
+        return this.overlay.activate(id)
+      }
+      case 'tasks': {
+        this.overlayController.resetNav()
+        // 单任务直进 detail（CC 对标）：只有一个 worker 时列表页没有信息增量
+        const data = this.getTasksData('running')
+        const only = data.groups.length === 1 && data.groups[0]!.workers.length === 1
+          ? data.groups[0]!.workers[0]
+          : undefined
+        if (only) {
+          this.openWorkerDetail(only.workerId)
+          return true
+        }
         return this.overlay.activate(id)
       }
       case 'domain-picker': {
@@ -1160,6 +1209,9 @@ export class TuiApp {
         status: w.status,
         activity: w.activity,
         elapsedMs: w.elapsedMs,
+        toolUseCount: w.toolUseCount,
+        tokenCount: w.tokenCount,
+        unread: w.unread && w.terminal,
       })
       byParent.set(w.parentToolId, arr)
     }
@@ -1219,9 +1271,39 @@ export class TuiApp {
     return this.getTasksData('running')
   }
 
+  /** 接线 worker kill 回调（/tasks 里 x 键 → per-worker AbortController）。 */
+  setWorkerKill(fn: (workerId: string) => boolean): void {
+    this.workerKill = fn
+  }
+
+  /** 接线输入直达回调（worker 视图输入 → coordinator per-worker steer 队列）。 */
+  setWorkerSteer(fn: (workerId: string, text: string) => boolean): void {
+    this.workerSteer = fn
+  }
+
+  /** 当前切入查看的 worker id（null = 主视图）。 */
+  getViewingWorkerId(): string | null {
+    return this.viewingWorkerId
+  }
+
+  /** 切入 worker 视图：live 区改为渲染该 worker 的镜像消息 tail，输入直达。 */
+  enterWorkerView(workerId: string): void {
+    this.viewingWorkerId = workerId
+    this.fleet.markSeen(workerId)
+    this.renderLive()
+  }
+
+  /** 退出 worker 视图，回到主视图。 */
+  exitWorkerView(): void {
+    if (!this.viewingWorkerId) return
+    this.viewingWorkerId = null
+    this.renderLive()
+  }
+
   /** 打开指定 worker 的 detail pager。 */
   openWorkerDetail(workerId: string): void {
     this.workerDetailWorkerId = workerId
+    this.fleet.markSeen(workerId)
     const nav = this.overlayController.nav()
     nav.pagerPage = 0
     nav.pagerMode = 'page'
@@ -1323,6 +1405,27 @@ export class TuiApp {
         const workerId = selectable[nav.tasksIndex]
         if (workerId) {
           this.openWorkerDetail(workerId)
+        }
+        return true
+      }
+      // f：切入选中 worker 的实时视图（foreground，CC teammate 视图对标）
+      if (c === 'f' && count > 0) {
+        const workerId = selectable[nav.tasksIndex]
+        if (workerId) {
+          this.deactivateOverlay()
+          this.enterWorkerView(workerId)
+        }
+        return true
+      }
+      // x：停止选中的 worker（per-worker AbortController，由 main.ts 接线）
+      if (c === 'x' && count > 0) {
+        const workerId = selectable[nav.tasksIndex]
+        if (workerId && this.workerKill) {
+          const killed = this.workerKill(workerId)
+          if (killed) {
+            this.commitStatic(color(`⊗ 已发送停止信号: ${shortOrderLabel(workerId)}`, this.theme.warning))
+            this.overlay.rerender()
+          }
         }
         return true
       }
@@ -2290,9 +2393,35 @@ export class TuiApp {
    * 据此实时刷新）。终态清理在委派工具 result 到达时统一处理。
    */
   private handleDelegationActivity(activity: DelegationActivity): void {
+    const prev = this.fleet.getWorkerById(activity.workOrderId)
     this.fleet.apply(activity)
+    this.mirror.apply(activity)
+    // 终态转变 → 主区完成通知行（CC 后台任务完成对标）。
+    // 只在「见过 running」的 worker 上通知，避免纯终态回放（resume/归档）刷屏。
+    if (prev && !prev.terminal) {
+      const now = this.fleet.getWorkerById(activity.workOrderId)
+      if (now?.terminal) this.notifyWorkerTerminal(now)
+    }
     this.markActivity()
     this.writeBatcher.schedule()
+  }
+
+  /** worker 终态完成通知：一行摘要入 scrollback + 可选终端 bell（RIVET_NOTIFY_BELL=1）。 */
+  private notifyWorkerTerminal(w: import('../fleet-registry.js').FleetWorkerView): void {
+    const star = authorityStarName(w.authority)
+    const label = star ? `${star} · ${profileLabel(w.profile)}` : profileLabel(w.profile)
+    const elapsed = formatElapsed(w.elapsedMs)
+    const stats: string[] = []
+    if (w.toolUseCount > 0) stats.push(`${w.toolUseCount} 工具`)
+    if (w.tokenCount > 0) stats.push(`${formatTokenCount(w.tokenCount)} tok`)
+    const statsStr = stats.length > 0 ? ` · ${stats.join(' · ')}` : ''
+    const summary = w.activity ? ` — ${w.activity.slice(0, 60)}` : ''
+    const ok = w.status === 'passed'
+    const glyph = ok ? '✓' : w.status === 'failed' ? '✗' : '⊗'
+    const verb = ok ? '完成' : w.status === 'failed' ? '失败' : w.status === 'blocked' ? '受阻' : '升级'
+    const line = ` ${glyph} 子代理${verb}: ${label}${statsStr} (${elapsed})${summary}`
+    this.commitStatic(color(line, ok ? this.theme.success : this.theme.warning))
+    if (process.env.RIVET_NOTIFY_BELL === '1') this.stdout.write('\x07')
   }
 
   /**
@@ -2953,6 +3082,18 @@ export class TuiApp {
       lines.push({ text: this.clampLine(spinnerLine) })
     }
 
+    // 1c. Worker 切入视图（CC teammate 对标）：激活时替换主视图全部动态段
+    //     （thinking / 流式尾 / 舰队汇总 / 工具聚合），只渲染该 worker 的
+    //     镜像消息 tail + header。底部 chrome（输入框/GlanceBar）不变。
+    const viewingWorker = this.viewingWorkerId ? this.fleet.getWorkerById(this.viewingWorkerId) : undefined
+    if (viewingWorker) {
+      const viewRows = Math.max(6, liveMaxRowsFor(this.rows) - 6)
+      for (const line of formatWorkerView(viewingWorker, this.mirror.getMessages(viewingWorker.workerId), this.theme, cols, viewRows)) {
+        lines.push({ text: this.clampLine(line) })
+      }
+    } else {
+    // ↓ 主视图动态段（1b–2d；worker 视图激活时整段跳过）
+
     // 1b. Thinking 展开内容（状态行已由 spinner 承担）。split 结果记忆化见 getThinkingLines。
     if (this.state.isThinking && this.state.thinkingText) {
       for (const line of this.getThinkingLines(this.state.thinkingExpanded)) {
@@ -3073,6 +3214,8 @@ export class TuiApp {
       }
     }
 
+    } // ← 主视图动态段结束（1b–2d；与上方 worker 视图分支对应）
+
     // 3. Approval prompt (when pending)
     if (this.approvalIntentController.approvalPending) {
       const p = this.approvalIntentController.approvalPending
@@ -3149,6 +3292,10 @@ export class TuiApp {
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
+        // worker 视图徽章：提示当前输入路由目标（◐ = 在跑，✓/✗ = 已终态）
+        workerBadge: this.viewingWorkerId
+          ? `→ ${shortOrderLabel(this.viewingWorkerId)}`
+          : undefined,
       }, this.theme)
 
       const rightStr = formatGlanceRight({

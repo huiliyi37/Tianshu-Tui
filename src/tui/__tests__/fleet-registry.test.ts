@@ -115,6 +115,50 @@ test('FleetRegistry: hasActive 反映是否有未终态 worker', () => {
   assert.equal(fleet.hasActive(), false)
 })
 
+test('FleetRegistry: toolUseCount/tokenCount 计数归约，只增不减', () => {
+  const fleet = new FleetRegistry()
+  fleet.apply({ ...running('wo_c', 't'), toolUseCount: 1 }, 0)
+  fleet.apply({ ...running('wo_c', 't'), toolUseCount: 3, tokenCount: 1200 }, 1)
+  // 乱序/迟到事件不回退计数
+  fleet.apply({ ...running('wo_c', 't'), toolUseCount: 2, tokenCount: 800 }, 2)
+  const w = fleet.getWorkerById('wo_c', 3)!
+  assert.equal(w.toolUseCount, 3)
+  assert.equal(w.tokenCount, 1200)
+})
+
+test('FleetRegistry: 终态 usage/model 保留，tokenCount 从 usage 派生并在归档后可查', () => {
+  const fleet = new FleetRegistry()
+  fleet.apply({ ...running('wo_u', 'toolA'), toolUseCount: 5, tokenCount: 2000 }, 0)
+  fleet.apply({
+    workOrderId: 'wo_u',
+    parentToolId: 'toolA',
+    status: 'passed',
+    progressLine: 'done',
+    model: 'deepseek-v4',
+    usage: { input_tokens: 3000, output_tokens: 500, total_tokens: 3500 },
+  }, 100)
+  fleet.clearGroup('toolA')
+  const w = fleet.getWorkerById('wo_u', 200)!
+  assert.equal(w.terminal, true)
+  assert.equal(w.model, 'deepseek-v4')
+  assert.deepEqual(w.usage, { input_tokens: 3000, output_tokens: 500, total_tokens: 3500 })
+  // usage.total_tokens > 运行中心跳 → tokenCount 升级为终态快照
+  assert.equal(w.tokenCount, 3500)
+  // 终态事件不带 toolUseCount → 保留运行中累计值
+  assert.equal(w.toolUseCount, 5)
+})
+
+test('FleetRegistry: usage 缺 total_tokens 时 tokenCount 回退 input+output', () => {
+  const fleet = new FleetRegistry()
+  fleet.apply({
+    workOrderId: 'wo_v',
+    parentToolId: 't',
+    status: 'passed',
+    usage: { input_tokens: 100, output_tokens: 50 },
+  }, 0)
+  assert.equal(fleet.getWorkerById('wo_v', 1)!.tokenCount, 150)
+})
+
 test('FleetRegistry: getWorkers 按 startedAt 升序', () => {
   const fleet = new FleetRegistry()
   fleet.apply(running('late', 't'), 100)

@@ -71,6 +71,10 @@ export interface WorkerSessionConfig {
    *  Without this the worker's internal heartbeat fires into the void.
    *  `detail` carries the tool name for tool events and the delta for text. */
   onActivity?: (kind: WorkerActivityKind, detail?: string) => void
+  /** WC: 输入直达通道 — coordinator 注入的 per-order steer 队列 drain。
+   *  worker 的 AgentLoop 在工具回合结算时调用，把用户直达消息以
+   *  [User guidance] 形态注入 tool_result（与主会话 steer 同一机制）。 */
+  onSteerDrain?: () => string | null
   /** Resume from a previous checkpoint — inject partial results as context so
    *  the worker doesn't redo completed work. Especially valuable for multi-turn
    *  Flash workers (test_scaffolder generating multiple files). */
@@ -86,7 +90,8 @@ export interface WorkerSessionConfig {
   priorMessages?: readonly import('../api/oai-types.js').OaiMessage[]
 }
 
-export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result'
+/** `turn` 事件在每个 worker turn 结束时上报，detail 为累计 token 总数（字符串）。 */
+export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'turn'
 
 export interface WorkerTranscript {
   text: string
@@ -184,6 +189,7 @@ async function runOnce(
   prompt: string,
   transcript: WorkerTranscript,
   onActivity?: (kind: WorkerActivityKind, detail?: string) => void,
+  onSteerDrain?: () => string | null,
 ): Promise<string> {
   let text = ''
   // AgentLoop.run never rethrows stream errors — it reports them via onError
@@ -213,7 +219,13 @@ async function runOnce(
       if (isError) transcript.errors.push(result)
       onActivity?.('tool_result', name)
     },
-    onTurnComplete: () => {},
+    // usage 是累计快照（getTotalUsage）——上报累计 token 总数，供 fleet 面板实时显示。
+    onTurnComplete: (usage) => {
+      const total = (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0)
+      if (total > 0) onActivity?.('turn', String(total))
+    },
+    // WC: 输入直达 — drain coordinator 注入的 per-order steer 队列
+    onSteerDrain: onSteerDrain ? () => onSteerDrain() : undefined,
     onError: (error) => {
       transcript.errors.push(error.message)
       streamError = error
@@ -283,10 +295,11 @@ export async function runOnceWithTransientRetry(
   prompt: string,
   transcript: WorkerTranscript,
   onActivity?: (kind: WorkerActivityKind, detail?: string) => void,
+  onSteerDrain?: () => string | null,
 ): Promise<string> {
   for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
     try {
-      return await runOnce(agent, prompt, transcript, onActivity)
+      return await runOnce(agent, prompt, transcript, onActivity, onSteerDrain)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       const classified = classifyFailure(message)
@@ -394,7 +407,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
 
   try {
     const transcript = emptyTranscript()
-    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity)
+    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity, config.onSteerDrain)
     mbox?.progress(1, config.order.budget.maxRetries + 1, 'initial run')
 
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
@@ -480,7 +493,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           }
           // json-mode repair produced nothing (stream error) → fall through to AgentLoop repair
         }
-        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity)
+        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity, config.onSteerDrain)
       }
     }
 

@@ -73,18 +73,32 @@ function assignLabels(workers: FleetWorkerView[]): string[] {
   })
 }
 
+/** 紧凑 token 数：1234 → "1.2k"，890 → "890"。 */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
+}
+
+interface FleetLine {
+  text: string
+  kind: 'header' | 'worker' | 'activity' | 'overflow'
+  status?: FleetWorkerView['status']
+}
+
 /**
- * 生成内联舰队面板的纯文本行（无颜色，便于测试）。
- * 第一行是汇总头，其后每行一个在跑 worker。
+ * 树形两行结构（CC Task 进度对标）：
+ *  分支行 `├─/└─ glyph label · N 工具 · Xk tok · elapsed`
+ *  活动行 `│  ⎿ 最新活动`（末支用空白续行；无活动时省略）
  */
-export function buildWorkerFleetLines(
+function buildEntries(
   workers: FleetWorkerView[],
   summary: WorkerFleetSummary | undefined,
-  width = 80,
-  maxRows = 6,
-): string[] {
+  width: number,
+  maxRows: number,
+): FleetLine[] {
   const rule = Math.min(Math.max(40, width), 80)
-  const lines: string[] = []
+  const lines: FleetLine[] = []
 
   const running = summary?.running ?? workers.filter(w => w.status === 'running').length
   if (summary && summary.total > 0) {
@@ -95,36 +109,61 @@ export function buildWorkerFleetLines(
     if (summary.done > 0) {
       parts.push(`${summary.done}/${summary.total} 完成`)
     }
-    lines.push(` ◐ 子代理 · ${parts.join(' · ') || `${summary.total} 个`}`)
+    lines.push({ text: ` ◐ 子代理 · ${parts.join(' · ') || `${summary.total} 个`}`, kind: 'header' })
   } else {
-    lines.push(` ◐ 子代理 · ${workers.length} 执行中`)
+    lines.push({ text: ` ◐ 子代理 · ${workers.length} 执行中`, kind: 'header' })
   }
 
   const visible = workers.slice(0, maxRows)
+  const overflow = workers.length - visible.length
   const labels = assignLabels(visible)
   for (let i = 0; i < visible.length; i++) {
     const w = visible[i]!
+    const isLast = i === visible.length - 1 && overflow <= 0
+    const branch = isLast ? '└─' : '├─'
+    const cont = isLast ? '  ' : '│ '
     const glyph = statusGlyph(w.status)
     const label = labels[i]!
     const elapsed = formatElapsed(w.elapsedMs)
-    const head = `   ${glyph} ${label}`
+
+    // 计数段（CC AgentProgress 对标）：工具调用数 + token 数，缺省时省略
+    const stats: string[] = []
+    if (w.toolUseCount > 0) stats.push(`${w.toolUseCount} 工具`)
+    if (w.tokenCount > 0) stats.push(`${fmtTokens(w.tokenCount)} tok`)
+    const statsStr = stats.length > 0 ? ` · ${stats.join(' · ')}` : ''
     const tail = elapsed ? `  ${elapsed}` : ''
-    const activityMax = rule - head.length - tail.length - 2
-    const activity = w.activity ? ` ${truncate(w.activity, Math.max(0, activityMax))}` : ''
-    lines.push(`${head}${activity}${tail}`)
+    lines.push({ text: ` ${branch} ${glyph} ${label}${statsStr}${tail}`, kind: 'worker', status: w.status })
+
+    if (w.activity) {
+      const head = ` ${cont}   ⎿ `
+      const budget = Math.max(0, rule - head.length - 1)
+      lines.push({ text: `${head}${truncate(w.activity, budget)}`, kind: 'activity', status: w.status })
+    }
   }
 
-  const overflow = workers.length - visible.length
   if (overflow > 0) {
-    lines.push(`   …(+${overflow})`)
+    lines.push({ text: ` └─ …(+${overflow})`, kind: 'overflow' })
   }
 
   return lines
 }
 
 /**
+ * 生成内联舰队面板的纯文本行（无颜色，便于测试）。
+ * 第一行是汇总头，其后每个 worker 一到两行（分支行 + 可选活动行）。
+ */
+export function buildWorkerFleetLines(
+  workers: FleetWorkerView[],
+  summary: WorkerFleetSummary | undefined,
+  width = 80,
+  maxRows = 6,
+): string[] {
+  return buildEntries(workers, summary, width, maxRows).map(l => l.text)
+}
+
+/**
  * 渲染内联舰队面板为带色 ANSI 行：
- *  汇总头 → muted · running → primary · passed → success · 其余 → warning。
+ *  汇总头/折叠/活动行 → muted · running → primary · passed → success · 其余 → warning。
  */
 export function formatWorkerFleet(
   workers: FleetWorkerView[],
@@ -133,22 +172,15 @@ export function formatWorkerFleet(
   summary?: WorkerFleetSummary,
   maxRows = 6,
 ): string[] {
-  const plain = buildWorkerFleetLines(workers, summary, width, maxRows)
-  if (plain.length === 0) return plain
-  const out: string[] = []
-  out.push(color(plain[0]!, theme.muted))
-  const visible = workers.slice(0, maxRows)
-  for (let i = 0; i < visible.length; i++) {
-    const w = visible[i]!
-    const line = plain[i + 1]!
-    if (w.status === 'running') out.push(color(line, theme.primary))
-    else if (w.status === 'passed') out.push(color(line, theme.success))
-    else out.push(color(line, theme.warning))
-  }
-  if (plain.length > visible.length + 1) {
-    out.push(color(plain[plain.length - 1]!, theme.muted))
-  }
-  return out
+  const entries = buildEntries(workers, summary, width, maxRows)
+  return entries.map(l => {
+    if (l.kind === 'worker') {
+      if (l.status === 'running') return color(l.text, theme.primary)
+      if (l.status === 'passed') return color(l.text, theme.success)
+      return color(l.text, theme.warning)
+    }
+    return color(l.text, theme.muted)
+  })
 }
 
 /**

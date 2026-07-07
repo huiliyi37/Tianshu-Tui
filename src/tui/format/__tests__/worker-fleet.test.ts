@@ -18,22 +18,54 @@ function worker(over: Partial<FleetWorkerView> = {}): FleetWorkerView {
     activity: '⚙ read_file',
     activityLog: [],
     elapsedMs: 2000,
+    toolUseCount: 0,
+    tokenCount: 0,
+    unread: false,
     ...over,
   }
 }
 
 describe('buildWorkerFleetLines', () => {
-  it('单 worker：汇总头 + 行含中文职能名/活动/elapsed', () => {
+  it('单 worker：汇总头 + 分支行（职能/elapsed）+ 活动行', () => {
     const lines = buildWorkerFleetLines([worker()], { done: 0, total: 2, running: 1 }, 80)
-    assert.equal(lines.length, 2)
+    assert.equal(lines.length, 3)
     assert.ok(lines[0]!.includes('子代理'))
     assert.ok(lines[0]!.includes('执行中'))
     // 不再包含英文 profile
     assert.ok(!lines[0]!.includes('Agents'))
+    // 分支行：树形 glyph + 职能名 + elapsed
+    assert.ok(lines[1]!.includes('└─'))
     assert.ok(lines[1]!.includes('侦察'))
     assert.ok(lines[1]!.includes('代码'))
-    assert.ok(lines[1]!.includes('read_file'))
     assert.ok(lines[1]!.includes('2s'))
+    // 活动行：⎿ + 最新活动
+    assert.ok(lines[2]!.includes('⎿'))
+    assert.ok(lines[2]!.includes('read_file'))
+  })
+
+  it('计数段：toolUseCount/tokenCount 有值时渲染，为零时省略', () => {
+    const lines = buildWorkerFleetLines(
+      [worker({ toolUseCount: 12, tokenCount: 3400, activity: undefined })],
+      undefined,
+      80,
+    )
+    assert.ok(lines[1]!.includes('12 工具'))
+    assert.ok(lines[1]!.includes('3.4k tok'))
+    const bare = buildWorkerFleetLines([worker({ activity: undefined })], undefined, 80)
+    assert.ok(!bare[1]!.includes('工具'))
+    assert.ok(!bare[1]!.includes('tok'))
+  })
+
+  it('树形分支：多 worker 时非末支 ├─、末支 └─，续行用 │', () => {
+    const w1 = worker({ workerId: 'w1', profile: 'code_scout' })
+    const w2 = worker({ workerId: 'w2', profile: 'doc_scout' })
+    const lines = buildWorkerFleetLines([w1, w2], undefined, 80)
+    // header + (branch+activity)*2
+    assert.equal(lines.length, 5)
+    assert.ok(lines[1]!.includes('├─'))
+    assert.ok(lines[2]!.includes('│'), '非末支活动行应有 │ 续行')
+    assert.ok(lines[3]!.includes('└─'))
+    assert.ok(!lines[4]!.includes('│'), '末支活动行不应有 │')
   })
 
   it('无 summary：头显示 N 执行中', () => {
@@ -50,23 +82,23 @@ describe('buildWorkerFleetLines', () => {
   })
 
   it('同 profile 多 worker 显示序号 #1/#2', () => {
-    const w1 = worker({ workerId: 'w1', shortLabel: 'W1' })
-    const w2 = worker({ workerId: 'w2', shortLabel: 'W2' })
+    const w1 = worker({ workerId: 'w1', shortLabel: 'W1', activity: undefined })
+    const w2 = worker({ workerId: 'w2', shortLabel: 'W2', activity: undefined })
     const lines = buildWorkerFleetLines([w1, w2], undefined, 80)
     assert.ok(lines[1]!.includes('#1'))
     assert.ok(lines[2]!.includes('#2'))
   })
 
   it('不同 profile 不显示序号', () => {
-    const w1 = worker({ workerId: 'w1', shortLabel: 'W1', profile: 'code_scout' })
-    const w2 = worker({ workerId: 'w2', shortLabel: 'W2', profile: 'doc_scout' })
+    const w1 = worker({ workerId: 'w1', shortLabel: 'W1', profile: 'code_scout', activity: undefined })
+    const w2 = worker({ workerId: 'w2', shortLabel: 'W2', profile: 'doc_scout', activity: undefined })
     const lines = buildWorkerFleetLines([w1, w2], undefined, 80)
     assert.ok(!lines[1]!.includes('#1'))
     assert.ok(!lines[2]!.includes('#1'))
   })
 
   it('多 worker 超 maxRows：折叠 …(+N)', () => {
-    const workers = Array.from({ length: 9 }, (_, i) => worker({ workerId: `w${i}`, shortLabel: `T${i}` }))
+    const workers = Array.from({ length: 9 }, (_, i) => worker({ workerId: `w${i}`, shortLabel: `T${i}`, activity: undefined }))
     const lines = buildWorkerFleetLines(workers, { done: 0, total: 9, running: 9 }, 80, 6)
     assert.equal(lines.length, 8)
     assert.ok(lines[lines.length - 1]!.includes('(+3)'))
@@ -111,7 +143,7 @@ describe('buildWorkerFleetLines', () => {
 })
 
 describe('formatWorkerFleet', () => {
-  it('行数与 plain 一致（头 + worker 行 + 折叠）', () => {
+  it('行数与 plain 一致（头 + worker 行 + 活动行 + 折叠）', () => {
     const workers = [worker(), worker({ workerId: 'w2', shortLabel: 'T2', status: 'passed' })]
     const colored = formatWorkerFleet(workers, theme, 80, { done: 1, total: 2, running: 1 })
     const plain = buildWorkerFleetLines(workers, { done: 1, total: 2, running: 1 }, 80)
@@ -119,7 +151,7 @@ describe('formatWorkerFleet', () => {
   })
 
   it('溢出行也被着色', () => {
-    const workers = Array.from({ length: 8 }, (_, i) => worker({ workerId: `w${i}`, shortLabel: `T${i}` }))
+    const workers = Array.from({ length: 8 }, (_, i) => worker({ workerId: `w${i}`, shortLabel: `T${i}`, activity: undefined }))
     const colored = formatWorkerFleet(workers, theme, 80, { done: 0, total: 8, running: 8 }, 6)
     assert.equal(colored.length, 8)
   })

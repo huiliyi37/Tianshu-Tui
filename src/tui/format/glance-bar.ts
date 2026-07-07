@@ -110,6 +110,8 @@ export interface GlanceBarInput {
    * 未传按 full 处理（兼容既有直接调用方/测试）。
    */
   density?: 'compact' | 'full'
+  /** 当前切入的 worker 视图徽章（例如 "◐ T1"）——非空时显示在左区。 */
+  workerBadge?: string
 }
 
 export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): string {
@@ -122,7 +124,9 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
   const accentColor = resolveStarDomainAccent(input.domainName, theme)
 
   const glyphPart = domainGlyph ? `${color(domainGlyph, accentColor)} ` : ''
-  return `${glyphPart}${color(domainLabel, accentColor)}${color(branchPart, theme.dim)}`
+  // worker 视图徽章：切入子代理视图时提示当前输入路由目标
+  const workerPart = input.workerBadge ? ` ${color(`[${input.workerBadge}]`, theme.secondary)}` : ''
+  return `${glyphPart}${color(domainLabel, accentColor)}${color(branchPart, theme.dim)}${workerPart}`
 }
 
 export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): string {
