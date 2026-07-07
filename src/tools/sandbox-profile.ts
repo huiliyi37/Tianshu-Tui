@@ -140,6 +140,14 @@ export function buildSeatbeltProfile(writableRoots: string[]): string {
     '  (literal "/dev/tty")',
     '  (literal "/dev/dtracehelper")',
     ')',
+    // Disk device access — hdiutil, diskutil, and DMG creation need to
+    // read/write/ioctl /dev/disk* and /dev/rdisk* nodes. Seatbelt's
+    // (allow default) already permits IOKit-open, but device nodes are
+    // gated by file-read*/file-write*/file-ioctl rules.
+    '(allow file-read* file-write* file-ioctl',
+    '  (subpath "/dev/disk")',
+    '  (subpath "/dev/rdisk")',
+    ')',
   ].join('\n')
 }
 
