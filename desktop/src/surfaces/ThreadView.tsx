@@ -454,6 +454,99 @@ export function ThreadView(props: {
     setFocusedIndex(renderedIndex)
   }, [virtualizer])
 
+  // ── In-thread search (Cmd+F) — block-level match + jump ──
+  // Matches are rendered-list indices (valid scrollToIndex targets). Text-level
+  // highlighting inside Markdown is intentionally out of scope; the active hit
+  // row gets a highlight class instead.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchPos, setSearchPos] = useState(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  const searchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return []
+    const out: number[] = []
+    rendered.forEach((item, i) => {
+      if (item.kind === 'block') {
+        const b = item.block
+        if ((b.kind === 'user' || b.kind === 'assistant') && b.text.toLowerCase().includes(q)) out.push(i)
+      } else if (item.kind === 'timeline') {
+        // Tool/thinking hits count toward the collapsed group's row.
+        if (item.items.some((b) => (b.text ?? '').toLowerCase().includes(q))) out.push(i)
+      }
+    })
+    return out
+  }, [rendered, searchQuery])
+
+  const jumpToMatch = useCallback((pos: number) => {
+    const idx = searchMatches[pos]
+    if (idx === undefined) return
+    setScrolledUp(true)
+    virtualizer.scrollToIndex(idx, { align: 'center' })
+    requestAnimationFrame(() => virtualizer.scrollToIndex(idx, { align: 'center' }))
+  }, [searchMatches, virtualizer])
+
+  // New query → reset to the first hit and jump there.
+  useEffect(() => {
+    setSearchPos(0)
+    if (searchQuery.trim() && searchMatches.length > 0) jumpToMatch(0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery])
+
+  const stepSearch = useCallback((dir: 1 | -1) => {
+    const n = searchMatches.length
+    if (n === 0) return
+    const next = ((searchPos + dir) % n + n) % n
+    setSearchPos(next)
+    jumpToMatch(next)
+  }, [searchMatches.length, searchPos, jumpToMatch])
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    msgRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault() // pre-empt the WebView native find
+        setSearchOpen(true)
+        requestAnimationFrame(() => searchInputRef.current?.focus())
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const activeSearchIndex = searchOpen && searchMatches.length > 0 ? searchMatches[searchPos] ?? null : null
+
+  // Regenerate an assistant reply: find the nearest preceding user turn and
+  // replay it through the same rewind+resend chain as message editing.
+  const handleRegenerate = useCallback(async (assistantKey: string) => {
+    const blocks = view.blocks
+    const idx = blocks.findIndex((b) => b.key === assistantKey)
+    if (idx < 0) return
+    for (let i = idx - 1; i >= 0; i--) {
+      const b = blocks[i]!
+      if (b.kind !== 'user') continue
+      const seq = Number(b.key.slice(2)) // "u-<seq>"
+      const point = Number.isNaN(seq) ? undefined : rewindPoints.find((p) => p.seq === seq)
+      if (!point) return
+      try {
+        await rewindSession(session.id, point.index)
+        setSelectedTurnIndex(-1)
+        const { points } = await getRewindPoints(session.id)
+        setRewindPoints(points)
+        onSend(b.text)
+      } catch (err) {
+        console.error(err)
+      }
+      return
+    }
+  }, [view.blocks, rewindPoints, session.id, onSend])
+
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
   // Context usage bar: live token estimate vs model window.
@@ -793,6 +886,50 @@ export function ThreadView(props: {
       </header>
 
       <div className="messages" ref={msgRef} onScroll={onScroll} onKeyDown={onMessagesKeyDown} tabIndex={-1}>
+        {searchOpen && (
+          <div className="thread-search-bar" role="search">
+            <input
+              ref={searchInputRef}
+              className="thread-search-input"
+              type="text"
+              value={searchQuery}
+              placeholder={t('search.placeholder')}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  stepSearch(e.shiftKey ? -1 : 1)
+                } else if (e.key === 'Escape') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  closeSearch()
+                }
+              }}
+            />
+            <span className="thread-search-count">
+              {searchQuery.trim()
+                ? (searchMatches.length > 0 ? `${searchPos + 1}/${searchMatches.length}` : t('search.noMatch'))
+                : ''}
+            </span>
+            <button
+              className="thread-search-btn"
+              onClick={() => stepSearch(-1)}
+              disabled={searchMatches.length === 0}
+              aria-label={t('search.prev')}
+            >↑</button>
+            <button
+              className="thread-search-btn"
+              onClick={() => stepSearch(1)}
+              disabled={searchMatches.length === 0}
+              aria-label={t('search.next')}
+            >↓</button>
+            <button
+              className="thread-search-btn"
+              onClick={closeSearch}
+              aria-label={t('search.close')}
+            >×</button>
+          </div>
+        )}
         {streamStatus === 'offline' && (
           <div className="stream-banner offline" role="alert">
             <span className="stream-banner-glyph" aria-hidden>⚠</span>
@@ -832,7 +969,7 @@ export function ThreadView(props: {
               return (
                 <div
                   key={vi.key}
-                  className={`vrow${focusedIndex === vi.index ? ' vrow-focused' : ''}`}
+                  className={`vrow${focusedIndex === vi.index ? ' vrow-focused' : ''}${activeSearchIndex === vi.index ? ' vrow-search-active' : ''}`}
                   data-index={vi.index}
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${vi.start}px)` }}
@@ -873,6 +1010,7 @@ export function ThreadView(props: {
                       domainName={activeDomain?.name}
                       onContinue={handleWatchdogContinue}
                       onCancelContinue={onAbort}
+                      onRegenerate={busy ? undefined : handleRegenerate}
                       onEditUserMsg={async (seq, text) => {
                         const point = rewindPoints.find(p => p.seq === seq)
                         if (point) {
@@ -1286,10 +1424,10 @@ const Block = memo(BlockImpl, (a, b) =>
   a.onFileClick === b.onFileClick &&
   a.domainGlyph === b.domainGlyph && a.domainName === b.domainName &&
   a.onContinue === b.onContinue && a.onCancelContinue === b.onCancelContinue &&
-  a.onEditUserMsg === b.onEditUserMsg
+  a.onEditUserMsg === b.onEditUserMsg && a.onRegenerate === b.onRegenerate
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, domainGlyph, domainName, onContinue, onCancelContinue, onEditUserMsg }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, domainGlyph, domainName, onContinue, onCancelContinue, onEditUserMsg, onRegenerate }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
@@ -1302,6 +1440,8 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
   /** C2 刹车 — cancel a pending watchdog auto-continue countdown (aborts the session). */
   onCancelContinue?: () => void
   onEditUserMsg?: (seq: number, text: string) => Promise<void>
+  /** Regenerate this assistant reply (rewind to the preceding user turn + resend). */
+  onRegenerate?: (assistantKey: string) => void
 }) {
   const { t } = useTranslation('threadView')
   const [isEditing, setIsEditing] = useState(false)
@@ -1544,7 +1684,11 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
     )
   }
   return (
-    <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph}>
+    <MsgBlock
+      role={domainName ?? STAR_DOMAINS.tianshu.name}
+      roleGlyph={domainGlyph}
+      onRegenerate={block.kind === 'assistant' && onRegenerate ? () => onRegenerate(block.key) : undefined}
+    >
       <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} />
     </MsgBlock>
   )
@@ -1695,8 +1839,9 @@ function MsgBlock(props: {
   children: React.ReactNode
   canEdit?: boolean
   onEdit?: () => void
+  onRegenerate?: () => void
 }) {
-  const { role, roleGlyph, isError, className, children, canEdit, onEdit } = props
+  const { role, roleGlyph, isError, className, children, canEdit, onEdit, onRegenerate } = props
   const { t } = useTranslation('threadView')
   const [copied, setCopied] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1732,6 +1877,16 @@ function MsgBlock(props: {
             aria-label={t('block.edit')}
           >
             ✎
+          </button>
+        )}
+        {onRegenerate && (
+          <button
+            className="msg-regen-btn"
+            onClick={onRegenerate}
+            title={t('block.regenerateTitle')}
+            aria-label={t('block.regenerate')}
+          >
+            ↻
           </button>
         )}
         <button

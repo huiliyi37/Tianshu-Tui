@@ -1229,6 +1229,29 @@ body {
   color: var(--muted); font-size: var(--text-sm);
 }
 
+/* Cross-session content search — "content matches" group under the tree. */
+.content-match-section { border-top: 1px solid var(--border); margin-top: var(--space-2); padding-bottom: var(--space-2); }
+.content-match-row {
+  padding: 5px 10px; cursor: pointer;
+  border-radius: var(--radius-sm); margin: 0 4px;
+}
+.content-match-row:hover { background: var(--hover); }
+.content-match-row.active { background: var(--panel-2); }
+.content-match-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.content-match-role {
+  flex-shrink: 0; font-size: 10px; padding: 0 5px; border-radius: 4px;
+  background: var(--panel-3); color: var(--muted); line-height: 16px;
+}
+.content-match-role.role-user { color: var(--accent); }
+.content-match-session {
+  font-size: var(--text-sm); color: var(--text-strong);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.content-match-snippet {
+  margin-top: 1px; font-size: 11px; color: var(--muted); line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
 /* Project tree */
 .project-tree {
   flex: 1;
@@ -1238,6 +1261,13 @@ body {
   gap: var(--space-1);
 }
 .project-tree-node { display: flex; flex-direction: column; }
+/* Virtualized session tree: .pt-vlist is the total-height spacer, each .pt-vrow
+   is absolutely positioned by the virtualizer and measured dynamically. */
+.pt-vlist { position: relative; width: 100%; flex-shrink: 0; }
+.pt-vrow { position: absolute; top: 0; left: 0; width: 100%; }
+/* Restore the inter-project gap the flex `gap` used to provide (included in
+   measureElement, so the virtualizer accounts for it). */
+.pt-vrow .project-tree-node { padding-top: var(--space-1); }
 .project-tree-header {
   width: 100%;
   display: flex; align-items: center; gap: 6px;
@@ -2052,6 +2082,37 @@ body {
 .vlist { position: relative; width: 100%; flex-shrink: 0; }
 .vrow { position: absolute; top: 0; left: 0; width: 100%; padding-bottom: var(--space-3); }
 .vrow-focused { box-shadow: inset 3px 0 0 var(--accent); border-radius: var(--radius-sm); }
+.vrow-search-active { box-shadow: inset 0 0 0 2px var(--accent); border-radius: var(--radius-sm); }
+
+/* In-thread Cmd+F search bar — sticky at the top of the message list. */
+.thread-search-bar {
+  position: sticky; top: 0; z-index: 5;
+  margin-left: auto; width: fit-content; flex-shrink: 0;
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: 4px 6px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.15));
+}
+.thread-search-input {
+  width: 200px; padding: 4px 8px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 12.5px; outline: none;
+}
+.thread-search-input:focus { border-color: var(--accent); }
+.thread-search-count {
+  min-width: 44px; text-align: center;
+  font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.thread-search-btn {
+  width: 24px; height: 24px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--muted);
+  border: none; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 13px; line-height: 1;
+}
+.thread-search-btn:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.thread-search-btn:disabled { opacity: 0.4; cursor: default; }
 .scroll-bottom-btn {
   position: sticky; bottom: var(--space-3); align-self: center;
   width: 36px; height: 36px; border-radius: 50%;
@@ -2133,6 +2194,17 @@ body {
 }
 .msg-body:hover .msg-copy-btn { opacity: 1; }
 .msg-copy-btn:hover { color: var(--text); background: var(--panel-3); }
+
+/* Regenerate (assistant replies) — sits left of the copy button. */
+.msg-regen-btn {
+  position: absolute; top: 0; right: 28px;
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--muted); border: none; cursor: pointer;
+  border-radius: var(--radius-sm); font-size: var(--text-sm);
+  opacity: 0; transition: opacity var(--dur-fast) var(--ease);
+}
+.msg-body:hover .msg-regen-btn { opacity: 1; }
+.msg-regen-btn:hover { color: var(--text); background: var(--panel-3); }
 
 /* User messages: right-aligned speech bubble so they don't get lost in the stream. */
 .msg.user {

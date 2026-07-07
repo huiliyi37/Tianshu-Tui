@@ -14,6 +14,8 @@ import {
   saveActiveProject,
   saveActiveSessionId,
   saveAttentionSeen,
+  loadComposerDrafts,
+  saveComposerDrafts,
   saveOpenTabs,
   saveSidebarVisible,
   saveReviewVisible,
@@ -239,7 +241,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     connectOpen: false,
     composerAttachments: [],
     reviewTabRequest: null,
-    composerDrafts: {},
+    composerDrafts: loadComposerDrafts(),
     scrollPositions: {},
   }))
 
@@ -282,6 +284,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveOpenTabs(state.openTabs)
   }, [state.openTabs])
+
+  useEffect(() => {
+    saveComposerDrafts(state.composerDrafts)
+  }, [state.composerDrafts])
 
   useEffect(() => {
     saveSplitMode(state.splitMode)

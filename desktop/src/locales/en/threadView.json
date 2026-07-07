@@ -51,6 +51,13 @@
     "chars": "{{count}} chars"
   },
   "scrollToBottom": "Scroll to bottom",
+  "search": {
+    "placeholder": "Search in conversation…",
+    "noMatch": "No matches",
+    "prev": "Previous match",
+    "next": "Next match",
+    "close": "Close search"
+  },
   "copy": "Copy",
   "copied": "Copied",
   "commands": {
@@ -138,6 +145,8 @@
     "checkpointLabel": "Checkpoint",
     "edit": "Edit",
     "editTitle": "Edit and resend",
+    "regenerate": "Regenerate",
+    "regenerateTitle": "Regenerate this reply (rewind to the previous message and resend)",
     "continue": "Continue",
     "continueNow": "Continue now",
     "landing": {

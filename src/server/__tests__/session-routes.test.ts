@@ -985,3 +985,76 @@ test('DELETE /sessions/:id/permanent refuses active sessions', async () => {
   const res = await router('DELETE', `/sessions/${id}/permanent`, {}, AUTH)
   assert.equal(res.status, 409)
 })
+
+// ── GET /sessions/search — cross-session transcript content search ──
+
+test('GET /sessions/search scans transcripts and caps per-session hits', async () => {
+  const prevDir = process.env.RIVET_SESSION_DIR
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-search-'))
+  process.env.RIVET_SESSION_DIR = dir
+  try {
+    const { router } = setup()
+    const a = await router('POST', '/sessions', { title: 'Alpha' }, AUTH)
+    const b = await router('POST', '/sessions', { title: 'Beta' }, AUTH)
+    const idA = (a.body as { id: string }).id
+    const idB = (b.body as { id: string }).id
+
+    // Session A: 5 matching lines → per-session cap of 3 applies. Mixed
+    // plain-JSON (legacy) rows; audit + tool rows must be skipped.
+    const linesA = [
+      JSON.stringify({ type: 'model_switch', t: 1, to: 'x' }),
+      JSON.stringify({ role: 'user', content: 'please refactor the flux capacitor wiring' }),
+      JSON.stringify({ role: 'assistant', content: 'the flux capacitor is now rewired' }),
+      JSON.stringify({ role: 'tool', tool_call_id: 't1', content: 'flux capacitor grep output' }),
+      JSON.stringify({ role: 'user', content: 'flux capacitor round two' }),
+      JSON.stringify({ role: 'assistant', content: 'flux capacitor round two done' }),
+      JSON.stringify({ role: 'user', content: 'flux capacitor round three' }),
+      'not-json-at-all',
+    ]
+    writeFileSync(join(dir, `${idA}.jsonl`), linesA.join('\n') + '\n')
+    // Session B: one hit; session with a missing transcript must not break.
+    writeFileSync(join(dir, `${idB}.jsonl`), JSON.stringify({ role: 'assistant', content: 'unrelated text about FLUX Capacitor casing' }) + '\n')
+
+    const res = await router('GET', '/sessions/search?q=flux%20capacitor', {}, AUTH)
+    assert.equal(res.status, 200)
+    const { results } = res.body as { results: Array<{ sessionId: string; title: string; role: string; snippet: string }> }
+    const hitsA = results.filter((r) => r.sessionId === idA)
+    const hitsB = results.filter((r) => r.sessionId === idB)
+    assert.equal(hitsA.length, 3) // capped at 3 despite 5 matching rows
+    assert.equal(hitsB.length, 1) // case-insensitive match
+    assert.equal(hitsA[0]!.title, 'Alpha')
+    assert.equal(hitsA[0]!.role, 'user')
+    assert.ok(hitsA[0]!.snippet.includes('flux capacitor'))
+    // tool rows and audit rows never surface
+    assert.ok(results.every((r) => r.role === 'user' || r.role === 'assistant'))
+  } finally {
+    if (prevDir === undefined) delete process.env.RIVET_SESSION_DIR
+    else process.env.RIVET_SESSION_DIR = prevDir
+  }
+})
+
+test('GET /sessions/search validates query length and auth', async () => {
+  const { router } = setup()
+  const short = await router('GET', '/sessions/search?q=a', {}, AUTH)
+  assert.equal(short.status, 400)
+  const missing = await router('GET', '/sessions/search', {}, AUTH)
+  assert.equal(missing.status, 400)
+  const unauthorized = await router('GET', '/sessions/search?q=hello', {}, {})
+  assert.equal(unauthorized.status, 401)
+})
+
+test('GET /sessions/search returns empty results when transcripts are absent', async () => {
+  const prevDir = process.env.RIVET_SESSION_DIR
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-search-empty-'))
+  process.env.RIVET_SESSION_DIR = dir
+  try {
+    const { router } = setup()
+    await router('POST', '/sessions', { title: 'NoFile' }, AUTH)
+    const res = await router('GET', '/sessions/search?q=anything', {}, AUTH)
+    assert.equal(res.status, 200)
+    assert.deepEqual((res.body as { results: unknown[] }).results, [])
+  } finally {
+    if (prevDir === undefined) delete process.env.RIVET_SESSION_DIR
+    else process.env.RIVET_SESSION_DIR = prevDir
+  }
+})

@@ -223,6 +223,20 @@ export async function listAllSessions(): Promise<SessionRecord[]> {
   return sessions
 }
 
+/** One transcript hit from the cross-session content search. */
+export type SessionSearchHit = {
+  sessionId: string
+  title: string
+  role: 'user' | 'assistant'
+  snippet: string
+}
+
+/** Search user/assistant text across all active sessions' transcripts (q >= 2 chars). */
+export async function searchSessionContent(q: string): Promise<SessionSearchHit[]> {
+  const { results } = await apiGet<{ results: SessionSearchHit[] }>(`/sessions/search?q=${encodeURIComponent(q)}`)
+  return results
+}
+
 export function getSession(id: string): Promise<SessionRecord> {
   return apiGet<SessionRecord>(`/sessions/${id}`)
 }
@@ -1078,7 +1092,7 @@ export interface PluginPreset {
   id: string
   name: string
   description: string
-  category: 'office' | 'dev' | 'productivity'
+  category: 'office' | 'dev' | 'productivity' | 'design'
   /** Repo-relative install source — resolved against the sidecar cwd. */
   installPath: string
   tools: string[]
