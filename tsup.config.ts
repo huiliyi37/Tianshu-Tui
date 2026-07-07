@@ -97,6 +97,7 @@ export default defineConfig({
   noExternal: [
     'string-width',
     'get-east-asian-width',
+    'chalk',
     'ink',
     'react',
     'diff',
