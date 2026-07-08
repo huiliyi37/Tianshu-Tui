@@ -118,4 +118,23 @@ describe('FallbackStreamClient', () => {
     client.setReasoningEffort('high')
     assert.equal(effort, 'high')
   })
+
+  it('falls back when primary throws stream_parse error', async () => {
+    const primary: StreamClient = {
+      async stream() {
+        const err = new Error('invalid SSE event')
+        ;(err as Error & { name: string }).name = 'StreamParseError'
+        throw err
+      },
+    }
+    const log: string[] = []
+    const client = new FallbackStreamClient(
+      primary, 'main',
+      [{ name: 'backup', create: () => { log.push('backup-created'); return makeClient('ok') } }],
+      (from, to) => log.push(`${from}->${to}`),
+    )
+    await client.stream(makeRequest(), makeCallbacks())
+    assert.ok(log.includes('main->backup'), 'should fall back on stream_parse error')
+    assert.ok(log.includes('backup-created'), 'backup client should be instantiated')
+  })
 })

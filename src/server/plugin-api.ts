@@ -15,7 +15,31 @@ import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
 import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
 import { parseManifest } from '../plugins/manifest.js'
 import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, isAbsolute, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+/**
+ * The project root in dev: the parent of dist/ (where main.js is emitted).
+ * In the Tauri-packaged app this dir has no plugins/ source tree, so local-path
+ * install will correctly fail with "No package.json found" — expected for
+ * packaged distributions where repo plugins aren't bundled.
+ */
+function projectRoot(): string {
+  // In dev, process.env.RIVET_SIDECAR_ENTRY points to repo's dist/main.js.
+  const entry = process.env.RIVET_SIDECAR_ENTRY
+  if (entry) return dirname(dirname(entry))
+  // Otherwise: the module is at dist/plugin-api.js, project root is parent of dist/.
+  return dirname(dirname(dirname(fileURLToPath(import.meta.url))))
+}
+
+/**
+ * Resolve a possibly-relative plugin source path to an absolute path.
+ * Relative paths are resolved against the project root (repo root in dev).
+ */
+function resolveSourcePath(inputPath: string): string {
+  if (isAbsolute(inputPath)) return inputPath
+  return join(projectRoot(), inputPath)
+}
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -71,9 +95,10 @@ export function buildPluginRoutes(apiToken?: string): Record<string, RouteHandle
       }
 
       // Pre-flight: read manifest from source to show permissions before installing
-      const pkgPath = join(input.path, 'package.json')
+      const sourcePath = resolveSourcePath(input.path)
+      const pkgPath = join(sourcePath, 'package.json')
       if (!existsSync(pkgPath)) {
-        return { status: 400, body: { ok: false, error: `No package.json found at ${input.path}` } }
+        return { status: 400, body: { ok: false, error: `No package.json found at ${sourcePath}` } }
       }
       let manifest: Record<string, unknown> | undefined
       try {
@@ -107,7 +132,7 @@ export function buildPluginRoutes(apiToken?: string): Record<string, RouteHandle
         }
       }
 
-      const result = await installPlugin(input.path)
+      const result = await installPlugin(sourcePath)
       if (result.ok) {
         return {
           status: 200,
