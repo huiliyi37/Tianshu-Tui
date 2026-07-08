@@ -30,3 +30,8 @@ known-folders = "1.1"
 time = { version = "0.3", features = ["formatting"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-single-instance = "2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
