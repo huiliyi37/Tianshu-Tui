@@ -110,6 +110,7 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
     }
 
     const makeDefault = yes(await ask(askIo, 'Set as default? [y/N]: '))
+    const allowProFallback = yes(await ask(askIo, 'Allow strong/pro models as fallback? [y/N]: '))
 
     setupProvider({
       providerName,
@@ -119,6 +120,7 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
       baseUrl,
       model,
       makeDefault,
+      allowProFallback,
     })
     write(`Provider ${providerName} configured. Run "rivet config providers" to inspect.`)
   } finally {
