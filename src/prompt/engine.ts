@@ -304,7 +304,7 @@ export class PromptEngine {
     }
   }
 
-  buildOaiRequest(inputMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number, options?: { sidePath?: boolean }): OaiChatRequest {
+  buildOaiRequest(inputMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number, options?: { sidePath?: boolean; onOrphanRepair?: (repairedMessages: OaiMessage[], count: number) => void }): OaiChatRequest {
     // Side-path builds (compaction summaries etc.) pass an unrelated message
     // array through the same engine. They must be HERMETIC: any state write
     // here (cachedFreshForUser, frozen snapshots, firstUserKey, volatile swap,
@@ -323,7 +323,16 @@ export class PromptEngine {
     // repair by inserting synthetic tool results before the request is sent.
     // No-op (same array reference) when there are no orphans, so the happy path
     // and prefix cache are untouched.
-    const oaiMessages = runResumePreflightOai(inputMessages).messages
+    const preflight = runResumePreflightOai(inputMessages)
+    const oaiMessages = preflight.messages
+
+    // P0-orphan-loop: when repair is transient (only in the outgoing request,
+    // not written back to session), the same orphans are detected every turn,
+    // causing the model to see "会话中断导致工具结果丢失" on every tool call.
+    // Write repaired messages back to the session so orphans are healed once.
+    if (preflight.repaired && preflight.syntheticResultsInserted > 0 && !sidePath && options?.onOrphanRepair) {
+      options.onOrphanRepair(oaiMessages, preflight.syntheticResultsInserted)
+    }
 
     // Compute GWT budget for dynamic appendix (context-update sub-blocks).
     // Track 4 预算审计：旧上限 200K chars（1M 窗口 5%≈50K token）是

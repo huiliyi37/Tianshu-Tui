@@ -489,6 +489,12 @@ export class TurnStepProducer {
       this.self.session.getMessages(),
       this.self.recentToolHistory,
       this.self.config.contextWindow,
+      {
+        onOrphanRepair: (repaired, count) => {
+          debugLog(`[orphan-repair] buildOaiRequest repaired ${count} orphan(s) — writing back to session`)
+          this.self.session.replaceMessages(repaired)
+        },
+      },
     )
 
     return { action: 'proceed', request }
