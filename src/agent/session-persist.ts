@@ -1,5 +1,5 @@
 import { appendFile } from 'fs/promises'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, rmSync, readdirSync, statSync } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, rmSync, readdirSync, statSync, openSync, fdatasyncSync, closeSync } from 'fs'
 import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { isAbsolute, join, relative, resolve } from 'path'
 import { sessionsDir } from '../config/paths.js'
@@ -180,6 +180,14 @@ export class SessionPersist {
     const json = serializeOaiSessionMessage(message)
     const line = appendChecksum(json) + '\n'
     await appendFile(this.filePath, line)
+    // Force data to disk so abort drain doesn't lose tool results.
+    // fdatasyncSync is non-blocking enough for the append rate here
+    // (metadata-only operations skip this path; compaction uses atomic rewrite).
+    try {
+      const fd = openSync(this.filePath, 'a')
+      fdatasyncSync(fd)
+      closeSync(fd)
+    } catch { /* non-critical: in-memory state still authoritative */ }
   }
 
   /**
@@ -327,6 +335,11 @@ export class SessionPersist {
     const json = serializeSessionMessage(message)
     const line = appendChecksum(json) + '\n'
     await appendFile(this.filePath, line)
+    try {
+      const fd = openSync(this.filePath, 'a')
+      fdatasyncSync(fd)
+      closeSync(fd)
+    } catch { /* non-critical */ }
   }
 
   /**
