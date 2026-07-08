@@ -1121,6 +1121,7 @@ export class TuiApp {
     this.connectFlow = new ConnectFlow()
     this.connectInput = ''
     this.connectError = undefined
+    this.input.setMode('input')
     this.activateOverlay('connect')
   }
 
