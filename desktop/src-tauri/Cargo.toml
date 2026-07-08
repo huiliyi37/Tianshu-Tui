@@ -33,5 +33,5 @@ tauri-plugin-single-instance = "2"
 
 [profile.release]
 strip = true
-lto = true
+lto = "thin"
 codegen-units = 1
