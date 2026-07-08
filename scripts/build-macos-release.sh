@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VER="2.16.6"
+VER="2.17.3"
 echo "=== 天枢 macOS 打包 v$VER ==="
 
 # 1. 确保版本一致
@@ -25,26 +25,33 @@ echo "--- 打包原生二进制 ---"
 node scripts/pack-native.js
 
 # 3. Tauri 构建 — arm64 (Apple Silicon)
+# --bundles app: skip DMG (hdiutil requires full macOS permissions outside agent sandbox)
 echo "=== 构建 arm64 (Apple Silicon) ==="
 cd desktop
-TAURI_ENV_TARGET_TRIPLE=aarch64-apple-darwin npm run tauri:build -- --target aarch64-apple-darwin
+TAURI_ENV_TARGET_TRIPLE=aarch64-apple-darwin npm run tauri:build -- --target aarch64-apple-darwin --bundles app
 cd ..
 
 # 4. Tauri 构建 — x86_64 (Intel)
 echo "=== 构建 x86_64 (Intel) ==="
 cd desktop
-TAURI_ENV_TARGET_TRIPLE=x86_64-apple-darwin npm run tauri:build -- --target x86_64-apple-darwin
+TAURI_ENV_TARGET_TRIPLE=x86_64-apple-darwin npm run tauri:build -- --target x86_64-apple-darwin --bundles app
 cd ..
 
-# 5. 收集产物
+# 5. 收集产物 — 从 .app bundle 创建 .tar.gz 归档
 mkdir -p release
 RELEASE_DIR="desktop/src-tauri/target/aarch64-apple-darwin/release/bundle"
-cp "$RELEASE_DIR/macos/"*.app.tar.gz "release/Tianshu_${VER}_aarch64.app.tar.gz" 2>/dev/null || echo "⚠ aarch64 .app.tar.gz 未找到"
-cp "$RELEASE_DIR/dmg/"*.dmg "release/Tianshu_${VER}_aarch64.dmg" 2>/dev/null || echo "⚠ aarch64 .dmg 未找到"
+if [ -d "$RELEASE_DIR/macos/Tianshu.app" ]; then
+  echo "--- 归档 arm64 .app ---"
+  tar -czf "release/Tianshu_${VER}_aarch64.app.tar.gz" -C "$RELEASE_DIR/macos" Tianshu.app
+  echo "  ✅ release/Tianshu_${VER}_aarch64.app.tar.gz"
+fi
 
 RELEASE_DIR_X64="desktop/src-tauri/target/x86_64-apple-darwin/release/bundle"
-cp "$RELEASE_DIR_X64/macos/"*.app.tar.gz "release/Tianshu_${VER}_x64.app.tar.gz" 2>/dev/null || echo "⚠ x64 .app.tar.gz 未找到"
-cp "$RELEASE_DIR_X64/dmg/"*.dmg "release/Tianshu_${VER}_x64.dmg" 2>/dev/null || echo "⚠ x64 .dmg 未找到"
+if [ -d "$RELEASE_DIR_X64/macos/Tianshu.app" ]; then
+  echo "--- 归档 x86_64 .app ---"
+  tar -czf "release/Tianshu_${VER}_x64.app.tar.gz" -C "$RELEASE_DIR_X64/macos" Tianshu.app
+  echo "  ✅ release/Tianshu_${VER}_x64.app.tar.gz"
+fi
 
 echo ""
 echo "=== 打包完成 ==="
