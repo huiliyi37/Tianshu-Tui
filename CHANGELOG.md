@@ -2,8 +2,14 @@
 
 ## 2026-07-14 — v2.16.4
 
+### Added
+
+- **swebench 评测工具链**（`0178dda3`）— 完整的 SWE-bench 评测脚本、worker 与进度解析，支持 `--domain` 参数注入星域 prompt。
+- **convergence-detector 测试覆盖**（`src/agent/__tests__/convergence-detector.test.ts`）— 新增 154 行测试。
+
 ### Changed
 
+- **convergence-detector 增强**— 优化收敛判定逻辑与 loop 集成。
 - 版本号升级至 2.16.4
 
 ## 2026-07-11 — v2.16.3: 修复 .app 启动崩溃 — chalk 运行时缺失
