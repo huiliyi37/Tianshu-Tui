@@ -151,7 +151,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
             const newContent = freshContent.replaceAll(oldString, newString)
             await writeFileAtomicAsync(filePath, applyEol(newContent, freshEol))
             await recordSuccessfulEdit(filePath, params.sessionId)
-          resetEditFailCount(filePath)
+            resetEditFailCount(filePath)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const expectedCount = params.input.expected_count as number | undefined
             const warn = await syntaxCheck(filePath, newContent)
