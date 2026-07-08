@@ -490,6 +490,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getLastUserInputRunTurn: () => self.lastUserInputRunTurn,
     getIntentObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 500) ?? null,
     getMaxTurns: () => self.config.maxTurns,
+    addSystemReminder: content => { self.session.appendSystemReminder(content) },
     hearthObserveEnabled: self.config.hearthObserveEnabled,
     getAnchorGraph: () => self.antiAnchoring.buildAnchorGraph(),
     getPrevAnchorGraphHash: () => self.prevAnchorGraphHash,

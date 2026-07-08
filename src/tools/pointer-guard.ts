@@ -60,9 +60,9 @@ export function pointerPlaceholderError(opts: {
   filePath: string
 }): string {
   return (
-    `Error: ${opts.field} is a ${POINTER_GUARD_ERROR_MARKER} ("${opts.matchedPrefix} …"), not real file contents. `
-    + `Pointers like this only appear in your PAST tool calls because large arguments are replaced by placeholders after execution — they were never valid input. `
-    + `Do NOT imitate that pattern: ${opts.toolName} requires the complete literal text in ${opts.field}. `
-    + `Write out the full real content now; if you need the previous version of this file, read_file ${opts.filePath} first.`
+    `错误：${opts.field} 的内容是 ${POINTER_GUARD_ERROR_MARKER}（"${opts.matchedPrefix} …"），不是真实的文件内容。 `
+    + `这类占位符只在你的历史消息中出现——大内容写入成功后参数会被替换成显示指针，它们从来不是合法输入。 `
+    + `不要模仿历史里的占位符格式。修复：在 ${opts.field} 参数中写出完整的真实内容（可以是完整代码）；`
+    + `如果需要此文件的旧版本，请先 read_file ${opts.filePath}。`
   )
 }

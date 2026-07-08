@@ -165,14 +165,26 @@ describe('detectDeviation', () => {
 
   it('detects deviated when toolCalls not in expectedTools', () => {
     const trace = createTrace('c1', 'unit', [
-      makeStep('step-1', ['edit_file']),
+      makeStep('step-1', ['read_file']),
     ])
     const result = makeResult('step-1', 1, {
-      toolCalls: [{ tool: 'bash', result_summary: 'ran command' }],
+      toolCalls: [{ tool: 'grep', result_summary: 'searched code' }],
       status: 'deviated',
     })
     const dev = detectDeviation(trace, result)
     assert.equal(dev.type, 'deviated')
+  })
+
+  it('does not trigger deviated for productive tools (write_file/edit_file/bash etc)', () => {
+    const trace = createTrace('c1', 'unit', [
+      makeStep('step-1', ['read_file']),
+    ])
+    const result = makeResult('step-1', 1, {
+      toolCalls: [{ tool: 'write_file', result_summary: 'wrote file' }],
+      status: 'done',
+    })
+    const dev = detectDeviation(trace, result)
+    assert.equal(dev.type, 'none')
   })
 
   it('returns none when toolCalls match expectedTools', () => {

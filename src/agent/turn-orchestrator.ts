@@ -109,6 +109,8 @@ export interface TurnStateBag {
   turnBudget: TurnBudget
   latestFsWatcherState: FsWatcherState
   consecutiveNoToolTurns: number
+  /** Consecutive turns where ALL tool calls were read-only (read_file/grep/glob etc). */
+  consecutiveReadOnlyTurns: number
   /** Fingerprint of the last fully-errored tool batch — for wedged-loop detection. */
   wedgeToolFingerprint: string
   /** Consecutive identical fully-errored tool batches — for wedged-loop detection. */
@@ -780,6 +782,13 @@ export class TurnOrchestrator {
         if (toolUses.length > 0) {
           // Reset no-tool counter — model is taking action
           this.deps.state.consecutiveNoToolTurns = 0
+          // ── B1 轮内只读调用计数（spec 三轮防御加固）──
+          // 在本轮工具结果处理后刷新计数器：全只读则 +1，否则重置。
+          if (turnUsedOnlyReadTools(toolUses)) {
+            this.deps.state.consecutiveReadOnlyTurns = this.deps.state.consecutiveReadOnlyTurns + 1
+          } else {
+            this.deps.state.consecutiveReadOnlyTurns = 0
+          }
           // ── Pre-execution diagnostic snapshot ──
           // Write sensorium before tool execution so freeze analysis can
           // identify which tools were about to run, even if executeBatch hangs.
@@ -923,6 +932,33 @@ export class TurnOrchestrator {
                 expect: {
                   kind: 'tool_appears',
                   tools: ['write_file', 'edit_file', 'hash_edit', 'apply_patch', 'run_tests', 'todo'],
+                  withinTurns: 2,
+                },
+              })
+            } else {
+              this.deps.appendSystemReminder(`<system-reminder>${content}</system-reminder>`)
+            }
+          }
+
+          // ── B1 连续只读螺旋提醒（spec 三轮防御加固）──
+          // 连续 4+ 轮全只读工具且没有写侧承诺 → 模型陷入无声读取螺旋。
+          // 此时 action-intent gate 不触发（未声明写入），但信息已足够——
+          // 注入一次性提醒推动模型行动。
+          if (this.deps.state.consecutiveReadOnlyTurns >= 4) {
+            const n = this.deps.state.consecutiveReadOnlyTurns
+            this.deps.state.consecutiveReadOnlyTurns = 0 // 一次性，不重复提醒
+            const content = `本轮已连续 ${n} 次只读操作（read_file/grep/glob 等），信息可能已足够 — 请基于已有理解开始行动（编辑、测试、或输出结论），不需要继续读取更多文件。`
+            if (this.deps.submitAdvisory) {
+              this.deps.submitAdvisory({
+                key: 'readonly-spiral',
+                priority: 0.65,
+                category: 'discipline',
+                content,
+                channel: 'system-reminder',
+                immediate: true,
+                expect: {
+                  kind: 'tool_appears',
+                  tools: ['write_file', 'edit_file', 'hash_edit', 'apply_patch', 'run_tests', 'bash', 'deliver_task'],
                   withinTurns: 2,
                 },
               })

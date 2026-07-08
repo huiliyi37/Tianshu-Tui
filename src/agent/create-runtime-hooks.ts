@@ -230,6 +230,10 @@ export interface RuntimeHookDeps {
   getIntentObjective?: () => string | null
   /** run 的 maxTurns 预算(turn-budget 预警)。 */
   getMaxTurns?: () => number
+
+  // ── 轮内防御三层加固（2026-07）──
+  /** 注入 system-reminder 到消息流末尾（不经 advisory bus 优先级竞争）。 */
+  addSystemReminder?: (content: string) => void
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -457,7 +461,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // offense. The inline guard error alone failed to break a ~20-rejection
   // imitation loop (word-batch report 2026-07-06).
   if (deps.advisoryBus) {
-    hooks.push(createPointerRegurgitationHook({ advisoryBus: deps.advisoryBus }))
+    hooks.push(createPointerRegurgitationHook({ advisoryBus: deps.advisoryBus, addSystemReminder: deps.addSystemReminder }))
   }
 
   // Error Diagnosis: postTool hook — when a tool fails, reads the

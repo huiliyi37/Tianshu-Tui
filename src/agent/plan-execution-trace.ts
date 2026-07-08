@@ -11,6 +11,7 @@
 
 import type { TaskDepthLayer } from '../context/task-contract.js'
 import type { PlanStepInput } from '../tools/types.js'
+import { PRODUCTIVE_TOOLS } from './convergence-detector.js'
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -294,7 +295,7 @@ export function detectDeviation(
   if (step && step.expectedTools.length > 0) {
     const newFileSet = new Set(lastResult.newFiles ?? [])
     const unexpected = lastResult.toolCalls.filter(
-      tc => !step.expectedTools.includes(tc.tool),
+      tc => !step.expectedTools.includes(tc.tool) && !PRODUCTIVE_TOOLS.has(tc.tool),
     )
     // 忽略纯探索性发现（stray newFiles 标记的）
     if (unexpected.length > 0 && lastResult.status !== 'done') {
