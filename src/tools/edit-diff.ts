@@ -1,4 +1,6 @@
-import { createTwoFilesPatch, structuredPatch } from 'diff'
+import { cpuPool } from '../workers/cpu-pool.js'
+import { diffUnifiedRaw, diffStructuredRaw } from '../workers/cpu-tasks.js'
+import type { RawHunk } from '../workers/cpu-tasks.js'
 
 /**
  * Display-only unified diff for write-family tools (edit_file/write_file/…).
@@ -12,7 +14,7 @@ import { createTwoFilesPatch, structuredPatch } from 'diff'
 const DEFAULT_MAX_DIFF_LINES = 600
 
 /**
- * Hard wall-clock bound for a single Myers diff pass.
+ * Inline-fallback timeout for a single Myers diff pass (1s).
  *
  * jsdiff's Myers is O((N+M)·D) SYNCHRONOUS CPU — a full rewrite of an 8K-line
  * file costs ~7s per pass, and a 50K-line file with 1/3 changed runs for
@@ -23,10 +25,13 @@ const DEFAULT_MAX_DIFF_LINES = 600
  * again (the "write 卡住 → 丢工具返回" loop, root-caused 2026-07-08).
  *
  * The diff here is display-only (uiContent) / diagnostics-narrowing — losing
- * it degrades a tool card, never correctness. 1s keeps worst-case block at
- * ~2s per write (two passes) while covering every realistic diff.
+ * it degrades a tool card, never correctness.  The pool path uses a 4s timeout
+ * (worker thread doesn't block the event loop); this 1s value is the inline
+ * floor when the pool is unavailable.
  */
 const DIFF_TIMEOUT_MS = 1000
+/** Worker-thread timeout — longer because it doesn't block the main thread. */
+const POOL_DIFF_TIMEOUT_MS = 4000
 
 /** Normalize Windows backslash paths to POSIX for clean diff headers. */
 function normPath(p: string): string {
@@ -41,14 +46,34 @@ export interface BuildFileDiffOptions {
 /**
  * Build a unified diff between `before` and `after` for `relPath`.
  * Returns '' when there is no textual change (identical or empty hunk set).
+ *
+ * Tries the worker pool first (4s, non-blocking), falls back to inline (1s).
  */
-export function buildFileDiff(relPath: string, before: string, after: string, opts?: BuildFileDiffOptions): string {
+export async function buildFileDiff(
+  relPath: string,
+  before: string,
+  after: string,
+  opts?: BuildFileDiffOptions,
+): Promise<string> {
   if (before === after) return ''
   const posixPath = normPath(relPath)
 
-  // timeout → undefined when the edit graph is too large to finish in time;
-  // fall back to no diff (callers degrade to the summary-text tool card).
-  const raw = createTwoFilesPatch(posixPath, posixPath, before, after, '', '', { context: 3, timeout: DIFF_TIMEOUT_MS })
+  // Try worker pool first with a longer timeout (non-blocking)
+  let raw: string | undefined
+  if (cpuPool.available) {
+    try {
+      raw = (await cpuPool.run('diffUnifiedRaw', [posixPath, before, after, POOL_DIFF_TIMEOUT_MS])) as
+        | string
+        | undefined
+    } catch {
+      // Pool unavailable or timed out — fall through to inline
+    }
+  }
+
+  // Inline fallback
+  if (raw === undefined) {
+    raw = diffUnifiedRaw(posixPath, before, after, DIFF_TIMEOUT_MS)
+  }
   if (raw === undefined) return ''
 
   // createTwoFilesPatch prepends an `Index:` + `===` preamble (INCLUDE_HEADERS
@@ -87,19 +112,46 @@ export interface LineRange {
  * at the deletion boundary — the ±context in filterDiagnosticsForEdit widens it
  * enough to catch adjacent errors. A brand-new file (before === '') yields one
  * range covering the whole file. No change yields [].
+ *
+ * Tries the worker pool first (4s, non-blocking), falls back to inline (1s).
  */
-export function computeChangedLineRanges(before: string, after: string): LineRange[] {
+export async function computeChangedLineRanges(
+  before: string,
+  after: string,
+): Promise<LineRange[]> {
   if (before === after) return []
-  const patch = structuredPatch('a', 'a', before, after, '', '', { context: 0, timeout: DIFF_TIMEOUT_MS })
-  if (patch === undefined) {
-    // Diff too expensive to finish in time — conservatively treat the whole
-    // AFTER file as changed (same shape as the brand-new-file case), so the
-    // LSP diagnostics filter surfaces everything instead of hiding errors.
+
+  // Try worker pool first with a longer timeout
+  let hunks: RawHunk[] | undefined
+  if (cpuPool.available) {
+    try {
+      const result = (await cpuPool.run('diffStructuredRaw', [
+        before,
+        after,
+        POOL_DIFF_TIMEOUT_MS,
+      ])) as { hunks: RawHunk[] } | undefined
+      hunks = result?.hunks
+    } catch {
+      // Pool unavailable or timed out — fall through to inline
+    }
+  }
+
+  // Inline fallback
+  if (hunks === undefined) {
+    const patch = diffStructuredRaw(before, after, DIFF_TIMEOUT_MS)
+    hunks = patch?.hunks
+  }
+
+  // Diff too expensive to finish in time — conservatively treat the whole
+  // AFTER file as changed (same shape as the brand-new-file case), so the
+  // LSP diagnostics filter surfaces everything instead of hiding errors.
+  if (hunks === undefined || hunks.length === 0) {
     const lineCount = after.length === 0 ? 1 : after.split('\n').length
     return [{ start: 1, end: lineCount }]
   }
+
   const ranges: LineRange[] = []
-  for (const hunk of patch.hunks) {
+  for (const hunk of hunks) {
     const start = Math.max(1, hunk.newStart)
     const end = hunk.newLines > 0 ? start + hunk.newLines - 1 : start
     ranges.push({ start, end })

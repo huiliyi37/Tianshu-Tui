@@ -166,16 +166,16 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     await writeFileAtomicAsync(filePath, finalContent)
     await recordSuccessfulEdit(filePath, params.sessionId)
     const lines = finalContent.split('\n').length
-    const warn = syntaxCheck(filePath, finalContent)
+    const warn = await syntaxCheck(filePath, finalContent)
     const afterForDiff = toLf(content)
     const diff = haveOldContentForDiff
-      ? buildFileDiff(relative(params.cwd, filePath), oldContentForDiff, afterForDiff)
+      ? await buildFileDiff(relative(params.cwd, filePath), oldContentForDiff, afterForDiff)
       : ''
     const uiContent = diff ? (warn ? `${diff}\n\n${warn}` : diff) : (warn ? warn : undefined)
     return {
       content: `Wrote ${finalContent.length} bytes (${lines} lines) to ${toPosixPath(filePath)}` + (warn ? '\n\n' + warn : ''),
       uiContent,
-      changedRanges: haveOldContentForDiff ? computeChangedLineRanges(oldContentForDiff, afterForDiff) : [],
+      changedRanges: haveOldContentForDiff ? await computeChangedLineRanges(oldContentForDiff, afterForDiff) : [],
     }
   },
 

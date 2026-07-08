@@ -9,8 +9,8 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
 }
 
-describe('formatToolCardLive', () => {
-  it('returns a fixed height even without output tail', () => {
+describe('formatToolCardLive', async () => {
+  it('returns a fixed height even without output tail', async () => {
     const lines = formatToolCardLive({
       toolName: 'bash',
       toolInput: { command: 'npm test' },
@@ -21,7 +21,7 @@ describe('formatToolCardLive', () => {
     assert.equal(lines.length, 1 + 3, 'header + fixed tail rows')
   })
 
-  it('pads empty tail rows when output is short', () => {
+  it('pads empty tail rows when output is short', async () => {
     const lines = formatToolCardLive({
       toolName: 'bash',
       toolInput: { command: 'echo hi' },
@@ -34,7 +34,7 @@ describe('formatToolCardLive', () => {
     assert.ok(plain.some(l => l.includes('hello')), 'content visible')
   })
 
-  it('shows only the last tailLines of output', () => {
+  it('shows only the last tailLines of output', async () => {
     const output = 'line1\nline2\nline3\nline4'
     const lines = formatToolCardLive({
       toolName: 'bash',
@@ -47,7 +47,7 @@ describe('formatToolCardLive', () => {
     assert.ok(!plain.some(l => l.includes('line1')), 'first line dropped')
   })
 
-  it('renders a spinner bullet when tick is provided', () => {
+  it('renders a spinner bullet when tick is provided', async () => {
     const lines = formatToolCardLive({
       toolName: 'bash',
       toolInput: { command: 'sleep 1' },
@@ -61,9 +61,9 @@ describe('formatToolCardLive', () => {
   })
 })
 
-describe('formatToolCard — inline edit diff (write family + isDiffContent)', () => {
-  it('colors an edit_file uiContent diff and shows the +N −M summary', () => {
-    const diff = buildFileDiff('src/foo.ts', 'alpha\nbeta\ngamma\n', 'alpha\nBETA\ngamma\n')
+describe('formatToolCard — inline edit diff (write family + isDiffContent)', async () => {
+  it('colors an edit_file uiContent diff and shows the +N −M summary', async () => {
+    const diff = await buildFileDiff('src/foo.ts', 'alpha\nbeta\ngamma\n', 'alpha\nBETA\ngamma\n')
     const lines = formatToolCard({
       toolName: 'edit_file',
       content: diff,
@@ -76,7 +76,7 @@ describe('formatToolCard — inline edit diff (write family + isDiffContent)', (
     assert.ok(plain.includes('+BETA'), 'addition line rendered')
   })
 
-  it('routes apply_patch output through the diff renderer', () => {
+  it('routes apply_patch output through the diff renderer', async () => {
     const diff = 'diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+new\n'
     const lines = formatToolCard({
       toolName: 'apply_patch',

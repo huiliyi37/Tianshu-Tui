@@ -5,18 +5,34 @@ import { createRequire } from 'node:module'
 // Load it lazily via require so a packaged sidecar without esbuild on disk
 // degrades (skips the JS/TS parse check) instead of crashing at startup with
 // ERR_MODULE_NOT_FOUND. Resolved once, then cached (null = unavailable).
+//
+// We use the async `transform()` API so esbuild runs on its own worker thread
+// and never blocks the main event loop (plan: cpu-pool). The sync
+// `transformSync` version is kept as an inline fallback if async isn't
+// available (very old esbuild), but it is gated behind a 2 MB size limit.
+
+type TransformFn = (input: string, options: Record<string, unknown>) => Promise<unknown>
 type TransformSync = (input: string, options: Record<string, unknown>) => unknown
-let _transformSync: TransformSync | null | undefined
-function getTransformSync(): TransformSync | null {
-  if (_transformSync !== undefined) return _transformSync
+
+interface EsbuildModule {
+  transform: TransformFn
+  transformSync: TransformSync
+}
+
+let _esbuild: EsbuildModule | null | undefined
+function getEsbuild(): EsbuildModule | null {
+  if (_esbuild !== undefined) return _esbuild
   try {
     const req = createRequire(import.meta.url)
-    _transformSync = (req('esbuild') as { transformSync: TransformSync }).transformSync
+    _esbuild = req('esbuild') as EsbuildModule
   } catch {
-    _transformSync = null
+    _esbuild = null
   }
-  return _transformSync
+  return _esbuild
 }
+
+/** Files larger than this skip CSS/HTML/JSON branch checks (O(n) scans). */
+const SYNC_SCAN_SIZE_LIMIT = 2 * 1024 * 1024 // 2 MB
 
 /**
  * Language-agnostic syntax and structural integrity check for written files.
@@ -27,25 +43,31 @@ function getTransformSync(): TransformSync | null {
  * warning directly into the ToolResult — so the model sees the error
  * immediately instead of discovering it 2–3 turns later.
  *
- * Supported: .ts .tsx .js .jsx (esbuild parser), .css (brace balance),
+ * Supported: .ts .tsx .js .jsx (esbuild parser, async), .css (brace balance),
  * .html (tag balance), .json (JSON.parse).
  *
  * Returns null if clean or unsupported extension.
  * Returns a warning string if an integrity issue is detected.
  */
-export function syntaxCheck(filePath: string, content: string): string | null {
+export async function syntaxCheck(filePath: string, content: string): Promise<string | null> {
   const ext = extname(filePath)
 
-  // ── TypeScript/JavaScript via esbuild parser ──
+  // ── TypeScript/JavaScript via esbuild async transform ──
   if (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs') {
     const loaderMap: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
       '.ts': 'ts', '.tsx': 'tsx', '.js': 'js', '.jsx': 'jsx', '.mjs': 'js', '.cjs': 'js',
     }
     const loader = loaderMap[ext] ?? 'js'
-    const transformSync = getTransformSync()
-    if (!transformSync) return null
+    const esbuild = getEsbuild()
+    if (!esbuild) return null
     try {
-      transformSync(content, { loader, target: 'esnext', jsx: 'automatic' })
+      // Prefer async transform — esbuild runs on its own worker, doesn't block
+      // the main thread. Falls back to sync for ancient esbuild versions.
+      if (esbuild.transform) {
+        await esbuild.transform(content, { loader, target: 'esnext', jsx: 'automatic' })
+      } else {
+        esbuild.transformSync(content, { loader, target: 'esnext', jsx: 'automatic' })
+      }
       return null
     } catch (err) {
       if (!(err instanceof Error)) return null
@@ -59,8 +81,9 @@ export function syntaxCheck(filePath: string, content: string): string | null {
     }
   }
 
-  // ── CSS: brace balance check ──
+  // ── CSS: brace balance check (skip if >2MB) ──
   if (ext === '.css') {
+    if (content.length > SYNC_SCAN_SIZE_LIMIT) return null
     let depth = 0
     let inString = false
     let stringChar = ''
@@ -90,8 +113,9 @@ export function syntaxCheck(filePath: string, content: string): string | null {
     return null
   }
 
-  // ── HTML: basic tag balance ──
+  // ── HTML: basic tag balance (skip if >2MB) ──
   if (ext === '.html' || ext === '.htm') {
+    if (content.length > SYNC_SCAN_SIZE_LIMIT) return null
     const voids = new Set([
       'area','base','br','col','embed','hr','img','input','link','meta',
       'param','source','track','wbr',
@@ -122,8 +146,9 @@ export function syntaxCheck(filePath: string, content: string): string | null {
     return null
   }
 
-  // ── JSON: parse check ──
+  // ── JSON: parse check (skip if >2MB) ──
   if (ext === '.json') {
+    if (content.length > SYNC_SCAN_SIZE_LIMIT) return null
     try {
       JSON.parse(content)
       return null
