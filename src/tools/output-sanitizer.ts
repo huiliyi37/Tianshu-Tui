@@ -188,6 +188,43 @@ const LINE_FILTERS: Record<string, LineFilter> = {
     ],
     maxLines: 20,
   },
+
+  // ── pnpm / yarn ──
+  // 来源：pnpm install 输出 "Progress: resolved 123, reused 100, downloaded 23, added 50"
+  // yarn 输出类似 npm 的 spinner + "Done in X.XXs"
+  'pnpm-yarn': {
+    matchCommand: /\b(?:pnpm|yarn)\s+(?:install|add|up|dlx|create)\b/,
+    stripLines: [
+      /^\s*(?:Progress:|Packages:|●|\│|├|└|\s){2,}/,  // pnpm progress tree / yarn step prefix
+      /^Done in \d/,            // yarn "Done in 3.45s"
+    ],
+    shortCircuit: /Already up[ -]to[ -]date|Nothing to install/,
+    maxLines: 25,
+  },
+
+  // ── go build / go test ──
+  // 来源：go build 输出 "go: downloading github.com/foo v1.2.3"
+  // go test 输出 "ok   pkg/name  0.123s" 或 "--- FAIL: TestName"
+  'go': {
+    matchCommand: /\bgo\s+(?:build|test|install|run|vet)\b/,
+    stripLines: [
+      /^go: downloading /,     // 依赖下载进度
+      /^ok\s+\S+\s+\d/,        // 通过行 "ok   pkg  0.123s"（FAIL 行含 error 会被 DIAGNOSTIC 保护）
+    ],
+    maxLines: 40,
+  },
+
+  // ── ruff / mypy ──
+  // 来源：ruff check 输出 "Found 3 errors (2 fixed, 1 remaining)"
+  // mypy 输出 "Success: no issues found in 5 source files"
+  'ruff': {
+    matchCommand: /\b(?:ruff|mypy|pyright)\b/,
+    shortCircuit: /(?:^|\n)(?:All good!|No errors? found|Success: no issues|0 errors?)/,
+    stripLines: [
+      /^\s*$/,                  // 空行压缩
+    ],
+    maxLines: 40,
+  },
 }
 
 /** 应用行级过滤。诊断行受 DIAGNOSTIC_LINE_RE 保护。 */
