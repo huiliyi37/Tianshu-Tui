@@ -1,90 +1,66 @@
 #!/bin/bash
-# swebench-eval.sh — SWE-bench evaluation runner for Tianshu predictions
-#
-# Prerequisites:
-#   colima start --vm-type vz --vz-rosetta  (Apple Silicon)
-#   /tmp/swebench-venv with swebench installed
-#   /tmp/swebench-predictions.jsonl
-#
-# Usage:
-#   bash scripts/swebench-eval.sh
-
+# Usage: bash scripts/swebench-eval.sh [predictions-file]
+# If no file given, rebuilds from /tmp/swebench-full-progress.jsonl
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-VENV_DIR="/tmp/swebench-venv"
-PREDICTIONS="/tmp/swebench-predictions.jsonl"
-RUN_ID="${1:-tianshu-v5}"
-TIMEOUT="${2:-600}"
+VENV="/tmp/swebench-venv"
+DOCKER_HOST="${DOCKER_HOST:-unix://$HOME/.colima/default/docker.sock}"
+DOCKER_CONFIG="${DOCKER_CONFIG:-/tmp/docker-cfg}"
+TIMEOUT="${TIMEOUT:-600}"
 
-# ── Docker setup ──────────────────────────────────────────────
-export DOCKER_CONFIG="${DOCKER_CONFIG:-/tmp/docker-cfg}"
-export DOCKER_HOST="${DOCKER_HOST:-unix://$HOME/.colima/default/docker.sock}"
-
+# ── Docker setup ──
 mkdir -p "$DOCKER_CONFIG"
-if [ ! -f "$DOCKER_CONFIG/config.json" ]; then
-  echo '{"auths":{}}' > "$DOCKER_CONFIG/config.json"
-fi
+[ -f "$DOCKER_CONFIG/config.json" ] || echo '{"auths":{}}' > "$DOCKER_CONFIG/config.json"
 
-# ── Docker check ──────────────────────────────────────────────
 if ! docker info >/dev/null 2>&1; then
-  echo "❌ Docker not accessible. Start colima: colima start --vm-type vz --vz-rosetta"
-  exit 1
-fi
-echo "✓ Docker ready"
-
-# ── Venv check ────────────────────────────────────────────────
-if [ ! -f "$VENV_DIR/bin/python" ]; then
-  echo "❌ Venv not found at $VENV_DIR. Run: python3.12 -m venv $VENV_DIR && $VENV_DIR/bin/pip install swebench"
+  echo "❌ Docker down. Run: colima start --vm-type vz --vz-rosetta --disk 100"
   exit 1
 fi
 
-# ── Predictions check ─────────────────────────────────────────
-if [ ! -f "$PREDICTIONS" ]; then
-  echo "❌ Predictions not found at $PREDICTIONS"
-  exit 1
+# ── Build predictions if needed ──
+PREDICTIONS="${1:-}"
+if [ -z "$PREDICTIONS" ]; then
+  PROGRESS="/tmp/swebench-full-progress.jsonl"
+  PREDICTIONS="/tmp/swebench-eval-predictions.jsonl"
+  echo "📦 Building predictions from $PROGRESS..."
+  python3 -c "
+import json
+ps = []
+with open('$PROGRESS') as f:
+    for l in f:
+        r = json.loads(l)
+        if r['status'] == 'completed' and r.get('patch'):
+            ps.append({'instance_id': r['instance_id'], 'model_name_or_path': 'tianshu-agent-v1', 'model_patch': r['patch']})
+with open('$PREDICTIONS', 'w') as out:
+    for p in ps: out.write(json.dumps(p) + '\n')
+print(f'{len(ps)} predictions written')
+"
 fi
-echo "✓ Predictions: $(wc -l < "$PREDICTIONS") instances"
 
-# ── Run evaluation ────────────────────────────────────────────
+echo "📊 Evaluating $(wc -l < "$PREDICTIONS") predictions..."
+RUN_ID="${RUN_ID:-tianshu-eval}"
+
 cd "$PROJECT_DIR"
-echo ""
-echo "🚀 Running evaluation (run_id=$RUN_ID, timeout=${TIMEOUT}s)..."
-echo ""
+rm -rf "logs/run_evaluation/$RUN_ID"
 
-"$VENV_DIR/bin/python" -m swebench.harness.run_evaluation \
+DOCKER_CONFIG="$DOCKER_CONFIG" DOCKER_HOST="$DOCKER_HOST" \
+"$VENV/bin/python" -m swebench.harness.run_evaluation \
   --dataset_name princeton-nlp/SWE-bench_Verified \
   --predictions_path "$PREDICTIONS" \
   --max_workers 1 \
   --run_id "$RUN_ID" \
   --timeout "$TIMEOUT"
 
-# ── Show results ──────────────────────────────────────────────
+# ── Results ──
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Results"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-RESOLVED=0
-TOTAL=0
+cd "$PROJECT_DIR"
 LOG_DIR="logs/run_evaluation/$RUN_ID/tianshu-agent-v1"
-
 if [ -d "$LOG_DIR" ]; then
-  for log in "$LOG_DIR"/*/run_instance.log; do
-    inst=$(basename "$(dirname "$log")")
-    result=$(grep "Result for" "$log" 2>/dev/null | grep -o "resolved: [A-Za-z]*" | cut -d' ' -f2)
-    TOTAL=$((TOTAL + 1))
-    if [ "$result" = "True" ]; then
-      RESOLVED=$((RESOLVED + 1))
-      echo "  ✅ $inst"
-    elif [ -n "$result" ]; then
-      echo "  ❌ $inst"
-    else
-      echo "  ⏳ $inst (no result yet)"
-    fi
-  done
+  total=$(find "$LOG_DIR" -name "run_instance.log" | wc -l | tr -d ' ')
+  resolved=$(grep -r "resolved: True" "$LOG_DIR" 2>/dev/null | wc -l | tr -d ' ')
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo " Resolved: $resolved / $total"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━"
 fi
-
-echo ""
-echo "Resolved: $RESOLVED / $TOTAL"
