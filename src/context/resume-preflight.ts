@@ -1,7 +1,18 @@
-import type { Message } from '../api/types.js'
+import type { Message, ContentBlock } from '../api/types.js'
 import type { OaiMessage, OaiToolMessage, OaiAssistantMessage } from '../api/oai-types.js'
 import { groupIntoRounds, computeInvariantStatus, groupIntoRoundsOai } from './rounds.js'
 import type { ResumePreflightReport } from './types.js'
+
+/** 写类工具——恢复时应告知模型"可能已成功，不需重试"。 */
+const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'hash_edit', 'apply_patch'])
+
+function syntheticResultContent(toolName?: string): string {
+  if (toolName && WRITE_TOOLS.has(toolName)) {
+    return '会话中断导致工具结果丢失——该写入操作很可能已经成功执行，文件已保存到磁盘。'
+      + '不要重试此操作：若需确认，先 read_file 检查文件当前状态。如果内容已存在，直接继续下一步。'
+  }
+  return '会话中断导致工具结果丢失——该工具可能已经成功执行。检查文件/缓冲区状态后再决定是否重试。'
+}
 
 export function runResumePreflight(messages: Message[]): ResumePreflightReport {
   const rounds = groupIntoRounds(messages)
@@ -41,12 +52,17 @@ export function runResumePreflight(messages: Message[]): ResumePreflightReport {
     }
     if (orphanIds.length === 0) continue
 
-    const syntheticResults = orphanIds.map(id => ({
-      type: 'tool_result' as const,
-      tool_use_id: id,
-      content: '[recovered] Tool result missing after interrupted session resume — the tool MAY have executed successfully. Check file/buffer state before re-running.',
-      is_error: false,
-    }))
+    const syntheticResults = orphanIds.map(id => {
+      const blocks = asstMsg.content as ContentBlock[]
+      const toolUse = blocks.find(b => b.type === 'tool_use' && b.id === id)
+      const toolName = toolUse?.type === 'tool_use' ? toolUse.name : undefined
+      return {
+        type: 'tool_result' as const,
+        tool_use_id: id,
+        content: syntheticResultContent(toolName),
+        is_error: false,
+      }
+    })
 
     // Insert right after the assistant message with orphan tool_use
     repaired.splice(round.startMessageIndex + 1, 0, { role: 'user', content: syntheticResults })
@@ -124,8 +140,7 @@ export function detectOrphanToolResultsOai(messages: OaiMessage[]): string[] {
   return orphanResultIds
 }
 
-const SYNTHETIC_TOOL_RESULT_CONTENT =
-  '[recovered] Tool result missing after interrupted session resume — the tool MAY have executed successfully. Check file/buffer state before re-running.'
+const SYNTHETIC_TOOL_RESULT_CONTENT = syntheticResultContent()
 
 /**
  * True when every assistant `tool_calls` message is IMMEDIATELY followed by a
@@ -207,7 +222,8 @@ export function runResumePreflightOai(messages: OaiMessage[]): OaiResumePrefligh
       if (existing) {
         repaired.push({ role: 'tool', tool_call_id: tc.id, content: existing.content })
       } else {
-        repaired.push({ role: 'tool', tool_call_id: tc.id, content: SYNTHETIC_TOOL_RESULT_CONTENT })
+        const toolName = tc.function?.name
+        repaired.push({ role: 'tool', tool_call_id: tc.id, content: syntheticResultContent(toolName) })
         inserted++
       }
     }

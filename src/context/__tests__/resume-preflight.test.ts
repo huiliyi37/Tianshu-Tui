@@ -66,8 +66,8 @@ describe('runResumePreflight', () => {
     assert.deepEqual(ids, ['tu_1', 'tu_2'])
     for (const block of blocks) {
       if (block.type === 'tool_result') {
-        assert.equal(block.is_error, true)
-        assert.ok(block.content.includes('interrupted'))
+        assert.equal(block.is_error, false)
+        assert.ok(block.content.includes('会话中断'))
       }
     }
   })
@@ -114,8 +114,8 @@ describe('runResumePreflight', () => {
     const first = blocks[0]!
     assert.equal(first.type, 'tool_result')
     if (first.type === 'tool_result') {
-      assert.equal(first.is_error, true)
-      assert.ok(first.content.includes('interrupted'))
+      assert.equal(first.is_error, false)
+      assert.ok(first.content.includes('会话中断'))
     }
   })
 

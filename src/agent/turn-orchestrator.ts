@@ -300,7 +300,7 @@ const MAX_WEDGE_REPEATS = 3
  *  following tool_calls"). Draining here lands the commit in-order in the common
  *  (abort-cooperative) case; the bound preserves responsiveness when a tool is
  *  wedged, and runResumePreflightOai backstops any overrun at request-build time. */
-const TOOL_ABORT_DRAIN_MS = 1500
+const TOOL_ABORT_DRAIN_MS = 3000
 
 /** Order-preserving fingerprint of a tool batch (name + input). Two batches with
  *  the same tools and args produce the same string, so a model re-emitting an
