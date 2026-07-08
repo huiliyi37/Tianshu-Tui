@@ -44,6 +44,10 @@ export interface ConvergenceInput {
    *  Used by tokenEfficiency signal to measure real output cost vs tool calls.
    *  When absent, falls back to the old tool-classification heuristic. */
   outputTokens?: number
+  /** Number of times the SAME message variant has been previously emitted
+   *  (before the current evaluation). Used by buildInjectedMessage to add a
+   *  progressive "第 N 次提醒" prefix — 0 = first time, no prefix. */
+  repeatCount?: number
 }
 
 export interface ConvergenceResult {
@@ -402,6 +406,46 @@ function textRepetitionHasData(fingerprints: ReadonlyArray<string>): boolean {
 const REPORT_TEXT_MIN_LEN = 200
 
 /**
+ * The set of tools that count as "productive" (write/test/commit class).
+ * Used by distance-since-productive and read-only penalty logic.
+ */
+export const PRODUCTIVE_TOOLS = new Set([
+  'edit_file', 'write_file', 'hash_edit', 'apply_patch',
+  'run_tests', 'bash', 'deliver_task', 'plan_submit', 'plan_close',
+])
+
+/**
+ * Distance since the last productive tool call, measured backwards from the
+ * end of recentToolHistory. Returns the number of trailing entries that are
+ * all non-productive. When the entire history is non-productive (or empty),
+ * returns the history length.
+ *
+ * This is the key metric that distinguishes healthy read-write alternation
+ * from genuine read-only stagnation. A developer who reads 3 files then edits
+ * 2 then reads 3 more has distance=3 — not stuck. The same developer reading
+ * 15 files with no edits has distance=15 — genuinely stuck.
+ *
+ * Returns Infinity when there has NEVER been a productive tool in the history
+ * — this lets callers apply the full stagnation penalty (no alternation
+ * evidence to exempt) while still allowing finite distances to gate the
+ * penalty for mixed histories.
+ *
+ * Incident 9266c3a7: the old productiveStagnation check only looked at a
+ * 6-entry window, so every read segment between edit bursts was flagged as
+ * "all reads, zero productive" — 120 false advisories across 154 turns.
+ */
+function distanceSinceLastProductive(
+  history: ConvergenceInput['recentToolHistory'],
+): number {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (PRODUCTIVE_TOOLS.has(history[i]!.tool)) {
+      return history.length - 1 - i
+    }
+  }
+  return Infinity
+}
+
+/**
  * 识别 recentToolHistory 中是否存在诊断探针（调试性质的 bash/grep 调用）。
  * 诊断探针的存在说明 agent 在"主动诊断"而非"被动读取"——
  * 有 hypothesis 并用探针验证，不应与纯只读停滞同等惩罚。
@@ -453,6 +497,7 @@ function computeConvergenceScore(
   providerName?: string,
   signalsMissingData: ReadonlySet<keyof ConvergenceSignals> = new Set(),
   producingReport = false,
+  windowSize = 6,
 ): number {
   // Weight re-allocation for no-data signals: when a penalty signal lacks
   // sufficient data, its default 1.0 ("no penalty") would otherwise enter the
@@ -517,22 +562,29 @@ function computeConvergenceScore(
   // read→think→read→think where each turn has a tool call but productive
   // ratio remains 0.
   //
+  // Distance guard (incident 9266c3a7): the window-only view falsely flags
+  // the read segment of a healthy read→edit→read→edit rhythm. If a productive
+  // tool exists within 2×windowSize records back in FULL history, the agent
+  // is alternating, not stuck — skip this penalty entirely.
+  //
   // GLM: Preserved Thinking accumulates server-side reasoning state across
   // turns. Once GLM enters a read-only loop the server retains that trajectory,
   // making it harder to break out — hence the tighter ramp (4→0.65 vs 8→0.7).
   // Default ramp is tuned for DeepSeek's stateless reasoning model.
-  const productiveTools = new Set([
-    'edit_file', 'write_file', 'hash_edit', 'apply_patch',
-    'run_tests', 'bash', 'deliver_task', 'plan_submit', 'plan_close',
-  ])
+  const productiveTools = PRODUCTIVE_TOOLS
   const window = recentToolHistory.slice(-Math.min(turn, 15))
   const productiveCount = window.filter(h => productiveTools.has(h.tool)).length
   const productiveRatio = window.length > 0 ? productiveCount / window.length : 1.0
   const isGlm = providerName === 'glm'
+  // Distance guard: if the last productive tool is close enough that this read
+  // burst is just the read phase of a read-write cycle, don't penalize.
+  const distanceToProductive = distanceSinceLastProductive(recentToolHistory)
+  const distanceThreshold = windowSize * 2
+  const withinProductiveRange = distanceToProductive < distanceThreshold
   // Skip the read-only penalty when the agent is producing a substantial text
   // deliverable (review/analysis report): read-heavy work with a textual output
   // is legitimate progress, not stagnation.
-  if (!producingReport && window.length >= (isGlm ? 2 : 4) && productiveRatio === 0) {
+  if (!producingReport && !withinProductiveRange && window.length >= (isGlm ? 2 : 4) && productiveRatio === 0) {
     // 诊断探针存在时减半惩罚：agent 在主动诊断而非被动读取
     const diagProbes = hasDiagnosticProbes(window)
     if (isGlm) {
@@ -585,8 +637,23 @@ function buildInjectedMessage(
   deliveryStatus?: string,
   noToolTurnCount?: number,
   productiveStagnation?: boolean,
+  repeatCount?: number,
 ): string {
   const lines: string[] = []
+
+  // Progressive prefix: when the same message variant has been emitted before,
+  // add a "第 N 次提醒" header so the agent knows this isn't new information.
+  // The prefix escalates: first repeat acknowledges prior nudge was ignored;
+  // subsequent repeats tell the agent to ignore if direction is fine.
+  if (repeatCount && repeatCount > 0) {
+    const nth = repeatCount + 1 // this emission is the (repeatCount+1)-th
+    if (repeatCount === 1) {
+      lines.push(`（第 ${nth} 次同类提醒 — 上次提醒后你可能已调整，如果方向没问题请忽略）`)
+    } else {
+      lines.push(`（第 ${nth} 次同类提醒 — 已多次发出，如果方向没问题请忽略此信息）`)
+    }
+    lines.push('')
+  }
 
   // Productive-ratio stagnation variant: model keeps calling read/grep tools
   // (so noToolTurnCount stays 0), but never edits/tests/commits. This catches
@@ -752,7 +819,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   const producingReport = !hasUnverifiedEdits
     && isProducingReport(input.textFingerprints ?? [], signals.textRepetitionPenalty)
 
-  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName, signalsMissingData, producingReport)
+  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName, signalsMissingData, producingReport, windowSize)
 
   // Determine escalation level
   let level: 0 | 1 | 2 | 3 = 0
@@ -772,16 +839,24 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // alternating read-analyze loop. This bypasses the turn gate because the
   // pattern is meaningful from early turns — each turn burns full input cost
   // (especially on GLM with no prefix cache).
-  const productiveToolsSet = new Set([
-    'edit_file', 'write_file', 'hash_edit', 'apply_patch',
-    'run_tests', 'bash', 'deliver_task', 'plan_submit', 'plan_close',
-  ])
+  //
+  // Distance guard (incident 9266c3a7): the window-only productiveRatio sees
+  // the read tail of a healthy read→edit→read→edit cycle as "all reads" and
+  // fires 120+ false advisories. Require the last productive tool to be far
+  // enough back (≥ 2×windowSize) that this isn't just a normal read phase
+  // between edit bursts.
+  const productiveToolsSet = PRODUCTIVE_TOOLS
   const stagnationWindow = input.recentToolHistory.slice(-windowSize)
   const productiveInWindow = stagnationWindow.filter(h => productiveToolsSet.has(h.tool)).length
   const productiveRatio = stagnationWindow.length > 0
     ? productiveInWindow / stagnationWindow.length
     : 1.0
-  const productiveStagnation = stagnationWindow.length >= Math.min(windowSize, 4) && productiveRatio === 0 && !producingReport
+  const distanceToLastProductive = distanceSinceLastProductive(input.recentToolHistory)
+  const productiveDistanceThreshold = windowSize * 2
+  const productiveStagnation = stagnationWindow.length >= Math.min(windowSize, 4)
+    && productiveRatio === 0
+    && !producingReport
+    && distanceToLastProductive >= productiveDistanceThreshold
 
   // Reasoning-aware no-tool handling. A model that keeps emitting fresh,
   // substantial, non-repetitive analysis on each no-tool turn is reasoning
@@ -838,7 +913,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   const shouldForceSplit = level >= 3 && !noToolForceAbort
   const shouldKick = level >= 2
   const injectedMessage = (level >= 2)
-    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount, productiveStagnation)
+    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount, productiveStagnation, input.repeatCount)
     : null
 
   return {

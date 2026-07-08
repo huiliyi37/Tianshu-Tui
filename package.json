@@ -1,6 +1,6 @@
 {
   "name": "tianshu-tui",
-  "version": "2.16.3",
+  "version": "2.16.4",
   "description": "Terminal coding agent optimized for DeepSeek V4 prefix cache",
   "license": "Apache-2.0",
   "type": "module",
@@ -60,6 +60,8 @@
     "chalk": "^5.6.2",
     "diff": "^9.0.0",
     "get-east-asian-width": "^1.6.0",
+    "parquet-wasm": "^0.7.2",
+    "parquetjs": "^0.11.2",
     "string-width": "^8.2.1",
     "tree-sitter-wasms": "^0.1.13",
     "turndown": "^7.2.4",

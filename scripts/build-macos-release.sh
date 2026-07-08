@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# 天枢 macOS 双架构打包脚本 (2.16.3)
+# 天枢 macOS 双架构打包脚本 (2.16.4)
 # 用法: bash scripts/build-macos-release.sh
 # 前提: Node 24+, Rust targets (aarch64 + x86_64), Tauri CLI
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VER="2.16.3"
+VER="2.16.4"
 echo "=== 天枢 macOS 打包 v$VER ==="
 
 # 1. 确保版本一致
