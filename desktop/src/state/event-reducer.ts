@@ -244,19 +244,15 @@ function coalesceDeltas(events: SessionEvent[]): SessionEvent[] {
   return out
 }
 
+/** Maximum allowed block text length — prevents unbounded string growth in
+ *  streaming runs. 500KB is well above any reasonable single assistant reply
+ *  (~125K tokens) while capping worst-case memory use. */
+const MAX_BLOCK_TEXT_LEN = 500_000
+
 function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
   // Idempotent replay: ignore events at or below what we've folded.
   if (ev.seq <= state.lastSeq) return state
   const next: EventViewState = { ...state, lastSeq: ev.seq }
-
-  /** Maximum allowed block text length — prevents unbounded string growth in
-   *  streaming runs. 500KB is well above any reasonable single assistant reply
-   *  (~125K tokens) while capping worst-case memory use. */
-  const MAX_BLOCK_TEXT_LEN = 500_000
-
-  /** Soft cap on the total number of timeline blocks. Beyond this, the oldest
-   *  blocks are trimmed to keep reducer and renderer O(n) cost bounded. */
-  const MAX_BLOCKS = 5_000
 
   switch (ev.type) {
     case 'user':
@@ -284,9 +280,9 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         // (~4KB for 500 blocks) and only fires once per rAF frame after
         // coalesceDeltas merging.
         const blocks = next.blocks.slice()
-        let appended = last.text + text
-        if (appended.length > MAX_BLOCK_TEXT_LEN) appended = appended.slice(0, MAX_BLOCK_TEXT_LEN)
-        blocks[lastIdx] = { ...last, text: appended }
+        const appended = last.text + text
+        const clamped = appended.length > MAX_BLOCK_TEXT_LEN ? appended.slice(0, MAX_BLOCK_TEXT_LEN) : appended
+        blocks[lastIdx] = { ...last, text: clamped }
         next.blocks = blocks
         next.blocksRev = next.blocksRev + 1
       } else if (text) {
@@ -303,9 +299,9 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         const lastIdx = next.blocks.length - 1
         const last = next.blocks[lastIdx]!
         const blocks = next.blocks.slice()
-        let appended = last.text + text
-        if (appended.length > MAX_BLOCK_TEXT_LEN) appended = appended.slice(0, MAX_BLOCK_TEXT_LEN)
-        blocks[lastIdx] = { ...last, text: appended }
+        const appended = last.text + text
+        const clamped = appended.length > MAX_BLOCK_TEXT_LEN ? appended.slice(0, MAX_BLOCK_TEXT_LEN) : appended
+        blocks[lastIdx] = { ...last, text: clamped }
         next.blocks = blocks
         next.blocksRev = next.blocksRev + 1
       } else if (text) {
