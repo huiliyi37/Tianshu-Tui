@@ -5,7 +5,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
 import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
-import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession } from './read-file.js'
+import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession, incrementEditFailCount, resetEditFailCount } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
 import { detectEol, chooseEol, toLf, applyEol } from './line-endings.js'
@@ -223,8 +223,10 @@ Note: For large new_string, the message history keeps only a short pointer
     // The first edit shifts line numbers; subsequent L<num> anchors point to
     // wrong content. Force the model to re-read and use full-hash anchors.
     if (posOnly && wasFileEditedBySession(filePath, params.sessionId)) {
+      const fails = incrementEditFailCount(filePath)
+      const gatePrefix = fails >= 3 ? `After ${fails} consecutive hash_edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
       return {
-        content: [
+        content: gatePrefix + [
           `Error: position-only anchors blocked on ${filePath}`,
           `This file has been edited in the current session, so line numbers have shifted.`,
           `Re-read the file and use L<num>:<hash> anchors, or use edit_file instead.`,
@@ -305,6 +307,7 @@ Note: For large new_string, the message history keeps only a short pointer
 
             await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
             await recordSuccessfulEdit(filePath, params.sessionId)
+            resetEditFailCount(filePath)
             const warn = await syntaxCheck(filePath, newContent)
             const recoveredInfo = recoveredCount > 0
               ? ` (auto-recovered ${recoveredCount} stale anchors)`
@@ -321,8 +324,10 @@ Note: For large new_string, the message history keeps only a short pointer
       }
 
       // Recovery not possible — return the original stale diagnostic
+      const fails = incrementEditFailCount(filePath)
+      const gatePrefix = fails >= 3 ? `After ${fails} consecutive hash_edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
       return {
-        content: formatStaleDiagnostic(filePath, anchors, lines, mismatches),
+        content: gatePrefix + formatStaleDiagnostic(filePath, anchors, lines, mismatches),
         isError: true,
       }
     }
@@ -344,6 +349,7 @@ Note: For large new_string, the message history keeps only a short pointer
 
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     await recordSuccessfulEdit(filePath, params.sessionId)
+    resetEditFailCount(filePath)
     const warn = await syntaxCheck(filePath, newContent)
     const posDrift = positionDriftWarning
       ? '\n\n⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'

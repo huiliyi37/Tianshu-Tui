@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { applyEol, chooseEol, detectEol } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
+import { incrementEditFailCount, resetEditFailCount } from './read-file.js'
 import {
   inferLang,
   resolveLang,
@@ -104,6 +105,18 @@ export const AST_EDIT_TOOL: Tool = {
       }
       if (typeof op.replace !== 'string') {
         return { content: 'Error: each op must have a "replace" template', isError: true }
+      }
+    }
+
+    // Regex-misuse guard: ast-grep uses its own pattern syntax ($NAME, $$),
+    // not regular expressions. \d \w .* etc. will not work as intended.
+    for (const op of ops) {
+      const find = op.find as string
+      if (/\\[dDwWsSbB1-9]/.test(find)) {
+        return {
+          content: `Error: "find" pattern contains regex tokens (\\d, \\w, \\s, \\1, etc.).\n\nast_edit uses ast-grep syntax, not regular expressions. Patterns like "var $NAME = $VAL" match AST nodes — use $ metavariables for placeholders and $$ for ellipsis.\n\nOffending pattern: ${find.slice(0, 80)}`,
+          isError: true,
+        }
       }
     }
 
@@ -276,6 +289,7 @@ export const AST_EDIT_TOOL: Tool = {
               // files); ast-grep edits operate on \n-normalized ranges internally.
               const eol = chooseEol(filePath, detectEol(source), getTargetEol())
               await writeFileAtomicAsync(filePath, applyEol(currentSource, eol))
+              resetEditFailCount(filePath)
             } catch {
               errors.push(`${filePath}: failed to write changes`)
             }
@@ -310,6 +324,12 @@ export const AST_EDIT_TOOL: Tool = {
 
     const summary = `${totalChanges} change(s) ${action} in ${fileResults.length} file(s)${errors.length > 0 ? `, ${errors.length} error(s)` : ''}`
     const errorSection = errors.length > 0 ? `\n\nErrors:\n${errors.map(e => `  - ${e}`).join('\n')}` : ''
+
+    // Fail counter: if all ops produced errors and no changes, increment for
+    // the first file with errors (the primary target). Reset on success above.
+    if (errors.length > 0 && totalChanges === 0) {
+      incrementEditFailCount(fileResults.length > 0 ? fileResults[0]!.file : (paths[0] ?? ''))
+    }
 
     return { content: `${summary}\n${body}${errorSection}` }
   },
