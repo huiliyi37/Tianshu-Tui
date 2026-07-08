@@ -166,16 +166,34 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     await writeFileAtomicAsync(filePath, finalContent)
     await recordSuccessfulEdit(filePath, params.sessionId)
     const lines = finalContent.split('\n').length
-    const warn = await syntaxCheck(filePath, finalContent)
-    const afterForDiff = toLf(content)
-    const diff = haveOldContentForDiff
-      ? await buildFileDiff(relative(params.cwd, filePath), oldContentForDiff, afterForDiff)
-      : ''
+
+    // Post-write enhancements (syntax-check, diff, changed-ranges) are
+    // display-only / diagnostics-narrowing.  Failures here MUST NOT cause
+    // the tool call to report an error — the file is already on disk and
+    // an error would create a "write succeeded but tool reports failure"
+    // loop: the model retries, hits the blind-overwrite guard, and stalls.
+    let warn = ''
+    let diff = ''
+    let changedRanges: number[][] = []
+    try {
+      warn = (await syntaxCheck(filePath, finalContent)) ?? ''
+    } catch (e) {
+      warn = `(syntax-check skipped: ${(e as Error).message})`
+    }
+    try {
+      const afterForDiff = toLf(content)
+      if (haveOldContentForDiff) {
+        diff = await buildFileDiff(relative(params.cwd, filePath), oldContentForDiff, afterForDiff)
+        changedRanges = await computeChangedLineRanges(oldContentForDiff, afterForDiff)
+      }
+    } catch (e) {
+      warn = warn ? `${warn}\n(diff skipped: ${(e as Error).message})` : `(diff skipped: ${(e as Error).message})`
+    }
     const uiContent = diff ? (warn ? `${diff}\n\n${warn}` : diff) : (warn ? warn : undefined)
     return {
       content: `Wrote ${finalContent.length} bytes (${lines} lines) to ${toPosixPath(filePath)}` + (warn ? '\n\n' + warn : ''),
       uiContent,
-      changedRanges: haveOldContentForDiff ? await computeChangedLineRanges(oldContentForDiff, afterForDiff) : [],
+      changedRanges,
     }
   },
 
