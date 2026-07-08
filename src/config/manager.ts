@@ -500,6 +500,7 @@ export interface SetupProviderOptions {
   baseUrl?: string
   model?: ModelConfig
   makeDefault?: boolean
+  allowProFallback?: boolean
 }
 
 function assertValidUrl(value: string): void {
@@ -548,6 +549,14 @@ export function upsertProviderModel(providerName: string, model: ModelConfig, op
   saveConfig(cfg)
 }
 
+export function setProviderAllowProFallback(providerName: string, allowProFallback: boolean): void {
+  const cfg = loadConfig()
+  const provider = cfg.provider.providers[providerName]
+  if (!provider) throw new Error(`Provider "${providerName}" not found`)
+  provider.allowProFallback = allowProFallback
+  saveConfig(cfg)
+}
+
 export function setupProvider(options: SetupProviderOptions): void {
   const cfg = loadConfig()
   const presetKey = options.preset ?? (isProviderPresetKey(options.providerName) ? options.providerName : undefined)
@@ -577,6 +586,9 @@ export function setupProvider(options: SetupProviderOptions): void {
   }
   cfg.provider.providers[options.providerName] = next
   if (options.makeDefault) cfg.provider.default = options.providerName
+  if (options.allowProFallback !== undefined) {
+    next.allowProFallback = options.allowProFallback
+  }
   saveConfig(cfg)
 }
 
@@ -587,6 +599,7 @@ export interface SetupCustomProviderOptions {
   apiKey?: string
   model: { id: string; alias?: string; contextWindow: number; maxTokens: number; reasoningEffort?: ModelConfig['reasoningEffort'] }
   makeDefault?: boolean
+  allowProFallback?: boolean
 }
 
 /**
@@ -622,6 +635,7 @@ export function setupCustomProvider(options: SetupCustomProviderOptions): void {
     },
     thinking: 'enabled',
     maxTokens,
+    allowProFallback: options.allowProFallback ?? false,
     models: [model],
     unsupported: [],
   }
