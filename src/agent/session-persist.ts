@@ -189,6 +189,15 @@ export class SessionPersist {
    * (fdatasyncSync) blocked the event loop once per message append — ordering
    * is already guaranteed by the session-persist-listener writeChain awaiting
    * this method before the next append starts.
+   *
+   * Trade-off: writing to page cache (async) rather than fsyncing to disk
+   * means a power loss / kernel crash within the ~30s dirty-page writeback
+   * window may lose trailing lines (including just-written tool results).
+   * SIGKILL / OOM / process crash are safe — the OS eventually flushes
+   * page-cache. On next start, loadOai's repairOrphanToolCalls strips any
+   * orphan tool_use entries introduced by the gap. Acceptable: the window is
+   * narrow, the failure mode is self-healing, and the event-loop benefit
+   * (no per-message ~1ms sync stall) is substantial at scale.
    */
   private async fdatasyncQuiet(): Promise<void> {
     try {
@@ -241,11 +250,34 @@ export class SessionPersist {
       } catch { /* skip malformed rows */ }
     }
     // 压#7: Validate tool_call/tool_result pairing
-    return this.repairOrphanToolCalls(messages)
+    const { messages: repaired, hadOrphans } = this.repairOrphanToolCalls(messages)
+    if (hadOrphans) {
+      // Orphan tool_use entries were stripped from history. These tools were
+      // NEVER executed (crash occurred between stream commit and execution).
+      // Any files they would have created/modified do NOT exist — the model
+      // must re-execute any pending writes, not assume they succeeded.
+      repaired.unshift({
+        role: 'system',
+        content: '<system-reminder>The previous session was interrupted mid-turn. '
+          + 'Some tool calls from the last assistant message were stripped because '
+          + 'they were never executed (the crash happened between the model '
+          + 'committing tool_use and the tools running). Any files those tools '
+          + 'would have written or modified DO NOT EXIST — re-run any pending edits, '
+          + 'do not assume files were saved.</system-reminder>',
+      })
+    }
+    return repaired
   }
 
-  /** 压#7: Remove orphan tool_use/tool_result pairs left by corrupted/missing lines. */
-  private repairOrphanToolCalls(messages: OaiMessage[]): OaiMessage[] {
+  /** 压#7: Remove orphan tool_use/tool_result pairs left by corrupted/missing lines.
+   *
+   * Orphan tool_use entries occur when the stream delivered a complete
+   * tool_calls block but the process was killed before the tool executed
+   * (force-kill, power loss, or stream error after tool_use commit). The tool
+   * was NEVER run — any files it would have created/modified do NOT exist.
+   * Returns whether any orphans were stripped so the caller can warn the model
+   * not to assume side effects from the removed tools. */
+  private repairOrphanToolCalls(messages: OaiMessage[]): { messages: OaiMessage[]; hadOrphans: boolean } {
     const toolCallIds = new Set<string>()
     const toolResultIndices = new Map<string, number>()
     for (let i = 0; i < messages.length; i++) {
@@ -264,23 +296,25 @@ export class SessionPersist {
 
     // Pass 1: collect valid messages (strip orphan tool_calls, drop orphan results)
     const result: OaiMessage[] = []
+    let hadOrphans = false
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i]!
       // Drop orphan tool results
-      if (orphanResultIdx.has(i)) continue
+      if (orphanResultIdx.has(i)) { hadOrphans = true; continue }
       // Strip orphan tool_calls from assistant messages
       if (msg.role === 'assistant' && msg.tool_calls) {
         const valid = msg.tool_calls.filter(tc => tc.id && toolResultIndices.has(tc.id))
         // Drop the message entirely if all tool_calls were orphan and content is empty
-        if (valid.length === 0 && !msg.content) continue
+        if (valid.length === 0 && !msg.content) { hadOrphans = true; continue }
         if (valid.length !== msg.tool_calls.length) {
+          hadOrphans = true
           result.push({ ...msg, tool_calls: valid })
           continue
         }
       }
       result.push(msg)
     }
-    return result
+    return { messages: result, hadOrphans }
   }
 
   /** Audit breadcrumb types: skipped on replay (parseSessionLine), preserved across rewrites. */
