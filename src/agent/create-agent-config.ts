@@ -224,8 +224,8 @@ function buildFallbackChain(
           )
         }
         // Use the fallback provider's fallbackModel if set; default to Flash
-        // ('deepseek-chat') to avoid cold-start cache miss cost on Pro models.
-        const fallbackModelId = fp.fallbackModel ?? 'deepseek-chat'
+        // ('deepseek-v4-flash') to avoid cold-start cache miss cost on Pro models.
+        const fallbackModelId = fp.fallbackModel ?? 'deepseek-v4-flash'
         const fModel = fp.models.find(m => m.id === fallbackModelId) ?? fp.models[0]!
         return createProviderClient(fp, fCaps, {
           apiKey: fApiKey,

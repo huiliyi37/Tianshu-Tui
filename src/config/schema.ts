@@ -51,7 +51,7 @@ export const providerSchema = z.object({
   auth: authConfigSchema.nullable().optional(),
   capabilities: providerCapabilitiesSchema,
   fallback: z.array(z.string()).optional(),
-  /** Model to use when falling back to this provider (defaults to 'deepseek-chat' / Flash). */
+  /** Model to use when falling back to this provider (defaults to 'deepseek-v4-flash'). */
   fallbackModel: z.string().optional(),
   models: z.array(modelConfigSchema).min(1),
   thinking: z.enum(['enabled', 'disabled']).default('enabled'),
