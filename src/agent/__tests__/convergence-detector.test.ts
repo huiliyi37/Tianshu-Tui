@@ -477,9 +477,11 @@ describe('evaluateConvergence', () => {
       recentToolHistory: history,
       toolFingerprints: ['fp-git', 'fp-ls', 'fp-git', 'fp-ls', 'fp-git', 'fp-ls'],
     }))
-    // Oscillation + no edits + verify phase → score should be low enough for level 2+
-    assert.ok(result.score < 0.45, `expected score < 0.45 for oscillation, got ${result.score.toFixed(2)}`)
-    assert.ok(result.level >= 2, `expected level >= 2 for oscillation, got ${result.level}`)
+    // The oscillationPenalty signal itself must still fire — oscillation is
+    // detected regardless of phase. But the composite score is no longer
+    // dragged down by verify's old editRatio=0.22 weight (verify should not
+    // penalize no-edit behavior — that was the primary false-positive source
+    // behind "verify 阶段 47 轮未收敛").
     assert.ok(result.signals.oscillationPenalty !== undefined, 'should have oscillationPenalty signal')
     assert.ok(result.signals.oscillationPenalty < 0.5, `oscillation penalty should be severe, got ${result.signals.oscillationPenalty}`)
   })

@@ -22,6 +22,24 @@ export interface FuzzyMatch {
   matchedText: string
 }
 
+/**
+ * Hard wall-clock bound for the window scan.
+ *
+ * The scan is O(fileLines × needleLines) SYNCHRONOUS CPU with early-exit on
+ * first line mismatch. Repetitive file content defeats the early exit: when
+ * every window matches the needle's first 79 lines and fails on the 80th
+ * (generated code, lockfiles, test tables), a 120K-line file measured ~6s of
+ * uninterruptible block — same failure class as the unbounded Myers diff
+ * root-caused in ea413390 (event loop dead → Esc/tool-timeout can't fire →
+ * force-kill → tool result lost). Fuzzy matching is a best-effort courtesy;
+ * on timeout return null and let the caller emit its normal diagnostic error.
+ */
+const FUZZY_MATCH_TIMEOUT_MS = 1000
+
+/** Check the deadline every N outer iterations — cheap enough to keep the
+ *  worst overshoot below ~1ms while not paying Date.now() per window. */
+const DEADLINE_CHECK_INTERVAL = 256
+
 /** Collapse all runs of whitespace to a single space and trim — tolerates
  *  indentation, tab/space, trailing-space, and CRLF differences. */
 function normalizeLine(line: string): string {
@@ -42,11 +60,18 @@ export function findFuzzyMatch(content: string, needle: string): FuzzyMatch | nu
   const win = needleLines.length
   if (win === 0 || win > contentLines.length) return null
 
+  // Pre-normalize once. The scan below revisits each content line up to `win`
+  // times across overlapping windows — running the \s+ regex inside the inner
+  // loop multiplied its cost by the needle length for no gain.
+  const normContent = contentLines.map(normalizeLine)
+
+  const deadline = Date.now() + FUZZY_MATCH_TIMEOUT_MS
   const starts: number[] = []
   for (let i = 0; i + win <= contentLines.length; i++) {
+    if (i % DEADLINE_CHECK_INTERVAL === 0 && Date.now() > deadline) return null
     let ok = true
     for (let j = 0; j < win; j++) {
-      if (normalizeLine(contentLines[i + j]!) !== normNeedle[j]) { ok = false; break }
+      if (normContent[i + j] !== normNeedle[j]) { ok = false; break }
     }
     if (ok) {
       starts.push(i)

@@ -305,7 +305,7 @@ Note: For large new_string, the message history keeps only a short pointer
 
             await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
             await recordSuccessfulEdit(filePath, params.sessionId)
-            const warn = syntaxCheck(filePath, newContent)
+            const warn = await syntaxCheck(filePath, newContent)
             const recoveredInfo = recoveredCount > 0
               ? ` (auto-recovered ${recoveredCount} stale anchors)`
               : ''
@@ -344,7 +344,7 @@ Note: For large new_string, the message history keeps only a short pointer
 
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     await recordSuccessfulEdit(filePath, params.sessionId)
-    const warn = syntaxCheck(filePath, newContent)
+    const warn = await syntaxCheck(filePath, newContent)
     const posDrift = positionDriftWarning
       ? '\n\n⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
       : ''

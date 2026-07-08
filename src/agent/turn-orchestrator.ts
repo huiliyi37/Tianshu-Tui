@@ -995,20 +995,21 @@ export class TurnOrchestrator {
           )
           continue
           } catch (err) {
-            // Esc during tool execution: rejectOnAbort abandoned the await to keep
-            // the UI responsive, but `batchPromise` is still running and will call
-            // addToolResults() at an uncontrolled later time. Drain it (bounded) so
-            // its result commit lands in-order NOW — before this turn tears down and
-            // any new user message starts a fresh run that would push the late tool
-            // result out of position. Without this the next request breaks with
-            // "insufficient tool messages following tool_calls" (only /rewind fixed
-            // it). Non-abort errors skip the drain and propagate unchanged.
-            if ((err as Error).name === 'AbortError') {
-              await Promise.race([
-                batchPromise.then(() => {}, () => {}),
-                new Promise<void>((resolve) => setTimeout(resolve, TOOL_ABORT_DRAIN_MS)),
-              ])
-            }
+            // Esc or unexpected error during tool execution: rejectOnAbort
+            // abandoned the await to keep the UI responsive, but `batchPromise`
+            // is still running and will call addToolResults() at an uncontrolled
+            // later time. Drain it (bounded) so its result commit lands in-order
+            // NOW — before this turn tears down and any new user message starts
+            // a fresh run that would push the late tool result out of position.
+            // Without this the next request breaks with "insufficient tool
+            // messages following tool_calls" (only /rewind fixed it).
+            // ALL error types must drain: non-AbortError exceptions (e.g.
+            // TypeError from a tool bug) also leave orphan tool_use entries
+            // if the batch completes after we throw.
+            await Promise.race([
+              batchPromise.then(() => {}, () => {}),
+              new Promise<void>((resolve) => setTimeout(resolve, TOOL_ABORT_DRAIN_MS)),
+            ])
             throw err
           } finally {
             toolHeartbeat?.rearmWatchdog()

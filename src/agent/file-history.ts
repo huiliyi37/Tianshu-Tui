@@ -1,8 +1,10 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { diffLines } from 'diff'
 import { dirname, join } from 'node:path'
 import type { OaiMessage } from '../api/oai-types.js'
+import { cpuPool } from '../workers/cpu-pool.js'
+import { diffLinesRaw } from '../workers/cpu-tasks.js'
+import type { RawChange } from '../workers/cpu-tasks.js'
 
 const MAX_SNAPSHOTS = 100
 
@@ -230,7 +232,33 @@ export class FileHistory {
       if (oldContent === newContent) continue
       filesChanged.push(filePath)
 
-      const changes = diffLines(oldContent, newContent)
+      // Bounded diff: Myers on a heavily-rewritten large file is unbounded
+      // sync CPU (blocks the event loop — same root cause as edit-diff.ts).
+      // Stats are display-only; on timeout fall back to a coarse line-count
+      // estimate instead of exact insert/delete counts.
+      // Try worker pool first (4s, non-blocking), then inline (1s).
+      const POOL_TIMEOUT = 4000
+      const INLINE_TIMEOUT = 1000
+      let changes: RawChange[] | undefined
+      if (cpuPool.available) {
+        try {
+          changes = (await cpuPool.run('diffLinesRaw', [
+            oldContent,
+            newContent,
+            POOL_TIMEOUT,
+          ])) as RawChange[] | undefined
+        } catch {
+          // Pool unavailable or timed out — fall through to inline
+        }
+      }
+      if (changes === undefined) {
+        changes = diffLinesRaw(oldContent, newContent, INLINE_TIMEOUT)
+      }
+      if (changes === undefined) {
+        insertions += newContent.length === 0 ? 0 : newContent.split('\n').length
+        deletions += oldContent.length === 0 ? 0 : oldContent.split('\n').length
+        continue
+      }
       for (const c of changes) {
         if (c.added) insertions += c.count ?? 0
         if (c.removed) deletions += c.count ?? 0

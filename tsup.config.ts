@@ -9,7 +9,7 @@ import { builtinModules } from 'node:module'
 // option. No esbuild plugin / NullDatabase shim is needed.
 
 export default defineConfig({
-  entry: ['src/main.ts'],
+  entry: ['src/main.ts', 'src/workers/cpu-worker.ts'],
   format: ['esm'],
   target: 'node24',
   // dts:false — 声明文件对 CLI 运行毫无用处，且 Windows 上对 100+ 文件生成 .d.ts
@@ -93,6 +93,8 @@ export default defineConfig({
     // reached when DEV devtools are enabled. Keep it external so bundling ink
     // doesn't fail on the missing module.
     'react-devtools-core',
+    // Optional Office docx reader (npm i mammoth for .docx support without LibreOffice)
+    'mammoth',
   ],
   noExternal: [
     'string-width',

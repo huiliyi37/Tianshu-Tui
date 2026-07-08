@@ -111,9 +111,9 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
             await recordSuccessfulEdit(filePath, params.sessionId)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const expectedCount = params.input.expected_count as number | undefined
-            const warn = syntaxCheck(filePath, newContent)
-            const ui = editUiContent(params.cwd, filePath, freshContent, newContent, warn)
-            const changedRanges = computeChangedLineRanges(freshContent, newContent)
+            const warn = await syntaxCheck(filePath, newContent)
+            const ui = await editUiContent(params.cwd, filePath, freshContent, newContent, warn)
+            const changedRanges = await computeChangedLineRanges(freshContent, newContent)
             if (expectedCount !== undefined && occurrences !== expectedCount) {
               const base = `File was modified externally but old_string still matched. Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. Use grep to verify no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
               return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
@@ -128,11 +128,11 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           const recovered = freshContent.replace(oldString, newString)
           await writeFileAtomicAsync(filePath, applyEol(recovered, freshEol))
           await recordSuccessfulEdit(filePath, params.sessionId)
-          const warn = syntaxCheck(filePath, recovered)
+          const warn = await syntaxCheck(filePath, recovered)
           return {
             content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}`,
-            uiContent: editUiContent(params.cwd, filePath, freshContent, recovered, warn),
-            changedRanges: computeChangedLineRanges(freshContent, recovered),
+            uiContent: await editUiContent(params.cwd, filePath, freshContent, recovered, warn),
+            changedRanges: await computeChangedLineRanges(freshContent, recovered),
           }
         }
 
@@ -206,9 +206,9 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       await recordSuccessfulEdit(filePath, params.sessionId)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
-      const warn = syntaxCheck(filePath, newContent)
-      const ui = editUiContent(params.cwd, filePath, content, newContent, warn)
-      const changedRanges = computeChangedLineRanges(content, newContent)
+      const warn = await syntaxCheck(filePath, newContent)
+      const ui = await editUiContent(params.cwd, filePath, content, newContent, warn)
+      const changedRanges = await computeChangedLineRanges(content, newContent)
       if (expectedCount !== undefined && occurrences !== expectedCount) {
         const base = `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
         return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
@@ -226,7 +226,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         const recovered = applyFuzzyReplacement(content, fuzzy, newString)
         await writeFileAtomicAsync(filePath, applyEol(recovered, eol))
         await recordSuccessfulEdit(filePath, params.sessionId)
-        const warn = syntaxCheck(filePath, recovered)
+        const warn = await syntaxCheck(filePath, recovered)
         // Surface the whitespace drift so the model can self-correct in
         // subsequent edits — without this, error accumulates across calls.
         const diff = diffBlock(oldString, fuzzy.matchedText)
@@ -237,8 +237,8 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         ].join('\n')
         return {
           content: fuzzyReport + (warn ? '\n\n' + warn : ''),
-          uiContent: editUiContent(params.cwd, filePath, content, recovered, warn),
-          changedRanges: computeChangedLineRanges(content, recovered),
+          uiContent: await editUiContent(params.cwd, filePath, content, recovered, warn),
+          changedRanges: await computeChangedLineRanges(content, recovered),
         }
       }
       return {
@@ -256,11 +256,11 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
     const newContent = content.replace(oldString, newString)
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     await recordSuccessfulEdit(filePath, params.sessionId)
-    const warn = syntaxCheck(filePath, newContent)
+    const warn = await syntaxCheck(filePath, newContent)
     return {
       content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : ''),
-      uiContent: editUiContent(params.cwd, filePath, content, newContent, warn),
-      changedRanges: computeChangedLineRanges(content, newContent),
+      uiContent: await editUiContent(params.cwd, filePath, content, newContent, warn),
+      changedRanges: await computeChangedLineRanges(content, newContent),
     }
   },
 
@@ -279,8 +279,8 @@ function escapeRegExp(str: string): string {
  * Returns undefined when there is nothing extra to show (card falls back to
  * the model-facing `content`).
  */
-function editUiContent(cwd: string, filePath: string, before: string, after: string, warn: string | null): string | undefined {
-  const diff = buildFileDiff(relative(cwd, filePath), before, after)
+async function editUiContent(cwd: string, filePath: string, before: string, after: string, warn: string | null): Promise<string | undefined> {
+  const diff = await buildFileDiff(relative(cwd, filePath), before, after)
   if (!diff) return warn ? warn : undefined
   return warn ? `${diff}\n\n${warn}` : diff
 }
