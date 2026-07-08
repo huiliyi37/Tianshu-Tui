@@ -96,6 +96,25 @@ interface KnownFileState {
 const lastKnownFileState = new Map<string, KnownFileState>()
 const LAST_KNOWN_MAX = 500
 
+/** Consecutive edit_file "old_string not found" failures per file.
+ *  ≥3 triggers a hard gate requiring read_file before further edits. */
+const editFailCount = new Map<string, number>()
+const MAX_CONSECUTIVE_EDIT_FAILS = 3
+
+export function incrementEditFailCount(canonicalPath: string): number {
+  const n = (editFailCount.get(canonicalPath) ?? 0) + 1
+  editFailCount.set(canonicalPath, n)
+  return n
+}
+
+export function resetEditFailCount(canonicalPath: string): void {
+  editFailCount.delete(canonicalPath)
+}
+
+export function __resetEditFailCountForTests(): void {
+  editFailCount.clear()
+}
+
 function trimLastKnown(): void {
   if (lastKnownFileState.size <= LAST_KNOWN_MAX) return
   const drop = Math.ceil(lastKnownFileState.size * 0.2)

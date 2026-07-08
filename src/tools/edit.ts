@@ -4,7 +4,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
 import { hashLine } from './hash-edit.js'
-import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession } from './read-file.js'
+import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession, incrementEditFailCount, resetEditFailCount } from './read-file.js'
 import { syntaxCheck } from './syntax-check.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { findFuzzyMatch, applyFuzzyReplacement } from './fuzzy-match.js'
@@ -16,6 +16,35 @@ import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-gua
 // far too small. 8MB reads comfortably into the Node heap; anything larger is
 // almost certainly machine-generated and better edited with apply_patch/sed.
 const MAX_EDIT_FILE_BYTES = 8 * 1024 * 1024 // 8MB
+
+/** Regex patterns that indicate the model is treating old_string as a regex
+ *  instead of a literal string. edit_file uses exact string matching.
+ *
+ *  Only flag unambiguous regex tokens — things that are NEVER valid literal
+ *  text in source code. Avoid flagging  .*  .+  |  ^  $  which appear
+ *  legitimately in shell commands, import paths, and everyday code. */
+const REGEX_MISUSE_PATTERNS = [
+  /\\[dDwWsSbB]/,        // \d \D \w \W \s \S \b \B — class shorthands
+  /\\[1-9]/,             // \1 \2 ... backreferences
+  /\\[AGZz]/,            // \A \G \Z \z boundary anchors
+  /\(\?[:=!<]/,          // (?:...) (?=...) (?!...) (?<=...) (?<!...)
+  /\{\d+(?:,\d*)?\}/,    // {n} {n,m} quantifiers — literal {3} in code is rare
+]
+
+/** Returns a human-readable name for the first regex pattern found, or null. */
+function detectRegexPattern(oldString: string): string | null {
+  const names: [RegExp, string][] = [
+    [/\\[dDwWsSbB]/, '\\d / \\w / \\s / \\b class shorthand'],
+    [/\\[1-9]/, '\\1 backreference'],
+    [/\\[AGZz]/, '\\A / \\Z boundary anchor'],
+    [/\(\?[:=!<]/, '(?: / (?= / (?! / (?<= group'],
+    [/\{\d+(?:,\d*)?\}/, '{n} / {n,m} quantifier'],
+  ]
+  for (const [re, name] of names) {
+    if (re.test(oldString)) return name
+  }
+  return null
+}
 
 
 export const EDIT_FILE_TOOL: Tool = {
@@ -69,6 +98,19 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       }
     }
 
+    // Regex-misuse guard: edit_file uses exact string matching, not regex.
+    // Models occasionally write \d, \w, .* etc. in old_string expecting regex
+    // semantics — this silently fails (match not found) and leads to retry
+    // loops that can corrupt the file. Catch it early with a clear message.
+    const oldStringRaw = params.input.old_string as string
+    const regexPattern = detectRegexPattern(oldStringRaw)
+    if (regexPattern) {
+      return {
+        content: `Error: old_string contains a regex pattern (${regexPattern}).\n\nedit_file uses exact string matching, not regular expressions. The pattern was treated as literal text and will NOT match.\n\nTo fix:\n- Replace regex tokens with literal characters from the file\n- Use grep with the regex to find the actual content, then copy-paste it as old_string\n- For complex patterns, use hash_edit with anchors instead`,
+        isError: true,
+      }
+    }
+
     let fileStat: Awaited<ReturnType<typeof stat>>
     try {
       fileStat = await stat(filePath)
@@ -109,6 +151,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
             const newContent = freshContent.replaceAll(oldString, newString)
             await writeFileAtomicAsync(filePath, applyEol(newContent, freshEol))
             await recordSuccessfulEdit(filePath, params.sessionId)
+          resetEditFailCount(filePath)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const expectedCount = params.input.expected_count as number | undefined
             const warn = await syntaxCheck(filePath, newContent)
@@ -128,6 +171,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           const recovered = freshContent.replace(oldString, newString)
           await writeFileAtomicAsync(filePath, applyEol(recovered, freshEol))
           await recordSuccessfulEdit(filePath, params.sessionId)
+          resetEditFailCount(filePath)
           const warn = await syntaxCheck(filePath, recovered)
           return {
             content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}`,
@@ -154,8 +198,10 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           const end = Math.min(freshLines.length, bestIdx + oldString.split('\n').length + CONTEXT)
           const actualWindow = freshLines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n')
           const modNote = wasFileEditedBySession(filePath, params.sessionId) ? ' — you previously edited this file in the current session' : ' externally'
+          const fails = incrementEditFailCount(filePath)
+          const gatePrefix = fails >= 3 ? `After ${fails} consecutive edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
           return {
-            content: `File ${filePath} was modified${modNote} since your last read_file. old_string no longer matches.\n\nCurrent content near the expected location (line ${bestIdx + 1}):\n\`\`\`\n${actualWindow}\n\`\`\`\n\nUpdate your old_string to match the current content and retry, or use hash_edit with anchors.`,
+            content: gatePrefix + `File ${filePath} was modified${modNote} since your last read_file. old_string no longer matches.\n\nCurrent content near the expected location (line ${bestIdx + 1}):\n\`\`\`\n${actualWindow}\n\`\`\`\n\nUpdate your old_string to match the current content and retry, or use hash_edit with anchors.`,
             isError: true,
           }
         }
@@ -163,8 +209,10 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         // No close match — show file head
         const head = freshLines.slice(0, 30).map((l, i) => `${i + 1}: ${l}`).join('\n')
         const modNote = wasFileEditedBySession(filePath, params.sessionId) ? ' — you previously edited this file in the current session' : ' externally'
+        const fails = incrementEditFailCount(filePath)
+        const gatePrefix = fails >= 3 ? `After ${fails} consecutive edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
         return {
-          content: `File ${filePath} was modified${modNote} since your last read_file. old_string not found.\n\nFile head:\n\`\`\`\n${head}${freshLines.length > 30 ? `\n... (${freshLines.length} lines total)` : ''}\n\`\`\`\n\nRe-read the file to see full content, or use hash_edit with anchors.`,
+          content: gatePrefix + `File ${filePath} was modified${modNote} since your last read_file. old_string not found.\n\nFile head:\n\`\`\`\n${head}${freshLines.length > 30 ? `\n... (${freshLines.length} lines total)` : ''}\n\`\`\`\n\nRe-read the file to see full content, or use hash_edit with anchors.`,
           isError: true,
         }
       } catch {
@@ -196,14 +244,17 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
 
     if (replaceAll) {
       if (!content.includes(oldString)) {
+        const fails = incrementEditFailCount(filePath)
+        const gatePrefix = fails >= 3 ? `After ${fails} consecutive edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
         return {
-          content: buildNotFoundError(filePath, oldString, content),
+          content: gatePrefix + buildNotFoundError(filePath, oldString, content),
           isError: true,
         }
       }
       const newContent = content.replaceAll(oldString, newString)
       await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
       await recordSuccessfulEdit(filePath, params.sessionId)
+      resetEditFailCount(filePath)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
       const warn = await syntaxCheck(filePath, newContent)
@@ -226,6 +277,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         const recovered = applyFuzzyReplacement(content, fuzzy, newString)
         await writeFileAtomicAsync(filePath, applyEol(recovered, eol))
         await recordSuccessfulEdit(filePath, params.sessionId)
+        resetEditFailCount(filePath)
         const warn = await syntaxCheck(filePath, recovered)
         // Surface the whitespace drift so the model can self-correct in
         // subsequent edits — without this, error accumulates across calls.
@@ -241,8 +293,10 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           changedRanges: await computeChangedLineRanges(content, recovered),
         }
       }
+      const fails = incrementEditFailCount(filePath)
+      const gatePrefix = fails >= 3 ? `After ${fails} consecutive edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
       return {
-        content: buildNotFoundError(filePath, oldString, content),
+        content: gatePrefix + buildNotFoundError(filePath, oldString, content),
         isError: true,
       }
     }
@@ -256,6 +310,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
     const newContent = content.replace(oldString, newString)
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     await recordSuccessfulEdit(filePath, params.sessionId)
+    resetEditFailCount(filePath)
     const warn = await syntaxCheck(filePath, newContent)
     return {
       content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : ''),
