@@ -72,15 +72,58 @@ async function getEngine(): Promise<'textutil' | 'soffice' | 'mammoth'> {
       await import('mammoth')
       cachedEngine = 'mammoth'
     } catch {
+      const installs: Record<string, string> = {
+        darwin: '', // textutil is built-in
+        linux: 'sudo apt install libreoffice',
+        win32: 'winget install LibreOffice.LibreOffice',
+      }
       throw new Error(
         'No Office document converter available. ' +
-        'On macOS: textutil is built in. ' +
-        'On Linux: install LibreOffice (sudo apt install libreoffice). ' +
-        'Or install mammoth: npm install mammoth',
+        `Install LibreOffice${installs[process.platform] ? ': ' + installs[process.platform]! : ''}. ` +
+        'Or install mammoth for .docx only: npm install mammoth',
       )
     }
   }
   return cachedEngine
+}
+
+export interface OfficeEngineStatus {
+  read: string | null   // engine name or null if unavailable
+  write: string | null  // engine name or null if unavailable
+  platform: string
+}
+
+/**
+ * Check which Office engines are available. Safe to call at startup —
+ * never throws, returns null for unavailable engines.
+ */
+export async function checkOfficeEngines(): Promise<OfficeEngineStatus> {
+  let readEngine: string | null = null
+  let writeEngine: string | null = null
+
+  if (process.platform === 'darwin') {
+    try { await access('/usr/bin/textutil'); readEngine = 'textutil'; writeEngine = 'textutil' } catch {}
+  }
+  try {
+    await execFileAsync('soffice', ['--version'], { timeout: 5000 })
+    readEngine = readEngine || 'soffice'
+    writeEngine = writeEngine || 'soffice'
+  } catch {}
+  try {
+    await execFileAsync('libreoffice', ['--version'], { timeout: 5000 })
+    readEngine = readEngine || 'soffice'
+    writeEngine = writeEngine || 'soffice'
+  } catch {}
+  // Check mammoth for read-only
+  if (!readEngine) {
+    try {
+      // @ts-expect-error — mammoth is optional dependency
+      await import('mammoth')
+      readEngine = 'mammoth'
+    } catch {}
+  }
+
+  return { read: readEngine, write: writeEngine, platform: process.platform }
 }
 
 /**

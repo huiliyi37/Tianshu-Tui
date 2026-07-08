@@ -149,11 +149,15 @@ async function getWriteEngine(): Promise<'textutil' | 'soffice'> {
   if (engineCache !== undefined) return engineCache!
   engineCache = await detectEngine()
   if (!engineCache) {
+    const installs: Record<string, string> = {
+      darwin: '', // textutil is built-in, should never reach here
+      linux: 'sudo apt install libreoffice',
+      win32: 'winget install LibreOffice.LibreOffice',
+    }
     throw new Error(
-      'No docx converter available. ' +
-      'Install pandoc (brew install pandoc / apt install pandoc) ' +
-      'or LibreOffice (brew install libreoffice). ' +
-      'Then you can write .docx files via bash: pandoc input.md -o output.docx',
+      `No docx converter available. ` +
+      `Install LibreOffice${installs[process.platform] ? ': ' + installs[process.platform]! : ''}. ` +
+      'Alternatively install pandoc and use bash: pandoc input.md -o output.docx',
     )
   }
   return engineCache
