@@ -164,7 +164,7 @@ const PHASE_WEIGHTS: Record<PhaseClass, PhaseWeights> = {
   explore: { editRatio: 0.05, targetNovelty: 0.25, toolEntropy: 0.20, errorPenalty: 0.12, tokenEfficiency: 0.13, oscillationPenalty: 0.10, textRepetitionPenalty: 0.15 },
   plan:    { editRatio: 0.10, targetNovelty: 0.18, toolEntropy: 0.15, errorPenalty: 0.18, tokenEfficiency: 0.18, oscillationPenalty: 0.10, textRepetitionPenalty: 0.11 },
   execute: { editRatio: 0.40, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.18, tokenEfficiency: 0.08, oscillationPenalty: 0.06, textRepetitionPenalty: 0.12 },
-  verify:  { editRatio: 0.22, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.28, tokenEfficiency: 0.10, oscillationPenalty: 0.10, textRepetitionPenalty: 0.14 },
+  verify:  { editRatio: 0.05, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.35, tokenEfficiency: 0.18, oscillationPenalty: 0.12, textRepetitionPenalty: 0.14 },
   deliver: { editRatio: 0.36, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.20, tokenEfficiency: 0.08, oscillationPenalty: 0.08, textRepetitionPenalty: 0.12 },
 }
 
@@ -541,10 +541,12 @@ function computeConvergenceScore(
     w.oscillationPenalty * signals.oscillationPenalty +
     w.textRepetitionPenalty * signals.textRepetitionPenalty
 
-  // Phase expectation penalty: phases that require edits (execute, verify,
-  // deliver) are fundamentally off-track if no edits are happening.
-  // Apply a soft multiplier when editRatio is critically low.
-  const editExpectedPhases: PhaseClass[] = ['execute', 'verify', 'deliver']
+  // Phase expectation penalty: phases that require edits (execute, deliver)
+  // are fundamentally off-track if no edits are happening. Verify phase is
+  // deliberately excluded — its job is running tests/typechecks and reading
+  // diagnostics, NOT editing files. Penalizing verify for low editRatio is
+  // the primary false-positive source ("verify 阶段 47 轮未收敛").
+  const editExpectedPhases: PhaseClass[] = ['execute', 'deliver']
   let penalty = 1.0
   if (editExpectedPhases.includes(phaseClass) && signals.editRatio < 0.1) {
     // Severity scales with how far below expectation we are
@@ -814,7 +816,13 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // 收窄（2026-07-04 触发面修复）：豁免仅对"纯审查"生效——存在未验证编辑时，
   // 边写长分析文本边搁置验证正是该被提醒的场景，不是审查报告。原豁免让
   // 排查/验证类会话（每轮都输出大段分析）把改道机制永久静音，验证轮次膨胀。
-  const hasUnverifiedEdits = input.evidenceState.filesModified.size > 0
+  //
+  // 进一步收窄（2026-07-08 verify 误报修复）：verify 阶段的职责就是验证已有编辑
+  // ——filesModified 非空 + deliveryStatus≠verified 是 verify 的常态而非异常。
+  // 在此阶段封锁 producingReport 会让 verify 全程的测试/诊断输出被误判为
+  // "无产出停滞"（"verify 阶段 47 轮未收敛"误报的次要来源）。
+  const hasUnverifiedEdits = input.phaseClass !== 'verify'
+    && input.evidenceState.filesModified.size > 0
     && input.evidenceState.deliveryStatus !== 'verified'
   const producingReport = !hasUnverifiedEdits
     && isProducingReport(input.textFingerprints ?? [], signals.textRepetitionPenalty)
