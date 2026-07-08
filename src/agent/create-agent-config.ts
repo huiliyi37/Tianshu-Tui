@@ -8,7 +8,7 @@ import { FallbackStreamClient } from '../api/fallback-client.js'
 import type { AgentConfig } from './loop-types.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
-import type { ProviderConfig, Config } from '../config/schema.js'
+import type { ProviderConfig, Config, ModelConfig } from '../config/schema.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router.js'
 import type { LlmSpeculationConfigInput } from './llm-speculation.js'
@@ -16,6 +16,7 @@ import type { AuthProvider } from '../auth/types.js'
 import type { PermissionConfig } from './permissions.js'
 import { getProviderProfile } from '../api/provider-profile.js'
 import { gateToolDefinitions } from './tool-tiers.js'
+import { inferModelTierFromName, type ModelTier } from './model-tier-policy.js'
 
 export interface ModelSpec {
   id: string
@@ -196,6 +197,46 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
  }
 }
 
+export function resolveFallbackModel(fp: ProviderConfig): ModelConfig {
+  const tierOf = (m: ModelConfig): ModelTier => {
+    if (m.tier) return m.tier
+    return inferModelTierFromName(m.id) ?? 'balanced'
+  }
+
+  const preferred = fp.fallbackModel
+    ? fp.models.find(m => m.id === fp.fallbackModel || m.alias === fp.fallbackModel)
+    : undefined
+
+  const allowProFallback = fp.allowProFallback ?? false
+
+  // 1. preferred is cheap → use it
+  if (preferred && tierOf(preferred) === 'cheap') return preferred
+
+  // 2. preferred is strong and pro fallback explicitly allowed → use it
+  if (preferred && tierOf(preferred) === 'strong' && allowProFallback) return preferred
+
+  // 3. preferred is strong but pro fallback forbidden → downgrade to cheap
+  if (preferred && tierOf(preferred) === 'strong' && !allowProFallback) {
+    const cheap = fp.models.find(m => tierOf(m) === 'cheap')
+    if (cheap) {
+      console.warn(`[fallback] ${preferred.id} is strong tier and allowProFallback=false; downgrading to ${cheap.id}`)
+      return cheap
+    }
+  }
+
+  // 4. no preferred or not allowed → prefer cheap, then balanced, then strong
+  const candidates = [
+    ...fp.models.filter(m => tierOf(m) === 'cheap'),
+    ...fp.models.filter(m => tierOf(m) === 'balanced'),
+    ...(!allowProFallback ? [] : fp.models.filter(m => tierOf(m) === 'strong')),
+  ]
+  if (candidates.length > 0) return candidates[0]!
+
+  // 5. legacy fallback: if pro is forbidden and no cheap/balanced exists, still
+  //    need a model to avoid breaking the chain — fall back to the first model.
+  return fp.models[0]!
+}
+
 function buildFallbackChain(
   primary: import('../api/stream-client.js').StreamClient,
   provider: ProviderConfig,
@@ -223,10 +264,9 @@ function buildFallbackChain(
             `Set ${fp.apiKeyEnv ?? `<PROVIDER>_API_KEY`} env var or inline apiKey in config.`
           )
         }
-        // Use the fallback provider's fallbackModel if set; default to Flash
-        // ('deepseek-v4-flash') to avoid cold-start cache miss cost on Pro models.
-        const fallbackModelId = fp.fallbackModel ?? 'deepseek-v4-flash'
-        const fModel = fp.models.find(m => m.id === fallbackModelId) ?? fp.models[0]!
+        // Resolve a fallback model that is safe by default: cheap tier only,
+        // unless the user explicitly opts in via allowProFallback.
+        const fModel = resolveFallbackModel(fp)
         return createProviderClient(fp, fCaps, {
           apiKey: fApiKey,
           model: fModel.id,
