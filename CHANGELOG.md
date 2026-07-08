@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-07-15 — v2.17.3: 工具层防御加固
+
+### Fixed
+
+- **orphan tool_call 永久循环**（`fcab18d6`）— prompt engine 每轮 buildOaiRequest 调用 runResumePreflightOai 修复孤儿 tool_call，但修复只进 API 请求不回写 session，导致每轮都注入"会话中断"合成结果。新增 onOrphanRepair 回调在修复后回写 session。
+- **edit_file 正则误用守卫**（`476ceca8`）— 模型将 `\d` `\w` `.*` 等正则 token 写入 old_string，触发精确匹配失败→重试→文件膨胀的死循环。新增 detectRegexPattern 在 I/O 前拦截并提示使用精确匹配。
+- **edit_file 连续失败强制 read_file**（`476ceca8`）— per-session per-file 失败计数器，old_string 连续 3 次 not found 后强制要求 read_file 才能继续编辑。
+- **hash_edit / ast_edit 同样加固**（`c8f81c96`）— hash_edit anchor 失败 + ast_edit pattern 失败均接入同一失败计数器；ast_edit find 参数新增正则误用检测。
+
+### Added
+
+- **RIVET_DEBUG_ORPHAN=1 诊断探针**（`fcab18d6`）— 开启后在 stderr 输出邻接检查失败原因、tool_call_id、消息行号。
+- **scripts/diagnose-tool-orphans.ts**（`fcab18d6`）— 离线诊断 JSONL 的 tool_call↔tool_result 配对完整性。
+
+### Changed
+
+- **write_file 后处理容错**（`8d799c45`）— syntaxCheck/diff/computeChangedLineRanges 失败不再导致工具报错，防止"已落盘但报告失败→重试→盲写守卫死锁"。
+- **orphan tool_use 双重来源修补**（`335cdc26`）— ① turn-orchestrator drain 对所有异常类型生效（不再仅 AbortError）；② loadOai 时注入 system-reminder 告知被剥离的工具从未执行。
+
 ## 2026-07-14 — v2.16.4
 
 ### Added
