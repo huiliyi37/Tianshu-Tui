@@ -4,7 +4,7 @@
 # 用法: bash scripts/sync-to-public.sh [--dry-run]
 #
 # 同步策略(2026-07-07 起改为「默认公开 + 排除清单」):
-#   ✅ 同步: src/(含测试)desktop/(含测试)scripts/ docs/ runtime-assets/
+#   ✅ 同步: src/(含测试) scripts/ docs/ runtime-assets/
 #            .rivet/knowledge/ .github/ patches/ completions/ prompts/
 #            根配置与社区文件(README/LICENSE/SECURITY/CONTRIBUTING…)
 #   ❌ 排除: 核心设计文档(docs/design、teamtask、superpowers、tasks、
@@ -37,15 +37,7 @@ rsync $RSYNC_FLAGS \
   --exclude='sync-to-public.sh' \
   "$DEV_DIR/scripts/" "$PUB_DIR/scripts/"
 
-echo "=== 同步: desktop/（含测试）==="
-rsync $RSYNC_FLAGS \
-  --exclude 'node_modules/' \
-  --exclude 'dist/' \
-  --exclude 'src-tauri/target/' \
-  --exclude 'src-tauri/gen/' \
-  --exclude '.DS_Store' \
-  "$DEV_DIR/desktop/" "$PUB_DIR/desktop/"
-
+# desktop/ 不同步 — 桌面端闭源分发，不进入公开仓库
 echo "=== 同步: docs/（排除核心设计文档与内部文件）==="
 rsync $RSYNC_FLAGS \
   --exclude='design/' \
