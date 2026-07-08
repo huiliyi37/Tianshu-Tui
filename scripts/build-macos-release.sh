@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VER="2.17.3"
+VER="2.17.4"
 echo "=== 天枢 macOS 打包 v$VER ==="
 
 # 1. 确保版本一致

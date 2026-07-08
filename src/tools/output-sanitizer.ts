@@ -188,6 +188,114 @@ const LINE_FILTERS: Record<string, LineFilter> = {
     ],
     maxLines: 20,
   },
+
+  // ── pnpm / yarn ──
+  // 来源：pnpm install 输出 "Progress: resolved 123, reused 100, downloaded 23, added 50"
+  // yarn 输出类似 npm 的 spinner + "Done in X.XXs"
+  'pnpm-yarn': {
+    matchCommand: /\b(?:pnpm|yarn)\s+(?:install|add|up|dlx|create)\b/,
+    stripLines: [
+      /^\s*(?:Progress:|Packages:|●|\│|├|└|\s){2,}/,  // pnpm progress tree / yarn step prefix
+      /^Done in \d/,            // yarn "Done in 3.45s"
+    ],
+    shortCircuit: /Already up[ -]to[ -]date|Nothing to install/,
+    maxLines: 25,
+  },
+
+  // ── go build / go test ──
+  // 来源：go build 输出 "go: downloading github.com/foo v1.2.3"
+  // go test 输出 "ok   pkg/name  0.123s" 或 "--- FAIL: TestName"
+  'go': {
+    matchCommand: /\bgo\s+(?:build|test|install|run|vet)\b/,
+    stripLines: [
+      /^go: downloading /,     // 依赖下载进度
+      /^ok\s+\S+\s+\d/,        // 通过行 "ok   pkg  0.123s"（FAIL 行含 error 会被 DIAGNOSTIC 保护）
+    ],
+    maxLines: 40,
+  },
+
+  // ── ruff / mypy ──
+  // 来源：ruff check 输出 "Found 3 errors (2 fixed, 1 remaining)"
+  // mypy 输出 "Success: no issues found in 5 source files"
+  'ruff': {
+    matchCommand: /\b(?:ruff|mypy|pyright)\b/,
+    shortCircuit: /(?:^|\n)(?:All good!|No errors? found|Success: no issues|0 errors?)/,
+    stripLines: [
+      /^\s*$/,                  // 空行压缩
+    ],
+    maxLines: 40,
+  },
+
+  // ── make ──
+  // 来源：make 输出 "make: Nothing to be done for 'all'" 或 gcc/clang 编译行
+  // 保留 error/warning/undefined reference 等诊断；strip 编译命令、进入目录行
+  'make': {
+    matchCommand: /\bmake\b/,
+    stripLines: [
+      /^(?:gcc|g\+\+|clang|cc)\s/,     // 编译命令 "gcc -c -o foo.o foo.c"
+      /^make\[\d+\]: (?:Entering|Leaving)/, // 递归目录进入/退出
+      /^ar cr /,                         // 归档命令
+      /^(?:ranlib|strip)\s/,            // 后处理
+    ],
+    maxLines: 30,
+  },
+
+  // ── git push / fetch / remote ──
+  // 来源：git push 输出 "Enumerating objects: 42, done. Writing objects: 100% (42/42)"
+  'git-push': {
+    matchCommand: /\bgit\s+(?:push|fetch|pull|remote\s+(?:add|update|set-url))\b/,
+    stripLines: [
+      /^(?:Enumerating|Counting|Compressing|Writing|Total|remote:|Resolving)/,
+      /^\s*\d+%/,                         // 进度百分比
+    ],
+    shortCircuit: /Everything up[ -]to[ -]date|Already up[ -]to[ -]date/,
+    maxLines: 15,
+  },
+
+  // ── terraform ──
+  // 来源：terraform plan/apply 输出 "Refreshing state... [id=xxx]" 和 plan summary
+  'terraform': {
+    matchCommand: /\bterraform\s+(?:plan|apply|init|validate|fmt)\b/,
+    stripLines: [
+      /^data\.\S+: Reading\.\.\./,     // data source 读取
+      /^\S+: (?:Refreshing|Creating|Modifying|Destroying)\.\.\./, // 资源操作进度
+      /^\s*(?:\S+\.)+\S+: (?:Creation|Modification|Destruction) complete/,  // 完成行
+    ],
+    maxLines: 40,
+  },
+
+  // ── prettier ──
+  // 来源：prettier --check 输出 "Checking formatting... [warn] src/foo.ts\n[warn] Code style issues found"
+  // 或 prettier --write 输出 "src/foo.ts 123ms"
+  'prettier': {
+    matchCommand: /\b(?:prettier|npx\s+prettier)\b/,
+    shortCircuit: /All matched files use Prettier|Code style issues found in .* file/,
+    stripLines: [
+      /^\s*$/,                  // 空行压缩
+    ],
+    maxLines: 30,
+  },
+
+  // ── uv sync / uv pip ──
+  // 来源：uv sync 输出 "Resolved 150 packages in 2.3s\nPrepared 50 packages in 1.5s\nInstalled 50 packages in 0.8s"
+  // uv 是新一代 Python 包管理器，输出比 pip 更紧凑但仍含进度条
+  'uv': {
+    matchCommand: /\buv\s+(?:sync|lock|pip\s+install|pip\s+compile|add|remove)\b/,
+    stripLines: [
+      /^\s*(?:Resolved|Prepared|Installed|Uninstalled|Audited)\s+\d+/,  // 阶段摘要
+      /^\s*━/,                   // 进度条
+      /^\s*(?:⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)/, // spinner
+    ],
+    shortCircuit: /Not modified|No changes|already satisfied/,
+    maxLines: 20,
+  },
+
+  // ── jq / yq ──
+  // 来源：jq '.field' data.json 输出结构化 JSON/行；超长输出 maxLines 截断
+  'jq-yq': {
+    matchCommand: /\b(?:jq|yq)\b/,
+    maxLines: 40,
+  },
 }
 
 /** 应用行级过滤。诊断行受 DIAGNOSTIC_LINE_RE 保护。 */
