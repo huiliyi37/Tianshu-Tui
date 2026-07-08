@@ -263,6 +263,39 @@ const LINE_FILTERS: Record<string, LineFilter> = {
     ],
     maxLines: 40,
   },
+
+  // ── prettier ──
+  // 来源：prettier --check 输出 "Checking formatting... [warn] src/foo.ts\n[warn] Code style issues found"
+  // 或 prettier --write 输出 "src/foo.ts 123ms"
+  'prettier': {
+    matchCommand: /\b(?:prettier|npx\s+prettier)\b/,
+    shortCircuit: /All matched files use Prettier|Code style issues found in .* file/,
+    stripLines: [
+      /^\s*$/,                  // 空行压缩
+    ],
+    maxLines: 30,
+  },
+
+  // ── uv sync / uv pip ──
+  // 来源：uv sync 输出 "Resolved 150 packages in 2.3s\nPrepared 50 packages in 1.5s\nInstalled 50 packages in 0.8s"
+  // uv 是新一代 Python 包管理器，输出比 pip 更紧凑但仍含进度条
+  'uv': {
+    matchCommand: /\buv\s+(?:sync|lock|pip\s+install|pip\s+compile|add|remove)\b/,
+    stripLines: [
+      /^\s*(?:Resolved|Prepared|Installed|Uninstalled|Audited)\s+\d+/,  // 阶段摘要
+      /^\s*━/,                   // 进度条
+      /^\s*(?:⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)/, // spinner
+    ],
+    shortCircuit: /Not modified|No changes|already satisfied/,
+    maxLines: 20,
+  },
+
+  // ── jq / yq ──
+  // 来源：jq '.field' data.json 输出结构化 JSON/行；超长输出 maxLines 截断
+  'jq-yq': {
+    matchCommand: /\b(?:jq|yq)\b/,
+    maxLines: 40,
+  },
 }
 
 /** 应用行级过滤。诊断行受 DIAGNOSTIC_LINE_RE 保护。 */
