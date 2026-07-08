@@ -99,7 +99,6 @@ const LAST_KNOWN_MAX = 500
 /** Consecutive edit_file "old_string not found" failures per file.
  *  ≥3 triggers a hard gate requiring read_file before further edits. */
 const editFailCount = new Map<string, number>()
-const MAX_CONSECUTIVE_EDIT_FAILS = 3
 
 export function incrementEditFailCount(canonicalPath: string): number {
   const n = (editFailCount.get(canonicalPath) ?? 0) + 1
