@@ -3,6 +3,9 @@ import type { OaiMessage, OaiToolMessage, OaiAssistantMessage } from '../api/oai
 import { groupIntoRounds, computeInvariantStatus, groupIntoRoundsOai } from './rounds.js'
 import type { ResumePreflightReport } from './types.js'
 
+// ─── orphan diagnostic: RIVET_DEBUG_ORPHAN=1 dumps adjacency-violation details ───
+const DEBUG_ORPHAN = process.env.RIVET_DEBUG_ORPHAN === '1'
+
 /** 写类工具——恢复时应告知模型"可能已成功，不需重试"。 */
 const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'hash_edit', 'apply_patch'])
 
@@ -157,7 +160,14 @@ const SYNTHETIC_TOOL_RESULT_CONTENT = syntheticResultContent()
 function isToolAdjacencyCleanOai(messages: OaiMessage[]): boolean {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]!
-    if (m.role === 'tool') return false // a tool message not consumed by a run below → stray
+    if (m.role === 'tool') {
+      if (DEBUG_ORPHAN) {
+        const tid = (m as OaiToolMessage).tool_call_id
+        // eslint-disable-next-line no-console
+        console.error(`[RIVET_DEBUG_ORPHAN] adjacency fail: stray tool at L${i} id=${tid} — no preceding assistant(tool_calls)`)
+      }
+      return false
+    }
     if (m.role !== 'assistant' || !('tool_calls' in m) || !m.tool_calls || m.tool_calls.length === 0) continue
 
     const ids = m.tool_calls.map(tc => tc.id)
@@ -165,12 +175,26 @@ function isToolAdjacencyCleanOai(messages: OaiMessage[]): boolean {
     let j = i + 1
     while (j < messages.length && messages[j]!.role === 'tool') {
       const id = (messages[j] as OaiToolMessage).tool_call_id
-      if (!ids.includes(id) || seen.has(id)) return false // foreign or duplicate result
+      if (!ids.includes(id) || seen.has(id)) {
+        if (DEBUG_ORPHAN) {
+          const reason = !ids.includes(id) ? `foreign id=${id} not in [${ids.join(',')}]` : `duplicate id=${id}`
+          // eslint-disable-next-line no-console
+          console.error(`[RIVET_DEBUG_ORPHAN] adjacency fail: assistant(tool_calls) at L${i} → tool at L${j} ${reason}`)
+        }
+        return false
+      }
       seen.add(id)
       j++
     }
-    if (seen.size !== ids.length) return false // some tool_call has no in-position result
-    i = j - 1 // skip the consumed run; the outer loop's ++ lands on messages[j]
+    if (seen.size !== ids.length) {
+      if (DEBUG_ORPHAN) {
+        const missing = ids.filter(id => !seen.has(id))
+        // eslint-disable-next-line no-console
+        console.error(`[RIVET_DEBUG_ORPHAN] adjacency fail: assistant(tool_calls) at L${i} missing tool results for [${missing.join(',')}] (found ${seen.size}/${ids.length})`)
+      }
+      return false
+    }
+    i = j - 1
   }
   return true
 }
@@ -225,6 +249,10 @@ export function runResumePreflightOai(messages: OaiMessage[]): OaiResumePrefligh
         const toolName = tc.function?.name
         repaired.push({ role: 'tool', tool_call_id: tc.id, content: syntheticResultContent(toolName) })
         inserted++
+        if (DEBUG_ORPHAN) {
+          // eslint-disable-next-line no-console
+          console.error(`[RIVET_DEBUG_ORPHAN] synthetic result for tool_call id=${tc.id} name=${toolName ?? '?'} — NO matching tool result found anywhere in ${messages.length} messages`)
+        }
       }
     }
   }

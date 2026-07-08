@@ -212,9 +212,21 @@ function buildFallbackChain(
       create: () => {
         const fp = input.allProviders![name]!
         const fCaps = resolveCapabilities(fp.name, fp.capabilities)
+        // Resolve fallback API key — fail loudly instead of silently returning
+        // primary so the user knows their fallback provider is misconfigured.
         let fApiKey: string
-        try { fApiKey = resolveApiKey(fp) } catch { return primary }
-        const fModel = fp.models.find(m => m.id === model.id) ?? fp.models[0]!
+        try {
+          fApiKey = resolveApiKey(fp)
+        } catch {
+          throw new Error(
+            `Fallback provider "${name}" has no API key configured. ` +
+            `Set ${fp.apiKeyEnv ?? `<PROVIDER>_API_KEY`} env var or inline apiKey in config.`
+          )
+        }
+        // Use the fallback provider's fallbackModel if set; default to Flash
+        // ('deepseek-v4-flash') to avoid cold-start cache miss cost on Pro models.
+        const fallbackModelId = fp.fallbackModel ?? 'deepseek-v4-flash'
+        const fModel = fp.models.find(m => m.id === fallbackModelId) ?? fp.models[0]!
         return createProviderClient(fp, fCaps, {
           apiKey: fApiKey,
           model: fModel.id,
