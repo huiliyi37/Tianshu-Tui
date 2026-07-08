@@ -11,7 +11,8 @@
  */
 
 import { parentPort } from 'node:worker_threads'
-import { diffUnifiedRaw, diffStructuredRaw, diffLinesRaw } from './cpu-tasks.js'
+// @ts-ignore — tsx dev worker uses .ts extension; tsup bundles this file separately
+import { diffUnifiedRaw, diffStructuredRaw, diffLinesRaw } from './cpu-tasks.ts'
 
 type TaskFn = (...args: any[]) => unknown
 
