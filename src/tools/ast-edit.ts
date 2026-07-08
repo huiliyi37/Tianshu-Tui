@@ -118,6 +118,13 @@ export const AST_EDIT_TOOL: Tool = {
           isError: true,
         }
       }
+      const replace = op.replace as string
+      if (/\\[dDwWsSbB1-9]/.test(replace)) {
+        return {
+          content: `Error: "replace" template contains regex tokens (\\d, \\w, \\s, \\1, etc.).\n\nast_edit replacement templates use ast-grep metavariables ($NAME, $$NAME), not regular expressions. The tokens will be written literally into the file.\n\nOffending template: ${replace.slice(0, 80)}`,
+          isError: true,
+        }
+      }
     }
 
     const paths = Array.isArray(input.paths) ? (input.paths as string[]).filter(p => typeof p === 'string') : ['.']
