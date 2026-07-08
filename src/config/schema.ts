@@ -21,6 +21,8 @@ export const modelConfigSchema = z.object({
     cacheWrite: z.number().min(0).optional(),
     reasoning: z.number().min(0).optional(),
   }).optional(),
+  /** Model tier for routing/fallback decisions. Overrides name-based inference. */
+  tier: z.enum(['cheap', 'balanced', 'strong']).optional(),
 })
 
 export const authConfigSchema = z.discriminatedUnion('type', [
@@ -53,6 +55,9 @@ export const providerSchema = z.object({
   fallback: z.array(z.string()).optional(),
   /** Model to use when falling back to this provider (defaults to 'deepseek-v4-flash'). */
   fallbackModel: z.string().optional(),
+  /** Allow strong/pro tier models to be used as fallback. Default false to avoid
+   *  cold-start cache-miss cost on large-context pro models. */
+  allowProFallback: z.boolean().optional(),
   models: z.array(modelConfigSchema).min(1),
   thinking: z.enum(['enabled', 'disabled']).default('enabled'),
   maxTokens: z.number().int().positive().default(64000),
