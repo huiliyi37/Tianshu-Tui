@@ -14,6 +14,7 @@ import { decideReadPolicy } from './read-policy.js'
 import { foldCode } from '../compact/code-fold.js'
 import { canUsePrewarmForRead, consumePrewarm } from '../agent/prewarm-file.js'
 import { canonicalPathKey } from '../path-format.js'
+import { OFFICE_EXTENSIONS, readOfficeFile } from './office-reader.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: Promise<GitignoreFilter>; ts: number }>()
@@ -465,6 +466,20 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
   // Reject binary files with a clear error — the tool description promises this.
   // Common binary extensions are checked before reading to avoid returning garbled UTF-8.
   const ext = extname(filePath).toLowerCase()
+
+  // Office documents: convert to plain text via platform-native tools
+  if (OFFICE_EXTENSIONS.has(ext)) {
+    const result = await readOfficeFile(filePath)
+    const officeHint = `\n\n── Office document (${ext}, converted via ${result.engine}) ──`
+    const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
+    return {
+      canonicalPath: filePath,
+      rawContent: result.text,
+      modelContent: truncateContent(result.text, cap.maxChars, cap.headChars, cap.tailChars) + officeHint,
+      uiContent: result.text.slice(0, 200),
+    }
+  }
+
   if (BINARY_EXTENSIONS.has(ext)) {
     throw new Error(`File is binary (${ext} format). read_file only reads text files. Use file_info to inspect metadata.`)
   }
