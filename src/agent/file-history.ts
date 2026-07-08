@@ -230,7 +230,16 @@ export class FileHistory {
       if (oldContent === newContent) continue
       filesChanged.push(filePath)
 
-      const changes = diffLines(oldContent, newContent)
+      // Bounded diff: Myers on a heavily-rewritten large file is unbounded
+      // sync CPU (blocks the event loop — same root cause as edit-diff.ts).
+      // Stats are display-only; on timeout fall back to a coarse line-count
+      // estimate instead of exact insert/delete counts.
+      const changes = diffLines(oldContent, newContent, { timeout: 1000 })
+      if (changes === undefined) {
+        insertions += newContent.length === 0 ? 0 : newContent.split('\n').length
+        deletions += oldContent.length === 0 ? 0 : oldContent.split('\n').length
+        continue
+      }
       for (const c of changes) {
         if (c.added) insertions += c.count ?? 0
         if (c.removed) deletions += c.count ?? 0

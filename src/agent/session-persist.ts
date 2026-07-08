@@ -1,5 +1,5 @@
-import { appendFile } from 'fs/promises'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, rmSync, readdirSync, statSync, openSync, fdatasyncSync, closeSync } from 'fs'
+import { appendFile, open } from 'fs/promises'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, rmSync, readdirSync, statSync } from 'fs'
 import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { isAbsolute, join, relative, resolve } from 'path'
 import { sessionsDir } from '../config/paths.js'
@@ -180,13 +180,24 @@ export class SessionPersist {
     const json = serializeOaiSessionMessage(message)
     const line = appendChecksum(json) + '\n'
     await appendFile(this.filePath, line)
-    // Force data to disk so abort drain doesn't lose tool results.
-    // fdatasyncSync is non-blocking enough for the append rate here
-    // (metadata-only operations skip this path; compaction uses atomic rewrite).
+    await this.fdatasyncQuiet()
+  }
+
+  /**
+   * Force appended data to disk so the abort drain waits for durable bytes,
+   * not just a completed appendFile. Async on purpose: the sync variant
+   * (fdatasyncSync) blocked the event loop once per message append — ordering
+   * is already guaranteed by the session-persist-listener writeChain awaiting
+   * this method before the next append starts.
+   */
+  private async fdatasyncQuiet(): Promise<void> {
     try {
-      const fd = openSync(this.filePath, 'a')
-      fdatasyncSync(fd)
-      closeSync(fd)
+      const fh = await open(this.filePath, 'a')
+      try {
+        await fh.datasync()
+      } finally {
+        await fh.close()
+      }
     } catch { /* non-critical: in-memory state still authoritative */ }
   }
 
@@ -335,11 +346,7 @@ export class SessionPersist {
     const json = serializeSessionMessage(message)
     const line = appendChecksum(json) + '\n'
     await appendFile(this.filePath, line)
-    try {
-      const fd = openSync(this.filePath, 'a')
-      fdatasyncSync(fd)
-      closeSync(fd)
-    } catch { /* non-critical */ }
+    await this.fdatasyncQuiet()
   }
 
   /**

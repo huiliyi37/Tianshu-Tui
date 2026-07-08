@@ -11,6 +11,23 @@ import { createTwoFilesPatch, structuredPatch } from 'diff'
 
 const DEFAULT_MAX_DIFF_LINES = 600
 
+/**
+ * Hard wall-clock bound for a single Myers diff pass.
+ *
+ * jsdiff's Myers is O((N+M)·D) SYNCHRONOUS CPU — a full rewrite of an 8K-line
+ * file costs ~7s per pass, and a 50K-line file with 1/3 changed runs for
+ * MINUTES. That blocks the entire event loop: TUI frozen, Esc/stdin dead,
+ * withToolTimeout's setTimeout can't fire (sync code is uninterruptible), so
+ * the user force-kills the process and the already-written file's tool result
+ * is lost → resume synthesizes "[recovered]" → the model rewrites → same hang
+ * again (the "write 卡住 → 丢工具返回" loop, root-caused 2026-07-08).
+ *
+ * The diff here is display-only (uiContent) / diagnostics-narrowing — losing
+ * it degrades a tool card, never correctness. 1s keeps worst-case block at
+ * ~2s per write (two passes) while covering every realistic diff.
+ */
+const DIFF_TIMEOUT_MS = 1000
+
 /** Normalize Windows backslash paths to POSIX for clean diff headers. */
 function normPath(p: string): string {
   return p.replaceAll('\\', '/')
@@ -29,7 +46,10 @@ export function buildFileDiff(relPath: string, before: string, after: string, op
   if (before === after) return ''
   const posixPath = normPath(relPath)
 
-  const raw = createTwoFilesPatch(posixPath, posixPath, before, after, '', '', { context: 3 })
+  // timeout → undefined when the edit graph is too large to finish in time;
+  // fall back to no diff (callers degrade to the summary-text tool card).
+  const raw = createTwoFilesPatch(posixPath, posixPath, before, after, '', '', { context: 3, timeout: DIFF_TIMEOUT_MS })
+  if (raw === undefined) return ''
 
   // createTwoFilesPatch prepends an `Index:` + `===` preamble (INCLUDE_HEADERS
   // default). Drop everything before the first `--- ` file header for a clean
@@ -70,7 +90,14 @@ export interface LineRange {
  */
 export function computeChangedLineRanges(before: string, after: string): LineRange[] {
   if (before === after) return []
-  const patch = structuredPatch('a', 'a', before, after, '', '', { context: 0 })
+  const patch = structuredPatch('a', 'a', before, after, '', '', { context: 0, timeout: DIFF_TIMEOUT_MS })
+  if (patch === undefined) {
+    // Diff too expensive to finish in time — conservatively treat the whole
+    // AFTER file as changed (same shape as the brand-new-file case), so the
+    // LSP diagnostics filter surfaces everything instead of hiding errors.
+    const lineCount = after.length === 0 ? 1 : after.split('\n').length
+    return [{ start: 1, end: lineCount }]
+  }
   const ranges: LineRange[] = []
   for (const hunk of patch.hunks) {
     const start = Math.max(1, hunk.newStart)

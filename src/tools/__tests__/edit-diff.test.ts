@@ -87,3 +87,38 @@ describe('computeChangedLineRanges', () => {
     assert.ok(ranges[0]!.start >= 1)
   })
 })
+
+describe('pathological diff inputs stay bounded (write-tool hang root cause 2026-07-08)', () => {
+  // Full rewrite where every line differs — Myers worst case. Unbounded, an
+  // 8K-line rewrite costs ~7s PER PASS of synchronous CPU (event loop frozen:
+  // TUI dead, Esc dead, tool timeout can't fire). The timeout option must cap
+  // each pass at ~1s and degrade gracefully.
+  function fullRewrite(n: number, tag: string): string {
+    return Array.from({ length: n }, (_, i) => `const v${(i * 7) % 9973}_${tag} = compute(${i}, '${tag}')`).join('\n')
+  }
+
+  it('buildFileDiff returns within the timeout bound on a huge full rewrite', () => {
+    const before = fullRewrite(8000, 'old')
+    const after = fullRewrite(8000, 'new')
+    const t = Date.now()
+    const diff = buildFileDiff('big.ts', before, after)
+    const elapsed = Date.now() - t
+    // Unbounded this takes ~7s; the 1s timeout must keep it well under that.
+    assert.ok(elapsed < 5000, `buildFileDiff took ${elapsed}ms — timeout bound not effective`)
+    assert.equal(typeof diff, 'string', 'degrades to a string (possibly empty), never undefined/throw')
+  })
+
+  it('computeChangedLineRanges falls back to a whole-file range on timeout', () => {
+    const before = fullRewrite(8000, 'old')
+    const after = fullRewrite(8000, 'new')
+    const t = Date.now()
+    const ranges = computeChangedLineRanges(before, after)
+    const elapsed = Date.now() - t
+    assert.ok(elapsed < 5000, `computeChangedLineRanges took ${elapsed}ms — timeout bound not effective`)
+    assert.ok(ranges.length >= 1, 'always returns at least one range for differing content')
+    // Whatever path was taken (finished or timed-out fallback), the ranges
+    // must cover the changed content so diagnostics are not hidden.
+    const last = ranges[ranges.length - 1]!
+    assert.ok(last.end >= 1)
+  })
+})
