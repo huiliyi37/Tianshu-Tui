@@ -725,3 +725,29 @@ test('watchdog_recovery breaks an open text run', () => {
   assert.equal(s.blocks[2]!.kind, 'assistant')
   assert.equal(s.blocks[2]!.text, 'resumed')
 })
+
+// ── Immutability: snapshot must not be corrupted by subsequent deltas ──────
+
+test('text_delta does not mutate previous state snapshot (immutability)', () => {
+  seq = 0
+  const s1 = eventReducer(initialEventState, { type: 'event', event: ev('text_delta', { text: 'hello' }) })
+  const oldBlocks = s1.blocks
+  const oldBlockText = oldBlocks[0]!.text
+  assert.equal(oldBlockText, 'hello')
+
+  const s2 = eventReducer(s1, { type: 'event', event: ev('text_delta', { text: ' world' }) })
+
+  assert.equal(oldBlocks[0]!.text, 'hello', 'old snapshot text must not change')
+  assert.equal(s2.blocks[0]!.text, 'hello world', 'new state must have concatenated text')
+  assert.notEqual(oldBlocks, s2.blocks, 'blocks arrays must be distinct references')
+})
+
+test('thinking_delta does not mutate previous state snapshot (immutability)', () => {
+  seq = 0
+  const s1 = eventReducer(initialEventState, { type: 'event', event: ev('thinking_delta', { text: 'plan' }) })
+  const oldBlocks = s1.blocks
+  const s2 = eventReducer(s1, { type: 'event', event: ev('thinking_delta', { text: ' more' }) })
+
+  assert.equal(oldBlocks[0]!.text, 'plan', 'old snapshot text must not change')
+  assert.notEqual(oldBlocks, s2.blocks, 'blocks arrays must be distinct references')
+})

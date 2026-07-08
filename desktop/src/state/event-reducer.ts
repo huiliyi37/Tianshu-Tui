@@ -249,6 +249,15 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
   if (ev.seq <= state.lastSeq) return state
   const next: EventViewState = { ...state, lastSeq: ev.seq }
 
+  /** Maximum allowed block text length — prevents unbounded string growth in
+   *  streaming runs. 500KB is well above any reasonable single assistant reply
+   *  (~125K tokens) while capping worst-case memory use. */
+  const MAX_BLOCK_TEXT_LEN = 500_000
+
+  /** Soft cap on the total number of timeline blocks. Beyond this, the oldest
+   *  blocks are trimmed to keep reducer and renderer O(n) cost bounded. */
+  const MAX_BLOCKS = 5_000
+
   switch (ev.type) {
     case 'user':
       next.private_textOpen = false
@@ -270,9 +279,15 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       if (next.private_textOpen && next.blocks.length > 0) {
         const lastIdx = next.blocks.length - 1
         const last = next.blocks[lastIdx]!
-        // U8: in-place update of the last block avoids O(n) full-array copy on
-        // every streaming delta; blocksRev signals the change to consumers.
-        next.blocks[lastIdx] = { ...last, text: last.text + text }
+        // Clone before mutating: prevents corruption of any previous snapshot
+        // that shares this array reference. The shallow copy cost is negligible
+        // (~4KB for 500 blocks) and only fires once per rAF frame after
+        // coalesceDeltas merging.
+        const blocks = next.blocks.slice()
+        let appended = last.text + text
+        if (appended.length > MAX_BLOCK_TEXT_LEN) appended = appended.slice(0, MAX_BLOCK_TEXT_LEN)
+        blocks[lastIdx] = { ...last, text: appended }
+        next.blocks = blocks
         next.blocksRev = next.blocksRev + 1
       } else if (text) {
         next.private_thinkingOpen = false
@@ -287,7 +302,11 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       if (next.private_thinkingOpen && next.blocks.length > 0) {
         const lastIdx = next.blocks.length - 1
         const last = next.blocks[lastIdx]!
-        next.blocks[lastIdx] = { ...last, text: last.text + text }
+        const blocks = next.blocks.slice()
+        let appended = last.text + text
+        if (appended.length > MAX_BLOCK_TEXT_LEN) appended = appended.slice(0, MAX_BLOCK_TEXT_LEN)
+        blocks[lastIdx] = { ...last, text: appended }
+        next.blocks = blocks
         next.blocksRev = next.blocksRev + 1
       } else if (text) {
         next.private_textOpen = false
