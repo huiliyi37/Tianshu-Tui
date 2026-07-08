@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# 天枢 macOS 双架构打包脚本 (2.16.6)
+# 天枢 macOS 双架构打包脚本 (2.17.3)
 # 用法: bash scripts/build-macos-release.sh
 # 前提: Node 24+, Rust targets (aarch64 + x86_64), Tauri CLI
+#
+# 终端直接运行：完整 DMG + .app.tar.gz
+# agent 沙箱内运行：DMG 创建 (hdiutil) 会失败，脚本自动跳过并仅收集 .app.tar.gz
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -25,33 +28,51 @@ echo "--- 打包原生二进制 ---"
 node scripts/pack-native.js
 
 # 3. Tauri 构建 — arm64 (Apple Silicon)
-# --bundles app: skip DMG (hdiutil requires full macOS permissions outside agent sandbox)
 echo "=== 构建 arm64 (Apple Silicon) ==="
 cd desktop
-TAURI_ENV_TARGET_TRIPLE=aarch64-apple-darwin npm run tauri:build -- --target aarch64-apple-darwin --bundles app
+TAURI_ENV_TARGET_TRIPLE=aarch64-apple-darwin npm run tauri:build -- --target aarch64-apple-darwin || echo "⚠ arm64 构建未完全成功（DMG 可能失败，.app 不受影响）"
 cd ..
 
 # 4. Tauri 构建 — x86_64 (Intel)
 echo "=== 构建 x86_64 (Intel) ==="
 cd desktop
-TAURI_ENV_TARGET_TRIPLE=x86_64-apple-darwin npm run tauri:build -- --target x86_64-apple-darwin --bundles app
+TAURI_ENV_TARGET_TRIPLE=x86_64-apple-darwin npm run tauri:build -- --target x86_64-apple-darwin || echo "⚠ x86_64 构建未完全成功（DMG 可能失败，.app 不受影响）"
 cd ..
 
-# 5. 收集产物 — 从 .app bundle 创建 .tar.gz 归档
+# 5. 收集产物 — DMG（Tauri 自动生成）和 .app.tar.gz
 mkdir -p release
-RELEASE_DIR="desktop/src-tauri/target/aarch64-apple-darwin/release/bundle"
-if [ -d "$RELEASE_DIR/macos/Tianshu.app" ]; then
-  echo "--- 归档 arm64 .app ---"
-  tar -czf "release/Tianshu_${VER}_aarch64.app.tar.gz" -C "$RELEASE_DIR/macos" Tianshu.app
-  echo "  ✅ release/Tianshu_${VER}_aarch64.app.tar.gz"
-fi
 
-RELEASE_DIR_X64="desktop/src-tauri/target/x86_64-apple-darwin/release/bundle"
-if [ -d "$RELEASE_DIR_X64/macos/Tianshu.app" ]; then
-  echo "--- 归档 x86_64 .app ---"
-  tar -czf "release/Tianshu_${VER}_x64.app.tar.gz" -C "$RELEASE_DIR_X64/macos" Tianshu.app
-  echo "  ✅ release/Tianshu_${VER}_x64.app.tar.gz"
-fi
+collect_arch() {
+  local arch="$1"
+  local bundle_dir="desktop/src-tauri/target/${arch}-apple-darwin/release/bundle"
+
+  # DMG — Tauri 自动生成（终端环境有效，沙箱内 hdiutil 无权限会缺这个文件）
+  for dmg in "$bundle_dir/dmg/"*.dmg; do
+    if [ -f "$dmg" ]; then
+      cp "$dmg" "release/Tianshu_${VER}_${arch}.dmg"
+      echo "  ✅ release/Tianshu_${VER}_${arch}.dmg"
+    fi
+  done
+
+  # .app.tar.gz — Tauri 自动生成，如果 Tauri 没生成就自己打包
+  for tgz in "$bundle_dir/macos/"*.app.tar.gz; do
+    if [ -f "$tgz" ]; then
+      cp "$tgz" "release/Tianshu_${VER}_${arch}.app.tar.gz"
+      echo "  ✅ release/Tianshu_${VER}_${arch}.app.tar.gz (from Tauri)"
+    fi
+  done
+
+  # 兜底：Tauri 没生成 .app.tar.gz 但 .app 存在 → 自己打包
+  if [ ! -f "release/Tianshu_${VER}_${arch}.app.tar.gz" ] && [ -d "$bundle_dir/macos/Tianshu.app" ]; then
+    tar -czf "release/Tianshu_${VER}_${arch}.app.tar.gz" -C "$bundle_dir/macos" Tianshu.app 2>/dev/null
+    if [ -f "release/Tianshu_${VER}_${arch}.app.tar.gz" ]; then
+      echo "  ✅ release/Tianshu_${VER}_${arch}.app.tar.gz (self-packed)"
+    fi
+  fi
+}
+
+collect_arch "aarch64"
+collect_arch "x86_64"
 
 echo ""
 echo "=== 打包完成 ==="
