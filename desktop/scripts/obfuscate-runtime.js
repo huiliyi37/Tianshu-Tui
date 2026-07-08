@@ -15,7 +15,8 @@
 
 import { readFileSync, writeFileSync, statSync, readdirSync } from 'node:fs'
 import { join, extname, basename } from 'node:path'
-import { obfuscate } from 'javascript-obfuscator'
+import jsObfuscator from 'javascript-obfuscator'
+const { obfuscate } = jsObfuscator
 
 const repoRoot = join(import.meta.dirname, '..', '..')
 const distDir = join(repoRoot, 'dist')
@@ -75,7 +76,21 @@ function collectJsFiles(dir) {
   return files
 }
 
-const files = collectJsFiles(distDir)
+const files = collectJsFiles(distDir).filter(f => {
+  // turndown 是第三方 HTML→Markdown 库，含 polyglot 字符导致 parser URI malformed
+  if (basename(f).startsWith('turndown')) return false
+  // undici 的 chunk（通常最大，约 2MB）含 ES2022 私有类字段 (#target 等)，
+  // javascript-obfuscator 对其处理可能产生 Invalid JS 语法错误。
+  // undici 是开源 HTTP 库，无需混淆保护。
+  const name = basename(f)
+  if (name.startsWith('chunk-') && name.endsWith('.js')) {
+    // 排除超过 500KB 的 chunk（undici + 大依赖）
+    try {
+      if (statSync(f).size > 500 * 1024) return false
+    } catch {}
+  }
+  return true
+})
 
 if (files.length === 0) {
   console.log('[obfuscate-runtime] dist/ 中没有 JS 文件，跳过')
