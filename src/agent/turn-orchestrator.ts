@@ -378,6 +378,7 @@ export class TurnOrchestrator {
     // buffer instead of starting a new run.
     let finalTurnCompleted = false
     let actionIntentFiredThisRun = false
+    let turnCallLimitAdvisoryFired = false
 
     try {
       // maxTurns <= 0 means "no hard cap" (true YOLO / autonomous mode). The for
@@ -961,6 +962,26 @@ export class TurnOrchestrator {
                   tools: ['write_file', 'edit_file', 'hash_edit', 'apply_patch', 'run_tests', 'bash', 'deliver_task'],
                   withinTurns: 2,
                 },
+              })
+            } else {
+              this.deps.appendSystemReminder(`<system-reminder>${content}</system-reminder>`)
+            }
+          }
+
+          // ── B2 轮内调用上限提醒（spec 三轮防御加固）──
+          // 轮内 API 调用超过 12 次 → 模型发散，注入一次性强提醒。
+          // 不强制截断（避免打断合法大批量编辑），仅收敛建议。
+          if (!turnCallLimitAdvisoryFired && turn >= 12) {
+            turnCallLimitAdvisoryFired = true
+            const content = '本轮已进行 12+ 次 API 调用，请收敛当前动作并输出结论，不要继续发散。'
+            if (this.deps.submitAdvisory) {
+              this.deps.submitAdvisory({
+                key: 'turn-call-limit',
+                priority: 0.68,
+                category: 'discipline',
+                content,
+                channel: 'system-reminder',
+                immediate: true,
               })
             } else {
               this.deps.appendSystemReminder(`<system-reminder>${content}</system-reminder>`)
