@@ -29,6 +29,7 @@ import { POINTER_GUARD_ERROR_MARKER } from '../../tools/pointer-guard.js'
 
 export interface PointerRegurgitationHookDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
+  addSystemReminder?: (content: string) => void
 }
 
 /** Session-wide guard-rejection count before the advisory escalates.
@@ -83,6 +84,11 @@ export function createPointerRegurgitationHook(deps: PointerRegurgitationHookDep
           + `不要模仿历史里的占位符格式。恢复协议：①在参数里写出完整的真实文本（哪怕很长）；②需要旧内容时先 read_file；③若同批内容反复被拒，检查你是否在复制自己历史消息里的工具调用——那些参数已被重写，不可复用。`,
         ttl: 2,
       })
+      deps.addSystemReminder?.(
+        '<system-reminder>你刚才的写入调用失败，原因是你把 "[file written to …]" 这类显示占位符当成了真实内容传给参数。'
+        + '这是工具历史压缩产生的指针，不是合法输入。修复：在参数中写出完整的真实内容（可以是完整代码），'
+        + '不要复制历史消息里的工具调用格式。</system-reminder>',
+      )
     },
   }
 }
