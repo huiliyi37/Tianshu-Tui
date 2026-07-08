@@ -93,6 +93,8 @@ export default defineConfig({
     // reached when DEV devtools are enabled. Keep it external so bundling ink
     // doesn't fail on the missing module.
     'react-devtools-core',
+    // Optional Office docx reader (npm i mammoth for .docx support without LibreOffice)
+    'mammoth',
   ],
   noExternal: [
     'string-width',
