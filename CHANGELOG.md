@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-15 — v2.17.4: 输出过滤扩展 + TUI 修复
+
+### Fixed
+
+- **TUI /connect 粘贴失效**（`8f346681`）— startConnect 未重置输入模式，审批模式残留导致 onPaste 前置门吞掉粘贴内容
+
+### Added
+
+- **LINE_FILTERS 扩展至 18 条规则**（`9a510e61` `f8c4026d` `78af5168`）—
+  新增 pnpm/yarn、go build/test、ruff/mypy、make、git push/fetch、terraform、prettier、uv、jq/yq 共 9 条输出过滤规则。覆盖 JS/Go/Python/DevOps 全生态高频命令，纯 TypeScript 实现，零外部依赖
+
 ## 2026-07-15 — v2.17.3: 工具层防御加固
 
 ### Fixed
