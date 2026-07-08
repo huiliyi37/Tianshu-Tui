@@ -6,7 +6,7 @@
 
 import type { StreamClient, StreamCallbacks } from './stream-client.js'
 import type { OaiChatRequest } from './oai-types.js'
-import { classifyApiError } from './error-classifier.js'
+import { type ErrorCategory, classifyApiError } from './error-classifier.js'
 
 export interface FallbackEntry {
   name: string
@@ -85,10 +85,10 @@ export class FallbackStreamClient implements StreamClient {
     throw lastError
   }
 
-  private shouldFallback(category: string): boolean {
+  private shouldFallback(category: ErrorCategory): boolean {
     const fallbackCategories = new Set([
       'rate_limit', 'server_error', 'overloaded',
-      'timeout', 'connection_error', 'stream_error',
+      'timeout', 'stream_parse',
     ])
     return fallbackCategories.has(category)
   }
