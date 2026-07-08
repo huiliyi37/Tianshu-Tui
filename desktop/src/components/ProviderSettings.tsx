@@ -12,6 +12,7 @@ import {
   removeProviderModel,
   setProviderKey,
   setProviderAsDefault,
+  setProviderAllowProFallback,
   type ProviderListItem,
   type UnconfiguredPreset,
 } from '../runtime/client'
@@ -319,6 +320,16 @@ function ProviderRow({
     } finally { setBusy(false) }
   }
 
+  const toggleAllowProFallback = async () => {
+    setBusy(true)
+    try {
+      await setProviderAllowProFallback(p.name, !p.allowProFallback)
+      onRefresh()
+    } catch (e) {
+      toast.error((e as Error).message)
+    } finally { setBusy(false) }
+  }
+
   const remove = async () => {
     if (p.isDefault) {
       toast.error(t('providers.cannotRemoveDefault'))
@@ -383,6 +394,15 @@ function ProviderRow({
           <button className="btn-sm danger" disabled={busy} onClick={remove}>{t('providers.remove')}</button>
         )}
       </div>
+      <label className="provider-check" title={t('providers.allowProFallbackHint')}>
+        <input
+          type="checkbox"
+          checked={p.allowProFallback}
+          onChange={toggleAllowProFallback}
+          disabled={busy}
+        />
+        <span>{t('providers.allowProFallback')}</span>
+      </label>
       {editing && (
         <div className="provider-key-form">
           <input

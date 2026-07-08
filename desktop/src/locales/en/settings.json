@@ -361,6 +361,8 @@
     "baseUrlPlaceholder": "e.g. https://api.example.com/v1",
     "apiKeyOptional": "API Key (optional)",
     "makeDefault": "Set as default provider",
+    "allowProFallback": "Allow Pro models as fallback",
+    "allowProFallbackHint": "Off by default. When enabled, falling back to this provider may use strong/pro models; Pro models can incur full-context cost on cache misses.",
     "loading": "Loading…",
     "loadFailed": "Unable to load provider config (sidecar offline?)",
     "prevPage": "Previous",

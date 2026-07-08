@@ -833,6 +833,7 @@ export interface ProviderListItem {
   keyStatus: { source: 'inline' | 'env' | 'none'; ref: string }
   models: { id: string; alias?: string; contextWindow: number; maxTokens: number }[]
   isPreset: boolean
+  allowProFallback: boolean
 }
 
 export interface UnconfiguredPreset {
@@ -854,6 +855,7 @@ export interface SetupConfigProviderInput {
   apiKeyEnv?: string
   baseUrl?: string
   makeDefault?: boolean
+  allowProFallback?: boolean
   model?: {
     id: string
     alias?: string
@@ -880,6 +882,7 @@ export interface SetupCustomProviderInput {
     maxTokens: number
   }
   makeDefault?: boolean
+  allowProFallback?: boolean
 }
 
 /** Create a brand-new OpenAI-compatible provider from scratch (no preset needed).
@@ -924,6 +927,13 @@ export function setProviderKey(
 
 export function setProviderAsDefault(name: string): Promise<{ ok: boolean }> {
   return apiPost(`/config/providers/${name}/default`, {})
+}
+
+export function setProviderAllowProFallback(
+  name: string,
+  allowProFallback: boolean,
+): Promise<{ ok: boolean; allowProFallback: boolean }> {
+  return apiPut<{ ok: boolean; allowProFallback: boolean }>(`/config/providers/${name}/allow-pro-fallback`, { allowProFallback })
 }
 
 // ── Config: Sub-agent / Review model routing ────────────────────────

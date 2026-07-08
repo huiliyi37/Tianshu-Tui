@@ -361,6 +361,8 @@
     "baseUrlPlaceholder": "例如 https://api.example.com/v1",
     "apiKeyOptional": "API Key（可选）",
     "makeDefault": "设为默认 Provider",
+    "allowProFallback": "允许 Pro 模型作为 fallback",
+    "allowProFallbackHint": "默认关闭。开启后，主模型失败 fallback 到此 Provider 时可能使用 strong/pro 模型；Pro 模型无缓存时吃全量上下文，成本显著增加。",
     "loading": "加载中…",
     "loadFailed": "无法加载 Provider 配置（sidecar 离线？）",
     "prevPage": "上一页",
