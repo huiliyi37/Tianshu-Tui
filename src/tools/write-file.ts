@@ -1,5 +1,5 @@
 import { mkdir, stat, readFile } from 'node:fs/promises'
-import { dirname, relative } from 'path'
+import { dirname, relative, extname } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
@@ -11,6 +11,7 @@ import { getTargetEol } from '../platform.js'
 import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
 import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
 import { toPosixPath } from '../path-format.js'
+import { writeMarkdownAsDocx } from './office-writer.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -49,6 +50,23 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
       return { content: `Error: ${e instanceof Error ? e.message : 'Path escapes project directory'}`, isError: true }
     }
     const content = params.input.content as string
+
+    // Office: Markdown → .docx
+    if (extname(filePath).toLowerCase() === '.docx') {
+      try {
+        const result = await writeMarkdownAsDocx(filePath, content)
+        return {
+          content: `Wrote Markdown→docx to ${toPosixPath(relative(params.cwd, filePath))} (via ${result.engine})`,
+          rawPath: filePath,
+        }
+      } catch (e) {
+        return {
+          content: `Error: Markdown→docx conversion failed: ${e instanceof Error ? e.message : 'unknown'}. Install pandoc (brew install pandoc) or LibreOffice.`,
+          isError: true,
+        }
+      }
+    }
+
     const dir = dirname(filePath)
 
     // Pointer-regurgitation guard: the arg post-processors replace large
