@@ -225,6 +225,44 @@ const LINE_FILTERS: Record<string, LineFilter> = {
     ],
     maxLines: 40,
   },
+
+  // ── make ──
+  // 来源：make 输出 "make: Nothing to be done for 'all'" 或 gcc/clang 编译行
+  // 保留 error/warning/undefined reference 等诊断；strip 编译命令、进入目录行
+  'make': {
+    matchCommand: /\bmake\b/,
+    stripLines: [
+      /^(?:gcc|g\+\+|clang|cc)\s/,     // 编译命令 "gcc -c -o foo.o foo.c"
+      /^make\[\d+\]: (?:Entering|Leaving)/, // 递归目录进入/退出
+      /^ar cr /,                         // 归档命令
+      /^(?:ranlib|strip)\s/,            // 后处理
+    ],
+    maxLines: 30,
+  },
+
+  // ── git push / fetch / remote ──
+  // 来源：git push 输出 "Enumerating objects: 42, done. Writing objects: 100% (42/42)"
+  'git-push': {
+    matchCommand: /\bgit\s+(?:push|fetch|pull|remote\s+(?:add|update|set-url))\b/,
+    stripLines: [
+      /^(?:Enumerating|Counting|Compressing|Writing|Total|remote:|Resolving)/,
+      /^\s*\d+%/,                         // 进度百分比
+    ],
+    shortCircuit: /Everything up[ -]to[ -]date|Already up[ -]to[ -]date/,
+    maxLines: 15,
+  },
+
+  // ── terraform ──
+  // 来源：terraform plan/apply 输出 "Refreshing state... [id=xxx]" 和 plan summary
+  'terraform': {
+    matchCommand: /\bterraform\s+(?:plan|apply|init|validate|fmt)\b/,
+    stripLines: [
+      /^data\.\S+: Reading\.\.\./,     // data source 读取
+      /^\S+: (?:Refreshing|Creating|Modifying|Destroying)\.\.\./, // 资源操作进度
+      /^\s*(?:\S+\.)+\S+: (?:Creation|Modification|Destruction) complete/,  // 完成行
+    ],
+    maxLines: 40,
+  },
 }
 
 /** 应用行级过滤。诊断行受 DIAGNOSTIC_LINE_RE 保护。 */
