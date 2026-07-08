@@ -21,7 +21,6 @@ import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
 import { isApprovalConsent } from '../lib/consent'
-import { ApprovalInline } from '../components/ApprovalInline'
 import { deriveProjects, loadKnownProjects } from '../lib/projects'
 import { openExternal } from '../lib/open-external'
 import { openThreadPopout } from '../lib/popout'
@@ -298,6 +297,7 @@ export function WorkspaceSurface() {
                     streamStatus={view.streamStatus}
                     onRetryStream={view.retryStream}
                     onToggleDelegation={setShowDelegation}
+                    onApproval={handleApproval}
                   />
                 ) : (
                    <div className="empty thread-empty onboard">
@@ -503,12 +503,6 @@ export function WorkspaceSurface() {
         </button>
       )}
 
-      {view.pendingApproval && (
-        <ApprovalInline
-          request={view.pendingApproval}
-          onDecision={handleApproval}
-        />
-      )}
 
       {showDelegation && view.delegation && (
         <DelegationOverlay

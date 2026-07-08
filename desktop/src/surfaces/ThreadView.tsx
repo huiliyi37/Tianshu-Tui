@@ -13,6 +13,7 @@ import { Composer } from '../components/Composer'
 import { TimelineGroup } from '../components/TimelineGroup'
 import { ArtifactCard } from '../components/ArtifactCard'
 import { DelegateDialog } from '../components/DelegateDialog'
+import { ApprovalInline } from '../components/ApprovalInline'
 import { CompletionCurtain } from '../components/CompletionCurtain'
 import { RewindOverlay } from '../components/RewindOverlay'
 import { FileViewer } from '../components/FileViewer'
@@ -83,8 +84,9 @@ export function ThreadView(props: {
   streamStatus?: StreamStatus
   onRetryStream?: () => void
   onToggleDelegation?: (open: boolean) => void
+  onApproval?: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>, remember?: boolean) => void
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream, onToggleDelegation } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval } = props
   const { t } = useTranslation('threadView')
   const ui = useUiState()
   const dispatch = useUiDispatch()
@@ -1073,6 +1075,12 @@ export function ThreadView(props: {
 
       <div className="composer-float" ref={composerWrapRef}>
         <div className={`composer-float-inner accent-${activeDomain?.uiPersona.accent ?? 'primary'}`}>
+          {view.pendingApproval && onApproval && (
+            <ApprovalInline
+              request={view.pendingApproval}
+              onDecision={onApproval}
+            />
+          )}
           {view.pendingQuestion && !busy && (
             <QuestionCard
               question={view.pendingQuestion}
