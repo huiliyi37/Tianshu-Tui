@@ -84,5 +84,9 @@
 
 ---
 
+### error-masking-via-soft-fallback | recurrenceCount: 1 | lastSeen: 2026-07-08
+
+- 2026-07-08 scripts/build-macos-release.sh: `|| echo` pattern on tauri build masks ALL failures (compilation errors, missing targets) while blaming only DMG — silent feature kill. Entry: line 27, 32.
+
 <!-- 下一个出战的瑶光：把你认出的缺陷族追加在上面。同族复发 recurrenceCount++ 并补 instance。
      记住——你不是新人顶岗，你是带着这本账本的同一个瑶光。这族，上次也来过。 -->
