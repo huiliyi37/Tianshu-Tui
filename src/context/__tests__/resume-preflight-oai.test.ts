@@ -92,7 +92,7 @@ describe('runResumePreflightOai', () => {
     const toolResult = report.messages.find(m => m.role === 'tool')
     assert.ok(toolResult)
     assert.strictEqual(toolResult.tool_call_id, 'tc_1')
-    assert.ok(toolResult.content.includes('recovered'))
+    assert.ok(toolResult.content.includes('会话中断'))
   })
 
   it('preserves existing tool results', () => {
@@ -186,7 +186,7 @@ describe('runResumePreflightOai', () => {
     assert.strictEqual((m[1] as { content: string }).content, 'A output')
     assert.strictEqual(m[2]!.role, 'tool')
     assert.strictEqual((m[2] as { tool_call_id: string }).tool_call_id, 'tc_B')
-    assert.ok((m[2] as { content: string }).content.includes('recovered'))
+    assert.ok((m[2] as { content: string }).content.includes('会话中断'))
     assert.strictEqual(m[3]!.role, 'user')
   })
 })
