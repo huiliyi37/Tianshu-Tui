@@ -11,6 +11,16 @@ import { access, readFile, unlink } from 'fs/promises'
 import { extname, basename } from 'path'
 import { tmpdir } from 'os'
 
+/** execFile promisified — used for engine detection. */
+function execFileAsync(binary: string, args: string[], opts?: { timeout?: number }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(binary, args, { timeout: opts?.timeout ?? 30_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(err)
+      else resolve({ stdout, stderr })
+    })
+  })
+}
+
 export const OFFICE_EXTENSIONS = new Set([
   '.doc',
   '.docx',
@@ -31,21 +41,20 @@ export interface OfficeReadResult {
  * Detect the best available conversion engine for the current platform.
  */
 async function detectEngine(): Promise<'textutil' | 'soffice' | 'mammoth' | null> {
-  // macOS built-in
+  // macOS built-in — textutil is always at /usr/bin/textutil
+  if (process.platform === 'darwin') {
+    try { await access('/usr/bin/textutil'); return 'textutil' } catch {}
+  }
+  // Cross-platform: try soffice via PATH
   try {
-    await access('/usr/bin/textutil')
-    return 'textutil'
-  } catch { /* not macOS or textutil not available */ }
-
-  try {
-    await access('/usr/bin/soffice')
+    await execFileAsync('soffice', ['--version'], { timeout: 5000 })
     return 'soffice'
-  } catch { /* no LibreOffice */ }
-
+  } catch {}
+  // Some Linux distros use libreoffice as binary name
   try {
-    await access('/usr/bin/libreoffice')
+    await execFileAsync('libreoffice', ['--version'], { timeout: 5000 })
     return 'soffice'
-  } catch { /* no LibreOffice */ }
+  } catch {}
 
   // mammoth requires the npm package; check lazily at call time
   return null
@@ -114,7 +123,7 @@ async function readWithMammoth(filePath: string, ext: string): Promise<OfficeRea
 
 function execTextutil(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('/usr/bin/textutil', ['-convert', 'txt', '-stdout', filePath], {
+    execFile('textutil', ['-convert', 'txt', '-stdout', filePath], {
       timeout: 30_000,
       maxBuffer: 10 * 1024 * 1024, // 10 MB
     }, (err, stdout) => {
@@ -128,10 +137,9 @@ function execSoffice(filePath: string): Promise<string> {
   const name = basename(filePath)
   const outName = name.replace(/\.[^.]+$/, '.txt')
   const outPath = `${tmpdir()}/${outName}`
-  const binary = '/usr/bin/soffice'
 
   return new Promise((resolve, reject) => {
-    execFile(binary, ['--headless', '--convert-to', 'txt', '--outdir', tmpdir(), filePath], {
+    execFile('soffice', ['--headless', '--convert-to', 'txt', '--outdir', tmpdir(), filePath], {
       timeout: 60_000,
     }, async (err) => {
       if (err) {

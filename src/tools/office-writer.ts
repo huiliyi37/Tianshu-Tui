@@ -16,6 +16,16 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 
+/** execFile promisified — used for engine detection and conversion. */
+function execFileAsync(binary: string, args: string[], opts?: { timeout?: number }): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(binary, args, { timeout: opts?.timeout ?? 30_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(err)
+      else resolve({ stdout, stderr })
+    })
+  })
+}
+
 /** Convert Markdown text to basic HTML. Focused on the most common elements:
  *  headings, bold, italic, unordered/ordered lists, paragraphs, code blocks.
  *  Does NOT handle: tables, links, images (use pandoc/bash for those). */
@@ -118,9 +128,20 @@ function inlineMd(text: string): string {
 let engineCache: 'textutil' | 'soffice' | null | undefined
 
 async function detectEngine(): Promise<'textutil' | 'soffice' | null> {
-  try { accessSync('/usr/bin/textutil'); return 'textutil' } catch {}
-  try { accessSync('/usr/bin/soffice'); return 'soffice' } catch {}
-  try { accessSync('/usr/bin/libreoffice'); return 'soffice' } catch {}
+  // macOS built-in — textutil is always at /usr/bin/textutil
+  if (process.platform === 'darwin') {
+    try { accessSync('/usr/bin/textutil'); return 'textutil' } catch {}
+  }
+  // Cross-platform: try soffice via PATH (works on Linux, Windows with LibreOffice)
+  try {
+    await execFileAsync('soffice', ['--version'], { timeout: 5000 })
+    return 'soffice'
+  } catch {}
+  // Some Linux distros use libreoffice as binary name
+  try {
+    await execFileAsync('libreoffice', ['--version'], { timeout: 5000 })
+    return 'soffice'
+  } catch {}
   return null
 }
 
@@ -176,7 +197,7 @@ async function writeWithTextutil(filePath: string, html: string): Promise<Office
   await writeFile(htmlPath, html, 'utf-8')
 
   return new Promise((resolve, reject) => {
-    execFile('/usr/bin/textutil', [
+    execFile('textutil', [
       '-convert', 'docx',
       '-output', filePath,
       htmlPath,
@@ -198,7 +219,7 @@ async function writeWithSoffice(filePath: string, html: string): Promise<OfficeW
   await writeFile(htmlPath, html, 'utf-8')
 
   return new Promise((resolve, reject) => {
-    execFile('/usr/bin/soffice', [
+    execFile('soffice', [
       '--headless',
       '--convert-to', 'docx',
       '--outdir', tmpDir,
