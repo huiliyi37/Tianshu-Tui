@@ -24,15 +24,24 @@ function makeParams(input: Record<string, unknown>): ToolCallParams {
 }
 
 describe('detectPointerPlaceholder', () => {
-  it('detects every registered pointer prefix', () => {
+  it('detects every registered pointer prefix in real pointer shape', () => {
+    const samples: Record<string, string> = {
+      '[file written to': '[file written to /x/y.md — 5 lines, 100 chars. Display placeholder — never emit this as content; use read_file to review.]',
+      '[edit on': '[edit on /x/y.md: replaced 100-char block, preview: "abc". Display placeholder — never emit this as content; use read_file for current content.]',
+      '[hash_edit applied to': '[hash_edit applied to /x/y.md — new block 5 lines, 100 chars. Display placeholder — never emit this as content; use read_file to review.]',
+      '[new block': '[new block 100 chars — placeholder, never emit as content]',
+      '[plan persisted to': '[plan persisted to .rivet/plans/x.md — 5 lines, 100 chars. Use read_file to review.]',
+    }
     for (const prefix of POINTER_PLACEHOLDER_PREFIXES) {
-      assert.equal(detectPointerPlaceholder(`${prefix} /x/y.md — stuff]`), prefix, prefix)
+      const sample = samples[prefix]
+      assert.ok(sample, `missing test sample for prefix ${prefix}`)
+      assert.equal(detectPointerPlaceholder(sample), prefix, prefix)
     }
   })
 
   it('detects a pointer behind leading whitespace', () => {
     assert.equal(
-      detectPointerPlaceholder('\n  [file written to /a.md — 5 lines, 10 chars.]'),
+      detectPointerPlaceholder('\n  [file written to /a.md — 5 lines, 10 chars. Display placeholder — never emit this as content; use read_file to review.]'),
       '[file written to',
     )
   })
@@ -40,6 +49,18 @@ describe('detectPointerPlaceholder', () => {
   it('ignores real content that mentions a pointer mid-text', () => {
     assert.equal(detectPointerPlaceholder('Docs: history shows "[file written to …" pointers.\n'), null)
     assert.equal(detectPointerPlaceholder('---\ndeck: 01英语::00必考词\n---\n\n### gift\n'), null)
+  })
+
+  it('allows real content that starts with a pointer prefix but contains newlines', () => {
+    const content = '[file written to /a/b/page.tsx — this line is a red herring\nimport React from "react"\nexport default function Page() {\n  return <div>real content</div>\n}\n'
+    assert.equal(detectPointerPlaceholder(content), null)
+  })
+
+  it('allows a single-line prefix imitation that lacks the marker phrase', () => {
+    assert.equal(
+      detectPointerPlaceholder('[file written to /a/b/page.tsx is a note about what I did earlier]'),
+      null,
+    )
   })
 
   it('error message carries the stable marker the advisory hook keys off', () => {
@@ -110,7 +131,7 @@ describe('cross-tool pointer rejection', () => {
     writeFileSync(file, 'alpha\nbeta\n')
     const result = await EDIT_FILE_TOOL.execute(makeParams({
       file_path: file,
-      old_string: `[edit on ${file}: replaced 9000-char block, preview: "x". Use read_file for current content.]`,
+      old_string: `[edit on ${file}: replaced 9000-char block, preview: "x". Display placeholder — never emit this as content; use read_file for current content.]`,
       new_string: 'gamma',
     }))
     assert.ok(result.isError)

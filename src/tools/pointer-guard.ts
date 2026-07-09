@@ -36,14 +36,35 @@ export const POINTER_PLACEHOLDER_PREFIXES: readonly string[] = [
  *  advisory hook keys off this substring to count repeated offenses. */
 export const POINTER_GUARD_ERROR_MARKER = 'pointer placeholder from message history'
 
+/** Marker phrases that appear inside every real pointer produced by the arg
+ *  processors. Used as a secondary guard so that real content which merely
+ *  happens to start with the same bracketed prefix is not rejected. */
+const POINTER_MARKER_PHRASES: readonly string[] = [
+  'Display placeholder',
+  'never emit as content',
+  'Use read_file to review',
+]
+
 /**
  * Returns the matched pointer prefix when `value` (after leading whitespace)
- * starts with one, or null for real content.
+ * starts with one AND matches the structural shape of a real pointer, or null
+ * for real content.
+ *
+ * Real pointers are single-line and contain a marker phrase. Model imitations
+ * often start with the same prefix (because they appear dozens of times in
+ * compressed history) but then continue with real multi-line content; those
+ * must be allowed to write.
  */
 export function detectPointerPlaceholder(value: string): string | null {
   const trimmed = value.trimStart()
   for (const prefix of POINTER_PLACEHOLDER_PREFIXES) {
-    if (trimmed.startsWith(prefix)) return prefix
+    if (!trimmed.startsWith(prefix)) continue
+    // Literal pointers are always rendered as a single line by the arg
+    // processors; any newline means the model added real content after the
+    // prefix imitation.
+    if (trimmed.includes('\n') || trimmed.includes('\r')) continue
+    if (!POINTER_MARKER_PHRASES.some(phrase => trimmed.includes(phrase))) continue
+    return prefix
   }
   return null
 }
