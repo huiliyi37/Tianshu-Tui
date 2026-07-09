@@ -1,0 +1,32 @@
+{
+  "publicUrl": "https://your-gateway.example.com",
+  "rivet": {
+    "baseUrl": "http://127.0.0.1:41421",
+    "token": "your-rivet-sidecar-token",
+    "cwd": "/path/to/your/project"
+  },
+  "security": {
+    "allowlistOnly": true,
+    "allowlist": ["feishu:ou_xxx", "wechat:openid_xxx"],
+    "approvalMode": "manual",
+    "autoApproveTools": [
+      "read_file", "read_section", "grep", "glob", "file_info",
+      "git_status", "git_log", "git_diff", "web_search", "web_fetch"
+    ]
+  },
+  "feishu": {
+    "enabled": true,
+    "appId": "cli_xxx",
+    "appSecret": "xxx",
+    "encryptKey": "xxx",
+    "verificationToken": "xxx"
+  },
+  "wechat": {
+    "enabled": true,
+    "appId": "wx_xxx",
+    "appSecret": "xxx",
+    "token": "your-wechat-token",
+    "encodingAesKey": "xxx",
+    "kind": "official"
+  }
+}
