@@ -66,6 +66,28 @@ export const AST_GREP_TOOL: Tool = {
     const pattern = String(input.pattern ?? '').trim()
     if (!pattern) return { content: 'Error: pattern is required', isError: true }
 
+    // Parse the pattern once: a bare pattern string and a `{ rule: ... }` JSON
+    // object are both valid ast-grep inputs. Detect rule objects early so we
+    // can skip the regex-misuse guard on their internal fields.
+    let ruleOrPattern: string | Record<string, unknown> = pattern
+    let isRuleObject = false
+    try {
+      const parsed = JSON.parse(pattern)
+      if (parsed && typeof parsed === 'object' && 'rule' in parsed) {
+        ruleOrPattern = parsed
+        isRuleObject = true
+      }
+    } catch { /* not JSON — use as bare pattern string */ }
+
+    // Regex-misuse guard: ast_grep uses ast-grep pattern syntax ($NAME, $$NAME),
+    // not regular expressions. \d \w \1 etc. will not work as intended.
+    if (!isRuleObject && /\\[dDwWsSbB1-9]/.test(pattern)) {
+      return {
+        content: `Error: pattern contains regex tokens (\\d, \\w, \\s, \\1, etc.).\n\nast_grep uses ast-grep syntax, not regular expressions. Use $NAME for single-node captures and $$NAME for ellipsis (multi-node) captures.\n\nOffending pattern: ${pattern.slice(0, 80)}`,
+        isError: true,
+      }
+    }
+
     const paths = Array.isArray(input.paths) ? (input.paths as string[]).filter(p => typeof p === 'string') : ['.']
     const explicitLang = typeof input.lang === 'string' && input.lang.trim() ? input.lang.trim() : undefined
     const limit = typeof input.limit === 'number' && input.limit > 0 ? input.limit : 50
@@ -99,17 +121,6 @@ export const AST_GREP_TOOL: Tool = {
     // Register dynamic languages (python/json) once before any parse — lazy,
     // single-shot, degrades gracefully if the lang-* package is missing.
     await ensureDynamicLangsRegistered(napi)
-
-    // Parse the pattern ONCE: a bare pattern string and a `{ rule: ... }` JSON
-    // object are both valid ast-grep inputs. Done outside the file loop so we
-    // don't JSON.parse the same pattern per file.
-    let ruleOrPattern: string | Record<string, unknown> = pattern
-    try {
-      const parsed = JSON.parse(pattern)
-      if (parsed && typeof parsed === 'object' && 'rule' in parsed) {
-        ruleOrPattern = parsed
-      }
-    } catch { /* not JSON — use as pattern string */ }
 
     for (const filePath of allFiles) {
       const langStr = resolveLang(explicitLang, filePath)

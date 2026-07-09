@@ -164,6 +164,33 @@ describe('ast-grep error handling', () => {
       assert.ok(msg.includes('pattern'), `expected pattern error, got: ${msg}`)
     }
   })
+
+  it('rejects regex tokens in bare pattern string', async () => {
+    const result = await astGrep.execute({
+      input: { pattern: 'function \\d+', paths: ['sample.ts'], lang: 'TypeScript' },
+      cwd: testDir,
+      toolUseId: 'test-regex',
+      abortSignal: new AbortController().signal,
+      onOutput: undefined,
+    } as unknown as ToolCallParams)
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('regex tokens'), `expected regex misuse error, got: ${result.content}`)
+  })
+
+  it('allows regex-like strings inside JSON rule objects', async () => {
+    const result = await astGrep.execute({
+      input: {
+        pattern: JSON.stringify({ rule: { kind: 'function_declaration', regex: '^foo' } }),
+        paths: ['sample.ts'],
+        lang: 'TypeScript',
+      },
+      cwd: testDir,
+      toolUseId: 'test-rule-object',
+      abortSignal: new AbortController().signal,
+      onOutput: undefined,
+    } as unknown as ToolCallParams)
+    assert.equal(result.isError, undefined)
+  })
 })
 
 // ── meta-variables ────────────────────────────────────────────────
