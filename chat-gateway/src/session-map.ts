@@ -2,9 +2,11 @@ import Database from 'better-sqlite3'
 import { mkdirSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+export type ChatPlatform = 'feishu' | 'wechat' | 'wechat-personal'
+
 export interface ChatSession {
   id: number
-  platform: 'feishu' | 'wechat'
+  platform: ChatPlatform
   conversationId: string
   senderId: string
   sessionId: string
@@ -40,7 +42,7 @@ export class SessionMap {
   }
 
   async resolve(params: {
-    platform: 'feishu' | 'wechat'
+    platform: ChatPlatform
     conversationId: string
     senderId: string
     createSessionId: () => Promise<string>

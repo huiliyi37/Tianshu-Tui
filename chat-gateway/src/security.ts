@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
 export interface SenderIdentity {
-  platform: 'feishu' | 'wechat'
+  platform: 'feishu' | 'wechat' | 'wechat-personal'
   conversationId: string
   senderId: string
   senderName?: string

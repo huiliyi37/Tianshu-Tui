@@ -17,10 +17,12 @@
     "test": "tsx --test src/__tests__/*.test.ts"
   },
   "dependencies": {
-    "zod": "^3.24.0",
-    "hono": "^4.7.0",
     "@hono/node-server": "^1.14.0",
-    "better-sqlite3": "^12.10.0"
+    "better-sqlite3": "^12.10.0",
+    "hono": "^4.7.0",
+    "wechaty": "^1.20.2",
+    "wechaty-puppet-wechat4u": "^1.14.14",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

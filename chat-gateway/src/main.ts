@@ -7,8 +7,8 @@ import { envAwareConfig } from './config.js'
 import { RivetClient } from './rivet-client.js'
 import { SessionMap } from './session-map.js'
 import { Allowlist } from './security.js'
-import { FeishuAdapter, WechatAdapter } from './adapters/index.js'
-import type { ChatAdapter, ChatAdapterContext } from './adapters/index.js'
+import { FeishuAdapter, WechatAdapter, WechatPersonalAdapter } from './adapters/index.js'
+import type { BotAdapter, ChatAdapter, ChatAdapterContext } from './adapters/index.js'
 
 function dataDir(): string {
   const fromEnv = process.env.TIANSHU_CHAT_GATEWAY_DATA
@@ -28,13 +28,24 @@ async function main() {
 
   const adapters: ChatAdapter[] = []
   if (config.feishu.enabled) adapters.push(new FeishuAdapter())
-  if (config.wechat.enabled) adapters.push(new WechatAdapter())
+  if (config.wechat.enabled && config.wechat.kind !== 'personal') adapters.push(new WechatAdapter())
+
+  const botAdapters: BotAdapter[] = []
+  if (config.wechat.enabled && config.wechat.kind === 'personal') {
+    botAdapters.push(new WechatPersonalAdapter())
+  }
 
   const ctx: ChatAdapterContext = {
     config,
     rivet,
     sessions,
     allowlist,
+  }
+
+  for (const bot of botAdapters) {
+    await bot.start(ctx).catch((err) => {
+      console.error(`[gateway] failed to start ${bot.platform}:`, err)
+    })
   }
 
   const app = new Hono()
@@ -87,7 +98,10 @@ async function main() {
     console.log(`[gateway] adapters: ${adapters.map(a => a.platform).join(', ') || 'none'}`)
   })
 
-  process.on('SIGINT', () => {
+  process.on('SIGINT', async () => {
+    for (const bot of botAdapters) {
+      try { await bot.stop() } catch { /* ignore */ }
+    }
     sessions.close()
     process.exit(0)
   })

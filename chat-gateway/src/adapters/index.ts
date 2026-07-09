@@ -1,3 +1,5 @@
 export { FeishuAdapter } from './feishu.js'
 export { WechatAdapter } from './wechat.js'
+export { WechatPersonalAdapter } from './wechat-personal.js'
 export type { ChatAdapter, ChatAdapterContext, OutgoingMessage } from './types.js'
+export type { BotAdapter } from './bot-adapter.js'

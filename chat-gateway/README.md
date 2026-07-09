@@ -60,6 +60,21 @@ rivet serve
 }
 ```
 
+### 个人微信（experimental）
+
+```json
+{
+  "wechat": {
+    "enabled": true,
+    "kind": "personal",
+    "groupTriggerPrefix": "@天枢 ",
+    "puppet": "wechaty-puppet-wechat4u"
+  }
+}
+```
+
+启动后会打印二维码链接，用微信扫码登录。群聊里只有被 @ 或消息以 `@天枢 ` 开头才会触发。
+
 或用环境变量（见 `.env.example`）。
 
 ### 3. 运行 gateway
@@ -84,6 +99,9 @@ npm run dev
 
 ## 限制
 
-- 当前仅支持微信公众号/企业微信官方 webhook；个人微信需第三方协议，暂未实现。
+- 支持微信公众号/企业微信官方 webhook。
+- **个人微信（experimental）**：通过 Wechaty 接入，默认使用开源的 `wechaty-puppet-wechat4u`（网页协议）。
+  - ⚠️ 个人微信号自动化违反微信用户协议，存在封号风险，仅供实验/自托管使用。
+  - 网页协议不稳定，很多账号无法登录或几天后被踢下线；可在配置中切换其他 puppet。
 - 长回复会自动分块发送。
 - 会话绑定按 `platform + conversation + sender` 维度持久化在 SQLite 中。

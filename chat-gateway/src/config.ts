@@ -19,6 +19,10 @@ export const wechatConfigSchema = z.object({
   appSecret: z.string().optional(),
   /** 'official' | 'work' for now; 'personal' is experimental. */
   kind: z.enum(['official', 'work', 'personal']).default('official'),
+  /** For personal WeChat group chats: only respond to messages starting with this prefix or @mention. */
+  groupTriggerPrefix: z.string().default('@天枢 '),
+  /** For personal WeChat: override the Wechaty puppet package. Default wechaty-puppet-wechat4u. */
+  puppet: z.string().default('wechaty-puppet-wechat4u'),
 })
 
 export const gatewayConfigSchema = z.object({
@@ -91,6 +95,8 @@ export function envAwareConfig(path = defaultConfigPath()): GatewayConfig {
       encodingAesKey: process.env.WECHAT_ENCODING_AES_KEY ?? base.wechat.encodingAesKey,
       appSecret: process.env.WECHAT_APP_SECRET ?? base.wechat.appSecret,
       kind: (process.env.WECHAT_KIND as any) ?? base.wechat.kind,
+      groupTriggerPrefix: process.env.WECHAT_GROUP_TRIGGER_PREFIX ?? base.wechat.groupTriggerPrefix,
+      puppet: process.env.WECHAT_PUPPET ?? base.wechat.puppet,
     },
   })
 }
