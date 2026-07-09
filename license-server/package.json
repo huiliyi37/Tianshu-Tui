@@ -1,0 +1,21 @@
+{
+  "name": "tianshu-license-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "天枢桌面端授权服务器 — Ed25519 签发 + 激活码校验 (Cloudflare Workers + D1)。不进入开源仓库。",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute tianshu-licenses --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute tianshu-licenses --local --file=./schema.sql",
+    "genkeys": "node scripts/genkeys.mjs",
+    "gencode": "node scripts/gencode.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.6.3",
+    "wrangler": "^3.90.0"
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+dist/
+*.log
+.dev.vars
+.env
+# never commit key material
+*.pkcs8
+*.pem
+keys.txt

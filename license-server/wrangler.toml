@@ -1,0 +1,26 @@
+name = "tianshu-license-server"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+# Ed25519 in WebCrypto requires the modern runtime.
+compatibility_flags = ["nodejs_compat"]
+
+# D1 database binding. Create with:
+#   wrangler d1 create tianshu-licenses
+# then paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "tianshu-licenses"
+database_id = "5060d541-bba8-4ac3-99a5-23397e81bde1"
+
+[vars]
+# Product identifier embedded in issued tokens; must match the Rust verifier.
+PRODUCT = "tianshu-desktop"
+# Issued-token lifetime in days. Heartbeat /verify refreshes before expiry.
+# Keep short-ish so revocation propagates; the client offline grace period
+# covers server outages independently.
+TOKEN_TTL_DAYS = "30"
+
+# Secret (NOT committed) — set with:
+#   wrangler secret put SIGNING_KEY_PKCS8
+# Value is the base64 of the Ed25519 private key in PKCS#8 DER
+# (produced by `npm run genkeys`).
