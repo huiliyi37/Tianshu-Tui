@@ -361,6 +361,50 @@ describe('SessionPersist — persisted messages', () => {
       { role: 'tool', tool_call_id: 'tu_1', content: 'contents' },
     ])
   })
+
+  it('strips a write-tool orphan tool_call with a NON-destructive verify reminder (not "files do not exist")', async () => {
+    const persist = new SessionPersist('test-orphan-write', tempDir)
+    await persist.appendOaiWithChecksum({ role: 'user', content: 'edit the component' })
+    // Assistant committed a write_file call but the result line never landed
+    // (interrupted after the file was written, before the result was flushed).
+    await persist.appendOaiWithChecksum({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        { id: 'call_write', type: 'function', function: { name: 'write_file', arguments: '{"file_path":"App.tsx"}' } },
+      ],
+    })
+
+    const loaded = persist.loadOai()
+    const reminder = loaded.find(m => m.role === 'system')
+    assert.ok(reminder, 'expected an injected system reminder')
+    const text = String(reminder!.content)
+    // Must NOT falsely assert the file is gone — that drives a blind rewrite.
+    assert.doesNotMatch(text, /DO NOT EXIST/i)
+    // Must steer the model to verify current state first.
+    assert.match(text, /verify/i)
+    assert.match(text, /read_file|grep/i)
+    // The orphan tool_call itself is stripped (empty-content assistant dropped).
+    assert.ok(!loaded.some(m => m.role === 'assistant' && m.tool_calls?.length))
+  })
+
+  it('keeps the generic re-run reminder for a read-only orphan tool_call', async () => {
+    const persist = new SessionPersist('test-orphan-read', tempDir)
+    await persist.appendOaiWithChecksum({ role: 'user', content: 'look something up' })
+    await persist.appendOaiWithChecksum({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        { id: 'call_grep', type: 'function', function: { name: 'grep', arguments: '{"pattern":"foo"}' } },
+      ],
+    })
+
+    const reminder = persist.loadOai().find(m => m.role === 'system')
+    assert.ok(reminder)
+    const text = String(reminder!.content)
+    assert.doesNotMatch(text, /read_file or grep/i)
+    assert.match(text, /re-run/i)
+  })
 })
 
 

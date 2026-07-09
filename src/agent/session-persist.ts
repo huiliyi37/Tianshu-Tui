@@ -250,24 +250,42 @@ export class SessionPersist {
       } catch { /* skip malformed rows */ }
     }
     // 压#7: Validate tool_call/tool_result pairing
-    const { messages: repaired, hadOrphans } = this.repairOrphanToolCalls(messages)
+    const { messages: repaired, hadOrphans, strippedWriteTool } = this.repairOrphanToolCalls(messages)
     if (hadOrphans) {
-      // Orphan tool_use entries were stripped from history. These tools were
-      // NEVER executed (crash occurred between stream commit and execution).
-      // Any files they would have created/modified do NOT exist — the model
-      // must re-execute any pending writes, not assume they succeeded.
+      // Orphan tool_use entries were stripped from history: the stream committed
+      // a tool_calls block but no matching result durably landed. The interruption
+      // can happen at two points, and we cannot tell which from the log alone:
+      //   (a) BEFORE the tool ran → any file it would touch is unchanged;
+      //   (b) AFTER the tool ran (file already written) but before the result
+      //       line was flushed → the file DOES exist with the new content.
+      // The old wording asserted "files DO NOT EXIST — re-run", which is false in
+      // case (b) and pushes the model into a blind rewrite (→ blind-overwrite
+      // guard → stuck). For write/edit tools we must stay non-destructive: verify
+      // first, never assume. Read/search tools are safe to just re-run.
       repaired.unshift({
         role: 'system',
-        content: '<system-reminder>The previous session was interrupted mid-turn. '
-          + 'Some tool calls from the last assistant message were stripped because '
-          + 'they were never executed (the crash happened between the model '
-          + 'committing tool_use and the tools running). Any files those tools '
-          + 'would have written or modified DO NOT EXIST — re-run any pending edits, '
-          + 'do not assume files were saved.</system-reminder>',
+        content: strippedWriteTool
+          ? '<system-reminder>The previous session was interrupted mid-turn. '
+            + 'A write/edit tool call from the last assistant message was stripped '
+            + 'because its result was not recorded — but the interruption may have '
+            + 'happened either before OR after the file was actually written, so the '
+            + 'file may or may not already contain the intended changes. Do NOT blindly '
+            + 're-run the write. First verify the file\'s current state with read_file '
+            + 'or grep, then only write what is still missing.</system-reminder>'
+          : '<system-reminder>The previous session was interrupted mid-turn. '
+            + 'Some tool calls from the last assistant message were stripped because '
+            + 'their results were not recorded. Re-run any read-only/search steps you '
+            + 'still need; verify state before assuming any side effects took hold.</system-reminder>',
       })
     }
     return repaired
   }
+
+  /** Tools whose orphan recovery must be non-destructive: the file may already
+   *  hold the intended changes, so the model must verify before re-writing. */
+  private static readonly WRITE_TOOL_NAMES = new Set([
+    'write_file', 'edit_file', 'apply_patch', 'multi_edit', 'notebook_edit',
+  ])
 
   /** 压#7: Remove orphan tool_use/tool_result pairs left by corrupted/missing lines.
    *
@@ -276,8 +294,10 @@ export class SessionPersist {
    * (force-kill, power loss, or stream error after tool_use commit). The tool
    * was NEVER run — any files it would have created/modified do NOT exist.
    * Returns whether any orphans were stripped so the caller can warn the model
-   * not to assume side effects from the removed tools. */
-  private repairOrphanToolCalls(messages: OaiMessage[]): { messages: OaiMessage[]; hadOrphans: boolean } {
+   * not to assume side effects from the removed tools, plus whether any stripped
+   * orphan was a write/edit tool (so the warning can be non-destructive: the
+   * file may already hold the change, verify before re-running). */
+  private repairOrphanToolCalls(messages: OaiMessage[]): { messages: OaiMessage[]; hadOrphans: boolean; strippedWriteTool: boolean } {
     const toolCallIds = new Set<string>()
     const toolResultIndices = new Map<string, number>()
     for (let i = 0; i < messages.length; i++) {
@@ -297,6 +317,10 @@ export class SessionPersist {
     // Pass 1: collect valid messages (strip orphan tool_calls, drop orphan results)
     const result: OaiMessage[] = []
     let hadOrphans = false
+    let strippedWriteTool = false
+    const noteStripped = (tc: OaiToolCall): void => {
+      if (SessionPersist.WRITE_TOOL_NAMES.has(tc.function?.name ?? '')) strippedWriteTool = true
+    }
     for (let i = 0; i < messages.length; i++) {
       const msg = messages[i]!
       // Drop orphan tool results
@@ -304,17 +328,19 @@ export class SessionPersist {
       // Strip orphan tool_calls from assistant messages
       if (msg.role === 'assistant' && msg.tool_calls) {
         const valid = msg.tool_calls.filter(tc => tc.id && toolResultIndices.has(tc.id))
+        const orphaned = msg.tool_calls.filter(tc => !(tc.id && toolResultIndices.has(tc.id)))
         // Drop the message entirely if all tool_calls were orphan and content is empty
-        if (valid.length === 0 && !msg.content) { hadOrphans = true; continue }
+        if (valid.length === 0 && !msg.content) { hadOrphans = true; orphaned.forEach(noteStripped); continue }
         if (valid.length !== msg.tool_calls.length) {
           hadOrphans = true
+          orphaned.forEach(noteStripped)
           result.push({ ...msg, tool_calls: valid })
           continue
         }
       }
       result.push(msg)
     }
-    return { messages: result, hadOrphans }
+    return { messages: result, hadOrphans, strippedWriteTool }
   }
 
   /** Audit breadcrumb types: skipped on replay (parseSessionLine), preserved across rewrites. */

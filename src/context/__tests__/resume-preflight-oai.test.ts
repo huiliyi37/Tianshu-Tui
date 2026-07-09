@@ -95,6 +95,38 @@ describe('runResumePreflightOai', () => {
     assert.ok(toolResult.content.includes('会话中断'))
   })
 
+  it('names the target file in a write-tool orphan recovery hint', () => {
+    const messages: OaiMessage[] = [
+      { role: 'user', content: 'edit the component' },
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'tc_w', type: 'function', function: { name: 'write_file', arguments: '{"file_path":"src/App.tsx","content":"<ptr>"}' } },
+      ]},
+      // orphan: no result for tc_w
+    ]
+    const report = runResumePreflightOai(messages)
+    const toolResult = report.messages.find(m => m.role === 'tool' && m.tool_call_id === 'tc_w')
+    assert.ok(toolResult)
+    const text = String((toolResult as { content: string }).content)
+    // Actionable: names the exact file to verify, and stays non-destructive.
+    assert.ok(text.includes('src/App.tsx'), 'should name the target file')
+    assert.ok(text.includes('read_file'))
+    assert.ok(text.includes('不要盲目重写'))
+  })
+
+  it('falls back to a generic hint when the write args are unparseable', () => {
+    const messages: OaiMessage[] = [
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'tc_bad', type: 'function', function: { name: 'edit_file', arguments: 'not json' } },
+      ]},
+    ]
+    const report = runResumePreflightOai(messages)
+    const toolResult = report.messages.find(m => m.role === 'tool' && m.tool_call_id === 'tc_bad')
+    assert.ok(toolResult)
+    const text = String((toolResult as { content: string }).content)
+    assert.ok(text.includes('会话中断'))
+    assert.ok(text.includes('目标文件'))
+  })
+
   it('preserves existing tool results', () => {
     const messages: OaiMessage[] = [
       { role: 'assistant', content: null, tool_calls: [
