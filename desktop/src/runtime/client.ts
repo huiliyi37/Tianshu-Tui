@@ -385,6 +385,8 @@ export interface ComputerUseGrantItem {
 
 export interface ComputerUseStatus {
   available: boolean
+  /** True when the platform supports Computer Use but Pro is not active. */
+  proRequired: boolean
   platform: string
   permissions: ComputerUsePermissions | null
   grants: ComputerUseGrantItem[]

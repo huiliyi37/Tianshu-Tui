@@ -107,6 +107,7 @@
     "title": "Computer Use",
     "desc": "允许 agent 查看并操作桌面图形界面应用（截图 + 无障碍树 + 点击/键入）。每个应用首次操作需审批，勾选「始终允许」后记录在此。",
     "unavailable": "当前平台不支持（仅 macOS 与 Windows），或已通过 RIVET_COMPUTER_USE=0 禁用。",
+    "proRequired": "Computer Use 为 Pro 功能。请在设置 → 许可证中开通 Pro 后使用。",
     "permissions": "系统权限",
     "permAccessibility": "辅助功能",
     "permScreenRecording": "屏幕录制",

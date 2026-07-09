@@ -107,6 +107,7 @@
     "title": "Computer Use",
     "desc": "Let the agent see and operate desktop GUI apps (screenshot + accessibility tree + click/type). Each app's first action requires approval; apps you mark \"always allow\" are listed here.",
     "unavailable": "Not supported on this platform (macOS and Windows only), or disabled via RIVET_COMPUTER_USE=0.",
+    "proRequired": "Computer Use is a Pro feature. Enable Pro in Settings → License to use it.",
     "permissions": "System permissions",
     "permAccessibility": "Accessibility",
     "permScreenRecording": "Screen Recording",

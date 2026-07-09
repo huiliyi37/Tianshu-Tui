@@ -1188,6 +1188,9 @@ function ComputerUseSettingsManager() {
   if (!status) return null
 
   if (!status.available) {
+    if (status.proRequired) {
+      return <div className="meta">{t('computerUse.proRequired')}</div>
+    }
     return <div className="meta">{t('computerUse.unavailable')}</div>
   }
 
