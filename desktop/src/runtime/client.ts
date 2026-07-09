@@ -131,7 +131,7 @@ export interface ActivationStatus {
 
 /** License server base URL. Override at build time via VITE_LICENSE_SERVER_URL. */
 export const LICENSE_SERVER_URL = String(
-  viteEnv().VITE_LICENSE_SERVER_URL ?? 'https://license.tianshu.app',
+  viteEnv().VITE_LICENSE_SERVER_URL ?? 'https://tianshu-license-server.huiliyi37.workers.dev',
 ).replace(/\/+$/, '')
 
 /** Current local activation state (Ed25519-verified in Rust, offline-grace aware). */

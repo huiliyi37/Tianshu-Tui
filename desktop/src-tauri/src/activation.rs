@@ -31,7 +31,7 @@ const OFFLINE_GRACE_DAYS: i64 = 10;
 /// 占位值(全零)不会匹配任何真实签名 → 所有 token 验签失败 → fail-closed 锁死,
 /// 这是有意的:没有真实密钥 + 真实服务器,加固版就不该跑起来。开发期用
 /// `RIVET_ACTIVATION_DEV_BYPASS=1`(仅 debug 构建生效)绕过。
-const PUBLIC_KEY_B64: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const PUBLIC_KEY_B64: &str = "uBhXciTyeze2pimLqWFrPQM8YjOoJHaGcOcmqZjZ8Y4=";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
