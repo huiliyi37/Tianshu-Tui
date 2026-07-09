@@ -9,6 +9,7 @@ import {
   switchModel,
   listDomains,
   setDomain,
+  setEffort,
   listSkills,
   setSkillEnabled,
   getHooks,
@@ -105,6 +106,19 @@ test('switchModel POSTs the modelId', async () => {
     assert.match(calls[0]!.url, /\/sessions\/s1\/model$/)
     assert.equal(calls[0]!.method, 'POST')
     assert.equal(JSON.parse(calls[0]!.body!).modelId, 'm2')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('setEffort POSTs the effort level', async () => {
+  clearRuntimeCache()
+  const { calls } = stubFetch({ id: 's1', effort: 'max' })
+  try {
+    await setEffort('s1', 'max')
+    assert.match(calls[0]!.url, /\/sessions\/s1\/effort$/)
+    assert.equal(calls[0]!.method, 'POST')
+    assert.equal(JSON.parse(calls[0]!.body!).effort, 'max')
   } finally {
     globalThis.fetch = realFetch
   }

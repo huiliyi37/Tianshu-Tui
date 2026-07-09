@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterCommands, detectSlash, type ComposerCommand } from '../composer-commands'
+import { filterCommands, detectSlash, nextEffortLevel, type ComposerCommand } from '../composer-commands'
 
 const noop = () => {}
 const CMDS: ComposerCommand[] = [
@@ -66,3 +66,18 @@ test('detectSlash: whitespace ends command mode', () => {
 // isKnownSlashCommand was removed: unknown slashes now pass through to the
 // server's resolveAppPromptInput (POST /prompt), which rejects with a 400
 // toast instead of a client-side guard. See Composer.submit().
+
+test('nextEffortLevel: cycles through off/low/medium/high/max/auto', () => {
+  assert.equal(nextEffortLevel('off'), 'low')
+  assert.equal(nextEffortLevel('low'), 'medium')
+  assert.equal(nextEffortLevel('medium'), 'high')
+  assert.equal(nextEffortLevel('high'), 'max')
+  assert.equal(nextEffortLevel('max'), 'auto')
+  assert.equal(nextEffortLevel('auto'), 'off')
+})
+
+test('nextEffortLevel: unknown or empty value defaults to off', () => {
+  assert.equal(nextEffortLevel(''), 'off')
+  assert.equal(nextEffortLevel('unknown'), 'off')
+  assert.equal(nextEffortLevel(undefined), 'off')
+})

@@ -35,6 +35,9 @@ class FakeAgent implements ManagedAgent {
   getMessages(): OaiMessage[] { return [] }
   replaceMessages(_msgs: OaiMessage[]): void {}
   rewindToMessages(_msgs: OaiMessage[]): void {}
+  reasoningEffortCalls: string[] = []
+  getReasoningEffort() { return this.reasoningEffortCalls[this.reasoningEffortCalls.length - 1] }
+  setReasoningEffort(effort: string) { this.reasoningEffortCalls.push(effort) }
 }
 
 function setup() {
@@ -277,6 +280,36 @@ test('S: approval-mode route is Bearer-gated (fail-closed)', async () => {
   const { manager, router } = setup()
   const s = manager.createSession({})
   const res = await router('POST', `/sessions/${s.id}/approval-mode`, { approvalMode: 'manual' }, {})
+  assert.equal(res.status, 401)
+})
+
+// ── Reasoning effort routes ─────────────────────────────────────────
+
+test('Effort: POST /effort switches the reasoning effort level', async () => {
+  const { manager, agents, router } = setup()
+  const s = manager.createSession({})
+  // Build the agent eagerly so setReasoningEffort is called live.
+  manager.run(s.id, 'go')
+  const res = await router('POST', `/sessions/${s.id}/effort`, { effort: 'max' }, AUTH)
+  assert.equal(res.status, 200)
+  assert.equal((res.body as { effort: string }).effort, 'max')
+  assert.equal(manager.getSession(s.id)!.reasoningEffort, 'max')
+  assert.deepEqual(agents[0]!.reasoningEffortCalls, ['max'])
+})
+
+test('Effort: route validates the body (400) and 404s a missing session', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({})
+  const bad = await router('POST', `/sessions/${s.id}/effort`, { effort: 'nope' }, AUTH)
+  assert.equal(bad.status, 400)
+  const missing = await router('POST', '/sessions/nope/effort', { effort: 'low' }, AUTH)
+  assert.equal(missing.status, 404)
+})
+
+test('Effort: route is Bearer-gated (fail-closed)', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({})
+  const res = await router('POST', `/sessions/${s.id}/effort`, { effort: 'low' }, {})
   assert.equal(res.status, 401)
 })
 

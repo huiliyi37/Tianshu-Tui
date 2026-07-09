@@ -51,6 +51,8 @@
     "chars": "{{count}} chars"
   },
   "scrollToBottom": "Scroll to bottom",
+  "effortSet": "Reasoning effort set to {{effort}}",
+  "effortSetFailed": "Failed to set reasoning effort",
   "search": {
     "placeholder": "Search in conversation…",
     "noMatch": "No matches",
@@ -91,7 +93,7 @@
     "sensorium": "Cognitive self-awareness",
     "council": "Council · star-domain expert review",
     "councilExample": "/council <goal description>",
-    "effort": "Set reasoning effort (off/low/medium/high/max)",
+    "effort": "Set reasoning effort (off/low/medium/high/max/auto)",
     "model": "Switch model",
     "domain": "Switch star-domain persona",
     "todo": "Todo list management (list/add/done/skip/move)",

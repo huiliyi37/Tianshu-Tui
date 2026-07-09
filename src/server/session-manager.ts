@@ -200,6 +200,8 @@ export interface ManagedAgent {
   }
   /** Current reasoning effort level (off/low/medium/high/max). */
   getReasoningEffort?(): string | undefined
+  /** Set the reasoning effort level (off/low/medium/high/max) or return to auto. */
+  setReasoningEffort?(effort: import('../agent/auto-reasoning.js').ReasoningEffort | 'auto'): void
   /** Rewind: return the current message list (for listing rewind points). */
   getMessages(): OaiMessage[]
   /**
@@ -429,6 +431,8 @@ interface InternalSession {
   agent: ManagedAgent | null
   /** S — per-session autonomy override threaded into the agent on build. */
   approvalMode?: ApprovalMode
+  /** Per-session reasoning effort override. Applied to the agent on build and live-mutated mid-session. */
+  reasoningEffort?: import('../agent/auto-reasoning.js').ReasoningEffort | 'auto'
   events: SessionEvent[]
   /**
    * Whether `events` holds the full on-disk log. False for a rehydrated session
@@ -662,6 +666,7 @@ export class RuntimeSessionManager {
           domainState: resolveDomainState(rec.domain ?? 'auto')?.state,
           disabledSkills: new Set(),
           skillLoadErrors: [],
+          reasoningEffort: rec.reasoningEffort as import('../agent/auto-reasoning.js').ReasoningEffort | 'auto' | undefined,
         }
         this.sessions.set(session.record.id, session)
         if (wasRunning) {
@@ -732,6 +737,7 @@ export class RuntimeSessionManager {
         domainState: resolveDomainState(ps.record.domain ?? 'auto')?.state,
         disabledSkills: new Set(),
         skillLoadErrors: [],
+        reasoningEffort: ps.record.reasoningEffort as import('../agent/auto-reasoning.js').ReasoningEffort | 'auto' | undefined,
       }
       this.sessions.set(session.record.id, session)
       if (wasRunning) {
@@ -1223,6 +1229,9 @@ export class RuntimeSessionManager {
     try {
       if (session.disabledSkills.size > 0) agent.setDisabledSkills?.(new Set(session.disabledSkills))
     } catch { /* non-fatal */ }
+    try {
+      if (session.reasoningEffort !== undefined) agent.setReasoningEffort?.(session.reasoningEffort)
+    } catch { /* non-fatal */ }
     // 主动 plan mode：模型经 plan action=enter_mode 自主切换时，把状态镜像到
     // session record 并发 plan_mode SSE（桌面切 Plan tab）。server 自己触发的
     // 切换（setPlanMode/approve/reject）已直接 append —— 状态相同时跳过防重复。
@@ -1413,6 +1422,24 @@ export class RuntimeSessionManager {
     session.approvalMode = mode
     session.record.approvalMode = mode
     try { session.agent?.setApprovalMode?.(mode) } catch { /* non-fatal */ }
+    this.touch(session)
+    this.persistRecord(session)
+    return true
+  }
+
+  /**
+   * Set the per-session reasoning effort level. Stores the override (so it
+   * applies when the agent is first built) AND live-mutates an already-built
+   * agent (so a mid-session change takes effect on the next turn). Returns false
+   * when the session is missing. Persists the new level onto the record so
+   * reconnecting viewers see the current level.
+   */
+  setReasoningEffort(id: string, effort: import('../agent/auto-reasoning.js').ReasoningEffort | 'auto'): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    session.reasoningEffort = effort
+    session.record.reasoningEffort = effort
+    try { session.agent?.setReasoningEffort?.(effort) } catch { /* non-fatal */ }
     this.touch(session)
     this.persistRecord(session)
     return true
@@ -1775,7 +1802,10 @@ export class RuntimeSessionManager {
     if (s.agent) {
       try { record.contextTokens = s.agent.getEstimatedTokens?.() } catch { /* non-fatal */ }
       try { record.contextWindow = s.agent.getContextWindow?.() } catch { /* non-fatal */ }
-      try { record.reasoningEffort = s.agent.getReasoningEffort?.() } catch { /* non-fatal */ }
+      // Prefer the user's explicit effort selection (including 'auto') over the
+      // agent's current concrete level, so the desktop chip reflects the mode
+      // the user actually set.
+      try { record.reasoningEffort = s.reasoningEffort ?? s.agent.getReasoningEffort?.() } catch { /* non-fatal */ }
     }
     const persona = resolveDomainPersona(record.domain)
     record.domainGlyph = persona.glyph

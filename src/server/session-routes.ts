@@ -32,6 +32,7 @@ import type { RuntimeSessionManager } from './session-manager.js'
 import type { Artifact } from '../artifact/types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { ApprovalMode } from '../agent/loop-types.js'
+import type { ReasoningEffort } from '../agent/auto-reasoning.js'
 import type { PlanDocument } from '../plan/plan-store.js'
 import type { Config } from '../config/schema.js'
 import { computeUsageCost, findModelPricing } from '../utils/pricing.js'
@@ -222,6 +223,21 @@ export function buildSessionRoutes(
         return { status: 404, body: { error: 'Session not found' } }
       }
       return { status: 200, body: { id, approvalMode: data.approvalMode } }
+    }, apiToken),
+
+    // Reasoning effort — live-switch the session's reasoning effort level. Mirrors
+    // the TUI /effort command; takes effect on the next turn without a rebuild.
+    'POST /sessions/:id/effort': withAuth((body, params) => {
+      const id = params!.id!
+      const data = (body ?? {}) as { effort?: unknown }
+      const valid = new Set<string>(['off', 'low', 'medium', 'high', 'max', 'auto'])
+      if (typeof data.effort !== 'string' || !valid.has(data.effort)) {
+        return { status: 400, body: { error: 'Invalid or missing "effort" (off|low|medium|high|max|auto)' } }
+      }
+      if (!manager.setReasoningEffort(id, data.effort as ReasoningEffort | 'auto')) {
+        return { status: 404, body: { error: 'Session not found' } }
+      }
+      return { status: 200, body: { id, effort: data.effort } }
     }, apiToken),
 
     // Plan mode — toggle the session into read-only planning ('planning') or back

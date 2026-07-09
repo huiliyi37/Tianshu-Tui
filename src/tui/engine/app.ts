@@ -113,10 +113,14 @@ export function truncateToWidth(text: string, maxWidth: number): string {
  *
  *  单段绝对路径（`/etc`、`/mnt`、`/usr`）在没有 isKnownCommand 谓词时
  *  回退到旧行为（视为命令）；传入谓词后，非已知命令的单段路径被
- *  正确识别为 Linux/WSL 文件路径。 */
+ *  正确识别为 Linux/WSL 文件路径。
+ *
+ *  若提供 isCommandPrefix，则第一 token 是某个已知命令前缀时视为 slash 命令，
+ *  保证 `/h` 这类模糊输入仍能触发 slash 提示与补全。 */
 export function looksLikeFilePath(
   input: string,
   isKnownCommand?: (name: string) => boolean,
+  isCommandPrefix?: (name: string) => boolean,
 ): boolean {
   if (input.startsWith('~/')) return true
   // Windows 盘符路径 C:\... 或 C:/...（不是 slash 命令）
@@ -131,7 +135,9 @@ export function looksLikeFilePath(
   // 单段 /xxx：可能是命令（/exit）也可能是路径（/etc, /mnt）
   if (isKnownCommand) {
     const firstToken = rest.split(/\s/)[0] ?? ''
-    return firstToken !== '' && !isKnownCommand(firstToken)
+    if (firstToken === '') return false
+    if (isCommandPrefix?.(firstToken)) return false
+    return !isKnownCommand(firstToken)
   }
   return false
 }
@@ -144,6 +150,20 @@ function buildCommandPredicate(commands: ReadonlyArray<{ name: string }>): (name
     return n.startsWith('/') ? n.slice(1).split(/\s/)[0]! : n.split(/\s/)[0]!
   }))
   return (name: string) => names.has(name)
+}
+
+/** 构建命令前缀谓词，用于 looksLikeFilePath 区分 `/h` 这类模糊输入与真实路径。 */
+function buildCommandPrefixPredicate(commands: ReadonlyArray<{ name: string }>): (name: string) => boolean {
+  const prefixes = new Set<string>()
+  for (const c of commands) {
+    const n = c.name.trim()
+    const base = n.startsWith('/') ? n.slice(1) : n
+    const firstToken = base.split(/\s/)[0] ?? ''
+    for (let i = 1; i <= firstToken.length; i++) {
+      prefixes.add(firstToken.slice(0, i).toLowerCase())
+    }
+  }
+  return (name: string) => prefixes.has(name.toLowerCase())
 }
 
 /**
@@ -788,7 +808,7 @@ export class TuiApp {
       }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
-      const inputIsPath = looksLikeFilePath(inputVal, this.getCommandPredicate())
+      const inputIsPath = looksLikeFilePath(inputVal, this.getCommandPredicate(), this.getCommandPrefixPredicate())
       if (inputVal.startsWith('/') && !inputIsPath) {
         const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
         if (key.name === 'up' && filtered.length > 0) {
@@ -804,9 +824,17 @@ export class TuiApp {
         // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
         if (key.name === 'return') {
           // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
+          // 若 ↑↓ 选中了命令，且选中命令名比当前输入长，则提交选中命令名。
+          // 长度比较避免用户已输入完整命令+参数（如 /team max plan.md）时被截断。
+          const selected = filtered.length > 0
+            ? filtered[Math.min(this.inputController.slashSelectedIdx, filtered.length - 1)]
+            : undefined
+          const submitVal = selected && selected.name.length > inputVal.length
+            ? selected.name
+            : inputVal
           this.inputLine.setValue('')
           this.inputController.slashSelectedIdx = 0
-          void this.submitSlashCommand(inputVal)
+          void this.submitSlashCommand(submitVal)
           return
         }
       } else {
@@ -990,6 +1018,13 @@ export class TuiApp {
   getCommandPredicate(): (name: string) => boolean {
     const fromHints = buildCommandPredicate(this.inputController.slashCommands)
     const fromRegistry = buildCommandPredicate(this.slashRegistry.list())
+    return (name: string) => fromHints(name) || fromRegistry(name)
+  }
+
+  /** 构建命令前缀谓词，供 looksLikeFilePath 把 `/h` 这类模糊输入识别为 slash 命令。 */
+  private getCommandPrefixPredicate(): (name: string) => boolean {
+    const fromHints = buildCommandPrefixPredicate(this.inputController.slashCommands)
+    const fromRegistry = buildCommandPrefixPredicate(this.slashRegistry.list())
     return (name: string) => fromHints(name) || fromRegistry(name)
   }
 
@@ -1977,7 +2012,7 @@ export class TuiApp {
     const cursor = this.inputLine.cursor
 
     // slash 命令补全（排除 `/file/path` 这类绝对路径；支持 /skill <name> 等多 token）
-    if (value.startsWith('/') && !looksLikeFilePath(value, this.getCommandPredicate())) {
+    if (value.startsWith('/') && !looksLikeFilePath(value, this.getCommandPredicate(), this.getCommandPrefixPredicate())) {
       const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
@@ -3265,7 +3300,7 @@ export class TuiApp {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
       const inputVal = this.inputLine.value
-      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal, this.getCommandPredicate())
+      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal, this.getCommandPredicate(), this.getCommandPrefixPredicate())
       const isStreaming = this.state.phase !== 'idle'
 
       // Domain-accent border color: slash=primary, streaming=dim, else domain accent

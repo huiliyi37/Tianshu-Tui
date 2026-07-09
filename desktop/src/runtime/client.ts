@@ -217,6 +217,11 @@ export function setApprovalMode(id: string, approvalMode: ApprovalMode): Promise
   return apiPost<{ id: string; approvalMode: ApprovalMode }>(`/sessions/${id}/approval-mode`, { approvalMode })
 }
 
+/** Set the session's reasoning effort level (off/low/medium/high/max/auto). Live on a running agent. */
+export function setEffort(id: string, effort: string): Promise<{ id: string; effort: string }> {
+  return apiPost<{ id: string; effort: string }>(`/sessions/${id}/effort`, { effort })
+}
+
 export async function listSessions(): Promise<SessionRecord[]> {
   const { sessions } = await apiGet<{ sessions: SessionRecord[] }>('/sessions')
   return sessions

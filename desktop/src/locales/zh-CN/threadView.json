@@ -51,6 +51,8 @@
     "chars": "{{count}} 字"
   },
   "scrollToBottom": "回到底部",
+  "effortSet": "推理强度已设置为 {{effort}}",
+  "effortSetFailed": "设置推理强度失败",
   "search": {
     "placeholder": "在会话中搜索…",
     "noMatch": "无匹配",
@@ -91,7 +93,7 @@
     "sensorium": "认知自感知",
     "council": "议事会 · 星域专家审查",
     "councilExample": "/council <目标描述>",
-    "effort": "设置推理强度 (off/low/medium/high/max)",
+    "effort": "设置推理强度 (off/low/medium/high/max/auto)",
     "model": "切换模型",
     "domain": "切换星域人格",
     "todo": "任务清单管理 (list/add/done/skip/move)",

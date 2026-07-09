@@ -30,6 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { nextEffortLevel } from '../lib/composer-commands'
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
@@ -79,6 +80,7 @@ export function ThreadView(props: {
   onAbort: () => void
   onSetApprovalMode: (mode: ApprovalMode) => void
   onSetPlanMode?: (state: PlanModeState) => void
+  onSetEffort?: (effort: string) => void
   onClose: () => void
   /** D2 — live SSE connection state; drives the "updates stopped" banner. */
   streamStatus?: StreamStatus
@@ -86,7 +88,7 @@ export function ThreadView(props: {
   onToggleDelegation?: (open: boolean) => void
   onApproval?: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>, remember?: boolean) => void
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onSetEffort, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval } = props
   const { t } = useTranslation('threadView')
   const ui = useUiState()
   const dispatch = useUiDispatch()
@@ -696,7 +698,9 @@ export function ThreadView(props: {
     {
       name: '/effort',
       desc: t('commands.effort'),
-      run: () => onSend('Show current reasoning effort level. Available: off, low, medium, high, max.'),
+      // Cycle through effort levels like /theme cycles themes; calls the server
+      // endpoint so the change takes effect on the next turn (no prompt run).
+      run: () => onSetEffort?.(nextEffortLevel(session.reasoningEffort)),
     },
     {
       name: '/model',
@@ -863,7 +867,7 @@ export function ThreadView(props: {
             <button
               className="effort-chip"
               title={t('header.effortTitle', { effort: session.reasoningEffort })}
-              onClick={() => onSend('/effort')}
+              onClick={() => onSetEffort?.(nextEffortLevel(session.reasoningEffort))}
             >
               {session.reasoningEffort}
             </button>

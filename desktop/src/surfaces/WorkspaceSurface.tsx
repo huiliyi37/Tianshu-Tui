@@ -7,7 +7,7 @@ import { qk, useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useS
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
 import { useJobNotifications } from '../state/use-job-notifications'
-import { answerApproval, commitSessionChanges, createSessionPr, mergeSessionBack, setApprovalMode, steerSession } from '../runtime/client'
+import { answerApproval, commitSessionChanges, createSessionPr, mergeSessionBack, setApprovalMode, setEffort, steerSession } from '../runtime/client'
 import type { ApprovalMode, PlanModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
@@ -175,6 +175,18 @@ export function WorkspaceSurface() {
     void setApprovalMode(activeId, mode).then(() => sessions.refetch())
   }, [activeId, sessions])
 
+  const handleSetEffort = useCallback((effort: string) => {
+    if (!activeId) return
+    void setEffort(activeId, effort)
+      .then(() => {
+        sessions.refetch()
+        toast.success(t('effortSet', { effort }))
+      })
+      .catch((err: Error) => {
+        toast.error(err.message || t('effortSetFailed'))
+      })
+  }, [activeId, sessions, t])
+
   const handleSetPlanMode = useCallback((state: PlanModeState) => {
     if (!activeId) return
     setPlanMode.mutate({ id: activeId, state })
@@ -293,6 +305,7 @@ export function WorkspaceSurface() {
                     onAbort={() => abortSession.mutate(active.id)}
                     onSetApprovalMode={handleSetApprovalMode}
                     onSetPlanMode={handleSetPlanMode}
+                    onSetEffort={handleSetEffort}
                     onClose={handleClose}
                     streamStatus={view.streamStatus}
                     onRetryStream={view.retryStream}

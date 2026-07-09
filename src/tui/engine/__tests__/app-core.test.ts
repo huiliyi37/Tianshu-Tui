@@ -82,3 +82,17 @@ test('looksLikeFilePath with isKnownCommand: Linux/WSL single-segment paths', ()
   // 带参数的未知命令 → 视为路径（第一个 token 不是已知命令）
   assert.equal(looksLikeFilePath('/etc hosts', isCmd), true)
 })
+
+test('looksLikeFilePath with isCommandPrefix: partial slash inputs stay as commands', () => {
+  const isCmd = (name: string) => new Set(['help', 'exit', 'team', 'model', 'review']).has(name)
+  const isPrefix = (name: string) => ['h', 'he', 'hel', 'help', 't', 'te', 'tea', 'team'].includes(name.toLowerCase())
+  // 部分输入匹配已知命令前缀 → 不是路径（保留 slash 提示/补全）
+  assert.equal(looksLikeFilePath('/h', isCmd, isPrefix), false)
+  assert.equal(looksLikeFilePath('/he', isCmd, isPrefix), false)
+  assert.equal(looksLikeFilePath('/hel', isCmd, isPrefix), false)
+  // 完全不匹配前缀且不是已知命令 → 仍是路径
+  assert.equal(looksLikeFilePath('/etc', isCmd, isPrefix), true)
+  assert.equal(looksLikeFilePath('/x', isCmd, isPrefix), true)
+  // 完整已知命令不受影响
+  assert.equal(looksLikeFilePath('/help', isCmd, isPrefix), false)
+})

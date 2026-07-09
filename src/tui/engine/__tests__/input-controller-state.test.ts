@@ -146,3 +146,76 @@ test('/file/path 按 Tab 不会补全成 slash 命令', async () => {
   // 不应被补全成 /help
   assert.equal(app.getInputValue(), '/hel', '路径前缀 Tab 不补全')
 })
+
+test('slash 命令 ↑↓ 选中后按 Enter 提交选中命令，而不是原始输入', async () => {
+  const { app, stdin } = makeApp()
+  const slashInputs: string[] = []
+  app.setSlashCommands([
+    { name: '/help', description: 'Show all commands' },
+    { name: '/compact', description: 'Compact conversation context' },
+    { name: '/exit', description: 'Exit' },
+  ])
+  app.setSlashHandler((input) => { slashInputs.push(input); return true })
+  app.start()
+
+  // 只输入 /，打开完整提示列表
+  app.setInput('/')
+  await tick()
+
+  // 按两次 ↓ 选中 /compact（索引 0→1→2？实际按字母序 /compact 是索引 1；
+  // 这里用两次 ↓ 确保不是首项 /compact 而是有意选择）
+  // /help(0), /compact(1), /exit(2)
+  stdin.dataHandler!('\x1B[B') // ↓
+  await tick()
+  stdin.dataHandler!('\x1B[B') // ↓
+  await tick()
+
+  // 此时原始输入仍是 '/'，如果直接提交会丢失命令
+  stdin.dataHandler!('\r')
+  await tick()
+
+  assert.equal(slashInputs.length, 1, '应提交一次 slash 命令')
+  assert.equal(slashInputs[0], '/exit', '应提交 ↑↓ 选中的 /exit，而不是原始输入 /')
+})
+
+test('slash 命令输入 /h 后模糊过滤并选中 /help 提交', async () => {
+  const { app, stdin } = makeApp()
+  const slashInputs: string[] = []
+  app.setSlashCommands([
+    { name: '/help', description: 'Show all commands' },
+    { name: '/compact', description: 'Compact conversation context' },
+    { name: '/exit', description: 'Exit' },
+  ])
+  app.setSlashHandler((input) => { slashInputs.push(input); return true })
+  app.start()
+
+  app.setInput('/h')
+  await tick()
+
+  // 过滤后 /help 应是唯一或首项，直接 Enter应提交 /help
+  stdin.dataHandler!('\r')
+  await tick()
+
+  assert.equal(slashInputs.length, 1, '应提交一次 slash 命令')
+  assert.equal(slashInputs[0], '/help', '输入 /h 后 Enter 应提交模糊匹配到的 /help')
+})
+
+test('slash 命令已输入完整命令+参数时 Enter 保留参数', async () => {
+  const { app, stdin } = makeApp()
+  const slashInputs: string[] = []
+  app.setSlashCommands([
+    { name: '/team', description: 'Run team-mode workflow' },
+    { name: '/team max', description: 'Run team-mode planning-first' },
+  ])
+  app.setSlashHandler((input) => { slashInputs.push(input); return true })
+  app.start()
+
+  // 用户已输入完整命令和参数，不应被提示首项截断
+  app.setInput('/team plan.md')
+  await tick()
+  stdin.dataHandler!('\r')
+  await tick()
+
+  assert.equal(slashInputs.length, 1, '应提交一次 slash 命令')
+  assert.equal(slashInputs[0], '/team plan.md', '已输入完整命令+参数时应保留参数')
+})
