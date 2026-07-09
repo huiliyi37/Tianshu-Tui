@@ -8,7 +8,7 @@ import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
 import { applyEol, chooseEol, detectFileEol, toLf } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
-import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
+import { buildFileDiff, computeChangedLineRanges, type LineRange } from './edit-diff.js'
 import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
 import { toPosixPath } from '../path-format.js'
 import { writeMarkdownAsDocx } from './office-writer.js'
@@ -174,7 +174,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     // loop: the model retries, hits the blind-overwrite guard, and stalls.
     let warn = ''
     let diff = ''
-    let changedRanges: number[][] = []
+    let changedRanges: LineRange[] = []
     try {
       warn = (await syntaxCheck(filePath, finalContent)) ?? ''
     } catch (e) {
