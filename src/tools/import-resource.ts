@@ -5,6 +5,7 @@ import { existsSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
 import { expandHome } from '../platform.js'
 import { relativePosix } from '../path-format.js'
+import { httpFetchGuarded } from './net/http-fetch.js'
 
 const IMPORT_DIR = '.rivet/external'
 const PREVIEW_BYTES = 4000
@@ -238,30 +239,18 @@ async function handleUrlImport(cwd: string, importDir: string, url: string): Pro
   const targetName = importTargetName(url) + '_' + filename.replace(/[^a-zA-Z0-9._-]/g, '_')
   const targetPath = join(importDir, targetName)
 
-  const execAsync = (cmd: string, args: string[], opts: { timeout: number }) =>
-    new Promise<void>((resolveExec, reject) => {
-      execFile(cmd, args, { ...opts }, (err) => err ? reject(err) : resolveExec())
-    })
-
   try {
-    await execAsync('curl', ['-sL', '-o', targetPath, url], { timeout: 60_000 })
-  } catch (err) {
-    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
-      try {
-        const res = await fetch(url)
-        if (!res.ok) {
-          return { content: `Error downloading ${url}: HTTP ${res.status}`, isError: true, uiContent: `Download failed: ${url}` }
-        }
-        const buf = Buffer.from(await res.arrayBuffer())
-        await writeFile(targetPath, buf)
-      } catch (fetchErr) {
-        const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
-        return { content: `Error downloading ${url}: ${msg}`, isError: true, uiContent: `Download failed: ${url}` }
-      }
-    } else {
-      const msg = err instanceof Error ? err.message : String(err)
-      return { content: `Error downloading ${url}: ${msg}`, isError: true, uiContent: `Download failed: ${url}` }
+    const { status, bytes } = await httpFetchGuarded(url, undefined, { timeoutMs: 60_000 })
+    if (status >= 400) {
+      return { content: `Error downloading ${url}: HTTP ${status}`, isError: true, uiContent: `Download failed: ${url}` }
     }
+    if (bytes.length === 0) {
+      return { content: `Error: download produced empty file from ${url}`, isError: true, uiContent: `Empty download: ${url}` }
+    }
+    await writeFile(targetPath, bytes)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { content: `Error downloading ${url}: ${msg}`, isError: true, uiContent: `Download failed: ${url}` }
   }
 
   let s: Awaited<ReturnType<typeof stat>>

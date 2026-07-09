@@ -190,6 +190,13 @@ export const DEFAULT_CONFIG: Config = {
     tavilyApiKeyEnv: 'TAVILY_API_KEY',
     timeoutMs: 15_000,
   },
+  fetch: {
+    timeoutMs: 15_000,
+    maxResponseBytes: 10_485_760,
+    maxRedirects: 5,
+    userAgent: 'Tianshu/1.0 (terminal coding agent)',
+    extractMainContent: true,
+  },
   mcp: {
     enabled: true,
     servers: {},

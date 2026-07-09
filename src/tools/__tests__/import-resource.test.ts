@@ -126,6 +126,47 @@ describe('import_resource', () => {
       )
       assert.equal(result.isError, true)
     })
+
+    it('downloads a text file via httpFetchGuarded', async () => {
+      const originalFetch = globalThis.fetch
+      globalThis.fetch = async () =>
+        new Response('downloaded content', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        })
+      try {
+        const result = await IMPORT_RESOURCE_TOOL.execute(
+          makeParams({ source: 'http://example.com/file.txt' }, tmpCwd),
+        )
+        assert.equal(result.isError, undefined)
+        assert.match(result.content, /Imported:/)
+        assert.match(result.content, /downloaded content/)
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
+
+    it('rejects private IP URLs (SSRF)', async () => {
+      const result = await IMPORT_RESOURCE_TOOL.execute(
+        makeParams({ source: 'http://127.0.0.1/secret.txt' }, tmpCwd),
+      )
+      assert.equal(result.isError, true)
+      assert.match(result.content, /Access denied/)
+    })
+
+    it('surfaces HTTP errors from the remote server', async () => {
+      const originalFetch = globalThis.fetch
+      globalThis.fetch = async () => new Response('not found', { status: 404 })
+      try {
+        const result = await IMPORT_RESOURCE_TOOL.execute(
+          makeParams({ source: 'http://example.com/missing.txt' }, tmpCwd),
+        )
+        assert.equal(result.isError, true)
+        assert.match(result.content, /HTTP 404/)
+      } finally {
+        globalThis.fetch = originalFetch
+      }
+    })
   })
 
   describe('GitHub URL parsing edge cases', () => {

@@ -84,6 +84,7 @@ import { createRepoGraphTool } from './tools/repo-graph.js'
 import { createRelatedTestsTool } from './tools/related-tests.js'
 import { SEMANTIC_SEARCH_TOOL } from './tools/semantic-search.js'
 import { buildSearchBackends } from './tools/web-search.js'
+import { buildFetchOptions } from './tools/web-fetch/build-options.js'
 import { APPLY_PATCH_TOOL } from './tools/apply-patch.js'
 import { createPlanTaskTool } from './tools/plan-task.js'
 import { createMemoryTool } from './tools/memory.js'
@@ -386,6 +387,8 @@ export function createInteractiveToolRegistry(
     proEnabled: isProFeatureEnabled(config, 'computerUse'),
     // web_search 后端链（DDG 默认 / Brave / Tavily），按 config.search 顺序 fallback。
     searchBackends: buildSearchBackends(config),
+    // web_fetch 配置注入（超时/大小上限/UA/正文抽取）
+    fetchOptions: buildFetchOptions(config),
   })
 
   // delegate_task

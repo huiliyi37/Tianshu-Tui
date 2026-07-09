@@ -34,7 +34,8 @@ import { TODO_TOOL, createTodoTool } from './todo.js'
 import type { TodoStore } from './todo-store.js'
 import { ToolRegistry } from './registry.js'
 import type { Tool } from './types.js'
-import { WEB_FETCH_TOOL } from './web-fetch.js'
+import { WEB_FETCH_TOOL, createWebFetchTool } from './web-fetch.js'
+import type { WebFetchOptions } from './web-fetch/tool.js'
 import { WEB_SEARCH_TOOL, createWebSearchTool } from './web-search.js'
 import type { SearchBackend } from './web-search.js'
 import { WRITE_FILE_TOOL } from './write-file.js'
@@ -60,6 +61,10 @@ export interface DefaultRegistryOptions {
    *  Absent → the DDG-only default WEB_SEARCH_TOOL is registered. The tool
    *  `definition` is byte-identical either way, so prefix cache is unaffected. */
   searchBackends?: SearchBackend[]
+  /** web_fetch options built from config.fetch. Absent → the default
+   *  WEB_FETCH_TOOL is registered. The tool `definition` is byte-identical
+   *  either way, so prefix cache is unaffected. */
+  fetchOptions?: WebFetchOptions
 }
 
 export function createDefaultToolRegistry(extraTools: Tool[] = [], options: DefaultRegistryOptions = {}): ToolRegistry {
@@ -92,7 +97,11 @@ export function createDefaultToolRegistry(extraTools: Tool[] = [], options: Defa
   registry.register(RUN_TESTS_TOOL)
   registry.register(GIT_TOOL)
   registry.register(options.todoStore ? createTodoTool(options.todoStore) : TODO_TOOL)
-  registry.register(WEB_FETCH_TOOL)
+  registry.register(
+    options.fetchOptions
+      ? createWebFetchTool(undefined, options.fetchOptions)
+      : WEB_FETCH_TOOL,
+  )
   registry.register(
     options.searchBackends && options.searchBackends.length > 0
       ? createWebSearchTool({ backends: options.searchBackends })
