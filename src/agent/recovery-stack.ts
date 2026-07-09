@@ -43,6 +43,32 @@ export function trackFileRestore(
   recordRecovery(cwd, { file, action, linesLost })
 }
 
+/** Per-process latest backup path per (cwd, filePath). Used by the edit tools
+ *  to roll back a write when post-edit structural validation fails.
+ *  Keyed by canonical absolute path to avoid collisions across sessions. */
+const latestBackups = new Map<string, string>()
+
+function backupKey(cwd: string, filePath: string): string {
+  return join(cwd, filePath)
+}
+
+/**
+ * Restore a file to its most recent backup recorded by trackFileChange.
+ * Returns true if a backup existed and was restored; false otherwise.
+ */
+export function restoreLatestBackup(cwd: string, filePath: string): boolean {
+  const key = backupKey(cwd, filePath)
+  const backupPath = latestBackups.get(key)
+  if (!backupPath || !existsSync(backupPath)) return false
+  const absPath = join(cwd, filePath)
+  try {
+    copyFileSync(backupPath, absPath)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
  * Create a backup of a file before mutation and record the change.
  * The backup lives in .rivet/backups/<timestamp>/<relpath> so undo can recover.
@@ -61,6 +87,7 @@ export function trackFileChange(cwd: string, record: Omit<FileChangeRecord, 'bac
     }
     backupPath = join(backupDir, record.filePath)
     copyFileSync(absPath, backupPath)
+    latestBackups.set(backupKey(cwd, record.filePath), backupPath)
   }
 
   // Also record in the recovery journal for deliver_task visibility

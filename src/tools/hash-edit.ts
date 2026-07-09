@@ -3,13 +3,14 @@ import { createHash } from 'crypto'
 import { relative } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
-import { syntaxCheck } from './syntax-check.js'
+import { syntaxCheck, checkSyntax } from './syntax-check.js'
 import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
 import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession, incrementEditFailCount, resetEditFailCount } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
-import { trackFileChange } from '../agent/recovery-stack.js'
+import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
 import { detectEol, chooseEol, toLf, applyEol } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
+import { buildFileDiff, computeChangedLineRanges, type LineRange } from './edit-diff.js'
 
 /**
  * Compute a 8-char hex hash of a line's content (stripped of trailing \r).
@@ -30,6 +31,70 @@ async function safeSyntaxCheck(filePath: string, content: string): Promise<strin
   } catch (e) {
     return `(syntax-check skipped: ${(e as Error).message})`
   }
+}
+
+/**
+ * Validate a hash_edit write and roll back on fatal parse errors.
+ * Returns the success content with any non-fatal warnings appended.
+ */
+async function finalizeHashEdit(
+  filePath: string,
+  cwd: string,
+  newContent: string,
+  sessionId: string | undefined,
+  successContent: string,
+  extraWarning: string,
+): Promise<{ content: string; isError?: boolean }> {
+  const check = await checkSyntax(filePath, newContent)
+  if (check.fatal) {
+    const relPath = relative(cwd, filePath)
+    const restored = restoreLatestBackup(cwd, relPath)
+    const fails = incrementEditFailCount(filePath)
+    const gatePrefix = fails >= 3 ? `After ${fails} consecutive hash_edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
+    const rollbackMsg = restored ? 'The change has been automatically rolled back.' : 'Automatic rollback failed.'
+    return {
+      content: gatePrefix + `Error: ${check.fatal}\n\n${rollbackMsg}\n\nFix the edit and retry. For complex changes prefer apply_patch with a unified diff.`,
+      isError: true,
+    }
+  }
+  await recordSuccessfulEdit(filePath, sessionId)
+  resetEditFailCount(filePath)
+  const combinedWarn = [check.warning, extraWarning].filter(Boolean).join('\n\n')
+  return { content: successContent + (combinedWarn ? '\n\n' + combinedWarn : '') }
+}
+
+/**
+ * Preview mode for dry_run: compute the diff and changed ranges without
+ * writing anything to disk. Still runs a syntax check so the model can see
+ * whether applying the edit would introduce parse errors.
+ */
+async function buildHashDryRunPreview(
+  cwd: string,
+  filePath: string,
+  before: string,
+  after: string,
+): Promise<{ content: string; uiContent?: string; changedRanges: LineRange[] }> {
+  const relPath = relative(cwd, filePath)
+  let diff = ''
+  let changedRanges: LineRange[] = []
+  try {
+    diff = await buildFileDiff(relPath, before, after)
+    changedRanges = await computeChangedLineRanges(before, after)
+  } catch {
+    // diff is display-only; failures are not fatal in preview mode
+  }
+
+  let warn = ''
+  try {
+    const check = await checkSyntax(filePath, after)
+    if (check.fatal) warn = `SYNTAX ERROR if applied: ${check.fatal}`
+    else if (check.warning) warn = check.warning
+  } catch (e) {
+    warn = `(syntax-check skipped: ${(e as Error).message})`
+  }
+
+  const content = `Preview (dry_run) for ${filePath} — no changes written:\n\n${diff || '(no textual change)'}` + (warn ? `\n\n${warn}` : '')
+  return { content, uiContent: diff || undefined, changedRanges }
 }
 
 interface Anchor {
@@ -55,6 +120,80 @@ function parseAnchor(raw: string): Anchor | null {
     return { line, hash: null }
   }
   return null
+}
+
+const RECOVERY_NEAR_WINDOW = 200
+
+/**
+ * Recover stale full-hash anchors by searching the current file.
+ *
+ * Strategy:
+ * 1. Search ±RECOVERY_NEAR_WINDOW lines around each anchor's expected line.
+ * 2. If an anchor is not found, check whether already-recovered anchors share
+ *    a consistent line shift; if so, search near the shifted position.
+ *
+ * Returns recovered anchors (same length, ascending line order) or null.
+ */
+function recoverStaleAnchors(anchors: Anchor[], lines: string[]): Anchor[] | null {
+  const recovered: Anchor[] = anchors.map(a => ({ line: a.line, hash: a.hash }))
+  const usedLines = new Set<number>()
+
+  for (let i = 0; i < anchors.length; i++) {
+    const anchor = anchors[i]!
+    if (anchor.hash === null) continue // position-only anchors are not recovered by content
+
+    const found =
+      findAnchorLine(anchor.hash, anchor.line, lines, usedLines, RECOVERY_NEAR_WINDOW)
+      ?? findShiftedAnchorLine(anchor.hash, anchor.line, i, anchors, recovered, lines, usedLines)
+
+    if (!found) return null
+    recovered[i] = { line: found, hash: anchor.hash }
+    usedLines.add(found)
+  }
+
+  // Ascending order must be preserved for first/last to define a valid range.
+  for (let i = 1; i < recovered.length; i++) {
+    if (recovered[i]!.line <= recovered[i - 1]!.line) return null
+  }
+  return recovered
+}
+
+function findAnchorLine(
+  hash: string,
+  expectedLine: number,
+  lines: string[],
+  usedLines: Set<number>,
+  window: number,
+): number | null {
+  const searchStart = Math.max(1, expectedLine - window)
+  const searchEnd = window === Infinity ? lines.length : Math.min(lines.length, expectedLine + window)
+  for (let i = searchStart; i <= searchEnd; i++) {
+    if (usedLines.has(i)) continue
+    if (hashLine(lines[i - 1]!) === hash) return i
+  }
+  return null
+}
+
+function findShiftedAnchorLine(
+  hash: string,
+  expectedLine: number,
+  originalIndex: number,
+  originalAnchors: Anchor[],
+  recovered: Anchor[],
+  lines: string[],
+  usedLines: Set<number>,
+): number | null {
+  if (originalIndex === 0) return null
+  const shifts: number[] = []
+  for (let i = 0; i < originalIndex; i++) {
+    if (originalAnchors[i]!.hash !== null) {
+      shifts.push(recovered[i]!.line - originalAnchors[i]!.line)
+    }
+  }
+  if (shifts.length === 0) return null
+  const firstShift = shifts[0]!
+  if (firstShift === 0 || !shifts.every(s => s === firstShift)) return null
+  return findAnchorLine(hash, expectedLine + firstShift, lines, usedLines, 50)
 }
 
 function formatStaleDiagnostic(
@@ -124,6 +263,9 @@ Grep results include anchor hints for single-file matches.
 ⚠ Position-only: never chain consecutive calls — each hash_edit changes the
 file, invalidating subsequent L<line> anchors.
 
+For multi-location changes, edits over ~20 lines, or structural refactors,
+prefer apply_patch with a unified diff.
+
 Note: For large new_string, the message history keeps only a short pointer
 (file_path + size). Use read_file to review the current content in a later turn.`,
     input_schema: {
@@ -136,6 +278,7 @@ Note: For large new_string, the message history keeps only a short pointer
           description: '1-3 anchors in "L<line>:<8-char-hex>" (full) or "L<line>" (position-only) format. First and last define the inclusive replacement range.',
         },
         new_string: { type: 'string', description: 'Replacement text for the anchored block. Use "" to delete. Provide this parameter last.' },
+        dry_run: { type: 'boolean', description: 'If true, compute and return the diff that would be applied without writing to disk.' },
       },
       required: ['file_path', 'anchors', 'new_string'],
     },
@@ -265,71 +408,47 @@ Note: For large new_string, the message history keeps only a short pointer
     if (mismatches.length > 0) {
       // ── Stale recovery: attempt to find anchor content in current file ──
       // When full-hash anchors go stale (e.g. after a prior edit shifted line
-      // numbers), search ±N lines around the expected position for matching
-      // content. If ALL mismatching anchors are recovered, apply the edit with
-      // updated anchors. If ANY cannot be found, fall through to the error.
-      const SEARCH_WINDOW = 50
+      // numbers), search ±RECOVERY_NEAR_WINDOW lines around the expected
+      // position, detect a consistent line shift, or fall back to a global
+      // search. If ALL anchors are recovered and remain in ascending order,
+      // apply the edit with updated anchors.
       const allFullHash = mismatches.every(m => m.anchor.hash !== null)
       if (allFullHash) {
-        const recoveredAnchors: Anchor[] = anchors.map(a => ({ line: a.line, hash: a.hash }))
-        let allRecovered = true
-        let recoveredCount = 0
+        const recoveredAnchors = recoverStaleAnchors(anchors, lines)
+        if (recoveredAnchors) {
+          const firstLine = recoveredAnchors[0]!.line
+          const lastLine = recoveredAnchors[recoveredAnchors.length - 1]!.line
+          const newString = params.input.new_string as string
 
-        for (const m of mismatches) {
-          const targetHash = m.anchor.hash!
-          const searchStart = Math.max(1, m.anchor.line - SEARCH_WINDOW)
-          const searchEnd = Math.min(lines.length, m.anchor.line + SEARCH_WINDOW)
-          let found = false
-          for (let i = searchStart; i <= searchEnd; i++) {
-            if (hashLine(lines[i - 1]!) === targetHash) {
-              // Update this anchor to its new position
-              const idx = recoveredAnchors.findIndex(a => a.line === m.anchor.line && a.hash === m.anchor.hash)
-              if (idx >= 0) recoveredAnchors[idx] = { line: i, hash: targetHash }
-              found = true
-              recoveredCount++
-              break
-            }
+          const before = lines.slice(0, firstLine - 1)
+          const after = lines.slice(lastLine)
+          const newLines = newString === '' ? [] : newString.split('\n')
+          const newContent = [...before, ...newLines, ...after].join('\n')
+
+          const recoveredCount = anchors.reduce((n, a, i) => a.hash !== null && a.line !== recoveredAnchors[i]!.line ? n + 1 : n, 0)
+          const dryRun = (params.input.dry_run as boolean) ?? false
+          if (dryRun) {
+            return buildHashDryRunPreview(params.cwd, filePath, content, newContent)
           }
-          if (!found) {
-            allRecovered = false
-            break
-          }
-        }
+          const relPath = relative(params.cwd, filePath)
+          trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
 
-        if (allRecovered && recoveredAnchors.every(a => a.line > 0)) {
-          // Re-validate ascending order after recovery
-          let orderOk = true
-          for (let i = 1; i < recoveredAnchors.length; i++) {
-            if (recoveredAnchors[i]!.line <= recoveredAnchors[i - 1]!.line) { orderOk = false; break }
-          }
-          if (orderOk) {
-            const firstLine = recoveredAnchors[0]!.line
-            const lastLine = recoveredAnchors[recoveredAnchors.length - 1]!.line
-            const newString = params.input.new_string as string
-
-            const before = lines.slice(0, firstLine - 1)
-            const after = lines.slice(lastLine)
-            const newLines = newString === '' ? [] : newString.split('\n')
-            const newContent = [...before, ...newLines, ...after].join('\n')
-
-            const relPath = relative(params.cwd, filePath)
-            trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
-
-            await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-            await recordSuccessfulEdit(filePath, params.sessionId)
-            resetEditFailCount(filePath)
-            const warn = await safeSyntaxCheck(filePath, newContent)
-            const recoveredInfo = recoveredCount > 0
-              ? ` (auto-recovered ${recoveredCount} stale anchors)`
-              : ''
-            const staleAdvice = recoveredCount > 0 && anchors.length >= 2
-              ? '\n\n⚠ Multiple anchors went stale — anchors are interdependent. Consider switching to edit_file for further edits to this file.'
-              : ''
-            const posDrift = positionDriftWarning
-              ? '\n\n⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
-              : ''
-            return { content: `hash_edit${recoveredInfo} applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') + staleAdvice + posDrift }
-          }
+          await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
+          const recoveredInfo = recoveredCount > 0
+            ? ` (auto-recovered ${recoveredCount} stale anchor${recoveredCount > 1 ? 's' : ''})`
+            : ''
+          const staleAdvice = recoveredCount > 0 && anchors.length >= 2
+            ? '⚠ Multiple anchors went stale — anchors are interdependent. Consider switching to edit_file for further edits to this file.'
+            : ''
+          const posDrift = positionDriftWarning
+            ? '⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
+            : ''
+          const extraWarn = [staleAdvice, posDrift].filter(Boolean).join('\n\n')
+          return await finalizeHashEdit(
+            filePath, params.cwd, newContent, params.sessionId,
+            `hash_edit${recoveredInfo} applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines`,
+            extraWarn,
+          )
         }
       }
 
@@ -353,18 +472,24 @@ Note: For large new_string, the message history keeps only a short pointer
     const newLines = newString === '' ? [] : newString.split('\n')
     const newContent = [...before, ...newLines, ...after].join('\n')
 
+    const dryRun = (params.input.dry_run as boolean) ?? false
+    if (dryRun) {
+      return buildHashDryRunPreview(params.cwd, filePath, content, newContent)
+    }
+
     // Record file change for recovery tracking (backup created by trackFileChange)
     const relPath = relative(params.cwd, filePath)
     trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
 
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-    await recordSuccessfulEdit(filePath, params.sessionId)
-    resetEditFailCount(filePath)
-    const warn = await safeSyntaxCheck(filePath, newContent)
     const posDrift = positionDriftWarning
-      ? '\n\n⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
+      ? '⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
       : ''
-    return { content: `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') + posDrift }
+    return await finalizeHashEdit(
+      filePath, params.cwd, newContent, params.sessionId,
+      `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines`,
+      posDrift,
+    )
   },
 
   requiresApproval: () => true,

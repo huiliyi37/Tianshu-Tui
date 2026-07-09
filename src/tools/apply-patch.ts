@@ -1,8 +1,47 @@
 import { spawn } from 'node:child_process'
-import { writeFile, unlink } from 'node:fs/promises'
+import { writeFile, unlink, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Tool, ToolCallParams } from './types.js'
+import { checkSyntax } from './syntax-check.js'
+import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
+import { incrementEditFailCount, resetEditFailCount, recordSuccessfulEdit } from './read-file.js'
+import { APPLY_PATCH_POINTER_PREFIX } from './apply-patch-arg-processor.js'
+
+/** Post-apply syntax verification + rollback. Default on; RIVET_APPLY_PATCH_VERIFY=0
+ *  falls back to the legacy "git apply and trust it" behaviour. */
+function isApplyPatchVerifyEnabled(): boolean {
+  const v = process.env.RIVET_APPLY_PATCH_VERIFY
+  return v !== '0' && v !== 'false'
+}
+
+interface PatchTarget {
+  /** Repo-relative path (forward slashes). */
+  rel: string
+  /** Absolute path on disk. */
+  abs: string
+  /** Whether the file existed before the patch (governs rollback strategy). */
+  existedBefore: boolean
+}
+
+/** Extract the set of files a unified diff writes to (its `+++ ` headers).
+ *  Skips `/dev/null` (pure deletions) — those carry no post-apply content to
+ *  verify. Mirrors the arg-processor's parser so target sets stay consistent. */
+export function extractPatchTargetPaths(diff: string): string[] {
+  const paths = new Set<string>()
+  for (const line of diff.split('\n')) {
+    if (!line.startsWith('+++ ')) continue
+    let p = line.slice(4).trim()
+    const tabIdx = p.indexOf('\t')
+    if (tabIdx !== -1) p = p.slice(0, tabIdx)
+    if (p === '/dev/null') continue
+    p = p.replace(/^"(.*)"$/, '$1')
+    p = p.replace(/^[ab]\//, '')
+    if (p.length > 0) paths.add(p)
+  }
+  return [...paths]
+}
 
 export interface ApplyPatchInput {
   diff: string
@@ -84,17 +123,67 @@ export const APPLY_PATCH_TOOL: Tool = {
       return { content: 'apply_patch requires a non-empty "diff" string.', isError: true }
     }
 
+    // Pointer-regurgitation guard: the arg processor collapses large diffs in
+    // message history to "[patch applied to …]". The model sometimes echoes
+    // that pointer back as the diff — applying it is meaningless and confusing.
+    if (diff.trimStart().startsWith(APPLY_PATCH_POINTER_PREFIX)) {
+      return {
+        content: `Error: the "diff" is a collapsed history pointer ("${APPLY_PATCH_POINTER_PREFIX} …"), not a real unified diff. `
+          + 'That placeholder only appears in past messages after a large patch was applied — it is never valid input. '
+          + 'Provide the actual unified diff, or use read_file / git diff to inspect the current state first.',
+        isError: true,
+      }
+    }
+
     // Normalize header paths to forward slashes so patches produced on/with
     // Windows paths still apply cleanly and render as valid unified diffs.
     const normalizedDiff = normalizeDiffPaths(diff)
+    const checkOnly = params.input.check_only === true
+    const verify = isApplyPatchVerifyEnabled() && !checkOnly
+
+    // Snapshot targets + back them up BEFORE applying, so a corrupting patch
+    // can be rolled back per-file. check_only never writes, so it skips this.
+    const targets: PatchTarget[] = verify
+      ? extractPatchTargetPaths(normalizedDiff).map((rel) => {
+          const abs = join(params.cwd, rel)
+          return { rel, abs, existedBefore: existsSync(abs) }
+        })
+      : []
+    for (const t of targets) {
+      if (t.existedBefore) {
+        trackFileChange(params.cwd, { filePath: t.rel, action: 'edit', toolCallId: params.toolUseId ?? 'apply_patch' })
+      }
+    }
 
     const result = await applyPatch(params.cwd, {
       diff: normalizedDiff,
-      checkOnly: params.input.check_only === true,
+      checkOnly,
     })
 
     if (!result.ok) {
+      for (const t of targets) incrementEditFailCount(t.abs)
       return { content: `Patch failed: ${result.error}`, isError: true }
+    }
+
+    // Post-apply structural verification: git apply --3way can leave conflict
+    // markers or the patch itself can introduce a syntax error, either of which
+    // silently corrupts the file. Parse-check each written file; on a fatal
+    // error roll the whole patch back (restore backups / delete new files).
+    if (verify) {
+      const fatal = await firstFatalSyntax(targets)
+      if (fatal) {
+        await rollbackTargets(params.cwd, targets)
+        for (const t of targets) incrementEditFailCount(t.abs)
+        return {
+          content: `Patch applied but introduced a fatal error in ${fatal.rel}:\n${fatal.message}\n\n`
+            + 'The patch has been automatically rolled back. Fix the diff (check for context drift / conflict markers) and retry.',
+          isError: true,
+        }
+      }
+      for (const t of targets) {
+        resetEditFailCount(t.abs)
+        await recordSuccessfulEdit(t.abs, params.sessionId)
+      }
     }
 
     // uiContent (display-only): echo the applied diff so the TUI/desktop card
@@ -102,7 +191,7 @@ export const APPLY_PATCH_TOOL: Tool = {
     // summary (unchanged) → no prefix-cache/context cost. Cap the display diff
     // to keep the UI responsive for huge patches.
     return {
-      content: params.input.check_only === true
+      content: checkOnly
         ? 'Patch applies cleanly (check-only; no files modified).'
         : 'Patch applied successfully.',
       uiContent: truncateDiffForUi(normalizedDiff.trim()),
@@ -112,6 +201,35 @@ export const APPLY_PATCH_TOOL: Tool = {
   requiresApproval: () => true,
   isConcurrencySafe: () => false,
   isEnabled: () => true,
+}
+
+/** Parse-check each written target; return the first fatal error found, or null.
+ *  A read/check failure for one file degrades to "skip" (never blocks a patch
+ *  whose file we simply can't re-read). */
+async function firstFatalSyntax(targets: PatchTarget[]): Promise<{ rel: string; message: string } | null> {
+  for (const t of targets) {
+    if (!existsSync(t.abs)) continue
+    try {
+      const content = await readFile(t.abs, 'utf-8')
+      const check = await checkSyntax(t.abs, content)
+      if (check.fatal) return { rel: t.rel, message: check.fatal }
+    } catch {
+      // Unreadable (binary, races) — not a syntax verdict, skip.
+    }
+  }
+  return null
+}
+
+/** Undo an applied patch: restore pre-patch content for files that existed,
+ *  delete files the patch newly created. Best-effort per file. */
+async function rollbackTargets(cwd: string, targets: PatchTarget[]): Promise<void> {
+  for (const t of targets) {
+    if (t.existedBefore) {
+      restoreLatestBackup(cwd, t.rel)
+    } else {
+      try { await unlink(t.abs) } catch { /* already gone */ }
+    }
+  }
 }
 
 const APPLY_PATCH_MAX_UI_LINES = 600

@@ -63,7 +63,7 @@ describe('read history invalidation after edits', () => {
   }
 
   it('edit_file → full re-read returns new content, never [read-ref]', async () => {
-    const fp = makeBigFile('src/a.ts')
+    const fp = makeBigFile('src/a.txt')
 
     const r1 = await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
     assert.ok(r1.content.includes('line 50'), 'first read returns content')
@@ -83,7 +83,7 @@ describe('read history invalidation after edits', () => {
   })
 
   it('edit_file → offset re-read does not serve stale artifact slice', async () => {
-    const fp = makeBigFile('src/b.ts')
+    const fp = makeBigFile('src/b.txt')
     const store = new ArtifactStore(dir, 'inval-artifact')
 
     const r1 = await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA', store))
@@ -101,7 +101,7 @@ describe('read history invalidation after edits', () => {
   })
 
   it('hash_edit → re-read returns new content', async () => {
-    const fp = makeBigFile('src/c.ts')
+    const fp = makeBigFile('src/c.txt')
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
 
     const line50 = 'line 50'.padEnd(80, ' ')
@@ -118,7 +118,7 @@ describe('read history invalidation after edits', () => {
   })
 
   it('write_file → re-read returns new content', async () => {
-    const fp = makeBigFile('src/d.ts')
+    const fp = makeBigFile('src/d.txt')
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
 
     const newContent = Array.from({ length: 60 }, (_, i) => `rewritten ${i + 1}`.padEnd(80, ' ')).join('\n')
@@ -131,7 +131,7 @@ describe('read history invalidation after edits', () => {
   })
 
   it('consecutive same-session edits do not false-positive the stale branch', async () => {
-    const fp = makeBigFile('src/e.ts')
+    const fp = makeBigFile('src/e.txt')
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
 
     const e1 = await EDIT_FILE_TOOL.execute(params({
@@ -153,7 +153,7 @@ describe('read history invalidation after edits', () => {
   })
 
   it('external modification after read triggers edit_file stale-recovery branch', async () => {
-    const fp = makeBigFile('src/f.ts')
+    const fp = makeBigFile('src/f.txt')
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
     assert.notEqual(getFileReadMtime(fp, 'sessA'), null, '表2 must be populated by read_file')
 
@@ -171,7 +171,7 @@ describe('read history invalidation after edits', () => {
   })
 
   it('read_section reports staleness after external modification', async () => {
-    const fp = makeBigFile('src/g.ts')
+    const fp = makeBigFile('src/g.txt')
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
 
     writeFileSync(fp, 'totally new\ncontent here\n', 'utf-8')
@@ -216,7 +216,7 @@ describe('in-process concurrent session isolation', () => {
   }
 
   it('session B is unaffected by session A reads and edits', async () => {
-    const fp = makeBigFile('src/shared.ts')
+    const fp = makeBigFile('src/shared.txt')
 
     // A reads and edits
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
@@ -239,7 +239,7 @@ describe('in-process concurrent session isolation', () => {
   })
 
   it("session B's stale message says externally, not self-edited", async () => {
-    const fp = makeBigFile('src/blame.ts')
+    const fp = makeBigFile('src/blame.txt')
 
     // Both sessions read; A edits (changing mtime under B's feet)
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
@@ -263,7 +263,7 @@ describe('in-process concurrent session isolation', () => {
   })
 
   it('position-only hash_edit hard-reject is session-scoped', async () => {
-    const fp = makeBigFile('src/pos.ts')
+    const fp = makeBigFile('src/pos.txt')
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessB'))
 

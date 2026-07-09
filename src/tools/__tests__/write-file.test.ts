@@ -201,4 +201,19 @@ describe('write_file tool — blind-overwrite guard', () => {
       delete process.env.RIVET_WRITE_OVERWRITE_GUARD
     }
   })
+
+  it('rolls back overwrite that introduces a fatal Python syntax error', async () => {
+    const file = join(TEST_DIR, 'valid.py')
+    const original = 'def foo():\n    return 1\n'
+    writeFileSync(file, original)
+    markObserved(file)
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'def foo():\n    return 1\n  bad_indent\n',
+    }))
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('Python syntax error'), `Expected syntax error, got: ${result.content}`)
+    assert.ok(result.content.includes('automatically rolled back'), `Expected rollback note, got: ${result.content}`)
+    assert.equal(readFileSync(file, 'utf-8'), original, 'File should be rolled back to original content')
+  })
 })

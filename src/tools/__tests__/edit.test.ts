@@ -355,5 +355,85 @@ describe('edit_file tool', () => {
     assert.equal(result.isError, true)
     assert.match(result.content, /return 99/, `Should show actual file content, got: ${result.content}`)
   })
+
+  it('rolls back edit that introduces a fatal Python syntax error', async () => {
+    const filePath = join(TEST_DIR, 'valid.py')
+    const original = 'def foo():\n    return 1\n'
+    writeFileSync(filePath, original)
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: '    return 1',
+      new_string: '    return 1\n  bad_indent',
+    }))
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('Python syntax error'), `Expected syntax error, got: ${result.content}`)
+    assert.ok(result.content.includes('automatically rolled back'), `Expected rollback note, got: ${result.content}`)
+    assert.equal(readFileSync(filePath, 'utf-8'), original, 'File should be rolled back to original content')
+  })
+
+  it('dry_run returns preview diff without writing to disk', async () => {
+    const filePath = join(TEST_DIR, 'dry-run.txt')
+    const original = 'alpha\nbeta\ngamma\n'
+    writeFileSync(filePath, original)
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'beta',
+      new_string: 'BETA',
+      dry_run: true,
+    }))
+    assert.ok(!result.isError, `Expected dry_run preview, got: ${result.content}`)
+    assert.ok(result.content.includes('Preview (dry_run)'), `Expected preview header, got: ${result.content}`)
+    assert.ok(result.content.includes('@@'), `Expected diff hunk, got: ${result.content}`)
+    assert.ok(result.content.includes('+BETA'), `Expected addition line, got: ${result.content}`)
+    assert.ok(result.content.includes('-beta'), `Expected removal line, got: ${result.content}`)
+    assert.equal(readFileSync(filePath, 'utf-8'), original, 'dry_run must not modify the file')
+    assert.ok(Array.isArray(result.changedRanges) && result.changedRanges.length === 1, 'dry_run returns changedRanges')
+  })
+
+  it('dry_run works with replace_all', async () => {
+    const filePath = join(TEST_DIR, 'dry-run-all.txt')
+    const original = 'x\ny\nx\n'
+    writeFileSync(filePath, original)
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'x',
+      new_string: 'z',
+      replace_all: true,
+      dry_run: true,
+    }))
+    assert.ok(!result.isError, `Expected dry_run preview, got: ${result.content}`)
+    assert.ok(result.content.includes('Preview (dry_run)'), `Expected preview header, got: ${result.content}`)
+    assert.equal(readFileSync(filePath, 'utf-8'), original, 'dry_run must not modify the file')
+  })
+
+  it('dry_run still reports not-found errors without writing', async () => {
+    const filePath = join(TEST_DIR, 'dry-run-miss.txt')
+    const original = 'hello world\n'
+    writeFileSync(filePath, original)
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'not present',
+      new_string: 'replacement',
+      dry_run: true,
+    }))
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('not found'), `Expected not-found error, got: ${result.content}`)
+    assert.equal(readFileSync(filePath, 'utf-8'), original, 'dry_run must not modify the file on error')
+  })
+
+  it('dry_run still reports multiple-match errors without writing', async () => {
+    const filePath = join(TEST_DIR, 'dry-run-multi.txt')
+    const original = 'foo\nbar\nfoo\n'
+    writeFileSync(filePath, original)
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'foo',
+      new_string: 'baz',
+      dry_run: true,
+    }))
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('multiple locations'), `Expected multiple-match error, got: ${result.content}`)
+    assert.equal(readFileSync(filePath, 'utf-8'), original, 'dry_run must not modify the file on error')
+  })
 })
 

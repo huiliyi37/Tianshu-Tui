@@ -5,12 +5,13 @@ import { validatePath } from './path-validate.js'
 import { buildFileDiff, computeChangedLineRanges, type LineRange } from './edit-diff.js'
 import { hashLine } from './hash-edit.js'
 import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession, incrementEditFailCount, resetEditFailCount } from './read-file.js'
-import { syntaxCheck } from './syntax-check.js'
+import { syntaxCheck, checkSyntax } from './syntax-check.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { findFuzzyMatch, applyFuzzyReplacement } from './fuzzy-match.js'
 import { detectEol, chooseEol, toLf, applyEol } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
 import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
+import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
 
 // Large files are common (generated code, lockfiles, big modules). 100KB was
 // far too small. 8MB reads comfortably into the Node heap; anything larger is
@@ -57,7 +58,8 @@ export const EDIT_FILE_TOOL: Tool = {
 - replace_all replaces every occurrence; expected_count warns on mismatch
 - For large edits, message history keeps only a short pointer; use read_file to review
 
-Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous edits or large files.`,
+Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous edits; use apply_patch with a unified diff for single-file multi-location changes, edits over ~20 lines, or structural refactors.`,
+
     input_schema: {
       type: 'object',
       properties: {
@@ -68,6 +70,10 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         expected_count: {
           type: 'number',
           description: 'Expected number of replacements when replace_all is true. If actual count differs, a warning is returned so you can grep to verify no instances were missed (e.g. due to indentation differences).'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'If true, compute and return the diff that would be applied without writing to disk.',
         },
       },
       required: ['file_path', 'old_string', 'new_string'],
@@ -149,17 +155,21 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           const replaceAll = (params.input.replace_all as boolean) ?? false
           if (replaceAll) {
             const newContent = freshContent.replaceAll(oldString, newString)
+            const dryRun = (params.input.dry_run as boolean) ?? false
+            if (dryRun) {
+              return buildDryRunPreview(params.cwd, filePath, freshContent, newContent)
+            }
+            trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
             await writeFileAtomicAsync(filePath, applyEol(newContent, freshEol))
-            await recordSuccessfulEdit(filePath, params.sessionId)
-            resetEditFailCount(filePath)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const expectedCount = params.input.expected_count as number | undefined
-            const { warn, uiContent: ui, changedRanges } = await buildEditSuccessResult(params.cwd, filePath, freshContent, newContent)
-            if (expectedCount !== undefined && occurrences !== expectedCount) {
-              const base = `File was modified externally but old_string still matched. Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. Use grep to verify no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
-              return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
-            }
-            return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}`, uiContent: ui, changedRanges }
+            return await finalizeEdit(params.cwd, filePath, freshContent, newContent, params.sessionId, (warn, ui, changedRanges) => {
+              if (expectedCount !== undefined && occurrences !== expectedCount) {
+                const base = `File was modified externally but old_string still matched. Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. Use grep to verify no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
+                return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
+              }
+              return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}`, uiContent: ui, changedRanges }
+            })
           }
           const firstIdx = freshContent.indexOf(oldString)
           const secondIdx = freshContent.indexOf(oldString, firstIdx + oldString.length)
@@ -167,15 +177,17 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
             return { content: buildMultipleMatchError(filePath, oldString, freshContent), isError: true }
           }
           const recovered = freshContent.replace(oldString, newString)
+          const dryRun = (params.input.dry_run as boolean) ?? false
+          if (dryRun) {
+            return buildDryRunPreview(params.cwd, filePath, freshContent, recovered)
+          }
+          trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
           await writeFileAtomicAsync(filePath, applyEol(recovered, freshEol))
-          await recordSuccessfulEdit(filePath, params.sessionId)
-          resetEditFailCount(filePath)
-          const { warn, uiContent: ui, changedRanges } = await buildEditSuccessResult(params.cwd, filePath, freshContent, recovered)
-          return {
+          return await finalizeEdit(params.cwd, filePath, freshContent, recovered, params.sessionId, (warn, ui, changedRanges) => ({
             content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}`,
             uiContent: ui,
             changedRanges,
-          }
+          }))
         }
 
         // old_string not found — show what the file actually looks like near the best guess
@@ -250,17 +262,21 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         }
       }
       const newContent = content.replaceAll(oldString, newString)
+      const dryRun = (params.input.dry_run as boolean) ?? false
+      if (dryRun) {
+        return buildDryRunPreview(params.cwd, filePath, content, newContent)
+      }
+      trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
       await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-      await recordSuccessfulEdit(filePath, params.sessionId)
-      resetEditFailCount(filePath)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
-      const { warn, uiContent: ui, changedRanges } = await buildEditSuccessResult(params.cwd, filePath, content, newContent)
-      if (expectedCount !== undefined && occurrences !== expectedCount) {
-        const base = `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
-        return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
-      }
-      return { content: `Replaced all ${occurrences} occurrences in ${filePath}` + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
+      return await finalizeEdit(params.cwd, filePath, content, newContent, params.sessionId, (warn, ui, changedRanges) => {
+        if (expectedCount !== undefined && occurrences !== expectedCount) {
+          const base = `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
+          return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
+        }
+        return { content: `Replaced all ${occurrences} occurrences in ${filePath}` + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
+      })
     }
 
     const firstIndex = content.indexOf(oldString)
@@ -271,23 +287,27 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       const fuzzy = findFuzzyMatch(content, oldString)
       if (fuzzy) {
         const recovered = applyFuzzyReplacement(content, fuzzy, newString)
-        await writeFileAtomicAsync(filePath, applyEol(recovered, eol))
-        await recordSuccessfulEdit(filePath, params.sessionId)
-        resetEditFailCount(filePath)
-        const { warn, uiContent: ui, changedRanges } = await buildEditSuccessResult(params.cwd, filePath, content, recovered)
-        // Surface the whitespace drift so the model can self-correct in
-        // subsequent edits — without this, error accumulates across calls.
-        const diff = diffBlock(oldString, fuzzy.matchedText)
-        const fuzzyReport = [
-          `Applied edit to ${filePath} (whitespace-tolerant match)`,
-          `[fuzzy] your old_string had whitespace/indentation drift from the file:`,
-          `[fuzzy] diff:\n${diff}`,
-        ].join('\n')
-        return {
-          content: fuzzyReport + (warn ? '\n\n' + warn : ''),
-          uiContent: ui,
-          changedRanges,
+        const dryRun = (params.input.dry_run as boolean) ?? false
+        if (dryRun) {
+          return buildDryRunPreview(params.cwd, filePath, content, recovered)
         }
+        trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
+        await writeFileAtomicAsync(filePath, applyEol(recovered, eol))
+        return await finalizeEdit(params.cwd, filePath, content, recovered, params.sessionId, (warn, ui, changedRanges) => {
+          // Surface the whitespace drift so the model can self-correct in
+          // subsequent edits — without this, error accumulates across calls.
+          const diff = diffBlock(oldString, fuzzy.matchedText)
+          const fuzzyReport = [
+            `Applied edit to ${filePath} (whitespace-tolerant match)`,
+            `[fuzzy] your old_string had whitespace/indentation drift from the file:`,
+            `[fuzzy] diff:\n${diff}`,
+          ].join('\n')
+          return {
+            content: fuzzyReport + (warn ? '\n\n' + warn : ''),
+            uiContent: ui,
+            changedRanges,
+          }
+        })
       }
       const fails = incrementEditFailCount(filePath)
       const gatePrefix = fails >= 3 ? `After ${fails} consecutive edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
@@ -304,15 +324,17 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       }
     }
     const newContent = content.replace(oldString, newString)
+    const dryRun = (params.input.dry_run as boolean) ?? false
+    if (dryRun) {
+      return buildDryRunPreview(params.cwd, filePath, content, newContent)
+    }
+    trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-    await recordSuccessfulEdit(filePath, params.sessionId)
-    resetEditFailCount(filePath)
-    const { warn, uiContent: ui, changedRanges } = await buildEditSuccessResult(params.cwd, filePath, content, newContent)
-    return {
+    return await finalizeEdit(params.cwd, filePath, content, newContent, params.sessionId, (warn, ui, changedRanges) => ({
       content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : ''),
       uiContent: ui,
       changedRanges,
-    }
+    }))
   },
 
   requiresApproval: () => true,
@@ -348,16 +370,19 @@ async function buildEditSuccessResult(
   filePath: string,
   before: string,
   after: string,
+  precomputedSyntaxWarning?: string | null,
 ): Promise<{ warn: string; uiContent?: string; changedRanges: LineRange[] }> {
-  let warn = ''
+  let warn = precomputedSyntaxWarning ?? ''
   let uiContent: string | undefined
   let changedRanges: LineRange[] = []
 
-  try {
-    const result = await syntaxCheck(filePath, after)
-    if (result) warn = result
-  } catch (e) {
-    warn = `(syntax-check skipped: ${(e as Error).message})`
+  if (!warn) {
+    try {
+      const result = await syntaxCheck(filePath, after)
+      if (result) warn = result
+    } catch (e) {
+      warn = `(syntax-check skipped: ${(e as Error).message})`
+    }
   }
 
   try {
@@ -369,6 +394,72 @@ async function buildEditSuccessResult(
   }
 
   return { warn, uiContent, changedRanges }
+}
+
+/**
+ * Preview mode for dry_run: compute the diff and changed ranges without
+ * writing anything to disk. Still runs a syntax check so the model can see
+ * whether applying the edit would introduce parse errors.
+ */
+async function buildDryRunPreview(
+  cwd: string,
+  filePath: string,
+  before: string,
+  after: string,
+): Promise<{ content: string; uiContent?: string; changedRanges: LineRange[] }> {
+  let warn = ''
+  try {
+    const check = await checkSyntax(filePath, after)
+    if (check.fatal) warn = `SYNTAX ERROR if applied: ${check.fatal}`
+    else if (check.warning) warn = check.warning
+  } catch (e) {
+    warn = `(syntax-check skipped: ${(e as Error).message})`
+  }
+
+  let diff = ''
+  let changedRanges: LineRange[] = []
+  try {
+    diff = await buildFileDiff(relative(cwd, filePath), before, after)
+    changedRanges = await computeChangedLineRanges(before, after)
+  } catch (e) {
+    warn = warn ? `${warn}\n(diff skipped: ${(e as Error).message})` : `(diff skipped: ${(e as Error).message})`
+  }
+
+  const content = `Preview (dry_run) for ${filePath} — no changes written:\n\n${diff || '(no textual change)'}` + (warn ? `\n\n${warn}` : '')
+  return { content, uiContent: diff || undefined, changedRanges }
+}
+
+/**
+ * Post-write validation + rollback helper.
+ * Runs strict syntax/AST checks on the edited file. If a fatal parse error is
+ * detected, automatically restores the latest backup and returns an error.
+ * Otherwise records the successful edit and returns the normal success payload.
+ */
+async function finalizeEdit(
+  cwd: string,
+  filePath: string,
+  before: string,
+  after: string,
+  sessionId: string | undefined,
+  buildSuccessResult: (warn: string, uiContent: string | undefined, changedRanges: LineRange[]) => { content: string; uiContent?: string; changedRanges: LineRange[] },
+): Promise<{ content: string; uiContent?: string; changedRanges: LineRange[]; isError?: boolean }> {
+  const check = await checkSyntax(filePath, after)
+  if (check.fatal) {
+    const relPath = relative(cwd, filePath)
+    const restored = restoreLatestBackup(cwd, relPath)
+    const fails = incrementEditFailCount(filePath)
+    const gatePrefix = fails >= 3 ? `After ${fails} consecutive edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
+    const rollbackMsg = restored ? 'The change has been automatically rolled back.' : 'Automatic rollback failed.'
+    return {
+      content: gatePrefix + `Error: ${check.fatal}\n\n${rollbackMsg}\n\nFix the edit and retry. For complex changes prefer apply_patch with a unified diff.`,
+      isError: true,
+      changedRanges: [],
+    }
+  }
+  await recordSuccessfulEdit(filePath, sessionId)
+  resetEditFailCount(filePath)
+  const { warn, uiContent, changedRanges } = await buildEditSuccessResult(cwd, filePath, before, after, check.warning)
+  return buildSuccessResult(warn, uiContent, changedRanges)
 }
 
 /**

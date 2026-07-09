@@ -2,10 +2,10 @@ import { mkdir, stat, readFile } from 'node:fs/promises'
 import { dirname, relative, extname } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
-import { syntaxCheck } from './syntax-check.js'
-import { getFileReadMtime, recordSuccessfulEdit } from './read-file.js'
+import { syntaxCheck, checkSyntax } from './syntax-check.js'
+import { getFileReadMtime, recordSuccessfulEdit, incrementEditFailCount, resetEditFailCount } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
-import { trackFileChange } from '../agent/recovery-stack.js'
+import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
 import { applyEol, chooseEol, detectFileEol, toLf } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
 import { buildFileDiff, computeChangedLineRanges, type LineRange } from './edit-diff.js'
@@ -164,6 +164,22 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     const finalContent = applyEol(content, chooseEol(filePath, existingEol, getTargetEol()))
 
     await writeFileAtomicAsync(filePath, finalContent)
+
+    // Post-write structural validation: if the file is unparseable, roll back.
+    const syntax = await checkSyntax(filePath, finalContent)
+    if (syntax.fatal) {
+      const relPath = relative(params.cwd, filePath)
+      const restored = restoreLatestBackup(params.cwd, relPath)
+      const fails = incrementEditFailCount(filePath)
+      const gatePrefix = fails >= 3 ? `After ${fails} consecutive write failures on this file, you MUST re-read it before editing again.\n\n` : ''
+      const rollbackMsg = restored ? 'The change has been automatically rolled back.' : 'Automatic rollback failed.'
+      return {
+        content: gatePrefix + `Error: ${syntax.fatal}\n\n${rollbackMsg}\n\nFix the content and retry.`,
+        isError: true,
+      }
+    }
+
+    resetEditFailCount(filePath)
     await recordSuccessfulEdit(filePath, params.sessionId)
     const lines = finalContent.split('\n').length
 
@@ -172,14 +188,9 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     // the tool call to report an error — the file is already on disk and
     // an error would create a "write succeeded but tool reports failure"
     // loop: the model retries, hits the blind-overwrite guard, and stalls.
-    let warn = ''
+    let warn = syntax.warning ?? ''
     let diff = ''
     let changedRanges: LineRange[] = []
-    try {
-      warn = (await syntaxCheck(filePath, finalContent)) ?? ''
-    } catch (e) {
-      warn = `(syntax-check skipped: ${(e as Error).message})`
-    }
     try {
       const afterForDiff = toLf(content)
       if (haveOldContentForDiff) {

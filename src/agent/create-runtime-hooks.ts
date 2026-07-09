@@ -35,6 +35,7 @@ import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
 import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
+import { createEditFailureRecoveryHook } from './hooks/edit-failure-recovery-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createPointerRegurgitationHook } from './hooks/pointer-regurgitation-hook.js'
 import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
@@ -445,6 +446,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Gated by RIVET_EDIT_SMART_ROUTING (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_EDIT_SMART_ROUTING !== '0') {
     hooks.push(createEditToolAdvisoryHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Edit-Failure Recovery: postTool hook — detects consecutive edit failures
+  // on the same file across turns and injects a repair advisory telling the
+  // agent to undo, re-read, and switch to apply_patch/write_file.
+  if (deps.advisoryBus) {
+    hooks.push(createEditFailureRecoveryHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Lossy Observation: postTool hook — detects collapsed/truncated tool

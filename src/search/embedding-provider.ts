@@ -21,6 +21,15 @@ export interface EmbeddingProvider {
   embed(texts: string[]): Promise<number[][]>
 }
 
+/** Per-request timeout for the embeddings endpoint. A hung provider would
+ *  otherwise stall indexing indefinitely; embeddings are a strict upgrade, so
+ *  timing out degrades to BM25 rather than blocking. Override with
+ *  RIVET_EMBEDDING_TIMEOUT (ms). */
+function embeddingTimeoutMs(): number {
+  const v = Number.parseInt(process.env.RIVET_EMBEDDING_TIMEOUT ?? '', 10)
+  return Number.isFinite(v) && v > 0 ? v : 30_000
+}
+
 export interface RemoteEmbeddingOptions {
   baseUrl: string
   apiKey: string
@@ -65,6 +74,7 @@ export class RemoteEmbeddingProvider implements EmbeddingProvider {
           authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify({ model: this.model, input: batch }),
+        signal: AbortSignal.timeout(embeddingTimeoutMs()),
       })
       if (!res.ok) {
         throw new Error(`embeddings request failed: ${res.status}`)

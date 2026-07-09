@@ -127,6 +127,11 @@ function inlineMd(text: string): string {
 
 let engineCache: 'textutil' | 'soffice' | null | undefined
 
+/** Concrete LibreOffice binary detected on PATH — some distros ship only
+ *  `libreoffice` (no `soffice` symlink), so execution must use the detected
+ *  name or it fails with ENOENT after detection passed. */
+let cachedSofficeBinary: 'soffice' | 'libreoffice' = 'soffice'
+
 async function detectEngine(): Promise<'textutil' | 'soffice' | null> {
   // macOS built-in — textutil is always at /usr/bin/textutil
   if (process.platform === 'darwin') {
@@ -135,11 +140,13 @@ async function detectEngine(): Promise<'textutil' | 'soffice' | null> {
   // Cross-platform: try soffice via PATH (works on Linux, Windows with LibreOffice)
   try {
     await execFileAsync('soffice', ['--version'], { timeout: 5000 })
+    cachedSofficeBinary = 'soffice'
     return 'soffice'
   } catch {}
   // Some Linux distros use libreoffice as binary name
   try {
     await execFileAsync('libreoffice', ['--version'], { timeout: 5000 })
+    cachedSofficeBinary = 'libreoffice'
     return 'soffice'
   } catch {}
   return null
@@ -223,14 +230,14 @@ async function writeWithSoffice(filePath: string, html: string): Promise<OfficeW
   await writeFile(htmlPath, html, 'utf-8')
 
   return new Promise((resolve, reject) => {
-    execFile('soffice', [
+    execFile(cachedSofficeBinary, [
       '--headless',
       '--convert-to', 'docx',
       '--outdir', tmpDir,
       htmlPath,
     ], { timeout: 60_000 }, async (err) => {
       await unlink(htmlPath).catch(() => {})
-      if (err) reject(new Error(`soffice docx conversion failed: ${err.message}`))
+      if (err) reject(new Error(`${cachedSofficeBinary} docx conversion failed: ${err.message}`))
       else {
         const { stat, rename } = await import('fs/promises')
         // soffice outputs to tmpdir with basename changed, move to target

@@ -95,9 +95,13 @@ export class DuckDuckGoBackend implements SearchBackend {
 
   async search(query: string, count: number, signal: AbortSignal): Promise<SearchResult[]> {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
+    // redirect:'manual' — the lite endpoint returns 200 directly. Refusing to
+    // auto-follow redirects avoids being bounced to an unvalidated host (a 3xx
+    // simply surfaces as a non-ok status and the chain falls through).
     const response = await this.fetchImpl(url, {
       signal,
       headers: { 'User-Agent': 'terminal-coding-agent/1.0' },
+      redirect: 'manual',
     })
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)

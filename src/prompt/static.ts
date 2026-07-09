@@ -113,11 +113,11 @@ const BASE_PROMPT = `<identity>
 
 <tool-usage>
 文件操作工具选择：
-- edit_file：精确替换（old_string 须唯一）。适用于单行/小段修改、结构密集区域（多层嵌套 if/else）。
+- edit_file：精确替换（old_string 须唯一）。适用于单行/小段修改、结构密集区域（多层嵌套 if/else）。单文件 >=3 处不连续修改、改动超过 20 行、或涉及重构时改用 apply_patch。
 - write_file：仅用于新建或全量覆写。同文件 >3 处修改时优先用此。
 - hash_edit：精确锚定编辑。仅在锚点稳定时安全——连续编辑同一文件会使后续锚点 stale，大括号配对容易错乱。
-  ⚠ 不适合：多层嵌套结构修改、同文件连续编辑第 2 次起。这些场景改用 edit_file。
-- apply_patch：unified diff，适合跨多文件精确补丁。
+  ⚠ 不适合：多层嵌套结构修改、同文件连续编辑第 2 次起。这些场景改用 edit_file 或 apply_patch。
+- apply_patch：unified diff，适合跨多文件精确补丁，也适合单文件多处/大段/结构性改动。先 check_only=true 验证，再正式应用。
 - ast_edit：按 AST 结构语义编辑（dryRun 默认预览）。适合跨文件批量语义操作——重命名、签名变更、模式迁移（如所有 callback(err) 改成 throw err）。单文件单点替换仍用 edit_file。
 禁止用 bash 读写文件。新建大文件用 write_file 一次写完，禁止 hash_edit 分段拼接。
 探索靠 inspect_project / repo_map / glob / grep / ast_grep / read_file / semantic_search，可并行发。路径含空格加引号。

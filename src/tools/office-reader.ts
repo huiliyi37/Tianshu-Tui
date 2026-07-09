@@ -37,6 +37,12 @@ export interface OfficeReadResult {
   sourceFormat: string
 }
 
+/** The concrete LibreOffice binary name that detection found on PATH. The
+ *  engine label is 'soffice' but some distros only ship the `libreoffice`
+ *  binary (no `soffice` symlink) — execution must use whichever was detected,
+ *  otherwise detection passes and conversion fails with ENOENT. */
+let cachedSofficeBinary: 'soffice' | 'libreoffice' = 'soffice'
+
 /**
  * Detect the best available conversion engine for the current platform.
  */
@@ -48,11 +54,13 @@ async function detectEngine(): Promise<'textutil' | 'soffice' | 'mammoth' | null
   // Cross-platform: try soffice via PATH
   try {
     await execFileAsync('soffice', ['--version'], { timeout: 5000 })
+    cachedSofficeBinary = 'soffice'
     return 'soffice'
   } catch {}
   // Some Linux distros use libreoffice as binary name
   try {
     await execFileAsync('libreoffice', ['--version'], { timeout: 5000 })
+    cachedSofficeBinary = 'libreoffice'
     return 'soffice'
   } catch {}
 
@@ -182,11 +190,11 @@ function execSoffice(filePath: string): Promise<string> {
   const outPath = `${tmpdir()}/${outName}`
 
   return new Promise((resolve, reject) => {
-    execFile('soffice', ['--headless', '--convert-to', 'txt', '--outdir', tmpdir(), filePath], {
+    execFile(cachedSofficeBinary, ['--headless', '--convert-to', 'txt', '--outdir', tmpdir(), filePath], {
       timeout: 60_000,
     }, async (err) => {
       if (err) {
-        reject(new Error(`soffice failed: ${err.message}`))
+        reject(new Error(`${cachedSofficeBinary} failed: ${err.message}`))
         return
       }
       try {

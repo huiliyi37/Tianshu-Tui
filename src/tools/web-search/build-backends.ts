@@ -3,6 +3,7 @@ import type { SearchBackend, SearchFetch } from './types.js'
 import { DuckDuckGoBackend } from './duckduckgo.js'
 import { BraveBackend } from './brave.js'
 import { TavilyBackend } from './tavily.js'
+import { boundedSearchFetch } from './bounded-fetch.js'
 
 export interface BuildBackendsDeps {
   fetch?: SearchFetch
@@ -17,7 +18,8 @@ export interface BuildBackendsDeps {
  * constructed, DuckDuckGo is added as a zero-config safety net.
  */
 export function buildSearchBackends(config: Config, deps: BuildBackendsDeps = {}): SearchBackend[] {
-  const fetchImpl = deps.fetch ?? (globalThis.fetch.bind(globalThis) as SearchFetch)
+  // Injected test fetches stay as-is; the real global fetch is body-size capped.
+  const fetchImpl = deps.fetch ?? boundedSearchFetch(globalThis.fetch.bind(globalThis) as SearchFetch)
   const env = deps.env ?? process.env
   const s = config.search
 

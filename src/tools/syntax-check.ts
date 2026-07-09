@@ -1,5 +1,6 @@
 import { extname } from 'path'
 import { createRequire } from 'node:module'
+import { spawn } from 'node:child_process'
 
 // esbuild ships a native binary, so it can't be inlined into the tsup bundle.
 // Load it lazily via require so a packaged sidecar without esbuild on disk
@@ -34,10 +35,23 @@ function getEsbuild(): EsbuildModule | null {
 /** Files larger than this skip CSS/HTML/JSON branch checks (O(n) scans). */
 const SYNC_SCAN_SIZE_LIMIT = 2 * 1024 * 1024 // 2 MB
 
+/** Files larger than this skip external-parser checks (Python AST, esbuild). */
+const EXTERNAL_PARSE_SIZE_LIMIT = 8 * 1024 * 1024 // 8 MB
+
 /** Timeout for esbuild async transform — prevents a hung worker from blocking
  *  the tool call indefinitely (file is already written; losing syntax-check is
  *  a degradation, not a failure). */
 const TRANSFORM_TIMEOUT_MS = 5000
+
+/** Timeout for the python3 AST parse child process. A hung interpreter (blocked
+ *  import, stuck stdin, slow environment) would otherwise leave the promise
+ *  unresolved and stall the whole turn. Override with RIVET_PY_SYNTAX_TIMEOUT
+ *  (ms); set to 0/negative to fall back to the 5s default. Read lazily so the
+ *  env override is honoured (and testable) without a module reload. */
+function getPySyntaxTimeoutMs(): number {
+  const v = Number.parseInt(process.env.RIVET_PY_SYNTAX_TIMEOUT ?? '', 10)
+  return Number.isFinite(v) && v > 0 ? v : 5000
+}
 
 function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -49,6 +63,15 @@ function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): 
   })
 }
 
+export interface SyntaxCheckResult {
+  /** Non-fatal lint/style warning to display to the model. */
+  warning: string | null
+  /** Fatal parse/integrity error. If set, the caller should roll back the write. */
+  fatal: string | null
+}
+
+const OK: SyntaxCheckResult = { warning: null, fatal: null }
+
 /**
  * Language-agnostic syntax and structural integrity check for written files.
  *
@@ -58,26 +81,35 @@ function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): 
  * warning directly into the ToolResult — so the model sees the error
  * immediately instead of discovering it 2–3 turns later.
  *
- * Supported: .ts .tsx .js .jsx (esbuild parser, async), .css (brace balance),
- * .html (tag balance), .json (JSON.parse).
+ * Supported: .ts .tsx .js .jsx (esbuild parser, async), .py (Python AST),
+ * .css (brace balance), .html (tag balance), .json (JSON.parse).
  *
  * Returns null if clean or unsupported extension.
  * Returns a warning string if an integrity issue is detected.
  */
 export async function syntaxCheck(filePath: string, content: string): Promise<string | null> {
+  const result = await checkSyntax(filePath, content)
+  return result.warning
+}
+
+/**
+ * Strict syntax check that distinguishes fatal parse errors from warnings.
+ * Fatal errors indicate the file is corrupted or unparseable and should be
+ * rolled back by the caller.
+ */
+export async function checkSyntax(filePath: string, content: string): Promise<SyntaxCheckResult> {
   const ext = extname(filePath)
 
   // ── TypeScript/JavaScript via esbuild async transform ──
   if (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs') {
+    if (content.length > EXTERNAL_PARSE_SIZE_LIMIT) return OK
     const loaderMap: Record<string, 'ts' | 'tsx' | 'js' | 'jsx'> = {
       '.ts': 'ts', '.tsx': 'tsx', '.js': 'js', '.jsx': 'jsx', '.mjs': 'js', '.cjs': 'js',
     }
     const loader = loaderMap[ext] ?? 'js'
     const esbuild = getEsbuild()
-    if (!esbuild) return null
+    if (!esbuild) return OK
     try {
-      // Prefer async transform — esbuild runs on its own worker, doesn't block
-      // the main thread. Falls back to sync for ancient esbuild versions.
       if (esbuild.transform) {
         await withTimeout(
           esbuild.transform(content, { loader, target: 'esnext', jsx: 'automatic' }),
@@ -87,22 +119,34 @@ export async function syntaxCheck(filePath: string, content: string): Promise<st
       } else {
         esbuild.transformSync(content, { loader, target: 'esnext', jsx: 'automatic' })
       }
-      return null
+      return OK
     } catch (err) {
-      if (!(err instanceof Error)) return null
+      if (!(err instanceof Error)) return OK
       const lines = err.message.split('\n')
       const errorLines = lines.filter(l => /ERROR:|error:/i.test(l))
       const detail = errorLines.length > 0
         ? errorLines.join('\n')
         : lines.slice(1).join('\n')
       const cleaned = detail.replace(/<stdin>:/g, '')
-      return `⚠️ Syntax error detected in ${ext}:\n${cleaned}\n\nFix this before proceeding — the file was written but will fail at runtime.`
+      const message = `⚠️ Syntax error detected in ${ext}:\n${cleaned}\n\nThe file was written but will fail at runtime.`
+      return { warning: message, fatal: message }
     }
+  }
+
+  // ── Python: AST parse via system python3 ──
+  if (ext === '.py') {
+    if (content.length > EXTERNAL_PARSE_SIZE_LIMIT) return OK
+    const result = await checkPythonSyntax(content)
+    if (result.error) {
+      const message = `⚠️ Python syntax error:\n${result.error}\n\nThe file was written but will fail to import/execute.`
+      return { warning: message, fatal: message }
+    }
+    return OK
   }
 
   // ── CSS: brace balance check (skip if >2MB) ──
   if (ext === '.css') {
-    if (content.length > SYNC_SCAN_SIZE_LIMIT) return null
+    if (content.length > SYNC_SCAN_SIZE_LIMIT) return OK
     let depth = 0
     let inString = false
     let stringChar = ''
@@ -123,18 +167,20 @@ export async function syntaxCheck(filePath: string, content: string): Promise<st
       if (c === '{') depth++
       if (c === '}') depth--
       if (depth < 0) {
-        return `⚠️ CSS brace mismatch: unmatched '}' at position ${i}. Remove the extra closing brace.`
+        const msg = `⚠️ CSS brace mismatch: unmatched '}' at position ${i}. Remove the extra closing brace.`
+        return { warning: msg, fatal: msg }
       }
     }
     if (depth > 0) {
-      return `⚠️ CSS brace mismatch: ${depth} unmatched '{' (missing closing '}'). Check for unclosed blocks like @media or rule sets.`
+      const msg = `⚠️ CSS brace mismatch: ${depth} unmatched '{' (missing closing '}'). Check for unclosed blocks like @media or rule sets.`
+      return { warning: msg, fatal: msg }
     }
-    return null
+    return OK
   }
 
   // ── HTML: basic tag balance (skip if >2MB) ──
   if (ext === '.html' || ext === '.htm') {
-    if (content.length > SYNC_SCAN_SIZE_LIMIT) return null
+    if (content.length > SYNC_SCAN_SIZE_LIMIT) return OK
     const voids = new Set([
       'area','base','br','col','embed','hr','img','input','link','meta',
       'param','source','track','wbr',
@@ -151,7 +197,8 @@ export async function syntaxCheck(filePath: string, content: string): Promise<st
       if (isClose) {
         if (stack.length === 0 || stack[stack.length - 1]!.tag !== tag) {
           const expected = stack.length > 0 ? stack[stack.length - 1]!.tag : 'nothing'
-          return `⚠️ HTML tag mismatch: unexpected </${tag}> at position ${match.index} (expected </${expected}>)`
+          const msg = `⚠️ HTML tag mismatch: unexpected </${tag}> at position ${match.index} (expected </${expected}>)`
+          return { warning: msg, fatal: msg }
         }
         stack.pop()
       } else {
@@ -160,22 +207,91 @@ export async function syntaxCheck(filePath: string, content: string): Promise<st
     }
     if (stack.length > 0) {
       const unclosed = stack.map(s => `<${s.tag}>`).join(', ')
-      return `⚠️ HTML tag mismatch: ${stack.length} unclosed tag(s): ${unclosed}. Add the missing closing tags.`
+      const msg = `⚠️ HTML tag mismatch: ${stack.length} unclosed tag(s): ${unclosed}. Add the missing closing tags.`
+      return { warning: msg, fatal: msg }
     }
-    return null
+    return OK
   }
 
   // ── JSON: parse check (skip if >2MB) ──
   if (ext === '.json') {
-    if (content.length > SYNC_SCAN_SIZE_LIMIT) return null
+    if (content.length > SYNC_SCAN_SIZE_LIMIT) return OK
     try {
       JSON.parse(content)
-      return null
+      return OK
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      return `⚠️ Invalid JSON: ${msg}`
+      const message = `⚠️ Invalid JSON: ${msg}`
+      return { warning: message, fatal: message }
     }
   }
 
-  return null
+  return OK
+}
+
+interface PythonSyntaxResult {
+  ok: boolean
+  error?: string
+}
+
+/** Parse Python source via system python3 -c "import ast; ast.parse(...)".
+ *  Returns {ok:true} on clean parse OR on any infrastructure failure (missing
+ *  interpreter, spawn error, timeout kill) — those must NEVER masquerade as a
+ *  fatal syntax error, since the caller rolls back the write on `error`.
+ *  Only a genuine non-zero exit with parser output is reported as {ok:false}.
+ *  Uses a child process because there is no robust pure-JS Python parser in
+ *  the dependency tree, and SWE-bench is overwhelmingly Python. */
+function checkPythonSyntax(content: string): Promise<PythonSyntaxResult> {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (r: PythonSyntaxResult): void => {
+      if (!settled) { settled = true; resolve(r) }
+    }
+
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn('python3', ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    } catch {
+      // Synchronous spawn failure — degrade, don't flag as a syntax error.
+      done({ ok: true })
+      return
+    }
+
+    // Hung interpreter guard: kill and degrade to OK. The file is already on
+    // disk; losing the check is a degradation, not a failure. A timeout kill
+    // surfaces as close(code=null) which we also treat as non-fatal below.
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL') } catch { /* already exited */ }
+      done({ ok: true })
+    }, getPySyntaxTimeoutMs())
+
+    let stdout = ''
+    let stderr = ''
+    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      if (code === 0 || code === null) {
+        // 0 = clean parse; null = killed by signal (our timeout / external) —
+        // never a real syntax error.
+        done({ ok: true })
+      } else {
+        done({ ok: false, error: stderr.trim() || stdout.trim() || `python3 exited with code ${code}` })
+      }
+    })
+    child.on('error', () => {
+      // python3 unavailable (ENOENT) or spawn failure — degrade to OK so a
+      // missing interpreter never triggers a false rollback of a valid file.
+      clearTimeout(timer)
+      done({ ok: true })
+    })
+    try {
+      child.stdin?.write(content)
+      child.stdin?.end()
+    } catch {
+      // stdin closed early (e.g. killed) — close/error handler resolves.
+    }
+  })
 }

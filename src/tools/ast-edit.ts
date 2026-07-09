@@ -1,10 +1,19 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, relative } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { applyEol, chooseEol, detectEol } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
 import { incrementEditFailCount, resetEditFailCount } from './read-file.js'
+import { checkSyntax } from './syntax-check.js'
+import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
+
+/** Post-write syntax verification + rollback for ast_edit. Default on;
+ *  RIVET_AST_EDIT_VERIFY=0 falls back to the pre-write ERROR-node gate only. */
+function isAstEditVerifyEnabled(): boolean {
+  const v = process.env.RIVET_AST_EDIT_VERIFY
+  return v !== '0' && v !== 'false'
+}
 import {
   inferLang,
   resolveLang,
@@ -288,18 +297,48 @@ export const AST_EDIT_TOOL: Tool = {
           }
         }
         if (finalSyntaxOk) {
-          fileResults.push({ file: filePath, changes })
           if (!dryRun) {
+            const cwd = params.cwd ?? process.cwd()
+            const relPath = relative(cwd, filePath)
+            const verify = isAstEditVerifyEnabled()
             try {
               params.onFileWrite?.(filePath)
               // Preserve the file's original line endings (CRLF on Windows-authored
               // files); ast-grep edits operate on \n-normalized ranges internally.
               const eol = chooseEol(filePath, detectEol(source), getTargetEol())
+              // Back up before writing so a fatal post-write check can roll back.
+              if (verify) {
+                trackFileChange(cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'ast_edit' })
+              }
               await writeFileAtomicAsync(filePath, applyEol(currentSource, eol))
-              resetEditFailCount(filePath)
+
+              // Authoritative post-write verification (python3 ast.parse / esbuild):
+              // the ast-grep ERROR-node gate misses some corruption; checkSyntax
+              // is the same gate edit_file/write_file use. Fatal → roll back.
+              let rolledBack = false
+              if (verify) {
+                try {
+                  const check = await checkSyntax(filePath, currentSource)
+                  if (check.fatal) {
+                    restoreLatestBackup(cwd, relPath)
+                    incrementEditFailCount(filePath)
+                    errors.push(`${filePath}: post-write syntax error — rolled back: ${check.fatal.split('\n')[0]}`)
+                    rolledBack = true
+                  }
+                } catch {
+                  // checkSyntax degraded (missing parser/timeout) — keep the write.
+                }
+              }
+
+              if (!rolledBack) {
+                fileResults.push({ file: filePath, changes })
+                resetEditFailCount(filePath)
+              }
             } catch {
               errors.push(`${filePath}: failed to write changes`)
             }
+          } else {
+            fileResults.push({ file: filePath, changes })
           }
         }
       }

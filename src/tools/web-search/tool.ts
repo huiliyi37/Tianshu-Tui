@@ -2,6 +2,7 @@ import type { Tool, ToolCallParams, ToolResult } from '../types.js'
 import type { SearchBackend, SearchFetch } from './types.js'
 import { DuckDuckGoBackend } from './duckduckgo.js'
 import { runBackendChain } from './chain.js'
+import { boundedSearchFetch } from './bounded-fetch.js'
 
 const MAX_RESULTS = 20
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -16,7 +17,8 @@ export interface WebSearchDeps {
 }
 
 export function createWebSearchTool(deps: WebSearchDeps = {}): Tool {
-  const fetchImpl = deps.fetch ?? (globalThis.fetch.bind(globalThis) as SearchFetch)
+  // Injected test fetches stay as-is; the real global fetch is body-size capped.
+  const fetchImpl = deps.fetch ?? boundedSearchFetch(globalThis.fetch.bind(globalThis) as SearchFetch)
   const backends = deps.backends && deps.backends.length > 0
     ? deps.backends
     : [new DuckDuckGoBackend(fetchImpl)]

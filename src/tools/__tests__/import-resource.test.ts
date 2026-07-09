@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync, existsSync, readlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { IMPORT_RESOURCE_TOOL, parseGitHubUrl } from '../import-resource.js'
+import { IMPORT_RESOURCE_TOOL, parseGitHubUrl, isSafeGitRef } from '../import-resource.js'
 import type { ToolCallParams } from '../types.js'
 
 function makeParams(input: Record<string, unknown>, cwd: string): ToolCallParams {
@@ -166,6 +166,36 @@ describe('import_resource', () => {
       } finally {
         globalThis.fetch = originalFetch
       }
+    })
+  })
+
+  describe('isSafeGitRef', () => {
+    it('accepts normal branches/tags/commits', () => {
+      assert.equal(isSafeGitRef('main'), true)
+      assert.equal(isSafeGitRef('v2.18.0'), true)
+      assert.equal(isSafeGitRef('feature/foo-bar'), true)
+      assert.equal(isSafeGitRef('a1b2c3d'), true)
+    })
+
+    it('rejects refs starting with "-" (git option injection)', () => {
+      assert.equal(isSafeGitRef('--upload-pack=touch /tmp/pwn'), false)
+      assert.equal(isSafeGitRef('-x'), false)
+    })
+
+    it('rejects refs with whitespace, control chars, or git-invalid chars', () => {
+      assert.equal(isSafeGitRef('a b'), false)
+      assert.equal(isSafeGitRef('a\nb'), false)
+      assert.equal(isSafeGitRef('a:b'), false)   // invalid in a git ref name
+      assert.equal(isSafeGitRef('a?b'), false)
+      assert.equal(isSafeGitRef(''), false)
+    })
+
+    it('rejects option-injecting ref via the GitHub import path', async () => {
+      const result = await IMPORT_RESOURCE_TOOL.execute(
+        makeParams({ source: 'github.com/owner/repo', ref: '--upload-pack=touch /tmp/pwn' }, tmpCwd),
+      )
+      assert.equal(result.isError, true)
+      assert.match(result.content, /invalid git ref/i)
     })
   })
 

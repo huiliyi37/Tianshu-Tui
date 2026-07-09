@@ -47,6 +47,19 @@ export function parseGitHubUrl(url: string): { owner: string; repo: string; subp
   return { owner, repo, ref: ref ?? undefined, subpath: subpath || undefined }
 }
 
+/** Validate a git ref (branch/tag/commit) supplied by the model/URL before it
+ *  reaches `git clone --branch` / `git checkout`. The refs are passed as
+ *  `execFile` args (no shell), so the real risk is git *option injection*: a
+ *  ref like `--upload-pack=…` would be parsed as an option. Reject anything
+ *  starting with `-`, plus whitespace/control and the characters git itself
+ *  forbids in ref names (`~^:?*[\`). Returns true when the ref is safe. */
+export function isSafeGitRef(ref: string): boolean {
+  if (ref.length === 0 || ref.length > 255) return false
+  if (ref.startsWith('-')) return false
+  if (/[\s\x00-\x1f\x7f~^:?*[\\]/.test(ref)) return false
+  return true
+}
+
 async function ensureImportDir(cwd: string): Promise<string> {
   const dir = join(cwd, IMPORT_DIR)
   await mkdir(dir, { recursive: true })
@@ -183,6 +196,13 @@ async function handleGitHubImport(
   explicitRef?: string,
 ): Promise<{ content: string; uiContent: string; isError?: boolean }> {
   const ref = explicitRef ?? gh.ref
+  if (ref !== undefined && !isSafeGitRef(ref)) {
+    return {
+      content: `Error: invalid git ref "${ref}". A branch/tag/commit must not start with "-" or contain whitespace/control characters.`,
+      isError: true,
+      uiContent: `Invalid ref: ${ref}`,
+    }
+  }
   const repoUrl = `https://github.com/${gh.owner}/${gh.repo}.git`
   const targetName = importTargetName(`${gh.owner}/${gh.repo}`)
   const targetPath = join(importDir, targetName)
@@ -197,18 +217,25 @@ async function handleGitHubImport(
   } else {
     try { await rm(targetPath, { recursive: true, force: true }) } catch { /* not existing is fine */ }
     try {
+      // `--` terminates option parsing before the positional repo/target args.
       const args = ['clone', '--depth', '1']
       if (ref) args.push('--branch', ref)
-      args.push(repoUrl, targetPath)
+      args.push('--', repoUrl, targetPath)
       await execAsync('git', args, { timeout: 120_000 })
     } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (code === 'ENOENT') {
+        return { content: `Error: git is not installed or not on PATH — cannot clone ${repoUrl}. Install git and retry.`, isError: true, uiContent: `git not found` }
+      }
       const msg = err instanceof Error ? err.message : String(err)
       return { content: `Error cloning ${repoUrl}: ${msg}`, isError: true, uiContent: `Clone failed: ${gh.owner}/${gh.repo}` }
     }
   }
 
   if (ref && existsSync(join(targetPath, '.git'))) {
-    try { await execAsync('git', ['checkout', ref], { cwd: targetPath, timeout: 10_000 }) } catch { /* shallow */ }
+    // ref is validated (no leading `-`); trailing `--` disambiguates it from any
+    // pathspec so git treats it strictly as a revision.
+    try { await execAsync('git', ['checkout', ref, '--'], { cwd: targetPath, timeout: 10_000 }) } catch { /* shallow */ }
   }
 
   const effectivePath = gh.subpath ? join(targetPath, gh.subpath) : targetPath

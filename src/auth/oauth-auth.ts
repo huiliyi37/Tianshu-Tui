@@ -20,6 +20,26 @@ export interface OAuthConfig {
 const DEFAULT_REDIRECT_PORT = 1455
 const DEFAULT_AUTH_DIR = '.rivet/auth'
 
+/** Hard timeout for token exchange/refresh network calls. Without it a hung
+ *  token endpoint would stall auth (and any request that triggers a refresh)
+ *  indefinitely. Override with RIVET_OAUTH_TIMEOUT (ms). */
+function oauthTimeoutMs(): number {
+  const v = Number.parseInt(process.env.RIVET_OAUTH_TIMEOUT ?? '', 10)
+  return Number.isFinite(v) && v > 0 ? v : 30_000
+}
+
+/** Cap the error-body read so a hostile/misbehaving endpoint cannot force an
+ *  unbounded string into memory just to build an error message. */
+async function readErrorBodyCapped(resp: Response, maxBytes = 64 * 1024): Promise<string> {
+  try {
+    const buf = await resp.arrayBuffer()
+    const bytes = new Uint8Array(buf).subarray(0, maxBytes)
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return ''
+  }
+}
+
 export class OAuthAuth implements AuthProvider {
   private store: TokenStore
   private config: Required<Pick<OAuthConfig, 'clientId' | 'tokenEndpoint'>> & OAuthConfig
@@ -166,10 +186,11 @@ export class OAuthAuth implements AuthProvider {
         code_verifier: codeVerifier,
         redirect_uri: redirectUri,
       }).toString(),
+      signal: AbortSignal.timeout(oauthTimeoutMs()),
     })
 
     if (!resp.ok) {
-      const body = await resp.text()
+      const body = await readErrorBodyCapped(resp)
       throw new Error(`Token exchange failed (${resp.status}): ${body}`)
     }
 
@@ -199,6 +220,7 @@ export class OAuthAuth implements AuthProvider {
         client_id: this.config.clientId,
         refresh_token: token.refreshToken,
       }).toString(),
+      signal: AbortSignal.timeout(oauthTimeoutMs()),
     })
 
     if (!resp.ok) {

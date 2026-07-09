@@ -106,11 +106,43 @@ describe('syntaxCheck', async () => {
     })
   })
 
+  describe('Python', async () => {
+    it('passes valid Python', async () => {
+      assert.equal(await syntaxCheck('/a/script.py', 'def foo():\n    return 1\n'), null)
+    })
+
+    it('flags Python indentation error', async () => {
+      const r = await syntaxCheck('/a/script.py', 'def foo():\n    return 1\n  bad\n')
+      assert.ok(r, 'should detect indentation error')
+      assert.match(r!, /IndentationError|syntax error/i)
+    })
+
+    it('flags invalid Python syntax', async () => {
+      const r = await syntaxCheck('/a/script.py', 'def foo(\n')
+      assert.ok(r, 'should detect invalid syntax')
+      assert.match(r!, /SyntaxError|syntax error/i)
+    })
+
+    it('does not produce a false fatal under an aggressive timeout (degrade to OK)', async () => {
+      // A 1ms budget almost always trips the hung-interpreter guard before
+      // python3 finishes. The guard must degrade to OK (null), never surface a
+      // spurious syntax error that would roll back a perfectly valid file.
+      const prev = process.env.RIVET_PY_SYNTAX_TIMEOUT
+      process.env.RIVET_PY_SYNTAX_TIMEOUT = '1'
+      try {
+        const r = await syntaxCheck('/a/script.py', 'def foo():\n    return 1\n')
+        assert.equal(r, null)
+      } finally {
+        if (prev === undefined) delete process.env.RIVET_PY_SYNTAX_TIMEOUT
+        else process.env.RIVET_PY_SYNTAX_TIMEOUT = prev
+      }
+    })
+  })
+
   describe('unknown extensions', async () => {
     it('returns null for unsupported file types', async () => {
       assert.equal(await syntaxCheck('/a/file.md', '# Hello'), null)
       assert.equal(await syntaxCheck('/a/file.txt', 'hello'), null)
-      assert.equal(await syntaxCheck('/a/file.py', 'print("hi")'), null)
     })
   })
 })

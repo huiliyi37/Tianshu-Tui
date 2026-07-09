@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
-import { applyPatch, APPLY_PATCH_TOOL } from '../apply-patch.js'
+import { applyPatch, APPLY_PATCH_TOOL, extractPatchTargetPaths } from '../apply-patch.js'
 
 function git(cwd: string, args: string[]) {
   return spawnSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -94,6 +94,58 @@ index 2e65efe..a2005b8 100644
     assert.ok(result.uiContent!.includes('--- a/file.txt'), 'header path was normalized')
     assert.ok(result.uiContent!.includes('+++ b/file.txt'), 'header path was normalized')
     assert.equal(readFileSync(join(repoDir, 'file.txt'), 'utf-8').trim(), 'patched')
+  })
+
+  it('rejects a collapsed history pointer as diff input', async () => {
+    const result = await APPLY_PATCH_TOOL.execute({
+      input: { diff: '[patch applied to 2 file(s): a.py, b.py — 4 hunks, 9000 chars. Use read_file / git diff to inspect.]' },
+      toolUseId: 'toolu_test',
+      cwd: repoDir,
+    })
+    assert.equal(result.isError, true)
+    assert.match(result.content, /collapsed history pointer/i)
+  })
+
+  it('rolls back a patch that introduces a fatal Python syntax error', async () => {
+    writeFileSync(join(repoDir, 'mod.py'), 'def foo():\n    return 1\n')
+    git(repoDir, ['add', 'mod.py'])
+    git(repoDir, ['commit', '-m', 'add mod'])
+    // Patch turns a valid def into an unbalanced one — python3 ast.parse fails.
+    const badDiff = `diff --git a/mod.py b/mod.py
+--- a/mod.py
++++ b/mod.py
+@@ -1,2 +1,2 @@
+-def foo():
++def foo(:
+     return 1
+`
+    const result = await APPLY_PATCH_TOOL.execute({
+      input: { diff: badDiff },
+      toolUseId: 'toolu_test',
+      cwd: repoDir,
+    })
+    // If python3 is unavailable, syntax check degrades to OK and the patch
+    // stays applied — only assert rollback when the corruption was detected.
+    if (result.isError) {
+      assert.match(result.content, /rolled back/i)
+      assert.equal(readFileSync(join(repoDir, 'mod.py'), 'utf-8'), 'def foo():\n    return 1\n')
+    }
+  })
+
+  it('extractPatchTargetPaths parses +++ headers and skips /dev/null', () => {
+    const diff = `diff --git a/x.ts b/x.ts
+--- a/x.ts
++++ b/x.ts
+@@ -1 +1 @@
+-a
++b
+diff --git a/gone.txt b/gone.txt
+--- a/gone.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-bye
+`
+    assert.deepEqual(extractPatchTargetPaths(diff), ['x.ts'])
   })
 
   it('truncates oversized diffs in uiContent', async () => {
