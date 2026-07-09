@@ -54,3 +54,23 @@ export async function openRivetHome(): Promise<void> {
     alert(i18n.t('shell:dataDir.location', { path: rivetHome }))
   }
 }
+
+/**
+ * Open the bundled EULA (End User License Agreement) document.
+ *
+ * The desktop shell is proprietary; EULA.md is bundled as a Tauri resource.
+ * We resolve the resource path and open it with the OS default handler.
+ * Falls back to the public license reference when the resource plugins are
+ * unavailable (browser dev mode).
+ */
+export async function openEula(): Promise<void> {
+  try {
+    const { resolveResource } = await import('@tauri-apps/api/path')
+    const opener = await import('@tauri-apps/plugin-opener')
+    const eulaPath = await resolveResource('EULA.md')
+    await opener.openPath(eulaPath)
+  } catch {
+    // Not under Tauri or resource missing — surface the notice inline.
+    alert(i18n.t('settings:about.eulaUnavailable'))
+  }
+}

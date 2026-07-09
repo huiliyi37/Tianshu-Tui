@@ -113,6 +113,118 @@ export function __peekRuntimeCache(): RuntimeInfo | null {
   return cached
 }
 
+// ── License activation ─────────────────────────────────────────────────────
+// The real gate lives in Rust (sidecar spawn is skipped when unactivated).
+// The frontend only drives the UI + the network calls to the license server;
+// Rust verifies the Ed25519 signature and persists the token.
+
+export interface ActivationStatus {
+  activated: boolean
+  tier: string | null
+  tokenExp: number | null
+  licenseExpires: number | null
+  grace: boolean
+  graceUntil: number | null
+  reason: string
+  deviceId: string
+}
+
+/** License server base URL. Override at build time via VITE_LICENSE_SERVER_URL. */
+export const LICENSE_SERVER_URL = String(
+  viteEnv().VITE_LICENSE_SERVER_URL ?? 'https://license.tianshu.app',
+).replace(/\/+$/, '')
+
+/** Current local activation state (Ed25519-verified in Rust, offline-grace aware). */
+export function getActivationStatus(): Promise<ActivationStatus> {
+  return invoke<ActivationStatus>('activation_status')
+}
+
+/** Stable device fingerprint used to bind a license to this machine. */
+export function getDeviceFingerprint(): Promise<string> {
+  return invoke<string>('device_fingerprint')
+}
+
+/** Verify + persist a server-issued token; returns the recomputed status. */
+export function storeLicense(token: string): Promise<ActivationStatus> {
+  return invoke<ActivationStatus>('store_license', { token })
+}
+
+/** Remove the local license (deactivate). Gate applies on next launch. */
+export function deactivateLicense(): Promise<void> {
+  return invoke<void>('deactivate')
+}
+
+async function serverError(res: Response): Promise<string> {
+  let reason = `HTTP ${res.status}`
+  try {
+    const j = (await res.json()) as { error?: string }
+    if (j?.error) reason = String(j.error)
+  } catch { /* non-JSON body */ }
+  return reason
+}
+
+/**
+ * Redeem an activation code: POST /activate → Rust verifies & stores the token.
+ * On success the caller should relaunch so the setup() gate spawns the sidecar.
+ */
+export async function activateWithCode(code: string): Promise<ActivationStatus> {
+  const deviceId = await getDeviceFingerprint()
+  const res = await fetch(`${LICENSE_SERVER_URL}/activate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code: code.trim(), deviceId }),
+  })
+  if (!res.ok) throw new Error(await serverError(res))
+  const data = (await res.json()) as { token?: string }
+  if (!data.token) throw new Error('no_token')
+  return storeLicense(data.token)
+}
+
+/**
+ * Heartbeat: POST /verify with the stored token → refresh (rolling expiry) or
+ * detect revocation. Returns:
+ *   - refreshed ActivationStatus on success
+ *   - `{ revoked: true }` when the server explicitly revoked the license
+ *   - null on network failure (offline grace period covers it)
+ */
+export async function verifyLicenseHeartbeat(): Promise<
+  { status: ActivationStatus } | { revoked: true; reason: string } | null
+> {
+  const [token, deviceId] = await Promise.all([
+    invoke<string | null>('license_token'),
+    getDeviceFingerprint(),
+  ])
+  if (!token) return null
+  let res: Response
+  try {
+    res = await fetch(`${LICENSE_SERVER_URL}/verify`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, deviceId }),
+    })
+  } catch {
+    return null // offline — grace period handles it
+  }
+  if (!res.ok) return null
+  const data = (await res.json()) as {
+    valid: boolean
+    reason?: string
+    token?: string
+  }
+  if (!data.valid) {
+    if (data.reason === 'revoked' || data.reason === 'license_expired') {
+      await deactivateLicense()
+      return { revoked: true, reason: data.reason }
+    }
+    return null
+  }
+  if (data.token) {
+    const status = await storeLicense(data.token)
+    return { status }
+  }
+  return { status: await getActivationStatus() }
+}
+
 export function runtimeBaseUrl(info: RuntimeInfo): string {
   return `http://127.0.0.1:${info.port}`
 }

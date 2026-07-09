@@ -1,3 +1,4 @@
+mod activation;
 mod pty;
 
 use std::io::{Read, Write};
@@ -95,6 +96,40 @@ struct Sidecar {
 #[tauri::command]
 fn runtime_info(state: State<Sidecar>) -> RuntimeInfo {
     state.info.clone()
+}
+
+// ── 在线激活命令 ──
+// 网络调用在前端(JS fetch 打授权服务器);Rust 只负责验签 + 落盘 + gate。
+
+#[tauri::command]
+fn device_fingerprint(app: tauri::AppHandle) -> String {
+    let home = strip_verbatim_prefix(resolve_rivet_home(&app));
+    activation::device_id(&home)
+}
+
+#[tauri::command]
+fn activation_status(app: tauri::AppHandle) -> activation::LicenseStatus {
+    let home = strip_verbatim_prefix(resolve_rivet_home(&app));
+    activation::read_status(&home)
+}
+
+/// 前端在 /activate 或 /verify 心跳成功后,把服务器签发的 token 交来验签落盘。
+#[tauri::command]
+fn store_license(app: tauri::AppHandle, token: String) -> Result<activation::LicenseStatus, String> {
+    let home = strip_verbatim_prefix(resolve_rivet_home(&app));
+    activation::store_license(&home, &token)
+}
+
+#[tauri::command]
+fn license_token(app: tauri::AppHandle) -> Option<String> {
+    let home = strip_verbatim_prefix(resolve_rivet_home(&app));
+    activation::current_token(&home)
+}
+
+#[tauri::command]
+fn deactivate(app: tauri::AppHandle) -> Result<(), String> {
+    let home = strip_verbatim_prefix(resolve_rivet_home(&app));
+    activation::clear_license(&home)
 }
 
 // ── Storage location (RIVET_HOME) UI commands ───────────────────────────────
@@ -1199,6 +1234,29 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
         log_path: log_path.clone(),
     };
 
+    // ── 激活 gate ──
+    // 未激活就不拉起 sidecar(= agent 全部能力)。前端据 activation_status()
+    // 渲染激活界面。真校验在 activation.rs(编译进机器码),前端 patch 绕不过。
+    // 激活成功后前端触发 relaunch,下次 setup 走正常 spawn 分支。
+    if !activation::is_activated(&rivet_home) {
+        eprintln!("[rivet] license not active — sidecar launch gated (activation required)");
+        return (
+            RuntimeInfo {
+                port,
+                token,
+                node_source: node_source.to_string(),
+                ready: false,
+                rivet_home: rivet_home.to_string_lossy().to_string(),
+                node_path: node,
+                entry_path: entry.to_string_lossy().to_string(),
+                spawn_error: "__ACTIVATION_REQUIRED__".to_string(),
+                log_path: log_path.to_string_lossy().to_string(),
+            },
+            None,
+            spec,
+        );
+    }
+
     let mut child = spawn_from_spec(&spec);
 
     let ready = child.is_some() && wait_until_ready(port, &token, Duration::from_secs(15));
@@ -1343,6 +1401,13 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
             if state.shutting_down.load(Ordering::SeqCst) {
                 return;
             }
+            // 激活 gate(防绕过):运行时若 license 被吊销/过期,崩溃后不再重启。
+            // 前端收到 activation-required 事件切激活界面。
+            if !activation::is_activated(&state.spec.rivet_home) {
+                eprintln!("[rivet] license no longer active — halting sidecar auto-restart");
+                let _ = handle.emit("activation-required", ());
+                return;
+            }
             restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
             if restarts.len() >= 3 {
                 eprintln!(
@@ -1410,6 +1475,11 @@ pub fn run() {
         .manage(pty::PtyManager::default())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
+            device_fingerprint,
+            activation_status,
+            store_license,
+            license_token,
+            deactivate,
             is_storage_configured,
             get_storage_options,
             apply_storage_location,

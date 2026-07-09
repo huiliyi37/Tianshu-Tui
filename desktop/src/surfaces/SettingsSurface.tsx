@@ -23,7 +23,8 @@ import { McpSettingsManager } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
 import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { pickFolder } from '../lib/dialog'
-import { openRivetHome } from '../lib/open-external'
+import { openRivetHome, openEula } from '../lib/open-external'
+import { getVersion } from '@tauri-apps/api/app'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -326,6 +327,7 @@ export function SettingsSurface() {
             <StorageLocationSection />
             <StorageSection />
             <UpdaterSection />
+            <AboutSection />
           </div>
         )}
         {activeCat === 'help' && <HelpSection onNavigate={setActiveCat} />}
@@ -1156,6 +1158,33 @@ function UpdaterSection() {
         </div>
       )}
       {message && <div className="meta">{message}</div>}
+    </section>
+  )
+}
+
+/** About / License: app version, proprietary-license notice, and EULA access. */
+function AboutSection() {
+  const { t } = useTranslation('settings')
+  const [version, setVersion] = useState<string | null>(null)
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => setVersion(null))
+  }, [])
+
+  return (
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>{t('about.title')}</h4>
+        <p className="meta">{t('about.desc')}</p>
+      </div>
+      <dl className="kv">
+        <div><dt>{t('about.version')}</dt><dd>{version ?? '—'}</dd></div>
+        <div><dt>{t('about.license')}</dt><dd>{t('about.licenseValue')}</dd></div>
+      </dl>
+      <p className="meta">{t('about.boundary')}</p>
+      <button className="btn" onClick={() => { void openEula() }}>
+        {t('about.viewEula')}
+      </button>
     </section>
   )
 }

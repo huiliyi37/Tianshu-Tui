@@ -121,6 +121,16 @@
     "refresh": "Refresh",
     "loading": "Loading…"
   },
+  "about": {
+    "title": "About & License",
+    "desc": "App version and licensing information.",
+    "version": "App version",
+    "license": "License",
+    "licenseValue": "Proprietary (Tianshu Desktop EULA)",
+    "boundary": "The desktop shell is proprietary software. The embedded CLI runtime is separately open-sourced under Apache-2.0.",
+    "viewEula": "View EULA",
+    "eulaUnavailable": "The EULA document is unavailable in this context."
+  },
   "runtime": "Runtime (sidecar)",
   "runtimeDesc": "Current sidecar version, session count, and running status.",
   "sidecarOffline": "sidecar offline, reconnecting…",

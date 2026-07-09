@@ -30,6 +30,9 @@ known-folders = "1.1"
 time = { version = "0.3", features = ["formatting"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-single-instance = "2"
+# License activation: Ed25519 token verification + stable device fingerprint.
+ed25519-dalek = "2"
+machine-uid = "0.5"
 
 [profile.release]
 strip = true

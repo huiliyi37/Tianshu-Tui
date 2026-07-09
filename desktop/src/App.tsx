@@ -24,6 +24,8 @@ import { openExternal } from './lib/open-external'
 import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
 import { FirstRunStorageDialog } from './components/FirstRunStorageDialog'
 import { FirstRunGitDialog } from './components/FirstRunGitDialog'
+import { ActivationScreen } from './components/ActivationScreen'
+import { useActivationGate } from './lib/use-activation-gate'
 import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured, fixAutocrlf } from './runtime/client'
 import type { ProjectTemplatesStatus } from './runtime/types'
 
@@ -36,6 +38,7 @@ export function App() {
   const createSession = useCreateSession()
   const sessions = useSessions()
   useGlobalNotifications()
+  const activation = useActivationGate()
 
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
@@ -200,6 +203,12 @@ export function App() {
       dispatch({ type: 'openConnect', open: true })
     }
   }, [needsSetup, dispatch])
+
+  // 激活 gate:未激活时整屏拦截,不渲染工作区。真正的强制在 Rust(未激活不
+  // spawn sidecar),此处仅是兑换 UI。必须在所有 hooks 之后 early-return。
+  if (activation.gated && activation.status) {
+    return <ActivationScreen status={activation.status} />
+  }
 
   return (
     <WallpaperProvider>

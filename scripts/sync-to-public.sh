@@ -38,6 +38,7 @@ rsync $RSYNC_FLAGS \
   "$DEV_DIR/scripts/" "$PUB_DIR/scripts/"
 
 # desktop/ 不同步 — 桌面端闭源分发，不进入公开仓库
+# license-server/ 不同步 — 授权服务器为白名单外顶层目录，天然不公开（含私钥签发逻辑）
 echo "=== 同步: docs/（排除核心设计文档与内部文件）==="
 rsync $RSYNC_FLAGS \
   --exclude='design/' \

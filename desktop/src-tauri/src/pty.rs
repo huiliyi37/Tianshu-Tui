@@ -156,8 +156,14 @@ fn resolve_shell_path(shell: &str) -> String {
     {
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
         let candidates = [
-            format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", windir),
-            format!("{}\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe", windir),
+            format!(
+                "{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                windir
+            ),
+            format!(
+                "{}\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe",
+                windir
+            ),
             format!("{}\\System32\\cmd.exe", windir),
             format!("{}\\SysWOW64\\cmd.exe", windir),
             format!("{}\\System32\\WindowsPowerShell\\v1.0\\pwsh.exe", windir),
@@ -301,12 +307,17 @@ pub fn pty_spawn(
 /// 把前端键盘输入写进 PTY。未知 id 静默忽略（会话可能已退出）。
 #[tauri::command]
 pub fn pty_write(state: State<'_, PtyManager>, id: String, data: String) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().map_err(|_| "pty state poisoned".to_string())?;
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "pty state poisoned".to_string())?;
     if let Some(s) = sessions.get_mut(&id) {
         s.writer
             .write_all(data.as_bytes())
             .map_err(|e| format!("pty write failed: {e}"))?;
-        s.writer.flush().map_err(|e| format!("pty flush failed: {e}"))?;
+        s.writer
+            .flush()
+            .map_err(|e| format!("pty flush failed: {e}"))?;
     }
     Ok(())
 }
@@ -319,7 +330,10 @@ pub fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().map_err(|_| "pty state poisoned".to_string())?;
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "pty state poisoned".to_string())?;
     if let Some(s) = sessions.get(&id) {
         s.master
             .resize(PtySize {
@@ -336,7 +350,10 @@ pub fn pty_resize(
 /// 杀掉 PTY 会话并从表中移除。幂等。
 #[tauri::command]
 pub fn pty_kill(state: State<'_, PtyManager>, id: String) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().map_err(|_| "pty state poisoned".to_string())?;
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "pty state poisoned".to_string())?;
     if let Some(mut s) = sessions.remove(&id) {
         let _ = s.child.kill();
     }

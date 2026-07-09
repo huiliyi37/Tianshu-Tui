@@ -1,4 +1,29 @@
 {
+  "activation": {
+    "title": "激活天枢桌面端",
+    "subtitle": "这是授权副本。输入激活码以解锁 agent 运行时。",
+    "codeLabel": "激活码",
+    "codePlaceholder": "TS-XXXX-XXXX-XXXX",
+    "activate": "激活",
+    "activating": "激活中…",
+    "deviceLabel": "设备 ID",
+    "graceNotice": "离线宽限期生效中——请在 {{date}} 前联网续期以继续使用。",
+    "revoked": "许可已失效（{{reason}}）。请联系客服或输入新的激活码。",
+    "success": "激活成功，正在重启以拉起运行时…",
+    "viewEula": "查看许可协议",
+    "errors": {
+      "code_not_found": "未找到该激活码。",
+      "code_revoked": "该激活码已被吊销。",
+      "license_expired": "该许可已过期。",
+      "activation_limit_reached": "该激活码已达设备绑定上限。",
+      "activation_revoked": "本设备的激活已被吊销。",
+      "invalid_code_format": "激活码格式不正确。",
+      "device_mismatch": "token 与本设备不匹配。",
+      "no_token": "服务器未返回有效 token。",
+      "network": "无法连接授权服务器，请检查网络后重试。",
+      "generic": "激活失败：{{reason}}"
+    }
+  },
   "banner": {
     "sidecarGaveUp": "运行时进程短时间内多次崩溃，已停止自动重启。请重启应用；若反复出现，请检查磁盘空间与数据目录（设置 → 存储），或查看日志后反馈。",
     "sidecarFailed": "sidecar 启动失败：未找到 Node 运行时或端口被占用。请重启应用，若仍失败请检查安装。",

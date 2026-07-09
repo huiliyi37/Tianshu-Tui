@@ -1,4 +1,29 @@
 {
+  "activation": {
+    "title": "Activate Tianshu Desktop",
+    "subtitle": "This is a licensed copy. Enter your activation code to unlock the agent runtime.",
+    "codeLabel": "Activation code",
+    "codePlaceholder": "TS-XXXX-XXXX-XXXX",
+    "activate": "Activate",
+    "activating": "Activating…",
+    "deviceLabel": "Device ID",
+    "graceNotice": "Offline grace period active — reconnect before {{date}} to keep using the app.",
+    "revoked": "This license is no longer valid ({{reason}}). Please contact support or enter a new code.",
+    "success": "Activated. Restarting to launch the runtime…",
+    "viewEula": "View License Agreement",
+    "errors": {
+      "code_not_found": "Activation code not found.",
+      "code_revoked": "This activation code has been revoked.",
+      "license_expired": "This license has expired.",
+      "activation_limit_reached": "This code has reached its device limit.",
+      "activation_revoked": "This device's activation was revoked.",
+      "invalid_code_format": "Invalid code format.",
+      "device_mismatch": "The token does not match this device.",
+      "no_token": "The server did not return a valid token.",
+      "network": "Could not reach the license server. Check your connection and try again.",
+      "generic": "Activation failed: {{reason}}"
+    }
+  },
   "banner": {
     "sidecarGaveUp": "The runtime process crashed repeatedly in a short period, so auto-restart has stopped. Please restart the app; if this keeps happening, check disk space and the data directory (Settings → Storage), or check the logs and report the issue.",
     "sidecarFailed": "Sidecar failed to start: no Node runtime found or the port is in use. Please restart the app; if it still fails, check your installation.",

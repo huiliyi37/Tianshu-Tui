@@ -121,6 +121,16 @@
     "refresh": "刷新",
     "loading": "加载中…"
   },
+  "about": {
+    "title": "关于与许可",
+    "desc": "应用版本与许可信息。",
+    "version": "应用版本",
+    "license": "许可协议",
+    "licenseValue": "专有许可(天枢桌面端 EULA)",
+    "boundary": "桌面端为专有软件;内嵌的 CLI 运行时以 Apache-2.0 单独开源。",
+    "viewEula": "查看最终用户许可协议",
+    "eulaUnavailable": "当前环境无法打开许可协议文档。"
+  },
   "runtime": "运行时 (sidecar)",
   "runtimeDesc": "当前 sidecar 版本、会话数量与运行状态统计。",
   "sidecarOffline": "sidecar 离线，重连中…",
