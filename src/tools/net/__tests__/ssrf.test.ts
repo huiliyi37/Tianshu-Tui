@@ -49,4 +49,16 @@ describe('resolveAndAssertPublic', () => {
       (err: unknown) => err instanceof SSRFError && err.hostname === 'evil.local' && err.address === '10.0.0.1',
     )
   })
+
+  it('passes through the family from the lookup', async () => {
+    const result = await resolveAndAssertPublic('example.com', async () => ({ address: '93.184.216.34', family: 4 }))
+    assert.equal(result.family, 4)
+  })
+
+  it('infers family from the address when the lookup omits it', async () => {
+    const v4 = await resolveAndAssertPublic('example.com', async () => ({ address: '93.184.216.34' }))
+    assert.equal(v4.family, 4)
+    const v6 = await resolveAndAssertPublic('example.com', async () => ({ address: '2001:4860:4860::8888' }))
+    assert.equal(v6.family, 6)
+  })
 })

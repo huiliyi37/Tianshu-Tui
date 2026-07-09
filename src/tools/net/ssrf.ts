@@ -31,15 +31,22 @@ export class SSRFError extends Error {
   }
 }
 
-export type LookupFn = (hostname: string) => Promise<{ address: string }>
+export interface ResolvedAddress {
+  address: string
+  /** 4 or 6; may be absent for injected lookups that only return an address. */
+  family?: number
+}
+
+export type LookupFn = (hostname: string) => Promise<ResolvedAddress>
 
 export async function resolveAndAssertPublic(
   hostname: string,
   lookup: LookupFn,
-): Promise<{ address: string }> {
-  const { address } = await lookup(hostname)
+): Promise<ResolvedAddress> {
+  const { address, family } = await lookup(hostname)
   if (isPrivateIP(address)) {
     throw new SSRFError(hostname, address)
   }
-  return { address }
+  const ipFamily = isIP(address)
+  return { address, family: family ?? (ipFamily === 0 ? undefined : ipFamily) }
 }

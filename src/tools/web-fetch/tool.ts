@@ -1,4 +1,3 @@
-import { lookup as dnsLookup } from 'node:dns/promises'
 import type { Tool, ToolCallParams } from '../types.js'
 import { fetchCauseDetail } from '../../api/error-classifier.js'
 import { httpFetchGuarded, type HttpFetchDeps, type HttpFetchOptions } from '../net/http-fetch.js'
@@ -25,10 +24,10 @@ const BINARY_CONTENT_TYPE_PREFIXES = [
   'font/',
 ]
 
-const defaultDeps: FetchDeps = {
-  lookup: dnsLookup,
-  fetch: globalThis.fetch.bind(globalThis),
-}
+// No explicit `fetch` here: leaving it undefined lets httpFetchGuarded use the
+// real (undici) global fetch AND engage connection pinning against DNS
+// rebinding. `lookup` also defaults inside httpFetchGuarded to node:dns.
+const defaultDeps: FetchDeps = {}
 
 export function createWebFetchTool(deps: FetchDeps = defaultDeps, opts: WebFetchOptions = {}): Tool {
   const options = {

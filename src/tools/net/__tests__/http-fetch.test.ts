@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { httpFetchGuarded } from '../http-fetch.js'
+import { buildPinnedLookup, httpFetchGuarded } from '../http-fetch.js'
+import { SSRFError } from '../ssrf.js'
 
 function publicLookup() {
   return async (hostname: string) => ({ address: '93.184.216.34' })
@@ -85,6 +86,36 @@ describe('httpFetchGuarded', () => {
       }, { maxResponseBytes: 100 }),
       /exceeds maximum allowed size/,
     )
+  })
+
+  it('pins the connection to the validated IP regardless of the hostname asked', () => {
+    // The lookup must return the pre-validated address, not re-resolve the name
+    // — this is what closes the DNS-rebinding window.
+    const lookup = buildPinnedLookup('93.184.216.34', 4)
+    let seen: { address?: string; family?: number } = {}
+    lookup('attacker-controlled.example.com', {}, (err, address, family) => {
+      assert.equal(err, null)
+      seen = { address: address as string, family }
+    })
+    assert.equal(seen.address, '93.184.216.34')
+    assert.equal(seen.family, 4)
+  })
+
+  it('returns the address-list form when the connector asks for all records', () => {
+    const lookup = buildPinnedLookup('2001:4860:4860::8888', 6)
+    let list: { address: string; family: number }[] = []
+    lookup('example.com', { all: true }, (err, addresses) => {
+      assert.equal(err, null)
+      list = addresses as { address: string; family: number }[]
+    })
+    assert.deepEqual(list, [{ address: '2001:4860:4860::8888', family: 6 }])
+  })
+
+  it('refuses to hand a private IP to the socket layer (defence in depth)', () => {
+    const lookup = buildPinnedLookup('10.0.0.1', 4)
+    let captured: unknown
+    lookup('rebind.example.com', {}, (err) => { captured = err })
+    assert.ok(captured instanceof SSRFError)
   })
 
   it('aborts on body read timeout', async () => {
