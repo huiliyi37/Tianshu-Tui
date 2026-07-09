@@ -22,6 +22,16 @@ export function hashLine(line: string): string {
   return createHash('sha256').update(clean).digest('hex').slice(0, 8)
 }
 
+/** Post-write syntax check that never throws — file is already on disk. */
+async function safeSyntaxCheck(filePath: string, content: string): Promise<string> {
+  try {
+    const result = await syntaxCheck(filePath, content)
+    return result ?? ''
+  } catch (e) {
+    return `(syntax-check skipped: ${(e as Error).message})`
+  }
+}
+
 interface Anchor {
   line: number      // 1-based
   hash: string | null  // 8-char hex, or null for position-only mode
@@ -308,7 +318,7 @@ Note: For large new_string, the message history keeps only a short pointer
             await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
             await recordSuccessfulEdit(filePath, params.sessionId)
             resetEditFailCount(filePath)
-            const warn = await syntaxCheck(filePath, newContent)
+            const warn = await safeSyntaxCheck(filePath, newContent)
             const recoveredInfo = recoveredCount > 0
               ? ` (auto-recovered ${recoveredCount} stale anchors)`
               : ''
@@ -350,7 +360,7 @@ Note: For large new_string, the message history keeps only a short pointer
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     await recordSuccessfulEdit(filePath, params.sessionId)
     resetEditFailCount(filePath)
-    const warn = await syntaxCheck(filePath, newContent)
+    const warn = await safeSyntaxCheck(filePath, newContent)
     const posDrift = positionDriftWarning
       ? '\n\n⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
       : ''
