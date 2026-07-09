@@ -352,6 +352,20 @@ export const cacheSchema = z.object({
   showHitRate: z.boolean().default(true),
 })
 
+export const searchSchema = z.object({
+  /** Ordered backend chain for web_search. First available backend with a
+   *  non-empty result wins; the rest are skipped. Unknown names are ignored. */
+  backends: z.array(z.string()).default(['duckduckgo']),
+  /** Env var holding the Brave Search API key (subscription token). */
+  braveApiKeyEnv: z.string().default('BRAVE_API_KEY'),
+  /** Env var holding the Tavily Search API key. */
+  tavilyApiKeyEnv: z.string().default('TAVILY_API_KEY'),
+  /** Per-backend request timeout (ms). */
+  timeoutMs: z.number().int().positive().default(15_000),
+  /** Optional region/country hint passed to backends that support it (Brave). */
+  region: z.string().optional(),
+}).default({})
+
 export const editorSchema = z.object({
   /**
    * Target-OS conventions for file artifacts and the system-prompt OS hint.
@@ -525,6 +539,7 @@ export const configSchema = z.object({
   agent: agentSchema.default({}),
   compact: compactSchema.default({}),
   cache: cacheSchema.default({}),
+  search: searchSchema,
   editor: editorSchema.default({}),
   mcp: mcpConfigSchema.default({}),
   workers: workersSchema,
@@ -544,6 +559,7 @@ export type Config = {
   agent: AgentConfig
   compact: CompactConfig
   cache: CacheConfig
+  search: SearchConfig
   editor: EditorConfig
   mcp: McpConfig
   workers: WorkersConfig
@@ -566,6 +582,7 @@ export type EditorEol = EditorConfig['eol']
 export type AgentConfig = z.infer<typeof agentSchema>
 export type CompactConfig = z.infer<typeof compactSchema>
 export type CacheConfig = z.infer<typeof cacheSchema>
+export type SearchConfig = z.infer<typeof searchSchema>
 export type WorkersConfig = z.infer<typeof workersSchema>
 export type SkillsConfig = z.infer<typeof skillsSchema>
 export type MirrorsConfig = z.infer<typeof mirrorsSchema>

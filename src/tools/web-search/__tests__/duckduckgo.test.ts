@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseDuckDuckGoResults, decodeHtmlEntities } from '../web-search.js'
+import { parseDuckDuckGoResults, decodeHtmlEntities, DuckDuckGoBackend } from '../duckduckgo.js'
 
 // Fixture: real markup captured from html.duckduckgo.com/html/?q=anthropic+claude
 // (2026-06-07). Trimmed to two result blocks. Source of truth for the parser —
@@ -63,5 +63,32 @@ describe('decodeHtmlEntities', () => {
 
   it('leaves unknown / malformed entities untouched', () => {
     assert.equal(decodeHtmlEntities('100% &notreal; &#;'), '100% &notreal; &#;')
+  })
+})
+
+describe('DuckDuckGoBackend', () => {
+  it('is always available (no API key required)', () => {
+    const backend = new DuckDuckGoBackend(async () => new Response(''))
+    assert.equal(backend.isAvailable(), true)
+    assert.equal(backend.name, 'duckduckgo')
+  })
+
+  it('fetches the html endpoint and parses results', async () => {
+    let calledUrl = ''
+    const backend = new DuckDuckGoBackend(async (url) => {
+      calledUrl = url
+      return new Response(DDG_FIXTURE, { status: 200 })
+    })
+    const results = await backend.search('anthropic claude', 10, new AbortController().signal)
+    assert.ok(calledUrl.startsWith('https://html.duckduckgo.com/html/?q='))
+    assert.equal(results.length, 2)
+  })
+
+  it('throws on non-ok HTTP so the chain can fall through', async () => {
+    const backend = new DuckDuckGoBackend(async () => new Response('', { status: 503 }))
+    await assert.rejects(
+      () => backend.search('x', 10, new AbortController().signal),
+      /HTTP 503/,
+    )
   })
 })

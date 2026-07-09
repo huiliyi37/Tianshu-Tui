@@ -184,6 +184,12 @@ export const DEFAULT_CONFIG: Config = {
     minSystemTokens: 256,
     showHitRate: true,
   },
+  search: {
+    backends: ['duckduckgo'],
+    braveApiKeyEnv: 'BRAVE_API_KEY',
+    tavilyApiKeyEnv: 'TAVILY_API_KEY',
+    timeoutMs: 15_000,
+  },
   mcp: {
     enabled: true,
     servers: {},

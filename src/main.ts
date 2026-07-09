@@ -225,10 +225,12 @@ async function main() {
     const cfg = loadConfig()
     setTargetConventions(cfg.editor.platform, cfg.editor.eol)
     applyConfiguredGitBashPath(cfg.env.gitBashPath)
+    const { buildSearchBackends } = await import('./tools/web-search.js')
     const registryOptions = {
       desktopTools: cfg.agent.desktopTools,
       computerUse: (process.platform === 'darwin' || process.platform === 'win32') && process.env.RIVET_COMPUTER_USE !== '0',
       proEnabled: isProFeatureEnabled(cfg, 'computerUse'),
+      searchBackends: buildSearchBackends(cfg),
     }
     const prov = cfg.provider.providers[cfg.provider.default]
     if (!prov) { process.stderr.write('Provider not configured. Run: rivet config setup <provider>\n'); process.exit(1) }

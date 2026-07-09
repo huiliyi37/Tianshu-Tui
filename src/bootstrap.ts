@@ -82,7 +82,7 @@ import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
 import { createRelatedTestsTool } from './tools/related-tests.js'
 import { SEMANTIC_SEARCH_TOOL } from './tools/semantic-search.js'
-import { WEB_SEARCH_TOOL } from './tools/web-search.js'
+import { buildSearchBackends } from './tools/web-search.js'
 import { APPLY_PATCH_TOOL } from './tools/apply-patch.js'
 import { createPlanTaskTool } from './tools/plan-task.js'
 import { createMemoryTool } from './tools/memory.js'
@@ -383,6 +383,8 @@ export function createInteractiveToolRegistry(
     // 过滤），@Computer / /tools enable 挂载时才进主控视野。darwin/win32 + Pro gated。
     computerUse: (process.platform === 'darwin' || process.platform === 'win32') && process.env.RIVET_COMPUTER_USE !== '0',
     proEnabled: isProFeatureEnabled(config, 'computerUse'),
+    // web_search 后端链（DDG 默认 / Brave / Tavily），按 config.search 顺序 fallback。
+    searchBackends: buildSearchBackends(config),
   })
 
   // delegate_task
