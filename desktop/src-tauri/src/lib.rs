@@ -3,7 +3,7 @@ mod pty;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -12,14 +12,14 @@ use std::time::{Duration, Instant};
 use known_folders::{get_known_folder_path, KnownFolder};
 use rand::Rng;
 use serde::Serialize;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
 use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{TrayIconBuilder, TrayIconEvent},
     Manager, State,
 };
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 /// 进程级退出标志。托盘「退出」触发后置 true，退出过程中所有可见性切换
 /// （托盘点击 toggle、CloseRequested→hide）都让它先让路，避免退出清理
@@ -44,6 +44,16 @@ pub struct RuntimeInfo {
     /// The resolved RIVET_HOME passed to the sidecar. Empty string when the
     /// shell could not resolve a data directory.
     pub rivet_home: String,
+    /// Absolute path to the Node binary used to spawn the sidecar.
+    pub node_path: String,
+    /// Absolute path to the rivet runtime entry point (`main.js`).
+    pub entry_path: String,
+    /// When `ready` is false because `Command::spawn` failed, this carries the
+    /// OS error message. Empty otherwise.
+    pub spawn_error: String,
+    /// Absolute path to the sidecar stdout/stderr log file. On a failed start
+    /// this is where the user (and support) can read the actual crash reason.
+    pub log_path: String,
 }
 
 /// Everything needed to (re)spawn the sidecar. Resolved once at setup so the
@@ -68,6 +78,9 @@ struct SidecarLaunchSpec {
     /// is belt-and-suspenders for the inherited case AND the channel through
     /// which shell-harvested keys (macOS/Linux GUI launch) reach the sidecar.
     auth_env: Vec<(String, String)>,
+    /// Absolute path to the sidecar stdout/stderr log file. Created before spawn
+    /// so the path is known even when spawn fails.
+    log_path: PathBuf,
 }
 
 struct Sidecar {
@@ -105,7 +118,9 @@ struct StorageApplyResult {
 
 #[tauri::command]
 fn is_storage_configured(app: tauri::AppHandle) -> bool {
-    launcher_config_path(&app).map(|p| p.exists()).unwrap_or(false)
+    launcher_config_path(&app)
+        .map(|p| p.exists())
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -116,7 +131,12 @@ fn get_storage_options(app: tauri::AppHandle) -> StorageOptions {
         .ok()
         .and_then(|exe| exe.parent().map(PathBuf::from))
         .filter(|p| is_portable_location(p))
-        .map(|p| p.join("TianshuData").join(".rivet").to_string_lossy().to_string());
+        .map(|p| {
+            p.join("TianshuData")
+                .join(".rivet")
+                .to_string_lossy()
+                .to_string()
+        });
     StorageOptions {
         current,
         default_path,
@@ -141,8 +161,7 @@ fn validate_storage_path(path: &Path) -> Result<(), String> {
 
 fn ensure_parent_dir(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("无法创建父目录: {}", e))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("无法创建父目录: {}", e))?;
     }
     Ok(())
 }
@@ -201,11 +220,10 @@ async fn apply_storage_location(
         let new_data = new_home.clone();
         // Run the recursive copy on a blocking thread — session data can
         // be hundreds of MB and must not freeze the UI.
-        let result = tauri::async_runtime::spawn_blocking(move || {
-            copy_dir_all(&old_data, &new_data)
-        })
-        .await
-        .map_err(|e| format!("迁移线程异常: {}", e))?;
+        let result =
+            tauri::async_runtime::spawn_blocking(move || copy_dir_all(&old_data, &new_data))
+                .await
+                .map_err(|e| format!("迁移线程异常: {}", e))?;
         match result {
             Ok(()) => migrated = true,
             Err(e) => {
@@ -393,7 +411,11 @@ fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
     match comps.next() {
         Some(Component::Prefix(pref)) => {
             // `\\?\D:\...` parses as Prefix::VerbatimDisk — reconstruct without the verbatim wrapper.
-            if let Some(disk) = pref.as_os_str().to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+            if let Some(disk) = pref
+                .as_os_str()
+                .to_str()
+                .and_then(|s| s.strip_prefix(r"\\?\"))
+            {
                 let mut rebuilt = PathBuf::from(disk);
                 for c in comps {
                     rebuilt.push(c.as_os_str());
@@ -534,7 +556,9 @@ fn ensure_bundled_git(app: &tauri::App, rivet_home: &Path) -> Option<PathBuf> {
         match status {
             Ok(s) if s.success() => {
                 if !tmp_dir.join("bin").join("bash.exe").exists() {
-                    eprintln!("[rivet] PortableGit extract: bin\\bash.exe missing after extraction");
+                    eprintln!(
+                        "[rivet] PortableGit extract: bin\\bash.exe missing after extraction"
+                    );
                     let _ = std::fs::remove_dir_all(&tmp_dir);
                     return;
                 }
@@ -546,7 +570,9 @@ fn ensure_bundled_git(app: &tauri::App, rivet_home: &Path) -> Option<PathBuf> {
                             cleanup_stale_git_runtimes(root);
                         }
                     }
-                    Err(e) => eprintln!("[rivet] PortableGit extract: rename into place failed: {e}"),
+                    Err(e) => {
+                        eprintln!("[rivet] PortableGit extract: rename into place failed: {e}")
+                    }
                 }
             }
             Ok(s) => eprintln!("[rivet] PortableGit extract failed: {s}"),
@@ -598,7 +624,12 @@ fn detect_system_node() -> String {
     }
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         // nvm-windows symlink target / standalone installs under LocalAppData.
-        candidates.push(Path::new(&local).join("Programs").join("nodejs").join("node.exe"));
+        candidates.push(
+            Path::new(&local)
+                .join("Programs")
+                .join("nodejs")
+                .join("node.exe"),
+        );
         // Volta default shim.
         candidates.push(Path::new(&local).join("Volta").join("bin").join("node.exe"));
     }
@@ -688,8 +719,6 @@ fn sidecar_entry(app: &tauri::App) -> PathBuf {
     dir.pop();
     dir.join("dist").join("main.js")
 }
-
-
 
 /// Verify the port is actually OUR rivet sidecar (correct token), not merely
 /// "something is listening". A bare TCP connect can succeed against an unrelated
@@ -931,6 +960,20 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+    // Persist sidecar stdout/stderr to a log file. In a GUI app these streams
+    // otherwise vanish; the log is the only way to diagnose "spawned but died"
+    // or "never passed /health" failures on Windows. Fail-open: if the log file
+    // cannot be created, spawn without redirection rather than abort startup.
+    if let Ok(log_file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&spec.log_path)
+    {
+        if let Ok(stdout_log) = log_file.try_clone() {
+            cmd.stdout(Stdio::from(stdout_log));
+            cmd.stderr(Stdio::from(log_file));
+        }
+    }
     match cmd.spawn() {
         Ok(c) => Some(c),
         Err(e) => {
@@ -1117,6 +1160,19 @@ fn hydrate_auth_env_from_shell(rivet_home: &std::path::Path) {
     }
 }
 
+/// Build a timestamped sidecar log path under `<rivet_home>/logs/`.
+/// Creates the directory if missing. The timestamp lets each launch write its
+/// own file so a fresh failure isn't appended to a huge historical log.
+fn sidecar_log_path(rivet_home: &Path) -> PathBuf {
+    let logs_dir = rivet_home.join("logs");
+    let _ = std::fs::create_dir_all(&logs_dir);
+    let stamp = OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "unknown".to_string())
+        .replace(':', "-");
+    logs_dir.join(format!("sidecar-{stamp}.log"))
+}
+
 fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunchSpec) {
     let port = pick_free_port();
     let token = random_token();
@@ -1130,24 +1186,34 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
     // exports — hydrate any config-referenced apiKeyEnv vars from the login
     // shell BEFORE resolving auth_env so the snapshot (and the sidecar) get them.
     hydrate_auth_env_from_shell(&rivet_home);
+    let log_path = sidecar_log_path(&rivet_home);
     let spec = SidecarLaunchSpec {
-        node,
-        entry,
+        node: node.clone(),
+        entry: entry.clone(),
         rivet_home: rivet_home.clone(),
         cwd: sidecar_cwd(app),
         port,
         token: token.clone(),
         bundled_git_dir: ensure_bundled_git(app, &rivet_home),
         auth_env: resolve_auth_env(&rivet_home),
+        log_path: log_path.clone(),
     };
 
     let mut child = spawn_from_spec(&spec);
 
     let ready = child.is_some() && wait_until_ready(port, &token, Duration::from_secs(15));
+    let spawn_error = if child.is_none() {
+        format!(
+            "failed to spawn sidecar (node='{}', entry='{}') — see log at {}",
+            node,
+            entry.display(),
+            log_path.display()
+        )
+    } else {
+        String::new()
+    };
     if child.is_some() && !ready {
-        eprintln!(
-            "[rivet] sidecar spawned but did not pass /health on port {port} within timeout"
-        );
+        eprintln!("[rivet] sidecar spawned but did not pass /health on port {port} within timeout");
         // Health never came up: reap the half-dead child so it can't linger
         // holding the port behind a UI that's about to show a fatal error.
         if let Some(mut c) = child.take() {
@@ -1162,6 +1228,10 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
             node_source: node_source.to_string(),
             ready,
             rivet_home: rivet_home.to_string_lossy().to_string(),
+            node_path: node,
+            entry_path: entry.to_string_lossy().to_string(),
+            spawn_error,
+            log_path: log_path.to_string_lossy().to_string(),
         },
         child,
         spec,
@@ -1251,7 +1321,9 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
                 return;
             }
             let exited = {
-                let Ok(mut guard) = state.child.lock() else { continue };
+                let Ok(mut guard) = state.child.lock() else {
+                    continue;
+                };
                 match guard.as_mut() {
                     Some(c) => match c.try_wait() {
                         Ok(Some(_status)) => {
@@ -1273,7 +1345,10 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
             }
             restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
             if restarts.len() >= 3 {
-                eprintln!("[rivet] sidecar crashed {} times within 10min — giving up auto-restart", restarts.len() + 1);
+                eprintln!(
+                    "[rivet] sidecar crashed {} times within 10min — giving up auto-restart",
+                    restarts.len() + 1
+                );
                 // Tell the frontend we stopped trying. Without this the UI keeps
                 // showing the transient "正在重连…" copy forever while nothing is
                 // actually reconnecting — the user needs an explicit "restart the
@@ -1288,11 +1363,8 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
             );
             pending_respawn = true;
             if let Some(mut child) = spawn_from_spec(&respawn_spec(&state.spec)) {
-                let ready = wait_until_ready(
-                    state.spec.port,
-                    &state.spec.token,
-                    Duration::from_secs(15),
-                );
+                let ready =
+                    wait_until_ready(state.spec.port, &state.spec.token, Duration::from_secs(15));
                 if ready {
                     if let Ok(mut guard) = state.child.lock() {
                         *guard = Some(child);
@@ -1418,32 +1490,34 @@ pub fn run() {
                         }
                     }
                 })
-                .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent| {
-                    // 退出过程中忽略托盘点击 toggle，避免与退出清理的 window.hide 打架。
-                    if EXITING.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    // 只在「左键抬起」时切换窗口显隐。之前用 `button: _` 会把右键点击
-                    // 也当成切窗口,而右键此刻正要弹出托盘上下文菜单——切窗口会抢走菜单
-                    // 焦点使其立即关闭,在 Windows 上表现为右键菜单闪来闪去、无法点退出。
-                    // 限定 Left+Up 后,右键完全交给系统弹菜单,不再受干扰。
-                    if let TrayIconEvent::Click {
-                        button: tauri::tray::MouseButton::Left,
-                        button_state: tauri::tray::MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            if w.is_visible().unwrap_or(false) {
-                                let _ = w.hide();
-                            } else {
-                                let _ = w.show();
-                                let _ = w.set_focus();
+                .on_tray_icon_event(
+                    |tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent| {
+                        // 退出过程中忽略托盘点击 toggle，避免与退出清理的 window.hide 打架。
+                        if EXITING.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        // 只在「左键抬起」时切换窗口显隐。之前用 `button: _` 会把右键点击
+                        // 也当成切窗口,而右键此刻正要弹出托盘上下文菜单——切窗口会抢走菜单
+                        // 焦点使其立即关闭,在 Windows 上表现为右键菜单闪来闪去、无法点退出。
+                        // 限定 Left+Up 后,右键完全交给系统弹菜单,不再受干扰。
+                        if let TrayIconEvent::Click {
+                            button: tauri::tray::MouseButton::Left,
+                            button_state: tauri::tray::MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(w) = app.get_webview_window("main") {
+                                if w.is_visible().unwrap_or(false) {
+                                    let _ = w.hide();
+                                } else {
+                                    let _ = w.show();
+                                    let _ = w.set_focus();
+                                }
                             }
                         }
-                    }
-                })
+                    },
+                )
                 .build(app)?;
 
             Ok(())

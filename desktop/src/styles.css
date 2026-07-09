@@ -3622,9 +3622,18 @@ a.mention-link:hover { background: var(--accent-soft); }
   color: var(--text-strong);
   font-weight: var(--weight-semibold);
 }
-.banner { padding: 8px 14px; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: var(--space-2); }
+.banner { padding: 8px 14px; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: var(--space-2); flex-wrap: wrap; }
 .banner.error { background: var(--error-soft); color: var(--error); }
 .banner.warn { background: var(--warning-soft); color: var(--warning); }
+.banner-detail {
+  width: 100%;
+  text-align: center;
+  font-size: 11px;
+  opacity: 0.85;
+  font-family: var(--font-mono);
+  word-break: break-all;
+  padding: 2px 0;
+}
 .banner-action {
   display: inline-flex; align-items: center; padding: 3px 10px;
   background: var(--warning); color: var(--bg); border: none;

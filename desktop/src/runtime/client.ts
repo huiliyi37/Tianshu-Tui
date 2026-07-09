@@ -44,6 +44,14 @@ export interface RuntimeInfo {
   ready?: boolean
   /** Resolved RIVET_HOME passed to the sidecar. Reported by the Rust shell. */
   rivetHome?: string
+  /** Absolute path to the Node binary used to spawn the sidecar. */
+  nodePath?: string
+  /** Absolute path to the rivet runtime entry point (`main.js`). */
+  entryPath?: string
+  /** When `ready` is false because spawn failed, the OS error message. */
+  spawnError?: string
+  /** Absolute path to the sidecar stdout/stderr log file. */
+  logPath?: string
 }
 
 let cached: RuntimeInfo | null = null

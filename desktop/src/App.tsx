@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getRuntimeInfo } from './runtime/client'
+import { getRuntimeInfo, type RuntimeInfo } from './runtime/client'
 import { useHealth, useEnvironment, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
 import { loadKnownProjects, projectId, deriveProjects } from './lib/projects'
@@ -138,6 +138,7 @@ export function App() {
   //   2. only escalate to the fatal banner after a grace window during which the
   //      sidecar is STILL unreachable, so a slow start never flashes "启动失败".
   const [sidecarFailed, setSidecarFailed] = useState(false)
+  const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null)
   const sidecarHealthyRef = useRef(false)
   useEffect(() => {
     if (health.data?.ok) {
@@ -150,7 +151,9 @@ export function App() {
     let timer: ReturnType<typeof setTimeout> | undefined
     getRuntimeInfo()
       .then((info) => {
-        if (cancelled || info.ready !== false) return
+        if (cancelled) return
+        setRuntimeInfo(info)
+        if (info.ready !== false) return
         // Grace window: only mark fatal if the sidecar hasn't answered /health by then.
         timer = setTimeout(() => {
           if (!cancelled && !sidecarHealthyRef.current) setSidecarFailed(true)
@@ -212,6 +215,17 @@ export function App() {
         ) : sidecarFailed && sidecarDown ? (
           <div className="banner error">
             {t('banner.sidecarFailed')}
+            {runtimeInfo?.spawnError && (
+              <span className="banner-detail" title={runtimeInfo.spawnError}>
+                {runtimeInfo.spawnError.slice(0, 120)}
+                {runtimeInfo.spawnError.length > 120 ? '…' : ''}
+              </span>
+            )}
+            {runtimeInfo?.logPath && (
+              <span className="banner-detail" title={runtimeInfo.logPath}>
+                日志: {runtimeInfo.logPath}
+              </span>
+            )}
             <button className="banner-action" onClick={restartApp}>{t('banner.restartApp')}</button>
           </div>
         ) : sidecarDown ? (
