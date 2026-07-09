@@ -6,6 +6,7 @@ import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 
 import { debugLog } from '../utils/debug.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
+import type { WriteProbe } from '../context/write-evidence-probe.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import type { CompactCircuitBreakerState, CompactTier } from '../context/types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
@@ -387,6 +388,8 @@ export interface CompactionControllerDeps {
    * compact client may run a different model than the session primary).
    */
   recordSummaryUsage?: (usage: Partial<Usage>, model: string) => void
+  /** Disk evidence probe for write-tool orphan synthesis during compaction repair. */
+  writeProbe?: WriteProbe
 }
 
 export interface ArchiveHistoryInput {
@@ -941,7 +944,7 @@ export class CompactionController {
     // message list before it is overwritten. This is the single choke point for
     // every compaction path, so one hook covers partial / checkpoint / micro.
     this.maybeBackupTranscript()
-    const preflight = runResumePreflightOai(messages)
+    const preflight = runResumePreflightOai(messages, { writeProbe: this.deps.writeProbe })
     if (preflight.repaired) {
       debugLog(`[compact-preflight] repaired ${preflight.syntheticResultsInserted} orphan tool_call(s)`)
     }

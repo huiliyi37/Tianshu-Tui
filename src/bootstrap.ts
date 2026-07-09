@@ -30,6 +30,7 @@ import { SessionContext } from './agent/context.js'
 import { SessionPersist, evictOldSessions, getSessionDir } from './agent/session-persist.js'
 import { decideStartupSession, RESUME_FRESHNESS_MS } from './agent/session-recovery.js'
 import { runResumePreflightOai } from './context/resume-preflight.js'
+import { createWriteEvidenceProbe } from './context/write-evidence-probe.js'
 import { FileHistory } from './agent/file-history.js'
 import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
@@ -1336,7 +1337,7 @@ export function switchAgentSession(ctx: BootstrapContext, targetId: string): Swi
   }
 
   const rawMsgs = targetPersist.loadOai()
-  const preflight = runResumePreflightOai(rawMsgs)
+  const preflight = runResumePreflightOai(rawMsgs, { writeProbe: createWriteEvidenceProbe(ctx.cwd) })
 
   // 仅换会话身份,保留当前模型。
   let currentModelId: string | undefined

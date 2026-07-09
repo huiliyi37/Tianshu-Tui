@@ -21,6 +21,7 @@ import {
 import { FieldHabituationTracker } from './field-habituation.js'
 import { isSystemReminder } from './system-reminder.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
+import type { WriteProbe } from '../context/write-evidence-probe.js'
 import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
 import { debugLog } from '../utils/debug.js'
 import { skillRegistry } from '../skills/skill-loader.js'
@@ -304,7 +305,7 @@ export class PromptEngine {
     }
   }
 
-  buildOaiRequest(inputMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number, options?: { sidePath?: boolean; onOrphanRepair?: (repairedMessages: OaiMessage[], count: number) => void }): OaiChatRequest {
+  buildOaiRequest(inputMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number, options?: { sidePath?: boolean; onOrphanRepair?: (repairedMessages: OaiMessage[], count: number) => void; writeProbe?: WriteProbe }): OaiChatRequest {
     // Side-path builds (compaction summaries etc.) pass an unrelated message
     // array through the same engine. They must be HERMETIC: any state write
     // here (cachedFreshForUser, frozen snapshots, firstUserKey, volatile swap,
@@ -323,7 +324,7 @@ export class PromptEngine {
     // repair by inserting synthetic tool results before the request is sent.
     // No-op (same array reference) when there are no orphans, so the happy path
     // and prefix cache are untouched.
-    const preflight = runResumePreflightOai(inputMessages)
+    const preflight = runResumePreflightOai(inputMessages, sidePath ? undefined : { writeProbe: options?.writeProbe })
     const oaiMessages = preflight.messages
 
     // P0-orphan-loop: when repair is transient (only in the outgoing request,

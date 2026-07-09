@@ -22,6 +22,7 @@ import { selectReasoningEffort } from './auto-reasoning.js'
 import { SessionPersist } from './session-persist.js'
 import { formatEventsForAppendix, invalidateReadCachesForEvents, renderCrossSessionClaims } from './hooks/cross-session-hook.js'
 import { loadPresence, formatPresenceForAppendix } from './companion-presence.js'
+import { createWriteEvidenceProbe } from '../context/write-evidence-probe.js'
 // staleness/vigor-low advisory entries migrated to CCR hook (cognitive-capsule-router.ts)
 import { classifySeason } from './cognitive-season.js'
 import { renderToolContext, type AffordanceState, adaptAffordanceFromHistory, computeAffordanceScores } from './affordance.js'
@@ -494,6 +495,7 @@ export class TurnStepProducer {
           debugLog(`[orphan-repair] buildOaiRequest repaired ${count} orphan(s) — writing back to session`)
           this.self.session.replaceMessages(repaired)
         },
+        writeProbe: createWriteEvidenceProbe(this.self.cwd),
       },
     )
 

@@ -2,42 +2,36 @@ import type { Message, ContentBlock } from '../api/types.js'
 import type { OaiMessage, OaiToolMessage, OaiAssistantMessage } from '../api/oai-types.js'
 import { groupIntoRounds, computeInvariantStatus, groupIntoRoundsOai } from './rounds.js'
 import type { ResumePreflightReport } from './types.js'
+import {
+  extractTargetPath,
+  formatWriteRecoveryContent,
+  type WriteProbe,
+} from './write-evidence-probe.js'
 
 // ─── orphan diagnostic: RIVET_DEBUG_ORPHAN=1 dumps adjacency-violation details ───
 const DEBUG_ORPHAN = process.env.RIVET_DEBUG_ORPHAN === '1'
 
-/** 写类工具——恢复时应告知模型"可能已成功，不需重试"。 */
-const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'hash_edit', 'apply_patch', 'multi_edit', 'notebook_edit'])
-
-/**
- * Best-effort extraction of the target file path from a tool call's arguments so
- * the recovery hint can name the exact file to verify. Robust to the arg
- * post-processor having collapsed large `content`/`old_string` fields to a
- * pointer — those processors keep `file_path`/`path` intact at the top level.
- * Returns undefined for non-file tools or unparseable args.
- */
-function extractTargetPath(args: unknown): string | undefined {
-  let obj: Record<string, unknown> | undefined
-  if (typeof args === 'string') {
-    try { obj = JSON.parse(args) as Record<string, unknown> } catch { return undefined }
-  } else if (args && typeof args === 'object') {
-    obj = args as Record<string, unknown>
-  }
-  if (!obj) return undefined
-  const p = obj.file_path ?? obj.path ?? obj.notebook_path
-  return typeof p === 'string' && p.length > 0 ? p : undefined
+function syntheticResultContent(
+  toolName?: string,
+  filePath?: string,
+  writeProbe?: WriteProbe,
+  args?: unknown,
+): string {
+  const evidence = toolName && writeProbe && args !== undefined
+    ? writeProbe(toolName, args)
+    : undefined
+  return formatWriteRecoveryContent(toolName, filePath, evidence)
 }
 
-function syntheticResultContent(toolName?: string, filePath?: string): string {
-  if (toolName && WRITE_TOOLS.has(toolName)) {
-    const target = filePath ? `\`${filePath}\`` : '目标文件'
-    return `会话中断导致工具结果丢失——对 ${target} 的写入很可能已经成功执行，文件已保存到磁盘。`
-      + `不要盲目重写：先 read_file ${target} 确认当前内容，若已包含目标改动直接继续下一步；仅当确实缺失时才补写。`
-  }
-  return '会话中断导致工具结果丢失——该工具可能已经成功执行。检查文件/缓冲区状态后再决定是否重试。'
+export interface OaiResumePreflightOptions {
+  /** Optional cwd-scoped disk probe for write-tool orphan synthesis (default on). */
+  writeProbe?: WriteProbe
 }
 
-export function runResumePreflight(messages: Message[]): ResumePreflightReport {
+export function runResumePreflight(
+  messages: Message[],
+  options?: OaiResumePreflightOptions,
+): ResumePreflightReport {
   const rounds = groupIntoRounds(messages)
   const invariant = computeInvariantStatus(rounds)
 
@@ -80,10 +74,11 @@ export function runResumePreflight(messages: Message[]): ResumePreflightReport {
       const toolUse = blocks.find(b => b.type === 'tool_use' && b.id === id)
       const toolName = toolUse?.type === 'tool_use' ? toolUse.name : undefined
       const filePath = toolUse?.type === 'tool_use' ? extractTargetPath(toolUse.input) : undefined
+      const args = toolUse?.type === 'tool_use' ? toolUse.input : undefined
       return {
         type: 'tool_result' as const,
         tool_use_id: id,
-        content: syntheticResultContent(toolName, filePath),
+        content: syntheticResultContent(toolName, filePath, options?.writeProbe, args),
         is_error: false,
       }
     })
@@ -230,7 +225,10 @@ function isToolAdjacencyCleanOai(messages: OaiMessage[]): boolean {
  * (a duplicate or truly orphaned result) is dropped. No-op — same array
  * reference, prefix cache untouched — when adjacency already holds.
  */
-export function runResumePreflightOai(messages: OaiMessage[]): OaiResumePreflightReport {
+export function runResumePreflightOai(
+  messages: OaiMessage[],
+  options?: OaiResumePreflightOptions,
+): OaiResumePreflightReport {
   if (isToolAdjacencyCleanOai(messages)) {
     return {
       messageCount: messages.length,
@@ -269,7 +267,12 @@ export function runResumePreflightOai(messages: OaiMessage[]): OaiResumePrefligh
       } else {
         const toolName = tc.function?.name
         const filePath = extractTargetPath(tc.function?.arguments)
-        repaired.push({ role: 'tool', tool_call_id: tc.id, content: syntheticResultContent(toolName, filePath) })
+        const args = tc.function?.arguments
+        repaired.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: syntheticResultContent(toolName, filePath, options?.writeProbe, args),
+        })
         inserted++
         if (DEBUG_ORPHAN) {
           // eslint-disable-next-line no-console

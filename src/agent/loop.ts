@@ -48,6 +48,7 @@ import { appendMilestone } from '../constellation/store.js'
 import { ArtifactStore } from '../artifact/store.js'
 import { SessionJobs } from '../tools/job-store.js'
 import { COMPACT_HISTORY_TOOL } from '../compact/recall-marker.js'
+import { createWriteEvidenceProbe } from '../context/write-evidence-probe.js'
 import { compactPolicyRatios } from '../compact/constants.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
@@ -736,6 +737,7 @@ export class AgentLoop {
       recordSummaryUsage: (usage, model) => {
         createSidePathUsageRecorder(this)('compact-summary', usage, model)
       },
+      writeProbe: createWriteEvidenceProbe(this.cwd),
     })
     // 在 AgentLoop 构造时立即设置 prefixOverhead，关闭 UI 启动到 maybeCompact 之间的窗口。
     // 否则首次响应前 GlanceBar 显示 ctx 0%、◧ 0/1.0M（数据未接入而非真的 0%）。
