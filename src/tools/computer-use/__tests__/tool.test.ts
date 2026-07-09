@@ -115,6 +115,7 @@ function darwinTool(driver: FakeDriver, granted: string[] = [], sleep?: (ms: num
     // Feedback loop is exercised by its own dedicated tests below; keep the
     // rest of the suite focused on single-action semantics.
     feedback: false,
+    proEnabled: true,
   })
 }
 
@@ -125,6 +126,7 @@ function feedbackTool(driver: FakeDriver) {
     isAppGranted: () => true,
     sleep: async () => {},
     feedback: true,
+    proEnabled: true,
   })
 }
 
@@ -437,11 +439,11 @@ test('secure text field values and secret-looking tokens are masked', async () =
   assert.match(res.content, /AXButton "OK"/, 'benign rows survive')
 })
 
-// ── Platform gating ───────────────────────────────────────────────
+// ── Platform + Pro gating ─────────────────────────────────────────
 
 test('unsupported platform: tool disabled and execute refuses', async () => {
   const driver = new FakeDriver()
-  const tool = createComputerUseTool({ platform: 'linux', driverFactory: () => driver })
+  const tool = createComputerUseTool({ platform: 'linux', driverFactory: () => driver, proEnabled: true })
   assert.equal(tool.isEnabled!(), false)
   const res = await tool.execute(params({ action: 'list_apps' }))
   assert.equal(res.isError, true)
@@ -449,14 +451,14 @@ test('unsupported platform: tool disabled and execute refuses', async () => {
   assert.equal(driver.calls.length, 0)
 })
 
-test('darwin platform: tool enabled by default', () => {
-  const tool = createComputerUseTool({ platform: 'darwin', driverFactory: () => new FakeDriver() })
+test('darwin platform: enabled when Pro gate is true', () => {
+  const tool = createComputerUseTool({ platform: 'darwin', proEnabled: true, driverFactory: () => new FakeDriver() })
   assert.equal(tool.isEnabled!(), true)
 })
 
-test('win32 platform: tool enabled by default and actions execute', async () => {
+test('win32 platform: enabled when Pro gate is true and actions execute', async () => {
   const driver = new FakeDriver()
-  const tool = createComputerUseTool({ platform: 'win32', driverFactory: () => driver, feedback: false })
+  const tool = createComputerUseTool({ platform: 'win32', proEnabled: true, driverFactory: () => driver, feedback: false })
   assert.equal(tool.isEnabled!(), true)
   const list = await tool.execute(params({ action: 'list_apps' }))
   assert.equal(list.isError, undefined)
@@ -468,8 +470,18 @@ test('win32 platform: tool enabled by default and actions execute', async () => 
   assert.deepEqual(driver.calls.map((c) => c.method), ['listApps', 'snapshot', 'click'])
 })
 
-test('enabled override wins over platform default', () => {
-  const tool = createComputerUseTool({ platform: 'darwin', enabled: false, driverFactory: () => new FakeDriver() })
+test('Pro gate disabled: tool is disabled even on supported platform', () => {
+  const tool = createComputerUseTool({ platform: 'darwin', proEnabled: false, driverFactory: () => new FakeDriver() })
+  assert.equal(tool.isEnabled!(), false)
+})
+
+test('Pro gate defaults to false (fail-closed)', () => {
+  const tool = createComputerUseTool({ platform: 'darwin', driverFactory: () => new FakeDriver() })
+  assert.equal(tool.isEnabled!(), false)
+})
+
+test('enabled override wins over platform default but not Pro gate', () => {
+  const tool = createComputerUseTool({ platform: 'darwin', enabled: false, proEnabled: true, driverFactory: () => new FakeDriver() })
   assert.equal(tool.isEnabled!(), false)
 })
 

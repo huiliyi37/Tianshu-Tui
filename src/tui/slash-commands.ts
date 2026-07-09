@@ -58,6 +58,8 @@ import { buildAgentMark, VOID_SYMBOL } from '../agent/void-identity.js'
 import type { TuiApp } from './engine/app.js'
 import type { SlashCommand } from './slash-command-registry.js'
 import type { BootstrapContext } from '../bootstrap.js'
+import type { Config } from '../config/schema.js'
+import { isProFeatureEnabled } from '../config/pro-license.js'
 import { loadConfig, saveConfig } from '../config/manager.js'
 import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
 import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
@@ -154,6 +156,7 @@ export interface MutableRefLike<T> {
 
 export interface SlashHandlerContext {
   parts: string[]
+  config: Config
   agent: AgentLoop
   session: SessionContext
   persist: SessionPersist
@@ -544,6 +547,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         const toolName = parts[2]
         if (!toolName) {
           pushStatic(createLogEntry({ type: 'system', content: 'Usage: /tools enable <tool_name>\nMounts an EXTENDED-layer tool onto the primary agent at this turn boundary.\nAlternatively, use delegate_task to dispatch a worker with that tool (zero cache cost).' }))
+        } else if (toolName.toLowerCase() === 'computer_use' && !isProFeatureEnabled(ctx.config, 'computerUse')) {
+          pushStatic(createLogEntry({ type: 'system', content: 'computer_use is a Pro feature. Enable Pro (config.pro.enabled, RIVET_PRO=1, or ~/.rivet/pro.license) and set config.pro.features.computerUse=true to mount this tool.' }))
         } else {
           const result = ctx.agent.enableTool(toolName)
           switch (result.status) {
@@ -3231,6 +3236,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
 
     return {
       parts,
+      config: ctx.config,
       agent: ctx.agent,
       session: ctx.session,
       persist: ctx.persist,

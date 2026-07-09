@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
 import { loadConstellation } from '../../constellation/store.js'
+import { DEFAULT_CONFIG } from '../../config/default.js'
+import type { Config } from '../../config/schema.js'
 import { distillSkillDraft, persistSkillDraft, listSkillDrafts } from '../../agent/skill-distill.js'
 import type { LogEntry } from '../log-state.js'
 import { makeTestDir, cleanupTestDir } from './_test-tmp.js'
@@ -11,6 +13,7 @@ import { makeTestDir, cleanupTestDir } from './_test-tmp.js'
 function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext {
   return {
     parts: ['/help'],
+    config: DEFAULT_CONFIG as Config,
     agent: {
       getDebugInfo: () => ({
         fingerprint: { systemSha256: 'a'.repeat(64), toolsSha256: 'b'.repeat(64), combinedSha256: 'c'.repeat(64) },

@@ -109,4 +109,21 @@ describe('createDefaultToolRegistry', () => {
       false,
     )
   })
+
+  it('keeps computer_use out of the default registry (Pro + platform gated)', () => {
+    const registry = createDefaultToolRegistry()
+    assert.equal(registry.has('computer_use'), false)
+  })
+
+  it('registers computer_use when computerUse and proEnabled are both true', () => {
+    const registry = createDefaultToolRegistry([], { computerUse: true, proEnabled: true })
+    const tool = registry.getAll().find(t => t.definition.name === 'computer_use')
+    assert.ok(tool, 'computer_use should be registered')
+    assert.equal(tool!.isEnabled!(), true)
+  })
+
+  it('does not register computer_use when proEnabled is false', () => {
+    const registry = createDefaultToolRegistry([], { computerUse: true, proEnabled: false })
+    assert.equal(registry.has('computer_use'), false)
+  })
 })

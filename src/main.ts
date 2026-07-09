@@ -18,6 +18,7 @@ installEpermFilter()
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig, setApprovalMode as persistApprovalDefault } from './config/manager.js'
+import { isProFeatureEnabled } from './config/pro-license.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
@@ -224,6 +225,11 @@ async function main() {
     const cfg = loadConfig()
     setTargetConventions(cfg.editor.platform, cfg.editor.eol)
     applyConfiguredGitBashPath(cfg.env.gitBashPath)
+    const registryOptions = {
+      desktopTools: cfg.agent.desktopTools,
+      computerUse: (process.platform === 'darwin' || process.platform === 'win32') && process.env.RIVET_COMPUTER_USE !== '0',
+      proEnabled: isProFeatureEnabled(cfg, 'computerUse'),
+    }
     const prov = cfg.provider.providers[cfg.provider.default]
     if (!prov) { process.stderr.write('Provider not configured. Run: rivet config setup <provider>\n'); process.exit(1) }
     const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
@@ -246,14 +252,14 @@ async function main() {
     // Load plugins (async, before creating agent — cache discipline: only at session start).
     // Use a pre-filled registry so conflict detection runs against the real built-in tool set,
     // not an empty set. (Wave 1 regression: empty PluginRegistry let every plugin pass.)
-    const pluginRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
+    const pluginRegistry = createDefaultToolRegistry([], registryOptions)
     const pluginResult = await initializePlugins(cfg.plugins, pluginRegistry, process.cwd())
     if (pluginResult.warnings.length > 0) {
       process.stderr.write(`[plugins] ${pluginResult.loaded}/${pluginResult.scanned} loaded; warnings: ${pluginResult.warnings.join('; ')}\n`)
     }
 
     // Extract only the plugin tools (not built-ins) for the real registry.
-    const builtinNames = new Set(createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools }).getAllNames())
+    const builtinNames = new Set(createDefaultToolRegistry([], registryOptions).getAllNames())
     const pluginTools = pluginRegistry.getAll().filter(t => !builtinNames.has(t.definition.name))
 
     const result = await runHeadless({
@@ -261,7 +267,7 @@ async function main() {
       json: parsed.json,
       streamJson: parsed.streamJson,
       createAgent: () => {
-        const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
+        const toolRegistry = createDefaultToolRegistry([], registryOptions)
 
         // Register plugin tools (loaded during startup, already conflict-checked)
         for (const tool of pluginTools) {

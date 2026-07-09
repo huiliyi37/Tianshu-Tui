@@ -218,3 +218,40 @@ describe('config permissions schema', () => {
     }
   })
 })
+
+describe('pro schema', () => {
+  it('DEFAULT_CONFIG keeps Pro disabled and features off for free tier', () => {
+    const parsed = configSchema.parse(DEFAULT_CONFIG)
+
+    assert.equal(parsed.pro.enabled, false)
+    assert.equal(parsed.pro.features.computerUse, false)
+    assert.equal(parsed.pro.features.chatGateway, false)
+  })
+
+  it('schema defaults Pro features to enabled when Pro is active', () => {
+    const parsed = configSchema.parse({
+      ...DEFAULT_CONFIG,
+      pro: { enabled: true },
+    })
+
+    assert.equal(parsed.pro.enabled, true)
+    assert.equal(parsed.pro.features.computerUse, true)
+    assert.equal(parsed.pro.features.chatGateway, true)
+  })
+
+  it('parses explicit Pro opt-in and per-feature overrides', () => {
+    const parsed = configSchema.parse({
+      ...DEFAULT_CONFIG,
+      pro: {
+        enabled: true,
+        licenseKey: 'test-key',
+        features: { computerUse: false, chatGateway: true },
+      },
+    })
+
+    assert.equal(parsed.pro.enabled, true)
+    assert.equal(parsed.pro.licenseKey, 'test-key')
+    assert.equal(parsed.pro.features.computerUse, false)
+    assert.equal(parsed.pro.features.chatGateway, true)
+  })
+})

@@ -500,6 +500,23 @@ export const verifySchema = z.object({
   lint: z.string().optional(),
 }).default({})
 
+export const proSchema = z.object({
+  /** Whether Pro features are active. Can also be enabled via RIVET_PRO=1
+   *  or by placing a non-empty key in ~/.rivet/pro.license. */
+  enabled: z.boolean().default(false),
+  /** Optional license key (opaque string). The runtime does not validate
+   *  signatures; online seat/validation is handled by a licensing service. */
+  licenseKey: z.string().optional(),
+  /** Per-feature Pro gates. When Pro is active, features default to enabled
+   *  unless explicitly set to false here. */
+  features: z.object({
+    computerUse: z.boolean().default(true),
+    chatGateway: z.boolean().default(true),
+  }).default({}),
+}).default({})
+
+export type ProConfig = z.infer<typeof proSchema>
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -516,6 +533,7 @@ export const configSchema = z.object({
   env: envSchema,
   ui: uiSchema,
   verify: verifySchema,
+  pro: proSchema,
   plugins: z.object({
     enabled: z.record(z.boolean()).default({}),
   }).default({}),
@@ -534,6 +552,7 @@ export type Config = {
   env: EnvConfig
   ui: UiConfig
   verify: VerifyConfig
+  pro: ProConfig
   plugins: { enabled: Record<string, boolean> }
 }
 

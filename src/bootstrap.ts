@@ -21,6 +21,7 @@ import type { BaselineSnapshot } from './agent/worktree-baseline.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 
 import { loadConfig as loadLayeredConfig } from './config/manager.js'
+import { isProFeatureEnabled } from './config/pro-license.js'
 import { lastSessionPointerDir, rivetHome, stateDir } from './config/paths.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from './platform.js'
 import { AgentLoop } from './agent/loop.js'
@@ -379,8 +380,9 @@ export function createInteractiveToolRegistry(
     desktopTools: config.agent.desktopTools,
     todoStore: refs.todoStore,
     // Computer Use（桌面 GUI 自动化）：EXTENDED 层，注册≠主控可见（tool gating
-    // 过滤），@Computer / /tools enable 挂载时才进主控视野。darwin/win32 gated。
+    // 过滤），@Computer / /tools enable 挂载时才进主控视野。darwin/win32 + Pro gated。
     computerUse: (process.platform === 'darwin' || process.platform === 'win32') && process.env.RIVET_COMPUTER_USE !== '0',
+    proEnabled: isProFeatureEnabled(config, 'computerUse'),
   })
 
   // delegate_task

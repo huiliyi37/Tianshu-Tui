@@ -227,5 +227,12 @@ export const DEFAULT_CONFIG: Config = {
   ui: {},
   // 项目验证命令声明 — 默认空，由项目层 .rivet-config.json 覆盖（/init 生成）
   verify: {},
+  pro: {
+    enabled: false,
+    features: {
+      computerUse: false,
+      chatGateway: false,
+    },
+  },
   plugins: { enabled: {} },
 }

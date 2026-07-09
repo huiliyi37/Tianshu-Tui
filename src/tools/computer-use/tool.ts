@@ -66,6 +66,9 @@ export interface ComputerUseToolOptions {
   driverFactory?: ComputerUseDriverFactory
   /** Whether the tool is registered/visible. Defaults to darwin/win32 only. */
   enabled?: boolean
+  /** Pro feature gate: when false, the tool is disabled regardless of platform.
+   *  Defaults to false; bootstrap sets it from config.pro.features.computerUse. */
+  proEnabled?: boolean
   /** App grant lookup (injectable for tests). Defaults to persisted grants. */
   isAppGranted?: (app: string) => boolean
   /** Platform override (tests). Defaults to process.platform. */
@@ -139,7 +142,8 @@ const SNAPSHOT_CACHE_CAP = 20
 export function createComputerUseTool(options: ComputerUseToolOptions = {}): Tool {
   const platform = options.platform ?? process.platform
   const isSupported = isComputerUsePlatform(platform)
-  const enabled = options.enabled ?? isSupported
+  const proEnabled = options.proEnabled ?? false
+  const enabled = (options.enabled ?? isSupported) && proEnabled
   const driverFactory = options.driverFactory ?? (() => createPlatformDriver(platform))
   const grantLookup = options.isAppGranted ?? ((app: string) => isAppGranted(app))
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
