@@ -2,7 +2,7 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
-import { HASH_EDIT_TOOL } from '../hash-edit.js'
+import { HASH_EDIT_TOOL, __safeSyntaxCheckForTests as safeSyntaxCheck } from '../hash-edit.js'
 import { markSessionFileEdit, wasFileEditedBySession, __resetSessionFileEditsForTests } from '../read-file.js'
 import type { ToolCallParams } from '../types.js'
 
@@ -386,5 +386,19 @@ describe('hash_edit', () => {
     // 文件未被修改（全部可恢复才应用编辑）
     const newContent = readFileSync(join(cwd, 'test.ts'), 'utf-8')
     assert.equal(newContent, 'alpha\nCHANGED\ngamma\ndelta\n')
+  })
+})
+
+
+describe('safeSyntaxCheck — syntaxCheck failure is non-fatal', () => {
+  it('passes through a clean result', async () => {
+    const result = await safeSyntaxCheck('/cwd/file.ts', 'content', async () => null)
+    assert.equal(result, null)
+  })
+
+  it('returns a skip note when the checker throws', async () => {
+    const result = await safeSyntaxCheck('/cwd/file.tsx', 'content', async () => { throw new Error('esbuild exploded') })
+    assert.ok(result?.includes('syntax-check skipped'), 'should surface skip note')
+    assert.ok(result?.includes('esbuild exploded'), 'should include original error message')
   })
 })

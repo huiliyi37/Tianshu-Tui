@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync, statSync } from 'fs'
 
 import { join } from 'path'
-import { EDIT_FILE_TOOL } from '../edit.js'
+import { EDIT_FILE_TOOL, __buildEditSuccessResultForTests as buildEditSuccessResult } from '../edit.js'
 import type { ToolCallParams } from '../types.js'
 
 // Use a directory inside the project tree so validatePath() doesn't reject
@@ -357,3 +357,59 @@ describe('edit_file tool', () => {
   })
 })
 
+
+describe('buildEditSuccessResult — post-write enhancement failures are non-fatal', () => {
+  it('surfaces syntax-check failure as a warning, not an error', async () => {
+    const result = await buildEditSuccessResult(
+      '/cwd',
+      '/cwd/file.tsx',
+      'before',
+      'after',
+      'Applied edit',
+      {
+        syntaxCheck: async () => { throw new Error('esbuild exploded') },
+        buildFileDiff: async () => '',
+        computeChangedLineRanges: async () => [],
+      },
+    )
+    assert.ok(result.uiContent?.includes('syntax-check skipped'), 'uiContent should surface skip note')
+    assert.ok(result.content.includes('syntax-check skipped'), 'should surface skip note')
+    assert.ok(result.content.includes('esbuild exploded'), 'should include original error message')
+  })
+
+  it('surfaces diff failure as a warning while keeping syntax warning', async () => {
+    const result = await buildEditSuccessResult(
+      '/cwd',
+      '/cwd/file.tsx',
+      'before',
+      'after',
+      'Applied edit',
+      {
+        syntaxCheck: async () => '⚠️ Syntax error',
+        buildFileDiff: async () => { throw new Error('diff worker died') },
+        computeChangedLineRanges: async () => { throw new Error('ranges worker died') },
+      },
+    )
+    assert.ok(result.content.includes('diff skipped'), 'should surface diff skip note')
+    assert.ok(result.content.includes('Syntax error'), 'should keep syntax warning')
+    assert.ok(result.uiContent?.includes('Syntax error'), 'uiContent should show available warning')
+  })
+
+  it('keeps success result unchanged when enhancements pass', async () => {
+    const result = await buildEditSuccessResult(
+      '/cwd',
+      '/cwd/file.tsx',
+      'before',
+      'after',
+      'Applied edit',
+      {
+        syntaxCheck: async () => null,
+        buildFileDiff: async () => '@@ -1 +1 @@\n-before\n+after',
+        computeChangedLineRanges: async () => [{ start: 1, end: 1 }],
+      },
+    )
+    assert.equal(result.content, 'Applied edit')
+    assert.ok(result.uiContent?.includes('@@'), 'uiContent has diff')
+    assert.deepEqual(result.changedRanges, [{ start: 1, end: 1 }])
+  })
+})

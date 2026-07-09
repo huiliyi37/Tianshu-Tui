@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { relative } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
-import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
+import { buildFileDiff, computeChangedLineRanges, type LineRange } from './edit-diff.js'
 import { hashLine } from './hash-edit.js'
 import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession, incrementEditFailCount, resetEditFailCount } from './read-file.js'
 import { syntaxCheck } from './syntax-check.js'
@@ -45,6 +45,61 @@ function detectRegexPattern(oldString: string): string | null {
   }
   return null
 }
+
+/**
+ * Assemble the final ToolResult for a successful edit.
+ *
+ * Post-write enhancements (syntax-check, diff, changed-ranges) are
+ * display-only / diagnostics-narrowing. Failures here MUST NOT cause the tool
+ * call to report an error — the file is already on disk and an error would
+ * create a "write succeeded but tool reports failure" loop.
+ */
+interface EditSuccessDeps {
+  syntaxCheck?: (filePath: string, content: string) => Promise<string | null>
+  buildFileDiff?: (relPath: string, before: string, after: string) => Promise<string>
+  computeChangedLineRanges?: (before: string, after: string) => Promise<LineRange[]>
+}
+
+async function buildEditSuccessResult(
+  cwd: string,
+  filePath: string,
+  before: string,
+  after: string,
+  baseContent: string,
+  deps?: EditSuccessDeps,
+): Promise<{ content: string; uiContent?: string; changedRanges: LineRange[] }> {
+  const doSyntaxCheck = deps?.syntaxCheck ?? syntaxCheck
+  const doBuildFileDiff = deps?.buildFileDiff ?? buildFileDiff
+  const doComputeChangedLineRanges = deps?.computeChangedLineRanges ?? computeChangedLineRanges
+
+  let warn: string | null = null
+  let uiContent: string | undefined
+  let changedRanges: LineRange[] = []
+
+  try {
+    warn = await doSyntaxCheck(filePath, after)
+  } catch (e) {
+    warn = `(syntax-check skipped: ${(e as Error).message})`
+  }
+
+  try {
+    const diff = await doBuildFileDiff(relative(cwd, filePath), before, after)
+    changedRanges = await doComputeChangedLineRanges(before, after)
+    uiContent = diff ? (warn ? `${diff}\n\n${warn}` : diff) : (warn ? warn : undefined)
+  } catch (e) {
+    const note = `(diff skipped: ${(e as Error).message})`
+    warn = warn ? `${warn}\n${note}` : note
+    uiContent = warn ? warn : undefined
+  }
+
+  return {
+    content: baseContent + (warn ? '\n\n' + warn : ''),
+    uiContent,
+    changedRanges,
+  }
+}
+
+export const __buildEditSuccessResultForTests = buildEditSuccessResult
 
 
 export const EDIT_FILE_TOOL: Tool = {
@@ -151,17 +206,14 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
             const newContent = freshContent.replaceAll(oldString, newString)
             await writeFileAtomicAsync(filePath, applyEol(newContent, freshEol))
             await recordSuccessfulEdit(filePath, params.sessionId)
-          resetEditFailCount(filePath)
+            resetEditFailCount(filePath)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const expectedCount = params.input.expected_count as number | undefined
-            const warn = await syntaxCheck(filePath, newContent)
-            const ui = await editUiContent(params.cwd, filePath, freshContent, newContent, warn)
-            const changedRanges = await computeChangedLineRanges(freshContent, newContent)
-            if (expectedCount !== undefined && occurrences !== expectedCount) {
-              const base = `File was modified externally but old_string still matched. Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. Use grep to verify no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
-              return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
-            }
-            return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}`, uiContent: ui, changedRanges }
+            const baseContent = expectedCount !== undefined && occurrences !== expectedCount
+              ? `File was modified externally but old_string still matched. Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. Use grep to verify no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
+              : `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}`
+            const { content: resultContent, uiContent, changedRanges } = await buildEditSuccessResult(params.cwd, filePath, freshContent, newContent, baseContent)
+            return { content: resultContent, uiContent, changedRanges }
           }
           const firstIdx = freshContent.indexOf(oldString)
           const secondIdx = freshContent.indexOf(oldString, firstIdx + oldString.length)
@@ -172,12 +224,11 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           await writeFileAtomicAsync(filePath, applyEol(recovered, freshEol))
           await recordSuccessfulEdit(filePath, params.sessionId)
           resetEditFailCount(filePath)
-          const warn = await syntaxCheck(filePath, recovered)
-          return {
-            content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}`,
-            uiContent: await editUiContent(params.cwd, filePath, freshContent, recovered, warn),
-            changedRanges: await computeChangedLineRanges(freshContent, recovered),
-          }
+          const { content: resultContent, uiContent, changedRanges } = await buildEditSuccessResult(
+            params.cwd, filePath, freshContent, recovered,
+            `Applied edit to ${filePath} (file was modified externally but content still matched)`
+          )
+          return { content: resultContent, uiContent, changedRanges }
         }
 
         // old_string not found — show what the file actually looks like near the best guess
@@ -257,14 +308,11 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       resetEditFailCount(filePath)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
-      const warn = await syntaxCheck(filePath, newContent)
-      const ui = await editUiContent(params.cwd, filePath, content, newContent, warn)
-      const changedRanges = await computeChangedLineRanges(content, newContent)
-      if (expectedCount !== undefined && occurrences !== expectedCount) {
-        const base = `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
-        return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
-      }
-      return { content: `Replaced all ${occurrences} occurrences in ${filePath}` + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
+      const baseContent = expectedCount !== undefined && occurrences !== expectedCount
+        ? `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
+        : `Replaced all ${occurrences} occurrences in ${filePath}`
+      const { content: resultContent, uiContent, changedRanges } = await buildEditSuccessResult(params.cwd, filePath, content, newContent, baseContent)
+      return { content: resultContent, uiContent, changedRanges }
     }
 
     const firstIndex = content.indexOf(oldString)
@@ -278,7 +326,6 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         await writeFileAtomicAsync(filePath, applyEol(recovered, eol))
         await recordSuccessfulEdit(filePath, params.sessionId)
         resetEditFailCount(filePath)
-        const warn = await syntaxCheck(filePath, recovered)
         // Surface the whitespace drift so the model can self-correct in
         // subsequent edits — without this, error accumulates across calls.
         const diff = diffBlock(oldString, fuzzy.matchedText)
@@ -287,11 +334,8 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           `[fuzzy] your old_string had whitespace/indentation drift from the file:`,
           `[fuzzy] diff:\n${diff}`,
         ].join('\n')
-        return {
-          content: fuzzyReport + (warn ? '\n\n' + warn : ''),
-          uiContent: await editUiContent(params.cwd, filePath, content, recovered, warn),
-          changedRanges: await computeChangedLineRanges(content, recovered),
-        }
+        const { content: resultContent, uiContent, changedRanges } = await buildEditSuccessResult(params.cwd, filePath, content, recovered, fuzzyReport)
+        return { content: resultContent, uiContent, changedRanges }
       }
       const fails = incrementEditFailCount(filePath)
       const gatePrefix = fails >= 3 ? `After ${fails} consecutive edit failures on this file, you MUST re-read it before editing again.\n\n` : ''
@@ -311,12 +355,10 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     await recordSuccessfulEdit(filePath, params.sessionId)
     resetEditFailCount(filePath)
-    const warn = await syntaxCheck(filePath, newContent)
-    return {
-      content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : ''),
-      uiContent: await editUiContent(params.cwd, filePath, content, newContent, warn),
-      changedRanges: await computeChangedLineRanges(content, newContent),
-    }
+    const { content: resultContent, uiContent, changedRanges } = await buildEditSuccessResult(
+      params.cwd, filePath, content, newContent, `Applied edit to ${filePath}`
+    )
+    return { content: resultContent, uiContent, changedRanges }
   },
 
   requiresApproval: () => true,
@@ -326,18 +368,6 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-/**
- * Assemble the display-only uiContent for a successful edit: a colored inline
- * diff (rendered by the TUI/desktop tool card) plus any syntax-check warning.
- * Returns undefined when there is nothing extra to show (card falls back to
- * the model-facing `content`).
- */
-async function editUiContent(cwd: string, filePath: string, before: string, after: string, warn: string | null): Promise<string | undefined> {
-  const diff = await buildFileDiff(relative(cwd, filePath), before, after)
-  if (!diff) return warn ? warn : undefined
-  return warn ? `${diff}\n\n${warn}` : diff
 }
 
 /**

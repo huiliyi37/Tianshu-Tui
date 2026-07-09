@@ -34,6 +34,16 @@ function getEsbuild(): EsbuildModule | null {
 /** Files larger than this skip CSS/HTML/JSON branch checks (O(n) scans). */
 const SYNC_SCAN_SIZE_LIMIT = 2 * 1024 * 1024 // 2 MB
 
+/** Cap esbuild transform so a malformed/huge TSX file cannot hang the tool. */
+const TRANSFORM_TIMEOUT_MS = 5000
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms)),
+  ])
+}
+
 /**
  * Language-agnostic syntax and structural integrity check for written files.
  *
@@ -64,7 +74,11 @@ export async function syntaxCheck(filePath: string, content: string): Promise<st
       // Prefer async transform — esbuild runs on its own worker, doesn't block
       // the main thread. Falls back to sync for ancient esbuild versions.
       if (esbuild.transform) {
-        await esbuild.transform(content, { loader, target: 'esnext', jsx: 'automatic' })
+        await withTimeout(
+          esbuild.transform(content, { loader, target: 'esnext', jsx: 'automatic' }),
+          TRANSFORM_TIMEOUT_MS,
+          'esbuild transform',
+        )
       } else {
         esbuild.transformSync(content, { loader, target: 'esnext', jsx: 'automatic' })
       }
