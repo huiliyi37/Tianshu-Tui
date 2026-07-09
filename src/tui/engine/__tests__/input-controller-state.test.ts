@@ -63,8 +63,8 @@ test('idle 空输入 Esc → 清空已有输入', async () => {
   await tick()
 
   stdin.dataHandler!('\x1B')
-  // lone ESC 有延迟（区分方向键序列）
-  await new Promise(r => setTimeout(r, 60))
+  // lone ESC 有延迟（区分方向键序列），默认超时 80ms，等待 100ms 确保已派发。
+  await new Promise(r => setTimeout(r, 100))
   assert.equal(app.getInputValue(), '', 'Esc 应清空有内容的输入框')
 })
 

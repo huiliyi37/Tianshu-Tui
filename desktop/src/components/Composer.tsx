@@ -121,6 +121,10 @@ export function Composer(props: {
   commands?: ComposerCommand[]
   planMode?: PlanModeState
   onSetPlanMode?: (state: PlanModeState) => void
+  /** PlusMenu — current reasoning effort level (off/low/medium/high/max/auto). */
+  effort?: string
+  /** PlusMenu — switch the session's reasoning effort level. */
+  onSetEffort?: (effort: string) => void
   /** PlusMenu — open the "派子代理" dispatch dialog. */
   onDelegate?: () => void
   /** PlusMenu — send a workflow slash command (/council, /team). */
@@ -141,7 +145,7 @@ export function Composer(props: {
   onHistoryNext?: () => void
   activeDomainAccent?: string
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, effort, onSetEffort, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
   const { t } = useTranslation('composer')
   const planning = planMode === 'planning'
 
@@ -740,6 +744,8 @@ export function Composer(props: {
             sessionRunning={busy}
             planMode={planMode}
             onSetPlanMode={onSetPlanMode}
+            effort={effort}
+            onSetEffort={onSetEffort}
             onPickImage={() => fileInputRef.current?.click()}
             imageDisabled={images.length >= MAX_IMAGES}
             commands={commands}

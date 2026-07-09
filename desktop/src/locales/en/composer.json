@@ -73,6 +73,25 @@
     "connect": "Connect model providers",
     "connectDesc": "Set keys / add providers",
     "domainLabel": "Star Domain",
+    "effortLabel": "Reasoning Effort",
+    "effortTitle": "Choose Reasoning Effort",
+    "effortEmpty": "No effort levels available",
+    "effort": {
+      "off": "Off",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "max": "Max",
+      "auto": "Auto"
+    },
+    "effortDesc": {
+      "off": "No extra reasoning",
+      "low": "Quick answers for simple questions",
+      "medium": "Default for routine tasks",
+      "high": "Complex bugs and feature work",
+      "max": "Architecture and deep analysis",
+      "auto": "Choose automatically by prompt complexity"
+    },
     "commandsTitle": "Commands",
     "modelsEmpty": "No models available",
     "domainsEmpty": "No domains found",

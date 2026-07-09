@@ -1171,6 +1171,8 @@ export function ThreadView(props: {
             commands={commands}
             planMode={view.planMode}
             onSetPlanMode={onSetPlanMode}
+            effort={session.reasoningEffort}
+            onSetEffort={onSetEffort}
             onDelegate={() => setShowDelegateDialog(true)}
             onWorkflow={(cmd) => {
               // 带上引导 prompt——让 agent 进入对应工作流模式并询问用户具体目标。

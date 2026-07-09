@@ -32,9 +32,12 @@ import { CheckIcon } from 'lucide-react'
 import { useUiDispatch } from '../state/store'
 
 // Cursor 3.0-style "+" menu. Root DropdownMenu consolidates mode / image / slash
-// commands; Models / Skills / 星域 / MCP open a Command-dialog sub-panel
+// commands; Models / Skills / 星域 / MCP / Effort open a Command-dialog sub-panel
 // (searchable list, current item checked, keyboard nav, live SSE re-fetch).
-type Panel = 'models' | 'skills' | 'domain' | 'mcp' | 'commands'
+type Panel = 'models' | 'skills' | 'domain' | 'mcp' | 'commands' | 'effort'
+
+/** Available reasoning effort levels, ordered from least to most reasoning. */
+const EFFORT_LEVELS = ['off', 'low', 'medium', 'high', 'max', 'auto'] as const
 
 /** A normalized list row shared by all selectable sub-panels. */
 interface Row {
@@ -52,6 +55,9 @@ export function PlusMenu(props: {
   sessionRunning?: boolean
   planMode?: PlanModeState
   onSetPlanMode?: (state: PlanModeState) => void
+  /** Current reasoning effort level (off/low/medium/high/max/auto). */
+  effort?: string
+  onSetEffort?: (effort: string) => void
   onPickImage: () => void
   imageDisabled?: boolean
   commands?: ComposerCommand[]
@@ -67,7 +73,7 @@ export function PlusMenu(props: {
   threadNonEmpty?: boolean
 }) {
   const {
-    sessionId, menuRev, sessionRunning, planMode, onSetPlanMode,
+    sessionId, menuRev, sessionRunning, planMode, onSetPlanMode, effort, onSetEffort,
     onPickImage, imageDisabled, commands, onRunCommand, onDelegate, onWorkflow, onClose,
     open, onOpenChange, threadNonEmpty,
   } = props
@@ -160,6 +166,7 @@ export function PlusMenu(props: {
             { glyph: '◇', label: 'Models', panel: 'models' as const },
             { glyph: '✦', label: 'Skills', panel: 'skills' as const },
             { glyph: '✶', label: t('plusMenu.domainLabel'), panel: 'domain' as const },
+            { glyph: '⚡', label: t('plusMenu.effortLabel'), panel: 'effort' as const },
             { glyph: '⚙', label: 'MCP Servers', panel: 'mcp' as const },
           ]).map((it) => (
             <DropdownMenuItem key={it.label} onClick={() => openSub(it.panel)}>
@@ -210,6 +217,23 @@ export function PlusMenu(props: {
           })}
           apply={async (id, row) => { await setDomain(id, row.key) }}
           warning={threadNonEmpty ? `⚠ ${t('domainCacheWarning')}` : undefined}
+        />
+      )}
+      {panel === 'effort' && onSetEffort && (
+        <PickerPanel
+          title={t('plusMenu.effortTitle')}
+          sessionId={sessionId}
+          menuRev={menuRev}
+          mode="single"
+          emptyHint={t('plusMenu.effortEmpty')}
+          onClose={closeSub}
+          load={async () => EFFORT_LEVELS.map<Row>((level) => ({
+            key: level,
+            label: t(`plusMenu.effort.${level}`),
+            desc: t(`plusMenu.effortDesc.${level}`),
+            active: effort === level,
+          }))}
+          apply={async (_id, row) => { onSetEffort(row.key) }}
         />
       )}
       {panel === 'skills' && (

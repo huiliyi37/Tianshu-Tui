@@ -73,6 +73,25 @@
     "connect": "连接模型服务商",
     "connectDesc": "配 Key / 加服务商",
     "domainLabel": "星域 Domain",
+    "effortLabel": "推理强度 Effort",
+    "effortTitle": "选择推理强度",
+    "effortEmpty": "无可用档位",
+    "effort": {
+      "off": "关闭",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "max": "最高",
+      "auto": "自动"
+    },
+    "effortDesc": {
+      "off": "不额外触发推理",
+      "low": "简单问题快速回答",
+      "medium": "常规任务默认档",
+      "high": "复杂 bug / 功能实现",
+      "max": "架构设计 / 深度分析",
+      "auto": "按输入复杂度自动选择"
+    },
     "commandsTitle": "命令 Commands",
     "modelsEmpty": "未发现可用模型",
     "domainsEmpty": "未发现星域",

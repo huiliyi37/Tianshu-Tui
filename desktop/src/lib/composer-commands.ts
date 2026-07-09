@@ -48,7 +48,7 @@ export function detectSlash(text: string, caret: number): SlashToken | null {
 /** Available reasoning effort levels in cycle order. */
 export const EFFORT_LEVELS = ['off', 'low', 'medium', 'high', 'max', 'auto'] as const
 
-/** Return the next effort level in the cycle. Unknown/falsy values start at 'low'. */
+/** Return the next effort level in the cycle. Unknown/falsy values start at 'off'. */
 export function nextEffortLevel(current?: string): string {
   const idx = current ? EFFORT_LEVELS.indexOf(current as typeof EFFORT_LEVELS[number]) : -1
   return EFFORT_LEVELS[(idx + 1) % EFFORT_LEVELS.length]!
