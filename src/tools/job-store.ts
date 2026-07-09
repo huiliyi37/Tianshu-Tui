@@ -18,6 +18,16 @@ const RING_CAP = 64_000
 /** Minimum interval between throttled `output` events (ms). */
 const OUTPUT_THROTTLE_MS = 500
 
+/** Absolute wall-clock cap on a background job's lifetime (ms). 0/unset = unlimited.
+ *  Off by default: background jobs are intentionally long-lived (dev servers,
+ *  watchers), so a blanket timeout would kill legitimate work. Eval/CI harnesses
+ *  set RIVET_JOB_MAX_MS to reap runaway/orphaned jobs that never exit and would
+ *  otherwise hold ports/resources until session close. */
+export function jobMaxLifetimeMs(): number {
+  const v = Number.parseInt(process.env.RIVET_JOB_MAX_MS ?? '', 10)
+  return Number.isFinite(v) && v > 0 ? v : 0
+}
+
 export type JobStatus = 'running' | 'exited' | 'killed'
 
 /** Serializable snapshot of a background job — safe to send over SSE / REST. */
@@ -48,6 +58,9 @@ export interface JobSpawnOptions {
   cwd: string
   /** Fully-prepared child environment (sanitized + mirror overlay by caller). */
   env: Record<string, string | undefined>
+  /** Absolute wall-clock cap before the job is auto-killed (SIGTERM→SIGKILL).
+   *  Omitted → falls back to RIVET_JOB_MAX_MS (0 = unlimited). */
+  maxLifetimeMs?: number
 }
 
 export interface JobAwaitOptions {
@@ -84,6 +97,7 @@ class BackgroundJob {
   private pid?: number
   private logStream: WriteStream | null = null
   private killTimer: ReturnType<typeof setTimeout> | null = null
+  private lifetimeTimer: ReturnType<typeof setTimeout> | null = null
   private waiters: Waiter[] = []
   private readonly decoderOut = new WinStreamDecoder()
   private readonly decoderErr = new WinStreamDecoder()
@@ -136,6 +150,13 @@ class BackgroundJob {
     this.child = child
     this.pid = child.pid
 
+    // Absolute lifetime cap (opt-in): reap a job that never exits on its own.
+    const maxMs = this.opts.maxLifetimeMs ?? jobMaxLifetimeMs()
+    if (maxMs > 0) {
+      this.lifetimeTimer = setTimeout(() => this.onLifetimeExceeded(maxMs), maxMs)
+      if (typeof this.lifetimeTimer.unref === 'function') this.lifetimeTimer.unref()
+    }
+
     child.stdout?.on('data', (d: Buffer) => this.onData(this.decoderOut.write(d)))
     child.stderr?.on('data', (d: Buffer) => this.onData(this.decoderErr.write(d)))
     child.on('close', (code) => this.onExit(code ?? 1))
@@ -181,8 +202,19 @@ class BackgroundJob {
     this.emit({ kind: 'output', job: this.snapshot(), chunk })
   }
 
+  /** Fired when the job outlives its configured wall-clock cap: note the reason
+   *  (so logs/await surface it) then terminate via the normal SIGTERM→SIGKILL path. */
+  private onLifetimeExceeded(maxMs: number): void {
+    this.lifetimeTimer = null
+    if (this.status !== 'running') return
+    const secs = Math.round(maxMs / 1000)
+    this.onData(`\n[job killed] exceeded max lifetime (${secs}s) — auto-terminated\n`)
+    this.kill()
+  }
+
   private onExit(code: number): void {
     if (this.killTimer) { clearTimeout(this.killTimer); this.killTimer = null }
+    if (this.lifetimeTimer) { clearTimeout(this.lifetimeTimer); this.lifetimeTimer = null }
     if (this.status !== 'running') {
       // Already killed — keep the killed status but record the code/time.
       this.exitCode = code
@@ -231,6 +263,7 @@ class BackgroundJob {
 
   kill(): void {
     if (this.status !== 'running' || !this.child) return
+    if (this.lifetimeTimer) { clearTimeout(this.lifetimeTimer); this.lifetimeTimer = null }
     this.status = 'killed'
     killProcessTree(this.child, 'SIGTERM')
     const child = this.child

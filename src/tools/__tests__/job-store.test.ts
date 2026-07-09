@@ -82,6 +82,28 @@ describe('SessionJobs', () => {
     assert.equal(res!.job.status, 'killed')
   })
 
+  it('auto-kills a job that exceeds its max lifetime', async () => {
+    const snap = store.spawn({
+      command: "sh -c 'sleep 30'",
+      rawCommand: 'sleep 30',
+      cwd: dir,
+      env,
+      maxLifetimeMs: 150,
+    })
+    const res = await store.await(snap.id, { timeoutMs: 5000 })
+    assert.ok(res)
+    assert.equal(res!.job.status, 'killed')
+    assert.match(res!.tail, /exceeded max lifetime/)
+  })
+
+  it('does not cap lifetime when maxLifetimeMs is absent', async () => {
+    const snap = store.spawn({ command: "sh -c 'sleep 1'", rawCommand: 'sleep 1', cwd: dir, env })
+    // No lifetime cap → the job runs to natural completion (exit, not killed).
+    const res = await store.await(snap.id, { timeoutMs: 5000 })
+    assert.ok(res)
+    assert.equal(res!.job.status, 'exited')
+  })
+
   it('await on an unknown job id returns null', async () => {
     const res = await store.await('does-not-exist', { timeoutMs: 10 })
     assert.equal(res, null)

@@ -52,7 +52,17 @@
   `import-resource.test.ts` 的 `isSafeGitRef` 用例、
   `edit-failure-recovery-hook.test.ts`。
 
-## 未纳入（低优 / 后续）
+## 收尾优化（同批补齐）
 
-- bash 后台 job 进程级生命周期超时（`job-store.ts`）。
-- 清理 `multi_edit`/`notebook_edit` 遗留工具名（未实现却出现在工具名集合里）。
+- **后台 job 进程级生命周期超时**（`job-store.ts`）：`BackgroundJob` 加绝对
+  wall-clock 上限,到时走已有的 SIGTERM→SIGKILL,并在输出 ring 里留
+  `[job killed] exceeded max lifetime` 让 `job(logs/await)` 可见。默认**关闭**
+  （后台 job 本就是 dev server/watcher 等长命进程,盲目超时会误杀）——由
+  `RIVET_JOB_MAX_MS` 开启,供 eval/CI 收割永不退出的 runaway job;`JobSpawnOptions.maxLifetimeMs` 支持 per-spawn 覆盖。
+- **清理 `multi_edit`/`notebook_edit` 遗留工具名**：这两个名字从未注册为工具,
+  却出现在三处写工具名集合里。移除死名的同时对齐到注册表实际的编辑/写工具
+  （`write_file`/`edit_file`/`hash_edit`/`ast_edit`/`apply_patch`）——顺带修复了
+  `session-persist.ts` 孤儿恢复集合**漏掉主力编辑器 `hash_edit` 与 `ast_edit`** 的
+  潜在缺口（孤儿化的 hash_edit 之前不会触发验证式非破坏恢复）,以及
+  `write-evidence-probe.ts` 漏掉 `ast_edit` 的磁盘证据召回;并移除
+  `extractTargetPath` 中随 notebook_edit 一起废弃的 `notebook_path` 兜底。

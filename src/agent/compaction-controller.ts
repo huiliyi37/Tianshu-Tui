@@ -89,8 +89,7 @@ function extractUserIntentChain(messages: OaiMessage[]): string[] {
  * unreliable and over-enumeration would pollute the summary.
  */
 const WRITE_TOOLS = new Set([
-  'write_file', 'edit_file', 'edit', 'apply_patch', 'multi_edit',
-  'notebook_edit', 'ast_edit', 'hash_edit',
+  'write_file', 'edit_file', 'edit', 'apply_patch', 'ast_edit', 'hash_edit',
 ])
 
 /**

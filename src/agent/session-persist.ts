@@ -284,7 +284,7 @@ export class SessionPersist {
   /** Tools whose orphan recovery must be non-destructive: the file may already
    *  hold the intended changes, so the model must verify before re-writing. */
   private static readonly WRITE_TOOL_NAMES = new Set([
-    'write_file', 'edit_file', 'apply_patch', 'multi_edit', 'notebook_edit',
+    'write_file', 'edit_file', 'hash_edit', 'ast_edit', 'apply_patch',
   ])
 
   /** 压#7: Remove orphan tool_use/tool_result pairs left by corrupted/missing lines.

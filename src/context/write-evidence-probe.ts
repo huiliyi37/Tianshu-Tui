@@ -3,7 +3,7 @@ import { validatePathSafe } from '../tools/path-validate.js'
 
 /** Tools whose orphan recovery can be grounded in on-disk file evidence. */
 export const WRITE_TOOLS = new Set([
-  'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'multi_edit', 'notebook_edit',
+  'write_file', 'edit_file', 'hash_edit', 'ast_edit', 'apply_patch',
 ])
 
 export interface WriteEvidence {
@@ -32,7 +32,7 @@ export function extractTargetPath(args: unknown): string | undefined {
     obj = args as Record<string, unknown>
   }
   if (!obj) return undefined
-  const p = obj.file_path ?? obj.path ?? obj.notebook_path
+  const p = obj.file_path ?? obj.path
   return typeof p === 'string' && p.length > 0 ? p : undefined
 }
 
