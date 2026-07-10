@@ -287,19 +287,37 @@ pub fn clear_license(rivet_home: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// gate 便捷判断:是否允许拉起 agent runtime。
-pub fn is_activated(rivet_home: &Path) -> bool {
-    // 编译时开关：不设 RIVET_ACTIVATION_ENABLED=1 时，release 构建跳过激活 gate。
-    // 当前版本未启用激活（待完整端到端验证后再打开）。
-    // 后续启用：打包脚本设 RIVET_ACTIVATION_ENABLED=1 即可。
+/// 编译时开关：release 构建未设 RIVET_ACTIVATION_ENABLED=1 时跳过激活 gate。
+/// debug 构建仍可通过 RIVET_ACTIVATION_DEV_BYPASS=1 绕过。
+pub fn activation_bypassed() -> bool {
     #[cfg(not(debug_assertions))]
     if option_env!("RIVET_ACTIVATION_ENABLED").is_none() {
         return true;
     }
-
-    // 仅 debug 构建honor 开发绕过环境变量;release(tauri:build)构建永不生效。
     #[cfg(debug_assertions)]
     if std::env::var("RIVET_ACTIVATION_DEV_BYPASS").is_ok() {
+        return true;
+    }
+    false
+}
+
+/// 编译时 gate 关闭时的占位激活状态，供前后端统一跳过 UI gate。
+pub fn bypass_status(rivet_home: &Path) -> LicenseStatus {
+    LicenseStatus {
+        activated: true,
+        tier: None,
+        token_exp: None,
+        license_expires: None,
+        grace: false,
+        grace_until: None,
+        reason: "disabled".to_string(),
+        device_id: device_id(rivet_home),
+    }
+}
+
+/// gate 便捷判断:是否允许拉起 agent runtime。
+pub fn is_activated(rivet_home: &Path) -> bool {
+    if activation_bypassed() {
         return true;
     }
     read_status(rivet_home).activated

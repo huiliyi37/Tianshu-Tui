@@ -43,9 +43,15 @@ export function useActivationGate() {
     }
   }, [])
 
+  // 当 Rust 编译时关闭激活 gate（release 未设 RIVET_ACTIVATION_ENABLED=1）时，
+  // activation_status 返回 reason === 'disabled'，前端应彻底跳过激活 UI 与心跳。
+  const disabled = status?.reason === 'disabled'
+  const gated = isTauri() && checked && status != null && !status.activated && !disabled
+
   useEffect(() => {
     void refresh()
-    if (!isTauri()) return
+    // 激活被编译时关闭时，不监听 revocation 事件也不跑心跳。
+    if (!isTauri() || disabled) return
 
     let offEvent: (() => void) | undefined
     void import('@tauri-apps/api/event')
@@ -74,8 +80,7 @@ export function useActivationGate() {
       if (timer.current) clearInterval(timer.current)
       clearTimeout(boot)
     }
-  }, [refresh])
+  }, [refresh, disabled])
 
-  const gated = isTauri() && checked && status != null && !status.activated
-  return { gated, status, checked, refresh }
+  return { gated, status, checked, refresh, disabled }
 }

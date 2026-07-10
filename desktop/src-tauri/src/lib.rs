@@ -110,6 +110,11 @@ fn device_fingerprint(app: tauri::AppHandle) -> String {
 #[tauri::command]
 fn activation_status(app: tauri::AppHandle) -> activation::LicenseStatus {
     let home = strip_verbatim_prefix(resolve_rivet_home(&app));
+    // 与 is_activated() 对齐：release 构建未设 RIVET_ACTIVATION_ENABLED 时
+    // 前端 UI 也跳过激活 gate，否则 sidecar 能启动但界面仍卡在激活页。
+    if activation::activation_bypassed() {
+        return activation::bypass_status(&home);
+    }
     activation::read_status(&home)
 }
 
