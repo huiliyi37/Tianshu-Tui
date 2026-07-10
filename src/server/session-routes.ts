@@ -927,7 +927,19 @@ export function buildSessionRoutes(
         unsubscribe = undefined
       }
       const sse = new SseStream(res, cleanup)
-      for (const ev of existing.events) sse.send(ev.type, ev)
+      // Batch the replay: yield every REPLAY_BATCH events so a large reconnect
+      // (thousands of events) doesn't block the event loop — concurrent streams
+      // keep their keepalives and health pings get through. cork/uncork within
+      // each batch coalesces writes into one TCP segment.
+      const REPLAY_BATCH = 200
+      const canCork = typeof res.cork === 'function'
+      for (let i = 0; i < existing.events.length; i += REPLAY_BATCH) {
+        const end = Math.min(i + REPLAY_BATCH, existing.events.length)
+        if (canCork) res.cork()
+        for (let j = i; j < end; j++) sse.send(existing.events[j]!.type, existing.events[j]!)
+        if (canCork) res.uncork()
+        if (end < existing.events.length) await new Promise<void>((r) => setImmediate(r))
+      }
       unsubscribe = manager.subscribe(id, (ev) => sse.send(ev.type, ev))
       // The async replay above yields the loop, so events may have been
       // appended between the snapshot and the subscribe — back-fill them now.
