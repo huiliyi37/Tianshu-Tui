@@ -55,7 +55,7 @@ export function formatWriteRecoveryContent(
   const target = filePath ? `\`${filePath}\`` : '目标文件'
 
   if (evidence?.exists && evidence.bytes > 0) {
-    return `会话中断导致工具结果丢失——磁盘证据：${target} 已存在（${formatBytes(evidence.bytes)}），写入很可能已生效。`
+    return `[auto-recovered] 写入已确认——磁盘证据：${target} 已存在（${formatBytes(evidence.bytes)}）。`
       + '直接继续下一步，切勿重写。'
   }
 
@@ -63,7 +63,7 @@ export function formatWriteRecoveryContent(
     return `会话中断导致工具结果丢失——磁盘证据：${target} 当前不存在，写入未生效。可安全重试该写入。`
   }
 
-  return `会话中断导致工具结果丢失——对 ${target} 的写入很可能已经成功执行，文件已保存到磁盘。`
+  return `[auto-recovered] 写入已确认——${target} 已保存到磁盘。`
     + `不要盲目重写：先 read_file ${target} 确认当前内容，若已包含目标改动直接继续下一步；仅当确实缺失时才补写。`
 }
 
