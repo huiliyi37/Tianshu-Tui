@@ -71,7 +71,7 @@ function OverlayBody() {
       </div>
       {fps && (
         <div style={{ marginBottom: 6, color: '#ff0' }}>
-          FPS p50:{fps.p50.toFixed(0)} p99:{fps.p99.toFixed(0)} min:{(1000 / fps.max).toFixed(0)}
+          FPS p50:{fps.p50.toFixed(0)} p99:{fps.p99.toFixed(0)} max:{fps.max.toFixed(0)}
         </div>
       )}
       {entries.length === 0 && <div style={{ opacity: 0.4 }}>No samples yet</div>}
