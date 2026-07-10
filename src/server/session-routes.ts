@@ -49,6 +49,8 @@ import { sessionsDir } from '../config/paths.js'
 import { verifyAndExtract } from '../agent/checksum.js'
 import type { HookEntry, HookEvent, HooksConfig } from '../hooks/user-hooks-runner.js'
 import { loadHooksConfig, VALID_EVENTS } from '../hooks/user-hooks-runner.js'
+import { buildDistillPrompt } from '../prompt/rpa-distill.js'
+import { isProFeatureEnabled } from '../config/pro-license.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result' | 'markdown' | 'html'
 
@@ -209,6 +211,36 @@ export function buildSessionRoutes(
         isolatedWorktree: data.isolatedWorktree === true,
       })
       return { status: 201, body: rec }
+    }, apiToken),
+
+    // RPA 录制蒸馏 — 桌面端把录制 JSONL 交来，组装蒸馏 prompt 并开一次性
+    // agent 会话，产出语义工作流文档（写到 session cwd 下的 workflowPath）。
+    // Pro 门禁归入 computerUse（录制回放本质依赖 computer_use）。
+    'POST /recordings/distill': withAuth((body) => {
+      const data = (body ?? {}) as { recordingId?: string; jsonl?: string; cwd?: string }
+      if (!data.recordingId || typeof data.recordingId !== 'string') {
+        return { status: 400, body: { error: 'Missing "recordingId"' } }
+      }
+      if (!data.jsonl || typeof data.jsonl !== 'string') {
+        return { status: 400, body: { error: 'Missing "jsonl"' } }
+      }
+      if (config && !isProFeatureEnabled(config, 'computerUse')) {
+        return { status: 403, body: { error: 'pro_required', feature: 'computerUse' } }
+      }
+      // recordingId 进入文件路径，先约束成安全 slug（防路径注入）。
+      const safeId = data.recordingId.replace(/[^a-zA-Z0-9_-]/g, '')
+      if (!safeId) return { status: 400, body: { error: 'Invalid "recordingId"' } }
+      const workflowPath = `.rivet/recordings/${safeId}.workflow.md`
+      const built = buildDistillPrompt({ recordingId: safeId, jsonl: data.jsonl, workflowPath })
+      if (!built.ok) {
+        return { status: 400, body: { error: built.error } }
+      }
+      const rec = manager.createSession({
+        cwd: data.cwd,
+        title: `蒸馏录制 · ${built.apps.join('/') || safeId}`,
+        prompt: built.prompt,
+      })
+      return { status: 201, body: { session: rec, workflowPath, eventCount: built.eventCount, apps: built.apps } }
     }, apiToken),
 
     // S — switch a session's autonomy level (监督 / 默认 / 自治). Live-mutates a

@@ -364,7 +364,10 @@ export function ThreadView(props: {
     count: renderedWithTurns.length,
     getScrollElement: () => msgRef.current,
     estimateSize: () => 80,
-    overscan: 8,
+    // W2-5: drop overscan to 2 while streaming + bottom-pinned — the user only
+    // sees the tail, so pre-rendering 8 rows ahead wastes layout/paint. Restore
+    // 8 when settled or scrolled up (exploring the history).
+    overscan: view.status === 'running' && !scrolledUp ? 2 : 8,
     getItemKey: (index) => {
       const item = renderedWithTurns[index]!
       return item.kind === 'timeline' ? item.key : item.block.key
@@ -636,6 +639,16 @@ export function ThreadView(props: {
     if (view.prevTotalTokens <= 0 || view.lastTotalTokens <= view.prevTotalTokens) return 0
     return view.lastTotalTokens - view.prevTotalTokens
   }, [view.lastTotalTokens, view.prevTotalTokens])
+
+  // W2-2: stabilize contextUsage so Composer's memo isn't busted by a new
+  // object literal every render.
+  const contextUsageMemo = useMemo(() => ({
+    usedTokens: session.contextTokens ?? view.lastTotalTokens,
+    contextWindow: session.contextWindow,
+    cacheReadTokens: view.cacheReadTokens,
+    cacheCreationTokens: view.cacheCreationTokens,
+    deltaTokens: ctxDelta,
+  }), [session.contextTokens, session.contextWindow, view.lastTotalTokens, view.cacheReadTokens, view.cacheCreationTokens, ctxDelta])
 
   // D3 — composer slash commands: desktop-actionable items + prompt pass-throughs.
   const commands = useMemo<ComposerCommand[]>(() => [
@@ -1236,13 +1249,9 @@ export function ThreadView(props: {
             activeDomainAccent={activeDomain?.uiPersona.accent ?? 'primary'}
             approvalLevel={modeToLevel(session.approvalMode)}
             onSetApprovalLevel={(lvl) => onSetApprovalMode(levelToMode(lvl))}
-            contextUsage={{
-              usedTokens: session.contextTokens ?? view.lastTotalTokens,
-              contextWindow: session.contextWindow,
-              cacheReadTokens: view.cacheReadTokens,
-              cacheCreationTokens: view.cacheCreationTokens,
-              deltaTokens: ctxDelta,
-            }}
+            // W2-2: stabilize the contextUsage object reference so Composer's
+            // future React.memo won't see a "new" prop every ThreadView render.
+            contextUsage={contextUsageMemo}
             onSubmit={async (text, images) => {
               if (selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length) {
                 const point = rewindPoints[selectedTurnIndex]

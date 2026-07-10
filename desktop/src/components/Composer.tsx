@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
 import { detectMention, applyMention, formatFileMention, type MentionToken } from '../lib/mention-input'
@@ -110,7 +110,7 @@ export interface ContextUsage {
   deltaTokens: number
 }
 
-export function Composer(props: {
+export const Composer = memo(function Composer(props: {
   sessionId: string
   value: string
   onChange: (v: string) => void
@@ -797,7 +797,7 @@ export function Composer(props: {
       </div>
     </div>
   )
-}
+})
 
 function formatTok(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
