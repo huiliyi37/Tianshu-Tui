@@ -38,3 +38,22 @@ SSE 帧数：现状 1374 帧（每 delta 一帧）；Wave 2 服务端 40ms 合�
 1. 卡顿主因确认：全量重 parse 在 16K+ 文档上单次成本即超 tick 预算，成本随全文线性增长 → 越写越卡。Wave 1 的稳定段冻结把每 tick 成本钉在 O(tail)（~10-18ms），是本专项收益大头。
 2. Wave 2 合并主要降低 SSE/JSON/rAF 事件处理频次，对 parse 成本无直接影响（前端 `coalesceDeltas` 已合并同帧 delta）。
 3. Wave 4 收尾时复跑同一脚本 + 手动 WebView profile 对比。
+
+## Wave 4 复测（2026-07-10，全部 wave 落地后）
+
+复跑同一脚本（数值受机器负载影响，比值稳定）：full/tail-only 累计工作量比 **13.7x** 复现；
+tail-only 主线程占用 **10%**（32K 文档单 tick 12.3ms，远低于 100ms 预算）。
+
+各 wave 实际落地对照：
+
+- **Wave 1**：`AssistantText` 已改为 `splitStableSegments`（`desktop/src/lib/stream-segments.ts`）
+  稳定段冻结 + 尾段 10Hz 节流，脚本中的 tail-only 曲线即当前生产路径的管道成本模型；
+  超长无边界尾段（如巨型代码块）由 `STREAM_TAIL_MAX` 窗口兜底。
+- **Wave 2**：sidecar `bufferDelta` 40ms/2KB 合并窗口（首 delta 立即落）。脚本按 20ms/delta
+  模拟得 2.0x 帧数削减；真实 provider 逐 token 推送（间隔更小），实际倍率更高。
+- **Wave 3**：`useSessionEventsSelector` 切片订阅 —— AgentCard（glance 首行投影）、全局通知
+  （status 字符串）、Header/DelegationSurface（delegation 引用）在流式期不再随 delta 重渲染。
+- **Wave 4**：底部锚定时活跃行 `measureElement` 100ms 节流，与 scroll 节流同节奏。
+
+**未覆盖项（遗留）**：WebView 侧 React Profiler / performance profile 的手动实测未做
+（需要交互式 dev 环境）；如需端到端数字，按本文档「测量对象」一节的场景手动录制对比。

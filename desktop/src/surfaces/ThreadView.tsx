@@ -313,6 +313,22 @@ export function ThreadView(props: {
     })
   }, [rendered])
   const lastKey = view.blocks[view.blocks.length - 1]?.key
+
+  // Wave 4 — throttle the remeasure of the actively-growing LAST row while the
+  // user is pinned to the bottom mid-stream. Every ResizeObserver fire on the
+  // growing row otherwise triggers a full virtualizer remeasure + layout at
+  // stream cadence; while bottom-pinned the exact height is irrelevant (the
+  // 10Hz scroll throttle below re-aligns anyway), so a slightly stale height
+  // for ≤100ms is invisible. Off-stream / scrolled-up rows measure exactly.
+  const MEASURE_THROTTLE_MS = 100
+  const lastRowMeasureRef = useRef<{ at: number; height: number } | null>(null)
+  const measureCtxRef = useRef({ streaming: false, lastIndex: -1, pinned: false })
+  measureCtxRef.current = {
+    streaming: view.status === 'running',
+    lastIndex: renderedWithTurns.length - 1,
+    pinned: !scrolledUp,
+  }
+
   // P2 — only render the visible window of the message list. Long sessions keep
   // DOM at O(viewport) instead of O(messages). Item heights vary, so rows are
   // measured dynamically via measureElement (ResizeObserver under the hood).
@@ -324,6 +340,22 @@ export function ThreadView(props: {
     getItemKey: (index) => {
       const item = renderedWithTurns[index]!
       return item.kind === 'timeline' ? item.key : item.block.key
+    },
+    measureElement: (el, entry) => {
+      const height = entry?.borderBoxSize?.[0]?.blockSize ?? el.getBoundingClientRect().height
+      const ctx = measureCtxRef.current
+      const idx = Number((el as HTMLElement).dataset.index)
+      if (ctx.streaming && ctx.pinned && idx === ctx.lastIndex) {
+        const now = performance.now()
+        const cached = lastRowMeasureRef.current
+        if (cached && now - cached.at < MEASURE_THROTTLE_MS) return cached.height
+        lastRowMeasureRef.current = { at: now, height }
+      } else if (idx === ctx.lastIndex) {
+        // Stream settled or user scrolled up — drop the cache so the final
+        // height lands exactly.
+        lastRowMeasureRef.current = null
+      }
+      return height
     },
   })
 
