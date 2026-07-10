@@ -9,6 +9,7 @@ import { basename } from '../lib/projects'
 import { ToolCard, toolNameOf, pairEntries, PairedRow } from '../components/ToolGroup'
 import type { PairedEntry } from '../components/ToolGroup'
 import { Markdown, closeUnterminatedFence } from '../components/Markdown'
+import { splitStableSegments, EMPTY_SEGMENTS, type StreamSegments } from '../lib/stream-segments'
 import { Composer } from '../components/Composer'
 import { TimelineGroup } from '../components/TimelineGroup'
 import { ArtifactCard } from '../components/ArtifactCard'
@@ -1796,31 +1797,50 @@ function useThrottledStreamingSource(text: string, isStreaming: boolean): string
   return isStreaming ? shown : text
 }
 
-// Above this size, streaming Markdown would re-parse the whole string every
-// throttle window. Fall back to plain text mid-stream and parse once at the end.
-const STREAM_MARKDOWN_MAX = 16000
+// Stable prefix + live tail (TUI StreamRenderer model, see stream-segments.ts):
+// frozen segments render once as memoized <Markdown> and never re-parse; only
+// the still-growing tail is re-parsed per throttle tick. Bounds per-tick
+// markdown cost to O(tail) regardless of total reply length, so the previous
+// STREAM_MARKDOWN_MAX plain-text bail-out for long replies is gone.
 function AssistantText({ text, isStreaming, onFileClick }: { text: string; isStreaming: boolean; onFileClick?: (path: string) => void }) {
-  const heavy = isStreaming && text.length > STREAM_MARKDOWN_MAX
-  const throttled = useThrottledStreamingSource(text, isStreaming && !heavy)
-  if (heavy) return <StreamingText source={text} />
-  // Streaming: render structure only (highlight=false); the async highlight pass
-  // runs once on completion so mid-stream deltas stay cheap.
-  if (isStreaming) return <Markdown source={closeUnterminatedFence(throttled)} highlight={false} onFileClick={onFileClick} />
-  return <Markdown source={text} onFileClick={onFileClick} />
+  const throttled = useThrottledStreamingSource(text, isStreaming)
+  const segRef = useRef<StreamSegments>(EMPTY_SEGMENTS)
+  useEffect(() => {
+    // Drop the frozen prefix once the stream settles so a later regenerate
+    // starts clean (the splitter also self-heals on non-append input).
+    if (!isStreaming) segRef.current = EMPTY_SEGMENTS
+  }, [isStreaming])
+
+  // Completion snaps to ONE full-text parse (with math + async highlight) —
+  // final rendering is identical to the pre-segmentation behaviour, covering
+  // cross-segment constructs like reference-style links.
+  if (!isStreaming) return <Markdown source={text} onFileClick={onFileClick} />
+
+  const segs = splitStableSegments(throttled, segRef.current)
+  segRef.current = segs
+  const tailHeavy = segs.tail.length > STREAM_TAIL_MAX
+  return (
+    <div className="md-stream">
+      {segs.stable.map((seg, i) => (
+        <Markdown key={i} source={seg} highlight={false} onFileClick={onFileClick} />
+      ))}
+      {tailHeavy
+        ? <StreamingText source={segs.tail} />
+        : segs.tail.trim()
+          ? <Markdown source={closeUnterminatedFence(segs.tail)} highlight={false} streaming onFileClick={onFileClick} />
+          : null}
+    </div>
+  )
 }
 
-// Above this size the streaming tail is windowed (see below).
+// Above this size the live tail is windowed (see below).
 const STREAM_TAIL_MAX = 8000
 
-// Plain-text fallback for the very-long streaming guard (md-streaming keeps the
-// pre-wrap styling until the final Markdown parse on turn completion).
-//
-// Only the trailing window is rendered while a long reply streams: a single
-// growing text node costs O(n) to diff/paint per throttle tick, so over a
-// 50k-char reply the naive full render is O(n^2). The user is pinned to the
-// bottom mid-stream (auto-scroll), so the tail is exactly what they read; the
-// full text + Markdown render the instant streaming completes (AssistantText
-// switches off this path). Bounds per-tick work to O(tail).
+// Plain-text fallback for a live tail that has gone a long time without a
+// safe segment boundary (e.g. one giant code fence): only the trailing window
+// is rendered. The user is pinned to the bottom mid-stream (auto-scroll), so
+// the tail is exactly what they read; the full text + Markdown render the
+// instant streaming completes (AssistantText switches off this path).
 function StreamingText({ source }: { source: string }) {
   const { t } = useTranslation('threadView')
   const tail = source.length > STREAM_TAIL_MAX ? source.slice(-STREAM_TAIL_MAX) : source

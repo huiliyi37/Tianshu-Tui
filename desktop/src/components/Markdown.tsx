@@ -167,7 +167,7 @@ export function normalizeMathDelimiters(source: string): string {
     .replace(/^(\s*)\$\$([^\n$]+)\$\$\s*$/gm, (_, indent: string, body: string) => `${indent}$$\n${indent}${body}\n${indent}$$`)
 }
 
-function MarkdownImpl({ source, highlight = true, onFileClick }: { source: string; highlight?: boolean; onFileClick?: (path: string) => void }) {
+function MarkdownImpl({ source, highlight = true, streaming = false, onFileClick }: { source: string; highlight?: boolean; streaming?: boolean; onFileClick?: (path: string) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const huge = source.length > MD_RENDER_MAX
 
@@ -198,11 +198,17 @@ function MarkdownImpl({ source, highlight = true, onFileClick }: { source: strin
     },
     pre: CodeBlock,
   }
+  // Streaming (live tail) mode drops only the HEAVY plugins: remark-math /
+  // rehype-katex re-run KaTeX layout per tick and render half-typed `$$...`
+  // unsafely. The cheap regex passes (normalizeMathDelimiters /
+  // linkifyFileMentions) stay on so the tail's text matches the frozen
+  // segments as closely as possible; math snaps to KaTeX when its block
+  // freezes into a stable segment (same progressive model as async highlight).
   return (
     <div className="md" ref={ref}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={streaming ? [remarkGfm, remarkBreaks] : [remarkGfm, remarkMath, remarkBreaks]}
+        rehypePlugins={streaming ? [] : [rehypeKatex]}
         components={components}
       >
         {normalized}
@@ -211,9 +217,9 @@ function MarkdownImpl({ source, highlight = true, onFileClick }: { source: strin
   )
 }
 
-// Memoize by source + highlight flag — streaming deltas re-render the parent
+// Memoize by source + mode flags — streaming deltas re-render the parent
 // frequently; this keeps re-parses limited to actual content/mode changes.
 export const Markdown = React.memo(
   MarkdownImpl,
-  (a, b) => a.source === b.source && a.highlight === b.highlight && a.onFileClick === b.onFileClick,
+  (a, b) => a.source === b.source && a.highlight === b.highlight && (a.streaming ?? false) === (b.streaming ?? false) && a.onFileClick === b.onFileClick,
 )

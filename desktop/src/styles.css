@@ -2257,6 +2257,10 @@ body {
 .timeline-more:hover { color: var(--accent); }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
+/* Streaming segmentation (stable prefix + live tail): each frozen segment is
+   its own .md whose :last-child margin is zeroed — restore the inter-block
+   gap between segments so the split is visually seamless. */
+.md-stream > .md:not(:last-child) { margin-bottom: var(--md-gap); }
 .md p { margin: 0 0 var(--md-gap); }
 .md h1, .md h2, .md h3, .md h4, .md h5 { margin: var(--space-4) 0 var(--space-2); line-height: 1.3; color: var(--text-strong); font-weight: var(--weight-semibold); }
 .md h1 { font-size: var(--text-xl); }
