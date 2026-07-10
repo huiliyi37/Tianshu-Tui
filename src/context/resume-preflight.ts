@@ -5,6 +5,7 @@ import type { ResumePreflightReport } from './types.js'
 import {
   extractTargetPath,
   formatWriteRecoveryContent,
+  WRITE_RECOVERY_MARKER,
   type WriteProbe,
 } from './write-evidence-probe.js'
 
@@ -16,11 +17,24 @@ function syntheticResultContent(
   filePath?: string,
   writeProbe?: WriteProbe,
   args?: unknown,
+  priorOccurrences = 0,
 ): string {
   const evidence = toolName && writeProbe && args !== undefined
     ? writeProbe(toolName, args)
     : undefined
-  return formatWriteRecoveryContent(toolName, filePath, evidence)
+  return formatWriteRecoveryContent(toolName, filePath, evidence, priorOccurrences)
+}
+
+/** Count synthetic recovery results already present in history (any format).
+ *  Repeated occurrences mean the host environment keeps interrupting — the
+ *  synthesized message escalates so the model reports it instead of concluding
+ *  the write tools are broken. */
+function countPriorRecoveries(contents: Iterable<string>): number {
+  let n = 0
+  for (const c of contents) {
+    if (c.includes(WRITE_RECOVERY_MARKER)) n++
+  }
+  return n
 }
 
 export interface OaiResumePreflightOptions {
@@ -51,6 +65,16 @@ export function runResumePreflight(
   const repaired = [...messages]
   let inserted = 0
 
+  // Prior synthetic recoveries anywhere in history — drives repeat escalation.
+  let priorRecoveries = countPriorRecoveries(function* () {
+    for (const m of messages) {
+      if (typeof m.content === 'string') continue
+      for (const b of m.content) {
+        if (b.type === 'tool_result' && typeof b.content === 'string') yield b.content
+      }
+    }
+  }())
+
   // Walk rounds in reverse so insertion indices stay stable.
   // Rounds from groupIntoRounds are non-overlapping with strictly increasing
   // startMessageIndex, so reverse iteration guarantees each splice shifts
@@ -78,7 +102,7 @@ export function runResumePreflight(
       return {
         type: 'tool_result' as const,
         tool_use_id: id,
-        content: syntheticResultContent(toolName, filePath, options?.writeProbe, args),
+        content: syntheticResultContent(toolName, filePath, options?.writeProbe, args, priorRecoveries++),
         is_error: false,
       }
     })
@@ -254,6 +278,13 @@ export function runResumePreflightOai(
   const repaired: OaiMessage[] = []
   let inserted = 0
 
+  // Prior synthetic recoveries anywhere in history — drives repeat escalation.
+  let priorRecoveries = countPriorRecoveries(function* () {
+    for (const m of messages) {
+      if (m.role === 'tool' && typeof m.content === 'string') yield m.content
+    }
+  }())
+
   for (const m of messages) {
     if (m.role === 'tool') continue // re-emitted in-position below; leftovers are dropped
     repaired.push(m)
@@ -271,7 +302,7 @@ export function runResumePreflightOai(
         repaired.push({
           role: 'tool',
           tool_call_id: tc.id,
-          content: syntheticResultContent(toolName, filePath, options?.writeProbe, args),
+          content: syntheticResultContent(toolName, filePath, options?.writeProbe, args, priorRecoveries++),
         })
         inserted++
         if (DEBUG_ORPHAN) {
