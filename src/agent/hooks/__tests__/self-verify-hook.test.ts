@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createSelfVerifyHook } from '../self-verify-hook.js'
+import { createSelfVerifyHook, detectScopeMismatch, moduleOf } from '../self-verify-hook.js'
 import type { AdvisoryEntry } from '../../advisory-bus.js'
 import type { RuntimeHookContext } from '../../runtime-hooks.js'
+import type { VerificationMetadata } from '../../../tools/types.js'
 
 function makeCtx(tools: Array<{ tool: string; status: 'success' | 'failed' | 'running'; target: string }>): RuntimeHookContext {
   return {
@@ -98,5 +99,126 @@ describe('SelfVerifyHook', () => {
     ]))
     assert.equal(submitted.length, 1)
     assert.match(submitted[0]!.content, /没有独立验证/)
+  })
+})
+
+// ─── W5: 粗粒度验证-改动错配 ────────────────────────────────────
+
+function verification(over: Partial<VerificationMetadata>): VerificationMetadata {
+  return {
+    command: 'npx tsx --test src/a/__tests__/a.test.ts',
+    status: 'passed',
+    scope: 'targeted',
+    exitCode: 0,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    durationMs: 10,
+    ...over,
+  }
+}
+
+describe('detectScopeMismatch (W5)', () => {
+  it('moduleOf groups by the first two path segments', () => {
+    assert.equal(moduleOf('src/agent/hooks/x.ts'), 'src/agent')
+    assert.equal(moduleOf('src/tools/y.ts'), 'src/tools')
+    assert.equal(moduleOf('main.ts'), 'main.ts')
+    assert.equal(moduleOf('lib/z.ts'), 'lib')
+  })
+
+  it('flags mismatch: 3+ modules, all verifications targeted', () => {
+    const result = detectScopeMismatch(
+      new Set(['src/agent/a.ts', 'src/tools/b.ts', 'src/api/c.ts']),
+      [verification({})],
+    )
+    assert.equal(result.mismatch, true)
+    assert.equal(result.moduleCount, 3)
+  })
+
+  it('no mismatch when a full-scope verification exists', () => {
+    const result = detectScopeMismatch(
+      new Set(['src/agent/a.ts', 'src/tools/b.ts', 'src/api/c.ts']),
+      [verification({}), verification({ scope: 'full', command: 'npm test' })],
+    )
+    assert.equal(result.mismatch, false)
+  })
+
+  it('no mismatch below the module threshold', () => {
+    const result = detectScopeMismatch(
+      new Set(['src/agent/a.ts', 'src/agent/hooks/b.ts', 'src/tools/c.ts']),
+      [verification({})],
+    )
+    assert.equal(result.mismatch, false)
+    assert.equal(result.moduleCount, 2)
+  })
+
+  it('no mismatch with zero verifications (零验证由既有检测覆盖)', () => {
+    const result = detectScopeMismatch(
+      new Set(['src/agent/a.ts', 'src/tools/b.ts', 'src/api/c.ts']),
+      [],
+    )
+    assert.equal(result.mismatch, false)
+  })
+})
+
+describe('SelfVerifyHook — scope mismatch advisory (W5)', () => {
+  function makeEvidence(files: string[], verifications: VerificationMetadata[]) {
+    return () => ({ filesModified: new Set(files), verifications })
+  }
+
+  it('submits scope-mismatch advisory when changes span 3+ modules with only targeted verifications', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+      getEvidenceState: makeEvidence(
+        ['src/agent/a.ts', 'src/tools/b.ts', 'src/api/c.ts'],
+        [verification({})],
+      ),
+    })
+    hook.run(makeCtx([
+      { tool: 'run_tests', status: 'success', target: 'src/a' },
+    ]))
+    const mismatch = submitted.filter(e => e.key === 'self-verify-scope-mismatch')
+    assert.equal(mismatch.length, 1)
+    assert.match(mismatch[0]!.content, /跨 3 个模块/)
+    assert.match(mismatch[0]!.content, /full-scope/)
+  })
+
+  it('does not repeat the advisory for the same module count (nag 抑制)', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+      getEvidenceState: makeEvidence(
+        ['src/agent/a.ts', 'src/tools/b.ts', 'src/api/c.ts'],
+        [verification({})],
+      ),
+    })
+    const ctx = makeCtx([{ tool: 'run_tests', status: 'success', target: 'src/a' }])
+    hook.run(ctx)
+    hook.run(ctx)
+    const mismatch = submitted.filter(e => e.key === 'self-verify-scope-mismatch')
+    assert.equal(mismatch.length, 1)
+  })
+
+  it('stays silent when a full-scope verification exists', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+      getEvidenceState: makeEvidence(
+        ['src/agent/a.ts', 'src/tools/b.ts', 'src/api/c.ts'],
+        [verification({ scope: 'full', command: 'npm test' })],
+      ),
+    })
+    hook.run(makeCtx([{ tool: 'run_tests', status: 'success', target: 'src' }]))
+    assert.equal(submitted.filter(e => e.key === 'self-verify-scope-mismatch').length, 0)
+  })
+
+  it('no getEvidenceState dep → unchanged behavior', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+    })
+    hook.run(makeCtx([{ tool: 'run_tests', status: 'success', target: 'src' }]))
+    assert.equal(submitted.length, 0)
   })
 })

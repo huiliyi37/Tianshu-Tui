@@ -429,7 +429,10 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // with no ground-truth verification, inject a reminder for the next turn
   // to self-verify before building on the conclusions.
   if (deps.advisoryBus) {
-    hooks.push(createSelfVerifyHook({ advisoryBus: deps.advisoryBus }))
+    hooks.push(createSelfVerifyHook({
+      advisoryBus: deps.advisoryBus,
+      getEvidenceState: deps.getEvidenceState,
+    }))
   }
 
   // Post-Commit Review delivery: preTurn + postTool 双相排水 — deliver_task

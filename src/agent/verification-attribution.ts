@@ -219,6 +219,81 @@ export type AttributionClass =
    *  conflicts with concurrent changes on current HEAD. Not this session's
    *  fault → advisory (rebase/coordinate), never blocking. */
   | 'integration_conflict'
+  /** Owned edits have Meridian-impacted tests (blast radius) that exist on
+   *  disk but were never covered by any passed verification. The targeted
+   *  runs that did pass don't reach the changed module's dependents —
+   *  regression risk. YELLOW at gate; RED on deliver_task(commit=true). */
+  | 'module_unverified'
+
+// ─── Impacted-test coverage (W1 回归防线) ──────────────────────────────────
+// Meridian blast radius (EvidenceTracker.impactedTests) lists tests that
+// transitively import the files this session modified. "有任意 passed 验证"
+// 不等于"波及面被验证过"——引入回归是评测暴露的最大失败类。
+//
+// 假阳性防御（天权评审）：Meridian import graph 是静态分析，impactedTests
+// 可能包含已删除/重命名的测试文件。existsFn 过滤后归入 uncoverable，只留痕
+// 不触发升级；仅"存在且从未被 passed 验证覆盖"的测试才计入 uncovered。
+
+export interface ImpactedTestCoverage {
+  /** Tests that exist on disk but were never covered by a passed verification. */
+  uncovered: string[]
+  /** Tests from the impact set that no longer exist (deleted/renamed) — recorded, never blocking. */
+  uncoverable: string[]
+}
+
+function normalizePathForMatch(p: string): string {
+  return p.replace(/\\/g, '/').replace(/^\.\//, '')
+}
+
+/** Suffix-tolerant path equality: 'src/a/__tests__/b.test.ts' matches
+ *  'a/__tests__/b.test.ts' and vice versa (verification target files may be
+ *  recorded relative to different roots than Meridian paths). */
+function pathsMatch(a: string, b: string): boolean {
+  if (a === b) return true
+  return a.endsWith(`/${b}`) || b.endsWith(`/${a}`)
+}
+
+/**
+ * Assess which Meridian-impacted tests were actually covered by passed
+ * verifications. Pure function — filesystem access is injected via existsFn.
+ *
+ * Coverage rules:
+ * - any passed full-scope verification covers everything → uncovered = []
+ * - a passed targeted verification covers its targetFiles (or test files
+ *   extractable from command/resolvedCommand)
+ */
+export function assessImpactedTestCoverage(
+  impactedTests: readonly string[],
+  verifications: readonly VerificationMetadata[],
+  existsFn: (path: string) => boolean,
+): ImpactedTestCoverage {
+  if (impactedTests.length === 0) return { uncovered: [], uncoverable: [] }
+
+  const passed = verifications.filter(v => v.status === 'passed')
+  if (passed.some(v => v.scope === 'full')) return { uncovered: [], uncoverable: [] }
+
+  const coveredFiles: string[] = []
+  for (const v of passed) {
+    const targets = v.targetFiles && v.targetFiles.length > 0
+      ? v.targetFiles
+      : [...extractTestFiles(v.command), ...extractTestFiles(v.resolvedCommand ?? '')]
+    for (const t of targets) coveredFiles.push(normalizePathForMatch(t))
+  }
+
+  const uncovered: string[] = []
+  const uncoverable: string[] = []
+  for (const test of [...new Set(impactedTests)].sort()) {
+    if (!existsFn(test)) {
+      uncoverable.push(test)
+      continue
+    }
+    const normalized = normalizePathForMatch(test)
+    if (!coveredFiles.some(c => pathsMatch(normalized, c))) {
+      uncovered.push(test)
+    }
+  }
+  return { uncovered, uncoverable }
+}
 
 export interface AttributionResult {
   attribution: AttributionClass

@@ -4,7 +4,7 @@ import { createDeliveryGateV2, filterExternalNoise, isJunkExternalPath } from '.
 import { createOwnershipLedger } from '../ownership-ledger.js'
 import { createWorktreeBaseline, type BaselineSnapshot } from '../worktree-baseline.js'
 import { createTaskLedger } from '../task-ledger.js'
-import { createVerificationAttribution } from '../verification-attribution.js'
+import { createVerificationAttribution, assessImpactedTestCoverage } from '../verification-attribution.js'
 import type { VerificationMetadata } from '../../tools/types.js'
 
 function makeGate(ownedFiles: string[], externalDirty: string[] = []) {
@@ -291,5 +291,136 @@ describe('external-file noise filtering (C-fix, session 803d897d)', () => {
     const split = filterExternalNoise(['src/a.ts'], '/nonexistent-dir-for-test')
     assert.deepEqual(split.files, ['src/a.ts'])
     assert.equal(split.noiseCount, 0)
+  })
+})
+
+describe('W1 回归防线 — assessImpactedTestCoverage', () => {
+  const meta = (over: Partial<VerificationMetadata>): VerificationMetadata => ({
+    command: 'npx tsx --test',
+    status: 'passed',
+    scope: 'targeted',
+    exitCode: 0,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    durationMs: 10,
+    ...over,
+  })
+
+  it('a passed full-scope verification covers everything', () => {
+    const coverage = assessImpactedTestCoverage(
+      ['src/a/__tests__/a.test.ts', 'src/b/__tests__/b.test.ts'],
+      [meta({ scope: 'full' })],
+      () => true,
+    )
+    assert.deepEqual(coverage.uncovered, [])
+    assert.deepEqual(coverage.uncoverable, [])
+  })
+
+  it('targeted verification only covers its target files', () => {
+    const coverage = assessImpactedTestCoverage(
+      ['src/a/__tests__/a.test.ts', 'src/b/__tests__/b.test.ts'],
+      [meta({ command: 'npx tsx --test src/a/__tests__/a.test.ts' })],
+      () => true,
+    )
+    assert.deepEqual(coverage.uncovered, ['src/b/__tests__/b.test.ts'])
+    assert.deepEqual(coverage.uncoverable, [])
+  })
+
+  it('meta.targetFiles take priority over command extraction', () => {
+    const coverage = assessImpactedTestCoverage(
+      ['src/a/__tests__/a.test.ts'],
+      [meta({ command: 'run_tests filter=a.test', targetFiles: ['src/a/__tests__/a.test.ts'] })],
+      () => true,
+    )
+    assert.deepEqual(coverage.uncovered, [])
+  })
+
+  it('deleted/renamed impacted tests go to uncoverable, never uncovered (假阳性防御)', () => {
+    const coverage = assessImpactedTestCoverage(
+      ['src/gone/__tests__/gone.test.ts', 'src/b/__tests__/b.test.ts'],
+      [meta({ command: 'npx tsx --test src/other/__tests__/other.test.ts' })],
+      p => !p.includes('gone'),
+    )
+    assert.deepEqual(coverage.uncovered, ['src/b/__tests__/b.test.ts'])
+    assert.deepEqual(coverage.uncoverable, ['src/gone/__tests__/gone.test.ts'])
+  })
+
+  it('suffix-tolerant path matching bridges different path roots', () => {
+    const coverage = assessImpactedTestCoverage(
+      ['src/a/__tests__/a.test.ts'],
+      [meta({ targetFiles: ['a/__tests__/a.test.ts'] })],
+      () => true,
+    )
+    assert.deepEqual(coverage.uncovered, [])
+  })
+
+  it('failed verifications provide no coverage', () => {
+    const coverage = assessImpactedTestCoverage(
+      ['src/a/__tests__/a.test.ts'],
+      [meta({ status: 'failed', command: 'npx tsx --test src/a/__tests__/a.test.ts', passed: 0, failed: 1, exitCode: 1 })],
+      () => true,
+    )
+    assert.deepEqual(coverage.uncovered, ['src/a/__tests__/a.test.ts'])
+  })
+})
+
+describe('W1 回归防线 — gate module_unverified', () => {
+  it('downgrades GREEN to YELLOW (module_unverified) when impacted tests exist but were never covered', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({ type: 'verification', command: 'npx tsx --test src/tools/__tests__/git.test.ts', status: 'passed', meta: { scope: 'targeted' } })
+
+    const result = gate.assess([], undefined, undefined, {
+      impactedTests: ['src/tools/__tests__/git.test.ts', 'src/agent/__tests__/consumer.test.ts'],
+      testExists: () => true,
+    })
+    assert.equal(result.state, 'YELLOW')
+    assert.equal(result.canDeliver, true)
+    assert.equal(result.attributionClass, 'module_unverified')
+    assert.deepEqual(result.uncoveredImpactedTests, ['src/agent/__tests__/consumer.test.ts'])
+    assert.ok(result.reason?.includes('consumer.test.ts'))
+  })
+
+  it('stays GREEN when a full-scope verification passed', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({ type: 'verification', command: 'npm test', status: 'passed', meta: { scope: 'full' } })
+
+    const result = gate.assess([], undefined, undefined, {
+      impactedTests: ['src/agent/__tests__/consumer.test.ts'],
+      testExists: () => true,
+    })
+    assert.equal(result.state, 'GREEN')
+    assert.equal(result.attributionClass, undefined)
+  })
+
+  it('stays GREEN when uncovered tests no longer exist — uncoverable 留痕不阻断', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({ type: 'verification', command: 'npx tsx --test src/tools/__tests__/git.test.ts', status: 'passed', meta: { scope: 'targeted' } })
+
+    const result = gate.assess([], undefined, undefined, {
+      impactedTests: ['src/tools/__tests__/git.test.ts', 'src/deleted/__tests__/old.test.ts'],
+      testExists: p => !p.includes('deleted'),
+    })
+    assert.equal(result.state, 'GREEN')
+    assert.deepEqual(result.uncoverableImpactedTests, ['src/deleted/__tests__/old.test.ts'])
+  })
+
+  it('does not touch RED/unverified states — coverage check only refines would-be GREEN', () => {
+    const { gate } = makeGate(['src/tools/git.ts'])
+
+    const result = gate.assess([], undefined, undefined, {
+      impactedTests: ['src/agent/__tests__/consumer.test.ts'],
+      testExists: () => true,
+    })
+    assert.equal(result.state, 'RED')
+    assert.equal(result.attributionClass, 'unverified')
+  })
+
+  it('no moduleCoverage input → unchanged GREEN behavior', () => {
+    const { gate, ledger } = makeGate(['src/tools/git.ts'])
+    ledger.record({ type: 'verification', command: 'npx tsx --test src/tools/__tests__/git.test.ts', status: 'passed', meta: { scope: 'targeted' } })
+
+    const result = gate.assess([])
+    assert.equal(result.state, 'GREEN')
   })
 })

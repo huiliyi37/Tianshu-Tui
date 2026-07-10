@@ -11,7 +11,32 @@ async function fileExists(path: string): Promise<boolean> {
 
 function isTestFile(filePath: string): boolean {
   const base = basename(filePath)
-  return base.includes('.test.') || base.includes('.spec.')
+  if (base.includes('.test.') || base.includes('.spec.')) return true
+  // Python conventions: test_<name>.py / <name>_test.py
+  if (base.endsWith('.py') && (base.startsWith('test_') || base.endsWith('_test.py'))) return true
+  return false
+}
+
+/** Python test candidates: 同级 test_<name>.py、tests/test_<name>.py、tests/ 镜像目录。
+ *  (W1: 之前只认 .test./.spec.，Python 项目 related_tests 常空手而归。) */
+function pythonTestCandidates(file: string): string[] {
+  const baseName = basename(file, '.py')
+  const dir = dirname(file)
+  const parentDir = dirname(dir)
+  const relDir = dir.startsWith('src/') ? dir.slice(4) : dir
+
+  return [
+    // Co-located
+    join(dir, `test_${baseName}.py`),
+    join(dir, `${baseName}_test.py`),
+    // Sibling tests/ dir
+    join(dir, 'tests', `test_${baseName}.py`),
+    join(parentDir, 'tests', `test_${baseName}.py`),
+    // Top-level tests/ flat
+    join('tests', `test_${baseName}.py`),
+    // Top-level tests/ mirroring the source path
+    join('tests', relDir, `test_${baseName}.py`),
+  ]
 }
 
 async function findTestsForSource(file: string, cwd: string): Promise<string[]> {
@@ -23,6 +48,14 @@ async function findTestsForSource(file: string, cwd: string): Promise<string[]> 
 
   // Strip src/ prefix for some candidate patterns
   const relDir = dir.startsWith('src/') ? dir.slice(4) : dir
+
+  if (ext === '.py') {
+    const pyCandidates = pythonTestCandidates(file)
+    const withExists = await Promise.all(
+      pyCandidates.map(async (c) => ({ path: c, exists: await fileExists(join(cwd, c)) })),
+    )
+    return withExists.filter(c => c.exists).map(c => c.path).sort()
+  }
 
   const candidates = [
     // __tests__ dir colocated
@@ -51,8 +84,11 @@ async function findTestsForSource(file: string, cwd: string): Promise<string[]> 
 async function findSourceForTest(file: string, cwd: string): Promise<string[]> {
   const parsed = extname(file)
   const ext = parsed
-  // Strip test indicators: .test.ts -> .ts, .spec.ts -> .ts
-  const baseName = basename(file, ext).replace(/\.test$|\.spec$/, '') + ext
+  // Strip test indicators: .test.ts -> .ts, .spec.ts -> .ts,
+  // test_<name>.py -> <name>.py, <name>_test.py -> <name>.py
+  const baseName = ext === '.py'
+    ? basename(file, ext).replace(/^test_/, '').replace(/_test$/, '') + ext
+    : basename(file, ext).replace(/\.test$|\.spec$/, '') + ext
   const dir = dirname(file)
 
   // Map test dir patterns back to source dirs
@@ -61,6 +97,14 @@ async function findSourceForTest(file: string, cwd: string): Promise<string[]> {
   // __tests__/foo.test.ts -> same parent dir
   if (basename(dir) === '__tests__') {
     sourceDirs.push(dirname(dir))
+  }
+
+  // Python: <pkg>/tests/test_foo.py -> <pkg>/foo.py; tests/test_foo.py -> ./foo.py
+  if (ext === '.py' && basename(dir) === 'tests') {
+    sourceDirs.push(dirname(dir))
+  }
+  if (ext === '.py' && dir.startsWith('tests/')) {
+    sourceDirs.push(dir.slice(6))
   }
 
   // tests/tools/foo.test.ts -> src/tools/

@@ -298,6 +298,8 @@ async function main() {
           ownership: b1Ownership,
           attribution: b1Attribution,
         })
+        // W1 回归防线: agent 在工具注册后才创建，经 mutable ref 延迟接线
+        const headlessAgentRef: { current: import('./agent/loop.js').AgentLoop | null } = { current: null }
         toolRegistry.register(createDeliverTaskTool(() => ({
           taskLedger: b1TaskLedger,
           ownership: b1Ownership,
@@ -305,6 +307,7 @@ async function main() {
           isGoalActive: () => goalTrackerRef.current?.isActive() ?? false,
           isGoalAchieved: () => goalTrackerRef.current?.isGoalAchieved() ?? false,
           getLastVerdict: () => goalTrackerRef.current?.getLastVerdict() ?? null,
+          getImpactedTests: () => headlessAgentRef.current ? [...headlessAgentRef.current.getEvidenceState().impactedTests] : [],
         })))
         toolRegistry.register(createUpdateGoalTool(
           () => goalTrackerRef.current,
@@ -325,6 +328,7 @@ async function main() {
         }))
         const session = new SessionContext()
         const agent = new AgentLoop({ ...agentCfg, toolRegistry, maxTurns: headlessMaxTurns }, session, process.cwd())
+        headlessAgentRef.current = agent
         if (parsed.goal) {
           const tracker = new GoalTracker({
             goal: parsed.goal,

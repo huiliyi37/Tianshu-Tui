@@ -20,7 +20,7 @@ import { spawnSync } from 'node:child_process'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
 import type { VerificationAttribution, AttributionClass } from './verification-attribution.js'
-import { getEffectiveVerifications } from './verification-attribution.js'
+import { getEffectiveVerifications, assessImpactedTestCoverage } from './verification-attribution.js'
 import { summarizeOwnershipHealth } from './ownership-health.js'
 import type { VerificationMetadata } from '../tools/types.js'
 
@@ -105,6 +105,12 @@ export interface DeliveryGateResult {
   /** The verification attribution class that caused this gate state.
    *  Used by deliver_task to decide mechanical-change bypass. */
   attributionClass?: AttributionClass
+  /** W1 回归防线: Meridian-impacted tests that exist but were never covered
+   *  by a passed verification. Present when attributionClass === 'module_unverified'. */
+  uncoveredImpactedTests?: string[]
+  /** Impacted tests that no longer exist on disk (deleted/renamed) — recorded
+   *  for the report, never blocking. */
+  uncoverableImpactedTests?: string[]
 }
 
 export interface DeliveryReport {
@@ -136,17 +142,30 @@ export interface DeliveryReport {
   /** The verification attribution class causing this gate state.
    *  Used by deliver_task to decide mechanical-change bypass. */
   attributionClass?: AttributionClass
+  /** W1 回归防线: impacted tests never covered by a passed verification. */
+  uncoveredImpactedTests?: string[]
+  /** Impacted tests that no longer exist on disk (deleted/renamed). */
+  uncoverableImpactedTests?: string[]
   /** Full attribution result for diagnostics */
   attributionSummary: string
+}
+
+/** W1 回归防线: inputs for impacted-test coverage assessment. Both provided by
+ *  the caller (deliver_task) — the gate itself stays filesystem-free. */
+export interface ModuleCoverageInput {
+  /** Meridian blast radius tests (EvidenceTracker.impactedTests). */
+  impactedTests: readonly string[]
+  /** Existence probe — resolves relative paths against the session cwd. */
+  testExists: (path: string) => boolean
 }
 
 export interface DeliveryGateV2 {
   /** Assess delivery readiness, optionally with external verification metadata,
    *  current dirty files, and the current VSW snapshotRef (drops stale snapshot
    *  verifications when provided). */
-  assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string): DeliveryGateResult
+  assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string, moduleCoverage?: ModuleCoverageInput): DeliveryGateResult
   /** Full structured report suitable for cycle_close deposit */
-  getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string): DeliveryReport
+  getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string, moduleCoverage?: ModuleCoverageInput): DeliveryReport
 }
 
 /**
@@ -171,6 +190,9 @@ export function buildGateConvergenceHint(
     return lines.join('\n') + depthSuffix
   }
   // YELLOW — differentiate no_test_infra from transient external blocks
+  if (gate.attributionClass === 'module_unverified') {
+    return `交付门禁 YELLOW（波及面未验证）：${gate.reason ?? '改动波及的测试从未被任何 passed 验证覆盖。'}\n引入回归是最常见的交付失败——请运行上述受波及测试（或一次 full-scope 验证）后再交付；commit=true 会被硬拦。` + depthSuffix
+  }
   if (gate.attributionClass === 'no_test_infra') {
     return `交付门禁 YELLOW（测试基础设施缺失）：${gate.reason ?? '项目无可自动检测的测试框架。'}\n\n不要反复重试 run_tests——它每次都会以同样原因受阻。应向用户报告具体缺失项，并询问是否需要协助搭建测试框架，或用 bash 运行替代验证后交付。` + depthSuffix
   }
@@ -236,7 +258,7 @@ export function createDeliveryGateV2(opts: {
     return { ownedFilesForGate, coOwnedFiles, historicalOwnedFiles, externalFiles }
   }
 
-  function assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string): DeliveryGateResult {
+  function assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string, moduleCoverage?: ModuleCoverageInput): DeliveryGateResult {
     const { ownedFilesForGate: ownedFiles, coOwnedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
 
     // Check ownership health for unclassified dirty files
@@ -301,7 +323,49 @@ export function createDeliveryGateV2(opts: {
     const aggregate = attribution.getAggregateAttribution(allVerifications)
 
     switch (aggregate.attribution) {
-      case 'verified':
+      case 'verified': {
+        // W1 回归防线: "有 passed 验证" ≠ "改动波及面被验证过"。Meridian 波及
+        // 的测试若存在于磁盘且从未被任何 passed 验证覆盖 → 降为 YELLOW
+        // (module_unverified)。deliver_task(commit=true) 时升 RED 硬拦。
+        if (moduleCoverage && moduleCoverage.impactedTests.length > 0) {
+          const coverage = assessImpactedTestCoverage(
+            moduleCoverage.impactedTests,
+            allVerifications,
+            moduleCoverage.testExists,
+          )
+          if (coverage.uncovered.length > 0) {
+            const sample = coverage.uncovered.slice(0, 5)
+            return {
+              state: 'YELLOW',
+              canDeliver: true,
+              isBlocked: false,
+              reason: `${ownedFiles.length} owned file(s) have passed verifications, but ${coverage.uncovered.length} impacted test file(s) (Meridian blast radius) were never covered by any passed run: ${sample.join(', ')}${coverage.uncovered.length > sample.length ? ` (+${coverage.uncovered.length - sample.length} more)` : ''}. Regression risk — run these tests or a full-scope verification.`,
+              ownedFileCount: ownedFiles.length,
+              externalFileCount: externalFiles.length,
+              verificationCount: allVerifications.length,
+              ...diagnostics,
+              latestVerificationTotals,
+              attributionClass: 'module_unverified',
+              uncoveredImpactedTests: coverage.uncovered,
+              ...(coverage.uncoverable.length > 0 ? { uncoverableImpactedTests: coverage.uncoverable } : {}),
+            }
+          }
+          if (coverage.uncoverable.length > 0) {
+            // 留痕不阻断：已删/重命名的测试只出现在报告里
+            return {
+              state: 'GREEN',
+              canDeliver: true,
+              isBlocked: false,
+              reason: `${ownedFiles.length} owned file(s) verified. Ready to deliver. (${coverage.uncoverable.length} impacted test path(s) no longer exist — deleted/renamed, excluded from coverage check.)`,
+              ownedFileCount: ownedFiles.length,
+              externalFileCount: externalFiles.length,
+              verificationCount: allVerifications.length,
+              ...diagnostics,
+              latestVerificationTotals,
+              uncoverableImpactedTests: coverage.uncoverable,
+            }
+          }
+        }
         return {
           state: 'GREEN',
           canDeliver: true,
@@ -313,6 +377,7 @@ export function createDeliveryGateV2(opts: {
           ...diagnostics,
       latestVerificationTotals,
         }
+      }
 
       case 'external_blocked':
         return {
@@ -436,8 +501,8 @@ export function createDeliveryGateV2(opts: {
     }
   }
 
-  function getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string): DeliveryReport {
-    const result = assess(externalVerifications, currentDirtyFiles, currentSnapshotRef)
+  function getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string, moduleCoverage?: ModuleCoverageInput): DeliveryReport {
+    const result = assess(externalVerifications, currentDirtyFiles, currentSnapshotRef, moduleCoverage)
     const { ownedFilesForGate, coOwnedFiles, historicalOwnedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
     return {
       taskId: taskLedger.getTaskId(),
@@ -461,6 +526,8 @@ export function createDeliveryGateV2(opts: {
       shortestNextStep: result.shortestNextStep,
       blockingReason: result.blockingReason,
       attributionClass: result.attributionClass,
+      uncoveredImpactedTests: result.uncoveredImpactedTests,
+      uncoverableImpactedTests: result.uncoverableImpactedTests,
       attributionSummary: result.reason ?? 'No attribution available.',
     }
   }

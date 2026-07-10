@@ -12,6 +12,7 @@ import type { PlaybookBullet } from '../agent/playbook.js'
 import type { WorktreeReality } from '../agent/worktree-reality.js'
 import type { TaskDepthLayer } from '../context/task-contract.js'
 import { loadDeclaredVerify } from '../config/verify-config.js'
+import { detectRuntimeEnvBlock } from './runtime-env.js'
 
 const DEPTH_ADVISORY: Record<Exclude<TaskDepthLayer, 'unit'>, string> = {
   wiring: '<task-depth layer="wiring">此任务跨越模块边界。mock 单测会掩盖接线缺陷。写集成测试时实例化真实依赖（非 mock），RED 必须先证明边界断裂，GREEN 才证明已修复。</task-depth>',
@@ -846,6 +847,14 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   const shellNote = windowsShellNote(getShellCommand().kind)
   if (shellNote) {
     parts.push(shellNote)
+  }
+
+  // W4 运行时版本感知：目标项目 Python/Node/Rust/Go 版本（探测一次、按 cwd
+  // 记忆化 → 会话内字节恒定）。同 <environment> 一类的会话常量，留在 frozen
+  // `<context>` 块缓存安全；不进跨会话 static 系统提示，也不进每轮 appendix。
+  const runtimeEnv = detectRuntimeEnvBlock(ctx.cwd)
+  if (runtimeEnv) {
+    parts.push(runtimeEnv)
   }
 
   // 天枢本体锚点——常驻 frozen，简短心跳确认在场。

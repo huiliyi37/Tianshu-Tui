@@ -38,6 +38,7 @@ function makeContext(opts: {
   declaredCheckRunner?: import('../typecheck-gate.js').DeclaredCommandRunner
   taskContract?: import('../../context/task-contract.js').TaskContract
   inventorySearcher?: import('../regression-inventory.js').InventorySearcher
+  impactedTests?: string[]
 }) {
   const baseline = createWorktreeBaseline({
     branch: 'feat/b1',
@@ -74,6 +75,7 @@ function makeContext(opts: {
     declaredCheckRunner: opts.declaredCheckRunner,
     getTaskContract: opts.taskContract ? () => opts.taskContract : undefined,
     inventorySearcher: opts.inventorySearcher,
+    getImpactedTests: opts.impactedTests ? () => opts.impactedTests! : undefined,
   }))
 
   const params: ToolCallParams = {
@@ -127,6 +129,104 @@ describe('deliver-task — semantic task delivery tool', () => {
     const result = await tool.execute(params)
     assert.equal(result.isError ?? false, false)
     assert.ok(result.content.includes('RED'))
+  })
+
+  it('W1: commit=true blocked when impacted tests were never covered (module_unverified → RED)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w1-impacted-'))
+    try {
+      mkdirSync(join(dir, 'src', '__tests__'), { recursive: true })
+      writeFileSync(join(dir, 'src', '__tests__', 'consumer.test.ts'), '// impacted test')
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        dirtyFiles: ['src/a.ts'],
+        verifications: [{ command: 'npx tsx --test src/__tests__/a.test.ts', status: 'passed', meta: { scope: 'targeted' } }],
+        impactedTests: ['src/__tests__/consumer.test.ts'],
+        commitOwnedFiles: () => {
+          throw new Error('commit executor should not run when impacted tests are uncovered')
+        },
+      })
+
+      const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, message: 'fix: test' } })
+      assert.equal(result.isError, true)
+      assert.ok(result.content.includes('impacted tests'))
+      assert.ok(result.content.includes('src/__tests__/consumer.test.ts'))
+      assert.ok(result.content.includes('force=true'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('W1: force=true overrides module_unverified block (逃生口)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w1-force-'))
+    try {
+      mkdirSync(join(dir, 'src', '__tests__'), { recursive: true })
+      writeFileSync(join(dir, 'src', '__tests__', 'consumer.test.ts'), '// impacted test')
+      let committed = false
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        dirtyFiles: ['src/a.ts'],
+        verifications: [{ command: 'npx tsx --test src/__tests__/a.test.ts', status: 'passed', meta: { scope: 'targeted' } }],
+        impactedTests: ['src/__tests__/consumer.test.ts'],
+        commitOwnedFiles: () => {
+          committed = true
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, force: true, message: 'fix: test' } })
+      assert.equal(result.isError ?? false, false)
+      assert.equal(committed, true)
+      assert.ok(result.content.includes('module_unverified overridden'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('W1: status-only module_unverified reports YELLOW without tool error', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w1-status-'))
+    try {
+      mkdirSync(join(dir, 'src', '__tests__'), { recursive: true })
+      writeFileSync(join(dir, 'src', '__tests__', 'consumer.test.ts'), '// impacted test')
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        dirtyFiles: ['src/a.ts'],
+        verifications: [{ command: 'npx tsx --test src/__tests__/a.test.ts', status: 'passed', meta: { scope: 'targeted' } }],
+        impactedTests: ['src/__tests__/consumer.test.ts'],
+      })
+
+      const result = await tool.execute({ ...params, cwd: dir })
+      assert.equal(result.isError ?? false, false)
+      assert.ok(result.content.includes('YELLOW'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('W1: nonexistent impacted tests are uncoverable — commit proceeds (假阳性防御)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'w1-uncoverable-'))
+    try {
+      let committed = false
+      const { tool, params } = makeContext({
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        dirtyFiles: ['src/a.ts'],
+        verifications: [{ command: 'npx tsx --test src/__tests__/a.test.ts', status: 'passed', meta: { scope: 'targeted' } }],
+        impactedTests: ['src/deleted/__tests__/gone.test.ts'],
+        commitOwnedFiles: () => {
+          committed = true
+          return { ok: true, output: 'commit abc123' }
+        },
+      })
+
+      const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, message: 'fix: test' } })
+      assert.equal(result.isError ?? false, false)
+      assert.equal(committed, true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('marks commit=true RED as tool error because commit request is rejected', async () => {
