@@ -3,9 +3,17 @@ import type { ServerResponse } from 'node:http'
 export class SseStream {
   private res: ServerResponse
   private _closed = false
+  private onDead?: () => void
 
-  constructor(res: ServerResponse) {
+  /**
+   * @param onDead invoked ONCE when the stream dies because the peer went away
+   * (a write threw). Lets the owner tear down its side (unsubscribe listeners,
+   * stop keepalive timers) immediately instead of waiting for — or missing —
+   * the response 'close' event. Not invoked on a local, intentional close().
+   */
+  constructor(res: ServerResponse, onDead?: () => void) {
     this.res = res
+    this.onDead = onDead
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -28,7 +36,20 @@ export class SseStream {
     try {
       this.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     } catch {
-      this._closed = true
+      this.markDead()
+    }
+  }
+
+  /** Transition to closed because the peer is gone; fire onDead exactly once. */
+  private markDead(): void {
+    if (this._closed) return
+    this._closed = true
+    const cb = this.onDead
+    this.onDead = undefined
+    try {
+      cb?.()
+    } catch {
+      // owner cleanup must never crash the write path
     }
   }
 
@@ -43,7 +64,7 @@ export class SseStream {
     try {
       this.res.write(': ping\n\n')
     } catch {
-      this._closed = true
+      this.markDead()
     }
   }
 

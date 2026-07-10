@@ -29,6 +29,8 @@
     "sidecarGaveUp": "运行时进程短时间内多次崩溃，已停止自动重启。请重启应用；若反复出现，请检查磁盘空间与数据目录（设置 → 存储），或查看日志后反馈。",
     "sidecarFailed": "sidecar 启动失败：未找到 Node 运行时或端口被占用。请重启应用，若仍失败请检查安装。",
     "sidecarReconnecting": "sidecar 未启动，正在重连…",
+    "sidecarDegraded": "运行时响应缓慢（可能正在处理耗时操作），正在观察，通常会自行恢复…",
+    "sidecarHung": "运行时约 1 分钟无响应，且有 {{count}} 个任务在途。重启会终止这些任务——可先等待，或选择重启应用。",
     "restartApp": "重启应用",
     "needsSetup": "未配置模型服务商的 API Key，无法开始对话或委派子代理。",
     "connectModel": "连接模型",

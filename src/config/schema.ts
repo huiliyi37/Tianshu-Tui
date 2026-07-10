@@ -233,6 +233,12 @@ export const agentSchema = z.object({
   autoReasoning: z.boolean().default(true),
   /** 默认星域（auto | tianshu | pojun ...）。新会话的初始星域将由此配置项决定。 */
   defaultDomain: z.string().default('auto'),
+  /**
+   * 重启后一键续跑的兜底模型（可选）。续跑严格沿用会话原模型（前缀缓存亲和）；
+   * 仅当原模型不可用且此项配置了可用模型时才切换续跑（UI 明示缓存将重建）。
+   * 未配置时 fail-closed：不自动续跑，引导开新会话。绝不静默回退默认模型。
+   */
+  resumeFallbackModel: z.string().optional(),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
   songlineEnabled: z.boolean().default(false),
   /** Enable cross-session knowledge loading (memory block, playbook, companion presence).

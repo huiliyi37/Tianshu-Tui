@@ -71,10 +71,40 @@ interface Store {
   generation: number
   pending: SessionEvent[]
   rafId: number | null
+  /** Coarse-timer fallback for flush — rAF alone stops entirely while the
+   *  window is hidden/occluded (macOS), which froze the folded state (and any
+   *  notifications derived from it) while `pending` piled up unbounded. */
+  fallbackId: ReturnType<typeof setTimeout> | null
+  /** Current generation's flush, exposed so visibilitychange can drain all
+   *  stores the instant the window becomes visible again. */
+  flushNow: (() => void) | null
   retry: () => void
 }
 
 const stores = new Map<string, Store>()
+
+/** Background flush deadline. Browsers clamp hidden-window timers to ~1s,
+ *  which still bounds reducer staleness — versus unbounded with rAF alone. */
+let FALLBACK_FLUSH_MS = 250
+/** Test-only: shrink the fallback deadline so tests don't wait real time. */
+export function __setHubFallbackFlushMs(ms: number): void {
+  FALLBACK_FLUSH_MS = ms
+}
+
+/** Hard cap: a burst that outruns both schedulers folds synchronously rather
+ *  than letting `pending` grow without bound. */
+const PENDING_FLUSH_CAP = 2000
+
+/** Drain every live store's pending batch now (visibilitychange hook). */
+function flushAllStores(): void {
+  for (const s of stores.values()) s.flushNow?.()
+}
+
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') flushAllStores()
+  })
+}
 
 const EMPTY_SNAPSHOT: SessionEventsView = {
   ...initialEventState,
@@ -103,19 +133,35 @@ function startLoop(id: string, store: Store): void {
   const gen = store.generation
 
   const flush = () => {
-    store.rafId = null
+    if (store.rafId !== null) {
+      cancelAnimationFrame(store.rafId)
+      store.rafId = null
+    }
+    if (store.fallbackId !== null) {
+      clearTimeout(store.fallbackId)
+      store.fallbackId = null
+    }
     if (store.generation !== gen || store.pending.length === 0) return
     const batch = store.pending
     store.pending = []
     store.state = eventReducer(store.state, { type: 'events', events: batch })
     notify(store)
   }
+  store.flushNow = flush
 
   const onEvent = (e: SessionEvent) => {
     if (store.generation !== gen) return
     if (e.seq > store.seq) store.seq = e.seq
     store.pending.push(e)
+    if (store.pending.length >= PENDING_FLUSH_CAP) {
+      flush()
+      return
+    }
+    // Double-schedule: rAF for frame-aligned folding in the foreground, a
+    // coarse timer as the background deadline (rAF never fires when hidden).
+    // Whichever fires first cancels the other inside flush().
     if (store.rafId === null) store.rafId = requestAnimationFrame(flush)
+    if (store.fallbackId === null) store.fallbackId = setTimeout(flush, FALLBACK_FLUSH_MS)
   }
 
   const onOpen = () => {
@@ -164,13 +210,18 @@ function startLoop(id: string, store: Store): void {
 
 function stopLoop(store: Store): void {
   store.stopped = true
-  store.generation += 1 // fence in-flight loop + queued rAF callbacks
+  store.generation += 1 // fence in-flight loop + queued rAF/timer callbacks
   store.ac?.abort()
   store.ac = null
   if (store.rafId !== null) {
     cancelAnimationFrame(store.rafId)
     store.rafId = null
   }
+  if (store.fallbackId !== null) {
+    clearTimeout(store.fallbackId)
+    store.fallbackId = null
+  }
+  store.flushNow = null
   store.pending = []
 }
 
@@ -187,6 +238,8 @@ function createStore(id: string): Store {
     generation: 0,
     pending: [],
     rafId: null,
+    fallbackId: null,
+    flushNow: null,
     retry: () => {},
   }
   store.retry = () => {

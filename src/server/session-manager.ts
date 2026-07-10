@@ -293,6 +293,14 @@ export type AgentFactory = (
   cwd?: string,
   sessionId?: string,
   approvalMode?: ApprovalMode,
+  /**
+   * Preferred model for the initial build (prefix-cache affinity). A session
+   * rebuilt after rehydrate must come back on the model its history was
+   * accumulated on — building on the default model and cross-switching later
+   * rebuilds the entire prefix cache. Factories may ignore it (test doubles)
+   * or fall back to the default when the id no longer resolves.
+   */
+  modelId?: string,
 ) => ManagedAgent
 
 export interface CreateSessionInput {
@@ -357,6 +365,14 @@ export interface SessionPersistenceAdapter {
   loadRecords?(): SessionRecord[]
   loadEvents?(sessionId: string): SessionEvent[]
   /**
+   * Async event-log read for the reconnect-replay path (optional). Adapters
+   * that implement it should do a non-blocking file read and keep JSON parsing
+   * off the main thread (worker / chunked) — a large log parsed inline starves
+   * SSE keepalives and turns one reconnect into a storm. Falls back to
+   * `loadEvents` when absent.
+   */
+  loadEventsAsync?(sessionId: string): Promise<SessionEvent[]>
+  /**
    * Storage-management support (optional). `sizeReport`/`sizeOf` report on-disk
    * byte usage via stat() only (never reading contents); `deleteSession`
    * irreversibly removes a session's files. Used by the manual cleanup UI.
@@ -414,6 +430,23 @@ export interface RuntimeSessionManagerOptions {
   defaultModelId?: string
   /** PlusMenu (domain) — the default domain key new sessions start on. */
   defaultDomain?: string
+  /**
+   * Fallback model for one-click resume when the session's original model is
+   * no longer available (user-configured, off by default). Resume is strictly
+   * model-affine — without this option an unavailable original model makes
+   * resume fail closed (open-a-new-session guidance) instead of silently
+   * running the history on the default model and rebuilding the prefix cache.
+   */
+  resumeFallbackModel?: string
+  /**
+   * Phase 3 #9 — release a built agent after this long of session inactivity
+   * (0 disables). The agent is the heavy half of a session (AgentLoop, tool
+   * registry, prompt engine, coordinator); once released the session also
+   * becomes eligible for the event-log LRU. The next prompt rebuilds the agent
+   * with history restored from disk — same recovery path as a sidecar restart.
+   * Default 30 minutes.
+   */
+  idleAgentTtlMs?: number
 }
 
 type InterventionKind = 'approval'
@@ -445,6 +478,8 @@ interface InternalSession {
    * bound memory — ensureEvents() (re)loads from disk on first access.
    */
   eventsLoaded: boolean
+  /** In-flight async log load — concurrent async opens share it (no double read). */
+  eventsLoadPromise?: Promise<void>
   seq: number
   running: boolean
   pending: Map<string, PendingIntervention>
@@ -560,6 +595,18 @@ export type DelegateResult =
   | { ok: true; workerId: string }
   | { ok: false; reason: 'not_found' | 'invalid' | 'unsupported' | 'limit' }
 
+/** Result of a one-click resume — `switched` means the fallback model took
+ *  over (UI must disclose that the prefix cache will be rebuilt). */
+export type ResumeRunResult =
+  | { ok: true; model: string; switched: boolean }
+  | { ok: false; code: 'not_found' | 'busy' | 'model_unavailable'; error: string }
+
+/** Injected user prompt for a resumed run — the model context was restored
+ *  from disk, so a short continuation instruction rides the existing history
+ *  (appended at the tail → prefix-cache friendly). */
+export const RESUME_PROMPT =
+  '[续跑] 上一轮执行被进程重启打断。请基于已有上下文继续完成中断前的任务；若中断点不明确，先回顾最近的工具输出与待办清单再继续。'
+
 function extractObjective(input: Record<string, unknown>): string {
   for (const key of ['objective', 'prompt', 'description', 'goal']) {
     const v = input[key]
@@ -637,6 +684,9 @@ export class RuntimeSessionManager {
   private readonly listModelsFn?: () => ModelOption[]
   private readonly defaultModelId?: string
   private readonly defaultDomain?: string
+  private readonly resumeFallbackModel?: string
+  private readonly idleAgentTtlMs: number
+  private idleSweepTimer?: ReturnType<typeof setInterval>
 
   constructor(opts: RuntimeSessionManagerOptions) {
     this.createAgent = opts.createAgent
@@ -651,7 +701,67 @@ export class RuntimeSessionManager {
     this.getRegistry = opts.getSessionRegistry
     this.listModelsFn = opts.listModels
     this.defaultModelId = opts.defaultModelId
+    this.resumeFallbackModel = opts.resumeFallbackModel
+    this.idleAgentTtlMs = opts.idleAgentTtlMs ?? 30 * 60_000
+    if (this.idleAgentTtlMs > 0) {
+      // Sweep once a minute; unref so the timer never keeps the process alive.
+      this.idleSweepTimer = setInterval(() => this.sweepIdleAgents(), 60_000)
+      this.idleSweepTimer.unref?.()
+    }
     if (this.persistence) this.rehydrate()
+  }
+
+  /**
+   * Phase 3 #9 — release built agents of long-idle sessions so a day-long
+   * sidecar doesn't accumulate one live AgentLoop per conversation ever opened.
+   * Conservative gates: never touches a session that is running, holds pending
+   * approvals, has user background workers or running jobs. Rebuild on the next
+   * prompt goes through ensureAgent → history restore, the same path a sidecar
+   * restart uses (prefix cache is content-addressed, so byte-identical history
+   * still hits).
+   */
+  sweepIdleAgents(): void {
+    if (this.idleAgentTtlMs <= 0) return
+    const now = this.now()
+    for (const s of this.sessions.values()) {
+      if (!s.agent || s.running) continue
+      if (s.pending.size > 0) continue
+      if (s.backgroundAborts && s.backgroundAborts.size > 0) continue
+      if (s.jobs && s.jobs.list().some((j) => j.status === 'running')) continue
+      if (now - s.record.updatedAt < this.idleAgentTtlMs) continue
+      this.releaseAgent(s)
+    }
+    // Agent-free sessions are now eligible for the event-log LRU too.
+    this.evictLoadedBeyondCap()
+  }
+
+  /** Shut down and drop a session's built agent (timers, coordinator, in-flight
+   *  worker handles). The lightweight record/events stay; ensureAgent rebuilds
+   *  on demand. Caller guarantees the session is not running. */
+  private releaseAgent(s: InternalSession): void {
+    if (!s.agent) return
+    try { s.agent.shutdown?.() } catch { /* best-effort */ }
+    s.agent = null
+  }
+
+  /**
+   * Phase 3 #9 — drop a session's heavy in-memory state entirely (agent, event
+   * ring, background jobs). Used by the archive path: an archived session is
+   * closed, so its jobs are terminated (mirrors hardDelete) and its log is
+   * evicted; everything reloads lazily from disk if the session is reopened.
+   */
+  private unloadSession(s: InternalSession): void {
+    if (s.running) return
+    this.releaseAgent(s)
+    try { s.jobs?.killAll() } catch { /* best-effort */ }
+    s.jobs = undefined
+    // Never drop unflushed coalesced deltas — they'd be lost from the replay.
+    this.flushDeltaBuf(s)
+    s.events = []
+    s.knownArtifacts = new Set()
+    s.eventsLoaded = false
+    const i = this.loadedOrder.indexOf(s.record.id)
+    if (i !== -1) this.loadedOrder.splice(i, 1)
   }
 
   /**
@@ -722,6 +832,13 @@ export class RuntimeSessionManager {
             reason: 'sidecar-restart',
             ...(orphans.length ? { interruptedApprovals: orphans } : {}),
           })
+          // One-click resume entry (Phase 3). Carries the model/domain the run
+          // was on — resume is strictly affine to both (prefix-cache), enforced
+          // server-side by resumeRun().
+          appendMarker('resume_offer', {
+            model: rec.model ?? null,
+            domain: rec.domain ?? 'auto',
+          })
           this.persistRecord(session)
         }
       }
@@ -779,6 +896,11 @@ export class RuntimeSessionManager {
           reason: 'sidecar-restart',
           ...(orphans.length ? { interruptedApprovals: orphans } : {}),
         })
+        // One-click resume entry (Phase 3) — see the lazy path above.
+        this.append(session, 'resume_offer', {
+          model: ps.record.model ?? null,
+          domain: ps.record.domain ?? 'auto',
+        })
         this.persistRecord(session)
       }
     }
@@ -793,27 +915,102 @@ export class RuntimeSessionManager {
   private ensureEvents(session: InternalSession): void {
     if (!session.eventsLoaded) {
       const loader = this.persistence?.loadEvents
+      let loadError: string | undefined
       if (loader) {
         let evs: SessionEvent[]
-        try { evs = loader.call(this.persistence, session.record.id) } catch { evs = [] }
-        evs.sort((a, b) => a.seq - b.seq)
-        // knownArtifacts 在截断前从全量构建——即使 artifact 事件落在被截掉的
-        // 头部，去重集仍然完整（防止重放时重新公告旧 artifact）。
-        session.knownArtifacts = new Set(
-          evs.filter((e) => e.type === 'artifact').map((e) => String(e.data.id)),
-        )
-        const maxSeq = evs.length ? evs[evs.length - 1]!.seq : session.record.lastSeq
-        session.seq = Math.max(session.seq, maxSeq)
-        // 内存环上限对懒加载路径同样生效：极长会话（磁盘日志 ≫ maxEvents）只
-        // 保留尾部进内存——与活跃会话超过环容量后的行为一致（append 已截尾），
-        // 客户端 since=0 重放本来就只拿得到环内尾部。磁盘 events.jsonl 不动，
-        // 仍是完整历史的 source of truth。
-        session.events = evs.length > this.maxEvents ? evs.slice(evs.length - this.maxEvents) : evs
+        try {
+          evs = loader.call(this.persistence, session.record.id)
+        } catch (err) {
+          // Do NOT silently replay an empty history — record the failure so it
+          // surfaces as a visible error event below (a viewer that reconnects
+          // into a blank timeline otherwise has no clue the log read failed).
+          evs = []
+          loadError = redactText((err as Error)?.message ?? String(err))
+        }
+        this.adoptLoadedEvents(session, evs)
       }
       session.eventsLoaded = true
+      if (loadError !== undefined) {
+        this.append(session, 'error', {
+          error: `event log could not be read — history replay is incomplete (${loadError})`,
+        })
+      }
     }
     this.touchLoaded(session)
     this.evictLoadedBeyondCap()
+  }
+
+  /** Fold a freshly-read on-disk log into the session (shared by the sync and
+   *  async load paths). Caller still owns the eventsLoaded flag. */
+  private adoptLoadedEvents(session: InternalSession, evs: SessionEvent[]): void {
+    evs.sort((a, b) => a.seq - b.seq)
+    // knownArtifacts 在截断前从全量构建——即使 artifact 事件落在被截掉的
+    // 头部，去重集仍然完整（防止重放时重新公告旧 artifact）。
+    session.knownArtifacts = new Set(
+      evs.filter((e) => e.type === 'artifact').map((e) => String(e.data.id)),
+    )
+    const maxSeq = evs.length ? evs[evs.length - 1]!.seq : session.record.lastSeq
+    session.seq = Math.max(session.seq, maxSeq)
+    // 内存环上限对懒加载路径同样生效：极长会话（磁盘日志 ≫ maxEvents）只
+    // 保留尾部进内存——与活跃会话超过环容量后的行为一致（append 已截尾），
+    // 客户端 since=0 重放本来就只拿得到环内尾部。磁盘 events.jsonl 不动，
+    // 仍是完整历史的 source of truth。
+    session.events = evs.length > this.maxEvents ? evs.slice(evs.length - this.maxEvents) : evs
+  }
+
+  /**
+   * Async twin of ensureEvents for the reconnect-replay entry points. Uses the
+   * adapter's non-blocking `loadEventsAsync` when available (async file read +
+   * off-thread parse) so a multi-MB log doesn't stall SSE keepalives.
+   * Guards:
+   *  - concurrent async opens share one in-flight load (no double read);
+   *  - if a sync ensureEvents() wins the race while we awaited, the stale disk
+   *    snapshot is discarded — the sync path may already have appended fresh
+   *    events that a blind overwrite would drop.
+   */
+  private async ensureEventsAsync(session: InternalSession): Promise<void> {
+    if (!session.eventsLoaded) {
+      const asyncLoader = this.persistence?.loadEventsAsync
+      if (!asyncLoader) {
+        this.ensureEvents(session)
+        return
+      }
+      if (!session.eventsLoadPromise) {
+        session.eventsLoadPromise = (async () => {
+          let evs: SessionEvent[]
+          let loadError: string | undefined
+          try {
+            evs = await asyncLoader.call(this.persistence, session.record.id)
+          } catch (err) {
+            evs = []
+            loadError = redactText((err as Error)?.message ?? String(err))
+          }
+          if (session.eventsLoaded) return // sync load won the race — keep it
+          this.adoptLoadedEvents(session, evs)
+          session.eventsLoaded = true
+          if (loadError !== undefined) {
+            this.append(session, 'error', {
+              error: `event log could not be read — history replay is incomplete (${loadError})`,
+            })
+          }
+        })().finally(() => {
+          session.eventsLoadPromise = undefined
+        })
+      }
+      await session.eventsLoadPromise
+    }
+    this.touchLoaded(session)
+    this.evictLoadedBeyondCap()
+  }
+
+  /** Async twin of getEvents — reconnect/replay entry point for HTTP routes. */
+  async getEventsAsync(id: string, since = 0): Promise<{ events: SessionEvent[]; lastSeq: number } | undefined> {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    await this.ensureEventsAsync(s)
+    this.flushDeltaBuf(s)
+    const events = s.events.filter((e) => e.seq > since)
+    return { events, lastSeq: s.seq }
   }
 
   /** Mark a session's log as most-recently-used in the LRU. */
@@ -1104,7 +1301,13 @@ export class RuntimeSessionManager {
       })
       .finally(() => {
         session.running = false
-        this.rejectAllPending(session, 'aborted')
+        // Close out approvals the run left dangling — the promise must settle
+        // (deny) either way, but label honestly: only an aborted run closes as
+        // 'aborted'; a run that ended on its own (completed/failed) leaves the
+        // approval merely 'stale' — the user never denied it and nothing was
+        // interrupted. Mislabeling completed runs as aborted poisoned the
+        // timeline and downstream "was this an interruption?" heuristics.
+        this.rejectAllPending(session, session.record.status === 'aborted' ? 'aborted' : 'stale')
         // R1 — turn finished: release this session's exclusive file claims so a
         // peer session can edit those files next. Idempotent / best-effort.
         try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* non-fatal */ }
@@ -1115,8 +1318,74 @@ export class RuntimeSessionManager {
         this.append(session, 'done', { status: session.record.status })
         this.persistRecord(session)
         this.maybeWatchdogAutoContinue(session)
+        // Phase 3 #9 — the session was archived while this run was settling
+        // (archive aborts first): finish the unload archiveSession deferred.
+        if (session.record.archived) this.unloadSession(session)
       })
     return true
+  }
+
+  /**
+   * One-click resume for a run interrupted by a sidecar restart (resume_offer).
+   *
+   * Cache-affinity contract (hard requirement): the resumed run MUST stay on
+   * the model and star domain the session was on before the restart — the
+   * conversation's prefix cache lives per model, and rebuilding it on a
+   * different model costs more than the resume saves. Behavior ladder:
+   *  - original model available → resume on it (domain restored via
+   *    ensureAgent → applySelections from the persisted record.domain);
+   *  - original model unavailable AND `resumeFallbackModel` is configured and
+   *    available → resume on the fallback with an explicit model_switched
+   *    event (`switched: true` in the result lets the UI say "cache will be
+   *    rebuilt");
+   *  - otherwise fail closed (`model_unavailable`) — the UI degrades to a
+   *    "start a new session" entry. Never silently falls back to the default
+   *    model.
+   */
+  resumeRun(id: string): ResumeRunResult {
+    const session = this.sessions.get(id)
+    if (!session) return { ok: false, code: 'not_found', error: 'Session not found' }
+    if (session.running) return { ok: false, code: 'busy', error: 'Session is already running' }
+    const original = session.record.model
+    const available = this.listModelsFn?.()
+    // No injected model source (tests / minimal setups): trust the record —
+    // there is nothing to validate against, and the factory resolves it.
+    const isAvailable = (m: string | undefined): m is string =>
+      !!m && (!available || available.some((o) => o.id === m || o.alias === m))
+    let target = original
+    let switched = false
+    if (!isAvailable(original)) {
+      const fallback = this.resumeFallbackModel
+      if (!isAvailable(fallback)) {
+        return {
+          ok: false,
+          code: 'model_unavailable',
+          error: original
+            ? `原模型 ${original} 当前不可用，且未配置续跑兜底模型（agent.resumeFallbackModel）——请开新会话继续`
+            : '会话未记录原模型，无法保证缓存亲和——请开新会话继续',
+        }
+      }
+      target = fallback
+      switched = true
+    }
+    if (switched) {
+      if (session.agent) {
+        // Live agent on the wrong model — hot-swap it (emits model_switched).
+        if (!this.switchModel(id, target!)) {
+          return { ok: false, code: 'model_unavailable', error: `兜底模型 ${target} 切换失败——请开新会话继续` }
+        }
+      } else {
+        // Agent not built yet: point the record at the fallback so ensureAgent
+        // builds on it directly, and leave an audit event.
+        this.ensureEvents(session)
+        session.record.model = target
+        this.append(session, 'model_switched', { modelId: target, reason: 'resume-fallback', from: original ?? null })
+        this.persistRecord(session)
+      }
+    }
+    const started = this.run(id, RESUME_PROMPT)
+    if (!started) return { ok: false, code: 'busy', error: 'Session is already running' }
+    return { ok: true, model: session.record.model ?? target ?? '', switched }
   }
 
   /**
@@ -1185,7 +1454,14 @@ export class RuntimeSessionManager {
   private ensureAgent(session: InternalSession): ManagedAgent {
     if (!session.agent) {
       this.ensureJobs(session)
-      session.agent = this.createAgent(session.record.cwd, session.record.id, session.approvalMode)
+      // Model affinity: a rehydrated session must come back on the model its
+      // record carries (prefix-cache lives per model) — not the default model.
+      session.agent = this.createAgent(
+        session.record.cwd,
+        session.record.id,
+        session.approvalMode,
+        session.record.model,
+      )
       this.applySelections(session)
       this.warnIfHistoryLost(session)
     }
@@ -1951,6 +2227,10 @@ export class RuntimeSessionManager {
    * best-effort：任一 session shutdown 抛错不影响其他。
    */
   shutdownAll(): void {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer)
+      this.idleSweepTimer = undefined
+    }
     for (const s of this.sessions.values()) {
       try { s.agent?.shutdown?.() } catch { /* best-effort */ }
       try { s.jobs?.killAll() } catch { /* best-effort */ }
@@ -1970,6 +2250,7 @@ export class RuntimeSessionManager {
   archiveSession(id: string): boolean {
     const s = this.sessions.get(id)
     if (!s || s.record.archived) return false
+    const wasRunning = s.running
     // Stop any in-flight run first (mirrors abort's cleanup).
     if (s.running) {
       s.record.status = 'aborted'
@@ -2008,6 +2289,10 @@ export class RuntimeSessionManager {
       : { status: 'archived' })
     this.persistRecord(s)
     try { this.getRegistry?.()?.releaseAllClaims(id) } catch (e) { console.warn('releaseAllClaims failed during archive:', e) }
+    // Phase 3 #9 — an archived session must not keep its heavy state resident.
+    // If a run was just aborted above, its promise is still settling; run()'s
+    // finally does the unload once the agent has actually let go.
+    if (!wasRunning) this.unloadSession(s)
     return true
   }
 

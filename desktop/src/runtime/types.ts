@@ -185,6 +185,11 @@ export interface HealthInfo {
   runningCount: number
   /** false when the default provider has no usable API key (first launch / setup mode). */
   configured: boolean
+  /** p99 sidecar event-loop delay (ms) over the last poll window — high values
+   *  mean "sidecar busy", which the UI shows instead of a phantom "offline". */
+  loopLagP99Ms?: number
+  /** Worst single event-loop delay (ms) over the same window. */
+  loopLagMaxMs?: number
 }
 
 export interface ToolVersionInfo {

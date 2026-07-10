@@ -21,7 +21,11 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { setImmediate as yieldToLoop } from 'node:timers/promises'
 import { join } from 'node:path'
+import { cpuPool } from '../workers/cpu-pool.js'
+import { parseEventsJsonlRaw } from '../workers/cpu-tasks.js'
 import type {
   PersistedSession,
   SessionEvent,
@@ -34,11 +38,22 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
 
   /** Per-session event write buffer — batches high-frequency appendFileSync
    *  (streaming deltas can fire hundreds per turn) into one disk write per
-   *  FLUSH_INTERVAL_MS. Critical events flush immediately via flushEventBuffer. */
+   *  FLUSH_INTERVAL_MS. Critical events (CRITICAL_TYPES) flush their session's
+   *  buffer immediately so a host-process crash can never lose them — closing
+   *  the 100ms window that used to swallow the tail (e.g. a tool_result whose
+   *  loss later resurfaces as "session interrupted, tool result lost"). The
+   *  flush is one batched write() (not fsync); the threat model is process
+   *  death, where page-cache contents survive. */
   private eventBuffers = new Map<string, string[]>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   private static readonly FLUSH_INTERVAL_MS = 100
   private static readonly FLUSH_MAX_LINES = 50
+  /** Events that must be on disk the moment they are appended. Delta/phase
+   *  chatter stays on the debounce timer. */
+  private static readonly CRITICAL_TYPES: ReadonlySet<string> = new Set([
+    'user', 'tool_result', 'status', 'error', 'done',
+    'approval_required', 'approval_resolved', 'unattended_halt',
+  ])
 
   private dir(id: string): string {
     return join(this.baseDir, sanitize(id))
@@ -67,7 +82,12 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
       this.eventBuffers.set(sessionId, buf)
     }
     buf.push(JSON.stringify(event) + '\n')
-    if (buf.length >= FileSessionPersistence.FLUSH_MAX_LINES) {
+    if (
+      FileSessionPersistence.CRITICAL_TYPES.has(event.type) ||
+      buf.length >= FileSessionPersistence.FLUSH_MAX_LINES
+    ) {
+      // One batched write for everything buffered so far — same-tick bursts
+      // (parallel tool results) coalesce naturally into a single syscall.
       this.flushSession(sessionId)
     } else if (!this.flushTimer) {
       this.flushTimer = setTimeout(() => this.flushAll(), FileSessionPersistence.FLUSH_INTERVAL_MS)
@@ -179,6 +199,32 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   }
 
   /**
+   * Async variant for the reconnect-replay path: non-blocking file read, then
+   * JSON.parse offloaded to the shared cpu-pool worker. A multi-MB events.jsonl
+   * parsed inline used to stall the event loop long enough to starve SSE
+   * keepalives — turning one reconnect into a reconnect storm. Falls back to a
+   * chunked inline parse (yields between batches) when the pool is unavailable.
+   */
+  async loadEventsAsync(id: string): Promise<SessionEvent[]> {
+    this.flushSession(id)
+    const file = join(this.dir(id), 'events.jsonl')
+    let text: string
+    try {
+      text = await readFile(file, 'utf8')
+    } catch {
+      return []
+    }
+    if (!text) return []
+    // Small logs parse faster inline than a worker round-trip costs.
+    if (text.length < 256 * 1024) return parseEventsJsonlRaw(text) as SessionEvent[]
+    try {
+      return (await cpuPool.run('parseEventsJsonlRaw', [text])) as SessionEvent[]
+    } catch {
+      return chunkedParseEvents(text)
+    }
+  }
+
+  /**
    * On-disk byte size of every session, keyed by session id. Stat-based only
    * (file metadata, never reads contents) so surfacing storage usage in the UI
    * costs a handful of stat() calls — not a re-read of the (potentially huge)
@@ -256,21 +302,7 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
     } catch {
       return []
     }
-    const events: SessionEvent[] = []
-    for (const line of text.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      try {
-        const parsed = JSON.parse(trimmed) as SessionEvent
-        if (parsed && typeof parsed.seq === 'number' && typeof parsed.type === 'string') {
-          events.push(parsed)
-        }
-      } catch {
-        // corrupt/partial line (e.g. crash mid-write) — drop it, keep the rest
-      }
-    }
-    events.sort((a, b) => a.seq - b.seq)
-    return events
+    return parseEventsJsonlRaw(text) as SessionEvent[]
   }
 
   private readRecord(dir: string, id: string, events: SessionEvent[]): SessionRecord | null {
@@ -302,6 +334,35 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
 
 function sanitize(id: string): string {
   return id.replace(/[^A-Za-z0-9._-]/g, '_')
+}
+
+/**
+ * Inline fallback when the cpu-pool is unavailable: parse in bounded batches,
+ * yielding to the event loop between batches so SSE pings and other requests
+ * keep flowing even for very large logs.
+ */
+async function chunkedParseEvents(text: string): Promise<SessionEvent[]> {
+  const lines = text.split('\n')
+  const events: SessionEvent[] = []
+  const BATCH = 2000
+  for (let i = 0; i < lines.length; i += BATCH) {
+    if (i > 0) await yieldToLoop()
+    const end = Math.min(i + BATCH, lines.length)
+    for (let j = i; j < end; j++) {
+      const trimmed = lines[j]!.trim()
+      if (!trimmed) continue
+      try {
+        const parsed = JSON.parse(trimmed) as SessionEvent
+        if (parsed && typeof parsed.seq === 'number' && typeof parsed.type === 'string') {
+          events.push(parsed)
+        }
+      } catch {
+        // corrupt/partial line — drop it, keep the rest
+      }
+    }
+  }
+  events.sort((a, b) => a.seq - b.seq)
+  return events
 }
 
 /** Provider-safe image MIMEs ↔ file extensions (single source of truth). */

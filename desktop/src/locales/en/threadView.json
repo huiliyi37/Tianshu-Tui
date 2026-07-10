@@ -27,11 +27,22 @@
     "forkHere": "Fork here",
     "backToLatest": "Back to latest"
   },
+  "resume": {
+    "title": "The previous run was interrupted by an app restart",
+    "detail": "Resume in one click — keeps the original model {{model}} and domain {{domain}} (preserves cache hits)",
+    "detailNoModel": "No model recorded for this session (domain {{domain}}) — resume will be strictly validated",
+    "button": "Resume",
+    "pending": "Resuming…",
+    "dismiss": "Dismiss",
+    "switchedToast": "Original model unavailable — resumed on configured fallback {{model}}; the prefix cache will be rebuilt",
+    "newSessionHint": "Consider starting a new session and restating the context"
+  },
   "stream": {
     "offline": "Live connection lost — you may be missing the latest progress",
     "retry": "Reconnect",
     "retryAria": "Reconnect live updates",
     "reconnecting": "Connection interrupted, reconnecting…",
+    "busy": "Service busy (processing a heavy operation) — updates will resume shortly…",
     "longOutput": "↑ Long output — full text shown on completion"
   },
   "welcome": {

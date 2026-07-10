@@ -726,6 +726,41 @@ test('watchdog_recovery breaks an open text run', () => {
   assert.equal(s.blocks[2]!.text, 'resumed')
 })
 
+// ── resume_offer：一键续跑入口（模型/星域缓存亲和） ─────────────────────────
+
+test('resume_offer 记录原模型/星域，供续跑卡片渲染', () => {
+  seq = 0
+  const s = fold([
+    ev('status', { status: 'aborted', reason: 'sidecar-restart' }),
+    ev('resume_offer', { model: 'kimi-x', domain: 'tianshu' }),
+  ])
+  assert.ok(s.resumeOffer)
+  assert.equal(s.resumeOffer!.model, 'kimi-x')
+  assert.equal(s.resumeOffer!.domain, 'tianshu')
+})
+
+test('resume_offer：model 缺失时归一为 null（服务端 fail-closed 兜底）', () => {
+  seq = 0
+  const s = fold([ev('resume_offer', { model: null, domain: 'auto' })])
+  assert.equal(s.resumeOffer!.model, null)
+})
+
+test('新用户消息 / 新 run 使 resume_offer 失效', () => {
+  seq = 0
+  const viaUser = fold([
+    ev('resume_offer', { model: 'kimi-x', domain: 'tianshu' }),
+    ev('user', { text: '继续' }),
+  ])
+  assert.equal(viaUser.resumeOffer, null, '用户消息（含续跑注入的提示）清除入口')
+
+  seq = 0
+  const viaRun = fold([
+    ev('resume_offer', { model: 'kimi-x', domain: 'tianshu' }),
+    ev('status', { status: 'running' }),
+  ])
+  assert.equal(viaRun.resumeOffer, null, '新 run 开始清除入口')
+})
+
 // ── Immutability: snapshot must not be corrupted by subsequent deltas ──────
 
 test('text_delta does not mutate previous state snapshot (immutability)', () => {

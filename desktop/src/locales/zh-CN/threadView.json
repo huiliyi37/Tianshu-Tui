@@ -27,11 +27,22 @@
     "forkHere": "在此分叉 (Fork)",
     "backToLatest": "返回最新"
   },
+  "resume": {
+    "title": "上一轮执行被应用重启打断",
+    "detail": "可一键续跑 — 沿用原模型 {{model}} 与星域 {{domain}}（保持缓存命中）",
+    "detailNoModel": "会话未记录原模型（星域 {{domain}}）— 续跑将做严格校验",
+    "button": "续跑",
+    "pending": "续跑中…",
+    "dismiss": "忽略",
+    "switchedToast": "原模型不可用，已按配置切换到 {{model}} 续跑 — 前缀缓存将重建",
+    "newSessionHint": "建议开新会话并重述上下文"
+  },
   "stream": {
     "offline": "实时连接已断开，可能错过最新进度",
     "retry": "重新连接",
     "retryAria": "重新连接实时更新",
     "reconnecting": "连接中断，正在重连…",
+    "busy": "服务繁忙（正在处理耗时操作），更新稍后恢复…",
     "longOutput": "↑ 输出较长，完成后显示全文"
   },
   "welcome": {

@@ -6,6 +6,7 @@ import {
   __setHubTransport,
   __resetHubTransport,
   __activeStoreCount,
+  __setHubFallbackFlushMs,
 } from '../session-event-hub'
 import type { SessionEvent } from '../../runtime/types'
 
@@ -96,6 +97,55 @@ test('events fan out to every subscriber and fold into the shared snapshot', asy
     unsubA()
     unsubB()
   } finally {
+    __resetHubTransport()
+  }
+})
+
+test('background fallback: events still fold when rAF never fires (hidden window)', async () => {
+  // Simulate a hidden/occluded window: rAF hands out ids but never runs the
+  // callback — exactly what WebViews do when the window is not visible.
+  const prevRaf = g.requestAnimationFrame
+  g.requestAnimationFrame = () => 999
+  __setHubFallbackFlushMs(20)
+  const events: SessionEvent[] = [
+    { seq: 1, ts: 0, type: 'user', data: { text: 'bg' } } as SessionEvent,
+    { seq: 2, ts: 0, type: 'status', data: { status: 'completed' } } as SessionEvent,
+  ]
+  const fake = makeFakeTransport(events)
+  __setHubTransport(fake)
+  try {
+    const unsub = subscribeSession('s-bg', () => {})
+    await tick(60) // > fallback deadline, no rAF ever fires
+    const view = getSessionSnapshot('s-bg')
+    assert.equal(view.lastSeq, 2, 'fallback timer must fold pending events without rAF')
+    assert.equal(view.status, 'completed', 'status (→notifications) must not freeze in background')
+    unsub()
+  } finally {
+    g.requestAnimationFrame = prevRaf
+    __setHubFallbackFlushMs(250)
+    __resetHubTransport()
+  }
+})
+
+test('pending hard cap folds a burst synchronously (no scheduler needed)', async () => {
+  const prevRaf = g.requestAnimationFrame
+  g.requestAnimationFrame = () => 999 // dead rAF
+  __setHubFallbackFlushMs(60_000) // fallback effectively disabled
+  const events: SessionEvent[] = []
+  for (let i = 1; i <= 2000; i++) {
+    events.push({ seq: i, ts: 0, type: 'text_delta', data: { text: 'x' } } as SessionEvent)
+  }
+  const fake = makeFakeTransport(events)
+  __setHubTransport(fake)
+  try {
+    const unsub = subscribeSession('s-cap', () => {})
+    await tick(1) // let the stream replay synchronously; no schedulers involved
+    const view = getSessionSnapshot('s-cap')
+    assert.equal(view.lastSeq, 2000, 'cap-triggered flush must fold the burst')
+    unsub()
+  } finally {
+    g.requestAnimationFrame = prevRaf
+    __setHubFallbackFlushMs(250)
     __resetHubTransport()
   }
 })

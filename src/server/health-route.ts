@@ -5,6 +5,7 @@
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
 import type { RuntimeSessionManager } from './session-manager.js'
+import type { LoopLagSnapshot } from './loop-health.js'
 
 export function buildHealthRoute(
   manager: RuntimeSessionManager,
@@ -20,6 +21,9 @@ export function buildHealthRoute(
   /** Whether the default provider has a usable API key. Callback so it
    *  re-checks on each /health poll (user may have configured since startup). */
   configured?: () => boolean,
+  /** Event-loop delay for the window since the last poll — lets the desktop
+   *  tell "sidecar busy (loop starved)" apart from "connection dropped". */
+  loopLag?: () => LoopLagSnapshot,
 ): Record<string, RouteHandler> {
   return {
     'GET /health': (body, _params, headers) => {
@@ -27,6 +31,7 @@ export function buildHealthRoute(
         return { status: 401, body: { error: 'Unauthorized' } }
       }
       const { sessionCount, runningCount } = manager.stats()
+      const lag = loopLag?.()
       return {
         status: 200,
         body: {
@@ -37,6 +42,7 @@ export function buildHealthRoute(
           runningCount,
           registryOk: registryReady ? registryReady() : true,
           configured: configured?.() ?? true,
+          ...(lag ? { loopLagP99Ms: lag.p99Ms, loopLagMaxMs: lag.maxMs } : {}),
         },
       }
     },

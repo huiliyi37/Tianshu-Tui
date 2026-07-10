@@ -159,6 +159,9 @@ export interface EventViewState {
   /** Timestamp (ms) when the current run started (status→running). Undefined when idle.
    *  Drives the elapsed-time indicator so users can tell if the agent is stuck. */
   runStartedAt?: number
+  /** Phase 3 可靠性 — sidecar 重启打断在途 run 后的一键续跑入口（resume_offer）。
+   *  携带原模型/星域（续跑缓存亲和约束）；任何新用户消息/新 run 即失效清除。 */
+  resumeOffer: { seq: number; model: string | null; domain: string } | null
 }
 
 export const initialEventState: EventViewState = {
@@ -185,6 +188,7 @@ export const initialEventState: EventViewState = {
   jobsRev: 0,
   completionSummary: undefined,
   runStartedAt: undefined,
+  resumeOffer: null,
 }
 
 /** Strip the inline Evidence markdown section from assistant text so the desktop
@@ -260,6 +264,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.private_thinkingOpen = false
       // 提问卡片的回答走用户消息通道 —— 任何新用户消息都视为已回答/已跳过。
       next.pendingQuestion = null
+      // 对话继续了（含续跑本身注入的提示）——续跑入口随之失效。
+      next.resumeOffer = null
       next.blocks = [...next.blocks, {
         key: `u-${ev.seq}`,
         kind: 'user',
@@ -540,8 +546,10 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'status':
       next.status = String(ev.data.status ?? next.status ?? '')
       // Track run start timestamp for the elapsed-time indicator.
-      if (next.status === 'running') next.runStartedAt = ev.ts
-      else next.runStartedAt = undefined
+      if (next.status === 'running') {
+        next.runStartedAt = ev.ts
+        next.resumeOffer = null // 新 run 开始 → 续跑入口失效
+      } else next.runStartedAt = undefined
       return next
     case 'done':
       // Run settled — reflect the final status immediately instead of waiting
@@ -688,6 +696,15 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.blocksRev = next.blocksRev + 1
       return next
     }
+    case 'resume_offer':
+      // 重启打断在途 run —— 提供一键续跑入口（严格沿用原模型/星域；服务端
+      // resumeRun fail-closed 保证不静默换默认模型）。
+      next.resumeOffer = {
+        seq: ev.seq,
+        model: typeof ev.data.model === 'string' && ev.data.model ? ev.data.model : null,
+        domain: String(ev.data.domain ?? 'auto'),
+      }
+      return next
     case 'model_switched':
     case 'domain_changed':
     case 'skills_changed':

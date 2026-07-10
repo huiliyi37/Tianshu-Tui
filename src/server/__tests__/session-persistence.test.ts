@@ -1,6 +1,7 @@
+import './disable-cpu-pool.js' // must precede session-persistence import (worker hangs node:test)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, appendFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, appendFileSync, readdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { FileSessionPersistence } from '../session-persistence.js'
@@ -104,6 +105,106 @@ test('saveRecord is atomic (no stray tmp left behind)', () => {
     const files = readdirSync(join(dir, 's1'))
     assert.ok(files.includes('index.json'))
     assert.ok(!files.includes('index.json.tmp'), 'tmp file must be renamed away')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('critical events hit disk immediately, without waiting for the debounce flush', () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    p.saveRecord(rec('s1'))
+    // A delta buffers (debounced)…
+    p.appendEvent('s1', ev(1, 'text_delta'))
+    // …but a tool_result must be durable the moment append returns — this is
+    // the crash window that used to lose the tail ("tool result lost").
+    p.appendEvent('s1', ev(2, 'tool_result'))
+    const raw = readFileSync(join(dir, 's1', 'events.jsonl'), 'utf8')
+    const seqs = raw.trim().split('\n').map((l) => (JSON.parse(l) as SessionEvent).seq)
+    // The critical flush drains the whole buffer (one batched write), so the
+    // earlier delta rides along — nothing is left in memory to lose.
+    assert.deepEqual(seqs, [1, 2])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('non-critical events stay buffered until debounce/flushSync (no per-delta write)', () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    p.saveRecord(rec('s1'))
+    p.appendEvent('s1', ev(1, 'text_delta'))
+    p.appendEvent('s1', ev(2, 'thinking_delta'))
+    assert.equal(
+      existsSync(join(dir, 's1', 'events.jsonl')), false,
+      'deltas must not trigger an immediate write',
+    )
+    p.flushSync()
+    const raw = readFileSync(join(dir, 's1', 'events.jsonl'), 'utf8')
+    assert.equal(raw.trim().split('\n').length, 2)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('every critical type flushes immediately', () => {
+  const critical = ['user', 'tool_result', 'status', 'error', 'done', 'approval_required', 'approval_resolved', 'unattended_halt'] as const
+  for (const type of critical) {
+    const dir = tmp()
+    try {
+      const p = new FileSessionPersistence(dir)
+      p.appendEvent('s1', ev(1, type as SessionEvent['type']))
+      assert.equal(
+        existsSync(join(dir, 's1', 'events.jsonl')), true,
+        `${type} must be on disk immediately`,
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+})
+
+test('loadEventsAsync round-trips events and tolerates corrupt lines', async () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    p.appendEvent('s1', ev(1))
+    p.appendEvent('s1', ev(2, 'tool_result'))
+    p.flushSync()
+    appendFileSync(join(dir, 's1', 'events.jsonl'), '{"seq":3,"ts":1,"type":"tex') // crash mid-write
+    const evs = await p.loadEventsAsync('s1')
+    assert.deepEqual(evs.map((e) => e.seq), [1, 2], 'corrupt tail dropped, rest intact')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('loadEventsAsync handles a large log (off-thread or chunked path) correctly', async () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    // > 256KB so the pool/chunked path is exercised (not the small-log inline path).
+    const pad = 'x'.repeat(200)
+    for (let i = 1; i <= 2000; i++) {
+      p.appendEvent('big', { seq: i, ts: i, type: 'text_delta', data: { text: pad } })
+    }
+    p.flushSync()
+    const evs = await p.loadEventsAsync('big')
+    assert.equal(evs.length, 2000)
+    assert.equal(evs[0]!.seq, 1)
+    assert.equal(evs[1999]!.seq, 2000)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('loadEventsAsync returns [] for a session with no log', async () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    assert.deepEqual(await p.loadEventsAsync('nope'), [])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

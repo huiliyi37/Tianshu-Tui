@@ -236,6 +236,89 @@ test('lazy rehydrate reads no event logs at boot, loads on first open', () => {
   assert.deepEqual(mem.loadEventsCalls, ['a'], 'resident log is not re-read')
 })
 
+test('getEventsAsync lazily loads via loadEventsAsync and shares one in-flight read', async () => {
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'a', status: 'completed', createdAt: 1, updatedAt: 9,
+      cwd: '/work', lastSeq: 2, pendingApprovals: 0,
+    },
+    events: [ev(1, 'status', { status: 'running' }), ev(2, 'text_delta', { text: 'hi' })],
+  }]
+  const mem = new LazyMemoryPersistence(seed)
+  let asyncCalls = 0
+  ;(mem as SessionPersistenceAdapter).loadEventsAsync = async (id: string) => {
+    asyncCalls += 1
+    await new Promise((r) => setTimeout(r, 10))
+    return mem.events.get(id)?.map((e) => ({ ...e })) ?? []
+  }
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+  })
+
+  // Two concurrent async opens share ONE disk read.
+  const [r1, r2] = await Promise.all([mgr.getEventsAsync('a', 0), mgr.getEventsAsync('a', 0)])
+  assert.equal(asyncCalls, 1, 'concurrent opens must share the in-flight load')
+  assert.equal(r1!.events.length, 2)
+  assert.equal(r2!.lastSeq, 2)
+  assert.equal(mem.loadEventsCalls.length, 0, 'sync loadEvents untouched')
+
+  // Subsequent open is resident — no re-read.
+  await mgr.getEventsAsync('a', 0)
+  assert.equal(asyncCalls, 1)
+})
+
+test('a sync load winning the race is not clobbered by the stale async snapshot', async () => {
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'a', status: 'completed', createdAt: 1, updatedAt: 9,
+      cwd: '/work', lastSeq: 1, pendingApprovals: 0,
+    },
+    events: [ev(1, 'status', { status: 'running' })],
+  }]
+  const mem = new LazyMemoryPersistence(seed)
+  ;(mem as SessionPersistenceAdapter).loadEventsAsync = async (id: string) => {
+    await new Promise((r) => setTimeout(r, 20)) // slow disk
+    return mem.events.get(id)?.map((e) => ({ ...e })) ?? []
+  }
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+  })
+
+  const pending = mgr.getEventsAsync('a', 0) // async load in flight…
+  // …meanwhile the sync path wins the race and new events are appended on top.
+  mgr.run('a', 'go') // run() → ensureEvents (sync) → appends 'user' + 'status'
+  await pending
+  const now = mgr.getEvents('a', 0)!
+  assert.ok(
+    now.events.some((e) => e.type === 'user'),
+    'events appended after the sync load must survive the async load settling',
+  )
+})
+
+test('a failing loadEvents surfaces a visible error event instead of a silent empty replay', () => {
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'bad', status: 'completed', createdAt: 1, updatedAt: 9,
+      cwd: '/work', lastSeq: 7, pendingApprovals: 0,
+    },
+    events: [ev(1, 'status', { status: 'running' })],
+  }]
+  const mem = new LazyMemoryPersistence(seed)
+  mem.loadEvents = () => { throw new Error('EIO: disk unhappy') }
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+  })
+
+  const replay = mgr.getEvents('bad', 0)!
+  const errEv = replay.events.find((e) => e.type === 'error')
+  assert.ok(errEv, 'the failed log read must be visible in the replayed timeline')
+  assert.match(String(errEv!.data.error), /history replay is incomplete/)
+  assert.match(String(errEv!.data.error), /EIO/)
+})
+
 test('lazy rehydrate caps resident logs (LRU) and reloads evicted ones', () => {
   const seed: PersistedSession[] = ['s1', 's2', 's3'].map((id, i) => ({
     record: {
@@ -415,6 +498,214 @@ test('requestApproval persists pendingApprovals so the rehydrate gate sees it', 
 
   mgr.answerIntervention(s.id, 't1', 'reject')
   assert.equal(mem.records.get(s.id)!.pendingApprovals, 0)
+})
+
+// ── 一键续跑（resume_offer / resumeRun）：模型/星域缓存亲和 ─────────────────
+
+function crashSeed(model?: string, domain?: string): PersistedSession[] {
+  return [{
+    record: {
+      id: 'crash', status: 'running', createdAt: 1, updatedAt: 5,
+      cwd: '/work', lastSeq: 2, pendingApprovals: 0,
+      ...(model ? { model } : {}), ...(domain ? { domain } : {}),
+    },
+    events: [ev(1, 'user', { text: 'do it' }), ev(2, 'status', { status: 'running' })],
+  }]
+}
+
+test('rehydrate 给被打断的 run 追加 resume_offer（携带原模型/星域）', () => {
+  const mem = new LazyMemoryPersistence(crashSeed('kimi-x', 'tianshu'))
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+  })
+  const evs = mgr.getEvents('crash', 0)!.events
+  const offer = evs.find((e) => e.type === 'resume_offer')
+  assert.ok(offer, 'resume_offer 事件必须存在')
+  assert.equal(offer!.data.model, 'kimi-x')
+  assert.equal(offer!.data.domain, 'tianshu')
+  const statusMarker = evs.find((e) => e.type === 'status' && e.data.reason === 'sidecar-restart')
+  assert.ok(offer!.seq > statusMarker!.seq, 'resume_offer 排在中断标记之后')
+})
+
+test('resumeRun 沿用原模型建 agent 并注入续跑提示（缓存亲和）', async () => {
+  const factoryModels: (string | undefined)[] = []
+  const mem = new LazyMemoryPersistence(crashSeed('kimi-x', 'tianshu'))
+  const mgr = new RuntimeSessionManager({
+    createAgent: (_cwd, _id, _mode, modelId) => {
+      factoryModels.push(modelId)
+      return new NoopAgent()
+    },
+    persistence: mem,
+    listModels: () => [
+      { id: 'kimi-x', alias: 'kimi', provider: 'p' },
+      { id: 'v4-pro', alias: 'v4', provider: 'p' },
+    ],
+    defaultModelId: 'v4-pro',
+  })
+  const res = mgr.resumeRun('crash')
+  assert.deepEqual(res, { ok: true, model: 'kimi-x', switched: false })
+  assert.deepEqual(factoryModels, ['kimi-x'], 'agent 必须直接建在原模型上，而非默认模型')
+  const { RESUME_PROMPT } = await import('../session-manager.js')
+  const userEvents = mgr.getEvents('crash', 0)!.events.filter((e) => e.type === 'user')
+  assert.equal(userEvents[userEvents.length - 1]!.data.text, RESUME_PROMPT, '续跑注入恢复提示而非空 prompt')
+})
+
+test('resumeRun fail-closed：原模型不可用且无兜底 → 拒绝并保持原状', () => {
+  const factoryCalls: number[] = []
+  const mem = new LazyMemoryPersistence(crashSeed('gone-model', 'tianshu'))
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => { factoryCalls.push(1); return new NoopAgent() },
+    persistence: mem,
+    listModels: () => [{ id: 'v4-pro', alias: 'v4', provider: 'p' }],
+    defaultModelId: 'v4-pro',
+  })
+  const res = mgr.resumeRun('crash')
+  assert.equal(res.ok, false)
+  assert.equal((res as { code: string }).code, 'model_unavailable')
+  assert.equal(factoryCalls.length, 0, '绝不静默落到默认模型建 agent')
+  assert.equal(mgr.getSession('crash')!.status, 'aborted', '会话保持中断态')
+  const userEvents = mgr.getEvents('crash', 0)!.events.filter((e) => e.type === 'user' && e.data.text !== 'do it')
+  assert.equal(userEvents.length, 0, '没有注入任何续跑消息')
+})
+
+test('resumeRun fail-closed：会话未记录原模型同样拒绝', () => {
+  const mem = new LazyMemoryPersistence(crashSeed(undefined, 'tianshu'))
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+    listModels: () => [{ id: 'v4-pro', alias: 'v4', provider: 'p' }],
+    defaultModelId: 'v4-pro',
+  })
+  const res = mgr.resumeRun('crash')
+  assert.equal(res.ok, false)
+  assert.equal((res as { code: string }).code, 'model_unavailable')
+})
+
+test('resumeRun 兜底模型：显式配置 + 可用 → 切换续跑并留 model_switched 痕', () => {
+  const factoryModels: (string | undefined)[] = []
+  const mem = new LazyMemoryPersistence(crashSeed('gone-model', 'tianshu'))
+  const mgr = new RuntimeSessionManager({
+    createAgent: (_cwd, _id, _mode, modelId) => {
+      factoryModels.push(modelId)
+      return new NoopAgent()
+    },
+    persistence: mem,
+    listModels: () => [{ id: 'fallback-x', alias: 'fb', provider: 'p' }],
+    defaultModelId: 'v4-pro',
+    resumeFallbackModel: 'fallback-x',
+  })
+  const res = mgr.resumeRun('crash')
+  assert.deepEqual(res, { ok: true, model: 'fallback-x', switched: true })
+  assert.deepEqual(factoryModels, ['fallback-x'])
+  assert.equal(mgr.getSession('crash')!.model, 'fallback-x', 'record.model 指向兜底模型')
+  const switched = mgr.getEvents('crash', 0)!.events.find((e) => e.type === 'model_switched')
+  assert.ok(switched, '兜底切换必须留审计事件')
+  assert.equal(switched!.data.reason, 'resume-fallback')
+  assert.equal(switched!.data.from, 'gone-model')
+})
+
+test('resumeRun：running 会话拒绝续跑（busy）', () => {
+  class HangingAgent extends NoopAgent {
+    override run(): Promise<void> { return new Promise(() => { /* stays running */ }) }
+  }
+  const mgr = new RuntimeSessionManager({ createAgent: () => new HangingAgent() })
+  const s = mgr.createSession({ prompt: 'go' })
+  const res = mgr.resumeRun(s.id)
+  assert.equal(res.ok, false)
+  assert.equal((res as { code: string }).code, 'busy')
+})
+
+// ── Phase 3 #9：归档卸载 / 空闲 agent TTL ─────────────────────────────────
+
+test('archiveSession 卸载重态：agent shutdown、事件环清空、重开时从盘重放', async () => {
+  let shutdowns = 0
+  class TrackedAgent extends NoopAgent {
+    shutdown(): void { shutdowns += 1 }
+  }
+  const mem = new LazyMemoryPersistence()
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new TrackedAgent(),
+    persistence: mem,
+  })
+  const s = mgr.createSession({})
+  mgr.run(s.id, 'hello') // NoopAgent 立即 settle，但 agent 已建
+  await new Promise((r) => setTimeout(r, 10)) // run settle → idle 归档路径
+  const ok = mgr.archiveSession(s.id)
+  assert.equal(ok, true)
+  assert.equal(shutdowns, 1, '归档必须 shutdown 已建 agent（清 timer/coordinator）')
+  // 事件环被清空 → 下次读取走磁盘懒加载（loadEvents 被再次调用）
+  const before = mem.loadEventsCalls.length
+  const replay = mgr.getEvents(s.id, 0)!
+  assert.ok(mem.loadEventsCalls.length > before, '归档后事件应从磁盘重放')
+  assert.ok(replay.events.some((e) => e.type === 'user'), '磁盘重放包含完整历史')
+  // 归档状态与解档路径不受影响
+  assert.equal(mgr.unarchiveSession(s.id), true)
+})
+
+test('运行中归档：卸载推迟到 run settle 之后（不撕在途 promise）', async () => {
+  let shutdowns = 0
+  class HangingAgent extends NoopAgent {
+    private resolveRun?: () => void
+    override run(): Promise<void> { return new Promise((r) => { this.resolveRun = r }) }
+    override abort(): void { this.resolveRun?.() }
+    shutdown(): void { shutdowns += 1 }
+  }
+  const agents: HangingAgent[] = []
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => { const a = new HangingAgent(); agents.push(a); return a },
+    persistence: new LazyMemoryPersistence(),
+  })
+  const s = mgr.createSession({ prompt: 'go' })
+  assert.equal(mgr.getSession(s.id)!.status, 'running')
+  mgr.archiveSession(s.id) // abort + archive；run promise 仍在 settle
+  await new Promise((r) => setTimeout(r, 20))
+  assert.equal(shutdowns, 1, 'run settle 后归档卸载必须完成')
+})
+
+test('空闲 agent TTL：超时释放，运行/挂起审批的会话不受影响', async () => {
+  let clock = 1_000_000
+  let built = 0
+  let shutdowns = 0
+  class TrackedAgent extends NoopAgent {
+    callbacks?: AgentCallbacks
+    private resolveRun?: () => void
+    override run(_p: string, cb: AgentCallbacks): Promise<void> {
+      this.callbacks = cb
+      return new Promise((r) => { this.resolveRun = r })
+    }
+    override abort(): void { this.resolveRun?.() }
+    shutdown(): void { shutdowns += 1 }
+  }
+  const agents: TrackedAgent[] = []
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => { built += 1; const a = new TrackedAgent(); agents.push(a); return a },
+    now: () => clock,
+    idleAgentTtlMs: 10_000,
+  })
+  // idle 会话：先建 agent（run 立刻被 abort 掉太绕——直接用 delegate 建？）
+  // 用 run + abort 更贴近真实：跑起来再 abort，agent 保持已建。
+  const idle = mgr.createSession({ prompt: 'a' })
+  mgr.abort(idle.id)
+  await new Promise((r) => setTimeout(r, 10)) // run promise settle → running=false
+  // running 会话：一直在跑（abort 只针对 idle 那个 agent 调用）
+  const busy = mgr.createSession({ prompt: 'b' })
+  assert.equal(built, 2)
+
+  // 未到 TTL：sweep 不动
+  clock += 5_000
+  mgr.sweepIdleAgents()
+  assert.equal(shutdowns, 0)
+
+  // 过 TTL：idle 的 agent 被释放，running 的不动
+  clock += 6_000
+  mgr.sweepIdleAgents()
+  assert.equal(shutdowns, 1, '只有空闲会话的 agent 被释放')
+  assert.equal(mgr.getSession(busy.id)!.status, 'running', 'running 会话不受影响')
+
+  // 释放后再发 prompt：agent 惰性重建（工厂第 3 次调用）
+  mgr.run(idle.id, 'again')
+  assert.equal(built, 3, '下一条 prompt 触发重建')
 })
 
 test('stats() reports session and running counts', () => {

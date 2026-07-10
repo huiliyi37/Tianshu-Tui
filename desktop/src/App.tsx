@@ -63,6 +63,12 @@ export function App() {
   // emits `sidecar-gave-up` and stops — without surfacing that, the UI keeps
   // showing "正在重连…" forever while nothing is actually reconnecting.
   const [sidecarGaveUp, setSidecarGaveUp] = useState(false)
+  // Graded supervision (Phase 3): the Rust shell probes /health from outside
+  // the Node event loop. 'degraded' = alive but unresponsive ~10s (yellow
+  // banner, self-clears on 'recovered'); 'hung' = unresponsive ~60s WITH runs
+  // in flight — auto-restart would kill them, so the user decides.
+  const [sidecarDegraded, setSidecarDegraded] = useState(false)
+  const [sidecarHungRuns, setSidecarHungRuns] = useState<number | null>(null)
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return
     const unlisteners: (() => void)[] = []
@@ -71,6 +77,8 @@ export function App() {
       .then(async (m) => {
         const offRestarted = await m.listen('sidecar-restarted', async () => {
           setSidecarGaveUp(false)
+          setSidecarDegraded(false)
+          setSidecarHungRuns(null)
           // Verify the respawned sidecar actually resolved a usable key. If the
           // restart dropped auth (e.g. an apiKeyEnv provider whose env was lost),
           // say so plainly — the persistent `needsSetup` banner below then guides
@@ -85,11 +93,24 @@ export function App() {
         const offGaveUp = await m.listen('sidecar-gave-up', () => {
           setSidecarGaveUp(true)
         })
+        const offDegraded = await m.listen('sidecar-degraded', () => {
+          setSidecarDegraded(true)
+        })
+        const offRecovered = await m.listen('sidecar-recovered', () => {
+          setSidecarDegraded(false)
+          setSidecarHungRuns(null)
+        })
+        const offHung = await m.listen<number>('sidecar-hung', (ev) => {
+          setSidecarHungRuns(typeof ev.payload === 'number' ? ev.payload : 0)
+        })
         if (cancelled) {
           offRestarted()
           offGaveUp()
+          offDegraded()
+          offRecovered()
+          offHung()
         } else {
-          unlisteners.push(offRestarted, offGaveUp)
+          unlisteners.push(offRestarted, offGaveUp, offDegraded, offRecovered, offHung)
         }
       })
       .catch(() => {})
@@ -234,6 +255,17 @@ export function App() {
           </div>
         ) : sidecarDown ? (
           <div className="banner error">{t('banner.sidecarReconnecting')}</div>
+        ) : null}
+        {sidecarHungRuns !== null ? (
+          <div className="banner error">
+            {t('banner.sidecarHung', { count: sidecarHungRuns })}
+            <button className="banner-action" onClick={restartApp}>{t('banner.restartApp')}</button>
+            <button className="banner-close" onClick={() => setSidecarHungRuns(null)} aria-label={t('common:close')} title={t('common:close')}>
+              ×
+            </button>
+          </div>
+        ) : sidecarDegraded ? (
+          <div className="banner warn">{t('banner.sidecarDegraded')}</div>
         ) : null}
         {needsSetup && !setupDismissed && (
           <div className="banner warn">

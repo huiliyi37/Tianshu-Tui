@@ -97,6 +97,22 @@ test('prompt on a busy session returns 409', async () => {
   assert.equal(again.status, 409)
 })
 
+test('POST /sessions/:id/resume maps manager results to precise status codes', async () => {
+  const { router } = setup()
+  // busy 会话 → 409（附 code）
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+  const busy = await router('POST', `/sessions/${id}/resume`, {}, AUTH)
+  assert.equal(busy.status, 409)
+  assert.equal((busy.body as { code: string }).code, 'busy')
+  // 不存在 → 404
+  const missing = await router('POST', '/sessions/nope/resume', {}, AUTH)
+  assert.equal(missing.status, 404)
+  // Bearer-gated
+  const unauth = await router('POST', `/sessions/${id}/resume`, {}, {})
+  assert.equal(unauth.status, 401)
+})
+
 test('T3: POST /steer queues guidance on a running session', async () => {
   const { router } = setup()
   const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)

@@ -36,9 +36,11 @@ import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import type { ThemePref } from '../lib/theme'
-import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
+import { fetchSessionImageObjectUrl, getRewindPoints, resumeSession, rewindSession } from '../runtime/client'
+import { toast } from 'sonner'
 import { formatMention } from '../lib/mention-input'
 import { useUiState, useUiDispatch } from '../state/store'
+import { useHealth } from '../state/queries'
 import { usePlanModeShortcut } from '../hooks/use-plan-mode-shortcut'
 import { SideChat } from '../components/SideChat'
 import { MessageNavigator, type TurnEntry } from '../components/MessageNavigator'
@@ -93,6 +95,12 @@ export function ThreadView(props: {
   const { t } = useTranslation('threadView')
   const ui = useUiState()
   const dispatch = useUiDispatch()
+  // Busy-vs-dropped attribution: /health reports the sidecar's event-loop lag.
+  // A ≥1s stall in the last poll window means the loop was starved by a
+  // synchronous operation — the likely cause of the stream hiccup — so the
+  // banner says "service busy" instead of a phantom "connection interrupted".
+  const health = useHealth()
+  const sidecarBusy = (health.data?.loopLagMaxMs ?? 0) >= 1000
   const [input, setInputRaw] = useState(ui.composerDrafts[session.id] ?? '')
   /** Wrapper that also syncs to the store so drafts survive tab switches. */
   const setInput = useCallback((text: string) => {
@@ -241,6 +249,26 @@ export function ThreadView(props: {
   const elapsedMs = busy && view.runStartedAt ? Date.now() - view.runStartedAt : 0
   const elapsedStr = elapsedMs > 0 ? formatElapsed(elapsedMs) : ''
   const elapsedStalled = elapsedMs > 600_000 // >10min → 红色高亮提示可能卡住
+
+  // Phase 3 可靠性 — 一键续跑卡片（resume_offer）。服务端强制模型/星域缓存
+  // 亲和：原模型不可用且无兜底配置时 409 fail-closed，卡片降级为开新会话提示。
+  const [resumePending, setResumePending] = useState(false)
+  const [resumeError, setResumeError] = useState<string | null>(null)
+  const [resumeDismissedSeq, setResumeDismissedSeq] = useState<number | null>(null)
+  const handleResume = useCallback(async () => {
+    setResumePending(true)
+    setResumeError(null)
+    try {
+      const res = await resumeSession(session.id)
+      if (res.switched) {
+        toast.warning(t('resume.switchedToast', { model: res.model }))
+      }
+    } catch (err) {
+      setResumeError((err as Error)?.message ?? String(err))
+    } finally {
+      setResumePending(false)
+    }
+  }, [session.id, t])
 
   const autonomous = isAutonomous(session.approvalMode)
   const activeDomainId = useMemo(() => resolveActiveDomain(session, view), [session, view])
@@ -987,7 +1015,9 @@ export function ThreadView(props: {
         {streamStatus === 'reconnecting' && (
           <div className="stream-banner reconnecting" role="status">
             <span className="stream-banner-glyph spin" aria-hidden>⟳</span>
-            <span className="stream-banner-text">{t('stream.reconnecting')}</span>
+            <span className="stream-banner-text">
+              {sidecarBusy ? t('stream.busy') : t('stream.reconnecting')}
+            </span>
           </div>
         )}
         {view.blocks.length === 0 && (
@@ -1112,6 +1142,39 @@ export function ThreadView(props: {
 
       <div className="composer-float" ref={composerWrapRef}>
         <div className={`composer-float-inner accent-${activeDomain?.uiPersona.accent ?? 'primary'}`}>
+          {view.resumeOffer && view.resumeOffer.seq !== resumeDismissedSeq && !busy && (
+            <div className="resume-offer-banner flex items-center justify-between bg-panel-3 border border-border rounded-lg p-3 mb-2 text-xs" role="status">
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className="font-medium text-text">{t('resume.title')}</span>
+                <span className="text-muted truncate">
+                  {view.resumeOffer.model
+                    ? t('resume.detail', { model: view.resumeOffer.model, domain: view.resumeOffer.domain })
+                    : t('resume.detailNoModel', { domain: view.resumeOffer.domain })}
+                </span>
+                {resumeError && (
+                  <span className="text-warning">
+                    {resumeError} — {t('resume.newSessionHint')}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0 ml-3">
+                <button
+                  className="px-2.5 py-1 rounded bg-primary text-white hover:bg-primary/90 transition-colors font-medium disabled:opacity-60"
+                  onClick={handleResume}
+                  disabled={resumePending}
+                >
+                  {resumePending ? t('resume.pending') : t('resume.button')}
+                </button>
+                <button
+                  className="px-2.5 py-1 rounded bg-panel-2 hover:bg-panel-1 border border-border text-text transition-colors"
+                  onClick={() => setResumeDismissedSeq(view.resumeOffer!.seq)}
+                  aria-label={t('resume.dismiss')}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
           {view.pendingApproval && onApproval && (
             <ApprovalInline
               request={view.pendingApproval}

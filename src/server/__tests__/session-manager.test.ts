@@ -296,6 +296,29 @@ test('abort resolves all pending approvals (no hung promises)', async () => {
   manager.abort(s.id)
   assert.deepEqual(await pending, { approved: false })
   assert.equal(manager.getSession(s.id)!.pendingApprovals, 0)
+  const resolved = manager.getEvents(s.id, 0)!.events
+    .filter((e) => e.type === 'approval_resolved')
+    .find((e) => e.data.requestId === 't')
+  assert.equal(resolved!.data.decision, 'aborted', '用户中止的审批关闭保持 aborted 语义')
+})
+
+test('run 正常完成时挂起 approval 关闭为 stale，不误标 aborted', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const a = agents[0]!
+  const pending = a.callbacks!.onApprovalRequired('t1', 'bash', { command: 'ls' })
+  // run 正常 settle，approval 仍挂起（真实 agent 不应发生，但 manager 必须诚实收尾）
+  a.finish()
+  await settle()
+  assert.deepEqual(await pending, { approved: false }, 'promise 必须被关闭，不能悬挂')
+  const rec = manager.getSession(s.id)!
+  assert.equal(rec.status, 'completed')
+  assert.equal(rec.pendingApprovals, 0)
+  const resolved = manager.getEvents(s.id, 0)!.events
+    .filter((e) => e.type === 'approval_resolved')
+    .find((e) => e.data.requestId === 't1')
+  assert.ok(resolved, '必须有 approval_resolved 收尾事件')
+  assert.equal(resolved!.data.decision, 'stale', '正常完成的收尾不得伪装成 aborted')
 })
 
 test('artifacts are surfaced per session and never cross-read', async () => {

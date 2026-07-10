@@ -433,6 +433,18 @@ export function abortSession(id: string): Promise<{ aborted: boolean }> {
   return apiPost<{ aborted: boolean }>(`/sessions/${id}/abort`)
 }
 
+/**
+ * One-click resume of a run interrupted by a sidecar restart (resume_offer).
+ * Model/domain affinity is enforced server-side (fail-closed): when the
+ * original model is unavailable and no fallback is configured this rejects
+ * with 409 — the caller degrades to a "start a new session" hint.
+ * `switched: true` means the configured fallback model took over and the
+ * prefix cache will be rebuilt (disclose it to the user).
+ */
+export function resumeSession(id: string): Promise<{ resumed: boolean; model: string; switched: boolean }> {
+  return apiPost<{ resumed: boolean; model: string; switched: boolean }>(`/sessions/${id}/resume`)
+}
+
 /** Archive (soft-close) a session — hides it from the sidebar list. Data survives on disk. */
 export async function closeSession(id: string): Promise<{ archived: boolean }> {
   const res = await rivetFetch(`/sessions/${id}`, { method: 'DELETE' })

@@ -77,3 +77,28 @@ test('a dead peer (write throws) closes the stream instead of crashing', () => {
   // once closed, further writes short-circuit (no throw)
   assert.doesNotThrow(() => sse.ping())
 })
+
+test('onDead fires exactly once when the peer dies, letting the owner unsubscribe', () => {
+  const { res } = fakeRes({ throwOnWrite: true })
+  let deadCount = 0
+  const sse = new SseStream(res, () => { deadCount += 1 })
+  sse.send('tool_use', { seq: 1 })
+  sse.send('tool_use', { seq: 2 })
+  sse.ping()
+  assert.equal(deadCount, 1, 'owner cleanup must run once, not per failed write')
+})
+
+test('onDead does NOT fire on a local intentional close()', () => {
+  const { res } = fakeRes()
+  let deadCount = 0
+  const sse = new SseStream(res, () => { deadCount += 1 })
+  sse.close()
+  assert.equal(deadCount, 0, 'intentional close has its own cleanup path')
+})
+
+test('a throwing onDead callback never crashes the write path', () => {
+  const { res } = fakeRes({ throwOnWrite: true })
+  const sse = new SseStream(res, () => { throw new Error('owner bug') })
+  assert.doesNotThrow(() => sse.send('tool_use', { seq: 1 }))
+  assert.equal(sse.isClosed(), true)
+})

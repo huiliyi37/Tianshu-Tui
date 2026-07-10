@@ -572,6 +572,18 @@ export function buildSessionRoutes(
       return { status: 200, body: manager.getSession(params!.id!) }
     }, apiToken),
 
+    // Phase 3 可靠性 — 一键续跑（resume_offer 卡片的服务端入口）。
+    // 缓存亲和 fail-closed：原模型不可用且未配置 agent.resumeFallbackModel 时
+    // 返回 409/model_unavailable，UI 降级为「开新会话」入口——绝不静默换默认模型。
+    'POST /sessions/:id/resume': withAuth((_body, params) => {
+      const result = manager.resumeRun(params!.id!)
+      if (!result.ok) {
+        const status = result.code === 'not_found' ? 404 : 409
+        return { status, body: { error: result.error, code: result.code } }
+      }
+      return { status: 200, body: { resumed: true, model: result.model, switched: result.switched } }
+    }, apiToken),
+
     // T3 — mid-run steering. Queues user guidance into a RUNNING session's steer
     // buffer; injected at the next tool boundary (no new turn). Idle → 409 so the
     // desktop knows to use /prompt instead. Bearer-gated.
@@ -594,9 +606,11 @@ export function buildSessionRoutes(
       return { status: 200, body: { aborted: true } }
     }, apiToken),
 
-    'GET /sessions/:id/events': withAuth((_body, params) => {
+    'GET /sessions/:id/events': withAuth(async (_body, params) => {
       const since = Number(params?.since ?? 0) || 0
-      const result = manager.getEvents(params!.id!, since)
+      // Async replay: first open of a lazily-rehydrated session reads the log
+      // off the main thread instead of stalling every other request on it.
+      const result = await manager.getEventsAsync(params!.id!, since)
       if (!result) return { status: 404, body: { error: 'Session not found' } }
       return { status: 200, body: result }
     }, apiToken),
@@ -890,24 +904,50 @@ export function buildSessionRoutes(
       return { status: 200, body: { path: relPath, entries } }
     }, apiToken),
 
-    'GET /sessions/:id/stream': withAuth((_body, params, _headers, res) => {
+    'GET /sessions/:id/stream': withAuth(async (_body, params, _headers, res) => {
       if (!res) return { status: 500, body: { error: 'SSE response stream is unavailable' } }
       const id = params!.id!
       const since = Number(params?.since ?? 0) || 0
-      const existing = manager.getEvents(id, since)
+      // Reconnect replay is the hot path for large logs — load it without
+      // blocking the loop (async read + off-thread parse), so concurrent
+      // streams keep their keepalives during someone else's big replay.
+      const existing = await manager.getEventsAsync(id, since)
       if (!existing) return { status: 404, body: { error: 'Session not found' } }
 
-      const sse = new SseStream(res)
+      // Tear down BOTH on peer death (write throws → onDead) and on the normal
+      // response 'close'. Without the onDead path a half-dead socket kept the
+      // subscription + keepalive alive: every append still fanned out to a
+      // stream that silently dropped it (viewer showed "live" with no events).
+      let unsubscribe: (() => void) | undefined
+      let keepalive: ReturnType<typeof setInterval> | undefined
+      const cleanup = () => {
+        if (keepalive) clearInterval(keepalive)
+        keepalive = undefined
+        unsubscribe?.()
+        unsubscribe = undefined
+      }
+      const sse = new SseStream(res, cleanup)
       for (const ev of existing.events) sse.send(ev.type, ev)
-      const unsubscribe = manager.subscribe(id, (ev) => sse.send(ev.type, ev))
+      unsubscribe = manager.subscribe(id, (ev) => sse.send(ev.type, ev))
+      // The async replay above yields the loop, so events may have been
+      // appended between the snapshot and the subscribe — back-fill them now.
+      // This block is synchronous after subscribe, so no duplicates: listener
+      // fan-out can only happen on later ticks.
+      const gap = manager.getEvents(id, existing.lastSeq)
+      if (gap) for (const ev of gap.events) sse.send(ev.type, ev)
+      // A dead peer during the replay above means the subscription was created
+      // after onDead already fired — close it out now instead of leaking it.
+      if (sse.isClosed()) {
+        cleanup()
+        return { status: 200, handled: true }
+      }
       // Keepalive: a 30s comment heartbeat stops idle proxies from reaping the
       // connection and detects a half-dead socket (write throws → sse closes).
       // unref so the timer never keeps the process (or a test) alive on its own.
-      const keepalive = setInterval(() => sse.ping(), 30_000)
+      keepalive = setInterval(() => sse.ping(), 30_000)
       if (typeof keepalive.unref === 'function') keepalive.unref()
       res.on('close', () => {
-        clearInterval(keepalive)
-        unsubscribe?.()
+        cleanup()
         sse.close()
       })
       return { status: 200, handled: true }

@@ -47,8 +47,13 @@ export function WorkspaceSurface() {
   const sessions = useSessions()
   const activeId = ui.activeSessionId
 
-  const view = useSessionEvents(activeId)
-  useJobNotifications(activeId, view.jobs)
+  // 中控台真正卸载主线程流（Phase 3 #9，让 MissionControlSurface 头注释成真）：
+  // mission 打开时 ThreadView 不渲染，这里也不再持有活跃会话的 SSE 订阅——
+  // 连接预算（~6）整体让给中控台的 live 卡片池。返回线程视图时 hub 重新订阅
+  // 并从 since=0 重放（服务端 replay 已异步化，代价可控）。
+  const streamId = ui.surface === 'mission' ? null : activeId
+  const view = useSessionEvents(streamId)
+  useJobNotifications(streamId, view.jobs)
   const artifacts = useArtifacts(activeId, view.artifactRev)
   const sendPrompt = useSendPrompt()
   const abortSession = useAbortSession()

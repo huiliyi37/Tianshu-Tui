@@ -12,7 +12,7 @@
 
 import { parentPort } from 'node:worker_threads'
 // @ts-ignore — tsx dev worker uses .ts extension; tsup bundles this file separately
-import { diffUnifiedRaw, diffStructuredRaw, diffLinesRaw } from './cpu-tasks.ts'
+import { diffUnifiedRaw, diffStructuredRaw, diffLinesRaw, parseEventsJsonlRaw } from './cpu-tasks.ts'
 
 type TaskFn = (...args: any[]) => unknown
 
@@ -20,6 +20,7 @@ const tasks: Record<string, TaskFn> = {
   diffUnifiedRaw: diffUnifiedRaw as TaskFn,
   diffStructuredRaw: diffStructuredRaw as TaskFn,
   diffLinesRaw: diffLinesRaw as TaskFn,
+  parseEventsJsonlRaw: parseEventsJsonlRaw as TaskFn,
 }
 
 parentPort?.on('message', (msg: { id: number; task: string; args: unknown[] }) => {

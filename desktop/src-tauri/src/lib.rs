@@ -797,6 +797,35 @@ fn wait_until_ready(port: u16, token: &str, timeout: Duration) -> bool {
     false
 }
 
+/// Liveness probe for the supervision ladder: authed `GET /health`, returns the
+/// reported `runningCount` on a 200, or None on connect/timeout/non-200. Unlike
+/// `http_health_ok` this reads the full (Connection: close) response so the
+/// body can be parsed, and uses a longer read timeout — the point is to detect
+/// an event loop that stopped answering, not to punish a briefly busy one.
+fn http_health_running_count(port: u16, token: &str) -> Option<u32> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(1500)));
+    let req = format!(
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut body = String::new();
+    // read_to_string errors on timeout even with partial data — good enough:
+    // a healthy sidecar finishes this tiny response well within the window.
+    stream.read_to_string(&mut body).ok()?;
+    if !(body.starts_with("HTTP/1.1 200") || body.starts_with("HTTP/1.0 200")) {
+        return None;
+    }
+    // Minimal parse: `"runningCount":N` — avoids a JSON dependency for one field.
+    let idx = body.find("\"runningCount\":")?;
+    let digits: String = body[idx + "\"runningCount\":".len()..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse::<u32>().ok()
+}
+
 /// Working directory for the sidecar process.
 ///
 /// The sidecar uses `process.cwd()` as the fallback `defaultCwd` for any session
@@ -1349,10 +1378,21 @@ fn respawn_spec(spec: &SidecarLaunchSpec) -> SidecarLaunchSpec {
     s
 }
 
-/// Crash monitor (W2): polls the sidecar child every 2s; if it exited without
-/// kill_sidecar being the cause, respawns it with the SAME port + token so the
-/// frontend's health polling recovers in place. Capped at 3 restarts per 10min
-/// window — beyond that the existing fatal-banner path takes over.
+/// Consecutive failed liveness probes (2s cadence) before emitting
+/// `sidecar-degraded` (UI yellow banner): ~10s of unresponsiveness.
+const DEGRADED_AFTER_FAILS: u32 = 5;
+/// Consecutive failed probes before the hang is treated as confirmed (~60s).
+/// Then: no in-flight runs → cautious auto-restart; runs in flight → emit
+/// `sidecar-hung` and leave the decision to the user (a restart kills them).
+const HUNG_AFTER_FAILS: u32 = 30;
+
+/// Crash monitor (W2) + graded supervision ladder (Phase 3 reliability plan):
+/// every 2s the child is `try_wait`ed AND probed via authed `GET /health`
+/// (in-work-path liveness — `try_wait` only sees exits, never a live-but-hung
+/// event loop). Ladder: probe fails ~10s → `sidecar-degraded`; fails ~60s →
+/// auto-restart iff the last healthy probe reported zero running sessions,
+/// else `sidecar-hung` (user decides). Exit/hang restarts share the same
+/// budget: 3 per 10min window — beyond that the fatal-banner path takes over.
 fn start_sidecar_monitor(handle: tauri::AppHandle) {
     use tauri::Emitter;
     std::thread::spawn(move || {
@@ -1361,6 +1401,13 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
         // slot empty — without this flag the next poll would see None, treat it
         // as "nothing to watch" and silently stop retrying with budget left.
         let mut pending_respawn = false;
+        // Ladder state. `ever_healthy` gates failure counting so a slow cold
+        // start (rehydrate, cold disk) is never mistaken for a hang.
+        let mut ever_healthy = false;
+        let mut consecutive_fails: u32 = 0;
+        let mut degraded_emitted = false;
+        let mut hung_emitted = false;
+        let mut last_running_count: u32 = 0;
         loop {
             std::thread::sleep(Duration::from_secs(2));
             let Some(state) = handle.try_state::<Sidecar>() else {
@@ -1385,9 +1432,77 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
                     None => false,
                 }
             };
+            // Hang detection only applies to a live child with no respawn pending.
+            let mut hang_restart = false;
             if !exited && !pending_respawn {
-                continue;
+                let child_present = state
+                    .child
+                    .lock()
+                    .map(|g| g.is_some())
+                    .unwrap_or(false);
+                if !child_present {
+                    continue; // nothing to supervise
+                }
+                match http_health_running_count(state.spec.port, &state.spec.token) {
+                    Some(rc) => {
+                        ever_healthy = true;
+                        last_running_count = rc;
+                        consecutive_fails = 0;
+                        hung_emitted = false;
+                        if degraded_emitted {
+                            degraded_emitted = false;
+                            let _ = handle.emit("sidecar-recovered", ());
+                            eprintln!("[rivet] sidecar responsive again — degraded state cleared");
+                        }
+                    }
+                    None if ever_healthy => {
+                        consecutive_fails += 1;
+                        if consecutive_fails == DEGRADED_AFTER_FAILS {
+                            degraded_emitted = true;
+                            let _ = handle.emit("sidecar-degraded", consecutive_fails);
+                            eprintln!(
+                                "[rivet] sidecar alive but unresponsive ({}s) — degraded",
+                                consecutive_fails * 2
+                            );
+                        }
+                        if consecutive_fails >= HUNG_AFTER_FAILS {
+                            if last_running_count == 0 {
+                                // Cautious rung: nothing in flight to kill, so a
+                                // restart is strictly better than a dead UI.
+                                eprintln!(
+                                    "[rivet] sidecar hung ~{}s with no active runs — restarting",
+                                    consecutive_fails * 2
+                                );
+                                if let Ok(mut guard) = state.child.lock() {
+                                    if let Some(mut c) = guard.take() {
+                                        kill_child_tree(&mut c);
+                                    }
+                                }
+                                hang_restart = true;
+                            } else if !hung_emitted {
+                                // Runs in flight (per the last healthy probe) — a
+                                // restart would kill them. Surface it; the user
+                                // decides via the existing restart affordance.
+                                hung_emitted = true;
+                                let _ = handle.emit("sidecar-hung", last_running_count);
+                                eprintln!(
+                                    "[rivet] sidecar hung with {} run(s) in flight — deferring to user",
+                                    last_running_count
+                                );
+                            }
+                        }
+                    }
+                    None => { /* never been healthy — startup grace, don't count */ }
+                }
+                if !hang_restart {
+                    continue;
+                }
             }
+            // Reset ladder state across a restart attempt.
+            consecutive_fails = 0;
+            degraded_emitted = false;
+            hung_emitted = false;
+            last_running_count = 0;
             // Re-check: kill_sidecar may have raced between our try_wait and here.
             if state.shutting_down.load(Ordering::SeqCst) {
                 return;
