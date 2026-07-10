@@ -46,6 +46,20 @@ describe('write-evidence-probe', () => {
     assert.ok(text.includes('直接继续'))
   })
 
+  it('evidence-confirmed branch leads with calm confirmation, not interrupt panic (PR #4)', () => {
+    const text = formatWriteRecoveryContent('write_file', 'a.ts', { exists: true, bytes: 4096 })
+    assert.ok(text.startsWith('[auto-recovered] 写入已确认'), `panic-first framing: ${text}`)
+    // marker 必须保留在正文——repeat escalation 靠它计数，证据确认的恢复同样是一次宿主中断
+    assert.ok(text.includes('会话中断导致工具结果丢失'), 'marker missing — escalation counting would break')
+  })
+
+  it('no-evidence branch stays honest — never claims 已确认 without disk evidence', () => {
+    const text = formatWriteRecoveryContent('write_file', 'a.ts')
+    assert.ok(!text.includes('写入已确认'), `overclaims without evidence: ${text}`)
+    assert.ok(text.includes('很可能'))
+    assert.ok(text.includes('read_file'))
+  })
+
   it('formatWriteRecoveryContent says safe to retry when file missing', () => {
     const text = formatWriteRecoveryContent('edit_file', 'b.tsx', { exists: false, bytes: 0 })
     assert.ok(text.includes('不存在'))
@@ -182,5 +196,32 @@ describe('runResumePreflightOai + write probe', () => {
     const text = String(toolResult.content)
     assert.ok(text.includes('重复发生'))
     assert.ok(text.includes('不是写工具故障'))
+  })
+
+  it('evidence-confirmed prior recoveries still count toward escalation (marker 括注)', () => {
+    // 平静确认版本（PR #4 采纳后）的历史恢复消息——marker 在括注里，
+    // countPriorRecoveries 必须仍能计数，两条历史 + 新 orphan → 升级段出现。
+    const prior = formatWriteRecoveryContent('write_file', 'x.ts', { exists: true, bytes: 128 })
+    const messages: OaiMessage[] = [
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'tc_1', type: 'function', function: { name: 'write_file', arguments: '{"file_path":"x.ts"}' } },
+      ]},
+      { role: 'tool', tool_call_id: 'tc_1', content: prior },
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'tc_2', type: 'function', function: { name: 'edit_file', arguments: '{"file_path":"x.ts"}' } },
+      ]},
+      { role: 'tool', tool_call_id: 'tc_2', content: prior },
+      { role: 'assistant', content: null, tool_calls: [
+        { id: 'tc_3', type: 'function', function: { name: 'write_file', arguments: '{"file_path":"y.ts"}' } },
+      ]},
+    ]
+    const report = runResumePreflightOai(messages)
+    assert.equal(report.syntheticResultsInserted, 1)
+    const toolResult = report.messages.find(
+      (m): m is OaiMessage & { role: 'tool'; tool_call_id: string; content: string } =>
+        m.role === 'tool' && 'tool_call_id' in m && m.tool_call_id === 'tc_3',
+    )
+    assert.ok(toolResult)
+    assert.ok(String(toolResult.content).includes('重复发生'))
   })
 })

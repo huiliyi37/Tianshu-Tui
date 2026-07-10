@@ -80,9 +80,13 @@ export function formatWriteRecoveryContent(
 
   const target = filePath ? `\`${filePath}\`` : '目标文件'
 
+  // 磁盘证据已确认成功 → 平静确认优先（去惊吓化，采纳自公开仓库 PR #4）：
+  // 开头给结论而非事故。marker 以括注保留在正文——countPriorRecoveries 靠
+  // includes() 计数，证据确认的恢复同样是一次宿主中断，不能漏计。
   if (evidence?.exists && evidence.bytes > 0) {
-    return `${WRITE_RECOVERY_MARKER}——磁盘证据：${target} 已存在（${formatBytes(evidence.bytes)}），写入很可能已生效。`
-      + '直接继续下一步，切勿重写。' + suffix
+    return `[auto-recovered] 写入已确认——磁盘证据：${target} 已存在（${formatBytes(evidence.bytes)}），写入已生效。`
+      + '直接继续下一步，切勿重写。'
+      + `\n（合成占位：${WRITE_RECOVERY_MARKER}，已由磁盘证据确认写入生效。）` + suffix
   }
 
   if (evidence && !evidence.exists) {
