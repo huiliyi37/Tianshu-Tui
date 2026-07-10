@@ -1,8 +1,8 @@
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, Profiler, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ProfilerOnRenderCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useQueryClient } from '@tanstack/react-query'
-import { perfBegin, perfEnd } from '../state/perf-budget'
+import { perfBegin, perfEnd, perfRecord } from '../state/perf-budget'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import type { StreamStatus } from '../state/use-session-events'
@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { nextEffortLevel } from '../lib/composer-commands'
 import type { ComposerCommand } from '../lib/composer-commands'
-import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
+import { isAutonomous, levelToMode, modeToLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, resumeSession, rewindSession } from '../runtime/client'
@@ -647,6 +647,42 @@ export function ThreadView(props: {
     deltaTokens: ctxDelta,
   }), [session.contextTokens, session.contextWindow, view.lastTotalTokens, view.cacheReadTokens, view.cacheCreationTokens, ctxDelta])
 
+  // W2-2 收束: Composer is a memo component — every callback prop must be
+  // reference-stable, or a single inline arrow busts the shallow compare and
+  // Composer re-renders on every streaming batch anyway.
+  const handleSetApprovalLevel = useCallback(
+    (lvl: AutonomyLevel) => onSetApprovalMode(levelToMode(lvl)),
+    [onSetApprovalMode],
+  )
+  const handleComposerSubmit = useCallback(async (text: string, images?: string[]) => {
+    if (selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length) {
+      const point = rewindPoints[selectedTurnIndex]
+      if (point) {
+        try {
+          await rewindSession(session.id, point.index)
+          setSelectedTurnIndex(-1)
+          const { points } = await getRewindPoints(session.id)
+          setRewindPoints(points)
+        } catch (err) {
+          console.error(err)
+        }
+      }
+    }
+    if (busy) onSteer(text)
+    else onSend(text, images)
+    setInput('')
+    historyIndex.current = null
+  }, [selectedTurnIndex, rewindPoints, session.id, busy, onSteer, onSend])
+  const handleDoubleEscape = useCallback(() => setShowRewind(true), [])
+  const handleDelegate = useCallback(() => setShowDelegateDialog(true), [])
+  const handleWorkflow = useCallback((cmd: string) => {
+    // 带上引导 prompt——让 agent 进入对应工作流模式并询问用户具体目标。
+    const label = cmd === '/council' ? t('workflow.council') : t('workflow.team')
+    onSend(t('workflow.prompt', { cmd, label }))
+  }, [onSend, t])
+  const handleHistoryPrev = useCallback(() => recallHistory('prev'), [recallHistory])
+  const handleHistoryNext = useCallback(() => recallHistory('next'), [recallHistory])
+
   // D3 — composer slash commands: desktop-actionable items + prompt pass-throughs.
   const commands = useMemo<ComposerCommand[]>(() => [
     { name: '/rewind', desc: t('commands.rewind'), run: () => setShowRewind(true) },
@@ -1245,45 +1281,23 @@ export function ThreadView(props: {
             threadNonEmpty={view.blocks.length > 0}
             activeDomainAccent={activeDomain?.uiPersona.accent ?? 'primary'}
             approvalLevel={modeToLevel(session.approvalMode)}
-            onSetApprovalLevel={(lvl) => onSetApprovalMode(levelToMode(lvl))}
+            onSetApprovalLevel={handleSetApprovalLevel}
             // W2-2: stabilize the contextUsage object reference so Composer's
-            // future React.memo won't see a "new" prop every ThreadView render.
+            // React.memo won't see a "new" prop every ThreadView render.
             contextUsage={contextUsageMemo}
-            onSubmit={async (text, images) => {
-              if (selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length) {
-                const point = rewindPoints[selectedTurnIndex]
-                if (point) {
-                  try {
-                    await rewindSession(session.id, point.index)
-                    setSelectedTurnIndex(-1)
-                    const { points } = await getRewindPoints(session.id)
-                    setRewindPoints(points)
-                  } catch (err) {
-                    console.error(err)
-                  }
-                }
-              }
-              if (busy) onSteer(text)
-              else onSend(text, images)
-              setInput('')
-              historyIndex.current = null
-            }}
+            onSubmit={handleComposerSubmit}
             onAbort={onAbort}
-            onDoubleEscape={() => setShowRewind(true)}
+            onDoubleEscape={handleDoubleEscape}
             commands={commands}
             planMode={view.planMode}
             onSetPlanMode={onSetPlanMode}
             effort={session.reasoningEffort}
             onSetEffort={onSetEffort}
-            onDelegate={() => setShowDelegateDialog(true)}
-            onWorkflow={(cmd) => {
-              // 带上引导 prompt——让 agent 进入对应工作流模式并询问用户具体目标。
-              const label = cmd === '/council' ? t('workflow.council') : t('workflow.team')
-              onSend(t('workflow.prompt', { cmd, label }))
-            }}
+            onDelegate={handleDelegate}
+            onWorkflow={handleWorkflow}
             menuRev={view.menuRev}
-            onHistoryPrev={() => recallHistory('prev')}
-            onHistoryNext={() => recallHistory('next')}
+            onHistoryPrev={handleHistoryPrev}
+            onHistoryNext={handleHistoryNext}
           />
         </div>
       </div>
@@ -1898,6 +1912,14 @@ function useThrottledStreamingSource(text: string, isStreaming: boolean): string
   return isStreaming ? shown : text
 }
 
+// W0: tail markdown render cost (parse + reconcile of the live tail subtree).
+// React Profiler's actualDuration is scoped to exactly this subtree — unlike
+// wrapping perfBegin/perfEnd around the parent render, it doesn't over-count
+// sibling work in the same commit. Dev-only (perfRecord early-returns in prod).
+const recordTailRender: ProfilerOnRenderCallback = (_id, _phase, actualDuration) => {
+  perfRecord('tailMarkdown', actualDuration)
+}
+
 // Stable prefix + live tail (TUI StreamRenderer model, see stream-segments.ts):
 // frozen segments render once as memoized <Markdown> and never re-parse; only
 // the still-growing tail is re-parsed per throttle tick. Bounds per-tick
@@ -1928,7 +1950,11 @@ function AssistantText({ text, isStreaming, onFileClick }: { text: string; isStr
       {tailHeavy
         ? <StreamingText source={segs.tail} />
         : segs.tail.trim()
-          ? <Markdown source={closeUnterminatedFence(segs.tail)} highlight={false} streaming onFileClick={onFileClick} />
+          ? (
+            <Profiler id="tailMarkdown" onRender={recordTailRender}>
+              <Markdown source={closeUnterminatedFence(segs.tail)} highlight={false} streaming onFileClick={onFileClick} />
+            </Profiler>
+          )
           : null}
     </div>
   )

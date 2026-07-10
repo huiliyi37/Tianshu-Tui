@@ -2,7 +2,10 @@
  * Wave 0 — Performance budget instrumentation.
  *
  * A lightweight perf marks store + selector hook for the dev overlay.
- * Production builds tree-shake this away via __DEV_INSTRUMENT__.
+ * Zero production overhead: every record path early-returns on
+ * `import.meta.env.DEV` — Vite statically replaces it with `false` in prod
+ * builds, so the branches (map ops, ring pushes, microtask scheduling) are
+ * dead code and get dropped by the minifier.
  *
  * Usage in a hot path:
  *   const m = perfBegin('groupBlocks')
@@ -12,6 +15,8 @@
  * The store keeps a ring buffer of the last N samples per metric and
  * exposes p50/p99/max for the overlay.
  */
+
+const IS_DEV: boolean = import.meta.env?.DEV ?? false
 
 export interface PerfSample {
   at: number
@@ -53,24 +58,20 @@ function percentile(sorted: number[], rank: number): number {
 
 /** Begin a perf measurement. Returns an opaque handle for perfEnd. */
 export function perfBegin(_name: string): number {
+  if (!IS_DEV) return 0
   return performance.now()
 }
 
 /** End a perf measurement and record the duration. */
 export function perfEnd(name: string, start: number): void {
+  if (!IS_DEV) return
   const duration = performance.now() - start
-  let ring = metrics.get(name)
-  if (!ring) {
-    ring = []
-    metrics.set(name, ring)
-  }
-  ring.push({ at: performance.now(), duration })
-  if (ring.length > RING_SIZE) ring.shift()
-  scheduleFlush()
+  perfRecord(name, duration)
 }
 
 /** Record a pre-measured duration (e.g. from performance.measure). */
 export function perfRecord(name: string, duration: number): void {
+  if (!IS_DEV) return
   let ring = metrics.get(name)
   if (!ring) {
     ring = []
@@ -165,5 +166,59 @@ export function getFpsMetric(): PerfMetric | null {
     p99: percentile(sorted, 0.99),
     max: sorted[sorted.length - 1] ?? 0,
     count: sorted.length,
+  }
+}
+
+// ─── Long task tracking (scripting occupancy) ─────────────────
+// Chromium-only (WebView2 / dev browser): the `longtask` entry type is not
+// implemented in WKWebView. Feature-detected — silently absent on macOS.
+
+let longTaskObserver: PerformanceObserver | null = null
+
+/** Start observing long tasks (>50ms scripting blocks). Idempotent. */
+export function startLongTaskTracking(): void {
+  if (!IS_DEV || longTaskObserver) return
+  if (typeof PerformanceObserver === 'undefined') return
+  try {
+    const obs = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) perfRecord('longtask', entry.duration)
+    })
+    obs.observe({ type: 'longtask', buffered: false })
+    longTaskObserver = obs
+  } catch {
+    // Entry type unsupported (WKWebView) — heap/FPS still cover this platform.
+  }
+}
+
+export function stopLongTaskTracking(): void {
+  longTaskObserver?.disconnect()
+  longTaskObserver = null
+}
+
+// ─── JS heap sampling ─────────────────────────────────────────
+// performance.memory is Chromium-only (WebView2). On WKWebView the plan's
+// fallback is manual sampling via Activity Monitor / Instruments.
+
+interface ChromiumMemory {
+  usedJSHeapSize: number
+}
+
+let heapTimer: ReturnType<typeof setInterval> | null = null
+
+/** Sample used JS heap (MB) every 5s where the API exists. Idempotent. */
+export function startHeapTracking(): void {
+  if (!IS_DEV || heapTimer) return
+  const probe = (performance as unknown as { memory?: ChromiumMemory }).memory
+  if (!probe) return
+  heapTimer = setInterval(() => {
+    const mem = (performance as unknown as { memory?: ChromiumMemory }).memory
+    if (mem) perfRecord('jsHeapMB', mem.usedJSHeapSize / (1024 * 1024))
+  }, 5000)
+}
+
+export function stopHeapTracking(): void {
+  if (heapTimer) {
+    clearInterval(heapTimer)
+    heapTimer = null
   }
 }

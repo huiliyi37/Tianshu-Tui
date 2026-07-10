@@ -202,6 +202,12 @@ export function WorkspaceSurface() {
     closeSession.mutate(activeId)
     dispatch({ type: 'closeTab', id: activeId })
   }, [activeId, closeSession, dispatch])
+
+  // W2-2 收束: ThreadView → Composer 的 memo 链要求回调引用稳定，onAbort 若为
+  // 内联箭头，会随每个 streaming batch 的重渲染击穿 Composer 的浅比较。
+  const handleAbort = useCallback(() => {
+    if (activeId) abortSession.mutate(activeId)
+  }, [activeId, abortSession])
   const sidebarRef = usePanelRef()
   const reviewRef = usePanelRef()
 
@@ -307,7 +313,7 @@ export function WorkspaceSurface() {
                     view={view}
                     onSend={handleSend}
                     onSteer={handleSteer}
-                    onAbort={() => abortSession.mutate(active.id)}
+                    onAbort={handleAbort}
                     onSetApprovalMode={handleSetApprovalMode}
                     onSetPlanMode={handleSetPlanMode}
                     onSetEffort={handleSetEffort}

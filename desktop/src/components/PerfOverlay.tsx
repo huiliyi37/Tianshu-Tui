@@ -2,8 +2,8 @@
  * Wave 0 — Performance budget overlay.
  *
  * Dev-only React portal that shows p50/p99/max for each instrumented metric.
- * Toggled via Cmd+Shift+P (macOS) / Ctrl+Shift+P (Windows). Polls the perf
- * store at 500ms; tree-shaken in production builds via __DEV_INSTRUMENT__.
+ * Toggled via Cmd+Shift+P (macOS) / Ctrl+Shift+P (Windows). Inert in
+ * production: the record paths in perf-budget early-return on !DEV.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
@@ -13,6 +13,10 @@ import {
   getFpsMetric,
   startFpsTracking,
   stopFpsTracking,
+  startLongTaskTracking,
+  stopLongTaskTracking,
+  startHeapTracking,
+  stopHeapTracking,
   type PerfMetric,
 } from '../state/perf-budget'
 
@@ -33,11 +37,23 @@ export function PerfOverlay() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Start/stop FPS tracking based on visibility.
+  // Start/stop the pull-based trackers with visibility. longtask + heap are
+  // Chromium-only (WebView2/dev browser) and no-op on WKWebView.
   useEffect(() => {
-    if (visible) startFpsTracking()
-    else stopFpsTracking()
-    return () => stopFpsTracking()
+    if (visible) {
+      startFpsTracking()
+      startLongTaskTracking()
+      startHeapTracking()
+    } else {
+      stopFpsTracking()
+      stopLongTaskTracking()
+      stopHeapTracking()
+    }
+    return () => {
+      stopFpsTracking()
+      stopLongTaskTracking()
+      stopHeapTracking()
+    }
   }, [visible])
 
   if (!isDev || !visible) return null
@@ -83,12 +99,17 @@ function OverlayBody() {
 }
 
 function MetricRow({ name, m }: { name: string; m: PerfMetric }) {
-  const p50Color = m.p50 < 5 ? '#0f0' : m.p50 < 16 ? '#ff0' : '#f44'
+  // jsHeapMB samples are megabytes, not milliseconds — different unit + budget.
+  const isHeap = name === 'jsHeapMB'
+  const unit = isHeap ? 'MB' : 'ms'
+  const p50Color = isHeap
+    ? (m.p50 < 200 ? '#0f0' : m.p50 < 400 ? '#ff0' : '#f44')
+    : (m.p50 < 5 ? '#0f0' : m.p50 < 16 ? '#ff0' : '#f44')
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
       <span style={{ minWidth: 120, opacity: 0.7 }}>{name}</span>
       <span style={{ color: p50Color, minWidth: 50, textAlign: 'right' }}>
-        {m.p50.toFixed(1)}ms
+        {m.p50.toFixed(1)}{unit}
       </span>
       <span style={{ color: '#888', minWidth: 55, textAlign: 'right' }}>
         p99:{m.p99.toFixed(1)}
