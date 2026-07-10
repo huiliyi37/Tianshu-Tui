@@ -166,3 +166,101 @@ test('tables are not split (blank line ends the table before any cut)', () => {
   assert.ok(holder)
   assert.ok(holder.includes('| 3 | 4 |'))
 })
+
+// ── Performance regression guard (Wave 1 invariant) ─────────────────────────
+// The core win of Wave 1: per-tick markdown cost is O(tail), not O(full text).
+// This test verifies the incremental-call invariant: when streaming append-only,
+// `splitStableSegments` with `prev` rescans only the tail region. If the
+// invariant breaks (rescan covers the full document), cost regresses to O(n).
+
+test('PERF: incremental call rescans only the tail (O(tail) not O(full))', () => {
+  // Build a 30KB document with 10 stable segments + tail.
+  // Each segment is > MIN_SEGMENT_CHARS to ensure cuts happen.
+  const segments: string[] = []
+  for (let i = 0; i < 10; i++) {
+    segments.push(bigPara(`seg-${i}`))
+  }
+  const docBase = segments.join('\n\n') + '\n\ngrowing tail'
+
+  // Run one full scan to establish baseline.
+  const prev = splitStableSegments(docBase)
+  const stableCount = prev.stable.length
+  assert.ok(stableCount >= 5, `expected ≥5 stable segments, got ${stableCount}`)
+
+  // Instrument the scan function by measuring string indexOf calls.
+  // We patch String.prototype.indexOf temporarily to count invocations
+  // from within scan(), which is the hot loop. A full-rescan would call
+  // indexOf ~O(full_lines); tail-only rescan calls it ~O(tail_lines).
+  const originalIndexOf = String.prototype.indexOf
+  let indexOfCalls = 0
+  String.prototype.indexOf = function (search: string | RegExp, fromPosition?: number) {
+    if (this === docGrowing && search === '\n') indexOfCalls++
+    return originalIndexOf.call(this, search, fromPosition)
+  }
+
+  // Append ~500 chars to the tail (simulates one streaming batch).
+  const extra = ' more words'.repeat(50)
+  const docGrowing = docBase + extra
+
+  indexOfCalls = 0
+  const result = splitStableSegments(docGrowing, prev)
+
+  String.prototype.indexOf = originalIndexOf  // restore immediately
+
+  // Tail length at time of incremental call ≈ 'growing tail'.length + extra.length
+  const tailLen = docGrowing.length - docBase.length + 'growing tail'.length
+  const totalLines = docGrowing.split('\n').length
+
+  // The critical invariant: indexOf('\n') calls must be proportional to
+  // tail lines, NOT total document lines. Tail has ~50 lines; full doc has ~200+.
+  const tailLines = tailLen / 40  // rough estimate: ~40 chars/line
+  assert.ok(
+    indexOfCalls < totalLines * 0.5,
+    `rescan too broad: ${indexOfCalls} indexOf calls for ${totalLines} total lines (tail ≈${Math.round(tailLines)} lines)`,
+  )
+
+  // Frozen segments must be reference-identical to prev.
+  for (let i = 0; i < stableCount; i++) {
+    assert.ok(
+      Object.is(result.stable[i], prev.stable[i]),
+      `segment ${i} must be reference-stable across incremental call`,
+    )
+  }
+  assert.equal(joinAll(result), docGrowing)
+})
+
+test('PERF: 30 incremental appends keep per-call cost bounded', () => {
+  // Simulate a realistic streaming session: 30 batches of ~500 chars each,
+  // building a ~15KB document. Verify that the last few calls don't get
+  // progressively slower (which would indicate O(n) rescan).
+
+  const base = bigPara('stream-base') + '\n\n'
+  let doc = base
+  let prev: StreamSegments | undefined
+
+  // Establish initial segments.
+  prev = splitStableSegments(doc, prev)
+
+  const timings: number[] = []
+  for (let i = 0; i < 30; i++) {
+    doc += `batch-${i} ${'x'.repeat(450)}\n\n`
+    const t0 = performance.now()
+    prev = splitStableSegments(doc, prev)
+    timings.push(performance.now() - t0)
+  }
+
+  // The last 10 calls (large doc) must not be >10x slower than the first 10
+  // (small doc). With O(tail) invariant the cost stays roughly constant;
+  // without it, cost would grow linearly with doc size.
+  const early = timings.slice(0, 10)
+  const late = timings.slice(-10)
+  const earlyAvg = early.reduce((a, b) => a + b, 0) / early.length
+  const lateAvg = late.reduce((a, b) => a + b, 0) / late.length
+
+  // Allow 10x headroom for GC/JIT noise; the real ratio should be ~1-2x.
+  assert.ok(
+    lateAvg < earlyAvg * 10 + 0.5,
+    `late calls are ${lateAvg.toFixed(2)}ms vs early ${earlyAvg.toFixed(2)}ms — likely O(n) rescan regression`,
+  )
+  assert.ok(prev.stable.length >= 3, `expected ≥3 stable segments, got ${prev.stable.length}`)
+})

@@ -786,3 +786,33 @@ test('thinking_delta does not mutate previous state snapshot (immutability)', ()
   assert.equal(oldBlocks[0]!.text, 'plan', 'old snapshot text must not change')
   assert.notEqual(oldBlocks, s2.blocks, 'blocks arrays must be distinct references')
 })
+
+// ── Performance regression guard (Wave 2 invariant) ────────────────────────
+// coalesceDeltas merges consecutive same-type deltas into a single event.
+// Without this, 1000 token-deltas would produce 1000 blocks → O(n) per frame.
+// With it, they collapse to 1 merged event → O(1).
+
+test('PERF: 1000 consecutive text_deltas collapse into 1 block (coalesceDeltas invariant)', () => {
+  seq = 0
+  const events: SessionEvent[] = []
+  for (let i = 0; i < 1000; i++) {
+    events.push(ev('text_delta', { text: String.fromCharCode(97 + (i % 26)) }))
+  }
+  const s = fold(events)
+  // The critical invariant: 1000 deltas → 1 assistant block, not 1000.
+  assert.equal(s.blocks.length, 1, `expected 1 coalesced block, got ${s.blocks.length}`)
+  assert.equal(s.blocks[0]!.text.length, 1000)
+  assert.equal(s.blocks[0]!.kind, 'assistant')
+})
+
+test('PERF: 1000 thinking_deltas collapse into 1 block', () => {
+  seq = 0
+  const events: SessionEvent[] = []
+  for (let i = 0; i < 1000; i++) {
+    events.push(ev('thinking_delta', { text: 'x' }))
+  }
+  const s = fold(events)
+  assert.equal(s.blocks.length, 1, `expected 1 coalesced thinking block, got ${s.blocks.length}`)
+  assert.equal(s.blocks[0]!.text.length, 1000)
+  assert.equal(s.blocks[0]!.kind, 'thinking')
+})
