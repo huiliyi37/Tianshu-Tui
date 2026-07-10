@@ -182,13 +182,19 @@ test('有人值守会话：审批请求照常挂起（回归）', async () => {
   const agent = agents[0]!
 
   let resolvedValue: { approved: boolean } | boolean | undefined
+  let resolvedCount = 0
   void agent.callbacks!.onApprovalRequired('tool-2', 'computer_use', { action: 'click' })
-    .then((r) => { resolvedValue = r })
+    .then((r) => { resolvedValue = r; resolvedCount += 1 })
   await settle()
-  assert.equal(resolvedValue, undefined, 'approval should stay pending')
+  // 不能对 resolvedValue 直接断言「=== undefined」：@types/node 的 strict
+  // assert.equal/ok 带 `asserts` 收窄签名，会把这个只在闭包里赋值的变量永久
+  // 钉成 undefined（闭包赋值对 TS 流分析不可见，后续 typeof 分支推成 never）。
+  // 用计数器断言 pending，绕开对该变量的一切收窄。
+  assert.equal(resolvedCount, 0, 'approval should stay pending')
 
   assert.equal(manager.answerIntervention(s.id, 'tool-2', 'approve'), true)
   await settle()
+  assert.equal(resolvedCount, 1, 'approval should resolve after answerIntervention')
   assert.equal(typeof resolvedValue === 'boolean' ? resolvedValue : resolvedValue?.approved, true)
   agent.finish()
 })
