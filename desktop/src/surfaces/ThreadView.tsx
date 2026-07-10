@@ -2,6 +2,7 @@ import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useStat
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useQueryClient } from '@tanstack/react-query'
+import { perfBegin, perfEnd } from '../state/perf-budget'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import type { StreamStatus } from '../state/use-session-events'
@@ -285,52 +286,48 @@ export function ThreadView(props: {
   // Group consecutive tool/result blocks into one compact stream (Cursor 3.0).
   // U8: depend on blocksRev so in-place streaming text updates still recompute.
   const filteredBlocks = useMemo(() => {
-    // selectedTurnIndex === -1 (no selection) or === length (slider far right) =
-    // latest: show everything.
-    if (selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length) {
-      return view.blocks
-    }
-
-    // Historical: parked BEFORE rewind point `selectedTurnIndex`, so only the
-    // turns a fork here would keep are shown. Anchor on that point's `seq` — the
-    // exact `u-${seq}` block rewind() truncates from — so the preview is the
-    // byte-for-byte post-fork state (no drift from system/compaction/image turns
-    // that broke the old user-block-counting heuristic).
-    const point = rewindPoints[selectedTurnIndex]
-    if (!point) return view.blocks
-
-    if (typeof point.seq === 'number') {
-      const cutIdx = view.blocks.findIndex(
-        (b) => b.kind === 'user' && b.key === `u-${point.seq}`,
-      )
-      if (cutIdx >= 0) return view.blocks.slice(0, cutIdx)
-    }
-
-    // Fallback (event log trimmed → no seq): cut at the (selectedTurnIndex)-th
-    // user block. Equivalent to the seq path on a healthy 1:1 block/message log.
-    let userBlockCount = 0
-    for (let i = 0; i < view.blocks.length; i++) {
-      if (view.blocks[i]?.kind === 'user') {
-        if (userBlockCount === selectedTurnIndex) {
-          return view.blocks.slice(0, i)
-        }
-        userBlockCount++
-      }
-    }
-    return view.blocks
+    const _t = perfBegin('filteredBlocks')
+    const blocks = view.blocks
+    const result = selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length
+      ? blocks
+      : (() => {
+          const point = rewindPoints[selectedTurnIndex]
+          if (!point) return blocks
+          if (typeof point.seq === 'number') {
+            const cutIdx = blocks.findIndex((b) => b.kind === 'user' && b.key === `u-${point.seq}`)
+            if (cutIdx >= 0) return blocks.slice(0, cutIdx)
+          }
+          let userBlockCount = 0
+          for (let i = 0; i < blocks.length; i++) {
+            if (blocks[i]?.kind === 'user') {
+              if (userBlockCount === selectedTurnIndex) return blocks.slice(0, i)
+              userBlockCount++
+            }
+          }
+          return blocks
+        })()
+    perfEnd('filteredBlocks', _t)
+    return result
   }, [view.blocks, selectedTurnIndex, rewindPoints])
 
   // P1-2 view mode: summary keeps only conversational text (user/assistant/
   // error/turn separators) — tool runs and thinking are dropped before grouping.
   const viewMode = ui.viewMode
   const modeBlocks = useMemo(() => {
-    if (viewMode !== 'summary') return filteredBlocks
-    return filteredBlocks.filter((b) =>
+    const _t = perfBegin('modeBlocks')
+    const result = viewMode !== 'summary' ? filteredBlocks : filteredBlocks.filter((b) =>
       b.kind === 'user' || b.kind === 'assistant' || b.kind === 'error' || b.kind === 'turn' || b.kind === 'steer' || b.kind === 'landing',
     )
+    perfEnd('modeBlocks', _t)
+    return result
   }, [filteredBlocks, viewMode])
 
-  const rendered = useMemo(() => groupBlocks(modeBlocks), [modeBlocks, view.blocksRev])
+  const rendered = useMemo(() => {
+    const _t = perfBegin('groupBlocks')
+    const result = groupBlocks(modeBlocks)
+    perfEnd('groupBlocks', _t)
+    return result
+  }, [modeBlocks, view.blocksRev])
   const renderedWithTurns = useMemo(() => {
     let tNum = 1
     return rendered.map((item) => {

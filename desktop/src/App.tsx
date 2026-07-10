@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { PerfOverlay } from './components/PerfOverlay'
 import { getRuntimeInfo, type RuntimeInfo } from './runtime/client'
 import { useHealth, useEnvironment, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
@@ -24,6 +25,7 @@ import { openExternal } from './lib/open-external'
 import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
 import { FirstRunStorageDialog } from './components/FirstRunStorageDialog'
 import { FirstRunGitDialog } from './components/FirstRunGitDialog'
+import { RecordingBar } from './components/RecordingBar'
 import { useProLicense } from './lib/use-activation-gate'
 import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured, fixAutocrlf } from './runtime/client'
 import type { ProjectTemplatesStatus } from './runtime/types'
@@ -228,6 +230,7 @@ export function App() {
 
   return (
     <WallpaperProvider>
+      <PerfOverlay />
       <div className="shell">
         <TitleBar />
         <WallpaperLayer />
@@ -422,6 +425,7 @@ export function App() {
         && !gitGateDismissed && (
         <FirstRunGitDialog open onDismiss={() => setGitGateDismissed(true)} />
       )}
+      <RecordingBar />
       <Toaster position="top-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
     </div>
     </WallpaperProvider>
