@@ -289,6 +289,14 @@ pub fn clear_license(rivet_home: &Path) -> Result<(), String> {
 
 /// gate 便捷判断:是否允许拉起 agent runtime。
 pub fn is_activated(rivet_home: &Path) -> bool {
+    // 编译时开关：不设 RIVET_ACTIVATION_ENABLED=1 时，release 构建跳过激活 gate。
+    // 当前版本未启用激活（待完整端到端验证后再打开）。
+    // 后续启用：打包脚本设 RIVET_ACTIVATION_ENABLED=1 即可。
+    #[cfg(not(debug_assertions))]
+    if option_env!("RIVET_ACTIVATION_ENABLED").is_none() {
+        return true;
+    }
+
     // 仅 debug 构建honor 开发绕过环境变量;release(tauri:build)构建永不生效。
     #[cfg(debug_assertions)]
     if std::env::var("RIVET_ACTIVATION_DEV_BYPASS").is_ok() {
