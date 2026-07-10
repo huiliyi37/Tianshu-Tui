@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { SurfaceSkeleton } from '../components/Skeleton'
 import { qk, useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode, useWorkingTree } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
-import { useSessionEvents } from '../state/use-session-events'
+import { useSessionEvents, useSessionEventsSelector } from '../state/use-session-events'
 import { useJobNotifications } from '../state/use-job-notifications'
 import { answerApproval, commitSessionChanges, createSessionPr, mergeSessionBack, setApprovalMode, setEffort, steerSession } from '../runtime/client'
 import type { ApprovalMode, PlanModeState } from '../runtime/types'
@@ -541,8 +541,10 @@ function WorkspaceHeader({
   const abortSession = useAbortSession()
   const activeSession = sessions.data?.find((s) => s.id === ui.activeSessionId) ?? null
 
-  const view = useSessionEvents(ui.activeSessionId)
-  const delegation = view.delegation
+  // Sliced subscription (Wave 3): the header only reads delegation — the
+  // reducer keeps `delegation` reference-stable across text deltas, so
+  // streaming no longer re-renders the whole header bar.
+  const delegation = useSessionEventsSelector(ui.activeSessionId, (v) => v.delegation)
   const { total, done, running: runningWorkers } = summarizeDelegation(delegation)
 
   const known = useMemo(() => loadKnownProjects(), [])

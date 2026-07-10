@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { toast } from 'sonner'
 import { useUiState } from '../state/store'
-import { useSessionEvents } from '../state/use-session-events'
+import { useSessionEventsSelector } from '../state/use-session-events'
 import { abortDelegateWorker, getArtifact } from '../runtime/client'
 import { DiffView } from '../components/DiffView'
 import type { DelegationNode } from '../runtime/types'
@@ -251,9 +251,13 @@ function DetailPanel({ n, onViewDiff, onAbort }: {
 export function DelegationSurface() {
   const { t } = useTranslation('delegation')
   const { activeSessionId } = useUiState()
-  // Delegation nodes come from the live event stream — same hook ThreadView uses.
-  const view = useSessionEvents(activeSessionId)
-  const delegationMap: Record<string, DelegationNode> = view.delegation
+  // Delegation nodes come from the live event stream. Sliced subscription
+  // (Wave 3): the reducer keeps `delegation` reference-stable across text
+  // deltas, so streaming no longer re-renders this surface.
+  const delegationMap: Record<string, DelegationNode> = useSessionEventsSelector(
+    activeSessionId,
+    (v) => v.delegation,
+  )
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterKind>('all')

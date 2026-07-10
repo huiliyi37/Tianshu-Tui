@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import i18n from '../i18n'
 import { useSessions } from './queries'
-import { useSessionEvents } from './use-session-events'
+import { useSessionEventsSelector } from './use-session-events'
 import { initNotificationRouting, notifyRouted, shouldNotify } from '../lib/notify'
 import { loadNotifPref } from '../lib/persist'
 import { useUiDispatch, useUiState } from './store'
@@ -78,14 +78,16 @@ export function useGlobalNotifications(): void {
   }, [dispatch])
 
   // ── Active session: real-time completion via the live SSE event stream ──
-  const live = useSessionEvents(activeSessionId)
+  // Sliced subscription (Wave 3): only the status string wakes this hook —
+  // streaming text deltas no longer re-render the whole app shell above it.
+  const liveStatus = useSessionEventsSelector(activeSessionId, (v) => v.status ?? '')
   useEffect(() => {
     if (!activeSessionId) {
       activeStatusPrev.current = ''
       return
     }
     const before = activeStatusPrev.current
-    const now = live.status ?? ''
+    const now = liveStatus
     activeStatusPrev.current = now
     if (before === 'running' && (now === 'completed' || now === 'failed' || now === 'aborted')) {
       const key = `${activeSessionId}:${now}`
@@ -99,7 +101,7 @@ export function useGlobalNotifications(): void {
       const label = meta?.title ?? activeSessionId.slice(0, 8)
       notifyTerminal(activeSessionId, now as TerminalStatus, label, meta?.error, pref, isScheduledRun(meta?.title))
     }
-  }, [live.status, activeSessionId, sessions.data])
+  }, [liveStatus, activeSessionId, sessions.data])
 
   // ── All sessions: 2 s poll diff (backstop for non-active sessions) ──
   useEffect(() => {

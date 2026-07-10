@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ReactNode } from 'react'
 import type { SessionRecord } from '../runtime/types'
-import { useSessionEvents, type StreamStatus } from '../state/use-session-events'
+import { useSessionEventsSelector, type StreamStatus } from '../state/use-session-events'
 import { useAbortSession } from '../state/queries'
 import { answerApproval } from '../runtime/client'
-import { MiniStream } from './MiniStream'
+import { MiniStream, miniTail, miniLinesEqual, type MiniLineData } from './MiniStream'
 
 interface AgentCardProps {
   session: SessionRecord
@@ -127,26 +127,60 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
+/** The glance slice a live card actually renders — streaming deltas that don't
+ *  change any of these fields skip the card re-render entirely (Wave 3). */
+interface LiveCardSlice {
+  approvalRequestId: string | null
+  phase?: string
+  streamStatus: StreamStatus
+  tokens: number
+  edits: number
+  mini: MiniLineData[]
+}
+
+function liveCardSliceEqual(a: LiveCardSlice, b: LiveCardSlice): boolean {
+  return (
+    a.approvalRequestId === b.approvalRequestId &&
+    a.phase === b.phase &&
+    a.streamStatus === b.streamStatus &&
+    a.tokens === b.tokens &&
+    a.edits === b.edits &&
+    miniLinesEqual(a.mini, b.mini)
+  )
+}
+
 /** Live variant — subscribes to the session's SSE stream for tail blocks,
- *  live phase, token delta and edit count. */
+ *  live phase, token delta and edit count. Sliced subscription: only the
+ *  visible glance data wakes this card, not every text delta. */
 function LiveAgentCard({ session, onOpen }: { session: SessionRecord; onOpen: (s: SessionRecord) => void }) {
   const { t } = useTranslation('mission')
-  const view = useSessionEvents(session.id)
+  const view = useSessionEventsSelector<LiveCardSlice>(
+    session.id,
+    (v) => ({
+      approvalRequestId: v.pendingApproval?.requestId ?? null,
+      phase: v.phase,
+      streamStatus: v.streamStatus,
+      tokens: v.lastTotalTokens,
+      edits: v.sources.length,
+      mini: miniTail(v.blocks),
+    }),
+    liveCardSliceEqual,
+  )
   const [answering, setAnswering] = useState(false)
-  const pending = view.pendingApproval
+  const pendingRequestId = view.approvalRequestId
 
-  const onApprove = pending
+  const onApprove = pendingRequestId
     ? () => {
         if (answering) return
         setAnswering(true)
-        answerApproval(session.id, pending.requestId, 'approve').finally(() => setAnswering(false))
+        answerApproval(session.id, pendingRequestId, 'approve').finally(() => setAnswering(false))
       }
     : undefined
 
   const body = (
     <>
       {view.phase && <div className="mission-phase" title={t('card.phaseHint')}>{view.phase}</div>}
-      <MiniStream blocks={view.blocks} rev={view.blocksRev} />
+      <MiniStream lines={view.mini} />
     </>
   )
 
@@ -154,9 +188,9 @@ function LiveAgentCard({ session, onOpen }: { session: SessionRecord; onOpen: (s
     <AgentCardChrome
       session={session}
       streamStatus={view.streamStatus}
-      tokens={view.lastTotalTokens || session.contextTokens}
-      edits={view.sources.length}
-      pendingApprovals={pending ? Math.max(session.pendingApprovals, 1) : session.pendingApprovals}
+      tokens={view.tokens || session.contextTokens}
+      edits={view.edits}
+      pendingApprovals={pendingRequestId ? Math.max(session.pendingApprovals, 1) : session.pendingApprovals}
       body={body}
       onOpen={onOpen}
       onApprove={onApprove}
