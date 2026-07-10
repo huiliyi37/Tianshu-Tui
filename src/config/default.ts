@@ -251,6 +251,7 @@ export const DEFAULT_CONFIG: Config = {
       chatGateway: true,
       teamMax: true,
       councilMultiRound: true,
+      unattendedAutomation: true,
     },
   },
   plugins: { enabled: {} },

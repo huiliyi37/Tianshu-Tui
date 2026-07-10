@@ -208,6 +208,12 @@
     "completedBody": "{{label}} 已完成，点击查看结果",
     "failedBody": "{{label}} 失败：{{error}}",
     "unknownError": "未知错误",
-    "approvalBody": "{{label}} 有 {{count}} 项待你审批"
+    "approvalBody": "{{label}} 有 {{count}} 项待你审批",
+    "automationCompleted": "自动化运行完成",
+    "automationCompletedBody": "{{label}} 已完成，走查报告已就绪，点击回放",
+    "automationFailed": "自动化运行失败",
+    "automationFailedBody": "{{label}} 失败：{{error}}，点击查看",
+    "automationHalted": "自动化运行被中止",
+    "automationHaltedBody": "{{label}} 已中止：{{error}}，点击查看"
   }
 }

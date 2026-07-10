@@ -849,6 +849,8 @@ export function createSchedule(input: {
   trigger: { type: 'interval' | 'cron' | 'oneshot'; spec: string }
   allowedTools?: string[]
   retry?: { maxAttempts: number; backoffMs: number }
+  /** 付费版 v1 · T2 — 审查策略（非 always-review 需要 Pro）。 */
+  reviewPolicy?: 'always-review' | 'first-runs' | 'auto-proceed'
 }): Promise<ScheduledTask> {
   return apiPost<ScheduledTask>('/schedule', input)
 }

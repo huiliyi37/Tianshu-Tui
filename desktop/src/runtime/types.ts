@@ -229,6 +229,9 @@ export interface ScheduledTaskRetry {
   backoffMs: number
 }
 
+/** 付费版 v1 · T2 — 自动化任务审查策略。 */
+export type ReviewPolicy = 'always-review' | 'first-runs' | 'auto-proceed'
+
 export interface ScheduledTask {
   id: string
   prompt: string
@@ -239,6 +242,7 @@ export interface ScheduledTask {
   triggerCount: number
   enabled?: boolean
   retry?: ScheduledTaskRetry
+  reviewPolicy?: ReviewPolicy
 }
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'

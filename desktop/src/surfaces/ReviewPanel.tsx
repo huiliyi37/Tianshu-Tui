@@ -22,6 +22,8 @@ import { GithubPanel } from './GithubPanel'
 import { BrowserPanel } from './BrowserPanel'
 import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
+import { WalkthroughViewer } from '../components/WalkthroughViewer'
+import { useProLicense } from '../lib/use-activation-gate'
 import { isAutonomous } from '../lib/autonomy'
 import { useUiState } from '../state/store'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -184,6 +186,13 @@ export function ReviewPanel(props: {
     return artifacts.filter((a) => a.kind === 'html' || a.kind === 'markdown' || a.target.endsWith('.html') || a.target.endsWith('.md') || a.target.endsWith('.css'))
   }, [artifacts])
 
+  // 付费版 v1 · T1 — 走查工件（walkthrough-recorder 落的运行回放）。取最新一份。
+  const walkthroughArtifact = useMemo(() => {
+    const list = artifacts.filter((a) => a.tool === 'walkthrough')
+    return list.length > 0 ? list[list.length - 1]! : null
+  }, [artifacts])
+  const { isPro } = useProLicense()
+
   // Esc 退出全屏预览。
   useEffect(() => {
     if (!canvasFullscreen) return
@@ -304,8 +313,13 @@ export function ReviewPanel(props: {
     }
 
     const filtered = all.filter((t) => enabledTabs.includes(t.id))
+    // 走查 tab 不受用户 tab 偏好过滤（陈旧的 localStorage 偏好里没有它）：
+    // 只要会话有 walkthrough 工件就展示。
+    if (walkthroughArtifact) {
+      filtered.push({ id: 'walkthrough', label: 'Walkthrough', glyph: '🎬' })
+    }
     return filtered.length > 0 ? filtered : [all[0]!]
-  }, [pendingCount, planMode, incompleteTasks, enabledTabs, canvasArtifacts.length, artifacts, session])
+  }, [pendingCount, planMode, incompleteTasks, enabledTabs, canvasArtifacts.length, artifacts, session, walkthroughArtifact])
 
   // Fallback active tab if current tab gets disabled
   useEffect(() => {
@@ -384,6 +398,19 @@ export function ReviewPanel(props: {
         </TabsContent>
         <TabsContent value="browser" className="review-body">
           <BrowserPanel sessionId={sessionId} />
+        </TabsContent>
+        <TabsContent value="walkthrough" className="review-body">
+          {sessionId && walkthroughArtifact ? (
+            <WalkthroughViewer
+              sessionId={sessionId}
+              artifact={walkthroughArtifact}
+              isPro={isPro}
+              onSteer={onSendPrompt}
+              sessionRunning={sessionRunning}
+            />
+          ) : (
+            <div className="empty sm">{t('walkthrough.empty')}</div>
+          )}
         </TabsContent>
         <TabsContent value="canvas" className="review-body flex flex-col h-full">
           <div className="canvas-container flex flex-col h-full gap-2 p-2">

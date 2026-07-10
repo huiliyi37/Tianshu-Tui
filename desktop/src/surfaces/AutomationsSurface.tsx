@@ -10,7 +10,7 @@ import {
 } from '../state/queries'
 import { useUiDispatch } from '../state/store'
 import { tasksForSchedule, latestStatusForSchedule, isCancellable, statusLabel, statusTone } from '../lib/automations'
-import type { ScheduledTask, TaskStatus } from '../runtime/types'
+import type { ReviewPolicy, ScheduledTask, TaskStatus } from '../runtime/types'
 
 type TriggerType = 'interval' | 'cron' | 'oneshot'
 
@@ -33,6 +33,7 @@ export function AutomationsSurface() {
   const [maxAttempts, setMaxAttempts] = useState('1')
   const [backoffSec, setBackoffSec] = useState('30')
   const [allowedTools, setAllowedTools] = useState('')
+  const [reviewPolicy, setReviewPolicy] = useState<ReviewPolicy>('always-review')
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const definitions = schedule.data ?? []
@@ -49,10 +50,16 @@ export function AutomationsSurface() {
         trigger: { type, spec: spec.trim() },
         ...(tools.length > 0 ? { allowedTools: tools } : {}),
         ...(attempts >= 2 ? { retry: { maxAttempts: attempts, backoffMs } } : {}),
+        ...(reviewPolicy !== 'always-review' ? { reviewPolicy } : {}),
       },
-      { onSuccess: () => { setPrompt(''); setAllowedTools('') } },
+      { onSuccess: () => { setPrompt(''); setAllowedTools(''); setReviewPolicy('always-review') } },
     )
   }
+
+  // 无人值守（Pro）：非 always-review 或点名 computer_use。auto-proceed 只放行
+  // 已授权 app（Computer Use「始终允许」），未授权动作 fail-closed 中止。
+  const wantsUnattended = reviewPolicy !== 'always-review'
+    || allowedTools.split(',').map((s) => s.trim()).includes('computer_use')
 
   const specHint =
     type === 'interval' ? t('form.specHint.interval')
@@ -97,11 +104,24 @@ export function AutomationsSurface() {
             <input type="number" min={0} value={backoffSec} onChange={(e) => setBackoffSec(e.target.value)} style={{ width: 72 }} />
           </div>
           <div className="row">
+            <label className="meta" style={{ minWidth: 64 }}>{t('form.reviewPolicy')}</label>
+            <select value={reviewPolicy} onChange={(e) => setReviewPolicy(e.target.value as ReviewPolicy)}>
+              <option value="always-review">{t('form.policyAlways')}</option>
+              <option value="first-runs">{t('form.policyFirstRuns')}</option>
+              <option value="auto-proceed">{t('form.policyAutoProceed')}</option>
+            </select>
+          </div>
+          <div className="row">
             <input value={allowedTools} onChange={(e) => setAllowedTools(e.target.value)} placeholder={t('form.allowedToolsPlaceholder')} />
             <button className="btn" disabled={!prompt.trim() || create.isPending} onClick={submit}>{t('form.create')}</button>
           </div>
           <div className="meta">{specHint} · {t('form.retryHint')}</div>
-          {create.isError && <div className="meta warn">{(create.error as Error).message}</div>}
+          {wantsUnattended && <div className="meta">{t('form.unattendedHint')}</div>}
+          {create.isError && (
+            <div className="meta warn">
+              {/pro_required/.test((create.error as Error).message) ? t('form.proRequired') : (create.error as Error).message}
+            </div>
+          )}
         </div>
 
         <div className="automations-def-list" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
@@ -191,6 +211,7 @@ function ScheduleCard({
       <div className="meta">
         {task.trigger.type} · {task.trigger.spec} · {t('schedule.triggerCount', { n: task.triggerCount })}
         {task.retry ? ` · ${t('schedule.retryTimes', { n: task.retry.maxAttempts })}` : ''}
+        {task.reviewPolicy && task.reviewPolicy !== 'always-review' ? ` · ${t(`schedule.policy.${task.reviewPolicy}`)}` : ''}
         {task.enabled === false ? ` · ${t('schedule.paused')}` : ''}
       </div>
       {latest && <div className="meta">{t('schedule.latest')}<StatusBadge status={latest} /></div>}

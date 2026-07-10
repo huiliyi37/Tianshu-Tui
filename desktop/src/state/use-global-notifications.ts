@@ -9,6 +9,41 @@ import { isAutonomous } from '../lib/autonomy'
 
 interface Snap { status: string; pendingApprovals: number }
 
+// 付费版 v1 · T2 — 定时任务派生的会话（SessionRuntimePool titlePrefix）。
+// 自动化运行的结束通知走专用文案：成功 → 走查报告就绪；失败/中止 → 原因。
+function isScheduledRun(title: string | undefined): boolean {
+  return !!title && title.startsWith('scheduled:')
+}
+
+type TerminalStatus = 'completed' | 'failed' | 'aborted'
+
+function notifyTerminal(
+  sessionId: string,
+  status: TerminalStatus,
+  label: string,
+  error: string | undefined,
+  pref: ReturnType<typeof loadNotifPref>,
+  scheduled: boolean,
+): void {
+  const err = error || i18n.t('shell:notify.unknownError')
+  if (scheduled) {
+    if (status === 'completed') {
+      void notifyRouted(i18n.t('shell:notify.automationCompleted'), i18n.t('shell:notify.automationCompletedBody', { label }), sessionId, pref)
+    } else if (status === 'failed') {
+      void notifyRouted(i18n.t('shell:notify.automationFailed'), i18n.t('shell:notify.automationFailedBody', { label, error: err }), sessionId, pref)
+    } else {
+      void notifyRouted(i18n.t('shell:notify.automationHalted'), i18n.t('shell:notify.automationHaltedBody', { label, error: err }), sessionId, pref)
+    }
+    return
+  }
+  // 非自动化会话维持原行为：aborted（用户自己按的停止）不打扰。
+  if (status === 'completed') {
+    void notifyRouted(i18n.t('shell:notify.taskCompleted'), i18n.t('shell:notify.completedBody', { label }), sessionId, pref)
+  } else if (status === 'failed') {
+    void notifyRouted(i18n.t('shell:notify.taskFailed'), i18n.t('shell:notify.failedBody', { label, error: err }), sessionId, pref)
+  }
+}
+
 // Cross-session desktop notifications (Q2/S). Diffs successive session-list polls
 // and fires an OS notification for ANY session (not just the active one) that
 // newly needs approval or transitions to completed/failed. The first snapshot is
@@ -52,7 +87,7 @@ export function useGlobalNotifications(): void {
     const before = activeStatusPrev.current
     const now = live.status ?? ''
     activeStatusPrev.current = now
-    if (before === 'running' && (now === 'completed' || now === 'failed')) {
+    if (before === 'running' && (now === 'completed' || now === 'failed' || now === 'aborted')) {
       const key = `${activeSessionId}:${now}`
       if (notified.current.has(key)) return
       notified.current.add(key)
@@ -62,11 +97,7 @@ export function useGlobalNotifications(): void {
       // live view doesn't carry title/error, but the sessions list does.
       const meta = sessions.data?.find((s) => s.id === activeSessionId)
       const label = meta?.title ?? activeSessionId.slice(0, 8)
-      if (now === 'completed') {
-        void notifyRouted(i18n.t('shell:notify.taskCompleted'), i18n.t('shell:notify.completedBody', { label }), activeSessionId, pref)
-      } else {
-        void notifyRouted(i18n.t('shell:notify.taskFailed'), i18n.t('shell:notify.failedBody', { label, error: meta?.error || i18n.t('shell:notify.unknownError') }), activeSessionId, pref)
-      }
+      notifyTerminal(activeSessionId, now as TerminalStatus, label, meta?.error, pref, isScheduledRun(meta?.title))
     }
   }, [live.status, activeSessionId, sessions.data])
 
@@ -100,15 +131,12 @@ export function useGlobalNotifications(): void {
         void notifyRouted(i18n.t('shell:notify.needsApproval'), i18n.t('shell:notify.approvalBody', { label, count: s.pendingApprovals }), s.id, pref)
       }
       if (was && was.status !== s.status) {
+        if (s.status !== 'completed' && s.status !== 'failed' && s.status !== 'aborted') continue
         const key = `${s.id}:${s.status}`
         // Live SSE path already announced this transition — skip the duplicate.
         if (notified.current.has(key)) continue
         notified.current.add(key)
-        if (s.status === 'completed') {
-          void notifyRouted(i18n.t('shell:notify.taskCompleted'), i18n.t('shell:notify.completedBody', { label }), s.id, pref)
-        } else if (s.status === 'failed') {
-          void notifyRouted(i18n.t('shell:notify.taskFailed'), i18n.t('shell:notify.failedBody', { label, error: s.error || i18n.t('shell:notify.unknownError') }), s.id, pref)
-        }
+        notifyTerminal(s.id, s.status as TerminalStatus, label, s.error, pref, isScheduledRun(s.title))
       }
     }
     prev.current = snapshot()

@@ -34,6 +34,7 @@ import { TaskRegistry } from './task-registry.js'
 import { JsonTaskStore } from './task-store.js'
 import { SessionRuntimePool } from './session-runtime-pool.js'
 import { loadConfig } from '../config/manager.js'
+import { isProFeatureEnabled } from '../config/pro-license.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from '../platform.js'
 import { resolveApiKey } from '../api/factory.js'
 import type { OaiMessage } from '../api/oai-types.js'
@@ -1291,7 +1292,13 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     const lock = new CronLock({ lockPath: join(rivetDir, 'scheduled_tasks.lock') })
     wiring = new CronWiring({ scheduler, registry, runtimePool, lock })
     void wiring.start().catch(() => { /* non-fatal: scheduler stays idle */ })
-    Object.assign(routes, buildScheduleRoutes(scheduler, apiToken, () => wiring?.getStatus()))
+    Object.assign(routes, buildScheduleRoutes(scheduler, apiToken, {
+      getStatus: () => wiring?.getStatus(),
+      // 付费版 v1 · T5 — 非 always-review / 含 computer_use 的定时任务归 Pro。
+      // 用启动时的 ctx.config：Pro 状态经 RIVET_PRO 注入，激活后本就要求重启 sidecar。
+      isUnattendedAutomationEnabled: () =>
+        isProFeatureEnabled(ctx.config, 'unattendedAutomation'),
+    }))
     // Task audit/history API (execution records for the automations dashboard).
     // The scheduler + task-registry share this desktop dir, so events land in
     // .rivet/tasks/events alongside the task records.

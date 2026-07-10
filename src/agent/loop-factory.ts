@@ -567,6 +567,11 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getContextWindow: () => self.config.contextWindow ?? 128_000,
     // 多会话隔离：todo-reminder 经此读本会话 TodoStore（缺省回退全局 getTodos）。
     getTodos: self.config.getTodos,
+    // 运行走查工件（付费版 v1 · T1）：computer_use 步骤时间线 → walkthrough 工件。
+    walkthrough: {
+      getArtifactStore: () => self.artifactStore,
+      sessionId: self.config.sessionId,
+    },
   })
 
   // I4: when any runtime hook throws, run user `onError` hooks and emit the

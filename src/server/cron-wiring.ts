@@ -66,6 +66,8 @@ export class CronWiring {
         // 关联回 ScheduledTask 并继承重试策略（用于看板分组 + 失败重试）。
         scheduledTaskId: meta?.scheduledTaskId,
         retry: meta?.retry,
+        // reviewPolicy 解析结果：无人值守运行的审批 fail-closed 中止。
+        unattended: meta?.unattended,
       })
     })
 

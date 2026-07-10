@@ -14,7 +14,13 @@
     "backoffSec": "Retry backoff (s)",
     "allowedToolsPlaceholder": "Allowed tools (comma-separated, empty = all)",
     "create": "Create",
-    "retryHint": "Retry on failure is enabled when attempts ≥ 2"
+    "retryHint": "Retry on failure is enabled when attempts ≥ 2",
+    "reviewPolicy": "Review policy",
+    "policyAlways": "Always review (default)",
+    "policyFirstRuns": "Review first runs, then auto-proceed",
+    "policyAutoProceed": "Auto-proceed (granted apps only)",
+    "unattendedHint": "Unattended automation (Pro): only apps granted via Computer Use \"Always allow\" are permitted; ungranted actions halt the run and are recorded in the walkthrough. Grant the target app in a session first.",
+    "proRequired": "Unattended automation is a Pro feature: policies other than \"Always review\", or scheduled tasks that include computer_use, require a Pro license."
   },
   "list": {
     "empty": "No automations yet"
@@ -30,6 +36,10 @@
   "schedule": {
     "triggerCount": "Triggered {{n}} times",
     "retryTimes": "Retry ×{{n}}",
+    "policy": {
+      "first-runs": "Review first runs",
+      "auto-proceed": "Auto-proceed"
+    },
     "paused": "Paused",
     "latest": "Latest: ",
     "resume": "Resume",

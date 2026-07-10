@@ -545,6 +545,9 @@ export const proSchema = z.object({
     teamMax: z.boolean().default(true),
     /** council_convene rounds≥2（反驳/辩论轮）。 */
     councilMultiRound: z.boolean().default(true),
+    /** 无人值守自动化（付费版 v1 · T2）：非 always-review 审查策略 +
+     *  含 computer_use 的定时任务。 */
+    unattendedAutomation: z.boolean().default(true),
   }).default({}),
 }).default({})
 

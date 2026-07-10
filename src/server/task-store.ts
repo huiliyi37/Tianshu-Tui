@@ -71,6 +71,8 @@ export interface TaskRecord {
   retryOf?: string
   /** 失败重试策略（从 ScheduledTask 继承，随重试传递）。 */
   retry?: ScheduledTaskRetry
+  /** 无人值守运行（reviewPolicy 解析结果）：审批请求 fail-closed 中止而非挂起。 */
+  unattended?: boolean
 }
 
 export interface CreateTaskInput {
@@ -91,6 +93,8 @@ export interface CreateTaskInput {
   retryOf?: string
   /** 失败重试策略。 */
   retry?: ScheduledTaskRetry
+  /** 无人值守运行（审批 fail-closed 中止）。 */
+  unattended?: boolean
 }
 
 // ─── TaskStore 接口 ───────────────────────────────────────────

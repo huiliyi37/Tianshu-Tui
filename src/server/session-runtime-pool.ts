@@ -32,10 +32,12 @@ export class SessionRuntimePool implements RuntimePool {
   acquire(taskId: string): Promise<RuntimeHandle> {
     this.size++
     const handle: RuntimeHandle = {
-      execute: async (prompt, signal, _allowedTools, onSessionStart): Promise<RuntimeResult> => {
+      execute: async (prompt, signal, _allowedTools, onSessionStart, options): Promise<RuntimeResult> => {
         const session = this.manager.createSession({
           cwd: this.defaultCwd,
           title: `${this.titlePrefix}:${taskId.slice(0, 8)}`,
+          // 无人值守（auto-proceed）：审批请求 fail-closed 中止本次运行。
+          unattended: options?.unattended === true,
         })
         // Link the visible session to the task immediately, so the desktop can
         // jump to the thread even if the run subsequently fails.

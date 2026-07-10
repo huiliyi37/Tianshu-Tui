@@ -14,7 +14,13 @@
     "backoffSec": "重试间隔(秒)",
     "allowedToolsPlaceholder": "允许的工具(逗号分隔，留空=全部)",
     "create": "新建",
-    "retryHint": "尝试次数 ≥ 2 时启用失败重试"
+    "retryHint": "尝试次数 ≥ 2 时启用失败重试",
+    "reviewPolicy": "审查策略",
+    "policyAlways": "每次审批（默认）",
+    "policyFirstRuns": "前几次审批，信任后自动放行",
+    "policyAutoProceed": "自动放行（仅已授权 app）",
+    "unattendedHint": "无人值守自动化（Pro）：仅放行 Computer Use「始终允许」过的 app；未授权动作会中止本次运行并记入走查报告。先在会话里对目标 app 勾选「始终允许」。",
+    "proRequired": "无人值守自动化是 Pro 功能：非「每次审批」策略或含 computer_use 的定时任务需要 Pro 授权。"
   },
   "list": {
     "empty": "还没有自动化任务"
@@ -30,6 +36,10 @@
   "schedule": {
     "triggerCount": "已触发 {{n}} 次",
     "retryTimes": "重试×{{n}}",
+    "policy": {
+      "first-runs": "前几次审批",
+      "auto-proceed": "自动放行"
+    },
     "paused": "已暂停",
     "latest": "最近：",
     "resume": "恢复",

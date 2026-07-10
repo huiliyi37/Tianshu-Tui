@@ -302,6 +302,11 @@ export interface CreateSessionInput {
   approvalMode?: ApprovalMode
   /** Create an isolated git worktree for this session (parallel work without conflict). */
   isolatedWorktree?: boolean
+  /**
+   * 无人值守运行（付费版 v1 · T2，auto-proceed 定时任务）：审批请求不挂起等人，
+   * 立即拒绝并 fail-closed 中止本次运行（中止原因入事件流 + 走查工件）。
+   */
+  unattended?: boolean
 }
 
 /** Persisted snapshot of a session: a record + its full event log. */
@@ -509,6 +514,10 @@ interface InternalSession {
   planDraftLastEmit?: number
   /** plan_draft 节流 — 尾沿定时器，保证窗口内最后一次写盘总能落一发事件。 */
   planDraftTimer?: NodeJS.Timeout
+  /** 无人值守运行：审批请求 fail-closed 中止（付费版 v1 · T2）。 */
+  unattended?: boolean
+  /** 无人值守中止原因（首个被拦截的审批），随 done/summary 上报。 */
+  unattendedHaltReason?: string
 }
 
 const REDACTED = '[REDACTED]'
@@ -994,6 +1003,7 @@ export class RuntimeSessionManager {
         : undefined,
       disabledSkills: new Set(),
       skillLoadErrors: [],
+      unattended: input.unattended === true,
     }
     this.sessions.set(id, session)
     this.touchLoaded(session)
@@ -1028,6 +1038,7 @@ export class RuntimeSessionManager {
     }
     session.lastAbortReason = undefined
     session.abortWhileApprovalPending = false
+    session.unattendedHaltReason = undefined
     session.watchdogPolicy ??= new WatchdogRecoveryPolicy()
     // 用户主动提交恢复续跑预算；自动续跑注入的 'continue' 不算（与 TUI 的
     // onSubmitCallback 直呼路径一致，否则 consecutive cap 形同虚设）。
@@ -1080,6 +1091,9 @@ export class RuntimeSessionManager {
         // peer session can edit those files next. Idempotent / best-effort.
         try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* non-fatal */ }
         this.touch(session)
+        // postSession 产物（如 walkthrough 走查工件）在 run 落定后才入 store —
+        // 这里再扫一遍，让 'artifact' 事件把它公告给桌面端。
+        this.scanArtifacts(session)
         this.append(session, 'done', { status: session.record.status })
         this.persistRecord(session)
         this.maybeWatchdogAutoContinue(session)
@@ -1762,6 +1776,10 @@ export class RuntimeSessionManager {
   }
 
   private buildRunSummary(session: InternalSession): string {
+    // 无人值守 fail-closed 中止：原因优先于末段 assistant 文本（可行动性更高）。
+    if (session.unattendedHaltReason) {
+      return `[unattended halt] ${session.unattendedHaltReason}`
+    }
     // Last assistant text run is the closest thing to a result summary.
     for (let i = session.events.length - 1; i >= 0; i--) {
       const e = session.events[i]!
@@ -2592,6 +2610,25 @@ export class RuntimeSessionManager {
     name: string,
     input: Record<string, unknown>,
   ): Promise<ApprovalResult> {
+    // 无人值守（auto-proceed 定时任务）：审批请求不挂起等人 — fail-closed。
+    // 立即拒绝该工具调用，把中止原因写进事件流，并中止本次运行（绝不静默
+    // 跳过、也不无限期等待）。走查工件经 agent 侧 postTool 记录同一拒绝。
+    if (session.unattended) {
+      const requestId = toolId || randomId()
+      const app = typeof input.app === 'string' && input.app ? ` (app: ${input.app})` : ''
+      const reason = `unattended run blocked on approval: ${name}${app}`
+      session.unattendedHaltReason ??= reason
+      // record.error 让会话列表/桌面通知不用扒事件流就能拿到中止原因。
+      session.record.error ??= reason
+      this.append(session, 'approval_required', { requestId, toolName: name, input: redactValue(input) })
+      this.append(session, 'approval_resolved', { requestId, decision: 'unattended_blocked' })
+      this.append(session, 'unattended_halt', { requestId, toolName: name, reason })
+      session.lastApprovalDeniedAt = this.now()
+      this.persistRecord(session)
+      // 拒绝先返回（让 agent 收到 deny 的 tool_result 并被走查记录），下一拍中止运行。
+      setImmediate(() => { this.abort(session.record.id) })
+      return Promise.resolve({ approved: false })
+    }
     return new Promise<ApprovalResult>((resolve) => {
       const requestId = toolId || randomId()
       const pend: PendingIntervention = {

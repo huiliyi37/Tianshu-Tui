@@ -53,6 +53,7 @@ import { createAsyncCopilotHook, type CopilotContextPack } from './hooks/async-c
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
+import { createWalkthroughRecorderHooks, type WalkthroughRecorderDeps } from './hooks/walkthrough-recorder.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
@@ -235,6 +236,11 @@ export interface RuntimeHookDeps {
   // ── 轮内防御三层加固（2026-07）──
   /** 注入 system-reminder 到消息流末尾（不经 advisory bus 优先级竞争）。 */
   addSystemReminder?: (content: string) => void
+
+  // ── 运行走查工件（付费版 v1 · T1）──
+  /** computer_use 步骤时间线记录器 + postSession walkthrough 工件组装。
+   *  缺省（无 ArtifactStore 通道）→ 不装 hook。 */
+  walkthrough?: WalkthroughRecorderDeps
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -670,6 +676,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
 
   if (deps.userHooksBridge) {
     hooks.push(...createUserHooksBridge(deps.userHooksBridge))
+  }
+
+  // Walkthrough recorder（付费版 v1 · T1）: postTool 捕获 computer_use 步骤，
+  // postSession 组装走查工件。记录器恒开（无 computer_use 活动时零成本），
+  // 回放查看器在桌面端 Pro gate。
+  if (deps.walkthrough) {
+    hooks.push(...createWalkthroughRecorderHooks(deps.walkthrough))
   }
 
   return hooks

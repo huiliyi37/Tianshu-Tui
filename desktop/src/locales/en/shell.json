@@ -208,6 +208,12 @@
     "completedBody": "{{label}} completed, click to view the result",
     "failedBody": "{{label}} failed: {{error}}",
     "unknownError": "Unknown error",
-    "approvalBody": "{{label}} has {{count}} item(s) awaiting your approval"
+    "approvalBody": "{{label}} has {{count}} item(s) awaiting your approval",
+    "automationCompleted": "Automation run completed",
+    "automationCompletedBody": "{{label}} completed — walkthrough is ready, click to replay",
+    "automationFailed": "Automation run failed",
+    "automationFailedBody": "{{label}} failed: {{error}}, click to view",
+    "automationHalted": "Automation run halted",
+    "automationHaltedBody": "{{label}} halted: {{error}}, click to view"
   }
 }

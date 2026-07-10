@@ -41,6 +41,10 @@ export interface RuntimeHandle {
     signal: AbortSignal,
     allowedTools?: string[],
     onSessionStart?: (sessionId: string) => void,
+    options?: {
+      /** 无人值守运行：会话内审批请求 fail-closed 中止（付费版 v1 · T2）。 */
+      unattended?: boolean
+    },
   ): Promise<RuntimeResult>
   /** 释放 runtime 回池 */
   release(): void
@@ -152,6 +156,7 @@ export class TaskRegistry {
         attempt: input.attempt ?? 1,
         ...(input.retryOf ? { retryOf: input.retryOf } : {}),
         ...(input.retry ? { retry: input.retry } : {}),
+        ...(input.unattended ? { unattended: true } : {}),
       }
 
       await this.store.save(r)
@@ -253,6 +258,7 @@ export class TaskRegistry {
         allowedTools: record.allowedTools,
         scheduledTaskId: record.scheduledTaskId,
         retry,
+        unattended: record.unattended,
         attempt: nextAttempt,
         retryOf: origin,
         force: true,
@@ -423,6 +429,7 @@ export class TaskRegistry {
         ac.signal,
         record.allowedTools,
         (sessionId) => { void this.attachSessionId(record.id, sessionId) },
+        { unattended: record.unattended === true },
       )
 
       await this.transition(record.id, 'completed', { result })

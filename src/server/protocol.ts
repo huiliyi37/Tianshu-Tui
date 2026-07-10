@@ -74,6 +74,8 @@ export type SessionEventType =
   | 'landing'
   // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
   | 'autonomy_checkpoint'
+  // 付费版 v1 · T2 — 无人值守运行被审批门禁 fail-closed 中止。
+  | 'unattended_halt'
 
 export interface SessionEvent {
   seq: number

@@ -7,7 +7,7 @@ import { resolveProLicense, isProEnabled, isProFeatureEnabled } from '../pro-lic
 import { DEFAULT_CONFIG } from '../default.js'
 import type { Config } from '../schema.js'
 
-const ALL_FEATURES_ON = { computerUse: true, chatGateway: true, teamMax: true, councilMultiRound: true }
+const ALL_FEATURES_ON = { computerUse: true, chatGateway: true, teamMax: true, councilMultiRound: true, unattendedAutomation: true }
 
 function baseConfig(): Config {
   // Start from the real default and only mutate `pro` for the test.
