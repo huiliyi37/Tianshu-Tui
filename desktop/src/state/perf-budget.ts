@@ -52,7 +52,7 @@ function percentile(sorted: number[], rank: number): number {
 }
 
 /** Begin a perf measurement. Returns an opaque handle for perfEnd. */
-export function perfBegin(name: string): number {
+export function perfBegin(_name: string): number {
   return performance.now()
 }
 
