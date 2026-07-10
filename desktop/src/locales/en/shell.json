@@ -17,6 +17,7 @@
       "license_expired": "This license has expired.",
       "activation_limit_reached": "This code has reached its device limit.",
       "activation_revoked": "This device's activation was revoked.",
+      "trial_already_used": "This device has already used a trial license. Please upgrade to Pro.",
       "invalid_code_format": "Invalid code format.",
       "device_mismatch": "The token does not match this device.",
       "no_token": "The server did not return a valid token.",

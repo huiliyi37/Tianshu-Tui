@@ -119,9 +119,15 @@ export const adminPage = `<!DOCTYPE html>
 <div class="modal-bg" id="genModal">
   <div class="modal">
     <h2>生成激活码</h2>
+    <label>类型</label>
+    <!-- 试用码:有效期从首次激活起算,强制单设备,一台设备一生一次。 -->
+    <select id="genKind" onchange="onGenKindChange()">
+      <option value="normal">正式码 (固定到期日/永久)</option>
+      <option value="trial">试用码 (激活后 N 天)</option>
+    </select>
     <label>数量</label>
     <input type="number" id="genCount" value="1" min="1" max="500">
-    <label>设备上限 (每码可绑几台)</label>
+    <label id="genDevicesLabel">设备上限 (每码可绑几台)</label>
     <input type="number" id="genDevices" value="2" min="1" max="50">
     <label>等级</label>
     <!-- 双层模式:桌面端任何验签通过的许可证即 Pro(Basic 无需许可证),
@@ -129,7 +135,7 @@ export const adminPage = `<!DOCTYPE html>
     <select id="genTier">
       <option value="pro">pro</option>
     </select>
-    <label>有效期天数 (留空=永久)</label>
+    <label id="genDaysLabel">有效期天数 (留空=永久)</label>
     <input type="number" id="genDays" placeholder="如 365">
     <label>备注 (可选)</label>
     <input type="text" id="genNote" placeholder="如 user@example.com">
@@ -232,8 +238,10 @@ function renderCodes() {
         ? '<span class="badge badge-full">已满</span>'
         : '<span class="badge badge-active">正常</span>';
     const lic = c.licenseExpires
-      ? '<span class="expire-tag">' + new Date(c.licenseExpires).toLocaleDateString('zh-CN') + '</span>'
-      : '<span class="expire-tag perp">永久</span>';
+      ? '<span class="expire-tag">' + new Date(c.licenseExpires).toLocaleDateString('zh-CN') + (c.trialDays ? ' · 试用' : '') + '</span>'
+      : c.trialDays
+        ? '<span class="expire-tag">试用 ' + c.trialDays + ' 天 (未激活)</span>'
+        : '<span class="expire-tag perp">永久</span>';
     const action = c.revoked
       ? '<button class="btn btn-green btn-sm" onclick="toggleRevoke(\\'' + c.code + '\\',false)">恢复</button>'
       : '<button class="btn btn-red btn-sm" onclick="toggleRevoke(\\'' + c.code + '\\',true)">吊销</button>';
@@ -340,14 +348,29 @@ function closeGenModal() {
   document.getElementById('genModal').classList.remove('show');
 }
 
+function onGenKindChange() {
+  const trial = document.getElementById('genKind').value === 'trial';
+  document.getElementById('genDaysLabel').textContent = trial ? '试用天数 (从激活起算)' : '有效期天数 (留空=永久)';
+  document.getElementById('genDays').placeholder = trial ? '如 10' : '如 365';
+  // 试用码强制单设备（服务端同样强制），禁用输入避免误解
+  const dev = document.getElementById('genDevices');
+  dev.disabled = trial;
+  if (trial) dev.value = '1';
+  document.getElementById('genDevicesLabel').textContent = trial ? '设备上限 (试用码固定 1 台)' : '设备上限 (每码可绑几台)';
+}
+
 function doGenerate() {
+  const trial = document.getElementById('genKind').value === 'trial';
   const count = parseInt(document.getElementById('genCount').value) || 1;
   const devices = parseInt(document.getElementById('genDevices').value) || 1;
   const tier = document.getElementById('genTier').value;
   const daysRaw = document.getElementById('genDays').value.trim();
   const note = document.getElementById('genNote').value.trim();
-  const licenseDays = daysRaw ? parseInt(daysRaw) : null;
-  api('POST', '/codes', { count, maxActivations: devices, tier, licenseDays, note }).then(data => {
+  if (trial && !daysRaw) { showToast('试用码必须填试用天数', 'err'); return; }
+  const body = trial
+    ? { count, tier, trialDays: parseInt(daysRaw), note }
+    : { count, maxActivations: devices, tier, licenseDays: daysRaw ? parseInt(daysRaw) : null, note };
+  api('POST', '/codes', body).then(data => {
     closeGenModal();
     if (data.codes && data.codes.length > 0) {
       navigator.clipboard.writeText(data.codes.join('\\n'));

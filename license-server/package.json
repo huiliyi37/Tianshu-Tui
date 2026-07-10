@@ -9,12 +9,17 @@
     "deploy": "wrangler deploy",
     "db:init": "wrangler d1 execute tianshu-licenses --file=./schema.sql",
     "db:init:local": "wrangler d1 execute tianshu-licenses --local --file=./schema.sql",
+    "db:migrate": "wrangler d1 execute tianshu-licenses --remote --file=./migrations/0002_trial_days.sql",
+    "db:migrate:local": "wrangler d1 execute tianshu-licenses --local --file=./migrations/0002_trial_days.sql",
     "genkeys": "node scripts/genkeys.mjs",
     "gencode": "node scripts/gencode.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "node --import tsx --test \"src/__tests__/*.test.ts\""
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.0",
     "typescript": "^5.6.3",
     "wrangler": "^3.90.0"
   }

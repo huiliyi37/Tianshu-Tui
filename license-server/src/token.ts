@@ -27,7 +27,7 @@ export function b64urlEncode(bytes: Uint8Array): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-export function b64urlDecode(s: string): Uint8Array {
+export function b64urlDecode(s: string): Uint8Array<ArrayBuffer> {
   const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4))
   const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + pad)
   const out = new Uint8Array(bin.length)
@@ -83,7 +83,7 @@ export async function verifyTokenSignature(token: string, publicKey: CryptoKey):
 }
 
 /** Standard-base64 decode (private key is stored standard-base64, not url). */
-function b64urlDecodeStd(s: string): Uint8Array {
+function b64urlDecodeStd(s: string): Uint8Array<ArrayBuffer> {
   const bin = atob(s)
   const out = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)

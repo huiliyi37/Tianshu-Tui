@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS codes (
   max_activations  INTEGER NOT NULL DEFAULT 1,
   used_count       INTEGER NOT NULL DEFAULT 0,
   license_expires  INTEGER,            -- unix ms；NULL = 永久授权
+  trial_days       INTEGER,            -- 非 NULL = 试用码：首次激活时回填 license_expires = 激活时刻 + trial_days 天
   revoked          INTEGER NOT NULL DEFAULT 0,
   note             TEXT,
   created_at       INTEGER NOT NULL

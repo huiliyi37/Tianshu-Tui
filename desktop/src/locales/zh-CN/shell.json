@@ -17,6 +17,7 @@
       "license_expired": "该许可已过期。",
       "activation_limit_reached": "该激活码已达设备绑定上限。",
       "activation_revoked": "本设备的激活已被吊销。",
+      "trial_already_used": "本设备已使用过试用许可，请升级正式 Pro。",
       "invalid_code_format": "激活码格式不正确。",
       "device_mismatch": "token 与本设备不匹配。",
       "no_token": "服务器未返回有效 token。",

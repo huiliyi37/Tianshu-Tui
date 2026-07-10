@@ -19,6 +19,7 @@ const KNOWN_ERRORS = new Set([
   'license_expired',
   'activation_limit_reached',
   'activation_revoked',
+  'trial_already_used',
   'invalid_code_format',
   'device_mismatch',
   'no_token',

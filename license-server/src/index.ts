@@ -1,4 +1,5 @@
 import { importPrivateKey, derivePublicKey, verifyTokenSignature, signToken, decodePayload, type TokenPayload } from './token'
+import { selectActivation, type ActivationCandidate } from './select-activation'
 import { adminPage } from './admin-html'
 
 export interface Env {
@@ -16,6 +17,8 @@ interface CodeRow {
   max_activations: number
   used_count: number
   license_expires: number | null
+  /** 非 NULL = 试用码：首次激活时回填 license_expires（从激活起算）。 */
+  trial_days: number | null
   revoked: number
   note: string | null
   created_at: number
@@ -87,6 +90,7 @@ function toCamelCode(r: CodeRow): Record<string, unknown> {
     maxActivations: r.max_activations,
     usedCount: r.used_count,
     licenseExpires: r.license_expires,
+    trialDays: r.trial_days,
     revoked: r.revoked,
     note: r.note,
     createdAt: r.created_at,
@@ -113,7 +117,7 @@ async function handleAdmin(req: Request, url: URL, env: Env): Promise<Response> 
   // GET /admin/api/codes — list all codes with activation stats
   if (path === 'codes' && req.method === 'GET') {
     const { results } = await env.DB.prepare(
-      `SELECT code, tier, max_activations, used_count, license_expires, revoked, note, created_at
+      `SELECT code, tier, max_activations, used_count, license_expires, trial_days, revoked, note, created_at
        FROM codes ORDER BY created_at DESC`,
     ).all<CodeRow>()
     return json({ codes: (results ?? []).map(toCamelCode) })
@@ -129,11 +133,16 @@ async function handleAdmin(req: Request, url: URL, env: Env): Promise<Response> 
     }
     const count = Math.min(Number(body.count ?? 1), 500)
     const tier = String(body.tier ?? 'pro')
-    const devices = Number(body.maxActivations ?? body.devices ?? 2)
     const days = body.licenseDays != null ? Number(body.licenseDays) : (body.days != null ? Number(body.days) : null)
+    const trialDays = body.trialDays != null ? Number(body.trialDays) : null
     const note = body.note != null ? String(body.note) : null
 
     if (count < 1) return json({ error: 'invalid_count' }, 400)
+    // 试用码：有效期从首次激活起算（trial_days 回填），与固定到期日互斥；
+    // 强制单设备，防止一码在群里被多台设备复用。
+    if (trialDays != null && days != null) return json({ error: 'trial_days_conflicts_license_days' }, 400)
+    if (trialDays != null && trialDays < 1) return json({ error: 'invalid_trial_days' }, 400)
+    const devices = trialDays != null ? 1 : Number(body.maxActivations ?? body.devices ?? 2)
     if (devices < 1) return json({ error: 'invalid_devices' }, 400)
 
     const licenseExpires = days != null ? Date.now() + days * 86_400_000 : null
@@ -144,13 +153,11 @@ async function handleAdmin(req: Request, url: URL, env: Env): Promise<Response> 
     for (let i = 0; i < count; i++) {
       const code = `TS-${randGroup(ALPHABET)}-${randGroup(ALPHABET)}-${randGroup(ALPHABET)}`
       codes.push(code)
-      const lic = licenseExpires == null ? 'NULL' : String(licenseExpires)
-      const noteSql = note ? `'${note.replace(/'/g, "''")}'` : 'NULL'
       await env.DB.prepare(
-        `INSERT INTO codes (code, tier, max_activations, used_count, license_expires, revoked, note, created_at)
-         VALUES (?, ?, ?, 0, ${lic}, 0, ${noteSql}, ?)`,
+        `INSERT INTO codes (code, tier, max_activations, used_count, license_expires, trial_days, revoked, note, created_at)
+         VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?)`,
       )
-        .bind(code, tier, devices, now)
+        .bind(code, tier, devices, licenseExpires, trialDays, note, now)
         .run()
     }
     return json({ created: codes.length, codes })
@@ -276,7 +283,7 @@ async function activate(body: Record<string, unknown>, env: Env): Promise<Respon
   if (!DEVICE_RE.test(deviceId)) return json({ error: 'invalid_device_id' }, 400)
 
   const row = await env.DB.prepare(
-    'SELECT code, tier, max_activations, used_count, license_expires, revoked FROM codes WHERE code = ?',
+    'SELECT code, tier, max_activations, used_count, license_expires, trial_days, revoked FROM codes WHERE code = ?',
   )
     .bind(code)
     .first<CodeRow>()
@@ -293,6 +300,7 @@ async function activate(body: Record<string, unknown>, env: Env): Promise<Respon
     .first<ActivationRow>()
 
   const now = Date.now()
+  let licenseExpires = row.license_expires
   if (existing) {
     if (existing.revoked) return json({ error: 'activation_revoked' }, 403)
     await env.DB.prepare('UPDATE activations SET last_seen_at = ? WHERE device_id = ? AND code = ?')
@@ -300,16 +308,41 @@ async function activate(body: Record<string, unknown>, env: Env): Promise<Respon
       .run()
   } else {
     if (row.used_count >= row.max_activations) return json({ error: 'activation_limit_reached' }, 409)
-    await env.DB.batch([
+
+    // 防滥用：一台设备一生只能兑换一个试用码（含已过期/已吊销的历史记录），
+    // 否则换码即可无限续试用。
+    if (row.trial_days != null) {
+      const priorTrial = await env.DB.prepare(
+        'SELECT a.code AS code FROM activations a JOIN codes c ON a.code = c.code WHERE a.device_id = ? AND c.trial_days IS NOT NULL LIMIT 1',
+      )
+        .bind(deviceId)
+        .first<{ code: string }>()
+      if (priorTrial) return json({ error: 'trial_already_used' }, 403)
+    }
+
+    const statements = [
       env.DB.prepare(
         'INSERT INTO activations (device_id, code, activated_at, last_seen_at, revoked) VALUES (?, ?, ?, ?, 0)',
       ).bind(deviceId, code, now, now),
       env.DB.prepare('UPDATE codes SET used_count = used_count + 1 WHERE code = ?').bind(code),
-    ])
+    ]
+
+    // 试用码：有效期从首次激活起算。只在 license_expires 尚未回填时写入，
+    // 单设备约束保证这条路径只走一次。
+    if (row.trial_days != null && row.license_expires == null) {
+      licenseExpires = now + row.trial_days * 86_400_000
+      statements.push(
+        env.DB.prepare(
+          'UPDATE codes SET license_expires = ? WHERE code = ? AND license_expires IS NULL',
+        ).bind(licenseExpires, code),
+      )
+    }
+
+    await env.DB.batch(statements)
   }
 
-  const { token, exp } = await issueToken(env, deviceId, row.tier, row.license_expires)
-  return json({ token, expiresAt: exp, tier: row.tier, licenseExpires: row.license_expires })
+  const { token, exp } = await issueToken(env, deviceId, row.tier, licenseExpires)
+  return json({ token, expiresAt: exp, tier: row.tier, licenseExpires })
 }
 
 async function verify(body: Record<string, unknown>, env: Env): Promise<Response> {
@@ -326,20 +359,32 @@ async function verify(body: Record<string, unknown>, env: Env): Promise<Response
     return json({ valid: false, reason: 'malformed' }, 200)
   if (payload.deviceId !== deviceId) return json({ valid: false, reason: 'device_mismatch' }, 200)
 
-  const act = await env.DB.prepare(
-    'SELECT a.revoked AS a_revoked, c.revoked AS c_revoked, c.license_expires AS lic, c.tier AS tier, a.code AS code FROM activations a JOIN codes c ON a.code = c.code WHERE a.device_id = ?',
+  // 一台设备可能有多条激活记录（试用过期后购买正式码是主转化路径），
+  // 必须优选最优有效授权，不能取任意第一行。
+  const { results } = await env.DB.prepare(
+    'SELECT a.revoked AS a_revoked, c.revoked AS c_revoked, c.license_expires AS lic, c.tier AS tier, a.code AS code, a.activated_at AS activated_at FROM activations a JOIN codes c ON a.code = c.code WHERE a.device_id = ?',
   )
     .bind(deviceId)
-    .first<{ a_revoked: number; c_revoked: number; lic: number | null; tier: string; code: string }>()
+    .all<{ a_revoked: number; c_revoked: number; lic: number | null; tier: string; code: string; activated_at: number }>()
 
-  if (!act) return json({ valid: false, reason: 'not_activated' }, 200)
-  if (act.a_revoked || act.c_revoked) return json({ valid: false, reason: 'revoked' }, 200)
-  if (act.lic != null && act.lic < Date.now()) return json({ valid: false, reason: 'license_expired' }, 200)
+  const candidates: ActivationCandidate[] = (results ?? []).map((r) => ({
+    code: r.code,
+    tier: r.tier,
+    activationRevoked: r.a_revoked !== 0,
+    codeRevoked: r.c_revoked !== 0,
+    licenseExpires: r.lic,
+    activatedAt: r.activated_at,
+  }))
 
+  const selected = selectActivation(candidates, Date.now())
+  if (!selected) return json({ valid: false, reason: 'not_activated' }, 200)
+  if (!selected.valid) return json({ valid: false, reason: selected.reason }, 200)
+
+  const act = selected.row
   await env.DB.prepare('UPDATE activations SET last_seen_at = ? WHERE device_id = ? AND code = ?')
     .bind(Date.now(), deviceId, act.code)
     .run()
 
-  const { token: refreshed, exp } = await issueTokenWithKey(env, deviceId, act.tier, act.lic, privateKey)
-  return json({ valid: true, token: refreshed, expiresAt: exp, tier: act.tier, licenseExpires: act.lic })
+  const { token: refreshed, exp } = await issueTokenWithKey(env, deviceId, act.tier, act.licenseExpires, privateKey)
+  return json({ valid: true, token: refreshed, expiresAt: exp, tier: act.tier, licenseExpires: act.licenseExpires })
 }
