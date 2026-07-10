@@ -33,6 +33,7 @@
 | `~/.rivet/sessions/<slug>/<id>.claims.jsonl` | 文件归属声明 |
 | `~/.rivet/sessions/<slug>/<id>/sensorium.jsonl` | 遥测快照（仅 `RIVET_DEBUG_TELEMETRY` 开启） |
 | `~/.rivet/sessions/<slug>/<id>/pheromones.json` | 跨会话信息素 |
+| `~/.rivet/sessions/<slug>/<id>/cache-log.jsonl` | 逐 API 请求缓存指标（input/cacheRead/cacheCreate/hitRate/model/turn） |
 | `~/.rivet/sessions/<slug>/worker-*/` | worker 子会话目录（含遥测/信息素/对话 JSONL） |
 | `<cwd>/.rivet/knowledge/memory.jsonl` | 项目持久化知识（跨会话） |
 | `<cwd>/.rivet/playbook.jsonl` | 历史教训回放 |
