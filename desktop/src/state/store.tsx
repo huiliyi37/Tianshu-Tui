@@ -71,6 +71,9 @@ export interface UiState {
   composerDrafts: Record<string, string>
   /** Per-session scroll positions (scrollTop in px) — restored on tab switch. */
   scrollPositions: Record<string, number>
+  /** One-shot request to reveal a file in the right-side FileExplorer.
+   *  `rev` bumps so repeated requests for the same path still trigger. */
+  revealFileRequest: { path: string; rev: number } | null
 }
 
 /** A queued @-reference (file or folder) awaiting insertion into the composer. */
@@ -104,6 +107,7 @@ type UiAction =
   | { type: 'requestReviewTab'; tab: string }
   | { type: 'setComposerDraft'; sessionId: string; text: string }
   | { type: 'setScrollPosition'; sessionId: string; scrollTop: number }
+  | { type: 'requestRevealFile'; path: string }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -211,6 +215,17 @@ function reducer(state: UiState, action: UiAction): UiState {
         ...state,
         scrollPositions: { ...state.scrollPositions, [action.sessionId]: action.scrollTop },
       }
+    case 'requestRevealFile':
+      return {
+        ...state,
+        revealFileRequest: {
+          path: action.path,
+          rev: (state.revealFileRequest?.rev ?? 0) + 1,
+        },
+        // Make sure the FileExplorer panel is visible; if zen mode was on, exit it.
+        reviewVisible: true,
+        zenMode: false,
+      }
     default:
       return state
   }
@@ -243,6 +258,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     reviewTabRequest: null,
     composerDrafts: loadComposerDrafts(),
     scrollPositions: {},
+    revealFileRequest: null,
   }))
 
   useEffect(() => {

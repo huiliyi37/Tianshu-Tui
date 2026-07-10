@@ -16,7 +16,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { listDir, getFileContent, openFile as openFileInSystem } from '../runtime/client'
-import { useUiDispatch } from '../state/store'
+import { useUiDispatch, useUiState } from '../state/store'
 import type { ComposerAttachment } from '../state/store'
 import { FileViewer } from './FileViewer'
 import { Markdown } from './Markdown'
@@ -60,6 +60,18 @@ function toAbsolute(relativePath: string, cwd: string): string {
   return cwd.endsWith(separator) ? `${cwd}${normalizedRel}` : `${cwd}${separator}${normalizedRel}`
 }
 
+/** Convert an absolute or ./-prefixed path into a path relative to cwd,
+ *  normalizing separators to cwd's platform separator.
+ *  Falls back to the original path if it does not live under cwd. */
+function toRelative(path: string, cwd: string): string {
+  if (!cwd) return path.replace(/^\.\//, '')
+  const separator = detectSep(cwd)
+  const normalized = path.replace(/[/\\]/g, separator).replace(/^\.\//, '')
+  const prefix = cwd.endsWith(separator) ? cwd : `${cwd}${separator}`
+  if (normalized.startsWith(prefix)) return normalized.slice(prefix.length)
+  return normalized
+}
+
 /**
  * FileExplorer — read-only project file browser (Gap 1).
  *
@@ -84,6 +96,7 @@ function toAbsolute(relativePath: string, cwd: string): string {
 export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd?: string }) {
   const { t } = useTranslation('nav')
   const dispatch = useUiDispatch()
+  const ui = useUiState()
   const title = t('fileExplorer.title')
   const [tree, setTree] = useState<Record<string, DirEntry[]>>({}) // path → entries
   const [expanded, setExpanded] = useState<Set<string>>(new Set([''])) // root expanded by default
@@ -148,6 +161,42 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
       setLoadingFile(false)
     }
   }, [sessionId, t])
+
+  // Reveal a file requested from elsewhere (e.g. double-clicking a FilePath in
+  // the thread). Expand parent dirs, select the row, and preview the file.
+  const revealFile = useCallback(async (rawPath: string) => {
+    if (!sessionId) return
+    const rel = cwd ? toRelative(rawPath, cwd) : rawPath.replace(/^\.\//, '')
+    if (!rel) return
+    const sep = detectSep(cwd ?? rel)
+    const normalized = rel.replace(/[/\\]/g, sep)
+    const segments = normalized.split(sep).filter(Boolean)
+    if (segments.length === 0) return
+
+    // Build and expand every parent directory along the path.
+    const dirs: string[] = ['']
+    let built = ''
+    for (let i = 0; i < segments.length - 1; i++) {
+      built = built ? `${built}${sep}${segments[i]}` : segments[i]
+      dirs.push(built)
+    }
+    setExpanded(prev => new Set([...prev, ...dirs]))
+    for (const dir of dirs) {
+      if (!tree[dir]) await loadDir(dir)
+    }
+
+    const filePath = segments.join(sep)
+    setSelectedFiles(new Set([filePath]))
+    setLastSelectedFile(filePath)
+    treePanelRef.current?.focus()
+    await previewFileContent(filePath)
+  }, [sessionId, cwd, tree, loadDir, previewFileContent])
+
+  useEffect(() => {
+    const req = ui.revealFileRequest
+    if (!req?.path || !sessionId) return
+    void revealFile(req.path)
+  }, [ui.revealFileRequest, sessionId, revealFile])
 
   const getSiblingFiles = useCallback((path: string): string[] => {
     const parent = parentDir(path)

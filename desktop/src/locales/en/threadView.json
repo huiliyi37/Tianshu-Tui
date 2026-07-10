@@ -214,7 +214,7 @@
     "openFull": "Open full task view"
   },
   "file": {
-    "openTitle": "Open {{path}}"
+    "openTitle": "Open {{path}} (double-click to reveal in the file explorer)"
   },
   "rewind": {
     "header": "⏪ Rewind — pick the message to restore to",

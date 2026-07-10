@@ -214,7 +214,7 @@
     "openFull": "打开完整任务视图"
   },
   "file": {
-    "openTitle": "打开 {{path}}"
+    "openTitle": "打开 {{path}}（双击在右侧文件浏览器中展开）"
   },
   "rewind": {
     "header": "⏪ Rewind — 选择要恢复到的消息",

@@ -85,9 +85,10 @@ function ExpandableBody({ text }: { text: string }) {
 }
 
 // Leading file-path token: POSIX absolute (/…), Windows drive (C:\… or C:/…),
-// or home-relative (~/…). Windows drive paths were previously unmatched, so
-// tool cards weren't clickable for the largest desktop user base.
-const FILE_PATH_RE = /^(?:[a-zA-Z]:[\\/]|\/|~\/)[\w.\\/-]*/
+// or home-relative (~/…). Allows spaces inside directory/file names (common on
+// Windows) but stops at shell operators/punctuation so `cd /a && ls` doesn't
+// swallow the rest of the command.
+const FILE_PATH_RE = /^(?:[a-zA-Z]:[\\/]|\/|~\/)(?:[^\s&|;<>()`"\\]+[\\/]?)+/
 
 function PreviewText({ text }: { text: string }) {
   const match = text.match(FILE_PATH_RE)
