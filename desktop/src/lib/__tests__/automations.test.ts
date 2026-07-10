@@ -9,6 +9,10 @@ import {
   isTerminalStatus,
   statusLabel,
   statusTone,
+  trustStage,
+  newlyGrantedApps,
+  haltedAppFromError,
+  FIRST_RUNS_TRUST_THRESHOLD,
 } from '../automations.ts'
 import type { TaskRecord } from '../../runtime/types.ts'
 
@@ -70,4 +74,49 @@ test('statusTone maps to color classes', () => {
   assert.equal(statusTone('failed'), 'red')
   assert.equal(statusTone('running'), 'yellow')
   assert.equal(statusTone('cancelled'), 'muted')
+})
+
+// ── 试跑驱动信任 ──────────────────────────────────────────────
+
+test('trustStage: always-review/缺省无信任阶段', () => {
+  assert.equal(trustStage({ triggerCount: 5 }), null)
+  assert.equal(trustStage({ reviewPolicy: 'always-review', triggerCount: 5 }), null)
+})
+
+test('trustStage: first-runs 未试跑→建立中→已建立', () => {
+  assert.equal(trustStage({ reviewPolicy: 'first-runs', triggerCount: 0 }), 'untried')
+  assert.equal(trustStage({ reviewPolicy: 'first-runs', triggerCount: 1 }), 'building')
+  assert.equal(
+    trustStage({ reviewPolicy: 'first-runs', triggerCount: FIRST_RUNS_TRUST_THRESHOLD - 1 }),
+    'building',
+  )
+  assert.equal(
+    trustStage({ reviewPolicy: 'first-runs', triggerCount: FIRST_RUNS_TRUST_THRESHOLD }),
+    'trusted',
+  )
+})
+
+test('trustStage: auto-proceed 恒无人值守', () => {
+  assert.equal(trustStage({ reviewPolicy: 'auto-proceed', triggerCount: 0 }), 'unattended')
+})
+
+test('newlyGrantedApps diffs 新增授权', () => {
+  assert.deepEqual(newlyGrantedApps([], ['Safari']), ['Safari'])
+  assert.deepEqual(newlyGrantedApps(['Safari'], ['Safari', 'Notes']), ['Notes'])
+  assert.deepEqual(newlyGrantedApps(['Safari', 'Notes'], ['Safari']), [])
+  assert.deepEqual(newlyGrantedApps([], []), [])
+})
+
+test('haltedAppFromError 从 halt 文案提取 app 名', () => {
+  assert.equal(
+    haltedAppFromError('unattended run blocked on approval: computer_use (app: Safari)'),
+    'Safari',
+  )
+  assert.equal(
+    haltedAppFromError('[unattended halt] unattended run blocked on approval: computer_use (app: Google Chrome)'),
+    'Google Chrome',
+  )
+  assert.equal(haltedAppFromError('unattended run blocked on approval: bash'), null)
+  assert.equal(haltedAppFromError('ordinary error'), null)
+  assert.equal(haltedAppFromError(undefined), null)
 })

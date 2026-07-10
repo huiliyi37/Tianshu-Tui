@@ -102,6 +102,14 @@ export function buildScheduleRoutes(
       return { status: 200, body: { status: status ?? null } }
     }, apiToken),
 
+    // 试跑驱动信任 · Phase 1 — 立即手动触发一次（恒有人值守）。审批卡片
+    // 在试跑中弹出即授权采集；试跑计入 triggerCount，与 first-runs 晋级衔接。
+    'POST /schedule/:id/run-now': withAuth((_body, params) => {
+      const ok = scheduler.runNow(params!.id!)
+      if (!ok) return { status: 404, body: { error: 'Scheduled task not found or paused' } }
+      return { status: 200, body: { id: params!.id!, triggered: true } }
+    }, apiToken),
+
     'POST /schedule/:id/pause': withAuth((body, params) => {
       const data = (body ?? {}) as { enabled?: boolean }
       const enabled = data.enabled === true

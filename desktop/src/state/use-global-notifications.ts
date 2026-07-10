@@ -6,6 +6,7 @@ import { initNotificationRouting, notifyRouted, shouldNotify } from '../lib/noti
 import { loadNotifPref } from '../lib/persist'
 import { useUiDispatch, useUiState } from './store'
 import { isAutonomous } from '../lib/autonomy'
+import { haltedAppFromError } from '../lib/automations'
 
 interface Snap { status: string; pendingApprovals: number }
 
@@ -32,7 +33,13 @@ function notifyTerminal(
     } else if (status === 'failed') {
       void notifyRouted(i18n.t('shell:notify.automationFailed'), i18n.t('shell:notify.automationFailedBody', { label, error: err }), sessionId, pref)
     } else {
-      void notifyRouted(i18n.t('shell:notify.automationHalted'), i18n.t('shell:notify.automationHaltedBody', { label, error: err }), sessionId, pref)
+      // 中止修复闭环（Phase 3）：缺授权 app 可解析时给出可行动文案
+      // （补授权 → 重跑），而不是裸错误。
+      const missingApp = haltedAppFromError(error)
+      const body = missingApp
+        ? i18n.t('shell:notify.automationHaltedMissingAppBody', { label, app: missingApp })
+        : i18n.t('shell:notify.automationHaltedBody', { label, error: err })
+      void notifyRouted(i18n.t('shell:notify.automationHalted'), body, sessionId, pref)
     }
     return
   }

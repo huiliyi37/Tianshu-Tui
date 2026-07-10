@@ -1,15 +1,27 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import {
+  useComputerUseStatus,
   useCreateSchedule,
   useDeleteSchedule,
   usePauseSchedule,
+  useRunScheduleNow,
   useSchedule,
   useTasks,
   useCancelTask,
 } from '../state/queries'
 import { useUiDispatch } from '../state/store'
-import { tasksForSchedule, latestStatusForSchedule, isCancellable, statusLabel, statusTone } from '../lib/automations'
+import {
+  tasksForSchedule,
+  latestStatusForSchedule,
+  isCancellable,
+  statusLabel,
+  statusTone,
+  trustStage,
+  newlyGrantedApps,
+  FIRST_RUNS_TRUST_THRESHOLD,
+} from '../lib/automations'
 import type { ReviewPolicy, ScheduledTask, TaskStatus } from '../runtime/types'
 
 type TriggerType = 'interval' | 'cron' | 'oneshot'
@@ -25,6 +37,7 @@ export function AutomationsSurface() {
   const pause = usePauseSchedule()
   const del = useDeleteSchedule()
   const cancel = useCancelTask()
+  const runNow = useRunScheduleNow()
   const dispatch = useUiDispatch()
 
   const [prompt, setPrompt] = useState('')
@@ -60,6 +73,34 @@ export function AutomationsSurface() {
   // 已授权 app（Computer Use「始终允许」），未授权动作 fail-closed 中止。
   const wantsUnattended = reviewPolicy !== 'always-review'
     || allowedTools.split(',').map((s) => s.trim()).includes('computer_use')
+
+  // 授权可见（试跑驱动信任 · Phase 1）：表单选了无人值守策略、或已有任务带
+  // 无人值守意图时启用轮询——试跑中「始终允许」新增的授权自动出现在清单里。
+  const anyUnattendedTask = definitions.some((d) =>
+    (d.reviewPolicy !== undefined && d.reviewPolicy !== 'always-review') || d.allowedTools.includes('computer_use'))
+  const cuStatus = useComputerUseStatus(wantsUnattended || anyUnattendedTask)
+  const grantedApps = useMemo(() => (cuStatus.data?.grants ?? []).map((g) => g.app), [cuStatus.data])
+
+  // 试跑后新增授权 toast（Phase 2）：diff 授权清单前后状态。
+  const prevGrantsRef = useRef<string[] | null>(null)
+  useEffect(() => {
+    if (!cuStatus.data) return
+    const prev = prevGrantsRef.current
+    prevGrantsRef.current = grantedApps
+    if (prev === null) return
+    const added = newlyGrantedApps(prev, grantedApps)
+    if (added.length > 0) toast.success(t('grants.newGrants', { apps: added.join(', ') }))
+  }, [grantedApps, cuStatus.data, t])
+
+  const trialRun = (id: string) => {
+    runNow.mutate(id, {
+      onSuccess: () => {
+        setSelectedId(id)
+        toast.success(t('schedule.trialStarted'))
+      },
+      onError: (err) => toast.error((err as Error).message),
+    })
+  }
 
   const specHint =
     type === 'interval' ? t('form.specHint.interval')
@@ -117,6 +158,21 @@ export function AutomationsSurface() {
           </div>
           <div className="meta">{specHint} · {t('form.retryHint')}</div>
           {wantsUnattended && <div className="meta">{t('form.unattendedHint')}</div>}
+          {wantsUnattended && cuStatus.data && (
+            grantedApps.length > 0 ? (
+              <div className="meta">{t('grants.listLabel', { apps: grantedApps.join(', ') })}</div>
+            ) : (
+              <div className="meta">
+                {t('grants.empty')}{' '}
+                <button
+                  className="btn ghost sm"
+                  onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
+                >
+                  {t('grants.goSettings')}
+                </button>
+              </div>
+            )
+          )}
           {create.isError && (
             <div className="meta warn">
               {/pro_required/.test((create.error as Error).message) ? t('form.proRequired') : (create.error as Error).message}
@@ -135,6 +191,8 @@ export function AutomationsSurface() {
               onSelect={() => setSelectedId(t.id)}
               onPause={() => pause.mutate({ id: t.id, enabled: t.enabled === false })}
               onDelete={() => { del.mutate(t.id); if (selectedId === t.id) setSelectedId(null) }}
+              onRunNow={() => trialRun(t.id)}
+              runNowPending={runNow.isPending}
             />
           ))}
         </div>
@@ -158,7 +216,12 @@ export function AutomationsSurface() {
                     {new Date(run.createdAt).toLocaleString()}
                   </span>
                 </div>
-                {run.error && <div className="meta warn" title={run.error}>{run.error.slice(0, 160)}</div>}
+                {/* 中止修复闭环（Phase 3）：缺授权 app 结构化展示，替代原始错误文本 */}
+                {run.haltedApp ? (
+                  <div className="meta warn" title={run.error}>{t('history.haltMissingApp', { app: run.haltedApp })}</div>
+                ) : (
+                  run.error && <div className="meta warn" title={run.error}>{run.error.slice(0, 160)}</div>
+                )}
                 {run.result?.summary && <div className="meta">{run.result.summary.slice(0, 160)}</div>}
                 <div className="row">
                   {run.sessionId && (
@@ -166,6 +229,27 @@ export function AutomationsSurface() {
                   )}
                   {isCancellable(run.status) && (
                     <button className="btn ghost" disabled={cancel.isPending} onClick={() => cancel.mutate(run.id)}>{t('history.cancel')}</button>
+                  )}
+                  {run.haltedApp && (
+                    <>
+                      <button
+                        className="btn ghost"
+                        title={t('history.grantHint', { app: run.haltedApp })}
+                        onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
+                      >
+                        {t('history.goGrant')}
+                      </button>
+                      {run.scheduledTaskId && (
+                        <button
+                          className="btn ghost"
+                          disabled={runNow.isPending}
+                          title={t('history.rerunHint')}
+                          onClick={() => trialRun(run.scheduledTaskId!)}
+                        >
+                          {t('history.rerun')}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -192,6 +276,8 @@ function ScheduleCard({
   onSelect,
   onPause,
   onDelete,
+  onRunNow,
+  runNowPending,
 }: {
   task: ScheduledTask
   selected: boolean
@@ -199,8 +285,12 @@ function ScheduleCard({
   onSelect: () => void
   onPause: () => void
   onDelete: () => void
+  onRunNow: () => void
+  runNowPending: boolean
 }) {
   const { t } = useTranslation('automations')
+  // 信任徽章（试跑驱动信任 · Phase 2）：未试跑 / 已试跑 N 次 / 可无人值守。
+  const stage = trustStage(task)
   return (
     <div
       className="schedule-card"
@@ -214,8 +304,26 @@ function ScheduleCard({
         {task.reviewPolicy && task.reviewPolicy !== 'always-review' ? ` · ${t(`schedule.policy.${task.reviewPolicy}`)}` : ''}
         {task.enabled === false ? ` · ${t('schedule.paused')}` : ''}
       </div>
+      {stage && (
+        <div className="meta">
+          <span className={`mcp-status-badge ${stage === 'trusted' || stage === 'unattended' ? 'green' : 'yellow'}`}>
+            <span className="label">
+              {t(`schedule.trust.${stage}`, { n: task.triggerCount, total: FIRST_RUNS_TRUST_THRESHOLD })}
+            </span>
+          </span>
+          {stage === 'trusted' && <span> {t('schedule.trust.trustedHint')}</span>}
+        </div>
+      )}
       {latest && <div className="meta">{t('schedule.latest')}<StatusBadge status={latest} /></div>}
       <div className="row">
+        <button
+          className="btn ghost"
+          disabled={runNowPending || task.enabled === false}
+          title={t('schedule.runNowHint')}
+          onClick={(e) => { e.stopPropagation(); onRunNow() }}
+        >
+          {t('schedule.runNow')}
+        </button>
         <button className="btn ghost" onClick={(e) => { e.stopPropagation(); onPause() }}>
           {task.enabled === false ? t('schedule.resume') : t('schedule.pause')}
         </button>

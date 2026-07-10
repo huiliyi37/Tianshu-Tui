@@ -855,6 +855,11 @@ export function createSchedule(input: {
   return apiPost<ScheduledTask>('/schedule', input)
 }
 
+/** 试跑驱动信任 · Phase 1 — 立即手动触发一次（恒有人值守，计入 triggerCount）。 */
+export function runScheduleNow(id: string): Promise<{ id: string; triggered: boolean }> {
+  return apiPost<{ id: string; triggered: boolean }>(`/schedule/${id}/run-now`, {})
+}
+
 export function pauseSchedule(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }> {
   return apiPost<{ id: string; enabled: boolean }>(`/schedule/${id}/pause`, { enabled })
 }

@@ -214,6 +214,7 @@
     "automationFailed": "自动化运行失败",
     "automationFailedBody": "{{label}} 失败：{{error}}，点击查看",
     "automationHalted": "自动化运行被中止",
-    "automationHaltedBody": "{{label}} 已中止：{{error}}，点击查看"
+    "automationHaltedBody": "{{label}} 已中止：{{error}}，点击查看",
+    "automationHaltedMissingAppBody": "{{label}} 已中止：缺少「{{app}}」的授权。点击查看，补授权后可在自动化面板一键重跑"
   }
 }

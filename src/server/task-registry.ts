@@ -186,7 +186,7 @@ export class TaskRegistry {
    * 原子状态转换。
    * 终态不可被低优先级覆盖（cancelled > timed_out > failed > completed）。
    */
-  async transition(id: string, to: TaskStatus, extra?: { error?: string; result?: TaskRecord['result'] }): Promise<TaskRecord | null> {
+  async transition(id: string, to: TaskStatus, extra?: { error?: string; result?: TaskRecord['result']; haltedApp?: string }): Promise<TaskRecord | null> {
     return this.serialized(id, async () => {
       const record = await this.store.load(id)
       if (!record) return null
@@ -203,6 +203,7 @@ export class TaskRegistry {
         ...(to === 'completed' || to === 'failed' || to === 'cancelled' || to === 'timed_out' ? { completedAt: now } : {}),
         ...(extra?.error ? { error: extra.error } : {}),
         ...(extra?.result ? { result: extra.result } : {}),
+        ...(extra?.haltedApp ? { haltedApp: extra.haltedApp } : {}),
       }
 
       await this.store.save(updated)
@@ -435,15 +436,17 @@ export class TaskRegistry {
       await this.transition(record.id, 'completed', { result })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      // 无人值守中止：缺授权的 app 名结构化落库（修复闭环「补授权 → 重跑」）。
+      const haltedApp = err instanceof Error ? (err as Error & { haltedApp?: string }).haltedApp : undefined
       if (ac.signal.aborted) {
         // 如果是被 abort 的，检查是否已经是 timed_out（超时触发）
         // 如果还不是 → cancelled（手动取消）
         const current = await this.getTask(record.id)
         if (current && current.status !== 'timed_out' && current.status !== 'cancelled') {
-          await this.transition(record.id, 'cancelled', { error: message })
+          await this.transition(record.id, 'cancelled', { error: message, ...(haltedApp ? { haltedApp } : {}) })
         }
       } else {
-        await this.transition(record.id, 'failed', { error: message })
+        await this.transition(record.id, 'failed', { error: message, ...(haltedApp ? { haltedApp } : {}) })
       }
     } finally {
       handle?.release()

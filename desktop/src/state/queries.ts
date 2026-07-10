@@ -10,6 +10,7 @@ import {
   createSession,
   deleteSchedule,
   deleteSession,
+  getComputerUseStatus,
   getEnvironment,
   getHealth,
   getGithubPr,
@@ -30,6 +31,7 @@ import {
   cancelTask,
   pauseSchedule,
   rejectPlan,
+  runScheduleNow,
   updatePlan,
   renameSession,
   sendArtifactFeedback,
@@ -57,6 +59,7 @@ export const qk = {
   hooks: (id: string | null) => ['hooks', id] as const,
   schedule: ['schedule'] as const,
   tasks: ['tasks'] as const,
+  computerUse: ['config', 'computer-use'] as const,
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
   githubPrDiff: (n: number) => ['github', 'pr', n, 'diff'] as const,
@@ -321,6 +324,32 @@ export function useCreateSchedule() {
   return useMutation({
     mutationFn: createSchedule,
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.schedule }),
+  })
+}
+
+/** 试跑驱动信任 · Phase 1 — 立即试跑（有人值守）。成功后刷新任务表与执行历史。 */
+export function useRunScheduleNow() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => runScheduleNow(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.schedule })
+      void qc.invalidateQueries({ queryKey: qk.tasks })
+    },
+  })
+}
+
+/**
+ * Computer Use 授权状态（Automations 表单内嵌授权清单用）。
+ * enabled=false 时不发请求；开启时轮询，让试跑中「始终允许」新增的授权
+ * 能自动出现在表单里（顺带驱动新增授权 toast 的 diff）。
+ */
+export function useComputerUseStatus(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.computerUse,
+    queryFn: getComputerUseStatus,
+    enabled,
+    refetchInterval: enabled ? 5000 : false,
   })
 }
 

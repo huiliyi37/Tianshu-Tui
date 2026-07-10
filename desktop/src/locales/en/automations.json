@@ -22,6 +22,12 @@
     "unattendedHint": "Unattended automation (Pro): only apps granted via Computer Use \"Always allow\" are permitted; ungranted actions halt the run and are recorded in the walkthrough. Grant the target app in a session first.",
     "proRequired": "Unattended automation is a Pro feature: policies other than \"Always review\", or scheduled tasks that include computer_use, require a Pro license."
   },
+  "grants": {
+    "listLabel": "Granted apps: {{apps}}",
+    "empty": "No apps granted yet. Run a supervised trial first: checking \"Always allow\" on the approval card during the trial grants the app. You can also",
+    "goSettings": "manage grants in Settings",
+    "newGrants": "New grants from this run: {{apps}}"
+  },
   "list": {
     "empty": "No automations yet"
   },
@@ -31,7 +37,12 @@
     "empty": "No runs yet",
     "attempt": "Attempt {{n}}",
     "viewSession": "View Session",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "haltMissingApp": "Halted: missing grant for \"{{app}}\"",
+    "goGrant": "Grant access",
+    "grantHint": "Manage Computer Use grants in Settings, or check \"Always allow\" on the approval card during a trial run ({{app}})",
+    "rerun": "Rerun",
+    "rerunHint": "Manually re-trigger once after granting (supervised trial; unattended rhythm resumes after it passes)"
   },
   "schedule": {
     "triggerCount": "Triggered {{n}} times",
@@ -44,7 +55,17 @@
     "latest": "Latest: ",
     "resume": "Resume",
     "pause": "Pause",
-    "delete": "Delete"
+    "delete": "Delete",
+    "runNow": "Trial run",
+    "runNowHint": "Manually trigger one supervised run — check \"Always allow\" on the approval card to grant the app",
+    "trialStarted": "Trial run triggered — handle the approval cards in the session",
+    "trust": {
+      "untried": "Not tried yet",
+      "building": "Tried {{n}}/{{total}} runs",
+      "trusted": "Unattended-ready",
+      "trustedHint": "Trust established — future runs will auto-proceed",
+      "unattended": "Unattended"
+    }
   },
   "status": {
     "pending": "Queued",

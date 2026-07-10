@@ -69,6 +69,8 @@ export interface TaskDueMeta {
   retry?: ScheduledTaskRetry
   /** 本次运行是否无人值守（reviewPolicy 解析后的生效模式）。 */
   unattended?: boolean
+  /** 手动触发（试跑/中止后重跑），非定时到点。 */
+  manual?: boolean
 }
 
 /**
@@ -360,6 +362,28 @@ export class CronScheduler {
     return () => { this.handlers.delete(handler) }
   }
 
+  /**
+   * 立即手动触发一次（试跑驱动信任 · Phase 1）。**恒有人值守**——试跑的
+   * 目的就是让审批卡片弹出来（顺路完成 app 授权采集），绝不静默放行。
+   * 计入 triggerCount / lastTriggeredAt：与 first-runs 晋级计数天然衔接，
+   * interval 任务的下次自动触发也随之顺延（刚跑过，无需紧接着再跑）。
+   * oneshot 试跑即消耗（本就是一次性任务，提前手动跑等价于执行它）。
+   * 返回 false = 任务不存在或已暂停。
+   */
+  runNow(id: string): boolean {
+    const task = this.table.find(t => t.id === id)
+    if (!task || task.enabled === false) return false
+    const updated: ScheduledTask = {
+      ...cloneTask(task),
+      lastTriggeredAt: new Date().toISOString(),
+      triggerCount: task.triggerCount + 1,
+    }
+    this.table = this.table.map(t => (t.id === id ? updated : t))
+    this.persist()
+    void this.fireTask(updated, task.triggerCount, { forceAttended: true, manual: true })
+    return true
+  }
+
   // ─── Lifecycle ─────────────────────────────────────────────
 
   start(): void {
@@ -459,12 +483,20 @@ export class CronScheduler {
     }
   }
 
-  private async fireTask(task: ScheduledTask, preTriggerCount: number): Promise<void> {
+  private async fireTask(
+    task: ScheduledTask,
+    preTriggerCount: number,
+    opts?: { forceAttended?: boolean; manual?: boolean },
+  ): Promise<void> {
     const meta: TaskDueMeta = {
       scheduledTaskId: task.id,
       retry: task.retry,
       // first-runs 用触发前的计数判定（第 N+1 次起自动放行）。
-      unattended: resolveRunUnattended({ reviewPolicy: task.reviewPolicy, triggerCount: preTriggerCount }),
+      // 试跑（runNow）恒有人值守，无视 reviewPolicy。
+      unattended: opts?.forceAttended
+        ? false
+        : resolveRunUnattended({ reviewPolicy: task.reviewPolicy, triggerCount: preTriggerCount }),
+      ...(opts?.manual ? { manual: true } : {}),
     }
     for (const handler of this.handlers) {
       try {

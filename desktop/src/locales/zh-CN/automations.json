@@ -22,6 +22,12 @@
     "unattendedHint": "无人值守自动化（Pro）：仅放行 Computer Use「始终允许」过的 app；未授权动作会中止本次运行并记入走查报告。先在会话里对目标 app 勾选「始终允许」。",
     "proRequired": "无人值守自动化是 Pro 功能：非「每次审批」策略或含 computer_use 的定时任务需要 Pro 授权。"
   },
+  "grants": {
+    "listLabel": "已授权应用：{{apps}}",
+    "empty": "还没有已授权的应用。建议先「立即试跑」一次：试跑中弹出的审批卡片勾选「始终允许」即可完成授权；也可以",
+    "goSettings": "去设置管理授权",
+    "newGrants": "本次运行新增授权：{{apps}}"
+  },
   "list": {
     "empty": "还没有自动化任务"
   },
@@ -31,7 +37,12 @@
     "empty": "尚无执行记录",
     "attempt": "第 {{n}} 次",
     "viewSession": "查看会话",
-    "cancel": "取消"
+    "cancel": "取消",
+    "haltMissingApp": "已中止：缺少「{{app}}」的授权",
+    "goGrant": "去授权",
+    "grantHint": "到设置里管理 Computer Use 授权，或试跑时在审批卡片勾选「始终允许」（{{app}}）",
+    "rerun": "重跑",
+    "rerunHint": "补授权后手动重触发一次（有人值守试跑，通过后自动回到无人值守节奏）"
   },
   "schedule": {
     "triggerCount": "已触发 {{n}} 次",
@@ -44,7 +55,17 @@
     "latest": "最近：",
     "resume": "恢复",
     "pause": "暂停",
-    "delete": "删除"
+    "delete": "删除",
+    "runNow": "立即试跑",
+    "runNowHint": "手动触发一次有人值守运行——审批卡片里勾选「始终允许」即完成授权",
+    "trialStarted": "试跑已触发，请在会话中处理审批卡片",
+    "trust": {
+      "untried": "未试跑",
+      "building": "已试跑 {{n}}/{{total}} 次",
+      "trusted": "可无人值守",
+      "trustedHint": "信任已建立，后续运行将自动放行",
+      "unattended": "无人值守"
+    }
   },
   "status": {
     "pending": "排队中",

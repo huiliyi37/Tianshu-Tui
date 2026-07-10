@@ -264,6 +264,10 @@ export interface TaskRecord {
   attempt?: number
   retryOf?: string
   retry?: ScheduledTaskRetry
+  /** 无人值守运行（审批 fail-closed 中止）。 */
+  unattended?: boolean
+  /** 无人值守中止时缺授权的 app 名（修复闭环「去授权/重跑」）。 */
+  haltedApp?: string
 }
 
 export interface DelegationNode {

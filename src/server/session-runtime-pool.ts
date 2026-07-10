@@ -46,12 +46,16 @@ export class SessionRuntimePool implements RuntimePool {
         if (signal.aborted) onAbort()
         else signal.addEventListener('abort', onAbort)
         try {
-          const { status, summary, changedFiles } = await this.manager.runAndWait(session.id, prompt)
+          const { status, summary, changedFiles, haltedApp } = await this.manager.runAndWait(session.id, prompt)
           // Propagate real terminal state: a failed/aborted run must NOT be
           // recorded as completed. Throwing lets TaskRegistry mark failed (or,
           // when the abort came from cancel/timeout, keep that terminal state).
           if (status === 'failed' || status === 'aborted') {
-            throw new Error(summary || `session ${status}`)
+            const err = new Error(summary || `session ${status}`)
+            // 无人值守中止：缺授权的 app 名挂在 error 上，registry 结构化落
+            // TaskRecord（修复闭环「补授权 → 重跑」不用解析错误文本）。
+            if (haltedApp) (err as Error & { haltedApp?: string }).haltedApp = haltedApp
+            throw err
           }
           return { summary, changedFiles }
         } finally {

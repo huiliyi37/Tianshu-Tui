@@ -518,6 +518,8 @@ interface InternalSession {
   unattended?: boolean
   /** 无人值守中止原因（首个被拦截的审批），随 done/summary 上报。 */
   unattendedHaltReason?: string
+  /** 无人值守中止时缺授权的 app 名（结构化，供「补授权→重跑」修复闭环）。 */
+  unattendedHaltApp?: string
   /** 流式 delta 合并缓冲（Wave 2）——见 bufferDelta()。 */
   deltaBuf?: { type: 'text_delta' | 'thinking_delta'; text: string }
   /** delta 合并窗口定时器。 */
@@ -1054,6 +1056,7 @@ export class RuntimeSessionManager {
     session.lastAbortReason = undefined
     session.abortWhileApprovalPending = false
     session.unattendedHaltReason = undefined
+    session.unattendedHaltApp = undefined
     session.watchdogPolicy ??= new WatchdogRecoveryPolicy()
     // 用户主动提交恢复续跑预算；自动续跑注入的 'continue' 不算（与 TUI 的
     // onSubmitCallback 直呼路径一致，否则 consecutive cap 形同虚设）。
@@ -1766,7 +1769,7 @@ export class RuntimeSessionManager {
   runAndWait(
     id: string,
     prompt: string,
-  ): Promise<{ status: SessionStatus; summary: string; changedFiles: string[] }> {
+  ): Promise<{ status: SessionStatus; summary: string; changedFiles: string[]; haltedApp?: string }> {
     return new Promise((resolve) => {
       const s = this.sessions.get(id)
       if (!s || s.running) {
@@ -1780,6 +1783,8 @@ export class RuntimeSessionManager {
             status: s.record.status,
             summary: this.buildRunSummary(s),
             changedFiles: this.collectChangedFiles(s),
+            // 无人值守中止时缺授权的 app（结构化透传给 TaskRecord 修复闭环）。
+            ...(s.unattendedHaltApp ? { haltedApp: s.unattendedHaltApp } : {}),
           })
         }
       })
@@ -2634,9 +2639,12 @@ export class RuntimeSessionManager {
     // 跳过、也不无限期等待）。走查工件经 agent 侧 postTool 记录同一拒绝。
     if (session.unattended) {
       const requestId = toolId || randomId()
-      const app = typeof input.app === 'string' && input.app ? ` (app: ${input.app})` : ''
+      const appName = typeof input.app === 'string' && input.app ? input.app : undefined
+      const app = appName ? ` (app: ${appName})` : ''
       const reason = `unattended run blocked on approval: ${name}${app}`
       session.unattendedHaltReason ??= reason
+      // 结构化留存缺授权的 app 名：修复闭环（补授权 → 一键重跑）不用解析文本。
+      if (session.unattendedHaltApp === undefined && appName) session.unattendedHaltApp = appName
       // record.error 让会话列表/桌面通知不用扒事件流就能拿到中止原因。
       session.record.error ??= reason
       this.append(session, 'approval_required', { requestId, toolName: name, input: redactValue(input) })

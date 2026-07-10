@@ -214,6 +214,7 @@
     "automationFailed": "Automation run failed",
     "automationFailedBody": "{{label}} failed: {{error}}, click to view",
     "automationHalted": "Automation run halted",
-    "automationHaltedBody": "{{label}} halted: {{error}}, click to view"
+    "automationHaltedBody": "{{label}} halted: {{error}}, click to view",
+    "automationHaltedMissingAppBody": "{{label}} halted: missing grant for \"{{app}}\". Click to view — after granting, rerun from the Automations panel"
   }
 }
