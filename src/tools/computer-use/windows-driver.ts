@@ -71,6 +71,27 @@ import type {
 const POWERSHELL_TIMEOUT_MS = 20_000
 /** Bound the UIA walk so a deep app tree can't blow up the result. */
 const MAX_TREE_NODES = 400
+/**
+ * In-script wall-clock budget for the tree walk (mirrors the macOS driver).
+ * The UIA walk is CacheRequest-batched and normally finishes in seconds, but
+ * a pathological Chromium/Electron tree can still outrun the outer 30s
+ * PowerShell timeout — which returns NOTHING. The walk self-terminates at
+ * the deadline and returns the partial rows with truncated=true instead.
+ */
+const WALK_BUDGET_MS = 20_000
+/**
+ * Chromium/Electron apps build their UIA tree lazily: the first WM_GETOBJECT
+ * (triggered by our first walk) switches accessibility on, and the renderer
+ * populates the tree ASYNCHRONOUSLY afterwards — so the first snapshot can
+ * see a skeleton. A tiny non-truncated first walk triggers one delayed
+ * re-walk (same policy and thresholds as the macOS driver).
+ */
+const SPARSE_TREE_RETRY_THRESHOLD = 25
+/** Settle delay before the sparse-tree re-walk (ms). */
+const SPARSE_TREE_RETRY_DELAY_MS = 2_500
+/** Model-facing note appended to a truncated tree — byte-identical to the
+ *  macOS driver so the prompt experience matches across platforms. */
+const PARTIAL_TREE_NOTE = '\n(partial tree: walk budget exhausted — refs above are valid; use find(query)/wait_for for content deeper in the UI)'
 /** Max dimension for the vision-model screenshot copy (px). */
 const VISION_MAX_DIMENSION = 1440
 
@@ -519,8 +540,10 @@ ${INPUT_PRELUDE}
 ${UIA_PRELUDE}
 ${resolveApp(app)}
 $MAX = ${MAX_TREE_NODES}
+$DEADLINE = [DateTime]::UtcNow.AddMilliseconds(${WALK_BUDGET_MS})
 $script:rows = New-Object System.Collections.ArrayList
 $script:refN = 0
+$script:truncated = $false
 $NO_DESCEND = @{ ScrollBar = $true; TitleBar = $true }
 $SKIP_VALUE = @{ Window = $true; Pane = $true; Group = $true; Tree = $true; List = $true; Table = $true; DataGrid = $true; DataItem = $true; ToolBar = $true; TitleBar = $true; MenuBar = $true; Menu = $true; Tab = $true; ScrollBar = $true; Header = $true }
 $ctrlCond = [System.Windows.Automation.Automation]::ControlViewCondition
@@ -532,7 +555,7 @@ $cr.Add([System.Windows.Automation.ValuePattern]::Pattern)
 $cr.Add([System.Windows.Automation.ValuePattern]::ValueProperty)
 $cr.TreeFilter = $ctrlCond
 function Visit($el, $depth, $path) {
-  if ($script:rows.Count -ge $MAX) { return }
+  if ($script:rows.Count -ge $MAX -or [DateTime]::UtcNow -gt $DEADLINE) { $script:truncated = $true; return }
   $role = ''; $title = ''; $value = ''
   try { $role = $el.Cached.ControlType.ProgrammaticName -replace '^ControlType\\.', '' } catch {}
   try { $title = [string]$el.Cached.Name } catch {}
@@ -555,7 +578,7 @@ function Visit($el, $depth, $path) {
   $kids = $null
   try { $kids = $el.FindAll([System.Windows.Automation.TreeScope]::Children, $ctrlCond) } catch { return }
   for ($k = 0; $k -lt $kids.Count; $k++) {
-    if ($script:rows.Count -ge $MAX) { break }
+    if ($script:rows.Count -ge $MAX -or [DateTime]::UtcNow -gt $DEADLINE) { $script:truncated = $true; break }
     Visit $kids[$k] ($depth + 1) ($path + @($k))
   }
 }
@@ -564,7 +587,7 @@ try {
   for ($i = 0; $i -lt $wins.Count; $i++) { Visit ($wins[$i].GetUpdatedCache($cr)) 0 @($i) }
 } finally { $act.Dispose() }
 ${shotSection}
-ConvertTo-Json -InputObject @{ rows = $script:rows.ToArray(); shot = $shotOk } -Depth 8 -Compress
+ConvertTo-Json -InputObject @{ rows = $script:rows.ToArray(); shot = $shotOk; truncated = $script:truncated } -Depth 8 -Compress
 `
 }
 
@@ -857,7 +880,10 @@ ConvertTo-Json -InputObject @{ accessibility = $ok } -Compress
 }
 
 /** Real Windows driver. Runner injectable for tests. */
-export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault): ComputerUseDriver {
+export function createWindowsDriver(
+  run: PowerShellRunner = runPowerShellDefault,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): ComputerUseDriver {
   // Session-level UIA path choice: COM when the probe passes, managed
   // otherwise. Checked per action because the probe is lazy (first UIA call).
   const useCom = () => comReady(run)
@@ -883,23 +909,42 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
       try {
         const wantShot = opts?.screenshot !== false
         const script = (await useCom())
-          ? buildComSnapshotScript(app, outFull, outVision, wantShot, MAX_TREE_NODES)
+          ? buildComSnapshotScript(app, outFull, outVision, wantShot, MAX_TREE_NODES, WALK_BUDGET_MS)
           : buildSnapshotScript(app, outFull, outVision, wantShot)
-        const raw = (await run(script, 30_000)).trim()
-        let rows: WindowsSnapshotRow[] = []
-        let shot = false
-        try {
-          const parsed = JSON.parse(raw) as { rows?: WindowsSnapshotRow[] | WindowsSnapshotRow; shot?: boolean }
-          // ConvertTo-Json unwraps single-element arrays into a bare object
-          // (PS 5.1 quirk) — re-wrap instead of dropping to an empty tree.
-          if (Array.isArray(parsed.rows)) rows = parsed.rows
-          else if (parsed.rows && typeof parsed.rows === 'object') rows = [parsed.rows]
-          else rows = []
-          shot = parsed.shot === true
-        } catch {
-          rows = []
+        const runWalk = async (): Promise<{ rows: WindowsSnapshotRow[]; shot: boolean; truncated: boolean }> => {
+          const raw = (await run(script, 30_000)).trim()
+          try {
+            const parsed = JSON.parse(raw) as {
+              rows?: WindowsSnapshotRow[] | WindowsSnapshotRow
+              shot?: boolean
+              truncated?: boolean
+              // COM path nests the C#-assembled walk result under "snap".
+              snap?: { rows?: WindowsSnapshotRow[] | WindowsSnapshotRow; truncated?: boolean }
+            }
+            const core = parsed.snap ?? parsed
+            // ConvertTo-Json unwraps single-element arrays into a bare object
+            // (PS 5.1 quirk) — re-wrap instead of dropping to an empty tree.
+            let rows: WindowsSnapshotRow[] = []
+            if (Array.isArray(core.rows)) rows = core.rows
+            else if (core.rows && typeof core.rows === 'object') rows = [core.rows]
+            return { rows, shot: parsed.shot === true, truncated: core.truncated === true }
+          } catch {
+            return { rows: [], shot: false, truncated: false }
+          }
         }
-        const { tree, refs } = rowsToSnapshot(rows)
+        let walk = await runWalk()
+        // Electron skeleton-tree warmup (same policy as the macOS driver): a
+        // tiny non-truncated first walk right after accessibility switches on
+        // is indistinguishable from a genuinely tiny UI — wait once, re-walk,
+        // keep whichever saw more.
+        if (!walk.truncated && walk.rows.length < SPARSE_TREE_RETRY_THRESHOLD) {
+          await sleep(SPARSE_TREE_RETRY_DELAY_MS)
+          const second = await runWalk()
+          if (second.rows.length > walk.rows.length) walk = second
+        }
+        const { rows, shot, truncated } = walk
+        const { tree: baseTree, refs } = rowsToSnapshot(rows)
+        const tree = baseTree && truncated ? `${baseTree}${PARTIAL_TREE_NOTE}` : baseTree
         let png: Buffer | null = null
         let visionPng: Buffer | null = null
         if (shot) {
@@ -925,6 +970,7 @@ export function createWindowsDriver(run: PowerShellRunner = runPowerShellDefault
           refs,
           screenshotPng: png,
           visionPng,
+          truncated,
         }
       } finally {
         try { await unlink(outFull) } catch { /* best-effort temp cleanup */ }

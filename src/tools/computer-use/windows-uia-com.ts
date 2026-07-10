@@ -438,6 +438,8 @@ public static class RivetUia {
     public int max;
     public IUIAutomationCacheRequest cr;
     public bool first;
+    public DateTime deadline;
+    public bool truncated;
   }
 
   static readonly Dictionary<string, bool> SkipValue = new Dictionary<string, bool> {
@@ -451,7 +453,7 @@ public static class RivetUia {
   };
 
   static void Visit(SnapState st, IUIAutomationElement el, int depth, string path) {
-    if (st.count >= st.max) return;
+    if (st.count >= st.max || DateTime.UtcNow > st.deadline) { st.truncated = true; return; }
     string role = ""; string title = ""; string value = "";
     try { role = RoleName(el.get_CachedControlType()); } catch {}
     try { string t = el.get_CachedName(); if (t != null) title = t; } catch {}
@@ -489,14 +491,17 @@ public static class RivetUia {
     int len = 0;
     try { len = kids.get_Length(); } catch { return; }
     for (int k = 0; k < len; k++) {
-      if (st.count >= st.max) break;
+      if (st.count >= st.max || DateTime.UtcNow > st.deadline) { st.truncated = true; break; }
       IUIAutomationElement kid = null;
       try { kid = kids.GetElement(k); } catch { continue; }
       Visit(st, kid, depth + 1, path + "," + k);
     }
   }
 
-  public static string SnapshotJson(string app, int maxNodes) {
+  // budgetMs: in-walk wall-clock budget. Chromium/Electron trees can be huge;
+  // stopping at the deadline and returning the PARTIAL rows (truncated=true)
+  // beats an outer PowerShell timeout that returns nothing at all.
+  public static string SnapshotJson(string app, int maxNodes, int budgetMs) {
     AppMatch m = FindAppOrThrow(app);
     IUIAutomation uia = Uia();
     IUIAutomationCacheRequest cr = uia.CreateCacheRequest();
@@ -511,12 +516,14 @@ public static class RivetUia {
     st.max = maxNodes;
     st.cr = cr;
     st.first = true;
+    st.deadline = DateTime.UtcNow.AddMilliseconds(budgetMs);
+    st.truncated = false;
     for (int i = 0; i < m.wins.Count; i++) {
       IUIAutomationElement w = null;
       try { w = m.wins[i].BuildUpdatedCache(cr); } catch { continue; }
       Visit(st, w, 0, i.ToString());
     }
-    return st.sb.Append("]").ToString();
+    return "{\\"rows\\":" + st.sb.Append("]").ToString() + ",\\"truncated\\":" + (st.truncated ? "true" : "false") + "}";
   }
 
   // Child-index resolution with identity check. Stale messages render
@@ -678,7 +685,7 @@ ${comTry(`[RivetUia]::ListAppsJson()`)}
 `
 }
 
-export function buildComSnapshotScript(app: string, outFull: string, outVision: string, screenshot = true, maxNodes = 400): string {
+export function buildComSnapshotScript(app: string, outFull: string, outVision: string, screenshot = true, maxNodes = 400, budgetMs = 20_000): string {
   const name = psString(normalizeAppName(app))
   const shotSection = screenshot
     ? `
@@ -713,9 +720,9 @@ $shotOk = $false`
   return `
 ${INPUT_PRELUDE}
 ${UIA_COM_PRELUDE}
-${comTry(`$rowsJson = [RivetUia]::SnapshotJson(${name}, ${maxNodes})`)}
+${comTry(`$snapJson = [RivetUia]::SnapshotJson(${name}, ${maxNodes}, ${budgetMs})`)}
 ${shotSection}
-'{"rows":' + $rowsJson + ',"shot":' + $(if ($shotOk) { 'true' } else { 'false' }) + '}'
+'{"snap":' + $snapJson + ',"shot":' + $(if ($shotOk) { 'true' } else { 'false' }) + '}'
 `
 }
 

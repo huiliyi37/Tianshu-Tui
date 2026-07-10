@@ -161,14 +161,22 @@ test('probe script compiles the prelude and touches the UIA root', () => {
 })
 
 test('COM snapshot script routes tree work to C# and keeps the managed screenshot section', () => {
-  const s = buildComSnapshotScript('notepad', 'C:\\t\\full.png', 'C:\\t\\vision.png', true, 400)
-  assert.ok(s.includes(`[RivetUia]::SnapshotJson('notepad', 400)`))
+  const s = buildComSnapshotScript('notepad', 'C:\\t\\full.png', 'C:\\t\\vision.png', true, 400, 20_000)
+  assert.ok(s.includes(`[RivetUia]::SnapshotJson('notepad', 400, 20000)`))
   assert.ok(s.includes('CopyFromScreen'), 'screenshot stays in PS (System.Drawing)')
   assert.ok(s.includes(`'C:\\t\\full.png'`))
-  assert.ok(s.includes('"rows":'), 'envelope JSON assembled by string concat')
+  assert.ok(s.includes('"snap":'), 'envelope JSON assembled by string concat')
   assert.ok(!s.includes('ConvertTo-Json'), 'no ConvertTo-Json in the COM snapshot path')
   const noShot = buildComSnapshotScript('notepad', 'f.png', 'v.png', false)
   assert.ok(!noShot.includes('CopyFromScreen'))
+})
+
+test('COM walk carries an in-script deadline and returns truncated in the snap envelope', () => {
+  // The C# walk must self-terminate at its budget (partial rows beat an
+  // outer-timeout kill that returns nothing) and report that it did.
+  assert.ok(UIA_COM_PRELUDE.includes('DateTime.UtcNow > st.deadline'), 'Visit checks the deadline')
+  assert.ok(UIA_COM_PRELUDE.includes('st.deadline = DateTime.UtcNow.AddMilliseconds(budgetMs)'))
+  assert.ok(UIA_COM_PRELUDE.includes(`,\\"truncated\\":`), 'truncated flag serialized with the rows')
 })
 
 test('COM click: left single passes invoke flag, right/double disable it', () => {
@@ -255,6 +263,17 @@ test('probe failure marks COM broken for the whole session', async () => {
   assert.equal(calls, 1, 'no re-probe after failure')
 })
 
+/** Instant sleep so sparse-tree warmup retries don't slow the suite. */
+const noSleep = async () => {}
+
+/** Enough rows to stay above the sparse-tree warmup threshold (single walk). */
+function denseRows(): string {
+  const rows = Array.from({ length: 30 }, (_, i) => (
+    { ref: i + 1, depth: i === 0 ? 0 : 1, role: i === 0 ? 'Window' : 'Button', title: `el${i}`, value: '', pos: null, path: i === 0 ? [0] : [0, i - 1] }
+  ))
+  return JSON.stringify(rows)
+}
+
 test('driver routes through COM builders when the probe passes', async () => {
   const scripts: string[] = []
   const run = async (script: string) => {
@@ -262,7 +281,7 @@ test('driver routes through COM builders when the probe passes', async () => {
     if (script.includes('[RivetUia]::Probe()')) return 'com-ok:Desktop'
     return '{"rows":[],"shot":false}'
   }
-  const driver = createWindowsDriver(run)
+  const driver = createWindowsDriver(run, noSleep)
   await driver.snapshot('notepad', { screenshot: false })
   const action = scripts[scripts.length - 1]!
   assert.ok(action.includes('[RivetUia]::SnapshotJson'), 'COM snapshot builder used')
@@ -276,7 +295,7 @@ test('driver falls back to managed builders when the probe fails', async () => {
     if (script.includes('[RivetUia]::Probe()')) throw new Error('CLSID not registered')
     return JSON.stringify({ rows: [], shot: false })
   }
-  const driver = createWindowsDriver(run)
+  const driver = createWindowsDriver(run, noSleep)
   await driver.snapshot('notepad', { screenshot: false })
   const action = scripts[scripts.length - 1]!
   assert.ok(action.includes('System.Windows.Automation'), 'managed snapshot builder used')
@@ -288,9 +307,10 @@ test('driver with RIVET_CU_COM=0 never emits a probe or COM script', async () =>
   const scripts: string[] = []
   const run = async (script: string) => {
     scripts.push(script)
-    return JSON.stringify({ rows: [], shot: false })
+    // Dense tree: no warmup re-walk, so exactly one script proves no probe ran.
+    return `{"rows":${denseRows()},"shot":false}`
   }
-  const driver = createWindowsDriver(run)
+  const driver = createWindowsDriver(run, noSleep)
   await driver.snapshot('notepad', { screenshot: false })
   assert.equal(scripts.length, 1)
   assert.ok(!scripts[0]!.includes('RivetUia'))
@@ -302,9 +322,9 @@ test('COM snapshot rows parse through the same driver pipeline (no unwrap quirk)
   ]
   const run = async (script: string) => {
     if (script.includes('[RivetUia]::Probe()')) return 'com-ok:'
-    return `{"rows":${JSON.stringify(rows)},"shot":false}`
+    return `{"snap":{"rows":${JSON.stringify(rows)},"truncated":false},"shot":false}`
   }
-  const driver = createWindowsDriver(run)
+  const driver = createWindowsDriver(run, noSleep)
   const snap = await driver.snapshot('notepad', { screenshot: false })
   assert.ok(snap.tree.includes('[1] Window "readme - Notepad"'))
   assert.equal(snap.refs.length, 1)

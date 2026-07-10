@@ -355,11 +355,14 @@ test('listApps re-wraps a single unwrapped entry (ConvertTo-Json quirk)', async 
   assert.deepEqual(await one.listApps(), [{ name: 'Calculator', title: '', frontmost: false }])
 })
 
+/** Instant sleep so sparse-tree warmup retries don't slow the suite. */
+const noSleep = async () => {}
+
 test('snapshot parses rows into tree + refs; no screenshot when shot=false', async () => {
   const rows: WindowsSnapshotRow[] = [
     { ref: 1, depth: 0, role: 'Window', title: 'Notepad', value: '', pos: { x: 1, y: 2 }, path: [0] },
   ]
-  const driver = createWindowsDriver(async () => JSON.stringify({ rows, shot: false }))
+  const driver = createWindowsDriver(async () => JSON.stringify({ rows, shot: false }), noSleep)
   const snap = await driver.snapshot('notepad')
   assert.match(snap.tree, /\[1\] Window "Notepad" @\(1,2\)/)
   assert.equal(snap.refs.length, 1)
@@ -370,11 +373,59 @@ test('snapshot parses rows into tree + refs; no screenshot when shot=false', asy
 
 test('snapshot with screenshot:false sends the tree-only script', async () => {
   const scripts: string[] = []
-  const driver = createWindowsDriver(async (script) => { scripts.push(script); return JSON.stringify({ rows: [], shot: false }) })
+  const driver = createWindowsDriver(async (script) => { scripts.push(script); return JSON.stringify({ rows: [], shot: false }) }, noSleep)
   const snap = await driver.snapshot('notepad', { screenshot: false })
   assert.equal(scripts[0]?.includes('CopyFromScreen'), false)
   assert.equal(snap.screenshotPng, null)
   assert.equal(snap.visionPng, null)
+})
+
+test('snapshot warmup: sparse first walk re-walks once and keeps the bigger tree', async () => {
+  // Electron UIA trees populate asynchronously after the first walk switches
+  // accessibility on — the retry must pick up the grown tree.
+  const sparse = [{ ref: 1, depth: 0, role: 'Window', title: 'QQ', value: '', pos: null, path: [0] }]
+  const grown = Array.from({ length: 30 }, (_, i) => (
+    { ref: i + 1, depth: i === 0 ? 0 : 1, role: i === 0 ? 'Window' : 'Button', title: `el${i}`, value: '', pos: null, path: i === 0 ? [0] : [0, i - 1] }
+  ))
+  let calls = 0
+  const slept: number[] = []
+  const driver = createWindowsDriver(
+    async () => JSON.stringify({ rows: calls++ === 0 ? sparse : grown, shot: false }),
+    async (ms) => { slept.push(ms) },
+  )
+  const snap = await driver.snapshot('QQ', { screenshot: false })
+  assert.equal(calls, 2, 'exactly one re-walk')
+  assert.deepEqual(slept, [2500], 'one settle delay before the re-walk')
+  assert.equal(snap.refs.length, 30, 'the grown tree wins')
+})
+
+test('snapshot warmup: truncated sparse walk does NOT retry (budget already spent)', async () => {
+  const rows = [{ ref: 1, depth: 0, role: 'Window', title: 'App', value: '', pos: null, path: [0] }]
+  let calls = 0
+  const driver = createWindowsDriver(
+    async () => { calls++; return JSON.stringify({ rows, shot: false, truncated: true }) },
+    noSleep,
+  )
+  const snap = await driver.snapshot('App', { screenshot: false })
+  assert.equal(calls, 1)
+  assert.equal(snap.truncated, true)
+})
+
+test('snapshot truncated: partial-tree note appended (byte-parity with macOS) and flag set', async () => {
+  const rows = [{ ref: 1, depth: 0, role: 'Window', title: 'App', value: '', pos: null, path: [0] }]
+  const driver = createWindowsDriver(async () => JSON.stringify({ rows, shot: false, truncated: true }), noSleep)
+  const snap = await driver.snapshot('App', { screenshot: false })
+  assert.equal(snap.truncated, true)
+  assert.match(snap.tree, /\(partial tree: walk budget exhausted — refs above are valid; use find\(query\)\/wait_for for content deeper in the UI\)$/)
+})
+
+test('snapshot parses the COM "snap" envelope (rows + truncated nested)', async () => {
+  const rows = [{ ref: 1, depth: 0, role: 'Window', title: 'App', value: '', pos: null, path: [0] }]
+  const driver = createWindowsDriver(async () => JSON.stringify({ snap: { rows, truncated: true }, shot: false }), noSleep)
+  const snap = await driver.snapshot('App', { screenshot: false })
+  assert.equal(snap.refs.length, 1)
+  assert.equal(snap.truncated, true)
+  assert.match(snap.tree, /\[1\] Window "App"/)
 })
 
 test('launchApp / menuSelect / pasteText route to their scripts; empty menu path rejected locally', async () => {
@@ -393,14 +444,14 @@ test('launchApp / menuSelect / pasteText route to their scripts; empty menu path
 
 test('snapshot re-wraps a single-object rows field (ConvertTo-Json unwrap quirk)', async () => {
   const row: WindowsSnapshotRow = { ref: 1, depth: 0, role: 'Window', title: 'Notepad', value: '', pos: null, path: [0] }
-  const driver = createWindowsDriver(async () => JSON.stringify({ rows: row, shot: false }))
+  const driver = createWindowsDriver(async () => JSON.stringify({ rows: row, shot: false }), noSleep)
   const snap = await driver.snapshot('notepad')
   assert.match(snap.tree, /\[1\] Window "Notepad"/)
   assert.equal(snap.refs.length, 1)
 })
 
 test('snapshot degrades to empty tree on unparseable output', async () => {
-  const driver = createWindowsDriver(async () => 'PS burped')
+  const driver = createWindowsDriver(async () => 'PS burped', noSleep)
   const snap = await driver.snapshot('notepad')
   assert.equal(snap.tree, '(no accessible elements found)')
   assert.deepEqual(snap.refs, [])
