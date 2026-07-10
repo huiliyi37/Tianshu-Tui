@@ -401,4 +401,32 @@ describe('council_convene 工具', () => {
       rmSync(cwd, { recursive: true, force: true })
     }
   })
+
+  // ── Pro gate（双层模式）：rounds≥2 仅 Pro 可用 ──
+
+  it('rounds:2 且 multiRoundEnabled=false → 降级单轮并注明，不报错', async () => {
+    const { coordinator, calls } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator, undefined, { multiRoundEnabled: false })
+    const res = await tool.execute(paramsWith({ objective: 'review the plan', rounds: 2 }))
+    assert.equal(res.isError, false)
+    assert.match(res.content, /\[Pro\] 议事会第 2 轮/)
+    // 单轮 = 一次席位 fanout。
+    assert.equal(calls.requests.length, 1)
+  })
+
+  it('rounds:2 缺省 gate（未传 options）→ 不注入 Pro 提示', async () => {
+    const { coordinator } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator)
+    const res = await tool.execute(paramsWith({ objective: 'review the plan', rounds: 2 }))
+    assert.equal(res.isError, false)
+    assert.ok(!res.content.includes('[Pro]'))
+  })
+
+  it('rounds:1 在 gate 关闭时不受影响', async () => {
+    const { coordinator } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator, undefined, { multiRoundEnabled: false })
+    const res = await tool.execute(paramsWith({ objective: 'review the plan', rounds: 1 }))
+    assert.equal(res.isError, false)
+    assert.ok(!res.content.includes('[Pro]'))
+  })
 })

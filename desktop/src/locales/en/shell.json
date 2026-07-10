@@ -1,15 +1,15 @@
 {
   "activation": {
-    "title": "Activate Tianshu Desktop",
-    "subtitle": "This is a licensed copy. Enter your activation code to unlock the agent runtime.",
-    "codeLabel": "Activation code",
+    "title": "Upgrade to Tianshu Pro",
+    "subtitle": "Enter a Pro license code to unlock Computer Use, team max, multi-round council, and other advanced features. Core features stay free.",
+    "codeLabel": "License code",
     "codePlaceholder": "TS-XXXX-XXXX-XXXX",
-    "activate": "Activate",
-    "activating": "Activating…",
+    "activate": "Unlock Pro",
+    "activating": "Verifying…",
     "deviceLabel": "Device ID",
-    "graceNotice": "Offline grace period active — reconnect before {{date}} to keep using the app.",
-    "revoked": "This license is no longer valid ({{reason}}). Please contact support or enter a new code.",
-    "success": "Activated. Restarting to launch the runtime…",
+    "graceNotice": "Offline grace period active — reconnect before {{date}} to keep Pro.",
+    "revoked": "The Pro license is no longer valid ({{reason}}). The app has returned to Basic; enter a new license code to unlock again.",
+    "success": "Pro unlocked. Restarting the app to apply…",
     "viewEula": "View License Agreement",
     "errors": {
       "code_not_found": "Activation code not found.",

@@ -701,3 +701,54 @@ test('team_orchestrate auto-consumes plan from session store when planJson omitt
   // team_orchestrate consumes then re-stores the plan for multi-wave continuity.
   assert.ok(getStoredPlan(sessionId) !== null)
 })
+
+// ── Pro gate（双层模式）：mode:'max' 仅 Pro 可用 ──
+
+test('team_orchestrate max mode blocked without plan when teamMax Pro gate off', async () => {
+  const tool = createTeamOrchestrateTool(
+    { delegateBatch: async () => stubRun() },
+    { teamMaxEnabled: false },
+  )
+  const result = await tool.execute({
+    input: { mode: 'max', objective: 'force: a sufficiently large mission statement' },
+    cwd: process.cwd(),
+    toolUseId: 'tu-pro-gate-1',
+  })
+  assert.equal(result.isError, true)
+  assert.match(result.content, /Pro 功能/)
+  assert.match(result.content, /plan_task/)
+})
+
+test('team_orchestrate max mode downgrades to standard with existing plan when teamMax gate off', async () => {
+  const tool = createTeamOrchestrateTool(
+    { delegateBatch: async () => stubRun('downgraded') },
+    { teamMaxEnabled: false },
+  )
+  const md = [
+    '### Task 1: edit foo',
+    'Modify `src/agent/foo.ts`',
+  ].join('\n')
+  const result = await tool.execute({
+    input: { mode: 'max', objective: 'force: execute the provided plan', planMarkdown: md },
+    cwd: process.cwd(),
+    toolUseId: 'tu-pro-gate-2',
+  })
+  assert.equal(result.isError, false)
+  assert.match(result.content, /team standard/)
+  assert.match(result.content, /\[Pro\]/)
+})
+
+test('team_orchestrate default keeps max mode available (gate defaults on for direct constructors)', async () => {
+  // 未传 teamMaxEnabled → 缺省 true：直接构造方（测试/嵌入）不受 gate 影响。
+  // bootstrap 注册时才按 pro-license 传真值。
+  const tool = createTeamOrchestrateTool({ delegateBatch: async () => stubRun() })
+  const md = ['### Task 1: edit foo', 'Modify `src/agent/foo.ts`'].join('\n')
+  const result = await tool.execute({
+    input: { mode: 'max', objective: 'force: run max with plan provided', planMarkdown: md },
+    cwd: process.cwd(),
+    toolUseId: 'tu-pro-gate-3',
+  })
+  // max with pre-parsed plan bypasses planner fanout — should not be Pro-blocked.
+  assert.equal(result.isError, false)
+  assert.ok(!result.content.includes('[Pro]'))
+})

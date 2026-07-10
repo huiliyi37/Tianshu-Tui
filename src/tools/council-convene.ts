@@ -66,6 +66,11 @@ export function createCouncilConveneTool(
   /** Configured default seats (agent.council.seats). When non-empty, used as the
    *  default council instead of DEFAULT_COUNCIL_SEATS; per-call `seats` still wins. */
   defaultSeats?: CouncilSeat[],
+  options?: {
+    /** Pro gate: rounds≥2（反驳/辩论轮）仅 Pro 可用，未启用时降级单轮。缺省 true
+     *  以保持直接构造方（测试等）行为不变；bootstrap 按 pro-license 传真值。 */
+    multiRoundEnabled?: boolean
+  },
 ): Tool {
   return {
     definition: {
@@ -118,7 +123,17 @@ export function createCouncilConveneTool(
       }
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
-      const { objective, draftItems, seats, rounds, autoExecute } = parsed.data
+      const { objective, draftItems, seats, rounds: requestedRounds, autoExecute } = parsed.data
+
+      // ── Pro gate: 多轮议事会 ──
+      // rounds≥2（反驳轮）是 Pro 功能，未启用时降级单轮继续（不拒绝——单轮
+      // 议事会是 Basic 能力，降级比报错对任务更有用），并在结果中注明。
+      let rounds = requestedRounds
+      let proGateNote = ''
+      if (requestedRounds && requestedRounds >= 2 && !(options?.multiRoundEnabled ?? true)) {
+        rounds = 1
+        proGateNote = '\n\n[Pro] 议事会第 2 轮（反驳轮）是 Pro 功能——本次已按单轮执行。升级 Pro 解锁多轮辩论。'
+      }
 
       const items: PlanItem[] = draftItems ?? []
       // Precedence: per-call seats > configured agent.council.seats > built-in default.
@@ -252,7 +267,7 @@ export function createCouncilConveneTool(
         }
       }
 
-      return { content: parts.join('\n'), uiContent: summarizeCouncilPlan(plan), isError: false }
+      return { content: parts.join('\n') + proGateNote, uiContent: summarizeCouncilPlan(plan), isError: false }
     },
     requiresApproval: () => false,
     isConcurrencySafe: () => false,

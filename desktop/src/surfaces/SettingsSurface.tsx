@@ -21,7 +21,9 @@ import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettingsManager } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, deactivateLicense, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { useProLicense } from '../lib/use-activation-gate'
+import { ProUpgradeDialog } from '../components/ActivationScreen'
 import { pickFolder } from '../lib/dialog'
 import { openRivetHome, openEula } from '../lib/open-external'
 import { getVersion } from '@tauri-apps/api/app'
@@ -1162,14 +1164,29 @@ function UpdaterSection() {
   )
 }
 
-/** About / License: app version, proprietary-license notice, and EULA access. */
+/** About / License: app version, Basic/Pro tier, license management, EULA access. */
 function AboutSection() {
   const { t } = useTranslation('settings')
   const [version, setVersion] = useState<string | null>(null)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
+  // 双层模式：Basic 免许可证即用，Pro 许可证经 Rust 验签解锁高级功能。
+  const { status, isPro, refresh } = useProLicense()
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(null))
   }, [])
+
+  const handleRemoveLicense = useCallback(() => {
+    void deactivateLicense()
+      .then(() => refresh())
+      .catch(() => {})
+  }, [refresh])
+
+  const expiryLabel = (() => {
+    if (!isPro) return null
+    if (status?.licenseExpires == null) return t('about.proPerpetual')
+    return new Date(status.licenseExpires).toLocaleDateString()
+  })()
 
   return (
     <section className="system-card">
@@ -1180,11 +1197,33 @@ function AboutSection() {
       <dl className="kv">
         <div><dt>{t('about.version')}</dt><dd>{version ?? '—'}</dd></div>
         <div><dt>{t('about.license')}</dt><dd>{t('about.licenseValue')}</dd></div>
+        <div>
+          <dt>{t('about.tier')}</dt>
+          <dd>
+            {isPro ? t('about.tierPro') : t('about.tierBasic')}
+            {status?.grace ? ` · ${t('about.proGrace')}` : ''}
+          </dd>
+        </div>
+        {expiryLabel && <div><dt>{t('about.proExpiry')}</dt><dd>{expiryLabel}</dd></div>}
       </dl>
+      {!isPro && <p className="meta">{t('about.proPitch')}</p>}
       <p className="meta">{t('about.boundary')}</p>
-      <button className="btn" onClick={() => { void openEula() }}>
-        {t('about.viewEula')}
-      </button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {!isPro && (
+          <button className="btn" onClick={() => setUpgradeOpen(true)}>
+            {t('about.upgradePro')}
+          </button>
+        )}
+        {isPro && (
+          <button className="btn" onClick={handleRemoveLicense}>
+            {t('about.removeLicense')}
+          </button>
+        )}
+        <button className="btn" onClick={() => { void openEula() }}>
+          {t('about.viewEula')}
+        </button>
+      </div>
+      <ProUpgradeDialog status={status} open={upgradeOpen} onOpenChange={setUpgradeOpen} />
     </section>
   )
 }

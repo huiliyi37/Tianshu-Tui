@@ -98,8 +98,8 @@ fn runtime_info(state: State<Sidecar>) -> RuntimeInfo {
     state.info.clone()
 }
 
-// ── 在线激活命令 ──
-// 网络调用在前端(JS fetch 打授权服务器);Rust 只负责验签 + 落盘 + gate。
+// ── Pro 许可证命令 ──
+// 网络调用在前端(JS fetch 打授权服务器);Rust 只负责验签 + 落盘 + 层级判定。
 
 #[tauri::command]
 fn device_fingerprint(app: tauri::AppHandle) -> String {
@@ -110,10 +110,9 @@ fn device_fingerprint(app: tauri::AppHandle) -> String {
 #[tauri::command]
 fn activation_status(app: tauri::AppHandle) -> activation::LicenseStatus {
     let home = strip_verbatim_prefix(resolve_rivet_home(&app));
-    // 与 is_activated() 对齐：release 构建未设 RIVET_ACTIVATION_ENABLED 时
-    // 前端 UI 也跳过激活 gate，否则 sidecar 能启动但界面仍卡在激活页。
-    if activation::activation_bypassed() {
-        return activation::bypass_status(&home);
+    // debug 构建 dev bypass 时 UI 直接显示 Pro,与 is_pro() 对齐。
+    if activation::dev_pro_bypass() {
+        return activation::dev_bypass_status(&home);
     }
     activation::read_status(&home)
 }
@@ -967,6 +966,16 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
         // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
         // only covers the clean-shutdown paths we control.)
         .env("RIVET_PARENT_PID", std::process::id().to_string());
+    // ── Pro 层级注入(双层模式)──
+    // 验签通过的许可证(或 debug dev bypass)→ 注入 RIVET_PRO=1,sidecar 侧
+    // pro-license.ts 据此解锁 Pro 功能;Basic(无许可证)显式移除该变量,
+    // 防止从设置了 RIVET_PRO 的 shell 启动桌面端时继承出未付费的 Pro。
+    // 每次 (re)spawn 动态判定,许可证变更后重启 agent 即生效。
+    if activation::is_pro(&spec.rivet_home) {
+        cmd.env("RIVET_PRO", "1");
+    } else {
+        cmd.env_remove("RIVET_PRO");
+    }
     // Re-apply the captured auth env on every (re)spawn so a restart carries the
     // identical key-resolution environment as the first launch, independent of
     // any later mutation of the parent process env. Inherited env still flows;
@@ -1239,29 +1248,6 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
         log_path: log_path.clone(),
     };
 
-    // ── 激活 gate ──
-    // 未激活就不拉起 sidecar(= agent 全部能力)。前端据 activation_status()
-    // 渲染激活界面。真校验在 activation.rs(编译进机器码),前端 patch 绕不过。
-    // 激活成功后前端触发 relaunch,下次 setup 走正常 spawn 分支。
-    if !activation::is_activated(&rivet_home) {
-        eprintln!("[rivet] license not active — sidecar launch gated (activation required)");
-        return (
-            RuntimeInfo {
-                port,
-                token,
-                node_source: node_source.to_string(),
-                ready: false,
-                rivet_home: rivet_home.to_string_lossy().to_string(),
-                node_path: node,
-                entry_path: entry.to_string_lossy().to_string(),
-                spawn_error: "__ACTIVATION_REQUIRED__".to_string(),
-                log_path: log_path.to_string_lossy().to_string(),
-            },
-            None,
-            spec,
-        );
-    }
-
     let mut child = spawn_from_spec(&spec);
 
     let ready = child.is_some() && wait_until_ready(port, &token, Duration::from_secs(15));
@@ -1406,13 +1392,8 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
             if state.shutting_down.load(Ordering::SeqCst) {
                 return;
             }
-            // 激活 gate(防绕过):运行时若 license 被吊销/过期,崩溃后不再重启。
-            // 前端收到 activation-required 事件切激活界面。
-            if !activation::is_activated(&state.spec.rivet_home) {
-                eprintln!("[rivet] license no longer active — halting sidecar auto-restart");
-                let _ = handle.emit("activation-required", ());
-                return;
-            }
+            // 双层模式下许可证失效不再拦重启——respawn 时 spawn_from_spec 会按
+            // 最新 is_pro() 重新判定 RIVET_PRO,吊销/过期自动降级 Basic 继续跑。
             restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
             if restarts.len() >= 3 {
                 eprintln!(

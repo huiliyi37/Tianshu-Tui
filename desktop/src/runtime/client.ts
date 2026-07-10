@@ -113,10 +113,10 @@ export function __peekRuntimeCache(): RuntimeInfo | null {
   return cached
 }
 
-// ── License activation ─────────────────────────────────────────────────────
-// The real gate lives in Rust (sidecar spawn is skipped when unactivated).
-// The frontend only drives the UI + the network calls to the license server;
-// Rust verifies the Ed25519 signature and persists the token.
+// ── Pro license（双层模式）───────────────────────────────────────────────
+// Basic 免许可证即用；Pro 许可证在 Rust 侧 Ed25519 验签落盘，spawn sidecar 时
+// 按验签结果注入 RIVET_PRO=1 解锁高级功能。The frontend only drives the UI +
+// the network calls to the license server.
 
 export interface ActivationStatus {
   activated: boolean
@@ -149,7 +149,7 @@ export function storeLicense(token: string): Promise<ActivationStatus> {
   return invoke<ActivationStatus>('store_license', { token })
 }
 
-/** Remove the local license (deactivate). Gate applies on next launch. */
+/** Remove the local license (revert to Basic). Applies on next sidecar spawn. */
 export function deactivateLicense(): Promise<void> {
   return invoke<void>('deactivate')
 }
@@ -165,7 +165,8 @@ async function serverError(res: Response): Promise<string> {
 
 /**
  * Redeem an activation code: POST /activate → Rust verifies & stores the token.
- * On success the caller should relaunch so the setup() gate spawns the sidecar.
+ * On success the caller should relaunch so the next sidecar spawn picks up the
+ * Pro tier (RIVET_PRO env injection happens at spawn time).
  */
 export async function activateWithCode(code: string): Promise<ActivationStatus> {
   const deviceId = await getDeviceFingerprint()

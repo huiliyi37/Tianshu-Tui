@@ -124,9 +124,10 @@ export const adminPage = `<!DOCTYPE html>
     <label>设备上限 (每码可绑几台)</label>
     <input type="number" id="genDevices" value="2" min="1" max="50">
     <label>等级</label>
+    <!-- 双层模式:桌面端任何验签通过的许可证即 Pro(Basic 无需许可证),
+         tier 仅作未来更多层级的扩展位,当前只签发 pro。 -->
     <select id="genTier">
       <option value="pro">pro</option>
-      <option value="standard">standard</option>
     </select>
     <label>有效期天数 (留空=永久)</label>
     <input type="number" id="genDays" placeholder="如 365">

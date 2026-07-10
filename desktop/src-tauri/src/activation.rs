@@ -1,9 +1,10 @@
-//! 桌面端在线激活 — 本地验签 + 设备指纹 + 离线宽限。
+//! 桌面端 Pro 许可证 — 本地验签 + 设备指纹 + 离线宽限。
 //!
-//! 真校验全在 Rust(编译进机器码,前端 patch 绕不过)。网络调用放前端
-//! (JS fetch 打授权服务器),前端把服务器签发的 token 交给 `store_license`
-//! 做 Ed25519 验签后落盘。gate 在 `lib.rs` 的 sidecar spawn 前:未激活不拉起
-//! agent runtime。
+//! 双层模式:Basic 免许可证即用(sidecar 始终拉起),Pro 许可证经本地
+//! Ed25519 验签后解锁高级功能。真校验全在 Rust(编译进机器码,前端 patch
+//! 绕不过)。网络调用放前端(JS fetch 打授权服务器),前端把服务器签发的
+//! token 交给 `store_license` 做验签后落盘。`lib.rs` 在 sidecar spawn 时按
+//! `is_pro()` 注入 `RIVET_PRO=1`,sidecar 侧 pro-license.ts 据此启用 Pro 功能。
 //!
 //! Token 契约(与 `license-server/src/token.ts` 一致):
 //!   token = base64url(JSON(payload)) + "." + base64url(ed25519_sig)
@@ -27,10 +28,10 @@ const OFFLINE_GRACE_DAYS: i64 = 10;
 
 /// 授权服务器签发公钥(raw 32 字节,标准 base64)。
 ///
-/// ⚠️ 部署前必须替换为 `license-server` 的 `npm run genkeys` 输出的 PUBLIC KEY。
-/// 占位值(全零)不会匹配任何真实签名 → 所有 token 验签失败 → fail-closed 锁死,
-/// 这是有意的:没有真实密钥 + 真实服务器,加固版就不该跑起来。开发期用
-/// `RIVET_ACTIVATION_DEV_BYPASS=1`(仅 debug 构建生效)绕过。
+/// ⚠️ 必须与 `license-server` 的 `npm run genkeys` 输出的 PUBLIC KEY 一致。
+/// 密钥不匹配时所有 token 验签失败 → Pro 永远无法解锁(Basic 不受影响,
+/// 双层模式下应用始终可用)。开发期用 `RIVET_ACTIVATION_DEV_BYPASS=1`
+/// (仅 debug 构建生效)直接视为 Pro。
 const PUBLIC_KEY_B64: &str = "uBhXciTyeze2pimLqWFrPQM8YjOoJHaGcOcmqZjZ8Y4=";
 
 #[derive(Debug, Clone, Serialize)]
@@ -287,13 +288,9 @@ pub fn clear_license(rivet_home: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 编译时开关：release 构建未设 RIVET_ACTIVATION_ENABLED=1 时跳过激活 gate。
-/// debug 构建仍可通过 RIVET_ACTIVATION_DEV_BYPASS=1 绕过。
-pub fn activation_bypassed() -> bool {
-    #[cfg(not(debug_assertions))]
-    if option_env!("RIVET_ACTIVATION_ENABLED").is_none() {
-        return true;
-    }
+/// 开发便利:debug 构建设 RIVET_ACTIVATION_DEV_BYPASS=1 时视为 Pro
+/// (无需真实许可证)。release 构建忽略该变量,判定只认验签通过的许可证。
+pub fn dev_pro_bypass() -> bool {
     #[cfg(debug_assertions)]
     if std::env::var("RIVET_ACTIVATION_DEV_BYPASS").is_ok() {
         return true;
@@ -301,23 +298,24 @@ pub fn activation_bypassed() -> bool {
     false
 }
 
-/// 编译时 gate 关闭时的占位激活状态，供前后端统一跳过 UI gate。
-pub fn bypass_status(rivet_home: &Path) -> LicenseStatus {
+/// dev bypass 时的占位状态(仅 debug 构建可达):UI 显示为 Pro。
+pub fn dev_bypass_status(rivet_home: &Path) -> LicenseStatus {
     LicenseStatus {
         activated: true,
-        tier: None,
+        tier: Some("pro".to_string()),
         token_exp: None,
         license_expires: None,
         grace: false,
         grace_until: None,
-        reason: "disabled".to_string(),
+        reason: "dev_bypass".to_string(),
         device_id: device_id(rivet_home),
     }
 }
 
-/// gate 便捷判断:是否允许拉起 agent runtime。
-pub fn is_activated(rivet_home: &Path) -> bool {
-    if activation_bypassed() {
+/// 双层判定:任何验签通过且未过期的许可证即 Pro(Basic 无需许可证,
+/// sidecar 始终拉起)。`tier` 字段保留为未来更多层级的扩展位。
+pub fn is_pro(rivet_home: &Path) -> bool {
+    if dev_pro_bypass() {
         return true;
     }
     read_status(rivet_home).activated
@@ -390,6 +388,17 @@ mod tests {
         assert!(s.activated);
         assert_eq!(s.reason, "ok");
         assert!(!s.grace);
+    }
+
+    /// 双层模式:tier 字段缺失的旧 token 仍算有效许可证(is_pro 只看 activated)。
+    #[test]
+    fn evaluate_active_without_tier_field() {
+        let mut p = payload("dev-1", 1_000, None);
+        p.tier = None;
+        let s = evaluate_decoded(&p, 0, "dev-1", 500);
+        assert!(s.activated);
+        assert_eq!(s.tier, None);
+        assert_eq!(s.reason, "ok");
     }
 
     #[test]

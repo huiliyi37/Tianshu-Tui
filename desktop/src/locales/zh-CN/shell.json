@@ -1,15 +1,15 @@
 {
   "activation": {
-    "title": "激活天枢桌面端",
-    "subtitle": "这是授权副本。输入激活码以解锁 agent 运行时。",
-    "codeLabel": "激活码",
+    "title": "升级到天枢 Pro",
+    "subtitle": "输入 Pro 许可证码，解锁 Computer Use、team max、多轮议事会等高级功能。基础功能始终免费。",
+    "codeLabel": "许可证码",
     "codePlaceholder": "TS-XXXX-XXXX-XXXX",
-    "activate": "激活",
-    "activating": "激活中…",
+    "activate": "解锁 Pro",
+    "activating": "验证中…",
     "deviceLabel": "设备 ID",
-    "graceNotice": "离线宽限期生效中——请在 {{date}} 前联网续期以继续使用。",
-    "revoked": "许可已失效（{{reason}}）。请联系客服或输入新的激活码。",
-    "success": "激活成功，正在重启以拉起运行时…",
+    "graceNotice": "离线宽限期生效中——请在 {{date}} 前联网续期以保持 Pro。",
+    "revoked": "Pro 许可已失效（{{reason}}）。应用已回到基础版，可输入新的许可证码重新解锁。",
+    "success": "Pro 已解锁，正在重启应用以生效…",
     "viewEula": "查看许可协议",
     "errors": {
       "code_not_found": "未找到该激活码。",

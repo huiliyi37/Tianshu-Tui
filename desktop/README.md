@@ -55,7 +55,15 @@ VITE_RIVET_PORT=3100 VITE_RIVET_TOKEN=devtoken npm run dev   # 浏览器开 5273
 
 # B. 完整桌面（Tauri 自动 spawn sidecar + 注入随机 token）
 npm run tauri:dev
+
+# B'. 完整桌面，以 Pro 层级运行（开发便利，无需真实许可证）
+npm run tauri:dev:bypass
 ```
+
+> 双层模式说明：桌面端不再有启动激活闸门——Basic 免许可证即用（完整基础功能），
+> Pro 许可证经 Rust Ed25519 验签后解锁高级功能（computer_use / team max / 多轮议事会）。
+> `tauri:dev` 默认以 Basic 运行；`npm run tauri:dev:bypass` 等价于
+> `RIVET_ACTIVATION_DEV_BYPASS=1 npm run tauri:dev`（仅 debug 构建生效），直接视为 Pro。
 
 打包（N5）：`npm run tauri:build`。`bundle.resources` 会把仓库根 `dist/`（即 sidecar 运行时）装为
 `Resources/rivet-runtime/`；运行时 `lib.rs` 的 `sidecar_entry()` 优先解析该资源路径，`detect_node()`

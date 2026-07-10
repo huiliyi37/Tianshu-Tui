@@ -117,7 +117,12 @@ export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string
 
 export function createTeamOrchestrateTool(
   coordinator: TeamOrchestrateCoordinator,
-  options?: { defaultMaxParallel?: number },
+  options?: {
+    defaultMaxParallel?: number
+    /** Pro gate: mode:'max'（多视角 planner fanout）仅 Pro 可用。缺省 true
+     *  以保持直接构造方（测试等）行为不变；bootstrap 按 pro-license 传真值。 */
+    teamMaxEnabled?: boolean
+  },
 ): Tool {
   return {
     definition: {
@@ -191,10 +196,27 @@ export function createTeamOrchestrateTool(
         }
       }
 
+      // ── Pro gate: team max ──
+      // 多视角 planner fanout 是 Pro 功能。有现成计划时降级 standard 继续执行
+      // (不浪费已有工作),没有计划时明确拒绝并给出 Basic 可用的替代路径。
+      let effectiveMode = mode
+      let proGateNote = ''
+      if (mode === 'max' && !(options?.teamMaxEnabled ?? true)) {
+        if (tasks || markdown) {
+          effectiveMode = 'standard'
+          proGateNote = '\n\n[Pro] team max（多视角规划）是 Pro 功能——已降级为 standard 模式执行现有计划。升级 Pro 解锁多视角 planner fanout。'
+        } else {
+          return {
+            content: 'team_orchestrate: mode "max"（多视角规划 fanout）是 Pro 功能。Basic 替代路径：先用 plan_task 生成计划，再以 standard 模式执行；或升级 Pro 解锁。',
+            isError: true,
+          }
+        }
+      }
+
       // Standard mode needs a plan to execute; max mode generates one via planner
       // fanout, so only guard the standard path. A clear message beats the
       // "no dispatchable waves" weak result when nothing was provided/stored.
-      if (mode === 'standard' && !tasks && !markdown) {
+      if (effectiveMode === 'standard' && !tasks && !markdown) {
         return {
           content: 'team_orchestrate blocked: No plan provided and no stored plan found. Run plan_task first or pass planJson/planPath.',
           isError: true,
@@ -219,7 +241,7 @@ export function createTeamOrchestrateTool(
       try {
         run = await executePlan(
           {
-            mode,
+            mode: effectiveMode,
             objective,
             tasks,
             planMarkdown: markdown,
@@ -276,7 +298,7 @@ export function createTeamOrchestrateTool(
 
       const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict)
       return {
-        content: formatTeamSummary(summary, effectiveFromWave) + notes.reviewNote + notes.scopeHealthNote + notes.impactNote + notes.waveGateNote + notes.deliverySynthesis + planAdvisoryNote,
+        content: formatTeamSummary(summary, effectiveFromWave) + notes.reviewNote + notes.scopeHealthNote + notes.impactNote + notes.waveGateNote + notes.deliverySynthesis + planAdvisoryNote + proGateNote,
         uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
       }

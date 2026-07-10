@@ -548,7 +548,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         if (!toolName) {
           pushStatic(createLogEntry({ type: 'system', content: 'Usage: /tools enable <tool_name>\nMounts an EXTENDED-layer tool onto the primary agent at this turn boundary.\nAlternatively, use delegate_task to dispatch a worker with that tool (zero cache cost).' }))
         } else if (toolName.toLowerCase() === 'computer_use' && !isProFeatureEnabled(ctx.config, 'computerUse')) {
-          pushStatic(createLogEntry({ type: 'system', content: 'computer_use is a Pro feature. Enable Pro (config.pro.enabled, RIVET_PRO=1, or ~/.rivet/pro.license) and set config.pro.features.computerUse=true to mount this tool.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'computer_use is a Pro feature. Enable Pro (desktop: upgrade in Settings → About & License; CLI: config.pro.enabled / RIVET_PRO=1 / ~/.rivet/pro.license) to mount this tool.' }))
         } else {
           const result = ctx.agent.enableTool(toolName)
           switch (result.status) {
@@ -712,6 +712,13 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         setIsStreaming(false)
         return true
       }
+      // Pro gate（双层模式）：team max 的多视角规划 fanout 仅 Pro 可用。
+      // 入口早拦免得白跑一个模型轮次；标准 /team 不受影响。
+      if (parts[1]?.toLowerCase() === 'max' && !isProFeatureEnabled(ctx.config, 'teamMax')) {
+        pushStatic(createLogEntry({ type: 'system', content: 'team max（多视角规划）是 Pro 功能。Basic 可用：/team <task> 标准模式，或先 plan_task 出计划再执行。升级 Pro 解锁。' }))
+        setIsStreaming(false)
+        return true
+      }
       return false
     },
   },
@@ -724,6 +731,12 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /council <要会诊的计划/问题> [--seats id1,id2,...] [--rounds 1-2]' }))
         setIsStreaming(false)
         return true
+      }
+      // Pro gate（双层模式）：rounds≥2（反驳轮）仅 Pro 可用。提示后放行——
+      // council_convene 工具侧会把 rounds 钳制回单轮，单轮议事会是 Basic 能力。
+      const roundsMatch = /--rounds[\s=]+(\d+)/.exec(parts.slice(1).join(' '))
+      if (roundsMatch && Number(roundsMatch[1]) >= 2 && !isProFeatureEnabled(ctx.config, 'councilMultiRound')) {
+        pushStatic(createLogEntry({ type: 'system', content: '提示：议事会第 2 轮（反驳轮）是 Pro 功能，本次将按单轮执行。升级 Pro 解锁多轮辩论。' }))
       }
       return false
     },

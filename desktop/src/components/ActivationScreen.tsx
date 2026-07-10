@@ -25,19 +25,27 @@ const KNOWN_ERRORS = new Set([
 ])
 
 /**
- * Full-screen, non-dismissable activation gate. Shown when the local license is
- * missing/expired/revoked. The real enforcement is in Rust (the sidecar is not
- * spawned when unactivated) — this is purely the redemption UI. On success the
- * app relaunches so setup()'s gate spawns the runtime.
+ * Pro 升级弹窗（双层模式）：可随时关闭，从 设置 → 关于与许可 打开。
+ * 输入许可证码 → 前端调授权服务器换 token → Rust Ed25519 验签落盘。
+ * 成功后 relaunch，让 spawn_sidecar 按新许可证注入 RIVET_PRO 解锁 Pro 功能。
+ * Basic 不需要此弹窗——应用免许可证即用。
  */
-export function ActivationScreen({ status }: { status: ActivationStatus }) {
+export function ProUpgradeDialog({
+  status,
+  open,
+  onOpenChange,
+}: {
+  status: ActivationStatus | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
   const { t } = useTranslation('shell')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
 
-  const revoked = status.reason === 'license_expired' || status.reason === 'token_expired'
+  const expired = status != null && (status.reason === 'license_expired' || status.reason === 'token_expired')
 
   const resolveError = (raw: string): string => {
     if (raw === 'Failed to fetch' || raw.toLowerCase().includes('fetch')) {
@@ -68,20 +76,20 @@ export function ActivationScreen({ status }: { status: ActivationStatus }) {
     }
   }
 
-  const shortDevice =
-    status.deviceId.length > 20 ? `${status.deviceId.slice(0, 12)}…${status.deviceId.slice(-6)}` : status.deviceId
+  const deviceId = status?.deviceId ?? ''
+  const shortDevice = deviceId.length > 20 ? `${deviceId.slice(0, 12)}…${deviceId.slice(-6)}` : deviceId
 
   return (
-    <Dialog open onOpenChange={() => { /* cannot dismiss the activation gate */ }}>
-      <DialogContent showCloseButton={false} className="sm:max-w-md">
+    <Dialog open={open} onOpenChange={(next) => { if (!busy && !done) onOpenChange(next) }}>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t('activation.title')}</DialogTitle>
           <DialogDescription>{t('activation.subtitle')}</DialogDescription>
         </DialogHeader>
 
-        {revoked && (
+        {expired && (
           <div className="banner error" style={{ marginBottom: 8 }}>
-            {t('activation.revoked', { reason: status.reason })}
+            {t('activation.revoked', { reason: status?.reason })}
           </div>
         )}
 
@@ -105,8 +113,8 @@ export function ActivationScreen({ status }: { status: ActivationStatus }) {
           </Button>
 
           <div className="flex items-center justify-between text-[11px] text-muted mt-1">
-            <span title={status.deviceId}>
-              {t('activation.deviceLabel')}: <span className="font-mono">{shortDevice}</span>
+            <span title={deviceId}>
+              {t('activation.deviceLabel')}: <span className="font-mono">{shortDevice || '—'}</span>
             </span>
             <button
               type="button"

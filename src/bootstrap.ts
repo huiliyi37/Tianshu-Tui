@@ -471,7 +471,11 @@ export function createInteractiveToolRegistry(
     // 满载机器 tsc 超时曾被记成 passed 放行（2026-07-07）。
     getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*', GATE_TSC_TIMEOUT_MS),
   }
-  reg.register(createTeamOrchestrateTool(planExecutorDeps, { defaultMaxParallel: config.agent.maxTeamParallel }))
+  reg.register(createTeamOrchestrateTool(planExecutorDeps, {
+    defaultMaxParallel: config.agent.maxTeamParallel,
+    // Pro gate（双层模式）：桌面端由 Rust 验签后注入 RIVET_PRO=1；CLI 保持软 gate。
+    teamMaxEnabled: isProFeatureEnabled(config, 'teamMax'),
+  }))
 
   // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，默认绝不派执行；
   // autoExecute 经 executor 走完整 executePlan 闭环，与 team_orchestrate 同路径）。
@@ -484,7 +488,9 @@ export function createInteractiveToolRegistry(
     recordRoutingShadow: event => persistCouncilRoutingShadow(refs.meridianIndexer?.getDb(), event),
     recordCouncilSession: event => recordCouncilSession(refs.meridianIndexer?.getDb(), event),
     executor: planExecutorDeps,
-  }, config.agent.council.seats.length > 0 ? config.agent.council.seats : undefined))
+  }, config.agent.council.seats.length > 0 ? config.agent.council.seats : undefined, {
+    multiRoundEnabled: isProFeatureEnabled(config, 'councilMultiRound'),
+  }))
 
   // recall_capsule
   reg.register(createRecallCapsuleTool(() => cwd))

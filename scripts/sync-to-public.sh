@@ -26,10 +26,13 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   echo "[dry-run] 不实际写入，只显示将要同步的内容"
 fi
 
-echo "=== 同步: src/（含测试）==="
+echo "=== 同步: src/（含测试，排除 Pro 专属实现）==="
+# src/pro/ 是 Pro 专属实现的保留目录（桌面端专有分发，不进公开仓库）。
+# 纪律：新高级功能动工前先决定归属——一旦同步进公开 git 历史就收不回来。
 rsync $RSYNC_FLAGS \
   --exclude 'node_modules/' \
   --exclude 'dist/' \
+  --exclude 'pro/' \
   "$DEV_DIR/src/" "$PUB_DIR/src/"
 
 echo "=== 同步: scripts/ ==="

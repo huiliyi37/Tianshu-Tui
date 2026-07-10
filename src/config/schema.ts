@@ -541,6 +541,10 @@ export const proSchema = z.object({
   features: z.object({
     computerUse: z.boolean().default(true),
     chatGateway: z.boolean().default(true),
+    /** team_orchestrate mode:'max'（多视角 planner fanout）。 */
+    teamMax: z.boolean().default(true),
+    /** council_convene rounds≥2（反驳/辩论轮）。 */
+    councilMultiRound: z.boolean().default(true),
   }).default({}),
 }).default({})
 

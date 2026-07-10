@@ -220,12 +220,16 @@ describe('config permissions schema', () => {
 })
 
 describe('pro schema', () => {
-  it('DEFAULT_CONFIG keeps Pro disabled and features off for free tier', () => {
+  it('DEFAULT_CONFIG keeps Pro disabled for the free tier, with features ready once Pro activates', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 
+    // 双层模式：免费层的保护是 enabled=false（isProEnabled gate 一票否决）。
+    // features 默认 true —— Pro 激活（许可证/RIVET_PRO）即全部可用，无需逐项手开。
     assert.equal(parsed.pro.enabled, false)
-    assert.equal(parsed.pro.features.computerUse, false)
-    assert.equal(parsed.pro.features.chatGateway, false)
+    assert.equal(parsed.pro.features.computerUse, true)
+    assert.equal(parsed.pro.features.chatGateway, true)
+    assert.equal(parsed.pro.features.teamMax, true)
+    assert.equal(parsed.pro.features.councilMultiRound, true)
   })
 
   it('schema defaults Pro features to enabled when Pro is active', () => {

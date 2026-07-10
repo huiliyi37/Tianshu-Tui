@@ -7,10 +7,12 @@ import { resolveProLicense, isProEnabled, isProFeatureEnabled } from '../pro-lic
 import { DEFAULT_CONFIG } from '../default.js'
 import type { Config } from '../schema.js'
 
+const ALL_FEATURES_ON = { computerUse: true, chatGateway: true, teamMax: true, councilMultiRound: true }
+
 function baseConfig(): Config {
   // Start from the real default and only mutate `pro` for the test.
   const cfg = structuredClone(DEFAULT_CONFIG) as Config
-  cfg.pro = { enabled: false, features: { computerUse: true, chatGateway: true } }
+  cfg.pro = { enabled: false, features: { ...ALL_FEATURES_ON } }
   return cfg
 }
 
@@ -31,7 +33,7 @@ describe('resolveProLicense', () => {
 
   it('returns enabled=true when config.pro.enabled is true', () => {
     const config = baseConfig()
-    config.pro = { enabled: true, licenseKey: 'key-from-config', features: { computerUse: true, chatGateway: true } }
+    config.pro = { enabled: true, licenseKey: 'key-from-config', features: { ...ALL_FEATURES_ON } }
     const info = resolveProLicense(config, tmpLicense)
     assert.equal(info.enabled, true)
     assert.equal(info.source, 'config')
@@ -70,7 +72,7 @@ describe('resolveProLicense', () => {
     process.env.RIVET_PRO = '1'
     writeFileSync(tmpLicense, 'file-key')
     const config = baseConfig()
-    config.pro = { enabled: true, licenseKey: 'config-key', features: { computerUse: true, chatGateway: true } }
+    config.pro = { enabled: true, licenseKey: 'config-key', features: { ...ALL_FEATURES_ON } }
     const info = resolveProLicense(config, tmpLicense)
     assert.equal(info.source, 'config')
     assert.equal(info.licenseKey, 'config-key')
@@ -87,25 +89,47 @@ describe('isProFeatureEnabled', () => {
 
   it('returns false when Pro is disabled', () => {
     const config = baseConfig()
-    config.pro = { enabled: false, features: { computerUse: true, chatGateway: true } }
+    config.pro = { enabled: false, features: { ...ALL_FEATURES_ON } }
     assert.equal(isProFeatureEnabled(config, 'computerUse'), false)
   })
 
   it('returns true when Pro is enabled and feature defaults to true', () => {
     const config = baseConfig()
-    config.pro = { enabled: true, features: { computerUse: true, chatGateway: true } }
+    config.pro = { enabled: true, features: { ...ALL_FEATURES_ON } }
     assert.equal(isProFeatureEnabled(config, 'computerUse'), true)
     assert.equal(isProFeatureEnabled(config, 'chatGateway'), true)
   })
 
   it('returns false when Pro is enabled but feature is explicitly disabled', () => {
     const config = baseConfig()
-    config.pro = { enabled: true, features: { computerUse: false, chatGateway: false } }
+    config.pro = { enabled: true, features: { ...ALL_FEATURES_ON, computerUse: false, chatGateway: false } }
     assert.equal(isProFeatureEnabled(config, 'computerUse'), false)
   })
 
   it('isProEnabled reflects RIVET_PRO=1', () => {
     process.env.RIVET_PRO = '1'
     assert.equal(isProEnabled(baseConfig()), true)
+  })
+
+  // ── 双层模式新增 Pro 功能位 ──
+
+  it('teamMax / councilMultiRound default to enabled under an active Pro license', () => {
+    const config = baseConfig()
+    config.pro = { enabled: true, features: { ...ALL_FEATURES_ON } }
+    assert.equal(isProFeatureEnabled(config, 'teamMax'), true)
+    assert.equal(isProFeatureEnabled(config, 'councilMultiRound'), true)
+  })
+
+  it('teamMax / councilMultiRound are off without Pro', () => {
+    const config = baseConfig()
+    assert.equal(isProFeatureEnabled(config, 'teamMax'), false)
+    assert.equal(isProFeatureEnabled(config, 'councilMultiRound'), false)
+  })
+
+  it('RIVET_PRO=1（桌面端 Rust 注入通道）启用全部新功能位', () => {
+    process.env.RIVET_PRO = '1'
+    const config = baseConfig()
+    assert.equal(isProFeatureEnabled(config, 'teamMax'), true)
+    assert.equal(isProFeatureEnabled(config, 'councilMultiRound'), true)
   })
 })
