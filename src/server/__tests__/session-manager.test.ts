@@ -1038,3 +1038,118 @@ test('C2: 倒计时窗口内用户发新 prompt → 定时器清除，continue �
   await new Promise((r) => setTimeout(r, 50))
   assert.deepEqual(a.prompts, ['go', '用户新指令'], '用户 prompt 抢占，自动 continue 不得追发')
 })
+
+// ── Wave 2: delta 合并缓冲 ────────────────────────────────────────────────────
+
+test('delta coalescing: first delta lands immediately, burst merges into one windowed event', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  cb.onTextDelta('a')          // first of the run → immediate
+  cb.onTextDelta('b')
+  cb.onTextDelta('c')
+  cb.onTextDelta('d')
+
+  // Live listeners must see only the immediate first event so far.
+  const before = manager
+    .getSession(s.id) && manager['sessions'].get(s.id)!.events.filter((e) => e.type === 'text_delta')
+  assert.equal(before!.length, 1)
+  assert.equal(before![0]!.data.text, 'a')
+
+  await new Promise((r) => setTimeout(r, 60)) // > DELTA_COALESCE_MS
+  const after = manager['sessions'].get(s.id)!.events.filter((e) => e.type === 'text_delta')
+  assert.equal(after.length, 2, 'burst coalesces into one windowed event')
+  assert.equal(after[1]!.data.text, 'bcd')
+})
+
+test('delta coalescing: non-delta event flushes the buffer first (order preserved)', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  cb.onTextDelta('x')
+  cb.onTextDelta('y')          // buffered
+  cb.onToolUse('t1', 'bash', { command: 'ls' })
+
+  const evs = manager['sessions'].get(s.id)!.events
+  const types = evs.map((e) => e.type)
+  const yIdx = evs.findIndex((e) => e.type === 'text_delta' && e.data.text === 'y')
+  const toolIdx = types.indexOf('tool_use')
+  assert.ok(yIdx !== -1, 'buffered delta must be flushed by the tool_use')
+  assert.ok(yIdx < toolIdx, 'flushed delta must precede the tool_use event')
+})
+
+test('delta coalescing: abort drains the buffer before the status event', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  cb.onTextDelta('head')
+  cb.onTextDelta(' tail')      // buffered
+  manager.abort(s.id)
+
+  const evs = manager['sessions'].get(s.id)!.events
+  const tailIdx = evs.findIndex((e) => e.type === 'text_delta' && e.data.text === ' tail')
+  const statusIdx = evs.findIndex((e) => e.type === 'status' && e.data.status === 'aborted')
+  assert.ok(tailIdx !== -1, 'buffered tail must not be lost on abort')
+  assert.ok(tailIdx < statusIdx, 'tail must land before the aborted status')
+})
+
+test('delta coalescing: type switch (thinking↔text) flushes and keeps order', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  cb.onThinkingDelta('think1')  // immediate (first of thinking run)
+  cb.onThinkingDelta('think2')  // buffered
+  cb.onTextDelta('answer')      // type switch → flush think2, then immediate
+
+  const evs = manager['sessions'].get(s.id)!.events.filter(
+    (e) => e.type === 'text_delta' || e.type === 'thinking_delta',
+  )
+  assert.deepEqual(
+    evs.map((e) => [e.type, e.data.text]),
+    [['thinking_delta', 'think1'], ['thinking_delta', 'think2'], ['text_delta', 'answer']],
+  )
+})
+
+test('delta coalescing: oversized buffer flushes at the char cap without waiting', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  cb.onTextDelta('first')                 // immediate
+  cb.onTextDelta('x'.repeat(3000))        // exceeds cap → immediate flush
+
+  const evs = manager['sessions'].get(s.id)!.events.filter((e) => e.type === 'text_delta')
+  assert.equal(evs.length, 2)
+  assert.equal((evs[1]!.data.text as string).length, 3000)
+})
+
+test('delta coalescing: getEvents drains the window and seq stays monotonic', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  cb.onTextDelta('one ')
+  cb.onTextDelta('two')        // buffered — poll must still see it
+  const all = manager.getEvents(s.id, 0)!
+  const texts = all.events.filter((e) => e.type === 'text_delta').map((e) => e.data.text)
+  assert.deepEqual(texts, ['one ', 'two'])
+  const seqs = all.events.map((e) => e.seq)
+  assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b))
+})
+
+test('delta coalescing: shutdownAll drains pending buffers', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  cb.onTextDelta('kept')
+  cb.onTextDelta(' also kept')  // buffered
+  manager.shutdownAll()
+
+  const evs = manager['sessions'].get(s.id)!.events.filter((e) => e.type === 'text_delta')
+  assert.deepEqual(evs.map((e) => e.data.text), ['kept', ' also kept'])
+})

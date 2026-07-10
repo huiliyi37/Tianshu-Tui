@@ -518,6 +518,12 @@ interface InternalSession {
   unattended?: boolean
   /** 无人值守中止原因（首个被拦截的审批），随 done/summary 上报。 */
   unattendedHaltReason?: string
+  /** 流式 delta 合并缓冲（Wave 2）——见 bufferDelta()。 */
+  deltaBuf?: { type: 'text_delta' | 'thinking_delta'; text: string }
+  /** delta 合并窗口定时器。 */
+  deltaTimer?: NodeJS.Timeout
+  /** 当前 delta run 是否已发出首个事件（首 token 立即落，后续走窗口）。 */
+  deltaRunActive?: boolean
 }
 
 const REDACTED = '[REDACTED]'
@@ -537,6 +543,15 @@ const MAX_USER_BACKGROUND_WORKERS = 4
 /** plan_draft 事件节流窗口——agent 增量写草稿可能一轮多次落盘，事件只是
  *  失效信号（桌面收到后重拉正文），1s 粒度足够「直播感」。 */
 const PLAN_DRAFT_THROTTLE_MS = 1_000
+
+/** Delta 合并窗口（Wave 2）——provider 逐 token 回调，每个 token 独立
+ *  JSON.stringify + SSE write 太贵。窗口内的连续同类型 delta 合并成一条
+ *  规范事件（单 seq，持久化/重放语义不变）。40ms ≈ 前端 10Hz 渲染节流的
+ *  1/2.5，肉眼无感。 */
+const DELTA_COALESCE_MS = 40
+
+/** 合并缓冲上限——超过即刻 flush，避免慢消费者场景下单事件过大。 */
+const DELTA_COALESCE_MAX_CHARS = 2_048
 
 /** Result of a user-dispatch request — lets the route map a precise status code. */
 export type DelegateResult =
@@ -1883,6 +1898,8 @@ export class RuntimeSessionManager {
     if (!s) return undefined
     // Reconnect/replay entry point — lazy-load the log from disk on first open.
     this.ensureEvents(s)
+    // Poll/replay must see the freshest text — drain the delta window first.
+    this.flushDeltaBuf(s)
     const events = s.events.filter((e) => e.seq > since)
     return { events, lastSeq: s.seq }
   }
@@ -1932,6 +1949,8 @@ export class RuntimeSessionManager {
     for (const s of this.sessions.values()) {
       try { s.agent?.shutdown?.() } catch { /* best-effort */ }
       try { s.jobs?.killAll() } catch { /* best-effort */ }
+      // Drain any coalescing delta window so the tail is never lost on exit.
+      try { this.flushDeltaBuf(s) } catch { /* best-effort */ }
     }
     // Flush any buffered events to disk before exit.
     this.persistence?.flushSync?.()
@@ -2477,8 +2496,8 @@ export class RuntimeSessionManager {
 
   private buildCallbacks(session: InternalSession): AgentCallbacks {
     return {
-      onTextDelta: (text) => this.append(session, 'text_delta', { text }),
-      onThinkingDelta: (thinking) => this.append(session, 'thinking_delta', { text: thinking }),
+      onTextDelta: (text) => this.bufferDelta(session, 'text_delta', text),
+      onThinkingDelta: (thinking) => this.bufferDelta(session, 'thinking_delta', thinking),
       onToolUse: (toolId, name, input) => {
         this.append(session, 'tool_use', { id: toolId, name, input: redactValue(input) })
         // N3: surface delegation as a tree node, derived from the tool stream
@@ -2827,7 +2846,64 @@ export class RuntimeSessionManager {
     }
   }
 
+  /**
+   * Delta 合并（Wave 2）：provider 逐 token 回调 → 窗口内合并成一条规范事件。
+   * 首个 delta（每个 run 起始 / 非 delta 事件之后）立即落，保首 token 延迟；
+   * 后续进入 40ms / 2KB 窗口。类型切换（text↔thinking）先 flush 保序。
+   * 合并后的事件是唯一事件——单 seq、同一条持久化 + fan-out 路径，重放语义不变。
+   */
+  private bufferDelta(session: InternalSession, type: 'text_delta' | 'thinking_delta', text: string): void {
+    if (!text) return
+    if (session.deltaBuf && session.deltaBuf.type !== type) {
+      this.flushDeltaBuf(session)
+      session.deltaRunActive = false
+    }
+    if (!session.deltaRunActive) {
+      session.deltaRunActive = true
+      this.appendRaw(session, type, { text })
+      return
+    }
+    if (session.deltaBuf) session.deltaBuf.text += text
+    else session.deltaBuf = { type, text }
+    if (session.deltaBuf.text.length >= DELTA_COALESCE_MAX_CHARS) {
+      this.flushDeltaBuf(session)
+      return
+    }
+    if (!session.deltaTimer) {
+      session.deltaTimer = setTimeout(() => {
+        session.deltaTimer = undefined
+        this.flushDeltaBuf(session)
+      }, DELTA_COALESCE_MS)
+      session.deltaTimer.unref?.()
+    }
+  }
+
+  /** 把残留的 delta 缓冲落成事件。幂等；空缓冲为 no-op。 */
+  private flushDeltaBuf(session: InternalSession): void {
+    if (session.deltaTimer) {
+      clearTimeout(session.deltaTimer)
+      session.deltaTimer = undefined
+    }
+    const buf = session.deltaBuf
+    if (!buf) return
+    session.deltaBuf = undefined
+    this.appendRaw(session, buf.type, { text: buf.text })
+  }
+
+  /**
+   * 统一事件入口。非 delta 事件先冲掉 delta 缓冲再落自身，保证事件顺序——
+   * abort（收尾 append status，L abort()）、turn 完成、错误路径全部自动覆盖，
+   * 无需在各中断触发点单独挂钩子。
+   */
   private append(session: InternalSession, type: SessionEventType, data: Record<string, unknown>): void {
+    if (type !== 'text_delta' && type !== 'thinking_delta') {
+      this.flushDeltaBuf(session)
+      session.deltaRunActive = false
+    }
+    this.appendRaw(session, type, data)
+  }
+
+  private appendRaw(session: InternalSession, type: SessionEventType, data: Record<string, unknown>): void {
     const event: SessionEvent = { seq: ++session.seq, ts: this.now(), type, data }
     session.events.push(event)
     if (session.events.length > this.maxEvents) {
