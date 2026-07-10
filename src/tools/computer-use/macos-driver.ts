@@ -71,6 +71,10 @@ export interface SnapshotResult {
   /** Downsampled screenshot (max 1440px, sips) for vision-model attachment;
    *  null when capture failed or downsampling did not help. */
   visionPng: Buffer | null
+  /** True when the walk stopped at its budget/node cap — the tree is a
+   *  partial view (refs remain valid). Callers should avoid diffing a
+   *  partial tree against a full baseline. */
+  truncated?: boolean
 }
 
 export interface PermissionStatus {
@@ -121,8 +125,37 @@ const OSASCRIPT_TIMEOUT_MS = 15_000
 const SNAPSHOT_TIMEOUT_MS = 45_000
 /** Bound the accessibility walk so a deep app tree can't blow up the result. */
 const MAX_TREE_NODES = 400
+/**
+ * In-script wall-clock budget for the tree walk. Non-browser Electron apps
+ * (QQ NT, WeChat…) have deep single-child group chains where per-parent
+ * batching barely helps — a full QQ walk measured ~54s, past every timeout.
+ * The script self-terminates at the deadline and returns the PARTIAL tree
+ * with `truncated: true` instead of dying at the osascript kill with nothing.
+ */
+const WALK_BUDGET_MS = 25_000
+/**
+ * A first walk returning fewer rows than this right after AX enablement is
+ * treated as an Electron skeleton tree (verified on QQ: 17 nodes at t=0,
+ * 526 nodes ~6s after AXManualAccessibility is set — the renderer populates
+ * the AX tree asynchronously). snapshot() waits and re-walks once.
+ */
+const SPARSE_TREE_RETRY_THRESHOLD = 25
+/** Settle delay before the sparse-tree re-walk (ms). */
+const SPARSE_TREE_RETRY_DELAY_MS = 2_500
 /** Max dimension for the vision-model screenshot copy (px). */
 const VISION_MAX_DIMENSION = 1440
+
+/**
+ * Whether `type` must route through clipboard paste to be reliable: any
+ * character outside printable ASCII (CJK, emoji, accents…) goes through the
+ * IME on `System Events keystroke`, where an active Chinese input method
+ * intercepts the keystrokes into a composition buffer instead of the field.
+ * Clipboard paste (Cmd+V) bypasses the IME entirely. Exported for tests.
+ */
+export function needsClipboardInput(text: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  return /[^\x20-\x7E\t\n\r]/.test(text)
+}
 
 function runOsascript(args: string[], timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -328,6 +361,25 @@ async function windowCenter(app: string, jxa: JxaRunner): Promise<{ x: number; y
   }
 }
 
+/**
+ * Clipboard-paste input path, shared by pasteText and non-ASCII type().
+ * Overwrites the clipboard (documented tool behavior for paste_text).
+ */
+async function pasteViaClipboard(app: string, text: string, jxa: JxaRunner): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = execFile('pbcopy', [], { timeout: 5_000 }, (err) => (err ? reject(err) : resolve()))
+    child.stdin?.end(text)
+  })
+  const script = `
+    const se = Application('System Events');
+    se.processes.byName(${jxaString(app)}).frontmost = true;
+    delay(0.1);
+    se.keystroke('v', { using: ['command down'] });
+    'ok';
+  `
+  await jxa(script)
+}
+
 /** Downsample a PNG to VISION_MAX_DIMENSION via macOS-bundled sips. */
 async function downsampleForVision(srcFile: string): Promise<Buffer | null> {
   const dest = join(tmpdir(), `rivet-cu-vision-${randomUUID()}.png`)
@@ -423,15 +475,27 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
       // same tree to seconds. Two pruning cuts on top: NO_DESCEND roles keep
       // the node but skip the subtree (ruler ticks / scrollbar internals are
       // noise), and container roles discard the value (uninformative).
-      const script = `
+      //
+      // The walk also carries an IN-SCRIPT deadline (WALK_BUDGET_MS): deep
+      // Electron trees (QQ NT ≈ 526 nodes of single-child group chains) blow
+      // past any external timeout, and an osascript kill returns NOTHING.
+      // Self-terminating returns the partial tree with truncated=true — a
+      // partial view with valid refs beats total blindness.
+      const walkScript = `
         const se = Application('System Events');
         const proc = se.processes.byName(${jxaString(app)});
         ${AX_ENABLE}
         const MAX = ${MAX_TREE_NODES};
+        const DEADLINE = Date.now() + ${WALK_BUDGET_MS};
         const NO_DESCEND = { AXRuler: 1, AXScrollBar: 1, AXValueIndicator: 1, AXMenuBar: 1 };
         const SKIP_VALUE = { AXWindow: 1, AXGroup: 1, AXScrollArea: 1, AXSplitGroup: 1, AXToolbar: 1, AXList: 1, AXOutline: 1, AXTable: 1, AXSheet: 1, AXDrawer: 1, AXWebArea: 1 };
         const rows = [];
         let ref = 0;
+        let truncated = false;
+        function budgetLeft() {
+          if (rows.length >= MAX || Date.now() > DEADLINE) { truncated = true; return false; }
+          return true;
+        }
         function batch(fn) { try { const v = fn(); return Array.isArray(v) ? v : null; } catch (e) { return null; } }
         function push(role, title, value, pos, depth, path) {
           if (!(role || title || value)) return;
@@ -439,7 +503,7 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
           rows.push({ ref, depth, role, title, value, pos, path });
         }
         function visitChildren(el, depth, basePath) {
-          if (rows.length >= MAX) return;
+          if (!budgetLeft()) return;
           let kids = [];
           try { kids = el.uiElements(); } catch (e) {}
           if (kids.length === 0) return;
@@ -449,7 +513,7 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
           const values = batch(() => el.uiElements.value());
           const positions = batch(() => el.uiElements.position());
           for (let i = 0; i < kids.length; i++) {
-            if (rows.length >= MAX) break;
+            if (!budgetLeft()) break;
             const role = (roles && roles[i]) || '';
             const title = (titles && titles[i]) || (descs && descs[i]) || '';
             let value = '';
@@ -467,7 +531,7 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
         let windows = [];
         try { windows = proc.windows(); } catch (e) {}
         for (let i = 0; i < windows.length; i++) {
-          if (rows.length >= MAX) break;
+          if (!budgetLeft()) break;
           const el = windows[i];
           let role = '', title = '', pos = null;
           try { role = el.role(); } catch (e) {}
@@ -478,18 +542,37 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
         }
         let menus = [];
         try { menus = proc.menuBars[0].menuBarItems.name(); } catch (e) {}
-        JSON.stringify({ rows, menus });
+        JSON.stringify({ rows, menus, truncated });
       `
-      const raw = (await jxa(script, SNAPSHOT_TIMEOUT_MS)).trim()
-      let rows: Array<{ ref: number; depth: number; role: string; title: string; value: string; pos: { x: number; y: number } | null; path: number[] }> = []
-      let menus: string[] = []
-      try {
-        const parsed = JSON.parse(raw) as { rows?: typeof rows; menus?: string[] }
-        rows = Array.isArray(parsed.rows) ? parsed.rows : []
-        menus = Array.isArray(parsed.menus) ? parsed.menus : []
-      } catch {
-        rows = []
+      type WalkRow = { ref: number; depth: number; role: string; title: string; value: string; pos: { x: number; y: number } | null; path: number[] }
+      const walkTree = async (): Promise<{ rows: WalkRow[]; menus: string[]; truncated: boolean }> => {
+        const raw = (await jxa(walkScript, SNAPSHOT_TIMEOUT_MS)).trim()
+        try {
+          const parsed = JSON.parse(raw) as { rows?: WalkRow[]; menus?: string[]; truncated?: boolean }
+          return {
+            rows: Array.isArray(parsed.rows) ? parsed.rows : [],
+            menus: Array.isArray(parsed.menus) ? parsed.menus : [],
+            truncated: parsed.truncated === true,
+          }
+        } catch {
+          return { rows: [], menus: [], truncated: false }
+        }
       }
+
+      let walk = await walkTree()
+      // Electron skeleton-tree warmup: renderers populate the AX tree
+      // ASYNCHRONOUSLY after AXManualAccessibility is first set (QQ: 17 nodes
+      // at t=0 → 526 nodes a few seconds later). A tiny non-truncated first
+      // walk right after enablement is indistinguishable from a genuinely
+      // tiny UI, so wait once and re-walk — keep whichever saw more. Real
+      // small UIs pay one ~2.5s delay + a cheap re-walk; blind-by-default
+      // Electron apps become visible.
+      if (!walk.truncated && walk.rows.length < SPARSE_TREE_RETRY_THRESHOLD) {
+        await new Promise((r) => setTimeout(r, SPARSE_TREE_RETRY_DELAY_MS))
+        const second = await walkTree()
+        if (second.rows.length > walk.rows.length) walk = second
+      }
+      const { rows, menus, truncated } = walk
       // Localized menu names up front so menu_select works first try — Chinese
       // systems have 文件, not File. Stable per app: doesn't churn the
       // feedback diff or the snapshot dedup.
@@ -503,7 +586,10 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
           return `${indent}[${r.ref}] ${r.role || 'element'}${label}${val}${at}`
         })
         .join('\n')
-      const tree = body ? `${menuLine}${body}` : menuLine.trimEnd()
+      const truncNote = truncated
+        ? '\n(partial tree: walk budget exhausted — refs above are valid; use find(query)/wait_for for content deeper in the UI)'
+        : ''
+      const tree = body ? `${menuLine}${body}${truncNote}` : menuLine.trimEnd()
       const refs: SnapshotRef[] = rows.map((r) => ({
         ref: r.ref,
         path: r.path,
@@ -519,6 +605,7 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
         refs,
         screenshotPng: shot.png,
         visionPng: shot.visionPng,
+        truncated,
       }
     },
 
@@ -621,6 +708,15 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
     },
 
     async type(app: string, text: string): Promise<void> {
+      // Non-ASCII text (CJK/emoji/accents) auto-routes through clipboard
+      // paste: `keystroke` feeds an active IME's composition buffer instead
+      // of the field (Chinese IME turns "你好" into pinyin candidates), while
+      // Cmd+V bypasses the IME entirely. ASCII keeps the keystroke path
+      // (no clipboard side effect).
+      if (needsClipboardInput(text)) {
+        await pasteViaClipboard(app, text, jxa)
+        return
+      }
       const script = `
         const se = Application('System Events');
         se.processes.byName(${jxaString(app)}).frontmost = true;
@@ -748,18 +844,7 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
     },
 
     async pasteText(app: string, text: string): Promise<void> {
-      await new Promise<void>((resolve, reject) => {
-        const child = execFile('pbcopy', [], { timeout: 5_000 }, (err) => (err ? reject(err) : resolve()))
-        child.stdin?.end(text)
-      })
-      const script = `
-        const se = Application('System Events');
-        se.processes.byName(${jxaString(app)}).frontmost = true;
-        delay(0.1);
-        se.keystroke('v', { using: ['command down'] });
-        'ok';
-      `
-      await jxa(script)
+      await pasteViaClipboard(app, text, jxa)
     },
 
     async checkPermissions(): Promise<PermissionStatus> {

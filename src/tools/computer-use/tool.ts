@@ -520,14 +520,14 @@ Every action on an app requires human approval unless that app is already grante
 Actions:
 - check_permissions: report system capability/permission status (no approval).
 - list_apps: list visible apps.
-- snapshot(app): return the app's numbered accessibility tree + save a screenshot artifact. If the UI has not changed since the last snapshot, returns a short "unchanged" note instead of repeating the tree.
+- snapshot(app): return the app's numbered accessibility tree + save a screenshot artifact. If the UI has not changed since the last snapshot, returns a short "unchanged" note instead of repeating the tree. Electron apps (QQ, WeChat, VS Code…) populate their tree a few seconds after the first snapshot — the tool warms up and retries automatically; a huge tree may come back marked "partial" (refs are still valid; use find/wait_for for deeper content). NEVER conclude an app is invisible from one sparse snapshot — snapshot again or use find first.
 - find(app, query): snapshot but return ONLY tree lines matching the query (role/title/value, case-insensitive) with their ancestor chain. Preferred over snapshot for large UIs (browsers) — same refs, far less output.
 - wait_for(app, text, gone?, timeout_ms?): poll the UI until a tree line containing "text" appears (or disappears with gone:true). Returns the matching lines with clickable refs. Use after actions that trigger loads/animations instead of blind wait+snapshot loops.
 - click(app, ref|x,y): left-click a snapshot element ref (preferred) or coordinates.
 - double_click(app, ref|x,y) / right_click(app, ref|x,y): double / context click.
 - scroll(app, direction, amount?, ref|x,y?): scroll the view under the target (default: window center).
 - drag(app, from_ref|from_x+from_y, to_ref|to_x+to_y): press-drag-release.
-- type(app, text): type text into the focused field (short text; use paste_text for long text, set_value to write a specific field).
+- type(app, text): type text into the focused field (short ASCII text; use paste_text for long text, set_value to write a specific field). Non-ASCII text (Chinese/emoji) automatically routes through clipboard paste — immune to the active input method (IME), but overwrites the clipboard.
 - set_value(app, ref, text): write a value directly into a text-like control (text field, search box) — no focus juggling. Errors if the control doesn't accept value writes; fall back to click + type/paste_text.
 - key(app, combo): send a key combo like "cmd+s" or "return" (on Windows, cmd maps to Ctrl).
 - wait(duration_ms): pause up to 5000ms for animations/loads (no approval). Prefer wait_for when you know what you're waiting for.
@@ -853,7 +853,14 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
 
     isConcurrencySafe: () => false,
     isEnabled: () => enabled,
-    timeoutMs: () => 30_000,
+    // 感知类动作放宽超时：Electron 树预热重试 + 脚本内 25s 走树预算意味着
+    // 一次 snapshot 最坏 ~2s(首拍)+2.5s(等待)+25s(重走)+2s(截图)；find/wait_for
+    // 复用同一走树路径。变更类动作的后置反馈同样要走一次 25s 预算的树采集
+    // （动作 ~1s + 反馈 ~25s 会贴死旧的 30s），给 60s 余量。
+    timeoutMs: (params?: ToolCallParams) => {
+      const action = params?.input?.action as ComputerUseAction | undefined
+      return action === 'snapshot' || action === 'find' || action === 'wait_for' ? 90_000 : 60_000
+    },
   }
 }
 
