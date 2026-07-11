@@ -68,11 +68,14 @@ export class PressureMonitor {
 
   /**
    * Record CVM-injected tokens for overhead tracking.
-   * Call this each turn with the estimated token count of CVM injections
-   * (cognitive mirror, uncertainty hints, sycophancy traps, etc.).
    *
-   * Overhead accumulates across the session. If it exceeds thresholds,
-   * the next check() will signal shouldThrottleCvm.
+   * W6（2026-07-11）计费口径 = 增量字节：appendixDelta 下字节恒定块入场
+   * 付一次、稳态零重发，调用方（turn-step-producer）只在块内容变化时计费。
+   * 旧口径每轮全额计费高估 ~10x，长会话必然越过阈值、误熄镜面。
+   *
+   * Overhead accumulates until compact — history rewrite drops the injected
+   * blocks from context, so compaction-controller calls resetCvmOverhead().
+   * If the ratio exceeds thresholds, the next check() signals shouldThrottleCvm.
    */
   recordCvmInjection(estimatedTokens: number): void {
     this.cvmTokenAccumulator += estimatedTokens
@@ -87,6 +90,10 @@ export class PressureMonitor {
     return this.contextWindow > 0
       ? this.cvmTokenAccumulator / this.contextWindow
       : 0
+  }
+
+  isCvmThrottling(): boolean {
+    return this.getCvmOverheadRatio() >= CVM_OVERHEAD_THRESHOLD
   }
 
   isCvmThrottlingCeiling(): boolean {

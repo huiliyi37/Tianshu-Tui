@@ -63,6 +63,38 @@ export interface ConvergenceInput {
      *  nLow/nMid/nHigh turn thresholds by 1.5×. */
     activePlan: boolean
   }
+  /** W3：会话活动模式（classifyActivityMode 的结果，由调用方传入）。
+   *  diagnostic 时收敛文案分流为"先核实断言再收束"。 */
+  activityMode?: ActivityMode
+}
+
+/** W3（incident 20b9714e）：会话活动模式。diagnostic = 近窗口以只读工具为主
+ *  且零改动（日志排查/根因分析类）。此类会话被催收敛时的正确处方是
+ *  "先核实断言再收束"，而不是"输出结论"——后者直接诱发脑补。 */
+export type ActivityMode = 'diagnostic' | 'build'
+
+/** 诊断态判定窗口（近 N 条工具调用） */
+const ACTIVITY_MODE_WINDOW = 8
+/** 诊断态只读占比门槛 */
+const DIAGNOSTIC_READONLY_RATIO = 0.8
+
+/**
+ * W3：从工具轨迹 + 改动数分类会话活动模式。
+ *
+ * diagnostic 判据：窗口内样本 ≥4、只读（非 PRODUCTIVE_TOOLS）占比 ≥0.8、
+ * filesModified = 0。改动一出现即回到 build——改动即应验证，此时催收敛
+ * 走既有的验证锚点文案，不需要诊断分流。
+ */
+export function classifyActivityMode(
+  recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool'>>,
+  filesModifiedCount: number,
+  window = ACTIVITY_MODE_WINDOW,
+): ActivityMode {
+  if (filesModifiedCount > 0) return 'build'
+  const slice = recentToolHistory.slice(-window)
+  if (slice.length < 4) return 'build'
+  const readOnly = slice.filter(h => !PRODUCTIVE_TOOLS.has(h.tool)).length
+  return readOnly / slice.length >= DIAGNOSTIC_READONLY_RATIO ? 'diagnostic' : 'build'
 }
 
 export interface ConvergenceResult {
@@ -655,6 +687,7 @@ function buildInjectedMessage(
   noToolTurnCount?: number,
   productiveStagnation?: boolean,
   repeatCount?: number,
+  activityMode?: ActivityMode,
 ): string {
   const lines: string[] = []
 
@@ -676,6 +709,17 @@ function buildInjectedMessage(
   // (so noToolTurnCount stays 0), but never edits/tests/commits. This catches
   // the alternating read→analyze→read→analyze loop.
   if (productiveStagnation) {
+    // W3 诊断态分流（incident 20b9714e）：排查/根因分析会话被催"输出结论"
+    // 直接诱发脑补——正确处方是先核实将写进结论的断言，再收束。
+    if (activityMode === 'diagnostic') {
+      lines.push('**天枢-感知：最近多轮全部是读取/搜索操作。如果信息已足够，请核实后收束。**')
+      lines.push('')
+      lines.push('收束前先做断言核实：')
+      lines.push('- 把你准备写进结论的每条关键断言，用工具核实一遍（ls/grep/read 实际文件、跑实际命令）——不要凭已读片段推断未读内容')
+      lines.push('- 核实不了的断言，在结论里显式标注"未核实"，不要写成事实')
+      lines.push('- 核实完成后输出结论，交给用户判断——不要为了"做点什么"而去改代码')
+      return lines.join('\n')
+    }
     lines.push('**天枢-感知：最近多轮全部是读取/搜索操作，没有任何编辑、测试或提交。**')
     lines.push('')
     lines.push('信息可能已足够，请收敛：')
@@ -746,6 +790,19 @@ function buildInjectedMessage(
     lines.push('- 对已完成的改动跑一次 typecheck / related_tests，通过后再铺开下一批')
     lines.push('- 验证失败则当场修复——不带伤推进')
     lines.push('- 若剩余工作已明确，列出剩余清单，按清单收敛而非按惯性续写')
+    return lines.join('\n')
+  }
+
+  // W3 诊断态分流：通用变体的"换个角度/中断探索"对排查会话同样是错误处方
+  // ——把收束动作定义为断言核实，而非改道或强行下结论。
+  if (activityMode === 'diagnostic') {
+    lines.push(level === 2
+      ? '**天璇-感知：排查进度信号偏弱。请核实已有断言后收束，而不是继续铺开新的读取。**'
+      : '**天枢-感知：排查未能在预期轮次内收敛。请立即核实关键断言并输出带证据的结论。**')
+    lines.push('')
+    lines.push('- 把准备写进结论的关键断言用工具核实（ls/grep/read 实际文件），核实完再收束')
+    lines.push('- 没有工具证据支撑的推断必须标注"未核实"，不要写成事实')
+    lines.push('- 会话自身状态（上下文占用/缓存命中/信号台账）可用 session_vitals 工具取证，不要凭感觉描述')
     return lines.join('\n')
   }
 
@@ -957,7 +1014,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   const shouldForceSplit = level >= 3 && !noToolForceAbort
   const shouldKick = level >= 2
   const injectedMessage = (level >= 2)
-    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount, productiveStagnation, input.repeatCount)
+    ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount, productiveStagnation, input.repeatCount, input.activityMode)
     : null
 
   return {

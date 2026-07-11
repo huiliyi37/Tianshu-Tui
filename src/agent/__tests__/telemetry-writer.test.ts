@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createTelemetryWriter } from '../telemetry-writer.js'
+import { createTelemetryWriter, VITALS_LITE_KIND } from '../telemetry-writer.js'
 import type { PerceptionTelemetrySnapshot } from '../perception.js'
 import { buildTelemetrySnapshot } from '../perception.js'
 
@@ -96,5 +96,72 @@ describe('createTelemetryWriter', () => {
     // Write to an invalid path under /dev/null-like location
     const writer = createTelemetryWriter('/dev/null')
     assert.doesNotThrow(() => writer.write(makeSnapshot()))
+  })
+})
+
+// ── W5 (incident 20b9714e): lite vitals are on by default ──
+// Full telemetry stays opt-in, but the per-turn vitals-lite line writes without
+// RIVET_DEBUG_TELEMETRY — post-incident analysis needs at least this data floor.
+describe('createTelemetryWriter — lite mode (W5)', () => {
+  let cwd: string
+  let prevDebug: string | undefined
+  let prevLite: string | undefined
+
+  before(() => {
+    prevDebug = process.env['RIVET_DEBUG_TELEMETRY']
+    prevLite = process.env['RIVET_TELEMETRY_LITE']
+    delete process.env['RIVET_DEBUG_TELEMETRY']
+    delete process.env['RIVET_TELEMETRY_LITE']
+    cwd = mkdtempSync(join(tmpdir(), 'rivet-telemetry-lite-'))
+  })
+
+  after(() => {
+    if (prevDebug === undefined) delete process.env['RIVET_DEBUG_TELEMETRY']
+    else process.env['RIVET_DEBUG_TELEMETRY'] = prevDebug
+    if (prevLite === undefined) delete process.env['RIVET_TELEMETRY_LITE']
+    else process.env['RIVET_TELEMETRY_LITE'] = prevLite
+    rmSync(cwd, { recursive: true, force: true })
+  })
+
+  it('writes vitals-lite lines without RIVET_DEBUG_TELEMETRY', async () => {
+    const writer = createTelemetryWriter(cwd)
+    writer.write({ kind: VITALS_LITE_KIND, turn: 3, throttled: false })
+    await writer.flush()
+
+    const raw = readFileSync(join(cwd, '.rivet', 'sensorium.jsonl'), 'utf-8')
+    const parsed = JSON.parse(raw.trim())
+    assert.equal(parsed.kind, VITALS_LITE_KIND)
+    assert.equal(parsed.turn, 3)
+  })
+
+  it('filters out full snapshots in lite mode', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-telemetry-lite2-'))
+    try {
+      const writer = createTelemetryWriter(dir)
+      writer.write(makeSnapshot(1)) // full snapshot — must be dropped
+      writer.write({ kind: 'recall-summary', foo: 1 }) // debug-only event — dropped
+      await writer.flush()
+      assert.throws(() => readFileSync(join(dir, '.rivet', 'sensorium.jsonl'), 'utf-8'),
+        'no file must be created when only non-lite records were written')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('RIVET_TELEMETRY_LITE=0 disables even lite lines', async () => {
+    process.env['RIVET_TELEMETRY_LITE'] = '0'
+    try {
+      const dir = mkdtempSync(join(tmpdir(), 'rivet-telemetry-lite3-'))
+      try {
+        const writer = createTelemetryWriter(dir)
+        writer.write({ kind: VITALS_LITE_KIND, turn: 1 })
+        await writer.flush()
+        assert.throws(() => readFileSync(join(dir, '.rivet', 'sensorium.jsonl'), 'utf-8'))
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    } finally {
+      delete process.env['RIVET_TELEMETRY_LITE']
+    }
   })
 })

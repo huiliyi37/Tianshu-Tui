@@ -96,4 +96,28 @@ describe('PressureMonitor', () => {
     assert.equal(result.thrashing, true)
     assert.equal(result.suggestion, 'task_decomposition')
   })
+
+  // ── W6 (incident 20b9714e): CVM overhead accumulator lifecycle ──
+  // The accumulator was monotonic (zero resetCvmOverhead call sites) while the
+  // producer charged the full projection every turn — long sessions inevitably
+  // crossed the throttle thresholds. Compaction now resets the accumulator.
+
+  it('W6: resetCvmOverhead clears accumulated overhead and throttle state', () => {
+    const pm = new PressureMonitor(100_000)
+    // Accumulate past the 5% threshold: 100k window → 5000+ tokens
+    pm.recordCvmInjection(6_000)
+    assert.equal(pm.check(50_000, 1).shouldThrottleCvm, true)
+    pm.resetCvmOverhead()
+    const after = pm.check(50_000, 2)
+    assert.equal(after.shouldThrottleCvm, false)
+    assert.equal(after.cvmOverheadRatio, 0)
+  })
+
+  it('W6: incremental charges below threshold never throttle', () => {
+    const pm = new PressureMonitor(1_000_000)
+    // Simulated steady-state incremental billing: small deltas per turn
+    for (let turn = 1; turn <= 100; turn++) pm.recordCvmInjection(50)
+    // 5000 / 1M = 0.5% — far below the 5% threshold
+    assert.equal(pm.check(300_000, 101).shouldThrottleCvm, false)
+  })
 })

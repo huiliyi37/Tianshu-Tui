@@ -25,6 +25,11 @@ export interface CognitiveLedgerInput {
   convergencePrecision?: number
   /** Output token efficiency (0-1), from convergence detector signals.tokenEfficiency */
   outputEfficiency?: number
+  /** W4（incident 20b9714e）：上下文占用比（0-1，pressureResult.ratio）。
+   *  渲染成 10% 桶——给模型可引用的硬数字，替代"窗口紧张"类脑补。 */
+  ctxRatio?: number
+  /** 上下文窗口 token 数（会话内恒定），渲染成 1M/200K 等标签。 */
+  ctxWindow?: number
 }
 
 export interface CognitiveLedger {
@@ -40,6 +45,8 @@ export interface CognitiveLedger {
   riskLevel?: RiskLevel
   convergencePrecision?: number
   outputEfficiency?: number
+  ctxRatio?: number
+  ctxWindow?: number
 }
 
 export interface CognitivePhaseSnapshot {
@@ -65,6 +72,8 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     riskLevel: input.riskLevel,
     convergencePrecision: input.convergencePrecision,
     outputEfficiency: input.outputEfficiency,
+    ctxRatio: input.ctxRatio,
+    ctxWindow: input.ctxWindow,
   }
 }
 
@@ -158,7 +167,23 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
   if (ledger.convergencePrecision !== undefined) parts.push(`convergence_precision="${coarseLabel(ledger.convergencePrecision)}"`)
   if (ledger.outputEfficiency !== undefined) parts.push(`output_efficiency="${coarseLabel(ledger.outputEfficiency)}"`)
 
+  // W4（incident 20b9714e）：常驻上下文占用硬数据。pressure 复合值仍是
+  // routing-only——这里给的是可直接引用的原始数字（"ctx≈30%·1M"），让
+  // "窗口紧张"类断言有处锚定。10% 桶量化保证字节稳定：桶变才字节变，
+  // 与 mirror 的 low/mid/high 档位纪律同一口径（appendixDelta 兼容）。
+  if (ledger.ctxRatio !== undefined) {
+    const bucket = Math.min(90, Math.floor(ledger.ctxRatio * 10) * 10)
+    const win = ledger.ctxWindow !== undefined ? `·${formatWindowLabel(ledger.ctxWindow)}` : ''
+    parts.push(`ctx="${bucket}%${win}"`)
+  }
+
   return `<cognitive-mirror ${parts.join(' ')} />`
+}
+
+/** Context-window label: 1_000_000 → "1M", 200_000 → "200K". Constant per session. */
+function formatWindowLabel(tokens: number): string {
+  if (tokens >= 1_000_000) return `${Math.round(tokens / 1_000_000)}M`
+  return `${Math.round(tokens / 1_000)}K`
 }
 
 /** Coarse-grain a 0–1 value to low/mid/high for early-turn false-precision avoidance. */

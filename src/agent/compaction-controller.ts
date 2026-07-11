@@ -669,6 +669,9 @@ export class CompactionController {
       this.deps.promptEngine.resetAppendixBaseline()
       this.deps.session.markCompacted(input.loopTurn)
       this.deps.pressureMonitor.recordCompaction(this.deps.session.getTurnCount())
+      // W6：压缩重写历史后，被压掉的 CVM 注入已不在上下文里——开销计数
+      // 随之归零（appendix baseline 同步重置，后续块重新入场重新计费）。
+      this.deps.pressureMonitor.resetCvmOverhead()
       const afterTokens = this.deps.session.getEstimatedTokens()
       this.deps.session.recordCompactEvent({
         turn: this.deps.session.getTurnCount(),

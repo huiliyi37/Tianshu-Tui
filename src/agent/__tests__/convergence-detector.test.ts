@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluateConvergence } from '../convergence-detector.js'
+import { classifyActivityMode, evaluateConvergence } from '../convergence-detector.js'
 import type { ConvergenceInput, ConvergenceSignals, PhaseClass } from '../convergence-detector.js'
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -1731,6 +1731,139 @@ describe('evaluateConvergence', () => {
         assert.ok(result.injectedMessage.includes('已多次发出'),
           `expected "已多次发出" escalation, got: ${result.injectedMessage.slice(0, 150)}`)
       }
+    })
+  })
+
+  // ── W3 (incident 20b9714e): activity-mode classification + diagnostic copy ──
+
+  describe('classifyActivityMode (W3)', () => {
+    it('classifies read-only window with zero edits as diagnostic', () => {
+      const history = makeHistory([
+        { tool: 'read_file' }, { tool: 'grep' }, { tool: 'read_file' },
+        { tool: 'glob' }, { tool: 'read_file' },
+      ])
+      assert.equal(classifyActivityMode(history, 0), 'diagnostic')
+    })
+
+    it('returns build when any file has been modified', () => {
+      const history = makeHistory([
+        { tool: 'read_file' }, { tool: 'grep' }, { tool: 'read_file' }, { tool: 'glob' },
+      ])
+      assert.equal(classifyActivityMode(history, 1), 'build')
+    })
+
+    it('returns build below 0.8 read-only ratio boundary', () => {
+      // 6/8 read-only = 0.75 < 0.8 → build
+      const history = makeHistory([
+        { tool: 'read_file' }, { tool: 'grep' }, { tool: 'read_file' },
+        { tool: 'edit_file' }, { tool: 'read_file' }, { tool: 'grep' },
+        { tool: 'run_tests' }, { tool: 'read_file' },
+      ])
+      assert.equal(classifyActivityMode(history, 0), 'build')
+    })
+
+    it('returns diagnostic at exactly 0.875 read-only ratio (7/8)', () => {
+      const history = makeHistory([
+        { tool: 'read_file' }, { tool: 'grep' }, { tool: 'read_file' },
+        { tool: 'glob' }, { tool: 'read_file' }, { tool: 'grep' },
+        { tool: 'edit_file' }, { tool: 'read_file' },
+      ])
+      assert.equal(classifyActivityMode(history, 0), 'diagnostic')
+    })
+
+    it('returns build when window has fewer than 4 samples (insufficient data)', () => {
+      const history = makeHistory([{ tool: 'read_file' }, { tool: 'grep' }, { tool: 'glob' }])
+      assert.equal(classifyActivityMode(history, 0), 'build')
+    })
+
+    it('only considers the trailing window: early edits outside window do not count', () => {
+      // 12 entries: 4 edits first, then 8 read-only — window of 8 sees only reads
+      const history = makeHistory([
+        { tool: 'edit_file' }, { tool: 'edit_file' }, { tool: 'run_tests' }, { tool: 'edit_file' },
+        ...Array.from({ length: 8 }, (_, i) => ({ tool: 'read_file', target: `f${i}.ts` })),
+      ])
+      assert.equal(classifyActivityMode(history, 0), 'diagnostic')
+    })
+  })
+
+  describe('diagnostic-mode convergence copy (W3)', () => {
+    // Same-target reads: low novelty/entropy drives the score down so the
+    // L2 gate opens by mid turns (verified empirically: turn 16 → L2).
+    function sameTargetReads(count: number) {
+      return makeHistory(
+        Array.from({ length: count }, () => ({ tool: 'read_file', target: 'same.ts' })),
+      )
+    }
+
+    it('productive-stagnation variant asks for assertion verification, not conclusions', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 16,
+        phaseClass: 'explore',
+        recentToolHistory: sameTargetReads(16),
+        activityMode: 'diagnostic',
+      }))
+      assert.ok(result.level >= 2, `expected L2+, got L${result.level}`)
+      assert.ok(result.injectedMessage)
+      assert.ok(result.injectedMessage.includes('核实'),
+        `diagnostic copy must ask for verification, got: ${result.injectedMessage.slice(0, 150)}`)
+      assert.ok(result.injectedMessage.includes('未核实'),
+        'diagnostic copy must require marking unverified claims')
+      assert.ok(!result.injectedMessage.includes('直接编辑或测试'),
+        'diagnostic copy must not push edits')
+    })
+
+    it('build mode keeps the original productive-stagnation copy', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 16,
+        phaseClass: 'explore',
+        recentToolHistory: sameTargetReads(16),
+        activityMode: 'build',
+      }))
+      assert.ok(result.level >= 2, `expected L2+, got L${result.level}`)
+      assert.ok(result.injectedMessage!.includes('信息可能已足够，请收敛'))
+    })
+
+    it('no-tool stagnation variant is NOT branched by diagnostic mode', () => {
+      // No-tool hesitation is a different failure mode — the fix is "act",
+      // regardless of activity mode. A recent productive tool keeps
+      // productiveStagnation false so the no-tool variant wins the builder.
+      const result = evaluateConvergence(baseInput({
+        turn: 8,
+        phaseClass: 'explore',
+        recentToolHistory: makeHistory([
+          { tool: 'edit_file', target: 'a.ts' },
+          { tool: 'read_file', target: 'b.ts' },
+          { tool: 'read_file', target: 'c.ts' },
+          { tool: 'read_file', target: 'd.ts' },
+        ]),
+        noToolTurnCount: 3,
+        activityMode: 'diagnostic',
+      }))
+      assert.ok(result.level >= 2, `expected L2+, got L${result.level}`)
+      assert.ok(result.injectedMessage!.includes('未执行任何工具调用'),
+        `no-tool variant must win over diagnostic branch, got: ${result.injectedMessage!.slice(0, 120)}`)
+    })
+
+    it('generic score-based variant gets verification-first copy in diagnostic mode', () => {
+      // A recent productive tool (bash at window head) keeps productiveStagnation
+      // false; same-target reads keep the score low → generic variant at L2/L3.
+      const history = makeHistory([
+        { tool: 'bash', target: 'echo x' },
+        ...Array.from({ length: 11 }, () => ({ tool: 'read_file', target: 'same.ts' })),
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 20,
+        phaseClass: 'explore',
+        recentToolHistory: history,
+        activityMode: 'diagnostic',
+      }))
+      assert.ok(result.level >= 2, `expected L2+, got L${result.level}`)
+      assert.ok(!result.injectedMessage!.includes('读取/搜索操作'),
+        'setup must not hit the productive-stagnation variant')
+      assert.ok(result.injectedMessage!.includes('核实'),
+        `generic diagnostic copy must be verification-first, got: ${result.injectedMessage!.slice(0, 150)}`)
+      assert.ok(result.injectedMessage!.includes('session_vitals'),
+        'generic diagnostic copy should point at session_vitals for self-state claims')
     })
   })
 })

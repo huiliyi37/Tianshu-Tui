@@ -11,6 +11,7 @@ import { mapQueriedPheromones } from './pheromone-map.js'
 import { setGeneralLedgerTelemetrySink } from './general-ledger.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
 import { recordToolNamedFingerprint } from './trace-store.js'
+import { classifyActivityMode } from './convergence-detector.js'
 import { join, isAbsolute } from 'node:path'
 import { analyzeImpact } from '../repo/meridian-impact.js'
 import { getSessionDir } from './session-persist.js'
@@ -791,6 +792,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Advisory 总线（action-intent 闸门核销接入）===
     submitAdvisory: (entry) => { self.advisoryBus.submit(entry) },
+
+    // === W3 诊断态识别 ===
+    getActivityMode: () => classifyActivityMode(
+      self.recentToolHistory,
+      self.evidence.getState().filesModified.size,
+    ),
 
     // === Abort signal ===
     getAbortSignal: () => self.abortController?.signal,

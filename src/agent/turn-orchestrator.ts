@@ -225,6 +225,11 @@ export interface TurnOrchestratorDeps {
    *  appendSystemReminder 直注（行为不变，只是不计账）。 */
   submitAdvisory?: (entry: AdvisoryEntry) => void
 
+  // === W3 诊断态识别（incident 20b9714e）===
+  /** 会话活动模式。diagnostic = 近窗口只读为主 + 零改动（排查/根因分析）。
+   *  B2 催收敛文案据此分流为"先核实断言再收束"。缺省 = 恒 build（旧行为）。 */
+  getActivityMode?: () => 'diagnostic' | 'build'
+
   // === Abort signal ===
   // === Abort signal ===
   getAbortSignal: () => AbortSignal | undefined
@@ -973,7 +978,12 @@ export class TurnOrchestrator {
           // 不强制截断（避免打断合法大批量编辑），仅收敛建议。
           if (!turnCallLimitAdvisoryFired && turn >= 12) {
             turnCallLimitAdvisoryFired = true
-            const content = '本轮已进行 12+ 次 API 调用，请收敛当前动作并输出结论，不要继续发散。'
+            // W3 诊断态分流（incident 20b9714e）：对排查会话催"输出结论"会在
+            // 证据不足时直接诱发脑补——改为要求先核实将写进结论的断言。
+            const diagnostic = this.deps.getActivityMode?.() === 'diagnostic'
+            const content = diagnostic
+              ? '本轮已进行 12+ 次 API 调用。先用工具核实你将要写进结论的关键断言（ls/grep/read 实际文件），核实完再收束；没有工具证据的推断必须标注"未核实"。会话自身状态可用 session_vitals 取证。'
+              : '本轮已进行 12+ 次 API 调用，请收敛当前动作并输出结论，不要继续发散。'
             if (this.deps.submitAdvisory) {
               this.deps.submitAdvisory({
                 key: 'turn-call-limit',
@@ -982,6 +992,10 @@ export class TurnOrchestrator {
                 content,
                 channel: 'system-reminder',
                 immediate: true,
+                // 诊断态可核销：采纳签名 = 后续轮出现认知型工具调用（去核实）。
+                expect: diagnostic
+                  ? { kind: 'tool_appears', tools: ['read_file', 'grep', 'glob', 'list_dir', 'bash'], withinTurns: 2 }
+                  : undefined,
               })
             } else {
               this.deps.appendSystemReminder(`<system-reminder>${content}</system-reminder>`)

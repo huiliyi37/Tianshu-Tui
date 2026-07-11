@@ -362,6 +362,10 @@ export class AdvisoryBus {
   /** 静音期满后的 probation 名单 — 放行一次送达以收集新证据,之后 lift 仍 ≤0 才再静音 */
   private liftProbation = new Set<string>()
   private ledgerLiftMuted = 0
+  // ── W6 CVM 开销节流（通道 B 降级）──
+  private overheadThrottled = false
+  /** 节流态下的隔周期投递开关：true = 本渲染周期跳过非豁免条目 */
+  private overheadSkipNext = false
   // ── W2 efficacy 负反馈环 ──
   private efficacyStats: EfficacyStatsProvider | null = null
   /** 本会话被 efficacy 环静默的 key（delivered ≥ 6 且零采纳） */
@@ -428,6 +432,15 @@ export class AdvisoryBus {
    *  缺省 = 不做负反馈环（全回退旧行为）。 */
   setEfficacyStatsProvider(provider: EfficacyStatsProvider): void {
     this.efficacyStats = provider
+  }
+
+  /** W6 节流次序反转（incident 20b9714e）：CVM 开销越过 5% 阈值时，降级的
+   *  是通道 B（advisory，每条真金白银驻留 token）——非 constitutional、非
+   *  immediate、priority < 0.8 的条目隔个渲染周期送达（等效冷却翻倍）。
+   *  镜面等通道 A 附录块（appendixDelta 字节稳定，稳态近零成本）不受影响。 */
+  setOverheadThrottled(throttled: boolean): void {
+    this.overheadThrottled = throttled
+    if (!throttled) this.overheadSkipNext = false
   }
 
   /** 该 key 是否已被本会话 efficacy 环静默 — decision-shift 卡片同步抑制入口。 */
@@ -666,6 +679,29 @@ export class AdvisoryBus {
       }
       this.recordDropped(droppedByEfficacy)
       all = kept
+    }
+
+    // ── W6 CVM 开销节流:通道 B 隔周期送达（等效冷却翻倍）──
+    // 5% 阈值下先降级 advisory（每条都是终身驻留 token），最后才轮到
+    // toolContext（8% 硬顶）；镜面任何档位不熄。fail-open 豁免与 efficacy
+    // 环同口径：constitutional / immediate / priority ≥ 0.8。
+    if (this.overheadThrottled) {
+      if (this.overheadSkipNext) {
+        this.overheadSkipNext = false
+        const droppedByOverhead = new Set<string>()
+        const kept: AdvisoryEntry[] = []
+        for (const e of all) {
+          if (e.tier === 'constitutional' || e.immediate === true || e.priority >= 0.8) {
+            kept.push(e)
+            continue
+          }
+          droppedByOverhead.add(e.key)
+        }
+        this.recordDropped(droppedByOverhead)
+        all = kept
+      } else {
+        this.overheadSkipNext = true
+      }
     }
 
     // ── Lift 消费端:负 lift 自动静音（"没提醒也会做"= 纯噪音）──

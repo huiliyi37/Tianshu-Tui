@@ -333,4 +333,43 @@ describe('cognitive mirror delta byte stability', () => {
   function makeSensoriumForMirror(): Sensorium {
     return { momentum: 0.5, pressure: 0.3, confidence: 0.5, complexity: 0.4, freshness: 0.5, stability: 0.5 }
   }
+
+  // ── W4 (incident 20b9714e): resident ctx hard data ──
+  // The model claimed "上下文压力紧张" while actual usage was 34% of a 1M
+  // window — it had no number to cite. The mirror now carries ctx="N%·1M"
+  // quantized to 10% buckets (byte-stable within a bucket).
+
+  function ctxLedger(ratio: number, window = 1_000_000) {
+    return createCognitiveLedger({
+      evidence: makeEvidence({ filesModified: new Set() }),
+      trace: makeTrace(),
+      turn: 5,
+      sensorium: makeSensoriumForMirror(),
+      ctxRatio: ratio,
+      ctxWindow: window,
+    })
+  }
+
+  it('W4: renders ctx as a 10%-bucket with window label', () => {
+    assert.match(buildCognitiveMirror(ctxLedger(0.34)), /ctx="30%·1M"/)
+    assert.match(buildCognitiveMirror(ctxLedger(0.07, 200_000)), /ctx="0%·200K"/)
+  })
+
+  it('W4: is byte-identical within the same bucket', () => {
+    const a = buildCognitiveMirror(ctxLedger(0.30))
+    const b = buildCognitiveMirror(ctxLedger(0.399))
+    assert.equal(a, b, 'same 10% bucket must render identical bytes')
+  })
+
+  it('W4: changes bytes only on bucket transition', () => {
+    const low = buildCognitiveMirror(ctxLedger(0.39))
+    const next = buildCognitiveMirror(ctxLedger(0.40))
+    assert.notEqual(low, next)
+    assert.match(next, /ctx="40%·1M"/)
+  })
+
+  it('W4: caps at 90% bucket and omits ctx when ratio absent', () => {
+    assert.match(buildCognitiveMirror(ctxLedger(0.99)), /ctx="90%·1M"/)
+    assert.doesNotMatch(buildCognitiveMirror(mirrorLedger()), /ctx=/)
+  })
 })

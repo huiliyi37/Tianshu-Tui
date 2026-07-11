@@ -168,6 +168,50 @@ describe('W2 efficacy 负反馈环 (incident 20b9714e)', () => {
   })
 })
 
+describe('W6 CVM overhead throttle — channel B degradation (incident 20b9714e)', () => {
+  it('throttled: non-exempt entries deliver every other render cycle', () => {
+    const bus = new AdvisoryBus()
+    bus.setOverheadThrottled(true)
+    const deliveredAt: number[] = []
+    for (let cycle = 1; cycle <= 8; cycle++) {
+      bus.submit({ key: 'noise', priority: 0.6, category: 'discipline', content: '普通提醒' })
+      if (bus.render(undefined, cycle).includes('key="noise"')) deliveredAt.push(cycle)
+    }
+    assert.equal(deliveredAt.length, 4, `alternating delivery: expected 4/8, got ${deliveredAt.length} at ${deliveredAt}`)
+    for (let i = 1; i < deliveredAt.length; i++) {
+      assert.equal(deliveredAt[i]! - deliveredAt[i - 1]!, 2, 'gap between deliveries must be 2 cycles')
+    }
+  })
+
+  it('throttled: constitutional / immediate / priority>=0.8 are exempt', () => {
+    const bus = new AdvisoryBus()
+    bus.setOverheadThrottled(true)
+    let constitutional = 0
+    let hiPri = 0
+    for (let cycle = 1; cycle <= 6; cycle++) {
+      bus.submit({ key: 'guard', priority: 0.9, category: 'constitutional', tier: 'constitutional', content: '宪法级' })
+      bus.submit({ key: 'hi', priority: 0.85, category: 'repair', content: '高优先级' })
+      const out = bus.render(undefined, cycle)
+      if (out.includes('key="guard"')) constitutional++
+      if (out.includes('key="hi"')) hiPri++
+    }
+    assert.equal(constitutional, 6, 'constitutional never throttled by overhead')
+    assert.equal(hiPri, 6, 'priority >= 0.8 never throttled by overhead')
+  })
+
+  it('unthrottling resets the skip state — next render delivers', () => {
+    const bus = new AdvisoryBus()
+    bus.setOverheadThrottled(true)
+    bus.submit({ key: 'a', priority: 0.6, category: 'discipline', content: 'x' })
+    assert.ok(bus.render(undefined, 1).includes('key="a"'), 'first throttled render delivers')
+    bus.setOverheadThrottled(false)
+    bus.submit({ key: 'a', priority: 0.6, category: 'discipline', content: 'x' })
+    assert.ok(bus.render(undefined, 2).includes('key="a"'), 'unthrottled render always delivers')
+    bus.submit({ key: 'a', priority: 0.6, category: 'discipline', content: 'x' })
+    assert.ok(bus.render(undefined, 3).includes('key="a"'), 'stays delivered while unthrottled')
+  })
+})
+
 describe('discipline re-anchor (F-fix, session 803d897d)', () => {
   it('exposes a sane re-anchor interval', () => {
     assert.ok(DISCIPLINE_REANCHOR_INTERVAL >= 10 && DISCIPLINE_REANCHOR_INTERVAL <= 30)

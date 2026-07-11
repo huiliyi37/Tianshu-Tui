@@ -26,8 +26,16 @@ const NOOP_WRITER: TelemetryWriter = {
   async flush() {},
 }
 
+/** W5：轻量生命体征行的 kind 标记 — lite 模式下唯一放行的记录类型 */
+export const VITALS_LITE_KIND = 'vitals-lite'
+
 export function createTelemetryWriter(cwd: string, sessionId?: string): TelemetryWriter {
-  if (!process.env['RIVET_DEBUG_TELEMETRY']) return NOOP_WRITER
+  // W5（incident 20b9714e）：完整遥测仍由 RIVET_DEBUG_TELEMETRY opt-in，但
+  // 轻量生命体征行（vitals-lite，单行 <200B）默认落盘——没有它，事后复盘
+  // "节流何时触发/镜面是否存活/advisory 台账"全都无数据。RIVET_TELEMETRY_LITE=0 可关。
+  const full = !!process.env['RIVET_DEBUG_TELEMETRY']
+  const lite = process.env['RIVET_TELEMETRY_LITE'] !== '0'
+  if (!full && !lite) return NOOP_WRITER
 
   const dir = sessionId ? join(getSessionDir(cwd), sessionId) : join(cwd, '.rivet')
   const path = join(dir, 'sensorium.jsonl')
@@ -35,6 +43,7 @@ export function createTelemetryWriter(cwd: string, sessionId?: string): Telemetr
   let writesSinceTrim = 0
   return {
     write(snapshot: TelemetryRecord) {
+      if (!full && (snapshot as { kind?: string }).kind !== VITALS_LITE_KIND) return
       const line = JSON.stringify(snapshot)
       const shouldTrim = ++writesSinceTrim >= TRIM_CHECK_EVERY
       if (shouldTrim) writesSinceTrim = 0

@@ -30,6 +30,7 @@ import { selectPolicy } from './policy-selection.js'
 import { checkTddGate, buildTddGateHint } from './tdd-gate.js'
 import { buildCognitiveProjectionParts, createCognitiveLedger, getCognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { formatImmuneContext } from './immune-context.js'
+import { VITALS_LITE_KIND } from './telemetry-writer.js'
 import { getCapsuleByStar } from './seed-capsule-store.js'
 
 /**
@@ -113,6 +114,17 @@ const PHASE_CLASS_MAP: Record<string, string> = {
  */
 export class TurnStepProducer {
   constructor(private readonly self: AgentLoop) {}
+
+  // ── W6 CVM 增量记账基线（appendixDelta 对齐：只有变化字节才计费）──
+  /** 上次计费时的 projection stable 快照 */
+  private lastChargedProjectionStable = ''
+  /** 上次计费时的 toolContext 快照 */
+  private lastChargedToolCtx = ''
+  /** 本轮实际渲染的 toolContext（runPerception 写入，runCognitivePrep 消费） */
+  private lastRenderedToolCtx = ''
+  /** 计费基线对应的 compact 轮 — compact 重置 appendix baseline 后块全量
+   *  重新入场，计费基线必须同步作废（否则重发字节被漏计）。 */
+  private chargeBaselineCompactTurn: number | null = null
 
   /**
    * Step 6a: Per-run initialization — warmup, heartbeat, state resets,
@@ -423,6 +435,30 @@ export class TurnStepProducer {
     this.self.recordAdvisoryLedger(advisoryLedger)
     this.self.flushGuardianMeta()
 
+    // W5 轻量生命体征快照（通道 C，默认落盘）：单行 <200B，百轮 <20KB。
+    // 事后复盘的最小数据面——节流何时触发、镜面是否存活、advisory 台账走势。
+    {
+      const s = this.self.sensorium
+      const r2 = (v: number) => Math.round(v * 100) / 100
+      this.self.telemetryWriter.write({
+        kind: VITALS_LITE_KIND,
+        ts: Date.now(),
+        turn,
+        sensorium: s ? {
+          momentum: r2(s.momentum), pressure: r2(s.pressure), confidence: r2(s.confidence),
+          complexity: r2(s.complexity), freshness: r2(s.freshness), stability: r2(s.stability ?? 0),
+        } : null,
+        ctxRatio: r2(pressureResult.ratio),
+        cvmOverheadRatio: Math.round(pressureResult.cvmOverheadRatio * 10_000) / 10_000,
+        throttled: pressureResult.shouldThrottleCvm,
+        advisories: {
+          rendered: this.self.guardianActivity.advisoriesRendered,
+          dropped: this.self.guardianActivity.advisoriesDropped,
+          adopted: this.self.guardianActivity.advisoriesAdopted,
+        },
+      })
+    }
+
     // B 跨会话效能信息素:每 20 轮增量写回(崩溃不丢账;postSession 兜底全量)
     if (turn > 0 && turn % 20 === 0) {
       this.self.flushAdvisoryEfficacy()
@@ -518,14 +554,22 @@ export class TurnStepProducer {
       evidence: this.self.evidence.getState(),
       trace: this.self.traceStore,
       turn,
-      sensorium: pressureResult.shouldThrottleCvm ? null : this.self.sensorium,
-      strategy: pressureResult.shouldThrottleCvm ? null : this.self.strategy,
-      vigor: pressureResult.shouldThrottleCvm ? null : this.self.vigorState,
-      season: pressureResult.shouldThrottleCvm ? null : this.self.currentSeason,
-      seasonIntensity: pressureResult.shouldThrottleCvm ? undefined : (this.self.currentSeasonIntensity ?? undefined),
+      // W6 节流次序反转（incident 20b9714e）：镜面任何节流档位不熄。它是
+      // 通道 A（appendixDelta 字节稳定，稳态近零成本），也是模型唯一的自我
+      // 感知窗口——旧行为在长会话后段熄灭镜面、同时 advisory 照发，模型恰在
+      // 最需要自察时失去镜子。节流现在降级通道 B（advisory-bus 隔周期送达）。
+      sensorium: this.self.sensorium,
+      strategy: this.self.strategy,
+      vigor: this.self.vigorState,
+      season: this.self.currentSeason,
+      seasonIntensity: this.self.currentSeasonIntensity ?? undefined,
       riskLevel: this.self.latestRisk.level,
       convergencePrecision: this.self.latestConvergenceResult?.score,
       outputEfficiency: this.self.latestConvergenceResult?.signals.tokenEfficiency,
+      // W4：ctx 占用硬数据不随 CVM 节流关闭——它是最便宜的字段（10% 桶字节
+      // 稳定），也是防"窗口紧张"脑补的关键锚点。
+      ctxRatio: pressureResult.ratio,
+      ctxWindow: this.self.config.contextWindow,
     })
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
 
@@ -556,12 +600,28 @@ export class TurnStepProducer {
 
     // ── CVM overhead tracking ──
     // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
-    // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
+    // W6 增量计费（incident 20b9714e）：appendixDelta 语义下字节恒定块
+    // 入场付一次、稳态零重发——真实边际成本只有变化字节。旧口径每轮全额
+    // 计费高估 ~10x，137 轮会话的名义开销必然越过 5%/8% 阈值，长会话
+    // 后段镜面被误熄。ephemeral（一次性提示）每轮都是新字节，全额计入。
     // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
     if (actionable) {
-      const toolCtxLen = this.self.config.promptEngine.getToolContextLength()
-      const cvmTokenEstimate = Math.ceil((projectionStable.length + projectionEphemeral.length + toolCtxLen) / 4)
-      this.self.pressureMonitor.recordCvmInjection(cvmTokenEstimate)
+      // compact 后 appendix baseline 重置 → 块全量重发，计费基线同步作废
+      if (this.self.lastCompactTurn !== this.chargeBaselineCompactTurn) {
+        this.chargeBaselineCompactTurn = this.self.lastCompactTurn
+        this.lastChargedProjectionStable = ''
+        this.lastChargedToolCtx = ''
+      }
+      const stableChanged = projectionStable !== this.lastChargedProjectionStable
+      const toolCtxChanged = this.lastRenderedToolCtx !== this.lastChargedToolCtx
+      const chargedChars = (stableChanged ? projectionStable.length : 0)
+        + projectionEphemeral.length
+        + (toolCtxChanged ? this.lastRenderedToolCtx.length : 0)
+      if (chargedChars > 0) {
+        this.self.pressureMonitor.recordCvmInjection(Math.ceil(chargedChars / 4))
+      }
+      this.lastChargedProjectionStable = projectionStable
+      this.lastChargedToolCtx = this.lastRenderedToolCtx
     }
   }
 
@@ -655,11 +715,17 @@ export class TurnStepProducer {
     this.self.latestPolicySignals = { efe, sensorium: currentSensorium }
     const affordances = computeAffordanceScores(affordanceState, this.self.sessionAffordanceAdaptations)
     const policies = selectPolicy(efe, affordances, { topK: 5 })
-    if (pressureResult.shouldThrottleCvm) {
+    // W6 节流次序反转：toolContext（通道 A 中较贵的块）只在 8% 硬顶才熄，
+    // 5% 阈值改为降级通道 B（advisory-bus 隔渲染周期送达，见下）。
+    if (this.self.pressureMonitor.isCvmThrottlingCeiling()) {
+      this.lastRenderedToolCtx = ''
       this.self.config.promptEngine.setToolContext(null)
     } else {
-      this.self.config.promptEngine.setToolContext(renderToolContext(affordanceState, policies, efe) || null)
+      const renderedToolCtx = renderToolContext(affordanceState, policies, efe) || ''
+      this.lastRenderedToolCtx = renderedToolCtx
+      this.self.config.promptEngine.setToolContext(renderedToolCtx || null)
     }
+    this.self.advisoryBus.setOverheadThrottled(pressureResult.shouldThrottleCvm)
     this.self.recordModelRoutingShadow(currentSensorium, efe)
 
     // ── Adaptive Affordance: periodically recalibrate base affordances from sensorimotor history ──

@@ -14,7 +14,7 @@ import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel, getClassDoomLoopLevel, combineDoomLoopLevels, getDoomLoopThresholds } from './trace-store.js'
-import { evaluateConvergence, PRODUCTIVE_TOOLS } from './convergence-detector.js'
+import { classifyActivityMode, evaluateConvergence, PRODUCTIVE_TOOLS } from './convergence-detector.js'
 import type { PhaseClass, ConvergenceResult } from './convergence-detector.js'
 import { emitStopReason, stopReasonAbortTag, type StopReason } from './stop-reason.js'
 import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
@@ -1537,6 +1537,50 @@ export class AgentLoop {
 
   getTaskContract(): TaskContract | undefined { return this.taskContract }
 
+  /** W5（incident 20b9714e）：session_vitals 工具的数据源。全部为运行时
+   *  内存态实测，零磁盘 IO；拿不到的维度返回 null，工具层显式标注"无数据"。 */
+  getSessionVitals(): import('../tools/session-vitals.js').SessionVitalsData {
+    const estimatedTokens = this.session.getEstimatedTokens()
+    const contextWindow = this.config.contextWindow
+    const statsMap = this.advisoryReadback.getStats()
+    const top = [...statsMap.entries()]
+      .map(([key, s]) => ({
+        key,
+        delivered: s.delivered,
+        adopted: s.adopted,
+        ignored: s.ignored,
+        silenced: this.advisoryBus.isEfficacySilenced(key),
+      }))
+      .sort((a, b) => b.delivered - a.delivered)
+      .slice(0, 5)
+    const s = this.sensorium
+    return {
+      ctx: {
+        estimatedTokens,
+        contextWindow,
+        ratio: contextWindow > 0 ? estimatedTokens / contextWindow : 1,
+      },
+      cache: this.session.getCacheHistory().slice(-5),
+      sensorium: s ? {
+        momentum: s.momentum, pressure: s.pressure, confidence: s.confidence,
+        complexity: s.complexity, freshness: s.freshness, stability: s.stability,
+      } : null,
+      cvm: {
+        overheadRatio: this.pressureMonitor.getCvmOverheadRatio(),
+        throttled: this.pressureMonitor.isCvmThrottling(),
+        ceiling: this.pressureMonitor.isCvmThrottlingCeiling(),
+      },
+      advisories: {
+        rendered: this.guardianActivity.advisoriesRendered,
+        dropped: this.guardianActivity.advisoriesDropped,
+        adopted: this.guardianActivity.advisoriesAdopted,
+        ignored: this.guardianActivity.advisoriesIgnored,
+        top,
+      },
+      turn: this.session.getTurnCount(),
+    }
+  }
+
   /** 获取持久化的任务列表（从 Assistant 回复中提取），用于 TUI 固定显示和多轮回溯 */
   getTaskList() { return this.sessionStateManager?.getTaskList() ?? [] }
 
@@ -1832,6 +1876,13 @@ export class AgentLoop {
     if (this.todoCompletedSamples.length > 10) this.todoCompletedSamples.shift()
     const todoCompletedDelta = todoCompletedNow - (this.todoCompletedSamples[0] ?? todoCompletedNow)
 
+    // W3 — 诊断态识别：只读为主 + 零改动的排查会话，收敛文案分流为
+    // "先核实断言再收束"（催"输出结论"是 20b9714e 三次脑补的直接诱因）。
+    const activityMode = classifyActivityMode(
+      this.recentToolHistory,
+      this.evidence.getState().filesModified.size,
+    )
+
     const convergenceCheck = evaluateConvergence({
       turn,
       phaseClass: phaseClass as PhaseClass,
@@ -1848,6 +1899,7 @@ export class AgentLoop {
         todoCompletedDelta,
         activePlan: this.activePlanFilePath !== null,
       },
+      activityMode,
     })
     this.latestConvergenceResult = convergenceCheck
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
@@ -1934,12 +1986,17 @@ export class AgentLoop {
             tier: 'operational',
             category: 'discipline',
             content: convergenceCheck.injectedMessage,
-            // 谓词映射表（P1a）：仅无工具僵局变体可客观核销——任意工具调用
-            // 即打破僵局（计划中的 tool_stops 反向谓词）。其余变体（重复循环/
-            // 换推进方式）没有单一行为签名，不设谓词，只计送达。
+            // 谓词映射表（P1a + W3）：
+            // - 无工具僵局变体：任意工具调用即打破僵局。
+            // - 诊断态变体（W3）："核实后收束"的行为签名 = 后续轮出现认知型
+            //   工具调用（read/grep/glob 等）。核实了 → adopted 续命；直接
+            //   无工具脑补结论 → 谓词失败计 ignored，与 efficacy 环双轨咬合。
+            // - 其余 build 变体没有单一行为签名，不设谓词，只计送达。
             expect: this.consecutiveNoToolTurns >= 2
               ? { kind: 'tool_appears', tools: [], withinTurns: 1 }
-              : undefined,
+              : activityMode === 'diagnostic'
+                ? { kind: 'tool_appears', tools: ['read_file', 'grep', 'glob', 'list_dir', 'bash'], withinTurns: 2 }
+                : undefined,
           })
 
           // When convergence is detected, append the delivery gate hint so the
