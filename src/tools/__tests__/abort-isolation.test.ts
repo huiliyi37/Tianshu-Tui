@@ -8,10 +8,7 @@
  *
  * 本测试用两个独立 AbortSignal 模拟两个 AgentLoop 实例的信号边界：
  * 中止信号 A → 仅 A 的子进程被杀（markerA 缺失），B 不受影响（markerB 写出）。
- *
- * 环境注意：当 agent 自身运行在 macOS Seatbelt 沙箱内时，sandbox-exec 无法嵌套
- * (sandbox_apply: EPERM)，persistRawOutput 写 /var/folders T/ 也会 EPERM。
- * 因此测试 setup 做两件事：禁用命令沙箱 + 将 TMPDIR 重定向到 workspace 内。
+ * 测试将 TMPDIR 重定向到 workspace 内避免 persistRawOutput EPERM。
  */
 
 import { test, before, after } from 'node:test'
@@ -20,30 +17,22 @@ import { mkdtempSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BASH_TOOL } from '../bash.js'
-import { _resetSandboxBackendCache } from '../sandbox-profile.js'
 import type { ToolCallParams } from '../types.js'
 
 const sleepMs = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-const _savedNoSandbox = process.env.RIVET_NO_SANDBOX
 const _savedTmpdir = process.env.TMPDIR
 let _testTmp: string
 
 before(() => {
-  // Disable sandbox: sandbox-exec cannot nest inside the agent's Seatbelt.
-  process.env.RIVET_NO_SANDBOX = '1'
-  _resetSandboxBackendCache()
   // Redirect TMPDIR to workspace so persistRawOutput / mkdtemp don't EPERM.
   _testTmp = mkdtempSync(join(process.cwd(), '.tmp-abort-'))
   process.env.TMPDIR = _testTmp
 })
 
 after(() => {
-  if (_savedNoSandbox === undefined) delete process.env.RIVET_NO_SANDBOX
-  else process.env.RIVET_NO_SANDBOX = _savedNoSandbox
   if (_savedTmpdir === undefined) delete process.env.TMPDIR
   else process.env.TMPDIR = _savedTmpdir
-  _resetSandboxBackendCache()
   rmSync(_testTmp, { recursive: true, force: true })
 })
 

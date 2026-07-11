@@ -270,19 +270,21 @@ export interface SandboxNotice {
  * Pure (given injected detectors) so it is unit-testable on any OS.
  *
  * Returns:
- *   - a 'warn' when there is NO kernel write boundary (explicit RIVET_NO_SANDBOX,
- *     or no backend available) — with deliberately sterner wording on native
- *     Windows, where "no write protection + rollback as after-the-fact net"
- *     means a malicious/buggy command can write system dirs before any rollback,
- *     a strictly larger exposure window than mac/linux;
- *   - null when a real boundary (seatbelt/bwrap/firejail) is in effect (no noise).
+ *   - a 'warn' when RIVET_SANDBOX=1 but NO kernel write boundary is available,
+ *     or on native Windows with no backend — the user asked for protection
+ *     and it can't be delivered;
+ *   - null when sandbox is OFF by default (normal dev mode) or a real boundary
+ *     (seatbelt/bwrap/firejail) is in effect.
  */
 export function getSandboxStartupNotice(ctx: SandboxContext): SandboxNotice | null {
   const env = ctx.env ?? process.env
   const platform = ctx.platform ?? process.platform
 
-  if (env.RIVET_NO_SANDBOX === '1') {
-    const base = 'RIVET_NO_SANDBOX=1 — 命令沙箱已关闭，无工作区写边界；回滚是唯一安全网（且只能撤销文件改动，撤不了已发生的 API/DB/网络副作用）。'
+  if (env.RIVET_SANDBOX === '1') {
+    const backend = selectSandboxBackend(ctx)
+    if (backend !== 'none') return null // sandbox requested + available → no warning
+    
+    const base = 'RIVET_SANDBOX=1 已设置，但无可用的沙箱后端；命令以无写边界执行。'
     return {
       level: 'warn',
       message: platform === 'win32'
@@ -291,26 +293,7 @@ export function getSandboxStartupNotice(ctx: SandboxContext): SandboxNotice | nu
     }
   }
 
-  const backend = selectSandboxBackend(ctx)
-  if (backend !== 'none') return null
-
-  if (platform === 'win32') {
-    return {
-      level: 'warn',
-      message:
-        '⚠️ 原生 Windows 无内核级写沙箱：命令可写工作区外/系统目录，B2 回滚仅是事后兜底（无法撤销已发生的系统写入或外部副作用）——暴露窗口明显大于 mac/linux。' +
-        ' 强烈建议在 WSL 中运行（自动复用 Linux Landlock/bwrap 边界），或显式接受此风险。',
-    }
-  }
-
-  const readProcVersion = ctx.readProcVersion ?? defaultReadProcVersion
-  const isWsl = platform === 'linux' && detectWsl(readProcVersion, env)
-  return {
-    level: 'warn',
-    message: isWsl
-      ? 'WSL 检测到但未安装 bubblewrap：当前无写边界。`sudo apt install bubblewrap` 可获得真沙箱。'
-      : '无可用沙箱后端：当前无写边界。Linux 装 bubblewrap，Windows 走 WSL。',
-  }
+  return null // sandbox OFF by default — expected, no warning
 }
 
 let _emittedNoSandboxWarning = false
@@ -343,15 +326,15 @@ export function _setSandboxBackendForTest(kind: SandboxBackendKind): void {
 }
 
 /**
- * Wrap a shell command in a workspace-scoped sandbox. Default-ON.
- * Opt out entirely with RIVET_NO_SANDBOX=1.
+ * Wrap a shell command in a workspace-scoped sandbox. Default-OFF.
+ * Enable with RIVET_SANDBOX=1 (production/deployment hardening).
  */
 export function wrapSandboxCommand(command: string, ctx: SandboxContext): SandboxDecision {
   const env = ctx.env ?? process.env
   const platform = ctx.platform ?? process.platform
 
-  if (env.RIVET_NO_SANDBOX === '1') {
-    return { command, sandboxed: false, backend: 'none', note: 'RIVET_NO_SANDBOX=1 — sandbox disabled' }
+  if (env.RIVET_SANDBOX !== '1') {
+    return { command, sandboxed: false, backend: 'none' }
   }
 
   const backend = selectSandboxBackend(ctx)

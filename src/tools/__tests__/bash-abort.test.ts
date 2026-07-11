@@ -15,28 +15,20 @@ import { mkdtempSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BASH_TOOL } from '../bash.js'
-import { _resetSandboxBackendCache } from '../sandbox-profile.js'
 import type { ToolCallParams } from '../types.js'
 
 const sleepMs = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-// Same environment fixes as abort-isolation.test.ts — see comments there.
-const _savedNoSandbox = process.env.RIVET_NO_SANDBOX
 const _savedTmpdir = process.env.TMPDIR
 let _testTmp: string
 
 before(() => {
-  process.env.RIVET_NO_SANDBOX = '1'
-  _resetSandboxBackendCache()
   _testTmp = mkdtempSync(join(process.cwd(), '.tmp-abort-'))
   process.env.TMPDIR = _testTmp
 })
 after(() => {
-  if (_savedNoSandbox === undefined) delete process.env.RIVET_NO_SANDBOX
-  else process.env.RIVET_NO_SANDBOX = _savedNoSandbox
   if (_savedTmpdir === undefined) delete process.env.TMPDIR
   else process.env.TMPDIR = _savedTmpdir
-  _resetSandboxBackendCache()
   rmSync(_testTmp, { recursive: true, force: true })
 })
 

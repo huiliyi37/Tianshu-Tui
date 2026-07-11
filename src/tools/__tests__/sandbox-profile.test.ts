@@ -157,27 +157,27 @@ describe('sandbox-profile: selectSandboxBackend', () => {
 describe('sandbox-profile: wrapSandboxCommand', () => {
   const base = { cwd: '/work/proj', env: { HOME: '/home/u' } as NodeJS.ProcessEnv }
 
-  it('opts out cleanly with RIVET_NO_SANDBOX=1', () => {
-    const d = wrapSandboxCommand('echo hi', { ...base, env: { ...base.env, RIVET_NO_SANDBOX: '1' } })
+  it('passes through by default (sandbox OFF)', () => {
+    const d = wrapSandboxCommand('echo hi', { ...base })
     assert.equal(d.sandboxed, false)
     assert.equal(d.command, 'echo hi')
   })
-  it('wraps with seatbelt on macOS', () => {
-    const d = wrapSandboxCommand('echo hi', { ...base, platform: 'darwin', which: () => true })
+  it('wraps with seatbelt on macOS when RIVET_SANDBOX=1', () => {
+    const d = wrapSandboxCommand('echo hi', { ...base, platform: 'darwin', which: () => true, env: { ...base.env, RIVET_SANDBOX: '1' } })
     assert.equal(d.sandboxed, true)
     assert.equal(d.backend, 'seatbelt')
     assert.ok(d.command.includes('echo hi'))
   })
-  it('fails soft on native windows with an explanatory note', () => {
-    const d = wrapSandboxCommand('echo hi', { ...base, platform: 'win32', which: () => false })
+  it('fails soft on native windows with RIVET_SANDBOX=1', () => {
+    const d = wrapSandboxCommand('echo hi', { ...base, platform: 'win32', which: () => false, env: { ...base.env, RIVET_SANDBOX: '1' } })
     assert.equal(d.sandboxed, false)
     assert.equal(d.backend, 'none')
     assert.match(d.note ?? '', /Windows|rollback/i)
   })
-  it('notes WSL when on linux without tools', () => {
+  it('notes WSL when on linux without tools with RIVET_SANDBOX=1', () => {
     const d = wrapSandboxCommand('echo hi', {
       ...base, platform: 'linux', which: () => false,
-      env: { ...base.env, WSL_DISTRO_NAME: 'Ubuntu' },
+      env: { ...base.env, WSL_DISTRO_NAME: 'Ubuntu', RIVET_SANDBOX: '1' },
       readProcVersion: () => 'microsoft',
     })
     assert.equal(d.sandboxed, false)
@@ -193,50 +193,51 @@ describe('sandbox-profile: getSandboxStartupNotice', () => {
     assert.equal(getSandboxStartupNotice({ cwd: '/w', platform: 'linux', which: (b) => b === 'bwrap', env }), null)
   })
 
-  it('warns sternly on native Windows with no backend', () => {
-    const n = getSandboxStartupNotice({ cwd: '/w', platform: 'win32', which: () => false, env })
+  it('warns sternly on native Windows when RIVET_SANDBOX=1', () => {
+    const n = getSandboxStartupNotice({ cwd: '/w', platform: 'win32', which: () => false, env: { ...env, RIVET_SANDBOX: '1' } })
     assert.ok(n)
     assert.equal(n!.level, 'warn')
     assert.match(n!.message, /Windows/)
-    assert.match(n!.message, /回滚|rollback|WSL/i)
+    assert.match(n!.message, /RIVET_SANDBOX/)
   })
 
-  it('warns on RIVET_NO_SANDBOX with extra Windows emphasis', () => {
-    const generic = getSandboxStartupNotice({ cwd: '/w', platform: 'linux', which: () => true, env: { ...env, RIVET_NO_SANDBOX: '1' } })
+  it('warns when RIVET_SANDBOX=1 but no backend available', () => {
+    const generic = getSandboxStartupNotice({ cwd: '/w', platform: 'linux', which: () => false, env: { ...env, RIVET_SANDBOX: '1' } })
     assert.ok(generic)
-    assert.match(generic!.message, /RIVET_NO_SANDBOX/)
+    assert.match(generic!.message, /RIVET_SANDBOX/)
 
-    const win = getSandboxStartupNotice({ cwd: '/w', platform: 'win32', which: () => true, env: { ...env, RIVET_NO_SANDBOX: '1' } })
+    const win = getSandboxStartupNotice({ cwd: '/w', platform: 'win32', which: () => false, env: { ...env, RIVET_SANDBOX: '1' } })
     assert.match(win!.message, /Windows/)
   })
 
-  it('warns when WSL detected but bwrap missing', () => {
+  it('warns when RIVET_SANDBOX=1 with no backend on WSL', () => {
     const n = getSandboxStartupNotice({
       cwd: '/w', platform: 'linux', which: () => false,
-      env: { ...env, WSL_DISTRO_NAME: 'Ubuntu' }, readProcVersion: () => 'microsoft',
+      env: { ...env, WSL_DISTRO_NAME: 'Ubuntu', RIVET_SANDBOX: '1' }, readProcVersion: () => 'microsoft',
     })
     assert.ok(n)
-    assert.match(n!.message, /WSL|bubblewrap/i)
+    assert.match(n!.message, /RIVET_SANDBOX|沙箱后端/)
   })
 })
 
 describe('sandbox-profile: maybeWarnNoSandbox (one-shot)', () => {
+  const env = { HOME: '/home/u' } as NodeJS.ProcessEnv
   it('emits at most once per process and stays silent when sandboxed', () => {
     _resetSandboxWarningLatch()
     const logs: string[] = []
     const log = (m: string) => logs.push(m)
 
     // Sandboxed → no emission.
-    maybeWarnNoSandbox({ cwd: '/w', platform: 'darwin', which: () => true }, log)
+    maybeWarnNoSandbox({ cwd: '/w', platform: 'darwin', which: () => true, env: { ...env, RIVET_SANDBOX: '1' } }, log)
     assert.equal(logs.length, 0)
 
-    // First no-sandbox call emits once...
-    maybeWarnNoSandbox({ cwd: '/w', platform: 'win32', which: () => false }, log)
+    // First no-backend call with RIVET_SANDBOX=1 emits once...
+    maybeWarnNoSandbox({ cwd: '/w', platform: 'win32', which: () => false, env: { ...env, RIVET_SANDBOX: '1' } }, log)
     assert.equal(logs.length, 1)
     assert.match(logs[0]!, /\[sandbox\]/)
 
     // ...subsequent calls are latched.
-    maybeWarnNoSandbox({ cwd: '/w', platform: 'win32', which: () => false }, log)
+    maybeWarnNoSandbox({ cwd: '/w', platform: 'win32', which: () => false, env: { ...env, RIVET_SANDBOX: '1' } }, log)
     assert.equal(logs.length, 1)
     _resetSandboxWarningLatch()
   })

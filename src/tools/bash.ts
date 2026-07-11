@@ -132,10 +132,8 @@ export function classifyBashOutcome(
 }
 
 /**
- * Wrap a command in a workspace-scoped sandbox. Default-ON (opt out with
- * RIVET_NO_SANDBOX=1). The actual backend/profile logic lives in
- * sandbox-profile.ts (pure + unit-testable per platform); this thin wrapper
- * threads the workspace cwd through so writes are confined to it.
+ * Wrap a command in a workspace-scoped sandbox. Default-OFF.
+ * Enable with RIVET_SANDBOX=1.
  */
 export function wrapSandboxCommand(command: string, cwd?: string): { command: string; sandboxed: boolean; note?: string } {
   const decision = sandboxWrap(command, { cwd: cwd ?? process.cwd() })
