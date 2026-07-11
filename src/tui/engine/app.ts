@@ -3359,7 +3359,7 @@ export class TuiApp {
       const topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
 
       const MAX_INPUT_DISPLAY_LINES = 12
-      const arrowColor = this.theme.success
+      const arrowColor = this.theme.secondary
       const inputLines = this.inputLine.value
         ? this.inputLine.displayLines({ maxLines: MAX_INPUT_DISPLAY_LINES, maxWidth: innerWidth })
         : [`${color('〉', arrowColor)} ${color('█', this.theme.primary)}${color(this.inputLine.placeholder, this.theme.dim)}`]

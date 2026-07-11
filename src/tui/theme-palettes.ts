@@ -275,6 +275,33 @@ const SLATE: ThemePaletteDef = {
   fallbackOverrides: { userColor: 'white', assistantColor: 'white', muted: 'gray' },
 }
 
+// ── Dawn — 启明星（晨星青与地平金）─────────────────────────────────
+const DAWN: ThemePaletteDef = {
+  background: 'dark',
+  description: '启明星晨曦调。晨星青与地平金，黎明前深空冷色背景。',
+  truecolor: {
+    primary: '#5fb3c4',   // 晨星青
+    secondary: '#d4a574', // 地平金
+    success: '#7fb88a',   // 晨曦绿
+    warning: '#d6a35c',   // 琥珀
+    error: '#e08891',
+    dim: '#85929e',       // 晨雾灰
+    pulseQuiet: '#2c3539',
+    pulseActive: '#5fb3c4',
+    pulseAlert: '#e08891',
+    toolShell: '#d4a574',
+    toolEdit: '#5fb3c4',
+    toolTest: '#7fb88a',
+    toolDelegate: '#d6a35c',
+  },
+  overrides: { userColor: '#f4f6f7', assistantColor: '#d5dbdb', muted: '#85929e', systemColor: '#85929e' },
+  fallback: {
+    primary: 'cyan', secondary: 'yellow', success: 'green', warning: 'yellow',
+    error: 'red', dim: 'gray', pulseQuiet: 'gray', pulseActive: 'cyan', pulseAlert: 'red',
+  },
+  fallbackOverrides: { userColor: 'white', assistantColor: 'white', muted: 'gray' },
+}
+
 // ── Antigravity 2.0 — Codex cool azure（对齐桌面端 tokens.css）─────
 const ANTIGRAVITY: ThemePaletteDef = {
   background: 'dark',
@@ -427,6 +454,7 @@ export const THEME_PALETTES = {
   claude: CLAUDE,
   ziwei: ZIWEI,
   slate: SLATE,
+  dawn: DAWN,
   antigravity: ANTIGRAVITY,
   cobalt: COBALT,
   gemini: GEMINI,

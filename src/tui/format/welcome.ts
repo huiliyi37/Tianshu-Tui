@@ -77,9 +77,8 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   if (rows < BANNER_ROWS + RESERVED_ROWS) {
     return [compactLine()]
   }
-
   // ── Kimi Code 风格包裹卡片 ────────────────────────────────────
-  const W = Math.min(cols - 4, 76)
+  const W = Math.min(cols - 2, 78)
   if (W < 45) {
     return [compactLine()]
   }
@@ -89,13 +88,13 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   const infoW = innerW - logoW
 
   const logoLines = [
-    `    ${color('▲', theme.primary)}     `,
-    `  ${color('◄', theme.primary)} ${color('✦', theme.primary, { bold: true })} ${color('►', theme.primary)} `,
-    `    ${color('▼', theme.primary)}     `,
+    `    ${color('·', theme.secondary)}     `,
+    `  ${color('·', theme.secondary)} ${color('✦', theme.primary, { bold: true })} ${color('·', theme.secondary)} `,
+    `    ${color('·', theme.secondary)}     `,
   ]
 
   const rightLines = [
-    color('Welcome to Tianshu Code!', theme.primary, { bold: true }),
+    color('Welcome to Tianshu Code!', theme.secondary, { bold: true }),
     color('Send /help for help information.', theme.muted),
     '', // 空行
   ]
@@ -137,7 +136,7 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
       ? `${truncateToDisplayWidth(valPlain, maxValW - 1, WIDE)}…`
       : valPlain
     const valW = displayWidth(valTruncated, WIDE)
-    const valColored = color(valTruncated, theme.secondary)
+    const valColored = color(valTruncated, theme.userColor || theme.secondary)
     const pad = ' '.repeat(Math.max(0, maxValW - valW))
 
     cardLines.push(`${borderCol('│')} ${keyColored}${valColored}${pad} ${borderCol('│')}`)
@@ -145,9 +144,16 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
 
   cardLines.push(borderCol(`└${'─'.repeat(W - 2)}┘`))
 
+  // 6. 卡片下方留一行状态提示，用琥珀 #d6a35c 高亮前缀
+  const tipPrefix = color('✦ Dawn Mode is ready ', theme.warning, { bold: true })
+  const tipSuffix = color('Tianshu Code now runs with high-density adaptive chrome.', theme.muted)
+  const tipLine = `${tipPrefix}${tipSuffix}`
+
   return [
     '',
     ...cardLines,
+    '',
+    `  ${tipLine}`,
     '',
   ]
 }
