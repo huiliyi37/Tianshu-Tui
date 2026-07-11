@@ -51,7 +51,7 @@ describe('session_vitals tool (W5, incident 20b9714e)', () => {
 
   it('is read-only: no approval, concurrency-safe, always enabled', () => {
     const tool = createSessionVitalsTool(() => null)
-    assert.equal(tool.requiresApproval?.({} as never, {} as never), false)
-    assert.equal(tool.isConcurrencySafe?.({} as never), true)
+    assert.equal(tool.requiresApproval?.({} as never), false)
+    assert.equal(tool.isConcurrencySafe?.(), true)
   })
 })

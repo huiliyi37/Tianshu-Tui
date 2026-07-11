@@ -124,6 +124,8 @@ export interface ToolExecutionDeps {
   destructiveGate?: import('../tools/destructive-gate.js').DestructiveGateState
   /** W2 被拦不弃守护：gate/deny 拦截事件上报（loop 持 turn 级计数）。 */
   onGateBlocked?: (kind: string) => void
+  /** TDD gate 被拦上报：同一 target 反复触发时 advisory 提醒（loop 持会话级计数）。 */
+  onTddBlocked?: (target?: string) => void
   /** 遥测写入(缺口 B 输出裁剪计数等)。 */
   writeTelemetry?: (record: { kind: string } & Record<string, unknown>) => void
 }
@@ -267,6 +269,7 @@ export class ToolExecutionController {
       abortSignal: state.abortSignal,
       destructiveGate: this.deps.destructiveGate,
       onGateBlocked: this.deps.onGateBlocked,
+      onTddBlocked: this.deps.onTddBlocked,
     }
   }
 

@@ -193,7 +193,7 @@ test('PERF: incremental call rescans only the tail (O(tail) not O(full))', () =>
   // indexOf ~O(full_lines); tail-only rescan calls it ~O(tail_lines).
   const originalIndexOf = String.prototype.indexOf
   let indexOfCalls = 0
-  String.prototype.indexOf = function (search: string | RegExp, fromPosition?: number) {
+  String.prototype.indexOf = function (search: string, fromPosition?: number) {
     if (this === docGrowing && search === '\n') indexOfCalls++
     return originalIndexOf.call(this, search, fromPosition)
   }
