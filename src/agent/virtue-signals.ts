@@ -344,6 +344,12 @@ export interface VirtueWeightResult {
 /**
  * 计算美德信号的上下文权重——合并季节调制与证据互抑。
  *
+ * v1 已知限制：
+ *   - weight 仅乘进 pheromone strength（deposit），不乘进 stanceTally/virtueCredit
+ *     （后者仍用静态 WUCHANG_THRESHOLDS 权重表）
+ *   - strength >1 时被 stigmergy store 静默 clamp 到 1.0，高权重段（如 reversal 智
+ *     ×1.5 + 互抑）失去区分度——设计已确认，v1 接受此限制
+ *
  * @param virtueType — 美德类型
  * @param season — 当前认知季节（genesis/reversal/return/wuwei）
  * @param seasonIntensity — 季节强度 0-1（reversal 渐变用）

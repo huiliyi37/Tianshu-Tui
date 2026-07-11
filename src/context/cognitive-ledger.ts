@@ -31,7 +31,7 @@ export interface CognitiveLedgerInput {
   /** 上下文窗口 token 数（会话内恒定），渲染成 1M/200K 等标签。 */
   ctxWindow?: number
   /** T5: 美德 mirror 字段 — renderMirror() 产出，Fibonacci 桶量化 + 固定排序。
-   *  Null 时整段省略。跟随 CVM 节流（不是防脑补锚点，是锦上添花）。 */
+   *  Null 时整段省略。无条件传入；渲染由 cognitive-prep 的 actionable gate 控制。 */
   virtue?: string | null
 }
 
@@ -78,6 +78,7 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     outputEfficiency: input.outputEfficiency,
     ctxRatio: input.ctxRatio,
     ctxWindow: input.ctxWindow,
+    virtue: input.virtue ?? null,
   }
 }
 

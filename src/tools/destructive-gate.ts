@@ -38,6 +38,15 @@ function normalizeCommand(cmd: string): string {
   return cmd.trim().replace(/\s+/g, ' ')
 }
 
+/** 安全调用 getVirtueCredit，回调抛异常时返回 undefined（fallback 到无信任轨迹） */
+function safeGetVirtueCredit(getter?: () => number): number | undefined {
+  try {
+    return getter?.()
+  } catch {
+    return undefined
+  }
+}
+
 function buildBlockMessage(cmd: string, virtueCredit?: number): string {
   const lines = [
     '⛔ 已拦截(destructive-gate):测试刚失败,你正在执行 git 清场命令。',
@@ -88,7 +97,8 @@ export function createDestructiveGateState(options?: { windowSize?: number; getV
       if (blockedOnce.has(key)) return { block: false }
 
       blockedOnce.add(key)
-      return { block: true, message: buildBlockMessage(cmd, getVirtueCredit?.()) }
+      const credit = safeGetVirtueCredit(getVirtueCredit)
+      return { block: true, message: buildBlockMessage(cmd, credit) }
     },
   }
 }

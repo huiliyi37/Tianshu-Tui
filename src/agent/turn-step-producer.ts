@@ -570,7 +570,7 @@ export class TurnStepProducer {
       // 稳定），也是防"窗口紧张"脑补的关键锚点。
       ctxRatio: pressureResult.ratio,
       ctxWindow: this.self.config.contextWindow,
-      // T5: 美德 mirror — Fibonacci 桶字节稳定，跟随 CVM 节流
+      // T5: 美德 mirror — Fibonacci 桶字节稳定，无条件传入
       virtue: this.self.stanceTally.renderMirror(),
     })
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)

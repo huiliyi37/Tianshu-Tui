@@ -99,3 +99,42 @@ describe('GIT_CLEAR_RE 共享正则(迁移回归)', () => {
     }
   })
 })
+
+// ─── T4 getVirtueCredit 选项 ──────────────────────────────────────
+// virtueCredit 仅影响 block message 文案中 ≥0.7 时追加一行信任引导语，
+// 不影响 block 决策逻辑。
+
+describe('destructive-gate getVirtueCredit 选项 (T4)', () => {
+  test('B1: credit < 0.7 → 拦截消息不含信任轨迹', () => {
+    const gate = createDestructiveGateState({ getVirtueCredit: () => 0.5 })
+    gate.noteVerification('failed')
+    const d = gate.evaluate('bash', { command: 'git stash' })
+    assert.equal(d.block, true)
+    if (d.block) {
+      assert.ok(!d.message.includes('美德轨迹'), 'credit < 0.7 不应含信任轨迹')
+    }
+  })
+
+  test('B2: credit ≥ 0.7 → 拦截消息含信任轨迹 + credit 数值', () => {
+    const gate = createDestructiveGateState({ getVirtueCredit: () => 0.72 })
+    gate.noteVerification('failed')
+    const d = gate.evaluate('bash', { command: 'git stash' })
+    assert.equal(d.block, true)
+    if (d.block) {
+      assert.match(d.message, /美德轨迹/)
+      assert.match(d.message, /0\.72/)
+    }
+  })
+
+  test('B3: getVirtueCredit 抛异常不崩,正常返回 block（无信任轨迹）', () => {
+    const gate = createDestructiveGateState({
+      getVirtueCredit: () => { throw new Error('boom') },
+    })
+    gate.noteVerification('failed')
+    const d = gate.evaluate('bash', { command: 'git stash' })
+    assert.equal(d.block, true)
+    if (d.block) {
+      assert.ok(!d.message.includes('美德轨迹'), '回调抛异常时应 fallback 到无信任轨迹')
+    }
+  })
+})
