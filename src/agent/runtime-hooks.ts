@@ -21,6 +21,11 @@ export interface RuntimeToolEvent {
   /** Tool result content string — enables hooks to inspect output for lossy markers
    *  and other content-level signals without duplicating tool-pipeline logic. */
   resultContent?: string
+  /** True if this tool call actually went through interactive approval
+   *  (shouldAsk=true and approved). False = auto-approved/yolo. Enables
+   *  virtue detection (礼 boundary-respect) to distinguish real approval
+   *  from routine writes. */
+  approvalRequired?: boolean
 }
 
 export interface RuntimeHookSnapshot {

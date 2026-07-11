@@ -598,6 +598,11 @@ export class ToolExecutionController {
           target,
           input: tu.input,
           resultContent: result && 'content' in result && typeof result.content === 'string' ? result.content : undefined,
+          // 发现二修复：礼的真实判定——yolo 模式跳过审批门（approvalRequired=false），
+          // 其他模式下写操作走审批门（true）。非写工具始终 undefined。
+          approvalRequired: (tu.name === 'write_file' || tu.name === 'edit_file' || tu.name === 'hash_edit')
+            ? this.deps.config.approvalMode !== 'dangerously-skip-permissions'
+            : undefined,
           // Classify failure for vigor: environment issues (timeout, api_error)
           // get reduced phasic penalty vs semantic failures (type_error, assertion).
           failureClass: result && 'is_error' in result && result.is_error === true

@@ -98,8 +98,11 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
         toolName: tool.name,
         toolTarget: tool.target,
         toolSuccess: tool.success,
-        // 仁：ask_user_question 默认视为质疑（除非明显是确认性提问）
-        agreedWithUser: tool.name === 'ask_user_question' ? false : undefined,
+        // 仁：ask_user_question 仅在非确认性提问时视为质疑。
+        // 确认性提问（options 只有一个或无 options）不触发仁。
+        agreedWithUser: tool.name === 'ask_user_question'
+          ? (tool.input?.options && Array.isArray(tool.input.options) && tool.input.options.length <= 1 ? true : false)
+          : undefined,
         // 义：run_tests 在 agent 主动调用时默认视为 proactive
         userRequested: tool.name === 'run_tests' ? false : undefined,
         confidence: ctx.snapshot.vigor?.tonic ?? 0.6,
@@ -108,8 +111,9 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
           target: h.target,
           status: h.status,
         })),
-        // 礼：写操作经过审批门即视为 boundary-respect
-        approvalRequired: (tool.name === 'write_file' || tool.name === 'edit_file') ? true : undefined,
+        // 礼：只有真正经过审批门的写操作才触发——从 tool.approvalRequired
+        // 读取真实值，不再硬编码 true（发现二修复）。
+        approvalRequired: tool.approvalRequired === true ? true : undefined,
       }
 
       const virtueSignal = detectVirtue(virtueCtx)
