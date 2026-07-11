@@ -347,6 +347,8 @@ export interface ToolPipelineDeps {
    *  hook/reliability/doom-loop/plan-mode/deny）。loop 持 turn 级计数，
    *  gate-block-guard hook 在 postTurn 读取——单 turn ≥2 次被拦触发反放弃 advisory。 */
   onGateBlocked?: (kind: string) => void
+  /** P1b: TDD gate 同 target 被拦计数回调 */
+  onTddBlocked?: (target?: string) => void
 }
 
 export interface ToolExecResult {
@@ -730,6 +732,7 @@ export async function executeToolUse(
       const decision = evaluateTddGate(gateState, tu.name, tddConfig, editTarget)
       if (decision.action === 'block') {
         deps.onGateBlocked?.('tdd')
+        deps.onTddBlocked?.(editTarget)
         callbacks.onToolResult(tu.id, tu.name, decision.message!, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: decision.message!, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }

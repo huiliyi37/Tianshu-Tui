@@ -337,6 +337,20 @@ return new ToolExecutionController({
       },
       destructiveGate: self.destructiveGate,
       onGateBlocked: kind => { self.gateBlockedKinds.push(kind) },
+      onTddBlocked: (target?: string) => {
+        if (!target) return
+        const count = (self.tddBlockedTargets.get(target) ?? 0) + 1
+        self.tddBlockedTargets.set(target, count)
+        if (count >= 3) {
+          self.advisoryBus.submit({
+            key: `tdd-same-target:${target}`,
+            priority: 0.45,
+            category: 'discipline',
+            content: `同一文件 ${target} 已被 TDD gate 拦截 ${count} 次——确认你是否在反复尝试同一修改而没先跑测试。先运行相关测试定位问题，再回来改。`,
+            ttl: 1,
+          })
+        }
+      },
       writeTelemetry: (record) => { self.telemetryWriter.write(record) },
     })
 }

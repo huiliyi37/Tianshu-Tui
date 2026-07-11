@@ -85,7 +85,9 @@ export function buildKickActions(
   // 翻译成"上下文快满了"。只有实测 ctxRatio ≥ 0.7 才提上下文；否则如实
   // 说复合压力来源（资源/开销），不制造不存在的窗口焦虑。
   if (s.pressure > 0.7) {
-    if (ctxRatio !== undefined && ctxRatio >= 0.7) {
+    if (ctxRatio !== undefined && ctxRatio >= 0.8) {
+      parts.push(`- 上下文使用率 ${Math.round(ctxRatio * 100)}%，接近窗口上限——立即主动 compact 或提交当前工作，不要等系统触发`)
+    } else if (ctxRatio !== undefined && ctxRatio >= 0.7) {
       parts.push(`- 上下文使用率 ${Math.round(ctxRatio * 100)}%，建议提交当前完成的部分，用 checkpoint 收束`)
     } else {
       parts.push('- 系统复合压力偏高（资源/开销复合值，非窗口余量告急）——收敛当前子目标，避免同时展开多线')

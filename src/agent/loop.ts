@@ -393,6 +393,8 @@ export class AgentLoop {
   /** W2 被拦不弃守护：本 turn 被闸门拦截的事件 kind 列表（pipeline onGateBlocked
    *  累计，gate-block-guard hook postTurn drain 清零）。 */
   gateBlockedKinds: string[] = []
+  /** P1b: TDD gate 同 target 被拦计数 — session 级累计，≥3 触发 advisory */
+  tddBlockedTargets = new Map<string, number>()
   pressureMonitor: PressureMonitor
   sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   turnBudget: TurnBudget = createTurnBudget(0)
