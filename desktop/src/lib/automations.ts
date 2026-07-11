@@ -88,6 +88,45 @@ export function haltedAppFromError(error: string | undefined): string | null {
   return m?.[1] ?? null
 }
 
+// ── RPA 录制蒸馏（录制 → 蒸馏会话的持久关联）───────────────────────────
+
+/** 一次蒸馏的落点：会话 + 工作流文档路径（相对该会话 cwd）。 */
+export interface DistillLink {
+  sessionId: string
+  workflowPath: string
+}
+
+const DISTILL_LINKS_KEY = 'rivet.recorder.distillLinks'
+
+type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
+
+/** 全量读取 recordingId → DistillLink 映射（损坏时回空表，不抛）。 */
+export function loadDistillLinks(storage: StorageLike = localStorage): Record<string, DistillLink> {
+  try {
+    const raw = storage.getItem(DISTILL_LINKS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, DistillLink>
+    return typeof parsed === 'object' && parsed !== null ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/** 记录一次蒸馏关联；返回更新后的全量映射（供组件 setState）。 */
+export function saveDistillLink(
+  recordingId: string,
+  link: DistillLink,
+  storage: StorageLike = localStorage,
+): Record<string, DistillLink> {
+  const links = { ...loadDistillLinks(storage), [recordingId]: link }
+  try {
+    storage.setItem(DISTILL_LINKS_KEY, JSON.stringify(links))
+  } catch {
+    // 存储满/隐私模式——映射仅是便利功能，静默降级
+  }
+  return links
+}
+
 /** Tone class for a status badge (maps to existing badge color classes). */
 export function statusTone(status: TaskStatus): 'green' | 'red' | 'yellow' | 'muted' {
   switch (status) {

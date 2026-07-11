@@ -31,6 +31,27 @@
   "list": {
     "empty": "还没有自动化任务"
   },
+  "recorder": {
+    "title": "示范录制",
+    "record": "录制新自动化",
+    "recordHint": "在桌面上示范一遍操作，agent 会把它蒸馏成可回放的语义工作流",
+    "unsupported": "GUI 示范录制当前仅支持 macOS 桌面版",
+    "permissionMissing": "缺少录制所需的系统权限（输入监控 / 辅助功能）",
+    "started": "录制已开始——请示范要自动化的操作，完成后点指示条上的「停止」",
+    "stopped": "录制完成：{{count}} 步（{{apps}}）",
+    "indicator": "录制中 · 已录 {{count}} 步",
+    "stop": "停止",
+    "summary": "{{steps}} 步 · {{secs}} 秒 · {{apps}}",
+    "distill": "蒸馏成工作流",
+    "distillHint": "把录制交给 agent，蒸馏成带元素证据与验证步骤的语义工作流文档",
+    "distillStarted": "蒸馏已开始——agent 正在把录制转成语义工作流",
+    "proRequired": "录制回放依赖 Computer Use，需要 Pro 授权",
+    "createFrom": "创建自动化",
+    "createFromHint": "用蒸馏出的工作流文档预填上方创建表单（computer_use + 前几次审批）",
+    "prefilled": "已用工作流预填表单——补上触发时间后点「新建」",
+    "workflowNotReady": "工作流文档还没生成——请先等蒸馏会话完成",
+    "viewDistill": "查看蒸馏会话"
+  },
   "history": {
     "title": "执行历史",
     "selectHint": "选择左侧一个自动化查看执行历史",

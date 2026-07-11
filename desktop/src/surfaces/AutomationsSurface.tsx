@@ -10,6 +10,11 @@ import {
   useSchedule,
   useTasks,
   useCancelTask,
+  useRecorderPermissions,
+  useRecordings,
+  useStartRecording,
+  useDeleteRecording,
+  useDistillRecording,
 } from '../state/queries'
 import { useUiDispatch } from '../state/store'
 import {
@@ -20,8 +25,12 @@ import {
   statusTone,
   trustStage,
   newlyGrantedApps,
+  loadDistillLinks,
+  saveDistillLink,
   FIRST_RUNS_TRUST_THRESHOLD,
+  type DistillLink,
 } from '../lib/automations'
+import { getFileContent, type RecordingSummary } from '../runtime/client'
 import type { ReviewPolicy, ScheduledTask, TaskStatus } from '../runtime/types'
 
 type TriggerType = 'interval' | 'cron' | 'oneshot'
@@ -118,6 +127,60 @@ export function AutomationsSurface() {
     dispatch({ type: 'setSurface', surface: 'workspace' })
   }
 
+  // ── RPA 录制回放：示范录制 → 蒸馏成语义工作流 → 预填创建自动化 ──
+  const recPerms = useRecorderPermissions()
+  const recordings = useRecordings()
+  const startRec = useStartRecording()
+  const delRec = useDeleteRecording()
+  const distill = useDistillRecording()
+  const [distillLinks, setDistillLinks] = useState<Record<string, DistillLink>>(() => loadDistillLinks())
+
+  const beginRecording = () => {
+    const perms = recPerms.data
+    if (!perms?.supported) {
+      toast.error(t('recorder.unsupported'))
+      return
+    }
+    if (!perms.inputMonitoring || !perms.accessibility) {
+      toast.error(perms.detail || t('recorder.permissionMissing'))
+      return
+    }
+    startRec.mutate(undefined, {
+      onSuccess: () => toast.success(t('recorder.started')),
+      onError: (err) => toast.error((err as Error).message),
+    })
+  }
+
+  const distillRec = (id: string) => {
+    distill.mutate({ id }, {
+      onSuccess: (res) => {
+        setDistillLinks(saveDistillLink(id, { sessionId: res.session.id, workflowPath: res.workflowPath }))
+        toast.success(t('recorder.distillStarted'))
+        jumpToSession(res.session.id)
+      },
+      onError: (err) => {
+        const msg = (err as Error).message
+        toast.error(/pro_required/.test(msg) ? t('recorder.proRequired') : msg)
+      },
+    })
+  }
+
+  // 蒸馏完成后：读工作流文档，预填创建表单（computer_use + first-runs），
+  // 用户补触发时间即可创建——即 Phase 4 的回放接线。
+  const createFromWorkflow = async (id: string) => {
+    const link = distillLinks[id]
+    if (!link) return
+    try {
+      const file = await getFileContent(link.sessionId, link.workflowPath)
+      setPrompt(file.content)
+      setAllowedTools('computer_use')
+      setReviewPolicy('first-runs')
+      toast.success(t('recorder.prefilled'))
+    } catch {
+      toast.error(t('recorder.workflowNotReady'))
+    }
+  }
+
   return (
     <div className="automations-dashboard" style={{ display: 'flex', height: '100%', minHeight: 0 }}>
       {/* Left: definitions + create form */}
@@ -179,6 +242,35 @@ export function AutomationsSurface() {
             </div>
           )}
         </div>
+
+        {/* RPA 录制：示范一遍 → agent 蒸馏成语义工作流 → 一键创建自动化 */}
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{t('recorder.title')}</span>
+          <button
+            className="btn ghost sm"
+            disabled={startRec.isPending}
+            title={recPerms.data?.supported === false ? t('recorder.unsupported') : t('recorder.recordHint')}
+            onClick={beginRecording}
+          >
+            {t('recorder.record')}
+          </button>
+        </div>
+        {(recordings.data ?? []).length > 0 && (
+          <div style={{ overflowY: 'auto', maxHeight: '30%', flexShrink: 0 }}>
+            {(recordings.data ?? []).map((rec) => (
+              <RecordingCard
+                key={rec.id}
+                rec={rec}
+                link={distillLinks[rec.id]}
+                distillPending={distill.isPending}
+                onDistill={() => distillRec(rec.id)}
+                onCreateFrom={() => void createFromWorkflow(rec.id)}
+                onViewSession={(sid) => jumpToSession(sid)}
+                onDelete={() => delRec.mutate(rec.id)}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="automations-def-list" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
           {definitions.length === 0 && <div className="empty">{t('list.empty')}</div>}
@@ -256,6 +348,56 @@ export function AutomationsSurface() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+function RecordingCard({
+  rec,
+  link,
+  distillPending,
+  onDistill,
+  onCreateFrom,
+  onViewSession,
+  onDelete,
+}: {
+  rec: RecordingSummary
+  link: DistillLink | undefined
+  distillPending: boolean
+  onDistill: () => void
+  onCreateFrom: () => void
+  onViewSession: (sessionId: string) => void
+  onDelete: () => void
+}) {
+  const { t } = useTranslation('automations')
+  const secs = Math.max(1, Math.round(rec.durationMs / 1000))
+  return (
+    <div className="schedule-card">
+      <div className="title">{new Date(rec.startedAt).toLocaleString()}</div>
+      <div className="meta">
+        {t('recorder.summary', { steps: rec.eventCount, secs, apps: rec.apps.join(', ') || '-' })}
+      </div>
+      <div className="row">
+        <button
+          className="btn ghost"
+          disabled={distillPending}
+          title={t('recorder.distillHint')}
+          onClick={onDistill}
+        >
+          {t('recorder.distill')}
+        </button>
+        {link && (
+          <>
+            <button className="btn ghost" title={t('recorder.createFromHint')} onClick={onCreateFrom}>
+              {t('recorder.createFrom')}
+            </button>
+            <button className="btn ghost" onClick={() => onViewSession(link.sessionId)}>
+              {t('recorder.viewDistill')}
+            </button>
+          </>
+        )}
+        <button className="btn ghost" onClick={onDelete}>{t('schedule.delete')}</button>
       </div>
     </div>
   )

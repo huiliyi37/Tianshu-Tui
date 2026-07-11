@@ -40,6 +40,12 @@ import {
   setHooks,
   setPlanMode,
   unarchiveSession,
+  getRecorderPermissions,
+  listRecordings,
+  deleteRecording,
+  startRecording,
+  stopRecording,
+  distillRecording,
   type PrReviewInput,
 } from '../runtime/client'
 import type { HookEntry, PlanModeState } from '../runtime/types'
@@ -60,6 +66,8 @@ export const qk = {
   schedule: ['schedule'] as const,
   tasks: ['tasks'] as const,
   computerUse: ['config', 'computer-use'] as const,
+  recordings: ['recordings'] as const,
+  recorderPermissions: ['recorder', 'permissions'] as const,
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
   githubPrDiff: (n: number) => ['github', 'pr', n, 'diff'] as const,
@@ -460,5 +468,54 @@ export function useFileDiff(path: string | null, sessionId: string | null) {
     queryFn: () => getFileDiff(path!, sessionId!),
     enabled: path !== null && sessionId !== null,
     staleTime: 3000,
+  })
+}
+
+// ── RPA 录制回放 ────────────────────────────────────────────────────
+
+/** 录制权限探测（macOS：输入监控 + 辅助功能）。非 Tauri / 非 macOS 报 supported=false。 */
+export function useRecorderPermissions(enabled = true) {
+  return useQuery({
+    queryKey: qk.recorderPermissions,
+    queryFn: getRecorderPermissions,
+    enabled,
+    staleTime: 10_000,
+  })
+}
+
+export function useRecordings() {
+  return useQuery({ queryKey: qk.recordings, queryFn: listRecordings, staleTime: 5_000 })
+}
+
+export function useStartRecording() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => startRecording(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.recordings }),
+  })
+}
+
+export function useStopRecording() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => stopRecording(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.recordings }),
+  })
+}
+
+export function useDeleteRecording() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteRecording(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.recordings }),
+  })
+}
+
+/** 录制 → 蒸馏会话（一次性 agent task，产出语义工作流文档）。 */
+export function useDistillRecording() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, cwd }: { id: string; cwd?: string }) => distillRecording(id, cwd),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
   })
 }

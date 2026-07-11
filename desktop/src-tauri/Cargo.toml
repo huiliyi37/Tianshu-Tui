@@ -34,6 +34,13 @@ tauri-plugin-single-instance = "2"
 ed25519-dalek = "2"
 machine-uid = "0.5"
 
+# RPA 录制捕获层（macOS）：CGEventTap 全局监听 + AX hit-test。
+# 均为 tauri/wry 已传递引入的版本，不新增独立依赖树。
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.25"
+core-foundation = "0.10"
+foreign-types = "0.5"
+
 [profile.release]
 strip = true
 lto = "thin"

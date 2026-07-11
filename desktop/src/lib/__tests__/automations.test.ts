@@ -12,6 +12,8 @@ import {
   trustStage,
   newlyGrantedApps,
   haltedAppFromError,
+  loadDistillLinks,
+  saveDistillLink,
   FIRST_RUNS_TRUST_THRESHOLD,
 } from '../automations.ts'
 import type { TaskRecord } from '../../runtime/types.ts'
@@ -105,6 +107,25 @@ test('newlyGrantedApps diffs 新增授权', () => {
   assert.deepEqual(newlyGrantedApps(['Safari'], ['Safari', 'Notes']), ['Notes'])
   assert.deepEqual(newlyGrantedApps(['Safari', 'Notes'], ['Safari']), [])
   assert.deepEqual(newlyGrantedApps([], []), [])
+})
+
+test('distill links 读写 roundtrip 且损坏数据回空表', () => {
+  const store = new Map<string, string>()
+  const storage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => { store.set(k, v) },
+  }
+  assert.deepEqual(loadDistillLinks(storage), {})
+  const links = saveDistillLink('rec-1', { sessionId: 's1', workflowPath: '.rivet/recordings/rec-1.workflow.md' }, storage)
+  assert.equal(links['rec-1']!.sessionId, 's1')
+  assert.deepEqual(loadDistillLinks(storage), links)
+  // 追加第二条不丢第一条
+  saveDistillLink('rec-2', { sessionId: 's2', workflowPath: 'w2.md' }, storage)
+  const all = loadDistillLinks(storage)
+  assert.equal(Object.keys(all).length, 2)
+  // 损坏数据回空表
+  store.set('rivet.recorder.distillLinks', '{broken')
+  assert.deepEqual(loadDistillLinks(storage), {})
 })
 
 test('haltedAppFromError 从 halt 文案提取 app 名', () => {

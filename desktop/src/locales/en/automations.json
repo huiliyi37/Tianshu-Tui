@@ -31,6 +31,27 @@
   "list": {
     "empty": "No automations yet"
   },
+  "recorder": {
+    "title": "Demonstration Recording",
+    "record": "Record new automation",
+    "recordHint": "Demonstrate the task once on your desktop; the agent distills it into a replayable semantic workflow",
+    "unsupported": "GUI demonstration recording is currently macOS desktop only",
+    "permissionMissing": "Missing required system permissions (Input Monitoring / Accessibility)",
+    "started": "Recording started — demonstrate the task, then hit \"Stop\" on the indicator bar",
+    "stopped": "Recording finished: {{count}} steps ({{apps}})",
+    "indicator": "Recording · {{count}} steps captured",
+    "stop": "Stop",
+    "summary": "{{steps}} steps · {{secs}}s · {{apps}}",
+    "distill": "Distill to workflow",
+    "distillHint": "Hand the recording to the agent to distill into a semantic workflow with element evidence and verification steps",
+    "distillStarted": "Distillation started — the agent is turning the recording into a semantic workflow",
+    "proRequired": "Record & replay relies on Computer Use and requires a Pro license",
+    "createFrom": "Create automation",
+    "createFromHint": "Prefill the create form above with the distilled workflow (computer_use + review-first-runs)",
+    "prefilled": "Form prefilled from the workflow — set a trigger and hit \"Create\"",
+    "workflowNotReady": "Workflow document not ready yet — wait for the distillation session to finish",
+    "viewDistill": "View distillation session"
+  },
   "history": {
     "title": "Run History",
     "selectHint": "Select an automation on the left to view its run history",

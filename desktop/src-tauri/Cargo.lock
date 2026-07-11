@@ -4530,7 +4530,10 @@ name = "tianshu-desktop"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "core-foundation",
+ "core-graphics",
  "ed25519-dalek",
+ "foreign-types",
  "known-folders",
  "machine-uid",
  "portable-pty",

@@ -226,6 +226,87 @@ export async function verifyLicenseHeartbeat(): Promise<
   return { status: await getActivationStatus() }
 }
 
+// ── RPA 录制（Tauri 命令 + 蒸馏路由）────────────────────────────────────
+// 捕获层在 Rust（desktop/src-tauri/src/recorder.rs），JSONL 落 RIVET_HOME/
+// recordings；蒸馏走 sidecar 的 POST /recordings/distill（一次性 agent 会话）。
+
+export interface RecorderPermissions {
+  inputMonitoring: boolean
+  accessibility: boolean
+  detail: string
+  supported: boolean
+}
+
+export interface RecordingSummary {
+  id: string
+  path: string
+  startedAt: number
+  eventCount: number
+  durationMs: number
+  apps: string[]
+}
+
+export interface RecordingStatus {
+  recording: boolean
+  id: string | null
+  count: number
+}
+
+/** 录制权限探测。浏览器 dev（无 Tauri）与非 macOS 报 supported=false。 */
+export async function getRecorderPermissions(): Promise<RecorderPermissions> {
+  try {
+    return await invoke<RecorderPermissions>('recorder_permissions')
+  } catch {
+    return { inputMonitoring: false, accessibility: false, detail: '', supported: false }
+  }
+}
+
+export function startRecording(): Promise<{ id: string; path: string }> {
+  return invoke<{ id: string; path: string }>('recording_start')
+}
+
+export function stopRecording(): Promise<RecordingSummary> {
+  return invoke<RecordingSummary>('recording_stop')
+}
+
+export async function getRecordingStatus(): Promise<RecordingStatus> {
+  try {
+    return await invoke<RecordingStatus>('recording_status')
+  } catch {
+    return { recording: false, id: null, count: 0 }
+  }
+}
+
+export async function listRecordings(): Promise<RecordingSummary[]> {
+  try {
+    return await invoke<RecordingSummary[]>('list_recordings')
+  } catch {
+    return []
+  }
+}
+
+export function deleteRecording(id: string): Promise<void> {
+  return invoke<void>('delete_recording', { id })
+}
+
+export function readRecording(id: string): Promise<string> {
+  return invoke<string>('read_recording', { id })
+}
+
+export interface DistillResult {
+  session: SessionRecord
+  /** 工作流文档相对 session cwd 的路径（蒸馏 agent 写入的目标）。 */
+  workflowPath: string
+  eventCount: number
+  apps: string[]
+}
+
+/** 录制 → 蒸馏会话：读 JSONL（Tauri）→ POST /recordings/distill（sidecar）。 */
+export async function distillRecording(recordingId: string, cwd?: string): Promise<DistillResult> {
+  const jsonl = await readRecording(recordingId)
+  return apiPost<DistillResult>('/recordings/distill', { recordingId, jsonl, ...(cwd ? { cwd } : {}) })
+}
+
 export function runtimeBaseUrl(info: RuntimeInfo): string {
   return `http://127.0.0.1:${info.port}`
 }

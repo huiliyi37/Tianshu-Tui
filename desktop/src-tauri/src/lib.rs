@@ -1,5 +1,6 @@
 mod activation;
 mod pty;
+mod recorder;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -443,7 +444,7 @@ fn resource_dir_fallback(app: &tauri::App) -> PathBuf {
 /// with `EISDIR: lstat '<drive>:'`, killing the sidecar. Strip the prefix so
 /// the spawned `node` process receives an ordinary path. No-op off Windows.
 #[cfg(target_os = "windows")]
-fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
+pub(crate) fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
     use std::path::Component;
 
     let mut comps = p.components();
@@ -469,7 +470,7 @@ fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
+pub(crate) fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
     p
 }
 
@@ -881,7 +882,7 @@ fn read_launcher_config<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> Laun
 /// Priority:
 ///   1. launcher.json rivetHome (set by desktop Settings > Storage)
 ///   2. default: platform default, with portable-mode detection on first run
-fn resolve_rivet_home<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> PathBuf {
+pub(crate) fn resolve_rivet_home<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> PathBuf {
     let cfg = read_launcher_config(app);
     if !cfg.rivet_home.is_empty() {
         return PathBuf::from(cfg.rivet_home);
@@ -1574,6 +1575,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .manage(pty::PtyManager::default())
+        .manage(recorder::RecorderState::default())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
             device_fingerprint,
@@ -1590,7 +1592,14 @@ pub fn run() {
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
-            pty::pty_kill
+            pty::pty_kill,
+            recorder::recorder_permissions,
+            recorder::recording_start,
+            recorder::recording_stop,
+            recorder::recording_status,
+            recorder::list_recordings,
+            recorder::delete_recording,
+            recorder::read_recording
         ])
         .setup(|app| {
             let (info, child, spec) = spawn_sidecar(app);
