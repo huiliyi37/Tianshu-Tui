@@ -515,6 +515,8 @@ export class AgentLoop {
    *  tool-pipeline 是唯一写者兼读者,loop 只持有生命周期。 */
   destructiveGate = createDestructiveGateState({
     getVirtueCredit: () => {
+      // 反证 4：reversal 季冻结——平稳期信任不适用于压力态
+      if (this.currentSeason === 'reversal') return 0.5
       const signals = this.stanceTally.getAllSignals?.()
       return signals ? computeVirtueCredit(signals) : 0.5
     },

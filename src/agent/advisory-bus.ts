@@ -541,6 +541,8 @@ export class AdvisoryBus {
    *   被静态 persona 顶掉——静音栈的一环。)
    */
   render(activeStarDomain?: string, turn = 0): string {
+    // T6 正向臂 keys——render 周期内 accumulated，在 effectivePriority 消费后随 render 结束丢弃
+    let positiveArmKeys = new Set<string>()
     // ── Phase 2 状态机:candidate → pending → confirmed/revoked ──
     // A. 先处理既有挂起（新条目在 B 段才入队——观察进度从下个渲染周期起算,
     //    否则 observe.turns=1 会在挂起当轮就被判到期,挂起形同虚设）:
@@ -680,14 +682,19 @@ export class AdvisoryBus {
       this.recordDropped(droppedByEfficacy)
       all = kept
 
-      // ── T6 efficacy 正向臂：连续采纳 ≥3 → priority +0.05，冷却减半 ──
-      // 负向臂让"说了没人听"的 key 退场，正向臂让"说了有人听"的 key 升频。
+      // ── T6 efficacy 正向臂：累计采纳 ≥3 → 冷却减半，有效 priority 排序加成 ──
+      // 负向臂让"说了没人听"的 key 退场，正向臂让"说了有人听"的 key 加速送达。
+      // 设计写"连续采纳 ≥3"，当前实现为累计 adopted ≥3（readback 无 adoptedStreak）。
+      // 累积口径 + 不 mutation + cap 0.79 三道防线确保不击穿豁免线。
+      // 注意：不 mutation e.priority——alive 跨渲染周期持有同一批引用，
+      // 原地 +=0.05 会复合累加，且 0.85 越 0.8 fail-open 豁免线导致永久逃逸负向臂。
+      // 有效 priority 仅在 render 周期内用于排序比较，不写入条目对象。
+      positiveArmKeys = new Set<string>()
       for (const e of all) {
         const stats = this.efficacyStats(e.key)
         if (!stats || stats.adopted < 3) continue
-        // priority 提升 0.05（上限 0.85，不突破 fail-open 豁免线 0.8 太远）
-        e.priority = Math.min(0.85, e.priority + 0.05)
-        // 冷却减半：把当前冷却长度减半（作用于下次 cooldown）
+        positiveArmKeys.add(e.key)
+        // 冷却减半（作用于下次 cooldown，安全——修改的是 Map 不是条目对象）
         const currentLen = this.efficacyCooldownLength.get(e.key)
         if (currentLen && currentLen > 1) {
           this.efficacyCooldownLength.set(e.key, Math.max(1, Math.floor(currentLen / 2)))
@@ -846,8 +853,16 @@ export class AdvisoryBus {
       if (lift !== undefined && lift !== null) return (lift + 1) / 2
       return this.adoptionRateProvider?.(key) ?? 0.5
     }
+    const effectivePriority = (e: AdvisoryEntry): number => {
+      if (positiveArmKeys.has(e.key)) {
+        return Math.min(0.79, e.priority + 0.05) // cap 不越 0.8 豁免线
+      }
+      return e.priority
+    }
     const compareEntries = (a: AdvisoryEntry, b: AdvisoryEntry): number => {
-      if (b.priority !== a.priority) return b.priority - a.priority
+      const pa = effectivePriority(a)
+      const pb = effectivePriority(b)
+      if (pb !== pa) return pb - pa
       if (!this.adoptionRateProvider && !this.liftProvider) return 0
       return secondaryScore(b.key) - secondaryScore(a.key)
     }
@@ -931,9 +946,10 @@ export class AdvisoryBus {
       return ''
     }
 
-    const lines = sorted.map(e =>
-      `  <entry key="${escapeXml(e.key)}" priority="${e.priority.toFixed(2)}" category="${e.category}">${escapeXml(this.applyTone(e))}</entry>`
-    )
+    const lines = sorted.map(e => {
+      const ep = effectivePriority(e)
+      return `  <entry key="${escapeXml(e.key)}" priority="${ep.toFixed(2)}" category="${e.category}">${escapeXml(this.applyTone(e))}</entry>`
+    })
 
     // TTL 递减：TTL > 1 的条目保留到 alive，下轮继续
     this.alive = sorted
