@@ -1574,6 +1574,24 @@ describe('AgentLoop — convergence emission cooldown', () => {
     assert.ok(shifts <= 2, `cooldown=3 should cap emissions at 2 over turns 14..19, got ${shifts}`)
   })
 
+  it('wording uses phase-relative turns, not the global session turn (W1, 20b9714e)', async () => {
+    const agent = stuckLoop()
+    let reason = ''
+    const cb = {
+      ...makeCallbacks(),
+      onPhaseChange: (phase: string, detail?: { reason?: string }) => {
+        if (phase === 'convergence-warning') reason = detail?.reason ?? ''
+      },
+    }
+
+    // First check lands at global turn 90 — the phase baseline is set here, so
+    // the message must talk about ~1 phase turn, never "90 轮".
+    await agent.runConvergenceCheck(90, 'plan', true, false, cb)
+    assert.ok(reason, 'expected a convergence warning emission')
+    assert.ok(!reason.includes('90'), `wording must not leak the global turn count: ${reason}`)
+    assert.ok(reason.includes('近 1 轮'), `expected phase-relative count in wording: ${reason}`)
+  })
+
   it('user intervention resets the cooldown and skips that turn', async () => {
     const agent = stuckLoop()
     let shifts = 0

@@ -251,6 +251,26 @@ export const LIFT_MUTE_RENDERS = 10
 /** lift ≤ 此阈值判定为"提醒无真实增益"（成熟样本前提下） */
 export const LIFT_MUTE_THRESHOLD = 0
 
+// ─── W2 efficacy 负反馈环（incident 20b9714e）────────────────────────
+// efficacy 台账一直在如实记录 delivered/adopted，但发射侧从不回读——
+// convergence advisory 同会话送达 32 次、采纳 0 次仍照发不误。
+// 规则（仅会话内生效，不做跨会话全局静默）：
+//   delivered ≥ 3 且 adopted = 0 → 进入冷却，每次送达冷却翻倍（2→4→8…）
+//   delivered ≥ 6 仍零采纳 → 本会话静默该 key
+// fail-open 豁免：constitutional tier 或 priority ≥ 0.8 的条目不受此环约束。
+
+/** 进入冷却翻倍的最低会话内送达次数（零采纳前提） */
+export const EFFICACY_COOLDOWN_DELIVERED = 3
+/** 触发会话内静默的送达次数（零采纳前提） */
+export const EFFICACY_SILENCE_DELIVERED = 6
+/** 冷却初值（渲染周期），此后每次送达翻倍 */
+export const EFFICACY_BASE_COOLDOWN_RENDERS = 2
+
+/** 会话内 per-key 效能计数查询 — 由 AdvisoryReadback 会话统计实现 */
+export interface EfficacyStatsProvider {
+  (key: string): { delivered: number; adopted: number } | null
+}
+
 /** 习惯化查询接口 — 由 AdvisoryReadback 实现（结构化鸭子类型，便于测试） */
 export interface HabituationPolicy {
   getIgnoredStreak(key: string): number
@@ -342,6 +362,14 @@ export class AdvisoryBus {
   /** 静音期满后的 probation 名单 — 放行一次送达以收集新证据,之后 lift 仍 ≤0 才再静音 */
   private liftProbation = new Set<string>()
   private ledgerLiftMuted = 0
+  // ── W2 efficacy 负反馈环 ──
+  private efficacyStats: EfficacyStatsProvider | null = null
+  /** 本会话被 efficacy 环静默的 key（delivered ≥ 6 且零采纳） */
+  private efficacySilenced = new Set<string>()
+  /** key → 剩余冷却渲染周期数 */
+  private efficacyCooldownRemaining = new Map<string, number>()
+  /** key → 上次冷却长度（下次送达时翻倍） */
+  private efficacyCooldownLength = new Map<string, number>()
 
   /** P1b：注入习惯化查询源（AdvisoryReadback）。缺省 = 不做习惯化对抗。 */
   setHabituationPolicy(policy: HabituationPolicy): void {
@@ -394,6 +422,17 @@ export class AdvisoryBus {
    *  缺省 = 不消费 lift（不静音,排序回退采纳率）。 */
   setLiftProvider(provider: (key: string) => number | null): void {
     this.liftProvider = provider
+  }
+
+  /** W2：注入会话内 efficacy 计数查询（AdvisoryReadback 会话统计）。
+   *  缺省 = 不做负反馈环（全回退旧行为）。 */
+  setEfficacyStatsProvider(provider: EfficacyStatsProvider): void {
+    this.efficacyStats = provider
+  }
+
+  /** 该 key 是否已被本会话 efficacy 环静默 — decision-shift 卡片同步抑制入口。 */
+  isEfficacySilenced(key: string): boolean {
+    return this.efficacySilenced.has(key)
   }
 
   /** 静音中的 key（习惯化 + 负 lift）— cockpit advisory 面板观测口。 */
@@ -579,6 +618,53 @@ export class AdvisoryBus {
         kept.push(e)
       }
       this.recordDropped(droppedSilenced)
+      all = kept
+    }
+
+    // ── W2 efficacy 负反馈环:发射前回读会话内 delivered/adopted ──
+    // delivered ≥ 3 且零采纳 → 冷却翻倍;delivered ≥ 6 仍零采纳 → 会话内静默。
+    // 与习惯化静音（ignoredStreak,依赖 expect 谓词）互补:无 expect 的 key
+    // （如 convergence 的多数变体）ignored 永远是 0,只有这条环能拦住它。
+    if (this.efficacyStats) {
+      for (const [k, v] of this.efficacyCooldownRemaining) {
+        if (v <= 1) this.efficacyCooldownRemaining.delete(k)
+        else this.efficacyCooldownRemaining.set(k, v - 1)
+      }
+      const droppedByEfficacy = new Set<string>()
+      const kept: AdvisoryEntry[] = []
+      for (const e of all) {
+        // fail-open:constitutional / 高优先级条目永不受负反馈环约束
+        if (e.tier === 'constitutional' || e.priority >= 0.8) {
+          kept.push(e)
+          continue
+        }
+        if (this.efficacySilenced.has(e.key)) {
+          droppedByEfficacy.add(e.key)
+          continue
+        }
+        const stats = this.efficacyStats(e.key)
+        if (!stats || stats.adopted > 0) {
+          kept.push(e)
+          continue
+        }
+        if (stats.delivered >= EFFICACY_SILENCE_DELIVERED) {
+          this.efficacySilenced.add(e.key)
+          droppedByEfficacy.add(e.key)
+          continue
+        }
+        if (stats.delivered >= EFFICACY_COOLDOWN_DELIVERED) {
+          if (this.efficacyCooldownRemaining.has(e.key)) {
+            droppedByEfficacy.add(e.key)
+            continue
+          }
+          // 放行本次送达,并把下次冷却翻倍（2→4→8…）
+          const next = (this.efficacyCooldownLength.get(e.key) ?? EFFICACY_BASE_COOLDOWN_RENDERS / 2) * 2
+          this.efficacyCooldownLength.set(e.key, next)
+          this.efficacyCooldownRemaining.set(e.key, next)
+        }
+        kept.push(e)
+      }
+      this.recordDropped(droppedByEfficacy)
       all = kept
     }
 
@@ -829,6 +915,9 @@ export class AdvisoryBus {
     this.liftMuteRemaining.clear()
     this.liftProbation.clear()
     this.ledgerLiftMuted = 0
+    this.efficacySilenced.clear()
+    this.efficacyCooldownRemaining.clear()
+    this.efficacyCooldownLength.clear()
   }
 }
 

@@ -86,6 +86,88 @@ describe('AdvisoryBus', () => {
   })
 })
 
+describe('W2 efficacy 负反馈环 (incident 20b9714e)', () => {
+  /** 模拟真实接线：render 送达后 delivered++（AdvisoryReadback.track 的会话统计半边） */
+  function makeStatsHarness(bus: AdvisoryBus) {
+    const stats = new Map<string, { delivered: number; adopted: number }>()
+    bus.setEfficacyStatsProvider(key => stats.get(key) ?? null)
+    const trackDelivered = () => {
+      for (const d of bus.drainDelivered()) {
+        const s = stats.get(d.key) ?? { delivered: 0, adopted: 0 }
+        s.delivered++
+        stats.set(d.key, s)
+      }
+    }
+    return { stats, trackDelivered }
+  }
+
+  it('zero-adoption key: cooldown doubles from the 4th delivery, session-silenced after the 6th', () => {
+    const bus = new AdvisoryBus()
+    const { trackDelivered } = makeStatsHarness(bus)
+
+    const deliveredAtCycle: number[] = []
+    for (let cycle = 1; cycle <= 32; cycle++) {
+      bus.submit({ key: 'convergence', priority: 0.65, category: 'discipline', content: '请收敛' })
+      const out = bus.render(undefined, cycle)
+      if (out.includes('key="convergence"')) deliveredAtCycle.push(cycle)
+      trackDelivered()
+    }
+
+    // 前 3 次无阻拦；第 4 次起进入冷却翻倍;delivered 到 6 后本会话静默。
+    assert.deepEqual(deliveredAtCycle.slice(0, 3), [1, 2, 3], 'first three deliveries unthrottled')
+    assert.equal(deliveredAtCycle.length, 6, `delivered cap must be 6, got ${deliveredAtCycle.length} at ${deliveredAtCycle}`)
+    const gap45 = deliveredAtCycle[4]! - deliveredAtCycle[3]!
+    const gap56 = deliveredAtCycle[5]! - deliveredAtCycle[4]!
+    assert.ok(gap56 > gap45, `cooldown must double between deliveries: gaps ${gap45} → ${gap56}`)
+    assert.ok(bus.isEfficacySilenced('convergence'), 'key must be session-silenced after 6 zero-adoption deliveries')
+  })
+
+  it('adopted key is never throttled or silenced', () => {
+    const bus = new AdvisoryBus()
+    const { stats, trackDelivered } = makeStatsHarness(bus)
+    stats.set('helpful', { delivered: 10, adopted: 2 })
+
+    let rendered = 0
+    for (let cycle = 1; cycle <= 10; cycle++) {
+      bus.submit({ key: 'helpful', priority: 0.6, category: 'repair', content: '有效提醒' })
+      if (bus.render(undefined, cycle).includes('key="helpful"')) rendered++
+      trackDelivered()
+    }
+    assert.equal(rendered, 10, 'adopted > 0 exempts the key from the feedback loop')
+    assert.equal(bus.isEfficacySilenced('helpful'), false)
+  })
+
+  it('constitutional / high-priority entries are fail-open exempt', () => {
+    const bus = new AdvisoryBus()
+    const { stats, trackDelivered } = makeStatsHarness(bus)
+    stats.set('guard', { delivered: 20, adopted: 0 })
+    stats.set('hi-pri', { delivered: 20, adopted: 0 })
+
+    let guardRendered = 0
+    let hiPriRendered = 0
+    for (let cycle = 1; cycle <= 8; cycle++) {
+      bus.submit({ key: 'guard', priority: 0.9, category: 'constitutional', tier: 'constitutional', content: '宪法级' })
+      bus.submit({ key: 'hi-pri', priority: 0.85, category: 'repair', content: '高优先级' })
+      const out = bus.render(undefined, cycle)
+      if (out.includes('key="guard"')) guardRendered++
+      if (out.includes('key="hi-pri"')) hiPriRendered++
+      trackDelivered()
+    }
+    assert.equal(guardRendered, 8, 'constitutional tier must never be silenced')
+    assert.equal(hiPriRendered, 8, 'priority >= 0.8 must never be silenced')
+  })
+
+  it('no provider wired → loop is inert (backwards compatible)', () => {
+    const bus = new AdvisoryBus()
+    let rendered = 0
+    for (let cycle = 1; cycle <= 10; cycle++) {
+      bus.submit({ key: 'legacy', priority: 0.6, category: 'repair', content: '旧行为' })
+      if (bus.render(undefined, cycle).includes('key="legacy"')) rendered++
+    }
+    assert.equal(rendered, 10)
+  })
+})
+
 describe('discipline re-anchor (F-fix, session 803d897d)', () => {
   it('exposes a sane re-anchor interval', () => {
     assert.ok(DISCIPLINE_REANCHOR_INTERVAL >= 10 && DISCIPLINE_REANCHOR_INTERVAL <= 30)

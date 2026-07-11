@@ -131,6 +131,71 @@ describe('evaluateConvergence', () => {
     assert.ok(result.injectedMessage!.includes('执行阶段'), 'message should mention execute phase')
   })
 
+  // ── W1: progress beacons (incident 20b9714e) ──
+
+  it('progress beacon (todo completed) caps score-based escalation at level 1', () => {
+    const history = makeHistory([
+      { tool: 'read_file', target: 'a.ts' },
+      { tool: 'grep', target: 'x' },
+      { tool: 'read_file', target: 'b.ts' },
+      { tool: 'grep', target: 'y' },
+      { tool: 'bash', target: 'ls' },
+      { tool: 'read_file', target: 'c.ts' },
+      { tool: 'grep', target: 'z' },
+      { tool: 'read_file', target: 'a.ts' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 14,
+      phaseClass: 'execute',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+      progressBeacons: { todoCompletedDelta: 1, activePlan: false },
+    }))
+    assert.ok(result.level <= 1, `expected level <= 1 with todo progress, got ${result.level}`)
+    assert.equal(result.shouldKick, false)
+    assert.equal(result.injectedMessage, null)
+  })
+
+  it('progress beacon does NOT suppress no-tool stagnation levels', () => {
+    const result = evaluateConvergence(baseInput({
+      turn: 14,
+      phaseClass: 'execute',
+      contextWindow: 200_000,
+      recentToolHistory: [],
+      noToolTurnCount: 5,
+      progressBeacons: { todoCompletedDelta: 1, activePlan: false },
+    }))
+    assert.ok(result.level >= 2, `no-tool stagnation must keep escalating, got ${result.level}`)
+  })
+
+  it('activePlan widens turn thresholds by 1.5x (nMid 14 → 21)', () => {
+    const history = makeHistory([
+      { tool: 'read_file', target: 'a.ts' },
+      { tool: 'grep', target: 'x' },
+      { tool: 'read_file', target: 'b.ts' },
+      { tool: 'grep', target: 'y' },
+      { tool: 'bash', target: 'ls' },
+      { tool: 'read_file', target: 'c.ts' },
+      { tool: 'grep', target: 'z' },
+      { tool: 'read_file', target: 'a.ts' },
+    ])
+    const withoutPlan = evaluateConvergence(baseInput({
+      turn: 14,
+      phaseClass: 'execute',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+    }))
+    const withPlan = evaluateConvergence(baseInput({
+      turn: 14,
+      phaseClass: 'execute',
+      contextWindow: 200_000,
+      recentToolHistory: history,
+      progressBeacons: { todoCompletedDelta: 0, activePlan: true },
+    }))
+    assert.equal(withoutPlan.level, 2, `baseline should hit L2 at nMid, got ${withoutPlan.level}`)
+    assert.ok(withPlan.level < 2, `activePlan should push nMid past turn 14, got ${withPlan.level}`)
+  })
+
   it('returns level 2 with appropriate message in explore phase', () => {
     // Explore phase with extreme repetition: all read_file on the same file
     const history = makeHistory(

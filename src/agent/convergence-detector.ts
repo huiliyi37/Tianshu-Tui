@@ -48,6 +48,21 @@ export interface ConvergenceInput {
    *  (before the current evaluation). Used by buildInjectedMessage to add a
    *  progressive "第 N 次提醒" prefix — 0 = first time, no prefix. */
   repeatCount?: number
+  /** Hard progress beacons that override the soft stagnation heuristics
+   *  (novelty/entropy/token-efficiency). A session whose todo list is
+   *  advancing, or that is executing an approved plan, is NOT stuck no
+   *  matter what the trajectory-shape signals say — incident 20b9714e:
+   *  32 convergence advisories (0 adopted) fired on a healthy plan run. */
+  progressBeacons?: {
+    /** Completed-todo count increase over the recent signal window.
+     *  > 0 = the task list is demonstrably advancing → cap score-based
+     *  escalation at L1 (no-tool stagnation levels are unaffected). */
+    todoCompletedDelta: number
+    /** An approved plan file is active (plan execution session). Long
+     *  multi-wave turns are the legitimate shape of this work — widen the
+     *  nLow/nMid/nHigh turn thresholds by 1.5×. */
+    activePlan: boolean
+  }
 }
 
 export interface ConvergenceResult {
@@ -786,7 +801,18 @@ function buildInjectedMessage(
 // ─── Main Entry Point ───────────────────────────────────────────────
 
 export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult {
-  const tier = selectTier(input.contextWindow)
+  let tier = selectTier(input.contextWindow)
+  // Plan-execution sessions legitimately run long turns (multi-wave edits) —
+  // widen the score-based turn thresholds so the detector doesn't treat an
+  // approved plan run like an unstructured exploration spiral.
+  if (input.progressBeacons?.activePlan) {
+    tier = {
+      ...tier,
+      nLow: Math.round(tier.nLow * 1.5),
+      nMid: Math.round(tier.nMid * 1.5),
+      nHigh: Math.round(tier.nHigh * 1.5),
+    }
+  }
   const weights = PHASE_WEIGHTS[input.phaseClass]
   const windowSize = tier.signalWindow
 
@@ -899,6 +925,16 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // with the early-exit gate.
   if (turn < tier.nLow && !noToolStagnation && !productiveStagnation) {
     level = 0
+  }
+
+  // Progress-beacon veto: the todo list advanced within the recent window —
+  // the hardest possible "not stuck" evidence, strictly stronger than the
+  // trajectory-shape heuristics (novelty/entropy/efficiency). Cap score-based
+  // escalation at L1. No-tool stagnation keeps its levels: completing a todo
+  // requires a tool call, so a genuine no-tool spiral cannot carry this beacon
+  // (noToolCount < 2 guard is belt-and-braces for stale deltas).
+  if ((input.progressBeacons?.todoCompletedDelta ?? 0) > 0 && noToolCount < 2 && level > 1) {
+    level = 1
   }
 
   // Productive-ratio stagnation: if early-exit was bypassed but no other

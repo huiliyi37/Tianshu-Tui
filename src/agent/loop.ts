@@ -4,6 +4,7 @@ import { SessionPersist, getSessionDir } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
 import { PrewarmCache } from './prewarm.js'
 import { invalidateSessionReadDedup } from '../tools/read-file.js'
+import { getTodos } from '../tools/todo.js'
 import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ToolErrorClass } from '../tools/types.js'
@@ -254,6 +255,13 @@ export class AgentLoop {
   private lastConvergenceEmitVerifyFailStreak = 0
   /** 上次发射时的收敛 score — 冷却期内 score 显著下降（>0.15）时打破冷却。 */
   private lastConvergenceEmitScore = 1.0
+  /** W1（20b9714e 复盘）：阶段相对轮数基线。phaseClass 变更时重置，收敛文案
+   *  用 turn - phaseStartTurn 而非会话全局轮数——消灭"连续 90 轮未收敛"这类
+   *  会话越长越吓人的假数字。 */
+  private phaseStartTurn = 0
+  private lastConvergencePhaseClass = ''
+  /** 近 10 次收敛检查时的 todo 完成数采样（进度信标数据源，10 = 最大信号窗口）。 */
+  private todoCompletedSamples: number[] = []
   /** 解耦修复：CCR/kick 的让位判据。旧判据 latestConvergenceResult.shouldKick
    *  在卡住期间恒为 true，而发射被 3 轮冷却节流——冷却静默期 CCR 也被整轮压制
    *  （守护链路静音栈的一环）。新判据只在 convergence **真实发射**过 advisory 的
@@ -560,6 +568,12 @@ export class AgentLoop {
       )
     } catch { /* 先验加载失败不致命——回退冷启动 */ }
     this.advisoryBus.setAdoptionRateProvider(key => this.advisoryReadback.getAdoptionRate(key))
+    // W2 efficacy 负反馈环（20b9714e）：发射前回读会话内 delivered/adopted——
+    // 同 key 零采纳连发 3 次后冷却翻倍、6 次后会话内静默（constitutional 豁免）。
+    this.advisoryBus.setEfficacyStatsProvider(key => {
+      const s = this.advisoryReadback.getStats().get(key)
+      return s ? { delivered: s.delivered, adopted: s.adopted } : null
+    })
     // 星域措辞适配（2026-07-07）：按当前域把 advisory 翻译成该域听得进的
     // 形态（如天权的证据式裁决协议）。惰性读 sessionDomain——域激活/切换自动生效。
     this.advisoryBus.setToneAdapter((content, meta) =>
@@ -1800,6 +1814,24 @@ export class AgentLoop {
       this.lastUserInputRunTurn = turn
     }
 
+    // W1 — 阶段相对轮数：phase 切换即重置基线，文案与判定引用的是"本阶段"
+    // 的轮数而非会话全局计数。
+    if (phaseClass !== this.lastConvergencePhaseClass) {
+      this.lastConvergencePhaseClass = phaseClass
+      this.phaseStartTurn = turn
+    }
+    const phaseRelativeTurn = Math.max(1, turn - this.phaseStartTurn + 1)
+
+    // W1 — 进度信标：todo 完成数在近窗口内的增量。todo 推进是最硬的
+    // "未停滞"证据，交给 detector 做 L2+ 否决。
+    let todoCompletedNow = 0
+    try {
+      todoCompletedNow = (this.config.getTodos ?? getTodos)().filter(t => t.status === 'completed').length
+    } catch { /* beacon is advisory-only — never break the convergence check */ }
+    this.todoCompletedSamples.push(todoCompletedNow)
+    if (this.todoCompletedSamples.length > 10) this.todoCompletedSamples.shift()
+    const todoCompletedDelta = todoCompletedNow - (this.todoCompletedSamples[0] ?? todoCompletedNow)
+
     const convergenceCheck = evaluateConvergence({
       turn,
       phaseClass: phaseClass as PhaseClass,
@@ -1812,6 +1844,10 @@ export class AgentLoop {
       providerName: this.config.providerName,
       outputTokens: this.session.getTotalUsage().output_tokens,
       repeatCount: this.convergenceEmitRepeatCount,
+      progressBeacons: {
+        todoCompletedDelta,
+        activePlan: this.activePlanFilePath !== null,
+      },
     })
     this.latestConvergenceResult = convergenceCheck
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
@@ -1839,9 +1875,14 @@ export class AgentLoop {
         this.lastConvergenceEmitVerifyFailStreak = 0
       } else {
         // Fix 1 — cooldown + dedup gate on the visible side-effects. The message
-        // type is keyed by its header line (first line), so same-type nudges with
-        // only changed diagnostic numbers do not count as a new "direction".
-        const msgKey = convergenceCheck.injectedMessage.split('\n', 1)[0] ?? ''
+        // type is keyed by its header line, so same-type nudges with only changed
+        // diagnostic numbers do not count as a new "direction". Skip the
+        // "（第 N 次同类提醒…）" progressive prefix: it varies per emission and
+        // must not make a repeat look like a direction change (that would reset
+        // the cooldown and re-emit every turn — the exact spam this gate exists
+        // to stop).
+        const msgKey = convergenceCheck.injectedMessage.split('\n')
+          .find(l => l.length > 0 && !l.startsWith('（第')) ?? ''
         const cooldownElapsed = turn - this.lastConvergenceEmitTurn >= this.convergenceEmitCooldownTurns
         const scoreDropped = this.lastConvergenceEmitScore - convergenceCheck.score > 0.15
         const cooledDown = cooldownElapsed || scoreDropped
@@ -1870,19 +1911,23 @@ export class AgentLoop {
 
           // Level 2: inject user guidance as a system-visible nudge
           callbacks.onPhaseChange?.('convergence-warning', {
-            reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段 ${turn} 轮未收敛 (score=${convergenceCheck.score.toFixed(2)})`,
+            reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段近 ${phaseRelativeTurn} 轮进度信号弱 (score=${convergenceCheck.score.toFixed(2)})`,
             suggestion: convergenceCheck.injectedMessage.slice(0, 200),
           })
           // R4 — externalize the convergence nudge as a structured course-correction
           // so the desktop renders a "改道" card; the injected guidance below is what
           // the agent acts on next, making the cause→effect visible to the user.
-          this.recordDecisionShift('convergence')
-          callbacks.onDecisionShift?.({
-            source: 'convergence',
-            reason: `${phaseClass} 阶段连续 ${turn} 轮未收敛，已提示换一种推进方式`,
-            methods: [convergenceCheck.injectedMessage.slice(0, 200)],
-            severity: convergenceCheck.level >= 2 ? 'warn' : 'info',
-          })
+          // W2 — efficacy 环静默的 key 同步抑制改道卡：advisory 都不再送达了，
+          // 还继续弹卡就是纯 UI 噪音（20b9714e：32 张改道卡）。
+          if (!this.advisoryBus.isEfficacySilenced('convergence')) {
+            this.recordDecisionShift('convergence')
+            callbacks.onDecisionShift?.({
+              source: 'convergence',
+              reason: `${phaseClass} 阶段近 ${phaseRelativeTurn} 轮进度信号弱，已提示换一种推进方式`,
+              methods: [convergenceCheck.injectedMessage.slice(0, 200)],
+              severity: convergenceCheck.level >= 2 ? 'warn' : 'info',
+            })
+          }
           this.advisoryBus.submit({
             key: 'convergence',
             priority: 0.65,
