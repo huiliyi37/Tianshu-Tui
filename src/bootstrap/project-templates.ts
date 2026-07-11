@@ -28,8 +28,8 @@ import { ensureVerifyDeclaration, renderRivetMdStack, upsertStackSection } from 
 const SENTINEL_DIR = '.rivet'
 const SENTINEL_FILE = '.templates-init-sentinel'
 
-const RIVET_MD_PATH = '.rivet.md'
-const AGENTS_MD_PATH = 'AGENTS.md'
+export const RIVET_MD_PATH = '.rivet.md'
+export const AGENTS_MD_PATH = 'AGENTS.md'
 
 /** Shape of the sentinel. Tells us what the user decided last time. */
 export type TemplateSentinelDecision = 'created' | 'skipped' | 'declined'
@@ -58,7 +58,7 @@ export interface TemplateSentinel {
  */
 export const AGENTS_MD_TEMPLATE = `# Agent Operating Rules
 
-> 通用行为纪律,适用于在本项目工作的任何 AI agent（如天枢）。下方 "Project-Specific Rules" 段留给项目 owner 扩展,不要替换上面的纪律。
+> 通用行为纪律，适用于在本项目工作的任何 AI agent（如天枢）。下方 "Project-Specific Rules" 段留给项目 owner 扩展，不要替换上面的纪律。
 
 ## 高危命令纪律（硬性闸门）
 

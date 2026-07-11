@@ -224,6 +224,21 @@
     "statusAvailable": "Git detected{{version}}",
     "statusMissing": "Git not detected — specify a path below, or install Git and restart the app"
   },
+  "projectDocs": {
+    "title": "Project prefix cornerstone docs (AGENTS.md / .rivet.md)",
+    "desc": "These two files form the prefix cornerstone of the system prompt. They are read when a session starts to build the prefix cache.",
+    "warning": "⚠️ Warning: modifying these files while a session is in progress fractures the prefix cache. Subsequent turns on the same context may cache-miss every round, increasing token cost and latency significantly. After editing, start a new session—do not continue the current one.",
+    "agentsTitle": "AGENTS.md",
+    "agentsHint": "Agent behavior rules. Leave empty if the file does not exist.",
+    "rivetTitle": ".rivet.md",
+    "rivetHint": "Project metadata. Leave empty if the file does not exist.",
+    "noProject": "Open a project first to view or edit its prefix cornerstone docs.",
+    "loadFailed": "Load failed: {{error}}",
+    "saved": "Saved",
+    "saveFailed": "Save failed: {{error}}",
+    "saving": "Saving…",
+    "save": "Save"
+  },
   "storageLocation": {
     "title": "Storage location",
     "desc": "Set the Tianshu data root directory (RIVET_HOME). Changing it requires an app restart; you can optionally migrate existing data. Session logs, cache hit records, and configuration all live here.",
@@ -336,6 +351,10 @@
     "filesConfigExample": "Config example",
     "filesConfigExampleValue": "<code>config.example.json</code> at the repo root",
     "filesNote": "After editing the config by hand there's no need to restart the desktop app; it takes effect with the next new session. The loader only accepts JSON, with camelCase key names.",
+    "projectDocsTitle": "Project prefix cornerstone docs",
+    "projectDocsWarning": "AGENTS.md and .rivet.md are the prefix cornerstone of the Tianshu system prompt. Modifying them while a session is running fractures the prefix cache, causing cache misses on every turn and significantly higher cost and latency. Always start a new session after editing.",
+    "projectDocsDesc": "You can view and edit the current project's AGENTS.md / .rivet.md under System → Project prefix cornerstone docs. Changes only take effect for new sessions; the current session is not reloaded.",
+    "ctaProjectDocs": "Go to System to edit docs →",
     "shortcutsTitle": "Common shortcuts",
     "shortcutPalette": "Open command palette",
     "shortcutNewThread": "New thread",

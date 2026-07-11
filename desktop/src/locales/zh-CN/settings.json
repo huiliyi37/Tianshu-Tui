@@ -224,6 +224,21 @@
     "statusAvailable": "已探测到 Git{{version}}",
     "statusMissing": "未探测到 Git — 可手动指定路径，或安装后重启应用"
   },
+  "projectDocs": {
+    "title": "项目前缀基石文档（AGENTS.md / .rivet.md）",
+    "desc": "这两个文件是天枢构建系统提示词的前缀基石。项目启动时读取并生成前缀缓存。",
+    "warning": "⚠️ 警告：会话进行中修改这两个文件会导致前缀缓存碎裂，后续同样上下文每轮都可能 cache miss，token 成本与响应延迟显著增加。修改后请务必开启新会话，切勿在当前会话内继续工作。",
+    "agentsTitle": "AGENTS.md",
+    "agentsHint": "Agent 行为规则。留空表示文件不存在。",
+    "rivetTitle": ".rivet.md",
+    "rivetHint": "项目元数据。留空表示文件不存在。",
+    "noProject": "请先打开一个项目，再查看或编辑前缀基石文档。",
+    "loadFailed": "读取失败：{{error}}",
+    "saved": "已保存",
+    "saveFailed": "保存失败：{{error}}",
+    "saving": "保存中…",
+    "save": "保存"
+  },
   "storageLocation": {
     "title": "存储位置",
     "desc": "设置天枢数据根目录（RIVET_HOME）。更改后需重启应用，可选择是否迁移已有数据。会话日志、缓存命中记录、配置等都存放在此目录。",
@@ -336,6 +351,10 @@
     "filesConfigExample": "配置示例",
     "filesConfigExampleValue": "仓库根目录 <code>config.example.json</code>",
     "filesNote": "手改配置后无需重启桌面端，下一次新建会话即生效。加载器只接受 JSON 格式，键名为 camelCase。",
+    "projectDocsTitle": "项目前缀基石文档",
+    "projectDocsWarning": "AGENTS.md 与 .rivet.md 是天枢构建系统提示词的前缀基石。会话进行中修改它们会导致前缀缓存碎裂，同样上下文每轮 cache miss，成本与延迟显著增加。修改后请务必开启新会话。",
+    "projectDocsDesc": "可在「系统 → 项目前缀基石文档」中查看和编辑当前项目的 AGENTS.md / .rivet.md。保存后只在新建会话时生效；当前会话不会自动重载。",
+    "ctaProjectDocs": "前往「系统」编辑文档 →",
     "shortcutsTitle": "常用快捷键",
     "shortcutPalette": "打开命令面板",
     "shortcutNewThread": "新建线程",

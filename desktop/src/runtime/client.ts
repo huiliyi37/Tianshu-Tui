@@ -16,6 +16,7 @@ import type {
   PlanDoc,
   PlanModeState,
   PlanListResponse,
+  ProjectDocs,
   ProjectTemplatesApplyResult,
   ProjectTemplatesStatus,
   ScheduledTask,
@@ -392,6 +393,19 @@ export function getProjectTemplatesStatus(cwd: string): Promise<ProjectTemplates
 
 export function applyProjectTemplates(cwd: string, agentsMode: 'overwrite' | 'append' | 'skip'): Promise<ProjectTemplatesApplyResult> {
   return apiPost<ProjectTemplatesApplyResult>('/project-templates/apply', { cwd, agentsMode })
+}
+
+// ── Project prefix cornerstone docs (AGENTS.md / .rivet.md) ──────────
+
+export function getProjectDocs(cwd: string): Promise<ProjectDocs> {
+  return apiGet<ProjectDocs>(`/project-docs?cwd=${encodeURIComponent(cwd)}`)
+}
+
+export function setProjectDocs(
+  cwd: string,
+  docs: { agentsMd?: string; rivetMd?: string },
+): Promise<ProjectDocs> {
+  return apiPut<ProjectDocs>('/project-docs', { cwd, ...docs })
 }
 
 // ── Session API ─────────────────────────────────────────────────────

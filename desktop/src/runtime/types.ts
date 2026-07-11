@@ -222,6 +222,15 @@ export interface ProjectTemplatesStatus {
   rivetTemplate: string
 }
 
+/** GET /project-docs response — current content of the prefix cornerstone files. */
+export interface ProjectDocs {
+  cwd: string
+  agentsMd: string
+  rivetMd: string
+  agentsExists: boolean
+  rivetExists: boolean
+}
+
 export interface ProjectTemplatesApplyResult {
   created: string[]
   appended: string[]

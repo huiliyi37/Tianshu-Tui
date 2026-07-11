@@ -25,6 +25,7 @@ import { buildTaskRoutes } from './task-routes.js'
 import { buildConfigRoutes } from './config-routes.js'
 import { buildEnvRoute } from './env-route.js'
 import { buildProjectTemplatesRoutes } from './project-templates-routes.js'
+import { buildProjectDocsRoutes } from './project-docs-routes.js'
 import { CronScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
 import { buildMcpRoutes } from './mcp-api.js'
@@ -1232,6 +1233,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // Project templates route: first-run AGENTS.md / .rivet.md bootstrap for desktop UI.
   Object.assign(routes, buildProjectTemplatesRoutes(apiToken))
+
+  // Project docs route: read/write AGENTS.md / .rivet.md for the desktop settings UI.
+  Object.assign(routes, buildProjectDocsRoutes(apiToken))
 
   // MCP routes: server management + live status for the desktop MCP settings UI.
   Object.assign(routes, buildMcpRoutes(() => sharedRuntime.mcpManager, apiToken))

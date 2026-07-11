@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { Palette, SlidersHorizontal, Plug, Cpu, LifeBuoy, FolderOpen, type LucideIcon } from 'lucide-react'
 import { useUiDispatch, useUiState } from '../state/store'
-import { useHealth } from '../state/queries'
+import { useHealth, useSessions } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { loadFontWeightPref, setFontWeightPref, type FontWeightPref } from '../lib/font-weight'
 import { loadFontFamilyPref, setFontFamilyPref, type FontFamilyPref } from '../lib/font-family'
@@ -21,7 +21,7 @@ import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettingsManager } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, deactivateLicense, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, getProjectDocs, setProjectDocs, deactivateLicense, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { useProLicense } from '../lib/use-activation-gate'
 import { ProUpgradeDialog } from '../components/ActivationScreen'
 import { pickFolder } from '../lib/dialog'
@@ -30,8 +30,9 @@ import { getVersion } from '@tauri-apps/api/app'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import type { EnvironmentInfo } from '../runtime/types'
+import type { EnvironmentInfo, ProjectDocs } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
+import { deriveProjects, loadKnownProjects } from '../lib/projects'
 import {
   Select,
   SelectContent,
@@ -327,6 +328,7 @@ export function SettingsSurface() {
             <PlatformSection />
             <ShellSection />
             <GitPathSection />
+            <ProjectDocsSection />
             <StorageLocationSection />
             <StorageSection />
             <UpdaterSection />
@@ -438,6 +440,17 @@ function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void })
             <p className="help-lead">
               {t('help.filesNote')}
             </p>
+          </div>
+
+          <div className="help-card">
+            <h4>{t('help.projectDocsTitle')}</h4>
+            <p className="help-lead warn">
+              {t('help.projectDocsWarning')}
+            </p>
+            <p className="help-lead">
+              {t('help.projectDocsDesc')}
+            </p>
+            <button className="btn" onClick={() => onNavigate('system')}>{t('help.ctaProjectDocs')}</button>
           </div>
         </div>
       </TabsContent>
@@ -977,6 +990,117 @@ function GitPathSection() {
         <div className="meta warn" style={{ marginTop: 6 }}>{t('gitPath.savedPathMissing')}<code>{saved}</code></div>
       )}
       {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
+    </section>
+  )
+}
+
+function ProjectDocsSection() {
+  const { t } = useTranslation('settings')
+  const ui = useUiState()
+  const sessions = useSessions()
+  const [docs, setDocs] = useState<ProjectDocs | null>(null)
+  const [agentsDraft, setAgentsDraft] = useState('')
+  const [rivetDraft, setRivetDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const cwd = useMemo(() => {
+    if (!ui.activeProject) return null
+    const p = deriveProjects(sessions.data ?? [], loadKnownProjects()).find((x) => x.id === ui.activeProject)
+    return p?.roots[0] ?? null
+  }, [sessions.data, ui.activeProject])
+
+  useEffect(() => {
+    setMsg(null)
+    if (!cwd) {
+      setDocs(null)
+      setAgentsDraft('')
+      setRivetDraft('')
+      return
+    }
+    let cancelled = false
+    getProjectDocs(cwd)
+      .then((d) => {
+        if (cancelled) return
+        setDocs(d)
+        setAgentsDraft(d.agentsMd)
+        setRivetDraft(d.rivetMd)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setMsg(t('projectDocs.loadFailed', { error: (err as Error).message }))
+      })
+    return () => { cancelled = true }
+  }, [cwd, t])
+
+  const save = useCallback(async () => {
+    if (!cwd) return
+    setBusy(true)
+    setMsg(null)
+    try {
+      const d = await setProjectDocs(cwd, { agentsMd: agentsDraft, rivetMd: rivetDraft })
+      setDocs(d)
+      setAgentsDraft(d.agentsMd)
+      setRivetDraft(d.rivetMd)
+      setMsg(t('projectDocs.saved'))
+    } catch (err) {
+      setMsg(t('projectDocs.saveFailed', { error: (err as Error).message }))
+    } finally {
+      setBusy(false)
+    }
+  }, [cwd, agentsDraft, rivetDraft, t])
+
+  if (!cwd) {
+    return (
+      <section className="system-card">
+        <div className="system-card-header">
+          <h4>{t('projectDocs.title')}</h4>
+          <p className="meta">{t('projectDocs.desc')}</p>
+        </div>
+        <div className="meta">{t('projectDocs.noProject')}</div>
+      </section>
+    )
+  }
+
+  return (
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>{t('projectDocs.title')}</h4>
+        <p className="meta">{t('projectDocs.desc')}</p>
+      </div>
+      <div className="meta warn" style={{ marginBottom: 12, whiteSpace: 'pre-wrap' }}>
+        {t('projectDocs.warning')}
+      </div>
+      <div className="flex flex-col gap-3">
+        <div>
+          <h5 className="text-sm font-medium m-0">{t('projectDocs.agentsTitle')}</h5>
+          <div className="meta">{t('projectDocs.agentsHint')}</div>
+          <textarea
+            className="settings-input"
+            style={{ width: '100%', minHeight: 160, fontFamily: 'var(--font-mono, monospace)', marginTop: 6 }}
+            value={agentsDraft}
+            onChange={(e) => setAgentsDraft(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+        <div>
+          <h5 className="text-sm font-medium m-0">{t('projectDocs.rivetTitle')}</h5>
+          <div className="meta">{t('projectDocs.rivetHint')}</div>
+          <textarea
+            className="settings-input"
+            style={{ width: '100%', minHeight: 120, fontFamily: 'var(--font-mono, monospace)', marginTop: 6 }}
+            value={rivetDraft}
+            onChange={(e) => setRivetDraft(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+        <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+          <Button onClick={() => void save()} disabled={busy || !docs}>
+            {busy ? t('projectDocs.saving') : t('projectDocs.save')}
+          </Button>
+          {msg && <div className="meta">{msg}</div>}
+        </div>
+      </div>
     </section>
   )
 }
