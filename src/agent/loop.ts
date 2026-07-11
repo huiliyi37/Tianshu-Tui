@@ -2050,13 +2050,13 @@ export class AgentLoop {
     }
 
     if (convergenceCheck.shouldAbort) {
-      // Score-abort grace turn: if no L2+ warning was delivered in an earlier
+      // Grace turn for all aborts: if no L2+ warning was delivered in an earlier
       // turn (first escalation straight to L3, or the ladder was reset by a
       // user message), demote this abort to the kick that was just emitted
-      // above and let the model act on it for one turn. The no-tool hard cap
-      // is exempt — 5 consecutive no-tool turns already embodies repeated
-      // chances.
-      if (convergenceCheck.abortCause === 'score' && !warnedInEarlierTurn) {
+      // above and let the model act on it for one turn. This applies to both
+      // score-based and no-tool aborts — a model that went silent without prior
+      // warning deserves one more chance after being nudged.
+      if (!warnedInEarlierTurn) {
         debugLog(`[convergence] turn=${turn} score-abort demoted to kick (no prior-turn warning) score=${convergenceCheck.score.toFixed(2)}`)
         return { action: 'proceed' }
       }

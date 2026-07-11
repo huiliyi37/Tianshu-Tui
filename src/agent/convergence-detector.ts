@@ -212,7 +212,7 @@ const PHASE_WEIGHTS: Record<PhaseClass, PhaseWeights> = {
   plan:    { editRatio: 0.10, targetNovelty: 0.18, toolEntropy: 0.15, errorPenalty: 0.18, tokenEfficiency: 0.18, oscillationPenalty: 0.10, textRepetitionPenalty: 0.11 },
   execute: { editRatio: 0.40, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.18, tokenEfficiency: 0.08, oscillationPenalty: 0.06, textRepetitionPenalty: 0.12 },
   verify:  { editRatio: 0.05, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.35, tokenEfficiency: 0.18, oscillationPenalty: 0.12, textRepetitionPenalty: 0.14 },
-  deliver: { editRatio: 0.36, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.20, tokenEfficiency: 0.08, oscillationPenalty: 0.08, textRepetitionPenalty: 0.12 },
+  deliver: { editRatio: 0.05, targetNovelty: 0.08, toolEntropy: 0.08, errorPenalty: 0.35, tokenEfficiency: 0.24, oscillationPenalty: 0.08, textRepetitionPenalty: 0.12 },
 }
 
 // ─── Signal Computation ─────────────────────────────────────────────
@@ -593,7 +593,7 @@ function computeConvergenceScore(
   // deliberately excluded — its job is running tests/typechecks and reading
   // diagnostics, NOT editing files. Penalizing verify for low editRatio is
   // the primary false-positive source ("verify 阶段 47 轮未收敛").
-  const editExpectedPhases: PhaseClass[] = ['execute', 'deliver']
+  const editExpectedPhases: PhaseClass[] = ['execute']
   let penalty = 1.0
   if (editExpectedPhases.includes(phaseClass) && signals.editRatio < 0.1) {
     // Severity scales with how far below expectation we are
@@ -944,7 +944,14 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     : 1.0
   const distanceToLastProductive = distanceSinceLastProductive(input.recentToolHistory)
   const productiveDistanceThreshold = windowSize * 2
-  const productiveStagnation = stagnationWindow.length >= Math.min(windowSize, 4)
+  // Fix (infinity guard): when there has NEVER been a productive tool call in the
+  // entire session, the session simply hasn't had a chance to be productive yet.
+  // Treating Infinity >= threshold as "far from last productive" would flag every
+  // early-session read burst as stagnation — the wrong heuristic for cold starts.
+  // Skip the productiveStagnation check entirely until at least one productive
+  // call has been made (distance is finite).
+  const productiveStagnation = distanceToLastProductive !== Infinity
+    && stagnationWindow.length >= Math.min(windowSize, 4)
     && productiveRatio === 0
     && !producingReport
     && distanceToLastProductive >= productiveDistanceThreshold
