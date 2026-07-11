@@ -313,6 +313,9 @@ export interface VirtuePending {
   utilityExpect: AdvisoryExpectation
   /** 观察窗口（含检测轮），到期后强制核销 */
   windowTurns: number
+  /** 智专用：触发觉察的原始 tool+target，自持逻辑判定"不再出现"用 */
+  probeTool?: string
+  probeTarget?: string
 }
 
 export interface VirtuePendingLedger {

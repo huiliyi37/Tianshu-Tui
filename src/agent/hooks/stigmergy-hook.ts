@@ -11,11 +11,11 @@ function utilityExpectFor(type: VirtueSignal['type']): AdvisoryExpectation {
     case 'independent-judgment': // 仁：ask 后出现探针/写工具
       return { kind: 'tool_appears', tools: ['read_file', 'edit_file', 'grep', 'bash'], withinTurns: 2 }
     case 'proactive-verification': // 义：run_tests 后输出被消费（read/edit）
-      return { kind: 'tool_appears', tools: ['read_file', 'edit_file', 'bash'], withinTurns: 2 }
-    case 'boundary-respect': // 礼：审批后的写操作通过后续验证
-      return { kind: 'tool_appears', tools: ['run_tests', 'typecheck', 'bash'], withinTurns: 3 }
-    case 'strategic-awareness': // 智：窗口内不再出现同 tool+target（settlement hook 自持逻辑判定）
-      return { kind: 'tool_appears', tools: [], withinTurns: 2 } // 空 tools = 任意工具出现即可（弱近似）
+      return { kind: 'tool_appears', tools: ['read_file', 'edit_file'], withinTurns: 2 }
+    case 'boundary-respect': // 礼：审批后的写操作通过后续验证——收紧为 verify_attempted（问题3修复）
+      return { kind: 'verify_attempted', withinTurns: 3 }
+    case 'strategic-awareness': // 智：不走 readback（settlement hook 自持逻辑判定）
+      return { kind: 'tool_appears', tools: [], withinTurns: 2 }
     case 'cache-loyalty': // 信：会话级信号，不走 readback
       return { kind: 'tool_appears', tools: [], withinTurns: 1 }
   }
@@ -121,6 +121,9 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
           detectedTurn: ctx.snapshot.turn,
           utilityExpect: utilityExpectFor(virtueSignal.type),
           windowTurns: 2,
+          // 智专用：记录触发觉察的原始 tool+target，settlement hook 自持逻辑用
+          probeTool: virtueSignal.type === 'strategic-awareness' ? tool.name : undefined,
+          probeTarget: virtueSignal.type === 'strategic-awareness' ? tool.target : undefined,
         })
       }
 

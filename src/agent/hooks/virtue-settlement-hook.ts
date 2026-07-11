@@ -18,14 +18,14 @@
  * 不进 AdvisoryReadback 的 adopted/ignored 账本——美德信号不是 advisory。
  */
 
-import type { PostToolRuntimeHook, PostTurnRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
+import type { PostTurnRuntimeHook, RuntimeHookContext } from '../runtime-hooks.js'
 import type { AdvisoryReadback } from '../advisory-readback.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
 import type { VirtuePendingLedger, VirtueSignal } from '../virtue-signals.js'
 import { virtueEncouragementEntry } from '../advisory-bus.js'
 import type { CognitiveSeason } from '../cognitive-season.js'
-import { extractObservedTarget } from './advisory-readback-hook.js'
 import type { PheromoneDeposit } from '../../context/stigmergy.js'
+import type { ToolHistoryEntry } from '../evidence-gate.js'
 
 /** 效用转正阈值——低于此值的美德信号不记录（走过场） */
 const UTILITY_THRESHOLD = 0.5
@@ -52,25 +52,14 @@ export interface VirtueSettlementHookDeps {
   getSeasonIntensity: () => number
   /** 近 N 轮平均缓存命中率（T0 信复活用），null = 数据不足 */
   getRecentCacheHitRate: () => number | null
+  /** recentToolHistory 快照——用于智的自持逻辑判定（同 tool+target 不再出现） */
+  getRecentToolHistory: () => ToolHistoryEntry[]
 }
 
-export function createVirtueSettlementHooks(
+export function createVirtueSettlementHook(
   deps: VirtueSettlementHookDeps,
-): [PostToolRuntimeHook, PostTurnRuntimeHook] {
+): PostTurnRuntimeHook {
   let xinLastTriggered = 0 // 信上次触发的 turn（0 = 未触发过）
-
-  const observer: PostToolRuntimeHook = {
-    phase: 'postTool',
-    name: 'virtue-settlement-observe',
-    run(ctx: RuntimeHookContext, tool: RuntimeToolEvent): void {
-      deps.readback.observeTool({
-        turn: ctx.snapshot.turn,
-        name: tool.name,
-        target: extractObservedTarget(tool),
-        isError: tool.isError ?? !tool.success,
-      })
-    },
-  }
 
   const evaluator: PostTurnRuntimeHook = {
     phase: 'postTurn',
@@ -109,6 +98,31 @@ export function createVirtueSettlementHooks(
       if (settled.length === 0) return
 
       for (const entry of settled) {
+        // 智的自持逻辑（问题1修复）：同 tool+target 在检测后不再出现 = 转向 = 高效用
+        // 不走 readback——readback 的 tool_appears 空 tools 恒真，语义反了
+        if (entry.signal.type === 'strategic-awareness' && entry.probeTool) {
+          const history = deps.getRecentToolHistory()
+          const repeatsAfter = history.filter(
+            h => h.turn > entry.detectedTurn
+              && h.tool === entry.probeTool
+              && h.target === entry.probeTarget,
+          )
+          const utility = repeatsAfter.length === 0 ? 1.0 : 0.2
+          if (utility < UTILITY_THRESHOLD) continue
+          deps.recordStance(entry.signal)
+          deps.deposit({
+            path: 'virtue-signal',
+            signal: entry.signal.type,
+            strength: entry.signal.confidence * utility,
+            context: entry.signal.evidence,
+            halfLifeMs: 604_800_000 * 2,
+          }).catch(() => {})
+          if (SEASON_ENCOURAGEMENT_ALLOWED.has(season)) {
+            deps.advisoryBus.submit(virtueEncouragementEntry())
+          }
+          continue
+        }
+
         // 效用判定：用 readback 的观察日志查询谓词是否被满足
         let utility = 1.0 // 默认乐观（pattern_absent 等无谓词的场景）
         if (entry.utilityExpect.kind !== 'pattern_absent') {
@@ -142,5 +156,5 @@ export function createVirtueSettlementHooks(
     },
   }
 
-  return [observer, evaluator]
+  return evaluator
 }

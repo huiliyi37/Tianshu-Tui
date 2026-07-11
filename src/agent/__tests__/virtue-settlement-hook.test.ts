@@ -1,10 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createVirtueSettlementHooks } from '../hooks/virtue-settlement-hook.js'
+import { createVirtueSettlementHook } from '../hooks/virtue-settlement-hook.js'
 import { createVirtuePendingLedger, type VirtueSignal, type VirtuePending } from '../virtue-signals.js'
 import { AdvisoryReadback } from '../advisory-readback.js'
 import type { CognitiveSeason } from '../cognitive-season.js'
 import type { PheromoneDeposit } from '../../context/stigmergy.js'
+import type { ToolHistoryEntry } from '../evidence-gate.js'
 
 function mkSignal(wuchang: VirtueSignal['wuchang'], type: VirtueSignal['type']): VirtueSignal {
   return { type, confidence: 0.7, wuchang, evidence: `test ${type}` }
@@ -20,7 +21,7 @@ function mkPending(signal: VirtueSignal, detectedTurn: number, windowTurns = 2):
 }
 
 interface TestHarness {
-  deps: Parameters<typeof createVirtueSettlementHooks>[0]
+  deps: Parameters<typeof createVirtueSettlementHook>[0]
   recorded: VirtueSignal[]
   deposited: PheromoneDeposit[]
   get encouragementSubmitted(): boolean
@@ -48,6 +49,7 @@ function mkHarness(overrides?: {
       getSeason: overrides?.getSeason ?? (() => 'genesis' as CognitiveSeason),
       getSeasonIntensity: () => 1.0,
       getRecentCacheHitRate: overrides?.getRecentCacheHitRate ?? (() => null),
+      getRecentToolHistory: () => [] as ToolHistoryEntry[],
     },
   }
 }
@@ -57,19 +59,17 @@ function feedTool(readback: AdvisoryReadback, turn: number, name: string, target
   readback.observeTool({ turn, name, target, isError: false })
 }
 
-describe('createVirtueSettlementHooks', () => {
-  it('returns [PostToolHook, PostTurnHook] pair', () => {
+describe('createVirtueSettlementHook', () => {
+  it('returns PostTurnHook', () => {
     const h = mkHarness()
-    const [postTool, postTurn] = createVirtueSettlementHooks(h.deps)
-    assert.equal(postTool.phase, 'postTool')
-    assert.equal(postTool.name, 'virtue-settlement-observe')
+    const postTurn = createVirtueSettlementHook(h.deps)
     assert.equal(postTurn.phase, 'postTurn')
     assert.equal(postTurn.name, 'virtue-settlement-evaluate')
   })
 
   it('postTurn settles pending entries past deadline with observed utility', async () => {
     const h = mkHarness()
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     // Feed a matching tool at turn 2 so the utility predicate matches
     feedTool(h.deps.readback, 2, 'edit_file', 'src/foo.ts')
@@ -83,7 +83,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('postTurn does not settle entries before deadline', async () => {
     const h = mkHarness()
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     h.deps.ledger.submit(mkPending(mkSignal('仁', 'independent-judgment'), 1, 2))
     await postTurn.run({ snapshot: { turn: 2 } } as any)
@@ -92,7 +92,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('genesis season allows encouragement submit', async () => {
     const h = mkHarness({ getSeason: () => 'genesis' })
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     feedTool(h.deps.readback, 2, 'edit_file', 'src/foo.ts')
     h.deps.ledger.submit(mkPending(mkSignal('义', 'proactive-verification'), 1, 2))
@@ -103,7 +103,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('wuwei season suppresses encouragement but still records', async () => {
     const h = mkHarness({ getSeason: () => 'wuwei' })
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     feedTool(h.deps.readback, 2, 'edit_file', 'src/foo.ts')
     h.deps.ledger.submit(mkPending(mkSignal('义', 'proactive-verification'), 1, 2))
@@ -115,7 +115,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('reversal season suppresses encouragement', async () => {
     const h = mkHarness({ getSeason: () => 'reversal' })
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     feedTool(h.deps.readback, 2, 'edit_file', 'src/foo.ts')
     h.deps.ledger.submit(mkPending(mkSignal('义', 'proactive-verification'), 1, 2))
@@ -126,7 +126,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('utility check: ask without follow-up gets low utility, not recorded', async () => {
     const h = mkHarness()
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     // No tool fed to readback → wasSatisfiedBetween returns false → utility=0.2 → skip
     h.deps.ledger.submit(mkPending(mkSignal('仁', 'independent-judgment'), 1, 2))
@@ -137,7 +137,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('信(cache-loyalty): triggers when hitRate >= 80% and turn >= 5', async () => {
     const h = mkHarness({ getRecentCacheHitRate: () => 0.85 })
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     await postTurn.run({ snapshot: { turn: 5 } } as any)
     const xinRecorded = h.recorded.find(s => s.wuchang === '信')
@@ -146,7 +146,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('信: does not trigger when hitRate < 80%', async () => {
     const h = mkHarness({ getRecentCacheHitRate: () => 0.7 })
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     await postTurn.run({ snapshot: { turn: 5 } } as any)
     const xinRecorded = h.recorded.find(s => s.wuchang === '信')
@@ -155,7 +155,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('信: does not trigger before turn 5', async () => {
     const h = mkHarness({ getRecentCacheHitRate: () => 0.9 })
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     await postTurn.run({ snapshot: { turn: 4 } } as any)
     const xinRecorded = h.recorded.find(s => s.wuchang === '信')
@@ -164,7 +164,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('信: does not re-trigger within 10 turns of last trigger', async () => {
     const h = mkHarness({ getRecentCacheHitRate: () => 0.9 })
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     await postTurn.run({ snapshot: { turn: 5 } } as any)
     await postTurn.run({ snapshot: { turn: 8 } } as any)
@@ -175,7 +175,7 @@ describe('createVirtueSettlementHooks', () => {
 
   it('信: returns null when hitRate data unavailable', async () => {
     const h = mkHarness({ getRecentCacheHitRate: () => null })
-    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+    const postTurn = createVirtueSettlementHook(h.deps)
 
     await postTurn.run({ snapshot: { turn: 5 } } as any)
     const xinRecorded = h.recorded.find(s => s.wuchang === '信')

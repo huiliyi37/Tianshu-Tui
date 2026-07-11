@@ -4,7 +4,7 @@ import { createKickRuntimeHook } from './hooks/kick-hook.js'
 import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
 import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
-import { createVirtueSettlementHooks } from './hooks/virtue-settlement-hook.js'
+import { createVirtueSettlementHook } from './hooks/virtue-settlement-hook.js'
 import { createSignalConsumerRuntimeHook } from './hooks/signal-consumer-hook.js'
 import { createPlaybookReflectHook } from './hooks/playbook-reflect-hook.js'
 import { createAnchorBreakShadowHook } from './hooks/anchor-break-shadow-hook.js'
@@ -86,6 +86,8 @@ export interface RuntimeHookDeps {
   getCurrentSeasonIntensity?: () => number
   /** T0: 近 N 轮平均缓存命中率（信复活用） */
   getRecentCacheHitRate?: () => number | null
+  /** T2: recentToolHistory 快照（智的自持逻辑判定用） */
+  getRecentToolHistory?: () => Array<{ tool: string; target?: string; turn: number }>
   getThetaState: () => any
   setThetaState: (state: any) => void
   getPredictionAccumulator: () => any
@@ -595,18 +597,20 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     }))
   }
 
-  // Virtue-Settlement: postTool 观察 + postTurn 效用核销 — 美德信号两段式
+  // Virtue-Settlement: postTurn 效用核销 — 美德信号两段式
   // （stigmergy-hook 检测后 submit pending，此处 postTurn 核销效用后转正）。
-  if (deps.virtuePendingLedger && deps.advisoryReadback) {
-    hooks.push(...createVirtueSettlementHooks({
+  // 不需要 postTool 半边——advisory-readback-observe 已经在喂 readback 观察日志。
+  if (deps.virtuePendingLedger && deps.advisoryReadback && deps.advisoryBus) {
+    hooks.push(createVirtueSettlementHook({
       ledger: deps.virtuePendingLedger,
       readback: deps.advisoryReadback,
       recordStance: deps.recordStance ?? (() => {}),
       deposit: deps.stigmergyDeposit,
-      advisoryBus: deps.advisoryBus!,
+      advisoryBus: deps.advisoryBus,
       getSeason: () => deps.getCurrentSeason?.() ?? 'genesis',
       getSeasonIntensity: () => deps.getCurrentSeasonIntensity?.() ?? 1.0,
       getRecentCacheHitRate: () => deps.getRecentCacheHitRate?.() ?? null,
+      getRecentToolHistory: () => deps.getRecentToolHistory?.() ?? [],
     }))
   }
 
