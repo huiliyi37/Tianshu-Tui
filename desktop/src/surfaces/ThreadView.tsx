@@ -46,6 +46,7 @@ import { usePlanModeShortcut } from '../hooks/use-plan-mode-shortcut'
 import { SideChat } from '../components/SideChat'
 import { MessageNavigator, type TurnEntry } from '../components/MessageNavigator'
 import { QuestionCard } from './QuestionCard'
+import { useUserScrollIntent } from './use-scroll-intent.js'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
@@ -403,7 +404,7 @@ export function ThreadView(props: {
   // token batch triggers the auto-scroll effect in the same frame as the wheel
   // event — the effect reads a stale scrolledUp=false and yanks the view back
   // to the bottom, making the wheel feel dead.
-  const userIntentUpRef = useRef(false)
+  const scrollIntent = useUserScrollIntent()
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastScrollAtRef = useRef(0)
   useEffect(() => () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }, [])
@@ -412,7 +413,7 @@ export function ThreadView(props: {
     const SCROLL_THROTTLE_MS = 100
     const run = () => {
       scrollTimerRef.current = null
-      if (scrolledUpRef.current || userIntentUpRef.current) return // user scrolled up while the tick was pending
+      if (scrolledUpRef.current || scrollIntent.userIntentUpRef.current) return // user scrolled up while the tick was pending
       lastScrollAtRef.current = performance.now()
       virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
     }
@@ -442,21 +443,22 @@ export function ThreadView(props: {
   // Track scroll position: when user scrolls into the "near bottom" zone,
   // clear the scrolled-up flag so auto-scroll resumes.
   const onScroll = useCallback(() => {
+    const el = msgRef.current
+    const scrollTop = el?.scrollTop ?? 0
     const near = isNearBottom()
-    if (near) userIntentUpRef.current = false
+    scrollIntent.onScroll(scrollTop, near)
     setScrolledUp(!near)
     setNavTick((t) => t + 1) // refresh navigator "current" marker
     // Persist scroll position to store (throttled via rAF).
-    const el = msgRef.current
-    if (el) dispatch({ type: 'setScrollPosition', sessionId: session.id, scrollTop: el.scrollTop })
-  }, [isNearBottom, dispatch, session.id])
+    if (el) dispatch({ type: 'setScrollPosition', sessionId: session.id, scrollTop })
+  }, [isNearBottom, dispatch, session.id, scrollIntent])
 
   // Wheel intent: set synchronously so the auto-scroll effect (which may run
   // in the same frame) sees the user's upward intent immediately. Cleared by
   // onScroll once the user returns near the bottom.
   const onWheel = useCallback((e: React.WheelEvent) => {
-    if (e.deltaY < 0) userIntentUpRef.current = true
-  }, [])
+    scrollIntent.onWheel(e, msgRef.current?.scrollTop ?? 0)
+  }, [scrollIntent])
 
   // Restore scroll position on mount — preserves across tab switches.
   useEffect(() => {
@@ -471,9 +473,9 @@ export function ThreadView(props: {
 
   const scrollToBottom = useCallback(() => {
     if (rendered.length > 0) virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
-    userIntentUpRef.current = false
+    scrollIntent.clearIntent()
     setScrolledUp(false)
-  }, [rendered.length, virtualizer])
+  }, [rendered.length, virtualizer, scrollIntent])
 
   // Keyboard navigation: j/k or ↑/↓ to jump between message blocks.
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null)
@@ -481,6 +483,14 @@ export function ThreadView(props: {
     // Only handle when focus is on the messages container itself (not in input).
     const el = document.activeElement
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)) return
+    // Native scroll-up keys (PageUp, Home, ArrowUp) move the view upward without
+    // firing onWheel; capture intent synchronously so streaming auto-scroll does
+    // not yank the view back down in the same frame.
+    const isNativeScrollUp = (e.key === 'PageUp' || e.key === 'Home' || e.key === 'ArrowUp') && !e.altKey
+    if (isNativeScrollUp) {
+      scrollIntent.onKeyDown(e)
+      return
+    }
     const isNav = e.key === 'j' || e.key === 'k' || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp'))
     if (!isNav) return
     e.preventDefault()
@@ -490,7 +500,7 @@ export function ThreadView(props: {
       virtualizer.scrollToIndex(next, { align: 'center' })
       return next
     })
-  }, [rendered.length, virtualizer])
+  }, [rendered.length, virtualizer, scrollIntent])
 
   // ── Message navigator: jump to any earlier user turn without scrolling ──
   // seq → timestamp, joined from the already-fetched rewind points.
