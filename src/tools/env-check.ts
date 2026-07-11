@@ -112,11 +112,18 @@ export interface GitExeProbeDeps {
  *
  * GUI-launched desktop apps on Windows often inherit a truncated PATH that does
  * not include the user's `C:\Program Files\Git\cmd` entry, so `where git` fails
- * even though Git is installed. We mirror the Git Bash probe order from
- * platform.ts (RIVET override → PATH → Program Files → LOCALAPPDATA) but look
- * for `cmd\git.exe` instead of `bin\bash.exe`.
+ * even though Git is installed. Probe order:
+ *   1. `RIVET_GIT_PATH` override (seeded from `env.gitPath` on desktop startup)
+ *   2. `where git` (PATH)
+ *   3. common install locations (Program Files / LOCALAPPDATA)
+ * Mirrors the Git Bash probe order from platform.ts, but looks for
+ * `cmd\git.exe` instead of `bin\bash.exe`.
  */
 export async function resolveGitExePath(deps: GitExeProbeDeps): Promise<string | undefined> {
+  // 1. Explicit override: RIVET_GIT_PATH / env.gitPath wins everything.
+  const override = deps.env['RIVET_GIT_PATH']
+  if (override && deps.exists(override)) return override
+
   const path = await deps.whichGit()
   if (path) return path
 

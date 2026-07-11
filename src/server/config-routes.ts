@@ -267,24 +267,36 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
     }, apiToken),
 
-    // Windows Git Bash override for the desktop settings UI. `exists` lets the
-    // UI warn about a stale/typo'd path without blocking the save (the user may
-    // set it before installing Git). Takes effect on the next sidecar restart.
+    // Windows Git Bash override + cross-platform git executable override for the
+    // desktop settings UI. `exists` lets the UI warn about a stale/typo'd path
+    // without blocking the save. Takes effect on the next sidecar restart.
     'GET /config/shell': withAuth(() => {
       const cfg = getShellConfig()
-      return { status: 200, body: { ...cfg, exists: cfg.gitBashPath ? existsSync(cfg.gitBashPath) : null } }
+      return {
+        status: 200,
+        body: {
+          ...cfg,
+          exists: cfg.gitBashPath ? existsSync(cfg.gitBashPath) : null,
+          gitExists: cfg.gitPath ? existsSync(cfg.gitPath) : null,
+        },
+      }
     }, apiToken),
 
     'PUT /config/shell': withAuth((body) => {
-      const { gitBashPath } = (body ?? {}) as { gitBashPath?: unknown }
-      if (gitBashPath === undefined) {
-        return { status: 400, body: { error: 'gitBashPath is required' } }
+      const { gitBashPath, gitPath } = (body ?? {}) as { gitBashPath?: unknown; gitPath?: unknown }
+      if (gitBashPath === undefined && gitPath === undefined) {
+        return { status: 400, body: { error: 'gitBashPath or gitPath is required' } }
       }
       try {
-        const next = setShellConfig({ gitBashPath })
+        const next = setShellConfig({ gitBashPath, gitPath })
         return {
           status: 200,
-          body: { ok: true, ...next, exists: next.gitBashPath ? existsSync(next.gitBashPath) : null },
+          body: {
+            ok: true,
+            ...next,
+            exists: next.gitBashPath ? existsSync(next.gitBashPath) : null,
+            gitExists: next.gitPath ? existsSync(next.gitPath) : null,
+          },
         }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }

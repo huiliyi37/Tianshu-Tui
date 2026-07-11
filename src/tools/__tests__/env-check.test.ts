@@ -147,6 +147,23 @@ describe('env-check', () => {
       ...over,
     })
 
+    it('RIVET_GIT_PATH override wins when it exists', async () => {
+      const expected = 'D:\\custom\\Git\\cmd\\git.exe'
+      const got = await resolveGitExePath(baseDeps({
+        env: { RIVET_GIT_PATH: expected },
+        exists: (p) => p === expected,
+      }))
+      assert.equal(got, expected)
+    })
+
+    it('ignores RIVET_GIT_PATH override when the file does not exist', async () => {
+      const got = await resolveGitExePath(baseDeps({
+        env: { RIVET_GIT_PATH: 'D:\\nope\\git.exe' },
+        whichGit: async () => 'C:\\Program Files\\Git\\cmd\\git.exe',
+      }))
+      assert.equal(got, 'C:\\Program Files\\Git\\cmd\\git.exe')
+    })
+
     it('returns PATH git.exe when `which` finds it', async () => {
       const got = await resolveGitExePath(baseDeps({
         whichGit: async () => 'C:\\Program Files\\Git\\cmd\\git.exe',

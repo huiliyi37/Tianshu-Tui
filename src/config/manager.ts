@@ -301,11 +301,17 @@ export function setEditorConfig(input: { platform?: unknown; eol?: unknown }): E
 export interface ShellConfigSnapshot {
   /** Configured custom Git Bash path, or empty string when unset. */
   gitBashPath: string
+  /** Configured custom git executable path, or empty string when unset. */
+  gitPath: string
 }
 
-/** Snapshot of the shell block (Git Bash override) for the desktop settings UI. */
+/** Snapshot of the shell block (Git Bash / git override) for the desktop settings UI. */
 export function getShellConfig(): ShellConfigSnapshot {
-  return { gitBashPath: loadConfig().env.gitBashPath ?? '' }
+  const env = loadConfig().env
+  return {
+    gitBashPath: env.gitBashPath ?? '',
+    gitPath: env.gitPath ?? '',
+  }
 }
 
 /**
@@ -314,7 +320,7 @@ export function getShellConfig(): ShellConfigSnapshot {
  * sidecar/session start (seeded into RIVET_GIT_BASH_PATH via
  * applyConfiguredGitBashPath). Only meaningful on Windows.
  */
-export function setShellConfig(input: { gitBashPath?: unknown }): ShellConfigSnapshot {
+export function setShellConfig(input: { gitBashPath?: unknown; gitPath?: unknown }): ShellConfigSnapshot {
   const cfg = loadConfig()
   const merged: Record<string, unknown> = { ...cfg.env }
   if (input.gitBashPath !== undefined) {
@@ -322,9 +328,17 @@ export function setShellConfig(input: { gitBashPath?: unknown }): ShellConfigSna
     if (raw) merged.gitBashPath = raw
     else delete merged.gitBashPath
   }
+  if (input.gitPath !== undefined) {
+    const raw = String(input.gitPath).trim()
+    if (raw) merged.gitPath = raw
+    else delete merged.gitPath
+  }
   cfg.env = envSchema.parse(merged)
   saveConfig(cfg)
-  return { gitBashPath: cfg.env.gitBashPath ?? '' }
+  return {
+    gitBashPath: cfg.env.gitBashPath ?? '',
+    gitPath: cfg.env.gitPath ?? '',
+  }
 }
 
 // --- Codex 式常驻目录授权（agent.permissions.additionalReadDirs/WriteDirs） ---

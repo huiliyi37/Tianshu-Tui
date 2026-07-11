@@ -208,6 +208,22 @@
     "clear": "Clear",
     "savedPathMissing": "Saved path does not exist: "
   },
+  "gitPath": {
+    "title": "Git executable path",
+    "desc": "Tianshu uses this path to invoke git for environment probing and repository operations. If Git is installed in a non-default location or auto-detection fails, enter the full path to <code>git.exe</code> (Windows) or <code>git</code> (macOS/Linux). Leave empty for auto-detection (PATH → common install locations → bundled PortableGit). The <code>RIVET_GIT_PATH</code> environment variable takes precedence.",
+    "savedMissing": "Saved, but the path does not currently exist — install Git or fix the path, then restart the app",
+    "saved": "Saved · takes effect after restarting the app",
+    "cleared": "Custom path cleared · auto-detection resumes after restarting the app",
+    "saveFailed": "Save failed: {{error}}",
+    "saving": "Saving…",
+    "save": "Save",
+    "clear": "Clear",
+    "savedPathMissing": "Saved path does not exist: ",
+    "placeholderWin": "C:\\Program Files\\Git\\cmd\\git.exe",
+    "placeholderUnix": "/usr/local/bin/git",
+    "statusAvailable": "Git detected{{version}}",
+    "statusMissing": "Git not detected — specify a path below, or install Git and restart the app"
+  },
   "storageLocation": {
     "title": "Storage location",
     "desc": "Set the Tianshu data root directory (RIVET_HOME). Changing it requires an app restart; you can optionally migrate existing data. Session logs, cache hit records, and configuration all live here.",

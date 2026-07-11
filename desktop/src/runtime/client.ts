@@ -1238,16 +1238,21 @@ export function setEditorConfig(
   return apiPut<{ ok: boolean } & EditorConfig>('/config/editor', input)
 }
 
-// ── Shell / Git Bash 路径（Windows 命令执行）─────────────────────────
+// ── Shell / Git Bash + git 路径（Windows 命令执行 / 环境探测）──────────
 /** `exists`: true/false when a path is set (probed), null when unset. */
-export interface ShellConfig { gitBashPath: string; exists: boolean | null }
+export interface ShellConfig {
+  gitBashPath: string
+  exists: boolean | null
+  gitPath: string
+  gitExists: boolean | null
+}
 
 export function getShellConfig(): Promise<ShellConfig> {
   return apiGet<ShellConfig>('/config/shell')
 }
 
 export function setShellConfig(
-  input: { gitBashPath: string },
+  input: { gitBashPath?: string; gitPath?: string },
 ): Promise<{ ok: boolean } & ShellConfig> {
   return apiPut<{ ok: boolean } & ShellConfig>('/config/shell', input)
 }

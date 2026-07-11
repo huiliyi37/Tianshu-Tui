@@ -1104,6 +1104,39 @@ fn apply_configured_git_bash(rivet_home: &std::path::Path) {
     }
 }
 
+/// Seed `RIVET_GIT_PATH` from the persisted config (`env.gitPath` in
+/// `<rivet_home>/config.json`) so the `/environment` probe (env-check.ts)
+/// uses the user-chosen git executable directly instead of searching PATH.
+/// A real OS env var of the same name always wins (explicit override).
+fn apply_configured_git_path(rivet_home: &std::path::Path) {
+    if let Some(v) = std::env::var_os("RIVET_GIT_PATH") {
+        if !v.is_empty() {
+            return;
+        }
+    }
+    let cfg_path = std::env::var_os("RIVET_CONFIG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| rivet_home.join("config.json"));
+    let text = match std::fs::read_to_string(&cfg_path) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let json: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+    if let Some(p) = json
+        .get("env")
+        .and_then(|e| e.get("gitPath"))
+        .and_then(|v| v.as_str())
+    {
+        let p = p.trim();
+        if !p.is_empty() {
+            std::env::set_var("RIVET_GIT_PATH", p);
+        }
+    }
+}
+
 /// The env var names each configured provider resolves its key from: the
 /// explicit `apiKeyEnv` and the implicit `<PROVIDER>_API_KEY` (mirrors
 /// src/api/factory.ts::resolveApiKey). Best-effort: missing config / parse
@@ -1258,9 +1291,11 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
     let (node, node_source) = resolve_node_cmd(app);
     let entry = sidecar_entry(app);
     let rivet_home = strip_verbatim_prefix(resolve_rivet_home(app));
-    // Seed a user-configured Git Bash path before spawn (sidecar inherits it)
-    // and before any PTY is created (pty.rs reads it from this process env).
+    // Seed user-configured Git Bash / git paths before spawn (sidecar inherits
+    // them) and before any PTY is created (pty.rs reads RIVET_GIT_BASH_PATH
+    // from this process env).
     apply_configured_git_bash(&rivet_home);
+    apply_configured_git_path(&rivet_home);
     // macOS/Linux GUI launch inherits a minimal env without the user's shell rc
     // exports — hydrate any config-referenced apiKeyEnv vars from the login
     // shell BEFORE resolving auth_env so the snapshot (and the sidecar) get them.

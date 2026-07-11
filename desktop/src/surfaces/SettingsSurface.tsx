@@ -326,6 +326,7 @@ export function SettingsSurface() {
             <AutostartSection />
             <PlatformSection />
             <ShellSection />
+            <GitPathSection />
             <StorageLocationSection />
             <StorageSection />
             <UpdaterSection />
@@ -885,6 +886,95 @@ function ShellSection() {
       </div>
       {saved && exists === false && (
         <div className="meta warn" style={{ marginTop: 6 }}>{t('shell.savedPathMissing')}<code>{saved}</code></div>
+      )}
+      {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
+    </section>
+  )
+}
+
+function GitPathSection() {
+  const { t } = useTranslation('settings')
+  const [env, setEnv] = useState<EnvironmentInfo | null>(null)
+  const [path, setPath] = useState('')
+  const [saved, setSaved] = useState('')
+  const [exists, setExists] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const [e, s] = await Promise.all([getEnvironment(), getShellConfig()])
+      setEnv(e)
+      setPath(s.gitPath)
+      setSaved(s.gitPath)
+      setExists(s.gitExists)
+    } catch {
+      setEnv(null)
+    }
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const save = useCallback(async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const next = await setShellConfig({ gitPath: path })
+      setSaved(next.gitPath)
+      setExists(next.gitExists)
+      if (next.gitPath && next.gitExists === false) {
+        setMsg(t('gitPath.savedMissing'))
+      } else if (next.gitPath) {
+        setMsg(t('gitPath.saved'))
+      } else {
+        setMsg(t('gitPath.cleared'))
+      }
+      void getEnvironment().then(setEnv).catch(() => {})
+    } catch (err) {
+      setMsg(t('gitPath.saveFailed', { error: (err as Error).message }))
+    } finally {
+      setBusy(false)
+    }
+  }, [path, t])
+
+  // Render nothing until the environment probe resolves.
+  if (!env) return null
+
+  const placeholder = env.platform === 'win32' ? t('gitPath.placeholderWin') : t('gitPath.placeholderUnix')
+  const gitAvailable = env.git.available
+
+  return (
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>{t('gitPath.title')}</h4>
+        <p className="meta">
+          <Trans t={t} i18nKey="gitPath.desc" components={{ code: <code /> }} />
+        </p>
+      </div>
+      <div className={`meta ${gitAvailable ? '' : 'warn'}`} style={{ marginBottom: 8 }}>
+        {gitAvailable
+          ? t('gitPath.statusAvailable', { version: env.git.version ? ` (${env.git.version})` : '' })
+          : t('gitPath.statusMissing')}
+      </div>
+      <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+        <Input
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder={placeholder}
+          spellCheck={false}
+          style={{ minWidth: 340, flex: 1, fontFamily: 'var(--font-mono, monospace)' }}
+        />
+        <Button onClick={() => void save()} disabled={busy || path.trim() === saved.trim()}>
+          {busy ? t('gitPath.saving') : t('gitPath.save')}
+        </Button>
+        {saved && (
+          <Button variant="outline" onClick={() => { setPath(''); }} disabled={busy}>
+            {t('gitPath.clear')}
+          </Button>
+        )}
+      </div>
+      {saved && exists === false && (
+        <div className="meta warn" style={{ marginTop: 6 }}>{t('gitPath.savedPathMissing')}<code>{saved}</code></div>
       )}
       {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
     </section>

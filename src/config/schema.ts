@@ -486,6 +486,12 @@ export const envSchema = z.object({
    *  falls back to the normal probe chain (where git → common dirs → bundled
    *  PortableGit). */
   gitBashPath: z.string().optional(),
+  /** Absolute path to a custom `git.exe` (Windows) or `git` binary (macOS/Linux).
+   *  When set, it seeds `RIVET_GIT_PATH` at startup so the environment probe
+   *  (`/environment`) uses it directly instead of searching PATH. A real OS env
+   *  var of the same name always wins (explicit override). Empty/unset falls
+   *  back to the normal probe chain (PATH → common install dirs → bundled git). */
+  gitPath: z.string().optional(),
 }).default({})
 
 export const uiSchema = z.object({
