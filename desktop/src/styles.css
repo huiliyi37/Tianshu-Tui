@@ -2637,7 +2637,7 @@ body {
 
 .composer-float {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 20;
-  padding: 0 16px 16px;
+  padding: 0 16px 8px;
   display: flex; justify-content: center;
   pointer-events: none;
 }
@@ -2648,20 +2648,19 @@ body {
   backdrop-filter: blur(24px) saturate(1.2);
   -webkit-backdrop-filter: blur(24px) saturate(1.2);
   border: 1px solid var(--compose-surface-border);
-  border-radius: var(--radius-3xl);
+  border-radius: var(--radius-xl);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.1), 0 4px 12px rgba(0, 0, 0, 0.05);
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-  margin-bottom: var(--space-4);
 }
-.composer { position: relative; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; background: transparent; backdrop-filter: none; border: none; border-radius: 0; box-shadow: none; }
+.composer { position: relative; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; background: transparent; backdrop-filter: none; border: none; border-radius: 0; box-shadow: none; }
 .composer.drag-over { background: var(--accent-soft); border: 2px dashed var(--accent); border-radius: var(--radius-lg); }
 .composer-row { display: flex; gap: var(--space-2); align-items: flex-end; }
 .composer-row textarea { flex: 1; }
 .composer textarea {
   background: transparent; color: var(--text);
-  border: none; border-radius: 0; padding: 8px 12px;
-  resize: none; font-family: inherit; font-size: var(--text-md); line-height: 1.45;
-  min-height: 44px; max-height: min(32vh, 220px); overflow-y: hidden;
+  border: none; border-radius: 0; padding: 6px 10px;
+  resize: none; font-family: inherit; font-size: var(--text-md); line-height: 1.4;
+  min-height: 36px; max-height: min(32vh, 220px); overflow-y: hidden;
   transition: color var(--dur) var(--ease);
 }
 .composer textarea:hover,
