@@ -40,8 +40,8 @@ function makeApp() {
     stdin: stdin as unknown as ReadStream,
     cols: 120, rows: 24, modelName: 'test', contextWindow: 200_000,
   })
-  // Wave 2 起默认 compact 档收起 ⚡/cost/token 绝对值；本套件验证 metrics
-  // 管线（provider → 渲染）需要全量展示，固定 full 档。
+  // 默认 compact 档保留 ⚡/effort，收起 cost/token 绝对值/goal/todo；本套件验证
+  // metrics 管线（provider → 渲染）需要全量展示，固定 full 档。
   app.glanceDensity = 'full'
   return { app, out }
 }

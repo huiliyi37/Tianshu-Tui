@@ -105,7 +105,7 @@ export interface GlanceBarInput {
   todoSummary?: TodoSummary
   /**
    * 信息密度分档（Wave 2 减密）：
-   * - 'compact'（TUI 默认）：模式 badge + 模型 + 上下文% + 耗时 四项
+   * - 'compact'（TUI 默认）：模型 + effort + cache% + 上下文% + 耗时
    * - 'full'：全量（goal/todo/effort/cache/cost 都上）——`/glance full` 切换
    * 未传按 full 处理（兼容既有直接调用方/测试）。
    */
@@ -137,10 +137,29 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   // 权限/计划模式已收敛到输入框下方的常驻权限行（formatPermissionModeLine），
   // GlanceBar 不再重复显示 badge——单一事实来源。
 
-  // ── compact 档：模型 + 上下文% + 耗时，其余全部收起 ──
+  // ── compact 档：模型 + effort + cache% + 上下文% + 耗时 ──
   if (compact) {
     if (input.modelName) {
       parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.muted))
+    }
+    // 推理 effort 强度：◎ + 档位。max 高亮(secondary)、high 主色、medium muted、
+    // low/off dim。让用户随时看到当前实际生效的思考强度（auto-reasoning 会动态调整）。
+    if (input.reasoningEffort) {
+      const eff = input.reasoningEffort
+      const effShort = eff === 'medium' ? 'med' : eff
+      const effColor = eff === 'max' ? theme.secondary
+        : eff === 'high' ? theme.primary
+        : eff === 'off' ? theme.dim
+        : theme.muted
+      parts.push(color(`◎${effShort}`, effColor))
+    }
+    if (input.cacheHitRate !== undefined) {
+      const cachePct = (input.cacheHitRate * 100).toFixed(0)
+      const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.muted
+      parts.push(color(`⚡${cachePct}%`, cacheColor))
+    } else {
+      // 无缓存数据时显示占位，避免右侧空洞或误导
+      parts.push(color('⚡-', theme.dim))
     }
     const cRatio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
       ? input.estimatedTokens / input.maxTokens : 0
