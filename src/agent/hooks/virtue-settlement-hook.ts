@@ -25,7 +25,6 @@ import type { VirtuePendingLedger, VirtueSignal } from '../virtue-signals.js'
 import { virtueEncouragementEntry } from '../advisory-bus.js'
 import type { CognitiveSeason } from '../cognitive-season.js'
 import type { PheromoneDeposit } from '../../context/stigmergy.js'
-import type { ToolHistoryEntry } from '../evidence-gate.js'
 
 /** 效用转正阈值——低于此值的美德信号不记录（走过场） */
 const UTILITY_THRESHOLD = 0.5
@@ -52,8 +51,6 @@ export interface VirtueSettlementHookDeps {
   getSeasonIntensity: () => number
   /** 近 N 轮平均缓存命中率（T0 信复活用），null = 数据不足 */
   getRecentCacheHitRate: () => number | null
-  /** recentToolHistory 快照——用于智的自持逻辑判定（同 tool+target 不再出现） */
-  getRecentToolHistory: () => ToolHistoryEntry[]
 }
 
 export function createVirtueSettlementHook(
@@ -98,16 +95,16 @@ export function createVirtueSettlementHook(
       if (settled.length === 0) return
 
       for (const entry of settled) {
-        // 智的自持逻辑（问题1修复）：同 tool+target 在检测后不再出现 = 转向 = 高效用
-        // 不走 readback——readback 的 tool_appears 空 tools 恒真，语义反了
+        // 智的自持逻辑（方案C）：用 readback 负向查询——同 tool+target 在检测后
+        // 再次出现 = 原地重复 = 低效用；未再出现 = 转向 = 高效用。
+        // detectedTurn+1 起窗避免把触发检测的那次调用自己算进去。
         if (entry.signal.type === 'strategic-awareness' && entry.probeTool) {
-          const history = deps.getRecentToolHistory()
-          const repeatsAfter = history.filter(
-            h => h.turn > entry.detectedTurn
-              && h.tool === entry.probeTool
-              && h.target === entry.probeTarget,
+          const reappeared = deps.readback.wasSatisfiedBetween(
+            { kind: 'tool_appears', tools: [entry.probeTool], targetIncludes: entry.probeTarget },
+            entry.detectedTurn + 1,
+            currentTurn,
           )
-          const utility = repeatsAfter.length === 0 ? 1.0 : 0.2
+          const utility = reappeared ? 0.2 : 1.0
           if (utility < UTILITY_THRESHOLD) continue
           deps.recordStance(entry.signal)
           deps.deposit({

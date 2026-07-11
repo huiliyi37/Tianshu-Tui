@@ -86,8 +86,6 @@ export interface RuntimeHookDeps {
   getCurrentSeasonIntensity?: () => number
   /** T0: 近 N 轮平均缓存命中率（信复活用） */
   getRecentCacheHitRate?: () => number | null
-  /** T2: recentToolHistory 快照（智的自持逻辑判定用） */
-  getRecentToolHistory?: () => Array<{ tool: string; target?: string; turn: number }>
   getThetaState: () => any
   setThetaState: (state: any) => void
   getPredictionAccumulator: () => any
@@ -610,7 +608,6 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getSeason: () => deps.getCurrentSeason?.() ?? 'genesis',
       getSeasonIntensity: () => deps.getCurrentSeasonIntensity?.() ?? 1.0,
       getRecentCacheHitRate: () => deps.getRecentCacheHitRate?.() ?? null,
-      getRecentToolHistory: () => deps.getRecentToolHistory?.() ?? [],
     }))
   }
 

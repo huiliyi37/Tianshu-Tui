@@ -411,7 +411,6 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getCurrentSeason: () => self.currentSeason ?? 'genesis',
     getCurrentSeasonIntensity: () => self.currentSeasonIntensity ?? 1.0,
     getRecentCacheHitRate: () => self.session.getRecentTurnHitRate(3),
-    getRecentToolHistory: () => self.recentToolHistory.map(h => ({ tool: h.tool, target: h.target, turn: self.session.getTurnCount() })),
     publishEvent: self.config.sessionRegistry && self.config.sessionId
       ? (input) => self.config.sessionRegistry!.publishEvent(self.config.sessionId!, input)
       : undefined,

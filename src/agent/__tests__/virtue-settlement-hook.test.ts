@@ -5,7 +5,6 @@ import { createVirtuePendingLedger, type VirtueSignal, type VirtuePending } from
 import { AdvisoryReadback } from '../advisory-readback.js'
 import type { CognitiveSeason } from '../cognitive-season.js'
 import type { PheromoneDeposit } from '../../context/stigmergy.js'
-import type { ToolHistoryEntry } from '../evidence-gate.js'
 
 function mkSignal(wuchang: VirtueSignal['wuchang'], type: VirtueSignal['type']): VirtueSignal {
   return { type, confidence: 0.7, wuchang, evidence: `test ${type}` }
@@ -49,7 +48,6 @@ function mkHarness(overrides?: {
       getSeason: overrides?.getSeason ?? (() => 'genesis' as CognitiveSeason),
       getSeasonIntensity: () => 1.0,
       getRecentCacheHitRate: overrides?.getRecentCacheHitRate ?? (() => null),
-      getRecentToolHistory: () => [] as ToolHistoryEntry[],
     },
   }
 }
@@ -133,6 +131,46 @@ describe('createVirtueSettlementHook', () => {
     await postTurn.run({ snapshot: { turn: 3 } } as any)
 
     assert.equal(h.recorded.length, 0, 'low utility signal should not be recorded')
+  })
+
+  it('智: same tool+target reappears after detection → low utility, not recorded', async () => {
+    const h = mkHarness()
+    const postTurn = createVirtueSettlementHook(h.deps)
+
+    // 智 detected at turn 1, probeTool='grep' probeTarget='src/foo.ts'
+    h.deps.ledger.submit({
+      signal: mkSignal('智', 'strategic-awareness'),
+      detectedTurn: 1,
+      utilityExpect: { kind: 'tool_appears', tools: [], withinTurns: 2 },
+      windowTurns: 2,
+      probeTool: 'grep',
+      probeTarget: 'src/foo.ts',
+    })
+    // Same tool+target reappears at turn 2 → readback sees it
+    h.deps.readback.observeTool({ turn: 2, name: 'grep', target: 'src/foo.ts', isError: false })
+    await postTurn.run({ snapshot: { turn: 3 } } as any)
+
+    assert.equal(h.recorded.length, 0, '智 with reappearing tool should NOT be recorded')
+  })
+
+  it('智: tool does NOT reappear after detection → high utility, recorded', async () => {
+    const h = mkHarness()
+    const postTurn = createVirtueSettlementHook(h.deps)
+
+    h.deps.ledger.submit({
+      signal: mkSignal('智', 'strategic-awareness'),
+      detectedTurn: 1,
+      utilityExpect: { kind: 'tool_appears', tools: [], withinTurns: 2 },
+      windowTurns: 2,
+      probeTool: 'grep',
+      probeTarget: 'src/foo.ts',
+    })
+    // A DIFFERENT tool appears at turn 2 — grep+src/foo.ts does NOT reappear
+    h.deps.readback.observeTool({ turn: 2, name: 'edit_file', target: 'src/bar.ts', isError: false })
+    await postTurn.run({ snapshot: { turn: 3 } } as any)
+
+    assert.equal(h.recorded.length, 1, '智 with no reappear should be recorded')
+    assert.equal(h.recorded[0]!.wuchang, '智')
   })
 
   it('信(cache-loyalty): triggers when hitRate >= 80% and turn >= 5', async () => {
