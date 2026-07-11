@@ -78,30 +78,76 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     return [compactLine()]
   }
 
-  // ── CC 头式 3 行 ──────────────────────────────────────────────
-  // 左列：单颗启明星（只在第一行），下两行按其显示宽度留白对齐。
-  const prefix = ' ✦   '
-  const indent = ' '.repeat(displayWidth(prefix, WIDE))
-  const star = ` ${color('✦', theme.primary, { bold: true })}   `
+  // ── Kimi Code 风格包裹卡片 ────────────────────────────────────
+  const W = Math.min(cols - 4, 76)
+  if (W < 45) {
+    return [compactLine()]
+  }
 
-  const brand = color('Tianshu Code', theme.primary, { bold: true })
-  const version = input.version ? ` ${color(`v${input.version}`, theme.muted)}` : ''
+  const innerW = W - 4
+  const logoW = 11
+  const infoW = innerW - logoW
 
-  // 权限模式短标签——与输入框下方权限行同一口径（yolo 而非全称）。
-  const modeLabel = input.approvalMode === 'dangerously-skip-permissions' ? 'yolo' : input.approvalMode
-  const modeSuffix = modeLabel
-    ? ` ${color('·', theme.dim)} ${color(modeLabel, theme.muted)}`
-    : ''
-
-  // 前后各留一行呼吸空行：欢迎块上贴启动日志、下贴历史会话提示/输入框时
-  // 不至于挤成一坨（压抑感的主要来源）。
-  const out: string[] = [
-    '',
-    `${star}${brand}${version}`,
-    `${indent}${input.modelName}${modeSuffix}`,
-    `${indent}${color(tildify(input.cwd), theme.muted)}`,
-    '',
+  const logoLines = [
+    `    ${color('▲', theme.primary)}     `,
+    `  ${color('◄', theme.primary)} ${color('✦', theme.primary, { bold: true })} ${color('►', theme.primary)} `,
+    `    ${color('▼', theme.primary)}     `,
   ]
 
-  return out.map(line => truncateToWidth(line, cols))
+  const rightLines = [
+    color('Welcome to Tianshu Code!', theme.primary, { bold: true }),
+    color('Send /help for help information.', theme.muted),
+    '', // 空行
+  ]
+
+  const infoRows: { key: string; val: string }[] = [
+    { key: 'Directory', val: tildify(input.cwd) },
+    { key: 'Session', val: input.sessionId },
+    { key: 'Model', val: input.modelName },
+  ]
+  if (input.version) {
+    infoRows.push({ key: 'Version', val: 'v' + input.version })
+  }
+  if (input.approvalMode) {
+    const label = input.approvalMode === 'dangerously-skip-permissions' ? 'yolo' : input.approvalMode
+    infoRows.push({ key: 'Approval', val: label })
+  }
+
+  const borderCol = (s: string) => color(s, theme.primary)
+
+  const cardLines: string[] = []
+  cardLines.push(borderCol(`┌${'─'.repeat(W - 2)}┐`))
+
+  for (let i = 0; i < 3; i++) {
+    const logo = logoLines[i]!
+    const right = rightLines[i]!
+    const rightPlain = i === 0 ? 'Welcome to Tianshu Code!' : i === 1 ? 'Send /help for help information.' : ''
+    const rightW = displayWidth(rightPlain, WIDE)
+    const pad = ' '.repeat(Math.max(0, infoW - rightW))
+    cardLines.push(`${borderCol('│')} ${logo}${right}${pad} ${borderCol('│')}`)
+  }
+
+  for (const row of infoRows) {
+    const keyStr = `  ${row.key}:`
+    const keyColored = color(keyStr.padEnd(12), theme.muted)
+
+    const maxValW = innerW - 12
+    const valPlain = row.val
+    const valTruncated = displayWidth(valPlain, WIDE) > maxValW
+      ? `${truncateToDisplayWidth(valPlain, maxValW - 1, WIDE)}…`
+      : valPlain
+    const valW = displayWidth(valTruncated, WIDE)
+    const valColored = color(valTruncated, theme.secondary)
+    const pad = ' '.repeat(Math.max(0, maxValW - valW))
+
+    cardLines.push(`${borderCol('│')} ${keyColored}${valColored}${pad} ${borderCol('│')}`)
+  }
+
+  cardLines.push(borderCol(`└${'─'.repeat(W - 2)}┘`))
+
+  return [
+    '',
+    ...cardLines,
+    '',
+  ]
 }

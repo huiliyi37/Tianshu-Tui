@@ -19,7 +19,7 @@ test('welcome renders CC-style header (3 lines + breathing blanks)', () => {
     version: '2.15.1',
     approvalMode: 'auto-safe',
   }, theme)
-  assert.ok(lines.length <= 6, `welcome should be ≤6 lines, got ${lines.length}`)
+  assert.ok(lines.length <= 14, `welcome should be ≤14 lines, got ${lines.length}`)
   assert.ok(lines.length >= 3, `welcome should be ≥3 lines, got ${lines.length}`)
   assert.equal(lines[0], '', 'leading blank line for breathing room')
   assert.equal(lines[lines.length - 1], '', 'trailing blank line for breathing room')
@@ -52,14 +52,13 @@ test('welcome omits version/mode gracefully when not provided', () => {
   assert.ok(!joined.includes('v undefined') && !joined.includes('vnull'), 'no dangling version text')
 })
 
-test('welcome has no bordered card, big logo or shortcut matrix', () => {
+test('welcome has bordered card, star logo and no shortcut matrix', () => {
   const lines = formatWelcome({
     modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 120, rows: 40,
     version: '2.15.1',
   }, theme)
   const joined = lines.join('\n')
-  assert.ok(!joined.includes('┌'), 'no border')
-  assert.ok(!joined.includes('█'), 'no block-ASCII logo')
+  assert.ok(joined.includes('┌'), 'should show border')
   assert.ok(!joined.includes('Ctrl+'), 'no shortcut matrix')
 })
 
@@ -108,7 +107,7 @@ test('24-row terminal keeps the full header (fits easily)', () => {
     modelName: 'deepseek-v4', cwd: '/x/proj', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 80, rows: 24,
     version: '2.15.1', approvalMode: 'auto-safe',
   }, theme)
-  assert.ok(lines.length >= 3 && lines.length <= 6, `80×24 → full header, got ${lines.length}`)
+  assert.ok(lines.length >= 3 && lines.length <= 14, `80×24 → full header, got ${lines.length}`)
 })
 
 test('no rows provided → 3-line header (back-compat)', () => {

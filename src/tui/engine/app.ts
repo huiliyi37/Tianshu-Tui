@@ -39,7 +39,7 @@ import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBa
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, formatPermissionModeLine } from '../format/glance-bar.js'
+import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
@@ -3354,29 +3354,9 @@ export class TuiApp {
       // 渲染宽度会超过 cols → 终端折行成 2 显示行，而 LiveEngine.rowsForLine 按 narrow
       // 数成 1 行 → 回顶欠擦（moveToTop/ERASE 少擦一行）→ 输入框重影/逐帧堆叠重复。
       // 按 wide 定尺后顶边框恒 ≤ cols，任何终端都占 1 显示行，行数估算与实际一致。
-      const plainLeft = displayWidth(leftStr, { ambiguousAsWide: true })
-      const plainRight = displayWidth(rightStr, { ambiguousAsWide: true })
-
-      // 4. 计算并拼接一体化顶部边框：╭─ leftStr ─┬─ rightStr ─╮
+      // 4. 获取边框线字符，构建纯净闭合边框
       const chars = boxCharsFor(uiSep)
-      let topBorder = ''
-      if (innerWidth < plainLeft + plainRight + 10) {
-        topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
-      } else {
-        const lineRem = innerWidth - plainLeft - plainRight - 4 // 4 = label border paddings
-        const leftFill = Math.max(2, Math.floor(lineRem * 0.4))
-        const rightFill = Math.max(2, lineRem - leftFill)
-        
-        topBorder = color(chars.tl, borderColor) + 
-                    color(chars.h.repeat(2), borderColor) + 
-                    leftStr + 
-                    color(chars.h.repeat(leftFill), borderColor) + 
-                    color(chars.m, borderColor) + 
-                    color(chars.h.repeat(rightFill), borderColor) + 
-                    rightStr + 
-                    color(chars.h.repeat(2), borderColor) + 
-                    color(chars.tr, borderColor)
-      }
+      const topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
 
       const MAX_INPUT_DISPLAY_LINES = 12
       const arrowColor = this.theme.success
@@ -3404,10 +3384,24 @@ export class TuiApp {
       }
       lines.push({ text: botBorder })
 
-      // 5a. 权限模式行（CC parity：输入框正下方常驻，单一事实来源）。
-      //     slash 提示打开时让位，避免与候选列表叠在一起。
+      // 5a. 一体化状态底栏（包含星域、分支、执行模式及实时监控指标）
+      //     当 slash 命令提示打开时让位，避免视觉重叠。
       if (!isSlash) {
-        lines.push({ text: this.clampLine(formatPermissionModeLine({ approvalMode: this._approvalMode, planMode: planModeActive }, this.theme)) })
+        const modeLabel = this._approvalMode === 'dangerously-skip-permissions'
+          ? 'yolo'
+          : this._approvalMode === 'auto-safe'
+          ? '自治'
+          : this._approvalMode === 'manual'
+          ? '监督'
+          : this._approvalMode
+        const planLabel = planModeActive ? ' · Plan' : ''
+        const leftFull = `${leftStr} ${color(`[${modeLabel}${planLabel}]`, this.theme.muted)}`
+        const leftLen = displayWidth(leftFull, { ambiguousAsWide: true })
+        const rightLen = displayWidth(rightStr, { ambiguousAsWide: true })
+        
+        const spaceCount = Math.max(1, cols - leftLen - rightLen - 4) // 4 = 左右侧缩进留白
+        const statusLine = "  " + leftFull + " ".repeat(spaceCount) + rightStr
+        lines.push({ text: this.clampLine(statusLine) })
       }
 
       // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）
