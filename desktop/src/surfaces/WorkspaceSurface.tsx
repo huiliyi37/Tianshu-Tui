@@ -64,6 +64,7 @@ export function WorkspaceSurface() {
   const deckRef = useRef<HTMLDivElement>(null)
   const [showDelegation, setShowDelegation] = useState(false)
   const [jobsHidden, setJobsHidden] = useState(false)
+  const [sideChatOpen, setSideChatOpen] = useState(false)
 
   const runningJobsCount = Object.values(view.jobs).filter((j) => j.status === 'running').length
   const prevRunningCount = useRef(runningJobsCount)
@@ -291,6 +292,8 @@ export function WorkspaceSurface() {
             <WorkspaceHeader
               showDelegation={showDelegation}
               onToggleDelegation={() => setShowDelegation((v) => !v)}
+              sideChatOpen={sideChatOpen}
+              onToggleSideChat={() => setSideChatOpen((v) => !v)}
             />
             <div className="conversation-body">
               <ThreadTabs />
@@ -322,6 +325,8 @@ export function WorkspaceSurface() {
                     onRetryStream={view.retryStream}
                     onToggleDelegation={setShowDelegation}
                     onApproval={handleApproval}
+                    sideChatOpen={sideChatOpen}
+                    onToggleSideChat={() => setSideChatOpen((o) => !o)}
                   />
                 ) : (
                    <div className="empty thread-empty onboard">
@@ -541,9 +546,13 @@ export function WorkspaceSurface() {
 function WorkspaceHeader({
   showDelegation,
   onToggleDelegation,
+  sideChatOpen,
+  onToggleSideChat,
 }: {
   showDelegation: boolean
   onToggleDelegation: () => void
+  sideChatOpen: boolean
+  onToggleSideChat: () => void
 }) {
   const { t } = useTranslation('shell')
   const ui = useUiState()
@@ -557,6 +566,39 @@ function WorkspaceHeader({
   // streaming no longer re-renders the whole header bar.
   const delegation = useSessionEventsSelector(ui.activeSessionId, (v) => v.delegation)
   const { total, done, running: runningWorkers } = summarizeDelegation(delegation)
+
+  const cacheReadTokens = useSessionEventsSelector(ui.activeSessionId, (v) => v?.cacheReadTokens)
+  const cacheCreationTokens = useSessionEventsSelector(ui.activeSessionId, (v) => v?.cacheCreationTokens)
+  const prevTotalTokens = useSessionEventsSelector(ui.activeSessionId, (v) => v?.prevTotalTokens)
+  const lastTotalTokens = useSessionEventsSelector(ui.activeSessionId, (v) => v?.lastTotalTokens)
+  const phase = useSessionEventsSelector(ui.activeSessionId, (v) => v?.phase)
+  const runStartedAt = useSessionEventsSelector(ui.activeSessionId, (v) => v?.runStartedAt)
+
+  const cacheHitRate = useMemo(() => {
+    const r = cacheReadTokens ?? 0
+    const c = cacheCreationTokens ?? 0
+    const tot = r + c
+    if (tot <= 0) return null
+    return Math.round((r / tot) * 100)
+  }, [cacheReadTokens, cacheCreationTokens])
+
+  const ctxDelta = useMemo(() => {
+    const prev = prevTotalTokens ?? 0
+    const last = lastTotalTokens ?? 0
+    if (prev <= 0 || last <= prev) return 0
+    return last - prev
+  }, [lastTotalTokens, prevTotalTokens])
+
+  const busy = activeSession?.status === 'running'
+  const [, setElapsedTick] = useState(0)
+  useEffect(() => {
+    if (!busy || !runStartedAt) return
+    const id = setInterval(() => setElapsedTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [busy, runStartedAt])
+
+  const elapsedMs = busy && runStartedAt ? Date.now() - runStartedAt : 0
+  const elapsedStr = elapsedMs > 0 ? formatElapsed(elapsedMs) : ''
 
   const known = useMemo(() => loadKnownProjects(), [])
   const projects = useMemo(() => deriveProjects(sessions.data ?? [], known), [sessions.data, known])
@@ -613,6 +655,27 @@ function WorkspaceHeader({
         <span className="project-name">{projectName}</span>
         <span className="path-sep">/</span>
         <span className="page-name">{pageName}</span>
+        {onThread && (
+          <div className="workspace-header-status-line">
+            <span className={`status-dot status-${activeSession.status}`} />
+            {running && (
+              <span className="status-timer">
+                {elapsedStr}
+                {phase && <span className="status-phase"> · {phase}</span>}
+              </span>
+            )}
+            {cacheHitRate !== null && (
+              <span className="status-chip cache-chip" title={`读取: ${formatTokens(cacheReadTokens ?? 0)} / 写入: ${formatTokens(cacheCreationTokens ?? 0)}`}>
+                ⚡{cacheHitRate}%
+              </span>
+            )}
+            {ctxDelta > 0 && (
+              <span className="status-chip ctx-delta" title="上下文增量">
+                +{formatTokens(ctxDelta)}
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div className="workspace-header-actions" ref={actionsRef}>
         {onThread && running && (
@@ -661,6 +724,18 @@ function WorkspaceHeader({
           >
             <span className={`dp-dot ${runningWorkers > 0 ? 'pulse' : ''}`} />
             <span>子代理 {done}/{total}</span>
+          </button>
+        )}
+        {onThread && (
+          <button
+            className={`header-action-btn ${sideChatOpen ? 'active' : ''}`}
+            title="侧边栏对话 (Cmd+;)"
+            aria-label="侧边栏对话"
+            onClick={onToggleSideChat}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
           </button>
         )}
         <button
@@ -813,4 +888,17 @@ function HeaderGitMenu(props: { sessionId: string; busy: boolean; isWorktree: bo
       )}
     </div>
   )
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
+}
+
+function formatElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return r ? `${m}m${r}s` : `${m}m`
 }

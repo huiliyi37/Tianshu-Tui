@@ -6,7 +6,6 @@ import { perfBegin, perfEnd, perfRecord } from '../state/perf-budget'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import type { StreamStatus } from '../state/use-session-events'
-import { basename } from '../lib/projects'
 import { ToolCard, toolNameOf, pairEntries, PairedRow } from '../components/ToolGroup'
 import type { PairedEntry } from '../components/ToolGroup'
 import { Markdown, closeUnterminatedFence } from '../components/Markdown'
@@ -34,7 +33,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { nextEffortLevel } from '../lib/composer-commands'
 import type { ComposerCommand } from '../lib/composer-commands'
-import { isAutonomous, levelToMode, modeToLevel, type AutonomyLevel } from '../lib/autonomy'
+import { levelToMode, modeToLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, resumeSession, rewindSession } from '../runtime/client'
@@ -92,8 +91,10 @@ export function ThreadView(props: {
   onRetryStream?: () => void
   onToggleDelegation?: (open: boolean) => void
   onApproval?: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>, remember?: boolean) => void
+  sideChatOpen?: boolean
+  onToggleSideChat?: () => void
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onSetEffort, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onSetEffort, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval, sideChatOpen = false, onToggleSideChat } = props
   const { t } = useTranslation('threadView')
   const ui = useUiState()
   const dispatch = useUiDispatch()
@@ -169,8 +170,6 @@ export function ThreadView(props: {
   useEffect(() => {
     setSummaryDismissed(false)
   }, [session.id])
-  // P1-4 — Side Chat drawer (旁路提问): Cmd+; or the header button toggles.
-  const [sideChatOpen, setSideChatOpen] = useState(false)
   // File viewer drawer: opened by clicking @file mentions in messages.
   const [fileViewer, setFileViewer] = useState<{ path: string; content?: FileContent; loading?: boolean; error?: string } | null>(null)
   useEffect(() => {
@@ -184,12 +183,12 @@ export function ThreadView(props: {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === ';') {
         e.preventDefault()
-        setSideChatOpen((o) => !o)
+        onToggleSideChat?.()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [onToggleSideChat])
   const [composerHeight, setComposerHeight] = useState(0)
   const composerWrapRef = useRef<HTMLDivElement | null>(null)
   const composerObserverRef = useRef<ResizeObserver | null>(null)
@@ -272,7 +271,6 @@ export function ThreadView(props: {
     }
   }, [session.id, t])
 
-  const autonomous = isAutonomous(session.approvalMode)
   const activeDomainId = useMemo(() => resolveActiveDomain(session, view), [session, view])
   const activeDomain = STAR_DOMAINS[activeDomainId]
   const domainGlyph = session.domainGlyph ?? activeDomain?.uiPersona.glyph ?? '✹'
@@ -642,21 +640,6 @@ export function ThreadView(props: {
 
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
-  // Context usage bar: live token estimate vs model window.
-  const ctxPct = useMemo(() => {
-    const tokens = session.contextTokens
-    const window = session.contextWindow
-    if (!tokens || !window || window <= 0) return 0
-    return Math.min(Math.round((tokens / window) * 100), 100)
-  }, [session.contextTokens, session.contextWindow])
-
-  // Cache hit rate from cumulative cache tokens in turn_complete events.
-  const cacheHitRate = useMemo(() => {
-    const total = view.cacheReadTokens + view.cacheCreationTokens
-    if (total <= 0) return null
-    return Math.round((view.cacheReadTokens / total) * 100)
-  }, [view.cacheReadTokens, view.cacheCreationTokens])
-
   // Context increment: delta between last and previous turn totals.
   const ctxDelta = useMemo(() => {
     if (view.prevTotalTokens <= 0 || view.lastTotalTokens <= view.prevTotalTokens) return 0
@@ -932,99 +915,35 @@ export function ThreadView(props: {
 
   return (
     <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator} style={{ paddingBottom: composerHeight }}>
-      <header className="thread-header">
-        <div className="thread-header-main">
-          <span className={`thread-glyph${busy ? ' breathing' : ''}`} aria-hidden>
-            {domainGlyph}
-          </span>
-          <div className="thread-id">
-            <div className="thread-title">{session.title ?? session.id.slice(0, 8)}</div>
-            <div className="thread-sub" title={session.cwd}>{basename(session.cwd) || session.cwd}</div>
-          </div>
-          {/* 权限档位芯片移到 Composer 旁（P1-1，对标 Claude Desktop 送信钮旁控件群）。 */}
-          {autonomous && (
-            <span className="autonomy-badge" title={t('header.autonomousTitle')}>
-              <span className="ab-glyph" aria-hidden>✦</span>
-              {t('header.autonomous')}
-            </span>
-          )}
-          <span className={`status-dot status-${session.status}`} />
-          <span className="status-text">{t(`status.${session.status}`, { defaultValue: session.status })}</span>
-          <button
-            className={`icon-btn sidechat-toggle ${sideChatOpen ? 'active' : ''}`}
-            title={t('header.sideChatTitle')}
-            aria-label={t('header.sideChat')}
-            onClick={() => setSideChatOpen((o) => !o)}
-          >💬</button>
-          <button className="icon-btn thread-close" title={t('header.closeSession')} onClick={() => setShowCloseConfirm(true)} aria-label={t('header.closeSession')}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M18 6 6 18M6 6l12 12" />
+      {rewindPoints.length > 0 && (
+        <div className="thread-timeline-slider-container px-4 py-2 border-b border-border bg-panel-2 flex items-center gap-3 shrink-0">
+          <span className="text-xs text-muted font-medium flex items-center gap-1 shrink-0">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
             </svg>
-          </button>
+            {t('timeTravel.label')}
+          </span>
+          <input
+            type="range"
+            min="0"
+            max={rewindPoints.length}
+            value={selectedTurnIndex === -1 ? rewindPoints.length : selectedTurnIndex}
+            onChange={(e) => {
+              const val = Number(e.target.value)
+              setSelectedTurnIndex(val)
+            }}
+            className="timeline-slider flex-1 h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
+          />
+          <span className="text-xs font-mono text-muted bg-panel-3 px-1.5 py-0.5 rounded border border-border max-w-[220px] truncate shrink-0" title={selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length ? t('timeTravel.forkPointTitle', { turn: selectedTurnIndex + 1, content: rewindPoints[selectedTurnIndex]?.content }) : t('timeTravel.latestTitle')}>
+            {selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length ? (
+              t('timeTravel.latest')
+            ) : (
+              t('timeTravel.beforeTurn', { turn: selectedTurnIndex + 1 })
+            )}
+          </span>
         </div>
-
-        {rewindPoints.length > 0 && (
-          <div className="thread-timeline-slider-container px-4 py-2 border-t border-border bg-panel-2 flex items-center gap-3">
-            <span className="text-xs text-muted font-medium flex items-center gap-1 shrink-0">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              {t('timeTravel.label')}
-            </span>
-            <input
-              type="range"
-              min="0"
-              max={rewindPoints.length}
-              value={selectedTurnIndex === -1 ? rewindPoints.length : selectedTurnIndex}
-              onChange={(e) => {
-                const val = Number(e.target.value)
-                setSelectedTurnIndex(val)
-              }}
-              className="timeline-slider flex-1 h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
-            />
-            <span className="text-xs font-mono text-muted bg-panel-3 px-1.5 py-0.5 rounded border border-border max-w-[220px] truncate shrink-0" title={selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length ? t('timeTravel.forkPointTitle', { turn: selectedTurnIndex + 1, content: rewindPoints[selectedTurnIndex]?.content }) : t('timeTravel.latestTitle')}>
-              {selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length ? (
-                t('timeTravel.latest')
-              ) : (
-                t('timeTravel.beforeTurn', { turn: selectedTurnIndex + 1 })
-              )}
-            </span>
-          </div>
-        )}
-
-        <div className="thread-header-meta">
-          {/* model / plan-mode / context-ring 在 Composer 底栏已有可交互版本——header 不重复 */}
-          {session.reasoningEffort && (
-            <button
-              className="effort-chip"
-              title={t('header.effortTitle', { effort: session.reasoningEffort })}
-              onClick={() => onSetEffort?.(nextEffortLevel(session.reasoningEffort))}
-            >
-              {session.reasoningEffort}
-            </button>
-          )}
-          {session.contextWindow && session.contextWindow > 0 && ctxPct >= 80 ? (
-            <div className="ctx-bar warn" title={t('header.ctxNearLimit', { used: formatTokens(session.contextTokens ?? 0), total: formatTokens(session.contextWindow) })}>
-              <div className="ctx-bar-fill" style={{ width: `${ctxPct}%` }} />
-              <span className="ctx-bar-label">{ctxPct}%</span>
-            </div>
-          ) : null}
-          {cacheHitRate !== null ? (
-            <span className="cache-chip" title={t('header.cacheTitle', { read: formatTokens(view.cacheReadTokens), created: formatTokens(view.cacheCreationTokens) })}>
-              ⚡{cacheHitRate}%
-            </span>
-          ) : null}
-          {ctxDelta > 0 ? (
-            <span className="ctx-delta" title={t('header.ctxDeltaTitle')}>
-              +{formatTokens(ctxDelta)}
-            </span>
-          ) : null}
-          {busy && view.phase && <span className="phase-chip">{view.phase}{elapsedStr && ` · ${elapsedStr}`}</span>}
-          {busy && !view.phase && elapsedStr && <span className={`phase-chip${elapsedStalled ? ' stalled' : ''}`}>{elapsedStr}</span>}
-        </div>
-      </header>
+      )}
 
       <div className="messages" ref={msgRef} onScroll={onScroll} onWheel={onWheel} onKeyDown={onMessagesKeyDown} tabIndex={-1}>
         {searchOpen && (
@@ -1356,7 +1275,7 @@ export function ThreadView(props: {
 
       <SideChat
         open={sideChatOpen}
-        onClose={() => setSideChatOpen(false)}
+        onClose={() => onToggleSideChat?.()}
         mainTitle={session.title ?? session.id.slice(0, 8)}
         cwd={session.cwd}
         mainBlocks={view.blocks}
@@ -2136,9 +2055,4 @@ function summarizeThinking(text: string, charsLabel: (n: number) => string): str
   const chars = text.replace(/\s/g, '').length
   if (!clean) return chars > 0 ? charsLabel(chars) : ''
   return `${clean}${firstLine.length > 80 ? '…' : ''} · ${charsLabel(chars)}`
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
-  return String(n)
 }

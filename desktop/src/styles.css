@@ -6860,6 +6860,63 @@ html[data-theme="dark"] .picker-panel-warning {
 .workspace-header-path .page-name {
   color: var(--text-secondary);
 }
+.workspace-header-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+.workspace-header-status-line .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--muted);
+}
+.workspace-header-status-line .status-dot.status-running {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: dp-glow 2s infinite ease-in-out;
+}
+.workspace-header-status-line .status-dot.status-completed {
+  background: var(--success, #10b981);
+}
+.workspace-header-status-line .status-dot.status-error {
+  background: var(--error, #ef4444);
+}
+.workspace-header-status-line .status-timer {
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.workspace-header-status-line .status-phase {
+  color: var(--muted);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-header-status-line .status-chip {
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-weight: var(--weight-semibold);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+}
+.workspace-header-status-line .cache-chip {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.workspace-header-status-line .ctx-delta {
+  background: var(--success-soft);
+  color: var(--success, #10b981);
+}
 
 .workspace-header-actions {
   display: flex;
