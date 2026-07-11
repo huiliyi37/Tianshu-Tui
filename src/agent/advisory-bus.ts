@@ -855,7 +855,7 @@ export class AdvisoryBus {
     }
     const effectivePriority = (e: AdvisoryEntry): number => {
       if (positiveArmKeys.has(e.key)) {
-        return Math.min(0.79, e.priority + 0.05) // cap 不越 0.8 豁免线
+        return Math.max(e.priority, Math.min(0.79, e.priority + 0.05)) // 单调不减，cap 不越 0.8 豁免线
       }
       return e.priority
     }
