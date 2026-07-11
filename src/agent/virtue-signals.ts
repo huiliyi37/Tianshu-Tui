@@ -296,6 +296,73 @@ export function detectCacheLoyalty(
   return null
 }
 
+// ─── VirtuePendingLedger（T2a）─────────────────────────────────────
+// 美德信号的两段式核销台账——postTool 检测到美德时先 submit pending，
+// postTurn 到期时 drainSettled 返回到期条目供 settlement hook 核销效用。
+// 不进 AdvisoryReadback 的 adopted/ignored 账本——美德不是 advisory，
+// 混入会污染 efficacy 统计、习惯化 streak、holdout 抽样三条链。
+
+import type { AdvisoryExpectation } from './advisory-bus.js'
+
+/** 未核销的 pending 美德信号 */
+export interface VirtuePending {
+  signal: VirtueSignal
+  /** 检测到的轮次 */
+  detectedTurn: number
+  /** 效用谓词——表达为 AdvisoryExpectation，复用 readback.wasSatisfiedBetween() 查询 */
+  utilityExpect: AdvisoryExpectation
+  /** 观察窗口（含检测轮），到期后强制核销 */
+  windowTurns: number
+}
+
+export interface VirtuePendingLedger {
+  /** postTool：提交一个待核销的美德信号 */
+  submit(entry: VirtuePending): void
+  /** postTurn：取走到期的 pending（deadline = detectedTurn + windowTurns），未到期的保留 */
+  drainSettled(currentTurn: number): VirtuePending[]
+  /** 当前 pending 数量（观测/测试用） */
+  pendingCount(): number
+}
+
+/**
+ * 创建 VirtuePendingLedger 实例。
+ *
+ * drainSettled 的到期判定：currentTurn >= detectedTurn + windowTurns。
+ * 返回纯台账数据——utility 判定由 settlement hook 负责（用 readback 查询后决定）。
+ */
+export function createVirtuePendingLedger(): VirtuePendingLedger {
+  const pending: VirtuePending[] = []
+
+  return {
+    submit(entry) {
+      pending.push(entry)
+    },
+
+    drainSettled(currentTurn) {
+      const settled: VirtuePending[] = []
+      const remaining: VirtuePending[] = []
+
+      for (const entry of pending) {
+        const deadline = entry.detectedTurn + entry.windowTurns
+        if (currentTurn >= deadline) {
+          settled.push(entry)
+        } else {
+          remaining.push(entry)
+        }
+      }
+
+      pending.length = 0
+      pending.push(...remaining)
+
+      return settled
+    },
+
+    pendingCount() {
+      return pending.length
+    },
+  }
+}
+
 // ─── Utility ─────────────────────────────────────────────────────
 
 function clamp(value: number, min: number, max: number): number {
