@@ -398,6 +398,12 @@ export function ThreadView(props: {
   // throttle keeps the bottom pinned without the per-token layout storm.
   const scrolledUpRef = useRef(scrolledUp)
   scrolledUpRef.current = scrolledUp
+  // Synchronous user-intent flag: set the instant the wheel scrolls up, before
+  // React commits the scrolledUp state. This closes a race where a streaming
+  // token batch triggers the auto-scroll effect in the same frame as the wheel
+  // event — the effect reads a stale scrolledUp=false and yanks the view back
+  // to the bottom, making the wheel feel dead.
+  const userIntentUpRef = useRef(false)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastScrollAtRef = useRef(0)
   useEffect(() => () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }, [])
@@ -406,7 +412,7 @@ export function ThreadView(props: {
     const SCROLL_THROTTLE_MS = 100
     const run = () => {
       scrollTimerRef.current = null
-      if (scrolledUpRef.current) return // user scrolled up while the tick was pending
+      if (scrolledUpRef.current || userIntentUpRef.current) return // user scrolled up while the tick was pending
       lastScrollAtRef.current = performance.now()
       virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
     }
@@ -436,12 +442,21 @@ export function ThreadView(props: {
   // Track scroll position: when user scrolls into the "near bottom" zone,
   // clear the scrolled-up flag so auto-scroll resumes.
   const onScroll = useCallback(() => {
-    setScrolledUp(!isNearBottom())
+    const near = isNearBottom()
+    if (near) userIntentUpRef.current = false
+    setScrolledUp(!near)
     setNavTick((t) => t + 1) // refresh navigator "current" marker
     // Persist scroll position to store (throttled via rAF).
     const el = msgRef.current
     if (el) dispatch({ type: 'setScrollPosition', sessionId: session.id, scrollTop: el.scrollTop })
   }, [isNearBottom, dispatch, session.id])
+
+  // Wheel intent: set synchronously so the auto-scroll effect (which may run
+  // in the same frame) sees the user's upward intent immediately. Cleared by
+  // onScroll once the user returns near the bottom.
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    if (e.deltaY < 0) userIntentUpRef.current = true
+  }, [])
 
   // Restore scroll position on mount — preserves across tab switches.
   useEffect(() => {
@@ -456,6 +471,7 @@ export function ThreadView(props: {
 
   const scrollToBottom = useCallback(() => {
     if (rendered.length > 0) virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
+    userIntentUpRef.current = false
     setScrolledUp(false)
   }, [rendered.length, virtualizer])
 
@@ -1000,7 +1016,7 @@ export function ThreadView(props: {
         </div>
       </header>
 
-      <div className="messages" ref={msgRef} onScroll={onScroll} onKeyDown={onMessagesKeyDown} tabIndex={-1}>
+      <div className="messages" ref={msgRef} onScroll={onScroll} onWheel={onWheel} onKeyDown={onMessagesKeyDown} tabIndex={-1}>
         {searchOpen && (
           <div className="thread-search-bar" role="search">
             <input
