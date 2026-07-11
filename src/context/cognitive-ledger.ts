@@ -33,9 +33,6 @@ export interface CognitiveLedgerInput {
   /** T5: 美德 mirror 字段 — renderMirror() 产出，Fibonacci 桶量化 + 固定排序。
    *  Null 时整段省略。无条件传入；渲染由 cognitive-prep 的 actionable gate 控制。 */
   virtue?: string | null
-  /** P0: 当前模型名 — session 内极少变化，字节稳定。
-   *  模型切换时 agent 在 mirror 中可见，无需等异步 advisory。 */
-  model?: string
 }
 
 export interface CognitiveLedger {
@@ -54,7 +51,6 @@ export interface CognitiveLedger {
   ctxRatio?: number
   ctxWindow?: number
   virtue?: string | null
-  model?: string
 }
 
 export interface CognitivePhaseSnapshot {
@@ -83,7 +79,6 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     ctxRatio: input.ctxRatio,
     ctxWindow: input.ctxWindow,
     virtue: input.virtue ?? null,
-    model: input.model,
   }
 }
 
@@ -175,16 +170,11 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
   }
 
   // T5: 美德入 mirror — 通道 A（appendixDelta），Fibonacci 桶字节稳定。
-  // 跟随 CVM 节流（不是防脑补锚点，节流时可熄）。
   if (ledger.virtue) {
     parts.push(ledger.virtue)
   }
 
-  // P0: 模型名入 mirror — 字节稳定（session 内极少变化），agent 可见当前所用模型
-  if (ledger.model) {
-    parts.push(`model="${ledger.model}"`)
-  }
-
+  if (ledger.convergencePrecision !== undefined) parts.push(`convergence_precision="${coarseLabel(ledger.convergencePrecision)}"`)
   if (ledger.convergencePrecision !== undefined) parts.push(`convergence_precision="${coarseLabel(ledger.convergencePrecision)}"`)
   if (ledger.outputEfficiency !== undefined) parts.push(`output_efficiency="${coarseLabel(ledger.outputEfficiency)}"`)
 
