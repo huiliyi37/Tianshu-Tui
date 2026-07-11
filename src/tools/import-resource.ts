@@ -3,9 +3,11 @@ import { basename, join, resolve, extname } from 'path'
 import { execFile } from 'child_process'
 import { existsSync } from 'fs'
 import type { Tool, ToolCallParams } from './types.js'
+import type { ArtifactStore } from '../artifact/store.js'
 import { expandHome } from '../platform.js'
 import { relativePosix } from '../path-format.js'
 import { httpFetchGuarded } from './net/http-fetch.js'
+import { extractDocumentText, isExtractableDocument, EXTRACTION_CAVEAT } from './doc-extract.js'
 
 const IMPORT_DIR = '.rivet/external'
 const PREVIEW_BYTES = 4000
@@ -86,6 +88,7 @@ async function buildResult(
   localPath: string,
   cwd: string,
   stats: { type: 'file' | 'directory'; size?: number; files?: number },
+  artifactStore?: ArtifactStore,
 ): Promise<{ content: string; uiContent: string }> {
   const relPath = relativePosix(cwd, localPath)
   let header = `Imported: ${source}\nLocal: ${relPath}\nType: ${stats.type}`
@@ -100,6 +103,34 @@ async function buildResult(
         ? `\n\n── Preview (first ${PREVIEW_BYTES} chars) ──\n${content.slice(0, PREVIEW_BYTES)}\n... (${content.length} total chars)`
         : `\n\n── Content ──\n${content}`
     } catch { /* binary / unreadable */ }
+  } else if (stats.type === 'file' && isExtractableDocument(localPath)) {
+    // Binary office document (PDF/DOCX/PPTX/…) — extract text via system
+    // toolchains so the content is usable as context, not just a blob on disk.
+    // Fail-open: extraction failure keeps the import and surfaces install advice.
+    const extraction = await extractDocumentText(localPath)
+    if (extraction.ok) {
+      const marked = `${EXTRACTION_CAVEAT}\n\n${extraction.text}`
+      let artifactNote = ''
+      if (artifactStore) {
+        try {
+          const artifactId = await artifactStore.save({
+            tool: 'import_resource',
+            target: source,
+            rawContent: marked,
+            summary: `Extracted text (${extraction.engine}) from ${basename(localPath)} — ${extraction.text.length} chars`,
+            sections: [],
+          })
+          artifactNote = `\nFull extracted text: read_section(artifactId="${artifactId}")\n[artifact:${artifactId}]`
+        } catch { /* artifact persistence is best-effort */ }
+      }
+      const truncated = extraction.text.length > PREVIEW_BYTES
+      const body = truncated
+        ? `${extraction.text.slice(0, PREVIEW_BYTES)}\n... (${extraction.text.length} total chars)`
+        : extraction.text
+      preview = `\n\n── Extracted text (engine: ${extraction.engine}) ──\n${EXTRACTION_CAVEAT}\n${body}${artifactNote}`
+    } else {
+      preview = `\n\n(Binary document imported. ${extraction.suggestion})`
+    }
   } else if (stats.type === 'file' && isImageFile(localPath)) {
     preview = '\n\n(Image file — imported but not viewable as text. Use file_info for metadata.)'
   }
@@ -148,9 +179,9 @@ export const IMPORT_RESOURCE_TOOL: Tool = {
     const gh = parseGitHubUrl(rawSource)
     if (gh) return await handleGitHubImport(params.cwd, importDir, gh, params.input.ref as string | undefined)
 
-    if (/^https?:\/\//i.test(rawSource)) return await handleUrlImport(params.cwd, importDir, rawSource)
+    if (/^https?:\/\//i.test(rawSource)) return await handleUrlImport(params.cwd, importDir, rawSource, params.artifactStore)
 
-    return handleLocalImport(params.cwd, importDir, rawSource)
+    return handleLocalImport(params.cwd, importDir, rawSource, params.artifactStore)
   },
 
   requiresApproval: () => true,
@@ -158,7 +189,7 @@ export const IMPORT_RESOURCE_TOOL: Tool = {
   isEnabled: () => true,
 }
 
-async function handleLocalImport(cwd: string, importDir: string, source: string): Promise<{ content: string; uiContent: string; isError?: boolean }> {
+async function handleLocalImport(cwd: string, importDir: string, source: string, artifactStore?: ArtifactStore): Promise<{ content: string; uiContent: string; isError?: boolean }> {
   const expanded = expandHome(source)
   const resolved = resolve(expanded)
 
@@ -186,7 +217,7 @@ async function handleLocalImport(cwd: string, importDir: string, source: string)
     await cp(resolved, targetPath, { force: true })
   }
 
-  return await buildResult(source, targetPath, cwd, { type: 'file', size: (await stat(resolved)).size })
+  return await buildResult(source, targetPath, cwd, { type: 'file', size: (await stat(resolved)).size }, artifactStore)
 }
 
 async function handleGitHubImport(
@@ -256,7 +287,7 @@ async function handleGitHubImport(
   )
 }
 
-async function handleUrlImport(cwd: string, importDir: string, url: string): Promise<{ content: string; uiContent: string; isError?: boolean }> {
+async function handleUrlImport(cwd: string, importDir: string, url: string, artifactStore?: ArtifactStore): Promise<{ content: string; uiContent: string; isError?: boolean }> {
   let filename: string
   try {
     const parsed = new URL(url)
@@ -290,7 +321,7 @@ async function handleUrlImport(cwd: string, importDir: string, url: string): Pro
     return { content: `Error: download produced empty file from ${url}`, isError: true, uiContent: `Empty download: ${url}` }
   }
 
-  return await buildResult(url, targetPath, cwd, { type: 'file', size: s.size })
+  return await buildResult(url, targetPath, cwd, { type: 'file', size: s.size }, artifactStore)
 }
 
 async function countFiles(dir: string, maxDepth: number): Promise<number> {
