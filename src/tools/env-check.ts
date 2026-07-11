@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, win32 as winPath } from 'node:path'
 
 const execFileAsync = promisify(execFile)
 
@@ -101,6 +101,54 @@ async function detectTool(
   return { available: false, command: commands[0] ?? '' }
 }
 
+export interface GitExeProbeDeps {
+  env: NodeJS.ProcessEnv
+  whichGit: () => Promise<string | undefined>
+  exists: (p: string) => boolean
+}
+
+/**
+ * Resolve git.exe on Windows with fallback to common install locations.
+ *
+ * GUI-launched desktop apps on Windows often inherit a truncated PATH that does
+ * not include the user's `C:\Program Files\Git\cmd` entry, so `where git` fails
+ * even though Git is installed. We mirror the Git Bash probe order from
+ * platform.ts (RIVET override → PATH → Program Files → LOCALAPPDATA) but look
+ * for `cmd\git.exe` instead of `bin\bash.exe`.
+ */
+export async function resolveGitExePath(deps: GitExeProbeDeps): Promise<string | undefined> {
+  const path = await deps.whichGit()
+  if (path) return path
+
+  const candidates = [
+    'C:\\Program Files\\Git\\cmd\\git.exe',
+    'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
+  ]
+  const localApp = deps.env['LOCALAPPDATA']
+  if (localApp) candidates.push(winPath.join(localApp, 'Programs', 'Git', 'cmd', 'git.exe'))
+
+  for (const c of candidates) {
+    if (deps.exists(c)) return c
+  }
+  return undefined
+}
+
+async function detectGit(env?: NodeJS.ProcessEnv): Promise<ToolVersion> {
+  if (process.platform !== 'win32') {
+    return detectTool(['git'], ['--version'], env)
+  }
+  const path = await resolveGitExePath({
+    env: env ?? process.env,
+    whichGit: () => which('git', env),
+    exists: existsSync,
+  })
+  if (path) {
+    const version = await getVersion(path, ['--version'], env)
+    return { available: true, command: 'git', path, version }
+  }
+  return { available: false, command: 'git' }
+}
+
 /**
  * Detect Python, uv, git, node + JVM toolchain availability. Pass `env` to probe
  * against the *resolved* PATH (see resolved-env.ts) instead of the raw process
@@ -113,7 +161,7 @@ export async function detectEnv(cwd?: string, env?: NodeJS.ProcessEnv): Promise<
   const [python, uv, git, node, java, maven, gradle] = await Promise.all([
     detectTool(pythonCommands, ['--version'], env),
     detectTool(['uv'], ['--version'], env),
-    detectTool(['git'], ['--version'], env),
+    detectGit(env),
     detectTool(['node'], ['--version'], env),
     detectTool(['java'], ['-version'], env),
     detectTool(['mvn'], ['--version'], env),

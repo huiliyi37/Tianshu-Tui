@@ -9,6 +9,8 @@ import {
   isPythonProject,
   needsAutocrlfWarning,
   recommendUvSetup,
+  resolveGitExePath,
+  type GitExeProbeDeps,
 } from '../env-check.js'
 
 describe('env-check', () => {
@@ -130,16 +132,72 @@ describe('env-check', () => {
     })
   })
 
-  describe('isPythonProject', () => {
-    it('returns false for non-python cwd', () => {
-      assert.equal(isPythonProject('/tmp/empty-test-dir-xyz'), false)
-    })
-  })
-
   describe('recommendUvSetup', () => {
     it('rejects non-python directory', () => {
       const result = recommendUvSetup('/tmp/empty-test-dir-xyz')
       assert.equal(result.ok, false)
+    })
+  })
+
+  describe('resolveGitExePath — Windows git.exe probe with fallback', () => {
+    const baseDeps = (over: Partial<GitExeProbeDeps>): GitExeProbeDeps => ({
+      env: {},
+      whichGit: async () => undefined,
+      exists: () => false,
+      ...over,
+    })
+
+    it('returns PATH git.exe when `which` finds it', async () => {
+      const got = await resolveGitExePath(baseDeps({
+        whichGit: async () => 'C:\\Program Files\\Git\\cmd\\git.exe',
+      }))
+      assert.equal(got, 'C:\\Program Files\\Git\\cmd\\git.exe')
+    })
+
+    it('falls back to C:\\Program Files\\Git\\cmd\\git.exe', async () => {
+      const expected = 'C:\\Program Files\\Git\\cmd\\git.exe'
+      const got = await resolveGitExePath(baseDeps({
+        exists: (p) => p === expected,
+      }))
+      assert.equal(got, expected)
+    })
+
+    it('falls back to x86 install location', async () => {
+      const expected = 'C:\\Program Files (x86)\\Git\\cmd\\git.exe'
+      const got = await resolveGitExePath(baseDeps({
+        exists: (p) => p === expected,
+      }))
+      assert.equal(got, expected)
+    })
+
+    it('falls back to LOCALAPPDATA portable install', async () => {
+      const expected = 'C:\\Users\\me\\AppData\\Local\\Programs\\Git\\cmd\\git.exe'
+      const got = await resolveGitExePath(baseDeps({
+        env: { LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' },
+        exists: (p) => p === expected,
+      }))
+      assert.equal(got, expected)
+    })
+
+    it('prefers PATH hit over fallback locations', async () => {
+      const pathHit = 'D:\\custom\\Git\\cmd\\git.exe'
+      const fallback = 'C:\\Program Files\\Git\\cmd\\git.exe'
+      const got = await resolveGitExePath(baseDeps({
+        whichGit: async () => pathHit,
+        exists: (p) => p === fallback,
+      }))
+      assert.equal(got, pathHit)
+    })
+
+    it('returns undefined when nothing is found', async () => {
+      const got = await resolveGitExePath(baseDeps({}))
+      assert.equal(got, undefined)
+    })
+  })
+
+  describe('isPythonProject', () => {
+    it('returns false for non-python cwd', () => {
+      assert.equal(isPythonProject('/tmp/empty-test-dir-xyz'), false)
     })
   })
 })
