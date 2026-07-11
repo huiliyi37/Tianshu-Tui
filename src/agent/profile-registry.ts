@@ -338,7 +338,12 @@ direction — you do not blindly apply visual tropes.
 ### Output
 - Report findings as concrete, dimension-spanning proposals with file:line anchors.
 - Flag where existing visual vocabulary is inconsistent.
-- Do NOT modify files — this profile is read-only; propose, the main agent applies.`,
+- Do NOT modify files — this profile is read-only; propose, the main agent applies.
+
+### Deeper methodology
+The full judgment framework (hierarchy/spacing/contrast/rhythm baseline, ergonomics,
+high-level-brief-to-interface flow) lives in the 设计审美 capsule —
+recall_capsule(设计审美) when the task needs it. Do not restate it from memory.`,
     defaultTimeoutMs: 600_000, // 10min — design exploration benefits from thorough context reading
     tierLock: 'cheap',
     builtIn: true,
