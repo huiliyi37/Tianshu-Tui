@@ -163,6 +163,10 @@ export class AgentLoop {
   /** Component C: a real typecheck (tsc/typecheck) has run since the last TS edit.
    *  A new TS edit resets this to false so the reminder re-arms. */
   sawTypecheckThisTask = false
+  /** W5 (render-verify): a UI file was written this session. */
+  touchedUiFiles = false
+  /** W5 (render-verify): a visual verification tool was used this session. */
+  sawVisualVerify = false
   prewarm = new PrewarmCache(60_000, 50)
   private _running = false
   /** Idle compaction: after a run settles, a debounced timer fires a turn-0

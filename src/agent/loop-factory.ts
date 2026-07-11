@@ -370,6 +370,8 @@ return {
       },
       touchedTsFiles: self.touchedTsFiles,
       sawTypecheckThisTask: self.sawTypecheckThisTask,
+      touchedUiFiles: self.touchedUiFiles,
+      sawVisualVerify: self.sawVisualVerify,
       lastThinkingLength: self.lastThinkingContent.length || undefined,
       lastTurnHadTools: self.recentToolHistory.some(h => h.status === 'success') || undefined,
       ...extra,
@@ -511,6 +513,9 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getIntentObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 500) ?? null,
     getMaxTurns: () => self.config.maxTurns,
     addSystemReminder: content => { self.session.appendSystemReminder(content) },
+    // W5 (render-verify): check if browser/computer_use are registered for capability degradation.
+    getVisualToolsAvailable: () =>
+      self.config.toolRegistry.has('browser') || self.config.toolRegistry.has('computer_use'),
     hearthObserveEnabled: self.config.hearthObserveEnabled,
     getAnchorGraph: () => self.antiAnchoring.buildAnchorGraph(),
     getPrevAnchorGraphHash: () => self.prevAnchorGraphHash,

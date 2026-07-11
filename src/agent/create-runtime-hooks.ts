@@ -54,7 +54,7 @@ import { createAsyncCopilotHook, type CopilotContextPack } from './hooks/async-c
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createGateBlockGuardHook } from './hooks/gate-block-guard-hook.js'
-import { createWrapupAnxietyGuardHook } from './hooks/wrapup-anxiety-guard-hook.js'
+import { createRenderVerifyHook, type RenderVerifyHookDeps } from './hooks/render-verify-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import { createWalkthroughRecorderHooks, type WalkthroughRecorderDeps } from './hooks/walkthrough-recorder.js'
 import type { AdvisoryBus } from './advisory-bus.js'
@@ -229,6 +229,10 @@ export interface RuntimeHookDeps {
   // ── W2 被拦不弃守护 ──
   /** 读取并清零本 turn 的闸门拦截事件 kind 列表（loop.gateBlockedKinds）。 */
   drainGateBlockedKinds?: () => string[]
+
+  // ── W5 渲染自检 ──
+  /** 检查 browser/computer_use 是否已注册（能力降级分支）。 */
+  getVisualToolsAvailable?: () => boolean
 
   // ── P2 break-anchor scout (preTurn, opt-in real intervention) ──
   /** Present only when antiAnchoring + anchorBreakScout are both enabled and a coordinator exists. */
@@ -691,6 +695,17 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getStreamedText: deps.getStreamedText,
       getEstimatedTokens: deps.getEstimatedTokens,
       getContextWindow: deps.getContextWindow,
+    }))
+  }
+
+  // Render-Verify: postTurn hook — UI 文件改动后未检查渲染结果时提醒。
+  // 能力降级：browser/computer_use 未注册 → 提示人工过目。
+  // 冷却：每会话 2 次。
+  // Gated by RIVET_RENDER_VERIFY (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_RENDER_VERIFY !== '0') {
+    hooks.push(createRenderVerifyHook({
+      advisoryBus: deps.advisoryBus,
+      getVisualToolsAvailable: deps.getVisualToolsAvailable,
     }))
   }
 

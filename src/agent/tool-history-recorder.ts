@@ -4,6 +4,7 @@ import type { ToolErrorClass } from '../tools/types.js'
 import { createHash } from 'node:crypto'
 import { TYPECHECK_CMD_RE } from './typecheck-gate.js'
 import { toolTargetFromInput } from './tool-target.js'
+import { isUiFilePath, isVisualVerifyTool } from './hooks/render-verify-hook.js'
 
 /**
  * Record tool execution history and trigger deferred post-tool processing.
@@ -54,6 +55,16 @@ export function recordToolHistory(
         self.sawTypecheckThisTask = false
       } else if (name === 'bash' && typeof input?.command === 'string' && TYPECHECK_CMD_RE.test(input.command)) {
         self.sawTypecheckThisTask = true
+      }
+    }
+
+    // W5 (render-verify): track UI file edits and visual verification tool usage.
+    if (!isError) {
+      if ((name === 'edit_file' || name === 'write_file' || name === 'hash_edit' || name === 'apply_patch')
+        && isUiFilePath(target)) {
+        self.touchedUiFiles = true
+      } else if (isVisualVerifyTool(name)) {
+        self.sawVisualVerify = true
       }
     }
 

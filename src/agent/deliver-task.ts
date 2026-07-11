@@ -46,6 +46,7 @@ import { auditDeliveryClaims, claimAuditEnabled } from './claim-audit.js'
 import { scanFilesForProbes, formatProbeHits, type ProbeHit } from './probe-detector.js'
 import { findApprovedPlanInventory, verifyRegressionInventory, formatInventoryReport, type InventorySearcher } from './regression-inventory.js'
 import { enqueuePostCommitReviewOutcome } from './post-commit-review-queue.js'
+import { isUiFilePath, isVisualVerifyTool } from './hooks/render-verify-hook.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -224,6 +225,27 @@ export function collectCurrentDirtyFiles(cwd: string): string[] | undefined {
   return [...files].sort()
 }
 
+/**
+ * W5 (render-verify): check whether the delivery includes UI file changes
+ * without any visual verification action (browser/computer_use/browser_debug).
+ * Returns a warning line, or null if no issue.
+ */
+export function detectMissingVisualVerify(
+  ownedFiles: readonly string[],
+  getEvents?: () => ReadonlyArray<import('./task-ledger.js').TaskLedgerEvent>,
+): string | null {
+  const uiFiles = ownedFiles.filter(f => isUiFilePath(f))
+  if (uiFiles.length === 0) return null
+
+  const events = getEvents?.() ?? []
+  const hasVisualVerify = events.some(
+    e => e.type === 'tool_exec' && e.tool && isVisualVerifyTool(e.tool),
+  )
+  if (hasVisualVerify) return null
+
+  return `⚠️ 渲染未验证：UI 文件已修改（${uiFiles.slice(0, 2).join(', ')}${uiFiles.length > 2 ? ' 等' : ''}），但未见 browser/computer_use 截图验证。交付前请检查渲染结果。`
+}
+
 export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) => B1Context): Tool {
   return {
     definition: {
@@ -358,6 +380,15 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           lines.push('', `⚠️ 零测试交付：${presence.detail}`)
           lines.push('  交付报告中不要宣称"已验证"——这批源文件没有任何测试背书。')
         }
+      }
+
+      // W5 (render-verify): warn when UI files were changed without visual verification.
+      if (ctx.taskLedger && process.env.RIVET_RENDER_VERIFY !== '0') {
+        const visualWarn = detectMissingVisualVerify(
+          report.ownedFiles,
+          () => ctx.taskLedger.getEvents(),
+        )
+        if (visualWarn) lines.push('', visualWarn)
       }
 
       const hasVerificationDiagnostics = report.currentBlockingFailure
