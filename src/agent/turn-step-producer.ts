@@ -572,6 +572,8 @@ export class TurnStepProducer {
       ctxWindow: this.self.config.contextWindow,
       // T5: 美德 mirror — Fibonacci 桶字节稳定，无条件传入
       virtue: this.self.stanceTally.renderMirror(),
+      // P0: 模型名 — 让 agent 知道自己当前用的模型
+      model: this.self.config.promptEngine.getModel(),
     })
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
 
