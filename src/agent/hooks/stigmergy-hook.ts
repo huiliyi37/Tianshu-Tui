@@ -1,9 +1,25 @@
 import type { PostToolRuntimeHook } from '../runtime-hooks.js'
 import type { PheromoneDeposit, PheromoneQueryResult } from '../../context/stigmergy.js'
-import { detectVirtue, virtueToPheromoneDeposit } from '../virtue-signals.js'
-import type { VirtueContext, VirtueSignal } from '../virtue-signals.js'
+import { detectVirtue } from '../virtue-signals.js'
+import type { VirtueContext, VirtueSignal, VirtuePendingLedger } from '../virtue-signals.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
-import { virtueEncouragementEntry } from '../advisory-bus.js'
+import type { AdvisoryExpectation } from '../advisory-bus.js'
+
+/** 效用谓词 v1 映射——按美德类型构建 utilityExpect（12.1 表） */
+function utilityExpectFor(type: VirtueSignal['type']): AdvisoryExpectation {
+  switch (type) {
+    case 'independent-judgment': // 仁：ask 后出现探针/写工具
+      return { kind: 'tool_appears', tools: ['read_file', 'edit_file', 'grep', 'bash'], withinTurns: 2 }
+    case 'proactive-verification': // 义：run_tests 后输出被消费（read/edit）
+      return { kind: 'tool_appears', tools: ['read_file', 'edit_file', 'bash'], withinTurns: 2 }
+    case 'boundary-respect': // 礼：审批后的写操作通过后续验证
+      return { kind: 'tool_appears', tools: ['run_tests', 'typecheck', 'bash'], withinTurns: 3 }
+    case 'strategic-awareness': // 智：窗口内不再出现同 tool+target（settlement hook 自持逻辑判定）
+      return { kind: 'tool_appears', tools: [], withinTurns: 2 } // 空 tools = 任意工具出现即可（弱近似）
+    case 'cache-loyalty': // 信：会话级信号，不走 readback
+      return { kind: 'tool_appears', tools: [], withinTurns: 1 }
+  }
+}
 
 export interface StigmergyRuntimeHookDeps {
   deposit: (deposit: PheromoneDeposit) => Promise<void>
@@ -18,6 +34,8 @@ export interface StigmergyRuntimeHookDeps {
   sessionId?: string
   /** Advisory bus for positive reinforcement when virtue signals detected */
   advisoryBus?: AdvisoryBus
+  /** T2c: pending 台账——检测到美德后 submit pending，由 settlement hook 核销 */
+  pendingLedger?: VirtuePendingLedger
 }
 
 export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): PostToolRuntimeHook {
@@ -96,12 +114,14 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
 
       const virtueSignal = detectVirtue(virtueCtx)
       if (virtueSignal) {
-        deps.recordStance?.(virtueSignal)
-        deposits.push(virtueToPheromoneDeposit(
-          virtueSignal,
-          tool.target ?? 'virtue-signal',
-        ))
-        deps.advisoryBus?.submit(virtueEncouragementEntry())
+        // T2c: 不再当场 record+鼓励——submit pending 到 VirtuePendingLedger，
+        // 由 virtue-settlement hook 在 postTurn 核销效用后才转正。
+        deps.pendingLedger?.submit({
+          signal: virtueSignal,
+          detectedTurn: ctx.snapshot.turn,
+          utilityExpect: utilityExpectFor(virtueSignal.type),
+          windowTurns: 2,
+        })
       }
 
       for (const deposit of deposits) {

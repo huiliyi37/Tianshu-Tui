@@ -84,6 +84,7 @@ import { ResourceSensor, type ResourceSensorSnapshot } from './resource-sensor.j
 import { type PlanMethodology, type TaskContract, type TaskDepthLayer } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import { createStanceTally } from './stance-tally.js'
+import { createVirtuePendingLedger, type VirtuePendingLedger } from './virtue-signals.js'
 import { createFailureJournal, type FailureJournal } from './failure-journal.js'
 import type { Pheromone } from '../context/stigmergy.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
@@ -464,6 +465,7 @@ export class AgentLoop {
   stigmergyStore: StigmergyStore
   loadedPheromones: Pheromone[] = []
   readonly stanceTally = createStanceTally()
+  readonly virtuePendingLedger = createVirtuePendingLedger()
   lastSeenEventId = 0
   gitChangeRate = 0
   telemetryWriter: TelemetryWriter

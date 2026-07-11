@@ -407,6 +407,10 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getEvidenceState: () => self.evidence.getState(),
     setLoadedPheromones: pheromones => { self.loadedPheromones = mapQueriedPheromones(pheromones) },
     recordStance: signal => self.stanceTally.record(signal),
+    virtuePendingLedger: self.virtuePendingLedger,
+    getCurrentSeason: () => self.currentSeason ?? 'genesis',
+    getCurrentSeasonIntensity: () => self.currentSeasonIntensity ?? 1.0,
+    getRecentCacheHitRate: () => self.session.getRecentTurnHitRate(3),
     publishEvent: self.config.sessionRegistry && self.config.sessionId
       ? (input) => self.config.sessionRegistry!.publishEvent(self.config.sessionId!, input)
       : undefined,

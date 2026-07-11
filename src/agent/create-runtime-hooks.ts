@@ -4,6 +4,7 @@ import { createKickRuntimeHook } from './hooks/kick-hook.js'
 import { createVigorAfterPerceptionHook, createVigorPostToolHook } from './hooks/vigor-hook.js'
 import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
+import { createVirtueSettlementHooks } from './hooks/virtue-settlement-hook.js'
 import { createSignalConsumerRuntimeHook } from './hooks/signal-consumer-hook.js'
 import { createPlaybookReflectHook } from './hooks/playbook-reflect-hook.js'
 import { createAnchorBreakShadowHook } from './hooks/anchor-break-shadow-hook.js'
@@ -77,6 +78,14 @@ export interface RuntimeHookDeps {
   getEvidenceState: () => EvidenceState
   setLoadedPheromones: (pheromones: any) => void
   recordStance?: (signal: import('./virtue-signals.js').VirtueSignal) => void
+  /** T2: 美德 pending 台账——stigmergy-hook submit, settlement hook drainSettled */
+  virtuePendingLedger?: import('./virtue-signals.js').VirtuePendingLedger
+  /** T2/T0: 当前季节（settlement hook 季节鼓励门用） */
+  getCurrentSeason?: () => import('./cognitive-season.js').CognitiveSeason
+  /** T3: 季节强度 */
+  getCurrentSeasonIntensity?: () => number
+  /** T0: 近 N 轮平均缓存命中率（信复活用） */
+  getRecentCacheHitRate?: () => number | null
   getThetaState: () => any
   setThetaState: (state: any) => void
   getPredictionAccumulator: () => any
@@ -268,6 +277,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       recordStance: deps.recordStance,
       publishEvent: deps.publishEvent,
       sessionId: deps.sessionId,
+      pendingLedger: deps.virtuePendingLedger,
     }),
     ...(deps.getFileObservations
       ? [createConsistencyCheckHook({ getFileObservations: deps.getFileObservations })]
@@ -582,6 +592,21 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       readback: deps.advisoryReadback,
       writeTelemetry: deps.telemetryWriter ? (r) => deps.telemetryWriter!.write(r) : undefined,
       onOutcomes: deps.onAdvisoryOutcomes,
+    }))
+  }
+
+  // Virtue-Settlement: postTool 观察 + postTurn 效用核销 — 美德信号两段式
+  // （stigmergy-hook 检测后 submit pending，此处 postTurn 核销效用后转正）。
+  if (deps.virtuePendingLedger && deps.advisoryReadback) {
+    hooks.push(...createVirtueSettlementHooks({
+      ledger: deps.virtuePendingLedger,
+      readback: deps.advisoryReadback,
+      recordStance: deps.recordStance ?? (() => {}),
+      deposit: deps.stigmergyDeposit,
+      advisoryBus: deps.advisoryBus!,
+      getSeason: () => deps.getCurrentSeason?.() ?? 'genesis',
+      getSeasonIntensity: () => deps.getCurrentSeasonIntensity?.() ?? 1.0,
+      getRecentCacheHitRate: () => deps.getRecentCacheHitRate?.() ?? null,
     }))
   }
 
