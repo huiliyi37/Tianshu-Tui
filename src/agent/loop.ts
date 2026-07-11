@@ -84,7 +84,7 @@ import { ResourceSensor, type ResourceSensorSnapshot } from './resource-sensor.j
 import { type PlanMethodology, type TaskContract, type TaskDepthLayer } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import { createStanceTally } from './stance-tally.js'
-import { createVirtuePendingLedger, type VirtuePendingLedger } from './virtue-signals.js'
+import { createVirtuePendingLedger, type VirtuePendingLedger, computeVirtueCredit } from './virtue-signals.js'
 import { createFailureJournal, type FailureJournal } from './failure-journal.js'
 import type { Pheromone } from '../context/stigmergy.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
@@ -513,7 +513,12 @@ export class AgentLoop {
   advisoryReadback = new AdvisoryReadback()
   /** 破坏性命令 pre-execution 闸门(验证失败后 git 清场当轮拦截,首拦重放行)。
    *  tool-pipeline 是唯一写者兼读者,loop 只持有生命周期。 */
-  destructiveGate = createDestructiveGateState()
+  destructiveGate = createDestructiveGateState({
+    getVirtueCredit: () => {
+      const signals = this.stanceTally.getAllSignals?.()
+      return signals ? computeVirtueCredit(signals) : 0.5
+    },
+  })
   /** B 跨会话效能信息素 store（构造器内初始化） */
   advisoryEfficacyStore!: AdvisoryEfficacyStore
   /** 上次效能 flush 时的 per-key 计数快照 — mergeAndSave 只收增量,差分在此 */

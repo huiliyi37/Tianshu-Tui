@@ -20,6 +20,7 @@
 
 import { readFileSync } from 'node:fs'
 import type { AdvisoryExpectation, DeliveredAdvisory } from './advisory-bus.js'
+import type { ToolHistoryEntry } from './evidence-gate.js'
 
 /** 单条工具观察 — postTool 喂入,核销评估的证据源 */
 export interface ObservedToolEvent {
@@ -283,6 +284,22 @@ export class AdvisoryReadback {
   wasSatisfiedBetween(expect: AdvisoryExpectation, sinceTurn: number, nowTurn: number): boolean {
     if (expect.kind === 'pattern_absent') return this.checkPatternAbsent(expect)
     return this.checkPositive(expect, sinceTurn, nowTurn)
+  }
+
+  /**
+   * T3 证据门数据源：暴露自 sinceTurn 以来的工具事件，
+   * 映射为 evidence-gate 的 ToolHistoryEntry 格式。
+   * readback 按轮保留（EVENT_RETENTION_TURNS=8），
+   * 不受 recentToolHistory 5 条滚动窗口截断限制。
+   */
+  getRecentToolEvents(sinceTurn: number): ToolHistoryEntry[] {
+    return this.events
+      .filter(e => e.turn >= sinceTurn)
+      .map(e => ({
+        tool: e.name,
+        target: e.target,
+        turn: e.turn,
+      }))
   }
 
   /** 会话累计采纳/忽略计数（guardian meta 摘要用,不含先验——会话纯度） */

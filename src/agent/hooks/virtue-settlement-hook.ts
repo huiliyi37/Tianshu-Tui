@@ -22,15 +22,15 @@ import type { PostTurnRuntimeHook, RuntimeHookContext } from '../runtime-hooks.j
 import type { AdvisoryReadback } from '../advisory-readback.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
 import type { VirtuePendingLedger, VirtueSignal } from '../virtue-signals.js'
+import { computeVirtueWeights } from '../virtue-signals.js'
+import type { VirtueWeightResult } from '../virtue-signals.js'
 import { virtueEncouragementEntry } from '../advisory-bus.js'
 import type { CognitiveSeason } from '../cognitive-season.js'
 import type { PheromoneDeposit } from '../../context/stigmergy.js'
+import { detectEvidenceGate } from '../evidence-gate.js'
 
 /** 效用转正阈值——低于此值的美德信号不记录（走过场） */
 const UTILITY_THRESHOLD = 0.5
-
-/** 季节鼓励门：true = 允许送达鼓励条目 */
-const SEASON_ENCOURAGEMENT_ALLOWED: ReadonlySet<CognitiveSeason> = new Set(['genesis'])
 
 /** 信触发条件 */
 const XIN_MIN_TURN = 5
@@ -64,6 +64,28 @@ export function createVirtueSettlementHook(
     async run(ctx: RuntimeHookContext): Promise<void> {
       const currentTurn = ctx.snapshot.turn
       const season = deps.getSeason()
+      const intensity = deps.getSeasonIntensity()
+
+      // ── T3 证据门：用 readback events（非 recentToolHistory）做数据源 ──
+      // readback 按轮保留 8 轮，不受 5 条滚动窗口截断限制（T3 预警）。
+      const evidenceWindow = 6 // evidence-gate 默认窗口
+      const evidenceEvents = deps.readback.getRecentToolEvents(currentTurn - evidenceWindow)
+      const evidenceState = detectEvidenceGate({
+        recentHistory: evidenceEvents,
+        currentTurn,
+        windowTurns: evidenceWindow,
+      })
+
+      // ── T3 预计算权重缓存 ──
+      const weightCache = new Map<string, VirtueWeightResult>()
+      const getWeights = (type: string) => {
+        let w = weightCache.get(type)
+        if (!w) {
+          w = computeVirtueWeights(type as VirtueSignal['type'], season, intensity, evidenceState.active)
+          weightCache.set(type, w)
+        }
+        return w
+      }
 
       // ── 信号复活（T0）：实测缓存命中率 ≥ 80% 且 turn ≥ 5 → 触发一次 ──
       // 会话级信号不走 pending ledger——每 10 轮最多触发一次，防刷分。
@@ -76,15 +98,16 @@ export function createVirtueSettlementHook(
             wuchang: '信',
             evidence: '模型保护了前缀缓存的连续性——信者，天枢之本也',
           }
+          const xinWeights = getWeights('cache-loyalty')
           deps.recordStance(xinSignal)
           deps.deposit({
             path: 'virtue-signal',
             signal: 'cache-loyalty',
-            strength: xinSignal.confidence,
+            strength: xinSignal.confidence * xinWeights.weight,
             context: xinSignal.evidence,
             halfLifeMs: 604_800_000 * 2,
           }).catch(() => {})
-          if (SEASON_ENCOURAGEMENT_ALLOWED.has(season)) {
+          if (xinWeights.encouragementAllowed) {
             deps.advisoryBus.submit(virtueEncouragementEntry())
           }
           xinLastTriggered = currentTurn
@@ -106,15 +129,16 @@ export function createVirtueSettlementHook(
           )
           const utility = reappeared ? 0.2 : 1.0
           if (utility < UTILITY_THRESHOLD) continue
+          const zhiWeights = getWeights('strategic-awareness')
           deps.recordStance(entry.signal)
           deps.deposit({
             path: 'virtue-signal',
             signal: entry.signal.type,
-            strength: entry.signal.confidence * utility,
+            strength: entry.signal.confidence * utility * zhiWeights.weight,
             context: entry.signal.evidence,
             halfLifeMs: 604_800_000 * 2,
           }).catch(() => {})
-          if (SEASON_ENCOURAGEMENT_ALLOWED.has(season)) {
+          if (zhiWeights.encouragementAllowed) {
             deps.advisoryBus.submit(virtueEncouragementEntry())
           }
           continue
@@ -134,19 +158,20 @@ export function createVirtueSettlementHook(
         if (utility < UTILITY_THRESHOLD) continue // 走过场的美德不记账
 
         // 转正：记录 + deposit + 季节门鼓励
+        const vWeights = getWeights(entry.signal.type)
         deps.recordStance(entry.signal)
 
         // deposit pheromone（美德信息素，半衰期 14 天）
         deps.deposit({
           path: 'virtue-signal',
           signal: entry.signal.type,
-          strength: entry.signal.confidence * utility,
+          strength: entry.signal.confidence * utility * vWeights.weight,
           context: entry.signal.evidence,
           halfLifeMs: 604_800_000 * 2,
         }).catch(() => { /* best-effort */ })
 
         // 季节鼓励门
-        if (SEASON_ENCOURAGEMENT_ALLOWED.has(season)) {
+        if (vWeights.encouragementAllowed) {
           deps.advisoryBus.submit(virtueEncouragementEntry())
         }
       }

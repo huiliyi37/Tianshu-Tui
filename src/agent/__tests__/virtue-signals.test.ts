@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { detectVirtue, computeVirtueCredit, virtueToPheromoneDeposit } from '../virtue-signals.js'
+import { detectVirtue, computeVirtueCredit, virtueToPheromoneDeposit, computeVirtueWeights } from '../virtue-signals.js'
 import type { VirtueType } from '../virtue-signals.js'
 
 // ─── 任务 10：美德指令（阳面）───
@@ -251,5 +251,96 @@ describe('virtue signals — CVM 阳面', () => {
       { type: 'cache-loyalty' as VirtueType, confidence: 1.0, wuchang: '信' as const, evidence: '' },
     ]
     assert.ok(computeVirtueCredit(high) <= 1.0)
+  })
+})
+
+// ─── T3：互抑权重 + 季节调制矩阵 ────────────────────────────────
+// computeVirtueWeights() 合并 10.1 季节调制矩阵与 2.4 互抑关系。
+
+describe('computeVirtueWeights — T3 互抑 + 季节调制', () => {
+  // ═══════════════════════════════════════════════════════════════
+  // 基线：genesis 季 + 证活跃
+  // ═══════════════════════════════════════════════════════════════
+  it('基线：genesis 季证活跃时信 weight=1.2（互抑无涉）', () => {
+    const r = computeVirtueWeights('cache-loyalty', 'genesis', 1.0, true)
+    assert.equal(r.weight, 1.2) // baseWeight=1.2, 无季节调制, 无互抑
+    assert.equal(r.encouragementAllowed, true)
+    assert.equal(r.creditApplicable, true)
+  })
+
+  // ═══════════════════════════════════════════════════════════════
+  // 互抑：证活跃 → 仁降权
+  // ═══════════════════════════════════════════════════════════════
+  it('互抑：证活跃时仁降权（验证已替代质疑）', () => {
+    const active = computeVirtueWeights('independent-judgment', 'genesis', 1.0, true)
+    const inactive = computeVirtueWeights('independent-judgment', 'genesis', 1.0, false)
+    assert.ok(inactive.weight > active.weight, '证缺失时仁应升权（质疑是唯一防御）')
+    // baseWeight=1.0; active → 1.0 × 0.6 = 0.6; inactive → 1.0 × 1.3 = 1.3
+    assert.equal(active.weight, 0.6)
+    assert.equal(inactive.weight, 1.3)
+  })
+
+  it('互抑：证活跃时义升权（证活跃时的义更可信）', () => {
+    const active = computeVirtueWeights('proactive-verification', 'genesis', 1.0, true)
+    const inactive = computeVirtueWeights('proactive-verification', 'genesis', 1.0, false)
+    assert.ok(active.weight > inactive.weight, '证活跃时义应升权')
+    // baseWeight=0.9; active → 0.9 × 1.3 = 1.17; inactive → 0.9 × 0.6 = 0.54
+    assert.equal(active.weight, 1.17)
+    assert.equal(inactive.weight, 0.54)
+  })
+
+  it('互抑：礼不参与互抑（效用独立于证）', () => {
+    const active = computeVirtueWeights('boundary-respect', 'genesis', 1.0, true)
+    const inactive = computeVirtueWeights('boundary-respect', 'genesis', 1.0, false)
+    assert.equal(active.weight, inactive.weight)
+    assert.equal(active.weight, 0.6) // baseWeight=0.6
+  })
+
+  // ═══════════════════════════════════════════════════════════════
+  // 季节调制：reversal 压力态
+  // ═══════════════════════════════════════════════════════════════
+  it('reversal 季：智 ×1.5——觉察是压力态第一美德', () => {
+    const r = computeVirtueWeights('strategic-awareness', 'reversal', 1.0, true)
+    // baseWeight=0.8 × 1.5 = 1.2（智无互抑）
+    assert.equal(r.weight, 1.2)
+  })
+
+  it('reversal 季：仁 ×1.2——质疑成本低于蛮干', () => {
+    const r = computeVirtueWeights('independent-judgment', 'reversal', 1.0, false)
+    // baseWeight=1.0 × 1.2 × 1.3(inactive) = 1.56
+    assert.equal(r.weight, 1.56)
+  })
+
+  it('reversal 季：鼓励静默 + credit 冻结', () => {
+    const r = computeVirtueWeights('cache-loyalty', 'reversal', 1.0, true)
+    assert.equal(r.encouragementAllowed, false, 'reversal 季不应发鼓励')
+    assert.equal(r.creditApplicable, false, 'reversal 季 credit 应冻结')
+  })
+
+  // ═══════════════════════════════════════════════════════════════
+  // wuwei / return 季
+  // ═══════════════════════════════════════════════════════════════
+  it('wuwei 季：基线权重 + 全静默（上德不德）', () => {
+    const r = computeVirtueWeights('cache-loyalty', 'wuwei', 1.0, true)
+    assert.equal(r.weight, 1.2)
+    assert.equal(r.encouragementAllowed, false, 'wuwei 季不应发鼓励')
+    assert.equal(r.creditApplicable, true, 'wuwei 季 credit 正常')
+  })
+
+  it('return 季：基线权重 + 静默', () => {
+    const r = computeVirtueWeights('proactive-verification', 'return', 1.0, true)
+    assert.equal(r.weight, 1.17) // 0.9 × 1.3(active)
+    assert.equal(r.encouragementAllowed, false)
+    assert.equal(r.creditApplicable, true)
+  })
+
+  // ═══════════════════════════════════════════════════════════════
+  // intensity 渐变
+  // ═══════════════════════════════════════════════════════════════
+  it('reversal intensity=0.5 时智权重线性插值', () => {
+    const r = computeVirtueWeights('strategic-awareness', 'reversal', 0.5, true)
+    // seasonFactor=1.5, blend = 1 + (1.5-1)*0.5 = 1.25
+    // baseWeight=0.8 × 1.25 = 1.0
+    assert.equal(r.weight, 1.0)
   })
 })

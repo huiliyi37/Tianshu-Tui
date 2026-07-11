@@ -30,6 +30,9 @@ export interface CognitiveLedgerInput {
   ctxRatio?: number
   /** 上下文窗口 token 数（会话内恒定），渲染成 1M/200K 等标签。 */
   ctxWindow?: number
+  /** T5: 美德 mirror 字段 — renderMirror() 产出，Fibonacci 桶量化 + 固定排序。
+   *  Null 时整段省略。跟随 CVM 节流（不是防脑补锚点，是锦上添花）。 */
+  virtue?: string | null
 }
 
 export interface CognitiveLedger {
@@ -47,6 +50,7 @@ export interface CognitiveLedger {
   outputEfficiency?: number
   ctxRatio?: number
   ctxWindow?: number
+  virtue?: string | null
 }
 
 export interface CognitivePhaseSnapshot {
@@ -162,6 +166,12 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
       ? `${ledger.season}:${coarseLabel(intensity)}`
       : ledger.season
     parts.push(`season="${seasonVal}"`)
+  }
+
+  // T5: 美德入 mirror — 通道 A（appendixDelta），Fibonacci 桶字节稳定。
+  // 跟随 CVM 节流（不是防脑补锚点，节流时可熄）。
+  if (ledger.virtue) {
+    parts.push(ledger.virtue)
   }
 
   if (ledger.convergencePrecision !== undefined) parts.push(`convergence_precision="${coarseLabel(ledger.convergencePrecision)}"`)

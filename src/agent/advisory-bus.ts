@@ -180,7 +180,7 @@ export function virtueEncouragementEntry(): AdvisoryEntry {
   return {
     key: 'virtue-encouragement',
     priority: 0.4,
-    category: 'encouragement',
+    category: 'discipline',
     content: variant,
     ttl: 1,
   }
@@ -190,7 +190,7 @@ export function testPassEncouragementEntry(testCount: number): AdvisoryEntry {
   return {
     key: 'test-pass-encouragement',
     priority: 0.35,
-    category: 'encouragement',
+    category: 'discipline',
     content: `【天府】${testCount} 个测试全部通过。代码质量守护有效。`,
     ttl: 1,
   }
@@ -200,7 +200,7 @@ export function vigorRecoveryEntry(): AdvisoryEntry {
   return {
     key: 'vigor-recovery',
     priority: 0.35,
-    category: 'encouragement',
+    category: 'discipline',
     content: '【天枢】执行能量恢复。你从低效状态走出来了，保持当前的行动节奏。',
     ttl: 1,
   }
@@ -679,6 +679,20 @@ export class AdvisoryBus {
       }
       this.recordDropped(droppedByEfficacy)
       all = kept
+
+      // ── T6 efficacy 正向臂：连续采纳 ≥3 → priority +0.05，冷却减半 ──
+      // 负向臂让"说了没人听"的 key 退场，正向臂让"说了有人听"的 key 升频。
+      for (const e of all) {
+        const stats = this.efficacyStats(e.key)
+        if (!stats || stats.adopted < 3) continue
+        // priority 提升 0.05（上限 0.85，不突破 fail-open 豁免线 0.8 太远）
+        e.priority = Math.min(0.85, e.priority + 0.05)
+        // 冷却减半：把当前冷却长度减半（作用于下次 cooldown）
+        const currentLen = this.efficacyCooldownLength.get(e.key)
+        if (currentLen && currentLen > 1) {
+          this.efficacyCooldownLength.set(e.key, Math.max(1, Math.floor(currentLen / 2)))
+        }
+      }
     }
 
     // ── W6 CVM 开销节流:通道 B 隔周期送达（等效冷却翻倍）──

@@ -38,8 +38,8 @@ function normalizeCommand(cmd: string): string {
   return cmd.trim().replace(/\s+/g, ' ')
 }
 
-function buildBlockMessage(cmd: string): string {
-  return [
+function buildBlockMessage(cmd: string, virtueCredit?: number): string {
+  const lines = [
     '⛔ 已拦截(destructive-gate):测试刚失败,你正在执行 git 清场命令。',
     `  命令:${cmd.slice(0, 160)}`,
     '  为什么拦:验证失败后立即 stash/reset/checkout/restore/clean 会丢改动,',
@@ -47,11 +47,16 @@ function buildBlockMessage(cmd: string): string {
     '  共享临时路径、外部改动)未定位前,清场只是把问题藏起来。',
     '  正确路径:先用 read_file/grep 检查失败的测试与相关文件,定位根因。',
     '  如果你确认必须清场:原样重发同一命令即放行(拦截仅一次)。',
-  ].join('\n')
+  ]
+  if (virtueCredit !== undefined && virtueCredit >= 0.7) {
+    lines.push(`  本会话美德轨迹良好(信任分 ${virtueCredit.toFixed(2)}),若确认必须清场请原样重发。`)
+  }
+  return lines.join('\n')
 }
 
-export function createDestructiveGateState(options?: { windowSize?: number }): DestructiveGateState {
+export function createDestructiveGateState(options?: { windowSize?: number; getVirtueCredit?: () => number }): DestructiveGateState {
   const windowSize = options?.windowSize ?? WINDOW_SIZE
+  const getVirtueCredit = options?.getVirtueCredit
   /** 失败后经过的(实际执行的)工具调用计数;null = 窗口关闭 */
   let toolCallsSinceFail: number | null = null
   /** 已拦截过一次的命令(归一化)——再次提交视为显式坚持,放行 */
@@ -83,7 +88,7 @@ export function createDestructiveGateState(options?: { windowSize?: number }): D
       if (blockedOnce.has(key)) return { block: false }
 
       blockedOnce.add(key)
-      return { block: true, message: buildBlockMessage(cmd) }
+      return { block: true, message: buildBlockMessage(cmd, getVirtueCredit?.()) }
     },
   }
 }

@@ -296,6 +296,90 @@ export function detectCacheLoyalty(
   return null
 }
 
+// ─── T3 互抑权重 + 季节调制矩阵 ──────────────────────────────────
+// computeVirtueWeights() 合并 10.1 季节调制矩阵与 2.4 互抑关系。
+// 纯函数：无副作用，依赖仅 evidenceActive（来自 evidence-gate）+ season。
+
+import type { CognitiveSeason } from './cognitive-season.js'
+
+/** 季节美德权重调制因子（10.1 矩阵）。
+ *  genesis：基线（习惯形成期不干扰）。
+ *  reversal：智/仁升权（压力态下觉察和质疑比蛮干更有价值）。
+ *  return/wuwei：基线（复归窗口少打扰；成熟会话不調制）。 */
+const SEASON_MODULATION: Record<CognitiveSeason, Partial<Record<VirtueType, number>>> = {
+  genesis: {},
+  reversal: {
+    'strategic-awareness': 1.5,   // 觉察是压力态第一美德
+    'independent-judgment': 1.2,  // 质疑成本低于蛮干
+  },
+  return: {},
+  wuwei: {},
+}
+
+/** 证据-互抑因子（2.4）。
+ *  证活跃时：仁降权（验证已替代质疑）、义升权（证活跃时的义更可信）。
+ *  证缺失时：仁升权（质疑是唯一防御）、义降权（没有证的义是走过场）。
+ *  礼/智/信不参与互抑（它们的效用独立于证）。 */
+const EVIDENCE_SUPPRESSION: Partial<Record<VirtueType, { active: number; inactive: number }>> = {
+  'independent-judgment':  { active: 0.6, inactive: 1.3 },
+  'proactive-verification': { active: 1.3, inactive: 0.6 },
+}
+
+/** 季节鼓励门（10.1 表"鼓励送达"列） */
+const SEASON_ENCOURAGEMENT_ALLOWED: ReadonlySet<CognitiveSeason> = new Set(['genesis'])
+
+/** 季节 credit 适用性（10.1 表"virtueCredit 适用性"列）。
+ *  reversal 季冻结：平稳期信任不适用于压力态（反证 4）。 */
+const SEASON_CREDIT_APPLICABLE: ReadonlySet<CognitiveSeason> = new Set(['genesis', 'return', 'wuwei'])
+
+export interface VirtueWeightResult {
+  /** 归一化权重（应用到 signal.confidence 的乘数）。基线 = 1.0。 */
+  weight: number
+  /** 本美德 + 当前季节组合下鼓励是否允许送达 */
+  encouragementAllowed: boolean
+  /** virtueCredit 在当前季节是否适用（reversal 季冻结） */
+  creditApplicable: boolean
+}
+
+/**
+ * 计算美德信号的上下文权重——合并季节调制与证据互抑。
+ *
+ * @param virtueType — 美德类型
+ * @param season — 当前认知季节（genesis/reversal/return/wuwei）
+ * @param seasonIntensity — 季节强度 0-1（reversal 渐变用）
+ * @param evidenceActive — evidence-gate 判定证是否活跃
+ * @returns 权重结果（weight + 鼓励门 + credit 适用性）
+ */
+export function computeVirtueWeights(
+  virtueType: VirtueType,
+  season: CognitiveSeason,
+  seasonIntensity: number,
+  evidenceActive: boolean,
+): VirtueWeightResult {
+  // 基线权重 = WUCHANG_THRESHOLDS[virtueType].weight
+  const baseWeight = WUCHANG_THRESHOLDS[virtueType]?.weight ?? 0.5
+
+  // 季节调制因子（intensity 线性插值到基线 1.0）
+  const seasonFactor = SEASON_MODULATION[season]?.[virtueType] ?? 1.0
+  const seasonBlend = 1.0 + (seasonFactor - 1.0) * seasonIntensity
+
+  // 互抑因子
+  const evidenceRule = EVIDENCE_SUPPRESSION[virtueType]
+  const evidenceFactor = evidenceRule
+    ? (evidenceActive ? evidenceRule.active : evidenceRule.inactive)
+    : 1.0
+
+  const weight = Math.round((baseWeight * seasonBlend * evidenceFactor) * 10000) / 10000
+
+  // 鼓励门：genesis 季允许送达，其余季节静默
+  const encouragementAllowed = SEASON_ENCOURAGEMENT_ALLOWED.has(season)
+
+  // credit 适用性：reversal 季冻结
+  const creditApplicable = SEASON_CREDIT_APPLICABLE.has(season)
+
+  return { weight, encouragementAllowed, creditApplicable }
+}
+
 // ─── VirtuePendingLedger（T2a）─────────────────────────────────────
 // 美德信号的两段式核销台账——postTool 检测到美德时先 submit pending，
 // postTurn 到期时 drainSettled 返回到期条目供 settlement hook 核销效用。
