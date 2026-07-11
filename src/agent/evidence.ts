@@ -78,6 +78,12 @@ function isCodeFile(path: string): boolean {
   return CODE_EXTENSIONS.has(ext)
 }
 
+/** `.rivet/scratch/` 下的文件是一次性行为探针（微探针纪律），不计入 TDD gate。
+ *  与 reliability-mode.ts 的 scratch self-rescue 白名单同一路径约定。 */
+export function isScratchPath(path: string): boolean {
+  return /(?:^|[/\\])\.rivet[/\\]scratch(?:[/\\]|$)/.test(path)
+}
+
 export interface EvidenceTrackerPublic {
   trackFileRead(path: string): void
   trackFileModified(path: string): void
@@ -133,7 +139,10 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
     // Only code-file edits drive the TDD gate counter. Docs, configs, plans,
     // and other non-code files are excluded so the gate doesn't block pure
     // documentation work (which has no tests to run).
-    if (isCodeFile(path)) {
+    // Scratch probes (.rivet/scratch/) are also excluded: they are throwaway
+    // behavior-verification scripts, not deliverable edits — counting them
+    // would let the RED gate punish the probe discipline it should encourage.
+    if (isCodeFile(path) && !isScratchPath(path)) {
       this.#editsSinceLastTest++
       this.#hasCodeEdits = true
     }

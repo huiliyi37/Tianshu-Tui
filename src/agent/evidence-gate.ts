@@ -30,8 +30,13 @@ const DECISION_TOOLS = new Set([
   'deliver_task',
 ])
 
-/** bash 命令中视为探针的子串（dry-run / typecheck / test 类） */
-const BASH_PROBE_RE = /\b(dry[- ]run|typecheck|tsc\b|test|vitest|jest|pytest|mocha|tsx\s+--test)/i
+/** bash 命令中视为探针的子串，三类：
+ *  1. dry-run / typecheck / test 类（验证型执行）
+ *  2. 微探针执行：`tsx -e` / `node -e`（15 秒行为实测脚本）
+ *  3. 取证型只读 bash：`grep -c/-n/-o`、`wc -l`、`head -n`——"读内部实现"的
+ *     bash 形态。常出现在管道尾部（`git stash list | grep foo`），整条命令
+ *     仍是只读，归类探针是正确语义；词边界防误伤（`\bwc\b` 而非裸 wc）。 */
+const BASH_PROBE_RE = /\b(dry[- ]run|typecheck|tsc\b|test|vitest|jest|pytest|mocha|tsx\s+--test)|(?:\b(?:npx\s+)?(?:tsx|node)\s+(?:--?\S+\s+)*-e\b)|(?:\bgrep\s+(?:--?\S+\s+)*-[a-zA-Z]*[cno]\b)|(?:\bwc\s+-[a-zA-Z]*l\b)|(?:\bhead\s+-(?:n\b|c\b|\d))/i
 
 /** 判断 bash 命令是否为探针（而非写入） */
 function isBashProbe(command: string | undefined): boolean {

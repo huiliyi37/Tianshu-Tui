@@ -130,6 +130,24 @@ describe('evaluateTddGate', () => {
     }
   })
 
+  it('allows scratch probe edits (.rivet/scratch/) even in enforce mode past threshold', () => {
+    const hot = state({ filesModified: 3, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true })
+    for (const path of [
+      '.rivet/scratch/probe.ts',
+      '/Users/x/proj/.rivet/scratch/sub/check.ts',
+      'C:\\proj\\.rivet\\scratch\\probe.ts',
+    ]) {
+      const decision = evaluateTddGate(hot, 'write_file', enforce, path)
+      assert.equal(decision.action, 'allow', `scratch path must be exempt: ${path}`)
+    }
+  })
+
+  it('does NOT exempt paths that merely contain "scratch" outside .rivet', () => {
+    const hot = state({ filesModified: 3, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true })
+    const decision = evaluateTddGate(hot, 'edit_file', enforce, 'src/scratch-pad.ts')
+    assert.equal(decision.action, 'block')
+  })
+
   it('still blocks when the edit target is a non-test code file', () => {
     const hot = state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true })
     const decision = evaluateTddGate(hot, 'edit_file', enforce, 'src/repo/project-fingerprint.ts')

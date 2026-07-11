@@ -100,6 +100,17 @@ describe('EvidenceTracker delivery status', () => {
     assert.equal(gate.filesModified, 3) // filesModified still counts all
   })
 
+  it('does not increment editsSinceLastTest for scratch probe files (.rivet/scratch/)', () => {
+    const tracker = new EvidenceTracker()
+    tracker.trackFileModified('.rivet/scratch/probe.ts')
+    tracker.trackFileModified('/Users/x/proj/.rivet/scratch/check.ts')
+
+    const gate = tracker.getGateState()
+    assert.equal(gate.editsSinceLastTest, 0)
+    assert.equal(gate.hasCodeEdits, false)
+    assert.equal(gate.filesModified, 2) // filesModified still counts them
+  })
+
   it('increments editsSinceLastTest for code files', () => {
     const tracker = new EvidenceTracker()
     tracker.trackFileModified('src/agent/loop.ts')

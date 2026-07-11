@@ -141,6 +141,83 @@ describe('detectEvidenceGate', () => {
     assert.ok(result.score >= 0.5, `score should be >= 0.5 for active, got ${result.score}`)
   })
 
+  // ── BASH_PROBE_RE 扩展：微探针执行 + 取证型只读 bash ──
+
+  it('treats tsx -e micro-probe as valid probe', () => {
+    const history: ToolHistoryEntry[] = [
+      { tool: 'bash', target: undefined, turn: 1, command: `npx tsx -e "import { f } from './src/foo.js'; console.log(f(1))"` },
+      entry('edit_file', 'src/foo.ts', 2),
+    ]
+    const result = detectEvidenceGate({ recentHistory: history, currentTurn: 3 })
+    // bash probe has no target → not counted as closure, but must not be a decision either
+    assert.ok(!result.active || result.closures >= 0)
+    // The real assertion: a tsx -e command with a target IS a probe closure source
+    const withTarget: ToolHistoryEntry[] = [
+      { tool: 'bash', target: 'tsx probe', turn: 1, command: `npx tsx -e "console.log(1)"` },
+      entry('edit_file', 'src/foo.ts', 2),
+    ]
+    const r2 = detectEvidenceGate({ recentHistory: withTarget, currentTurn: 3 })
+    assert.ok(r2.active, 'tsx -e should classify as bash probe')
+    assert.ok(r2.closures >= 1)
+  })
+
+  it('treats node -e micro-probe as valid probe', () => {
+    const history: ToolHistoryEntry[] = [
+      { tool: 'bash', target: 'node probe', turn: 1, command: `node -e 'console.log(require("./pkg.json"))'` },
+      entry('edit_file', 'src/foo.ts', 2),
+    ]
+    const result = detectEvidenceGate({ recentHistory: history, currentTurn: 3 })
+    assert.ok(result.active, 'node -e should classify as bash probe')
+  })
+
+  it('treats evidence-gathering grep flags (-c/-n/-o) as probes', () => {
+    for (const cmd of [
+      `grep -n 'checkPositive' src/agent/advisory-readback.ts`,
+      `grep -c 'export' src/agent/loop.ts`,
+      `grep -rno 'pattern' src/`,
+    ]) {
+      const history: ToolHistoryEntry[] = [
+        { tool: 'bash', target: cmd, turn: 1, command: cmd },
+        entry('edit_file', 'src/foo.ts', 2),
+      ]
+      const result = detectEvidenceGate({ recentHistory: history, currentTurn: 3 })
+      assert.ok(result.active, `expected probe classification for: ${cmd}`)
+    }
+  })
+
+  it('treats wc -l and head -n as probes, including pipeline tails', () => {
+    for (const cmd of [
+      `wc -l src/agent/loop.ts`,
+      `head -n 40 src/agent/evidence.ts`,
+      `head -20 README.md`,
+      `git stash list | grep -c stash`,
+      `cat file.ts | wc -l`,
+    ]) {
+      const history: ToolHistoryEntry[] = [
+        { tool: 'bash', target: cmd, turn: 1, command: cmd },
+        entry('edit_file', 'src/foo.ts', 2),
+      ]
+      const result = detectEvidenceGate({ recentHistory: history, currentTurn: 3 })
+      assert.ok(result.active, `expected probe classification for: ${cmd}`)
+    }
+  })
+
+  it('does NOT classify plain write-ish bash as probe', () => {
+    for (const cmd of [
+      `git stash`,
+      `rm -rf dist`,
+      `echo hello > out.txt`,
+      `grep foo src/bar.ts`, // 无统计 flag 的裸 grep 不算（避免过宽）
+    ]) {
+      const history: ToolHistoryEntry[] = [
+        { tool: 'bash', target: cmd, turn: 1, command: cmd },
+        entry('edit_file', 'src/foo.ts', 2),
+      ]
+      const result = detectEvidenceGate({ recentHistory: history, currentTurn: 3 })
+      assert.equal(result.active, false, `expected non-probe for: ${cmd}`)
+    }
+  })
+
   it('produces low score when many decisions but few closures', () => {
     const history = [
       entry('read_file', 'src/a.ts', 1),

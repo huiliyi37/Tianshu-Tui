@@ -14,7 +14,7 @@
  * (edit_file/write_file vs edit/write), but the decision logic is identical.
  */
 
-import type { TddGateState } from './evidence.js'
+import { isScratchPath, type TddGateState } from './evidence.js'
 import type { ImmuneContextHint } from './immune-context.js'
 
 // ---------------------------------------------------------------------------
@@ -115,6 +115,11 @@ export function evaluateTddGate(
 
   // The gate only governs edit/write tools. Reads, bash, search, etc. pass through.
   if (!EDIT_TOOLS.has(toolName)) return { action: 'allow' }
+
+  // Scratch probes (.rivet/scratch/) are behavior-verification micro-probes,
+  // not deliverable edits. Blocking them locks the agent out of the probe
+  // discipline the RED gate exists to encourage — always allow.
+  if (targetPath && isScratchPath(targetPath)) return { action: 'allow' }
 
   // Doc-only edits (no code files modified) → allow. The gate's purpose is TDD
   // for code changes; documentation, config, and plan files have no tests to run.
