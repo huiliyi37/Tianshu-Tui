@@ -33,6 +33,11 @@ const UTILITY_THRESHOLD = 0.5
 /** 季节鼓励门：true = 允许送达鼓励条目 */
 const SEASON_ENCOURAGEMENT_ALLOWED: ReadonlySet<CognitiveSeason> = new Set(['genesis'])
 
+/** 信触发条件 */
+const XIN_MIN_TURN = 5
+const XIN_MIN_HIT_RATE = 0.8
+const XIN_COOLDOWN_TURNS = 10
+
 export interface VirtueSettlementHookDeps {
   ledger: VirtuePendingLedger
   readback: AdvisoryReadback
@@ -52,6 +57,8 @@ export interface VirtueSettlementHookDeps {
 export function createVirtueSettlementHooks(
   deps: VirtueSettlementHookDeps,
 ): [PostToolRuntimeHook, PostTurnRuntimeHook] {
+  let xinLastTriggered = 0 // 信上次触发的 turn（0 = 未触发过）
+
   const observer: PostToolRuntimeHook = {
     phase: 'postTool',
     name: 'virtue-settlement-observe',
@@ -70,10 +77,36 @@ export function createVirtueSettlementHooks(
     name: 'virtue-settlement-evaluate',
     async run(ctx: RuntimeHookContext): Promise<void> {
       const currentTurn = ctx.snapshot.turn
+      const season = deps.getSeason()
+
+      // ── 信号复活（T0）：实测缓存命中率 ≥ 80% 且 turn ≥ 5 → 触发一次 ──
+      // 会话级信号不走 pending ledger——每 10 轮最多触发一次，防刷分。
+      if (!xinLastTriggered || currentTurn - xinLastTriggered >= XIN_COOLDOWN_TURNS) {
+        const hitRate = deps.getRecentCacheHitRate()
+        if (hitRate !== null && hitRate >= XIN_MIN_HIT_RATE && currentTurn >= XIN_MIN_TURN) {
+          const xinSignal: VirtueSignal = {
+            type: 'cache-loyalty',
+            confidence: 0.9,
+            wuchang: '信',
+            evidence: '模型保护了前缀缓存的连续性——信者，天枢之本也',
+          }
+          deps.recordStance(xinSignal)
+          deps.deposit({
+            path: 'virtue-signal',
+            signal: 'cache-loyalty',
+            strength: xinSignal.confidence,
+            context: xinSignal.evidence,
+            halfLifeMs: 604_800_000 * 2,
+          }).catch(() => {})
+          if (SEASON_ENCOURAGEMENT_ALLOWED.has(season)) {
+            deps.advisoryBus.submit(virtueEncouragementEntry())
+          }
+          xinLastTriggered = currentTurn
+        }
+      }
+
       const settled = deps.ledger.drainSettled(currentTurn)
       if (settled.length === 0) return
-
-      const season = deps.getSeason()
 
       for (const entry of settled) {
         // 效用判定：用 readback 的观察日志查询谓词是否被满足

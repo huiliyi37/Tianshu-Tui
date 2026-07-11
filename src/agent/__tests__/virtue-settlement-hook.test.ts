@@ -28,6 +28,7 @@ interface TestHarness {
 
 function mkHarness(overrides?: {
   getSeason?: () => CognitiveSeason
+  getRecentCacheHitRate?: () => number | null
 }): TestHarness {
   const recorded: VirtueSignal[] = []
   const deposited: PheromoneDeposit[] = []
@@ -46,7 +47,7 @@ function mkHarness(overrides?: {
       advisoryBus: { submit: () => { state.encouragementSubmitted = true } } as any,
       getSeason: overrides?.getSeason ?? (() => 'genesis' as CognitiveSeason),
       getSeasonIntensity: () => 1.0,
-      getRecentCacheHitRate: () => null,
+      getRecentCacheHitRate: overrides?.getRecentCacheHitRate ?? (() => null),
     },
   }
 }
@@ -132,5 +133,52 @@ describe('createVirtueSettlementHooks', () => {
     await postTurn.run({ snapshot: { turn: 3 } } as any)
 
     assert.equal(h.recorded.length, 0, 'low utility signal should not be recorded')
+  })
+
+  it('信(cache-loyalty): triggers when hitRate >= 80% and turn >= 5', async () => {
+    const h = mkHarness({ getRecentCacheHitRate: () => 0.85 })
+    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+
+    await postTurn.run({ snapshot: { turn: 5 } } as any)
+    const xinRecorded = h.recorded.find(s => s.wuchang === '信')
+    assert.ok(xinRecorded, '信 should trigger at turn 5 with 85% hit rate')
+  })
+
+  it('信: does not trigger when hitRate < 80%', async () => {
+    const h = mkHarness({ getRecentCacheHitRate: () => 0.7 })
+    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+
+    await postTurn.run({ snapshot: { turn: 5 } } as any)
+    const xinRecorded = h.recorded.find(s => s.wuchang === '信')
+    assert.equal(xinRecorded, undefined)
+  })
+
+  it('信: does not trigger before turn 5', async () => {
+    const h = mkHarness({ getRecentCacheHitRate: () => 0.9 })
+    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+
+    await postTurn.run({ snapshot: { turn: 4 } } as any)
+    const xinRecorded = h.recorded.find(s => s.wuchang === '信')
+    assert.equal(xinRecorded, undefined)
+  })
+
+  it('信: does not re-trigger within 10 turns of last trigger', async () => {
+    const h = mkHarness({ getRecentCacheHitRate: () => 0.9 })
+    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+
+    await postTurn.run({ snapshot: { turn: 5 } } as any)
+    await postTurn.run({ snapshot: { turn: 8 } } as any)
+    await postTurn.run({ snapshot: { turn: 14 } } as any)
+    const xinCount = h.recorded.filter(s => s.wuchang === '信').length
+    assert.equal(xinCount, 1, '信 should only trigger once in 10-turn window')
+  })
+
+  it('信: returns null when hitRate data unavailable', async () => {
+    const h = mkHarness({ getRecentCacheHitRate: () => null })
+    const [_, postTurn] = createVirtueSettlementHooks(h.deps)
+
+    await postTurn.run({ snapshot: { turn: 5 } } as any)
+    const xinRecorded = h.recorded.find(s => s.wuchang === '信')
+    assert.equal(xinRecorded, undefined, '信 should not trigger with null hit rate')
   })
 })
