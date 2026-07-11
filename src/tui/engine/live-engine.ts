@@ -212,7 +212,8 @@ export class LiveEngine {
     if (!this.hasRendered || this.lastDisplayRows === 0) {
       // 首帧 / clear/overlay 退出后的全量重铺同样用 CSI 2026 包裹，原子刷新
       // 防撕裂（与增量帧一致）。尾行不带 `\n`，光标仍常驻最后一行末尾。
-      this.stdout.write(ANSI.BEGIN_SYNC + this.buildAppend(bounded) + ANSI.END_SYNC)
+      // 同步隐藏硬件光标，避免 overlay 退出后主屏出现额外闪烁指针。
+      this.stdout.write(ANSI.BEGIN_SYNC + ANSI.HIDE_CURSOR + this.buildAppend(bounded) + ANSI.END_SYNC)
       this.lastDisplayRows = newDisplayRows
       this.lineCache = bounded.map(l => l.text)
       this.hasRendered = true
@@ -239,8 +240,11 @@ export class LiveEngine {
       ? this.buildDiff(bounded, prevDisplayRows)
       : this.buildFullRewrite(bounded, prevDisplayRows)
 
-    // CSI 2026 同步输出包裹整帧，原子刷新防撕裂。
-    this.stdout.write(ANSI.BEGIN_SYNC + body + ANSI.END_SYNC)
+    // 隐藏终端硬件光标：输入框使用软件光标 `█` 指示编辑位置，硬件光标若保持可见
+    // 会停留在 live region 尾行（如权限模式行 `yolo (shift+tab 切换)` 开头）闪烁，
+    // 造成「多了一个输入指针」的视觉干扰。每帧 render 都发送 HIDE_CURSOR，可覆盖
+    // overlay 退出后 SHOW_CURSOR 恢复默认状态的间隙。
+    this.stdout.write(ANSI.BEGIN_SYNC + ANSI.HIDE_CURSOR + body + ANSI.END_SYNC)
     this.lastDisplayRows = newDisplayRows
     this.lineCache = bounded.map(l => l.text)
   }
@@ -339,7 +343,7 @@ export class LiveEngine {
   clear(): void {
     this.reconcileWidth()
     if (this.lastDisplayRows === 0) return
-    this.stdout.write(this.moveToTop(this.lastDisplayRows) + '\r' + ANSI.ERASE_SCREEN_END)
+    this.stdout.write(ANSI.HIDE_CURSOR + this.moveToTop(this.lastDisplayRows) + '\r' + ANSI.ERASE_SCREEN_END)
     this.lastDisplayRows = 0
     this.lineCache = []
   }

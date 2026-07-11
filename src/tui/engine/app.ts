@@ -26,7 +26,7 @@ import { ApprovalIntentController } from './approval-intent-controller.js'
 import { MetricsGlanceController } from './metrics-glance-controller.js'
 import { StreamRenderController } from './stream-render-controller.js'
 import { InputController } from './input-controller.js'
-import { color, fg, bg } from './ansi.js'
+import { ANSI, color, fg, bg } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
 import { SlashCommandRegistry, type SlashCommandContext } from '../slash-command-registry.js'
@@ -1868,8 +1868,9 @@ export class TuiApp {
       clearInterval(this.streamRenderController.ticker)
       this.streamRenderController.ticker = null
     }
-    // 关闭 bracketed paste，恢复终端默认
+    // 关闭 bracketed paste，恢复终端默认；同时恢复硬件光标可见性。
     this.stdout.write('\x1B[?2004l')
+    this.stdout.write(ANSI.SHOW_CURSOR)
     this.input.dispose()
     this.resize.dispose()
   }

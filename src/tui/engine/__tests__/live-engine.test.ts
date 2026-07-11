@@ -279,6 +279,37 @@ test('阶段3: 首帧/退出重绘的 append 帧同样用 CSI 2026 包裹', () =
   assert.ok(frame.includes('A') && frame.includes('C'), '首帧包含内容')
 })
 
+// ── 光标管理：主 TUI 使用软件光标 `█`，每帧隐藏硬件光标，防止其停留在权限模式行等 chrome 尾部闪烁 ──
+
+test('每帧 render 同步隐藏硬件光标（覆盖 overlay 退出后的 SHOW_CURSOR）', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('A', 'B', 'C'))
+  const first = term.flush()
+  assert.ok(first.includes('\x1B[?25l'), '首帧应隐藏硬件光标')
+
+  engine.render(lines('A2', 'B', 'C'))
+  const delta = term.flush()
+  assert.ok(delta.includes('\x1B[?25l'), '增量帧应隐藏硬件光标')
+})
+
+test('clear 后重绘仍隐藏硬件光标', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('A', 'B', 'C'))
+  term.flush()
+
+  engine.clear()
+  const cleared = term.flush()
+  assert.ok(cleared.includes('\x1B[?25l'), 'clear 应隐藏硬件光标')
+
+  engine.render(lines('A', 'B', 'C'))
+  const afterClear = term.flush()
+  assert.ok(afterClear.includes('\x1B[?25l'), 'clear 后重新 append 仍应隐藏硬件光标')
+})
+
 // ── 结构变化（行数变化）走全量重写，仍不滚屏/不用 SAVE/RESTORE ──
 
 test('结构变化（行数增减）安全重绘，不滚屏不用 SAVE/RESTORE', () => {
