@@ -43,10 +43,10 @@ test('renderChoicePanel: selected choice has cursor ▶', () => {
   const plain = lines.map(stripAnsi)
   // selectedIndex=1 → second choice should have ▶ cursor
   const bLine = plain.find(l => l.includes('压缩上下文'))
-  assert.ok(bLine && bLine.includes('▶'), 'selected choice has ▶ cursor')
+  assert.ok(bLine && bLine.includes('>'), 'selected choice has ▶ cursor')
   // First choice should NOT have cursor
   const aLine = plain.find(l => l.includes('降级模型'))
-  assert.ok(aLine && !aLine.includes('▶'), 'non-selected choice has no cursor')
+  assert.ok(aLine && !aLine.includes('>'), 'non-selected choice has no cursor')
 })
 
 test('renderChoicePanel: recommended choice has ★ marker', () => {

@@ -38,7 +38,7 @@ describe('renderModelPicker', () => {
     // SelectedIndex = 0 (Model A) -> should have ▶ cursor
     const modelALine = lines.find(l => stripAnsi(l).includes('Model A'))
     const modelBLine = lines.find(l => stripAnsi(l).includes('Model B'))
-    assert.ok(modelALine && stripAnsi(modelALine).includes('▶'))
+    assert.ok(modelALine && stripAnsi(modelALine).includes('>'))
     // Current = true (Model B) -> should have ● current mark
     assert.ok(modelBLine && stripAnsi(modelBLine).includes('●'))
   })
@@ -71,7 +71,7 @@ describe('renderThemePicker', () => {
     assert.ok(lines.some(l => stripAnsi(l).includes('gemini')))
     // selectedIndex = 1 (gemini) -> has ▶ cursor
     const geminiLine = lines.find(l => stripAnsi(l).includes('gemini'))
-    assert.ok(geminiLine && stripAnsi(geminiLine).includes('▶'))
+    assert.ok(geminiLine && stripAnsi(geminiLine).includes('>'))
   })
 
   it('renders theme details and primary/secondary color swatches', () => {

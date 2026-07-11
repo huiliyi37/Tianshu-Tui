@@ -31,8 +31,8 @@ export function renderHistorySearch(data: HistorySearchData, width: number, heig
   const contentRows = Math.max(3, height - 4) // top + title + footer + bottom
 
   const lines: string[] = [
-    frameTop(width, theme),
-    frameTitle('⌛ 历史搜索 · Ctrl+R', width, theme),
+    frameTop(width, theme, 'subtle'),
+    frameTitle('历史搜索 · Ctrl+R', width, theme),
   ]
 
   const body: string[] = []
@@ -55,7 +55,7 @@ export function renderHistorySearch(data: HistorySearchData, width: number, heig
   }
 
   for (let i = 0; i < contentRows; i++) lines.push(frameLine(body[i] ?? '', width, theme))
-  lines.push(frameFooter(keyHints([['↑↓', '选择'], ['Enter', '粘贴'], ['Esc', '取消']]), width, theme))
-  lines.push(frameBottom(width, theme))
+  lines.push(frameFooter(keyHints([['↑↓', '选择'], ['Enter', '粘贴'], ['Esc', '取消']]), width, theme, 'subtle'))
+  lines.push(frameBottom(width, theme, 'subtle'))
   return lines
 }

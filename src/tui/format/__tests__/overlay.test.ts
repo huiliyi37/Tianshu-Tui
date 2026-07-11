@@ -124,8 +124,8 @@ describe('renderTasks: per-worker 舰队', () => {
     assert.ok(text.includes('1/3 完成'))
     assert.ok(text.includes('T1·code_scout'))
     assert.ok(text.includes('grep seams'))
-    assert.ok(text.includes('Enter 详情'))
-    assert.ok(text.includes('Tab 筛选'))
+    assert.ok(text.includes('Enter:详情'))
+    assert.ok(text.includes('Tab:筛选'))
   })
 
   it('多组：序号化组标题 + failed 计数', () => {
@@ -141,7 +141,7 @@ describe('renderTasks: per-worker 舰队', () => {
     assert.ok(text.includes('批次 1'))
     assert.ok(text.includes('批次 2'))
     assert.ok(text.includes('✗1 失败'))
-    assert.ok(text.includes('Enter 详情'))
+    assert.ok(text.includes('Enter:详情'))
   })
 
   it('空舰队：显示空态提示', () => {
@@ -189,8 +189,8 @@ describe('renderTasks: per-worker 舰队', () => {
     // 第二个 worker 行应以 ▶ 开头（去 ANSI 后仍是 ▶）
     const workerLines = text.split('\n').filter(l => l.includes('A·') || l.includes('B·'))
     assert.equal(workerLines.length, 2)
-    assert.ok(!workerLines[0]!.includes('▶'), 'first worker not selected')
-    assert.ok(workerLines[1]!.includes('▶'), 'second worker selected')
+    assert.ok(!workerLines[0]!.includes('>'), 'first worker not selected')
+    assert.ok(workerLines[1]!.includes('>'), 'second worker selected')
   })
 
   it('纯 ASCII 行严格等宽（padLine 对齐）', () => {

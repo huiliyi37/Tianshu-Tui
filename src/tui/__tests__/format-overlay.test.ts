@@ -79,7 +79,7 @@ describe('renderCommandPalette', () => {
     const lines = renderCommandPalette(data, 60, 15, theme)
     assert.ok(lines.some(l => stripAnsi(l).includes('Command A')))
     // Selected should have ▶ prefix
-    assert.ok(lines.some(l => stripAnsi(l).includes('▶')))
+    assert.ok(lines.some(l => stripAnsi(l).includes('>')))
   })
 
   it('shows search text in title', () => {
@@ -139,8 +139,8 @@ describe('renderChronicle', () => {
     const lines = renderChronicle(data, 80, 20, theme)
     const secondLine = lines.find(l => stripAnsi(l).includes('second'))
     const firstLine = lines.find(l => stripAnsi(l).includes('first'))
-    assert.ok(secondLine && stripAnsi(secondLine).includes('▶'), '选中行有 ▶ 游标')
-    assert.ok(firstLine && !stripAnsi(firstLine).includes('▶'), '未选中行无游标')
+    assert.ok(secondLine && stripAnsi(secondLine).includes('>'), '选中行有 > 游标')
+    assert.ok(firstLine && !stripAnsi(firstLine).includes('>'), '未选中行无游标')
   })
 
   it('footer 引导 Enter → resume（G5 诚实文案）', () => {

@@ -260,14 +260,14 @@ export class InputLine {
   /**
    * 多行渲染：返回输入框的显示行数组。
    * - 空值时显示 placeholder（首行）
-   * - 光标行以 `〉 ` 前缀标识（高亮行），其余行缩进对齐
+   * - 光标行以 `> ` 前缀标识（高亮行），其余行缩进对齐
    * - 光标位置以 `█` 标记
    * - 当 maxWidth 给出时，对光标行做水平视窗：内容超宽时以光标为中心截取，
    *   保证光标位置（正在输入的字符）始终可见，而非从行首截断导致行尾不可见。
    */
   displayLines(options: InputLineDisplayOptions = {}): string[] {
     if (!this._value) {
-      return [`〉 █${this._placeholder}`]
+      return [`> █${this._placeholder}`]
     }
     const before = this._value.slice(0, this._cursor)
     const cursorLine = before.split('\n').length - 1
@@ -275,7 +275,7 @@ export class InputLine {
 
     const lines = this._value.split('\n').map((line, i) => {
       const isCursorLine = i === cursorLine
-      const prefix = isCursorLine ? '〉 ' : '  '
+      const prefix = isCursorLine ? '> ' : '  '
       if (!isCursorLine) return `${prefix}${line}`
       const beforeCursor = line.slice(0, cursorCol)
       const afterCursor = `█${line.slice(cursorCol)}`

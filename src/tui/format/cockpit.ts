@@ -142,11 +142,11 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
     : `${PANEL_LABELS[panel]}   ·   /cockpit summary 看全部   ·   q 关闭`
 
   const lines: string[] = [
-    frameTop(width, theme),
-    frameTitle('⚙ 运行时仪表盘', width, theme),
+    frameTop(width, theme, 'subtle'),
+    frameTitle('运行时仪表盘', width, theme),
   ]
   for (let i = 0; i < contentRows; i++) lines.push(frameLine(body[i] ?? '', width, theme))
-  lines.push(frameFooter(footer, width, theme))
-  lines.push(frameBottom(width, theme))
+  lines.push(frameFooter(footer, width, theme, 'subtle'))
+  lines.push(frameBottom(width, theme, 'subtle'))
   return lines
 }
