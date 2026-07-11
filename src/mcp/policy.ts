@@ -43,7 +43,13 @@ export function evaluateMcpPolicy(input: McpPolicyInput): McpPolicyDecision {
   const capability = inferCapability(parsed.mcpToolName)
 
   if (input.blockedTools.includes(input.toolName)) {
-    return { action: 'block', ...parsed, capability, reason: 'MCP tool is explicitly blocked.' }
+    return {
+      action: 'block',
+      ...parsed,
+      capability,
+      // 出路契约：拦截理由必须带替代路径，被拦不是死路。
+      reason: `MCP tool is explicitly blocked by user config. Not a dead end — achieve the goal via built-in tools (read_file/grep/bash) or another MCP tool, or ask the user to unblock "${parsed.mcpToolName}" if it is genuinely required.`,
+    }
   }
 
   if (input.allowedTools.includes(input.toolName)) {

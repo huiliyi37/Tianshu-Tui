@@ -336,6 +336,7 @@ return new ToolExecutionController({
         }
       },
       destructiveGate: self.destructiveGate,
+      onGateBlocked: kind => { self.gateBlockedKinds.push(kind) },
       writeTelemetry: (record) => { self.telemetryWriter.write(record) },
     })
 }
@@ -570,6 +571,8 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     sycophancyTrap: self.sycophancyTrap,
     getEstimatedTokens: () => self.session.getEstimatedTokens(),
     getContextWindow: () => self.config.contextWindow ?? 128_000,
+    // W2 被拦不弃守护：drain 语义（读取即清零 turn 级计数）。
+    drainGateBlockedKinds: () => self.gateBlockedKinds.splice(0),
     // 多会话隔离：todo-reminder 经此读本会话 TodoStore（缺省回退全局 getTodos）。
     getTodos: self.config.getTodos,
     // 运行走查工件（付费版 v1 · T1）：computer_use 步骤时间线 → walkthrough 工件。

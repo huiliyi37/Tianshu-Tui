@@ -122,6 +122,8 @@ export interface ToolExecutionDeps {
   isGoalActive?: () => boolean
   /** 破坏性命令 pre-execution 闸门(会话级状态,loop 持有,pipeline 读写)。 */
   destructiveGate?: import('../tools/destructive-gate.js').DestructiveGateState
+  /** W2 被拦不弃守护：gate/deny 拦截事件上报（loop 持 turn 级计数）。 */
+  onGateBlocked?: (kind: string) => void
   /** 遥测写入(缺口 B 输出裁剪计数等)。 */
   writeTelemetry?: (record: { kind: string } & Record<string, unknown>) => void
 }
@@ -264,6 +266,7 @@ export class ToolExecutionController {
       getLspManager: this.deps.getLspManager,
       abortSignal: state.abortSignal,
       destructiveGate: this.deps.destructiveGate,
+      onGateBlocked: this.deps.onGateBlocked,
     }
   }
 

@@ -343,6 +343,10 @@ export interface ToolPipelineDeps {
   /** T4: late-bound LSP manager getter. Checked first, falls back to `lspManager`.
    *  Enables T9 path where LSP initializes asynchronously after AgentLoop construction. */
   getLspManager?: () => LspManager | null
+  /** W2 被拦不弃守护：每次 gate/deny 拦截时上报（cerebellar/tdd/destructive/
+   *  hook/reliability/doom-loop/plan-mode/deny）。loop 持 turn 级计数，
+   *  gate-block-guard hook 在 postTurn 读取——单 turn ≥2 次被拦触发反放弃 advisory。 */
+  onGateBlocked?: (kind: string) => void
 }
 
 export interface ToolExecResult {
@@ -709,6 +713,7 @@ export async function executeToolUse(
       const recentReads = deps.trajectory.getEntries().slice(-3).some(e => e.tool === 'read_file')
       if (!recentReads) {
         const gateMsg = `Tool blocked by cerebellar gate: recent prediction error rate is elevated. Read the file before editing to ensure mental model is current.`
+        deps.onGateBlocked?.('cerebellar')
         callbacks.onToolResult(tu.id, tu.name, gateMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: gateMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
@@ -724,6 +729,7 @@ export async function executeToolUse(
       const editTarget = typeof tu.input?.file_path === 'string' ? tu.input.file_path : undefined
       const decision = evaluateTddGate(gateState, tu.name, tddConfig, editTarget)
       if (decision.action === 'block') {
+        deps.onGateBlocked?.('tdd')
         callbacks.onToolResult(tu.id, tu.name, decision.message!, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: decision.message!, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
@@ -746,6 +752,7 @@ export async function executeToolUse(
           durationMs: 0,
           summary: String((tu.input as Record<string, unknown>).command ?? '').slice(0, 200),
         })
+        deps.onGateBlocked?.('destructive')
         callbacks.onToolResult(tu.id, tu.name, gateDecision.message, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: gateDecision.message, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
       }
@@ -757,7 +764,11 @@ export async function executeToolUse(
     // PreToolUse hook
     const preHookResult = deps.config.hooks?.firePreToolUse({ toolName: tu.name, input: tu.input as Record<string, unknown> }) ?? {}
     if (preHookResult.block) {
-      const blockMsg = `Tool blocked by hook: ${preHookResult.reason ?? 'no reason given'}`
+      // 出路契约：无 reason 时给标准替代路径，不让模型面对"被拦且不知为何"的死路。
+      const blockMsg = preHookResult.reason
+        ? `Tool blocked by hook: ${preHookResult.reason}`
+        : 'Tool blocked by a user-configured PreToolUse hook (no reason given). This is a per-tool policy, not a system failure — continue via another route: use read-only tools (read_file/grep) to gather evidence, write probes under .rivet/scratch/, or ask the user to adjust the hook in .rivet/hooks.json.'
+      deps.onGateBlocked?.('pre-tool-hook')
       callbacks.onToolResult(tu.id, tu.name, blockMsg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: blockMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }
@@ -800,6 +811,7 @@ export async function executeToolUse(
     const reliabilityDecision = deps.getReliabilityDecision?.() ?? null
     if (reliabilityDecision && !isToolAllowedInReliabilityMode(reliabilityDecision.mode, tu.name, tu.input)) {
       const msg = reliabilityBlockMessage(reliabilityDecision, tu.name)
+      deps.onGateBlocked?.('reliability')
       callbacks.onToolResult(tu.id, tu.name, msg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }
@@ -845,6 +857,7 @@ export async function executeToolUse(
             ? 'Recovery: the target may be too large or the infra overloaded. Try splitting the task, using a different tool, or reducing scope.'
             : 'Recovery: try a different tool (e.g. read_file, todo), change the input, or modify the target path.',
         ].join('\n')
+        deps.onGateBlocked?.('doom-loop')
         callbacks.onToolResult(tu.id, tu.name, msg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
       }
@@ -867,6 +880,7 @@ export async function executeToolUse(
     })
     if (!planModeResult.allowed) {
       const planMsg = planModeResult.reason ?? 'Plan Mode: write operations blocked'
+      deps.onGateBlocked?.('plan-mode')
       callbacks.onToolResult(tu.id, tu.name, planMsg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? planMsg + starSig : planMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
    }
@@ -927,7 +941,8 @@ export async function executeToolUse(
     if (denied || bashDenied || selfKill) {
       const reason = selfKill
         ? "Tool execution blocked: this command would terminate the agent's own runtime (the Rivet sidecar / Node process it runs in). That aborts the session and drops its API auth. To restart a local dev server, use a targeted command like `npx kill-port <port>` or kill a specific non-agent PID; otherwise ask the user to restart it manually."
-        : `Tool execution denied: ${tu.name} matches an active deny rule`
+        : `Tool execution denied: ${tu.name} matches an active deny rule. This is a user-configured permission boundary, not a dead end — continue via another route: gather evidence with read-only tools (read_file/grep/glob), write probes under .rivet/scratch/, or ask the user to adjust the permissions deny rules if this operation is genuinely required.`
+      deps.onGateBlocked?.(selfKill ? 'self-kill' : 'deny')
       callbacks.onToolResult(tu.id, tu.name, reason, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: reason, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
     }

@@ -53,11 +53,17 @@ export function shouldKick(s: Sensorium): boolean {
  * @param s - Current Sensorium snapshot
  * @param _cwd - Working directory (reserved for future import-graph use)
  * @param recentlyFailedFiles - File paths that have failed recently
+ * @param ctxRatio - Real context window fill ratio (estimatedTokens / window).
+ *                   `s.pressure` is a composite that includes CVM overhead —
+ *                   using it to claim "context is almost full" manufactured
+ *                   anxiety at 10% actual fill (session 20b9714e). Only the
+ *                   real ratio may make context claims.
  */
 export function buildKickActions(
   s: Sensorium,
   _cwd: string,
   recentlyFailedFiles: string[] = [],
+  ctxRatio?: number,
 ): KickActions {
   const deadEndPaths = recentlyFailedFiles.length > 0
     ? recentlyFailedFiles
@@ -75,8 +81,15 @@ export function buildKickActions(
     parts.push('- 涉及多文件改动，建议拆分任务：先完成一个子目标并验证，再进行下一步')
   }
 
+  // 焦虑供给源修正（2026-07-11）：pressure 是含 CVM 开销的复合值，不能
+  // 翻译成"上下文快满了"。只有实测 ctxRatio ≥ 0.7 才提上下文；否则如实
+  // 说复合压力来源（资源/开销），不制造不存在的窗口焦虑。
   if (s.pressure > 0.7) {
-    parts.push('- 上下文快满了，建议立即提交当前完成的部分，用 checkpoint 清理上下文')
+    if (ctxRatio !== undefined && ctxRatio >= 0.7) {
+      parts.push(`- 上下文使用率 ${Math.round(ctxRatio * 100)}%，建议提交当前完成的部分，用 checkpoint 收束`)
+    } else {
+      parts.push('- 系统复合压力偏高（资源/开销复合值，非窗口余量告急）——收敛当前子目标，避免同时展开多线')
+    }
   }
 
   parts.push('- 重新阅读用户原始请求，确认当前方向是否偏离')

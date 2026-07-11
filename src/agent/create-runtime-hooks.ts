@@ -53,6 +53,8 @@ import { createAdvisoryReadbackHooks } from './hooks/advisory-readback-hook.js'
 import { createAsyncCopilotHook, type CopilotContextPack } from './hooks/async-copilot-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
+import { createGateBlockGuardHook } from './hooks/gate-block-guard-hook.js'
+import { createWrapupAnxietyGuardHook } from './hooks/wrapup-anxiety-guard-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import { createWalkthroughRecorderHooks, type WalkthroughRecorderDeps } from './hooks/walkthrough-recorder.js'
 import type { AdvisoryBus } from './advisory-bus.js'
@@ -224,6 +226,10 @@ export interface RuntimeHookDeps {
   /** Context window size (used by context-pressure-hook for ratio warning). */
   getContextWindow?: () => number
 
+  // ── W2 被拦不弃守护 ──
+  /** 读取并清零本 turn 的闸门拦截事件 kind 列表（loop.gateBlockedKinds）。 */
+  drainGateBlockedKinds?: () => string[]
+
   // ── P2 break-anchor scout (preTurn, opt-in real intervention) ──
   /** Present only when antiAnchoring + anchorBreakScout are both enabled and a coordinator exists. */
   anchorBreakScout?: {
@@ -263,7 +269,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     createPerceptionRuntimeHook(),
     createSignalConsumerRuntimeHook({ advisoryBus: deps.advisoryBus }),
     ...(isStarSoulEnabled() ? [createCourageHook({ cooldownTurns: 5, courageThreshold: 0.5, sycophancyTrap: deps.sycophancyTrap, advisoryBus: deps.advisoryBus })] : []),
-    createKickRuntimeHook({ deposit: deps.stigmergyDeposit, wasConvergenceTriggered: deps.wasConvergenceTriggered, advisoryBus: deps.advisoryBus }),
+    createKickRuntimeHook({
+      deposit: deps.stigmergyDeposit,
+      wasConvergenceTriggered: deps.wasConvergenceTriggered,
+      advisoryBus: deps.advisoryBus,
+      getEstimatedTokens: deps.getEstimatedTokens,
+      getContextWindow: deps.getContextWindow,
+    }),
     createVigorAfterPerceptionHook(),
     createThetaRuntimeHook({
       getThetaState: deps.getThetaState,
@@ -652,6 +664,31 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   if (deps.advisoryBus && deps.getEstimatedTokens && deps.getContextWindow) {
     hooks.push(createContextPressureHook({
       advisoryBus: deps.advisoryBus,
+      getEstimatedTokens: deps.getEstimatedTokens,
+      getContextWindow: deps.getContextWindow,
+    }))
+  }
+
+  // Gate-Block Guard: postTurn hook — 单 turn 被闸门拦截 ≥2 次时提醒
+  // "被拦不是死路"，引导执行拦截文案里的替代路径而非放弃排查。
+  // per-key 3 轮冷却防连拦 spam。
+  // Gated by RIVET_GATE_BLOCK_GUARD (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.drainGateBlockedKinds && process.env.RIVET_GATE_BLOCK_GUARD !== '0') {
+    hooks.push(createGateBlockGuardHook({
+      advisoryBus: deps.advisoryBus,
+      drainBlockedKinds: deps.drainGateBlockedKinds,
+    }))
+  }
+
+  // Wrapup-Anxiety Guard: postTurn hook — 收尾/新会话话术 × 实测 ctxRatio
+  // 对照。ratio < 0.5 时注入硬数据反驳（焦虑话术不基于物理事实）；
+  // 0.5-0.7 灰区不注入；≥0.7 不触发（context-pressure 的收束建议合法）。
+  // Gated by RIVET_WRAPUP_ANXIETY_GUARD (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.getStreamedText && deps.getEstimatedTokens && deps.getContextWindow
+    && process.env.RIVET_WRAPUP_ANXIETY_GUARD !== '0') {
+    hooks.push(createWrapupAnxietyGuardHook({
+      advisoryBus: deps.advisoryBus,
+      getStreamedText: deps.getStreamedText,
       getEstimatedTokens: deps.getEstimatedTokens,
       getContextWindow: deps.getContextWindow,
     }))

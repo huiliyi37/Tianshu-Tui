@@ -104,10 +104,33 @@ describe('buildKickActions', () => {
     assert.ok(actions.injectedMessage.includes('拆分任务'))
   })
 
-  it('includes context pressure suggestion when pressure high', () => {
+  // ── 焦虑供给源修正：pressure 是复合值，上下文声称只能来自实测 ctxRatio ──
+
+  it('does NOT claim context pressure when ctxRatio is unknown (pressure is composite)', () => {
     const s = makeSensorium({ pressure: 0.8 })
     const actions = buildKickActions(s, '/project')
-    assert.ok(actions.injectedMessage.includes('上下文'))
+    assert.ok(!actions.injectedMessage.includes('上下文'), 'must not manufacture context anxiety without real ratio')
+    assert.ok(actions.injectedMessage.includes('复合压力'), 'should name the real pressure source instead')
+  })
+
+  it('does NOT claim context pressure when real ctxRatio is low', () => {
+    const s = makeSensorium({ pressure: 0.8 })
+    const actions = buildKickActions(s, '/project', [], 0.1)
+    assert.ok(!actions.injectedMessage.includes('上下文'), 'pressure=0.8 but ctx=10% — no context claim')
+    assert.ok(actions.injectedMessage.includes('复合压力'))
+  })
+
+  it('claims context pressure only when real ctxRatio >= 0.7', () => {
+    const s = makeSensorium({ pressure: 0.8 })
+    const actions = buildKickActions(s, '/project', [], 0.75)
+    assert.ok(actions.injectedMessage.includes('上下文使用率 75%'), 'cites the measured ratio')
+  })
+
+  it('no pressure line at all when pressure is low regardless of ctxRatio', () => {
+    const s = makeSensorium({ pressure: 0.3 })
+    const actions = buildKickActions(s, '/project', [], 0.9)
+    assert.ok(!actions.injectedMessage.includes('上下文使用率'))
+    assert.ok(!actions.injectedMessage.includes('复合压力'))
   })
 
   it('always includes re-read original request suggestion', () => {

@@ -390,6 +390,9 @@ export class AgentLoop {
   prevAnchorGraphHash: string | null = null
   /** Previous turn's streamed assistant text for dedup-guard P5. */
   prevStreamedText: string | null = null
+  /** W2 被拦不弃守护：本 turn 被闸门拦截的事件 kind 列表（pipeline onGateBlocked
+   *  累计，gate-block-guard hook postTurn drain 清零）。 */
+  gateBlockedKinds: string[] = []
   pressureMonitor: PressureMonitor
   sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   turnBudget: TurnBudget = createTurnBudget(0)

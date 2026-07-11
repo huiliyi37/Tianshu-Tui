@@ -11,6 +11,10 @@ export interface KickRuntimeHookDeps {
   wasConvergenceTriggered?: () => boolean
   /** A1: unified advisory bus — kick messages route through Bus instead of injectUserMessage. */
   advisoryBus?: AdvisoryBus
+  /** 焦虑供给源修正：实测 ctxRatio 计算源。缺省时 kick 文案不做上下文声称。 */
+  getEstimatedTokens?: () => number
+  /** 焦虑供给源修正：上下文窗口大小。 */
+  getContextWindow?: () => number
 }
 
 export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntimeHook {
@@ -39,7 +43,12 @@ export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntime
         .map(h => h.target)
         .filter((target): target is string => Boolean(target))
 
-      const kickActions = buildKickActions(sensorium, ctx.snapshot.cwd, recentFailed)
+      // 实测 ctxRatio：pressure 是复合值，"上下文快满"的声称只允许来自真实比率。
+      const estimated = deps.getEstimatedTokens?.() ?? 0
+      const window = deps.getContextWindow?.() ?? 0
+      const ctxRatio = estimated > 0 && window > 0 ? estimated / window : undefined
+
+      const kickActions = buildKickActions(sensorium, ctx.snapshot.cwd, recentFailed, ctxRatio)
 
       for (const path of kickActions.deadEndPaths) {
         await deps.deposit({ path, signal: 'dead-end', strength: 0.9 })
