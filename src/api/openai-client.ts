@@ -9,7 +9,7 @@ import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
 import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
-import { debugEnabled, debugLog } from '../utils/debug.js'
+import { debugLog } from '../utils/debug.js'
 import { repairInvalidJsonEscapes } from './json-escape-repair.js'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -1225,15 +1225,20 @@ export class OpenAIClient implements StreamClient {
     }
   }
 
-  /** Always-on warning when a tool call's arguments never became valid JSON. */
+  /** Diagnostic log when a tool call's arguments never became valid JSON.
+   *
+   * Kept debug-only to avoid writing directly to stderr and corrupting the TUI
+   * render (the failure is already surfaced to the model/user through the
+   * `argsTruncated` tool_use block + tool_result error). Offline diagnosis is
+   * still available via the tool-stream JSONL event log and RIVET_DEBUG.
+   */
   private warnToolArgParseFailure(
     buf: { id?: string; function: { name?: string; arguments: string } },
   ): void {
     const msg =
       `[tool-arg-parse-failure] id=${buf.id ?? '?'} name=${buf.function.name ?? '?'}` +
       ` argsLen=${buf.function.arguments.length} args=${JSON.stringify(buf.function.arguments.slice(0, 300))}`
-    if (debugEnabled()) debugLog(msg)
-    else console.warn(msg)
+    debugLog(msg)
   }
 
   /**

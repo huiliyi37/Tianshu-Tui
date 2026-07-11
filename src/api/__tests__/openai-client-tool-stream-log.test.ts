@@ -116,6 +116,32 @@ describe('tool-stream event log (observability)', () => {
     assert.deepEqual(tu.input, {})
   })
 
+  it('final-flush empty does NOT leak [tool-arg-parse-failure] to stderr (TUI safety)', async () => {
+    // The parse failure must be surfaced to the model via the argsTruncated
+    // tool_use block + tool_result error, not by writing directly to stderr
+    // where it corrupts the TUI render.
+    const origDebug = process.env.RIVET_DEBUG
+    delete process.env.RIVET_DEBUG
+    const warns: unknown[][] = []
+    const origConsoleWarn = console.warn
+    console.warn = (...args: unknown[]) => { warns.push(args) }
+    try {
+      await runFrames([
+        frame({ choices: [{ delta: { tool_calls: [
+          { index: 0, id: 'leak-check', type: 'function', function: { name: 'grep', arguments: '{"path":"src",' } },
+        ] }, finish_reason: null }] }),
+        frame({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }),
+      ])
+      const leaked = warns.some(args =>
+        args.some(a => typeof a === 'string' && a.includes('[tool-arg-parse-failure]')),
+      )
+      assert.equal(leaked, false, '[tool-arg-parse-failure] must not be written to console.warn in non-debug mode')
+    } finally {
+      console.warn = origConsoleWarn
+      if (origDebug !== undefined) process.env.RIVET_DEBUG = origDebug
+    }
+  })
+
   it('healthy parse → no argsTruncated marker on the block', async () => {
     const blocks = await runFrames([
       frame({ choices: [{ delta: { tool_calls: [
