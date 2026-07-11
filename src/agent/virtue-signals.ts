@@ -160,7 +160,7 @@ export function detectVirtue(ctx: VirtueContext): VirtueSignal | null {
 
   // ── 礼：boundary-respect ──────────────────────────────────────
   // 写前确认，非礼勿动。检测写操作经过了审批门。
-  if ((ctx.toolName === 'write_file' || ctx.toolName === 'edit_file') && ctx.approvalRequired === true) {
+  if ((ctx.toolName === 'write_file' || ctx.toolName === 'edit_file' || ctx.toolName === 'hash_edit') && ctx.approvalRequired === true) {
     const spec = WUCHANG_THRESHOLDS['boundary-respect']
     if (conf >= spec.threshold) {
       return {

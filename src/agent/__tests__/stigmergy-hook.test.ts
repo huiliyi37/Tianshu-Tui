@@ -32,6 +32,19 @@ function makeHook(options: {
   })
 }
 
+function makeHookWithLedger(options: {
+  deposits: PheromoneDeposit[]
+  queries?: PheromoneQueryResult[]
+}, ledger: any[]) {
+  return createStigmergyRuntimeHook({
+    deposit: async deposit => { options.deposits.push(deposit) },
+    query: async () => options.queries ?? [],
+    getEvidenceState: () => ({ verifications: [] }),
+    setLoadedPheromones: () => {},
+    pendingLedger: { submit: (e: any) => { ledger.push(e) } } as any,
+  })
+}
+
 describe('createStigmergyRuntimeHook', () => {
   it('deposits entry-point after repeated reads without writes', async () => {
     const deposits: PheromoneDeposit[] = []
@@ -148,5 +161,104 @@ describe('createStigmergyRuntimeHook', () => {
     await hook.run(makeContext(), { name: 'read_file', success: true, target: 'src/a.ts' })
 
     assert.deepEqual(refreshed, [queries])
+  })
+
+  // ── 发现二修复后的礼/仁判定 ──
+
+  it('礼: write with approvalRequired=true triggers boundary-respect', async () => {
+    const ledger: any[] = []
+    const hook = makeHookWithLedger({ deposits: [] }, ledger)
+    const ctx = makeContext()
+
+    await hook.run(ctx, {
+      name: 'edit_file', success: true, target: 'src/a.ts',
+      approvalRequired: true,
+    } as any)
+
+    assert.ok(ledger.some((e: any) => e.signal.type === 'boundary-respect'),
+      '礼 should trigger when approvalRequired=true')
+  })
+
+  it('礼: write without approvalRequired does NOT trigger boundary-respect', async () => {
+    const ledger: any[] = []
+    const hook = makeHookWithLedger({ deposits: [] }, ledger)
+    const ctx = makeContext()
+
+    await hook.run(ctx, {
+      name: 'edit_file', success: true, target: 'src/a.ts',
+    } as any)
+
+    assert.ok(!ledger.some((e: any) => e.signal.type === 'boundary-respect'),
+      '礼 should NOT trigger without approvalRequired')
+  })
+
+  it('礼: hash_edit with approvalRequired=true triggers boundary-respect', async () => {
+    const ledger: any[] = []
+    const hook = makeHookWithLedger({ deposits: [] }, ledger)
+    const ctx = makeContext()
+
+    await hook.run(ctx, {
+      name: 'hash_edit', success: true, target: 'src/a.ts',
+      approvalRequired: true,
+    } as any)
+
+    assert.ok(ledger.some((e: any) => e.signal.type === 'boundary-respect'),
+      '礼 should trigger for hash_edit with approvalRequired=true')
+  })
+
+  it('仁: single-question with multiple options triggers (agreedWithUser=false)', async () => {
+    const ledger: any[] = []
+    const hook = makeHookWithLedger({ deposits: [] }, ledger)
+    const ctx = makeContext()
+
+    await hook.run(ctx, {
+      name: 'ask_user_question', success: true,
+      input: { question: 'Which?', options: ['A', 'B', 'C'] },
+    } as any)
+
+    const renEntry = ledger.find((e: any) => e.signal.wuchang === '仁')
+    assert.ok(renEntry, '仁 should trigger for multi-option single question')
+  })
+
+  it('仁: single-question with <=1 option does NOT trigger (confirmative)', async () => {
+    const ledger: any[] = []
+    const hook = makeHookWithLedger({ deposits: [] }, ledger)
+    const ctx = makeContext()
+
+    await hook.run(ctx, {
+      name: 'ask_user_question', success: true,
+      input: { question: 'OK?', options: ['Yes'] },
+    } as any)
+
+    const renEntry = ledger.find((e: any) => e.signal.wuchang === '仁')
+    assert.equal(renEntry, undefined, '仁 should NOT trigger for confirmative single-option question')
+  })
+
+  it('仁: multi-question (questions[]) with multi-option items triggers', async () => {
+    const ledger: any[] = []
+    const hook = makeHookWithLedger({ deposits: [] }, ledger)
+    const ctx = makeContext()
+
+    await hook.run(ctx, {
+      name: 'ask_user_question', success: true,
+      input: { questions: [{ prompt: 'Q1', options: ['A', 'B'] }] },
+    } as any)
+
+    const renEntry = ledger.find((e: any) => e.signal.wuchang === '仁')
+    assert.ok(renEntry, '仁 should trigger for multi-question with multi-option items')
+  })
+
+  it('仁: multi-question (questions[]) with single-option items does NOT trigger', async () => {
+    const ledger: any[] = []
+    const hook = makeHookWithLedger({ deposits: [] }, ledger)
+    const ctx = makeContext()
+
+    await hook.run(ctx, {
+      name: 'ask_user_question', success: true,
+      input: { questions: [{ prompt: 'Q1', options: ['OK'] }] },
+    } as any)
+
+    const renEntry = ledger.find((e: any) => e.signal.wuchang === '仁')
+    assert.equal(renEntry, undefined, '仁 should NOT trigger for confirmative multi-question')
   })
 })

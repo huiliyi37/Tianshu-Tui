@@ -5,7 +5,10 @@ import type { VirtueContext, VirtueSignal, VirtuePendingLedger } from '../virtue
 import type { AdvisoryBus } from '../advisory-bus.js'
 import type { AdvisoryExpectation } from '../advisory-bus.js'
 
-/** 效用谓词 v1 映射——按美德类型构建 utilityExpect（12.1 表） */
+/** 效用谓词 v1 映射——按美德类型构建 utilityExpect（12.1 表）。
+ *  智和信不通过 readback 核销（智走自持逻辑，信走 settlement hook 直接触发），
+ *  它们的 utilityExpect 永远不会被 wasSatisfiedBetween 读取——settlement hook
+ *  对这两种类型有专门的判定分支。 */
 function utilityExpectFor(type: VirtueSignal['type']): AdvisoryExpectation {
   switch (type) {
     case 'independent-judgment': // 仁：ask 后出现探针/写工具
@@ -14,10 +17,10 @@ function utilityExpectFor(type: VirtueSignal['type']): AdvisoryExpectation {
       return { kind: 'tool_appears', tools: ['read_file', 'edit_file'], withinTurns: 2 }
     case 'boundary-respect': // 礼：审批后的写操作通过后续验证——收紧为 verify_attempted（问题3修复）
       return { kind: 'verify_attempted', withinTurns: 3 }
-    case 'strategic-awareness': // 智：不走 readback（settlement hook 自持逻辑判定）
-      return { kind: 'tool_appears', tools: [], withinTurns: 2 }
-    case 'cache-loyalty': // 信：会话级信号，不走 readback
-      return { kind: 'tool_appears', tools: [], withinTurns: 1 }
+    // 智/信：utilityExpect 不会被 readback 读取——settlement hook 有专门分支。
+    // 返回最小占位（settlement drainSettled 仍需结构合法的 entry）。
+    default:
+      return { kind: 'tool_appears', tools: ['_unused'], withinTurns: 1 }
   }
 }
 
@@ -94,15 +97,22 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
       // ── 美德信号（阳面）：五常映射 → positive pheromone ──
       // 万物负阴而抱阳。CVM 的 trap（阴）需要 virtue（阳）来平衡。
       // 检测到美德时 deposit positive pheromone，让信任随积累而增长。
+
+      // 仁判定：ask 是否为确认性提问（单题 options≤1 或多题所有子题 options≤1）
+      const askInput = tool.input as Record<string, unknown> | undefined
+      const singleOpts = askInput?.options
+      const multiQ = askInput?.questions
+      const isConfirmativeAsk = Array.isArray(singleOpts)
+        ? singleOpts.length <= 1
+        : Array.isArray(multiQ)
+          ? (multiQ as Array<{ options?: unknown[] }>).every(q => !Array.isArray(q.options) || q.options.length <= 1)
+          : true
+
       const virtueCtx: VirtueContext = {
         toolName: tool.name,
         toolTarget: tool.target,
         toolSuccess: tool.success,
-        // 仁：ask_user_question 仅在非确认性提问时视为质疑。
-        // 确认性提问（options 只有一个或无 options）不触发仁。
-        agreedWithUser: tool.name === 'ask_user_question'
-          ? (tool.input?.options && Array.isArray(tool.input.options) && tool.input.options.length <= 1 ? true : false)
-          : undefined,
+        agreedWithUser: tool.name === 'ask_user_question' ? isConfirmativeAsk : undefined,
         // 义：run_tests 在 agent 主动调用时默认视为 proactive
         userRequested: tool.name === 'run_tests' ? false : undefined,
         confidence: ctx.snapshot.vigor?.tonic ?? 0.6,
