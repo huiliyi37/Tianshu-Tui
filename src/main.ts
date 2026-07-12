@@ -559,6 +559,10 @@ async function main() {
     // 工具执行期间直接推 overlay 可能与 turn 收尾渲染冲突，defer 到下一事件循环。
     setImmediate(() => tuiApp.openPlanApprovalPanel(info))
   }
+  // ask_user_question 含单选选项时自动弹出选择面板（替代手动输入编号）。
+  ctx!.agent.onAskUserQuestionRequested = (info) => {
+    setImmediate(() => tuiApp.openAskUserQuestionPanel(info))
+  }
   // TUI 默认钉住天枢星域(与桌面端 auto 形成对比):在首个请求前设置,仅构建
   // 初始 frozenBase,无缓存代价;setSessionDomain 后 bindSessionDomain 的
   // `!== undefined` 守卫会跳过按任务的 auto 关键词绑定。尊重 STAR_SOUL 总开关;
@@ -843,6 +847,16 @@ async function main() {
         ]
         return { title: '计划审批 / Plan Approval', choices: entries, selectedIndex: 0 }
       }
+      if (tuiApp.choicePanelKind === 'ask-user-question') {
+        const q = tuiApp.pendingAskUserQuestion
+        if (!q) return { title: '', choices: [], selectedIndex: 0 }
+        const entries = q.options.map((opt, i) => ({
+          id: String(i),
+          label: opt,
+          description: '',
+        }))
+        return { title: q.prompt, choices: entries, selectedIndex: 0 }
+      }
       const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
       const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
       const entries: Array<{ id: string; label: string; description: string; recommended?: boolean; current?: boolean }> = [
@@ -1024,6 +1038,19 @@ async function main() {
           ctx!.agent.exitPlanMode()
           deps.notify(doc ? `计划「${info.title}」已驳回，已退出 plan mode。` : '已退出 plan mode。')
         })
+      }
+      return
+    }
+    if (tuiApp.choicePanelKind === 'ask-user-question') {
+      // 问题选项面板回调：把选中的选项文本作为用户消息提交。
+      const q = tuiApp.pendingAskUserQuestion
+      tuiApp.choicePanelKind = 'effort' // reset
+      tuiApp.pendingAskUserQuestion = undefined
+      if (!q) return
+      const idx = Number(id)
+      const option = Number.isFinite(idx) ? q.options[idx] : undefined
+      if (option) {
+        tuiApp.submitText(option)
       }
       return
     }

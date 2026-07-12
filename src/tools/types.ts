@@ -79,6 +79,17 @@ export interface PlanSubmittedInfo {
   options?: Array<{ label: string; description: string }>
 }
 
+/** Ask-user-question surfaced to the TUI so it can render an arrow-key selector
+ *  instead of requiring the user to type a number or option text. */
+export interface AskUserQuestionInfo {
+  questions: Array<{
+    id: string
+    prompt: string
+    options: string[]
+    allowMultiple: boolean
+  }>
+}
+
 /** U6/C1: a step input passed through onPlanSteps to seed/sync PlanExecutionTrace. */
 export interface PlanStepInput {
   /** Optional stable identifier (e.g. todo id). */
@@ -114,6 +125,8 @@ export interface ToolCallParams {
   onPlanClosed?: (input: PlanClosedInput) => void
   /** Notify the UI that a plan was submitted for approval so it can prompt the user. */
   onPlanSubmitted?: (info: PlanSubmittedInfo) => void
+  /** Notify the UI that the agent asked the user a question with selectable options. */
+  onAskUserQuestion?: (info: AskUserQuestionInfo) => void
   /** Evidence-gated plan closure (防伪闭环): assess the real delivery gate over
    *  owned/dirty files. Pre-bound to the session's evidence + ownership. Absent
    *  in worker/non-agent contexts → plan_close falls back to trusting the

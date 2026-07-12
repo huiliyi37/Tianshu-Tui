@@ -305,6 +305,7 @@ return new ToolExecutionController({
       onPlanSteps: steps => self.capturePlanSteps(steps),
       onPlanClosed: input => self.handlePlanClosed(input),
       onPlanSubmitted: info => self.onPlanApprovalRequested?.(info),
+      onAskUserQuestion: info => self.onAskUserQuestionRequested?.(info),
       assessDelivery: self.config.deliveryGateV2
         ? files => self.config.deliveryGateV2!(files)
         : undefined,

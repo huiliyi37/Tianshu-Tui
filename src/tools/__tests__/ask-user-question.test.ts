@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { ASK_USER_QUESTION_TOOL, parseAskUserQuestions, renderAskUserQuestionText } from '../ask-user-question.js'
-import type { ToolCallParams } from '../types.js'
+import type { ToolCallParams, AskUserQuestionInfo } from '../types.js'
 
 function params(input: Record<string, unknown>): ToolCallParams {
   return { input, cwd: process.cwd() } as unknown as ToolCallParams
@@ -77,6 +77,40 @@ describe('ASK_USER_QUESTION_TOOL', () => {
     assert.ok(result.uiContent!.includes('1. Enter plan mode?'))
     assert.ok(result.uiContent!.includes('2. Which scope?'))
     assert.ok(result.uiContent!.includes('pick more than one'))
+  })
+
+  it('calls onAskUserQuestion callback for single-select options', async () => {
+    let called: AskUserQuestionInfo | null = null
+    await ASK_USER_QUESTION_TOOL.execute({
+      input: { question: 'Which provider?', options: ['OpenAI', 'Anthropic'] },
+      cwd: process.cwd(),
+      toolUseId: 'test',
+      onAskUserQuestion: (info: AskUserQuestionInfo) => { called = info },
+    } as unknown as ToolCallParams)
+    assert.ok(called)
+    assert.equal((called as AskUserQuestionInfo).questions.length, 1)
+    assert.equal((called as AskUserQuestionInfo).questions[0]!.prompt, 'Which provider?')
+    assert.deepEqual((called as AskUserQuestionInfo).questions[0]!.options, ['OpenAI', 'Anthropic'])
+    assert.equal((called as AskUserQuestionInfo).questions[0]!.allowMultiple, false)
+  })
+
+  it('does not call onAskUserQuestion for multi-select or open-ended questions', async () => {
+    let called = false
+    await ASK_USER_QUESTION_TOOL.execute({
+      input: { question: 'Which features?', options: ['Auth', 'Billing'], allow_multiple: true },
+      cwd: process.cwd(),
+      toolUseId: 'test',
+      onAskUserQuestion: () => { called = true },
+    } as unknown as ToolCallParams)
+    assert.equal(called, false)
+
+    await ASK_USER_QUESTION_TOOL.execute({
+      input: { question: 'Open ended?' },
+      cwd: process.cwd(),
+      toolUseId: 'test',
+      onAskUserQuestion: () => { called = true },
+    } as unknown as ToolCallParams)
+    assert.equal(called, false)
   })
 })
 

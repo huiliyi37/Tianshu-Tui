@@ -137,6 +137,11 @@ Do NOT use this to bounce a decision back when the user asked for YOUR analysis,
     //            additionally receives a structured user_question SSE for the card).
     const rendered = renderAskUserQuestionText(questions)
     const hasOptions = questions.some(q => q.options.length > 0)
+    // Surface selectable questions to the TUI so it can open an arrow-key picker.
+    const hasSelectable = questions.some(q => q.options.length > 0 && !q.allowMultiple)
+    if (hasSelectable) {
+      params.onAskUserQuestion?.({ questions })
+    }
     const content = hasOptions
       ? `[Awaiting your response…]\n\nThe user was shown these numbered options:\n${rendered}\n\nA bare number in the reply refers to this numbering.`
       : '[Awaiting your response…]'

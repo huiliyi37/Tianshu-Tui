@@ -207,6 +207,8 @@ export class AgentLoop {
   onPlanModeChange?: (state: PlanModeState) => void
   /** TUI 回调：计划提交待审批时弹出审批面板（替代手动输入 /plan-approve）。 */
   onPlanApprovalRequested?: (info: import('../tools/types.js').PlanSubmittedInfo) => void
+  /** TUI 回调：agent 向用户提问含选项时弹出选择面板（替代手动输入选项编号）。 */
+  onAskUserQuestionRequested?: (info: import('../tools/types.js').AskUserQuestionInfo) => void
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
   failureJournal: FailureJournal = createFailureJournal()

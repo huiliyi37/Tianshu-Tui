@@ -52,7 +52,7 @@ import { buildWorkerDetailContent } from '../worker-detail.js'
 import { renderSidePanel, resolveSidePanelWidth, SIDE_PANEL_MIN_COLUMNS, type SidePanelInput } from '../side-panel.js'
 import { loadWorkerSession } from '../../agent/worker-session-persist.js'
 import type { TasksFilter } from '../format/overlay.js'
-import type { PlanSubmittedInfo } from '../../tools/types.js'
+import type { PlanSubmittedInfo, AskUserQuestionInfo } from '../../tools/types.js'
 import {
   delegationObjectiveFromInput,
   delegationProfileFromInput,
@@ -393,10 +393,12 @@ export class TuiApp {
    * 退出 plan 时原样恢复；`/yes` 等在 planning 期间改审批时同步更新此 stash。
    */
   approvalModeBeforePlan: string | null = null
-  /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) / 'plan-approval' (计划审批) */
-  choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' | 'plan-approval' = 'effort'
+  /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) / 'plan-approval' (计划审批) / 'ask-user-question' (问题选项选择) */
+  choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' | 'plan-approval' | 'ask-user-question' = 'effort'
   /** 当前待审批计划信息（plan-approval 面板使用）。 */
   pendingPlanApproval: PlanSubmittedInfo | undefined = undefined
+  /** 当前待回答的可选择问题（ask-user-question 面板使用）。 */
+  pendingAskUserQuestion: AskUserQuestionInfo['questions'][number] | undefined = undefined
   /** GlanceBar 信息密度（Wave 2 减密）：compact 默认四项，`/glance full` 切全量。 */
   glanceDensity: 'compact' | 'full' = 'compact'
   /** 可脚本化 statusline 文本（ui.statusLine.command stdout 首行），渲染在输入框上方。 */
@@ -1239,6 +1241,16 @@ export class TuiApp {
   openPlanApprovalPanel(info: PlanSubmittedInfo): void {
     this.choicePanelKind = 'plan-approval'
     this.pendingPlanApproval = info
+    this.activateOverlay('choice-panel')
+  }
+
+  /** 打开用户问题选项选择面板（ask_user_question 含单选选项时自动调用）。 */
+  openAskUserQuestionPanel(info: AskUserQuestionInfo): void {
+    // 目前仅处理第一个非多选的可选择问题；多问题/多选场景保持文本输入。
+    const question = info.questions.find(q => q.options.length > 0 && !q.allowMultiple)
+    if (!question) return
+    this.choicePanelKind = 'ask-user-question'
+    this.pendingAskUserQuestion = question
     this.activateOverlay('choice-panel')
   }
 
