@@ -62,6 +62,23 @@ test('welcome is borderless compact header with no shortcut matrix', () => {
   assert.ok(!joined.includes('Ctrl+'), 'no shortcut matrix')
 })
 
+test('welcome shows session prefix and reasoning effort', () => {
+  const lines = formatWelcome({
+    modelName: 'over2',
+    cwd: '/tmp/x/proj',
+    sessionId: '8938a88f-c865-4c49-9c75-2c69e5b49e24',
+    priorMsgCount: 0,
+    columns: 120,
+    rows: 40,
+    version: '2.18.0',
+    approvalMode: 'yolo',
+    reasoningEffort: 'high',
+  }, theme)
+  const joined = lines.join('\n')
+  assert.ok(joined.includes('8938a88f'), 'should show session prefix')
+  assert.ok(joined.includes('◎high'), 'should show reasoning effort')
+})
+
 test('cwd under home is tildified', () => {
   const home = homedir()
   const lines = formatWelcome({

@@ -34,6 +34,8 @@ export interface FormatWelcomeInput {
   version?: string | null
   /** 当前权限模式（auto-safe / manual / dangerously-skip-permissions …）。 */
   approvalMode?: string
+  /** 当前推理 effort 档位（low / medium / high / max）。 */
+  reasoningEffort?: string
 }
 
 /** 3 行头 + 前后空行 2 行 + 输入框 3 行 + 终端底部状态栏/呼吸余量 ~2 行。 */
@@ -61,9 +63,18 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     ? `${input.sessionId.slice(0, 8)} (${input.priorMsgCount} prior)`
     : input.sessionId.slice(0, 8)
 
+  const effortColor = input.reasoningEffort === 'max' ? theme.secondary
+    : input.reasoningEffort === 'high' ? theme.primary
+    : input.reasoningEffort === 'off' ? theme.dim
+    : theme.muted
+  const effortShort = input.reasoningEffort === 'medium' ? 'med' : input.reasoningEffort
+  const effortLabel = input.reasoningEffort
+    ? ` ${color('·', theme.dim)} ${color(`◎${effortShort}`, effortColor)}`
+    : ''
+
   const compactLine = (): string => {
     const numeric = input.numericId ? ` · #${input.numericId}` : ''
-    const line = `${color('✦', theme.primary, { bold: true })} ${color('天枢', theme.primary, { bold: true })}${numeric}  ${color('·', theme.dim)}  ${color(input.modelName, theme.secondary)}  ${color('·', theme.dim)}  ${color(dir + '/', theme.muted)}  ${color('·', theme.dim)}  ${color(session, theme.muted)}  ${color('·', theme.dim)}  ${color('/help', theme.secondary)}`
+    const line = `${color('✦', theme.primary, { bold: true })} ${color('天枢', theme.primary, { bold: true })}${numeric}  ${color('·', theme.dim)}  ${color(input.modelName, theme.secondary)}${effortLabel}  ${color('·', theme.dim)}  ${color(dir + '/', theme.muted)}  ${color('·', theme.dim)}  ${color(session, theme.muted)}  ${color('·', theme.dim)}  ${color('/help', theme.secondary)}`
     return truncateToWidth(line, cols)
   }
 
@@ -98,8 +109,8 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   const out: string[] = [
     '',
     `${star}${brand}${version}`,
-    `${indent}${input.modelName}${modeSuffix}`,
-    `${indent}${color(tildify(input.cwd), theme.muted)}`,
+    `${indent}${color(input.modelName, theme.secondary)}${effortLabel}${modeSuffix}`,
+    `${indent}${color(session, theme.dim)} ${color('·', theme.dim)} ${color(tildify(input.cwd), theme.muted)}`,
     '',
   ]
 

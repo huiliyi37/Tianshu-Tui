@@ -66,6 +66,8 @@ import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/proj
 import { checkForUpdate, formatUpdateBanner, detectInstallRoot, getCurrentVersion } from './tui/updater.js'
 import { detectEnv, formatGitMissingBanner } from './tools/env-check.js'
 import { computeUsageCost, findModelPricing } from './utils/pricing.js'
+import { TuiPerfMonitor, isTuiPerfEnabled } from './tui/engine/perf-monitor.js'
+import { runTuiShutdownSequence } from './tui/engine/shutdown-sequence.js'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -95,6 +97,7 @@ const skipWelcome = args.includes('--skip-welcome')
 let app: TuiApp | null = null
 let ctx: BootstrapContext | null = null
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null
+let perfSummaryFlush: Promise<void> = Promise.resolve()
 
 /** advisory status 通道环形缓冲（最近 N 条,cockpit advisory 面板展示） */
 const ADVISORY_STATUS_BUFFER_MAX = 20
@@ -102,38 +105,52 @@ const advisoryStatusNotices: string[] = []
 
 let isShuttingDown = false
 
-function shutdown(code: number = 0) {
+async function shutdown(code: number = 0): Promise<void> {
   if (isShuttingDown) return
   isShuttingDown = true
 
-  app?.dispose()
-
-  // Delegate core cleanup to bootstrap shutdown handler
-  if (ctx) {
-    try { ctx.shutdown() } catch { /* already handled */ }
-    // Post-teardown resume hint: printed AFTER TUI dispose so it lands on the
-    // normal scrollback and survives the exit — the session id would otherwise
-    // be undiscoverable ("how do I reconnect?").
-    try {
-      const summary = formatExitSummary(ctx.persist.loadMetadata(), ctx.sessionId)
-      if (summary) process.stdout.write(`\n${summary}\n`)
-    } catch { /* best-effort */ }
-  }
-
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval)
-    heartbeatInterval = null
-  }
-
-  if (process.stdin.isTTY && process.stdin.setRawMode) {
-    process.stdin.setRawMode(false)
-  }
-  killAllSync()
-  process.exit(code)
+  await runTuiShutdownSequence({
+    dispose: () => { app?.dispose() },
+    flushTelemetry: () => perfSummaryFlush,
+    cleanup: [
+      () => {
+        // Delegate core cleanup to bootstrap shutdown handler.
+        ctx?.shutdown()
+      },
+      () => {
+        // Post-teardown resume hint: printed AFTER TUI dispose so it lands on the
+        // normal scrollback and survives the exit — the session id would otherwise
+        // be undiscoverable ("how do I reconnect?").
+        if (ctx) {
+          const summary = formatExitSummary(ctx.persist.loadMetadata(), ctx.sessionId)
+          if (summary) process.stdout.write(`\n${summary}\n`)
+        }
+      },
+      () => {
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval)
+          heartbeatInterval = null
+        }
+      },
+      () => {
+        if (process.stdin.isTTY && process.stdin.setRawMode) {
+          process.stdin.setRawMode(false)
+        }
+      },
+      () => { killAllSync() },
+    ],
+    exit: exitCode => process.exit(exitCode),
+    reportErrors: error => {
+      try {
+        const details = error.errors.map(item => item instanceof Error ? item.message : String(item)).join('; ')
+        process.stderr.write(`[shutdown] ${error.errors.length} cleanup error(s): ${details}\n`)
+      } catch { /* reporting must not block exit */ }
+    },
+  }, code)
 }
 
-process.on('SIGINT', () => shutdown(0))
-process.on('SIGTERM', () => shutdown(0))
+process.on('SIGINT', () => { void shutdown(0) })
+process.on('SIGTERM', () => { void shutdown(0) })
 
 // Last-resort sync hook: even if shutdown() threw or an uncaughtException
 // skipped it, the process-exit event still fires (unless SIGKILL). MCP child
@@ -501,7 +518,7 @@ async function main() {
   if (forceRecoveryCli) {
     const { runRecoveryCli } = await import('./recovery-cli.js')
     await runRecoveryCli(ctx)
-    shutdown(0)
+    await shutdown(0)
     return
   }
 
@@ -527,6 +544,10 @@ async function main() {
     history: loadHistory(),
     contextWindow: currentModel?.contextWindow,
     gitBranch,
+    perfMonitor: new TuiPerfMonitor({ enabled: isTuiPerfEnabled(args) }),
+    onPerfSummary: summary => {
+      perfSummaryFlush = ctx!.flushTuiPerfSummary(summary)
+    },
   })
 
   // Register overlays with real data
@@ -1091,7 +1112,7 @@ async function main() {
     const path = agent.getActivePlanFilePath()
     if (!path) return null
     try {
-      const abs = pathJoin(agent.config.cwd, path)
+      const abs = pathJoin(agent.cwd, path)
       const bytes = statSync(abs).size
       return { path, bytes }
     } catch {
@@ -1196,7 +1217,7 @@ async function main() {
 
   // ── Wire exit ────────────────────────────────────────────────
   app.onExit(() => {
-    shutdown(0)
+    void shutdown(0)
   })
 
   // ── First-run template prompt (before clearing screen) ───────
@@ -1282,6 +1303,7 @@ async function main() {
       compact: existingMsgCount > 0,
       version: installRoot ? getCurrentVersion(installRoot) : null,
       approvalMode: ctx.config.agent.approval ?? 'auto-safe',
+      reasoningEffort: ctx.agent.getReasoningEffort() ?? ctx.agent.config.reasoningEffort,
     }, theme)
     for (const line of welcomeLines) {
       stdout.write(line + '\n')
@@ -1362,5 +1384,5 @@ main().catch((err) => {
   if ((err as Error).stack) {
     process.stderr.write((err as Error).stack! + '\n')
   }
-  shutdown(1)
+  void shutdown(1)
 })
