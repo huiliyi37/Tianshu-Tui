@@ -305,11 +305,11 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   longcat: {
     key: 'longcat',
     label: 'LongCat (美团龙猫)',
-    defaultModelId: 'LongCat-2.0-Preview',
+    defaultModelId: 'LongCat-2.0',
     provider: {
       name: 'longcat',
       apiKeyEnv: 'LONGCAT_API_KEY',
-      baseUrl: 'https://api.longcat.chat/openai',
+      baseUrl: 'https://api.longcat.chat/openai/v1',
       protocol: 'openai',
       capabilities: {
         cacheControl: false,
@@ -323,7 +323,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       maxTokens: 131072,
       models: [
         {
-          id: 'LongCat-2.0-Preview',
+          id: 'LongCat-2.0',
           alias: 'longcat',
           contextWindow: 1_000_000,
           maxTokens: 131072,
