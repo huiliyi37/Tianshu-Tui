@@ -205,6 +205,8 @@ export class AgentLoop {
    *  覆盖模型自主 enter_mode 的场景：session-manager 自己触发的切换它已经知道，
    *  工具触发的切换只能靠这条回调出圈。agent 创建后由外部回填。 */
   onPlanModeChange?: (state: PlanModeState) => void
+  /** TUI 回调：计划提交待审批时弹出审批面板（替代手动输入 /plan-approve）。 */
+  onPlanApprovalRequested?: (info: import('../tools/types.js').PlanSubmittedInfo) => void
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
   failureJournal: FailureJournal = createFailureJournal()

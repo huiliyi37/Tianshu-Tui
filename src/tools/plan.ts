@@ -525,6 +525,8 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
     const optionsHint = submitOptions && submitOptions.length >= 2
       ? `\nOptions recorded (${submitOptions.length}). User can choose at approval: ${submitOptions.map(o => `\`${o.label}\``).join(', ')}`
       : ''
+    // Notify the TUI so it can prompt the user with an arrow-key approval panel.
+    params.onPlanSubmitted?.({ slug, title: title.trim(), options: submitOptions })
     return {
       content: [
         `✅ Plan submitted: **${title.trim()}**`,
@@ -535,11 +537,8 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
         scaleNote,
         cheapModelNote,
         '',
-        `The user will review and respond with:`,
-        `- \`/plan-approve ${slug}\` — approve and start execution`,
-        `- \`/plan-approve ${slug} <option-label>\` — approve a specific approach`,
-        `- \`/plan-reject ${slug} <feedback>\` — reject with feedback for revision`,
-        `- \`/plan-list\` — list all plans`,
+        `An approval panel has opened for the user. They can choose: approve, reject and revise, or reject and exit plan mode.`,
+        `You can also still use: /plan-approve ${slug}, /plan-reject ${slug}, or /plan-list.`,
         '',
         `**Wait here — do not proceed until the user approves.**`,
       ].filter(Boolean).join('\n'),

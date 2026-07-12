@@ -50,7 +50,7 @@ import { configureSpinnerVerbs, setReducedMotion } from './tui/format/spinner-st
 import { StatusLineRunner } from './tui/statusline.js'
 import { buildVerboseTranscript } from './tui/transcript-verbose.js'
 import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
-import { listPlansSync } from './plan/plan-store.js'
+import { listPlansSync, rejectPlan } from './plan/plan-store.js'
 import type { PlanPickerEntry } from './tui/format/overlay.js'
 import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
@@ -554,6 +554,11 @@ async function main() {
   // app 在此处必定非 null（前有 app = new TuiApp 赋值，无重赋 null 路径）
   const tuiApp = app!
   tuiApp.setApprovalMode(ctx!.config.agent.approval ?? 'auto-safe')
+  // Plan submit 成功后自动弹出审批面板（替代手动 /plan-approve）。
+  ctx!.agent.onPlanApprovalRequested = (info) => {
+    // 工具执行期间直接推 overlay 可能与 turn 收尾渲染冲突，defer 到下一事件循环。
+    setImmediate(() => tuiApp.openPlanApprovalPanel(info))
+  }
   // TUI 默认钉住天枢星域(与桌面端 auto 形成对比):在首个请求前设置,仅构建
   // 初始 frozenBase,无缓存代价;setSessionDomain 后 bindSessionDomain 的
   // `!== undefined` 守卫会跳过按任务的 auto 关键词绑定。尊重 STAR_SOUL 总开关;
@@ -828,6 +833,16 @@ async function main() {
         ]
         return { title: '确认 YOLO 模式 / Confirm YOLO', choices: entries, selectedIndex: 0 }
       }
+      if (tuiApp.choicePanelKind === 'plan-approval') {
+        const info = tuiApp.pendingPlanApproval
+        const title = info?.title ?? '待审批计划'
+        const entries = [
+          { id: 'approve', label: '批准并执行', description: `执行计划「${title}」`, recommended: true },
+          { id: 'reject', label: '驳回修订', description: '标记为 REJECTED，agent 可继续修改' },
+          { id: 'reject-exit', label: '驳回并退出计划模式', description: '驳回计划并退出 plan mode' },
+        ]
+        return { title: '计划审批 / Plan Approval', choices: entries, selectedIndex: 0 }
+      }
       const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
       const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
       const entries: Array<{ id: string; label: string; description: string; recommended?: boolean; current?: boolean }> = [
@@ -982,6 +997,33 @@ async function main() {
         applyPermission('dangerously-skip-permissions')
       } else {
         tuiApp.commitStatic('已取消 — 权限模式未改变。')
+      }
+      return
+    }
+    if (tuiApp.choicePanelKind === 'plan-approval') {
+      // 计划审批面板回调：approve / reject / reject-exit。
+      const info = tuiApp.pendingPlanApproval
+      tuiApp.choicePanelKind = 'effort' // reset
+      tuiApp.pendingPlanApproval = undefined
+      if (!info) return
+      const deps = {
+        cwd: ctx!.agent.cwd,
+        agent: ctx!.agent,
+        submitToAgent: (prompt: string) => { tuiApp.submitText(prompt) },
+        notify: (content: string, isError?: boolean) => tuiApp.commitStatic(content, { isError }),
+      }
+      if (id === 'approve') {
+        const option = info.options?.find(o => o.label.includes('Recommended')) ?? info.options?.[0]
+        void approvePlanAndKickoff(deps, info.slug, option?.label)
+      } else if (id === 'reject') {
+        void rejectPlan(ctx!.agent.cwd, info.slug).then(doc => {
+          deps.notify(doc ? `计划「${info.title}」已驳回，可继续修订。` : '计划不存在或已被删除。')
+        })
+      } else if (id === 'reject-exit') {
+        void rejectPlan(ctx!.agent.cwd, info.slug).then(doc => {
+          ctx!.agent.exitPlanMode()
+          deps.notify(doc ? `计划「${info.title}」已驳回，已退出 plan mode。` : '已退出 plan mode。')
+        })
       }
       return
     }
@@ -1159,7 +1201,7 @@ async function main() {
   // ── Wire agent → TuiApp ──────────────────────────────────────
   // 消息队列已收编进 TuiApp：streaming 时 Enter 由 TuiApp 入队（steerBuffer），
   // onSteerDrain 由 TuiApp callbacks 真实 drain，此处无需外层 override。
-  app.onSubmit((text) => {
+  app.onSubmit((text, images) => {
     const trimmed = text.trim()
     if (!trimmed) return
 
@@ -1203,7 +1245,7 @@ async function main() {
     // isStreaming 标志——正是「双门异步清除时机不同」造成 Esc 后死会话的根因。
     // run 生命周期回调（完成/错误/中止）由 bridge 桥接到 TuiApp，并带世代守卫。
     const callbacks = wrapCallbacksWithTuiApp(app!)
-    ctx!.agent.run(resolved.prompt, callbacks).catch((err) => {
+    ctx!.agent.run(resolved.prompt, callbacks, images).catch((err) => {
       process.stderr.write(`[T9] Agent error: ${(err as Error)?.message}\n`)
     })
   })

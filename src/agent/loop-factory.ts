@@ -116,7 +116,7 @@ return new TurnStreamController({
             .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
         }).catch(() => {})
       },
-      recordTurnCache: (turn, usage) => {
+      recordTurnCache: (turn, usage, streamObservability) => {
         self.session.recordTurnCache(turn, usage)
         const hitRateNum = usage.input_tokens > 0
           ? (usage.cache_read_input_tokens ?? 0) / usage.input_tokens * 100
@@ -125,6 +125,7 @@ return new TurnStreamController({
         const sid = self.config.sessionId ?? 'anon'
 
         // ── P2-6 breadcrumbs: make every break attributable in one read ──
+        const observability = self.turnCacheObservability.consumeForRequest(streamObservability)
         const entry: Record<string, unknown> = {
           t: Date.now(), turn,
           // model 让每条记录可溯源到具体模型 — /model 运行时切换后，
@@ -138,6 +139,7 @@ return new TurnStreamController({
           // output-token optimization — lets us see whether the spend is in
           // thinking (reasoning) or final prose (text) before any intervention.
           output: usage.output_tokens,
+          ...observability,
         }
         // tokenEfficiency from convergence detector: cross-validate with cache hit rate
         const te = self.latestConvergenceResult?.signals.tokenEfficiency
@@ -302,6 +304,7 @@ return new ToolExecutionController({
       onLeaveMark: mark => self.captureLeaveMark(mark),
       onPlanSteps: steps => self.capturePlanSteps(steps),
       onPlanClosed: input => self.handlePlanClosed(input),
+      onPlanSubmitted: info => self.onPlanApprovalRequested?.(info),
       assessDelivery: self.config.deliveryGateV2
         ? files => self.config.deliveryGateV2!(files)
         : undefined,
@@ -352,6 +355,12 @@ return new ToolExecutionController({
         }
       },
       writeTelemetry: (record) => { self.telemetryWriter.write(record) },
+      beginToolBatchObservability: measured => { self.turnCacheObservability.beginToolBatch(measured) },
+      recordSanitizedOutput: (raw, sanitized, filterId) => {
+        self.turnCacheObservability.recordSanitizedOutput(raw, sanitized, filterId)
+      },
+      recordToolUiEvent: () => { self.turnCacheObservability.recordToolUiEvent() },
+      endToolBatchObservability: () => { self.turnCacheObservability.endToolBatch() },
     })
 }
 export function buildRuntimeSnapshot(self: AgentLoop, extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {

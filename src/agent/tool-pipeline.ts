@@ -291,6 +291,8 @@ export interface ToolPipelineDeps {
   onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
+  /** Notify the UI that a plan was submitted for approval so it can prompt the user. */
+  onPlanSubmitted?: (info: import('../tools/types.js').PlanSubmittedInfo) => void
   /** Evidence-gated plan closure: assess the real delivery gate over owned/dirty files. */
   assessDelivery?: (dirtyFiles?: string[]) => import('./delivery-gate-v2.js').DeliveryGateResult
   /** 主动 plan mode：plan action=enter_mode → AgentLoop.enterPlanMode（仅主控有）。 */
@@ -676,6 +678,7 @@ export async function executeToolUse(
     onLeaveMark: deps.onLeaveMark,
     onPlanSteps: deps.onPlanSteps,
     onPlanClosed: deps.onPlanClosed,
+    onPlanSubmitted: deps.onPlanSubmitted,
     assessDelivery: deps.assessDelivery,
     enterPlanMode: deps.enterPlanMode,
     getVerificationEvidence: deps.getVerificationEvidence,

@@ -18,6 +18,7 @@ import { OverlayEngine } from './overlay-engine.js'
 import { InputHandler, type KeyPress } from './input-handler.js'
 import { ResizeHandler } from './resize-handler.js'
 import { InputLine } from './input-line.js'
+import { loadImageAttachment, looksLikeImagePath, MAX_IMAGES } from './image-attach.js'
 import { WriteBatcher } from './write-batcher.js'
 import { StreamRenderer } from './stream-renderer.js'
 import type { TuiPerfMonitor, TuiPerfSummary } from './perf-monitor.js'
@@ -51,6 +52,7 @@ import { buildWorkerDetailContent } from '../worker-detail.js'
 import { renderSidePanel, resolveSidePanelWidth, SIDE_PANEL_MIN_COLUMNS, type SidePanelInput } from '../side-panel.js'
 import { loadWorkerSession } from '../../agent/worker-session-persist.js'
 import type { TasksFilter } from '../format/overlay.js'
+import type { PlanSubmittedInfo } from '../../tools/types.js'
 import {
   delegationObjectiveFromInput,
   delegationProfileFromInput,
@@ -61,6 +63,7 @@ import { formatSpinnerStatus, formatTurnWorkSummary } from '../format/spinner-st
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
+import { resolve } from 'node:path'
 import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect } from '../format/overlay.js'
@@ -372,7 +375,7 @@ export class TuiApp {
   readonly callbacks: AgentCallbacks
 
   // External hooks
-  private onSubmitCallback?: (text: string) => void
+  private onSubmitCallback?: (text: string, images?: string[]) => void
   private onAbortCallback?: () => void
   private onExitCallback?: () => void
   /** External slash command handler. If set, it is tried before the registry. */
@@ -390,8 +393,10 @@ export class TuiApp {
    * 退出 plan 时原样恢复；`/yes` 等在 planning 期间改审批时同步更新此 stash。
    */
   approvalModeBeforePlan: string | null = null
-  /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) */
-  choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' = 'effort'
+  /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) / 'plan-approval' (计划审批) */
+  choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' | 'plan-approval' = 'effort'
+  /** 当前待审批计划信息（plan-approval 面板使用）。 */
+  pendingPlanApproval: PlanSubmittedInfo | undefined = undefined
   /** GlanceBar 信息密度（Wave 2 减密）：compact 默认四项，`/glance full` 切全量。 */
   glanceDensity: 'compact' | 'full' = 'compact'
   /** 可脚本化 statusline 文本（ui.statusLine.command stdout 首行），渲染在输入框上方。 */
@@ -474,8 +479,14 @@ export class TuiApp {
       history: options.history,
       placeholder: '询问任何事，或 / 唤起命令',
       onTabComplete: () => this.handleTabComplete(),
-      onSubmit: (text) => {
-        const trimmed = text.trim()
+      onSubmit: (text, images) => {
+        let trimmed = text.trim()
+        const hasImages = images && images.length > 0
+        // 允许只发图片：空文本时补一个占位 prompt，让后端能触发 run。
+        if (!trimmed && hasImages) {
+          text = '📎 图片消息'
+          trimmed = text
+        }
 
         // User-initiated submit is real progress: clear the goal-mode watchdog
         // auto-continue counter so a later legitimate stall gets the full
@@ -495,7 +506,7 @@ export class TuiApp {
         if (this.viewingWorkerId && trimmed && !trimmed.startsWith('/')) {
           const target = this.viewingWorkerId
           const delivered = this.workerSteer?.(target, trimmed) ?? false
-          this.commitUserPrompt(`[→ ${shortOrderLabel(target)}] ${trimmed}`)
+          this.commitUserPrompt(`[→ ${shortOrderLabel(target)}] ${trimmed}`, images)
           if (!delivered) {
             this.commitStatic(color('⚠ 该子代理已结束或不支持直达，消息未送达', this.theme.warning))
           }
@@ -506,7 +517,7 @@ export class TuiApp {
         // W4a: agent 执行中 → 入队（turn 边界 drain 注入）。
         // 同时立即 commit 用户气泡到 scrollback，确保用户始终能看到自己说了什么。
         if (this.agentBusy && trimmed) {
-          this.commitUserPrompt(trimmed)
+          this.commitUserPrompt(trimmed, images)
           this.steerBuffer.push(trimmed)
           this.renderLive()
           return
@@ -538,7 +549,7 @@ export class TuiApp {
         // Commit user message to scrollback（steer 已单独 commit 时跳过）
         if (trimmed) {
           if (!steerMerged) {
-            this.commitUserPrompt(submitText.trim())
+            this.commitUserPrompt(submitText.trim(), images)
           }
           // 新 run 启动前丢弃上一 run 未 finalize 的流式残留：blockWriter 缓冲
           // 与 streamRenderer pending 若不清，会把上一轮文字追加进新轮输出。
@@ -550,7 +561,7 @@ export class TuiApp {
         // Reset turn timer for the new turn
         this.state.turnStartMs = Date.now()
         this.streamRenderController.lastActivityMs = Date.now()
-        this.onSubmitCallback?.(submitText)
+        this.onSubmitCallback?.(submitText, images)
       },
     })
 
@@ -621,7 +632,7 @@ export class TuiApp {
     // Wire bracketed paste: 整段插入光标处，批渲染（避免逐 chunk 全量重写）
     // 审批/意图/overlay 模式下不处理粘贴——粘贴文本会"穿透"到输入框，
     // 退出模式后出现幽灵文本。
-    this.input.onPaste((text) => {
+    this.input.onPaste(async (text) => {
       const mode = this.input.getMode()
       if (mode !== 'input') return
       // Connect overlay active → route paste into connectInput, not the main input box
@@ -636,6 +647,28 @@ export class TuiApp {
       }
       // Other overlays active → don't paste into main input
       if (this.overlay.isActive()) return
+
+      const trimmed = text.trim()
+      // 粘贴内容看起来像图片路径 → 尝试加载为附件；失败则回退为普通文本。
+      if (trimmed && looksLikeImagePath(trimmed) && !trimmed.includes('\n')) {
+        if (this.inputLine.images.length >= MAX_IMAGES) {
+          this.commitStatic(color(`⚠ 最多附加 ${MAX_IMAGES} 张图片`, this.theme.warning))
+          this.renderLive()
+          return
+        }
+        try {
+          const attachment = await loadImageAttachment(resolve(trimmed))
+          this.inputLine.addImage(attachment.dataUrl)
+          this.writeBatcher.schedule()
+          return
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          this.commitStatic(color(`⚠ 图片加载失败: ${message}`, this.theme.warning))
+          this.renderLive()
+          // fallthrough to normal text paste
+        }
+      }
+
       this.inputLine.insertText(text)
       this.inputController.fileCompletion = null
       this.writeBatcher.schedule()
@@ -1006,8 +1039,8 @@ export class TuiApp {
     this.renderLive()
   }
 
-  /** 设置提交回调（用户按 Enter 后触发） */
-  onSubmit(callback: (text: string) => void): void {
+  /** 设置提交回调（用户按 Enter 后触发）。images 为当前输入框携带的图片附件 data URL 列表。 */
+  onSubmit(callback: (text: string, images?: string[]) => void): void {
     this.onSubmitCallback = callback
   }
 
@@ -1200,6 +1233,13 @@ export class TuiApp {
     this.connectError = undefined
     this.input.setMode('input')
     this.activateOverlay('connect')
+  }
+
+  /** 打开计划审批选择面板（plan action=submit 成功后自动调用）。 */
+  openPlanApprovalPanel(info: PlanSubmittedInfo): void {
+    this.choicePanelKind = 'plan-approval'
+    this.pendingPlanApproval = info
+    this.activateOverlay('choice-panel')
   }
 
   /** connect overlay 渲染数据（由 registerOverlays 的 render 闭包读取）。 */
@@ -1962,15 +2002,15 @@ export class TuiApp {
    * where SlashRouter already has a resolved prompt from resolveAppPromptInput.
    * Commits the user prompt to scrollback and fires onSubmitCallback.
    */
-  submitText(text: string): void {
-    this.commitUserPrompt(text)
+  submitText(text: string, images?: string[]): void {
+    this.commitUserPrompt(text, images)
     this.blockWriter.discard()
     this.streamRenderer.reset()
     this.streamRenderController.assistantHeaderDone = false
     this.agentBusy = true
     this.state.turnStartMs = Date.now()
     this.streamRenderController.lastActivityMs = Date.now()
-    this.onSubmitCallback?.(text)
+    this.onSubmitCallback?.(text, images)
   }
 
   /**
@@ -1998,10 +2038,13 @@ export class TuiApp {
    * 所有 submit 路径（idle / slash passthrough / steer）共用此入口，
    * 确保用户始终能在终端历史中看到自己输入的内容。
    */
-  private commitUserPrompt(content: string): void {
+  private commitUserPrompt(content: string, images?: string[]): void {
     this.commitAbove(() => {
+      const imageNote = images && images.length > 0
+        ? `\n${color(`📎 ${images.length} image${images.length > 1 ? 's' : ''} attached`, this.theme.muted)}`
+        : ''
       const formatted = formatUserMessage({
-        content: content.trim(),
+        content: content.trim() + imageNote,
         width: this.columns,
       }, this.theme)
       this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
@@ -3491,7 +3534,14 @@ export class TuiApp {
       }
       lines.push({ text: botBorder })
 
-      // 5a. 权限模式行（CC parity：输入框正下方常驻，单一事实来源）。
+      // 5a. 图片附件摘要（输入框正下方、权限模式行上方）
+      const imageCount = this.inputLine.images.length
+      if (imageCount > 0) {
+        const imageLabel = `📎 ${imageCount} image${imageCount > 1 ? 's' : ''}`
+        lines.push({ text: this.clampLine(color(imageLabel, this.theme.muted)) })
+      }
+
+      // 5b. 权限模式行（CC parity：输入框正下方常驻，单一事实来源）。
       //     slash 提示打开时让位，避免与候选列表叠在一起。
       if (!isSlash) {
         lines.push({ text: this.clampLine(formatPermissionModeLine({ approvalMode: this._approvalMode, planMode: planModeActive }, this.theme)) })

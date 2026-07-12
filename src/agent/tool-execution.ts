@@ -108,6 +108,8 @@ export interface ToolExecutionDeps {
   onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
+  /** Notify the UI that a plan was submitted for approval so it can prompt the user. */
+  onPlanSubmitted?: (info: import('../tools/types.js').PlanSubmittedInfo) => void
   /** Evidence-gated plan closure: assess the real delivery gate over owned/dirty files. */
   assessDelivery?: (dirtyFiles?: string[]) => import('./delivery-gate-v2.js').DeliveryGateResult
   /** 主动 plan mode：plan action=enter_mode → AgentLoop.enterPlanMode（仅主控有）。 */
@@ -128,6 +130,10 @@ export interface ToolExecutionDeps {
   onTddBlocked?: (target?: string) => void
   /** 遥测写入(缺口 B 输出裁剪计数等)。 */
   writeTelemetry?: (record: { kind: string } & Record<string, unknown>) => void
+  beginToolBatchObservability?: (outputMeasured: boolean) => void
+  recordSanitizedOutput?: (rawContent: string, sanitizedContent: string, filterId?: string) => void
+  recordToolUiEvent?: () => void
+  endToolBatchObservability?: () => void
 }
 
 export interface ToolExecBatchInput {
@@ -238,6 +244,7 @@ export class ToolExecutionController {
       onLeaveMark: this.deps.onLeaveMark,
       onPlanSteps: this.deps.onPlanSteps,
       onPlanClosed: this.deps.onPlanClosed,
+      onPlanSubmitted: this.deps.onPlanSubmitted,
       assessDelivery: this.deps.assessDelivery,
       enterPlanMode: this.deps.enterPlanMode,
       getVerificationEvidence: this.deps.getVerificationEvidence,
@@ -274,6 +281,18 @@ export class ToolExecutionController {
   }
 
   async executeBatch(input: ToolExecBatchInput): Promise<ToolExecBatchResult> {
+    const outputSanitizeEnabled = process.env.RIVET_OUTPUT_SANITIZE !== '0'
+    this.deps.beginToolBatchObservability?.(outputSanitizeEnabled)
+    try {
+      const callbacks: AgentCallbacks = this.deps.recordToolUiEvent
+      ? {
+          ...input.callbacks,
+          onToolResult: (...args) => {
+            this.deps.recordToolUiEvent?.()
+            input.callbacks.onToolResult(...args)
+          },
+        }
+      : input.callbacks
     const toolResults: ContentBlock[] = []
     let checkpointCreatedThisTurn = input.checkpointCreatedThisTurn
     let traceStore = input.traceStore
@@ -306,7 +325,7 @@ export class ToolExecutionController {
           batch.map(({ tu }) => executeToolUse(
             tu,
             this.buildDeps({ traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, abortSignal: input.abortSignal }),
-            input.callbacks,
+            callbacks,
             input.turn,
             checkpointCreatedThisTurn,
           )),
@@ -329,7 +348,7 @@ export class ToolExecutionController {
         const result = await executeToolUse(
           tu,
           this.buildDeps({ traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, abortSignal: input.abortSignal }),
-          input.callbacks,
+          callbacks,
           input.turn,
           checkpointCreatedThisTurn,
         )
@@ -537,7 +556,7 @@ export class ToolExecutionController {
     // 缺口 B 输出噪声裁剪:session 只存裁剪版。必须在这里(所有分类器/修复
     // 提示/artifact 拦截/lossy guard 之后、存入历史之前)——它们依赖原始输出。
     // UI 回调(onToolResult)在管线内已收到全文,保真不受影响。
-    if (process.env.RIVET_OUTPUT_SANITIZE !== '0') {
+    if (outputSanitizeEnabled) {
       let totalTrimmed = 0
       const filters = new Set<string>()
       for (let i = 0; i < toolResults.length; i++) {
@@ -546,6 +565,7 @@ export class ToolExecutionController {
         const tu = input.toolUses.find(t => t.id === tr.tool_use_id)
         if (!tu) continue
         const { content, trimmedBytes, filterName } = sanitizeToolOutput(tu.name, tu.input, tr.content)
+        this.deps.recordSanitizedOutput?.(tr.content, content, filterName)
         if (trimmedBytes > 0) {
           toolResults[i] = { ...tr, content }
           totalTrimmed += trimmedBytes
@@ -556,7 +576,6 @@ export class ToolExecutionController {
         this.deps.writeTelemetry?.({ kind: 'output-sanitize', turn: this.deps.getSessionTurnCount(), trimmedBytes: totalTrimmed, filters: [...filters] })
       }
     }
-
     this.deps.addToolResults(toolResults)
 
     // Vision channel: forward tool-carried screenshots to the model as a
@@ -655,6 +674,9 @@ export class ToolExecutionController {
       return n + (result && 'is_error' in result && result.is_error === true ? 1 : 0)
     }, 0)
 
-    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, endTurn: endTurn || undefined, toolCount: input.toolUses.length, errorCount }
+      return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, endTurn: endTurn || undefined, toolCount: input.toolUses.length, errorCount }
+    } finally {
+      this.deps.endToolBatchObservability?.()
+    }
  }
 }

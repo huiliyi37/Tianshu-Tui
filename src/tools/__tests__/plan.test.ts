@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PLAN_TOOL, checkPlanScale, PLAN_SCALE_TASK_THRESHOLD } from '../plan.js'
 import { parsePlanOptions, parsePlanModel } from '../../plan/plan-store.js'
+import type { PlanSubmittedInfo } from '../../tools/types.js'
 
 describe('plan tool submit', () => {
   let dir = ''
@@ -124,6 +125,36 @@ describe('plan tool submit', () => {
     assert.ok(written.includes('# Concrete Plan'))
     assert.ok(written.includes('flowchart TD'))
     assert.ok(written.includes('src/agent/loop.ts:120'))
+  })
+
+  it('calls onPlanSubmitted callback with slug and title on success', async () => {
+    const plan = [
+      '## 根因分析',
+      '循环条件在边界情况下未重置。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A[输入] --> B{边界?}',
+      '    B -->|是| C[重置计数器]',
+      '    B -->|否| D[继续]',
+      '```',
+      '',
+      '修改 `src/foo.ts`。',
+    ].join('\n') + FALSIFICATION
+
+    let submitted: PlanSubmittedInfo | null = null
+    const result = await PLAN_TOOL.execute({
+      cwd: dir,
+      input: { action: 'submit', title: 'Callback Plan', plan },
+      toolUseId: 'test-tool-use',
+      onPlanSubmitted: (info: PlanSubmittedInfo) => { submitted = info },
+    } as any)
+    assert.ok(!result.isError)
+    assert.ok(result.content.includes('Plan submitted'))
+    assert.ok(submitted)
+    assert.equal((submitted as PlanSubmittedInfo).slug, 'callback-plan')
+    assert.equal((submitted as PlanSubmittedInfo).title, 'Callback Plan')
   })
 
   it('submits from active plan file when plan field is omitted', async () => {
