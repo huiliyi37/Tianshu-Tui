@@ -1469,6 +1469,10 @@ export class AgentLoop {
         const abs = join(this.cwd, draft)
         if (existsSync(abs) && readFileSync(abs, 'utf-8').trim() === '') rmSync(abs)
       } catch { /* best-effort cleanup */ }
+      // Drop the draft from the task ledger so it is never treated as an owned
+      // file at delivery/commit time. The draft is a transient planning artifact;
+      // the canonical plan lives in .rivet/plans/<slug>.md once submitted.
+      this.config.taskLedger?.removeEventsByPath(draft)
     }
     this.markSkillCompleted(WRITING_PLANS_SKILL)
   }

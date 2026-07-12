@@ -202,6 +202,24 @@ describe('write_file tool — blind-overwrite guard', () => {
     }
   })
 
+  it('exempts the active plan-mode draft from the blind-overwrite guard', async () => {
+    // Plan-mode drafts are created empty by the system; writing the first
+    // content should not require a pointless read_file of the empty file.
+    const relDraft = '.rivet/plans/draft-1234567890123.md'
+    const file = join(TEST_DIR, relDraft)
+    mkdirSync(join(TEST_DIR, '.rivet', 'plans'), { recursive: true })
+    writeFileSync(file, '')
+    const result = await WRITE_FILE_TOOL.execute({
+      ...makeParams({
+        file_path: file,
+        content: '# Plan\n\nFirst draft content.\n',
+      }),
+      activePlanFilePath: relDraft,
+    })
+    assert.ok(!result.isError, `plan draft write must not be blocked: ${result.content}`)
+    assert.equal(readFileSync(file, 'utf-8'), '# Plan\n\nFirst draft content.\n')
+  })
+
   it('rolls back overwrite that introduces a fatal Python syntax error', async () => {
     const file = join(TEST_DIR, 'valid.py')
     const original = 'def foo():\n    return 1\n'

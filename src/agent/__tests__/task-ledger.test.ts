@@ -150,4 +150,20 @@ describe('task-ledger — task event recording and query', () => {
     assert.equal(ledger.getVerificationStatus(), 'verified')
     assert.equal(ledger.getVerifications().length, 0)
   })
+
+  it('removeEventsByPath drops only events for the given path', () => {
+    const ledger = createTaskLedger({ taskId })
+    ledger.record({ type: 'file_read', path: 'a.ts' })
+    ledger.record({ type: 'file_write', path: 'a.ts' })
+    ledger.record({ type: 'file_write', path: 'b.ts' })
+    ledger.record({ type: 'file_read', path: '.rivet/plans/draft-1.md' })
+    ledger.record({ type: 'file_write', path: '.rivet/plans/draft-1.md' })
+
+    ledger.removeEventsByPath('.rivet/plans/draft-1.md')
+
+    const events = ledger.getEvents()
+    assert.equal(events.length, 3)
+    assert.ok(events.every(e => e.path !== '.rivet/plans/draft-1.md'))
+    assert.deepEqual(ledger.getOwnedFiles().sort(), ['a.ts', 'b.ts'])
+  })
 })

@@ -75,6 +75,8 @@ export interface TaskLedgerSummary {
 export interface TaskLedger {
   record(event: Omit<TaskLedgerEvent, 'timestamp'>): void
   getEvents(): ReadonlyArray<TaskLedgerEvent>
+  /** Remove all events associated with a specific path (e.g. a discarded plan draft). */
+  removeEventsByPath(path: string): void
   getOwnedFiles(): string[]
   getVerifications(): ReadonlyArray<TaskLedgerEvent>
   getVerificationStatus(): DeliveryVerificationLevel
@@ -93,6 +95,14 @@ export function createTaskLedger(opts: { taskId: string }): TaskLedger {
 
   function getEvents(): ReadonlyArray<TaskLedgerEvent> {
     return events
+  }
+
+  function removeEventsByPath(path: string): void {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]!.path === path) {
+        events.splice(i, 1)
+      }
+    }
   }
 
   function getOwnedFiles(): string[] {
@@ -200,6 +210,7 @@ export function createTaskLedger(opts: { taskId: string }): TaskLedger {
   return {
     record,
     getEvents,
+    removeEventsByPath,
     getOwnedFiles,
     getVerifications,
     getVerificationStatus,
