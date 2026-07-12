@@ -67,3 +67,93 @@ describe('GET /config/computer-use', () => {
     assert.equal(res.status, 401)
   })
 })
+
+describe('GET /config/vision-model', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-vision-routes-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('returns null when the bridge is unset', async () => {
+    writeConfig(home, { enabled: false })
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router('GET', '/config/vision-model', {}, AUTH)
+    assert.equal(res.status, 200)
+    const body = res.body as { config: unknown }
+    assert.equal(body.config, null)
+  })
+
+  it('rejects unauthorized requests', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router('GET', '/config/vision-model', {}, {})
+    assert.equal(res.status, 401)
+  })
+})
+
+describe('PUT /config/vision-model', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-vision-routes-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('persists a vision model config and returns it', async () => {
+    writeConfig(home, { enabled: false })
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router(
+      'PUT',
+      '/config/vision-model',
+      { config: { provider: 'minimax', model: 'MiniMax-M3', maxTokens: 512 } },
+      AUTH,
+    )
+    assert.equal(res.status, 200)
+    const body = res.body as { ok: boolean; config: { provider: string; model: string; maxTokens: number } }
+    assert.equal(body.ok, true)
+    assert.deepEqual(body.config, { provider: 'minimax', model: 'MiniMax-M3', maxTokens: 512 })
+  })
+
+  it('clears the bridge when config is null', async () => {
+    writeConfig(home, { enabled: false })
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    await router('PUT', '/config/vision-model', { config: { provider: 'minimax', model: 'MiniMax-M3' } }, AUTH)
+    const res = await router('PUT', '/config/vision-model', { config: null }, AUTH)
+    assert.equal(res.status, 200)
+    const body = res.body as { ok: boolean; config: unknown }
+    assert.equal(body.config, null)
+  })
+
+  it('rejects an invalid payload', async () => {
+    writeConfig(home, { enabled: false })
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router(
+      'PUT',
+      '/config/vision-model',
+      { config: { provider: 'minimax', maxTokens: 512 } },
+      AUTH,
+    )
+    assert.equal(res.status, 400)
+  })
+
+  it('rejects unauthorized requests', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router('PUT', '/config/vision-model', { config: null }, {})
+    assert.equal(res.status, 401)
+  })
+})

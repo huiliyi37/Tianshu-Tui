@@ -31,6 +31,7 @@ import type {
   StorageOptions,
   WorkingTreeResponse,
 } from './types'
+import { perfRecord } from '../state/perf-budget'
 
 export interface RuntimeInfo {
   port: number
@@ -328,7 +329,7 @@ export async function rivetFetch(path: string, init: RequestInit = {}): Promise<
   } catch (err) {
     // Port gone (sidecar down/restarted) — invalidate so the next call
     // re-resolves a fresh handle instead of retrying the dead one.
-    clearRuntimeCache()
+    if (!(err instanceof Error && err.name === 'AbortError')) clearRuntimeCache()
     throw err
   }
   // Token rotated after a sidecar restart — drop the stale handle; the caller's
@@ -345,8 +346,8 @@ async function readErrorBody(res: Response): Promise<string> {
   return ''
 }
 
-async function apiGet<T>(path: string): Promise<T> {
-  const res = await rivetFetch(path)
+async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await rivetFetch(path, signal ? { signal } : undefined)
   if (!res.ok) {
     const detail = await readErrorBody(res)
     throw new Error(detail || `GET ${path} -> ${res.status}`)
@@ -453,8 +454,18 @@ export type SessionSearchHit = {
 }
 
 /** Search user/assistant text across all active sessions' transcripts (q >= 2 chars). */
-export async function searchSessionContent(q: string): Promise<SessionSearchHit[]> {
-  const { results } = await apiGet<{ results: SessionSearchHit[] }>(`/sessions/search?q=${encodeURIComponent(q)}`)
+export async function searchSessionContent(q: string, signal?: AbortSignal): Promise<SessionSearchHit[]> {
+  const { results, meta } = await apiGet<{
+    results: SessionSearchHit[]
+    meta?: { durationMs: number; scannedFiles: number }
+  }>(
+    `/sessions/search?q=${encodeURIComponent(q)}`,
+    signal,
+  )
+  if (meta) {
+    perfRecord('sessionSearch.duration', meta.durationMs)
+    perfRecord('sessionSearch.scannedFiles', meta.scannedFiles)
+  }
   return results
 }
 
@@ -1073,7 +1084,7 @@ export interface ProviderListItem {
   baseUrl: string
   isDefault: boolean
   keyStatus: { source: 'inline' | 'env' | 'none'; ref: string }
-  models: { id: string; alias?: string; contextWindow: number; maxTokens: number }[]
+  models: { id: string; alias?: string; contextWindow: number; maxTokens: number; supportsVision?: boolean }[]
   isPreset: boolean
   allowProFallback: boolean
 }
@@ -1286,6 +1297,25 @@ export function setCheckpointConfig(
   input: { checkpointEveryTurns?: number },
 ): Promise<{ ok: boolean } & CheckpointConfig> {
   return apiPut<{ ok: boolean } & CheckpointConfig>('/config/checkpoint', input)
+}
+
+// ── Vision bridge (multimodal image recognition) ──────────────────────
+
+export interface VisionModelConfig {
+  provider: string
+  model: string
+  prompt?: string
+  maxTokens: number
+}
+
+export function getVisionModelConfig(): Promise<{ config: VisionModelConfig | null }> {
+  return apiGet<{ config: VisionModelConfig | null }>('/config/vision-model')
+}
+
+export function setVisionModelConfig(
+  config: VisionModelConfig | null,
+): Promise<{ ok: boolean; config: VisionModelConfig | null }> {
+  return apiPut<{ ok: boolean; config: VisionModelConfig | null }>('/config/vision-model', { config })
 }
 
 // ── Codex 式常驻目录授权（agent.permissions.additional*Dirs）───────────

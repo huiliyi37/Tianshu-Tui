@@ -20,6 +20,7 @@ import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref,
 import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettingsManager } from '../components/McpSettings'
+import { VisionModelSettings } from '../components/VisionModelSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
 import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, getProjectDocs, setProjectDocs, deactivateLicense, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { useProLicense } from '../lib/use-activation-gate'
@@ -300,6 +301,13 @@ export function SettingsSurface() {
                 <p className="meta">{t('computerUse.desc')}</p>
               </div>
               <ComputerUseSettingsManager />
+            </section>
+            <section className="integration-card">
+              <div className="integration-card-header">
+                <h4>{t('visionModel.title')}</h4>
+                <p className="meta">{t('visionModel.desc')}</p>
+              </div>
+              <VisionModelSettings />
             </section>
           </div>
         )}

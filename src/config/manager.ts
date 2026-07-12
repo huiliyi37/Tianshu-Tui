@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
+import { z } from 'zod'
 import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, envSchema, uiSchema, permissionsSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
@@ -417,6 +418,47 @@ export function setCheckpointConfig(input: {
   }
   saveConfig(cfg)
   return { checkpointEveryTurns: cfg.agent.checkpointEveryTurns }
+}
+
+// --- Vision model bridge (multimodal image recognition) ---
+
+const visionModelConfigSchema = z.object({
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  prompt: z.string().optional(),
+  maxTokens: z.number().int().positive().default(1024),
+})
+
+export interface VisionModelConfigSnapshot {
+  provider: string
+  model: string
+  prompt?: string
+  maxTokens: number
+}
+
+/** Snapshot of the optional vision bridge model for the desktop/TUI settings UI. */
+export function getVisionModelConfig(): VisionModelConfigSnapshot | null {
+  return loadConfig().agent.visionModel ?? null
+}
+
+/**
+ * Persist the vision bridge model to the user global config.
+ * Pass `null` or empty provider/model to clear the bridge.
+ * Takes effect on the next session start.
+ */
+export function setVisionModelConfig(
+  input: { provider?: unknown; model?: unknown; prompt?: unknown; maxTokens?: unknown } | null,
+): VisionModelConfigSnapshot | null {
+  const cfg = loadConfig()
+  if (input === null || input.provider === '' || input.model === '') {
+    delete (cfg.agent as Record<string, unknown>).visionModel
+    saveConfig(cfg)
+    return null
+  }
+  const parsed = visionModelConfigSchema.parse(input)
+  cfg.agent.visionModel = parsed
+  saveConfig(cfg)
+  return parsed
 }
 
 /** Snapshot of the mirror configuration block. */

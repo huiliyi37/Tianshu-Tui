@@ -46,7 +46,10 @@ import {
   startRecording,
   stopRecording,
   distillRecording,
+  getVisionModelConfig,
+  setVisionModelConfig,
   type PrReviewInput,
+  type VisionModelConfig,
 } from '../runtime/client'
 import type { HookEntry, PlanModeState } from '../runtime/types'
 
@@ -72,6 +75,7 @@ export const qk = {
   githubPr: (n: number) => ['github', 'pr', n] as const,
   githubPrDiff: (n: number) => ['github', 'pr', n, 'diff'] as const,
   configProviders: ['config', 'providers'] as const,
+  visionModel: ['config', 'vision-model'] as const,
   workingTree: (sessionId: string) => ['git', 'working-tree', sessionId] as const,
   fileDiff: (path: string, sessionId: string) => ['git', 'diff', sessionId, path] as const,
 }
@@ -442,6 +446,23 @@ export function useConfigProviders() {
     queryKey: qk.configProviders,
     queryFn: listConfigProviders,
     staleTime: 10_000,
+  })
+}
+
+/** Optional multimodal vision bridge model configured in agent.visionModel. */
+export function useVisionModelConfig() {
+  return useQuery({
+    queryKey: qk.visionModel,
+    queryFn: getVisionModelConfig,
+    staleTime: 10_000,
+  })
+}
+
+export function useSetVisionModelConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (config: VisionModelConfig | null) => setVisionModelConfig(config),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.visionModel }),
   })
 }
 

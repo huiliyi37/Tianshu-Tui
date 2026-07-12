@@ -40,6 +40,8 @@ import {
   setCheckpointConfig,
   getPermissionDirs,
   setPermissionDirs,
+  getVisionModelConfig,
+  setVisionModelConfig,
 } from '../config/manager.js'
 import { applyConfiguredPathGrants } from '../tools/path-grants.js'
 import { expandHome } from '../platform.js'
@@ -67,7 +69,7 @@ export interface ProviderListItem {
   baseUrl: string
   isDefault: boolean
   keyStatus: { source: 'inline' | 'env' | 'none'; ref: string }
-  models: { id: string; alias?: string }[]
+  models: { id: string; alias?: string; supportsVision?: boolean }[]
   isPreset: boolean
   allowProFallback: boolean
 }
@@ -88,7 +90,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
           baseUrl: p.baseUrl,
           isDefault: name === defaultName,
           keyStatus: getApiKeyStatus(name),
-          models: p.models.map(m => ({ id: m.id, alias: m.alias, contextWindow: m.contextWindow, maxTokens: m.maxTokens })),
+          models: p.models.map(m => ({ id: m.id, alias: m.alias, contextWindow: m.contextWindow, maxTokens: m.maxTokens, supportsVision: m.supportsVision })),
           isPreset: (providerPresetKeys as string[]).includes(name),
           allowProFallback: p.allowProFallback ?? false,
         })
@@ -401,6 +403,22 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       const removed = revokeApp(app.trim())
       if (!removed) return { status: 404, body: { error: `No grant found for "${app.trim()}"` } }
       return { status: 200, body: { ok: true, grants: listGrantedApps().map(g => ({ app: g.app, grantedAt: g.grantedAt })) } }
+    }, apiToken),
+
+    // Vision bridge model: optional multimodal model used to describe images
+    // when the primary model is not vision-capable.
+    'GET /config/vision-model': withAuth(() => {
+      return { status: 200, body: { config: getVisionModelConfig() } }
+    }, apiToken),
+
+    'PUT /config/vision-model': withAuth((body) => {
+      const { config } = (body ?? {}) as { config?: unknown }
+      try {
+        const saved = setVisionModelConfig(config as Record<string, unknown> | null)
+        return { status: 200, body: { ok: true, config: saved } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
     }, apiToken),
 
     'GET /config/balance': withAuth(async () => {
