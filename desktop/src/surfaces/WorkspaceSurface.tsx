@@ -325,8 +325,6 @@ export function WorkspaceSurface() {
                     onRetryStream={view.retryStream}
                     onToggleDelegation={setShowDelegation}
                     onApproval={handleApproval}
-                    sideChatOpen={sideChatOpen}
-                    onToggleSideChat={() => setSideChatOpen((o) => !o)}
                   />
                 ) : (
                    <div className="empty thread-empty onboard">
@@ -727,7 +725,7 @@ function WorkspaceHeader({
             <span>子代理 {done}/{total}</span>
           </button>
         )}
-        {onThread && (
+        {false && onThread && (
           <button
             className={`header-action-btn ${sideChatOpen ? 'active' : ''}`}
             title="侧边栏对话 (Cmd+;)"
