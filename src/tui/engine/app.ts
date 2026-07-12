@@ -20,6 +20,7 @@ import { ResizeHandler } from './resize-handler.js'
 import { InputLine } from './input-line.js'
 import { WriteBatcher } from './write-batcher.js'
 import { StreamRenderer } from './stream-renderer.js'
+import type { TuiPerfMonitor, TuiPerfSummary } from './perf-monitor.js'
 import { ToolGroupController } from './tool-group-controller.js'
 import { OverlayController } from './overlay-controller.js'
 import { ApprovalIntentController } from './approval-intent-controller.js'
@@ -30,7 +31,7 @@ import { ANSI, color, fg, bg } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
 import { SlashCommandRegistry, type SlashCommandContext } from '../slash-command-registry.js'
-import { getTheme, type RivetTheme } from '../theme.js'
+import { getTheme, getActiveThemeName, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatAskUserQuestion } from '../format/ask-user-question.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
@@ -364,6 +365,8 @@ export class TuiApp {
   private writeBatcher: WriteBatcher
   /** Stream renderer: incremental markdown commit + live tail (W1) */
   private streamRenderer: StreamRenderer
+  /** Increments when StreamRenderer synchronously commits and renders a stable block. */
+  private stableStreamCommitGeneration = 0
 
   // Agent callbacks (aligned to loop-types.ts AgentCallbacks)
   readonly callbacks: AgentCallbacks
@@ -423,6 +426,9 @@ export class TuiApp {
   private inputController = new InputController()
   /** 原始 stdout（用于直接写 DEC 私有模式如 bracketed paste 开关） */
   private stdout: WriteStream
+  private readonly perfMonitor?: TuiPerfMonitor
+  private readonly onPerfSummary?: (summary: TuiPerfSummary) => void
+  private perfSummaryFlushed = false
 
   constructor(options: {
     stdout: WriteStream
@@ -438,6 +444,8 @@ export class TuiApp {
     contextWindow?: number
     /** git 分支名 */
     gitBranch?: string
+    perfMonitor?: TuiPerfMonitor
+    onPerfSummary?: (summary: TuiPerfSummary) => void
   }) {
     // theme is now a dynamic getter — always reads current activeTheme
     this.stdout = options.stdout
@@ -445,6 +453,8 @@ export class TuiApp {
     this.rows = options.rows
     this.metricsGlanceController.contextWindow = options.contextWindow
     this.metricsGlanceController.gitBranch = options.gitBranch
+    this.perfMonitor = options.perfMonitor
+    this.onPerfSummary = options.onPerfSummary
 
     // Initialize engines
     this.commit = new CommitEngine({ stdout: options.stdout })
@@ -541,7 +551,13 @@ export class TuiApp {
     })
 
     // Write batcher: coalesce render calls
-    this.writeBatcher = new WriteBatcher(() => this.renderLive())
+    this.writeBatcher = new WriteBatcher(() => {
+      if (this.perfMonitor?.enabled) {
+        this.perfMonitor.measure('flush', () => this.renderLive())
+      } else {
+        this.renderLive()
+      }
+    })
 
     // Stream renderer: stable markdown prefix → scrollback, tail → live region
     this.streamRenderer = new StreamRenderer({
@@ -556,15 +572,21 @@ export class TuiApp {
       },
       getColumns: () => this.columns,
       getTheme: () => this.theme,
+      getThemeKey: () => getActiveThemeName(),
+      perfMonitor: this.perfMonitor,
     })
 
     // Block stream writer: buffers streaming text into display blocks
     this.blockWriter = new BlockStreamWriter(
       { minChars: 60, maxChars: 200, idleMs: 180 },
       (block: string) => {
-        // Feed stream renderer (commits stable markdown blocks) and schedule render
-        this.streamRenderer.push(block)
-        this.writeBatcher.schedule()
+        // Stable commits synchronously render through commitAbove/flushNow. Only
+        // schedule when the block remains an unstable live tail.
+        if (this.streamRenderer.push(block)) {
+          this.stableStreamCommitGeneration++
+        } else {
+          this.writeBatcher.schedule()
+        }
       },
     )
 
@@ -874,8 +896,14 @@ export class TuiApp {
 
     // Build AgentCallbacks (aligned to loop-types.ts AgentCallbacks)
     this.callbacks = {
-      onTextDelta: (text) => this.handleTextDelta(text),
-      onThinkingDelta: (thinking) => this.handleThinkingDelta(thinking),
+      onTextDelta: (text) => {
+        if (this.perfMonitor?.enabled) this.perfMonitor.measure('delta', () => this.handleTextDelta(text))
+        else this.handleTextDelta(text)
+      },
+      onThinkingDelta: (thinking) => {
+        if (this.perfMonitor?.enabled) this.perfMonitor.measure('delta', () => this.handleThinkingDelta(thinking))
+        else this.handleThinkingDelta(thinking)
+      },
       onToolUse: (id, name, input) => this.handleToolUse(id, name, input),
       onToolResult: (id, name, result, isError, rawPath, uiContent) =>
         this.handleToolResult(id, name, result, isError, rawPath, uiContent),
@@ -922,7 +950,7 @@ export class TuiApp {
         const mapped = knownPhases[phase]
         if (mapped) {
           this.setPhase(mapped)
-          this.renderLive()
+          this.writeBatcher.flushNow()
         }
         // Unknown phases (heartbeat, convergence-warning, etc.) are ignored
         // for the status bar display
@@ -1880,6 +1908,12 @@ export class TuiApp {
     this.stdout.write(ANSI.SHOW_CURSOR)
     this.input.dispose()
     this.resize.dispose()
+    if (!this.perfSummaryFlushed) {
+      this.perfSummaryFlushed = true
+      const summary = this.perfMonitor?.summary()
+      if (summary) this.onPerfSummary?.(summary)
+      this.perfMonitor?.stop()
+    }
   }
 
   /** 将静态文本提交到 scrollback（slash command 输出等） */
@@ -1946,7 +1980,7 @@ export class TuiApp {
     try {
       this.live.clearForCommit()
       write()
-      this.renderLive()
+      this.writeBatcher.flushNow()
     } finally {
       if (canCork) s.uncork!()
     }
@@ -2354,10 +2388,13 @@ export class TuiApp {
     this.setPhase('streaming')
     this.markActivity()
     // Push through block writer (buffers text, emits in display-sized blocks)
+    const stableCommitGeneration = this.stableStreamCommitGeneration
     this.blockWriter.push(text)
     // 逐 delta 触发（microtask 合并）重绘——live tail 拼接 blockWriter.peek() 后，
     // 最新 token 无需等吐块即可逐字滑出（打字机节奏）。与 handleThinkingDelta 同口径。
-    this.writeBatcher.schedule()
+    if (this.stableStreamCommitGeneration === stableCommitGeneration) {
+      this.writeBatcher.schedule()
+    }
   }
 
   private handleThinkingDelta(thinking: string): void {
@@ -2406,7 +2443,7 @@ export class TuiApp {
     if (this.state.thinkingText) {
       this.commitAbove(() => this.commitThinking())
     } else {
-      this.renderLive()
+      this.writeBatcher.flushNow()
     }
   }
   /** 将 read/search 折叠组 buffer 刷新到 scrollback */
@@ -2534,6 +2571,7 @@ export class TuiApp {
       }
       this.toolGroupController.attachResult(id, finalContent, isError)
       // 不单独 commit — 将在 flushToolGroup 时作为组渲染
+      this.writeBatcher.flushNow()
       return
     }
 
@@ -2544,6 +2582,7 @@ export class TuiApp {
         this.flushBashGroup()
       } else {
         this.toolGroupController.attachBashResult(id, finalContent, isError)
+        this.writeBatcher.flushNow()
         return
       }
     }
@@ -2606,7 +2645,7 @@ export class TuiApp {
     // 面板要等下次 ticker 轮询或回合结束才更新——这里一并立即刷新。
     if (name === 'todo' || name === 'plan_task') {
       this.refreshTodos()
-      this.renderLive()
+      this.writeBatcher.flushNow()
     }
   }
 
@@ -2709,7 +2748,6 @@ export class TuiApp {
         this.commit.write({ text: summary, trailingNewline: true })
         this.state.committedCount++
       })
-      this.renderLive()
     } else {
       // Intermediate turn: archive thinking, keep writer alive
       if (this.state.thinkingText) {
@@ -2719,7 +2757,7 @@ export class TuiApp {
       this.state.isThinking = false
       this.state.thinkStartMs = 0
       this.setPhase('waiting')
-      this.renderLive()
+      this.writeBatcher.flushNow()
     }
   }
 
@@ -3034,6 +3072,14 @@ export class TuiApp {
   }
 
   private renderLive(): void {
+    if (this.perfMonitor?.enabled) {
+      this.perfMonitor.measure('renderLive', () => this.renderLiveImpl())
+    } else {
+      this.renderLiveImpl()
+    }
+  }
+
+  private renderLiveImpl(): void {
     // 全屏覆盖层（命令面板 / splash / 详情页）激活时，Live 区域由覆盖层引擎
     // 负责渲染，避免再次绘制内容产生右下角残留。
     if (this.overlay.isActive()) {
@@ -3306,6 +3352,12 @@ export class TuiApp {
     if (this.statusLineText) {
       lines.push({ text: this.clampLine(color(this.statusLineText, this.theme.muted)) })
     }
+    if (this.perfMonitor?.enabled) {
+      const lag = this.perfMonitor.getLoopLagWindow()
+      lines.push({
+        text: this.clampLine(color(`perf loop p99 ${lag.p99Ms}ms · max ${lag.maxMs}ms`, this.theme.muted)),
+      })
+    }
 
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
     if (this.inputController.ctrlCPendingSince > 0) {
@@ -3325,7 +3377,8 @@ export class TuiApp {
       const starDomain = activeDomainId ? (STAR_DOMAINS as any)[activeDomainId] : null
       const uiSep = starDomain?.uiPersona?.separator ?? 'thin'
 
-      const innerWidth = Math.max(20, cols - 6)
+      const W = Math.min(cols - 2, 78)
+      const innerWidth = Math.max(20, W - 4)
       // 静态 chrome（线框字符 + 底边框）只依赖 (separator, innerWidth, borderColor)，
       // 缓存复用，避免每帧 repeat(innerWidth) 重建。
       const { leftBar, rightBar, botBorder } = this.getInputChrome(uiSep, innerWidth, borderColor)

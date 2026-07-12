@@ -52,15 +52,21 @@ function tildify(cwd: string): string {
 }
 
 function makeLogoLines(theme: RivetTheme): string[] {
-  const p = (s: string) => color(s, theme.primary, { bold: true })
+  const moonCol = (s: string) => color(s, theme.secondary)
+  const starCol = (s: string) => color(s, theme.primary, { bold: true })
+  
+  const line1 = `  ${moonCol('▄██')}`
+  const line2 = ` ${moonCol('▐█▀')} ${starCol('✦')}`
+  const line3 = `  ${moonCol('▀██')}`
+  
+  const w1 = displayWidth('  ▄██', WIDE)
+  const w2 = displayWidth(' ▐█▀ ✦', WIDE)
+  const w3 = displayWidth('  ▀██', WIDE)
+  
   return [
-    `   ${p('╱│╲')}   `,
-    `  ${p('─✦─')}   `,
-    `   ${p('╲│╱')}   `,
-    `    ${p('│')}    `,
-    `    ${p('│')}    `,
-    `  ${p('─┼─')}   `,
-    `  ${p('─┴─')}   `,
+    line1 + ' '.repeat(Math.max(0, 10 - w1)),
+    line2 + ' '.repeat(Math.max(0, 10 - w2)),
+    line3 + ' '.repeat(Math.max(0, 10 - w3)),
   ]
 }
 
