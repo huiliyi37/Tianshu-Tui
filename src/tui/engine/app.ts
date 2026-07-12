@@ -399,6 +399,12 @@ export class TuiApp {
   pendingPlanApproval: PlanSubmittedInfo | undefined = undefined
   /** 当前待回答的可选择问题（ask-user-question 面板使用）。 */
   pendingAskUserQuestion: AskUserQuestionInfo['questions'][number] | undefined = undefined
+  /** choice-panel 子模式：select（选选项）/ input（在 overlay 内输入文字）。 */
+  choicePanelSubMode: 'select' | 'input' = 'select'
+  /** choice-panel 输入子模式下的实时缓冲。 */
+  choicePanelInputBuffer: string = ''
+  /** 输入子模式提交时的语义目标。 */
+  choicePanelInputFor?: 'plan-reject-comment' | 'ask-other'
   /** GlanceBar 信息密度（Wave 2 减密）：compact 默认四项，`/glance full` 切全量。 */
   glanceDensity: 'compact' | 'full' = 'compact'
   /** 可脚本化 statusline 文本（ui.statusLine.command stdout 首行），渲染在输入框上方。 */
@@ -1241,6 +1247,9 @@ export class TuiApp {
   openPlanApprovalPanel(info: PlanSubmittedInfo): void {
     this.choicePanelKind = 'plan-approval'
     this.pendingPlanApproval = info
+    this.choicePanelSubMode = 'select'
+    this.choicePanelInputBuffer = ''
+    this.choicePanelInputFor = undefined
     this.activateOverlay('choice-panel')
   }
 
@@ -1251,7 +1260,32 @@ export class TuiApp {
     if (!question) return
     this.choicePanelKind = 'ask-user-question'
     this.pendingAskUserQuestion = question
+    this.choicePanelSubMode = 'select'
+    this.choicePanelInputBuffer = ''
+    this.choicePanelInputFor = undefined
     this.activateOverlay('choice-panel')
+  }
+
+  /** choice-panel 输入子模式渲染数据（由 renderChoicePanel 读取）。 */
+  getChoicePanelInputState(): ChoicePanelData['inputSubMode'] {
+    if (this.choicePanelSubMode !== 'input') return undefined
+    if (this.choicePanelInputFor === 'plan-reject-comment') {
+      return {
+        active: true,
+        label: '驳回反馈',
+        placeholder: '输入反馈后回车（可留空）',
+        value: this.choicePanelInputBuffer,
+      }
+    }
+    if (this.choicePanelInputFor === 'ask-other') {
+      return {
+        active: true,
+        label: '自定义回答',
+        placeholder: '输入你的回答后回车',
+        value: this.choicePanelInputBuffer,
+      }
+    }
+    return undefined
   }
 
   /** connect overlay 渲染数据（由 registerOverlays 的 render 闭包读取）。 */
@@ -1890,6 +1924,42 @@ export class TuiApp {
     if (id === 'choice-panel') {
       const choices = this.overlayController.getData()?.choicePanelData?.().choices ?? []
       const cur = this.overlayController.nav().choicePanelIndex
+
+      // 输入子模式：在 overlay 内直接输入文字（反馈 / 自定义回答）。
+      if (this.choicePanelSubMode === 'input') {
+        if (key.name === 'escape') {
+          this.choicePanelSubMode = 'select'
+          this.choicePanelInputBuffer = ''
+          this.choicePanelInputFor = undefined
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'return') {
+          const targetId = this.choicePanelInputFor === 'plan-reject-comment' ? '__reject_comment__' : '__other__'
+          const exec = this.overlayController.getChoicePanelExec()
+          if (exec) exec(targetId)
+          this.choicePanelSubMode = 'select'
+          this.choicePanelInputBuffer = ''
+          this.choicePanelInputFor = undefined
+          this.choicePanelKind = 'effort'
+          this.pendingPlanApproval = undefined
+          this.pendingAskUserQuestion = undefined
+          this.deactivateOverlay()
+          return true
+        }
+        if (key.name === 'backspace') {
+          this.choicePanelInputBuffer = this.choicePanelInputBuffer.slice(0, -1)
+          this.overlay.rerender()
+          return true
+        }
+        if (this.isPrintableKey(key)) {
+          this.choicePanelInputBuffer += key.char
+          this.overlay.rerender()
+          return true
+        }
+        return true
+      }
+
       if (key.name === 'down') {
         if (choices.length > 0) { this.overlayController.nav().choicePanelIndex = (cur + 1) % choices.length; this.overlay.rerender() }
         return true
@@ -1900,6 +1970,15 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = choices[cur]
+        const inputEntryIds = new Set(['__other__', '__reject_comment__'])
+        if (entry && inputEntryIds.has(entry.id)) {
+          // 进入输入子模式，不关闭 overlay。
+          this.choicePanelSubMode = 'input'
+          this.choicePanelInputBuffer = ''
+          this.choicePanelInputFor = entry.id === '__reject_comment__' ? 'plan-reject-comment' : 'ask-other'
+          this.overlay.rerender()
+          return true
+        }
         if (entry && this.overlayController.getChoicePanelExec()) this.overlayController.getChoicePanelExec()?.(entry.id)
         this.deactivateOverlay()
         return true
@@ -3927,7 +4006,11 @@ export class TuiApp {
     this.overlay.register('choice-panel', {
       render: (_w, _h) => {
         const data = overlayData?.choicePanelData?.() ?? { title: '', choices: [], selectedIndex: 0 }
-        return renderChoicePanel({ ...data, selectedIndex: this.overlayController.nav().choicePanelIndex }, this.columns, this.rows, this.theme)
+        return renderChoicePanel({
+          ...data,
+          selectedIndex: this.overlayController.nav().choicePanelIndex,
+          inputSubMode: this.getChoicePanelInputState(),
+        }, this.columns, this.rows, this.theme)
       },
     })
 

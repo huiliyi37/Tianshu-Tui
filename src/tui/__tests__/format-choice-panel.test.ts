@@ -138,3 +138,37 @@ test('renderChoicePanel: title without question mark renders cleanly', () => {
   assert.ok(plain.includes('星位推荐'))
   assert.ok(plain.includes('天枢'))
 })
+
+// ── Input sub-mode ─────────────────────────────────────────────
+
+test('renderChoicePanel: input sub-mode renders input box and keeps choices visible', () => {
+  const data = makeData({
+    inputSubMode: {
+      active: true,
+      label: '自定义回答',
+      placeholder: '输入你的回答',
+      value: '',
+    },
+  })
+  const lines = renderChoicePanel(data, 60, 20, theme)
+  const plain = lines.map(stripAnsi).join('\n')
+  assert.ok(plain.includes('降级模型'), 'choices still visible')
+  assert.ok(plain.includes('自定义回答'), 'input label present')
+  assert.ok(plain.includes('输入你的回答'), 'placeholder present')
+  assert.ok(plain.includes('↵'), 'submit hint present')
+})
+
+test('renderChoicePanel: input sub-mode renders current value', () => {
+  const data = makeData({
+    inputSubMode: {
+      active: true,
+      label: '驳回反馈',
+      placeholder: '可留空',
+      value: '请补充测试用例',
+    },
+  })
+  const lines = renderChoicePanel(data, 60, 20, theme)
+  const plain = lines.map(stripAnsi).join('\n')
+  assert.ok(plain.includes('请补充测试用例'), 'input value present')
+  assert.ok(!plain.includes('可留空'), 'placeholder hidden when value present')
+})

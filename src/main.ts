@@ -844,8 +844,9 @@ async function main() {
           { id: 'approve', label: '批准并执行', description: `执行计划「${title}」`, recommended: true },
           { id: 'reject', label: '驳回修订', description: '标记为 REJECTED，agent 可继续修改' },
           { id: 'reject-exit', label: '驳回并退出计划模式', description: '驳回计划并退出 plan mode' },
+          { id: '__reject_comment__', label: '驳回并填写反馈…', description: '输入反馈后驳回，agent 可继续修订' },
         ]
-        return { title: '计划审批 / Plan Approval', choices: entries, selectedIndex: 0 }
+        return { title: '计划审批 / Plan Approval', choices: entries, selectedIndex: 0, inputSubMode: tuiApp.getChoicePanelInputState() }
       }
       if (tuiApp.choicePanelKind === 'ask-user-question') {
         const q = tuiApp.pendingAskUserQuestion
@@ -855,7 +856,8 @@ async function main() {
           label: opt,
           description: '',
         }))
-        return { title: q.prompt, choices: entries, selectedIndex: 0 }
+        entries.push({ id: '__other__', label: 'Other… / 自定义输入', description: '直接输入文字回答' })
+        return { title: q.prompt, choices: entries, selectedIndex: 0, inputSubMode: tuiApp.getChoicePanelInputState() }
       }
       const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
       const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
@@ -1038,15 +1040,34 @@ async function main() {
           ctx!.agent.exitPlanMode()
           deps.notify(doc ? `计划「${info.title}」已驳回，已退出 plan mode。` : '已退出 plan mode。')
         })
+      } else if (id === '__reject_comment__') {
+        const comment = tuiApp.choicePanelInputBuffer.trim()
+        void rejectPlan(ctx!.agent.cwd, info.slug).then(doc => {
+          if (!doc) {
+            deps.notify('计划不存在或已被删除。')
+            return
+          }
+          deps.notify(`计划「${info.title}」已驳回${comment ? '（含反馈）' : ''}，可继续修订。`)
+          if (comment) {
+            deps.submitToAgent(
+              `User rejected the plan. Feedback:\n\n${comment}\n\nRevise the plan in \`.rivet/plans/${info.slug}.md\`, then call plan action=submit again.`,
+            )
+          }
+        })
       }
       return
     }
     if (tuiApp.choicePanelKind === 'ask-user-question') {
-      // 问题选项面板回调：把选中的选项文本作为用户消息提交。
+      // 问题选项面板回调：把选中的选项文本或自定义输入作为用户消息提交。
       const q = tuiApp.pendingAskUserQuestion
       tuiApp.choicePanelKind = 'effort' // reset
       tuiApp.pendingAskUserQuestion = undefined
       if (!q) return
+      if (id === '__other__') {
+        const text = tuiApp.choicePanelInputBuffer.trim()
+        if (text) tuiApp.submitText(text)
+        return
+      }
       const idx = Number(id)
       const option = Number.isFinite(idx) ? q.options[idx] : undefined
       if (option) {

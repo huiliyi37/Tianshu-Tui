@@ -12,6 +12,7 @@
  */
 
 import stringWidth from 'string-width'
+import { truncateToDisplayWidth } from '../width.js'
 import { color } from '../engine/ansi.js'
 import { resolveThemeEntry, type RivetTheme } from '../theme.js'
 import { formatElapsed } from '../tool-elapsed.js'
@@ -935,6 +936,13 @@ export interface ChoicePanelData {
   title: string
   choices: ChoiceEntry[]
   selectedIndex: number
+  /** When active, a live text input box is rendered below the choices. */
+  inputSubMode?: {
+    active: boolean
+    label: string
+    placeholder: string
+    value: string
+  }
 }
 
 export function renderChoicePanel(data: ChoicePanelData, width: number, height: number, theme: RivetTheme): string[] {
@@ -944,7 +952,9 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
   lines.push(frameDivider(width, theme))
 
   const innerWidth = width - 6 // padLine border(2) + left indent(2) + right gap(2)
-  const contentRows = Math.max(1, height - 5) // border + title + separator + footer + bottom
+  const inputSubMode = data.inputSubMode?.active ? data.inputSubMode : undefined
+  const inputRows = inputSubMode ? 2 : 0 // label line + input line
+  const contentRows = Math.max(1, height - 5 - inputRows) // border + title + separator + footer + bottom = 5
 
   if (data.choices.length === 0) {
     lines.push(padLine(color('  （无可用选项）', theme.muted), width, theme))
@@ -960,7 +970,6 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
     if (rowsUsed >= contentRows) break
     const c = data.choices[i]!
     const selected = i === data.selectedIndex
-    const accent = selected ? theme.primary : theme.dim
 
     // Label line: cursor + recommended star + label
     const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
@@ -988,7 +997,18 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
     rowsUsed++
   }
 
-  lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']]), width, theme))
+  if (inputSubMode) {
+    lines.push(frameDivider(width, theme))
+    lines.push(padLine(` ${color(inputSubMode.label, theme.muted)}`, width, theme))
+    const cursor = color('▏', theme.primary, { bold: true })
+    const shown = inputSubMode.value.length > 0
+      ? color(truncateToDisplayWidth(inputSubMode.value, Math.max(1, width - 8)), theme.secondary)
+      : color(inputSubMode.placeholder, theme.dim)
+    lines.push(padLine(` ${color('>', theme.primary, { bold: true })} ${shown}${cursor}`, width, theme))
+    lines.push(formatFooter(keyHints([['↵', '提交'], ['Esc', '返回选项']]), width, theme))
+  } else {
+    lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']]), width, theme))
+  }
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
