@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 import { gracefulKill, forceKill } from '../platform.js'
 import { track } from '../tools/process-tracker.js'
+
+const require = createRequire(import.meta.url)
 
 export interface ThetaCheckResult {
   errors: string[]
@@ -173,7 +176,10 @@ export function clearThetaCache(cwd?: string): void {
 
 /** Resolve a runnable tsc command, preferring the project-local binary so we
  *  don't depend on `npx` (whose Windows form is npx.cmd and needs a shell) and
- *  picking tsc.cmd on Windows where the extension-less script is unrunnable. */
+ *  picking tsc.cmd on Windows where the extension-less script is unrunnable.
+ *  Falls back to the TypeScript compiler shipped with the running process so
+ *  theta-check works against temporary fixture projects that have no
+ *  node_modules of their own. */
 function resolveTscCommand(cwd: string): { command: string; args: string[]; useShell: boolean } {
   const bin = join(cwd, 'node_modules', '.bin')
   const candidates = process.platform === 'win32'
@@ -185,8 +191,15 @@ function resolveTscCommand(cwd: string): { command: string; args: string[]; useS
       return { command: useShell ? `"${candidate}"` : candidate, args: ['--noEmit', '--skipLibCheck'], useShell }
     }
   }
-  // Fallback: npx resolves tsc from node_modules; Windows needs a shell for npx.cmd.
-  return { command: 'npx', args: ['tsc', '--noEmit', '--skipLibCheck'], useShell: process.platform === 'win32' }
+  // Fallback 1: TypeScript compiler bundled with the running process.
+  try {
+    const bundledTsc = require.resolve('typescript/bin/tsc')
+    return { command: bundledTsc, args: ['--noEmit', '--skipLibCheck'], useShell: false }
+  } catch {
+    // Fallback 2: npx with explicit package so we don't accidentally resolve the
+    // placeholder `tsc` npm package in an empty fixture directory.
+    return { command: 'npx', args: ['-p', 'typescript', 'tsc', '--noEmit', '--skipLibCheck'], useShell: process.platform === 'win32' }
+  }
 }
 
 function runThetaCheckInner(cwd: string, timeoutMs: number): Promise<ThetaCheckResult> {
