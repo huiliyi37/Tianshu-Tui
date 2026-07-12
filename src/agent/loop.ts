@@ -109,6 +109,7 @@ import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
 import type { TurnOrchestrator } from "./turn-orchestrator.js";
 import { type EffortShadowRecord } from './p3-reward.js'
+import { TurnCacheObservability } from './cache-log-observability.js'
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
 
@@ -267,6 +268,10 @@ export class AgentLoop {
   private lastConvergencePhaseClass = ''
   /** 近 10 次收敛检查时的 todo 完成数采样（进度信标数据源，10 = 最大信号窗口）。 */
   private todoCompletedSamples: number[] = []
+  /** Rolling score history from recent convergence checks (most recent last).
+   *  Maintained as a sliding window of at most 20 entries. Passed to
+   *  evaluateConvergence for L3 scoreAbort decline-trend detection. */
+  private convergenceScoreHistory: number[] = []
   /** 解耦修复：CCR/kick 的让位判据。旧判据 latestConvergenceResult.shouldKick
    *  在卡住期间恒为 true，而发射被 3 轮冷却节流——冷却静默期 CCR 也被整轮压制
    *  （守护链路静音栈的一环）。新判据只在 convergence **真实发射**过 advisory 的
@@ -420,6 +425,8 @@ export class AgentLoop {
   prevMsgCount = 0
   prevHitRate: number | null = null
   prevTokenEfficiency: number | undefined = undefined
+  /** Request-aligned cache telemetry. Tool output is consumed by the next model call. */
+  turnCacheObservability = new TurnCacheObservability()
   /** Estimated context tokens at the end of the previous turn — baseline for
    *  compact attribution (compactPreRatio / compactReclaimed in the cache-log). */
   prevEstTokens = 0
@@ -1714,6 +1721,7 @@ export class AgentLoop {
       debugLog('[agent] run() called while already running — skipping duplicate')
       return
     }
+    this._running = true
     // Eager abort controller: created synchronously before any await (incl. the
     // cancelIdleCompaction() drain below) so an Esc/Ctrl+C during the init/warmup
     // window aborts a live signal instead of a no-op. Pending latch is cleared
@@ -1728,9 +1736,8 @@ export class AgentLoop {
     // settle is correct (not a stall): the idle abort makes the in-flight pass
     // bail at its next checkpoint; replaceMessages itself is synchronous so the
     // session is always in a consistent state at the await boundary.
-    await this.cancelIdleCompaction()
-    this._running = true
     try {
+      await this.cancelIdleCompaction()
       await this._runInner(userInput, callbacks, images)
     } finally {
       this._running = false
@@ -1904,6 +1911,8 @@ export class AgentLoop {
     const convergenceCheck = evaluateConvergence({
       turn,
       phaseClass: phaseClass as PhaseClass,
+      phaseRelativeTurn,
+      scoreHistory: this.convergenceScoreHistory,
       contextWindow: this.config.contextWindow,
       recentToolHistory: this.recentToolHistory,
       evidenceState: this.evidence.getState(),
@@ -1920,6 +1929,9 @@ export class AgentLoop {
       activityMode,
     })
     this.latestConvergenceResult = convergenceCheck
+    // Maintain rolling score history for L3 decline-trend detection (sliding window ≤ 20)
+    this.convergenceScoreHistory.push(convergenceCheck.score)
+    if (this.convergenceScoreHistory.length > 20) this.convergenceScoreHistory.shift()
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
 
     // Grace-turn precondition for the score abort (captured BEFORE this turn's

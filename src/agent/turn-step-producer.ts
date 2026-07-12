@@ -745,7 +745,11 @@ export class TurnStepProducer {
     }
 
     // Wire StarPhase → phaseClass for field habituation modulation
-    const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
+    const mapped = PHASE_CLASS_MAP[perceptionResult.event.phase]
+    const phaseClass = mapped ?? (() => {
+      debugLog(`[convergence] unmapped StarPhase "${perceptionResult.event.phase}" — falling back to explore`)
+      return 'explore'
+    })()
     this.self.config.promptEngine.setPhaseHint(phaseClass)
     const contractStatus = contractStatusFromPhaseClass(phaseClass)
     if (this.self.taskContract && contractStatus) {

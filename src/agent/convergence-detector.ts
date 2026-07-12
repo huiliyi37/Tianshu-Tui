@@ -66,6 +66,14 @@ export interface ConvergenceInput {
   /** W3：会话活动模式（classifyActivityMode 的结果，由调用方传入）。
    *  diagnostic 时收敛文案分流为"先核实断言再收束"。 */
   activityMode?: ActivityMode
+  /** Turns since current phaseClass was set. 1 = first turn in this phase.
+   *  Used to suppress productive-stagnation during the cooling period after
+   *  a phase transition. When absent, defaults to 1 (conservative: cooldown active). */
+  phaseRelativeTurn?: number
+  /** Score history from recent turns (most recent last). Used to detect
+   *  sustained decline vs isolated dip for L3 score-based abort decisions.
+   *  Length should be ≥ signalWindow for meaningful trend detection. */
+  scoreHistory?: number[]
 }
 
 /** W3（incident 20b9714e）：会话活动模式。diagnostic = 近窗口以只读工具为主
@@ -950,7 +958,15 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // early-session read burst as stagnation — the wrong heuristic for cold starts.
   // Skip the productiveStagnation check entirely until at least one productive
   // call has been made (distance is finite).
-  const productiveStagnation = distanceToLastProductive !== Infinity
+  //
+  // Phase cooldown (宁可漏报不可误熔断): the first N turns of a new phase are
+  // suppress productive-stagnation — the window likely contains only the previous
+  // phase's read-heavy tools. Let the model establish a phase-appropriate tool
+  // pattern before flagging stagnation.
+  const phaseCooldown = Math.min(4, windowSize)
+  const inPhaseCooldown = (input.phaseRelativeTurn ?? 1) <= phaseCooldown
+  const productiveStagnation = !inPhaseCooldown
+    && distanceToLastProductive !== Infinity
     && stagnationWindow.length >= Math.min(windowSize, 4)
     && productiveRatio === 0
     && !producingReport
@@ -1014,7 +1030,20 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // aborts are kept independent — they measure orthogonal stagnation signals
   // (repetition, oscillation, token efficiency) and should still fire when the
   // composite score says the session is stuck.
-  const scoreAbort = level >= 3 && score < 0.1
+  //
+  // L3 scoreAbort 双层护栏（宁可漏报不可误熔断）:
+  // 1. Score must be in sustained decline across the signal window — an isolated
+  //    dip from a phase transition or phase-mismatch is NOT a real stall.
+  // 2. At least one L2 warning must have been emitted in a prior turn (repeatCount
+  //    >= 1) — the model was told to change course and didn't. First-escalation
+  //    aborts skip the chance for the model to self-correct.
+  // These guard bands prevent the penalty multiplication chain (no-tool × read-only
+  // × phase-expectation) from false-triggering on a single low-score evaluation.
+  const scoreDeclining = input.scoreHistory != null
+    && input.scoreHistory.length >= windowSize
+    && input.scoreHistory.slice(-windowSize).every((s, i, arr) => i === 0 || s <= (arr[i - 1] ?? 1))
+  const warnedButNotAdopted = (input.repeatCount ?? 0) >= 1
+  const scoreAbort = level >= 3 && score < 0.05 && scoreDeclining && warnedButNotAdopted
   const shouldAbort = scoreAbort || noToolForceAbort
   // Session split is pointless for no-tool stagnation — the problem is model
   // behavior, not context size.  Only split on score-based level 3.
