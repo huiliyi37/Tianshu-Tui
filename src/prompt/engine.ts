@@ -1046,14 +1046,17 @@ export class PromptEngine {
   }
 
   /**
-   * Update session-state snapshot. Does NOT invalidate the fresh cache:
-   * within the same user message, all tool-call turns reuse the cached fresh
-   * volatile block — sessionState refreshes only at user-message boundaries.
-   * This is required to preserve DeepSeek prefix cache across tool turns.
+   * Update session-state snapshot. Byte-stable: only stores when the content
+   * actually differs from the previously stored snapshot. This means within an
+   * auto-continuation run where nothing changed (model only read files), the
+   * appendix stays identical → DeepSeek prefix cache preserved. When files are
+   * modified or task step advances, the state updates and the model sees it.
    * See: prompt/volatile.ts VolatileContext.sessionState comment.
    */
   setSessionState(text: string | null): void {
-    this.sessionStateText = text ?? undefined
+    const next = text ?? undefined
+    if (next === this.sessionStateText) return // byte-identical — no churn
+    this.sessionStateText = next
   }
 
   /**

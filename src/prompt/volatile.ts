@@ -81,9 +81,9 @@ export function renderPlanModeBlock(
   return `<plan-mode>
 你处于规划模式。只能读文件和探索代码库——禁止写、改、执行任何会修改状态的命令（活动计划文件除外）。${planFileLine}
 
-**对话纪律（硬性）**：
+**对话纪律**：
 - 计划正文**只进活动计划文件**（write_file / edit_file）。assistant 文本最多给 5–10 行进度摘要或澄清问题。
-- **禁止**在聊天里贴完整计划、逐步 shell/\`git commit\`/\`npx\`/\`pytest\` 菜谱，或 executing-plans 风格的可复制命令剧本。
+- 完整计划、逐步 shell/\`git commit\`/\`npx\`/\`pytest\` 菜谱首选写入文件而非贴对话——文件是唯一可靠的可复用载体，聊天里重发一遍浪费轮次且容易版本漂移。
 - 逐步命令与 commit 留给用户批准之后的执行阶段。
 
 工作流：

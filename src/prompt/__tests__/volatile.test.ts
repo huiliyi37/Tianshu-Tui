@@ -863,10 +863,10 @@ describe('GWT salience and Top-K selection', () => {
       assert.match(advisory!, /至少画一张架构或数据流图/)
     })
 
-    it('plan-mode block forbids chat dump of full plan / shell recipes', () => {
+    it('plan-mode block prefers writing full plan / shell recipes to the draft file', () => {
       const out = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning' })
       assert.match(out, /计划正文\*\*只进活动计划文件\*\*/)
-      assert.match(out, /禁止.*逐步 shell/)
+      assert.match(out, /逐步 shell/)
       assert.match(out, /验证清单/)
       assert.doesNotMatch(out, /执行计划基线/)
     })
