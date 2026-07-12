@@ -40,8 +40,7 @@ import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBa
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight } from '../format/glance-bar.js'
-import { WELCOME_MAX_CARD_WIDTH } from '../format/welcome.js'
+import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, formatPermissionModeLine } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
@@ -3402,20 +3401,14 @@ export class TuiApp {
       const starDomain = activeDomainId ? (STAR_DOMAINS as any)[activeDomainId] : null
       const uiSep = starDomain?.uiPersona?.separator ?? 'thin'
 
-      // 输入框外宽与欢迎卡片保持一致：固定上限 + 居中，避免宽终端下输入框缩在
-      // 卡片内部，也避免 resize 后 scrollback 中的卡片被 reflow 拉变形。
-      const W = Math.max(24, Math.min(WELCOME_MAX_CARD_WIDTH, cols - 2))
-      const innerWidth = Math.max(20, W - 4)
-      // 静态 chrome（线框字符 + 底边框）只依赖 (separator, innerWidth, borderColor），
+      const innerWidth = Math.max(20, cols - 6)
+      // 静态 chrome（线框字符 + 底边框）只依赖 (separator, innerWidth, borderColor)，
       // 缓存复用，避免每帧 repeat(innerWidth) 重建。
       const { leftBar, rightBar, botBorder } = this.getInputChrome(uiSep, innerWidth, borderColor)
 
-      // 输入框/状态栏与欢迎卡片的内容区对齐：卡片边框外侧 + 1 列内边距。
-      const chromeLeftPadding = ' '.repeat(Math.max(0, Math.floor((cols - W) / 2) + 1))
-
-      // 3. 构建高保真左右指标 Segment（按卡片宽度 W 决定 narrow/compact 模式）
+      // 3. 构建高保真左右指标 Segment
       const leftStr = formatGlanceLeft({
-        width: W,
+        width: cols,
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
@@ -3426,7 +3419,7 @@ export class TuiApp {
       }, this.theme)
 
       const rightStr = formatGlanceRight({
-        width: W,
+        width: cols,
         modelName: this.state.modelName,
         reasoningEffort: this.metricsGlanceController.reasoningEffortProvider?.(),
         cacheHitRate: glanceCacheHitRate,
@@ -3448,12 +3441,32 @@ export class TuiApp {
       // 渲染宽度会超过 cols → 终端折行成 2 显示行，而 LiveEngine.rowsForLine 按 narrow
       // 数成 1 行 → 回顶欠擦（moveToTop/ERASE 少擦一行）→ 输入框重影/逐帧堆叠重复。
       // 按 wide 定尺后顶边框恒 ≤ cols，任何终端都占 1 显示行，行数估算与实际一致。
-      // 4. 获取边框线字符，构建纯净闭合边框
+      const plainLeft = displayWidth(leftStr, { ambiguousAsWide: true })
+      const plainRight = displayWidth(rightStr, { ambiguousAsWide: true })
+
+      // 4. 计算并拼接一体化顶部边框：╭─ leftStr ─┬─ rightStr ─╮
       const chars = boxCharsFor(uiSep)
-      const topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
+      let topBorder = ''
+      if (innerWidth < plainLeft + plainRight + 10) {
+        topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
+      } else {
+        const lineRem = innerWidth - plainLeft - plainRight - 4 // 4 = label border paddings
+        const leftFill = Math.max(2, Math.floor(lineRem * 0.4))
+        const rightFill = Math.max(2, lineRem - leftFill)
+        
+        topBorder = color(chars.tl, borderColor) + 
+                    color(chars.h.repeat(2), borderColor) + 
+                    leftStr + 
+                    color(chars.h.repeat(leftFill), borderColor) + 
+                    color(chars.m, borderColor) + 
+                    color(chars.h.repeat(rightFill), borderColor) + 
+                    rightStr + 
+                    color(chars.h.repeat(2), borderColor) + 
+                    color(chars.tr, borderColor)
+      }
 
       const MAX_INPUT_DISPLAY_LINES = 12
-      const arrowColor = this.theme.secondary
+      const arrowColor = this.theme.success
       const inputLines = this.inputLine.value
         ? this.inputLine.displayLines({ maxLines: MAX_INPUT_DISPLAY_LINES, maxWidth: innerWidth })
         : [`${color('〉', arrowColor)} ${color('█', this.theme.primary)}${color(this.inputLine.placeholder, this.theme.dim)}`]
@@ -3465,61 +3478,42 @@ export class TuiApp {
         return raw
       }
 
-      lines.push({ text: chromeLeftPadding + topBorder })
+      lines.push({ text: topBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-        lines.push({ text: chromeLeftPadding + this.renderInputRow(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth, leftBar, rightBar) })
+        lines.push({ text: this.renderInputRow(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth, leftBar, rightBar) })
         for (const extra of inputLines.slice(1)) {
-          lines.push({ text: chromeLeftPadding + this.renderInputRow(colorizeInputLine(extra), innerWidth, leftBar, rightBar) })
+          lines.push({ text: this.renderInputRow(colorizeInputLine(extra), innerWidth, leftBar, rightBar) })
         }
       } else {
         for (const inputDisplayLine of inputLines) {
-          lines.push({ text: chromeLeftPadding + this.renderInputRow(colorizeInputLine(inputDisplayLine), innerWidth, leftBar, rightBar) })
+          lines.push({ text: this.renderInputRow(colorizeInputLine(inputDisplayLine), innerWidth, leftBar, rightBar) })
         }
       }
-      lines.push({ text: chromeLeftPadding + botBorder })
+      lines.push({ text: botBorder })
 
-      // 5a. 一体化状态底栏（包含星域、分支、执行模式及实时监控指标）
-      //     当 slash 命令提示打开时让位，避免视觉重叠。
+      // 5a. 权限模式行（CC parity：输入框正下方常驻，单一事实来源）。
+      //     slash 提示打开时让位，避免与候选列表叠在一起。
       if (!isSlash) {
-        const modeLabel = this._approvalMode === 'dangerously-skip-permissions'
-          ? 'yolo'
-          : this._approvalMode === 'auto-safe'
-          ? '自治'
-          : this._approvalMode === 'manual'
-          ? '监督'
-          : this._approvalMode
-        const planLabel = planModeActive ? ' · Plan' : ''
-        const leftFull = `${leftStr} ${color(`[${modeLabel}${planLabel}]`, this.theme.muted)}`
-        const leftLen = displayWidth(leftFull, { ambiguousAsWide: true })
-        const rightLen = displayWidth(rightStr, { ambiguousAsWide: true })
-
-        // 状态栏左边缘与输入框对齐，右边缘延伸至终端右边界，确保 metrics/cost
-        // 等关键信息不因卡片宽度上限而被截断。
-        const maxStatusWidth = cols - 1
-        const spaceCount = Math.max(1, maxStatusWidth - chromeLeftPadding.length - leftLen - rightLen - 2)
-        const statusLine = chromeLeftPadding + ' ' + leftFull + ' '.repeat(spaceCount) + rightStr
-        lines.push({ text: this.clampLine(statusLine, maxStatusWidth) })
+        lines.push({ text: this.clampLine(formatPermissionModeLine({ approvalMode: this._approvalMode, planMode: planModeActive }, this.theme)) })
       }
 
       // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）
       if (isSlash) {
-        const hintMaxWidth = Math.max(20, cols - chromeLeftPadding.length)
         for (const hintLine of formatSlashHint({ input: inputVal, commands: this.inputController.slashCommands, selectedIdx: this.inputController.slashSelectedIdx }, this.theme)) {
-          lines.push({ text: chromeLeftPadding + this.clampLine(hintLine, hintMaxWidth) })
+          lines.push({ text: this.clampLine(hintLine) })
         }
       }
 
       // 5c. @ 文件补全候选列表（Tab 循环时显示）
       if (this.inputController.fileCompletion && this.inputController.fileCompletion.candidates.length > 1) {
         const fc = this.inputController.fileCompletion
-        const fileHintMaxWidth = Math.max(20, cols - chromeLeftPadding.length)
         for (let i = 0; i < Math.min(fc.candidates.length, 6); i++) {
           const selected = i === fc.idx
           const marker = selected ? color('❯ ', this.theme.primary) : '  '
           const name = color(fc.candidates[i]!, selected ? this.theme.primary : this.theme.muted)
-          lines.push({ text: chromeLeftPadding + this.clampLine(`${marker}${name}`, fileHintMaxWidth) })
+          lines.push({ text: this.clampLine(`${marker}${name}`) })
         }
-        lines.push({ text: chromeLeftPadding + this.clampLine(color('tab to cycle', this.theme.dim), fileHintMaxWidth) })
+        lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
       }
     }
 

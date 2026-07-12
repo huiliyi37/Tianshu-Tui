@@ -327,10 +327,10 @@ test('tasks overlay: register + activate 渲染 per-worker 舰队', () => {
   })
   assert.equal(app.activateOverlay('tasks'), true, 'tasks overlay 应成功激活')
   const visible = stripAnsi(out.chunks.join(''))
-  assert.ok(visible.includes('运行中的子代理'), '应显示 tasks 标题')
+  assert.ok(visible.includes('子代理任务'), '应显示 tasks 标题')
   assert.ok(visible.includes('code_scout'), '应显示 worker profile')
   assert.ok(visible.includes('T1'), '应显示 worker 短标签')
-  assert.ok(visible.includes('1/2 done'), '应显示组进度')
+  assert.ok(visible.includes('1/2 完成'), '应显示组进度')
   assert.ok(visible.includes('grep routing seams'), '应显示活动行')
 })
 

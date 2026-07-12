@@ -52,13 +52,13 @@ test('welcome omits version/mode gracefully when not provided', () => {
   assert.ok(!joined.includes('v undefined') && !joined.includes('vnull'), 'no dangling version text')
 })
 
-test('welcome has bordered card, star logo and no shortcut matrix', () => {
+test('welcome is borderless compact header with no shortcut matrix', () => {
   const lines = formatWelcome({
     modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 120, rows: 40,
     version: '2.15.1',
   }, theme)
   const joined = lines.join('\n')
-  assert.ok(joined.includes('┌'), 'should show border')
+  assert.ok(!joined.includes('┌') && !joined.includes('└') && !joined.includes('─'), 'no border')
   assert.ok(!joined.includes('Ctrl+'), 'no shortcut matrix')
 })
 

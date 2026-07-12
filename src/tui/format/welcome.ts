@@ -1,11 +1,13 @@
 /**
- * T9 格式化函数 — 首屏欢迎（Dawn / 启明星风格卡片）。
+ * T9 格式化函数 — 首屏欢迎（Claude Code v2 头部样式：3 行紧凑头）。
  *
- * 目标样式：
- * - 左侧是一枚纵向“启明星”图腾：单一主星 + 向下的光柱 / 地平线倒影。
- * - 标题使用暖金色，副标题使用雾灰色。
- * - 信息区从标题列起始位置对齐，整体更接近设计稿。
- * - 去掉标题旁边的四个小星星，只保留左侧主图腾。
+ * 渲染结构：
+ *    ✦   Tianshu Code v2.15.1
+ *        deepseek-v4 · auto-safe
+ *        ~/app/deepseek-tui/opencode-tui
+ *
+ * 无边框、无大字 logo、无快捷键矩阵——欢迎屏只回答三个问题：
+ * 这是什么（品牌+版本）、现在什么配置（模型+权限）、在哪里（cwd）。
  */
 
 import { homedir } from 'node:os'
@@ -34,8 +36,8 @@ export interface FormatWelcomeInput {
   approvalMode?: string
 }
 
-/** 头图 + 卡片 + 输入框 + 状态栏最低保留。 */
-const BANNER_ROWS = 8
+/** 3 行头 + 前后空行 2 行 + 输入框 3 行 + 终端底部状态栏/呼吸余量 ~2 行。 */
+const BANNER_ROWS = 5
 const RESERVED_ROWS = 5
 
 function truncateToWidth(text: string, maxWidth: number): string {
@@ -49,25 +51,6 @@ function truncateToWidth(text: string, maxWidth: number): string {
 function tildify(cwd: string): string {
   const home = homedir()
   return home && cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
-}
-
-function makeLogoLines(theme: RivetTheme): string[] {
-  const frameCol = (s: string) => color(s, theme.secondary)
-  const starCol = (s: string) => color(s, theme.primary, { bold: true })
-  
-  const line1 = `  ${frameCol('┌─────┐')}`
-  const line2 = `  ${frameCol('│')}${starCol('✦')} ${starCol('✦')}${frameCol('│')}`
-  const line3 = `  ${frameCol('└─────┘')}`
-  
-  const w1 = displayWidth('  ┌─────┐', WIDE)
-  const w2 = displayWidth('  │✦ ✦│', WIDE)
-  const w3 = displayWidth('  └─────┘', WIDE)
-  
-  return [
-    line1 + ' '.repeat(Math.max(0, 10 - w1)),
-    line2 + ' '.repeat(Math.max(0, 10 - w2)),
-    line3 + ' '.repeat(Math.max(0, 10 - w3)),
-  ]
 }
 
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
@@ -84,83 +67,41 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     return truncateToWidth(line, cols)
   }
 
+  // 折叠模式：单行极简提示，适合恢复会话或非首次启动
   if (input.compact) {
     return [compactLine()]
   }
 
+  // 高度自适应：极矮终端（放不下 3 行头 + 输入框）退单行。
   const rows = input.rows && input.rows > 0 ? input.rows : Number.POSITIVE_INFINITY
   if (rows < BANNER_ROWS + RESERVED_ROWS) {
     return [compactLine()]
   }
 
-  const W = cols - 2
-  if (W < 56) {
-    return [compactLine()]
-  }
+  // ── CC 头式 3 行 ──────────────────────────────────────────────
+  // 左列：单颗启明星（只在第一行），下两行按其显示宽度留白对齐。
+  const prefix = ' ✦   '
+  const indent = ' '.repeat(displayWidth(prefix, WIDE))
+  const star = ` ${color('✦', theme.primary, { bold: true })}   `
 
-  const innerW = W - 4
-  const logoLines = makeLogoLines(theme)
-  const logoW = 10
-  const gapW = 2
-  const textW = innerW - logoW - gapW
-  const borderCol = (s: string) => color(s, theme.primary)
+  const brand = color('Tianshu Code', theme.primary, { bold: true })
+  const version = input.version ? ` ${color(`v${input.version}`, theme.muted)}` : ''
 
-  const titlePlain = 'Welcome to Tianshu Code!'
-  const subtitlePlain = 'Send /help for help information.'
-  const title = color(titlePlain, theme.secondary, { bold: true })
-  const subtitle = color(subtitlePlain, theme.muted)
+  // 权限模式短标签——与输入框下方权限行同一口径（yolo 而非全称）。
+  const modeLabel = input.approvalMode === 'dangerously-skip-permissions' ? 'yolo' : input.approvalMode
+  const modeSuffix = modeLabel
+    ? ` ${color('·', theme.dim)} ${color(modeLabel, theme.muted)}`
+    : ''
 
-  const cardLines: string[] = []
-  cardLines.push(borderCol(`┌${'─'.repeat(W - 2)}┐`))
-
-  for (let i = 0; i < logoLines.length; i++) {
-    const rightPlain = i === 0 ? titlePlain : i === 1 ? subtitlePlain : ''
-    const rightColored = i === 0 ? title : i === 1 ? subtitle : ''
-    const pad = ' '.repeat(Math.max(0, textW - displayWidth(rightPlain, WIDE)))
-    cardLines.push(`${borderCol('│')} ${logoLines[i]}${' '.repeat(gapW)}${rightColored}${pad} ${borderCol('│')}`)
-  }
-
-  const infoRows: { key: string; val: string }[] = [
-    { key: 'Directory', val: tildify(input.cwd) },
-    { key: 'Session', val: input.sessionId },
-    { key: 'Model', val: input.modelName },
-  ]
-  if (input.version) {
-    infoRows.push({ key: 'Version', val: 'v' + input.version })
-  }
-  if (input.approvalMode) {
-    const label = input.approvalMode === 'dangerously-skip-permissions' ? 'yolo' : input.approvalMode
-    infoRows.push({ key: 'Approval', val: label })
-  }
-
-  const infoIndent = ' '.repeat(logoW + gapW)
-  const infoIndentW = displayWidth(infoIndent, WIDE)
-  const keyW = 13
-  const maxValW = Math.max(8, innerW - infoIndentW - keyW)
-
-  for (const row of infoRows) {
-    const keyStr = `${row.key}: `.padEnd(keyW)
-    const keyColored = color(keyStr, theme.muted)
-    const valPlain = row.val
-    const valTruncated = displayWidth(valPlain, WIDE) > maxValW
-      ? `${truncateToDisplayWidth(valPlain, maxValW - 1, WIDE)}…`
-      : valPlain
-    const valW = displayWidth(valTruncated, WIDE)
-    const valColored = color(valTruncated, theme.assistantColor || theme.secondary)
-    const pad = ' '.repeat(Math.max(0, maxValW - valW))
-    cardLines.push(`${borderCol('│')} ${infoIndent}${keyColored}${valColored}${pad} ${borderCol('│')}`)
-  }
-
-  cardLines.push(borderCol(`└${'─'.repeat(W - 2)}┘`))
-
-  const tipPrefix = color('▸ Dawn Mode is ready ', theme.warning, { bold: true })
-  const tipSuffix = color('Tianshu Code now runs with high-density adaptive chrome.', theme.muted)
-
-  return [
+  // 前后各留一行呼吸空行：欢迎块上贴启动日志、下贴历史会话提示/输入框时
+  // 不至于挤成一坨（压抑感的主要来源）。
+  const out: string[] = [
     '',
-    ...cardLines,
-    '',
-    `  ${tipPrefix}${tipSuffix}`,
+    `${star}${brand}${version}`,
+    `${indent}${input.modelName}${modeSuffix}`,
+    `${indent}${color(tildify(input.cwd), theme.muted)}`,
     '',
   ]
+
+  return out.map(line => truncateToWidth(line, cols))
 }
