@@ -28,6 +28,11 @@ import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { loadTodos, setTodoSession } from './tools/todo.js'
 import { setPlanSession } from './agent/plan-store.js'
+import {
+  nextShiftTabPlanToggle,
+  shiftTabPlanToggleHint,
+} from './agent/plan-mode.js'
+import type { ApprovalMode } from './agent/loop-types.js'
 import { statSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { formatWelcome } from './tui/format/welcome.js'
@@ -1098,35 +1103,34 @@ async function main() {
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
   app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
-  // Shift+Tab：CC 式流畅三态环 auto-safe → plan → manual → auto-safe。
-  // 每按一次立即推进，无二次确认、无 picker 劫持（选择器走 /plan-approve）。
-  // plan 退出即环推进——未批准的 draft 保留在 .rivet/plans/，不弹确认。
-  // yolo/auto-accept 不进环：按一次直接退回 auto-safe（快速降险出口）。
-  // 环内切换为会话级（不持久化默认值）。
+  // Shift+Tab：纯 Plan Mode 叠层开关（不兼审批环）。
+  // 进入记住当前审批模式且不改 approval；退出原样恢复（YOLO 不会被冲成 auto-safe/manual）。
+  // 审批切换仍走 /permissions（含 YOLO 二次确认）。未批准 draft 保留在 .rivet/plans/。
+  let approvalModeBeforePlan: ApprovalMode | null = null
   app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
-    const setSessionApproval = (mode: import('./agent/loop-types.js').ApprovalMode) => {
+    const setSessionApproval = (mode: ApprovalMode) => {
       agent.setApprovalMode(mode)
       app!.setApprovalMode(mode)
     }
-    if (agent.planModeState === 'planning') {
-      // plan → manual：draft 保留，随时 /plan-mode 或 Shift+Tab 转回来继续
-      agent.exitPlanMode()
-      setSessionApproval('manual')
-      app!.commitStatic('⏵ manual — 每个高风险工具确认（草稿计划已保留）')
-      return
-    }
     const current = agent.config.approvalMode ?? 'auto-safe'
-    if (current === 'auto-safe') {
-      // auto-safe → plan
+    const decision = nextShiftTabPlanToggle({
+      isPlanning: agent.planModeState === 'planning',
+      currentApprovalMode: current,
+      approvalModeBeforePlan,
+    })
+    if (decision.action === 'enter') {
+      approvalModeBeforePlan = decision.stashMode
       agent.enterPlanMode()
       const path = agent.getActivePlanFilePath()
-      app!.commitStatic(`⏵ plan mode — 写入已锁定，先规划再执行${path ? `（计划文件: \`${path}\`）` : ''}`)
-    } else {
-      // manual / yolo / auto-accept → auto-safe
-      setSessionApproval('auto-safe')
-      app!.commitStatic('⏵ auto-safe — 低风险自动执行，高风险确认')
+      const hint = shiftTabPlanToggleHint('enter', decision.stashMode)
+      app!.commitStatic(path ? `${hint}（计划文件: \`${path}\`）` : hint)
+      return
     }
+    agent.exitPlanMode()
+    setSessionApproval(decision.restoreMode)
+    approvalModeBeforePlan = null
+    app!.commitStatic(shiftTabPlanToggleHint('exit', decision.restoreMode))
   })
   app.setPlanTraceProvider(() => ctx!.agent.planTrace)
 

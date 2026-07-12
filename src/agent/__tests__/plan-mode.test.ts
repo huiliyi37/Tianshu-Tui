@@ -3,7 +3,16 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { checkPlanMode, canonicalizePathForCompare, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath } from '../plan-mode.js'
+import {
+  checkPlanMode,
+  canonicalizePathForCompare,
+  PLAN_MODE_ALLOWED_TOOLS,
+  createActivePlanDraftPath,
+  nextShiftTabPlanToggle,
+  shiftTabPlanToggleHint,
+  approvalModeShortLabel,
+} from '../plan-mode.js'
+import type { ApprovalMode } from '../loop-types.js'
 import { profileIsWriteCapable, profileIsPlanModeSafe } from '../profile-registry.js'
 import { createDefaultToolRegistry } from '../../tools/default-registry.js'
 import { WEB_SEARCH_TOOL } from '../../tools/web-search.js'
@@ -182,5 +191,60 @@ describe('checkPlanMode', () => {
         `PLAN_MODE_ALLOWED_TOOLS references "${tool}" but no tool registers it (orphan/drift)`,
       )
     }
+  })
+})
+
+describe('nextShiftTabPlanToggle', () => {
+  const roundTrip = (mode: ApprovalMode) => {
+    const enter = nextShiftTabPlanToggle({
+      isPlanning: false,
+      currentApprovalMode: mode,
+      approvalModeBeforePlan: null,
+    })
+    assert.equal(enter.action, 'enter')
+    assert.equal(enter.stashMode, mode)
+    assert.equal(enter.restoreMode, null)
+
+    const exit = nextShiftTabPlanToggle({
+      isPlanning: true,
+      currentApprovalMode: mode,
+      approvalModeBeforePlan: enter.stashMode,
+    })
+    assert.equal(exit.action, 'exit')
+    assert.equal(exit.stashMode, null)
+    assert.equal(exit.restoreMode, mode)
+  }
+
+  it('YOLO → plan → YOLO restores without demotion', () => {
+    roundTrip('dangerously-skip-permissions')
+  })
+
+  it('auto-safe → plan → auto-safe', () => {
+    roundTrip('auto-safe')
+  })
+
+  it('manual → plan → manual', () => {
+    roundTrip('manual')
+  })
+
+  it('auto-accept → plan → auto-accept', () => {
+    roundTrip('auto-accept')
+  })
+
+  it('exit with null stash falls back to auto-safe', () => {
+    const exit = nextShiftTabPlanToggle({
+      isPlanning: true,
+      currentApprovalMode: 'manual',
+      approvalModeBeforePlan: null,
+    })
+    assert.equal(exit.action, 'exit')
+    assert.equal(exit.restoreMode, 'auto-safe')
+  })
+
+  it('hints name underlying mode on enter and restored mode on exit', () => {
+    assert.match(shiftTabPlanToggleHint('enter', 'dangerously-skip-permissions'), /yolo/)
+    assert.match(shiftTabPlanToggleHint('exit', 'dangerously-skip-permissions'), /yolo mode/)
+    assert.equal(approvalModeShortLabel('dangerously-skip-permissions'), 'yolo')
+    assert.equal(approvalModeShortLabel('auto-safe'), 'auto-safe')
   })
 })

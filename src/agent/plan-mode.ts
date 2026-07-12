@@ -1,9 +1,89 @@
 /** Plan Mode — 只读探索→执行的二态控制 */
 
 import { resolve } from 'node:path'
+import type { ApprovalMode } from './loop-types.js'
 
 /** Plan Mode 状态（两态：off / planning） */
 export type PlanModeState = 'off' | 'planning'
+
+/** Shift+Tab plan 叠层：进入/退出时的 stash 决策（不兼审批环） */
+export interface ShiftTabPlanToggleState {
+  isPlanning: boolean
+  currentApprovalMode: ApprovalMode
+  /** 进入 plan 前记住的审批模式；未叠层时为 null */
+  approvalModeBeforePlan: ApprovalMode | null
+}
+
+export type ShiftTabPlanToggleResult =
+  | {
+      action: 'enter'
+      /** 进入时 stash，供退出恢复 */
+      stashMode: ApprovalMode
+      /** 进入不改 approval */
+      restoreMode: null
+    }
+  | {
+      action: 'exit'
+      stashMode: null
+      /** 退出后恢复的审批模式 */
+      restoreMode: ApprovalMode
+    }
+
+/**
+ * Shift+Tab = 纯 Plan Mode 叠层开关。
+ * 进入：记住当前审批模式，不改 approval；退出：原样恢复 stash。
+ */
+export function nextShiftTabPlanToggle(state: ShiftTabPlanToggleState): ShiftTabPlanToggleResult {
+  if (state.isPlanning) {
+    return {
+      action: 'exit',
+      stashMode: null,
+      restoreMode: state.approvalModeBeforePlan ?? 'auto-safe',
+    }
+  }
+  return {
+    action: 'enter',
+    stashMode: state.currentApprovalMode,
+    restoreMode: null,
+  }
+}
+
+/** 审批模式短标签（CLI 状态行 / Shift+Tab 提示） */
+export function approvalModeShortLabel(mode: ApprovalMode): string {
+  switch (mode) {
+    case 'dangerously-skip-permissions':
+      return 'yolo'
+    case 'auto-accept':
+      return 'auto-accept'
+    case 'manual':
+      return 'manual'
+    case 'auto-safe':
+    default:
+      return 'auto-safe'
+  }
+}
+
+/** Shift+Tab 进入/退出 plan 后的状态提示 */
+export function shiftTabPlanToggleHint(
+  action: 'enter' | 'exit',
+  underlyingMode: ApprovalMode,
+): string {
+  const label = approvalModeShortLabel(underlyingMode)
+  if (action === 'enter') {
+    return `⏵ plan mode — 写入已锁定（底层仍为 ${label}）`
+  }
+  switch (underlyingMode) {
+    case 'dangerously-skip-permissions':
+      return '⏵ yolo mode — all tools auto-approved (use with caution)'
+    case 'auto-accept':
+      return '⏵ auto-accept mode — edits auto-approved'
+    case 'manual':
+      return '⏵ manual mode — approval required for all tools'
+    case 'auto-safe':
+    default:
+      return '⏵ auto-safe mode — bash requires approval'
+  }
+}
 
 /** Plan Mode 下允许的工具 — 只读探索 + 澄清/委派 + plan 提交/关闭计划 + memory 回忆。
  *  run_tests 在列：瑶光反证要求计划期就复现关键声称（跑失败测试拿 RED 证据），
