@@ -523,6 +523,35 @@ export const Composer = memo(function Composer(props: {
     // default paste has already inserted content, causing duplicate images.
     if (hasFile) e.preventDefault()
 
+    // Clipboard images often arrive as multiple format representations of the
+    // same picture (e.g. PNG + TIFF on macOS, or PNG + BMP on Windows). They
+    // share a generic name like "image.png" and the same lastModified, but have
+    // different sizes. Drop duplicates, keeping the preferred provider format.
+    const MIME_PREF_ORDER = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff']
+    const isGenericClipboardName = (name: string) =>
+      name === '' || /^image(\.[a-z0-9]+)?$/i.test(name) || /^pasted[-_]image(\.[a-z0-9]+)?$/i.test(name) || /^clipboard(\.[a-z0-9]+)?$/i.test(name)
+    const genericImages = pasted
+      .map((p, idx) => ({ ...p, idx, mime: p.mimeHint || p.file.type || '' }))
+      .filter(p => isGenericClipboardName(p.file.name) && (p.mime.startsWith('image/') || !p.file.name.includes('.')))
+    const keepIdx = new Set<number>(pasted.map((_, i) => i))
+    const byTimestamp = new Map<number, typeof genericImages>()
+    for (const p of genericImages) {
+      const list = byTimestamp.get(p.file.lastModified) ?? []
+      list.push(p)
+      byTimestamp.set(p.file.lastModified, list)
+    }
+    for (const group of byTimestamp.values()) {
+      if (group.length <= 1) continue
+      group.sort((a, b) => {
+        const rankA = MIME_PREF_ORDER.indexOf(a.mime)
+        const rankB = MIME_PREF_ORDER.indexOf(b.mime)
+        if (rankA !== rankB) return (rankA === -1 ? 999 : rankA) - (rankB === -1 ? 999 : rankB)
+        return a.idx - b.idx
+      })
+      for (let i = 1; i < group.length; i++) keepIdx.delete(group[i]!.idx)
+    }
+    const deduped = pasted.filter((_, i) => keepIdx.has(i))
+
     const classify = async (p: typeof pasted[0]) => {
       let type = p.mimeHint || p.file.type
       // Last-resort byte-level detection for Windows clipboard images that
@@ -535,7 +564,7 @@ export const Composer = memo(function Composer(props: {
       return { file: p.file, fileLike }
     }
 
-    const classified = await Promise.all(pasted.map(classify))
+    const classified = await Promise.all(deduped.map(classify))
     const imageFiles = classified.filter(c => isImageFile(c.fileLike)).map(c => c.file)
     const textFiles = classified.filter(c => isTextFile(c.fileLike) && !isImageFile(c.fileLike)).map(c => c.file)
     const unsupportedFiles = classified.filter(c => isUnsupportedFile(c.fileLike)).map(c => c.file)
