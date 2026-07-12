@@ -285,6 +285,7 @@ describe('evaluateConvergence', () => {
       recentToolHistory: history,
       scoreHistory: [0.40, 0.28, 0.19, 0.12, 0.06, 0.02], // declining 6 turns
       repeatCount: 2, // warned twice already
+      priorWarningAtL2Plus: true,
     }))
     assert.equal(result.level, 3)
     // All failures + all same tool → score should be extremely low
@@ -913,7 +914,7 @@ describe('evaluateConvergence', () => {
     })
 
     it('STILL score-aborts at level 3 even when fresh reasoning text is present', () => {
-      // Score-based abort fires when triple-guard satisfied (score<0.05 + declining + repeatCount>=1).
+      // Score-based abort fires when triple-guard satisfied (score<0.05 + declining + prior L2+ warning).
       // reasoningActive only protects the no-tool hard cap, not the score-based path.
       const history = makeHistory([
         { tool: 'grep', target: 'x', status: 'failed' },
@@ -931,6 +932,7 @@ describe('evaluateConvergence', () => {
         noToolTurnCount: 0,
         scoreHistory: [0.30, 0.21, 0.14, 0.09, 0.05, 0.02],
         repeatCount: 1,
+        priorWarningAtL2Plus: true,
       }))
       assert.equal(result.shouldAbort, true, 'score-based abort fires when triple-guard satisfied')
       assert.equal(result.abortCause, 'score')
@@ -1897,12 +1899,13 @@ describe('evaluateConvergence', () => {
         toolFingerprints: ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B'],
         scoreHistory: [0.50, 0.42, 0.44, 0.31, 0.22, 0.04],
         repeatCount: 2,
+        priorWarningAtL2Plus: true,
       }))
       assert.equal(result.shouldAbort, true, 'shouldAbort must allow 1 micro-bounce in declining trend')
       assert.equal(result.abortCause, 'score')
     })
 
-    it('does NOT abort when score is declining but never warned (repeatCount=0)', () => {
+    it('does NOT abort when score is declining but never warned', () => {
       const history = makeHistory(
         Array.from({ length: 12 }, (_, i) => ({ tool: 'read_file', target: `f${i}.ts` })),
       )
@@ -1911,13 +1914,14 @@ describe('evaluateConvergence', () => {
         phaseClass: 'deliver',
         recentToolHistory: history,
         scoreHistory: [0.55, 0.42, 0.31, 0.22, 0.11, 0.04], // steady decline over 6 turns
-        repeatCount: 0, // never been warned
+        repeatCount: 0,
+        priorWarningAtL2Plus: false, // no prior L2+ warning yet
       }))
       assert.equal(result.shouldAbort, false, 'shouldAbort must be false without prior L2 warning')
       assert.equal(result.abortCause, undefined)
     })
 
-    it('ABORTS when score declining AND previously warned (repeatCount>=1)', () => {
+    it('ABORTS when score declining AND previously warned', () => {
       // Same-target reads + oscillating fingerprints → score collapses below 0.05
       const history = makeHistory(
         Array.from({ length: 12 }, () => ({ tool: 'read_file', target: 'same.ts' })),
@@ -1928,9 +1932,10 @@ describe('evaluateConvergence', () => {
         recentToolHistory: history,
         toolFingerprints: ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B'],
         scoreHistory: [0.50, 0.38, 0.40, 0.22, 0.15, 0.03], // 1 micro-bounce, overall declining
-        repeatCount: 2, // been warned twice, still not improving
+        repeatCount: 2,
+        priorWarningAtL2Plus: true, // prior L2+ warning already delivered
       }))
-      assert.equal(result.shouldAbort, true, 'shouldAbort must be true with declining score + repeatCount>=1')
+      assert.equal(result.shouldAbort, true, 'shouldAbort must be true with declining score + prior L2+ warning')
       assert.equal(result.abortCause, 'score')
     })
 

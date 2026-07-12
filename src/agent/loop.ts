@@ -271,7 +271,7 @@ export class AgentLoop {
   /** Rolling score history from recent convergence checks (most recent last).
    *  Maintained as a sliding window of at most 20 entries. Passed to
    *  evaluateConvergence for L3 scoreAbort decline-trend detection. */
-  private convergenceScoreHistory: number[] = []
+  convergenceScoreHistory: number[] = []
   /** 解耦修复：CCR/kick 的让位判据。旧判据 latestConvergenceResult.shouldKick
    *  在卡住期间恒为 true，而发射被 3 轮冷却节流——冷却静默期 CCR 也被整轮压制
    *  （守护链路静音栈的一环）。新判据只在 convergence **真实发射**过 advisory 的
@@ -1915,6 +1915,14 @@ export class AgentLoop {
       this.evidence.getState().filesModified.size,
     )
 
+    // Grace-turn precondition for the score abort: a convergence warning at L2+
+    // must have been delivered in a strictly earlier turn, so the model had at
+    // least one turn to act on the guidance. Captured before this turn's kick
+    // emission updates the fields and passed into evaluateConvergence so the
+    // detector's scoreAbort decision uses the same signal as loop.ts.
+    const warnedInEarlierTurn = this.lastConvergenceEmitLevel >= 2
+      && this.lastConvergenceEmitTurn < turn
+
     const convergenceCheck = evaluateConvergence({
       turn,
       phaseClass: phaseClass as PhaseClass,
@@ -1929,6 +1937,7 @@ export class AgentLoop {
       providerName: this.config.providerName,
       outputTokens: this.session.getTotalUsage().output_tokens,
       repeatCount: this.convergenceEmitRepeatCount,
+      priorWarningAtL2Plus: warnedInEarlierTurn,
       progressBeacons: {
         todoCompletedDelta,
         activePlan: this.activePlanFilePath !== null,
@@ -1940,15 +1949,6 @@ export class AgentLoop {
     this.convergenceScoreHistory.push(convergenceCheck.score)
     if (this.convergenceScoreHistory.length > 20) this.convergenceScoreHistory.shift()
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
-
-    // Grace-turn precondition for the score abort (captured BEFORE this turn's
-    // kick emission updates the fields): a convergence warning at L2+ must have
-    // been delivered in a strictly earlier turn, so the model had at least one
-    // turn to act on the guidance. Without this, the L3 abort fires in the very
-    // same evaluation that submits its own advisory — the advisory is consumed
-    // by the NEXT request, which never happens because we just aborted.
-    const warnedInEarlierTurn = this.lastConvergenceEmitLevel >= 2
-      && this.lastConvergenceEmitTurn < turn
 
     if (convergenceCheck.shouldKick && convergenceCheck.injectedMessage) {
       // Fix 3 — user-interaction reset. When the user just spoke/intervened this

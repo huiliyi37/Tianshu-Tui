@@ -76,6 +76,11 @@ export interface ConvergenceInput {
    *  sustained decline vs isolated dip for L3 score-based abort decisions.
    *  Length should be ≥ signalWindow for meaningful trend detection. */
   scoreHistory?: number[]
+  /** True if an L2+ convergence advisory was already emitted in a strictly
+   *  earlier turn. This is the grace-turn precondition for score-based L3
+   *  aborts: the model must have been warned before we conclude it ignored
+   *  the guidance. */
+  priorWarningAtL2Plus?: boolean
 }
 
 /** W3（incident 20b9714e）：会话活动模式。diagnostic = 近窗口以只读工具为主
@@ -1039,9 +1044,9 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   //    Allows at most 1 micro-bounce (reversal) in the window: real score curves
   //    have natural jitter from tool diversity changes; strict monotonic descent
   //    would miss genuine slow slides.
-  // 2. At least one L2 warning must have been emitted in a prior turn (repeatCount
-  //    >= 1) — the model was told to change course and didn't. First-escalation
-  //    aborts skip the chance for the model to self-correct.
+  // 2. At least one L2 warning must have been emitted in a prior turn — the model
+  //    was told to change course and didn't. First-escalation aborts skip the
+  //    chance for the model to self-correct.
   // These guard bands prevent the penalty multiplication chain (no-tool × read-only
   // × phase-expectation) from false-triggering on a single low-score evaluation.
   const scoreDeclining = input.scoreHistory != null
@@ -1056,7 +1061,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
       // Allow at most 1 micro-bounce; overall trend must still be downward
       return reversals <= 1 && window[window.length - 1]! < window[0]!
     })()
-  const warnedButNotAdopted = (input.repeatCount ?? 0) >= 1
+  const warnedButNotAdopted = input.priorWarningAtL2Plus === true
   const scoreAbort = level >= 3 && score < 0.05 && scoreDeclining && warnedButNotAdopted
   const shouldAbort = scoreAbort || noToolForceAbort
   // Session split is pointless for no-tool stagnation — the problem is model

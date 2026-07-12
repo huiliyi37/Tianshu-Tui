@@ -1632,6 +1632,9 @@ describe('AgentLoop — convergence score-abort grace turn', () => {
     const history = Array.from({ length: 8 }, () => ({ tool: 'read_file', status: 'success', target: 'same.ts' }))
     agent.recentToolHistory = history as unknown as typeof agent.recentToolHistory
     agent.recentTextFingerprints = ['分析中', '分析中', '分析中']
+    // Pre-seed a sustained declining score history so the L3 scoreAbort guard
+    // (scoreDeclining over the signal window) is satisfied within two turns.
+    agent.convergenceScoreHistory = [0.50, 0.40, 0.30, 0.20, 0.10, 0.04]
     return agent
   }
 
