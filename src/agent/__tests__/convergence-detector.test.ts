@@ -1002,55 +1002,45 @@ describe('evaluateConvergence', () => {
     // When productiveRatio === 0 and window >= K, treat as stagnation that
     // bypasses the turn gate (same as noToolStagnation).
 
-    it('detects alternating read-analyze pattern as stagnation before nLow (200K)', () => {
-      // Pattern: read_file with different targets each time (high novelty)
-      // but zero productive tools in 6 calls. Turn 5 < nLow=8.
+    it('detects read-only stagnation after prior productive tool (200K)', () => {
+      // Infinity guard skips productive-stagnation when no productive tool has ever
+      // been called. Use one early edit followed by a long read-only burst so the
+      // last productive tool is far enough behind the current window.
       const history = makeHistory([
-        { tool: 'read_file', target: 'a.ts' },
-        { tool: 'read_file', target: 'b.ts' },
-        { tool: 'read_file', target: 'c.ts' },
-        { tool: 'read_file', target: 'd.ts' },
-        { tool: 'read_file', target: 'e.ts' },
-        { tool: 'read_file', target: 'f.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+        ...Array.from({ length: 12 }, (_, i) => ({ tool: 'read_file', target: `file${i}.ts` })),
       ])
       const result = evaluateConvergence(baseInput({
-        turn: 5, // < nLow=8
+        turn: 13,
         phaseClass: 'explore',
         contextWindow: 200_000,
         recentToolHistory: history,
         noToolTurnCount: 0, // all turns had tools, so this is 0
       }))
-      // Before fix: level=0 (early-exit gate blocks score-based, noTool=0)
-      // After fix: level >= 1 (productive stagnation bypasses gate)
       assert.ok(result.level >= 1,
-        `expected level >= 1 for read-only stagnation at turn 5, got ${result.level} (score=${result.score.toFixed(2)})`)
+        `expected level >= 1 for read-only stagnation, got ${result.level} (score=${result.score.toFixed(2)})`)
     })
 
-    it('detects alternating pattern on 1M window before nLow=12 (GLM scenario)', () => {
-      // 1M window: nLow=12, signalWindow=10
-      // 8 read-only tool calls at turn 6 — should be detected as stagnation
+    it('detects read-only stagnation after prior productive tool on 1M (GLM scenario)', () => {
+      // 1M window: signalWindow=10, distance threshold=20.
+      // One early edit plus 20 trailing read-only calls puts the last productive
+      // tool far enough behind the window for productive-stagnation to fire.
       const history = makeHistory([
-        { tool: 'read_file', target: `file${0}.ts` },
-        { tool: 'read_file', target: `file${1}.ts` },
-        { tool: 'grep', target: 'pattern0' },
-        { tool: 'read_file', target: `file${2}.ts` },
-        { tool: 'read_file', target: `file${3}.ts` },
-        { tool: 'grep', target: 'pattern1' },
-        { tool: 'read_file', target: `file${4}.ts` },
-        { tool: 'read_file', target: `file${5}.ts` },
+        { tool: 'edit_file', target: 'a.ts' },
+        ...Array.from({ length: 20 }, (_, i) =>
+          i % 3 === 1 ? { tool: 'grep', target: `pattern${i}` } : { tool: 'read_file', target: `file${i}.ts` }
+        ),
       ])
       const result = evaluateConvergence(baseInput({
-        turn: 6, // well below nLow=12 for 1M
+        turn: 21,
         phaseClass: 'explore',
         contextWindow: 1_000_000,
         recentToolHistory: history,
         noToolTurnCount: 0,
         providerName: 'glm',
       }))
-      // Before fix: level=0 (turn < nLow=12, noTool=0)
-      // After fix: level >= 1 (productive stagnation bypasses gate)
       assert.ok(result.level >= 1,
-        `expected level >= 1 for GLM read-only stagnation at turn 6 on 1M, got ${result.level} (score=${result.score.toFixed(2)})`)
+        `expected level >= 1 for GLM read-only stagnation on 1M, got ${result.level} (score=${result.score.toFixed(2)})`)
     })
 
     it('does NOT trigger when productive tools are present in window', () => {
@@ -1815,10 +1805,16 @@ describe('evaluateConvergence', () => {
     })
 
     it('build mode keeps the original productive-stagnation copy', () => {
+      // Prepend a productive tool so the Infinity guard does not skip
+      // productive-stagnation, then continue the same-target read burst.
+      const history = makeHistory([
+        { tool: 'edit_file', target: 'a.ts' },
+        ...sameTargetReads(16),
+      ])
       const result = evaluateConvergence(baseInput({
-        turn: 16,
+        turn: 17,
         phaseClass: 'explore',
-        recentToolHistory: sameTargetReads(16),
+        recentToolHistory: history,
         activityMode: 'build',
       }))
       assert.ok(result.level >= 2, `expected L2+, got L${result.level}`)

@@ -37,6 +37,8 @@ export interface AgentConfig {
   checkpointEveryTurns?: number
   contextWindow: number
   compact: CompactionConfig
+  /** Working directory for the session. */
+  cwd?: string
   providerProfile?: ProviderProfile
   /** Provider registry key (e.g. 'deepseek') — used as ProviderHealthTracker id. */
   providerName?: string

@@ -109,6 +109,7 @@ import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
 import type { TurnOrchestrator } from "./turn-orchestrator.js";
 import { type EffortShadowRecord } from './p3-reward.js'
+import { TurnCacheObservability } from './cache-log-observability.js'
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
 
@@ -424,6 +425,8 @@ export class AgentLoop {
   prevMsgCount = 0
   prevHitRate: number | null = null
   prevTokenEfficiency: number | undefined = undefined
+  /** Request-aligned cache telemetry. Tool output is consumed by the next model call. */
+  turnCacheObservability = new TurnCacheObservability()
   /** Estimated context tokens at the end of the previous turn — baseline for
    *  compact attribution (compactPreRatio / compactReclaimed in the cache-log). */
   prevEstTokens = 0
