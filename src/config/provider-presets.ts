@@ -1,6 +1,6 @@
 import type { ModelConfig, ProviderConfig } from './schema.js'
 
-export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'siliconflow'
+export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'siliconflow' | 'longcat'
 
 export interface ProviderPreset {
   key: ProviderPresetKey
@@ -297,6 +297,39 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           tier: 'strong',
           supportsVision: true,
           pricing: { input: 1.0, output: 4.0, cacheRead: 0.5, cacheWrite: 1.0 },
+        },
+      ],
+      unsupported: [],
+    },
+  },
+  longcat: {
+    key: 'longcat',
+    label: 'LongCat (美团龙猫)',
+    defaultModelId: 'LongCat-2.0-Preview',
+    provider: {
+      name: 'longcat',
+      apiKeyEnv: 'LONGCAT_API_KEY',
+      baseUrl: 'https://api.longcat.chat/v1',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        // LongCat cache 命中免费（官方政策），存在服务端隐式前缀缓存
+        prefixCache: 'deepseek-native',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 131072,
+      models: [
+        {
+          id: 'LongCat-2.0-Preview',
+          alias: 'longcat',
+          contextWindow: 1_000_000,
+          maxTokens: 131072,
+          tier: 'strong',
+          // 官方定价 $0.75/$2.95 per M tokens (≈ ¥5/¥20)，cache read 免费
+          pricing: { input: 0.75, output: 2.95, cacheRead: 0, cacheWrite: 0.75 },
         },
       ],
       unsupported: [],
