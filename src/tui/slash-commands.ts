@@ -1874,6 +1874,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
   },
   {
     name: '/fork',
+    description: 'Fork current session (optionally from a message line)',
     immediate: true,
     handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
@@ -1952,6 +1953,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
   },
   {
     name: '/branch',
+    description: 'Show or switch session branches',
     immediate: true,
     handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
