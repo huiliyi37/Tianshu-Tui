@@ -9,7 +9,7 @@ const theme = getTheme()
 
 const strip = (s: string) => s.replace(/\x1B\[[0-9;]*m/g, '')
 
-test('welcome renders CC-style header (3 lines + breathing blanks)', () => {
+test('welcome renders Dawn-style bordered card with breathing blanks', () => {
   const lines = formatWelcome({
     modelName: 'opus-4-8',
     cwd: '/Users/x/app/deepseek-tui/opencode-tui',
@@ -19,7 +19,7 @@ test('welcome renders CC-style header (3 lines + breathing blanks)', () => {
     version: '2.15.1',
     approvalMode: 'auto-safe',
   }, theme)
-  assert.ok(lines.length <= 14, `welcome should be ≤14 lines, got ${lines.length}`)
+  assert.ok(lines.length <= 20, `welcome should be ≤20 lines, got ${lines.length}`)
   assert.ok(lines.length >= 3, `welcome should be ≥3 lines, got ${lines.length}`)
   assert.equal(lines[0], '', 'leading blank line for breathing room')
   assert.equal(lines[lines.length - 1], '', 'trailing blank line for breathing room')
@@ -107,7 +107,7 @@ test('24-row terminal keeps the full header (fits easily)', () => {
     modelName: 'deepseek-v4', cwd: '/x/proj', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 80, rows: 24,
     version: '2.15.1', approvalMode: 'auto-safe',
   }, theme)
-  assert.ok(lines.length >= 3 && lines.length <= 14, `80×24 → full header, got ${lines.length}`)
+  assert.ok(lines.length >= 3 && lines.length <= 20, `80×24 → full header, got ${lines.length}`)
 })
 
 test('no rows provided → 3-line header (back-compat)', () => {

@@ -278,28 +278,44 @@ const SLATE: ThemePaletteDef = {
 // ── Dawn — 启明星（晨星青与地平金）─────────────────────────────────
 const DAWN: ThemePaletteDef = {
   background: 'dark',
-  description: '启明星晨曦调。晨星青与地平金，黎明前深空冷色背景。',
+  description: '启明星晨曦调。青蓝边框、暖金标题、雾灰正文，贴近 Tianshu 启动画面。',
   truecolor: {
-    primary: '#5fb3c4',   // 晨星青
-    secondary: '#d4a574', // 地平金
-    success: '#7fb88a',   // 晨曦绿
-    warning: '#d6a35c',   // 琥珀
-    error: '#e08891',
-    dim: '#85929e',       // 晨雾灰
-    pulseQuiet: '#2c3539',
-    pulseActive: '#5fb3c4',
-    pulseAlert: '#e08891',
-    toolShell: '#d4a574',
-    toolEdit: '#5fb3c4',
-    toolTest: '#7fb88a',
-    toolDelegate: '#d6a35c',
+    primary: '#58d6f5',   // 启明星青蓝：边框 / 图腾 / 重点线
+    secondary: '#d8a15c', // 地平金：标题
+    success: '#7bbf98',   // 柔和晨曦绿
+    warning: '#d8a15c',   // 琥珀金：状态提示
+    error: '#e58e98',
+    dim: '#8f9aaa',       // 雾灰：副标题 / 标签 / 辅助信息
+    pulseQuiet: '#2b3340',
+    pulseActive: '#58d6f5',
+    pulseAlert: '#e58e98',
+    toolShell: '#d8a15c',
+    toolEdit: '#58d6f5',
+    toolTest: '#7bbf98',
+    toolDelegate: '#d8a15c',
   },
-  overrides: { userColor: '#f4f6f7', assistantColor: '#d5dbdb', muted: '#85929e', systemColor: '#85929e' },
+  overrides: {
+    userColor: '#edf3f8',
+    assistantColor: '#dce3ea',
+    muted: '#8f9aaa',
+    systemColor: '#8f9aaa',
+  },
   fallback: {
-    primary: 'cyan', secondary: 'yellow', success: 'green', warning: 'yellow',
-    error: 'red', dim: 'gray', pulseQuiet: 'gray', pulseActive: 'cyan', pulseAlert: 'red',
+    primary: 'cyan',
+    secondary: 'yellow',
+    success: 'green',
+    warning: 'yellow',
+    error: 'red',
+    dim: 'gray',
+    pulseQuiet: 'gray',
+    pulseActive: 'cyan',
+    pulseAlert: 'red',
   },
-  fallbackOverrides: { userColor: 'white', assistantColor: 'white', muted: 'gray' },
+  fallbackOverrides: {
+    userColor: 'white',
+    assistantColor: 'white',
+    muted: 'gray',
+  },
 }
 
 // ── Antigravity 2.0 — Codex cool azure（对齐桌面端 tokens.css）─────

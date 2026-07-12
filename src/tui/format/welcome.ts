@@ -1,13 +1,11 @@
 /**
- * T9 格式化函数 — 首屏欢迎（Claude Code v2 头部样式：3 行紧凑头）。
+ * T9 格式化函数 — 首屏欢迎（Dawn / 启明星风格卡片）。
  *
- * 渲染结构：
- *    ✦   Tianshu Code v2.15.1
- *        deepseek-v4 · auto-safe
- *        ~/app/deepseek-tui/opencode-tui
- *
- * 无边框、无大字 logo、无快捷键矩阵——欢迎屏只回答三个问题：
- * 这是什么（品牌+版本）、现在什么配置（模型+权限）、在哪里（cwd）。
+ * 目标样式：
+ * - 左侧是一枚纵向“启明星”图腾：单一主星 + 向下的光柱 / 地平线倒影。
+ * - 标题使用暖金色，副标题使用雾灰色。
+ * - 信息区从标题列起始位置对齐，整体更接近设计稿。
+ * - 去掉标题旁边的四个小星星，只保留左侧主图腾。
  */
 
 import { homedir } from 'node:os'
@@ -36,8 +34,8 @@ export interface FormatWelcomeInput {
   approvalMode?: string
 }
 
-/** 3 行头 + 前后空行 2 行 + 输入框 3 行 + 终端底部状态栏/呼吸余量 ~2 行。 */
-const BANNER_ROWS = 5
+/** 头图 + 卡片 + 输入框 + 状态栏最低保留。 */
+const BANNER_ROWS = 8
 const RESERVED_ROWS = 5
 
 function truncateToWidth(text: string, maxWidth: number): string {
@@ -51,6 +49,19 @@ function truncateToWidth(text: string, maxWidth: number): string {
 function tildify(cwd: string): string {
   const home = homedir()
   return home && cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
+}
+
+function makeLogoLines(theme: RivetTheme): string[] {
+  const p = (s: string) => color(s, theme.primary, { bold: true })
+  return [
+    `   ${p('╱│╲')}   `,
+    `  ${p('─✦─')}   `,
+    `   ${p('╲│╱')}   `,
+    `    ${p('│')}    `,
+    `    ${p('│')}    `,
+    `  ${p('─┼─')}   `,
+    `  ${p('─┴─')}   `,
+  ]
 }
 
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
@@ -67,37 +78,41 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     return truncateToWidth(line, cols)
   }
 
-  // 折叠模式：单行极简提示，适合恢复会话或非首次启动
   if (input.compact) {
     return [compactLine()]
   }
 
-  // 高度自适应：极矮终端（放不下 3 行头 + 输入框）退单行。
   const rows = input.rows && input.rows > 0 ? input.rows : Number.POSITIVE_INFINITY
   if (rows < BANNER_ROWS + RESERVED_ROWS) {
     return [compactLine()]
   }
-  // ── Kimi Code 风格包裹卡片 ────────────────────────────────────
-  const W = Math.min(cols - 2, 78)
-  if (W < 45) {
+
+  const W = cols - 2
+  if (W < 56) {
     return [compactLine()]
   }
 
   const innerW = W - 4
-  const logoW = 11
-  const infoW = innerW - logoW
+  const logoLines = makeLogoLines(theme)
+  const logoW = 10
+  const gapW = 2
+  const textW = innerW - logoW - gapW
+  const borderCol = (s: string) => color(s, theme.primary)
 
-  const logoLines = [
-    `    ${color('·', theme.secondary)}     `,
-    `  ${color('·', theme.secondary)} ${color('✦', theme.primary, { bold: true })} ${color('·', theme.secondary)} `,
-    `    ${color('·', theme.secondary)}     `,
-  ]
+  const titlePlain = 'Welcome to Tianshu Code!'
+  const subtitlePlain = 'Send /help for help information.'
+  const title = color(titlePlain, theme.secondary, { bold: true })
+  const subtitle = color(subtitlePlain, theme.muted)
 
-  const rightLines = [
-    color('Welcome to Tianshu Code!', theme.secondary, { bold: true }),
-    color('Send /help for help information.', theme.muted),
-    '', // 空行
-  ]
+  const cardLines: string[] = []
+  cardLines.push(borderCol(`┌${'─'.repeat(W - 2)}┐`))
+
+  for (let i = 0; i < logoLines.length; i++) {
+    const rightPlain = i === 0 ? titlePlain : i === 1 ? subtitlePlain : ''
+    const rightColored = i === 0 ? title : i === 1 ? subtitle : ''
+    const pad = ' '.repeat(Math.max(0, textW - displayWidth(rightPlain, WIDE)))
+    cardLines.push(`${borderCol('│')} ${logoLines[i]}${' '.repeat(gapW)}${rightColored}${pad} ${borderCol('│')}`)
+  }
 
   const infoRows: { key: string; val: string }[] = [
     { key: 'Directory', val: tildify(input.cwd) },
@@ -112,48 +127,34 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     infoRows.push({ key: 'Approval', val: label })
   }
 
-  const borderCol = (s: string) => color(s, theme.primary)
-
-  const cardLines: string[] = []
-  cardLines.push(borderCol(`┌${'─'.repeat(W - 2)}┐`))
-
-  for (let i = 0; i < 3; i++) {
-    const logo = logoLines[i]!
-    const right = rightLines[i]!
-    const rightPlain = i === 0 ? 'Welcome to Tianshu Code!' : i === 1 ? 'Send /help for help information.' : ''
-    const rightW = displayWidth(rightPlain, WIDE)
-    const pad = ' '.repeat(Math.max(0, infoW - rightW))
-    cardLines.push(`${borderCol('│')} ${logo}${right}${pad} ${borderCol('│')}`)
-  }
+  const infoIndent = ' '.repeat(logoW + gapW)
+  const infoIndentW = displayWidth(infoIndent, WIDE)
+  const keyW = 13
+  const maxValW = Math.max(8, innerW - infoIndentW - keyW)
 
   for (const row of infoRows) {
-    const keyStr = `  ${row.key}:`
-    const keyColored = color(keyStr.padEnd(12), theme.muted)
-
-    const maxValW = innerW - 12
+    const keyStr = `${row.key}: `.padEnd(keyW)
+    const keyColored = color(keyStr, theme.muted)
     const valPlain = row.val
     const valTruncated = displayWidth(valPlain, WIDE) > maxValW
       ? `${truncateToDisplayWidth(valPlain, maxValW - 1, WIDE)}…`
       : valPlain
     const valW = displayWidth(valTruncated, WIDE)
-    const valColored = color(valTruncated, theme.userColor || theme.secondary)
+    const valColored = color(valTruncated, theme.assistantColor || theme.secondary)
     const pad = ' '.repeat(Math.max(0, maxValW - valW))
-
-    cardLines.push(`${borderCol('│')} ${keyColored}${valColored}${pad} ${borderCol('│')}`)
+    cardLines.push(`${borderCol('│')} ${infoIndent}${keyColored}${valColored}${pad} ${borderCol('│')}`)
   }
 
   cardLines.push(borderCol(`└${'─'.repeat(W - 2)}┘`))
 
-  // 6. 卡片下方留一行状态提示，用琥珀 #d6a35c 高亮前缀
-  const tipPrefix = color('✦ Dawn Mode is ready ', theme.warning, { bold: true })
+  const tipPrefix = color('▸ Dawn Mode is ready ', theme.warning, { bold: true })
   const tipSuffix = color('Tianshu Code now runs with high-density adaptive chrome.', theme.muted)
-  const tipLine = `${tipPrefix}${tipSuffix}`
 
   return [
     '',
     ...cardLines,
     '',
-    `  ${tipLine}`,
+    `  ${tipPrefix}${tipSuffix}`,
     '',
   ]
 }

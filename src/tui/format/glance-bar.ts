@@ -13,9 +13,10 @@ import { getActiveThemeName, type RivetTheme } from '../theme.js'
 
 /** 星域名称 → 主题语义色键（用于 input border / prompt accent 着色）。 */
 export function resolveStarDomainAccent(domainName: string | undefined, theme: RivetTheme): string {
-  // 单色克制：claude/antigravity/cobalt 主题下输入框边框收敛为中性 muted，不再按星域变色。
+  // 单色克制：claude/antigravity/cobalt/dawn 主题下输入框边框收敛为统一 accent，
+  // 不再按星域变色（避免默认星域的 secondary/warning 在 dawn 下变成金色）。
   const active = getActiveThemeName()
-  if (active === 'claude' || active === 'antigravity' || active === 'cobalt') return theme.muted
+  if (active === 'claude' || active === 'antigravity' || active === 'cobalt' || active === 'dawn') return theme.primary
   if (!domainName) return theme.muted
   for (const [id, domain] of Object.entries(STAR_DOMAINS)) {
     if (domain.name === domainName || id === domainName) {
