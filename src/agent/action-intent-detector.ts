@@ -55,14 +55,26 @@ function lastSentence(text: string): string {
   return ''
 }
 
-/** 尾句是否为祈使式行动宣布（动词开头、非完成态汇报）。 */
+/** 尾句是否为祈使式行动宣布（动词开头、非完成态汇报、非问句）。 */
 export function hasImperativeActionTail(text: string): boolean {
   if (!text) return false
   const tail = text.length > 600 ? text.slice(-600) : text
+  // Questions are inquiries, not imperatives — "要我实施吗？" is asking,
+  // not declaring an action to take.
+  if (/[？?]$/.test(tail.trimEnd())) return false
   const sentence = lastSentence(tail)
   if (!sentence || sentence.length > 80) return false
   return IMPERATIVE_HEAD_RE.test(sentence) && !COMPLETION_MARKER_RE.test(sentence)
 }
+
+/**
+ * 交付/收尾信号——全文级别（非仅尾句或尾部 600 字符）。
+ * 当文本整体是测试报告、交付总结或任务完成声明时，
+ * 即使中间某个句子形似祈使命令（"再跑 X"），也不应视为行动意图。
+ * 来源：交付总结含 ✓/passed/任务完成 时被 action-intent gate 误判的回归。
+ */
+export const DELIVERY_SIGNAL_RE =
+  /(?:typecheck\s*[✓✗]|^\d+\s*passed|^\d+\/\d+\s*[✓✗]|任务完成[，。]|交付[。！]|commit\s+[0-9a-f]{7}|^[✓✗]\s|(?:^|\n)>?\s*(?:fix|feat|refactor|test|chore|docs|perf)[(:]\s)/mi
 
 /**
  * 检查文本尾部是否宣布了行动：显式承诺（"让我…"+工具动词）或祈使收尾。
@@ -70,6 +82,9 @@ export function hasImperativeActionTail(text: string): boolean {
  */
 export function hasActionIntent(text: string): boolean {
   if (!text) return false
+  // 交付/收尾守卫：全文含强交付信号时直接返回 false，
+  // 不再检测尾部 600 字符或尾句——这是已完成的汇报，不是悬空的行动承诺。
+  if (DELIVERY_SIGNAL_RE.test(text)) return false
   const tail = text.length > 600 ? text.slice(-600) : text
   if (ACTION_PROMISE_PATTERN.test(tail) && TOOL_VERB_PATTERN.test(tail)) return true
   return hasImperativeActionTail(text)
@@ -81,6 +96,7 @@ export function hasActionIntent(text: string): boolean {
  */
 export function hasWriteActionIntent(text: string): boolean {
   if (!text) return false
+  if (DELIVERY_SIGNAL_RE.test(text)) return false
   const tail = text.length > 600 ? text.slice(-600) : text
   if (ACTION_PROMISE_PATTERN.test(tail) && WRITE_VERB_PATTERN.test(tail)) return true
   return hasImperativeActionTail(text)

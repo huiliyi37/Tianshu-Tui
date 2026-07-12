@@ -7,6 +7,8 @@ import { getSessionDir } from './session-persist.js'
 import type { CompleteTurnParams } from './turn-orchestrator.js'
 import type { AgentCallbacks } from './loop-types.js'
 import type { TelemetryRecord } from './telemetry-writer.js'
+import { hasActionIntent } from './action-intent-detector.js'
+import { DELIVERY_SIGNAL_RE } from './action-intent-detector.js'
 
 // ── Types ──
 
@@ -66,6 +68,30 @@ export class GoalContinuationController {
     )
 
     if (goalResult.shouldContinue) {
+      // ── Proactive delivery gate ──
+      // The default shouldContinue=true path skips the LLM judge entirely —
+      // the model can finish its work without saying "GOAL ACHIEVED" and
+      // still get force-continued, paying 7-8K cacheCreate per useless turn.
+      // Check: when the turn text looks like a natural delivery (delivery
+      // signals, no new action intent), route to the judge instead of
+      // blindly auto-continuing. If the judge agrees it's done, no extra turn.
+      const looksDone =
+        params.streamedText.length > 0 &&
+        !hasActionIntent(params.streamedText) &&
+        DELIVERY_SIGNAL_RE.test(params.streamedText)
+      if (looksDone) {
+        const decision = await this.judgeGoalCompletion(tracker, signal)
+        if (decision.action === 'continue') {
+          tracker.advanceIteration()
+          return this.finishContinuation(tracker, signal, params, decision.reminder)
+        }
+        this.deps.appendSystemReminder(decision.reminder)
+        tracker.deactivate('achieved')
+        this.persistGoalState(tracker)
+        this.deps.flushMeridianTurn()
+        return { kind: 'accept' }
+      }
+
       tracker.advanceIteration()
       return this.finishContinuation(tracker, signal, params, null)
     }

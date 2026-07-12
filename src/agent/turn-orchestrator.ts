@@ -24,7 +24,7 @@ import type { TelemetryRecord } from './telemetry-writer.js'
 import { emitStopReason, type StopReason } from './stop-reason.js'
 import type { AdvisoryEntry } from './advisory-bus.js'
 import { debugLog } from '../utils/debug.js'
-import { hasActionIntent, hasWriteActionIntent, turnUsedOnlyReadTools } from './action-intent-detector.js'
+import { hasActionIntent, hasWriteActionIntent, turnUsedOnlyReadTools, DELIVERY_SIGNAL_RE } from './action-intent-detector.js'
 
 // ── Types re-exported for deps interface ──
 
@@ -318,7 +318,13 @@ function toolBatchFingerprint(toolUses: { name: string; input: unknown }[]): str
   }
 }
 
+/** 两次 action-intent 提醒之间最小间隔（ms）。频繁对话场景下避免每轮注入重复提醒。 */
+const ACTION_INTENT_COOLDOWN_MS = 30_000
+
 export class TurnOrchestrator {
+  /** 上次注入 action-intent system-reminder 的时间戳。跨 run 冷却，避免频繁对话下追着提醒。 */
+  private lastActionIntentNudgeTime = 0
+
   constructor(private deps: TurnOrchestratorDeps) {}
 
   /**
@@ -1002,6 +1008,26 @@ export class TurnOrchestrator {
             }
           }
 
+          // ── Post-tool delivery gate ──
+          // After every tool turn the default was to unconditionally continue.
+          // But for read-only tasks (reviews, research, code inspection) the
+          // model may have gathered enough information and delivered results
+          // — forcing another turn costs 7-8K cacheCreate for no reason.
+          // Check: if the streamed text looks like a natural delivery AND
+          // the tools this turn were all read-only, stop auto-continuing and
+          // fall through to the no-tool path for natural finish.
+          const looksDelivered =
+            this.deps.state.streamedText.length > 0 &&
+            DELIVERY_SIGNAL_RE.test(this.deps.state.streamedText) &&
+            !hasActionIntent(this.deps.state.streamedText) &&
+            turnUsedOnlyReadTools(toolUses)
+          if (looksDelivered) {
+            // Don't archive as isFinal yet — the no-tool path below will handle
+            // natural finish. Just break out of the post-tool continue.
+            callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), false)
+            continue
+          }
+
           await rejectOnAbort(
             this.deps.completeTurn({ turn, isFinal: false, callbacks }),
             signal!,
@@ -1103,8 +1129,16 @@ export class TurnOrchestrator {
         // "接下来修改…") but issued no tool call on this no-tool turn.
         // Inject a system-reminder so the NEXT turn can self-correct —
         // no auto-continue, just a one-shot nudge per run.
-        if (!actionIntentFiredThisRun && hasActionIntent(this.deps.state.streamedText)) {
+        // Cooldown: skip if last nudge was within ACTION_INTENT_COOLDOWN_MS
+        // (frequent chat sessions shouldn't get the same reminder every run).
+        const now = Date.now()
+        if (
+          !actionIntentFiredThisRun &&
+          now - this.lastActionIntentNudgeTime >= ACTION_INTENT_COOLDOWN_MS &&
+          hasActionIntent(this.deps.state.streamedText)
+        ) {
           actionIntentFiredThisRun = true
+          this.lastActionIntentNudgeTime = now
           this.deps.appendSystemReminder(
             '<system-reminder>上一轮你以"我将做…""接下来…"结尾但未发出对应的工具调用。如果还需要执行，请在本轮直接发起工具调用。</system-reminder>'
           )
