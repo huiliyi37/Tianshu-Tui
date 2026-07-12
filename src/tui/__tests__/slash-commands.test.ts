@@ -946,10 +946,15 @@ describe('/yes — one-command YOLO shortcut', () => {
     let mode: string | null = null
     let autoSafe: boolean | null = null
     let persisted: string | null = null
+    let maxTurns: number | null = null
     const entries: string[] = []
     const handled = await handleSlashCommand(makeCtx({
       parts: ['/yes'],
-      agent: { ...makeCtx().agent, setApprovalMode: (m: string) => { mode = m } } as any,
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+        config: { maxTurns: 200 },
+      } as any,
       setAutoSafe: (v: boolean) => { autoSafe = v },
       persistApprovalMode: (m: string) => { persisted = m },
       pushStatic: (entry) => entries.push(entry.content),
@@ -978,6 +983,18 @@ describe('/yes — one-command YOLO shortcut', () => {
     assert.equal(autoSafe, true)
     assert.equal(persisted, 'auto-safe')
     assert.ok(entries[0]!.includes('切回 Auto'), entries[0])
+  })
+
+  it('/permission yolo risk text mentions /yes as confirm path', async () => {
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'yolo'],
+      setAutoSafe: () => {},
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.ok(entries[0]!.includes('/yes'), entries[0])
+    assert.ok(entries[0]!.includes('/permission yolo confirm'), entries[0])
   })
 })
 

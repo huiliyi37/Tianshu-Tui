@@ -803,7 +803,7 @@ async function main() {
       if (tuiApp.choicePanelKind === 'permission-yolo-confirm') {
         const entries = [
           { id: 'cancel', label: '取消', description: '保持当前权限模式不变。', current: true },
-          { id: 'confirm-yolo', label: '⚠ 确认进入 YOLO', description: '无轮次刹车 · 无进度播报 · 所有工具直接执行（沙箱仍拦项目外写入）。回滚兜底：/rollback + git 检查点。设为默认后重启仍是 YOLO。' },
+          { id: 'confirm-yolo', label: '⚠ 确认进入 YOLO', description: '无轮次刹车 · 无进度播报 · 所有工具直接执行（沙箱仍拦项目外写入）。回滚兜底：/rollback + git 检查点。也可直接输入 /yes。设为默认后重启仍是 YOLO。' },
         ]
         return { title: '确认 YOLO 模式 / Confirm YOLO', choices: entries, selectedIndex: 0 }
       }
@@ -1105,22 +1105,23 @@ async function main() {
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
   // Shift+Tab：纯 Plan Mode 叠层开关（不兼审批环）。
   // 进入记住当前审批模式且不改 approval；退出原样恢复（YOLO 不会被冲成 auto-safe/manual）。
-  // 审批切换仍走 /permissions（含 YOLO 二次确认）。未批准 draft 保留在 .rivet/plans/。
-  let approvalModeBeforePlan: ApprovalMode | null = null
+  // 审批切换仍走 /permission 与 /yes；planning 期间改审批会同步更新 stash。未批准 draft 保留在 .rivet/plans/。
   app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
     const setSessionApproval = (mode: ApprovalMode) => {
       agent.setApprovalMode(mode)
       app!.setApprovalMode(mode)
+      // YOLO 联动无限轮次（与 /yes、权限面板一致）
+      agent.config.maxTurns = mode === 'dangerously-skip-permissions' ? 0 : 200
     }
     const current = agent.config.approvalMode ?? 'auto-safe'
     const decision = nextShiftTabPlanToggle({
       isPlanning: agent.planModeState === 'planning',
       currentApprovalMode: current,
-      approvalModeBeforePlan,
+      approvalModeBeforePlan: (app!.approvalModeBeforePlan as ApprovalMode | null) ?? null,
     })
     if (decision.action === 'enter') {
-      approvalModeBeforePlan = decision.stashMode
+      app!.approvalModeBeforePlan = decision.stashMode
       agent.enterPlanMode()
       const path = agent.getActivePlanFilePath()
       const hint = shiftTabPlanToggleHint('enter', decision.stashMode)
@@ -1129,7 +1130,7 @@ async function main() {
     }
     agent.exitPlanMode()
     setSessionApproval(decision.restoreMode)
-    approvalModeBeforePlan = null
+    app!.approvalModeBeforePlan = null
     app!.commitStatic(shiftTabPlanToggleHint('exit', decision.restoreMode))
   })
   app.setPlanTraceProvider(() => ctx!.agent.planTrace)

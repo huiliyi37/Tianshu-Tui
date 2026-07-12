@@ -382,6 +382,11 @@ export class TuiApp {
   private agentBusy = false
   /** 当前会话审批模式（继承自 agent config），供 worker pills badge */
   private _approvalMode: string = 'auto-safe'
+  /**
+   * Shift+Tab Plan Mode 叠层：进入 planning 前记住的审批模式。
+   * 退出 plan 时原样恢复；`/yes` 等在 planning 期间改审批时同步更新此 stash。
+   */
+  approvalModeBeforePlan: string | null = null
   /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) */
   choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' = 'effort'
   /** GlanceBar 信息密度（Wave 2 减密）：compact 默认四项，`/glance full` 切全量。 */

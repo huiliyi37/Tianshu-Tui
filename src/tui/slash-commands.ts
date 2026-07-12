@@ -1458,15 +1458,16 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
             '  · 回滚兜底：/rollback + git 检查点',
             '  · Windows 注意：沙箱能力降级',
             '',
-            '确认进入: /permission yolo confirm',
+            '确认进入: /permission yolo confirm  或  /yes',
           ].join('\n') }))
           setIsStreaming(false)
           return true
         }
         agent.setApprovalMode('dangerously-skip-permissions')
+        agent.config.maxTurns = 0
         ctx.setAutoSafe(false)
         ctx.persistApprovalMode?.('dangerously-skip-permissions')
-        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰（已设为默认，重启后仍生效）。/rollback 可随时回滚。' }))
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰（已设为默认，重启后仍生效）。/rollback 可随时回滚。关闭: /yes off' }))
         setIsStreaming(false)
         return true
       }
@@ -3643,7 +3644,41 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     handler: () => {
       // Delegate to the main permission handler — it reads approvalMode live.
       app.setApprovalMode(ctx.agent.config.approvalMode ?? 'manual')
-      app.commitStatic(`当前权限: ${ctx.agent.config.approvalMode ?? 'manual'} — /permission manual|auto|yolo 快速切换`)
+      app.commitStatic(`当前权限: ${ctx.agent.config.approvalMode ?? 'manual'} — /permission manual|auto|yolo 快速切换 · /yes 一键 YOLO`)
+      app.setStreamingState(false)
+      return true
+    },
+  })
+
+  // /yes：一键 YOLO。显式输入即确认；同步 TUI badge，planning 叠层时更新 stash。
+  register("/yes", {
+    description: "一键 YOLO（/yes off 退出）— 持久化为默认",
+    immediate: true,
+    handler: ({ trimmed }) => {
+      const arg = trimmed.split(/\s+/)[1]?.toLowerCase()
+      const applyLive = (mode: 'dangerously-skip-permissions' | 'auto-safe') => {
+        ctx.agent.setApprovalMode(mode)
+        ctx.agent.config.maxTurns = mode === 'dangerously-skip-permissions' ? 0 : 200
+        app.setApprovalMode(mode)
+        // Plan 叠层期间改审批 → 同步 stash，Shift+Tab 退出时恢复用户最新意图
+        if (ctx.agent.planModeState === 'planning') {
+          app.approvalModeBeforePlan = mode
+        }
+        try { persistApprovalDefault(mode) } catch { /* best-effort */ }
+      }
+      // YOLO 确认面板打开时，/yes 视为确认并关掉面板
+      if (app.choicePanelKind === 'permission-yolo-confirm' && app.activeOverlayId() === 'choice-panel') {
+        app.choicePanelKind = 'effort'
+        app.deactivateOverlay()
+      }
+      if (arg === 'off') {
+        applyLive('auto-safe')
+        app.commitStatic('✓ 已退出 YOLO，切回 Auto — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。')
+        app.setStreamingState(false)
+        return true
+      }
+      applyLive('dangerously-skip-permissions')
+      app.commitStatic('✓ YOLO 已开启 — 全自动执行，无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback')
       app.setStreamingState(false)
       return true
     },
