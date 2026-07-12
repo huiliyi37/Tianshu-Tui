@@ -309,7 +309,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     provider: {
       name: 'longcat',
       apiKeyEnv: 'LONGCAT_API_KEY',
-      baseUrl: 'https://api.longcat.chat/openai/v1',
+      baseUrl: 'https://api.longcat.chat/openai',
       protocol: 'openai',
       capabilities: {
         cacheControl: false,
