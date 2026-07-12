@@ -1873,7 +1873,7 @@ describe('evaluateConvergence', () => {
 
   describe('scoreAbort guard bands', () => {
     it('does NOT abort when score is low but not declining (isolated dip)', () => {
-      // Single low score in an otherwise healthy history — not a real trend.
+      // Multiple reversals in the window — not a real declining trend.
       const history = makeHistory(
         Array.from({ length: 12 }, (_, i) => ({ tool: 'read_file', target: `f${i}.ts` })),
       )
@@ -1881,11 +1881,29 @@ describe('evaluateConvergence', () => {
         turn: 25,
         phaseClass: 'deliver',
         recentToolHistory: history,
-        scoreHistory: [0.82, 0.75, 0.68, 0.71, 0.64, 0.07], // last is an isolated dip
+        // 2 reversals (0.68→0.71, 0.71→0.75) — exceeds the 1-reversal tolerance
+        scoreHistory: [0.82, 0.75, 0.68, 0.71, 0.75, 0.07],
       }))
-      // Level may be 3 (score < 0.1) but abort should be false (not declining)
-      assert.equal(result.shouldAbort, false, 'shouldAbort must be false for isolated score dip')
+      assert.equal(result.shouldAbort, false, 'shouldAbort must be false for non-declining trend')
       assert.equal(result.abortCause, undefined)
+    })
+
+    it('allows up to 1 micro-bounce in an otherwise declining trend', () => {
+      // Same-target reads + oscillation → score collapses below 0.05
+      const history = makeHistory(
+        Array.from({ length: 12 }, () => ({ tool: 'read_file', target: 'same.ts' })),
+      )
+      // 1 reversal (0.42→0.44) — within tolerance, overall declining
+      const result = evaluateConvergence(baseInput({
+        turn: 35,
+        phaseClass: 'deliver',
+        recentToolHistory: history,
+        toolFingerprints: ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B'],
+        scoreHistory: [0.50, 0.42, 0.44, 0.31, 0.22, 0.04],
+        repeatCount: 2,
+      }))
+      assert.equal(result.shouldAbort, true, 'shouldAbort must allow 1 micro-bounce in declining trend')
+      assert.equal(result.abortCause, 'score')
     })
 
     it('does NOT abort when score is declining but never warned (repeatCount=0)', () => {
@@ -1913,7 +1931,7 @@ describe('evaluateConvergence', () => {
         phaseClass: 'deliver',
         recentToolHistory: history,
         toolFingerprints: ['A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B', 'A', 'B'],
-        scoreHistory: [0.50, 0.38, 0.26, 0.15, 0.08, 0.03], // steady decline
+        scoreHistory: [0.50, 0.38, 0.40, 0.22, 0.15, 0.03], // 1 micro-bounce, overall declining
         repeatCount: 2, // been warned twice, still not improving
       }))
       assert.equal(result.shouldAbort, true, 'shouldAbort must be true with declining score + repeatCount>=1')

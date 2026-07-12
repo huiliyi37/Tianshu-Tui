@@ -1036,6 +1036,9 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // L3 scoreAbort 双层护栏（宁可漏报不可误熔断）:
   // 1. Score must be in sustained decline across the signal window — an isolated
   //    dip from a phase transition or phase-mismatch is NOT a real stall.
+  //    Allows at most 1 micro-bounce (reversal) in the window: real score curves
+  //    have natural jitter from tool diversity changes; strict monotonic descent
+  //    would miss genuine slow slides.
   // 2. At least one L2 warning must have been emitted in a prior turn (repeatCount
   //    >= 1) — the model was told to change course and didn't. First-escalation
   //    aborts skip the chance for the model to self-correct.
@@ -1043,7 +1046,16 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // × phase-expectation) from false-triggering on a single low-score evaluation.
   const scoreDeclining = input.scoreHistory != null
     && input.scoreHistory.length >= windowSize
-    && input.scoreHistory.slice(-windowSize).every((s, i, arr) => i === 0 || s <= (arr[i - 1] ?? 1))
+    && (() => {
+      const window = input.scoreHistory.slice(-windowSize)
+      // Count reversals (where a later value is higher than an earlier neighbor)
+      let reversals = 0
+      for (let i = 1; i < window.length; i++) {
+        if (window[i]! > window[i - 1]!) reversals++
+      }
+      // Allow at most 1 micro-bounce; overall trend must still be downward
+      return reversals <= 1 && window[window.length - 1]! < window[0]!
+    })()
   const warnedButNotAdopted = (input.repeatCount ?? 0) >= 1
   const scoreAbort = level >= 3 && score < 0.05 && scoreDeclining && warnedButNotAdopted
   const shouldAbort = scoreAbort || noToolForceAbort
