@@ -226,3 +226,19 @@ test('a corrupt index.json falls back to event reconstruction', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('appendEvent truncates oversized events to a safety stub', () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    // Build a payload well over the 1MB cap (MAX_EVENT_JSON_BYTES)
+    const huge = 'x'.repeat(1_200_000)
+    p.appendEvent('s1', { seq: 1, ts: 1000, type: 'tool_result', data: { text: huge } })
+    p.flushSync()
+    const log = readFileSync(join(dir, 's1', 'events.jsonl'), 'utf8')
+    assert.ok(log.includes('_truncated'), 'truncation marker present')
+    assert.ok(!log.includes('xxxx'), 'original payload not stored')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -48,6 +48,11 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   private flushTimer: ReturnType<typeof setTimeout> | null = null
   private static readonly FLUSH_INTERVAL_MS = 100
   private static readonly FLUSH_MAX_LINES = 50
+  /** Hard cap per event JSON line — guard against runaway payloads (plan_draft
+   *  content, large tool results) silently bloating events.jsonl. Exceeding
+   *  events are replaced with a truncated stub that preserves seq/ts/type for
+   *  recovery diagnostics. */
+  private static readonly MAX_EVENT_JSON_BYTES = 1_000_000 // 1 MB
   /** Events that must be on disk the moment they are appended. Delta/phase
    *  chatter stays on the debounce timer. */
   private static readonly CRITICAL_TYPES: ReadonlySet<string> = new Set([
@@ -78,13 +83,27 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   }
 
   appendEvent(sessionId: string, event: SessionEvent): void {
+    let line = JSON.stringify(event) + '\n'
+
+    // Safety ceiling: truncate oversized events instead of letting a single
+    // runaway payload (e.g. 200KB plan_draft content) silently corrupt the
+    // session log. The stub preserves seq/ts/type for recovery diagnostics.
+    if (line.length > FileSessionPersistence.MAX_EVENT_JSON_BYTES) {
+      line = JSON.stringify({
+        seq: event.seq,
+        ts: event.ts,
+        type: event.type,
+        data: { _truncated: true, _originalBytes: line.length },
+      }) + '\n'
+    }
+
     // Buffer the line — flush is triggered by timer OR when buffer hits capacity.
     let buf = this.eventBuffers.get(sessionId)
     if (!buf) {
       buf = []
       this.eventBuffers.set(sessionId, buf)
     }
-    buf.push(JSON.stringify(event) + '\n')
+    buf.push(line)
     if (
       FileSessionPersistence.CRITICAL_TYPES.has(event.type) ||
       buf.length >= FileSessionPersistence.FLUSH_MAX_LINES
