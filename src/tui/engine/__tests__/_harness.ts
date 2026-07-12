@@ -65,11 +65,16 @@ export interface MakeAppOptions {
   rows?: number
   modelName?: string
   contextWindow?: number
+  /** 是否自动调用 app.start()。默认 true：真实生命周期中 start() 后才会渲染。 */
+  autoStart?: boolean
 }
 
 /**
  * 统一构造 TuiApp + mock TTY。MockOut 的 columns/rows 与传入 cols/rows 对齐，
  * 复刻历史各文件「类字段尺寸 == 构造尺寸」的约定。
+ *
+ * 默认自动调用 app.start()：TuiApp 现在会在 start() 之前抑制 stdout 输出，
+ * 需要渲染的测试必须在 start() 之后观察。
  */
 export function makeApp(opts: MakeAppOptions = {}): { app: TuiApp; out: MockOut; stdin: MockIn } {
   const cols = opts.cols ?? 80
@@ -84,5 +89,8 @@ export function makeApp(opts: MakeAppOptions = {}): { app: TuiApp; out: MockOut;
     modelName: opts.modelName ?? 'test',
     ...(opts.contextWindow != null ? { contextWindow: opts.contextWindow } : {}),
   })
+  if (opts.autoStart !== false) {
+    app.start()
+  }
   return { app, out, stdin }
 }

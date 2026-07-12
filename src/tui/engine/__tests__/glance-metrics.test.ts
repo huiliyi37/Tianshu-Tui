@@ -43,6 +43,7 @@ function makeApp() {
   // 默认 compact 档保留 ⚡/effort，收起 cost/token 绝对值/goal/todo；本套件验证
   // metrics 管线（provider → 渲染）需要全量展示，固定 full 档。
   app.glanceDensity = 'full'
+  app.start()
   return { app, out }
 }
 

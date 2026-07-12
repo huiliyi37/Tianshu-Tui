@@ -41,6 +41,7 @@ import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight } from '../format/glance-bar.js'
+import { WELCOME_MAX_CARD_WIDTH } from '../format/welcome.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
@@ -412,6 +413,10 @@ export class TuiApp {
    *  window and let the user intervene instead. */
   private _lastApprovalDeniedAt = 0
   private static readonly APPROVAL_STALL_GRACE_MS = 5_000
+  /** 是否已经执行过 start()。构造后到 start() 之间的 setter 不应触发渲染，
+   *  否则会在 main.ts 清屏前画出一版输入框；若清屏/flush 出现偏差，旧帧会
+   *  残留在欢迎屏上方形成重影。 */
+  private started = false
   /** Ctrl+X leader key 待处理状态（用于 ctrl+x r 打开右侧面板） */
   private sidePanelLeaderPending = false
   private sidePanelLeaderTimer: ReturnType<typeof setTimeout> | null = null
@@ -986,6 +991,9 @@ export class TuiApp {
    * 无需等待第一次按键。main-ansi 在欢迎块写完后调用。
    */
   start(): void {
+    // 标记已启动：构造后到 start() 之间的 setter 不再触发渲染，
+    // 避免在 main.ts 清屏前画出一版输入框，清屏/flush 偏差时形成顶部重影。
+    this.started = true
     // 启用 bracketed paste（DEC 2004）：粘贴被 200~/201~ 包裹，
     // 避免含 \r 的多行粘贴被逐行当作 Enter 提交、控制字符污染显示。
     this.stdout.write('\x1B[?2004h')
@@ -3072,6 +3080,23 @@ export class TuiApp {
   }
 
   private renderLive(): void {
+    // start() 之前所有 setter / 用户输入回调都不应触发真正的 stdout 输出。
+    // 构造后到 main.ts 清屏写欢迎屏之间若渲染一版输入框，旧帧可能残留在
+    // 欢迎屏上方形成重影；统一在 start() 置 started=true 后才开始绘制。
+    if (!this.started) return
+    // 同步终端实际尺寸：ResizeHandler 的 resize 回调有 150ms debounce，
+    // 在 debounce 窗口内 stdout.columns/rows 已变而 this.columns/rows 仍是旧值。
+    // 若此时触发渲染，renderLiveImpl 按旧宽布局而 LiveEngine 按 stdout 新宽估算
+    // 显示行数，回顶量错误 → 输入框漂移/重影。这里用 stdout 最新值统一口径。
+    const latestCols = this.stdout.columns
+    const latestRows = this.stdout.rows
+    if (latestCols && latestRows) {
+      if (this.columns !== latestCols || this.rows !== latestRows) {
+        this.columns = latestCols
+        this.rows = latestRows
+        this.live.setMaxRows(liveMaxRowsFor(this.rows))
+      }
+    }
     if (this.perfMonitor?.enabled) {
       this.perfMonitor.measure('renderLive', () => this.renderLiveImpl())
     } else {
@@ -3377,15 +3402,20 @@ export class TuiApp {
       const starDomain = activeDomainId ? (STAR_DOMAINS as any)[activeDomainId] : null
       const uiSep = starDomain?.uiPersona?.separator ?? 'thin'
 
-      const W = Math.min(cols - 2, 78)
+      // 输入框外宽与欢迎卡片保持一致：固定上限 + 居中，避免宽终端下输入框缩在
+      // 卡片内部，也避免 resize 后 scrollback 中的卡片被 reflow 拉变形。
+      const W = Math.max(24, Math.min(WELCOME_MAX_CARD_WIDTH, cols - 2))
       const innerWidth = Math.max(20, W - 4)
-      // 静态 chrome（线框字符 + 底边框）只依赖 (separator, innerWidth, borderColor)，
+      // 静态 chrome（线框字符 + 底边框）只依赖 (separator, innerWidth, borderColor），
       // 缓存复用，避免每帧 repeat(innerWidth) 重建。
       const { leftBar, rightBar, botBorder } = this.getInputChrome(uiSep, innerWidth, borderColor)
 
-      // 3. 构建高保真左右指标 Segment
+      // 输入框/状态栏与欢迎卡片的内容区对齐：卡片边框外侧 + 1 列内边距。
+      const chromeLeftPadding = ' '.repeat(Math.max(0, Math.floor((cols - W) / 2) + 1))
+
+      // 3. 构建高保真左右指标 Segment（按卡片宽度 W 决定 narrow/compact 模式）
       const leftStr = formatGlanceLeft({
-        width: cols,
+        width: W,
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
@@ -3396,7 +3426,7 @@ export class TuiApp {
       }, this.theme)
 
       const rightStr = formatGlanceRight({
-        width: cols,
+        width: W,
         modelName: this.state.modelName,
         reasoningEffort: this.metricsGlanceController.reasoningEffortProvider?.(),
         cacheHitRate: glanceCacheHitRate,
@@ -3435,18 +3465,18 @@ export class TuiApp {
         return raw
       }
 
-      lines.push({ text: topBorder })
+      lines.push({ text: chromeLeftPadding + topBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-        lines.push({ text: this.renderInputRow(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth, leftBar, rightBar) })
+        lines.push({ text: chromeLeftPadding + this.renderInputRow(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth, leftBar, rightBar) })
         for (const extra of inputLines.slice(1)) {
-          lines.push({ text: this.renderInputRow(colorizeInputLine(extra), innerWidth, leftBar, rightBar) })
+          lines.push({ text: chromeLeftPadding + this.renderInputRow(colorizeInputLine(extra), innerWidth, leftBar, rightBar) })
         }
       } else {
         for (const inputDisplayLine of inputLines) {
-          lines.push({ text: this.renderInputRow(colorizeInputLine(inputDisplayLine), innerWidth, leftBar, rightBar) })
+          lines.push({ text: chromeLeftPadding + this.renderInputRow(colorizeInputLine(inputDisplayLine), innerWidth, leftBar, rightBar) })
         }
       }
-      lines.push({ text: botBorder })
+      lines.push({ text: chromeLeftPadding + botBorder })
 
       // 5a. 一体化状态底栏（包含星域、分支、执行模式及实时监控指标）
       //     当 slash 命令提示打开时让位，避免视觉重叠。
@@ -3462,29 +3492,34 @@ export class TuiApp {
         const leftFull = `${leftStr} ${color(`[${modeLabel}${planLabel}]`, this.theme.muted)}`
         const leftLen = displayWidth(leftFull, { ambiguousAsWide: true })
         const rightLen = displayWidth(rightStr, { ambiguousAsWide: true })
-        
-        const spaceCount = Math.max(1, cols - leftLen - rightLen - 4) // 4 = 左右侧缩进留白
-        const statusLine = "  " + leftFull + " ".repeat(spaceCount) + rightStr
-        lines.push({ text: this.clampLine(statusLine) })
+
+        // 状态栏左边缘与输入框对齐，右边缘延伸至终端右边界，确保 metrics/cost
+        // 等关键信息不因卡片宽度上限而被截断。
+        const maxStatusWidth = cols - 1
+        const spaceCount = Math.max(1, maxStatusWidth - chromeLeftPadding.length - leftLen - rightLen - 2)
+        const statusLine = chromeLeftPadding + ' ' + leftFull + ' '.repeat(spaceCount) + rightStr
+        lines.push({ text: this.clampLine(statusLine, maxStatusWidth) })
       }
 
       // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）
       if (isSlash) {
+        const hintMaxWidth = Math.max(20, cols - chromeLeftPadding.length)
         for (const hintLine of formatSlashHint({ input: inputVal, commands: this.inputController.slashCommands, selectedIdx: this.inputController.slashSelectedIdx }, this.theme)) {
-          lines.push({ text: this.clampLine(hintLine) })
+          lines.push({ text: chromeLeftPadding + this.clampLine(hintLine, hintMaxWidth) })
         }
       }
 
       // 5c. @ 文件补全候选列表（Tab 循环时显示）
       if (this.inputController.fileCompletion && this.inputController.fileCompletion.candidates.length > 1) {
         const fc = this.inputController.fileCompletion
+        const fileHintMaxWidth = Math.max(20, cols - chromeLeftPadding.length)
         for (let i = 0; i < Math.min(fc.candidates.length, 6); i++) {
           const selected = i === fc.idx
           const marker = selected ? color('❯ ', this.theme.primary) : '  '
           const name = color(fc.candidates[i]!, selected ? this.theme.primary : this.theme.muted)
-          lines.push({ text: this.clampLine(`${marker}${name}`) })
+          lines.push({ text: chromeLeftPadding + this.clampLine(`${marker}${name}`, fileHintMaxWidth) })
         }
-        lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
+        lines.push({ text: chromeLeftPadding + this.clampLine(color('tab to cycle', this.theme.dim), fileHintMaxWidth) })
       }
     }
 

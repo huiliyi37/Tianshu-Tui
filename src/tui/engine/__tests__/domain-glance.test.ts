@@ -42,6 +42,7 @@ const glanceFromOutput = (out: MockOut) => stripAnsi(out.chunks.join(''))
 
 test('setSessionStarDomain 切换 GlanceBar 显示', () => {
   const { app, out } = makeApp()
+  app.start()
   out.chunks.length = 0
   app.setSessionStarDomain('天权')
   const plain = glanceFromOutput(out)
@@ -50,6 +51,7 @@ test('setSessionStarDomain 切换 GlanceBar 显示', () => {
 
 test('turnComplete 后保留 /domain 设定的星域（不清回默认）', async () => {
   const { app, out } = makeApp()
+  app.start()
   app.setSessionStarDomain('天权')
   out.chunks.length = 0
   app.callbacks.onTurnComplete({ input_tokens: 10, output_tokens: 5 }, 1, true)
@@ -60,6 +62,7 @@ test('turnComplete 后保留 /domain 设定的星域（不清回默认）', asyn
 
 test('委派期间显示天机，turn 结束恢复会话星域', async () => {
   const { app, out } = makeApp()
+  app.start()
   app.setSessionStarDomain('天权')
   app.callbacks.onToolUse('d1', 'delegate_task', { objective: 'explore' })
   assert.ok(glanceFromOutput(out).includes('天机'))

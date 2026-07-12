@@ -39,6 +39,7 @@ function makeApp() {
     stdin: stdin as unknown as ReadStream,
     cols: 100, rows: 40, modelName: 'test',
   })
+  app.start()
   return { app, out }
 }
 

@@ -24,6 +24,7 @@ function makeApp() {
     stdin: stdin as unknown as ReadStream,
     cols: 120, rows: 24, modelName: 'test', contextWindow: 200_000,
   })
+  app.start()
   return { app, out, stdin }
 }
 

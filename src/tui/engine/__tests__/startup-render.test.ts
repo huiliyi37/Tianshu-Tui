@@ -44,11 +44,12 @@ test('start() first frame is a clean append (no stale moveToTop after pre-start 
     cols: 100, rows: 40, modelName: 'gpt-5.5',
   })
 
-  // 模拟 main.ts 构造后、清屏前的 setter 触发的一次渲染（画出输入框，置 hasRendered）。
+  // 模拟 main.ts 构造后、清屏前的 setter：现在 start() 之前不应触发 stdout 输出，
+  // 避免清屏前画出一版输入框，随后 flush/清屏偏差形成顶部重影。
   app.setInput('')
-  assert.ok(out.chunks.join('').length > 0, 'pre-start setter should have rendered once')
+  assert.equal(out.chunks.join('').length, 0, 'pre-start setter 不应渲染')
 
-  // 模拟 main.ts：清屏 + 写欢迎屏（这里只关心清屏使屏上那版输入框失效）。
+  // 模拟 main.ts：清屏 + 写欢迎屏。
   out.clear()
   out.write('\x1B[2J\x1B[H')
   out.write('WELCOME\n')

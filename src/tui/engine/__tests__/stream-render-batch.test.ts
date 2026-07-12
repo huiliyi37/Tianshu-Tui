@@ -42,6 +42,7 @@ function makeApp() {
     stdin: stdin as unknown as ReadStream,
     cols: 120, rows: 24, modelName: 'test', contextWindow: 200_000,
   })
+  app.start()
   return { app, out }
 }
 
@@ -73,13 +74,64 @@ test('thinking delta 流经 WriteBatcher：同步批次合并为 1 次渲染', a
 })
 
 test('tool-result streaming chunk 经 WriteBatcher 合并', async () => {
-  const { app, out } = makeApp()
-  out.chunks = []
+  const { app } = makeApp()
+  let renders = 0
+  const internals = app as unknown as { renderLive: () => void }
+  internals.renderLive = () => { renders++ }
 
   // isError === undefined → streaming chunk 路径
   for (let i = 0; i < 8; i++) app.callbacks.onToolResult('t1', 'bash', `line${i}\n`, undefined)
-  assert.equal(out.chunks.length, 0, `streaming chunk 同步阶段不渲染，实际 ${out.chunks.length}`)
+  assert.equal(renders, 0, 'streaming chunk 同步阶段不渲染')
 
   await microtask()
-  assert.ok(out.chunks.length >= 1, 'flush 后渲染 1 次')
+  assert.equal(renders, 1, 'flush 后只渲染 1 次')
+})
+
+test('critical phase flush invalidates a queued streaming render', async () => {
+  const { app } = makeApp()
+  let renders = 0
+  const internals = app as unknown as { renderLive: () => void }
+  internals.renderLive = () => { renders++ }
+
+  app.callbacks.onThinkingDelta('queued delta')
+  assert.equal(renders, 0, 'delta remains scheduled')
+
+  app.callbacks.onPhaseChange?.('waiting')
+  assert.equal(renders, 1, 'phase change flushes immediately')
+
+  await microtask()
+  assert.equal(renders, 1, 'invalidated streaming microtask cannot double-render')
+})
+
+test('stable stream commit renders once while an unstable tail remains scheduled', async () => {
+  const { app } = makeApp()
+  let renders = 0
+  const internals = app as unknown as { renderLive: () => void }
+  internals.renderLive = () => { renders++ }
+
+  app.callbacks.onTextDelta(`${'x'.repeat(31)}\n\n`)
+  assert.equal(renders, 1, 'stable commit renders synchronously through commitAbove')
+  await microtask()
+  assert.equal(renders, 1, 'stable commit must not queue a duplicate render')
+
+  app.callbacks.onTextDelta('unfinished live tail')
+  assert.equal(renders, 1, 'tail render stays deferred')
+  await microtask()
+  assert.equal(renders, 2, 'tail without stable boundary still redraws')
+})
+
+test('app without a perf monitor emits no shutdown summary', () => {
+  const out = new MockOut()
+  const stdin = new MockIn()
+  let summaries = 0
+  const app = new TuiApp({
+    stdout: out as unknown as WriteStream,
+    stdin: stdin as unknown as ReadStream,
+    cols: 120,
+    rows: 24,
+    onPerfSummary: () => { summaries++ },
+  })
+
+  app.dispose()
+  assert.equal(summaries, 0)
 })
