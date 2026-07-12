@@ -1969,18 +1969,19 @@ describe('evaluateConvergence', () => {
       assert.ok(result.level >= 1, `expected L1+ after cooldown, got L${result.level}`)
     })
 
-    it('phaseRelativeTurn defaults to 1 when not passed (backward compat)', () => {
+    it('phaseRelativeTurn defaults to no cooldown when absent (backward compat)', () => {
       const history = makeHistory(
         Array.from({ length: 8 }, (_, i) => ({ tool: 'read_file', target: `file${i}.ts` })),
       )
-      // phaseRelativeTurn absent → defaults to 1 → within cooldown → no L2+
+      // phaseRelativeTurn absent → no cooldown → stagnation fires as before
       const result = evaluateConvergence(baseInput({
-        turn: 10,
+        turn: 14,
         phaseClass: 'deliver',
         phaseRelativeTurn: undefined,
         recentToolHistory: history,
       }))
-      assert.ok(result.level < 2, `backward compat: absent phaseRelativeTurn → cooldown → level < 2, got L${result.level}`)
+      // Old behavior preserved: stagnation can fire at L1+ when phaseRelativeTurn is absent
+      assert.ok(result.level >= 1, `absent phaseRelativeTurn → no cooldown → level >= 1, got L${result.level}`)
     })
   })
 })

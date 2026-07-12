@@ -68,7 +68,9 @@ export interface ConvergenceInput {
   activityMode?: ActivityMode
   /** Turns since current phaseClass was set. 1 = first turn in this phase.
    *  Used to suppress productive-stagnation during the cooling period after
-   *  a phase transition. When absent, defaults to 1 (conservative: cooldown active). */
+   *  a phase transition. When absent, defaults to Infinity (no cooldown —
+   *  backward compatible: callers that don't track phase transitions get
+   *  the original unstifled stagnation detection). */
   phaseRelativeTurn?: number
   /** Score history from recent turns (most recent last). Used to detect
    *  sustained decline vs isolated dip for L3 score-based abort decisions.
@@ -964,7 +966,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // phase's read-heavy tools. Let the model establish a phase-appropriate tool
   // pattern before flagging stagnation.
   const phaseCooldown = Math.min(4, windowSize)
-  const inPhaseCooldown = (input.phaseRelativeTurn ?? 1) <= phaseCooldown
+  const inPhaseCooldown = (input.phaseRelativeTurn ?? Infinity) <= phaseCooldown
   const productiveStagnation = !inPhaseCooldown
     && distanceToLastProductive !== Infinity
     && stagnationWindow.length >= Math.min(windowSize, 4)
