@@ -217,6 +217,7 @@ export function SkillsSurface() {
     const badge = sourceBadge(s.source)
     const busy = installing.has(s.name)
     const confirming = confirmName === s.name
+    const isLoaded = loadedNames.has(s.name)
     return (
       <div
         key={`inst-${s.name}`}
@@ -230,13 +231,26 @@ export function SkillsSurface() {
           <div className={`skill-tile ${tileClass(s.name)}`} aria-hidden>
             {s.name.slice(0, 1).toUpperCase()}
           </div>
-          <button
-            className={`skills-install-action${confirming ? ' confirm' : ''}`}
-            disabled={s.installed || busy}
-            onClick={(e) => { e.stopPropagation(); install(s.name) }}
-          >
-            {s.installed ? t('install.installed') : busy ? t('install.installing') : confirming ? t('install.confirm') : t('install.install')}
-          </button>
+          {s.installed && isLoaded ? (
+            <button className="skills-install-action" disabled>
+              {t('install.installedLoaded')}
+            </button>
+          ) : s.installed ? (
+            <button
+              className="skills-install-action"
+              onClick={(e) => { e.stopPropagation(); openNewThread() }}
+            >
+              {t('install.enable')}
+            </button>
+          ) : (
+            <button
+              className={`skills-install-action${confirming ? ' confirm' : ''}`}
+              disabled={busy}
+              onClick={(e) => { e.stopPropagation(); install(s.name) }}
+            >
+              {busy ? t('install.installing') : confirming ? t('install.confirm') : t('install.install')}
+            </button>
+          )}
         </div>
         <div className="skill-store-name">{s.name}</div>
         <div className="skill-store-desc">{s.description || t('card.noDescription')}</div>
@@ -431,15 +445,37 @@ export function SkillsSurface() {
                     {(detailSkill as SkillStatus).enabled ? t('detail.disable') : t('detail.enable')}
                   </button>
                 ) : (
-                  <button
-                    className="btn sm"
-                    disabled={(detailSkill as InstallableSkill).installed || installing.has(detailSkill.name)}
-                    onClick={() => install(detailSkill.name)}
-                  >
-                    {(detailSkill as InstallableSkill).installed
-                      ? t('install.installed')
-                      : installing.has(detailSkill.name) ? t('install.installing') : overCap && confirmName === detailSkill.name ? t('install.confirm') : t('install.install')}
-                  </button>
+                  (() => {
+                    const inst = detailSkill as InstallableSkill
+                    const loaded = loadedNames.has(inst.name)
+                    if (inst.installed && loaded) {
+                      return (
+                        <button className="btn sm" disabled>
+                          {t('install.installedLoaded')}
+                        </button>
+                      )
+                    }
+                    if (inst.installed) {
+                      return (
+                        <button className="btn sm" onClick={() => openNewThread()}>
+                          {t('install.enable')}
+                        </button>
+                      )
+                    }
+                    return (
+                      <button
+                        className="btn sm"
+                        disabled={installing.has(inst.name)}
+                        onClick={() => install(inst.name)}
+                      >
+                        {installing.has(inst.name)
+                          ? t('install.installing')
+                          : overCap && confirmName === inst.name
+                            ? t('install.confirm')
+                            : t('install.install')}
+                      </button>
+                    )
+                  })()
                 )}
               </div>
             </>

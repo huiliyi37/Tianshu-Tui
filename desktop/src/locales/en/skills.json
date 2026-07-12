@@ -26,6 +26,8 @@
     "newThreadToEnable": "New Thread to Enable",
     "newThread": "New Thread",
     "installed": "Installed",
+    "installedLoaded": "Enabled",
+    "enable": "Enable",
     "installing": "Installing…",
     "confirm": "Confirm install?",
     "install": "Install"

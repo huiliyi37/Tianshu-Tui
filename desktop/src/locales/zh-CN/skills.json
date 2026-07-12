@@ -26,6 +26,8 @@
     "newThreadToEnable": "新建线程以启用",
     "newThread": "新建线程",
     "installed": "已安装",
+    "installedLoaded": "已启用",
+    "enable": "启用",
     "installing": "安装中…",
     "confirm": "确认安装?",
     "install": "安装"
