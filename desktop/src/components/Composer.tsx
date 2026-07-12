@@ -209,7 +209,12 @@ export const Composer = memo(function Composer(props: {
     }
   }, [value])
 
-  useLayoutEffect(() => {
+  // Defer textarea auto-resize to useEffect (not useLayoutEffect) so the
+  // browser paints the typed character first, then adjusts height next frame.
+  // useLayoutEffect blocks paint on the forced synchronous layout
+  // (height='auto' → read scrollHeight → write height), making typing feel
+  // sluggish especially in WKWebView.
+  useEffect(() => {
     const el = taRef.current
     if (!el) return
     el.style.height = 'auto'
