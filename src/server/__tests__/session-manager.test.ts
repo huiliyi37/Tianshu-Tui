@@ -53,6 +53,8 @@ class FakeAgent implements ManagedAgent {
   getMessages(): OaiMessage[] { return this.messages }
   replaceMessages(msgs: OaiMessage[]): void { this.messages = msgs }
   rewindToMessages(msgs: OaiMessage[]): void { this.messages = msgs }
+  /** P0-2: optional — plan_task onToolResult reads this to emit todo_state */
+  getTodos?: () => Array<{ id: string; content: string; status: string }>
 }
 
 function makeArtifact(id: string, over: Partial<Artifact> = {}): Artifact {
@@ -556,6 +558,56 @@ test('T2: todo read action does NOT emit todo_state; bad statuses fall back to p
   assert.equal(evs.length, 1, 'only the write action emits')
   const items = evs[0]!.data.items as Array<{ status: string }>
   assert.equal(items[0]!.status, 'pending')
+})
+
+test('P0-2: plan_task success emits todo_state via onToolResult', () => {
+  const agents: FakeAgent[] = []
+  const manager = new RuntimeSessionManager({
+    createAgent: () => {
+      const a = new FakeAgent()
+      // P0-2: plan_task onToolResult reads session.agent.getTodos()
+      a.getTodos = () => [
+        { id: '1', content: 'step one', status: 'pending' },
+        { id: '2', content: 'step two', status: 'pending' },
+      ]
+      agents.push(a)
+      return a
+    },
+    defaultCwd: '/tmp/work',
+  })
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  // plan_task success → todo_state emitted
+  cb.onToolResult('plan1', 'plan_task', 'ok', false)
+  const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'todo_state')
+  assert.equal(evs.length, 1)
+  assert.deepEqual(evs[0]!.data.items, [
+    { id: '1', content: 'step one', status: 'pending' },
+    { id: '2', content: 'step two', status: 'pending' },
+  ])
+})
+
+test('P0-2: plan_task error does NOT emit todo_state', () => {
+  const agents: FakeAgent[] = []
+  const manager = new RuntimeSessionManager({
+    createAgent: () => {
+      const a = new FakeAgent()
+      a.getTodos = () => [
+        { id: '1', content: 'step one', status: 'pending' },
+      ]
+      agents.push(a)
+      return a
+    },
+    defaultCwd: '/tmp/work',
+  })
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  // plan_task error → no todo_state
+  cb.onToolResult('plan1', 'plan_task', 'error', true)
+  const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'todo_state')
+  assert.equal(evs.length, 0)
 })
 
 // ── T3: mid-run steering ────────────────────────────────────────────

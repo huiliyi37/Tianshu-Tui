@@ -688,6 +688,9 @@ export interface SalientBlock {
 function renderProgressBlock(ctx: VolatileContext, hasProjection?: boolean): string | null {
   // When sessionState is available, it's the richest source (objective + plan step
   // + modified files + decisions + failed tests). Extract its content and wrap as <progress>.
+  // P0-1: also merge taskProgress (current/done/next) so the model sees its todo list
+  // even when sessionState is active — taskProgress is NOT included in sessionState
+  // (SessionStateManager.renderForVolatile covers task contract, not todo store).
   if (ctx.sessionState) {
     // sessionState is pre-rendered as `<session-state>...\n</session-state>`
     // Re-wrap as <progress> to unify the tag namespace
@@ -699,9 +702,29 @@ function renderProgressBlock(ctx: VolatileContext, hasProjection?: boolean): str
     if (hasProjection) {
       inner = inner.replace(/^Objective:.*\n?/m, '')
     }
+
+    // Merge taskProgress lines into the progress block
+    const tpLines: string[] = []
+    if (ctx.taskProgress?.current) {
+      tpLines.push(`current: ${escapeXml(ctx.taskProgress.current)}`)
+    }
+    if (ctx.taskProgress?.completed && ctx.taskProgress.completed.length > 0) {
+      tpLines.push(`done: ${ctx.taskProgress.completed.map(escapeXml).join(', ')}`)
+    }
+    if (ctx.taskProgress?.remaining && ctx.taskProgress.remaining.length > 0) {
+      tpLines.push(`next: ${ctx.taskProgress.remaining.map(escapeXml).join(', ')}`)
+    }
+
     const trimmed = inner.trim()
-    if (!trimmed) return null
-    return `<progress>\n${trimmed}\n</progress>`
+    const hasSessionContent = trimmed.length > 0
+    const hasTaskProgress = tpLines.length > 0
+    if (!hasSessionContent && !hasTaskProgress) return null
+
+    const combined = [
+      hasSessionContent ? trimmed : null,
+      hasTaskProgress ? tpLines.join('\n') : null,
+    ].filter(Boolean).join('\n')
+    return `<progress>\n${combined}\n</progress>`
   }
 
   // Fallback: build from individual fields (early turns before sessionStateManager is ready)

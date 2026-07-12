@@ -829,6 +829,8 @@ function buildManagedAgent(
     conveneCouncil: (input) => conveneCouncilOnCoordinator(agent, stores.refs.coordinator, stores.refs, input),
     // 用户主动派后台子代理：独立 AbortSignal，跑在隔离子会话，不碰主历史。
     delegateWorker: (input, opts) => delegateWorkerOnCoordinator(stores.refs.coordinator, input, opts),
+    // P0-2: plan_task 成功后 onToolResult 通过此方法读取 TodoStore 发 todo_state SSE
+    getTodos: () => stores.refs.todoStore.read(),
   }
 }
 

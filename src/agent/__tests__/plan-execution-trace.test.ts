@@ -415,4 +415,34 @@ describe('withPlanSteps', () => {
     assert.equal(result.steps.length, 0)
     assert.equal(result.history.length, 1)
   })
+
+  // P1-2: history exists + steps already populated → status-only sync
+  it('syncs status when history exists and steps are populated', () => {
+    const trace = createTrace('c1', 'wiring', [
+      makeStep('step-1', ['read_file'], { status: 'pending' }),
+      makeStep('step-2', ['read_file'], { status: 'pending' }),
+    ])
+    const progressed = appendResult(trace, makeResult('turn-1', 1))
+    // Now simulate a todo write that marks step-1 completed and step-2 in_progress
+    const updated = buildPlanSteps([
+      { id: 'step-1', content: progressed.steps[0]!.description, status: 'completed' },
+      { id: 'step-2', content: progressed.steps[1]!.description, status: 'in_progress' },
+    ], 'wiring')
+    const result = withPlanSteps(progressed, updated)
+    // Status synced (mapTodoStatusToStepStatus: completed→done, in_progress→active)
+    assert.equal(result.steps[0]!.status, 'done')
+    assert.equal(result.steps[1]!.status, 'active')
+    // Structure unchanged
+    assert.equal(result.steps.length, 2)
+    assert.equal(result.history.length, 1)
+  })
+
+  // P1-2: history exists but incoming steps are empty → no-op (guards against mid-execution replan)
+  it('returns unchanged when history exists and incoming steps are empty', () => {
+    const trace = createTrace('c1', 'unit', [makeStep('step-1', ['read_file'], { status: 'pending' })])
+    const progressed = appendResult(trace, makeResult('turn-1', 1))
+    const result = withPlanSteps(progressed, [])
+    assert.equal(result, progressed, 'returns same trace reference')
+    assert.equal(result.steps.length, 1)
+  })
 })

@@ -1026,3 +1026,60 @@ describe('progress objective dedup (C3)', () => {
     assert.match(appendix, /<objective>ship the feature<\/objective>/)
   })
 })
+
+// ── P0-1: progress merges taskProgress into sessionState ─────────────
+
+describe('progress merges taskProgress with sessionState', () => {
+  const sessionState = '<session-state>\nTask: fix caching bug [in_progress]\nModified: src/cache.ts\n</session-state>'
+
+  it('taskProgress appears in <progress> alongside session content', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      sessionState,
+      taskProgress: {
+        completed: ['read docs'],
+        current: 'implement fix',
+        remaining: ['write tests', 'review'],
+        decisions: [],
+      },
+    }
+    const appendix = buildDynamicAppendix(ctx)
+    assert.match(appendix, /<progress>/)
+    assert.match(appendix, /Task: fix caching bug/)
+    assert.match(appendix, /Modified: src\/cache\.ts/)
+    // RED assertion — currently fails because taskProgress is dropped
+    assert.match(appendix, /current: implement fix/)
+    assert.match(appendix, /done: read docs/)
+    assert.match(appendix, /next: write tests, review/)
+  })
+
+  it('session-only (no taskProgress) still works', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      sessionState,
+    }
+    const appendix = buildDynamicAppendix(ctx)
+    assert.match(appendix, /<progress>/)
+    assert.match(appendix, /Task: fix caching bug/)
+    assert.doesNotMatch(appendix, /current:/)
+    assert.doesNotMatch(appendix, /done:/)
+  })
+
+  it('taskProgress-only (no sessionState) fallback works', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      taskProgress: {
+        completed: ['read docs'],
+        current: 'fix cache',
+        remaining: ['write tests'],
+        decisions: [],
+      },
+      decisions: ['use middleware'],
+    }
+    const appendix = buildDynamicAppendix(ctx)
+    assert.match(appendix, /current: fix cache/)
+    assert.match(appendix, /done: read docs/)
+    assert.match(appendix, /next: write tests/)
+    assert.match(appendix, /use middleware/)
+  })
+})

@@ -267,5 +267,34 @@ describe('TODO_TOOL onPlanSteps (U6/C1)', () => {
     })
     assert.equal(result.isError, undefined)
   })
+
+  // ── P1-1: description + continuation reminder ─────────────────
+
+  it('description includes when-to-use and when-not-to-use guidance', () => {
+    const desc = TODO_TOOL.definition.description
+    // when-to-use triggers
+    assert.ok(desc.includes('3+ distinct steps') || desc.includes('non-trivial') || desc.includes('multi-file'))
+    // when-not-to-use: explicit negative example
+    assert.ok(desc.includes('single trivial step') || desc.includes('one-shot edits'))
+    // proactive capture
+    assert.ok(desc.includes('right after receiving new instructions') || desc.includes('BEFORE starting work'))
+  })
+
+  it('write success returns continuation reminder', async () => {
+    const result = await TODO_TOOL.execute({
+      input: {
+        action: 'write',
+        todos: [
+          { id: '1', content: 'Read main.tsx', status: 'completed' },
+          { id: '2', content: 'Fix bug in loop', status: 'in_progress' },
+        ],
+      },
+      toolUseId: 'tu_1',
+      cwd: '/repo',
+    })
+    assert.equal(result.isError, undefined)
+    // RED: currently no continuation reminder
+    assert.ok(result.content.includes('继续用 todo 跟踪进度') || result.content.includes('track progress with todo'))
+  })
 })
 

@@ -186,6 +186,9 @@ Status rules:
             + `re-mark them as completed. Do NOT redo finished work.\n\n${content}`
       }
 
+      // P1-1: 续用回执——提醒模型继续用 todo 跟踪进度
+      content += '\n\n继续用 todo 跟踪进度——完成即标 completed，保持恰好一个 in_progress。'
+
       return { content }
     },
 

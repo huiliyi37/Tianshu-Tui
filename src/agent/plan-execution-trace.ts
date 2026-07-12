@@ -166,18 +166,23 @@ export function buildPlanSteps(
 /**
  * U6/C1: 把分解出的步骤填入 trace；若 trace 已有步骤，则按 id/description
  * 同步状态。这样 todo write / plan_task 都能持续刷新 PlanExecutionTrace。
+ *
+ * P1-2: 执行中（有 history）时仍允许 status-only 同步——不增删步骤、不改
+ * description。中途重规划（增删步骤）会破坏 trace 稳定性，应触发 replan
+ * 而非静默改写当前 trace。
  */
 export function withPlanSteps(
   trace: PlanExecutionTrace,
   steps: PlanStep[],
 ): PlanExecutionTrace {
-  // 幂等守卫：一旦执行已开始（有 history），绝不回填/重写计划步骤——中途重规划
-  // 会破坏 trace 稳定性。返回同一引用，下游可用引用相等判断"无变更"。
-  if (trace.history.length > 0) return trace
-  // 全新 trace（无步骤、无 history）：填入初始步骤。
-  if (trace.steps.length === 0) return { ...trace, steps }
+  const hasHistory = trace.history.length > 0
+  // history 存在且 steps 为空 → 无信息可同步，保持原样
+  if (hasHistory && steps.length === 0) return trace
 
-  // 已有步骤（无 history）：只同步状态，不覆盖结构。无任何变更时返回同一引用。
+  // 无 history → 全新 trace，填入初始步骤
+  if (!hasHistory && trace.steps.length === 0) return { ...trace, steps }
+
+  // 已有步骤（有 history 或无 history）：只同步状态，不覆盖结构。无任何变更时返回同一引用。
   let changed = false
   const merged = trace.steps.map(existing => {
     const match = steps.find(s =>
