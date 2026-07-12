@@ -63,7 +63,7 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     ? `${input.sessionId.slice(0, 8)} (${input.priorMsgCount} prior)`
     : input.sessionId.slice(0, 8)
 
-  const effortColor = input.reasoningEffort === 'max' ? theme.secondary
+  const effortColor = input.reasoningEffort === 'max' || input.reasoningEffort === 'auto' ? theme.secondary
     : input.reasoningEffort === 'high' ? theme.primary
     : input.reasoningEffort === 'off' ? theme.dim
     : theme.muted

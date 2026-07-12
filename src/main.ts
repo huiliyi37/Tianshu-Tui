@@ -1303,7 +1303,9 @@ async function main() {
       compact: existingMsgCount > 0,
       version: installRoot ? getCurrentVersion(installRoot) : null,
       approvalMode: ctx.config.agent.approval ?? 'auto-safe',
-      reasoningEffort: ctx.agent.getReasoningEffort() ?? ctx.agent.config.reasoningEffort,
+      reasoningEffort: (ctx.agent.config.autoReasoning && !ctx.agent.userReasoningOverride)
+        ? 'auto'
+        : (ctx.agent.getReasoningEffort() ?? ctx.agent.config.reasoningEffort),
     }, theme)
     for (const line of welcomeLines) {
       stdout.write(line + '\n')
