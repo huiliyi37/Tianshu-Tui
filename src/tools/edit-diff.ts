@@ -60,18 +60,29 @@ export async function buildFileDiff(
 
   // Try worker pool first with a longer timeout (non-blocking)
   let raw: string | undefined
+  let shouldInlineFallback = !cpuPool.available
   if (cpuPool.available) {
     try {
-      raw = (await cpuPool.run('diffUnifiedRaw', [posixPath, before, after, POOL_DIFF_TIMEOUT_MS])) as
+      raw = (await cpuPool.run('diffUnifiedRaw', [posixPath, before, after, POOL_DIFF_TIMEOUT_MS], POOL_DIFF_TIMEOUT_MS)) as
         | string
         | undefined
-    } catch {
-      // Pool unavailable or timed out — fall through to inline
+      // Worker returned undefined → jsdiff hit its internal timeout. The same
+      // input will also timeout inline, so bail out now rather than burning
+      // another second on the main thread.
+      if (raw === undefined) return ''
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('timed out')) {
+        // Worker already tried for 4s and failed; inline (1s) won't succeed.
+        return ''
+      }
+      // Worker crashed or became unavailable — fall through to inline.
+      shouldInlineFallback = true
     }
   }
 
-  // Inline fallback
-  if (raw === undefined) {
+  // Inline fallback (only when the pool is unavailable, never after timeout).
+  if (shouldInlineFallback) {
     raw = diffUnifiedRaw(posixPath, before, after, DIFF_TIMEOUT_MS)
   }
   if (raw === undefined) return ''
@@ -123,21 +134,35 @@ export async function computeChangedLineRanges(
 
   // Try worker pool first with a longer timeout
   let hunks: RawHunk[] | undefined
+  let shouldInlineFallback = !cpuPool.available
   if (cpuPool.available) {
     try {
       const result = (await cpuPool.run('diffStructuredRaw', [
         before,
         after,
         POOL_DIFF_TIMEOUT_MS,
-      ])) as { hunks: RawHunk[] } | undefined
+      ], POOL_DIFF_TIMEOUT_MS)) as { hunks: RawHunk[] } | undefined
       hunks = result?.hunks
-    } catch {
-      // Pool unavailable or timed out — fall through to inline
+      // Worker returned undefined → jsdiff hit its internal timeout. Skip the
+      // futile inline attempt and treat the whole file as changed.
+      if (hunks === undefined) {
+        const lineCount = after.length === 0 ? 1 : after.split('\n').length
+        return [{ start: 1, end: lineCount }]
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('timed out')) {
+        // Worker already tried for 4s; inline (1s) won't succeed either.
+        const lineCount = after.length === 0 ? 1 : after.split('\n').length
+        return [{ start: 1, end: lineCount }]
+      }
+      // Worker crashed or became unavailable — fall through to inline.
+      shouldInlineFallback = true
     }
   }
 
-  // Inline fallback
-  if (hunks === undefined) {
+  // Inline fallback (only when the pool is unavailable, never after timeout).
+  if (shouldInlineFallback) {
     const patch = diffStructuredRaw(before, after, DIFF_TIMEOUT_MS)
     hunks = patch?.hunks
   }
