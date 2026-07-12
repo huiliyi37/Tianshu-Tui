@@ -83,6 +83,7 @@ import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-
 import { ResourceSensor, type ResourceSensorSnapshot } from './resource-sensor.js'
 import { type PlanMethodology, type TaskContract, type TaskDepthLayer } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
+import { describeImages } from './vision-service.js'
 import { createStanceTally } from './stance-tally.js'
 import { createVirtuePendingLedger, type VirtuePendingLedger, computeVirtueCredit } from './virtue-signals.js'
 import { createFailureJournal, type FailureJournal } from './failure-journal.js'
@@ -866,9 +867,9 @@ export class AgentLoop {
     }
   }
 
-  /** U6/C1: seed the execution trace from the agent's first todo write.
-   *  withPlanSteps is idempotent — only the first non-empty write populates
-   *  the baseline; later status-update writes are a no-op on the trace. */
+  /** U6/C1: seed or sync the execution trace from todo/plan_task step inputs.
+   *  withPlanSteps is idempotent for first population; once history exists,
+   *  only status is synced (no step insertion/removal/description changes). */
   capturePlanSteps(steps: import('../tools/types.js').PlanStepInput[]): void {
     this.planTraceCoordinator.capturePlanSteps(steps)
   }
@@ -1749,6 +1750,23 @@ export class AgentLoop {
     // session is always in a consistent state at the await boundary.
     try {
       await this.cancelIdleCompaction()
+
+      // Vision bridge: when the primary model is text-only but a dedicated
+      // multimodal model is configured, describe the images and prepend the
+      // description to the user prompt so the primary model still receives
+      // the visual information.
+      if (images && images.length > 0 && !this.config.supportsVision && this.config.visionClient) {
+        const description = await describeImages(this.config.visionClient, images, {
+          prompt: this.config.visionModelPrompt,
+          maxTokens: this.config.visionModelMaxTokens,
+          signal: this.abortController.signal,
+        })
+        if (description) {
+          userInput = `[图片描述]\n${description}\n\n${userInput}`
+        }
+        images = undefined
+      }
+
       await this._runInner(userInput, callbacks, images)
     } finally {
       this._running = false

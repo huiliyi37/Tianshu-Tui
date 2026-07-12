@@ -253,6 +253,11 @@ export interface ManagedAgent {
   /** Model context window size (max tokens). */
   getContextWindow?(): number
   /**
+   * P0-2: 返回本会话 TodoStore 的当前清单。plan_task 成功后发 todo_state SSE 用。
+   * 多会话隔离——每个 session 独立的 TodoStore。Optional 以兼容 lightweight test doubles。
+   */
+  getTodos?(): Array<{ id: string; content: string; status: string }>
+  /**
    * Wave L: 进程退出时释放 session 级资源（典型场景：sidecar runServe.close
    * → shutdownAll）。具体实现负责调 coordinator.shutdown 等清 timer/in-flight
    * worker。与 abort() 严格分离——abort 中止当前 turn 但保留 agent 可继续运行，
@@ -447,6 +452,18 @@ export interface RuntimeSessionManagerOptions {
    * Default 30 minutes.
    */
   idleAgentTtlMs?: number
+  /** Injectable timer surface for deterministic tool-result coalescing tests. */
+  toolResultScheduler?: {
+    setTimeout(callback: () => void, ms: number): unknown
+    clearTimeout(handle: unknown): void
+  }
+  /** Injectable plan timer surface for deterministic lifecycle tests. */
+  planEventScheduler?: {
+    setTimeout(callback: () => void, ms: number): unknown
+    clearTimeout(handle: unknown): void
+  }
+  /** Injectable async plan listing for deterministic lifecycle tests. */
+  listPlans?: typeof storeListPlans
 }
 
 type InterventionKind = 'approval'
@@ -461,6 +478,13 @@ interface PendingIntervention {
   toolName?: string
   /** Original (unredacted) tool input for remember handling. */
   toolInput?: Record<string, unknown>
+}
+
+interface ActiveRunSettlement {
+  settled: boolean
+  claimsReleased: boolean
+  promise: Promise<void>
+  resolve: () => void
 }
 
 interface InternalSession {
@@ -482,6 +506,11 @@ interface InternalSession {
   eventsLoadPromise?: Promise<void>
   seq: number
   running: boolean
+  activeRunSettlement?: ActiveRunSettlement
+  /** Increments when durability ownership is permanently revoked. */
+  lifecycleGeneration: number
+  /** Permanent-delete tombstone retained by queued callback closures. */
+  tombstoned?: boolean
   pending: Map<string, PendingIntervention>
   listeners: Set<(e: SessionEvent) => void>
   knownArtifacts: Set<string>
@@ -548,7 +577,8 @@ interface InternalSession {
   /** plan_draft 节流 — 最近一次发射时刻（this.now() 读数）。 */
   planDraftLastEmit?: number
   /** plan_draft 节流 — 尾沿定时器，保证窗口内最后一次写盘总能落一发事件。 */
-  planDraftTimer?: NodeJS.Timeout
+  planDraftTimer?: unknown
+  planDraftTimerGeneration?: number
   /** 无人值守运行：审批请求 fail-closed 中止（付费版 v1 · T2）。 */
   unattended?: boolean
   /** 无人值守中止原因（首个被拦截的审批），随 done/summary 上报。 */
@@ -561,6 +591,11 @@ interface InternalSession {
   deltaTimer?: NodeJS.Timeout
   /** 当前 delta run 是否已发出首个事件（首 token 立即落，后续走窗口）。 */
   deltaRunActive?: boolean
+  /** Contiguous streaming tool_result run; terminal results are never buffered. */
+  toolResultStream?: { id: string; name: string; buffered: string; active: boolean }
+  toolResultTimer?: unknown
+  /** Reject streaming callbacks from an archived/deleted agent closure. */
+  toolResultClosed?: boolean
 }
 
 const REDACTED = '[REDACTED]'
@@ -592,6 +627,31 @@ const DELTA_COALESCE_MS = 40
 
 /** 合并缓冲上限——超过即刻 flush，避免慢消费者场景下单事件过大。 */
 const DELTA_COALESCE_MAX_CHARS = 2_048
+const TOOL_RESULT_COALESCE_MS = 40
+const TOOL_RESULT_COALESCE_BYTES = 2_048
+
+function takeUtf8Prefix(text: string, maxBytes: number): { head: string; tail: string } {
+  let bytes = 0
+  let end = 0
+  for (const point of text) {
+    const pointBytes = Buffer.byteLength(point)
+    if (bytes + pointBytes > maxBytes) break
+    bytes += pointBytes
+    end += point.length
+  }
+  return { head: text.slice(0, end), tail: text.slice(end) }
+}
+
+function truncateUtf16Safe(text: string, maxUnits: number): string {
+  let units = 0
+  let end = 0
+  for (const point of text) {
+    if (units + point.length > maxUnits) break
+    units += point.length
+    end += point.length
+  }
+  return text.slice(0, end)
+}
 
 /** Result of a user-dispatch request — lets the route map a precise status code. */
 export type DelegateResult =
@@ -689,6 +749,15 @@ export class RuntimeSessionManager {
   private readonly defaultDomain?: string
   private readonly resumeFallbackModel?: string
   private readonly idleAgentTtlMs: number
+  private readonly toolResultScheduler: {
+    setTimeout(callback: () => void, ms: number): unknown
+    clearTimeout(handle: unknown): void
+  }
+  private readonly planEventScheduler: {
+    setTimeout(callback: () => void, ms: number): unknown
+    clearTimeout(handle: unknown): void
+  }
+  private readonly loadPlans: typeof storeListPlans
   private idleSweepTimer?: ReturnType<typeof setInterval>
 
   constructor(opts: RuntimeSessionManagerOptions) {
@@ -706,6 +775,15 @@ export class RuntimeSessionManager {
     this.defaultModelId = opts.defaultModelId
     this.resumeFallbackModel = opts.resumeFallbackModel
     this.idleAgentTtlMs = opts.idleAgentTtlMs ?? 30 * 60_000
+    this.toolResultScheduler = opts.toolResultScheduler ?? {
+      setTimeout: (callback, ms) => setTimeout(callback, ms),
+      clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    }
+    this.planEventScheduler = opts.planEventScheduler ?? {
+      setTimeout: (callback, ms) => setTimeout(callback, ms),
+      clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    }
+    this.loadPlans = opts.listPlans ?? storeListPlans
     if (this.idleAgentTtlMs > 0) {
       // Sweep once a minute; unref so the timer never keeps the process alive.
       this.idleSweepTimer = setInterval(() => this.sweepIdleAgents(), 60_000)
@@ -760,6 +838,7 @@ export class RuntimeSessionManager {
     s.jobs = undefined
     // Never drop unflushed coalesced deltas — they'd be lost from the replay.
     this.flushDeltaBuf(s)
+    this.flushToolResultBuf(s)
     s.events = []
     s.knownArtifacts = new Set()
     s.eventsLoaded = false
@@ -798,6 +877,7 @@ export class RuntimeSessionManager {
           eventsLoaded: false,
           seq: rec.lastSeq,
           running: false,
+          lifecycleGeneration: 0,
           pending: new Map(),
           listeners: new Set(),
           knownArtifacts: new Set(),
@@ -872,6 +952,7 @@ export class RuntimeSessionManager {
         eventsLoaded: true,
         seq: maxSeq,
         running: false,
+        lifecycleGeneration: 0,
         pending: new Map(),
         listeners: new Set(),
         knownArtifacts: new Set(
@@ -1012,6 +1093,7 @@ export class RuntimeSessionManager {
     if (!s) return undefined
     await this.ensureEventsAsync(s)
     this.flushDeltaBuf(s)
+    this.flushToolResultBuf(s)
     const events = s.events.filter((e) => e.seq > since)
     return { events, lastSeq: s.seq }
   }
@@ -1088,12 +1170,13 @@ export class RuntimeSessionManager {
 
   /**
    * Irreversibly delete ONE archived session's files. Guarded: refuses unless
-   * the session is archived and idle, so an active conversation can never be
-   * nuked by the cleanup UI. Returns the freed byte count (0 on no-op).
+   * the session is archived. An archived run may still be settling after its
+   * abort request; hard delete tombstones durability while finalization retains
+   * only the in-memory busy/resource cleanup path.
    */
   deleteSession(id: string): { ok: boolean; freedBytes: number } {
     const s = this.sessions.get(id)
-    if (!s || s.record.archived !== true || s.running) return { ok: false, freedBytes: 0 }
+    if (!s || s.record.archived !== true) return { ok: false, freedBytes: 0 }
     const freedBytes = this.persistence?.sizeOf?.(id) ?? 0
     return { ok: this.hardDelete(id), freedBytes }
   }
@@ -1137,15 +1220,64 @@ export class RuntimeSessionManager {
   private hardDelete(id: string): boolean {
     const s = this.sessions.get(id)
     if (!s) return false
+    s.tombstoned = true
+    s.lifecycleGeneration++
+    s.toolResultClosed = true
+    this.disposeDeletedSessionState(s)
     try { s.agent?.shutdown?.() } catch { /* best-effort */ }
     try { s.jobs?.killAll() } catch { /* best-effort */ }
-    if (s.planDraftTimer) clearTimeout(s.planDraftTimer)
-    try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* best-effort */ }
+    if (s.activeRunSettlement) {
+      this.releaseRunClaims(id, s.activeRunSettlement)
+    } else {
+      try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* best-effort */ }
+    }
     this.sessions.delete(id)
     const i = this.loadedOrder.indexOf(id)
     if (i !== -1) this.loadedOrder.splice(i, 1)
     try { this.persistence?.deleteSession?.(id) } catch { /* best-effort */ }
     return true
+  }
+
+  private disposeDeletedSessionState(session: InternalSession): void {
+    if (session.deltaTimer) clearTimeout(session.deltaTimer)
+    session.deltaTimer = undefined
+    session.deltaBuf = undefined
+    session.deltaRunActive = false
+    this.cancelPlanDraftTimer(session)
+    session.planDraftLastEmit = undefined
+    if (session.watchdogContinueTimer) clearTimeout(session.watchdogContinueTimer)
+    session.watchdogContinueTimer = undefined
+    session.watchdogAutoResubmit = false
+    session.watchdogRecoveryCancelled = true
+    this.cancelToolResultBuf(session)
+    for (const pending of session.pending.values()) {
+      if (pending.timer) clearTimeout(pending.timer)
+      pending.resolve({ approved: false })
+    }
+    session.pending.clear()
+    session.record.pendingApprovals = 0
+  }
+
+  private ownsSessionDurability(session: InternalSession): boolean {
+    return !session.tombstoned && this.sessions.get(session.record.id) === session
+  }
+
+  private ownsSessionLifecycle(session: InternalSession, generation: number): boolean {
+    return this.ownsSessionDurability(session) && session.lifecycleGeneration === generation
+  }
+
+  private releaseRunClaims(id: string, settlement: ActiveRunSettlement): void {
+    if (settlement.claimsReleased) return
+    settlement.claimsReleased = true
+    try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* non-fatal */ }
+  }
+
+  private cancelPlanDraftTimer(session: InternalSession): void {
+    if (session.planDraftTimer !== undefined) {
+      this.planEventScheduler.clearTimeout(session.planDraftTimer)
+      session.planDraftTimer = undefined
+    }
+    session.planDraftTimerGeneration = undefined
   }
 
   /**
@@ -1211,6 +1343,7 @@ export class RuntimeSessionManager {
       eventsLoaded: true,
       seq: 0,
       running: false,
+      lifecycleGeneration: 0,
       pending: new Map(),
       listeners: new Set(),
       knownArtifacts: new Set(),
@@ -1266,6 +1399,7 @@ export class RuntimeSessionManager {
     this.ensureEvents(session)
     const agent = this.ensureAgent(session)
     session.running = true
+    session.toolResultClosed = false
     // T3 — drop any guidance left from a previous run so it can't leak forward.
     session.steer.clear()
     session.record.status = 'running'
@@ -1287,15 +1421,31 @@ export class RuntimeSessionManager {
     this.append(session, 'status', { status: 'running' })
     this.persistRecord(session)
 
+    const runGeneration = session.lifecycleGeneration
+    let resolveRunSettlement!: () => void
+    const runSettlementPromise = new Promise<void>((resolve) => {
+      resolveRunSettlement = resolve
+    })
+    const runSettlement: ActiveRunSettlement = {
+      settled: false,
+      claimsReleased: false,
+      promise: runSettlementPromise,
+      resolve: resolveRunSettlement,
+    }
+    session.activeRunSettlement = runSettlement
+    this.bindPlanModeChange(session, agent, runGeneration)
     const callbacks = this.buildCallbacks(session)
+    const ownsDurability = (): boolean => this.ownsSessionLifecycle(session, runGeneration)
     void agent
       .run(prompt, callbacks, images)
       .then(() => {
+        if (!ownsDurability()) return
         if (session.record.status === 'running') {
           session.record.status = 'completed'
         }
       })
       .catch((err: unknown) => {
+        if (!ownsDurability()) return
         if (session.record.status === 'running') {
           session.record.status = 'failed'
           session.record.error = redactText((err as Error)?.message ?? String(err))
@@ -1303,27 +1453,43 @@ export class RuntimeSessionManager {
         }
       })
       .finally(() => {
-        session.running = false
-        // Close out approvals the run left dangling — the promise must settle
-        // (deny) either way, but label honestly: only an aborted run closes as
-        // 'aborted'; a run that ended on its own (completed/failed) leaves the
-        // approval merely 'stale' — the user never denied it and nothing was
-        // interrupted. Mislabeling completed runs as aborted poisoned the
-        // timeline and downstream "was this an interruption?" heuristics.
-        this.rejectAllPending(session, session.record.status === 'aborted' ? 'aborted' : 'stale')
-        // R1 — turn finished: release this session's exclusive file claims so a
-        // peer session can edit those files next. Idempotent / best-effort.
-        try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* non-fatal */ }
-        this.touch(session)
-        // postSession 产物（如 walkthrough 走查工件）在 run 落定后才入 store —
-        // 这里再扫一遍，让 'artifact' 事件把它公告给桌面端。
-        this.scanArtifacts(session)
-        this.append(session, 'done', { status: session.record.status })
-        this.persistRecord(session)
-        this.maybeWatchdogAutoContinue(session)
-        // Phase 3 #9 — the session was archived while this run was settling
-        // (archive aborts first): finish the unload archiveSession deferred.
-        if (session.record.archived) this.unloadSession(session)
+        if (runSettlement.settled) return
+        runSettlement.settled = true
+        try {
+          if (session.activeRunSettlement === runSettlement) {
+            session.activeRunSettlement = undefined
+            session.running = false
+          }
+          this.releaseRunClaims(id, runSettlement)
+          if (!ownsDurability()) {
+            // Archive owns the durable transition and advances the generation,
+            // but an archived session still needs the deferred heavy-state unload
+            // once its old agent promise releases. Never unload after unarchive.
+            if (this.ownsSessionDurability(session) && session.record.archived) {
+              this.unloadSession(session)
+            }
+            return
+          }
+          // Close out approvals the run left dangling — the promise must settle
+          // (deny) either way, but label honestly: only an aborted run closes as
+          // 'aborted'; a run that ended on its own (completed/failed) leaves the
+          // approval merely 'stale' — the user never denied it and nothing was
+          // interrupted. Mislabeling completed runs as aborted poisoned the
+          // timeline and downstream "was this an interruption?" heuristics.
+          this.rejectAllPending(session, session.record.status === 'aborted' ? 'aborted' : 'stale')
+          this.touch(session)
+          // postSession 产物（如 walkthrough 走查工件）在 run 落定后才入 store —
+          // 这里再扫一遍，让 'artifact' 事件把它公告给桌面端。
+          this.scanArtifacts(session)
+          this.append(session, 'done', { status: session.record.status })
+          this.persistRecord(session)
+          this.maybeWatchdogAutoContinue(session)
+          // Phase 3 #9 — the session was archived while this run was settling
+          // (archive aborts first): finish the unload archiveSession deferred.
+          if (session.record.archived) this.unloadSession(session)
+        } finally {
+          runSettlement.resolve()
+        }
       })
     return true
   }
@@ -1543,16 +1709,7 @@ export class RuntimeSessionManager {
     try {
       if (session.reasoningEffort !== undefined) agent.setReasoningEffort?.(session.reasoningEffort)
     } catch { /* non-fatal */ }
-    // 主动 plan mode：模型经 plan action=enter_mode 自主切换时，把状态镜像到
-    // session record 并发 plan_mode SSE（桌面切 Plan tab）。server 自己触发的
-    // 切换（setPlanMode/approve/reject）已直接 append —— 状态相同时跳过防重复。
-    agent.onPlanModeChange = (state: PlanModeState) => {
-      if (session.record.planMode === state) return
-      session.record.planMode = state
-      this.touch(session)
-      this.append(session, 'plan_mode', { state })
-      this.persistRecord(session)
-    }
+    this.bindPlanModeChange(session, agent, session.lifecycleGeneration)
     // Plan mode 是 AgentLoop 的内存态，record.planMode 是持久态。agent 重建
     // （懒构建恢复会话 / switchModel）会丢内存态：工具门禁失效、
     // getActivePlanFilePath 变 null → 桌面「起草中」实时视图断流。record 说
@@ -1560,6 +1717,23 @@ export class RuntimeSessionManager {
     // onPlanModeChange 的同态守卫保证不会重复发 plan_mode SSE。
     if (session.record.planMode === 'planning') {
       try { agent.enterPlanMode?.() } catch { /* non-fatal */ }
+    }
+  }
+
+  private bindPlanModeChange(
+    session: InternalSession,
+    agent: ManagedAgent,
+    lifecycleGeneration: number,
+  ): void {
+    // AgentLoop owns this callback property, so rebind it for every run. A
+    // closure retained by an older run must not mutate a restored/new run.
+    agent.onPlanModeChange = (state: PlanModeState) => {
+      if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
+      if (session.record.planMode === state) return
+      session.record.planMode = state
+      this.touch(session)
+      this.append(session, 'plan_mode', { state })
+      this.persistRecord(session)
     }
   }
 
@@ -2049,29 +2223,26 @@ export class RuntimeSessionManager {
     id: string,
     prompt: string,
   ): Promise<{ status: SessionStatus; summary: string; changedFiles: string[]; haltedApp?: string }> {
-    return new Promise((resolve) => {
-      const s = this.sessions.get(id)
-      if (!s || s.running) {
-        resolve({ status: 'failed', summary: 'session missing or busy', changedFiles: [] })
-        return
-      }
-      const unsub = this.subscribe(id, (e) => {
-        if (e.type === 'done') {
-          unsub?.()
-          resolve({
-            status: s.record.status,
-            summary: this.buildRunSummary(s),
-            changedFiles: this.collectChangedFiles(s),
-            // 无人值守中止时缺授权的 app（结构化透传给 TaskRecord 修复闭环）。
-            ...(s.unattendedHaltApp ? { haltedApp: s.unattendedHaltApp } : {}),
-          })
-        }
-      })
-      if (!this.run(id, prompt)) {
-        unsub?.()
-        resolve({ status: 'failed', summary: 'failed to start', changedFiles: [] })
-      }
-    })
+    const s = this.sessions.get(id)
+    if (!s || s.running) {
+      return Promise.resolve({ status: 'failed', summary: 'session missing or busy', changedFiles: [] })
+    }
+    if (!this.run(id, prompt)) {
+      return Promise.resolve({ status: 'failed', summary: 'failed to start', changedFiles: [] })
+    }
+    // run() installs this token synchronously before invoking AgentLoop.run().
+    // Capture it now so a later run can never satisfy this waiter.
+    const settlement = s.activeRunSettlement
+    if (!settlement) {
+      return Promise.resolve({ status: 'failed', summary: 'run settlement unavailable', changedFiles: [] })
+    }
+    return settlement.promise.then(() => ({
+      status: s.record.status,
+      summary: this.buildRunSummary(s),
+      changedFiles: this.collectChangedFiles(s),
+      // 无人值守中止时缺授权的 app（结构化透传给 TaskRecord 修复闭环）。
+      ...(s.unattendedHaltApp ? { haltedApp: s.unattendedHaltApp } : {}),
+    }))
   }
 
   private buildRunSummary(session: InternalSession): string {
@@ -2184,6 +2355,7 @@ export class RuntimeSessionManager {
     this.ensureEvents(s)
     // Poll/replay must see the freshest text — drain the delta window first.
     this.flushDeltaBuf(s)
+    this.flushToolResultBuf(s)
     const events = s.events.filter((e) => e.seq > since)
     return { events, lastSeq: s.seq }
   }
@@ -2199,8 +2371,14 @@ export class RuntimeSessionManager {
   abort(id: string): boolean {
     const s = this.sessions.get(id)
     if (!s) return false
+    const wasRunning = s.running
     if (s.record.status === 'running') {
       s.record.status = 'aborted'
+    }
+    if (wasRunning) {
+      s.lifecycleGeneration++
+      this.cancelPlanDraftTimer(s)
+      s.planDraftLastEmit = undefined
     }
     // 窄窗口竞态修复：watchdog stall 后 finally → setImmediate 续跑之间，用户
     // abort 对已停会话是空操作。设此标记让 setImmediate 守卫放弃续跑。
@@ -2239,6 +2417,7 @@ export class RuntimeSessionManager {
       try { s.jobs?.killAll() } catch { /* best-effort */ }
       // Drain any coalescing delta window so the tail is never lost on exit.
       try { this.flushDeltaBuf(s) } catch { /* best-effort */ }
+      try { this.flushToolResultBuf(s) } catch { /* best-effort */ }
     }
     // Flush any buffered events to disk before exit.
     this.persistence?.flushSync?.()
@@ -2257,11 +2436,13 @@ export class RuntimeSessionManager {
     // Stop any in-flight run first (mirrors abort's cleanup).
     if (s.running) {
       s.record.status = 'aborted'
+      s.lifecycleGeneration++
+      this.cancelPlanDraftTimer(s)
+      s.planDraftLastEmit = undefined
       s.agent?.abort()
       this.rejectAllPending(s, 'aborted')
     }
     s.record.archived = true
-    s.running = false
     // Clean up isolated worktree on archive. Guard against data loss: if the
     // worktree has uncommitted changes, checkpoint-commit them first; if the
     // branch carries commits not merged into the main workspace, keep the
@@ -2290,8 +2471,9 @@ export class RuntimeSessionManager {
     this.append(s, 'status', branchKept
       ? { status: 'archived', branchKept: true, worktreeBranch: s.record.worktreeBranch }
       : { status: 'archived' })
+    s.toolResultClosed = true
+    this.cancelToolResultBuf(s)
     this.persistRecord(s)
-    try { this.getRegistry?.()?.releaseAllClaims(id) } catch (e) { console.warn('releaseAllClaims failed during archive:', e) }
     // Phase 3 #9 — an archived session must not keep its heavy state resident.
     // If a run was just aborted above, its promise is still settling; run()'s
     // finally does the unload once the agent has actually let go.
@@ -2307,6 +2489,7 @@ export class RuntimeSessionManager {
     const s = this.sessions.get(id)
     if (!s || !s.record.archived) return false
     s.record.archived = false
+    s.toolResultClosed = false
     s.record.status = 'idle'
     this.touch(s)
     this.persistRecord(s)
@@ -2788,10 +2971,23 @@ export class RuntimeSessionManager {
   }
 
   private buildCallbacks(session: InternalSession): AgentCallbacks {
+    const lifecycleGeneration = session.lifecycleGeneration
+    const isActive = (): boolean => this.ownsSessionLifecycle(session, lifecycleGeneration)
     return {
-      onTextDelta: (text) => this.bufferDelta(session, 'text_delta', text),
-      onThinkingDelta: (thinking) => this.bufferDelta(session, 'thinking_delta', thinking),
+      onTextDelta: (text) => {
+        if (!isActive()) return
+        this.flushToolResultBuf(session)
+        session.toolResultStream = undefined
+        this.bufferDelta(session, 'text_delta', text)
+      },
+      onThinkingDelta: (thinking) => {
+        if (!isActive()) return
+        this.flushToolResultBuf(session)
+        session.toolResultStream = undefined
+        this.bufferDelta(session, 'thinking_delta', thinking)
+      },
       onToolUse: (toolId, name, input) => {
+        if (!isActive()) return
         this.append(session, 'tool_use', { id: toolId, name, input: redactValue(input) })
         // N3: surface delegation as a tree node, derived from the tool stream
         // (no core-loop rewrite — stays inside the server layer).
@@ -2828,18 +3024,31 @@ export class RuntimeSessionManager {
         }
       },
       onToolResult: (toolId, name, result, isError, _rawPath, uiContent) => {
+        // Agent callbacks can already be queued when archive/delete closes the
+        // session. Reject both stream and terminal callbacks before watchdog,
+        // persistence, delegation, plan, or artifact side effects.
+        if (!isActive() || session.toolResultClosed) return
         // 终态才计进度单元；isError === undefined 是流式 chunk（TUI 侧同款过滤，
         // 否则单次长输出工具就能伪装稀疏 stall）。
         if (isError !== undefined) session.watchdogPolicy?.recordToolResult()
-        this.append(session, 'tool_result', {
+        const eventData = {
           id: toolId,
           name,
           isError: !!isError,
-          result: redactText(result).slice(0, 2000),
+          result: isError === undefined
+            ? redactText(result)
+            : truncateUtf16Safe(redactText(result), 2000),
           // uiContent is the display override (e.g. ask_user_question renders the
           // question + numbered options here, not the model-facing placeholder).
-          ...(uiContent ? { uiContent: redactText(uiContent).slice(0, 2000) } : {}),
-        })
+          ...(uiContent ? { uiContent: truncateUtf16Safe(redactText(uiContent), 2000) } : {}),
+        }
+        if (isError === undefined) {
+          this.bufferToolResult(session, toolId, name, eventData.result)
+          return
+        }
+        this.flushToolResultBuf(session)
+        session.toolResultStream = undefined
+        this.append(session, 'tool_result', eventData)
         if (DELEGATION_TOOLS.has(name)) {
           this.append(session, 'delegation', {
             workerId: toolId,
@@ -2849,7 +3058,7 @@ export class RuntimeSessionManager {
         // Plan mode — a successful plan_submit wrote a new .rivet/plans/*.md.
         // Surface it as an event so the desktop's plan column refreshes live.
         if (name === 'plan_submit' && !isError) {
-          void this.emitPlanSubmitted(session)
+          void this.emitPlanSubmitted(session, lifecycleGeneration)
         }
         // Plan mode — while planning, write_file/edit_file can only touch the
         // active draft (checkPlanMode gates every other path), so a successful
@@ -2861,30 +3070,45 @@ export class RuntimeSessionManager {
           && session.record.planMode === 'planning'
           && (name === 'write_file' || name === 'edit_file')
         ) {
-          this.schedulePlanDraftEvent(session)
+          this.schedulePlanDraftEvent(session, lifecycleGeneration)
+        }
+        // P0-2: plan_task 成功写入了 todos → 发 todo_state 让桌面 TodoDock 刷新
+        if (name === 'plan_task' && isError === false) {
+          const items = session.agent?.getTodos?.()
+          if (items && items.length > 0) this.append(session, 'todo_state', { items })
         }
         this.scanArtifacts(session)
       },
       onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
+        if (!isActive()) return
         session.watchdogPolicy?.recordTurnComplete()
         this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) })
       },
-      onError: (err) => this.append(session, 'error', { error: redactText(err.message) }),
+      onError: (err) => {
+        if (!isActive()) return
+        this.append(session, 'error', { error: redactText(err.message) })
+      },
       onAbort: (reason) => {
+        if (!isActive()) return
         session.lastAbortReason = reason
         // 在 finally 的 rejectAllPending 清场之前捕获审批挂起态。
         session.abortWhileApprovalPending =
           [...session.pending.values()].some((p) => p.kind === 'approval')
         if (session.record.status === 'running') session.record.status = 'aborted'
       },
-      onCheckpoint: (hash) => this.append(session, 'checkpoint', { hash }),
+      onCheckpoint: (hash) => {
+        if (!isActive()) return
+        this.append(session, 'checkpoint', { hash })
+      },
       onPhaseChange: (phase, detail) => {
+        if (!isActive()) return
         session.record.currentPhase = phase
         this.append(session, 'phase', { phase, ...(detail ?? {}) })
       },
       // R5 — structured course-correction → its own event so the desktop can
       // render a "改道" card inline (selective externalization of star-domain).
       onDecisionShift: (shift: DecisionShift) => {
+        if (!isActive()) return
         this.append(session, 'decision_shift', {
           source: shift.source,
           domain: shift.domain,
@@ -2894,15 +3118,19 @@ export class RuntimeSessionManager {
         })
       },
       onApprovalRequired: (toolId, name, input) =>
-        this.requestApproval(session, toolId, name, input),
-      onIntentNote: (intent) => this.emitIntentNote(session, intent),
+        this.requestApproval(session, lifecycleGeneration, toolId, name, input),
+      onIntentNote: (intent) => {
+        if (!isActive()) return
+        this.emitIntentNote(session, intent)
+      },
       // T3 — drain mid-run user guidance at the tool boundary (the agent appends
       // it to the last tool_result; see tool-execution.ts). The buffer is fed by
       // POST /sessions/:id/steer while the session is running.
-      onSteerDrain: () => session.steer.drain(),
+      onSteerDrain: () => isActive() ? session.steer.drain() : null,
       // C3 — 自治档检查点：cruise 暂停（paused=true，桌面渲染确认卡片）；
       // unleashed 无此回调（无刹车无播报）。digest 为进度摘要。
       onAutonomyCheckpoint: (info) => {
+        if (!isActive()) return
         this.append(session, 'autonomy_checkpoint', {
           turns: info.turns,
           digest: info.digest,
@@ -2912,16 +3140,23 @@ export class RuntimeSessionManager {
       // T4 — structured per-worker delegation status/progress → subagent panel.
       // Keyed by workOrderId (distinct from the spawning tool id, which is the
       // delegation-tree parent). Emitted alongside the existing text stream.
-      onDelegationActivity: (a) => this.emitDelegationActivity(session, a),
+      onDelegationActivity: (a) => {
+        if (!isActive()) return
+        this.emitDelegationActivity(session, a)
+      },
     }
   }
 
   private requestApproval(
     session: InternalSession,
+    lifecycleGeneration: number,
     toolId: string,
     name: string,
     input: Record<string, unknown>,
   ): Promise<ApprovalResult> {
+    if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) {
+      return Promise.resolve({ approved: false })
+    }
     // 无人值守（auto-proceed 定时任务）：审批请求不挂起等人 — fail-closed。
     // 立即拒绝该工具调用，把中止原因写进事件流，并中止本次运行（绝不静默
     // 跳过、也不无限期等待）。走查工件经 agent 侧 postTool 记录同一拒绝。
@@ -2941,7 +3176,11 @@ export class RuntimeSessionManager {
       session.lastApprovalDeniedAt = this.now()
       this.persistRecord(session)
       // 拒绝先返回（让 agent 收到 deny 的 tool_result 并被走查记录），下一拍中止运行。
-      setImmediate(() => { this.abort(session.record.id) })
+      setImmediate(() => {
+        if (this.ownsSessionLifecycle(session, lifecycleGeneration)) {
+          this.abort(session.record.id)
+        }
+      })
       return Promise.resolve({ approved: false })
     }
     return new Promise<ApprovalResult>((resolve) => {
@@ -2955,6 +3194,11 @@ export class RuntimeSessionManager {
       }
       if (this.approvalTimeoutMs > 0) {
         pend.timer = setTimeout(() => {
+          if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) {
+            session.pending.delete(requestId)
+            resolve({ approved: false })
+            return
+          }
           if (session.pending.delete(requestId)) {
             resolve({ approved: false })
             session.lastApprovalDeniedAt = this.now()
@@ -2993,6 +3237,7 @@ export class RuntimeSessionManager {
       || (session.lastApprovalDeniedAt != null
           && this.now() - session.lastApprovalDeniedAt < WATCHDOG_APPROVAL_GRACE_MS)
     setImmediate(() => {
+      if (!this.ownsSessionDurability(session)) return
       // 让位守卫：用户已重新驱动（running）、状态被改（非 aborted）、已归档，
       // 或用户在窄窗口内 abort 过 → 放弃续跑。
       if (session.running || session.record.status !== 'aborted' || session.record.archived) return
@@ -3009,6 +3254,7 @@ export class RuntimeSessionManager {
       if (!decision.autoContinue) return
       const timer = setTimeout(() => {
         session.watchdogContinueTimer = undefined
+        if (!this.ownsSessionDurability(session)) return
         // 倒计时后复核同一组守卫——期间用户可能已 abort / 提交新 prompt / 归档。
         if (session.running || session.record.status !== 'aborted' || session.record.archived) return
         if (session.watchdogRecoveryCancelled) return
@@ -3060,9 +3306,14 @@ export class RuntimeSessionManager {
    * `plan_submitted` event. Async/best-effort: the tool already persisted the
    * file, so a read failure here only delays the live refresh, not the data.
    */
-  private async emitPlanSubmitted(session: InternalSession): Promise<void> {
+  private async emitPlanSubmitted(
+    session: InternalSession,
+    lifecycleGeneration: number,
+  ): Promise<void> {
+    if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
     try {
-      const plans = await storeListPlans(session.record.cwd)
+      const plans = await this.loadPlans(session.record.cwd)
+      if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
       const latest = plans[0]
       if (latest) {
         this.append(session, 'plan_submitted', {
@@ -3082,21 +3333,34 @@ export class RuntimeSessionManager {
    * always lands an event (a plain leading-edge throttle would leave the
    * desktop stale until its fallback poll).
    */
-  private schedulePlanDraftEvent(session: InternalSession): void {
+  private schedulePlanDraftEvent(session: InternalSession, lifecycleGeneration: number): void {
+    if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
+    if (
+      session.planDraftTimer !== undefined
+      && session.planDraftTimerGeneration !== lifecycleGeneration
+    ) {
+      this.cancelPlanDraftTimer(session)
+    }
     const now = this.now()
     const elapsed = now - (session.planDraftLastEmit ?? 0)
     if (elapsed >= PLAN_DRAFT_THROTTLE_MS) {
       session.planDraftLastEmit = now
-      void this.emitPlanDraft(session)
+      void this.emitPlanDraft(session, lifecycleGeneration)
       return
     }
-    if (session.planDraftTimer) return
-    session.planDraftTimer = setTimeout(() => {
+    if (session.planDraftTimer !== undefined) return
+    const timer = this.planEventScheduler.setTimeout(() => {
+      if (session.planDraftTimer !== timer) return
+      if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
       session.planDraftTimer = undefined
+      session.planDraftTimerGeneration = undefined
       session.planDraftLastEmit = this.now()
-      void this.emitPlanDraft(session)
+      void this.emitPlanDraft(session, lifecycleGeneration)
     }, PLAN_DRAFT_THROTTLE_MS - elapsed)
-    session.planDraftTimer.unref?.()
+    session.planDraftTimer = timer
+    session.planDraftTimerGeneration = lifecycleGeneration
+    const unrefTimer = timer as { unref?: () => void }
+    unrefTimer?.unref?.()
   }
 
   /**
@@ -3105,10 +3369,12 @@ export class RuntimeSessionManager {
    * receive the same seq with `content` attached when the draft is under
    * PLAN_DRAFT_LIVE_CONTENT_MAX — desktop PlanPanel can paint without GET.
    */
-  private async emitPlanDraft(session: InternalSession): Promise<void> {
+  private async emitPlanDraft(session: InternalSession, lifecycleGeneration: number): Promise<void> {
+    if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
     if (session.record.planMode !== 'planning') return
     try {
       const draft = await this.readPlanDraft(session.record.id)
+      if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
       if (!draft) return
       const meta: Record<string, unknown> = {
         path: draft.path,
@@ -3154,7 +3420,7 @@ export class RuntimeSessionManager {
    * 合并后的事件是唯一事件——单 seq、同一条持久化 + fan-out 路径，重放语义不变。
    */
   private bufferDelta(session: InternalSession, type: 'text_delta' | 'thinking_delta', text: string): void {
-    if (!text) return
+    if (!text || !this.ownsSessionDurability(session)) return
     if (session.deltaBuf && session.deltaBuf.type !== type) {
       this.flushDeltaBuf(session)
       session.deltaRunActive = false
@@ -3192,6 +3458,83 @@ export class RuntimeSessionManager {
   }
 
   /**
+   * Coalesce contiguous streaming tool_result callbacks. A tool-id switch is an
+   * ordering boundary: flush the prior tool before exposing the new one.
+   */
+  private bufferToolResult(session: InternalSession, id: string, name: string, result: string): void {
+    if (!result || session.toolResultClosed) return
+    this.flushDeltaBuf(session)
+    session.deltaRunActive = false
+    const current = session.toolResultStream
+    if (current && (current.id !== id || current.name !== name)) {
+      this.flushToolResultBuf(session)
+      session.toolResultStream = undefined
+    }
+    const stream = session.toolResultStream ?? (session.toolResultStream = {
+      id,
+      name,
+      buffered: '',
+      active: false,
+    })
+    if (!stream.active) {
+      stream.active = true
+      const first = takeUtf8Prefix(result, TOOL_RESULT_COALESCE_BYTES)
+      this.appendRaw(session, 'tool_result', { id, name, isError: false, result: first.head })
+      stream.buffered = first.tail
+    } else {
+      stream.buffered += result
+    }
+    while (Buffer.byteLength(stream.buffered) >= TOOL_RESULT_COALESCE_BYTES) {
+      const chunk = takeUtf8Prefix(stream.buffered, TOOL_RESULT_COALESCE_BYTES)
+      stream.buffered = chunk.tail
+      this.appendRaw(session, 'tool_result', {
+        id: stream.id,
+        name: stream.name,
+        isError: false,
+        result: chunk.head,
+      })
+    }
+    if (stream.buffered && session.toolResultTimer === undefined) {
+      const sessionId = session.record.id
+      session.toolResultTimer = this.toolResultScheduler.setTimeout(() => {
+        session.toolResultTimer = undefined
+        if (session.toolResultClosed || this.sessions.get(sessionId) !== session) {
+          session.toolResultStream = undefined
+          return
+        }
+        this.flushToolResultBuf(session)
+      }, TOOL_RESULT_COALESCE_MS)
+      const timer = session.toolResultTimer as { unref?: () => void }
+      timer?.unref?.()
+    }
+  }
+
+  private flushToolResultBuf(session: InternalSession): void {
+    if (session.toolResultTimer !== undefined) {
+      this.toolResultScheduler.clearTimeout(session.toolResultTimer)
+      session.toolResultTimer = undefined
+    }
+    const stream = session.toolResultStream
+    if (!stream?.buffered) return
+    const result = stream.buffered
+    stream.buffered = ''
+    this.appendRaw(session, 'tool_result', {
+      id: stream.id,
+      name: stream.name,
+      isError: false,
+      result,
+    })
+  }
+
+  private cancelToolResultBuf(session: InternalSession): void {
+    if (session.toolResultTimer !== undefined) {
+      this.toolResultScheduler.clearTimeout(session.toolResultTimer)
+      session.toolResultTimer = undefined
+    }
+    session.toolResultStream = undefined
+  }
+
+  /**
    * 统一事件入口。非 delta 事件先冲掉 delta 缓冲再落自身，保证事件顺序——
    * abort（收尾 append status，L abort()）、turn 完成、错误路径全部自动覆盖，
    * 无需在各中断触发点单独挂钩子。
@@ -3205,6 +3548,11 @@ export class RuntimeSessionManager {
     data: Record<string, unknown>,
     opts?: { persistData?: Record<string, unknown> },
   ): void {
+    if (!this.ownsSessionDurability(session)) return
+    if (type !== 'tool_result') {
+      this.flushToolResultBuf(session)
+      session.toolResultStream = undefined
+    }
     if (type !== 'text_delta' && type !== 'thinking_delta') {
       this.flushDeltaBuf(session)
       session.deltaRunActive = false
@@ -3218,6 +3566,7 @@ export class RuntimeSessionManager {
     liveData: Record<string, unknown>,
     opts?: { persistData?: Record<string, unknown> },
   ): void {
+    if (!this.ownsSessionDurability(session)) return
     const persistData = opts?.persistData ?? liveData
     const stored: SessionEvent = { seq: ++session.seq, ts: this.now(), type, data: persistData }
     session.events.push(stored)
@@ -3245,7 +3594,7 @@ export class RuntimeSessionManager {
   }
 
   private persistRecord(session: InternalSession): void {
-    if (!this.persistence) return
+    if (!this.persistence || !this.ownsSessionDurability(session)) return
     try {
       this.persistence.saveRecord({ ...session.record })
     } catch {
