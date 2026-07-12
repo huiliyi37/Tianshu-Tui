@@ -16,7 +16,7 @@
  *                  the checksum guard below still verifies against official hashes.
  */
 
-import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, cpSync, copyFileSync, chmodSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { get } from 'node:https'
@@ -272,6 +272,44 @@ async function main() {
   // Make executable on Unix.
   if (!isWindows) {
     execSync(`chmod +x "${binaryPath}"`, { stdio: 'inherit' })
+  }
+
+  // Bundle npm so the packaged desktop app can install plugins on demand.
+  // The official Node archive ships npm; we copy only what is needed to run
+  // `npm install` (the npm module + its launcher script), keeping the runtime
+  // package as lean as possible.
+  try {
+    if (isWindows) {
+      const npmModuleSrc = join(extractedDir, 'node_modules', 'npm')
+      const npmModuleDest = join(targetDir, 'node_modules', 'npm')
+      const npmCmdSrc = join(extractedDir, 'npm.cmd')
+      const npmCmdDest = join(targetDir, 'npm.cmd')
+      if (existsSync(npmModuleSrc) && existsSync(npmCmdSrc)) {
+        mkdirSync(dirname(npmModuleDest), { recursive: true })
+        cpSync(npmModuleSrc, npmModuleDest, { recursive: true, dereference: true })
+        copyFileSync(npmCmdSrc, npmCmdDest)
+        console.log(`[fetch-node-runtime] bundled npm → ${npmCmdDest}`)
+      } else {
+        console.warn('[fetch-node-runtime] npm files not found in Windows archive; plugin install may fail in packaged app')
+      }
+    } else {
+      const npmModuleSrc = join(extractedDir, 'lib', 'node_modules', 'npm')
+      const npmModuleDest = join(targetDir, 'lib', 'node_modules', 'npm')
+      const npmBinSrc = join(extractedDir, 'bin', 'npm')
+      const npmBinDest = join(targetDir, 'bin', 'npm')
+      if (existsSync(npmModuleSrc) && existsSync(npmBinSrc)) {
+        mkdirSync(dirname(npmModuleDest), { recursive: true })
+        cpSync(npmModuleSrc, npmModuleDest, { recursive: true, dereference: true })
+        mkdirSync(dirname(npmBinDest), { recursive: true })
+        copyFileSync(npmBinSrc, npmBinDest)
+        chmodSync(npmBinDest, 0o755)
+        console.log(`[fetch-node-runtime] bundled npm → ${npmBinDest}`)
+      } else {
+        console.warn('[fetch-node-runtime] npm files not found in archive; plugin install may fail in packaged app')
+      }
+    }
+  } catch (err) {
+    console.warn('[fetch-node-runtime] failed to bundle npm:', err.message)
   }
 
   // Clean up.

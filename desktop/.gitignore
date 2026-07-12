@@ -7,6 +7,7 @@ src-tauri/resources/node/*
 !src-tauri/resources/node/.gitkeep
 src-tauri/resources/shell/*
 !src-tauri/resources/shell/.gitkeep
+src-tauri/resources/plugins-staged
 .tmp-node-runtime
 # 下载的 Node 运行时压缩包（fetch-node-runtime 产物，不入库）
 node-v*-win-*.zip

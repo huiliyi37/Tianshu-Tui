@@ -9,11 +9,78 @@
  */
 
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, dirname } from 'node:path'
 import { cpSync } from 'node:fs'
 import { execSync } from 'node:child_process'
 import { rivetHome } from '../config/paths.js'
 import { parseManifest, type PluginManifest, type PluginPackageJson } from './manifest.js'
+
+// ── npm resolution ─────────────────────────────────────────────────
+
+/**
+ * Resolve the npm command to use for plugin installs.
+ *
+ * The packaged desktop app bundles its own Node runtime (and now npm) under
+ * `node-runtime/<os>-<arch>/`. When the sidecar is hosted by that runtime,
+ * npm lives right next to the Node binary and we should use it so users do
+ * not need a system Node/npm install.
+ *
+ * Falls back to the system `npm` command in dev / test environments where the
+ * bundled npm is absent.
+ */
+function resolveNpmCommand(): string {
+  const nodeBin = process.execPath
+  const nodeDir = dirname(nodeBin)
+  const isWindows = process.platform === 'win32'
+
+  // Bundled npm layout mirrors the official Node.js archive layout.
+  const candidates = isWindows
+    ? [join(nodeDir, 'npm.cmd'), join(nodeDir, 'npm')]
+    : [join(nodeDir, 'bin', 'npm')]
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
+  }
+
+  return isWindows ? 'npm.cmd' : 'npm'
+}
+
+/**
+ * Build the platform-aware shell invocation for npm install.
+ *
+ * Windows: `npm` is a `.cmd` script; Node's execSync needs `shell: true` to
+ * resolve it. We also quote the npm path to handle spaces.
+ *
+ * Unix: execute the npm script directly (bundled) or via PATH fallback.
+ */
+function npmInstallArgs(cmd: string): { command: string; options: import('node:child_process').ExecSyncOptions } {
+  const baseArgs = ['install', '--ignore-scripts', '--omit=dev']
+  const isWindows = process.platform === 'win32'
+
+  // Make sure the Node binary hosting this sidecar is on PATH before npm runs.
+  // The packaged desktop app bundles its own Node/npm; npm's launcher script
+  // resolves `node` via PATH, so without this it could pick up a system Node
+  // (or none at all) and fail or use the wrong ABI.
+  const nodeDir = dirname(process.execPath)
+  const pathSep = isWindows ? ';' : ':'
+  const currentPath = process.env.PATH || ''
+  const pathWithNode = currentPath ? `${nodeDir}${pathSep}${currentPath}` : nodeDir
+
+  const options: import('node:child_process').ExecSyncOptions = {
+    stdio: 'pipe',
+    timeout: 600_000,
+    env: { ...process.env, NODE_ENV: 'production', PATH: pathWithNode },
+  }
+
+  if (isWindows) {
+    // ExecSyncOptions.shell is typed as string in this @types/node version,
+    // but the runtime accepts boolean. Use cmd.exe explicitly to satisfy TS.
+    options.shell = process.env.ComSpec || 'cmd.exe'
+    return { command: `"${cmd}" ${baseArgs.join(' ')}`, options }
+  }
+
+  return { command: `${cmd} ${baseArgs.join(' ')}`, options }
+}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -103,19 +170,20 @@ export async function installPlugin(sourcePath: string): Promise<InstallResult> 
     return { ok: false, error: `Failed to copy plugin files: ${(err as Error).message}` }
   }
 
-  // 4. Run npm install
+  // 4. Run npm install using the bundled npm when available (packaged desktop
+  // app) or the system npm as a fallback (dev / tests).
+  const npmCmd = resolveNpmCommand()
+  const { command, options } = npmInstallArgs(npmCmd)
   try {
-    execSync('npm install --ignore-scripts --omit=dev', {
+    execSync(command, {
+      ...options,
       cwd: installPath,
-      stdio: 'pipe',
-      timeout: 600_000, // 10 min for heavy deps
-      env: { ...process.env, NODE_ENV: 'production' },
     })
   } catch (err) {
     // Clean up failed install
     try { rmSync(installPath, { recursive: true, force: true }) } catch {}
     const stderr = (err as { stderr?: Buffer }).stderr?.toString().slice(0, 500) ?? (err as Error).message
-    return { ok: false, error: `npm install failed: ${stderr}` }
+    return { ok: false, error: `npm install failed (${npmCmd}): ${stderr}` }
   }
 
   return { ok: true, manifest, installPath }
