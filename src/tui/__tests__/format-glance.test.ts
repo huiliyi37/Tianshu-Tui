@@ -205,6 +205,14 @@ describe('formatPermissionModeLine（输入框下方权限模式行，CC parity�
     assert.ok(!plain.includes('manual'))
   })
 
+  it('plan mode 可附带草稿路径', () => {
+    const plain = stripAnsi(formatPermissionModeLine({
+      planMode: true,
+      planDraftPath: '.rivet/plans/draft-1.md',
+    }, theme))
+    assert.ok(plain.includes('draft-1.md'), `draft path: ${plain}`)
+  })
+
   it('yolo 模式显示缩写标签', () => {
     const plain = stripAnsi(formatPermissionModeLine({ approvalMode: 'dangerously-skip-permissions' }, theme))
     assert.ok(plain.includes('⏵ yolo'), `should abbreviate: ${plain}`)

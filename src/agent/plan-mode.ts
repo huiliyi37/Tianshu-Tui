@@ -61,6 +61,22 @@ function pathsMatch(cwd: string, a: string, b: string): boolean {
   return canonicalizePathForCompare(resolve(cwd, a)) === canonicalizePathForCompare(resolve(cwd, b))
 }
 
+/**
+ * Short tool-result receipt when write/edit hits the active plan draft —
+ * CLI users often misread silence as "didn't land". Only tool result text
+ * (never frozen prompt).
+ */
+export function formatActivePlanDraftReceipt(
+  cwd: string,
+  targetFilePath: string,
+  activePlanFilePath: string | null | undefined,
+  charCount: number,
+): string | null {
+  if (!activePlanFilePath) return null
+  if (!pathsMatch(cwd, targetFilePath, activePlanFilePath)) return null
+  return `已写入活动计划文件 \`${activePlanFilePath}\`（${charCount} chars）`
+}
+
 /** 检查工具是否在 plan-mode 下被允许 */
 export function checkPlanMode(
   state: PlanModeState,

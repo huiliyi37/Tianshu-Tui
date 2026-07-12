@@ -862,6 +862,25 @@ describe('GWT salience and Top-K selection', () => {
       assert.ok(advisory)
       assert.match(advisory!, /至少画一张架构或数据流图/)
     })
+
+    it('plan-mode block forbids chat dump of full plan / shell recipes', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning' })
+      assert.match(out, /计划正文\*\*只进活动计划文件\*\*/)
+      assert.match(out, /禁止.*逐步 shell/)
+      assert.match(out, /验证清单/)
+      assert.doesNotMatch(out, /执行计划基线/)
+    })
+
+    it('plan-mode methodology advisory is design-doc, not executable baseline', () => {
+      const advisory = renderPlanMethodologyAdvisory('full', undefined, { planMode: true })
+      assert.ok(advisory)
+      assert.match(advisory!, /mode="design-doc"/)
+      assert.match(advisory!, /验证清单/)
+      assert.doesNotMatch(advisory!, /执行计划基线/)
+      assert.doesNotMatch(advisory!, /RED→GREEN/)
+      const exec = renderPlanMethodologyAdvisory('full')
+      assert.match(exec!, /执行计划基线/)
+    })
   })
 
   describe('buildDynamicAppendixParts (task 1: structured parts for delta)', () => {

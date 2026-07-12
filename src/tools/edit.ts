@@ -12,6 +12,7 @@ import { detectEol, chooseEol, toLf, applyEol } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
 import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
 import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
+import { formatActivePlanDraftReceipt } from '../agent/plan-mode.js'
 
 // Large files are common (generated code, lockfiles, big modules). 100KB was
 // far too small. 8MB reads comfortably into the Node heap; anything larger is
@@ -275,7 +276,9 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           const base = `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
           return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
         }
-        return { content: `Replaced all ${occurrences} occurrences in ${filePath}` + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
+        const draftReceipt = formatActivePlanDraftReceipt(params.cwd, filePath, params.activePlanFilePath, newContent.length)
+        const base = draftReceipt ?? `Replaced all ${occurrences} occurrences in ${filePath}`
+        return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui, changedRanges }
       })
     }
 
@@ -330,13 +333,16 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
     }
     trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-    return await finalizeEdit(params.cwd, filePath, content, newContent, params.sessionId, (warn, ui, changedRanges) => ({
-      content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : ''),
-      uiContent: ui,
-      changedRanges,
-    }))
+    return await finalizeEdit(params.cwd, filePath, content, newContent, params.sessionId, (warn, ui, changedRanges) => {
+      const draftReceipt = formatActivePlanDraftReceipt(params.cwd, filePath, params.activePlanFilePath, newContent.length)
+      const base = draftReceipt ?? `Applied edit to ${filePath}`
+      return {
+        content: base + (warn ? '\n\n' + warn : ''),
+        uiContent: ui,
+        changedRanges,
+      }
+    })
   },
-
   requiresApproval: () => true,
   isConcurrencySafe: () => false,
   isEnabled: () => true,

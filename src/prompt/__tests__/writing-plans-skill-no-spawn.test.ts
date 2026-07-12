@@ -80,3 +80,20 @@ test('writing-plans skill: anti-spawn guard rail is present', () => {
     )
   }
 })
+
+test('writing-plans skill: Plan Mode design-doc branch forbids bash/commit recipes', () => {
+  const content = readFileSync(SKILL_PATH, 'utf-8')
+  const idx = content.indexOf('#### 3.1a Plan Mode')
+  assert.ok(idx >= 0, 'must have §3.1a Plan Mode design-doc section')
+  const end = content.indexOf('#### 3.1b', idx)
+  assert.ok(end > idx, 'must have §3.1b after 3.1a')
+  const planModeSection = content.slice(idx, end)
+  assert.ok(planModeSection.includes('设计文档'), '3.1a must describe design doc')
+  assert.ok(planModeSection.includes('验证清单'), '3.1a must use verification checklist')
+  assert.ok(!planModeSection.includes('```bash'), '3.1a must not contain bash fences')
+  assert.ok(!planModeSection.includes('git commit -m'), '3.1a must not contain git commit recipes')
+  assert.ok(!planModeSection.includes('npx tsc'), '3.1a must not contain npx tsc recipes')
+  // Independent path may still keep executable templates
+  const independent = content.slice(end)
+  assert.ok(independent.includes('```bash'), '3.1b may keep bash for executable plans')
+})

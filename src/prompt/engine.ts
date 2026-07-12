@@ -171,6 +171,8 @@ export class PromptEngine {
   private taskDepthAdvisory: string | null = null
   private planMethodology?: import('../context/task-contract.js').PlanMethodology
   private planMethodologyReason?: string
+  /** Whether the last setPlanMethodology was under Plan Mode (design-doc advisory). */
+  private planMethodologyPlanMode = false
   /** Advisory text — only set when methodology changes, null otherwise to avoid noise. */
   private planMethodologyAdvisory: string | null = null
   private skillAdvisoryBlock?: string | null
@@ -974,14 +976,20 @@ export class PromptEngine {
       : null
   }
 
-  setPlanMethodology(methodology: import('../context/task-contract.js').PlanMethodology | undefined, reason?: string): void {
+  setPlanMethodology(
+    methodology: import('../context/task-contract.js').PlanMethodology | undefined,
+    reason?: string,
+    opts?: { planMode?: boolean },
+  ): void {
     const changed = this.planMethodology !== methodology
+      || this.planMethodologyPlanMode !== !!opts?.planMode
     this.planMethodology = methodology
     this.planMethodologyReason = reason
+    this.planMethodologyPlanMode = !!opts?.planMode
     // Only inject the advisory when methodology changes or is first set.
     // Repeated identical advisory every turn is pure noise (~60 tokens/turn).
     this.planMethodologyAdvisory = changed
-      ? renderPlanMethodologyAdvisory(methodology, reason)
+      ? renderPlanMethodologyAdvisory(methodology, reason, opts)
       : null
   }
 

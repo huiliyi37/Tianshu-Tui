@@ -127,6 +127,11 @@ export interface EventViewState {
   planMode: PlanModeState
   /** Bumped on plan_mode/plan_submitted so the plan list query can re-fetch. */
   planRev: number
+  /**
+   * Live draft body from SSE `plan_draft` (content attached when under size cap).
+   * Prefer this for the PlanPanel "起草中" view to avoid waiting on GET /plans.
+   */
+  draftLive: { path: string; title: string | null; content: string; size: number } | null
   /** Slug of the most recently submitted plan (drives auto-select + Build hint). */
   latestPlanSlug?: string
   /**
@@ -175,6 +180,7 @@ export const initialEventState: EventViewState = {
   todos: [],
   planMode: 'off',
   planRev: 0,
+  draftLive: null,
   menuRev: 0,
   private_textOpen: false,
   private_thinkingOpen: false,
@@ -634,6 +640,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'plan_mode':
       next.planMode = ev.data.state === 'planning' ? 'planning' : 'off'
       next.planRev = next.planRev + 1
+      if (next.planMode !== 'planning') next.draftLive = null
       return next
     case 'user_question': {
       const raw = Array.isArray(ev.data.questions) ? (ev.data.questions as unknown[]) : []
@@ -661,12 +668,22 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       if (slug) next.latestPlanSlug = slug
       return next
     }
-    // Plan-mode draft grew (throttled server signal) — bump planRev so the
-    // plan list query re-fetches the draft body. This is the primary liveness
-    // channel for the "起草中" view; the slow poll is only a fallback.
-    case 'plan_draft':
+    // Plan-mode draft grew — bump planRev for list/metadata refresh; when SSE
+    // carries `content`, stash it as draftLive so PlanPanel paints without GET.
+    case 'plan_draft': {
       next.planRev = next.planRev + 1
+      const path = typeof ev.data.path === 'string' ? ev.data.path : ''
+      const content = typeof ev.data.content === 'string' ? ev.data.content : null
+      if (path && content !== null) {
+        next.draftLive = {
+          path,
+          title: typeof ev.data.title === 'string' ? ev.data.title : null,
+          content,
+          size: typeof ev.data.size === 'number' ? ev.data.size : content.length,
+        }
+      }
       return next
+    }
     case 'steer_queued':
       next.private_textOpen = false
       next.private_thinkingOpen = false

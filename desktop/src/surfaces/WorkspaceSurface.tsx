@@ -422,6 +422,7 @@ export function WorkspaceSurface() {
               approvalMode={active?.approvalMode}
               planMode={view.planMode}
               planRev={view.planRev}
+              draftLive={view.draftLive}
               latestPlanSlug={view.latestPlanSlug}
               onFeedbackSent={() => sessions.refetch()}
               todos={view.todos}

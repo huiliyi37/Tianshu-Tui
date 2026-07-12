@@ -397,13 +397,13 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
       content: [
         `⚠️ Plan not yet saved — it has no Mermaid diagram.`,
         '',
-        `A good plan visualizes architecture or data flow. Add one diagram (even just the core 3-5 nodes) and resubmit. Copy this skeleton and replace the node text:`,
+        `用 edit_file 在活动计划文件里补一张架构/数据流图（哪怕核心 3–5 个节点），然后同 title 重提。骨架：`,
         '',
         MISSING_DIAGRAM_SKELETON,
         '',
-        `Shapes: (rounded)=input/user · [[subroutine]]=agent · {{hexagon}}=LLM · [(cylinder)]=store · {rhombus}=decision. Edges: --> read · ==> write · -.-> async/event.`,
+        `Shapes: (rounded)=input/user · [[subroutine]]=agent · {{hexagon}}=LLM · [(cylinder)]=store · {rhombus}=decision.`,
         '',
-        `If a diagram is genuinely unnecessary for this task, resubmit \`plan\` as-is (same title) and it will be saved.`,
+        `不要把整份计划贴回对话。若图确实不必要，同 title 原样重提即可放行。`,
       ].join('\n'),
       isError: true,
     }
@@ -419,7 +419,7 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
       content: [
         `⚠️ Plan not yet saved — ${placeholderCheck.reason}`,
         '',
-        '请继续完善计划：补充根因分析、每个文件的具体改动（diff 或伪代码）、设计决策对比表、验证步骤等。',
+        '用 edit_file 完善活动计划文件：根因、每文件 diff/伪代码、取舍表、验证清单等。不要在聊天里重打全文；补完后同 title 重提。',
       ].join('\n'),
       isError: true,
     }
@@ -435,14 +435,12 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
       content: [
         `⚠️ Plan not yet saved — 计划缺少「瑶光反证」章节（标题含"反证"或"复现"）。`,
         '',
-        '设计阶段发明的断言最容易错——出计划的同时就要复现，不能等执行期。请补充该章节，覆盖：',
-        '- **关键断言清单**：方案依据的每条代码行为断言 + 计划期证据（设计定稿后的 read/grep 回读到 file:line、run_tests 输出、或 adversarial_verifier 复现结论）',
-        '- **原缺陷复现**（bugfix 类计划）：复现命令 + 观察到的 RED 输出——绿非证明，复现即证',
-        '- **待验证假设**：计划期无法复现的推论，显式标注并写明执行期第一步如何验证',
+        '用 edit_file 在活动计划文件补该章节（证据摘要 + file:line，不要贴逐步 shell 菜谱）：',
+        '- **关键断言清单**：每条断言 + 计划期证据（定稿后 read/grep 到 file:line、run_tests 输出摘要、或 adversarial_verifier 结论）',
+        '- **原缺陷复现**（bugfix）：复现结果摘要（RED），非完整命令教程',
+        '- **待验证假设**：计划期无法复现的推论 + 执行期如何验证',
         '',
-        '可用工具：plan mode 下 run_tests 可直接跑（拿 RED 证据）；`delegate_task profile=adversarial_verifier authority=yaoguang` 可派复现专员。',
-        '',
-        '补充后重新提交（同一 title）。若该计划确实无可复现断言（纯新增、零行为假设），可原样重提放行。',
+        '补完后同 title 重提。不要在聊天重贴整份计划。无可复现断言时可原样重提放行。',
       ].join('\n'),
       isError: true,
     }
@@ -463,7 +461,7 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
             '',
             formatAnchorDrifts(anchorReport.drifts),
             '',
-            '文档和历史计划描述的是写下时的状态，不是现状——用 read/grep/glob 对当前源码逐条核实后修正引用；确认是有意新建的文件请在同一行标注「新增」。核实完成后重新提交（同一 title），若你判断某条是误报（示例路径等）可原样重提。',
+            '用 read/grep 核实后 edit_file 修正活动计划文件中的引用；确认新建则标注「新增」。不要在聊天重贴全文。同 title 重提；误报可原样重提。',
           ].join('\n'),
           isError: true,
         }
@@ -486,12 +484,12 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
           content: [
             `⚠️ Plan not yet saved — 计划规模超阈值（任务 ${scale.taskCount} 个 / 涉及文件 ${scale.fileCount} 个，阈值 ${PLAN_SCALE_TASK_THRESHOLD}/${PLAN_SCALE_FILE_THRESHOLD}），但没有分波结构。`,
             '',
-            '大计划一口气执行是重构事故的高发形态。请在计划中补充「分波执行」章节：',
+            '用 edit_file 在活动计划文件补充「分波执行」章节（不要在聊天重贴全文）：',
             '- 用 `### Wave 1 / Wave 2 / …` 标题把任务切成 2-4 个可独立验证的波次',
-            '- 每波末尾声明验证命令（typecheck / 测试），波间硬门禁会真实执行它们',
+            '- 每波末尾声明验证要点（typecheck / 测试），波间硬门禁会真实执行它们',
             '- 波的边界放在功能可自证的位置（一波结束 = 可编译可测试）',
             '',
-            '补充后重新提交（同一 title）。若你判断该计划确实不可分波（如单一原子迁移），可原样重提放行。',
+            '补完后同 title 重提。若确实不可分波，可原样重提放行。',
           ].join('\n'),
           isError: true,
         }

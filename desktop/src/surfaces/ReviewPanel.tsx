@@ -61,6 +61,7 @@ export function ReviewPanel(props: {
   planMode?: PlanModeState
   planRev?: number
   latestPlanSlug?: string
+  draftLive?: { path: string; title: string | null; content: string; size: number } | null
   onFeedbackSent?: () => void
   /** T2 — active task list for the Task tab. */
   todos?: TodoStateItem[]
@@ -72,7 +73,7 @@ export function ReviewPanel(props: {
   /** Plan Build requires an idle session — disables the button with a hint. */
   sessionRunning?: boolean
 }) {
-  const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse, onSendPrompt, sessionRunning } = props
+  const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, draftLive = null, onFeedbackSent, todos = [], sources = [], onCollapse, onSendPrompt, sessionRunning } = props
   const { t } = useTranslation('review')
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
@@ -583,7 +584,7 @@ export function ReviewPanel(props: {
           <FileExplorer sessionId={sessionId} cwd={cwd} />
         </TabsContent>
         <TabsContent value="tasks" className="review-body">
-          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} todos={todos} planMode={planMode} sessionRunning={sessionRunning} />
+          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} todos={todos} planMode={planMode} sessionRunning={sessionRunning} draftLive={draftLive} />
           
           <section className="review-section mt-4 border-t border-border pt-4">
             <h4>{t('tasksHeading')}</h4>

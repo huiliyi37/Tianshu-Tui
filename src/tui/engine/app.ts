@@ -346,6 +346,8 @@ export class TuiApp {
   private todosProvider?: () => TodoItem[]
   /** 当前已批准计划指针访问器（main-ansi 读 PromptEngine） */
   private activePlanProvider?: () => string | undefined
+  /** Plan Mode 活动草稿路径（侧栏「起草中」） */
+  private planDraftProvider?: () => { path: string; bytes?: number } | null | undefined
   /** 当前 GoalTracker 快照访问器 */
   private goalTrackerProvider?: () => import('../../agent/goal-tracker.js').GoalTracker | null
   /** 当前 PlanExecutionTrace 访问器 */
@@ -2265,6 +2267,10 @@ export class TuiApp {
     this.activePlanProvider = provider
   }
 
+  setPlanDraftProvider(provider: () => { path: string; bytes?: number } | null | undefined): void {
+    this.planDraftProvider = provider
+  }
+
   /**
    * 注入 GoalTracker 访问器，供 GlanceBar 展示目标迭代/预算状态。
    */
@@ -3455,6 +3461,12 @@ export class TuiApp {
       } catch {
         activePlan = undefined
       }
+      let planDraft: { path: string; bytes?: number } | null | undefined
+      try {
+        planDraft = planModeActive ? this.planDraftProvider?.() : null
+      } catch {
+        planDraft = null
+      }
       const sidePanelInput: SidePanelInput = {
         columns: sidePanelWidth,
         todos: this.state.todos,
@@ -3468,6 +3480,7 @@ export class TuiApp {
         cacheHitRate: glanceCacheHitRate,
         cost: glanceCost,
         activePlan,
+        planDraft: planDraft ?? null,
         planTrace,
         goal: goalSnapshot,
       }

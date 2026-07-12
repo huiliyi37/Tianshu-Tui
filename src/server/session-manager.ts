@@ -577,9 +577,12 @@ const WATCHDOG_APPROVAL_GRACE_MS = 5_000
  *  shared coordinator from being swamped). */
 const MAX_USER_BACKGROUND_WORKERS = 4
 
-/** plan_draft 事件节流窗口——agent 增量写草稿可能一轮多次落盘，事件只是
- *  失效信号（桌面收到后重拉正文），1s 粒度足够「直播感」。 */
-const PLAN_DRAFT_THROTTLE_MS = 1_000
+/** plan_draft 事件节流窗口——agent 增量写草稿可能一轮多次落盘；250ms
+ *  兼顾「起草中」亚秒刷新与 burst 合并。事件持久化仅 metadata；SSE live 帧可带正文。 */
+const PLAN_DRAFT_THROTTLE_MS = 250
+
+/** plan_draft SSE 携带正文上限——超限只发失效信号，桌面回退 GET /plans。 */
+const PLAN_DRAFT_LIVE_CONTENT_MAX = 200_000
 
 /** Delta 合并窗口（Wave 2）——provider 逐 token 回调，每个 token 独立
  *  JSON.stringify + SSE write 太贵。窗口内的连续同类型 delta 合并成一条
@@ -3097,21 +3100,26 @@ export class RuntimeSessionManager {
   }
 
   /**
-   * Emit the `plan_draft` invalidation signal. Metadata only (title/size/path)
-   * — never the body — so events.jsonl stays small; viewers re-fetch the
-   * content via GET /sessions/:id/plans. Best-effort: a read failure only
-   * delays the live refresh (the poll fallback still covers it).
+   * Emit the `plan_draft` signal. Persistence / in-memory ring store metadata
+   * only (path/title/size) so events.jsonl stays small. Connected SSE listeners
+   * receive the same seq with `content` attached when the draft is under
+   * PLAN_DRAFT_LIVE_CONTENT_MAX — desktop PlanPanel can paint without GET.
    */
   private async emitPlanDraft(session: InternalSession): Promise<void> {
     if (session.record.planMode !== 'planning') return
     try {
       const draft = await this.readPlanDraft(session.record.id)
       if (!draft) return
-      this.append(session, 'plan_draft', {
+      const meta: Record<string, unknown> = {
         path: draft.path,
         title: draft.title,
         size: draft.content.length,
-      })
+      }
+      const live: Record<string, unknown> =
+        draft.content.length <= PLAN_DRAFT_LIVE_CONTENT_MAX
+          ? { ...meta, content: draft.content }
+          : meta
+      this.append(session, 'plan_draft', live, { persistData: meta })
     } catch {
       // non-fatal — the desktop's fallback poll still refreshes the draft
     }
@@ -3187,33 +3195,49 @@ export class RuntimeSessionManager {
    * 统一事件入口。非 delta 事件先冲掉 delta 缓冲再落自身，保证事件顺序——
    * abort（收尾 append status，L abort()）、turn 完成、错误路径全部自动覆盖，
    * 无需在各中断触发点单独挂钩子。
+   *
+   * `opts.persistData` — when set, the in-memory ring + events.jsonl store this
+   * payload while SSE listeners receive `data` (e.g. plan_draft live content).
    */
-  private append(session: InternalSession, type: SessionEventType, data: Record<string, unknown>): void {
+  private append(
+    session: InternalSession,
+    type: SessionEventType,
+    data: Record<string, unknown>,
+    opts?: { persistData?: Record<string, unknown> },
+  ): void {
     if (type !== 'text_delta' && type !== 'thinking_delta') {
       this.flushDeltaBuf(session)
       session.deltaRunActive = false
     }
-    this.appendRaw(session, type, data)
+    this.appendRaw(session, type, data, opts)
   }
 
-  private appendRaw(session: InternalSession, type: SessionEventType, data: Record<string, unknown>): void {
-    const event: SessionEvent = { seq: ++session.seq, ts: this.now(), type, data }
-    session.events.push(event)
+  private appendRaw(
+    session: InternalSession,
+    type: SessionEventType,
+    liveData: Record<string, unknown>,
+    opts?: { persistData?: Record<string, unknown> },
+  ): void {
+    const persistData = opts?.persistData ?? liveData
+    const stored: SessionEvent = { seq: ++session.seq, ts: this.now(), type, data: persistData }
+    session.events.push(stored)
     if (session.events.length > this.maxEvents) {
       session.events.splice(0, session.events.length - this.maxEvents)
     }
     session.record.lastSeq = session.seq
-    session.record.updatedAt = event.ts
+    session.record.updatedAt = stored.ts
     if (this.persistence) {
       try {
-        this.persistence.appendEvent(session.record.id, event)
+        this.persistence.appendEvent(session.record.id, stored)
       } catch {
         // persistence failure must not break the live event log
       }
     }
+    const forListeners: SessionEvent =
+      persistData === liveData ? stored : { ...stored, data: liveData }
     for (const listener of session.listeners) {
       try {
-        listener(event)
+        listener(forListeners)
       } catch {
         // a misbehaving viewer must not break the event log
       }

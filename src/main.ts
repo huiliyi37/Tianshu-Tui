@@ -28,6 +28,8 @@ import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { loadTodos, setTodoSession } from './tools/todo.js'
 import { setPlanSession } from './agent/plan-store.js'
+import { statSync } from 'node:fs'
+import { join as pathJoin } from 'node:path'
 import { formatWelcome } from './tui/format/welcome.js'
 import { color } from './tui/engine/ansi.js'
 import type { RewindMode } from './tui/format/rewind.js'
@@ -1078,6 +1080,19 @@ async function main() {
   // ── 当前已批准计划指针 provider ─────────────────────────────
   // 读 PromptEngine 中的 activePlanPointer，供右侧面板 lightweight 展示当前计划。
   app.setActivePlanProvider(() => ctx!.agent.config.promptEngine?.getActivePlanPointer())
+  app.setPlanDraftProvider(() => {
+    const agent = ctx!.agent
+    if (agent.planModeState !== 'planning') return null
+    const path = agent.getActivePlanFilePath()
+    if (!path) return null
+    try {
+      const abs = pathJoin(agent.config.cwd, path)
+      const bytes = statSync(abs).size
+      return { path, bytes }
+    } catch {
+      return { path }
+    }
+  })
 
   // ── Goal / plan-mode / plan-trace providers ──────────────────
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。

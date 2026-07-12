@@ -12,6 +12,7 @@ import { buildFileDiff, computeChangedLineRanges, type LineRange } from './edit-
 import { detectPointerPlaceholder, pointerPlaceholderError } from './pointer-guard.js'
 import { toPosixPath } from '../path-format.js'
 import { writeMarkdownAsDocx } from './office-writer.js'
+import { formatActivePlanDraftReceipt } from '../agent/plan-mode.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -201,8 +202,16 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
       warn = warn ? `${warn}\n(diff skipped: ${(e as Error).message})` : `(diff skipped: ${(e as Error).message})`
     }
     const uiContent = diff ? (warn ? `${diff}\n\n${warn}` : diff) : (warn ? warn : undefined)
+    const draftReceipt = formatActivePlanDraftReceipt(
+      params.cwd,
+      filePath,
+      params.activePlanFilePath,
+      finalContent.length,
+    )
+    const receipt = draftReceipt
+      ?? `Wrote ${finalContent.length} bytes (${lines} lines) to ${toPosixPath(filePath)}`
     return {
-      content: `Wrote ${finalContent.length} bytes (${lines} lines) to ${toPosixPath(filePath)}` + (warn ? '\n\n' + warn : ''),
+      content: receipt + (warn ? '\n\n' + warn : ''),
       uiContent,
       changedRanges,
     }

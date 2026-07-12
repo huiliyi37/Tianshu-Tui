@@ -34,6 +34,8 @@ export interface SidePanelInput {
   cost?: number
   /** 当前已批准计划指针（XML 字符串），可选 */
   activePlan?: string
+  /** Plan Mode 活动草稿路径 + 字节数（起草中可见性） */
+  planDraft?: { path: string; bytes?: number } | null
   /** 当前计划执行轨迹，可选 */
   planTrace?: PlanExecutionTrace | null
   /** 当前目标状态快照，可选 */
@@ -149,12 +151,18 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     }
   }
 
-  // ── Section: 当前已批准计划 ──
+  // ── Section: 当前已批准计划 / Plan Mode 草稿 ──
   const plan = parseActivePlan(input.activePlan)
   const planTrace = input.planTrace
-  if (plan || (planTrace && planTrace.steps.length > 0)) {
+  const planDraft = input.planDraft
+  if (plan || (planTrace && planTrace.steps.length > 0) || planDraft) {
     lines.push(sectionDivider())
     lines.push(line(color('◈ 计划', theme.secondary, { bold: true })))
+    if (planDraft) {
+      const size = planDraft.bytes !== undefined ? `${planDraft.bytes}b` : ''
+      lines.push(line(color('起草中', theme.warning, { bold: true }) + (size ? dim(` ${size}`) : '')))
+      lines.push(line(dim(truncateStr(planDraft.path, contentW))))
+    }
     if (plan) {
       lines.push(line(truncateStr(plan.title, contentW)))
       if (plan.path) lines.push(line(dim(truncateStr(plan.path, contentW))))

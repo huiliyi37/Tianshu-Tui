@@ -558,11 +558,24 @@ test('plan_draft bumps planRev without touching plan mode or blocks', () => {
   const s = fold([
     ev('plan_mode', { state: 'planning' }),
     ev('plan_draft', { path: '.rivet/plans/draft-1.md', title: '草稿', size: 120 }),
-    ev('plan_draft', { path: '.rivet/plans/draft-1.md', title: '草稿', size: 480 }),
+    ev('plan_draft', { path: '.rivet/plans/draft-1.md', title: '草稿', size: 480, content: '# 草稿\n\nbody' }),
   ])
   assert.equal(s.planMode, 'planning')
   assert.equal(s.planRev, 3, 'each draft signal re-fetches the plan list')
   assert.equal(s.blocks.length, 0, 'draft signals never render as thread blocks')
+  assert.ok(s.draftLive)
+  assert.equal(s.draftLive!.content, '# 草稿\n\nbody')
+})
+
+test('plan_mode off clears draftLive', () => {
+  seq = 0
+  const on = fold([
+    ev('plan_mode', { state: 'planning' }),
+    ev('plan_draft', { path: '.rivet/plans/draft-1.md', title: '草稿', size: 10, content: 'x' }),
+  ])
+  assert.ok(on.draftLive)
+  const off = eventReducer(on, { type: 'event', event: ev('plan_mode', { state: 'off' }) })
+  assert.equal(off.draftLive, null)
 })
 
 test('events batch coalesces consecutive text_delta into one block (same result as one-by-one)', () => {

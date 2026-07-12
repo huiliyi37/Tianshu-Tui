@@ -37,8 +37,10 @@ export function PlanPanel(props: {
   planMode?: PlanModeState
   /** Build requires an idle session (server refuses mid-run approval). */
   sessionRunning?: boolean
+  /** SSE-pushed draft body — prefer over usePlans draft when present. */
+  draftLive?: { path: string; title: string | null; content: string; size: number } | null
 }) {
-  const { sessionId, planRev, latestPlanSlug, planMode, sessionRunning } = props
+  const { sessionId, planRev, latestPlanSlug, planMode, sessionRunning, draftLive = null } = props
   const { t } = useTranslation('plan')
   const planning = planMode === 'planning'
   const plans = usePlans(sessionId, planRev, planning)
@@ -70,8 +72,13 @@ export function PlanPanel(props: {
   ]
 
   const all = plans.data?.plans ?? []
-  // Live drafting document — only meaningful while the session is planning.
-  const draft = planning ? plans.data?.draft ?? null : null
+  // Live drafting document — SSE draftLive wins over HTTP poll/refetch.
+  const draftFromQuery = planning ? plans.data?.draft ?? null : null
+  const draft = planning
+    ? (draftLive
+      ? { path: draftLive.path, title: draftLive.title, content: draftLive.content }
+      : draftFromQuery)
+    : null
   const isDraftSelected = selected === DRAFT_SELECTION && !!draft
   // Sort: submitted first (newest), then approved/executed, rejected last.
   const STATUS_ORDER: Record<PlanStatus, number> = { submitted: 0, approved: 1, executed: 2, rejected: 3 }

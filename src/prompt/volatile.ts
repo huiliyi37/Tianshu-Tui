@@ -34,11 +34,23 @@ const METHODOLOGY_ADVISORY_TEMPLATES: Record<PlanMethodology, string> = {
   full: '<plan-methodology route="full">推荐使用基础计划模板（Superpowers writing-plans），路径: docs/superpowers/plans/2026-06-28-plan-methodology-base.md。这是所有计划的默认基础：零上下文假设、任务粒度 2-5 分钟、禁止占位符、TDD、探针先行、瑶光反证、频繁提交。强制要求：① 至少一张 Mermaid 图（架构/数据流/状态图）；② 每个任务 RED→GREEN；③ 复杂实现前先打 30 秒探针；④ 用真实输入复现原问题再验修复，不取信声称取 exit code；⑤ 计划含「瑶光反证」章节（submit 门禁）——设计定稿后回读关键断言到 file:line、bugfix 先跑 run_tests 拿 RED 复现、跑不了的派 adversarial_verifier，复现不了的降级为待验证假设。如果任务涉及安全/权限/沙箱/多 enforcement gate，在基础模板之上追加安全附录（安全不变量、触发路径清单、双门对齐数据流图）。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
 }
 
+/** Plan Mode 专用：设计文档口径，不注入可执行 TDD/bash「执行计划基线」。 */
+const PLAN_MODE_METHODOLOGY_ADVISORY =
+  '<plan-methodology route="full" mode="design-doc">Plan Mode 产出完整设计文档（写入活动计划文件），不是逐步 bash/commit 菜谱。章节要求：① 问题与根因；② 至少一张 Mermaid 架构/数据流图；③ 方案取舍表（有决策时）；④ 文件:行锚点 + 提议 diff/伪代码；⑤ 验证清单（测什么/看什么，不写逐步 shell 块）；⑥ 「瑶光反证」——关键断言 + file:line 或 run_tests 证据摘要，复现不了的标待验证假设；⑦ 重构类须含「回归清单」。逐步命令与 git commit 留给批准后的执行阶段。</plan-methodology>'
+
 export function renderPlanMethodologyAdvisory(
   methodology: PlanMethodology | undefined,
   reason?: string,
+  opts?: { planMode?: boolean },
 ): string | null {
   if (!methodology) return null
+  if (opts?.planMode) {
+    if (!reason) return PLAN_MODE_METHODOLOGY_ADVISORY
+    return PLAN_MODE_METHODOLOGY_ADVISORY.replace(
+      '</plan-methodology>',
+      `\n路由理由: ${reason}</plan-methodology>`,
+    )
+  }
   const base = METHODOLOGY_ADVISORY_TEMPLATES[methodology]
   if (!reason || methodology === 'lightweight') return base
   // For 'full' with a reason, append it for traceability
@@ -69,18 +81,23 @@ export function renderPlanModeBlock(
   return `<plan-mode>
 你处于规划模式。只能读文件和探索代码库——禁止写、改、执行任何会修改状态的命令（活动计划文件除外）。${planFileLine}
 
+**对话纪律（硬性）**：
+- 计划正文**只进活动计划文件**（write_file / edit_file）。assistant 文本最多给 5–10 行进度摘要或澄清问题。
+- **禁止**在聊天里贴完整计划、逐步 shell/\`git commit\`/\`npx\`/\`pytest\` 菜谱，或 executing-plans 风格的可复制命令剧本。
+- 逐步命令与 commit 留给用户批准之后的执行阶段。
+
 工作流：
 1. **识别关键问题** — 先列出 2-3 个对计划至关重要的问题。不确定代码结构时，用 \`delegate_task\`（profile=code_scout）并行调研；独立问题并行派多个 worker。**多模块任务先并行调研**：用 \`delegate_batch\` 一次并行派 2-4 个只读 code_scout（按模块/文件域切分），汇总后再写计划——串行逐个调研浪费轮次。
 2. **外部调研** — 涉及外部库/协议/最佳实践时，用 \`web_search\` / \`web_fetch\` 核实，不凭训练记忆下结论。
 3. **设计收敛** — 最多 2-3 个真正不同的方案；一个明显更优就只提一个。偏好/约束不明时用 \`ask_user_question\` 澄清。
 4. **事实锚点核对（硬性）** — 写入计划前，计划引用的每个文件路径、符号、行号都必须用工具对当前源码核实过。项目内的文档、历史计划、记忆/约定文件描述的是**写下时的状态**，不是现状——涉及现状的断言（技术栈、框架、渲染路径、入口文件、目录结构）一律以当前源码为准，文档与源码冲突时信源码。scout 报告中引用文档得出的结论，必须自己对源码复核后才能写进计划；提议新建文件时先确认其父目录在当前项目中真实存在。
-5. **写入计划** — 将完整设计写入活动计划文件（write_file / edit_file），或成熟后用 \`plan action=submit\` 提交（可省略 plan 字段，从活动计划文件读取）。
+5. **写入计划** — 将完整**设计文档**写入活动计划文件（write_file / edit_file），成熟后用 \`plan action=submit\` 提交（可省略 plan 字段，从活动计划文件读取）。
 
 推进节奏 — 一鼓作气把计划推到成熟，不要每轮停下来问：
 - 默认继续推进：接着读代码、增量写入活动计划文件，直到方案完整，再用 \`plan action=submit\` 提交请求批准。规划本身不消耗审批，只读探索+写计划文件可以在多轮里自主连续进行，不要中途停下。
 - 只有遇到你无法自行判断的真实分歧才 \`ask_user_question\`——存在多个实质取舍不同、且取决于用户偏好的方向，或需求自相矛盾/关键信息缺失到无法继续。为了凑收尾、给个交代而提问是禁止的：没有真正要用户拍板的事就继续推进，不要中断。
 
-计划质量标准——你的计划应该是一份完整的设计文档，禁止占位符：
+计划质量标准——你的计划应该是一份完整的**设计文档**，禁止占位符：
 - 至少包含一张 Mermaid 图（架构图或数据流图）。图形承载语义——(圆角)=用户/输入，[[子程序]]=agent/处理器，{{六边形}}=LLM/模型，[(圆柱)]=存储/DB，{菱形}=判断；边 --> 同步/读，==> 写/强，-.-> 异步/事件。复制下方骨架并替换节点文字：
 \`\`\`mermaid
 flowchart TD
@@ -100,7 +117,8 @@ flowchart LR
 - 用完整路径引用文件，如 \`src/agent/loop.ts:643\`
 - 每个文件给出提议代码（diff 或伪代码），不能只有文件路径或 "TODO"
 - 存在设计决策时，用表格对比备选方案；多方案时在 submit 的 \`options\` 参数中列出供用户选择
-- 包含验证计划：测试用例和人工验证步骤
+- **验证清单**（不是逐步命令剧本）：列出要测的用例名/场景、人工检查点、期望可见结果；不要写 \`\`\`bash\`\`\` / \`git commit\` 菜谱
+- **瑶光反证**：关键断言 + file:line 或 run_tests 证据摘要；复现不了的标「待验证假设」
 - **重构条款（重构/迁移/重写类计划硬性）**：必须包含「回归清单」章节——列出改动前存在、改动后必须仍存在的功能锚点（路由、导航项、导出符号、命令入口等 grep 可验证的断言，每条附验证方式）。重构的行为等价不靠感觉靠清单：交付前逐项核对，缺清单的重构计划视为未完成。
 - 自检：如果 plan 字段里出现 "TODO"、"FIXME"、"待补充"、"placeholder"、"TBD"、"[x]" 空白条目或仅标题无正文的章节，说明计划尚未打磨完成，继续探索并补充内容后再提交。
 

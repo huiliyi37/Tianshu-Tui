@@ -53,6 +53,9 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   private static readonly CRITICAL_TYPES: ReadonlySet<string> = new Set([
     'user', 'tool_result', 'status', 'error', 'done',
     'approval_required', 'approval_resolved', 'unattended_halt',
+    // Plan Mode draft invalidation — desktop "起草中" should not wait on the
+    // 100ms debounce timer after a successful write_file/edit_file.
+    'plan_draft',
   ])
 
   private dir(id: string): string {

@@ -255,12 +255,15 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
  * 着色沿用旧 badge 映射：safe=muted / ask=warning / yolo=error / auto=success / plan=primary。
  */
 export function formatPermissionModeLine(
-  input: { approvalMode?: string; planMode?: boolean },
+  input: { approvalMode?: string; planMode?: boolean; planDraftPath?: string },
   theme: RivetTheme,
 ): string {
   const hint = color('(shift+tab 切换)', theme.dim)
   if (input.planMode) {
-    return `  ${color('⏵ plan mode', theme.primary)} ${hint}`
+    const draft = input.planDraftPath
+      ? ` ${color(truncateToDisplayWidth(input.planDraftPath, 28), theme.dim)}`
+      : ''
+    return `  ${color('⏵ plan mode', theme.primary)}${draft} ${hint}`
   }
   const mode = input.approvalMode ?? 'auto-safe'
   const [label, modeColor] = mode === 'manual' ? ['manual', theme.warning]

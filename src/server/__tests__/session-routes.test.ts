@@ -601,10 +601,9 @@ test('Plan: PUT /plans/:slug refuses non-submitted plans and preserves options o
   assert.match(readFileSync(join(plansDir, 'done.md'), 'utf-8'), /已批准/)
 })
 
-// Wave 2 — plan_draft invalidation signal: while planning, a successful
-// write_file/edit_file (which checkPlanMode restricts to the active draft)
-// emits a throttled metadata-only event so the desktop "起草中" view goes
-// event-driven instead of 2s polling.
+// Wave 2 — plan_draft: while planning, write_file/edit_file emits a throttled
+// event. Persistence/ring store metadata only; SSE listeners get `content` for
+// live PlanPanel paint (≤200KB).
 test('Plan: draft writes emit throttled plan_draft events while planning', async () => {
   const { manager, agents } = setup()
   const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
@@ -617,32 +616,41 @@ test('Plan: draft writes emit throttled plan_draft events while planning', async
   agent.activePlanFilePath = '.rivet/plans/draft-99.md'
   manager.run(s.id, 'plan it')
 
+  const live: Array<Record<string, unknown>> = []
+  const unsub = manager.subscribe(s.id, (e) => {
+    if (e.type === 'plan_draft') live.push(e.data)
+  })
+
   const draftEvents = () =>
     manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'plan_draft')
 
   // Leading edge: first write fires immediately (emit is async — flush microtasks).
   agent.callbacks!.onToolResult('t1', 'write_file', 'ok', false)
-  await new Promise((r) => setTimeout(r, 20))
+  await new Promise((r) => setTimeout(r, 100))
   assert.equal(draftEvents().length, 1)
-  const ev = draftEvents()[0]!.data as { path: string; title: string | null; size: number }
-  assert.equal(ev.path, '.rivet/plans/draft-99.md')
-  assert.equal(ev.title, '草稿')
-  assert.ok(ev.size > 0)
-  assert.ok(!('content' in ev), 'event is an invalidation signal — never carries the body')
+  const stored = draftEvents()[0]!.data as { path: string; title: string | null; size: number }
+  assert.equal(stored.path, '.rivet/plans/draft-99.md')
+  assert.equal(stored.title, '草稿')
+  assert.ok(stored.size > 0)
+  assert.ok(!('content' in stored), 'ring/persist store metadata only')
+  assert.equal(live.length, 1)
+  assert.ok(typeof live[0]!.content === 'string' && (live[0]!.content as string).includes('第一段'), 'SSE live frame carries body')
 
   // Burst inside the window: exactly one trailing event, not one per write.
   agent.callbacks!.onToolResult('t2', 'edit_file', 'ok', false)
   agent.callbacks!.onToolResult('t3', 'write_file', 'ok', false)
-  await new Promise((r) => setTimeout(r, 20))
+  await new Promise((r) => setTimeout(r, 50))
   assert.equal(draftEvents().length, 1, 'writes inside the throttle window do not emit immediately')
-  await new Promise((r) => setTimeout(r, 1100))
+  await new Promise((r) => setTimeout(r, 350))
   assert.equal(draftEvents().length, 2, 'trailing timer lands exactly one event for the burst')
+  assert.equal(live.length, 2)
 
   // Non-write tools and error results never emit.
   agent.callbacks!.onToolResult('t4', 'read_file', 'ok', false)
   agent.callbacks!.onToolResult('t5', 'write_file', 'denied', true)
-  await new Promise((r) => setTimeout(r, 20))
+  await new Promise((r) => setTimeout(r, 50))
   assert.equal(draftEvents().length, 2)
+  unsub?.()
 })
 
 test('Plan: no plan_draft events outside plan mode', async () => {

@@ -208,6 +208,20 @@ describe('renderSidePanel', () => {
     assert.ok(all.includes('.rivet/plans/p1.md'), `plan path: ${all}`)
   })
 
+  it('renders plan-mode draft path while drafting', () => {
+    const lines = renderSidePanel({
+      columns: 32,
+      todos: [],
+      workers: [],
+      modelName: 'test',
+      planDraft: { path: '.rivet/plans/draft-99.md', bytes: 420 },
+    }, theme)
+    const all = lines.map(stripAnsi).join(' ')
+    assert.ok(all.includes('起草中'), `drafting label: ${all}`)
+    assert.ok(all.includes('draft-99.md'), `draft path: ${all}`)
+    assert.ok(all.includes('420b'), `draft bytes: ${all}`)
+  })
+
   it('decodes XML entities in active plan title/path (named + numeric + amp-first ordering)', () => {
     // 覆盖 decodeXmlEntities 三类修复：
     //  - &apos; / &#39; → '  （旧实现未处理，会原样残留）
