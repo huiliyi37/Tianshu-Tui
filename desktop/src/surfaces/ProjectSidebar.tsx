@@ -15,6 +15,7 @@ import { pickFolder } from '../lib/dialog'
 import { listAllSessions, searchSessionContent, type SessionSearchHit } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
+import { createProjectSidebarSearch } from './project-sidebar-search'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -116,20 +117,19 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   // the title-matched tree. Stale responses are dropped via a request counter.
   const [contentHits, setContentHits] = useState<SessionSearchHit[]>([])
   const contentReqRef = useRef(0)
+  const contentSearch = useMemo(() => createProjectSidebarSearch<SessionSearchHit>({
+    search: (query, signal) => {
+      const requestId = ++contentReqRef.current
+      return searchSessionContent(query, signal).then((results) => (
+        contentReqRef.current === requestId ? results : []
+      ))
+    },
+    onResults: setContentHits,
+  }), [])
   useEffect(() => {
-    const q = filter.trim()
-    if (q.length < 2) {
-      setContentHits([])
-      return
-    }
-    const reqId = ++contentReqRef.current
-    const timer = setTimeout(() => {
-      searchSessionContent(q)
-        .then((results) => { if (contentReqRef.current === reqId) setContentHits(results) })
-        .catch(() => { if (contentReqRef.current === reqId) setContentHits([]) })
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [filter])
+    contentSearch.update(filter)
+  }, [contentSearch, filter])
+  useEffect(() => () => contentSearch.dispose(), [contentSearch])
 
   const cycleTheme = () => {
     const next = nextTheme(theme)
@@ -142,8 +142,8 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   // the queue turns the badge off.
   const tasks = useTasks()
   const attentionCount = useMemo(
-    () => deriveReviewQueue(sessions.data ?? [], tasks.data ?? [], new Set(ui.attentionSeen)).unseenCount,
-    [sessions.data, tasks.data, ui.attentionSeen],
+    () => deriveReviewQueue(sessions.data ?? [], tasks.data ?? [], new Set(ui.attentionSeen), ui.activeSessionId).unseenCount,
+    [sessions.data, tasks.data, ui.attentionSeen, ui.activeSessionId],
   )
 
   const loadArchived = async () => {

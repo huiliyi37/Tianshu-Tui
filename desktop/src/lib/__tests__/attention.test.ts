@@ -155,3 +155,29 @@ test('review queue: taskSig re-surfaces when task status changes', () => {
   const q = deriveReviewQueue([], [task({ id: 't1', status: 'completed' })], seen)
   assert.equal(q.unseenCount, 0)
 })
+
+// ── active session exclusion (bugfix: inbox noise from sessions you're watching) ──
+
+test('review queue: active session excluded from queue', () => {
+  const q = deriveReviewQueue(
+    [
+      sess({ id: 'active', status: 'completed', updatedAt: 9 }),
+      sess({ id: 'bg', status: 'completed', updatedAt: 9 }),
+    ],
+    [],
+    new Set(),
+    'active',
+  )
+  assert.equal(q.items.length, 1)
+  assert.equal(q.items[0]!.sessionId, 'bg')
+})
+
+test('review queue: null activeSessionId keeps all sessions', () => {
+  const q = deriveReviewQueue(
+    [sess({ id: 's1', status: 'completed', updatedAt: 9 })],
+    [],
+    new Set(),
+    null,
+  )
+  assert.equal(q.items.length, 1)
+})

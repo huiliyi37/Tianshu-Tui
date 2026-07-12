@@ -138,6 +138,7 @@ export function deriveReviewQueue(
   sessions: SessionRecord[],
   tasks: TaskRecord[],
   seen: Set<string>,
+  activeSessionId?: string | null,
 ): ReviewQueue {
   const items: ReviewItem[] = []
 
@@ -165,6 +166,7 @@ export function deriveReviewQueue(
 
   // Session-derived items — skip sessions already represented by an automation run.
   for (const s of sessions) {
+    if (s.id === activeSessionId) continue
     if (automationSessionIds.has(s.id) && s.pendingApprovals === 0) continue
     const r = reasonOf(s)
     if (!r) continue

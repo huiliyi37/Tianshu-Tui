@@ -18,7 +18,7 @@ export function InboxSurface() {
   const tasks = useTasks()
   const ui = useUiState()
   const dispatch = useUiDispatch()
-  const queue = deriveReviewQueue(sessions.data ?? [], tasks.data ?? [], new Set(ui.attentionSeen))
+  const queue = deriveReviewQueue(sessions.data ?? [], tasks.data ?? [], new Set(ui.attentionSeen), ui.activeSessionId)
 
   const open = (it: ReviewItem) => {
     if (!it.sessionId) return
