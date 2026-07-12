@@ -45,6 +45,7 @@ import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking
 import { createGeneralLedgerHook } from './hooks/general-ledger-hook.js'
 import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
 import { createDeadEndDetectorHook } from './hooks/dead-end-detector.js'
+import { createBatchConvergenceHook } from './hooks/batch-convergence-hook.js'
 import { createRegressionBisectHook } from './hooks/regression-bisect-hook.js'
 import { createIntentAnchorHook } from './hooks/intent-anchor-hook.js'
 import { createTurnBudgetHook } from './hooks/turn-budget-hook.js'
@@ -562,6 +563,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       advisoryBus: deps.advisoryBus,
       deposit: deps.stigmergyDeposit,
     }))
+  }
+
+  // Batch Convergence: postTool hook — 单 turn 工具调用 ≥5 时触发收敛提醒，
+  // 引导 agent 在汇总并行结果前进行分层收敛（分类→交叉验证→综合判断）。
+  // 防止批量并行调用返回后信息过载导致误判。
+  if (deps.advisoryBus) {
+    hooks.push(createBatchConvergenceHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Regression-Bisect 断路器: postTool hook — 回归语义 + 连续 ≥5 轮只读诊断
