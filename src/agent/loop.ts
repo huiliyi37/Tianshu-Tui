@@ -1721,10 +1721,14 @@ export class AgentLoop {
     // Re-entry guard: prevent concurrent agent.run() calls.
     // React strict mode or rapid re-submits could trigger handleSubmit
     // while a previous run is still in-flight, corrupting SessionContext.
+    // Claim the guard synchronously before any await (including the
+    // cancelIdleCompaction drain) so a duplicate run() that arrives during the
+    // drain sees _running=true and no-ops instead of racing _runInner.
     if (this._running) {
       debugLog('[agent] run() called while already running — skipping duplicate')
       return
     }
+    this._running = true
     // Eager abort controller: created synchronously before any await (incl. the
     // cancelIdleCompaction() drain below) so an Esc/Ctrl+C during the init/warmup
     // window aborts a live signal instead of a no-op. Pending latch is cleared
@@ -1741,7 +1745,6 @@ export class AgentLoop {
     // session is always in a consistent state at the await boundary.
     try {
       await this.cancelIdleCompaction()
-      this._running = true
       await this._runInner(userInput, callbacks, images)
     } finally {
       this._running = false
