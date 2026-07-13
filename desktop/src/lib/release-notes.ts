@@ -1,19 +1,19 @@
 import { getVersion } from '@tauri-apps/api/app'
 import { RELEASE_NOTES, type ReleaseNote } from '../generated/release-notes.ts'
-import pkg from '../../package.json' with { type: 'json' }
 
 const LAST_SEEN_KEY = 'tianshu.lastSeenVersion'
 
 export { type ReleaseNote }
 
 /** Best-effort app version. In Tauri uses the bundle version; in browser dev
- *  falls back to the package.json version so the release-notes flow can still
- *  be exercised. */
+ *  falls back to the latest release-note version so the release-notes flow can
+ *  still be exercised without importing package.json (which trips the JS
+ *  obfuscator's parser on import assertions). */
 export async function getCurrentVersion(): Promise<string> {
   try {
     return await getVersion()
   } catch {
-    return pkg.version
+    return RELEASE_NOTES[0]?.version ?? '0.0.0'
   }
 }
 
