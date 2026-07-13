@@ -57,9 +57,9 @@ function PermissionChips({ permissions }: { permissions: PermissionFlags | undef
  * the tool list in the system prompt, and mid-session changes would shatter
  * the prefix cache.
  *
- * Known boundary: preset installPath is repo-relative and resolved against
- * the sidecar cwd — in packaged distributions where the repo tree is absent
- * the server error is surfaced as-is (no fake success on the client).
+ * Preset installPath values like `plugins/office-pdf` resolve against the repo
+ * root in dev, and against the packaged `resources/plugins/` tree (via
+ * RIVET_BUNDLED_PLUGINS_DIR / bundledPluginsDir) in Tauri builds.
  */
 export function PluginsMarket() {
   const { t } = useTranslation('plugins')

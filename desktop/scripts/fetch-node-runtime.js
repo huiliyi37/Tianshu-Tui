@@ -284,11 +284,18 @@ async function main() {
       const npmModuleDest = join(targetDir, 'node_modules', 'npm')
       const npmCmdSrc = join(extractedDir, 'npm.cmd')
       const npmCmdDest = join(targetDir, 'npm.cmd')
+      const npxCmdSrc = join(extractedDir, 'npx.cmd')
+      const npxCmdDest = join(targetDir, 'npx.cmd')
       if (existsSync(npmModuleSrc) && existsSync(npmCmdSrc)) {
         mkdirSync(dirname(npmModuleDest), { recursive: true })
         cpSync(npmModuleSrc, npmModuleDest, { recursive: true, dereference: true })
         copyFileSync(npmCmdSrc, npmCmdDest)
-        console.log(`[fetch-node-runtime] bundled npm → ${npmCmdDest}`)
+        if (existsSync(npxCmdSrc)) {
+          copyFileSync(npxCmdSrc, npxCmdDest)
+          console.log(`[fetch-node-runtime] bundled npm + npx → ${npmCmdDest}, ${npxCmdDest}`)
+        } else {
+          console.log(`[fetch-node-runtime] bundled npm → ${npmCmdDest} (npx.cmd missing; npx-cli.js in module is enough)`)
+        }
       } else {
         console.warn('[fetch-node-runtime] npm files not found in Windows archive; plugin install may fail in packaged app')
       }
@@ -297,13 +304,21 @@ async function main() {
       const npmModuleDest = join(targetDir, 'lib', 'node_modules', 'npm')
       const npmBinSrc = join(extractedDir, 'bin', 'npm')
       const npmBinDest = join(targetDir, 'bin', 'npm')
+      const npxBinSrc = join(extractedDir, 'bin', 'npx')
+      const npxBinDest = join(targetDir, 'bin', 'npx')
       if (existsSync(npmModuleSrc) && existsSync(npmBinSrc)) {
         mkdirSync(dirname(npmModuleDest), { recursive: true })
         cpSync(npmModuleSrc, npmModuleDest, { recursive: true, dereference: true })
         mkdirSync(dirname(npmBinDest), { recursive: true })
         copyFileSync(npmBinSrc, npmBinDest)
         chmodSync(npmBinDest, 0o755)
-        console.log(`[fetch-node-runtime] bundled npm → ${npmBinDest}`)
+        if (existsSync(npxBinSrc)) {
+          copyFileSync(npxBinSrc, npxBinDest)
+          chmodSync(npxBinDest, 0o755)
+          console.log(`[fetch-node-runtime] bundled npm + npx → ${npmBinDest}, ${npxBinDest}`)
+        } else {
+          console.log(`[fetch-node-runtime] bundled npm → ${npmBinDest} (npx missing; npx-cli.js in module is enough)`)
+        }
       } else {
         console.warn('[fetch-node-runtime] npm files not found in archive; plugin install may fail in packaged app')
       }

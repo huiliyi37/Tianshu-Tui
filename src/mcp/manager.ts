@@ -5,6 +5,7 @@ import type { McpConfig, McpServerConfig } from './config.js'
 import type { McpConnectionState } from './types.js'
 import { createMcpToolWrapper, createMcpConnectorConsent, type McpConnectorConsent } from './wrapper.js'
 import { classifyMcpError } from './failure-classifier.js'
+import { resolveNpmCliCommand, buildStdioEnvWithNodePath } from '../platform/resolve-node-cli.js'
 
 const DEFAULT_MCP_TIMEOUT_MS = 60_000
 
@@ -216,10 +217,17 @@ export class McpManager {
     )
 
     if (cfg.command) {
+      // MCP SDK hardcodes shell:false — rewrite bare npx/npm to node+cli.js so
+      // Windows GUI / bundled-node launches don't ENOENT on npx.cmd.
+      const resolved = resolveNpmCliCommand(cfg.command, cfg.args ?? [])
+      const env = buildStdioEnvWithNodePath(
+        cfg.env as Record<string, string> | undefined,
+        { getDefaultEnvironment },
+      )
       const transport = new StdioClientTransport({
-        command: cfg.command,
-        args: cfg.args,
-        env: cfg.env ? { ...getDefaultEnvironment(), ...cfg.env } as Record<string, string> : undefined,
+        command: resolved.command,
+        args: resolved.args,
+        env,
         cwd: cfg.cwd,
         stderr: 'pipe',
       })

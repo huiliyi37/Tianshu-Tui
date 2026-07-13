@@ -209,3 +209,43 @@ test('DELETE /plugins/:name rejects missing name (400)', async () => {
   const res = await ROUTES['DELETE /plugins/:name']!({}, undefined, authHeaders(), undefined)
   assert.equal(res.status, 400)
 })
+
+test('resolveSourcePath falls back to RIVET_BUNDLED_PLUGINS_DIR for plugins/* presets', async () => {
+  const { resolveSourcePath } = await import('../plugin-api.js')
+  // Use an id that is NOT present under the repo's plugins/ so projectRoot
+  // miss forces the bundled fallback (repo has real office-pdf etc.).
+  const bundled = join(testHome, 'bundled-plugins')
+  const pluginDir = join(bundled, 'packaged-only-plugin')
+  mkdirSync(pluginDir, { recursive: true })
+  writeFileSync(join(pluginDir, 'package.json'), JSON.stringify({
+    name: 'packaged-only-plugin', version: '1.0.0',
+    tianshu: {
+      name: 'packaged-only-plugin', version: '1.0.0', description: 'Packaged', entry: 'index.js',
+      tools: [{ name: 'packaged_tool', description: 'x' }], permissions: {},
+    },
+  }))
+  cleanupDirs.push(bundled)
+
+  const prev = process.env.RIVET_BUNDLED_PLUGINS_DIR
+  process.env.RIVET_BUNDLED_PLUGINS_DIR = bundled
+  try {
+    const resolved = resolveSourcePath('plugins/packaged-only-plugin')
+    assert.equal(resolved, pluginDir)
+
+    // Install via relative preset path should find package.json through the fallback.
+    const res = await ROUTES['POST /plugins/install']!(
+      { path: 'plugins/packaged-only-plugin' },
+      undefined,
+      authHeaders(),
+      undefined,
+    )
+    assert.equal(res.status, 400)
+    const body = res.body as { ok: boolean; error: string; manifest?: { name: string } }
+    assert.equal(body.ok, false)
+    assert.ok(body.error.includes('Confirmation required'), `got: ${body.error}`)
+    assert.equal(body.manifest?.name, 'packaged-only-plugin')
+  } finally {
+    if (prev === undefined) delete process.env.RIVET_BUNDLED_PLUGINS_DIR
+    else process.env.RIVET_BUNDLED_PLUGINS_DIR = prev
+  }
+})

@@ -1013,14 +1013,32 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
     for (k, v) in &spec.auth_env {
         cmd.env(k, v);
     }
-    // Bundled PortableGit (Windows-only): tell platform.ts where the fallback
-    // Git Bash lives, and append the git `cmd\` dir to PATH so `git` resolves
-    // on machines without a system Git. Appended LAST so a system Git wins.
-    if let Some(dir) = &spec.bundled_git_dir {
-        cmd.env("RIVET_BUNDLED_GIT_DIR", dir.to_string_lossy().as_ref());
+    // Packaged first-party plugins live at resources/plugins (sibling of
+    // rivet-runtime/). Tell the sidecar so market install can resolve
+    // `plugins/<id>` without the repo tree.
+    if let Some(runtime_dir) = spec.entry.parent() {
+        if let Some(res_dir) = runtime_dir.parent() {
+            let plugins = res_dir.join("plugins");
+            if plugins.is_dir() {
+                cmd.env(
+                    "RIVET_BUNDLED_PLUGINS_DIR",
+                    plugins.to_string_lossy().as_ref(),
+                );
+            }
+        }
+    }
+    // PATH: prepend the bundled Node directory so npm/npx launchers find the
+    // same node; append PortableGit cmd\ last so a system Git still wins.
+    {
         let mut paths: Vec<PathBuf> =
             std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
-        paths.push(dir.join("cmd"));
+        if let Some(node_dir) = Path::new(&spec.node).parent() {
+            paths.insert(0, node_dir.to_path_buf());
+        }
+        if let Some(dir) = &spec.bundled_git_dir {
+            cmd.env("RIVET_BUNDLED_GIT_DIR", dir.to_string_lossy().as_ref());
+            paths.push(dir.join("cmd"));
+        }
         if let Ok(joined) = std::env::join_paths(paths) {
             cmd.env("PATH", joined);
         }
