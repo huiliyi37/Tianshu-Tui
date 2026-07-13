@@ -19,7 +19,7 @@ describe('formatToolCard (Claude Code ●/⎿ style)', () => {
     }, theme)
     assert.ok(lines.length >= 2)
     const header = stripAnsi(lines[0]!)
-    assert.ok(header.includes('●'), 'has bullet')
+    assert.ok(header.includes('›'), 'has bullet')
     assert.ok(header.includes('Run(npm test)'), `header: ${header}`)
   })
 

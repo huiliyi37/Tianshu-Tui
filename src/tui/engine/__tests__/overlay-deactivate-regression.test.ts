@@ -44,7 +44,7 @@ describe('Overlay deactivate · picker exit regression', () => {
     assert.doesNotMatch(output, /\x1B\[999A/, 'cursorUp(999) must not be used — it sends input box to screen top')
   })
 
-  it('deactivateOverlay produces output containing the input prompt (〉)', () => {
+  it('deactivateOverlay produces output containing the input prompt (❯)', () => {
     const { app, out } = makeApp()
     app.start()
     out.clear()
@@ -55,7 +55,7 @@ describe('Overlay deactivate · picker exit regression', () => {
 
     const output = out.chunks.join('')
     const plain = stripAnsi(output)
-    assert.ok(plain.includes('〉'), 'Input prompt symbol 〉 must be present after deactivate')
+    assert.ok(plain.includes('❯'), 'Input prompt symbol ❯ must be present after deactivate')
   })
 
   it('successive activate/deactivate cycles do not accumulate ghost frames', () => {
@@ -84,7 +84,7 @@ describe('Overlay deactivate · picker exit regression', () => {
     const topBorders = output.match(/╭/g) ?? []
     assert.equal(topBorders.length, 1, `Expected 1 top border after connect exit, got ${topBorders.length}`)
     const plain = stripAnsi(output)
-    assert.ok(plain.includes('〉'), 'Input prompt symbol 〉 must be present after connect overlay exit')
+    assert.ok(plain.includes('❯'), 'Input prompt symbol ❯ must be present after connect overlay exit')
   })
 
   it('deactivateOverlay after deactivateOverlay is safe (no crash, renders live region)', () => {
@@ -97,6 +97,6 @@ describe('Overlay deactivate · picker exit regression', () => {
     app.deactivateOverlay()
     const output = out.chunks.join('')
     const plain = stripAnsi(output)
-    assert.ok(plain.includes('〉'), 'Double deactivate should still render input box without crashing')
+    assert.ok(plain.includes('❯'), 'Double deactivate should still render input box without crashing')
   })
 })

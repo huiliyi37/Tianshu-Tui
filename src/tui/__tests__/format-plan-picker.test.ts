@@ -27,10 +27,10 @@ test('renderPlanPicker: renders title and all plan titles', () => {
   assert.ok(plain.includes('Old Plan'))
 })
 
-test('renderPlanPicker: selected entry has ▶ cursor and shows meta', () => {
+test('renderPlanPicker: selected entry has > cursor and shows meta', () => {
   const plain = renderPlanPicker(makeData({ selectedIndex: 1 }), 70, 20, theme).map(stripAnsi)
   const sel = plain.find(l => l.includes('权限入口三档统一'))
-  assert.ok(sel && sel.includes('▶'), 'selected entry has cursor')
+  assert.ok(sel && sel.includes('>'), 'selected entry has cursor')
   const joined = plain.join('\n')
   assert.ok(joined.includes('perm-unify'), 'selected slug shown in meta')
   assert.ok(joined.includes('Manual / Auto / YOLO'), 'options listed for multi-approach plan')

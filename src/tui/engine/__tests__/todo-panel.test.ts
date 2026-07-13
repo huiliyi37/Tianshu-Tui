@@ -58,7 +58,7 @@ test('setTodos 渲染面板且 GlanceBar / 输入框仍可见', () => {
   const plain = stripAnsi(out.chunks.join(''))
   assert.ok(plain.includes('◐ second task'), `panel shown: ${plain}`)
   assert.ok(plain.includes('天枢'), 'GlanceBar still visible (domain)')
-  assert.ok(plain.includes('〉'), 'input line still visible')
+  assert.ok(plain.includes('❯'), 'input line still visible')
 })
 
 test('todo 工具结果经 todosProvider 刷新面板', () => {

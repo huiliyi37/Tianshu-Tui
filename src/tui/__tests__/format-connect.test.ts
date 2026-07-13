@@ -30,7 +30,7 @@ test('renderConnect: choice step shows options with recommended marker', () => {
   assert.match(out, /DeepSeek/)
   assert.match(out, /自定义服务商/)
   assert.match(out, /★/)
-  assert.match(out, /Enter 确认/)
+  assert.match(out, /Enter:确认/)
 })
 
 test('renderConnect: masked input step hides the typed key', () => {
@@ -43,7 +43,7 @@ test('renderConnect: masked input step hides the typed key', () => {
   assert.match(out, /输入 DeepSeek 的 API 密钥/)
   assert.doesNotMatch(out, /sk-secret/)
   assert.match(out, /•/)
-  assert.match(out, /Enter 提交/)
+  assert.match(out, /Enter:提交/)
 })
 
 test('renderConnect: plain input step shows the typed value and step label', () => {

@@ -43,7 +43,7 @@ test('宽屏显式展开后 side panel 展示 todo 与当前工具', () => {
 
   // 主区底部 chrome 仍保留
   assert.ok(plain.includes('天枢'), 'GlanceBar domain still visible')
-  assert.ok(plain.includes('〉'), 'input prompt still visible')
+  assert.ok(plain.includes('❯'), 'input prompt still visible')
 })
 
 test('宽屏展开面板后主区不再重复渲染 todo 列表', () => {

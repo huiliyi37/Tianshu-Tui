@@ -38,15 +38,15 @@ test('renderChoicePanel: descriptions shown under labels', () => {
   assert.ok(plain.includes('切换到更快的模型继续执行'), 'choice A description present')
 })
 
-test('renderChoicePanel: selected choice has cursor ▶', () => {
+test('renderChoicePanel: selected choice has cursor >', () => {
   const lines = renderChoicePanel(makeData({ selectedIndex: 1 }), 60, 20, theme)
   const plain = lines.map(stripAnsi)
-  // selectedIndex=1 → second choice should have ▶ cursor
+  // selectedIndex=1 → second choice should have > cursor
   const bLine = plain.find(l => l.includes('压缩上下文'))
-  assert.ok(bLine && bLine.includes('▶'), 'selected choice has ▶ cursor')
+  assert.ok(bLine && bLine.includes('>'), 'selected choice has > cursor')
   // First choice should NOT have cursor
   const aLine = plain.find(l => l.includes('降级模型'))
-  assert.ok(aLine && !aLine.includes('▶'), 'non-selected choice has no cursor')
+  assert.ok(aLine && !aLine.includes('>'), 'non-selected choice has no cursor')
 })
 
 test('renderChoicePanel: recommended choice has ★ marker', () => {

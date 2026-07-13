@@ -60,7 +60,7 @@ test('start() first frame is a clean append (no stale moveToTop after pre-start 
   const startOutput = out.chunks.join('')
   assert.ok(!CURSOR_UP.test(startOutput), `start() 首帧不得含 cursorUp（stale moveToTop）: ${JSON.stringify(startOutput.slice(0, 120))}`)
   // 首帧应完整含输入框三要素（顶边框/输入行/底边框的可辨识片段）。
-  assert.ok(startOutput.includes('〉'), 'start() 首帧应含输入行提示符 〉')
+  assert.ok(startOutput.includes('❯'), 'start() 首帧应含输入行提示符 ❯')
   assert.ok(startOutput.includes('╭') || startOutput.includes('─'), 'start() 首帧应含顶边框')
   assert.ok(startOutput.includes('╰'), 'start() 首帧应含底边框')
 })

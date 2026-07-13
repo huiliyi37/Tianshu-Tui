@@ -130,7 +130,8 @@ export function renderPager(data: PagerData, width: number, height: number, them
 
   let effectivePage = Math.min(data.page, totalPages - 1)
   let title: string
-  let footer = compactHints([['↑↓/j/k', '滚动'], ['PgUp/PgDn', '翻页'], ['/', '搜索'], ['q', '关闭']])
+  const verboseHint: [string, string] = data.verbose ? ['v', '简略'] : ['v', '详细']
+  let footer = compactHints([['↑↓/j/k', '滚动'], ['PgUp/PgDn', '翻页'], ['/', '搜索'], verboseHint, ['q', '关闭']])
 
   if (mode === 'search') {
     const current = data.searchCurrent ?? 0
