@@ -86,6 +86,14 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('不等于已验证事实'), '应明确审查标记不等于已验证')
   })
 
+  it('includes lossy-observation-discipline rule', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    assert.ok(prompt.includes('lossy-observation-discipline'), '应有有损观测纪律规则')
+    assert.ok(prompt.includes('禁止从中推出负向结论'), '应含负向结论禁止条款')
+    assert.ok(prompt.includes('PARTIAL view'), '应显式覆盖 PARTIAL view 标记')
+    assert.ok(prompt.includes('truncated'), '应覆盖 truncated 场景')
+  })
+
   it('evidence-scope carries the self-verification kernel (merged from self-verification rule)', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     // self-verification 规则已并入 evidence-scope（减少重叠规则的认知负担）。
