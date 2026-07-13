@@ -502,6 +502,12 @@ src/
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南 |
 | [`config.example.json`](config.example.json) | 示例配置（含子代理/审查模型路由） |
 
+## ☕ 赞助支持
+
+如果天枢对你有用，欢迎随缘打赏——这只是一杯咖啡，不是合同。赞助不会改变 issue 优先级，也不会影响功能排期。
+
+![微信支付](docs/brand/assets/wechat-pay.jpg)
+
 ## 许可证
 
 本项目采用 [Apache License, Version 2.0](LICENSE) 开源许可。Copyright 2025-2026 Tianshu Contributors.

@@ -433,6 +433,14 @@ run in parallel without interference.
 - **File-level undo** — Versioned backups before every write/edit
 - **Worker safety** — Timeout budget via AbortController, tool allowlist enforcement
 
+## ☕ Support
+
+If Tianshu has been useful and you'd like to say thanks, you can. It stays a coffee, not a contract — donations don't buy feature priority or change how issues get triaged.
+
+- **China mainland** — WeChat Pay (scan the QR code below)
+
+![WeChat Pay](docs/brand/assets/wechat-pay.jpg)
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2025-2026 Tianshu Contributors.
