@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { gracefulKill, forceKill } from '../platform.js'
 import { track } from '../tools/process-tracker.js'
+import { resolveNpmCliCommand } from '../platform/resolve-node-cli.js'
 
 const require = createRequire(import.meta.url)
 
@@ -196,9 +197,11 @@ function resolveTscCommand(cwd: string): { command: string; args: string[]; useS
     const bundledTsc = require.resolve('typescript/bin/tsc')
     return { command: bundledTsc, args: ['--noEmit', '--skipLibCheck'], useShell: false }
   } catch {
-    // Fallback 2: npx with explicit package so we don't accidentally resolve the
-    // placeholder `tsc` npm package in an empty fixture directory.
-    return { command: 'npx', args: ['-p', 'typescript', 'tsc', '--noEmit', '--skipLibCheck'], useShell: process.platform === 'win32' }
+    // Fallback 2: npx → node + npx-cli.js so Windows packaged / bundled-node
+    // launches don't need npx.cmd + shell.
+    const npxArgs = ['-p', 'typescript', 'tsc', '--noEmit', '--skipLibCheck']
+    const resolved = resolveNpmCliCommand('npx', npxArgs)
+    return { command: resolved.command, args: resolved.args, useShell: false }
   }
 }
 

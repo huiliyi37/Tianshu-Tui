@@ -11,6 +11,7 @@
 
 import type { ChildProcess } from 'node:child_process'
 import { spawnHidden } from '../tools/spawn-hidden.js'
+import { resolveNpmCliCommand, buildStdioEnvWithNodePath } from '../platform/resolve-node-cli.js'
 import { createLspManager, type LspManager, type LspDiagnostic } from './manager.js'
 import {
   serverForFile,
@@ -34,7 +35,17 @@ export interface MultiLspOptions {
 export function createMultiLspManager(cwd: string, opts: MultiLspOptions = {}): LspManager {
   const which = opts.which ?? defaultWhich
   const spawnFor = opts.spawnFor
-    ?? ((def: LspServerDef) => spawnHidden(def.command, def.args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] }))
+    ?? ((def: LspServerDef) => {
+      // Bare npx/npm → node + cli.js so Windows GUI / bundled-node launches
+      // don't ENOENT on npx.cmd when shell is forced off (spawnHidden).
+      const resolved = resolveNpmCliCommand(def.command, def.args ?? [])
+      const env = buildStdioEnvWithNodePath(undefined, {
+        getDefaultEnvironment: () => ({ ...process.env } as Record<string, string>),
+      })
+      return spawnHidden(resolved.command, resolved.args, {
+        cwd, stdio: ['pipe', 'pipe', 'pipe'], env,
+      })
+    })
 
   const managers = new Map<string, { mgr: LspManager; ready: Promise<void> }>()
   let availableCache: LspServerDef[] | null = null
