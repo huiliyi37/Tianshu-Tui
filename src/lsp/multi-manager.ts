@@ -32,20 +32,31 @@ export interface MultiLspOptions {
   spawnFor?: (def: LspServerDef, cwd: string) => ChildProcess
 }
 
+/**
+ * Default spawn for LSP servers: rewrites bare npx/npm to node+cli.js so
+ * Windows GUI / bundled-node launches don't ENOENT on npx.cmd when shell is
+ * forced off (spawnHidden). Non-npx commands pass through unchanged.
+ *
+ * Exported so tests can assert the rewrite directly — deleting the
+ * resolveNpmCliCommand call causes the test to go RED.
+ */
+export function defaultLspSpawn(
+  def: LspServerDef,
+  cwd: string,
+  spawnFn: (cmd: string, args: string[], opts: Record<string, unknown>) => ChildProcess = spawnHidden as (cmd: string, args: string[], opts: Record<string, unknown>) => ChildProcess,
+): ChildProcess {
+  const resolved = resolveNpmCliCommand(def.command, def.args ?? [])
+  const env = buildStdioEnvWithNodePath(undefined, {
+    getDefaultEnvironment: () => ({ ...process.env } as Record<string, string>),
+  })
+  return spawnFn(resolved.command, resolved.args, {
+    cwd, stdio: ['pipe', 'pipe', 'pipe'], env,
+  })
+}
+
 export function createMultiLspManager(cwd: string, opts: MultiLspOptions = {}): LspManager {
   const which = opts.which ?? defaultWhich
-  const spawnFor = opts.spawnFor
-    ?? ((def: LspServerDef) => {
-      // Bare npx/npm → node + cli.js so Windows GUI / bundled-node launches
-      // don't ENOENT on npx.cmd when shell is forced off (spawnHidden).
-      const resolved = resolveNpmCliCommand(def.command, def.args ?? [])
-      const env = buildStdioEnvWithNodePath(undefined, {
-        getDefaultEnvironment: () => ({ ...process.env } as Record<string, string>),
-      })
-      return spawnHidden(resolved.command, resolved.args, {
-        cwd, stdio: ['pipe', 'pipe', 'pipe'], env,
-      })
-    })
+  const spawnFor = opts.spawnFor ?? ((def, c) => defaultLspSpawn(def, c))
 
   const managers = new Map<string, { mgr: LspManager; ready: Promise<void> }>()
   let availableCache: LspServerDef[] | null = null
