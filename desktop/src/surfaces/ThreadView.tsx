@@ -104,8 +104,11 @@ export function ThreadView(props: {
   onApproval?: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>, remember?: boolean) => void
   sideChatOpen?: boolean
   onToggleSideChat?: () => void
+  /** 底部终端面板是否打开；打开时 composer-float 需要抬高，避免被终端遮挡。 */
+  terminalVisible?: boolean
+  terminalHeight?: number
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onSetEffort, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval, sideChatOpen = false, onToggleSideChat } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onSetEffort, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval, sideChatOpen = false, onToggleSideChat, terminalVisible = false, terminalHeight = 240 } = props
   const { t } = useTranslation('threadView')
   const sessionOpenToken = useRef<SessionOpenToken | null>(null)
   useLayoutEffect(() => {
@@ -497,6 +500,12 @@ export function ThreadView(props: {
       composerObserverRef.current = null
     }
   }, [])
+
+  // Composer 拉长时保持底部对齐：用户未主动上滚时，随输入框高度增长自动滚到底。
+  useEffect(() => {
+    if (scrolledUp || rendered.length === 0) return
+    virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
+  }, [composerHeight, rendered.length, scrolledUp, virtualizer])
 
   // Track scroll position: when user scrolls into the "near bottom" zone,
   // clear the scrolled-up flag so auto-scroll resumes.
@@ -974,7 +983,7 @@ export function ThreadView(props: {
   }, [commands])
 
   return (
-    <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator} style={{ paddingBottom: composerHeight }}>
+    <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator} style={{ paddingBottom: composerHeight + (terminalVisible ? terminalHeight : 0) }}>
       {rewindPoints.length > 0 && (
         <div className="thread-timeline-slider-container px-4 py-2 border-b border-border bg-panel-2 flex items-center gap-3 shrink-0">
           <span className="text-xs text-muted font-medium flex items-center gap-1 shrink-0">

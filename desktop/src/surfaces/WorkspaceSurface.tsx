@@ -327,6 +327,7 @@ export function WorkspaceSurface() {
                     onRetryStream={view.retryStream}
                     onToggleDelegation={setShowDelegation}
                     onApproval={handleApproval}
+                    terminalVisible={ui.terminalVisible}
                   />
                 ) : (
                    <div className="empty thread-empty onboard">
