@@ -502,11 +502,21 @@ src/
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南 |
 | [`config.example.json`](config.example.json) | 示例配置（含子代理/审查模型路由） |
 
+## 🤝 社区与支持
+
+- **使用问题 / 讨论** → [GitHub Discussions](https://github.com/huiliyi37/Tianshu-Tui/discussions)
+- **Bug 报告 / 功能请求** → [GitHub Issues](https://github.com/huiliyi37/Tianshu-Tui/issues)
+- **安全漏洞** → [私密报告](https://github.com/huiliyi37/Tianshu-Tui/security/advisories/new)（不要开公开 issue）
+- **贡献代码** → 见 [CONTRIBUTING.md](CONTRIBUTING.md)
+- **求助指南** → 见 [SUPPORT.md](SUPPORT.md)
+
+> 提示：需要先由仓库维护者在 `Settings → General → Discussions` 中开启 Discussions 功能。
+
 ## ☕ 赞助支持
 
 如果天枢对你有用，欢迎随缘打赏——这只是一杯咖啡，不是合同。赞助不会改变 issue 优先级，也不会影响功能排期。
 
-![微信支付](docs/brand/assets/wechat-pay.jpg)
+<img src="docs/brand/assets/wechat-pay.jpg" width="240" alt="微信支付">
 
 ## 许可证
 

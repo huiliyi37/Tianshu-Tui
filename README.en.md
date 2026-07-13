@@ -433,13 +433,23 @@ run in parallel without interference.
 - **File-level undo** — Versioned backups before every write/edit
 - **Worker safety** — Timeout budget via AbortController, tool allowlist enforcement
 
+## 🤝 Community & Support
+
+- **Usage questions / discussions** → [GitHub Discussions](https://github.com/huiliyi37/Tianshu-Tui/discussions)
+- **Bug reports / feature requests** → [GitHub Issues](https://github.com/huiliyi37/Tianshu-Tui/issues)
+- **Security vulnerabilities** → [Report privately](https://github.com/huiliyi37/Tianshu-Tui/security/advisories/new) (do not open a public issue)
+- **Contributing** → See [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Support guide** → See [SUPPORT.md](SUPPORT.md)
+
+> Note: a maintainer needs to enable Discussions in `Settings → General → Discussions` first.
+
 ## ☕ Support
 
 If Tianshu has been useful and you'd like to say thanks, you can. It stays a coffee, not a contract — donations don't buy feature priority or change how issues get triaged.
 
 - **China mainland** — WeChat Pay (scan the QR code below)
 
-![WeChat Pay](docs/brand/assets/wechat-pay.jpg)
+<img src="docs/brand/assets/wechat-pay.jpg" width="240" alt="WeChat Pay">
 
 ## License
 
