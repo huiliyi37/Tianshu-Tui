@@ -50,7 +50,7 @@ const INHERIT = '__inherit__'
  *  are still allowed, hence a datalist (suggest) rather than a hard select. */
 const BUILTIN_DOMAINS = [
   'tianshu', 'pojun', 'tianfu', 'tianliang', 'tianquan',
-  'tianji', 'tianxuan', 'fu', 'wenqu', 'yaoguang',
+  'tianji', 'tianxuan', 'fu', 'wenqu', 'yaoguang', 'huagai',
 ]
 
 function encodeTarget(t: RoutingTarget): string {

@@ -153,6 +153,46 @@ describe('BASH_TOOL 基本命令输出可达', () => {
   })
 })
 
+describe('BASH_TOOL real-time UI output budget', () => {
+  it('bounds flood callbacks at 64KB while leaving raw byte accounting intact', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-bash-ui-budget-'))
+    const chunks: string[] = []
+    try {
+      const result = await BASH_TOOL.execute({
+        input: { command: `node -e "process.stdout.write('x'.repeat(100000))"` },
+        toolUseId: 'bash-ui-budget-test',
+        cwd: dir,
+        onOutput: (text: string) => chunks.push(text),
+      })
+      const visible = chunks.join('')
+      const marker = '[stream output truncated]'
+      assert.equal(visible.split(marker).length - 1, 1, 'truncation marker is emitted exactly once')
+      assert.equal(Buffer.byteLength(visible.replace(`\n${marker}\n`, '')), 64 * 1024)
+      assert.equal(result.rawBytes, 100000, 'raw counters remain independent from the UI budget')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('flushes a buffered tail before resolving the terminal result', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-bash-ui-flush-'))
+    const chunks: string[] = []
+    try {
+      await BASH_TOOL.execute({
+        input: {
+          command: `node -e "process.stdout.write('head'); setTimeout(() => process.stdout.write('tail'), 10)"`,
+        },
+        toolUseId: 'bash-ui-flush-test',
+        cwd: dir,
+        onOutput: (text: string) => chunks.push(text),
+      })
+      assert.equal(chunks.join(''), 'headtail')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('BASH_TOOL 空 stdout 的成功命令 → confirmed empty(不是 "Exit code: 0")', () => {
   it('exit 0 且无 stdout 时标记为 confirmed empty 并给出可操作提示', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-bash-empty-'))

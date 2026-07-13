@@ -17,6 +17,7 @@ import {
   delegateWorker,
   abortDelegateWorker,
   sendPrompt,
+  searchSessionContent,
 } from '../client.ts'
 import type { HookEntry } from '../types.ts'
 
@@ -46,6 +47,19 @@ test('rivetFetch invalidates the cache on a network error (sidecar down)', async
   }
 })
 
+test('rivetFetch keeps the shared runtime cache on intentional AbortError', async () => {
+  clearRuntimeCache()
+  await getRuntimeInfo()
+  const cachedBeforeAbort = __peekRuntimeCache()
+  globalThis.fetch = (() => Promise.reject(new DOMException('search canceled', 'AbortError'))) as typeof fetch
+  try {
+    await assert.rejects(() => rivetFetch('/sessions/search?q=old'), { name: 'AbortError' })
+    assert.equal(__peekRuntimeCache(), cachedBeforeAbort)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
 test('rivetFetch invalidates the cache on a 401 (token rotated)', async () => {
   clearRuntimeCache()
   await getRuntimeInfo()
@@ -66,6 +80,22 @@ test('rivetFetch keeps the cache on a normal 200', async () => {
     const res = await rivetFetch('/health')
     assert.equal(res.status, 200)
     assert.notEqual(__peekRuntimeCache(), null, 'a healthy response retains the handle')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('searchSessionContent forwards AbortSignal to fetch', async () => {
+  clearRuntimeCache()
+  const controller = new AbortController()
+  let forwarded: AbortSignal | null | undefined
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    forwarded = init?.signal
+    return Promise.resolve(new Response(JSON.stringify({ results: [] }), { status: 200 }))
+  }) as typeof fetch
+  try {
+    await searchSessionContent('needle', controller.signal)
+    assert.equal(forwarded, controller.signal)
   } finally {
     globalThis.fetch = realFetch
   }

@@ -80,7 +80,7 @@ export function createSidePathUsageRecorder(self: AgentLoop): (kind: string, usa
 }
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
-return new TurnStreamController({
+  return new TurnStreamController({
       client: self.config.client,
       abortSignal: self.abortController?.signal ?? new AbortController().signal,
       getStreamedTextLength: () => self.streamedText.length,
@@ -243,7 +243,7 @@ return new TurnStreamController({
     })
 }
 export function createTurnCompletionController(self: AgentLoop, callbacks?: AgentCallbacks): TurnCompletionController {
-return new TurnCompletionController({
+  return new TurnCompletionController({
       config: self.config,
       session: self.session,
       trajectory: self.trajectory,
@@ -272,7 +272,7 @@ return new TurnCompletionController({
     })
 }
 export function createToolExecutionController(self: AgentLoop): ToolExecutionController {
-return new ToolExecutionController({
+  return new ToolExecutionController({
       config: self.config,
       cwd: self.cwd,
       harness: self.harness,

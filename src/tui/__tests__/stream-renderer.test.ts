@@ -7,12 +7,23 @@ const theme = getTheme()
 
 function makeRenderer(columns = 80) {
   const commits: string[] = []
+  const cacheEvents: boolean[] = []
+  let currentColumns = columns
+  let themeKey = 'theme-a'
   const renderer = new StreamRenderer({
     commit: (ansi) => commits.push(ansi),
-    getColumns: () => columns,
+    getColumns: () => currentColumns,
     getTheme: () => theme,
+    getThemeKey: () => themeKey,
+    onCacheResult: hit => cacheEvents.push(hit),
   })
-  return { renderer, commits }
+  return {
+    renderer,
+    commits,
+    cacheEvents,
+    setColumns: (value: number) => { currentColumns = value },
+    setThemeKey: (value: string) => { themeKey = value },
+  }
 }
 
 // ── findStableBoundary ─────────────────────────────────────────
@@ -182,4 +193,67 @@ test('多次 push 跨边界累积 commit 顺序正确', () => {
   assert.match(commits[0]!, /alpha para continues/)
   assert.match(commits[1]!, /beta para/)
   assert.match(commits[2]!, /gamma tail/)
+})
+
+test('stable segment cache hit preserves exact ANSI bytes and refreshes LRU', () => {
+  const { renderer, commits, cacheEvents } = makeRenderer()
+  renderer.push('repeat me\n\n')
+  renderer.reset()
+  renderer.push('repeat me\n\n')
+
+  assert.deepEqual(cacheEvents, [false, true])
+  assert.equal(commits[1], commits[0], 'cached output must be byte-identical')
+})
+
+test('stable segment cache misses after columns or explicit theme identity changes', () => {
+  const { renderer, cacheEvents, setColumns, setThemeKey } = makeRenderer()
+  renderer.push('same segment\n\n')
+  renderer.reset()
+  setColumns(100)
+  renderer.push('same segment\n\n')
+  renderer.reset()
+  setThemeKey('theme-b')
+  renderer.push('same segment\n\n')
+
+  assert.deepEqual(cacheEvents, [false, false, false])
+})
+
+test('stable segment cache is a true LRU capped at 64 entries', () => {
+  const { renderer, cacheEvents } = makeRenderer()
+  renderer.push('oldest\n\n')
+  renderer.reset()
+  for (let i = 0; i < 63; i++) {
+    renderer.push(`segment-${i}\n\n`)
+    renderer.reset()
+  }
+
+  renderer.push('oldest\n\n') // hit refreshes oldest to newest
+  renderer.reset()
+  renderer.push('overflow\n\n') // evicts segment-0, not oldest
+  renderer.reset()
+  renderer.push('oldest\n\n')
+  renderer.reset()
+  renderer.push('segment-0\n\n')
+
+  assert.deepEqual(cacheEvents.slice(-4), [true, false, true, false])
+})
+
+test('multibyte segments at or below 16KB UTF-8 bytes are cached', () => {
+  const { renderer, cacheEvents } = makeRenderer()
+  const atLimit = `${'中'.repeat(5461)}x`
+  assert.equal(Buffer.byteLength(atLimit, 'utf8'), 16 * 1024)
+  renderer.push(`${atLimit}\n\n`)
+  renderer.reset()
+  renderer.push(`${atLimit}\n\n`)
+  assert.deepEqual(cacheEvents, [false, true])
+})
+
+test('multibyte segments larger than 16KB UTF-8 bytes bypass the cache', () => {
+  const { renderer, cacheEvents } = makeRenderer()
+  const overLimit = '中'.repeat(5462)
+  assert.ok(Buffer.byteLength(overLimit, 'utf8') > 16 * 1024)
+  renderer.push(`${overLimit}\n\n`)
+  renderer.reset()
+  renderer.push(`${overLimit}\n\n`)
+  assert.deepEqual(cacheEvents, [], 'oversized segments should avoid cache bookkeeping')
 })

@@ -1,6 +1,8 @@
 import { streamSession as realStreamSession } from '../runtime/sse'
 import { fetchEvents as realFetchEvents } from '../runtime/client'
-import { eventReducer, initialEventState, type EventViewState } from './event-reducer'
+import { initialEventState, type EventViewState } from './event-reducer'
+import { foldEventSlice } from './event-replay-slicer'
+import { perfRecord, perfSessionOpenFirstFold } from './perf-budget'
 import type { SessionEvent } from '../runtime/types'
 
 // Transport indirection: tests swap these for fakes to exercise the hub's
@@ -91,10 +93,6 @@ export function __setHubFallbackFlushMs(ms: number): void {
   FALLBACK_FLUSH_MS = ms
 }
 
-/** Hard cap: a burst that outruns both schedulers folds synchronously rather
- *  than letting `pending` grow without bound. */
-const PENDING_FLUSH_CAP = 2000
-
 /** Drain every live store's pending batch now (visibilitychange hook). */
 function flushAllStores(): void {
   for (const s of stores.values()) s.flushNow?.()
@@ -132,7 +130,14 @@ function startLoop(id: string, store: Store): void {
   store.status = 'connecting'
   const gen = store.generation
 
-  const flush = () => {
+  let flush: () => void
+  const scheduleFlush = () => {
+    if (store.generation !== gen || store.pending.length === 0) return
+    if (store.rafId === null) store.rafId = requestAnimationFrame(flush)
+    if (store.fallbackId === null) store.fallbackId = setTimeout(flush, FALLBACK_FLUSH_MS)
+  }
+
+  flush = () => {
     if (store.rafId !== null) {
       cancelAnimationFrame(store.rafId)
       store.rafId = null
@@ -142,26 +147,25 @@ function startLoop(id: string, store: Store): void {
       store.fallbackId = null
     }
     if (store.generation !== gen || store.pending.length === 0) return
-    const batch = store.pending
-    store.pending = []
-    store.state = eventReducer(store.state, { type: 'events', events: batch })
+    const slice = foldEventSlice(store.state, store.pending)
+    store.state = slice.state
+    store.seq = store.state.lastSeq
+    store.pending.splice(0, slice.consumed)
+    perfRecord('sessionHub.flushDuration', slice.durationMs)
+    perfRecord('sessionHub.flushEvents', slice.consumed)
+    perfSessionOpenFirstFold(id)
     notify(store)
+    scheduleFlush()
   }
   store.flushNow = flush
 
   const onEvent = (e: SessionEvent) => {
     if (store.generation !== gen) return
-    if (e.seq > store.seq) store.seq = e.seq
     store.pending.push(e)
-    if (store.pending.length >= PENDING_FLUSH_CAP) {
-      flush()
-      return
-    }
     // Double-schedule: rAF for frame-aligned folding in the foreground, a
     // coarse timer as the background deadline (rAF never fires when hidden).
     // Whichever fires first cancels the other inside flush().
-    if (store.rafId === null) store.rafId = requestAnimationFrame(flush)
-    if (store.fallbackId === null) store.fallbackId = setTimeout(flush, FALLBACK_FLUSH_MS)
+    scheduleFlush()
   }
 
   const onOpen = () => {

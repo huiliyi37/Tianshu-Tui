@@ -298,4 +298,28 @@ it('works', () => assert.equal(2 + 2, 4))`)
   it('isEnabled returns true', () => {
     assert.equal(RUN_TESTS_TOOL.isEnabled(), true)
   })
+
+  it('preserves the legacy 20,000-character real-time UI budget and emits one marker', async () => {
+    const dir = makeTestDir('run-tests-ui-budget-')
+    const chunks: string[] = []
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({
+        name: 'ui-budget',
+        scripts: {
+          test: `node -e "process.stdout.write('x'.repeat(25000))"`,
+        },
+      }))
+      await RUN_TESTS_TOOL.execute({
+        ...makeParams({}, dir),
+        onOutput: (text: string) => chunks.push(text),
+      })
+
+      const visible = chunks.join('')
+      const marker = '[stream output truncated]'
+      assert.equal(visible.split(marker).length - 1, 1)
+      assert.equal(visible.replace(`\n${marker}\n`, '').length, 20_000)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

@@ -19,6 +19,7 @@
 import { formatMarkdown } from '../format/markdown.js'
 import { capLiveTailMarkdownSafe } from '../live-tail-cap.js'
 import type { RivetTheme } from '../theme.js'
+import type { TuiPerfMonitor } from './perf-monitor.js'
 
 /**
  * 找到文本中最后一个稳定的顶层 block 边界（fence-aware）。
@@ -61,12 +62,20 @@ export interface StreamRendererOptions {
   getColumns: () => number
   /** 主题读取函数（动态，切主题后新 block 立即生效） */
   getTheme: () => RivetTheme
+  /** Explicit stable identity; theme objects are deliberately not serialized. */
+  getThemeKey: () => string
+  /** Optional cache instrumentation hook. Oversized segments do not emit events. */
+  onCacheResult?: (hit: boolean) => void
+  perfMonitor?: TuiPerfMonitor
 }
 
 export class StreamRenderer {
+  private static readonly CACHE_MAX_ENTRIES = 64
+  private static readonly CACHE_MAX_TEXT = 16 * 1024
   private pending = ''
   private committedAny = false
   private readonly options: StreamRendererOptions
+  private readonly stableCache = new Map<string, string>()
 
   constructor(options: StreamRendererOptions) {
     this.options = options
@@ -87,16 +96,17 @@ export class StreamRenderer {
     return this.pending
   }
 
-  /** 累积流式文本块，commit 所有新出现的稳定前缀 */
-  push(chunk: string): void {
-    if (!chunk) return
+  /** 累积流式文本块；返回本次是否同步 commit 了稳定前缀。 */
+  push(chunk: string): boolean {
+    if (!chunk) return false
     this.pending += chunk
     const cut = findStableBoundary(this.pending)
     if (cut > 0) {
       const stable = this.pending.slice(0, cut)
       this.pending = this.pending.slice(cut)
-      this.commitText(stable)
+      return this.commitText(stable)
     }
+    return false
   }
 
   /**
@@ -134,15 +144,45 @@ export class StreamRenderer {
     return capped ? capped.split('\n') : []
   }
 
-  private commitText(text: string): void {
+  private commitText(text: string): boolean {
     const trimmed = text.replace(/\n+$/, '')
-    if (!trimmed.trim()) return
-    const rendered = formatMarkdown(
-      { text: trimmed, columns: this.options.getColumns() },
-      this.options.getTheme(),
-    )
-    if (rendered.length === 0) return
-    this.options.commit(rendered.join('\n'))
+    if (!trimmed.trim()) return false
+    const columns = this.options.getColumns()
+    const cacheable = Buffer.byteLength(trimmed, 'utf8') <= StreamRenderer.CACHE_MAX_TEXT
+    const language = trimmed.startsWith('```')
+      ? (trimmed.slice(3).split(/\s|\n/, 1)[0] ?? '')
+      : ''
+    const key = cacheable
+      ? `${columns}\0${this.options.getThemeKey()}\0${language}\0${trimmed}`
+      : undefined
+    let ansi = key === undefined ? undefined : this.stableCache.get(key)
+    if (ansi !== undefined && key !== undefined) {
+      this.stableCache.delete(key)
+      this.stableCache.set(key, ansi)
+      this.options.onCacheResult?.(true)
+      this.options.perfMonitor?.recordCache(true)
+    } else {
+      if (key !== undefined) {
+        this.options.onCacheResult?.(false)
+        this.options.perfMonitor?.recordCache(false)
+      }
+      const render = () => formatMarkdown(
+        { text: trimmed, columns },
+        this.options.getTheme(),
+      )
+      const rendered = this.options.perfMonitor?.measure('formatMarkdown', render) ?? render()
+      if (rendered.length === 0) return false
+      ansi = rendered.join('\n')
+      if (key !== undefined) {
+        this.stableCache.set(key, ansi)
+        if (this.stableCache.size > StreamRenderer.CACHE_MAX_ENTRIES) {
+          const oldest = this.stableCache.keys().next().value
+          if (oldest !== undefined) this.stableCache.delete(oldest)
+        }
+      }
+    }
+    this.options.commit(ansi)
     this.committedAny = true
+    return true
   }
 }

@@ -10,9 +10,9 @@ import { makeTestDir, cleanupTestDir } from '../../tui/__tests__/_test-tmp.js'
 const _require = createRequire(import.meta.url)
 
 describe('StarDomainRegistry — built-in domains', () => {
-  test('has all 10 built-in domains', async () => {
+  test('has all 11 built-in domains', async () => {
     const reg = new StarDomainRegistry()
-    assert.equal(reg.getDomainIds().length, 10)
+    assert.equal(reg.getDomainIds().length, 11)
     for (const id of Object.keys(STAR_DOMAINS) as Array<keyof typeof STAR_DOMAINS>) {
       assert.ok(reg.has(id), `missing built-in domain: ${id}`)
       assert.equal(reg.get(id)!.isCustom, false)
@@ -65,7 +65,7 @@ describe('StarDomainRegistry — built-in domains', () => {
 
   test('list() returns all domains', async () => {
     const reg = new StarDomainRegistry()
-    assert.equal(reg.list().length, 10)
+    assert.equal(reg.list().length, 11)
   })
 })
 
@@ -305,8 +305,8 @@ describe('starDomainRegistry singleton', () => {
     assert.ok(starDomainRegistry instanceof StarDomainRegistry)
   })
 
-  test('has the 10 built-in domains', async () => {
-    assert.equal(starDomainRegistry.getDomainIds().length, 10)
+  test('has the 11 built-in domains', async () => {
+    assert.equal(starDomainRegistry.getDomainIds().length, 11)
   })
 })
 

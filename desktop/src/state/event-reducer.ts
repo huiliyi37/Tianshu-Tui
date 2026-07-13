@@ -241,11 +241,18 @@ function coalesceDeltas(events: SessionEvent[]): SessionEvent[] {
       prev && (ev.type === 'text_delta' || ev.type === 'thinking_delta') &&
       prev.type === ev.type
     ) {
+      const streamStartSeq = typeof prev.data.streamStartSeq === 'number'
+        ? prev.data.streamStartSeq
+        : prev.seq
       out[out.length - 1] = {
         ...prev,
         seq: ev.seq,
         ts: ev.ts,
-        data: { ...prev.data, text: String(prev.data.text ?? '') + String(ev.data.text ?? '') },
+        data: {
+          ...prev.data,
+          streamStartSeq,
+          text: String(prev.data.text ?? '') + String(ev.data.text ?? ''),
+        },
       }
     } else {
       out.push(ev)
@@ -299,7 +306,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         next.blocksRev = next.blocksRev + 1
       } else if (text) {
         next.private_thinkingOpen = false
-        next.blocks = [...next.blocks, { key: `t-${ev.seq}`, kind: 'assistant', text }]
+        const streamStartSeq = typeof ev.data.streamStartSeq === 'number' ? ev.data.streamStartSeq : ev.seq
+        next.blocks = [...next.blocks, { key: `t-${streamStartSeq}`, kind: 'assistant', text }]
         next.private_textOpen = true
         next.blocksRev = next.blocksRev + 1
       }
@@ -318,7 +326,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         next.blocksRev = next.blocksRev + 1
       } else if (text) {
         next.private_textOpen = false
-        next.blocks = [...next.blocks, { key: `th-${ev.seq}`, kind: 'thinking', text }]
+        const streamStartSeq = typeof ev.data.streamStartSeq === 'number' ? ev.data.streamStartSeq : ev.seq
+        next.blocks = [...next.blocks, { key: `th-${streamStartSeq}`, kind: 'thinking', text }]
         next.private_thinkingOpen = true
         next.blocksRev = next.blocksRev + 1
       }

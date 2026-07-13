@@ -16,7 +16,7 @@ function makeController(client: StreamClient) {
   let streamedText = ''
   let lastPrewarmAt = 0
   const usage: Partial<Usage>[] = []
-  const turnCaches: Array<{ turn: number; usage: Usage }> = []
+  const turnCaches: Array<{ turn: number; usage: Usage; observability?: { ttftMs?: number } }> = []
   const prewarmed: string[] = []
 
   const controller = new TurnStreamController({
@@ -28,7 +28,7 @@ function makeController(client: StreamClient) {
     setLastPrewarmAt: position => { lastPrewarmAt = position },
     maybePrewarm: text => { prewarmed.push(text) },
     addUsage: u => { usage.push(u) },
-    recordTurnCache: (turn, u) => { turnCaches.push({ turn, usage: u }) },
+    recordTurnCache: (turn, u, observability) => { turnCaches.push({ turn, usage: u, observability }) },
   })
 
   return { controller, getStreamedText: () => streamedText, usage, turnCaches, prewarmed }
@@ -412,6 +412,128 @@ describe('TurnStreamController', () => {
     assert.equal(order[0], 'stream-start', `stream-start must be first, got: ${order.join(',')}`)
     assert.ok(order.indexOf('stream-start') < order.indexOf('thinking'), 'stream-start before thinking')
     assert.ok(order.indexOf('stream-start') < order.indexOf('text'), 'stream-start before text')
+  })
+
+  it('records TTFT from stream start to the first provider output exactly once', async () => {
+    const times = [1_000, 1_037]
+    const turnCaches: Array<{ observability?: { ttftMs?: number } }> = []
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        cb.onThinkingDelta('first')
+        cb.onTextDelta('second')
+        cb.onContentBlock({ type: 'tool_use', id: 'tu_1', name: 'read_file', input: {} })
+        cb.onStopReason('tool_use', {
+          input_tokens: 10,
+          output_tokens: 2,
+          cache_read_input_tokens: 8,
+        })
+      }),
+    }
+    const controller = new TurnStreamController({
+      client,
+      abortSignal: new AbortController().signal,
+      getStreamedTextLength: () => 0,
+      appendStreamedText: () => {},
+      getLastPrewarmAt: () => 0,
+      setLastPrewarmAt: () => {},
+      maybePrewarm: () => {},
+      addUsage: () => {},
+      recordTurnCache: (_turn, _usage, observability) => { turnCaches.push({ observability }) },
+      now: () => times.shift() ?? 9_999,
+    })
+
+    const requestBytes = JSON.stringify(request)
+    await controller.streamTurn({
+      request,
+      turn: 2,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: () => {},
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+
+    assert.equal(turnCaches[0]?.observability?.ttftMs, 37)
+    assert.equal(times.length, 0, 'later provider events must not sample the clock again')
+    assert.equal(JSON.stringify(request), requestBytes, 'TTFT instrumentation must not change request/message bytes')
+  })
+
+  it('leaves TTFT absent when the provider emits no output signal', async () => {
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        cb.onStopReason('end_turn', {
+          input_tokens: 10,
+          output_tokens: 0,
+          cache_read_input_tokens: 8,
+        })
+      }),
+    }
+    const { controller, turnCaches } = makeController(client)
+
+    await controller.streamTurn({
+      request,
+      turn: 2,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: () => {},
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+
+    assert.equal(turnCaches[0]?.observability?.ttftMs, undefined)
+  })
+
+  it('records tool-only TTFT at the first tool-call delta before arguments complete', async () => {
+    let currentMs = 1_000
+    const turnCaches: Array<{ observability?: { ttftMs?: number } }> = []
+    const client: StreamClient = {
+      stream: mock.fn(async (_request: OaiChatRequest, cb: StreamCallbacks) => {
+        currentMs = 1_040
+        cb.onToolCallDelta?.()
+        currentMs = 1_900
+        cb.onContentBlock({
+          type: 'tool_use',
+          id: 'tu_delayed',
+          name: 'bash',
+          input: { command: 'printf done' },
+        })
+        cb.onStopReason('tool_use', {
+          input_tokens: 10,
+          output_tokens: 2,
+          cache_read_input_tokens: 8,
+        })
+      }),
+    }
+    const controller = new TurnStreamController({
+      client,
+      abortSignal: new AbortController().signal,
+      getStreamedTextLength: () => 0,
+      appendStreamedText: () => {},
+      getLastPrewarmAt: () => 0,
+      setLastPrewarmAt: () => {},
+      maybePrewarm: () => {},
+      addUsage: () => {},
+      recordTurnCache: (_turn, _usage, observability) => { turnCaches.push({ observability }) },
+      now: () => currentMs,
+    })
+
+    await controller.streamTurn({
+      request,
+      turn: 3,
+      lastTurnTextFingerprint: '',
+      callbacks: {
+        onTextDelta: () => {},
+        onThinkingDelta: () => {},
+        onToolUse: () => {},
+        onError: () => {},
+      },
+    })
+
+    assert.equal(turnCaches[0]?.observability?.ttftMs, 40)
   })
 
   describe('TTSR stream rules', () => {

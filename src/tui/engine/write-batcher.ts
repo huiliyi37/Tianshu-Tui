@@ -16,6 +16,7 @@
 
 export class WriteBatcher {
   private pending = false
+  private generation = 0
   private onFlush: () => void
   private onError: (err: unknown) => void
 
@@ -36,13 +37,26 @@ export class WriteBatcher {
   schedule(): void {
     if (this.pending) return
     this.pending = true
+    const generation = this.generation
     void Promise.resolve().then(() => {
+      if (!this.pending || generation !== this.generation) return
       this.pending = false
-      try {
-        this.onFlush()
-      } catch (err) {
-        this.onError(err)
-      }
+      this.runFlush()
     })
+  }
+
+  /** Immediately flush once and invalidate any previously queued microtask. */
+  flushNow(): void {
+    this.generation++
+    this.pending = false
+    this.runFlush()
+  }
+
+  private runFlush(): void {
+    try {
+      this.onFlush()
+    } catch (err) {
+      this.onError(err)
+    }
   }
 }

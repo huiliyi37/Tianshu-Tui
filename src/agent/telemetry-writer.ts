@@ -26,8 +26,10 @@ const NOOP_WRITER: TelemetryWriter = {
   async flush() {},
 }
 
-/** W5：轻量生命体征行的 kind 标记 — lite 模式下唯一放行的记录类型 */
+/** W5：轻量生命体征行的 kind 标记。 */
 export const VITALS_LITE_KIND = 'vitals-lite'
+/** CLI perf summary is emitted only by an explicitly enabled TUI monitor. */
+export const PERF_SUMMARY_KIND = 'perf-summary'
 
 export function createTelemetryWriter(cwd: string, sessionId?: string): TelemetryWriter {
   // W5（incident 20b9714e）：完整遥测仍由 RIVET_DEBUG_TELEMETRY opt-in，但
@@ -43,7 +45,8 @@ export function createTelemetryWriter(cwd: string, sessionId?: string): Telemetr
   let writesSinceTrim = 0
   return {
     write(snapshot: TelemetryRecord) {
-      if (!full && (snapshot as { kind?: string }).kind !== VITALS_LITE_KIND) return
+      const kind = (snapshot as { kind?: string }).kind
+      if (!full && kind !== VITALS_LITE_KIND && kind !== PERF_SUMMARY_KIND) return
       const line = JSON.stringify(snapshot)
       const shouldTrim = ++writesSinceTrim >= TRIM_CHECK_EVERY
       if (shouldTrim) writesSinceTrim = 0

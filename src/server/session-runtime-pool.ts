@@ -43,10 +43,18 @@ export class SessionRuntimePool implements RuntimePool {
         // jump to the thread even if the run subsequently fails.
         onSessionStart?.(session.id)
         const onAbort = () => this.manager.abort(session.id)
+        // Start first: runAndWait installs the exact active-run settlement token
+        // synchronously. A pre-aborted signal must cancel that run, not perform
+        // a no-op abort against the idle session immediately before it starts.
+        const execution = this.manager.runAndWait(session.id, prompt)
+        let listening = false
         if (signal.aborted) onAbort()
-        else signal.addEventListener('abort', onAbort)
+        else {
+          signal.addEventListener('abort', onAbort)
+          listening = true
+        }
         try {
-          const { status, summary, changedFiles, haltedApp } = await this.manager.runAndWait(session.id, prompt)
+          const { status, summary, changedFiles, haltedApp } = await execution
           // Propagate real terminal state: a failed/aborted run must NOT be
           // recorded as completed. Throwing lets TaskRegistry mark failed (or,
           // when the abort came from cancel/timeout, keep that terminal state).
@@ -59,7 +67,7 @@ export class SessionRuntimePool implements RuntimePool {
           }
           return { summary, changedFiles }
         } finally {
-          signal.removeEventListener('abort', onAbort)
+          if (listening) signal.removeEventListener('abort', onAbort)
         }
       },
       release: () => {

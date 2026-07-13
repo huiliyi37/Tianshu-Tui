@@ -302,6 +302,18 @@ export const agentSchema = z.object({
   permissions: permissionsSchema.default({}),
   /** Review worker model routing — see reviewConfigSchema. */
   review: reviewConfigSchema,
+  /** Optional dedicated multimodal model for image recognition.
+   *  When the primary model does not declare supportsVision, images sent by the
+   *  user are first routed through this model to produce a text description,
+   *  which is then prepended to the user prompt sent to the primary model. */
+  visionModel: z.object({
+    provider: z.string(),
+    model: z.string(),
+    /** Prompt template for the vision model. Defaults to a generic Chinese description request. */
+    prompt: z.string().optional(),
+    /** Max output tokens for the generated description. */
+    maxTokens: z.number().int().positive().default(1024),
+  }).optional(),
   /** Goal autonomy (/goal & --goal) completion judge. */
   goal: z.object({
     judge: z.object({

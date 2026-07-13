@@ -82,15 +82,141 @@ export function perfRecord(name: string, duration: number): void {
   scheduleFlush()
 }
 
-/** Subscribe to metric updates (for useSyncExternalStore). */
+export interface SessionOpenToken {
+  id: string
+  generation: number
+}
+
+export interface SessionOpenInitialState {
+  hasFoldedEvents: boolean
+  hasContent: boolean
+}
+
+export interface SessionOpenTracker {
+  begin: (id: string, initial?: SessionOpenInitialState) => SessionOpenToken
+  firstFold: (id: string) => void
+  firstContent: (token: SessionOpenToken) => void
+  firstInteractive: (token: SessionOpenToken) => void
+  end: (token: SessionOpenToken) => void
+}
+
+/** Small dependency-injected core so session-open span semantics stay testable
+ * without coupling tests to Vite's DEV replacement or React rendering. */
+export function createSessionOpenTracker(
+  now: () => number = () => performance.now(),
+  record: (name: string, duration: number) => void = perfRecord,
+): SessionOpenTracker {
+  interface ActiveSpan {
+    token: SessionOpenToken
+    startedAt: number
+    folded: boolean
+    content: boolean
+    interactive: boolean
+  }
+  const active = new Map<string, ActiveSpan>()
+  let generation = 0
+  const current = (token: SessionOpenToken): ActiveSpan | undefined => {
+    const span = active.get(token.id)
+    return span?.token.generation === token.generation ? span : undefined
+  }
+  return {
+    begin(id, initial) {
+      const token = { id, generation: ++generation }
+      const span = {
+        token,
+        startedAt: now(),
+        folded: initial?.hasFoldedEvents === true,
+        content: initial?.hasContent === true,
+        interactive: false,
+      }
+      active.set(id, span)
+      if (span.folded) record('sessionOpen.firstFold', now() - span.startedAt)
+      if (span.content) record('sessionOpen.firstContent', now() - span.startedAt)
+      return token
+    },
+    firstFold(id) {
+      const span = active.get(id)
+      if (!span || span.folded) return
+      span.folded = true
+      record('sessionOpen.firstFold', now() - span.startedAt)
+    },
+    firstContent(token) {
+      const span = current(token)
+      if (!span || span.content) return
+      span.content = true
+      record('sessionOpen.firstContent', now() - span.startedAt)
+    },
+    firstInteractive(token) {
+      const span = current(token)
+      if (!span || span.interactive) return
+      span.interactive = true
+      record('sessionOpen.firstInteractive', now() - span.startedAt)
+    },
+    end(token) {
+      if (current(token)) active.delete(token.id)
+    },
+  }
+}
+
+const sessionOpenTracker = IS_DEV ? createSessionOpenTracker() : null
+
+export function isPerfInstrumentationEnabled(): boolean {
+  return IS_DEV
+}
+
+export function beginSessionOpen(
+  id: string,
+  initial?: SessionOpenInitialState,
+): SessionOpenToken | null {
+  if (!IS_DEV) return null
+  return sessionOpenTracker!.begin(id, initial)
+}
+
+export function perfSessionOpenFirstFold(id: string): void {
+  if (!IS_DEV) return
+  sessionOpenTracker!.firstFold(id)
+}
+
+export function perfSessionOpenFirstContent(token: SessionOpenToken): void {
+  if (!IS_DEV) return
+  sessionOpenTracker!.firstContent(token)
+}
+
+export function perfSessionOpenFirstInteractive(token: SessionOpenToken): void {
+  if (!IS_DEV) return
+  sessionOpenTracker!.firstInteractive(token)
+}
+
+export function endSessionOpen(token: SessionOpenToken): void {
+  if (!IS_DEV) return
+  sessionOpenTracker!.end(token)
+}
+
+export function isSessionOpenInteractiveReady(input: {
+  hasContent: boolean
+  virtualItemCount: number
+  hasScrollContainer: boolean
+  hasComposer: boolean
+}): boolean {
+  return (
+    input.hasContent &&
+    input.virtualItemCount > 0 &&
+    input.hasScrollContainer &&
+    input.hasComposer
+  )
+}
+
+/** Subscribe to metric updates (for useSyncExternalStore). Dev-only. */
 export function subscribePerf(cb: () => void): () => void {
+  if (!IS_DEV) return () => {}
   listeners.add(cb)
   return () => { listeners.delete(cb) }
 }
 
-/** Get a snapshot of all metrics (p50/p99/max per name). Recomputes only when dirty. */
+/** Get a snapshot of all metrics (p50/p99/max per name). Recomputes only when dirty. Dev-only. */
 let cachedSnapshot: Readonly<Record<string, PerfMetric>> = {}
 export function getPerfSnapshot(): Readonly<Record<string, PerfMetric>> {
+  if (!IS_DEV) return cachedSnapshot
   if (!dirty) return cachedSnapshot
   dirty = false
   const result: Record<string, PerfMetric> = {}

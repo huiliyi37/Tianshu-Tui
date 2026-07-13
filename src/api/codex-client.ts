@@ -352,6 +352,17 @@ export class CodexClient implements StreamClient {
               break
             }
 
+            case 'response.output_item.added': {
+              const item = parsed.item as Record<string, unknown> | undefined
+              if (item?.type === 'function_call') callbacks.onToolCallDelta?.()
+              break
+            }
+
+            case 'response.function_call_arguments.delta': {
+              callbacks.onToolCallDelta?.()
+              break
+            }
+
             case 'response.output_item.done': {
               const item = parsed.item as Record<string, unknown> | undefined
               if (item?.type === 'function_call') {

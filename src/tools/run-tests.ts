@@ -10,8 +10,9 @@ import { persistRawOutput, buildUiOutput } from './output-store.js'
 import { getResolvedEnv } from './resolved-env.js'
 import { loadDeclaredVerify } from '../config/verify-config.js'
 import { detectProjectFingerprint } from '../repo/project-fingerprint.js'
+import { OutputStreamBudget } from './output-stream-budget.js'
 
-interface RunnableTestCommand {
+export interface RunnableTestCommand {
   type: 'run'
   command: string
   args: string[]
@@ -676,12 +677,47 @@ function tagVerification(result: ToolResult, phase: 'isolated' | 'integration', 
   result.verification = { ...result.verification, verificationPhase: phase, snapshotRef }
 }
 
-function runTestCommandIn(
+interface TestStreamDecoder {
+  write(data: Buffer): string
+  end(): string
+}
+
+export interface RunTestChild {
+  stdout: NodeJS.ReadableStream | null
+  stderr: NodeJS.ReadableStream | null
+  on(event: 'close', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
+  on(event: 'error', listener: (error: Error) => void): this
+}
+
+export interface RunTestCommandDeps {
+  spawn(
+    command: string,
+    args: readonly string[],
+    options: Parameters<typeof spawnHidden>[2],
+  ): RunTestChild
+  kill(child: RunTestChild, signal: NodeJS.Signals): void
+  persist(toolUseId: string, raw: string): Promise<string>
+  setTimeout(callback: () => void | Promise<void>, ms: number): unknown
+  clearTimeout(handle: unknown): void
+  createDecoder(): TestStreamDecoder
+}
+
+const defaultRunTestDeps: RunTestCommandDeps = {
+  spawn: (command, args, options) => track(spawnHidden(command, [...args], options)),
+  kill: (child, signal) => killProcessTree(child as ReturnType<typeof spawnHidden>, signal),
+  persist: persistRawOutput,
+  setTimeout: (callback, ms) => setTimeout(() => { void callback() }, ms),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  createDecoder: () => new WinStreamDecoder(),
+}
+
+export function runTestCommandIn(
   cwd: string,
   testCommand: RunnableTestCommand,
   params: ToolCallParams,
   filter: string | undefined,
   timeout: number,
+  deps: RunTestCommandDeps = defaultRunTestDeps,
 ): Promise<ToolResult> {
   const startTime = Date.now()
   // Normalize for the host OS: on Windows npm/npx/tsx are `.cmd` shims that need
@@ -696,12 +732,12 @@ function runTestCommandIn(
       // resolved). Without this the losing path still runs its async work
       // (persistRawOutput after the caller cleaned up) → unhandledRejection.
       let settled = false
-      const settle = (result: ToolResult): void => {
-        if (settled) return
+      const claimSettlement = (): boolean => {
+        if (settled) return false
         settled = true
-        resolve(result)
+        return true
       }
-      const child = track(spawnHidden(spawnSpec.command, spawnSpec.args, {
+      const child = deps.spawn(spawnSpec.command, spawnSpec.args, {
         cwd,
         env: buildExecutionEnv(cwd),
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -710,51 +746,55 @@ function runTestCommandIn(
         // tree (node → tsx → workers); Windows uses taskkill /T and must not be
         // detached (breaks stdio pipes). Mirrors bash.ts/git.ts.
         detached: process.platform !== 'win32',
-      }))
+      })
 
       let stdout = ''
       let stderr = ''
-      let onOutputBudget = 20_000
 
-      const stdoutDecoder = new WinStreamDecoder()
-      const stderrDecoder = new WinStreamDecoder()
+      const stdoutDecoder = deps.createDecoder()
+      const stderrDecoder = deps.createDecoder()
+      const uiOutput = new OutputStreamBudget({
+        emit: (text) => params.onOutput?.(text),
+        maxVisible: 20_000,
+        budgetUnit: 'characters',
+      })
 
       child.stdout!.on('data', (data: Buffer) => {
+        if (settled) return
         const text = stdoutDecoder.write(data)
         stdout += text
-        if (onOutputBudget > 0) {
-          const chunk = text.slice(0, onOutputBudget)
-          onOutputBudget -= chunk.length
-          params.onOutput?.(chunk)
-        }
+        uiOutput.push(text)
         if (stdout.length > 100_000) {
           stdout = stdout.slice(-80_000)
         }
       })
 
       child.stderr!.on('data', (data: Buffer) => {
+        if (settled) return
         const text = stderrDecoder.write(data)
         stderr += text
-        if (onOutputBudget > 0) {
-          const chunk = text.slice(0, onOutputBudget)
-          onOutputBudget -= chunk.length
-          params.onOutput?.(chunk)
-        }
+        uiOutput.push(text)
         if (stderr.length > 100_000) {
           stderr = stderr.slice(-80_000)
         }
       })
 
-      const timer = setTimeout(async () => {
-        if (settled) return
-        killProcessTree(child, 'SIGTERM')
-        setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
-        const finalStdout = stdout + stdoutDecoder.end()
-        const finalStderr = stderr + stderrDecoder.end()
+      const timer = deps.setTimeout(async () => {
+        if (!claimSettlement()) return
+        deps.kill(child, 'SIGTERM')
+        deps.setTimeout(() => deps.kill(child, 'SIGKILL'), 3000)
+        const stdoutTail = stdoutDecoder.end()
+        const stderrTail = stderrDecoder.end()
+        const finalStdout = stdout + stdoutTail
+        const finalStderr = stderr + stderrTail
+        uiOutput.push(stdoutTail)
+        uiOutput.push(stderrTail)
+        uiOutput.flush()
+        uiOutput.dispose()
         const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
         const meta = { command: testCommand.display, exitCode: -1, durationMs: Date.now() - startTime }
-        const rawPath = await persistRawOutput(params.toolUseId, raw)
-        settle({
+        const rawPath = await deps.persist(params.toolUseId, raw)
+        resolve({
           content: `Tests timed out after ${timeout}ms`,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
@@ -772,10 +812,13 @@ function runTestCommandIn(
       // 中止一个实例不会波及另一个实例的进程，无需全局 killAll 硬锤。
       const signal = params.abortSignal
       const onAbort = () => {
-        clearTimeout(timer)
-        killProcessTree(child, 'SIGTERM')
-        setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
-        settle({ content: 'Tests aborted by user.', uiContent: '⏹ aborted', isError: false })
+        if (!claimSettlement()) return
+        deps.clearTimeout(timer)
+        deps.kill(child, 'SIGTERM')
+        deps.setTimeout(() => deps.kill(child, 'SIGKILL'), 3000)
+        uiOutput.flush()
+        uiOutput.dispose()
+        resolve({ content: 'Tests aborted by user.', uiContent: '⏹ aborted', isError: false })
       }
       if (signal) {
         if (signal.aborted) onAbort()
@@ -783,13 +826,19 @@ function runTestCommandIn(
       }
 
       child.on('close', async (code, _exitSignal) => {
-        clearTimeout(timer)
+        deps.clearTimeout(timer)
         if (signal) signal.removeEventListener('abort', onAbort)
         // Timeout/abort already settled — a killed child still emits `close`;
         // skip the late async work (persistRawOutput on cleaned-up temp dirs).
-        if (settled) return
-        const finalStdout = stdout + stdoutDecoder.end()
-        const finalStderr = stderr + stderrDecoder.end()
+        if (!claimSettlement()) return
+        const stdoutTail = stdoutDecoder.end()
+        const stderrTail = stderrDecoder.end()
+        const finalStdout = stdout + stdoutTail
+        const finalStderr = stderr + stderrTail
+        uiOutput.push(stdoutTail)
+        uiOutput.push(stderrTail)
+        uiOutput.flush()
+        uiOutput.dispose()
         const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
 
         // EPERM auto-degradation: tsx IPC pipe fails in sandboxed environments.
@@ -798,7 +847,7 @@ function runTestCommandIn(
         if (testCommand.command === 'tsx' && raw.includes('EPERM') && testCommand.args[0] === '--test') {
           const args = ['--import', 'tsx', '--test', ...testCommand.args.slice(1)]
           const retryCmd: RunnableTestCommand = { ...testCommand, command: 'node', args, display: `node --import tsx --test ${testCommand.args.slice(1).join(' ')}` }
-          settle(await runTestCommandIn(cwd, retryCmd, params, filter, timeout))
+          resolve(await runTestCommandIn(cwd, retryCmd, params, filter, timeout, deps))
           return
         }
 
@@ -809,7 +858,7 @@ function runTestCommandIn(
         parsed.exitCode = exitCode
         const formatted = formatOutput(parsed)
         const truncated = truncateOutput(formatted)
-        const rawPath = await persistRawOutput(params.toolUseId, raw)
+        const rawPath = await deps.persist(params.toolUseId, raw)
         const meta = { command: testCommand.display, exitCode, durationMs }
 
         // Declared commands (verify.test) are explicit user intent — exit != 0
@@ -867,7 +916,7 @@ function runTestCommandIn(
           if (rawTail.length > 0) failureContent = `${truncated}\n\n[runner output tail]\n${rawTail}`
         }
 
-        settle({
+        resolve({
           content: exitCode === 0
             ? (parsed.passed === 0 && !parsed.duration
               ? truncated  // parse likely failed — fall back to full formatted output
@@ -881,10 +930,12 @@ function runTestCommandIn(
       })
 
       child.on('error', async (err) => {
-        clearTimeout(timer)
-        if (settled) return
-        const rawPath = await persistRawOutput(params.toolUseId, err.message)
-        settle({
+        deps.clearTimeout(timer)
+        if (!claimSettlement()) return
+        uiOutput.flush()
+        uiOutput.dispose()
+        const rawPath = await deps.persist(params.toolUseId, err.message)
+        resolve({
           content: err.message,
           uiContent: err.message,
           rawPath,

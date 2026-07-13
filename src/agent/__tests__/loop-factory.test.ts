@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AgentLoop } from '../loop.js'
-import { buildRuntimeSnapshot, createToolExecutionController, createSidePathUsageRecorder } from '../loop-factory.js'
+import { buildRuntimeSnapshot, createToolExecutionController, createSidePathUsageRecorder, createTurnStreamController } from '../loop-factory.js'
+import { TurnCacheObservability } from '../cache-log-observability.js'
 
 /**
  * Safety net for the loop.ts decomposition (mid-loop). `buildRuntimeSnapshot`
@@ -138,11 +139,22 @@ test('createSidePathUsageRecorder books usage and appends a side_path cache-log 
     // cache-log write is fire-and-forget — poll briefly for the file.
     const logPath = join(tmp, 'test-session', 'cache-log.jsonl')
     const deadline = Date.now() + 2_000
-    while (!existsSync(logPath)) {
+    let line: Record<string, unknown> | undefined
+    while (line === undefined) {
       if (Date.now() > deadline) throw new Error('cache-log line never appeared')
+      if (existsSync(logPath)) {
+        const content = readFileSync(logPath, 'utf-8').trim()
+        if (content) {
+          try {
+            line = JSON.parse(content) as Record<string, unknown>
+          } catch {
+            // appendFile may have created the file before all bytes are visible
+          }
+        }
+      }
+      if (line !== undefined) break
       await new Promise(r => setTimeout(r, 10))
     }
-    const line = JSON.parse(readFileSync(logPath, 'utf-8').trim())
     assert.equal(line.event, 'side_path')
     assert.equal(line.kind, 'llm-speculation')
     assert.equal(line.model, 'deepseek-v4')
@@ -167,4 +179,91 @@ test('createSidePathUsageRecorder skips empty usage (no totals pollution, no log
 
   createSidePathUsageRecorder(self)('llm-speculation', {})
   assert.equal(booked.length, 0)
+})
+
+test('turn cache-log writes measured observability fields once and then omits them', async () => {
+  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const tmp = mkdtempSync(join(tmpdir(), 'turn-cache-observability-'))
+  const prevEnv = process.env.RIVET_SESSION_DIR
+  process.env.RIVET_SESSION_DIR = tmp
+  try {
+    const turnCacheObservability = new TurnCacheObservability()
+    turnCacheObservability.recordToolBatch({
+      outputRawBytes: 800,
+      outputTrimmedBytes: 125,
+      outputFilterIds: ['node-test'],
+      toolUiEvents: 3,
+    })
+    const self = {
+      cwd: '/work',
+      session: {
+        addUsage: () => {},
+        recordTurnCache: () => {},
+        getMessages: () => [],
+        getEstimatedTokens: () => 0,
+        getCacheHistory: () => [],
+      },
+      config: {
+        sessionId: 'test-session',
+        contextWindow: 128_000,
+        promptEngine: { getModel: () => 'deepseek-v4' },
+        client: {},
+      },
+      streamedText: '',
+      lastPrewarmAt: 0,
+      prewarm: new Map(),
+      prewarmController: { maybePrewarm: () => {} },
+      turnCacheObservability,
+      prevMsgCount: 0,
+      prevEstTokens: 0,
+      prevEngineStats: { volatileSwaps: 0, frozenClamps: 0, frozenFallbackRebuilds: 0, toolsUpdates: 0 },
+      prevHitRate: null,
+      prevTokenEfficiency: undefined,
+      lastArchive: null,
+    } as unknown as AgentLoop
+    const deps = (createTurnStreamController(self) as unknown as {
+      deps: { recordTurnCache: (turn: number, usage: Record<string, number>, observability?: { ttftMs?: number }) => void }
+    }).deps
+    const usage = {
+      input_tokens: 100,
+      output_tokens: 10,
+      cache_read_input_tokens: 95,
+      cache_creation_input_tokens: 5,
+    }
+    deps.recordTurnCache(1, usage, { ttftMs: 42 })
+    deps.recordTurnCache(2, usage)
+
+    const logPath = join(tmp, 'test-session', 'cache-log.jsonl')
+    const deadline = Date.now() + 2_000
+    let lines: Array<Record<string, unknown>> = []
+    while (Date.now() <= deadline) {
+      if (existsSync(logPath)) {
+        try {
+          lines = readFileSync(logPath, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+        } catch {
+          lines = []
+        }
+        if (lines.length === 2) break
+      }
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+
+    const measured = lines.find(line => line.turn === 1)
+    const unmeasured = lines.find(line => line.turn === 2)
+    assert.equal(measured?.ttftMs, 42)
+    assert.equal(measured?.outputRawBytes, 800)
+    assert.equal(measured?.outputTrimmedBytes, 125)
+    assert.deepEqual(measured?.outputFilterIds, ['node-test'])
+    assert.equal(measured?.toolUiEvents, 3)
+    assert.equal('ttftMs' in (unmeasured ?? {}), false)
+    assert.equal('outputRawBytes' in (unmeasured ?? {}), false)
+    assert.equal('outputTrimmedBytes' in (unmeasured ?? {}), false)
+    assert.equal('outputFilterIds' in (unmeasured ?? {}), false)
+    assert.equal('toolUiEvents' in (unmeasured ?? {}), false)
+  } finally {
+    if (prevEnv === undefined) delete process.env.RIVET_SESSION_DIR
+    else process.env.RIVET_SESSION_DIR = prevEnv
+  }
 })

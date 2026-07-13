@@ -201,6 +201,33 @@ describe('final text content block emission', () => {
 })
 
 describe('tool_calls delta buffering', () => {
+  it('emits an observability signal on the first tool delta before JSON arguments complete', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    const events: string[] = []
+    const callbacks = {
+      onToolCallDelta: () => { events.push('delta') },
+      onToolCallHint: () => { events.push('hint') },
+      onContentBlock: () => { events.push('complete') },
+    }
+
+    client.processDelta(
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_slow', type: 'function', function: { name: 'bash', arguments: '' } }] }, finish_reason: null }] },
+      callbacks,
+    )
+    client.processDelta(
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"command":' } }] }, finish_reason: null }] },
+      callbacks,
+    )
+
+    assert.deepEqual(events, ['delta', 'delta'])
+
+    client.processDelta(
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"printf done"}' } }] }, finish_reason: 'tool_calls' }] },
+      callbacks,
+    )
+    assert.deepEqual(events, ['delta', 'delta', 'delta', 'hint', 'complete'])
+  })
+
   it('accumulates fragmented tool_calls deltas into complete tool_use', () => {
     const client = new OpenAIClient(TEST_CONFIG)
 

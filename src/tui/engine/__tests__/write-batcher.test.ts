@@ -47,4 +47,35 @@ describe('WriteBatcher (microtask coalescing)', () => {
     await nextMacrotask()
     assert.equal(flushes, 2, 'the re-armed schedule flushes exactly once more')
   })
+
+  it('flushNow invalidates an already queued microtask', async () => {
+    let flushes = 0
+    const b = new WriteBatcher(() => { flushes++ })
+
+    b.schedule()
+    b.flushNow()
+    assert.equal(flushes, 1, 'critical flush runs synchronously')
+
+    await nextMacrotask()
+    assert.equal(flushes, 1, 'stale queued microtask must not flush again')
+  })
+
+  it('flushNow reports errors and remains reusable', async () => {
+    const errors: unknown[] = []
+    let shouldThrow = true
+    let flushes = 0
+    const b = new WriteBatcher(() => {
+      flushes++
+      if (shouldThrow) throw new Error('render failed')
+    }, err => errors.push(err))
+
+    assert.doesNotThrow(() => b.flushNow())
+    assert.equal(errors.length, 1)
+    assert.match(String(errors[0]), /render failed/)
+
+    shouldThrow = false
+    b.schedule()
+    await nextMacrotask()
+    assert.equal(flushes, 2)
+  })
 })

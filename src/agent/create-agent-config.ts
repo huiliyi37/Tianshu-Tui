@@ -60,6 +60,13 @@ export interface AgentConfigInput {
     extraCore?: readonly string[]
     domainTier?: readonly string[]
   }
+  /** Optional vision bridge configuration (parsed from config.agent.visionModel). */
+  visionModel?: {
+    provider: string
+    model: string
+    prompt?: string
+    maxTokens: number
+  }
 }
 
 export interface MainAgentConfigInputParams {
@@ -113,7 +120,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'providerProfile' | 'providerName' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'providerProfile' | 'providerName' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision' | 'visionClient' | 'visionModelPrompt' | 'visionModelMaxTokens'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -138,6 +145,11 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
   // neither spends the main model's tokens nor evicts its hot prefix. Silent
   // fallback to primaryClient when unconfigured/invalid (mirrors review/council).
   const compactClient = buildCompactClient(input)
+
+  // Optional vision bridge client (agent.visionModel.provider + model).
+  // When the primary model is not multimodal, this client describes user images
+  // so the primary model still receives their content as text.
+  const visionBridge = buildVisionClient(input)
 
   // 工具门控：构造期与 updateTools() 共用同一过滤（gateToolDefinitions），
   // 确保 MCP/LSP 异步注册后调用 updateTools 不会把 EXTENDED 工具整个还原。
@@ -195,6 +207,9 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     // Per-model vision capability — switchModel rebuilds the agent, so this
     // value always tracks the active model (no live getter needed).
     supportsVision: model.supportsVision ?? false,
+    visionClient: visionBridge?.client,
+    visionModelPrompt: visionBridge?.prompt,
+    visionModelMaxTokens: visionBridge?.maxTokens,
  }
 }
 
@@ -330,4 +345,46 @@ function buildCompactClient(
     auth,
     sessionId: input.sessionId,
   })
+}
+
+/**
+ * Build the dedicated vision bridge StreamClient from agent.visionModel.
+ * Returns undefined when unconfigured/invalid/credentials missing — the primary
+ * model simply won't see images (same as before vision bridge existed).
+ */
+function buildVisionClient(
+  input: AgentConfigInput,
+): { client: import('../api/stream-client.js').StreamClient; prompt?: string; maxTokens: number } | undefined {
+  const vm = input.visionModel
+  if (!vm) return undefined
+  const prov = input.allProviders?.[vm.provider]
+  if (!prov) return undefined
+  const spec = prov.models.find(m => m.id === vm.model || m.alias === vm.model)
+  if (!spec) return undefined
+
+  let apiKey = ''
+  let auth: AuthProvider | undefined
+  try {
+    if (prov.auth?.type === 'oauth') {
+      auth = prov.name === input.provider.name ? input.auth : createAuthProvider(prov.auth, process.env)
+      if (!auth?.isAuthenticated()) return undefined
+    } else {
+      apiKey = resolveApiKey(prov)
+      if (!apiKey) return undefined
+    }
+  } catch {
+    return undefined
+  }
+
+  const caps = resolveCapabilities(prov.name, prov.capabilities)
+  const maxTokens = Math.min(vm.maxTokens, spec.maxTokens)
+  const client = createProviderClient(prov, caps, {
+    apiKey,
+    model: spec.id,
+    reasoningEffort: spec.reasoningEffort,
+    maxTokens,
+    auth,
+    sessionId: input.sessionId,
+  })
+  return { client, prompt: vm.prompt, maxTokens }
 }

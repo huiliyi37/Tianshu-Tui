@@ -41,6 +41,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/help', description: 'Show all commands', category: 'command' },
     { name: '/compact', description: 'Compact conversation context' },
     { name: '/connect', description: '连接模型服务商（选内置或自定义，填写 API 密钥）' },
+    { name: '/model', description: 'Show or switch model' },
     { name: '/model list', description: 'List available models' },
     { name: '/chat', description: 'Switch to lightweight chat mode' },
     { name: '/task', description: 'Switch to full task mode' },

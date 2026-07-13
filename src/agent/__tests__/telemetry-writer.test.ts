@@ -148,6 +148,23 @@ describe('createTelemetryWriter — lite mode (W5)', () => {
     }
   })
 
+  it('allows only perf-summary alongside lite telemetry', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-telemetry-perf-lite-'))
+    try {
+      const writer = createTelemetryWriter(dir)
+      writer.write({ kind: 'perf-summary', samples: { renderLive: { count: 1 } } })
+      writer.write({ kind: 'recall-summary', foo: 1 })
+      writer.write(makeSnapshot(1))
+      await writer.flush()
+
+      const raw = readFileSync(join(dir, '.rivet', 'sensorium.jsonl'), 'utf-8')
+      const lines = raw.trim().split('\n').map(line => JSON.parse(line) as { kind?: string })
+      assert.deepEqual(lines.map(line => line.kind), ['perf-summary'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('RIVET_TELEMETRY_LITE=0 disables even lite lines', async () => {
     process.env['RIVET_TELEMETRY_LITE'] = '0'
     try {

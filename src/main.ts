@@ -1246,6 +1246,12 @@ async function main() {
   })
   app.setPlanTraceProvider(() => ctx!.agent.planTrace)
 
+  // 同步 vision 状态到 TUI，使其能在用户气泡中提示图片处理方式。
+  app.setVisionInfo(
+    ctx!.agent.config.supportsVision ?? false,
+    !!ctx!.agent.config.visionClient,
+  )
+
   // ── Wire agent → TuiApp ──────────────────────────────────────
   // 消息队列已收编进 TuiApp：streaming 时 Enter 由 TuiApp 入队（steerBuffer），
   // onSteerDrain 由 TuiApp callbacks 真实 drain，此处无需外层 override。

@@ -10,6 +10,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { skillRegistry } from '../../skills/skill-loader.js'
+import { EventEmitter } from 'node:events'
+import type { ServerResponse } from 'node:http'
 
 const TOKEN = 'secret-token'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
@@ -22,9 +24,11 @@ class FakeAgent implements ManagedAgent {
   enterPlanModeCalls: Array<{ planFilePath?: string } | undefined> = []
   activePlanFilePath: string | null = null
   enabledTools: string[] = []
+  settleOnAbort = true
   private resolveRun?: () => void
   run(p: string, cb: AgentCallbacks) { this.runPrompts.push(p); this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
-  abort() { this.resolveRun?.() }
+  abort() { if (this.settleOnAbort) this.resolveRun?.() }
+  finish() { this.resolveRun?.() }
   enableTool(name: string) { this.enabledTools.push(name); return { status: 'mounted', cacheImpact: 'none' } as const }
   setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null) { this.activePlanCalls.push(plan) }
   enterPlanMode(opts?: { planFilePath?: string }) { this.enterPlanModeCalls.push(opts) }
@@ -95,6 +99,25 @@ test('prompt on a busy session returns 409', async () => {
   const id = (created.body as { id: string }).id
   const again = await router('POST', `/sessions/${id}/prompt`, { prompt: 'more' }, AUTH)
   assert.equal(again.status, 409)
+})
+
+test('prompt remains 409 through archive-abort settlement, then succeeds', async () => {
+  const { router, agents } = setup()
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+  agents[0]!.settleOnAbort = false
+
+  assert.equal((await router('DELETE', `/sessions/${id}`, {}, AUTH)).status, 200)
+  assert.equal((await router('POST', `/sessions/${id}/unarchive`, {}, AUTH)).status, 200)
+  const settling = await router('POST', `/sessions/${id}/prompt`, { prompt: 'too soon' }, AUTH)
+  assert.equal(settling.status, 409)
+  assert.deepEqual(agents[0]!.runPrompts, ['go'])
+
+  agents[0]!.finish()
+  await new Promise((resolve) => setImmediate(resolve))
+  const after = await router('POST', `/sessions/${id}/prompt`, { prompt: 'now safe' }, AUTH)
+  assert.equal(after.status, 200)
+  assert.deepEqual(agents[0]!.runPrompts, ['go', 'now safe'])
 })
 
 test('POST /sessions/:id/resume maps manager results to precise status codes', async () => {
@@ -1114,4 +1137,33 @@ test('GET /sessions/search returns empty results when transcripts are absent', a
     if (prevDir === undefined) delete process.env.RIVET_SESSION_DIR
     else process.env.RIVET_SESSION_DIR = prevDir
   }
+})
+
+test('GET /sessions/search aborts its scan when the client response closes', async () => {
+  const agents: FakeAgent[] = []
+  const manager = new RuntimeSessionManager({
+    createAgent: () => { const agent = new FakeAgent(); agents.push(agent); return agent },
+    defaultCwd: '/tmp/work',
+  })
+  await createRouter(buildSessionRoutes(manager, TOKEN))('POST', '/sessions', { title: 'Searchable' }, AUTH)
+  let observedSignal: AbortSignal | undefined
+  const routes = buildSessionRoutes(manager, TOKEN, undefined, undefined, {
+    searchSessionTranscripts: async (_sessions, _query, options) => {
+      observedSignal = options?.signal
+      await new Promise<void>((resolve) => options?.signal?.addEventListener('abort', () => resolve(), { once: true }))
+      return {
+        results: [],
+        metadata: { durationMs: 0, scannedFiles: 0 },
+      }
+    },
+  })
+  const router = createRouter(routes)
+  const response = new EventEmitter() as ServerResponse
+  const pending = router('GET', '/sessions/search?q=needle', {}, AUTH, response)
+  await Promise.resolve()
+  response.emit('close')
+  const result = await pending
+
+  assert.equal(observedSignal?.aborted, true)
+  assert.equal(result.status, 200)
 })

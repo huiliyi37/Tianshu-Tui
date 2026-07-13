@@ -1,8 +1,19 @@
-import { memo, Profiler, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ProfilerOnRenderCallback } from 'react'
+import { memo, Profiler, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ProfilerOnRenderCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useQueryClient } from '@tanstack/react-query'
-import { perfBegin, perfEnd, perfRecord } from '../state/perf-budget'
+import {
+  perfBegin,
+  beginSessionOpen,
+  endSessionOpen,
+  isPerfInstrumentationEnabled,
+  isSessionOpenInteractiveReady,
+  perfEnd,
+  perfRecord,
+  perfSessionOpenFirstContent,
+  perfSessionOpenFirstInteractive,
+  type SessionOpenToken,
+} from '../state/perf-budget'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import type { StreamStatus } from '../state/use-session-events'
@@ -96,6 +107,26 @@ export function ThreadView(props: {
 }) {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onSetEffort, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval, sideChatOpen = false, onToggleSideChat } = props
   const { t } = useTranslation('threadView')
+  const sessionOpenToken = useRef<SessionOpenToken | null>(null)
+  useLayoutEffect(() => {
+    if (!isPerfInstrumentationEnabled()) return
+    const token = beginSessionOpen(session.id, {
+      hasFoldedEvents: view.lastSeq > 0,
+      hasContent: view.blocks.length > 0,
+    })
+    if (!token) return
+    sessionOpenToken.current = token
+    return () => {
+      endSessionOpen(token)
+      if (sessionOpenToken.current?.generation === token.generation) {
+        sessionOpenToken.current = null
+      }
+    }
+  }, [session.id])
+  useLayoutEffect(() => {
+    const token = sessionOpenToken.current
+    if (token && view.blocks.length > 0) perfSessionOpenFirstContent(token)
+  }, [session.id, view.blocks.length])
   const ui = useUiState()
   const dispatch = useUiDispatch()
   // Busy-vs-dropped attribution: /health reports the sidecar's event-loop lag.
@@ -385,6 +416,35 @@ export function ThreadView(props: {
       return height
     },
   })
+
+  useLayoutEffect(() => {
+    if (!isPerfInstrumentationEnabled()) return
+    const token = sessionOpenToken.current
+    if (!token) return
+    const readiness = () => isSessionOpenInteractiveReady({
+      hasContent: view.blocks.length > 0,
+      virtualItemCount: virtualizer.getVirtualItems().length,
+      hasScrollContainer: msgRef.current !== null,
+      hasComposer: composerWrapRef.current !== null,
+    })
+    if (!readiness()) return
+    const frame = requestAnimationFrame(() => {
+      if (
+        sessionOpenToken.current?.generation === token.generation &&
+        readiness()
+      ) {
+        perfSessionOpenFirstInteractive(token)
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [
+    composerHeight,
+    renderedWithTurns.length,
+    session.id,
+    view.blocks.length,
+    view.blocksRev,
+    virtualizer,
+  ])
 
   // The last block's text length drives streaming auto-scroll: blocks.length
   // stays constant while a reply streams in, so we pin the bottom on text growth.

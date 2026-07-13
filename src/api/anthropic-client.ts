@@ -417,6 +417,7 @@ export class AnthropicClient implements StreamClient {
               const block = parsed.content_block as Record<string, unknown> | undefined
               if (!block) break
               if (block.type === 'tool_use' && index !== undefined) {
+                callbacks.onToolCallDelta?.()
                 const id = block.id as string
                 const name = block.name as string
                 if (id && name) {

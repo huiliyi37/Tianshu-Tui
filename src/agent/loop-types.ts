@@ -191,6 +191,14 @@ export interface AgentConfig {
    *  switchModel 重建 agent 时随 ModelSpec 更新。门控工具边界视觉通道：
    *  computer_use 截图仅在 true 时以尾部追加 user 消息回灌模型，false 时静默丢弃。 */
   supportsVision?: boolean
+  /** Optional dedicated multimodal client. When supportsVision is false and the user
+   *  sends images, this client generates text descriptions that are prepended to
+   *  the primary prompt. */
+  visionClient?: StreamClient
+  /** Prompt template used by the vision bridge. */
+  visionModelPrompt?: string
+  /** Max output tokens for the vision bridge description. */
+  visionModelMaxTokens?: number
   /** TDD gate config — controls whether edit tools are blocked when the model
    *  edits files without running tests. Parsed from RIVET_TDD_GATE env var.
    *  Default: enabled, enforce mode, threshold 3 edits. */

@@ -3,6 +3,7 @@ import type { StreamClient } from '../api/stream-client.js'
 import type { OaiChatRequest } from '../api/oai-types.js'
 import type { ContentBlock, Usage } from '../api/types.js'
 import { stripIntraTurnRepetition } from './dedup.js'
+import type { StreamCacheObservability } from './cache-log-observability.js'
 
 export interface StreamRule {
   /** Regex pattern matched against a bash tool-call's `command` argument.
@@ -46,9 +47,11 @@ export interface TurnStreamDeps {
   /** Direct file prewarm for speculative tool call hints */
   prewarmFile?: (filePath: string) => void
   addUsage: (usage: Partial<Usage>) => void
-  recordTurnCache: (turn: number, usage: Usage) => void
+  recordTurnCache: (turn: number, usage: Usage, observability?: StreamCacheObservability) => void
   /** Optional: record a failed stream attempt (partial output discarded) for diagnostics. */
   recordStreamAttemptAborted?: (info: StreamAttemptAbortedInfo) => void
+  /** Monotonic-enough clock for TTFT measurement; injectable for deterministic tests. */
+  now?: () => number
 }
 
 export interface TurnStreamInput {
@@ -102,6 +105,13 @@ export class TurnStreamController {
     const CHUNK_DEDUP_HISTORY = 5
     const chunkHistory: string[] = []
     const thinkingChunkHistory: string[] = []
+    const now = this.deps.now ?? Date.now
+    let streamStartMs: number | undefined
+    let ttftMs: number | undefined
+    const markFirstProviderOutput = () => {
+      if (streamStartMs === undefined || ttftMs !== undefined) return
+      ttftMs = Math.max(0, now() - streamStartMs)
+    }
 
     // TTSR: compile stream rule patterns once â default rules always active
     const rules = [...DEFAULT_STREAM_RULES, ...(input.streamRules ?? [])]
@@ -111,6 +121,7 @@ export class TurnStreamController {
 
     const streamCallbacks: StreamCallbacks = {
       onTextDelta: (text) => {
+        if (text.length > 0) markFirstProviderOutput()
         this.deps.appendStreamedText(text)
         if (this.deps.getStreamedTextLength() - this.deps.getLastPrewarmAt() >= 500) {
           this.deps.setLastPrewarmAt(this.deps.getStreamedTextLength())
@@ -132,6 +143,7 @@ export class TurnStreamController {
         input.callbacks.onTextDelta(text)
       },
       onThinkingDelta: (thinking) => {
+        if (thinking.length > 0) markFirstProviderOutput()
         thinkingAccum += thinking
         // Duplicate-chunk guard for thinking content (mirrors text dedup above).
         // DeepSeek/MiMo can repeat 50+ char reasoning chunks verbatim.
@@ -147,6 +159,13 @@ export class TurnStreamController {
         input.callbacks.onThinkingDelta(thinking)
       },
       onContentBlock: (block) => {
+        if (
+          block.type === 'tool_use'
+          || (block.type === 'text' && block.text.length > 0)
+          || (block.type === 'thinking' && block.thinking.length > 0)
+        ) {
+          markFirstProviderOutput()
+        }
         collectedBlocks.push(block)
         if (isToolUse(block)) {
           toolUses.push({ id: block.id, name: block.name, input: block.input, argsTruncated: block.argsTruncated })
@@ -177,7 +196,7 @@ export class TurnStreamController {
             output_tokens: usage.output_tokens ?? 0,
             cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
             cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
-          })
+          }, ttftMs !== undefined ? { ttftMs } : undefined)
         }
       },
       onError: (error) => {
@@ -189,7 +208,11 @@ export class TurnStreamController {
       onStreamAttemptAborted: (info) => {
         this.deps.recordStreamAttemptAborted?.(info)
       },
+      onToolCallDelta: () => {
+        markFirstProviderOutput()
+      },
       onToolCallHint: (toolName, partialArgs) => {
+        markFirstProviderOutput()
         input.callbacks.onToolHint?.(toolName)
         if (toolName === 'read_file' && typeof partialArgs.file_path === 'string') {
           const fp = partialArgs.file_path
@@ -200,6 +223,7 @@ export class TurnStreamController {
 
     let streamError: Error | null = null
     try {
+      streamStartMs = now()
       input.callbacks.onStreamStart?.()
       await this.deps.client.stream(input.request, streamCallbacks, this.deps.abortSignal)
     } catch (err) {

@@ -8,6 +8,7 @@ import {
   __activeStoreCount,
   __setHubFallbackFlushMs,
 } from '../session-event-hub'
+import { eventReducer, initialEventState } from '../event-reducer'
 import type { SessionEvent } from '../../runtime/types'
 
 // The hub batches reducer flushes through requestAnimationFrame; node has no DOM,
@@ -127,23 +128,134 @@ test('background fallback: events still fold when rAF never fires (hidden window
   }
 })
 
-test('pending hard cap folds a burst synchronously (no scheduler needed)', async () => {
+test('large replay drains at most 400 events per frame and matches a one-shot fold', async () => {
   const prevRaf = g.requestAnimationFrame
-  g.requestAnimationFrame = () => 999 // dead rAF
+  const frames: Array<() => void> = []
+  g.requestAnimationFrame = (cb) => {
+    frames.push(cb)
+    return frames.length
+  }
   __setHubFallbackFlushMs(60_000) // fallback effectively disabled
   const events: SessionEvent[] = []
-  for (let i = 1; i <= 2000; i++) {
+  for (let i = 1; i <= 1000; i++) {
     events.push({ seq: i, ts: 0, type: 'text_delta', data: { text: 'x' } } as SessionEvent)
   }
   const fake = makeFakeTransport(events)
   __setHubTransport(fake)
+  let unsub: (() => void) | undefined
+  let notifications = 0
   try {
-    const unsub = subscribeSession('s-cap', () => {})
-    await tick(1) // let the stream replay synchronously; no schedulers involved
+    unsub = subscribeSession('s-cap', () => { notifications++ })
+    assert.equal(frames.length, 1, 'the burst should schedule one initial frame')
+
+    frames.shift()!()
+    assert.equal(getSessionSnapshot('s-cap').lastSeq, 400, 'one frame must fold at most 400 events')
+    assert.equal(frames.length, 1, 'remaining events should schedule another frame')
+
+    while (frames.length > 0) frames.shift()!()
     const view = getSessionSnapshot('s-cap')
-    assert.equal(view.lastSeq, 2000, 'cap-triggered flush must fold the burst')
-    unsub()
+    const oneShot = eventReducer(initialEventState, { type: 'events', events })
+    assert.equal(view.lastSeq, oneShot.lastSeq)
+    assert.deepEqual(view.blocks, oneShot.blocks, 'sliced folding must equal one-shot folding')
+    assert.ok(notifications <= 21, `1000 events should notify at most 21 times, got ${notifications}`)
   } finally {
+    unsub?.()
+    g.requestAnimationFrame = prevRaf
+    __setHubFallbackFlushMs(250)
+    __resetHubTransport()
+  }
+})
+
+test('5000-event replay keeps listener notifications bounded', () => {
+  const prevRaf = g.requestAnimationFrame
+  const frames: Array<() => void> = []
+  g.requestAnimationFrame = (cb) => {
+    frames.push(cb)
+    return frames.length
+  }
+  __setHubFallbackFlushMs(60_000)
+  const events = Array.from({ length: 5000 }, (_, index) => ({
+    seq: index + 1,
+    ts: 0,
+    type: 'text_delta',
+    data: { text: 'x' },
+  } as SessionEvent))
+  const fake = makeFakeTransport(events)
+  __setHubTransport(fake)
+  let notifications = 0
+  let unsub: (() => void) | undefined
+  try {
+    unsub = subscribeSession('s-5000', () => { notifications++ })
+    while (frames.length > 0) frames.shift()!()
+    assert.equal(getSessionSnapshot('s-5000').lastSeq, 5000)
+    assert.ok(notifications <= 101, `5000 events should notify at most 101 times, got ${notifications}`)
+  } finally {
+    unsub?.()
+    g.requestAnimationFrame = prevRaf
+    __setHubFallbackFlushMs(250)
+    __resetHubTransport()
+  }
+})
+
+test('manual retry resumes from the highest folded seq and replays a dropped pending tail once', () => {
+  const prevRaf = g.requestAnimationFrame
+  const frames: Array<() => void> = []
+  g.requestAnimationFrame = (cb) => {
+    frames.push(cb)
+    return frames.length
+  }
+  __setHubFallbackFlushMs(60_000)
+  const events = Array.from({ length: 1000 }, (_, index) => ({
+    seq: index + 1,
+    ts: 0,
+    type: 'text_delta',
+    data: { text: 'x' },
+  } as SessionEvent))
+  const sinces: number[] = []
+  const streamSession = (
+    _id: string,
+    since: number,
+    onEvent: (event: SessionEvent) => void,
+    signal: AbortSignal,
+    onOpen?: () => void,
+  ): Promise<void> => {
+    sinces.push(since)
+    onOpen?.()
+    for (const event of events) {
+      if (event.seq > since) onEvent(event)
+    }
+    return new Promise<void>((_resolve, reject) => {
+      signal.addEventListener(
+        'abort',
+        () => reject(new DOMException('aborted', 'AbortError')),
+        { once: true },
+      )
+    })
+  }
+  __setHubTransport({
+    streamSession,
+    fetchEvents: async () => ({ events: [], lastSeq: 0 }),
+  })
+  let unsub: (() => void) | undefined
+  try {
+    unsub = subscribeSession('s-retry-tail', () => {})
+    frames.shift()!()
+    const partial = getSessionSnapshot('s-retry-tail')
+    assert.equal(partial.lastSeq, 400)
+    assert.equal(partial.blocks[0]!.text.length, 400)
+
+    // The queued old-generation frame is canceled by retry; remove it from the
+    // deterministic frame harness to model cancelAnimationFrame.
+    frames.length = 0
+    partial.retryStream()
+    while (frames.length > 0) frames.shift()!()
+
+    const final = getSessionSnapshot('s-retry-tail')
+    assert.deepEqual(sinces, [0, 400], 'retry must resume after the folded prefix, not received tail')
+    assert.equal(final.lastSeq, 1000)
+    assert.equal(final.blocks[0]!.text.length, 1000, 'replayed tail must fold exactly once')
+  } finally {
+    unsub?.()
     g.requestAnimationFrame = prevRaf
     __setHubFallbackFlushMs(250)
     __resetHubTransport()

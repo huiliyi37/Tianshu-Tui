@@ -27,6 +27,8 @@ export interface StreamCallbacks {
   onError: (error: Error) => void
   /** Hint: a tool call's name and partial args are parseable (for speculative prewarm). Optional. */
   onToolCallHint?: (toolName: string, partialArgs: Record<string, unknown>) => void
+  /** Observability-only signal for the earliest provider tool-call start/delta. */
+  onToolCallDelta?: () => void
   /** Called when a rate limit (429) is encountered and being retried. Optional. */
   onRateLimit?: (retryDelayMs?: number) => void
   /** Called when a stream attempt aborts after receiving partial output (each failed attempt, before any retry). Optional. */

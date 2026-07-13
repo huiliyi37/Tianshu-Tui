@@ -17,7 +17,7 @@
 
 export type InputLineEvent =
   | { type: 'change'; value: string; cursor: number }
-  | { type: 'submit'; value: string }
+  | { type: 'submit'; value: string; images?: string[] }
   | { type: 'tab' }
   | { type: 'history'; direction: 'prev' | 'next' }
 
@@ -32,10 +32,14 @@ export interface InputLineOptions {
   vimEnabled?: boolean
   /** 回调 */
   onChange?: (value: string, cursor: number) => void
-  onSubmit?: (value: string) => void
+  onSubmit?: (value: string, images?: string[]) => void
   onTabComplete?: () => boolean
   /** 最大输入长度 */
   maxLength?: number
+  /** 初始图片附件 data URL 列表 */
+  images?: string[]
+  /** 图片附件变化回调 */
+  onImagesChange?: (images: string[]) => void
 }
 
 export interface InputLineDisplayOptions {
@@ -221,13 +225,16 @@ export class InputLine {
   private _vimEnabled: boolean
   private _vimMode: VimMode
   private _maxLength: number
+  /** 图片附件 data URL 列表 */
+  private _images: string[] = []
 
   /** Grapheme 边界缓存（按 value 失效）。光标移动不改 value，命中缓存省去 O(n) 分段。 */
   private _graphemeCache: GraphemeCache | null = null
 
   private onChangeCallback?: (value: string, cursor: number) => void
-  private onSubmitCallback?: (value: string) => void
+  private onSubmitCallback?: (value: string, images?: string[]) => void
   private onTabCompleteCallback?: () => boolean
+  private onImagesChangeCallback?: (images: string[]) => void
 
   constructor(options: InputLineOptions = {}) {
     this._value = options.value ?? ''
@@ -238,9 +245,11 @@ export class InputLine {
     this._vimEnabled = options.vimEnabled ?? false
     this._vimMode = 'insert'
     this._maxLength = options.maxLength ?? 100000
+    this._images = options.images ?? []
     this.onChangeCallback = options.onChange
     this.onSubmitCallback = options.onSubmit
     this.onTabCompleteCallback = options.onTabComplete
+    this.onImagesChangeCallback = options.onImagesChange
   }
 
   // ── Accessors ────────────────────────────────────────────────
@@ -250,6 +259,7 @@ export class InputLine {
   get vimMode(): VimMode { return this._vimMode }
   get vimEnabled(): boolean { return this._vimEnabled }
   get placeholder(): string { return this._placeholder }
+  get images(): string[] { return [...this._images] }
 
   /** 启用/停用 vim 键位。停用或启用时都复位到 insert 模式，避免残留 normal 态吞字符。 */
   setVimEnabled(enabled: boolean): void {
@@ -307,6 +317,34 @@ export class InputLine {
     this.setValue(next, cursor)
   }
 
+  /** 添加图片附件（data URL）。 */
+  addImage(dataUrl: string): void {
+    this._images.push(dataUrl)
+    this.onImagesChangeCallback?.([...this._images])
+  }
+
+  /** 移除指定索引的图片附件。 */
+  removeImage(index: number): void {
+    if (index < 0 || index >= this._images.length) return
+    this._images.splice(index, 1)
+    this.onImagesChangeCallback?.([...this._images])
+  }
+
+  /** 清空图片附件。 */
+  clearImages(): void {
+    if (this._images.length === 0) return
+    this._images = []
+    this.onImagesChangeCallback?.([])
+  }
+
+  /** 图片占位摘要，用于 ANSI 渲染。 */
+  imageSummary(maxWidth?: number): string[] {
+    if (this._images.length === 0) return []
+    const label = `📎 ${this._images.length} image${this._images.length > 1 ? 's' : ''}`
+    if (!maxWidth || label.length <= maxWidth) return [label]
+    return [label.slice(0, maxWidth - 1) + '…']
+  }
+
   /** 设置历史 */
   setHistory(history: string[]): void {
     this._history = history
@@ -331,9 +369,11 @@ export class InputLine {
         return { type: 'change', value: this._value, cursor: this._cursor }
       }
       const submitted = this._value
+      const submittedImages = [...this._images]
       this.clearAfterSubmit()
-      this.onSubmitCallback?.(submitted)
-      return { type: 'submit', value: submitted }
+      this.onImagesChangeCallback?.([])
+      this.onSubmitCallback?.(submitted, submittedImages)
+      return { type: 'submit', value: submitted, images: submittedImages }
     }
 
     // 多行输入：Ctrl+J 插入换行
@@ -413,7 +453,7 @@ export class InputLine {
   // ── Editing Operations ───────────────────────────────────────
 
   /**
-   * 提交后重置缓冲：清空文本、归零光标、复位历史游标。
+   * 提交后重置缓冲：清空文本、归零光标、复位历史游标、清空图片附件。
    * 不触发 onChangeCallback —— submit 路径自己负责后续渲染，
    * 避免在 submit 回调里又触发一次 change 渲染造成竞态。
    */
@@ -421,6 +461,7 @@ export class InputLine {
     this._value = ''
     this._cursor = 0
     this._historyIdx = -1
+    this._images = []
   }
 
   private insertChar(ch: string): InputLineEvent | null {
@@ -626,9 +667,11 @@ export class InputLine {
       case 'escape': return null
       case 'return': {
         const submitted = this._value
+        const submittedImages = [...this._images]
         this.clearAfterSubmit()
-        this.onSubmitCallback?.(submitted)
-        return { type: 'submit', value: submitted }
+        this.onImagesChangeCallback?.([])
+        this.onSubmitCallback?.(submitted, submittedImages)
+        return { type: 'submit', value: submitted, images: submittedImages }
       }
       case 'left':
       case 'ctrl_b': return this.moveLeft()

@@ -219,3 +219,24 @@ test('slash 命令已输入完整命令+参数时 Enter 保留参数', async () 
   assert.equal(slashInputs.length, 1, '应提交一次 slash 命令')
   assert.equal(slashInputs[0], '/team plan.md', '已输入完整命令+参数时应保留参数')
 })
+
+test('slash 命令输入 /model 后 Enter 不自动扩展为 /model list', async () => {
+  const { app, stdin } = makeApp()
+  const slashInputs: string[] = []
+  app.setSlashCommands([
+    { name: '/model', description: 'Show or switch model' },
+    { name: '/model list', description: 'List available models' },
+  ])
+  app.setSlashHandler((input) => { slashInputs.push(input); return true })
+  app.start()
+
+  // 用户完整输入 /model，应直接提交 /model（打开模型选择器），
+  // 而不是被提示首项 /model list 截断成列表命令。
+  app.setInput('/model')
+  await tick()
+  stdin.dataHandler!('\r')
+  await tick()
+
+  assert.equal(slashInputs.length, 1, '应提交一次 slash 命令')
+  assert.equal(slashInputs[0], '/model', '输入 /model 后 Enter 应提交 /model 本身')
+})

@@ -45,14 +45,17 @@ import { RECOMMENDED_MAX_SKILLS } from '../skills/skill-loader.js'
 import { validatePath } from '../tools/path-validate.js'
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
 import { extname, relative, join } from 'node:path'
-import { sessionsDir } from '../config/paths.js'
-import { verifyAndExtract } from '../agent/checksum.js'
 import type { HookEntry, HookEvent, HooksConfig } from '../hooks/user-hooks-runner.js'
 import { loadHooksConfig, VALID_EVENTS } from '../hooks/user-hooks-runner.js'
 import { buildDistillPrompt } from '../prompt/rpa-distill.js'
 import { isProFeatureEnabled } from '../config/pro-license.js'
+import { searchSessionTranscripts } from './session-search.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result' | 'markdown' | 'html'
+
+type SessionRouteDependencies = {
+  searchSessionTranscripts?: typeof searchSessionTranscripts
+}
 
 /** Vision upload guards — provider-safe formats and a per-image byte ceiling. */
 const MAX_IMAGES = 4
@@ -129,51 +132,6 @@ function planSummary(p: PlanDocument) {
   }
 }
 
-// ── Cross-session content search (GET /sessions/search) ──
-// Linear scan over agent transcripts (~/.rivet/sessions/<slug>/<id>.jsonl).
-// No index: session files are local and bounded, and hit caps keep it cheap.
-const SEARCH_PER_SESSION_MAX = 3
-const SEARCH_TOTAL_MAX = 50
-const SEARCH_SNIPPET_RADIUS = 60
-
-export type SessionSearchHit = {
-  sessionId: string
-  title: string
-  role: 'user' | 'assistant'
-  snippet: string
-}
-
-/** Context window around the first case-insensitive hit, or null if no match. */
-function searchSnippet(text: string, lowerQuery: string): string | null {
-  const idx = text.toLowerCase().indexOf(lowerQuery)
-  if (idx < 0) return null
-  const start = Math.max(0, idx - SEARCH_SNIPPET_RADIUS)
-  const end = Math.min(text.length, idx + lowerQuery.length + SEARCH_SNIPPET_RADIUS)
-  const body = text.slice(start, end).replace(/\s+/g, ' ').trim()
-  return `${start > 0 ? '…' : ''}${body}${end < text.length ? '…' : ''}`
-}
-
-/** Scan one transcript JSONL for user/assistant text hits. Missing or
- *  malformed files (and rows) are silently skipped — search is best-effort. */
-function searchTranscript(filePath: string, lowerQuery: string, sessionId: string, title: string): SessionSearchHit[] {
-  let raw: string
-  try { raw = readFileSync(filePath, 'utf-8') } catch { return [] }
-  const hits: SessionSearchHit[] = []
-  for (const line of raw.split('\n')) {
-    if (hits.length >= SEARCH_PER_SESSION_MAX) break
-    if (!line.trim()) continue
-    const { json } = verifyAndExtract(line)
-    let parsed: { role?: unknown; content?: unknown; type?: unknown }
-    try { parsed = JSON.parse(json) as typeof parsed } catch { continue }
-    if (typeof parsed.type === 'string') continue // audit rows (model_switch, compact markers)
-    if (parsed.role !== 'user' && parsed.role !== 'assistant') continue
-    if (typeof parsed.content !== 'string' || !parsed.content) continue
-    const snippet = searchSnippet(parsed.content, lowerQuery)
-    if (snippet) hits.push({ sessionId, title, role: parsed.role, snippet })
-  }
-  return hits
-}
-
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
     if (!isAuthorizedRequest({ body, headers }, apiToken)) {
@@ -183,12 +141,49 @@ function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   }
 }
 
+const REPLAY_SLICE_EVENTS = 200
+const REPLAY_SLICE_MS = 4
+
+async function sendReplayTimeSliced(
+  res: import('node:http').ServerResponse,
+  sse: SseStream,
+  events: ReadonlyArray<{ type: string }>,
+): Promise<void> {
+  const canCork = typeof res.cork === 'function'
+  let index = 0
+  while (index < events.length && !sse.isClosed()) {
+    const startedAt = performance.now()
+    let sent = 0
+    if (canCork) res.cork()
+    try {
+      while (
+        index < events.length &&
+        sent < REPLAY_SLICE_EVENTS &&
+        (sent === 0 || performance.now() - startedAt < REPLAY_SLICE_MS)
+      ) {
+        const event = events[index]!
+        sse.send(event.type, event)
+        index++
+        sent++
+        if (sse.isClosed()) break
+      }
+    } finally {
+      if (canCork) res.uncork()
+    }
+    if (index < events.length && !sse.isClosed()) {
+      await new Promise<void>((resolve) => setImmediate(resolve))
+    }
+  }
+}
+
 export function buildSessionRoutes(
   manager: RuntimeSessionManager,
   apiToken?: string,
   getRegistry?: () => SessionRegistry | undefined,
   config?: Config,
+  dependencies: SessionRouteDependencies = {},
 ): Record<string, RouteHandler> {
+  const searchTranscripts = dependencies.searchSessionTranscripts ?? searchSessionTranscripts
   // R3 — build an OwnershipGuard scoped to one session so rollback never
   // restores files a *different* live session exclusively owns. Returns
   // undefined when no registry is wired (single-session / CLI path).
@@ -453,20 +448,25 @@ export function buildSessionRoutes(
     // Cross-session content search — scans active sessions' agent transcripts
     // for user/assistant text. Exact route, so it is matched before the
     // parameterized GET /sessions/:id. Read-only, Bearer-gated.
-    'GET /sessions/search': withAuth((_body, params) => {
+    'GET /sessions/search': withAuth(async (_body, params, _headers, res) => {
       const q = typeof params?.q === 'string' ? params.q.trim() : ''
       if (q.length < 2) {
         return { status: 400, body: { error: 'Query "q" must be at least 2 characters' } }
       }
-      const lowerQuery = q.toLowerCase()
-      const results: SessionSearchHit[] = []
-      for (const rec of manager.listSessions()) {
-        if (results.length >= SEARCH_TOTAL_MAX) break
-        const file = join(sessionsDir(rec.cwd), `${rec.id}.jsonl`)
-        const hits = searchTranscript(file, lowerQuery, rec.id, rec.title ?? rec.id.slice(0, 8))
-        results.push(...hits.slice(0, SEARCH_TOTAL_MAX - results.length))
+      const abortController = new AbortController()
+      const abortSearch = () => abortController.abort()
+      if (res?.destroyed) abortSearch()
+      else res?.once('close', abortSearch)
+      try {
+        const { results, metadata } = await searchTranscripts(
+          manager.listSessions(),
+          q,
+          { signal: abortController.signal },
+        )
+        return { status: 200, body: { results, meta: metadata } }
+      } finally {
+        res?.removeListener('close', abortSearch)
       }
-      return { status: 200, body: { results } }
     }, apiToken),
 
     // Archive (soft-close) a session. Aborts if running, marks archived, hides
@@ -959,26 +959,37 @@ export function buildSessionRoutes(
         unsubscribe = undefined
       }
       const sse = new SseStream(res, cleanup)
-      // Batch the replay: yield every REPLAY_BATCH events so a large reconnect
-      // (thousands of events) doesn't block the event loop — concurrent streams
-      // keep their keepalives and health pings get through. cork/uncork within
-      // each batch coalesces writes into one TCP segment.
-      const REPLAY_BATCH = 200
-      const canCork = typeof res.cork === 'function'
-      for (let i = 0; i < existing.events.length; i += REPLAY_BATCH) {
-        const end = Math.min(i + REPLAY_BATCH, existing.events.length)
-        if (canCork) res.cork()
-        for (let j = i; j < end; j++) sse.send(existing.events[j]!.type, existing.events[j]!)
-        if (canCork) res.uncork()
-        if (end < existing.events.length) await new Promise<void>((r) => setImmediate(r))
+      // Bound replay slices by both work count and elapsed time so slow
+      // serialization/socket writes cannot monopolize the event loop.
+      await sendReplayTimeSliced(res, sse, existing.events)
+      let catchingUp = true
+      let lastCatchupSeq = existing.lastSeq
+      const deferredLive: Array<{ type: string; seq: number }> = []
+      const sendCatchup = async (events: ReadonlyArray<{ type: string; seq: number }>) => {
+        const unique: Array<{ type: string; seq: number }> = []
+        for (const event of events) {
+          if (event.seq <= lastCatchupSeq) continue
+          unique.push(event)
+          lastCatchupSeq = event.seq
+        }
+        await sendReplayTimeSliced(res, sse, unique)
       }
-      unsubscribe = manager.subscribe(id, (ev) => sse.send(ev.type, ev))
+      unsubscribe = manager.subscribe(id, (ev) => {
+        if (catchingUp) deferredLive.push(ev)
+        else sse.send(ev.type, ev)
+      })
       // The async replay above yields the loop, so events may have been
       // appended between the snapshot and the subscribe — back-fill them now.
-      // This block is synchronous after subscribe, so no duplicates: listener
-      // fan-out can only happen on later ticks.
+      // Subscribe first, then defer listener fan-out while the gap is sent with
+      // the same bounded sender. This preserves seq order even though gap replay
+      // now yields: events arriving meanwhile drain immediately afterward.
       const gap = manager.getEvents(id, existing.lastSeq)
-      if (gap) for (const ev of gap.events) sse.send(ev.type, ev)
+      if (gap) await sendCatchup(gap.events)
+      while (deferredLive.length > 0 && !sse.isClosed()) {
+        const batch = deferredLive.splice(0)
+        await sendCatchup(batch)
+      }
+      catchingUp = false
       // A dead peer during the replay above means the subscription was created
       // after onDead already fired — close it out now instead of leaking it.
       if (sse.isClosed()) {

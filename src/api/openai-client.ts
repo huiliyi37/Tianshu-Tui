@@ -984,7 +984,7 @@ export class OpenAIClient implements StreamClient {
       }>
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_cache_hit_tokens?: number; prompt_cache_miss_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } }
     },
-    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onThinkingDelta' | 'onContentBlock' | 'onStopReason' | 'onToolCallHint'>>,
+    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onThinkingDelta' | 'onContentBlock' | 'onStopReason' | 'onToolCallHint' | 'onToolCallDelta'>>,
   ): void {
     const choice = chunk.choices?.[0]
 
@@ -1024,6 +1024,7 @@ export class OpenAIClient implements StreamClient {
 
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {
+        callbacks.onToolCallDelta?.()
         // Resolve the buffer slot for this chunk. Naive `tc.index ?? 0` was the
         // root cause of cross-tool argument pollution (oh-my-pi/384919c7): when a
         // provider (DeepSeek/GLM) streams trailing argument deltas AFTER

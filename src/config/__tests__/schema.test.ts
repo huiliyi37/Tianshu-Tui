@@ -29,6 +29,43 @@ describe('model supportsVision', () => {
   })
 })
 
+describe('agent visionModel', () => {
+  it('defaults visionModel to undefined', () => {
+    const agent = agentSchema.parse({})
+    assert.equal(agent.visionModel, undefined)
+  })
+
+  it('parses a visionModel configuration', () => {
+    const agent = agentSchema.parse({
+      visionModel: {
+        provider: 'glm',
+        model: 'glm-5.2',
+        prompt: 'Describe this image.',
+        maxTokens: 2048,
+      },
+    })
+    assert.deepEqual(agent.visionModel, {
+      provider: 'glm',
+      model: 'glm-5.2',
+      prompt: 'Describe this image.',
+      maxTokens: 2048,
+    })
+  })
+
+  it('defaults visionModel maxTokens', () => {
+    const agent = agentSchema.parse({
+      visionModel: { provider: 'glm', model: 'glm-5.2' },
+    })
+    assert.equal(agent.visionModel?.maxTokens, 1024)
+  })
+
+  it('rejects invalid visionModel fields', () => {
+    assert.throws(() => agentSchema.parse({
+      visionModel: { provider: 'glm', model: 'glm-5.2', maxTokens: -1 },
+    }))
+  })
+})
+
 describe('config permissions schema', () => {
   it('defaults permissions.allow to an empty list', () => {
     const agent = agentSchema.parse({})

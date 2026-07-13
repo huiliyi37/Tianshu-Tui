@@ -15,6 +15,7 @@ import { loadConfig } from '../config/manager.js'
 import { buildMirrorEnv, rewriteGitHubUrls } from './mirror-env.js'
 import { buildNotFoundHint, extractMissingCommand } from './env-check.js'
 import { getResolvedEnv } from './resolved-env.js'
+import { OutputStreamBudget } from './output-stream-budget.js'
 
 /** Success output inline threshold: commands that succeed with ≤ this many lines
  *  return full output to the model. Beyond this, only a header summary is returned
@@ -356,12 +357,16 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
 
       const stdoutDecoder = new WinStreamDecoder()
       const stderrDecoder = new WinStreamDecoder()
+      const uiOutput = new OutputStreamBudget({
+        emit: (text) => params.onOutput?.(text),
+        maxVisible: 64 * 1024,
+      })
 
       child.stdout!.on('data', (data: Buffer) => {
         const text = stdoutDecoder.write(data)
         stdoutRawBytes += data.length
         stdout += text
-        params.onOutput?.(text)
+        uiOutput.push(text)
         if (stdout.length > 32_000) {
           if (!stdoutTruncated) {
             stdoutTruncated = true
@@ -374,7 +379,7 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         const text = stderrDecoder.write(data)
         stderrRawBytes += data.length
         stderr += text
-        params.onOutput?.(text)
+        uiOutput.push(text)
         if (stderr.length > 32_000) {
           stderrTruncated = true
           stderr = stderr.slice(-24_000)
@@ -382,8 +387,14 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
       })
 
       const buildResult = async (code: number, isTimeout = false) => {
-        stdout += stdoutDecoder.end()
-        stderr += stderrDecoder.end()
+        const stdoutTail = stdoutDecoder.end()
+        const stderrTail = stderrDecoder.end()
+        stdout += stdoutTail
+        stderr += stderrTail
+        uiOutput.push(stdoutTail)
+        uiOutput.push(stderrTail)
+        uiOutput.flush()
+        uiOutput.dispose()
         // Shell 降级一次性警告（session 首次）：Windows 上 Git Bash 缺失时 fallback 到
         // PowerShell/cmd，告诉模型/用户根因，避免"命令大面积失败但不知为什么"。
         let shellFallbackNote = ''
@@ -570,8 +581,14 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         cleanupAbort()
         killProcessTree(child, 'SIGTERM')
         forceKillTimer = setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
-        const finalStdout = stdout + stdoutDecoder.end()
-        const finalStderr = stderr + stderrDecoder.end()
+        const stdoutTail = stdoutDecoder.end()
+        const stderrTail = stderrDecoder.end()
+        const finalStdout = stdout + stdoutTail
+        const finalStderr = stderr + stderrTail
+        uiOutput.push(stdoutTail)
+        uiOutput.push(stderrTail)
+        uiOutput.flush()
+        uiOutput.dispose()
         const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
         resolve({
           content: raw ? `[aborted] 命令被用户中止，部分输出:\n${raw.slice(-2000)}` : 'Command aborted by user.',
@@ -601,6 +618,8 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         if (timer) clearTimeout(timer)
         if (forceKillTimer) clearTimeout(forceKillTimer)
         cleanupAbort()
+        uiOutput.flush()
+        uiOutput.dispose()
         // spawn ENOENT（shell 二进制找不到）走环境分级——给根因而非裸 err.message。
         const msg = err.message
         if ('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {

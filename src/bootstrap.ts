@@ -108,6 +108,7 @@ import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from './age
 import { computeTeamWaveReward, deriveTeamWaveRewardInput } from './agent/team-reward.js'
 import { teamSchedulerArmForParallelism } from './agent/team-scheduler-bandit.js'
 import { recordTeamWaveRewardClosure } from './agent/reward-loop.js'
+import type { TuiPerfSummary } from './tui/engine/perf-monitor.js'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -177,6 +178,8 @@ export interface BootstrapContext {
   meridianIndexer: MeridianIndexer
   cwd: string
   shutdown: () => void
+  /** Persist the final TUI perf summary through the existing telemetry writer. */
+  flushTuiPerfSummary: (summary: TuiPerfSummary) => Promise<void>
   heartbeatInterval: ReturnType<typeof setInterval>
   /** True when first-run template init is pending — TUI layer handles the
    *  AGENTS.md prompt. Set by needsTemplatesInit() during bootstrap. */
@@ -1718,14 +1721,27 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     claimStore, fileHistory, toolRegistry, agent, refs,
     domainKnowledgeStore, meridianIndexer, cwd,
     shutdown: () => {}, // placeholder, replaced below
+    flushTuiPerfSummary: async () => {}, // placeholder; TUI bridge is attached on final context
     heartbeatInterval,
   })
 
-  const ctx: BootstrapContext = {
+  let ctx: BootstrapContext
+  const flushTuiPerfSummary = async (summary: TuiPerfSummary): Promise<void> => {
+    const writer = ctx.agent.telemetryWriter
+    writer.write({
+      kind: summary.kind,
+      samples: summary.samples,
+      cache: summary.cache,
+      loopLag: summary.loopLag,
+    })
+    await writer.flush()
+  }
+  ctx = {
     config, provider, apiKey, auth, sessionId, session, persist,
     claimStore, fileHistory, toolRegistry, agent, refs,
     domainKnowledgeStore, meridianIndexer, cwd,
     shutdown,
+    flushTuiPerfSummary,
     heartbeatInterval,
     templatesPendingAgents,
   }
