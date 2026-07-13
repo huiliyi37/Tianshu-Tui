@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { gracefulKill, forceKill } from '../platform.js'
 import { track } from '../tools/process-tracker.js'
-import { resolveNpmCliCommand } from '../platform/resolve-node-cli.js'
+import { resolveNpmCliCommand, buildStdioEnvWithNodePath } from '../platform/resolve-node-cli.js'
 
 const require = createRequire(import.meta.url)
 
@@ -210,9 +210,16 @@ function runThetaCheckInner(cwd: string, timeoutMs: number): Promise<ThetaCheckR
 
   return new Promise(resolve => {
     const tsc = resolveTscCommand(cwd)
+    const env = tsc.command === process.execPath
+      // npx-cli.js fallback path: prepend bundled node dir so the internal
+      // npx spawn can find the same node. No-op in dev (nodeDir already in PATH).
+      ? buildStdioEnvWithNodePath(undefined, {
+          getDefaultEnvironment: () => ({ ...process.env } as Record<string, string>),
+        })
+      : { ...process.env }
     const child = track(spawn(tsc.command, tsc.args, {
       cwd,
-      env: { ...process.env },
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       shell: tsc.useShell,

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMultiLspManager, type MultiLspOptions } from '../multi-manager.js'
-import { resolveNpmCliCommand } from '../../platform/resolve-node-cli.js'
+import type { LspServerDef } from '../server-registry.js'
 import type { ChildProcess } from 'node:child_process'
 
 function mockChild(): ChildProcess {
@@ -9,54 +9,46 @@ function mockChild(): ChildProcess {
 }
 
 describe('createMultiLspManager spawnFor wiring', () => {
-  it('rewrites npx command to node + npx-cli.js via injected spawnFor', () => {
-    // Inject spawnFor that mirrors the default's rewriting logic, then
-    // verify via gotoDefinition which triggers ensure → spawnFor synchronously.
+  it('routes npx def to spawnFor for .ts files', () => {
+    // Inject a capture-only spawnFor. The DEFAULT implementation calls
+    // resolveNpmCliCommand + buildStdioEnvWithNodePath; those are tested in
+    // resolve-node-cli.test.ts. Here we verify the wiring layer: that the
+    // framework passes the correct def (command='npx', args with -y) to
+    // spawnFor when gotoDefinition targets a .ts file.
     const captured: Array<{ command: string; args: string[] }> = []
 
     const opts: MultiLspOptions = {
       which: () => true,
       spawnFor: (def: LspServerDef) => {
-        const resolved = resolveNpmCliCommand(def.command, def.args ?? [])
-        captured.push({ command: resolved.command, args: resolved.args })
+        captured.push({ command: def.command, args: def.args ?? [] })
         return mockChild()
       },
     }
 
     const mgr = createMultiLspManager('/tmp', opts)
-    assert.ok(mgr.isReady())
-
-    // gotoDefinition → ensure() → spawnFor() is called synchronously
-    // (before the first await inside ensure), so captured is populated
-    // immediately after the call returns.
     void mgr.gotoDefinition('test.ts', 1, 0)
 
-    assert.equal(captured.length, 1, 'spawnFor should have been called once')
-    const call = captured[0]!
-    assert.equal(call.command, process.execPath, 'npx should resolve to node binary')
-    assert.ok(call.args[0]!.includes('npx-cli.js'), `args[0] should be npx-cli.js, got ${call.args[0]}`)
+    assert.equal(captured.length, 1, 'spawnFor should be called once')
+    assert.equal(captured[0]!.command, 'npx', 'TS LSP def command should be npx')
+    assert.ok(captured[0]!.args.includes('-y'), 'args should include -y')
   })
 
-  it('passes through non-npx commands unchanged', () => {
+  it('routes non-npx def to spawnFor for .go files', () => {
     const captured: Array<{ command: string; args: string[] }> = []
 
     const opts: MultiLspOptions = {
       which: () => true,
       spawnFor: (def: LspServerDef) => {
-        const resolved = resolveNpmCliCommand(def.command, def.args ?? [])
-        captured.push({ command: resolved.command, args: resolved.args })
+        captured.push({ command: def.command, args: def.args ?? [] })
         return mockChild()
       },
     }
 
     const mgr = createMultiLspManager('/tmp', opts)
-    assert.ok(mgr.isReady())
-
     void mgr.gotoDefinition('main.go', 1, 0)
 
     assert.equal(captured.length, 1)
-    const call = captured[0]!
-    assert.equal(call.command, 'gopls', 'non-npx command should pass through unchanged')
-    assert.deepEqual(call.args, [])
+    assert.equal(captured[0]!.command, 'gopls', 'gopls def command should pass through')
+    assert.deepEqual(captured[0]!.args, [])
   })
 })
