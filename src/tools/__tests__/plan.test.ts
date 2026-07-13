@@ -329,7 +329,8 @@ describe('plan tool submit', () => {
     const first = await execute({ action: 'submit', title: 'Anchor Drift Plan', plan })
     assert.equal(first.isError, true)
     assert.ok(first.content.includes('事实锚点'), first.content)
-    assert.ok(first.content.includes('src/tui/components/selector.tsx'), 'missing-parent-dir drift listed')
+    // selector.tsx 标了"新增"，其父目录不存在不再算 drift（write_file 会按需建目录）
+    assert.ok(!first.content.includes('src/tui/components/selector.tsx'), 'new-module file must not be flagged')
     assert.ok(first.content.includes('src/ghost.ts'), 'missing-file drift listed')
     assert.ok(!existsSync(join(dir, '.rivet/plans/anchor-drift-plan.md')), 'plan must not be persisted on first offense')
 

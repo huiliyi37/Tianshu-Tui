@@ -18,9 +18,9 @@
  */
 
 import { stat, readFile } from 'node:fs/promises'
-import { resolve, relative, isAbsolute, dirname } from 'node:path'
+import { resolve, relative, isAbsolute } from 'node:path'
 
-export type PlanAnchorDriftKind = 'missing-file' | 'missing-parent-dir' | 'line-out-of-range'
+export type PlanAnchorDriftKind = 'missing-file' | 'line-out-of-range'
 
 export interface PlanAnchorDrift {
   /** Raw anchor as written in the plan, e.g. `src/agent/loop.ts:643` */
