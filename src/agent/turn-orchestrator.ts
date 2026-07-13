@@ -325,6 +325,13 @@ export class TurnOrchestrator {
   /** 上次注入 action-intent system-reminder 的时间戳。跨 run 冷却，避免频繁对话下追着提醒。 */
   private lastActionIntentNudgeTime = 0
 
+  /**
+   * P7 write_file ghost-abort 修复：watchdog 误判后，工具批在 drain 窗口内
+   * 成功完成。rescue 路径设此标志 → 下一轮迭代跳过 abort 检查，让 turn 正常
+   * 继续。标志在跳过一次后自动清除。
+   */
+  private _rescuedFromWatchdog = false
+
   constructor(private deps: TurnOrchestratorDeps) {}
 
   /**
@@ -350,6 +357,18 @@ export class TurnOrchestrator {
       debug: debugLog,
       telemetry: rec => this.deps.writeTelemetry(rec as TelemetryRecord),
     })
+  }
+
+  /**
+   * Apply batch result state to the orchestrator deps. Extracted so both
+   * the normal post-tool path and the watchdog-rescue path share the same
+   * state-mutation logic without duplication.
+   */
+  private applyBatchState(r: ExecuteBatchResult): void {
+    this.deps.state.traceStore = r.traceStore
+    this.deps.state.importGraph = r.importGraph
+    this.deps.state.lastConflictCheckCount = r.lastConflictCheckCount
+    this.deps.state.latestRisk = r.latestRisk
   }
 
   /**
@@ -405,16 +424,25 @@ export class TurnOrchestrator {
         this.deps.syncPlanModeToConfig()
         const signal = this.deps.getAbortSignal()
         if (signal?.aborted) {
-          if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
-          const abortTag = this.deps.getAbortReason()
-          this.recordStop({
-            source: abortTag?.includes('watchdog') ? 'watchdog-stall' : 'user-interrupt',
-            turn,
-            voluntary: false,
-            ...(abortTag !== undefined && { detail: abortTag }),
-          })
-          callbacks.onAbort(abortTag)
-          return
+          if (this._rescuedFromWatchdog) {
+            // P7 ghost-abort rescue: previous turn's batch completed
+            // successfully during the watchdog drain window. The abort
+            // signal is a false positive — clear the flag and let this
+            // turn proceed normally.
+            this._rescuedFromWatchdog = false
+            debugLog('[turn-orch] skipping abort after watchdog rescue')
+          } else {
+            if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
+            const abortTag = this.deps.getAbortReason()
+            this.recordStop({
+              source: abortTag?.includes('watchdog') ? 'watchdog-stall' : 'user-interrupt',
+              turn,
+              voluntary: false,
+              ...(abortTag !== undefined && { detail: abortTag }),
+            })
+            callbacks.onAbort(abortTag)
+            return
+          }
         }
 
         // ── C3 Auto 模式检查点 ──
@@ -842,10 +870,7 @@ export class TurnOrchestrator {
           this.deps.speculateDuringBatch?.({ request, toolUses, turn, signal })
           try {
             r = await rejectOnAbort(batchPromise, signal!, 'tools')
-          this.deps.state.traceStore = r.traceStore
-          this.deps.state.importGraph = r.importGraph
-          this.deps.state.lastConflictCheckCount = r.lastConflictCheckCount
-          this.deps.state.latestRisk = r.latestRisk
+          this.applyBatchState(r)
           if (r.checkpointCreated) checkpointCreatedThisTurn = true
 
           // U6: record this tool-turn into the execution trace.
@@ -1035,22 +1060,80 @@ export class TurnOrchestrator {
           )
           continue
           } catch (err) {
-            // Esc or unexpected error during tool execution: rejectOnAbort
-            // abandoned the await to keep the UI responsive, but `batchPromise`
-            // is still running and will call addToolResults() at an uncontrolled
-            // later time. Drain it (bounded) so its result commit lands in-order
-            // NOW — before this turn tears down and any new user message starts
-            // a fresh run that would push the late tool result out of position.
-            // Without this the next request breaks with "insufficient tool
-            // messages following tool_calls" (only /rewind fixed it).
-            // ALL error types must drain: non-AbortError exceptions (e.g.
-            // TypeError from a tool bug) also leave orphan tool_use entries
-            // if the batch completes after we throw.
-            await Promise.race([
-              batchPromise.then(() => {}, () => {}),
-              new Promise<void>((resolve) => setTimeout(resolve, TOOL_ABORT_DRAIN_MS)),
+            // Esc, watchdog, or unexpected error during tool execution.
+            // rejectOnAbort abandoned the await to keep the UI responsive,
+            // but `batchPromise` is still running and will call
+            // addToolResults() at an uncontrolled later time. Drain it
+            // (bounded) so its result commit lands in-order NOW.
+            //
+            // P7 write_file ghost-abort: when the batch completed successfully
+            // while we were aborting, the tool results are in the session but
+            // the model never sees them if we throw. For watchdog aborts
+            // (false positives — batch finished, watchdog misfired), rescue
+            // the result and continue the turn normally. For user Esc, drain
+            // and abort as before — the user wants to stop.
+            const abandonedResult = await Promise.race([
+              batchPromise.then(
+                (v) => ({ resolved: true, value: v }),
+                (e) => ({ resolved: false, error: e }),
+              ),
+              new Promise<{ resolved: false; error: unknown }>((resolve) =>
+                setTimeout(() => resolve({ resolved: false, error: err }), TOOL_ABORT_DRAIN_MS),
+              ),
             ])
-            throw err
+
+            if (abandonedResult.resolved) {
+              const abortTag = this.deps.getAbortReason()
+              if (abortTag?.includes('watchdog')) {
+                // Watchdog false positive: batch completed, rescue it.
+                r = abandonedResult.value
+                debugLog(`[turn-orch] rescued abandoned batch after watchdog abort (${r.toolCount} tools)`)
+                this.applyBatchState(r)
+                if (r.checkpointCreated) checkpointCreatedThisTurn = true
+                this.deps.appendTurnResult(turn)
+
+                // endTurn check
+                if (r.endTurn) {
+                  this.emitStop({ source: 'end-turn', turn, voluntary: true }, callbacks)
+                  await this.deps.completeTurn({ turn, isFinal: true, callbacks })
+                  finalTurnCompleted = true
+                  break
+                }
+
+                // Wedged-loop detection — update counters; break if threshold hit
+                const allErrored = r.toolCount > 0 && r.errorCount === r.toolCount
+                const batchFingerprint = allErrored ? toolBatchFingerprint(toolUses) : ''
+                if (allErrored && batchFingerprint === this.deps.state.wedgeToolFingerprint) {
+                  this.deps.state.wedgeRepeatCount = this.deps.state.wedgeRepeatCount + 1
+                } else {
+                  this.deps.state.wedgeRepeatCount = allErrored ? 1 : 0
+                  this.deps.state.wedgeToolFingerprint = batchFingerprint
+                }
+                if (this.deps.state.wedgeRepeatCount >= MAX_WEDGE_REPEATS) {
+                  this.emitStop({
+                    source: 'wedged-loop',
+                    turn,
+                    voluntary: false,
+                    detail: `${toolUses.map(tu => tu.name).join(',')} ×${this.deps.state.wedgeRepeatCount}`,
+                  }, callbacks)
+                  await this.deps.completeTurn({ turn, isFinal: true, callbacks })
+                  finalTurnCompleted = true
+                  break
+                }
+
+                // Complete the turn and continue. No rejectOnAbort wrapper —
+                // the signal is still aborted from the watchdog; the loop-header
+                // abort check will see _rescuedFromWatchdog and skip it.
+                await this.deps.completeTurn({ turn, isFinal: false, callbacks })
+                this._rescuedFromWatchdog = true
+                continue
+              }
+            }
+
+            // User abort, batch error, or drain timeout — propagate.
+            throw abandonedResult.resolved
+              ? err
+              : abandonedResult.error
           } finally {
             toolHeartbeat?.rearmWatchdog()
           }
