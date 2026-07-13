@@ -232,6 +232,42 @@ pub fn pty_spawn(
     // xterm.js 通告自己是 xterm-256color；让 shell 启用全彩与正确的 termcap。
     cmd.env("TERM", "xterm-256color");
 
+    // Align PTY PATH with the sidecar: prepend bundled node-runtime so
+    // npm/npx/node are found in the integrated terminal even when the OS
+    // shell inherits a minimal PATH. Append PortableGit cmd if available.
+    if let Ok(res_dir) = app.path().resource_dir() {
+        let node_os = match std::env::consts::OS {
+            "macos" => "darwin",
+            "windows" => "win",
+            "linux" => "linux",
+            _ => "",
+        };
+        let node_arch = match std::env::consts::ARCH {
+            "aarch64" => "arm64",
+            "x86_64" => "x64",
+            _ => "",
+        };
+        if !node_os.is_empty() && !node_arch.is_empty() {
+            let node_dir = res_dir.join("node-runtime").join(format!("{}-{}", node_os, node_arch));
+            if node_dir.exists() {
+                let sep = if cfg!(windows) { ";" } else { ":" };
+                let mut path = node_dir.to_string_lossy().to_string();
+                if let Ok(existing) = std::env::var("PATH") {
+                    path.push_str(sep);
+                    path.push_str(&existing);
+                }
+                if let Ok(bundled_git) = std::env::var("RIVET_BUNDLED_GIT_DIR") {
+                    let git_cmd = std::path::Path::new(&bundled_git).join("cmd");
+                    if git_cmd.exists() {
+                        path.push_str(sep);
+                        path.push_str(&git_cmd.to_string_lossy());
+                    }
+                }
+                cmd.env("PATH", &path);
+            }
+        }
+    }
+
     let child = pair
         .slave
         .spawn_command(cmd)
