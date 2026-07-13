@@ -42,8 +42,9 @@ rsync $RSYNC_FLAGS \
 
 # desktop/ 不同步 — 桌面端闭源分发，不进入公开仓库
 # license-server/ 不同步 — 授权服务器为白名单外顶层目录，天然不公开（含私钥签发逻辑）
-echo "=== 同步: docs/（排除核心设计文档与内部文件）==="
+echo "=== 同步: docs/（排除核心设计文档、测试/评估/审计报告与内部文件）==="
 rsync $RSYNC_FLAGS \
+  --delete-excluded \
   --exclude='design/' \
   --exclude='teamtask/' \
   --exclude='superpowers/' \
@@ -68,6 +69,14 @@ rsync $RSYNC_FLAGS \
   --exclude='SESSION-MR0AZIEL-DIAGNOSIS.md' \
   --exclude='optimization-design-v2.md' \
   --exclude='desktop-planning-methodology.md' \
+  --exclude='*.docx' \
+  --exclude='*测试*.md' \
+  --exclude='*验证*.md' \
+  --exclude='*对标*.md' \
+  --exclude='*审计*.md' \
+  --exclude='*提示词*.md' \
+  --exclude='天枢*.html' \
+  --exclude='computer-use-windows-com-smoke.md' \
   --exclude='.DS_Store' \
   "$DEV_DIR/docs/" "$PUB_DIR/docs/"
 
