@@ -133,10 +133,13 @@ describe('StarDomain', () => {
     assert.equal(matchDomain('回归测试验证修复是否真的生效'), 'yaoguang')
   })
 
-  it('huagai systemPromptSuffix carries 守昼/追 blocker/星间接口', () => {
+  it('huagai systemPromptSuffix carries 守昼/追 blocker/基线先行/星间接口', () => {
     const huagai = STAR_DOMAINS.huagai
     assert.match(huagai.systemPromptSuffix, /守昼/)
     assert.match(huagai.systemPromptSuffix, /追 blocker/)
+    assert.match(huagai.systemPromptSuffix, /基线先行/)
+    assert.match(huagai.systemPromptSuffix, /不做清单/)
+    assert.match(huagai.systemPromptSuffix, /跨层同步/)
     assert.match(huagai.systemPromptSuffix, /星间接口/)
     assert.match(huagai.systemPromptSuffix, /瑶光/)
     assert.match(huagai.systemPromptSuffix, /天权/)
