@@ -46,16 +46,16 @@ describe('InputLine multi-line (W4b)', () => {
     assert.equal(input.value, 'line1\nline2')
   })
 
-  it('displayLines renders cursor line with 〉 prefix and █ marker', () => {
+  it('displayLines renders cursor line with ❯ prefix and █ marker', () => {
     const input = new InputLine({ value: 'one\ntwo' })
     // cursor at end → on second line
     const lines = input.displayLines()
-    assert.deepEqual(lines, ['  one', '〉 two█'])
+    assert.deepEqual(lines, ['  one', '❯ two█'])
   })
 
   it('displayLines shows placeholder when empty', () => {
     const input = new InputLine({ placeholder: 'Type here' })
-    assert.deepEqual(input.displayLines(), ['〉 █Type here'])
+    assert.deepEqual(input.displayLines(), ['❯ █Type here'])
   })
 
   it('displayLines with maxLines keeps the cursor line visible', () => {
@@ -69,7 +69,7 @@ describe('InputLine multi-line (W4b)', () => {
     assert.equal(lines.length, 5)
     assert.ok(lines.some(line => line.includes('lines above')))
     assert.ok(lines.some(line => line.includes('lines below')))
-    assert.ok(lines.some(line => line.includes('〉 █line6')), 'cursor line must stay visible')
+    assert.ok(lines.some(line => line.includes('❯ █line6')), 'cursor line must stay visible')
     assert.ok(!lines.some(line => line.includes('line11')), 'viewport should not blindly show only the tail')
   })
 
@@ -100,7 +100,7 @@ describe('InputLine multi-line (W4b)', () => {
     const line = lines[0]!
     assert.ok(line.includes('█'), 'cursor must be visible')
     assert.ok(line.includes('…'), 'must show truncation indicator')
-    // Both sides truncated when cursor is centered (prefix 〉 is always present)
+    // Both sides truncated when cursor is centered (prefix ❯ is always present)
     assert.ok(line.slice(2).startsWith('…'), 'left side truncated when cursor is centered')
     assert.ok(line.endsWith('…'), 'right side truncated when cursor is centered')
   })

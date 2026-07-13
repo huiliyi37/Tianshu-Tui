@@ -2086,7 +2086,7 @@ export class TuiApp {
     // 不走 live.clear() + append 路径——clear 置 lastDisplayRows=0 后 renderLive
     // 走 append 模式不擦除（live-engine.ts:136），若 clear 的 erase 因
     // lastDisplayRows 不准（域/主题/模型切换导致 wrap 行数变化）覆盖不全，
-    // 旧帧残留在屏上 → 输入框重影（〉 提示符/边框重复渲染）。
+    // 旧帧残留在屏上 → 输入框重影（❯ 提示符/边框重复渲染）。
     // 改为直接 renderLive：lineCache 内容变了（颜色/domain），render 的 diff 资格
     // 检测到行不匹配 → 走 buildFullRewrite（moveToTop+ERASE_SCREEN_END+重写），
     // 用真实的 prevDisplayRows 原子覆盖旧帧。
@@ -3619,15 +3619,15 @@ export class TuiApp {
       }
 
       const MAX_INPUT_DISPLAY_LINES = 12
-      const arrowColor = this.theme.success
+      const arrowColor = '#3ba55c'  // 暗绿色，沉稳不刺眼
       const inputLines = this.inputLine.value
         ? this.inputLine.displayLines({ maxLines: MAX_INPUT_DISPLAY_LINES, maxWidth: innerWidth })
-        : [`${color('〉', arrowColor)} ${color('█', this.theme.primary)}${color(this.inputLine.placeholder, this.theme.dim)}`]
+        : [`${color('❯', arrowColor)} ${color('█', this.theme.primary)}${color(this.inputLine.placeholder, this.theme.dim)}`]
 
-      /** 着色输入行：光标行前缀 〉 涂 success 绿，其余保持原样。
+      /** 着色输入行：光标行前缀 ❯ 涂暗绿，其余保持原样。
        *  光标行已在 displayLines 内做了水平视窗截断，不再二次 truncateToWidth。 */
       const colorizeInputLine = (raw: string): string => {
-        if (raw.startsWith('〉 ')) return color('〉', arrowColor) + ' ' + raw.slice(2)
+        if (raw.startsWith('❯ ')) return color('❯', arrowColor) + ' ' + raw.slice(2)
         return raw
       }
 
