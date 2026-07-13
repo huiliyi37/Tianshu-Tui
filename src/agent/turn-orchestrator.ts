@@ -1003,14 +1003,31 @@ export class TurnOrchestrator {
             // a fresh run that would push the late tool result out of position.
             // Without this the next request breaks with "insufficient tool
             // messages following tool_calls" (only /rewind fixed it).
-            // ALL error types must drain: non-AbortError exceptions (e.g.
-            // TypeError from a tool bug) also leave orphan tool_use entries
-            // if the batch completes after we throw.
-            await Promise.race([
-              batchPromise.then(() => {}, () => {}),
-              new Promise<void>((resolve) => setTimeout(resolve, TOOL_ABORT_DRAIN_MS)),
+            //
+            // Rescue path (P7 write_file ghost-abort): if the batch had already
+            // settled successfully while rejectOnAbort was racing, recover the
+            // result instead of discarding it. This fixes the common case where
+            // write_file's atomic rename completed but the abort signal won the
+            // race — file is on disk, model gets "interrupted", model retries,
+            // blind-overwrite guard blocks the retry → dead-end. Rescuing here
+            // returns the real tool result to the turn loop so the model sees
+            // "Wrote N bytes" and continues normally.
+            const abandonedResult = await Promise.race([
+              batchPromise.then(
+                (v) => ({ resolved: true, value: v }),
+                (e) => ({ resolved: false, error: e }),
+              ),
+              new Promise<{ resolved: false; error: unknown }>((resolve) =>
+                setTimeout(() => resolve({ resolved: false, error: err }), TOOL_ABORT_DRAIN_MS),
+              ),
             ])
-            throw err
+            if (abandonedResult.resolved) {
+              // Batch finished successfully while we were aborting — rescue it.
+              r = abandonedResult.value
+              debugLog(`[turn-orch] rescued abandoned batch after abort (${r.toolCount} tools)`)
+            } else {
+              throw abandonedResult.error
+            }
           } finally {
             toolHeartbeat?.rearmWatchdog()
           }
