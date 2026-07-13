@@ -3445,13 +3445,15 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       // （better_sqlite3.node）→ "另一个程序正在使用此文件"。改为分离式更新器：
       // 等本进程退出释放文件锁后再装、再拉起。
       if (process.platform === 'win32' && check.installType === 'global') {
-        const scheduled = spawnWindowsSelfUpdate(root, 'latest', true, ctx.sessionId)
-        if (!scheduled) {
-          app.commitStatic('❌ 无法启动后台更新器，请手动执行：npm install -g tianshu-tui@latest')
+        const schedule = spawnWindowsSelfUpdate(root, 'latest', true, ctx.sessionId)
+        if (!schedule.ok) {
+          app.commitStatic(`❌ 无法启动后台更新器：${schedule.error ?? 'unknown'}`)
+          app.commitStatic('   请手动执行：npm install -g tianshu-tui@latest')
           return true
         }
         app.commitStatic('✅ 更新已安排：天枢将退出以释放文件占用，安装完成后会自动重新打开。')
         app.commitStatic('   （若未自动打开，请重新运行 rivet；安装约需数十秒）')
+        app.commitStatic(`   日志：${schedule.logPath}`)
         setTimeout(() => {
           ctx.shutdown()
           app.dispose()

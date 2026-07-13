@@ -14,11 +14,13 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, join, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { execSync, spawn } from 'node:child_process'
 import { writeFileAtomicSync } from '../fs-atomic.js'
-import { updateCheckPath } from '../config/paths.js'
+import { rivetHome, updateCheckPath } from '../config/paths.js'
 import { WinStreamDecoder } from '../platform.js'
+import { ProxyAgent } from 'undici'
+import type Dispatcher from 'undici/types/dispatcher'
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org'
 const GITHUB_API_URL = 'https://api.github.com/repos'
@@ -26,6 +28,42 @@ const UPDATE_CHECK_TIMEOUT_MS = 5_000
 // 旧值 24h 会导致用户安装新版本后一整天都看不到更新横幅。
 // npm 发布频率下 1h 足够及时，又不会过度请求 registry。
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
+const UPDATE_RETRIES = 3
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms))
+}
+
+function envCaseInsensitive(key: string): string | undefined {
+  return process.env[key] ?? process.env[key.toLowerCase()]
+}
+
+function shouldBypassProxy(hostname: string): boolean {
+  const raw = envCaseInsensitive('NO_PROXY')
+  if (!raw) return false
+  const h = hostname.toLowerCase()
+  for (const entry of raw.split(',')) {
+    const p = entry.trim().toLowerCase()
+    if (!p) continue
+    if (p === '*') return true
+    if (h === p) return true
+    if (p.startsWith('.') && (h.endsWith(p) || h === p.slice(1))) return true
+  }
+  return false
+}
+
+function proxyForUrl(url: string): string | undefined {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return undefined
+  }
+  if (shouldBypassProxy(parsed.hostname)) return undefined
+  if (parsed.protocol === 'https:') return envCaseInsensitive('HTTPS_PROXY') ?? envCaseInsensitive('HTTP_PROXY')
+  if (parsed.protocol === 'http:') return envCaseInsensitive('HTTP_PROXY') ?? envCaseInsensitive('HTTPS_PROXY')
+  return undefined
+}
 
 interface UpdateCache {
   timestamp: number
@@ -64,15 +102,67 @@ function writeUpdateCache(latest: string | null, source?: 'npm' | 'github'): voi
 export type InstallType = 'source' | 'global' | 'local' | 'unknown'
 
 let cachedGlobalNpmRoot: string | null | undefined
+let cachedGlobalNpmPrefix: string | null | undefined
+
+function runNpmCommand(args: string): string | null {
+  try {
+    return execSync(`npm ${args}`, { encoding: 'utf-8', timeout: 5_000 }).trim()
+  } catch {
+    return null
+  }
+}
+
+function getGlobalNpmPrefix(): string | null {
+  if (cachedGlobalNpmPrefix !== undefined) return cachedGlobalNpmPrefix
+  cachedGlobalNpmPrefix = runNpmCommand('prefix -g')
+  return cachedGlobalNpmPrefix
+}
 
 function getGlobalNpmRoot(): string | null {
   if (cachedGlobalNpmRoot !== undefined) return cachedGlobalNpmRoot
-  try {
-    cachedGlobalNpmRoot = execSync('npm root -g', { encoding: 'utf-8', timeout: 5_000 }).trim()
-  } catch {
-    cachedGlobalNpmRoot = null
+  cachedGlobalNpmRoot = runNpmCommand('root -g')
+  if (!cachedGlobalNpmRoot) {
+    const prefix = getGlobalNpmPrefix()
+    if (prefix) cachedGlobalNpmRoot = join(prefix, 'node_modules')
   }
   return cachedGlobalNpmRoot
+}
+
+/** 定位当前 PATH 中的 npm 可执行文件绝对路径，供更新脚本使用。 */
+export function findNpm(): string | null {
+  try {
+    const cmd = process.platform === 'win32' ? 'where npm' : 'which npm'
+    const out = execSync(cmd, { encoding: 'utf-8', timeout: 5_000 }).trim()
+    const first = out.split(/\r?\n/)[0]
+    if (first) return first
+  } catch {
+    // fall through
+  }
+  const prefix = getGlobalNpmPrefix()
+  if (prefix) {
+    const candidates = process.platform === 'win32'
+      ? [join(prefix, 'npm.cmd'), join(prefix, 'npm.exe'), join(prefix, 'npm')]
+      : [join(prefix, 'bin', 'npm'), join(prefix, 'npm')]
+    for (const c of candidates) {
+      if (existsSync(c)) return c
+    }
+  }
+  return null
+}
+
+function findPowerShell(): string | null {
+  if (process.platform !== 'win32') return null
+  const candidates = ['pwsh.exe', 'powershell.exe', 'powershell']
+  for (const name of candidates) {
+    try {
+      const out = execSync(`where ${name}`, { encoding: 'utf-8', timeout: 5_000 }).trim()
+      const first = out.split(/\r?\n/)[0]
+      if (first) return first
+    } catch {
+      // try next
+    }
+  }
+  return null
 }
 
 export function parseSemver(version: string): [number, number, number, prerelease?: string] {
@@ -170,15 +260,52 @@ export function getCurrentVersion(root: string): string | null {
   }
 }
 
+function pathsEqual(a: string, b: string): boolean {
+  try {
+    const ra = resolve(a)
+    const rb = resolve(b)
+    if (process.platform === 'win32') return ra.toLowerCase() === rb.toLowerCase()
+    return ra === rb
+  } catch {
+    return a === b
+  }
+}
+
+function pathStartsWith(a: string, b: string): boolean {
+  try {
+    const ra = resolve(a)
+    const rb = resolve(b)
+    const cmp = process.platform === 'win32'
+      ? ra.toLowerCase().startsWith(rb.toLowerCase())
+      : ra.startsWith(rb)
+    if (!cmp) return false
+    // 确保是目录边界，不是前缀巧合（如 /foo-bar 与 /foo）
+    const nextChar = ra[rb.length]
+    return nextChar === undefined || nextChar === sep || nextChar === (process.platform === 'win32' ? '/' : '')
+  } catch {
+    return a.startsWith(b)
+  }
+}
+
 export function detectInstallType(root: string): InstallType {
   if (existsSync(join(root, '.git'))) return 'source'
   const name = readPackageName(root)
   const globalRoot = getGlobalNpmRoot()
-  if (globalRoot && name) {
-    const globalPackageRoot = join(globalRoot, name)
-    if (root === globalPackageRoot) return 'global'
+  const prefix = getGlobalNpmPrefix()
+  if (name) {
+    if (globalRoot) {
+      const globalPackageRoot = join(globalRoot, name)
+      if (pathsEqual(root, globalPackageRoot)) return 'global'
+    }
+    if (prefix) {
+      // 全局包也可能位于 prefix/node_modules/<name>（nvm/fnm 等场景）
+      const prefixedRoot = join(prefix, 'node_modules', name)
+      if (pathsEqual(root, prefixedRoot)) return 'global'
+    }
   }
   if (root.includes(`${sep}node_modules${sep}`)) return 'local'
+  // 如果 root 落在全局 npm root 下但名字没对上，仍视为 global 安装损坏/未知
+  if (prefix && pathStartsWith(root, join(prefix, 'node_modules'))) return 'global'
   return 'unknown'
 }
 
@@ -188,26 +315,44 @@ export interface LatestVersionInfo {
   source: 'npm' | 'github'
 }
 
-async function fetchWithTimeout(
+async function fetchWithRetry(
   url: string,
   options?: RequestInit,
+  retries = UPDATE_RETRIES,
 ): Promise<Response | null> {
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS)
-    const res = await fetch(url, { ...options, signal: controller.signal })
-    clearTimeout(timer)
-    return res
-  } catch {
-    return null
+  const proxy = proxyForUrl(url)
+  const dispatcher = proxy ? new ProxyAgent(proxy) : undefined
+  const init = { ...options, dispatcher } as RequestInit & { dispatcher?: Dispatcher }
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS)
+      const res = await fetch(url, { ...init, signal: controller.signal })
+      clearTimeout(timer)
+      // 客户端错误不重试；429/5xx 可重试。
+      if (res.ok || (res.status !== 429 && res.status < 500)) return res
+      if (attempt < retries) {
+        await sleep(1000 * 2 ** attempt)
+        continue
+      }
+      return res
+    } catch {
+      if (attempt < retries) {
+        await sleep(1000 * 2 ** attempt)
+        continue
+      }
+      return null
+    }
   }
+  return null
 }
 
 export async function fetchNpmLatestVersion(
   packageName: string,
 ): Promise<LatestVersionInfo | null> {
   const url = `${NPM_REGISTRY_URL}/${encodeURIComponent(packageName)}/latest`
-  const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } })
+  const res = await fetchWithRetry(url, { headers: { Accept: 'application/json' } })
   if (!res || !res.ok) return null
   const data = await res.json() as { version?: string; time?: Record<string, string> }
   if (typeof data.version !== 'string') return null
@@ -216,7 +361,8 @@ export async function fetchNpmLatestVersion(
 
 export async function npmPackageExists(packageName: string): Promise<boolean> {
   const url = `${NPM_REGISTRY_URL}/${encodeURIComponent(packageName)}/latest`
-  const res = await fetchWithTimeout(url, { method: 'HEAD' })
+  // 部分企业代理/安全软件会拦截 HEAD，改用 GET；registry /latest 负载很小。
+  const res = await fetchWithRetry(url, { method: 'GET', headers: { Accept: 'application/json' } })
   return res !== null && res.ok
 }
 
@@ -247,7 +393,7 @@ export async function fetchGitHubLatestVersion(
   repo: string,
 ): Promise<LatestVersionInfo | null> {
   const url = `${GITHUB_API_URL}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/latest`
-  const res = await fetchWithTimeout(url, {
+  const res = await fetchWithRetry(url, {
     headers: {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
@@ -310,7 +456,9 @@ export async function checkForUpdate(
 
   if (!latestInfo) {
     latestInfo = await fetchLatestVersion(name, installRoot)
-    writeUpdateCache(latestInfo?.version ?? null, latestInfo?.source)
+    // 网络失败时不要写缓存；否则下次启动在 1h 内会直接命中“无版本”缓存，
+    // 导致断网/代理失败的用户持续看不到更新提示。
+    if (latestInfo) writeUpdateCache(latestInfo.version, latestInfo.source)
   }
 
   if (!latestInfo) return null
@@ -460,6 +608,18 @@ export function restartProcess(sessionId?: string): void {
   process.exit(0)
 }
 
+function updateLogPath(): string {
+  return join(rivetHome(), 'update.log')
+}
+
+export interface WindowsSelfUpdateSchedule {
+  ok: boolean
+  powerShell?: string
+  npmPath?: string
+  logPath?: string
+  error?: string
+}
+
 /**
  * Windows 自更新脚本构造（纯函数，便于单测）。
  *
@@ -468,30 +628,48 @@ export function restartProcess(sessionId?: string): void {
  * 全局包目录，会命中「另一个程序正在使用此文件」→ 安装失败/半装坏。
  *
  * 方案：spawn 一个分离的 PowerShell —— 先 `Wait-Process` 等当前进程退出、
- * 释放文件锁，再 `npm install -g`，成功后（可选）`Start-Process` 重新拉起。
+ * 释放文件锁，再使用绝对 npm 路径执行 `npm install -g`，成功后（可选）
+ * `Start-Process` 重新拉起。所有步骤写入日志，失败不再静默吞掉。
  * 单引号包裹并把内嵌单引号翻倍（PowerShell 转义），避免路径含空格/引号被截断。
  */
 export function buildWindowsSelfUpdateScript(opts: {
   pid: number
   packageName: string
   channel: string
+  npmPath: string
   execPath: string
   argv: string[]
   cwd: string
   relaunch: boolean
+  logPath: string
 }): string {
   const q = (s: string): string => `'${s.replace(/'/g, "''")}'`
   const argList = opts.argv.map(q).join(', ')
+  const npm = q(opts.npmPath)
+  const log = q(opts.logPath)
+  const exec = q(opts.execPath)
+  const cwd = q(opts.cwd)
   const parts = [
-    `$ErrorActionPreference='SilentlyContinue'`,
-    `try { Wait-Process -Id ${opts.pid} -Timeout 120 } catch {}`,
+    `$ErrorActionPreference='Stop'`,
+    `$log = ${log}`,
+    `$logDir = Split-Path $log -Parent`,
+    `if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }`,
+    `function Write-Log { param([string]$m) Add-Content -Path $log -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" -ErrorAction SilentlyContinue }`,
+    `Write-Log 'update start; waiting for parent process ${opts.pid}'`,
+    `try { Wait-Process -Id ${opts.pid} -Timeout 120 } catch { Write-Log "wait process failed: $($_.Exception.Message)"; exit 1 }`,
     `Start-Sleep -Milliseconds 800`,
-    `npm install -g ${opts.packageName}@${opts.channel}`,
+    `Write-Log "running npm install -g ${opts.packageName}@${opts.channel}"`,
+    `$out = & ${npm} install -g ${opts.packageName}@${opts.channel} 2>&1`,
+    `$code = $LASTEXITCODE`,
+    `if ($out) { Write-Log ($out | Out-String) }`,
+    `Write-Log "npm exit code: $code"`,
+    `if ($code -ne 0) { exit $code }`,
   ]
   if (opts.relaunch) {
     const relaunchArgs = argList ? `-ArgumentList @(${argList}) ` : ''
     parts.push(
-      `if ($LASTEXITCODE -eq 0) { Start-Process -FilePath ${q(opts.execPath)} ${relaunchArgs}-WorkingDirectory ${q(opts.cwd)} }`,
+      `Start-Process -FilePath ${exec} ${relaunchArgs}-WorkingDirectory ${cwd}`,
+      `Write-Log 'relaunched'`,
     )
   }
   return parts.join('; ')
@@ -499,29 +677,39 @@ export function buildWindowsSelfUpdateScript(opts: {
 
 /**
  * 安排 Windows 后台自更新：spawn 分离 PowerShell（等本进程退出→装→重启），
- * 返回是否成功排程。调用方随后应主动退出当前进程释放文件锁。
+ * 返回排程结果。调用方随后应主动退出当前进程释放文件锁。
  */
-export function spawnWindowsSelfUpdate(root: string, channel: string, relaunch = true, sessionId?: string): boolean {
+export function spawnWindowsSelfUpdate(root: string, channel: string, relaunch = true, sessionId?: string): WindowsSelfUpdateSchedule {
   const name = readPackageName(root)
-  if (!name) return false
+  if (!name) return { ok: false, error: 'Could not read package name.' }
+
+  const powerShell = findPowerShell()
+  if (!powerShell) return { ok: false, error: 'PowerShell not found.' }
+
+  const npmPath = findNpm()
+  if (!npmPath) return { ok: false, error: 'npm not found in PATH.' }
+
+  const logPath = updateLogPath()
   const script = buildWindowsSelfUpdateScript({
     pid: process.pid,
     packageName: name,
     channel,
+    npmPath,
     execPath: process.execPath,
     argv: withResumeArgs(process.argv.slice(1), sessionId),
     cwd: process.cwd(),
     relaunch,
+    logPath,
   })
   try {
     const child = spawn(
-      'powershell',
+      powerShell,
       ['-NoProfile', '-NonInteractive', '-Command', script],
       { detached: true, stdio: 'ignore', windowsHide: true },
     )
     child.unref()
-    return true
-  } catch {
-    return false
+    return { ok: true, powerShell, npmPath, logPath }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }

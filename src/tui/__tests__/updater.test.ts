@@ -1,7 +1,20 @@
-import { describe, it } from 'node:test'
+import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { compareSemver, parseSemver, emitLines, buildWindowsSelfUpdateScript, withResumeArgs } from '../updater.js'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  compareSemver,
+  parseSemver,
+  emitLines,
+  buildWindowsSelfUpdateScript,
+  withResumeArgs,
+  checkForUpdate,
+  fetchNpmLatestVersion,
+  npmPackageExists,
+} from '../updater.js'
 import { WinStreamDecoder } from '../../platform.js'
+import { ProxyAgent } from 'undici'
 
 describe('updater semver', () => {
   it('parses plain versions', () => {
@@ -39,10 +52,12 @@ describe('buildWindowsSelfUpdateScript', () => {
     pid: 4242,
     packageName: 'tianshu-tui',
     channel: 'latest',
+    npmPath: 'C:\\Program Files\\nodejs\\npm.cmd',
     execPath: 'C:\\Program Files\\nodejs\\node.exe',
     argv: ['C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\tianshu-tui\\dist\\main.js'],
     cwd: 'C:\\work\\proj',
     relaunch: true,
+    logPath: 'C:\\Users\\me\\AppData\\Local\\.rivet\\update.log',
   }
 
   it('waits for the current pid before installing (release file lock)', () => {
@@ -53,9 +68,20 @@ describe('buildWindowsSelfUpdateScript', () => {
     assert.match(script, /npm install -g tianshu-tui@latest/)
   })
 
+  it('uses the provided absolute npm path instead of bare npm', () => {
+    const script = buildWindowsSelfUpdateScript(base)
+    assert.match(script, /& 'C:\\Program Files\\nodejs\\npm\.cmd' install -g/)
+  })
+
+  it('logs to the provided log path and creates the directory if needed', () => {
+    const script = buildWindowsSelfUpdateScript(base)
+    assert.match(script, /\$log = 'C:\\Users\\me\\AppData\\Local\\\.rivet\\update\.log'/)
+    assert.match(script, /New-Item -ItemType Directory -Path \$logDir -Force/)
+  })
+
   it('relaunches only on successful install and preserves argv', () => {
     const script = buildWindowsSelfUpdateScript(base)
-    assert.match(script, /if \(\$LASTEXITCODE -eq 0\)/)
+    assert.match(script, /if \(\$code -ne 0\) \{ exit \$code \}/)
     assert.match(script, /Start-Process -FilePath 'C:\\Program Files\\nodejs\\node\.exe'/)
     assert.match(script, /dist\\main\.js/)
   })
@@ -186,5 +212,136 @@ describe('updater WinStreamDecoder integration', () => {
   it('end() returns empty when nothing was written', () => {
     const dec = new WinStreamDecoder()
     assert.equal(dec.end(), '')
+  })
+})
+
+
+describe('checkForUpdate cache behavior', () => {
+  let tmpHome: string
+  let origHome: string | undefined
+  let origFetch: typeof globalThis.fetch
+
+  before(() => {
+    origHome = process.env.RIVET_HOME
+    tmpHome = mkdtempSync(join(tmpdir(), 'rivet-update-test-'))
+    process.env.RIVET_HOME = tmpHome
+    origFetch = globalThis.fetch
+  })
+
+  after(() => {
+    globalThis.fetch = origFetch
+    if (origHome === undefined) {
+      delete process.env.RIVET_HOME
+    } else {
+      process.env.RIVET_HOME = origHome
+    }
+    rmSync(tmpHome, { recursive: true, force: true })
+  })
+
+  it('does not write cache when network request fails', async () => {
+    // 使用 404 而非抛异常： fetchWithRetry 对 4xx 不重试，避免单测等待重试退避。
+    globalThis.fetch = async () => new Response('not found', { status: 404 })
+    const result = await checkForUpdate(undefined, { bypassCache: true })
+    assert.equal(result, null)
+    assert.equal(existsSync(join(tmpHome, 'update-check.json')), false)
+  })
+
+  it('writes cache when network request succeeds', async () => {
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ version: '99.0.0' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    const result = await checkForUpdate(undefined, { bypassCache: true })
+    assert.ok(result)
+    assert.equal(result!.hasUpdate, true)
+    assert.equal(existsSync(join(tmpHome, 'update-check.json')), true)
+  })
+})
+
+describe('fetchNpmLatestVersion proxy support', () => {
+  let origFetch: typeof globalThis.fetch
+  const proxyKeys = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy']
+  const origProxyValues: Record<string, string | undefined> = {}
+
+  before(() => {
+    origFetch = globalThis.fetch
+    for (const key of proxyKeys) {
+      origProxyValues[key] = process.env[key]
+      delete process.env[key]
+    }
+  })
+
+  after(() => {
+    globalThis.fetch = origFetch
+    for (const key of proxyKeys) {
+      if (origProxyValues[key] === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = origProxyValues[key]
+      }
+    }
+  })
+
+  it('uses ProxyAgent dispatcher when HTTPS_PROXY is set', async () => {
+    process.env.HTTPS_PROXY = 'http://127.0.0.1:8080'
+    let capturedDispatcher: unknown
+    globalThis.fetch = async (_url, init) => {
+      capturedDispatcher = (init as { dispatcher?: unknown }).dispatcher
+      return new Response(JSON.stringify({ version: '9.9.9' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    await fetchNpmLatestVersion('tianshu-tui')
+    assert.ok(capturedDispatcher instanceof ProxyAgent, 'expected ProxyAgent')
+  })
+
+  it('omits dispatcher when no proxy is configured', async () => {
+    for (const key of proxyKeys) delete process.env[key]
+    let capturedDispatcher: unknown = 'not-set'
+    globalThis.fetch = async (_url, init) => {
+      capturedDispatcher = (init as { dispatcher?: unknown }).dispatcher
+      return new Response(JSON.stringify({ version: '9.9.9' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    await fetchNpmLatestVersion('tianshu-tui')
+    assert.equal(capturedDispatcher, undefined)
+  })
+
+  it('respects NO_PROXY for registry hostname', async () => {
+    process.env.HTTPS_PROXY = 'http://127.0.0.1:8080'
+    process.env.NO_PROXY = 'registry.npmjs.org'
+    let capturedDispatcher: unknown = 'not-set'
+    globalThis.fetch = async (_url, init) => {
+      capturedDispatcher = (init as { dispatcher?: unknown }).dispatcher
+      return new Response(JSON.stringify({ version: '9.9.9' }), { status: 200 })
+    }
+    await fetchNpmLatestVersion('tianshu-tui')
+    assert.equal(capturedDispatcher, undefined)
+  })
+})
+
+describe('npmPackageExists', () => {
+  let origFetch: typeof globalThis.fetch
+
+  before(() => {
+    origFetch = globalThis.fetch
+  })
+
+  after(() => {
+    globalThis.fetch = origFetch
+  })
+
+  it('uses GET instead of HEAD to avoid proxy interception', async () => {
+    let method: string | undefined
+    globalThis.fetch = async (_url, init) => {
+      method = (init as { method?: string }).method
+      return new Response(JSON.stringify({ version: '1.0.0' }), { status: 200 })
+    }
+    await npmPackageExists('tianshu-tui')
+    assert.equal(method, 'GET')
   })
 })
