@@ -1,0 +1,110 @@
+/**
+ * Unified git spawning with resolved env + executable path discovery.
+ *
+ * Why this exists: GUI-launched desktop apps on Windows inherit a truncated PATH.
+ * `getResolvedEnv` recovers the real PATH (registry / login shell), but callers
+ * also need the git executable itself resolved — `git` as a bare command fails
+ * when the git install dir isn't on even the resolved PATH (rare but possible).
+ * This module provides sync/async/execFile wrappers that resolve the git path
+ * AND layer the resolved env, so every git call site gets both fixes in one shot.
+ *
+ * Sync `resolveGitCommand` mirrors the path set from env-check.ts's async
+ * `resolveGitExePath`, minus the `where git` step (sync constraint — that would
+ * require an async child process). The `'git'` fallback + `getResolvedEnv` PATH
+ * covers the vast majority of installs; hardcoded paths are defense-in-depth.
+ */
+
+import { spawn, spawnSync, execFile } from 'node:child_process'
+import type { SpawnSyncOptions, SpawnOptions, ExecFileOptions } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { getResolvedEnv } from './resolved-env.js'
+
+/**
+ * Resolve the git executable path synchronously.
+ *
+ * Probe order:
+ *   1. `RIVET_GIT_PATH` env override (seeded from `env.gitPath` on desktop)
+ *   2. Windows: common install locations (Program Files / LOCALAPPDATA)
+ *   3. Fallback `'git'` — resolved via `gitEnv`'s PATH
+ */
+export function resolveGitCommand(env?: NodeJS.ProcessEnv): string {
+  const effectiveEnv = env ?? process.env
+
+  // 1. Explicit override
+  const override = effectiveEnv['RIVET_GIT_PATH']
+  if (override && existsSync(override)) return override
+
+  // 2. Windows: probe common install locations
+  if (process.platform === 'win32') {
+    const candidates = [
+      'C:\\Program Files\\Git\\cmd\\git.exe',
+      'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
+    ]
+    const localApp = effectiveEnv['LOCALAPPDATA']
+    if (localApp) {
+      candidates.push(join(localApp, 'Programs', 'Git', 'cmd', 'git.exe'))
+    }
+    for (const c of candidates) {
+      if (existsSync(c)) return c
+    }
+  }
+
+  // 3. Fallback — resolved PATH will find it in the vast majority of cases
+  return 'git'
+}
+
+/** Resolved env for subprocess execution. Mirrors bash.ts / git.ts / run-tests.ts. */
+export function gitEnv(cwd?: string): NodeJS.ProcessEnv {
+  return getResolvedEnv(cwd)
+}
+
+/**
+ * Synchronous git spawn. Returns the raw `SpawnSyncReturns<Buffer>` so callers
+ * can access `.status`, `.stdout`, `.stderr` directly — same contract as
+ * `child_process.spawnSync`.
+ */
+export function spawnGitSync(
+  args: string[],
+  opts?: SpawnSyncOptions,
+): ReturnType<typeof spawnSync> {
+  const cwd = typeof opts?.cwd === 'string' ? opts.cwd : undefined
+  const command = resolveGitCommand(opts?.env)
+  const env = { ...gitEnv(cwd), ...opts?.env }
+  return spawnSync(command, args, { ...opts, env, windowsHide: true })
+}
+
+/**
+ * Async git spawn. Returns `ChildProcess` so callers can use `track()`,
+ * `gracefulKill()`, `AbortSignal`, and pipe stdio as they do with bare `spawn`.
+ * Same contract as `child_process.spawn`.
+ */
+export function spawnGit(
+  args: string[],
+  opts?: SpawnOptions,
+): ReturnType<typeof spawn> {
+  const cwd = typeof opts?.cwd === 'string' ? opts.cwd : undefined
+  const command = resolveGitCommand(opts?.env)
+  const env = { ...gitEnv(cwd), ...opts?.env }
+  return spawn(command, args, { ...opts, env, windowsHide: true })
+}
+
+/**
+ * `execFile` git wrapper — for callers that need the callback-style API
+ * (e.g. `tool-pipeline.ts`). With callback: returns `ChildProcess` (same as
+ * `execFile`). Without callback: returns `ChildProcess` with stdout/stderr
+ * accessible via events.
+ */
+export function execFileGit(
+  args: string[],
+  opts?: ExecFileOptions,
+  cb?: (error: Error | null, stdout: string, stderr: string) => void,
+): ReturnType<typeof execFile> {
+  const cwd = typeof opts?.cwd === 'string' ? opts.cwd : undefined
+  const command = resolveGitCommand(opts?.env)
+  const env = { ...gitEnv(cwd), ...opts?.env }
+  if (cb) {
+    return execFile(command, args, { ...opts, env, windowsHide: true }, cb)
+  }
+  return execFile(command, args, { ...opts, env, windowsHide: true })
+}
