@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import type { WorkerArtifact } from './work-order.js'
 
 interface GitResult {
@@ -7,7 +7,7 @@ interface GitResult {
 }
 
 function git(cwd: string, args: string[]): GitResult {
-  const result = spawnSync('git', args, {
+  const result = spawnGitSync(args, {
     cwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -20,7 +20,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import { join, isAbsolute } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import type { TaskLedger } from './task-ledger.js'
@@ -184,7 +184,7 @@ function collectLargeFiles(cwd: string, filePaths: readonly string[]): Array<{ p
 }
 
 function gitNameList(cwd: string, args: string[]): string[] | null {
-  const result = spawnSync('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf-8', timeout: 5000 })
+  const result = spawnGitSync(['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf-8', timeout: 5000 })
   if (result.status !== 0) return null
   return parseNulFileList(result.stdout)
 }
@@ -195,7 +195,7 @@ function gitNameList(cwd: string, args: string[]): string[] | null {
  * reflex — patch the last hop, not the root. Returns a stance hint, or null.
  */
 export function detectSymptomPatch(cwd: string): string | null {
-  const res = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', '--numstat', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 })
+  const res = spawnGitSync(['-c', 'core.quotePath=false', 'diff', '--numstat', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 })
   if (res.status !== 0) return null
   const rows = res.stdout.split(/\r?\n/).filter(Boolean)
     .map(l => l.split('\t'))
@@ -204,7 +204,7 @@ export function detectSymptomPatch(cwd: string): string | null {
   const row = rows[0]!
   const added = Number(row[0]) || 0
   if (added > 2) return null
-  const patch = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', 'HEAD', '--', row[2]!], { cwd, encoding: 'utf-8', timeout: 5000 })
+  const patch = spawnGitSync(['-c', 'core.quotePath=false', 'diff', 'HEAD', '--', row[2]!], { cwd, encoding: 'utf-8', timeout: 5000 })
   if (patch.status !== 0) return null
   const addedLines = patch.stdout.split(/\r?\n/).filter(l => l.startsWith('+') && !l.startsWith('+++'))
   const fallbackOnly = addedLines.length > 0 && addedLines.every(l => /\?\?|\|\||=\s*['"`]?\w*['"`]?\s*$|fallback|default/.test(l))
@@ -802,7 +802,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         // Capture HEAD before the commit so the result carries verifiable
         // evidence that a new commit actually landed (vs. agent guessing from
         // a possibly-stale git status snapshot).
-        const headBefore = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 5000 })
+        const headBefore = spawnGitSync(['rev-parse', '--short', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 5000 })
         const headBeforeHash = headBefore.status === 0 ? headBefore.stdout.trim() : null
 
         const executor = ctx.commitOwnedFiles ?? ((cwd, files, msg) => commitScopedFiles({ cwd, files, message: msg }))
@@ -815,7 +815,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         lines.push(`   Files: ${filesToCommit.join(', ') || '(none)'}`)
         if (commitResult.output) lines.push(`   ${commitResult.output}`)
         // Post-commit truth readback: verify HEAD actually moved + surface hash.
-        const headAfter = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 5000 })
+        const headAfter = spawnGitSync(['rev-parse', '--short', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 5000 })
         const headAfterHash = headAfter.status === 0 ? headAfter.stdout.trim() : null
         if (headBeforeHash && headAfterHash) {
           if (headBeforeHash !== headAfterHash) {
@@ -824,7 +824,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
             lines.push(`   ⚠️ WARNING: HEAD did not move (still ${headAfterHash}). The commit may not have landed — verify with git log before retrying.`)
           }
         }
-        const readback = spawnSync('git', ['-c', 'core.quotePath=false', 'show', '--stat', '--format=%h%d', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 10_000 })
+        const readback = spawnGitSync(['-c', 'core.quotePath=false', 'show', '--stat', '--format=%h%d', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 10_000 })
         if (readback.status === 0 && readback.stdout.trim()) {
           lines.push('', '--- actual changes (git show --stat) ---')
           lines.push(readback.stdout.trim())

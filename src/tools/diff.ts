@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawnGit } from './spawn-git.js'
 import { relative, resolve } from 'path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { validatePathSafe } from './path-validate.js'
@@ -64,9 +64,8 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
     }
 
     return new Promise((resolve) => {
-      const child = track(spawn('git', args, {
+      const child = track(spawnGit(args, {
         cwd: params.cwd,
-        env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
       }))
 

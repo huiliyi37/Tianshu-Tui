@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawnGit } from '../tools/spawn-git.js'
 import { track } from '../tools/process-tracker.js'
 
 /**
@@ -11,7 +11,7 @@ function gitSpawn(
   timeoutMs = 100,
 ): Promise<string> {
   return new Promise(resolve => {
-    const child = track(spawn('git', args, {
+    const child = track(spawnGit(args, {
       cwd,
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: timeoutMs,

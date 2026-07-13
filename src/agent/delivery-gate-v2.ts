@@ -16,7 +16,7 @@
  * @task B1-7
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
 import type { VerificationAttribution, AttributionClass } from './verification-attribution.js'
@@ -48,7 +48,7 @@ export function isJunkExternalPath(file: string): boolean {
 function gitIgnoredSubset(files: string[], cwd: string): Set<string> {
   if (files.length === 0) return new Set()
   try {
-    const r = spawnSync('git', ['check-ignore', '--stdin'], {
+    const r = spawnGitSync(['check-ignore', '--stdin'], {
       cwd,
       input: files.join('\n'),
       encoding: 'utf-8',

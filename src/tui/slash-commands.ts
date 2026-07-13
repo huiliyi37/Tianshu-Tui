@@ -218,9 +218,9 @@ export interface SlashHandlerContext {
 
 /** 收集当前工作区未提交的改动文件（unstaged + staged + untracked）。 */
 async function collectDirtyFiles(cwd: string): Promise<string[]> {
-  const { spawnSync } = await import('node:child_process')
+  const { spawnGitSync } = await import('../tools/spawn-git.js')
   const run = (gitArgs: string[]): string[] => {
-    const r = spawnSync('git', ['-c', 'core.quotePath=false', ...gitArgs], { cwd, encoding: 'utf-8', timeout: 5000 })
+    const r = spawnGitSync(['-c', 'core.quotePath=false', ...gitArgs], { cwd, encoding: 'utf-8', timeout: 5000 })
     return r.status === 0 ? r.stdout.split('\0').filter(Boolean) : []
   }
   try {

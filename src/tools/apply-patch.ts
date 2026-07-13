@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawnGit } from './spawn-git.js'
 import { writeFile, unlink, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -62,7 +62,7 @@ export async function applyPatch(cwd: string, input: ApplyPatchInput, abortSigna
     args.push(patchFile)
 
     const result = await new Promise<{status: number | null, stderr: string, stdout: string}>((resolve, reject) => {
-      const child = spawn('git', args, {
+      const child = spawnGit(args, {
         cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
       })

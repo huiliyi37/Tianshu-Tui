@@ -11,7 +11,7 @@
  * zero reads anywhere is mechanically certain dead wiring.
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -42,7 +42,7 @@ function isCandidateName(name: string): boolean {
 
 function gitAddedLines(cwd: string, file: string): string[] {
   try {
-    const diff = spawnSync('git', ['diff', 'HEAD', '--', file], { cwd, encoding: 'utf-8', timeout: 10_000 })
+    const diff = spawnGitSync(['diff', 'HEAD', '--', file], { cwd, encoding: 'utf-8', timeout: 10_000 })
     if (diff.status === 0 && diff.stdout.trim()) {
       return diff.stdout
         .split(/\r?\n/)
@@ -50,7 +50,7 @@ function gitAddedLines(cwd: string, file: string): string[] {
         .map(l => l.slice(1))
     }
     // Untracked new file: the whole content is "added".
-    const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', file], { cwd, encoding: 'utf-8', timeout: 5000 })
+    const tracked = spawnGitSync(['ls-files', '--error-unmatch', '--', file], { cwd, encoding: 'utf-8', timeout: 5000 })
     if (tracked.status !== 0) {
       // Read directly instead of spawning `cat`, which doesn't exist on native
       // Windows (the symbol scan silently returned nothing there).
@@ -106,8 +106,7 @@ function isWriteOrDeclareOnly(line: string, symbol: string): boolean {
 
 function hasReadSideUsage(cwd: string, symbol: string): boolean {
   try {
-    const grep = spawnSync(
-      'git',
+    const grep = spawnGitSync(
       ['grep', '-n', '--untracked', '-F', symbol, '--', '*.ts', '*.tsx'],
       { cwd, encoding: 'utf-8', timeout: 10_000 },
     )
@@ -228,8 +227,7 @@ function collectReadFields(cwd: string, changedFiles: string[]): SymbolCandidate
 /** Classify a field's value-write sites: how many in production vs test code. */
 function fieldWriteSites(cwd: string, field: string): { prod: number; test: number } {
   try {
-    const grep = spawnSync(
-      'git',
+    const grep = spawnGitSync(
       ['grep', '-n', '--untracked', '-F', field, '--', '*.ts', '*.tsx'],
       { cwd, encoding: 'utf-8', timeout: 10_000 },
     )

@@ -23,7 +23,7 @@
  * @module verification-snapshot
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import { existsSync, rmSync } from 'node:fs'
 import { isAbsolute, join, relative } from 'node:path'
 import { createWorktreeAt, removeWorktree } from './worktree.js'
@@ -72,7 +72,7 @@ interface GitResult {
 }
 
 function git(cwd: string, args: string[], input?: string): GitResult {
-  const result = spawnSync('git', args, {
+  const result = spawnGitSync(args, {
     cwd,
     encoding: 'utf-8',
     input,

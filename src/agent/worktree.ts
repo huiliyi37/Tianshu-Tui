@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -91,7 +91,7 @@ function writeOwnerMarker(path: string, sessionId: string): void {
 }
 
 function git(cwd: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
-  const result = spawnSync('git', args, {
+  const result = spawnGitSync(args, {
     cwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -326,7 +326,7 @@ export function squashMergeBranch(cwd: string, branch: string, message: string):
  * credentials (GIT_TERMINAL_PROMPT=0) and times out instead of hanging.
  */
 export function pushBranch(cwd: string, branch: string): { ok: boolean; error?: string } {
-  const result = spawnSync('git', ['push', '-u', 'origin', branch], {
+  const result = spawnGitSync(['push', '-u', 'origin', branch], {
     cwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],

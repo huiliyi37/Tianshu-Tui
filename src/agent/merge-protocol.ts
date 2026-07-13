@@ -14,7 +14,7 @@
  * - 使用 spawn 异步执行，不用 execSync
  */
 
-import { spawn } from 'node:child_process'
+import { spawnGit } from '../tools/spawn-git.js'
 import { writeFileSync, unlinkSync } from 'node:fs'
 import { track } from '../tools/process-tracker.js'
 
@@ -71,7 +71,7 @@ export interface DiffHunk {
 
 async function git(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = track(spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }))
+    const child = track(spawnGit(args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }))
     const chunks: Buffer[] = []
     const errChunks: Buffer[] = []
 

@@ -11,7 +11,7 @@
  * - verifyRegressionInventory(cwd, items)：逐项 git grep 核验存在性
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import { listPlansSync } from '../plan/plan-store.js'
 
 export type InventoryItemStatus = 'present' | 'missing' | 'unknown'
@@ -76,7 +76,7 @@ export type InventorySearcher = (cwd: string, needle: string) => InventoryItemSt
 /** 默认搜索器：git grep -F（追踪文件全文搜索）。0=命中 1=未命中 其他=unknown。 */
 function gitGrepSearcher(cwd: string, needle: string): InventoryItemStatus {
   try {
-    const res = spawnSync('git', ['grep', '-l', '-F', '--', needle], { cwd, encoding: 'utf-8', timeout: 10_000 })
+    const res = spawnGitSync(['grep', '-l', '-F', '--', needle], { cwd, encoding: 'utf-8', timeout: 10_000 })
     if (res.status === 0) return 'present'
     if (res.status === 1) return 'missing'
     return 'unknown'

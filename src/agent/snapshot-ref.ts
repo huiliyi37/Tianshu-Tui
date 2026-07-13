@@ -12,7 +12,7 @@
  * @module snapshot-ref
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import { createHash } from 'node:crypto'
 
 /**
@@ -35,7 +35,7 @@ export function computeSnapshotRef(baselineHead: string, ownedDiff: string): str
  */
 export function computeOwnedDiff(baseCwd: string, baselineHead: string, ownedFiles: string[]): string {
   if (!baselineHead || ownedFiles.length === 0) return ''
-  const result = spawnSync('git', ['diff', '--no-color', baselineHead, '--', ...ownedFiles], {
+  const result = spawnGitSync(['diff', '--no-color', baselineHead, '--', ...ownedFiles], {
     cwd: baseCwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],

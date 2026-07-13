@@ -57,7 +57,7 @@ import { classifyDeclaredCommand, loadDeclaredVerify } from '../config/verify-co
 import { profileIsPlanModeSafe } from './profile-registry.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 import { toolTargetFromInput } from './tool-target.js'
-import { execFile } from 'node:child_process'
+import { execFileGit } from '../tools/spawn-git.js'
 
 /** Headless prefix on denial messages — a stable marker so worker-session's
  *  detectApprovalDeadlock can distinguish "gated by approval" from "bad JSON". */
@@ -612,7 +612,7 @@ function generateToolSummary(content: string, toolName: string, input: Record<st
  */
 function gitHeadQuiet(cwd: string): Promise<string | null> {
   return new Promise(resolve => {
-    execFile('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 1_500 }, (err, stdout) => {
+    execFileGit(['rev-parse', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 1_500 }, (err, stdout) => {
       resolve(err ? null : stdout.trim() || null)
     })
   })
@@ -621,7 +621,7 @@ function gitHeadQuiet(cwd: string): Promise<string | null> {
 /** One-line `<short-hash> <subject>` of HEAD, same failure semantics as gitHeadQuiet. */
 function gitHeadSummaryQuiet(cwd: string): Promise<string | null> {
   return new Promise(resolve => {
-    execFile('git', ['log', '-1', '--format=%h %s'], { cwd, encoding: 'utf-8', timeout: 1_500 }, (err, stdout) => {
+    execFileGit(['log', '-1', '--format=%h %s'], { cwd, encoding: 'utf-8', timeout: 1_500 }, (err, stdout) => {
       resolve(err ? null : stdout.trim() || null)
     })
   })

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import { appendFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
@@ -17,7 +17,7 @@ function normalizeScopePath(baseCwd: string, filePath: string): string | null {
 }
 
 function workerGitPath(workerCwd: string, gitPath: string): string | null {
-  const result = spawnSync('git', ['rev-parse', '--git-path', gitPath], {
+  const result = spawnGitSync(['rev-parse', '--git-path', gitPath], {
     cwd: workerCwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -52,7 +52,7 @@ function excludeFromWorkerDiff(workerCwd: string, relPath: string): void {
 }
 
 function gitRevParse(workerCwd: string, flag: '--git-dir' | '--git-common-dir'): string | null {
-  const result = spawnSync('git', ['rev-parse', flag], {
+  const result = spawnGitSync(['rev-parse', flag], {
     cwd: workerCwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],

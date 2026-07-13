@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 import { isAbsolute, relative, resolve } from 'node:path'
 
 export interface ScopedCommitInput {
@@ -47,7 +47,7 @@ function normalizeFiles(cwd: string, files: string[]): string[] {
 function runGit(cwd: string, args: string[]): ScopedCommitResult {
   // Force C locale so git's porcelain/error text stays in parseable English
   // regardless of the user's system locale (e.g. zh_CN would print 无文件要提交).
-  const result = spawnSync('git', args, {
+  const result = spawnGitSync(args, {
     cwd,
     encoding: 'utf-8',
     timeout: 10_000,

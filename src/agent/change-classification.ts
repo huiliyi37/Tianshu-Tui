@@ -12,7 +12,7 @@
  * The gate bypass only applies to unverified RED.
  */
 
-import { spawnSync } from 'node:child_process'
+import { spawnGitSync } from '../tools/spawn-git.js'
 
 export type ChangeClass = 'docs-only' | 'rename-mechanical' | 'heuristic-rename' | 'normal'
 
@@ -303,7 +303,7 @@ export function createGitDiffProvider(
     if (partition) return partition
     const untracked = new Set<string>()
     if (files.length > 0) {
-      const result = spawnSync('git', ['-c', 'core.quotePath=false', 'ls-files', '--', ...files], {
+      const result = spawnGitSync(['-c', 'core.quotePath=false', 'ls-files', '--', ...files], {
         cwd, encoding: 'utf-8', timeout: 5000,
       })
       const listed = result.status === 0
@@ -324,7 +324,7 @@ export function createGitDiffProvider(
     if (cachedNameStatus !== undefined) return cachedNameStatus
     if (renameScope.length === 0) { cachedNameStatus = ''; return cachedNameStatus }
 
-    const result = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', '-M', '--name-status', 'HEAD', '--', ...renameScope], {
+    const result = spawnGitSync(['-c', 'core.quotePath=false', 'diff', '-M', '--name-status', 'HEAD', '--', ...renameScope], {
       cwd, encoding: 'utf-8', timeout: 10_000,
     })
     cachedNameStatus = result.status === 0 ? result.stdout : ''
@@ -334,7 +334,7 @@ export function createGitDiffProvider(
   const filePatch = (file: string): string => {
     // Untracked files have no diff against HEAD
     if (getPartition().untracked.has(file)) return ''
-    const result = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', 'HEAD', '--', file], {
+    const result = spawnGitSync(['-c', 'core.quotePath=false', 'diff', 'HEAD', '--', file], {
       cwd, encoding: 'utf-8', timeout: 10_000,
     })
     return result.status === 0 ? result.stdout : ''

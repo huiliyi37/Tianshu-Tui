@@ -13,7 +13,8 @@ import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici'
 import { join } from 'path'
 import { randomUUID, createHash } from 'crypto'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync } from 'fs'
-import { spawnSync, spawn } from 'child_process'
+import { spawn } from 'child_process'
+import { spawnGitSync } from './tools/spawn-git.js'
 
 import type { Config, ProviderConfig } from './config/schema.js'
 import type { AuthProvider } from './auth/types.js'
@@ -247,10 +248,10 @@ export function resolveProviderAndAuth(
 
 export function captureGitBaseline(cwd: string): BaselineSnapshot {
   try {
-    const branch = spawnSync('git', ['-c', 'core.quotePath=false', 'rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
-    const head = spawnSync('git', ['-c', 'core.quotePath=false', 'rev-parse', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
-    const dirty = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', '--name-only'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
-    const untracked = spawnSync('git', ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const branch = spawnGitSync(['-c', 'core.quotePath=false', 'rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const head = spawnGitSync(['-c', 'core.quotePath=false', 'rev-parse', 'HEAD'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const dirty = spawnGitSync(['-c', 'core.quotePath=false', 'diff', '--name-only'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
+    const untracked = spawnGitSync(['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard'], { cwd, encoding: 'utf-8', timeout: 5000 }).stdout.trim()
     return {
       branch,
       head,
