@@ -9,7 +9,7 @@
  * A domain's voice is not an add-on; it's the message itself.
  */
 
-export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | 'wenqu' | 'yaoguang' | null
+export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | 'wenqu' | 'yaoguang' | 'huagai' | null
 
 // ---------------------------------------------------------------------------
 // Domain tone tables
@@ -23,6 +23,7 @@ const DOMAIN_NAMES: Record<string, string> = {
   fu: '辅',
   wenqu: '文曲',
   yaoguang: '瑶光',
+  huagai: '华盖',
 }
 
 /**
@@ -148,6 +149,23 @@ const DOMAIN_TONE: Record<string, Array<[string, string]>> = {
     ['最后验证中', '做最后一道复现验证'],
     ['正在分析', '回溯历史中'],
     ['测一下', '复现一下'],
+  ],
+  huagai: [
+    // 华盖 — long-run fidelity, day-watch endurance.
+    ['准备制定方案', '长路先定守昼锚点'],
+    ['开始修改', '托举建设，继续推进'],
+    ['正在修复', '追 blocker，不在假完成处停'],
+    ['代码修改完成', '本段已闭合，验证据仍在'],
+    ['测试全部通过', '守昼未过——spec/quality 两关'],
+    ['运行测试验证', '可核验完成才算数'],
+    ['准备交付结果', '三项写全，长路可接续'],
+    ['收到任务，开始分析', '收到，先看长程脉络'],
+    ['可能遇到困难', '耐力在，追到根因'],
+    ['接近完成', '最后一英里走完整'],
+    ['继续执行中', '守昼托举中'],
+    ['最后验证中', '最后一关，可核验完成'],
+    ['正在分析', '长程脉络中'],
+    ['测一下', '守昼验一下'],
   ],
 }
 

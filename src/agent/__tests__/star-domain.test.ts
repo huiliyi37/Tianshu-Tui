@@ -104,6 +104,45 @@ describe('StarDomain', () => {
     assert.match(yaoguang.systemPromptSuffix, /先验基线/)
   })
 
+  it('huagai domain exists with full field set', () => {
+    const huagai = STAR_DOMAINS.huagai
+    assert.ok(huagai)
+    assert.equal(huagai.id, 'huagai')
+    assert.equal(huagai.name, '华盖')
+    assert.equal(huagai.decisionStyle, 'methodical')
+    assert.equal(huagai.courageThreshold, 0.6)
+    assert.equal(huagai.isCustom, false)
+    assert.match(huagai.volatileBlock, /华盖/)
+    assert.match(huagai.volatileBlock, /守昼/)
+    assert.ok(huagai.systemPromptSuffix.length > 0)
+    assert.ok(huagai.keywords.includes('托举'))
+    assert.ok(huagai.keywords.includes('长程'))
+    assert.equal(huagai.uiPersona.glyph, '☉')
+    assert.equal(huagai.uiPersona.accent, 'primary')
+  })
+
+  it('routes endurance/fidelity keywords to huagai', () => {
+    assert.equal(matchDomain('长程任务需要守昼托举'), 'huagai')
+    assert.equal(matchDomain('marathon build needs persist and fidelity'), 'huagai')
+    assert.equal(matchDomain('托举建设者，最后一英里不停'), 'huagai')
+  })
+
+  it('huagai does not steal yaoguang/tianquan routes (keyword orthogonality)', () => {
+    assert.equal(matchDomain('复现这个缺陷并归族处理'), 'yaoguang')
+    assert.equal(matchDomain('审查这个方案的设计'), 'tianquan')
+    assert.equal(matchDomain('回归测试验证修复是否真的生效'), 'yaoguang')
+  })
+
+  it('huagai systemPromptSuffix carries 守昼/追 blocker/星间接口', () => {
+    const huagai = STAR_DOMAINS.huagai
+    assert.match(huagai.systemPromptSuffix, /守昼/)
+    assert.match(huagai.systemPromptSuffix, /追 blocker/)
+    assert.match(huagai.systemPromptSuffix, /星间接口/)
+    assert.match(huagai.systemPromptSuffix, /瑶光/)
+    assert.match(huagai.systemPromptSuffix, /天权/)
+    assert.match(huagai.systemPromptSuffix, /天梁/)
+  })
+
   it('returns null for ambiguous tasks', () => {
     assert.equal(matchDomain('帮我看看'), null)
     assert.equal(matchDomain('探索并修复缓存问题'), null)
