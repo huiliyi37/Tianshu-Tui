@@ -22,24 +22,31 @@ import type { ConnectView } from '../connect-flow.js'
 import {
   frameTop as formatBorder,
   frameBottom as formatBottomBorder,
-  frameTitle as formatTitleBar,
+  frameTitleCenter as formatTitleBar,
+  frameTitleLeft as formatTitleLeft,
   frameFooter as formatFooter,
   frameLine as padLine,
   frameDivider,
   CURSOR,
   CURRENT_MARK,
   keyHints,
+  type BorderStyle,
 } from './overlay-frame.js'
 
 
+/** 紧凑快捷键提示（逗号分隔，类似 fzf 风格）。 */
+function compactHints(pairs: [key: string, action: string][]): string {
+  return pairs.map(([k, a]) => `${k}:${a}`).join(', ')
+}
+
 function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
-  const tabDomain = activeTab === 'domain' ? color(' 🎛  Domain ', theme.primary, { bold: true }) : color('    Domain ', theme.dim)
-  const tabModel = activeTab === 'model' ? color(' 🤖 Model ', theme.primary, { bold: true }) : color('    Model ', theme.dim)
-  const tabTheme = activeTab === 'theme' ? color(' 🎨 Theme ', theme.primary, { bold: true }) : color('    Theme ', theme.dim)
-  
-  const separator = color(' │ ', theme.dim)
+  const tabDomain = activeTab === 'domain' ? color('Domain', theme.primary, { bold: true }) : color(' Domain ', theme.dim)
+  const tabModel = activeTab === 'model' ? color('Model', theme.primary, { bold: true }) : color(' Model ', theme.dim)
+  const tabTheme = activeTab === 'theme' ? color('Theme', theme.primary, { bold: true }) : color(' Theme ', theme.dim)
+
+  const separator = color('│', theme.dim)
   const tabs = `${tabDomain}${separator}${tabModel}${separator}${tabTheme}`
-  const tabsPlain = ' 🎛  Domain  │     Model  │     Theme'
+  const tabsPlain = 'Domain  │  Model  │  Theme'
   const remaining = Math.max(0, width - 2 - stringWidth(tabsPlain))
   const left = Math.floor(remaining / 2)
   const right = remaining - left
@@ -123,7 +130,7 @@ export function renderPager(data: PagerData, width: number, height: number, them
 
   let effectivePage = Math.min(data.page, totalPages - 1)
   let title: string
-  let footer = keyHints([['↑↓/j/k', '滚动'], ['PgUp/PgDn', '翻页'], ['/', '搜索'], ['m', '消息'], ['v', data.verbose ? '简略' : '详细'], ['q/Esc', '关闭']])
+  let footer = compactHints([['↑↓/j/k', '滚动'], ['PgUp/PgDn', '翻页'], ['/', '搜索'], ['q', '关闭']])
 
   if (mode === 'search') {
     const current = data.searchCurrent ?? 0
@@ -132,7 +139,7 @@ export function renderPager(data: PagerData, width: number, height: number, them
     title = data.title
       ? `${data.title} — 搜索 "${query}" (${current}/${total})`
       : `搜索 "${query}" (${current}/${total})`
-    footer = keyHints([['n/N', '上/下匹配'], ['Esc', '清除搜索'], ['q', '关闭']])
+    footer = compactHints([['n/N', '匹配'], ['Esc', '清除'], ['q', '关闭']])
     if (messages.length > 0 && current > 0) {
       const msgIdx = current - 1 < messages.length ? current - 1 : 0
       effectivePage = pageForMessage(messages, msgIdx, pageSize)
@@ -143,17 +150,17 @@ export function renderPager(data: PagerData, width: number, height: number, them
     title = data.title
       ? `${data.title} — 消息 ${idx + 1}/${messages.length}`
       : `消息 ${idx + 1}/${messages.length}`
-    footer = keyHints([['↑↓/j/k', '上/下条'], ['Esc', '返回'], ['q', '关闭']])
+    footer = compactHints([['↑↓/j/k', '切换'], ['Esc', '返回'], ['q', '关闭']])
     effectivePage = pageForMessage(messages, idx, pageSize)
     effectivePage = Math.min(effectivePage, totalPages - 1)
   } else {
     const verboseTag = data.verbose ? ' [verbose]' : ''
-    title = data.title ? `${data.title}${verboseTag} (${effectivePage + 1}/${totalPages})` : `📄 查看${verboseTag} (${effectivePage + 1}/${totalPages})`
+    title = data.title ? `${data.title}${verboseTag} (${effectivePage + 1}/${totalPages})` : `查看${verboseTag} (${effectivePage + 1}/${totalPages})`
   }
 
   // Top border + title
-  lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar(title, width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
+  lines.push(formatTitleLeft(title, width, theme))
 
   // Content
   const start = effectivePage * pageSize
@@ -194,8 +201,8 @@ export function renderPager(data: PagerData, width: number, height: number, them
   }
 
   // Footer + bottom border
-  lines.push(formatFooter(footer, width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(footer, width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
 
   return lines
 }
@@ -238,8 +245,8 @@ export interface StarmapData {
 export function renderStarmap(data: StarmapData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
 
-  lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar(data.title ?? '❂ 星域总览', width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
+  lines.push(formatTitleLeft(data.title ?? '星域总览', width, theme))
 
   // Column widths
   const glyphWidth = 5
@@ -290,8 +297,8 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
     lines.push(padLine(color(recognition.slice(0, width - 2), theme.primary), width, theme))
   }
 
-  lines.push(formatFooter(keyHints([['↑↓/j/k', '选择'], ['Enter', '激活'], ['q/Esc', '关闭']]), width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(compactHints([['↑↓/j/k', '选择'], ['Enter', '激活'], ['q/Esc', '关闭']]), width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
 
   return lines
 }
@@ -319,12 +326,12 @@ export interface PaletteData {
 export function renderCommandPalette(data: PaletteData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
 
-  lines.push(formatBorder(width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
 
   const title = data.searchText
     ? `⌘ 命令面板 — "${data.searchText}"`
-    : '⌘ 命令面板'
-  lines.push(formatTitleBar(title, width, theme))
+    : '命令面板'
+  lines.push(formatTitleLeft(title, width, theme))
 
   const maxItems = height - 5 // border + title + footer + border = 4; +1 safety
   const visible = data.commands.slice(0, maxItems)
@@ -355,8 +362,8 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '执行'], ['Esc', '取消']]), width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(compactHints([['↑↓', '选择'], ['Enter', '执行'], ['Esc', '取消']]), width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
 
   return lines
 }
@@ -389,8 +396,8 @@ export interface ChronicleData {
 export function renderChronicle(data: ChronicleData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
 
-  lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar(data.title ?? '📜 会话编年史', width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
+  lines.push(formatTitleLeft(data.title ?? '会话编年史', width, theme))
 
   const idxWidth = 6
   const timeWidth = Math.min(14, Math.floor(width * 0.18))
@@ -418,8 +425,8 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '恢复会话'], ['Esc', '关闭']]), width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(compactHints([['↑↓', '选择'], ['Enter', '恢复会话'], ['Esc', '关闭']]), width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
 
   return lines
 }
@@ -600,7 +607,7 @@ function wrapToWidth(text: string, width: number, maxLines: number): string[] {
  */
 export function renderDomainPicker(data: DomainPickerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
-  lines.push(formatBorder(width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
   lines.push(renderTabBar('domain', width, theme))
 
   const innerWidth = width - 4 // padLine 占 2，左右各留 1 空隙
@@ -664,8 +671,8 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter(keyHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['Esc', '取消']]), width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(compactHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['Esc', '取消']]), width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
 }
 
@@ -687,8 +694,8 @@ export function renderTasks(
   selectedIndex = -1,
 ): string[] {
   const lines: string[] = []
-  lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar(`${color('◆ 子代理任务', theme.secondary, { bold: true })}   ${tasksFilterTabs(data.filter, theme)}`, width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
+  lines.push(formatTitleLeft(`${color('子代理任务', theme.secondary, { bold: true })}   ${tasksFilterTabs(data.filter, theme)}`, width, theme))
   lines.push(frameDivider(width, theme))
 
   const maxEntries = Math.max(1, height - 6) // top + title + divider + footer + bottom = 5, -1 安全余量
@@ -784,8 +791,8 @@ export function renderTasks(
   const summary = summaryParts.join(' · ')
   // 分隔符收紧为 " · "：frameFooter 溢出时从前截断，summary 在最前面，
   // f/x 键位加入后 80 列下过长会把计数吃掉。
-  lines.push(formatFooter(`${summary} · ${keyHints([['↑↓', '选择'], ['Enter', '详情'], ['f', '切入'], ['x', '停止'], ['Tab', '筛选'], ['q/Esc', '关闭']])}`, width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(`${summary} · ${compactHints([['↑↓', '选择'], ['Enter', '详情'], ['f', '切入'], ['x', '停止'], ['Tab', '筛选'], ['q/Esc', '关闭']])}`, width, theme))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
 
   return lines
 }
@@ -794,7 +801,7 @@ export function renderTasks(
 
 export function renderModelPicker(data: ModelPickerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
-  lines.push(formatBorder(width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
   lines.push(renderTabBar('model', width, theme))
 
   const innerWidth = width - 4
@@ -850,8 +857,8 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter(keyHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['Esc', '取消']]), width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(compactHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['Esc', '取消']]), width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
 }
 
@@ -859,7 +866,7 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
 
 export function renderThemePicker(data: ThemePickerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
-  lines.push(formatBorder(width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
   lines.push(renderTabBar('theme', width, theme))
 
   const innerWidth = width - 4
@@ -910,8 +917,8 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter(keyHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['S', '设为默认'], ['Esc', '取消']]), width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(compactHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['S', '设为默认'], ['Esc', '取消']]), width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
 }
 
@@ -947,8 +954,8 @@ export interface ChoicePanelData {
 
 export function renderChoicePanel(data: ChoicePanelData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
-  lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar(data.title, width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
+  lines.push(formatTitleLeft(data.title, width, theme))
   lines.push(frameDivider(width, theme))
 
   const innerWidth = width - 6 // padLine border(2) + left indent(2) + right gap(2)
@@ -958,8 +965,8 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
 
   if (data.choices.length === 0) {
     lines.push(padLine(color('  （无可用选项）', theme.muted), width, theme))
-    lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
-    lines.push(formatBottomBorder(width, theme))
+    lines.push(formatFooter(compactHints([['Esc', '关闭']]), width, theme, 'subtle'))
+    lines.push(formatBottomBorder(width, theme, 'subtle'))
     return lines
   }
 
@@ -1005,11 +1012,11 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
       ? color(truncateToDisplayWidth(inputSubMode.value, Math.max(1, width - 8)), theme.secondary)
       : color(inputSubMode.placeholder, theme.dim)
     lines.push(padLine(` ${color('>', theme.primary, { bold: true })} ${shown}${cursor}`, width, theme))
-    lines.push(formatFooter(keyHints([['↵', '提交'], ['Esc', '返回选项']]), width, theme))
+    lines.push(formatFooter(compactHints([['↵', '提交'], ['Esc', '返回选项']]), width, theme, 'subtle'))
   } else {
-    lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']]), width, theme))
+    lines.push(formatFooter(compactHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']]), width, theme, 'subtle'))
   }
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
 }
 
@@ -1047,8 +1054,8 @@ function planStatusIcon(status: PlanPickerEntry['status']): string {
  */
 export function renderPlanPicker(data: PlanPickerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
-  lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar('选择要批准执行的计划', width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
+  lines.push(formatTitleLeft('选择要批准执行的计划', width, theme))
   lines.push(frameDivider(width, theme))
 
   const innerWidth = width - 6
@@ -1056,8 +1063,8 @@ export function renderPlanPicker(data: PlanPickerData, width: number, height: nu
 
   if (data.entries.length === 0) {
     lines.push(padLine(color('  （无待批计划。/plan-mode 进入计划模式创建）', theme.muted), width, theme))
-    lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
-    lines.push(formatBottomBorder(width, theme))
+    lines.push(formatFooter(compactHints([['Esc', '关闭']]), width, theme, 'subtle'))
+    lines.push(formatBottomBorder(width, theme, 'subtle'))
     return lines
   }
 
@@ -1089,8 +1096,8 @@ export function renderPlanPicker(data: PlanPickerData, width: number, height: nu
     rowsUsed++
   }
 
-  lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '批准执行'], ['Esc', '取消']]), width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(compactHints([['↑↓', '选择'], ['Enter', '批准执行'], ['Esc', '取消']]), width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
 }
 
@@ -1116,9 +1123,9 @@ function maskSecret(value: string): string {
 export function renderConnect(data: ConnectOverlayData, width: number, height: number, theme: RivetTheme): string[] {
   const { view } = data
   const lines: string[] = []
-  lines.push(formatBorder(width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
   const titleBar = view.stepLabel ? `${view.title}   ${view.stepLabel}` : view.title
-  lines.push(formatTitleBar(titleBar, width, theme))
+  lines.push(formatTitleLeft(titleBar, width, theme))
   lines.push(frameDivider(width, theme))
 
   const innerWidth = width - 6
@@ -1170,10 +1177,10 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
   while (rowsUsed < contentRows) push('')
 
   const footer = view.kind === 'choice'
-    ? keyHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']])
-    : keyHints([['Enter', '提交'], ['Esc', '取消']])
-  lines.push(formatFooter(footer, width, theme))
-  lines.push(formatBottomBorder(width, theme))
+    ? compactHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']])
+    : compactHints([['Enter', '提交'], ['Esc', '取消']])
+  lines.push(formatFooter(footer, width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
 }
 
@@ -1186,7 +1193,7 @@ import type { FleetWorkerView } from '../fleet-registry.js'
 
 export function renderFleetDetail(worker: FleetWorkerView, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
-  lines.push(formatBorder(width, theme))
+  lines.push(formatBorder(width, theme, 'subtle'))
 
   // Title: status glyph + worker label + status word（同色，一眼判断终态）
   const statusGlyph = worker.terminal
@@ -1195,7 +1202,7 @@ export function renderFleetDetail(worker: FleetWorkerView, width: number, height
   const statusColor = worker.terminal
     ? (worker.status === 'passed' ? theme.success : worker.status === 'failed' ? theme.error : theme.warning)
     : theme.primary
-  lines.push(formatTitleBar(
+  lines.push(formatTitleLeft(
     `${color(`${statusGlyph} ${worker.shortLabel}`, statusColor, { bold: true })} ${color(`· ${worker.status}`, statusColor)}`,
     width, theme,
   ))
@@ -1237,7 +1244,7 @@ export function renderFleetDetail(worker: FleetWorkerView, width: number, height
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
-  lines.push(formatBottomBorder(width, theme))
+  lines.push(formatFooter(compactHints([['Esc', '关闭']]), width, theme, 'subtle'))
+  lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
 }

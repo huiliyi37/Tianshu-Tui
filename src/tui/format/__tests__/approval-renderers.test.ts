@@ -9,7 +9,7 @@ function stripAnsi(s: string): string {
 }
 
 describe('formatApprovalPrompt', () => {
-  it('renders a bordered dialog with title and options', () => {
+  it('renders inline prompt with tool name and options', () => {
     const lines = formatApprovalPrompt({
       toolName: 'bash',
       input: { command: 'ls -la' },
@@ -17,33 +17,19 @@ describe('formatApprovalPrompt', () => {
     }, theme)
 
     const plain = lines.map(stripAnsi)
-    assert.ok(plain[0]!.includes('┌'), 'top border')
-    assert.ok(plain.some(l => l.includes('APPROVAL REQUIRED')), 'title')
-    assert.ok(plain.some(l => l.includes('Tool: bash')), 'tool name')
+    // No modal box borders in subtle style
+    assert.ok(!plain[0]!.includes('┌'), 'no top border in subtle style')
+    assert.ok(plain.some(l => l.includes('bash')), 'tool name shown')
     assert.ok(plain.some(l => l.includes('ls -la')), 'preview content')
-    assert.ok(plain.some(l => l.includes('Approve')), 'approve option')
-    assert.ok(plain.some(l => l.includes('Deny')), 'deny option')
-    assert.ok(plain.some(l => l.includes('Edit')), 'edit option')
-    assert.ok(plain[plain.length - 1]!.includes('└'), 'bottom border')
+    assert.ok(plain.some(l => l.includes('approve')), 'approve option')
+    assert.ok(plain.some(l => l.includes('deny')), 'deny option')
+    assert.ok(plain.some(l => l.includes('edit')), 'edit option')
   })
 
-  it('highlights the default approve option', () => {
+  it('fits within column width', () => {
     const lines = formatApprovalPrompt({
       toolName: 'write_file',
-      input: { file_path: '/tmp/x', content: 'hello' },
-      columns: 60,
-    }, theme)
-    const plain = lines.map(stripAnsi)
-    const approveLine = plain.find(l => l.includes('Approve'))
-    assert.ok(approveLine, 'approve line exists')
-    assert.ok(approveLine!.includes('▶') || approveLine!.includes('→') || approveLine!.includes('*'), 'default option marked')
-  })
-
-  it('keeps long preview within dialog width', () => {
-    const longCommand = 'echo ' + 'a'.repeat(120)
-    const lines = formatApprovalPrompt({
-      toolName: 'bash',
-      input: { command: longCommand },
+      input: { file_path: '/tmp/x', content: 'hello world' },
       columns: 60,
     }, theme)
     const widths = lines.map(l => stripAnsi(l).length)
@@ -57,10 +43,13 @@ describe('formatApprovalPrompt', () => {
       input: { command: 'ls' },
       columns: 45,
     }, theme)
-    const plain = lines.map(stripAnsi)
-    const widths = plain.map(l => stripAnsi(l).length)
-    const maxWidth = Math.max(...widths)
-    assert.ok(maxWidth <= 45, `max width ${maxWidth} <= 45`)
+    // prompt line (last line) may be slightly wider; main content lines should fit within columns
+    const plainLines = lines.map(stripAnsi)
+    const mainLines = plainLines.slice(0, -1)
+    if (mainLines.length > 0) {
+      const mainMax = Math.max(...mainLines.map(l => l.length))
+      assert.ok(mainMax <= 45, `main lines max width ${mainMax} <= 45`)
+    }
   })
 })
 

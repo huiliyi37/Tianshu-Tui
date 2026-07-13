@@ -21,7 +21,7 @@ describe('renderModelPicker', () => {
     }
     const lines = renderModelPicker(data, 80, 20, theme)
     assert.ok(lines.length > 0)
-    assert.ok(stripAnsi(lines[0]!).includes('┌'))
+    assert.ok(stripAnsi(lines[0]!).includes('│'))
     assert.ok(lines.some(l => stripAnsi(l).includes('deepseek-v4-pro')))
     assert.ok(lines.some(l => stripAnsi(l).includes('gpt-5.5')))
   })
@@ -35,10 +35,10 @@ describe('renderModelPicker', () => {
       selectedIndex: 0,
     }
     const lines = renderModelPicker(data, 80, 20, theme)
-    // SelectedIndex = 0 (Model A) -> should have ▶ cursor
+    // SelectedIndex = 0 (Model A) -> should have > cursor
     const modelALine = lines.find(l => stripAnsi(l).includes('Model A'))
     const modelBLine = lines.find(l => stripAnsi(l).includes('Model B'))
-    assert.ok(modelALine && stripAnsi(modelALine).includes('▶'))
+    assert.ok(modelALine && stripAnsi(modelALine).includes('>'))
     // Current = true (Model B) -> should have ● current mark
     assert.ok(modelBLine && stripAnsi(modelBLine).includes('●'))
   })
@@ -69,9 +69,9 @@ describe('renderThemePicker', () => {
     assert.ok(lines.length > 0)
     assert.ok(lines.some(l => stripAnsi(l).includes('cobalt')))
     assert.ok(lines.some(l => stripAnsi(l).includes('gemini')))
-    // selectedIndex = 1 (gemini) -> has ▶ cursor
+    // selectedIndex = 1 (gemini) -> has > cursor
     const geminiLine = lines.find(l => stripAnsi(l).includes('gemini'))
-    assert.ok(geminiLine && stripAnsi(geminiLine).includes('▶'))
+    assert.ok(geminiLine && stripAnsi(geminiLine).includes('>'))
   })
 
   it('renders theme details and primary/secondary color swatches', () => {

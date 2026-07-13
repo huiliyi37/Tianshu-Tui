@@ -116,7 +116,7 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   // ── Header: ● Verb(arg) (elapsed) ───────────────────────────
   // ask_user_question needs to stand out: use a '?' bullet and warning color.
   const bulletColor = isError ? theme.error : isQuestion ? theme.warning : streaming ? theme.dim : theme.success
-  const bulletGlyph = isQuestion ? '?' : '●'
+  const bulletGlyph = isQuestion ? '?' : '›'
   const title = toolCardTitle(toolName, toolInput, rawPath)
   const tColor = isQuestion ? theme.warning : theme.toolColor(toolName)
   // 文件路径 → OSC 8 可点击链接（支持的终端 Cmd/Ctrl+Click 直接打开；其余纯文本降级）

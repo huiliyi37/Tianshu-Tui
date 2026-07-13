@@ -81,7 +81,7 @@ export function renderRewind(data: RewindData, width: number, height: number, th
   const contentRows = Math.max(3, height - 4) // top + title + footer + bottom
 
   const title = phase === 'action' ? '⏪ 回溯 · 选择恢复粒度' : '⏪ 回溯 · 选择回溯到的消息'
-  const lines: string[] = [frameTop(width, theme), frameTitle(title, width, theme)]
+  const lines: string[] = [frameTop(width, theme, 'subtle'), frameTitle(title, width, theme)]
 
   const body: string[] = []
   let footer: string
@@ -102,8 +102,8 @@ export function renderRewind(data: RewindData, width: number, height: number, th
   }
 
   for (let i = 0; i < contentRows; i++) lines.push(frameLine(body[i] ?? '', width, theme))
-  lines.push(frameFooter(footer, width, theme))
-  lines.push(frameBottom(width, theme))
+  lines.push(frameFooter(footer, width, theme, 'subtle'))
+  lines.push(frameBottom(width, theme, 'subtle'))
   return lines
 }
 

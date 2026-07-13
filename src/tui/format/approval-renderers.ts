@@ -213,17 +213,6 @@ export function renderApprovalPreview(
   return renderer.render(toolName, input, columns, theme)
 }
 
-const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g
-
-/** 左对齐填充或截断到目标宽度（ANSI 安全）。 */
-function fitLine(text: string, width: number): string {
-  const plain = text.replace(ANSI_RE, '')
-  const pad = width - displayWidth(plain, WIDE)
-  if (pad < 0) return truncateToDisplayWidth(text, width, WIDE)
-  if (pad === 0) return text
-  return text + ' '.repeat(pad)
-}
-
 export interface FormatApprovalPromptInput {
   toolName: string
   input: Record<string, unknown>
@@ -231,49 +220,31 @@ export interface FormatApprovalPromptInput {
 }
 
 /**
- * 渲染 approval 模态对话框。
+ * 渲染 approval 行内提示。
  *
- * 把原来的 `[y] approve [n] deny [e] edit` 一行按键提示升级为带边框的选项列表，
- * 默认推荐项（Approve）高亮并带箭头标记，让用户一眼看清可选操作。
+ * 精简风格：去掉 AI 感的模态框边框，采用类似 git 编辑器的行内展示。
+ * 工具名 + 预览内容用 dim 色，操作提示紧凑排列。
  */
 export function formatApprovalPrompt(input: FormatApprovalPromptInput, theme: RivetTheme): string[] {
-  const MIN_BOX_WIDTH = 40
-  const DEFAULT_BOX_WIDTH = 80
-  const boxWidth = Math.max(MIN_BOX_WIDTH, Math.min(DEFAULT_BOX_WIDTH, input.columns - 2))
-  const innerWidth = boxWidth - 4
-
-  const border = (text: string) => color(text, theme.warning)
-  const title = color('APPROVAL REQUIRED', theme.warning, { bold: true })
-
   const lines: string[] = []
-  lines.push(border('┌' + '─'.repeat(boxWidth - 2) + '┐'))
-  lines.push(border('│') + ' ' + fitLine(title, innerWidth) + ' ' + border('│'))
 
-  lines.push(border('├' + '─'.repeat(boxWidth - 2) + '┤'))
-  lines.push(border('│') + ' ' + fitLine(color(`Tool: ${input.toolName}`, theme.muted), innerWidth) + ' ' + border('│'))
+  // 工具名行
+  lines.push(color(`  ${input.toolName}`, theme.secondary, { bold: true }))
 
-  const previewLines = renderApprovalPreview(input.toolName, input.input, innerWidth, theme)
+  // 预览内容（缩进）
+  const previewLines = renderApprovalPreview(input.toolName, input.input, input.columns - 4, theme)
   for (const pv of previewLines) {
-    lines.push(border('│') + ' ' + fitLine(pv, innerWidth) + ' ' + border('│'))
+    lines.push(`    ${pv}`)
   }
 
-  lines.push(border('├' + '─'.repeat(boxWidth - 2) + '┤'))
-
-  const options = [
-    { marker: '▶', keys: 'Enter / y', label: 'Approve', hint: 'default', color: theme.success },
-    { marker: ' ', keys: 'Esc / n', label: 'Deny', hint: '', color: theme.error },
-    { marker: ' ', keys: 'e', label: 'Edit', hint: 'edit JSON', color: theme.secondary },
+  // 紧凑操作提示行（类似 git commit 编辑器的底部提示）
+  const hints = [
+    `${color('Enter/y', theme.success)}  ${color('approve', theme.muted)}`,
+    `${color('Esc/n', theme.error)}   ${color('deny', theme.muted)}`,
+    `${color('e', theme.secondary)}     ${color('edit JSON', theme.muted)}`,
   ]
+  lines.push(color('  ' + hints.join('    '), theme.dim))
 
-  for (const opt of options) {
-    const keyColored = color(opt.keys, opt.color, { bold: true })
-    const labelColored = color(opt.label, opt.color)
-    const hintColored = opt.hint ? color(` (${opt.hint})`, theme.dim) : ''
-    const line = `${opt.marker} ${keyColored}  ${labelColored}${hintColored}`
-    lines.push(border('│') + ' ' + fitLine(line, innerWidth) + ' ' + border('│'))
-  }
-
-  lines.push(border('└' + '─'.repeat(boxWidth - 2) + '┘'))
   return lines
 }
 
