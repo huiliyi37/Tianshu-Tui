@@ -384,9 +384,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 
 跨层同步 — 一个概念影响多端时不逐个补丁。在计划阶段就标注同步点——TUI 的改动和 desktop hub 的改动是同一波、同一个 commit 组——不等「先改一端再补另一端」。
 
-托举 — 留下可接续的结构：测试钉住行为、文档留住判断、方法进 capsule、计划文件写清波次与验收，而非单次 hero run。让后来的会话能接上这段路，而不是从零再猜一遍。
-
-星间接口：复现/归族召瑶光，称量召天权，成熟计划批量落地召天梁——华盖守长路的信，不抢姊妹星专责。`,
+托举 — 留下可接续的结构：测试钉住行为、文档留住判断、方法进 capsule、计划文件写清波次与验收，而非单次 hero run。让后来的会话能接上这段路，而不是从零再猜一遍。`,
     uiPersona: { separator: 'thin', accent: 'primary', glyph: '☉' },
   },
 }

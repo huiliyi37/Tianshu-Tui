@@ -133,17 +133,14 @@ describe('StarDomain', () => {
     assert.equal(matchDomain('回归测试验证修复是否真的生效'), 'yaoguang')
   })
 
-  it('huagai systemPromptSuffix carries 守昼/追 blocker/基线先行/星间接口', () => {
+  it('huagai systemPromptSuffix carries 守昼/追 blocker/基线先行', () => {
     const huagai = STAR_DOMAINS.huagai
     assert.match(huagai.systemPromptSuffix, /守昼/)
     assert.match(huagai.systemPromptSuffix, /追 blocker/)
     assert.match(huagai.systemPromptSuffix, /基线先行/)
     assert.match(huagai.systemPromptSuffix, /不做清单/)
     assert.match(huagai.systemPromptSuffix, /跨层同步/)
-    assert.match(huagai.systemPromptSuffix, /星间接口/)
-    assert.match(huagai.systemPromptSuffix, /瑶光/)
-    assert.match(huagai.systemPromptSuffix, /天权/)
-    assert.match(huagai.systemPromptSuffix, /天梁/)
+    assert.match(huagai.systemPromptSuffix, /托举/)
   })
 
   it('returns null for ambiguous tasks', () => {
@@ -228,12 +225,12 @@ describe('四域分工模型（2026-07-04 校订）', () => {
   })
 
   it('star-interface declarations exist across domains (协同公理落地)', () => {
-    // 抽查协调/审查域仍保留星间接口；天梁已精简为纯执行端，不再保留
+    // 抽查协调/审查域仍保留星间接口；天梁/华盖已精简，不再保留
     assert.match(STAR_DOMAINS.tianshu.systemPromptSuffix, /星间接口/)
     assert.match(STAR_DOMAINS.tianquan.systemPromptSuffix, /星间接口/)
     assert.match(STAR_DOMAINS.yaoguang.systemPromptSuffix, /星间接口/)
     for (const domain of Object.values(STAR_DOMAINS)) {
-      if (domain.id === 'tianliang') continue
+      if (domain.id === 'tianliang' || domain.id === 'huagai') continue
       assert.match(domain.systemPromptSuffix, /星间接口/, `${domain.name} missing 星间接口 declaration`)
     }
   })
