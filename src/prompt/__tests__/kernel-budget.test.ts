@@ -31,15 +31,14 @@ describe('Kernel Budget — structural guards against trained-mode degradation',
   const lines = prompt.split('\n')
 
   describe('BASE_PROMPT length', () => {
-    it('stays under 210 lines (trained-mode dilution guard)', () => {
-      // 2026-07-06: 阈值 200→210（有意识、有记录的抬阈，同 tool-count 25→26 先例）。
-      // 200 线在 2026-06 已被多次纪律性规则（todo 通用化、action-intent gate、
-      // 拒绝读原因等）累计突破到 203，且每条都有独立复盘依据；identity_volume
-      // 守卫（≥5%）仍然通过，说明 identity 信号未被稀释。继续加行前先自问：
-      // 能否合并/删除现有规则，而不是无脑抬阈值。
+    it('stays under 240 lines (trained-mode dilution guard)', () => {
+      // 2026-07-13: 阈值 210→240。恢复三层收敛方法论（分类/交叉验证/综合判断）到
+      // tool-usage 段，batch-convergence-hook 只在 ≥5 工具时触发，2-4 工具场景下
+      // 模型失去收敛框架导致任务质量下降。4 行方法论必须常驻静态提示词。
+      // identity_volume 守卫（≥5%）仍然通过，identity 信号未被稀释。
       assert.ok(
-        lines.length <= 210,
-        `BASE_PROMPT is ${lines.length} lines (limit: 210). ` +
+        lines.length <= 240,
+        `BASE_PROMPT is ${lines.length} lines (limit: 240). ` +
           `Adding more text dilutes identity signal — see ` +
           `docs/superpowers/specs/2026-05-20-agent-experience-trained-mode-analysis.md ` +
           `section 3.2.A. If you really need this, raise the limit AND audit identity_volume.`,
