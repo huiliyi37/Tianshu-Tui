@@ -140,10 +140,12 @@ describe('EPERM silent-skip integration', { skip: shouldSkip && 'skipped: Window
   })
 
   // ── grep native fallback ──────────────────────────────────────
-  // grep prefers ripgrep; empty PATH makes the rg spawn fail (async 'error'
-  // event → tryRipgrep resolves null) so execute takes the nativeSearch path
-  // where the EPERM silent-skip fix lives.
-  describe('grep (native fallback, rg unavailable)', () => {
+  // Empty PATH alone is no longer enough to force nativeSearch: tryRipgrep
+  // uses getResolvedEnv, which restores a login-shell PATH that usually has
+  // rg. Restricted dirs still make rg exit non-zero → native path (where
+  // EPERM silent-skip lives). Dedicated "rg unavailable → prefix" coverage
+  // lives in grep.test.ts (env.resolve:false + empty PATH).
+  describe('grep (native fallback via rg failure)', () => {
     let savedPath: string | undefined
 
     beforeEach(() => {
@@ -168,7 +170,6 @@ describe('EPERM silent-skip integration', { skip: shouldSkip && 'skipped: Window
 
       const result = await grep('needle', '.')
       assert.ok(!result.isError, `grep must not error, got: ${result.content}`)
-      assert.match(result.content!, /\[grep\] ripgrep \(rg\) not found or failed/, 'fallback prefix must appear when rg unavailable')
       assert.ok(result.content.includes('hit.ts'), 'should find the match in src/hit.ts')
       assert.ok(!/EACCES|EPERM/.test(result.content), 'no permission noise in output')
     })

@@ -411,7 +411,10 @@ fn random_token() -> String {
 /// truncated path like `D:\`. In that case we use `current_exe().parent()` —
 /// the folder where the raw .exe lives — because the bundled `node-runtime/`
 /// and `rivet-runtime/` directories are siblings of the exe.
-fn resource_dir_fallback(app: &tauri::App) -> PathBuf {
+///
+/// Also used by `pty.rs` so the integrated terminal PATH matches the sidecar
+/// (node-runtime prepend + PortableGit append) under the same resource layout.
+pub(crate) fn resource_dir_fallback<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> PathBuf {
     match app.path().resource_dir() {
         Ok(p) if !p.as_os_str().is_empty() => {
             // Raw exe on Windows often returns just the drive root (e.g. "D:" or "D:\").
@@ -426,7 +429,7 @@ fn resource_dir_fallback(app: &tauri::App) -> PathBuf {
                     return strip_verbatim_prefix(p);
                 }
             } else {
-                return p;
+                return strip_verbatim_prefix(p);
             }
         }
         _ => { /* resource_dir failed — fall through */ }

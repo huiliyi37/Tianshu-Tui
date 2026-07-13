@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { GREP_TOOL } from '../grep.js'
+import { resetResolvedEnvCache } from '../resolved-env.js'
 
 describe('GREP_TOOL', () => {
   let testDir: string
@@ -151,6 +152,40 @@ describe('GREP_TOOL', () => {
   it('requiresApproval and isConcurrencySafe', () => {
     assert.equal(GREP_TOOL.requiresApproval(makeParams({ pattern: 'test' })), false)
     assert.equal(GREP_TOOL.isConcurrencySafe(), true)
+  })
+
+  it('prefixes slow-fallback notice when rg is unavailable (cross-platform)', async () => {
+    // Force native path without relying on eperm-skip (Windows-skipped) or on
+    // empty PATH alone (getResolvedEnv would restore a login-shell PATH that
+    // still has rg). Disable env.resolve via project config, then empty PATH.
+    const fbDir = mkdtempSync(join(tmpdir(), 'grep-fallback-'))
+    const savedPath = process.env.PATH
+    try {
+      mkdirSync(join(fbDir, 'src'), { recursive: true })
+      writeFileSync(join(fbDir, 'src', 'hit.ts'), 'const FALLBACK_NEEDLE = 1\n')
+      writeFileSync(join(fbDir, '.rivet-config.json'), JSON.stringify({
+        env: { resolve: false },
+      }))
+      resetResolvedEnvCache()
+      process.env.PATH = join(fbDir, 'no-binaries-here')
+
+      const result = await GREP_TOOL.execute({
+        input: { pattern: 'FALLBACK_NEEDLE', path: 'src', literal: true },
+        toolUseId: 'test',
+        cwd: fbDir,
+      })
+      assert.ok(!result.isError, `grep must not error, got: ${result.content}`)
+      assert.match(
+        result.content!,
+        /\[grep\] ripgrep \(rg\) not found or failed; using slow fallback/,
+      )
+      assert.ok(result.content.includes('hit.ts'))
+      assert.ok(result.content.includes('FALLBACK_NEEDLE'))
+    } finally {
+      process.env.PATH = savedPath
+      resetResolvedEnvCache()
+      rmSync(fbDir, { recursive: true, force: true })
+    }
   })
 
   it('context_lines shows surrounding lines (native fallback)', async () => {

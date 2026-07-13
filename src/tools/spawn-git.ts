@@ -20,6 +20,12 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getResolvedEnv } from './resolved-env.js'
 
+/** Test/injection hooks for `resolveGitCommand` (production callers omit). */
+export interface ResolveGitCommandDeps {
+  platform?: NodeJS.Platform
+  existsSync?: (path: string) => boolean
+}
+
 /**
  * Resolve the git executable path synchronously.
  *
@@ -28,18 +34,23 @@ import { getResolvedEnv } from './resolved-env.js'
  *   2. Windows: common install locations (Program Files / LOCALAPPDATA)
  *   3. Fallback `'git'` — resolved via `gitEnv`'s PATH
  */
-export function resolveGitCommand(env?: NodeJS.ProcessEnv): string {
+export function resolveGitCommand(
+  env?: NodeJS.ProcessEnv,
+  deps?: ResolveGitCommandDeps,
+): string {
   // Merge caller overrides on top of process.env so a partial opts.env
   // (e.g. from spawnGitSync without explicit env) never hides process-level
   // RIVET_GIT_PATH set by the desktop launcher.
   const effectiveEnv = { ...process.env, ...env }
+  const platform = deps?.platform ?? process.platform
+  const exists = deps?.existsSync ?? existsSync
 
   // 1. Explicit override
   const override = effectiveEnv['RIVET_GIT_PATH']
-  if (override && existsSync(override)) return override
+  if (override && exists(override)) return override
 
   // 2. Windows: probe common install locations
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     const candidates = [
       'C:\\Program Files\\Git\\cmd\\git.exe',
       'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
@@ -49,7 +60,7 @@ export function resolveGitCommand(env?: NodeJS.ProcessEnv): string {
       candidates.push(join(localApp, 'Programs', 'Git', 'cmd', 'git.exe'))
     }
     for (const c of candidates) {
-      if (existsSync(c)) return c
+      if (exists(c)) return c
     }
   }
 

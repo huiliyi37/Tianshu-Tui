@@ -234,59 +234,51 @@ pub fn pty_spawn(
 
     // Align PTY PATH with the sidecar: prepend bundled node-runtime so
     // npm/npx/node are found in the integrated terminal even when the OS
-    // shell inherits a minimal PATH. Append PortableGit cmd if available.
+    // shell inherits a minimal PATH. Append PortableGit cmd if available —
+    // independently of node-runtime (sidecar does the same).
     //
-    // Use the same resource_dir_fallback logic as lib.rs: on Windows, raw
-    // exe may return a truncated drive root instead of the real resource dir.
-    let res_dir = app.path().resource_dir().ok().and_then(|p| {
-        #[cfg(target_os = "windows")]
-        {
-            let s = p.to_string_lossy();
-            if s.len() <= 3 {
-                // Drive letter only (e.g. "D:") — too shallow, fall back to exe dir.
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|q| q.to_path_buf()))
-            } else {
-                Some(p)
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Some(p)
-        }
+    // Share resource_dir_fallback with lib.rs so Windows raw-exe drive-root
+    // quirks and verbatim (`\\?\`) prefixes are handled identically; Err from
+    // resource_dir() still falls back to the exe directory.
+    let res_dir = crate::resource_dir_fallback(&app);
+    let node_os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win",
+        "linux" => "linux",
+        _ => "",
+    };
+    let node_arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        _ => "",
+    };
+    let node_dir = if !node_os.is_empty() && !node_arch.is_empty() {
+        let dir = res_dir
+            .join("node-runtime")
+            .join(format!("{}-{}", node_os, node_arch));
+        dir.exists().then_some(dir)
+    } else {
+        None
+    };
+    let git_cmd = std::env::var_os("RIVET_BUNDLED_GIT_DIR").and_then(|bundled| {
+        let cmd_dir = std::path::PathBuf::from(bundled).join("cmd");
+        cmd_dir.exists().then_some(cmd_dir)
     });
-    if let Some(res_dir) = res_dir {
-        let node_os = match std::env::consts::OS {
-            "macos" => "darwin",
-            "windows" => "win",
-            "linux" => "linux",
-            _ => "",
-        };
-        let node_arch = match std::env::consts::ARCH {
-            "aarch64" => "arm64",
-            "x86_64" => "x64",
-            _ => "",
-        };
-        if !node_os.is_empty() && !node_arch.is_empty() {
-            let node_dir = res_dir.join("node-runtime").join(format!("{}-{}", node_os, node_arch));
-            if node_dir.exists() {
-                let sep = if cfg!(windows) { ";" } else { ":" };
-                let mut path = node_dir.to_string_lossy().to_string();
-                if let Ok(existing) = std::env::var("PATH") {
-                    path.push_str(sep);
-                    path.push_str(&existing);
-                }
-                if let Ok(bundled_git) = std::env::var("RIVET_BUNDLED_GIT_DIR") {
-                    let git_cmd = std::path::Path::new(&bundled_git).join("cmd");
-                    if git_cmd.exists() {
-                        path.push_str(sep);
-                        path.push_str(&git_cmd.to_string_lossy());
-                    }
-                }
-                cmd.env("PATH", &path);
+    if node_dir.is_some() || git_cmd.is_some() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(dir) = &node_dir {
+            parts.push(dir.to_string_lossy().into_owned());
+        }
+        if let Ok(existing) = std::env::var("PATH") {
+            if !existing.is_empty() {
+                parts.push(existing);
             }
         }
+        if let Some(dir) = &git_cmd {
+            parts.push(dir.to_string_lossy().into_owned());
+        }
+        cmd.env("PATH", parts.join(sep));
     }
 
     let child = pair

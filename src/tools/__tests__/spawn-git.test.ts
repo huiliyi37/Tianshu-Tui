@@ -56,21 +56,42 @@ describe('resolveGitCommand', () => {
     }
   })
 
-  it('Win: x86 candidate present in probe chain', () => {
-    if (!isWin) return
-    const dir = tmpDir()
-    try {
-      // Create git.exe under Program Files (x86) to verify x86 is probed
-      const gitDir = join(dir, 'Program Files (x86)', 'Git', 'cmd')
-      // Can't set ProgramFiles(x86) env — but we can verify the hardcoded string exists
-      // by checking a git at the x86 path is NOT found (we don't create it at the real path).
-      // This test validates the candidate array structure: the fallback to 'git'
-      // proves no phantom hit on an absent candidate.
-      const got = resolveGitCommand({})
-      assert.ok(typeof got === 'string' && got.length > 0)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+  it('Win: probes Program Files (x86) when that is the only hit', () => {
+    const x86 = 'C:\\Program Files (x86)\\Git\\cmd\\git.exe'
+    const got = resolveGitCommand(
+      { RIVET_GIT_PATH: '' },
+      {
+        platform: 'win32',
+        existsSync: (p) => p === x86,
+      },
+    )
+    assert.equal(got, x86, 'x86 candidate must be probed after Program Files')
+  })
+
+  it('Win: Program Files wins over x86 when both exist', () => {
+    const pf = 'C:\\Program Files\\Git\\cmd\\git.exe'
+    const x86 = 'C:\\Program Files (x86)\\Git\\cmd\\git.exe'
+    const got = resolveGitCommand(
+      { RIVET_GIT_PATH: '' },
+      {
+        platform: 'win32',
+        existsSync: (p) => p === pf || p === x86,
+      },
+    )
+    assert.equal(got, pf)
+  })
+
+  it('Win: LOCALAPPDATA candidate via injected existsSync (cross-platform)', () => {
+    const local = 'D:\\Users\\me\\AppData\\Local'
+    const git = join(local, 'Programs', 'Git', 'cmd', 'git.exe')
+    const got = resolveGitCommand(
+      { RIVET_GIT_PATH: '', LOCALAPPDATA: local },
+      {
+        platform: 'win32',
+        existsSync: (p) => p === git,
+      },
+    )
+    assert.equal(got, git)
   })
 
   it('non-Win: returns "git" as fallback', () => {
