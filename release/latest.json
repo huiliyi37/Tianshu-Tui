@@ -1,0 +1,19 @@
+{
+  "version": "2.19.1",
+  "notes": "桌面端输入框锚定修复 + TUI 测试清零 + 代理感知 Windows 自更新",
+  "pub_date": "2026-07-13T05:38:41.707Z",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.19.1/Tianshu_2.19.1_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1JXYWVhTVFlWG0waU51QTRLVU4xR21YUGE3UG1MV3QzR3c5enFWQlM5QjV0NWJEQ2J1WDg2T1BqTmluVWNqSE40dVg3YzZTbDBQYmcxSi90RXdLa1FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzOTA5MDE4CWZpbGU6VGlhbnNodV8yLjE5LjBfeDY0LXNldHVwLmV4ZQpsdXdVV1h0OWpXbWlLNmtEb2JPQVRTb0t2dXQ2MU9oOEkzQnlObVRzU3YyQ0xhMmlHc3p4VUN2emo4bjJldlQ0WDEyWGYxWU4vVjM4dzJqcUNibFZCQT09Cg=="
+    },
+    "darwin-aarch64": {
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.19.1/Tianshu_2.19.1_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1E4MmtiUzJ2S0xrY2N2a0J5eFY4ZlJaVCtYdXkzVm9aSjBBRm9lMmxjalRESlAzNGw3YmpEOUp1bzZoWkhLN05hakNNUGprb1ZlZXFkMXdZakZzOXdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzOTA3Njc0CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CllPQlB6aVFQSGdGdzNveFFMOEl1RjdzUkhUaVRPVy90cHdNUER0ZDBzY0RhV3FoNnJJYkxvZkFRbGJ1Y2NvT2wxbVVCckIyNGN5MGcwM1BEZTNYK0RRPT0K"
+    },
+    "darwin-x86_64": {
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.19.1/Tianshu_2.19.1_x64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1VSdnRpYUthZDRMZ09sZEtxL1MrYkZCSFJ4WU9RR0Q5M2F6MDcrWVhHbmpKSkE3cytQOVRaTUd1UjQzWWNFbGkrZXVTYldvQTJPQ3hLeWtoaUpRUlE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzOTA3OTQ3CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CnI3RWV0WHJiOC9zVkhwNWt2U2FrRjVKdzQ1TytTVDlDdlp0ZldldDl2L2ZoRE1MN0F4QVoramJuM3BkSVJkSGNPN0swUFZydExSQmR1RlU5RzlJaUFRPT0K"
+    }
+  }
+}
