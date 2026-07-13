@@ -86,7 +86,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     if (content.length > MAX_WRITE_FILE_BYTES) {
       const sizeMB = (content.length / (1024 * 1024)).toFixed(1)
       return {
-        content: `Error: Content too large for write_file (${sizeMB}MB). Use bash to write large files via heredoc or stream redirection.`,
+        content: `Error: Content too large for write_file (${sizeMB}MB). Split the content into smaller files, or use edit_file for incremental changes.`,
         isError: true,
       }
     }
