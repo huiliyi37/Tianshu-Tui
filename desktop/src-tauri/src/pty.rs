@@ -235,7 +235,28 @@ pub fn pty_spawn(
     // Align PTY PATH with the sidecar: prepend bundled node-runtime so
     // npm/npx/node are found in the integrated terminal even when the OS
     // shell inherits a minimal PATH. Append PortableGit cmd if available.
-    if let Ok(res_dir) = app.path().resource_dir() {
+    //
+    // Use the same resource_dir_fallback logic as lib.rs: on Windows, raw
+    // exe may return a truncated drive root instead of the real resource dir.
+    let res_dir = app.path().resource_dir().ok().and_then(|p| {
+        #[cfg(target_os = "windows")]
+        {
+            let s = p.to_string_lossy();
+            if s.len() <= 3 {
+                // Drive letter only (e.g. "D:") — too shallow, fall back to exe dir.
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|exe| exe.parent().map(|q| q.to_path_buf()))
+            } else {
+                Some(p)
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Some(p)
+        }
+    });
+    if let Some(res_dir) = res_dir {
         let node_os = match std::env::consts::OS {
             "macos" => "darwin",
             "windows" => "win",

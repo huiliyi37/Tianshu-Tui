@@ -168,6 +168,7 @@ describe('EPERM silent-skip integration', { skip: shouldSkip && 'skipped: Window
 
       const result = await grep('needle', '.')
       assert.ok(!result.isError, `grep must not error, got: ${result.content}`)
+      assert.match(result.content!, /\[grep\] ripgrep \(rg\) not found or failed/, 'fallback prefix must appear when rg unavailable')
       assert.ok(result.content.includes('hit.ts'), 'should find the match in src/hit.ts')
       assert.ok(!/EACCES|EPERM/.test(result.content), 'no permission noise in output')
     })

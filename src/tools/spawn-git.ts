@@ -29,7 +29,10 @@ import { getResolvedEnv } from './resolved-env.js'
  *   3. Fallback `'git'` — resolved via `gitEnv`'s PATH
  */
 export function resolveGitCommand(env?: NodeJS.ProcessEnv): string {
-  const effectiveEnv = env ?? process.env
+  // Merge caller overrides on top of process.env so a partial opts.env
+  // (e.g. from spawnGitSync without explicit env) never hides process-level
+  // RIVET_GIT_PATH set by the desktop launcher.
+  const effectiveEnv = { ...process.env, ...env }
 
   // 1. Explicit override
   const override = effectiveEnv['RIVET_GIT_PATH']
