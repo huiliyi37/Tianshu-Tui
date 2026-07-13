@@ -133,14 +133,36 @@ describe('StarDomain', () => {
     assert.equal(matchDomain('回归测试验证修复是否真的生效'), 'yaoguang')
   })
 
-  it('huagai systemPromptSuffix carries 守昼/追 blocker/基线先行', () => {
+  it('huagai systemPromptSuffix carries 守昼/追 blocker/基线先行 + 通用工程 + 假绿手艺', () => {
     const huagai = STAR_DOMAINS.huagai
+    // 守昼专精（长程）
     assert.match(huagai.systemPromptSuffix, /守昼/)
     assert.match(huagai.systemPromptSuffix, /追 blocker/)
     assert.match(huagai.systemPromptSuffix, /基线先行/)
     assert.match(huagai.systemPromptSuffix, /不做清单/)
     assert.match(huagai.systemPromptSuffix, /跨层同步/)
     assert.match(huagai.systemPromptSuffix, /托举/)
+    // 通用工程
+    assert.match(huagai.systemPromptSuffix, /事实锚点/)
+    assert.match(huagai.systemPromptSuffix, /消费面穷尽/)
+    assert.match(huagai.systemPromptSuffix, /交付三项/)
+    // 假绿手艺
+    assert.match(huagai.systemPromptSuffix, /不测复刻/)
+    assert.match(huagai.systemPromptSuffix, /环境不可控/)
+    assert.match(huagai.systemPromptSuffix, /入口类改动看两面/)
+    // 无星间接口噪音（与天梁同策略）
+    assert.doesNotMatch(huagai.systemPromptSuffix, /星间接口/)
+    // 无双在场、无本仓专有路径
+    assert.doesNotMatch(huagai.systemPromptSuffix, /双在场/)
+    assert.doesNotMatch(huagai.systemPromptSuffix, /TUI/)
+    assert.doesNotMatch(huagai.systemPromptSuffix, /desktop hub/)
+  })
+
+  it('huagai volatileBlock carries verification-structure bias', () => {
+    const huagai = STAR_DOMAINS.huagai
+    assert.match(huagai.volatileBlock, /假绿/)
+    assert.match(huagai.volatileBlock, /半截修复/)
+    assert.match(huagai.volatileBlock, /可核验/)
   })
 
   it('returns null for ambiguous tasks', () => {
