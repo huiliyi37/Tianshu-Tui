@@ -29,6 +29,7 @@ import { MetricsGlanceController } from './metrics-glance-controller.js'
 import { StreamRenderController } from './stream-render-controller.js'
 import { InputController } from './input-controller.js'
 import { ANSI, color, fg, bg } from './ansi.js'
+import { debugLog } from '../../utils/debug.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
 import { SlashCommandRegistry, type SlashCommandContext } from '../slash-command-registry.js'
@@ -2677,10 +2678,15 @@ export class TuiApp {
   }
 
   private handleToolResult(id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string): void {
+    // DEBUG: unconditional trace for TUI rendering-loss investigation.
+    // Log output goes to stderr when RIVET_DEBUG=1.
+    // Also see: ~/.rivet/sessions/<project-slug>/<sessionId>/tool-result-trace.jsonl
+    debugLog(`[tool-result-trace] tui id=${id} name=${name} isError=${isError} len=${result?.length ?? 0}`)
     const displayContent = uiContent ?? result
 
     // Streaming chunk mode: isError === undefined means intermediate update
     if (isError === undefined) {
+      debugLog(`[tool-result-trace] tui id=${id} → STREAMING chunk (not committing to scrollback)`)
       // team_orchestrate fleet viz: the orchestrator streams an initial encoded
       // TeamPanel (all-waiting DAG) before dispatch. Intercept it into liveTeamModel
       // and DO NOT accumulate — otherwise it would double-decode at terminal
@@ -2706,6 +2712,7 @@ export class TuiApp {
     }
 
     // Terminal result: commit to scrollback.
+    debugLog(`[tool-result-trace] tui id=${id} → TERMINAL (committing to scrollback)`)
     // Progress unit counted HERE (after the streaming-chunk early return), not
     // at method entry: onOutput streams one callback per chunk with isError
     // undefined, and counting chunks would let a single chatty tool call (4+

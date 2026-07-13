@@ -10,6 +10,7 @@
  */
 
 import { TuiApp, type AgentCallbacks } from './app.js'
+import { debugLog } from '../../utils/debug.js'
 
 /**
  * 将 TuiApp 回调绑定到 AgentLoop.run() 的参数。
@@ -43,7 +44,11 @@ export function wrapCallbacksWithTuiApp(
       original.onToolUse?.(id, name, input)
     },
     onToolResult: (id, name, result, isError, rawPath, uiContent) => {
-      if (!live()) return
+      if (!live()) {
+        debugLog(`[tool-result-trace] DROP (stale run) id=${id} name=${name} isError=${isError}`)
+        return
+      }
+      debugLog(`[tool-result-trace] bridge id=${id} name=${name} isError=${isError} len=${result?.length ?? 0}`)
       app.callbacks.onToolResult(id, name, result, isError, rawPath, uiContent)
       original.onToolResult?.(id, name, result, isError, rawPath, uiContent)
     },

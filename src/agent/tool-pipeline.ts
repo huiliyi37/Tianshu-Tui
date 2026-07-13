@@ -189,6 +189,52 @@ async function emitToolInputTrace(input: { cwd: string; sessionId?: string; mess
 }
 
 /**
+ * Unconditional tool-result trace — always writes (no sampling gate). This is the
+ * primary diagnostic log for TUI rendering-loss bugs. Every tool result passing
+ * through the pipeline is recorded BEFORE the onToolResult callback.
+ *
+ * Log path: ~/.rivet/sessions/<project-slug>/<sessionId>/tool-result-trace.jsonl
+ * On Windows: %LOCALAPPDATA%\.rivet\sessions\<project-slug>\<sessionId>\tool-result-trace.jsonl
+ *
+ * Each line is JSON with: { ts, id, name, isError, contentLen, source }
+ *   source: "pipeline" = emitted just before callbacks.onToolResult
+ *           "bridge"   = received by TUI bridge
+ *           "tui"      = processed by TUI handleToolResult
+ *
+ * To find the log file on any platform:
+ *   1. Look at the "Watching" header line printed at TUI startup
+ *   2. Or check %LOCALAPPDATA%\.rivet\sessions\ on Windows
+ *   3. Or run: dir %LOCALAPPDATA%\.rivet\sessions\ /s /b | findstr tool-result-trace
+ */
+async function emitToolResultTrace(input: {
+  cwd: string
+  sessionId?: string
+  id: string
+  name: string
+  isError: boolean | undefined
+  contentLen: number
+  source: 'pipeline' | 'bridge' | 'tui'
+}): Promise<void> {
+  try {
+    const sessionDir = input.sessionId
+      ? join(getSessionDir(input.cwd), input.sessionId)
+      : join(getSessionDir(input.cwd), 'unknown')
+    await mkdir(sessionDir, { recursive: true })
+    const line = JSON.stringify({
+      ts: new Date().toISOString(),
+      id: input.id,
+      name: input.name,
+      isError: input.isError,
+      contentLen: input.contentLen,
+      source: input.source,
+    })
+    await appendFile(join(sessionDir, 'tool-result-trace.jsonl'), `${line}\n`, 'utf8')
+  } catch {
+    // Diagnostics must never affect tool execution or pollute model-visible output.
+  }
+}
+
+/**
  * File tools whose path operand may target a path outside the workspace, with
  * the access mode they need. Used to gate out-of-workspace file ops behind an
  * approval-driven path grant (rather than a hard "Path outside workspace" error).
@@ -1430,7 +1476,13 @@ export async function executeToolUse(
      }
    }
 
-    callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError, rawToolResult?.rawPath, rawToolResult?.uiContent)
+    // Normalize isError: tools may omit isError on success (undefined),
+    // but the TUI treats undefined as a streaming chunk that never
+    // commits to scrollback. Force false so terminal results render.
+    // DEBUG: unconditional trace for TUI rendering-loss investigation.
+    // Log file: ~/.rivet/sessions/<project-slug>/<sessionId>/tool-result-trace.jsonl
+    void emitToolResultTrace({ cwd: deps.cwd, sessionId: deps.sessionId, id: tu.id, name: tu.name, isError: harnessResult.isError, contentLen: finalContent.length, source: 'pipeline' })
+    callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError ?? false, rawToolResult?.rawPath, rawToolResult?.uiContent)
 
     deps.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content, rawToolResult?.errorClass)
 
