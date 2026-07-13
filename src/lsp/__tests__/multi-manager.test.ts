@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { win32 as winPath } from 'node:path'
 import { createMultiLspManager, defaultLspSpawn, type MultiLspOptions } from '../multi-manager.js'
 import type { LspServerDef } from '../server-registry.js'
 import type { ChildProcess } from 'node:child_process'
@@ -49,10 +50,23 @@ describe('createMultiLspManager spawnFor wiring', () => {
 })
 
 describe('defaultLspSpawn', () => {
-  it('rewrites npx to node + npx-cli.js via resolveNpmCliCommand', () => {
-    const captured: Array<{ command: string; args: string[] }> = []
-    const spawnFn = (cmd: string, args: string[]) => {
-      captured.push({ command: cmd, args })
+  it('rewrites npx against desktop bundled node-runtime layout (win-x64)', () => {
+    // Simulate fetch-node-runtime Windows layout — NOT the host Homebrew Node:
+    //   resources/node-runtime/win-x64/node.exe
+    //   resources/node-runtime/win-x64/node_modules/npm/bin/npx-cli.js
+    const execPath = 'C:\\App\\resources\\node-runtime\\win-x64\\node.exe'
+    const cli = winPath.join(
+      'C:\\App\\resources\\node-runtime\\win-x64',
+      'node_modules', 'npm', 'bin', 'npx-cli.js',
+    )
+
+    const captured: Array<{ command: string; args: string[]; env?: Record<string, string> }> = []
+    const spawnFn = (cmd: string, args: string[], opts: Record<string, unknown>) => {
+      captured.push({
+        command: cmd,
+        args,
+        env: opts.env as Record<string, string> | undefined,
+      })
       return mockChild()
     }
 
@@ -65,12 +79,20 @@ describe('defaultLspSpawn', () => {
       alwaysAvailable: true,
     }
 
-    defaultLspSpawn(npxDef, '/tmp', spawnFn as (cmd: string, args: string[], opts: Record<string, unknown>) => ChildProcess)
+    defaultLspSpawn(npxDef, 'C:\\proj', spawnFn, {
+      execPath,
+      platform: 'win32',
+      existsSync: (p) => p === cli,
+    })
 
     assert.equal(captured.length, 1, 'spawnFn should be called once')
-    // If someone removes resolveNpmCliCommand from defaultLspSpawn,
-    // command will be 'npx' instead of process.execPath → test goes RED.
-    assert.equal(captured[0]!.command, process.execPath, 'command should be node binary, not npx')
-    assert.ok(captured[0]!.args[0]!.includes('npx-cli.js'), `args[0] should be npx-cli.js, got ${captured[0]!.args[0]}`)
+    // Deleting resolveNpmCliCommand from defaultLspSpawn → command stays 'npx' → RED.
+    assert.equal(captured[0]!.command, execPath, 'command should be bundled node.exe, not bare npx')
+    assert.equal(captured[0]!.args[0], cli)
+    assert.deepEqual(captured[0]!.args.slice(1), ['-y', 'typescript-language-server', '--stdio'])
+    assert.ok(
+      captured[0]!.env?.PATH?.startsWith('C:\\App\\resources\\node-runtime\\win-x64;'),
+      `PATH should prepend bundled nodeDir, got ${captured[0]!.env?.PATH}`,
+    )
   })
 })

@@ -11,7 +11,11 @@
 
 import type { ChildProcess } from 'node:child_process'
 import { spawnHidden } from '../tools/spawn-hidden.js'
-import { resolveNpmCliCommand, buildStdioEnvWithNodePath } from '../platform/resolve-node-cli.js'
+import {
+  resolveNpmCliCommand,
+  buildStdioEnvWithNodePath,
+  type ResolveNodeCliDeps,
+} from '../platform/resolve-node-cli.js'
 import { createLspManager, type LspManager, type LspDiagnostic } from './manager.js'
 import {
   serverForFile,
@@ -32,21 +36,25 @@ export interface MultiLspOptions {
   spawnFor?: (def: LspServerDef, cwd: string) => ChildProcess
 }
 
+type LspSpawnFn = (cmd: string, args: string[], opts: Record<string, unknown>) => ChildProcess
+
 /**
  * Default spawn for LSP servers: rewrites bare npx/npm to node+cli.js so
  * Windows GUI / bundled-node launches don't ENOENT on npx.cmd when shell is
  * forced off (spawnHidden). Non-npx commands pass through unchanged.
  *
- * Exported so tests can assert the rewrite directly — deleting the
- * resolveNpmCliCommand call causes the test to go RED.
+ * `resolveDeps` / `spawnFn` are injectable so tests can simulate the desktop
+ * bundled node-runtime layout without depending on the host Node install.
  */
 export function defaultLspSpawn(
   def: LspServerDef,
   cwd: string,
-  spawnFn: (cmd: string, args: string[], opts: Record<string, unknown>) => ChildProcess = spawnHidden as (cmd: string, args: string[], opts: Record<string, unknown>) => ChildProcess,
+  spawnFn: LspSpawnFn = spawnHidden as LspSpawnFn,
+  resolveDeps: ResolveNodeCliDeps = {},
 ): ChildProcess {
-  const resolved = resolveNpmCliCommand(def.command, def.args ?? [])
+  const resolved = resolveNpmCliCommand(def.command, def.args ?? [], resolveDeps)
   const env = buildStdioEnvWithNodePath(undefined, {
+    ...resolveDeps,
     getDefaultEnvironment: () => ({ ...process.env } as Record<string, string>),
   })
   return spawnFn(resolved.command, resolved.args, {
