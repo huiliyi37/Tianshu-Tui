@@ -1,6 +1,7 @@
 import { extname } from 'path'
 import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
+import { getResolvedEnv } from './resolved-env.js'
 
 // esbuild ships a native binary, so it can't be inlined into the tsup bundle.
 // Load it lazily via require so a packaged sidecar without esbuild on disk
@@ -242,56 +243,66 @@ interface PythonSyntaxResult {
  *  Uses a child process because there is no robust pure-JS Python parser in
  *  the dependency tree, and SWE-bench is overwhelmingly Python. */
 function checkPythonSyntax(content: string): Promise<PythonSyntaxResult> {
-  return new Promise((resolve) => {
-    let settled = false
-    const done = (r: PythonSyntaxResult): void => {
-      if (!settled) { settled = true; resolve(r) }
-    }
+  const isWin = process.platform === 'win32'
+  const candidates: Array<{ command: string; args: string[] }> = isWin
+    ? [
+        { command: 'py', args: ['-3', '-c', 'import ast,sys; ast.parse(sys.stdin.read())'] },
+        { command: 'python', args: ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'] },
+        { command: 'python3', args: ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'] },
+      ]
+    : [
+        { command: 'python3', args: ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'] },
+        { command: 'python', args: ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'] },
+      ]
 
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn('python3', ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-    } catch {
-      // Synchronous spawn failure — degrade, don't flag as a syntax error.
-      done({ ok: true })
-      return
-    }
-
-    // Hung interpreter guard: kill and degrade to OK. The file is already on
-    // disk; losing the check is a degradation, not a failure. A timeout kill
-    // surfaces as close(code=null) which we also treat as non-fatal below.
-    const timer = setTimeout(() => {
-      try { child.kill('SIGKILL') } catch { /* already exited */ }
-      done({ ok: true })
-    }, getPySyntaxTimeoutMs())
-
-    let stdout = ''
-    let stderr = ''
-    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
-    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      if (code === 0 || code === null) {
-        // 0 = clean parse; null = killed by signal (our timeout / external) —
-        // never a real syntax error.
-        done({ ok: true })
-      } else {
-        done({ ok: false, error: stderr.trim() || stdout.trim() || `python3 exited with code ${code}` })
+  async function tryCandidate(candidate: typeof candidates[number]): Promise<PythonSyntaxResult | null> {
+    return new Promise((resolve) => {
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(candidate.command, candidate.args, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: getResolvedEnv(),
+          windowsHide: true,
+        })
+      } catch {
+        resolve(null) // ENOENT — try next candidate
+        return
       }
+
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL') } catch { /* already exited */ }
+        resolve({ ok: true })
+      }, getPySyntaxTimeoutMs())
+
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (code === 0 || code === null) {
+          resolve({ ok: true })
+        } else {
+          resolve({ ok: false, error: stderr.trim() || stdout.trim() || `${candidate.command} exited with code ${code}` })
+        }
+      })
+      child.on('error', () => {
+        clearTimeout(timer)
+        resolve(null) // ENOENT — try next candidate
+      })
+      try {
+        child.stdin?.write(content)
+        child.stdin?.end()
+      } catch { /* stdin closed early */ }
     })
-    child.on('error', () => {
-      // python3 unavailable (ENOENT) or spawn failure — degrade to OK so a
-      // missing interpreter never triggers a false rollback of a valid file.
-      clearTimeout(timer)
-      done({ ok: true })
-    })
-    try {
-      child.stdin?.write(content)
-      child.stdin?.end()
-    } catch {
-      // stdin closed early (e.g. killed) — close/error handler resolves.
+  }
+
+  return (async () => {
+    for (const candidate of candidates) {
+      const result = await tryCandidate(candidate)
+      if (result !== null) return result
     }
-  })
+    // All candidates failed — degrade to OK
+    return { ok: true }
+  })()
 }

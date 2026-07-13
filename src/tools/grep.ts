@@ -3,6 +3,7 @@ import { spawnHidden } from './spawn-hidden.js'
 import { createReadStream } from 'fs'
 import { lstat, readdir, realpath, readFile, stat } from 'fs/promises'
 import { join, resolve } from 'path'
+import { getResolvedEnv } from './resolved-env.js'
 import { createInterface } from 'readline'
 import type { Dirent } from 'node:fs'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
@@ -122,11 +123,12 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     try {
       const results = await nativeSearch(absPath, regex, glob, maxResults, params.cwd, contextLines)
       if (results.length === 0) {
-        return { content: 'No matches found.' }
+        return { content: '[grep] ripgrep (rg) not found or failed; using slow fallback.\nNo matches found.' }
       }
+      const FALLBACK_PREFIX = '[grep] ripgrep (rg) not found or failed; using slow fallback.\n'
       const text = results.length > maxResults
-        ? results.slice(0, maxResults).join('\n') + '\n... (truncated)'
-        : results.join('\n')
+        ? FALLBACK_PREFIX + results.slice(0, maxResults).join('\n') + '\n... (truncated)'
+        : FALLBACK_PREFIX + results.join('\n')
       let hintedText = appendLogRangeHints(text, searchPath)
       hintedText = await appendHashEditHints(hintedText, absPath, params.cwd, params.sessionId)
       await registerGrepFilesFromOutput(hintedText, params.cwd, params.sessionId)
@@ -303,7 +305,7 @@ async function tryRipgrep(
     try {
       child = track(spawnHidden('rg', args, {
         cwd,
-        env: { ...process.env },
+        env: getResolvedEnv(cwd),
         stdio: ['ignore', 'pipe', 'pipe'],
       }))
     } catch {
