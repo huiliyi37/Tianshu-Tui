@@ -270,6 +270,34 @@ Double-tap **ESC** to open message history. Select any past user message to rewi
 
 Convenes multiple expert seats to review a plan or design, producing an auditable Markdown plan with seat contributions and convergence state.
 
+### Star Domains
+
+Tianshu models different cognitive stances as **star domains**. Each domain is not a role-play costume but a switchable cognitive discipline: when active, the system prompt, tool whitelist, and decision threshold are tuned to that domain's methodology. Switch explicitly or let Tianshu route automatically from the task description.
+
+```bash
+/domain tianliang          # switch to Tianliang (execution/delivery)
+/domain list               # list all domains
+/domain                    # open the domain picker
+Implement user registration  # auto-routes to Tianliang
+Review this design           # auto-routes to Tianquan
+```
+
+| Domain | ID | Role | Motto |
+|--------|-----|------|-------|
+| 天枢 Tianshu | `tianshu` | Default orchestrator; closes the loop from understanding to delivery | 执中调度，以全貌定向 |
+| 破军 Pojun | `pojun` | Exploration, experimentation, breaking boundaries | 好男儿当负三尺剑立不世之功 |
+| 天府 Tianfu | `tianfu` | Guardianship, refactoring, optimization, stability | 善守者，藏于九地之下 |
+| 天梁 Tianliang | `tianliang` | Execution, wave-based delivery, precise closure | 千里之行，始于足下 |
+| 天权 Tianquan | `tianquan` | Architecture review, planning, trade-offs | 权衡取舍，择善而从 |
+| 天机 Tianji | `tianji` | Challenge assumptions, find boundary gaps, deduce failure modes | 运筹帷幄之中，决胜千里之外 |
+| 天璇 Tianxuan | `tianxuan` | Cross-domain pattern discovery, retrospectives | 道可道，非常道 |
+| 辅 Fu | `fu` | Cognitive-field distillation, prompt tuning | 蒸馏不是创造新东西，是让已有的东西第一次被看清 |
+| 文曲 Wenqu | `wenqu` | Code aesthetics, naming, elegant structure | 形随意转，美自境生 |
+| 瑶光 Yaoguang | `yaoguang` | Reproduction, defect taxonomy, silence audit | 绿非证明，复现即证 |
+| 华盖 Huagai | `huagai` | Long-haul construction, baseline-first endurance | 守昼托举，长路不弃 |
+
+Each star has a seed-capsule capturing its field-tested methodology; see `docs/seed-capsule-*.md`. Council (`/council`) and team mode (`/team`) automatically convene multiple star-domain seats and can enter a rebuttal round when opinions conflict.
+
 ### Skills System
 
 Reusable workflow playbooks loaded from `.rivet/skills/*.md`. Two-layer progressive disclosure: only name + description enters context; full instructions load on demand via the `skill` tool or `/skill`.
