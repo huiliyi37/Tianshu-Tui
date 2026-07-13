@@ -10,7 +10,9 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "predev": "npm run build:release-notes",
+    "build": "npm run build:release-notes && tsc --noEmit && vite build",
+    "build:release-notes": "node --import tsx scripts/build-release-notes.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

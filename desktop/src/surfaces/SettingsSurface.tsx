@@ -22,6 +22,7 @@ import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettingsManager } from '../components/McpSettings'
 import { VisionModelSettings } from '../components/VisionModelSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
+import { ReleaseNotesPanel } from '../components/ReleaseNotesPanel'
 import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, getProjectDocs, setProjectDocs, deactivateLicense, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { useProLicense } from '../lib/use-activation-gate'
 import { ProUpgradeDialog } from '../components/ActivationScreen'
@@ -1301,6 +1302,7 @@ function UpdaterSection() {
   const [message, setMessage] = useState<string | null>(null)
   const [update, setUpdate] = useState<Update | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
+  const [notesOpen, setNotesOpen] = useState(false)
 
   const handleCheck = async () => {
     setChecking(true)
@@ -1371,9 +1373,14 @@ function UpdaterSection() {
         <div className="updater-actions">
           <div className="meta">{t('updateAvailableShort', { version: update.version })}</div>
           {update.body && <div className="meta">{update.body}</div>}
-          <button className="btn" onClick={handleInstall} disabled={installing}>
-            {installing ? (progress != null ? t('updateDownloading', { progress }) : t('updateInstalling')) : t('updateDownload')}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn" onClick={handleInstall} disabled={installing}>
+              {installing ? (progress != null ? t('updateDownloading', { progress }) : t('updateInstalling')) : t('updateDownload')}
+            </button>
+            <button className="btn ghost" onClick={() => setNotesOpen(true)}>
+              {t('releaseNotes.view', { version: update.version })}
+            </button>
+          </div>
         </div>
       )}
       {installing && progress != null && (
@@ -1382,6 +1389,11 @@ function UpdaterSection() {
         </div>
       )}
       {message && <div className="meta">{message}</div>}
+      <ReleaseNotesPanel
+        open={notesOpen}
+        onOpenChange={setNotesOpen}
+        highlightVersion={update?.version}
+      />
     </section>
   )
 }
@@ -1391,6 +1403,7 @@ function AboutSection() {
   const { t } = useTranslation('settings')
   const [version, setVersion] = useState<string | null>(null)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [notesOpen, setNotesOpen] = useState(false)
   // 双层模式：Basic 免许可证即用，Pro 许可证经 Rust 验签解锁高级功能。
   const { status, isPro, refresh } = useProLicense()
 
@@ -1444,8 +1457,12 @@ function AboutSection() {
         <button className="btn" onClick={() => { void openEula() }}>
           {t('about.viewEula')}
         </button>
+        <button className="btn ghost" onClick={() => setNotesOpen(true)}>
+          {t('releaseNotes.title')}
+        </button>
       </div>
       <ProUpgradeDialog status={status} open={upgradeOpen} onOpenChange={setUpgradeOpen} />
+      <ReleaseNotesPanel open={notesOpen} onOpenChange={setNotesOpen} highlightVersion={version ?? undefined} />
     </section>
   )
 }

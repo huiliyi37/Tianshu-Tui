@@ -163,6 +163,13 @@
     "upgradePro": "升级 Pro / 输入许可证",
     "removeLicense": "移除许可证（重启后回到基础版）"
   },
+  "releaseNotes": {
+    "title": "更新日志",
+    "whatsNew": "发现新版本 v{{version}}",
+    "view": "查看 v{{version}} 更新说明",
+    "dismiss": "知道了",
+    "noNotes": "暂无更新日志。"
+  },
   "runtime": "运行时 (sidecar)",
   "runtimeDesc": "当前 sidecar 版本、会话数量与运行状态统计。",
   "sidecarOffline": "sidecar 离线，重连中…",

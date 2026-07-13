@@ -14,3 +14,5 @@ node-v*-win-*.zip
 node-v*.zip
 # 签名私钥绝不入库（含 TAURI_SIGNING_PRIVATE_KEY）
 .env
+# 构建时生成的文件
+src/generated/

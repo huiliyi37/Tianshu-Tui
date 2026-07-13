@@ -163,6 +163,13 @@
     "upgradePro": "Upgrade to Pro / Enter license",
     "removeLicense": "Remove license (reverts to Basic after restart)"
   },
+  "releaseNotes": {
+    "title": "Release Notes",
+    "whatsNew": "What's new in v{{version}}",
+    "view": "View v{{version}} release notes",
+    "dismiss": "Got it",
+    "noNotes": "No release notes available."
+  },
   "runtime": "Runtime (sidecar)",
   "runtimeDesc": "Current sidecar version, session count, and running status.",
   "sidecarOffline": "sidecar offline, reconnecting…",

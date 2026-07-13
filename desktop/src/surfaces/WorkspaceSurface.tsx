@@ -20,6 +20,7 @@ import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
+import { WhatsNewModal } from '../components/WhatsNewModal'
 import { isApprovalConsent } from '../lib/consent'
 import { deriveProjects, loadKnownProjects } from '../lib/projects'
 import { openExternal } from '../lib/open-external'
@@ -237,6 +238,7 @@ export function WorkspaceSurface() {
   return (
     <div ref={wsRef} className="workspace-resizable">
       <UpdateBanner />
+      <WhatsNewModal />
       <button
         className="layout-reset-btn"
         title={t('workspace.resetLayout')}

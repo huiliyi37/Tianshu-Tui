@@ -67,7 +67,8 @@ export function VisionModelSettings() {
     [visionOptions, selectedProvider],
   )
 
-  const handleProviderChange = (val: string) => {
+  const handleProviderChange = (val: string | null) => {
+    if (!val) return
     setProvider(val)
     setModel(INHERIT)
     setDirty(true)
@@ -133,7 +134,7 @@ export function VisionModelSettings() {
         <span className="text-xs text-text">{t('visionModel.model')}</span>
         <Select
           value={model}
-          onValueChange={(v) => { setModel(v); setDirty(true) }}
+          onValueChange={(v) => { if (v) { setModel(v); setDirty(true) } }}
           disabled={provider === INHERIT || modelOptions.length === 0}
         >
           <SelectTrigger className="w-72">
