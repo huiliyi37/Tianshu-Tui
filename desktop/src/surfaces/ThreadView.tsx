@@ -1160,15 +1160,6 @@ export function ThreadView(props: {
             })}
           </div>
         )}
-        {showThinking && (
-          <div className="thinking">
-            <span className="dot-pulse" /><span className="dot-pulse" /><span className="dot-pulse" />
-            <span className="thinking-label">
-              {view.phase ? t('thinking.withPhase', { phase: view.phase }) : t('thinking.label')}
-              {elapsedStr && <span className={`elapsed${elapsedStalled ? ' stalled' : ''}`}> · {elapsedStr}</span>}
-            </span>
-          </div>
-        )}
         {scrolledUp && (
           <button className="scroll-bottom-btn" onClick={scrollToBottom} aria-label={t('scrollToBottom')}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -1193,6 +1184,15 @@ export function ThreadView(props: {
 
       <div className="composer-float" ref={composerWrapRef}>
         <div className={`composer-float-inner accent-${activeDomain?.uiPersona.accent ?? 'primary'}`}>
+          {showThinking && (
+            <div className="thinking">
+              <span className="dot-pulse" /><span className="dot-pulse" /><span className="dot-pulse" />
+              <span className="thinking-label">
+                {view.phase ? t('thinking.withPhase', { phase: view.phase }) : t('thinking.label')}
+                {elapsedStr && <span className={`elapsed${elapsedStalled ? ' stalled' : ''}`}> · {elapsedStr}</span>}
+              </span>
+            </div>
+          )}
           {view.resumeOffer && view.resumeOffer.seq !== resumeDismissedSeq && !busy && (
             <div className="resume-offer-banner flex items-center justify-between bg-panel-3 border border-border rounded-lg p-3 mb-2 text-xs" role="status">
               <div className="flex flex-col gap-1 min-w-0">

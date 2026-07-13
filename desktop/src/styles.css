@@ -2578,7 +2578,7 @@ body {
 }
 .timeline-more:hover { color: var(--text-strong); background: var(--panel-3); border-color: var(--accent); }
 
-.thinking { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
+.thinking { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); padding: var(--space-1) var(--space-3); margin: var(--space-1) var(--space-2) 0; background: var(--panel-2); border-radius: var(--radius-md); width: fit-content; }
 .dot-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s var(--ease) infinite; }
 .dot-pulse:nth-child(2) { animation-delay: 0.2s; }
 .dot-pulse:nth-child(3) { animation-delay: 0.4s; }

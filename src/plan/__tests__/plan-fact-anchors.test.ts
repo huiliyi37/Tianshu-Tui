@@ -40,11 +40,9 @@ describe('checkPlanFactAnchors', () => {
     assert.equal(report.drifts[0]!.path, 'engine/core/missing.ts')
   })
 
-  it('flags 新增 file whose parent directory does not exist (the Ink-component failure shape)', async () => {
+  it('passes 新增 file even when parent directory does not exist (new modules create dirs on write)', async () => {
     const report = await checkPlanFactAnchors('- [ ] 新增 `engine/components/selector.tsx` — 选择器组件', dir)
-    assert.equal(report.drifts.length, 1)
-    assert.equal(report.drifts[0]!.kind, 'missing-parent-dir')
-    assert.match(report.drifts[0]!.detail, /父目录/)
+    assert.deepEqual(report.drifts, [])
   })
 
   it('passes 新增 file when the parent directory exists', async () => {

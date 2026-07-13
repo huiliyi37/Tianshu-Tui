@@ -155,16 +155,9 @@ export async function checkPlanFactAnchors(content: string, cwd: string): Promis
     const absolute = resolve(cwd, anchor.path)
 
     if (anchor.declaredNew || declaredNewPaths.has(anchor.path)) {
-      const parent = dirname(absolute)
-      const parentOk = await stat(parent).then(s => s.isDirectory()).catch(() => false)
-      if (!parentOk) {
-        drifts.push({
-          anchor: anchor.raw,
-          path: anchor.path,
-          kind: 'missing-parent-dir',
-          detail: `计划声明新增 \`${anchor.path}\`，但其父目录 \`${relative(cwd, parent) || '.'}/\` 在当前项目中不存在——请核实项目结构（该目录可能属于过时的架构记忆）。`,
-        })
-      }
+      // 计划明确要新建的文件：不再逐条校验父目录是否存在。
+      // 新建模块时父目录自然也不存在，执行层 write_file 会按需创建；
+      // 这里如果报漂移，只会把整份新模块计划的批准提示变成大量噪声。
       continue
     }
 
