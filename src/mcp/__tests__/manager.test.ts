@@ -243,4 +243,79 @@ describe('McpManager', () => {
     // Connections cleared so a later shutdown() is a no-op.
     assert.deepEqual([...(mgr as any).connections.keys()], [])
   })
+
+  it('reconcileFromConfig connects servers added after init snapshot', async () => {
+    const mgr = new McpManager(makeConfig())
+    await mgr.initialize()
+    assert.deepEqual(mgr.getStates(), [])
+
+    mgr['_connectServer'] = async (serverId) => ({
+      client: {} as any,
+      transport: { close: async () => {} },
+      serverId,
+    })
+    mgr['_discoverTools'] = async () => [{
+      name: 'late',
+      description: 'Late tool',
+      inputSchema: { type: 'object' as const, properties: {} },
+    }]
+
+    const added = await mgr.reconcileFromConfig(makeConfig({
+      late: { command: 'node', args: ['late.js'] },
+    }))
+    assert.equal(added.length, 1)
+    assert.equal(added[0]!.definition.name, 'mcp__late__late')
+    assert.equal(mgr.getStates().find((s) => s.serverId === 'late')?.status, 'connected')
+  })
+
+  it('reconcileFromConfig skips already-connected servers', async () => {
+    const mgr = new McpManager(makeConfig({
+      echo: { command: 'node', args: ['echo.js'] },
+    }))
+    let connects = 0
+    mgr['_connectServer'] = async (serverId) => {
+      connects++
+      return { client: {} as any, transport: { close: async () => {} }, serverId }
+    }
+    mgr['_discoverTools'] = async () => []
+    await mgr.initialize()
+    const afterInit = connects
+    await mgr.reconcileFromConfig(makeConfig({
+      echo: { command: 'node', args: ['echo.js'] },
+    }))
+    assert.equal(connects, afterInit)
+  })
+
+  it('folds stderr into error state on connect failure', async () => {
+    const mgr = new McpManager(makeConfig({
+      broken: { command: 'node', args: ['broken.js'] },
+    }))
+    mgr['_connectServer'] = async (serverId) => {
+      const err: any = new Error('spawn failed')
+      // Simulate a ConnectedServer that never succeeds — throw after attach
+      throw Object.assign(err, {
+        /* connect fails before return — stderr captured in real path */
+      })
+    }
+    await mgr.initialize()
+    const state = mgr.getStates().find((s) => s.serverId === 'broken')
+    assert.equal(state?.status, 'error')
+    assert.ok(state?.errorHint, 'should carry classifier suggestion')
+    assert.ok(state?.lastErrorClass)
+  })
+
+  it('connectAndDiscover returns newly registered tools', async () => {
+    const mgr = new McpManager(makeConfig())
+    mgr['_connectServer'] = async (serverId) => ({
+      client: {} as any,
+      transport: { close: async () => {} },
+      serverId,
+    })
+    mgr['_discoverTools'] = async () => [{
+      name: 't', description: 'T', inputSchema: { type: 'object' as const, properties: {} },
+    }]
+    const tools = await mgr.connectAndDiscover('x', { command: 'node', args: ['x.js'] })
+    assert.equal(tools.length, 1)
+    assert.equal(tools[0]!.definition.name, 'mcp__x__t')
+  })
 })

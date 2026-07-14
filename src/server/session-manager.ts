@@ -18,7 +18,7 @@
  */
 import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
 import { collectPostBoundaryEditIds } from '../agent/file-history.js'
-import type { DelegationActivity } from '../tools/types.js'
+import type { DelegationActivity, Tool } from '../tools/types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
 import type { IntentPreview } from '../agent/intent-preview.js'
@@ -198,6 +198,13 @@ export interface ManagedAgent {
     status: 'mounted' | 'already-active' | 'not-extended' | 'unknown' | 'gating-off'
     cacheImpact: 'prefix-invalidated' | 'none'
   }
+  /**
+   * Hot-register tools discovered after this agent was built (MCP connect mid-
+   * session). Mirrors LSP attachLspTools: registry.register is Map.set-idempotent;
+   * callers should then rely on updateTools() inside the impl. Optional so
+   * lightweight test doubles need not implement it.
+   */
+  registerExternalTools?(tools: Tool[]): void
   /** Current reasoning effort level (off/low/medium/high/max). */
   getReasoningEffort?(): string | undefined
   /** Set the reasoning effort level (off/low/medium/high/max) or return to auto. */
@@ -2699,6 +2706,24 @@ export class RuntimeSessionManager {
     if (!session) return undefined
     const agent = await this.ensureAgentAsync(session)
     return agent.enableTool?.(name)
+  }
+
+  /**
+   * Hot-inject MCP (or other late-discovered) tools into every session that
+   * already has a live ManagedAgent. Sessions without an agent yet will pick
+   * tools up at ensureAgent → buildSessionStores via getAllTools(). Idempotent:
+   * ToolRegistry.register is Map.set overwrite.
+   */
+  injectMcpTools(tools: Tool[]): void {
+    if (!tools.length) return
+    for (const s of this.sessions.values()) {
+      if (!s.agent || s.record.archived) continue
+      try {
+        s.agent.registerExternalTools?.(tools)
+      } catch {
+        /* best-effort per session — one failure must not block others */
+      }
+    }
   }
 
   /**

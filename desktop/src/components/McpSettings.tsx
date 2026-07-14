@@ -290,9 +290,16 @@ export function McpSettings({
                   <span className="mcp-server-id">{s.serverId}</span>
                   <span className="mcp-server-transport">{s.transport ?? '—'}</span>
                   <StatusBadge state={s} />
-                  {s.error && s.status === 'error' && (
-                    <span className="mcp-server-error" title={s.error}>
-                      {s.lastErrorClass ? `[${s.lastErrorClass}] ` : ''}{s.error.slice(0, 60)}
+                  {s.error && (s.status === 'error' || s.status === 'degraded') && (
+                    <span className="mcp-server-error" title={[s.error, s.errorHint].filter(Boolean).join('\n')}>
+                      {s.lastErrorClass ? `[${s.lastErrorClass}] ` : ''}{s.error.slice(0, 80)}
+                    </span>
+                  )}
+                  {s.errorHint && (s.status === 'error' || s.status === 'degraded') && (
+                    <span className="mcp-server-hint meta">
+                      {s.lastErrorClass && ['config', 'auth', 'network', 'protocol', 'tool_error'].includes(s.lastErrorClass)
+                        ? t(`mcp.hints.${s.lastErrorClass}`)
+                        : s.errorHint}
                     </span>
                   )}
                 </div>
@@ -306,13 +313,13 @@ export function McpSettings({
                       {toolsOpen === s.serverId ? t('mcp.collapse') : t('mcp.tools')}
                     </button>
                   )}
-                  {(s.status === 'connected' || s.status === 'degraded' || s.status === 'error') && (
+                  {(s.status === 'connected' || s.status === 'degraded' || s.status === 'error' || s.status === 'disconnected') && (
                     <button
                       className="btn-mini"
                       onClick={() => onRestart(s.serverId)}
                       title={t('mcp.reconnect')}
                     >
-                      {t('mcp.restart')}
+                      {s.status === 'error' || s.status === 'degraded' ? t('mcp.retry') : t('mcp.restart')}
                     </button>
                   )}
                   <button
@@ -437,42 +444,108 @@ export function McpSettings({
  *  wiring around the controlled McpSettings UI. Shared by the Settings
  *  integration card and the extensions hub connectors tab. */
 export function McpSettingsManager() {
+  const { t } = useTranslation('settings')
   const [mcpStatus, setMcpStatus] = useState<McpStatusResponse | null>(null)
   const [mcpLoading, setMcpLoading] = useState(true)
   const [mcpError, setMcpError] = useState<string | null>(null)
   const [presets, setPresets] = useState<McpPreset[] | null>(null)
   const [configuredIds, setConfiguredIds] = useState<string[]>([])
 
-  const fetchStatus = useCallback(() => {
-    getMcpStatus()
-      .then((s) => { setMcpStatus(s); setMcpError(null) })
-      .catch((err) => setMcpError((err as Error).message))
-      .finally(() => setMcpLoading(false))
-    getMcpPresets()
-      .then((p) => { setPresets(p.presets); setConfiguredIds(p.configuredIds) })
-      .catch(() => { /* non-fatal: preset grid just won't render */ })
+  const fetchStatus = useCallback(async () => {
+    try {
+      const [s, p] = await Promise.all([
+        getMcpStatus(),
+        getMcpPresets().catch(() => null),
+      ])
+      setMcpStatus(s)
+      setMcpError(null)
+      if (p) {
+        setPresets(p.presets)
+        setConfiguredIds(p.configuredIds)
+      }
+    } catch (err) {
+      setMcpError((err as Error).message)
+    } finally {
+      setMcpLoading(false)
+    }
   }, [])
 
   useEffect(() => {
-    fetchStatus()
+    void fetchStatus()
   }, [fetchStatus])
+
+  // Keep a light health poll while any server is connecting (or manager not ready).
+  useEffect(() => {
+    const connecting = mcpStatus?.servers.some((s) => s.status === 'connecting')
+    const waitingMgr = mcpStatus != null && mcpStatus.managerReady === false
+    if (!connecting && !waitingMgr) return
+    const id = setInterval(() => { void fetchStatus() }, 1500)
+    return () => clearInterval(id)
+  }, [mcpStatus, fetchStatus])
+
+  /** Poll until `serverId` leaves connecting (or timeout). Toast outcome. */
+  const watchUntilSettled = useCallback(async (serverId: string) => {
+    const deadline = Date.now() + 90_000
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1500))
+      let s: McpStatusResponse
+      try {
+        s = await getMcpStatus()
+      } catch {
+        continue
+      }
+      setMcpStatus(s)
+      const row = s.servers.find((x) => x.serverId === serverId)
+      if (!row) continue
+      if (row.status === 'connecting') continue
+      if (row.status === 'connected') {
+        toast.success(t('mcp.connectedOk', { id: serverId, tools: row.toolCount }))
+        return
+      }
+      if (row.status === 'error' || row.status === 'degraded') {
+        toast.error(t('mcp.connectFailed', {
+          id: serverId,
+          error: row.error ?? row.status,
+        }))
+        return
+      }
+      // disconnected but managerReady — keep waiting briefly
+      if (s.managerReady === false) continue
+      if (row.status === 'disconnected') {
+        // Still waiting for connect to start after reconcile
+        continue
+      }
+    }
+    toast.error(t('mcp.connectFailed', { id: serverId, error: 'timeout' }))
+  }, [t])
 
   const handleAdd = useCallback(async (config: McpServerConfig) => {
     await addMcpServer(config)
+    toast.success(t('mcp.addOk', { id: config.serverId }))
     await fetchStatus()
+    void watchUntilSettled(config.serverId)
+  }, [fetchStatus, watchUntilSettled, t])
+
+  const handleRemove = useCallback(async (serverId: string) => {
+    try {
+      await removeMcpServer(serverId)
+      await fetchStatus()
+    } catch (err) {
+      setMcpError((err as Error).message)
+      toast.error((err as Error).message)
+    }
   }, [fetchStatus])
 
-  const handleRemove = useCallback((serverId: string) => {
-    removeMcpServer(serverId)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
-  }, [fetchStatus])
-
-  const handleRestart = useCallback((serverId: string) => {
-    restartMcpServer(serverId)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
-  }, [fetchStatus])
+  const handleRestart = useCallback(async (serverId: string) => {
+    try {
+      await restartMcpServer(serverId)
+      await fetchStatus()
+      void watchUntilSettled(serverId)
+    } catch (err) {
+      setMcpError((err as Error).message)
+      toast.error(t('mcp.connectFailed', { id: serverId, error: (err as Error).message }))
+    }
+  }, [fetchStatus, watchUntilSettled, t])
 
   return (
     <McpSettings
@@ -482,8 +555,8 @@ export function McpSettingsManager() {
       presets={presets}
       configuredIds={configuredIds}
       onAdd={handleAdd}
-      onRemove={handleRemove}
-      onRestart={handleRestart}
+      onRemove={(id) => { void handleRemove(id) }}
+      onRestart={(id) => { void handleRestart(id) }}
     />
   )
 }

@@ -8,6 +8,8 @@ import { classifyMcpError } from './failure-classifier.js'
 import { resolveNpmCliCommand, buildStdioEnvWithNodePath } from '../platform/resolve-node-cli.js'
 
 const DEFAULT_MCP_TIMEOUT_MS = 60_000
+const STDERR_TAIL_MAX = 4_096
+const NETWORK_RETRY_DELAY_MS = 800
 
 function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -17,6 +19,24 @@ function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): 
       error => { clearTimeout(timer); reject(error) },
     )
   })
+}
+
+function trimStderrTail(chunks: string[]): string {
+  let text = chunks.join('').replace(/\s+$/u, '')
+  if (text.length > STDERR_TAIL_MAX) text = text.slice(-STDERR_TAIL_MAX)
+  return text
+}
+
+function formatConnectError(err: unknown, stderrTail: string): string {
+  const base = err instanceof Error ? err.message : String(err)
+  const classified = classifyMcpError(err)
+  const parts = [base]
+  if (stderrTail) {
+    const compact = stderrTail.replace(/\n+/g, ' | ').slice(0, 500)
+    parts.push(`stderr: ${compact}`)
+  }
+  if (classified.suggestion) parts.push(classified.suggestion)
+  return parts.join(' — ')
 }
 
 export interface McpToolDef {
@@ -31,8 +51,10 @@ export interface McpToolDef {
 
 export interface ConnectedServer {
   client: Client
-  transport: { close(): Promise<void> }
+  transport: { close(): Promise<void>; pid?: number | null }
   serverId: string
+  /** Last stdio stderr bytes captured during connect (for error attribution). */
+  stderrTail?: () => string
 }
 
 export class McpManager {
@@ -62,8 +84,43 @@ export class McpManager {
     )
   }
 
+  /**
+   * Re-read a live config snapshot and connect any servers that are missing
+   * from the in-memory manager — used after fire-and-forget init so a POST
+   * that landed while mgr was still null still gets a connect attempt.
+   * Skips currently connected/connecting entries; retries error/disconnected.
+   * @returns newly registered tools from this reconcile pass
+   */
+  async reconcileFromConfig(live: McpConfig): Promise<Tool[]> {
+    this.config = live
+    this.timeoutMs = live.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS
+    if (!live.enabled) return []
+
+    const added: Tool[] = []
+    for (const [serverId, cfg] of Object.entries(live.servers)) {
+      if (cfg.disabled) continue
+      const state = this.states.get(serverId)
+      if (state?.status === 'connected' || state?.status === 'connecting') continue
+      if (this.connections.has(serverId)) continue
+      const before = new Set(this.tools.map((t) => t.definition.name))
+      await this.connectAndDiscover(serverId, cfg)
+      for (const tool of this.tools) {
+        if (!before.has(tool.definition.name) && tool.definition.name.startsWith(`mcp__${serverId}__`)) {
+          added.push(tool)
+        }
+      }
+    }
+    return added
+  }
+
   getAllTools(): Tool[] {
     return this.tools
+  }
+
+  /** Tools belonging to one server (by `mcp__{id}__` prefix). */
+  getToolsForServer(serverId: string): Tool[] {
+    const prefix = `mcp__${serverId}__`
+    return this.tools.filter((t) => t.definition.name.startsWith(prefix))
   }
 
   getStates(): McpConnectionState[] {
@@ -122,12 +179,17 @@ export class McpManager {
   /**
    * Connect and discover tools for a single server. Public so the REST API can
    * hot-add servers without a full restart.
+   * @returns tools newly registered for this server (empty on failure)
    */
-  async connectAndDiscover(serverId: string, serverConfig: McpServerConfig): Promise<void> {
-    return this._connectAndDiscover(serverId, serverConfig)
+  async connectAndDiscover(serverId: string, serverConfig: McpServerConfig): Promise<Tool[]> {
+    return this._connectAndDiscover(serverId, serverConfig, /*attempt*/ 0)
   }
 
-  private async _connectAndDiscover(serverId: string, serverConfig: McpServerConfig): Promise<void> {
+  private async _connectAndDiscover(
+    serverId: string,
+    serverConfig: McpServerConfig,
+    attempt: number,
+  ): Promise<Tool[]> {
     const transport: 'stdio' | 'sse' = serverConfig.command ? 'stdio' : 'sse'
     this.states.set(serverId, {
       serverId,
@@ -136,11 +198,17 @@ export class McpManager {
       toolCount: 0,
     })
 
+    let stderrTail = ''
     try {
       const server = await this._connectServer(serverId, serverConfig)
+      stderrTail = server.stderrTail?.() ?? ''
       this.connections.set(serverId, server)
 
       try {
+        // Drop prior tools for this server (restart / re-reconcile path).
+        const prefix = `mcp__${serverId}__`
+        this.tools = this.tools.filter((t) => !t.definition.name.startsWith(prefix))
+
         const mcpTools = await this._discoverTools(serverId, server)
 
         const rivetTools = mcpTools.map(mcpDef => {
@@ -169,7 +237,8 @@ export class McpManager {
                 transport,
                 status: 'degraded',
                 toolCount: current?.toolCount ?? 0,
-                error: err instanceof Error ? err.message : String(err),
+                error: formatConnectError(err, ''),
+                errorHint: classified.suggestion,
                 lastConnectedAt: current?.lastConnectedAt,
                 lastErrorClass: classified.class,
                 lastErrorAt: Date.now(),
@@ -188,6 +257,7 @@ export class McpManager {
           toolCount: mcpTools.length,
           lastConnectedAt: Date.now(),
         })
+        return rivetTools
       } catch (err) {
         // Tool discovery failed — close the transport that was just opened
         try { await server.transport.close() } catch { /* best-effort */ }
@@ -196,15 +266,22 @@ export class McpManager {
       }
     } catch (err) {
       const classified = classifyMcpError(err)
+      // One automatic backoff retry for transient/network failures.
+      if (classified.retryable && attempt === 0) {
+        await new Promise((r) => setTimeout(r, NETWORK_RETRY_DELAY_MS))
+        return this._connectAndDiscover(serverId, serverConfig, 1)
+      }
       this.states.set(serverId, {
         serverId,
         transport,
         status: 'error',
         toolCount: 0,
-        error: err instanceof Error ? err.message : String(err),
+        error: formatConnectError(err, stderrTail),
+        errorHint: classified.suggestion,
         lastErrorClass: classified.class,
         lastErrorAt: Date.now(),
       })
+      return []
     }
   }
 
@@ -220,6 +297,9 @@ export class McpManager {
       // MCP SDK hardcodes shell:false — rewrite bare npx/npm to node+cli.js so
       // Windows GUI / bundled-node launches don't ENOENT on npx.cmd.
       const resolved = resolveNpmCliCommand(cfg.command, cfg.args ?? [])
+      const bare = cfg.command.replace(/\\/g, '/').split('/').pop()?.replace(/\.(cmd|bat|exe)$/i, '').toLowerCase()
+      const fellBackToBareNpx = (bare === 'npx' || bare === 'npm')
+        && resolved.command === cfg.command
       const env = buildStdioEnvWithNodePath(
         cfg.env as Record<string, string> | undefined,
         { getDefaultEnvironment },
@@ -231,8 +311,34 @@ export class McpManager {
         cwd: cfg.cwd,
         stderr: 'pipe',
       })
-      await withTimeout(client.connect(transport), `MCP connect ${serverId}`, this.timeoutMs)
-      return { client, transport, serverId }
+      // Attach stderr listeners BEFORE connect so early bootstrap errors are kept.
+      const stderrChunks: string[] = []
+      const stderrStream = transport.stderr as { on?(event: string, cb: (chunk: Buffer | string) => void): void } | null
+      if (stderrStream && typeof stderrStream.on === 'function') {
+        stderrStream.on('data', (chunk: Buffer | string) => {
+          const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+          stderrChunks.push(text)
+          while (stderrChunks.join('').length > STDERR_TAIL_MAX) stderrChunks.shift()
+        })
+      }
+      try {
+        await withTimeout(client.connect(transport), `MCP connect ${serverId}`, this.timeoutMs)
+      } catch (err) {
+        if (fellBackToBareNpx) {
+          const msg = err instanceof Error ? err.message : String(err)
+          throw new Error(
+            `${msg} — npx/npm-cli.js was not found next to this Node binary `
+            + `(${process.execPath}); packaged builds need fetch-node-runtime to bundle npm`,
+          )
+        }
+        throw err
+      }
+      return {
+        client,
+        transport,
+        serverId,
+        stderrTail: () => trimStderrTail(stderrChunks),
+      }
     } else if (cfg.url) {
       const { StreamableHTTPClientTransport } = await import(
         '@modelcontextprotocol/sdk/client/streamableHttp.js'

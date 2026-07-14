@@ -415,12 +415,25 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // Initialize MCP manager asynchronously — dynamic import keeps the MCP SDK
   // out of the cold /health import graph. Fire-and-forget so listen isn't blocked.
+  // Use live loadConfig().mcp (not the startup ctx snapshot) so servers added
+  // while this IIFE is still loading are not lost; reconcileFromConfig after
+  // initialize() picks up anything POSTed before mgr was assigned.
   void (async () => {
     try {
       const { McpManager } = await import('../mcp/manager.js')
-      const mgr = new McpManager(ctx.config.mcp)
+      const liveMcp = loadConfig().mcp
+      const mgr = new McpManager(liveMcp)
       await mgr.initialize()
+      // Race heal: POST /mcp/servers while mgr was null already wrote disk —
+      // reconnect anything missing from the in-memory states.
+      const reconciled = await mgr.reconcileFromConfig(loadConfig().mcp)
       sharedRuntime.mcpManager = mgr
+      if (reconciled.length > 0) {
+        sharedRuntime.sessions?.injectMcpTools(reconciled)
+      } else if (mgr.getAllTools().length > 0) {
+        // Sessions created during init may have missed the first tool snapshot.
+        sharedRuntime.sessions?.injectMcpTools(mgr.getAllTools())
+      }
       serverLogger.warn(`MCP: ${mgr.getStates().filter(s => s.status === 'connected').length} servers connected, ${mgr.getAllTools().length} tools`)
     } catch (err) {
       serverLogger.warn('MCP initialization failed:', { error: (err as Error)?.message ?? String(err) })
@@ -532,7 +545,11 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   Object.assign(routes, buildProjectDocsRoutes(apiToken))
 
   // MCP routes: server management + live status for the desktop MCP settings UI.
-  Object.assign(routes, buildMcpRoutes(() => sharedRuntime.mcpManager, apiToken))
+  Object.assign(routes, buildMcpRoutes({
+    getMcpManager: () => sharedRuntime.mcpManager,
+    onToolsReady: (tools) => sharedRuntime.sessions?.injectMcpTools(tools),
+    apiToken,
+  }))
 
   // Plugin routes: presets + install/enable/remove for desktop plugin market UI.
   Object.assign(routes, buildPluginRoutes(apiToken))

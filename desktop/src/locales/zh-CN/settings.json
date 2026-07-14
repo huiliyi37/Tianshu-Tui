@@ -532,7 +532,7 @@
     "toolsFailed": "获取工具列表失败",
     "recommended": "推荐集成",
     "presetsLoading": "加载预设中…",
-    "restartNote": "新增的工具需重启会话才对已运行会话生效；密钥以明文存于 config.json（与 provider 密钥一致）。",
+    "restartNote": "连接器启用后工具会对当前会话热注入；密钥以明文存于 config.json（与 provider 密钥一致）。",
     "addCustom": "+ 添加自定义 MCP 服务器",
     "serverId": "服务器 ID",
     "serverIdPlaceholder": "如: filesystem",
@@ -547,6 +547,17 @@
     "urlPlaceholder": "如: http://localhost:3001/sse",
     "adding": "添加中…",
     "add": "添加",
-    "addFailed": "添加失败：{{error}}"
+    "addFailed": "添加失败：{{error}}",
+    "addOk": "已添加 {{id}}，正在连接…",
+    "connectedOk": "{{id}} 已连接 · {{tools}} 个工具可用（当前会话已可用）",
+    "connectFailed": "{{id}} 连接失败：{{error}}",
+    "retry": "重试",
+    "hints": {
+      "config": "检查命令路径 / npx 是否可用，或封版环境是否已捆绑 Node/npm",
+      "auth": "检查 API Key / Token 是否正确",
+      "network": "网络错误，可点重试",
+      "protocol": "协议不兼容，检查 MCP 服务器版本",
+      "tool_error": "查看错误详情"
+    }
   }
 }

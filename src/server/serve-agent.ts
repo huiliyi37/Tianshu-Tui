@@ -567,6 +567,15 @@ export function buildManagedAgent(
     delegateWorker: (input, opts) => delegateWorkerOnCoordinator(stores.refs.coordinator, input, opts),
     // P0-2: plan_task 成功后 onToolResult 通过此方法读取 TodoStore 发 todo_state SSE
     getTodos: () => stores.refs.todoStore.read(),
+    // Hot-inject MCP tools discovered after this agent was built (mid-session
+    // connector enable). register is Map.set-idempotent; updateTools refreshes
+    // the prompt tool list the same way attachLspTools does for LSP tools.
+    registerExternalTools: (tools) => {
+      for (const tool of tools) {
+        stores.toolRegistry.register(tool)
+      }
+      agent.updateTools()
+    },
   }
 }
 

@@ -464,6 +464,7 @@ export interface McpConnectionState {
   transport?: McpTransport
   toolCount: number
   error?: string
+  errorHint?: string
   lastErrorClass?: string
   lastConnectedAt?: number
 }
@@ -472,6 +473,8 @@ export interface McpStatusResponse {
   servers: McpConnectionState[]
   totalTools: number
   enabled: boolean
+  /** False while the sidecar MCP manager is still booting. */
+  managerReady?: boolean
 }
 
 export interface McpServerConfig {

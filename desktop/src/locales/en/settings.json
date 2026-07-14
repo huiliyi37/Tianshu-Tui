@@ -532,7 +532,7 @@
     "toolsFailed": "Failed to fetch tool list",
     "recommended": "Recommended integrations",
     "presetsLoading": "Loading presets…",
-    "restartNote": "Newly added tools require a session restart to take effect in running sessions; keys are stored in plaintext in config.json (same as provider keys).",
+    "restartNote": "Tools are hot-injected into the current session after a connector connects; keys are stored in plaintext in config.json (same as provider keys).",
     "addCustom": "+ Add custom MCP server",
     "serverId": "Server ID",
     "serverIdPlaceholder": "e.g. filesystem",
@@ -547,6 +547,17 @@
     "urlPlaceholder": "e.g. http://localhost:3001/sse",
     "adding": "Adding…",
     "add": "Add",
-    "addFailed": "Failed to add: {{error}}"
+    "addFailed": "Failed to add: {{error}}",
+    "addOk": "Added {{id}}, connecting…",
+    "connectedOk": "{{id}} connected · {{tools}} tools (available in current session)",
+    "connectFailed": "{{id}} failed to connect: {{error}}",
+    "retry": "Retry",
+    "hints": {
+      "config": "Check the command path / npx availability, or whether Node/npm is bundled in the packaged app",
+      "auth": "Check that the API key / token is correct",
+      "network": "Network error — retry may succeed",
+      "protocol": "Protocol mismatch — check the MCP server version",
+      "tool_error": "See the error details"
+    }
   }
 }
