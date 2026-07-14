@@ -4,6 +4,7 @@
  * for AgentLoop / tools / Meridian / council / MCP SDK graph.
  */
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { activityProgressLine } from '../tools/worker-activity-stream.js'
 import type { DelegateWorkerInput, DelegateActivityUpdate, ManagedAgent, RuntimeSessionManager } from './session-manager.js'
 import { SessionPersist } from '../agent/session-persist.js'
@@ -42,6 +43,8 @@ import type { McpManager } from '../mcp/manager.js'
 import {
   type ServeContext,
   type ResolvedModelSpec,
+  type HistoryRestoreInfo,
+  resolveServeContext,
   resolveModelSpec,
   resolveModelSpecWithReload,
   isModelSpecUsable,
@@ -171,10 +174,27 @@ export function disposeSharedCwdResources(shared: SharedRuntime): void {
 }
 
 /**
- * A resolved provider/model/auth tuple for one model id — the cross-provider
- * lookup result that switchModel rebuilds an agent on. Mirrors the resolution
- * logic in bootstrap.switchAgentRuntime (provider/OAuth/apiKey handling).
+ * Per-session, model-independent pieces. Built once and reused across model
+ * rebuilds so switchModel preserves conversation (same SessionContext) and
+ * shared stores (claims/file-history/playbook/tools/ledgers).
  */
+interface SessionStores {
+  persist: SessionPersist
+  claimStore: ReturnType<SessionPersist['createClaimStore']>
+  fileHistory: FileHistory
+  toolRegistry: ReturnType<typeof createDefaultToolRegistry>
+  session: SessionContext
+  taskLedger: ReturnType<typeof createTaskLedger>
+  ownershipLedger: ReturnType<typeof createOwnershipLedger>
+  /** Outcome of the boot-time history restore — lets the session layer warn
+   *  when the UI shows history but the model context came back empty. */
+  historyRestore: HistoryRestoreInfo
+  /** RuntimeRefs 在 createInteractiveToolRegistry 中被工具体内闭包持有；
+   *  Wave C: assembleAgentLoop 通过 createAgentRuntime 装配 coordinator 后
+   *  回写 refs.coordinator，让 5 个 coordinator 依赖工具激活。 */
+  refs: RuntimeRefs
+}
+
 function buildSessionStores(
   ctx: ServeContext,
   cwd: string,
