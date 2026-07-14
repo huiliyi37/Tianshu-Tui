@@ -1,6 +1,10 @@
 // Command palette model (Q4). `filterCommands` is a pure fuzzy filter so it can
 // be unit-tested without React.
 
+/** 「更多」等入口 → 命令面板。palette 开关是 App.tsx 本地 state，经 window
+ *  事件桥接，避免为一个布尔值把 state 提升进全局 store。 */
+export const OPEN_PALETTE_EVENT = 'tianshu:open-palette'
+
 export interface Command {
   id: string
   label: string

@@ -196,7 +196,11 @@
     }
   },
   "timeline": {
-    "showEarlier": "显示更早的 {{count}} 步"
+    "showEarlier": "显示更早的 {{count}} 步",
+    "worked": "已处理 {{steps}} 步",
+    "workedThinking": "已处理 {{steps}} 步（思考）",
+    "workedTools": "已处理 {{steps}} 步（{{tools}} 个工具）",
+    "workedThinkingTools": "已处理 {{steps}} 步（思考 + {{tools}} 个工具）"
   },
   "tool": {
     "truncated": "…(已截断 {{count}} 字)",

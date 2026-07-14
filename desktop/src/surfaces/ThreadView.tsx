@@ -2056,9 +2056,22 @@ function MsgBlock(props: {
         </div>
       )}
       <div className="msg-body" ref={ref}>
+        {children}
+      </div>
+      {/* Codex 对标（Wave 3）：消息底部动作行（悬停显现）——复制 / 编辑重发 /
+          重新生成。原浮动角标按钮下移，处理器不变。 */}
+      <div className="msg-action-row" aria-hidden={false}>
+        <button
+          className="msg-action-btn"
+          onClick={copy}
+          aria-label={copied ? t('copied') : t('copy')}
+          title={copied ? t('copied') : t('copy')}
+        >
+          {copied ? '✓' : '⎘'}
+        </button>
         {canEdit && onEdit && (
           <button
-            className="msg-edit-btn"
+            className="msg-action-btn"
             onClick={onEdit}
             title={t('block.editTitle')}
             aria-label={t('block.edit')}
@@ -2068,7 +2081,7 @@ function MsgBlock(props: {
         )}
         {onRegenerate && (
           <button
-            className="msg-regen-btn"
+            className="msg-action-btn"
             onClick={onRegenerate}
             title={t('block.regenerateTitle')}
             aria-label={t('block.regenerate')}
@@ -2076,15 +2089,6 @@ function MsgBlock(props: {
             ↻
           </button>
         )}
-        <button
-          className="msg-copy-btn"
-          onClick={copy}
-          aria-label={copied ? t('copied') : t('copy')}
-          title={copied ? t('copied') : t('copy')}
-        >
-          {copied ? '✓' : '⎘'}
-        </button>
-        {children}
       </div>
     </div>
   )

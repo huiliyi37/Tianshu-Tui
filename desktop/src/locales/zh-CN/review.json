@@ -6,6 +6,13 @@
   },
   "collapse": "收起",
   "collapseTitle": "收起审查面板 (Cmd+Shift+B)",
+  "launcher": {
+    "files": "文件",
+    "browser": "浏览器",
+    "terminal": "终端",
+    "changes": "变更",
+    "tasks": "任务"
+  },
   "walkthrough": {
     "proTitle": "走查回放是 Pro 功能",
     "proPitch": "升级 Pro 解锁桌面自动化运行的逐步回放：每步截图、UI 变化摘要与失败原因，像看录像一样审查 agent 的工作。",

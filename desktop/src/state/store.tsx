@@ -34,6 +34,11 @@ import type { MentionKind } from '../lib/mention-input'
 // automations (was schedule), attention (was inbox), settings, git.
 export type Surface = 'home' | 'workspace' | 'mission' | 'automations' | 'attention' | 'settings' | 'skills' | 'git' | 'insights' | 'delegation' | 'council' | 'hooks'
 
+/** Codex 对标（IA 收敛）：侧边栏只暴露高频入口；其余 surface 保留类型与路由
+ *  能力，仅从侧边栏导航移除，经命令面板（Cmd+K）或 Cmd+1..9 到达。
+ *  低频集合：mission / insights / delegation / council / hooks / home。 */
+export const SIDEBAR_SURFACES: Surface[] = ['workspace', 'attention', 'automations', 'skills', 'git']
+
 export interface UiState {
   activeSessionId: string | null
   activeProject: string | null // project id (slug derived from cwd)

@@ -168,6 +168,19 @@ export function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
 
   const intent = getApprovalIntent(request.toolName, request.input as Record<string, unknown>)
 
+  // Codex 对标（Wave 3）：编辑类审批在标题行给出 +N −M 变更统计，
+  // 一眼可读「改了多少」再决定 撤销/审核。仅统计展示，决策通道不变。
+  const diffStats = (() => {
+    if (!preview.isDiff) return null
+    let add = 0
+    let del = 0
+    for (const line of preview.text.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) add++
+      else if (line.startsWith('-') && !line.startsWith('---')) del++
+    }
+    return add + del > 0 ? { add, del } : null
+  })()
+
   const approve = () => {
     if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft }, rememberApp)
     else onDecision('approve', undefined, rememberApp)
@@ -197,7 +210,15 @@ export function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
               <div className="approval-inline-subtitle truncate" title={intent.desc}>{intent.desc}</div>
             </div>
           </div>
-          <span className="approval-inline-badge shrink-0">{t('badge')}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            {diffStats && (
+              <span className="approval-diff-stats" title={t('diffStatsTitle', { add: diffStats.add, del: diffStats.del })}>
+                <span className="approval-stat add">+{diffStats.add}</span>
+                <span className="approval-stat del">−{diffStats.del}</span>
+              </span>
+            )}
+            <span className="approval-inline-badge">{t('badge')}</span>
+          </div>
         </div>
 
         {showDetail && !editing && (

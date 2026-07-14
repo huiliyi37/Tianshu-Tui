@@ -172,6 +172,9 @@
     "stop": "Stop",
     "gitQuickActions": "Git quick actions",
     "toggleTerminal": "Toggle terminal (Cmd+J)",
+    "openFiles": "Files (Cmd+P)",
+    "openBrowser": "Browser",
+    "toggleReview": "Toggle right panel (Cmd+Shift+B)",
     "popoutWindow": "Pop out to floating window",
     "more": "More"
   },

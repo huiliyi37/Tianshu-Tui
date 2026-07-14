@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ArrowUp, Mic, Paperclip, Square } from 'lucide-react'
 import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
 import { detectMention, applyMention, formatFileMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
@@ -475,7 +476,7 @@ export const Composer = memo(function Composer(props: {
 
     if (e.key === 'Tab' && e.shiftKey && onSetPlanMode) {
       e.preventDefault()
-      togglePlan()
+      setInteractionMode(interactionMode === 'plan' ? 'agent' : 'plan')
       return
     }
 
@@ -865,26 +866,9 @@ export const Composer = memo(function Composer(props: {
             e.target.value = ''
           }}
         />
-        <button
-          className="btn ghost icon-btn"
-          onClick={() => {
-            if (isTauri()) void openNativeFilePicker()
-            else fileInputRef.current?.click()
-          }}
-          disabled={images.length >= MAX_IMAGES}
-          title={t('selectFile')}
-          aria-label={t('selectFile')}
-        >📎</button>
-        {speechSupported && (
-          <button
-            className={`btn ghost icon-btn ${recording ? 'recording' : ''}`}
-            onClick={toggleRecording}
-            disabled={busy}
-            title={recording ? t('voiceStop') : t('voiceStart')}
-            aria-label={recording ? t('voiceStop') : t('voiceStart')}
-          >🎤</button>
-        )}
       </div>
+      {/* Codex 对标动作行（Wave 2）：+ / 自治级 / 模型 / 星域 … 附件 / 麦克风 /
+          圆形发送。仅重排外观——submit()/mention 序列化路径原封不动。 */}
       <div className="composer-actions">
         <div className="plus-wrap">
           <PlusMenu
@@ -910,11 +894,11 @@ export const Composer = memo(function Composer(props: {
             threadNonEmpty={threadNonEmpty}
           />
         </div>
-        <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
-        <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} threadNonEmpty={threadNonEmpty} />
         {approvalLevel && onSetApprovalLevel && (
           <AutonomyMenu value={approvalLevel} onChange={onSetApprovalLevel} />
         )}
+        <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
+        <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} threadNonEmpty={threadNonEmpty} />
         {contextUsage && <ContextRing usage={contextUsage} />}
         {(onSetPlanMode || onSetAskMode) && (
           <button
@@ -938,14 +922,45 @@ export const Composer = memo(function Composer(props: {
         >
           {sendMode === 'enter' ? '↵' : '⇧↵'}
         </button>
+        <button
+          className="composer-icon-btn"
+          onClick={() => {
+            if (isTauri()) void openNativeFilePicker()
+            else fileInputRef.current?.click()
+          }}
+          disabled={images.length >= MAX_IMAGES}
+          title={t('selectFile')}
+          aria-label={t('selectFile')}
+        >
+          <Paperclip size={15} strokeWidth={1.8} aria-hidden />
+        </button>
+        {speechSupported && (
+          <button
+            className={`composer-icon-btn ${recording ? 'recording' : ''}`}
+            onClick={toggleRecording}
+            disabled={busy}
+            title={recording ? t('voiceStop') : t('voiceStart')}
+            aria-label={recording ? t('voiceStop') : t('voiceStart')}
+          >
+            <Mic size={15} strokeWidth={1.8} aria-hidden />
+          </button>
+        )}
         {busy ? (
           <>
             <button className="btn ghost" onClick={submit} disabled={!canSend}>{t('steer')}</button>
-            <button className="btn ghost danger" onClick={onAbort}>{t('stop')}</button>
+            <button className="composer-send-btn stop" onClick={onAbort} title={t('stop')} aria-label={t('stop')}>
+              <Square size={12} strokeWidth={2} fill="currentColor" aria-hidden />
+            </button>
           </>
         ) : (
-          <button className="btn" onClick={submit} disabled={!canSend}>
-            {planning ? t('generate') : t('send')}
+          <button
+            className="composer-send-btn"
+            onClick={submit}
+            disabled={!canSend}
+            title={planning ? t('generate') : t('send')}
+            aria-label={planning ? t('generate') : t('send')}
+          >
+            <ArrowUp size={16} strokeWidth={2.2} aria-hidden />
           </button>
         )}
       </div>

@@ -82,11 +82,15 @@ export function FileViewer(props: {
   language: string
   startLine?: number
   highlightLines?: number[]
+  /** Codex 对标（Wave 4）：工作区 diff 中新增/修改的行号（新文件计数），
+   *  渲染为绿色底色（复用 DiffView 的 add 底色语义）。 */
+  diffAddedLines?: number[]
 }) {
-  const { content, language, startLine = 1, highlightLines = [] } = props
+  const { content, language, startLine = 1, highlightLines = [], diffAddedLines = [] } = props
   const parentRef = useRef<HTMLDivElement>(null)
   const lines = useMemo(() => content.split(/\r?\n/), [content])
   const highlightSet = useMemo(() => new Set(highlightLines), [highlightLines])
+  const diffAddSet = useMemo(() => new Set(diffAddedLines), [diffAddedLines])
 
   const highlighted = useMemo(() => {
     const shouldHighlight =
@@ -130,13 +134,14 @@ export function FileViewer(props: {
           const i = virtualRow.index
           const lineNum = startLine + i
           const isHighlighted = highlightSet.has(lineNum)
+          const isDiffAdd = diffAddSet.has(lineNum)
           const html = highlightedLines[i] ?? ''
           return (
             <div
               key={virtualRow.key}
               data-index={i}
               ref={virtualizer.measureElement}
-              className={`file-line${isHighlighted ? ' highlighted' : ''}`}
+              className={`file-line${isHighlighted ? ' highlighted' : ''}${isDiffAdd ? ' diff-add' : ''}`}
               style={{
                 position: 'absolute',
                 top: 0,

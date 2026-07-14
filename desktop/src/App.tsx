@@ -20,6 +20,7 @@ import { Toaster } from 'sonner'
 import { WallpaperLayer } from './components/WallpaperLayer'
 import { WallpaperProvider } from './components/WallpaperContext'
 import { useGlobalShortcuts } from './lib/use-global-shortcuts'
+import { OPEN_PALETTE_EVENT } from './lib/commands'
 import { useSurfaceCommands } from './lib/use-surface-commands'
 import { openExternal } from './lib/open-external'
 import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
@@ -47,6 +48,13 @@ export function App() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   useGlobalShortcuts(setPaletteOpen, setShortcutsOpen)
   const commands = useSurfaceCommands()
+
+  // 侧边栏「更多」等入口经 window 事件打开命令面板（低频 surface 的统一入口）。
+  useEffect(() => {
+    const onOpenPalette = () => setPaletteOpen(true)
+    window.addEventListener(OPEN_PALETTE_EVENT, onOpenPalette)
+    return () => window.removeEventListener(OPEN_PALETTE_EVENT, onOpenPalette)
+  }, [])
 
 
   const sidecarDown = health.isError
@@ -394,6 +402,7 @@ export function App() {
       {ui.newSessionOpen && (
         <NewSessionDialog
           defaultCwd={defaultCwd}
+          initialPrompt={ui.newSessionPrompt}
           onCreate={async (input) => {
             try {
               const rec = await createSession.mutateAsync(input)

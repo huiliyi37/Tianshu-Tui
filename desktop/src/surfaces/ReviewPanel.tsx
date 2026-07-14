@@ -25,7 +25,8 @@ import { ChangesTab } from './ChangesTab'
 import { WalkthroughViewer } from '../components/WalkthroughViewer'
 import { useProLicense } from '../lib/use-activation-gate'
 import { isAutonomous } from '../lib/autonomy'
-import { useUiState } from '../state/store'
+import { useUiDispatch, useUiState } from '../state/store'
+import { Folder, Globe, Terminal as TerminalIcon, ChevronRight as ChevronRightIcon } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
   AlertDialog,
@@ -77,7 +78,16 @@ export function ReviewPanel(props: {
   const { t } = useTranslation('review')
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
-  const [tab, setTab] = useState<ReviewTab>('changes')
+  const [tab, setTab] = useState<ReviewTab>('files')
+  const dispatch = useUiDispatch()
+
+  // Codex 对标（Wave 4）：右栏默认渲染资源启动器（文件 ⌘P / 浏览器 ⌘T /
+  // 终端 ⌘J），任何显式导航（tab 请求 / 规划开始 / 新计划落地）都会解除。
+  // 换会话时回到启动器空态。
+  const [launcher, setLauncher] = useState(true)
+  useEffect(() => {
+    setLauncher(true)
+  }, [sessionId])
 
   // External tab-focus requests (e.g. ArtifactCard "Review" in the thread).
   const { reviewTabRequest } = useUiState()
@@ -93,6 +103,7 @@ export function ReviewPanel(props: {
     }
     if (['changes', 'tasks', 'files', 'canvas', 'github', 'browser'].includes(requested)) {
       setTab(requested as ReviewTab)
+      setLauncher(false)
     }
   }, [reviewTabRequest])
 
@@ -158,14 +169,22 @@ export function ReviewPanel(props: {
   // reviewable plan surfaces without a manual tab switch (Cursor 3.0 flow).
   const prevSlug = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (planMode === 'planning') setTab('tasks')
+    if (planMode === 'planning') {
+      setTab('tasks')
+      setLauncher(false)
+    }
   }, [planMode])
   useEffect(() => {
     if (latestPlanSlug && latestPlanSlug !== prevSlug.current) {
       prevSlug.current = latestPlanSlug
       setTab('tasks')
+      setLauncher(false)
     }
   }, [latestPlanSlug])
+  // 有待审批时资源启动器让位给审查视图（badge 在 Changes tab 上）。
+  useEffect(() => {
+    if (pendingApproval) setLauncher(false)
+  }, [pendingApproval])
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
   const [viewMode, setViewMode] = useState<'rendered' | 'raw'>('rendered')
   const [comment, setComment] = useState('')
@@ -294,13 +313,15 @@ export function ReviewPanel(props: {
 
   const tabs = useMemo<TabDef[]>(() => {
     const hasCanvas = canvasArtifacts.length > 0
-    const hasBrowser = artifacts.some((a) => a.kind === 'screenshot')
     const hasGithub = Boolean(session?.worktreeBranch)
 
+    // Codex 对标（Wave 4）：资源为中心——Files/Browser 前置且恒可用，
+    // 审查类 Changes/Tasks 降为次级；Canvas/PR 仍按内容出现。
     const all: TabDef[] = [
+      { id: 'files', label: 'Files', glyph: '📁' },
+      { id: 'browser', label: 'Browser', glyph: '🌐' },
       { id: 'changes', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
       { id: 'tasks', label: 'Tasks', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : (incompleteTasks || null)) },
-      { id: 'files', label: 'Files', glyph: '📁' },
     ]
 
     if (hasCanvas) {
@@ -308,9 +329,6 @@ export function ReviewPanel(props: {
     }
     if (hasGithub) {
       all.push({ id: 'github', label: 'PR', glyph: '🔀' })
-    }
-    if (hasBrowser) {
-      all.push({ id: 'browser', label: 'Browser', glyph: '🌐' })
     }
 
     const filtered = all.filter((t) => enabledTabs.includes(t.id))
@@ -329,6 +347,57 @@ export function ReviewPanel(props: {
       setTab(tabs[0].id)
     }
   }, [tabs, tab])
+
+  // Codex 对标（Wave 4）：空态资源启动器——文件 / 浏览器 / 终端 三主入口，
+  // 变更 / 任务 作为次级链接。选择后进入正常 tab 视图。
+  if (launcher) {
+    const openTab = (id: ReviewTab) => {
+      setTab(id)
+      setLauncher(false)
+    }
+    return (
+      <div className="review flex flex-col h-full relative">
+        <div className="review-launcher">
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              className="review-collapse-capsule-btn review-launcher-collapse"
+              title={t('collapseTitle')}
+            >
+              <span>{t('collapse')}</span>
+              <ChevronRightIcon size={11} strokeWidth={2.5} aria-hidden />
+            </button>
+          )}
+          <div className="review-launcher-menu" role="menu">
+            <button className="review-launcher-item" role="menuitem" onClick={() => openTab('files')}>
+              <Folder size={15} strokeWidth={1.7} aria-hidden />
+              <span className="rl-label">{t('launcher.files')}</span>
+              <kbd>⌘P</kbd>
+            </button>
+            <button className="review-launcher-item" role="menuitem" onClick={() => openTab('browser')}>
+              <Globe size={15} strokeWidth={1.7} aria-hidden />
+              <span className="rl-label">{t('launcher.browser')}</span>
+              <kbd>⌘T</kbd>
+            </button>
+            <button
+              className="review-launcher-item"
+              role="menuitem"
+              onClick={() => dispatch({ type: 'setTerminal', visible: true })}
+            >
+              <TerminalIcon size={15} strokeWidth={1.7} aria-hidden />
+              <span className="rl-label">{t('launcher.terminal')}</span>
+              <kbd>⌘J</kbd>
+            </button>
+          </div>
+          <div className="review-launcher-secondary">
+            <button onClick={() => openTab('changes')}>{t('launcher.changes')}</button>
+            <span aria-hidden>·</span>
+            <button onClick={() => openTab('tasks')}>{t('launcher.tasks')}</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="review flex flex-col h-full relative">

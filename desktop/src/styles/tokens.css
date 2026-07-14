@@ -38,10 +38,10 @@
   --radius-xl: 20px;   /* window-level containers, composer capsule */
   --radius-pill: 999px;
 
-  /* ── Island system (P2) — window is the canvas, panels are floating islands.
-     canvas-bg / island-bg / shadows are refined per theme in themes/*.json;
-     these are safe fallbacks derived from the base palette. */
-  --island-gap: 10px;
+  /* ── Island tokens (legacy P2) — the main chrome is now flat (Codex 对标),
+     but themes/*.json still define these; kept as compat fallbacks for any
+     remaining consumers (dock/modal shadows). */
+  --island-gap: 0px;
   --canvas-bg: var(--bg);
   --island-bg: var(--panel);
   --shadow-island: 0 1px 2px rgb(0 0 0 / 0.2), 0 4px 16px rgb(0 0 0 / 0.15);

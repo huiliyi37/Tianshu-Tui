@@ -55,6 +55,7 @@
     "paren": "（{{value}}）"
   },
   "badge": "需批准",
+  "diffStatsTitle": "变更统计：+{{add}} −{{del}} 行",
   "editCode": "编辑代码",
   "cancelEdit": "取消编辑",
   "editConfig": "编辑配置",

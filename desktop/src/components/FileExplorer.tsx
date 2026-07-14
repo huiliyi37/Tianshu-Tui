@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import {
   ChevronRight,
   ChevronDown,
@@ -16,6 +16,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { listDir, getFileContent, openFile as openFileInSystem } from '../runtime/client'
+import { useFileDiff } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import type { ComposerAttachment } from '../state/store'
 import { FileViewer } from './FileViewer'
@@ -58,6 +59,28 @@ function toAbsolute(relativePath: string, cwd: string): string {
   // 归一化：把相对路径中的 / 和 \ 统一为 cwd 的分隔符
   const normalizedRel = relativePath.replace(/[/\\]/g, separator)
   return cwd.endsWith(separator) ? `${cwd}${normalizedRel}` : `${cwd}${separator}${normalizedRel}`
+}
+
+/** Codex 对标（Wave 4）：从 unified diff 提取新文件计数下的新增/修改行号，
+ *  供 FileViewer 渲染 diff 底色。 */
+function addedLinesFromUnifiedDiff(diff: string): number[] {
+  const added: number[] = []
+  let newLine = 0
+  for (const line of diff.split('\n')) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+    if (hunk) {
+      newLine = Number(hunk[1])
+      continue
+    }
+    if (line.startsWith('+++') || line.startsWith('---')) continue
+    if (line.startsWith('+')) {
+      added.push(newLine)
+      newLine++
+    } else if (!line.startsWith('-') && newLine > 0) {
+      newLine++
+    }
+  }
+  return added
 }
 
 /** Convert an absolute or ./-prefixed path into a path relative to cwd,
@@ -109,6 +132,14 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   const [loadingFile, setLoadingFile] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const treePanelRef = useRef<HTMLDivElement>(null)
+
+  // Codex 对标（Wave 4）：预览文件时顺带取其相对基线的 unified diff，
+  // 命中的新增/修改行在查看器里加绿色底色（只读，不做编辑）。
+  const fileDiff = useFileDiff(previewFile, sessionId)
+  const diffAddedLines = useMemo(
+    () => (fileDiff.data?.diff ? addedLinesFromUnifiedDiff(fileDiff.data.diff) : []),
+    [fileDiff.data],
+  )
 
   // Load root on mount / sessionId change
   const loadDir = useCallback(async (dirPath: string) => {
@@ -407,6 +438,7 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
                 content={fileContent.content}
                 language={fileContent.language}
                 startLine={fileContent.startLine}
+                diffAddedLines={diffAddedLines}
               />
             )}
           </>

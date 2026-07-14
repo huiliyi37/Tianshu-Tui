@@ -79,6 +79,18 @@ export function useGlobalShortcuts(
         return
       }
 
+      // Codex 对标（Wave 4）：Cmd+P → 右栏文件面板；Cmd+T → 右栏浏览器面板。
+      if (mod && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault()
+        dispatch({ type: 'requestReviewTab', tab: 'files' })
+        return
+      }
+      if (mod && !e.shiftKey && (e.key === 't' || e.key === 'T')) {
+        e.preventDefault()
+        dispatch({ type: 'requestReviewTab', tab: 'browser' })
+        return
+      }
+
       // Cmd+O → cycle thread view mode (normal → verbose → summary)
       if (mod && !e.shiftKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault()

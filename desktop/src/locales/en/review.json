@@ -6,6 +6,13 @@
   },
   "collapse": "Collapse",
   "collapseTitle": "Collapse review panel (Cmd+Shift+B)",
+  "launcher": {
+    "files": "Files",
+    "browser": "Browser",
+    "terminal": "Terminal",
+    "changes": "Changes",
+    "tasks": "Tasks"
+  },
   "walkthrough": {
     "proTitle": "Walkthrough replay is a Pro feature",
     "proPitch": "Upgrade to Pro to unlock step-by-step replay of desktop automation runs: per-step screenshots, UI change summaries and failure causes — review the agent's work like a recording.",

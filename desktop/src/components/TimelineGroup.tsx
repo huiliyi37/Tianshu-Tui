@@ -22,15 +22,16 @@ export function TimelineGroupImpl({ blocks, children, forceOpen }: { blocks: Con
     if (forceOpen !== undefined) setCollapsed(!forceOpen)
   }, [forceOpen])
 
+  // Codex 对标（Wave 3）：折叠行读作「已处理 N 步（思考 + X 工具）」。
+  // 注：块级无时间戳（event-reducer 不动），无法给出 Codex 的 Xm Ys 时长。
   const summary = useMemo(() => {
-    // just a simple count
     const tools = blocks.filter(b => b.kind === 'tool').length
     const thinking = blocks.filter(b => b.kind === 'thinking').length
-    if (tools > 0 && thinking > 0) return `Worked for ${blocks.length} steps (Thinking + ${tools} tools)`
-    if (tools > 0) return `Worked for ${blocks.length} steps (${tools} tools)`
-    if (thinking > 0) return `Worked for ${blocks.length} steps (Thinking)`
-    return `Worked for ${blocks.length} steps`
-  }, [blocks])
+    if (tools > 0 && thinking > 0) return t('timeline.workedThinkingTools', { steps: blocks.length, tools })
+    if (tools > 0) return t('timeline.workedTools', { steps: blocks.length, tools })
+    if (thinking > 0) return t('timeline.workedThinking', { steps: blocks.length })
+    return t('timeline.worked', { steps: blocks.length })
+  }, [blocks, t])
 
   const childArray = Children.toArray(children)
   const hiddenCount = childArray.length - TIMELINE_WINDOW

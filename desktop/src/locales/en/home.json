@@ -1,4 +1,36 @@
 {
+  "welcome": {
+    "title": "What should we work on in {{project}}?",
+    "titleNoProject": "What should we work on today?",
+    "noProject": "Pick a project",
+    "placeholder": "Describe a task — Tianshu will plan, code and self-test…",
+    "newTask": "New task",
+    "send": "Send",
+    "hintPalette": "Command palette",
+    "hintNew": "New task",
+    "cards": {
+      "explore": {
+        "title": "Explore",
+        "desc": "Map the codebase structure and key flows",
+        "prompt": "Help me understand this codebase: overall structure, core modules and key execution flows."
+      },
+      "build": {
+        "title": "Build a feature",
+        "desc": "From requirement to implementation and self-test",
+        "prompt": "I want to build a new feature: "
+      },
+      "review": {
+        "title": "Review & improve",
+        "desc": "Review current changes and suggest improvements",
+        "prompt": "Review the current working-tree changes, point out issues and suggest improvements."
+      },
+      "fix": {
+        "title": "Fix failures",
+        "desc": "Locate and fix failing tests or builds",
+        "prompt": "Run the tests and build, locate the failures and fix them."
+      }
+    }
+  },
   "brand": {
     "title": "Tianshu · tiānshū"
   },

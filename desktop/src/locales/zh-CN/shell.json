@@ -172,6 +172,9 @@
     "stop": "停止",
     "gitQuickActions": "Git 快捷操作",
     "toggleTerminal": "切换终端 (Cmd+J)",
+    "openFiles": "文件 (Cmd+P)",
+    "openBrowser": "浏览器",
+    "toggleReview": "切换右侧面板 (Cmd+Shift+B)",
     "popoutWindow": "弹出为独立小窗",
     "more": "更多"
   },

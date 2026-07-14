@@ -55,6 +55,7 @@
     "paren": "({{value}})"
   },
   "badge": "Approval required",
+  "diffStatsTitle": "Change stats: +{{add}} −{{del}} lines",
   "editCode": "Edit code",
   "cancelEdit": "Cancel edit",
   "editConfig": "Edit config",

@@ -196,7 +196,11 @@
     }
   },
   "timeline": {
-    "showEarlier": "Show {{count}} earlier steps"
+    "showEarlier": "Show {{count}} earlier steps",
+    "worked": "Worked for {{steps}} steps",
+    "workedThinking": "Worked for {{steps}} steps (Thinking)",
+    "workedTools": "Worked for {{steps}} steps ({{tools}} tools)",
+    "workedThinkingTools": "Worked for {{steps}} steps (Thinking + {{tools}} tools)"
   },
   "tool": {
     "truncated": "…(truncated {{count}} chars)",

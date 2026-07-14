@@ -17,6 +17,7 @@ import { JobsDock } from '../components/JobsDock'
 import { DelegationOverlay } from '../components/DelegationOverlay'
 import { summarizeDelegation } from '../components/DelegationTree'
 import { ThreadTabs } from '../components/ThreadTabs'
+import { HomeWelcome } from '../components/HomeWelcome'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
@@ -337,55 +338,7 @@ export function WorkspaceSurface() {
                     terminalVisible={ui.terminalVisible}
                   />
                 ) : (
-                   <div className="empty thread-empty onboard">
-                     <div className="onboard-glyph" aria-hidden>✦</div>
-                     <h2 className="onboard-title">{t('onboard.title')}</h2>
-                     <p className="onboard-subtitle">{t('onboard.subtitle')}</p>
-                     
-                     <div className="onboard-templates">
-                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: t('onboard.diagnosePrompt') })}>
-                         <span className="tc-emoji">🔍</span>
-                         <div className="tc-text">
-                           <span className="tc-title">{t('onboard.diagnoseTitle')}</span>
-                           <span className="tc-desc">{t('onboard.diagnoseDesc')}</span>
-                         </div>
-                       </button>
-                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: t('onboard.featurePrompt') })}>
-                         <span className="tc-emoji">⚡</span>
-                         <div className="tc-text">
-                           <span className="tc-title">{t('onboard.featureTitle')}</span>
-                           <span className="tc-desc">{t('onboard.featureDesc')}</span>
-                         </div>
-                       </button>
-                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: t('onboard.bugPrompt') })}>
-                         <span className="tc-emoji">🐛</span>
-                         <div className="tc-text">
-                           <span className="tc-title">{t('onboard.bugTitle')}</span>
-                           <span className="tc-desc">{t('onboard.bugDesc')}</span>
-                         </div>
-                       </button>
-                     </div>
-
-                     <div className="onboard-actions">
-                       <button className="btn btn-primary" onClick={() => dispatch({ type: 'openNew', open: true })}>
-                         {t('onboard.customNew')}
-                       </button>
-                     </div>
-                     <div className="onboard-hints">
-                       <div className="onboard-hint">
-                         <kbd>⌘K</kbd>
-                         <span>{t('onboard.hintPalette')}</span>
-                       </div>
-                       <div className="onboard-hint">
-                         <kbd>⌘N</kbd>
-                         <span>{t('onboard.hintNew')}</span>
-                       </div>
-                       <div className="onboard-hint">
-                         <kbd>/</kbd>
-                         <span>{t('onboard.hintSlash')}</span>
-                       </div>
-                     </div>
-                   </div>
+                  <HomeWelcome />
                 )}
               </Suspense>
             </div>
@@ -660,9 +613,10 @@ function WorkspaceHeader({
 
   return (
     <header className="workspace-header" data-tauri-drag-region>
+      {/* Codex 对标（Wave 3）：面包屑 header——项目 › 任务标题。 */}
       <div className="workspace-header-path">
         <span className="project-name">{projectName}</span>
-        <span className="path-sep">/</span>
+        <span className="path-sep">›</span>
         <span className="page-name">{pageName}</span>
         {onThread && (
           <div className="workspace-header-status-line">
@@ -747,16 +701,56 @@ function WorkspaceHeader({
             </svg>
           </button>
         )}
-        <button
-          className={`header-action-btn ${ui.terminalVisible ? 'active' : ''}`}
-          title={t('header.toggleTerminal')}
-          onClick={() => dispatch({ type: 'setTerminal', visible: !ui.terminalVisible })}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <polyline points="4 17 10 11 4 5" />
-            <line x1="12" y1="19" x2="20" y2="19" />
-          </svg>
-        </button>
+        {/* Codex 对标（Wave 3）：右上角面板切换簇——文件 / 浏览器 / 终端 +
+            右栏展开。文件/浏览器经 requestReviewTab 直达右栏对应 tab。 */}
+        <div className="header-panel-cluster" role="group" aria-label={t('header.toggleReview')}>
+          <button
+            className="header-action-btn"
+            title={t('header.openFiles')}
+            aria-label={t('header.openFiles')}
+            onClick={() => dispatch({ type: 'requestReviewTab', tab: 'files' })}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+          </button>
+          <button
+            className="header-action-btn"
+            title={t('header.openBrowser')}
+            aria-label={t('header.openBrowser')}
+            onClick={() => dispatch({ type: 'requestReviewTab', tab: 'browser' })}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+          </button>
+          <button
+            className={`header-action-btn ${ui.terminalVisible ? 'active' : ''}`}
+            title={t('header.toggleTerminal')}
+            onClick={() => dispatch({ type: 'setTerminal', visible: !ui.terminalVisible })}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+          </button>
+          <button
+            className={`header-action-btn ${ui.reviewVisible ? 'active' : ''}`}
+            title={t('header.toggleReview')}
+            aria-label={t('header.toggleReview')}
+            onClick={() => {
+              dispatch({ type: 'setReview', visible: !ui.reviewVisible })
+              dispatch({ type: 'setReviewManual', on: true })
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+          </button>
+        </div>
         {onThread && isTauri() && (
           <button
             className="header-action-btn"
