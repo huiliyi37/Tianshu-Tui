@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">天府</title>
+  <desc id="desc">A refined heavenly treasury icon with a quiet palace silhouette.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#263044;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.soft{fill:#F6F0E4}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="soft" d="M18 30l14-10.5L46 30H18z"/>
+  <path class="ring" d="M18 30l14-10.5L46 30H18z"/>
+  <path class="line" d="M22 30v17h20V30M27.5 47V35h9v12M20 47h24"/>
+  <path class="gold" d="M32 14l1.9 4.1 4.4 1.7-4.4 1.7-1.9 4.1-1.9-4.1-4.4-1.7 4.4-1.7L32 14z"/>
+  <path class="ring" d="M32 14l1.9 4.1 4.4 1.7-4.4 1.7-1.9 4.1-1.9-4.1-4.4-1.7 4.4-1.7L32 14z"/>
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">天梁</title>
+  <desc id="desc">A refined celestial beam icon with an arched bridge and guiding star.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#E8EEF7;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.soft{fill:none}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="line" d="M15.5 42c4.6-11.2 10.1-16.8 16.5-16.8S43.9 30.8 48.5 42"/>
+  <path class="line" d="M20.5 42h23M25.5 42V31.5M32 42V26.5M38.5 42V31.5"/>
+  <path class="soft" d="M32 12l2.5 5.5 5.8 2.3-5.8 2.3-2.5 5.5-2.5-5.5-5.8-2.3 5.8-2.3L32 12z"/>
+  <path class="ring" d="M32 12l2.5 5.5 5.8 2.3-5.8 2.3-2.5 5.5-2.5-5.5-5.8-2.3 5.8-2.3L32 12z"/>
+</svg>

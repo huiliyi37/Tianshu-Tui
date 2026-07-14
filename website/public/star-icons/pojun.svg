@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">破军</title>
+  <desc id="desc">A refined forceful comet icon with a broken blade motif.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#263044;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.soft{fill:#F6F0E4}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="line" d="M15 47c8.4-14 19.6-24.1 34-30"/>
+  <path class="line" d="M17 36.5c6.7-7.4 14.4-12.7 24.5-16"/>
+  <path class="soft" d="M38 17l10 2-2 10-8 2-5-6 5-8z"/>
+  <path class="ring" d="M38 17l10 2-2 10-8 2-5-6 5-8z"/>
+  <path class="line" d="M27.5 36.5l5.4-5.4M20.5 43.5l5.3-5.3M25.2 41.6l-3.8-3.8M34.7 32.1l-3.8-3.8"/>
+  <circle class="gold" cx="16" cy="48" r="2.4"/>
+</svg>

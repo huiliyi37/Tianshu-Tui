@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">天机</title>
+  <desc id="desc">A clean celestial mechanism icon with smooth orbits and a small central hub.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#E8EEF7;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.soft{fill:none}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="line" d="M13.5 35.5C21 23 35 18.2 50.5 24.5"/>
+  <path class="line" d="M12 28.5c11.2 8.2 25.4 9.6 40 3.5"/>
+  <circle class="soft" cx="32" cy="32" r="7.4"/>
+  <circle class="ring" cx="32" cy="32" r="7.4"/>
+  <path class="line" d="M32 21.5v5M32 37.5v5M21.5 32h5M37.5 32h5"/>
+  <circle class="gold" cx="18.5" cy="41.5" r="2.6"/>
+  <circle class="gold" cx="48" cy="23.5" r="2.6"/>
+</svg>

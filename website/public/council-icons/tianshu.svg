@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">天枢</title>
+  <desc id="desc">A refined pivot-star icon with a central axis and compass-like hub.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#E8EEF7;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.soft{fill:none}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="line" d="M32 12.5v11M32 40.5v11M12.5 32h11M40.5 32h11"/>
+  <path class="soft" d="M32 18l6.2 14L32 46l-6.2-14L32 18z"/>
+  <path class="ring" d="M32 18l6.2 14L32 46l-6.2-14L32 18z"/>
+  <circle class="gold" cx="32" cy="32" r="5.2"/>
+  <circle class="ring" cx="32" cy="32" r="5.2"/>
+  <circle class="gold" cx="47" cy="17" r="2.4"/>
+</svg>

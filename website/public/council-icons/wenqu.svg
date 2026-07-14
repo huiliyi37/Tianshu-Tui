@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">文曲</title>
+  <desc id="desc">A literary flowing-star icon with smooth scroll lines and a comet-like curve.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#E8EEF7;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.thin{fill:none;stroke:#E8EEF7;stroke-width:2.2;stroke-linecap:round}.soft{fill:none}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="line" d="M17 24h21.5c4.9 0 8.5 3.3 8.5 7.8 0 4.9-4 8.2-9.2 8.2H25.5c-4.1 0-7 2.7-7.5 6.4"/>
+  <path class="thin" d="M24 30h15.5M24 36h12"/>
+  <path class="soft" d="M42.5 15.5l2.7 5.8 6.3 2.7-6.3 2.7-2.7 5.8-2.7-5.8-6.3-2.7 6.3-2.7 2.7-5.8z"/>
+  <path class="ring" d="M42.5 15.5l2.7 5.8 6.3 2.7-6.3 2.7-2.7 5.8-2.7-5.8-6.3-2.7 6.3-2.7 2.7-5.8z"/>
+  <circle class="gold" cx="18.5" cy="46" r="2.4"/>
+</svg>

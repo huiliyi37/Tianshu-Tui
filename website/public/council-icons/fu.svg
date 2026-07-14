@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">辅</title>
+  <desc id="desc">A companion star icon with one large star and one smaller supporting star.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#E8EEF7;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.soft{fill:none}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="line" d="M18.5 42.5C27 34 36.2 30.8 47.5 32"/>
+  <path class="soft" d="M38 16.5l4.3 9.2 9.2 4.3-9.2 4.3L38 43.5l-4.3-9.2-9.2-4.3 9.2-4.3L38 16.5z"/>
+  <path class="ring" d="M38 16.5l4.3 9.2 9.2 4.3-9.2 4.3L38 43.5l-4.3-9.2-9.2-4.3 9.2-4.3L38 16.5z"/>
+  <path class="gold" d="M19 29.5l2.2 4.8 4.8 2.2-4.8 2.2-2.2 4.8-2.2-4.8-4.8-2.2 4.8-2.2 2.2-4.8z"/>
+  <path class="ring" d="M19 29.5l2.2 4.8 4.8 2.2-4.8 2.2-2.2 4.8-2.2-4.8-4.8-2.2 4.8-2.2 2.2-4.8z"/>
+</svg>

@@ -26,3 +26,8 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Website
+website/.next/
+website/dist/
+website/node_modules/

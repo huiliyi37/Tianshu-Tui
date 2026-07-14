@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">天璇</title>
+  <desc id="desc">A clean rotating jewel star icon with a smooth inner spiral.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#263044;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.soft{fill:#F6F0E4}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="line" d="M46.5 30.5c.3 8.8-7.7 15.4-16.1 13.4-8.9-2.1-13-12.1-7.4-19.1 4.6-5.8 13.2-5.7 17.4-.2 3.6 4.7 1.2 11.5-4.6 12.8-4 1-8-1.7-8.3-5.7"/>
+  <path class="soft" d="M32 16.5l5 10.2L47.5 32 37 37.3l-5 10.2-5-10.2L16.5 32 27 26.7 32 16.5z"/>
+  <path class="ring" d="M32 16.5l5 10.2L47.5 32 37 37.3l-5 10.2-5-10.2L16.5 32 27 26.7 32 16.5z"/>
+  <circle class="gold" cx="32" cy="32" r="3.2"/>
+</svg>

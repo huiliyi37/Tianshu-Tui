@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">天权</title>
+  <desc id="desc">A refined celestial authority icon with balanced star scales.</desc>
+  <style>
+    .ring,.line{fill:none;stroke:#E8EEF7;stroke-linecap:round;stroke-linejoin:round}.ring{stroke-width:2.4}.line{stroke-width:2.6}.soft{fill:none}.gold{fill:#C9A24D}
+  </style>
+  <circle class="ring" cx="32" cy="32" r="23"/>
+  <path class="line" d="M32 17.5v28M21 24.5h22M21 24.5l-7 14h14l-7-14zM43 24.5l-7 14h14l-7-14zM24 47h16"/>
+  <path class="gold" d="M32 12l1.9 4.1 4.4 1.7-4.4 1.7-1.9 4.1-1.9-4.1-4.4-1.7 4.4-1.7L32 12z"/>
+  <path class="ring" d="M32 12l1.9 4.1 4.4 1.7-4.4 1.7-1.9 4.1-1.9-4.1-4.4-1.7 4.4-1.7L32 12z"/>
+</svg>
