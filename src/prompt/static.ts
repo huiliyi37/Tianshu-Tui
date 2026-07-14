@@ -123,6 +123,11 @@ const BASE_PROMPT = `<identity>
 检索工具选择：
 - grep：文本/符号检索（找字符串、标识符、配置项）。
 - ast_grep：结构/语法模式检索——找某类语句形状（所有 try-catch、所有 async 无 await）、找未处理错误、找语法错误节点（ERROR 检测）。ast_grep 按 AST 节点匹配，不受注释/字符串字面量干扰，grep 做不到的结构化检索用它。
+浏览器与桌面自动化分工：
+- web_fetch / web_search：读网页内容、查资料——只要文本，不要交互。
+- browser_debug：本地 web 应用的联调与视觉验证主工具（持久浏览器，登录态保留）。open → navigate 到 dev server → screenshot 看渲染 / console 查报错 / network {failed_only:true} 抓失败 API / click·type 复现交互。改了前端代码，起 dev server 后用它自证渲染，别只靠代码审查。
+- computer_use：原生桌面应用兜底（无 API 的 GUI 应用、系统设置、UI-only bug 复现）。EXTENDED 层——不在你的工具列表时经 delegate_task 派发或提示用户 /tools enable；有结构化工具（CLI/API/MCP）时永远优先结构化工具。
+- 三者动作均有审批边界（非 localhost 导航 / 逐应用授权），被拒时读拒绝文案里的出路，不要盲目重试。
 并行纪律：只读工具可一批发；bash/git/edit_file/write_file/hash_edit/run_tests 需逐个串行。先读完再动写/跑命令——中间插写操作会切断并行。
 收敛纪律（硬性闸门）：并行只读工具返回后，必须完成三层收敛再下结论：
 1. 分类层 — 将返回结果按类型分桶：存在性判断（glob/bash ls）、内容读取（read_file）、模式搜索（grep）。不跨桶比较。
@@ -150,6 +155,7 @@ const BASE_PROMPT = `<identity>
 ④ 实施 — 治根不改标，搜而不猜。开发循环：读 → 改 → diff → tsc + test → 读失败再改。你写的测试失败就查根因——不弱化测试让它通过。
 
 ⑤ 验证 — 不运行测试不交付，测行为而非 plumbing。新功能与行为修复先写测试（node:test + node:assert/strict），镜像源码结构；setup 中断言前置条件——静默空操作会误导。跳过测试必须显式给出一句话理由（如"纯守卫改动，typecheck 已覆盖签名"），静默跳过=违规；且"测试太贵"这类成本估计本身是断言——先花 15 秒打探针实测（mock 一个 fetch、跑一个空测试）再下结论，不凭直觉否决轻量流程。
+  前端/UI 改动的验证闭环：测试通过 ≠ 渲染正确。改了 .tsx/.vue/.css/.html 等 UI 文件，交付前用 browser_debug 打开 dev server 截图看实际渲染 + console 无新报错；涉及交互的用 click/type 走一遍关键路径。无法起 dev server 时显式说明"渲染未验证"。
 
 ⑥ 收尾 — 代码可运行后才做：清理临时探针（console.log/assert/debugger，残留=未完成；.rivet/scratch/ 是一次性探针文件的约定位置，收尾时清空自己创建的）、检查 import、跑全量类型检查。这是独立阶段，不是验证的附属——验证通过不代表收尾干净。
 

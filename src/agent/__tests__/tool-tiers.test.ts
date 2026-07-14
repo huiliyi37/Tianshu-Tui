@@ -135,6 +135,8 @@ describe('tool-tiers', () => {
         'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene',
         'recall_capsule', 'ask_user_question', 'repo_graph', 'semantic_search',
         'apply_patch', 'plan_task', 'deliver_task', 'undo', 'memory', 'plan',
+        // browser_debug 在 bootstrap 的 interactive registry 注册（CORE since 2026-07-15）
+        'browser_debug',
       ])
       for (const name of CORE_TOOLS) {
         assert.ok(
@@ -155,14 +157,20 @@ describe('tool-tiers', () => {
 
     it('EXTENDED tools are NOT in the default tier (would defeat gating)', () => {
       const tier = new Set(resolveMainToolTier(null, true))
-      // web_search/web_fetch are CORE now — exclude only true EXTENDED tools.
+      // web_search/web_fetch/browser_debug are CORE now — exclude only true EXTENDED tools.
       // Includes the 2026-07-01 CORE→EXTENDED demotions (regression guard).
-      const mustExclude = ['browser', 'browser_debug', 'council_convene',
+      const mustExclude = ['browser', 'computer_use', 'council_convene',
         'team_orchestrate', 'apply_patch', 'undo',
         'read_section', 'diff', 'inspect_project', 'related_tests', 'file_info', 'leave_mark']
       for (const name of mustExclude) {
         assert.ok(!tier.has(name), `"${name}" should NOT be in CORE tier`)
       }
+    })
+
+    it('browser_debug is CORE (UI 渲染验证闭环主工具, 2026-07-15)', () => {
+      const tier = new Set(resolveMainToolTier(null, true))
+      assert.ok(tier.has('browser_debug'), 'browser_debug should be in CORE tier')
+      assert.equal(isExtendedTool('browser_debug'), false)
     })
   })
 })

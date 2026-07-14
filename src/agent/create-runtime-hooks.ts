@@ -56,6 +56,7 @@ import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createGateBlockGuardHook } from './hooks/gate-block-guard-hook.js'
 import { createRenderVerifyHook, type RenderVerifyHookDeps } from './hooks/render-verify-hook.js'
+import { createComputerUseMountHook } from './hooks/computer-use-mount-hook.js'
 import { createWrapupAnxietyGuardHook } from './hooks/wrapup-anxiety-guard-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import { createWalkthroughRecorderHooks, type WalkthroughRecorderDeps } from './hooks/walkthrough-recorder.js'
@@ -235,6 +236,13 @@ export interface RuntimeHookDeps {
   // ── W5 渲染自检 ──
   /** 检查 browser/computer_use 是否已注册（能力降级分支）。 */
   getVisualToolsAvailable?: () => boolean
+
+  // ── computer_use 任务感知自动挂载（2026-07-15）──
+  /** AgentLoop.enableTool 桥 + 用户意图源。缺省 → 不装 hook。 */
+  computerUseMount?: {
+    getUserIntent: () => string | null
+    enableTool: (name: string) => { status: string }
+  }
 
   // ── P2 break-anchor scout (preTurn, opt-in real intervention) ──
   /** Present only when antiAnchoring + anchorBreakScout are both enabled and a coordinator exists. */
@@ -715,6 +723,17 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     hooks.push(createRenderVerifyHook({
       advisoryBus: deps.advisoryBus,
       getVisualToolsAvailable: deps.getVisualToolsAvailable,
+    }))
+  }
+
+  // Computer-Use Mount: afterPerception hook — 任务涉及桌面 GUI 时在会话早期
+  // （turn 0-1）自动挂载 computer_use（EXTENDED 层逃生口的任务感知版）。
+  // Gated by RIVET_COMPUTER_USE_AUTOMOUNT (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.computerUseMount && process.env.RIVET_COMPUTER_USE_AUTOMOUNT !== '0') {
+    hooks.push(createComputerUseMountHook({
+      advisoryBus: deps.advisoryBus,
+      getUserIntent: deps.computerUseMount.getUserIntent,
+      enableTool: deps.computerUseMount.enableTool,
     }))
   }
 

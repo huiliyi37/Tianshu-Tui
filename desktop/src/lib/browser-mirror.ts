@@ -9,15 +9,24 @@
 //     (humanizeToolInput: open/navigate carry the target URL as detail)
 //   - result block role `result · browser_debug`, text = the tool's own output
 //     (`Navigated to <url> …`, `Captured screenshot of <url> → artifact <id>`)
+//   - computer_use (CDP route) mirrors the same way:
+//     tool `<action> <url|app>`, result `Navigated to "<title>" — <url>` /
+//     `Accessibility tree for <app> (screenshot → artifact <id>)`
 
 import type { ConvoBlock } from '../state/event-reducer'
 
 const TOOL_ROLE = 'tool · browser_debug'
 const RESULT_ROLE = 'result · browser_debug'
+const CU_TOOL_ROLE = 'tool · computer_use'
+const CU_RESULT_ROLE = 'result · computer_use'
 
-const ARTIFACT_RE = /→ artifact (\S+)/
+// artifact id 后可能紧跟 `)`（computer_use 的 `(screenshot → artifact <id>)`）——
+// 不能用 \S+ 吞掉右括号。
+const ARTIFACT_RE = /→ artifact ([\w.:-]+)/
 const NAVIGATED_RE = /Navigated to (\S+)/
 const SCREENSHOT_OF_RE = /screenshot of (\S+)/i
+/** computer_use CDP 导航结果：`Navigated to "<title>" — <url>` / `Went back to "…" — <url>` / `Reloaded "…" — <url>`。 */
+const CU_NAVIGATED_RE = /(?:Navigated to|Went (?:back|forward) to|Reloaded) "[^"]*" — (\S+)/
 
 /** Actions whose detail is a target URL worth tracking on the timeline. */
 const NAV_ACTIONS = new Set(['open', 'navigate'])
@@ -82,7 +91,7 @@ export function deriveBrowserState(blocks: ReadonlyArray<ConvoBlock>): BrowserMi
   const timeline: BrowserNav[] = []
 
   for (const b of blocks) {
-    if (b.kind === 'tool' && b.role === TOOL_ROLE) {
+    if (b.kind === 'tool' && (b.role === TOOL_ROLE || b.role === CU_TOOL_ROLE)) {
       active = true
       const text = b.text.trim()
       const sp = text.indexOf(' ')
@@ -96,16 +105,20 @@ export function deriveBrowserState(blocks: ReadonlyArray<ConvoBlock>): BrowserMi
       continue
     }
 
-    if (b.kind === 'result' && b.role === RESULT_ROLE) {
+    if (b.kind === 'result' && (b.role === RESULT_ROLE || b.role === CU_RESULT_ROLE)) {
       active = true
       const text = b.text
       const shot = text.match(ARTIFACT_RE)
       if (shot) latestScreenshotArtifactId = shot[1]!
-      const nav = text.match(NAVIGATED_RE) ?? text.match(SCREENSHOT_OF_RE)
+      const nav = text.match(CU_NAVIGATED_RE) ?? text.match(NAVIGATED_RE) ?? text.match(SCREENSHOT_OF_RE)
       if (nav) currentUrl = normalizeUrl(nav[1]!)
       // A textual extraction (snapshot/eval/console/network/status) — keep the
       // latest non-screenshot result so the panel can show what the agent read.
-      if (!shot && text.trim()) latestText = text.trim()
+      // computer_use snapshot 结果同时含 artifact 和可访问性树文本——树文本也保留。
+      if (text.trim() && (!shot || b.role === CU_RESULT_ROLE)) {
+        if (!shot) latestText = text.trim()
+        else if (/Accessibility tree/i.test(text)) latestText = text.trim()
+      }
     }
   }
 

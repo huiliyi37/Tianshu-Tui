@@ -1,7 +1,10 @@
 {
   "empty": {
-    "prefix": "尚未有浏览器活动。当天枢用 ",
-    "suffix": " 打开网页时，这里会实时镜像它看到的页面。"
+    "title": "尚未有浏览器活动",
+    "desc": "当天枢用浏览器或桌面自动化查看页面时，这里会实时镜像它看到的画面。",
+    "ctaLabel": "让天枢打开并检查页面",
+    "urlPlaceholder": "http://localhost:3000",
+    "prompt": "用浏览器打开 {{url}}，截图检查页面渲染是否正常，并查看 console 有无报错。"
   },
   "notNavigated": "（未导航）",
   "openExternal": "外部打开",

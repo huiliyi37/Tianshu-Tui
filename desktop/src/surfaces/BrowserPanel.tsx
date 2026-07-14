@@ -5,12 +5,16 @@ import { openExternal } from '../lib/open-external'
 import { useSessionEvents } from '../state/use-session-events'
 import { deriveBrowserState, EMPTY_BROWSER_STATE } from '../lib/browser-mirror'
 
-// Browser mirror panel — shows what the agent's `browser_debug` tool is doing:
-// current URL, the latest screenshot, a navigation timeline and the most recent
-// extracted text. Pure read-only mirror; it replays session history on mount so
-// it is populated even when opened after the agent already browsed.
-export function BrowserPanel({ sessionId }: { sessionId: string | null }) {
+// Browser mirror panel — shows what the agent's `browser_debug` / `computer_use`
+// tools are doing: current URL, the latest screenshot, a navigation timeline and
+// the most recent extracted text. Pure read-only mirror; it replays session
+// history on mount so it is populated even when opened after the agent browsed.
+export function BrowserPanel({ sessionId, onSendPrompt }: {
+  sessionId: string | null
+  onSendPrompt?: (text: string) => void
+}) {
   const { t } = useTranslation('browser')
+  const [ctaUrl, setCtaUrl] = useState('')
   const events = useSessionEvents(sessionId)
   const state = useMemo(
     () => (sessionId ? deriveBrowserState(events.blocks) : EMPTY_BROWSER_STATE),
@@ -44,10 +48,33 @@ export function BrowserPanel({ sessionId }: { sessionId: string | null }) {
   }, [lightbox])
 
   if (!sessionId || !state.active) {
+    const sendCta = () => {
+      const url = ctaUrl.trim() || t('empty.urlPlaceholder')
+      onSendPrompt?.(t('empty.prompt', { url }))
+    }
     return (
       <div className="review-body flex items-center justify-center h-full">
-        <div className="empty sm text-center max-w-xs">
-          {t('empty.prefix')}<code className="bd-line bd-muted">browser_debug</code>{t('empty.suffix')}
+        <div className="empty sm text-center max-w-xs flex flex-col gap-3">
+          <div className="text-text text-sm">{t('empty.title')}</div>
+          <div>{t('empty.desc')}</div>
+          {sessionId && onSendPrompt && (
+            <div className="flex flex-col gap-2">
+              <input
+                className="bg-panel-2 border border-border rounded px-2 py-1 text-xs text-text outline-none"
+                value={ctaUrl}
+                placeholder={t('empty.urlPlaceholder')}
+                onChange={e => setCtaUrl(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') sendCta() }}
+              />
+              <button
+                type="button"
+                className="text-xs px-2 py-1 border border-border rounded text-muted hover:text-text"
+                onClick={sendCta}
+              >
+                {t('empty.ctaLabel')}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )

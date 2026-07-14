@@ -851,6 +851,14 @@ export function humanizeToolInput(toolName: string, input: Record<string, unknow
       const detail = input.url ?? input.selector ?? input.request_id ?? input.url_filter ?? ''
       return detail ? `${act} ${detail}` : act
     }
+    case 'computer_use': {
+      const act = String(input.action ?? '')
+      // navigate 带 url（语义目标）；其余动作 app 是目标。text/query 作补充细节。
+      const detail = input.url ?? input.app ?? ''
+      const extra = input.text ?? input.query ?? ''
+      const head = detail ? `${act} ${detail}` : act
+      return extra ? `${head} · ${String(extra).slice(0, 80)}` : head
+    }
     default:
       return safeJson(input)
   }

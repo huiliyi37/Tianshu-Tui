@@ -50,6 +50,9 @@ export const CORE_TOOLS = [
   'skill',
   // 换视角方法论：static prompt L80 直接指示使用，必须常驻（与 skill 同源）
   'recall_capsule',
+  // 浏览器联调与 UI 视觉验证（2026-07-15 从 EXTENDED 升入）：改 UI 不看渲染
+  // 是高频失败模式，browser_debug 是渲染验证闭环的主工具，主控必须恒可见。
+  'browser_debug',
 ] as const
 
 /**
@@ -57,8 +60,8 @@ export const CORE_TOOLS = [
  * web/browser/doc/council/team/import/lsp/undo 等低频或重场景工具。
  */
 export const EXTENDED_TOOLS = [
+  // browser（一次性 headless）与 browser_debug 能力重叠且默认未注册——退役候选。
   'browser',
-  'browser_debug',
   'computer_use',
   'repo_graph',
   'council_convene',

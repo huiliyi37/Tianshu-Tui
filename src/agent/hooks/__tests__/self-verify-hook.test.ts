@@ -100,6 +100,57 @@ describe('SelfVerifyHook', () => {
     assert.equal(submitted.length, 1)
     assert.match(submitted[0]!.content, /没有独立验证/)
   })
+
+  // ── 浏览器/桌面视觉验证计为 ground truth（2026-07-15）──
+  it('does NOT fire when browser_debug screenshot verified the UI', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+    })
+    hook.run(makeCtx([
+      { tool: 'edit_file', status: 'success', target: 'src/App.tsx' },
+      { tool: 'browser_debug', status: 'success', target: 'screenshot' },
+    ]))
+    assert.equal(submitted.length, 0)
+  })
+
+  it('does NOT fire when browser_debug console/network gathered evidence', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+    })
+    hook.run(makeCtx([
+      { tool: 'edit_file', status: 'success', target: 'src/api.ts' },
+      { tool: 'browser_debug', status: 'success', target: 'network http://localhost:3000/api' },
+    ]))
+    assert.equal(submitted.length, 0)
+  })
+
+  it('browser_debug open/navigate/click are operations, NOT verification', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+    })
+    hook.run(makeCtx([
+      { tool: 'edit_file', status: 'success', target: 'src/App.tsx' },
+      { tool: 'browser_debug', status: 'success', target: 'navigate http://localhost:3000' },
+    ]))
+    // navigate 不是取证——但 browser_debug 未分类为 read/write，保守不触发
+    // （isReadOrWriteCall 对未知工具返回 false → allReadOrWrite 为 false）
+    assert.equal(submitted.length, 0)
+  })
+
+  it('does NOT fire when computer_use snapshot verified the desktop UI', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+    })
+    hook.run(makeCtx([
+      { tool: 'edit_file', status: 'success', target: 'src/window.ts' },
+      { tool: 'computer_use', status: 'success', target: 'snapshot MyApp' },
+    ]))
+    assert.equal(submitted.length, 0)
+  })
 })
 
 // ─── W5: 粗粒度验证-改动错配 ────────────────────────────────────

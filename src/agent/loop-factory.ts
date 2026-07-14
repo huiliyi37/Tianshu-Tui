@@ -524,8 +524,17 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getMaxTurns: () => self.config.maxTurns,
     addSystemReminder: content => { self.session.appendSystemReminder(content) },
     // W5 (render-verify): check if browser/computer_use are registered for capability degradation.
+    // browser_debug 是渲染验证主工具（CORE since 2026-07-15），必须计入——否则它可用时
+    // 仍会走「缺少视觉验证工具」降级文案。
     getVisualToolsAvailable: () =>
-      self.config.toolRegistry.has('browser') || self.config.toolRegistry.has('computer_use'),
+      self.config.toolRegistry.has('browser_debug') ||
+      self.config.toolRegistry.has('browser') ||
+      self.config.toolRegistry.has('computer_use'),
+    // computer_use 任务感知自动挂载（2026-07-15）：会话早期检测桌面 GUI 意图。
+    computerUseMount: {
+      getUserIntent: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 500) ?? null,
+      enableTool: (name: string) => self.enableTool(name),
+    },
     hearthObserveEnabled: self.config.hearthObserveEnabled,
     getAnchorGraph: () => self.antiAnchoring.buildAnchorGraph(),
     getPrevAnchorGraphHash: () => self.prevAnchorGraphHash,

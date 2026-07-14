@@ -53,8 +53,8 @@ export function createRenderVerifyHook(deps: RenderVerifyHookDeps): PostTurnRunt
 
       const visualAvailable = deps.getVisualToolsAvailable?.() ?? true
       const advice = visualAvailable
-        ? 'UI 文件已修改但尚未检查渲染结果。交付前用 browser 截图或 computer_use 查看实际渲染效果，确认布局/样式/组件无误后再交付。'
-        : 'UI 文件已修改，但当前环境缺少视觉验证工具（无 Playwright 或非 Pro）。交付前请人工过目渲染结果，确认视觉无误后再交付。'
+        ? 'UI 文件已修改但尚未检查渲染结果。交付前用 browser_debug 自证：open → navigate 到 dev server → screenshot 看布局 + console 查报错；原生桌面应用场景用 computer_use snapshot（未挂载时经 /tools enable computer_use 或 delegate_task 派发）。确认渲染无误后再交付。'
+        : 'UI 文件已修改，但当前环境缺少视觉验证工具（无 Playwright 或非 Pro——browser_debug 需要 Playwright，computer_use 需要 Pro + macOS/Windows）。交付前请人工过目渲染结果，确认视觉无误后再交付。'
 
       deps.advisoryBus.submit({
         key: 'render-verify',

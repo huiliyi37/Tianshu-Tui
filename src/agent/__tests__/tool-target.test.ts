@@ -40,4 +40,18 @@ describe('toolTargetFromInput', () => {
     assert.equal(toolTargetFromInput('bash', { command: 'cd /repo && npm test' }), 'npm test')
     assert.equal(toolTargetFromInput('todo', {}), 'todo')
   })
+
+  it('视觉工具的 action 成为语义 target（2026-07-15）', () => {
+    assert.equal(toolTargetFromInput('browser_debug', { action: 'screenshot' }), 'screenshot')
+    assert.equal(
+      toolTargetFromInput('browser_debug', { action: 'navigate', url: 'http://localhost:3000' }),
+      'navigate http://localhost:3000',
+    )
+    assert.equal(toolTargetFromInput('computer_use', { action: 'snapshot', app: 'Finder' }), 'snapshot Finder')
+  })
+
+  it('非视觉工具的 action 字段不改变 target（git/plan 语义不受影响）', () => {
+    assert.equal(toolTargetFromInput('git', { action: 'status' }), 'git')
+    assert.equal(toolTargetFromInput('plan', { action: 'submit' }), 'plan')
+  })
 })

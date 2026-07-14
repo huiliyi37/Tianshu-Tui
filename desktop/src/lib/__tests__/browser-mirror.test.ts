@@ -84,3 +84,38 @@ test('127.0.0.1 URLs receive an implied http:// scheme', () => {
   const s = deriveBrowserState([tool('tu-1', 'navigate 127.0.0.1:8080')])
   assert.equal(s.currentUrl, 'http://127.0.0.1:8080')
 })
+
+// ── computer_use 镜像（2026-07-15）──
+
+function cuTool(key: string, text: string): ConvoBlock {
+  return { key, kind: 'tool', role: 'tool · computer_use', text }
+}
+function cuResult(key: string, text: string): ConvoBlock {
+  return { key, kind: 'result', role: 'result · computer_use', text }
+}
+
+test('computer_use navigate activates the mirror and tracks the URL', () => {
+  const blocks = [
+    cuTool('cu-1', 'navigate http://localhost:5173'),
+    cuResult('cr-1', 'Navigated to "My App" — http://localhost:5173/dashboard'),
+  ]
+  const s = deriveBrowserState(blocks)
+  assert.equal(s.active, true)
+  assert.equal(s.currentUrl, 'http://localhost:5173/dashboard')
+  assert.equal(s.timeline.length, 1)
+})
+
+test('computer_use snapshot screenshot artifact is extracted (paren form)', () => {
+  const blocks = [
+    cuResult('cr-1', 'Accessibility tree for Safari (screenshot → artifact computer_use_screenshot:ab12):\n\nwindow "Home"'),
+  ]
+  const s = deriveBrowserState(blocks)
+  assert.equal(s.latestScreenshotArtifactId, 'computer_use_screenshot:ab12')
+  // 树文本同时保留为 latestText
+  assert.match(s.latestText ?? '', /Accessibility tree/)
+})
+
+test('computer_use went-back result updates the URL', () => {
+  const s = deriveBrowserState([cuResult('cr-1', 'Went back to "Docs" — https://example.com/docs')])
+  assert.equal(s.currentUrl, 'https://example.com/docs')
+})

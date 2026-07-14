@@ -262,6 +262,23 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string, op
     `Disallowed tools: ${order.disallowedTools.join(', ')}`,
   )
 
+  // 浏览器/桌面自动化使用要点：工具在 allowed 列表里时给一行分工提示，
+  // 否则 worker 常把 browser_debug 当纯截图工具、把 computer_use 当首选而非兜底。
+  const visualUsageNotes: string[] = []
+  if (order.allowedTools.includes('browser_debug')) {
+    visualUsageNotes.push(
+      'browser_debug：本地 web 联调主工具——navigate 到 dev server 后 screenshot 验证渲染、console 查报错、network {failed_only:true} 抓失败请求；改了 UI 文件交付前截图自证。',
+    )
+  }
+  if (order.allowedTools.includes('computer_use')) {
+    visualUsageNotes.push(
+      'computer_use：原生桌面 GUI 兜底——先 snapshot(app) 读可访问性树再 find/click/type；有 CLI/API 可用时永远优先结构化工具。',
+    )
+  }
+  if (visualUsageNotes.length > 0) {
+    parts.push('', '## 浏览器/桌面自动化要点', ...visualUsageNotes.map(n => `- ${n}`))
+  }
+
   if (order.workerCwd && hasWriteTools) {
     parts.push(
       '',

@@ -30,6 +30,31 @@ test('extractWalkthroughStep ignores non-computer_use tools', () => {
   assert.equal(extractWalkthroughStep(tool, META), null)
 })
 
+test('extractWalkthroughStep captures browser_debug steps (2026-07-15)', () => {
+  const nav: RuntimeToolEvent = {
+    name: 'browser_debug',
+    success: true,
+    input: { action: 'navigate', url: 'http://localhost:3000' },
+    resultContent: 'Navigated to http://localhost:3000/. Captured 12 network request(s), 0 console error(s).',
+  }
+  const navStep = extractWalkthroughStep(nav, META)
+  assert.ok(navStep)
+  assert.equal(navStep.tool, 'browser_debug')
+  assert.equal(navStep.action, 'navigate')
+  assert.equal(navStep.app, 'http://localhost:3000')
+
+  const shot: RuntimeToolEvent = {
+    name: 'browser_debug',
+    success: true,
+    input: { action: 'screenshot' },
+    resultContent: 'Captured screenshot of http://localhost:3000/ → artifact browser_screenshot:aa11\nSaved: /tmp/x.png',
+  }
+  const shotStep = extractWalkthroughStep(shot, { ...META, index: 2 })
+  assert.ok(shotStep)
+  assert.equal(shotStep.screenshotArtifactId, 'browser_screenshot:aa11')
+  assert.equal(shotStep.app, 'http://localhost:3000/')
+})
+
 test('extractWalkthroughStep captures action/app/screenshot/diff', () => {
   const tool: RuntimeToolEvent = {
     name: 'computer_use',

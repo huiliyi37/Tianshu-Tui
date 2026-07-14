@@ -3,6 +3,7 @@
  */
 
 import { join } from 'node:path'
+import { writeFile } from 'node:fs/promises'
 import type { Tool, ToolCallParams, ToolResult } from '../types.js'
 import { rivetHome } from '../../config/paths.js'
 import { isHostAllowed } from '../browser.js'
@@ -600,8 +601,21 @@ Actions:
                 sections: [],
               })
             }
+            // CLI 可见性：纯 ANSI 终端无法内联渲染截图——把 PNG 落成真实文件，
+            // 结果尾注给出可直接打开的路径（桌面端仍走 artifact id 内联渲染）。
+            let pngNote = ''
+            if (artifactId) {
+              const rawPath = params.artifactStore?.get?.(artifactId)?.rawPath
+              if (rawPath) {
+                const pngPath = rawPath.replace(/\.raw$/, '.png')
+                try {
+                  await writeFile(pngPath, png)
+                  pngNote = `\nSaved: ${pngPath}`
+                } catch { /* 落盘失败不影响截图结果 */ }
+              }
+            }
             return {
-              content: `Captured screenshot of ${session.driver.currentUrl()}` + (artifactId ? ` → artifact ${artifactId}` : ''),
+              content: `Captured screenshot of ${session.driver.currentUrl()}` + (artifactId ? ` → artifact ${artifactId}` : '') + pngNote,
             }
           }
           default:

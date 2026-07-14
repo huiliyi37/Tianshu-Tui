@@ -290,7 +290,7 @@ function PairedRowImpl({ entry, sessionId, onOpenImage }: {
   const [open, setOpen] = useState(!!entry.result?.isError)
   const name = entry.name
   const status = entry.result?.isError ? 'err' : entry.result ? 'ok' : 'run'
-  const isBrowserDebug = name === 'browser_debug'
+  const isBrowserDebug = name === 'browser_debug' || name === 'computer_use'
 
   // Build a smart preview for the tool row head.
   const previewText = useMemo(() => {
@@ -347,10 +347,12 @@ export const PairedRow = memo(PairedRowImpl, (a, b) =>
   a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage
 )
 
-// ── BrowserDebugBody: rich render of browser_debug output ──
+// ── BrowserDebugBody: rich render of browser_debug / computer_use output ──
 // console/network lines get a severity class from the shared classifier; a
 // screenshot result (`… → artifact <id>`) is fetched and inlined as an image.
-const SCREENSHOT_ARTIFACT_RE = /→ artifact (\S+)/
+// computer_use snapshots wrap the id in parens (`(screenshot → artifact <id>)`),
+// so the id charset is restricted instead of \S+ (which would eat the `)`).
+const SCREENSHOT_ARTIFACT_RE = /→ artifact ([\w.:-]+)/
 
 function BrowserDebugBody({ result, sessionId, onOpenImage }: {
   result: ConvoBlock
@@ -374,10 +376,15 @@ function BrowserDebugBody({ result, sessionId, onOpenImage }: {
     return () => { cancelled = true }
   }, [artifactId, sessionId])
 
+  const lines = text.split('\n')
+
   if (artifactId) {
+    // computer_use snapshot results carry the accessibility tree below the
+    // artifact note — keep the tree readable instead of one giant muted line.
+    const [head, ...rest] = lines
     return (
       <div className="tool-output-section bd-output">
-        <div className="bd-line bd-muted">{result.text}</div>
+        <div className="bd-line bd-muted">{head}</div>
         {shotUrl && !shotFailed && (
           <img
             className="msg-thumb bd-shot"
@@ -388,11 +395,12 @@ function BrowserDebugBody({ result, sessionId, onOpenImage }: {
             onError={() => setShotFailed(true)}
           />
         )}
+        {rest.length > 0 && rest.map((line, i) => (
+          <div key={i} className={`bd-line bd-${classifyBrowserDebugLine(line)}`}>{line || '\u00a0'}</div>
+        ))}
       </div>
     )
   }
-
-  const lines = text.split('\n')
   const netRows = useMemo(() => parseNetworkRows(lines), [text])
   if (netRows) return <NetworkTable rows={netRows} />
   return (

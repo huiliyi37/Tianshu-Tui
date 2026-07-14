@@ -197,6 +197,13 @@ describe('StarDomain', () => {
     }
   })
 
+  it('all domains have browser_debug + computer_use (visual verification loop, 2026-07-15)', () => {
+    for (const domain of Object.values(STAR_DOMAINS)) {
+      assert.ok(domain.toolWhitelist.includes('browser_debug'), `${domain.name} missing browser_debug`)
+      assert.ok(domain.toolWhitelist.includes('computer_use'), `${domain.name} missing computer_use`)
+    }
+  })
+
   it('all domains have systemPromptSuffix', () => {
     for (const domain of Object.values(STAR_DOMAINS)) {
       assert.ok(domain.systemPromptSuffix.length > 0, `${domain.name} missing suffix`)

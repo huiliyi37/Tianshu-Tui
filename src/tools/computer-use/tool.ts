@@ -23,6 +23,7 @@
  * instead of a mis-click on whatever now sits at the old ordinal position.
  */
 
+import { writeFile } from 'node:fs/promises'
 import type { Tool, ToolCallParams, ToolResult } from '../types.js'
 import {
   type ComputerUseDriver,
@@ -647,6 +648,12 @@ Feedback loop: after each mutating action the tool re-reads the UI and appends h
                 summary: `Screenshot of ${app}`,
                 sections: [],
               })
+              // CLI 可见性：把 PNG 落成真实文件，纯 ANSI 终端用户可直接打开
+              //（桌面端仍走 artifact id 内联渲染）。落盘失败不影响 snapshot 结果。
+              const rawPath = params.artifactStore.get?.(artifactId)?.rawPath
+              if (rawPath) {
+                try { await writeFile(rawPath.replace(/\.raw$/, '.png'), snap.screenshotPng) } catch { /* best-effort */ }
+              }
             }
             const tree = redactTree(snap.tree)
             const key = cacheKey(params, app)

@@ -515,7 +515,7 @@ export function createInteractiveToolRegistry(
   reg.register(ASK_USER_QUESTION_TOOL)
 
   // browser_debug — persistent browser for local frontend/backend联调 (CDP route).
-  // EXTENDED tier (gated from 主控 by default; opt-in via /tools enable or delegate).
+  // CORE tier since 2026-07-15（UI 渲染验证闭环主工具，主控恒可见）。
   // Shared here so both TUI and desktop sidecar get the same tool + data flow.
   reg.register(BROWSER_DEBUG_TOOL)
 

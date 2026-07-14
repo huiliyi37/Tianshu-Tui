@@ -467,7 +467,7 @@ export function ReviewPanel(props: {
           <GithubPanel />
         </TabsContent>
         <TabsContent value="browser" className="review-body">
-          <BrowserPanel sessionId={sessionId} />
+          <BrowserPanel sessionId={sessionId} onSendPrompt={onSendPrompt} />
         </TabsContent>
         <TabsContent value="walkthrough" className="review-body">
           {sessionId && walkthroughArtifact ? (

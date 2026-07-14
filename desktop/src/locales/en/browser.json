@@ -1,7 +1,10 @@
 {
   "empty": {
-    "prefix": "No browser activity yet. When Tianshu opens a page with ",
-    "suffix": ", this panel mirrors what the agent sees in real time."
+    "title": "No browser activity yet",
+    "desc": "When Tianshu inspects a page with the browser or desktop automation, this panel mirrors what the agent sees in real time.",
+    "ctaLabel": "Ask Tianshu to open & inspect",
+    "urlPlaceholder": "http://localhost:3000",
+    "prompt": "Open {{url}} in the browser, take a screenshot to verify the page renders correctly, and check the console for errors."
   },
   "notNavigated": "(not navigated)",
   "openExternal": "Open externally",

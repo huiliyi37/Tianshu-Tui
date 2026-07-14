@@ -243,7 +243,7 @@ export function detectMissingVisualVerify(
   )
   if (hasVisualVerify) return null
 
-  return `⚠️ 渲染未验证：UI 文件已修改（${uiFiles.slice(0, 2).join(', ')}${uiFiles.length > 2 ? ' 等' : ''}），但未见 browser/computer_use 截图验证。交付前请检查渲染结果。`
+  return `⚠️ 渲染未验证：UI 文件已修改（${uiFiles.slice(0, 2).join(', ')}${uiFiles.length > 2 ? ' 等' : ''}），但未见 browser_debug/computer_use 视觉验证。交付前用 browser_debug open → navigate → screenshot 检查渲染结果。`
 }
 
 export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) => B1Context): Tool {

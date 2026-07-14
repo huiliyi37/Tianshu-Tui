@@ -1,9 +1,10 @@
 /**
  * Walkthrough Recorder — 运行走查工件（付费版 v1 · T1）
  *
- * postTool 阶段捕获每个 computer_use 调用（动作、目标 app、截图 artifact id、
- * 反馈 diff 摘要、失败原因），累积成步骤时间线；postSession 把时间线组装成
- * 结构化 walkthrough 工件（JSON，内嵌 markdown 渲染稿）经 ArtifactStore 持久化。
+ * postTool 阶段捕获每个 computer_use / browser_debug 调用（动作、目标 app 或
+ * URL、截图 artifact id、反馈 diff 摘要、失败原因），累积成步骤时间线；
+ * postSession 把时间线组装成结构化 walkthrough 工件（JSON，内嵌 markdown
+ * 渲染稿）经 ArtifactStore 持久化——浏览器操作也有可回放走查（2026-07-15）。
  *
  * 记录器恒开（成本低），回放查看器在桌面端做 Pro gate。
  * 数据只来自已有的 tool 事件流——不额外截图、不重放 UI。
@@ -18,9 +19,11 @@ export interface WalkthroughStep {
   turn: number
   /** Unix ms. */
   ts: number
-  /** computer_use action, e.g. click / type / snapshot / launch_app. */
+  /** Source tool. Optional for backward compat — absent means computer_use. */
+  tool?: 'computer_use' | 'browser_debug'
+  /** computer_use / browser_debug action, e.g. click / type / snapshot / navigate. */
   action: string
-  /** Target application ('' for app-less actions like list_apps). */
+  /** Target application, or browser page URL for browser_debug ('' for app-less actions). */
   app: string
   /** Compact human-readable target detail (ref / query / text / keys …). */
   detail?: string
@@ -49,12 +52,14 @@ export interface WalkthroughDocument {
   markdown: string
 }
 
-const SCREENSHOT_ARTIFACT_RE = /\(screenshot → artifact ([^)\s]+)\)/
+// computer_use 用 `(screenshot → artifact <id>)`；browser_debug 用
+// `Captured screenshot of <url> → artifact <id>`（无括号）——统一按 id 字符集截取。
+const SCREENSHOT_ARTIFACT_RE = /(?:screenshot[^\n]*)?→ artifact ([\w.:-]+)/
 const UI_DIFF_RE = /^UI (changed|unchanged)[^\n]*(?:\n[+-] [^\n]*)*/m
 const APPROVAL_DENY_RE = /requires (?:explicit user )?(?:an )?approval/i
 
 /** Keys of computer_use input that make a useful one-line detail. */
-const DETAIL_KEYS = ['ref', 'query', 'text', 'keys', 'direction', 'url', 'path', 'title'] as const
+const DETAIL_KEYS = ['ref', 'query', 'text', 'keys', 'direction', 'url', 'path', 'title', 'selector'] as const
 
 function stepDetail(input: Record<string, unknown> | undefined): string | undefined {
   if (!input) return undefined
@@ -68,24 +73,37 @@ function stepDetail(input: Record<string, unknown> | undefined): string | undefi
   return parts.length > 0 ? parts.join(' ') : undefined
 }
 
+const RECORDED_TOOLS = new Set(['computer_use', 'browser_debug'])
+
+/** browser_debug 结果里的当前页 URL（`Navigated to <url>` / `screenshot of <url>`）。 */
+const BROWSER_URL_RE = /(?:Navigated to|screenshot of) (\S+)/i
+
 /**
  * Convert one postTool event into a walkthrough step. Returns null for
- * non-computer_use tools. Pure — fully unit-testable without a live loop.
+ * tools outside computer_use / browser_debug. Pure — fully unit-testable
+ * without a live loop.
  */
 export function extractWalkthroughStep(
   tool: RuntimeToolEvent,
   meta: { index: number; turn: number; ts: number },
 ): WalkthroughStep | null {
-  if (tool.name !== 'computer_use') return null
+  if (!RECORDED_TOOLS.has(tool.name)) return null
   const input = tool.input ?? {}
   const action = typeof input.action === 'string' && input.action ? input.action : '?'
-  const app = typeof input.app === 'string' ? input.app : ''
   const content = tool.resultContent ?? ''
+  // computer_use 的目标是 app；browser_debug 的"位置"是页面 URL（input.url
+  // 优先，其次从结果反推）。
+  const app = typeof input.app === 'string' && input.app
+    ? input.app
+    : tool.name === 'browser_debug'
+      ? (typeof input.url === 'string' ? input.url : BROWSER_URL_RE.exec(content)?.[1]?.replace(/[.,;)]+$/, '') ?? '')
+      : ''
 
   const step: WalkthroughStep = {
     index: meta.index,
     turn: meta.turn,
     ts: meta.ts,
+    tool: tool.name as 'computer_use' | 'browser_debug',
     action,
     app,
     success: tool.success,
@@ -226,11 +244,14 @@ export function createWalkthroughRecorderHooks(deps: WalkthroughRecorderDeps): [
       })
       const failNote = doc.summary.failedSteps > 0 ? `，失败 ${doc.summary.failedSteps}` : ''
       const haltNote = doc.summary.halted ? '，含审批门禁中止' : ''
+      const kind = doc.steps.some(s => s.tool === 'browser_debug')
+        ? (doc.steps.some(s => (s.tool ?? 'computer_use') === 'computer_use') ? '桌面+浏览器自动化' : '浏览器自动化')
+        : '桌面自动化'
       await store.save({
         tool: 'walkthrough',
         target: 'run-walkthrough.json',
         rawContent: JSON.stringify(doc, null, 2),
-        summary: `桌面自动化走查：${doc.summary.totalSteps} 步${failNote}${haltNote}（${doc.summary.apps.join(', ') || '无应用'}）`,
+        summary: `${kind}走查：${doc.summary.totalSteps} 步${failNote}${haltNote}（${doc.summary.apps.join(', ') || '无应用'}）`,
         sections: [],
       })
     },

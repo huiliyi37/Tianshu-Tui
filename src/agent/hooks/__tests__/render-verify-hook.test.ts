@@ -88,8 +88,9 @@ describe('RenderVerifyHook', () => {
   it('uses degraded advisory when visual tools unavailable', () => {
     const out = run({ touchedUiFiles: true, sawVisualVerify: false }, { visualAvailable: false })
     assert.equal(out.length, 1)
-    assert.match(out[0]!.content, /缺少视觉验证工具.*人工过目/)
-    assert.ok(!out[0]!.content.includes('browser'))
+    assert.match(out[0]!.content, /缺少视觉验证工具[\s\S]*人工过目/)
+    // 降级文案解释工具为何缺失（挂载条件），但不指示去调用它们
+    assert.ok(!out[0]!.content.includes('open → navigate'))
   })
 
   it('defaults visual tools to available when callback is absent', () => {

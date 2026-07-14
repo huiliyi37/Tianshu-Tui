@@ -21,10 +21,20 @@ export function bashCommandTarget(command: string): string {
   return rest.trim().slice(0, TARGET_MAX_CHARS)
 }
 
-/** file_path > path > command 的统一 target 提取（原 4 处逐字重复的三元链）。 */
+/** file_path > path > command > action 的统一 target 提取（原 4 处逐字重复的三元链）。 */
 export function toolTargetFromInput(toolName: string, input: Record<string, unknown>): string {
   if (typeof input.file_path === 'string') return input.file_path
   if (typeof input.path === 'string') return input.path
   if (typeof input.command === 'string') return bashCommandTarget(input.command)
+  // 视觉/自动化 action 型工具：action（+ url/app）才是语义目标。全部塌缩成
+  // 工具名会让 dead-end 信息素失去区分度，也让 self-verify 无法识别
+  // 「screenshot/console 是验证动作」。范围刻意限定在这三个工具——git/plan
+  // 等也有 action 字段，但它们的 target 语义已被下游消费方按工具名依赖。
+  if (VISUAL_ACTION_TOOLS.has(toolName) && typeof input.action === 'string') {
+    const detail = typeof input.url === 'string' ? input.url : typeof input.app === 'string' ? input.app : ''
+    return `${input.action}${detail ? ` ${detail}` : ''}`.slice(0, TARGET_MAX_CHARS)
+  }
   return toolName
 }
+
+const VISUAL_ACTION_TOOLS = new Set(['browser_debug', 'browser', 'computer_use'])
