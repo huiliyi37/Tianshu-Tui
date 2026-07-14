@@ -331,14 +331,14 @@ export function ReviewPanel(props: {
       all.push({ id: 'github', label: 'PR', glyph: '🔀' })
     }
 
-    const filtered = all.filter((t) => enabledTabs.includes(t.id))
+    const filtered = all.filter((t) => enabledTabs.includes(t.id) || tab === t.id)
     // 走查 tab 不受用户 tab 偏好过滤（陈旧的 localStorage 偏好里没有它）：
     // 只要会话有 walkthrough 工件就展示。
     if (walkthroughArtifact) {
       filtered.push({ id: 'walkthrough', label: 'Walkthrough', glyph: '🎬' })
     }
     return filtered.length > 0 ? filtered : [all[0]!]
-  }, [pendingCount, planMode, incompleteTasks, enabledTabs, canvasArtifacts.length, artifacts, session, walkthroughArtifact])
+  }, [pendingCount, planMode, incompleteTasks, enabledTabs, canvasArtifacts.length, artifacts, session, walkthroughArtifact, tab])
 
   // Fallback active tab if current tab gets disabled
   useEffect(() => {

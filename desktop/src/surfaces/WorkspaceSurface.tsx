@@ -708,7 +708,11 @@ function WorkspaceHeader({
             className="header-action-btn"
             title={t('header.openFiles')}
             aria-label={t('header.openFiles')}
-            onClick={() => dispatch({ type: 'requestReviewTab', tab: 'files' })}
+            onClick={() => {
+              dispatch({ type: 'requestReviewTab', tab: 'files' })
+              dispatch({ type: 'setReview', visible: true })
+              dispatch({ type: 'setReviewManual', on: true })
+            }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -718,7 +722,11 @@ function WorkspaceHeader({
             className="header-action-btn"
             title={t('header.openBrowser')}
             aria-label={t('header.openBrowser')}
-            onClick={() => dispatch({ type: 'requestReviewTab', tab: 'browser' })}
+            onClick={() => {
+              dispatch({ type: 'requestReviewTab', tab: 'browser' })
+              dispatch({ type: 'setReview', visible: true })
+              dispatch({ type: 'setReviewManual', on: true })
+            }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <circle cx="12" cy="12" r="10" />
