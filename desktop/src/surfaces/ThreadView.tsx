@@ -423,6 +423,25 @@ export function ThreadView(props: {
     },
   })
 
+  useEffect(() => {
+    const el = msgRef.current
+    if (!el) return
+    let prevWidth = el.clientWidth
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width
+        if (width > 0 && width !== prevWidth) {
+          prevWidth = width
+          // Container width changed (e.g. window resize, sidebar toggle).
+          // Remeasure all virtualized items to update their heights and positions.
+          virtualizer.measure()
+        }
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [virtualizer])
+
   useLayoutEffect(() => {
     if (!isPerfInstrumentationEnabled()) return
     const token = sessionOpenToken.current
