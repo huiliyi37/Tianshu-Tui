@@ -101,6 +101,7 @@ export const DEFAULT_CONFIG: Config = {
     toolGating: {
       enabled: true,
       extraCore: [],
+      disabledTools: [],
     },
     antiAnchoring: {
       enabled: false,
