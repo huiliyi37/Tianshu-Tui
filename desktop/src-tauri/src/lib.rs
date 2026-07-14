@@ -681,14 +681,20 @@ fn ensure_bundled_git(_app: &tauri::App, _rivet_home: &Path) -> Option<PathBuf> 
 /// common install locations before falling back to PATH resolution.
 #[cfg(not(target_os = "windows"))]
 fn detect_system_node() -> String {
-    let candidates = [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/node",
+    let mut candidates: Vec<String> = vec![
+        "/opt/homebrew/bin/node".to_string(),
+        "/usr/local/bin/node".to_string(),
+        "/usr/bin/node".to_string(),
     ];
+    // fnm (Fast Node Manager) default alias — the most common non-system
+    // Node installation on macOS dev machines. GUI apps don't inherit shell
+    // PATH, so fnm's shim is invisible to `Command::new("node")`.
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(format!("{home}/.local/share/fnm/aliases/default/bin/node"));
+    }
     for c in candidates {
-        if std::path::Path::new(c).exists() {
-            return c.to_string();
+        if std::path::Path::new(&c).exists() {
+            return c;
         }
     }
     "node".to_string()
@@ -719,6 +725,14 @@ fn detect_system_node() -> String {
         );
         // Volta default shim.
         candidates.push(Path::new(&local).join("Volta").join("bin").join("node.exe"));
+        // fnm (Fast Node Manager) default alias on Windows.
+        candidates.push(
+            Path::new(&local)
+                .join("fnm")
+                .join("aliases")
+                .join("default")
+                .join("node.exe"),
+        );
     }
     for c in &candidates {
         if c.is_file() {
