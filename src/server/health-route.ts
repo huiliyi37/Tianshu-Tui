@@ -1,9 +1,12 @@
 /**
- * GET /health — sidecar liveness + summary counts (N1). Bearer-gated like the
- * rest of the API; the desktop uses it to drive the crash-reconnect banner.
+ * GET /health — sidecar liveness + summary counts (N1).
+ *
+ * Health is intentionally NOT auth-gated: the desktop shell and Rust monitor
+ * need to probe it from cold-start / token-rotation windows where the Bearer
+ * token may not be available yet. The response carries no user data (uptime,
+ * session/running counts, loop lag) so there is no confidentiality risk.
  */
 import type { RouteHandler } from './index.js'
-import { isAuthorizedRequest } from './auth.js'
 import type { RuntimeSessionManager } from './session-manager.js'
 import type { LoopLagSnapshot } from './loop-health.js'
 
@@ -11,25 +14,13 @@ export function buildHealthRoute(
   manager: RuntimeSessionManager,
   startedAt: number,
   version: string,
-  apiToken?: string,
-  /**
-   * Whether the shared SessionRegistry has finished its async init. When
-   * omitted (tests / single-session paths) it reports `true`, so callers that
-   * don't run a registry see a healthy sidecar.
-   */
+  _apiToken?: string,
   registryReady?: () => boolean,
-  /** Whether the default provider has a usable API key. Callback so it
-   *  re-checks on each /health poll (user may have configured since startup). */
   configured?: () => boolean,
-  /** Event-loop delay for the window since the last poll — lets the desktop
-   *  tell "sidecar busy (loop starved)" apart from "connection dropped". */
   loopLag?: () => LoopLagSnapshot,
 ): Record<string, RouteHandler> {
   return {
-    'GET /health': (body, _params, headers) => {
-      if (!isAuthorizedRequest({ body, headers }, apiToken)) {
-        return { status: 401, body: { error: 'Unauthorized' } }
-      }
+    'GET /health': (_body, _params, _headers) => {
       const { sessionCount, runningCount } = manager.stats()
       const lag = loopLag?.()
       return {
