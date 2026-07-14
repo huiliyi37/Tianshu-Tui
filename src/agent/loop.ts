@@ -1137,6 +1137,7 @@ export class AgentLoop {
       extraCore: gating.extraCore,
       domainTier: gating.domainTier,
       mountedExtras: [...this.mountedExtras],
+      disabledTools: gating.disabledTools,
     })
   }
 

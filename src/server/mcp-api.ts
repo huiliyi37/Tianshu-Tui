@@ -222,6 +222,13 @@ export function buildMcpRoutes(
       return { status: 200, body: { tools: serverTools } }
     }, token),
 
+    // GET /tools/disabled — read config-level disabled tools list (session startup reference).
+    'GET /tools/disabled': withAuth(() => {
+      const cfg = loadConfig()
+      const disabledTools = cfg.agent?.toolGating?.disabledTools ?? []
+      return { status: 200, body: { disabledTools } }
+    }, token),
+
     // POST /mcp/servers/:id/oauth/start — initiate OAuth flow for a preset MCP server.
     'POST /mcp/servers/:id/oauth/start': withAuth(async (body, params) => {
       const serverId = params?.id

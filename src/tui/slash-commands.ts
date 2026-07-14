@@ -579,9 +579,13 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         const { CORE_TOOLS, EXTENDED_TOOLS, isExtendedTool } = await import('../agent/tool-tiers.js')
         const active = new Set(ctx.agent.getActiveToolNames())
         const mountedExtras = [...active].filter(isExtendedTool)
-        const lines: string[] = ['Tool Gating Tiers', '═════════════════════', '', `CORE (${CORE_TOOLS.length}):`, ...CORE_TOOLS.map(t => `  ✓ ${t}`), '', `EXTENDED (${EXTENDED_TOOLS.length}):`, ...EXTENDED_TOOLS.map(t => `  ${active.has(t) ? '✓ (mounted)' : '·'} ${t}`), '']
+        const disabled = new Set(ctx.config.agent?.toolGating?.disabledTools ?? [])
+        const lines: string[] = ['Tool Gating Tiers', '═════════════════════', '', `CORE (${CORE_TOOLS.length}):`, ...CORE_TOOLS.map(t => `  ${disabled.has(t) ? '✗' : '✓'} ${t}`), '', `EXTENDED (${EXTENDED_TOOLS.length}):`, ...EXTENDED_TOOLS.map(t => `  ${disabled.has(t) ? '✗' : active.has(t) ? '✓ (mounted)' : '·'} ${t}`), '']
         if (mountedExtras.length > 0) {
           lines.push(`Runtime-mounted EXTENDED: ${mountedExtras.join(', ')}`, '')
+        }
+        if (disabled.size > 0) {
+          lines.push(`Disabled tools (config-level, restart to apply): ${[...disabled].join(', ')}`, '')
         }
         lines.push('EXTENDED tools are available to workers via delegate_task.', 'Use /tools enable <name> to mount one onto the primary agent.')
         pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))

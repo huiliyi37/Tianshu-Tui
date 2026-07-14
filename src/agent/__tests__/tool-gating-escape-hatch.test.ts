@@ -120,6 +120,24 @@ describe('gateToolDefinitions', () => {
     }).map(d => d.name)
     assert.deepEqual(out, ['mcp_foo'])
   })
+
+  it('disabledTools removes specified tools even when exempt (config-level static disable)', () => {
+    // disabledTools has highest priority — removes CORE + exempted tools alike.
+    const out = gateToolDefinitions(all, {
+      enabled: true,
+      extraCore: ['browser'],
+      disabledTools: ['browser', 'read_file'],
+    }).map(d => d.name)
+    assert.ok(!out.includes('browser'), 'disabled despite extraCore exempt')
+    assert.ok(!out.includes('read_file'), 'disabled CORE tool removed')
+    assert.ok(out.includes('mcp_foo'), 'unaffected tool kept')
+  })
+
+  it('disabledTools respects empty array (no-op)', () => {
+    const out = gateToolDefinitions(all, { enabled: true, disabledTools: [] }).map(d => d.name)
+    assert.ok(out.includes('read_file'))
+    assert.ok(!out.includes('browser'), 'EXTENDED still removed by deny-list')
+  })
 })
 
 describe('AgentLoop tool gating + escape hatch', () => {

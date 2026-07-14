@@ -186,6 +186,7 @@ export interface AgentConfig {
     coreOverride?: readonly string[]
     extraCore?: readonly string[]
     domainTier?: readonly string[]
+    disabledTools?: readonly string[]
   }
   /** 当前 provider 的前缀缓存策略 — 逃生口 /tools enable 用它量化挂载的缓存代价。 */
   prefixCacheStrategy?: 'deepseek-native' | 'anthropic-cache-control' | 'none'

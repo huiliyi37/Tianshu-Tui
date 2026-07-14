@@ -59,6 +59,7 @@ export interface AgentConfigInput {
     coreOverride?: readonly string[]
     extraCore?: readonly string[]
     domainTier?: readonly string[]
+    disabledTools?: readonly string[]
   }
   /** Optional vision bridge configuration (parsed from config.agent.visionModel). */
   visionModel?: {
@@ -113,6 +114,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
           enabled: params.config.agent.toolGating.enabled,
           coreOverride: params.config.agent.toolGating.coreTools,
           extraCore: params.config.agent.toolGating.extraCore,
+          disabledTools: params.config.agent.toolGating.disabledTools,
         }
       : undefined,
  }
@@ -159,6 +161,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
         coreOverride: input.toolGating.coreOverride,
         extraCore: input.toolGating.extraCore,
         domainTier: input.toolGating.domainTier,
+        disabledTools: input.toolGating.disabledTools,
       })
     : input.toolDefinitions
 
