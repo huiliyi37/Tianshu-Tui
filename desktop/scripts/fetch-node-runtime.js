@@ -205,14 +205,23 @@ async function main() {
       cachedVersion = ''
     }
     if (cachedVersion === `v${NODE_VERSION}`) {
-      console.log(`[fetch-node-runtime] cached ${binaryPath} (${cachedVersion})`)
-      return
+      // Cache hit for node.exe — but npm may be missing if this binary was
+      // fetched by an older script version that didn't bundle npm. Re-extract
+      // npm from a fresh archive when the npm module dir is absent, so plugin
+      // installs work without forcing a full node re-download.
+      const npmModuleDest = join(targetDir, 'node_modules', 'npm')
+      if (existsSync(npmModuleDest)) {
+        console.log(`[fetch-node-runtime] cached ${binaryPath} (${cachedVersion})`)
+        return
+      }
+      console.log(`[fetch-node-runtime] cached node OK but npm missing — extracting npm only`)
+      // Fall through to download + extract, then only copy npm.
+    } else {
+      console.log(
+        `[fetch-node-runtime] cached ${binaryPath} is ${cachedVersion || 'unreadable'}, ` +
+          `need v${NODE_VERSION} — re-downloading`,
+      )
     }
-    console.log(
-      `[fetch-node-runtime] cached ${binaryPath} is ${cachedVersion || 'unreadable'}, ` +
-        `need v${NODE_VERSION} — re-downloading`,
-    )
-  }
 
   const baseName = `node-v${NODE_VERSION}-${platform}-${arch}`
   const ext = isWindows ? 'zip' : platform === 'linux' ? 'tar.xz' : 'tar.gz'

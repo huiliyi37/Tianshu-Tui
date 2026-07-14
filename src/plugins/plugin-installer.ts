@@ -11,7 +11,7 @@
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { cpSync } from 'node:fs'
-import { execSync } from 'node:child_process'
+import { execSync, execFileSync } from 'node:child_process'
 import { rivetHome } from '../config/paths.js'
 import { parseManifest, type PluginManifest, type PluginPackageJson } from './manifest.js'
 
@@ -170,20 +170,35 @@ export async function installPlugin(sourcePath: string): Promise<InstallResult> 
     return { ok: false, error: `Failed to copy plugin files: ${(err as Error).message}` }
   }
 
-  // 4. Run npm install using the bundled npm when available (packaged desktop
-  // app) or the system npm as a fallback (dev / tests).
-  const npmCmd = resolveNpmCommand()
-  const { command, options } = npmInstallArgs(npmCmd)
+  // 4. Run npm install. Prefer `node + npm-cli.js` (resolveNpmCliCommand) so
+  // we bypass npm.cmd's batch-script path resolution, which breaks on the
+  // space-bearing "Program Files (x86)" install path (Cannot find module
+  // 'npm\bin\npm-prefix.js'). Falls back to the system npm in dev/test.
+  const nodeDir = dirname(process.execPath)
+  const cliJs = join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  const installArgs = ['install', '--ignore-scripts', '--omit=dev']
+  const pathSep = process.platform === 'win32' ? ';' : ':'
+  const pathWithNode = process.env.PATH ? `${nodeDir}${pathSep}${process.env.PATH}` : nodeDir
   try {
-    execSync(command, {
-      ...options,
-      cwd: installPath,
-    })
+    if (existsSync(cliJs)) {
+      // Direct: node <npm-cli.js> install --ignore-scripts --omit=dev
+      execFileSync(process.execPath, [cliJs, ...installArgs], {
+        cwd: installPath,
+        stdio: 'pipe',
+        timeout: 600_000,
+        env: { ...process.env, NODE_ENV: 'production', PATH: pathWithNode },
+      })
+    } else {
+      // Dev/test fallback: system npm via shell
+      const npmCmd = resolveNpmCommand()
+      const { command, options } = npmInstallArgs(npmCmd)
+      execSync(command, { ...options, cwd: installPath })
+    }
   } catch (err) {
     // Clean up failed install
     try { rmSync(installPath, { recursive: true, force: true }) } catch {}
     const stderr = (err as { stderr?: Buffer }).stderr?.toString().slice(0, 500) ?? (err as Error).message
-    return { ok: false, error: `npm install failed (${npmCmd}): ${stderr}` }
+    return { ok: false, error: `npm install failed: ${stderr}` }
   }
 
   return { ok: true, manifest, installPath }
