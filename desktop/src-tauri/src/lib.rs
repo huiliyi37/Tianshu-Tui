@@ -1502,6 +1502,12 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
         // slot empty — without this flag the next poll would see None, treat it
         // as "nothing to watch" and silently stop retrying with budget left.
         let mut pending_respawn = false;
+        // When the initial spawn_sidecar fails (cold disk, antivirus, missing
+        // Node), the child slot starts empty and never_healthy stays false. The
+        // monitor must attempt recovery instead of giving up silently. This
+        // timer enforces a minimum interval between first-time recovery attempts
+        // so we don't busy-retry every 2s loop tick.
+        let mut last_spawn_attempt: Option<Instant> = None;
         // Ladder state. `ever_healthy` gates failure counting so a slow cold
         // start (rehydrate, cold disk) is never mistaken for a hang.
         let mut ever_healthy = false;
@@ -1542,7 +1548,23 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
                     .map(|g| g.is_some())
                     .unwrap_or(false);
                 if !child_present {
-                    continue; // nothing to supervise
+                    // Initial spawn_sidecar may have failed (cold disk,
+                    // antivirus scan, Node not on PATH from GUI context).
+                    // Without a recovery path the monitor would loop forever
+                    // doing nothing, leaving the UI stuck on a transient
+                    // "reconnecting" banner with no automatic retry.
+                    //
+                    // Set pending_respawn so the NEXT iteration skips the
+                    // health-check block and reaches the shared restart logic,
+                    // which includes the budget window and the minimum-interval
+                    // throttle (last_spawn_attempt). We continue immediately
+                    // here instead of spawning inline to stay on the same code
+                    // path as crash recovery — one restart site, one set of
+                    // guards.
+                    if !ever_healthy {
+                        pending_respawn = true;
+                    }
+                    continue;
                 }
                 match http_health_running_count(state.spec.port, &state.spec.token) {
                     Some(rc) => {
@@ -1600,6 +1622,19 @@ fn start_sidecar_monitor(handle: tauri::AppHandle) {
                 }
             }
             // Reset ladder state across a restart attempt.
+            // Reset ladder state across a restart attempt.
+            // First-time recovery throttling: when the initial spawn failed
+            // (never been healthy), enforce a minimum interval between retries
+            // so we don't burn the budget in a tight loop. Crash recoveries
+            // (ever_healthy was already true) proceed at full speed.
+            if !ever_healthy {
+                if let Some(t) = last_spawn_attempt {
+                    if t.elapsed() < Duration::from_secs(10) {
+                        continue;
+                    }
+                }
+                last_spawn_attempt = Some(Instant::now());
+            }
             consecutive_fails = 0;
             degraded_emitted = false;
             hung_emitted = false;
