@@ -110,7 +110,9 @@ export function startServer(port: number, routes: Record<string, RouteHandler>, 
     // Health endpoint is intentionally not auth-gated — the desktop shell and
     // Rust monitor probe it from cold-start / token-rotation windows where the
     // Bearer token may not be available yet. No user data is exposed.
-    if (req.url !== '/health' && !isAuthorizedRequest({ headers: reqHeaders }, apiToken)) {
+    // Use startsWith so /health?foo=bar also bypasses auth.
+    const isHealth = req.url?.startsWith('/health') ?? false
+    if (!isHealth && !isAuthorizedRequest({ headers: reqHeaders }, apiToken)) {
       res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
       res.end(JSON.stringify({ error: 'Unauthorized' }))
       return
