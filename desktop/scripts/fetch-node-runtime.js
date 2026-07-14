@@ -222,6 +222,7 @@ async function main() {
           `need v${NODE_VERSION} — re-downloading`,
       )
     }
+  }
 
   const baseName = `node-v${NODE_VERSION}-${platform}-${arch}`
   const ext = isWindows ? 'zip' : platform === 'linux' ? 'tar.xz' : 'tar.gz'
