@@ -2410,10 +2410,57 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
   {
     name: '/mcp',
     immediate: true,
-    handler(ctx) {
+    async handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      pushStatic(createLogEntry({ type: 'system', content: 'MCP status: use /debug mcp for detailed connection info, or check startup logs.' }))
+      const subcmd = parts[0]?.toLowerCase() ?? 'status'
+      const serverId = parts[1]
+
+      if (subcmd === 'auth' && serverId) {
+        try {
+          const { startMcpOAuth } = await import('../mcp/oauth/connector.js')
+          const { findMcpOAuthProvider } = await import('../mcp/oauth/providers.js')
+          const { loadConfig } = await import('../config/manager.js')
+          const cfg = loadConfig().mcp?.servers[serverId]
+          if (!cfg) {
+            pushStatic(createLogEntry({ type: 'system', content: `MCP server "${serverId}" not found in config.`, isError: true }))
+            setIsStreaming(false)
+            return true
+          }
+          const auth = cfg.auth
+          if (!auth || auth.type !== 'oauth') {
+            pushStatic(createLogEntry({ type: 'system', content: `Server "${serverId}" does not support OAuth.`, isError: true }))
+            setIsStreaming(false)
+            return true
+          }
+          const provider = findMcpOAuthProvider(auth.provider)
+          if (!provider) {
+            pushStatic(createLogEntry({ type: 'system', content: `Unknown OAuth provider: ${auth.provider}`, isError: true }))
+            setIsStreaming(false)
+            return true
+          }
+          const clientId = process.env.RIVET_MCP_OAUTH_CLIENT_ID ?? ''
+          if (!clientId) {
+            pushStatic(createLogEntry({ type: 'system', content: 'Set RIVET_MCP_OAUTH_CLIENT_ID env var with your OAuth app client ID, then retry.', isError: true }))
+            setIsStreaming(false)
+            return true
+          }
+          pushStatic(createLogEntry({ type: 'system', content: `Starting OAuth for ${serverId} (${provider.name})...\nA browser window should open shortly.` }))
+          try {
+            const scopes = [...provider.defaultScopes, ...(auth.scopes ?? [])]
+            await startMcpOAuth(serverId, provider, clientId, scopes)
+            pushStatic(createLogEntry({ type: 'system', content: `✓ OAuth connected for ${serverId} (${provider.name})` }))
+          } catch (err) {
+            pushStatic(createLogEntry({ type: 'system', content: `OAuth failed: ${(err as Error).message}`, isError: true }))
+          }
+        } catch (err) {
+          pushStatic(createLogEntry({ type: 'system', content: `OAuth failed: ${(err as Error).message}`, isError: true }))
+        }
+        setIsStreaming(false)
+        return true
+      }
+
+      // Default: show status
+      pushStatic(createLogEntry({ type: 'system', content: 'Usage:\n  /mcp — show status\n  /mcp auth <serverId> — start OAuth flow\n  /mcp logs <serverId> — view stderr (coming in Wave 4)' }))
       setIsStreaming(false)
       return true
     },

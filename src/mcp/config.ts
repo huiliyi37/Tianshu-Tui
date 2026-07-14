@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { mcpOAuthConfigSchema } from './oauth/types.js'
 
 /** Transport hint — explicit opt-in for transport selection on url-based servers.
  *  `streamableHttp` (default when absent): use Streamable HTTP transport (post-2025-03-26 spec).
@@ -18,6 +19,9 @@ export const mcpServerConfigSchema = z.object({
   /** Explicit transport selection (url-based servers). When unset, Streamable HTTP is
    *  preferred. Set to 'sse' to force legacy SSE transport. */
   transportHint: transportHintSchema,
+  /** OAuth-based authentication for this server.
+   *  When set, env/headers secrets are obtained via OAuth flow instead of manual entry. */
+  auth: mcpOAuthConfigSchema.optional(),
   // shared
   disabled: z.boolean().optional(),
 }).refine(

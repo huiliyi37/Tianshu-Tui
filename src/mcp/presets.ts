@@ -10,6 +10,7 @@
  */
 
 import type { McpTransportType } from './types.js'
+import type { McpOAuthConfig } from './oauth/types.js'
 
 export interface McpPresetEnvField {
   /** Env var name passed to the MCP server process (e.g. GITHUB_PERSONAL_ACCESS_TOKEN). */
@@ -32,8 +33,11 @@ export interface McpPreset {
   args?: string[]
   /** remote */
   url?: string
-  /** Secrets the preset needs; collected inline and stored as `env`. */
+  /** Secrets the preset needs; collected inline and stored as `env`.
+   *  Omit if using OAuth (auth.oauth). */
   requiredEnv?: McpPresetEnvField[]
+  /** OAuth-based auth for this preset. Takes precedence over requiredEnv when set. */
+  auth?: McpOAuthConfig
   /** A few representative tool names to set expectations (not exhaustive). */
   expectedTools?: string[]
   docsUrl?: string
@@ -59,11 +63,12 @@ export const MCP_PRESETS: McpPreset[] = [
     transport: 'stdio',
     command: 'npx',
     args: ['-y', '@modelcontextprotocol/server-github'],
+    auth: { type: 'oauth' as const, provider: 'github', scopes: ['repo', 'read:org'] },
     requiredEnv: [
       {
         key: 'GITHUB_PERSONAL_ACCESS_TOKEN',
         label: 'GitHub Personal Access Token',
-        help: '在 GitHub Settings → Developer settings → Personal access tokens 生成（需 repo 权限）',
+        help: '在 GitHub Settings → Developer settings → Personal access tokens 生成（需 repo 权限）。使用 OAuth 可跳过手动填此字段。',
       },
     ],
     expectedTools: ['create_issue', 'get_pull_request', 'search_repositories'],
@@ -77,8 +82,9 @@ export const MCP_PRESETS: McpPreset[] = [
     transport: 'stdio',
     command: 'npx',
     args: ['-y', '@modelcontextprotocol/server-slack'],
+    auth: { type: 'oauth' as const, provider: 'slack', scopes: ['channels:read', 'chat:write', 'channels:history'] },
     requiredEnv: [
-      { key: 'SLACK_BOT_TOKEN', label: 'Slack Bot Token', help: 'xoxb- 开头的 Bot User OAuth Token' },
+      { key: 'SLACK_BOT_TOKEN', label: 'Slack Bot Token', help: 'xoxb- 开头的 Bot User OAuth Token。使用 OAuth 可跳过。' },
       { key: 'SLACK_TEAM_ID', label: 'Slack Team ID', help: '工作区 ID（T 开头）' },
     ],
     expectedTools: ['slack_post_message', 'slack_list_channels'],
@@ -92,11 +98,12 @@ export const MCP_PRESETS: McpPreset[] = [
     transport: 'stdio',
     command: 'npx',
     args: ['-y', '@notionhq/notion-mcp-server'],
+    auth: { type: 'oauth' as const, provider: 'notion' },
     requiredEnv: [
       {
         key: 'NOTION_API_KEY',
         label: 'Notion Integration Token',
-        help: '在 notion.so/my-integrations 创建 internal integration 并共享目标页面',
+        help: '在 notion.so/my-integrations 创建 internal integration 并共享目标页面。使用 OAuth 可跳过。',
       },
     ],
     expectedTools: ['search', 'query_database', 'update_page'],
@@ -149,8 +156,9 @@ export const MCP_PRESETS: McpPreset[] = [
     transport: 'stdio',
     command: 'npx',
     args: ['-y', 'mcp-linear'],
+    auth: { type: 'oauth' as const, provider: 'linear', scopes: ['read', 'write'] },
     requiredEnv: [
-      { key: 'LINEAR_API_KEY', label: 'Linear API Key', help: '在 Linear Settings → API → Personal API keys 生成' },
+      { key: 'LINEAR_API_KEY', label: 'Linear API Key', help: '在 Linear Settings → API → Personal API keys 生成。使用 OAuth 可跳过。' },
     ],
     expectedTools: ['list_issues', 'create_issue', 'update_issue'],
     docsUrl: 'https://github.com/jerhadf/linear-mcp-server',

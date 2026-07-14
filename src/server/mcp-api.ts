@@ -16,6 +16,9 @@ import { mcpServerConfigSchema, type McpServerConfig } from '../mcp/config.js'
 import { MCP_PRESETS } from '../mcp/presets.js'
 import { serverLogger } from './logger.js'
 import type { Tool } from '../tools/types.js'
+import { findMcpOAuthProvider } from '../mcp/oauth/providers.js'
+import { startMcpOAuth, loadMcpOAuthToken, revokeMcpOAuth } from '../mcp/oauth/connector.js'
+import type { McpOAuthToken } from '../mcp/oauth/types.js'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -217,6 +220,60 @@ export function buildMcpRoutes(
         }))
 
       return { status: 200, body: { tools: serverTools } }
+    }, token),
+
+    // POST /mcp/servers/:id/oauth/start — initiate OAuth flow for a preset MCP server.
+    'POST /mcp/servers/:id/oauth/start': withAuth(async (body, params) => {
+      const serverId = params?.id
+      if (!serverId) return { status: 400, body: { error: 'server id is required' } }
+      const clientId = typeof (body as Record<string, unknown>).clientId === 'string'
+        ? (body as Record<string, unknown>).clientId as string : ''
+      if (!clientId) return { status: 400, body: { error: 'clientId is required' } }
+      const cfg = loadConfig().mcp?.servers[serverId]
+      if (!cfg) return { status: 404, body: { error: `MCP server "${serverId}" not found` } }
+      const preset = MCP_PRESETS.find(p => p.id === serverId)
+      const authConfig = cfg.auth ?? preset?.auth
+      if (!authConfig || authConfig.type !== 'oauth') {
+        return { status: 400, body: { error: 'Server does not support OAuth' } }
+      }
+      const provider = findMcpOAuthProvider(authConfig.provider)
+      if (!provider) {
+        return { status: 400, body: { error: `Unknown OAuth provider: ${authConfig.provider}` } }
+      }
+
+      // startMcpOAuth blocks until the user completes browser auth — return authUrl
+      // for the frontend to open, but the actual flow runs server-side.
+      // For headless/CLI, the function handles localhost callback internally.
+      try {
+        const scopes = [...provider.defaultScopes, ...(authConfig.scopes ?? [])]
+        const token = await startMcpOAuth(serverId, provider, clientId, scopes)
+        return { status: 200, body: { ok: true, serverId, provider: token.provider, expiresAt: token.expiresAt } }
+      } catch (err) {
+        return { status: 500, body: { error: (err as Error).message } }
+      }
+    }, token),
+
+    // GET /mcp/servers/:id/oauth/status
+    'GET /mcp/servers/:id/oauth/status': withAuth((_, params) => {
+      const serverId = params?.id
+      if (!serverId) return { status: 400, body: { error: 'server id is required' } }
+      const token = loadMcpOAuthToken(serverId)
+      return {
+        status: 200,
+        body: {
+          connected: token !== null && token.expiresAt > Date.now(),
+          provider: token?.provider,
+          expiresAt: token?.expiresAt,
+        },
+      }
+    }, token),
+
+    // DELETE /mcp/servers/:id/oauth — revoke stored token
+    'DELETE /mcp/servers/:id/oauth': withAuth((_, params) => {
+      const serverId = params?.id
+      if (!serverId) return { status: 400, body: { error: 'server id is required' } }
+      revokeMcpOAuth(serverId)
+      return { status: 200, body: { ok: true, serverId } }
     }, token),
   }
 }
