@@ -76,7 +76,7 @@ export function buildMcpRoutes(
           servers.push({
             serverId: id,
             status: cfg.disabled ? 'disconnected' : 'disconnected',
-            transport: cfg.command ? 'stdio' : 'sse',
+            transport: cfg.command ? 'stdio' : 'streamableHttp',
             toolCount: 0,
           })
         }

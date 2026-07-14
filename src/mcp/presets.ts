@@ -9,6 +9,8 @@
  * tradeoff as provider API keys).
  */
 
+import type { McpTransportType } from './types.js'
+
 export interface McpPresetEnvField {
   /** Env var name passed to the MCP server process (e.g. GITHUB_PERSONAL_ACCESS_TOKEN). */
   key: string
@@ -24,11 +26,11 @@ export interface McpPreset {
   description: string
   /** Rough grouping for the discovery grid. */
   category: 'dev' | 'productivity' | 'communication' | 'knowledge'
-  transport: 'stdio' | 'sse'
+  transport: McpTransportType
   /** stdio */
   command?: string
   args?: string[]
-  /** sse */
+  /** remote */
   url?: string
   /** Secrets the preset needs; collected inline and stored as `env`. */
   requiredEnv?: McpPresetEnvField[]

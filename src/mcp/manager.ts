@@ -1,15 +1,15 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { Tool } from '../tools/types.js'
 import type { McpConfig, McpServerConfig } from './config.js'
-import type { McpConnectionState } from './types.js'
+import type { McpConnectionState, McpTransportType } from './types.js'
 import { createMcpToolWrapper, createMcpConnectorConsent, type McpConnectorConsent } from './wrapper.js'
 import { classifyMcpError } from './failure-classifier.js'
-import { resolveNpmCliCommand, buildStdioEnvWithNodePath } from '../platform/resolve-node-cli.js'
+import { createTransport, type TransportFactoryResult } from './transport-factory.js'
 
 const DEFAULT_MCP_TIMEOUT_MS = 60_000
-const STDERR_TAIL_MAX = 4_096
 const NETWORK_RETRY_DELAY_MS = 800
+const RECONNECT_MAX_ATTEMPTS = 3
+const RECONNECT_BACKOFF_BASE_MS = 2_000
 
 function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -19,12 +19,6 @@ function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): 
       error => { clearTimeout(timer); reject(error) },
     )
   })
-}
-
-function trimStderrTail(chunks: string[]): string {
-  let text = chunks.join('').replace(/\s+$/u, '')
-  if (text.length > STDERR_TAIL_MAX) text = text.slice(-STDERR_TAIL_MAX)
-  return text
 }
 
 function formatConnectError(err: unknown, stderrTail: string): string {
@@ -51,9 +45,10 @@ export interface McpToolDef {
 
 export interface ConnectedServer {
   client: Client
-  transport: { close(): Promise<void>; pid?: number | null }
+  transport: TransportFactoryResult['transport']
   serverId: string
-  /** Last stdio stderr bytes captured during connect (for error attribution). */
+  transportType: McpTransportType
+  /** Last stdio stderr bytes captured (for error attribution). */
   stderrTail?: () => string
 }
 
@@ -63,6 +58,8 @@ export class McpManager {
   private states: Map<string, McpConnectionState> = new Map()
   private tools: Tool[] = []
   private timeoutMs: number
+  // Per-server reconnect attempt counter (for remote transports).
+  private reconnectAttempts: Map<string, number> = new Map()
   // Shared across all wrappers: first use of each connector requires explicit opt-in.
   private connectorConsent: McpConnectorConsent = createMcpConnectorConsent()
 
@@ -123,6 +120,10 @@ export class McpManager {
     return this.tools.filter((t) => t.definition.name.startsWith(prefix))
   }
 
+  getConnection(serverId: string): ConnectedServer | undefined {
+    return this.connections.get(serverId)
+  }
+
   getStates(): McpConnectionState[] {
     return Array.from(this.states.values())
   }
@@ -167,9 +168,12 @@ export class McpManager {
   async shutdownServer(serverId: string): Promise<void> {
     const conn = this.connections.get(serverId)
     if (conn) {
+      // Remove onclose handler to avoid reconnect fighting with shutdown.
+      conn.transport.onclose = undefined
       try { await conn.transport.close() } catch { /* best-effort */ }
       this.connections.delete(serverId)
     }
+    this.reconnectAttempts.delete(serverId)
     // Remove the server's tools from the tool list
     const prefix = `mcp__${serverId}__`
     this.tools = this.tools.filter(t => !t.definition.name.startsWith(prefix))
@@ -190,7 +194,7 @@ export class McpManager {
     serverConfig: McpServerConfig,
     attempt: number,
   ): Promise<Tool[]> {
-    const transport: 'stdio' | 'sse' = serverConfig.command ? 'stdio' : 'sse'
+    const transport: McpTransportType = serverConfig.command ? 'stdio' : 'streamableHttp'
     this.states.set(serverId, {
       serverId,
       status: 'connecting',
@@ -234,7 +238,7 @@ export class McpManager {
               const current = this.states.get(serverId)
               this.states.set(serverId, {
                 serverId,
-                transport,
+                transport: server.transportType,
                 status: 'degraded',
                 toolCount: current?.toolCount ?? 0,
                 error: formatConnectError(err, ''),
@@ -252,11 +256,13 @@ export class McpManager {
         this.tools.push(...rivetTools)
         this.states.set(serverId, {
           serverId,
-          transport,
+          transport: server.transportType,
           status: 'connected',
           toolCount: mcpTools.length,
           lastConnectedAt: Date.now(),
         })
+        // Reset reconnect counter on successful connect.
+        this.reconnectAttempts.delete(serverId)
         return rivetTools
       } catch (err) {
         // Tool discovery failed — close the transport that was just opened
@@ -269,7 +275,7 @@ export class McpManager {
       // One automatic backoff retry for transient/network failures.
       if (classified.retryable && attempt === 0) {
         await new Promise((r) => setTimeout(r, NETWORK_RETRY_DELAY_MS))
-        return this._connectAndDiscover(serverId, serverConfig, 1)
+        return this._connectAndDiscover(serverId, serverConfig, attempt + 1)
       }
       this.states.set(serverId, {
         serverId,
@@ -288,72 +294,83 @@ export class McpManager {
   /** @internal Overridable for testing */
   async _connectServer(serverId: string, config?: McpServerConfig): Promise<ConnectedServer> {
     const cfg = config ?? this.config.servers[serverId]!
-    const client = new Client(
-      { name: 'rivet', version: '0.1.0' },
-      { capabilities: {} },
-    )
 
-    if (cfg.command) {
-      // MCP SDK hardcodes shell:false — rewrite bare npx/npm to node+cli.js so
-      // Windows GUI / bundled-node launches don't ENOENT on npx.cmd.
-      const resolved = resolveNpmCliCommand(cfg.command, cfg.args ?? [])
-      const bare = cfg.command.replace(/\\/g, '/').split('/').pop()?.replace(/\.(cmd|bat|exe)$/i, '').toLowerCase()
-      const fellBackToBareNpx = (bare === 'npx' || bare === 'npm')
-        && resolved.command === cfg.command
-      const env = buildStdioEnvWithNodePath(
-        cfg.env as Record<string, string> | undefined,
-        { getDefaultEnvironment },
-      )
-      const transport = new StdioClientTransport({
-        command: resolved.command,
-        args: resolved.args,
-        env,
-        cwd: cfg.cwd,
-        stderr: 'pipe',
-      })
-      // Attach stderr listeners BEFORE connect so early bootstrap errors are kept.
-      const stderrChunks: string[] = []
-      const stderrStream = transport.stderr as { on?(event: string, cb: (chunk: Buffer | string) => void): void } | null
-      if (stderrStream && typeof stderrStream.on === 'function') {
-        stderrStream.on('data', (chunk: Buffer | string) => {
-          const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-          stderrChunks.push(text)
-          while (stderrChunks.join('').length > STDERR_TAIL_MAX) stderrChunks.shift()
-        })
-      }
-      try {
-        await withTimeout(client.connect(transport), `MCP connect ${serverId}`, this.timeoutMs)
-      } catch (err) {
-        if (fellBackToBareNpx) {
-          const msg = err instanceof Error ? err.message : String(err)
-          throw new Error(
-            `${msg} — npx/npm-cli.js was not found next to this Node binary `
-            + `(${process.execPath}); packaged builds need fetch-node-runtime to bundle npm`,
-          )
-        }
-        throw err
-      }
-      return {
-        client,
-        transport,
-        serverId,
-        stderrTail: () => trimStderrTail(stderrChunks),
-      }
-    } else if (cfg.url) {
-      const { StreamableHTTPClientTransport } = await import(
-        '@modelcontextprotocol/sdk/client/streamableHttp.js'
-      ) as typeof import('@modelcontextprotocol/sdk/client/streamableHttp.js')
-      const transport = new StreamableHTTPClientTransport(
-        new URL(cfg.url),
-        {
-          requestInit: cfg.headers ? { headers: cfg.headers as Record<string, string> } : undefined,
-        },
-      )
-      await withTimeout(client.connect(transport), `MCP connect ${serverId}`, this.timeoutMs)
-      return { client, transport, serverId }
+    const transportOpts: {
+      getHeaders?: () => Promise<Record<string, string>>
+      getEnv?: () => Promise<Record<string, string>>
+      timeoutMs?: number
+    } = { timeoutMs: this.timeoutMs }
+    if (cfg.headers) {
+      transportOpts.getHeaders = async () => cfg.headers as Record<string, string>
     }
 
-    throw new Error(`Invalid MCP server config for ${serverId}`)
+    // Factory handles Client creation, transport construction, and connect.
+    const result = await withTimeout(
+      createTransport(cfg, transportOpts),
+      `MCP connect ${serverId}`,
+      this.timeoutMs,
+    )
+
+    // Register onclose handler for auto-reconnect on remote transports.
+    // stdio transport death is terminal (process exited).
+    if (result.transportType !== 'stdio' && process.env.RIVET_MCP_RECONNECT !== '0') {
+      result.transport.onclose = () => {
+        this._onTransportClosed(serverId, cfg)
+      }
+    }
+
+    return {
+      client: result.client,
+      serverId,
+      transport: result.transport,
+      transportType: result.transportType,
+      stderrTail: result.stderrTail,
+    }
+  }
+
+  /**
+   * Auto-reconnect handler for remote (URL-based) transport disconnections.
+   * Uses exponential backoff: 2s, 4s, 8s, up to RECONNECT_MAX_ATTEMPTS.
+   * Disabled when RIVET_MCP_RECONNECT=0.
+   */
+  private _onTransportClosed(serverId: string, cfg: McpServerConfig): void {
+    const attempts = this.reconnectAttempts.get(serverId) ?? 0
+    if (attempts >= RECONNECT_MAX_ATTEMPTS) {
+      const current = this.states.get(serverId)
+      this.states.set(serverId, {
+        serverId,
+        transport: 'streamableHttp',
+        status: 'error',
+        toolCount: current?.toolCount ?? 0,
+        error: `Reconnect failed after ${RECONNECT_MAX_ATTEMPTS} attempts`,
+        lastConnectedAt: current?.lastConnectedAt,
+        lastErrorAt: Date.now(),
+      })
+      return
+    }
+
+    this.reconnectAttempts.set(serverId, attempts + 1)
+    this.connections.delete(serverId)
+
+    const delay = RECONNECT_BACKOFF_BASE_MS * Math.pow(2, attempts)
+    const current = this.states.get(serverId)
+    this.states.set(serverId, {
+      serverId,
+      transport: 'streamableHttp',
+      status: 'degraded',
+      toolCount: current?.toolCount ?? 0,
+      error: `Reconnecting (attempt ${attempts + 1}/${RECONNECT_MAX_ATTEMPTS})…`,
+      lastConnectedAt: current?.lastConnectedAt,
+      lastErrorAt: Date.now(),
+    })
+
+    setTimeout(async () => {
+      try {
+        await this._connectAndDiscover(serverId, cfg, /*attempt*/ 0)
+      } catch {
+        // Error already recorded by _connectAndDiscover.
+      }
+    }, delay)
   }
 
   /** @internal Overridable for testing */
