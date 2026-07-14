@@ -1,0 +1,29 @@
+[[permission]]
+identifier = "allow-custom-commands"
+description = "Allows all application-specific custom Tauri commands (runtime_info, pty_*, recorder_*, license_*, window management, etc.)."
+commands.allow = [
+  "runtime_info",
+  "device_fingerprint",
+  "activation_status",
+  "store_license",
+  "license_token",
+  "deactivate",
+  "is_storage_configured",
+  "get_storage_options",
+  "apply_storage_location",
+  "set_window_glass",
+  "read_attachment_file",
+  "focus_main_window",
+  "open_thread_window",
+  "pty_spawn",
+  "pty_write",
+  "pty_resize",
+  "pty_kill",
+  "recorder_permissions",
+  "recording_start",
+  "recording_stop",
+  "recording_status",
+  "list_recordings",
+  "delete_recording",
+  "read_recording",
+]

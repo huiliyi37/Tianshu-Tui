@@ -19,6 +19,7 @@
     "core:window:allow-set-title",
     "core:window:allow-set-always-on-top",
     "allow-read-attachment-file",
+    "allow-custom-commands",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
