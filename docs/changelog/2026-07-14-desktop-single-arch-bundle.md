@@ -37,5 +37,22 @@ bash desktop/scripts/build-mac.sh arm64
 
 ## 未做（Wave B/C）
 
-- tree-sitter-wasms / typescript 子集裁剪
-- serve 启动闭包延后 import（墙钟优化）
+- ~~tree-sitter-wasms / typescript 子集裁剪~~ → 见下方 Wave B
+- serve 启动闭包延后 import（墙钟优化，Wave C / 任务 7）
+
+## Wave B（2026-07-14）
+
+| 改动 | 结果 |
+|------|------|
+| `scripts/tree-sitter-wasm-keep.js` | 只保留 meridian `LANG_WASM`：typescript / python / go；`out/` **49MB → ~4MB** |
+| `scripts/typescript-stage-trim.js` | **保留** `typescript`（`lsp/client` 无本地 `tsc` 时 `createProgram` 回退）；裁掉 locale + tsc/tsserver CLI；**23MB → ~12–14MB** |
+
+**为何不删 typescript：** 封版 sidecar 在用户项目缺 `node_modules/.bin/tsc` 时走进程内回退；删掉会让 typecheck gate `ranOk:false` fail-open。CLI/`tsserver` 与 locale 包进程内 API 用不到，可安全裁。
+
+验收：
+
+```bash
+npm exec -- tsx --test scripts/__tests__/tree-sitter-wasm-keep.test.ts scripts/__tests__/typescript-stage-trim.test.ts
+TAURI_ENV_TARGET_TRIPLE=aarch64-apple-darwin STAGE_SKIP_SQLITE_CHECK=1 node scripts/stage-runtime-deps.js
+# 预期：tree-sitter-wasms ~4MB；typescript ~12–14MB；createProgram 可 require
+```

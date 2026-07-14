@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { isForeignPlatformPackage } from './runtime-platform-filter.js'
 import { pruneTreeSitterWasms } from './tree-sitter-wasm-keep.js'
+import { pruneTypescriptStaging } from './typescript-stage-trim.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '..')
@@ -174,6 +175,18 @@ if (wasmPrune.removed.length > 0) {
     wasmPrune.kept.length,
     wasmPrune.removed.length,
     dirSizeMb(join(destModules, 'tree-sitter-wasms')),
+  )
+}
+
+// Keep typescript for lsp/client in-process createProgram fallback, but drop
+// locale packs + tsc/tsserver CLIs (~9MB) that the API path never loads.
+const tsRoot = join(destModules, 'typescript')
+const tsPrune = pruneTypescriptStaging(tsRoot)
+if (tsPrune.removed.length > 0) {
+  console.log(
+    '✅ Trimmed staged typescript: removed %d paths → %dMB (kept for typecheck fallback)',
+    tsPrune.removed.length,
+    dirSizeMb(tsRoot),
   )
 }
 

@@ -404,38 +404,10 @@ EOF
 - 修改：`scripts/stage-runtime-deps.js`（staging 后 prune `tree-sitter-wasms/out`）
 - 查清：谁按路径加载 wasm（`rg tree-sitter-wasms` / `LANG_MAP`）
 
-- [ ] **步骤 1：列出运行时实际引用的 grammar 名**
-
-```bash
-rg -n "tree-sitter-wasms|LANG_MAP|tree-sitter-.*\.wasm" src/ scripts/ dist/ --glob '!dist/node_modules/**' | head -40
-```
-
-得到 allowlist（预期含：typescript, tsx, javascript, python, go, rust, c, cpp, java, json, html, css, bash…）。缺的语言在工具调用时再失败并有明确错误，或后续按需下载（本计划不做按需下载）。
-
-- [ ] **步骤 2：staging 后删除非 allowlist `.wasm`**
-
-```js
-const TS_WASM_KEEP = new Set([
-  'tree-sitter-typescript.wasm', 'tree-sitter-tsx.wasm', /* … */
-])
-// after staging loop:
-const outDir = join(destModules, 'tree-sitter-wasms', 'out')
-if (existsSync(outDir)) {
-  for (const f of readdirSync(outDir)) {
-    if (!TS_WASM_KEEP.has(f)) rmSync(join(outDir, f), { force: true })
-  }
-}
-```
-
-- [ ] **步骤 3：验收**
-
-```bash
-du -sh dist/node_modules/tree-sitter-wasms
-```
-
-预期：从 ~49MB 降到 roughly ≤15MB（视 allowlist）。
-
-- [ ] **步骤 4：Commit**（独立 commit）
+- [x] **步骤 1：列出运行时实际引用的 grammar 名** — 仅 `meridian-parser.ts` LANG_WASM：typescript / python / go
+- [x] **步骤 2：staging 后删除非 allowlist `.wasm`** — `scripts/tree-sitter-wasm-keep.js`
+- [x] **步骤 3：验收** — ~49MB → ~4MB
+- [x] **步骤 4：Commit** — `76e61e49`
 
 ---
 
@@ -445,14 +417,9 @@ du -sh dist/node_modules/tree-sitter-wasms
 - 调研：`rg "from 'typescript'|require\\('typescript'\\)|createProgram|tsserver" src/`
 - 修改：`scripts/stage-runtime-deps.js` 的 `ROOTS`（若可删）
 
-- [ ] **步骤 1：确认调用链** — 若仅 LSP fallback / 极少路径，改为：
-
-  - 从 `ROOTS` 移除 `typescript`，或  
-  - 只 stage `lib/typescript.js` + 必要 `lib/*.d.ts` 子集（慎：易碎）
-
-- [ ] **步骤 2：无 typescript 的 sidecar 冒烟** — `serve` + 跑一条原依赖 tsc 的工具路径；若失败，保留但文档标明「23MB 税」。
-
-- [ ] **步骤 3：Commit 或记录「保留」决定到 changelog**（二选一，禁止静默）。
+- [x] **步骤 1：确认调用链** — `lsp/client.ts` 在无本地 `tsc` 时 `require('typescript')` + `createProgram`；**保留 ROOTS**，裁 locale/CLI（`typescript-stage-trim.js`）
+- [x] **步骤 2：冒烟** — staged `createProgram` / `findConfigFile` OK；~23MB → ~12–14MB
+- [x] **步骤 3：Commit + changelog 记录保留决定**
 
 ---
 
