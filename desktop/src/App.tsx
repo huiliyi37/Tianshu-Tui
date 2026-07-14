@@ -240,7 +240,7 @@ export function App() {
             {t('banner.sidecarGaveUp')}
             <button className="banner-action" onClick={restartApp}>{t('banner.restartApp')}</button>
           </div>
-        ) : (sidecarFailed || (runtimeInfo?.ready === false && !sidecarHealthyRef.current)) && sidecarDown ? (
+        ) : (sidecarFailed || (runtimeInfo?.ready !== true && !sidecarHealthyRef.current)) && sidecarDown ? (
           <div className="banner error">
             {t('banner.sidecarFailed')}
             {runtimeInfo?.spawnError && (
