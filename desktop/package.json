@@ -2,7 +2,7 @@
   "name": "tianshu-desktop",
   "private": true,
   "license": "SEE LICENSE IN EULA.md",
-  "version": "2.19.1",
+  "version": "2.19.2",
   "type": "module",
   "description": "天枢桌面版 — Antigravity 2.0 范式 agent-first 桌面外壳（Tauri + React），通过 localhost sidecar 接 rivet runtime。",
   "engines": {
