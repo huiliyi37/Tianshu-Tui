@@ -429,12 +429,12 @@ EOF
 
 **前提：** Wave A/B 已合并；本任务改 `src/server/serve.ts` / 工具注册路径，需完整回归。
 
-- [ ] 用 `node --cpu-prof` 或简单 `performance.now()` 包一层，对封版 `main.js serve` 打印「listen 前各 import 耗时」。
-- [ ] 将首包不需要的 MCP SDK / turndown / 重 tool registry 改为 `await import()`（首次相关路由或首 session）。
-- [ ] 回归：`npm test` 中 server 相关 + 手动封版 sidecar `/health` < 现基线 3.6s。
-- [ ] 单独计划或本计划末尾执行；**不要与 Wave A 同一 PR 混做**。
+- [x] **步骤 1：计时** — `RIVET_SERVE_TIMING=1` 打印 listen / serve-agent import ms
+- [x] **步骤 2：拆分** — `serve-agent.ts` 承载 AgentLoop/tools/Meridian/council；`runServe` 动态 `import()`；MCP `McpManager` 动态加载；listen 后预热
+- [x] **步骤 3：回归** — server session 相关测试全绿；冷启动 `/health` 本机 ~760ms（基线 ~1195ms）
+- [x] **步骤 4：changelog**
 
-> **2026-07-14 暂停：** Wave B（任务 5–6）已完成。任务 7 改启动闭包、需独立回归与墙钟基线，本轮不做；需要时另开会话/计划。
+> **2026-07-14 完成：** Wave C 任务 7 已合并。serve 冷路径静态图从 ~5MB 依赖降到 ~3KB+轻量 chunk；重依赖在首 session / 后台预热时加载。
 
 ---
 

@@ -269,13 +269,13 @@ export function buildSessionRoutes(
 
     // Plan mode — toggle the session into read-only planning ('planning') or back
     // to normal execution ('off'). Emits a plan_mode event for live viewers.
-    'POST /sessions/:id/plan-mode': withAuth((body, params) => {
+    'POST /sessions/:id/plan-mode': withAuth(async (body, params) => {
       const id = params!.id!
       const data = (body ?? {}) as { state?: unknown }
       if (data.state !== 'off' && data.state !== 'planning') {
         return { status: 400, body: { error: 'Invalid or missing "state" (off|planning)' } }
       }
-      if (!manager.setPlanMode(id, data.state)) {
+      if (!(await manager.setPlanMode(id, data.state))) {
         return { status: 404, body: { error: 'Session not found' } }
       }
       return { status: 200, body: { id, planMode: data.state } }
@@ -353,12 +353,12 @@ export function buildSessionRoutes(
     }, apiToken),
 
     // Write — hot-switch the session's model (preserves history). Non-running only.
-    'POST /sessions/:id/model': withAuth((body, params) => {
+    'POST /sessions/:id/model': withAuth(async (body, params) => {
       const data = (body ?? {}) as { modelId?: unknown }
       if (typeof data.modelId !== 'string' || !data.modelId.trim()) {
         return { status: 400, body: { error: 'Missing or invalid "modelId"' } }
       }
-      if (!manager.switchModel(params!.id!, data.modelId.trim())) {
+      if (!(await manager.switchModel(params!.id!, data.modelId.trim()))) {
         return { status: 409, body: { error: 'Session missing/running or model not found' } }
       }
       return { status: 200, body: manager.getSession(params!.id!) }
@@ -536,7 +536,7 @@ export function buildSessionRoutes(
       return { status: 200, body: rec }
     }, apiToken),
 
-    'POST /sessions/:id/prompt': withAuth((body, params) => {
+    'POST /sessions/:id/prompt': withAuth(async (body, params) => {
       const data = (body ?? {}) as { prompt?: string; images?: unknown }
       if (!data.prompt || typeof data.prompt !== 'string' || !data.prompt.trim()) {
         return { status: 400, body: { error: 'Missing or empty "prompt" field' } }
@@ -587,7 +587,7 @@ export function buildSessionRoutes(
           prompt = resolved.prompt
           // 桌面端也需挂载 workflow 声明的 EXTENDED 工具（与 TUI main.ts 对齐）。
           for (const toolName of resolved.requiredTools ?? []) {
-            manager.enableTool(params!.id!, toolName)
+            await manager.enableTool(params!.id!, toolName)
           }
         }
       }
@@ -596,7 +596,7 @@ export function buildSessionRoutes(
       // 缓存纪律：走既有 enableTool 边界挂载机制，边界一次性 miss 已有提示；
       // 非 darwin 平台工具未注册，enableTool 静默 no-op。
       if (/@computer\b/i.test(prompt)) {
-        manager.enableTool(params!.id!, 'computer_use')
+        await manager.enableTool(params!.id!, 'computer_use')
       }
 
       const ok = manager.run(params!.id!, prompt, images)
@@ -607,8 +607,8 @@ export function buildSessionRoutes(
     // Phase 3 可靠性 — 一键续跑（resume_offer 卡片的服务端入口）。
     // 缓存亲和 fail-closed：原模型不可用且未配置 agent.resumeFallbackModel 时
     // 返回 409/model_unavailable，UI 降级为「开新会话」入口——绝不静默换默认模型。
-    'POST /sessions/:id/resume': withAuth((_body, params) => {
-      const result = manager.resumeRun(params!.id!)
+    'POST /sessions/:id/resume': withAuth(async (_body, params) => {
+      const result = await manager.resumeRun(params!.id!)
       if (!result.ok) {
         const status = result.code === 'not_found' ? 404 : 409
         return { status, body: { error: result.error, code: result.code } }
@@ -1118,7 +1118,7 @@ export function buildSessionRoutes(
 
     // 用户主动派后台子代理：在已有会话上、独立于主 turn 启动一个 worker。
     // 不置 session.running，子代理跑在隔离子会话，进度走 delegation SSE。
-    'POST /sessions/:id/delegate': withAuth((body, params) => {
+    'POST /sessions/:id/delegate': withAuth(async (body, params) => {
       const data = (body ?? {}) as { objective?: unknown; profile?: unknown; authority?: unknown; files?: unknown }
       if (typeof data.objective !== 'string' || !data.objective.trim()) {
         return { status: 400, body: { error: 'Missing or empty "objective" field' } }
@@ -1132,7 +1132,7 @@ export function buildSessionRoutes(
       if (data.files !== undefined && (!Array.isArray(data.files) || data.files.some((f: unknown) => typeof f !== 'string'))) {
         return { status: 400, body: { error: 'Invalid "files"' } }
       }
-      const result = manager.delegate(params!.id!, {
+      const result = await manager.delegate(params!.id!, {
         objective: data.objective.trim(),
         ...(data.profile ? { profile: data.profile } : {}),
         ...(data.authority ? { authority: data.authority } : {}),

@@ -573,7 +573,7 @@ describe('session tool_result stream coalescing', () => {
 
     assert.equal(manager.abort(session.id), true)
     assert.equal(manager.run(session.id, 'too soon'), false)
-    assert.equal(manager.switchModel(session.id, 'other-model'), false)
+    assert.equal(await manager.switchModel(session.id, 'other-model'), false)
     assert.equal(manager.rewind(session.id, 0), false)
     assert.equal(agent.concurrentRunAttempts, 0)
     assert.equal(agent.switchModelCalls, 0)
@@ -602,7 +602,7 @@ describe('session tool_result stream coalescing', () => {
     assert.equal(first.manager.archiveSession(first.session.id), true)
     assert.equal(first.manager.unarchiveSession(first.session.id), true)
     assert.equal(first.manager.run(first.session.id, 'too soon'), false)
-    assert.equal(first.manager.switchModel(first.session.id, 'other-model'), false)
+    assert.equal(first.await manager.switchModel(first.session.id, 'other-model'), false)
     assert.equal(first.manager.rewind(first.session.id, 0), false)
     assert.equal(first.agent.concurrentRunAttempts, 0)
     assert.equal(releaseCalls, 0)

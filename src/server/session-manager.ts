@@ -306,7 +306,7 @@ export type AgentFactory = (
    * or fall back to the default when the id no longer resolves.
    */
   modelId?: string,
-) => ManagedAgent
+) => ManagedAgent | Promise<ManagedAgent>
 
 export interface CreateSessionInput {
   cwd?: string
@@ -1397,7 +1397,10 @@ export class RuntimeSessionManager {
     // Materialize the on-disk log before appending — otherwise a reconnecting
     // viewer (since=0) would replay only this run's events, not the history.
     this.ensureEvents(session)
-    const agent = this.ensureAgent(session)
+    // Mark running before ensureAgent (may await dynamic serve-agent import) so a
+    // second run() cannot race in while the module is still loading. User/status
+    // events are appended only after the agent exists — warnIfHistoryLost must
+    // see the pre-prompt event log, not this turn's user echo.
     session.running = true
     session.toolResultClosed = false
     // T3 — drop any guidance left from a previous run so it can't leak forward.
@@ -1407,19 +1410,6 @@ export class RuntimeSessionManager {
     // R1 — keep the registry heartbeat fresh while this session is active.
     try { this.getRegistry?.()?.heartbeat(id) } catch { /* non-fatal */ }
     this.touch(session)
-    // Persist each attached image as a standalone file and echo only small
-    // reference ids into the event log — NOT the base64. This keeps events.jsonl
-    // (and its full replay/restore) tiny while the model still receives the data
-    // URLs inline via agent.run below.
-    const imageIds = this.persistImages(id, images)
-    this.append(session, 'user', {
-      text: prompt,
-      ...(images?.length
-        ? { imageCount: images.length, ...(imageIds.length ? { imageIds } : {}) }
-        : {}),
-    })
-    this.append(session, 'status', { status: 'running' })
-    this.persistRecord(session)
 
     const runGeneration = session.lifecycleGeneration
     let resolveRunSettlement!: () => void
@@ -1433,64 +1423,113 @@ export class RuntimeSessionManager {
       resolve: resolveRunSettlement,
     }
     session.activeRunSettlement = runSettlement
-    this.bindPlanModeChange(session, agent, runGeneration)
-    const callbacks = this.buildCallbacks(session)
     const ownsDurability = (): boolean => this.ownsSessionLifecycle(session, runGeneration)
-    void agent
-      .run(prompt, callbacks, images)
-      .then(() => {
-        if (!ownsDurability()) return
-        if (session.record.status === 'running') {
-          session.record.status = 'completed'
-        }
-      })
-      .catch((err: unknown) => {
-        if (!ownsDurability()) return
-        if (session.record.status === 'running') {
-          session.record.status = 'failed'
-          session.record.error = redactText((err as Error)?.message ?? String(err))
-          this.append(session, 'error', { error: session.record.error })
-        }
-      })
-      .finally(() => {
-        if (runSettlement.settled) return
-        runSettlement.settled = true
-        try {
+
+    const startWithAgent = (agent: ManagedAgent) => {
+      // Abort/archive raced a dynamic serve-agent import — never start a turn.
+      if (!ownsDurability() || session.record.status === 'aborted') {
+        if (!runSettlement.settled) {
+          runSettlement.settled = true
           if (session.activeRunSettlement === runSettlement) {
             session.activeRunSettlement = undefined
             session.running = false
           }
           this.releaseRunClaims(id, runSettlement)
-          if (!ownsDurability()) {
-            // Archive owns the durable transition and advances the generation,
-            // but an archived session still needs the deferred heavy-state unload
-            // once its old agent promise releases. Never unload after unarchive.
-            if (this.ownsSessionDurability(session) && session.record.archived) {
-              this.unloadSession(session)
-            }
-            return
-          }
-          // Close out approvals the run left dangling — the promise must settle
-          // (deny) either way, but label honestly: only an aborted run closes as
-          // 'aborted'; a run that ended on its own (completed/failed) leaves the
-          // approval merely 'stale' — the user never denied it and nothing was
-          // interrupted. Mislabeling completed runs as aborted poisoned the
-          // timeline and downstream "was this an interruption?" heuristics.
-          this.rejectAllPending(session, session.record.status === 'aborted' ? 'aborted' : 'stale')
-          this.touch(session)
-          // postSession 产物（如 walkthrough 走查工件）在 run 落定后才入 store —
-          // 这里再扫一遍，让 'artifact' 事件把它公告给桌面端。
-          this.scanArtifacts(session)
-          this.append(session, 'done', { status: session.record.status })
-          this.persistRecord(session)
-          this.maybeWatchdogAutoContinue(session)
-          // Phase 3 #9 — the session was archived while this run was settling
-          // (archive aborts first): finish the unload archiveSession deferred.
-          if (session.record.archived) this.unloadSession(session)
-        } finally {
+          try { agent.abort() } catch { /* best-effort */ }
           runSettlement.resolve()
         }
+        return
+      }
+      // Persist each attached image as a standalone file and echo only small
+      // reference ids into the event log — NOT the base64. This keeps events.jsonl
+      // (and its full replay/restore) tiny while the model still receives the data
+      // URLs inline via agent.run below.
+      const imageIds = this.persistImages(id, images)
+      this.append(session, 'user', {
+        text: prompt,
+        ...(images?.length
+          ? { imageCount: images.length, ...(imageIds.length ? { imageIds } : {}) }
+          : {}),
       })
+      this.append(session, 'status', { status: 'running' })
+      this.persistRecord(session)
+      this.bindPlanModeChange(session, agent, runGeneration)
+      const callbacks = this.buildCallbacks(session)
+      void agent
+        .run(prompt, callbacks, images)
+        .then(() => {
+          if (!ownsDurability()) return
+          if (session.record.status === 'running') {
+            session.record.status = 'completed'
+          }
+        })
+        .catch((err: unknown) => {
+          if (!ownsDurability()) return
+          if (session.record.status === 'running') {
+            session.record.status = 'failed'
+            session.record.error = redactText((err as Error)?.message ?? String(err))
+            this.append(session, 'error', { error: session.record.error })
+          }
+        })
+        .finally(() => {
+          if (runSettlement.settled) return
+          runSettlement.settled = true
+          try {
+            if (session.activeRunSettlement === runSettlement) {
+              session.activeRunSettlement = undefined
+              session.running = false
+            }
+            this.releaseRunClaims(id, runSettlement)
+            if (!ownsDurability()) {
+              if (this.ownsSessionDurability(session) && session.record.archived) {
+                this.unloadSession(session)
+              }
+              return
+            }
+            this.rejectAllPending(session, session.record.status === 'aborted' ? 'aborted' : 'stale')
+            this.touch(session)
+            this.scanArtifacts(session)
+            this.append(session, 'done', { status: session.record.status })
+            this.persistRecord(session)
+            this.maybeWatchdogAutoContinue(session)
+            if (session.record.archived) this.unloadSession(session)
+          } finally {
+            runSettlement.resolve()
+          }
+        })
+    }
+
+    const failEnsure = (err: unknown) => {
+      if (ownsDurability() && session.record.status === 'running') {
+        session.record.status = 'failed'
+        session.record.error = redactText((err as Error)?.message ?? String(err))
+        this.append(session, 'error', { error: session.record.error })
+      }
+      if (!runSettlement.settled) {
+        runSettlement.settled = true
+        if (session.activeRunSettlement === runSettlement) {
+          session.activeRunSettlement = undefined
+          session.running = false
+        }
+        this.releaseRunClaims(id, runSettlement)
+        if (ownsDurability()) {
+          this.append(session, 'done', { status: session.record.status })
+          this.persistRecord(session)
+        }
+        runSettlement.resolve()
+      }
+    }
+
+    try {
+      const agentOrPromise = this.ensureAgent(session)
+      if (agentOrPromise && typeof (agentOrPromise as Promise<ManagedAgent>).then === 'function') {
+        void (agentOrPromise as Promise<ManagedAgent>).then(startWithAgent, failEnsure)
+      } else {
+        startWithAgent(agentOrPromise as ManagedAgent)
+      }
+    } catch (err) {
+      failEnsure(err)
+    }
     return true
   }
 
@@ -1511,7 +1550,7 @@ export class RuntimeSessionManager {
    *    "start a new session" entry. Never silently falls back to the default
    *    model.
    */
-  resumeRun(id: string): ResumeRunResult {
+  async resumeRun(id: string): Promise<ResumeRunResult> {
     const session = this.sessions.get(id)
     if (!session) return { ok: false, code: 'not_found', error: 'Session not found' }
     if (session.running) return { ok: false, code: 'busy', error: 'Session is already running' }
@@ -1540,7 +1579,7 @@ export class RuntimeSessionManager {
     if (switched) {
       if (session.agent) {
         // Live agent on the wrong model — hot-swap it (emits model_switched).
-        if (!this.switchModel(id, target!)) {
+        if (!(await this.switchModel(id, target!))) {
           return { ok: false, code: 'model_unavailable', error: `兜底模型 ${target} 切换失败——请开新会话继续` }
         }
       } else {
@@ -1564,12 +1603,12 @@ export class RuntimeSessionManager {
    * killed by aborting the main conversation. Progress streams through the same
    * 'delegation' SSE channel (origin:'user') the viewer panel already consumes.
    */
-  delegate(id: string, input: DelegateWorkerInput): DelegateResult {
+  async delegate(id: string, input: DelegateWorkerInput): Promise<DelegateResult> {
     const session = this.sessions.get(id)
     if (!session) return { ok: false, reason: 'not_found' }
     const objective = input.objective?.trim()
     if (!objective) return { ok: false, reason: 'invalid' }
-    const agent = this.ensureAgent(session)
+    const agent = await this.ensureAgentAsync(session)
     if (typeof agent.delegateWorker !== 'function') return { ok: false, reason: 'unsupported' }
     const aborts = session.backgroundAborts ?? (session.backgroundAborts = new Map())
     if (aborts.size >= MAX_USER_BACKGROUND_WORKERS) return { ok: false, reason: 'limit' }
@@ -1620,21 +1659,34 @@ export class RuntimeSessionManager {
     return true
   }
 
-  private ensureAgent(session: InternalSession): ManagedAgent {
-    if (!session.agent) {
-      this.ensureJobs(session)
-      // Model affinity: a rehydrated session must come back on the model its
-      // record carries (prefix-cache lives per model) — not the default model.
-      session.agent = this.createAgent(
-        session.record.cwd,
-        session.record.id,
-        session.approvalMode,
-        session.record.model,
-      )
+  private ensureAgent(session: InternalSession): ManagedAgent | Promise<ManagedAgent> {
+    if (session.agent) return session.agent
+    this.ensureJobs(session)
+    // Model affinity: a rehydrated session must come back on the model its
+    // record carries (prefix-cache lives per model) — not the default model.
+    const created = this.createAgent(
+      session.record.cwd,
+      session.record.id,
+      session.approvalMode,
+      session.record.model,
+    )
+    const finish = (agent: ManagedAgent): ManagedAgent => {
+      session.agent = agent
       this.applySelections(session)
       this.warnIfHistoryLost(session)
+      return agent
     }
-    return session.agent
+    // Production serve factory returns a Promise (dynamic serve-agent import).
+    // Test doubles return a ManagedAgent synchronously — keep that path sync so
+    // existing tests don't need a microtask flush after every run().
+    if (created && typeof (created as Promise<ManagedAgent>).then === 'function') {
+      return (created as Promise<ManagedAgent>).then(finish)
+    }
+    return finish(created as ManagedAgent)
+  }
+
+  private async ensureAgentAsync(session: InternalSession): Promise<ManagedAgent> {
+    return await this.ensureAgent(session)
   }
 
   /**
@@ -1795,10 +1847,10 @@ export class RuntimeSessionManager {
    * selections, persists record.model, and emits model_switched. Returns false
    * when the session is missing/running or the model id is unknown.
    */
-  switchModel(id: string, modelId: string): boolean {
+  async switchModel(id: string, modelId: string): Promise<boolean> {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
-    const agent = this.ensureAgent(session)
+    const agent = await this.ensureAgentAsync(session)
     let resolved: string | null
     try {
       resolved = agent.switchModel?.(modelId) ?? null
@@ -1937,10 +1989,10 @@ export class RuntimeSessionManager {
    * desktop can flip its mode chip / open the plan column. Returns false when the
    * session is missing.
    */
-  setPlanMode(id: string, state: PlanModeState): boolean {
+  async setPlanMode(id: string, state: PlanModeState): Promise<boolean> {
     const session = this.sessions.get(id)
     if (!session) return false
-    const agent = this.ensureAgent(session)
+    const agent = await this.ensureAgentAsync(session)
     session.record.planMode = state
     try {
       if (state === 'planning') agent.enterPlanMode?.()
@@ -2082,7 +2134,7 @@ export class RuntimeSessionManager {
       }
     }
     const { approved, kickoff } = result
-    const agent = this.ensureAgent(session)
+    const agent = await this.ensureAgentAsync(session)
     try {
       agent.setActivePlan?.({
         slug,
@@ -2121,7 +2173,7 @@ export class RuntimeSessionManager {
       return false
     }
     if (!rejected) return false
-    const agent = this.ensureAgent(session)
+    const agent = await this.ensureAgentAsync(session)
     try {
       agent.enterPlanMode?.({ planFilePath: `.rivet/plans/${slug}.md` })
     } catch { /* non-fatal */ }
@@ -2642,10 +2694,10 @@ export class RuntimeSessionManager {
    * Returns the mount status, or undefined if the session/agent lacks enableTool
    * (lightweight doubles). No-op if gating is off (tool already visible).
    */
-  enableTool(id: string, name: string): { status: string; cacheImpact: string } | undefined {
+  async enableTool(id: string, name: string): Promise<{ status: string; cacheImpact: string } | undefined> {
     const session = this.sessions.get(id)
     if (!session) return undefined
-    const agent = this.ensureAgent(session)
+    const agent = await this.ensureAgentAsync(session)
     return agent.enableTool?.(name)
   }
 

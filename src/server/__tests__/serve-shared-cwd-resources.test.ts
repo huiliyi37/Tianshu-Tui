@@ -15,7 +15,7 @@ import {
   disposeSharedCwdResources,
   attachLspTools,
   type SharedRuntime,
-} from '../serve.js'
+} from '../serve-agent.js'
 import { ProviderHealthTracker } from '../../agent/provider-health.js'
 import type { LspManager } from '../../lsp/manager.js'
 import type { Tool } from '../../tools/types.js'

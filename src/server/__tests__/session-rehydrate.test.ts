@@ -76,7 +76,7 @@ function ev(seq: number, type: SessionEvent['type'], data: Record<string, unknow
   return { seq, ts: 100 + seq, type, data }
 }
 
-test('rehydrate restores sessions and replays their event tail', () => {
+test('rehydrate restores sessions and replays their event tail', async () => {
   const seed: PersistedSession[] = [{
     record: {
       id: 'old1', status: 'completed', createdAt: 1, updatedAt: 9,
@@ -99,7 +99,7 @@ test('rehydrate restores sessions and replays their event tail', () => {
   assert.equal(replay.lastSeq, 2)
 })
 
-test('a session that was running becomes aborted with an honest marker', () => {
+test('a session that was running becomes aborted with an honest marker', async () => {
   const seed: PersistedSession[] = [{
     record: {
       id: 'crash', status: 'running', createdAt: 1, updatedAt: 5,
@@ -130,7 +130,7 @@ test('a session that was running becomes aborted with an honest marker', () => {
   assert.deepEqual(marker!.data.interruptedApprovals, [{ requestId: 'r', toolName: 'bash' }])
 })
 
-test('new events after rehydrate are persisted via the adapter', () => {
+test('new events after rehydrate are persisted via the adapter', async () => {
   const mem = new MemoryPersistence()
   const mgr = new RuntimeSessionManager({
     createAgent: () => new NoopAgent(),
@@ -143,7 +143,7 @@ test('new events after rehydrate are persisted via the adapter', () => {
   assert.ok(persistedEvents.some((e) => e.type === 'status'), 'run status event persisted')
 })
 
-test('rehydrated session with a prior conversation warns when the model context restore came back empty', () => {
+test('rehydrated session with a prior conversation warns when the model context restore came back empty', async () => {
   const seed: PersistedSession[] = [{
     record: {
       id: 'lost', status: 'completed', createdAt: 1, updatedAt: 9,
@@ -169,7 +169,7 @@ test('rehydrated session with a prior conversation warns when the model context 
   assert.deepEqual(warn!.data.historyRestore, { restored: 0, error: 'EISDIR: illegal operation' })
 })
 
-test('no history-lost warning when the restore succeeded or the session had no conversation', () => {
+test('no history-lost warning when the restore succeeded or the session had no conversation', async () => {
   const seed: PersistedSession[] = [
     {
       record: { id: 'ok', status: 'completed', createdAt: 1, updatedAt: 9, cwd: '/work', lastSeq: 1, pendingApprovals: 0 },
@@ -207,7 +207,7 @@ test('no history-lost warning when the restore succeeded or the session had no c
   )
 })
 
-test('lazy rehydrate reads no event logs at boot, loads on first open', () => {
+test('lazy rehydrate reads no event logs at boot, loads on first open', async () => {
   const seed: PersistedSession[] = [{
     record: {
       id: 'a', status: 'completed', createdAt: 1, updatedAt: 9,
@@ -297,7 +297,7 @@ test('a sync load winning the race is not clobbered by the stale async snapshot'
   )
 })
 
-test('a failing loadEvents surfaces a visible error event instead of a silent empty replay', () => {
+test('a failing loadEvents surfaces a visible error event instead of a silent empty replay', async () => {
   const seed: PersistedSession[] = [{
     record: {
       id: 'bad', status: 'completed', createdAt: 1, updatedAt: 9,
@@ -319,7 +319,7 @@ test('a failing loadEvents surfaces a visible error event instead of a silent em
   assert.match(String(errEv!.data.error), /EIO/)
 })
 
-test('lazy rehydrate caps resident logs (LRU) and reloads evicted ones', () => {
+test('lazy rehydrate caps resident logs (LRU) and reloads evicted ones', async () => {
   const seed: PersistedSession[] = ['s1', 's2', 's3'].map((id, i) => ({
     record: {
       id, status: 'completed' as const, createdAt: 1, updatedAt: i,
@@ -345,7 +345,7 @@ test('lazy rehydrate caps resident logs (LRU) and reloads evicted ones', () => {
   assert.equal(replay.events.length, 1)
 })
 
-test('lazy load applies the memory ring cap: only the tail stays resident', () => {
+test('lazy load applies the memory ring cap: only the tail stays resident', async () => {
   const total = 250
   const cap = 100
   const events: SessionEvent[] = []
@@ -374,7 +374,7 @@ test('lazy load applies the memory ring cap: only the tail stays resident', () =
   assert.equal(replay.lastSeq, total, 'lastSeq reflects the full on-disk log, not the trimmed window')
 })
 
-test('eager fallback rehydrate applies the same memory ring cap', () => {
+test('eager fallback rehydrate applies the same memory ring cap', async () => {
   const total = 250
   const cap = 100
   const events: SessionEvent[] = []
@@ -398,7 +398,7 @@ test('eager fallback rehydrate applies the same memory ring cap', () => {
   assert.equal(replay.lastSeq, total)
 })
 
-test('lazy rehydrate flags an interrupted run aborted without reading the log', () => {
+test('lazy rehydrate flags an interrupted run aborted without reading the log', async () => {
   const seed: PersistedSession[] = [{
     record: {
       id: 'crash', status: 'running', createdAt: 1, updatedAt: 5,
@@ -425,7 +425,7 @@ test('lazy rehydrate flags an interrupted run aborted without reading the log', 
   assert.ok(marker!.seq > 2, 'seq does not regress')
 })
 
-test('lazy rehydrate closes out approvals the crash left dangling', () => {
+test('lazy rehydrate closes out approvals the crash left dangling', async () => {
   const seed: PersistedSession[] = [{
     record: {
       id: 'crash', status: 'running', createdAt: 1, updatedAt: 5,
@@ -475,7 +475,7 @@ test('lazy rehydrate closes out approvals the crash left dangling', () => {
   ))
 })
 
-test('requestApproval persists pendingApprovals so the rehydrate gate sees it', () => {
+test('requestApproval persists pendingApprovals so the rehydrate gate sees it', async () => {
   class CaptureAgent extends NoopAgent {
     callbacks?: AgentCallbacks
     override run(_p: string, cb: AgentCallbacks): Promise<void> {
@@ -513,7 +513,7 @@ function crashSeed(model?: string, domain?: string): PersistedSession[] {
   }]
 }
 
-test('rehydrate 给被打断的 run 追加 resume_offer（携带原模型/星域）', () => {
+test('rehydrate 给被打断的 run 追加 resume_offer（携带原模型/星域）', async () => {
   const mem = new LazyMemoryPersistence(crashSeed('kimi-x', 'tianshu'))
   const mgr = new RuntimeSessionManager({
     createAgent: () => new NoopAgent(),
@@ -543,7 +543,7 @@ test('resumeRun 沿用原模型建 agent 并注入续跑提示（缓存亲和）
     ],
     defaultModelId: 'v4-pro',
   })
-  const res = mgr.resumeRun('crash')
+  const res = await mgr.resumeRun('crash')
   assert.deepEqual(res, { ok: true, model: 'kimi-x', switched: false })
   assert.deepEqual(factoryModels, ['kimi-x'], 'agent 必须直接建在原模型上，而非默认模型')
   const { RESUME_PROMPT } = await import('../session-manager.js')
@@ -551,7 +551,7 @@ test('resumeRun 沿用原模型建 agent 并注入续跑提示（缓存亲和）
   assert.equal(userEvents[userEvents.length - 1]!.data.text, RESUME_PROMPT, '续跑注入恢复提示而非空 prompt')
 })
 
-test('resumeRun fail-closed：原模型不可用且无兜底 → 拒绝并保持原状', () => {
+test('resumeRun fail-closed：原模型不可用且无兜底 → 拒绝并保持原状', async () => {
   const factoryCalls: number[] = []
   const mem = new LazyMemoryPersistence(crashSeed('gone-model', 'tianshu'))
   const mgr = new RuntimeSessionManager({
@@ -560,7 +560,7 @@ test('resumeRun fail-closed：原模型不可用且无兜底 → 拒绝并保持
     listModels: () => [{ id: 'v4-pro', alias: 'v4', provider: 'p' }],
     defaultModelId: 'v4-pro',
   })
-  const res = mgr.resumeRun('crash')
+  const res = await mgr.resumeRun('crash')
   assert.equal(res.ok, false)
   assert.equal((res as { code: string }).code, 'model_unavailable')
   assert.equal(factoryCalls.length, 0, '绝不静默落到默认模型建 agent')
@@ -569,7 +569,7 @@ test('resumeRun fail-closed：原模型不可用且无兜底 → 拒绝并保持
   assert.equal(userEvents.length, 0, '没有注入任何续跑消息')
 })
 
-test('resumeRun fail-closed：会话未记录原模型同样拒绝', () => {
+test('resumeRun fail-closed：会话未记录原模型同样拒绝', async () => {
   const mem = new LazyMemoryPersistence(crashSeed(undefined, 'tianshu'))
   const mgr = new RuntimeSessionManager({
     createAgent: () => new NoopAgent(),
@@ -577,12 +577,12 @@ test('resumeRun fail-closed：会话未记录原模型同样拒绝', () => {
     listModels: () => [{ id: 'v4-pro', alias: 'v4', provider: 'p' }],
     defaultModelId: 'v4-pro',
   })
-  const res = mgr.resumeRun('crash')
+  const res = await mgr.resumeRun('crash')
   assert.equal(res.ok, false)
   assert.equal((res as { code: string }).code, 'model_unavailable')
 })
 
-test('resumeRun 兜底模型：显式配置 + 可用 → 切换续跑并留 model_switched 痕', () => {
+test('resumeRun 兜底模型：显式配置 + 可用 → 切换续跑并留 model_switched 痕', async () => {
   const factoryModels: (string | undefined)[] = []
   const mem = new LazyMemoryPersistence(crashSeed('gone-model', 'tianshu'))
   const mgr = new RuntimeSessionManager({
@@ -595,7 +595,7 @@ test('resumeRun 兜底模型：显式配置 + 可用 → 切换续跑并留 mode
     defaultModelId: 'v4-pro',
     resumeFallbackModel: 'fallback-x',
   })
-  const res = mgr.resumeRun('crash')
+  const res = await mgr.resumeRun('crash')
   assert.deepEqual(res, { ok: true, model: 'fallback-x', switched: true })
   assert.deepEqual(factoryModels, ['fallback-x'])
   assert.equal(mgr.getSession('crash')!.model, 'fallback-x', 'record.model 指向兜底模型')
@@ -605,13 +605,13 @@ test('resumeRun 兜底模型：显式配置 + 可用 → 切换续跑并留 mode
   assert.equal(switched!.data.from, 'gone-model')
 })
 
-test('resumeRun：running 会话拒绝续跑（busy）', () => {
+test('resumeRun：running 会话拒绝续跑（busy）', async () => {
   class HangingAgent extends NoopAgent {
     override run(): Promise<void> { return new Promise(() => { /* stays running */ }) }
   }
   const mgr = new RuntimeSessionManager({ createAgent: () => new HangingAgent() })
   const s = mgr.createSession({ prompt: 'go' })
-  const res = mgr.resumeRun(s.id)
+  const res = await mgr.resumeRun(s.id)
   assert.equal(res.ok, false)
   assert.equal((res as { code: string }).code, 'busy')
 })
@@ -708,7 +708,7 @@ test('空闲 agent TTL：超时释放，运行/挂起审批的会话不受影响
   assert.equal(built, 3, '下一条 prompt 触发重建')
 })
 
-test('stats() reports session and running counts', () => {
+test('stats() reports session and running counts', async () => {
   const mgr = new RuntimeSessionManager({ createAgent: () => new NoopAgent() })
   mgr.createSession({})
   const s = mgr.createSession({})

@@ -415,7 +415,7 @@ test('Plan: GET /plans filters drafts from the list and exposes the active draft
   assert.equal(offBody.draft, null)
 
   // Planning with an active draft file — draft rides along with title+content.
-  manager.setPlanMode(s.id, 'planning')
+  await manager.setPlanMode(s.id, 'planning')
   agents[0]!.activePlanFilePath = '.rivet/plans/draft-1751600000000.md'
   const planning = await router('GET', `/sessions/${s.id}/plans`, {}, AUTH)
   const body = planning.body as {
@@ -428,7 +428,7 @@ test('Plan: GET /plans filters drafts from the list and exposes the active draft
   assert.match(body.draft!.content, /wip/)
 
   // Back to off — draft channel closes.
-  manager.setPlanMode(s.id, 'off')
+  await manager.setPlanMode(s.id, 'off')
   const closed = await router('GET', `/sessions/${s.id}/plans`, {}, AUTH)
   assert.equal((closed.body as { draft: unknown }).draft, null)
 })
@@ -441,18 +441,18 @@ test('Plan: agent rebuild re-enters plan mode when record says planning', async 
   const { manager, agents } = setup()
   const s = manager.createSession({})
 
-  manager.setPlanMode(s.id, 'planning')
+  await manager.setPlanMode(s.id, 'planning')
   const agent = agents[0]!
   assert.equal(agent.enterPlanModeCalls.length, 1, 'setPlanMode enters plan mode once')
 
   // switchModel rebuilds the loop and re-runs applySelections — planning must survive.
-  assert.equal(manager.switchModel(s.id, 'other-model'), true)
+  assert.equal(await manager.switchModel(s.id, 'other-model'), true)
   assert.equal(agent.enterPlanModeCalls.length, 2, 'rebuild re-enters plan mode from record')
 
   // Off sessions must NOT be pushed into planning on rebuild.
-  manager.setPlanMode(s.id, 'off')
+  await manager.setPlanMode(s.id, 'off')
   const callsAfterOff = agent.enterPlanModeCalls.length
-  assert.equal(manager.switchModel(s.id, 'other-model'), true)
+  assert.equal(await manager.switchModel(s.id, 'other-model'), true)
   assert.equal(agent.enterPlanModeCalls.length, callsAfterOff, 'off record does not re-enter')
 })
 
@@ -634,7 +634,7 @@ test('Plan: draft writes emit throttled plan_draft events while planning', async
   mkdirSync(plansDir, { recursive: true })
   writeFileSync(join(plansDir, 'draft-99.md'), '# 草稿\n\n第一段', 'utf-8')
   const s = manager.createSession({ cwd: dir })
-  manager.setPlanMode(s.id, 'planning')
+  await manager.setPlanMode(s.id, 'planning')
   const agent = agents[0]!
   agent.activePlanFilePath = '.rivet/plans/draft-99.md'
   manager.run(s.id, 'plan it')
@@ -906,7 +906,7 @@ test('GET /skills surfaces loadErrors for a malformed installed skill', async ()
   assert.equal(body.skills.find((sk) => sk.name === 'broken-skill'), undefined)
 })
 
-test('classifyArtifact taxonomy mapping', () => {
+test('classifyArtifact taxonomy mapping', async () => {
   const base = { id: 'x', sessionId: 's', createdAt: 0, summary: '', sections: [], rawPath: '', charCount: 0, lineCount: 0, sha256: '' }
   assert.equal(classifyArtifact({ ...base, tool: 'write_plan', target: 'plan.md' }), 'plan')
   assert.equal(classifyArtifact({ ...base, tool: 'todo', target: 'x' }), 'task-list')

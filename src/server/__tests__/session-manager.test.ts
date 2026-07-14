@@ -90,7 +90,7 @@ function makeManager(opts: { watchdogContinueDelayMs?: number } = {}) {
   return { manager, agents }
 }
 
-test('createSession with prompt starts running; without prompt stays idle', () => {
+test('createSession with prompt starts running; without prompt stays idle', async () => {
   const { manager } = makeManager()
   const idle = manager.createSession({})
   assert.equal(idle.status, 'idle')
@@ -100,7 +100,7 @@ test('createSession with prompt starts running; without prompt stays idle', () =
   assert.notEqual(idle.id, live.id)
 })
 
-test('sameCwdRunningCount counts running sessions per cwd (VSW §6)', () => {
+test('sameCwdRunningCount counts running sessions per cwd (VSW §6)', async () => {
   const { manager } = makeManager()
   const a = manager.createSession({ prompt: 'a', cwd: '/repo/x' })
   manager.createSession({ prompt: 'b', cwd: '/repo/x' })
@@ -130,7 +130,7 @@ test('sameCwdRunningCount drops sessions once they finish', async () => {
   assert.equal(manager.sameCwdRunningCount('/repo/q'), 1)
 })
 
-test('two parallel sessions have distinct ids and abort is isolated', () => {
+test('two parallel sessions have distinct ids and abort is isolated', async () => {
   const { manager, agents } = makeManager()
   const a = manager.createSession({ prompt: 'a' })
   const b = manager.createSession({ prompt: 'b' })
@@ -143,7 +143,7 @@ test('two parallel sessions have distinct ids and abort is isolated', () => {
   assert.equal(manager.getSession(b.id)!.status, 'running')
 })
 
-test('unsubscribing an event viewer does NOT abort the session', () => {
+test('unsubscribing an event viewer does NOT abort the session', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const stop = manager.subscribe(s.id, () => {})
@@ -153,7 +153,7 @@ test('unsubscribing an event viewer does NOT abort the session', () => {
   assert.equal(manager.getSession(s.id)!.status, 'running')
 })
 
-test('getEvents(since) replays only newer events with monotonic seq', () => {
+test('getEvents(since) replays only newer events with monotonic seq', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -177,7 +177,7 @@ test('getEvents(since) replays only newer events with monotonic seq', () => {
 // Redaction now lives ONLY here (the legacy /prompt route forwards manager
 // events verbatim since its session rebase) — this is the single trust boundary
 // keeping secrets out of event logs and every SSE stream.
-test('manager redacts sensitive tool input and error text before they reach the event log', () => {
+test('manager redacts sensitive tool input and error text before they reach the event log', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -192,7 +192,7 @@ test('manager redacts sensitive tool input and error text before they reach the 
   assert.ok(!String(error.data.error).includes('server-secret'))
 })
 
-test('createSession with prompt records a user event with the prompt text (Q1)', () => {
+test('createSession with prompt records a user event with the prompt text (Q1)', async () => {
   const { manager } = makeManager()
   const s = manager.createSession({ prompt: '帮我重构这个模块' })
   const events = manager.getEvents(s.id, 0)!.events
@@ -377,7 +377,7 @@ test('idle/rehydrated session reads artifact bodies straight off disk', async ()
   assert.equal(await manager.readArtifact(s.id, 'missing:zzz'), null)
 })
 
-test('run() is rejected while a session is already running', () => {
+test('run() is rejected while a session is already running', async () => {
   const { manager } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   assert.equal(manager.run(s.id, 'again'), false)
@@ -421,7 +421,7 @@ function makeManagerWithRegistry() {
   return { manager, agents, calls }
 }
 
-test('R1: createSession registers the session and run heartbeats the registry', () => {
+test('R1: createSession registers the session and run heartbeats the registry', async () => {
   const { manager, calls } = makeManagerWithRegistry()
   const s = manager.createSession({ cwd: '/tmp/proj', prompt: 'go' })
   assert.deepEqual(calls.registered, [{ id: s.id, cwd: '/tmp/proj', role: 'standalone' }])
@@ -450,7 +450,7 @@ test('R1: two concurrent sessions register & release independently', async () =>
 
 // ── R5: decision_shift event ─────────────────────────────────────────
 
-test('R5: onDecisionShift appends a decision_shift event with structured payload', () => {
+test('R5: onDecisionShift appends a decision_shift event with structured payload', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   agents[0]!.callbacks!.onDecisionShift!({
@@ -487,7 +487,7 @@ function makeManagerCapturingMode() {
   return { manager, agents, built }
 }
 
-test('S: createSession threads approvalMode into the agent factory + record', () => {
+test('S: createSession threads approvalMode into the agent factory + record', async () => {
   const { manager, built } = makeManagerCapturingMode()
   const rec = manager.createSession({ prompt: 'go', approvalMode: 'dangerously-skip-permissions' })
   assert.equal(rec.approvalMode, 'dangerously-skip-permissions', 'record carries the mode')
@@ -495,14 +495,14 @@ test('S: createSession threads approvalMode into the agent factory + record', ()
   assert.equal(built[0]!.approvalMode, 'dangerously-skip-permissions', 'factory received the mode')
 })
 
-test('S: createSession without approvalMode leaves it undefined (global default wins)', () => {
+test('S: createSession without approvalMode leaves it undefined (global default wins)', async () => {
   const { manager, built } = makeManagerCapturingMode()
   const rec = manager.createSession({ prompt: 'go' })
   assert.equal(rec.approvalMode, undefined)
   assert.equal(built[0]!.approvalMode, undefined)
 })
 
-test('S: setApprovalMode live-switches a built agent and updates the record', () => {
+test('S: setApprovalMode live-switches a built agent and updates the record', async () => {
   const { manager, agents } = makeManagerCapturingMode()
   const s = manager.createSession({ prompt: 'go' }) // builds the agent
   const ok = manager.setApprovalMode(s.id, 'dangerously-skip-permissions')
@@ -511,7 +511,7 @@ test('S: setApprovalMode live-switches a built agent and updates the record', ()
   assert.equal(manager.getSession(s.id)!.approvalMode, 'dangerously-skip-permissions', 'record updated')
 })
 
-test('S: setApprovalMode before first run applies on agent build', () => {
+test('S: setApprovalMode before first run applies on agent build', async () => {
   const { manager, agents, built } = makeManagerCapturingMode()
   const s = manager.createSession({}) // idle: no agent yet
   assert.equal(built.length, 0, 'no agent built for an idle session')
@@ -521,14 +521,14 @@ test('S: setApprovalMode before first run applies on agent build', () => {
   assert.equal(agents[0]!.builtApprovalMode, 'manual')
 })
 
-test('S: setApprovalMode returns false for a missing session', () => {
+test('S: setApprovalMode returns false for a missing session', async () => {
   const { manager } = makeManagerCapturingMode()
   assert.equal(manager.setApprovalMode('nope', 'manual'), false)
 })
 
 // ── T2: todo_state emission ─────────────────────────────────────────
 
-test('T2: todo write tool emits a structured todo_state event', () => {
+test('T2: todo write tool emits a structured todo_state event', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -548,7 +548,7 @@ test('T2: todo write tool emits a structured todo_state event', () => {
   ])
 })
 
-test('T2: todo read action does NOT emit todo_state; bad statuses fall back to pending', () => {
+test('T2: todo read action does NOT emit todo_state; bad statuses fall back to pending', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -560,7 +560,7 @@ test('T2: todo read action does NOT emit todo_state; bad statuses fall back to p
   assert.equal(items[0]!.status, 'pending')
 })
 
-test('P0-2: plan_task success emits todo_state via onToolResult', () => {
+test('P0-2: plan_task success emits todo_state via onToolResult', async () => {
   const agents: FakeAgent[] = []
   const manager = new RuntimeSessionManager({
     createAgent: () => {
@@ -588,7 +588,7 @@ test('P0-2: plan_task success emits todo_state via onToolResult', () => {
   ])
 })
 
-test('P0-2: plan_task error does NOT emit todo_state', () => {
+test('P0-2: plan_task error does NOT emit todo_state', async () => {
   const agents: FakeAgent[] = []
   const manager = new RuntimeSessionManager({
     createAgent: () => {
@@ -612,7 +612,7 @@ test('P0-2: plan_task error does NOT emit todo_state', () => {
 
 // ── T3: mid-run steering ────────────────────────────────────────────
 
-test('T3: steer on a running session queues, echoes, and drains once', () => {
+test('T3: steer on a running session queues, echoes, and drains once', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -627,7 +627,7 @@ test('T3: steer on a running session queues, echoes, and drains once', () => {
   assert.equal(cb.onSteerDrain!(), null, 'second drain is empty')
 })
 
-test('T3: steer on an idle session returns idle; missing returns not_found', () => {
+test('T3: steer on an idle session returns idle; missing returns not_found', async () => {
   const { manager } = makeManager()
   const idle = manager.createSession({})
   assert.equal(manager.steer(idle.id, 'hi'), 'idle')
@@ -647,7 +647,7 @@ test('T3: a fresh run drops guidance left over from a previous run', async () =>
 
 // ── T4: structured per-worker delegation ────────────────────────────
 
-test('T4: onDelegationActivity emits per-worker delegation with progress + elapsed', () => {
+test('T4: onDelegationActivity emits per-worker delegation with progress + elapsed', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -717,7 +717,7 @@ function makePlusManager() {
   return { manager, agents }
 }
 
-test('PlusMenu: listDomains flags Auto by default; setDomain pins a domain', () => {
+test('PlusMenu: listDomains flags Auto by default; setDomain pins a domain', async () => {
   const { manager } = makePlusManager()
   const s = manager.createSession({})
   const entries = manager.listDomains(s.id)!
@@ -735,13 +735,13 @@ test('PlusMenu: listDomains flags Auto by default; setDomain pins a domain', () 
   assert.equal(ev.data.key, 'tianshu')
 })
 
-test('PlusMenu: setDomain rejects an unknown key', () => {
+test('PlusMenu: setDomain rejects an unknown key', async () => {
   const { manager } = makePlusManager()
   const s = manager.createSession({})
   assert.equal(manager.setDomain(s.id, 'nope-xyz'), false)
 })
 
-test('PlusMenu: domain selection applies to a lazily-built agent', () => {
+test('PlusMenu: domain selection applies to a lazily-built agent', async () => {
   const { manager, agents } = makePlusManager()
   const s = manager.createSession({})
   manager.setDomain(s.id, 'tianshu') // before any agent exists
@@ -749,13 +749,13 @@ test('PlusMenu: domain selection applies to a lazily-built agent', () => {
   assert.equal(agents[0]!.domain?.id, 'tianshu')
 })
 
-test('PlusMenu: listModels flags current; switchModel updates record + emits', () => {
+test('PlusMenu: listModels flags current; switchModel updates record + emits', async () => {
   const { manager } = makePlusManager()
   const s = manager.createSession({})
   const before = manager.listModels(s.id)!
   assert.equal(before.find((m) => m.id === 'model-a')!.current, true)
 
-  assert.equal(manager.switchModel(s.id, 'model-b'), true)
+  assert.equal(await manager.switchModel(s.id, 'model-b'), true)
   assert.equal(manager.getSession(s.id)!.model, 'model-b')
   const after = manager.listModels(s.id)!
   assert.equal(after.find((m) => m.id === 'model-b')!.current, true)
@@ -763,16 +763,16 @@ test('PlusMenu: listModels flags current; switchModel updates record + emits', (
   assert.equal(ev.data.modelId, 'model-b')
 })
 
-test('PlusMenu: switchModel rejects unknown id and refuses while running', () => {
+test('PlusMenu: switchModel rejects unknown id and refuses while running', async () => {
   const { manager } = makePlusManager()
   const s = manager.createSession({})
-  assert.equal(manager.switchModel(s.id, 'ghost'), false)
+  assert.equal(await manager.switchModel(s.id, 'ghost'), false)
 
   manager.run(s.id, 'go') // now running
-  assert.equal(manager.switchModel(s.id, 'model-b'), false)
+  assert.equal(await manager.switchModel(s.id, 'model-b'), false)
 })
 
-test('PlusMenu: setSkillEnabled toggles disabled set + applies to live agent', () => {
+test('PlusMenu: setSkillEnabled toggles disabled set + applies to live agent', async () => {
   const { manager, agents } = makePlusManager()
   const s = manager.createSession({})
   manager.run(s.id, 'go') // build agent so live-apply path runs
@@ -787,13 +787,13 @@ test('PlusMenu: setSkillEnabled toggles disabled set + applies to live agent', (
   assert.equal(agents[0]!.disabled.has('leave-ritual'), false)
 })
 
-test('PlusMenu: missing session yields undefined/false from menu methods', () => {
+test('PlusMenu: missing session yields undefined/false from menu methods', async () => {
   const { manager } = makePlusManager()
   assert.equal(manager.listModels('nope'), undefined)
   assert.equal(manager.listDomains('nope'), undefined)
   assert.equal(manager.listSkills('nope'), undefined)
   assert.equal(manager.setDomain('nope', 'auto'), false)
-  assert.equal(manager.switchModel('nope', 'model-a'), false)
+  assert.equal(await manager.switchModel('nope', 'model-a'), false)
   assert.equal(manager.setSkillEnabled('nope', 'x', false), false)
 })
 
@@ -833,10 +833,10 @@ function makeDelegateManager() {
   return { manager, agents }
 }
 
-test('delegate: dispatches a worker WITHOUT setting session.running', () => {
+test('delegate: dispatches a worker WITHOUT setting session.running', async () => {
   const { manager, agents } = makeDelegateManager()
   const s = manager.createSession({})
-  const res = manager.delegate(s.id, { objective: '查登录验证码', profile: 'code_scout' })
+  const res = await manager.delegate(s.id, { objective: '查登录验证码', profile: 'code_scout' })
   assert.equal(res.ok, true)
   // Session stays idle — a background worker must not flip the main turn flag.
   assert.notEqual(manager.getSession(s.id)!.status, 'running')
@@ -845,10 +845,10 @@ test('delegate: dispatches a worker WITHOUT setting session.running', () => {
   assert.equal(agents[0]!.lastOpts!.workerId, res.ok ? res.workerId : '')
 })
 
-test('delegate: emits a running delegation node with origin=user', () => {
+test('delegate: emits a running delegation node with origin=user', async () => {
   const { manager } = makeDelegateManager()
   const s = manager.createSession({})
-  const res = manager.delegate(s.id, { objective: 'go', profile: 'reviewer' })
+  const res = await manager.delegate(s.id, { objective: 'go', profile: 'reviewer' })
   assert.equal(res.ok, true)
   const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'delegation')
   assert.equal(evs.length, 1)
@@ -858,10 +858,10 @@ test('delegate: emits a running delegation node with origin=user', () => {
   assert.equal(evs[0]!.data.profile, 'reviewer')
 })
 
-test('delegate: onActivity terminal update carries summary + origin', () => {
+test('delegate: onActivity terminal update carries summary + origin', async () => {
   const { manager, agents } = makeDelegateManager()
   const s = manager.createSession({})
-  const res = manager.delegate(s.id, { objective: 'go' })
+  const res = await manager.delegate(s.id, { objective: 'go' })
   assert.ok(res.ok)
   const workerId = res.ok ? res.workerId : ''
   // Simulate the worker finishing with a digest.
@@ -879,23 +879,23 @@ test('delegate: onActivity terminal update carries summary + origin', () => {
   assert.deepEqual(terminal.data.changedFiles, ['a.ts', 'b.ts'])
 })
 
-test('delegate: empty objective is rejected', () => {
+test('delegate: empty objective is rejected', async () => {
   const { manager } = makeDelegateManager()
   const s = manager.createSession({})
-  const res = manager.delegate(s.id, { objective: '   ' })
+  const res = await manager.delegate(s.id, { objective: '   ' })
   assert.deepEqual(res, { ok: false, reason: 'invalid' })
 })
 
-test('delegate: missing session is rejected', () => {
+test('delegate: missing session is rejected', async () => {
   const { manager } = makeDelegateManager()
-  const res = manager.delegate('nope', { objective: 'go' })
+  const res = await manager.delegate('nope', { objective: 'go' })
   assert.deepEqual(res, { ok: false, reason: 'not_found' })
 })
 
-test('cancelDelegate: aborts the worker signal; unknown returns false', () => {
+test('cancelDelegate: aborts the worker signal; unknown returns false', async () => {
   const { manager, agents } = makeDelegateManager()
   const s = manager.createSession({})
-  const res = manager.delegate(s.id, { objective: 'go' })
+  const res = await manager.delegate(s.id, { objective: 'go' })
   assert.ok(res.ok)
   const workerId = res.ok ? res.workerId : ''
   assert.equal(agents[0]!.lastOpts!.signal.aborted, false)
@@ -904,12 +904,12 @@ test('cancelDelegate: aborts the worker signal; unknown returns false', () => {
   assert.equal(manager.cancelDelegate(s.id, 'ghost'), false)
 })
 
-test('delegate: coexists with a running main turn (anytime dispatch)', () => {
+test('delegate: coexists with a running main turn (anytime dispatch)', async () => {
   const { manager } = makeDelegateManager()
   const s = manager.createSession({ prompt: 'main task' })
   assert.equal(manager.getSession(s.id)!.status, 'running')
   // Background dispatch must succeed even while the main turn runs.
-  const res = manager.delegate(s.id, { objective: 'side quest' })
+  const res = await manager.delegate(s.id, { objective: 'side quest' })
   assert.equal(res.ok, true)
 })
 
@@ -1138,7 +1138,7 @@ test('delta coalescing: first delta lands immediately, burst merges into one win
   assert.equal(after[1]!.data.text, 'bcd')
 })
 
-test('delta coalescing: non-delta event flushes the buffer first (order preserved)', () => {
+test('delta coalescing: non-delta event flushes the buffer first (order preserved)', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -1155,7 +1155,7 @@ test('delta coalescing: non-delta event flushes the buffer first (order preserve
   assert.ok(yIdx < toolIdx, 'flushed delta must precede the tool_use event')
 })
 
-test('delta coalescing: abort drains the buffer before the status event', () => {
+test('delta coalescing: abort drains the buffer before the status event', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -1171,7 +1171,7 @@ test('delta coalescing: abort drains the buffer before the status event', () => 
   assert.ok(tailIdx < statusIdx, 'tail must land before the aborted status')
 })
 
-test('delta coalescing: type switch (thinking↔text) flushes and keeps order', () => {
+test('delta coalescing: type switch (thinking↔text) flushes and keeps order', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -1189,7 +1189,7 @@ test('delta coalescing: type switch (thinking↔text) flushes and keeps order', 
   )
 })
 
-test('delta coalescing: oversized buffer flushes at the char cap without waiting', () => {
+test('delta coalescing: oversized buffer flushes at the char cap without waiting', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -1202,7 +1202,7 @@ test('delta coalescing: oversized buffer flushes at the char cap without waiting
   assert.equal((evs[1]!.data.text as string).length, 3000)
 })
 
-test('delta coalescing: getEvents drains the window and seq stays monotonic', () => {
+test('delta coalescing: getEvents drains the window and seq stays monotonic', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!
@@ -1216,7 +1216,7 @@ test('delta coalescing: getEvents drains the window and seq stays monotonic', ()
   assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b))
 })
 
-test('delta coalescing: shutdownAll drains pending buffers', () => {
+test('delta coalescing: shutdownAll drains pending buffers', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
   const cb = agents[0]!.callbacks!

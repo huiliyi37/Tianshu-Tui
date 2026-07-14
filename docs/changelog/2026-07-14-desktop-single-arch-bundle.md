@@ -56,3 +56,23 @@ npm exec -- tsx --test scripts/__tests__/tree-sitter-wasm-keep.test.ts scripts/_
 TAURI_ENV_TARGET_TRIPLE=aarch64-apple-darwin STAGE_SKIP_SQLITE_CHECK=1 node scripts/stage-runtime-deps.js
 # 预期：tree-sitter-wasms ~4MB；typescript ~12–14MB；createProgram 可 require
 ```
+
+## Wave C（2026-07-14）
+
+| 改动 | 结果 |
+|------|------|
+| `src/server/serve-agent.ts` | AgentLoop / tools / Meridian / council 装配从 serve 静态图拆出 |
+| `serve.ts` `loadServeAgent()` | listen 后再动态 import；`RIVET_SERVE_TIMING=1` 打点 |
+| MCP | `import('../mcp/manager.js')` 异步初始化，不挡 `/health` |
+| `AgentFactory` | 可返回 `Promise`；测试双仍同步 |
+
+本机验收（干净 `RIVET_HOME`，`dist/main.js serve`）：
+
+| 指标 | 改前 | 改后 |
+|------|------|------|
+| `/health` ready_ms（热盘） | ~1195 | ~640–760 |
+| listen 内就绪 | （淹没在大图 import） | **~2–5ms**（`RIVET_SERVE_TIMING`） |
+| serve 入口 chunk | ~340KB + ~5MB 静态依赖 | ~3KB + ~322KB 轻量依赖 |
+| serve-agent 后台加载 | — | ~30–100ms（重 chunk 懒加载） |
+
+`turndown` 本已 dynamic import，无需再改。
