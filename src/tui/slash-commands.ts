@@ -2463,8 +2463,32 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
+      if (subcmd === 'logs' && serverId) {
+        try {
+          const { ctx: appCtx } = await import('./engine/app.js')
+          const mgr = appCtx?.mcpManager
+          if (!mgr) {
+            pushStatic(createLogEntry({ type: 'system', content: 'MCP manager not initialized.', isError: true }))
+            setIsStreaming(false)
+            return true
+          }
+          const tail = Number.parseInt(parts[2] ?? '100', 10) || 100
+          const entries = mgr.getLogs(serverId, tail)
+          if (entries.length === 0) {
+            pushStatic(createLogEntry({ type: 'system', content: `No log entries for server "${serverId}".` }))
+          } else {
+            const lines = entries.map(e => `[${new Date(e.ts).toISOString()}] ${e.stream === 'stderr' ? 'stderr' : 'event'}: ${e.text.trimEnd()}`)
+            pushStatic(createLogEntry({ type: 'system', content: `Logs for ${serverId} (last ${entries.length} entries):\n${lines.join('\n')}` }))
+          }
+        } catch (err) {
+          pushStatic(createLogEntry({ type: 'system', content: `Logs failed: ${(err as Error).message}`, isError: true }))
+        }
+        setIsStreaming(false)
+        return true
+      }
+
       // Default: show status
-      pushStatic(createLogEntry({ type: 'system', content: 'Usage:\n  /mcp — show status\n  /mcp auth <serverId> — start OAuth flow\n  /mcp logs <serverId> — view stderr (coming in Wave 4)' }))
+      pushStatic(createLogEntry({ type: 'system', content: 'Usage:\n  /mcp — show status\n  /mcp auth <serverId> — start OAuth flow\n  /mcp logs <serverId> [tail] — view stderr log buffer' }))
       setIsStreaming(false)
       return true
     },

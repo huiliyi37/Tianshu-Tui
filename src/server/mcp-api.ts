@@ -229,6 +229,17 @@ export function buildMcpRoutes(
       return { status: 200, body: { disabledTools } }
     }, token),
 
+    // GET /mcp/servers/:id/logs — tail the stderr/event log buffer for a server.
+    'GET /mcp/servers/:id/logs': withAuth((_, params) => {
+      const serverId = params?.id
+      if (!serverId) return { status: 400, body: { error: 'server id is required' } }
+      const mgr = getMgr()
+      if (!mgr) return { status: 503, body: { error: 'MCP manager not initialized' } }
+      const tail = Number.parseInt((params as Record<string, string>).tail ?? '200', 10) || 200
+      const lines = mgr.getLogs(serverId, tail)
+      return { status: 200, body: { lines, serverId, truncated: lines.length >= tail } }
+    }, token),
+
     // POST /mcp/servers/:id/oauth/start — initiate OAuth flow for a preset MCP server.
     'POST /mcp/servers/:id/oauth/start': withAuth(async (body, params) => {
       const serverId = params?.id

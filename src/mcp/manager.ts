@@ -5,6 +5,7 @@ import type { McpConnectionState, McpTransportType } from './types.js'
 import { createMcpToolWrapper, createMcpConnectorConsent, type McpConnectorConsent } from './wrapper.js'
 import { classifyMcpError } from './failure-classifier.js'
 import { createTransport, type TransportFactoryResult } from './transport-factory.js'
+import { LogRingBuffer } from './log-buffer.js'
 
 const DEFAULT_MCP_TIMEOUT_MS = 60_000
 const NETWORK_RETRY_DELAY_MS = 800
@@ -60,6 +61,8 @@ export class McpManager {
   private timeoutMs: number
   // Per-server reconnect attempt counter (for remote transports).
   private reconnectAttempts: Map<string, number> = new Map()
+  // Per-server stderr/event log buffers (ring buffer, 64KB default).
+  private logBuffers: Map<string, LogRingBuffer> = new Map()
   // Shared across all wrappers: first use of each connector requires explicit opt-in.
   private connectorConsent: McpConnectorConsent = createMcpConnectorConsent()
 
@@ -124,6 +127,16 @@ export class McpManager {
     return this.connections.get(serverId)
   }
 
+  /** Get log entries for a server's stderr + transport events (ring buffer tail). */
+  getLogs(serverId: string, tail = 200): import('./log-buffer.js').LogEntry[] {
+    const buf = this.logBuffers.get(serverId)
+    return buf ? buf.tail(tail) : []
+  }
+
+  getStates(): McpConnectionState[] {
+    return this.connections.get(serverId)
+  }
+
   getStates(): McpConnectionState[] {
     return Array.from(this.states.values())
   }
@@ -139,6 +152,7 @@ export class McpManager {
     await Promise.all(closePromises)
     this.connections.clear()
     this.states.clear()
+    this.logBuffers.clear()
     this.tools = []
   }
 
@@ -295,6 +309,12 @@ export class McpManager {
   async _connectServer(serverId: string, config?: McpServerConfig): Promise<ConnectedServer> {
     const cfg = config ?? this.config.servers[serverId]!
 
+    // Create a ring buffer for this server's logs (stderr + transport events).
+    if (!this.logBuffers.has(serverId)) {
+      this.logBuffers.set(serverId, new LogRingBuffer())
+    }
+    const logBuf = this.logBuffers.get(serverId)!
+
     const transportOpts: {
       getHeaders?: () => Promise<Record<string, string>>
       getEnv?: () => Promise<Record<string, string>>
@@ -310,6 +330,17 @@ export class McpManager {
       `MCP connect ${serverId}`,
       this.timeoutMs,
     )
+
+    // Wire persistent stderr capture for stdio transports.
+    if (result.transportType === 'stdio') {
+      const stderrStream = (result.transport as { stderr?: { on?(event: string, cb: (chunk: Buffer | string) => void): void } }).stderr
+      if (stderrStream && typeof stderrStream.on === 'function') {
+        stderrStream.on('data', (chunk: Buffer | string) => {
+          const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+          logBuf.push({ ts: Date.now(), stream: 'stderr', text })
+        })
+      }
+    }
 
     // Register onclose handler for auto-reconnect on remote transports.
     // stdio transport death is terminal (process exited).
