@@ -337,7 +337,7 @@ export async function rivetFetch(path: string, init: RequestInit = {}): Promise<
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   // Apply a default 15s timeout unless the caller provides its own signal
   // (the SSE stream reader, for example, uses its own lifetime signal).
-  const mergedInit = { ...init }
+  const mergedInit: RequestInit = { ...init, headers }
   if (!mergedInit.signal) {
     const ac = new AbortController()
     setTimeout(() => ac.abort(new DOMException('sidecar request timed out', 'TimeoutError')), 15_000)

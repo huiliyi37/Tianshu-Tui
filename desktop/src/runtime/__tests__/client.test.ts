@@ -87,6 +87,34 @@ test('rivetFetch returns a 200 response normally', async () => {
   }
 })
 
+test('rivetFetch always sends Authorization Bearer header (timeout merge must not drop headers)', async () => {
+  // Regression for 10162a64: introducing AbortController timeout replaced
+  // `{ ...init, headers }` with `mergedInit = { ...init }` and forgot to
+  // reattach headers — every desktop API call then arrived without Bearer
+  // and the sidecar returned 401 Unauthorized.
+  clearRuntimeCache()
+  let captured: HeadersInit | undefined
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    captured = init?.headers
+    return Promise.resolve(new Response('{}', { status: 200 }))
+  }) as typeof fetch
+  try {
+    await rivetFetch('/sessions')
+    assert.ok(captured, 'fetch must receive init.headers')
+    const value = captured instanceof Headers
+      ? captured.get('Authorization')
+      : Array.isArray(captured)
+        ? (Object.fromEntries(captured)['Authorization']
+          ?? Object.fromEntries(captured)['authorization'])
+        : ((captured as Record<string, string>)['Authorization']
+          ?? (captured as Record<string, string>)['authorization'])
+    assert.ok(typeof value === 'string' && /^Bearer(\s|$)/.test(value),
+      `expected Authorization Bearer header, got ${JSON.stringify(value)}`)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
 test('searchSessionContent forwards AbortSignal to fetch', async () => {
   clearRuntimeCache()
   const controller = new AbortController()
