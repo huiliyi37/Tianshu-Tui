@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PerfOverlay } from './components/PerfOverlay'
-import { getRuntimeInfo, type RuntimeInfo } from './runtime/client'
+import { getRuntimeInfo, clearRuntimeCache, type RuntimeInfo } from './runtime/client'
 import { useHealth, useEnvironment, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
 import { loadKnownProjects, projectId, deriveProjects } from './lib/projects'
@@ -176,6 +176,10 @@ export function App() {
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    // Vite HMR preserves module-level state across rebuilds, so the cached
+    // runtime_info token from a previous Rust session may be stale. Drop it
+    // before the first call to force a fresh invoke('runtime_info').
+    clearRuntimeCache()
     getRuntimeInfo()
       .then((info) => {
         if (cancelled) return
