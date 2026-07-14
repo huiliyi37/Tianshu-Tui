@@ -74,11 +74,18 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
   if (cached) return cached
   try {
     cached = await invoke<RuntimeInfo>('runtime_info')
-  } catch {
+  } catch (err) {
+    // In a plain browser dev context (no Tauri) this is expected; in the Tauri
+    // desktop app it usually means the shell is not ready yet. Don't cache the
+    // fallback so the next API call retries the real runtime_info instead of
+    // getting stuck on the browser-dev default port 3100.
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      console.warn('[rivet] runtime_info invoke failed, using dev fallback:', err)
+    }
     const env = viteEnv()
     const port = Number(env.VITE_RIVET_PORT ?? 3100)
     const token = String(env.VITE_RIVET_TOKEN ?? '')
-    cached = { port, token }
+    return { port, token }
   }
   return cached
 }
