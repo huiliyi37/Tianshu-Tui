@@ -3,12 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { SurfaceSkeleton } from '../components/Skeleton'
-import { qk, useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode, useWorkingTree } from '../state/queries'
+import { qk, useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode, useSetAskMode, useWorkingTree } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents, useSessionEventsSelector } from '../state/use-session-events'
 import { useJobNotifications } from '../state/use-job-notifications'
 import { answerApproval, commitSessionChanges, createSessionPr, mergeSessionBack, setApprovalMode, setEffort, steerSession } from '../runtime/client'
-import type { ApprovalMode, PlanModeState } from '../runtime/types'
+import type { ApprovalMode, PlanModeState, AskModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
@@ -60,6 +60,7 @@ export function WorkspaceSurface() {
   const abortSession = useAbortSession()
   const closeSession = useCloseSession()
   const setPlanMode = useSetPlanMode()
+  const setAskMode = useSetAskMode()
 
   const [isFloatDeckOpen, setIsFloatDeckOpen] = useState(false)
   const deckRef = useRef<HTMLDivElement>(null)
@@ -199,6 +200,11 @@ export function WorkspaceSurface() {
     setPlanMode.mutate({ id: activeId, state })
   }, [activeId, setPlanMode])
 
+  const handleSetAskMode = useCallback((state: AskModeState) => {
+    if (!activeId) return
+    setAskMode.mutate({ id: activeId, state })
+  }, [activeId, setAskMode])
+
   const handleClose = useCallback(() => {
     if (!activeId) return
     closeSession.mutate(activeId)
@@ -321,6 +327,7 @@ export function WorkspaceSurface() {
                     onAbort={handleAbort}
                     onSetApprovalMode={handleSetApprovalMode}
                     onSetPlanMode={handleSetPlanMode}
+                    onSetAskMode={handleSetAskMode}
                     onSetEffort={handleSetEffort}
                     onClose={handleClose}
                     streamStatus={view.streamStatus}

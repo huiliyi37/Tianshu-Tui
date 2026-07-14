@@ -155,6 +155,8 @@ export interface AgentConfig {
   planModeState?: PlanModeState
   /** Active plan draft file (relative to cwd) — only this path is writable in plan mode. */
   activePlanFilePath?: string | null
+  /** Ask Mode state — when 'asking', only pure read-only Q&A tools are allowed. */
+  askModeState?: import('./ask-mode.js').AskModeState
   /** Optional stream rules — abort and inject reminders when model output matches patterns.
    *  Each rule has a regex `pattern` and an `inject` message appended as a user reminder. */
   streamRules?: StreamRule[]

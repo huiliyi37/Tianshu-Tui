@@ -546,6 +546,30 @@ test('plan_mode toggles state and bumps planRev', () => {
   assert.equal(off.planRev, 2)
 })
 
+test('ask_mode toggles and mutually excludes plan_mode', () => {
+  seq = 0
+  const planning = fold([ev('plan_mode', { state: 'planning' })])
+  assert.equal(planning.planMode, 'planning')
+  const asking = eventReducer(planning, { type: 'event', event: ev('ask_mode', { state: 'asking' }) })
+  assert.equal(asking.askMode, 'asking')
+  assert.equal(asking.planMode, 'off')
+  const off = eventReducer(asking, { type: 'event', event: ev('ask_mode', { state: 'off' }) })
+  assert.equal(off.askMode, 'off')
+})
+
+test('tool_result preserves toolName for inline diff rendering', () => {
+  seq = 0
+  const s = fold([ev('tool_result', {
+    name: 'edit_file',
+    uiContent: 'diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-old\n+new\n',
+    result: 'ok',
+  })])
+  const block = s.blocks.find(b => b.kind === 'result')
+  assert.ok(block)
+  assert.equal(block!.toolName, 'edit_file')
+  assert.match(block!.text, /^diff --git/)
+})
+
 test('plan_submitted bumps planRev and records latest slug', () => {
   seq = 0
   const s = fold([ev('plan_submitted', { slug: 'my-plan', title: 'My Plan' })])

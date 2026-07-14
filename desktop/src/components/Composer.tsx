@@ -5,7 +5,7 @@ import { detectMention, applyMention, formatFileMention, type MentionToken } fro
 import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
 import { toast } from 'sonner'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/persist'
-import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
+import type { ModelEntry, DomainEntry, PlanModeState, AskModeState } from '../runtime/types'
 import { AutonomyMenu } from './AutonomyMenu'
 import type { AutonomyLevel } from '../lib/autonomy'
 import { PlusMenu } from './PlusMenu'
@@ -124,6 +124,8 @@ export const Composer = memo(function Composer(props: {
   commands?: ComposerCommand[]
   planMode?: PlanModeState
   onSetPlanMode?: (state: PlanModeState) => void
+  askMode?: AskModeState
+  onSetAskMode?: (state: AskModeState) => void
   /** PlusMenu — current reasoning effort level (off/low/medium/high/max/auto). */
   effort?: string
   /** PlusMenu — switch the session's reasoning effort level. */
@@ -148,17 +150,32 @@ export const Composer = memo(function Composer(props: {
   onHistoryNext?: () => void
   activeDomainAccent?: string
 }) {
-  const { sessionId, cwd, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, effort, onSetEffort, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
+  const { sessionId, cwd, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, askMode, onSetAskMode, effort, onSetEffort, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
   const { t } = useTranslation('composer')
   const planning = planMode === 'planning'
+  const asking = askMode === 'asking'
+  const interactionMode: 'agent' | 'plan' | 'ask' = asking ? 'ask' : planning ? 'plan' : 'agent'
 
   useEffect(() => {
     const win = window as unknown as { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
     setSpeechSupported(!!(win.SpeechRecognition || win.webkitSpeechRecognition))
   }, [])
-  const togglePlan = useCallback(() => {
-    onSetPlanMode?.(planning ? 'off' : 'planning')
-  }, [planning, onSetPlanMode])
+  const setInteractionMode = useCallback((mode: 'agent' | 'plan' | 'ask') => {
+    if (mode === 'plan') {
+      onSetAskMode?.('off')
+      onSetPlanMode?.('planning')
+    } else if (mode === 'ask') {
+      onSetPlanMode?.('off')
+      onSetAskMode?.('asking')
+    } else {
+      onSetPlanMode?.('off')
+      onSetAskMode?.('off')
+    }
+  }, [onSetPlanMode, onSetAskMode])
+  const cycleInteractionMode = useCallback(() => {
+    const next = interactionMode === 'agent' ? 'plan' : interactionMode === 'plan' ? 'ask' : 'agent'
+    setInteractionMode(next)
+  }, [interactionMode, setInteractionMode])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const lastEscAt = useRef(0)
@@ -876,6 +893,8 @@ export const Composer = memo(function Composer(props: {
             sessionRunning={busy}
             planMode={planMode}
             onSetPlanMode={onSetPlanMode}
+            askMode={askMode}
+            onSetAskMode={onSetAskMode}
             effort={effort}
             onSetEffort={onSetEffort}
             onPickImage={() => {
@@ -897,14 +916,14 @@ export const Composer = memo(function Composer(props: {
           <AutonomyMenu value={approvalLevel} onChange={onSetApprovalLevel} />
         )}
         {contextUsage && <ContextRing usage={contextUsage} />}
-        {onSetPlanMode && (
+        {(onSetPlanMode || onSetAskMode) && (
           <button
-            className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
-            onClick={togglePlan}
-            title={t('planToggleTitle')}
+            className={`mode-toggle ${interactionMode}`}
+            onClick={cycleInteractionMode}
+            title={t('modeToggleTitle')}
           >
             <span className="mode-dot" aria-hidden />
-            {planning ? 'Plan' : 'Agent'}
+            {interactionMode === 'plan' ? 'Plan' : interactionMode === 'ask' ? 'Ask' : 'Agent'}
           </button>
         )}
         <span className="composer-spacer" />

@@ -140,6 +140,22 @@ export function renderPlanExitReminder(): string {
 }
 
 /**
+ * Ask Mode instruction block. Cache-safe: dynamic appendix only — askModeState
+ * flips mid-session and must not invalidate the exact-prefix cache.
+ */
+export function renderAskModeBlock(): string {
+  return `<ask-mode>
+你处于 Ask 模式（只读问答）。只能读文件、搜索代码库、检索网络，以及用 ask_user_question 澄清——禁止写、改、执行命令、委派工人、提交计划或跑测试。
+
+**对话纪律**：
+- 以回答用户问题为主：给结论、引用 file:line、必要时给小段说明。
+- 需要探索时用 read/grep/glob/repo_map 等只读工具；不要发起会改变仓库状态的操作。
+- 意图不清时优先 ask_user_question；不要假装能改代码。
+- 用户若要求实现/修改/运行，说明需先退出 Ask Mode，再动手。
+</ask-mode>`
+}
+
+/**
  * Phase 2B: output verbosity steering nudge.
  *
  * OPT-IN via RIVET_TERSE=1 (or ctx.tersenessEnabled) — OFF by default, so the
@@ -260,6 +276,8 @@ export interface VolatileContext {
   worktreeReality?: WorktreeReality
   /** Plan Mode state — when 'planning', injects a block reminding the agent it may only read */
   planModeState?: 'off' | 'planning' | 'approved'
+  /** Ask Mode state — when 'asking', injects a pure read-only Q&A block */
+  askModeState?: 'off' | 'asking'
   /** Active plan file path (relative) for incremental plan writing */
   activePlanFilePath?: string | null
   /** One-shot flag: render the exit reminder on the first turn after plan mode
@@ -399,6 +417,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     // but MUST stay out of FROZEN — they can change mid-session and would
     // break exact-prefix cache if included in the stable block.
     planModeState: undefined,
+    askModeState: undefined,
     planExitReminderPending: undefined,
     worktreeReality: undefined,
     // Session snapshot fields — KEEP in FROZEN:
@@ -628,6 +647,13 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     parts.push(renderPlanExitReminder())
   }
 
+  // Ask-mode instruction block — mutually exclusive with plan at the UI layer;
+  // if both somehow set, plan block already rendered above (appending ask is ok
+  // as a soft reminder, but gate already blocks writes).
+  if (ctx.askModeState === 'asking') {
+    parts.push(renderAskModeBlock())
+  }
+
   // Phase 2B: output verbosity steering (opt-in via RIVET_TERSE=1, off by default).
   // Cache-safe: dynamic appendix only — default sessions are byte-for-byte
   // unchanged. Escalates on doom-loop/storm turns when the caller signals it.
@@ -761,6 +787,7 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<star-domain')) return 1.0
   // Plan-mode block governs the entire planning turn — never drop under budget.
   if (blockContent.startsWith('<plan-mode>')) return 0.95
+  if (blockContent.startsWith('<ask-mode>')) return 0.95
   if (blockContent.startsWith('<repair-hint>')) return 0.8
   if (blockContent.startsWith('<星域-advisory>')) return 0.8
   if (blockContent.startsWith('<historical-lessons>')) return 0.8

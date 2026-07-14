@@ -16,6 +16,7 @@ import type {
   PlanDoc,
   PlanModeState,
   PlanListResponse,
+  AskModeState,
   ProjectDocs,
   ProjectTemplatesApplyResult,
   ProjectTemplatesStatus,
@@ -780,6 +781,11 @@ export function installSkills(id: string, names: string[]): Promise<SkillInstall
 /** Toggle the session into read-only planning ('planning') or execution ('off'). */
 export function setPlanMode(id: string, state: PlanModeState): Promise<{ id: string; planMode: PlanModeState }> {
   return apiPost<{ id: string; planMode: PlanModeState }>(`/sessions/${id}/plan-mode`, { state })
+}
+
+/** Toggle the session into read-only Ask ('asking') or execution ('off'). */
+export function setAskMode(id: string, state: AskModeState): Promise<{ id: string; askMode: AskModeState }> {
+  return apiPost<{ id: string; askMode: AskModeState }>(`/sessions/${id}/ask-mode`, { state })
 }
 
 /** List this session's plans (newest first) plus the active plan-mode draft. */

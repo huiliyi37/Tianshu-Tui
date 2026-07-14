@@ -55,6 +55,11 @@ import { loadWorkerSession } from '../../agent/worker-session-persist.js'
 import type { TasksFilter } from '../format/overlay.js'
 import type { PlanSubmittedInfo, AskUserQuestionInfo } from '../../tools/types.js'
 import {
+  composeAnswers,
+  type AskAnswerDraft,
+  type AskUserQuestionItem,
+} from '../../tools/ask-user-question.js'
+import {
   delegationObjectiveFromInput,
   delegationProfileFromInput,
   domainBadge,
@@ -359,6 +364,7 @@ export class TuiApp {
   private planTraceProvider?: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null
   /** 当前 plan-mode 状态访问器（返回是否处于 planning） */
   private planModeProvider?: () => boolean
+  private askModeProvider?: () => boolean
   /** Shift+Tab 循环权限模式（由 main 注入）。plan-picker 打开时先关闭再循环。 */
   private planModeToggleHandler?: () => void
   /** Side panel 状态变化回调（用于持久化到 session metadata） */
@@ -402,8 +408,25 @@ export class TuiApp {
   choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' | 'plan-approval' | 'ask-user-question' = 'effort'
   /** 当前待审批计划信息（plan-approval 面板使用）。 */
   pendingPlanApproval: PlanSubmittedInfo | undefined = undefined
+  /**
+   * ask_user_question 多题流：当前题索引 + drafts。
+   * `pendingAskUserQuestion` 仍暴露当前题，兼容旧回调路径。
+   */
+  pendingAskFlow: {
+    questions: AskUserQuestionItem[]
+    index: number
+    drafts: AskAnswerDraft[]
+  } | undefined = undefined
   /** 当前待回答的可选择问题（ask-user-question 面板使用）。 */
-  pendingAskUserQuestion: AskUserQuestionInfo['questions'][number] | undefined = undefined
+  get pendingAskUserQuestion(): AskUserQuestionItem | undefined {
+    const flow = this.pendingAskFlow
+    if (!flow) return undefined
+    return flow.questions[flow.index]
+  }
+  set pendingAskUserQuestion(q: AskUserQuestionItem | undefined) {
+    // Legacy single-question assign — only used by cleanup resets to undefined.
+    if (!q) this.pendingAskFlow = undefined
+  }
   /** choice-panel 子模式：select（选选项）/ input（在 overlay 内输入文字）。 */
   choicePanelSubMode: 'select' | 'input' = 'select'
   /** choice-panel 输入子模式下的实时缓冲。 */
@@ -1264,17 +1287,158 @@ export class TuiApp {
     this.activateOverlay('choice-panel')
   }
 
-  /** 打开用户问题选项选择面板（ask_user_question 含单选选项时自动调用）。 */
+  /** 打开用户问题选项选择面板（ask_user_question）— 支持多题分页 + 多选。 */
   openAskUserQuestionPanel(info: AskUserQuestionInfo): void {
-    // 目前仅处理第一个非多选的可选择问题；多问题/多选场景保持文本输入。
-    const question = info.questions.find(q => q.options.length > 0 && !q.allowMultiple)
-    if (!question) return
+    const questions = info.questions.filter(q => q.options.length > 0)
+    if (questions.length === 0) return
     this.choicePanelKind = 'ask-user-question'
-    this.pendingAskUserQuestion = question
+    this.pendingAskFlow = {
+      questions,
+      index: 0,
+      drafts: questions.map(() => ({
+        selected: [],
+        otherSelected: false,
+        otherText: '',
+        skipped: false,
+      })),
+    }
     this.choicePanelSubMode = 'select'
     this.choicePanelInputBuffer = ''
     this.choicePanelInputFor = undefined
+    this.overlayController.nav().choicePanelIndex = 0
     this.activateOverlay('choice-panel')
+  }
+
+  /** Build ChoicePanelData for the current ask-flow question (pager + multi-select marks). */
+  buildAskChoicePanelData(): ChoicePanelData {
+    const flow = this.pendingAskFlow
+    const q = flow?.questions[flow.index]
+    if (!flow || !q) return { title: '', choices: [], selectedIndex: 0 }
+    const draft = flow.drafts[flow.index] ?? {
+      selected: [], otherSelected: false, otherText: '', skipped: false,
+    }
+    const pager = flow.questions.length > 1
+      ? ` (${flow.index + 1}/${flow.questions.length})`
+      : ''
+    const multiHint = q.allowMultiple ? ' · 空格多选' : ''
+    const entries = q.options.map((opt, i) => ({
+      id: String(i),
+      label: `${draft.selected.includes(i) ? '☑ ' : q.allowMultiple ? '☐ ' : ''}${opt}`,
+      description: '',
+    }))
+    entries.push({
+      id: '__other__',
+      label: `${draft.otherSelected ? '☑ ' : q.allowMultiple ? '☐ ' : ''}Other… / 自定义输入`,
+      description: '直接输入文字回答',
+    })
+    entries.push({
+      id: '__skip__',
+      label: '跳过此题',
+      description: flow.index + 1 < flow.questions.length ? '进入下一题' : '全部跳过则结束提问',
+    })
+    return {
+      title: `? 需要你的回答${pager}${multiHint}\n${q.prompt}`,
+      choices: entries,
+      selectedIndex: this.overlayController.nav().choicePanelIndex,
+      inputSubMode: this.getChoicePanelInputState(),
+      footerHints: q.allowMultiple
+        ? [['↑↓', '移动'], ['空格', '切换'], ['Enter', '确认'], ['Esc', '取消']]
+        : [['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']],
+    }
+  }
+
+  /**
+   * Resolve an ask-question choice. Returns true when the panel should close
+   * (final submit done); false when it stays open (advance / multi-select toggle).
+   */
+  resolveAskChoice(id: string): boolean {
+    const flow = this.pendingAskFlow
+    if (!flow) return true
+    const q = flow.questions[flow.index]
+    if (!q) return true
+    const draft = flow.drafts[flow.index]!
+
+    if (id === '__skip__') {
+      flow.drafts[flow.index] = { selected: [], otherSelected: false, otherText: '', skipped: true }
+      return this.advanceAskFlow()
+    }
+
+    if (id === '__other__') {
+      // Input sub-mode is entered by the key handler before calling resolve;
+      // when we get here with a filled buffer, record other text.
+      const text = this.choicePanelInputBuffer.trim()
+      if (!text && !draft.otherSelected) return false
+      if (q.allowMultiple) {
+        draft.otherSelected = true
+        draft.otherText = text
+        draft.skipped = false
+        return this.advanceAskFlow()
+      }
+      flow.drafts[flow.index] = {
+        selected: [],
+        otherSelected: true,
+        otherText: text,
+        skipped: false,
+      }
+      return this.advanceAskFlow()
+    }
+
+    const idx = Number(id)
+    if (!Number.isFinite(idx) || idx < 0 || idx >= q.options.length) return false
+
+    if (q.allowMultiple) {
+      // Toggle selection; stay on this question (caller uses space for this).
+      const has = draft.selected.includes(idx)
+      draft.selected = has ? draft.selected.filter(i => i !== idx) : [...draft.selected, idx]
+      draft.skipped = false
+      if (!q.allowMultiple) draft.otherSelected = false
+      this.overlay.rerender()
+      return false
+    }
+
+    flow.drafts[flow.index] = {
+      selected: [idx],
+      otherSelected: false,
+      otherText: '',
+      skipped: false,
+    }
+    return this.advanceAskFlow()
+  }
+
+  /** Confirm multi-select (Enter without moving to Other) — advance with current picks. */
+  confirmAskMultiSelect(): boolean {
+    const flow = this.pendingAskFlow
+    if (!flow) return true
+    const q = flow.questions[flow.index]
+    const draft = flow.drafts[flow.index]
+    if (!q?.allowMultiple || !draft) return false
+    if (draft.selected.length === 0 && !(draft.otherSelected && draft.otherText.trim())) {
+      return false // nothing selected yet
+    }
+    draft.skipped = false
+    return this.advanceAskFlow()
+  }
+
+  private advanceAskFlow(): boolean {
+    const flow = this.pendingAskFlow
+    if (!flow) return true
+    if (flow.index + 1 < flow.questions.length) {
+      flow.index += 1
+      this.choicePanelSubMode = 'select'
+      this.choicePanelInputBuffer = ''
+      this.choicePanelInputFor = undefined
+      this.overlayController.nav().choicePanelIndex = 0
+      this.overlay.rerender()
+      return false
+    }
+    const text = composeAnswers(flow.questions, flow.drafts, '已全部跳过')
+    this.choicePanelKind = 'effort'
+    this.pendingAskFlow = undefined
+    this.choicePanelSubMode = 'select'
+    this.choicePanelInputBuffer = ''
+    this.choicePanelInputFor = undefined
+    this.submitText(text)
+    return true
   }
 
   /** choice-panel 输入子模式渲染数据（由 renderChoicePanel 读取）。 */
@@ -1947,6 +2111,15 @@ export class TuiApp {
         }
         if (key.name === 'return') {
           const targetId = this.choicePanelInputFor === 'plan-reject-comment' ? '__reject_comment__' : '__other__'
+          if (this.choicePanelKind === 'ask-user-question') {
+            const done = this.resolveAskChoice(targetId)
+            this.choicePanelSubMode = 'select'
+            this.choicePanelInputBuffer = ''
+            this.choicePanelInputFor = undefined
+            if (done) this.deactivateOverlay()
+            else this.overlay.rerender()
+            return true
+          }
           const exec = this.overlayController.getChoicePanelExec()
           if (exec) exec(targetId)
           this.choicePanelSubMode = 'select'
@@ -1979,6 +2152,22 @@ export class TuiApp {
         if (choices.length > 0) { this.overlayController.nav().choicePanelIndex = (cur - 1 + choices.length) % choices.length; this.overlay.rerender() }
         return true
       }
+      // Multi-select toggle (space) for ask-user-question
+      if (c === ' ' && this.choicePanelKind === 'ask-user-question') {
+        const entry = choices[cur]
+        const q = this.pendingAskUserQuestion
+        if (entry && q?.allowMultiple && entry.id !== '__skip__' && entry.id !== '__other__') {
+          this.resolveAskChoice(entry.id) // toggle, stays open
+          return true
+        }
+        if (entry && q?.allowMultiple && entry.id === '__other__') {
+          this.choicePanelSubMode = 'input'
+          this.choicePanelInputBuffer = ''
+          this.choicePanelInputFor = 'ask-other'
+          this.overlay.rerender()
+          return true
+        }
+      }
       if (key.name === 'return') {
         const entry = choices[cur]
         const inputEntryIds = new Set(['__other__', '__reject_comment__'])
@@ -1988,6 +2177,21 @@ export class TuiApp {
           this.choicePanelInputBuffer = ''
           this.choicePanelInputFor = entry.id === '__reject_comment__' ? 'plan-reject-comment' : 'ask-other'
           this.overlay.rerender()
+          return true
+        }
+        if (this.choicePanelKind === 'ask-user-question') {
+          const q = this.pendingAskUserQuestion
+          if (q?.allowMultiple && entry && entry.id !== '__skip__') {
+            // Enter on a multi-select option confirms current picks (not toggle).
+            const done = this.confirmAskMultiSelect()
+            if (done) this.deactivateOverlay()
+            return true
+          }
+          if (entry) {
+            const done = this.resolveAskChoice(entry.id)
+            if (done) this.deactivateOverlay()
+            return true
+          }
           return true
         }
         if (entry && this.overlayController.getChoicePanelExec()) this.overlayController.getChoicePanelExec()?.(entry.id)
@@ -2490,6 +2694,10 @@ export class TuiApp {
    */
   setPlanModeProvider(provider: () => boolean): void {
     this.planModeProvider = provider
+  }
+
+  setAskModeProvider(provider: () => boolean): void {
+    this.askModeProvider = provider
   }
 
   /** Shift+Tab 循环权限模式。Wired from main.ts. */
@@ -3324,6 +3532,9 @@ export class TuiApp {
     const planModeActive = (() => {
       try { return this.planModeProvider?.() ?? false } catch { return false }
     })()
+    const askModeActive = (() => {
+      try { return this.askModeProvider?.() ?? false } catch { return false }
+    })()
     const planTrace = (() => {
       try { return this.planTraceProvider?.() ?? null } catch { return null }
     })()
@@ -3661,7 +3872,7 @@ export class TuiApp {
       // 5b. 权限模式行（CC parity：输入框正下方常驻，单一事实来源）。
       //     slash 提示打开时让位，避免与候选列表叠在一起。
       if (!isSlash) {
-        lines.push({ text: this.clampLine(formatPermissionModeLine({ approvalMode: this._approvalMode, planMode: planModeActive }, this.theme)) })
+        lines.push({ text: this.clampLine(formatPermissionModeLine({ approvalMode: this._approvalMode, planMode: planModeActive, askMode: askModeActive }, this.theme)) })
       }
 
       // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）

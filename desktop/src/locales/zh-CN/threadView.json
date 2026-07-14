@@ -202,6 +202,8 @@
     "truncated": "…(已截断 {{count}} 字)",
     "expandAll": "展开全文（共 {{count}} 行）",
     "collapse": "收起",
+    "expandDiff": "展开 diff",
+    "collapseDiff": "收起 diff",
     "densityFollow": "跟随全局密度 · 点击切换",
     "densityCompact": "紧凑 · 点击切换",
     "densityDetailed": "详细 · 点击恢复全局",

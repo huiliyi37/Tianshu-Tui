@@ -951,18 +951,26 @@ export interface ChoicePanelData {
     placeholder: string
     value: string
   }
+  /** Optional footer key hints; defaults to ↑↓/Enter/Esc. */
+  footerHints?: Array<[string, string]>
 }
 
 export function renderChoicePanel(data: ChoicePanelData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
   lines.push(formatBorder(width, theme, 'subtle'))
-  lines.push(formatTitleLeft(data.title, width, theme))
+  // Multi-line titles (ask pager): first line as title, rest as muted captions.
+  const titleLines = data.title.split('\n')
+  lines.push(formatTitleLeft(titleLines[0] ?? '', width, theme))
+  for (const extra of titleLines.slice(1)) {
+    lines.push(padLine(`  ${color(truncateToDisplayWidth(extra, Math.max(1, width - 8)), theme.secondary)}`, width, theme))
+  }
   lines.push(frameDivider(width, theme))
 
   const innerWidth = width - 6 // padLine border(2) + left indent(2) + right gap(2)
   const inputSubMode = data.inputSubMode?.active ? data.inputSubMode : undefined
   const inputRows = inputSubMode ? 2 : 0 // label line + input line
-  const contentRows = Math.max(1, height - 5 - inputRows) // border + title + separator + footer + bottom = 5
+  const titleExtra = Math.max(0, titleLines.length - 1)
+  const contentRows = Math.max(1, height - 5 - inputRows - titleExtra) // border + title + separator + footer + bottom = 5
 
   if (data.choices.length === 0) {
     lines.push(padLine(color('  （无可用选项）', theme.muted), width, theme))
@@ -1015,7 +1023,8 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
     lines.push(padLine(` ${color('>', theme.primary, { bold: true })} ${shown}${cursor}`, width, theme))
     lines.push(formatFooter(compactHints([['↵', '提交'], ['Esc', '返回选项']]), width, theme, 'subtle'))
   } else {
-    lines.push(formatFooter(compactHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']]), width, theme, 'subtle'))
+    const hints = data.footerHints ?? [['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']]
+    lines.push(formatFooter(compactHints(hints), width, theme, 'subtle'))
   }
   lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines

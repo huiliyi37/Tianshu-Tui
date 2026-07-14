@@ -579,6 +579,7 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
                                 </span>
                               )}
                               {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
+                              {s.askMode === 'asking' && <span className="thread-ask-badge">Ask</span>}
                               {s.worktreeBranch && (
                                 <span className="thread-wt-badge" title={`Worktree: ${s.worktreeBranch}`}>
                                   ⑂ {s.worktreeBranch.replace(/^rivet-hands-/, '').slice(0, 8)}

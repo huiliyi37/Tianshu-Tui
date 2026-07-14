@@ -281,6 +281,20 @@ export function buildSessionRoutes(
       return { status: 200, body: { id, planMode: data.state } }
     }, apiToken),
 
+    // Ask mode — toggle the session into pure read-only Q&A ('asking') or back
+    // to normal execution ('off'). Mutually exclusive with plan-mode.
+    'POST /sessions/:id/ask-mode': withAuth(async (body, params) => {
+      const id = params!.id!
+      const data = (body ?? {}) as { state?: unknown }
+      if (data.state !== 'off' && data.state !== 'asking') {
+        return { status: 400, body: { error: 'Invalid or missing "state" (off|asking)' } }
+      }
+      if (!(await manager.setAskMode(id, data.state))) {
+        return { status: 404, body: { error: 'Session not found' } }
+      }
+      return { status: 200, body: { id, askMode: data.state } }
+    }, apiToken),
+
     // Plan list — this session's plans (newest first), summary only (no content).
     'GET /sessions/:id/plans': withAuth(async (_body, params) => {
       const plans = await manager.listPlans(params!.id!)

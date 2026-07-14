@@ -14,7 +14,7 @@ import {
   perfSessionOpenFirstInteractive,
   type SessionOpenToken,
 } from '../state/perf-budget'
-import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
+import type { ApprovalMode, PlanModeState, AskModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import type { StreamStatus } from '../state/use-session-events'
 import { ToolCard, toolNameOf, pairEntries, PairedRow } from '../components/ToolGroup'
@@ -95,6 +95,7 @@ export function ThreadView(props: {
   onAbort: () => void
   onSetApprovalMode: (mode: ApprovalMode) => void
   onSetPlanMode?: (state: PlanModeState) => void
+  onSetAskMode?: (state: AskModeState) => void
   onSetEffort?: (effort: string) => void
   onClose: () => void
   /** D2 — live SSE connection state; drives the "updates stopped" banner. */
@@ -108,7 +109,7 @@ export function ThreadView(props: {
   terminalVisible?: boolean
   terminalHeight?: number
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onSetEffort, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval, sideChatOpen = false, onToggleSideChat, terminalVisible = false, terminalHeight = 240 } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onSetAskMode, onSetEffort, onClose, streamStatus, onRetryStream, onToggleDelegation, onApproval, sideChatOpen = false, onToggleSideChat, terminalVisible = false, terminalHeight = 240 } = props
   const { t } = useTranslation('threadView')
   const sessionOpenToken = useRef<SessionOpenToken | null>(null)
   useLayoutEffect(() => {
@@ -811,6 +812,17 @@ export function ThreadView(props: {
       },
     },
     {
+      name: '/ask',
+      desc: t('commands.ask', { defaultValue: 'Enter Ask mode (read-only Q&A)' }),
+      run: () => {
+        if (onSetAskMode && view.askMode !== 'asking') {
+          onSetAskMode('asking')
+        } else if (onSetAskMode && view.askMode === 'asking') {
+          onSetAskMode('off')
+        }
+      },
+    },
+    {
       name: '/write-plan',
       desc: t('commands.writePlan'),
       example: t('commands.writePlanExample'),
@@ -980,7 +992,7 @@ export function ThreadView(props: {
       desc: t('commands.diagram'),
       run: () => onSend('Generate a mermaid diagram skeleton. Types: architecture, dataflow, sequence, flowchart, comparison, state.'),
     },
-  ], [onSetApprovalMode, onSend, onSetPlanMode, view.planMode, t])
+  ], [onSetApprovalMode, onSend, onSetPlanMode, onSetAskMode, view.planMode, view.askMode, t])
 
   // Lookup map for welcome cards/pills to call the actual slash command
   // run() instead of sending raw text to the model.
@@ -1314,6 +1326,8 @@ export function ThreadView(props: {
             commands={commands}
             planMode={view.planMode}
             onSetPlanMode={onSetPlanMode}
+            askMode={view.askMode}
+            onSetAskMode={onSetAskMode}
             effort={session.reasoningEffort}
             onSetEffort={onSetEffort}
             onDelegate={handleDelegate}

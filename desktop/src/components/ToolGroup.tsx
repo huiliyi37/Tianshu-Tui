@@ -8,6 +8,7 @@ import { parseMcpToolName } from '../lib/approval-preview'
 import { classifyBrowserDebugLine, parseNetworkLine } from '../../../src/tools/browser-debug/log-capture.js'
 import type { ParsedNetworkRow } from '../../../src/tools/browser-debug/log-capture.js'
 import { getArtifact } from '../runtime/client'
+import { DiffView } from './DiffView'
 
 const TOOL_BODY_MAX = 10000
 /** Lines shown when collapsed (before "展开全文" button). */
@@ -31,7 +32,19 @@ const RUN_TEST_TOOLS = new Set(['run_tests'])
 
 /** Tool name from a `tool · X` / `result · X` role, falling back to the kind. */
 export function toolNameOf(block: ConvoBlock): string {
-  return (block.role ?? '').split(' · ')[1] ?? block.role ?? block.kind
+  return block.toolName ?? (block.role ?? '').split(' · ')[1] ?? block.role ?? block.kind
+}
+
+const DIFF_TOOLS = new Set(['edit_file', 'write_file', 'apply_patch', 'hash_edit'])
+
+/** True when tool output looks like a unified diff (edit/write uiContent). */
+export function looksLikeUnifiedDiff(text: string): boolean {
+  if (!text) return false
+  return /^diff --git |^--- |^\+\+\+ |^@@ -\d+/m.test(text)
+}
+
+export function isInlineDiffTool(name: string): boolean {
+  return DIFF_TOOLS.has(name.toLowerCase())
 }
 
 /** Whether a tool/result block may fold into the compact read+search group. */
@@ -82,6 +95,46 @@ function ExpandableBody({ text }: { text: string }) {
       )}
     </>
   )
+}
+
+/** Collapsible inline DiffView for edit/write/apply_patch uiContent. */
+function InlineDiffBody({ text }: { text: string }) {
+  const { t } = useTranslation('threadView')
+  const [expanded, setExpanded] = useState(true)
+  const stats = useMemo(() => {
+    let add = 0
+    let del = 0
+    for (const line of text.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) add++
+      else if (line.startsWith('-') && !line.startsWith('---')) del++
+    }
+    return { add, del }
+  }, [text])
+  return (
+    <div className="tool-inline-diff">
+      <button type="button" className="tool-diff-summary" onClick={() => setExpanded(v => !v)}>
+        <span className="tool-diff-stat add">+{stats.add}</span>
+        <span className="tool-diff-stat del">−{stats.del}</span>
+        <span className="tool-diff-toggle">
+          {expanded
+            ? t('tool.collapseDiff', { defaultValue: 'Collapse diff' })
+            : t('tool.expandDiff', { defaultValue: 'Expand diff' })}
+        </span>
+      </button>
+      {expanded && (
+        <div className="tool-diff-body">
+          <DiffView raw={text} hideToolbar />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ResultBody({ result, name }: { result: ConvoBlock; name: string }) {
+  if (isInlineDiffTool(name) && looksLikeUnifiedDiff(result.text)) {
+    return <InlineDiffBody text={result.text} />
+  }
+  return <ExpandableBody text={result.text} />
 }
 
 // Leading file-path token: POSIX absolute (/…), Windows drive (C:\… or C:/…),
@@ -280,7 +333,7 @@ function PairedRowImpl({ entry, sessionId, onOpenImage }: {
             isBrowserDebug ? (
               <BrowserDebugBody result={entry.result} sessionId={sessionId} onOpenImage={onOpenImage} />
             ) : (
-              <ExpandableBody text={entry.result.text} />
+              <ResultBody result={entry.result} name={name} />
             )
           )}
         </div>
@@ -463,7 +516,11 @@ function ToolRowImpl({ block, defaultOpen = false }: { block: ConvoBlock; defaul
         <McpBadge name={name} />
         {!open && preview && <PreviewText text={preview} />}
       </button>
-      {open && <ExpandableBody text={block.text} />}
+      {open && (
+        block.kind === 'result'
+          ? <ResultBody result={block} name={name} />
+          : <ExpandableBody text={block.text} />
+      )}
     </div>
   )
 }

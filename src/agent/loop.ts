@@ -23,6 +23,7 @@ import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { ImportGraph } from './import-graph.js'
 import type { PlanModeState } from './plan-mode.js'
 import { createActivePlanDraftPath } from './plan-mode.js'
+import type { AskModeState } from './ask-mode.js'
 import { WRITING_PLANS_SKILL } from './plan-delegation.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
@@ -200,12 +201,16 @@ export class AgentLoop {
   planModeState: PlanModeState = 'off'
   /** Relative path to the active plan file (draft or revision target). Writable in plan mode. */
   activePlanFilePath: string | null = null
+  /** Ask Mode — pure read-only Q&A; mutually exclusive with planModeState. */
+  askModeState: AskModeState = 'off'
   /** 主动 plan mode 建议的 one-shot 记忆：已建议过的 contract id（选「直接执行」后不复问）。 */
   planModeSuggestedContracts = new Set<string>()
   /** Plan mode 状态变更通知 — server 层订阅后转发 plan_mode SSE（桌面切 Plan tab）。
    *  覆盖模型自主 enter_mode 的场景：session-manager 自己触发的切换它已经知道，
    *  工具触发的切换只能靠这条回调出圈。agent 创建后由外部回填。 */
   onPlanModeChange?: (state: PlanModeState) => void
+  /** Ask mode 状态变更通知 — server 层订阅后转发 ask_mode SSE。 */
+  onAskModeChange?: (state: AskModeState) => void
   /** TUI 回调：计划提交待审批时弹出审批面板（替代手动输入 /plan-approve）。 */
   onPlanApprovalRequested?: (info: import('../tools/types.js').PlanSubmittedInfo) => void
   /** TUI 回调：agent 向用户提问含选项时弹出选择面板（替代手动输入选项编号）。 */
@@ -1073,14 +1078,17 @@ export class AgentLoop {
   syncPlanModeToConfig(): void {
     this.config.planModeState = this.planModeState
     this.config.activePlanFilePath = this.activePlanFilePath
+    this.config.askModeState = this.askModeState
     this.config.promptEngine.setPlanModeState(this.planModeState)
     this.config.promptEngine.setActivePlanFilePath(this.activePlanFilePath)
+    this.config.promptEngine.setAskModeState(this.askModeState)
     // 落盘到 session meta——resume 后计划模式可恢复（内存态否则随进程消失）。
     // 所有状态迁移(enter/exit/setActivePlan)都经本方法,单点持久化。
     try {
       this.persist?.updateMetadata({
         planModeState: this.planModeState,
         activePlanFilePath: this.activePlanFilePath,
+        askModeState: this.askModeState,
       })
     } catch { /* best-effort */ }
   }
@@ -1415,6 +1423,11 @@ export class AgentLoop {
     if (this.planModeState === 'planning' && this.activePlanFilePath && !opts?.planFilePath) {
       return
     }
+    // Mutual exclusion with Ask Mode — enter plan exits ask silently.
+    if (this.askModeState === 'asking') {
+      this.askModeState = 'off'
+      try { this.onAskModeChange?.('off') } catch { /* non-fatal */ }
+    }
     this.planModeState = 'planning'
     // Re-entering cancels any pending exit reminder from a prior exit.
     this.config.promptEngine.setPlanExitReminderPending(false)
@@ -1513,6 +1526,31 @@ export class AgentLoop {
 
   /** Get current plan mode state */
   getPlanModeState(): PlanModeState { return this.planModeState }
+
+  /** Enter Ask Mode — pure read-only Q&A. Mutually exclusive with Plan Mode. */
+  enterAskMode(): void {
+    if (this.askModeState === 'asking') return
+    // Mutual exclusion with Plan Mode — enter ask exits plan (with exit reminder).
+    if (this.planModeState === 'planning') {
+      this.planModeState = 'off'
+      this.config.promptEngine.setPlanExitReminderPending(true)
+      this.releasePlanModeArtifacts()
+      try { this.onPlanModeChange?.('off') } catch { /* non-fatal */ }
+    }
+    this.askModeState = 'asking'
+    this.syncPlanModeToConfig()
+    try { this.onAskModeChange?.('asking') } catch { /* non-fatal */ }
+  }
+
+  /** Exit Ask Mode — restore normal tool access. */
+  exitAskMode(): void {
+    if (this.askModeState === 'off') return
+    this.askModeState = 'off'
+    this.syncPlanModeToConfig()
+    try { this.onAskModeChange?.('off') } catch { /* non-fatal */ }
+  }
+
+  getAskModeState(): AskModeState { return this.askModeState }
 
   /** Relative path to the active plan file while in plan mode. */
   getActivePlanFilePath(): string | null { return this.activePlanFilePath }

@@ -202,6 +202,8 @@
     "truncated": "…(truncated {{count}} chars)",
     "expandAll": "Expand all ({{count}} lines)",
     "collapse": "Collapse",
+    "expandDiff": "Expand diff",
+    "collapseDiff": "Collapse diff",
     "densityFollow": "Following global density · click to switch",
     "densityCompact": "Compact · click to switch",
     "densityDetailed": "Detailed · click to restore global",

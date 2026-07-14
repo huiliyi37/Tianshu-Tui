@@ -133,6 +133,7 @@ const HELP_TEXT = `Available commands:
 /workflow [list|<name>|replay <id>] — YAML workflow orchestration + trace replay
 /todo [list|add <content>|done <id>|skip <id>|move <id> up|down] — Manage task list
 /plan-template [list|<name>|save <name>] — Reusable plan templates
+/ask — Enter/exit Ask mode (read-only Q&A)
 /team-resume [groupId] — Resume team execution from wave checkpoint
 /goal <objective> [--max N] [--budget M] [--criteria '["..."]'] — Set autonomous goal
 /goal-status — Show current goal state
@@ -1622,6 +1623,28 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       planModeExitArmedAt = 0
       ctx.agent.enterPlanMode()
       pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)\n\n/plan-mode — exit plan mode (double-confirm if unapproved)' }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/ask',
+    immediate: true,
+    handler(ctx) {
+      const { pushStatic, setIsStreaming } = ctx
+      if (ctx.agent.getAskModeState?.() === 'asking' || ctx.agent.askModeState === 'asking') {
+        ctx.agent.exitAskMode()
+        pushStatic(createLogEntry({ type: 'system', content: 'Ask Mode 已关闭 — 写入与执行操作已解锁。' }))
+        setIsStreaming(false)
+        return true
+      }
+      ctx.agent.enterAskMode()
+      pushStatic(createLogEntry({
+        type: 'system',
+        content:
+          '? Ask Mode activated. Only read / search / ask_user_question are allowed.\n\n' +
+          'Ask Mode 适合：代码问答、对照阅读、澄清需求。需要写改或跑命令时执行 /ask 退出。',
+      }))
       setIsStreaming(false)
       return true
     },

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { PlanModeState } from '../runtime/types'
+import type { PlanModeState, AskModeState } from '../runtime/types'
 import type { ComposerCommand } from '../lib/composer-commands'
 import {
   abortSession,
@@ -55,6 +55,8 @@ export function PlusMenu(props: {
   sessionRunning?: boolean
   planMode?: PlanModeState
   onSetPlanMode?: (state: PlanModeState) => void
+  askMode?: AskModeState
+  onSetAskMode?: (state: AskModeState) => void
   /** Current reasoning effort level (off/low/medium/high/max/auto). */
   effort?: string
   onSetEffort?: (effort: string) => void
@@ -73,12 +75,14 @@ export function PlusMenu(props: {
   threadNonEmpty?: boolean
 }) {
   const {
-    sessionId, menuRev, sessionRunning, planMode, onSetPlanMode, effort, onSetEffort,
+    sessionId, menuRev, sessionRunning, planMode, onSetPlanMode, askMode, onSetAskMode, effort, onSetEffort,
     onPickImage, imageDisabled, commands, onRunCommand, onDelegate, onWorkflow, onClose,
     open, onOpenChange, threadNonEmpty,
   } = props
   const { t } = useTranslation('composer')
   const planning = planMode === 'planning'
+  const asking = askMode === 'asking'
+  const modeValue = asking ? 'ask' : planning ? 'plan' : 'agent'
   const [panel, setPanel] = useState<Panel | null>(null)
   const dispatch = useUiDispatch()
 
@@ -97,15 +101,30 @@ export function PlusMenu(props: {
           +
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="top" sideOffset={6} className="min-w-56">
-          {onSetPlanMode && (
+          {(onSetPlanMode || onSetAskMode) && (
             <>
               <DropdownMenuRadioGroup
-                value={planning ? 'plan' : 'agent'}
-                onValueChange={(v) => onSetPlanMode(v === 'plan' ? 'planning' : 'off')}
+                value={modeValue}
+                onValueChange={(v) => {
+                  if (v === 'plan') {
+                    onSetAskMode?.('off')
+                    onSetPlanMode?.('planning')
+                  } else if (v === 'ask') {
+                    onSetPlanMode?.('off')
+                    onSetAskMode?.('asking')
+                  } else {
+                    onSetPlanMode?.('off')
+                    onSetAskMode?.('off')
+                  }
+                }}
               >
                 <DropdownMenuRadioItem value="plan">
                   <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>◑</span>
                   <span>Plan</span>
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="ask">
+                  <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>?</span>
+                  <span>Ask</span>
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="agent">
                   <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>●</span>

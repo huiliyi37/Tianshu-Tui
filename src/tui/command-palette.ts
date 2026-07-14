@@ -81,6 +81,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/plan', description: 'Create implementation plan (writing-plans workflow)' },
     { name: '/write-plan', description: 'Alias of /plan — same writing-plans workflow' },
     { name: '/plan-mode', description: 'Enter/exit plan authoring mode (/plan-mode toggles)' },
+    { name: '/ask', description: 'Enter/exit Ask mode — read-only Q&A (/ask toggles)' },
     { name: '/plan-list', description: 'List submitted plans awaiting approval' },
     { name: '/plan-approve', description: 'Approve a plan and start execution' },
     { name: '/plan-reject', description: 'Reject a plan with feedback for revision' },

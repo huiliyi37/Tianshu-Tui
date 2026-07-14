@@ -11,6 +11,7 @@ export type {
   SessionStatus,
   ApprovalMode,
   PlanModeState,
+  AskModeState,
   SessionEventType,
   SessionEvent,
   SessionRecord,

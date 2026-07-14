@@ -52,6 +52,7 @@ import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
 import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
+import { checkAskMode } from './ask-mode.js'
 import { GIT_CLEAR_RE } from '../tools/destructive-patterns.js'
 import { classifyDeclaredCommand, loadDeclaredVerify } from '../config/verify-config.js'
 import { profileIsPlanModeSafe } from './profile-registry.js'
@@ -938,7 +939,16 @@ export async function executeToolUse(
       deps.onGateBlocked?.('plan-mode')
       callbacks.onToolResult(tu.id, tu.name, planMsg, true)
       return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? planMsg + starSig : planMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-   }
+    }
+
+    // Ask-mode gate — pure read-only Q&A (no write / execute / plan / delegate)
+    const askModeResult = checkAskMode(deps.config.askModeState ?? 'off', tu.name)
+    if (!askModeResult.allowed) {
+      const askMsg = askModeResult.reason ?? 'Ask Mode: write operations blocked'
+      deps.onGateBlocked?.('ask-mode')
+      callbacks.onToolResult(tu.id, tu.name, askMsg, true)
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? askMsg + starSig : askMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    }
 
     // Sensitive-area preflight — nudge, don't block. The model must read the
     // knowledge manifest before editing prompt/memory/recall/verification/ownership

@@ -849,15 +849,7 @@ async function main() {
         return { title: '计划审批 / Plan Approval', choices: entries, selectedIndex: 0, inputSubMode: tuiApp.getChoicePanelInputState() }
       }
       if (tuiApp.choicePanelKind === 'ask-user-question') {
-        const q = tuiApp.pendingAskUserQuestion
-        if (!q) return { title: '', choices: [], selectedIndex: 0 }
-        const entries = q.options.map((opt, i) => ({
-          id: String(i),
-          label: opt,
-          description: '',
-        }))
-        entries.push({ id: '__other__', label: 'Other… / 自定义输入', description: '直接输入文字回答' })
-        return { title: q.prompt, choices: entries, selectedIndex: 0, inputSubMode: tuiApp.getChoicePanelInputState() }
+        return tuiApp.buildAskChoicePanelData()
       }
       const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
       const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
@@ -1058,21 +1050,10 @@ async function main() {
       return
     }
     if (tuiApp.choicePanelKind === 'ask-user-question') {
-      // 问题选项面板回调：把选中的选项文本或自定义输入作为用户消息提交。
-      const q = tuiApp.pendingAskUserQuestion
-      tuiApp.choicePanelKind = 'effort' // reset
-      tuiApp.pendingAskUserQuestion = undefined
-      if (!q) return
-      if (id === '__other__') {
-        const text = tuiApp.choicePanelInputBuffer.trim()
-        if (text) tuiApp.submitText(text)
-        return
-      }
-      const idx = Number(id)
-      const option = Number.isFinite(idx) ? q.options[idx] : undefined
-      if (option) {
-        tuiApp.submitText(option)
-      }
+      // Handled inside TuiApp.resolveAskChoice / advanceAskFlow (multi-question).
+      // Legacy single-shot path should not double-submit via this callback.
+      const done = tuiApp.resolveAskChoice(id)
+      if (!done) return
       return
     }
     // Effort 选择面板回车回调。
@@ -1214,9 +1195,11 @@ async function main() {
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
   app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
+  app.setAskModeProvider(() => ctx!.agent.askModeState === 'asking')
   // Shift+Tab：纯 Plan Mode 叠层开关（不兼审批环）。
   // 进入记住当前审批模式且不改 approval；退出原样恢复（YOLO 不会被冲成 auto-safe/manual）。
   // 审批切换仍走 /permission 与 /yes；planning 期间改审批会同步更新 stash。未批准 draft 保留在 .rivet/plans/。
+  // enterPlanMode 内部会自动退出 Ask（互斥）。
   app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
     const setSessionApproval = (mode: ApprovalMode) => {

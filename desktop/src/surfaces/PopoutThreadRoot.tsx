@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Pin, PinOff } from 'lucide-react'
-import { useAbortSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
+import { useAbortSession, useSendPrompt, useSessions, useSetPlanMode, useSetAskMode } from '../state/queries'
 import { useSessionEvents } from '../state/use-session-events'
 import { answerApproval, setApprovalMode, steerSession } from '../runtime/client'
-import type { ApprovalMode, PlanModeState } from '../runtime/types'
+import type { ApprovalMode, PlanModeState, AskModeState } from '../runtime/types'
 import { ThreadView } from './ThreadView'
 import { isApprovalConsent } from '../lib/consent'
 import { ApprovalInline } from '../components/ApprovalInline'
@@ -23,6 +23,7 @@ export function PopoutThreadRoot({ sessionId }: { sessionId: string }) {
   const sendPrompt = useSendPrompt()
   const abortSession = useAbortSession()
   const setPlanMode = useSetPlanMode()
+  const setAskMode = useSetAskMode()
 
   const session = sessions.data?.find((s) => s.id === sessionId) ?? null
   const [pinned, setPinned] = useState(false)
@@ -81,6 +82,10 @@ export function PopoutThreadRoot({ sessionId }: { sessionId: string }) {
     setPlanMode.mutate({ id: sessionId, state })
   }, [sessionId, setPlanMode])
 
+  const handleSetAskMode = useCallback((state: AskModeState) => {
+    setAskMode.mutate({ id: sessionId, state })
+  }, [sessionId, setAskMode])
+
   const closeWindow = useCallback(() => {
     void import('@tauri-apps/api/window')
       .then((m) => m.getCurrentWindow().close())
@@ -123,6 +128,7 @@ export function PopoutThreadRoot({ sessionId }: { sessionId: string }) {
         onAbort={() => abortSession.mutate(session.id)}
         onSetApprovalMode={handleSetApprovalMode}
         onSetPlanMode={handleSetPlanMode}
+        onSetAskMode={handleSetAskMode}
         onClose={closeWindow}
         streamStatus={view.streamStatus}
         onRetryStream={view.retryStream}

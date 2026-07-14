@@ -29,6 +29,12 @@ export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously
  */
 export type PlanModeState = 'off' | 'planning'
 
+/**
+ * Ask mode — read-only Q&A (Cursor Ask). Canonical wire definition;
+ * the runtime re-exports it from src/agent/ask-mode.ts.
+ */
+export type AskModeState = 'off' | 'asking'
+
 export type SessionEventType =
   | 'user'
   | 'text_delta'
@@ -54,6 +60,8 @@ export type SessionEventType =
   // Plan mode — state toggle (off|planning) + a plan was submitted to disk.
   | 'plan_mode'
   | 'plan_submitted'
+  // Ask mode — read-only Q&A toggle (off|asking); mutually exclusive with plan_mode.
+  | 'ask_mode'
   // Plan mode — the agent grew the active draft (throttled invalidation signal;
   // metadata only, the desktop re-fetches the body via GET /plans).
   | 'plan_draft'
@@ -111,6 +119,12 @@ export interface SessionRecord {
    * normal execution. Mirrors AgentLoop.planModeState.
    */
   planMode?: PlanModeState
+  /**
+   * Ask mode — when 'asking', the agent is restricted to pure read-only Q&A
+   * tools (no write/execute/plan/delegate). Mutually exclusive with planMode.
+   * Absent/'off' → normal execution. Mirrors AgentLoop.askModeState.
+   */
+  askMode?: AskModeState
   /**
    * PlusMenu — current provider model id for this session (the resolved model
    * id, not an alias). Absent → the global default. Surfaced in the model picker

@@ -29,6 +29,7 @@ import type { OaiMessage } from '../api/oai-types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { DecisionShift } from '../agent/loop-types.js'
 import type { PlanModeState } from '../agent/plan-mode.js'
+import type { AskModeState } from '../agent/ask-mode.js'
 import {
   listPlans as storeListPlans,
   readPlan as storeReadPlan,
@@ -58,6 +59,7 @@ import { grantApp as grantComputerUseApp } from '../tools/computer-use/app-grant
 import type {
   ApprovalMode as WireApprovalMode,
   PlanModeState as WirePlanModeState,
+  AskModeState as WireAskModeState,
   SessionStatus,
   SessionEvent,
   SessionEventType,
@@ -77,6 +79,7 @@ type Equals<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type Assert<T extends true> = T
 export type _ApprovalModeInSync = Assert<Equals<ApprovalMode, WireApprovalMode>>
 export type _PlanModeStateInSync = Assert<Equals<PlanModeState, WirePlanModeState>>
+export type _AskModeStateInSync = Assert<Equals<AskModeState, WireAskModeState>>
 
 /** Structured approval outcome — routes surface `reason` instead of a blind 409. */
 export type PlanApprovalOutcome =
@@ -167,12 +170,24 @@ export interface ManagedAgent {
   enterPlanMode?(opts?: { planFilePath?: string }): void
   exitPlanMode?(): void
   /**
+   * Ask mode — restrict the agent to pure read-only Q&A tools (asking) or
+   * release it (off). Mutually exclusive with Plan Mode. Optional so lightweight
+   * test doubles need not implement it.
+   */
+  enterAskMode?(): void
+  exitAskMode?(): void
+  /**
    * Plan mode change notification — assigned by the session layer so agent-side
    * transitions (e.g. the model calling plan action=enter_mode) surface as
    * plan_mode SSE events. Mirrors AgentLoop.onPlanModeChange. Optional so
    * lightweight test doubles need not implement it.
    */
   onPlanModeChange?: (state: PlanModeState) => void
+  /**
+   * Ask mode change notification — assigned by the session layer so agent-side
+   * transitions surface as ask_mode SSE events.
+   */
+  onAskModeChange?: (state: AskModeState) => void
   /**
    * Relative path of the working draft the agent writes while in plan mode
    * (null when not planning). Mirrors AgentLoop.getActivePlanFilePath.
@@ -1769,6 +1784,7 @@ export class RuntimeSessionManager {
       if (session.reasoningEffort !== undefined) agent.setReasoningEffort?.(session.reasoningEffort)
     } catch { /* non-fatal */ }
     this.bindPlanModeChange(session, agent, session.lifecycleGeneration)
+    this.bindAskModeChange(session, agent, session.lifecycleGeneration)
     // Plan mode 是 AgentLoop 的内存态，record.planMode 是持久态。agent 重建
     // （懒构建恢复会话 / switchModel）会丢内存态：工具门禁失效、
     // getActivePlanFilePath 变 null → 桌面「起草中」实时视图断流。record 说
@@ -1776,6 +1792,8 @@ export class RuntimeSessionManager {
     // onPlanModeChange 的同态守卫保证不会重复发 plan_mode SSE。
     if (session.record.planMode === 'planning') {
       try { agent.enterPlanMode?.() } catch { /* non-fatal */ }
+    } else if (session.record.askMode === 'asking') {
+      try { agent.enterAskMode?.() } catch { /* non-fatal */ }
     }
   }
 
@@ -1790,8 +1808,33 @@ export class RuntimeSessionManager {
       if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
       if (session.record.planMode === state) return
       session.record.planMode = state
+      // Mutual exclusion: enter plan clears ask on the wire record.
+      if (state === 'planning' && session.record.askMode === 'asking') {
+        session.record.askMode = 'off'
+        this.append(session, 'ask_mode', { state: 'off' })
+      }
       this.touch(session)
       this.append(session, 'plan_mode', { state })
+      this.persistRecord(session)
+    }
+  }
+
+  private bindAskModeChange(
+    session: InternalSession,
+    agent: ManagedAgent,
+    lifecycleGeneration: number,
+  ): void {
+    agent.onAskModeChange = (state: AskModeState) => {
+      if (!this.ownsSessionLifecycle(session, lifecycleGeneration)) return
+      if (session.record.askMode === state) return
+      session.record.askMode = state
+      // Mutual exclusion: enter ask clears plan on the wire record.
+      if (state === 'asking' && session.record.planMode === 'planning') {
+        session.record.planMode = 'off'
+        this.append(session, 'plan_mode', { state: 'off' })
+      }
+      this.touch(session)
+      this.append(session, 'ask_mode', { state })
       this.persistRecord(session)
     }
   }
@@ -2001,12 +2044,41 @@ export class RuntimeSessionManager {
     if (!session) return false
     const agent = await this.ensureAgentAsync(session)
     session.record.planMode = state
+    // Mutual exclusion with Ask on the wire record.
+    if (state === 'planning' && session.record.askMode === 'asking') {
+      session.record.askMode = 'off'
+      this.append(session, 'ask_mode', { state: 'off' })
+    }
     try {
       if (state === 'planning') agent.enterPlanMode?.()
       else agent.exitPlanMode?.()
     } catch { /* non-fatal */ }
     this.touch(session)
     this.append(session, 'plan_mode', { state })
+    this.persistRecord(session)
+    return true
+  }
+
+  /**
+   * Ask mode — toggle the session between pure read-only Q&A and normal
+   * execution. Mutually exclusive with Plan Mode. Emits `ask_mode` (and clears
+   * plan_mode when entering). Returns false when the session is missing.
+   */
+  async setAskMode(id: string, state: AskModeState): Promise<boolean> {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    const agent = await this.ensureAgentAsync(session)
+    session.record.askMode = state
+    if (state === 'asking' && session.record.planMode === 'planning') {
+      session.record.planMode = 'off'
+      this.append(session, 'plan_mode', { state: 'off' })
+    }
+    try {
+      if (state === 'asking') agent.enterAskMode?.()
+      else agent.exitAskMode?.()
+    } catch { /* non-fatal */ }
+    this.touch(session)
+    this.append(session, 'ask_mode', { state })
     this.persistRecord(session)
     return true
   }

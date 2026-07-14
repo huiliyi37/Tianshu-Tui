@@ -846,10 +846,17 @@ body {
 .mode-toggle .mode-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .mode-toggle.plan { color: var(--accent); border-color: var(--accent); background: transparent; }
 .mode-toggle.plan .mode-dot { background: var(--accent); }
+.mode-toggle.ask { color: var(--warning); border-color: var(--warning); background: transparent; }
+.mode-toggle.ask .mode-dot { background: var(--warning); }
 .composer.planning { box-shadow: inset 0 0 0 1px var(--accent); border-radius: var(--radius-md); }
 .thread-plan-badge {
   font-size: 10px; font-weight: var(--weight-medium);
   color: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-pill);
+  padding: 0 6px; line-height: 1.5; flex-shrink: 0;
+}
+.thread-ask-badge {
+  font-size: 10px; font-weight: var(--weight-medium);
+  color: var(--warning); border: 1px solid var(--warning); border-radius: var(--radius-pill);
   padding: 0 6px; line-height: 1.5; flex-shrink: 0;
 }
 .thread-wt-badge {
@@ -1349,7 +1356,7 @@ body {
 .thread-row .title { font-weight: var(--weight-normal); font-size: var(--text-sm); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .thread-row.active .title { font-weight: var(--weight-medium); }
 .thread-row .title > span:first-child { flex-shrink: 0; }
-.thread-row .title > span:not(.status-dot):not(.thread-plan-badge):not(.thread-wt-badge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.thread-row .title > span:not(.status-dot):not(.thread-plan-badge):not(.thread-ask-badge):not(.thread-wt-badge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .thread-row .meta { display: none; }
 .thread-row-close {
   display: none;
@@ -2404,6 +2411,28 @@ body {
   font-size: var(--text-xs); cursor: pointer;
 }
 .tool-expand-btn:hover { filter: brightness(1.1); }
+
+.tool-inline-diff {
+  margin: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.tool-diff-summary {
+  display: flex; align-items: center; gap: var(--space-2);
+  width: 100%; padding: var(--space-2) var(--space-3);
+  background: transparent; border: none; cursor: pointer;
+  font-size: var(--text-xs); color: var(--muted); text-align: left;
+}
+.tool-diff-summary:hover { color: var(--text); background: var(--panel-3); }
+.tool-diff-stat.add { color: var(--success); font-family: var(--font-mono); font-weight: var(--weight-medium); }
+.tool-diff-stat.del { color: var(--error); font-family: var(--font-mono); font-weight: var(--weight-medium); }
+.tool-diff-toggle { margin-left: auto; color: var(--accent); }
+.tool-diff-body {
+  max-height: 320px; overflow: auto;
+  border-top: 1px solid var(--border);
+}
 
 /* Tool stream group (Cursor 3.0) — compact inline rows with status dots. */
 .tool-group {

@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PendingQuestion } from '../runtime/types'
+import {
+  composeAnswers,
+  draftToAnswer,
+  type AskAnswerDraft,
+} from '../../../src/tools/ask-user-question'
 
 /**
  * 结构化提问卡片（Cursor 3.0 风格）— 渲染 ask_user_question 的 user_question SSE。
@@ -18,24 +23,9 @@ interface QuestionCardProps {
 
 const OTHER_KEY = '__other__'
 
-interface DraftAnswer {
-  /** 选中的选项下标（单选恒 ≤1 个；allowMultiple 时可多个）。 */
-  selected: number[]
-  /** 「Other…」被选中。 */
-  otherSelected: boolean
-  otherText: string
-  skipped: boolean
-}
+type DraftAnswer = AskAnswerDraft
 
 const emptyDraft = (): DraftAnswer => ({ selected: [], otherSelected: false, otherText: '', skipped: false })
-
-function draftToAnswer(draft: DraftAnswer, options: string[]): string | null {
-  if (draft.skipped) return null
-  const parts = draft.selected.map((i) => options[i]).filter((o): o is string => !!o)
-  if (draft.otherSelected && draft.otherText.trim()) parts.push(draft.otherText.trim())
-  if (parts.length === 0) return null
-  return parts.join('；')
-}
 
 export function QuestionCard({ question, onSubmit, disabled }: QuestionCardProps) {
   const { t } = useTranslation('approval')
@@ -72,17 +62,16 @@ export function QuestionCard({ question, onSubmit, disabled }: QuestionCardProps
   }, [setDraft])
 
   const submitAll = useCallback((finalDrafts: DraftAnswer[]) => {
-    const lines: string[] = []
-    questions.forEach((q, i) => {
-      const d = finalDrafts[i] ?? emptyDraft()
-      const answer = draftToAnswer(d, q.options)
-      if (answer) lines.push(questions.length > 1 ? `${q.prompt} → ${answer}` : answer)
-    })
-    if (lines.length === 0) {
-      onSubmit(t('question.skippedAll'))
-    } else {
-      onSubmit(lines.join('\n'))
-    }
+    onSubmit(composeAnswers(
+      questions.map(q => ({
+        id: q.id,
+        prompt: q.prompt,
+        options: q.options,
+        allowMultiple: q.allowMultiple,
+      })),
+      finalDrafts,
+      t('question.skippedAll'),
+    ))
   }, [questions, onSubmit, t])
 
   const advance = useCallback((markSkipped: boolean) => {

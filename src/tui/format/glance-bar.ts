@@ -255,10 +255,13 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
  * 着色沿用旧 badge 映射：safe=muted / ask=warning / yolo=error / auto=success / plan=primary。
  */
 export function formatPermissionModeLine(
-  input: { approvalMode?: string; planMode?: boolean; planDraftPath?: string },
+  input: { approvalMode?: string; planMode?: boolean; askMode?: boolean; planDraftPath?: string },
   theme: RivetTheme,
 ): string {
-  const hint = color('(shift+tab 切换)', theme.dim)
+  const hint = color('(shift+tab 切换 plan · /ask 切换问答)', theme.dim)
+  if (input.askMode) {
+    return `  ${color('⏵ ask mode', theme.warning)} ${hint}`
+  }
   if (input.planMode) {
     const draft = input.planDraftPath
       ? ` ${color(truncateToDisplayWidth(input.planDraftPath, 28), theme.dim)}`

@@ -39,6 +39,7 @@ import {
   setDomain,
   setHooks,
   setPlanMode,
+  setAskMode,
   unarchiveSession,
   getRecorderPermissions,
   listRecordings,
@@ -51,7 +52,7 @@ import {
   type PrReviewInput,
   type VisionModelConfig,
 } from '../runtime/client'
-import type { HookEntry, PlanModeState } from '../runtime/types'
+import type { HookEntry, PlanModeState, AskModeState } from '../runtime/types'
 
 // Server state lives in TanStack Query: sessions/health poll on an interval,
 // artifacts refetch on demand (driven by artifact events). UI state is separate
@@ -198,6 +199,14 @@ export function useSetPlanMode() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, state }: { id: string; state: PlanModeState }) => setPlanMode(id, state),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
+  })
+}
+
+export function useSetAskMode() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, state }: { id: string; state: AskModeState }) => setAskMode(id, state),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
   })
 }

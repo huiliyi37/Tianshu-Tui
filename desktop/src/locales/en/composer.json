@@ -26,6 +26,7 @@
   "speechFailed": "Speech recognition failed",
   "computerMentionDesc": "Control macOS desktop apps (screenshot/click/type)",
   "planToggleTitle": "Shift+Tab to toggle Plan / Agent mode",
+  "modeToggleTitle": "Cycle Agent → Plan → Ask mode",
   "sendModeEnter": "Enter to send · Shift+Enter for newline (click to toggle)",
   "sendModeShiftEnter": "Shift+Enter to send · Enter for newline (click to toggle)",
   "loading": "Loading…",

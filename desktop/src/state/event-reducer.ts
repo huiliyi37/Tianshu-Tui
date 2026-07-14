@@ -5,6 +5,7 @@ import type {
   PendingQuestion,
   PendingQuestionItem,
   PlanModeState,
+  AskModeState,
   SessionEvent,
   TodoStateItem,
 } from '../runtime/types'
@@ -45,6 +46,8 @@ export interface ConvoBlock {
   role?: string
   text: string
   isError?: boolean
+  /** Tool name for tool/result blocks — used to pick rich renderers (inline diff). */
+  toolName?: string
   /** R5 — decision_shift card payload (star-domain course-correction). */
   shift?: {
     source: string
@@ -125,6 +128,8 @@ export interface EventViewState {
   phase?: string
   /** Plan mode — current read-only planning vs execution state for this session. */
   planMode: PlanModeState
+  /** Ask mode — current read-only Q&A vs execution state for this session. */
+  askMode: AskModeState
   /** Bumped on plan_mode/plan_submitted so the plan list query can re-fetch. */
   planRev: number
   /**
@@ -179,6 +184,7 @@ export const initialEventState: EventViewState = {
   delegation: {},
   todos: [],
   planMode: 'off',
+  askMode: 'off',
   planRev: 0,
   draftLive: null,
   menuRev: 0,
@@ -337,14 +343,15 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.private_textOpen = false
       next.private_thinkingOpen = false
       const toolInput = ev.data.input as Record<string, unknown> | undefined
+      const toolName = String(ev.data.name ?? '')
       next.blocks = [...next.blocks, {
         key: `tu-${ev.seq}`,
         kind: 'tool',
-        role: `tool · ${String(ev.data.name ?? '')}`,
-        text: humanizeToolInput(String(ev.data.name ?? ''), toolInput),
+        role: `tool · ${toolName}`,
+        toolName,
+        text: humanizeToolInput(toolName, toolInput),
       }]
       next.blocksRev = next.blocksRev + 1
-      const toolName = String(ev.data.name ?? '')
       if (FILE_TOOLS.has(toolName)) {
         const input = (ev.data.input ?? {}) as Record<string, unknown>
         const filePath = String(input.path ?? input.file_path ?? input.target ?? '')
@@ -360,15 +367,19 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'tool_result':
       next.private_textOpen = false
       next.private_thinkingOpen = false
-      next.blocks = [...next.blocks, {
-        key: `tr-${ev.seq}`,
-        kind: 'result',
-        role: `result · ${String(ev.data.name ?? '')}`,
-        // Prefer uiContent (display override) over the model-facing result, matching
-        // TUI semantics — e.g. ask_user_question shows the question + options here.
-        text: String(ev.data.uiContent ?? ev.data.result ?? ''),
-        isError: !!ev.data.isError,
-      }]
+      {
+        const toolName = String(ev.data.name ?? '')
+        next.blocks = [...next.blocks, {
+          key: `tr-${ev.seq}`,
+          kind: 'result',
+          role: `result · ${toolName}`,
+          toolName,
+          // Prefer uiContent (display override) over the model-facing result, matching
+          // TUI semantics — e.g. ask_user_question shows the question + options here.
+          text: String(ev.data.uiContent ?? ev.data.result ?? ''),
+          isError: !!ev.data.isError,
+        }]
+      }
       next.blocksRev = next.blocksRev + 1
       return next
     case 'phase':
@@ -649,7 +660,16 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'plan_mode':
       next.planMode = ev.data.state === 'planning' ? 'planning' : 'off'
       next.planRev = next.planRev + 1
+      if (next.planMode === 'planning') next.askMode = 'off'
       if (next.planMode !== 'planning') next.draftLive = null
+      return next
+    case 'ask_mode':
+      next.askMode = ev.data.state === 'asking' ? 'asking' : 'off'
+      if (next.askMode === 'asking') {
+        next.planMode = 'off'
+        next.draftLive = null
+        next.planRev = next.planRev + 1
+      }
       return next
     case 'user_question': {
       const raw = Array.isArray(ev.data.questions) ? (ev.data.questions as unknown[]) : []

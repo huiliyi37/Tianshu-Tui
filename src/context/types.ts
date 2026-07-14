@@ -201,6 +201,8 @@ export interface SessionMetadata {
   planModeState?: 'off' | 'planning'
   /** Relative path of the active plan draft while planModeState === 'planning'. */
   activePlanFilePath?: string | null
+  /** Ask Mode mirror — resume re-enters Ask when 'asking'. */
+  askModeState?: 'off' | 'asking'
   /**
    * 最近一次 run 结束的结构化停止原因（2026-07-07 观测缺口修复）。
    * 此前 StopReason 只走 debugLog/遥测——不开 RIVET_DEBUG 时事后无法区分

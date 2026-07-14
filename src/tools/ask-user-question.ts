@@ -84,6 +84,50 @@ export function renderAskUserQuestionText(questions: AskUserQuestionItem[]): str
   return blocks.join('\n\n')
 }
 
+/** Per-question draft answer — mirrors desktop QuestionCard DraftAnswer. */
+export interface AskAnswerDraft {
+  /** Selected option indices. */
+  selected: number[]
+  /** Free-text "Other…" was chosen. */
+  otherSelected: boolean
+  otherText: string
+  /** User skipped this question. */
+  skipped: boolean
+}
+
+const SKIPPED_ALL = '(skipped all questions)'
+
+/** Convert a single draft into an answer string (options joined by ；). */
+export function draftToAnswer(draft: AskAnswerDraft, options: string[]): string | null {
+  if (draft.skipped) return null
+  const parts = draft.selected.map((i) => options[i]).filter((o): o is string => !!o)
+  if (draft.otherSelected && draft.otherText.trim()) parts.push(draft.otherText.trim())
+  if (parts.length === 0) return null
+  return parts.join('；')
+}
+
+/**
+ * Compose all drafts into a single user-message string — parity with desktop
+ * QuestionCard.submitAll:
+ * - multi-question: `${prompt} → ${answer}` lines joined by `\n`
+ * - single question: just the answer text
+ * - all skipped: SKIPPED_ALL placeholder
+ */
+export function composeAnswers(
+  questions: AskUserQuestionItem[],
+  drafts: AskAnswerDraft[],
+  skippedAllLabel: string = SKIPPED_ALL,
+): string {
+  const lines: string[] = []
+  questions.forEach((q, i) => {
+    const d = drafts[i] ?? { selected: [], otherSelected: false, otherText: '', skipped: true }
+    const answer = draftToAnswer(d, q.options)
+    if (answer) lines.push(questions.length > 1 ? `${q.prompt} → ${answer}` : answer)
+  })
+  if (lines.length === 0) return skippedAllLabel
+  return lines.join('\n')
+}
+
 export const ASK_USER_QUESTION_TOOL: Tool = {
   definition: {
     name: 'ask_user_question',
@@ -137,8 +181,9 @@ Do NOT use this to bounce a decision back when the user asked for YOUR analysis,
     //            additionally receives a structured user_question SSE for the card).
     const rendered = renderAskUserQuestionText(questions)
     const hasOptions = questions.some(q => q.options.length > 0)
-    // Surface selectable questions to the TUI so it can open an arrow-key picker.
-    const hasSelectable = questions.some(q => q.options.length > 0 && !q.allowMultiple)
+    // Surface selectable questions to the TUI so it can open an arrow-key picker
+    // (including multi-select and multi-question forms).
+    const hasSelectable = questions.some(q => q.options.length > 0)
     if (hasSelectable) {
       params.onAskUserQuestion?.({ questions })
     }

@@ -26,6 +26,7 @@
   "speechFailed": "语音识别失败",
   "computerMentionDesc": "操作 macOS 桌面应用（截图/点击/键入）",
   "planToggleTitle": "Shift+Tab 切换 Plan / Agent 模式",
+  "modeToggleTitle": "循环切换 Agent → Plan → Ask 模式",
   "sendModeEnter": "Enter 发送 · Shift+Enter 换行（点击切换）",
   "sendModeShiftEnter": "Shift+Enter 发送 · Enter 换行（点击切换）",
   "loading": "加载中…",
