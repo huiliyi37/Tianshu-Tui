@@ -12,9 +12,10 @@
  *   root package (flat layout) next to the bundle.
  *
  * Platform note: esbuild / @ast-grep list every platform binary as an
- *   optionalDependency, but npm only installs the host one. We copy "what's
- *   actually installed", so the staged tree is naturally host-arch-specific —
- *   matching the bundled Node runtime fetched for the same target.
+ *   optionalDependency. We copy only packages matching the *target* arch
+ *   (`TAURI_ENV_TARGET_TRIPLE` / host fallback) so each packaged .app stays
+ *   single-arch. Foreign-arch optional deps present in node_modules (from a
+ *   previous cross-build ensure step) are skipped.
  *
  * better-sqlite3: we stage ONLY the pure-JS wrapper (lib/ + package.json), NOT
  * the full ~27MB package. The native binary is shipped separately by
@@ -32,6 +33,7 @@ import { existsSync, mkdirSync, cpSync, readFileSync, rmSync, statSync, readdirS
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+import { isForeignPlatformPackage } from './runtime-platform-filter.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '..')
@@ -112,11 +114,20 @@ const visited = new Set()
 const queue = [...ROOTS]
 const missing = []
 let copied = 0
+let skippedForeign = 0
+const keepArchRaw = resolveTargetArch()
+/** @type {'arm64'|'x64'} */
+const keepArch = keepArchRaw === 'arm64' ? 'arm64' : 'x64'
 
 while (queue.length > 0) {
   const name = queue.shift()
   if (visited.has(name)) continue
   visited.add(name)
+
+  if (isForeignPlatformPackage(name, keepArch)) {
+    skippedForeign++
+    continue
+  }
 
   const src = pkgDir(name)
   if (!src) {
@@ -152,7 +163,13 @@ function dirSizeMb(dir) {
 if (missing.length > 0) {
   console.error('⚠ stage-runtime-deps: missing root packages (features will degrade): %s', missing.join(', '))
 }
-console.log('✅ Staged %d runtime packages (%dMB) → dist/node_modules', copied, dirSizeMb(destModules))
+console.log(
+  '✅ Staged %d runtime packages (%dMB, keep=%s, skippedForeign=%d) → dist/node_modules',
+  copied,
+  dirSizeMb(destModules),
+  keepArch,
+  skippedForeign,
+)
 
 // ── better-sqlite3: lean JS wrapper + zero-degrade load assertion ──
 stageBetterSqlite3Wrapper()

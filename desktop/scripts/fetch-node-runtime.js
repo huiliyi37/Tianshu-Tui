@@ -16,7 +16,7 @@
  *                  the checksum guard below still verifies against official hashes.
  */
 
-import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, cpSync, copyFileSync, chmodSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync, cpSync, copyFileSync, chmodSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { get } from 'node:https'
@@ -339,6 +339,26 @@ async function main() {
 
   // Clean up.
   rmSync(tmpDir, { recursive: true, force: true })
+
+  // Single-arch policy: each package must only ship the Node we just fetched.
+  // Leftover sibling dirs from a previous --target build would otherwise be
+  // copied wholesale into every .app via tauri.conf.json resources mapping.
+  const resourcesNode = join(__dirname, '..', 'src-tauri', 'resources', 'node')
+  if (existsSync(resourcesNode)) {
+    const keepDir = `${platform}-${arch}`
+    for (const name of readdirSync(resourcesNode)) {
+      if (name === '.gitkeep' || name === keepDir) continue
+      const victim = join(resourcesNode, name)
+      try {
+        if (statSync(victim).isDirectory()) {
+          rmSync(victim, { recursive: true, force: true })
+          console.log(`[fetch-node-runtime] pruned sibling runtime ${name}`)
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 
   console.log(`[fetch-node-runtime] ready ${binaryPath}`)
 }

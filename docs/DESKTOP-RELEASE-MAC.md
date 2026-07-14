@@ -6,7 +6,7 @@
 ## TL;DR
 
 ```bash
-bash desktop/scripts/build-mac.sh both      # arm64 + Intel 一起打
+bash desktop/scripts/build-mac.sh both      # arm64 + Intel 各打一份（各自单架构）
 bash desktop/scripts/build-mac.sh arm64     # 只打 Apple Silicon
 bash desktop/scripts/build-mac.sh x64        # 只打 Intel
 ```
@@ -14,14 +14,18 @@ bash desktop/scripts/build-mac.sh x64        # 只打 Intel
 产物：
 ```
 desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/
-  ├── macos/Tianshu.app
+  ├── macos/Tianshu.app          # 仅 darwin-arm64 Node / native
   └── dmg/Tianshu_<ver>_aarch64.dmg
 desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/
-  ├── macos/Tianshu.app
+  ├── macos/Tianshu.app          # 仅 darwin-x64 Node / native
   └── dmg/Tianshu_<ver>_x64.dmg
 ```
 
 前置：`rustup target add x86_64-apple-darwin aarch64-apple-darwin`、Node **24.1.0**。
+
+**包体政策（2026-07-14）：** 每个 `.app` / DMG **只含目标架构**的 Node、esbuild、@ast-grep。  
+不再把双架构原生打进同一包（旧政策会把 `.app` 撑到 ~370MB，其中 `node-runtime` alone 224MB）。  
+Intel 与 Apple Silicon **分开构建、分开分发**。
 
 ## 为什么之前的 Intel 包是坏的（根因）
 
@@ -29,7 +33,7 @@ desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/
 
 | 原生件 | 位置 | 之前的问题 |
 |--------|------|-----------|
-| Node sidecar 运行时 | `resources/node/darwin-<arch>/node` | 无问题（两架构都打进包，`lib.rs` 按运行架构自选） |
+| Node sidecar 运行时 | `resources/node/darwin-<arch>/node` | `resources/node` 累加两套后整树进包；现已在 fetch 后 prune 异架构 |
 | **better-sqlite3** | `dist/native/better_sqlite3.node` | **单文件、无架构区分**。`pack-native.js` 直接拷宿主 `node_modules` 的二进制。M1 上就是 arm64 → 塞进 Intel 包 → Intel 机 sidecar(x64 node) 加载失败 → 退化 nullDb（跨会话知识/claims/registry 静默失能），严重时 sidecar 直接崩 |
 | esbuild / @ast-grep napi | `dist/node_modules/@esbuild/*`、`@ast-grep/napi-darwin-*` | 宿主 `npm install` 只装宿主架构 → Intel 包里是 arm64 → 对应工具在 Intel 机报错 |
 
@@ -38,22 +42,14 @@ M1 上 `tauri build --target x86_64-apple-darwin` 打出来的 Intel 包混入�
 
 ## 修复（已落地）
 
-1. **`desktop/scripts/fetch-node-runtime.js`**：新增 `resolveTargetTriple()`，按
-   `TAURI_ENV_TARGET_TRIPLE`（Tauri 每次 build 都设）拉/校验**目标架构**的 Node，
-   而非宿主。
-2. **`scripts/pack-native.js`**：目标架构 ≠ 宿主时，走 `prebuild-install --arch
-   <目标> --target <目标 Node 版本>` 拉对应架构 + ABI 的 `better_sqlite3.node`，
-   打包后读 Mach-O 头校验架构（fail-closed）。拉取用临时替换 + 还原，不污染宿主
-   `node_modules`。ABI 正确性由 `--target` 保证（跨架构无法 `require` 探测）。
-3. **`scripts/stage-runtime-deps.js`**：跨架构时跳过「宿主 require round-trip」断言
-   （宿主进程加载不了异架构 .node），改为 Mach-O 架构校验。
-4. **`desktop/scripts/build-mac.sh`**：非破坏式补齐**两个架构**的 esbuild /
-   @ast-grep 平台包（直接解 tarball，不动 npm 依赖树——`npm i --cpu/--os` 会把宿主
-   架构包删掉），两架构原生同时打进每个包，运行时由各自 JS loader 按 arch 自选。
+1. **`desktop/scripts/fetch-node-runtime.js`**：按 `TAURI_ENV_TARGET_TRIPLE` 拉目标架构 Node；成功后 **prune** `resources/node` 下其他 `*-*` 目录。
+2. **`scripts/pack-native.js`**：目标架构 ≠ 宿主时，走 `prebuild-install --arch <目标> --target <目标 Node 版本>` 拉对应架构 + ABI 的 `better_sqlite3.node`，打包后读 Mach-O 头校验架构（fail-closed）。
+3. **`scripts/stage-runtime-deps.js`**：跳过异架构 optional 平台包（`isForeignPlatformPackage`）；跨架构时 SQLite 断言改 Mach-O 校验。
+4. **`desktop/scripts/build-mac.sh`**：每个 target 只 ensure **本架构** esbuild/ast-grep；`tauri build` 后对 `.app` 跑 `prune-bundle-arch.js` + `assert-bundle-arch.js`。
+5. **`desktop/scripts/prune-bundle-arch.js` / `assert-bundle-arch.js`**：删/断言异架构 Node 与原生平台包。
 
-> 关键坑：`npm install --cpu=x64 --os=darwin @esbuild/darwin-x64` 会把
-> `@esbuild/darwin-arm64` 当作「不匹配目标」**删掉**。要两架构共存必须绕开 npm
-> 依赖树解析（`npm pack` + 手动解包）。
+> 注意：开发机 `node_modules` 里仍可同时存在两套平台包（方便切 target）。  
+> **打进 `.app` 的只有目标套**——靠 stage 过滤 + 打包后 prune/assert。
 
 ## DMG 打包方式
 
@@ -75,11 +71,21 @@ M1 上 `tauri build --target x86_64-apple-darwin` 打出来的 Intel 包混入�
   要彻底免这步，须配 Developer ID + `APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID` 走
   `sign-and-build.sh` 的公证路径。
 
-## 验证产物架构
+## 验证产物架构（单架构）
 
 ```bash
+# Apple Silicon 包
+app=desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Tianshu.app
+file "$app/Contents/MacOS/tianshu-desktop"                              # arm64
+file "$app/Contents/Resources/rivet-runtime/native/better_sqlite3.node"  # arm64
+ls   "$app/Contents/Resources/node-runtime/"                            # 仅 darwin-arm64
+ls   "$app/Contents/Resources/rivet-runtime/node_modules/@esbuild/"     # 仅 darwin-arm64
+node desktop/scripts/assert-bundle-arch.js "$app/Contents/Resources" aarch64-apple-darwin
+
+# Intel 包对称
 app=desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/Tianshu.app
-file "$app/Contents/MacOS/tianshu-desktop"                              # 应为 x86_64
-file "$app/Contents/Resources/rivet-runtime/native/better_sqlite3.node"  # 应为 x86_64
-ls   "$app/Contents/Resources/node-runtime/"                            # darwin-arm64 + darwin-x64
+ls   "$app/Contents/Resources/node-runtime/"                            # 仅 darwin-x64
+node desktop/scripts/assert-bundle-arch.js "$app/Contents/Resources" x86_64-apple-darwin
 ```
+
+预期体积：`node-runtime` ≈ **110MB**（不再 224MB）；整个 `.app` 较旧双架构包下降 **≥100MB**。
