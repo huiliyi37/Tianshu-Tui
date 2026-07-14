@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { listMcpServerTools, getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
 import { openExternal } from '../lib/open-external'
 import type { McpStatusResponse, McpServerConfig, McpConnectionState, McpPreset, McpServerToolsResponse } from '../runtime/types'
@@ -58,7 +59,7 @@ interface McpSettingsProps {
   presets: McpPreset[] | null
   /** 已在 config 中配置的预设 id（用于标注"已添加"）。 */
   configuredIds: string[]
-  onAdd: (config: McpServerConfig) => void
+  onAdd: (config: McpServerConfig) => Promise<void>
   onRemove: (serverId: string) => void
   onRestart: (serverId: string) => void
 }
@@ -71,12 +72,13 @@ function PresetCard({
 }: {
   preset: McpPreset
   configured: boolean
-  onAdd: (config: McpServerConfig) => void
+  onAdd: (config: McpServerConfig) => Promise<void>
 }) {
   const { t } = useTranslation('settings')
   const needsKeys = (preset.requiredEnv?.length ?? 0) > 0
   const [expanded, setExpanded] = useState(false)
   const [env, setEnv] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
 
   const buildConfig = (): McpServerConfig => ({
     serverId: preset.id,
@@ -88,10 +90,23 @@ function PresetCard({
 
   const allFilled = (preset.requiredEnv ?? []).every((f) => (env[f.key] ?? '').trim().length > 0)
 
+  const handleConfirm = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      await onAdd(buildConfig())
+      setExpanded(false)
+    } catch (err) {
+      toast.error(t('mcp.addFailed', { error: (err as Error).message }))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onCardClick = () => {
-    if (configured) return
+    if (configured || busy) return
     if (needsKeys) setExpanded((v) => !v)
-    else onAdd(buildConfig())
+    else handleConfirm()
   }
 
   return (
@@ -127,10 +142,11 @@ function PresetCard({
           <div className="form-actions">
             <button
               className="btn-mini"
-              disabled={!allFilled}
-              onClick={() => { onAdd(buildConfig()); setExpanded(false) }}
+              type="button"
+              disabled={!allFilled || busy}
+              onClick={handleConfirm}
             >
-              {t('mcp.confirmEnable')}
+              {busy ? t('mcp.adding') : t('mcp.confirmEnable')}
             </button>
             <button className="btn-mini" onClick={() => setExpanded(false)}>{t('mcp.cancel')}</button>
             {preset.docsUrl && (
@@ -235,7 +251,7 @@ export function McpSettings({
       } else {
         config.url = url.trim()
       }
-      onAdd(config)
+      await onAdd(config)
       setShowAdd(false)
       setServerId('')
       setCommand('')
@@ -441,10 +457,9 @@ export function McpSettingsManager() {
     fetchStatus()
   }, [fetchStatus])
 
-  const handleAdd = useCallback((config: McpServerConfig) => {
-    addMcpServer(config)
-      .then(() => fetchStatus())
-      .catch((err) => setMcpError((err as Error).message))
+  const handleAdd = useCallback(async (config: McpServerConfig) => {
+    await addMcpServer(config)
+    await fetchStatus()
   }, [fetchStatus])
 
   const handleRemove = useCallback((serverId: string) => {

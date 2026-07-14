@@ -546,6 +546,7 @@
     "url": "URL",
     "urlPlaceholder": "e.g. http://localhost:3001/sse",
     "adding": "Adding…",
-    "add": "Add"
+    "add": "Add",
+    "addFailed": "Failed to add: {{error}}"
   }
 }

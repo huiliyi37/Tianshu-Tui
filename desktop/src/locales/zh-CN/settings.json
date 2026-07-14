@@ -546,6 +546,7 @@
     "url": "URL",
     "urlPlaceholder": "如: http://localhost:3001/sse",
     "adding": "添加中…",
-    "add": "添加"
+    "add": "添加",
+    "addFailed": "添加失败：{{error}}"
   }
 }
