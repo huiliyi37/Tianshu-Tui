@@ -324,19 +324,32 @@ export function runtimeBaseUrl(info: RuntimeInfo): string {
  * Low-level authed fetch against the sidecar. Shared by the REST helpers below
  * and the SSE stream reader (runtime/sse.ts) so the Bearer token lives in one
  * place. Throws on non-2xx (callers in this file check `res.ok`).
+ *
+ * Every request gets a default 15s timeout via AbortController so a hung
+ * sidecar (stuck event loop, deadlocked handler) doesn't leave the UI in a
+ * permanent loading state. Callers that need longer can pass their own signal
+ * via `init.signal` — it takes precedence over the default.
  */
 export async function rivetFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const info = await getRuntimeInfo()
   const headers = new Headers(init.headers)
   headers.set('Authorization', `Bearer ${info.token}`)
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  // Apply a default 15s timeout unless the caller provides its own signal
+  // (the SSE stream reader, for example, uses its own lifetime signal).
+  const mergedInit = { ...init }
+  if (!mergedInit.signal) {
+    const ac = new AbortController()
+    setTimeout(() => ac.abort(new DOMException('sidecar request timed out', 'TimeoutError')), 15_000)
+    mergedInit.signal = ac.signal
+  }
   let res: Response
   try {
-    res = await fetch(runtimeBaseUrl(info) + path, { ...init, headers })
+    res = await fetch(runtimeBaseUrl(info) + path, mergedInit)
   } catch (err) {
     // Port gone (sidecar down/restarted) — invalidate so the next call
     // re-resolves a fresh handle instead of retrying the dead one.
-    if (!(err instanceof Error && err.name === 'AbortError')) clearRuntimeCache()
+    if (!(err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError'))) clearRuntimeCache()
     throw err
   }
   // Token rotated after a sidecar restart — drop the stale handle; the caller's
