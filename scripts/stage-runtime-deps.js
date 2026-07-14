@@ -34,6 +34,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { isForeignPlatformPackage } from './runtime-platform-filter.js'
+import { pruneTreeSitterWasms } from './tree-sitter-wasm-keep.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '..')
@@ -163,6 +164,19 @@ function dirSizeMb(dir) {
 if (missing.length > 0) {
   console.error('⚠ stage-runtime-deps: missing root packages (features will degrade): %s', missing.join(', '))
 }
+
+// Wave B: ship only grammars meridian-parser actually loads (TS/Python/Go).
+const wasmOut = join(destModules, 'tree-sitter-wasms', 'out')
+const wasmPrune = pruneTreeSitterWasms(wasmOut)
+if (wasmPrune.removed.length > 0) {
+  console.log(
+    '✅ Pruned tree-sitter-wasms: kept %d, removed %d → %dMB',
+    wasmPrune.kept.length,
+    wasmPrune.removed.length,
+    dirSizeMb(join(destModules, 'tree-sitter-wasms')),
+  )
+}
+
 console.log(
   '✅ Staged %d runtime packages (%dMB, keep=%s, skippedForeign=%d) → dist/node_modules',
   copied,
