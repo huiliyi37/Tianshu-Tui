@@ -35,7 +35,7 @@
     "rivet": "dist/main.js"
   },
   "scripts": {
-    "postinstall": "patch-package || node -e 1",
+    "postinstall": "patch-package || node -e 1 && node scripts/install-git-hooks.mjs || node -e 1",
     "prepublishOnly": "npm run build",
     "dev": "tsup --watch",
     "build": "tsup",

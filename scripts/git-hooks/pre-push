@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Pre-push gate — run the root typecheck so a broken build never leaves this
+# machine. This is the exact check that would have caught commit bb97febd
+# (missing imports + a misplaced `await`): npm test passed because the server
+# tests use factory doubles that never exercised the broken serve-agent path,
+# but `tsc --noEmit` fails immediately.
+#
+# Fast by design (~8-30s): only the root typecheck runs here. The desktop
+# typecheck (~5min) and the full test suite are intentionally left out so the
+# hook stays cheap enough that nobody reaches for --no-verify out of habit.
+#
+# Bypass in a genuine emergency:   git push --no-verify
+# Disable everywhere (e.g. in CI): RIVET_SKIP_HOOKS=1
+set -euo pipefail
+
+if [ "${RIVET_SKIP_HOOKS:-}" = "1" ]; then
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[pre-push] npm run typecheck …"
+if ! npm run --silent typecheck; then
+  echo ""
+  echo "[pre-push] ✗ typecheck failed — push aborted."
+  echo "           Fix the errors above, or bypass with: git push --no-verify"
+  exit 1
+fi
+echo "[pre-push] ✓ typecheck clean — pushing"
