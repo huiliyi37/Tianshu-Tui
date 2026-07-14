@@ -60,12 +60,23 @@ describe('useUserScrollIntent', () => {
     assert.equal(api.userIntentUpRef.current, true)
   })
 
-  it('onScroll clears intent when returning near bottom', () => {
+  it('onScroll clears intent when returning near bottom by scrolling down', () => {
     const api = renderHook()
-    api.onWheel({ deltaY: -10 }, 100)
+    // Establish baseline, then scroll up away from bottom.
+    api.onScroll(200, false)
+    api.onScroll(150, false)
     assert.equal(api.userIntentUpRef.current, true)
-    api.onScroll(50, true)
+    // Scroll back down to near bottom: intent clears.
+    api.onScroll(180, true)
     assert.equal(api.userIntentUpRef.current, false)
+  })
+
+  it('onScroll keeps intent when scrolling up while still near bottom', () => {
+    const api = renderHook()
+    // Near bottom, then scroll up a little but still near bottom.
+    api.onScroll(80, true)
+    api.onScroll(40, true)
+    assert.equal(api.userIntentUpRef.current, true)
   })
 
   it('clearIntent resets the flag', () => {

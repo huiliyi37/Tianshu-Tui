@@ -40,15 +40,19 @@ export function useUserScrollIntent() {
   /**
    * Scroll event intent. Detects upward movement from any source (scrollbar drag,
    * touch, programmatic-but-user-initiated, etc.) by comparing scrollTop with the
-   * previous value. Clears intent when the user returns near the bottom.
+   * previous value. Clears intent only when the user scrolls back DOWN to near the
+   * bottom — if they are scrolling up while still in the near-bottom zone we keep
+   * the intent so auto-scroll does not fight the gesture.
    */
   const onScroll = useCallback((currentScrollTop: number, nearBottom: boolean) => {
-    if (currentScrollTop < lastScrollTopRef.current) {
-      userIntentUpRef.current = true
-    }
+    const prevScrollTop = lastScrollTopRef.current
     lastScrollTopRef.current = currentScrollTop
-    if (nearBottom) {
+    if (nearBottom && currentScrollTop > prevScrollTop) {
+      // Scrolling down back to the bottom: explicit clear wins.
       userIntentUpRef.current = false
+    } else if (currentScrollTop < prevScrollTop) {
+      // Any upward movement sets intent (including near-bottom upward nudges).
+      userIntentUpRef.current = true
     }
   }, [])
 

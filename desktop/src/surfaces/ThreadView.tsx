@@ -233,6 +233,8 @@ export function ThreadView(props: {
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
   const [navTick, setNavTick] = useState(0) // bumps on scroll → refresh navigator marker
+  const scrollRafRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null)
+  const pendingScrollRef = useRef<{ scrollTop: number; near: boolean }>({ scrollTop: 0, near: false })
 
   // Time-Travel Timeline Slider state
   const [rewindPoints, setRewindPoints] = useState<import('../runtime/client').RewindPoint[]>([])
@@ -468,7 +470,10 @@ export function ThreadView(props: {
   const scrollIntent = useUserScrollIntent()
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastScrollAtRef = useRef(0)
-  useEffect(() => () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }, [])
+  useEffect(() => () => {
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current)
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+  }, [])
   useEffect(() => {
     if (scrolledUp || rendered.length === 0) return
     const SCROLL_THROTTLE_MS = 100
@@ -501,12 +506,6 @@ export function ThreadView(props: {
     }
   }, [])
 
-  // Composer 拉长时保持底部对齐：用户未主动上滚时，随输入框高度增长自动滚到底。
-  useEffect(() => {
-    if (scrolledUp || rendered.length === 0) return
-    virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
-  }, [composerHeight, rendered.length, scrolledUp, virtualizer])
-
   // Track scroll position: when user scrolls into the "near bottom" zone,
   // clear the scrolled-up flag so auto-scroll resumes.
   const onScroll = useCallback(() => {
@@ -515,9 +514,18 @@ export function ThreadView(props: {
     const near = isNearBottom()
     scrollIntent.onScroll(scrollTop, near)
     setScrolledUp(!near)
-    setNavTick((t) => t + 1) // refresh navigator "current" marker
-    // Persist scroll position to store (throttled via rAF).
-    if (el) dispatch({ type: 'setScrollPosition', sessionId: session.id, scrollTop })
+    // Navigator marker and persisted scroll position only need frame-rate updates;
+    // batch them via rAF to avoid a React render / reducer dispatch on every wheel
+    // pixel and reduce jank while scrolling through long history.
+    pendingScrollRef.current = { scrollTop, near }
+    if (scrollRafRef.current === null) {
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null
+        const { scrollTop: st } = pendingScrollRef.current
+        setNavTick((t) => t + 1) // refresh navigator "current" marker
+        if (el) dispatch({ type: 'setScrollPosition', sessionId: session.id, scrollTop: st })
+      })
+    }
   }, [isNearBottom, dispatch, session.id, scrollIntent])
 
   // Wheel intent: set synchronously so the auto-scroll effect (which may run
