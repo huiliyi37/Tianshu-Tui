@@ -1283,7 +1283,10 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   }
 
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.
-  const version = process.env.npm_package_version ?? '2.9.0'
+  // RIVET_VERSION is injected at build time via tsup define (tsup.config.ts) so
+  // the packaged sidecar reports the real version. Falls back to
+  // npm_package_version (CLI `npm start` dev) then a placeholder.
+  const version = process.env.RIVET_VERSION ?? process.env.npm_package_version ?? '0.0.0-dev'
   // Event-loop lag telemetry: lets the desktop label a starved loop as
   // "service busy" instead of a phantom "connection interrupted".
   const loopHealth = new LoopHealthMonitor()

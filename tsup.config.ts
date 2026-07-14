@@ -1,5 +1,9 @@
 import { defineConfig, type Options } from 'tsup'
 import { builtinModules } from 'node:module'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const pkgVersion = require('./package.json').version as string
 
 // better-sqlite3 is kept `external` (below) and never imported as a bare
 // specifier at runtime — the live consumers (session-registry, meridian-db) load
@@ -12,6 +16,12 @@ export default defineConfig({
   entry: ['src/main.ts', 'src/workers/cpu-worker.ts'],
   format: ['esm'],
   target: 'node24',
+  // Inject the package version as a build-time constant so the packaged sidecar
+  // (spawned by Rust as `node main.js serve`, no npm env) reports the real
+  // version in /health instead of a hardcoded fallback.
+  define: {
+    'process.env.RIVET_VERSION': JSON.stringify(pkgVersion),
+  },
   // dts:false — 声明文件对 CLI 运行毫无用处，且 Windows 上对 100+ 文件生成 .d.ts
   // 会静默崩溃（exit=1 无任何报错）。若将来需要发布 npm 包，改为 true。
   dts: false,
