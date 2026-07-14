@@ -86,8 +86,8 @@ describe('buildStdioEnvWithNodePath', () => {
         getDefaultEnvironment: () => ({ PATH: 'C:\\Windows' }),
       },
     )
-    assert.ok(env.PATH.startsWith(`C:\\app;`))
-    assert.ok(env.PATH.includes('C:\\Users\\me'))
+    assert.ok(env.PATH?.startsWith(`C:\\app;`))
+    assert.ok(env.PATH?.includes('C:\\Users\\me'))
   })
 
   it('works when cfg.env is omitted', () => {
@@ -96,6 +96,6 @@ describe('buildStdioEnvWithNodePath', () => {
       platform: 'darwin',
       getDefaultEnvironment: () => ({ PATH: '/usr/bin' }),
     })
-    assert.ok(env.PATH.startsWith(join('/opt', 'node', 'bin') + ':'))
+    assert.ok(env.PATH?.startsWith(join('/opt', 'node', 'bin') + ':'))
   })
 })

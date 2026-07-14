@@ -1074,8 +1074,8 @@ export class TurnOrchestrator {
             // and abort as before — the user wants to stop.
             const abandonedResult = await Promise.race([
               batchPromise.then(
-                (v) => ({ resolved: true, value: v }),
-                (e) => ({ resolved: false, error: e }),
+                (v): { resolved: true; value: ExecuteBatchResult } => ({ resolved: true, value: v }),
+                (e): { resolved: false; error: unknown } => ({ resolved: false, error: e }),
               ),
               new Promise<{ resolved: false; error: unknown }>((resolve) =>
                 setTimeout(() => resolve({ resolved: false, error: err }), TOOL_ABORT_DRAIN_MS),

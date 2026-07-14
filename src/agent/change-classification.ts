@@ -307,7 +307,7 @@ export function createGitDiffProvider(
         cwd, encoding: 'utf-8', timeout: 5000,
       })
       const listed = result.status === 0
-        ? new Set(result.stdout.split('\n').filter(Boolean))
+        ? new Set(String(result.stdout).split('\n').filter(Boolean))
         : new Set<string>()
       for (const f of files) {
         if (!listed.has(f)) untracked.add(f)
@@ -327,7 +327,7 @@ export function createGitDiffProvider(
     const result = spawnGitSync(['-c', 'core.quotePath=false', 'diff', '-M', '--name-status', 'HEAD', '--', ...renameScope], {
       cwd, encoding: 'utf-8', timeout: 10_000,
     })
-    cachedNameStatus = result.status === 0 ? result.stdout : ''
+    cachedNameStatus = result.status === 0 ? String(result.stdout) : ''
     return cachedNameStatus
   }
 
@@ -337,7 +337,7 @@ export function createGitDiffProvider(
     const result = spawnGitSync(['-c', 'core.quotePath=false', 'diff', 'HEAD', '--', file], {
       cwd, encoding: 'utf-8', timeout: 10_000,
     })
-    return result.status === 0 ? result.stdout : ''
+    return result.status === 0 ? String(result.stdout) : ''
   }
 
   return { nameStatus, filePatch }

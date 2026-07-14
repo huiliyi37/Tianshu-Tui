@@ -74,18 +74,31 @@ export function gitEnv(cwd?: string): NodeJS.ProcessEnv {
 }
 
 /**
- * Synchronous git spawn. Returns the raw `SpawnSyncReturns<Buffer>` so callers
- * can access `.status`, `.stdout`, `.stderr` directly — same contract as
- * `child_process.spawnSync`.
+ * Synchronous git spawn. Always returns string stdout/stderr (encoding defaults
+ * to 'utf-8'). In Node 24, `spawnSync`'s return type uses `string | Buffer |
+ * NonSharedBuffer | null` for stdout/stderr — TS doesn't narrow on `encoding`,
+ * so we default encoding to 'utf-8' and assert the return type to avoid every
+ * caller needing `String(result.stdout)` coercion.
  */
 export function spawnGitSync(
   args: string[],
   opts?: SpawnSyncOptions,
-): ReturnType<typeof spawnSync> {
+): Omit<ReturnType<typeof spawnSync>, 'stdout' | 'stderr'> & {
+  stdout: string
+  stderr: string
+} {
   const cwd = typeof opts?.cwd === 'string' ? opts.cwd : undefined
   const command = resolveGitCommand(opts?.env)
   const env = { ...gitEnv(cwd), ...opts?.env }
-  return spawnSync(command, args, { ...opts, env, windowsHide: true })
+  return spawnSync(command, args, {
+    encoding: 'utf-8',
+    ...opts,
+    env,
+    windowsHide: true,
+  }) as Omit<ReturnType<typeof spawnSync>, 'stdout' | 'stderr'> & {
+    stdout: string
+    stderr: string
+  }
 }
 
 /**
@@ -117,8 +130,9 @@ export function execFileGit(
   const cwd = typeof opts?.cwd === 'string' ? opts.cwd : undefined
   const command = resolveGitCommand(opts?.env)
   const env = { ...gitEnv(cwd), ...opts?.env }
+  const mergedOpts = { ...opts, encoding: 'utf-8' as const, env, windowsHide: true }
   if (cb) {
-    return execFile(command, args, { ...opts, env, windowsHide: true }, cb)
+    return execFile(command, args, mergedOpts, cb)
   }
-  return execFile(command, args, { ...opts, env, windowsHide: true })
+  return execFile(command, args, mergedOpts)
 }
