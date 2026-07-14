@@ -9,9 +9,11 @@ import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
 import { AutonomyMenu } from './AutonomyMenu'
 import type { AutonomyLevel } from '../lib/autonomy'
 import { PlusMenu } from './PlusMenu'
-import { compressImage } from '../lib/image-compress'
+import { compressImage, compressImageFromDataUrl } from '../lib/image-compress'
 import i18n from '../i18n'
 import { isImageFile, isTextFile, isUnsupportedFile, formatUnsupportedFiles, detectImageMimeByMagic } from '../lib/file-types'
+import { isTauri } from '../lib/dialog'
+import { classifyAttachmentPath, makeFileMention, attachmentBasename } from '../lib/drop-attachments'
 
 // Composer (D2/D3) — message input with two autocompletes sharing one dropdown:
 //  - '@' anywhere → file mention picker; inserts a canonical `@file:<path>`
@@ -112,6 +114,7 @@ export interface ContextUsage {
 
 export const Composer = memo(function Composer(props: {
   sessionId: string
+  cwd: string
   value: string
   onChange: (v: string) => void
   busy: boolean
@@ -145,7 +148,7 @@ export const Composer = memo(function Composer(props: {
   onHistoryNext?: () => void
   activeDomainAccent?: string
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, effort, onSetEffort, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
+  const { sessionId, cwd, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, effort, onSetEffort, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
   const { t } = useTranslation('composer')
   const planning = planMode === 'planning'
 
@@ -621,6 +624,98 @@ export const Composer = memo(function Composer(props: {
     if (textFiles.length > 0) void inlineTextFiles(textFiles)
   }
 
+  // Tauri native drag-drop: the shell gives us absolute paths, so text files
+  // can be referenced as @file: mentions instead of inlined content.
+  const addImageFromPath = useCallback(async (path: string) => {
+    setAttachmentError(null)
+    if (images.length >= MAX_IMAGES) { setAttachmentError(t('imageErrorMax', { max: MAX_IMAGES })); return }
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const dataUrl = await invoke<string>('read_attachment_file', { path })
+      const mime = dataUrl.slice(5, dataUrl.indexOf(';')) || undefined
+      const compressed = await compressImageFromDataUrl(dataUrl, mime)
+      setImages(prev => [...prev, compressed.dataUrl])
+    } catch (err) {
+      setAttachmentError(t('imageErrorProcess'))
+    }
+  }, [images.length, t])
+
+  const addFileMentionsFromPaths = useCallback((paths: string[]) => {
+    const mentions = paths.map(p => makeFileMention(p, cwd))
+    if (mentions.length === 0) return
+    const suffix = mentions.join(' ')
+    const needsSpace = value.length > 0 && !value.endsWith(' ')
+    onChange(value ? `${value}${needsSpace ? ' ' : ''}${suffix} ` : `${suffix} `)
+  }, [cwd, value, onChange])
+
+  const handleAttachmentPaths = useCallback((paths: string[]) => {
+    setAttachmentError(null)
+    const imagePaths: string[] = []
+    const textPaths: string[] = []
+    const unsupportedPaths: string[] = []
+    for (const path of paths) {
+      const kind = classifyAttachmentPath(path)
+      if (kind === 'image') imagePaths.push(path)
+      else if (kind === 'text') textPaths.push(path)
+      else unsupportedPaths.push(path)
+    }
+    if (unsupportedPaths.length > 0) {
+      setAttachmentError(formatUnsupportedFiles(unsupportedPaths.map(p => ({ name: attachmentBasename(p), type: '' }))))
+    }
+    if (textPaths.length > 0) addFileMentionsFromPaths(textPaths)
+    for (const path of imagePaths) void addImageFromPath(path)
+  }, [addFileMentionsFromPaths, addImageFromPath])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: (() => void) | null = null
+    let disposed = false
+    void import('@tauri-apps/api/webview')
+      .then((m) => m.getCurrentWebview().onDragDropEvent((event) => {
+        if (disposed) return
+        const payload = event.payload as { type: 'enter' | 'over' | 'drop' | 'leave'; paths?: string[] }
+        if (payload.type === 'enter' || payload.type === 'over') {
+          setDragOver(true)
+        } else if (payload.type === 'leave') {
+          setDragOver(false)
+        } else if (payload.type === 'drop') {
+          setDragOver(false)
+          handleAttachmentPaths(payload.paths ?? [])
+        }
+      }))
+      .then((fn) => {
+        if (disposed) fn()
+        else unlisten = fn
+      })
+      .catch(() => { /* browser dev mode — ignore */ })
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [handleAttachmentPaths])
+
+  const openNativeFilePicker = useCallback(async () => {
+    if (images.length >= MAX_IMAGES) {
+      setAttachmentError(t('imageErrorMax', { max: MAX_IMAGES }))
+      return
+    }
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        multiple: true,
+        filters: [
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] },
+          { name: 'Text files', extensions: ['txt', 'md', 'json', 'js', 'jsx', 'ts', 'tsx', 'css', 'scss', 'html', 'yaml', 'yml', 'toml', 'py', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'rb', 'php', 'sh', 'bash', 'zsh', 'ps1', 'sql', 'log'] },
+        ],
+      })
+      if (selected === null) return
+      const paths = Array.isArray(selected) ? selected : [selected]
+      handleAttachmentPaths(paths)
+    } catch {
+      setAttachmentError(t('imageErrorProcess'))
+    }
+  }, [images.length, t, handleAttachmentPaths])
+
   const canSend = value.trim() || images.length > 0
 
   return (
@@ -755,7 +850,10 @@ export const Composer = memo(function Composer(props: {
         />
         <button
           className="btn ghost icon-btn"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            if (isTauri()) void openNativeFilePicker()
+            else fileInputRef.current?.click()
+          }}
           disabled={images.length >= MAX_IMAGES}
           title={t('selectFile')}
           aria-label={t('selectFile')}
@@ -780,7 +878,10 @@ export const Composer = memo(function Composer(props: {
             onSetPlanMode={onSetPlanMode}
             effort={effort}
             onSetEffort={onSetEffort}
-            onPickImage={() => fileInputRef.current?.click()}
+            onPickImage={() => {
+              if (isTauri()) void openNativeFilePicker()
+              else fileInputRef.current?.click()
+            }}
             imageDisabled={images.length >= MAX_IMAGES}
             commands={commands}
             onRunCommand={runCommand}

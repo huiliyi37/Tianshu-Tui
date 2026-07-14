@@ -105,6 +105,24 @@ function drawDownscaled(
   return canvas
 }
 
+async function compressSource(
+  src: string,
+  keepPng: boolean,
+  maxEdge: number,
+): Promise<CompressedImage> {
+  const img = await loadImage(src)
+  const natW = img.naturalWidth || img.width
+  const natH = img.naturalHeight || img.height
+  if (natW <= 0 || natH <= 0) throw new Error('Image has zero dimensions')
+  const target = computeTargetDimensions(natW, natH, maxEdge)
+  const canvas = drawDownscaled(img, target)
+  const mime = keepPng ? OUTPUT_PNG : OUTPUT_JPEG
+  const dataUrl = keepPng
+    ? canvas.toDataURL(OUTPUT_PNG)
+    : canvas.toDataURL(OUTPUT_JPEG, JPEG_QUALITY)
+  return { dataUrl, mime, width: canvas.width, height: canvas.height }
+}
+
 /**
  * Compress a file to a provider-safe data URL by rasterizing through a canvas.
  * PNG sources keep transparency (PNG output); everything else becomes JPEG.
@@ -116,17 +134,18 @@ export async function compressImage(
   maxEdge: number = MAX_EDGE,
 ): Promise<CompressedImage> {
   const src = await readFileAsDataURL(file)
-  const img = await loadImage(src)
-  const natW = img.naturalWidth || img.width
-  const natH = img.naturalHeight || img.height
-  if (natW <= 0 || natH <= 0) throw new Error('Image has zero dimensions')
-  const target = computeTargetDimensions(natW, natH, maxEdge)
-  const canvas = drawDownscaled(img, target)
-  // PNG sources may carry alpha; preserve it. Otherwise JPEG for size.
-  const keepPng = file.type === OUTPUT_PNG
-  const mime = keepPng ? OUTPUT_PNG : OUTPUT_JPEG
-  const dataUrl = keepPng
-    ? canvas.toDataURL(OUTPUT_PNG)
-    : canvas.toDataURL(OUTPUT_JPEG, JPEG_QUALITY)
-  return { dataUrl, mime, width: canvas.width, height: canvas.height }
+  return compressSource(src, file.type === OUTPUT_PNG, maxEdge)
+}
+
+/**
+ * Compress an existing data URL (e.g. from Tauri native file drop) to a
+ * provider-safe data URL. Used when the source is not a browser File object.
+ */
+export async function compressImageFromDataUrl(
+  dataUrl: string,
+  mimeHint?: string,
+  maxEdge: number = MAX_EDGE,
+): Promise<CompressedImage> {
+  const keepPng = mimeHint === OUTPUT_PNG || dataUrl.startsWith(`data:${OUTPUT_PNG};`)
+  return compressSource(dataUrl, keepPng, maxEdge)
 }

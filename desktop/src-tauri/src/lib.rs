@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 #[cfg(target_os = "windows")]
 use known_folders::{get_known_folder_path, KnownFolder};
 use rand::Rng;
@@ -314,6 +315,49 @@ fn set_window_glass(window: tauri::WebviewWindow, enabled: bool) {
     {
         let _ = (window, enabled);
     }
+}
+
+/// Read a user-dropped image file and return it as a base64 data URL.
+/// Used by the Composer when handling Tauri native drag-drop events, because
+/// the webview only receives absolute paths, not File objects.
+const MAX_ATTACHMENT_BYTES: u64 = 8 * 1024 * 1024;
+
+#[tauri::command]
+fn read_attachment_file(path: String) -> Result<String, String> {
+    let p = Path::new(&path);
+    if !p.is_absolute() {
+        return Err("Attachment path must be absolute".to_string());
+    }
+    if !p.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    let size = std::fs::metadata(&path)
+        .map(|m| m.len())
+        .map_err(|e| format!("Failed to stat {}: {}", path, e))?;
+    if size > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "File too large: {} (max {} MB)",
+            path,
+            MAX_ATTACHMENT_BYTES / 1024 / 1024
+        ));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
+
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => "application/octet-stream",
+    };
+
+    Ok(format!("data:{};base64,{}", mime, STANDARD.encode(&bytes)))
 }
 
 /// Pop out a thread into its own small companion window (Codex-style floating
@@ -1643,6 +1687,7 @@ pub fn run() {
             get_storage_options,
             apply_storage_location,
             set_window_glass,
+            read_attachment_file,
             focus_main_window,
             open_thread_window,
             pty::pty_spawn,

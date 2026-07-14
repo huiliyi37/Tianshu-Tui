@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-read-attachment-file"
+description = "Allows reading user-dropped image files and returning them as base64 data URLs for the Composer vision attachment pipeline."
+commands.allow = ["read_attachment_file"]

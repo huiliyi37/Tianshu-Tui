@@ -1297,6 +1297,7 @@ export function ThreadView(props: {
           )}
           <Composer
             sessionId={session.id}
+            cwd={session.cwd}
             value={input}
             onChange={setInput}
             busy={busy}
