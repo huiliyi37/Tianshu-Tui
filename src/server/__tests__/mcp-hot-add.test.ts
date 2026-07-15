@@ -53,7 +53,7 @@ test('POST /mcp/servers persists even when manager is null (startup race)', asyn
     let connected = false
     mgr['_connectServer'] = async (serverId) => {
       connected = true
-      return { client: {} as any, transport: { close: async () => {} }, serverId }
+      return { client: {} as any, transport: { close: async () => {} }, transportType: 'stdio', serverId }
     }
     mgr['_discoverTools'] = async () => [{
       name: 'search', description: 'Search', inputSchema: { type: 'object' as const, properties: {} },
@@ -70,7 +70,7 @@ test('POST /mcp/servers hot-connects and notifies onToolsReady when manager live
     const mgr = new McpManager({ enabled: true, servers: {} })
     mgr['_connectServer'] = async (serverId) => ({
       client: {} as any,
-      transport: { close: async () => {} },
+      transport: { close: async () => {} }, transportType: 'stdio',
       serverId,
     })
     mgr['_discoverTools'] = async () => [{

@@ -31,7 +31,7 @@ describe('McpManager', () => {
 
     mgr['_connectServer'] = async () => ({
       client: { listTools: async () => ({ tools: [] }) } as any,
-      transport: { close: async () => {} },
+      transport: { close: async () => {} }, transportType: 'stdio',
       serverId: 'echo',
     })
     mgr['_discoverTools'] = async () => [{
@@ -54,7 +54,7 @@ describe('McpManager', () => {
     let connected = false
     mgr['_connectServer'] = async () => {
       connected = true
-      return { client: {} as any, transport: { close: async () => {} }, serverId: 'off' }
+      return { client: {} as any, transport: { close: async () => {} }, transportType: 'stdio', serverId: 'off' }
     }
 
     await mgr.initialize()
@@ -68,7 +68,7 @@ describe('McpManager', () => {
 
     mgr['_connectServer'] = async () => ({
       client: {} as any,
-      transport: { close: async () => {} },
+      transport: { close: async () => {} }, transportType: 'stdio',
       serverId: 'echo',
     })
     mgr['_discoverTools'] = async () => [{
@@ -104,7 +104,7 @@ describe('McpManager', () => {
       async _connectServer(serverId: string): Promise<any> {
         return {
           serverId,
-          transport: { close: async () => {} },
+          transport: { close: async () => {} }, transportType: 'stdio',
           client: { listTools: () => new Promise(() => {}) },
         }
       }
@@ -133,7 +133,7 @@ describe('McpManager', () => {
 
     mgr['_connectServer'] = async (serverId: string) => ({
       serverId,
-      transport: { close: async () => {} },
+      transport: { close: async () => {} }, transportType: 'stdio',
       client: {
         listTools: async () => ({ tools: [{ name: 'slowTool', description: 'Slow', inputSchema: { type: 'object' as const, properties: {} } }] }),
         callTool: () => new Promise(() => {}),
@@ -164,7 +164,7 @@ describe('McpManager', () => {
     let closed = false
     mgr['_connectServer'] = async () => ({
       client: {} as any,
-      transport: { close: async () => { closed = true } },
+      transport: { close: async () => { closed = true } }, transportType: 'stdio',
       serverId: 'echo',
     })
     mgr['_discoverTools'] = async () => []
@@ -190,7 +190,7 @@ describe('McpManager', () => {
         connectedHeaders = (config as any).headers ?? {}
         return {
           client: {} as any,
-          transport: { close: async () => {} },
+          transport: { close: async () => {} }, transportType: 'stdio',
           serverId,
         }
       }
@@ -219,7 +219,7 @@ describe('McpManager', () => {
     }))
     mgr['_connectServer'] = async () => ({
       client: {} as any,
-      transport: { close: async () => {}, pid: 4242 },
+      transport: { close: async () => {}, pid: 4242 }, transportType: 'stdio',
       serverId: 'echo',
     })
     mgr['_discoverTools'] = async () => []
@@ -251,7 +251,7 @@ describe('McpManager', () => {
 
     mgr['_connectServer'] = async (serverId) => ({
       client: {} as any,
-      transport: { close: async () => {} },
+      transport: { close: async () => {} }, transportType: 'stdio',
       serverId,
     })
     mgr['_discoverTools'] = async () => [{
@@ -275,7 +275,7 @@ describe('McpManager', () => {
     let connects = 0
     mgr['_connectServer'] = async (serverId) => {
       connects++
-      return { client: {} as any, transport: { close: async () => {} }, serverId }
+      return { client: {} as any, transport: { close: async () => {} }, transportType: 'stdio', serverId }
     }
     mgr['_discoverTools'] = async () => []
     await mgr.initialize()
@@ -308,7 +308,7 @@ describe('McpManager', () => {
     const mgr = new McpManager(makeConfig())
     mgr['_connectServer'] = async (serverId) => ({
       client: {} as any,
-      transport: { close: async () => {} },
+      transport: { close: async () => {} }, transportType: 'stdio',
       serverId,
     })
     mgr['_discoverTools'] = async () => [{
