@@ -39,5 +39,6 @@ export const MCP_OAUTH_PROVIDERS: McpOAuthProvider[] = [
 
 /** Look up a provider by id. */
 export function findMcpOAuthProvider(id: string): McpOAuthProvider | undefined {
-  return MCP_OAUTH_PROVIDERS.find(p => p.id === id)
+  const lower = id.toLowerCase()
+  return MCP_OAUTH_PROVIDERS.find(p => p.id.toLowerCase() === lower)
 }

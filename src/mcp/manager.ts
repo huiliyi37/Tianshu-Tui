@@ -328,6 +328,28 @@ export class McpManager {
       transportOpts.getHeaders = async () => cfg.headers as Record<string, string>
     }
 
+    // Wire OAuth token to transport if configured.
+    if (cfg.auth?.type === 'oauth') {
+      const { findMcpOAuthProvider } = await import('./oauth/providers.js')
+      const { loadMcpOAuthToken, getMcpAccessToken } = await import('./oauth/connector.js')
+      const { resolveOAuthEnv, resolveOAuthHeaders } = await import('./oauth/inject.js')
+      const provider = findMcpOAuthProvider(cfg.auth.provider)
+      if (provider) {
+        const token = loadMcpOAuthToken(serverId)
+        if (token) {
+          // For stdio: inject token into environment variables.
+          // For remote (URL): inject token into Authorization header.
+          if (cfg.command) {
+            const oauthEnv = resolveOAuthEnv(provider.id, token)
+            transportOpts.getEnv = async () => oauthEnv
+          } else {
+            const oauthHeaders = resolveOAuthHeaders(provider.id, token)
+            transportOpts.getHeaders = async () => oauthHeaders
+          }
+        }
+      }
+    }
+
     // Factory handles Client creation, transport construction, and connect.
     const result = await withTimeout(
       createTransport(cfg, transportOpts),

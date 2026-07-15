@@ -60,7 +60,13 @@ export async function startMcpOAuth(
     provider: provider.id,
     scopes,
   }
-  tokenStore(serverId).save(token)
+  // Save metadata (provider, scopes) alongside the raw TokenData so
+  // loadMcpOAuthToken can reconstruct the full McpOAuthToken.
+  tokenStore(serverId).save({
+    ...token,
+    _provider: provider.id,
+    _scopes: scopes,
+  } as TokenData & { _provider: string; _scopes: string[] })
   return mcpToken
 }
 
@@ -86,23 +92,20 @@ export function hasMcpOAuthToken(serverId: string): boolean {
 
 /** Remove the OAuth token for a server (disconnect). */
 export function revokeMcpOAuth(serverId: string): void {
-  tokenStore(serverId).delete()
+  tokenStore(serverId).clear()
 }
 
 /** Load the stored OAuth token for a server (null if none or expired). */
 export function loadMcpOAuthToken(serverId: string): McpOAuthToken | null {
-  const data = tokenStore(serverId).load()
+  const data = tokenStore(serverId).load() as (TokenData & { _provider?: string; _scopes?: string[] }) | null
   if (!data) return null
-  // We store provider/scopes alongside the raw token in the store via a wrapper.
-  // For now, reconstruct from the raw token — provider info is not persisted
-  // in the raw TokenData. Return minimal valid token.
   if (data.expiresAt <= Date.now()) return null
   return {
     accessToken: data.accessToken,
     refreshToken: data.refreshToken,
     expiresAt: data.expiresAt,
-    provider: '',
-    scopes: [],
+    provider: data._provider ?? '',
+    scopes: data._scopes ?? [],
   }
 }
 
