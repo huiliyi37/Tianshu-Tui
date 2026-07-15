@@ -16,6 +16,9 @@ interface RewardAccumulator {
 const REWARD_CLOSURE_PREFIXES = [
   'reward_closure:routing_shadow:',
   'reward_closure:team_wave:',
+  // W4-D2/D3: worker episodes carry a verified (main-side write gate) outcome
+  // per worker model — highest-signal rows for future dispatch ranking.
+  'reward_closure:worker_episode:',
 ] as const
 
 function finiteReward(value: unknown): number | null {
@@ -34,10 +37,11 @@ function modelNamesForReward(record: RewardClosureRecord): string[] {
     return recommendedModel ? [recommendedModel] : []
   }
 
-  if (record.sourceKind === 'team_wave') {
+  if (record.sourceKind === 'team_wave' || record.sourceKind === 'worker_episode') {
     // Current team-wave reward closure stores only workerModelCount, not per-worker
     // model identities. Keep this branch explicit so future richer closures can be
-    // consumed without guessing from source keys or counts.
+    // consumed without guessing from source keys or counts. Worker episodes always
+    // carry a single workerModel.
     const workerModel = stringComponent(record.components, 'workerModel')
     return workerModel ? [workerModel] : []
   }
@@ -49,7 +53,7 @@ function parseRewardClosure(json: string): RewardClosureRecord | null {
   try {
     const parsed = JSON.parse(json) as Partial<RewardClosureRecord>
     if (parsed.schemaVersion !== 1) return null
-    if (parsed.sourceKind !== 'routing_shadow' && parsed.sourceKind !== 'team_wave') return null
+    if (parsed.sourceKind !== 'routing_shadow' && parsed.sourceKind !== 'team_wave' && parsed.sourceKind !== 'worker_episode') return null
     if (!parsed.components || typeof parsed.components !== 'object') return null
     if (finiteReward(parsed.reward) === null) return null
     return parsed as RewardClosureRecord

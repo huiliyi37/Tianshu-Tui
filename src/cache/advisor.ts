@@ -26,6 +26,20 @@ const PHASE_MULTIPLIERS: Record<string, number> = {
   deliver: 0.5,
 }
 
+/** W3-C3: one delay-compact decision with the inputs that produced it. */
+export interface DelayCompactDecision {
+  event: 'compact_delay_decision'
+  turn: number
+  tier: number
+  decision: 'delay' | 'allow'
+  /** Which branch produced the decision (protection formula / warmth / legacy / reactive). */
+  reason: 'reactive-tier' | 'protection' | 'warmth-hot' | 'pressure-allow' | 'legacy-hitrate' | 'legacy-warmth' | 'legacy-allow'
+  recentHitRate: number | null
+  estimatedTokens?: number
+  contextWindow?: number
+  protection?: number
+}
+
 export class CacheAdvisor {
   private readonly ghostRegistry: GhostRegistry
   private readonly behaviorLearner: CacheBehaviorLearner
@@ -35,6 +49,8 @@ export class CacheAdvisor {
   private readonly staticProfile: Pick<ProviderProfile, 'cacheType' | 'persistent'>
   private recentHitRate: number | null = null
   private currentTurn = 0
+  /** W3-C3 decision ledger listener — observe-only, never affects the decision. */
+  private delayDecisionListener: ((d: DelayCompactDecision) => void) | null = null
 
   constructor(config: CacheAdvisorConfig) {
     this.staticProfile = config.providerProfile
@@ -86,9 +102,28 @@ export class CacheAdvisor {
     this.thresholdController.adjust(this.recentHitRate ?? 0.5, metrics.turn)
   }
 
+  /** W3-C3: register the observe-only decision-ledger sink. */
+  setDelayDecisionListener(listener: (d: DelayCompactDecision) => void): void {
+    this.delayDecisionListener = listener
+  }
+
+  private emitDelayDecision(d: Omit<DelayCompactDecision, 'event' | 'turn' | 'recentHitRate'>): void {
+    try {
+      this.delayDecisionListener?.({
+        event: 'compact_delay_decision',
+        turn: this.currentTurn,
+        recentHitRate: this.recentHitRate,
+        ...d,
+      })
+    } catch { /* ledger is best-effort — never affect the decision */ }
+  }
+
   shouldDelayCompact(tier: number, ctx?: { estimatedTokens: number; contextWindow: number }): boolean {
     // Never delay reactive (tier 3+) or ceiling (tier 4)
-    if (tier >= 3) return false
+    if (tier >= 3) {
+      this.emitDelayDecision({ tier, decision: 'allow', reason: 'reactive-tier' })
+      return false
+    }
 
     // Track 4 显式权衡：cache miss 成本 vs 压缩收益。
     // 压缩后整段前缀作废 → miss 成本 ∝ hitRate（被缓存的输入占比）；
@@ -98,16 +133,31 @@ export class CacheAdvisor {
     if (ctx && ctx.contextWindow > 0 && this.recentHitRate !== null) {
       const pressure = Math.min(1, Math.max(0, ctx.estimatedTokens / ctx.contextWindow))
       const protection = this.recentHitRate * (1 - pressure)
-      if (protection >= 0.45) return true
-      if (this.warmthTracker.predict() === 'hot' && tier <= 1 && pressure < 0.5) return true
+      const base = { tier, estimatedTokens: ctx.estimatedTokens, contextWindow: ctx.contextWindow, protection }
+      if (protection >= 0.45) {
+        this.emitDelayDecision({ ...base, decision: 'delay', reason: 'protection' })
+        return true
+      }
+      if (this.warmthTracker.predict() === 'hot' && tier <= 1 && pressure < 0.5) {
+        this.emitDelayDecision({ ...base, decision: 'delay', reason: 'warmth-hot' })
+        return true
+      }
+      this.emitDelayDecision({ ...base, decision: 'allow', reason: 'pressure-allow' })
       return false
     }
 
     // Legacy fallback (no pressure context provided)
     // Delay watch/compact tier when cache is healthy
-    if (this.recentHitRate !== null && this.recentHitRate >= 0.8) return true
+    if (this.recentHitRate !== null && this.recentHitRate >= 0.8) {
+      this.emitDelayDecision({ tier, decision: 'delay', reason: 'legacy-hitrate' })
+      return true
+    }
     // Delay when warmth is hot and tier is only watch
-    if (this.warmthTracker.predict() === 'hot' && tier <= 1) return true
+    if (this.warmthTracker.predict() === 'hot' && tier <= 1) {
+      this.emitDelayDecision({ tier, decision: 'delay', reason: 'legacy-warmth' })
+      return true
+    }
+    this.emitDelayDecision({ tier, decision: 'allow', reason: 'legacy-allow' })
     return false
   }
 

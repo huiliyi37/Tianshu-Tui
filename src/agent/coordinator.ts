@@ -33,6 +33,8 @@ import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } fro
 import { saveWorkerSession, loadWorkerSession } from './worker-session-persist.js'
 import { WorkerLiveness, EXPLORE_STALL_MS, WRITE_STALL_MS } from './worker-liveness.js'
 import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
+import { buildWorkerEpisode } from './worker-episode.js'
+import { recordWorkerEpisodeClosure } from './reward-loop.js'
 import { WorktreeCoordinator } from './worktree-coordinator.js'
 import { classifyProfile } from './coordination-policy.js'
 import { aggregateResults } from './aggregation.js'
@@ -884,6 +886,27 @@ export class DelegationCoordinator {
     else health.recordFailure(providerId)
   }
 
+  /** W4-D3: persist one worker episode (+ derived reward closure when the
+   *  outcome is capability-attributable) into the shared routing-metrics
+   *  store. Shadow-first: rows only influence FUTURE dispatch ranking via
+   *  buildHistoricalModelRewards behind the efeRouting gate — never the
+   *  current task. Telemetry failures must never affect delegation. */
+  private recordWorkerEpisode(order: WorkOrder, handsRun: HandsSessionRun, model: string): void {
+    try {
+      const episode = buildWorkerEpisode({
+        order,
+        result: handsRun.result,
+        sessionId: this.config.sessionId ?? 'unknown',
+        model,
+        role: 'hands',
+        ...(handsRun.writeGate ? { writeGate: handsRun.writeGate } : {}),
+      })
+      recordWorkerEpisodeClosure(this.config.modelTierShadowStore, episode)
+    } catch {
+      // Episode telemetry is best-effort.
+    }
+  }
+
   /** Attach runtime model/provider/usage metadata to a worker result so that
    *  downstream insights panels can render per-delegation costs and routing. */
   private enrichResult(
@@ -1490,6 +1513,7 @@ export class DelegationCoordinator {
             },
           }))
           run = { result: handsRun.result, sessionMessages: handsSessionMessages, usage: handsRun.usage, providerName: workerConfig.providerName }
+          this.recordWorkerEpisode(order, handsRun, selected.model)
         } finally {
           if (this.config.sessionRegistry && this.config.sessionId) {
             for (const file of acquiredClaimFiles) {
@@ -1582,6 +1606,7 @@ export class DelegationCoordinator {
                   },
                 }))
                 run = { result: retryHandsRun.result, sessionMessages: retryHandsMessages, usage: retryHandsRun.usage, providerName: workerConfig.providerName }
+                this.recordWorkerEpisode(order, retryHandsRun, selected.model)
               } finally {
                 if (this.config.sessionRegistry && this.config.sessionId) {
                   for (const f of retryClaimFiles) this.config.sessionRegistry.releaseClaim(this.config.sessionId, f)
@@ -1710,6 +1735,7 @@ export class DelegationCoordinator {
                   },
                 }))
                 run = { result: handsRun.result, sessionMessages: retryHandsMessages, usage: handsRun.usage, providerName: upgradedConfig.providerName }
+                this.recordWorkerEpisode(order, handsRun, strongCard.model)
               } finally {
                 if (this.config.sessionRegistry && this.config.sessionId)
                   for (const f of retryClaimFiles)

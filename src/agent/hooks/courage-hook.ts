@@ -105,6 +105,14 @@ export function createCourageHook(config: CourageHookConfig = {}): PreTurnRuntim
           tier: constitutional ? 'constitutional' : 'operational',
           category: 'constitutional',
           content: constitutional ? CONSTITUTIONAL_HINT : RISK_HINT,
+          // W3-C2: the constitutional obligation demands a substantive read
+          // ("你读了哪个文件的哪几行") — adoption is observable as a read/grep
+          // within the window. The risk arm asks for a one-sentence TEXT
+          // statement, which has no unique tool signature — deliberately no
+          // expect there (伪 expect 禁止).
+          ...(constitutional
+            ? { expect: { kind: 'tool_appears' as const, tools: ['read_file', 'read_section', 'grep'], withinTurns: 2 } }
+            : {}),
         })
       } else {
         ctx.effects.injectUserMessage(constitutional ? CONSTITUTIONAL_HINT : RISK_HINT)

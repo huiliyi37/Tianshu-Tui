@@ -66,6 +66,11 @@ export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntime
             tier: 'operational',
             category: 'discipline',
             content: fullMessage,
+            // W3-C2: adoption = the stagnation deadlock breaks. `tools: []`
+            // is the documented "any tool call counts" reverse predicate
+            // (advisory-bus.ts:29-30) — kick fires exactly when the loop has
+            // stalled, so any subsequent tool activity is the adoption signal.
+            expect: { kind: 'tool_appears', tools: [], withinTurns: 2 },
           })
         } else {
           ctx.effects.injectUserMessage(fullMessage)

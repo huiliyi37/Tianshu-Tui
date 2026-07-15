@@ -115,7 +115,8 @@ describe('dream-hook', () => {
     // gate 缺席：回调不转发 → 直写分支，缓冲为空
     const withoutGate: KnowledgeCandidate[] = []
     const hooksNoGate = createDefaultRuntimeHooks({ ...baseDeps, dream: dreamDeps(withoutGate) })
-    await hooksNoGate.find(h => h.name === 'dream-distill')!.run({} as never)
+    const noGateHook = hooksNoGate.find(h => h.name === 'dream-distill')!
+    await (noGateHook.run as (ctx: unknown) => Promise<void> | void)({})
     await flushImmediates()
     assert.equal(withoutGate.length, 0, 'no gate = no consumer, dream keeps direct write')
 
@@ -131,7 +132,8 @@ describe('dream-hook', () => {
         complete: async () => '[]',
       },
     })
-    await hooksWithGate.find(h => h.name === 'dream-distill')!.run({} as never)
+    const withGateHook = hooksWithGate.find(h => h.name === 'dream-distill')!
+    await (withGateHook.run as (ctx: unknown) => Promise<void> | void)({})
     await flushImmediates()
     assert.equal(withGate.length, 1, 'assembled gate must receive dream candidates')
     assert.equal(withGate[0]!.origin, 'dream')

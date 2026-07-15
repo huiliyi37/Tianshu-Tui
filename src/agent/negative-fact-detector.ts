@@ -6,6 +6,9 @@
  * Principle: 有损观测不能证明不存在。
  * A lossy observation cannot support a negative conclusion.
  */
+// W1-A4: lossy marker list lives in lossy-markers.ts (single source of truth,
+// shared with lossy-observation-hook).
+import { isLossyObservation } from './lossy-markers.js'
 
 /** Patterns that match negative claims in tool output */
 const NEGATIVE_FACT_PATTERNS = [
@@ -24,16 +27,6 @@ const NEGATIVE_FACT_PATTERNS = [
   /\bno changes\b/i,
 ]
 
-/** Patterns that indicate the current observation is lossy (not full output) */
-const LOSSY_CONTENT_MARKERS = [
-  /^\[storm-collapsed:/,
-  /^\[tiered-summary:/,
-  /^\[collapsed /,
-  /\[output truncated:/,
-  /\[stdout truncated:/,
-  /\[stderr truncated:/,
-]
-
 export interface NegativeFactDetection {
   /** The suspected negative pattern that was matched */
   matched: string
@@ -47,14 +40,7 @@ export interface NegativeFactDetection {
  */
 export function detectNegativeFactInLossyResult(content: string): NegativeFactDetection | null {
   // Step 1: is this observation lossy?
-  let isLossy = false
-  for (const marker of LOSSY_CONTENT_MARKERS) {
-    if (marker.test(content)) {
-      isLossy = true
-      break
-    }
-  }
-  if (!isLossy) return null
+  if (!isLossyObservation(content)) return null
 
   // Step 2: does it contain a negative claim?
   for (const pattern of NEGATIVE_FACT_PATTERNS) {

@@ -1,4 +1,5 @@
 import { perMessageToolResultBudget, getToolBudget } from '../compact/constants.js'
+import { preserveRecoveryReference } from '../compact/recovery-ref.js'
 
 const PROTECTED_TOOLS = new Set(['read_file'])
 
@@ -38,7 +39,12 @@ export function enforcePerMessageBudget(
     if (!evictSet.has(i)) return r
     return {
       ...r,
-      content: `[budget-evicted: ${r.content.length} chars from ${r.toolName}. Use read_file with offset/limit to retrieve.]`,
+      // W1-A2: eviction replaces the whole content — the trailing [artifact:ID]
+      // recovery marker must survive so read_section can still recover it.
+      content: preserveRecoveryReference(
+        r.content,
+        `[budget-evicted: ${r.content.length} chars from ${r.toolName}. Use read_file with offset/limit to retrieve.]`,
+      ),
     }
   })
 }
@@ -78,7 +84,9 @@ export function enforceTurnReadBudget(
       ...tail,
     ].join('\n')
 
-    return { ...r, content: summary }
+    // Tail-5 usually carries the trailing marker already; the helper is a
+    // no-op then and only appends when the marker would otherwise be lost.
+    return { ...r, content: preserveRecoveryReference(r.content, summary) }
   })
 }
 
@@ -114,7 +122,8 @@ export function enforceContextPressureTruncation(
       `... ${omitted} lines omitted (context pressure: ${Math.round(usageRatio * 100)}% used). Use read_file with offset/limit for specific ranges. ...`,
     ].join('\n')
 
-    return { ...r, content: truncated }
+    // W1-A2: head-only preview drops the tail — restore the recovery marker.
+    return { ...r, content: preserveRecoveryReference(r.content, truncated) }
   })
 }
 
@@ -170,6 +179,14 @@ export function enforceToolTypeBudgets(
       const lineCount = lines.length
       const preview = lines.slice(0, 5).join('\n')
       content = `[budget-summarized: ${r.toolName} cumulative ${newCum} tokens (limit: ${budget.summarizeAfter}), ${lineCount} lines]\n${preview}\n... [remaining ${Math.max(0, lineCount - 5)} lines omitted — cumulative budget exceeded]`
+    }
+
+    // W1-A2: covers both the per-call slice branch (head-only) and the
+    // cumulative summary branch (head-5 preview) — either can drop the tail
+    // where the recovery marker lives. No-op when content is unchanged or the
+    // marker already survived (head+tail branch keeps tail-5).
+    if (content !== r.content) {
+      content = preserveRecoveryReference(r.content, content)
     }
 
     return { ...r, content }

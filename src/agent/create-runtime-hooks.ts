@@ -40,6 +40,7 @@ import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createEditFailureRecoveryHook } from './hooks/edit-failure-recovery-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
+import { createCompactionAmnesiaHook, type CompactionAmnesiaHookDeps } from './hooks/compaction-amnesia-hook.js'
 import { createPointerRegurgitationHook } from './hooks/pointer-regurgitation-hook.js'
 import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
@@ -278,6 +279,10 @@ export interface RuntimeHookDeps {
   /** computer_use 步骤时间线记录器 + postSession walkthrough 工件组装。
    *  缺省（无 ArtifactStore 通道）→ 不装 hook。 */
   walkthrough?: WalkthroughRecorderDeps
+
+  // ── W3-C1 压缩失忆 shadow 账本 ──
+  /** Shadow-only：不注入 prompt、不改行为，仅落行供离线分析。缺省不装 hook。 */
+  compactionAmnesia?: CompactionAmnesiaHookDeps
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -528,6 +533,14 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
   if (deps.advisoryBus) {
     hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // W3-C1 Compaction Amnesia (shadow): postTool hook — records unchanged-hash
+  // full re-reads within 10 turns after a compact. Never injects into the
+  // prompt; rows feed offline precision analysis only.
+  // Gated by RIVET_AMNESIA_SHADOW (default on; set to '0' to disable).
+  if (deps.compactionAmnesia && process.env.RIVET_AMNESIA_SHADOW !== '0') {
+    hooks.push(createCompactionAmnesiaHook(deps.compactionAmnesia))
   }
 
   // Pointer-Regurgitation: postTool hook — counts pointer-guard rejections

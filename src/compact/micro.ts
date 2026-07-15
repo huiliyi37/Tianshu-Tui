@@ -2,6 +2,7 @@ import type { OaiMessage } from '../api/oai-types.js'
 import { KEEP_RECENT_MESSAGES, CACHE_ANCHOR_MESSAGES, compactThresholds } from './constants.js'
 import { groupIntoRoundsOai } from '../context/rounds.js'
 import { collapseToolResult } from './context-collapse.js'
+import { ARTIFACT_MARKER_REGEX } from './recovery-ref.js'
 
 const CHARS_PER_TOKEN = 4
 
@@ -17,6 +18,10 @@ function compactToolMessage(
   msg: OaiMessage,
   contextWindow: number,
   turnAge?: number,
+  /** W1-A3: artifactId archived for this message at the compact boundary (pure data). */
+  recoveryRefId?: string,
+  /** True when a boundary archive pass ran (fail-open semantics apply). */
+  archiveRan?: boolean,
 ): { msg: OaiMessage; changed: boolean } {
   if (msg.role !== 'tool') return { msg, changed: false }
 
@@ -25,13 +30,26 @@ function compactToolMessage(
   if (turnAge != null && turnAge >= 4 && toolName) {
     const collapsed = collapseToolResult(toolName, msg.content, turnAge, contextWindow)
     if (collapsed) {
-      return { msg: { ...msg, content: collapsed.summary }, changed: true }
+      // Boundary-archived original: keep the recovery pointer on the summary
+      // (collapseToolResult itself only preserves markers already in content).
+      const summary = recoveryRefId && !collapsed.summary.includes(`[artifact:${recoveryRefId}]`)
+        ? `${collapsed.summary}\n[artifact:${recoveryRefId}]`
+        : collapsed.summary
+      return { msg: { ...msg, content: summary }, changed: true }
     }
   }
 
   const previewChars = Math.max(1_200, compactThresholds(contextWindow).toolResultMaxTokens)
   if (msg.content.length <= previewChars) return { msg, changed: false }
-  const stub = `<microcompacted tool_result original_chars="${msg.content.length}">\n${msg.content.slice(0, previewChars)}\n</microcompacted tool_result>`
+  const markerMatch = msg.content.match(ARTIFACT_MARKER_REGEX)
+  // Fail-open: when an archive pass ran but this marker-less message has no
+  // ref (save failed), keep the original — never cut unrecoverable content.
+  if (archiveRan && !markerMatch && !recoveryRefId) return { msg, changed: false }
+  const marker = markerMatch
+    ? markerMatch[0].trimEnd()
+    : recoveryRefId ? `[artifact:${recoveryRefId}]` : undefined
+  const tail = marker ? `\n${marker}` : ''
+  const stub = `<microcompacted tool_result original_chars="${msg.content.length}">\n${msg.content.slice(0, previewChars)}\n</microcompacted tool_result>${tail}`
   if (stub.length >= msg.content.length) return { msg, changed: false }
   return { msg: { ...msg, content: stub }, changed: true }
 }
@@ -106,6 +124,9 @@ export function microCompactOai(
   messages: OaiMessage[],
   contextWindow: number,
   estimatedTokens: number,
+  /** W1-A3: boundary-archived `message index → artifactId` (pure data; see
+   *  boundary-archive.ts). Absent for legacy callers — behavior unchanged. */
+  recoveryRefs?: ReadonlyMap<number, string>,
 ): { messages: OaiMessage[]; truncated: number } {
   const recentStart = Math.max(0, messages.length - KEEP_RECENT_MESSAGES)
 
@@ -116,7 +137,7 @@ export function microCompactOai(
     const isRecent = msgIdx >= recentStart
     const turnAge = turnAgeMap.get(msgIdx) ?? 0
 
-    const toolResult = compactToolMessage(msg, contextWindow, turnAge)
+    const toolResult = compactToolMessage(msg, contextWindow, turnAge, recoveryRefs?.get(msgIdx), recoveryRefs !== undefined)
     if (toolResult.changed) { compactedCount++; return toolResult.msg }
 
     if (!isRecent && msgIdx >= CACHE_ANCHOR_MESSAGES) {

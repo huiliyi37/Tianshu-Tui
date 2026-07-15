@@ -22,6 +22,39 @@ import { OutputStreamBudget } from './output-stream-budget.js'
  *  (recoverable via the artifact reference in the same message). */
 const SUCCESS_INLINE_LINES = 20
 
+/** Bounded raw-spool cap: recovery content is complete up to this many bytes
+ *  per stream. Beyond the cap the spool stops appending and the persisted raw
+ *  carries an explicit `[raw capture capped …]` note — never a false
+ *  "full output" claim. */
+const RAW_SPOOL_CAP_BYTES = 8 * 1024 * 1024
+
+/**
+ * W1-A1: bounded raw spool. The in-memory model preview truncates stdout to a
+ * 24KB tail once it crosses 32KB — that policy is unchanged. But persistence
+ * (rawPath / ArtifactStore) used to consume the SAME truncated buffer, so the
+ * head of large outputs was silently lost while the truncation note claimed
+ * "full output at rawPath below". The spool captures the stream from the first
+ * chunk, bounded at RAW_SPOOL_CAP_BYTES (head-retaining: appending stops at
+ * the cap), so recovery is complete within the cap and honest beyond it.
+ * Memory stays bounded — it never grows past the cap plus one chunk.
+ */
+class BoundedRawSpool {
+  private chunks: string[] = []
+  private bytes = 0
+  capped = false
+
+  append(text: string): void {
+    if (this.capped || text.length === 0) return
+    this.chunks.push(text)
+    this.bytes += Buffer.byteLength(text)
+    if (this.bytes >= RAW_SPOOL_CAP_BYTES) this.capped = true
+  }
+
+  content(): string {
+    return this.chunks.join('')
+  }
+}
+
 /** 一次性 flag：shell 降级警告只在 session 首次 bash 执行时注入一次。 */
 let _shellFallbackWarned = false
 
@@ -361,10 +394,15 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         emit: (text) => params.onOutput?.(text),
         maxVisible: 64 * 1024,
       })
+      // W1-A1: capture the raw stream (arrival order, both streams) BEFORE the
+      // in-memory preview truncation below — persistence must not consume the
+      // tail-truncated preview buffer.
+      const rawSpool = new BoundedRawSpool()
 
       child.stdout!.on('data', (data: Buffer) => {
         const text = stdoutDecoder.write(data)
         stdoutRawBytes += data.length
+        rawSpool.append(text)
         stdout += text
         uiOutput.push(text)
         if (stdout.length > 32_000) {
@@ -378,6 +416,7 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
       child.stderr!.on('data', (data: Buffer) => {
         const text = stderrDecoder.write(data)
         stderrRawBytes += data.length
+        rawSpool.append(text)
         stderr += text
         uiOutput.push(text)
         if (stderr.length > 32_000) {
@@ -391,6 +430,8 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         const stderrTail = stderrDecoder.end()
         stdout += stdoutTail
         stderr += stderrTail
+        rawSpool.append(stdoutTail)
+        rawSpool.append(stderrTail)
         uiOutput.push(stdoutTail)
         uiOutput.push(stderrTail)
         uiOutput.flush()
@@ -414,6 +455,22 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
           : ''
         const raw = truncNote + stderrNote + stdout + (stderr ? '\n' + stderr : '')
         const totalRawBytes = stdoutRawBytes + stderrRawBytes
+        // W1-A1: persistence consumes the spool (complete within the cap), not
+        // the tail-truncated preview buffer. Beyond the cap we declare honestly.
+        const capNote = rawSpool.capped
+          ? `[raw capture capped at ${RAW_SPOOL_CAP_BYTES} bytes (stream total ${totalRawBytes} bytes) — content beyond the cap was NOT captured]\n`
+          : ''
+        const persistedRaw = capNote + rawSpool.content()
+        // Persistence failure must degrade honestly (no rawPath, no silent loss
+        // claim) instead of rejecting the whole tool call.
+        const persistRawSafe = async (): Promise<string | undefined> => {
+          try {
+            return await persistRawOutput(params.toolUseId, persistedRaw)
+          } catch (e) {
+            debugLog(`[bash-raw-persist-failed] ${e instanceof Error ? e.message : String(e)}`)
+            return undefined
+          }
+        }
         const totalRawLines = raw.split('\n').length - (truncNote ? truncNote.split('\n').length - 1 : 0) - (stderrNote ? stderrNote.split('\n').length - 1 : 0)
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
@@ -484,7 +541,7 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
 
           if (!wrapInArtifact) {
             debugLog(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
-            const rawPath = await persistRawOutput(params.toolUseId, raw)
+            const rawPath = await persistRawSafe()
             const baseContent = buildModelOutput(modelBody, { ...meta, rawPath })
             const prefix = shellFallbackNote + (rereadWarn ? rereadWarn + '\n' : '')
             return {
@@ -506,7 +563,7 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
           const artifactId = await params.artifactStore.save({
             tool: 'bash',
             target: rawCommand,
-            rawContent: raw,
+            rawContent: persistedRaw,
             summary,
             sections,
           })
@@ -535,7 +592,7 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
           }
         }
 
-        const rawPath = await persistRawOutput(params.toolUseId, raw)
+        const rawPath = await persistRawSafe()
         const baseContent = buildModelOutput(modelBody, { ...meta, rawPath })
         return {
           content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,

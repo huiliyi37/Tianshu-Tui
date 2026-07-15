@@ -24,6 +24,8 @@ export interface ModelRoutingShadowDeps {
   getCurrentModel: () => string | undefined
   hasCurrentModelOverride: () => boolean
   getFallbackModel: () => string
+  /** W4-D2: latest main-loop verification status (EvidenceTracker), if any. */
+  getLatestVerificationOutcome?: () => 'passed' | 'failed' | 'blocked' | undefined
 }
 
 /**
@@ -61,6 +63,10 @@ export class ModelRoutingShadowController {
         selectedBy: this.deps.hasCurrentModelOverride() ? 'human' : 'config',
         legacyRouting,
         ...(efeRecommendation ? { efeRecommendedModel: efeRecommendation.model } : {}),
+        ...(() => {
+          const outcome = this.deps.getLatestVerificationOutcome?.()
+          return outcome ? { verificationOutcome: outcome } : {}
+        })(),
         sensorium: currentSensorium,
       })
       persistModelRoutingShadow(store, event)

@@ -75,6 +75,9 @@ export function createDedupGuardHook(deps: DedupGuardHookDeps): PostTurnRuntimeH
       const summary = head.slice(0, 150).replace(/\n/g, ' ').trim()
 
       // A1: route through advisory bus instead of injectUserMessage (prefix-cache safe)
+      // W3-C2 expect 审计：采纳信号是“下一轮文本不再重复”——文本级现象，
+      // 无唯一工具签名可核销（convergence 的 textRepetitionPenalty 已独立
+      // 度量重复度）。刻意不填 expect，避免伪采纳率。
       if (deps.advisoryBus) {
         deps.advisoryBus.submit({
           key: 'dedup-guard',

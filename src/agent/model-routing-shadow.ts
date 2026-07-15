@@ -20,6 +20,9 @@ export interface ModelRoutingShadowEvent {
   legacyRouterRecommendedModel?: string
   efeRecommendedModel?: string
   sensorium: Pick<Sensorium, 'complexity' | 'pressure' | 'confidence' | 'stability'>
+  /** W4-D2: latest main-loop verification status at record time. Feeds the
+   *  shadow reward's verificationPass; 'blocked' stays neutral. */
+  verificationOutcome?: 'passed' | 'failed' | 'blocked'
   reason: string
   timestamp: number
 }
@@ -37,6 +40,7 @@ export interface BuildModelRoutingShadowEventInput {
   selectedBy?: 'human' | 'config'
   legacyRouting?: LegacyRoutingRecommendation | null
   efeRecommendedModel?: string
+  verificationOutcome?: 'passed' | 'failed' | 'blocked'
   reason?: string
   timestamp?: number
 }
@@ -82,6 +86,7 @@ export function buildModelRoutingShadowEvent(input: BuildModelRoutingShadowEvent
     selectedBy: input.selectedBy ?? 'config',
     ...(input.legacyRouting ? { legacyRouterRecommendedModel: input.legacyRouting.model } : {}),
     ...(input.efeRecommendedModel ? { efeRecommendedModel: input.efeRecommendedModel } : {}),
+    ...(input.verificationOutcome ? { verificationOutcome: input.verificationOutcome } : {}),
     sensorium: {
       complexity: input.sensorium.complexity,
       pressure: input.sensorium.pressure,

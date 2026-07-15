@@ -23,11 +23,33 @@ const CVM_OVERHEAD_THRESHOLD = 0.05
 /** CVM overhead ceiling: hard stop at 8% — skip all non-essential injections. */
 const CVM_OVERHEAD_CEILING = 0.08
 
+/**
+ * W2-B1: egress metering source tags. Every injected request byte is charged
+ * at exactly ONE egress (no double counting):
+ *   - projection / ephemeral / tool-context — cognitive prep (appendixDelta
+ *     block semantics: charged only on byte change)
+ *   - advisory-appendix — AdvisoryBus rendered block (same block semantics)
+ *   - system-reminder — bus-drained SR appended to the session tail (K1
+ *     append-only: charged once per append)
+ *   - runtime-payload — runtime hook injectUserMessage payloads (K1
+ *     append-only: charged once per append)
+ */
+export type CvmInjectionSource =
+  | 'projection'
+  | 'ephemeral'
+  | 'tool-context'
+  | 'advisory-appendix'
+  | 'system-reminder'
+  | 'runtime-payload'
+
 export class PressureMonitor {
   private compactionTurns: number[] = []
   private tokenHistory: Array<{ turn: number; tokens: number }> = []
   /** Accumulated CVM-injected token estimate across this session. */
   private cvmTokenAccumulator = 0
+  /** W2-B1: per-source breakdown — values are CUMULATIVE session tokens.
+   *  Invariant: sum over sources === cvmTokenAccumulator. */
+  private cvmBySource = new Map<CvmInjectionSource, number>()
 
   constructor(private contextWindow: number) {}
 
@@ -77,13 +99,20 @@ export class PressureMonitor {
    * blocks from context, so compaction-controller calls resetCvmOverhead().
    * If the ratio exceeds thresholds, the next check() signals shouldThrottleCvm.
    */
-  recordCvmInjection(estimatedTokens: number): void {
+  recordCvmInjection(estimatedTokens: number, source: CvmInjectionSource = 'projection'): void {
     this.cvmTokenAccumulator += estimatedTokens
+    this.cvmBySource.set(source, (this.cvmBySource.get(source) ?? 0) + estimatedTokens)
+  }
+
+  /** W2-B1: cumulative per-source injection tokens (telemetry breakdown). */
+  getCvmInjectionBySource(): Readonly<Partial<Record<CvmInjectionSource, number>>> {
+    return Object.fromEntries(this.cvmBySource)
   }
 
   /** Reset CVM overhead counter (e.g., after checkpoint-resume). */
   resetCvmOverhead(): void {
     this.cvmTokenAccumulator = 0
+    this.cvmBySource.clear()
   }
 
   getCvmOverheadRatio(): number {

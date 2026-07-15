@@ -2,6 +2,11 @@ import { estimateOaiTokens } from '../compact/micro.js'
 import { compactStaleRoundsOai } from '../compact/stale-round.js'
 import { microCompactOai } from '../compact/micro.js'
 import { staleRoundThresholds } from '../compact/constants.js'
+import {
+  collectStaleArchiveCandidates,
+  collectMicroArchiveCandidates,
+  type ArchiveForRecovery,
+} from '../compact/boundary-archive.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
 import type { DangerSignal } from './immune-types.js'
 import { debugLog } from '../utils/debug.js'
@@ -75,6 +80,13 @@ export interface CompactBoundaryDeps {
   /** T9 trigger ratios from config; falls back to DEFAULT_QUALITY_COMPACT_THRESHOLDS. */
   getQualityThresholds?: () => QualityCompactThresholds
   injectImmuneSignal: (signal: DangerSignal) => void
+  /**
+   * W1-A3: archive originals of marker-less tool messages before a lossy
+   * rewrite. Returns `message index → artifactId`; failed saves are simply
+   * absent and the transforms keep those originals (fail-open). Optional —
+   * when absent, transforms behave exactly as before.
+   */
+  archiveForRecovery?: ArchiveForRecovery
 }
 
 export interface RunCompactionResult {
@@ -208,7 +220,17 @@ export class CompactBoundaryCoordinator {
 
           const before = this.deps.getMessages()
           const advisorPreview = this.deps.getStalePreviewChars()
-          const after = compactStaleRoundsOai(before, contextWindow, Math.max(advisorPreview, staleRoundThresholds(contextWindow).previewChars))
+          const previewChars = Math.max(advisorPreview, staleRoundThresholds(contextWindow).previewChars)
+          // W1-A3: archive marker-less originals BEFORE the lossy rewrite so the
+          // transform can attach recovery refs; failed saves stay intact.
+          let staleRefs: ReadonlyMap<number, string> | undefined
+          if (this.deps.archiveForRecovery) {
+            const candidates = collectStaleArchiveCandidates(before, contextWindow, previewChars)
+            staleRefs = candidates.length > 0
+              ? await this.deps.archiveForRecovery(candidates)
+              : new Map()
+          }
+          const after = compactStaleRoundsOai(before, contextWindow, previewChars, staleRefs)
           if (after !== before) {
             this.deps.replaceMessages(after)
             if (typeof globalThis.gc === 'function') globalThis.gc()
@@ -241,7 +263,15 @@ export class CompactBoundaryCoordinator {
         this.deps.setPendingHeapCompact(false)
         const before = this.deps.getMessages()
         const contextWindow = this.deps.getContextWindow()
-        const { messages: trimmed } = microCompactOai(before, contextWindow, this.deps.getEstimatedTokens())
+        // W1-A3: same archive-before-rewrite discipline for the heap micro-compact.
+        let microRefs: ReadonlyMap<number, string> | undefined
+        if (this.deps.archiveForRecovery) {
+          const candidates = collectMicroArchiveCandidates(before, contextWindow)
+          microRefs = candidates.length > 0
+            ? await this.deps.archiveForRecovery(candidates)
+            : new Map()
+        }
+        const { messages: trimmed } = microCompactOai(before, contextWindow, this.deps.getEstimatedTokens(), microRefs)
         if (trimmed.length < before.length || trimmed !== before) {
           this.deps.replaceMessages(trimmed)
           if (typeof globalThis.gc === 'function') globalThis.gc()

@@ -1,13 +1,8 @@
 import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES, staleRoundThresholds } from './constants.js'
-
-// Match an artifact marker at the END of the tool result content string.
-// All tools producing artifact refs MUST place "[artifact:XYZ]" as the last
-// token — any usage instructions, summaries, or other suffixes go BEFORE it.
-// See docs/superpowers/plans/2026-05-24-工具输出 artifact 标记格式统一与窗口感知预算.md.
-// We preserve this marker when truncating so the model can still call
-// read_section(artifactId=...) to retrieve the original content.
-const ARTIFACT_MARKER_REGEX = /\[artifact:([A-Za-z0-9_-]+)\]\s*$/
+// Marker-last contract and regex live in recovery-ref.ts (single source of
+// truth, shared with the budget-layer transforms in per-message-budget.ts).
+import { ARTIFACT_MARKER_REGEX } from './recovery-ref.js'
 
 /** OAI-format: truncate tool message content in stale rounds (N-2+).
  *
@@ -20,6 +15,15 @@ export function compactStaleRoundsOai(
   messages: OaiMessage[],
   contextWindow: number,
   previewCharsOverride?: number,
+  /**
+   * W1-A3: `message index → artifactId` map produced by the boundary archive
+   * adapter (see boundary-archive.ts). Pure data — this transform never
+   * touches ArtifactStore. When the map is provided, a marker-less message is
+   * only truncated if its original was archived (map has an entry); otherwise
+   * it is kept intact (fail-open). When the map is absent (legacy callers),
+   * behavior is unchanged.
+   */
+  recoveryRefs?: ReadonlyMap<number, string>,
 ): OaiMessage[] {
   const thresholds = staleRoundThresholds(contextWindow)
   const recentToKeep = thresholds.recentToKeep
@@ -35,12 +39,12 @@ export function compactStaleRoundsOai(
     if (msg.role !== 'tool') return msg
     if (msg.content.length <= previewChars) return msg
 
-    changed = true
     const artifactMatch = msg.content.match(ARTIFACT_MARKER_REGEX)
 
     if (artifactMatch) {
       // Preserve the artifact marker at the tail so the model can recover the
       // full content via read_section. Trim preview to leave room for marker.
+      changed = true
       const marker = artifactMatch[0]
       const removed = msg.content.length - previewChars
       const preview = msg.content.slice(0, previewChars)
@@ -50,6 +54,19 @@ export function compactStaleRoundsOai(
       }
     }
 
+    if (recoveryRefs) {
+      const refId = recoveryRefs.get(idx)
+      if (!refId) return msg // archive failed or skipped — keep original (fail-open)
+      changed = true
+      const removed = msg.content.length - previewChars
+      const preview = msg.content.slice(0, previewChars)
+      return {
+        ...msg,
+        content: `${preview}\n<stale-compacted removed_chars="${removed}" use_read_section_to_retrieve_full_content />\n[artifact:${refId}]`,
+      }
+    }
+
+    changed = true
     const preview = msg.content.slice(0, previewChars)
     return { ...msg, content: `${preview}\n<stale-compacted removed_chars="${msg.content.length - previewChars}" />` }
   })

@@ -59,6 +59,9 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
     if (inference) {
       const recommended = recommendModelForTask(inference.task, config.modelCards)
       if (recommended.model !== currentModel && config.onModelSwitch) {
+        // W4-D2 producer: attach the latest verification status so the routing
+        // event carries a real outcome signal (the field was previously never set).
+        const latestVerification = evidence.getState().verifications.at(-1)
         routingMetrics.record({
           turn: session.getTurnCount(),
           inferredTask: inference.task,
@@ -67,6 +70,7 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
           switched: true,
           reason: inference.reason,
           timestamp: Date.now(),
+          ...(latestVerification ? { verificationOutcome: latestVerification.status } : {}),
        })
         try { config.onModelSwitch(recommended.model) } catch { /* non-fatal */ }
      }

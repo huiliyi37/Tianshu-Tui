@@ -696,6 +696,22 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       getArtifactStore: () => self.artifactStore,
       sessionId: self.config.sessionId,
     },
+    // W3-C1 压缩失忆 shadow 账本：行落 cache-log.jsonl（event:'amnesia_shadow'），
+    // 与既有缓存指标同通道，离线分析共用一个读取面。
+    compactionAmnesia: {
+      getCompactEvents: () => self.session.getCompactEvents(),
+      record: row => {
+        try {
+          const sid = self.config.sessionId ?? 'anon'
+          const line = JSON.stringify({ ts: Date.now(), ...row })
+          import('node:fs/promises').then(fs => {
+            const dir = join(getSessionDir(self.cwd), sid)
+            return fs.mkdir(dir, { recursive: true })
+              .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+          }).catch(() => {})
+        } catch { /* shadow accounting is best-effort */ }
+      },
+    },
   })
 
   // I4: when any runtime hook throws, run user `onError` hooks and emit the
@@ -758,6 +774,28 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     getProviderName: () => self.config.providerName,
     getQualityThresholds: () => self.config.compact.qualityCompact ?? DEFAULT_QUALITY_COMPACT_THRESHOLDS,
     injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal) },
+    // W1-A3: boundary archive adapter — pure transforms receive only the
+    // resulting index→artifactId map; ArtifactStore stays out of micro/stale.
+    archiveForRecovery: async candidates => {
+      const out = new Map<number, string>()
+      const store = self.artifactStore
+      if (!store) return out
+      for (const c of candidates) {
+        try {
+          const id = await store.save({
+            tool: 'compact-archive',
+            target: c.toolCallId ?? `message-${c.index}`,
+            rawContent: c.content,
+            summary: c.content.slice(0, 160),
+            sections: [],
+          })
+          out.set(c.index, id)
+        } catch {
+          // fail-open: absent from the map → transform keeps the original
+        }
+      }
+      return out
+    },
   })
 }
 
@@ -1099,6 +1137,8 @@ export function createModelRoutingShadowController(self: AgentLoop): ModelRoutin
     getCurrentModel: () => self.config.getCurrentModel?.(),
     hasCurrentModelOverride: () => !!self.config.getCurrentModel,
     getFallbackModel: () => self.config.promptEngine.getModel(),
+    // W4-D2 producer: latest run_tests verification recorded by EvidenceTracker.
+    getLatestVerificationOutcome: () => self.evidence.getState().verifications.at(-1)?.status,
   })
 }
 

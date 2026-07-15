@@ -7,8 +7,10 @@ import type { TeamEpisode } from './team-episode.js'
 import { buildTeamEpisode, deriveTeamEpisodeRewardInput, persistTeamEpisode, teamEpisodeKey } from './team-episode.js'
 import { buildRoutingRewardRecord, type RoutingRewardInput } from './routing-reward.js'
 import { buildTeamWaveRewardRecord, deriveTeamWaveRewardInput } from './team-reward.js'
+import type { WorkerEpisode } from './worker-episode.js'
+import { deriveWorkerEpisodeRewardInput, persistWorkerEpisode, workerEpisodeKey } from './worker-episode.js'
 
-export type RewardSourceKind = 'routing_shadow' | 'team_wave' | 'team_episode'
+export type RewardSourceKind = 'routing_shadow' | 'team_wave' | 'team_episode' | 'worker_episode'
 
 export interface RewardClosureRecord {
   schemaVersion: 1
@@ -102,6 +104,10 @@ function routingRewardInputFromEvent(event: ModelRoutingShadowEvent): RoutingRew
   return {
     currentModel: event.currentModel,
     recommendedModel: event.efeRecommendedModel ?? event.legacyRouterRecommendedModel,
+    // W4-D2: main-loop verification outcome flows into the shadow reward.
+    // 'blocked' stays undefined — environment-neutral, never a capability signal.
+    ...(event.verificationOutcome === 'passed' ? { verificationPass: true } : {}),
+    ...(event.verificationOutcome === 'failed' ? { verificationPass: false } : {}),
     normalizedCostOverBudget: 0,
     normalizedLatencySurprisal: 0,
   }
@@ -190,6 +196,42 @@ export function buildRewardClosureRecordFromTeamEpisode(
   })
 }
 
+/**
+ * W4-D2/D3: worker episode reward closure. `null` when the episode is
+ * environment-blocked (no reward row — the plan forbids capability penalties
+ * for env failures). The closure lands under `reward_closure:worker_episode:`
+ * where buildHistoricalModelRewards picks it up for FUTURE dispatch ranking
+ * (shadow by default; applied only behind the efeRouting gate). It can never
+ * change the current task's model — dispatch already happened.
+ */
+export function buildRewardClosureRecordFromWorkerEpisode(
+  episode: WorkerEpisode,
+  options?: BuildRewardClosureOptions,
+): RewardClosureRecord | null {
+  const rewardInput = deriveWorkerEpisodeRewardInput(episode)
+  if (!rewardInput) return null
+  const rewardRecord = buildRoutingRewardRecord(rewardInput)
+  return buildRewardClosureRecord({
+    sourceKind: 'worker_episode',
+    sourceKey: workerEpisodeKey(episode),
+    objectiveHash: episode.objectiveHash,
+    sessionId: episode.sessionId,
+    reward: rewardRecord.reward,
+    components: {
+      ...rewardRecord.components,
+      workerModel: episode.model,
+      orderId: episode.orderId,
+      role: episode.role,
+      ...(episode.profile ? { profile: episode.profile } : {}),
+      status: episode.status,
+      gateOutcome: episode.gateOutcome,
+      repairCount: episode.repairCount,
+      changedFileCount: episode.changedFileCount,
+    },
+    timestamp: options?.timestamp,
+  })
+}
+
 export function persistRewardClosure(
   store: RewardClosureStore | undefined | null,
   record: RewardClosureRecord,
@@ -218,6 +260,19 @@ export function recordTeamWaveRewardClosure(
   options?: BuildRewardClosureOptions,
 ): RewardClosureRecord {
   const record = buildRewardClosureRecordFromTeamWave(event, options)
+  persistRewardClosure(store, record)
+  return record
+}
+
+export function recordWorkerEpisodeClosure(
+  store: RewardClosureStore | undefined | null,
+  episode: WorkerEpisode,
+  options?: BuildRewardClosureOptions,
+): RewardClosureRecord | null {
+  // Episode row always persists (diagnosis); reward row only when derivable.
+  persistWorkerEpisode(store, episode)
+  const record = buildRewardClosureRecordFromWorkerEpisode(episode, options)
+  if (!record) return null
   persistRewardClosure(store, record)
   return record
 }

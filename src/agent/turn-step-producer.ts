@@ -32,6 +32,7 @@ import { buildCognitiveProjectionParts, createCognitiveLedger, getCognitivePhase
 import { formatImmuneContext } from './immune-context.js'
 import { VITALS_LITE_KIND } from './telemetry-writer.js'
 import { getCapsuleByStar } from './seed-capsule-store.js'
+import { BlockChargeTracker } from './injection-meter.js'
 
 /**
  * Resolve the turn-level hard-stall watchdog ceiling (ms) from provider +
@@ -141,6 +142,10 @@ export class TurnStepProducer {
   /** 计费基线对应的 compact 轮 — compact 重置 appendix baseline 后块全量
    *  重新入场，计费基线必须同步作废（否则重发字节被漏计）。 */
   private chargeBaselineCompactTurn: number | null = null
+  /** W2-B1: advisory appendix block 的增量计费基线（appendixDelta 对齐） */
+  private readonly advisoryBlockCharge = new BlockChargeTracker()
+  /** advisory 计费基线对应的 compact 轮（与 chargeBaselineCompactTurn 同语义） */
+  private advisoryChargeBaselineCompactTurn: number | null = null
 
   /**
    * Step 6a: Per-run initialization — warmup, heartbeat, state resets,
@@ -443,12 +448,27 @@ export class TurnStepProducer {
     // Pass active star domain name for dedup — suppress entries whose 【星名】 tag
     // matches the domain already rendered in the frozen base.
     const activeStarName = this.self.sessionDomain?.name
-    this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render(activeStarName, turn))
+    const advisoryBlock = this.self.advisoryBus.render(activeStarName, turn)
+    this.self.config.promptEngine.setHarnessAdvisoryBlock(advisoryBlock)
+    // W2-B1 egress metering: advisory appendix block, appendixDelta semantics —
+    // pays full bytes on change, zero at steady state. Compact resets the
+    // appendix baseline → tracker baseline must reset too (bytes re-enter).
+    if (this.self.lastCompactTurn !== this.advisoryChargeBaselineCompactTurn) {
+      this.advisoryChargeBaselineCompactTurn = this.self.lastCompactTurn
+      this.advisoryBlockCharge.reset()
+    }
+    const advisoryChargedChars = this.advisoryBlockCharge.charge(advisoryBlock ?? '')
+    if (advisoryChargedChars > 0) {
+      this.self.pressureMonitor.recordCvmInjection(Math.ceil(advisoryChargedChars / 4), 'advisory-appendix')
+    }
 
     // Phase 2 通道分级：system-reminder 通道条目走消息流细断点（必读通道,
     // 缓存安全:只追加尾部）。目前仅 git-clear 等 immediate 守护使用。
+    // W2-B1: K1 append-only — each drained SR charges its bytes exactly once
+    // at the moment it is committed to the session tail.
     for (const sr of this.self.advisoryBus.drainSystemReminders()) {
       this.self.session.appendSystemReminder(sr)
+      this.self.pressureMonitor.recordCvmInjection(Math.ceil(sr.length / 4), 'system-reminder')
     }
 
     // P1a 核销闭环：把本轮实际送达的条目（含 expect 谓词）交给 readback 跟踪。
@@ -480,6 +500,9 @@ export class TurnStepProducer {
         ctxRatio: r2(pressureResult.ratio),
         cvmOverheadRatio: Math.round(pressureResult.cvmOverheadRatio * 10_000) / 10_000,
         throttled: pressureResult.shouldThrottleCvm,
+        // W2-B1 出口计量拆分（量纲：会话累计 token 估算，compact 时随
+        // resetCvmOverhead 清零）。恒等式：各 source 之和 == cvmTokenAccumulator。
+        cvmBySource: this.self.pressureMonitor.getCvmInjectionBySource(),
         advisories: {
           rendered: this.self.guardianActivity.advisoriesRendered,
           dropped: this.self.guardianActivity.advisoriesDropped,
@@ -643,13 +666,19 @@ export class TurnStepProducer {
         this.lastChargedProjectionStable = ''
         this.lastChargedToolCtx = ''
       }
+      // W2-B1: per-source tagging — same charge decisions as before, but each
+      // egress books under its own enum tag so telemetry can split
+      // projection/ephemeral/tool-context (sum semantics unchanged).
       const stableChanged = projectionStable !== this.lastChargedProjectionStable
       const toolCtxChanged = this.lastRenderedToolCtx !== this.lastChargedToolCtx
-      const chargedChars = (stableChanged ? projectionStable.length : 0)
-        + projectionEphemeral.length
-        + (toolCtxChanged ? this.lastRenderedToolCtx.length : 0)
-      if (chargedChars > 0) {
-        this.self.pressureMonitor.recordCvmInjection(Math.ceil(chargedChars / 4))
+      if (stableChanged && projectionStable.length > 0) {
+        this.self.pressureMonitor.recordCvmInjection(Math.ceil(projectionStable.length / 4), 'projection')
+      }
+      if (projectionEphemeral.length > 0) {
+        this.self.pressureMonitor.recordCvmInjection(Math.ceil(projectionEphemeral.length / 4), 'ephemeral')
+      }
+      if (toolCtxChanged && this.lastRenderedToolCtx.length > 0) {
+        this.self.pressureMonitor.recordCvmInjection(Math.ceil(this.lastRenderedToolCtx.length / 4), 'tool-context')
       }
       this.lastChargedProjectionStable = projectionStable
       this.lastChargedToolCtx = this.lastRenderedToolCtx

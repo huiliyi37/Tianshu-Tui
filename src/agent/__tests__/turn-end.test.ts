@@ -87,6 +87,40 @@ describe('processTurnEnd', () => {
     }
   })
 
+  it('W4-D2: routing event carries the latest verification outcome', () => {
+    const recorded: any[] = []
+    processTurnEnd(makeDeps({
+      routingMetrics: { record: (e: any) => recorded.push(e) } as any,
+      trajectory: {
+        getEntries: () => Array.from({ length: 6 }, () => ({ tool: 'run_tests', status: 'failed', target: 'src/a.test.ts', errorClass: 'assertion' })),
+      } as any,
+      evidence: {
+        getState: () => ({
+          verifications: [
+            { command: 'npm test', status: 'passed', scope: 'full', exitCode: 0, passed: 5, failed: 0, skipped: 0, durationMs: 100 },
+            { command: 'npm test', status: 'failed', scope: 'full', exitCode: 1, passed: 3, failed: 2, skipped: 0, durationMs: 100 },
+          ],
+          filesModified: new Set<string>(),
+        }),
+      } as any,
+      config: {
+        promptEngine: { setTaskProgress: () => {}, setDecisions: () => {} },
+        // 6 failed run_tests → test_failure_diagnosis; strong-repair card wins
+        // over the current weak card → a switch event is deterministically recorded.
+        modelCards: [
+          { model: 'model-strong', toolUseReliability: 0.9, jsonStability: 0.9, editSuccessRate: 0.9, testRepairRate: 0.95, contextWindow: 128_000, cacheEconomics: 'strong', recommendedTasks: ['test_failure_diagnosis'] },
+          { model: 'model-weak', toolUseReliability: 0.5, jsonStability: 0.5, editSuccessRate: 0.5, testRepairRate: 0.1, contextWindow: 128_000, cacheEconomics: 'weak', recommendedTasks: [] },
+        ],
+        getCurrentModel: () => 'model-weak',
+        onModelSwitch: () => {},
+      } as any,
+    }))
+    assert.equal(recorded.length, 1, 'switch recommendation must be recorded')
+    // Latest verification (failed) — not the first — must ride the event.
+    assert.equal(recorded[0].verificationOutcome, 'failed')
+    assert.equal(recorded[0].recommendedModel, 'model-strong')
+  })
+
   it('reads the injected per-session store via config.getTodos (not the global singleton)', () => {
     // 全局清空，证明回灌读的是注入 store 而非全局 defaultStore。
     setTodos([])

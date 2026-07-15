@@ -1199,6 +1199,18 @@ export class CompactionController {
       // prefix — so this stays prefix-cache safe. Fail-soft: a null archive
       // simply means the summary ships without a recall pointer.
       const archive = await this.archiveDiscardedHistory(oldZone, 'partial-compact')
+
+      // W3-C1: same state-coverage post-check as llmCompact (line ~1344).
+      // Partial compact has two deterministic backstops — the verbatim archive
+      // (recall ref) and the task-anchor appendix. Only when BOTH are absent
+      // would this lossy summary be the sole carrier of the discarded history;
+      // in that case a summary reflecting none of the material state must not
+      // commit the rewrite (fail-open to context occupancy).
+      if (!archive && !this.buildTaskAnchorAppendix() && !this.summaryCoversState(summary)) {
+        debugLog('[partial-compact] summary failed state-coverage post-check with no archive/anchor backstop — skipping rewrite')
+        return false
+      }
+
       const summaryBody = archive ? `${summary}${archive.ref}` : summary
 
       const summaryMessage: OaiMessage = {

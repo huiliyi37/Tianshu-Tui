@@ -8,6 +8,11 @@ import { runHandsSession, type HandsSessionConfig } from '../hands-session.js'
 import { WorktreeCoordinator } from '../worktree-coordinator.js'
 import { createWriteWorkOrder, parseWorkerResult, type WorkOrder } from '../work-order.js'
 
+// These tests cover worktree lifecycle / diff collection, not the W4-D1 write
+// gate (temp repos have no tsconfig — the real gate would block on tsc).
+// Gate behavior is covered in hands-session-write-gate.test.ts.
+process.env.RIVET_WORKER_WRITE_GATE = '0'
+
 function initGitRepo(dir: string, branch = 'main'): void {
   execSync(`git init -b ${branch}`, { cwd: dir, stdio: 'pipe' })
   execSync('git config user.email "test@test"', { cwd: dir, stdio: 'pipe' })

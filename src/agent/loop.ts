@@ -658,6 +658,22 @@ export class AgentLoop {
       providerProfile: this.config.providerProfile ?? { cacheType: 'none', persistent: false },
       contextWindow: this.config.contextWindow,
     })
+    // W3-C3: observe-only delay-compact decision ledger → cache-log.jsonl
+    // (event:'compact_delay_decision'), same channel as per-request cache rows
+    // so offline analysis joins decisions with the actual cache outcome.
+    if (this.config.sessionId) {
+      const sid = this.config.sessionId
+      this.cacheAdvisor.setDelayDecisionListener(decision => {
+        try {
+          const line = JSON.stringify({ ts: Date.now(), ...decision })
+          import('node:fs/promises').then(fs => {
+            const dir = join(getSessionDir(this.cwd), sid)
+            return fs.mkdir(dir, { recursive: true })
+              .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+          }).catch(() => {})
+        } catch { /* ledger is best-effort */ }
+      })
+    }
     // Speculative pre-execution chain SEALED (2026-07-07): no execute callback
     // and speculativeEnabled unset → miner still records patterns, but nothing
     // is pre-executed or cached. Serving was cut 2026-07-06 (ShadowQueue had no
@@ -684,7 +700,13 @@ export class AgentLoop {
       getProviderDegradationRatio: () => this.config.providerHealth?.getDegradationRatio() ?? 0,
       // Hook injections are pseudo-user messages: append as SR to the last
       // user message (not a new message entry) to preserve prefix cache.
-      addUserMessage: message => { this.session.appendSystemReminder(message) },
+      // W2-B1: K1 append-only egress — runtime hook payloads (MCTS seeds,
+      // scout packets, fallback advisories) charge their bytes exactly once
+      // at commit, under the 'runtime-payload' tag.
+      addUserMessage: message => {
+        this.session.appendSystemReminder(message)
+        this.pressureMonitor.recordCvmInjection(Math.ceil(message.length / 4), 'runtime-payload')
+      },
       requestThetaCheck: reason => { this.requestThetaCheck(reason) },
       setReasoningEffort: effort => { this.setReasoningEffort(effort) },
       getFingerprint: () => this.config.promptEngine.getFingerprint(),
