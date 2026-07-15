@@ -2651,8 +2651,8 @@ export class RuntimeSessionManager {
   }
 
   /** Working-tree changes relative to HEAD for the desktop "changes" tab. */
-  async getWorkingTreeFiles(cwd?: string): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
-    return getWorkingTreeFiles(cwd ?? this.defaultCwd)
+  async getWorkingTreeFiles(cwd?: string, includeIgnored = false): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
+    return getWorkingTreeFiles(cwd ?? this.defaultCwd, 'HEAD', includeIgnored)
   }
 
   /** Unified diff of a single file relative to HEAD (on-demand). */
@@ -2675,10 +2675,10 @@ export class RuntimeSessionManager {
   }
 
   /** Session-scoped working-tree changes (worktree cwd + task baseline). */
-  async getSessionWorkingTree(id: string): Promise<{ files: WorkingTreeFile[]; isRepo: boolean } | null> {
+  async getSessionWorkingTree(id: string, includeIgnored = false): Promise<{ files: WorkingTreeFile[]; isRepo: boolean } | null> {
     const ctx = this.sessionGitContext(id)
     if (!ctx) return null
-    const result = await getWorkingTreeFiles(ctx.cwd, ctx.baseRef)
+    const result = await getWorkingTreeFiles(ctx.cwd, ctx.baseRef, includeIgnored)
     // The worktree owner marker is infrastructure, not user work — hide it.
     return { ...result, files: result.files.filter(f => f.path !== '.vsw-owner.json') }
   }

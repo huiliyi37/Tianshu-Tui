@@ -1325,8 +1325,9 @@ export function buildSessionRoutes(
 
     // Working-tree changes relative to HEAD (file list only; per-file diff fetched on demand).
     // Used by the desktop "changes" tab — lightweight file list, no diff body.
-    'GET /git/working-tree': withAuth(async () => {
-      const result = await manager.getWorkingTreeFiles()
+    'GET /git/working-tree': withAuth(async (_body, params) => {
+      const includeIgnored = params?.includeIgnored === 'true'
+      const result = await manager.getWorkingTreeFiles(undefined, includeIgnored)
       return { status: 200, body: result }
     }, apiToken),
 
@@ -1342,7 +1343,8 @@ export function buildSessionRoutes(
     // and diffs against the recorded task baseline (baselineHead) so committed
     // work stays visible in the Changes tab.
     'GET /sessions/:id/git/working-tree': withAuth(async (_body, params) => {
-      const result = await manager.getSessionWorkingTree(String(params?.id ?? ''))
+      const includeIgnored = params?.includeIgnored === 'true'
+      const result = await manager.getSessionWorkingTree(String(params?.id ?? ''), includeIgnored)
       if (!result) return { status: 404, body: { error: 'Session not found' } }
       return { status: 200, body: result }
     }, apiToken),

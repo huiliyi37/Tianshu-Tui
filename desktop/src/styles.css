@@ -4471,6 +4471,57 @@ a.mention-link:hover { background: var(--accent-soft); }
 .st-renamed { color: var(--accent); background: var(--accent-soft, var(--panel-3)); }
 .st-untracked { color: var(--muted); }
 
+/* Changes tab — summary actions, search, ignored toggle, status groups */
+.changes-summary-actions {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin-left: auto;
+}
+.changes-search {
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: 2px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+.changes-search input {
+  border: none; background: transparent; outline: none;
+  color: var(--text); font-size: var(--text-xs);
+  width: 120px;
+}
+.changes-ignored-toggle {
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+}
+.changes-ignored-toggle:hover { color: var(--text-secondary); border-color: var(--accent); }
+.changes-ignored-toggle.active { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.changes-status-group { border-top: 1px solid var(--border); }
+.changes-status-group:first-child { border-top: none; }
+.changes-status-group-header {
+  width: 100%;
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  text-align: left;
+}
+.changes-status-group-header:hover { background: var(--hover); }
+.changes-status-label { flex: 1; }
+.changes-status-count { color: var(--muted); }
+.changes-status-chevron { color: var(--muted); margin-left: auto; }
+.dashboard-file-row.ignored { opacity: 0.6; }
+
 /* TerminalTabs — multi-tab terminal panel (Gap 4) */
 .terminal-tabs { display: flex; flex-direction: column; flex: none; min-height: 0; }
 .tt-tab-bar { display: flex; align-items: center; gap: 2px; padding: 0 var(--space-2); border-bottom: 1px solid var(--border); background: var(--panel); flex: none; overflow-x: auto; }

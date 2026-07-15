@@ -401,6 +401,8 @@ export interface WorkingTreeFile {
   status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
   additions: number
   deletions: number
+  /** True when the file is hidden by default and only shown via "show ignored". */
+  ignored?: boolean
 }
 
 /** Working-tree change list for the desktop "changes" tab. */

@@ -29,6 +29,16 @@
     "commentsPrompt": "Please modify the code according to the following line comments on the working-tree diff:\n\n{{comments}}",
     "loadingDiff": "Loading diff…",
     "diffFailed": "Failed to load diff",
-    "binaryNoDiff": "No text diff (binary file)"
+    "binaryNoDiff": "No text diff (binary file)",
+    "searchPlaceholder": "Filter files…",
+    "showIgnored": "Show ignored",
+    "hideIgnored": "Hide ignored",
+    "showIgnoredTitle": "Show runtime/generated files hidden by default",
+    "hideIgnoredTitle": "Hide runtime/generated files",
+    "statusModified": "Modified",
+    "statusAdded": "Added",
+    "statusDeleted": "Deleted",
+    "statusRenamed": "Renamed",
+    "statusUntracked": "Untracked"
   }
 }

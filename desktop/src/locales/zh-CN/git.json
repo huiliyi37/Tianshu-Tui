@@ -29,6 +29,16 @@
     "commentsPrompt": "请根据以下针对工作树 diff 的行级评论修改代码：\n\n{{comments}}",
     "loadingDiff": "加载 diff…",
     "diffFailed": "读取 diff 失败",
-    "binaryNoDiff": "无文本差异（二进制文件）"
+    "binaryNoDiff": "无文本差异（二进制文件）",
+    "searchPlaceholder": "筛选文件…",
+    "showIgnored": "显示已忽略",
+    "hideIgnored": "隐藏已忽略",
+    "showIgnoredTitle": "显示默认隐藏的运行时/生成文件",
+    "hideIgnoredTitle": "隐藏运行时/生成文件",
+    "statusModified": "已修改",
+    "statusAdded": "新增",
+    "statusDeleted": "已删除",
+    "statusRenamed": "重命名",
+    "statusUntracked": "未跟踪"
   }
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQueryClient } from '@tanstack/react-query'
-import { qk, useFileDiff, useSessions, useWorkingTree } from '../state/queries'
+import { useFileDiff, useSessions, useWorkingTree } from '../state/queries'
 import { commitSessionChanges, createSessionPr, mergeSessionBack } from '../runtime/client'
 import { DiffView } from '../components/DiffView'
 import type { LineComment, WorkingTreeFile, ArtifactSummary } from '../runtime/types'
@@ -16,7 +16,10 @@ import {
   Play,
   Terminal,
   Eye,
-  ArrowLeft
+  ArrowLeft,
+  Search,
+  EyeOff,
+  Eye as EyeIcon
 } from 'lucide-react'
 
 const STATUS_LABEL: Record<WorkingTreeFile['status'], string> = {
@@ -120,12 +123,16 @@ export function ChangesTab(props: {
 }) {
   const { t } = useTranslation('git')
   const enabled = props.sessionId !== null
-  const tree = useWorkingTree(props.sessionId)
   const [sideBySide, setSideBySide] = useState(false)
   const [lineComments, setLineComments] = useState<LineComment[]>([])
-  
+
   const [subTab, setSubTab] = useState<'overview' | 'review'>('overview')
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
+  const [includeIgnored, setIncludeIgnored] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<WorkingTreeFile['status']>>(new Set(['untracked']))
+
+  const tree = useWorkingTree(props.sessionId, includeIgnored)
 
   const addComment = (anchor: { file: string; oldLine?: number; newLine?: number }, text: string) => {
     setLineComments((prev) => [
@@ -149,9 +156,36 @@ export function ChangesTab(props: {
   const isWorktree = Boolean(session?.worktreeBranch)
 
   const files = tree.data?.files ?? []
+  const filteredFiles = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return files
+    return files.filter((f) => f.path.toLowerCase().includes(q))
+  }, [files, searchQuery])
+
+  const groupedFiles = useMemo(() => {
+    const groups: Record<WorkingTreeFile['status'], WorkingTreeFile[]> = {
+      modified: [],
+      added: [],
+      deleted: [],
+      renamed: [],
+      untracked: [],
+    }
+    for (const f of filteredFiles) groups[f.status].push(f)
+    return groups
+  }, [filteredFiles])
+
+  const groupOrder: WorkingTreeFile['status'][] = ['modified', 'added', 'deleted', 'renamed', 'untracked']
+  const groupLabels: Record<WorkingTreeFile['status'], string> = {
+    modified: t('changes.statusModified'),
+    added: t('changes.statusAdded'),
+    deleted: t('changes.statusDeleted'),
+    renamed: t('changes.statusRenamed'),
+    untracked: t('changes.statusUntracked'),
+  }
+
   const totals = useMemo(
     () =>
-      files.reduce(
+      filteredFiles.reduce(
         (acc, f) => {
           acc.add += f.additions
           acc.del += f.deletions
@@ -159,7 +193,7 @@ export function ChangesTab(props: {
         },
         { add: 0, del: 0 },
       ),
-    [files],
+    [filteredFiles],
   )
 
   const delegation = useSessionEventsSelector(props.sessionId, (v) => v.delegation ?? {})
@@ -225,14 +259,33 @@ export function ChangesTab(props: {
       {subTab === 'overview' ? (
         <div className="changes-overview-content">
           <div className="changes-summary">
-            <span className="changes-summary-count">{t('changes.filesChanged', { n: files.length })}</span>
+            <span className="changes-summary-count">{t('changes.filesChanged', { n: filteredFiles.length })}</span>
             <span className="changes-summary-delta">
               {totals.add > 0 && <span className="add">+{totals.add}</span>}
               {totals.del > 0 && <span className="del">-{totals.del}</span>}
             </span>
+            <div className="changes-summary-actions">
+              <div className="changes-search">
+                <Search size={14} />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t('changes.searchPlaceholder')}
+                />
+              </div>
+              <button
+                className={`changes-ignored-toggle ${includeIgnored ? 'active' : ''}`}
+                onClick={() => setIncludeIgnored((v) => !v)}
+                title={includeIgnored ? t('changes.hideIgnoredTitle') : t('changes.showIgnoredTitle')}
+              >
+                {includeIgnored ? <EyeOff size={14} /> : <EyeIcon size={14} />}
+                <span>{includeIgnored ? t('changes.hideIgnored') : t('changes.showIgnored')}</span>
+              </button>
+            </div>
           </div>
 
-          {files.length === 0 ? (
+          {filteredFiles.length === 0 ? (
             <div className="empty sm">{t('changes.empty')}</div>
           ) : (
             <div className="dashboard-groups">
@@ -262,34 +315,61 @@ export function ChangesTab(props: {
 
               <DashboardGroup 
                 title="Files Changed" 
-                count={files.length} 
+                count={filteredFiles.length} 
                 icon={<FileCode size={16} className="text-accent" />}
                 defaultOpen={true}
               >
-                <div className="dashboard-list">
-                  {files.map((f) => {
-                    const parts = f.path.split('/')
-                    const fileName = parts.pop() || f.path
-                    const dirPath = parts.join('/')
-                    return (
-                      <div 
-                        key={f.path} 
-                        className="dashboard-file-row"
-                        onClick={() => handleSelectFile(f.path)}
+                {groupOrder.map((status) => {
+                  const group = groupedFiles[status]
+                  if (group.length === 0) return null
+                  const collapsed = collapsedGroups.has(status)
+                  return (
+                    <div key={status} className="changes-status-group">
+                      <button
+                        className="changes-status-group-header"
+                        onClick={() => {
+                          setCollapsedGroups((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(status)) next.delete(status)
+                            else next.add(status)
+                            return next
+                          })
+                        }}
                       >
-                        <div className="dashboard-file-info">
-                          {getFileIcon(f.path)}
-                          <span className="dashboard-file-name">{fileName}</span>
-                          {dirPath && <span className="dashboard-file-dir">{dirPath}</span>}
+                        <span className={`changes-status ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
+                        <span className="changes-status-label">{groupLabels[status]}</span>
+                        <span className="changes-status-count">{group.length}</span>
+                        <span className="changes-status-chevron">{collapsed ? '▸' : '▾'}</span>
+                      </button>
+                      {!collapsed && (
+                        <div className="dashboard-list">
+                          {group.map((f) => {
+                            const parts = f.path.split('/')
+                            const fileName = parts.pop() || f.path
+                            const dirPath = parts.join('/')
+                            return (
+                              <div 
+                                key={f.path} 
+                                className={`dashboard-file-row ${f.ignored ? 'ignored' : ''}`}
+                                onClick={() => handleSelectFile(f.path)}
+                              >
+                                <div className="dashboard-file-info">
+                                  {getFileIcon(f.path)}
+                                  <span className="dashboard-file-name">{fileName}</span>
+                                  {dirPath && <span className="dashboard-file-dir">{dirPath}</span>}
+                                </div>
+                                <div className="dashboard-file-delta">
+                                  {f.additions > 0 && <span className="add">+{f.additions}</span>}
+                                  {f.deletions > 0 && <span className="del">-{f.deletions}</span>}
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
-                        <div className="dashboard-file-delta">
-                          {f.additions > 0 && <span className="add">+{f.additions}</span>}
-                          {f.deletions > 0 && <span className="del">-{f.deletions}</span>}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                      )}
+                    </div>
+                  )
+                })}
               </DashboardGroup>
 
               <DashboardGroup 
@@ -463,11 +543,28 @@ function LandingBar(props: {
   const queryClient = useQueryClient()
   const [commitOpen, setCommitOpen] = useState(false)
   const [commitMsg, setCommitMsg] = useState('')
-  const [pending, setPending] = useState<null | 'commit' | 'merge' | 'pr'>(null)
+  const [pending, setPending] = useState<null | 'commit' | 'checkpoint' | 'merge' | 'pr'>(null)
   const [notice, setNotice] = useState<null | { kind: 'ok' | 'err'; text: string; url?: string }>(null)
 
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: qk.workingTree(sessionId) })
+    void queryClient.invalidateQueries({ queryKey: ['git', 'working-tree', sessionId] })
+  }
+
+  const runCheckpoint = async () => {
+    setPending('checkpoint')
+    setNotice(null)
+    try {
+      const date = new Date().toISOString().slice(0, 10)
+      const r = await commitSessionChanges(sessionId, `checkpoint: ${date}`)
+      if (r.ok && r.nothingToCommit) setNotice({ kind: 'ok', text: t('landingNothingToCommit') })
+      else if (r.ok) setNotice({ kind: 'ok', text: t('landingCheckpointSaved', { sha: r.sha?.slice(0, 8) ?? '' }) })
+      else setNotice({ kind: 'err', text: t('landingFailed', { error: r.error ?? '' }) })
+      if (r.ok) refresh()
+    } catch (e) {
+      setNotice({ kind: 'err', text: t('landingFailed', { error: String(e) }) })
+    } finally {
+      setPending(null)
+    }
   }
 
   const runCommit = async () => {
@@ -538,6 +635,14 @@ function LandingBar(props: {
           title={busy ? t('landingBusy') : undefined}
         >
           {pending === 'commit' ? '…' : t('landingCommit')}
+        </button>
+        <button
+          className="btn sm ghost"
+          disabled={directDisabled}
+          onClick={runCheckpoint}
+          title={busy ? t('landingBusy') : t('landingCheckpointHint')}
+        >
+          {pending === 'checkpoint' ? '…' : t('landingCheckpoint')}
         </button>
         {onSendPrompt && (
           <button className="btn sm ghost" onClick={askAgentCommit}>

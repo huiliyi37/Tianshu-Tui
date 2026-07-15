@@ -186,6 +186,9 @@ export interface WorkingTreeFile {
   status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
   additions: number
   deletions: number
+  /** True when the file is matched by the changes-tab ignore rules and is only
+   *  visible because the caller passed `includeIgnored=true`. */
+  ignored?: boolean
 }
 
 /** Parse `git diff HEAD --numstat` (+ untracked via status) into a file list.
@@ -240,7 +243,11 @@ function parseWorkingTreeFiles(numstat: string, statusPorcelain: string): Workin
  * Worktree sessions pass their recorded baseline commit as baseRef so the tab
  * shows the full task delta even after the agent commits mid-task.
  */
-export async function getWorkingTreeFiles(cwd: string, baseRef = 'HEAD'): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
+export async function getWorkingTreeFiles(
+  cwd: string,
+  baseRef = 'HEAD',
+  includeIgnored = false,
+): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
   const base = safeBaseRef(baseRef)
   const { ok: numstatOk, output: numstat } = await runGitSafe(['diff', base, '--numstat'], cwd)
   // git diff <base> fails if the ref doesn't exist (empty repo) — treat as "no tracked diff yet"
@@ -249,12 +256,56 @@ export async function getWorkingTreeFiles(cwd: string, baseRef = 'HEAD'): Promis
     // Both failed — likely not a git repo
     return { files: [], isRepo: false }
   }
-  const files = parseWorkingTreeFiles(numstatOk ? numstat : '', statusOk ? statusOut : '')
+  let files = parseWorkingTreeFiles(numstatOk ? numstat : '', statusOk ? statusOut : '')
+  if (!includeIgnored) {
+    files = files.filter((f) => !isChangesIgnored(f.path))
+  } else {
+    files = files.map((f) => ({ ...f, ignored: isChangesIgnored(f.path) }))
+  }
   // Untracked files aren't in `git diff HEAD --numstat`, so their +N badge would
   // read 0. Backfill the addition count by reading the file and counting lines
   // (cheap, no spawn). Skip oversized/binary/unreadable files — badge stays 0.
   await backfillUntrackedAdditions(cwd, files)
   return { files, isRepo: true }
+}
+
+/** Default ignore rules for the desktop "changes" tab. These are runtime /
+ *  generated artifacts that are not user source code. Kept separate from
+ *  .gitignore so the tab can still show them on demand via `includeIgnored`.
+ *
+ *  Rule syntax:
+ *    - starts with "*." → file extension match
+ *    - otherwise      → substring match anywhere in the lower-cased path
+ */
+export const DEFAULT_CHANGES_IGNORE = [
+  // Dependencies / build outputs
+  'node_modules/', 'dist/', '.vite/',
+  // Runtime / cache directories
+  '.rivet/scratch/', '.rivet/plugin-', '.rivet/backups/', '.rivet/vsw/',
+  '.rivet/artifacts/', '.rivet/sessions/', '.rivet/runtime/', '.rivet/checkpoints/',
+  '.tmp', '.test-tmp', '.tmp-', '.tmp-abort-', '.tmp-iso-',
+  // Local data / logs
+  'logs/', 'Library/',
+  // Release artifacts
+  'release/',
+  // Binaries / archives
+  '*.dmg', '*.tar.gz', '*.tar.gz.sig', '*.app', '*.exe', '*.zip',
+  // Temp / misc
+  '_test-', '.DS_Store',
+] as const
+
+/** Return true if a path matches the default changes-tab ignore rules. */
+export function isChangesIgnored(path: string): boolean {
+  const lower = path.toLowerCase()
+  for (const rule of DEFAULT_CHANGES_IGNORE) {
+    const rl = rule.toLowerCase()
+    if (rule.startsWith('*.')) {
+      if (lower.endsWith(rl.slice(1))) return true
+    } else if (lower.includes(rl)) {
+      return true
+    }
+  }
+  return false
 }
 
 /** Max bytes to read when counting lines of an untracked file for its +N badge. */

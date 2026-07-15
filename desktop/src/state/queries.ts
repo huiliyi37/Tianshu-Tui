@@ -480,11 +480,11 @@ export function useSetVisionModelConfig() {
 /** Poll the working-tree change list, scoped to the active session (worktree
  *  cwd + task baseline). Diff changes less often than session state, so 5s
  *  (vs sessions' 2s) is a reasonable cadence. Disabled when no active session. */
-export function useWorkingTree(sessionId: string | null) {
+export function useWorkingTree(sessionId: string | null, includeIgnored = false) {
   const enabled = sessionId !== null
   return useQuery({
-    queryKey: qk.workingTree(sessionId ?? ''),
-    queryFn: () => getWorkingTree(sessionId!),
+    queryKey: [...qk.workingTree(sessionId ?? ''), includeIgnored],
+    queryFn: () => getWorkingTree(sessionId!, includeIgnored),
     refetchInterval: enabled ? 5000 : false,
     enabled,
     staleTime: 2000,

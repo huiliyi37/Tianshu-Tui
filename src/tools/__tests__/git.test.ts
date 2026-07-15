@@ -313,4 +313,33 @@ describe('getWorkingTreeFiles / getFileDiff (desktop changes tab)', () => {
     const diff = await getFileDiff(TMP2, 'base.txt', '--output=/tmp/evil')
     assert.ok(diff.includes('+base changed'), 'behaves like HEAD diff, no option injection')
   })
+
+  it('filters runtime/generated files by default', async () => {
+    mkdirSync(join(TMP2, 'src'), { recursive: true })
+    writeFileSync(join(TMP2, 'src', 'code.ts'), 'export const a = 1\n')
+    mkdirSync(join(TMP2, '.rivet', 'plugin-abc'), { recursive: true })
+    writeFileSync(join(TMP2, '.rivet', 'plugin-abc', 'index.js'), 'x\n')
+    mkdirSync(join(TMP2, 'release'), { recursive: true })
+    writeFileSync(join(TMP2, 'release', 'app.dmg'), 'binary')
+    writeFileSync(join(TMP2, '_test-docx.html'), '<html>')
+
+    const { files } = await getWorkingTreeFiles(TMP2)
+    const paths = files.map((f) => f.path)
+    assert.ok(paths.includes('src/code.ts'), 'source file should be visible')
+    assert.ok(!paths.includes('.rivet/plugin-abc/index.js'), 'plugin runtime should be hidden')
+    assert.ok(!paths.includes('release/app.dmg'), 'release binary should be hidden')
+    assert.ok(!paths.includes('_test-docx.html'), 'temp test file should be hidden')
+  })
+
+  it('includes ignored files when includeIgnored is true', async () => {
+    mkdirSync(join(TMP2, 'src'), { recursive: true })
+    writeFileSync(join(TMP2, 'src', 'code.ts'), 'export const a = 1\n')
+    mkdirSync(join(TMP2, '.rivet', 'plugin-abc'), { recursive: true })
+    writeFileSync(join(TMP2, '.rivet', 'plugin-abc', 'index.js'), 'x\n')
+
+    const { files } = await getWorkingTreeFiles(TMP2, 'HEAD', true)
+    const paths = files.map((f) => f.path)
+    assert.ok(paths.includes('src/code.ts'), 'source file should still be visible')
+    assert.ok(paths.includes('.rivet/plugin-abc/index.js'), 'ignored file should appear when requested')
+  })
 })

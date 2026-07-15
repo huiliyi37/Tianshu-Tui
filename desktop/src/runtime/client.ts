@@ -1495,9 +1495,10 @@ export function getGitGraph(maxCount?: number): Promise<GitGraphResponse> {
 }
 
 /** Working-tree changes relative to HEAD (file list only — per-file diff is on-demand). */
-export function getWorkingTree(sessionId?: string): Promise<WorkingTreeResponse> {
-  if (sessionId) return apiGet<WorkingTreeResponse>(`/sessions/${sessionId}/git/working-tree`)
-  return apiGet<WorkingTreeResponse>('/git/working-tree')
+export function getWorkingTree(sessionId?: string, includeIgnored = false): Promise<WorkingTreeResponse> {
+  const qs = includeIgnored ? '?includeIgnored=true' : ''
+  if (sessionId) return apiGet<WorkingTreeResponse>(`/sessions/${sessionId}/git/working-tree${qs}`)
+  return apiGet<WorkingTreeResponse>(`/git/working-tree${qs}`)
 }
 
 /** Unified diff of a single file relative to the session baseline (or HEAD).
