@@ -23,16 +23,18 @@ export function buildHealthRoute(
     'GET /health': (_body, _params, _headers) => {
       const { sessionCount, runningCount } = manager.stats()
       const lag = loopLag?.()
+      const registryOk = registryReady ? registryReady() : true
+      const configuredOk = configured?.() ?? true
       return {
         status: 200,
         body: {
-          ok: true,
+          ok: registryOk && configuredOk,
           version,
           uptimeMs: Date.now() - startedAt,
           sessionCount,
           runningCount,
-          registryOk: registryReady ? registryReady() : true,
-          configured: configured?.() ?? true,
+          registryOk,
+          configured: configuredOk,
           ...(lag ? { loopLagP99Ms: lag.p99Ms, loopLagMaxMs: lag.maxMs } : {}),
         },
       }

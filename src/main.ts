@@ -181,7 +181,7 @@ async function main() {
   // rivet serve [--port N] — HTTP+SSE Runtime API (localhost sidecar for 桌面版)
   if (args[0] === 'serve') {
     const { serveCommand } = await import('./server/serve.js')
-    serveCommand(args.slice(1))
+    await serveCommand(args.slice(1))
     return
   }
 

@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import type { Tool } from '../tools/types.js'
 import type { McpConfig, McpServerConfig } from './config.js'
@@ -65,6 +66,9 @@ export class McpManager {
   private reconnectTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
   // Per-server stderr/event log buffers (ring buffer, 64KB default).
   private logBuffers: Map<string, LogRingBuffer> = new Map()
+  // In-flight connect promises per serverId — prevents concurrent connect attempts
+  // for the same server (e.g. reconcile + REST API hot-add racing).
+  private connectLocks: Map<string, Promise<Tool[]>> = new Map()
   // Shared across all wrappers: first use of each connector requires explicit opt-in.
   private connectorConsent: McpConnectorConsent = createMcpConnectorConsent()
 
@@ -168,9 +172,17 @@ export class McpManager {
    * (root-cause analysis 2026-06-05, Thread 1A)
    */
   killChildrenSync(): void {
+    const isWindows = process.platform === 'win32'
     for (const conn of this.connections.values()) {
       const pid = (conn.transport as { pid?: number | null }).pid
-      if (typeof pid === 'number' && pid > 0) {
+      if (typeof pid !== 'number' || pid <= 0) continue
+      if (isWindows) {
+        // Windows has no process-group kill; taskkill /T terminates the whole
+        // subtree (child + grand-children) matching the spawned pid.
+        try {
+          execSync(`taskkill /T /F /PID ${pid}`, { windowsHide: true, stdio: 'ignore' })
+        } catch { /* already gone */ }
+      } else {
         try { process.kill(-pid, 'SIGKILL') } catch {
           try { process.kill(pid, 'SIGKILL') } catch { /* already gone */ }
         }
@@ -204,7 +216,15 @@ export class McpManager {
    * @returns tools newly registered for this server (empty on failure)
    */
   async connectAndDiscover(serverId: string, serverConfig: McpServerConfig): Promise<Tool[]> {
-    return this._connectAndDiscover(serverId, serverConfig, /*attempt*/ 0)
+    const existing = this.connectLocks.get(serverId)
+    if (existing) return existing
+
+    const promise = this._connectAndDiscover(serverId, serverConfig, /*attempt*/ 0).finally(() => {
+      // Release the lock once the attempt completes (success or failure).
+      this.connectLocks.delete(serverId)
+    })
+    this.connectLocks.set(serverId, promise)
+    return promise
   }
 
   private async _connectAndDiscover(

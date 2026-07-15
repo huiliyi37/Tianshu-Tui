@@ -318,4 +318,36 @@ describe('McpManager', () => {
     assert.equal(tools.length, 1)
     assert.equal(tools[0]!.definition.name, 'mcp__x__t')
   })
+
+  it('serializes concurrent connectAndDiscover for the same serverId', async () => {
+    const mgr = new McpManager(makeConfig())
+    let calls = 0
+    mgr['_connectServer'] = async (serverId) => {
+      calls++
+      await new Promise(r => setTimeout(r, 20))
+      return { client: {} as any, transport: { close: async () => {} }, transportType: 'stdio', serverId }
+    }
+    mgr['_discoverTools'] = async () => []
+
+    const [a, b] = await Promise.all([
+      mgr.connectAndDiscover('same', { command: 'node', args: ['same.js'] }),
+      mgr.connectAndDiscover('same', { command: 'node', args: ['same.js'] }),
+    ])
+    assert.equal(calls, 1, 'only one connect attempt should run')
+    assert.equal(a.length, 0)
+    assert.equal(b.length, 0)
+  })
+
+  it('releases connect lock after failure so retry can proceed', async () => {
+    const mgr = new McpManager(makeConfig())
+    let calls = 0
+    mgr['_connectServer'] = async () => {
+      calls++
+      throw new Error('boom')
+    }
+
+    await mgr.connectAndDiscover('same', { command: 'node', args: ['same.js'] })
+    await mgr.connectAndDiscover('same', { command: 'node', args: ['same.js'] })
+    assert.equal(calls, 2)
+  })
 })

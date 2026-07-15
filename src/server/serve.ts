@@ -61,6 +61,11 @@ export function loadServeAgent(): Promise<ServeAgentModule> {
         console.error(`[serve-timing] serve-agent import ${Math.round(performance.now() - t0)}ms`)
       }
       return m
+    }).catch((err) => {
+      // Don't cache a rejected promise — transient build/load failures would
+      // permanently break session creation otherwise.
+      serveAgentPromise = null
+      throw err
     })
   }
   return serveAgentPromise
@@ -360,7 +365,7 @@ export interface RunningServer {
  * all in-flight work, and the RuntimeSessionManager backing the multi-session
  * API. Throws if no token is available (fail-closed).
  */
-export function runServe(opts: RunServeOptions = {}): RunningServer {
+export async function runServe(opts: RunServeOptions = {}): Promise<RunningServer> {
   const apiToken = (opts.token ?? process.env.RIVET_SERVER_TOKEN)?.trim()
   if (!apiToken) {
     throw new Error('RIVET_SERVER_TOKEN is required for rivet serve')
@@ -649,7 +654,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   }
 
   const listenT0 = performance.now()
-  const server = startServer(port, routes, apiToken)
+  const server = await startServer(port, routes, apiToken)
   if (process.env.RIVET_SERVE_TIMING === '1') {
     console.error(`[serve-timing] listen ready ${Math.round(performance.now() - listenT0)}ms (since runServe start ${Date.now() - startedAt}ms)`)
   }
@@ -782,13 +787,13 @@ function writeExitBreadcrumb(reason: string, extra: Record<string, unknown> = {}
  * CLI command handler for `rivet serve [--port N]`. Wires signal handlers and
  * prints the listening banner. Exits non-zero on misconfiguration.
  */
-export function serveCommand(args: string[]): void {
+export async function serveCommand(args: string[]): Promise<void> {
   const portIdx = args.indexOf('--port')
   const port = parseInt(portIdx >= 0 ? args[portIdx + 1]! : '3100', 10)
 
   let server: RunningServer
   try {
-    server = runServe({ port })
+    server = await runServe({ port })
   } catch (err) {
     console.error((err as Error).message)
     process.exit(1)

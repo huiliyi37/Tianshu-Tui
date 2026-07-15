@@ -132,6 +132,9 @@ async function createStdioTransport(
   try {
     await withTimeout(client.connect(transport), `MCP connect stdio`, opts.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS)
   } catch (err) {
+    // Connect failed after transport was constructed — close it to avoid leaking
+    // the child process / file descriptors (especially on Windows).
+    try { await transport.close() } catch { /* already gone */ }
     if (fellBackToBareNpx) {
       const msg = err instanceof Error ? err.message : String(err)
       throw new Error(
@@ -176,7 +179,12 @@ async function createRemoteTransport(
     const transport = new SSEClientTransport(url, {
       requestInit: Object.keys(headers).length > 0 ? { headers } : undefined,
     })
-    await withTimeout(client.connect(transport), `MCP connect sse-legacy`, opts.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS)
+    try {
+      await withTimeout(client.connect(transport), `MCP connect sse-legacy`, opts.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS)
+    } catch (err) {
+      try { await transport.close() } catch { /* already gone */ }
+      throw err
+    }
     return {
       client,
       transport,
@@ -194,7 +202,12 @@ async function createRemoteTransport(
   const transport = new StreamableHTTPClientTransport(url, {
     requestInit: Object.keys(headers).length > 0 ? { headers } : undefined,
   })
-  await withTimeout(client.connect(transport), `MCP connect streamableHttp`, opts.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS)
+  try {
+    await withTimeout(client.connect(transport), `MCP connect streamableHttp`, opts.timeoutMs ?? DEFAULT_MCP_TIMEOUT_MS)
+  } catch (err) {
+    try { await transport.close() } catch { /* already gone */ }
+    throw err
+  }
   return {
     client,
     transport,
