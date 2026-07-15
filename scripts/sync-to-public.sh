@@ -38,6 +38,8 @@ rsync $RSYNC_FLAGS \
 echo "=== 同步: scripts/ ==="
 rsync $RSYNC_FLAGS \
   --exclude='sync-to-public.sh' \
+  --exclude='build-macos-release.sh' \
+  --exclude='build-windows-release.sh' \
   "$DEV_DIR/scripts/" "$PUB_DIR/scripts/"
 
 # desktop/ 不同步 — 桌面端闭源分发，不进入公开仓库
@@ -81,6 +83,7 @@ rsync $RSYNC_FLAGS \
   --exclude='changelog/2026-07-14-desktop-auth-401-headers-drop.md' \
   --exclude='changelog/2026-07-14-desktop-single-arch-bundle.md' \
   --exclude='releases/' \
+  --exclude='repository-architecture.md' \
   --exclude='*.docx' \
   --exclude='*测试*.md' \
   --exclude='*验证*.md' \
