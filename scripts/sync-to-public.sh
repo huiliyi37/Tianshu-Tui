@@ -69,6 +69,18 @@ rsync $RSYNC_FLAGS \
   --exclude='SESSION-MR0AZIEL-DIAGNOSIS.md' \
   --exclude='optimization-design-v2.md' \
   --exclude='desktop-planning-methodology.md' \
+  --exclude='desktop-render-perf-audit.md' \
+  --exclude='DESKTOP-RELEASE*.md' \
+  --exclude='Mac桌面端打包流程.md' \
+  --exclude='WINDOWS-*.md' \
+  --exclude='computer-use-windows-com-smoke.md' \
+  --exclude='changelog-2026-06-17.md' \
+  --exclude='changelog-2026-06-27.md' \
+  --exclude='changelog-2026-06-28.md' \
+  --exclude='changelog/2026-07-10-desktop-dual-tier-basic-pro.md' \
+  --exclude='changelog/2026-07-14-desktop-auth-401-headers-drop.md' \
+  --exclude='changelog/2026-07-14-desktop-single-arch-bundle.md' \
+  --exclude='releases/' \
   --exclude='*.docx' \
   --exclude='*测试*.md' \
   --exclude='*验证*.md' \
@@ -76,7 +88,6 @@ rsync $RSYNC_FLAGS \
   --exclude='*审计*.md' \
   --exclude='*提示词*.md' \
   --exclude='天枢*.html' \
-  --exclude='computer-use-windows-com-smoke.md' \
   --exclude='.DS_Store' \
   "$DEV_DIR/docs/" "$PUB_DIR/docs/"
 
