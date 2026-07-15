@@ -14,6 +14,8 @@ import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotoc
 import type { McpServerConfig } from './config.js'
 import { resolveNpmCliCommand, buildStdioEnvWithNodePath } from '../platform/resolve-node-cli.js'
 
+const DEFAULT_MCP_TIMEOUT_MS = 60_000
+
 export type McpTransportType = 'stdio' | 'streamableHttp' | 'sse-legacy'
 
 export interface TransportFactoryOptions {
@@ -21,13 +23,13 @@ export interface TransportFactoryOptions {
   getHeaders?: () => Promise<Record<string, string>>
   /** Called before spawning for stdio transports — returns env to merge with config.env. */
   getEnv?: () => Promise<Record<string, string>>
-  /** Connect timeout (ms). */
-  timeoutMs: number
+  /** Connect timeout (ms). Defaults to 60s when unset. */
+  timeoutMs?: number
 }
 
 export interface TransportResult {
   client: Client
-  transport: { close(): Promise<void>; pid?: number | null }
+  transport: { close(): Promise<void>; pid?: number | null; onclose?: () => void }
   transportType: McpTransportType
   /** stdio stderr tail for error attribution (undefined for URL transports). */
   stderrTail?: () => string

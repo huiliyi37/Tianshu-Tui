@@ -4,7 +4,7 @@ import type { McpConfig, McpServerConfig } from './config.js'
 import type { McpConnectionState, McpTransportType } from './types.js'
 import { createMcpToolWrapper, createMcpConnectorConsent, type McpConnectorConsent } from './wrapper.js'
 import { classifyMcpError } from './failure-classifier.js'
-import { createTransport, type TransportFactoryResult } from './transport-factory.js'
+import { createTransport, type TransportResult } from './transport-factory.js'
 import { LogRingBuffer } from './log-buffer.js'
 
 const DEFAULT_MCP_TIMEOUT_MS = 60_000
@@ -46,7 +46,7 @@ export interface McpToolDef {
 
 export interface ConnectedServer {
   client: Client
-  transport: TransportFactoryResult['transport']
+  transport: TransportResult['transport']
   serverId: string
   transportType: McpTransportType
   /** Last stdio stderr bytes captured (for error attribution). */
@@ -61,6 +61,8 @@ export class McpManager {
   private timeoutMs: number
   // Per-server reconnect attempt counter (for remote transports).
   private reconnectAttempts: Map<string, number> = new Map()
+  // Reconnect timer handles — cleared on shutdown to prevent reconnect-after-close.
+  private reconnectTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
   // Per-server stderr/event log buffers (ring buffer, 64KB default).
   private logBuffers: Map<string, LogRingBuffer> = new Map()
   // Shared across all wrappers: first use of each connector requires explicit opt-in.
@@ -134,14 +136,13 @@ export class McpManager {
   }
 
   getStates(): McpConnectionState[] {
-    return this.connections.get(serverId)
-  }
-
-  getStates(): McpConnectionState[] {
     return Array.from(this.states.values())
   }
 
   async shutdown(): Promise<void> {
+    // Clear pending reconnect timers before closing transports.
+    for (const [, timer] of this.reconnectTimers) clearTimeout(timer)
+    this.reconnectTimers.clear()
     const closePromises = Array.from(this.connections.values()).map(async (conn) => {
       try {
         await conn.transport.close()
@@ -180,6 +181,9 @@ export class McpManager {
 
   /** Shut down a single server by id — for the REST API restart/remove flow. */
   async shutdownServer(serverId: string): Promise<void> {
+    // Clear pending reconnect timer for this server.
+    const timer = this.reconnectTimers.get(serverId)
+    if (timer) { clearTimeout(timer); this.reconnectTimers.delete(serverId) }
     const conn = this.connections.get(serverId)
     if (conn) {
       // Remove onclose handler to avoid reconnect fighting with shutdown.
@@ -395,13 +399,15 @@ export class McpManager {
       lastErrorAt: Date.now(),
     })
 
-    setTimeout(async () => {
+    const timer = setTimeout(async () => {
+      this.reconnectTimers.delete(serverId)
       try {
         await this._connectAndDiscover(serverId, cfg, /*attempt*/ 0)
       } catch {
         // Error already recorded by _connectAndDiscover.
       }
     }, delay)
+    this.reconnectTimers.set(serverId, timer)
   }
 
   /** @internal Overridable for testing */
