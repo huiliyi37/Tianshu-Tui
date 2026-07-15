@@ -1,17 +1,20 @@
 /**
  * Observation extractor — pull structured facts from assistant output.
  *
- * Three-layer noise gate (post-2026-06-13 upgrade):
+ * Wave 1（知识重构）起本模块**只提取、不落盘**：提取结果作为候选素材
+ * 进入会话级缓冲，由 postSession essence-gate（LLM 准入闸）统一裁决。
+ * 历史教训：正则直写曾产出互相矛盾的规则（jest/vitest/node:test 并存）——
+ * "任何提及"都会触发 FACT_PATTERNS，无互斥校验。
+ *
+ * Noise gates (post-2026-06-13):
  *   G1: Noise filters — reject code fragments, meta-cognition, file paths
  *   G2: Minimum length — ≥20 chars AND ≥5 words
- *   G3: Cross-round dedup — skip if ≥2 similar entries already in unified memory
  *
- * Extraction caps at 3 per round (down from 5); constraint confidence
+ * Extraction caps at 3 per round; constraint confidence
  * calibrated down to 0.7 (highest false-positive rate in practice).
  */
 
-import { appendObservation, type Observation } from './observation-store.js'
-import { countSimilarMemoryEntries } from './unified-memory.js'
+import type { Observation } from './observation-store.js'
 
 // ── G1: Noise detection ───────────────────────────────────────────────────
 
@@ -51,18 +54,6 @@ const FACT_PATTERNS: Array<{ re: RegExp; kind: Observation['kind']; confidence: 
 
 const TEST_FRAMEWORK_RE = /\b(node:test|vitest|jest|mocha)\b/i
 const LINT_RE = /\b(eslint|biome|prettier)\b/i
-
-// ── G3: Cross-round dedup ─────────────────────────────────────────────────
-
-const MAX_PRIOR_OCCURRENCES = 2  // skip if ≥2 similar entries already in memory
-
-function isAlreadyKnown(cwd: string, text: string): boolean {
-  try {
-    return countSimilarMemoryEntries(cwd, text) >= MAX_PRIOR_OCCURRENCES
-  } catch {
-    return false // dedup failure → allow through (don't block on I/O error)
-  }
-}
 
 // ── Main extractor ─────────────────────────────────────────────────────────
 
@@ -149,11 +140,3 @@ export function extractObservations(
   return observations.slice(0, MAX_PER_ROUND)
 }
 
-export function persistExtractedObservations(
-  cwd: string,
-  text: string,
-  sessionId?: string,
-): Observation[] {
-  const extracted = extractObservations(text, sessionId)
-  return extracted.map(e => appendObservation(cwd, e))
-}

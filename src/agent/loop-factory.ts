@@ -28,7 +28,6 @@ import { GoalContinuationController } from './goal-continuation.js'
 import { PostTurnDecisionController } from './post-turn-decision.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { buildGatedInfluenceAuditEvent, persistGatedInfluenceAudit } from './gated-influence-audit.js'
-import { loadProjectRules } from '../context/rules-loader.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
@@ -591,18 +590,88 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       sessionId: self.config.sessionId,
       getUserMessage: () => self.initialUserMessage,
       getStreamedText: () => self.streamedText,
-      // Mid-session rules reload: newly generated .rivet/rules/*.md enter the
-      // claim store immediately (propose is idempotent by claim id) instead of
-      // waiting for the next bootstrap. Claims flow into the prompt via the
-      // refreshActiveClaims → updateActiveClaims channel, not frozenBase.
-      onRuleGenerated: () => {
-        const store = self.config.contextClaimStore
-        if (!store) return
-        try {
-          for (const rule of loadProjectRules(self.cwd)) store.propose(rule)
-        } catch { /* rules reload is best-effort */ }
+      // Wave 1（知识重构）：提取结果只进内存缓冲，postSession essence-gate
+      // 统一裁决准入。不再直写 unified-memory、不再自动生成 .rivet/rules。
+      onObservationCandidates: candidates => {
+        self.knowledgeCandidates.push(...candidates.map(c => ({
+          text: c.text,
+          kind: c.kind,
+          confidence: c.confidence,
+          origin: 'observation' as const,
+          tags: c.tags,
+          sessionId: c.sessionId,
+        })))
+        if (self.knowledgeCandidates.length > 60) {
+          self.knowledgeCandidates.splice(0, self.knowledgeCandidates.length - 60)
+        }
       },
     },
+    // Essence-gate（Wave 2 知识重构）：postSession 知识准入闸。廉价路由优先
+    // compactClient；无任何 client 时不装配（fail-closed：无闸即无写入）。
+    essenceGate: (() => {
+      const gateClient = self.config.compactClient ?? self.config.primaryClient ?? self.config.client
+      if (!gateClient || !self.config.sessionId) return undefined
+      const recordSidePath = createSidePathUsageRecorder(self)
+      return {
+        cwd: self.cwd,
+        sessionId: self.config.sessionId,
+        // 三路素材收口：① 正则观察缓冲 ② agent 手动 remember（scope=project 的
+        // 本会话 claims——memory 工具已停直写，项目级持久化由闸门裁决）③ 失败模式
+        getCandidates: () => {
+          const manualRemembers = (self.config.contextClaimStore?.listClaims({ scope: ['project'] }) ?? [])
+            .filter(c => c.source.sessionId === self.config.sessionId && c.source.eventId.startsWith('memory:'))
+            .map(c => ({
+              text: c.text,
+              kind: c.kind,
+              confidence: c.confidence,
+              origin: 'manual' as const,
+              tags: c.tags,
+              sessionId: self.config.sessionId,
+            }))
+          return [...self.knowledgeCandidates, ...manualRemembers]
+        },
+        getFailureJournal: () => self.failureJournal,
+        complete: async (prompt: string, timeoutMs: number) => {
+          // 独立新建 request（不复用主请求对象）——无 prefixProbe、无 mutation 风险
+          const request = {
+            model: '', // client already binds the model
+            messages: [{ role: 'user' as const, content: prompt }],
+            max_tokens: 2048,
+            stream: true,
+          }
+          const chunks: string[] = []
+          let streamError: Error | undefined
+          const abort = new AbortController()
+          const timer = setTimeout(() => abort.abort(), timeoutMs)
+          try {
+            await gateClient.stream(request, {
+              onTextDelta: text => { chunks.push(text) },
+              onThinkingDelta: () => {},
+              onContentBlock: () => {},
+              onStopReason: (_reason, usage) => {
+                recordSidePath('essence_gate', usage ?? {})
+              },
+              onError: err => { streamError = err },
+            }, abort.signal)
+          } finally {
+            clearTimeout(timer)
+          }
+          if (streamError) throw streamError
+          if (abort.signal.aborted) throw new Error('essence-gate LLM timeout')
+          return chunks.join('')
+        },
+      }
+    })(),
+    // 召回健康账本（Wave 3 知识重构）：memory recall 工具经模块级 tracker 记录，
+    // postSession 聚合落盘 + 连续空召回告警。
+    recallEfficacy: self.config.sessionId ? {
+      cwd: self.cwd,
+      sessionId: self.config.sessionId,
+      getAssistantText: () => self.session.getMessages()
+        .filter(m => m.role === 'assistant' && typeof m.content === 'string')
+        .map(m => m.content as string)
+        .join('\n'),
+    } : undefined,
     userHooksBridge: userBridgeDeps,
     advisoryBus: self.advisoryBus,
     getJobs: () => self.jobs,

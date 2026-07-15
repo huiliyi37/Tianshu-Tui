@@ -285,6 +285,9 @@ export interface VolatileContext {
   planExitReminderPending?: boolean
   /** Project memory loaded from .rivet/knowledge/memory.jsonl (frozen: changes only on file update) */
   projectMemoryBlock?: string
+  /** Knowledge manifest routing index（Wave 4b）——"改 X 前先召回 Y"的地图，
+   *  会话启动快照一次进 frozen base，只留索引不留知识本文。 */
+  knowledgeManifestBlock?: string
   /** Codebase index — module summaries + CLI entries from MeridianDB.
    *  Rendered into frozen base after projectMemoryBlock for prefix cache stability.
    *  Generated at snapshot time from DB, not stored as flat file. */
@@ -974,6 +977,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   // A3: budget cap at 3K chars — beyond that it's stale noise.
   if (ctx.projectMemoryBlock) {
     parts.push(truncateBlock(ctx.projectMemoryBlock, 3_000, 'project-memory'))
+  }
+
+  // Knowledge manifest routing map（Wave 4b）——字节稳定索引，snapshot 时生成。
+  // 只告诉模型"何时召回什么"，知识本文经 memory recall 按需取。
+  if (ctx.knowledgeManifestBlock) {
+    parts.push(truncateBlock(ctx.knowledgeManifestBlock, 2_200, 'knowledge-manifest'))
   }
 
   // Seed capsule — 前辈星域封存的经验方法（天璇胶囊等）。

@@ -74,6 +74,22 @@ export function crossSessionDisabled(configEnabled?: boolean): boolean {
 }
 
 /**
+ * Wave 1（知识重构）：`<cross-session-memory>` 每轮推送注入**默认退位**。
+ *
+ * Store B（unified-memory）的正则观察噪声曾经此通道每个用户边界推给模型；
+ * 按"召回是主通道"原则，跨会话知识只经 memory recall 工具按需取。
+ * 显式回退口：env RIVET_CROSS_SESSION_INJECT=1 恢复推送（对照实验用）。
+ *
+ * 注意与 crossSessionDisabled 的分工：后者门控另外三个点位
+ * （warmup / 跨会话事件 / 伙伴 presence——多会话协作功能，不是知识推送），
+ * 本开关只管记忆块推送，默认关。
+ */
+export function crossSessionMemoryPushEnabled(): boolean {
+  const v = process.env.RIVET_CROSS_SESSION_INJECT
+  return v === '1' || v === 'true'
+}
+
+/**
  * B4（将星点亮·贪狼触发面）：勘探/盘点类任务关键词。
  * 贪狼是任务型触发（objective 语义），不是状态型触发（CCR 的 P 规则管状态）——
  * 勘探停滞已有 P6 覆盖，这里只在任务意图分类处点一盏 informational 灯。
@@ -356,7 +372,9 @@ export class TurnStepProducer {
       skillRegistry.renderDiscoveryBlock(userInput, { exclude: this.self.getDisabledSkills() }),
     )
     this.self.config.promptEngine.setCrossSessionMemoryBlock(
-      crossSessionDisabled(this.self.config.crossSessionEnabled) ? null : renderMemoryBlock(this.self.cwd, userInput),
+      crossSessionMemoryPushEnabled() && !crossSessionDisabled(this.self.config.crossSessionEnabled)
+        ? renderMemoryBlock(this.self.cwd, userInput)
+        : null,
     )
     this.self.config.promptEngine.setMentionContextBlock(renderMentionContext(parseMentions(userInput)))
 

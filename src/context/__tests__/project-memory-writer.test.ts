@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appendProjectMemory, compactProjectMemory } from '../project-memory-writer.js'
+import { appendProjectMemory, compactProjectMemory, readCommitFacts } from '../project-memory-writer.js'
 
 function claim(id: string, confidence: number, createdAt: number, text = `Claim ${id}`) {
   return {
@@ -44,7 +44,7 @@ describe('project-memory-writer', () => {
     }
   })
 
-  it('persists tags so commit facts can remain recall-only', () => {
+  it('routes commit facts to the sidecar, keeping the 200-entry main quota clean', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-memory-writer-'))
     try {
       appendProjectMemory(dir, {
@@ -56,8 +56,35 @@ describe('project-memory-writer', () => {
         tags: ['tool', 'commit_fact'],
       })
 
-      const entries = readEntries(dir)
-      assert.deepEqual(entries[0]!.tags, ['tool', 'commit_fact'])
+      // Wave 1（知识重构）：commit_fact confidence=0.95 曾在主存储 compact 时
+      // 挤掉 0.7 的 dream 蒸馏产物——分流侧车后不再竞争主配额。
+      assert.equal(existsSync(memoryPath(dir)), false, 'commit facts must not enter memory.jsonl')
+      const sidecar = readCommitFacts(dir)
+      assert.equal(sidecar.length, 1)
+      assert.equal(sidecar[0]!.id, 'commit-1')
+      assert.deepEqual(sidecar[0]!.tags, ['tool', 'commit_fact'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('commit-fact sidecar enforces FIFO cap independent of main store', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-memory-writer-'))
+    try {
+      for (let i = 0; i < 305; i++) {
+        appendProjectMemory(dir, {
+          id: `commit-${i}`,
+          kind: 'decision',
+          text: `Commit fact number ${i}`,
+          confidence: 0.95,
+          createdAt: i,
+          tags: ['commit_fact'],
+        })
+      }
+      const sidecar = readCommitFacts(dir)
+      assert.equal(sidecar.length, 300)
+      assert.equal(sidecar[0]!.id, 'commit-5', 'oldest entries evicted FIFO')
+      assert.equal(sidecar[299]!.id, 'commit-304')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

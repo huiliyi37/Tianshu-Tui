@@ -49,16 +49,15 @@ export class ContextInjectionController {
   }
 
   /**
-   * Playbook lessons 注入（复活）。历史禁用原因与对策：
-   *  1. 低信号噪音 → `minImportance: 0.5` 质量闸。新蒸馏 bullet 初始 0.6-0.7 可入选，
-   *     recordUsage +0.05 强化，被用的活下来；没人用的随时间衰减到 0.5 以下自动出局。
-   *  2. 每 turn 重查导致 habituation 抖动 → consolidated 突变 → 前缀缓存破。
-   *     现在**每会话只查一次**（首个 user input 的 keyword），会话内 lessons 恒定，
-   *     habituation 干净地晋升进 <consolidated>，前缀不再抖。
-   * 渲染走 appendix/consolidated 通道（volatile.ts <historical-lessons>），不动
-   * frozenBase；onLessonsRendered → recordUsage 回路（loop.ts）随渲染自然复活。
+   * Playbook lessons 注入——**Wave 4（知识重构）起默认撤出推送通道**。
+   *
+   * 按"召回是主通道"原则，playbook 教训不再进 `<historical-lessons>` appendix，
+   * 只经 memory recall 工具按需取。env `RIVET_PLAYBOOK_INJECT=1` 恢复推送
+   * （对照实验回退口）。恢复时仍保留历史对策：minImportance 质量闸 +
+   * 每会话只查一次（habituation 不抖前缀）。
    */
   refreshPlaybookLessons(userInput: string): void {
+    if (process.env.RIVET_PLAYBOOK_INJECT !== '1' && process.env.RIVET_PLAYBOOK_INJECT !== 'true') return
     if (this.playbookLessonsLoaded) return
     const store = this.deps.getPlaybookStore()
     if (!store) return

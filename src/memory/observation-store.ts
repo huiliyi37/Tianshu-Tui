@@ -1,16 +1,20 @@
 /**
- * Cross-session observation store — ~/.rivet/memory/<project-hash>/observations.jsonl
+ * Cross-session observation store — **write path disabled since Wave 2（知识重构）**.
+ *
+ * 历史职责：把正则提取的观察双写到 `~/.rivet/memory/<project-hash>/observations.jsonl`
+ * 和 unified-memory。这是噪声链的落盘端——"任何提及"都会触发的 FACT_PATTERNS
+ * 曾把互相矛盾的事实写成持久知识。
+ *
+ * 现状：
+ * - `appendObservation` 不再持久化（返回构造好的记录，仅供内存缓冲/测试）
+ * - 读路径保留：legacy observations.jsonl 只读兼容（历史数据召回）
+ * - 观察类素材的准入由 postSession essence-gate 统一裁决（essence-gate.ts）
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { memoryDir } from '../config/paths.js'
-import { appendMemoryEntry } from './unified-memory.js'
-import { migrateObservationsToUnified } from './unified-memory.js'
-
-/** Track which cwds have had migration attempted (lazy, on first append). */
-const _migrated = new Set<string>()
 
 export interface Observation {
   id: string
@@ -35,17 +39,12 @@ function observationsPath(cwd: string): string {
   return join(projectMemoryDir(cwd), 'observations.jsonl')
 }
 
-export function appendObservation(cwd: string, obs: Omit<Observation, 'id' | 'ts'> & { id?: string; ts?: number }): Observation {
-  const dir = projectMemoryDir(cwd)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-
-  // Lazy auto-migrate old observations.jsonl → memory.jsonl on first write
-  if (!_migrated.has(cwd)) {
-    _migrated.add(cwd)
-    try { migrateObservationsToUnified(cwd) } catch { /* migration failure is non-critical */ }
-  }
-
-  const record: Observation = {
+/**
+ * @deprecated Wave 2 起不再落盘——构造并返回记录，但不写任何文件。
+ * 观察素材应进入会话级缓冲，由 essence-gate 裁决后经 appendMemoryEntry 入库。
+ */
+export function appendObservation(_cwd: string, obs: Omit<Observation, 'id' | 'ts'> & { id?: string; ts?: number }): Observation {
+  return {
     id: obs.id ?? `obs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     text: obs.text.slice(0, 500),
     kind: obs.kind,
@@ -55,29 +54,9 @@ export function appendObservation(cwd: string, obs: Omit<Observation, 'id' | 'ts
     ts: obs.ts ?? Date.now(),
     sessionId: obs.sessionId,
   }
-
-  // Dual-write to unified memory log first (primary store), then legacy log.
-  // If the legacy write fails, the unified entry is already persisted.
-  appendMemoryEntry(cwd, {
-    id: record.id,
-    text: record.text,
-    kind: record.kind,
-    confidence: record.confidence,
-    source: record.source === 'user' ? 'manual' : record.source === 'agent' ? 'manual' : record.source,
-    status: 'observed',
-    tags: [...record.tags, `obs-source:${record.source}`],
-    sessionId: record.sessionId,
-  })
-
-  try {
-    appendFileSync(observationsPath(cwd), JSON.stringify(record) + '\n', 'utf-8')
-  } catch {
-    // Legacy log write failure is non-critical — unified log already persisted
-  }
-
-  return record
 }
 
+/** Read legacy observations (read-only compat — write path is dead). */
 export function readObservations(cwd: string): Observation[] {
   const path = observationsPath(cwd)
   if (!existsSync(path)) return []
@@ -95,7 +74,7 @@ export function readObservations(cwd: string): Observation[] {
   return results
 }
 
-/** Keyword recall — score observations by term overlap with query. */
+/** Keyword recall over legacy observations — score by term overlap with query. */
 export function recallObservations(cwd: string, query: string, limit = 5): Observation[] {
   const terms = query.toLowerCase().split(/\W+/).filter(t => t.length >= 3)
   if (terms.length === 0) return []
@@ -116,29 +95,6 @@ export function recallObservations(cwd: string, query: string, limit = 5): Obser
     .sort((a, b) => b.score - a.score || b.obs.ts - a.obs.ts)
 
   return scored.slice(0, limit).map(s => s.obs)
-}
-
-export function renderMemoryBlock(cwd: string, query: string, maxChars = 2000): string | null {
-  const recalled = recallObservations(cwd, query, 8)
-  if (recalled.length === 0) return null
-
-  const lines = ['<cross-session-memory>']
-  let budget = maxChars
-  for (const obs of recalled) {
-    const line = `  <obs kind="${obs.kind}" c="${obs.confidence.toFixed(2)}">${escapeXml(obs.text)}</obs>`
-    if (line.length > budget) break
-    lines.push(line)
-    budget -= line.length
-  }
-  lines.push('</cross-session-memory>')
-  return lines.join('\n')
-}
-
-function escapeXml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
 }
 
 /** Count how many times an observation text (normalized) has appeared. */

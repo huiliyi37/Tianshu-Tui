@@ -10,21 +10,20 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimKind, ContextClaimScope } from '../context/claims.js'
 import type { ToolDefinition } from '../api/types.js'
-import { loadAllProjectMemoryEntries } from '../context/project-memory-loader.js'
-import { recallMemoryEntries, type MemoryKind } from '../memory/unified-memory.js'
-import { appendProjectMemory, compactProjectMemory } from '../context/project-memory-writer.js'
-import { stat, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import type { MemoryKind } from '../memory/unified-memory.js'
+import { getKnowledgeIndex } from '../memory/knowledge-index.js'
+import { getRecallTracker } from '../memory/recall-efficacy.js'
+import { readCommitFacts } from '../context/project-memory-writer.js'
 
 // ── recall helpers ──
 
 const DEFINITION: ToolDefinition = {
   name: 'memory',
-  description: `Search and persist context memory claims across sessions.
+  description: `Search and persist project knowledge across sessions.
 
 ### Actions
-- recall: Search historical claims in context memory by keyword. Returns matching claims with their status, kind, and evidence.
-- remember: Persist a claim to context memory (decisions, observations, verification facts, failure patterns, or project rules) that survives compaction and is recallable later.
+- recall: Hybrid search over the project knowledge base (structured entries + knowledge/*.md + playbook lessons). Supports kind/topic/source filters; returns only currently-valid entries by default (superseded knowledge needs includeHistory).
+- remember: Persist a claim (decisions, observations, verification facts, failure patterns, or project rules). Session scope is immediate; project scope passes a session-end quality gate before entering the shared knowledge base.
 
 ### Claim kinds (for remember)
 - decision — architectural or implementation decisions made
@@ -37,9 +36,13 @@ const DEFINITION: ToolDefinition = {
     properties: {
       action: { type: 'string', enum: ['recall', 'remember'], description: 'recall: search memory; remember: store a claim' },
       // recall params
-      query: { type: 'string', description: 'Search keyword (substring match on claim text). Required for recall.' },
+      query: { type: 'string', description: 'Search keywords (hybrid BM25 + structured filters over the project knowledge base). Required for recall.' },
       kind: { type: 'string', enum: ['user_constraint', 'user_preference', 'decision', 'file_observation', 'verification_fact', 'failure_pattern', 'security_finding', 'worker_finding', 'project_rule'], description: 'Filter by claim kind' },
+      topic: { type: 'string', description: 'Filter by topic scope (module/subject metadata) for recall' },
+      source: { type: 'string', enum: ['playbook'], description: 'Restrict recall to a specific source. "playbook" returns only distilled playbook lessons.' },
       limit: { type: 'number', default: 5, description: 'Max results to return' },
+      includeHistory: { type: 'boolean', default: false, description: 'Include superseded/expired knowledge entries in recall results (default: only current)' },
+      includeCommitFacts: { type: 'boolean', default: false, description: 'Include historical commit facts in recall results (auto-enabled when query looks like a commit hash)' },
       // remember params
       text: { type: 'string', description: 'The claim text — be concise and specific (1-3 sentences). Required for remember.' },
       scope: { type: 'string', enum: ['session', 'project'], default: 'session', description: 'Lifetime: session (dies with session) or project (survives across sessions)' },
@@ -48,25 +51,6 @@ const DEFINITION: ToolDefinition = {
     },
     required: ['action'],
   },
-}
-
-export async function searchKnowledgeFiles(cwd: string, query: string): Promise<string[]> {
-  const dir = join(cwd, '.rivet', 'knowledge')
-  try { await stat(dir) } catch { return [] }
-  const { readdir } = await import('node:fs/promises')
-  const entries = await readdir(dir)
-  const lower = query.toLowerCase()
-  const matches: string[] = []
-  for (const entry of entries) {
-    if (!entry.endsWith('.md')) continue
-    try {
-      const content = await readFile(join(dir, entry), 'utf-8')
-      if (content.toLowerCase().includes(lower)) {
-        matches.push(entry.replace(/\.md$/, ''))
-      }
-    } catch { /* skip unreadable */ }
-  }
-  return matches
 }
 
 export interface MemoryContext {
@@ -92,29 +76,59 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
         if (!query) return { content: 'Error: query is required for recall', isError: true }
 
         const kind = typeof params.input.kind === 'string' ? params.input.kind as MemoryKind : undefined
+        const topic = typeof params.input.topic === 'string' ? params.input.topic.trim() : undefined
         const limit = typeof params.input.limit === 'number' ? params.input.limit : 5
+        const includeHistory = params.input.includeHistory === true
+        const source = params.input.source === 'playbook' ? 'playbook' as const : undefined
 
-        // Also search .rivet/knowledge/ markdown files
         const cwd = ctx?.cwd ?? process.cwd()
 
-        const entries = recallMemoryEntries(cwd, query, limit, kind)
-        const knowledgeMatches = await searchKnowledgeFiles(cwd, query)
+        // Hybrid 检索（Wave 3）：BM25 + 结构过滤 + 时间加权，统一覆盖
+        // 知识条目、knowledge/*.md 分块与 playbook 教训。默认只返回 current 叶子。
+        const hits = await getKnowledgeIndex(cwd).search(query, { limit, kind, topic, includeHistory, source })
 
-        // Load project-level memory
-        const projectEntries = await loadAllProjectMemoryEntries(cwd)
+        // commit_fact 侧车：显式请求或 query 形如 commit hash 时才查
+        const looksLikeCommitHash = /\b[0-9a-f]{7,40}\b/i.test(query)
+        const includeCommitFacts = params.input.includeCommitFacts === true || looksLikeCommitHash
+        const commitFacts = includeCommitFacts
+          ? readCommitFacts(cwd)
+              .filter(e => e.text.toLowerCase().includes(query.toLowerCase())
+                || query.toLowerCase().split(/\W+/).filter(t => t.length >= 3).some(t => e.text.toLowerCase().includes(t)))
+              .slice(-limit)
+          : []
+
+        // 召回健康账本（Wave 3）：记录每次召回的空/命中，postSession 聚合落盘
+        if (ctx?.sessionId) {
+          getRecallTracker(ctx.sessionId).record(query, hits.map(h => ({ text: h.text })))
+        }
 
         const lines: string[] = []
-        if (entries.length > 0) {
-          lines.push(`Cross-session memory (${entries.length}):`)
-          for (const e of entries) lines.push(`- ${e.kind}: ${e.text}`)
+        const entryHits = hits.filter(h => h.entry)
+        const mdHits = hits.filter(h => h.file)
+        if (entryHits.length > 0) {
+          lines.push(`Knowledge entries (${entryHits.length}):`)
+          for (const h of entryHits) {
+            const e = h.entry!
+            const meta: string[] = []
+            if (e.topic) meta.push(`topic:${e.topic}`)
+            if (e.evidence) meta.push(`evidence:${e.evidence.slice(0, 60)}`)
+            if (e.sessionId) meta.push(`session:${e.sessionId.slice(0, 8)}`)
+            if (e.supersededBy) meta.push(`superseded-by:${e.supersededBy}`)
+            lines.push(`- [${e.kind}] ${e.text}${meta.length > 0 ? ` (${meta.join(', ')})` : ''}`)
+          }
         }
-        if (projectEntries.length > 0) {
-          lines.push(`Project memory (${projectEntries.length}):`)
-          for (const e of projectEntries) lines.push(`- ${e.kind}: ${e.text}`)
+        if (mdHits.length > 0) {
+          lines.push(`Knowledge files (${mdHits.length}):`)
+          for (const h of mdHits) lines.push(`- ${h.file}: ${h.text.slice(0, 160).replace(/\n/g, ' ')}`)
         }
-        if (knowledgeMatches.length > 0) {
-          lines.push(`Knowledge files (${knowledgeMatches.length}):`)
-          for (const m of knowledgeMatches) lines.push(`- ${m}`)
+        const playbookHits = hits.filter(h => h.playbook)
+        if (playbookHits.length > 0) {
+          lines.push(`Playbook lessons (${playbookHits.length}):`)
+          for (const h of playbookHits) lines.push(`- ${h.text.replace(/\n/g, ' ')}`)
+        }
+        if (commitFacts.length > 0) {
+          lines.push(`Commit facts (${commitFacts.length}):`)
+          for (const e of commitFacts) lines.push(`- ${e.text}`)
         }
         if (lines.length === 0) return { content: `No memory found for "${query}".` }
         return { content: lines.join('\n') }
@@ -138,7 +152,7 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
       const sessionId = ctx?.sessionId ?? 'unknown'
 
       const createdAt = Date.now()
-      const claim = store.propose({
+      store.propose({
         kind,
         text,
         scope,
@@ -150,16 +164,12 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
         tags: tags ?? [],
       })
 
-      // Also persist to project memory if scope is project
-      if (scope === 'project' && ctx?.cwd) {
-        appendProjectMemory(ctx.cwd, {
-          id: claim.id,
-          kind,
-          text,
-          confidence,
-          createdAt,
-        })
-        compactProjectMemory(ctx.cwd)
+      // Wave 2（知识重构）：project scope 不再直写 .rivet/knowledge/memory.jsonl。
+      // 项目级持久化统一走 postSession essence-gate（LLM 准入闸）——claim store
+      // 中 scope=project 的本会话条目由闸门收口裁决（loop-factory essenceGate 接线）。
+      // 会话内该条目经 active-claims 通道立即可见，不受影响。
+      if (scope === 'project') {
+        return { content: `✅ Remembered: [${kind}] ${text}\n(project-scope persistence pending session-end quality gate)` }
       }
 
       return { content: `✅ Remembered: [${kind}] ${text}` }

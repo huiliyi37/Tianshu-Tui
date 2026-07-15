@@ -27,6 +27,8 @@ import { createBlindExplorationHook } from './hooks/blind-exploration-hook.js'
 import { createMCTSPlanningHook } from './hooks/mcts-planning-hook.js'
 import { createDispatcherHook, type DispatcherHookDeps } from './hooks/dispatcher-hook.js'
 import { createMemoryLearningPostTurnHook, type MemoryLearningHookDeps } from './hooks/memory-learning-hook.js'
+import { createEssenceGateHook, type EssenceGateHookDeps } from './hooks/essence-gate-hook.js'
+import { createRecallEfficacyHook, type RecallEfficacyHookDeps } from './hooks/recall-efficacy-hook.js'
 import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-hooks-bridge.js'
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
@@ -108,6 +110,10 @@ export interface RuntimeHookDeps {
     getTrajectory: () => TrajectoryEntry[]
     getFailureJournal?: () => import('./failure-journal.js').FailureJournal
   }
+  /** Essence-gate（postSession 知识准入闸）。缺省不装配 = fail-closed 无写入。 */
+  essenceGate?: EssenceGateHookDeps
+  /** 召回健康账本（postSession 聚合落盘）。 */
+  recallEfficacy?: RecallEfficacyHookDeps
   playbookStore?: PlaybookStore
   /** Live registry skills (name+triggers) for skill-distill dedup. */
   getRegisteredSkills?: () => Array<{ name: string; triggers: RegExp[] }>
@@ -390,6 +396,17 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
         getObjective: deps.getObjective,
       }))
     }
+  }
+
+  // Essence-gate（Wave 2 知识重构）：postSession 知识准入闸。
+  // deps-gated——没有廉价 LLM complete 通道就不装配（fail-closed：无闸即无写入）。
+  if (deps.essenceGate) {
+    hooks.push(createEssenceGateHook(deps.essenceGate))
+  }
+
+  // 召回健康账本（Wave 3 知识重构）：postSession 聚合空召回率/引用率落盘。
+  if (deps.recallEfficacy) {
+    hooks.push(createRecallEfficacyHook(deps.recallEfficacy))
   }
 
   if (deps.telemetryWriter && deps.getPhysarumShadowStats) {

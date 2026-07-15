@@ -1,12 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const MAX_RENDER_CHARS = 2_000 // ~500 tokens for Tier 1 injection (conservative)
+const MAX_RENDER_CHARS = 1_500 // ~375 tokens for Tier 1 injection (Wave 4 收紧)
 
-/** Kinds eligible for Tier 1 prompt injection (high-signal, low-noise). */
-const TIER1_KINDS = new Set(['decision', 'project_rule', 'user_constraint', 'failure_pattern'])
+/**
+ * Kinds eligible for Tier 1 prompt injection (high-signal, low-noise).
+ * Wave 4（知识重构）收紧：decision / failure_pattern 转 recall-only——
+ * 决策与失败模式属"需要时找得回"的知识，不属"每轮都推给模型"的约束。
+ */
+const TIER1_KINDS = new Set(['project_rule', 'user_constraint'])
 /** Minimum confidence for Tier 1 injection. */
-const TIER1_MIN_CONFIDENCE = 0.9
+const TIER1_MIN_CONFIDENCE = 0.95
 
 interface MemoryEntry {
   id: string
@@ -45,7 +49,7 @@ function readMemoryEntries(cwd: string): MemoryEntry[] {
 
 /**
  * Load Tier 1 project memory for frozen volatile block injection.
- * Only includes high-confidence decisions, project rules, and user constraints.
+ * Only includes high-confidence project rules and user constraints.
  * Everything else is available via the recall tool (Tier 2).
  */
 export function loadProjectMemory(cwd: string): ProjectMemoryBlock {
@@ -74,12 +78,43 @@ export function loadProjectMemory(cwd: string): ProjectMemoryBlock {
 }
 
 /**
- * Load all project memory entries (Tier 1 + Tier 2) for recall tool search.
- * Returns raw entries sorted by confidence, without rendering or budget cap.
+ * Load all project memory entries (Tier 1 + Tier 2), unfiltered.
+ *
+ * Internal use only（compact、迁移、诊断）。recall 工具**不得**调用——
+ * 全量 dump 曾把 187 条 commit 搬运噪声原样灌给模型（Wave 1 修复）。
  */
 export function loadAllProjectMemoryEntries(cwd: string): MemoryEntry[] {
   return readMemoryEntries(cwd)
     .sort((a, b) => b.confidence - a.confidence || b.createdAt - a.createdAt)
+}
+
+/**
+ * Query project memory by keyword relevance — the recall-tool entry point.
+ * Scores by term overlap (text ×2, tags ×1) weighted by confidence;
+ * commit_fact entries are excluded (they live in the sidecar, see
+ * project-memory-writer.readCommitFacts).
+ */
+export function queryProjectMemoryEntries(cwd: string, query: string, limit = 5): MemoryEntry[] {
+  const terms = query.toLowerCase().split(/\W+/).filter(t => t.length >= 3)
+  if (terms.length === 0) return []
+
+  const scored = readMemoryEntries(cwd)
+    .filter(e => !isCommitFact(e))
+    .map(entry => {
+      const text = entry.text.toLowerCase()
+      const tagText = (entry.tags ?? []).join(' ').toLowerCase()
+      let score = 0
+      for (const term of terms) {
+        if (text.includes(term)) score += 2
+        if (tagText.includes(term)) score += 1
+      }
+      score *= entry.confidence
+      return { entry, score }
+    })
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score || b.entry.createdAt - a.entry.createdAt)
+
+  return scored.slice(0, limit).map(s => s.entry)
 }
 
 function isCommitFact(entry: MemoryEntry): boolean {

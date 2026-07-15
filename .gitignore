@@ -46,6 +46,7 @@ docs/superpowers/specs/*.md
 .rivet/meridian.db*
 .rivet/playbook.jsonl
 .rivet/knowledge/memory.jsonl
+.rivet/knowledge/commit-facts.jsonl
 .rivet/knowledge/advisory-efficacy.jsonl
 .rivet/generals/*.md
 .gitlog_temp.txt

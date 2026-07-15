@@ -1,18 +1,27 @@
 /**
  * Unified Memory — single JSONL log for cross-session observations, claims, and rules.
  *
- * Replaces the fragmented ObservationStore + ClaimStore + ProjectMemory trifecta
- * with one append-only log. The ClaimStore retains its event-sourcing lifecycle
- * for session-scoped claims; this module covers the cross-session / auto-extracted
- * tier that feeds recall and prompt injection.
+ * Wave 2（知识重构·存储统一）：schema 采 Store B（本模块）的丰富字段，
+ * **存储位置迁到项目内** `.rivet/knowledge/memory.jsonl`（原 Store A 位置）。
+ * 理由：知识沉淀在开发者项目里——项目内路径随仓库走、可共享；旧的
+ * `~/.rivet/memory/<cwd-hash>/` 按 cwd 哈希定位，目录移动/换机即知识孤儿化。
  *
- * Storage: ~/.rivet/memory/<project-hash>/memory.jsonl
+ * Schema v2 增强（mempalace 时间窗 + cognition-mcp 可迁移性）：
+ *   - validFrom/validTo：温度有效性窗口——知识失效用封口，不删除
+ *   - supersededBy：被新条目取代的链式引用，召回只返回当前叶子
+ *   - transferableTo：适用范围（salvage 准入形态，回答不了即不准入）
+ *   - topic：作用域元数据（模块/主题，供召回预过滤）
+ *
+ * 旧机器目录（legacy Store B）保留为只读兼容层：读路径 dual-read 合并，
+ * 迁移 B → A 幂等按 id（正则观察产物 source='auto' 默认不迁——那是噪声）。
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { memoryDir } from '../config/paths.js'
+import { appendKnowledgeJsonl } from '../context/project-memory-writer.js'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 
 // ── Schema ─────────────────────────────────────────────────────────────────
 
@@ -30,8 +39,14 @@ export type MemoryKind =
   | 'security_finding'
   | 'worker_finding'
   | 'project_rule'
+  // Dream curated criteria（Store A 既有 kind，统一后纳入联合类型）
+  | 'convergence_insight'
+  | 'architectural_invariant'
+  | 'selection_rule'
+  | 'conceptual_reframe'
+  | 'reusable_design_pattern'
 
-export type MemorySource = 'auto' | 'manual' | 'claim' | 'verification'
+export type MemorySource = 'auto' | 'manual' | 'claim' | 'verification' | 'dream' | 'essence-gate'
 
 export type MemoryStatus = 'observed' | 'claimed' | 'verified' | 'rejected' | 'expired'
 
@@ -46,14 +61,25 @@ export interface MemoryEntry {
   sessionId?: string
   tags: string[]
   ts: number
-  /** Cross-session repeat count (>=3 triggers rule generation). */
+  /** Cross-session repeat count. */
   repeatCount: number
-  /** Path to auto-generated rule file, if promoted. */
+  /** Path to auto-generated rule file, if promoted (legacy — rule autogen 已停用). */
   promotedToRule?: string
   /** Extension: original claim ID if sourced from ClaimStore. */
   claimId?: string
   /** Extension: references to evidence files that still exist. */
   fileRefs?: string[]
+  // ── Schema v2 (Wave 2) ──
+  /** 生效时间（缺省 = ts）。 */
+  validFrom?: number
+  /** 失效时间。有值 = 已封口（被取代或过期），召回默认不返回。 */
+  validTo?: number
+  /** 被哪个条目取代（id 引用）。召回跟随链条找最新叶子。 */
+  supersededBy?: string
+  /** 适用范围（cognition-mcp salvage）——回答不了"可迁移到哪"的知识不配准入。 */
+  transferableTo?: string[]
+  /** 作用域元数据（模块/主题），召回结构化预过滤用。 */
+  topic?: string
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -62,28 +88,77 @@ function projectHash(cwd: string): string {
   return createHash('sha256').update(cwd).digest('hex').slice(0, 12)
 }
 
-function projectMemoryDir(cwd: string): string {
-  return memoryDir(projectHash(cwd))
+/** Legacy Store B 机器目录（只读兼容层）。 */
+function legacyMemoryPath(cwd: string): string {
+  return join(memoryDir(projectHash(cwd)), 'memory.jsonl')
 }
 
+/** 统一后的主存储：项目内 `.rivet/knowledge/memory.jsonl`。 */
 function memoryPath(cwd: string): string {
-  return join(projectMemoryDir(cwd), 'memory.jsonl')
+  return join(cwd, '.rivet', 'knowledge', 'memory.jsonl')
 }
 
 function generateId(): string {
   return `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+/** 归一化：容忍 Store A 旧 schema（createdAt 而非 ts，无 status/repeatCount）。 */
+function normalizeEntry(raw: Record<string, unknown>): MemoryEntry | null {
+  if (!raw.id || !raw.text) return null
+  return {
+    id: String(raw.id),
+    text: String(raw.text),
+    kind: (raw.kind ?? 'fact') as MemoryKind,
+    confidence: typeof raw.confidence === 'number' ? raw.confidence : 0.5,
+    source: (raw.source ?? 'manual') as MemorySource,
+    status: (raw.status ?? 'observed') as MemoryStatus,
+    evidence: typeof raw.evidence === 'string' ? raw.evidence : undefined,
+    sessionId: typeof raw.sessionId === 'string' ? raw.sessionId : undefined,
+    tags: Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === 'string') : [],
+    ts: typeof raw.ts === 'number' ? raw.ts : (typeof raw.createdAt === 'number' ? raw.createdAt : 0),
+    repeatCount: typeof raw.repeatCount === 'number' ? raw.repeatCount : 1,
+    promotedToRule: typeof raw.promotedToRule === 'string' ? raw.promotedToRule : undefined,
+    claimId: typeof raw.claimId === 'string' ? raw.claimId : undefined,
+    fileRefs: Array.isArray(raw.fileRefs) ? raw.fileRefs.filter((f): f is string => typeof f === 'string') : undefined,
+    validFrom: typeof raw.validFrom === 'number' ? raw.validFrom : undefined,
+    validTo: typeof raw.validTo === 'number' ? raw.validTo : undefined,
+    supersededBy: typeof raw.supersededBy === 'string' ? raw.supersededBy : undefined,
+    transferableTo: Array.isArray(raw.transferableTo) ? raw.transferableTo.filter((t): t is string => typeof t === 'string') : undefined,
+    topic: typeof raw.topic === 'string' ? raw.topic : undefined,
+  }
+}
+
+function readJsonlEntries(path: string): MemoryEntry[] {
+  if (!existsSync(path)) return []
+  const results: MemoryEntry[] = []
+  try {
+    for (const line of readFileSync(path, 'utf-8').split('\n').filter(Boolean)) {
+      try {
+        const entry = normalizeEntry(JSON.parse(line))
+        if (entry) results.push(entry)
+      } catch { /* skip malformed */ }
+    }
+  } catch {
+    return []
+  }
+  return results
+}
+
+/** 条目当前是否有效（未封口、未被取代）。 */
+export function isCurrentEntry(entry: MemoryEntry): boolean {
+  if (entry.validTo !== undefined && entry.validTo <= Date.now()) return false
+  if (entry.supersededBy) return false
+  if (entry.status === 'expired' || entry.status === 'rejected') return false
+  return true
+}
+
 // ── Write ──────────────────────────────────────────────────────────────────
 
-/** Append a memory entry to the unified log. Deduplicates by normalized text. */
+/** Append a memory entry to the unified log (project-local since Wave 2). */
 export function appendMemoryEntry(
   cwd: string,
   partial: Omit<MemoryEntry, 'id' | 'ts' | 'repeatCount'> & { id?: string; ts?: number },
 ): MemoryEntry {
-  const dir = projectMemoryDir(cwd)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-
   // Count existing similar entries for repeatCount — streaming scan, no full parse.
   const normalized = partial.text.trim().toLowerCase().slice(0, 200)
   let repeatCount = 1
@@ -115,40 +190,95 @@ export function appendMemoryEntry(
     promotedToRule: partial.promotedToRule,
     claimId: partial.claimId,
     fileRefs: partial.fileRefs,
+    validFrom: partial.validFrom,
+    validTo: partial.validTo,
+    supersededBy: partial.supersededBy,
+    transferableTo: partial.transferableTo,
+    topic: partial.topic,
   }
 
-  appendFileSync(memoryPath(cwd), JSON.stringify(entry) + '\n', 'utf-8')
+  // 共用 project-memory-writer 的锁协议写入项目内知识库
+  appendKnowledgeJsonl(cwd, 'memory.jsonl', compactUndefined(entry))
   return entry
+}
+
+/** JSONL 落盘前剥离 undefined 字段——保持行字节紧凑且解析回读等价。 */
+function compactUndefined<T extends object>(obj: T): T {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T
+}
+
+/**
+ * Supersede 封口：旧条目标记 validTo + supersededBy，指向取代它的新条目。
+ * 不删除——知识失效是迭代，不是遗忘（mempalace invalidate 语义）。
+ * 只重写项目主存储；legacy Store B 只读不动。
+ */
+export function supersedeMemoryEntry(cwd: string, oldId: string, newId: string): boolean {
+  const path = memoryPath(cwd)
+  if (!existsSync(path)) return false
+
+  let found = false
+  const lines: string[] = []
+  try {
+    for (const line of readFileSync(path, 'utf-8').split('\n').filter(Boolean)) {
+      try {
+        const raw = JSON.parse(line)
+        if (raw.id === oldId && !raw.supersededBy) {
+          raw.validTo = Date.now()
+          raw.supersededBy = newId
+          raw.status = 'expired'
+          found = true
+          lines.push(JSON.stringify(raw))
+          continue
+        }
+      } catch { /* keep malformed line as-is */ }
+      lines.push(line)
+    }
+  } catch {
+    return false
+  }
+
+  if (!found) return false
+  writeFileAtomicSync(path, lines.join('\n') + '\n')
+  return true
 }
 
 // ── Read ───────────────────────────────────────────────────────────────────
 
-/** Read all memory entries from the unified log. */
+/**
+ * Read all memory entries. Dual-read（过渡期）：项目主存储优先，
+ * legacy Store B 机器目录 fallback 合并（按 id 去重，项目侧胜出）。
+ */
 export function readMemoryEntries(cwd: string): MemoryEntry[] {
-  const path = memoryPath(cwd)
-  if (!existsSync(path)) return []
+  const primary = readJsonlEntries(memoryPath(cwd))
+  const legacy = readJsonlEntries(legacyMemoryPath(cwd))
+  if (legacy.length === 0) return primary
 
-  const results: MemoryEntry[] = []
-  try {
-    for (const line of readFileSync(path, 'utf-8').split('\n').filter(Boolean)) {
-      try {
-        results.push(JSON.parse(line) as MemoryEntry)
-      } catch { /* skip malformed */ }
-    }
-  } catch {
-    return []
+  const seen = new Set(primary.map(e => e.id))
+  const merged = [...primary]
+  for (const entry of legacy) {
+    if (!seen.has(entry.id)) merged.push(entry)
   }
-  return results
+  return merged
 }
 
 // ── Recall ─────────────────────────────────────────────────────────────────
 
-/** Keyword recall — score entries by term overlap with query. */
+export interface RecallOptions {
+  kindFilter?: MemoryKind | MemoryKind[]
+  /** 作用域过滤（topic 元数据完全匹配或子串）。 */
+  topic?: string
+  /** 默认只返回 current 叶子；true 时包含已封口/被取代的历史。 */
+  includeHistory?: boolean
+}
+
+/** Keyword recall — score entries by term overlap with query.
+ *  默认只返回当前有效条目（validity 窗口 + supersede 链过滤）。 */
 export function recallMemoryEntries(
   cwd: string,
   query: string,
   limit = 5,
   kindFilter?: MemoryKind | MemoryKind[],
+  options?: Omit<RecallOptions, 'kindFilter'>,
 ): MemoryEntry[] {
   const terms = query.toLowerCase().split(/\W+/).filter(t => t.length >= 3)
   if (terms.length === 0) return []
@@ -159,6 +289,8 @@ export function recallMemoryEntries(
 
   const candidates = readMemoryEntries(cwd)
     .filter(e => !kinds || kinds.includes(e.kind))
+    .filter(e => options?.includeHistory || isCurrentEntry(e))
+    .filter(e => !options?.topic || (e.topic ?? '').toLowerCase().includes(options.topic.toLowerCase()))
 
   const scored = candidates
     .map(entry => {
@@ -178,7 +310,8 @@ export function recallMemoryEntries(
   return scored.slice(0, limit).map(s => s.entry)
 }
 
-/** Render memory entries as XML block for prompt injection. */
+/** Render memory entries as XML block for prompt injection.
+ *  Wave 1 起默认不再每轮推送（见 turn-step-producer.crossSessionMemoryPushEnabled）。 */
 export function renderMemoryBlock(cwd: string, query: string, maxChars = 2000): string | null {
   const recalled = recallMemoryEntries(cwd, query, 8)
   if (recalled.length === 0) return null
@@ -212,14 +345,39 @@ export function countSimilarMemoryEntries(cwd: string, text: string): number {
 
 // ── Migration ──────────────────────────────────────────────────────────────
 
-/** Migrate old observations.jsonl to unified memory.jsonl. Idempotent — skips
- *  entries whose IDs already exist in the unified log. Safe to re-run after
- *  partial migration (crash recovery). */
+/**
+ * Wave 2 迁移：legacy Store B（机器目录）→ 项目主存储。
+ *
+ * - 幂等按 id：已存在的跳过，可重复执行（崩溃恢复安全）
+ * - **正则观察产物不迁**（source === 'auto'）——那是 observation-extractor
+ *   的噪声，Wave 1 已停写，存量留在 legacy 层只读
+ * - 人工/claim/verification 来源的迁入项目存储（v2 schema）
+ *
+ * Returns number of entries migrated.
+ */
+export function migrateLegacyMemoryToProject(cwd: string): number {
+  const legacy = readJsonlEntries(legacyMemoryPath(cwd))
+  if (legacy.length === 0) return 0
+
+  const existingIds = new Set(readJsonlEntries(memoryPath(cwd)).map(e => e.id))
+
+  let migrated = 0
+  for (const entry of legacy) {
+    if (existingIds.has(entry.id)) continue
+    if (entry.source === 'auto') continue // 正则噪声不迁
+    appendKnowledgeJsonl(cwd, 'memory.jsonl', compactUndefined(entry))
+    existingIds.add(entry.id)
+    migrated++
+  }
+  return migrated
+}
+
+/** Migrate old observations.jsonl (legacy机器目录) to the unified project log.
+ *  Idempotent — skips entries whose IDs already exist. */
 export function migrateObservationsToUnified(cwd: string): number {
-  const oldPath = join(projectMemoryDir(cwd), 'observations.jsonl')
+  const oldPath = join(memoryDir(projectHash(cwd)), 'observations.jsonl')
   if (!existsSync(oldPath)) return 0
 
-  // Load existing unified entries to skip already-migrated observations
   const existingIds = new Set(readMemoryEntries(cwd).map(e => e.id))
 
   let migrated = 0
@@ -243,10 +401,7 @@ export function migrateObservationsToUnified(cwd: string): number {
           repeatCount: 1,
           sessionId: obs.sessionId,
         }
-        // Direct append — bypass appendMemoryEntry's repeatCount read-back
-        const dir = projectMemoryDir(cwd)
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-        appendFileSync(memoryPath(cwd), JSON.stringify(entry) + '\n', 'utf-8')
+        appendKnowledgeJsonl(cwd, 'memory.jsonl', compactUndefined(entry))
         existingIds.add(entry.id)
         migrated++
       } catch { /* skip malformed */ }

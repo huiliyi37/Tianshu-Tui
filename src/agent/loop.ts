@@ -1,4 +1,5 @@
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
+import type { KnowledgeCandidate } from '../memory/essence-gate.js'
 import { SessionContext } from './context.js'
 import { SessionPersist, getSessionDir } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
@@ -557,6 +558,9 @@ export class AgentLoop {
   turnsSinceLastObjection = 0
   lastToolCompleteTime = 0
   initialUserMessage: string | null = null
+  /** 知识重构（Wave 1/2）：候选知识缓冲——正则观察 + 手动 remember 队列，
+   *  不直写存储，由 postSession essence-gate 统一裁决准入。会话级，上限 60 条 FIFO。 */
+  knowledgeCandidates: KnowledgeCandidate[] = []
   /** 当前 run 的 orchestrator 循环轮数(每 run 从 0 重计)——缺口 C/D hook 消费 */
   runLoopTurn = 0
   /** 最近一次用户输入(run 启动 = 0,steer 注入时更新)的 run 轮数 */

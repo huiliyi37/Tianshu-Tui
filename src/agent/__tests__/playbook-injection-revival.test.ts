@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,9 +8,9 @@ import { PlaybookStore } from '../playbook-store.js'
 import type { PlaybookBullet } from '../playbook.js'
 
 /**
- * Playbook lessons injection revival. The old refreshPlaybookLessons was an
- * empty stub (disabled for noise + habituation churn); the revived version
- * queries ONCE per session with a minImportance quality gate and feeds
+ * Playbook lessons injection. Wave 4（知识重构）起默认撤出推送通道——
+ * 只有 env RIVET_PLAYBOOK_INJECT=1 时才恢复注入。恢复态保留历史对策：
+ * 每会话只查一次 + minImportance 质量闸，feeds
  * promptEngine.updatePlaybookLessons — which renders via the appendix /
  * consolidated channel and fires onLessonsRendered → recordUsage.
  */
@@ -47,7 +47,38 @@ function makeController(store: PlaybookStore | undefined) {
   return { controller: new ContextInjectionController(deps), updates }
 }
 
-describe('refreshPlaybookLessons revival', () => {
+describe('refreshPlaybookLessons Wave 4 default-off', () => {
+  const saved = process.env.RIVET_PLAYBOOK_INJECT
+  beforeEach(() => { delete process.env.RIVET_PLAYBOOK_INJECT })
+  afterEach(() => {
+    if (saved === undefined) delete process.env.RIVET_PLAYBOOK_INJECT
+    else process.env.RIVET_PLAYBOOK_INJECT = saved
+  })
+
+  it('does not inject lessons by default (recall-only channel)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'playbook-off-'))
+    try {
+      const store = new PlaybookStore(join(dir, 'playbook.jsonl'))
+      store.save([bullet({ importance: 0.7 })])
+      const { controller, updates } = makeController(store)
+
+      controller.refreshPlaybookLessons('add pagination to the posts endpoint')
+
+      assert.equal(updates.length, 0, 'Wave 4: lessons must not enter the prompt push channel by default')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('refreshPlaybookLessons revival (RIVET_PLAYBOOK_INJECT=1)', () => {
+  const saved = process.env.RIVET_PLAYBOOK_INJECT
+  beforeEach(() => { process.env.RIVET_PLAYBOOK_INJECT = '1' })
+  afterEach(() => {
+    if (saved === undefined) delete process.env.RIVET_PLAYBOOK_INJECT
+    else process.env.RIVET_PLAYBOOK_INJECT = saved
+  })
+
   it('queries matching lessons and forwards them to the prompt engine', () => {
     const dir = mkdtempSync(join(tmpdir(), 'playbook-revive-'))
     try {

@@ -4,6 +4,8 @@ import { randomBytes } from 'node:crypto'
 
 const MAX_ENTRIES = 200
 const MAX_FILE_SIZE = 16_384 // 16KB
+/** commit_fact 侧车独立配额（FIFO）——不与主存储 200 条竞争。 */
+const MAX_COMMIT_FACT_ENTRIES = 300
 const LOCK_RETRY_MAX_MS = 500
 const LOCK_RETRY_INTERVAL_MS = 20
 
@@ -15,6 +17,8 @@ interface MemoryEntry {
   createdAt: number
   source: string
   tags?: string[]
+  /** Wave 2 unified entries use `ts` — tolerated for sorting in compact. */
+  ts?: number
 }
 
 /**
@@ -65,11 +69,6 @@ export function appendProjectMemory(
   cwd: string,
   claim: { id: string; kind: string; text: string; confidence: number; createdAt: number; evidence?: Array<{ summary?: string }>; tags?: string[] },
 ): void {
-  const dir = join(cwd, '.rivet', 'knowledge')
-  mkdirSync(dir, { recursive: true })
-  const path = join(dir, 'memory.jsonl')
-  const lockPath = join(dir, 'memory.jsonl.lock')
-
   const entry: MemoryEntry = {
     id: claim.id,
     kind: claim.kind,
@@ -80,18 +79,70 @@ export function appendProjectMemory(
     ...(claim.tags && claim.tags.length > 0 ? { tags: claim.tags } : {}),
   }
 
+  // commit_fact 分流侧车：confidence 0.95 的 commit 事实曾在 200 条主配额中
+  // 挤掉 0.7 的 dream 蒸馏产物（compact 按 confidence 降序裁剪）。侧车独立
+  // 配额 FIFO，保留按 hash 召回能力，不与真知识竞争。
+  if (entry.tags?.includes('commit_fact')) {
+    appendToJsonl(cwd, 'commit-facts.jsonl', entry, MAX_COMMIT_FACT_ENTRIES)
+    return
+  }
+
+  appendToJsonl(cwd, 'memory.jsonl', entry)
+}
+
+/**
+ * Append one record to a knowledge JSONL file under lock; optional FIFO cap.
+ * Exported for unified-memory (Wave 2 存储统一)——所有 `.rivet/knowledge/*.jsonl`
+ * 写入共用同一把锁协议，避免两套写路径并发互踩。
+ */
+export function appendKnowledgeJsonl(cwd: string, filename: string, record: object, fifoCap?: number): void {
+  appendToJsonl(cwd, filename, record as MemoryEntry, fifoCap)
+}
+
+/** Append one entry to a knowledge JSONL file under lock; optional FIFO cap. */
+function appendToJsonl(cwd: string, filename: string, entry: MemoryEntry, fifoCap?: number): void {
+  const dir = join(cwd, '.rivet', 'knowledge')
+  mkdirSync(dir, { recursive: true })
+  const path = join(dir, filename)
+  const lockPath = join(dir, `${filename}.lock`)
+
   const release = acquireLock(lockPath)
   try {
-    // Read existing, append, atomic write
     let existing = ''
     if (existsSync(path)) {
       try { existing = readFileSync(path, 'utf-8') } catch { /* treat as empty */ }
     }
-    const newContent = existing + JSON.stringify(entry) + '\n'
+    let newContent = existing + JSON.stringify(entry) + '\n'
+
+    if (fifoCap !== undefined) {
+      const lines = newContent.split('\n').filter(l => l.trim())
+      if (lines.length > fifoCap) {
+        newContent = lines.slice(lines.length - fifoCap).join('\n') + '\n'
+      }
+    }
+
     atomicWrite(path, newContent)
   } finally {
     release()
   }
+}
+
+/** Read commit-fact sidecar entries (newest last). Used by recall on explicit request. */
+export function readCommitFacts(cwd: string): MemoryEntry[] {
+  const path = join(cwd, '.rivet', 'knowledge', 'commit-facts.jsonl')
+  if (!existsSync(path)) return []
+  const entries: MemoryEntry[] = []
+  try {
+    for (const line of readFileSync(path, 'utf-8').split('\n').filter(l => l.trim())) {
+      try {
+        const parsed = JSON.parse(line)
+        if (parsed.id && parsed.text) entries.push(parsed)
+      } catch { /* skip malformed */ }
+    }
+  } catch {
+    return []
+  }
+  return entries
 }
 
 /**
@@ -128,9 +179,9 @@ export function compactProjectMemory(cwd: string): number {
       seen.set(entry.id, entry)
     }
 
-    // Sort by confidence desc, then createdAt desc
+    // Sort by confidence desc, then createdAt/ts desc
     const kept = [...seen.values()]
-      .sort((a, b) => b.confidence - a.confidence || b.createdAt - a.createdAt)
+      .sort((a, b) => b.confidence - a.confidence || (b.createdAt ?? b.ts ?? 0) - (a.createdAt ?? a.ts ?? 0))
       .slice(0, MAX_ENTRIES)
 
     // Write back only if changed

@@ -16,7 +16,7 @@
 
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { crossSessionDisabled } from '../turn-step-producer.js'
+import { crossSessionDisabled, crossSessionMemoryPushEnabled } from '../turn-step-producer.js'
 
 // ── crossSessionDisabled() unit tests ──────────────────────────
 
@@ -116,5 +116,36 @@ describe('RIVET_NO_CROSS_SESSION=1 → 四个注入点返回 null/空/skip', () 
     // turn-step-producer.ts:331
     //   crossSessionDisabled(configEnabled) ? [] : loadPresence(...)
     assert.equal(crossSessionDisabled(true), true)
+  })
+})
+
+// ── Wave 1（知识重构）：cross-session memory 推送默认退位 ────────
+
+describe('crossSessionMemoryPushEnabled — 记忆块推送默认关闭', () => {
+  const saved = process.env.RIVET_CROSS_SESSION_INJECT
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env.RIVET_CROSS_SESSION_INJECT
+    else process.env.RIVET_CROSS_SESSION_INJECT = saved
+  })
+
+  it('默认（无 env）→ 推送关闭', () => {
+    delete process.env.RIVET_CROSS_SESSION_INJECT
+    assert.equal(crossSessionMemoryPushEnabled(), false)
+  })
+
+  it('env=1 → 显式恢复推送（对照实验回退口）', () => {
+    process.env.RIVET_CROSS_SESSION_INJECT = '1'
+    assert.equal(crossSessionMemoryPushEnabled(), true)
+  })
+
+  it('env=true → 显式恢复推送', () => {
+    process.env.RIVET_CROSS_SESSION_INJECT = 'true'
+    assert.equal(crossSessionMemoryPushEnabled(), true)
+  })
+
+  it('env=0 → 推送保持关闭', () => {
+    process.env.RIVET_CROSS_SESSION_INJECT = '0'
+    assert.equal(crossSessionMemoryPushEnabled(), false)
   })
 })

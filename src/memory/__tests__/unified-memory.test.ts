@@ -3,7 +3,7 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
@@ -14,6 +14,9 @@ import {
   recallMemoryEntries,
   countSimilarMemoryEntries,
   migrateObservationsToUnified,
+  migrateLegacyMemoryToProject,
+  supersedeMemoryEntry,
+  isCurrentEntry,
   renderMemoryBlock,
 } from '../unified-memory.js'
 
@@ -134,6 +137,75 @@ describe('unified-memory', () => {
     // Third run — only the new entry should be migrated
     const count3 = migrateObservationsToUnified(TEST_DIR)
     assert.equal(count3, 1)
+  })
+
+  // ── Wave 2: 存储统一 + Schema v2 ──────────────────────────────
+
+  it('writes to the project-local knowledge store (.rivet/knowledge/memory.jsonl)', () => {
+    appendMemoryEntry(TEST_DIR, {
+      text: 'Unified store lives inside the project',
+      kind: 'project_rule', confidence: 1, source: 'manual', status: 'verified', tags: [],
+    })
+    assert.ok(existsSync(join(TEST_DIR, '.rivet', 'knowledge', 'memory.jsonl')))
+  })
+
+  it('supersede seals the old entry and recall returns only the current leaf', () => {
+    const oldEntry = appendMemoryEntry(TEST_DIR, {
+      text: 'Bundler rollup is used for builds here',
+      kind: 'project_rule', confidence: 0.9, source: 'manual', status: 'verified', tags: [], topic: 'build',
+    })
+    const newEntry = appendMemoryEntry(TEST_DIR, {
+      text: 'Bundler esbuild replaced rollup for builds',
+      kind: 'project_rule', confidence: 0.95, source: 'essence-gate', status: 'verified', tags: [], topic: 'build',
+    })
+
+    assert.equal(supersedeMemoryEntry(TEST_DIR, oldEntry.id, newEntry.id), true)
+
+    const all = readMemoryEntries(TEST_DIR)
+    const sealed = all.find(e => e.id === oldEntry.id)
+    assert.equal(sealed!.supersededBy, newEntry.id)
+    assert.ok(sealed!.validTo !== undefined)
+    assert.equal(isCurrentEntry(sealed!), false)
+
+    const recalled = recallMemoryEntries(TEST_DIR, 'bundler builds', 5)
+    assert.ok(recalled.some(e => e.id === newEntry.id), 'current leaf must be recallable')
+    assert.ok(!recalled.some(e => e.id === oldEntry.id), 'sealed entry must not surface by default')
+
+    const withHistory = recallMemoryEntries(TEST_DIR, 'bundler builds', 5, undefined, { includeHistory: true })
+    assert.ok(withHistory.some(e => e.id === oldEntry.id), 'history available on explicit request')
+  })
+
+  it('migrates legacy machine-dir entries to project store, skipping regex noise', () => {
+    const legacyDir = memoryDir(projectHash(TEST_DIR))
+    mkdirSync(legacyDir, { recursive: true })
+    writeFileSync(join(legacyDir, 'memory.jsonl'), [
+      JSON.stringify({ id: 'legacy_manual', text: 'Manually recorded legacy insight', kind: 'decision', confidence: 0.9, source: 'manual', status: 'verified', tags: [], ts: 1, repeatCount: 1 }),
+      JSON.stringify({ id: 'legacy_noise', text: 'Project uses jest for testing', kind: 'fact', confidence: 0.85, source: 'auto', status: 'observed', tags: [], ts: 2, repeatCount: 1 }),
+    ].join('\n') + '\n')
+
+    const migrated = migrateLegacyMemoryToProject(TEST_DIR)
+    assert.equal(migrated, 1, 'only non-auto entries migrate')
+
+    // Idempotent re-run
+    assert.equal(migrateLegacyMemoryToProject(TEST_DIR), 0)
+
+    // Dual-read still surfaces legacy noise (read-only compat) without copying it
+    const all = readMemoryEntries(TEST_DIR)
+    assert.ok(all.some(e => e.id === 'legacy_manual'))
+    assert.ok(all.some(e => e.id === 'legacy_noise'))
+  })
+
+  it('normalizes legacy Store A schema (createdAt) on read', () => {
+    const dir = join(TEST_DIR, '.rivet', 'knowledge')
+    mkdirSync(dir, { recursive: true })
+    appendFileSync(join(dir, 'memory.jsonl'),
+      JSON.stringify({ id: 'storeA_1', kind: 'project_rule', text: 'Store A style entry with createdAt', confidence: 1, createdAt: 1234, source: 'test' }) + '\n')
+
+    const entry = readMemoryEntries(TEST_DIR).find(e => e.id === 'storeA_1')
+    assert.ok(entry)
+    assert.equal(entry!.ts, 1234, 'createdAt normalized to ts')
+    assert.equal(entry!.status, 'observed', 'missing status defaults')
+    assert.deepEqual(entry!.tags, [])
   })
 
   it('skips malformed lines when reading', () => {

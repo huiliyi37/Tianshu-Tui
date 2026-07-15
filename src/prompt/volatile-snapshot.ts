@@ -3,6 +3,7 @@ import { join } from 'path'
 import { gitStatusCache } from './volatile-git.js'
 import { summarizeGitStatus } from './git-status-summary.js'
 import { loadProjectMemory } from '../context/project-memory-loader.js'
+import { loadKnowledgeManifestBlock } from '../context/knowledge-manifest.js'
 import { renderResidentCapsuleBlock } from '../agent/seed-capsule-store.js'
 import { generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { detectCwdRelation } from './self-recognition.js'
@@ -16,6 +17,8 @@ export interface SnapshotInput {
   workingSet?: string[]
   activeDomain?: VolatileContext['activeDomain']
   projectMemoryBlock?: string
+  /** Optional pre-built knowledge manifest routing block（Wave 4b）。 */
+  knowledgeManifestBlock?: string
   /** Optional pre-built codebase index block. If not provided, generated from MeridianDB. */
   projectIndexBlock?: string
   /** Optional MeridianDb instance for codebase index generation. */
@@ -50,6 +53,10 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
 
   const projectMemoryBlock = input.projectMemoryBlock ?? loadProjectMemory(input.cwd).content
 
+  // Wave 4b（知识重构）：manifest 路由地图——"何时该召回什么"的索引，
+  // 会话启动快照一次，进 frozen base，知识本文一律走 recall。
+  const knowledgeManifestBlock = input.knowledgeManifestBlock ?? loadKnowledgeManifestBlock(input.cwd)
+
   // 常驻注入：核心护栏置顶 + 5 星 principles 全文。行为护栏必须常驻——
   // 撤入 recall 后行动跑偏（V3.1 回归）。ledger 仍经 recall_capsule 按需拉取。
   const seedCapsuleBlock = renderResidentCapsuleBlock(input.cwd)
@@ -71,6 +78,7 @@ export function createVolatileSnapshot(input: SnapshotInput): VolatileContext {
     activeDomain: input.activeDomain ?? undefined,
     sessionMemoryBlock: input.sessionMemoryBlock,
     projectMemoryBlock,
+    knowledgeManifestBlock,
     seedCapsuleBlock,
     projectIndexBlock,
   }) as VolatileContext
