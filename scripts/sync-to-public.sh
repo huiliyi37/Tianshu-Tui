@@ -107,7 +107,7 @@ done
 
 echo "=== 同步: 根配置与社区文件（README.md 为中文主页）==="
 # package-lock.json / .npmrc（engine-strict）：可复现安装的硬前提。
-for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json \
+for f in README.md CLAUDE.md .rivet.md AGENTS.md .gitignore .rivet/SELF .rivet-config.json \
          tsconfig.json tsup.config.ts package.json package-lock.json .npmrc \
          CHANGELOG.md LICENSE CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md config.example.json; do
   if [[ -f "$DEV_DIR/$f" ]]; then
