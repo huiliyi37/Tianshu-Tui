@@ -170,4 +170,62 @@ describe('essence-gate', () => {
     assert.equal(verdicts!.length, 1)
     assert.equal(verdicts![0]!.index, 0)
   })
+
+  // ── Wave 5: result refs fields ──
+
+  it('returns admittedRefs with id and textHash on admit', async () => {
+    const result = await runEssenceGate(
+      {
+        cwd,
+        complete: async () => JSON.stringify([
+          { index: 0, action: 'admit', refinedText: 'Immutable spread patterns are the default in reducers', transferableTo: ['reducers'], topic: 'patterns' },
+        ]),
+      },
+      [candidate('This project uses immutable spread patterns everywhere in reducers')],
+    )
+    assert.equal(result.failedClosed, false)
+    assert.equal(result.admitted.length, 1)
+    assert.equal(result.admittedRefs.length, 1)
+    assert.ok(result.admittedRefs[0]!.id)
+    assert.ok(result.admittedRefs[0]!.textHash)
+    assert.equal(result.rejectedRefs.length, 0)
+  })
+
+  it('returns rejectedRefs with textHash and snippet on reject', async () => {
+    const result = await runEssenceGate(
+      {
+        cwd,
+        complete: async () => JSON.stringify([
+          { index: 0, action: 'reject', reason: 'event-like description of file edits' },
+        ]),
+      },
+      [candidate('Last time I edited src/main.ts and changed the entry point in a session')],
+    )
+    assert.equal(result.admitted.length, 0)
+    assert.equal(result.rejected, 1)
+    assert.equal(result.rejectedRefs.length, 1)
+    assert.ok(result.rejectedRefs[0]!.textHash)
+    assert.ok(result.rejectedRefs[0]!.snippet.length <= 80)
+  })
+
+  it('returns supersededRefs on successful supersede', async () => {
+    // Seed an existing entry to supersede
+    const old = appendMemoryEntry(cwd, {
+      text: 'Old rule: use jest for testing',
+      kind: 'project_rule', confidence: 0.9, source: 'manual', status: 'verified', tags: [],
+    })
+    const result = await runEssenceGate(
+      {
+        cwd,
+        complete: async () => JSON.stringify([
+          { index: 0, action: 'supersede', refinedText: 'Use node:test for testing', transferableTo: ['testing'], topic: 'testing', supersedesId: old.id },
+        ]),
+      },
+      [candidate('This project uses node:test for testing')],
+    )
+    assert.equal(result.superseded, 1)
+    assert.equal(result.supersededRefs.length, 1)
+    assert.equal(result.supersededRefs[0]!.oldId, old.id)
+    assert.ok(result.supersededRefs[0]!.newId)
+  })
 })

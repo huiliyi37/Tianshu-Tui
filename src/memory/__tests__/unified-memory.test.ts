@@ -18,6 +18,8 @@ import {
   supersedeMemoryEntry,
   isCurrentEntry,
   renderMemoryBlock,
+  validateKnowledgeChains,
+  type MemoryEntry,
 } from '../unified-memory.js'
 
 const TEST_DIR = join(tmpdir(), 'rivet-um-test')
@@ -219,6 +221,51 @@ describe('unified-memory', () => {
     assert.ok(entries.length >= 1)
     const valid = entries.find(e => e.text === 'Valid entry')
     assert.ok(valid)
+  })
+
+  // ── Wave 5: chain validation ──
+
+  function mkEntry(id: string, supersededBy?: string): MemoryEntry {
+    return { id, text: '', kind: 'fact', confidence: 1, source: 'manual', status: 'observed', tags: [], ts: 1, repeatCount: 1, ...(supersededBy ? { supersededBy } : {}) }
+  }
+
+  it('detects dangling supersededBy reference', () => {
+    const entries: MemoryEntry[] = [
+      { id: 'a', text: '', kind: 'fact', confidence: 1, source: 'manual', status: 'observed', tags: [], ts: 1, repeatCount: 1, supersededBy: 'nonexistent' },
+    ]
+    const issues = validateKnowledgeChains(entries)
+    assert.ok(issues.some(i => i.kind === 'dangling_reference'))
+  })
+
+  it('detects cycles in supersede chain', () => {
+    const entries: MemoryEntry[] = [
+      mkEntry('a', 'b'),
+      mkEntry('b', 'c'),
+      mkEntry('c', 'a'),  // cycle back to a
+    ]
+    const issues = validateKnowledgeChains(entries)
+    assert.ok(issues.some(i => i.kind === 'cycle'))
+  })
+
+  it('detects dead chain with no current leaf', () => {
+    const entries: MemoryEntry[] = [
+      { ...mkEntry('a', 'b'), validTo: 1, status: 'expired' },
+      { ...mkEntry('b'), validTo: 2, status: 'expired' },  // no supersededBy, but expired
+    ]
+    const issues = validateKnowledgeChains(entries)
+    assert.ok(issues.some(i => i.kind === 'dead_chain'))
+  })
+
+  it('returns no issues for a clean chain', () => {
+    const entries: MemoryEntry[] = [
+      mkEntry('a', 'b'),
+      mkEntry('b'),  // current leaf
+    ]
+    // Mark a as expired (superseded) but b is current → healthy chain
+    entries[0]!.validTo = 1
+    entries[0]!.status = 'expired'
+    const issues = validateKnowledgeChains(entries)
+    assert.equal(issues.length, 0)
   })
 
   teardown()

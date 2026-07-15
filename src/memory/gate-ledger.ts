@@ -13,7 +13,7 @@
  * KnowledgeIndex 重建时按需调用，结果可注入 recall 工具的返回（"闸门健康度"提示行）。
  */
 
-import { existsSync, readFileSync, mkdirSync, appendFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { memoryDir } from '../config/paths.js'
@@ -57,7 +57,7 @@ function ledgerPath(cwd: string): string {
 // ── Write ───────────────────────────────────────────────────────────────────
 
 /** 每次 gate 运行落一行。FIFO cap = MAX_LEDGER_ROWS。 */
-export function appendGateLedgerRow(cwd: string, row: GateLedgerRow): void {
+export function writeGateLedgerRow(cwd: string, row: GateLedgerRow): void {
   try {
     const path = ledgerPath(cwd)
     mkdirSync(join(path, '..'), { recursive: true })
@@ -71,7 +71,7 @@ export function appendGateLedgerRow(cwd: string, row: GateLedgerRow): void {
     if (lines.length > MAX_LEDGER_ROWS) {
       lines.splice(0, lines.length - MAX_LEDGER_ROWS)
     }
-    appendFileSync(path, JSON.stringify(row) + '\n', 'utf-8')
+    writeFileSync(path, lines.join('\n') + '\n', 'utf-8')
   } catch { /* ledger write is best-effort */ }
 }
 
