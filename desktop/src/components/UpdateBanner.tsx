@@ -11,8 +11,12 @@ const CHECK_TIMEOUT_MS = 15_000
  * 检查/下载失败时会在横幅里显示具体原因，并允许重试。
  *
  * 仅在 Tauri 桌面环境运行（浏览器开发模式 no-op）。
+ * dev 开发模式下不自动弹横幅，避免 target/debug 二进制版本 stale 时反复提示。
  */
 export function UpdateBanner() {
+  // dev 模式下跳过自动检查：Settings → About 的 App version 以 Rust 二进制为准，
+  // 开发时若未重新编译，二进制内嵌版本可能落后于前端/源码，导致误报。
+  if (import.meta.env.DEV) return null
   const { t } = useTranslation('shell')
   const [update, setUpdate] = useState<Update | null>(null)
   const [installing, setInstalling] = useState(false)

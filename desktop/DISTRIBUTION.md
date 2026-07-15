@@ -166,7 +166,23 @@ bash scripts/sign-and-build.sh
 
 脚本会 source `.env` 读私钥/密码，构建带 `.sig` 的安装包。
 
-### 4. 发布到 GitHub Release（CI 自动）
+### 4. 本地完整发布打包（含 latest.json）
+
+| 平台 | 命令 |
+|---|---|
+| macOS | `bash scripts/build-macos-release.sh` |
+| Windows | 在 Windows 宿主 / Git Bash / WSL2 中执行 `bash scripts/build-windows-release.sh` |
+
+脚本会：
+
+1. 校验 `package.json` / `desktop/package.json` / `tauri.conf.json` / `Cargo.toml` 版本一致；
+2. 构建 CLI + 前端 + 原生二进制；
+3. 执行签名构建，收集安装包与 `.sig` 到 `release/`；
+4. 增量更新 `release/latest.json` 中当前平台的条目，保留另一平台已有条目。
+
+上传时把 `release/` 下的安装包、`.sig` 和 `latest.json` 一起传到 GitHub Release 即可。
+
+### 5. 发布到 GitHub Release（CI 自动）
 
 标签推送 `v*` 触发 `build-macos.yml` / `build-windows.yml`：
 1. 注入签名密钥 → `tauri build` 产出安装包 + `.sig`。
@@ -204,13 +220,13 @@ node desktop/scripts/gen-latest-json.js \
 
 ## CI 构建
 
-仓库已配置两个 workflow：
+当前仓库未提交 GitHub Actions workflow，发布以本地脚本为准（见上文「本地完整发布打包」）。
+后续若接入 CI，可直接复用：
 
-- `.github/workflows/build-macos.yml`：标签推送 `v*` 时触发，产出 `.dmg` 与 `.app` + `.sig`，并发布到 GitHub Release。
-- `.github/workflows/build-windows.yml`：标签推送 `v*` 时触发，产出 `.exe`、NSIS、MSI + `.sig`，并发布到 GitHub Release。
+- `scripts/build-macos-release.sh`
+- `scripts/build-windows-release.sh`
 
-配置 Repository Secrets（`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）
-后即可自动签名与发布更新。
+两者都会把产物放到 `release/`，并维护好 `release/latest.json`，上传 Release asset 即可。
 
 ## 注意事项
 

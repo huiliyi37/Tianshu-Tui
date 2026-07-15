@@ -1,6 +1,6 @@
 [package]
 name = "tianshu-desktop"
-version = "0.0.1"
+version = "2.19.2"
 description = "天枢桌面版 — Antigravity 2.0 范式 agent-first 外壳"
 authors = ["Tianshu"]
 edition = "2021"
