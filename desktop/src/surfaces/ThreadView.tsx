@@ -497,8 +497,22 @@ export function ThreadView(props: {
     if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current)
     if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
   }, [])
+  // Guards the auto-scroll below: only CONTENT GROWTH may pin the bottom. The
+  // effect also re-runs when `scrolledUp` merely flips back to false (user
+  // wheeling inside the 120px near-bottom zone of an idle thread); without this
+  // signature check that re-run called scrollToIndex(end) with no new content —
+  // the "magnetic snap to the last message" jump users reported while the
+  // session sat idle. Consumed even while scrolled up, so returning to the
+  // bottom never replays a stale scroll; follow resumes on the next real delta.
+  const lastAutoScrollSigRef = useRef('')
   useEffect(() => {
-    if (scrolledUp || rendered.length === 0) return
+    if (rendered.length === 0) return
+    // session.id disambiguates tab switches: a freshly opened session must get
+    // its initial bottom-pin even if its (length, textLen) happens to collide.
+    const sig = `${session.id}:${rendered.length}:${lastBlockTextLen}`
+    if (sig === lastAutoScrollSigRef.current) return
+    lastAutoScrollSigRef.current = sig
+    if (scrolledUp) return
     const SCROLL_THROTTLE_MS = 100
     const run = () => {
       scrollTimerRef.current = null
@@ -511,7 +525,7 @@ export function ThreadView(props: {
     else if (scrollTimerRef.current === null) {
       scrollTimerRef.current = setTimeout(run, SCROLL_THROTTLE_MS - elapsed)
     }
-  }, [rendered.length, lastBlockTextLen, scrolledUp, virtualizer])
+  }, [session.id, rendered.length, lastBlockTextLen, scrolledUp, virtualizer])
 
   // Measure the floating composer so the thread reserves bottom padding and
   // the last message is never hidden behind the input card.
