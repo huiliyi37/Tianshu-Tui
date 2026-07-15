@@ -256,7 +256,7 @@ export const agentSchema = z.object({
     /** 可选：额外加入 CORE 的工具名（追加到默认清单） */
     extraCore: z.array(z.string()).default([]),
     /** 会话级禁用的工具名（CORE/EXTENDED/MCP 均可）。Session 启动时生效，运行中不变（缓存约束）。 */
-    disabledTools: z.array(z.string()).default([]),
+    disabledTools: z.array(z.string()).optional(),
   }).default({ enabled: true }),
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). */
   hearthObserveEnabled: z.boolean().default(false),

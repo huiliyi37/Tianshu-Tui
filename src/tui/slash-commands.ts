@@ -2465,8 +2465,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
 
       if (subcmd === 'logs' && serverId) {
         try {
-          const { ctx: appCtx } = await import('./engine/app.js')
-          const mgr = appCtx?.mcpManager
+          const mgr = ctx.mcpManagerRef?.current
           if (!mgr) {
             pushStatic(createLogEntry({ type: 'system', content: 'MCP manager not initialized.', isError: true }))
             setIsStreaming(false)
@@ -2477,7 +2476,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           if (entries.length === 0) {
             pushStatic(createLogEntry({ type: 'system', content: `No log entries for server "${serverId}".` }))
           } else {
-            const lines = entries.map(e => `[${new Date(e.ts).toISOString()}] ${e.stream === 'stderr' ? 'stderr' : 'event'}: ${e.text.trimEnd()}`)
+            const lines = entries.map((entry) => `[${new Date(entry.ts).toISOString()}] ${entry.stream === 'stderr' ? 'stderr' : 'event'}: ${entry.text.trimEnd()}`)
             pushStatic(createLogEntry({ type: 'system', content: `Logs for ${serverId} (last ${entries.length} entries):\n${lines.join('\n')}` }))
           }
         } catch (err) {
