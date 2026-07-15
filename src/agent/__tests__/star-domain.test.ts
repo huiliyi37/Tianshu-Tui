@@ -146,7 +146,7 @@ describe('StarDomain', () => {
     assert.match(huagai.systemPromptSuffix, /不测复刻/)
     assert.match(huagai.systemPromptSuffix, /环境不可控/)
     assert.match(huagai.systemPromptSuffix, /入口类改动看两面/)
-    // 通用工程已由天枢 baseline 承载，华盖不重复
+    // 通用工程纪律已由 baseline <engineering-baseline> 承载，星域不重复
     assert.doesNotMatch(huagai.systemPromptSuffix, /事实锚点/)
     assert.doesNotMatch(huagai.systemPromptSuffix, /消费面穷尽/)
     assert.doesNotMatch(huagai.systemPromptSuffix, /交付三项/)
