@@ -554,13 +554,15 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         getDecisions: () => self.decisions,
         getTrajectory: () => self.trajectory.getEntries(),
         getFailureJournal: () => self.failureJournal,
-        // Wave 5（反馈闭环）：gate 装配时 dream 候选推入 essence-gate 素材缓冲
-        onKnowledgeCandidates: self.config.sessionId ? (candidates) => {
+        // Wave 5（反馈闭环）：dream 候选推入 essence-gate 素材缓冲。
+        // create-runtime-hooks 只在 gate 真实装配时转发此回调；gate 缺席时
+        // dream-hook 走直写分支，缓冲不会积压无消费者的候选。
+        onKnowledgeCandidates: candidates => {
           self.knowledgeCandidates.push(...candidates)
           if (self.knowledgeCandidates.length > 60) {
             self.knowledgeCandidates.splice(0, self.knowledgeCandidates.length - 60)
           }
-        } : undefined,
+        },
       },
       getRegisteredSkills: () => skillRegistry.list().map(s => ({ name: s.name, triggers: s.triggers })),
     } : {}),

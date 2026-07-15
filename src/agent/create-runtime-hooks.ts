@@ -109,6 +109,8 @@ export interface RuntimeHookDeps {
     getDecisions: () => string[]
     getTrajectory: () => TrajectoryEntry[]
     getFailureJournal?: () => import('./failure-journal.js').FailureJournal
+    /** Wave 5（反馈闭环）：dream 蒸馏候选交 essence-gate 统一裁决（见 dream-hook）。 */
+    onKnowledgeCandidates?: (candidates: import('../memory/essence-gate.js').KnowledgeCandidate[]) => void
   }
   /** Essence-gate（postSession 知识准入闸）。缺省不装配 = fail-closed 无写入。 */
   essenceGate?: EssenceGateHookDeps
@@ -381,6 +383,9 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getTrajectory: deps.dream.getTrajectory,
       getFailureJournal: deps.dream.getFailureJournal,
       getPlaybookStore: deps.playbookStore ? () => deps.playbookStore : undefined,
+      // 只有 essence-gate 真的装配时才转发回调——gate 缺席时 dream 保留直写通道，
+      // 否则候选推进缓冲后没有任何消费者，dream 知识凭空丢失。
+      onKnowledgeCandidates: deps.essenceGate ? deps.dream.onKnowledgeCandidates : undefined,
     }))
 
     // Skill-distill: same postSession source as dream — verified, repeatable

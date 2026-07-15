@@ -51,10 +51,12 @@ export function createEssenceGateHook(deps: EssenceGateHookDeps): PostSessionRun
         { cwd: deps.cwd, sessionId: deps.sessionId, complete: deps.complete },
         candidates,
       )
+      // 闭环 1（反馈回路）：裁决落账——后续会话经 analyzeGateFeedback 与
+      // recall-efficacy join，度量闸门准入标准是否过宽/过严。
       writeGateLedgerRow(deps.cwd, {
         sessionId: deps.sessionId ?? 'unknown',
         ts: Date.now(),
-        admitted: result.admitted.map(e => ({ id: e.id, text: e.text })),
+        admitted: result.admittedRefs,
         rejected: result.rejectedRefs,
         superseded: result.supersededRefs,
         failedClosed: result.failedClosed,

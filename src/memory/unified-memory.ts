@@ -371,6 +371,12 @@ export interface ChainIssue {
 export function validateKnowledgeChains(entries: MemoryEntry[]): ChainIssue[] {
   const issues: ChainIssue[] = []
   const byId = new Map(entries.map(e => [e.id, e] as const))
+  // 被任何 supersededBy 指向的条目集合——链根 = 有 supersededBy 且自身不被指向
+  const supersedeTargets = new Set(
+    entries.map(e => e.supersededBy).filter((id): id is string => !!id),
+  )
+  // 同一个环只报一次（沿链能到达该环的所有起点共享一份报告）
+  const reportedCycleMembers = new Set<string>()
 
   for (const entry of entries) {
     if (!entry.supersededBy) continue
@@ -385,7 +391,9 @@ export function validateKnowledgeChains(entries: MemoryEntry[]): ChainIssue[] {
       continue
     }
 
-    // ① 环检测：沿链走，visited set 防止环
+    // ① 环检测：沿链走，visited set 判重。发现环后继续校验其余条目
+    // （不能 break 整个循环——否则环之后的悬空引用/死链全部漏检）。
+    if (reportedCycleMembers.has(entry.id)) continue
     const visited = new Set<string>()
     let current: MemoryEntry | undefined = entry
     let cycleStart: string | null = null
@@ -399,21 +407,23 @@ export function validateKnowledgeChains(entries: MemoryEntry[]): ChainIssue[] {
       current = byId.get(current.supersededBy)
     }
     if (cycleStart) {
+      for (const id of visited) reportedCycleMembers.add(id)
       issues.push({
         kind: 'cycle',
         entryIds: [...visited],
         detail: `supersede 链在 ${cycleStart} 形成环（${visited.size} 个条目）`,
       })
-      break // 一个环就够了，不重复
+      continue // 环上没有叶子概念，跳过死链检查（也防走链死循环）
     }
 
-    // ③ 死链：链末端也封口 → 无 current 叶子
-    let leaf: MemoryEntry | undefined = entry
-    while (leaf?.supersededBy && byId.has(leaf.supersededBy)) {
-      leaf = byId.get(leaf.supersededBy)
+    // ③ 死链：只从链根报一次——链中段成员跳过，避免同一条链按成员数重复告警
+    if (supersedeTargets.has(entry.id)) continue
+    let leaf: MemoryEntry = entry
+    while (leaf.supersededBy && byId.has(leaf.supersededBy)) {
+      leaf = byId.get(leaf.supersededBy)!
     }
-    if (leaf && !isCurrentEntry(leaf)) {
-      // 链上所有条目（包括起点）都不是 current：确认是否整条链已死
+    if (!isCurrentEntry(leaf)) {
+      // 链上所有条目（包括起点）都不是 current：确认整条链已死
       let cursor: MemoryEntry | undefined = entry
       let allDead = true
       while (cursor) {
@@ -424,8 +434,8 @@ export function validateKnowledgeChains(entries: MemoryEntry[]): ChainIssue[] {
       if (allDead) {
         issues.push({
           kind: 'dead_chain',
-          entryIds: [entry.id, ...(leaf.id !== entry.id ? [leaf!.id] : [])],
-          detail: `从 ${entry.id} 起的 supersede 链无 current 叶子（末端 ${leaf!.id} 已封口）`,
+          entryIds: [entry.id, ...(leaf.id !== entry.id ? [leaf.id] : [])],
+          detail: `从 ${entry.id} 起的 supersede 链无 current 叶子（末端 ${leaf.id} 已封口）`,
         })
       }
     }

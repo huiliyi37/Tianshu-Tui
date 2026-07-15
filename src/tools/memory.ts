@@ -13,6 +13,7 @@ import type { ToolDefinition } from '../api/types.js'
 import type { MemoryKind } from '../memory/unified-memory.js'
 import { getKnowledgeIndex } from '../memory/knowledge-index.js'
 import { getRecallTracker } from '../memory/recall-efficacy.js'
+import { renderGateFeedbackHint } from '../memory/gate-ledger.js'
 import { readCommitFacts } from '../context/project-memory-writer.js'
 
 // ── recall helpers ──
@@ -118,6 +119,13 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
           lines.push('')
         }
 
+        // Wave 5（反馈闭环）：闸门健康度——账本指标越过阈值才产出，正常时零噪声
+        const gateFeedback = renderGateFeedbackHint(cwd)
+        if (gateFeedback) {
+          lines.push(gateFeedback)
+          lines.push('')
+        }
+
         const entryHits = hits.filter(h => h.entry)
         const mdHits = hits.filter(h => h.file)
         if (entryHits.length > 0) {
@@ -145,7 +153,10 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
           lines.push(`Commit facts (${commitFacts.length}):`)
           for (const e of commitFacts) lines.push(`- ${e.text}`)
         }
-        if (lines.length === 0) return { content: `No memory found for "${query}".` }
+        // 告警行（链校验/闸门健康）可能存在于零命中的响应里——仍要明确"没找到"
+        if (hits.length === 0 && commitFacts.length === 0) {
+          lines.push(`No memory found for "${query}".`)
+        }
         return { content: lines.join('\n') }
       }
 

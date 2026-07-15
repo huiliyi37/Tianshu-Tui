@@ -1,5 +1,5 @@
 import type { EvidenceState } from '../evidence.js'
-import { persistDream, cleanupProjectMemory } from '../dream.js'
+import { persistDream, persistDreamNarrative, cleanupProjectMemory } from '../dream.js'
 import { extractCuratedMemoryCandidates } from '../dream.js'
 import type { TrajectoryEntry as DreamTrajectoryEntry } from '../dream.js'
 import type { TrajectoryEntry } from '../trajectory.js'
@@ -70,7 +70,9 @@ export function createDreamHook(deps: DreamHookDeps): PostSessionRuntimeHook {
         sessionId: deps.sessionId,
       }
 
-      // Wave 5（反馈闭环）：gate 装配时 dream 候选汇入 essence-gate 统一裁决
+      // Wave 5（反馈闭环）：gate 装配时 dream 候选汇入 essence-gate 统一裁决。
+      // 候选推送必须同步完成——essence-gate 是同批 postSession 的后序 hook，
+      // setImmediate 里推会错过本次 gate 运行。
       if (deps.onKnowledgeCandidates) {
         const dreamCandidates = extractCuratedMemoryCandidates(input.decisions)
         if (dreamCandidates.length > 0) {
@@ -78,14 +80,15 @@ export function createDreamHook(deps: DreamHookDeps): PostSessionRuntimeHook {
             text: c.claim,
             kind: c.criterion,
             confidence: 0.7,
-            origin: 'manual' as const,
+            origin: 'dream' as const,
             tags: ['dream'],
             sessionId: deps.sessionId,
           })))
         }
-        // project-memory.md 叙事务保持 setImmediate（与 gate 的 jsonl 写入解耦）
+        // .md 叙事层照常沉淀（与 gate 的 jsonl 通路解耦）；jsonl 直写被 gate 取代
         setImmediate(() => {
           cleanupProjectMemory(cwd)
+          persistDreamNarrative(cwd, input)
         })
         return
       }

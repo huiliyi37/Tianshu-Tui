@@ -118,7 +118,8 @@ export class KnowledgeIndex {
     // 向量不清：id 稳定（entry id / file+chunk），provider 增量补缺
 
     // ① 结构化条目（含历史——validity 过滤在 search 时做，支持 includeHistory）
-    for (const entry of readMemoryEntries(this.cwd)) {
+    const memoryEntries = readMemoryEntries(this.cwd)
+    for (const entry of memoryEntries) {
       const id = `${ENTRY_PREFIX}:${entry.id}`
       this.entriesById.set(id, entry)
       const indexText = [entry.text, entry.topic ?? '', entry.tags.join(' ')].join(' ')
@@ -162,8 +163,8 @@ export class KnowledgeIndex {
       }
     }
 
-    // Wave 5（反馈闭环）：supersede 链完整性校验——每次全量重建时零额外 IO
-    this._chainIssues = validateKnowledgeChains(readMemoryEntries(this.cwd))
+    // Wave 5（反馈闭环）：supersede 链完整性校验——复用 ① 已读的条目，零额外 IO
+    this._chainIssues = validateKnowledgeChains(memoryEntries)
   }
 
   /** Supersede 链完整性校验结果（rebuild 后可用）。 */

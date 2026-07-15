@@ -32,8 +32,8 @@ export interface KnowledgeCandidate {
   text: string
   kind: string
   confidence: number
-  /** 素材来路：observation=正则提取缓冲 / manual=agent 显式 remember / failure=失败蒸馏素材 */
-  origin: 'observation' | 'manual' | 'failure'
+  /** 素材来路：observation=正则提取缓冲 / manual=agent 显式 remember / failure=失败蒸馏素材 / dream=会话蒸馏候选 */
+  origin: 'observation' | 'manual' | 'failure' | 'dream'
   tags?: string[]
   sessionId?: string
   evidence?: string

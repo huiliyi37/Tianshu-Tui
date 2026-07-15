@@ -191,10 +191,11 @@ describe('unified-memory', () => {
     // Idempotent re-run
     assert.equal(migrateLegacyMemoryToProject(TEST_DIR), 0)
 
-    // Dual-read still surfaces legacy noise (read-only compat) without copying it
+    // Dual-read surfaces legacy manual entries but filters regex noise
+    // (source='auto') at the legacy read layer — same policy as migration.
     const all = readMemoryEntries(TEST_DIR)
-    assert.ok(all.some(e => e.id === 'legacy_manual'))
-    assert.ok(all.some(e => e.id === 'legacy_noise'))
+    assert.ok(all.some(e => e.id === 'legacy_manual'), 'manual legacy entry surfaces via dual-read')
+    assert.ok(!all.some(e => e.id === 'legacy_noise'), 'auto-sourced legacy noise must be filtered')
   })
 
   it('normalizes legacy Store A schema (createdAt) on read', () => {

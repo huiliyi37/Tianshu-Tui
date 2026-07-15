@@ -23,8 +23,8 @@ export interface RecallEvent {
   snippets: string[]
   /** Wave 5（反馈闭环）：召回条目的 id（gate-ledger join 用）。 */
   entryIds: string[]
-  /** Wave 5（反馈闭环）：召回条目中有多少来自 essence-gate 准入。 */
-  gateAdmittedCount: number
+  /** Wave 5（反馈闭环）：gate 准入条目的 id+片段（引用检测用）。 */
+  gateEntries: Array<{ id: string; snippet: string }>
 }
 
 export interface SessionEfficacyRecord {
@@ -37,7 +37,7 @@ export interface SessionEfficacyRecord {
   citeRate: number
   /** Wave 5: 被召回条目的 id 列表（截断上限，gate-ledger join 用）。 */
   recalledEntryIds: string[]
-  /** Wave 5: 被引用的条目中来自 essence-gate 的数量。 */
+  /** Wave 5: gate 准入条目中被实际引用（片段出现在召回后的 assistant 输出）的去重条目数。 */
   gateAdmittedCited: number
   /** 空召回率 > 0.5 连续 ≥3 会话（含本会话）。 */
   alert: boolean
@@ -65,7 +65,10 @@ export class RecallEfficacyTracker {
       resultCount: results.length,
       snippets: results.slice(0, 8).map(r => r.text.slice(0, SNIPPET_LENGTH)),
       entryIds: results.filter(r => r.id).map(r => r.id!).slice(0, 20),
-      gateAdmittedCount: results.filter(r => r.gateAdmitted).length,
+      gateEntries: results
+        .filter(r => r.gateAdmitted && r.id)
+        .slice(0, 8)
+        .map(r => ({ id: r.id!, snippet: r.text.slice(0, SNIPPET_LENGTH) })),
     })
     // 会话内上限，防异常膨胀
     if (this.events.length > 200) this.events.splice(0, this.events.length - 200)
@@ -109,7 +112,9 @@ export class RecallEfficacyTracker {
       citedRecalls,
       citeRate: round2(citeRate),
       recalledEntryIds: [...new Set(this.events.flatMap(e => e.entryIds))].slice(0, 50),
-      gateAdmittedCited: this.events.filter(e => e.gateAdmittedCount > 0).length,
+      // gate 准入条目的引用检测：与 citedRecalls 同一代理指标（片段回现），
+      // 但按条目去重——回答"闸门放进来的知识有没有被真的用上"。
+      gateAdmittedCited: countCitedGateEntries(this.events, assistantTextAfterRecalls),
       alert,
     }
 
@@ -121,6 +126,20 @@ export class RecallEfficacyTracker {
 
     return record
   }
+}
+
+/** gate 准入条目中片段回现于 assistant 输出的去重条目数。 */
+function countCitedGateEntries(events: RecallEvent[], assistantText: string): number {
+  if (!assistantText) return 0
+  const cited = new Set<string>()
+  for (const event of events) {
+    for (const ge of event.gateEntries) {
+      if (ge.snippet.length >= 20 && assistantText.includes(ge.snippet)) {
+        cited.add(ge.id)
+      }
+    }
+  }
+  return cited.size
 }
 
 /** 最近账本行中，从末尾起连续 emptyRate > 阈值的会话数。 */

@@ -13,11 +13,12 @@
  * KnowledgeIndex 重建时按需调用，结果可注入 recall 工具的返回（"闸门健康度"提示行）。
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { memoryDir } from '../config/paths.js'
-import { readEfficacyLedger, type SessionEfficacyRecord } from './recall-efficacy.js'
+import { writeFileAtomicSync } from '../fs-atomic.js'
+import { readEfficacyLedger } from './recall-efficacy.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -56,7 +57,9 @@ function ledgerPath(cwd: string): string {
 
 // ── Write ───────────────────────────────────────────────────────────────────
 
-/** 每次 gate 运行落一行。FIFO cap = MAX_LEDGER_ROWS。 */
+/** 每次 gate 运行落一行。FIFO cap = MAX_LEDGER_ROWS。
+ *  读-改-写用原子替换（temp+rename）——并发会话 postSession 同时落账时
+ *  最坏丢一行诊断数据，但绝不产生半截/交错的账本文件。 */
 export function writeGateLedgerRow(cwd: string, row: GateLedgerRow): void {
   try {
     const path = ledgerPath(cwd)
@@ -71,7 +74,7 @@ export function writeGateLedgerRow(cwd: string, row: GateLedgerRow): void {
     if (lines.length > MAX_LEDGER_ROWS) {
       lines.splice(0, lines.length - MAX_LEDGER_ROWS)
     }
-    writeFileSync(path, lines.join('\n') + '\n', 'utf-8')
+    writeFileAtomicSync(path, lines.join('\n') + '\n')
   } catch { /* ledger write is best-effort */ }
 }
 

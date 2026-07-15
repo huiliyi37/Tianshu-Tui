@@ -158,22 +158,7 @@ const MAX_FILE_SIZE = 8192
  * compactProjectMemory 的按-id 去重天然收敛重复蒸馏。
  */
 export function persistDream(cwd: string, input: DreamInput): void {
-  const entry = distillSession(input)
-  if (!entry) return
-
-  const dir = join(cwd, '.rivet', 'knowledge')
-  ensureDir(dir)
-  const path = join(dir, 'project-memory.md')
-
-  let existing = ''
-  try { existing = readFileSync(path, 'utf-8') } catch { /* first write */ }
-
-  const dedupKey = extractDreamKey(entry)
-  const deduped = dedupKey ? removeMatchingEntry(existing, dedupKey) : existing
-
-  const combined = entry + '\n' + deduped
-  const trimmed = trimToEntryBoundary(combined, MAX_FILE_SIZE)
-  writeFileAtomicSync(path, trimmed)
+  persistDreamNarrative(cwd, input)
 
   const createdAt = Date.now()
   for (const candidate of extractCuratedMemoryCandidates(input.decisions)) {
@@ -191,6 +176,30 @@ export function persistDream(cwd: string, input: DreamInput): void {
       // memory.jsonl is best-effort — never fail the dream write
     }
   }
+}
+
+/**
+ * 仅写 `project-memory.md` 叙事层（curated Markdown，recall-only）。
+ * essence-gate 装配时 dream-hook 用它：jsonl 候选改走 gate 裁决，
+ * .md 叙事照常沉淀（Wave 5 反馈闭环，两轨解耦）。
+ */
+export function persistDreamNarrative(cwd: string, input: DreamInput): void {
+  const entry = distillSession(input)
+  if (!entry) return
+
+  const dir = join(cwd, '.rivet', 'knowledge')
+  ensureDir(dir)
+  const path = join(dir, 'project-memory.md')
+
+  let existing = ''
+  try { existing = readFileSync(path, 'utf-8') } catch { /* first write */ }
+
+  const dedupKey = extractDreamKey(entry)
+  const deduped = dedupKey ? removeMatchingEntry(existing, dedupKey) : existing
+
+  const combined = entry + '\n' + deduped
+  const trimmed = trimToEntryBoundary(combined, MAX_FILE_SIZE)
+  writeFileAtomicSync(path, trimmed)
 }
 
 /** Trim from the tail, but only at `### ` entry boundaries — never mid-entry. */

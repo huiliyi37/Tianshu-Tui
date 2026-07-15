@@ -5,7 +5,6 @@ import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { memoryDir } from '../../config/paths.js'
@@ -62,19 +61,21 @@ describe('recall-efficacy', () => {
   })
 
   // Wave 5: entry id + gate source tracking
-  it('tracks recalled entry ids and gate-admitted count', () => {
+  it('tracks recalled entry ids and cited gate-admitted entries', () => {
     const tracker = new RecallEfficacyTracker('sess-wave5')
     tracker.record('test sql', [
-      { text: 'Use parameterized queries', id: 'mem-1', gateAdmitted: true },
-      { text: 'Prefer connection pooling', id: 'mem-2', gateAdmitted: false },
+      { text: 'Use parameterized queries for all SQL access', id: 'mem-1', gateAdmitted: true },
+      { text: 'Prefer connection pooling over per-request connections', id: 'mem-2', gateAdmitted: true },
+      { text: 'Some non-gate entry about logging', id: 'mem-3', gateAdmitted: false },
     ])
 
-    const record = tracker.finalize(cwd, 'We use parameterized queries — as recalled from memory.')
+    // mem-1 的片段逐字回现（被引用）；mem-2 从未出现；mem-3 非 gate 来源不计
+    const record = tracker.finalize(cwd, 'As recalled: Use parameterized queries for all SQL access — applying it now.')
     assert.ok(record)
-    assert.equal(record!.recalledEntryIds.length, 2)
+    assert.equal(record!.recalledEntryIds.length, 3)
     assert.ok(record!.recalledEntryIds.includes('mem-1'))
     assert.ok(record!.recalledEntryIds.includes('mem-2'))
-    assert.equal(record!.gateAdmittedCited, 1)
+    assert.equal(record!.gateAdmittedCited, 1, 'only the verbatim-cited gate entry counts')
   })
 
   it('backward-compat: old ledger rows without recalledEntryIds are tolerated', () => {
