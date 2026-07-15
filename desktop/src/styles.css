@@ -4583,6 +4583,7 @@ html[data-theme="dark"] body {
 .update-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 30%, transparent); color: var(--text-primary); font-size: 13px; }
 .update-banner-text { flex: 1; min-width: 0; }
 .update-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.update-banner.error { background: color-mix(in srgb, var(--error, #ef4444) 12%, transparent); border-bottom-color: color-mix(in srgb, var(--error, #ef4444) 35%, transparent); }
 .updater-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .updater-progress { height: 4px; margin-top: 6px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
 .updater-progress-bar { height: 100%; background: var(--accent, #3b82f6); transition: width .2s; }

@@ -80,7 +80,16 @@
     "restartingBtn": "Restarting",
     "pleaseWait": "Please wait",
     "updateNow": "Update Now",
-    "later": "Later"
+    "later": "Later",
+    "checkFailed": "Update check failed",
+    "downloadFailed": "Download failed",
+    "networkError": "Network error. Please check your connection and try again.",
+    "serverError": "Update server unavailable. Please try again later.",
+    "signatureError": "Signature verification failed. Please try again later or contact support.",
+    "timeoutError": "Update check timed out. Please try again later.",
+    "unknownError": "Unknown error",
+    "retry": "Retry",
+    "dismiss": "Dismiss"
   },
   "shortcuts": {
     "title": "Shortcuts",

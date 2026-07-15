@@ -80,7 +80,16 @@
     "restartingBtn": "重启中",
     "pleaseWait": "请稍候",
     "updateNow": "立即更新",
-    "later": "稍后"
+    "later": "稍后",
+    "checkFailed": "检查更新失败",
+    "downloadFailed": "下载更新失败",
+    "networkError": "网络连接失败，请检查网络后重试",
+    "serverError": "更新服务器暂时不可用，请稍后再试",
+    "signatureError": "安装包签名验证失败，请稍后再试或联系支持",
+    "timeoutError": "检查更新超时，请稍后重试",
+    "unknownError": "未知错误",
+    "retry": "重试",
+    "dismiss": "忽略"
   },
   "shortcuts": {
     "title": "快捷键",
