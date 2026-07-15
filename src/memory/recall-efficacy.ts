@@ -21,6 +21,10 @@ export interface RecallEvent {
   resultCount: number
   /** 召回条目的特征片段（引用率检测用）。 */
   snippets: string[]
+  /** Wave 5（反馈闭环）：召回条目的 id（gate-ledger join 用）。 */
+  entryIds: string[]
+  /** Wave 5（反馈闭环）：召回条目中有多少来自 essence-gate 准入。 */
+  gateAdmittedCount: number
 }
 
 export interface SessionEfficacyRecord {
@@ -31,6 +35,10 @@ export interface SessionEfficacyRecord {
   emptyRate: number
   citedRecalls: number
   citeRate: number
+  /** Wave 5: 被召回条目的 id 列表（截断上限，gate-ledger join 用）。 */
+  recalledEntryIds: string[]
+  /** Wave 5: 被引用的条目中来自 essence-gate 的数量。 */
+  gateAdmittedCited: number
   /** 空召回率 > 0.5 连续 ≥3 会话（含本会话）。 */
   alert: boolean
 }
@@ -50,12 +58,14 @@ export class RecallEfficacyTracker {
 
   constructor(private readonly sessionId: string) {}
 
-  record(query: string, results: Array<{ text: string }>): void {
+  record(query: string, results: Array<{ text: string; id?: string; gateAdmitted?: boolean }>): void {
     this.events.push({
       ts: Date.now(),
       query: query.slice(0, 120),
       resultCount: results.length,
       snippets: results.slice(0, 8).map(r => r.text.slice(0, SNIPPET_LENGTH)),
+      entryIds: results.filter(r => r.id).map(r => r.id!).slice(0, 20),
+      gateAdmittedCount: results.filter(r => r.gateAdmitted).length,
     })
     // 会话内上限，防异常膨胀
     if (this.events.length > 200) this.events.splice(0, this.events.length - 200)
@@ -98,6 +108,8 @@ export class RecallEfficacyTracker {
       emptyRate: round2(emptyRate),
       citedRecalls,
       citeRate: round2(citeRate),
+      recalledEntryIds: [...new Set(this.events.flatMap(e => e.entryIds))].slice(0, 50),
+      gateAdmittedCited: this.events.filter(e => e.gateAdmittedCount > 0).length,
       alert,
     }
 

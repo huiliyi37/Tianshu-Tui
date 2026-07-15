@@ -20,7 +20,7 @@ import { BM25Index } from '../search/text-index.js'
 import { VectorIndex } from '../search/vector-index.js'
 import { reciprocalRankFusion } from '../search/hybrid-search.js'
 import type { EmbeddingProvider } from '../search/embedding-provider.js'
-import { readMemoryEntries, isCurrentEntry, type MemoryEntry, type MemoryKind } from './unified-memory.js'
+import { readMemoryEntries, isCurrentEntry, validateKnowledgeChains, type MemoryEntry, type MemoryKind, type ChainIssue } from './unified-memory.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -69,6 +69,8 @@ export class KnowledgeIndex {
   private mdChunksById = new Map<string, { file: string; text: string }>()
   private playbookById = new Map<string, { text: string }>()
   private lastFingerprint = ''
+  /** Wave 5: supersede 链完整性校验结果（rebuild 时刷新，recall 工具返回警告）。 */
+  private _chainIssues: ChainIssue[] = []
 
   constructor(
     private readonly cwd: string,
@@ -159,7 +161,13 @@ export class KnowledgeIndex {
         } catch { /* malformed line */ }
       }
     }
+
+    // Wave 5（反馈闭环）：supersede 链完整性校验——每次全量重建时零额外 IO
+    this._chainIssues = validateKnowledgeChains(readMemoryEntries(this.cwd))
   }
+
+  /** Supersede 链完整性校验结果（rebuild 后可用）。 */
+  get chainIssues(): ChainIssue[] { return this._chainIssues }
 
   /** 可选向量层：provider 可用时为缺向量的 chunk 补 embedding。失败静默降级 BM25。 */
   async ensureVectors(): Promise<void> {

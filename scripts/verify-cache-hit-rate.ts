@@ -13,8 +13,6 @@
 
 import { PromptEngine } from '../src/prompt/engine.js'
 import { createVolatileSnapshot } from '../src/prompt/volatile-snapshot.js'
-import { canonicalizeRequest } from '../src/api/request-freezer.js'
-import { getProviderProfile } from '../src/api/provider-profile.js'
 import { stableStringify } from '../src/api/stable-json.js'
 import type { Message, Usage } from '../src/api/types.js'
 
@@ -77,7 +75,7 @@ const PROMPTS = [
   '总结一下我们刚才的对话',
 ]
 
-const profile = getProviderProfile('deepseek', 128_000)
+const profile = { contextWindow: 128_000 }
 
 async function sendTurn(turn: number, userText: string): Promise<TurnResult> {
   // 添加 user 消息
@@ -95,15 +93,11 @@ async function sendTurn(turn: number, userText: string): Promise<TurnResult> {
     prefixStable = vol0Current === vol0Prev
   }
 
-  // Canonicalize（strip cache_control, stable JSON）
-  const canonical = canonicalizeRequest(
-    { ...request, stream: true },
-    profile,
-    ['cache_control'],
-  )
-
-  // 发送 API 请求（非流式，简化解析）
-  const body = stableStringify(canonical)
+  // 构建 API 请求体：剥离 system prompt 为顶层字段（DeepSeek API 惯例）
+  const systemMsg = request.messages[0]
+  const chatMessages = systemMsg && systemMsg.role === 'system'
+    ? request.messages.slice(1)
+    : request.messages
 
   const response = await fetch(`${BASE_URL}/v1/chat/completions`, {
     method: 'POST',
@@ -113,10 +107,8 @@ async function sendTurn(turn: number, userText: string): Promise<TurnResult> {
     },
     body: stableStringify({
       model: 'deepseek-chat',
-      messages: [
-        { role: 'system', content: canonical.system },
-        ...canonical.messages,
-      ],
+      ...(systemMsg && systemMsg.role === 'system' ? { system: (systemMsg as { content: string }).content } : {}),
+      messages: chatMessages.map(m => ({ role: m.role, content: (m as { content: string }).content })),
       max_tokens: 256,
       stream: false,
     }),

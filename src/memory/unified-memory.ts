@@ -16,11 +16,11 @@
  * 迁移 B → A 幂等按 id（正则观察产物 source='auto' 默认不迁——那是噪声）。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { memoryDir } from '../config/paths.js'
-import { appendKnowledgeJsonl } from '../context/project-memory-writer.js'
+import { appendKnowledgeJsonl, acquireLock } from '../context/project-memory-writer.js'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 
 // ── Schema ─────────────────────────────────────────────────────────────────
@@ -216,30 +216,36 @@ export function supersedeMemoryEntry(cwd: string, oldId: string, newId: string):
   const path = memoryPath(cwd)
   if (!existsSync(path)) return false
 
-  let found = false
-  const lines: string[] = []
+  const lockPath = join(cwd, '.rivet', 'knowledge', 'memory.jsonl.lock')
+  const release = acquireLock(lockPath)
   try {
-    for (const line of readFileSync(path, 'utf-8').split('\n').filter(Boolean)) {
-      try {
-        const raw = JSON.parse(line)
-        if (raw.id === oldId && !raw.supersededBy) {
-          raw.validTo = Date.now()
-          raw.supersededBy = newId
-          raw.status = 'expired'
-          found = true
-          lines.push(JSON.stringify(raw))
-          continue
-        }
-      } catch { /* keep malformed line as-is */ }
-      lines.push(line)
+    let found = false
+    const lines: string[] = []
+    try {
+      for (const line of readFileSync(path, 'utf-8').split('\n').filter(Boolean)) {
+        try {
+          const raw = JSON.parse(line)
+          if (raw.id === oldId && !raw.supersededBy) {
+            raw.validTo = Date.now()
+            raw.supersededBy = newId
+            raw.status = 'expired'
+            found = true
+            lines.push(JSON.stringify(raw))
+            continue
+          }
+        } catch { /* keep malformed line as-is */ }
+        lines.push(line)
+      }
+    } catch {
+      return false
     }
-  } catch {
-    return false
-  }
 
-  if (!found) return false
-  writeFileAtomicSync(path, lines.join('\n') + '\n')
-  return true
+    if (!found) return false
+    writeFileAtomicSync(path, lines.join('\n') + '\n')
+    return true
+  } finally {
+    release()
+  }
 }
 
 // ── Read ───────────────────────────────────────────────────────────────────
@@ -250,7 +256,9 @@ export function supersedeMemoryEntry(cwd: string, oldId: string, newId: string):
  */
 export function readMemoryEntries(cwd: string): MemoryEntry[] {
   const primary = readJsonlEntries(memoryPath(cwd))
-  const legacy = readJsonlEntries(legacyMemoryPath(cwd))
+  // Legacy fallback: 排除正则观察产物（source='auto'）——那是 observation-extractor 的噪声，
+  // Wave 1 已停写，迁移政策明确"观察类正则产物不迁"，dual-read 必须执行同一过滤。
+  const legacy = readJsonlEntries(legacyMemoryPath(cwd)).filter(e => e.source !== 'auto')
   if (legacy.length === 0) return primary
 
   const seen = new Set(primary.map(e => e.id))
@@ -341,6 +349,89 @@ export function countSimilarMemoryEntries(cwd: string, text: string): number {
   return readMemoryEntries(cwd).filter(e =>
     e.text.trim().toLowerCase().slice(0, 200) === normalized,
   ).length
+}
+
+// ── Chain Validation（Wave 5: 反馈闭环）───────────────────────────────────
+
+export interface ChainIssue {
+  kind: 'cycle' | 'dangling_reference' | 'dead_chain'
+  /** 问题涉及的条目 id。 */
+  entryIds: string[]
+  detail: string
+}
+
+/**
+ * 检查 supersede 链的结构完整性。只告警不自动修复。
+ *
+ * 三类问题：
+ * ① 环：沿 `supersededBy` 走链遇到重复 id（visited set）
+ * ② 悬空引用：`supersededBy` 指向不存在的 id
+ * ③ 死链：链上全部条目有 `validTo` 且无 current 叶子（最远端也被封口）
+ */
+export function validateKnowledgeChains(entries: MemoryEntry[]): ChainIssue[] {
+  const issues: ChainIssue[] = []
+  const byId = new Map(entries.map(e => [e.id, e] as const))
+
+  for (const entry of entries) {
+    if (!entry.supersededBy) continue
+
+    // ② 悬空引用
+    if (!byId.has(entry.supersededBy)) {
+      issues.push({
+        kind: 'dangling_reference',
+        entryIds: [entry.id],
+        detail: `${entry.id} 的 supersededBy 指向不存在的 ${entry.supersededBy}`,
+      })
+      continue
+    }
+
+    // ① 环检测：沿链走，visited set 防止环
+    const visited = new Set<string>()
+    let current: MemoryEntry | undefined = entry
+    let cycleStart: string | null = null
+    while (current) {
+      if (visited.has(current.id)) {
+        cycleStart = current.id
+        break
+      }
+      visited.add(current.id)
+      if (!current.supersededBy) break
+      current = byId.get(current.supersededBy)
+    }
+    if (cycleStart) {
+      issues.push({
+        kind: 'cycle',
+        entryIds: [...visited],
+        detail: `supersede 链在 ${cycleStart} 形成环（${visited.size} 个条目）`,
+      })
+      break // 一个环就够了，不重复
+    }
+
+    // ③ 死链：链末端也封口 → 无 current 叶子
+    let leaf: MemoryEntry | undefined = entry
+    while (leaf?.supersededBy && byId.has(leaf.supersededBy)) {
+      leaf = byId.get(leaf.supersededBy)
+    }
+    if (leaf && !isCurrentEntry(leaf)) {
+      // 链上所有条目（包括起点）都不是 current：确认是否整条链已死
+      let cursor: MemoryEntry | undefined = entry
+      let allDead = true
+      while (cursor) {
+        if (isCurrentEntry(cursor)) { allDead = false; break }
+        if (!cursor.supersededBy) break
+        cursor = byId.get(cursor.supersededBy)
+      }
+      if (allDead) {
+        issues.push({
+          kind: 'dead_chain',
+          entryIds: [entry.id, ...(leaf.id !== entry.id ? [leaf!.id] : [])],
+          detail: `从 ${entry.id} 起的 supersede 链无 current 叶子（末端 ${leaf!.id} 已封口）`,
+        })
+      }
+    }
+  }
+
+  return issues
 }
 
 // ── Migration ──────────────────────────────────────────────────────────────

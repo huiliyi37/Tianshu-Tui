@@ -37,7 +37,7 @@ export type DreamCriterion =
   | 'conceptual_reframe'
   | 'reusable_design_pattern'
 
-interface CuratedMemoryCandidate {
+export interface CuratedMemoryCandidate {
   criterion: DreamCriterion
   claim: string
 }
@@ -109,7 +109,7 @@ export function distillSession(input: DreamInput): string | null {
   return lines.join('\n')
 }
 
-function extractCuratedMemoryCandidates(decisions: string[]): CuratedMemoryCandidate[] {
+export function extractCuratedMemoryCandidates(decisions: string[]): CuratedMemoryCandidate[] {
   const candidates: CuratedMemoryCandidate[] = []
   const seen = new Set<string>()
 

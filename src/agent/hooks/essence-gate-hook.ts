@@ -9,6 +9,7 @@
 import type { PostSessionRuntimeHook } from '../runtime-hooks.js'
 import type { FailureJournal } from '../failure-journal.js'
 import { runEssenceGate, type KnowledgeCandidate, type EssenceGateResult } from '../../memory/essence-gate.js'
+import { writeGateLedgerRow } from '../../memory/gate-ledger.js'
 
 export interface EssenceGateHookDeps {
   cwd: string
@@ -50,6 +51,14 @@ export function createEssenceGateHook(deps: EssenceGateHookDeps): PostSessionRun
         { cwd: deps.cwd, sessionId: deps.sessionId, complete: deps.complete },
         candidates,
       )
+      writeGateLedgerRow(deps.cwd, {
+        sessionId: deps.sessionId ?? 'unknown',
+        ts: Date.now(),
+        admitted: result.admitted.map(e => ({ id: e.id, text: e.text })),
+        rejected: result.rejectedRefs,
+        superseded: result.supersededRefs,
+        failedClosed: result.failedClosed,
+      })
       deps.onResult?.(result)
     },
   }

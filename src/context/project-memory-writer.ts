@@ -30,7 +30,8 @@ interface MemoryEntry {
  * sharing the same cwd would interleave reads and writes, losing entries
  * (violating the atomic/monotonic invariant from 891cc1b6).
  */
-function acquireLock(lockPath: string): () => void {
+/** Exported for unified-memory supersedeMemoryEntry — the read-modify-write needs the same lock protocol. */
+export function acquireLock(lockPath: string): () => void {
   const start = Date.now()
   while (true) {
     try {

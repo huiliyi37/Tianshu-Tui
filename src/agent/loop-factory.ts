@@ -554,6 +554,13 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         getDecisions: () => self.decisions,
         getTrajectory: () => self.trajectory.getEntries(),
         getFailureJournal: () => self.failureJournal,
+        // Wave 5（反馈闭环）：gate 装配时 dream 候选推入 essence-gate 素材缓冲
+        onKnowledgeCandidates: self.config.sessionId ? (candidates) => {
+          self.knowledgeCandidates.push(...candidates)
+          if (self.knowledgeCandidates.length > 60) {
+            self.knowledgeCandidates.splice(0, self.knowledgeCandidates.length - 60)
+          }
+        } : undefined,
       },
       getRegisteredSkills: () => skillRegistry.list().map(s => ({ name: s.name, triggers: s.triggers })),
     } : {}),

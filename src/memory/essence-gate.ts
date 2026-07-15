@@ -24,6 +24,7 @@ import {
   type MemoryEntry,
   type MemoryKind,
 } from './unified-memory.js'
+import { createHash } from 'node:crypto'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,12 @@ export interface EssenceGateResult {
   admitted: MemoryEntry[]
   rejected: number
   superseded: number
+  /** Admitted entries 的 id+hash（gate-ledger join 用）。 */
+  admittedRefs: Array<{ id: string; textHash: string }>
+  /** Rejected 候选的 hash+片段（gate-ledger 复现检测用）。 */
+  rejectedRefs: Array<{ textHash: string; snippet: string }>
+  /** Superseded 的旧→新 id 映射。 */
+  supersededRefs: Array<{ oldId: string; newId: string }>
   /** true = LLM 不可用或输出不可解析，本轮什么都没写（fail-closed）。 */
   failedClosed: boolean
 }
@@ -201,6 +208,11 @@ function normalizeKind(kind: string): MemoryKind {
   return (VALID_KINDS.has(kind) ? kind : 'finding') as MemoryKind
 }
 
+/** 候选文本去标识化 hash（gate-ledger join 用）。 */
+function hashCandidateText(text: string): string {
+  return createHash('sha256').update(text.trim().toLowerCase().slice(0, 200)).digest('hex').slice(0, 16)
+}
+
 /** 送审前去重（session 内同文候选只审一次）。 */
 function dedupeCandidates(candidates: KnowledgeCandidate[]): KnowledgeCandidate[] {
   const seen = new Set<string>()
@@ -222,7 +234,7 @@ export async function runEssenceGate(
 ): Promise<EssenceGateResult> {
   const candidates = dedupeCandidates(rawCandidates).slice(0, deps.maxCandidates ?? DEFAULT_MAX_CANDIDATES)
   if (candidates.length === 0) {
-    return { admitted: [], rejected: 0, superseded: 0, failedClosed: false }
+    return { admitted: [], rejected: 0, superseded: 0, admittedRefs: [], rejectedRefs: [], supersededRefs: [], failedClosed: false }
   }
 
   const existing = readMemoryEntries(deps.cwd)
@@ -238,15 +250,18 @@ export async function runEssenceGate(
     raw = await deps.complete(prompt, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)
   } catch {
     // fail-closed：LLM 不可用不写入，绝不回退正则直写
-    return { admitted: [], rejected: 0, superseded: 0, failedClosed: true }
+    return { admitted: [], rejected: 0, superseded: 0, admittedRefs: [], rejectedRefs: [], supersededRefs: [], failedClosed: true }
   }
 
   const verdicts = parseGateVerdicts(raw, candidates.length)
   if (verdicts === null) {
-    return { admitted: [], rejected: 0, superseded: 0, failedClosed: true }
+    return { admitted: [], rejected: 0, superseded: 0, admittedRefs: [], rejectedRefs: [], supersededRefs: [], failedClosed: true }
   }
 
   const admitted: MemoryEntry[] = []
+  const admittedRefs: EssenceGateResult['admittedRefs'] = []
+  const rejectedRefs: EssenceGateResult['rejectedRefs'] = []
+  const supersededRefs: EssenceGateResult['supersededRefs'] = []
   let rejected = 0
   let superseded = 0
 
@@ -254,12 +269,14 @@ export async function runEssenceGate(
     const candidate = candidates[verdict.index]!
     if (verdict.action === 'reject') {
       rejected++
+      rejectedRefs.push({ textHash: hashCandidateText(candidate.text), snippet: candidate.text.slice(0, 80) })
       continue
     }
 
     const admission = validateAdmission(verdict, candidate, existingIds)
     if (!admission) {
       rejected++
+      rejectedRefs.push({ textHash: hashCandidateText(candidate.text), snippet: candidate.text.slice(0, 80) })
       continue
     }
 
@@ -277,14 +294,23 @@ export async function runEssenceGate(
       validFrom: Date.now(),
     })
     admitted.push(entry)
+    admittedRefs.push({ id: entry.id, textHash: hashCandidateText(entry.text) })
 
     if (admission.supersedesId) {
-      if (supersedeMemoryEntry(deps.cwd, admission.supersedesId, entry.id)) superseded++
+      if (supersedeMemoryEntry(deps.cwd, admission.supersedesId, entry.id)) {
+        superseded++
+        supersededRefs.push({ oldId: admission.supersedesId, newId: entry.id })
+      }
     }
   }
 
   // LLM 漏判的候选（无裁决）按 reject 处理——宁缺毋滥
-  rejected += candidates.length - verdicts.length
+  for (let i = 0; i < candidates.length; i++) {
+    if (!verdicts.some(v => v.index === i)) {
+      rejected++
+      rejectedRefs.push({ textHash: hashCandidateText(candidates[i]!.text), snippet: candidates[i]!.text.slice(0, 80) })
+    }
+  }
 
-  return { admitted, rejected, superseded, failedClosed: false }
+  return { admitted, rejected, superseded, admittedRefs, rejectedRefs, supersededRefs, failedClosed: false }
 }

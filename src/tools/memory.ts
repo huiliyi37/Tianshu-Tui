@@ -99,10 +99,25 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
 
         // 召回健康账本（Wave 3）：记录每次召回的空/命中，postSession 聚合落盘
         if (ctx?.sessionId) {
-          getRecallTracker(ctx.sessionId).record(query, hits.map(h => ({ text: h.text })))
+          getRecallTracker(ctx.sessionId).record(query, hits.map(h => ({
+            text: h.text,
+            id: h.entry?.id,
+            gateAdmitted: h.entry?.source === 'essence-gate',
+          })))
         }
 
         const lines: string[] = []
+
+        // Wave 5（反馈闭环）：supersede 链结构告警（模型可见，不影响检索结果）
+        const chainIssues = getKnowledgeIndex(cwd).chainIssues
+        if (chainIssues.length > 0) {
+          lines.push(`⚠ Knowledge chain integrity issues (${chainIssues.length}):`)
+          for (const issue of chainIssues.slice(0, 3)) {
+            lines.push(`  [${issue.kind}] ${issue.detail}`)
+          }
+          lines.push('')
+        }
+
         const entryHits = hits.filter(h => h.entry)
         const mdHits = hits.filter(h => h.file)
         if (entryHits.length > 0) {
