@@ -18,6 +18,7 @@
 import { WRITE_FILE_POINTER_PREFIX } from './write-file-arg-processor.js'
 import { EDIT_FILE_POINTER_PREFIX } from './edit-file-arg-processor.js'
 import { HASH_EDIT_POINTER_PREFIX } from './hash-edit-arg-processor.js'
+import { POINTER_INTERNAL_TAG } from './pointer-tag.js'
 
 /** edit_file's new_string collapse marker (see edit-file-arg-processor render). */
 export const EDIT_NEW_BLOCK_POINTER_PREFIX = '[new block'
@@ -36,10 +37,15 @@ export const POINTER_PLACEHOLDER_PREFIXES: readonly string[] = [
  *  advisory hook keys off this substring to count repeated offenses. */
 export const POINTER_GUARD_ERROR_MARKER = 'pointer placeholder from message history'
 
+/** Re-exported from pointer-tag.ts for convenience; this is the machine-only tag
+ *  embedded in every real pointer produced by the arg processors. */
+export { POINTER_INTERNAL_TAG }
+
 /** Marker phrases that appear inside every real pointer produced by the arg
  *  processors. Used as a secondary guard so that real content which merely
  *  happens to start with the same bracketed prefix is not rejected. */
 const POINTER_MARKER_PHRASES: readonly string[] = [
+  POINTER_INTERNAL_TAG,
   'Display placeholder',
   'never emit as content',
   'Use read_file to review',
@@ -54,16 +60,35 @@ const POINTER_MARKER_PHRASES: readonly string[] = [
  * often start with the same prefix (because they appear dozens of times in
  * compressed history) but then continue with real multi-line content; those
  * must be allowed to write.
+ *
+ * We also scan every line of the value, so that a pointer placeholder embedded
+ * in the middle or at the end of a larger argument (e.g. the model prepends a
+ * sentence and then echoes the placeholder line) is still caught.
  */
 export function detectPointerPlaceholder(value: string): string | null {
-  const trimmed = value.trimStart()
+  // Fast path: the whole value is a pointer (most common regurgitation pattern).
+  const head = detectPointerPlaceholderInLine(value.trimStart())
+  if (head) return head
+
+  // Scan each line independently. A pointer placeholder produced by the arg
+  // processors is always a single line; if any complete line matches, reject.
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trimStart()
+    if (line.length === 0) continue
+    const matched = detectPointerPlaceholderInLine(line)
+    if (matched) return matched
+  }
+  return null
+}
+
+function detectPointerPlaceholderInLine(line: string): string | null {
   for (const prefix of POINTER_PLACEHOLDER_PREFIXES) {
-    if (!trimmed.startsWith(prefix)) continue
+    if (!line.startsWith(prefix)) continue
     // Literal pointers are always rendered as a single line by the arg
     // processors; any newline means the model added real content after the
     // prefix imitation.
-    if (trimmed.includes('\n') || trimmed.includes('\r')) continue
-    if (!POINTER_MARKER_PHRASES.some(phrase => trimmed.includes(phrase))) continue
+    if (line.includes('\n') || line.includes('\r')) continue
+    if (!POINTER_MARKER_PHRASES.some(phrase => line.includes(phrase))) continue
     return prefix
   }
   return null

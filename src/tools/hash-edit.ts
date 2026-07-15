@@ -124,6 +124,35 @@ function parseAnchor(raw: string): Anchor | null {
 
 const RECOVERY_NEAR_WINDOW = 200
 
+/** Detect new_string that looks like a complete declaration block, which is
+ *  usually a sign the model intends to REPLACE a range rather than INSERT after
+ *  a single anchor. Single-anchor mode inserts after the anchor line; using it
+ *  with a full method/class leaves the old declaration in place and creates a
+ *  duplicate. */
+function looksLikeCompleteDeclarationBlock(text: string): boolean {
+  const trimmed = text.trimStart()
+  if (!trimmed.includes('\n')) return false
+  const firstLine = trimmed.split('\n')[0] ?? ''
+  return /\b(async\s+)?function\s+\w+|class\s+\w+|interface\s+\w+|type\s+\w+|enum\s+\w+\b/.test(firstLine)
+}
+
+/** Count how many times each "function-like" header appears in the file.
+ *  Used as a post-edit sanity check to catch accidental duplication caused by
+ *  single-anchor insertion when replacement was intended. */
+function detectDuplicateDeclarations(content: string): string[] {
+  const headerPattern = /^(\s*)(?:export\s+|default\s+|async\s+)*\s*(function\s+(\w+)|class\s+(\w+)|interface\s+(\w+)|type\s+(\w+)|enum\s+(\w+))\b/gm
+  const counts = new Map<string, number>()
+  let m: RegExpExecArray | null
+  while ((m = headerPattern.exec(content)) !== null) {
+    const name = m[3] ?? m[4] ?? m[5] ?? m[6] ?? m[7] ?? ''
+    if (!name) continue
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+}
+
 /**
  * Recover stale full-hash anchors by searching the current file.
  *
@@ -341,6 +370,21 @@ Note: For large new_string, the message history keeps only a short pointer
       }
     }
 
+    const newString = params.input.new_string as string
+
+    // Semantic guard: single-anchor mode inserts AFTER the anchor line. If the
+    // model hands us what looks like a complete declaration block, it probably
+    // meant to REPLACE a range and should use two anchors (first and last of
+    // the block to remove). Flag it as a warning rather than an error because
+    // insertion of a standalone block is still legitimate.
+    let semanticWarning = ''
+    if (anchors.length === 1 && looksLikeCompleteDeclarationBlock(newString)) {
+      semanticWarning =
+        `⚠ Single-anchor mode inserts new_string AFTER L${anchors[0]!.line}, not replacing it. ` +
+        `new_string looks like a complete declaration block; if you meant to replace an existing block, ` +
+        `use two anchors marking the inclusive start and end of the range to remove.`
+    }
+
     // Normalize to LF for line splitting/rebuild; restore the file's EOL on
     // write-back. Without this, splicing LF new_string lines into a CRLF file's
     // (still \r-terminated) lines produces a mixed-EOL file. hashLine already
@@ -418,7 +462,6 @@ Note: For large new_string, the message history keeps only a short pointer
         if (recoveredAnchors) {
           const firstLine = recoveredAnchors[0]!.line
           const lastLine = recoveredAnchors[recoveredAnchors.length - 1]!.line
-          const newString = params.input.new_string as string
 
           const before = lines.slice(0, firstLine - 1)
           const after = lines.slice(lastLine)
@@ -440,10 +483,14 @@ Note: For large new_string, the message history keeps only a short pointer
           const staleAdvice = recoveredCount > 0 && anchors.length >= 2
             ? '⚠ Multiple anchors went stale — anchors are interdependent. Consider switching to edit_file for further edits to this file.'
             : ''
+          const duplicateNames = detectDuplicateDeclarations(newContent)
+          const duplicateWarning = duplicateNames.length > 0
+            ? `⚠ Duplicate declarations detected after edit: ${duplicateNames.join(', ')}. If you intended to replace the original, use two anchors.`
+            : ''
           const posDrift = positionDriftWarning
             ? '⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
             : ''
-          const extraWarn = [staleAdvice, posDrift].filter(Boolean).join('\n\n')
+          const extraWarn = [staleAdvice, posDrift, semanticWarning, duplicateWarning].filter(Boolean).join('\n\n')
           return await finalizeHashEdit(
             filePath, params.cwd, newContent, params.sessionId,
             `hash_edit${recoveredInfo} applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines`,
@@ -464,7 +511,6 @@ Note: For large new_string, the message history keeps only a short pointer
     // All anchors verified — apply the edit
     const firstLine = anchors[0]!.line
     const lastLine = anchors[anchors.length - 1]!.line
-    const newString = params.input.new_string as string
 
     // Build the new file content
     const before = lines.slice(0, firstLine - 1)
@@ -481,14 +527,19 @@ Note: For large new_string, the message history keeps only a short pointer
     const relPath = relative(params.cwd, filePath)
     trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
 
+    const duplicateNames = detectDuplicateDeclarations(newContent)
+    const duplicateWarning = duplicateNames.length > 0
+      ? `⚠ Duplicate declarations detected after edit: ${duplicateNames.join(', ')}. If you intended to replace the original, use two anchors.`
+      : ''
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     const posDrift = positionDriftWarning
       ? '⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
       : ''
+    const extraWarn = [posDrift, semanticWarning, duplicateWarning].filter(Boolean).join('\n\n')
     return await finalizeHashEdit(
       filePath, params.cwd, newContent, params.sessionId,
       `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines`,
-      posDrift,
+      extraWarn,
     )
   },
 

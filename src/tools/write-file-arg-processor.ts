@@ -12,6 +12,7 @@
 
 import { createFileContentArgProcessor } from '../agent/tool-arg-post-processor.js'
 import { toPosixPath } from '../path-format.js'
+import { POINTER_INTERNAL_TAG } from './pointer-tag.js'
 
 export const WRITE_FILE_POINTER_PREFIX = '[file written to'
 
@@ -32,5 +33,5 @@ export const writeFileArgProcessor = createFileContentArgProcessor({
     return typeof fp === 'string' && fp.length > 0 ? toPosixPath(fp) : null
   },
   render: ({ path, lines, chars }) =>
-    `${WRITE_FILE_POINTER_PREFIX} ${path} — ${lines} lines, ${chars} chars. Display placeholder — never emit this as content; use read_file to review.]`,
+    `${WRITE_FILE_POINTER_PREFIX} ${path} — ${lines} lines, ${chars} chars. ${POINTER_INTERNAL_TAG} Display placeholder — never emit this as content; use read_file to review.]`,
 })

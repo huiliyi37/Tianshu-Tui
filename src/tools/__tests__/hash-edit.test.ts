@@ -448,4 +448,46 @@ describe('hash_edit', () => {
     assert.ok(result.content.includes('stale'), `Expected stale error, got: ${result.content}`)
     assert.equal(readFileSync(join(cwd, 'test.txt'), 'utf-8'), original, 'dry_run must not modify the file on error')
   })
+
+  // ── semantic guard: single-anchor insertion of a complete declaration block ──
+
+  it('warns when single-anchor mode receives a complete declaration block', async () => {
+    const cwd = setup({
+      'test.ts': '// header\nfunction oldOne() {\n  return 1;\n}\n',
+    })
+    const filePath = join(cwd, 'test.ts')
+    const { createHash } = await import('crypto')
+    const h = (line: string): string => createHash('sha256').update(line).digest('hex').slice(0, 8)
+    const lines = readFileSync(filePath, 'utf-8').split('\n')
+    const result = await HASH_EDIT_TOOL.execute(params({
+      file_path: filePath,
+      anchors: [`L1:${h(lines[0]!)}`],
+      new_string: 'function newOne() {\n  return 2;\n}',
+    }))
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('Single-anchor mode inserts new_string AFTER'), `expected single-anchor warning, got: ${result.content}`)
+    // File still reflects the insertion (not rejected, just warned).
+    const newContent = readFileSync(filePath, 'utf-8')
+    assert.ok(newContent.includes('function oldOne'))
+    assert.ok(newContent.includes('function newOne'))
+  })
+
+  it('flags duplicate declarations caused by single-anchor insertion', async () => {
+    const cwd = setup({
+      'test.ts': '// header\nfunction getStates() {\n  return [];\n}\n',
+    })
+    const filePath = join(cwd, 'test.ts')
+    const { createHash } = await import('crypto')
+    const h = (line: string): string => createHash('sha256').update(line).digest('hex').slice(0, 8)
+    const lines = readFileSync(filePath, 'utf-8').split('\n')
+    const result = await HASH_EDIT_TOOL.execute(params({
+      file_path: filePath,
+      anchors: [`L1:${h(lines[0]!)}`],
+      new_string: 'function getStates() {\n  return this.connections.get(serverId);\n}',
+    }))
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('Duplicate declarations detected after edit: getStates'), `expected duplicate warning, got: ${result.content}`)
+    const newContent = readFileSync(filePath, 'utf-8')
+    assert.equal((newContent.match(/function getStates/g) ?? []).length, 2, 'single-anchor insertion should leave two getStates declarations')
+  })
 })

@@ -14,6 +14,7 @@
  */
 
 import { createFileContentArgProcessor } from '../agent/tool-arg-post-processor.js'
+import { POINTER_INTERNAL_TAG } from './pointer-tag.js'
 
 export const HASH_EDIT_POINTER_PREFIX = '[hash_edit applied to'
 
@@ -30,5 +31,5 @@ export const hashEditArgProcessor = createFileContentArgProcessor({
     return typeof fp === 'string' && fp.length > 0 ? fp : null
   },
   render: ({ path, lines, chars }) =>
-    `${HASH_EDIT_POINTER_PREFIX} ${path} — new block ${lines} lines, ${chars} chars. Display placeholder — never emit this as content; use read_file to review.]`,
+    `${HASH_EDIT_POINTER_PREFIX} ${path} — new block ${lines} lines, ${chars} chars. ${POINTER_INTERNAL_TAG} Display placeholder — never emit this as content; use read_file to review.]`,
 })

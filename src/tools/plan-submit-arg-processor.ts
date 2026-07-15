@@ -11,6 +11,7 @@
 
 import { createFileContentArgProcessor } from '../agent/tool-arg-post-processor.js'
 import { slugify } from '../plan/plan-store.js'
+import { POINTER_INTERNAL_TAG } from './pointer-tag.js'
 
 const PLAN_POINTER_PREFIX = '[plan persisted to'
 
@@ -25,5 +26,5 @@ export const planSubmitArgProcessor = createFileContentArgProcessor({
     return `.rivet/plans/${slugify(title)}.md`
   },
   render: ({ path, lines, chars }) =>
-    `${PLAN_POINTER_PREFIX} ${path} — ${lines} lines, ${chars} chars. Use read_file to review.]`,
+    `${PLAN_POINTER_PREFIX} ${path} — ${lines} lines, ${chars} chars. ${POINTER_INTERNAL_TAG} Use read_file to review.]`,
 })

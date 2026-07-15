@@ -26,11 +26,11 @@ function makeParams(input: Record<string, unknown>): ToolCallParams {
 describe('detectPointerPlaceholder', () => {
   it('detects every registered pointer prefix in real pointer shape', () => {
     const samples: Record<string, string> = {
-      '[file written to': '[file written to /x/y.md — 5 lines, 100 chars. Display placeholder — never emit this as content; use read_file to review.]',
-      '[edit on': '[edit on /x/y.md: replaced 100-char block, preview: "abc". Display placeholder — never emit this as content; use read_file for current content.]',
-      '[hash_edit applied to': '[hash_edit applied to /x/y.md — new block 5 lines, 100 chars. Display placeholder — never emit this as content; use read_file to review.]',
-      '[new block': '[new block 100 chars — placeholder, never emit as content]',
-      '[plan persisted to': '[plan persisted to .rivet/plans/x.md — 5 lines, 100 chars. Use read_file to review.]',
+      '[file written to': '[file written to /x/y.md — 5 lines, 100 chars. #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file to review.]',
+      '[edit on': '[edit on /x/y.md: replaced 100-char block, preview: "abc". #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file for current content.]',
+      '[hash_edit applied to': '[hash_edit applied to /x/y.md — new block 5 lines, 100 chars. #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file to review.]',
+      '[new block': '[new block 100 chars — #RIVET-POINTER-DISPLAY-ONLY# placeholder, never emit as content]',
+      '[plan persisted to': '[plan persisted to .rivet/plans/x.md — 5 lines, 100 chars. #RIVET-POINTER-DISPLAY-ONLY# Use read_file to review.]',
     }
     for (const prefix of POINTER_PLACEHOLDER_PREFIXES) {
       const sample = samples[prefix]
@@ -59,6 +59,23 @@ describe('detectPointerPlaceholder', () => {
   it('allows a single-line prefix imitation that lacks the marker phrase', () => {
     assert.equal(
       detectPointerPlaceholder('[file written to /a/b/page.tsx is a note about what I did earlier]'),
+      null,
+    )
+  })
+
+  it('detects a pointer embedded mid-content on its own line', () => {
+    const content = 'Here is the previous batch:\n[file written to /x/y.md — 5 lines, 100 chars. #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file to review.]\nNow continuing...'
+    assert.equal(detectPointerPlaceholder(content), '[file written to')
+  })
+
+  it('detects a pointer at the end of multi-line content', () => {
+    const content = 'Draft below:\n\n[hash_edit applied to /x/y.md — new block 5 lines, 100 chars. #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file to review.]'
+    assert.equal(detectPointerPlaceholder(content), '[hash_edit applied to')
+  })
+
+  it('still allows real content that merely mentions a pointer mid-text', () => {
+    assert.equal(
+      detectPointerPlaceholder('Docs: history shows "[file written to /x/y.md — 5 lines, 100 chars. #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file to review.]" pointers.'),
       null,
     )
   })
