@@ -94,7 +94,7 @@ describe('ASK_USER_QUESTION_TOOL', () => {
     assert.equal((called as AskUserQuestionInfo).questions[0]!.allowMultiple, false)
   })
 
-  it('does not call onAskUserQuestion for multi-select or open-ended questions', async () => {
+  it('calls onAskUserQuestion for multi-select options (so TUI can render a picker)', async () => {
     let called = false
     await ASK_USER_QUESTION_TOOL.execute({
       input: { question: 'Which features?', options: ['Auth', 'Billing'], allow_multiple: true },
@@ -102,8 +102,11 @@ describe('ASK_USER_QUESTION_TOOL', () => {
       toolUseId: 'test',
       onAskUserQuestion: () => { called = true },
     } as unknown as ToolCallParams)
-    assert.equal(called, false)
+    assert.equal(called, true)
+  })
 
+  it('does not call onAskUserQuestion for open-ended questions', async () => {
+    let called = false
     await ASK_USER_QUESTION_TOOL.execute({
       input: { question: 'Open ended?' },
       cwd: process.cwd(),

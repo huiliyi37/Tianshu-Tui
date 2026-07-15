@@ -26,10 +26,11 @@ function setup() {
   return { manager, router }
 }
 
-test('GET /health is fail-closed', async () => {
+test('GET /health is intentionally open (desktop monitor probes without token)', async () => {
   const { router } = setup()
   const res = await router('GET', '/health', {}, {})
-  assert.equal(res.status, 401)
+  assert.equal(res.status, 200)
+  assert.equal((res.body as { ok: boolean }).ok, true)
 })
 
 test('GET /health reports version, uptime and counts', async () => {

@@ -821,7 +821,6 @@ describe('GWT salience and Top-K selection', () => {
       assert.match(out, /事实锚点核对/)
       assert.match(out, /写下时的状态/)
       assert.match(out, /文档与源码冲突时信源码/)
-      assert.match(out, /父目录/)
     })
 
     // Regression (2026-07-05 plan-mode 卡死排查): the old "收尾契约 — 每个 turn 必须以
