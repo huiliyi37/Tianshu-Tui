@@ -75,3 +75,24 @@ docs/sessions/
 /js
 # npm pack 产物
 *.tgz
+
+# Release build artifacts（保留 latest.json 作为 manifest 继续跟踪）
+release/*.dmg
+release/*.app.tar.gz
+release/*.sig
+
+# 日志与评估产物
+logs/
+tianshu-agent-v1.*.json
+
+# 运行时插件 / scratch 目录
+.rivet/plugin-*/
+.rivet/scratch/
+
+# macOS 本地应用数据
+Library/
+
+# 一次性临时产物 / 导出的文档产物
+_test-docx.html
+docs/*.html
+docs/*.docx
