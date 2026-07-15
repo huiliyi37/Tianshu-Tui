@@ -342,7 +342,9 @@ export class OpenAIClient implements StreamClient {
     })
 
     const body: Record<string, unknown> = {
-      model: request.model,
+      // 空 model 回退到 client 绑定值——侧路调用（essence-gate / vision bridge）
+      // 传 model: '' 期望"client already binds the model"；不回退会被 provider 400。
+      model: request.model || this.config.model,
       messages,
       stream: true,
     }

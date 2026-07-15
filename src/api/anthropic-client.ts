@@ -147,7 +147,8 @@ export class AnthropicClient implements StreamClient {
       : undefined
 
     const body: AnthropicRequestBody = {
-      model: request.model,
+      // 空 model 回退到 client 绑定值（侧路调用契约，同 openai-client）。
+      model: request.model || this.config.model,
       max_tokens: request.max_tokens ?? this.config.maxTokens,
       messages,
       stream: true,

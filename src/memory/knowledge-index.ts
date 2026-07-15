@@ -88,8 +88,9 @@ export class KnowledgeIndex {
       for (const f of readdirSync(dir)) {
         if (!f.endsWith('.md')) continue
         try {
+          // mtime + size 双因子：NAS/SMB 挂载的 mtime 精度不可靠，size 兜底
           const st = statSync(join(dir, f))
-          parts.push(`${f}:${st.mtimeMs}`)
+          parts.push(`${f}:${st.mtimeMs}:${st.size}`)
         } catch { /* skip */ }
       }
     } catch { /* no dir */ }

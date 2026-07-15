@@ -80,8 +80,10 @@ export function loadProjectMemory(cwd: string): ProjectMemoryBlock {
 /**
  * Load all project memory entries (Tier 1 + Tier 2), unfiltered.
  *
- * Internal use only（compact、迁移、诊断）。recall 工具**不得**调用——
- * 全量 dump 曾把 187 条 commit 搬运噪声原样灌给模型（Wave 1 修复）。
+ * @deprecated 仅限内部用途（compact、迁移、诊断）。recall 工具及任何面向
+ * 模型的路径**不得**调用——全量 dump 曾把 187 条 commit 搬运噪声原样灌给
+ * 模型（Wave 1 修复）。面向模型的检索一律走 `queryProjectMemoryEntries`
+ * 或 `KnowledgeIndex.search`。
  */
 export function loadAllProjectMemoryEntries(cwd: string): MemoryEntry[] {
   return readMemoryEntries(cwd)

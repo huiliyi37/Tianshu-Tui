@@ -23,7 +23,7 @@ const DEFINITION: ToolDefinition = {
 
 ### Actions
 - recall: Hybrid search over the project knowledge base (structured entries + knowledge/*.md + playbook lessons). Supports kind/topic/source filters; returns only currently-valid entries by default (superseded knowledge needs includeHistory).
-- remember: Persist a claim (decisions, observations, verification facts, failure patterns, or project rules). Session scope is immediate; project scope passes a session-end quality gate before entering the shared knowledge base.
+- remember: Persist a claim (decisions, observations, verification facts, failure patterns, or project rules). Session scope is immediate; project scope is queued and admitted by a session-end quality gate — a "pending quality gate" response means the claim IS recorded, do not retry.
 
 ### Claim kinds (for remember)
 - decision — architectural or implementation decisions made
