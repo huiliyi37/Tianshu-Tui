@@ -136,85 +136,43 @@ taskkill //IM tianshu-desktop.exe //F
 taskkill //IM node.exe //F
 ```
 
-### 2.4 重新构建 runtime（src/ 改了才需要）
+### 2.4 一键打包（推荐）
 
-```bash
-npm run build
-# 末尾看到 "Build success" 即成功
-```
+项目已提供 Windows 打包脚本，内部完成 runtime 构建、Tauri 构建、产物收集、`release/latest.json` 增量合并：
 
-### 2.5 签名打包（核心）
-
-**⚠️ Windows 踩坑（已验证）**：
-- `tauri build` 的内置签名在 Windows 上读不到空密码 env var（`TAURI_SIGNING_PRIVATE_KEY` 在子进程丢失），会报 "A public key has been found, but no private key" → 不产 `.sig`。
-- `build-signed.ps1`（项目自带的两步法脚本）理论上绕开了这个问题，但实测它的**签名步骤会卡住/超时**（PowerShell 下 `npx tauri signer sign` 仍丢失 env 或交互卡死）。
-- **最可靠的方式：直接 build 出裸包（createUpdaterArtifacts 自然产 .sig 失败也无妨），再手动 `tauri signer sign` 显式传 `--private-key-path` + `--password ""`。**
-
-```bash
-cd D:/Tianshu-Tui/desktop
-
-# Step 1: tauri build（createUpdaterArtifacts: true 时会试图内置签名，
-#         失败也无所谓——只要 build 出 setup.exe 就行，签名我们手动补）
-npx tauri build
-# 末尾会报缺私钥的 error，但 Finished 2 bundles 已经产出 setup.exe/msi，忽略即可
-
-# Step 2: 手动签名（显式传密钥路径 + 空密码，绝不卡交互）
-npx tauri signer sign \
-  --private-key-path ~/.tauri/tianshu.key \
-  --password "" \
-  "src-tauri/target/release/bundle/nsis/Tianshu_2.x.x_x64-setup.exe"
-npx tauri signer sign \
-  --private-key-path ~/.tauri/tianshu.key \
-  --password "" \
-  "src-tauri/target/release/bundle/msi/Tianshu_2.x.x_x64_zh-CN.msi"
-```
-
-成功标志：
-```
-# Step 1 末尾（error 可忽略，重点是 Finished 2 bundles）：
-Finished 2 bundles at:
-    ...nsis\Tianshu_2.x.x_x64-setup.exe
-    ...msi\Tianshu_2.x.x_x64_zh-CN.msi
-
-# Step 2 每个文件：
-Your file was signed successfully, You can find the signature here:
-    ...Tianshu_2.x.x_x64-setup.exe.sig
-```
-
-> **不要用** `build-signed.ps1`：实测它的签名步骤会卡住/超时。手动 `tauri signer sign --private-key-path ... --password ""` 是最可靠的。
-
-### 2.6 清理 bundle 目录残留（重要！）
-
-`target/release/bundle/` 会堆积历史版本的 setup.exe。`gen-latest-json.js` 用 `readdirSync().find()` 匹配第一个，**残留的旧文件会先被匹配到（它没 .sig）导致报错**。
-
-```bash
-cd desktop/src-tauri/target/release/bundle
-# 删掉所有非当前版本的 setup.exe / msi
-rm -f nsis/*-setup.exe nsis/*.sig msi/*.msi msi/*.sig   # 清干净
-# 然后重新跑 2.5 只会产当前版本的包
-```
-
-> 更稳妥：每次打包前清空 bundle 目录，避免历史污染。
-
-### 2.7 生成 latest.json 更新清单
-
-```bash
+```powershell
 cd D:/Tianshu-Tui
-node desktop/scripts/gen-latest-json.js \
-  --version 0.0.x \
-  --notes "本次更新说明" \
-  --bundle-dir desktop/src-tauri/target/release/bundle \
-  --download-base https://github.com/huiliyi37/Tianshu-Tui/releases/download/v0.0.x \
-  > desktop/src-tauri/target/release/bundle/latest.json
+# 方式 A：直接导出私钥内容
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content ~/.tauri/tianshu.key -Raw
+bash scripts/build-windows-release.sh
+
+# 方式 B：通过路径引用私钥（私钥内容不会进入 shell history）
+$env:TAURI_SIGNING_PRIVATE_KEY_PATH = "$env:USERPROFILE/.tauri/tianshu.key"
+bash scripts/build-windows-release.sh
 ```
 
-**验证 latest.json 的 url 字段**——必须是纯文件名，**不能含本地路径**（`desktop\src-tauri\...`）：
-```json
-"url": "https://.../releases/download/v0.0.x/Tianshu_0.0.x_x64-setup.exe"  ✅
-"url": "https://.../releases/download/v0.0.x/desktop\...\Tianshu_..."        ❌ 脚本路径 bug
+脚本会：
+- 硬闸门校验 Node 版本必须为 **24.1.0**；
+- 校验 `package.json` / `desktop/package.json` / `tauri.conf.json` / `Cargo.toml` 版本一致；
+- 清理 bundle 目录历史残留，避免旧版本 .exe 被误匹配；
+- 产出 `release/Tianshu_<ver>_x64-setup.exe` + `.sig`；
+- 顺带收集 MSI（手动分发用）；
+- 合并到 `release/latest.json`，仅修改 `windows-x86_64` 条目，保留 macOS 条目。
+
+**若脚本内嵌签名失败**（Windows 环境变量传递常见坑），可先用脚本跑完 build，再手动补签名：
+
+```powershell
+npx tauri signer sign `
+  --private-key-path "$env:USERPROFILE/.tauri/tianshu.key" `
+  --password "" `
+  "desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Tianshu_2.19.3_x64-setup.exe"
 ```
 
-> 如果 url 含本地路径，是 `gen-latest-json.js` 的 Windows 路径 bug（已修，entry() 里 `replace(/\\/g,'/')`）。
+然后重新执行 `bash scripts/build-windows-release.sh` 的收集阶段，或直接手动更新 `release/latest.json`。
+
+### 2.5 手动打包（旧流程，仅兜底）
+
+如果脚本不可用，按 `docs/WINDOWS-DESKTOP-BUILD-GUIDE.md` 手动 `npx tauri build`、手动 `tauri signer sign`、再用 `desktop/scripts/gen-latest-json.js` 生成清单。注意每次打包前清空 `bundle/` 目录避免历史残留。
 
 ---
 
@@ -226,13 +184,17 @@ node desktop/scripts/gen-latest-json.js \
 
 1. https://github.com/huiliyi37/Tianshu-Tui/releases/edit/v0.0.x（已存在）或 `/releases/new`（新建 tag）
 2. **删掉** Assets 里所有旧文件
-3. 拖入**三个文件**（缺一不可）：
+3. 拖入**三个文件**（自动更新缺一不可）：
    ```
-   desktop/src-tauri/target/release/bundle/nsis/Tianshu_0.0.x_x64-setup.exe   ← 安装包
-   desktop/src-tauri/target/release/bundle/nsis/Tianshu_0.0.x_x64-setup.exe.sig ← 签名
-   desktop/src-tauri/target/release/bundle/latest.json                          ← 更新清单
+   release/Tianshu_0.0.x_x64-setup.exe        ← 安装包
+   release/Tianshu_0.0.x_x64-setup.exe.sig    ← 签名
+   release/latest.json                        ← 更新清单
    ```
-4. 发布
+4. （可选）顺带上传 MSI 供首次手动分发：
+   ```
+   release/Tianshu_0.0.x_x64_zh-CN.msi
+   ```
+5. 发布
 
 ### 3.2 关键：v0.0.x 必须是 latest release
 
@@ -290,17 +252,17 @@ git push origin main
 
 ## 7. 文件清单（发布前核对）
 
-发布一个版本，本地应产出：
+脚本运行后产物统一放在仓库根目录 `release/`：
 
 ```
-desktop/src-tauri/target/release/bundle/
-├── nsis/
-│   ├── Tianshu_0.0.x_x64-setup.exe        ← 上传
-│   └── Tianshu_0.0.x_x64-setup.exe.sig    ← 上传
-└── latest.json                             ← 上传（在 bundle/ 根，不在 nsis/）
+release/
+├── Tianshu_0.0.x_x64-setup.exe            ← 上传（自动更新必需）
+├── Tianshu_0.0.x_x64-setup.exe.sig        ← 上传（自动更新必需）
+├── Tianshu_0.0.x_x64_zh-CN.msi           ← 可选，手动分发
+└── latest.json                             ← 上传（自动更新必需）
 ```
 
-上传这三个到 release，自动更新就生效了。
+上传前三个到 release，Windows 自动更新就生效了。
 
 ---
 
