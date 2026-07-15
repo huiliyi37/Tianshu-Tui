@@ -349,22 +349,38 @@ export class McpManager {
     }
 
     // Wire OAuth token to transport if configured.
+    // Prefer getMcpAccessToken because it refreshes expired tokens; fall back
+    // to the cached snapshot when refresh is unavailable or fails.
     if (cfg.auth?.type === 'oauth') {
       const { findMcpOAuthProvider } = await import('./oauth/providers.js')
       const { loadMcpOAuthToken, getMcpAccessToken } = await import('./oauth/connector.js')
       const { resolveOAuthEnv, resolveOAuthHeaders } = await import('./oauth/inject.js')
       const provider = findMcpOAuthProvider(cfg.auth.provider)
       if (provider) {
-        const token = loadMcpOAuthToken(serverId)
+        let token: import('./oauth/types.js').McpOAuthToken | null = null
+        const clientId = process.env.RIVET_MCP_OAUTH_CLIENT_ID?.trim() ?? ''
+        if (clientId) {
+          try {
+            await getMcpAccessToken(serverId, provider, clientId)
+            token = loadMcpOAuthToken(serverId)
+          } catch {
+            // Refresh failed — fall back to the cached token (may be expired).
+            token = loadMcpOAuthToken(serverId)
+          }
+        } else {
+          token = loadMcpOAuthToken(serverId)
+        }
         if (token) {
-          // For stdio: inject token into environment variables.
-          // For remote (URL): inject token into Authorization header.
+          // For stdio: merge OAuth env with static env.
+          // For remote (URL): merge OAuth Authorization header with static headers.
           if (cfg.command) {
+            const staticEnv = cfg.env as Record<string, string> | undefined
             const oauthEnv = resolveOAuthEnv(provider.id, token)
-            transportOpts.getEnv = async () => oauthEnv
+            transportOpts.getEnv = async () => ({ ...staticEnv, ...oauthEnv })
           } else {
+            const staticHeaders = cfg.headers as Record<string, string> | undefined
             const oauthHeaders = resolveOAuthHeaders(provider.id, token)
-            transportOpts.getHeaders = async () => oauthHeaders
+            transportOpts.getHeaders = async () => ({ ...staticHeaders, ...oauthHeaders })
           }
         }
       }

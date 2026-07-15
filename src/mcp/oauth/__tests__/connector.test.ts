@@ -7,10 +7,11 @@ import { tmpdir } from 'node:os'
 const testDir = mkdtempSync(join(tmpdir(), 'mcp-oauth-test-'))
 process.env.RIVET_HOME = testDir
 
-import { loadMcpOAuthToken, revokeMcpOAuth, hasMcpOAuthToken, serveCallback } from '../connector.js'
+import { loadMcpOAuthToken, revokeMcpOAuth, hasMcpOAuthToken, serveCallback, getMcpAccessToken } from '../connector.js'
 import { findMcpOAuthProvider } from '../providers.js'
 import { resolveOAuthEnv, resolveOAuthHeaders } from '../inject.js'
 import { mcpServerConfigSchema } from '../../config.js'
+import { TokenStore, type TokenData } from '../../../auth/token-store.js'
 
 afterEach(() => {
   try { rmSync(testDir, { recursive: true, force: true }) } catch { /* ignore */ }
@@ -76,6 +77,57 @@ describe('mcpServerConfigSchema with auth', () => {
       auth: { type: 'invalid', provider: 'github' },
     })
     assert.ok(!result.success)
+  })
+})
+
+describe('getMcpAccessToken', () => {
+  const provider = {
+    id: 'github',
+    name: 'GitHub',
+    authorizeUrl: 'https://github.com/login/oauth/authorize',
+    tokenEndpoint: 'https://github.com/login/oauth/access_token',
+    defaultScopes: ['repo'],
+    clientIdHelp: '',
+  }
+
+  it('refreshes an expired token and persists the new one', async () => {
+    const serverId = 'refresh-test'
+    const clientId = 'test-client'
+
+    // Seed an expired token with a refresh token in the MCP OAuth store.
+    const expired: TokenData = {
+      accessToken: 'old-token',
+      refreshToken: 'refresh-123',
+      expiresAt: Date.now() - 1000,
+    }
+    new TokenStore(join(testDir, 'mcp-oauth'), serverId).save(expired)
+
+    const origFetch = global.fetch
+    global.fetch = async () => ({
+      ok: true,
+      text: async () => 'access_token=new-token&refresh_token=refresh-456&expires_in=3600',
+    } as Response)
+
+    try {
+      const accessToken = await getMcpAccessToken(serverId, provider as any, clientId)
+      assert.equal(accessToken, 'new-token')
+      const stored = loadMcpOAuthToken(serverId)
+      assert.equal(stored?.accessToken, 'new-token')
+      assert.equal(stored?.refreshToken, 'refresh-456')
+      assert.ok((stored?.expiresAt ?? 0) > Date.now(), 'new token should not be expired')
+    } finally {
+      global.fetch = origFetch
+      revokeMcpOAuth(serverId)
+    }
+  })
+
+  it('throws when no token exists and refresh is impossible', async () => {
+    const serverId = 'missing-token'
+    revokeMcpOAuth(serverId)
+    await assert.rejects(
+      getMcpAccessToken(serverId, provider as any, 'test-client'),
+      /No OAuth token/,
+    )
   })
 })
 
