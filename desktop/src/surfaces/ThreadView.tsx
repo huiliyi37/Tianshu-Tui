@@ -207,6 +207,9 @@ export function ThreadView(props: {
   }, [session.id])
   // File viewer drawer: opened by clicking @file mentions in messages.
   const [fileViewer, setFileViewer] = useState<{ path: string; content?: FileContent; loading?: boolean; error?: string } | null>(null)
+  const revealFileInExplorer = useCallback((path: string) => {
+    dispatch({ type: 'requestRevealFile', path })
+  }, [dispatch])
   useEffect(() => {
     if (!fileViewer?.path || fileViewer.content || fileViewer.loading) return
     setFileViewer({ path: fileViewer.path, loading: true })
@@ -1176,6 +1179,7 @@ export function ThreadView(props: {
                       sessionId={session.id}
                       onOpenImage={openImage}
                       onFileClick={(p) => setFileViewer({ path: p })}
+                      onFileReveal={revealFileInExplorer}
                       domainGlyph={domainGlyph}
                       domainName={activeDomain?.name}
                       onContinue={handleWatchdogContinue}
@@ -1596,18 +1600,19 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
 const Block = memo(BlockImpl, (a, b) =>
   a.block === b.block && a.isStreaming === b.isStreaming &&
   a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage &&
-  a.onFileClick === b.onFileClick &&
+  a.onFileClick === b.onFileClick && a.onFileReveal === b.onFileReveal &&
   a.domainGlyph === b.domainGlyph && a.domainName === b.domainName &&
   a.onContinue === b.onContinue && a.onCancelContinue === b.onCancelContinue &&
   a.onEditUserMsg === b.onEditUserMsg && a.onRegenerate === b.onRegenerate
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, domainGlyph, domainName, onContinue, onCancelContinue, onEditUserMsg, onRegenerate }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, onFileReveal, domainGlyph, domainName, onContinue, onCancelContinue, onEditUserMsg, onRegenerate }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
   onOpenImage?: (src: string) => void
   onFileClick?: (path: string) => void
+  onFileReveal?: (path: string) => void
   domainGlyph?: string
   domainName?: string
   /** Resume a run stopped by the watchdog quota (sends "continue"). */
@@ -1670,7 +1675,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
         canEdit={canEdit}
         onEdit={() => setIsEditing(true)}
       >
-        <Markdown source={block.text} onFileClick={onFileClick} />
+        <Markdown source={block.text} onFileClick={onFileClick} onFileReveal={onFileReveal} />
         {block.imageIds && block.imageIds.length > 0 && sessionId ? (
           <div className="msg-images">
             {block.imageIds.map((imgId, i) => (
@@ -1710,7 +1715,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
   if (block.kind === 'steer') {
     return (
       <MsgBlock role={t('block.steer')} roleGlyph="steer">
-        <Markdown source={block.text} onFileClick={onFileClick} />
+        <Markdown source={block.text} onFileClick={onFileClick} onFileReveal={onFileReveal} />
       </MsgBlock>
     )
   }
@@ -1864,7 +1869,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
       roleGlyph={domainGlyph}
       onRegenerate={block.kind === 'assistant' && onRegenerate ? () => onRegenerate(block.key) : undefined}
     >
-      <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} />
+      <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} onFileReveal={onFileReveal} />
     </MsgBlock>
   )
 }
@@ -1981,7 +1986,7 @@ const recordTailRender: ProfilerOnRenderCallback = (_id, _phase, actualDuration)
 // the still-growing tail is re-parsed per throttle tick. Bounds per-tick
 // markdown cost to O(tail) regardless of total reply length, so the previous
 // STREAM_MARKDOWN_MAX plain-text bail-out for long replies is gone.
-function AssistantText({ text, isStreaming, onFileClick }: { text: string; isStreaming: boolean; onFileClick?: (path: string) => void }) {
+function AssistantText({ text, isStreaming, onFileClick, onFileReveal }: { text: string; isStreaming: boolean; onFileClick?: (path: string) => void; onFileReveal?: (path: string) => void }) {
   const throttled = useThrottledStreamingSource(text, isStreaming)
   const segRef = useRef<StreamSegments>(EMPTY_SEGMENTS)
   useEffect(() => {
@@ -1993,7 +1998,7 @@ function AssistantText({ text, isStreaming, onFileClick }: { text: string; isStr
   // Completion snaps to ONE full-text parse (with math + async highlight) —
   // final rendering is identical to the pre-segmentation behaviour, covering
   // cross-segment constructs like reference-style links.
-  if (!isStreaming) return <Markdown source={text} onFileClick={onFileClick} />
+  if (!isStreaming) return <Markdown source={text} onFileClick={onFileClick} onFileReveal={onFileReveal} />
 
   const segs = splitStableSegments(throttled, segRef.current)
   segRef.current = segs
@@ -2001,14 +2006,14 @@ function AssistantText({ text, isStreaming, onFileClick }: { text: string; isStr
   return (
     <div className="md-stream">
       {segs.stable.map((seg, i) => (
-        <Markdown key={i} source={seg} highlight={false} onFileClick={onFileClick} />
+        <Markdown key={i} source={seg} highlight={false} onFileClick={onFileClick} onFileReveal={onFileReveal} />
       ))}
       {tailHeavy
         ? <StreamingText source={segs.tail} />
         : segs.tail.trim()
           ? (
             <Profiler id="tailMarkdown" onRender={recordTailRender}>
-              <Markdown source={closeUnterminatedFence(segs.tail)} highlight={false} streaming onFileClick={onFileClick} />
+              <Markdown source={closeUnterminatedFence(segs.tail)} highlight={false} streaming onFileClick={onFileClick} onFileReveal={onFileReveal} />
             </Profiler>
           )
           : null}

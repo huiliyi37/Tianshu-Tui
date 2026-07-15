@@ -79,15 +79,20 @@ function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   )
 }
 
-/** Internal file-mention link — clicking opens the file in a side panel. */
-function FileMentionLink({ path, onClick, children }: { path: string; onClick?: (p: string) => void; children: React.ReactNode }) {
+/** Internal file-mention link — click opens the file in a side panel;
+ *  Ctrl/Cmd+click reveals it in the right-side FileExplorer. */
+function FileMentionLink({ path, onClick, onReveal, children }: { path: string; onClick?: (p: string) => void; onReveal?: (p: string) => void; children: React.ReactNode }) {
   return (
     <a
       className="mention-link"
       href={`#file:${path}`}
       onClick={(e) => {
         e.preventDefault()
-        onClick?.(path)
+        if ((e.ctrlKey || e.metaKey) && onReveal) {
+          onReveal(path)
+        } else {
+          onClick?.(path)
+        }
       }}
     >
       {children}
@@ -167,7 +172,7 @@ export function normalizeMathDelimiters(source: string): string {
     .replace(/^(\s*)\$\$([^\n$]+)\$\$\s*$/gm, (_, indent: string, body: string) => `${indent}$$\n${indent}${body}\n${indent}$$`)
 }
 
-function MarkdownImpl({ source, highlight = true, streaming = false, onFileClick }: { source: string; highlight?: boolean; streaming?: boolean; onFileClick?: (path: string) => void }) {
+function MarkdownImpl({ source, highlight = true, streaming = false, onFileClick, onFileReveal }: { source: string; highlight?: boolean; streaming?: boolean; onFileClick?: (path: string) => void; onFileReveal?: (path: string) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const huge = source.length > MD_RENDER_MAX
 
@@ -192,7 +197,7 @@ function MarkdownImpl({ source, highlight = true, streaming = false, onFileClick
       // Internal file mention link (#file:path) → side panel.
       if (href?.startsWith('#file:')) {
         const path = href.slice(6)
-        return <FileMentionLink path={path} onClick={onFileClick}>{children}</FileMentionLink>
+        return <FileMentionLink path={path} onClick={onFileClick} onReveal={onFileReveal}>{children}</FileMentionLink>
       }
       return <ExternalLink href={href} {...rest}>{children}</ExternalLink>
     },
@@ -221,5 +226,5 @@ function MarkdownImpl({ source, highlight = true, streaming = false, onFileClick
 // frequently; this keeps re-parses limited to actual content/mode changes.
 export const Markdown = React.memo(
   MarkdownImpl,
-  (a, b) => a.source === b.source && a.highlight === b.highlight && (a.streaming ?? false) === (b.streaming ?? false) && a.onFileClick === b.onFileClick,
+  (a, b) => a.source === b.source && a.highlight === b.highlight && (a.streaming ?? false) === (b.streaming ?? false) && a.onFileClick === b.onFileClick && a.onFileReveal === b.onFileReveal,
 )
