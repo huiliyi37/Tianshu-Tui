@@ -33,15 +33,16 @@ describe('maybePrintStaticPromptCacheWarning', () => {
 
   it('prints warning when no stored hash exists', () => {
     maybePrintStaticPromptCacheWarning()
-    assert.ok(stderr.includes('Static prompt changed since last run'), 'should warn on first run')
-    assert.ok(stderr.includes('full prefix-cache rebuild'), 'should mention cache rebuild')
-    assert.ok(stderr.includes('Start a new session'), 'should advise new session')
+    assert.ok(stderr.includes('系统提示词已变更'), 'should warn on first run')
+    assert.ok(stderr.includes('前缀缓存将在下一轮失效'), 'should mention cache invalidation')
+    assert.ok(stderr.includes('建议：升级后请新建会话'), 'should advise new session')
+    assert.ok(stderr.includes('Static prompt changed; start a new session'), 'should include short english line')
   })
 
   it('prints warning when stored hash differs', () => {
     writeFileSync(join(testDir, '.static-prompt-hash'), ' stale-hash ', 'utf8')
     maybePrintStaticPromptCacheWarning()
-    assert.ok(stderr.includes('Static prompt changed since last run'), 'should warn when hash differs')
+    assert.ok(stderr.includes('系统提示词已变更'), 'should warn when hash differs')
   })
 
   it('does not print warning when stored hash matches current prompt', () => {

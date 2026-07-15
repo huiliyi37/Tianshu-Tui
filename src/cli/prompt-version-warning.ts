@@ -58,10 +58,9 @@ export function maybePrintStaticPromptCacheWarning(): void {
 
   process.stderr.write(
     '\n' +
-    '⚠️  Static prompt changed since last run.\n' +
-    '   Existing sessions will incur a full prefix-cache rebuild on the next turn\n' +
-    '   (cache creation tokens are much more expensive than cache reads).\n' +
-    '   Start a new session to avoid the extra cost.\n' +
+    '⚠️  系统提示词已变更：旧会话的前缀缓存将在下一轮失效并触发完整重建。\n' +
+    '   建议：升级后请新建会话，不要在旧会话里继续长对话，以避免高额 cache creation 费用。\n' +
+    '   Static prompt changed; start a new session to avoid cache rebuild costs.\n' +
     '\n'
   )
 
