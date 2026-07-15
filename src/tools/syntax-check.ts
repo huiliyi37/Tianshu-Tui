@@ -21,16 +21,30 @@ interface EsbuildModule {
   transformSync: TransformSync
 }
 
-let _esbuild: EsbuildModule | null | undefined
-function getEsbuild(): EsbuildModule | null {
-  if (_esbuild !== undefined) return _esbuild
+let _esbuildPromise: Promise<EsbuildModule | null> | undefined
+
+async function loadEsbuildModule(): Promise<EsbuildModule | null> {
   try {
     const req = createRequire(import.meta.url)
-    _esbuild = req('esbuild') as EsbuildModule
+    return req('esbuild') as EsbuildModule
   } catch {
-    _esbuild = null
+    return null
   }
-  return _esbuild
+}
+
+async function getEsbuild(): Promise<EsbuildModule | null> {
+  if (_esbuildPromise) return _esbuildPromise
+  _esbuildPromise = withTimeout(
+    loadEsbuildModule(),
+    'esbuild load',
+    getEsbuildLoadTimeoutMs(),
+  ).catch(() => null)
+  return _esbuildPromise
+}
+
+/** Test-only: clear the esbuild load cache so each test gets a fresh load attempt. */
+export function _resetEsbuildCacheForTest(): void {
+  _esbuildPromise = undefined
 }
 
 /** Files larger than this skip CSS/HTML/JSON branch checks (O(n) scans). */
@@ -43,6 +57,23 @@ const EXTERNAL_PARSE_SIZE_LIMIT = 8 * 1024 * 1024 // 8 MB
  *  the tool call indefinitely (file is already written; losing syntax-check is
  *  a degradation, not a failure). */
 const TRANSFORM_TIMEOUT_MS = 5000
+
+/** Timeout for loading the esbuild module itself.
+ *
+ *  esbuild ships a native binary; on Windows with certain antivirus/EDR
+ *  configurations the first require() of the native addon can block the event
+ *  loop for minutes. Because the default 2-minute tool timeout uses setTimeout,
+ *  a blocked event loop never fires it, so the edit_file call appears to hang
+ *  for 5-10 minutes with the UI stuck on "thinking". Loading esbuild async with
+ *  a short timeout keeps the event loop alive and lets us degrade gracefully
+ *  (skip the parse check) when the binary is slow to arrive.
+ *
+ *  Override with RIVET_ESBUILD_LOAD_TIMEOUT (ms); set to 0/negative to fall
+ *  back to the 3s default. */
+function getEsbuildLoadTimeoutMs(): number {
+  const v = Number.parseInt(process.env.RIVET_ESBUILD_LOAD_TIMEOUT ?? '', 10)
+  return Number.isFinite(v) && v > 0 ? v : 3000
+}
 
 /** Timeout for the python3 AST parse child process. A hung interpreter (blocked
  *  import, stuck stdin, slow environment) would otherwise leave the promise
@@ -108,7 +139,7 @@ export async function checkSyntax(filePath: string, content: string): Promise<Sy
       '.ts': 'ts', '.tsx': 'tsx', '.js': 'js', '.jsx': 'jsx', '.mjs': 'js', '.cjs': 'js',
     }
     const loader = loaderMap[ext] ?? 'js'
-    const esbuild = getEsbuild()
+    const esbuild = await getEsbuild()
     if (!esbuild) return OK
     try {
       if (esbuild.transform) {

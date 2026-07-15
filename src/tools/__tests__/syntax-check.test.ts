@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { syntaxCheck } from '../syntax-check.js'
+import { syntaxCheck, _resetEsbuildCacheForTest } from '../syntax-check.js'
 
 describe('syntaxCheck', async () => {
   describe('CSS', async () => {
@@ -92,6 +92,28 @@ describe('syntaxCheck', async () => {
 
     it('passes JSX', async () => {
       assert.equal(await syntaxCheck('/a/comp.jsx', 'const el = <div>hi</div>;'), null)
+    })
+
+    it('does not produce a false fatal when esbuild load is slow (degrade to OK)', async () => {
+      // A 1ms budget almost always trips the async load timeout before esbuild
+      // resolves. The guard must degrade to OK (null), never block the event
+      // loop or surface a spurious syntax error that would roll back a valid
+      // file. This regression-test protects against Windows antivirus/EDR hangs
+      // where a synchronous require('esbuild') blocks for minutes.
+      const prev = process.env.RIVET_ESBUILD_LOAD_TIMEOUT
+      process.env.RIVET_ESBUILD_LOAD_TIMEOUT = '1'
+      _resetEsbuildCacheForTest()
+      try {
+        const start = Date.now()
+        const r = await syntaxCheck('/a/script.js', 'const x = 1;\nconsole.log(x);')
+        const elapsed = Date.now() - start
+        assert.equal(r, null)
+        assert.ok(elapsed < 1000, `syntaxCheck took ${elapsed}ms; should return quickly on slow esbuild load`)
+      } finally {
+        if (prev === undefined) delete process.env.RIVET_ESBUILD_LOAD_TIMEOUT
+        else process.env.RIVET_ESBUILD_LOAD_TIMEOUT = prev
+        _resetEsbuildCacheForTest()
+      }
     })
   })
 
