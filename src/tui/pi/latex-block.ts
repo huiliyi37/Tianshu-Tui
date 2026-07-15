@@ -10,7 +10,7 @@
 // matrices, environments — is delegated to `latexToUnicode`, so this engine only
 // adds the vertical stacking the flat string form can't express.
 
-import { latexToUnicode } from "./latex-to-unicode";
+import { latexToUnicode } from "./latex-to-unicode.js";
 import { displayWidth } from "../width.js";
 
 /**

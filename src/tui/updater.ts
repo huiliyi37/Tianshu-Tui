@@ -20,7 +20,7 @@ import { writeFileAtomicSync } from '../fs-atomic.js'
 import { rivetHome, updateCheckPath } from '../config/paths.js'
 import { WinStreamDecoder } from '../platform.js'
 import { ProxyAgent } from 'undici'
-import type Dispatcher from 'undici/types/dispatcher'
+import type { Dispatcher } from 'undici'
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org'
 const GITHUB_API_URL = 'https://api.github.com/repos'
