@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 const testDir = mkdtempSync(join(tmpdir(), 'mcp-oauth-test-'))
 process.env.RIVET_HOME = testDir
 
-import { loadMcpOAuthToken, revokeMcpOAuth, hasMcpOAuthToken } from '../connector.js'
+import { loadMcpOAuthToken, revokeMcpOAuth, hasMcpOAuthToken, serveCallback } from '../connector.js'
 import { findMcpOAuthProvider } from '../providers.js'
 import { resolveOAuthEnv, resolveOAuthHeaders } from '../inject.js'
 import { mcpServerConfigSchema } from '../../config.js'
@@ -15,6 +15,11 @@ import { mcpServerConfigSchema } from '../../config.js'
 afterEach(() => {
   try { rmSync(testDir, { recursive: true, force: true }) } catch { /* ignore */ }
 })
+
+function pickPort(): number {
+  // Pick a high ephemeral port unlikely to collide with the fixed REDIRECT_PORT.
+  return 15000 + Math.floor(Math.random() * 5000)
+}
 
 describe('findMcpOAuthProvider', () => {
   it('finds github provider', () => {
@@ -71,5 +76,49 @@ describe('mcpServerConfigSchema with auth', () => {
       auth: { type: 'invalid', provider: 'github' },
     })
     assert.ok(!result.success)
+  })
+})
+
+describe('serveCallback shared redirect server', () => {
+  it('multiplexes concurrent OAuth callbacks by state', async () => {
+    const port = pickPort()
+    const p1 = serveCallback(port, 'state-a', 'http://auth/a')
+    const p2 = serveCallback(port, 'state-b', 'http://auth/b')
+
+    // Callbacks may arrive in any order; each resolves its own flow.
+    const resB = await fetch(`http://127.0.0.1:${port}/auth/callback?state=state-b&code=code-b`)
+    assert.equal(resB.status, 200)
+    const resA = await fetch(`http://127.0.0.1:${port}/auth/callback?state=state-a&code=code-a`)
+    assert.equal(resA.status, 200)
+
+    const [codeA, codeB] = await Promise.all([p1, p2])
+    assert.equal(codeA, 'code-a')
+    assert.equal(codeB, 'code-b')
+  })
+
+  it('rejects unknown state without disturbing a live flow', async () => {
+    const port = pickPort()
+    const p1 = serveCallback(port, 'state-only', 'http://auth/only')
+
+    const resUnknown = await fetch(`http://127.0.0.1:${port}/auth/callback?state=unknown&code=code`)
+    assert.equal(resUnknown.status, 400)
+
+    const resOk = await fetch(`http://127.0.0.1:${port}/auth/callback?state=state-only&code=code-only`)
+    assert.equal(resOk.status, 200)
+    const code = await p1
+    assert.equal(code, 'code-only')
+  })
+
+  it('times out and closes the shared server', async () => {
+    const port = pickPort()
+    await assert.rejects(
+      serveCallback(port, 'state-timeout', 'http://auth/timeout', 50),
+      /timed out/,
+    )
+    // After the last pending flow times out, the server should be closed.
+    await assert.rejects(
+      fetch(`http://127.0.0.1:${port}/auth/callback?state=state-timeout&code=x`),
+      /fetch failed|ECONNREFUSED/i,
+    )
   })
 })

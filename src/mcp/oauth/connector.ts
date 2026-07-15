@@ -6,7 +6,7 @@
 
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http'
 import { generatePKCE, buildAuthorizeUrl } from '../../auth/oauth.js'
 import { TokenStore, type TokenData } from '../../auth/token-store.js'
 import { shouldRefresh } from '../../auth/refresh.js'
@@ -111,45 +111,135 @@ export function loadMcpOAuthToken(serverId: string): McpOAuthToken | null {
 
 // ── internals ──
 
-async function serveCallback(port: number, expectedState: string, authUrl: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      server.close()
-      reject(new Error('OAuth callback timed out after 5 minutes'))
-    }, CALLBACK_TIMEOUT_MS)
+/** Pending OAuth callback keyed by state. Allows multiple concurrent flows to
+ *  share the same localhost redirect port without port conflicts. */
+type PendingCallback = {
+  resolve: (code: string) => void
+  reject: (err: Error) => void
+  timeout: ReturnType<typeof setTimeout>
+}
 
+let sharedServer: Server | null = null
+let sharedServerPort: number | null = null
+let serverStartPromise: Promise<void> | null = null
+const pendingCallbacks = new Map<string, PendingCallback>()
+
+async function getOrStartSharedServer(port: number): Promise<void> {
+  if (sharedServer && sharedServerPort === port) return
+  if (serverStartPromise) {
+    // A start/stop transition is in progress; wait for it to settle.
+    await serverStartPromise
+    // If the port still doesn't match, recurse once (shouldn't happen in practice).
+    if (sharedServerPort !== port) return getOrStartSharedServer(port)
+    return
+  }
+
+  serverStartPromise = new Promise<void>((resolve, reject) => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      const url = new URL(req.url ?? '/', `http://localhost:${port}`)
-      if (url.pathname !== CALLBACK_PATH) { res.writeHead(404); res.end(); return }
+      handleCallbackRequest(req, res)
+    })
 
-      const code = url.searchParams.get('code')
-      const returnedState = url.searchParams.get('state')
-
-      if (returnedState !== expectedState) {
-        res.writeHead(400, { 'Content-Type': 'text/html' })
-        res.end('<h1>State mismatch — possible CSRF</h1>')
-        server.close(); clearTimeout(timeout)
-        reject(new Error('OAuth state mismatch'))
-        return
+    server.once('error', (err) => {
+      const wasStarting = serverStartPromise !== null
+      const allPending = Array.from(pendingCallbacks.values())
+      closeSharedServer().catch(() => {})
+      if (wasStarting) {
+        reject(err)
+      } else {
+        for (const pending of allPending) pending.reject(err)
       }
-      if (!code) {
-        res.writeHead(400, { 'Content-Type': 'text/html' })
-        res.end(`<h1>Authorization failed: ${url.searchParams.get('error') ?? 'unknown'}</h1>`)
-        server.close(); clearTimeout(timeout)
-        reject(new Error(`OAuth error: ${url.searchParams.get('error') ?? 'unknown'}`))
-        return
-      }
-
-      res.writeHead(200, { 'Content-Type': 'text/html' })
-      res.end('<h1>MCP connected — you can close this tab</h1>')
-      server.close(); clearTimeout(timeout)
-      resolve(code)
     })
 
     server.listen(port, () => {
-      process.stderr.write(`Open this URL to connect MCP:\n${authUrl}\n`)
+      sharedServer = server
+      sharedServerPort = port
+      resolve()
     })
-    server.on('error', (err) => { clearTimeout(timeout); reject(err) })
+  })
+
+  try {
+    await serverStartPromise
+  } finally {
+    // Only clear the start promise if we are still the current start attempt.
+    if (serverStartPromise) serverStartPromise = null
+  }
+}
+
+async function closeSharedServer(): Promise<void> {
+  const server = sharedServer
+  sharedServer = null
+  sharedServerPort = null
+  serverStartPromise = null
+  for (const pending of pendingCallbacks.values()) clearTimeout(pending.timeout)
+  pendingCallbacks.clear()
+  if (server) {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+}
+
+function handleCallbackRequest(req: IncomingMessage, res: ServerResponse): void {
+  const port = sharedServerPort ?? REDIRECT_PORT
+  const url = new URL(req.url ?? '/', `http://localhost:${port}`)
+  if (url.pathname !== CALLBACK_PATH) {
+    res.writeHead(404, { 'Content-Type': 'text/html' })
+    res.end('<h1>Not found</h1>')
+    return
+  }
+
+  const state = url.searchParams.get('state')
+  const code = url.searchParams.get('code')
+  const pending = state ? pendingCallbacks.get(state) : undefined
+
+  if (!pending) {
+    res.writeHead(400, { 'Content-Type': 'text/html' })
+    res.end('<h1>Unknown or expired authorization session</h1>')
+    return
+  }
+
+  if (!code) {
+    res.writeHead(400, { 'Content-Type': 'text/html' })
+    res.end(`<h1>Authorization failed: ${url.searchParams.get('error') ?? 'unknown'}</h1>`)
+    pending.reject(new Error(`OAuth error: ${url.searchParams.get('error') ?? 'unknown'}`))
+    return
+  }
+
+  res.writeHead(200, { 'Content-Type': 'text/html' })
+  res.end('<h1>MCP connected — you can close this tab</h1>')
+  pending.resolve(code)
+}
+
+/** Wait for an OAuth callback on the shared redirect server.
+ *  Multiple concurrent flows are multiplexed by `state`.
+ *  @internal exported for testing only */
+export async function serveCallback(
+  port: number,
+  expectedState: string,
+  authUrl: string,
+  timeoutMs: number = CALLBACK_TIMEOUT_MS,
+): Promise<string> {
+  await getOrStartSharedServer(port)
+
+  return new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup()
+      reject(new Error(`OAuth callback timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    const cleanup = () => {
+      clearTimeout(timeout)
+      pendingCallbacks.delete(expectedState)
+      if (pendingCallbacks.size === 0) {
+        closeSharedServer().catch(() => {})
+      }
+    }
+
+    pendingCallbacks.set(expectedState, {
+      resolve: (code) => { cleanup(); resolve(code) },
+      reject: (err) => { cleanup(); reject(err) },
+      timeout,
+    })
+
+    process.stderr.write(`Open this URL to connect MCP:\n${authUrl}\n`)
   })
 }
 
