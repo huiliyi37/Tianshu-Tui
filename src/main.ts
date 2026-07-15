@@ -17,6 +17,7 @@ installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
+import { maybePrintStaticPromptCacheWarning } from './cli/prompt-version-warning.js'
 import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig, setApprovalMode as persistApprovalDefault } from './config/manager.js'
 import { isProFeatureEnabled } from './config/pro-license.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
@@ -439,6 +440,7 @@ async function main() {
 
   // ── Bootstrap agent runtime ──────────────────────────────────
   process.stderr.write('[T9] Initializing agent runtime...\n')
+  maybePrintStaticPromptCacheWarning()
 
   try {
     ctx = await bootstrapInteractiveSession({
