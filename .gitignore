@@ -28,6 +28,14 @@ docs/sessions/
 .wolf/
 .omc/
 .github/workflows/
+# 一次性/本地诊断脚本与评估产物
+desktop/scripts/perf-*.ts
+scripts/summarize-*.ts
+scripts/swebench-*.sh
+# 自动生成的计划、研究与设计草稿
+.rivet/plans/*.md
+docs/research/*.md
+docs/superpowers/specs/*.md
 .rivet/sensorium.jsonl
 .rivet/pheromones.json
 .rivet/debug-400.json

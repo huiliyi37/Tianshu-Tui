@@ -1,18 +1,37 @@
 #!/usr/bin/env bash
 # 天枢 Windows 打包脚本
 # 用法: bash scripts/build-windows-release.sh
-# 前提: Node 24+, Windows 版 Tauri CLI, NSIS, WiX（MSI）, Rust x86_64-pc-windows-msvc target
-# 环境: 需在 Windows 宿主、Git Bash 或 WSL2 中运行，并设置 TAURI_SIGNING_PRIVATE_KEY
+# 前提: Node 24.1.0（必须精确匹配，ABI 137）, Windows 版 Tauri CLI, NSIS, WiX（MSI）, Rust x86_64-pc-windows-msvc target
+# 环境: 需在 Windows 宿主、Git Bash 或 WSL2 中运行
+# 签名: 导出 TAURI_SIGNING_PRIVATE_KEY，或设置 TAURI_SIGNING_PRIVATE_KEY_PATH 指向私钥文件
 #
 # 产物:
 #   release/Tianshu_<VER>_x64-setup.exe
 #   release/Tianshu_<VER>_x64-setup.exe.sig
+#   release/Tianshu_<VER>_x64_zh-CN.msi   （可选，手动分发）
 #   release/latest.json（仅更新 windows-x86_64 条目，保留 macOS 条目）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VER="2.19.2"
+VER="2.19.3"
 echo "=== 天枢 Windows 打包 v$VER ==="
+
+# 0. 构建机环境硬闸门
+REQUIRED_NODE="24.1.0"
+CURRENT_NODE="$(node -v | sed 's/^v//')"
+if [[ "$CURRENT_NODE" != "$REQUIRED_NODE" ]]; then
+  echo "✗ 构建机 Node 必须是 v${REQUIRED_NODE}（当前 ${CURRENT_NODE}）。sidecar 运行时 ABI 137 必须精确匹配，否则 better-sqlite3 会退化。" >&2
+  exit 1
+fi
+
+# 签名私钥：优先用已导出的 TAURI_SIGNING_PRIVATE_KEY，否则读 TAURI_SIGNING_PRIVATE_KEY_PATH
+if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" && -n "${TAURI_SIGNING_PRIVATE_KEY_PATH:-}" ]]; then
+  if [[ ! -f "$TAURI_SIGNING_PRIVATE_KEY_PATH" ]]; then
+    echo "✗ TAURI_SIGNING_PRIVATE_KEY_PATH 指向的文件不存在: $TAURI_SIGNING_PRIVATE_KEY_PATH" >&2
+    exit 1
+  fi
+  export TAURI_SIGNING_PRIVATE_KEY="$(cat "$TAURI_SIGNING_PRIVATE_KEY_PATH")"
+fi
 
 # 1. 确保版本一致（桌面端 app 版本以 tauri.conf.json 为准，Cargo.toml 需同步）
 node -e "
@@ -44,13 +63,18 @@ cd desktop && npm run build && cd ..
 echo "--- 打包原生二进制 ---"
 node scripts/pack-native.js
 
-# 4. Tauri 构建 — Windows x86_64（NSIS + MSI）
+# 4. 清理旧产物，避免 bundle 目录残留历史版本被误匹配
+echo "=== 清理 bundle 目录旧产物 ==="
+BUNDLE_DIR="desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
+rm -rf "$BUNDLE_DIR/nsis" "$BUNDLE_DIR/msi"
+
+# 5. Tauri 构建 — Windows x86_64（NSIS + MSI）
 echo "=== 构建 Windows x86_64 ==="
 cd desktop
 npm run tauri:build -- --target x86_64-pc-windows-msvc
 cd ..
 
-# 5. 收集产物
+# 6. 收集产物
 mkdir -p release
 BUNDLE_DIR="desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
 NSIS_DIR="$BUNDLE_DIR/nsis"
@@ -82,7 +106,7 @@ for msi in "$MSI_DIR"/$MSI_PATTERN; do
   fi
 done
 
-# 6. 更新 release/latest.json 的 windows-x86_64 条目，保留已有 macOS 条目
+# 7. 更新 release/latest.json 的 windows-x86_64 条目，保留已有 macOS 条目
 node -e "
 const fs = require('fs');
 const path = 'release/$SETUP_SIG';

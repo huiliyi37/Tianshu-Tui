@@ -4527,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "tianshu-desktop"
-version = "2.19.2"
+version = "2.19.3"
 dependencies = [
  "base64 0.22.1",
  "core-foundation",

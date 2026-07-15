@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VER="2.19.2"
+VER="2.19.3"
 echo "=== 天枢 macOS 打包 v$VER ==="
 
 # 1. 确保版本一致（桌面端 app 版本以 tauri.conf.json 为准，Cargo.toml 需同步）
