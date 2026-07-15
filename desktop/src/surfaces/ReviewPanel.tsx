@@ -536,7 +536,12 @@ export function ReviewPanel(props: {
           </div>
         </TabsContent>
         <TabsContent value="changes" className="review-body">
-          <ChangesTab sessionId={sessionId} onSendPrompt={onSendPrompt} />
+          <ChangesTab
+            sessionId={sessionId}
+            artifacts={artifacts}
+            onViewArtifact={view}
+            onSendPrompt={onSendPrompt}
+          />
 
           {autonomous && !pendingApproval && (
             <section className="review-section mt-4 border-t border-border pt-4">

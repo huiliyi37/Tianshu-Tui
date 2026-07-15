@@ -1,10 +1,23 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQueryClient } from '@tanstack/react-query'
 import { qk, useFileDiff, useSessions, useWorkingTree } from '../state/queries'
 import { commitSessionChanges, createSessionPr, mergeSessionBack } from '../runtime/client'
 import { DiffView } from '../components/DiffView'
-import type { LineComment, WorkingTreeFile } from '../runtime/types'
+import type { LineComment, WorkingTreeFile, ArtifactSummary } from '../runtime/types'
+import { useSessionEventsSelector } from '../state/use-session-events'
+import { summarizeDelegation } from '../components/DelegationTree'
+import {
+  ChevronRight,
+  ChevronDown,
+  Users,
+  FileCode,
+  FileText,
+  Play,
+  Terminal,
+  Eye,
+  ArrowLeft
+} from 'lucide-react'
 
 const STATUS_LABEL: Record<WorkingTreeFile['status'], string> = {
   modified: 'M',
@@ -22,29 +35,87 @@ const STATUS_CLASS: Record<WorkingTreeFile['status'], string> = {
   untracked: 'st-untracked',
 }
 
-/**
- * Working-tree changes relative to the session baseline — the desktop
- * "Changes" tab. Worktree sessions diff against the recorded task-start
- * commit (baselineHead) in their own worktree cwd, so committed work stays
- * visible; plain sessions fall back to HEAD in the shared cwd.
- *
- * Antigravity-2.0-style review: a single scrollable column with a sticky
- * summary bar (file count, total +/-, global single/double-column toggle) and
- * one collapsible card per changed file. Each card lazily fetches its own diff
- * the first time it is expanded (reusing GET /git/diff?path=), so opening the
- * tab never pulls 50 files' worth of diff at once. The first file is expanded by
- * default for an immediate "what changed" view.
- *
- * Host-agnostic: the diff is pure local git, so this works the same for repos
- * hosted on GitHub, gitee, self-hosted, or no remote at all.
- *
- * Degrades gracefully: non-git cwd shows "不是 git 仓库"; no changes shows the
- * empty state. Read-only (no stage/commit) — edits go through the agent.
- */
+const formatArtifactTime = (timestamp: number) => {
+  const date = new Date(timestamp)
+  const isToday = new Date().toDateString() === date.toDateString()
+  const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })
+  if (isToday) {
+    return `Today ${timeStr}`
+  }
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (yesterday.toDateString() === date.toDateString()) {
+    return `Yesterday ${timeStr}`
+  }
+  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${timeStr}`
+}
+
+const getFileIcon = (filePath: string) => {
+  const ext = filePath.split('.').pop()?.toLowerCase()
+  switch (ext) {
+    case 'tsx':
+    case 'ts':
+    case 'jsx':
+    case 'js':
+      return <FileCode size={16} className="text-accent" />
+    case 'css':
+    case 'scss':
+      return <FileCode size={16} className="text-warning" />
+    case 'md':
+      return <FileText size={16} className="text-success" />
+    case 'json':
+      return <FileText size={16} className="text-info" />
+    default:
+      return <FileText size={16} className="text-muted" />
+  }
+}
+
+const getArtifactIcon = (a: ArtifactSummary) => {
+  if (a.tool === 'walkthrough') {
+    return <Play size={16} className="text-success" />
+  }
+  if (a.target.endsWith('task.md') || a.tool === 'task') {
+    return <FileText size={16} className="text-warning" />
+  }
+  if (a.kind === 'screenshot' || a.kind === 'image') {
+    return <Eye size={16} className="text-info" />
+  }
+  return <FileText size={16} className="text-muted" />
+}
+
+function DashboardGroup(props: {
+  title: string
+  count: number
+  icon: React.ReactNode
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(props.defaultOpen ?? false)
+  return (
+    <div className={`dashboard-group ${open ? 'open' : ''}`}>
+      <button className="dashboard-group-header" onClick={() => setOpen(!open)}>
+        <span className="group-title-wrap">
+          {props.icon}
+          <span className="group-title">{props.title}</span>
+          <span className="group-count">{props.count}</span>
+        </span>
+        <span className="group-chevron">
+          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </span>
+      </button>
+      {open && (
+        <div className="dashboard-group-body">
+          {props.children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ChangesTab(props: {
   sessionId: string | null
-  /** P1-3 — line-comment feedback loop: comments across files collect here and
-   *  one click sends them as a structured prompt (running turn → steer). */
+  artifacts: ArtifactSummary[]
+  onViewArtifact?: (a: ArtifactSummary) => void
   onSendPrompt?: (text: string) => void
 }) {
   const { t } = useTranslation('git')
@@ -52,6 +123,9 @@ export function ChangesTab(props: {
   const tree = useWorkingTree(props.sessionId)
   const [sideBySide, setSideBySide] = useState(false)
   const [lineComments, setLineComments] = useState<LineComment[]>([])
+  
+  const [subTab, setSubTab] = useState<'overview' | 'review'>('overview')
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null)
 
   const addComment = (anchor: { file: string; oldLine?: number; newLine?: number }, text: string) => {
     setLineComments((prev) => [
@@ -88,6 +162,33 @@ export function ChangesTab(props: {
     [files],
   )
 
+  const delegation = useSessionEventsSelector(props.sessionId, (v) => v.delegation ?? {})
+  const subagents = useMemo(() => {
+    return Object.values(delegation).sort((a, b) => b.updatedAt - a.updatedAt)
+  }, [delegation])
+  const { total: totalWorkers } = summarizeDelegation(delegation)
+
+  const jobs = useSessionEventsSelector(props.sessionId, (v) => v.jobs ?? {})
+  const jobList = useMemo(() => {
+    return Object.values(jobs).sort((a, b) => b.startedAt - a.startedAt)
+  }, [jobs])
+  const totalJobs = jobList.length
+
+  const sortedArtifacts = useMemo(() => {
+    return [...props.artifacts].sort((a, b) => b.createdAt - a.createdAt)
+  }, [props.artifacts])
+
+  useEffect(() => {
+    if (subTab === 'review' && !selectedFilePath && files.length > 0) {
+      setSelectedFilePath(files[0]!.path)
+    }
+  }, [subTab, selectedFilePath, files])
+
+  const handleSelectFile = (path: string) => {
+    setSelectedFilePath(path)
+    setSubTab('review')
+  }
+
   if (!enabled) {
     return <div className="empty sm">{t('changes.noSession')}</div>
   }
@@ -100,67 +201,257 @@ export function ChangesTab(props: {
   if (tree.data && !tree.data.isRepo) {
     return <div className="empty sm">{t('changes.notRepo')}</div>
   }
-  if (files.length === 0) {
-    return <div className="empty sm">{t('changes.empty')}</div>
-  }
 
   return (
     <div className="changes-overview">
-      <div className="changes-summary">
-        <span className="changes-summary-count">{t('changes.filesChanged', { n: files.length })}</span>
-        <span className="changes-summary-delta">
-          {totals.add > 0 && <span className="add">+{totals.add}</span>}
-          {totals.del > 0 && <span className="del">-{totals.del}</span>}
-        </span>
-        <button
-          className={`diff-toggle ${sideBySide ? 'active' : ''}`}
-          onClick={() => setSideBySide((v) => !v)}
-          title={t('changes.toggleLayoutTitle')}
-        >
-          {sideBySide ? t('changes.split') : t('changes.unified')}
-        </button>
-        {props.onSendPrompt && lineComments.length > 0 && (
-          <button
-            className="btn sm changes-send-comments"
-            onClick={sendComments}
-            title={t('changes.sendCommentsTitle')}
+      <div className="changes-tab-header">
+        <div className="changes-tabs-capsule">
+          <button 
+            className={`changes-tab-btn ${subTab === 'overview' ? 'active' : ''}`}
+            onClick={() => setSubTab('overview')}
           >
-            {t('changes.sendComments', { n: lineComments.length })}
+            概览 Overview
           </button>
-        )}
+          <button 
+            className={`changes-tab-btn ${subTab === 'review' ? 'active' : ''}`}
+            onClick={() => setSubTab('review')}
+            disabled={files.length === 0}
+          >
+            评审 Review
+          </button>
+        </div>
       </div>
-      <div className="changes-cards">
-        {files.map((f, i) => (
-          <FileDiffCard
-            key={f.path}
-            file={f}
-            sessionId={props.sessionId}
-            sideBySide={sideBySide}
-            defaultOpen={i === 0}
-            comments={props.onSendPrompt ? lineComments : undefined}
-            onLineComment={props.onSendPrompt ? addComment : undefined}
-          />
-        ))}
-      </div>
-      {props.sessionId && (
-        <LandingBar
-          sessionId={props.sessionId}
-          busy={busy}
-          isWorktree={isWorktree}
-          onSendPrompt={props.onSendPrompt}
-        />
+
+      {subTab === 'overview' ? (
+        <div className="changes-overview-content">
+          <div className="changes-summary">
+            <span className="changes-summary-count">{t('changes.filesChanged', { n: files.length })}</span>
+            <span className="changes-summary-delta">
+              {totals.add > 0 && <span className="add">+{totals.add}</span>}
+              {totals.del > 0 && <span className="del">-{totals.del}</span>}
+            </span>
+          </div>
+
+          {files.length === 0 ? (
+            <div className="empty sm">{t('changes.empty')}</div>
+          ) : (
+            <div className="dashboard-groups">
+              <DashboardGroup 
+                title="Subagents" 
+                count={totalWorkers} 
+                icon={<Users size={16} className="text-accent" />}
+              >
+                {totalWorkers === 0 ? (
+                  <div className="empty sm muted">No active subagents</div>
+                ) : (
+                  <div className="dashboard-list">
+                    {subagents.map((s) => (
+                      <div key={s.workerId} className="dashboard-subagent-row">
+                        <div className="dashboard-subagent-info">
+                          <span className="dashboard-subagent-profile">{s.profile || 'subagent'}</span>
+                          <span className="dashboard-subagent-objective" title={s.objective}>{s.objective}</span>
+                        </div>
+                        <div className="dashboard-subagent-meta">
+                          <span className={`status-badge ${s.status}`}>{s.status}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DashboardGroup>
+
+              <DashboardGroup 
+                title="Files Changed" 
+                count={files.length} 
+                icon={<FileCode size={16} className="text-accent" />}
+                defaultOpen={true}
+              >
+                <div className="dashboard-list">
+                  {files.map((f) => {
+                    const parts = f.path.split('/')
+                    const fileName = parts.pop() || f.path
+                    const dirPath = parts.join('/')
+                    return (
+                      <div 
+                        key={f.path} 
+                        className="dashboard-file-row"
+                        onClick={() => handleSelectFile(f.path)}
+                      >
+                        <div className="dashboard-file-info">
+                          {getFileIcon(f.path)}
+                          <span className="dashboard-file-name">{fileName}</span>
+                          {dirPath && <span className="dashboard-file-dir">{dirPath}</span>}
+                        </div>
+                        <div className="dashboard-file-delta">
+                          {f.additions > 0 && <span className="add">+{f.additions}</span>}
+                          {f.deletions > 0 && <span className="del">-{f.deletions}</span>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </DashboardGroup>
+
+              <DashboardGroup 
+                title="Artifacts" 
+                count={props.artifacts.length} 
+                icon={<FileText size={16} className="text-accent" />}
+                defaultOpen={true}
+              >
+                {props.artifacts.length === 0 ? (
+                  <div className="empty sm muted">No artifacts generated</div>
+                ) : (
+                  <div className="dashboard-list">
+                    {sortedArtifacts.map((a) => {
+                      let label = a.summary || a.target
+                      if (a.tool === 'walkthrough') label = 'Walkthrough'
+                      else if (a.target.endsWith('task.md') || a.tool === 'task') label = 'Task'
+                      else if (a.kind === 'screenshot') label = `Media (Today ${new Date(a.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+                      
+                      return (
+                        <div 
+                          key={a.id} 
+                          className="dashboard-artifact-row"
+                          onClick={() => props.onViewArtifact?.(a)}
+                        >
+                          <div className="dashboard-artifact-info">
+                            {getArtifactIcon(a)}
+                            <span className="dashboard-artifact-label">{label}</span>
+                          </div>
+                          <div className="dashboard-artifact-meta">
+                            {formatArtifactTime(a.createdAt)}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </DashboardGroup>
+
+              <DashboardGroup 
+                title="Background Tasks" 
+                count={totalJobs} 
+                icon={<Terminal size={16} className="text-accent" />}
+              >
+                {totalJobs === 0 ? (
+                  <div className="empty sm muted">No running jobs</div>
+                ) : (
+                  <div className="dashboard-list">
+                    {jobList.map((j) => (
+                      <div key={j.id || j.startedAt} className="dashboard-job-row">
+                        <div className="dashboard-job-info">
+                          <Terminal size={14} className="dashboard-job-icon" />
+                          <span className="dashboard-job-cmd" title={j.command}>{j.command}</span>
+                        </div>
+                        <div className="dashboard-job-meta">
+                          <span className={`status-badge ${j.status}`}>{j.status}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DashboardGroup>
+            </div>
+          )}
+
+          {props.sessionId && (
+            <LandingBar
+              sessionId={props.sessionId}
+              busy={busy}
+              isWorktree={isWorktree}
+              onSendPrompt={props.onSendPrompt}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="changes-review-content">
+          <div className="review-nav-bar">
+            <button className="review-back-btn" onClick={() => setSubTab('overview')}>
+              <ArrowLeft size={14} />
+              <span>概览 Overview</span>
+            </button>
+
+            <div className="review-file-nav">
+              <select
+                className="review-file-select"
+                value={selectedFilePath ?? ''}
+                onChange={(e) => setSelectedFilePath(e.target.value)}
+              >
+                {files.map((f) => (
+                  <option key={f.path} value={f.path}>
+                    {f.path}
+                  </option>
+                ))}
+              </select>
+
+              <div className="review-nav-buttons">
+                <button
+                  className="review-nav-arrow"
+                  disabled={files.findIndex((f) => f.path === selectedFilePath) <= 0}
+                  onClick={() => {
+                    const idx = files.findIndex((f) => f.path === selectedFilePath)
+                    if (idx > 0) setSelectedFilePath(files[idx - 1]!.path)
+                  }}
+                  title="上一个文件"
+                >
+                  ◀
+                </button>
+                <button
+                  className="review-nav-arrow"
+                  disabled={files.findIndex((f) => f.path === selectedFilePath) >= files.length - 1}
+                  onClick={() => {
+                    const idx = files.findIndex((f) => f.path === selectedFilePath)
+                    if (idx < files.length - 1) setSelectedFilePath(files[idx + 1]!.path)
+                  }}
+                  title="下一个文件"
+                >
+                  ▶
+                </button>
+              </div>
+            </div>
+
+            <button
+              className={`diff-toggle ${sideBySide ? 'active' : ''}`}
+              onClick={() => setSideBySide((v) => !v)}
+              title={t('changes.toggleLayoutTitle')}
+            >
+              {sideBySide ? t('changes.split') : t('changes.unified')}
+            </button>
+          </div>
+
+          <div className="review-card-container">
+            {selectedFilePath && files.some((f) => f.path === selectedFilePath) ? (
+              <FileDiffCard
+                file={files.find((f) => f.path === selectedFilePath)!}
+                sessionId={props.sessionId}
+                sideBySide={sideBySide}
+                defaultOpen={true}
+                comments={props.onSendPrompt ? lineComments : undefined}
+                onLineComment={props.onSendPrompt ? addComment : undefined}
+                isSingleFileView={true}
+              />
+            ) : (
+              <div className="empty sm muted">请选择一个文件进行评审</div>
+            )}
+          </div>
+
+          {props.onSendPrompt && lineComments.length > 0 && (
+            <div className="review-comments-footer">
+              <button
+                className="btn sm primary changes-send-comments"
+                onClick={sendComments}
+                title={t('changes.sendCommentsTitle')}
+              >
+                {t('changes.sendComments', { n: lineComments.length })}
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
 }
 
-/**
- * Change-landing action bar — closes the "agent produced changes, now what?"
- * loop. Dual-channel: server-direct git (Commit / Merge back / Create PR,
- * fast, no agent turns) plus a "let the agent commit" prompt path that goes
- * through the agent's commit discipline. Direct git actions are disabled
- * while the agent is running to avoid racing its file writes.
- */
 function LandingBar(props: {
   sessionId: string
   busy: boolean
@@ -301,7 +592,6 @@ function LandingBar(props: {
   )
 }
 
-/** One collapsible per-file diff card. Fetches its diff only once expanded. */
 function FileDiffCard(props: {
   file: WorkingTreeFile
   sessionId: string | null
@@ -309,12 +599,34 @@ function FileDiffCard(props: {
   defaultOpen: boolean
   comments?: LineComment[]
   onLineComment?: (anchor: { file: string; oldLine?: number; newLine?: number }, text: string) => void
+  isSingleFileView?: boolean
 }) {
-  const { file, sessionId, sideBySide, defaultOpen, comments, onLineComment } = props
+  const { file, sessionId, sideBySide, defaultOpen, comments, onLineComment, isSingleFileView } = props
   const { t } = useTranslation('git')
   const [open, setOpen] = useState(defaultOpen)
-  // null path → query disabled, so collapsed cards never fetch.
-  const diff = useFileDiff(open ? file.path : null, sessionId)
+  const diff = useFileDiff(isSingleFileView || open ? file.path : null, sessionId)
+
+  if (isSingleFileView) {
+    return (
+      <div className="file-diff-card-body single-view">
+        {diff.isLoading ? (
+          <div className="empty sm">{t('changes.loadingDiff')}</div>
+        ) : diff.isError ? (
+          <div className="empty sm">{t('changes.diffFailed')}</div>
+        ) : !diff.data?.diff ? (
+          <div className="empty sm muted">{t('changes.binaryNoDiff')}</div>
+        ) : (
+          <DiffView
+            raw={diff.data.diff}
+            sideBySide={sideBySide}
+            hideToolbar
+            comments={comments}
+            onLineComment={onLineComment}
+          />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className={`file-diff-card ${open ? 'open' : ''}`}>
