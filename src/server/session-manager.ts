@@ -2661,14 +2661,15 @@ export class RuntimeSessionManager {
   }
 
   /**
-   * Resolve the git context of a session: worktree cwd (falls back to the
-   * shared default cwd) and the diff baseline (recorded creation HEAD for
-   * worktree sessions, plain HEAD otherwise).
+   * Resolve the git context of a session: worktree cwd for isolated worktree
+   * sessions, otherwise the session's own cwd (the project directory), falling
+   * back to the shared default cwd only as a last resort. The diff baseline is
+   * the recorded creation HEAD for worktree sessions, plain HEAD otherwise.
    */
   private sessionGitContext(id: string): { cwd: string; baseRef: string } | null {
     const s = this.sessions.get(id)
     if (!s) return null
-    const cwd = s.record.worktreePath ?? this.defaultCwd
+    const cwd = s.record.worktreePath ?? s.record.cwd ?? this.defaultCwd
     const baseRef = s.record.baselineHead ?? 'HEAD'
     return { cwd, baseRef }
   }

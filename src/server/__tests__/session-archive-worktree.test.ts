@@ -114,6 +114,30 @@ test('session-scoped git context: worktree cwd + baseline diff keeps committed w
   git(repo, ['branch', '-D', rec.worktreeBranch!])
 })
 
+test('session-scoped git context: plain sessions use their own cwd, not the manager defaultCwd', async () => {
+  // In production the sidecar's defaultCwd is the user's home, while the
+  // session's cwd is the actual project directory. Plain (non-worktree)
+  // sessions must diff against the project cwd so the Changes tab recognises
+  // the repo.
+  const otherDir = mkdtempSync(join(tmpdir(), 'rivet-non-repo-'))
+  const manager = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    defaultCwd: otherDir,
+  })
+  const rec = manager.createSession({ cwd: repo })
+  assert.equal(rec.worktreePath, undefined, 'plain session has no worktree')
+
+  writeFileSync(join(repo, 'plain.txt'), 'plain change\n')
+
+  const tree = await manager.getSessionWorkingTree(rec.id)
+  assert.ok(tree, 'tree returned for plain session')
+  assert.equal(tree!.isRepo, true, 'detects repo via session cwd')
+  assert.ok(tree!.files.some(f => f.path === 'plain.txt'), 'sees changes in session cwd')
+
+  rmSync(otherDir, { recursive: true, force: true })
+  rmSync(join(repo, 'plain.txt'), { force: true })
+})
+
 test('landing: commitSessionChanges commits the worktree and emits a landing event', () => {
   const manager = makeManager()
   const rec = manager.createSession({ isolatedWorktree: true })
