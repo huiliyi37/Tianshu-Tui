@@ -9,7 +9,9 @@ import { classifyFailure, isTransient } from './failure-classifier.js'
 import {
   buildBlockedWorkerResult,
   clampWorkerMaxTurns,
+  deriveWorkerSessionId,
   parseWorkerResult,
+  salvageWorkerResult,
   type WorkOrder,
   type WorkerResult,
 } from './work-order.js'
@@ -88,6 +90,11 @@ export interface WorkerSessionConfig {
    *  sees its previous context. The current objective is appended as a new user
    *  message on top of the history. */
   priorMessages?: readonly import('../api/oai-types.js').OaiMessage[]
+  /** Per-dispatch nonce mixed into the worker's session id (see
+   *  deriveWorkerSessionId) — batch order ids repeat across delegation runs,
+   *  and without the nonce every run appends to the same conversation JSONL.
+   *  Set by the coordinator; standalone callers may omit (legacy layout). */
+  sessionNonce?: string
 }
 
 /** `turn` 事件在每个 worker turn 结束时上报，detail 为累计 token 总数（字符串）。 */
@@ -301,6 +308,54 @@ async function repairWithJsonMode(
   return failed ? '' : text
 }
 
+/** Soft-landing wrap-up steer, delivered ONCE through the per-tool-round steer
+ *  drain when the budget soft timer fires. After delivery (or before arming),
+ *  the drain passes through to the inner (coordinator) steer queue. */
+export function createSoftLandingDrain(inner?: () => string | null): {
+  drain: () => string | null
+  requestWrapUp: () => void
+} {
+  let requested = false
+  let delivered = false
+  return {
+    requestWrapUp: () => { requested = true },
+    drain: () => {
+      if (requested && !delivered) {
+        delivered = true
+        return '[budget warning] Less than 25% of your time budget remains. STOP exploring now. Based on the evidence you already have, emit your final report as a single valid JSON object (WorkerResult contract) immediately. Do not start new tool-call chains.'
+      }
+      return inner?.() ?? null
+    },
+  }
+}
+
+/** Abort-path salvage ladder: the abort (budget timer / parent signal) may have
+ *  landed after the worker already emitted its final report — or mid-stream
+ *  with enough of the report on the wire to recover findings. Full contract
+ *  parse first (degraded to unverified evidence), then field-level salvage.
+ *  Returns null when nothing usable is present. */
+export function salvageAbortedReport(
+  latestText: string,
+  orderId: string,
+  abortSource: 'timeout' | 'caller_aborted',
+): WorkerResult | null {
+  if (!latestText.trim()) return null
+  try {
+    const parsed = parseWorkerResult(latestText, orderId)
+    return {
+      ...parsed,
+      evidenceStatus: parsed.evidenceStatus === 'verified' ? 'unverified' : parsed.evidenceStatus,
+      risks: [...parsed.risks, `salvaged after ${abortSource === 'timeout' ? 'budget timeout' : 'parent abort'} — verification evidence downgraded`],
+      failureReason: abortSource,
+    }
+  } catch {
+    // Fall through to field-level salvage.
+  }
+  const salvaged = salvageWorkerResult(latestText, orderId)
+  if (!salvaged) return null
+  return { ...salvaged, failureReason: abortSource }
+}
+
 /** Run a single agent turn, retrying transient network/API errors with backoff.
  *  Exported for direct testing with an injected mock agent. */
 export async function runOnceWithTransientRetry(
@@ -370,7 +425,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     maxTurns: clampWorkerMaxTurns(config.maxTurns, config.order.budget.maxTurns),
     contextWindow: config.contextWindow,
     compact: config.compact,
-    sessionId: `worker-${config.order.id.replace(/:/g, '-')}`,
+    sessionId: deriveWorkerSessionId(config.order.id, config.sessionNonce),
     // Headless: no human answers approval prompts for a worker. The tool pipeline
     // auto-approves in-workspace writes (worktree/claim isolation) and fast-denies
     // anything else that would ask, instead of stalling on onApprovalRequired.
@@ -404,14 +459,36 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
   // session must STOP. Each agent.run() creates a fresh AbortController, so
   // without this latch the parse-repair loop below would happily re-run an
   // "aborted" worker with a live signal and keep issuing API calls.
+  // `abortSource` records WHICH fired first so the blocked result can carry a
+  // machine-readable failureReason (timeout vs caller_aborted — different
+  // recovery strategies for the primary).
   let abortLatched = false
+  let abortSource: 'timeout' | 'caller_aborted' | null = null
   const timeoutMs = config.order.budget.timeoutMs
-  const timer = setTimeout(() => { abortLatched = true; agent.abort() }, timeoutMs)
+  const timer = setTimeout(() => {
+    abortLatched = true
+    abortSource ??= 'timeout'
+    agent.abort()
+  }, timeoutMs)
+
+  // Soft landing — at ~75% of the budget (or 60s before the hard timer for
+  // long budgets), inject ONE wrap-up steer through the per-tool-round drain
+  // channel so the worker stops exploring and emits its final report while
+  // there is still time. Session 2c1186f5: a scout was hard-killed 37s INTO
+  // streaming its final report — the report was seconds from landing.
+  // Cache-safe: the steer is an append-only tail message in the worker's own
+  // session (same mechanism as coordinator steerWorker).
+  const softLanding = createSoftLandingDrain(config.onSteerDrain)
+  const steerDrain = softLanding.drain
+  const softMs = Math.max(timeoutMs * 0.75, timeoutMs - 60_000)
+  const softTimer = softMs > 0 && softMs < timeoutMs
+    ? setTimeout(() => { softLanding.requestWrapUp() }, softMs)
+    : null
 
   // Propagate parent abort signal — when parent aborts, worker must stop
   // immediately instead of waiting for the internal budget timeout.
   const onParentAbort = config.abortSignal
-    ? () => { abortLatched = true; agent.abort(); clearTimeout(timer) }
+    ? () => { abortLatched = true; abortSource ??= 'caller_aborted'; agent.abort(); clearTimeout(timer) }
     : null
   if (onParentAbort && !config.abortSignal!.aborted) {
     config.abortSignal!.addEventListener('abort', onParentAbort, { once: true })
@@ -420,7 +497,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
 
   try {
     const transcript = emptyTranscript()
-    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity, config.onSteerDrain)
+    let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity, steerDrain)
     mbox?.progress(1, config.order.budget.maxRetries + 1, 'initial run')
 
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
@@ -434,11 +511,29 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           partialResult: latestText.slice(0, 8000),
           completedTools: [...transcript.toolUses],
         }
+        // Abort salvage — the abort may have landed AFTER the worker finished
+        // (or nearly finished) its final report. Try the full contract first
+        // (degraded to unverified evidence), then field-level salvage, before
+        // discarding everything into an empty blocked result.
+        const abortSalvaged = salvageAbortedReport(latestText, config.order.id, abortSource ?? 'timeout')
+        if (abortSalvaged) {
+          return {
+            result: abortSalvaged,
+            transcript,
+            session,
+            usage: session.getTotalUsage(),
+            checkpoint: abortCheckpoint,
+          }
+        }
         const pollutionHint = detectPollutionFailure(transcript)
         const approvalHint = detectApprovalDeadlock(transcript)
         return {
           result: {
-            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`),
+            ...buildBlockedWorkerResult(
+              config.order,
+              `Worker aborted (${abortSource === 'caller_aborted' ? 'parent signal' : 'budget timeout'}). Partial output: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`,
+              abortSource ?? 'timeout',
+            ),
             artifacts: [
               { kind: 'note' as const, title: 'Aborted worker partial output', content: latestText.slice(0, 2000) },
             ],
@@ -471,12 +566,25 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
         transcript.errors.push(message)
         mbox?.escalate(`Parse failed (attempt ${attempt + 1}): ${message.slice(0, 100)}`)
         if (attempt === config.order.budget.maxRetries) {
+          // Terminal tier ladder: repair retries exhausted → field-level salvage
+          // (recover independently parseable findings from the malformed report)
+          // → empty blocked only when nothing is salvageable.
+          const salvaged = salvageWorkerResult(latestText, config.order.id)
+          if (salvaged) {
+            mbox?.progress(config.order.budget.maxRetries + 1, config.order.budget.maxRetries + 1, 'parse-salvaged')
+            return {
+              result: salvaged,
+              transcript,
+              session,
+              usage: session.getTotalUsage(),
+            }
+          }
           const partialSummary = latestText.slice(0, 300)
           const pollutionHint = detectPollutionFailure(transcript)
           const approvalHint = detectApprovalDeadlock(transcript)
           return {
             result: {
-              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`),
+              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`, 'json_parse'),
               artifacts: [
                 { kind: 'note' as const, title: 'Unparseable worker output', content: latestText.slice(0, 2000) },
               ],
@@ -506,7 +614,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           }
           // json-mode repair produced nothing (stream error) → fall through to AgentLoop repair
         }
-        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity, config.onSteerDrain)
+        latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity, steerDrain)
       }
     }
 
@@ -518,6 +626,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     }
   } finally {
     clearTimeout(timer)
+    if (softTimer) clearTimeout(softTimer)
     if (onParentAbort && config.abortSignal) {
       config.abortSignal.removeEventListener('abort', onParentAbort)
     }

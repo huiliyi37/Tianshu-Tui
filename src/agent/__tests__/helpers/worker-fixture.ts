@@ -23,7 +23,10 @@ export function makeWorkerConfig(
       profile: 'code_scout',
       objective: 'trace the authentication flow across multiple files in the codebase',
       scope: { files: ['a.ts'] },
-      budget: { timeoutMs: 5_000, maxRetries: 1, maxTurns: 2, maxTokens: 2048 },
+      // Generous budget: under full-suite CPU contention a 5s wall-clock budget
+      // gets eaten by event-loop starvation and the hard abort timer flips
+      // results to blocked. Tests that exercise timeouts override this.
+      budget: { timeoutMs: 60_000, maxRetries: 1, maxTurns: 2, maxTokens: 2048 },
     }),
     client: (over.client ?? makeNoopClient()) as StreamClient,
     promptEngine,

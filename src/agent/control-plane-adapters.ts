@@ -190,13 +190,19 @@ export function signalsFromVerifiedResults(results: readonly WorkerResult[]): Co
       }
     }
     if (result.status === 'blocked') {
+      // W4: grade by failureReason — a json_parse block is a repairable
+      // protocol fault (report existed, contract broke: status-level noise),
+      // while timeout/caller_aborted means real work was cut off and the
+      // primary should decide (rebudget / resume re-dispatch).
+      const reason = result.failureReason
+      const cutOff = reason === 'timeout' || reason === 'caller_aborted'
       return {
         key: `worker:blocked:${result.workOrderId}`,
         kind: 'worker' as const,
         severity: 'attention' as const,
-        summary: `worker ${result.workOrderId} blocked`,
+        summary: `worker ${result.workOrderId} blocked${reason ? ` (${reason})` : ''}${reason === 'timeout' ? ' — budget exhausted, consider resume re-dispatch or a larger timeoutMs' : ''}`,
         routeHint: 'status' as const,
-        requiresDecision: false,
+        requiresDecision: cutOff,
         ttlTurns: 2,
         evidenceKey: `worker-result:${result.workOrderId}`,
         cacheImpact: 'none' as const,

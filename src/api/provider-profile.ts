@@ -47,6 +47,13 @@ const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
   kimi: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
   'opencode-go': { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
   claude: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
+  longcat: {
+    // LongCat has server-side implicit exact-prefix caching (cache hits free
+    // per official pricing). Same treatment as GLM: cache-preserving so
+    // compaction protects the stable prefix on the 1M window.
+    cacheType: 'exact-prefix' as CacheType, persistent: true, minCacheTokens: 64,
+    attentionProfile: { effectiveAttentionRatio: 0.85, toolDensityThreshold: 0.6, collapseAgeTurns: 4 },
+  },
 }
 
 /**

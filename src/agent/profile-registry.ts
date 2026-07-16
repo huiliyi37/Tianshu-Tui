@@ -56,6 +56,11 @@ const BUILTIN_PROFILES: ProfileDefinition[] = [
 4. Report findings with file:line references
 Evidence discipline — label the source of every finding: [current source] / [documentation] / [historical plan or memo]. Docs, old plans and memory/convention files describe the state when they were WRITTEN, not the present. Any claim about the current state (tech stack, framework, entry points, directory layout) that comes from a document must be verified against the current source code before you report it. When docs and source conflict, report the conflict itself: "docs say X, current code shows Y" — the conflict is a finding, do not silently pick a side.
 Do NOT modify any files.`,
+    // 8min — deep evidence scouting routinely needs 40+ tool calls; the early-
+    // session progressive ladder (240s at turn ≤4) hard-killed scouts that were
+    // mid-report (session 2c1186f5). Wall clock is a far backstop — silence
+    // detection (worker-liveness) is the real "stuck" judge.
+    defaultTimeoutMs: 480_000,
     builtIn: true,
   },
   {
@@ -63,6 +68,7 @@ Do NOT modify any files.`,
     role: 'readonly',
     allowedTools: [...READ_ONLY_TOOLS],
     expertisePrompt: `You are a documentation scout. Locate and read documentation files. Report findings accurately. Documentation may lag behind the code — when reporting claims about the CURRENT state of the project, mark them as "per docs, unverified against source" unless you have confirmed them in the source code.`,
+    defaultTimeoutMs: 480_000, // 8min — same scouting budget rationale as code_scout
     builtIn: true,
   },
   {

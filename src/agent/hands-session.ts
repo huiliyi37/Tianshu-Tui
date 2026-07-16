@@ -5,6 +5,7 @@ import { collectDiff, formatDiffArtifact } from './diff-collector.js'
 import {
   buildBlockedWorkerResult,
   parseWorkerResult,
+  salvageWorkerResult,
   type WorkOrder,
   type WorkerResult,
 } from './work-order.js'
@@ -160,7 +161,10 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
    } catch (parseError) {
       const message = parseError instanceof Error ? parseError.message : String(parseError)
       // Retry: send repair prompt and re-parse (mirrors worker-session.ts retry loop)
-      result = buildBlockedWorkerResult(config.order, message) // default — overwritten on success
+      // Terminal default: field-level salvage first (recover parseable findings
+      // from the malformed report), empty blocked only when nothing salvages.
+      result = salvageWorkerResult(text, config.order.id)
+        ?? buildBlockedWorkerResult(config.order, message, 'json_parse') // default — overwritten on success
       for (let attempt = 0; attempt < config.maxTurns && attempt < 2; attempt++) {
         try {
           const repairPrompt = buildWorkerRepairPrompt(config.order, text, message)

@@ -5,7 +5,7 @@ import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { subagentsDir } from '../config/paths.js'
 import { debugLog } from '../utils/debug.js'
 import { CircuitBreakerManager } from './worker-circuit-breaker.js'
@@ -27,9 +27,10 @@ import {
   type WorkOrderScope,
   type WorkerFailureReason,
   clampWorkerMaxTurns,
+  deriveWorkerSessionId,
 } from './work-order.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
-import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
+import { runWorkerSession, type WorkerCheckpoint, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
 import { saveWorkerSession, loadWorkerSession } from './worker-session-persist.js'
 import { WorkerLiveness, EXPLORE_STALL_MS, WRITE_STALL_MS } from './worker-liveness.js'
 import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
@@ -524,6 +525,14 @@ export class DelegationCoordinator {
    *  resumeWorkOrderId is provided; consumed by delegateOrder() when building
    *  the worker config. Side-table pattern (same as activityUpstream). */
   private readonly resumeMessages = new Map<string, readonly OaiMessage[]>()
+  /** W3 re-dispatch entry: latest abort checkpoint per order — captured from
+   *  aborted worker runs, re-injected as config.checkpoint when the primary
+   *  re-dispatches with resume:'<orderId>'. Bounded FIFO (insertion order). */
+  private readonly abortCheckpoints = new Map<string, WorkerCheckpoint>()
+  private static readonly MAX_ABORT_CHECKPOINTS = 8
+  /** Per-NEW-order checkpoint staged for a resume dispatch (side-table keyed by
+   *  the new order id, same pattern as resumeMessages). */
+  private readonly resumeCheckpoints = new Map<string, WorkerCheckpoint>()
   /** WC: per-order steer 队列 — 用户在 TUI worker 视图输入的直达消息。
    *  worker 的 onSteerDrain 在工具回合结算时 drain 注入 tool_result。 */
   private readonly steerQueues = new Map<string, string[]>()
@@ -549,9 +558,34 @@ export class DelegationCoordinator {
     this.mailbox = new InMemoryMailbox()
   }
 
+  /** W3: stash an aborted worker's checkpoint (bounded FIFO) and annotate the
+   *  blocked result with an explicit re-dispatch entry, so the primary KNOWS
+   *  the partial work is resumable instead of writing the worker off. */
+  private captureAbortCheckpoint(orderId: string, workerRun: WorkerSessionRun): void {
+    if (!workerRun.checkpoint?.partialResult) return
+    if (this.abortCheckpoints.size >= DelegationCoordinator.MAX_ABORT_CHECKPOINTS && !this.abortCheckpoints.has(orderId)) {
+      const oldest = this.abortCheckpoints.keys().next().value
+      if (oldest !== undefined) this.abortCheckpoints.delete(oldest)
+    }
+    this.abortCheckpoints.set(orderId, workerRun.checkpoint)
+    if (workerRun.result.status === 'blocked') {
+      workerRun.result.nextActions = [
+        ...workerRun.result.nextActions,
+        `Resumable: re-dispatch with delegate_task/delegate_batch resume:'${orderId}' — the worker's partial progress (${workerRun.checkpoint.completedTools.length} tool calls, ${workerRun.checkpoint.partialResult.length} chars) is checkpointed and will be injected as context.`,
+      ]
+    }
+  }
+
+  /** Per-order dispatch nonce — minted once per delegateOrder so the worker's
+   *  conversation JSONL / artifact dir are unique per dispatch even though
+   *  batch order ids (`batch:0`) repeat across delegation runs. Consulted by
+   *  workerArtifactSessionId so the artifact fallback registration matches the
+   *  session id the worker actually ran under. */
+  private readonly dispatchNonces = new Map<string, string>()
+
   /** Artifact session id used by a worker for its own ArtifactStore. */
   private workerArtifactSessionId(orderId: string): string {
-    return `worker-${orderId.replace(/:/g, '-')}`
+    return deriveWorkerSessionId(orderId, this.dispatchNonces.get(orderId))
   }
 
   /** Make worker-produced artifacts resolvable from the primary session store. */
@@ -606,6 +640,9 @@ export class DelegationCoordinator {
     this.orderControllers.clear()
     this.activityUpstream.clear()
     this.resumeMessages.clear()
+    this.resumeCheckpoints.clear()
+    this.abortCheckpoints.clear()
+    this.dispatchNonces.clear()
     this.steerQueues.clear()
     this.backgroundRuns.clear()
     this.backgroundPromises.clear()
@@ -1154,6 +1191,12 @@ export class DelegationCoordinator {
         } else {
           debugLog(`[worker-resume] no prior session for ${request.resumeWorkOrderId} — starting fresh`)
         }
+        // W3: abort checkpoint from the previous run rides along (consumed once).
+        const checkpoint = this.abortCheckpoints.get(request.resumeWorkOrderId)
+        if (checkpoint) {
+          this.resumeCheckpoints.set(order.id, checkpoint)
+          this.abortCheckpoints.delete(request.resumeWorkOrderId)
+        }
       }
       const run = await this.delegateOrder(order)
       return this.drainMailboxIntoRun(run)
@@ -1324,11 +1367,26 @@ export class DelegationCoordinator {
     workerConfig.parentApprovalMode = this.config.parentApprovalMode
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
     workerConfig.mailbox = this.mailbox
+    // Dispatch nonce: batch order ids repeat across delegation runs — without
+    // this, every run appends to the same worker-batch-N.jsonl (cumulative
+    // context + stale artifacts, session 2c1186f5). Same-order retries within
+    // THIS dispatch reuse the nonce on purpose (same session, same artifacts).
+    const dispatchNonce = randomUUID().slice(0, 5)
+    this.dispatchNonces.set(order.id, dispatchNonce)
+    workerConfig.sessionNonce = dispatchNonce
     // Session resume: inject prior messages so the worker continues from its
     // previous context. Side-table pattern (same as activityUpstream).
     const priorMessages = this.resumeMessages.get(order.id)
     if (priorMessages && priorMessages.length > 0) {
       workerConfig.priorMessages = priorMessages
+    }
+    // W3: inject the aborted run's checkpoint so the resumed worker starts from
+    // its partial result instead of redoing all work (worker-session embeds it
+    // into the prompt as a <checkpoint> block).
+    const resumeCheckpoint = this.resumeCheckpoints.get(order.id)
+    if (resumeCheckpoint) {
+      workerConfig.checkpoint = resumeCheckpoint
+      this.resumeCheckpoints.delete(order.id)
     }
 
     // A4: per-order AbortController merged with the parent signal — the stall
@@ -1542,6 +1600,7 @@ export class DelegationCoordinator {
         }
       } else {
         const workerRun = await wrapAbort(this.runWorker(workerConfig))
+        this.captureAbortCheckpoint(order.id, workerRun)
         const sessionMessages = typeof workerRun.session?.getMessages === 'function'
           ? workerRun.session.getMessages()
           : undefined
@@ -1633,6 +1692,7 @@ export class DelegationCoordinator {
               }
             } else {
               const workerRun = await wrapAbort(this.runWorker(workerConfig))
+              this.captureAbortCheckpoint(order.id, workerRun)
               const sessionMessages = typeof workerRun.session?.getMessages === 'function'
                 ? workerRun.session.getMessages()
                 : undefined
@@ -1997,6 +2057,12 @@ export class DelegationCoordinator {
           if (record) {
             this.resumeMessages.set(order.id, record.messages)
             debugLog(`[worker-resume] batch: loaded ${record.messages.length} messages from ${r.resumeWorkOrderId} for ${order.id}`)
+          }
+          // W3: abort checkpoint from the previous run rides along (consumed once).
+          const checkpoint = this.abortCheckpoints.get(r.resumeWorkOrderId)
+          if (checkpoint) {
+            this.resumeCheckpoints.set(order.id, checkpoint)
+            this.abortCheckpoints.delete(r.resumeWorkOrderId)
           }
         }
       }

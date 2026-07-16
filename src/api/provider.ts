@@ -171,6 +171,23 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     prefixCacheStrategy: 'none',
     supportsResponseFormat: false,
   },
+  // LongCat official docs support ONLY model/messages/stream/max_tokens/
+  // temperature/top_p — no response_format (json-mode repair unusable, worker
+  // repair must run as plain-text re-ask) and no cache_control breakpoints
+  // (server-side implicit prefix caching, hits free). Explicit entry so
+  // behavior doesn't ride on the DEFAULT_CAPABILITIES fallback
+  // (session 2c1186f5 scout postmortem).
+  longcat: {
+    supportsThinking: true,
+    thinkingFormat: 'openai',
+    supportsCacheControl: false,
+    stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+    hasToolJsonInContentBug: false,
+    effortFormat: 'none',
+    prefixCacheStrategy: 'deepseek-native',
+    supportsResponseFormat: false,
+    mapUsage: mapDeepSeekUsage,
+  },
 }
 
 /**

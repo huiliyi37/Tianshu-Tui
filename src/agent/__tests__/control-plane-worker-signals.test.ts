@@ -115,6 +115,35 @@ describe('aggregation-path adapter (real verifyWorkerEvidence output)', () => {
     assert.equal(routeFor(signal), 'silent')
   })
 
+  it('W4: blocked with failureReason=timeout → requiresDecision + resume hint in summary', () => {
+    const blocked = baseResult({
+      status: 'blocked',
+      changedFiles: [],
+      evidenceStatus: 'unverified',
+      failureReason: 'timeout',
+      summary: 'Worker aborted (budget timeout)',
+    })
+    const [signal] = signalsFromVerifiedResults([blocked])
+    assert.ok(signal)
+    assert.equal(signal.requiresDecision, true, 'cut-off work needs a primary decision (rebudget/resume)')
+    assert.match(signal.summary, /timeout/)
+    assert.match(signal.summary, /resume re-dispatch/)
+  })
+
+  it('W4: blocked with failureReason=json_parse → status-level, no decision gate', () => {
+    const blocked = baseResult({
+      status: 'blocked',
+      changedFiles: [],
+      evidenceStatus: 'unverified',
+      failureReason: 'json_parse',
+      summary: 'Failed to parse worker output',
+    })
+    const [signal] = signalsFromVerifiedResults([blocked])
+    assert.ok(signal)
+    assert.equal(signal.requiresDecision, false, 'protocol fault is repairable noise, not a decision point')
+    assert.match(signal.summary, /json_parse/)
+  })
+
   it('worker text claims (全绿) are NOT trusted — the gate downgraded result maps to gate outcome, not the claim', () => {
     const gated = verifyWorkerEvidence(
       baseResult({ evidenceStatus: 'verified', summary: '全部测试通过，全绿' }),

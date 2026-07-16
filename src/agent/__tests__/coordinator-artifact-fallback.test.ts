@@ -11,7 +11,7 @@ import { ToolRegistry } from '../../tools/registry.js'
 import type { Tool, ToolCallParams } from '../../tools/types.js'
 import { DelegationCoordinator, type WorkerRuntimeFactory } from '../coordinator.js'
 import { profileRegistry } from '../profile-registry.js'
-import { READ_ONLY_WORKER_TOOLS } from '../work-order.js'
+import { deriveWorkerSessionId, READ_ONLY_WORKER_TOOLS } from '../work-order.js'
 
 function fakeTool(name: string): Tool {
   return {
@@ -83,7 +83,9 @@ describe('DelegationCoordinator artifact fallback', () => {
         runtimeFactory,
         artifactStore: primaryStore,
         runWorker: async (config) => {
-          const workerSessionId = `worker-${config.order.id.replace(/:/g, '-')}`
+          // Same derivation as production runWorkerSession — nonce included,
+          // so this test also guards the coordinator/worker sync contract.
+          const workerSessionId = deriveWorkerSessionId(config.order.id, config.sessionNonce)
           const workerStore = new ArtifactStore(dir, workerSessionId, {
             idGenerator: () => 'worker-id',
           })

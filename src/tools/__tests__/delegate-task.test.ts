@@ -220,9 +220,15 @@ describe('DELEGATE_TASK_TOOL', () => {
         tool.timeoutMs?.({ ...base, input: { profile: 'reviewer' }, sessionTurnCount: 0 }),
         600_000 + GRACE,
       )
-      // Profiles without defaultTimeoutMs keep the ladder
+      // Scouts now carry their own 480s budget (session 2c1186f5: 240s ladder
+      // hard-killed scouts mid-report) — no longer a ladder example.
       assert.equal(
         tool.timeoutMs?.({ ...base, input: { profile: 'code_scout' }, sessionTurnCount: 0 }),
+        480_000 + GRACE,
+      )
+      // Profiles without defaultTimeoutMs keep the ladder
+      assert.equal(
+        tool.timeoutMs?.({ ...base, input: { profile: 'verifier' }, sessionTurnCount: 0 }),
         120_000 + GRACE,
       )
     })

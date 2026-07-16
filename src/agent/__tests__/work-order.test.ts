@@ -7,6 +7,7 @@ import {
   mapWorkOrderKindToCapabilityTask,
   parseWorkerResult,
   READ_ONLY_WORKER_TOOLS,
+  WorkerResultParseError,
   WRITE_WORKER_TOOLS,
 } from '../work-order.js'
 
@@ -123,21 +124,27 @@ describe('work-order contract', () => {
     assert.equal(result.artifacts[0]!.kind, 'note')
   })
 
-  it('reports schema errors from the WorkerResult candidate, not incidental JSON', () => {
-    // parseWorkerResult no longer throws on schema errors — it returns a blocked
-    // result with the diagnostic error details, allowing the coordinator to surface
-    // the failure without crashing the retry chain.
-    const result = parseWorkerResult(`{"note":"incidental"}\n{
+  it('throws WorkerResultParseError when candidates exist but none validates (repair loop must fire)', () => {
+    // parseWorkerResult THROWS on all-candidates-failed — swallowing this into a
+    // blocked return bypassed the caller's catch-driven repair loop entirely
+    // (session 2c1186f5: a complete scout report was discarded over one syntax
+    // error because the repair re-ask never ran).
+    assert.throws(
+      () => parseWorkerResult(`{"note":"incidental"}\n{
   "workOrderId": "wo_1",
   "status": "done",
   "summary": "Invalid result status"
-}`, 'wo_1')
-    assert.equal(result.status, 'blocked')
-    // The diagnostic includes errors from ALL candidates; the important one
-    // (invalid enum value "done") should be present somewhere in the output.
-    const diag = result.artifacts[0]!.content as string
-    assert.ok(diag.includes('done') || diag.includes('invalid_enum_value'),
-      `expected blocked result to mention the "done" status error. Got: ${diag}`)
+}`, 'wo_1'),
+      (error: unknown) => {
+        assert.ok(error instanceof WorkerResultParseError)
+        assert.ok(error.candidateCount >= 2)
+        // The diagnostic includes errors from ALL candidates; the important one
+        // (invalid enum value "done") should be present somewhere.
+        assert.ok(error.message.includes('done') || error.message.includes('invalid_enum_value')
+          || error.message.includes('Invalid'), `expected error to mention the "done" status error. Got: ${error.message}`)
+        return true
+      },
+    )
   })
 
   it('auto-fixes wrong workOrderId to expected one (fault tolerance for cheap models)', () => {

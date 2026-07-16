@@ -127,6 +127,11 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
     'Anthropic-compatible thinking format',
     'Reasoning effort via reasoning_effort parameter',
   ]),
+  longcat: buildEntry('longcat', 'LongCat (Meituan)', WELL_KNOWN_DEFAULTS['longcat']!, [
+    'API supports only model/messages/stream/max_tokens/temperature/top_p — no response_format',
+    'Implicit server-side exact-prefix cache, cache hits free (official pricing)',
+    'JSON repair must run as plain-text re-ask (no json-mode)',
+  ]),
 }
 
 // ─── Lookup Functions ────────────────────────────────────────

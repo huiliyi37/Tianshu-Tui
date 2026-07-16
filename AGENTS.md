@@ -116,8 +116,8 @@ DeepSeek · GLM · MiMo · MiniMax · SiliconFlow · Codex (OAuth) · LongCat；
 - 找"某个 agent 说了什么" → `~/.rivet/sessions/<slug>/<id>.jsonl`
 - 找"worker 用了什么模型" → `~/.rivet/sessions/<slug>/worker-<id>.jsonl`（看 `model_switch` 行）或同级 `.meta.json` 的 `model` 字段
 - 找"项目级知识/记忆" → `<cwd>/.rivet/knowledge/memory.jsonl`
-- worker 会话 ID 格式：`worker-<uuid>`，与主会话共享同一目录
-- worker artifact 目录格式：`<cwd>/.rivet/artifacts/worker-${order.id.replace(/:/g, '-')}/`
+- worker 会话 ID 格式：`worker-<orderId>-<派发nonce>`（如 `worker-batch-0-x7f3a`），与主会话共享同一目录。nonce 每次派发新生成（`deriveWorkerSessionId`，`work-order.ts`）——batch 序号型 order id 跨多轮委派复用，nonce 保证每次派发独立 JSONL/artifact；同一派发内的 retry 复用同一 nonce。resume 查找不受影响（按 order id 走 `~/.rivet/subagents/<orderId>.session.jsonl`）
+- worker artifact 目录格式：`<cwd>/.rivet/artifacts/<workerSessionId>/`（同上 helper 派生，与会话 ID 一致）
 - 主会话 `ArtifactStore` 通过 `addFallbackSession(workerSessionId)` 读取 worker artifact，不拷贝文件
 - 可通过 `RIVET_SESSION_DIR` 环境变量覆盖默认目录
 

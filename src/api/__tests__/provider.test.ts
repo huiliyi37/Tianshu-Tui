@@ -55,3 +55,14 @@ describe('GLM provider implicit prefix cache', () => {
     })
   })
 })
+
+describe('LongCat provider explicit defaults (W4 — no implicit DEFAULT fallback)', () => {
+  it('resolves longcat with response_format disabled — worker repair must run as plain-text re-ask', () => {
+    const capabilities = resolveCapabilities('longcat')
+    assert.equal(capabilities.supportsResponseFormat, false, 'LongCat API has no response_format — json-mode repair unusable')
+    assert.equal(capabilities.supportsCacheControl, false, 'no cache_control breakpoints — implicit server-side prefix caching')
+    assert.ok(capabilities.stripParams.includes('cache_control'))
+    assert.equal(capabilities.prefixCacheStrategy, 'deepseek-native')
+    assert.ok(capabilities.mapUsage, 'must read cached_tokens for free cache hits')
+  })
+})

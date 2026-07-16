@@ -94,6 +94,22 @@ export function clampWorkerMaxTurns(runtimeDefault: number, budgetMaxTurns: numb
   return Math.min(runtimeDefault, budgetMaxTurns)
 }
 
+/**
+ * Single derivation point for a worker's runtime session id (conversation
+ * JSONL under ~/.rivet/sessions/<slug>/ AND artifact dir under
+ * .rivet/artifacts/). Batch order ids (`batch:0`) are intentionally stable
+ * across delegation runs (dependencies/resume/claims key off them), so
+ * without a per-dispatch nonce every run of the session appends to the SAME
+ * worker-batch-0.jsonl — cumulative context, stale artifacts (session
+ * 2c1186f5). The coordinator mints a nonce per dispatch; both the worker's
+ * AgentLoop session and the coordinator's artifact fallback registration
+ * must derive through here so they stay in sync.
+ */
+export function deriveWorkerSessionId(orderId: string, dispatchNonce?: string): string {
+  const base = `worker-${orderId.replace(/:/g, '-')}`
+  return dispatchNonce ? `${base}-${dispatchNonce}` : base
+}
+
 export const workOrderSchema = z.object({
   id: z.string().min(1),
   parentTurnId: z.string().min(1),
@@ -544,6 +560,23 @@ function parseWorkerResultObject(parsed: unknown, expectedWorkOrderId: string): 
   return normalizeWorkerResult(ingested)
 }
 
+/** Thrown when JSON candidates exist in the worker output but none parses into
+ *  a schema-valid WorkerResult. MUST be thrown (not swallowed into a blocked
+ *  result) so the caller's catch-driven repair loop fires — a single malformed
+ *  character in an otherwise complete report is recoverable with one cheap
+ *  in-session repair re-ask (worker context is prefix-cached). See session
+ *  2c1186f5: a 10.9k-char scout report was discarded because the terminal
+ *  blocked-return bypassed the repair loop entirely. */
+export class WorkerResultParseError extends Error {
+  constructor(
+    readonly candidateCount: number,
+    readonly parseErrors: readonly string[],
+  ) {
+    super(`JSON candidates found (${candidateCount}) but none parseable. Errors: ${parseErrors.join(' | ')}`.slice(0, 500))
+    this.name = 'WorkerResultParseError'
+  }
+}
+
 export function parseWorkerResult(text: string, expectedWorkOrderId: string): WorkerResult {
   // extractJsonCandidates throws when truly no JSON is found — let it propagate
   // so the caller's repair loop can trigger a retry with the repair prompt.
@@ -567,17 +600,72 @@ export function parseWorkerResult(text: string, expectedWorkOrderId: string): Wo
     }
   }
 
-  // All JSON candidates failed to parse or validate. Return a blocked result
-  // with diagnostic details so the coordinator can see what went wrong, instead
-  // of throwing and triggering yet another retry with the same broken prompt.
-  // The caller's repair loop already handles retries; this is the terminal case.
-  return buildBlockedWorkerResult(
-    { id: expectedWorkOrderId } as WorkOrder,
-    `JSON candidates found (${candidates.length}) but none parseable. Errors: ${errors.join(' | ')}`.slice(0, 500),
-  )
+  // All JSON candidates failed to parse or validate. Throw so the caller's
+  // repair loop fires (repair prompt / json-mode re-ask). Terminal handling
+  // (salvage → blocked) is the caller's responsibility after retries exhaust.
+  throw new WorkerResultParseError(candidates.length, errors)
 }
 
-export function buildBlockedWorkerResult(order: WorkOrder, reason: string): WorkerResult {
+/** Field-level salvage — the terminal tier between "repair retries exhausted"
+ *  and an empty blocked result. Scans all JSON candidates for independently
+ *  parseable finding objects and a summary string, and rebuilds a degraded but
+ *  usable WorkerResult (status stays 'blocked', evidenceStatus 'unverified')
+ *  so the primary keeps the scout's recoverable findings instead of losing the
+ *  entire report to one syntax error. Returns null when nothing is salvageable. */
+export function salvageWorkerResult(text: string, expectedWorkOrderId: string): WorkerResult | null {
+  let candidates: string[]
+  try {
+    candidates = extractJsonCandidates(text)
+  } catch {
+    return null
+  }
+
+  const findings: z.infer<typeof workerFindingSchema>[] = []
+  const seenClaims = new Set<string>()
+  for (const candidate of candidates) {
+    let parsed: unknown
+    try {
+      parsed = parseJsonCandidate(candidate)
+    } catch {
+      continue
+    }
+    const finding = workerFindingSchema.safeParse(parsed)
+    if (finding.success && !seenClaims.has(finding.data.claim)) {
+      seenClaims.add(finding.data.claim)
+      findings.push(finding.data)
+    }
+  }
+  if (findings.length === 0) return null
+
+  const summaryMatch = text.match(/"summary"\s*:\s*"((?:\\.|[^"\\])*)"/)
+  let extractedSummary = ''
+  if (summaryMatch?.[1]) {
+    try {
+      extractedSummary = JSON.parse(`"${summaryMatch[1]}"`) as string
+    } catch {
+      extractedSummary = summaryMatch[1]
+    }
+  }
+
+  return {
+    workOrderId: expectedWorkOrderId,
+    status: 'blocked',
+    summary: `Worker report JSON was malformed; salvaged ${findings.length}/${candidates.length} candidate(s) as findings.${extractedSummary ? ` Worker's own summary: ${extractedSummary.slice(0, 300)}` : ''}`,
+    findings,
+    artifacts: [{
+      kind: 'note',
+      title: 'Parse-salvaged worker report',
+      content: `Result contract failed but individual findings were recovered. Treat findings as unverified leads — the full report did not pass schema validation.`,
+    }],
+    changedFiles: [],
+    risks: [`parse-salvaged: ${findings.length} finding(s) recovered from a malformed report — verify before trusting`],
+    nextActions: ['Weigh salvaged findings as unverified leads; re-dispatch with resume if full fidelity is needed'],
+    evidenceStatus: 'unverified',
+    failureReason: 'json_parse',
+  }
+}
+
+export function buildBlockedWorkerResult(order: WorkOrder, reason: string, failureReason?: WorkerFailureReason): WorkerResult {
   return {
     workOrderId: order.id,
     status: 'blocked',
@@ -592,5 +680,6 @@ export function buildBlockedWorkerResult(order: WorkOrder, reason: string): Work
     risks: ['Worker did not return schema-valid JSON'],
     nextActions: ['Primary should continue without trusting this worker result'],
     evidenceStatus: 'blocked',
+    ...(failureReason ? { failureReason } : {}),
   }
 }

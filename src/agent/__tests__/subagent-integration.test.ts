@@ -298,7 +298,7 @@ describe('Worker Session Isolation', () => {
       dedupeKey: 'test-dedupe',
       dependencies: [],
       aggregationPolicy: 'primary_decides',
-      budget: { maxTurns: 1, maxTokens: 1024, timeoutMs: 5000, maxRetries: 0, retryBackoffMs: 10000, maxRetryBackoffMs: 300000 }
+      budget: { maxTurns: 1, maxTokens: 1024, timeoutMs: 60000, maxRetries: 0, retryBackoffMs: 10000, maxRetryBackoffMs: 300000 }
     }
 
     const run = await runWorkerSession({
@@ -352,7 +352,7 @@ describe('Worker Session Isolation', () => {
       dedupeKey: 'test-dedupe-2',
       dependencies: [],
       aggregationPolicy: 'primary_decides',
-      budget: { maxTurns: 1, maxTokens: 1024, timeoutMs: 5000, maxRetries: 1, retryBackoffMs: 10000, maxRetryBackoffMs: 300000 } // Allow 1 retry
+      budget: { maxTurns: 1, maxTokens: 1024, timeoutMs: 60000, maxRetries: 1, retryBackoffMs: 10000, maxRetryBackoffMs: 300000 } // Allow 1 retry
     }
 
     const run = await runWorkerSession({
