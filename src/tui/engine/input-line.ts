@@ -65,7 +65,7 @@ try {
 
 const GRAPHEME_SEGMENTER = graphemeSegmenter
 
-import stringWidth from 'string-width'
+import { ambiguousWideEnabled, displayWidth } from '../width.js'
 
 /**
  * Grapheme 边界缓存：Intl.Segmenter 对整串分段是 O(n)，而 prevGrapheme/
@@ -98,71 +98,88 @@ function graphemeBoundaries(value: string): number[] {
   return bounds
 }
 
-/**
- * 水平视窗：当光标行的内容部分超过可用宽度时，以光标位置为中心截取可见窗口。
- * 前缀（`❯ ` 或 `  `）始终保留，截断只发生在内容部分。
- *
- * @param prefix 固定前缀（如 `❯ `），始终完整保留
- * @param beforeCursor 光标前的内容文本
- * @param afterCursor 光标后含 `█` 的文本（`█${rest}`）
- * @param maxCols 该行的最大显示列数（含前缀）
- */
-function hscrollCursorLine(
+interface VisualLine {
+  text: string
+  cursor: boolean
+}
+
+function inputDisplayWidth(text: string, ambiguousAsWide: boolean): number {
+  return displayWidth(text, { ambiguousAsWide })
+}
+
+function pushWrappedSegment(
+  out: VisualLine[],
+  segment: string,
   prefix: string,
-  beforeCursor: string,
-  afterCursor: string,
-  maxCols: number,
-): string {
-  const prefixWidth = stringWidth(prefix)
-  const beforeW = stringWidth(beforeCursor)
-  const afterW = stringWidth(afterCursor) // includes █
-  const contentW = beforeW + afterW
-  const available = maxCols - prefixWidth
-  if (contentW <= available) return prefix + beforeCursor + afterCursor
+  maxContentWidth: number,
+  cursorOffset: number | null,
+  ambiguousAsWide: boolean,
+): void {
+  const chars = Array.from(segment)
+  let current = ''
+  let currentWidth = 0
+  let currentHasCursor = false
+  let offset = 0
 
-  const max = Math.max(3, available)
-  const reserveLeft = 1 // `…` marker
-  const reserveRight = 1
-  const usable = max - reserveLeft - reserveRight
-  if (usable < 1) return prefix + beforeCursor.slice(-max) // extreme fallback
-
-  // 以光标为中心分配左右预算
-  let leftBudget = Math.floor(usable / 2)
-  let rightBudget = usable - leftBudget
-
-  if (beforeW < leftBudget) {
-    rightBudget += leftBudget - beforeW
-    leftBudget = beforeW
-  }
-  if (afterW < rightBudget) {
-    leftBudget += rightBudget - afterW
-    rightBudget = afterW
+  const flush = (): void => {
+    out.push({ text: `${prefix}${current}`, cursor: currentHasCursor })
+    current = ''
+    currentWidth = 0
+    currentHasCursor = false
   }
 
-  // 从光标向左收集字符
-  const leftChars: string[] = []
-  let leftW = 0
-  for (const ch of [...beforeCursor].reverse()) {
-    const cw = stringWidth(ch)
-    if (leftW + cw > leftBudget) break
-    leftChars.unshift(ch)
-    leftW += cw
+  for (const ch of chars) {
+    if (cursorOffset !== null && offset === cursorOffset) {
+      const markerWidth = inputDisplayWidth('█', ambiguousAsWide)
+      if (currentWidth > 0 && currentWidth + markerWidth > maxContentWidth) flush()
+      current += '█'
+      currentWidth += markerWidth
+      currentHasCursor = true
+    }
+
+    const chWidth = Math.max(1, inputDisplayWidth(ch, ambiguousAsWide))
+    if (currentWidth > 0 && currentWidth + chWidth > maxContentWidth) flush()
+    current += ch
+    currentWidth += chWidth
+    offset += ch.length
   }
 
-  // 从光标向右收集字符（afterCursor 含 █ + rest）
-  const rightChars: string[] = []
-  let rightW = 0
-  for (const ch of afterCursor) {
-    const cw = stringWidth(ch)
-    if (rightW + cw > rightBudget + reserveRight) break
-    rightChars.push(ch)
-    rightW += cw
+  if (cursorOffset !== null && cursorOffset === segment.length) {
+    const markerWidth = inputDisplayWidth('█', ambiguousAsWide)
+    if (currentWidth > 0 && currentWidth + markerWidth > maxContentWidth) flush()
+    current += '█'
+    currentWidth += markerWidth
+    currentHasCursor = true
   }
 
-  const leftEllipsis = leftW < beforeW ? '…' : ''
-  const rightEllipsis = rightW < afterW ? '…' : ''
+  if (current.length > 0 || currentHasCursor || segment.length === 0) flush()
+}
 
-  return prefix + leftEllipsis + leftChars.join('') + rightChars.join('') + rightEllipsis
+function wrapInputLines(value: string, cursor: number, maxWidth: number): { lines: string[]; cursorLine: number } {
+  const ambiguousAsWide = ambiguousWideEnabled()
+  const visual: VisualLine[] = []
+  const logicalLines = value.split('\n')
+  const prefixWidth = inputDisplayWidth('❯ ', ambiguousAsWide)
+  const maxContentWidth = Math.max(1, maxWidth - prefixWidth)
+  let cursorLine = 0
+  let absoluteOffset = 0
+
+  for (let lineIndex = 0; lineIndex < logicalLines.length; lineIndex++) {
+    const logicalLine = logicalLines[lineIndex]!
+    const lineStart = absoluteOffset
+    const lineEnd = lineStart + logicalLine.length
+    const cursorInLine = cursor >= lineStart && cursor <= lineEnd
+    const prefix = cursorInLine ? '❯ ' : '  '
+    const beforeCount = visual.length
+    pushWrappedSegment(visual, logicalLine, prefix, maxContentWidth, cursorInLine ? cursor - lineStart : null, ambiguousAsWide)
+    if (cursorInLine) {
+      const found = visual.findIndex((line, idx) => idx >= beforeCount && line.cursor)
+      cursorLine = found >= 0 ? found : beforeCount
+    }
+    absoluteOffset = lineEnd + 1
+  }
+
+  return { lines: visual.map(line => line.text), cursorLine }
 }
 
 /** 在升序边界数组中找严格小于 cursor 的最大下标（光标左侧最近边界）。二分 O(log n)。 */
@@ -272,8 +289,8 @@ export class InputLine {
    * - 空值时显示 placeholder（首行）
    * - 光标行以 `❯ ` 前缀标识（高亮行），其余行缩进对齐
    * - 光标位置以 `█` 标记
-   * - 当 maxWidth 给出时，对光标行做水平视窗：内容超宽时以光标为中心截取，
-   *   保证光标位置（正在输入的字符）始终可见，而非从行首截断导致行尾不可见。
+   * - 当 maxWidth 给出时，长逻辑行按显示宽度软换行，避免前文被水平视窗遮盖。
+   *   maxLines 仍按光标所在视觉行裁剪，保证正在编辑的位置始终可见。
    */
   displayLines(options: InputLineDisplayOptions = {}): string[] {
     if (!this._value) {
@@ -283,14 +300,18 @@ export class InputLine {
     const cursorLine = before.split('\n').length - 1
     const cursorCol = before.length - (before.lastIndexOf('\n') + 1)
 
+    if (options.maxWidth !== undefined) {
+      const wrapped = wrapInputLines(this._value, this._cursor, options.maxWidth)
+      return viewportAroundCursor(wrapped.lines, wrapped.cursorLine, options.maxLines)
+    }
+
     const lines = this._value.split('\n').map((line, i) => {
       const isCursorLine = i === cursorLine
       const prefix = isCursorLine ? '❯ ' : '  '
       if (!isCursorLine) return `${prefix}${line}`
       const beforeCursor = line.slice(0, cursorCol)
       const afterCursor = `█${line.slice(cursorCol)}`
-      if (options.maxWidth === undefined) return `${prefix}${beforeCursor}${afterCursor}`
-      return hscrollCursorLine(prefix, beforeCursor, afterCursor, options.maxWidth)
+      return `${prefix}${beforeCursor}${afterCursor}`
     })
     return viewportAroundCursor(lines, cursorLine, options.maxLines)
   }
@@ -355,8 +376,12 @@ export class InputLine {
   /**
    * 处理按键。返回处理后的文本值（如果需要渲染）。
    */
-  handleKey(name: string, char: string, ctrl: boolean, meta: boolean): InputLineEvent | null {
+  handleKey(name: string, char: string, ctrl: boolean, meta: boolean, shift = false): InputLineEvent | null {
     // ── 全局键 ─────────────────────────────────────────────────
+    if (name === 'return' && shift) {
+      return this.insertChar('\n')
+    }
+
     if (name === 'return') {
       // 多行输入：`\` + Enter 续行（去掉尾部反斜杠，插入换行）
       if (this._value.slice(0, this._cursor).endsWith('\\')) {

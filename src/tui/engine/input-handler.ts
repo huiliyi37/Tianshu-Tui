@@ -467,6 +467,13 @@ export class InputHandler {
     // 直接映射
     if (ANSI_ESCAPE_MAP[body]) return ANSI_ESCAPE_MAP[body]!
 
+    // Kitty / xterm modifyOtherKeys: Shift+Enter can arrive as \x1B[13;2u.
+    const modifyOtherKeysMatch = body.match(/^\[(\d+);(\d+)u$/)
+    if (modifyOtherKeysMatch) {
+      const code = Number(modifyOtherKeysMatch[1])
+      if (code === 13) return 'return'
+    }
+
     // 处理带修饰键的序列（如 \x1B[1;5A = Ctrl+Up）
     const modMatch = body.match(/^\[(\d+);(\d+)([A-HF~])$/)
     if (modMatch) {

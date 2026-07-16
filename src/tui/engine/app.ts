@@ -924,7 +924,7 @@ export class TuiApp {
           return
         }
         // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
-        if (key.name === 'return') {
+        if (key.name === 'return' && !key.shift) {
           // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
           // 若 ↑↓ 选中了命令，且选中命令名比当前输入长，则提交选中命令名。
           // 长度比较避免用户已输入完整命令+参数（如 /team max plan.md）时被截断。
