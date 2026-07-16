@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AgentLoop } from '../loop.js'
-import { buildRuntimeSnapshot, createToolExecutionController, createSidePathUsageRecorder, createTurnStreamController } from '../loop-factory.js'
+import { buildRuntimeSnapshot, createToolExecutionController, createSidePathUsageRecorder, createReclaimDecisionRecorder, createTurnStreamController } from '../loop-factory.js'
 import { TurnCacheObservability } from '../cache-log-observability.js'
 
 /**
@@ -179,6 +179,75 @@ test('createSidePathUsageRecorder skips empty usage (no totals pollution, no log
 
   createSidePathUsageRecorder(self)('llm-speculation', {})
   assert.equal(booked.length, 0)
+})
+
+/**
+ * Reclaim-decision telemetry (plan task 7): every gate decision — committed
+ * or rejected — emits a structured `event:'reclaim_decision'` line so
+ * "compressed but reclaimed nothing" is visible offline.
+ */
+test('createReclaimDecisionRecorder appends a reclaim_decision cache-log line', async () => {
+  const { mkdtempSync, readFileSync, existsSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+
+  const tmp = mkdtempSync(join(tmpdir(), 'reclaim-decision-'))
+  const prevEnv = process.env.RIVET_SESSION_DIR
+  process.env.RIVET_SESSION_DIR = tmp
+  try {
+    const self = {
+      cwd: '/work',
+      session: { getTurnCount: () => 12 },
+      config: { sessionId: 'test-reclaim' },
+    } as unknown as AgentLoop
+
+    const record = createReclaimDecisionRecorder(self)
+    // A rejected candidate (below reclaim floor)
+    record({
+      beforeTokens: 228_000,
+      afterTokens: 227_000,
+      reclaimedTokens: 1_000,
+      reclaimRatio: 0.0044,
+      changed: true,
+      action: 'micro',
+      commit: false,
+      reason: 'below-reclaim-floor',
+      force: false,
+      windowBand: 'medium',
+      billing: 'per-token',
+      cache: 'exact-prefix',
+    })
+
+    const logPath = join(tmp, 'test-reclaim', 'cache-log.jsonl')
+    const deadline = Date.now() + 2_000
+    let line: Record<string, unknown> | undefined
+    while (line === undefined) {
+      if (Date.now() > deadline) throw new Error('cache-log line never appeared')
+      if (existsSync(logPath)) {
+        const content = readFileSync(logPath, 'utf-8').trim()
+        if (content) {
+          try { line = JSON.parse(content) as Record<string, unknown> } catch { /* partial write */ }
+        }
+      }
+      if (line !== undefined) break
+      await new Promise(r => setTimeout(r, 10))
+    }
+    assert.equal(line.event, 'reclaim_decision')
+    assert.equal(line.turn, 12)
+    assert.equal(line.action, 'micro')
+    assert.equal(line.commit, false)
+    assert.equal(line.reason, 'below-reclaim-floor')
+    assert.equal(line.force, false)
+    assert.equal(line.beforeTokens, 228_000)
+    assert.equal(line.afterTokens, 227_000)
+    assert.equal(line.reclaimedTokens, 1_000)
+    assert.equal(line.windowBand, 'medium')
+    assert.equal(line.billing, 'per-token')
+    assert.equal(line.cache, 'exact-prefix')
+  } finally {
+    if (prevEnv === undefined) delete process.env.RIVET_SESSION_DIR
+    else process.env.RIVET_SESSION_DIR = prevEnv
+  }
 })
 
 test('turn cache-log writes measured observability fields once and then omits them', async () => {

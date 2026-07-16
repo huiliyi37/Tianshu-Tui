@@ -102,7 +102,7 @@ import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot, createSidePathUsageRecorder } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot, createSidePathUsageRecorder, createReclaimDecisionRecorder } from "./loop-factory.js";
 import type { TurnStepProducer } from './turn-step-producer.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
@@ -834,6 +834,7 @@ export class AgentLoop {
       recordSummaryUsage: (usage, model) => {
         createSidePathUsageRecorder(this)('compact-summary', usage, model)
       },
+      onReclaimDecision: createReclaimDecisionRecorder(this),
       writeProbe: createWriteEvidenceProbe(this.cwd),
     })
     // 在 AgentLoop 构造时立即设置 prefixOverhead，关闭 UI 启动到 maybeCompact 之间的窗口。

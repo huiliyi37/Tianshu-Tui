@@ -18,6 +18,7 @@ import { getSessionDir } from './session-persist.js'
 import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { computeCompactAttribution } from './compact-attribution.js'
+import type { ReclaimDecisionRecord } from '../compact/reclaim-estimate.js'
 import { isCostInsensitiveProvider } from '../api/cost-model.js'
 import { isSystemReminder } from '../prompt/system-reminder.js'
 import { getReadRefStats, invalidateSessionReadDedup } from '../tools/read-file.js'
@@ -75,6 +76,44 @@ export function createSidePathUsageRecorder(self: AgentLoop): (kind: string, usa
           .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
       }).catch(() => {})
     } catch { /* accounting is best-effort — never break the side path */ }
+  }
+}
+
+/**
+ * Reclaim-decision telemetry sink (plan task 7). Every deterministic candidate
+ * that passes through the reclaim gate — committed or rejected — emits a
+ * structured `event:'reclaim_decision'` line to the cache-log. This makes
+ * "compressed but reclaimed nothing" visible offline instead of masquerading
+ * as a successful compact.
+ *
+ * Best-effort fire-and-forget: observability must never break compaction.
+ */
+export function createReclaimDecisionRecorder(self: AgentLoop): (record: ReclaimDecisionRecord) => void {
+  return (record) => {
+    try {
+      const line = JSON.stringify({
+        event: 'reclaim_decision',
+        t: Date.now(),
+        turn: self.session.getTurnCount(),
+        action: record.action,
+        commit: record.commit,
+        reason: record.reason,
+        force: record.force,
+        windowBand: record.windowBand,
+        billing: record.billing,
+        cache: record.cache,
+        beforeTokens: record.beforeTokens,
+        afterTokens: record.afterTokens,
+        reclaimedTokens: record.reclaimedTokens,
+        reclaimRatio: Number(record.reclaimRatio.toFixed(4)),
+      })
+      const sid = self.config.sessionId ?? 'anon'
+      void import('node:fs/promises').then(fs => {
+        const dir = join(getSessionDir(self.cwd), sid)
+        return fs.mkdir(dir, { recursive: true })
+          .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+      }).catch(() => {})
+    } catch { /* telemetry is best-effort — never break compaction */ }
   }
 }
 
@@ -778,6 +817,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     getCompactionProfile: () => self.config.compactionProfile,
     getProviderName: () => self.config.providerName,
     getQualityThresholds: () => self.config.compact.qualityCompact ?? DEFAULT_QUALITY_COMPACT_THRESHOLDS,
+    onReclaimDecision: createReclaimDecisionRecorder(self),
     injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal) },
     // W1-A3: boundary archive adapter — pure transforms receive only the
     // resulting index→artifactId map; ArtifactStore stays out of micro/stale.
