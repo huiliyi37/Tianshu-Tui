@@ -232,7 +232,7 @@ export const agentSchema = z.object({
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
   autoReasoning: z.boolean().default(true),
   /** 默认星域（auto | tianshu | pojun ...）。新会话的初始星域将由此配置项决定。 */
-  defaultDomain: z.string().default('auto'),
+  defaultDomain: z.string().default('tianquan'),
   /**
    * 重启后一键续跑的兜底模型（可选）。续跑严格沿用会话原模型（前缀缓存亲和）；
    * 仅当原模型不可用且此项配置了可用模型时才切换续跑（UI 明示缓存将重建）。
