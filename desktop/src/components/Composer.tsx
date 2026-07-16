@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { ArrowUp, Mic, Paperclip, Square } from 'lucide-react'
 import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
 import { detectMention, applyMention, formatFileMention, type MentionToken } from '../lib/mention-input'
-import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
+import { detectSlash, filterCommands, EFFORT_LEVELS, type ComposerCommand } from '../lib/composer-commands'
 import { toast } from 'sonner'
-import { loadSendMode, saveSendMode, type SendMode } from '../lib/persist'
+import { loadSendMode, type SendMode } from '../lib/persist'
 import type { ModelEntry, DomainEntry, PlanModeState, AskModeState } from '../runtime/types'
 import { AutonomyMenu } from './AutonomyMenu'
 import type { AutonomyLevel } from '../lib/autonomy'
@@ -187,7 +187,7 @@ export const Composer = memo(function Composer(props: {
   // 当成"提交消息"。用 ref 追踪 compositionstart/end，比 e.nativeEvent.isComposing
   // 更可靠（部分 WebView 下 isComposing 在 keydown 时尚未更新）。
   const composingRef = useRef(false)
-  const [sendMode, setSendMode] = useState<SendMode>(loadSendMode())
+  const [sendMode] = useState<SendMode>(loadSendMode())
   const [suggest, setSuggest] = useState<Suggest | null>(null)
   const [images, setImages] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -879,8 +879,6 @@ export const Composer = memo(function Composer(props: {
             onSetPlanMode={onSetPlanMode}
             askMode={askMode}
             onSetAskMode={onSetAskMode}
-            effort={effort}
-            onSetEffort={onSetEffort}
             onPickImage={() => {
               if (isTauri()) void openNativeFilePicker()
               else fileInputRef.current?.click()
@@ -899,6 +897,7 @@ export const Composer = memo(function Composer(props: {
         )}
         <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
         <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} threadNonEmpty={threadNonEmpty} />
+        <EffortPicker effort={effort} onSetEffort={onSetEffort} disabled={busy} />
         {contextUsage && <ContextRing usage={contextUsage} />}
         {(onSetPlanMode || onSetAskMode) && (
           <button
@@ -911,17 +910,6 @@ export const Composer = memo(function Composer(props: {
           </button>
         )}
         <span className="composer-spacer" />
-        <button
-          className="send-mode-toggle"
-          title={sendMode === 'enter' ? t('sendModeEnter') : t('sendModeShiftEnter')}
-          onClick={() => {
-            const next = sendMode === 'enter' ? 'shift-enter' : 'enter'
-            setSendMode(next)
-            saveSendMode(next)
-          }}
-        >
-          {sendMode === 'enter' ? '↵' : '⇧↵'}
-        </button>
         <button
           className="composer-icon-btn"
           onClick={() => {
@@ -1012,9 +1000,12 @@ function ContextRing({ usage }: { usage: ContextUsage }) {
       <button
         className="ctx-ring-trigger"
         onClick={() => setOpen((o) => !o)}
-        title={pct !== null
-          ? `${t('ctx.title', { used: formatTok(usedTokens), window: formatTok(contextWindow!), pct })}${warn ? t('ctx.compactSuffix') : ''}`
-          : t('ctx.titleTokens', { used: formatTok(usedTokens) })}
+        title={[
+          pct !== null
+            ? `${t('ctx.title', { used: formatTok(usedTokens), window: formatTok(contextWindow!), pct })}${warn ? t('ctx.compactSuffix') : ''}`
+            : t('ctx.titleTokens', { used: formatTok(usedTokens) }),
+          hitRate !== null ? `${t('ctx.rowHitRate')}: ⚡${hitRate}%` : null,
+        ].filter(Boolean).join('\n')}
         aria-label={t('ctx.aria')}
         aria-expanded={open}
       >
@@ -1268,6 +1259,63 @@ function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessio
               ) : (e.meta || e.motto) ? (
                 <span className="model-picker-desc">{e.meta || e.motto}</span>
               ) : null}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Inline reasoning-effort selector in the composer bar. Shows the current
+ *  level (⚡medium); click to open a 6-option dropdown. Effort is a high-freq
+ *  toggle (quick Q&A vs deep reasoning), so it lives beside ModelPicker instead
+ *  of buried in PlusMenu's sub-panel. */
+function EffortPicker({ effort, onSetEffort, disabled }: { effort?: string; onSetEffort?: (e: string) => void; disabled?: boolean }) {
+  const { t } = useTranslation('composer')
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  if (!onSetEffort) return null
+  const current = effort && EFFORT_LEVELS.includes(effort as typeof EFFORT_LEVELS[number]) ? effort : 'auto'
+  const labels = t('plusMenu.effort', { returnObjects: true }) as Record<string, string>
+  const descs = t('plusMenu.effortDesc', { returnObjects: true }) as Record<string, string>
+
+  return (
+    <div className="effort-picker" ref={ref}>
+      <button
+        className="effort-picker-trigger"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        title={t('plusMenu.effortTitle')}
+        aria-label={t('plusMenu.effortTitle')}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span aria-hidden>⚡</span>
+        <span className="effort-picker-label">{labels[current] ?? current}</span>
+      </button>
+      {open && (
+        <div className="effort-picker-menu" role="listbox">
+          {EFFORT_LEVELS.map((level) => (
+            <button
+              key={level}
+              role="option"
+              aria-selected={level === current}
+              className={`effort-picker-item ${level === current ? 'active' : ''}`}
+              onClick={() => { onSetEffort(level); setOpen(false) }}
+            >
+              <span className="effort-picker-name">{labels[level] ?? level}</span>
+              <span className="effort-picker-desc">{descs[level] ?? ''}</span>
             </button>
           ))}
         </div>
