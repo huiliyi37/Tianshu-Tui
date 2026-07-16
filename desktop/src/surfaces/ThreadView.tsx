@@ -1881,6 +1881,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, on
     <MsgBlock
       role={domainName ?? STAR_DOMAINS.tianshu.name}
       roleGlyph={domainGlyph}
+      copyText={block.text}
       onRegenerate={block.kind === 'assistant' && onRegenerate ? () => onRegenerate(block.key) : undefined}
     >
       <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} onFileReveal={onFileReveal} />
@@ -2055,7 +2056,9 @@ function StreamingText({ source }: { source: string }) {
   )
 }
 
-/** MsgBlock — message wrapper with a copy button that appears on hover. */
+/** MsgBlock — message wrapper. Copy button only renders when `copyText` is
+ *  provided (assistant replies) — copies the raw markdown source, not DOM
+ *  textContent, so pasted content is clean. */
 function MsgBlock(props: {
   role?: string
   roleGlyph?: string | 'user' | 'steer'
@@ -2065,20 +2068,20 @@ function MsgBlock(props: {
   canEdit?: boolean
   onEdit?: () => void
   onRegenerate?: () => void
+  /** Raw source text to copy. When omitted, no copy button is rendered. */
+  copyText?: string
 }) {
-  const { role, roleGlyph, isError, className, children, canEdit, onEdit, onRegenerate } = props
+  const { role, roleGlyph, isError, className, children, canEdit, onEdit, onRegenerate, copyText } = props
   const { t } = useTranslation('threadView')
   const [copied, setCopied] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
 
   const copy = useCallback(() => {
-    const text = ref.current?.textContent ?? ''
-    if (!text) return
-    void navigator.clipboard.writeText(text).then(() => {
+    if (!copyText) return
+    void navigator.clipboard.writeText(copyText).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     })
-  }, [])
+  }, [copyText])
 
   const kind = className
     ? ` ${className}`
@@ -2093,41 +2096,44 @@ function MsgBlock(props: {
           <span className="msg-role-label">{role}</span>
         </div>
       )}
-      <div className="msg-body" ref={ref}>
+      <div className="msg-body">
         {children}
       </div>
-      {/* Codex 对标（Wave 3）：消息底部动作行（悬停显现）——复制 / 编辑重发 /
-          重新生成。原浮动角标按钮下移，处理器不变。 */}
-      <div className="msg-action-row" aria-hidden={false}>
-        <button
-          className="msg-action-btn"
-          onClick={copy}
-          aria-label={copied ? t('copied') : t('copy')}
-          title={copied ? t('copied') : t('copy')}
-        >
-          {copied ? '✓' : '⎘'}
-        </button>
-        {canEdit && onEdit && (
-          <button
-            className="msg-action-btn"
-            onClick={onEdit}
-            title={t('block.editTitle')}
-            aria-label={t('block.edit')}
-          >
-            ✎
-          </button>
-        )}
-        {onRegenerate && (
-          <button
-            className="msg-action-btn"
-            onClick={onRegenerate}
-            title={t('block.regenerateTitle')}
-            aria-label={t('block.regenerate')}
-          >
-            ↻
-          </button>
-        )}
-      </div>
+      {/* 消息底部内联动作行（悬停显现）。仅在有动作时渲染。 */}
+      {(copyText || (canEdit && onEdit) || onRegenerate) && (
+        <div className="msg-action-row">
+          {copyText && (
+            <button
+              className="msg-action-btn"
+              onClick={copy}
+              aria-label={copied ? t('copied') : t('copy')}
+              title={copied ? t('copied') : t('copy')}
+            >
+              {copied ? '✓' : '⎘'}
+            </button>
+          )}
+          {canEdit && onEdit && (
+            <button
+              className="msg-action-btn"
+              onClick={onEdit}
+              title={t('block.editTitle')}
+              aria-label={t('block.edit')}
+            >
+              ✎
+            </button>
+          )}
+          {onRegenerate && (
+            <button
+              className="msg-action-btn"
+              onClick={onRegenerate}
+              title={t('block.regenerateTitle')}
+              aria-label={t('block.regenerate')}
+            >
+              ↻
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
