@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { CompactBoundaryCoordinator, type CompactBoundaryDeps } from '../compact-boundary-coordinator.js'
 import type { CompactCircuitBreakerState } from '../../context/types.js'
 import type { OaiMessage } from '../../api/oai-types.js'
+import { deriveCompactionProfile } from '../../compact/compaction-profile.js'
+import type { ReclaimDecisionRecord } from '../../compact/reclaim-estimate.js'
 
 /**
  * C-line: CompactBoundaryCoordinator is the extracted compaction-boundary brain
@@ -155,6 +157,106 @@ describe('CompactBoundaryCoordinator (C-line: extracted, was untested)', () => {
     assert.equal(r.compacted, true)
     assert.equal(r.userMessageConsumed, true)
     assert.equal(calls.lastCompactTurn, 7)
+  })
+})
+
+describe('CompactBoundaryCoordinator reclaim gate (2026-07-16 cost-aware reclaim plan task 3)', () => {
+  // Small-window (1k) fixture so staleRoundThresholds gives preview=1200 /
+  // recentToKeep=4: layout = 2 anchors + 3 stale tool messages + 4 recent.
+  function staleFixture(staleToolChars: number): OaiMessage[] {
+    const anchor = (role: 'user' | 'assistant'): OaiMessage => ({ role, content: 'a'.repeat(200) }) as OaiMessage
+    const tool = (i: number): OaiMessage => ({ role: 'tool', tool_call_id: `read_file_${i}`, content: 't'.repeat(staleToolChars) }) as OaiMessage
+    const recent = (i: number): OaiMessage => ({ role: i % 2 === 0 ? 'user' : 'assistant', content: 'r'.repeat(100) }) as OaiMessage
+    return [anchor('user'), anchor('assistant'), tool(0), tool(1), tool(2), recent(0), recent(1), recent(2), recent(3)]
+  }
+
+  const perTokenExactPrefix = deriveCompactionProfile({ contextWindow: 1_000, billing: 'per-token', cache: 'exact-prefix' })
+
+  function makeGated(opts: { msgs: OaiMessage[]; pendingStale?: boolean; window?: number }) {
+    const decisions: ReclaimDecisionRecord[] = []
+    const harness = makeCoord({
+      getContextWindow: () => opts.window ?? 1_000,
+      getMessages: () => opts.msgs,
+      getCompactionProfile: () => deriveCompactionProfile({
+        contextWindow: opts.window ?? 1_000, billing: 'per-token', cache: 'exact-prefix',
+      }),
+      onReclaimDecision: d => { decisions.push(d) },
+    })
+    if (opts.pendingStale) harness.calls.pendingStaleCompact = true
+    return { ...harness, decisions }
+  }
+
+  it('rejects a low-reclaim stale candidate at turn 0: no replace, pending debt survives', async () => {
+    // Stale tool msgs barely over the 1200-char preview → tiny reclaim per msg,
+    // far below the small-window per-token floor (8192 tokens).
+    const t = makeGated({ msgs: staleFixture(1_300), pendingStale: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.calls.replaceMessages, 0, 'sub-floor rewrite must not commit')
+    assert.equal(t.calls.pendingStaleCompact, true, 'debt is kept for the next boundary, not falsely cleared')
+    const stale = t.decisions.find(d => d.action === 'stale-round')
+    assert.ok(stale, 'a stale-round decision is recorded')
+    assert.equal(stale!.commit, false)
+    assert.equal(stale!.reason, 'below-reclaim-floor')
+  })
+
+  it('commits a high-reclaim stale candidate at turn 0 and clears the pending debt', async () => {
+    // 40k-char stale tool msgs truncated to 1200 → ~9.7k tokens reclaimed each,
+    // well above the 8192 floor.
+    const t = makeGated({ msgs: staleFixture(40_000), pendingStale: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.calls.replaceMessages, 1, 'committed candidate replaces history exactly once')
+    assert.equal(t.calls.pendingStaleCompact, false, 'debt cleared on commit')
+    const stale = t.decisions.find(d => d.action === 'stale-round')
+    assert.equal(stale!.commit, true)
+    assert.equal(stale!.reason, 'reclaim-above-floor')
+    assert.ok(stale!.reclaimedTokens > 8_192)
+  })
+
+  it('heap emergency (force) commits even a sub-floor reclaim on a 1M window', async () => {
+    // One tool message just over the 1M micro preview (200k chars) → ~2.5k token
+    // reclaim, far below the 50k large-window floor — but heap 0.90 is emergency.
+    const msgs: OaiMessage[] = [
+      { role: 'user', content: 'anchor' },
+      { role: 'assistant', content: 'anchor' },
+      ...Array.from({ length: 8 }, (_, i) => (
+        { role: 'tool', tool_call_id: `x_${i}`, content: 'small' } as OaiMessage
+      )),
+      { role: 'tool', tool_call_id: 'read_file_big', content: 'b'.repeat(210_000) } as OaiMessage,
+    ]
+    const t = makeGated({ msgs, window: 1_000_000 })
+    await t.coord.runCompaction(5, { memory: { heapUsedBytes: 90, memoryLimitBytes: 100 } })
+    assert.equal(t.calls.replaceMessages, 1, 'force path is not blocked by the reclaim gate')
+    const micro = t.decisions.find(d => d.action === 'micro')
+    assert.equal(micro!.force, true)
+    assert.equal(micro!.commit, true)
+    assert.equal(micro!.reason, 'forced')
+  })
+
+  it('non-emergency heap pressure at turn 0 is gated: sub-floor candidate does not rewrite', async () => {
+    const msgs: OaiMessage[] = [
+      { role: 'user', content: 'anchor' },
+      { role: 'assistant', content: 'anchor' },
+      ...Array.from({ length: 8 }, (_, i) => (
+        { role: 'tool', tool_call_id: `x_${i}`, content: 'small' } as OaiMessage
+      )),
+      { role: 'tool', tool_call_id: 'read_file_big', content: 'b'.repeat(210_000) } as OaiMessage,
+    ]
+    const t = makeGated({ msgs, window: 1_000_000 })
+    // 0.80 heap: above the 0.75 1M threshold, below the 0.85 emergency band.
+    await t.coord.runCompaction(0, { memory: { heapUsedBytes: 80, memoryLimitBytes: 100 } })
+    assert.equal(t.calls.replaceMessages, 0, 'non-force sub-floor micro must not commit')
+    const micro = t.decisions.find(d => d.action === 'micro')
+    assert.equal(micro!.commit, false)
+    assert.equal(micro!.force, false)
+  })
+
+  it('unchanged stale candidate clears the pending debt instead of retrying forever', async () => {
+    // All stale tool messages under the preview → transform is a no-op. The
+    // debt is unsatisfiable until content changes, so it must not spin.
+    const t = makeGated({ msgs: staleFixture(1_000), pendingStale: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.calls.replaceMessages, 0)
+    assert.equal(t.calls.pendingStaleCompact, false, 'no-op candidate drains the debt')
   })
 })
 
