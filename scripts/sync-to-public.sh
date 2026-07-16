@@ -62,6 +62,7 @@ rsync $RSYNC_FLAGS \
   --exclude='harness-engineering-resume.md' \
   --exclude='deepseek-v4-pro-to-model-team.md' \
   --exclude='codex-cliproxy-account-pool.md' \
+  --exclude='engineering-metrics.md' \
   --exclude='cliproxy-fork-optimization.md' \
   --exclude='ctcl思想.rtf' \
   --exclude='*.rej' \
@@ -102,9 +103,10 @@ rsync $RSYNC_FLAGS \
   --exclude 'node_modules/' \
   "$DEV_DIR/runtime-assets/" "$PUB_DIR/runtime-assets/"
 
-echo "=== 同步: .rivet/knowledge/（排除本地专属记录）==="
+echo "=== 同步: .rivet/knowledge/（排除本地专属记录 + 星域经验数据）==="
 rsync $RSYNC_FLAGS \
   --exclude='debug-windows-cmd-chcp-nul.md' \
+  --exclude='domains/' \
   "$DEV_DIR/.rivet/knowledge/" "$PUB_DIR/.rivet/knowledge/"
 
 echo "=== 同步: 英文 README ==="

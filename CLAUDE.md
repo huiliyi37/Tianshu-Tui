@@ -1,12 +1,14 @@
-# Rivet
+# 天枢 (Tianshu) / Rivet
 
-Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 24+ (`engines` pins 24.1.0) / TypeScript strict / 纯 ANSI 终端 UI（`src/tui/engine/`，零 React/Ink 渲染） / node:test。桌面端 `desktop/` 是独立的 React 应用；`src/tui/command-palette.tsx` 是仅存的 Ink 组件残留（main.ts 只用它的纯函数，待清理）。
+Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 24+ (`engines` pins 24.1.0) / TypeScript strict / 纯 ANSI 终端 UI（`src/tui/engine/`，零 React/Ink 渲染） / node:test。桌面端 `desktop/` 是独立的 Tauri + React 应用，经 `src/server/` sidecar 驱动同一内核。CLI 命令仍为 `rivet`。
+
+顶层索引与运行时排查：[`AGENTS.md`](./AGENTS.md)。架构总览：[`docs/architecture-overview.md`](./docs/architecture-overview.md)。
 
 ## Build & Test
 
 ```bash
 npm install && npm run build
-npm test          # ~820 test files, node:test + node:assert/strict (runner: scripts/run-node-tests.ts)
+npm test          # ~995 test files, node:test + node:assert/strict (runner: scripts/run-node-tests.ts)
 npm run typecheck # tsc --noEmit
 ```
 
@@ -23,7 +25,7 @@ main.ts → AgentLoop (agent/loop.ts)
   │       postTurn                  → turn-completion.ts
   │       postSession               → loop.ts（经 turn-orchestrator 调度）
   │     hooks 由 createDefaultRuntimeHooks() 条件装配（create-runtime-hooks.ts），
-  │       约 37 种（src/agent/hooks/ 有 39 文件），按 deps/开关 gated。默认会话实际激活 ~18+：
+  │       60+ 模块（src/agent/hooks/），按 deps/开关 gated。默认会话实际激活 ~18+：
   │       常驻 8（base 数组无条件）：perception, signal-consumer, kick,
   │               vigor×2(afterPerception+postTool), theta, stigmergy, radio
   │       advisoryBus 恒构造(loop.ts) → 这批默认全开：self-verify、edit-tool-advisory、
@@ -36,12 +38,12 @@ main.ts → AgentLoop (agent/loop.ts)
   ├── AgentSession (messages, usage, turn count)
   ├── EvidenceTracker + FileHistory
   ├── Stores: claim-store, stigmergy-store, playbook-store, trace-store
-  └── Tool dispatch → API (SSE streaming) → TUI (纯 ANSI, src/tui/engine/)
+  └── Tool dispatch → API (SSE streaming) → TUI (纯 ANSI, src/tui/engine/) / Desktop (server SSE)
 ```
 
 > ⚠️ 旧文档写「9 个固定 hook」是误导性简化。真相是条件装配，开关在 `loop-factory.ts:createRuntimeHooksPipeline` 传入的 deps。改 hook 行为前先看 `create-runtime-hooks.ts` 的 gate 条件，不要假设某 hook 一定在跑。
 
-Key modules: `src/agent/` (loop, hooks/, session, sub-agent, coordinator), `src/api/` (client, codex-client, error-classifier), `src/tui/` (app, stream, render-batch, steer-buffer), `src/tools/`, `src/compact/`, `src/context/`, `src/auth/`
+Key modules: `src/agent/` (loop, hooks/, session, coordinator, star-domain), `src/api/`, `src/tui/`, `src/tools/`, `src/prompt/`, `src/compact/`, `src/cache/`, `src/context/`, `src/server/` (desktop sidecar), `src/repo/`, `src/mcp/`, `src/auth/`, `desktop/`
 
 ## Conventions
 

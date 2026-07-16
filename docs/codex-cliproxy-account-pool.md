@@ -3,7 +3,8 @@
 > 运维文档。记录 Rivet 的 `codex` provider 如何经由本地 **cliproxy** 使用一组 ChatGPT
 > OAuth 账号池来跑 GPT-5.5，以及日常维护、排障、踩坑点。
 >
-> 最后核对：2026-06-06。
+> 最后核对：2026-07-15（账号池已换代为 1 个 plus 账号，见 §3.6；「不要重启 cliproxy」
+> 已有例外，见 §4 / §7.5#4）。
 
 ---
 
@@ -64,6 +65,13 @@ ChatGPT 后端 (codex Responses)  → 真正的 GPT-5.5
       "contextWindow": 1000000,
       "maxTokens": 128000,
       "reasoningEffort": "max"        // Rivet 规范最高档；出站时被映射成 xhigh，见 §5.3
+    },
+    {
+      "id": "claude-opus-4-6",        // 2026-07-15 新增：cliproxy 别名服务 gpt-5.6-sol
+      "alias": "gpt-5.6-sol",
+      "contextWindow": 1000000,
+      "maxTokens": 128000,
+      "reasoningEffort": "max"        // xhigh 已实测支持
     }
   ],
   "thinking": "enabled",
@@ -76,6 +84,44 @@ ChatGPT 后端 (codex Responses)  → 真正的 GPT-5.5
 > 所以该文件应保持 **chmod 600**。
 
 <!-- APPEND-MARKER -->
+
+---
+
+## 3.6 账号池更新记录（2026-07-15）—— 旧池全灭，换新号
+
+### 变更摘要
+
+| 项目 | 旧值（§3.5） | 新值 |
+|------|------|------|
+| 账号数量 | 1000 team（edu.aiceo.dev） | **1（plus）** |
+| 来源 | 1000TEAM-sub2api | **本机 codex CLI 登录**（`~/.codex/auth.json` 转换） |
+| 状态 | **全部死亡**（2026-07-15 实测） | 活跃，直连探活 200 |
+
+### 旧池死亡确认（实测，非推测）
+
+refresh_token 闲置约 5 周后全部被服务端吊销，refresh 全部失败：
+
+- original-9：0/9（2 个 `refresh_token_reused` + 7 个 `invalid_refresh_token`）
+- `backup-2026-06-08` 的 dsmo6481：`invalid_refresh_token`
+- edu-1000 池抽样 10 个：`invalid_refresh_token` / `refresh_token_invalidated`，全灭，剩余 248 个未试（同批同来源，无价值）
+
+**所有旧备份已移出 auth-dir**：`~/.cli-proxy-api-graveyard/`（含 5 个原备份目录 + cliproxy 自己写回的 6 个 edu 文件，共 1036 个账号文件）。死号 refresh_token 已吊销，文件无恢复价值，仅为存档。
+
+### 新账号接入流程（codex CLI → cliproxy，实测可行）
+
+1. 本机 codex CLI 完成 OAuth 登录，凭据在 `~/.codex/auth.json` 的 `tokens` 块
+   （`access_token` / `id_token` / `refresh_token` / `account_id`）。
+2. 转成 cliproxy 账号文件写入 auth-dir：`codex-<email>-<plan>.json`，字段同 §3.5
+   （`expired` = access_token 真实 JWT exp，`disabled=false`，`type="codex"`，chmod 600）。
+   plan 从 id_token claims 的 `chatgpt_plan_type` 读。
+3. cliproxy 文件监视器 CREATE 事件自动纳入（若池子经历过大删，需重启，见 §7.5#4）。
+4. 后续 token 刷新由 §9 的 launchd 定时器正常维护（refresh_token 会轮换写回，**注意：
+   codex CLI 自己也会刷新它那份 auth.json——两边共用同一 refresh_token 链，任一方
+   刷新都会使另一方的旧 refresh_token 失效。cliproxy 侧每次刷新会写回新 token，所以
+   以 cliproxy 侧文件为准；若 codex CLI 侧报登录失效，重新 `codex login` 后需重新
+   同步到 cliproxy**）。
+
+当前账号：`codex-donkeys.face.5q+cvz3hmpk0c@icloud.com-plus.json`（plus，token 10 天寿命）。
 
 ---
 
@@ -177,6 +223,8 @@ oauth-model-alias:
   codex:
     - name: gpt-5.5         # 上游真实模型
       alias: claude-opus-4-5   # 对外暴露的名字 ← Rivet 必须用这个
+    - name: gpt-5.6-sol     # 2026-07-15 新增（注意：真名带 -sol 后缀，gpt-5.6 上游不认）
+      alias: claude-opus-4-6
     - name: gpt-5.4-mini
       alias: claude-hiku-4-5
 
@@ -188,8 +236,12 @@ disable-cooling: true       # 全局冷却开关
 max-retry-credentials: 3    # 单次请求最多换 3 个账号重试
 ```
 
-> **绝对不要 `kill` / 重启 cliproxy 进程。** 它支持配置热加载，改完 `config.yaml` 自动生效；
+> **改配置不要重启 cliproxy 进程。** 它支持配置热加载，改完 `config.yaml` 自动生效；
 > 验证改动用 curl 测 API 即可（见 §7）。
+> **例外（2026-07-15 实测）**：大批量增删账号文件后，selector 的内存注册表不会随
+> 热加载/文件事件清掉已消失的账号（幽灵账号仍会被 round-robin 选中 → 401 auth_unavailable），
+> 此时必须重启：`launchctl kickstart -k gui/$(id -u)/com.cli-proxy-api.plus`（launchd 监管，
+> 自动拉起，中断 1-2 秒）。详见 §7.5#4。
 
 ---
 
@@ -204,6 +256,12 @@ deepMerge 不会删除继承来的 oauth 块 → `factory.ts` 仍判定 `auth.ty
 
 deepMerge 把 **`null` 当作「删除该键」**，所以 `"auth": null` 才能真正去掉 oauth，
 让 factory 落到通用 `OpenAIClient`（它会把 `apiKey` 当 Bearer 发出去）。
+
+> **⚠️ 不要再对 codex 跑 `rivet config setup`（2026-07-15 实证）。** 配置向导会按
+> 内置预设重写整个 codex 块，`auth` 被还原成 `{type:'oauth'}` → 又回到 CodexClient
+> 直连链路。此时它去读已废弃的 `~/.rivet/auth/codex.json`（该文件没有 refresh_token），
+> 报错 `No refresh token — re-authenticate`。一旦发生，把 `auth` 重新置 `null` 即可
+> （改 codex 配置请直接编辑 `~/.rivet/config.json`，别走向导）。
 
 ### 5.2 model id 必须是 `claude-opus-4-5`，不能是 `gpt-5.5`
 
@@ -301,6 +359,7 @@ PY
 | 现象 | 含义 / 处理 |
 |------|------|
 | `401 Missing API key` | 本地 key 没带对，或 Rivet 侧 `auth` 没置 null（落到了 CodexClient） |
+| `No refresh token — re-authenticate`（Rivet 侧报错） | 同上：`auth` 不是 null（多因跑过 `rivet config setup codex` 被向导重置），CodexClient 去读废弃的 `~/.rivet/auth/codex.json` → 把 `auth` 置回 null，见 §5.1 |
 | `502 unknown provider for model gpt-5.5` | 请求用了别名 `claude-opus-4-5`，但**账号池里没有可用账号**——cliproxy 把别名解析回真名 `gpt-5.5` 后找不到活账号。日志刷 `auth unavailable, reselected`。→ 补号见 §7.3 / §7.4 |
 | `502 unknown provider for model claude-opus-4-5` | 请求里直接用了真名 `gpt-5.5`（应改用别名），或别名映射配错 |
 | `400 level "max" not supported` | §5.3 的 `max → xhigh` 映射没生效（源码改动丢了 / 没编译） |
@@ -398,6 +457,14 @@ PY
    未来时间它就不刷新，哪怕真实 JWT 已过期 → 发过期 token → 401 → 池子空 → 502。
    所以刷新后 `expired` 必须写**真实 JWT exp**（§7.3 脚本已处理）。token 寿命约 10 天，
    到期需定期刷新 → **已用 launchd 定时器自动化，见 §9**。
+4. **（2026-07-15 新坑）auth-dir 会被递归扫描，且 selector 注册表不随文件删除清账。**
+   - cliproxyapi 扫描 auth-dir 是**递归**的：`backup-*/` 子目录里的 `codex-*.json` 也会
+     被纳入账号池。想彻底移出账号，必须移出 auth-dir 之外（现用 `~/.cli-proxy-api-graveyard/`）。
+   - 选中某个内存中的账号时，cliproxy 会**把它落盘写回** auth-dir（perms 700/600）——
+     删掉的账号文件可能被它自己「复活」。
+   - 大批量账号增删后，selector 的内存注册表仍持有已删除账号（幽灵），热加载和重启前的
+     文件事件都清不掉；表现为请求一直选中死账号 → `401 auth_unavailable`。
+     **必须 `launchctl kickstart -k gui/$(id -u)/com.cli-proxy-api.plus` 重启**才能重建注册表。
 
 ### 7.6 改 Rivet 配置后
 
@@ -480,9 +547,10 @@ rm "$PLIST"
 ### 9.4 注意
 
 - 改频率：编辑 plist 的 `StartCalendarInterval`，然后按 §9.3 重新 bootstrap。
-- 脚本写 `~/.cli-proxy-api/codex-*.json`，是这些文件的**唯一**写入者（cliproxy 只自刷新 kim-*.json，
-  不碰 codex），所以无写竞争；flock 仅防 launchd 运行重叠。
-- 1000 个账号下刷新脚本次约 1000 次探测，建议将定时器间隔从 6h 调至 12h 降低开销。
+- 脚本写 `~/.cli-proxy-api/codex-*.json`，与 cliproxy 的写入行为分工见 §7.5#4（cliproxy 会把
+  选中账号落盘；本脚本是刷新/禁用状态的唯一写入者），flock 仅防 launchd 运行重叠。
+- 当前池子仅 1 个账号（§3.6），每轮探测开销可忽略，6h 间隔无需调整。（历史上 1000 个
+  team 账号时曾建议调至 12h，已随旧池全灭失效。）
 - 这是个人本机运维脚本，不属于 Rivet 仓库构建链路；纳入文档仅为可维护与可复现。
 
 ---
@@ -503,11 +571,13 @@ rm "$PLIST"
 |------|------|
 | `~/.rivet/config.json`（chmod 600） | Rivet 的 `codex` provider（指向 cliproxy）。§3 |
 | `~/.cli-proxy-api/config.yaml` | cliproxy 配置（别名映射 / 路由 / payload）。§4，热加载 |
-| `~/.cli-proxy-api/codex-*.json` | codex OAuth 账号池（每文件一账号）。§7。当前 1000 个 team 账号 |
-| `~/.cli-proxy-api/backup-original-9-20260607/` | 旧 9 账号备份（含 `_manifest.json` 标注）。§3.5 |
+| `~/.cli-proxy-api/codex-*.json` | codex OAuth 账号池（每文件一账号）。§7。**当前 1 个 plus 账号（donkeys…@icloud.com），§3.6** |
+| `~/.codex/auth.json` | codex CLI 的 OAuth 凭据，新账号入池的转换来源。§3.6 |
+| `~/.cli-proxy-api-graveyard/` | **旧账号墓地（auth-dir 之外）**：original-9、edu-1000 等 1036 个死号，refresh_token 均已吊销。§3.6、§7.5#4 |
 | `~/.cli-proxy-api/logs/main.log` `error-*.log` | cliproxy 运行日志 / 单条错误详情。§7.2 |
 | `~/.cli-proxy-api/refresh-codex-tokens.py` | 账号池自动刷新脚本。§9 |
 | `~/Library/LaunchAgents/com.banxia.cliproxy.refresh-codex.plist` | launchd 定时器（每 6h）。§9 |
+| `~/Library/LaunchAgents/com.cli-proxy-api.plus.plist` | cliproxy 主进程 launchd 监管项（重启用 `kickstart -k`）。§7.5#4 |
 | `~/.cli-proxy-api/logs/refresh-codex.log` | 刷新脚本运行日志。§9 |
 | `src/api/openai-client.ts` | `max → xhigh` 出站映射（commit `1e5d517`）。§5.3 |
 

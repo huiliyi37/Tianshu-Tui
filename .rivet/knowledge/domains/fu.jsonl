@@ -1,0 +1,1 @@
+{"id":"de4c85c6a42c99bc","domainId":"fu","kind":"invariant","text":"相关代码集中在 / 目录","evidence":"files=.rivet.md,AGENTS.md,package.json,.rivet/knowledge/manifest.md,docs/analysis/2026-06-01-project-memory-architecture-conflict.md","strength":0.5,"reinforcement":1,"grade":"novice","depositedAt":1784135905782,"halfLifeMs":604800000}

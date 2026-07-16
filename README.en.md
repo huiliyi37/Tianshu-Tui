@@ -182,7 +182,7 @@ Most AI coding agents treat context as a garbage can—they dump everything in u
 ```mermaid
 graph TD
     LLM[Large Language Model] -->|Raw Action / Defect| CVM[Cognitive VM Runtime]
-    CVM -->|30+ Hooks / 5 Phases| Engine[Self-Correction & Mirroring]
+    CVM -->|60+ Hook modules / 5 Phases| Engine[Self-Correction & Mirroring]
     Engine -->|Approved & Safe Action| Tools[Tool System]
     Tools -->|Evidence & Claims| Stigmergy[Stigmergic Memory]
     Stigmergy -->|Pheromones & Trails| LLM
@@ -191,7 +191,7 @@ graph TD
 ### The Three Pillars of Tianshu's Architecture
 
 1. **Cognitive Virtual Machine (CVM)**:
-   A dedicated virtual runtime layer implementing `30+ conditionally-assembled hooks` across `5 runtime phases` (pre-turn, after-perception, post-tool, post-turn, post-session). CVM traps and emulates LLM behavior at runtime, actively correcting alignment drift, attention decay, and loop oscillations without modifying model weights.
+   A dedicated virtual runtime layer implementing `60+` conditionally-assembled hook modules across `5 runtime phases` (pre-turn, after-perception, post-tool, post-turn, post-session; ~18+ active in a default session). CVM traps and emulates LLM behavior at runtime, actively correcting alignment drift, attention decay, and loop oscillations without modifying model weights.
 2. **Stigmergic Memory**:
    Unlike static memory files, Tianshu implements a biology-inspired stigmergic memory system. It leaves behavioral "pheromones" directly mapped onto codebase files that decay naturally over time. The agent gets faster and smarter on files it modifies frequently.
 3. **Prefix-Cache Optimization**:
@@ -201,10 +201,10 @@ graph TD
 
 | Metric | Value |
 |--------|-------|
-| TUI source (TypeScript, excl. tests) | 770 files / ~159k lines |
-| Test code | 922 files / ~152k lines |
+| TUI source (TypeScript, excl. tests) | 825 files / ~173k lines |
+| Test code | 995 files / ~166k lines |
 | Test cases (node:test) | **10,000+**, test : source ≈ **1 : 1** |
-| Type checking | `tsc` strict + `noUncheckedIndexedAccess`, zero errors |
+| Type checking | `tsc` strict + `noUncheckedIndexedAccess` |
 | Prefix-cache hit rate | 95–99% steady state, measured on long sessions |
 
 Agent core logic (multi-turn loops, tool pipelines, context compaction) is notoriously hard to test, and most open-source agents ship with thin coverage. This project maintains a near 1:1 test-to-source ratio, and every incident fix ships with a regression test. Full methodology and reproduction commands: [Engineering Metrics](docs/engineering-metrics.md).
@@ -216,7 +216,7 @@ Agent core logic (multi-turn loops, tool pipelines, context compaction) is notor
 | Dimension | Tianshu | MiMo-Code | Claude Code |
 | :--- | :--- | :--- | :--- |
 | **Core focus** | Cognitive runtime (CVM) | Product experience / ecosystem | Enterprise coding agent |
-| **Runtime hook layer** | 30+ conditionally-assembled hooks × 5 phases | standard agent loop | user-configurable hooks |
+| **Runtime hook layer** | 60+ conditionally-assembled hook modules × 5 phases | standard agent loop | user-configurable hooks |
 | **Prefix-cache tuning** | Deeply tuned for DeepSeek V4 (95–99% steady-state) | provider default | Anthropic prompt caching |
 | **Self-perception** | Continuous cognitive-state vector | — | — |
 | **Cross-session memory** | File-level stigmergic pheromones (auto-decay) | SQLite + MEMORY.md | project memory |

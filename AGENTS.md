@@ -1,19 +1,90 @@
 # 天枢 (Tiānshū) — Architecture Map
 
-> 顶层目录索引。文件级细节用 `repo_map` 按需获取。
+> v2.19.3 · 顶层目录索引 + 能力全景。文件级细节用工具 `repo_map` / `repo_graph` 按需获取。
+> 更深架构说明见 [`docs/architecture-overview.md`](docs/architecture-overview.md)；星图叙事见 [`star.md`](star.md)。
 
-| 目录 | 职责 |
+## 项目定位
+
+天枢是全功能终端编程智能体运行时（CLI 命令仍为 `rivet`）。三大支柱：
+
+1. **认知虚拟机 (CVM)** — `RuntimeHookPipeline` 五阶段条件装配 60+ hook 模块，拦截服从性漂移 / doom loop / 验证债务
+2. **前缀缓存工程** — 冻结 system prompt + 字节稳定 appendix + 边界压缩，DeepSeek V4 长会话稳态命中率 95–99%
+3. **星域 + 多模型编排** — 11 星域认知纪律；worker / council / team / plan 分波执行
+
+表面入口：`src/main.ts` → `bootstrap` → `AgentLoop`；桌面端 `desktop/`（Tauri + React）经 `src/server/` sidecar HTTP/SSE 驱动同一 agent 内核。
+
+## 能力全景（按需查阅）
+
+| 能力面 | 落点 | 要点 |
+|--------|------|------|
+| Agent 主循环 | `src/agent/` | loop / turn 编排 / 证据门禁 / 交付 / 投机解码 |
+| Runtime Hooks | `src/agent/hooks/` + `create-runtime-hooks.ts` | 5 阶段；条件装配，默认会话激活 ~18+ |
+| 工具 | `src/tools/` | kernel ≤26；EXTENDED 层含 office / browser / computer_use |
+| 提示词 | `src/prompt/` | static 冻结锚 + volatile + appendixDelta |
+| 压缩 | `src/compact/` + boundary coordinator | 仅 `turn===0` 重写历史 |
+| 前缀缓存 | `src/cache/` + `api/request-freezer.ts` | advisor / recall / 审计 CLI |
+| 认知上下文 | `src/context/` | claims / stigmergy / ledger / pressure |
+| 星域 | `src/agent/star-domain.ts` | 11 域；`toolWhitelist` 交集过滤器 |
+| 多模型 / Worker | `src/agent/` coordinator + `src/model/` | profiles + adaptive routing |
+| Plan / Team / Council | `src/plan/` + tools | 审批门禁、wave-gate、多席审查 |
+| MCP | `src/mcp/` | stdio / SSE；工具名 `mcp__<id>__<name>` |
+| LSP | `src/lsp/` | 诊断注入 |
+| 仓库索引 | `src/repo/` | Meridian 图 + Physarum 文件访问偏好 |
+| 语义搜索 | `src/search/` | hybrid / embedding / tree-sitter |
+| TUI | `src/tui/engine/` | 纯 ANSI，零 React/Ink 渲染路径 |
+| 桌面端 | `desktop/` | Tauri；经 `src/server/` 调内核 |
+| 无头 / 脚本 | `src/headless.ts` + `rivet -p` | 单次提示 / JSON 输出 |
+| 鉴权 | `src/auth/` | API key + Codex OAuth PKCE |
+| 插件 / Skills | `src/plugins/` · `src/skills/` | 清单加载；`.rivet/skills/*.md` |
+| Cron / 任务 | `src/server/cron-*.ts` · task routes | 桌面 sidecar 调度 |
+
+### 内置星域（11）
+
+天枢 · 破军 · 天府 · 天梁 · 天权 · 天机 · 天璇 · 辅 · 文曲 · 瑶光 · 华盖 — 详见 README「星域系统」与 `docs/stars/`。
+
+### 提供商（预设）
+
+DeepSeek · GLM · MiMo · MiniMax · SiliconFlow · Codex (OAuth) · LongCat；另支持自定义 OpenAI 兼容端点。
+
+## 顶层目录
+
+| 路径 | 职责 |
 |------|------|
-| `src/agent/` | 核心智能体循环、工具流水线、多模型协调、压缩、子智能体、验证、交付门禁 |
-| `src/tools/` | 工具实现（definition + execute）与注册 |
-| `src/api/` | API 客户端层（OpenAI 兼容、Codex OAuth、流式处理） |
-| `src/prompt/` | 系统提示词工程（static / volatile / engine） |
-| `src/tui/` | 终端 UI（纯 ANSI，渲染引擎在 `src/tui/engine/`，零 React/Ink） |
-| `src/compact/` | 上下文压缩策略（修剪、微压缩、阈值） |
-| `src/cache/` | 前缀缓存管理与命中诊断 |
-| `src/repo/` | 代码仓库分析（导入图、持久化索引） |
-| `src/config/` | 配置管理（默认 → ~/.rivet → 项目多层加载） |
+| `src/agent/` | 核心智能体循环、hooks、协调器、子智能体、验证、交付门禁、星域 |
+| `src/tools/` | 工具实现（definition + execute）与默认注册；含 browser-debug / computer-use |
+| `src/api/` | API 客户端（OpenAI 兼容、Anthropic、Codex OAuth、流式、重试、成本模型） |
+| `src/prompt/` | 系统提示词工程（static / volatile / engine / appendix / reminder） |
+| `src/tui/` | 终端 UI（纯 ANSI，`engine/`；SteerBuffer、命令面板、cockpit） |
+| `src/compact/` | 上下文压缩（修剪、微压缩、陈旧轮、语义剪枝） |
+| `src/cache/` | 前缀缓存管理、advisor、命中诊断、审计 CLI |
+| `src/context/` | 认知层（claims、ledger、pressure、antibody、project memory） |
+| `src/repo/` | 仓库分析（Meridian 导入图、Physarum、symbol index） |
+| `src/search/` | 语义 / 混合检索与向量索引 |
+| `src/config/` | 配置（默认 → `~/.rivet` → 项目多层；provider presets） |
 | `src/artifact/` | 大输出持久化 |
+| `src/auth/` | API key / OAuth / token store |
+| `src/mcp/` | MCP 客户端管理、预设、策略 |
+| `src/lsp/` | Language Server 诊断 |
+| `src/model/` | 模型能力卡、任务推断、路由指标 |
+| `src/plan/` | Plan Mode 存储与审批 / 关闭 |
+| `src/memory/` | 统一记忆、观察提取、规则生成 |
+| `src/server/` | 桌面 sidecar HTTP/SSE、会话池、cron、任务路由 |
+| `src/plugins/` | 插件清单与加载 |
+| `src/skills/` | Skill 加载器 |
+| `src/hooks/` | 用户级 hook 注册桥 |
+| `src/bootstrap/` | 启动装配、项目模板 |
+| `src/cli/` | CLI 辅助（如 prompt 版本警告） |
+| `src/commands/` | 斜杠 / CLI 命令加载 |
+| `src/platform/` | 平台路径 / EPERM / Node CLI 解析 |
+| `src/workers/` | CPU worker 池（重计算卸载） |
+| `src/workflows/` | 生态工作流定义 |
+| `src/constellation/` | 星座里程碑与持久化 |
+| `src/benchmark/` | 基准任务与报告 |
+| `src/utils/` | 通用工具（sanitize、pricing、frontmatter） |
+| `desktop/` | Tauri + React 桌面端 |
+| `docs/` | 用户手册、架构、changelog、seed-capsule |
+| `scripts/` | 构建、同步公开仓、缓存验证、测试 runner |
+| `chat-gateway/` · `license-server/` · `teamtask/` · `plugins/` | 附属服务 / 示例插件 |
 
 ## Runtime Data Layout（排查必读）
 
@@ -38,6 +109,8 @@
 | `<cwd>/.rivet/knowledge/memory.jsonl` | 项目持久化知识（跨会话） |
 | `<cwd>/.rivet/playbook.jsonl` | 历史教训回放 |
 | `<cwd>/.rivet/artifacts/` | 大输出持久化（主 session + worker session） |
+| `<cwd>/.rivet/plans/` | Plan Mode 计划文档 |
+| `<cwd>/.rivet/skills/` | 项目级 Skills |
 
 **排查规则**：
 - 找"某个 agent 说了什么" → `~/.rivet/sessions/<slug>/<id>.jsonl`

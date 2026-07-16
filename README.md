@@ -188,7 +188,7 @@ rivet --dangerously-skip-permissions                    # 单次会话 YOLO
 ```mermaid
 graph TD
     LLM[大型语言模型] -->|原始动作 / 缺陷行为| CVM[认知虚拟机 CVM]
-    CVM -->|30+ Hooks / 5 大认知阶段| Engine[自我修正与认知镜映射]
+    CVM -->|60+ Hook 模块 / 5 大认知阶段| Engine[自我修正与认知镜映射]
     Engine -->|被批准的物理动作| Tools[工具系统]
     Tools -->|证据追踪与文件确权| Stigmergy[行为信息素记忆]
     Stigmergy -->|信息素衰减 / 行为印记| LLM
@@ -196,7 +196,7 @@ graph TD
 
 ### 三大核心架构支柱
 
-1. **认知虚拟机 (CVM)** —— 天枢在运行时建立了一个独立的虚拟层，横跨 `5 大运行时阶段`（preTurn 回合前、afterPerception 感知后、postTool 工具后、postTurn 回合后、postSession 会话后），并按需条件装配 `30+ 个生命周期 Hook`。CVM 在不改变模型权重的前提下，主动拦截并纠正大模型的服从性漂移、注意力衰减和重复工具调用的 Doom Loop。
+1. **认知虚拟机 (CVM)** —— 天枢在运行时建立了一个独立的虚拟层，横跨 `5 大运行时阶段`（preTurn 回合前、afterPerception 感知后、postTool 工具后、postTurn 回合后、postSession 会话后），并按需条件装配 `60+` 个生命周期 Hook 模块（默认会话实际激活约 18+）。CVM 在不改变模型权重的前提下，主动拦截并纠正大模型的服从性漂移、注意力衰减和重复工具调用的 Doom Loop。
 2. **生物启发式信息素记忆 (Stigmergy)** —— 区别于静态记忆文件（如 MEMORY.md），天枢基于生物学“化学信息素”机制，将行为足迹和认知标记直接映射在代码文件上，并随时间自动衰减。AI 在修改频繁的文件上会越用越熟。
 3. **前缀缓存优化** —— DeepSeek V4 对缓存未命中按命中的至多 50 倍计费。天枢的提示词引擎围绕前缀缓存友好（冰镜三区缓存锚点、冻结系统提示词等）重构，长会话稳态命中率 **95–99%**，显著降低 API 成本。
 
@@ -204,10 +204,10 @@ graph TD
 
 | 指标 | 数值 |
 |------|------|
-| TUI 源码（TypeScript，不含测试） | 770 文件 / 约 16 万行 |
-| 测试代码 | 922 文件 / 约 15.2 万行 |
+| TUI 源码（TypeScript，不含测试） | 825 文件 / 约 17.3 万行 |
+| 测试代码 | 995 文件 / 约 16.6 万行 |
 | 测试用例（node:test） | **10,000+**，测试 : 源码 ≈ **1 : 1** |
-| 类型检查 | `tsc` strict + `noUncheckedIndexedAccess`，零错误 |
+| 类型检查 | `tsc` strict + `noUncheckedIndexedAccess` |
 | 前缀缓存命中率 | 长会话稳态实测 95–99% |
 
 编码 agent 的核心逻辑（多轮循环、工具流水线、上下文压缩）以难测著称，开源 agent 项目普遍测试覆盖很薄——本项目坚持测试与源码等量、事故修复必带回归测试。完整统计口径与复现命令见 [工程质量指标](docs/engineering-metrics.md)。

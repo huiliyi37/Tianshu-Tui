@@ -1,184 +1,157 @@
-# Rivet Architecture Overview
+# 天枢 Architecture Overview
 
-> v2.9.0 · TUI 2.x · Node.js 22+ / TypeScript strict / Ink 6 / node:test / ESM
+> v2.19.3 · Node.js 24+ / TypeScript strict / 纯 ANSI TUI（`src/tui/engine/`）+ Tauri 桌面端 / node:test / ESM
+>
+> 开发代号曾用 **Rivet**；CLI 命令仍为 `rivet`。Agent 导航索引见根目录 [`AGENTS.md`](../AGENTS.md)。
 
 ## 项目定位
 
-Rivet 是一个针对 DeepSeek V4 prefix cache 优化的终端编码 Agent。核心差异化：通过 prompt 分层（static anchor + volatile payload）最大化 prefix cache hit rate，同时通过 9 个运行时 hook 实现自调节（StarFlow/TUI 2.x）。
+天枢是针对 DeepSeek V4 前缀缓存深度优化的全功能编程智能体运行时。差异化不在「多几个工具」，而在：
 
-## 五层架构
+- **CVM（认知虚拟机）** — 模型动作经五阶段 RuntimeHookPipeline 过滤与纠正，再落到物理工具
+- **Prefix-cache-first** — 冻结前缀、字节稳定 appendix、仅用户边界压缩，把命中率做成一级成本指标
+- **星域纪律** — 11 套可切换认知姿态（提示词 / 决策阈值 / 勇气阈值），而非角色扮演皮肤
+
+## 六层架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Layer 0: TUI (Ink 6 React)                                         │
-│  app.tsx → StreamOutput, ToolCard, GlanceBar, InputBar, Cockpit     │
-│  RenderBatcher, SteerBuffer, ActivityStatus, SurfaceRouter          │
+│  Layer 0: Surfaces                                                  │
+│  TUI: src/tui/engine/（纯 ANSI） · Desktop: desktop/（Tauri/React） │
+│  Headless: rivet -p · Sidecar HTTP/SSE: src/server/                 │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Layer 1: Agent Loop (src/agent/)                                   │
-│  loop.ts → TurnHarness → ToolExecutionController                   │
-│           → TurnStreamController → TurnCompletionController         │
-│           → CompactionController → ContextInjectionController       │
-│  RuntimeHookPipeline (9 hooks, 5 phases)                            │
-│  Coordinator + WorkerSession (multi-model delegation)               │
+│  loop.ts → turn orchestration → tool-execution → completion         │
+│  RuntimeHookPipeline（5 phases，条件装配 60+ hook 模块）            │
+│  Coordinator / WorkerSession / Plan·Team·Council / DeliveryGate     │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Layer 2: Context & Cognition (src/context/)                        │
-│  CognitiveLedger, TaskContract, ClaimStore, Stigmergy               │
-│  PressureMonitor, FsWatcher, SessionMemory, ProjectMemory           │
-│  AnchorRegistry, Antibody, Dead-end Rules                           │
+│  Layer 2: Context & Cognition (src/context/ + memory/)              │
+│  CognitiveLedger · ClaimStore · Stigmergy · PressureMonitor         │
+│  TaskContract · Antibody · ProjectMemory · UnifiedMemory            │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Layer 3: Prompt Engineering (src/prompt/)                          │
-│  PromptEngine: static.ts (anchor) + volatile.ts (dynamic payload)  │
-│  AnchorGraph, AnchorInvariants, Fingerprint (cache stability)       │
-│  FieldHabituation (anti-prompt-fatigue)                             │
+│  Layer 3: Prompt & Compact (src/prompt/ + compact/ + cache/)        │
+│  PromptEngine: static(frozen) + volatile + appendixDelta             │
+│  Boundary compaction · CacheAdvisor · Request freezer               │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Layer 4: API & Model (src/api/ + src/model/)                       │
-│  openai-client.ts, anthropic-client.ts, codex-client.ts             │
-│  StreamClient (SSE), RetryEngine, ErrorClassifier                   │
-│  ProviderRegistry, ProviderProfile, PrefixCompletion                │
-│  ModelCapabilityCard, RoutingMetrics, TaskInferrer                  │
+│  Layer 4: Tools & Repo Intel (src/tools/ + repo/ + search/ + lsp/)  │
+│  Kernel ≤26 工具 · EXTENDED（office/browser/computer_use）          │
+│  Meridian 图 · Physarum · semantic/hybrid search · MCP · LSP        │
+├─────────────────────────────────────────────────────────────────────┤
+│  Layer 5: API & Model (src/api/ + model/ + auth/)                   │
+│  OpenAI-compat · Anthropic · Codex OAuth · FallbackStream           │
+│  Provider presets · Capability cards · Adaptive worker routing      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 核心子系统
 
-### Agent Loop (心脏)
+### Agent Loop
 
-`src/agent/loop.ts` 主循环，每个 turn：
+`src/agent/loop.ts` 每轮大致：
 
-1. **PreTurn** → RuntimeHookPipeline preTurn phase
-2. **Perception** → TurnPerceptionController（接收 API 流）
-3. **Tool Execution** → ToolExecutionController（执行 tool calls）
-4. **Post-Tool** → postTool hooks（stigmergy 更新、evidence 追踪）
-5. **Compaction** → CompactionController（上下文压缩决策）
-6. **PostTurn** → hook pipeline postTurn phase
+1. **preTurn** → RuntimeHookPipeline
+2. **Perception** → 流式接收模型输出（`turn-perception.ts`）
+3. **Tool Execution** → 执行 tool calls（`tool-execution.ts`，每工具后 **postTool**）
+4. **Compaction 决策** → `runCompaction`（`turn-orchestrator.ts`；历史重写仅在 `turn===0`）
+5. **postTurn** → 回合收尾 hooks
+6. **postSession** → 会话级 hooks（经 orchestrator 调度）
 
-关键控制器：
+关键控制器与门禁：TurnHarness、EvidenceTracker、DeliveryGate、RepairPipeline（DeepSeek tool-JSON-in-content）、wave-gate（计划分波）、GoalTracker。
 
-| 控制器 | 职责 |
-|--------|------|
-| TurnHarness | 单 turn 生命周期管理 |
-| CompactionController | 基于 staleRoundThresholds 驱动压缩 |
-| RepairPipeline | 修复 malformed tool JSON (DeepSeek V4 bug) |
-| CacheAdvisor | prefix cache 命中率监控与建议 |
-
-### RuntimeHookPipeline (自调节)
+### RuntimeHookPipeline
 
 5 phases: `preTurn → afterPerception → postTool → postTurn → postSession`
 
-9 hooks:
+- 装配入口：`createDefaultRuntimeHooks()`（`create-runtime-hooks.ts`）
+- **不是**固定 9 个 hook。模块约 60+，按 deps / 环境变量门控；默认会话实际激活约 18+
+- 常驻基线含：perception、signal-consumer、kick、vigor、theta、stigmergy、radio
+- Advisory 类（self-verify、edit-tool-advisory、spec-verify-gate、context-pressure…）经 `AdvisoryBus` 注入 system-reminder，**不重写** `frozenBase` / `volatileBlock`
+- 改 hook 行为前先看 gate 条件，勿假设某 hook 一定在跑
 
-| Hook | 职责 |
-|------|------|
-| signal-consumer | 消费外部信号 |
-| perception | 感知融合 |
-| vigor | 活力/能量状态管理 |
-| theta | θ 检查（认知漂移检测） |
-| kick | 卡死唤醒 |
-| stigmergy | 痕迹信息素管理 |
-| playbook-reflect | playbook 反思 |
-| dream | 会话间学习 |
-| telemetry-flush | 遥测写入 |
-
-### Cognitive Layer (认知基座)
-
-| 模块 | 职责 |
-|------|------|
-| CognitiveLedger | 认知镜面 — 模型看到自己的认知状态 (paravirtualization) |
-| TaskContract | 任务契约 — 从用户输入提取 objective, scope, deliverables |
-| ClaimStore | 知识声明存储 — 追踪模型产出的事实断言 |
-| Stigmergy | 信息素 — 跨 turn 隐式协调信号 (strength, halfLife, decay) |
-| PressureMonitor | 压力监控 — 上下文填充率、验证债务、CVM 开销 |
-| ProjectMemory | 项目记忆 — 跨 session 持久化的项目知识 |
-
-### Sensorium (六维感知)
-
-模型通过 6 个 0.0–1.0 连续维度感知自身状态：
-
-- **momentum** — 预测准确率动量
-- **pressure** — 多维压力（上下文 50% + 验证债 30% + CVM 15% + 增速 5%）
-- **confidence** — 验证覆盖率 (verified / modified)
-- **complexity** — 工具多样性 (unique tools / total calls)
-- **freshness** — 文件熟悉度（信息素强度，默认 0.5）
-- **stability** — 连续稳定性（doom 40% + prediction 25% + diversity 20% + verification 15%）
-
-### Prompt Engine (缓存优化核心)
+### Prompt Engine（缓存优化核心）
 
 ```
-System Prompt = static.ts (固定 anchor, 永不变) + volatile.ts (每 turn 动态组装)
+System = static.ts（会话内冻结） + volatile（动态区） + appendixDelta（跨回合增量）
 ```
 
-- **static.ts** — 基础指令、工具描述、身份。prefix cache 锚点。
-- **volatile.ts** — git status, cognitive ledger, tool history, active claims
-- **AnchorGraph** — anchor 依赖关系，确保不意外破坏 cache
-- **AnchorInvariants** — 强制约束（anchor 不可变、顺序不可变）
-- **Fingerprint** — prompt hash，检测 cache invalidation
+硬约束（详见 CLAUDE.md Known Constraints）：
+
+- appendix 块必须字节稳定；量化在渲染层做
+- 压缩历史重写只在用户边界（`turn===0`）
+- frozen 快照 commit 不得依赖可被 `invalidateFreshCache()` 清空的守卫
+- `stream()` 对 request 的变换必须 copy-on-write（防侧路重入双写）
+
+### Tools
+
+`createDefaultToolRegistry`（`src/tools/default-registry.ts`）维护 **kernel budget ≤26**。超出会触发认知过载退化（见 kernel-budget 测试）。
+
+| 层 | 示例 |
+|----|------|
+| Kernel | read/write/edit/hash_edit、bash、job、grep/ast_grep/ast_edit、glob、diff、git、run_tests、todo、web_search/fetch、repo_map、plan_submit/close、skill… |
+| 装配注入 | delegate_task/batch、team_orchestrate、council_convene、deliver_task、memory/recall、repo_graph、semantic_search、browser_debug… |
+| EXTENDED（默认关） | 办公套件（docx/xlsx/pptx/pdf/image）、browser、computer_use（Pro 门控） |
+
+星域 `toolWhitelist` 是真实交集过滤器；内置 11 域当前白名单为全集 → 交集退化为恒等，但拼错 authority 会 fail-closed 返回 `[]`。
+
+### 星域 · Plan · Team · Council
+
+| 机制 | 作用 |
+|------|------|
+| `/domain` + 自动路由 | 切换 11 星域的提示词后缀 / 决策风格 / 勇气阈值 |
+| Plan Mode | 调研 → 结构化计划 → 审批 → 分波执行（wave-gate） |
+| `/team` | 多 worker 并行，文件冲突感知调度 |
+| `/council` | 多席位审查，可选反驳轮 |
 
 ### Multi-Model Delegation
 
-`src/agent/coordinator.ts`:
+WorkerProfile + WorkOrder → 独立无头会话；按任务类型自适应路由（capable / cheap 等）；批量聚合策略可配。议事会席位有 tierFloor（只抬升不降级）。
 
-- WorkerProfile + WorkOrderScope → 路由到不同 provider/model
-- WorkerSession → 独立 worker 执行上下文
-- AggregationPolicy → 结果聚合策略
+### Compaction
 
-### Compaction (上下文压缩)
+`src/compact/` + `compact-boundary-coordinator`：会话分裂 → maybeCompact → T9 质量压缩 → 陈旧轮 → 堆驱动微压缩；命中即止。1M 窗口与健康缓存时可延迟压缩。
 
-`src/compact/`:
+### Repo Intel
 
-| 模块 | 职责 |
-|------|------|
-| stale-round.ts | 过时轮次检测和压缩 |
-| micro.ts | 微压缩（token 级裁剪） |
-| semantic-prune.ts | 语义剪枝 |
-| staleness-detect.ts | 陈旧度检测 |
-| agent-diet.ts | agent 级上下文瘦身 |
-| heuristic-*.ts | 启发式提取/注入/存储（跨压缩知识保留） |
+- **Meridian**（`src/repo/meridian-*`）— 导入图 / 影响半径
+- **Physarum** — 文件访问偏好（信息素式路径强化）
+- **search/** — tree-sitter chunk + hybrid / embedding 检索
+- **LSP** — 诊断回流
 
-### Tools (40+)
+### Surfaces
 
-bash, edit, read-file, grep, glob, git, apply-patch, delegate-task, delegate-batch, remember, recall, repo-map, repo-graph, run-tests, ask-user-question, todo-store, plan-close, inspect-project, sandbox-exec, process-tracker...
+| 表面 | 路径 | 说明 |
+|------|------|------|
+| TUI | `src/tui/` | 纯 ANSI 引擎；SteerBuffer 承接流式中输入 |
+| Desktop | `desktop/` | Tauri；经 `src/server/` 会话池与 SSE |
+| Headless | `rivet -p` | 脚本 / CI |
+| MCP | `src/mcp/` | 外部工具以 `mcp__*` 进入同一审批链 |
 
 ## 关键设计决策
 
-1. **Prefix Cache 是架构级承诺** — 不是优化，是核心约束。所有 prompt 变更通过 AnchorInvariants 验证。
+1. **Prefix Cache 是架构级承诺** — 不是事后优化；一切注入路径优先 appendix / reminder，避免翻写前缀。
+2. **CVM** — hook + AdvisoryBus + CognitiveLedger，让模型看见并修正自身状态。
+3. **条件装配 > 固定清单** — hook / 工具 / 星域能力均按 deps 与开关启用。
+4. **Immutable + copy-on-write** — 尤其 API 客户端变换层，防重入污染缓存 key。
+5. **Fail-closed** — 未知星域、路径逃逸、高危命令、敏感文件：拒绝并解释。
+6. **测试与源码近 1:1** — 事故修复必带回归；指标见 [`engineering-metrics.md`](./engineering-metrics.md)。
 
-2. **CVM (Cognitive Virtual Machine)** — 模型通过 CognitiveLedger 看到自己的状态（Gen2 paravirtualization），实现自调节。
+## 目录速查
 
-3. **StarFlow v2** — 运行时 hook pipeline 替代静态 prompt 行为指令，基于实时感知动态调整。
+完整表见 [`AGENTS.md`](../AGENTS.md)。规模最大的模块：
 
-4. **Immutable + Functional** — 全局不可变模式，状态更新返回新对象。
+| 目录 | 约 `.ts` 文件数 | 角色 |
+|------|-----------------|------|
+| `src/agent/` | ~800 | 心脏 |
+| `src/tools/` | ~260 | 动作面 |
+| `src/tui/` | ~240 | 终端表面 |
+| `src/server/` | ~80 | 桌面 sidecar |
+| `src/context/` | ~70 | 认知状态 |
+| `desktop/` | ~150 源文件 | GUI 表面 |
 
-5. **DeepSeek V4 适配** — hasToolJsonInContentBug 修复、RepairPipeline、ctclSanitizerPass。
+## 相关文档
 
-6. **Multi-Provider** — 支持 OpenAI-compatible（DeepSeek）、Anthropic、Codex 三种 API 协议。
-
-## 目录结构
-
-```
-src/
-├── agent/        # 主循环、hooks、session、coordinator、星域事件
-├── api/          # 多 provider 客户端、流式、重试、错误分类
-├── artifact/     # artifact 存储
-├── auth/         # API key、OAuth、token store
-├── benchmark/    # 性能基准
-├── cache/        # cache advisor、审计
-├── commands/     # CLI 命令
-├── compact/      # 上下文压缩策略
-├── config/       # 配置管理
-├── context/      # 认知层（ledger、contract、claims、stigmergy）
-├── docs/         # 内嵌文档
-├── failures/     # 失败处理
-├── hooks/        # 外部 hook 注册
-├── lsp/          # LSP 集成
-├── mcp/          # MCP server 管理
-├── model/        # 模型能力卡、路由
-├── plan/         # plan mode
-├── prompt/       # prompt 引擎（static + volatile + anchor）
-├── repo/         # git repo 操作
-├── server/       # server mode
-├── tools/        # 40+ 工具实现
-├── tui/          # Ink 6 UI 组件
-├── types/        # 共享类型
-├── utils/        # 工具函数
-└── workflows/    # workflow 支持
-```
+- [`AGENTS.md`](../AGENTS.md) — Agent 导航、运行时数据、缓存排查、安全闸门
+- [`CLAUDE.md`](../CLAUDE.md) — 构建约定与 Known Constraints
+- [`star.md`](../star.md) — 星图叙事
+- [`engineering-metrics.md`](./engineering-metrics.md) — 规模与测试指标
+- [`user-guide.md`](./user-guide.md) — 用户手册
