@@ -11,6 +11,7 @@ import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ToolErrorClass } from '../tools/types.js'
 import { EvidenceTracker } from './evidence.js'
+import { ObligationTracker } from './obligation-tracker.js'
 import { computeVerifyFailStreak } from './hooks/cognitive-capsule-router.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
@@ -161,6 +162,8 @@ export class AgentLoop {
   _pendingAbort = false
   cwd: string
   evidence: EvidenceTracker
+  /** 证据义务状态机（evidence-driven reasoning loop）——与 evidence 同寿命。 */
+  obligations: ObligationTracker
   compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
   recentToolHistory: ToolHistoryEntry[] = []
   /** Component C (typecheck-reminder): a .ts/.tsx file was written this session. */
@@ -587,6 +590,10 @@ export class AgentLoop {
     }
     this.cwd = cwd ?? process.cwd()
     this.evidence = new EvidenceTracker()
+    // 证据义务状态机：与 EvidenceTracker 同寿命。验证事件单向流入——
+    // blocked 只记 attempted、目标不匹配的失败不满足 RED（Wave 1 语义）。
+    this.obligations = new ObligationTracker()
+    this.evidence.setVerificationListener(meta => this.obligations.applyVerification(meta))
     this.traceStore = createTraceStore()
     // P1b 习惯化对抗：核销账本的 ignoredStreak 驱动升级措辞/有界静音
     this.advisoryBus.setHabituationPolicy(this.advisoryReadback)

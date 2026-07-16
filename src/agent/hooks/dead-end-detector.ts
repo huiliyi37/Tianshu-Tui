@@ -28,6 +28,9 @@ export interface DeadEndDetectorDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
   /** stigmergy 沉积(file target dead-end 信息素,跨会话经 signal-consumer 复用) */
   deposit?: (deposit: PheromoneDeposit) => Promise<void>
+  /** 证据义务状态机：死路触发时把「为什么反复失败」登记为 behavior 义务
+   *  （直接进 micro_probe 阶段——read 已被证明不够），与 advisory 同一事实。 */
+  obligations?: Pick<import('../obligation-tracker.js').ObligationTracker, 'upsert'>
 }
 
 /** 触发阈值:同文件 edit→verify-fail 循环次数 */
@@ -139,6 +142,16 @@ export function createDeadEndDetectorHook(
 
         if (s.cycles >= CYCLE_THRESHOLD && !s.fired) {
           s.fired = true
+          // 义务归账：盲改死路 = 「该文件的失败根因」是未证行为断言。
+          // requiredAction 直接进 micro_probe（read 阶段已被死路证伪）；
+          // 该文件后续验证转绿时由 applyVerificationEvent 自动关闭。
+          deps.obligations?.upsert({
+            family: 'behavior',
+            claim: `${file} 反复「编辑→验证失败」的根因未确认`,
+            targets: [file],
+            risk: 'high',
+            requiredAction: 'micro_probe',
+          })
           deps.advisoryBus.submit({
             key: 'dead-end-file',
             priority: 0.7,

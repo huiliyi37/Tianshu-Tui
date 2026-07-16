@@ -75,6 +75,12 @@ export interface DetectEvidenceGateOptions {
 /**
  * 检测证据门状态——近 N 轮内是否存在"探针→决策"闭环。
  *
+ * @deprecated 分类语义正在迁移到 evidence-obligation reducer（证据驱动推理
+ * 闭环计划）。本 API 保留兼容：virtue-settlement-hook（美德结算）与
+ * advisory-readback（ToolHistoryEntry 类型）是活的生产消费方，待其迁移完毕
+ * 后再删除。新代码请消费 `evidence-obligation.ts` 的 ObligationStore；
+ * 探针/决策分类请用本模块导出的 `classifyEvidenceTool`（单一分类事实源）。
+ *
  * 判据：
  *   1. 窗口内存在时序对：(探针工具 turn A, 决策工具 turn B)，A < B ≤ A + windowTurns
  *   2. target 匹配：探针和决策的 target 相同（跨 target 不计），或 run_tests 特殊处理
@@ -151,6 +157,15 @@ function isProbe(h: ToolHistoryEntry): boolean {
 /** 判断条目是否为决策/写入工具 */
 function isDecision(h: ToolHistoryEntry): boolean {
   return DECISION_TOOLS.has(h.tool)
+}
+
+/** 探针/决策分类的单一事实源——evidence-obligation reducer 与后续消费方
+ *  统一走这里，不各自维护工具集合。返回 null 表示中性工具（不参与证据闭环）。 */
+export function classifyEvidenceTool(entry: Pick<ToolHistoryEntry, 'tool' | 'target' | 'command'>): 'probe' | 'decision' | null {
+  if (PROBE_TOOLS.has(entry.tool)) return 'probe'
+  if (entry.tool === 'bash' && isBashProbe(entry.command ?? entry.target)) return 'probe'
+  if (DECISION_TOOLS.has(entry.tool)) return 'decision'
+  return null
 }
 
 /** 从 run_tests 等探针中提取源文件基础名（去 .test.ts/.spec.ts 后缀） */

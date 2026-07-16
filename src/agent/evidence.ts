@@ -116,6 +116,10 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
   #editsSinceLastTest = 0
   /** Whether any modified file is a code file (vs. docs/config only). */
   #hasCodeEdits = false
+  /** Obligation reducer 的验证事件出口：每次 trackVerification 后收到同一份
+   *  VerificationMetadata。义务状态独立于 TDD 编辑计数——计数清零（任意状态
+   *  的验证都会清）不会清除义务；blocked 验证在 reducer 侧只记 attempted。 */
+  #verificationListener: ((result: VerificationMetadata) => void) | null = null
 
   constructor() {
     this.state = {
@@ -159,6 +163,15 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
     this.#editsSinceLastTest = 0
     this.applyVerificationLevels(result)
     this.refreshDeliveryStatus()
+    try {
+      this.#verificationListener?.(result)
+    } catch { /* obligation accounting must never break evidence tracking */ }
+  }
+
+  /** 注册验证事件监听（obligation reducer 接线点）。单监听即可——义务 store
+   *  与 tracker 同寿命，由 loop 持有。 */
+  setVerificationListener(listener: ((result: VerificationMetadata) => void) | null): void {
+    this.#verificationListener = listener
   }
 
   trackImpact(files: string[], tests: string[]): void {

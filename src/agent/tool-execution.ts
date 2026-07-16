@@ -49,6 +49,8 @@ export interface ToolExecutionDeps {
   harness: TurnHarness
   prewarm: PrewarmCache
   evidence: EvidenceTracker
+  /** 证据义务状态机——tool pipeline 把 probe/失败/RED 编辑门接进义务状态。 */
+  obligations?: import('./obligation-tracker.js').ObligationTracker
   repairHintTracker: RepairHintTracker
   repairPipeline: RepairPipeline
   runtimeHooks: RuntimeHookPipeline
@@ -231,6 +233,7 @@ export class ToolExecutionController {
       harness: this.deps.harness,
       prewarm: this.deps.prewarm,
       evidence: this.deps.evidence,
+      obligations: this.deps.obligations,
       traceStore: state.traceStore,
       repairHintTracker: this.deps.repairHintTracker,
       repairPipeline: this.deps.repairPipeline,

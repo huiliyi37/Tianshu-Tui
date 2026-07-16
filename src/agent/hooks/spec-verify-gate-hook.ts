@@ -4,6 +4,10 @@ import { detectSpecToExecuteJump } from './spec-verify-gate.js'
 
 export interface SpecVerifyGateHookDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
+  /** 证据义务状态机：spec 文档未核验登记为 external_claim 义务。
+   *  medium 风险（不拦 natural-finish）——advisory 才是当轮硬约束，
+   *  义务提供跨轮状态与升级压力。任务边界自动 supersede。 */
+  obligations?: Pick<import('../obligation-tracker.js').ObligationTracker, 'upsert'>
 }
 
 export function createSpecVerifyGateHook(deps: SpecVerifyGateHookDeps): PreTurnRuntimeHook {
@@ -18,6 +22,14 @@ export function createSpecVerifyGateHook(deps: SpecVerifyGateHookDeps): PreTurnR
         })),
       })
       if (result.triggered) {
+        deps.obligations?.upsert({
+          family: 'external_claim',
+          claim: `诊断文档 ${result.specDocPath ?? '(未命名)'} 的声明未经独立验证`,
+          targets: result.specDocPath ? [result.specDocPath] : [],
+          risk: 'medium',
+          // 文档本身已被读过——独立验证从探针/测试开始，read 阶段无意义。
+          requiredAction: 'micro_probe',
+        })
         deps.advisoryBus.submit({
           key: 'spec-verify-gate',
           priority: 0.9,

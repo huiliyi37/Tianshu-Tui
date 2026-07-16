@@ -21,6 +21,9 @@ import type { AdvisoryBus } from '../advisory-bus.js'
 
 export interface ReasoningSpiralHookDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
+  /** 证据义务状态机：长推理零工具 + 未决高风险义务 → advisory 点名具体
+   *  下一动作（而非抽象"用工具"），并记一次无新证据尝试（升级压力）。 */
+  obligations?: Pick<import('../obligation-tracker.js').ObligationTracker, 'unresolvedHigh' | 'recordAttempt'>
 }
 
 /** 阈值：单轮推理字符数超过此值且无工具调用 → 触发 */
@@ -61,6 +64,22 @@ export function createReasoningSpiralHook(
         recentLengths.every((v, i) => i === 0 || v > recentLengths[i - 1]!)
 
       lastAdvisoryTurn = turn
+
+      // 义务升级：长推理零行动期间存在未决高风险义务 → 点名该义务的
+      // 具体下一动作，并登记一次无新证据尝试（连续空转 → 阶梯升级）。
+      const unresolved = deps.obligations?.unresolvedHigh() ?? []
+      if (unresolved.length > 0) {
+        const first = unresolved[0]!
+        deps.obligations!.recordAttempt(first.id, {})
+        deps.advisoryBus.submit({
+          key: 'reasoning-spiral',
+          priority: 0.54,
+          category: 'discipline',
+          ttl: 1,
+          content: `上一轮输出了 ${formatLen(lastThinkingLength)} 推理但未调用任何工具，而高风险义务「${first.claim}」仍未关闭。继续推理不能关闭它——下一步：${first.requiredAction}（目标：${first.targets.join(', ') || '见义务描述'}）。`,
+        })
+        return
+      }
 
       deps.advisoryBus.submit({
         key: 'reasoning-spiral',

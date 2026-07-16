@@ -316,6 +316,8 @@ export interface ToolPipelineDeps {
   harness: TurnHarness
   prewarm: PrewarmCache
   evidence: EvidenceTrackerPublic
+  /** 证据义务状态机：pre-tool RED 编辑门 + post-tool probe/失败归账。可缺省（测试/worker）。 */
+  obligations?: import('./obligation-tracker.js').ObligationTracker
   traceStore: TraceStore
   repairHintTracker: RepairHintTracker
   repairPipeline: import('./repair-pipeline.js').RepairPipeline
@@ -790,6 +792,19 @@ export async function executeToolUse(
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: decision.message!, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
    }
+
+    // Obligation RED gate（有界）：高风险 bugfix 义务尚无 RED 复现时，对目标
+    // 源文件的首次编辑当轮拦截（测试/scratch 豁免；同一义务只拦一次，重发放行）。
+    // TDD gate 之后——TDD 管"编辑未验证"节奏，这里管"缺陷未被证明存在"。
+    if (deps.obligations && EDIT_TOOLS.has(tu.name)) {
+      const editTarget = typeof tu.input?.file_path === 'string' ? tu.input.file_path : undefined
+      const redDecision = deps.obligations.evaluateSourceEditGate(editTarget)
+      if (redDecision.block) {
+        deps.onGateBlocked?.('obligation-red')
+        callbacks.onToolResult(tu.id, tu.name, redDecision.message!, true)
+        return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: redDecision.message!, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+      }
+    }
 
     // Destructive gate: 验证失败后 ≤3 个工具调用内的 git 清场命令当轮拦截
     // (首次拦截、原样重发放行)。TDD gate 之后、PreToolUse hook 之前。
@@ -1785,6 +1800,14 @@ export async function executeToolUse(
       const matchedFiles = extractGrepMatchPaths(finalContent, deps.cwd)
       if (matchedFiles.length > 0) {
         void batchPrewarm(deps.cwd, matchedFiles, deps.prewarm).catch(() => {})
+        // Obligation probe 归账：grep 命中的文件是存在性证据（cross_check 阶段
+        // 的独立工具来源之一）。截断输出视为有损——不能关闭"不存在"断言。
+        if (deps.obligations) {
+          const grepLossy = finalContent.includes('[truncated') || finalContent.includes('results truncated')
+          for (const matched of matchedFiles) {
+            deps.obligations.applyProbe({ tool: 'grep', target: matched, lossy: grepLossy })
+          }
+        }
       }
     }
 
@@ -1794,6 +1817,13 @@ export async function executeToolUse(
 
       // compaction_fail signal: read_file returns pruned/diet content
       const hasPruned = finalContent.includes('[pruned]') || finalContent.includes('[diet:redundant]')
+      // Obligation probe 归账：无损读取关闭 read_source 阶段义务；
+      // pruned/diet 内容是有损观察，只积累升级压力。
+      deps.obligations?.applyProbe({
+        tool: 'read_file',
+        target: tu.input.file_path as string,
+        lossy: hasPruned,
+      })
       if (hasPruned) {
         try {
           deps.immuneHook?.injectSignal({
@@ -1911,7 +1941,13 @@ export async function executeToolUse(
         msg += `\n\nNo new commit landed (HEAD unchanged at ${headNow.slice(0, 8)}). Check git log before retrying to avoid a duplicate commit.`
       }
     }
-    deps.repairHintTracker.recordFailure(tu.name, classifyFailure(msg).class)
+    const caughtFailureClass = classifyFailure(msg).class
+    deps.repairHintTracker.recordFailure(tu.name, caughtFailureClass)
+    // Obligation 失败归账：target 关联义务记一次失败尝试（同类失败重复 → 升级阶梯）。
+    deps.obligations?.recordFailureSignal(
+      caughtFailureClass,
+      typeof tu.input?.file_path === 'string' ? tu.input.file_path as string : toolTargetFromInput(tu.name, tu.input),
+    )
     callbacks.onToolResult(tu.id, tu.name, msg, true)
     return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
   }

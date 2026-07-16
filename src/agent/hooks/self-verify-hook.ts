@@ -109,6 +109,10 @@ export interface SelfVerifyHookDeps {
   /** W5: EvidenceTracker state getter for scope-mismatch detection.
    *  Absent → mismatch check disabled (unchanged behavior). */
   getEvidenceState?: () => { filesModified: Set<string>; verifications: VerificationMetadata[] }
+  /** 结构化 verification_required 信号出口（control plane）。与 advisory
+   *  并行：advisory 服务下一轮措辞（可核销/自愈），信号让 focus 立即转
+   *  verify——不再只是 postTurn 软文。 */
+  submitControlSignal?: (signal: import('../control-plane.js').ControlSignal) => void
 }
 
 export function createSelfVerifyHook(deps: SelfVerifyHookDeps): PostTurnRuntimeHook {
@@ -148,6 +152,19 @@ export function createSelfVerifyHook(deps: SelfVerifyHookDeps): PostTurnRuntimeH
       // are not classified → stay conservative and don't fire.
       const allReadOrWrite = recentToolHistory.every(isReadOrWriteCall)
       if (!allReadOrWrite) return
+
+      // 结构化信号：kind='verification' + attention → control plane focus 转
+      // 'verify'。key 稳定、无自由文本——同一事实反复触发不会抖动 revision。
+      deps.submitControlSignal?.({
+        key: 'self-verify:verification-required',
+        kind: 'verification',
+        severity: 'attention',
+        summary: 'recent conclusions built on reads/edits without ground-truth verification',
+        routeHint: 'status',
+        requiresDecision: false,
+        ttlTurns: 2,
+        cacheImpact: 'none',
+      })
 
       deps.advisoryBus.submit({
         key: 'self-verify',

@@ -84,6 +84,11 @@ export interface RuntimeHookDeps {
   stigmergyDeposit: (deposit: any) => Promise<void>
   stigmergyQuery: () => Promise<any>
   getEvidenceState: () => EvidenceState
+  /** 证据义务状态机（evidence-driven reasoning loop）。缺省 → hooks 只发
+   *  advisory 不做义务归账（行为与旧版一致）。 */
+  obligations?: import('./obligation-tracker.js').ObligationTracker
+  /** control plane 信号出口（self-verify 的结构化 verification_required 用）。 */
+  submitControlSignal?: (signal: import('./control-plane.js').ControlSignal) => void
   setLoadedPheromones: (pheromones: any) => void
   recordStance?: (signal: import('./virtue-signals.js').VirtueSignal) => void
   /** T2: 美德 pending 台账——stigmergy-hook submit, settlement hook drainSettled */

@@ -82,6 +82,10 @@ const ADVISORY_PREAMBLE = '【天枢·诊断】'
 
 export interface ErrorDiagnosisHookDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
+  /** 证据义务状态机：失败分类归账到 target 关联义务（同类失败重复 → 升级阶梯）。
+   *  归账与诊断 advisory 是同一事实的两个出口——义务改状态，advisory 给措辞，
+   *  不额外创建同义 advisory。 */
+  obligations?: Pick<import('../obligation-tracker.js').ObligationTracker, 'recordFailureSignal'>
 }
 
 export function createErrorDiagnosisHook(deps: ErrorDiagnosisHookDeps): PostToolRuntimeHook {
@@ -97,6 +101,11 @@ export function createErrorDiagnosisHook(deps: ErrorDiagnosisHookDeps): PostTool
       if (!tool.failureClass) return
       // Unknown class — no diagnosis to give
       if (tool.failureClass === 'unknown') return
+      // 义务归账不受每轮 1 条诊断的节流约束——状态推进和文案节流是两回事。
+      const failureTarget = typeof tool.input?.file_path === 'string'
+        ? tool.input.file_path as string
+        : tool.target
+      deps.obligations?.recordFailureSignal(tool.failureClass, failureTarget)
       // At most 1 diagnosis per turn
       if (ctx.snapshot.turn === lastFiredTurn) return
 
