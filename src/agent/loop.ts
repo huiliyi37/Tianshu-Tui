@@ -756,6 +756,7 @@ export class AgentLoop {
       promptEngine: this.config.promptEngine,
       contextWindow: this.config.contextWindow,
       providerProfile: this.config.providerProfile,
+      compactionProfile: this.config.compactionProfile,
       primaryClient: this.config.primaryClient,
       compactClient: this.config.compactClient,
       compactEnabled: this.config.compact.enabled,

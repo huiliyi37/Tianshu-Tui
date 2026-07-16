@@ -94,7 +94,7 @@ export interface CompactBoundaryDeps {
    * micro candidates must clear its floors before replacing history; absent,
    * a conservative per-token profile is derived from the cache classification.
    */
-  getCompactionProfile?: () => CompactionProfile
+  getCompactionProfile?: () => CompactionProfile | undefined
   /** Structured sink for reclaim-gate decisions (committed AND rejected). */
   onReclaimDecision?: (record: ReclaimDecisionRecord) => void
 }

@@ -775,6 +775,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     shouldOpportunisticCompact: () => self.cacheAdvisor.shouldOpportunisticCompact(),
     isCachePreservingProvider: () => self.compaction.isCachePreservingProvider(),
     isCostInsensitiveProvider: () => isCostInsensitiveProvider(self.config.providerName),
+    getCompactionProfile: () => self.config.compactionProfile,
     getProviderName: () => self.config.providerName,
     getQualityThresholds: () => self.config.compact.qualityCompact ?? DEFAULT_QUALITY_COMPACT_THRESHOLDS,
     injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal) },

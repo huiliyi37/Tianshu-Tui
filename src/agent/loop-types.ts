@@ -42,6 +42,10 @@ export interface AgentConfig {
   providerProfile?: ProviderProfile
   /** Provider registry key (e.g. 'deepseek') — used as ProviderHealthTracker id. */
   providerName?: string
+  /** Cost-aware reclaim profile resolved from provider+model economics
+   *  (billing / cache kind / reclaim floors). Absent → controllers derive a
+   *  conservative per-token fallback from providerProfile. */
+  compactionProfile?: import('../compact/compaction-profile.js').CompactionProfile
   /** Primary model's StreamClient — reused for LLM compaction via Forked Agent pattern. */
   primaryClient?: StreamClient
   /** Optional dedicated StreamClient for compaction summarization, built from

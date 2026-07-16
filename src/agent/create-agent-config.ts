@@ -15,6 +15,7 @@ import type { LlmSpeculationConfigInput } from './llm-speculation.js'
 import type { AuthProvider } from '../auth/types.js'
 import type { PermissionConfig } from './permissions.js'
 import { getProviderProfile } from '../api/provider-profile.js'
+import { resolveCompactionEconomics } from '../compact/compaction-profile.js'
 import { gateToolDefinitions } from './tool-tiers.js'
 import { inferModelTierFromName, type ModelTier } from './model-tier-policy.js'
 
@@ -122,7 +123,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'providerProfile' | 'providerName' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision' | 'visionClient' | 'visionModelPrompt' | 'visionModelMaxTokens'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'providerProfile' | 'providerName' | 'compactionProfile' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision' | 'visionClient' | 'visionModelPrompt' | 'visionModelMaxTokens'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -152,6 +153,8 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
   // When the primary model is not multimodal, this client describes user images
   // so the primary model still receives their content as text.
   const visionBridge = buildVisionClient(input)
+
+  const modelPricing = provider.models.find(m => m.id === model.id || m.alias === model.id)?.pricing
 
   // 工具门控：构造期与 updateTools() 共用同一过滤（gateToolDefinitions），
   // 确保 MCP/LSP 异步注册后调用 updateTools 不会把 EXTENDED 工具整个还原。
@@ -186,6 +189,19 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     cwd: input.cwd,
     providerProfile: getProviderProfile(provider.name, model.contextWindow),
     providerName: provider.name,
+    // Model-aware compaction economics: billing from provider identity
+    // (oauth/baseUrl hints for custom providers), cache kind from the provider
+    // profile with the aggregator escape hatch (deepseek-native capability +
+    // known model family), pricing from the model's config entry.
+    compactionProfile: resolveCompactionEconomics({
+      providerName: provider.name,
+      modelId: model.id,
+      contextWindow: model.contextWindow,
+      ...(provider.auth?.type !== undefined ? { authType: provider.auth.type } : {}),
+      baseUrl: provider.baseUrl,
+      prefixCacheStrategy: capabilities.prefixCacheStrategy,
+      ...(modelPricing ? { pricing: modelPricing } : {}),
+    }),
     primaryClient: primaryClient,
     compactClient,
     sessionId: input.sessionId,

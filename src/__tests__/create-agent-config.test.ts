@@ -74,6 +74,24 @@ describe('createAgentConfig', () => {
     assert.equal(cfg.providerProfile?.contextWindow, 128000)
   })
 
+  it('resolves a model-aware compactionProfile (task 5 assembly wiring)', () => {
+    const cfg = createAgentConfig(baseInput)
+    assert.ok(cfg.compactionProfile)
+    assert.equal(cfg.compactionProfile.billing, 'per-token')
+    assert.equal(cfg.compactionProfile.cache, 'exact-prefix')
+    assert.equal(cfg.compactionProfile.contextWindow, 128000)
+
+    const withPricing = createAgentConfig({
+      ...baseInput,
+      provider: {
+        ...testProvider,
+        models: [{ id: 'deepseek-r1', contextWindow: 128000, maxTokens: 8192, pricing: { cacheRead: 0.028, cacheWrite: 0.28 } }],
+      },
+    })
+    assert.equal(withPricing.compactionProfile?.cacheReadPricePerMillion, 0.028)
+    assert.equal(withPricing.compactionProfile?.cacheWritePricePerMillion, 0.28)
+  })
+
   it('returns primaryClient as the main model client', () => {
     const cfg = createAgentConfig(baseInput)
     assert.ok(cfg.primaryClient)

@@ -1,4 +1,5 @@
-import type { ProviderProfile } from '../api/provider-profile.js'
+import { getProviderCacheDefaults, type ProviderProfile } from '../api/provider-profile.js'
+import { classifyCostModel } from '../api/cost-model.js'
 
 /**
  * Cost-aware compaction profile (2026-07-16 reclaim gate plan §3.1).
@@ -127,4 +128,72 @@ export function deriveCompactionProfile(input: CompactionProfileInput): Compacti
     minReclaimTokens,
     minReclaimRatio,
   }
+}
+
+export interface CompactionEconomicsInput {
+  providerName?: string
+  modelId?: string
+  contextWindow: number
+  /** Auth type from provider config ('oauth' implies subscription). */
+  authType?: string
+  /** Provider baseUrl — coding-plan / token-plan endpoints imply subscription. */
+  baseUrl?: string
+  /** Resolved capability strategy (config override already applied). */
+  prefixCacheStrategy?: 'deepseek-native' | 'anthropic-cache-control' | 'none'
+  /** Explicit cache profile — wins over the provider-name lookup when given. */
+  providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
+  /** Model pricing per 1M tokens (USD) from config, when known. */
+  pricing?: { cacheRead?: number; cacheWrite?: number }
+  outputReserveTokens?: number
+}
+
+/**
+ * Model families with a verified persistent exact-prefix server cache. Used
+ * only for the aggregator escape hatch below — a provider we know directly
+ * (deepseek/glm/…) is classified via its ProviderProfile, not this list.
+ */
+const EXACT_PREFIX_MODEL_FAMILIES = ['deepseek', 'glm-', 'longcat']
+
+function modelFamilyHasExactPrefixCache(modelId: string | undefined): boolean {
+  const id = (modelId ?? '').toLowerCase()
+  return EXACT_PREFIX_MODEL_FAMILIES.some(f => id.includes(f))
+}
+
+/**
+ * Assembly-layer adapter (plan task 5): resolve a CompactionProfile from the
+ * provider/model identity actually configured, instead of hardcoding economics
+ * per call site.
+ *
+ * Billing comes from `classifyCostModel` — provider identity first, then
+ * oauth/baseUrl hints. It is never inferred from the model alias: `mimo` (the
+ * token-plan provider) is subscription while `mimo-api` serving the same model
+ * stays per-token.
+ *
+ * Cache kind comes from the ProviderProfile for known providers. For
+ * aggregators (SiliconFlow etc.) whose profile defaults to 'none' but whose
+ * capabilities declare `deepseek-native` prefix caching, the model family
+ * decides: a DeepSeek/GLM/LongCat model routed through the aggregator keeps
+ * exact-prefix protection; an unverified family degrades to 'partial' so the
+ * reclaim gate never over-protects a cache that may not exist.
+ */
+export function resolveCompactionEconomics(input: CompactionEconomicsInput): CompactionProfile {
+  const billing = classifyCostModel(input.providerName, {
+    ...(input.authType !== undefined ? { authType: input.authType } : {}),
+    ...(input.baseUrl !== undefined ? { baseUrl: input.baseUrl } : {}),
+  })
+
+  const cacheSource = input.providerProfile ?? getProviderCacheDefaults(input.providerName ?? '')
+  let cache = cacheKindFromProviderProfile(cacheSource)
+  if (cache === 'none' && input.prefixCacheStrategy === 'deepseek-native') {
+    cache = modelFamilyHasExactPrefixCache(input.modelId) ? 'exact-prefix' : 'partial'
+  }
+
+  return deriveCompactionProfile({
+    contextWindow: input.contextWindow,
+    billing,
+    cache,
+    ...(input.pricing?.cacheWrite !== undefined ? { cacheWritePricePerMillion: input.pricing.cacheWrite } : {}),
+    ...(input.pricing?.cacheRead !== undefined ? { cacheReadPricePerMillion: input.pricing.cacheRead } : {}),
+    ...(input.outputReserveTokens !== undefined ? { outputReserveTokens: input.outputReserveTokens } : {}),
+  })
 }
