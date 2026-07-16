@@ -34,20 +34,109 @@ function makeController(session: SessionContext, overrides: Partial<ConstructorP
   })
 }
 
+describe('CompactionController reclaim gate (2026-07-16 cost-aware reclaim plan task 2)', () => {
+  // Session 2c1186f5 counterexample: a deterministic rewrite that changes tool
+  // bytes but reclaims almost nothing must NOT replace history — the rewrite
+  // shatters the hot prefix cache for a sub-floor reclaim.
+  //
+  // Construction: 128k window, ratio ≈ 0.67 (tier 1 fires). The only
+  // compactable message is one tool result barely over the truncation preview
+  // (40k chars vs 38.4k preview) → candidate changes, but reclaims only a few
+  // hundred tokens, far below any profile floor.
+  function lowReclaimSession(): SessionContext {
+    const session = new SessionContext()
+    const big = 'x'.repeat(76_000) // 19k tokens each, non-tool → untouched by micro compact
+    session.replaceMessages([
+      { role: 'user', content: big },
+      { role: 'assistant', content: big },
+      { role: 'user', content: big },
+      { role: 'assistant', content: big },
+      { role: 'tool', tool_call_id: 'read_file_1', content: 'y'.repeat(40_000) } as OaiMessage,
+    ])
+    return session
+  }
+
+  it('skips a low-reclaim deterministic rewrite: no replace, no markCompacted, no compact event', async () => {
+    const session = lowReclaimSession()
+    const beforeMessages = session.getMessages()
+    const decisions: Array<{ commit: boolean; reason: string }> = []
+    const controller = makeController(session, {
+      onReclaimDecision: d => { decisions.push({ commit: d.commit, reason: d.reason }) },
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+
+    assert.equal(result.compacted, false, 'low-reclaim candidate must not commit')
+    assert.deepEqual(result.failures, { consecutiveFailures: 0 }, 'a gate skip is not a compaction failure')
+    assert.equal(session.getMessages(), beforeMessages, 'history untouched (same reference)')
+    assert.equal(session.wasCompactedAt(0), false, 'no markCompacted on a rejected candidate')
+    assert.equal(session.getCompactEvents().length, 0, 'no compact event on a rejected candidate')
+    assert.equal(decisions.length, 1)
+    assert.deepEqual(decisions[0], { commit: false, reason: 'below-reclaim-floor' })
+  })
+
+  it('does not inject the tier-2 summary on a rejected candidate', async () => {
+    const session = lowReclaimSession()
+    const controller = makeController(session, {
+      getTrajectoryEntries: () => [{
+        turn: 1, tool: 'edit_file', target: 'src/a.ts', status: 'failed',
+        durationMs: 1, inputSummary: 'src/a.ts', resultSummary: 'boom', errorClass: 'io',
+      } as TrajectoryEntry],
+    })
+    await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+    const hasSummary = session.getMessages().some(
+      m => typeof m.content === 'string' && m.content.includes('<compact-summary>'),
+    )
+    assert.equal(hasSummary, false, 'summary must only be appended after the candidate commits')
+  })
+
+  it('commits a high-reclaim candidate and records the commit decision', async () => {
+    // All-tool session: every message is compactable, reclaim is huge.
+    const session = new SessionContext()
+    const big = 'z'.repeat(60_000)
+    session.replaceMessages(Array.from({ length: 8 }, (_, i) => (
+      { role: 'tool', tool_call_id: `read_file_${i}`, content: big } as OaiMessage
+    )))
+    const decisions: Array<{ commit: boolean; reason: string }> = []
+    const controller = makeController(session, {
+      onReclaimDecision: d => { decisions.push({ commit: d.commit, reason: d.reason }) },
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+
+    assert.equal(result.compacted, true)
+    assert.equal(session.getCompactEvents().at(-1)?.tier, 1)
+    assert.equal(decisions.length, 1)
+    assert.deepEqual(decisions[0], { commit: true, reason: 'reclaim-above-floor' })
+  })
+
+  it('records before/after/reclaimed token fields on the decision', async () => {
+    const session = lowReclaimSession()
+    const records: Array<{ beforeTokens: number; afterTokens: number; reclaimedTokens: number; action: string }> = []
+    const controller = makeController(session, {
+      onReclaimDecision: d => {
+        records.push({ beforeTokens: d.beforeTokens, afterTokens: d.afterTokens, reclaimedTokens: d.reclaimedTokens, action: d.action })
+      },
+    })
+    await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+    assert.equal(records.length, 1)
+    assert.equal(records[0]!.action, 'micro')
+    assert.ok(records[0]!.beforeTokens > 80_000, 'before reflects the real session estimate')
+    assert.ok(records[0]!.reclaimedTokens > 0 && records[0]!.reclaimedTokens < 4_096, 'reclaim is positive but sub-floor')
+    assert.equal(records[0]!.beforeTokens - records[0]!.reclaimedTokens, records[0]!.afterTokens)
+  })
+})
+
 describe('CompactionController', () => {
   it('runs micro compact when pressure crosses ratio threshold', async () => {
+    // Reclaim-gate era: the fixture must contain genuinely compactable content
+    // (tool results over the truncation preview). All-text histories produce an
+    // unchanged candidate, which the gate now correctly refuses to commit.
     const session = new SessionContext()
     const historyMessage = 'x'.repeat(12_000 * 4)
-    session.replaceMessages([
-      { role: 'user', content: historyMessage },
-      { role: 'assistant', content: historyMessage },
-      { role: 'user', content: historyMessage },
-      { role: 'assistant', content: historyMessage },
-      { role: 'user', content: historyMessage },
-      { role: 'assistant', content: historyMessage },
-      { role: 'user', content: historyMessage },
-      { role: 'assistant', content: historyMessage },
-    ])
+    session.replaceMessages(Array.from({ length: 8 }, (_, i) => (
+      { role: 'tool', tool_call_id: `read_file_${i}`, content: historyMessage } as OaiMessage
+    )))
     let refreshed = false
     const controller = makeController(session, {
       refreshLedger: () => { refreshed = true },
@@ -66,16 +155,9 @@ describe('CompactionController', () => {
   it('fires onHistoryRewritten after a compaction rewrite (read-dedup invalidation hook)', async () => {
     const session = new SessionContext()
     const historyMessage = 'x'.repeat(12_000 * 4)
-    session.replaceMessages([
-      { role: 'user', content: historyMessage },
-      { role: 'assistant', content: historyMessage },
-      { role: 'user', content: historyMessage },
-      { role: 'assistant', content: historyMessage },
-      { role: 'user', content: historyMessage },
-      { role: 'assistant', content: historyMessage },
-      { role: 'user', content: historyMessage },
-      { role: 'assistant', content: historyMessage },
-    ])
+    session.replaceMessages(Array.from({ length: 8 }, (_, i) => (
+      { role: 'tool', tool_call_id: `read_file_${i}`, content: historyMessage } as OaiMessage
+    )))
     let fired = 0
     const controller = makeController(session, {
       onHistoryRewritten: () => { fired++ },

@@ -3,6 +3,8 @@ import type { Usage } from '../api/types.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES, summaryOutputBudgetChars } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
+import { deriveCompactionProfile, cacheKindFromProviderProfile, type CompactionProfile } from '../compact/compaction-profile.js'
+import { estimateReclaim, buildReclaimDecision, type ReclaimDecisionRecord } from '../compact/reclaim-estimate.js'
 
 import { debugLog } from '../utils/debug.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
@@ -389,6 +391,14 @@ export interface CompactionControllerDeps {
   recordSummaryUsage?: (usage: Partial<Usage>, model: string) => void
   /** Disk evidence probe for write-tool orphan synthesis during compaction repair. */
   writeProbe?: WriteProbe
+  /**
+   * Cost-aware reclaim profile (2026-07-16 plan). When absent, a conservative
+   * per-token profile is derived from providerProfile + contextWindow — an
+   * unknown provider must never get looser cache protection than DeepSeek.
+   */
+  compactionProfile?: CompactionProfile
+  /** Structured sink for reclaim-gate decisions (committed AND rejected). */
+  onReclaimDecision?: (record: ReclaimDecisionRecord) => void
 }
 
 export interface ArchiveHistoryInput {
@@ -616,6 +626,24 @@ export class CompactionController {
 
     try {
       const { messages: compacted } = this.compactMessages(messages, estimatedTokens)
+
+      // Reclaim gate (2026-07-16 plan task 2): the candidate must prove it
+      // reclaims enough context to be worth the prefix-cache rebuild before
+      // any history replacement. Rejected candidates leave the session
+      // untouched — the next boundary re-evaluates with fresh pressure. A
+      // gate skip is NOT a compaction failure (the circuit breaker tracks
+      // pipeline errors, not economic vetoes).
+      const decision = buildReclaimDecision(
+        'micro',
+        estimateReclaim(messages, compacted),
+        this.reclaimProfile(),
+        false,
+      )
+      this.deps.onReclaimDecision?.(decision)
+      if (!decision.commit) {
+        debugLog(`[compaction-gate] micro candidate rejected (${decision.reason}): reclaimed=${decision.reclaimedTokens} floor=${this.reclaimProfile().minReclaimTokens}`)
+        return { failures: input.failures, compacted: false }
+      }
 
       // Tier 2+: inject a deterministic 4-field summary so the model retains
       // goals/progress/active-files/errors across compaction boundaries.
@@ -927,6 +955,16 @@ export class CompactionController {
   /** Whether this provider uses exact-prefix cache (e.g. DeepSeek). */
   isCachePreservingProvider(): boolean {
     return this.deps.providerProfile?.cacheType === 'exact-prefix' && (this.deps.providerProfile?.persistent ?? false)
+  }
+
+  /** Reclaim-gate profile: injected model-aware profile, else a conservative
+   *  per-token derivation from the provider cache profile (never looser). */
+  private reclaimProfile(): CompactionProfile {
+    return this.deps.compactionProfile ?? deriveCompactionProfile({
+      contextWindow: this.deps.contextWindow,
+      billing: 'per-token',
+      cache: cacheKindFromProviderProfile(this.deps.providerProfile),
+    })
   }
 
   /**
