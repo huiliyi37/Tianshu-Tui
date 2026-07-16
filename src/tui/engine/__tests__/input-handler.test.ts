@@ -229,6 +229,61 @@ describe('InputHandler · Shift+Tab and Alt+letter (领航星 2026-06-28)', () =
     handler.dispose()
   })
 
+  it('parses Shift+Enter modifyOtherKeys (\\x1B[13;2u) as return with shift=true', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: KeyPress[] = []
+    handler.onAnyKey((k) => { keys.push(k) })
+
+    stdin.emitData('\x1B[13;2u')
+    assert.equal(keys.length, 1, 'one key dispatched')
+    assert.equal(keys[0]!.name, 'return')
+    assert.equal(keys[0]!.shift, true)
+    assert.equal(keys[0]!.ctrl, false)
+    assert.equal(keys[0]!.meta, false)
+    handler.dispose()
+  })
+
+  it('Shift+Enter modifyOtherKeys split across chunks assembles correctly', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: KeyPress[] = []
+    handler.onAnyKey((k) => { keys.push(k) })
+
+    stdin.emitData('\x1B[13')
+    assert.equal(keys.length, 0, 'incomplete sequence held for more bytes')
+    stdin.emitData(';2u')
+    assert.equal(keys.length, 1, 'assembled after second chunk')
+    assert.equal(keys[0]!.name, 'return')
+    assert.equal(keys[0]!.shift, true)
+    handler.dispose()
+  })
+
+  it('modifyOtherKeys with Alt modifier (\\x1B[13;3u) parses code then meta', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: KeyPress[] = []
+    handler.onAnyKey((k) => { keys.push(k) })
+
+    stdin.emitData('\x1B[13;3u')
+    assert.equal(keys.length, 1)
+    assert.equal(keys[0]!.name, 'return')
+    assert.equal(keys[0]!.meta, true, 'modifier 3 = Alt')
+    handler.dispose()
+  })
+
+  it('non-Enter modifyOtherKeys code (\\x1B[9;2u = Tab+Shift) not dispatched as return', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: KeyPress[] = []
+    handler.onAnyKey((k) => { keys.push(k) })
+
+    stdin.emitData('\x1B[9;2u')
+    assert.equal(keys.length, 1)
+    assert.notEqual(keys[0]!.name, 'return', 'code 9 is Tab, not Enter')
+    handler.dispose()
+  })
+
   it('parses Alt+f (\\x1Bf) as meta=true', () => {
     const stdin = makeStdin()
     const handler = new InputHandler({ stdin })

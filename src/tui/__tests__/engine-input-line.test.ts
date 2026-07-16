@@ -30,6 +30,17 @@ describe('InputLine multi-line (W4b)', () => {
     assert.equal(input.value, 'a\nb')
   })
 
+  it('shift+enter inserts a newline instead of submitting', () => {
+    let submitted: string | null = null
+    const input = new InputLine({ value: 'ab', onSubmit: (v) => { submitted = v } })
+    input.handleKey('left', '', false, false)
+    const ev = input.handleKey('return', '', false, false, true)
+    assert.equal(ev?.type, 'change')
+    assert.equal(input.value, 'a\nb')
+    assert.equal(input.cursor, 2)
+    assert.equal(submitted, null)
+  })
+
   it('insertText inserts at cursor and advances cursor', () => {
     const input = new InputLine({ value: 'AB' })
     input.handleKey('left', '', false, false) // cursor at A|B
@@ -78,45 +89,94 @@ describe('InputLine multi-line (W4b)', () => {
     assert.equal(input.placeholder, 'p')
   })
 
-  it('displayLines with maxWidth keeps cursor visible on long lines (cursor at end)', () => {
-    // 100 chars, cursor at end — line is way wider than maxWidth=20
-    const value = 'a'.repeat(100)
-    const input = new InputLine({ value })
-    const lines = input.displayLines({ maxWidth: 20 })
-    assert.equal(lines.length, 1)
-    const line = lines[0]!
-    // █ (cursor marker) must be visible, not truncated off
-    assert.ok(line.includes('█'), 'cursor █ must be visible when line exceeds maxWidth')
-    // Right-side ellipsis indicates there's more content after cursor (cursor at end → no right ellipsis)
-    // Left-side ellipsis indicates truncated content before cursor
-    assert.ok(line.includes('…'), 'must show ellipsis for truncated content')
-  })
-
-  it('displayLines with maxWidth centers cursor when typing in the middle', () => {
-    const value = 'a'.repeat(100)
-    const input = new InputLine({ value })
-    input.setValue(value, 50) // cursor at middle
-    const lines = input.displayLines({ maxWidth: 20 })
-    const line = lines[0]!
-    assert.ok(line.includes('█'), 'cursor must be visible')
-    assert.ok(line.includes('…'), 'must show truncation indicator')
-    // Both sides truncated when cursor is centered (prefix ❯ is always present)
-    assert.ok(line.slice(2).startsWith('…'), 'left side truncated when cursor is centered')
-    assert.ok(line.endsWith('…'), 'right side truncated when cursor is centered')
-  })
-
-  it('displayLines with maxWidth shows tail content when cursor at end (the regression case)', () => {
-    // The bug: typing at the end of a long line → truncateToWidth from start
-    // hid the last characters the user was actively typing.
-    // Fix: hscrollCursorLine centers on cursor so tail is visible.
+  it('displayLines with maxWidth soft-wraps long lines instead of hiding the head', () => {
     const value = 'AAAAAAAAAA' + 'BBBBBBBBBB' + 'CCCCCCCCCC' // 30 chars
     const input = new InputLine({ value })
     const lines = input.displayLines({ maxWidth: 15 })
-    const line = lines[0]!
-    assert.ok(line.includes('█'), 'cursor must be visible')
-    assert.ok(line.includes('C'), 'tail content near cursor must be visible')
-    // Should NOT show the very start 'A's — they're scrolled off
-    assert.ok(!line.includes('AAAAAAAAAA'), 'head content should be scrolled off when cursor at end')
+
+    assert.ok(lines.length > 1, 'long input should expand into multiple visual rows')
+    assert.ok(lines[0]!.includes('AAAAAAAAAA'), 'head content should remain visible after soft wrap')
+    assert.ok(lines.some(line => line.includes('CCCC')), 'tail content should remain visible')
+    assert.ok(lines.some(line => line.includes('█')), 'cursor must remain visible')
+  })
+
+  it('displayLines with maxWidth keeps cursor visible when typing in the middle of wrapped text', () => {
+    const value = 'a'.repeat(100)
+    const input = new InputLine({ value })
+    input.setValue(value, 50) // cursor at middle
+    const lines = input.displayLines({ maxWidth: 20, maxLines: 5 })
+
+    assert.equal(lines.length, 5)
+    assert.ok(lines.some(line => line.includes('█')), 'cursor must remain visible in wrapped viewport')
+    assert.ok(lines.some(line => line.includes('lines above')), 'wrapped viewport should report hidden rows above')
+    assert.ok(lines.some(line => line.includes('lines below')), 'wrapped viewport should report hidden rows below')
+  })
+
+  it('displayLines wraps pasted multiline text by visual width while preserving explicit newlines', () => {
+    const input = new InputLine({ value: 'first line\n' + 'x'.repeat(40) })
+    const lines = input.displayLines({ maxWidth: 12 })
+
+    assert.ok(lines[0]!.includes('first line'), 'explicit first line remains visible')
+    assert.ok(lines.length >= 5, 'second logical line wraps into multiple visual rows')
+    assert.ok(lines.some(line => line.includes('█')), 'cursor on wrapped pasted text remains visible')
+  })
+
+  it('displayLines wraps CJK 宽字符按双宽折行，光标落在正确行', () => {
+    // '❯ ' 占 2 列 → maxContentWidth = 8 - 2 = 6；每个 CJK 占 2 列
+    const input = new InputLine({ value: '一二三四' }) // 8 列，光标在末
+    const lines = input.displayLines({ maxWidth: 8 })
+
+    assert.ok(lines.length >= 2, 'CJK 文本在一行内放不下时应折到多视觉行')
+    assert.ok(lines[0]!.includes('一二三'), '首视觉行应含前三个 CJK 字')
+    assert.ok(lines.some(l => l.includes('四')), '最后一个 CJK 字在折行后仍可见')
+    assert.ok(lines.some(l => l.includes('█')), '光标在折行后仍可见')
+  })
+
+  it('displayLines with maxWidth + empty value 显示占位符不触发软换行', () => {
+    const input = new InputLine({ placeholder: '请输入' })
+    const lines = input.displayLines({ maxWidth: 10 })
+    assert.deepEqual(lines, ['❯ █请输入'], '空值应直接渲染占位符')
+  })
+
+  it('displayLines 内容+光标宽度恰好等于可用宽度时不触发软换行', () => {
+    // '❯ ' 2 列；maxContentWidth = 15 - 2 = 13；12 个 a + █(1) = 13，恰好不换
+    const value = 'a'.repeat(12)
+    const input = new InputLine({ value })
+    const lines = input.displayLines({ maxWidth: 15 })
+    assert.equal(lines.length, 1, '内容+光标恰好填满可用宽度不应折行')
+    assert.ok(lines[0]!.startsWith('❯ '), '光标行前缀应存在')
+    assert.ok(lines[0]!.includes('a'.repeat(12) + '█'), '全部内容+光标均可见')
+  })
+
+  it('shift+return at maxLength 不插入不提交', () => {
+    let submitted: string | null = null
+    const input = new InputLine({ value: 'abcde', maxLength: 5, onSubmit: (v) => { submitted = v } })
+    const ev = input.handleKey('return', '', false, false, true)
+    assert.equal(ev, null, '已达 maxLength 时 shift+return 应被忽略')
+    assert.equal(input.value, 'abcde', '值不变')
+    assert.equal(submitted, null, '不触发提交')
+  })
+
+  it('displayLines with maxWidth 在多行值中正确追踪光标所在行', () => {
+    const value = 'first\n' + 'x'.repeat(20)
+    const input = new InputLine({ value })
+    const lines = input.displayLines({ maxWidth: 10 })
+
+    assert.ok(lines.length >= 3, '第二逻辑行应折行为多个视觉行')
+    assert.ok(lines[0]!.includes('first'), '第一逻辑行不折行保持原样')
+    assert.ok(lines.some(l => l.includes('█')), '光标在折行后的第二逻辑行中可见')
+  })
+
+  it('displayLines with maxWidth+maxLines 在软换行视图中按光标裁剪', () => {
+    const value = 'x'.repeat(60)
+    const input = new InputLine({ value })
+    input.setValue(value, 30)
+    const lines = input.displayLines({ maxWidth: 10, maxLines: 4 })
+
+    assert.equal(lines.length, 4, '视口裁剪到 maxLines')
+    assert.ok(lines.some(l => l.includes('█')), '光标在裁剪后仍可见')
+    assert.ok(lines.some(l => l.includes('lines above')), '报告被裁掉的上方行数')
+    assert.ok(lines.some(l => l.includes('lines below')), '报告被裁掉的下方行数')
   })
 })
 
