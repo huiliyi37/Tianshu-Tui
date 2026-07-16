@@ -197,7 +197,9 @@
     "saving": "Saving…",
     "saveFailed": "Save failed: {{error}}",
     "regenerateFailed": "Regenerate failed: {{error}}",
-    "regenerating": "Regenerating…"
+    "regenerating": "Regenerating…",
+    "expand": "Expand",
+    "collapse": "Collapse"
   },
   "timeline": {
     "showEarlier": "Show {{count}} earlier steps",

@@ -2560,6 +2560,16 @@ body {
 }
 .tool-expand-btn:hover { filter: brightness(1.1); }
 
+/* Long assistant reply collapse — gradient fade + toggle button. */
+.assistant-collapse { position: relative; overflow: hidden; }
+.assistant-collapse.expanded { overflow: visible; }
+.assistant-collapse-fade {
+  position: absolute; bottom: 36px; left: 0; right: 0; height: 80px;
+  background: linear-gradient(transparent, var(--bg, var(--panel)));
+  pointer-events: none;
+}
+.assistant-collapse-btn { text-align: center; margin: var(--space-1) auto; }
+
 .tool-inline-diff {
   margin: var(--space-2) var(--space-3) var(--space-3);
   border: 1px solid var(--border);
@@ -2791,6 +2801,10 @@ body {
   padding: var(--space-3); color: var(--muted); font-size: var(--text-sm); line-height: 1.55;
   white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono);
   border-top: 1px solid var(--border); max-height: 400px; overflow-y: auto;
+  transition: max-height var(--dur) var(--ease), opacity var(--dur-fast) var(--ease), padding var(--dur) var(--ease);
+}
+.reasoning-body.collapsed {
+  max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; border-top-color: transparent;
 }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 

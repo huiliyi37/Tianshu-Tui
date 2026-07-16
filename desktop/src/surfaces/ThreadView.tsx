@@ -1156,7 +1156,14 @@ export function ThreadView(props: {
             </span>
           </div>
         )}
-        {view.blocks.length === 0 && (
+        {view.blocks.length === 0 && streamStatus === 'connecting' && (
+          <div className="skeleton-surface">
+            <div className="skeleton-msg-block" />
+            <div className="skeleton-msg-block short" />
+            <div className="skeleton-msg-block" />
+          </div>
+        )}
+        {view.blocks.length === 0 && streamStatus !== 'connecting' && (
           <div className="empty welcome">
             <p className="welcome-title">{t('welcome.title')}</p>
             <p className="welcome-hint">{t('welcome.hint')}</p>
@@ -1918,7 +1925,9 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, on
       onRegenerate={block.kind === 'assistant' && onRegenerate ? () => onRegenerate(block.key) : undefined}
       regenerating={regeneratingKey === block.key}
     >
-      <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} onFileReveal={onFileReveal} />
+      <CollapsibleAssistantBody text={block.text} isStreaming={!!isStreaming}>
+        <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} onFileReveal={onFileReveal} />
+      </CollapsibleAssistantBody>
     </MsgBlock>
   )
 }
@@ -2073,6 +2082,40 @@ function AssistantText({ text, isStreaming, onFileClick, onFileReveal }: { text:
 // Above this size the live tail is windowed (see below).
 const STREAM_TAIL_MAX = 8000
 
+/** Char threshold above which a settled (non-streaming) assistant reply gets a
+ *  collapse/expand toggle. ~3000 chars ≈ 40-50 lines of markdown — matches the
+ *  tool-output COLLAPSED_LINES=50 convention in ToolGroup. */
+const ASSISTANT_COLLAPSE_THRESHOLD = 3000
+const ASSISTANT_COLLAPSE_HEIGHT = 400
+
+/** Wraps assistant children with a CSS max-height collapse when the settled
+ *  text is long. Streaming replies are always fully visible (can't collapse
+ *  content still being written). Mirrors ChatGPT/Claude long-reply behavior. */
+function CollapsibleAssistantBody({ text, isStreaming, children }: { text: string; isStreaming: boolean; children: React.ReactNode }) {
+  const { t } = useTranslation('threadView')
+  const collapsible = !isStreaming && text.length > ASSISTANT_COLLAPSE_THRESHOLD
+  const [expanded, setExpanded] = useState(!collapsible)
+  // Re-evaluate when a new reply arrives (regenerate): reset to collapsed.
+  useEffect(() => { if (collapsible) setExpanded(false) }, [text])
+
+  if (!collapsible) return <>{children}</>
+
+  return (
+    <div className={`assistant-collapse ${expanded ? 'expanded' : 'collapsed'}`}
+      style={{ maxHeight: expanded ? undefined : ASSISTANT_COLLAPSE_HEIGHT }}
+    >
+      {children}
+      {!expanded && <div className="assistant-collapse-fade" />}
+      <button
+        className="tool-expand-btn assistant-collapse-btn"
+        onClick={() => setExpanded((e) => !e)}
+      >
+        {expanded ? t('block.collapse') : t('block.expand')}
+      </button>
+    </div>
+  )
+}
+
 // Plain-text fallback for a live tail that has gone a long time without a
 // safe segment boundary (e.g. one giant code fence): only the trailing window
 // is rendered. The user is pinned to the bottom mid-stream (auto-scroll), so
@@ -2218,9 +2261,7 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
         {!open && summary && <span className="reasoning-peek">{summary}</span>}
         <span className="reasoning-caret" aria-hidden>{open ? '▾' : '▸'}</span>
       </div>
-      {open && (
-        <div className="reasoning-body" ref={bodyRef}>{shown}</div>
-      )}
+      <div className={`reasoning-body ${open ? '' : 'collapsed'}`} ref={bodyRef}>{shown}</div>
     </div>
   )
 }
