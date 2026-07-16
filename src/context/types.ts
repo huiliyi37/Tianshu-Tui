@@ -243,4 +243,10 @@ export interface SessionMetadata {
    * 「spec 到底发了几次 API 调用」无法从磁盘考证（2026-07-06 成本盲区修复）。
    */
   llmSpeculationEngine?: { fired: number; enqueued: number; parseFailures: number; errors: number }
+  /**
+   * Obligation final gate 遥测（evidence-driven reasoning loop Wave 3）：
+   * auto-continue 触发/误触发/诚实受阻计数。误触发率（misfires/continued）
+   * >20% 时优先怀疑 task kind 分类而非调低风险阈值。
+   */
+  obligationGate?: { continued: number; misfires: number; honestBlocked: number }
 }

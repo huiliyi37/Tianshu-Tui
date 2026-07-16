@@ -214,6 +214,15 @@ export interface TurnOrchestratorDeps {
   // === Telemetry ===
   writeTelemetry: (entry: TelemetryRecord) => void
   resetEvidence: () => void
+  // === Obligation final gate（evidence-driven reasoning loop Wave 3）===
+  /** natural-finish 候选判定（ObligationTracker.evaluateFinal）。缺省 → 门禁关闭（行为与旧版一致）。 */
+  evaluateObligationFinal?: () => import('./evidence-obligation.js').FinalEvaluation & { alreadyContinued: boolean }
+  /** 实际注入续轮动作后登记 latch，保证同一义务只自动续轮一次。 */
+  markObligationContinued?: (obligationId: string) => void
+  /** 义务 store 版本号（误触发遥测：续轮后 version 未变 = misfire）。 */
+  getObligationVersion?: () => number
+  /** 遥测：auto-continue 触发/误触发/诚实受阻计数（postSession 落 meta）。 */
+  recordObligationGateEvent?: (event: 'continued' | 'misfire' | 'honest_blocked') => void
 
   // === Stop-reason 落盘（2026-07-07 观测缺口修复）===
   /** 把结构化停止原因写进 AgentLoop.latestStopReason + session meta。
@@ -409,6 +418,12 @@ export class TurnOrchestrator {
     let finalTurnCompleted = false
     let actionIntentFiredThisRun = false
     let turnCallLimitAdvisoryFired = false
+    // Obligation final gate（evidence-driven reasoning loop Wave 3）：
+    // 本 run 内最多自动续轮一次（跨义务共享配额——多义务也不追加第二轮）；
+    // 记录续轮时的义务 store 版本以判定误触发（续轮后 version 未变 =
+    // 模型没有产生任何改变义务状态的证据动作）。
+    let obligationContinuation: { version: number } | null = null
+    let obligationGateFiredThisRun = false
 
     try {
       // maxTurns <= 0 means "no hard cap" (true YOLO / autonomous mode). The for
@@ -1231,6 +1246,51 @@ export class TurnOrchestrator {
             'action-intent-gate-complete',
           )
           continue
+        }
+
+        // ── Obligation final gate（action-intent 之后、natural-finish 之前）──
+        // 纯文本候选到达时，若存在未关闭的高风险证据义务：只自动续轮一次，
+        // 注入该义务的最短下一动作；已续过（tracker latch 或 run 级守卫）则
+        // 放行诚实受阻/未验证出口，绝不无限循环。低/中风险义务不参与
+        // （low_risk_small_edit_never_gates_final）。
+        if (this.deps.evaluateObligationFinal) {
+          // 误触发核账：本 run 曾续轮且义务状态自那以后零变化 → 模型没有
+          // 产生任何新证据动作（直接重复结论），记一次 misfire。
+          if (obligationContinuation && this.deps.getObligationVersion) {
+            if (this.deps.getObligationVersion() === obligationContinuation.version) {
+              this.deps.recordObligationGateEvent?.('misfire')
+            }
+            obligationContinuation = null
+          }
+          const obGate = this.deps.evaluateObligationFinal()
+          if (
+            obGate.verdict === 'continue_once'
+            && obGate.nextAction
+            && !obGate.alreadyContinued
+            && !obligationGateFiredThisRun
+          ) {
+            obligationGateFiredThisRun = true
+            this.deps.markObligationContinued?.(obGate.nextAction.obligationId)
+            this.deps.recordObligationGateEvent?.('continued')
+            obligationContinuation = { version: this.deps.getObligationVersion?.() ?? 0 }
+            debugLog(`[obligation-gate] turn=${turn} continue_once action=${obGate.nextAction.action} claim=${obGate.nextAction.claim.slice(0, 80)}`)
+            this.deps.appendSystemReminder(
+              `<system-reminder>上一轮结论依赖尚未证实的高风险断言：「${obGate.nextAction.claim}」。`
+              + `在给出最终答案前，请先执行最短证据动作：${obGate.nextAction.action}。`
+              + `若该动作确实无法执行（缺权限/环境/依赖），请在最终答复中明确标注该结论未经验证及具体障碍，不要声称已验证。</system-reminder>`,
+            )
+            await rejectOnAbort(
+              this.deps.completeTurn({ turn, isFinal: false, callbacks }),
+              signal!,
+              'obligation-gate-complete',
+            )
+            continue
+          }
+          if (obGate.verdict === 'honest_blocked') {
+            // 高风险义务受阻或已续过一轮仍未关闭：允许结束（诚实受阻出口），
+            // 披露责任已由义务块/控制面承担，这里只记账。
+            this.deps.recordObligationGateEvent?.('honest_blocked')
+          }
         }
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.

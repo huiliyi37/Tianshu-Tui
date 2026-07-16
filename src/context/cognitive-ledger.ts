@@ -33,6 +33,10 @@ export interface CognitiveLedgerInput {
   /** T5: 美德 mirror 字段 — renderMirror() 产出，Fibonacci 桶量化 + 固定排序。
    *  Null 时整段省略。无条件传入；渲染由 cognitive-prep 的 actionable gate 控制。 */
   virtue?: string | null
+  /** 证据义务结构化摘要（ObligationTracker.renderBlock() 产出，字节稳定）。
+   *  非空时替代泛化的 verification-gap 文案——当前断言、证据状态、下一动作
+   *  一目了然；空/缺省时回退旧 verification-gap 行为（无义务 ≠ 无验证缺口）。 */
+  obligationBlock?: string | null
 }
 
 export interface CognitiveLedger {
@@ -51,6 +55,7 @@ export interface CognitiveLedger {
   ctxRatio?: number
   ctxWindow?: number
   virtue?: string | null
+  obligationBlock?: string | null
 }
 
 export interface CognitivePhaseSnapshot {
@@ -79,6 +84,7 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     ctxRatio: input.ctxRatio,
     ctxWindow: input.ctxWindow,
     virtue: input.virtue ?? null,
+    obligationBlock: input.obligationBlock ?? null,
   }
 }
 
@@ -227,9 +233,11 @@ export function buildCognitiveProjectionParts(
     yaoguangHint?: string | null
   },
 ): CognitiveProjectionParts {
+  // 义务块非空时替代 verification-gap：同一"改了没验证"事实由结构化义务
+  // 表达（含下一动作），不再叠加一行泛化文案（worker_claim_single_voice 同哲学）。
   const stable = [
     ledger.contract ? renderContractProjection(ledger.contract) : '',
-    buildVerificationGapProjection(ledger),
+    ledger.obligationBlock || buildVerificationGapProjection(ledger),
     buildCognitiveMirror(ledger),
     buildUncertaintyProjection(ledger),
   ].filter(Boolean).join('\n')

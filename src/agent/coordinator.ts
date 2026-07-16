@@ -229,6 +229,11 @@ export interface DelegationCoordinatorConfig {
   /** Wave 3 控制面：worker 事实上报出口（episode 路径 + aggregation 路径）。
    *  best-effort——控制面故障绝不影响派发。 */
   onControlSignal?: (signal: import('./control-plane.js').ControlSignal) => void
+  /** 证据义务出口（evidence-driven reasoning loop）：verifyWorkerEvidence 后的
+   *  gated 结果回调，主控为未验证写入声明创建 external_claim 义务。设置后
+   *  worker unverified 信号降级为 status（worker_claim_single_voice——义务是
+   *  唯一的模型可见声音）。best-effort，义务归账故障绝不影响派发。 */
+  onVerifiedResults?: (results: readonly WorkerResult[]) => void
   /** Optional session registry for cross-process file claim coordination. */
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   /** Current session ID for claim management. */
@@ -953,9 +958,19 @@ export class DelegationCoordinator {
 
   /** Wave 3: map gated results to control signals (best-effort, never throws). */
   private emitWorkerResultSignals(results: WorkerResult[]): void {
+    // 义务出口先行：external_claim 义务创建后，同事实的 worker unverified
+    // 信号降级为 status（obligationVoice），不出现两份决策门文案。
+    const obligationVoice = this.config.onVerifiedResults !== undefined
+    if (obligationVoice) {
+      try {
+        this.config.onVerifiedResults!(results)
+      } catch {
+        // Obligation accounting must never affect delegation.
+      }
+    }
     if (!this.config.onControlSignal) return
     try {
-      for (const signal of signalsFromVerifiedResults(results)) {
+      for (const signal of signalsFromVerifiedResults(results, { obligationVoice })) {
         this.config.onControlSignal(signal)
       }
     } catch {

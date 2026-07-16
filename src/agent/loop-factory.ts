@@ -965,6 +965,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     writeTelemetry: (entry) => { self.telemetryWriter.write(entry) },
     resetEvidence: () => { self.evidence.reset() },
 
+    // === Obligation final gate（evidence-driven reasoning loop Wave 3）===
+    evaluateObligationFinal: () => self.obligations.evaluateFinal(),
+    markObligationContinued: id => { self.obligations.markContinued(id) },
+    getObligationVersion: () => self.obligations.getVersion(),
+    recordObligationGateEvent: event => { self.recordObligationGateEvent(event) },
+
     // === Stop-reason 落盘（2026-07-07 观测缺口修复）===
     recordStopReason: (r) => { self.recordStopReason(r) },
 

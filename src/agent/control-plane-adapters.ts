@@ -25,6 +25,7 @@ import {
 import type { AdvisoryLedgerDelta, DeliveredAdvisory } from './advisory-bus.js'
 import type { WorkerEpisode } from './worker-episode.js'
 import type { WorkerResult } from './work-order.js'
+import type { EvidenceObligation, ObligationStore } from './evidence-obligation.js'
 
 export type ControlPlaneMode = 'off' | 'shadow' | 'active'
 
@@ -174,10 +175,31 @@ export function signalFromWorkerEpisode(episode: WorkerEpisode): ControlSignal {
  * (the `aggregateResults` output). Verified ordinary results stay silent;
  * unverified write claims become a decision gate: the master must decide to
  * re-verify or reject, never auto-accept.
+ *
+ * `opts.obligationVoice` (worker_claim_single_voice): when the caller also
+ * creates an external_claim obligation for unverified write claims, the
+ * obligation IS the model-visible voice — the worker signal here degrades to
+ * a status line (no second decision gate, no duplicate appendix copy).
  */
-export function signalsFromVerifiedResults(results: readonly WorkerResult[]): ControlSignal[] {
+export function signalsFromVerifiedResults(
+  results: readonly WorkerResult[],
+  opts?: { obligationVoice?: boolean },
+): ControlSignal[] {
   return results.map(result => {
     if (result.evidenceStatus === 'unverified' && result.changedFiles.length > 0) {
+      if (opts?.obligationVoice) {
+        return {
+          key: `worker:unverified:${result.workOrderId}`,
+          kind: 'worker' as const,
+          severity: 'attention' as const,
+          summary: `worker ${result.workOrderId} wrote ${result.changedFiles.length} file(s) without transcript verification evidence (tracked as external_claim obligation)`,
+          routeHint: 'status' as const,
+          requiresDecision: false,
+          ttlTurns: 2,
+          evidenceKey: `worker-result:${result.workOrderId}`,
+          cacheImpact: 'none' as const,
+        }
+      }
       return {
         key: `worker:unverified:${result.workOrderId}`,
         kind: 'verification' as const,
@@ -219,4 +241,71 @@ export function signalsFromVerifiedResults(results: readonly WorkerResult[]): Co
       cacheImpact: 'none' as const,
     }
   })
+}
+
+// ── Obligation adapters (Wave 3, evidence-driven reasoning loop) ─────────────
+
+/** Families whose next step is a verification run (focus → verify);
+ *  everything else routes to inspect (read/probe/cross-check). */
+const VERIFY_FAMILIES: ReadonlySet<EvidenceObligation['family']> = new Set(['bugfix', 'delivery', 'regression'])
+
+/**
+ * Project the obligation store onto the control plane. Deterministic and
+ * byte-stable: keys derive from the stable obligation ID, summaries reuse the
+ * normalized claim text (identical state → identical signals → revision quiet).
+ *
+ * Routing: high open/attempted → decision-gate (kind='obligation', focus
+ * inspect/verify — NOT await-user); medium and high-blocked → status lane.
+ * Low obligations never surface (low_risk_small_edit_never_gates_final).
+ *
+ * Single-voice discipline: the model-visible copy of obligations is the
+ * `<evidence-obligation>` cognitive-projection block. Control-plane signals
+ * here carry focus/fingerprint/telemetry semantics only — they must NOT
+ * route to the appendix lane, or active mode would render the same fact
+ * twice (block + control-plane line).
+ */
+export function signalsFromObligations(store: ObligationStore): ControlSignal[] {
+  const signals: ControlSignal[] = []
+  for (const ob of store.obligations) {
+    if (ob.state === 'satisfied' || ob.state === 'superseded') continue
+    if (ob.risk === 'low') continue
+    const focusVerb = VERIFY_FAMILIES.has(ob.family) ? 'verify' : 'inspect'
+    if (ob.risk === 'high' && (ob.state === 'open' || ob.state === 'attempted')) {
+      signals.push({
+        key: `obligation:${focusVerb}:${ob.id}`,
+        kind: 'obligation',
+        severity: 'attention',
+        summary: `未证断言 [${ob.family}] ${ob.claim} → 下一步 ${ob.requiredAction}`,
+        requiresDecision: true,
+        ttlTurns: 2,
+        evidenceKey: `obligation:${ob.id}`,
+        cacheImpact: 'none',
+      })
+    } else if (ob.risk === 'high' && ob.state === 'blocked') {
+      signals.push({
+        key: `obligation:blocked:${ob.id}`,
+        kind: 'obligation',
+        severity: 'attention',
+        summary: `义务受阻 [${ob.family}] ${ob.claim}（${ob.lastFailureClass ?? 'blocked'}）——交付时须明示未验证与障碍`,
+        routeHint: 'status',
+        requiresDecision: false,
+        ttlTurns: 2,
+        evidenceKey: `obligation:${ob.id}`,
+        cacheImpact: 'none',
+      })
+    } else {
+      signals.push({
+        key: `obligation:${focusVerb}:${ob.id}`,
+        kind: 'obligation',
+        severity: 'attention',
+        summary: `未证断言 [${ob.family}] ${ob.claim} → 下一步 ${ob.requiredAction}`,
+        routeHint: 'status',
+        requiresDecision: false,
+        ttlTurns: 2,
+        evidenceKey: `obligation:${ob.id}`,
+        cacheImpact: 'none',
+      })
+    }
+  }
+  return signals
 }

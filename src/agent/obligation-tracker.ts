@@ -41,6 +41,9 @@ export interface SourceEditGateDecision {
 
 export class ObligationTracker {
   #store: ObligationStore = emptyObligationStore()
+  /** 单调递增：store 引用每次变化 +1。final gate 误触发遥测用——续轮后
+   *  version 不变 = 模型没有产生任何改变义务状态的证据动作。 */
+  #version = 0
   /** RED 编辑门的一次性 latch：同一义务只硬拦一次，重发放行（有界 gate，
    *  与 destructive gate 同哲学——挡的是惯性，不挡明确意图）。 */
   #redGateFired = new Set<string>()
@@ -51,37 +54,49 @@ export class ObligationTracker {
     return this.#store
   }
 
+  /** store 版本号：任何状态变化单调 +1。状态未变（reducer 返回同引用）不变。 */
+  getVersion(): number {
+    return this.#version
+  }
+
+  #set(next: ObligationStore): void {
+    if (next !== this.#store) {
+      this.#store = next
+      this.#version += 1
+    }
+  }
+
   /** 创建/合并义务，返回稳定 ID。 */
   upsert(input: CreateObligationInput): string {
-    this.#store = upsertObligation(this.#store, input)
+    this.#set(upsertObligation(this.#store, input))
     return deriveObligationId(input.family, input.claim, input.targets ?? [])
   }
 
   recordAttempt(id: string, input: { evidenceRef?: string; failureClass?: string } = {}): void {
-    this.#store = recordAttempt(this.#store, id, input)
+    this.#set(recordAttempt(this.#store, id, input))
   }
 
   satisfy(id: string, evidenceRef: string): void {
-    this.#store = satisfyObligation(this.#store, id, evidenceRef)
+    this.#set(satisfyObligation(this.#store, id, evidenceRef))
   }
 
   block(id: string, reason: string): void {
-    this.#store = blockObligation(this.#store, id, reason)
+    this.#set(blockObligation(this.#store, id, reason))
   }
 
   /** 用户任务边界：未决义务全部作废，latch 清空。 */
   supersedeOpen(): void {
-    this.#store = supersedeOpenObligations(this.#store)
+    this.#set(supersedeOpenObligations(this.#store))
     this.#redGateFired.clear()
     this.#continuedOnce.clear()
   }
 
   applyVerification(meta: VerificationMetadata): void {
-    this.#store = applyVerificationEvent(this.#store, meta)
+    this.#set(applyVerificationEvent(this.#store, meta))
   }
 
   applyProbe(probe: ProbeEventInput): void {
-    this.#store = applyProbeEvent(this.#store, probe)
+    this.#set(applyProbeEvent(this.#store, probe))
   }
 
   /** 工具失败信号（error-diagnosis / tool-pipeline catch 路径）：
@@ -93,7 +108,7 @@ export class ObligationTracker {
       if (ob.state === 'satisfied' || ob.state === 'superseded' || ob.state === 'blocked') continue
       const matches = ob.targets.some(t => normalized.includes(t) || t.includes(normalized))
       if (matches) {
-        this.#store = recordAttempt(this.#store, ob.id, { failureClass })
+        this.#set(recordAttempt(this.#store, ob.id, { failureClass }))
       }
     }
   }
@@ -115,7 +130,7 @@ export class ObligationTracker {
         || ob.targets.some(t => normalized.includes(t) || t.includes(normalized))
       if (!matches) continue
       this.#redGateFired.add(ob.id)
-      this.#store = recordAttempt(this.#store, ob.id, { failureClass: 'edit_before_red' })
+      this.#set(recordAttempt(this.#store, ob.id, { failureClass: 'edit_before_red' }))
       return {
         block: true,
         message: `Edit blocked by evidence gate (once): 该任务的 bugfix 义务「${ob.claim}」还没有 RED 复现——` +

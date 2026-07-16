@@ -1063,6 +1063,22 @@ export function createAgentRuntime(deps: {
     // Wave 3 控制面双源接线：episode 路径（writeGate/falseGreen）+ aggregation
     // 路径（verifyWorkerEvidence 后结果）都汇入主控控制面（shadow 记账）。
     onControlSignal: signal => { agent.controlPlane.submit(signal) },
+    // 证据义务接线（evidence-driven reasoning loop）：worker 未验证写入声明
+    // 创建 external_claim 义务——delegate 结果只是外部声明，主控 read/grep/
+    // 测试后才关闭（worker_claim_requires_primary_evidence）。设置本回调即
+    // 触发 worker unverified 信号降级（single voice）。
+    onVerifiedResults: results => {
+      for (const result of results) {
+        if (result.evidenceStatus === 'unverified' && result.changedFiles.length > 0) {
+          agent.obligations.upsert({
+            family: 'external_claim',
+            claim: `worker ${result.workOrderId} 的写入声明未经主控独立验证`,
+            targets: result.changedFiles,
+            risk: 'high',
+          })
+        }
+      }
+    },
     resumeEnabled: true,
     reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
     maxDelegationDepth: config.agent.maxDelegationDepth,

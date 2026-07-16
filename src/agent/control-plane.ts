@@ -25,6 +25,7 @@ export type ControlSignalKind =
   | 'compaction'
   | 'cache'
   | 'cross-session'
+  | 'obligation'
 
 export type AttentionRoute = 'silent' | 'status' | 'appendix' | 'decision-gate'
 export type SignalSeverity = 'info' | 'attention' | 'blocking'
@@ -98,6 +99,21 @@ function inferFocus(ordered: readonly ControlSignal[]): ControlPlaneFrame['focus
 }
 
 /**
+ * Focus for a frame that has decision gates. Obligation-kind gates mean "the
+ * model must go act" (inspect/verify) — NOT "wait for the user". Any
+ * non-obligation gate (false-green worker episode, worker timeout rebudget,
+ * permission/approval) keeps the historical `await-user` semantics and wins
+ * over obligation focus when mixed.
+ *
+ * Obligation gate keys carry their focus verb by convention:
+ * `obligation:verify:<id>` → verify, anything else → inspect.
+ */
+function focusForGates(gates: readonly ControlSignal[]): ControlPlaneFrame['focus'] {
+  if (gates.some(s => s.kind !== 'obligation')) return 'await-user'
+  return gates.some(s => s.key.startsWith('obligation:verify:')) ? 'verify' : 'inspect'
+}
+
+/**
  * Fold incoming signals into the previous frame. Pure and idempotent:
  * reducing again with no incoming input returns a deep-equal frame.
  */
@@ -125,7 +141,7 @@ export function reduceControlSignals(
     !== visibleFingerprint(previous.appendix, previous.decisionGates)
 
   return {
-    focus: decisionGates.length > 0 ? 'await-user' : inferFocus(ordered),
+    focus: decisionGates.length > 0 ? focusForGates(decisionGates) : inferFocus(ordered),
     signals: ordered,
     decisionGates,
     status,

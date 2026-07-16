@@ -33,7 +33,7 @@ import { formatImmuneContext } from './immune-context.js'
 import { VITALS_LITE_KIND } from './telemetry-writer.js'
 import { getCapsuleByStar } from './seed-capsule-store.js'
 import { BlockChargeTracker } from './injection-meter.js'
-import { signalFromLedgerDelta, signalsFromDelivered } from './control-plane-adapters.js'
+import { signalFromLedgerDelta, signalsFromDelivered, signalsFromObligations } from './control-plane-adapters.js'
 import { renderControlPlaneAppendix } from './control-plane.js'
 
 /**
@@ -289,6 +289,9 @@ export class TurnStepProducer {
 
     if (turnMode === 'task') {
       this.self.taskContract = extractTaskContract(userInput, this.self.session.getTurnCount())
+      // 证据义务任务边界：上一个用户任务的未决义务全部作废（satisfied 历史
+      // 保留），latch 清空——新任务从干净的义务面开始。
+      this.self.obligations.supersedeOpen()
     } else if (turnMode === 'followUp') {
       // P5: inherit the active contract, but fold in any new constraints/files
       // from this follow-up (multi-line corrections whose constraint sits past
@@ -329,6 +332,44 @@ export class TurnStepProducer {
     // Classify task dependency depth for TDD strategy / verifier selection
     if (this.self.taskContract && actionable) {
       const routeKinds = this.self._lastRetrievalRoute?.taskKinds
+      // 初始证据义务（evidence-driven reasoning loop Wave 3）：由结构化来源
+      // （task kind + contract）创建，不做自由文本 claim 抽取（计划「待验证假设」
+      // 明确第一版不上正则 claim detector）。只在新任务边界创建一次——upsert
+      // 幂等（稳定 ID），followUp 轮重复调用不改变状态。
+      if (turnMode === 'task') {
+        const targets = this.self.taskContract.scope.mentionedFiles
+        if (routeKinds?.includes('bug_fix')) {
+          // bugfix → RED 复现优先（动作矩阵第一列）。high：final gate 参与方。
+          this.self.obligations.upsert({
+            family: 'bugfix',
+            claim: `缺陷已被 RED 复现并修复：${this.self.taskContract.objective}`,
+            targets,
+            risk: 'high',
+          })
+        }
+        if (routeKinds?.includes('refactor')) {
+          // 重构的风险形态是回归。medium：提供 baseline_diff 升级阶梯与
+          // 状态可见性，但不拦 natural-finish（回归权威仍是 B1 delivery gate
+          // + regressionInventory 核验）。
+          this.self.obligations.upsert({
+            family: 'regression',
+            claim: `重构未破坏既有行为：${this.self.taskContract.objective}`,
+            targets,
+            risk: 'medium',
+          })
+        }
+        if (routeKinds?.includes('review_audit') || routeKinds?.includes('performance_diagnosis')) {
+          // 审查/诊断结论需要交叉验证（计划：review/diagnosis→交叉验证）。
+          // medium：诊断是排查不是交付，不制造 final gate 仪式。
+          this.self.obligations.upsert({
+            family: 'behavior',
+            claim: `诊断/审查结论有独立证据支撑：${this.self.taskContract.objective}`,
+            targets,
+            risk: 'medium',
+            requiredAction: 'cross_check',
+          })
+        }
+      }
       this.self._taskDepthLayer = classifyTaskDepth(this.self.taskContract, undefined, routeKinds)
       this.self.config.promptEngine.setTaskDepthLayer(this.self._taskDepthLayer)
       // Plan mode always uses design-doc advisory (not executable Superpowers bash template);
@@ -496,6 +537,12 @@ export class TurnStepProducer {
     const ledgerSignal = signalFromLedgerDelta(advisoryLedger)
     if (ledgerSignal) this.self.controlPlane.submit(ledgerSignal)
 
+    // 证据义务 → 控制面（Wave 3）：high open/attempted → decision-gate
+    // （kind='obligation'，focus 分流到 inspect/verify 而非 await-user）；
+    // medium/blocked → appendix。信号键/摘要由稳定义务 ID 和归一化 claim
+    // 派生——状态不变则字节不变，revision 静默。
+    this.self.controlPlane.submitAll(signalsFromObligations(this.self.obligations.getStore()))
+
     // 控制面归并：一轮一次（统一 TTL tick 点）。shadow/active 都在此归并；
     // shadow 只落 K0 遥测（有活动信号才写行，避免噪音），不触碰 prompt。
     {
@@ -648,6 +695,23 @@ export class TurnStepProducer {
     actionable: boolean,
     pressureResult: import('../context/pressure-monitor.js').PressureResult,
   ): void {
+    // Delivery 义务（动态）：任务型会话里代码文件被改且尚未验证 → 登记
+    // high 义务（self-verify 从 postTurn 软文升格为 final 前门禁的状态载体）。
+    // targets=[] → 任意 passed 验证即关闭（B1 delivery gate 仍是交付权威，
+    // 义务只负责 natural-finish 前的注意力）。doc/config-only 编辑不创建
+    // （low_risk_small_edit_never_gates_final）。upsert 幂等，每轮调用安全。
+    {
+      const ev = this.self.evidence.getState()
+      const gate = this.self.evidence.getGateState()
+      if (actionable && this.self.taskContract && gate.hasCodeEdits && ev.deliveryStatus === 'unverified') {
+        this.self.obligations.upsert({
+          family: 'delivery',
+          claim: '本任务修改的代码已通过相关验证',
+          targets: [],
+          risk: 'high',
+        })
+      }
+    }
     const cognitiveLedger = createCognitiveLedger({
       contract: this.self.taskContract,
       evidence: this.self.evidence.getState(),
@@ -671,6 +735,8 @@ export class TurnStepProducer {
       ctxWindow: this.self.config.contextWindow,
       // T5: 美德 mirror — Fibonacci 桶字节稳定，无条件传入
       virtue: this.self.stanceTally.renderMirror(),
+      // 证据义务结构化摘要：非空时替代 verification-gap（同一事实单一声音）。
+      obligationBlock: this.self.obligations.renderBlock(),
     })
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
 

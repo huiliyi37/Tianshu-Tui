@@ -506,6 +506,10 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     hooks.push(createSelfVerifyHook({
       advisoryBus: deps.advisoryBus,
       getEvidenceState: deps.getEvidenceState,
+      // 结构化 verification 信号 + 同义 advisory supersede（义务在场时义务块
+      // 是唯一声音，泛化 self-verify advisory 不再叠发）。
+      submitControlSignal: deps.submitControlSignal,
+      obligations: deps.obligations,
     }))
   }
 
@@ -564,7 +568,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // translation table in the system prompt — knowledge is injected
   // on-demand instead of occupying prompt space permanently.
   if (deps.advisoryBus) {
-    hooks.push(createErrorDiagnosisHook({ advisoryBus: deps.advisoryBus }))
+    hooks.push(createErrorDiagnosisHook({ advisoryBus: deps.advisoryBus, obligations: deps.obligations }))
   }
 
   // Probe-Tracking: postTool hook — detects debug probes (console.log,
@@ -610,6 +614,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     hooks.push(createDeadEndDetectorHook({
       advisoryBus: deps.advisoryBus,
       deposit: deps.stigmergyDeposit,
+      obligations: deps.obligations,
     }))
   }
 
@@ -706,7 +711,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // and exploration-stall don't cover: pure thinking length without tools.
   // Gated by RIVET_REASONING_SPIRAL_GUARD (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_REASONING_SPIRAL_GUARD !== '0') {
-    hooks.push(createReasoningSpiralHook({ advisoryBus: deps.advisoryBus }))
+    hooks.push(createReasoningSpiralHook({ advisoryBus: deps.advisoryBus, obligations: deps.obligations }))
   }
 
   // Language Anchor: postTool hook — when a turn's cumulative tool output is a
@@ -780,7 +785,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Spec-Verify Gate: preTurn hook — detects "read spec → implement
   // without verification" jumps and injects a constitutional advisory.
   if (deps.advisoryBus) {
-    hooks.push(createSpecVerifyGateHook({ advisoryBus: deps.advisoryBus }))
+    hooks.push(createSpecVerifyGateHook({ advisoryBus: deps.advisoryBus, obligations: deps.obligations }))
   }
 
   // Typecheck-Reminder: postTurn hook — fills self-verify's blind spot. tsx

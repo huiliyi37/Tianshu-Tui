@@ -164,6 +164,8 @@ export class AgentLoop {
   evidence: EvidenceTracker
   /** 证据义务状态机（evidence-driven reasoning loop）——与 evidence 同寿命。 */
   obligations: ObligationTracker
+  /** Obligation final gate 遥测（auto-continue 触发/误触发/诚实受阻计数，postSession 落 meta）。 */
+  obligationGateStats = { continued: 0, misfires: 0, honestBlocked: 0 }
   compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
   recentToolHistory: ToolHistoryEntry[] = []
   /** Component C (typecheck-reminder): a .ts/.tsx file was written this session. */
@@ -358,6 +360,13 @@ export class AgentLoop {
    * 中断 / 流错误 / 自然收尾不可区分）。现在同步写进 session meta，
    * 每次 run 结束覆盖上一条。写失败不致命（观测辅助，永不阻断）。
    */
+  /** Obligation final gate 遥测计数（turn-orchestrator 回调；postSession 落 meta）。 */
+  recordObligationGateEvent(event: 'continued' | 'misfire' | 'honest_blocked'): void {
+    if (event === 'continued') this.obligationGateStats.continued += 1
+    else if (event === 'misfire') this.obligationGateStats.misfires += 1
+    else this.obligationGateStats.honestBlocked += 1
+  }
+
   recordStopReason(r: StopReason): void {
     this.latestStopReason = r
     if (!this.persist) return
@@ -1778,6 +1787,15 @@ export class AgentLoop {
       const engineStats = this.llmSpeculationEngine?.stats()
       if (engineStats && engineStats.fired > 0) {
         this.persist?.updateMetadata({ llmSpeculationEngine: engineStats })
+      }
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
+    // Obligation final gate 遥测（Wave 3 心流保护）：auto-continue 触发率与
+    // 误触发率的原始计数。误触发率 >20% 时优先怀疑 task kind 分类而非调低
+    // 风险阈值（计划纪律）。有活动才写，闲置会话不长 meta。
+    try {
+      const og = this.obligationGateStats
+      if (og.continued > 0 || og.misfires > 0 || og.honestBlocked > 0) {
+        this.persist?.updateMetadata({ obligationGate: og })
       }
     } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
   }
