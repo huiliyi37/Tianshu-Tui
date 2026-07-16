@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { pickFolder } from '../lib/dialog'
 import type { ApprovalMode } from '../runtime/types'
 import { coerceLevel, levelToMode, type AutonomyLevel, LEVEL_META, AUTONOMY_LEVELS } from '../lib/autonomy'
 import { loadDefaultAutonomy } from '../lib/persist'
+import { listConfigProviders } from '../runtime/client'
+import { STAR_DOMAINS } from '../../agent/star-domain'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -29,7 +31,7 @@ import {
 export function NewSessionDialog(props: {
   defaultCwd?: string | null
   initialPrompt?: string | null
-  onCreate: (input: { cwd?: string; roots?: string[]; title?: string; prompt?: string; approvalMode?: ApprovalMode; isolatedWorktree?: boolean }) => void
+  onCreate: (input: { cwd?: string; roots?: string[]; title?: string; prompt?: string; approvalMode?: ApprovalMode; isolatedWorktree?: boolean; model?: string; domain?: string }) => void
   onClose: () => void
 }) {
   const { defaultCwd, initialPrompt, onCreate, onClose } = props
@@ -42,6 +44,31 @@ export function NewSessionDialog(props: {
   const [prompt, setPrompt] = useState(initialPrompt || '')
   const [level, setLevel] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
   const [worktree, setWorktree] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('')
+  const [selectedDomain, setSelectedDomain] = useState('')
+
+  // Fetch configured providers + models for the model dropdown.
+  const [providerModels, setProviderModels] = useState<{ value: string; label: string }[]>([])
+  useEffect(() => {
+    let cancelled = false
+    listConfigProviders()
+      .then((res) => {
+        if (cancelled) return
+        const opts: { value: string; label: string }[] = []
+        for (const p of res.providers) {
+          for (const m of p.models) {
+            opts.push({ value: m.id, label: `${p.label}: ${m.alias || m.id}` })
+          }
+        }
+        setProviderModels(opts)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const domainEntries = useMemo(() =>
+    Object.values(STAR_DOMAINS).map((d) => ({ value: d.id, label: `${d.uiPersona.glyph} ${d.name}` })),
+  [])
 
   const browse = async () => {
     const picked = await pickFolder()
@@ -70,6 +97,8 @@ export function NewSessionDialog(props: {
       prompt: prompt.trim() || undefined,
       approvalMode: levelToMode(level),
       isolatedWorktree: worktree || undefined,
+      model: selectedModel || undefined,
+      domain: selectedDomain || undefined,
     })
   }
 
@@ -169,6 +198,35 @@ export function NewSessionDialog(props: {
               })}
             </ToggleGroup>
             <p className="text-xs text-muted-foreground">{LEVEL_META[level].hint}</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <label className="text-xs text-muted-foreground">{t('modelLabel')}</label>
+              <select
+                className="h-9 rounded-md border border-border bg-transparent px-2 text-sm"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+              >
+                <option value="">{t('modelDefault')}</option>
+                {providerModels.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <label className="text-xs text-muted-foreground">{t('domainLabel')}</label>
+              <select
+                className="h-9 rounded-md border border-border bg-transparent px-2 text-sm"
+                value={selectedDomain}
+                onChange={(e) => setSelectedDomain(e.target.value)}
+              >
+                <option value="">{t('domainDefault')}</option>
+                {domainEntries.map((d) => (
+                  <option key={d.value} value={d.value}>{d.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <label className="flex cursor-pointer items-center gap-2 text-sm">

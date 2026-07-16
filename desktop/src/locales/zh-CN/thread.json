@@ -75,5 +75,9 @@
     "delegateWaiting": "等待任务列表…",
     "delegateAgent": "派发 {{agent}}",
     "delegating": "派发中…"
-  }
+  },
+  "modelLabel": "模型",
+  "modelDefault": "跟随项目/全局默认",
+  "domainLabel": "星域",
+  "domainDefault": "跟随项目/全局默认"
 }

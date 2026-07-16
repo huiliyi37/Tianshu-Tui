@@ -18,6 +18,7 @@
  */
 import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
 import { collectPostBoundaryEditIds } from '../agent/file-history.js'
+import { loadConfig } from '../config/manager.js'
 import type { DelegationActivity, Tool } from '../tools/types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
@@ -335,6 +336,10 @@ export interface CreateSessionInput {
   title?: string
   prompt?: string
   approvalMode?: ApprovalMode
+  /** Override the model for this session (takes priority over project/global defaults). */
+  model?: string
+  /** Override the star domain for this session (takes priority over project/global defaults). */
+  domain?: string
   /** Create an isolated git worktree for this session (parallel work without conflict). */
   isolatedWorktree?: boolean
   /**
@@ -1342,6 +1347,23 @@ export class RuntimeSessionManager {
     }
 
     const ts = this.now()
+
+    // Per-project defaults: load .rivet-config.json from the session cwd so
+    // agent.defaultDomain and provider.default override the global startup
+    // values. Explicit input.model/domain take top priority (user chose in the
+    // new-session dialog); then project config; then the global default.
+    let sessionModel = this.defaultModelId
+    let sessionDomain = this.defaultDomain ?? 'auto'
+    try {
+      const projectConfig = loadConfig({ cwd })
+      const projectDomain = projectConfig.agent?.defaultDomain
+      if (projectDomain && projectDomain !== 'auto') sessionDomain = projectDomain
+      const projectProvider = projectConfig.provider.providers[projectConfig.provider.default]
+      if (projectProvider?.models[0]?.id) sessionModel = projectProvider.models[0].id
+    } catch { /* project config load failure is non-fatal — fall back to global defaults */ }
+    if (input.model) sessionModel = input.model
+    if (input.domain) sessionDomain = input.domain
+
     const session: InternalSession = {
       record: {
         id,
@@ -1353,8 +1375,8 @@ export class RuntimeSessionManager {
         lastSeq: 0,
         pendingApprovals: 0,
         approvalMode: input.approvalMode,
-        model: this.defaultModelId,
-        domain: this.defaultDomain ?? 'auto',
+        model: sessionModel,
+        domain: sessionDomain,
         worktreeBranch,
         worktreePath,
         baselineHead,
@@ -1370,8 +1392,8 @@ export class RuntimeSessionManager {
       listeners: new Set(),
       knownArtifacts: new Set(),
       steer: new SteerBuffer(),
-      domainState: this.defaultDomain && this.defaultDomain !== 'auto'
-        ? resolveDomainState(this.defaultDomain)?.state
+      domainState: sessionDomain && sessionDomain !== 'auto'
+        ? resolveDomainState(sessionDomain)?.state
         : undefined,
       disabledSkills: new Set(),
       skillLoadErrors: [],

@@ -194,7 +194,7 @@ export function buildSessionRoutes(
 
   const routes: Record<string, RouteHandler> = {
     'POST /sessions': withAuth((body) => {
-      const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string; approvalMode?: unknown; isolatedWorktree?: unknown }
+      const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string; approvalMode?: unknown; isolatedWorktree?: unknown; model?: string; domain?: string }
       if (data.approvalMode !== undefined && !isApprovalMode(data.approvalMode)) {
         return { status: 400, body: { error: 'Invalid "approvalMode"' } }
       }
@@ -204,6 +204,8 @@ export function buildSessionRoutes(
         prompt: data.prompt,
         approvalMode: data.approvalMode as ApprovalMode | undefined,
         isolatedWorktree: data.isolatedWorktree === true,
+        model: typeof data.model === 'string' && data.model.trim() ? data.model.trim() : undefined,
+        domain: typeof data.domain === 'string' && data.domain.trim() ? data.domain.trim() : undefined,
       })
       return { status: 201, body: rec }
     }, apiToken),

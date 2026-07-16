@@ -438,6 +438,8 @@ export function createSession(input: {
   prompt?: string
   approvalMode?: ApprovalMode
   isolatedWorktree?: boolean
+  model?: string
+  domain?: string
 }): Promise<SessionRecord> {
   return apiPost<SessionRecord>('/sessions', input)
 }

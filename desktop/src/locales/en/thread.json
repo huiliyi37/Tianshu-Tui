@@ -75,5 +75,9 @@
     "delegateWaiting": "Waiting for task list…",
     "delegateAgent": "Dispatching {{agent}}",
     "delegating": "Dispatching…"
-  }
+  },
+  "modelLabel": "Model",
+  "modelDefault": "Follow project/global default",
+  "domainLabel": "Domain",
+  "domainDefault": "Follow project/global default"
 }
