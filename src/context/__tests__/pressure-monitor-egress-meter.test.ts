@@ -36,6 +36,18 @@ describe('PressureMonitor per-source injection ledger (W2-B1)', () => {
     assert.equal(pm.getCvmOverheadRatio(), 40 / 100_000)
   })
 
+  it('control-appendix (Wave 4) books as its own source — never merged into advisory-appendix', () => {
+    const pm = new PressureMonitor(100_000)
+    pm.recordCvmInjection(25, 'advisory-appendix')
+    pm.recordCvmInjection(15, 'control-appendix')
+    const bySource = pm.getCvmInjectionBySource()
+    assert.equal(bySource['advisory-appendix'], 25)
+    assert.equal(bySource['control-appendix'], 15)
+    const sum = Object.values(bySource).reduce((a, b) => a + (b ?? 0), 0)
+    assert.equal(sum, 40, 'identity holds with the new source in the union')
+    assert.equal(pm.getCvmOverheadRatio(), 40 / 100_000)
+  })
+
   it('resetCvmOverhead clears the total AND the per-source ledger together', () => {
     const pm = new PressureMonitor(100_000)
     pm.recordCvmInjection(25, 'advisory-appendix')

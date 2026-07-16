@@ -1060,6 +1060,9 @@ export function createAgentRuntime(deps: {
     sessionRegistry: refs.sessionRegistry ?? undefined,
     sessionId: refs.sessionId ?? undefined,
     artifactStore: agent.artifactStore,
+    // Wave 3 控制面双源接线：episode 路径（writeGate/falseGreen）+ aggregation
+    // 路径（verifyWorkerEvidence 后结果）都汇入主控控制面（shadow 记账）。
+    onControlSignal: signal => { agent.controlPlane.submit(signal) },
     resumeEnabled: true,
     reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
     maxDelegationDepth: config.agent.maxDelegationDepth,

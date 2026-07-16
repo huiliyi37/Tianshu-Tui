@@ -81,6 +81,12 @@ export interface RuntimeHookEffects {
   /** R4 — surface a structured course-correction to the desktop conversation. */
   emitDecisionShift(shift: DecisionShift): void
   markClaimStale(claimId: string): void
+  /** 控制面事实上报（Wave 2）：hook 报告结构化事实，由控制面统一路由
+   *  silent/status/appendix/decision-gate。默认 no-op；shadow 模式只记账不改
+   *  prompt。任务数据（MCTS seed / scout packet）不得走此通道。
+   *  Optional（兼容既有手工构造的 effects 字面量）；createRuntimeHookContext
+   *  恒填充，hook 侧可直接调用。 */
+  emitControlSignal?(signal: import('./control-plane.js').ControlSignal): void
 }
 
 export interface RuntimeHookContext {
@@ -170,6 +176,7 @@ export function createRuntimeHookContext(
       emitPhaseChange: effects.emitPhaseChange ?? noop,
       emitDecisionShift: effects.emitDecisionShift ?? noop,
       markClaimStale: effects.markClaimStale ?? noop,
+      emitControlSignal: effects.emitControlSignal ?? noop,
     },
   }
 }

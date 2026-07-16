@@ -35,6 +35,7 @@ import { WorkerLiveness, EXPLORE_STALL_MS, WRITE_STALL_MS } from './worker-liven
 import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
 import { buildWorkerEpisode } from './worker-episode.js'
 import { recordWorkerEpisodeClosure } from './reward-loop.js'
+import { signalFromWorkerEpisode, signalsFromVerifiedResults } from './control-plane-adapters.js'
 import { WorktreeCoordinator } from './worktree-coordinator.js'
 import { classifyProfile } from './coordination-policy.js'
 import { aggregateResults } from './aggregation.js'
@@ -224,6 +225,9 @@ export interface DelegationCoordinatorConfig {
   /** Optional provider health tracker for Physarum-style routing.
    *  When set, cold-tier providers are excluded from model selection. */
   providerHealth?: ProviderHealthTracker
+  /** Wave 3 控制面：worker 事实上报出口（episode 路径 + aggregation 路径）。
+   *  best-effort——控制面故障绝不影响派发。 */
+  onControlSignal?: (signal: import('./control-plane.js').ControlSignal) => void
   /** Optional session registry for cross-process file claim coordination. */
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   /** Current session ID for claim management. */
@@ -902,8 +906,23 @@ export class DelegationCoordinator {
         ...(handsRun.writeGate ? { writeGate: handsRun.writeGate } : {}),
       })
       recordWorkerEpisodeClosure(this.config.modelTierShadowStore, episode)
+      // Wave 3 episode path: control plane consumes writeGate/falseGreen/
+      // repairCount facts here (NOT via aggregation — its signature stays).
+      this.config.onControlSignal?.(signalFromWorkerEpisode(episode))
     } catch {
       // Episode telemetry is best-effort.
+    }
+  }
+
+  /** Wave 3: map gated results to control signals (best-effort, never throws). */
+  private emitWorkerResultSignals(results: WorkerResult[]): void {
+    if (!this.config.onControlSignal) return
+    try {
+      for (const signal of signalsFromVerifiedResults(results)) {
+        this.config.onControlSignal(signal)
+      }
+    } catch {
+      // Control-plane telemetry must never affect delegation.
     }
   }
 
@@ -1855,6 +1874,9 @@ export class DelegationCoordinator {
     }
 
     const results = aggregateResults([run.result], 'primary_decides', profileMap, transcriptMap)
+    // Wave 3 aggregation path: consume ONLY the verifyWorkerEvidence-gated
+    // output — the adapter maps, never re-derives evidence policy.
+    this.emitWorkerResultSignals(results)
 
     // V3 Component B-loop: precipitate domain lessons from results
     if (order.authority && this.config.domainKnowledgeStore) {
@@ -2031,6 +2053,8 @@ export class DelegationCoordinator {
 
     const profileMap = new Map(orders.map(o => [o.id, o.profile] as const))
     const aggregated = [...aggregateResults(allResults, policy, profileMap), ...depthCapped]
+    // Wave 3 aggregation path: post-verifyWorkerEvidence facts only.
+    this.emitWorkerResultSignals(aggregated)
     // D1: persist worker results to ~/.rivet/subagents/
     for (const r of aggregated) {
       persistWorkerResult(r)

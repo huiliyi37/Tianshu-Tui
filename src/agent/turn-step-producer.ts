@@ -33,6 +33,8 @@ import { formatImmuneContext } from './immune-context.js'
 import { VITALS_LITE_KIND } from './telemetry-writer.js'
 import { getCapsuleByStar } from './seed-capsule-store.js'
 import { BlockChargeTracker } from './injection-meter.js'
+import { signalFromLedgerDelta, signalsFromDelivered } from './control-plane-adapters.js'
+import { renderControlPlaneAppendix } from './control-plane.js'
 
 /**
  * Resolve the turn-level hard-stall watchdog ceiling (ms) from provider +
@@ -146,6 +148,10 @@ export class TurnStepProducer {
   private readonly advisoryBlockCharge = new BlockChargeTracker()
   /** advisory 计费基线对应的 compact 轮（与 chargeBaselineCompactTurn 同语义） */
   private advisoryChargeBaselineCompactTurn: number | null = null
+  /** Wave 4: control-plane appendix 独立计费 tracker——同一字节绝不同时记在
+   *  advisory-appendix 与 control-appendix（两个 block 互斥，各自持有 tracker）。 */
+  private readonly controlBlockCharge = new BlockChargeTracker()
+  private controlChargeBaselineCompactTurn: number | null = null
 
   /**
    * Step 6a: Per-run initialization — warmup, heartbeat, state resets,
@@ -473,7 +479,11 @@ export class TurnStepProducer {
 
     // P1a 核销闭环：把本轮实际送达的条目（含 expect 谓词）交给 readback 跟踪。
     // 送达轮 = 当前 turn；postTurn 的 advisory-readback-evaluate 按窗口核销。
-    this.self.advisoryReadback.track(this.self.advisoryBus.drainDelivered(), turn)
+    // 控制面 tee（Wave 2）：单次 drain → 不可变快照 → 多路分发。readback 与
+    // control adapter 消费同一快照；adapter 绝不自行 drain（一次性消费边界）。
+    const deliveredSnapshot = this.self.advisoryBus.drainDelivered()
+    this.self.advisoryReadback.track(deliveredSnapshot, turn)
+    this.self.controlPlane.submitAll(signalsFromDelivered(deliveredSnapshot))
 
     // Phase 0 观测：advisory 投递账本落盘（仅有活动时写，避免遥测噪音），
     // 并把 guardian 活动摘要（CCR/改道/丢弃计数）同步进 session meta。
@@ -483,6 +493,43 @@ export class TurnStepProducer {
     }
     this.self.recordAdvisoryLedger(advisoryLedger)
     this.self.flushGuardianMeta()
+    const ledgerSignal = signalFromLedgerDelta(advisoryLedger)
+    if (ledgerSignal) this.self.controlPlane.submit(ledgerSignal)
+
+    // 控制面归并：一轮一次（统一 TTL tick 点）。shadow/active 都在此归并；
+    // shadow 只落 K0 遥测（有活动信号才写行，避免噪音），不触碰 prompt。
+    {
+      const prevRevision = this.self.controlPlane.getFrame().revision
+      const frame = this.self.controlPlane.reduceTurn()
+      if (frame.signals.length > 0 || frame.revision !== prevRevision) {
+        this.self.telemetryWriter.write({
+          kind: 'control-plane-frame',
+          turn,
+          focus: frame.focus,
+          revision: frame.revision,
+          signals: frame.signals.length,
+          gates: frame.decisionGates.map(s => s.key),
+          appendix: frame.appendix.map(s => s.key),
+          status: frame.status.length,
+        })
+      }
+      // Wave 4：仅 active 模式把 appendix lane 交给 dynamic appendix setter。
+      // 渲染是 frame 的纯函数（无时间戳/随机值/计数）——revision 不变则字节
+      // 不变，appendixDelta 稳态零重发。off/shadow 下绝不调用 setter，
+      // PromptEngine 输出与无控制面时逐字节一致（cache-prefix-replay 锁定）。
+      if (this.self.controlPlane.mode === 'active') {
+        const controlBlock = renderControlPlaneAppendix(frame)
+        this.self.config.promptEngine.setControlPlaneAppendix(controlBlock)
+        if (this.self.lastCompactTurn !== this.controlChargeBaselineCompactTurn) {
+          this.controlChargeBaselineCompactTurn = this.self.lastCompactTurn
+          this.controlBlockCharge.reset()
+        }
+        const controlChargedChars = this.controlBlockCharge.charge(controlBlock ?? '')
+        if (controlChargedChars > 0) {
+          this.self.pressureMonitor.recordCvmInjection(Math.ceil(controlChargedChars / 4), 'control-appendix')
+        }
+      }
+    }
 
     // W5 轻量生命体征快照（通道 C，默认落盘）：单行 <200B，百轮 <20KB。
     // 事后复盘的最小数据面——节流何时触发、镜面是否存活、advisory 台账走势。

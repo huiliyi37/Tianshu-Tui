@@ -1,5 +1,6 @@
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import type { KnowledgeCandidate } from '../memory/essence-gate.js'
+import { ControlPlaneController } from './control-plane-adapters.js'
 import { SessionContext } from './context.js'
 import { SessionPersist, getSessionDir } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
@@ -538,6 +539,9 @@ export class AgentLoop {
   advisoryBus = new AdvisoryBus()
   /** P1a 核销闭环：advisory 送达后按 expect 谓词核销 adopted/ignored */
   advisoryReadback = new AdvisoryReadback()
+  /** 主控心流控制面（RIVET_CONTROL_PLANE: off|shadow|active，默认 shadow）。
+   *  shadow 只归并/记账（K0），不改 prompt；active 才允许 appendix 出口（Wave 4）。 */
+  controlPlane = new ControlPlaneController()
   /** 破坏性命令 pre-execution 闸门(验证失败后 git 清场当轮拦截,首拦重放行)。
    *  tool-pipeline 是唯一写者兼读者,loop 只持有生命周期。 */
   destructiveGate = createDestructiveGateState({
@@ -710,6 +714,7 @@ export class AgentLoop {
       requestThetaCheck: reason => { this.requestThetaCheck(reason) },
       setReasoningEffort: effort => { this.setReasoningEffort(effort) },
       getFingerprint: () => this.config.promptEngine.getFingerprint(),
+      submitControlSignal: signal => { this.controlPlane.submit(signal) },
     })
     this.intent = new TurnIntentController()
     this.contextInjection = new ContextInjectionController({

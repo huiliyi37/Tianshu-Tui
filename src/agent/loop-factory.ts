@@ -317,6 +317,7 @@ export function createToolExecutionController(self: AgentLoop): ToolExecutionCon
       onSkillInvoked: name => self.config.promptEngine.markSkillInvoked(name),
       onSkillCompleted: name => self.config.promptEngine.markSkillCompleted(name),
       buildRuntimeSnapshot: extra => self.buildRuntimeSnapshot(extra),
+      submitControlSignal: signal => { self.controlPlane.submit(signal) },
       requestThetaCheck: reason => { self.requestThetaCheck(reason) },
       getAutoReasoning: () => self.config.autoReasoning ?? false,
       getReasoningEffort: () => self.config.reasoningEffort,
@@ -793,6 +794,19 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
         } catch {
           // fail-open: absent from the map → transform keeps the original
         }
+      }
+      // Wave 4 控制面：归档事实只进 silent（recovery ref 已在消息尾部留痕，
+      // 主控无需被打断）。
+      if (out.size > 0) {
+        self.controlPlane.submit({
+          key: 'compaction:boundary-archive',
+          kind: 'compaction',
+          severity: 'info',
+          summary: `compact boundary archived ${out.size} marker-less tool message(s) for recovery`,
+          requiresDecision: false,
+          ttlTurns: 1,
+          cacheImpact: 'none',
+        })
       }
       return out
     },

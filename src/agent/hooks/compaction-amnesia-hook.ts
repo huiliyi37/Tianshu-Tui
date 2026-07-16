@@ -99,6 +99,17 @@ export function createCompactionAmnesiaHook(deps: CompactionAmnesiaHookDeps): Po
             contentHash: hash,
             ...(prior.lossy ? { exclusion: 'prior-lossy' as const } : {}),
           })
+          // Wave 4 控制面：失忆事实只进 silent（shadow 记账，绝不进 prompt）。
+          // effects 可缺省（旧测试固件手工构造 ctx）——控制面上报是 best-effort。
+          ctx.effects?.emitControlSignal?.({
+            key: `compaction:amnesia:${target}`,
+            kind: 'compaction',
+            severity: 'info',
+            summary: `post-compact full re-read of unchanged file ${target}${prior.lossy ? ' (prior-lossy, discounted)' : ''}`,
+            requiresDecision: false,
+            ttlTurns: 1,
+            cacheImpact: 'none',
+          })
         }
       }
 

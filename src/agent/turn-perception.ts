@@ -28,6 +28,8 @@ export interface TurnPerceptionDeps {
   requestThetaCheck(reason: string): void
   setReasoningEffort(effort: StrategyProfile['reasoningEffort']): void
   getFingerprint(): PrefixFingerprint
+  /** Wave 2 控制面：hook 结构化事实上报出口（shadow 记账，不改 prompt）。 */
+  submitControlSignal?(signal: import('./control-plane.js').ControlSignal): void
 }
 
 export interface PerceptionInput {
@@ -105,6 +107,7 @@ export class TurnPerceptionController {
       injectUserMessage: message => { this.deps.addUserMessage(message) },
       emitPhaseChange: (phase, detail) => { effects.emitPhaseChange(phase, detail) },
       emitDecisionShift: shift => { effects.emitDecisionShift?.(shift) },
+      emitControlSignal: signal => { this.deps.submitControlSignal?.(signal) },
     }))
 
     if (!nextSensorium || !nextStrategy) {
@@ -120,6 +123,7 @@ export class TurnPerceptionController {
       setStrategy: strategy => { currentStrategy = strategy },
       setVigor: vigor => { nextVigor = vigor },
       requestThetaCheck: reason => { this.deps.requestThetaCheck(reason) },
+      emitControlSignal: signal => { this.deps.submitControlSignal?.(signal) },
     }))
     nextStrategy = currentStrategy
 

@@ -71,6 +71,8 @@ export interface ToolExecutionDeps {
   recordToolHistory: (name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: ToolErrorClass) => void
   buildRuntimeSnapshot: (extra?: Partial<RuntimeHookSnapshot>) => RuntimeHookSnapshot
   requestThetaCheck: (reason: string) => void
+  /** Wave 2 控制面：postTool hook 结构化事实上报出口（shadow 记账，不改 prompt）。 */
+  submitControlSignal?: (signal: import('./control-plane.js').ControlSignal) => void
   getAutoReasoning: () => boolean
   getReasoningEffort: () => ReasoningEffort | undefined
   setClientReasoningEffort: (effort: ReasoningEffort) => void
@@ -610,6 +612,7 @@ export class ToolExecutionController {
           {
             setVigor: (vigor) => { this.deps.setVigorState(vigor) },
             requestThetaCheck: (reason) => { this.deps.requestThetaCheck(reason) },
+            emitControlSignal: signal => { this.deps.submitControlSignal?.(signal) },
             markClaimStale: claimId => {
               this.deps.config.contextClaimStore?.updateClaimStatus(
                 claimId,

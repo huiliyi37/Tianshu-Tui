@@ -120,3 +120,47 @@ describe('cache-prefix replay: earliest-divergence gate', () => {
     assert.equal(div!.index, 1)
   })
 })
+
+describe('control-plane appendix cache gate (Wave 4)', () => {
+  it('off/shadow: setControlPlaneAppendix(null) is byte-identical to never calling it', () => {
+    const untouched = makeEngine()
+    const nulled = makeEngine()
+    nulled.setControlPlaneAppendix(null)
+    const conv: OaiMessage[] = [{ role: 'user', content: 'same task' }]
+    const a = serialize(untouched.buildOaiRequest(conv).messages)
+    const b = serialize(nulled.buildOaiRequest(conv).messages)
+    assert.deepEqual(b, a)
+  })
+
+  it('active: setting a control block never diverges earlier than the dynamic boundary (history prefix intact)', () => {
+    const engine = makeEngine()
+    const conv: OaiMessage[] = [{ role: 'user', content: 'q1' }]
+    const req1 = engine.buildOaiRequest(conv)
+    const bytes1 = serialize(req1.messages)
+
+    // Frame changed → active mode sets a new block before the next build.
+    engine.setControlPlaneAppendix('<control-plane>\n- [attention] worker wo-1 wrote 2 file(s) without transcript verification evidence\n</control-plane>')
+    conv.push({ role: 'assistant', content: 'a1' })
+    conv.push({ role: 'user', content: 'q2' })
+    const req2 = engine.buildOaiRequest(conv)
+    const bytes2 = serialize(req2.messages)
+
+    // Previous request must remain a byte prefix — the block may only appear
+    // in the NEW tail user message, never rewrite history.
+    const div = earliestDivergence(bytes1, bytes2)
+    assert.equal(div, null, div ? `divergence at ${div.index}` : undefined)
+    assert.ok(bytes2.at(-1)?.includes('control-plane'), 'block must attach to the newest user message')
+    for (const b of bytes2.slice(0, -1)) {
+      assert.ok(!b.includes('<control-plane>'), 'block must not leak into historical messages')
+    }
+  })
+
+  it('active: unchanged frame → identical bytes across consecutive builds (appendixDelta steady state)', () => {
+    const engine = makeEngine()
+    engine.setControlPlaneAppendix('<control-plane>\n- [info] stable fact\n</control-plane>')
+    const conv: OaiMessage[] = [{ role: 'user', content: 'q1' }]
+    const a = serialize(engine.buildOaiRequest(conv).messages)
+    const b = serialize(engine.buildOaiRequest(conv).messages)
+    assert.deepEqual(b, a)
+  })
+})

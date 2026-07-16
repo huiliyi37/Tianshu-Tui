@@ -33,6 +33,9 @@ const CVM_OVERHEAD_CEILING = 0.08
  *     append-only: charged once per append)
  *   - runtime-payload — runtime hook injectUserMessage payloads (K1
  *     append-only: charged once per append)
+ *   - control-appendix — control-plane dynamic appendix (Wave 4, active mode
+ *     only; own BlockChargeTracker — the same byte is NEVER also charged to
+ *     advisory-appendix)
  */
 export type CvmInjectionSource =
   | 'projection'
@@ -41,6 +44,7 @@ export type CvmInjectionSource =
   | 'advisory-appendix'
   | 'system-reminder'
   | 'runtime-payload'
+  | 'control-appendix'
 
 export class PressureMonitor {
   private compactionTurns: number[] = []
