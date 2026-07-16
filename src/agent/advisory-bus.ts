@@ -468,6 +468,20 @@ export class AdvisoryBus {
     return out
   }
 
+  /**
+   * 只读观察口（CVM-vector v3.1 Wave 1）：当前可能参与本轮 render 的条目 key
+   * （本轮已提交 + 跨轮存活 + 阶段抑制携带）。让位判定用——render 前判断
+   * "同类声音是否已在场"。无副作用：不 drain、不重排、不触碰任何账本，
+   * peek 后的 render 输出与未 peek 时逐字节一致（测试锁定）。
+   */
+  peekPendingKeys(): string[] {
+    const keys = new Set<string>()
+    for (const e of this.entries) keys.add(e.key)
+    for (const e of this.alive) keys.add(e.key)
+    for (const c of this.suppressedCarry) keys.add(c.entry.key)
+    return [...keys]
+  }
+
   /** 投递一条劝导 */
   submit(entry: AdvisoryEntry): void {
     this.entries.push(entry)

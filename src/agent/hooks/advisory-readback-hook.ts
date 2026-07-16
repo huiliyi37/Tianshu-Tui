@@ -33,6 +33,11 @@ export function extractObservedTarget(tool: RuntimeToolEvent): string {
     if (typeof fp === 'string') return fp
     const pattern = input.pattern
     if (typeof pattern === 'string') return pattern
+    // CVM-vector v3.1：recall_capsule 的结构化 input 只有 star 字段——
+    // 不提取则 observed target 恒为空串，tool_appears+targetIncludes 谓词
+    // 永远无法核销（伪 expect）。结构化提取，不做自由文本猜测。
+    const star = input.star
+    if (typeof star === 'string') return star
   }
   return tool.target ?? ''
 }

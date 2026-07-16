@@ -491,6 +491,63 @@ export class TurnStepProducer {
     // Anti-habituation: staleness / vigor-low advisories are now routed by
     // CognitiveCapsuleRouter (preTurn hook) via advisory bus. Manual injection removed.
 
+    // CVM-vector 干预路由（v3.1 计划）：render 前的唯一评估点——此时本轮
+    // convergence/pressure/obligation 事实与各 preTurn hook 的 pending advisory
+    // 全部就绪。纪律：off 不评估；shadow 只落 telemetry，绝不 submit（“名义
+    // shadow、实际影响模型”是计划的反证测试项）；active 至多 submit 一条。
+    // evaluator 抛错吞掉——干预路由永不阻断主 turn。
+    if (this.self.cvmVector.mode !== 'off') {
+      try {
+        const conv = this.self.latestConvergenceResult
+        const evidenceState = this.self.evidence.getState()
+        const decision = this.self.cvmVector.evaluator.evaluate({
+          turn,
+          phaseClass: this.self.getConvergencePhaseClass(),
+          convergence: conv
+            ? {
+                score: conv.score,
+                level: conv.level,
+                textRepetitionPenalty: conv.signals.textRepetitionPenalty,
+                oscillationPenalty: conv.signals.oscillationPenalty,
+              }
+            : null,
+          pressure: {
+            ratio: pressureResult.ratio,
+            cvmOverheadRatio: pressureResult.cvmOverheadRatio,
+            thrashing: pressureResult.thrashing,
+            shouldThrottleCvm: pressureResult.shouldThrottleCvm,
+            hardCeiling: this.self.pressureMonitor.isCvmThrottlingCeiling(),
+          },
+          obligations: this.self.obligations.getStore(),
+          evidence: {
+            filesModified: evidenceState.filesModified.size,
+            deliveryStatus: evidenceState.deliveryStatus,
+          },
+          pendingAdvisoryKeys: this.self.advisoryBus.peekPendingKeys(),
+          convergenceEmittedRecently: this.self.wasConvergenceEmittedRecently(),
+          scoutOwned: this.self.anchorScoutOwned,
+          hasDecisionGates: this.self.controlPlane.getFrame().decisionGates.length > 0,
+        })
+        if (decision.classification || decision.candidate || decision.yielded) {
+          this.self.telemetryWriter.write({
+            kind: 'cvm-vector-decision',
+            turn,
+            mode: this.self.cvmVector.mode,
+            classification: decision.classification?.kind ?? null,
+            ruleId: decision.classification?.ruleId ?? decision.candidate?.ruleId ?? null,
+            facts: decision.classification?.facts ?? null,
+            candidateKey: decision.candidate?.entry.key ?? null,
+            yielded: decision.yielded,
+          })
+        }
+        if (this.self.cvmVector.mode === 'active' && decision.candidate) {
+          this.self.advisoryBus.submit(decision.candidate.entry)
+        }
+      } catch {
+        // CVM-vector 评估失败不影响 turn 主路径
+      }
+    }
+
     // A1: flush advisory bus into prompt engine (unified corrective guidance)
     // Pass active star domain name for dedup — suppress entries whose 【星名】 tag
     // matches the domain already rendered in the frozen base.

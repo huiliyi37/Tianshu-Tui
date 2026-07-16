@@ -38,6 +38,8 @@ export interface AnchorBreakScoutHookDeps {
   getAbortSignal?: () => AbortSignal | undefined
   /** Telemetry sink (meridian DB). Optional. */
   store?: AnchorBreakShadowStore | null
+  /** CVM-vector 让位判据：scout 派发（获得视角干预所有权）时回调一次。 */
+  onScoutDispatched?: () => void
 }
 
 /**
@@ -112,6 +114,7 @@ export function createAnchorBreakScoutHook(deps: AnchorBreakScoutHookDeps): PreT
         // Mark before awaiting so an in-flight scout can't be double-dispatched
         // by a subsequent turn.
         hasScouted = true
+        deps.onScoutDispatched?.()
 
         const parentDepth = deps.getDelegationDepth?.() ?? 0
         const request = buildForeignScoutRequest({

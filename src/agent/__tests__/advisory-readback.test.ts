@@ -332,4 +332,32 @@ describe('advisory-readback-hook — 运行时接线', () => {
     assert.equal(extractObservedTarget({ name: 'grep', success: true, input: { pattern: 'foo' } }), 'foo')
     assert.equal(extractObservedTarget({ name: 'x', success: true, target: 't' }), 't')
   })
+
+  // CVM-vector v3.1：recall_capsule 的 star 字段结构化提取——
+  // 没有它 tool_appears+targetIncludes('天璇') 谓词恒空串不匹配（伪 expect）
+  it('extractObservedTarget: recall_capsule → star 字段', () => {
+    assert.equal(extractObservedTarget({ name: 'recall_capsule', success: true, input: { star: '天璇' } }), '天璇')
+  })
+
+  it('tool_appears+targetIncludes(star) 经 recall_capsule 事件可核销', () => {
+    const rb = new AdvisoryReadback()
+    const [observer, evaluator] = createAdvisoryReadbackHooks({ readback: rb })
+    deliver(rb, 'cvm-vector-天璇-CV2', { kind: 'tool_appears', tools: ['recall_capsule'], targetIncludes: '天璇', withinTurns: 3 }, 5)
+    observer.run(ctxAt(6), { name: 'recall_capsule', success: true, input: { star: '天璇' } })
+    evaluator.run(ctxAt(6))
+    const stats = rb.getStats().get('cvm-vector-天璇-CV2')
+    assert.equal(stats?.adopted, 1)
+    assert.equal(stats?.ignored, 0)
+  })
+
+  it('tool_appears+targetIncludes(star) 召回别的星域不算采纳', () => {
+    const rb = new AdvisoryReadback()
+    const [observer, evaluator] = createAdvisoryReadbackHooks({ readback: rb })
+    deliver(rb, 'cvm-vector-天璇-CV2', { kind: 'tool_appears', tools: ['recall_capsule'], targetIncludes: '天璇', withinTurns: 1 }, 5)
+    observer.run(ctxAt(5), { name: 'recall_capsule', success: true, input: { star: '瑶光' } })
+    evaluator.run(ctxAt(5))
+    const stats = rb.getStats().get('cvm-vector-天璇-CV2')
+    assert.equal(stats?.adopted, 0)
+    assert.equal(stats?.ignored, 1)
+  })
 })

@@ -392,4 +392,51 @@ describe('priority tier (constitutional/operational/informational)', () => {
     const opPos = result.indexOf('OP')
     assert.ok(constPos < opPos, 'constitutional should render before operational')
   })
+
+  // ── CVM-vector v3.1 Wave 1: peekPendingKeys 无副作用观察口 ──
+
+  describe('peekPendingKeys', () => {
+    it('returns submitted keys before render', () => {
+      const bus = new AdvisoryBus()
+      bus.submit({ key: 'ccr-瑶光-P1', priority: 0.55, category: 'star_domain', content: 'X' })
+      bus.submit({ key: 'self-verify', priority: 0.6, category: 'discipline', content: 'Y' })
+      assert.deepEqual(new Set(bus.peekPendingKeys()), new Set(['ccr-瑶光-P1', 'self-verify']))
+    })
+
+    it('includes alive (ttl carried) entries after a render', () => {
+      const bus = new AdvisoryBus()
+      bus.submit({ key: 'persist', priority: 0.8, category: 'repair', content: 'P', ttl: 2 })
+      bus.render()
+      assert.ok(bus.peekPendingKeys().includes('persist'), 'alive entry should be visible to peek')
+    })
+
+    it('has zero side effects — render output byte-identical with and without peek', () => {
+      const mkBus = () => {
+        const bus = new AdvisoryBus()
+        bus.submit({ key: 'a', priority: 0.7, category: 'repair', content: 'AAA', ttl: 2 })
+        bus.submit({ key: 'b', priority: 0.5, category: 'mistake', content: 'BBB', expect: { kind: 'verify_attempted' } })
+        bus.submit({ key: 'c', priority: 0.9, tier: 'constitutional', category: 'constitutional', content: 'CCC' })
+        return bus
+      }
+      const peeked = mkBus()
+      const control = mkBus()
+      peeked.peekPendingKeys()
+      peeked.peekPendingKeys() // 重复 peek 也不能改变任何东西
+      const r1 = peeked.render(undefined, 3)
+      const r2 = control.render(undefined, 3)
+      assert.equal(r1, r2, 'peek must not perturb render output')
+      // 账本与 delivered 快照也必须一致
+      assert.deepEqual(peeked.drainLedger(), control.drainLedger())
+      assert.deepEqual(peeked.drainDelivered(), control.drainDelivered())
+      // 第二轮 render（alive 承接）也逐字节一致
+      assert.equal(peeked.render(undefined, 4), control.render(undefined, 4))
+    })
+
+    it('does not drain entries — render after peek still delivers them', () => {
+      const bus = new AdvisoryBus()
+      bus.submit({ key: 'kept', priority: 0.8, category: 'repair', content: 'KEPT' })
+      bus.peekPendingKeys()
+      assert.match(bus.render(), /KEPT/)
+    })
+  })
 })

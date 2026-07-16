@@ -12,7 +12,7 @@ import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types
 import type { ToolErrorClass } from '../tools/types.js'
 import { EvidenceTracker } from './evidence.js'
 import { ObligationTracker } from './obligation-tracker.js'
-import { computeVerifyFailStreak } from './hooks/cognitive-capsule-router.js'
+import { computeVerifyFailStreak, createCvmVectorEvaluator, cvmVectorMode, type CvmVectorMode } from './hooks/cognitive-capsule-router.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
@@ -296,6 +296,21 @@ export class AgentLoop {
   wasConvergenceEmittedRecently(): boolean {
     return this.session.getTurnCount() - this.lastConvergenceEmitTurn <= 1
   }
+  /** CVM-vector（v3.1 计划）：最近一次 convergence 检查的 phaseClass。
+   *  '' = 本会话尚未跑过 convergence 检查（未到 perception 不分类）。 */
+  getConvergencePhaseClass(): string {
+    return this.lastConvergencePhaseClass
+  }
+  /** CVM-vector 干预路由：mode 闸门（RIVET_CVM_VECTOR，缺省 shadow）+
+   *  session 级 evaluator（冷却状态内聚）。shadow 只落 telemetry 绝不 submit——
+   *  该纪律由 turn-step-producer 的唯一接线点执行。 */
+  readonly cvmVector: { mode: CvmVectorMode; evaluator: ReturnType<typeof createCvmVectorEvaluator> } = {
+    mode: cvmVectorMode(),
+    evaluator: createCvmVectorEvaluator(),
+  }
+  /** anchor-break-scout 已在本 session 派发过视角侦察（CV2 让位判据）。
+   *  scout 是 opt-in（antiAnchoring），默认会话恒 false。 */
+  anchorScoutOwned = false
   /** Phase 0 观测 — guardian（CCR / 改道 / kick）触发计数。会话内累计，
    *  随遥测与 session meta 落盘，让"守护链路被静音"从体感问题变成数据问题。 */
   readonly guardianActivity: {

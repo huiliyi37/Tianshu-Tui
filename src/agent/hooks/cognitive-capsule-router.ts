@@ -516,6 +516,310 @@ function getDominantDimValue(rule: RouteRule, state: RouteState): number {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// CVM-vector 干预路由（v3.1 计划 Wave 1-3）— render 前纯 evaluator
+// ═══════════════════════════════════════════════════════════════════
+//
+// 与上方 preTurn CCR（RULES）的关系：同一模块的第二个发射点，在
+// turn-step-producer 的 AdvisoryBus render 前评估——此时本轮 perception/
+// convergence/pressure/obligation 与各 preTurn hook 的 pending advisory
+// 都已就绪。约束（计划 v3.1）：
+//   - 唯一发声入口：不新建平行 router/bus；候选是现有 AdvisoryEntry，
+//     经既有 AdvisoryBus 送达（active 模式），复用 readback/习惯化/efficacy
+//     负反馈环（熔断 + probation 语义已由 bus 实现，不重建）。
+//   - 让位矩阵：high-risk obligation gate > 已在场的专用 hook 声音（pending
+//     key）> CVM-vector 候选；同轮同星域只允许一条（老 CCR pending 的
+//     `ccr-<star>-*` 视为已有声音）。
+//   - 辅域聚焦契约：一个缺口、一个动作、一个可核销 expect、一个停止条件；
+//     没有单一行为签名的规则不得 activeEligible。
+//   - off/shadow/active 闸门：shadow 只产出 decision（telemetry），绝不
+//     submit——由调用方（turn-step-producer）执行该纪律，evaluator 本身
+//     无副作用。
+//   - 事实源唯一：convergence 只读消费 ConvergenceResult.signals 的真实
+//     字段（textRepetitionPenalty/oscillationPenalty，缺数据时为 1.0 =
+//     中性，不会假阳性）；不自建停滞计数。
+
+import type { ObligationStore } from '../evidence-obligation.js'
+
+export type CvmVectorMode = 'off' | 'shadow' | 'active'
+
+/** RIVET_CVM_VECTOR 闸门解析：'0'/'off' 关闭，'active' 开放主动送达，缺省 shadow。 */
+export function cvmVectorMode(env: NodeJS.ProcessEnv = process.env): CvmVectorMode {
+  const raw = env.RIVET_CVM_VECTOR
+  if (raw === 'off' || raw === '0') return 'off'
+  if (raw === 'active') return 'active'
+  return 'shadow'
+}
+
+/** 困难分类（确定性，带触发字段；不输出无解释的 0-1 分数）。 */
+export type CvmDifficultyKind =
+  | 'gate-blocked'
+  | 'context-pressure'
+  | 'perspective-locked'
+  | 'verification-debt'
+
+export interface CvmVectorInput {
+  turn: number
+  /** perception 传入 ConvergenceInput 的 phaseClass；'' = 尚未有 convergence 检查。 */
+  phaseClass: string
+  /** ConvergenceResult 只读快照；null = 本会话尚未跑过 convergence 检查。
+   *  signals 缺数据时 detector 返回 1.0（中性）——低值才是真实重复信号。 */
+  convergence: {
+    score: number
+    level: number
+    textRepetitionPenalty: number
+    oscillationPenalty: number
+  } | null
+  pressure: {
+    ratio: number
+    cvmOverheadRatio: number
+    thrashing: boolean
+    shouldThrottleCvm: boolean
+    hardCeiling: boolean
+  }
+  obligations: ObligationStore
+  evidence: {
+    filesModified: number
+    deliveryStatus: string
+  }
+  /** render 前的 AdvisoryBus.peekPendingKeys() 只读快照。 */
+  pendingAdvisoryKeys: readonly string[]
+  /** loop.wasConvergenceEmittedRecently()——convergence 真实发射过的相邻轮让位。 */
+  convergenceEmittedRecently: boolean
+  /** anchor-break-scout 本 session 已派发（opt-in，默认恒 false）。 */
+  scoutOwned: boolean
+  /** 上一轮 ControlPlane frame 是否有 decision-gate（worker/ownership 等）。 */
+  hasDecisionGates: boolean
+}
+
+export interface CvmVectorDecision {
+  /** 确定性分类 + 触发字段（回放/反证用）。null = 无分类命中。 */
+  classification: {
+    kind: CvmDifficultyKind
+    ruleId?: string
+    facts: Record<string, number | string | boolean>
+  } | null
+  /** 主动候选（active 模式由调用方 submit；shadow 只落 telemetry）。 */
+  candidate: { ruleId: string; star: string; entry: AdvisoryEntry } | null
+  /** 让位记录：规则匹配但被单一声音仲裁静默。 */
+  yielded: { ruleId: string; to: string } | null
+}
+
+const EMPTY_DECISION: CvmVectorDecision = { classification: null, candidate: null, yielded: null }
+
+/** 同规则冷却（轮）——与 bus 侧习惯化/efficacy 环叠加，evaluator 侧先挡一层。 */
+export const CVM_VECTOR_RULE_COOLDOWN_TURNS = 6
+
+/** CV2 视角锁定触发阈值（Wave 0 标注校准前仅 shadow 运行，初值为工程判断）。
+ *  detector 缺数据时 penalty 为 1.0（中性），低于阈值必然是真实重复信号。 */
+export const CVM_REPETITION_THRESHOLD = 0.4
+
+/** 让位 key 清单：这些声音在场时对应规则静默（专用 hook 拥有执行责任）。 */
+const PERSPECTIVE_YIELD_KEYS = [
+  'convergence',
+  'convergence-gate',
+  'dissipative-kick',
+  'reasoning-spiral',
+  'dead-end-file',
+  'regression-bisect',
+  'capsule-recall',
+] as const
+const VERIFY_YIELD_KEYS = [
+  'self-verify',
+  'self-verify:verification-required',
+  'self-verify-scope-mismatch',
+  'typecheck-reminder',
+] as const
+
+/** 同星去重：老 CCR 本轮 pending 的 `ccr-<star>-*` 视为该星域已有声音。 */
+function sameStarCcrPending(pendingKeys: readonly string[], star: string): string | null {
+  return pendingKeys.find(k => k.startsWith(`ccr-${star}-`)) ?? null
+}
+
+/** high-risk obligation gate 判定——与 signalsFromObligations 的 decision-gate
+ *  语义同构（high + open/attempted → requiresDecision）。直接读 store 事实，
+ *  不经 ControlPlane frame（frame 是上一轮归并结果，义务事实要用当前值）。 */
+function hasHighRiskObligationGate(store: ObligationStore): boolean {
+  return store.obligations.some(o =>
+    o.risk === 'high' && (o.state === 'open' || o.state === 'attempted'))
+}
+
+/**
+ * CVM-vector evaluator 工厂。session 级冷却状态内聚（与 CCR 的 per-star
+ * cooldown 同构）；除冷却推进外无状态、无 IO、无 Date.now()、无随机——
+ * 相同输入序列产生相同 decision 序列。
+ */
+export function createCvmVectorEvaluator(): { evaluate(input: CvmVectorInput): CvmVectorDecision } {
+  const lastFiredTurn = new Map<string, number>()
+
+  function cooled(ruleId: string, turn: number): boolean {
+    const last = lastFiredTurn.get(ruleId)
+    return last === undefined || turn - last >= CVM_VECTOR_RULE_COOLDOWN_TURNS
+  }
+
+  return {
+    evaluate(input: CvmVectorInput): CvmVectorDecision {
+      // ── 让位矩阵第一层：gate 在场 → 分类记录，永不发声 ──
+      if (hasHighRiskObligationGate(input.obligations)) {
+        return {
+          classification: {
+            kind: 'gate-blocked',
+            facts: { source: 'obligation-gate', turn: input.turn },
+          },
+          candidate: null,
+          yielded: null,
+        }
+      }
+      if (input.hasDecisionGates) {
+        return {
+          classification: {
+            kind: 'gate-blocked',
+            facts: { source: 'control-plane-gate', turn: input.turn },
+          },
+          candidate: null,
+          yielded: null,
+        }
+      }
+
+      // ── 上下文压力：永久让位 compact/recovery，只记 silent 分类 ──
+      if (input.pressure.hardCeiling || input.pressure.shouldThrottleCvm || input.pressure.thrashing) {
+        return {
+          classification: {
+            kind: 'context-pressure',
+            facts: {
+              ratio: input.pressure.ratio,
+              cvmOverheadRatio: input.pressure.cvmOverheadRatio,
+              thrashing: input.pressure.thrashing,
+              hardCeiling: input.pressure.hardCeiling,
+              turn: input.turn,
+            },
+          },
+          candidate: null,
+          yielded: null,
+        }
+      }
+
+      // ── CV2 视角锁定 → 天璇（stuck 信号比验证债更尖锐，先评）──
+      const conv = input.convergence
+      if (conv !== null) {
+        const repetitionHit = conv.textRepetitionPenalty <= CVM_REPETITION_THRESHOLD
+          || conv.oscillationPenalty <= CVM_REPETITION_THRESHOLD
+        if (repetitionHit && conv.level >= 1) {
+          const facts: Record<string, number | string | boolean> = {
+            textRepetitionPenalty: conv.textRepetitionPenalty,
+            oscillationPenalty: conv.oscillationPenalty,
+            convergenceLevel: conv.level,
+            phaseClass: input.phaseClass,
+            turn: input.turn,
+          }
+          if (input.convergenceEmittedRecently) {
+            return {
+              classification: { kind: 'perspective-locked', ruleId: 'CV2', facts },
+              candidate: null,
+              yielded: { ruleId: 'CV2', to: 'convergence-emit' },
+            }
+          }
+          if (input.scoutOwned) {
+            return {
+              classification: { kind: 'perspective-locked', ruleId: 'CV2', facts },
+              candidate: null,
+              yielded: { ruleId: 'CV2', to: 'anchor-break-scout' },
+            }
+          }
+          const pendingSpecial = PERSPECTIVE_YIELD_KEYS.find(k => input.pendingAdvisoryKeys.includes(k))
+          if (pendingSpecial) {
+            return {
+              classification: { kind: 'perspective-locked', ruleId: 'CV2', facts },
+              candidate: null,
+              yielded: { ruleId: 'CV2', to: pendingSpecial },
+            }
+          }
+          const sameStar = sameStarCcrPending(input.pendingAdvisoryKeys, '天璇')
+          if (sameStar) {
+            return {
+              classification: { kind: 'perspective-locked', ruleId: 'CV2', facts },
+              candidate: null,
+              yielded: { ruleId: 'CV2', to: sameStar },
+            }
+          }
+          if (!cooled('CV2', input.turn)) {
+            return { classification: { kind: 'perspective-locked', ruleId: 'CV2', facts }, candidate: null, yielded: null }
+          }
+          lastFiredTurn.set('CV2', input.turn)
+          return {
+            classification: { kind: 'perspective-locked', ruleId: 'CV2', facts },
+            candidate: {
+              ruleId: 'CV2',
+              star: '天璇',
+              entry: {
+                key: 'cvm-vector-天璇-CV2',
+                priority: 0.5,
+                category: 'star_domain',
+                content: '【天璇】证据缺口：近几轮输出/工具模式重复，未产生新证据。下一动作：调用 recall_capsule("天璇") 换视角，或写一个最小反证输入。3 轮内见到动作即停，本提醒不重复。',
+                ttl: 1,
+                expect: { kind: 'tool_appears', tools: ['recall_capsule'], targetIncludes: '天璇', withinTurns: 3 },
+              },
+            },
+            yielded: null,
+          }
+        }
+      }
+
+      // ── CV1 验证债 → 瑶光 ──
+      if (
+        input.turn >= 2
+        && input.evidence.filesModified > 0
+        && input.evidence.deliveryStatus !== 'verified'
+      ) {
+        const facts: Record<string, number | string | boolean> = {
+          filesModified: input.evidence.filesModified,
+          deliveryStatus: input.evidence.deliveryStatus,
+          turn: input.turn,
+        }
+        const pendingVerify = VERIFY_YIELD_KEYS.find(k => input.pendingAdvisoryKeys.includes(k))
+        if (pendingVerify) {
+          return {
+            classification: { kind: 'verification-debt', ruleId: 'CV1', facts },
+            candidate: null,
+            yielded: { ruleId: 'CV1', to: pendingVerify },
+          }
+        }
+        const sameStar = sameStarCcrPending(input.pendingAdvisoryKeys, '瑶光')
+          ?? sameStarCcrPending(input.pendingAdvisoryKeys, '天权')
+        if (sameStar) {
+          return {
+            classification: { kind: 'verification-debt', ruleId: 'CV1', facts },
+            candidate: null,
+            yielded: { ruleId: 'CV1', to: sameStar },
+          }
+        }
+        if (!cooled('CV1', input.turn)) {
+          return { classification: { kind: 'verification-debt', ruleId: 'CV1', facts }, candidate: null, yielded: null }
+        }
+        lastFiredTurn.set('CV1', input.turn)
+        return {
+          classification: { kind: 'verification-debt', ruleId: 'CV1', facts },
+          candidate: {
+            ruleId: 'CV1',
+            star: '瑶光',
+            entry: {
+              key: 'cvm-vector-瑶光-CV1',
+              priority: 0.5,
+              category: 'star_domain',
+              content: '【瑶光】证据缺口：已有文件改动未经验证。下一动作：跑 typecheck 或相关测试（run_tests）确认改动闭环。观察到验证尝试即停，本提醒不重复。',
+              ttl: 1,
+              expect: { kind: 'verify_attempted', withinTurns: 2 },
+            },
+          },
+          yielded: null,
+        }
+      }
+
+      return EMPTY_DECISION
+    },
+  }
+}
+
 // ─── Exports for testing ─────────────────────────────────────────
 
 export { RULES as _RULES_FOR_TESTING }

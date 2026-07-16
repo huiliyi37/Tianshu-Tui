@@ -264,6 +264,8 @@ export interface RuntimeHookDeps {
     config: AnchorBreakScoutConfig
     getCoordinator: () => DelegationCoordinator | null
     getAbortSignal?: () => AbortSignal | undefined
+    /** CVM-vector 让位判据：scout 派发时回调（loop.anchorScoutOwned 置位）。 */
+    onScoutDispatched?: () => void
   }
 
   // ── 主控工作流缺口 C/D(intent-anchor / turn-budget,2026-07-04) ──
@@ -381,6 +383,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getDoomLoopLevel: deps.getDoomLoopLevel,
       getAbortSignal: deps.anchorBreakScout.getAbortSignal,
       store: deps.meridianIndexer?.getDb() ?? null,
+      onScoutDispatched: deps.anchorBreakScout.onScoutDispatched,
     }))
   }
 

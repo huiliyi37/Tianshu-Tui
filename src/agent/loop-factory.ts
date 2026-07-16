@@ -634,6 +634,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
             config: aa.anchorBreakScout,
             getCoordinator: () => self.config.coordinatorRef?.() ?? null,
             getAbortSignal: () => self.abortController?.signal,
+            onScoutDispatched: () => { self.anchorScoutOwned = true },
           }
         : undefined
     })(),
