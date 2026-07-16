@@ -236,6 +236,9 @@ export function ThreadView(props: {
   const handleWatchdogContinue = useCallback(() => onSend('continue'), [onSend])
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
+  const lastSeenLengthRef = useRef(0)
+  const [regeneratingKey, setRegeneratingKey] = useState<string | null>(null)
   const [navTick, setNavTick] = useState(0) // bumps on scroll → refresh navigator marker
   const scrollRafRef = useRef<ReturnType<typeof requestAnimationFrame> | null>(null)
   const pendingScrollRef = useRef<{ scrollTop: number; near: boolean }>({ scrollTop: 0, near: false })
@@ -527,6 +530,20 @@ export function ThreadView(props: {
     }
   }, [session.id, rendered.length, lastBlockTextLen, scrolledUp, virtualizer])
 
+  // Track unread messages while scrolled up: snapshot the block count when the
+  // user leaves the bottom, then count new arrivals until they return.
+  useEffect(() => {
+    if (!scrolledUp) {
+      lastSeenLengthRef.current = rendered.length
+      if (unreadCount > 0) setUnreadCount(0)
+      return
+    }
+    const seen = lastSeenLengthRef.current
+    if (rendered.length > seen) {
+      setUnreadCount(rendered.length - seen)
+    }
+  }, [scrolledUp, rendered.length, unreadCount])
+
   // Measure the floating composer so the thread reserves bottom padding and
   // the last message is never hidden behind the input card.
   useEffect(() => {
@@ -739,6 +756,7 @@ export function ThreadView(props: {
       const seq = Number(b.key.slice(2)) // "u-<seq>"
       const point = Number.isNaN(seq) ? undefined : rewindPoints.find((p) => p.seq === seq)
       if (!point) return
+      setRegeneratingKey(assistantKey)
       try {
         await rewindSession(session.id, point.index)
         setSelectedTurnIndex(-1)
@@ -746,11 +764,13 @@ export function ThreadView(props: {
         setRewindPoints(points)
         onSend(b.text)
       } catch (err) {
-        console.error(err)
+        toast.error(t('block.regenerateFailed', { error: (err as Error).message }))
+      } finally {
+        setRegeneratingKey(null)
       }
       return
     }
-  }, [view.blocks, rewindPoints, session.id, onSend])
+  }, [view.blocks, rewindPoints, session.id, onSend, t])
 
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
@@ -1199,19 +1219,15 @@ export function ThreadView(props: {
                       onContinue={handleWatchdogContinue}
                       onCancelContinue={onAbort}
                       onRegenerate={busy ? undefined : handleRegenerate}
+                      regeneratingKey={regeneratingKey}
                       onEditUserMsg={async (seq, text) => {
                         const point = rewindPoints.find(p => p.seq === seq)
-                        if (point) {
-                          try {
-                            await rewindSession(session.id, point.index)
-                            setSelectedTurnIndex(-1)
-                            const { points } = await getRewindPoints(session.id)
-                            setRewindPoints(points)
-                            onSend(text)
-                          } catch (err) {
-                            console.error(err)
-                          }
-                        }
+                        if (!point) return
+                        await rewindSession(session.id, point.index)
+                        setSelectedTurnIndex(-1)
+                        const { points } = await getRewindPoints(session.id)
+                        setRewindPoints(points)
+                        onSend(text)
                       }}
                       isStreaming={
                         item.block.key === lastKey && (
@@ -1227,11 +1243,16 @@ export function ThreadView(props: {
           </div>
         )}
         {scrolledUp && (
-          <button className="scroll-bottom-btn" onClick={scrollToBottom} aria-label={t('scrollToBottom')}>
+          <button className="scroll-bottom-btn" onClick={scrollToBottom}
+            aria-label={unreadCount > 0 ? t('newMessages', { count: unreadCount }) : t('scrollToBottom')}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M6 9l6 6 6-6" />
             </svg>
+            {unreadCount > 0 && (
+              <span className="scroll-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+            )}
           </button>
         )}
         <MessageNavigator turns={userTurns} activeIndex={navActiveIndex} onJump={jumpTo} />
@@ -1617,10 +1638,11 @@ const Block = memo(BlockImpl, (a, b) =>
   a.onFileClick === b.onFileClick && a.onFileReveal === b.onFileReveal &&
   a.domainGlyph === b.domainGlyph && a.domainName === b.domainName &&
   a.onContinue === b.onContinue && a.onCancelContinue === b.onCancelContinue &&
-  a.onEditUserMsg === b.onEditUserMsg && a.onRegenerate === b.onRegenerate
+  a.onEditUserMsg === b.onEditUserMsg && a.onRegenerate === b.onRegenerate &&
+  a.regeneratingKey === b.regeneratingKey
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, onFileReveal, domainGlyph, domainName, onContinue, onCancelContinue, onEditUserMsg, onRegenerate }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, onFileReveal, domainGlyph, domainName, onContinue, onCancelContinue, onEditUserMsg, onRegenerate, regeneratingKey }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
@@ -1636,10 +1658,13 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, on
   onEditUserMsg?: (seq: number, text: string) => Promise<void>
   /** Regenerate this assistant reply (rewind to the preceding user turn + resend). */
   onRegenerate?: (assistantKey: string) => void
+  /** Key of the assistant block currently being regenerated (spinner state). */
+  regeneratingKey?: string | null
 }) {
   const { t } = useTranslation('threadView')
   const [isEditing, setIsEditing] = useState(false)
   const [editText, setEditText] = useState(block.text)
+  const [saving, setSaving] = useState(false)
 
   if (block.kind === 'user') {
     const seq = Number(block.key.slice(2))
@@ -1658,17 +1683,25 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, on
             <div className="user-edit-actions">
               <button
                 className="btn-sm btn-primary user-edit-submit"
+                disabled={saving}
                 onClick={async () => {
-                  if (editText.trim()) {
+                  if (!editText.trim() || saving) return
+                  setSaving(true)
+                  try {
                     await onEditUserMsg?.(seq, editText)
                     setIsEditing(false)
+                  } catch (err) {
+                    toast.error(t('block.saveFailed', { error: (err as Error).message }))
+                  } finally {
+                    setSaving(false)
                   }
                 }}
               >
-                {t('block.saveResend')}
+                {saving ? t('block.saving') : t('block.saveResend')}
               </button>
               <button
                 className="btn-sm btn-secondary user-edit-cancel"
+                disabled={saving}
                 onClick={() => {
                   setIsEditing(false)
                   setEditText(block.text)
@@ -1883,6 +1916,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, on
       roleGlyph={domainGlyph}
       copyText={block.text}
       onRegenerate={block.kind === 'assistant' && onRegenerate ? () => onRegenerate(block.key) : undefined}
+      regenerating={regeneratingKey === block.key}
     >
       <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} onFileReveal={onFileReveal} />
     </MsgBlock>
@@ -2068,10 +2102,12 @@ function MsgBlock(props: {
   canEdit?: boolean
   onEdit?: () => void
   onRegenerate?: () => void
+  /** True while a regenerate is in-flight (rewind+resend) — shows spinner. */
+  regenerating?: boolean
   /** Raw source text to copy. When omitted, no copy button is rendered. */
   copyText?: string
 }) {
-  const { role, roleGlyph, isError, className, children, canEdit, onEdit, onRegenerate, copyText } = props
+  const { role, roleGlyph, isError, className, children, canEdit, onEdit, onRegenerate, regenerating, copyText } = props
   const { t } = useTranslation('threadView')
   const [copied, setCopied] = useState(false)
 
@@ -2126,10 +2162,11 @@ function MsgBlock(props: {
             <button
               className="msg-action-btn"
               onClick={onRegenerate}
-              title={t('block.regenerateTitle')}
+              disabled={regenerating}
+              title={regenerating ? t('block.regenerating') : t('block.regenerateTitle')}
               aria-label={t('block.regenerate')}
             >
-              ↻
+              {regenerating ? <span className="spinner-inline" aria-hidden /> : '↻'}
             </button>
           )}
         </div>

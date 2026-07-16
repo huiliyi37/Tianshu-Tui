@@ -2279,6 +2279,21 @@ body {
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .scroll-bottom-btn:hover { color: var(--text); background: var(--panel-2); transform: scale(1.08); }
+.scroll-badge {
+  position: absolute; top: -4px; right: -4px;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--accent); color: #fff;
+  font-size: 11px; font-weight: 600; line-height: 18px; text-align: center;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+
+/* Inline spinner for action buttons (regenerate etc.) */
+.spinner-inline {
+  display: inline-block; width: 12px; height: 12px;
+  border: 1.5px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+}
 
 /* Message navigator — floating jump-to-user-turn outline. Sticky (not absolute)
    so it pins to the viewport bottom-right instead of scrolling with content,

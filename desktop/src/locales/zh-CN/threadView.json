@@ -62,6 +62,7 @@
     "chars": "{{count}} 字"
   },
   "scrollToBottom": "回到底部",
+  "newMessages": "{{count}} 条新消息",
   "effortSet": "推理强度已设置为 {{effort}}",
   "effortSetFailed": "设置推理强度失败",
   "search": {
@@ -193,7 +194,11 @@
       "cancelledReason": "续跑已取消——等待你的下一条指令。",
       "pendingReason": "检测到边界停滞，{{seconds}}s 后自动续跑（可取消）。",
       "countdownDone": "倒计时结束，已自动注入 continue 恢复执行。"
-    }
+    },
+    "saving": "保存中…",
+    "saveFailed": "保存失败：{{error}}",
+    "regenerateFailed": "重新生成失败：{{error}}",
+    "regenerating": "重新生成中…"
   },
   "timeline": {
     "showEarlier": "显示更早的 {{count}} 步",

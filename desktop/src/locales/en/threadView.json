@@ -193,7 +193,11 @@
       "cancelledReason": "Auto-continue cancelled — waiting for your next instruction.",
       "pendingReason": "Boundary stall detected — auto-continuing in {{seconds}}s (cancellable).",
       "countdownDone": "Countdown finished — injected continue automatically to resume."
-    }
+    },
+    "saving": "Saving…",
+    "saveFailed": "Save failed: {{error}}",
+    "regenerateFailed": "Regenerate failed: {{error}}",
+    "regenerating": "Regenerating…"
   },
   "timeline": {
     "showEarlier": "Show {{count}} earlier steps",
@@ -264,5 +268,6 @@
     "skippedFiles": "Skipped {{count}} files in use",
     "unrevertable": "⚠️ Side effects that cannot be rolled back: {{list}}",
     "failed": "Rollback failed: {{error}}"
-  }
+  },
+  "newMessages": "{{count}} new messages"
 }
