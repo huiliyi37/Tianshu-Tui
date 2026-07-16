@@ -163,6 +163,74 @@ describe('CompactionController reclaim gate (2026-07-16 cost-aware reclaim plan 
   })
 })
 
+describe('CompactionController ceiling force semantics (task 6)', () => {
+  function overCeilingSession(window: number): SessionContext {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(Math.floor(window * 0.3) * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+    ])
+    return session
+  }
+
+  it('enforceContextCeiling emits a forced checkpoint decision that bypasses reclaim floors', async () => {
+    const session = overCeilingSession(128_000)
+    const decisions: Array<{ action: string; force: boolean; commit: boolean; reason: string }> = []
+    const controller = makeController(session, {
+      onReclaimDecision: d => { decisions.push({ action: d.action, force: d.force, commit: d.commit, reason: d.reason }) },
+    })
+
+    await controller.enforceContextCeiling()
+
+    assert.ok(session.getEstimatedTokens() <= 128_000 * 0.95, 'ceiling reduced context below 95%')
+    assert.equal(decisions.length, 1)
+    assert.deepEqual(decisions[0], { action: 'checkpoint', force: true, commit: true, reason: 'forced' })
+  })
+
+  it('enforceContextCeiling below the ceiling emits no decision (no phantom telemetry)', async () => {
+    const session = new SessionContext()
+    session.replaceMessages([
+      { role: 'user', content: 'small' },
+      { role: 'assistant', content: 'small' },
+    ])
+    const decisions: unknown[] = []
+    const controller = makeController(session, {
+      onReclaimDecision: d => { decisions.push(d) },
+    })
+    await controller.enforceContextCeiling()
+    assert.equal(decisions.length, 0)
+  })
+
+  it('trySessionSplit emits a forced session-split decision', async () => {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(220_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+    ])
+    const decisions: Array<{ action: string; force: boolean; commit: boolean }> = []
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      onReclaimDecision: d => { decisions.push({ action: d.action, force: d.force, commit: d.commit }) },
+    })
+
+    const didSplit = await controller.trySessionSplit()
+
+    assert.equal(didSplit, true)
+    assert.equal(decisions.length, 1)
+    assert.deepEqual(decisions[0], { action: 'session-split', force: true, commit: true })
+  })
+})
+
 describe('CompactionController', () => {
   it('runs micro compact when pressure crosses ratio threshold', async () => {
     // Reclaim-gate era: the fixture must contain genuinely compactable content

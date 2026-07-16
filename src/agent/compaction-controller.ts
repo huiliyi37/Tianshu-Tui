@@ -3,7 +3,7 @@ import type { Usage } from '../api/types.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES, summaryOutputBudgetChars } from '../compact/constants.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
-import { deriveCompactionProfile, cacheKindFromProviderProfile, type CompactionProfile } from '../compact/compaction-profile.js'
+import { deriveCompactionProfile, cacheKindFromProviderProfile, type CompactionProfile, type CompactionAction } from '../compact/compaction-profile.js'
 import { estimateReclaim, buildReclaimDecision, type ReclaimDecisionRecord } from '../compact/reclaim-estimate.js'
 
 import { debugLog } from '../utils/debug.js'
@@ -577,13 +577,19 @@ export class CompactionController {
         // the prefix cache with the pre-refresh frozen base — the persist
         // callback hot-refreshes session memory, which rebuilds the frozen base.
         this.persistExtractedMemories(this.deps.getTrajectoryEntries())
-        await this.replaceWithCheckpoint({
+        const committed = await this.replaceWithCheckpoint({
           tier: 2,
           reason: `LLM compact at ${(ratio * 100).toFixed(0)}% context (${actionDecision.action})`,
           summary,
           maxFallback: this.deps.contextWindow * 0.3,
           fallbackText: '<compact-summary>LLM compact failed to fit; session continues with cache anchors.</compact-summary>',
+          action: actionDecision.action,
+          force: actionDecision.force,
         })
+        if (!committed) {
+          // Gate veto is an economic decision, not a pipeline error.
+          return { failures: input.failures, compacted: false }
+        }
         return { failures: recordCompactSuccess(input.failures), compacted: true }
       }
       debugLog(`[llm-compact] LLM compact failed (null summary)`)
@@ -727,6 +733,8 @@ export class CompactionController {
           summary,
           maxFallback: ceiling,
           fallbackText: '<checkpoint-resume>Context ceiling exceeded. Continue from preserved cache anchors.</checkpoint-resume>',
+          action: 'checkpoint',
+          force: true,
         })
         return
       }
@@ -762,6 +770,8 @@ export class CompactionController {
       summary: resumeContent,
       maxFallback: ceiling,
       fallbackText: '<checkpoint-resume>Context ceiling exceeded. Continue from preserved cache anchors and ask for missing details if needed.</checkpoint-resume>',
+      action: 'checkpoint',
+      force: true,
     })
   }
 
@@ -792,6 +802,8 @@ export class CompactionController {
           summary,
           maxFallback: this.deps.contextWindow * 0.3,
           fallbackText: `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context.</session-handoff>`,
+          action: 'session-split',
+          force: true,
         })
         debugLog(`[session-split] LLM compact ratio=${ratio.toFixed(2)} tokens=${this.deps.session.getEstimatedTokens()}`)
         return true
@@ -808,6 +820,8 @@ export class CompactionController {
       summary: handoffContent,
       maxFallback: this.deps.contextWindow * 0.3,
       fallbackText: `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context. ${taskState.current}</session-handoff>`,
+      action: 'session-split',
+      force: true,
     })
 
     debugLog(`[session-split] structured handoff ratio=${ratio.toFixed(2)} tokens=${this.deps.session.getEstimatedTokens()}`)
@@ -1057,8 +1071,15 @@ export class CompactionController {
 
   /**
    * Replace message history with cache anchors + checkpoint summary.
-   * Called by both trySessionSplit (86% threshold, richer handoff) and
-   * enforceContextCeiling (95% threshold, emergency fallback).
+   * Called by trySessionSplit (86% threshold, richer handoff),
+   * enforceContextCeiling (95% threshold, emergency fallback), and the
+   * maybeCompact LLM ladder.
+   *
+   * Task 6 force semantics: every checkpoint-style rewrite passes through the
+   * reclaim gate and emits a decision record. Forced callers (ceiling /
+   * session split — the alternative is an over-window API failure) always
+   * commit; discretionary LLM commits must clear the profile floors.
+   * Returns whether the rewrite was committed.
    */
   private async replaceWithCheckpoint(params: {
     tier: CompactTier
@@ -1066,7 +1087,9 @@ export class CompactionController {
     summary: string
     maxFallback: number
     fallbackText: string
-  }): Promise<void> {
+    action: CompactionAction
+    force: boolean
+  }): Promise<boolean> {
     const messages = this.deps.session.getMessages()
     const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
 
@@ -1093,7 +1116,19 @@ export class CompactionController {
       candidate.push({ role: 'user', content: anchorAppendix })
     }
 
-    const beforeTokens = estimateOaiTokens(messages)
+    const decision = buildReclaimDecision(
+      params.action,
+      estimateReclaim(messages, candidate),
+      this.reclaimProfile(),
+      params.force,
+    )
+    this.deps.onReclaimDecision?.(decision)
+    if (!decision.commit) {
+      debugLog(`[compaction-gate] ${params.action} checkpoint rejected (${decision.reason}): reclaimed=${decision.reclaimedTokens}`)
+      return false
+    }
+
+    const beforeTokens = decision.beforeTokens
     this.safeReplaceMessages(candidate)
     this.deps.promptEngine.resetAppendixBaseline()
     this.deps.session.recordCompactEvent({
@@ -1105,6 +1140,7 @@ export class CompactionController {
       createdAt: Date.now(),
     })
     this.deps.refreshLedger()
+    return true
   }
 
   /**
@@ -1261,6 +1297,17 @@ export class CompactionController {
       const anchorAppendix = this.buildTaskAnchorAppendix()
       if (anchorAppendix) {
         newMessages.push({ role: 'user', content: anchorAppendix })
+      }
+
+      // Reclaim gate: a partial compact that fails to reclaim the profile
+      // floor (e.g. tiny oldZone vs a large recall-laden summary) must not
+      // shatter the prefix for nothing. The side-path summary cost is already
+      // booked either way; skipping the rewrite keeps the cache intact.
+      const decision = buildReclaimDecision('partial-llm', estimateReclaim(messages, newMessages), this.reclaimProfile(), false)
+      this.deps.onReclaimDecision?.(decision)
+      if (!decision.commit) {
+        debugLog(`[compaction-gate] partial-llm candidate rejected (${decision.reason}): reclaimed=${decision.reclaimedTokens}`)
+        return false
       }
       this.safeReplaceMessages(newMessages)
       this.deps.promptEngine.resetAppendixBaseline()
