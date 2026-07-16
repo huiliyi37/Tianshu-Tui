@@ -91,10 +91,12 @@ describe('CompactionController reclaim gate (2026-07-16 cost-aware reclaim plan 
   })
 
   it('commits a high-reclaim candidate and records the commit decision', async () => {
-    // All-tool session: every message is compactable, reclaim is huge.
+    // All-tool session: every message is compactable, reclaim is huge. Six
+    // messages keep the ratio (~0.78 incl. prefix overhead) under the 0.95
+    // ceiling so the decision stays a non-force tier action.
     const session = new SessionContext()
     const big = 'z'.repeat(60_000)
-    session.replaceMessages(Array.from({ length: 8 }, (_, i) => (
+    session.replaceMessages(Array.from({ length: 6 }, (_, i) => (
       { role: 'tool', tool_call_id: `read_file_${i}`, content: big } as OaiMessage
     )))
     const decisions: Array<{ commit: boolean; reason: string }> = []
@@ -108,6 +110,40 @@ describe('CompactionController reclaim gate (2026-07-16 cost-aware reclaim plan 
     assert.equal(session.getCompactEvents().at(-1)?.tier, 1)
     assert.equal(decisions.length, 1)
     assert.deepEqual(decisions[0], { commit: true, reason: 'reclaim-above-floor' })
+  })
+
+  it('1M precision band (task 4): deterministic reclaim commits at turn 0 through the gate', async () => {
+    // ~510k tokens on a 1M window: past the 0.5 precision ceiling, below the
+    // 0.60 partial-llm rung. Old code returned early from the dedicated 1M
+    // branch and did nothing; the unified decision now surfaces a gated
+    // deterministic reclaim. Four 500k-char tool results truncate to 200k
+    // chars each → ~300k tokens reclaimed, far above the 50k large floor.
+    const session = new SessionContext()
+    session.replaceMessages(Array.from({ length: 4 }, (_, i) => (
+      { role: 'tool', tool_call_id: `read_file_${i}`, content: 'w'.repeat(500_000) } as OaiMessage
+    )))
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      providerProfile: { cacheType: 'exact-prefix', persistent: true } as ProviderProfile,
+    })
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+    assert.equal(result.compacted, true)
+    assert.ok(session.getEstimatedTokens() < 300_000, 'giant tool results were truncated')
+  })
+
+  it('1M precision band (task 4): never rewrites mid-turn (loopTurn ≠ 0)', async () => {
+    const session = new SessionContext()
+    session.replaceMessages(Array.from({ length: 4 }, (_, i) => (
+      { role: 'tool', tool_call_id: `read_file_${i}`, content: 'w'.repeat(500_000) } as OaiMessage
+    )))
+    const before = session.getMessages()
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      providerProfile: { cacheType: 'exact-prefix', persistent: true } as ProviderProfile,
+    })
+    const result = await controller.maybeCompact({ loopTurn: 3, failures: { consecutiveFailures: 0 } })
+    assert.equal(result.compacted, false)
+    assert.equal(session.getMessages(), before, 'no mid-turn history rewrite on 1M windows')
   })
 
   it('records before/after/reclaimed token fields on the decision', async () => {
@@ -428,7 +464,7 @@ describe('CompactionController', () => {
       contextWindow: 1_000_000,
       primaryClient,
       providerProfile: { cacheType: 'exact-prefix', persistent: true } as ProviderProfile,
-      cacheAdvisor: { shouldDelayCompact: () => true } as unknown as CacheAdvisor,
+      cacheAdvisor: { shouldDelayCompact: () => true, getRecentHitRate: () => null } as unknown as CacheAdvisor,
     })
 
     const result = await controller.maybeCompact({

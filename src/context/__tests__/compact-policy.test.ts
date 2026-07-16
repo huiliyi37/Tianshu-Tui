@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { decideCompactTier, tierForRatio, recordCompactFailure, recordCompactSuccess } from '../compact-policy.js'
+import { decideCompactTier, decideCompactAction, tierForRatio, recordCompactFailure, recordCompactSuccess } from '../compact-policy.js'
 import { precisionCeilingRatio } from '../../compact/constants.js'
+import { deriveCompactionProfile } from '../../compact/compaction-profile.js'
 
 describe('compact policy', () => {
   it('chooses progressive tiers from balanced token ratio', () => {
@@ -78,6 +79,108 @@ describe('precision ceiling', () => {
   it('honours an explicit override over the window-derived value', () => {
     assert.equal(precisionCeilingRatio(1_000_000, 0.7), 0.7)
     assert.equal(precisionCeilingRatio(1_000, 0.4), 0.4)
+  })
+
+  it('decideCompactAction: 1M/510k DeepSeek hot cache flags precision-risk without forcing an LLM rewrite', () => {
+    // Plan task 4 self-check: precisionRisk=true, action none/stale-round —
+    // NEVER a direct full-llm. The deterministic candidate still has to clear
+    // the reclaim gate downstream.
+    const d = decideCompactAction({
+      estimatedTokens: 510_000,
+      maxTokens: 1_000_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      recentHitRate: 0.95,
+      profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'per-token', cache: 'exact-prefix' }),
+    })
+    assert.equal(d.precisionRisk, true)
+    assert.ok(d.action === 'none' || d.action === 'stale-round', `got ${d.action}`)
+    assert.notEqual(d.action, 'full-llm')
+    assert.equal(d.force, false)
+    assert.match(d.reason, /precision-risk/)
+  })
+
+  it('decideCompactAction: 1M/650k subscription (GLM) reaches partial-llm without force', () => {
+    const d = decideCompactAction({
+      estimatedTokens: 650_000,
+      maxTokens: 1_000_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'subscription', cache: 'exact-prefix' }),
+    })
+    assert.equal(d.action, 'partial-llm')
+    assert.equal(d.force, false)
+  })
+
+  it('decideCompactAction: 1M/900k DeepSeek reaches full-llm, still non-force (advisor may delay)', () => {
+    const d = decideCompactAction({
+      estimatedTokens: 900_000,
+      maxTokens: 1_000_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'per-token', cache: 'exact-prefix' }),
+    })
+    assert.equal(d.action, 'full-llm')
+    assert.equal(d.force, false)
+  })
+
+  it('decideCompactAction: 1M/960k crosses the hard ceiling — checkpoint with force=true', () => {
+    const d = decideCompactAction({
+      estimatedTokens: 960_000,
+      maxTokens: 1_000_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'per-token', cache: 'exact-prefix' }),
+    })
+    assert.equal(d.action, 'checkpoint')
+    assert.equal(d.force, true)
+  })
+
+  it('decideCompactAction: 256k windows use the same action vocabulary, never the 1M LLM ladder', () => {
+    const profile = deriveCompactionProfile({ contextWindow: 256_000, billing: 'per-token', cache: 'exact-prefix' })
+    // 0.78 of 256k on a cache-preserving provider: watch tier → deterministic micro.
+    const mid = decideCompactAction({
+      estimatedTokens: 200_000,
+      maxTokens: 256_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      profile,
+    })
+    assert.equal(mid.action, 'micro')
+    assert.equal(mid.force, false)
+    // Over the 0.95 ceiling on a medium window: forced micro (emergency
+    // deterministic reclaim), checkpoint stays owned by enforceContextCeiling.
+    const over = decideCompactAction({
+      estimatedTokens: 246_000,
+      maxTokens: 256_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      profile,
+    })
+    assert.equal(over.action, 'micro')
+    assert.equal(over.force, true)
+  })
+
+  it('decideCompactAction: open circuit breaker blocks discretionary actions but not the forced ceiling', () => {
+    const profile = deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'per-token', cache: 'exact-prefix' })
+    const failures = { consecutiveFailures: 3, disabledUntilTurn: 10 }
+    const discretionary = decideCompactAction({
+      estimatedTokens: 650_000, maxTokens: 1_000_000, turn: 5, failures,
+      providerProfile: { cacheType: 'exact-prefix', persistent: true }, profile,
+    })
+    assert.equal(discretionary.action, 'none')
+    const forced = decideCompactAction({
+      estimatedTokens: 960_000, maxTokens: 1_000_000, turn: 5, failures,
+      providerProfile: { cacheType: 'exact-prefix', persistent: true }, profile,
+    })
+    assert.equal(forced.action, 'checkpoint')
+    assert.equal(forced.force, true)
   })
 
   it('decideCompactTier threads the ceiling through end-to-end', () => {

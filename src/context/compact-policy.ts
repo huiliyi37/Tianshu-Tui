@@ -1,6 +1,7 @@
 import type { CompactCircuitBreakerState, CompactDecision, CompactTier } from './types.js'
 import { adaptiveCompactPolicyRatios, compactPolicyRatios, precisionCeilingRatio } from '../compact/constants.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
+import type { CompactionAction, CompactionProfile } from '../compact/compaction-profile.js'
 
 export interface CompactPolicyInput {
   estimatedTokens: number
@@ -59,6 +60,88 @@ export function decideCompactTier(input: CompactPolicyInput): CompactDecision {
   const precisionCeiling = precisionCeilingRatio(input.maxTokens, input.precisionCeilingOverride)
   const tier = tierForRatio(ratio, input.providerProfile, input.recentHitRate, precisionCeiling)
   return { tier, reason: reasonForTier(tier), shouldCompact: tier > 0 }
+}
+
+/** 1M LLM-compaction ladder ratios — formerly literals buried inside
+ *  CompactionController.maybeCompact's dedicated 1M branch. */
+export const LLM_ACTION_RATIOS = { partial: 0.60, full: 0.75 } as const
+
+export interface CompactActionInput extends CompactPolicyInput {
+  profile: CompactionProfile
+}
+
+export interface CompactActionDecision {
+  action: CompactionAction
+  reason: string
+  /** Force actions (hard ceiling) bypass the reclaim gate AND advisor delay. */
+  force: boolean
+  /** Context usage crossed the model-accuracy precision ceiling. */
+  precisionRisk: boolean
+  /** Legacy tier, retained for observability and existing consumers. */
+  tier: CompactTier
+  shouldCompact: boolean
+  profile: CompactionProfile
+}
+
+/**
+ * Unified window-aware action decision (2026-07-16 reclaim gate plan task 4).
+ *
+ * Replaces the old split where 1M windows early-returned into a dedicated
+ * 60%/75% branch that bypassed decideCompactTier — and with it the precision
+ * ceiling. Windows now share one action vocabulary; the window only moves
+ * thresholds:
+ *
+ *   - hard ceiling (0.95): force — 1M gets `checkpoint`, smaller windows get
+ *     forced `micro` (their checkpoint owner remains enforceContextCeiling).
+ *     Force wins over the circuit breaker: an over-window request is a hard
+ *     API failure, not a tuning preference.
+ *   - open breaker: no discretionary action.
+ *   - 1M LLM ladder: full-llm ≥ 0.75, partial-llm ≥ 0.60 (unchanged ratios,
+ *     now shared constants).
+ *   - 1M precision band (≥ 0.5): no longer silently ignored — surfaces as a
+ *     deterministic `stale-round` reclaim, which still has to clear the
+ *     downstream reclaim gate and cache-advisor delay. Never a forced LLM
+ *     rewrite (plan §1.4).
+ *   - everything else: the tier policy decides a deterministic `micro`.
+ */
+export function decideCompactAction(input: CompactActionInput): CompactActionDecision {
+  const ratio = input.maxTokens > 0 ? input.estimatedTokens / input.maxTokens : 1
+  const precisionCeiling = precisionCeilingRatio(input.maxTokens, input.precisionCeilingOverride)
+  const precisionRisk = precisionCeiling < 1 && ratio >= precisionCeiling
+  const tierDecision = decideCompactTier(input)
+  const base = { precisionRisk, profile: input.profile }
+
+  const ratios = input.recentHitRate != null
+    ? adaptiveCompactPolicyRatios(input.providerProfile, input.recentHitRate)
+    : compactPolicyRatios(input.providerProfile)
+  if (ratio >= ratios.ceiling) {
+    return input.maxTokens >= 1_000_000
+      ? { ...base, action: 'checkpoint', reason: 'context ceiling exceeded; checkpoint-resume required', force: true, tier: 4, shouldCompact: true }
+      : { ...base, action: 'micro', reason: 'context ceiling exceeded; forced deterministic reclaim', force: true, tier: 4, shouldCompact: true }
+  }
+
+  const breakerOpen = input.failures.disabledUntilTurn !== undefined && input.turn < input.failures.disabledUntilTurn
+  if (breakerOpen) {
+    return { ...base, action: 'none', reason: 'automatic compact circuit breaker is open', force: false, tier: 0, shouldCompact: false }
+  }
+
+  if (input.maxTokens >= 1_000_000) {
+    if (ratio >= LLM_ACTION_RATIOS.full) {
+      return { ...base, action: 'full-llm', reason: `full LLM compact ladder at ${(ratio * 100).toFixed(0)}%`, force: false, tier: tierDecision.tier, shouldCompact: true }
+    }
+    if (ratio >= LLM_ACTION_RATIOS.partial) {
+      return { ...base, action: 'partial-llm', reason: `partial LLM compact ladder at ${(ratio * 100).toFixed(0)}%`, force: false, tier: tierDecision.tier, shouldCompact: true }
+    }
+    if (precisionRisk) {
+      return { ...base, action: 'stale-round', reason: 'precision-risk: past accuracy ceiling; deterministic reclaim only (gated)', force: false, tier: tierDecision.tier, shouldCompact: true }
+    }
+    return { ...base, action: 'none', reason: tierDecision.reason, force: false, tier: tierDecision.tier, shouldCompact: false }
+  }
+
+  if (tierDecision.shouldCompact) {
+    return { ...base, action: 'micro', reason: tierDecision.reason, force: false, tier: tierDecision.tier, shouldCompact: true }
+  }
+  return { ...base, action: 'none', reason: tierDecision.reason, force: false, tier: tierDecision.tier, shouldCompact: false }
 }
 
 export function recordCompactFailure(state: CompactCircuitBreakerState, turn: number): CompactCircuitBreakerState {
