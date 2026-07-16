@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createWebFetchTool } from '../tool.js'
+import type { FetchLike } from '../../net/http-fetch.js'
+
+/** DOM Response ≡ undici Response at runtime; bridge the nominal type gap. */
+const mockFetch = (fn: () => Promise<Response>): FetchLike => fn as unknown as FetchLike
 
 function publicLookup() {
   return async (_hostname: string) => ({ address: '93.184.216.34' })
@@ -41,7 +45,7 @@ describe('createWebFetchTool', () => {
   it('rejects binary content types', async () => {
     const tool = createWebFetchTool({
       lookup: publicLookup(),
-      fetch: async () => textResponse('binary', 'application/pdf'),
+      fetch: mockFetch(async () => textResponse('binary', 'application/pdf')),
     })
     const result = await tool.execute({ input: { url: 'https://example.com/file.pdf' }, toolUseId: 'tu_bin', cwd: '/' } as any)
     assert.equal(result.isError, true)
@@ -53,7 +57,7 @@ describe('createWebFetchTool', () => {
     const longText = 'x'.repeat(60_000)
     const tool = createWebFetchTool({
       lookup: publicLookup(),
-      fetch: async () => textResponse(`<p>${longText}</p>`, 'text/html'),
+      fetch: mockFetch(async () => textResponse(`<p>${longText}</p>`, 'text/html')),
     })
     const result = await tool.execute({ input: { url: 'https://example.com/long' }, toolUseId: 'tu_long', cwd: '/' } as any)
     assert.equal(result.isError, undefined)
@@ -64,7 +68,7 @@ describe('createWebFetchTool', () => {
   it('returns HTTP error for non-2xx', async () => {
     const tool = createWebFetchTool({
       lookup: publicLookup(),
-      fetch: async () => textResponse('not found', 'text/plain', 404),
+      fetch: mockFetch(async () => textResponse('not found', 'text/plain', 404)),
     })
     const result = await tool.execute({ input: { url: 'https://example.com/missing' }, toolUseId: 'tu_404', cwd: '/' } as any)
     assert.equal(result.isError, true)

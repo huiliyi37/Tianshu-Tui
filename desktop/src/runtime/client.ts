@@ -1325,6 +1325,25 @@ export function setCheckpointConfig(
   return apiPut<{ ok: boolean } & CheckpointConfig>('/config/checkpoint', input)
 }
 
+// ── Network proxy (web_fetch / import_resource) ──────────────────────
+
+export interface NetworkConfig {
+  /** HTTP proxy URL (e.g. http://127.0.0.1:7890). Empty = follow env vars. */
+  proxy: string
+  /** Comma-separated no-proxy domains. Empty = follow NO_PROXY env. */
+  noProxy: string
+}
+
+export function getNetworkConfig(): Promise<NetworkConfig> {
+  return apiGet<NetworkConfig>('/config/network')
+}
+
+export function setNetworkConfig(
+  input: { proxy?: string; noProxy?: string },
+): Promise<{ ok: boolean } & NetworkConfig> {
+  return apiPut<{ ok: boolean } & NetworkConfig>('/config/network', input)
+}
+
 // ── Vision bridge (multimodal image recognition) ──────────────────────
 
 export interface VisionModelConfig {

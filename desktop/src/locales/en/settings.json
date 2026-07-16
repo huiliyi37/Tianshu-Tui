@@ -559,5 +559,14 @@
       "protocol": "Protocol mismatch — check the MCP server version",
       "tool_error": "See the error details"
     }
+  },
+  "network": {
+    "title": "Network Proxy",
+    "desc": "HTTP proxy for web_fetch / import_resource (e.g. http://127.0.0.1:7890 for Clash). Leave empty to follow HTTPS_PROXY / HTTP_PROXY environment variables.",
+    "noProxyDesc": "Domains to bypass proxy (comma-separated, supports * wildcard and . prefix, e.g. localhost,.internal.example.com). Leave empty to follow NO_PROXY env var.",
+    "saved": "Saved · takes effect after restart",
+    "saveFailed": "Save failed: {{error}}",
+    "saving": "Saving…",
+    "save": "Save"
   }
 }

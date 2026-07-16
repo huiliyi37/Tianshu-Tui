@@ -23,7 +23,7 @@ import { McpSettingsManager } from '../components/McpSettings'
 import { VisionModelSettings } from '../components/VisionModelSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
 import { ReleaseNotesPanel } from '../components/ReleaseNotesPanel'
-import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, getProjectDocs, setProjectDocs, deactivateLicense, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, getNetworkConfig, setNetworkConfig, getComputerUseStatus, revokeComputerUseApp, getPermissionDirs, setPermissionDirs, getProjectDocs, setProjectDocs, deactivateLicense, type PermissionDirs, type ComputerUseStatus, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { useProLicense } from '../lib/use-activation-gate'
 import { ProUpgradeDialog } from '../components/ActivationScreen'
 import { pickFolder } from '../lib/dialog'
@@ -340,6 +340,7 @@ export function SettingsSurface() {
             <ProjectDocsSection />
             <StorageLocationSection />
             <StorageSection />
+            <NetworkSection />
             <UpdaterSection />
             <AboutSection />
           </div>
@@ -1664,6 +1665,81 @@ function LanguageSection() {
           ))}
         </SelectContent>
       </Select>
+    </section>
+  )
+}
+
+function NetworkSection() {
+  const { t } = useTranslation('settings')
+  const [proxy, setProxy] = useState('')
+  const [noProxy, setNoProxy] = useState('')
+  const [savedProxy, setSavedProxy] = useState('')
+  const [savedNoProxy, setSavedNoProxy] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const cfg = await getNetworkConfig()
+      setProxy(cfg.proxy)
+      setNoProxy(cfg.noProxy)
+      setSavedProxy(cfg.proxy)
+      setSavedNoProxy(cfg.noProxy)
+    } catch {
+      /* sidecar offline — leave empty */
+    }
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const dirty = proxy.trim() !== savedProxy.trim() || noProxy.trim() !== savedNoProxy.trim()
+
+  const save = useCallback(async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const next = await setNetworkConfig({ proxy: proxy.trim(), noProxy: noProxy.trim() })
+      setProxy(next.proxy)
+      setNoProxy(next.noProxy)
+      setSavedProxy(next.proxy)
+      setSavedNoProxy(next.noProxy)
+      setMsg(t('network.saved'))
+    } catch (err) {
+      setMsg(t('network.saveFailed', { error: (err as Error).message }))
+    } finally {
+      setBusy(false)
+    }
+  }, [proxy, noProxy, t])
+
+  return (
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>{t('network.title')}</h4>
+        <p className="meta">{t('network.desc')}</p>
+      </div>
+      <div className="flex items-center gap-2" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+        <Input
+          value={proxy}
+          onChange={(e) => setProxy(e.target.value)}
+          placeholder="http://127.0.0.1:7890"
+          spellCheck={false}
+          style={{ minWidth: 340, flex: 1, fontFamily: 'var(--font-mono, monospace)' }}
+        />
+        <Button onClick={() => void save()} disabled={busy || !dirty}>
+          {busy ? t('network.saving') : t('network.save')}
+        </Button>
+      </div>
+      <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+        <Input
+          value={noProxy}
+          onChange={(e) => setNoProxy(e.target.value)}
+          placeholder="localhost,127.0.0.1,.internal.example.com"
+          spellCheck={false}
+          style={{ minWidth: 340, flex: 1, fontFamily: 'var(--font-mono, monospace)' }}
+        />
+      </div>
+      <div className="meta" style={{ marginTop: 6 }}>{t('network.noProxyDesc')}</div>
+      {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
     </section>
   )
 }

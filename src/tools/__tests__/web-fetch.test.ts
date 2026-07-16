@@ -2,6 +2,11 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createWebFetchTool, htmlToMarkdown } from '../web-fetch.js'
 import { isPrivateIP } from '../web-fetch.js'
+import type { FetchLike } from '../net/http-fetch.js'
+
+/** DOM Response ≡ undici Response at runtime; bridge the nominal type gap. */
+const mockFetch = (fn: (url: string, init?: RequestInit) => Promise<Response>): FetchLike =>
+  fn as unknown as FetchLike
 
 describe('htmlToMarkdown (turndown)', () => {
   it('strips HTML tags and preserves text', async () => {
@@ -98,12 +103,12 @@ describe('web_fetch redirect SSRF', () => {
         if (hostname === 'evil.com') return { address: '10.0.0.1' }
         return { address: '93.184.216.34' }
       },
-      fetch: async (_url: string, init?: RequestInit) => {
+      fetch: mockFetch(async (_url: string, init?: RequestInit) => {
         return new Response(null, {
           status: 302,
           headers: { Location: 'http://evil.com/private' },
         })
-      },
+      }),
     })
 
     const result = await tool.execute({
@@ -120,7 +125,7 @@ describe('web_fetch redirect SSRF', () => {
     let fetchCalled = 0
     const tool = createWebFetchTool({
       lookup: async () => ({ address: '93.184.216.34' }),
-      fetch: async (url: string, init?: RequestInit) => {
+      fetch: mockFetch(async (url: string, init?: RequestInit) => {
         fetchCalled++
         if (fetchCalled === 1) {
           return new Response(null, {
@@ -132,7 +137,7 @@ describe('web_fetch redirect SSRF', () => {
           status: 200,
           headers: { 'content-type': 'text/html' },
         })
-      },
+      }),
     })
 
     const result = await tool.execute({

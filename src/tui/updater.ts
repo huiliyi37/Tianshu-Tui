@@ -21,6 +21,7 @@ import { rivetHome, updateCheckPath } from '../config/paths.js'
 import { WinStreamDecoder } from '../platform.js'
 import { ProxyAgent } from 'undici'
 import type { Dispatcher } from 'undici'
+import { resolveProxyForUrl } from '../tools/net/proxy-resolver.js'
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org'
 const GITHUB_API_URL = 'https://api.github.com/repos'
@@ -32,37 +33,6 @@ const UPDATE_RETRIES = 3
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
-}
-
-function envCaseInsensitive(key: string): string | undefined {
-  return process.env[key] ?? process.env[key.toLowerCase()]
-}
-
-function shouldBypassProxy(hostname: string): boolean {
-  const raw = envCaseInsensitive('NO_PROXY')
-  if (!raw) return false
-  const h = hostname.toLowerCase()
-  for (const entry of raw.split(',')) {
-    const p = entry.trim().toLowerCase()
-    if (!p) continue
-    if (p === '*') return true
-    if (h === p) return true
-    if (p.startsWith('.') && (h.endsWith(p) || h === p.slice(1))) return true
-  }
-  return false
-}
-
-function proxyForUrl(url: string): string | undefined {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return undefined
-  }
-  if (shouldBypassProxy(parsed.hostname)) return undefined
-  if (parsed.protocol === 'https:') return envCaseInsensitive('HTTPS_PROXY') ?? envCaseInsensitive('HTTP_PROXY')
-  if (parsed.protocol === 'http:') return envCaseInsensitive('HTTP_PROXY') ?? envCaseInsensitive('HTTPS_PROXY')
-  return undefined
 }
 
 interface UpdateCache {
@@ -320,7 +290,7 @@ async function fetchWithRetry(
   options?: RequestInit,
   retries = UPDATE_RETRIES,
 ): Promise<Response | null> {
-  const proxy = proxyForUrl(url)
+  const proxy = resolveProxyForUrl(url)
   const dispatcher = proxy ? new ProxyAgent(proxy) : undefined
   const init = { ...options, dispatcher } as RequestInit & { dispatcher?: Dispatcher }
 

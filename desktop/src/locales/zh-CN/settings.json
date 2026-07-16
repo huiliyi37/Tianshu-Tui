@@ -559,5 +559,14 @@
       "protocol": "协议不兼容，检查 MCP 服务器版本",
       "tool_error": "查看错误详情"
     }
+  },
+  "network": {
+    "title": "网络代理",
+    "desc": "web_fetch / import_resource 的 HTTP 代理地址（如 Clash 的 http://127.0.0.1:7890）。留空则跟随系统环境变量 HTTPS_PROXY / HTTP_PROXY。",
+    "noProxyDesc": "不走代理的域名列表（逗号分隔，支持 * 通配和 . 前缀，如 localhost,.internal.example.com）。留空则跟随 NO_PROXY 环境变量。",
+    "saved": "已保存 · 重启应用后生效",
+    "saveFailed": "保存失败：{{error}}",
+    "saving": "保存中…",
+    "save": "保存"
   }
 }

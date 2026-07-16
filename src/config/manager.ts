@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
 import { z } from 'zod'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, envSchema, uiSchema, permissionsSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
@@ -339,6 +339,48 @@ export function setShellConfig(input: { gitBashPath?: unknown; gitPath?: unknown
   return {
     gitBashPath: cfg.env.gitBashPath ?? '',
     gitPath: cfg.env.gitPath ?? '',
+  }
+}
+
+// --- 网络代理配置（web_fetch / import_resource 的 HTTP 代理） ---
+
+export interface NetworkConfigSnapshot {
+  proxy: string
+  noProxy: string
+}
+
+/** 读取用户全局 config 的 network 段（web_fetch 代理配置）。 */
+export function getNetworkConfig(): NetworkConfigSnapshot {
+  const net = loadConfig().network
+  return {
+    proxy: net.proxy ?? '',
+    noProxy: net.noProxy ?? '',
+  }
+}
+
+/**
+ * 持久化 HTTP 代理配置到用户全局 config（`network.proxy` / `network.noProxy`）。
+ * 空值清除覆盖，回退到环境变量 HTTPS_PROXY/HTTP_PROXY/NO_PROXY。
+ * 下次 sidecar/session 启动时生效（buildFetchOptions → httpFetchGuarded）。
+ */
+export function setNetworkConfig(input: { proxy?: unknown; noProxy?: unknown }): NetworkConfigSnapshot {
+  const cfg = loadConfig()
+  const merged: Record<string, unknown> = { ...cfg.network }
+  if (input.proxy !== undefined) {
+    const raw = String(input.proxy).trim()
+    if (raw) merged.proxy = raw
+    else delete merged.proxy
+  }
+  if (input.noProxy !== undefined) {
+    const raw = String(input.noProxy).trim()
+    if (raw) merged.noProxy = raw
+    else delete merged.noProxy
+  }
+  cfg.network = networkSchema.parse(merged)
+  saveConfig(cfg)
+  return {
+    proxy: cfg.network.proxy ?? '',
+    noProxy: cfg.network.noProxy ?? '',
   }
 }
 

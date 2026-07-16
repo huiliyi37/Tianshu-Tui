@@ -1,10 +1,14 @@
 import { lookup as dnsLookup } from 'node:dns/promises'
-import { Agent } from 'undici'
+import { Agent, ProxyAgent, fetch as undiciFetch, type Response as UndiciResponse, type RequestInit as UndiciRequestInit } from 'undici'
 import { isPrivateIP, resolveAndAssertPublic, SSRFError, type LookupFn } from './ssrf.js'
+import { resolveProxyForUrl, type ProxyResolverOptions } from './proxy-resolver.js'
+
+export type FetchLike = (url: string, init?: UndiciRequestInit) => Promise<UndiciResponse>
 
 export interface HttpFetchDeps {
   lookup?: LookupFn
-  fetch?: (url: string, init?: RequestInit) => Promise<Response>
+  /** 可注入自定义 fetch（测试用）。注入后会关闭 SSRF pin + proxy 路径。 */
+  fetch?: FetchLike
 }
 
 export interface HttpFetchOptions {
@@ -12,6 +16,11 @@ export interface HttpFetchOptions {
   maxResponseBytes?: number
   maxRedirects?: number
   userAgent?: string
+  /**
+   * Proxy 解析选项。传入 config.network.proxy / noProxy；未传则回退到
+   * HTTPS_PROXY/HTTP_PROXY 环境变量。每跳（含重定向）独立解析。
+   */
+  proxy?: ProxyResolverOptions
 }
 
 export interface HttpFetchResult {
@@ -65,9 +74,21 @@ export function buildPinnedLookup(address: string, family: number | undefined): 
   }
 }
 
-/** Per-request undici dispatcher whose connections are pinned to `address`. */
-function createPinnedDispatcher(address: string, family: number | undefined): Agent {
-  return new Agent({ connect: { lookup: buildPinnedLookup(address, family) as never } })
+/** Per-request undici dispatcher whose connections are pinned to `address`.
+ *
+ * 当配置了 proxy 时，返回 ProxyAgent——连接目标变为代理服务器，DNS pin 降级
+ * 为请求前的 resolveAndAssertPublic 校验（仍在拦截私网目标，但不做 socket 层
+ * pin，因为 pin 源站 IP 对代理隧道无意义）。 */
+function createPinnedDispatcher(
+  address: string,
+  family: number | undefined,
+  proxyUrl?: string,
+): Agent | ProxyAgent {
+  const connect = { lookup: buildPinnedLookup(address, family) as never }
+  if (proxyUrl) {
+    return new ProxyAgent({ uri: proxyUrl, connect })
+  }
+  return new Agent({ connect })
 }
 
 export async function httpFetchGuarded(
@@ -76,7 +97,12 @@ export async function httpFetchGuarded(
   opts: HttpFetchOptions = {},
 ): Promise<HttpFetchResult> {
   const lookup = deps.lookup ?? dnsLookup
-  const fetchImpl = deps.fetch ?? globalThis.fetch.bind(globalThis)
+  // Use npm undici's fetch (not globalThis.fetch) so it shares the same version
+  // as the Agent/ProxyAgent we construct below. Node's builtin undici may be an
+  // older major (e.g. Node 24 ships undici 7.x) whose dispatch handler protocol
+  // is incompatible with our npm undici 8.x dispatchers — passing a custom
+  // dispatcher to the builtin fetch raises "invalid onRequestStart method".
+  const fetchImpl = deps.fetch ?? undiciFetch
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const maxBytes = opts.maxResponseBytes ?? DEFAULT_MAX_BYTES
   const maxRedirects = opts.maxRedirects ?? DEFAULT_MAX_REDIRECTS
@@ -99,10 +125,10 @@ export async function httpFetchGuarded(
 
   const headers: Record<string, string> = { 'User-Agent': userAgent }
   let currentUrl = parsed.href
-  let response: Response | undefined
+  let response: UndiciResponse | undefined
   // Dispatcher of the terminal (non-redirect) response, kept alive until its
   // streaming body has been fully read, then destroyed in the outer finally.
-  let activeDispatcher: Agent | undefined
+  let activeDispatcher: Agent | ProxyAgent | undefined
 
   try {
     for (let hop = 0; hop <= maxRedirects; hop++) {
@@ -116,17 +142,17 @@ export async function httpFetchGuarded(
         throw new Error(`Redirect to unsupported protocol: ${hopUrl.protocol}`)
       }
       const resolved = await resolveAndAssertPublic(hopUrl.hostname, lookup)
-      const dispatcher = pin ? createPinnedDispatcher(resolved.address, resolved.family) : undefined
+      const proxyUrl = pin ? resolveProxyForUrl(currentUrl, opts.proxy) : undefined
+      const dispatcher = pin ? createPinnedDispatcher(resolved.address, resolved.family, proxyUrl) : undefined
 
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), timeoutMs)
-      const init: RequestInit = {
+      const init: UndiciRequestInit = {
         signal: controller.signal,
         headers,
         redirect: 'manual',
       }
-      // `dispatcher` is an undici extension not present in the DOM RequestInit
-      // type; the real (undici) global fetch honours it, mock fetches ignore it.
+      // `dispatcher` is an undici extension; mock fetches ignore it.
       if (dispatcher) (init as { dispatcher?: unknown }).dispatcher = dispatcher
       try {
         response = await fetchImpl(currentUrl, init)
@@ -172,7 +198,7 @@ export async function httpFetchGuarded(
   }
 }
 
-async function readBody(response: Response, maxBytes: number, timeoutMs: number): Promise<Uint8Array> {
+async function readBody(response: UndiciResponse, maxBytes: number, timeoutMs: number): Promise<Uint8Array> {
   if (!response.body) return new Uint8Array(0)
 
   const reader = response.body.getReader()

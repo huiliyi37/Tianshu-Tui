@@ -38,6 +38,8 @@ import {
   setShellConfig,
   getCheckpointConfig,
   setCheckpointConfig,
+  getNetworkConfig,
+  setNetworkConfig,
   getPermissionDirs,
   setPermissionDirs,
   getVisionModelConfig,
@@ -319,6 +321,23 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
       try {
         return { status: 200, body: { ok: true, ...setCheckpointConfig({ checkpointEveryTurns }) } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // HTTP proxy for web_fetch / import_resource (Clash etc.). Empty = follow env.
+    'GET /config/network': withAuth(() => {
+      return { status: 200, body: getNetworkConfig() }
+    }, apiToken),
+
+    'PUT /config/network': withAuth((body) => {
+      const { proxy, noProxy } = (body ?? {}) as { proxy?: unknown; noProxy?: unknown }
+      if (proxy === undefined && noProxy === undefined) {
+        return { status: 400, body: { error: 'proxy or noProxy is required' } }
+      }
+      try {
+        return { status: 200, body: { ok: true, ...setNetworkConfig({ proxy, noProxy }) } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

@@ -198,6 +198,7 @@ export const DEFAULT_CONFIG: Config = {
     userAgent: 'Tianshu/1.0 (terminal coding agent)',
     extractMainContent: true,
   },
+  network: {},
   mcp: {
     enabled: true,
     servers: {},
