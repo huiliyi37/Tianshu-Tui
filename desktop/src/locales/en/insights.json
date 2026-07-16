@@ -38,5 +38,33 @@
     "elapsed": "Elapsed",
     "calls": "Calls"
   },
-  "selectSessionHint": "Select a session first to view details"
+  "selectSessionHint": "Select a session first to view details",
+  "platform": {
+    "title": "DeepSeek Platform",
+    "monthlyCost": "Monthly Cost",
+    "dailyCost": "Today Cost",
+    "balance": "Balance",
+    "requests": "Requests",
+    "notAvailable": "Not a DeepSeek provider or API Key not set",
+    "loadFailed": "Failed to load platform data"
+  },
+  "trend": {
+    "title": "Cost Trend (Daily)",
+    "cost": "Cost"
+  },
+  "modelBreakdown": {
+    "title": "Cost by Model",
+    "cacheHit": "Cache Hit",
+    "cacheMiss": "Cache Miss",
+    "noData": "No cost data this month"
+  },
+  "monthPicker": {
+    "prev": "Prev",
+    "next": "Next"
+  },
+  "cache": {
+    "title": "Cache Hit Rate",
+    "hit": "Hit",
+    "miss": "Miss"
+  }
 }

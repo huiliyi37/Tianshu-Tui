@@ -1189,6 +1189,45 @@ export function getBalance(): Promise<{ balance: BalanceResult | null }> {
   return apiGet<{ balance: BalanceResult | null }>('/config/balance')
 }
 
+// ── DeepSeek 平台成本 API ──────────────────────────────────────────
+
+export interface DeepSeekSummary {
+  is_account_available: boolean
+  current_day_cost: number
+  current_month_cost: number
+  current_day_requests: number
+  flash_usage: number
+  pro_usage: number
+  balance_info: {
+    currency: string
+    total_balance: number
+    granted_balance?: number
+    topped_up_balance?: number
+  }
+}
+
+export interface DeepSeekCostEntry {
+  total_tokens: number
+  cost_in_cents: number
+  input_cache_hit_tokens: number
+  input_cache_miss_tokens: number
+  output_tokens: number
+  request_count: number
+}
+
+export interface DeepSeekCostReport {
+  total: { cost_in_cents: number; total_tokens: number }
+  models: Array<{ model: string; usage: DeepSeekCostEntry[] }>
+}
+
+export function getDeepSeekSummary(): Promise<{ summary: DeepSeekSummary | null }> {
+  return apiGet<{ summary: DeepSeekSummary | null }>('/config/deepseek/summary')
+}
+
+export function getDeepSeekCost(month: number, year: number): Promise<{ cost: DeepSeekCostReport | null }> {
+  return apiGet<{ cost: DeepSeekCostReport | null }>(`/config/deepseek/cost?month=${month}&year=${year}`)
+}
+
 export function removeConfigProvider(name: string): Promise<{ ok: boolean }> {
   return rivetFetch(`/config/providers/${name}`, { method: 'DELETE' })
     .then(r => r.json() as Promise<{ ok: boolean }>)

@@ -38,5 +38,33 @@
     "elapsed": "耗时",
     "calls": "调用次数"
   },
-  "selectSessionHint": "请先选择一个会话以查看明细"
+  "selectSessionHint": "请先选择一个会话以查看明细",
+  "platform": {
+    "title": "DeepSeek 平台账户",
+    "monthlyCost": "当月花费",
+    "dailyCost": "当日花费",
+    "balance": "余额",
+    "requests": "请求数",
+    "notAvailable": "非 DeepSeek provider 或未配置 API Key",
+    "loadFailed": "平台数据加载失败"
+  },
+  "trend": {
+    "title": "成本趋势（按天）",
+    "cost": "花费"
+  },
+  "modelBreakdown": {
+    "title": "按模型成本明细",
+    "cacheHit": "缓存命中",
+    "cacheMiss": "缓存未命中",
+    "noData": "本月无成本数据"
+  },
+  "monthPicker": {
+    "prev": "上月",
+    "next": "下月"
+  },
+  "cache": {
+    "title": "缓存命中率",
+    "hit": "命中",
+    "miss": "未命中"
+  }
 }
