@@ -1019,7 +1019,10 @@ async function main() {
       tuiApp.setModelInfo(res.modelName, res.contextWindow)
       tuiApp.commitStatic(`Model switched to: ${res.modelName}`)
     } else {
-      tuiApp.commitStatic(`⚠️ Model switch failed: ${res.error ?? 'unknown error'}`)
+      // defer to after overlay closes so the message isn't erased by deactivateOverlay
+      setTimeout(() => {
+        tuiApp.commitStatic(`Model switch failed: ${res.error ?? 'unknown error'}`, { isError: true })
+      }, 0)
     }
   }, /* themePickerExec: */ (themeName: string) => {
     // Theme Picker Enter 回调：切换主题。
