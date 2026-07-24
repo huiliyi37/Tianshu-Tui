@@ -1376,7 +1376,7 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
         try { return resolveApiKey(prov) } catch { return undefined }
       })()
       if (!provKey) {
-        return { ok: false, error: `API key not set for ${provName}. Set ${prov.apiKeyEnv ?? 'apiKey'} in config or environment.` }
+        return { ok: false, error: `API key not set for ${provName}.\nSet \`${prov.apiKeyEnv ?? 'apiKey'}\` in ~/.rivet/config.json or via environment variable, then restart rivet.` }
       }
       if (provName !== ctx.provider.name || provKey !== apiKey) {
         provider = prov
