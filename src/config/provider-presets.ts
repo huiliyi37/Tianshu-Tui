@@ -397,7 +397,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           supportsVision: true,
         },
         {
-          id: 'gpt-5.6',
+          id: 'gpt-5.6-sol',
           alias: 'cc-gpt56',
           contextWindow: 200_000,
           maxTokens: 128_000,
