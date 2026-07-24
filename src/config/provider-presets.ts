@@ -1,6 +1,6 @@
 import type { ModelConfig, ProviderConfig } from './schema.js'
 
-export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'siliconflow' | 'longcat'
+export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'siliconflow' | 'longcat' | 'ccswitch'
 
 export interface ProviderPreset {
   key: ProviderPresetKey
@@ -339,6 +339,62 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           tier: 'strong',
           // 官方定价 $0.75/$2.95 per M tokens (≈ ¥5/¥20)，cache read 免费
           pricing: { input: 0.75, output: 2.95, cacheRead: 0, cacheWrite: 0.75 },
+        },
+      ],
+      unsupported: [],
+    },
+  },
+  ccswitch: {
+    key: 'ccswitch',
+    label: 'CC Switch',
+    defaultModelId: 'claude-opus-4-8',
+    provider: {
+      name: 'ccswitch',
+      apiKeyEnv: 'CC_SWITCH_PROXY_API_KEY',
+      baseUrl: 'http://127.0.0.1:8891/v1',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+        toolJsonBug: false,
+        prefixCache: 'none',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 128000,
+      models: [
+        {
+          id: 'claude-opus-4-8',
+          alias: 'cc-opus',
+          contextWindow: 1_000_000,
+          maxTokens: 128000,
+          reasoningEffort: 'max',
+          tier: 'strong',
+        },
+        {
+          id: 'claude-sonnet-4-5',
+          alias: 'cc-sonnet',
+          contextWindow: 1_000_000,
+          maxTokens: 128000,
+          reasoningEffort: 'max',
+          tier: 'strong',
+        },
+        {
+          id: 'deepseek-v4-pro',
+          alias: 'cc-dsv4',
+          contextWindow: 1_000_000,
+          maxTokens: 384_000,
+          reasoningEffort: 'max',
+          tier: 'strong',
+        },
+        {
+          id: 'glm-5.2',
+          alias: 'cc-glm',
+          contextWindow: 1_000_000,
+          maxTokens: 131_072,
+          reasoningEffort: 'max',
+          tier: 'strong',
+          supportsVision: true,
         },
       ],
       unsupported: [],

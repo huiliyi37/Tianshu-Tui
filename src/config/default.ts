@@ -93,6 +93,7 @@ export const DEFAULT_CONFIG: Config = {
       'mimo-api': cloneProviderPreset('mimo-api'),
       minimax: cloneProviderPreset('minimax'),
       codex: cloneProviderPreset('codex'),
+      ccswitch: cloneProviderPreset('ccswitch'),
     },
   },
   agent: {
