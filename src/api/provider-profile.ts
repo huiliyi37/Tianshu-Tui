@@ -54,6 +54,7 @@ const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
     cacheType: 'exact-prefix' as CacheType, persistent: true, minCacheTokens: 64,
     attentionProfile: { effectiveAttentionRatio: 0.85, toolDensityThreshold: 0.6, collapseAgeTurns: 4 },
   },
+  ccswitch: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
 }
 
 /**

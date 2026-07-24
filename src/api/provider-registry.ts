@@ -132,6 +132,11 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
     'Implicit server-side exact-prefix cache, cache hits free (official pricing)',
     'JSON repair must run as plain-text re-ask (no json-mode)',
   ]),
+  ccswitch: buildEntry('ccswitch', 'CC Switch', WELL_KNOWN_DEFAULTS['ccswitch']!, [
+    '本地 OpenAI 兼容代理，默认 http://127.0.0.1:8891/v1',
+    '认证使用 CC_SWITCH_PROXY_API_KEY 环境变量',
+    '模型名透传——可用模型取决于 cc-switch 侧配置',
+  ]),
 }
 
 // ─── Lookup Functions ────────────────────────────────────────

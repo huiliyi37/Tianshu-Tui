@@ -188,6 +188,16 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     supportsResponseFormat: false,
     mapUsage: mapDeepSeekUsage,
   },
+  ccswitch: {
+    supportsThinking: false,
+    thinkingFormat: 'none',
+    supportsCacheControl: false,
+    stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+    hasToolJsonInContentBug: false,
+    effortFormat: 'none',
+    prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
+  },
 }
 
 /**
