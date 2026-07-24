@@ -185,6 +185,19 @@ export function loadConfig(options?: {
     base = deepMerge(base, options.sessionOverlay)
   }
 
+  // Backfill missing provider names from the providers map key.
+  // Older config files or partial overrides may omit `name`; the schema
+  // requires it. Auto-populate so user configs stay forward-compatible.
+  const providers = (base as Record<string, unknown>).provider as Record<string, unknown> | undefined
+  if (providers) {
+    const providerMap = providers.providers as Record<string, Record<string, unknown>> | undefined
+    if (providerMap) {
+      for (const [key, entry] of Object.entries(providerMap)) {
+        if (!entry.name) entry.name = key
+      }
+    }
+  }
+
   return configSchema.parse(base)
 }
 
