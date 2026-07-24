@@ -360,7 +360,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         prefixCache: 'none',
         prefixCompletion: false,
       },
-      thinking: 'enabled',
+      thinking: 'disabled',
       maxTokens: 128000,
       models: [
         {
