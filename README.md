@@ -96,7 +96,7 @@ Add-Content $PROFILE ". C:\path\to\rivet.ps1"
 
 > 补全内容与 CLI 保持一致：顶层命令（`config` / `serve` / `sessions` / `browser` / `logs`）、全局 flags、`config` 全部子命令，以及从 `~/.rivet/config.json` 动态读取的 provider 名。
 
-### 3. 配置 API Key（首次必做）
+### 4. 配置 API Key（首次必做）
 
 ```bash
 # A. 环境变量（首次试用最简单）
@@ -108,7 +108,7 @@ rivet config set-key deepseek sk-xxx
 
 > 其他提供商（Claude、GLM、Codex、MiniMax、MiMo）用法相同，详见 [模型配置](docs/user-guide-provider-config.md)。
 
-### 4. 启动
+### 5. 启动
 
 ```bash
 rivet            # 或：npm start / node dist/main.js
