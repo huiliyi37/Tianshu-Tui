@@ -1,6 +1,7 @@
 import type { SummaryState } from './summary-state.js'
 
-function truncate(s: string, max: number): string {
+export function truncate(s: string, max: number): string {
+  if (max <= 0) return ''
   return s.length > max ? s.slice(0, max - 1) + '…' : s
 }
 
