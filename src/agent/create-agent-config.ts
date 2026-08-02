@@ -405,9 +405,32 @@ function buildFallbackChain(
 }
 
 /**
+ * Resolve which provider hosts the compact model.
+ * When `compact.provider` is unset, infer from the primary provider or
+ * allProviders so the schema default `model: deepseek-v4-flash` actually
+ * builds a cheap dedicated client (previously inert without provider).
+ */
+export function resolveCompactProviderName(input: {
+  compact: { provider?: string; model?: string }
+  provider: ProviderConfig
+  allProviders?: Record<string, ProviderConfig>
+}): string | undefined {
+  if (input.compact.provider) return input.compact.provider
+  const model = input.compact.model
+  if (!model) return undefined
+  const hasModel = (prov: ProviderConfig) =>
+    prov.models.some(m => m.id === model || m.alias === model)
+  if (hasModel(input.provider)) return input.provider.name
+  for (const [name, prov] of Object.entries(input.allProviders ?? {})) {
+    if (hasModel(prov)) return name
+  }
+  return undefined
+}
+
+/**
  * Build the dedicated compaction StreamClient from compact.provider+model.
  * Returns undefined (→ caller falls back to primaryClient) when:
- *  - provider/model not both set
+ *  - model not set, or no resolvable provider
  *  - provider unknown, or model not in its model list
  *  - credentials missing (apiKey empty / oauth not authenticated)
  * This matches the silent-fallback contract of review/council routing: a
@@ -416,10 +439,12 @@ function buildFallbackChain(
 function buildCompactClient(
   input: AgentConfigInput,
 ): import('../api/stream-client.js').StreamClient | undefined {
-  const compactProvider = input.compact.provider
   const compactModel = input.compact.model
+  const compactProvider = resolveCompactProviderName(input)
   if (!compactProvider || !compactModel) return undefined
-  const prov = input.allProviders?.[compactProvider]
+  const prov = input.allProviders?.[compactProvider] ?? (
+    input.provider.name === compactProvider ? input.provider : undefined
+  )
   if (!prov) return undefined
   const spec = prov.models.find(m => m.id === compactModel || m.alias === compactModel)
   if (!spec) return undefined

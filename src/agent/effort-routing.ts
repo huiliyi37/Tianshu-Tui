@@ -12,12 +12,30 @@ export interface RoutineEffortSignals {
 }
 
 /**
+ * Whether Phase 2A routine effort routing is active.
+ *
+ * Default ON (cost control): routine on-track turns step effort down one tier.
+ * Opt out with `RIVET_EFFORT_ROUTING=0` (also accepts `false` / `off`).
+ * Explicit `=1` / `true` / `on` keeps the historical opt-in spelling working.
+ */
+export function isEffortRoutingEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const raw = env['RIVET_EFFORT_ROUTING']
+  if (raw === undefined || raw === '') return true
+  const v = raw.trim().toLowerCase()
+  if (v === '0' || v === 'false' || v === 'off' || v === 'no') return false
+  if (v === '1' || v === 'true' || v === 'on' || v === 'yes') return true
+  // Unknown values: fail open to the cost-saving default.
+  return true
+}
+
+/**
  * Phase 2A: route reasoning effort down one tier on routine, on-track turns.
  *
- * OPT-IN via RIVET_EFFORT_ROUTING=1 — OFF by default. This is an unvalidated
- * behavior change gated on the Phase 1 decision (reasoning-dominated output).
- * Keeping it opt-in means the default session is byte-for-byte unchanged until
- * the data justifies enabling it.
+ * Default ON — DeepSeek V4 bills thinking inside output tokens; stepping down
+ * on low-complexity turns is the highest-ROI cost lever after prefix cache.
+ * Opt out: `RIVET_EFFORT_ROUTING=0`.
  *
  * Heuristic: a turn is "routine" when complexity is low AND the agent is on
  * track (high prediction momentum or good evidence coverage). Such turns rarely
@@ -31,7 +49,7 @@ export interface RoutineEffortSignals {
 export function routeRoutineEffort(
   effort: ReasoningEffort,
   signals: RoutineEffortSignals,
-  enabled: boolean = process.env['RIVET_EFFORT_ROUTING'] === '1',
+  enabled: boolean = isEffortRoutingEnabled(),
 ): ReasoningEffort {
   if (!enabled) return effort
   const routine = signals.complexity <= 0.3 && (signals.momentum >= 0.7 || signals.confidence >= 0.7)

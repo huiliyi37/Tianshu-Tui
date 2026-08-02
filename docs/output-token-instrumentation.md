@@ -31,18 +31,21 @@ text 主导          → 杠杆是 verbosity（Phase 2B）
 - `scripts/analyze-output-tokens.ts`：读 cache-log，按会话 + 总体输出拆分占比与
   verdict（2A / 2B / 停止）。
 
-### Phase 2A — effort 路由（opt-in，默认关）
+### Phase 2A — effort 路由（默认开，可用 `RIVET_EFFORT_ROUTING=0` 关闭）
 
-- `src/agent/effort-routing.ts`：`routeRoutineEffort()`，`RIVET_EFFORT_ROUTING=1` 开启。
+- `src/agent/effort-routing.ts`：`routeRoutineEffort()` / `isEffortRoutingEnabled()`。
 - 接线：`src/agent/turn-perception.ts`，用真实 sensorium 的
   `complexity / momentum / confidence`。仅"低复杂度 + (高 momentum 或高 confidence)"
   降一档；从不升档；floor 由 `ReasoningEffortController.set()` 下游钳制。
+- DeepSeek 预设默认 effort：`v4-pro=high`、`v4-flash=medium`（不再默认 max/high）。
 
-### Phase 2B — 自适应 verbosity（opt-in，默认关）
+### Phase 2B — 自适应 verbosity（日常仍 opt-in；doom-loop 自动 escalate）
 
-- `src/prompt/volatile.ts`：`renderTersenessNudge()`，`RIVET_TERSE=1` 或
-  `ctx.tersenessEnabled` 开启，支持 `tersenessEscalate`（doom-loop/storm 时更紧）。
-- 只进**动态 appendix**，frozen base 不动 → 默认会话字节不变，缓存稳定性测试无需改。
+- `src/prompt/volatile.ts`：`renderTersenessNudge()` / `resolveTersenessFlags()`。
+  - 日常：`RIVET_TERSE=1` 或 `ctx.tersenessEnabled` 开启。
+  - doom-loop / storm：`turn-step-producer` 设 `tersenessEscalate`，自动注入更严 nudge
+    （可用 `RIVET_TERSE=0` 彻底关闭）。
+- 只进**动态 appendix**，frozen base 不动 → 默认会话字节不变（无 doom-loop 时）。
 
 ## 注意事项（坑位）
 
@@ -50,11 +53,10 @@ text 主导          → 杠杆是 verbosity（Phase 2B）
    `text = output - reasoning`，不要把它加到 output 上重复计费。
 2. **Anthropic 不暴露思考 token 拆分**：`reasoning_tokens` 在 Claude 路径恒为
    `undefined`（这是正确行为，不是 bug）。脚本对无拆分的会话诚实报"无数据"。
-3. **两个干预都默认关**。这是有意的——在 Phase 1 拿到数据前不改默认行为。开启方式：
-   `RIVET_EFFORT_ROUTING=1` / `RIVET_TERSE=1`。
-4. **Phase 2B 故意没进 frozen base**。原计划写"frozen base 恒定 + appendix 自适应"，
-   为硬保"缓存测试不变"，恒定 + 自适应都放进 appendix 并改成 opt-in。代价：steering
-   力度略弱于 system prompt 级；收益：默认零字节改动、缓存测试无需动。
+3. **Effort 路由默认开；日常 terseness 仍默认关**。关闭 effort：`RIVET_EFFORT_ROUTING=0`。
+   开启日常 terse：`RIVET_TERSE=1`。彻底关闭含 doom-loop 的 terse：`RIVET_TERSE=0`。
+4. **Phase 2B 故意没进 frozen base**。日常与 doom-loop escalate 都只进 appendix。
+   代价：steering 力度略弱于 system prompt 级；收益：无 doom-loop 时默认零字节改动。
 5. **terseness 只管输出散文，不降验证严谨度**。nudge 文案显式声明这点，避免与
    AGENTS.md"交付报告必须覆盖三项 / 不验证不声称完成"硬纪律打架——这是 terseness
    最经典的翻车方式。
@@ -66,17 +68,14 @@ text 主导          → 杠杆是 verbosity（Phase 2B）
 
 ## 后续（按优先级）
 
-1. **跑基线 → 读 verdict → 决定**：正常用几个真实会话后
-   `npx tsx scripts/analyze-output-tokens.ts`，按 verdict 决定开 2A / 2B / 都不开。
-   按"文本已很短"的直觉，大概率落在 2A 或"停止"。
-2. **接 `tersenessEscalate` 到 doom-loop 信号**：当前 escalate 入参已就绪但调用方未
-   接线。可挂 `getDoomLoopLevel()`（trace-store）在循环/storm 时置真。
-3. **effort bandit 真启用评估**：`reasoning-effort-controller.ts` 已有 P3 shadow
+1. **跑基线 → 读 reasoning 占比**：`npx tsx scripts/analyze-output-tokens.ts`，确认
+   effort 默认开后的账单结构；若仍 reasoning 主导，再考虑把 pro 默认降到 medium。
+2. **effort bandit 真启用评估**：`reasoning-effort-controller.ts` 已有 P3 shadow
    telemetry；待 `isEffortGateOpen()` 闸门(totalPulls≥30 且吻合率≥0.8)满足后，可考虑
    让 bandit 真投票，与 2A 的确定性 gate 二选一或叠加。
-4. **GlanceBar/`/debug` 暴露 reasoning 占比**：把脚本的拆分做成实时面板一行，省得事后
+3. **GlanceBar/`/debug` 暴露 reasoning 占比**：把脚本的拆分做成实时面板一行，省得事后
    翻 cache-log。
-5. **若数据指向 2B 且值得更强 steering**：再评估把恒定 terseness 放 frozen base（一次性
+4. **若数据指向更强 terseness**：再评估把恒定 terseness 放 frozen base（一次性
    进缓存锚点，会话内仍稳定），届时需更新 engine-cache-stability 基线。
 
 ## 验证

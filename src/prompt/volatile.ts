@@ -168,8 +168,11 @@ export function renderAskModeBlock(): string {
 /**
  * Phase 2B: output verbosity steering nudge.
  *
- * OPT-IN via RIVET_TERSE=1 (or ctx.tersenessEnabled) — OFF by default, so the
- * default session is byte-for-byte unchanged. Cache-safe: this is only ever
+ * Base mode: OPT-IN via RIVET_TERSE=1 (or ctx.tersenessEnabled) — OFF by default
+ * so quiet sessions stay byte-stable.
+ *
+ * Escalate mode: when ctx.tersenessEscalate is true (doom-loop / storm), the
+ * nudge is enabled automatically unless RIVET_TERSE=0 opts out. Still only
  * pushed into the DYNAMIC appendix, never the frozen base.
  *
  * Scope discipline: the nudge governs OUTPUT PROSE ONLY. It must never be read
@@ -182,6 +185,20 @@ export function renderTersenessNudge(escalate = false): string {
     ? ' 你似乎在重复工作或打转——本轮尤其简洁：一段短文，不复述上下文。'
     : ''
   return `<output-style>文字要精炼。跳过开场白、自我陈述和收尾总结。不要复述已展示的代码、文件内容或上下文——引用即可。直接给答案或动作。${strict} 本指令只约束输出文字——绝不因此削减验证、测试、取证或交付报告的严谨度。</output-style>`
+}
+
+/** Resolve whether terseness steering is active for this appendix render. */
+export function resolveTersenessFlags(ctx: {
+  tersenessEnabled?: boolean
+  tersenessEscalate?: boolean
+}, env: NodeJS.ProcessEnv = process.env): { enabled: boolean; escalate: boolean } {
+  const raw = env['RIVET_TERSE']
+  const v = raw?.trim().toLowerCase()
+  const optOut = v === '0' || v === 'false' || v === 'off' || v === 'no'
+  if (optOut) return { enabled: false, escalate: false }
+  const optIn = v === '1' || v === 'true' || v === 'on' || v === 'yes' || ctx.tersenessEnabled === true
+  const escalate = Boolean(ctx.tersenessEscalate)
+  return { enabled: optIn || escalate, escalate }
 }
 
 export interface ToolHistoryEntry {
@@ -720,12 +737,12 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     push(renderAskModeBlock())
   }
 
-  // Phase 2B: output verbosity steering (opt-in via RIVET_TERSE=1, off by default).
-  // Cache-safe: dynamic appendix only — default sessions are byte-for-byte
-  // unchanged. Escalates on doom-loop/storm turns when the caller signals it.
-  const tersenessEnabled = ctx.tersenessEnabled ?? (process.env['RIVET_TERSE'] === '1')
+  // Phase 2B: output verbosity steering.
+  // Base: opt-in via RIVET_TERSE=1 / ctx.tersenessEnabled.
+  // Escalate: doom-loop turns auto-enable (unless RIVET_TERSE=0).
+  const { enabled: tersenessEnabled, escalate: tersenessEscalate } = resolveTersenessFlags(ctx)
   if (tersenessEnabled) {
-    push(renderTersenessNudge(ctx.tersenessEscalate ?? false))
+    push(renderTersenessNudge(tersenessEscalate))
   }
 
   const toPart = (p: { content: string; source?: CvmInjectionSource }): AppendixPart =>

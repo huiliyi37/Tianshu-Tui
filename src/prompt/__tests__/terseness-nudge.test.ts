@@ -57,7 +57,33 @@ describe('buildDynamicAppendixParts terseness wiring', () => {
     }
   })
 
-  it('escalation flag produces the stricter nudge', () => {
+  it('escalation flag alone auto-enables the stricter nudge (doom-loop path)', () => {
+    const prev = process.env['RIVET_TERSE']
+    try {
+      delete process.env['RIVET_TERSE']
+      const parts = buildDynamicAppendixParts(baseCtx({ tersenessEscalate: true }))
+      const block = parts.find(p => p.name === 'output-style')
+      assert.ok(block, 'doom-loop escalate must inject output-style without RIVET_TERSE=1')
+      assert.match(block!.content, /尤其简洁/)
+    } finally {
+      if (prev === undefined) delete process.env['RIVET_TERSE']
+      else process.env['RIVET_TERSE'] = prev
+    }
+  })
+
+  it('RIVET_TERSE=0 opts out even when escalate is set', () => {
+    const prev = process.env['RIVET_TERSE']
+    try {
+      process.env['RIVET_TERSE'] = '0'
+      const parts = buildDynamicAppendixParts(baseCtx({ tersenessEscalate: true }))
+      assert.equal(parts.find(p => p.name === 'output-style'), undefined)
+    } finally {
+      if (prev === undefined) delete process.env['RIVET_TERSE']
+      else process.env['RIVET_TERSE'] = prev
+    }
+  })
+
+  it('escalation flag with tersenessEnabled produces the stricter nudge', () => {
     const parts = buildDynamicAppendixParts(
       baseCtx({ tersenessEnabled: true, tersenessEscalate: true }),
     )

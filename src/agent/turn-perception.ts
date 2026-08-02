@@ -137,7 +137,7 @@ export class TurnPerceptionController {
       this.hasEnteredHighComplexity = true
     }
 
-    // Phase 2A effort routing (opt-in via RIVET_EFFORT_ROUTING=1, off by default):
+    // Phase 2A effort routing (default ON; opt out with RIVET_EFFORT_ROUTING=0):
     // step effort down one tier on routine, on-track turns. Floor is enforced
     // downstream in ReasoningEffortController.set().
     this.deps.setReasoningEffort(routeRoutineEffort(nextStrategy.reasoningEffort, {

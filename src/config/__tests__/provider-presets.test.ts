@@ -21,4 +21,12 @@ describe('provider presets', () => {
     assert.equal(codex.capabilities.cacheControl, true)
     assert.equal(codex.models[0]?.id, 'gpt-5.5')
   })
+
+  it('deepseek cost defaults: pro=high effort, flash=medium effort', () => {
+    const deepseek = cloneProviderPreset('deepseek')
+    const pro = deepseek.models.find(m => m.id === 'deepseek-v4-pro')
+    const flash = deepseek.models.find(m => m.id === 'deepseek-v4-flash')
+    assert.equal(pro?.reasoningEffort, 'high')
+    assert.equal(flash?.reasoningEffort, 'medium')
+  })
 })

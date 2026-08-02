@@ -1,12 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { routeRoutineEffort } from '../effort-routing.js'
+import { routeRoutineEffort, isEffortRoutingEnabled } from '../effort-routing.js'
 
 describe('routeRoutineEffort (Phase 2A)', () => {
   const routine = { complexity: 0.2, momentum: 0.9, confidence: 0.8 }
   const busy = { complexity: 0.8, momentum: 0.4, confidence: 0.3 }
 
-  it('is a no-op when disabled (default)', () => {
+  it('is a no-op when disabled', () => {
     assert.equal(routeRoutineEffort('high', routine, false), 'high')
   })
 
@@ -35,12 +35,22 @@ describe('routeRoutineEffort (Phase 2A)', () => {
     assert.equal(routeRoutineEffort('low', routine, true), 'off')
   })
 
-  it('respects the RIVET_EFFORT_ROUTING env default', () => {
+  it('defaults ON; opt out with RIVET_EFFORT_ROUTING=0', () => {
     const prev = process.env['RIVET_EFFORT_ROUTING']
     try {
       delete process.env['RIVET_EFFORT_ROUTING']
+      assert.equal(isEffortRoutingEnabled(), true)
+      assert.equal(routeRoutineEffort('high', routine), 'medium')
+
+      process.env['RIVET_EFFORT_ROUTING'] = '0'
+      assert.equal(isEffortRoutingEnabled(), false)
       assert.equal(routeRoutineEffort('high', routine), 'high')
+
+      process.env['RIVET_EFFORT_ROUTING'] = 'false'
+      assert.equal(isEffortRoutingEnabled(), false)
+
       process.env['RIVET_EFFORT_ROUTING'] = '1'
+      assert.equal(isEffortRoutingEnabled(), true)
       assert.equal(routeRoutineEffort('high', routine), 'medium')
     } finally {
       if (prev === undefined) delete process.env['RIVET_EFFORT_ROUTING']

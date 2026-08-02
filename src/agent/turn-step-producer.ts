@@ -824,6 +824,9 @@ export class TurnStepProducer {
     if (this.self.sessionStateManager) {
       this.self.config.promptEngine.setSessionState(this.self.sessionStateManager.renderForVolatile())
     }
+    // Doom-loop / storm → escalate terseness in dynamic appendix (cost + anti-ramble).
+    // Opt out with RIVET_TERSE=0. Does not touch frozenBase.
+    this.self.config.promptEngine.setTersenessEscalate(this.self.getDoomLoopLevel() !== 'none')
     // Pre-refresh git status so buildOaiRequest doesn't return stale cached data
     _tb = Date.now()
     await this.self.config.promptEngine.refreshGitContextIfNeeded(this.self.cwd)
