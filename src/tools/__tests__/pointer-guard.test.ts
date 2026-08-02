@@ -33,6 +33,7 @@ describe('detectPointerPlaceholder', () => {
       '[hash_edit applied to': '[hash_edit applied to /x/y.md — new block 5 lines, 100 chars. #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file to review.]',
       '[new block': '[new block 100 chars — #RIVET-POINTER-DISPLAY-ONLY# placeholder, never emit as content]',
       '[plan persisted to': '[plan persisted to .rivet/plans/x.md — 5 lines, 100 chars. #RIVET-POINTER-DISPLAY-ONLY# Use read_file to review.]',
+      '[patch applied to': '[patch applied to 2 file(s): a.ts, b.ts — 3 hunks, 1520 chars. 已成功应用，勿重放——历史正常截断，查看用 read_file / git diff。#RIVET-POINTER-DISPLAY-ONLY# display-only pointer]',
     }
     for (const prefix of POINTER_PLACEHOLDER_PREFIXES) {
       const sample = samples[prefix]
@@ -50,12 +51,20 @@ describe('detectPointerPlaceholder', () => {
       '[hash_edit applied to': '[hash_edit applied to /x/y.md — new block 5 lines, 100 chars. 已成功落盘，勿重做——历史正常截断，查看用 read_file。#RIVET-POINTER-DISPLAY-ONLY# display-only pointer]',
       '[new block': '[new block 100 chars — 已落盘，勿重做。#RIVET-POINTER-DISPLAY-ONLY# display-only pointer]',
       '[plan persisted to': '[plan persisted to .rivet/plans/x.md — 5 lines, 100 chars. 已成功落盘，勿重贴——历史正常截断，查看用 read_file。#RIVET-POINTER-DISPLAY-ONLY# display-only pointer]',
+      '[patch applied to': '[patch applied to 2 file(s): a.ts, b.ts — 3 hunks, 1520 chars. 已成功应用，勿重放——历史正常截断，查看用 read_file / git diff。#RIVET-POINTER-DISPLAY-ONLY# display-only pointer]',
     }
     for (const prefix of POINTER_PLACEHOLDER_PREFIXES) {
       const sample = samples[prefix]
       assert.ok(sample, `missing test sample for prefix ${prefix}`)
       assert.equal(detectPointerPlaceholder(sample), prefix, prefix)
     }
+  })
+
+  it('detects an apply_patch pointer echoed into write_file content (cross-tool)', () => {
+    // apply-patch 的大 diff 在历史中被折叠为 [patch applied to …] 指针；
+    // 模型可能把它 echo 成 write_file 的 content —— 守卫必须识别（前缀 + tag 双条件）。
+    const apPtr = '[patch applied to 2 file(s): a.ts, b.ts — 3 hunks, 1520 chars. 已成功应用，勿重放——历史正常截断，查看用 read_file / git diff。#RIVET-POINTER-DISPLAY-ONLY# display-only pointer]'
+    assert.equal(detectPointerPlaceholder(apPtr), '[patch applied to')
   })
 
   it('detects a pointer behind leading whitespace', () => {
