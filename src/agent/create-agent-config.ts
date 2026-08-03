@@ -21,6 +21,7 @@ import { resolveCompactionEconomics } from '../compact/compaction-profile.js'
 import { gateToolDefinitions } from './tool-tiers.js'
 import { applyDescriptionMode } from '../tools/description-compact.js'
 import { inferModelTierFromName, type ModelTier } from './model-tier-policy.js'
+import { isRuntimeLean } from '../config/runtime-lean.js'
 
 export interface ModelSpec {
   id: string
@@ -45,6 +46,10 @@ export interface AgentConfigInput {
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
   songlineEnabled?: boolean
+  constellationEnabled?: boolean
+  companionPresenceEnabled?: boolean
+  dreamEnabled?: boolean
+  runtimeLean?: boolean
   securityGuidance?: boolean
   hearthObserveEnabled?: boolean
   antiAnchoring?: AntiAnchoringConfig
@@ -91,7 +96,7 @@ export interface MainAgentConfigInputParams {
   apiKey: string
   model: ModelSpec
   cwd: string
-  config: Pick<Config, 'agent' | 'compact'>
+  config: Pick<Config, 'agent' | 'compact' | 'runtime'>
   sessionId: string
   toolDefinitions: ToolDefinition[]
   provider: ProviderConfig
@@ -118,6 +123,10 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     sessionMemoryBlock: params.sessionMemoryBlock,
     approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions',
     songlineEnabled: params.config.agent.songlineEnabled,
+    constellationEnabled: params.config.agent.constellationEnabled,
+    companionPresenceEnabled: params.config.agent.companionPresenceEnabled,
+    dreamEnabled: params.config.agent.dreamEnabled,
+    runtimeLean: isRuntimeLean(params.config.runtime?.lean, params.cwd),
     securityGuidance: params.config.agent.securityGuidance,
     hearthObserveEnabled: params.config.agent.hearthObserveEnabled,
     crossSessionEnabled: params.config.agent.crossSessionEnabled,
@@ -151,7 +160,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'blockPolicy' | 'providerProfile' | 'providerName' | 'compactionProfile' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'securityGuidance' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'domainKeywordRouting' | 'defaultDomain' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision' | 'visionClient' | 'visionModelPrompt' | 'visionModelMaxTokens' | 'visionBridge'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'blockPolicy' | 'providerProfile' | 'providerName' | 'compactionProfile' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'constellationEnabled' | 'companionPresenceEnabled' | 'dreamEnabled' | 'runtimeLean' | 'securityGuidance' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'domainKeywordRouting' | 'defaultDomain' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision' | 'visionClient' | 'visionModelPrompt' | 'visionModelMaxTokens' | 'visionBridge'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -250,6 +259,10 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,
     songlineEnabled: input.songlineEnabled,
+    constellationEnabled: input.constellationEnabled,
+    companionPresenceEnabled: input.companionPresenceEnabled,
+    dreamEnabled: input.dreamEnabled,
+    runtimeLean: input.runtimeLean,
     securityGuidance: input.securityGuidance,
     hearthObserveEnabled: input.hearthObserveEnabled,
     crossSessionEnabled: input.crossSessionEnabled,

@@ -17,6 +17,7 @@ function draft(): SettingsDraft {
     modelVision: {},
     basics: {
       toolPreset: 'minimal',
+      runtimeLean: false,
       approval: 'auto-safe',
       checkpointEveryTurns: 0,
       defaultDomain: 'qiming',

@@ -3,8 +3,8 @@
  *
  * name/defaultHint/files 由 scripts/gen-env-registry.ts 生成，勿手改；
  * description 字段人工维护，重新生成时按 name 保留。
- * 最后生成：2026-08-02T18:27:30.969Z
- * 共 133 个变量。
+ * 最后生成：2026-08-03T09:46:08.950Z
+ * 共 134 个变量。
  *
  * 每个条目含：名称 / 默认值提示 / 引用文件 / 简要说明。
  * 当源码中新增 RIVET_* 引用但注册表未同步时，
@@ -38,7 +38,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_AMBIGUOUS_WIDTH',
     defaultHint: '\'\'',
-    files: ['tui/width.ts', 'tui/engine/__tests__/live-engine-ghost-render.test.ts', 'tui/__tests__/format-welcome.test.ts', 'tui/__tests__/width.test.ts'],
+    files: ['tui/width.ts', 'tui/__tests__/format-welcome.test.ts', 'tui/__tests__/width.test.ts', 'tui/engine/__tests__/live-engine-ghost-render.test.ts'],
     description: '',
   },
   {
@@ -62,7 +62,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_ASCII_UI',
     defaultHint: '',
-    files: ['tui/term-caps.ts', 'tui/engine/__tests__/app-core.test.ts', 'tui/__tests__/format-welcome.test.ts'],
+    files: ['tui/term-caps.ts', 'tui/__tests__/format-welcome.test.ts', 'tui/engine/__tests__/app-core.test.ts'],
     description: '',
   },
   {
@@ -140,7 +140,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_CONFIG_PATH',
     defaultHint: '',
-    files: ['tui/__tests__/settings-persist.test.ts', 'tui/__tests__/slash-commands.test.ts', 'tools/__tests__/tool-preset.test.ts', 'plugins/__tests__/integration/git-source-mirror-fallback.test.ts', 'config/paths.ts', 'config/__tests__/config-cli.test.ts', 'config/__tests__/layered-config.test.ts', 'config/__tests__/manager-editor.test.ts', 'config/__tests__/manager-fetch-search.test.ts', 'config/__tests__/manager-permission-dirs.test.ts', 'config/__tests__/manager-provider.test.ts', 'config/__tests__/manager-routing.test.ts', 'config/__tests__/manager-shell.test.ts', 'config/__tests__/manager-ui.test.ts', 'config/__tests__/manager-vision-model.test.ts', 'config/__tests__/preset-model-backfill.test.ts', 'config/__tests__/provider-wizard.test.ts'],
+    files: ['__tests__/bootstrap.test.ts', 'tui/__tests__/settings-persist.test.ts', 'tui/__tests__/slash-commands.test.ts', 'tools/__tests__/tool-preset.test.ts', 'plugins/__tests__/integration/git-source-mirror-fallback.test.ts', 'config/paths.ts', 'config/__tests__/config-cli.test.ts', 'config/__tests__/layered-config.test.ts', 'config/__tests__/manager-editor.test.ts', 'config/__tests__/manager-fetch-search.test.ts', 'config/__tests__/manager-permission-dirs.test.ts', 'config/__tests__/manager-provider.test.ts', 'config/__tests__/manager-routing.test.ts', 'config/__tests__/manager-shell.test.ts', 'config/__tests__/manager-ui.test.ts', 'config/__tests__/manager-vision-model.test.ts', 'config/__tests__/preset-model-backfill.test.ts', 'config/__tests__/provider-wizard.test.ts'],
     description: '',
   },
   {
@@ -400,6 +400,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     defaultHint: '',
     files: ['agent/create-runtime-hooks.ts'],
     description: '',
+  },
+  {
+    name: 'RIVET_LEAN',
+    defaultHint: '',
+    files: ['config/runtime-lean.ts'],
+    description: 'Runtime lean profile (minimal tools, lean prompt, no embeddings, no Meridian startup backfill, tighter session pool).',
   },
   {
     name: 'RIVET_LEAVE_MARK',
@@ -668,7 +674,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_SESSION_DIR',
     defaultHint: '',
-    files: ['server/__tests__/cache-routes.test.ts', 'server/__tests__/handoff-route.test.ts', 'server/__tests__/serve-restore-history.test.ts', 'server/__tests__/session-routes.test.ts', 'prompt/__tests__/frozen-snapshot-persist.test.ts', 'config/paths.ts', 'agent/__tests__/appendix-trace.test.ts', 'agent/__tests__/handoff-persist.test.ts', 'agent/__tests__/loop-factory.test.ts', 'agent/__tests__/persist-integration.test.ts', 'agent/__tests__/session-cd.test.ts', 'agent/__tests__/session-persist.test.ts', 'agent/__tests__/speculation-stats-meta.test.ts', 'agent/__tests__/tool-pipeline.test.ts', '__tests__/bootstrap.test.ts', '__tests__/switch-agent-session.test.ts'],
+    files: ['__tests__/bootstrap.test.ts', '__tests__/switch-agent-session.test.ts', 'server/__tests__/cache-routes.test.ts', 'server/__tests__/handoff-route.test.ts', 'server/__tests__/serve-restore-history.test.ts', 'server/__tests__/session-routes.test.ts', 'prompt/__tests__/frozen-snapshot-persist.test.ts', 'config/paths.ts', 'agent/__tests__/appendix-trace.test.ts', 'agent/__tests__/handoff-persist.test.ts', 'agent/__tests__/loop-factory.test.ts', 'agent/__tests__/persist-integration.test.ts', 'agent/__tests__/session-cd.test.ts', 'agent/__tests__/session-persist.test.ts', 'agent/__tests__/speculation-stats-meta.test.ts', 'agent/__tests__/tool-pipeline.test.ts'],
     description: '',
   },
   {

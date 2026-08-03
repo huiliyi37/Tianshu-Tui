@@ -47,6 +47,8 @@ import {
   setCheckpointConfig,
   getToolPresetConfig,
   setToolPresetConfig,
+  getRuntimeLeanConfig,
+  setRuntimeLeanConfig,
   getNetworkConfig,
   setNetworkConfig,
   getMirrorConfig,
@@ -380,6 +382,41 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
       try {
         return { status: 200, body: { ok: true, ...setToolPresetConfig({ preset }) } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // Runtime lean profile — expands into minimal tools / lean prompt / no
+    // embeddings / tighter session pool. Takes effect next session (pool caps
+    // on next sidecar start).
+    'GET /config/runtime-lean': withAuth(() => {
+      return { status: 200, body: getRuntimeLeanConfig() }
+    }, apiToken),
+
+    'PUT /config/runtime-lean': withAuth((body) => {
+      const { lean, maxLoadedSessions, idleAgentTtlMs, maxEventsDiskBytes } = (body ?? {}) as {
+        lean?: unknown
+        maxLoadedSessions?: unknown
+        idleAgentTtlMs?: unknown
+        maxEventsDiskBytes?: unknown
+      }
+      if (
+        lean === undefined
+        && maxLoadedSessions === undefined
+        && idleAgentTtlMs === undefined
+        && maxEventsDiskBytes === undefined
+      ) {
+        return { status: 400, body: { error: 'lean or a pool/disk cap is required' } }
+      }
+      try {
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            ...setRuntimeLeanConfig({ lean, maxLoadedSessions, idleAgentTtlMs, maxEventsDiskBytes }),
+          },
+        }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

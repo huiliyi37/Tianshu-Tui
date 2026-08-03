@@ -105,6 +105,9 @@ export const DEFAULT_CONFIG: Config = {
     domainKeywordRouting: true,
     verificationSnapshot: 'auto',
     songlineEnabled: false,
+    constellationEnabled: false,
+    companionPresenceEnabled: false,
+    dreamEnabled: true,
     securityGuidance: true,
     scoutEvidenceFirewall: false,
     desktopTools: false,
@@ -286,6 +289,9 @@ export const DEFAULT_CONFIG: Config = {
   // 前缀档位：空对象 = 走 schema 默认（standard）。这里刻意不写死 profile，
   // 让「无配置 = 现状」这一不变量只有一个来源（block-policy.resolvePromptBlocks）。
   prompt: { blocks: {} },
+  // Runtime lean：默认关。开启后展开为 minimal tools / lean prompt / 无 embeddings
+  // / 无 Meridian 启动回填 / 更紧的会话驻留（见 runtime-lean.ts）。
+  runtime: { lean: false },
   // Pro 双层模式：enabled 由许可证/RIVET_PRO 决定（Basic=false）；features 与
   // schema 默认一致为 true——「Pro 激活即全部 Pro 功能可用」，显式 false 才关。
   // 注意 DEFAULT_CONFIG 是 loadConfig 的第一层，会 deep-merge 覆盖 schema 默认，

@@ -24,6 +24,7 @@ import { buildModelCards } from './model/capability.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 
 import { loadConfig as loadLayeredConfig } from './config/manager.js'
+import { isRuntimeLean } from './config/runtime-lean.js'
 import { isProFeatureEnabled } from './config/pro-license.js'
 import { lastSessionPointerDir, rivetHome, stateDir } from './config/paths.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from './platform.js'
@@ -1978,8 +1979,10 @@ export async function switchAgentCwd(ctx: BootstrapContext, target: string): Pro
  */
 function resolveCoordinatorMaxWorkers(config: Config): number {
   const raw = (config.agent as { maxWorkers?: unknown }).maxWorkers
-  const n = typeof raw === 'number' ? raw : Number(process.env['RIVET_MAX_WORKERS'])
-  return Number.isInteger(n) && n >= 1 ? n : 3
+  if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 1) return raw
+  const envN = Number(process.env['RIVET_MAX_WORKERS'])
+  if (Number.isInteger(envN) && envN >= 1) return envN
+  return isRuntimeLean(config.runtime?.lean) ? 1 : 3
 }
 
 export interface BootstrapOptions {
@@ -2133,9 +2136,11 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
 
   // 6. Meridian indexer
   const meridianIndexer = new MeridianIndexer(cwd)
-  // 后台闲时全量索引——懒建只覆盖 agent 读过的文件，backfill 逐步补齐全项目
-  // （hash 幂等，与懒建重叠零成本）；进程退出自然终止，半成品 hash 已落库。
-  setImmediate(() => { scheduleMeridianBackfill(meridianIndexer, cwd) })
+  // 启动全量回填改为 opt-in（RIVET_MERIDIAN_BACKFILL=1）。默认只靠 read_file 懒索引；
+  // 首次 repo_graph / repo_map 等工具会 on-demand 调度 backfill（见 scheduleMeridianBackfill）。
+  setImmediate(() => {
+    scheduleMeridianBackfill(meridianIndexer, cwd, { reason: 'startup' })
+  })
 
   // Memory epoch reset — 首次/升级后启动时一次性清空中毒的跨会话学习存量
   // （playbook.jsonl / recovery-journal / advisory-efficacy / mistake_entries），

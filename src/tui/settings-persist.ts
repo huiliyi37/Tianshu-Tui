@@ -18,6 +18,7 @@ import {
   getRoutingConfig,
   getSearchConfig,
   getToolPresetConfig,
+  getRuntimeLeanConfig,
   getVisionAutoBridge,
   getVisionModelConfig,
   loadConfig,
@@ -32,6 +33,7 @@ import {
   setRoutingConfig,
   setSearchConfig,
   setToolPresetConfig,
+  setRuntimeLeanConfig,
   setVisionAutoBridge,
   setVisionModelConfig,
 } from '../config/manager.js'
@@ -76,6 +78,7 @@ export function loadSettingsDraft(): SettingsDraft {
     modelVision: {},
     basics: {
       toolPreset: getToolPresetConfig().preset ?? 'frontend',
+      runtimeLean: getRuntimeLeanConfig().lean,
       approval: cfg.agent.approval,
       checkpointEveryTurns: getCheckpointConfig().checkpointEveryTurns,
       defaultDomain: getDefaultDomainConfig().defaultDomain,
@@ -179,6 +182,9 @@ export function saveSettings(
       }
       case 'toolPreset':
         attempt(block, () => setToolPresetConfig({ preset: draft.basics.toolPreset }))
+        break
+      case 'runtimeLean':
+        attempt(block, () => setRuntimeLeanConfig({ lean: draft.basics.runtimeLean }))
         break
       case 'approval':
         attempt(block, () => {

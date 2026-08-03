@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { findProjectConfig } from '../config/manager.js'
 import { userConfigPath } from '../config/paths.js'
+import { isRuntimeLean } from '../config/runtime-lean.js'
 
 /**
  * Tool preset — 会话启动期的工具装配档位（会话内冻结，前缀缓存零影响）。
@@ -16,7 +17,7 @@ import { userConfigPath } from '../config/paths.js'
  *
  * 解析优先级：`RIVET_TOOL_PRESET` env > 项目 `.rivet-config.json` tools.preset
  * > 用户配置 tools.preset（`userConfigPath()`，认 RIVET_HOME/RIVET_CONFIG_PATH）
- * > 'frontend'。
+ * > lean 默认 `minimal` > 'frontend'。
  * 变更只在下个会话生效（会话中途改工具指纹 = 前缀全量重建，反经济）。
  */
 
@@ -59,7 +60,7 @@ export function resolveToolPreset(cwd: string): ToolPreset {
     }
   }
 
-  const resolved = preset ?? 'frontend'
+  const resolved = preset ?? (isRuntimeLean(undefined, cwd) ? 'minimal' : 'frontend')
   memo.set(cwd, resolved)
   return resolved
 }

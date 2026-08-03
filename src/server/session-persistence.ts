@@ -16,10 +16,13 @@
  */
 import {
   appendFileSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -39,7 +42,10 @@ import type {
 } from './session-manager.js'
 
 export class FileSessionPersistence implements SessionPersistenceAdapter {
-  constructor(private readonly baseDir: string) {}
+  constructor(
+    private readonly baseDir: string,
+    private readonly opts: { maxEventsDiskBytes?: number } = {},
+  ) {}
 
   /** Per-session event write buffer — batches high-frequency appendFileSync
    *  (streaming deltas can fire hundreds per turn) into one disk write per
@@ -66,6 +72,8 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
    *  events are replaced with a truncated stub that preserves seq/ts/type for
    *  recovery diagnostics. */
   private static readonly MAX_EVENT_JSON_BYTES = 1_000_000 // 1 MB
+  /** Default whole-file disk cap (overridable via constructor / runtime.lean). */
+  private static readonly DEFAULT_MAX_EVENTS_DISK_BYTES = 50 * 1024 * 1024
   /** Events that must be on disk the moment they are appended. Delta/phase
    *  chatter stays on the debounce timer. */
   private static readonly CRITICAL_TYPES: ReadonlySet<string> = new Set([
@@ -75,6 +83,10 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
     // 100ms debounce timer after a successful write_file/edit_file.
     'plan_draft',
   ])
+
+  private maxEventsDiskBytes(): number {
+    return this.opts.maxEventsDiskBytes ?? FileSessionPersistence.DEFAULT_MAX_EVENTS_DISK_BYTES
+  }
 
   private dir(id: string): string {
     return join(this.baseDir, sanitize(id))
@@ -152,6 +164,52 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
       // 索引是纯加速层——写失败下次读走全量重建。
       this.indexTracks.delete(sessionId)
     }
+    // Bound unbounded append-only growth: keep the tail under the disk cap.
+    try {
+      this.trimEventsFileIfNeeded(sessionId, d)
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
+   * If events.jsonl exceeds maxEventsDiskBytes, rewrite keeping only the
+   * trailing bytes (aligned to the next newline). Invalidates the sparse index
+   * so the next cold read rebuilds it.
+   */
+  trimEventsFileIfNeeded(sessionId: string, dir?: string): void {
+    const d = dir ?? this.dir(sessionId)
+    const file = join(d, 'events.jsonl')
+    let size = 0
+    try { size = statSync(file).size } catch { return }
+    const max = this.maxEventsDiskBytes()
+    if (size <= max) return
+
+    let tail: Buffer | null = null
+    const fd = openSync(file, 'r')
+    try {
+      const keepFrom = size - max
+      // Align to next newline so we don't keep a partial leading event.
+      const probe = Buffer.alloc(Math.min(64 * 1024, size - keepFrom))
+      const n = readSync(fd, probe, 0, probe.length, keepFrom)
+      const nl = probe.subarray(0, n).indexOf(0x0a)
+      const start = nl >= 0 ? keepFrom + nl + 1 : keepFrom
+      const keepLen = size - start
+      if (keepLen <= 0 || keepLen >= size) return
+      tail = Buffer.alloc(keepLen)
+      readSync(fd, tail, 0, keepLen, start)
+    } finally {
+      // Close before rename — Windows cannot replace a file while any handle is open.
+      closeSync(fd)
+    }
+    if (!tail) return
+
+    const tmp = join(d, 'events.jsonl.trim.tmp')
+    writeFileSync(tmp, tail)
+    renameSync(tmp, file)
+    // Drop sparse index — offsets are now wrong.
+    try { rmSync(join(d, 'events.index.jsonl'), { force: true }) } catch { /* ok */ }
+    this.indexTracks.delete(sessionId)
   }
 
   /**

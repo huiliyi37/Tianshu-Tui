@@ -265,6 +265,13 @@ export const agentSchema = z.object({
   resumeFallbackModel: z.string().optional(),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
   songlineEnabled: z.boolean().default(false),
+  /** Explicit opt-in for constellation post-session milestone capture. Default false. */
+  constellationEnabled: z.boolean().default(false),
+  /** Explicit opt-in for companion presence heartbeat. Default false. */
+  companionPresenceEnabled: z.boolean().default(false),
+  /** Session-end dream / skill-distill. Default true when a sessionId exists;
+   *  lean profile forces this off. */
+  dreamEnabled: z.boolean().default(true),
   /** 写操作后的安全模式正则告警（层1）。默认开：纯正则、零 API 调用、命中才注入，
    *  与其他 advisory hook 同档。设 false 或 RIVET_SECURITY_GUIDANCE=0 关闭。
    *  配置项存在的意义是让桌面端用户也能关——GUI 启动的 sidecar 继承不到 shell 环境变量。 */
@@ -746,6 +753,15 @@ const promptSchema = z.object({
 
 export type PromptConfig = z.infer<typeof promptSchema>
 
+const runtimeSchema = z.object({
+  lean: z.boolean().default(false),
+  maxLoadedSessions: z.number().int().min(1).optional(),
+  idleAgentTtlMs: z.number().int().min(0).optional(),
+  maxEventsDiskBytes: z.number().int().min(1_000_000).optional(),
+}).default({})
+
+export type RuntimeConfig = z.infer<typeof runtimeSchema>
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -772,6 +788,12 @@ export const configSchema = z.object({
     preset: z.enum(['minimal', 'frontend', 'full']).optional(),
   }).default({}),
   prompt: promptSchema,
+  /**
+   * Runtime resource profile. `lean` expands into existing knobs (minimal tools,
+   * lean prompt, no embeddings, no Meridian startup backfill, tighter session
+   * pool). Env `RIVET_LEAN=1` overrides. Optional pool/disk caps override lean defaults.
+   */
+  runtime: runtimeSchema,
   pro: proSchema,
   plugins: z.object({
     enabled: z.record(z.boolean()).default({}),
@@ -797,6 +819,7 @@ export type Config = {
   verify: VerifyConfig
   tools: { preset?: 'minimal' | 'frontend' | 'full' | undefined }
   prompt: PromptConfig
+  runtime: RuntimeConfig
   pro: ProConfig
   plugins: { enabled: Record<string, boolean> }
 }

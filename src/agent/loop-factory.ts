@@ -626,11 +626,12 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     setCycleClose: self.config.sessionRegistry
       ? (sessionId, closeHash) => self.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
       : undefined,
-    constellationEnabled: self.config.sessionId !== undefined,
+    // True opt-in (config defaults false). Lean forces off even if config opts in.
+    constellationEnabled: !self.config.runtimeLean && self.config.constellationEnabled === true,
     constellationCwd: self.cwd,
     getConstellationPendingMark: () => self.pendingLeaveMark,
     getConstellationNumericId: () => self._sessionNumericId,
-    companionPresenceEnabled: self.config.sessionId !== undefined,
+    companionPresenceEnabled: !self.config.runtimeLean && self.config.companionPresenceEnabled === true,
     companionPresenceCwd: self.cwd,
     getCognitiveSnapshot: () => {
       if (!self.vigorState || !self.sensorium) return null
@@ -674,7 +675,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getPrevSessionCycleClose: self.config.sessionRegistry
       ? () => self.config.sessionRegistry!.getLastCycleClose()
       : undefined,
-    ...(self.config.sessionId ? {
+    ...(self.config.sessionId && self.config.dreamEnabled !== false && !self.config.runtimeLean ? {
       dream: {
         cwd: self.cwd,
         sessionId: self.config.sessionId,
@@ -693,8 +694,9 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       },
       getRegisteredSkills: () => skillRegistry.list().map(s => ({ name: s.name, triggers: s.triggers })),
     } : {}),
-    meridianIndexer: self.config.meridianIndexer,
-    physarumFileAccess: {
+    // Lean: skip postTool meridian/physarum hooks (tools still use indexer via bootstrap).
+    meridianIndexer: self.config.runtimeLean ? undefined : self.config.meridianIndexer,
+    physarumFileAccess: self.config.runtimeLean ? undefined : {
       getPhysarum: () => self.immuneHook.getPhysarum(),
       // Predictions feed ONLY the prewarm cache (mtime+size validated at
       // consume time). The ShadowQueue enqueue was removed with the 2026-07-07

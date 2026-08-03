@@ -24,6 +24,7 @@ export type SettingsBlockId =
   | 'visionAuto'
   | 'modelVision'
   | 'toolPreset'
+  | 'runtimeLean'
   | 'approval'
   | 'checkpoint'
   | 'defaultDomain'
@@ -54,6 +55,7 @@ export interface VisionDraft {
 
 export interface BasicsDraft {
   toolPreset: string
+  runtimeLean: boolean
   approval: string
   checkpointEveryTurns: number
   defaultDomain: string
@@ -622,6 +624,15 @@ function basicsCategory(): SettingsCategory {
       get: d => d.basics.toolPreset,
       set: (d, value) => withBasics(d, { toolPreset: value }),
     }),
+    boolField({
+      id: 'runtime.lean',
+      label: '精简运行时（lean）',
+      block: 'runtimeLean',
+      effect: 'next-session',
+      hint: '降低资源占用：minimal 工具、lean 提示词、关 embeddings、关 Meridian 启动回填、更紧会话驻留。RIVET_LEAN=1 也可开',
+      get: d => d.basics.runtimeLean,
+      set: (d, value) => withBasics(d, { runtimeLean: value }),
+    }),
     enumField({
       id: 'agent.approval',
       label: '审批模式',
@@ -757,6 +768,7 @@ export function blockValue(draft: SettingsDraft, block: SettingsBlockId): unknow
     case 'visionAuto': return draft.visionAutoBridge
     case 'modelVision': return draft.modelVision
     case 'toolPreset': return draft.basics.toolPreset
+    case 'runtimeLean': return draft.basics.runtimeLean
     case 'approval': return draft.basics.approval
     case 'checkpoint': return draft.basics.checkpointEveryTurns
     case 'defaultDomain': return draft.basics.defaultDomain
@@ -768,7 +780,7 @@ export function blockValue(draft: SettingsDraft, block: SettingsBlockId): unknow
 }
 
 const ALL_BLOCKS: readonly SettingsBlockId[] = [
-  'workers', 'review', 'vision', 'visionAuto', 'modelVision', 'toolPreset', 'approval',
+  'workers', 'review', 'vision', 'visionAuto', 'modelVision', 'toolPreset', 'runtimeLean', 'approval',
   'checkpoint', 'defaultDomain', 'defaultModel', 'mirrors', 'network', 'search',
 ]
 

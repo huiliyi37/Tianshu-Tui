@@ -40,7 +40,7 @@ function draft(): SettingsDraft {
     vision: null,
     visionAutoBridge: false,
     modelVision: {},
-    basics: { toolPreset: 'minimal', approval: 'auto-safe', checkpointEveryTurns: 0, defaultDomain: 'qiming', defaultModel: '' },
+    basics: { toolPreset: 'minimal', runtimeLean: false, approval: 'auto-safe', checkpointEveryTurns: 0, defaultDomain: 'qiming', defaultModel: '' },
     net: { mirrorsEnabled: false, mirrorsPreset: 'default', proxy: '', noProxy: '', searchBackends: 'bing', jinaBaseUrl: 'https://r.jina.ai' },
   }
 }

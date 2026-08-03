@@ -37,6 +37,7 @@ import { TaskRegistry } from './task-registry.js'
 import { JsonTaskStore } from './task-store.js'
 import { SessionRuntimePool } from './session-runtime-pool.js'
 import { loadConfig, getGreetingConfig } from '../config/manager.js'
+import { isRuntimeLean, resolveSessionPoolOptions } from '../config/runtime-lean.js'
 import { isProFeatureEnabled } from '../config/pro-license.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from '../platform.js'
 import { resolveApiKey } from '../api/factory.js'
@@ -404,10 +405,13 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   }
 
   // N1: durable session storage so sessions survive sidecar restarts.
+  const lean = isRuntimeLean(ctx.config.runtime?.lean)
+  const sessionPool = resolveSessionPoolOptions(ctx.config.runtime, lean)
   const persistence = opts.ephemeral
     ? undefined
     : new FileSessionPersistence(
         opts.sessionDir ?? desktopSessionsDir(),
+        { maxEventsDiskBytes: sessionPool.maxEventsDiskBytes },
       )
 
   // Wave J: sidecar 级 SharedRuntime——providerHealth 跨 session 共享让
@@ -492,6 +496,8 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
     },
     defaultCwd: process.cwd(),
     persistence,
+    maxLoadedSessions: sessionPool.maxLoadedSessions,
+    idleAgentTtlMs: sessionPool.idleAgentTtlMs,
     // R1 — late-bound getter: registry resolves async after server start.
     getSessionRegistry: () => sessionRegistry,
     // Goal mode — late-bound per-session goal handles (refs + sessionDir +

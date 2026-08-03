@@ -127,7 +127,7 @@ export function getOrCreateMeridianIndexer(shared: SharedRuntime, cwd: string): 
   } catch { /* 清理绝不阻塞会话创建 */ }
   shared.meridianIndexers.set(cwd, indexer)
   // 后台闲时全量索引（镜像 CLI bootstrap）——同 cwd 多会话共享单例，天然只跑一次。
-  setImmediate(() => { scheduleMeridianBackfill(indexer, cwd) })
+  setImmediate(() => { scheduleMeridianBackfill(indexer, cwd, { reason: 'startup' }) })
   return indexer
 }
 

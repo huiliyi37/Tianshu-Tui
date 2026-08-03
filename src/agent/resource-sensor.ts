@@ -1,4 +1,5 @@
-import { statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { getHeapStatistics } from 'node:v8'
 
 export interface MemorySample {
@@ -19,6 +20,8 @@ export interface ResourceSensorSnapshot {
   memory: MemorySample
   disk?: DiskSample
   memoryTrendBytesPerSample: number
+  /** True while absolute heap pressure should not escalate reliability to minimal. */
+  memoryCooldownActive: boolean
 }
 
 export interface ResourceSensorOptions {
@@ -26,11 +29,19 @@ export interface ResourceSensorOptions {
   sessionByteLimit?: number
   now?: () => number
   memoryUsage?: () => Pick<NodeJS.MemoryUsage, 'rss' | 'heapUsed'>
+  /**
+   * After construction / reset(), ignore absolute heap warn/error for this many
+   * samples. Desktop sidecar heap is process-shared across sessions — a fresh
+   * agent must not inherit the previous session's pressure lockout.
+   * Default 3.
+   */
+  initialMemoryCooldownSamples?: number
 }
 
 const DEFAULT_MEMORY_LIMIT_BYTES = 1024 * 1024 * 1024
 export const DEFAULT_SESSION_BYTE_LIMIT = 50 * 1024 * 1024
 const MAX_MEMORY_SAMPLES = 12
+export const DEFAULT_MEMORY_COOLDOWN_SAMPLES = 3
 
 function defaultMemoryLimitBytes(): number {
   const configured = Number(process.env.RIVET_MEMORY_LIMIT_BYTES)
@@ -64,8 +75,50 @@ function linearRegressionSlope(values: number[]): number {
   return denominator === 0 ? 0 : numerator / denominator
 }
 
+/** Sum the primary session file plus sibling claims / events when present. */
+function measureSessionRelatedBytes(path: string): number {
+  let total = 0
+  try {
+    total += statSync(path).size
+  } catch {
+    return 0
+  }
+
+  // CLI layout: <id>.jsonl + <id>.claims.jsonl + optional <id>/events.jsonl
+  if (path.endsWith('.jsonl') && !path.endsWith('events.jsonl')) {
+    const claims = path.replace(/\.jsonl$/, '.claims.jsonl')
+    try { total += statSync(claims).size } catch { /* optional */ }
+    const sessionDir = path.replace(/\.jsonl$/, '')
+    const eventsInSessionDir = join(sessionDir, 'events.jsonl')
+    try { total += statSync(eventsInSessionDir).size } catch { /* optional */ }
+  }
+
+  // Desktop layout: directory with events.jsonl (+ maybe other jsonl)
+  try {
+    const st = statSync(path)
+    if (st.isDirectory()) {
+      for (const name of readdirSync(path)) {
+        if (!name.endsWith('.jsonl') && name !== 'index.json') continue
+        try { total += statSync(join(path, name)).size } catch { /* skip */ }
+      }
+    } else {
+      // Also peek at sibling dir named like the jsonl stem
+      const parent = dirname(path)
+      if (existsSync(parent) && path.endsWith('.jsonl')) {
+        const stem = path.slice(0, -'.jsonl'.length)
+        // already counted claims / sessionDir above
+        void stem
+      }
+    }
+  } catch { /* ignore */ }
+
+  return total
+}
+
 export class ResourceSensor {
   private memorySamples: MemorySample[] = []
+  private memoryCooldownRemaining: number
+  private readonly memoryCooldownSamples: number
   private readonly now: () => number
   private readonly memoryUsage: () => Pick<NodeJS.MemoryUsage, 'rss' | 'heapUsed'>
   private readonly memoryLimitBytes: number
@@ -76,6 +129,21 @@ export class ResourceSensor {
     this.memoryUsage = options.memoryUsage ?? (() => process.memoryUsage())
     this.memoryLimitBytes = options.memoryLimitBytes ?? defaultMemoryLimitBytes()
     this.sessionByteLimit = options.sessionByteLimit ?? DEFAULT_SESSION_BYTE_LIMIT
+    this.memoryCooldownSamples = options.initialMemoryCooldownSamples ?? DEFAULT_MEMORY_COOLDOWN_SAMPLES
+    this.memoryCooldownRemaining = this.memoryCooldownSamples
+  }
+
+  /**
+   * Clear trend history and re-arm absolute-heap cooldown. Call on session /
+   * agent rebuild boundaries in the long-lived desktop sidecar.
+   */
+  reset(cooldownSamples?: number): void {
+    this.memorySamples = []
+    this.memoryCooldownRemaining = cooldownSamples ?? this.memoryCooldownSamples
+  }
+
+  isMemoryCooldownActive(): boolean {
+    return this.memoryCooldownRemaining > 0
   }
 
   sample(sessionPath?: string): ResourceSensorSnapshot {
@@ -84,6 +152,7 @@ export class ResourceSensor {
       memory,
       disk: sessionPath ? this.sampleDisk(sessionPath) : undefined,
       memoryTrendBytesPerSample: this.memoryTrendBytesPerSample(),
+      memoryCooldownActive: this.isMemoryCooldownActive(),
     }
   }
 
@@ -96,16 +165,12 @@ export class ResourceSensor {
       memoryLimitBytes: this.memoryLimitBytes,
     }
     this.memorySamples = [...this.memorySamples, sample].slice(-MAX_MEMORY_SAMPLES)
+    if (this.memoryCooldownRemaining > 0) this.memoryCooldownRemaining -= 1
     return sample
   }
 
   sampleDisk(path: string): DiskSample {
-    let sessionBytes = 0
-    try {
-      sessionBytes = statSync(path).size
-    } catch {
-      sessionBytes = 0
-    }
+    const sessionBytes = measureSessionRelatedBytes(path)
     return {
       timestamp: this.now(),
       sessionBytes,

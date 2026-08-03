@@ -171,6 +171,14 @@ export interface AgentConfig {
   defaultDomain?: string
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. Disabled by default. */
   songlineEnabled?: boolean
+  /** Explicit opt-in for constellation post-session milestone capture. Default false. */
+  constellationEnabled?: boolean
+  /** Explicit opt-in for companion presence heartbeat. Default false. */
+  companionPresenceEnabled?: boolean
+  /** Session-end dream / skill-distill. Default true; lean forces off. */
+  dreamEnabled?: boolean
+  /** Runtime lean profile — trims postTool meridian/physarum and postSession dream. */
+  runtimeLean?: boolean
   /** 安全模式正则告警（层1）。默认开；false 或 RIVET_SECURITY_GUIDANCE=0 关闭。 */
   securityGuidance?: boolean
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). Disabled by default. */

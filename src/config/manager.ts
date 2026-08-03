@@ -8,6 +8,7 @@ import { userConfigPath } from './paths.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 import { backfillPresetModelFields } from './preset-model-backfill.js'
 import { invalidateToolPreset } from '../tools/tool-preset.js'
+import { invalidatePromptBlocks } from '../prompt/block-policy.js'
 import { formatProviderCard, formatSuccess, formatError, formatMcpServerList, type FormatOpts } from './cli-format.js'
 
 const APPROVAL_MODES = ['auto-safe', 'manual', 'auto-accept', 'dangerously-skip-permissions'] as const
@@ -734,6 +735,67 @@ export function setToolPresetConfig(input: { preset?: unknown }): ToolPresetConf
   // 长驻进程（desktop sidecar）内 memo 必须失效，否则新会话拿到旧档位。
   invalidateToolPreset()
   return { preset: cfg.tools.preset ?? 'frontend' }
+}
+
+// --- Runtime lean (resource profile) ---
+
+export interface RuntimeLeanConfigSnapshot {
+  lean: boolean
+  maxLoadedSessions?: number
+  idleAgentTtlMs?: number
+  maxEventsDiskBytes?: number
+}
+
+/** Snapshot of runtime.lean (+ optional pool caps) for desktop/TUI settings. */
+export function getRuntimeLeanConfig(): RuntimeLeanConfigSnapshot {
+  const runtime = loadConfig().runtime ?? { lean: false }
+  return {
+    lean: runtime.lean === true,
+    ...(runtime.maxLoadedSessions !== undefined ? { maxLoadedSessions: runtime.maxLoadedSessions } : {}),
+    ...(runtime.idleAgentTtlMs !== undefined ? { idleAgentTtlMs: runtime.idleAgentTtlMs } : {}),
+    ...(runtime.maxEventsDiskBytes !== undefined ? { maxEventsDiskBytes: runtime.maxEventsDiskBytes } : {}),
+  }
+}
+
+/**
+ * Persist runtime.lean. Takes effect at the NEXT session for tool/prompt/hook
+ * assembly (prefix-cache safe). Session pool caps apply on next sidecar start.
+ */
+export function setRuntimeLeanConfig(input: {
+  lean?: unknown
+  maxLoadedSessions?: unknown
+  idleAgentTtlMs?: unknown
+  maxEventsDiskBytes?: unknown
+}): RuntimeLeanConfigSnapshot {
+  const cfg = loadConfig()
+  const next = { ...(cfg.runtime ?? { lean: false }) }
+  if (input.lean !== undefined) {
+    if (typeof input.lean !== 'boolean') throw new Error('lean must be a boolean')
+    next.lean = input.lean
+  }
+  if (input.maxLoadedSessions !== undefined) {
+    if (typeof input.maxLoadedSessions !== 'number' || !Number.isInteger(input.maxLoadedSessions) || input.maxLoadedSessions < 1) {
+      throw new Error('maxLoadedSessions must be an integer >= 1')
+    }
+    next.maxLoadedSessions = input.maxLoadedSessions
+  }
+  if (input.idleAgentTtlMs !== undefined) {
+    if (typeof input.idleAgentTtlMs !== 'number' || !Number.isInteger(input.idleAgentTtlMs) || input.idleAgentTtlMs < 0) {
+      throw new Error('idleAgentTtlMs must be an integer >= 0')
+    }
+    next.idleAgentTtlMs = input.idleAgentTtlMs
+  }
+  if (input.maxEventsDiskBytes !== undefined) {
+    if (typeof input.maxEventsDiskBytes !== 'number' || !Number.isInteger(input.maxEventsDiskBytes) || input.maxEventsDiskBytes < 1_000_000) {
+      throw new Error('maxEventsDiskBytes must be an integer >= 1000000')
+    }
+    next.maxEventsDiskBytes = input.maxEventsDiskBytes
+  }
+  cfg.runtime = next
+  saveConfig(cfg)
+  invalidateToolPreset()
+  invalidatePromptBlocks()
+  return getRuntimeLeanConfig()
 }
 
 // --- Default star domain (new-session initial domain + Auto keyword routing) ---

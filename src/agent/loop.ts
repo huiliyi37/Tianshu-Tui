@@ -1579,6 +1579,7 @@ export class AgentLoop {
         sessionBytes: disk?.sessionBytes ?? 0,
         sessionByteLimit: disk?.sessionByteLimit ?? Number.POSITIVE_INFINITY,
         memoryTrendBytesPerSample: this.latestResourceSnapshot.memoryTrendBytesPerSample,
+        suppressAbsoluteMemoryPressure: this.latestResourceSnapshot.memoryCooldownActive,
       },
     })
 

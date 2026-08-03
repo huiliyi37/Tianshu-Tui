@@ -1,6 +1,7 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import type { ToolDefinition } from '../api/types.js'
 import type { MeridianIndexer } from '../repo/meridian-indexer.js'
+import { scheduleMeridianBackfill } from '../repo/meridian-backfill.js'
 
 interface RepoGraphInput {
   from_file: string
@@ -43,6 +44,8 @@ export function createRepoGraphTool(getIndexer: () => MeridianIndexer | null): T
       if (!indexer) {
         return { content: 'Meridian 图尚未初始化。请先读取一些文件以构建索引。', isError: true }
       }
+      // First repo_* use: kick idle full-project backfill (no-op if already scheduled / lean / disabled).
+      scheduleMeridianBackfill(indexer, params.cwd ?? process.cwd(), { reason: 'ondemand' })
 
       const input = params.input as unknown as RepoGraphInput
       const mode = input.mode ?? 'graph'
