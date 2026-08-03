@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runThetaCheck, clearThetaCache } from '../theta-check.js'
+import { runThetaCheck, clearThetaCache, trimCapturedOutput } from '../theta-check.js'
 
 const tempDirs: string[] = []
 
@@ -67,5 +67,32 @@ describe('runThetaCheck', () => {
 
     assert.deepEqual(result.errors, [])
     assert.equal(result.timedOut, true)
+  })
+})
+
+describe('trimCapturedOutput', () => {
+  const line = (i: number) => `src/file${String(i).padStart(4, '0')}.ts(${i + 1},5): error TS2322: `.padEnd(150, 'x')
+
+  it('passes small output through unchanged', () => {
+    assert.equal(trimCapturedOutput('ok'), 'ok')
+    assert.equal(trimCapturedOutput(''), '')
+  })
+
+  it('truncates to ~80KB at a line boundary (no partial diagnostics)', () => {
+    const full = Array.from({ length: 1000 }, (_, i) => line(i)).join('\n')
+    assert.ok(full.length > 100_000, 'fixture must exceed the 100KB threshold')
+
+    const out = trimCapturedOutput(full)
+    assert.ok(out.length <= 80_000, `got ${out.length}`)
+    const lines = out.split('\n')
+    // First and last lines are complete diagnostics — no partial line anywhere
+    const diagRe = /^src\/file\d{4}\.ts\(\d+,\d+\): error TS\d+:/
+    for (const l of lines) assert.match(l, diagRe, `partial line: ${l.slice(0, 60)}`)
+  })
+
+  it('falls back to raw slice when no newline exists after the cut point', () => {
+    const full = 'A'.repeat(100_001) // no newlines at all
+    const out = trimCapturedOutput(full)
+    assert.equal(out, full.slice(full.length - 80_000))
   })
 })

@@ -29,10 +29,10 @@ describe('ProfileRegistry', () => {
   // 侦察层必须区分"当前源码"与"文档/历史计划",文档断言先对源码复核再上报。
   it('code_scout carries evidence-source discipline', () => {
     const p = registry.get('code_scout')!
-    assert.match(p.expertisePrompt, /\[current source\]/)
-    assert.match(p.expertisePrompt, /\[historical plan or memo\]/)
-    assert.match(p.expertisePrompt, /verified against the current source code/)
-    assert.match(p.expertisePrompt, /docs say X, current code shows Y/)
+    assert.match(p.expertisePrompt, /\[当前源码\]/)
+    assert.match(p.expertisePrompt, /\[历史计划或备忘\]/)
+    assert.match(p.expertisePrompt, /对当前源码核验/)
+    assert.match(p.expertisePrompt, /文档说 X，当前代码显示 Y/)
   })
 
   // "证无"任务上廉价模型会反复 grep 空结果仍不收手，直到 budget 超时
@@ -40,22 +40,22 @@ describe('ProfileRegistry', () => {
   // scout 必须带显式收敛纪律：多样 pattern 无果即报告"已证无"并停止。
   it('code_scout carries convergence discipline for prove-absence tasks', () => {
     const p = registry.get('code_scout')!
-    assert.match(p.expertisePrompt, /Convergence discipline/)
-    assert.match(p.expertisePrompt, /prove-absence/)
-    assert.match(p.expertisePrompt, /verified absence/)
-    assert.match(p.expertisePrompt, /absence after diverse patterns is a finding/)
+    assert.match(p.expertisePrompt, /收敛纪律/)
+    assert.match(p.expertisePrompt, /证无/)
+    assert.match(p.expertisePrompt, /已证无/)
+    assert.match(p.expertisePrompt, /多样 pattern 之后仍无果，是发现/)
   })
 
   it('doc_scout marks unverified current-state claims', () => {
     const p = registry.get('doc_scout')!
-    assert.match(p.expertisePrompt, /lag behind the code/)
-    assert.match(p.expertisePrompt, /unverified against source/)
+    assert.match(p.expertisePrompt, /滞后于代码/)
+    assert.match(p.expertisePrompt, /未对源码核验/)
   })
 
   it('doc_scout carries convergence discipline for prove-absence tasks', () => {
     const p = registry.get('doc_scout')!
-    assert.match(p.expertisePrompt, /Convergence discipline/)
-    assert.match(p.expertisePrompt, /verified absence/)
+    assert.match(p.expertisePrompt, /收敛纪律/)
+    assert.match(p.expertisePrompt, /已证无/)
   })
 
   it('maps code_scout as readonly', async () => {

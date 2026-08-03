@@ -14,6 +14,7 @@ function draft(): SettingsDraft {
     review: { profiles: {}, skipAuto: true, mechanicalFastPath: true },
     vision: null,
     visionAutoBridge: false,
+    modelVision: {},
     basics: {
       toolPreset: 'minimal',
       approval: 'auto-safe',
@@ -21,7 +22,7 @@ function draft(): SettingsDraft {
       defaultDomain: 'qiming',
       defaultModel: '',
     },
-    net: { mirrorsEnabled: false, mirrorsPreset: 'default', proxy: '', noProxy: '', searchBackends: 'bing, duckduckgo' },
+    net: { mirrorsEnabled: false, mirrorsPreset: 'default', proxy: '', noProxy: '', searchBackends: 'bing, duckduckgo', jinaBaseUrl: 'https://r.jina.ai' },
   }
 }
 

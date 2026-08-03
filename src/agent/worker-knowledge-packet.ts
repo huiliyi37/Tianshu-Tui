@@ -28,11 +28,11 @@ export function needsMemoryKnowledgePacket(order: Pick<WorkOrder, 'objective' | 
 
 export function buildMemoryKnowledgePacket(): string {
   return [
-    '## Required Knowledge Packet: memory / prompt / recall',
+    '## 必需知识包（memory / prompt / recall 类任务）',
     '',
-    'This task touches project memory, prompt construction, or recall behavior. Before making claims or recommendations, inspect the relevant retrieval map and code paths.',
+    '本任务涉及项目记忆、prompt 构造或召回行为。在提出论断或建议前，先检查相关的检索地图与代码路径。',
     '',
-    'Must read / inspect:',
+    '必须读/查：',
     '- .rivet/knowledge/manifest.md',
     '- docs/analysis/2026-06-01-project-memory-architecture-conflict.md',
     '- docs/superpowers/plans/2026-06-01-project-memory-system.md',
@@ -40,11 +40,11 @@ export function buildMemoryKnowledgePacket(): string {
     '- src/context/project-memory-loader.ts',
     '- src/tools/recall.ts',
     '',
-    'Known constraints:',
-    '- .rivet/knowledge/project-memory.md is curated Markdown and recall-only; do not recommend full prompt injection.',
-    '- .rivet/knowledge/memory.jsonl is local structured cache and must not be committed.',
-    '- Tier 1 injection is restricted to decision/project_rule/user_constraint with confidence >= 0.9 and a 2K char budget.',
-    '- Tier 2 entries are searched through recall, not injected into every prompt.',
-    '- If evidence contradicts these constraints, report the contradiction with file paths instead of guessing.',
+    '已知约束：',
+    '- .rivet/knowledge/project-memory.md 是人工整理的 Markdown、仅供召回；不要建议整段注入 prompt。',
+    '- .rivet/knowledge/memory.jsonl 是本地结构化缓存，不得提交。',
+    '- Tier 1 注入仅限 decision/project_rule/user_constraint 且 confidence >= 0.9，预算 2K 字符。',
+    '- Tier 2 条目经 recall 检索，不注入每条 prompt。',
+    '- 若证据与这些约束冲突，附文件路径报告冲突本身，不要臆测。',
   ].join('\n')
 }

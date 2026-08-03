@@ -158,6 +158,57 @@ describe('routeReviewWorkflow', () => {
     assert.match(outcome.evidence ?? '', /no blocking findings/i)
   })
 
+  it('L3 squadron CRITICAL confirmation (polarity) never blocks — counted as 核实确认', async () => {
+    const outcome = await routeReviewWorkflow(
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false },
+      {
+        ...okDeps,
+        spawnSquadron: async () => ({
+          findings: [
+            { severity: 'CRITICAL', claim: '注册链 + handler 三路径均已读码确认', evidence: 'src/a.ts:10', polarity: 'confirmation' },
+            { severity: 'HIGH', claim: '四象限口径全对齐', evidence: 'src/b.ts:20', polarity: 'confirmation' },
+          ],
+          infraFailures: [],
+        }),
+      },
+    )
+
+    assert.equal(outcome.tier, 'L3')
+    assert.equal(outcome.verdict, 'verified', '确认性结论不是缺陷，不得 blocking')
+    assert.match(outcome.evidence ?? '', /2 项核实确认/)
+  })
+
+  it('L3 squadron explicit defect CRITICAL still blocks', async () => {
+    const outcome = await routeReviewWorkflow(
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false },
+      {
+        ...okDeps,
+        spawnSquadron: async () => ({
+          findings: [{ severity: 'CRITICAL', claim: 'reasoningFloor 钳制使降档零净效果', evidence: 'src/c.ts:30', polarity: 'defect' }],
+          infraFailures: [],
+        }),
+      },
+    )
+
+    assert.equal(outcome.verdict, 'rejected')
+    assert.match(outcome.evidence ?? '', /reasoningFloor/)
+  })
+
+  it('L3 squadron CRITICAL without polarity still blocks (fail-closed 兼容存量)', async () => {
+    const outcome = await routeReviewWorkflow(
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false },
+      {
+        ...okDeps,
+        spawnSquadron: async () => ({
+          findings: [{ severity: 'CRITICAL', claim: 'yolo 豁免 request_path_access', evidence: 'src/d.ts:40' }],
+          infraFailures: [],
+        }),
+      },
+    )
+
+    assert.equal(outcome.verdict, 'rejected')
+  })
+
   it('L3 squadron with infra-only failures returns verified (no L2 fallthrough)', async () => {
     let verifierCalls = 0
     const outcome = await routeReviewWorkflow(
@@ -216,6 +267,22 @@ describe('routeReviewWorkflow', () => {
       assert.equal(wiringCalls, 1)
       assert.equal(squadronCalls, 0, 'auto mode must never spawn the full squadron')
       assert.equal(verifierCalls, 0, 'auto mode must never spawn the adversarial verifier')
+    })
+
+    it('auto mode: wiring CRITICAL confirmation → verified with 核实确认 count', async () => {
+      const outcome = await routeReviewWorkflow(codeChange, {
+        spawnVerifier: async () => ({ verdict: 'verified', evidence: 'ran: x' }),
+        spawnPatcher: async () => ({ patched: true }),
+        spawnSquadron: async () => ({ findings: [] }),
+        spawnWiringReviewer: async () => ({
+          findings: [{ severity: 'CRITICAL', claim: '接线闭环已读码确认', evidence: 'src/agent/loop.ts:10', polarity: 'confirmation' }],
+          infraFailures: [],
+        }),
+      }, { mode: 'auto' })
+
+      assert.equal(outcome.tier, 'auto')
+      assert.equal(outcome.verdict, 'verified', '确认性 CRITICAL 不得 blocking')
+      assert.match(outcome.evidence ?? '', /1 项核实确认/)
     })
 
     it('downgrades structural L3 signals to the single wiring reviewer in auto mode', async () => {

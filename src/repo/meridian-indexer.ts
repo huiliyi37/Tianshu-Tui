@@ -16,11 +16,25 @@ const TS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx']
 const ALL_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go']
 const IGNORE_PATTERNS = ['node_modules', 'dist', '.git', '.rivet']
 
+/**
+ * 可索引判定（扩展名白名单 + IGNORE_PATTERNS + attention 静默层）——
+ * 懒建（indexFile）与后台全量索引（meridian-backfill）共用的单一来源，
+ * 防两处规则漂移。输入必须是 repo 相对路径；越界/绝对路径的 fail-closed
+ * 归 toRepoRelative 管，不在此层。
+ */
+export function isMeridianIndexablePath(rel: string): boolean {
+  if (IGNORE_PATTERNS.some(p => rel.includes(p))) return false
+  if (classifyPath(rel).silent) return false
+  return ALL_EXTENSIONS.some(ext => rel.endsWith(ext))
+}
+
 export class MeridianIndexer {
   private db: MeridianDb
   private behavior: MeridianBehavior
   private initialized = false
   private indexing = new Set<string>()
+  /** 后台全量索引（meridian-backfill）每实例只调度一次的 flag。 */
+  backfillScheduled = false
 
   constructor(private cwd: string, stateDir?: string, stigmergy?: StigmergyStore) {
     const dir = stateDir ?? resolve(cwd, '.rivet')
@@ -155,9 +169,7 @@ export class MeridianIndexer {
   private isIndexable(filePath: string): boolean {
     const rel = this.toRepoRelative(filePath)
     if (rel === null) return false
-    if (IGNORE_PATTERNS.some(p => rel.includes(p))) return false
-    if (classifyPath(rel).silent) return false
-    return ALL_EXTENSIONS.some(ext => rel.endsWith(ext))
+    return isMeridianIndexablePath(rel)
   }
 
   private isTestFile(filePath: string): boolean {

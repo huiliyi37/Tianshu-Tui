@@ -27,7 +27,11 @@ async function ask(io: Required<Pick<ProviderWizardIO, 'ask'>>, question: string
   return (await io.ask(question)).trim()
 }
 
-export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promise<void> {
+/**
+ * 首次配置向导。返回 `{ skipped: true }` 表示用户选择跳过（进 TUI 后再配），
+ * 此时不应重试 bootstrap——调用方应让会话以降级模式启动（发消息时报错指引配 key）。
+ */
+export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promise<{ skipped?: boolean }> {
   let close: (() => void) | undefined
   let askFn = io.ask
   if (!askFn) {
@@ -44,6 +48,19 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
     write('Rivet provider configuration')
     write(`Built-in providers: ${providerPresetKeys.join(', ')}`)
     write(`Current default: ${config.provider.default}`)
+
+    // 跳过选项——新用户可以先看界面，稍后用 /config 或 rivet config setup 配 key。
+    // 直接回车 = 跳过（降低首启摩擦，与桌面端「先进界面再提醒」体验对齐）。
+    const skipAnswer = await ask(askIo, 'Configure now? [Y/n] (Enter=n=skip, configure later via /config): ')
+    if (!yes(skipAnswer)) {
+      write('')
+      write('Skipped. You can configure later with:')
+      write('  rivet config setup deepseek --key YOUR_KEY --default')
+      write('  (or run `rivet config` for the interactive wizard)')
+      write('  (or set DEEPSEEK_API_KEY environment variable)')
+      write('Messages will fail until a key is configured.')
+      return { skipped: true }
+    }
 
     const providerAnswer = await ask(askIo, 'Provider [deepseek|glm|mimo|minimax|codex]: ')
     const providerName = providerAnswer || config.provider.default
@@ -123,6 +140,7 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
       allowProFallback,
     })
     write(`Provider ${providerName} configured. Run "rivet config providers" to inspect.`)
+    return {}
   } finally {
     close?.()
   }

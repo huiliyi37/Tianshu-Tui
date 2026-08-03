@@ -339,6 +339,16 @@ DeepSeek 对缓存未命中收取 50× 费用。天枢的提示词引擎围绕�
 
 排查：① `rivet logs`（或 TUI 里 `/logs`）直接打出本会话的数据根与 `cache-log.jsonl` / `sensorium.jsonl` 路径；② 打开会话 `.jsonl` 搜 `cache_read_input_tokens` 看各轮命中；③ 需要全量遥测时设 `RIVET_DEBUG_TELEMETRY=1`（或任意非空值）后查 `sensorium.jsonl`；④ `npm exec -- tsx scripts/verify-cache-hit-rate.ts` 模拟多轮对话验证。路径总览见下方「日志与排查」。
 
+### 💰 API 成本控制
+
+前缀缓存已接近稳态上限后，成本优化转向 DeepSeek API 思考 token 侧——对按输出 token 计费的推理模型，降低 verbose reasoning 是 ROI 最高的杠杆。
+
+- **默认 reasoningEffort 降级** —— DeepSeek V4 Pro 从 `max` 降至 `high`，Flash 从 `max` 降至 `medium`。已有显式配置的用户不受影响（`reasoningFloor` 保护）。
+- **effort 路由（默认开启）** —— 低复杂度 + 高置信度的例行轮自动降一档 reasoning effort，从不升档。`RIVET_EFFORT_ROUTING=0` 关闭。
+- **Compact 走 flash 侧路** —— 修复了压缩未配 provider 时仍走主模型的 bug，自动从主 provider 推断 flash 端点。
+- **Doom-loop 自动收束** —— 检测到重复工具调用时，动态 appendix 注入更严格的 output-style 约束，减少无谓思考 token 消耗。`RIVET_TERSE=0` 关闭。
+- **用户显式 `max` 保护** —— 在 config 中手动指定 `reasoningEffort: max` 会被视为 reasoning floor，effort 路由永不将其降级。
+
 ### 子智能体编排
 
 将子任务委派给独立的无界面 worker 会话：
@@ -621,7 +631,7 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 | 命令 | 说明 |
 |------|------|
 | `/model [name\|list]` | 显示或切换模型/提供商 |
-| `/effort [off\|low\|medium\|high\|max\|auto]` | 控制推理深度（无参数弹出选择面板） |
+| `/effort [off\|low\|medium\|high\|max\|auto]` | 控制推理深度（无参数弹出选择面板）。默认 `high`（Pro）/ `medium`（Flash），例行轮自动降档；手动设 `max` 永不被降级 |
 | `/permission [manual\|auto\|yolo\|allow\|deny\|bash\|remove\|reset\|test]` | 权限模式：Manual / Auto / YOLO 三档统一 |
 | `/yes [off]` | 一键 YOLO（`/yes off` 退出，回 Auto）—— 持久化为默认 |
 | `/domain [list\|<name>\|auto\|off]` | 查看或切换星域人格 |
@@ -884,7 +894,9 @@ rivet logs open desktop            # 打开 sidecar 日志目录（GUI 起不来
   },
   "search": {
     "backends": ["bing", "duckduckgo"],  // web_search 后端链（首个有结果即停）
-    "braveApiKeyEnv": "BRAVE_API_KEY"    // 用 Brave 时填 env 变量名
+    "braveApiKeyEnv": "BRAVE_API_KEY",   // 用 Brave 时填 env 变量名
+    "tavilyApiKeyEnv": "TAVILY_API_KEY", // Tavily（需 key，offshore）
+    "bochaApiKeyEnv": "BOCHA_API_KEY"    // 博查（国内直连 AI 搜索，Tavily 国内替代，需 key）
   },
   "ui": {
     "theme": "auto",              // 内置名 | auto（OSC 11 探测）| custom:<name>

@@ -478,7 +478,10 @@ ${objective}
    - scout 返回的 findings 是待核验假设：构建/安装/测试类验证命令由你亲自实跑取 exit code，不引用 scout 转述；关键结论抽查 read_file/grep 核验。
    - 结尾输出「启动/修复前需要准备」小节：环境依赖、启动命令、账号等可操作清单。
 
-后续出口：诊断发现需要修复的问题时，先问用户是否修复；用户确认后把核对清单作为 plan_task 的输入走计划-执行链。不要在 /scout 流程里直接改文件。`
+后续出口：诊断发现需要修复的问题时，先问用户是否修复；用户确认后按规模走两条路之一：
+- 中小修复（≤8 项、单一关注面）：把核对清单作为 plan_task 的输入走计划-执行链。
+- 大型多维改造（>8 项或横跨 ≥3 个独立关注面）：把核对清单映射为 starflow 的 draftItems 走五阶段编排（council 评审 → team 波次 → galaxy 攻坚），映射形状：每个清单项一条 { id: 短slug, title: 清单项标题, detail: 证据(file:line/exit code) + 修复方向, files: [涉及文件] }。id/title 会被用于 galaxy 维度分类，detail 会成为维度目标——写实、别写空话。
+不要在 /scout 流程里直接改文件。`
 }
 
 export function resolveEcosystemWorkflowInput(input: string, opts?: { date?: Date }): WorkflowResolveResult | null {

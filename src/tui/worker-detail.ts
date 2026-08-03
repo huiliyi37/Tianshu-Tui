@@ -161,7 +161,7 @@ export function buildWorkerDetailContent(
     if (result.verification) {
       const v = result.verification
       const g = v.status === 'passed' ? '✅' : v.status === 'failed' ? '❌' : '⚠'
-      lines.push(`验证：${g} ${v.passed}/${v.passed + v.failed} 通过 · ${v.command}`)
+      lines.push(`验证：${g} ${v.passed ?? 0}/${(v.passed ?? 0) + (v.failed ?? 0)} 通过 · ${v.command}`)
     }
     if (result.changedFiles && result.changedFiles.length > 0) {
       lines.push('改动文件：')

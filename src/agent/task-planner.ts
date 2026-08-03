@@ -31,13 +31,21 @@ const SHARD_SELF_VERIFY =
   '\n\n本分片自包含:实现改动后,在本分片范围内自行运行 tsc / lint / 相关测试至通过,'
   + '不要把整理 import、修类型、修 lint、补测试拆给其他分片或留给后续。'
 
-/** Top-level module path of a file (first two path segments, e.g. `src/tui`).
- *  Used to group scope files into orthogonal shards that touch disjoint files. */
+/** Top-level module path of a file (directory up to three segments, e.g. `desktop/src/surfaces`).
+ *  Used to group scope files into orthogonal shards that touch disjoint files.
+ *  Two segments (e.g. `desktop/src`) collapses too many sub-modules into one
+ *  monster shard when files span surfaces/state/components/locales — taking the
+ *  directory (stripping the filename) up to three segments keeps sub-modules
+ *  separate while keeping same-module files together. */
 function moduleKey(file: string): string {
-  // Split on both separators — Windows tool inputs may carry backslashes.
-  const parts = file.split(/[\\/]/).filter(Boolean)
-  if (parts.length >= 2) return `${parts[0]}/${parts[1]}`
-  return parts[0] ?? file
+  // Normalize: strip leading './' and unify Windows backslashes.
+  const normalized = file.replace(/^\.[\\/]/, '').replace(/\\/g, '/')
+  const parts = normalized.split('/').filter(Boolean)
+  // Strip the filename: the module grouping is the directory, not the file.
+  const dirParts = parts.length > 1 ? parts.slice(0, -1) : parts
+  if (dirParts.length >= 3) return `${dirParts[0]}/${dirParts[1]}/${dirParts[2]}`
+  if (dirParts.length === 2) return `${dirParts[0]}/${dirParts[1]}`
+  return dirParts[0] ?? file
 }
 
 /** Group files into orthogonal module shards. Different modules → parallelizable

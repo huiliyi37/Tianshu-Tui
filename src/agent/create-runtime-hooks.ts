@@ -234,6 +234,9 @@ export interface RuntimeHookDeps {
   userHooksBridge?: UserHooksBridgeDeps
   /** A1: unified advisory bus for noise-gated corrective signals */
   advisoryBus?: AdvisoryBus
+  /** 证据防火墙：external-claim hook 装配成功后回传 tracker getter——
+   *  bootstrap 经 AgentLoop 转交 deliver_task 门禁。hook 被开关禁用时不回调。 */
+  onClaimTrackerReady?: (getTracker: () => import('./hooks/external-claim-tracking-hook.js').ClaimTracker) => void
   /** Background job registry accessor — enables the preTurn background-jobs
    *  awareness nudge. Absent → hook not installed. */
   getJobs?: () => import('../tools/job-store.js').JobRegistry | undefined
@@ -639,7 +642,9 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // discipline against authoritative-sounding worker reports.
   // Gated by RIVET_EXTERNAL_CLAIM_TRACKING (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_EXTERNAL_CLAIM_TRACKING !== '0') {
-    hooks.push(createExternalClaimTrackingHook({ advisoryBus: deps.advisoryBus }))
+    const externalClaimHook = createExternalClaimTrackingHook({ advisoryBus: deps.advisoryBus })
+    deps.onClaimTrackerReady?.(externalClaimHook.getClaimTracker)
+    hooks.push(externalClaimHook)
   }
 
   // General-Ledger（将星记账）: postTool hook — 带账本星 authority 的 delegate

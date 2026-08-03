@@ -296,8 +296,33 @@ describe('readCapOverride (2026-07-24 worker max-turns 诊断)', () => {
       readCapOverride: { maxChars: 4_000, headChars: 2_400, tailChars: 1_200 },
     })
     assert.ok(!result.isError)
-    assert.match(result.content, /── PARTIAL view of/, 'fold-then-partial skeleton served')
+    assert.match(result.content, /── SKELETON view of/, 'fold-then-partial skeleton served')
     assert.ok(result.content.length < bigSource.length / 2, `content bounded (got ${result.content.length} of ${bigSource.length})`)
+  })
+
+  // A worker that reads a long plan document gets the fold skeleton. If the header
+  // reports the skeleton's own size ("79 lines … showing lines 1-79 of 79") the model
+  // reads it as the whole file and silently executes against stripped instructions —
+  // this is how the D6 migration lost its user_version guard (2026-08-02).
+  it('骨架头部报原文尺寸并声明正文已移除，不伪装成完整文件', async () => {
+    const { READ_FILE_TOOL } = await import('../read-file.js')
+    const result = await READ_FILE_TOOL.execute({
+      input: { file_path: 'src/big.ts' },
+      toolUseId: 'test',
+      cwd: dir,
+      contextWindow: 1_000_000,
+      sessionId: `readcap-d-${Date.now()}`,
+      readCapOverride: { maxChars: 4_000, headChars: 2_400, tailChars: 1_200 },
+    })
+    assert.ok(!result.isError)
+    const realLines = bigSource.split('\n').length
+    assert.match(result.content, new RegExp(`\\(${realLines} lines, ${bigSource.length} chars\\)`),
+      '头部必须报原文行数/字符数，不是骨架自己的')
+    assert.match(result.content, /NOT the file's text/, '必须明说这不是文件正文')
+    assert.match(result.content, /REMOVED/, '必须明说正文已被移除')
+    assert.doesNotMatch(result.content, /Showing lines 1-\d+ of \d+\./,
+      '不得出现「显示 1-N 共 N 行」这种读起来像完整文件的措辞')
+    assert.match(result.content, /offset=1, limit=200/, '必须指向从头精读而非跳过已"看过"的部分')
   })
 
   it('override 不影响显式 offset/limit 精读', async () => {

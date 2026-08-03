@@ -1,11 +1,15 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { commitScopedFiles } from '../scoped-git-commit.js'
 
-const TMP = join(import.meta.dirname, '.scoped-commit-tmp')
+// 必须在系统 tmpdir + mkdtemp 唯一路径——曾用工作树内固定路径，并发会话的
+// rmSync/init 竞态会让 `git config` 向上爬进主仓库，污染提交作者（详见
+// git.test.ts 同款注释）。
+let TMP: string
 
 function git(args: string[]): string {
   const result = spawnSync('git', args, { cwd: TMP, encoding: 'utf-8' })
@@ -15,8 +19,7 @@ function git(args: string[]): string {
 
 describe('commitScopedFiles', () => {
   beforeEach(() => {
-    rmSync(TMP, { recursive: true, force: true })
-    mkdirSync(TMP, { recursive: true })
+    TMP = mkdtempSync(join(tmpdir(), 'rivet-scoped-commit-'))
     git(['init'])
     git(['config', 'user.email', 'test@test.com'])
     git(['config', 'user.name', 'Test'])

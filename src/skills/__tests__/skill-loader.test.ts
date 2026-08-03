@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills, seedBundledSkillsFrom, loadProjectSkills } from '../skill-loader.js'
+import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills, seedBundledSkillsFrom, loadProjectSkills, writeSkill, readSkillContent, uninstallSkill } from '../skill-loader.js'
 import { readFileSync } from 'node:fs'
 import { validatePathSafe } from '../../tools/path-validate.js'
 
@@ -249,5 +249,95 @@ Router body.`, 'utf-8')
   it('seed returns [] when source dir is missing', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'rivet-cwd-'))
     assert.deepEqual(seedBundledSkillsFrom(join(cwd, 'nope'), cwd), [])
+  })
+
+  // ── Desktop CRUD primitives ──────────────────────────────────────
+
+  it('writeSkill creates a directory skill and validates frontmatter', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-write-'))
+    const content = `---
+name: my-skill
+description: created from the desktop editor
+---
+
+Do the thing.`
+    const { path } = writeSkill('my-skill', content, cwd, 'project')
+    assert.ok(path.endsWith(join('.rivet', 'skills', 'my-skill', 'SKILL.md')))
+    assert.ok(existsSync(path))
+    assert.equal(readFileSync(path, 'utf-8'), content)
+  })
+
+  it('writeSkill overwrites an existing skill (edit semantics, unlike install)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-write-edit-'))
+    const dir = join(cwd, '.rivet', 'skills', 'editskill')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: editskill\ndescription: v1\n---\n\nbody v1', 'utf-8')
+
+    const updated = `---
+name: editskill
+description: v2
+---
+
+body v2`
+    writeSkill('editskill', updated, cwd, 'project')
+    assert.equal(readFileSync(join(dir, 'SKILL.md'), 'utf-8'), updated)
+  })
+
+  it('writeSkill throws on malformed frontmatter (route layer surfaces as 400)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-write-bad-'))
+    assert.throws(
+      () => writeSkill('bad', 'no frontmatter here', cwd, 'project'),
+      /missing YAML frontmatter/,
+    )
+    // nothing was written
+    assert.ok(!existsSync(join(cwd, '.rivet', 'skills', 'bad')))
+  })
+
+  it('uninstallSkill removes a directory skill and reports wasDir', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-uninstall-dir-'))
+    const dir = join(cwd, '.rivet', 'skills', 'goner')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: goner\n---\nbody', 'utf-8')
+
+    const res = uninstallSkill('goner', cwd)
+    assert.equal(res.removed, true)
+    assert.equal(res.wasDir, true)
+    assert.ok(!existsSync(dir))
+  })
+
+  it('uninstallSkill removes a flat skill', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-uninstall-flat-'))
+    const skillsDir = join(cwd, '.rivet', 'skills')
+    mkdirSync(skillsDir, { recursive: true })
+    writeFileSync(join(skillsDir, 'flat.md'), '---\nname: flat\n---\nbody', 'utf-8')
+
+    const res = uninstallSkill('flat', cwd)
+    assert.equal(res.removed, true)
+    assert.equal(res.wasDir, false)
+    assert.ok(!existsSync(join(skillsDir, 'flat.md')))
+  })
+
+  it('uninstallSkill returns removed:false for a missing/global/builtin skill', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-uninstall-miss-'))
+    const res = uninstallSkill('never-existed', cwd)
+    assert.equal(res.removed, false)
+    assert.equal(res.wasDir, false)
+  })
+
+  it('project skill overrides a same-named user-level (global-rivet) skill by load order', () => {
+    // loadFromDirectory registers later calls last, so "project wins" is just
+    // load ORDER. Verify with a standalone registry to avoid polluting the
+    // process-wide singleton.
+    const globalDir = mkdtempSync(join(tmpdir(), 'rivet-prio-global-'))
+    const projectDir = mkdtempSync(join(tmpdir(), 'rivet-prio-project-'))
+    writeFileSync(join(globalDir, 'shared.md'), '---\nname: shared\ndescription: GLOBAL\n---\nglobal body', 'utf-8')
+    writeFileSync(join(projectDir, 'shared.md'), '---\nname: shared\ndescription: PROJECT\n---\nproject body', 'utf-8')
+
+    const reg = new SkillRegistry()
+    reg.loadFromDirectory(globalDir, 'global-rivet')
+    reg.loadFromDirectory(projectDir, 'rivet')
+    const skill = reg.get('shared')!
+    assert.equal(skill.description, 'PROJECT')
+    assert.equal(skill.source, 'rivet')
   })
 })

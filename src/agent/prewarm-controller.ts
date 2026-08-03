@@ -12,6 +12,9 @@ export interface PrewarmDeps {
   getCwd: () => string
   getPrewarmCache: () => PrewarmCache
   getRecentToolHistory: () => ToolHistoryEntry[]
+  /** physarum 预测的下一步文件（repo 相对路径 + 分数）。可选——缺席时
+   *  prewarmRecentReads 行为不变；抛错由 controller 静默降级为空。 */
+  getPhysarumPredictions?: () => Array<{ file: string; score: number }>
 }
 
 /**
@@ -41,5 +44,17 @@ export class PrewarmController {
       .filter(entry => entry.tool === 'read_file' && entry.status === 'success')
       .map(entry => entry.target)
     await batchPrewarm(this.deps.getCwd(), paths, this.deps.getPrewarmCache())
+    // physarum 预测接 PrewarmCache：top-3 硬上限（宁少勿滥）；存在性/大小校验
+    // 与去重由 batchPrewarm 复用，消费端 mtime+size 双校验防陈旧。
+    let predictions: Array<{ file: string; score: number }> = []
+    try { predictions = this.deps.getPhysarumPredictions?.() ?? [] } catch { /* 预测失败静默降级 */ }
+    if (predictions.length > 0) {
+      await batchPrewarm(
+        this.deps.getCwd(),
+        predictions.slice(0, 3).map(p => p.file),
+        this.deps.getPrewarmCache(),
+        3,
+      )
+    }
   }
 }

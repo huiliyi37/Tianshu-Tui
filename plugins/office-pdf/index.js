@@ -1,7 +1,7 @@
 // office-pdf: Native PDF generation (pdfkit) + text extraction (pdf-parse)
 // Replaces the browser-print HTML fallback (create_pdf).
 
-import { writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { writeFileSync, renameSync, readFileSync, existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { containsCjk, resolveCjkFont } from './fonts.js'
 
@@ -68,7 +68,10 @@ async function generatePdf(filePath, input) {
   return new Promise((resolve, reject) => {
     doc.on('data', chunk => buffers.push(chunk))
     doc.on('end', () => {
-      writeFileSync(filePath, Buffer.concat(buffers))
+      // 原子替换：同目录临时文件 + rename（跨文件系统会 EXDEV，故不用 os.tmpdir）
+      const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`
+      writeFileSync(tmp, Buffer.concat(buffers))
+      renameSync(tmp, filePath)
       resolve(warnings)
     })
     doc.on('error', reject)

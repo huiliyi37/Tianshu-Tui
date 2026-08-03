@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { TODO_TOOL, getTodos, setTodos } from '../todo.js'
+import { TODO_TOOL, createTodoTool, getTodos, setTodos } from '../todo.js'
 import { TodoStore } from '../todo-store.js'
 
 describe('TODO_TOOL', () => {
@@ -145,6 +145,49 @@ describe('TodoStore', () => {
       { id: '2', content: 'New thing', status: 'pending' },
     ])
     assert.deepEqual(regressions, [])
+  })
+})
+
+// The detector's trigger used to render one warning and vanish. These counters are
+// the denominator+numerator that make a cross-session "todo 退回率" comparable.
+describe('TodoStore regression counters', () => {
+  it('starts at zero and reports writes as the denominator', () => {
+    const store = new TodoStore()
+    assert.deepEqual(store.getRegressionStats(), { writes: 0, regressedWrites: 0, regressedItems: 0 })
+    store.recordWrite([])
+    store.recordWrite([])
+    assert.deepEqual(store.getRegressionStats(), { writes: 2, regressedWrites: 0, regressedItems: 0 })
+  })
+
+  it('counts a write once but every regressed item within it', () => {
+    const store = new TodoStore()
+    store.recordWrite(['a（completed → pending）', 'b（已从清单移除）'])
+    assert.deepEqual(store.getRegressionStats(), { writes: 1, regressedWrites: 1, regressedItems: 2 })
+  })
+
+  it('the tool path feeds the counters on every write', async () => {
+    const store = new TodoStore()
+    const tool = createTodoTool(store)
+    const call = (status: 'completed' | 'pending') => tool.execute({
+      input: { action: 'write', todos: [{ id: '1', content: 'Ship it', status }] },
+      toolUseId: `tu_${status}`,
+      cwd: '/repo',
+    })
+    await call('completed')
+    await call('pending')
+
+    const stats = store.getRegressionStats()
+    assert.equal(stats.writes, 2, 'both writes counted')
+    assert.equal(stats.regressedWrites, 1, 'only the second write regressed')
+    assert.equal(stats.regressedItems, 1)
+  })
+
+  it('getRegressionStats hands back a copy — callers cannot mutate the tally', () => {
+    const store = new TodoStore()
+    store.recordWrite(['x'])
+    const snapshot = store.getRegressionStats()
+    snapshot.writes = 999
+    assert.equal(store.getRegressionStats().writes, 1)
   })
 })
 

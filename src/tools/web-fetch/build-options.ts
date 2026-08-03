@@ -17,6 +17,7 @@ export function buildFetchOptions(config: Config): WebFetchOptions {
     // 挤压导航与内容提取预算，直接钳制而非报错
     renderWaitMs: Math.min(config.fetch.renderWaitMs, Math.floor(config.fetch.renderTimeoutMs / 2)),
     cacheMaxAgeMs: config.fetch.cacheMaxAgeMs,
+    jinaBaseUrl: config.fetch.jinaBaseUrl,
     proxy: {
       ...(config.network.proxy ? { proxyUrl: config.network.proxy } : {}),
       ...(config.network.noProxy ? { noProxy: config.network.noProxy } : {}),

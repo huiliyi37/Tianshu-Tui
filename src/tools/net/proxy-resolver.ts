@@ -50,6 +50,65 @@ function readWindowsSystemProxy(): string | undefined {
 }
 
 /**
+ * Read macOS system proxy via `scutil --proxy`.
+ * Returns undefined on non-macOS or when no HTTP/HTTPS proxy is enabled.
+ * HTTPS 优先（与 normalizeProxyUrl 语义一致——出站多为 https）。
+ *
+ * scutil 输出形如（非 JSON，嵌套字典文本）：
+ *   HTTPEnable : 1
+ *   HTTPPort : 7890
+ *   HTTPProxy : 127.0.0.1
+ *   HTTPSEnable : 1
+ *   HTTPSPort : 7890
+ *   HTTPSProxy : 127.0.0.1
+ *   ProxyAutoConfigEnable : 0   ← PAC，启用时我们不处理（需取 PAC URL 解析 JS）
+ *   ExceptionsList : <array> { 0 : *.local ... }   ← 等价 NO_PROXY，这里不读（环境变量/config 已覆盖）
+ */
+function readMacosSystemProxy(): string | undefined {
+  if (process.platform !== 'darwin') return undefined
+  try {
+    const stdout = execSync('scutil --proxy', {
+      encoding: 'utf8',
+      timeout: 3000,
+    })
+    return parseScutilProxy(stdout)
+  } catch {
+    // scutil 缺失或超时 —— 视为无系统代理，回退到环境变量/直连
+  }
+  return undefined
+}
+
+/**
+ * 从 scutil --proxy 输出解析代理 URL。抽成纯函数便于单测（避免 mock child_process）。
+ *
+ * 优先级：HTTPS（启用且配置了 host+port）> HTTP。SOCKS 不处理（undici ProxyAgent
+ * 仅支持 HTTP CONNECT 隧道，SOCKS 需另引 socks-proxy-agent，不在本层范围）。
+ * PAC（ProxyAutoConfigEnable=1）不处理 —— 需取 PAC URL 并执行其中 JS，复杂度高，
+ * 配 PAC 的用户应自行设 HTTPS_PROXY 环境变量。
+ */
+export function parseScutilProxy(stdout: string): string | undefined {
+  const get = (key: string): string | undefined => {
+    const m = stdout.match(new RegExp(`^\\s*${key}\\s*:\\s*(\\S+)`, 'm'))
+    return m?.[1]
+  }
+  // HTTPS 优先
+  const httpsHost = get('HTTPSProxy')
+  const httpsPort = get('HTTPSPort')
+  const httpsEnable = get('HTTPSEnable')
+  if (httpsEnable === '1' && httpsHost && httpsPort) {
+    return `http://${httpsHost}:${httpsPort}`
+  }
+  // 回退 HTTP
+  const httpHost = get('HTTPProxy')
+  const httpPort = get('HTTPPort')
+  const httpEnable = get('HTTPEnable')
+  if (httpEnable === '1' && httpHost && httpPort) {
+    return `http://${httpHost}:${httpPort}`
+  }
+  return undefined
+}
+
+/**
  * 从 reg query 的 ProxyEnable / ProxyServer 两段输出解析代理 URL。
  * 抽成纯函数便于单测——避免 mock child_process（Node 24 内置模块属性
  * 不可配置，mock.method 会抛 Cannot redefine property）。
@@ -132,13 +191,18 @@ export function resolveProxyForUrl(url: string, opts?: ProxyResolverOptions): st
   // config 显式配置优先
   if (opts?.proxyUrl) return opts.proxyUrl
 
+  // RIVET_NO_SYSTEM_PROXY=1：禁用 OS 级系统代理回退（Windows 注册表 / macOS
+  // scutil）——CI/沙箱/测试需要确定性直连，或用户显式绕过系统代理时使用。
+  const systemProxy = (): string | undefined =>
+    process.env.RIVET_NO_SYSTEM_PROXY === '1' ? undefined : readWindowsSystemProxy() ?? readMacosSystemProxy()
+
   // 回退到环境变量
   if (parsed.protocol === 'https:') {
-    return envCaseInsensitive('HTTPS_PROXY') ?? envCaseInsensitive('HTTP_PROXY') ?? readWindowsSystemProxy()
+    return envCaseInsensitive('HTTPS_PROXY') ?? envCaseInsensitive('HTTP_PROXY') ?? systemProxy()
   }
   if (parsed.protocol === 'http:') {
-    return envCaseInsensitive('HTTP_PROXY') ?? envCaseInsensitive('HTTPS_PROXY') ?? readWindowsSystemProxy()
+    return envCaseInsensitive('HTTP_PROXY') ?? envCaseInsensitive('HTTPS_PROXY') ?? systemProxy()
   }
-  // Non-HTTP protocols: try generic proxy env vars then Windows fallback
-  return readWindowsSystemProxy()
+  // Non-HTTP protocols: try generic proxy env vars then OS fallbacks
+  return systemProxy()
 }

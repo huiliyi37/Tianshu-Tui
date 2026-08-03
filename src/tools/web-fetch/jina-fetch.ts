@@ -13,7 +13,7 @@
 import { httpFetchGuarded, type HttpFetchDeps, type HttpFetchOptions } from '../net/http-fetch.js'
 import { SSRFError } from '../net/ssrf.js'
 
-const JINA_BASE = 'https://r.jina.ai'
+const DEFAULT_JINA_BASE = 'https://r.jina.ai'
 
 /** Quality heuristic: local extraction likely failed if Markdown is tiny or
  *  contains a JS-render-page signal. These thresholds are conservative by
@@ -65,9 +65,12 @@ export interface JinaFetchResult {
 export async function fetchViaJina(
   url: string,
   deps: HttpFetchDeps = {},
-  options: HttpFetchOptions = {},
+  options: HttpFetchOptions & { jinaBaseUrl?: string } = {},
 ): Promise<JinaFetchResult> {
-  const jinaUrl = `${JINA_BASE}/${url}`
+  // 可配置 base：国内默认 r.jina.ai 直连不稳，用户可填自建反代域名规避。
+  // 仅取 host（去尾斜杠），路径 `/`+目标 URL 的语义不变。
+  const base = (options.jinaBaseUrl ?? DEFAULT_JINA_BASE).replace(/\/+$/, '')
+  const jinaUrl = `${base}/${url}`
 
   // Reuse the exact same fetch pipeline: proxy resolution, SSRF pinning,
   // timeout, redirect limit, and body-size cap. Jina is just another HTTP

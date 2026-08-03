@@ -12,6 +12,14 @@
  * 解析 playwright-core 的类型。
  */
 
+/** playwright-core 模块缺失时的安装引导——区分 CLI 安装用户 / 仓库内开发 / 桌面端。 */
+export const PLAYWRIGHT_CORE_INSTALL_HINT = [
+  'CLI 安装用户：npm install -g tianshu-tui（重新安装以补齐依赖），',
+  '  或当前项目内：npm i playwright-core',
+  '  仓库内开发：npm i playwright-core',
+  '  桌面端：检查 dist/node_modules/playwright-core 是否完整',
+].join('\n')
+
 /** 手动安装命令（含国内镜像 env）——banner 的兜底行复用它，避免文案漂移。 */
 export const PLAYWRIGHT_MANUAL_INSTALL_HINT =
   'npx playwright install chromium' +

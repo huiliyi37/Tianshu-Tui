@@ -56,7 +56,7 @@ export type ConnectCommit =
       providerName: string
       baseUrl: string
       apiKey: string
-      model: { id: string; alias: string; contextWindow: number; maxTokens: number }
+      model: { id: string; alias: string; contextWindow: number; maxTokens: number; supportsVision?: boolean }
       makeDefault: boolean
     }
 
@@ -71,6 +71,7 @@ type Phase =
   | 'diy-url'
   | 'diy-model'
   | 'diy-context'
+  | 'diy-vision'
   | 'diy-apikey'
 
 interface Collected {
@@ -78,6 +79,7 @@ interface Collected {
   baseUrl?: string
   modelId?: string
   contextWindow?: number
+  supportsVision?: boolean
 }
 
 function presetProviderOptions(): ConnectChoiceOption[] {
@@ -139,7 +141,7 @@ export class ConnectFlow {
           kind: 'input',
           title: '输入服务商 API 地址',
           subtitle: '例如 https://api.deepseek.com/v1（可粘贴）',
-          stepLabel: '步骤 1 / 4',
+          stepLabel: '步骤 1 / 5',
           placeholder: 'https://',
         }
       case 'diy-model':
@@ -147,7 +149,7 @@ export class ConnectFlow {
           kind: 'input',
           title: '输入模型型号',
           subtitle: '例如 deepseek-v4-flash',
-          stepLabel: '步骤 2 / 4',
+          stepLabel: '步骤 2 / 5',
         }
       case 'diy-context':
         return {
@@ -156,16 +158,26 @@ export class ConnectFlow {
           // 上下文窗口驱动自动压缩阈值 —— 必须照模型服务商官方 API 的真实值填。
           // 填小了会过早压缩(丢上下文、碎缓存);填大了会撞 API 上限来不及自救。
           subtitle: '请照官方 API 文档的真实值填(它决定自动压缩点);DeepSeek V4 填 1000000,回车用默认',
-          stepLabel: '步骤 3 / 4',
+          stepLabel: '步骤 3 / 5',
           placeholder: String(DEFAULT_CONTEXT_WINDOW),
           defaultValue: String(DEFAULT_CONTEXT_WINDOW),
+        }
+      case 'diy-vision':
+        return {
+          kind: 'choice',
+          title: '这个模型支持视觉（识图）吗？',
+          subtitle: '支持图片输入的模型勾「是」，之后可在「识图」配置里选它做识图桥',
+          options: [
+            { id: 'no', label: '否（纯文本）' },
+            { id: 'yes', label: '是（多模态，可识图）' },
+          ],
         }
       case 'diy-apikey':
         return {
           kind: 'input',
           title: '输入 API Key',
           subtitle: CONFIG_HINT,
-          stepLabel: '步骤 4 / 4',
+          stepLabel: '步骤 5 / 5',
           masked: true,
         }
     }
@@ -173,6 +185,11 @@ export class ConnectFlow {
 
   /** Advance a choice step. Invalid for input steps. */
   submitChoice(id: string): ConnectStepResult {
+    if (this.phase === 'diy-vision') {
+      this.collected.supportsVision = id === 'yes'
+      this.phase = 'diy-apikey'
+      return { kind: 'next', view: this.view() }
+    }
     if (this.phase !== 'provider') {
       return { kind: 'error', message: '当前步骤需要输入文本，而非选择。', view: this.view() }
     }
@@ -204,6 +221,7 @@ export class ConnectFlow {
     const value = raw.trim()
     switch (this.phase) {
       case 'provider':
+      case 'diy-vision':
         return { kind: 'error', message: '当前步骤需要选择，而非输入。', view: this.view() }
 
       case 'preset-apikey': {
@@ -247,7 +265,7 @@ export class ConnectFlow {
           contextWindow = parsed
         }
         this.collected.contextWindow = contextWindow
-        this.phase = 'diy-apikey'
+        this.phase = 'diy-vision'
         return { kind: 'next', view: this.view() }
       }
 
@@ -270,6 +288,7 @@ export class ConnectFlow {
               alias: slugifyModelId(modelId),
               contextWindow,
               maxTokens: Math.min(DEFAULT_MAX_OUTPUT, contextWindow),
+              ...(this.collected.supportsVision ? { supportsVision: true } : {}),
             },
             makeDefault: true,
           },

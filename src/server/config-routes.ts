@@ -17,6 +17,8 @@
  *   POST   /config/computer-use/revoke      revoke an app's "always allow" grant ({ app })
  *   GET    /config/permission-dirs          Codex-style standing directory grants (read/write, exists probe)
  *   PUT    /config/permission-dirs          set standing directory grants; additions apply immediately
+ *   GET    /config/path-grants              approval-time remembered dirs for a workspace (?cwd=)
+ *   DELETE /config/path-grants              revoke one remembered dir (?cwd=&path=); effective immediately
  *   GET    /config/vision-model             vision bridge model (provider/model/prompt/maxTokens/fallback)
  *   PUT    /config/vision-model             set/clear the vision bridge
  *   GET    /config/vision-auto-bridge       auto-pick a vision bridge when unconfigured (opt-in)
@@ -64,15 +66,16 @@ import {
   getFetchConfig,
   setFetchConfig,
   getSearchConfig,
+  setSearchApiKey,
   setSearchConfig,
   getDefaultModelConfig,
   setDefaultModelConfig,
   getDeliveryConfig,
   setDeliveryConfig,
 } from '../config/manager.js'
-import { applyConfiguredPathGrants } from '../tools/path-grants.js'
+import { applyConfiguredPathGrants, listPersistedGrants, revokeGrant } from '../tools/path-grants.js'
 import { expandHome } from '../platform.js'
-import { resolve } from 'node:path'
+import { resolve, isAbsolute } from 'node:path'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { rivetHome } from '../config/paths.js'
@@ -133,6 +136,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         .map(k => ({
           key: k,
           label: PROVIDER_PRESETS[k].label,
+          description: PROVIDER_PRESETS[k].description,
           defaultModelId: PROVIDER_PRESETS[k].defaultModelId,
         }))
 
@@ -497,6 +501,19 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
     }, apiToken),
 
+    // Set/clear a search backend's inline API key (mirrors POST /config/providers/:name/key).
+    // GET /config/search never returns the plaintext — only the masked keyStatus.
+    'POST /config/search/key': withAuth((body) => {
+      const { backend, apiKey } = body as { backend?: string; apiKey?: string }
+      if (!backend) return { status: 400, body: { error: 'backend is required' } }
+      try {
+        const keyStatus = setSearchApiKey(backend, apiKey ?? '')
+        return { status: 200, body: { ok: true, backend, keyStatus } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
     // Mirror acceleration (GitHub/npm/pip/go/rust) for users behind the GFW.
     // Takes effect on the next bash execution (bash.ts reloads mirrors each
     // call) — no restart needed. CLI equivalent: /mirror on|off|china|default.
@@ -593,6 +610,40 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }
+    }, apiToken),
+
+    // Approval-time directory grants the user chose to remember. Keyed by
+    // workspace (a grant for project A must never surface under project B), so
+    // `cwd` is required rather than defaulting to the sidecar's own directory.
+    'GET /config/path-grants': withAuth((_body, params) => {
+      const cwd = params?.cwd
+      if (!cwd || !isAbsolute(cwd)) {
+        return { status: 400, body: { error: 'cwd (absolute path) is required' } }
+      }
+      return {
+        status: 200,
+        body: {
+          grants: listPersistedGrants(cwd).map(g => ({
+            path: g.root,
+            mode: g.mode,
+            grantedAt: g.grantedAt,
+            exists: existsSync(g.root),
+          })),
+        },
+      }
+    }, apiToken),
+
+    // Revoke is fail-safe (it only ever narrows access), and takes effect in
+    // this running sidecar rather than at the next start — see revokeGrant.
+    'DELETE /config/path-grants': withAuth((_body, params) => {
+      const cwd = params?.cwd
+      const path = params?.path
+      if (!cwd || !isAbsolute(cwd)) {
+        return { status: 400, body: { error: 'cwd (absolute path) is required' } }
+      }
+      if (!path) return { status: 400, body: { error: 'path is required' } }
+      const removed = revokeGrant(path, { cwd })
+      return { status: 200, body: { ok: true, removed } }
     }, apiToken),
 
     // Revoke an app's "always allow" grant. App name in body (may contain

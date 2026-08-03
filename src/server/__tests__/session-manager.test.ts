@@ -277,7 +277,7 @@ test('computer_use approve + remember records a per-app grant (always allow)', a
   // approve WITH remember → grant recorded + event annotated
   const p2 = cb.onApprovalRequired('cu-2', 'computer_use', { action: 'click', app: 'Safari', ref: 1 })
   manager.answerIntervention(s.id, 'cu-2', 'approve', undefined, true)
-  assert.deepEqual(await p2, { approved: true })
+  assert.deepEqual(await p2, { approved: true, remember: true })
   assert.equal(isAppGranted('Safari'), true, 'approve+remember must grant the app')
   const resolved = manager.getEvents(s.id, 0)!.events
     .filter((e) => e.type === 'approval_resolved')
@@ -287,7 +287,7 @@ test('computer_use approve + remember records a per-app grant (always allow)', a
   // remember on a NON-computer_use tool → no grant side effect
   const p3 = cb.onApprovalRequired('b-1', 'bash', { command: 'ls' })
   manager.answerIntervention(s.id, 'b-1', 'approve', undefined, true)
-  assert.deepEqual(await p3, { approved: true })
+  assert.deepEqual(await p3, { approved: true, remember: true })
 
   // reject + remember → no grant
   const p4 = cb.onApprovalRequired('cu-3', 'computer_use', { action: 'snapshot', app: 'Notes' })

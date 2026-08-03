@@ -825,6 +825,14 @@ export function evictOldSessionsInternal(dir: string, keepSessionId: string, lim
     sessions = readdirSync(dir)
       .filter((f: string) => f.endsWith('.jsonl'))
       .map((f: string) => f.replace('.jsonl', ''))
+      // 只有主会话占 MAX_SESSIONS 额度（与 listMainSessions 同语义）。曾经全量计数：
+      // - worker-*.jsonl 每次派发新文件（nonce 不复用），team/galaxy 重度使用即洪水
+      //   （实测 46/65 个坑被 worker 占掉），把更老的主会话挤出额度——桌面端会话的
+      //   模型上下文被静默驱逐，重开后 UI 有历史、模型失忆、上下文 0%。
+      //   worker 文件生命周期归 cleanupStaleWorkerSessionDirs（独立阈值）。
+      // - 带点的 id（<id>.claims 等）是主会话附属文件，不是会话；被误计还会被
+      //   当作"最老会话"驱逐，损坏在用主会话的 claims。
+      .filter((id: string) => !id.startsWith('worker-') && !id.includes('.'))
   } catch {
     return []
   }

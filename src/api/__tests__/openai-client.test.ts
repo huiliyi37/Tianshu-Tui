@@ -403,6 +403,45 @@ describe('error handling', () => {
       'OpenAI API error (HTTP 500): Internal Server Error',
     )
   })
+
+  it('appends billing hint with recharge url for DeepSeek insufficient balance', () => {
+    const body = JSON.stringify({
+      error: { code: 'invalid_request_error', message: 'Insufficient Balance' },
+    })
+    const out = parseOpenAIError(402, body, { providerName: 'deepseek', baseUrl: 'https://api.deepseek.com/v1' })
+    assert.ok(out.startsWith('OpenAI API error (invalid_request_error): Insufficient Balance\n'))
+    assert.ok(out.includes('DeepSeek 账户余额不足'))
+    assert.ok(out.includes('https://platform.deepseek.com/top_up'))
+    assert.ok(out.includes('/model'))
+  })
+
+  it('detects balance errors by baseUrl when providerName is absent', () => {
+    const body = JSON.stringify({
+      error: { code: 'insufficient_balance', message: 'Insufficient balance' },
+    })
+    const out = parseOpenAIError(402, body, { baseUrl: 'https://api.siliconflow.cn/v1' })
+    assert.ok(out.includes('SiliconFlow 账户余额不足'))
+    assert.ok(out.includes('https://cloud.siliconflow.cn'))
+  })
+
+  it('falls back to generic billing hint when provider is unknown', () => {
+    const body = JSON.stringify({
+      error: { code: 'invalid_request_error', message: 'Insufficient Balance' },
+    })
+    const out = parseOpenAIError(402, body)
+    assert.ok(out.includes('账户余额不足'))
+    assert.ok(!out.includes('platform.deepseek.com'))
+  })
+
+  it('does not append billing hint for unrelated errors', () => {
+    const body = JSON.stringify({
+      error: { code: 'invalid_api_key', message: 'Incorrect API key provided' },
+    })
+    assert.equal(
+      parseOpenAIError(401, body, { providerName: 'deepseek', baseUrl: 'https://api.deepseek.com/v1' }),
+      'OpenAI API error (invalid_api_key): Incorrect API key provided',
+    )
+  })
 })
 
 describe('retry-after parsing (parseRetryAfterMs)', () => {

@@ -72,6 +72,17 @@ export function detectImageMime(buf: Buffer, filePath: string): string | null {
     if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
       return 'image/gif'
     }
+    // TIFF: II (little-endian) or MM (big-endian) at offset 0, magic 42 at offset 2-3
+    if (
+      (buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2A && buf[3] === 0x00) ||
+      (buf[0] === 0x4D && buf[1] === 0x4D && buf[2] === 0x00 && buf[3] === 0x2A)
+    ) {
+      return 'image/tiff'
+    }
+    // BMP: BM
+    if (buf[0] === 0x42 && buf[1] === 0x4D) {
+      return 'image/bmp'
+    }
   }
   const ext = extname(filePath).toLowerCase()
   return IMAGE_MIMES[ext] ?? null

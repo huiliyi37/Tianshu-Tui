@@ -346,6 +346,7 @@ describe('cognitive mirror delta byte stability', () => {
     vigor?: number
     convergencePrecision?: number
     seasonIntensity?: number
+    stabilityQuality?: 'measured' | 'partial'
   } = {}) {
     return createCognitiveLedger({
       evidence: makeEvidence({ filesModified: new Set() }),
@@ -355,6 +356,16 @@ describe('cognitive mirror delta byte stability', () => {
         momentum: 0.5, pressure: 0.3, confidence: 0.5,
         complexity: 0.4, freshness: 0.5,
         stability: overrides.stability ?? 0.42,
+        ...(overrides.stabilityQuality
+          ? {
+              quality: {
+                confidence: 'measured' as const,
+                momentum: 'measured' as const,
+                stability: overrides.stabilityQuality,
+                decisiveness: 'measured' as const,
+              },
+            }
+          : {}),
       },
       vigor: {
         tonic: 0.6, phasic: 0.1, curiosity: 0.45, variability: 0.1, history: [],
@@ -379,6 +390,32 @@ describe('cognitive mirror delta byte stability', () => {
     assert.notEqual(mid, high, 'mid → high band transition must change bytes')
     assert.match(mid, /stability="mid"/)
     assert.match(high, /stability="high"/)
+  })
+
+  // SensoriumQuality distinguishes a measured score from one re-normalized around
+  // missing data. Every consumer of that flag was programmatic (routing, gating,
+  // telemetry) — the one consumer facing the model rendered both as the same string.
+  it('marks a re-normalized stability score as an estimate', () => {
+    const partial = buildCognitiveMirror(mirrorLedger({ stability: 0.42, stabilityQuality: 'partial' }))
+    assert.match(partial, /stability="mid:partial"/)
+  })
+
+  it('leaves a measured stability score unmarked', () => {
+    const measured = buildCognitiveMirror(mirrorLedger({ stability: 0.42, stabilityQuality: 'measured' }))
+    assert.match(measured, /stability="mid"/)
+    assert.doesNotMatch(measured, /:partial/)
+  })
+
+  it('absent quality renders the pre-existing bytes — provenance is additive', () => {
+    const withoutQuality = buildCognitiveMirror(mirrorLedger({ stability: 0.42 }))
+    const measured = buildCognitiveMirror(mirrorLedger({ stability: 0.42, stabilityQuality: 'measured' }))
+    assert.equal(withoutQuality, measured)
+  })
+
+  it('provenance suffix does not churn bytes within a quality state', () => {
+    const a = buildCognitiveMirror(mirrorLedger({ stability: 0.40, stabilityQuality: 'partial' }))
+    const b = buildCognitiveMirror(mirrorLedger({ stability: 0.45, stabilityQuality: 'partial' }))
+    assert.equal(a, b, 'same band + same quality must render identical bytes')
   })
 
   it('renders no 2-decimal floats for continuous dims', () => {

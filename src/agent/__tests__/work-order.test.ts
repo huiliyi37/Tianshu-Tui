@@ -2,11 +2,15 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildBlockedWorkerResult,
+  buildPolicyCancelledResult,
+  workerResultSchema,
+  classifyWorkerParseError,
   createReadOnlyWorkOrder,
   createWriteWorkOrder,
   mapWorkOrderKindToCapabilityTask,
   parseWorkerResult,
   READ_ONLY_WORKER_TOOLS,
+  salvageWorkerResult,
   WorkerResultParseError,
   WRITE_WORKER_TOOLS,
 } from '../work-order.js'
@@ -543,5 +547,150 @@ describe('work-order contract', () => {
         changedFiles: [],
       }), 'wo_bad')
     })
+  })
+})
+
+describe('classifyWorkerParseError (D 度量细分)', () => {
+  function catchParse(text: string): unknown {
+    try {
+      parseWorkerResult(text, 'wo_x')
+      return null
+    } catch (e) {
+      return e
+    }
+  }
+
+  it('no JSON at all → no_json', () => {
+    const err = catchParse('纯散文，没有任何 JSON。')
+    assert.ok(err)
+    assert.equal(classifyWorkerParseError(err), 'no_json')
+  })
+
+  it('unescaped quote breaks syntax → json_syntax', () => {
+    const err = catchParse('{"workOrderId":"wo_x","status":"passed","summary":"他说"你好"","findings":[],"artifacts":[],"changedFiles":[],"risks":[],"nextActions":[]}')
+    assert.ok(err instanceof WorkerResultParseError)
+    assert.equal(classifyWorkerParseError(err), 'json_syntax')
+  })
+
+  it('truncated output → truncated', () => {
+    const err = catchParse('{"workOrderId":"wo_x","status":"passed","summary":"被截断的报')
+    assert.ok(err instanceof WorkerResultParseError)
+    assert.equal(classifyWorkerParseError(err), 'truncated')
+  })
+
+  // 策略 6 会给截断的报告补上闭合符，补完就能解析——于是一份被 maxTokens 砍断的
+  // 报告曾直接变成 status:passed、summary 断在半句、findings 为空，与「worker 真的
+  // 没什么可报」在编排者眼里完全一样。
+  it('截断的报告不得被自动闭合成 status=passed', () => {
+    const truncated = '{"workOrderId":"wo_x","status":"passed","summary":"被截断的报'
+    assert.throws(() => parseWorkerResult(truncated, 'wo_x'), WorkerResultParseError)
+  })
+
+  it('截断但含 findings 时，救回内容而非伪装通过', () => {
+    const truncated = '{"workOrderId":"wo_x","status":"passed","summary":"报告","findings":'
+      + '[{"claim":"c1","evidence":"e1","confidence":"high"},{"claim":"c2","evidence":"e2","confidence":"high"}]'
+      + ',"artifacts":[{"kind":"note","title":"t","content":"被截断'
+    const salvaged = salvageWorkerResult(truncated, 'wo_x', catchParse(truncated))
+    assert.ok(salvaged, '两条完整 finding 应当被救回')
+    assert.equal(salvaged.findings.length, 2)
+    assert.equal(salvaged.status, 'blocked', '救回的报告不能顶着 passed')
+    assert.equal(salvaged.evidenceStatus, 'unverified')
+  })
+
+  it('valid JSON failing schema → schema_field', () => {
+    const err = catchParse(JSON.stringify({ workOrderId: 'wo_x', status: 'banana', summary: 's' }))
+    assert.ok(err instanceof WorkerResultParseError)
+    assert.equal(classifyWorkerParseError(err), 'schema_field')
+  })
+
+  it('salvageWorkerResult attaches parseErrorKind from the parse error', () => {
+    const text = '{"workOrderId":"wo_x","status":"passed","summary":"partial","findings":[{"claim":"c1","evidence":"e1","confidence":"high"}],"artifacts":[],"changedFiles":[],"risks":[],"nextActions":[],'
+    const err = catchParse(text)
+    const salvaged = salvageWorkerResult(text, 'wo_x', err)
+    assert.ok(salvaged)
+    assert.equal(salvaged.failureReason, 'json_parse')
+    assert.equal(salvaged.parseErrorKind, 'json_syntax')
+  })
+})
+
+// 任务级约束通道（docs/design/2026-08-02-工单约束通道.md）。
+// 这条链此前三处断开：模型无插槽、DelegationRequest 无字段、coordinator 不转发，
+// 于是 worker 永远只看到 profile 样板，计划的反目标一条都到不了。
+describe('work-order task constraints', () => {
+  const base = {
+    parentTurnId: 'turn_1',
+    kind: 'code_search' as const,
+    objective: 'Migrate the meridian schema.',
+    scope: { files: ['src/repo/meridian-db.ts'] },
+  }
+
+  it('appends task constraints to read-only profile discipline instead of replacing it', () => {
+    const order = createReadOnlyWorkOrder({
+      ...base,
+      profile: 'code_scout',
+      constraints: ['迁移必须带 user_version 守卫，只跑一次。'],
+    })
+    assert.ok(order.constraints.includes('Do not request write, edit, bash, or test execution tools.'),
+      '只读纪律不能被任务约束顶掉')
+    assert.ok(order.constraints.includes('迁移必须带 user_version 守卫，只跑一次。'))
+  })
+
+  it('appends task constraints on the write path too', () => {
+    const order = createWriteWorkOrder({
+      ...base,
+      constraints: ['不要推广 council/galaxy，先过观察窗口。'],
+    })
+    assert.ok(order.constraints.includes('Return a patchSummary describing all changes made.'))
+    assert.ok(order.constraints.includes('不要推广 council/galaxy，先过观察窗口。'))
+  })
+
+  it('falls back to profile boilerplate when constraints are absent or empty', () => {
+    const absent = createReadOnlyWorkOrder({ ...base, profile: 'code_scout' })
+    const empty = createReadOnlyWorkOrder({ ...base, profile: 'code_scout', constraints: [] })
+    assert.deepEqual(empty.constraints, absent.constraints, '空数组等同缺席，不得清空纪律')
+  })
+
+  it('drops blanks and duplicates, and caps the list', () => {
+    const order = createReadOnlyWorkOrder({
+      ...base,
+      profile: 'code_scout',
+      constraints: ['  ', 'Return only evidence-backed claims.', 'A', 'A',
+        ...Array.from({ length: 20 }, (_, i) => `extra-${i}`)],
+    })
+    assert.equal(order.constraints.filter(c => c === 'Return only evidence-backed claims.').length, 1,
+      '回声的样板行不得重复')
+    assert.equal(order.constraints.filter(c => c === 'A').length, 1)
+    assert.ok(order.constraints.length <= 3 + 12, `约束总量需有上限，实得 ${order.constraints.length}`)
+  })
+
+  // ── buildPolicyCancelledResult ──
+
+  it('buildPolicyCancelledResult produces valid schema-passable result', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_cancel', parentTurnId: 't1', kind: 'code_search',
+      profile: 'code_scout', objective: 'test', scope: {},
+    })
+    const r = buildPolicyCancelledResult(order, 'quorum k=2')
+    // schema parse must not throw
+    workerResultSchema.parse(r)
+    assert.equal(r.status, 'blocked')
+    assert.equal(r.failureReason, 'policy_short_circuit')
+    assert.equal(r.evidenceStatus, 'skipped')
+    assert.ok(r.summary.includes('quorum k=2'))
+    assert.ok(r.summary.includes('不是故障'))
+  })
+
+  it('buildPolicyCancelledResult preserves groupId and objective from the order', () => {
+    // P1 regression: cancelled results bypass reconcileWithObjective → groupId
+    // was missing, causing quorum members to land in the "independent" group (k=1)
+    // and produce false quorum-not-reached warnings.
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_grp', parentTurnId: 't1', kind: 'code_search',
+      profile: 'code_scout', objective: 'find the bug', scope: {},
+      groupId: 'replica-set-a',
+    })
+    const r = buildPolicyCancelledResult(order, 'quorum k=2')
+    assert.equal(r.groupId, 'replica-set-a')
+    assert.equal(r.objective, 'find the bug')
   })
 })

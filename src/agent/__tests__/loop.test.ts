@@ -1613,9 +1613,26 @@ describe('AgentLoop — convergence emission cooldown', () => {
 
   it('build 变体（filesModified>0）携带 course_changed 核销谓词 (B1b/M4)', async () => {
     const agent = stuckLoop()
-    agent.evidence.trackFileModified('src/x.ts') // activityMode 短路为 build
+    // build 态的真实构造（窗口分类语义）：窗口内非只读占比低于 0.8——
+    // 8 条里 2 条 bash（productive）把只读率压到 0.75。filesModified 只影响
+    // producingReport 豁免，不再单独决定 activityMode（窗口分类，W3）。
+    agent.recentToolHistory = [
+      { tool: 'read_file', status: 'success', target: 'a.ts' },
+      { tool: 'grep', status: 'success', target: 'x' },
+      { tool: 'bash', status: 'success', target: 'ls' },
+      { tool: 'read_file', status: 'success', target: 'b.ts' },
+      { tool: 'grep', status: 'success', target: 'y' },
+      { tool: 'bash', status: 'success', target: 'ls dist' },
+      { tool: 'read_file', status: 'success', target: 'c.ts' },
+      { tool: 'grep', status: 'success', target: 'z' },
+    ] as typeof agent.recentToolHistory
+    agent.evidence.trackFileModified('src/x.ts')
     const submits = captureSubmits(agent)
-    await agent.runConvergenceCheck(14, 'plan', true, false, makeCallbacks())
+    // 无编辑 execute 阶段在窗口内持续 → L2 shouldKick 发射（跨轮扫描以对
+    // 未来的 tier/threshold 调整保持韧性，通常第一轮即发射）。
+    for (let turn = 14; turn <= 20 && submits.length === 0; turn++) {
+      await agent.runConvergenceCheck(turn, 'execute', true, false, makeCallbacks())
+    }
     const conv = submits.find(e => e.key === 'convergence')
     assert.ok(conv, 'expected a convergence advisory emission')
     assert.equal(conv.expect?.kind, 'course_changed', 'build 变体必须携带 course_changed 谓词')

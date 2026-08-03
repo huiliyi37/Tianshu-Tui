@@ -26,6 +26,7 @@
 import type { WorkerResult, WorkOrderKind } from './work-order.js'
 import type { WorkerTranscript } from './worker-session.js'
 import { VERIFY_BASH_RE } from './hooks/self-verify-hook.js'
+import { classifyProfile } from './coordination-policy.js'
 
 /** 对账只需要派发侧这几样，不必拖进整个 WorkOrder。 */
 export interface ObjectiveContext {
@@ -71,6 +72,10 @@ function ranAnyVerification(transcript: WorkerTranscript): boolean {
   if (transcript.toolUses.includes('run_tests')) return true
   return (transcript.bashCommands ?? []).some(cmd => VERIFY_BASH_RE.test(cmd))
 }
+
+/** 测试文件模式：__tests__/ 目录或 *.test.* / *.spec.* —— 写工/verifier 的
+ *  合法伴随产物（判据 3 越界豁免，见下方注释）。 */
+const TEST_FILE_RE = /(^|\/)(__tests__\/|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?$)/
 
 /** 末段路径比较：容忍绝对/相对路径与分隔符差异，只看是否指同一个文件。 */
 function samePath(a: string, b: string): boolean {
@@ -143,6 +148,24 @@ export function reconcileWithObjective(
     }
     if (!transcript) {
       risks = addRisk(risks, '目标对账：kind=verify 的 worker 未产出 verification 元数据（无 transcript 可佐证，未硬拦）')
+    }
+  }
+
+  // ── 硬判据 3：写工越界改文件（P1-8）──────────────────────────────
+  // 派它去改 scope.files，它却改了 scope 之外的文件——批内 hasFileConflict
+  // 与全局 inflight 登记都以 scope.files 为边界，越界改动会逃过两道防线。
+  // 只有写工（hands）硬拦：读工的 examinedFiles 越界是「查得广」，合法。
+  // 测试文件豁免（审查 M2）：__tests__/ 与 *.test.* / *.spec.* 是写工/verifier
+  // 的合法伴随产物（「实现 X 带测试」是常态派发），不计入越界。
+  if (classifyProfile(order.profile ?? '') === 'hands' && (order.scope.files?.length ?? 0) > 0) {
+    const outOfScope = (stamped.changedFiles ?? []).filter(f => !TEST_FILE_RE.test(f) && !(order.scope.files ?? []).some(s => samePath(s, f)))
+    if (outOfScope.length > 0) {
+      return {
+        ...stamped,
+        status: 'blocked',
+        evidenceStatus: 'unverified',
+        risks: addRisk(risks, `目标对账：写工改动了 scope 之外的文件 — ${outOfScope.join(' · ')} 不在派发范围 ${(order.scope.files ?? []).join(' · ')} 内，拒绝采信越界改动`),
+      }
     }
   }
 

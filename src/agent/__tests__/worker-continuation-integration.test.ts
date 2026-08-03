@@ -54,7 +54,9 @@ function makeRegistry(): ToolRegistry {
 const FINAL_REPORT = JSON.stringify({
   workOrderId: 'wo',
   status: 'passed',
-  summary: '续跑轮盘点了上一轮进度后补齐剩余部分，产出终局报告，内容足够长以避开 summary 扩写门的追问，不要在这里再触发一轮扩写。',
+  // 必须真的 ≥200 字符才能避开 summary 扩写门——此前版本只有 ~60 字，扩写门
+  // 会多跑一轮（多一次 finalize），把 lifecycle 计数顶超。
+  summary: '续跑轮盘点了上一轮进度后补齐剩余部分，产出终局报告：渲染回落路径定位在 overlay.ts 的 fleet 行渲染器，宽度兜底走 displayWidth 分支；已核对调用点与测试锚点，无文件改动，遗留风险是窄终端下省略号截断与候选行高估算的耦合，建议后续用真实会话回放验证。内容足够长以避开 summary 扩写门的追问，不要在这里再触发一轮扩写。',
   findings: [{ claim: '路由接缝在 overlay.ts', evidence: 'src/tui/format/overlay.ts:733', confidence: 'high' }],
   artifacts: [],
   changedFiles: [],
@@ -155,9 +157,10 @@ describe('预算耗尽自动续跑（接线）', () => {
       )
       // Wave 10：补偿轮要看得见。不发事件的话，面板上只有一个 worker 长时间"还在跑"，
       // 用户无从判断它是卡住了还是已经进了第二次续跑。
-      const lifecycle = activity.filter(a => a.kind === 'lifecycle')
-      assert.equal(lifecycle.length, 1, `续跑一轮应当上行一条 lifecycle 事件，实际：${JSON.stringify(activity.map(a => a.kind))}`)
-      assert.match(lifecycle[0]!.detail ?? '', /续跑 1\/\d+ · 轮次预算耗尽/)
+      // B 终轮定型后每次收尾轮也会上行 'finalizing report' lifecycle——计数只看续跑事件。
+      const continuations = activity.filter(a => a.kind === 'lifecycle' && /续跑/.test(a.detail ?? ''))
+      assert.equal(continuations.length, 1, `续跑一轮应当上行一条续跑 lifecycle 事件，实际：${JSON.stringify(activity.filter(a => a.kind === 'lifecycle').map(a => a.detail))}`)
+      assert.match(continuations[0]!.detail ?? '', /续跑 1\/\d+ · 轮次预算耗尽/)
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }

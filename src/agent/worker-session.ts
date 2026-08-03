@@ -9,6 +9,7 @@ import { classifyFailure, isTransient } from './failure-classifier.js'
 import {
   buildBlockedWorkerResult,
   clampWorkerMaxTurns,
+  classifyWorkerParseError,
   deriveWorkerSessionId,
   parseWorkerResult,
   salvageWorkerResult,
@@ -16,7 +17,8 @@ import {
   type WorkerResult,
 } from './work-order.js'
 import { toolArgSummary } from '../tui/tool-label.js'
-import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
+import { buildWorkerPrompt, buildWorkerRepairPrompt, buildFinalizationInstruction, workerOrderHasWriteTools } from './worker-prompts.js'
+import { reconcileCapturedWorkerFacts } from './worker-evidence.js'
 import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
 import { buildDomainKnowledgeBlock, formatBatchStigmergyBlock } from './domain-knowledge-block.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
@@ -68,8 +70,16 @@ export interface WorkerSessionConfig {
    *  provider supports it) to force valid JSON output. The repair turn is a
    *  tool-free single-shot request, so json_object does not conflict with
    *  function calling (unlike normal turns where tools + json_object cause
-   *  duplicate/spurious output). */
+   *  duplicate/spurious output). Also gates json_object on the B 终轮定型
+   *  finalization turn (finalizeWorkerReport) — same tool-free shape, same
+   *  provider-capability semantics. */
   forceJsonRepair?: boolean
+  /** B（终轮定型）：探索循环结束后，由系统发起一个带完整会话历史、无工具、
+   *  json_object（随 forceJsonRepair 门）的收尾轮，把报告统一挤经受约束通道——
+   *  根治 2026-07-24 无历史修复编造假 summary 事故。默认 true（undefined 即开）；
+   *  coordinator 在 RIVET_WORKER_FINALIZE=0 时传 false，回退旧契约
+   *  （主提示词内联 JSON、无收尾轮）。 */
+  finalizeReport?: boolean
   activeClaims?: import('../context/claims.js').ContextClaim[]
   /** Review-router re-entrancy depth propagated to worker tool calls. */
   reviewDepth?: number
@@ -133,9 +143,10 @@ export interface WorkerSessionConfig {
 /** `turn` 事件在每个 worker turn 结束时上报，detail 为累计 token 总数（字符串）。
  *  `retry` 事件在 API 层内部瞬时重试的每次 attempt 起始上报——重试中的健康
  *  请求必须喂 liveness，否则被 stall sweep 误判为静默（慢 ≠ 死）。
- *  `lifecycle` 由 coordinator / hands-session 在补偿轮开始时上报（续跑、证据
- *  复核），detail 是给人看的中文短语。它不是 worker 自己发的——worker 不知道
- *  自己在第几次续跑，只有派发侧知道。 */
+ *  `lifecycle` 多数由 coordinator / hands-session 在补偿轮开始时上报（续跑、证据
+ *  复核），detail 是给人看的中文短语；worker-session 自己在终轮定型
+ *  （finalizeWorkerReport）开始时也会发一条 'finalizing report'——收尾轮不走
+ *  AgentLoop，没有它 stall clock 在收尾期间吃不到任何信号。 */
 export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'turn' | 'retry' | 'lifecycle'
 
 /** tool_use 活动行:`name(关键参数)`。toolArgSummary 覆盖常见工具;未覆盖的
@@ -164,6 +175,10 @@ export interface WorkerTranscript {
    *  "验证跑挂了"：npm test 失败不能当 verified 证据。可选：旧固件缺省时
    *  按全部成功处理（不误杀历史数据）。 */
   failedBashCommands?: string[]
+  /** 写工具（edit_file/write_file/hash_edit/apply_patch）实际触及的文件——
+   *  worker-evidence 以它为系统捕获口径交叉校验自报 changedFiles。可选：
+   *  旧固件/测试缺省时捕获视为未激活，changedFiles 保持自报不校验。 */
+  mutatedFiles?: string[]
 }
 
 export interface WorkerSessionRun {
@@ -186,6 +201,7 @@ function emptyTranscript(): WorkerTranscript {
     repairAttempts: 0,
     bashCommands: [],
     failedBashCommands: [],
+    mutatedFiles: [],
   }
 }
 
@@ -246,6 +262,11 @@ export interface RunnableAgent {
   run: AgentLoop['run']
 }
 
+/** 长工具 keepalive 默认节拍：远低于最短 stall 容忍（90s），30s 一拍。 */
+let TOOL_KEEPALIVE_MS = 30_000
+/** Test-only: shrink the long-tool keepalive cadence so tests don't wait 30s. */
+export function __setToolKeepaliveMs(ms: number): void { TOOL_KEEPALIVE_MS = ms }
+
 async function runOnce(
   agent: RunnableAgent,
   prompt: string,
@@ -262,6 +283,20 @@ async function runOnce(
   let aborted = false
   // tool id → bash command，供 onToolResult 把失败结果精确归到具体命令。
   const bashCommandById = new Map<string, string>()
+  // 长工具 keepalive：tool_use→tool_result 之间没有任何流式事件——跑数分钟的
+  // 测试套件/构建在 liveness 静默窗口内会被 stall sweep 误杀（慢 ≠ 死，与
+  // finalize 轮保活同理）。工具在飞期间每 30s 发一条 lifecycle 心跳。
+  // 代价：工具真死锁不再被 stall 提前杀，改由 budget 墙钟兜底（更晚但有界）——
+  // 误杀健康长任务的代价比晚杀死锁高，取此交换。
+  const toolsInFlight = new Map<string, { name: string; since: number }>()
+  const keepalive = setInterval(() => {
+    const oldest = toolsInFlight.values().next().value
+    if (!oldest) return
+    const elapsedS = Math.round((Date.now() - oldest.since) / 1000)
+    onActivity?.('lifecycle', `tool still running: ${oldest.name} (${elapsedS}s, ${toolsInFlight.size} in flight)`)
+  }, TOOL_KEEPALIVE_MS)
+  keepalive.unref?.()
+  try {
   await agent.run(prompt, {
     onTextDelta: (delta) => {
       text += delta
@@ -273,17 +308,32 @@ async function runOnce(
       onActivity?.('thinking', delta)
     },
     onToolUse: (id, name, input) => {
+      toolsInFlight.set(id, { name, since: Date.now() })
       transcript.toolUses.push(name)
-      if (name === 'bash' && typeof (input as Record<string, unknown> | undefined)?.command === 'string') {
+      const inputRec = input as Record<string, unknown> | undefined
+      if (name === 'bash' && typeof inputRec?.command === 'string') {
         const command = (input as { command: string }).command
         ;(transcript.bashCommands ??= []).push(command)
         bashCommandById.set(id, command)
+      }
+      // 写工具触及的文件留痕——worker-evidence 以此交叉校验自报 changedFiles
+      // （系统捕获为主，自报仅作对照）。worktree 里报相对路径，与自报口径一致，
+      // 不做路径归一化。
+      if ((name === 'edit_file' || name === 'write_file' || name === 'hash_edit') && typeof inputRec?.file_path === 'string') {
+        ;(transcript.mutatedFiles ??= []).push(inputRec.file_path)
+      }
+      if (name === 'apply_patch' && typeof inputRec?.diff === 'string') {
+        for (const line of inputRec.diff.split('\n')) {
+          // 统一 diff 的 +++ 行标记目标文件；删除文件的 +++ /dev/null 不算改动。
+          if (line.startsWith('+++ b/')) (transcript.mutatedFiles ??= []).push(line.slice(6).trim())
+        }
       }
       // 活动流带关键参数(name(arg))——桌面委派 UI / TUI worker mirror 直接展示,
       // 光秃工具名无法回答"它在读哪个文件/跑什么命令"。
       onActivity?.('tool_use', summarizeToolUseLine(name, input))
     },
     onToolResult: (id, name, result, isError) => {
+      toolsInFlight.delete(id)
       transcript.toolResults.push(name)
       if (isError) {
         transcript.errors.push(result)
@@ -312,10 +362,24 @@ async function runOnce(
     },
     onApprovalRequired: async () => false,
   })
+  } finally {
+    clearInterval(keepalive)
+  }
   // Aborts are a deliberate stop (budget timer / parent signal), not a fault —
   // return the partial text and let the parse/blocked path handle it.
   if (streamError && !aborted) throw streamError
   return text
+}
+
+/**
+ * response_format 被 provider 拒绝的识别——严格 provider（能力表
+ * supportsResponseFormat:false 的 mimo/minimax/longcat 等）对未知参数直接
+ * 400。只在错误信息明确指向 json 模式/未知参数时判定：网络抖动等瞬断不算，
+ * 否则一次偶发失败就会永久关掉本会话的 json 收尾通道。
+ */
+function isResponseFormatRejection(err: Error | undefined): boolean {
+  if (!err) return false
+  return /response_format|json_object|json.mode|unknown\s+(parameter|field|argument)|unrecognized\s+(parameter|field|argument)|not[-_ ]supported/i.test(err.message)
 }
 
 /**
@@ -330,8 +394,9 @@ async function runOnce(
  * eliminating the most common parse-failure cause (free-text prose / truncation).
  *
  * Bypasses AgentLoop entirely (no tool-calling loop) — just one client.stream
- * call. Returns the accumulated text or '' on stream error (caller falls back
- * to the blocked-result path).
+ * call. Returns the accumulated text ('' on stream error — caller falls back to
+ * the AgentLoop repair path) plus a `rejected` flag telling the caller the
+ * provider refused response_format itself, so it can stop offering it.
  */
 async function repairWithJsonMode(
   client: StreamClient,
@@ -339,9 +404,9 @@ async function repairWithJsonMode(
   repairPrompt: string,
   maxTokens: number,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<{ text: string; rejected: boolean }> {
   let text = ''
-  let failed = false
+  let error: Error | undefined
   await client.stream(
     {
       model,
@@ -357,28 +422,101 @@ async function repairWithJsonMode(
       onThinkingDelta: () => {},
       onContentBlock: () => {},
       onStopReason: () => {},
-      onError: () => { failed = true },
+      onError: (e) => { error = e },
     },
     signal,
-  ).catch(() => { failed = true })
-  return failed ? '' : text
+  ).catch((e: unknown) => { error = e as Error })
+  return { text: error ? '' : text, rejected: isResponseFormatRejection(error) }
+}
+
+/**
+ * B（终轮定型）——带完整会话历史、无工具的收尾轮，把报告统一挤经受约束通道。
+ *
+ * 与 repairWithJsonMode 同骨架（直接 client.stream，不经 AgentLoop、不占 turn
+ * 预算），本质区别在 messages：修复轮是无历史单发，正是 2026-07-24 假 summary
+ * 事故的根因（模型凭空编造 "No work order context provided" 且解析通过）；
+ * 收尾轮的 messages = worker 自己的完整会话历史 + 一条收尾指令，模型只能基于
+ * 实际发生的工具调用与结果写报告。前缀与 worker 自己的 API 请求一致，provider
+ * 前缀缓存接近全命中，净成本只有收尾指令 + 报告输出。
+ *
+ * response_format: json_object 复用 forceJsonRepair 的 provider 门——provider
+ * 不支持时退化为无 json_object 的收尾（仍无工具 + 带历史）。
+ * 流失败/空文本 → 返回 ''，调用方走回退（parse 自然输出 / max-turns 阶梯）。
+ *
+ * 探针式自愈（P0）：coordinator 对能力表外的 provider 乐观置 forceJsonRepair，
+ * 若 provider 明确拒绝 response_format（isResponseFormatRejection），立刻不带
+ * 它重试本收尾轮——收尾轮不白烧——并关闭本会话的 json 通道（后续 repair 轮
+ * 同样跳过），严格 provider 从此零额外成本。
+ */
+async function finalizeWorkerReport(
+  config: WorkerSessionConfig,
+  session: SessionContext,
+  order: WorkOrder,
+  hasWriteTools: boolean,
+): Promise<string> {
+  // 收尾轮不走 AgentLoop，没有任何自然流式事件——先发一条 lifecycle 喂 stall
+  // clock，再把 delta 按 'text' 上行（与探索轮同一保活通道）。
+  config.onActivity?.('lifecycle', 'finalizing report')
+  const attempt = async (withJson: boolean): Promise<{ text: string; error?: Error }> => {
+    let text = ''
+    let error: Error | undefined
+    await config.client.stream(
+      {
+        model: config.promptEngine.getModel(),
+        messages: [
+          ...session.getMessages(),
+          { role: 'user' as const, content: buildFinalizationInstruction(order, hasWriteTools) },
+        ],
+        // 报告再生与修复轮同档（16384）——报告写大被截时照样需要这份空间。
+        max_tokens: Math.min(16384, order.budget.maxTokens ?? config.contextWindow),
+        stream: true,
+        // 收尾指令已含 "JSON"（DeepSeek/GLM 在 response_format 下要求提及 json）。
+        ...(withJson ? { response_format: { type: 'json_object' as const } } : {}),
+      },
+      {
+        onTextDelta: (delta) => { text += delta; config.onActivity?.('text', delta) },
+        onThinkingDelta: () => {},
+        onContentBlock: () => {},
+        onStopReason: () => {},
+        onError: (e) => { error = e },
+      },
+      config.abortSignal,
+    ).catch((e: unknown) => { error = e as Error })
+    return { text, error }
+  }
+  let result = await attempt(Boolean(config.forceJsonRepair))
+  if (result.error && config.forceJsonRepair && isResponseFormatRejection(result.error)) {
+    config.forceJsonRepair = false
+    config.onActivity?.('lifecycle', 'provider rejected response_format — json channel disabled, retrying without')
+    result = await attempt(false)
+  }
+  // 空文本等同失败——调用方回退旧路径（parse 自然输出 / max-turns 阶梯）。
+  return result.error || !result.text.trim() ? '' : result.text
 }
 
 /** Soft-landing wrap-up steer, delivered ONCE through the per-tool-round steer
  *  drain when the budget soft timer fires. After delivery (or before arming),
- *  the drain passes through to the inner (coordinator) steer queue. */
-export function createSoftLandingDrain(inner?: () => string | null): {
+ *  the drain passes through to the inner (coordinator) steer queue.
+ *  文案按报告契约分体：finalized（B 终轮定型）时报告由系统收尾轮单独索取，
+ *  软着陆只需让 worker 停探索、用散文收束——再叫它自产 JSON 会与收尾轮重复。 */
+export function createSoftLandingDrain(
+  inner?: () => string | null,
+  reportContract: 'inline-json' | 'finalized' = 'inline-json',
+): {
   drain: () => string | null
   requestWrapUp: () => void
 } {
   let requested = false
   let delivered = false
+  const wrapUpSteer = reportContract === 'finalized'
+    ? '[budget warning] Less than 25% of your time budget remains. STOP exploring now. Wrap up your findings in prose based on the evidence you already have — the structured report will be requested separately by the system. Do not start new tool-call chains.'
+    : '[budget warning] Less than 25% of your time budget remains. STOP exploring now. Based on the evidence you already have, emit your final report as a single valid JSON object (WorkerResult contract) immediately. Do not start new tool-call chains.'
   return {
     requestWrapUp: () => { requested = true },
     drain: () => {
       if (requested && !delivered) {
         delivered = true
-        return '[budget warning] Less than 25% of your time budget remains. STOP exploring now. Based on the evidence you already have, emit your final report as a single valid JSON object (WorkerResult contract) immediately. Do not start new tool-call chains.'
+        return wrapUpSteer
       }
       return inner?.() ?? null
     },
@@ -437,13 +575,15 @@ export function buildMaxTurnsExhaustedResult(
   latestText: string,
   maxTurns: number,
 ): WorkerResult | null {
+  let parseError: unknown
   try {
     parseWorkerResult(latestText, order.id)
     return null // 终轮已产出合法报告(soft-landing 成功)——走正常路径
-  } catch {
+  } catch (error) {
+    parseError = error
     // fall through — the run genuinely ended without a report
   }
-  const salvaged = salvageWorkerResult(latestText, order.id)
+  const salvaged = salvageWorkerResult(latestText, order.id, parseError)
   if (salvaged) {
     return {
       ...salvaged,
@@ -516,7 +656,13 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     // 给写工挂共享 store。
     config.stigmergy ? await formatBatchStigmergyBlock(config.stigmergy) : '',
   ].filter(Boolean)
-  const baseParts = [...knowledgeBlocks, buildWorkerPrompt(config.order, undefined, { ledgerCwd: config.cwd })]
+  // B（终轮定型）：默认报告由带完整会话历史的收尾轮统一产出，主提示词用
+  // finalized 契约（不携带 shape/转义段）；finalizeReport === false
+  // （RIVET_WORKER_FINALIZE=0）时完全旧契约——inline JSON、无收尾轮。
+  const finalizeReport = config.finalizeReport !== false
+  const reportContract = finalizeReport ? 'finalized' as const : 'inline-json' as const
+  const hasWriteTools = workerOrderHasWriteTools(config.order)
+  const baseParts = [...knowledgeBlocks, buildWorkerPrompt(config.order, undefined, { ledgerCwd: config.cwd, reportContract })]
   // Checkpoint resume: inject partial results so the worker doesn't redo completed work
   if (config.checkpoint && config.checkpoint.partialResult) {
     baseParts.push(
@@ -612,7 +758,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
   // streaming its final report — the report was seconds from landing.
   // Cache-safe: the steer is an append-only tail message in the worker's own
   // session (same mechanism as coordinator steerWorker).
-  const softLanding = createSoftLandingDrain(config.onSteerDrain)
+  const softLanding = createSoftLandingDrain(config.onSteerDrain, reportContract)
   const steerDrain = softLanding.drain
   const softMs = Math.max(timeoutMs * 0.75, timeoutMs - 60_000)
   const softTimer = softMs > 0 && softMs < timeoutMs
@@ -634,31 +780,56 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity, steerDrain, config.onNestedDelegation)
     mbox?.progress(1, config.order.budget.maxRetries + 1, 'initial run')
 
-    // Max-turns 熔断闸门：初始 run 被 maxTurns 切断时绝不进修复梯——
-    // 无上下文的 json-mode 修复会捏造"缺上下文"假报告(见 helper 注释)。
+    // Max-turns 熔断判定：初始 run 被 maxTurns 非自愿切断时，累计文本是探索
+    // 散文而非报告（2026-07-24 假 summary 事故背景，见 buildMaxTurnsExhaustedResult）。
     const initialStop = agent.latestStopReason
-    if (initialStop?.source === 'max-turns' && !initialStop.voluntary) {
+    const maxTurnsExhausted = initialStop?.source === 'max-turns' && !initialStop.voluntary
+    // 确定性 max-turns 阶梯（终型失败回退与旧契约闸门共用）：返回 null 说明
+    // 终轮已产出合法报告（soft-landing 成功），落入下方正常 parse 路径。
+    const maxTurnsFallback = (): WorkerSessionRun | null => {
       const exhausted = buildMaxTurnsExhaustedResult(
         config.order,
         transcript,
         latestText,
         clampWorkerMaxTurns(config.maxTurns, config.order.budget.maxTurns),
       )
-      if (exhausted) {
-        mbox?.escalate(`Worker exhausted max-turns budget (${transcript.toolUses.length} tool calls, no verdict)`)
-        return {
-          result: exhausted,
-          transcript,
-          session,
-          usage: session.getTotalUsage(),
-          checkpoint: {
-            turnIndex: 0,
-            partialResult: latestText.slice(0, 8000),
-            completedTools: [...transcript.toolUses],
-          },
-        }
+      if (!exhausted) return null
+      mbox?.escalate(`Worker exhausted max-turns budget (${transcript.toolUses.length} tool calls, no verdict)`)
+      return {
+        result: exhausted,
+        transcript,
+        session,
+        usage: session.getTotalUsage(),
+        checkpoint: {
+          turnIndex: 0,
+          partialResult: latestText.slice(0, 8000),
+          completedTools: [...transcript.toolUses],
+        },
       }
-      // null → 终轮已产出合法报告,落入下方正常 parse 路径
+    }
+
+    // Abort 绝对优先：预算/父信号一到就不再花任何 API（终型轮也是一次调用）。
+    // 被掐断的 worker 跳过终型与 max-turns 闸，直接落入下方循环 attempt 0 的
+    // abort 分支走 salvage 阶梯。
+    if (!wasAborted()) {
+      if (finalizeReport) {
+        // B（终轮定型）：报告不再由探索轮自产，统一经带完整会话历史的无工具
+        // 收尾轮产出（根治无历史修复编造）。max-turns 非自愿耗尽同样改走终型——
+        // 带历史的收尾能如实产出「探索到哪」的报告；终型失败才回退 max-turns 阶梯。
+        const reportText = await finalizeWorkerReport(config, session, config.order, hasWriteTools)
+        if (reportText) {
+          latestText = reportText
+        } else if (maxTurnsExhausted) {
+          const run = maxTurnsFallback()
+          if (run) return run
+        }
+        // 终型为空（非 max-turns）→ 回退旧路径：下方 parse 自然输出 → 修复梯
+      } else if (maxTurnsExhausted) {
+        // 旧契约（RIVET_WORKER_FINALIZE=0）：max-turns 熔断闸门原样——
+        // 初始 run 被 maxTurns 切断时绝不进修复梯。
+        const run = maxTurnsFallback()
+        if (run) return run
+      }
     }
 
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
@@ -706,7 +877,9 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
         }
       }
       try {
-        const result = parseWorkerResult(latestText, config.order.id)
+        // 系统捕获优先：用本次 transcript 的工具调用痕迹交叉校验自报的
+        // changedFiles/verification（聚合侧二次过闸还会再校一次，函数幂等）。
+        const result = reconcileCapturedWorkerFacts(parseWorkerResult(latestText, config.order.id), transcript)
         // Report structured findings back to coordinator
         if (result.findings?.length) {
           for (const f of result.findings.slice(0, 3)) {
@@ -730,7 +903,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           // Terminal tier ladder: repair retries exhausted → field-level salvage
           // (recover independently parseable findings from the malformed report)
           // → empty blocked only when nothing is salvageable.
-          const salvaged = salvageWorkerResult(latestText, config.order.id)
+          const salvaged = salvageWorkerResult(latestText, config.order.id, error)
           if (salvaged) {
             mbox?.progress(config.order.budget.maxRetries + 1, config.order.budget.maxRetries + 1, 'parse-salvaged')
             return {
@@ -746,6 +919,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           return {
             result: {
               ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}${approvalHint ? ` ${approvalHint}` : ''}`, 'json_parse'),
+              parseErrorKind: classifyWorkerParseError(error) ?? 'json_syntax',
               artifacts: [
                 { kind: 'note' as const, title: 'Unparseable worker output', content: latestText.slice(0, 2000) },
               ],
@@ -761,7 +935,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
         // the AgentLoop repair loop — it directly forces valid JSON output,
         // short-circuiting the most common parse-failure cause.
         if (config.forceJsonRepair && !abortLatched) {
-          const jsonText = await repairWithJsonMode(
+          const repair = await repairWithJsonMode(
             config.client,
             config.promptEngine.getModel(),
             buildWorkerRepairPrompt(config.order, latestText, message),
@@ -769,8 +943,11 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
             Math.min(16384, config.order.budget.maxTokens ?? config.contextWindow),
             config.abortSignal,
           )
-          if (jsonText) {
-            latestText = jsonText
+          // provider 明确拒绝 response_format——关闭本会话 json 通道，后续
+          // finalize/repair 轮不再白试（与 finalizeWorkerReport 的探针同理）。
+          if (repair.rejected) config.forceJsonRepair = false
+          if (repair.text) {
+            latestText = repair.text
             // Skip the AgentLoop repair — go straight to re-parse at loop top.
             continue
           }

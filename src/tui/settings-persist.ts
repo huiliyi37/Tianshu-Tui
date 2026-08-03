@@ -12,6 +12,7 @@ import {
   getCheckpointConfig,
   getDefaultDomainConfig,
   getDefaultModelConfig,
+  getFetchConfig,
   getMirrorConfig,
   getNetworkConfig,
   getRoutingConfig,
@@ -24,6 +25,8 @@ import {
   setCheckpointConfig,
   setDefaultDomainConfig,
   setDefaultModelConfig,
+  setFetchConfig,
+  setModelSupportsVision,
   setMirrorConfig,
   setNetworkConfig,
   setRoutingConfig,
@@ -34,6 +37,7 @@ import {
 } from '../config/manager.js'
 import { buildDomainPickerEntries } from '../agent/domain-picker-entries.js'
 import type { SettingsBlockId, SettingsDraft, SettingsEnv } from './settings-model.js'
+import { splitModelRef } from './settings-model.js'
 import type { SettingsSaveResult } from './settings-flow.js'
 
 /** Runtime side-effects the panel cannot do by itself. */
@@ -53,6 +57,7 @@ export function loadSettingsDraft(): SettingsDraft {
   const mirrors = getMirrorConfig()
   const network = getNetworkConfig()
   const search = getSearchConfig()
+  const fetchCfg = getFetchConfig()
   const vision = getVisionModelConfig()
   return {
     workers: routing.workers,
@@ -67,8 +72,10 @@ export function loadSettingsDraft(): SettingsDraft {
         }
       : null,
     visionAutoBridge: getVisionAutoBridge(),
+    // modelVision 只存用户在面板里的覆盖；初始为空，display 时 fallback 到模型卡的 supportsVision。
+    modelVision: {},
     basics: {
-      toolPreset: getToolPresetConfig().preset ?? 'minimal',
+      toolPreset: getToolPresetConfig().preset ?? 'frontend',
       approval: cfg.agent.approval,
       checkpointEveryTurns: getCheckpointConfig().checkpointEveryTurns,
       defaultDomain: getDefaultDomainConfig().defaultDomain,
@@ -80,6 +87,7 @@ export function loadSettingsDraft(): SettingsDraft {
       proxy: network.proxy ?? '',
       noProxy: network.noProxy ?? '',
       searchBackends: (search.backends ?? []).join(', '),
+      jinaBaseUrl: fetchCfg.jinaBaseUrl ?? '',
     },
   }
 }
@@ -151,6 +159,24 @@ export function saveSettings(
       case 'visionAuto':
         attempt(block, () => setVisionAutoBridge(draft.visionAutoBridge))
         break
+      case 'modelVision': {
+        // draft.modelVision 存的是「覆盖值」——只写与磁盘现状不同的模型，避免无谓写盘。
+        // setModelSupportsVision 内部做了幂等（相同值 no-op）。
+        attempt(block, () => {
+          const cfg = loadConfig()
+          for (const [ref, value] of Object.entries(draft.modelVision)) {
+            const parts = splitModelRef(ref)
+            if (!parts) continue
+            const provider = cfg.provider.providers[parts.provider]
+            const model = provider?.models.find(m => m.id === parts.model || m.alias === parts.model)
+            // 只在覆盖值与磁盘现状不同时写入
+            if (model && (model.supportsVision === true) !== value) {
+              setModelSupportsVision(parts.provider, model.id, value)
+            }
+          }
+        })
+        break
+      }
       case 'toolPreset':
         attempt(block, () => setToolPresetConfig({ preset: draft.basics.toolPreset }))
         break
@@ -176,6 +202,8 @@ export function saveSettings(
         break
       case 'network':
         attempt(block, () => setNetworkConfig({ proxy: draft.net.proxy, noProxy: draft.net.noProxy }))
+        // jinaBaseUrl 与 proxy/noProxy 同属 network 块——一起写。空串删键回落默认 r.jina.ai。
+        attempt(block, () => setFetchConfig({ jinaBaseUrl: draft.net.jinaBaseUrl }))
         break
       case 'search':
         attempt(block, () => {

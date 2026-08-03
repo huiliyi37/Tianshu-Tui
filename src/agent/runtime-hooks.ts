@@ -138,16 +138,44 @@ export interface RuntimeHookError {
   error: unknown
 }
 
+export type RuntimeHookRunOutcome = 'completed' | 'failed' | 'timed_out' | 'skipped'
+
+export interface RuntimeHookManifestEntry {
+  id: string
+  phase: RuntimeHookPhase
+  enabled: boolean
+}
+
+export interface RuntimeHookRunEvent {
+  id: string
+  phase: RuntimeHookPhase
+  outcome: RuntimeHookRunOutcome
+  durationMs: number
+  slow: boolean
+  message?: string
+}
+
+export interface RuntimeHookStats {
+  id: string
+  phase: RuntimeHookPhase
+  runs: number
+  skipped: number
+  failures: number
+  timeouts: number
+  slowRuns: number
+  totalDurationMs: number
+  maxDurationMs: number
+}
+
 export interface RuntimeHookPipelineOptions {
   onError?: (error: RuntimeHookError) => void
-  /** 单 hook 异步执行超时（默认 10s）——pending promise 永不 resolve 时降级
-   *  跳过并报 onError，后续 hook 照常执行；卡死的 promise 遗留后台（泄漏有界）。
-   *  注意：同步 CPU 死循环无法被 in-process 抢占（同线程），此类缺陷只能
-   *  靠 worker 隔离根治；本护栏守住「异步挂起」与「慢 hook 可观测」两条线。
-   *  （2026-08-01 事故：postTool hook 正则死循环拖死整个 agent loop。） */
+  /** Receives one event per registered hook invocation, including skipped hooks. */
+  onRun?: (event: RuntimeHookRunEvent) => void
+  /** Hook ids to retain in the manifest but exclude from execution. */
+  disabledHookIds?: Iterable<string>
+  /** Per-hook wall-clock budget. Set to 0 to disable timeout handling. */
   hookTimeoutMs?: number
-  /** 慢 hook 遥测阈值（默认 2s）——同步执行超过即报 onError（事后检测，
-   *  不能抢占，但让慢 hook 可见）。 */
+  /** Report completed hooks at or above this duration as slow. */
   hookSlowMs?: number
 }
 
@@ -199,15 +227,20 @@ export class RuntimeHookPipeline {
   private postToolHooks: PostToolRuntimeHook[] = []
   private postTurnHooks: PostTurnRuntimeHook[] = []
   private postSessionHooks: PostSessionRuntimeHook[] = []
+  private registeredHooks: RuntimeHook[] = []
+  private stats = new Map<string, RuntimeHookStats>()
+  private disabledHookIds: ReadonlySet<string>
 
   constructor(
     hooks: RuntimeHook[] = [],
     private options: RuntimeHookPipelineOptions = {},
   ) {
+    this.disabledHookIds = new Set(options.disabledHookIds ?? [])
     for (const hook of hooks) this.register(hook)
   }
 
   register(hook: RuntimeHook): void {
+    this.registeredHooks.push(hook)
     switch (hook.phase) {
       case 'preTurn':
         this.preTurnHooks.push(hook)
@@ -225,6 +258,18 @@ export class RuntimeHookPipeline {
         this.postSessionHooks.push(hook)
         break
     }
+  }
+
+  getManifest(): RuntimeHookManifestEntry[] {
+    return this.registeredHooks.map(hook => ({
+      id: hook.name,
+      phase: hook.phase,
+      enabled: !this.disabledHookIds.has(hook.name),
+    }))
+  }
+
+  getStats(): RuntimeHookStats[] {
+    return [...this.stats.values()].map(stat => ({ ...stat }))
   }
 
   async runPreTurn(ctx: RuntimeHookContext): Promise<void> {
@@ -252,47 +297,96 @@ export class RuntimeHookPipeline {
     hooks: T[],
     invoke: (hook: T) => Promise<void> | void,
   ): Promise<void> {
-    const timeoutMs = this.options.hookTimeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS
-    const slowMs = this.options.hookSlowMs ?? DEFAULT_HOOK_SLOW_MS
     for (const hook of hooks) {
-      const start = Date.now()
-      let timer: ReturnType<typeof setTimeout> | undefined
+      if (this.disabledHookIds.has(hook.name)) {
+        this.publishRun({
+          id: hook.name,
+          phase,
+          outcome: 'skipped',
+          durationMs: 0,
+          slow: false,
+          message: 'disabled',
+        })
+        continue
+      }
+
+      const startedAt = Date.now()
+      const timeoutMs = this.options.hookTimeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS
+      const slowMs = this.options.hookSlowMs ?? DEFAULT_HOOK_SLOW_MS
+      let timeout: ReturnType<typeof setTimeout> | undefined
       let timedOut = false
+      let outcome: RuntimeHookRunOutcome = 'completed'
+      let message: string | undefined
+
       try {
-        const result = invoke(hook)
-        if (result instanceof Promise) {
+        const pending = Promise.resolve().then(() => invoke(hook))
+        if (timeoutMs > 0) {
           await Promise.race([
-            result,
+            pending,
             new Promise<never>((_, reject) => {
-              timer = setTimeout(() => {
+              timeout = setTimeout(() => {
                 timedOut = true
-                reject(new Error(`[hook-timeout] "${hook.name}" exceeded ${timeoutMs}ms in phase ${phase} — skipped`))
+                reject(new Error(`Runtime hook '${hook.name}' timed out after ${timeoutMs}ms`))
               }, timeoutMs)
             }),
           ])
+        } else {
+          await pending
         }
       } catch (error) {
+        outcome = timedOut ? 'timed_out' : 'failed'
+        message = toMessage(error)
         this.options.onError?.({
           phase,
           hookName: hook.name,
-          message: toMessage(error),
+          message,
           error,
         })
       } finally {
-        if (timer !== undefined) clearTimeout(timer)
-        const elapsed = Date.now() - start
-        // 超时已通过 [hook-timeout] 上报——同一次超时事件不再重复报 [hook-slow]
-        // （生产默认 timeoutMs=10s > slowMs=2s，超时后 elapsed 必 ≥ slowMs，
-        //  不跳过会把用户 onError 钩子对同一事件触发两次）。
-        if (!timedOut && elapsed >= slowMs) {
-          this.options.onError?.({
-            phase,
-            hookName: hook.name,
-            message: `[hook-slow] "${hook.name}" took ${elapsed}ms in phase ${phase}`,
-            error: undefined,
-          })
-        }
+        if (timeout) clearTimeout(timeout)
+        const durationMs = Date.now() - startedAt
+        this.publishRun({
+          id: hook.name,
+          phase,
+          outcome,
+          durationMs,
+          slow: outcome === 'completed' && durationMs >= slowMs,
+          message,
+        })
       }
+    }
+  }
+
+  private publishRun(event: RuntimeHookRunEvent): void {
+    const key = `${event.phase}:${event.id}`
+    const stat = this.stats.get(key) ?? {
+      id: event.id,
+      phase: event.phase,
+      runs: 0,
+      skipped: 0,
+      failures: 0,
+      timeouts: 0,
+      slowRuns: 0,
+      totalDurationMs: 0,
+      maxDurationMs: 0,
+    }
+
+    if (event.outcome === 'skipped') {
+      stat.skipped += 1
+    } else {
+      stat.runs += 1
+      stat.totalDurationMs += event.durationMs
+      stat.maxDurationMs = Math.max(stat.maxDurationMs, event.durationMs)
+      if (event.outcome === 'failed') stat.failures += 1
+      if (event.outcome === 'timed_out') stat.timeouts += 1
+      if (event.slow) stat.slowRuns += 1
+    }
+
+    this.stats.set(key, stat)
+    try {
+      this.options.onRun?.(event)
+    } catch {
+      // Instrumentation must never interrupt agent execution.
     }
   }
 }

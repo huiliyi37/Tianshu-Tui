@@ -20,117 +20,107 @@ import type { ArtifactStore } from '../artifact/store.js'
 // inspired by the everything-claude-code agent collection.
 
 const PROFILE_PROMPTS: Record<WorkerProfile, string> = {
-  code_scout: `## Code Scout Methodology
+  code_scout: `## 代码侦察方法论
 
-You are an expert code explorer. Follow this search strategy:
+你是资深代码探索专家。按以下搜索策略执行：
 
-1. **Locate**: Use grep to find key symbols, function names, class definitions.
-   Prefer literal patterns over broad regex. Start narrow, broaden only if needed.
-2. **Read**: Use read_file (with offset/limit for large files) to inspect implementations.
-   Focus on the specific area relevant to the objective — do NOT read entire large files.
-3. **Trace dependencies**: Use repo_graph to find callers, imports, and dependents.
-   This reveals blast radius and integration points.
-4. **Verify scope**: Use glob to confirm file locations and discover related files.
+1. **定位**：用 grep 查找关键符号、函数名、类定义。优先字面量模式而非宽泛正则。从窄开始，必要时再放宽。
+2. **阅读**：用 read_file（大文件用 offset/limit）检查实现。聚焦与目标相关的具体区域——不要通读整个大文件。
+3. **追踪依赖**：用 repo_graph 找调用方、导入与依赖方。这能揭示爆炸半径与集成点。
+4. **核实范围**：用 glob 确认文件位置并发现相关文件。
 
-Evidence quality checklist:
-- Every finding must cite a specific file:line reference
-- Report what you actually observed, not what you assume
-- If a search returns no results, report that explicitly — absence is evidence too
-- Distinguish "file does not exist" from "pattern not found in existing file"
-- Set "evidenceKind" to "firsthand" when you personally read/grep/ran the command that produced this evidence. Set to "inferred" when the claim is based on deduction, pattern recognition, or assumption without direct observation. "firsthand" findings MUST include evidenceRefs (file:line or "cmd: exit=N")`,
+证据质量清单：
+- 每条发现必须引用具体的 file:line
+- 报告你实际观察到的，而不是你假设的
+- 搜索无结果时要显式报告——缺失也是证据
+- 区分「文件不存在」与「已有文件中找不到该模式」
+- 亲自读/grep/跑过产生该证据的命令时，evidenceKind 标 "firsthand"；基于推断、模式识别或假设（无直接观察）时标 "inferred"。"firsthand" 发现必须带 evidenceRefs（file:line 或 "cmd: exit=N"）`,
 
-  doc_scout: `## Documentation Scout Methodology
+  doc_scout: `## 文档侦察方法论
 
-You are an expert at finding and analyzing documentation, specs, and plans.
+你是查找与分析文档、规格、计划文本的专家。
 
-1. **Find docs**: Use glob to locate *.md, docs/, *.txt, DESIGN*, PLAN* files.
-   Check for .rivet/, .rivet.md, AGENTS.md, README.md at project root.
-2. **Read selectively**: Use read_file with offset/limit for large documents.
-   Focus on sections relevant to the objective.
-3. **Extract structure**: Identify headings, sections, and key decisions.
-4. **Cross-reference**: Verify if code matches documented behavior.
+1. **找文档**：用 glob 定位 *.md、docs/、*.txt、DESIGN*、PLAN* 文件。检查项目根目录的 .rivet/、.rivet.md、AGENTS.md、README.md。
+2. **选择性阅读**：大文档用 read_file 的 offset/limit。聚焦与目标相关的章节。
+3. **提取结构**：识别标题、章节与关键决策。
+4. **交叉核对**：核实代码与文档描述的行为是否一致。
 
-Report format:
-- Quote the relevant sections verbatim (with source file and line numbers)
-- Note any discrepancies between docs and code
-- Flag stale or outdated documentation`,
+报告格式：
+- 逐字引用相关章节（附源文件与行号）
+- 标注文档与代码之间的任何出入
+- 标记过时/陈旧的文档`,
 
-  planner: `## Planning Methodology
+  planner: `## 规划方法论
 
-You are a senior architect creating implementation plans.
+你是资深架构师，负责制定实现计划。
 
-1. **Understand current state**: Use repo_map to get project structure.
-   Read key entry points (main.ts, index.ts, package.json) to understand the stack.
-2. **Analyze the request**: Break the objective into concrete, ordered steps.
-3. **Identify risks**: Look for potential breaking changes, circular dependencies,
-   and backward compatibility concerns.
-4. **Estimate scope**: Classify each step as small/medium/large.
-   Flag steps that require sequential ordering vs parallel execution.
+1. **理解现状**：用 repo_map 获取项目结构。读关键入口（main.ts、index.ts、package.json）理解技术栈。
+2. **分析需求**：把目标拆成具体、有序的步骤。
+3. **识别风险**：寻找潜在破坏性变更、循环依赖与向后兼容问题。
+4. **估算范围**：把每步标为小/中/大。标注必须串行还是可并行的步骤。
 
-Plan output format (in findings):
-- Step N: What to do + which files to change + estimated complexity
-- Prerequisites: What must be true before starting this step
-- Verification: How to confirm the step was done correctly`,
+计划输出格式（findings 中）：
+- 第 N 步：做什么 + 改哪些文件 + 估算复杂度
+- 前置条件：开始这步前必须为真的条件
+- 验证：如何确认这步做对了`,
 
-  reviewer: `## Code Review Methodology
+  reviewer: `## 代码审查方法论
 
-You are a senior code reviewer. Review with the following priorities:
+你是资深代码审查者。按以下优先级审查：
 
-### Critical (must fix)
-- Security: hardcoded secrets, SQL injection, path traversal, XSS
-- Correctness: logic errors, null/undefined risks, race conditions
-- Data loss: unsafe file operations, missing error handling
+### 严重（必须修）
+- 安全：硬编码密钥、SQL 注入、路径穿越、XSS
+- 正确性：逻辑错误、null/undefined 风险、竞态条件
+- 数据丢失：不安全的文件操作、缺失的错误处理
 
-### High (should fix)
-- API misuse: incorrect parameters, missing error handling
-- Performance: O(n²) when O(n) possible, unnecessary re-renders
-- Test gaps: new code without tests, flaky test patterns
+### 高（应该修）
+- API 误用：参数错误、缺失的错误处理
+- 性能：本可 O(n) 却写成 O(n²)、不必要的重渲染
+- 测试缺口：新代码无测试、易碎的测试模式
 
-### Medium (consider)
-- Readability: unclear naming, magic numbers, deep nesting
-- Maintainability: God objects, duplicated logic, tight coupling
-- Documentation: missing JSDoc on public APIs, stale comments
+### 中（考虑修）
+- 可读性：命名不清、魔法数字、深层嵌套
+- 可维护性：上帝对象、重复逻辑、紧耦合
+- 文档：公开 API 缺 JSDoc、过时注释
 
-Review process:
-1. Read the changed files first (use scope.files if provided)
-2. Use repo_graph to understand caller impact
-3. Organize findings by severity, include file:line references`,
+审查流程：
+1. 先读改动文件（有 scope.files 就用）
+2. 用 repo_graph 理解调用方影响
+3. 按严重度组织发现，附 file:line 引用`,
 
-  verifier: `## Verification Methodology
+  verifier: `## 验证方法论
 
-You are a test and verification specialist.
+你是测试与验证专家。
 
-1. **Identify test framework**: Read package.json scripts section to find test commands.
-   Look for vitest, jest, mocha, or node:test patterns.
-2. **Run relevant tests**: Execute test commands for the affected files.
-3. **Analyze failures**: If tests fail, read the test file and source to diagnose root cause.
-4. **Verify coverage**: Check if the changed code has corresponding test coverage.
+1. **识别测试框架**：读 package.json 的 scripts 段找测试命令。找 vitest、jest、mocha 或 node:test 模式。
+2. **跑相关测试**：对受影响文件执行测试命令。
+3. **分析失败**：测试失败时，读测试文件与源码诊断根因。
+4. **核实覆盖**：检查改动代码是否有对应测试覆盖。
 
-Output requirements:
-- Report exact test commands run and their exit codes
-- For failures: include the test name, expected vs actual, and root cause analysis
-- For passes: confirm which test files cover the changed code`,
+输出要求：
+- 报告实际执行的测试命令与退出码
+- 失败：含测试名、期望 vs 实际、根因分析
+- 通过：确认哪些测试文件覆盖了改动代码`,
 
-  patcher: `## Patcher Methodology
+  patcher: `## 补丁方法论
 
-You are a precise code editor working in an isolated git worktree.
+你是在隔离 git worktree 中工作的精确代码编辑器。
 
-1. **Understand the change**: Read the objective and relevant files carefully.
-2. **Make minimal edits**: Use edit_file for targeted changes — do NOT rewrite entire files.
-3. **Preserve context**: Keep existing formatting, imports, and surrounding code intact.
-4. **Verify**: After editing, read the changed section back to confirm correctness.
-5. **Run tests**: Execute relevant test commands to validate the change.
+1. **理解改动**：仔细读目标与相关文件。
+2. **最小编辑**：用 edit_file 做定点改动——不要整文件重写。
+3. **保留上下文**：保持既有格式、import 与周边代码不动。
+4. **验证**：编辑后回读改动区域确认正确。
+5. **跑测试**：执行相关测试命令验证改动。
 
-Critical rules:
-- NEVER use edit_file with old_string that matches multiple locations
-- NEVER rewrite a file when a targeted edit suffices
-- ALWAYS read the file first to understand current state
-- If a change affects multiple files, list all of them in changedFiles`,
+关键规则：
+- 绝不用 old_string 同时匹配多个位置的 edit_file
+- 定点编辑能解决时绝不重写文件
+- 动手前必须读文件理解现状
+- 改动涉及多个文件时，全部列入 changedFiles`,
 
-  adversarial_verifier: `## Adversarial Verifier
+  adversarial_verifier: `## 对抗式验证者
 
-See profile-registry for full adversarial verifier prompt. If you see this fallback,
-the registry prompt was not loaded — escalate as blocked.`,
+完整对抗式验证者提示词见 profile-registry。若看到此回退文本，说明注册表提示词未加载——按 blocked 上报。`,
 }
 
 // ─── Project self-discovery preamble ───────────────────────────────
@@ -141,62 +131,64 @@ the registry prompt was not loaded — escalate as blocked.`,
 // 文件存在时其内容已经在冻结块的 <project-instructions> 里（读一遍纯属浪费一次
 // 工具调用），文件不存在时条件本身就不成立。<project-instructions> 超预算略去
 // 章节时还会自带一条「需要时直接读原文」的标记，比这条静态指令更准。
-const PROJECT_DISCOVERY_PREAMBLE = `## Project Context Discovery
+const PROJECT_DISCOVERY_PREAMBLE = `## 项目上下文探测
 
-Before diving into the objective, quickly orient yourself:
-1. If package.json exists, read the "scripts" and "dependencies" sections to understand the stack.
-2. Use repo_map to see the top-level file structure if you need navigation context.
+深入目标之前，先快速定位：
+1. 若存在 package.json，读 "scripts" 与 "dependencies" 段理解技术栈。
+2. 需要导航上下文时，用 repo_map 看顶层文件结构。
 
-Do NOT spend more than 1-2 tool calls on discovery. Proceed to the objective quickly.
-If the objective is already specific enough (cites file paths), skip discovery entirely.`
+探测不要超过 1-2 次工具调用。尽快进入目标。
+若目标已经足够具体（已给出文件路径），完全跳过探测。`
 
 // ─── Result shape templates ────────────────────────────────────────
 
+/** 写能力判定统一口径——buildWorkerPrompt / buildWorkerRepairPrompt /
+ *  buildFinalizationInstruction 三处共用，避免各判各的漂移。 */
+export function workerOrderHasWriteTools(order: WorkOrder): boolean {
+  return order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
+}
+
+/** JSON 转义纪律——inline-json 契约（buildWorkerPrompt）与收尾指令
+ *  （buildFinalizationInstruction）共用同一段，避免两份文案漂移。
+ *  廉价模型（LongCat/MiMo）常写裸双引号弄碎整份报告，这段必须在每一个
+ *  要求自产 JSON 的通道上出现。 */
+const JSON_STRING_DISCIPLINE = 'JSON 字符串纪律：每个字符串值必须是合法 JSON。字符串内的双引号转义为 \\"，换行转义为 \\\\n，反斜杠转义为 \\\\\\。绝不要在字符串值里放未转义的裸 "——常见肇事字段是 summary、findings[].claim/evidence 与 artifacts[].content（如引用代码、路径或强调术语时）。想在字符串内引用或强调，用单引号、反引号或中文引号「」代替裸 "。一个未转义的 " 会弄碎整份报告，迫使调用方逐字段抢救。'
+
 function buildReadOnlyResultShape(): string {
   return `{
-  "workOrderId": "<copy WorkOrder ID>",
+  "workOrderId": "<复制工单 ID>",
   "status": "passed | failed | blocked | escalated",
-  "summary": "one sentence summary",
+  "summary": "一句话总结",
   "findings": [
-    { "claim": "evidence-backed claim", "evidence": "file path, command, or observed fact", "confidence": "low | medium | high", "evidenceKind": "firsthand | inferred", "evidenceRefs": ["file:line", "cmd: exit=N"] }
+    { "claim": "有证据支撑的论断", "evidence": "文件路径、命令或观察到的事实", "confidence": "low | medium | high", "evidenceKind": "firsthand | inferred", "evidenceRefs": ["file:line", "cmd: exit=N"] }
   ],
   "artifacts": [
-    { "kind": "note | patch | test_command | risk | question", "title": "short title", "content": "artifact content" }
+    { "kind": "note | patch | test_command | risk | question", "title": "短标题", "content": "内容" }
   ],
   "changedFiles": [],
-  "examinedFiles": ["REQUIRED: list all files you read/inspected but did NOT modify"],
-  "risks": ["string — brief risk description, one per item"],
-  "nextActions": ["string — suggested next action, one per item"],
+  "examinedFiles": ["必填：列出你读/查过但未修改的全部文件"],
+  "risks": ["字符串——每条一个简短风险描述"],
+  "nextActions": ["字符串——每条一个建议的下一步"],
   "evidenceStatus": "verified | failed | blocked | unverified"
 }`
 }
 
 function buildWriteResultShape(): string {
   return `{
-  "workOrderId": "<copy WorkOrder ID>",
+  "workOrderId": "<复制工单 ID>",
   "status": "passed | failed | blocked | escalated",
-  "summary": "one sentence summary",
+  "summary": "一句话总结",
   "findings": [
-    { "claim": "evidence-backed claim", "evidence": "file path, command, or observed fact", "confidence": "low | medium | high", "evidenceKind": "firsthand | inferred", "evidenceRefs": ["file:line", "cmd: exit=N"] }
+    { "claim": "有证据支撑的论断", "evidence": "文件路径、命令或观察到的事实", "confidence": "low | medium | high", "evidenceKind": "firsthand | inferred", "evidenceRefs": ["file:line", "cmd: exit=N"] }
   ],
   "artifacts": [
-    { "kind": "note | patch | test_command | risk | question", "title": "short title", "content": "artifact content" }
+    { "kind": "note | patch | test_command | risk | question", "title": "短标题", "content": "内容" }
   ],
-  "patchSummary": "describe all changes made",
-  "changedFiles": ["REQUIRED: list all files you modified/created"],
-  "examinedFiles": ["list files you read/inspected but did NOT modify"],
-  "verification": {
-    "command": "verification command run",
-    "status": "passed | failed | blocked",
-    "scope": "full | targeted",
-    "exitCode": 0,
-    "passed": 0,
-    "failed": 0,
-    "skipped": 0,
-    "durationMs": 0
-  },
-  "risks": ["string — brief risk description, one per item"],
-  "nextActions": ["string — suggested next action, one per item"],
+  "patchSummary": "描述全部改动",
+  "changedFiles": ["可选——系统以工具调用捕获为准，自报仅作交叉校验"],
+  "examinedFiles": ["列出你读/查过但未修改的文件"],
+  "risks": ["字符串——每条一个简短风险描述"],
+  "nextActions": ["字符串——每条一个建议的下一步"],
   "evidenceStatus": "verified | failed | blocked | unverified"
 }`
 }
@@ -205,6 +197,11 @@ export interface WorkerPromptOptions {
   /** B3: 项目根 cwd（非 worktree），用于读 .rivet/generals/ 将星账本。
    *  提供且 order.authority 有账本时，权域指令后附「将星战绩」top-3 段。 */
   ledgerCwd?: string
+  /** B（终轮定型）：报告契约。'inline-json'（默认）要求 worker 探索循环自产
+   *  结果 JSON（hands-session 等旧路径不变）；'finalized' 时契约（结果卡
+   *  shape + 转义纪律）移至系统收尾轮（buildFinalizationInstruction），
+   *  主提示词不再携带——探索轮只需把活干完，报告是系统的事。 */
+  reportContract?: 'inline-json' | 'finalized'
 }
 
 export function buildWorkerPrompt(order: WorkOrder, _authoritySuffix?: string, opts?: WorkerPromptOptions): string {
@@ -218,18 +215,19 @@ export function buildWorkerPrompt(order: WorkOrder, _authoritySuffix?: string, o
     const known = starDomainRegistry.getDomainIds()
     console.warn(
       `[coordinator] Unknown authority "${order.authority}" — cognitive injection skipped. ` +
-      `Known domains: ${known.join(', ')}. Worker will run without domain persona/methodology.`,
+      `已知域：${known.join(', ')}。Worker 将在无域人格/方法论的情况下运行。`,
     )
   }
-  const hasWriteTools = order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
-  const capability = hasWriteTools ? 'write-capable' : 'read-only'
+  const hasWriteTools = workerOrderHasWriteTools(order)
+  const capability = hasWriteTools ? '可写' : '只读'
+  const reportContract = opts?.reportContract ?? 'inline-json'
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
 
   const parts = [
-    `You are a headless ${capability} Rivet worker.`,
-    `WorkOrder ID: ${order.id}`,
-    `Kind: ${order.kind}`,
-    `Profile: ${order.profile}`,
+    `你是一个无头 ${capability} Rivet worker。`,
+    `工单 ID（WorkOrder ID）：${order.id}`,
+    `类型（Kind）：${order.kind}`,
+    `档案（Profile）：${order.profile}`,
   ]
 
   // Inject profile-specific expertise (prefer registry, fallback to hardcoded PROFILE_PROMPTS)
@@ -252,12 +250,12 @@ export function buildWorkerPrompt(order: WorkOrder, _authoritySuffix?: string, o
 
   parts.push(
     '',
-    '## Task',
-    `Objective: ${order.objective}`,
-    `Scope: ${JSON.stringify(order.scope)}`,
-    `Constraints: ${order.constraints.join(' | ')}`,
-    `Allowed tools: ${order.allowedTools.join(', ')}`,
-    `Disallowed tools: ${order.disallowedTools.join(', ')}`,
+    '## 任务',
+    `目标（Objective）：${order.objective}`,
+    `范围（Scope）：${JSON.stringify(order.scope)}`,
+    `约束（Constraints）：${order.constraints.join(' | ')}`,
+    `允许的工具：${order.allowedTools.join(', ')}`,
+    `禁止的工具：${order.disallowedTools.join(', ')}`,
   )
 
   // 浏览器/桌面自动化使用要点：工具在 allowed 列表里时给一行分工提示，
@@ -280,11 +278,11 @@ export function buildWorkerPrompt(order: WorkOrder, _authoritySuffix?: string, o
   if (order.workerCwd && hasWriteTools) {
     parts.push(
       '',
-      '## Working Directory',
-      `CWD: ${order.workerCwd}`,
-      'You are in an isolated git worktree. Use RELATIVE paths for all file operations.',
-      'Do NOT use absolute paths from the original repository.',
-      'After completing edits, run relevant verification if feasible; git commit is optional because the primary session collects uncommitted worktree diffs.',
+      '## 工作目录',
+      `CWD：${order.workerCwd}`,
+      '你在一个隔离的 git worktree 中。所有文件操作使用相对路径。',
+      '不要使用原仓库的绝对路径。',
+      '完成编辑后，如可行则运行相关验证；git commit 可选——主会话会收集未提交的 worktree diff。',
     )
   }
 
@@ -292,21 +290,30 @@ export function buildWorkerPrompt(order: WorkOrder, _authoritySuffix?: string, o
   // 前件不可能成立，而结果卡模板里 changedFiles 本来就写死成 []。
   parts.push(
     hasWriteTools
-      ? 'Do not call disallowed tools. Do not claim that files were changed unless you actually modified them.'
-      : 'Do not call disallowed tools.',
+      ? '不要调用禁止的工具。不要声称改过文件——除非你真的修改过。'
+      : '不要调用禁止的工具。',
   )
-  if (hasWriteTools) {
-    parts.push('If you changed files and did not run relevant verification, evidenceStatus must be "unverified".')
-  }
   parts.push(
     '执行纪律（全星域共享）：绿非证明，复现即证——宣称已修/已验证前，先用工具复现结论（run_tests 或验证命令）；summary 里的每个数字要能指到一条真实验证记录，否则宣称会被证据门降级。',
-    hasWriteTools
-      ? 'Use changedFiles ONLY for files you actually modified/created. Use examinedFiles for files you read/inspected.'
-      : 'Use examinedFiles for files you read/inspected.',
-    'Return exactly one JSON object and no prose outside the object.',
-    'The JSON object must match this shape:',
-    resultShape,
-    'JSON string discipline: every string value MUST be valid JSON. Escape any double-quote inside a string as \\", escape newlines as \\\\n, and escape backslashes as \\\\\\. Never put a raw unescaped " inside a string value — common offenders are summary, findings[].claim/evidence, and artifacts[].content (e.g. when quoting code, paths, or emphasizing a term). If you want to quote or emphasize something inside a string, use single quotes, backticks, or Chinese quotes 「」 instead of a bare ". A single unescaped " breaks the whole report and forces the caller to salvage individual fields.',
+    // B（终轮定型）：finalized 契约下报告由系统收尾轮统一索取，主提示词
+    // 不再携带 shape/转义段——探索轮只需把活干完、把发现收束成散文。
+    // inline-json（默认，hands-session 等旧路径）契约原样保留。
+    ...(reportContract === 'finalized'
+      ? [
+          '任务完成后无需自己输出报告 JSON——系统会在收尾时基于完整会话记录单独索取结构化报告，收尾前用散文把发现与改动讲清楚即可。',
+          hasWriteTools
+            ? '验证执行与改动文件以系统捕获的工具调用为准——没跑验证不要宣称 verified。'
+            : '发现必须来自你实际读到的文件与跑过的命令——没读到、没跑过的内容不要写。',
+        ]
+      : [
+          hasWriteTools
+            ? '验证执行与改动文件以系统捕获的工具调用为准——没跑验证不要宣称 verified。'
+            : '用 examinedFiles 列你读/查过的文件。',
+          '只返回一个 JSON 对象，对象外不要任何散文。',
+          'JSON 对象必须匹配以下结构：',
+          resultShape,
+          JSON_STRING_DISCIPLINE,
+        ]),
   )
 
   // B3（将星点亮）：worker 出战带着上次的记忆——账本缺陷/能力族 top-3，
@@ -332,6 +339,26 @@ export function buildWorkerPrompt(order: WorkOrder, _authoritySuffix?: string, o
   return parts.join('\n')
 }
 
+/** B（终轮定型）收尾指令——带完整会话历史的无工具收尾轮上唯一的新消息。
+ *
+ * 契约（结果卡 shape + 转义纪律）从 buildWorkerPrompt 的 inline-json 段
+ * 搬到这里，与旧契约同源。与修复轮（buildWorkerRepairPrompt）的本质区别：
+ * 修复轮是无历史单发——2026-07-24 假 summary 事故中模型凭空编造
+ * "No work order context provided" 且解析通过；收尾轮的消息前缀是 worker
+ * 自己的完整探索历史，只能基于实际发生的工具调用与结果写报告。 */
+export function buildFinalizationInstruction(order: WorkOrder, hasWriteTools: boolean): string {
+  const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
+  return [
+    '探索已结束。只基于上方对话中实际发生的工具调用及其结果，为这个工单产出 WorkerResult 报告。',
+    '如实总结，不得编造：只写你实际做过的事——不得宣称跑过未执行的验证、读过未读的文件、改过未改的文件；没跑验证就标 evidenceStatus: "unverified"，summary 里的每个数字都要能指到一条真实的工具记录。',
+    '只输出一个 JSON 对象，除此之外什么都不要——不要 ``` 围栏、不要 markdown、对象外不要任何散文。',
+    `工单 ID（原样复制）：${order.id}`,
+    'JSON 对象必须匹配以下结构：',
+    resultShape,
+    JSON_STRING_DISCIPLINE,
+  ].join('\n')
+}
+
 export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, parseError: string): string {
   // Tail of previous text as reference for the model to repair. A complete
   // WorkerResult JSON for write-capable workers (multiple findings + artifacts
@@ -342,7 +369,7 @@ export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, 
     ? previousText
     : previousText.slice(-8000)
 
-  const hasWriteTools = order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
+  const hasWriteTools = workerOrderHasWriteTools(order)
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
 
   // Classify the error to give a specific repair instruction.
@@ -354,47 +381,46 @@ export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, 
   let instruction = ''
   if (isMissingJson) {
     instruction = [
-      'The previous answer contained NO valid JSON object. Output ONLY a raw JSON object (no markdown, no prose, no thinking).',
-      'Start with a single { character and end with a single } character.',
-      'If your answer includes thinking or analysis, put it INSIDE the "summary" field of the JSON.',
+      '你上一条回答里没有合法的 JSON 对象。只输出一个裸 JSON 对象（不要 markdown、不要散文、不要思考过程）。',
+      '以单个 { 开头，以单个 } 结尾。',
+      '如果你的回答包含思考或分析，放进 JSON 的 "summary" 字段。',
     ].join('\n')
   } else if (isInvalidJson) {
     instruction = [
-      'The JSON in your previous answer was syntactically invalid (bad commas, unclosed strings, etc).',
-      'Common fixes: use double-quotes for all keys AND values; remove trailing commas after the last array/object item; escape any double-quotes inside strings with \\\".',
+      '你上一条回答的 JSON 语法无效（逗号错误、字符串未闭合等）。',
+      '常见修法：所有键与值都用双引号；数组/对象最后一项后删掉尾逗号；字符串内的双引号用 \\" 转义。',
     ].join('\n')
   } else if (isMissingField) {
     instruction = [
-      'The JSON was valid but missing required fields. Check that your object has:',
-      '- "workOrderId" (copy from the order ID)',
-      '- "status" (one of: passed, failed, blocked, escalated)',
-      '- "findings" (array, not single object)',
-      '- "artifacts" (array, not single object)',
-      '- "changedFiles" (array of strings, even if empty)',
-      '- "risks" (array of strings)',
-      '- "nextActions" (array of strings)',
-      '- "evidenceStatus" (one of: verified, failed, blocked, unverified)',
+      'JSON 合法但缺必填字段。检查你的对象必须有：',
+      '- "workOrderId"（从工单 ID 复制）',
+      '- "status"（取其一：passed, failed, blocked, escalated）',
+      '- "findings"（数组，不是单个对象）',
+      '- "artifacts"（数组，不是单个对象）',
+      '- "risks"（字符串数组）',
+      '- "nextActions"（字符串数组）',
+      '- "evidenceStatus"（取其一：verified, failed, blocked, unverified）',
     ].join('\n')
   } else if (isSchemaError) {
-    instruction = 'The JSON had extra or wrong-typed fields. Use EXACTLY the field names shown in the shape below — no additional top-level keys.'
+    instruction = 'JSON 有多余字段或字段类型错误。严格使用下面结构中的字段名——不要加任何顶层键。'
   } else {
-    instruction = `The JSON could not be parsed. Error: ${parseError}. Follow the exact shape below.`
+    instruction = `JSON 无法解析。错误：${parseError}。严格按下面的结构输出。`
   }
 
   // Always surface the concrete parser error so the worker knows exactly what
   // failed — the classified branches give generic advice; without the raw error
   // the model is repairing blind. (The fallback branch already embeds it.)
   if (parseError && !instruction.includes(parseError)) {
-    instruction = `${instruction}\nParser error: ${parseError}`
+    instruction = `${instruction}\n解析错误：${parseError}`
   }
 
   return [
-    `YOUR PREVIOUS ANSWER COULD NOT BE USED. ${instruction}`,
-    'Output EXACTLY one JSON object and NOTHING else — no ``` fences, no markdown, no prose outside the object.',
-    `WorkOrder ID (copy this exactly): ${order.id}`,
-    'Required shape:',
+    `你上一条回答无法使用。${instruction}`,
+    '只输出一个 JSON 对象，除此之外什么都不要——不要 ``` 围栏、不要 markdown、对象外不要任何散文。',
+    `工单 ID（原样复制）：${order.id}`,
+    '必需结构：',
     resultShape,
-    'Your previous answer (for reference):',
+    '你上一条回答（供参考）：',
     tail,
   ].join('\n')
 }
@@ -422,6 +448,7 @@ const FAILURE_GUIDANCE: Record<string, string> = {
   schema_mismatch: 'worker 报告字段不合规——同上',
   worker_crash: 'worker 运行时崩溃——查 API/工具层错误，不要原样重派',
   worker_blocked: 'worker 自己判定被阻塞——读它的 summary 找阻塞点',
+  policy_short_circuit: '聚合策略已达标后被短路取消——非故障，无需重派，不影响本批结论',
   unknown: '未分类失败——读 summary 判断',
 }
 
@@ -440,7 +467,7 @@ function buildFailureNotice(results: readonly WorkerResult[]): string {
     `本次派发有 ${failed.length}/${results.length} 个 worker 没有完成。它们的 findings 只是半程产出，不足以当作交付依据——不要在汇报里把它们说成"已完成"。`,
     ...lines,
     ...(resumable ? ['带 "Resumable:" 的结果可以用 delegate_task({resume: "<workOrderId>"}) 接着干，它会带着上一轮的完整上下文继续。'] : []),
-    ...(failed.length >= 2 && failed.every(r => r.status === 'blocked')
+    ...(failed.length >= 2 && failed.every(r => r.status === 'blocked' && r.failureReason !== 'policy_short_circuit')
       ? ['多个 worker 被阻塞——如果任务是天然可并行的多维度（如前端+后端+审查），考虑用 galaxy 工具拆解为集群并行执行。']
       : []),
     '</worker_dispatch_incomplete>',
@@ -470,7 +497,7 @@ function dropNextActionsKeepingResumeHints(result: Record<string, unknown>): voi
  *  because the metadata backing that claim may have been omitted. */
 function markTruncated(result: Record<string, unknown>): void {
   result._truncated = true
-  result._truncationNote = 'Inline packet truncated; verification metadata may have been omitted.'
+  result._truncationNote = '内联 packet 已截断；支撑该论断的验证元数据可能已被省略。'
   if (result.evidenceStatus === 'verified') {
     result.evidenceStatus = 'unverified'
   }

@@ -120,7 +120,7 @@ function request(input: {
 function verificationEvidence(result: WorkerResult): string | undefined {
   if (!result.verification) return undefined
   const v = result.verification
-  return `ran: ${v.command} → ${v.status} (${v.passed} passed, ${v.failed} failed, ${v.skipped} skipped)`
+  return `ran: ${v.command} → ${v.status} (${v.passed ?? 0} passed, ${v.failed ?? 0} failed, ${v.skipped ?? 0} skipped)`
 }
 
 export function formatFinding(finding: WorkerFinding): string {
@@ -163,6 +163,8 @@ function mapWorkerFinding(result: WorkerResult, finding: WorkerFinding): ReviewF
     severity: extractSeverity(text),
     claim: finding.claim,
     evidence: finding.evidence,
+    // 极性透传：worker 未上报时缺席，blocking 判定按 defect 处理（fail-closed）。
+    ...(finding.polarity ? { polarity: finding.polarity } : {}),
   }
 }
 
@@ -310,7 +312,11 @@ function stanceBlocks(stances: InspectorStance[]): string[] {
   return blocks
 }
 
-const FINDING_CONTRACT = '每项发现须报告严重级别 CRITICAL/HIGH/MEDIUM/LOW、结论、证据（file:line）、以及最小修复建议。若该审查维度无问题，须明确报告"未发现异常"——沉默不等于通过。'
+const FINDING_CONTRACT = [
+  '每项发现须报告严重级别 CRITICAL/HIGH/MEDIUM/LOW、结论、证据（file:line）、以及最小修复建议。若该审查维度无问题，须明确报告"未发现异常"——沉默不等于通过。',
+  'severity 语义：CRITICAL/HIGH 只用于必须修复的缺陷。确认性结论（已核实无问题、链路闭合、口径对齐）不是缺陷——在该 finding 上标 "polarity": "confirmation"，它会进入「已核实清单」而非 blocking findings；缺陷可显式标 "defect"（缺省按 defect 处理）。',
+  'status 语义：status 表示你的审查任务是否完成，不是被审代码的判定。发现 CRITICAL 缺陷时 status 仍为 passed——缺陷经 findings 表达；failed/blocked 只用于你自己没完成审查（预算耗尽、读不到代码等）。',
+].join('\n')
 
 /**
  * 大文件警告：审查 worker 不得整文件读取这些文件，必须用 read_file + offset/limit。

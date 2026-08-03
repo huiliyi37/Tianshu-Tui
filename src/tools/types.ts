@@ -5,6 +5,7 @@ import type { ReadRefStats } from './read-file.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 import type { FailureClass } from '../agent/failure-classifier.js'
 import type { ContractProjection } from '../agent/contract-projection.js'
+import type { OrchestrationOutcome } from '../agent/orchestration-outcome.js'
 
 /**
  * T4 — structured per-worker delegation update for the desktop subagent panel
@@ -72,8 +73,9 @@ export interface DelegationActivity {
   findingsCount?: number
   /** 终态第一条 finding claim（空/无则缺省）。 */
   topFinding?: string
-  /** 终态 verification 摘要。 */
-  verificationBrief?: { status: string; passed: number; failed: number }
+  /** 终态 verification 摘要。passed/failed 随 VerificationMetadata 放宽为可选
+   *  （worker 自报/系统补录的元数据可不含计数）。 */
+  verificationBrief?: { status: string; passed?: number; failed?: number }
   /** 终态 evidenceStatus。 */
   evidenceStatus?: string
   /** 谁派发的该 worker：'user' = 用户侧派发（sidecar delegateWorker 直达），'agent' = 主模型
@@ -322,11 +324,14 @@ export interface VerificationMetadata {
   command: string
   status: 'passed' | 'failed' | 'blocked'
   scope: 'full' | 'targeted'
-  exitCode: number
-  passed: number
-  failed: number
-  skipped: number
-  durationMs: number
+  /** 以下数值字段可选（2026-08-01）：run_tests 等真实执行始终填充；worker 自报
+   *  的 verification 已降为交叉校验口径，系统补录的元数据不含计数。消费方不得
+   *  假定它们必存在。 */
+  exitCode?: number
+  passed?: number
+  failed?: number
+  skipped?: number
+  durationMs?: number
   failureKind?: VerificationFailureKind
   /** Why verification was blocked — enables scenario-specific guidance downstream. */
   blockedReason?: VerificationBlockedReason
@@ -408,6 +413,10 @@ export interface ToolResult {
    *  out-of-region warnings are dropped. Absent → append site keeps whole-file
    *  behavior. See computeChangedLineRanges / filterDiagnosticsForEdit. */
   changedRanges?: Array<{ start: number; end: number }>
+  /** 编排工具（team_orchestrate 等）回给上游编排器的结构化事实。
+   *  starflow 门禁优先读它，缺席才回退 formatter 文案正则——文案改动
+   *  不应让门禁静默失效（见 2026-08-01 TEAM_DISPATCHED_RE 事故）。 */
+  orchestration?: OrchestrationOutcome
 }
 
 export interface Tool {

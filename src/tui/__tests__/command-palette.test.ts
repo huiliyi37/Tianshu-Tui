@@ -20,7 +20,7 @@ describe('getPaletteCommands', () => {
   it('exposes /review (L2 adversarial verifier) for manual code review', () => {
     const cmd = getPaletteCommands().find(c => c.name === '/review')
     assert.ok(cmd, '/review must be in palette so users discover the L2 review trigger')
-    assert.match(cmd.description, /review/i)
+    assert.match(cmd.description, /review|审查/i)
   })
 
   it('exposes /review max (L3 Review Squadron, 5 inspectors)', () => {
@@ -44,7 +44,7 @@ describe('getPaletteCommands', () => {
   it('exposes /plan-mode (write-blocked plan authoring mode)', () => {
     const cmd = getPaletteCommands().find(c => c.name === '/plan-mode')
     assert.ok(cmd, '/plan-mode must be in palette so users can enter plan authoring mode')
-    assert.match(cmd.description, /plan.*mode|enter.*plan/i)
+    assert.match(cmd.description, /plan.*mode|enter.*plan|计划编写模式/i)
   })
 
   it('exposes /plan-list to browse submitted plans', () => {

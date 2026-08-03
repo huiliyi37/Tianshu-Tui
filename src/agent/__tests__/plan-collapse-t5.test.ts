@@ -201,4 +201,41 @@ describe('T5 同族：source+test 绑定应扩展名无关（.mjs 也要绑）',
     const patchers = graph.nodes.filter(n => n.profile === 'patcher')
     assert.ok(patchers[0]!.files.includes('handler.ts'))
   })
+
+  // ── moduleKey 3 段分组回归 ──────────────────────────────────────
+  // 审查发现（0df98574 post-commit）：./ 前缀 + 3 段目录 → 坍缩回 2 段；
+  // desktop/src/* 场景无测试锁定，修复目标原样失效。两例同族一锅端。
+
+  it('moduleKey: desktop/src 下四个子模块切为四个正交分片', () => {
+    const graph = decomposeObjective({
+      objective: '修复多处 UI 文案与状态逻辑',
+      files: [
+        'desktop/src/surfaces/settings/OtherPage.tsx',
+        'desktop/src/locales/en/settings.json',
+        'desktop/src/locales/zh-CN/settings.json',
+        'desktop/src/state/queries.ts',
+        'desktop/src/components/HomeWelcome.tsx',
+      ],
+    })
+    const patchers = graph.nodes.filter(n => n.profile === 'patcher')
+    // surfaces、locales、state、components — 四个子模块各成一分片
+    assert.equal(patchers.length, 4)
+    const labels = patchers.map(p => p.files)
+    assert.ok(labels.some(fs => fs.includes('desktop/src/surfaces/settings/OtherPage.tsx')))
+    assert.ok(labels.some(fs => fs.includes('desktop/src/locales/en/settings.json')))
+    assert.ok(labels.some(fs => fs.includes('desktop/src/state/queries.ts')))
+    assert.ok(labels.some(fs => fs.includes('desktop/src/components/HomeWelcome.tsx')))
+  })
+
+  it('moduleKey: ./ 前缀不影响分组——与无前缀一致', () => {
+    const graph = decomposeObjective({
+      objective: '修复 UI 文案',
+      files: [
+        './desktop/src/surfaces/ProjectSidebar.tsx',
+        './desktop/src/state/mission-projector.ts',
+      ],
+    })
+    const patchers = graph.nodes.filter(n => n.profile === 'patcher')
+    assert.equal(patchers.length, 2, './ 前缀不应导致坍缩')
+  })
 })

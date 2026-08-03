@@ -117,6 +117,8 @@ export default defineConfig({
     'zod',
     '@modelcontextprotocol/sdk',
     'turndown',
+    'pixelmatch',
+    'pngjs',
   ],
   esbuildPlugins: [],
   // platform:node makes esbuild externalize bare node builtin requires (e.g.

@@ -134,7 +134,11 @@ export function createCouncilConveneTool(
     },
     async execute(params: ToolCallParams): Promise<ToolResult> {
       if (!isCouncilEnabled()) {
-        return { content: 'council_convene 已禁用（COUNCIL=0）——未派发任何席位', isError: false }
+        return {
+          content: 'council_convene 已禁用（COUNCIL=0）——未派发任何席位',
+          isError: false,
+          orchestration: { kind: 'council', disabled: true },
+        }
       }
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `无效输入：${parsed.error.message}`, isError: true, errorKind: 'format_error' }
@@ -524,7 +528,12 @@ export function createCouncilConveneTool(
         qliphothCount: plan.meta.qliphoth?.length,
       }
 
-      return { content: parts.join('\n') + proGateNote, uiContent: summarizeCouncilPlan(plan) + '\n' + encodeCouncilPanel(councilPanel), isError: false }
+      return {
+        content: parts.join('\n') + proGateNote,
+        uiContent: summarizeCouncilPlan(plan) + '\n' + encodeCouncilPanel(councilPanel),
+        isError: false,
+        orchestration: { kind: 'council', disabled: false },
+      }
     },
     requiresApproval: () => false,
     isConcurrencySafe: () => false,

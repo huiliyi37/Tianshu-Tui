@@ -13,6 +13,7 @@
 
 import { DelegationCoordinator } from './coordinator.js'
 import type { WorkerRuntimeFactory } from './coordinator.js'
+import { buildModelCards as buildSharedModelCards } from '../model/capability.js'
 import type { ModelCapabilityCard } from '../model/capability.js'
 import type { ProviderConfig } from '../config/schema.js'
 import type { ToolRegistry } from '../tools/registry.js'
@@ -35,34 +36,9 @@ export interface HeadlessCoordinatorInput {
   sessionId?: string
 }
 
-/** Build modelCards from a provider's models (mirrors bootstrap.ts:584-609). */
+/** Build modelCards from a provider's models (统一口径：model/capability.ts)。 */
 export function buildModelCards(provider: ProviderConfig): ModelCapabilityCard[] {
-  return provider.models.map(m => {
-    const isPro = m.id.includes('pro') || m.alias?.includes('pro')
-    const isFlash = m.id.includes('flash') || m.alias?.includes('flash')
-    if (isPro || (!isFlash && !isPro)) {
-      return {
-        model: m.id,
-        toolUseReliability: 0.8,
-        jsonStability: 0.8,
-        editSuccessRate: 0.7,
-        testRepairRate: 0.6,
-        contextWindow: m.contextWindow,
-        cacheEconomics: 'strong' as const,
-        recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'risky_refactor'],
-      }
-    }
-    return {
-      model: m.id,
-      toolUseReliability: 0.6,
-      jsonStability: 0.65,
-      editSuccessRate: 0.5,
-      testRepairRate: 0.45,
-      contextWindow: m.contextWindow,
-      cacheEconomics: 'strong' as const,
-      recommendedTasks: ['repo_summarization', 'compaction'],
-    }
-  })
+  return buildSharedModelCards(provider)
 }
 
 const HEADLESS_COMPACT: CompactionConfig = {
@@ -127,5 +103,7 @@ export function createHeadlessCoordinator(input: HeadlessCoordinatorInput): Dele
     runtimeFactory,
     maxDelegationDepth: 1,
     sessionId: input.sessionId,
+    // D8 L2：有意不接 getPlanConstraints——headless 只跑 goal_judge（maxWorkers:1），
+    // 没有计划语境。此决定在 assembly-audit 检查项 4 的 allowlist 显式登记。
   })
 }

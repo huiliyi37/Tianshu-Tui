@@ -1,7 +1,7 @@
 // tianshu-design — frontend design plugin (Codex Product Design parity)
 // Multi-viewport preview, visual diff, palette extraction, responsive audit.
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { findChromeBinary, chromeNotFoundMessage } from './lib/chrome.js'
 
@@ -100,7 +100,10 @@ async function uiDiff(params) {
       return { content: result.error, isError: true }
     }
     const diffOut = outputPath || actual.replace(/\.png$/i, '') + '.diff.png'
-    writeFileSync(diffOut, result.diffPng)
+    // 原子替换：同目录临时文件 + rename（跨文件系统会 EXDEV，故不用 os.tmpdir）
+    const diffTmp = `${diffOut}.${process.pid}.${Date.now()}.tmp`
+    writeFileSync(diffTmp, result.diffPng)
+    renameSync(diffTmp, diffOut)
     const matchPercent = Math.round((100 - result.mismatchPercent) * 100) / 100
     return {
       content: [

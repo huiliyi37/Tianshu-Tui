@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { Tool } from './types.js'
 import { TodoStore, TODO_EMPTY_RESULT } from './todo-store.js'
-import type { TodoItem } from './todo-store.js'
+import type { TodoItem, TodoRegressionStats } from './todo-store.js'
 import { detectDependencies, assessScopeRisk, buildScopeNotice } from './todo-deps.js'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { existsSync, readFileSync } from 'node:fs'
@@ -46,6 +46,11 @@ export const defaultStore = new TodoStore()
 
 export function getTodos(): TodoItem[] {
   return defaultStore.read()
+}
+
+/** Fallback accessor for callers without an injected store — mirrors `getTodos`. */
+export function getTodoRegressionStats(): TodoRegressionStats {
+  return defaultStore.getRegressionStats()
 }
 
 export function setTodos(todos: TodoItem[]): void {
@@ -185,6 +190,7 @@ TDD 纪律：
       // legitimate re-open is still allowed; the model just gets told so it
       // can confirm rather than silently redo finished work. (Thread 3)
       const regressions = store.detectRegressions(data.todos)
+      store.recordWrite(regressions)
 
       store.write(data.todos)
 

@@ -49,6 +49,17 @@ const delegateTaskInputSchema = z.object({
   ),
   maxTurns: delegateMaxTurnsSchema,
   timeoutMs: delegateTimeoutMsSchema,
+}).superRefine((data, ctx) => {
+  // P1-8 写工 scope 强制：写工（patch_proposal）必须显式声明 files——worker
+  // 只能在声明范围内改动（coordinator 的 in-flight 冲突登记 + objective-gate
+  // 越界闸门都以 scope.files 为界），空 scope 直接放行会绕过这两道防线。
+  if (data.kind === 'patch_proposal' && (!data.files || data.files.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['files'],
+      message: 'patch_proposal（写工）任务必须声明 files——worker 只能在声明范围内改动，空 scope 无法通过越界闸门。',
+    })
+  }
 })
 
 export function formatUiContent(run: CoordinatorRun): string {

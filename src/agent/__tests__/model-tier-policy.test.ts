@@ -40,12 +40,13 @@ describe('model tier policy', () => {
     }
   })
 
-  it('escalates repeated failures to strong', () => {
+  it('escalates repeated failures to strong（显式开启 escalationCap 时）', () => {
     const rec = recommendModelTier({
       profile: 'code_scout',
       kind: 'code_search',
       objective: 'read-only search after failed attempts',
       consecutiveFailures: 2,
+      failureEscalationCap: 'strong',
     })
     assert.equal(rec.tier, 'strong')
     assert.equal(rec.hardFloor, 'strong')
@@ -147,18 +148,27 @@ describe('failureEscalationCap (workers.escalationCap 失败升档天花板)', (
     assert.equal(rec.hardFloor, 'balanced')
   })
 
-  it('strong (and absent cap) keeps the legacy escalate-to-strong behavior', () => {
-    for (const cap of ['strong', undefined] as const) {
-      const rec = recommendModelTier({
-        profile: 'code_scout',
-        kind: 'code_search',
-        objective: 'read-only search after failed attempts',
-        consecutiveFailures: 2,
-        ...(cap ? { failureEscalationCap: cap } : {}),
-      })
-      assert.equal(rec.tier, 'strong')
-      assert.equal(rec.hardFloor, 'strong')
-    }
+  it('strong 显式开启才升档；缺省 fail-closed 不升档', () => {
+    const strong = recommendModelTier({
+      profile: 'code_scout',
+      kind: 'code_search',
+      objective: 'read-only search after failed attempts',
+      consecutiveFailures: 2,
+      failureEscalationCap: 'strong',
+    })
+    assert.equal(strong.tier, 'strong')
+    assert.equal(strong.hardFloor, 'strong')
+
+    // 缺省（构造路径漏传 cap）必须等于关死——升档是零缓存全量重跑，
+    // 默认绝不替用户花 Pro 的钱。
+    const absent = recommendModelTier({
+      profile: 'code_scout',
+      kind: 'code_search',
+      objective: 'read-only search after failed attempts',
+      consecutiveFailures: 2,
+    })
+    assert.equal(absent.tier, 'cheap', 'absent cap = off：scout 留在正常路由')
+    assert.equal(absent.hardFloor, undefined)
   })
 
   it('off does NOT touch upfront routing floors (planner keeps balanced floor)', () => {
@@ -178,6 +188,6 @@ describe('failureEscalationCap (workers.escalationCap 失败升档天花板)', (
     assert.equal(escalationTierAllowed('off'), null)
     assert.equal(escalationTierAllowed('balanced'), 'balanced')
     assert.equal(escalationTierAllowed('strong'), 'strong')
-    assert.equal(escalationTierAllowed(undefined), 'strong', 'library default stays legacy')
+    assert.equal(escalationTierAllowed(undefined), null, 'library default is fail-closed — no implicit Pro spend')
   })
 })

@@ -257,7 +257,9 @@ describe('runWorkerSession repair ladder (full path)', () => {
       { kind: 'ok', text: TIANQUAN_MALFORMED_REPORT },
       { kind: 'ok', text: VALID_REPORT },
     ])
-    const run = await runWorkerSession(makeWorkerConfig({ client }))
+    // 修复梯专用用例——钉旧契约（无收尾轮），否则终型轮先把报告救回、
+    // repairAttempts 恒为 0。
+    const run = await runWorkerSession(makeWorkerConfig({ client, finalizeReport: false }))
     assert.equal(run.result.status, 'passed', 'repair round must recover the report')
     assert.equal(run.result.summary, 'repaired report')
     assert.ok(run.transcript.repairAttempts >= 1, 'repair loop must have fired')

@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto'
 import { memoryDir } from '../config/paths.js'
 import { appendKnowledgeJsonl, acquireLock } from '../context/project-memory-writer.js'
 import { writeFileAtomicSync } from '../fs-atomic.js'
+import { tokenizeRecallQuery } from './query-terms.js'
 
 // ── Schema ─────────────────────────────────────────────────────────────────
 
@@ -292,7 +293,7 @@ export function recallMemoryEntries(
   kindFilter?: MemoryKind | MemoryKind[],
   options?: Omit<RecallOptions, 'kindFilter'>,
 ): MemoryEntry[] {
-  const terms = query.toLowerCase().split(/\W+/).filter(t => t.length >= 3)
+  const terms = tokenizeRecallQuery(query)
   if (terms.length === 0) return []
 
   const kinds = kindFilter

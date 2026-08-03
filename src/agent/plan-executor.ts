@@ -21,7 +21,7 @@ import { createCoordinatorReviewDeps } from './review-coordinator-deps.js'
 import { classifyChangeScale, isCrossModule, isFixContext, type ChangeSet, type ReviewScale } from './review-discipline.js'
 import { routeReviewWorkflow } from './review-router.js'
 import { extractChangedFiles } from './diff-collector.js'
-import { runTeamSkeleton, taskAuthority, type TeamRunSummary } from './team-orchestrator.js'
+import { runTeamSkeleton, taskAuthority, type TeamRunInput, type TeamRunSummary } from './team-orchestrator.js'
 import type { TeamTask } from './team-plan.js'
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from './team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from './team-scheduler-shadow.js'
@@ -99,6 +99,10 @@ export interface PlanExecutorOptions {
   /** Per-worker settle passthrough (final result the moment each worker settles),
    *  for the subagent fleet panel terminal glyphs. */
   onWorkerSettled?: (result: import('./work-order.js').WorkerResult) => void
+  /** 计划约束（D8 L2）：team-orchestrate 从 planPath 解析出的反目标/待验证假设，
+   *  已渲染为 ≤400 字符的约束条目。透传进每波派发的 request.constraints（任务级
+   *  约束在前，计划级在后）。缺省不注入——解析不到就是空，不报错不拦截。 */
+  planConstraints?: string[]
 }
 
 export interface PlanExecutorRun {
@@ -281,7 +285,10 @@ export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorD
       teamSchedulerBanditEnabled: deps.isTeamSchedulerBanditEnabled?.() === true,
       onActivity: opts.onActivity,
       onPlanReady: opts.onPlanReady,
-    },
+      // D8 L2：计划约束透传（team-orchestrator 分片在 TeamRunInput 消费并并入
+      // waveToRequests 的 request.constraints）。条件注入——空则不带，fail-open。
+      ...(opts.planConstraints && opts.planConstraints.length > 0 ? { planConstraints: opts.planConstraints } : {}),
+    } as TeamRunInput,
     {
       delegateBatch: (requests, policy, abortSignal, onProgress, onWorkerSettled) =>
         deps.delegateBatch(requests, policy, abortSignal, (completed, total) => {

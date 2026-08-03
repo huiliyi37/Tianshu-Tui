@@ -24,6 +24,20 @@ describe('backfillModelFromPreset', () => {
     assert.ok(fixed.pricing, 'pricing comes back too')
   })
 
+  it('refills description on snapshots that predate the field (61224f45 存量断链)', () => {
+    // description 数据链路落地前的存量快照没有该字段；不回填的话存量用户的
+    // ModelPicker 永远看不到「擅长场景」（审查 61224f45 逮出的 HIGH）。
+    const stale: ModelConfig = { id: 'deepseek-v4-flash', alias: 'v4-flash', contextWindow: 1_000_000, maxTokens: 384_000 }
+    const fixed = backfillModelFromPreset('deepseek', stale)
+    assert.equal(fixed.description, '快速档：能力对标旗舰，成本更低')
+  })
+
+  it('leaves a user-customized description alone', () => {
+    const stored: ModelConfig = { id: 'deepseek-v4-flash', contextWindow: 1_000_000, maxTokens: 384_000, description: '我自己的备注' }
+    const out = backfillModelFromPreset('deepseek', stored)
+    assert.equal(out.description, '我自己的备注', '用户写过的 description 不被 preset 覆盖')
+  })
+
   it('leaves user-set values alone, including deliberate falsey ones', () => {
     const stored: ModelConfig = {
       id: 'MiniMax-M3',
@@ -32,11 +46,13 @@ describe('backfillModelFromPreset', () => {
       supportsVision: false,
       tier: 'cheap',
       pricing: { input: 99 },
+      description: '用户自己的描述',
     }
     const out = backfillModelFromPreset('minimax', stored)
     assert.equal(out, stored, 'nothing to fill — same object back')
     assert.equal(out.supportsVision, false)
     assert.equal(out.tier, 'cheap')
+    assert.equal(out.description, '用户自己的描述')
   })
 
   it('never rewrites naming or request-tuning fields', () => {
@@ -76,7 +92,7 @@ describe('backfillModelFromPreset', () => {
   })
 
   it('only touches fields on the allowlist', () => {
-    assert.deepEqual([...BACKFILLED_MODEL_FIELDS], ['supportsVision', 'tier', 'pricing'])
+    assert.deepEqual([...BACKFILLED_MODEL_FIELDS], ['supportsVision', 'tier', 'pricing', 'reasoningEffort', 'description'])
   })
 })
 
@@ -174,5 +190,30 @@ describe('loadConfig integration', () => {
       provider: { providers: Record<string, { models: ModelConfig[] }> }
     }
     assert.equal(onDisk.provider.providers.minimax!.models[0]?.supportsVision, true)
+  })
+
+  it('migrates v4-flash reasoningEffort high→max and persists', () => {
+    writeFileSync(configPath, JSON.stringify({
+      provider: {
+        default: 'deepseek',
+        providers: {
+          deepseek: {
+            ...cloneProviderPreset('deepseek'),
+            apiKey: 'sk-test',
+            // 模拟存量快照：v4-flash 还是旧的 'high'
+            models: [
+              { id: 'deepseek-v4-pro', alias: 'v4-pro', contextWindow: 1_000_000, maxTokens: 384_000, reasoningEffort: 'max' },
+              { id: 'deepseek-v4-flash', alias: 'v4-flash', contextWindow: 1_000_000, maxTokens: 384_000, reasoningEffort: 'high' },
+            ],
+          },
+        },
+      },
+    }))
+    const models = loadConfig().provider.providers.deepseek!.models
+    const flash = models.find(m => m.id === 'deepseek-v4-flash')!
+    assert.equal(flash.reasoningEffort, 'max', 'high migrated to max')
+    // 幂等：再 load 一次不报错、值稳定
+    const flash2 = loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'deepseek-v4-flash')!
+    assert.equal(flash2.reasoningEffort, 'max')
   })
 })

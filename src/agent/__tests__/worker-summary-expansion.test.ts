@@ -255,4 +255,49 @@ describe('summary quality auto-expansion', () => {
     assert.ok(callCount >= 2, 'expansion should have been attempted')
     assert.equal(run.results[0]!.summary, SHORT_SUMMARY, 'should keep the original when expansion is shorter')
   })
+
+  it('keeps original passed result when expansion returns failed with longer summary', async () => {
+    let callCount = 0
+    // 事故回归（2026-08-02 c12c8）：收尾轮 JSON 解析崩 → salvage 出长 summary 的
+    // failed 结果——长度验收放行就会把首轮 passed 翻盘成 failed。
+    const SALVAGED_LONG = 'salvaged findings dump: '.repeat(20)
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      cwd: '/repo',
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async () => {
+        callCount++
+        const isFirst = callCount === 1
+        return {
+          result: isFirst ? makeResult('wo_flip', 'passed', SHORT_SUMMARY) : makeResult('wo_flip', 'failed', SALVAGED_LONG),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getMessages: () => [{ role: 'user', content: 'x' }], getTurnCount: () => callCount } as never,
+          usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'tu_summary_flip',
+      objective: 'trace the authentication flow across multiple coordinator modules',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['a.ts', 'b.ts'] },
+    })
+
+    assert.ok(callCount >= 2, 'expansion should have been attempted')
+    assert.equal(run.results[0]!.status, 'passed', 'failed expansion must not flip a passed result')
+    assert.equal(run.results[0]!.summary, SHORT_SUMMARY, 'should keep the original passed summary')
+  })
 })

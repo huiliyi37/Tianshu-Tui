@@ -265,16 +265,15 @@ export class SessionStateManager {
   /** Render compact XML block for volatile block injection. Target: <500 chars. */
   renderForVolatile(): string {
     const s = this.state
-    const lines: string[] = ['<session-state>']
+    // Content lines only — the wrapper is added below, and only if there is content.
+    const lines: string[] = []
 
-    if (s.task.objective) {
-      lines.push(`Task: ${s.task.objective} [${s.task.status}]`)
-      if (s.task.plan && s.task.currentStep !== undefined) {
-        lines.push(
-          `Plan: step ${s.task.currentStep + 1}/${s.task.plan.length} — ${s.task.plan[s.task.currentStep] ?? ''}`,
-        )
-      }
-    }
+    // The objective lives in the task-contract channel (`<objective>` / `<task-anchor>`),
+    // not here. This block used to render `Task: <objective> [status]` from `updateTask`,
+    // which has no production caller — so the line never fired, while the dedup regex
+    // guarding against it in volatile.ts matched `Objective:` and never fired either.
+    // Two dead halves covering for each other: wiring `updateTask` up would have
+    // produced a duplicated objective line with no working dedup. Both halves removed.
 
     const modifiedFiles = Object.entries(s.fileIndex)
       .filter(([, v]) => v.modifiedByMe)
@@ -295,19 +294,28 @@ export class SessionStateManager {
       lines.push(`Failed: ${failedTests.map(v => v.target).join(', ')}`)
     }
 
-    lines.push('</session-state>')
-    let result = lines.join('\n')
+    // No content means no block. An empty `<session-state></session-state>` is
+    // still a non-empty string, so every truthiness check downstream reads it as
+    // "state exists" — that is what kept renderProgressBlock's fallback branch
+    // unreachable (volatile.ts gates on `if (ctx.sessionState)`).
+    if (lines.length === 0) return ''
+
+    const closing = '\n</session-state>'
+    let result = ['<session-state>', ...lines].join('\n') + closing
 
     // Diffusion-aware truncation: keep under VOLATILE_MAX_CHARS
     if (result.length > VOLATILE_MAX_CHARS) {
-      // Trim decision list first
-      const closing = '\n</session-state>'
-      const header = result.slice(0, result.indexOf('Decisions:'))
-      if (header) {
-        result = header.trimEnd() + closing
+      // Trim decision list first — only when there is one. indexOf returns -1
+      // with no decisions, and slice(0, -1) would eat the closing tag's '>'.
+      const decisionsAt = result.indexOf('Decisions:')
+      if (decisionsAt > 0) {
+        const head = result.slice(0, decisionsAt).trimEnd()
+        // Trimming decisions can leave nothing but the opening tag — that is the
+        // empty-shell shape this function exists to avoid, so drop the block.
+        result = head === '<session-state>' ? '' : head + closing
       }
       // If still too long, truncate with ellipsis
-      if (result.length > VOLATILE_MAX_CHARS) {
+      if (result && result.length > VOLATILE_MAX_CHARS) {
         const maxContent = VOLATILE_MAX_CHARS - closing.length - 3 // '...'
         result = result.slice(0, maxContent) + '...' + closing
       }

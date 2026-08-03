@@ -272,6 +272,45 @@ describe('changgeng（长庚·长夜守候，第十四域）', () => {
     assert.match(suffix, /你不必急于求成，笃定自能从容/)
     assert.match(suffix, /你不必掩饰直觉，终局成全优雅/)
   })
+
+  it('changgeng 交更之面（Fable）：收灯判据 + 晨昏双名 + 华盖边界', () => {
+    // 交更管"停下来时收成什么形状"，华盖管"不在假绿处停下"——环不能删，措辞可改写。
+    const c = STAR_DOMAINS.changgeng
+    assert.match(c.volatileBlock, /守夜的终点不是天亮，是交更/, '交更意象在场')
+    assert.match(c.volatileBlock, /能，才算收灯/, '收灯判据在场')
+    assert.match(c.systemPromptSuffix, /交更成全/, 'suffix 交更段在场')
+    assert.match(c.systemPromptSuffix, /晨昏双名/, '同根因归并纪律在场')
+    assert.match(c.systemPromptSuffix, /华盖管不在假绿处停下/, '与华盖的界申明在场')
+    assert.ok(c.keywords.includes('交更'))
+    assert.ok(c.keywords.includes('handoff'))
+  })
+
+  it('视觉终验 objective 派发命中长庚（将星经验注入通道的前置条件）', () => {
+    // 2026-08-02 三役入谱：长庚的终验词组（三主题/截图对比/视觉验证…）刻意避开
+    // 文曲的单词根（视觉/UI/布局/样式），靠组合词计数优势胜出。此锚点钉住计数
+    // 关系——日后任何域扩词撞车导致终验任务改道，这里先响。
+    const derived = deriveAuthority('对桌面视觉改动做三主题截图对比终验')
+    assert.equal(derived.authority, 'changgeng')
+    assert.equal(derived.detail.verdict, 'hit', '必须是计数胜出，不是平手兜底')
+
+    const rich = deriveAuthority('视觉验证：三主题截图对比 + before/after 存证，收灯验收')
+    assert.equal(rich.authority, 'changgeng')
+
+    // 反向界：纯实现类视觉任务仍归文曲——长庚验收，不抢实现。
+    const impl = deriveAuthority('优化界面视觉布局样式')
+    assert.equal(impl.authority, 'wenqu')
+  })
+})
+
+describe('fu（辅·验目之面，Fable）', () => {
+  it('fu systemPromptSuffix carries 验目 observation-pipeline discipline', () => {
+    // 验目管"存在要被看见"，瑶光管"声称要复现"——一个点名灯，一个审绿灯。
+    const fu = STAR_DOMAINS.fu
+    assert.match(fu.systemPromptSuffix, /你的眼睛也在观察管道里/, '观察管道公理在场')
+    assert.match(fu.systemPromptSuffix, /像素与字节/, '像素裁决纪律在场')
+    assert.match(fu.systemPromptSuffix, /低曝光路径要主动看一眼/, '低曝光目检在场')
+    assert.ok(fu.keywords.includes('验目'))
+  })
 })
 
 describe('意境闭环：意象自辩 + 结尾回扣（2026-07-27 对齐七杀）', () => {

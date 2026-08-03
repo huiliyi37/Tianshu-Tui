@@ -59,7 +59,8 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
   if (consecutiveFailures >= 2) {
     // 失败升档受 escalationCap 约束：升档意味着全新会话零缓存全量重跑,
     // 成本可达 flash 的数十倍。'off' 时跳过本分支,走正常路由。
-    const cap = input.failureEscalationCap ?? 'strong'
+    // 缺省 fail-closed（与 escalationTierAllowed 同源）：漏传 = 不升档。
+    const cap = input.failureEscalationCap ?? 'off'
     if (cap === 'strong') {
       return { tier: 'strong', hardFloor: 'strong', reason: 'repeated failure escalates worker tier to strong' }
     }

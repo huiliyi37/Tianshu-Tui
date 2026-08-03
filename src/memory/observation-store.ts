@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { memoryDir } from '../config/paths.js'
+import { tokenizeRecallQuery } from './query-terms.js'
 
 export interface Observation {
   id: string
@@ -76,7 +77,7 @@ export function readObservations(cwd: string): Observation[] {
 
 /** Keyword recall over legacy observations — score by term overlap with query. */
 export function recallObservations(cwd: string, query: string, limit = 5): Observation[] {
-  const terms = query.toLowerCase().split(/\W+/).filter(t => t.length >= 3)
+  const terms = tokenizeRecallQuery(query)
   if (terms.length === 0) return []
 
   const scored = readObservations(cwd)

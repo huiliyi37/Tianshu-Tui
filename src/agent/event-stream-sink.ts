@@ -24,15 +24,20 @@ export interface EventStreamFile {
 export function createNdjsonEventSink(path: string): EventStreamFile {
   let stream: WriteStream | null = null
   let broken = false
+  let brokenLogged = false
 
   const open = (): WriteStream | null => {
     if (stream || broken) return stream
     try {
       mkdirSync(dirname(path), { recursive: true })
       stream = createWriteStream(path, { flags: 'a' })
-      // An EPIPE/ENOSPC here must not become an unhandled 'error' event that
-      // takes down the process — the event stream is diagnostic, not critical.
-      stream.on('error', () => { broken = true })
+      stream.on('error', (err) => {
+        if (!brokenLogged) {
+          brokenLogged = true
+          console.error(`[event-sink] stream error for ${path}:`, (err as Error).message)
+        }
+        broken = true
+      })
     } catch {
       broken = true
     }

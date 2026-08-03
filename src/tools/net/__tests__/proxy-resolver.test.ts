@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveProxyForUrl, shouldBypassProxy, parseWindowsProxyOutput } from '../proxy-resolver.js'
+import { resolveProxyForUrl, shouldBypassProxy, parseWindowsProxyOutput, parseScutilProxy } from '../proxy-resolver.js'
 
 describe('shouldBypassProxy', () => {
   it('returns false when NO_PROXY unset', () => {
@@ -47,7 +47,10 @@ describe('resolveProxyForUrl', () => {
   })
 
   it('returns undefined when no proxy configured', () => {
-    assert.equal(resolveProxyForUrl('https://example.com'), undefined)
+    // noProxy:'*' 显式绕过所有层（含宿主机 OS 系统代理——开发机可能正开着
+    // Clash/V2Ray，否则这个"无代理"断言会在本机误判失败）。此用例验证的是
+    // env/config 层未配置时的直连意图。
+    assert.equal(resolveProxyForUrl('https://example.com', { noProxy: '*' }), undefined)
   })
 
   it('reads HTTPS_PROXY for https URLs', () => {
@@ -99,8 +102,10 @@ describe('resolveProxyForUrl', () => {
     assert.equal(resolveProxyForUrl('not-a-url'), undefined)
   })
 
-  it('returns undefined for non-http protocols', () => {
-    assert.equal(resolveProxyForUrl('ftp://example.com'), undefined)
+  it('returns undefined for non-http protocols when no OS proxy', () => {
+    // ftp 等非 http 协议无专属 env 分支，仅回退到 OS 系统代理。
+    // noProxy:'*' 隔离宿主状态（开发机 macOS 可能正开着系统代理）。
+    assert.equal(resolveProxyForUrl('ftp://example.com', { noProxy: '*' }), undefined)
   })
 })
 
@@ -148,5 +153,87 @@ describe('parseWindowsProxyOutput', () => {
     const enable = '    ProxyEnable    REG_DWORD    0x1'
     const server = '    ProxyServer    REG_SZ    http=127.0.0.1:80;https=127.0.0.1:443'
     assert.equal(parseWindowsProxyOutput(enable, server), 'http://127.0.0.1:443')
+  })
+})
+
+/**
+ * parseScutilProxy 纯函数测试——readMacosSystemProxy 的判定核心。
+ * Fixture 取自真实 `scutil --proxy` 输出（macOS 系统代理开启，Clash 7890）。
+ * 与 parseWindowsProxyOutput 同构：抽成纯函数避免 mock child_process。
+ */
+describe('parseScutilProxy', () => {
+  // 真实输出（macOS，HTTP+HTTPS 均启用，Clash 7890）
+  const REAL_OUTPUT = `<dictionary> {
+  ExceptionsList : <array> {
+    0 : 127.0.0.1
+    1 : 192.168.0.0/16
+    2 : *.local
+  }
+  HTTPEnable : 1
+  HTTPPort : 7890
+  HTTPProxy : 127.0.0.1
+  HTTPSEnable : 1
+  HTTPSPort : 7890
+  HTTPSProxy : 127.0.0.1
+  ProxyAutoConfigEnable : 0
+  SOCKSEnable : 1
+  SOCKSPort : 7890
+  SOCKSProxy : 127.0.0.1
+}`
+
+  it('HTTP+HTTPS 均启用 → 优先返回 HTTPS 代理（与 normalizeProxyUrl 语义一致）', () => {
+    assert.equal(parseScutilProxy(REAL_OUTPUT), 'http://127.0.0.1:7890')
+  })
+
+  it('仅 HTTP 启用（HTTPSEnable=0）→ 回退 HTTP 代理', () => {
+    const out = REAL_OUTPUT.replace('HTTPSEnable : 1', 'HTTPSEnable : 0')
+    assert.equal(parseScutilProxy(out), 'http://127.0.0.1:7890')
+  })
+
+  it('HTTPS 启用但 HTTP 禁用 → 返回 HTTPS 代理', () => {
+    const out = REAL_OUTPUT.replace('HTTPEnable : 1', 'HTTPEnable : 0')
+    assert.equal(parseScutilProxy(out), 'http://127.0.0.1:7890')
+  })
+
+  it('两者均禁用 → undefined', () => {
+    const out = REAL_OUTPUT
+      .replace('HTTPEnable : 1', 'HTTPEnable : 0')
+      .replace('HTTPSEnable : 1', 'HTTPSEnable : 0')
+    assert.equal(parseScutilProxy(out), undefined)
+  })
+
+  it('启用但缺 host/port → undefined（配置不完整）', () => {
+    const out = `<dictionary> {
+  HTTPSEnable : 1
+  HTTPSPort : 7890
+}`
+    // HTTPSProxy 字段缺失 —— 不能返回 http://undefined:7890
+    assert.equal(parseScutilProxy(out), undefined)
+  })
+
+  it('空输出 / scutil 失败 → undefined', () => {
+    assert.equal(parseScutilProxy(''), undefined)
+    assert.equal(parseScutilProxy('Proxy Configuration is not enabled'), undefined)
+  })
+
+  it('PAC 启用但 HTTP/HTTPS 代理禁用 → 不处理 PAC，返回 undefined', () => {
+    // ProxyAutoConfigEnable=1 时我们不解析 PAC JS —— 用户应自行设 HTTPS_PROXY
+    const out = `<dictionary> {
+  HTTPEnable : 0
+  HTTPSEnable : 0
+  ProxyAutoConfigEnable : 1
+  ProxyAutoConfigURLString : http://127.0.0.1/proxy.pac
+}`
+    assert.equal(parseScutilProxy(out), undefined)
+  })
+
+  it('host 是非环回地址（如公司代理 10.0.0.1）也能正确解析', () => {
+    const out = `<dictionary> {
+  HTTPEnable : 0
+  HTTPSEnable : 1
+  HTTPSPort : 8080
+  HTTPSProxy : 10.0.0.1
+}`
+    assert.equal(parseScutilProxy(out), 'http://10.0.0.1:8080')
   })
 })

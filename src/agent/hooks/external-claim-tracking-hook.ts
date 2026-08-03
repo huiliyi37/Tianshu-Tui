@@ -36,10 +36,13 @@ interface ClaimEntry {
   turn: number
   /** TTL 轮次——超过后自动失效 */
   expiresAtTurn: number
+  /** 本会话已对该路径独立核验（read/grep/verify-bash 目标命中）的 turn；
+   *  undefined = 未核验。deliver 门禁与 Step 2 的第二判据来源。 */
+  verifiedAt?: number
 }
 
 /** Session-scoped: 从 delegate 结果抽取的声称路径集合 */
-interface ClaimTracker {
+export interface ClaimTracker {
   claims: ClaimEntry[]
 }
 
@@ -89,6 +92,39 @@ export function extractClaimedPaths(content: string): string[] {
   return [...paths]
 }
 
+/**
+ * verify 类工具的目标文本——结构化 input 优先（path/file_path/file/pattern/
+ * query/command），target 兜底。用于判定该工具是否命中某个声称路径。
+ */
+function verifyTargetOf(tool: RuntimeToolEvent): string {
+  const input = (tool.input ?? {}) as Record<string, unknown>
+  const parts: string[] = []
+  for (const key of ['path', 'file_path', 'file', 'pattern', 'query', 'command']) {
+    const v = input[key]
+    if (typeof v === 'string') parts.push(v)
+  }
+  if (tool.target) parts.push(tool.target)
+  return parts.join(' ')
+}
+
+/**
+ * 证据防火墙（Phase 2）：找出交付文本中引用了、但本会话未独立核验的声称路径。
+ *
+ * `[待核]` 标注行豁免——诚实降级为线索的行不参与引用抽取（与 Phase 1 诚实
+ * 标注协议同语义）。tracker.claims 恒为活跃集（hook run() 开头 trim）。
+ *
+ * @returns 去重后的未核验声称路径列表；空 = 全部已核验或无引用。
+ */
+export function findUnverifiedClaimRefs(tracker: ClaimTracker, text: string): string[] {
+  const scanText = text.split('\n').filter(l => !l.includes('[待核]')).join('\n')
+  const refs = extractClaimedPaths(scanText)
+  if (refs.length === 0) return []
+  const unverified = new Set(
+    tracker.claims.filter(c => c.verifiedAt === undefined).map(c => c.filePath),
+  )
+  return refs.filter(r => unverified.has(r))
+}
+
 export function createExternalClaimTrackingHook(
   deps: ExternalClaimTrackingHookDeps,
 ): PostToolRuntimeHook & { getClaimTracker: () => ClaimTracker; resetClaimTracker: () => void } {
@@ -101,6 +137,11 @@ export function createExternalClaimTrackingHook(
     resetClaimTracker() { tracker.claims = [] },
     run(ctx: RuntimeHookContext, tool: RuntimeToolEvent): void {
       const { turn } = ctx.snapshot
+
+      // ── Step 0: 活跃集维护 ────────────────────────────────────
+      // trim 在每次 run 开头执行（原在 Step 1 内）——tracker.claims 恒为
+      // 未过期集合，deliver 门禁（findUnverifiedClaimRefs）无需 turn 参数。
+      tracker.claims = tracker.claims.filter(c => c.expiresAtTurn > turn)
 
       // ── Step 1: delegate 完成 → 抽取声称路径 ──────────────────
       if (DELEGATE_TOOLS.has(tool.name) && tool.success && tool.resultContent) {
@@ -133,8 +174,47 @@ export function createExternalClaimTrackingHook(
             expiresAtTurn: turn + CLAIM_TTL_TURNS,
           })
         }
-        // Trim expired claims
-        tracker.claims = tracker.claims.filter(c => c.expiresAtTurn > turn)
+        return
+      }
+
+      // ── Step 1.5: verify 类工具成功 → 命中活跃 claim → 标 verifiedAt ──
+      // 独立于 recentToolHistory（5 条窗口）：deliver 距 delegate 可能几十个
+      // 工具调用，窗口早滚没——核验状态必须由 tracker 自含（Phase 2 设计）。
+      const isVerifyShapedBash = tool.name === 'bash'
+        && /\b(grep|cat|rg|find|head|tail|sed)\b/.test(String((tool.input as Record<string, unknown> | undefined)?.command ?? ''))
+      if ((VERIFY_TOOLS.has(tool.name) || isVerifyShapedBash) && tool.success) {
+        const hay = verifyTargetOf(tool)
+        if (hay) {
+          tracker.claims = tracker.claims.map(c =>
+            c.verifiedAt === undefined && hay.includes(c.filePath) ? { ...c, verifiedAt: turn } : c,
+          )
+        }
+        return // verify 工具不会同时是 write/deliver
+      }
+
+      // ── Step 3: deliver_task 完成 → 引用未核验声称 → 软提醒 ──
+      // 防火墙关闭时的兜底（设计文档"关闭时退化为 advisory，不是完全静默"）。
+      // 硬拦时 deliver 返回 isError → tool.success=false（tool-execution.ts:687
+      // success: !(result.is_error === true) 取反语义，已验证）→ 本分支不触发，
+      // 软硬互斥天然成立。deliver 不是 write 工具——必须在 Step 2 的 write 检查
+      // return 之前判定。
+      if (tool.name === 'deliver_task' && tool.success) {
+        const input = (tool.input ?? {}) as Record<string, unknown>
+        const checklist = Array.isArray(input.checklist)
+          ? (input.checklist as Array<{ item?: unknown }>).map(e => typeof e?.item === 'string' ? e.item : '').join('\n')
+          : ''
+        const text = `${typeof input.message === 'string' ? input.message : ''}\n${checklist}`
+        const refs = findUnverifiedClaimRefs(tracker, text)
+        if (refs.length > 0) {
+          deps.advisoryBus.submit({
+            key: 'external-claim-in-delivery',
+            priority: 0.6,
+            category: 'discipline',
+            content: `⚠ 交付文本引用了 delegate 报告的 ${refs.join('、')}，但本会话没有对其独立核验（read_file/grep）。worker 的 file:line 是待核验假设——commit 前先核验，或将该条标注 [待核] 降级为线索。`,
+            ttl: 1,
+            expect: { kind: 'tool_appears', tools: [...VERIFY_TOOLS, 'bash'], targetIncludes: refs[0]!, withinTurns: 2 },
+          })
+        }
         return
       }
 
@@ -167,7 +247,9 @@ export function createExternalClaimTrackingHook(
         return false
       })
 
-      if (!hasIndependentVerify) {
+      // 第二判据：tracker 自含的 verifiedAt（Step 1.5 标记）——history 窗口滚出
+      // 后仍能识别"已核验过"，少一次误报。
+      if (!hasIndependentVerify && matchedClaim.verifiedAt === undefined) {
         deps.advisoryBus.submit({
           key: 'external-claim-unverified',
           priority: 0.56,

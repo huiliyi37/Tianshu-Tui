@@ -118,7 +118,7 @@ export function generateMarkdownReport(
   }
 
   parts.push('')
-  parts.push('> **Note:** All runs shown are dry-run records. Dry-run status is always `blocked` and does not represent real capability.')
+  parts.push('> **Note:** `blocked` records come from dry-runs or an explicitly blocked executor. Only `passed` and `failed` records represent completed live executions.')
 
   return parts.join('\n')
 }

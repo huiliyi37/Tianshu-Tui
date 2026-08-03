@@ -59,6 +59,9 @@ export interface TeamRunInput {
   /** Results from the immediately prior wave. Used by dispatchWaveAt to
    *  block tasks whose dependencies failed. Undefined for wave 0. */
   priorResults?: import('../agent/work-order.js').WorkerResult[]
+  /** 计划约束（D8 L2）：team-orchestrate 从 planPath 解析的反目标/待验证假设。
+   *  透传进每个 DelegationRequest.constraints（任务级约束在前，计划级在后）。 */
+  planConstraints?: string[]
 }
 
 export interface TeamRunSummary {
@@ -377,6 +380,12 @@ async function dispatchWaveAt(
     }
   }
   if (input.onActivity) for (const r of requests) r.onActivity = input.onActivity
+  // D8 L2：计划约束兜底注入——任务级在前、计划级在后，走 L1 通道。
+  if (input.planConstraints && input.planConstraints.length > 0) {
+    for (const r of requests) {
+      r.constraints = [...(r.constraints ?? []), ...input.planConstraints]
+    }
+  }
   if (requests.length === 0) {
     return {
       mode: input.mode,
@@ -570,6 +579,12 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
 
     const requests = teamTasksToDelegationRequests(selected, input.parentTurnId ?? 'team')
     if (input.onActivity) for (const r of requests) r.onActivity = input.onActivity
+    // D8 L2：计划约束兜底注入——任务级在前、计划级在后，走 L1 通道。
+    if (input.planConstraints && input.planConstraints.length > 0) {
+      for (const r of requests) {
+        r.constraints = [...(r.constraints ?? []), ...input.planConstraints]
+      }
+    }
     const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
     try {
       deps.recordTeamWaveTelemetry?.(buildTeamWaveTelemetry({

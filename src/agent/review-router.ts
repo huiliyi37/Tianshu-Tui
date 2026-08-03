@@ -16,6 +16,10 @@ export interface PatcherResult {
 
 export type ReviewFindingSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
 
+/** 结论极性：'defect' = 缺陷发现；'confirmation' = 核实通过（确认无问题）。
+ *  undefined 按 defect 处理（fail-closed，兼容无 polarity 的存量 worker 输出）。 */
+export type ReviewFindingPolarity = 'defect' | 'confirmation'
+
 export interface ReviewFinding {
   severity?: ReviewFindingSeverity | Lowercase<ReviewFindingSeverity> | string
   claim?: string
@@ -24,6 +28,8 @@ export interface ReviewFinding {
    *  blocking delivery. Evidence = file:line reference, command output, or
    *  other ground truth the reviewer used to substantiate the claim. */
   evidence?: string
+  /** blocking 判定只认 'defect'；'confirmation' 单独汇总为已核实清单。 */
+  polarity?: ReviewFindingPolarity
 }
 
 export type ReviewInfraFailureKind = 'worker' | 'json' | 'timeout' | 'skip'
@@ -126,8 +132,15 @@ function findingHasEvidence(finding: ReviewFinding): boolean {
   return Boolean(finding.evidence && finding.evidence.trim().length > 0)
 }
 
+/** blocking 只认缺陷极性——confirmation（核实通过）永远 non-blocking。
+ *  polarity 省略按 defect 处理（fail-closed，兼容存量输出）。 */
+function isDefect(finding: ReviewFinding): boolean {
+  return finding.polarity !== 'confirmation'
+}
+
 function hasBlockingSquadronFinding(result: SquadronResult): boolean {
   return result.findings.some(finding => {
+    if (!isDefect(finding)) return false
     if (!isBlockingSeverity(finding.severity)) return false
     // A HIGH/CRITICAL finding without evidence cannot block — it may be a
     // hallucinated claim (e.g. referencing a file:line that doesn't exist).
@@ -136,8 +149,14 @@ function hasBlockingSquadronFinding(result: SquadronResult): boolean {
   })
 }
 
+/** 已核实清单条数（confirmation 极性）——verified 文案用它替代「无 blocking
+ *  findings」的空话，让审查通过带上实质内容。 */
+function countConfirmations(result: SquadronResult): number {
+  return result.findings.filter(finding => finding.polarity === 'confirmation').length
+}
+
 function summarizeSquadronFindings(result: SquadronResult): string {
-  const blocking = result.findings.filter(finding => isBlockingSeverity(finding.severity))
+  const blocking = result.findings.filter(finding => isDefect(finding) && isBlockingSeverity(finding.severity))
   const summary = blocking
     .map(finding => {
       const label = `${finding.severity ?? 'UNKNOWN'}: ${finding.claim ?? 'review finding'}`
@@ -236,7 +255,7 @@ export async function routeReviewWorkflow(
     return {
       tier: 'auto',
       verdict: 'verified',
-      evidence: 'auto wiring review: no blocking findings',
+      evidence: `auto wiring review: no blocking findings${countConfirmations(wiring) > 0 ? `（${countConfirmations(wiring)} 项核实确认）` : ''}`,
       rounds: attempts,
       ...(infraFailures.length > 0 ? { infraFailures } : {}),
     }
@@ -265,7 +284,7 @@ export async function routeReviewWorkflow(
     return {
       tier,
       verdict: 'verified',
-      evidence: `L3 squadron verified (5 inspectors): no blocking findings`,
+      evidence: `L3 squadron verified (5 inspectors): no blocking findings${countConfirmations(squadron) > 0 ? `（${countConfirmations(squadron)} 项核实确认）` : ''}`,
       rounds: 0,
       ...(infraFailures.length > 0 ? { infraFailures } : {}),
     }

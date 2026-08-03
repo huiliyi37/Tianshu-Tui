@@ -5,9 +5,22 @@
  * 单行 ANSI 格式化，包含 4 个 zone。
  */
 
+import { homedir } from 'node:os'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import { ANSI, color } from '../engine/ansi.js'
+
+/** 将绝对路径的 home 前缀替换为 ~（跨平台）。非 home 下原样返回。 */
+export function shortenCwd(cwd: string): string {
+  const home = homedir()
+  if (!home) return cwd
+  // 规范化比较：Windows 盘符大小写不敏感
+  const normHome = home.replace(/\\/g, '/')
+  const normCwd = cwd.replace(/\\/g, '/')
+  if (normCwd === normHome) return '~'
+  if (normCwd.startsWith(normHome + '/')) return '~' + cwd.slice(home.length)
+  return cwd
+}
 import { displayWidth, truncateToDisplayWidth } from '../width.js'
 import { getActiveThemeName, type RivetTheme } from '../theme.js'
 import type { CacheStatus } from '../status-types.js'
@@ -86,6 +99,8 @@ export interface GlanceBarInput {
   domainName?: string
   /** Git 分支名 */
   branch?: string
+  /** 当前工作目录（~ 缩写后显示在分支后，帮助多会话/多仓库区分） */
+  cwd?: string
   /** 模型名称 */
   modelName?: string
   /** 推理 effort glyph */
@@ -146,7 +161,12 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
   const narrow = input.narrow ?? input.width < 60
   const domainGlyph = input.domainGlyph ?? ''
   const domainLabel = input.domainName ?? '天枢'
-  const branchPart = !narrow && input.branch ? ` (${input.branch})` : ''
+  // 分支带 git 符号——视觉上更醒目，是开发高频关注的信息，用 secondary 中亮色
+  // （比此前的 dim 灰更突出，与星域 primary 形成层次）。
+  const branchPart = !narrow && input.branch ? ` ${input.branch}` : ''
+  // cwd 跟在分支后——辅助信息，用 dim（比 muted 略亮，与分支 secondary 形成层次）。
+  // 窄终端（<60列）不显示避免挤爆。
+  const cwdPart = !narrow && input.cwd ? ` ${shortenCwd(input.cwd)}` : ''
 
   // 星域专属 accent 色；单色克制主题降级为 muted
   const accentColor = resolveStarDomainAccent(input.domainName, theme)
@@ -154,7 +174,8 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
   const glyphPart = domainGlyph ? `${color(domainGlyph, accentColor)} ` : ''
   // worker 视图徽章：切入子代理视图时提示当前输入路由目标
   const workerPart = input.workerBadge ? ` ${color(`[${input.workerBadge}]`, theme.secondary)}` : ''
-  return `${glyphPart}${color(domainLabel, accentColor)}${color(branchPart, theme.dim)}${workerPart}`
+  // 三阶色阶层次：accent(星域·最醒目) → secondary(分支·中亮) → dim(cwd·辅助)
+  return `${glyphPart}${color(domainLabel, accentColor)}${color(branchPart, theme.secondary)}${color(cwdPart, theme.dim)}${workerPart}`
 }
 
 /** 过半成本提示（2026-07-25）：上下文 ≥50% 在底栏常驻建议开新会话——继续推进

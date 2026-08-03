@@ -92,6 +92,16 @@ describe('unified-memory', () => {
     assert.equal(decisions.length, 0) // db entry is 'fact', not 'decision'
   })
 
+  it('recalls entries for pure Chinese queries', () => {
+    const entry = appendMemoryEntry(TEST_DIR, {
+      text: '灾情专题需要按图片、视频和文档分类展示',
+      kind: 'project_rule', confidence: 0.95, source: 'manual', status: 'verified', tags: ['灾情'],
+    })
+
+    const results = recallMemoryEntries(TEST_DIR, '灾情专题', 5)
+    assert.ok(results.some(result => result.id === entry.id))
+  })
+
   it('renders memory block as XML', () => {
     appendMemoryEntry(TEST_DIR, {
       text: 'Testing framework is node:test',

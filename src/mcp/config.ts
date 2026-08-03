@@ -1,6 +1,16 @@
 import { z } from 'zod'
 import { mcpOAuthConfigSchema } from './oauth/types.js'
 
+export const mcpToolPolicySchema = z.object({
+  capability: z.enum(['read', 'write', 'execute', 'network']),
+  requireApproval: z.literal(true).optional(),
+})
+
+export const mcpServerPolicySchema = z.object({
+  /** Keys are original MCP tool names, before rivet prefixes them. */
+  tools: z.record(mcpToolPolicySchema).default({}),
+})
+
 /** Transport hint — explicit opt-in for transport selection on url-based servers.
  *  `streamableHttp` (default when absent): use Streamable HTTP transport (post-2025-03-26 spec).
  *  `sse`: force legacy SSE transport (pre-2025 spec, deprecated but still in wide use).
@@ -22,6 +32,8 @@ export const mcpServerConfigSchema = z.object({
   /** OAuth-based authentication for this server.
    *  When set, env/headers secrets are obtained via OAuth flow instead of manual entry. */
   auth: mcpOAuthConfigSchema.optional(),
+  /** Missing tool policies are treated as unknown and require confirmation. */
+  policy: mcpServerPolicySchema.optional(),
   // shared
   disabled: z.boolean().optional(),
 }).refine(
@@ -41,3 +53,4 @@ export const mcpConfigSchema = z.object({
 
 export type McpServerConfig = z.infer<typeof mcpServerConfigSchema>
 export type McpConfig = z.infer<typeof mcpConfigSchema>
+export type McpToolPolicy = z.infer<typeof mcpToolPolicySchema>

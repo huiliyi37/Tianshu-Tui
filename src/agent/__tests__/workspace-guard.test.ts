@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -12,7 +13,10 @@ import {
 
 const execFileP = promisify(execFile)
 
-const TMP = join(import.meta.dirname, '.workspace-guard-test-tmp')
+// 必须在系统 tmpdir + mkdtemp 唯一路径——曾用工作树内固定路径，并发会话的
+// rmSync/init 竞态会让 `git config` 向上爬进主仓库，污染提交作者（详见
+// git.test.ts 同款注释）。
+let TMP: string
 
 // ── Async git helpers ───────────────────────────────────────────────
 
@@ -73,8 +77,7 @@ describe('workspace-guard — stash / runtime artifact guard', () => {
   let guard: WorkspaceGuard
 
   beforeEach(async () => {
-    rmSync(TMP, { recursive: true, force: true })
-    mkdirSync(TMP, { recursive: true })
+    TMP = mkdtempSync(join(tmpdir(), 'rivet-workspace-guard-'))
     await setupGitRepo(TMP)
     makeGitignore(TMP, ['.rivet/artifacts/', '.rivet/sessions/'])
     guard = createWorkspaceGuard(TMP)

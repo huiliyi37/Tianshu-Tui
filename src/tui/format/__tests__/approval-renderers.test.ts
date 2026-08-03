@@ -42,6 +42,39 @@ describe('formatApprovalPrompt', () => {
     assert.ok(!plain.some(l => l.includes('> 1. 批准')), 'first option not selected')
   })
 
+  it('rememberOption inserts 「批准并记住此目录」between 编辑 and 解释风险', () => {
+    const lines = formatApprovalPrompt({
+      toolName: 'write_file',
+      input: { file_path: '/tmp/x', content: 'x' },
+      columns: 60,
+      selectedIndex: 0,
+      rememberOption: true,
+    }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain.some(l => l.includes('批准并记住此目录 (r)')), 'remember option rendered')
+    assert.ok(plain.some(l => l.includes('解释风险')), 'risk option still present when no risk shown')
+    // 顺序：记住项在编辑与解释之间（index 3 of 5）
+    const editIdx = plain.findIndex(l => l.includes('编辑 JSON'))
+    const rememberIdx = plain.findIndex(l => l.includes('批准并记住'))
+    const riskIdx = plain.findIndex(l => l.includes('解释风险'))
+    assert.ok(editIdx >= 0 && rememberIdx > editIdx && riskIdx > rememberIdx, 'order: 编辑 < 记住 < 解释风险')
+  })
+
+  it('rememberOption with existing risk explanation drops the risk line but keeps remember', () => {
+    const lines = formatApprovalPrompt({
+      toolName: 'write_file',
+      input: { file_path: '/tmp/x', content: 'x' },
+      columns: 60,
+      selectedIndex: 3,
+      rememberOption: true,
+      risk: { level: 'medium', lines: ['writes outside workspace'] },
+    }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain.some(l => l.includes('批准并记住此目录 (r)')), 'remember option survives risk shown')
+    assert.ok(!plain.some(l => l.includes('解释风险')), 'risk line gone once explanation shown')
+    assert.ok(plain.some(l => l.includes('> 4. 批准并记住')), 'selectedIndex 3 → remember is 4th option')
+  })
+
   it('fits within column width', () => {
     const lines = formatApprovalPrompt({
       toolName: 'write_file',

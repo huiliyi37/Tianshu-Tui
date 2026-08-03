@@ -157,10 +157,10 @@ describe('formatTeamDelivery', () => {
       fragment({ fromWave: 1, waveCount: 2, planned: { ...fragment().planned, taskIds: ['T2'] } }),
     ])
     const text = formatTeamDelivery(episode)
-    assert.ok(text.includes('2/2 waves'), `wave count: ${text}`)
-    assert.ok(text.includes('wave 1: T1'), 'wave 1 tasks')
-    assert.ok(text.includes('wave 2: T2'), 'wave 2 tasks')
-    assert.ok(text.includes('Changed files (2)'), 'cumulative changed files')
+    assert.ok(text.includes('2/2 波'), `wave count: ${text}`)
+    assert.ok(text.includes('波 1：T1'), 'wave 1 tasks')
+    assert.ok(text.includes('波 2：T2'), 'wave 2 tasks')
+    assert.ok(text.includes('改动文件（2）'), 'cumulative changed files')
     assert.ok(text.includes('review=pass'), 'overall verdict')
   })
 
@@ -174,7 +174,7 @@ describe('formatTeamDelivery', () => {
       fragment({ fromWave: 1, waveCount: 2, changedFiles: shared }),
     ])
     const text = formatTeamDelivery(episode)
-    assert.ok(text.includes('touched by multiple waves'), `conflict line: ${text}`)
+    assert.ok(text.includes('多波触碰的文件'), `conflict line: ${text}`)
     assert.ok(text.includes('src/shared.ts'), 'conflict file listed')
   })
 })

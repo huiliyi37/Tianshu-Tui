@@ -13,8 +13,28 @@ const todoItemSchema = z.object({
 
 export type TodoItem = z.infer<typeof todoItemSchema>
 
+/**
+ * Cumulative counters behind the "todo 退回率" baseline.
+ *
+ * `detectRegressions` is the only outcome-side detector in this repo that observes
+ * whether the model actually retains its own task state — everything else measures
+ * whether context was *injected*, not whether it *worked*. Its trigger used to go
+ * nowhere: the warning was rendered into one tool result and then dropped, so the
+ * rate was unknowable across sessions.
+ */
+export interface TodoRegressionStats {
+  /** todo writes seen this session — the denominator. Without it a raw count of
+   *  regressions says nothing: 3 regressions in 5 writes and in 500 differ. */
+  writes: number
+  /** writes that reset or dropped at least one previously completed item */
+  regressedWrites: number
+  /** individual completed items regressed, summed across writes */
+  regressedItems: number
+}
+
 export class TodoStore {
   private todos: TodoItem[] = []
+  private regressionStats: TodoRegressionStats = { writes: 0, regressedWrites: 0, regressedItems: 0 }
 
   read(): TodoItem[] {
     return [...this.todos]
@@ -46,6 +66,24 @@ export class TodoStore {
       }
     }
     return regressed
+  }
+
+  /**
+   * Record one write and whatever `detectRegressions` found for it. Kept separate
+   * from `detectRegressions` so that query stays free of side effects, and separate
+   * from `write` so a caller that skips the detection can't silently inflate the
+   * denominator with writes it never checked.
+   */
+  recordWrite(regressed: readonly string[]): void {
+    this.regressionStats.writes++
+    if (regressed.length > 0) {
+      this.regressionStats.regressedWrites++
+      this.regressionStats.regressedItems += regressed.length
+    }
+  }
+
+  getRegressionStats(): TodoRegressionStats {
+    return { ...this.regressionStats }
   }
 
   write(todos: TodoItem[]): void {

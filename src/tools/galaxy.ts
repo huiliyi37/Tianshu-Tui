@@ -20,6 +20,7 @@ import { profileIsWriteCapable, profileRegistry, delegationToolTimeoutMs } from 
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import { formatWorkerResultDigest } from '../agent/worker-result-digest.js'
 import { validatePathSafe } from './path-validate.js'
+import { resolvePlanConstraints } from '../agent/plan-constraints.js'
 import {
   MAX_TURNS_TOOL_DESCRIPTION,
   TIMEOUT_MS_TOOL_DESCRIPTION,
@@ -71,6 +72,9 @@ const parallelismSchema = z.enum(['expert', 'data'])
 const dimensionSchema = z.object({
   name: z.string().min(1).describe('维度标识（如 frontend / backend / review / test / docs）'),
   objective: z.string().min(1).describe('该维度的具体执行目标'),
+  constraints: z.array(z.string()).max(12).optional().describe(
+    '该维度必须遵守的任务级约束：计划里的反目标、待验证假设、不许动的东西。**逐字抄写原文，不要转述**——转述会丢掉约束的判据（曾把「加版本守卫只跑一次」压缩成「幂等」，执行方据此实现成每次开库都跑，删掉了真实数据）。worker 看不到计划文档，这是唯一的送达通道。',
+  ),
   authority: authorityStringSchema.optional().describe('该维度使用的星域（单星域，与 authorities 二选一）'),
   authorities: z.array(authorityStringSchema).min(2).max(5).optional().describe(
     '该维度使用的多个星域，分别给出独立的只读视角；它们不共享实时上下文，也不能用于并行写入。与 authority 二选一。',
@@ -110,6 +114,11 @@ const galaxyInputSchema = z.object({
     '用户已确认集群方案。首次调用不带此参数以展示方案并请求确认。',
   ),
   policy: aggregationPolicySchema.optional().describe('聚合策略。默认：all_required。'),
+  /** D8 L2：计划文件路径——让维度 worker 自动继承计划的反目标与待验证假设。
+   *  解析不到就是空，不报错不拦截。 */
+  planPath: z.string().optional().describe(
+    '可选，计划文件路径。维度 worker 会自动继承该计划的反目标与待验证假设。',
+  ),
 })
 
 // ── Dimension → WorkOrderKind 映射 ──────────────────────────────────────
@@ -320,6 +329,7 @@ function formatGalaxyResult(
   targets: GalaxyResultTarget[],
   dataParallelGroups: GalaxyDataParallelGroup[],
   strippedFiles: Array<{ label: string; files: string[] }> = [],
+  emptiedDims: string[] = [],
 ): string {
   const passed = run.results.filter(r => r.status === 'passed').length
   const total = run.results.length
@@ -380,6 +390,12 @@ function formatGalaxyResult(
     for (const s of strippedFiles) {
       lines.push(`      ${s.label}: ${s.files.join(', ')}`)
     }
+    lines.push('')
+  }
+
+  // 文件全被夺走的写维度（M3）：跳过派发而非派到闸口撞墙，必须可见。
+  if (emptiedDims.length > 0) {
+    lines.push(`  ⚠ 写维度文件全部被其他维度夺走，已跳过派发（请核查维度划分）：${emptiedDims.join('、')}`)
     lines.push('')
   }
 
@@ -495,6 +511,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
               properties: {
                 name: { type: 'string', description: '维度标识（如 frontend / backend / review / test / docs）' },
                 objective: { type: 'string', description: '该维度的具体执行目标' },
+                constraints: { type: 'array', items: { type: 'string' }, maxItems: 12, description: '该维度必须遵守的任务级约束：计划里的反目标、待验证假设、不许动的东西。逐字抄写原文，不要转述——worker 看不到计划文档，这是唯一的送达通道。' },
                 authority: { type: 'string', description: '该维度使用的星域 id。单星域时使用，与 authorities 二选一。' },
                 authorities: { type: 'array', items: { type: 'string' }, description: '该维度使用多个星域作独立只读分析；不共享实时上下文，也不能用于并行写入。与 authority 二选一。' },
                 parallelism: { type: 'string', enum: ['expert', 'data'], default: 'expert', description: 'expert 为按专长的单分片派发；data 为同一只读任务的独立副本。' },
@@ -516,6 +533,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
           autoReview: { type: 'boolean', default: true, description: '执行完成后自动追加审查维度（瑶光）。默认开启。' },
           confirm: { type: 'boolean', default: false, description: '用户已确认集群方案。首次调用不带此参数以展示方案并请求确认。' },
           policy: { type: 'string', enum: [...aggregationPolicyKinds], description: '聚合策略。默认：all_required。' },
+          planPath: { type: 'string', description: '可选，计划文件路径。维度 worker 会自动继承该计划的反目标与待验证假设。' },
         },
         required: ['objective', 'dimensions'],
       },
@@ -531,7 +549,12 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
         }
       }
 
-      const { objective, dimensions, autoReview, confirm, policy } = parsed.data
+      const { objective, dimensions, autoReview, confirm, policy, planPath } = parsed.data
+
+      // D8 L2：从 planPath 解析计划约束（反目标/待验证假设），合并进各维度的 constraints。
+      const planConstraints = planPath
+        ? resolvePlanConstraints(params.cwd, { planPath, objective })
+        : undefined
 
       // DP 组合法策略：all_required（默认）或 quorum（组级判定）。其他策略
       // （first_success/majority 等）会把 DP 副本当普通 worker 聚合掉，破坏
@@ -660,6 +683,10 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
             kind: mapDimensionToKind(dim.name),
             profile,
             authority: star,
+            // D8 L2：维度级约束在前，计划级在后（维度级更贴，优先占满 12 条预算）。
+            constraints: planConstraints && planConstraints.length > 0
+              ? [...(dim.constraints ?? []), ...planConstraints]
+              : dim.constraints,
             scope: { files: dim.files, symbols: dim.symbols },
             modelOverride: dim.modelOverride,
             tierFloor: dim.tierFloor,
@@ -703,6 +730,25 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
           strippedByDim.get(dimIdx)!.push(f)
         }
         ;(req as any).scope = { ...req.scope, files: deduped }
+      }
+
+      // M3 修复（审查）：文件「被去重夺走」的写维度不再派发到闸口——显式跳过
+      // 并入报告。只认 original>0 → deduped=0（被夺走）；原本就无 files 的写维度
+      // 不拦（其命运由 coordinator 的 scope 闸独立裁决，galaxy 层不越权）。
+      // 「全部文件被夺走」本质是维度划分问题，必须可见。
+      const emptiedWriteDims: string[] = []
+      for (let i = requests.length - 1; i >= 0; i--) {
+        const dimIdx = dimensionIndexByParentTurnId.get(requests[i]!.parentTurnId)
+        if (dimIdx === undefined || !writeDim(dimIdx)) continue
+        const originalCount = dimensions[dimIdx]?.files?.length ?? 0
+        const currentCount = requests[i]!.scope?.files?.length ?? 0
+        if (originalCount > 0 && currentCount === 0) {
+          emptiedWriteDims.unshift(dimensions[dimIdx]!.name)
+          requests.splice(i, 1)
+        }
+      }
+      if (requests.length === 0) {
+        return { content: `星河执行失败：全部可写维度的文件均被其他维度夺走（${emptiedWriteDims.join('、')}）。请重新划分不重叠的维度文件范围。`, isError: true }
       }
 
       // A review is a true join node. Use stable work-order IDs, not request
@@ -769,6 +815,9 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
               workOrderId: r.workOrderId,
               parentToolId: params.toolUseId,
               objective: objectiveById.get(r.workOrderId),
+              // 终态也带派发侧盖章的身份（星域/职能）——否则完成后面板星域信息断流。
+              profile: r.profile,
+              authority: r.authority,
               status: r.status,
               progressLine: progressSnippet(r.summary),
               summary: r.summary,
@@ -855,24 +904,36 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
         }
       }
 
+      const targets = requests.map(request => {
+        const dimensionIndex = dimensionIndexByParentTurnId.get(request.parentTurnId)
+        if (dimensionIndex === undefined) return { workOrderId: workerOrderId(request.parentTurnId), label: '全局审查', requestedModel: request.modelOverride?.model }
+        const dimension = dimensions[dimensionIndex]!
+        const stars = dimension.authorities ?? (dimension.authority ? [dimension.authority] : [])
+        const authorityIndex = stars.indexOf(request.authority ?? '')
+        const star = starDomainRegistry.get(request.authority ?? '')
+        const perspective = stars.length > 1 ? ' ◌ 多视角' : ''
+        const replicaIndex = replicaIndexByParentTurnId.get(request.parentTurnId)
+        const replica = replicaIndex === undefined ? '' : ` DP replica ${replicaIndex + 1}/${dimension.replicas}`
+        return {
+          workOrderId: workerOrderId(request.parentTurnId),
+          label: `${dimension.name}${perspective}${replica} ${star?.name ?? request.authority ?? authorityIndex}`,
+          requestedModel: request.modelOverride?.model,
+        }
+      })
+      // 结构化结果（galaxyGate 消费侧字段）：与 formatGalaxyResult 的
+      // 「聚合结论: N/M 个维度未通过」同一语义——passed/total 取全局 worker
+      // 终态计数，failed 取未通过维度的 label（对齐 GALAXY_DIM_LINE_RE 提取的
+      // 散文行 `<label>: <✗|⊗|↑>`，status !== 'passed' 即未通过）。
+      const resultByWorkOrderId = new Map(run.results.map(r => [r.workOrderId, r]))
+      const galaxyPassed = run.results.filter(r => r.status === 'passed').length
+      const galaxyTotal = run.results.length
+      const failedDimensions = targets
+        .filter(t => resultByWorkOrderId.get(t.workOrderId)?.status !== 'passed')
+        .map(t => t.label)
       return {
-        content: formatGalaxyResult(run, requests.map(request => {
-          const dimensionIndex = dimensionIndexByParentTurnId.get(request.parentTurnId)
-          if (dimensionIndex === undefined) return { workOrderId: workerOrderId(request.parentTurnId), label: '全局审查', requestedModel: request.modelOverride?.model }
-          const dimension = dimensions[dimensionIndex]!
-          const stars = dimension.authorities ?? (dimension.authority ? [dimension.authority] : [])
-          const authorityIndex = stars.indexOf(request.authority ?? '')
-          const star = starDomainRegistry.get(request.authority ?? '')
-          const perspective = stars.length > 1 ? ' ◌ 多视角' : ''
-          const replicaIndex = replicaIndexByParentTurnId.get(request.parentTurnId)
-          const replica = replicaIndex === undefined ? '' : ` DP replica ${replicaIndex + 1}/${dimension.replicas}`
-          return {
-            workOrderId: workerOrderId(request.parentTurnId),
-            label: `${dimension.name}${perspective}${replica} ${star?.name ?? request.authority ?? authorityIndex}`,
-            requestedModel: request.modelOverride?.model,
-          }
-        }), [...dataParallelGroups.values()],
-        [...strippedByDim.entries()].map(([idx, files]) => ({ label: dimensions[idx]!.name, files }))),
+        content: formatGalaxyResult(run, targets, [...dataParallelGroups.values()],
+          [...strippedByDim.entries()].map(([idx, files]) => ({ label: dimensions[idx]!.name, files })),
+          emptiedWriteDims),
         // DP quorum 未达成 → isError，让主 agent 的工具管线感知到失败信号，
         // 而非只靠报告文本判断（展示层→判定层的断层修复）。
         isError: dataParallelGroups.size > 0
@@ -881,6 +942,10 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
             new Map(run.results.map(r => [r.workOrderId, r])),
           ).length > 0 || undefined,
         uiContent: formatGalaxyUi(run, dimensions),
+        orchestration: {
+          kind: 'galaxy',
+          dimensions: { passed: galaxyPassed, total: galaxyTotal, failed: failedDimensions },
+        },
       }
     },
 

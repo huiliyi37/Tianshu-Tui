@@ -166,7 +166,23 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
     parts.push(`complexity="${coarseLabel(s.complexity)}"`)
   }
   // momentum, freshness, pressure — routing-only: consumed by hooks from sensorium directly
-  if (s.stability !== undefined) parts.push(`stability="${coarseLabel(s.stability)}"`)
+  // Provenance suffix: `partial` means the verification component was vacuous and the
+  // score was re-normalized around its absence — a re-derived estimate, not a reading.
+  // Rendering it identically to a measured value is the same false confidence the
+  // verification_coverage branch above exists to prevent. SensoriumQuality has carried
+  // this flag since it was introduced; until now only programmatic consumers read it,
+  // so the model saw an estimate and a measurement as the same string.
+  // Byte-stable, but not because filesModified is monotonic — it is not: initializeRun
+  // calls evidence.reset() per user message. It holds because only the state observed at
+  // a user boundary reaches the wire (the trailer freezes there; mid-run mirror changes
+  // are never re-emitted), and at that instant the reset has just run, so filesModified
+  // is 0 and quality is 'partial' every time. The suffix is therefore a constant on the
+  // wire, not a flip. Corollary worth knowing before trusting this block: the model never
+  // sees a 'measured' stability here, because it never sees any mid-run mirror state.
+  if (s.stability !== undefined) {
+    const provenance = s.quality?.stability === 'partial' ? ':partial' : ''
+    parts.push(`stability="${coarseLabel(s.stability)}${provenance}"`)
+  }
 
   if (ledger.strategy) {
     const st = ledger.strategy

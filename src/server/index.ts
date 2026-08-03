@@ -90,7 +90,7 @@ export function createRouter(routes: Record<string, RouteHandler>) {
   }
 }
 
-export async function startServer(port: number, routes: Record<string, RouteHandler>, apiToken?: string): Promise<{ close: () => void }> {
+export async function startServer(port: number, routes: Record<string, RouteHandler>, apiToken?: string): Promise<{ close: (cb?: (err?: Error) => void) => void }> {
   const router = createRouter(routes)
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -143,7 +143,7 @@ export async function startServer(port: number, routes: Record<string, RouteHand
       resolve()
     })
   })
-  return { close: () => server.close() }
+  return { close: (cb) => server.close(cb) }
 }
 
 const BODY_TOO_LARGE = Symbol('body-too-large')

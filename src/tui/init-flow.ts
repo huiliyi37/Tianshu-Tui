@@ -40,6 +40,8 @@ export interface InitView {
   kind: 'multi-choice' | 'confirm'
   title: string
   subtitle?: string
+  /** 信息性提示行（非 toggleable 动作项）——如第三方 agent 配置参考提示。 */
+  note?: string
   /** e.g. "步骤 1 / 3" */
   stepLabel?: string
   /** multi-choice step */
@@ -202,11 +204,14 @@ export class InitFlow {
   private readonly hookSpecs: InitHookSpec[]
   private readonly skillPicks: boolean[]
   private readonly hookPicks: boolean[]
+  /** 项目根存在的第三方 agent 配置（如 CLAUDE.md）——仅作人工参考提示。 */
+  private readonly externalAgentDocs?: string[]
   private cancelledFlag = false
 
   constructor(input: InitFlowInput) {
     this.skillSpecs = suggestInitSkills(input)
     this.hookSpecs = suggestInitHooks(input)
+    this.externalAgentDocs = input.fingerprint.externalAgentDocs
     // 进入 details 的项默认全选——用户已在 scope 显式勾选该类别；
     // 「默认不勾选」的克制纪律作用于 scope 层的 skills/hooks 本身。
     this.skillPicks = this.skillSpecs.map(() => true)
@@ -222,6 +227,9 @@ export class InitFlow {
           title: '项目初始化 — 生成范围',
           subtitle: '选择要生成的内容（已有文件与配置不会被覆盖）',
           stepLabel: '步骤 1 / 3',
+          note: this.externalAgentDocs && this.externalAgentDocs.length > 0
+            ? `ℹ 检测到 ${this.externalAgentDocs.join('、')}（第三方 agent 配置）。可人工参考其内容充实 .rivet.md 的 Stack/纪律节；天枢不会自动搬运或注入它（身份边界）。`
+            : undefined,
           options: [
             {
               id: SCOPE_VERIFY,

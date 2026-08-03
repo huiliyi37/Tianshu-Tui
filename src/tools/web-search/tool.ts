@@ -98,7 +98,12 @@ export function createWebSearchTool(deps: WebSearchDeps = {}): Tool {
       }
 
       const formatted = results
-        .map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`)
+        .map((r, i) => {
+          // 来源站点与发布时间（博查等后端提供）附在 snippet 后，帮助判断可信度与时效
+          const meta = [r.siteName, r.publishedAt].filter(Boolean).join(' · ')
+          const snippet = r.snippet + (meta ? `（${meta}）` : '')
+          return `${i + 1}. [${r.title}](${r.url})\n   ${snippet}`
+        })
         .join('\n\n')
 
       const via = backend ? `（经 ${backend}）` : ''

@@ -116,7 +116,11 @@ export class OAuthAuth implements AuthProvider {
 
   private startCallbackServer(port: number, expectedState: string, authUrl: string): Promise<string> {
     return new Promise((resolve, reject) => {
+      let settled = false
+
       const timeout = setTimeout(() => {
+        if (settled) return
+        settled = true
         server.close()
         reject(new Error('OAuth callback timed out after 5 minutes'))
       }, 5 * 60_000)
@@ -138,6 +142,7 @@ export class OAuthAuth implements AuthProvider {
           res.end('<h1>State mismatch — possible CSRF</h1>')
           server.close()
           clearTimeout(timeout)
+          settled = true
           reject(new Error('OAuth state mismatch'))
           return
         }
@@ -148,6 +153,7 @@ export class OAuthAuth implements AuthProvider {
           res.end(`<h1>Authorization failed: ${error}</h1>`)
           server.close()
           clearTimeout(timeout)
+          settled = true
           reject(new Error(`OAuth error: ${error}`))
           return
         }
@@ -156,6 +162,7 @@ export class OAuthAuth implements AuthProvider {
         res.end('<h1>Authentication successful — you can close this tab</h1>')
         server.close()
         clearTimeout(timeout)
+        settled = true
         resolve(code)
       })
 
@@ -171,6 +178,8 @@ export class OAuthAuth implements AuthProvider {
       })
 
       server.on('error', (err) => {
+        if (settled) return
+        settled = true
         clearTimeout(timeout)
         reject(err)
       })

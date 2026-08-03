@@ -179,4 +179,26 @@ export class WorkOrderQueue {
   pending(): WorkOrder[] {
     return this.entries.map(e => e.order)
   }
+
+  /** In-flight order 快照（策略短路挑同组在跑成员用）。 */
+  inFlight(): WorkOrder[] {
+    return [...this.inFlightOrders.values()]
+  }
+
+  /** 撤走满足谓词且尚未调度的 order。被撤 order 记入 failedIds
+   *  （="不再产出"，依赖者走既有 skip/alternate/blocked 语义），
+   *  返回被撤列表供调用方合成 policy-cancelled 结果。 */
+  cancelPending(predicate: (order: WorkOrder) => boolean): WorkOrder[] {
+    const cancelled: WorkOrder[] = []
+    this.entries = this.entries.filter(e => {
+      if (!predicate(e.order)) return true
+      cancelled.push(e.order)
+      return false
+    })
+    for (const order of cancelled) {
+      this.failedIds.add(order.id)
+      this.emit({ type: 'failed', orderId: order.id })
+    }
+    return cancelled
+  }
 }

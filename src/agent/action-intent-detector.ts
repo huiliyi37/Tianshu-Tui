@@ -44,7 +44,7 @@ const IMPERATIVE_HEAD_RE =
   /^(?:(?:先|再|然后|接着|继续|马上|立即|下面|现在)\s*)?(?:跑|运行|执行|修(?:复|改|正|好|一下|掉|\s)|重写|更新|编辑|提交|构建|部署|安装|重启|验证|重构|(?:re)?run(?![a-z])|fix(?![a-z])|update(?![a-z])|rewrite(?![a-z])|commit(?![a-z])|build(?![a-z])|deploy(?![a-z])|verify(?![a-z]))/i
 
 const COMPLETION_MARKER_RE =
-  /(了|已|完成|完毕|通过|失败|成功|中断|报错|✓|✗|done\b|passed\b|failed\b|finished\b)/i
+  /(了|已|完成|完毕|通过|失败|成功|中断|报错|生效|即可|✓|✗|done\b|passed\b|failed\b|finished\b)/i
 
 function lastSentence(text: string): string {
   const parts = text.split(/[。！？!?\n]+/)
@@ -77,6 +77,13 @@ export const DELIVERY_SIGNAL_RE =
   /(?:typecheck\s*[✓✗]|^\d+\s*passed|^\d+\/\d+\s*[✓✗]|任务完成[，。]|交付[。！]|commit\s+[0-9a-f]{7}|^[✓✗]\s|(?:^|\n)>?\s*(?:fix|feat|refactor|test|chore|docs|perf)[(:]\s)/mi
 
 /**
+ * 条件/否定前缀——在行动承诺词附近出现了"除非""不需要""不必"等时，
+ * 是假设性/否定性表述（"除非你想让我也审查 X"），不是真正的行动承诺。
+ * 只看尾部 120 字符内的前缀，避免跨段误匹配。
+ */
+const CONDITIONAL_PREFIX_RE = /(?:除非|不需要|不必|不用|无需|没必要|没打算)\s*[^。！？!?\n]{0,150}?(?:让我|接下来|现在|我来|我[先去])/i
+
+/**
  * 检查文本尾部是否宣布了行动：显式承诺（"让我…"+工具动词）或祈使收尾。
  * 只看尾部 600 字符——行动承诺（如果有）通常在回复结尾。
  */
@@ -93,6 +100,10 @@ export function hasActionIntent(text: string): boolean {
   // 用户视角凭空多出一轮。无论问的是方向（"哪条？"）还是许可（"要我跑吗？"），
   // 正确行为都是等用户回答，不该被推着自答自干。
   if (/[？?]$/.test(tail.trimEnd())) return false
+  // 条件/否定守卫：尾部含"除非"等前缀时，即便命中了承诺词+工具动词，
+  // 也属于假设性表述（如"不需要改，除非你想让我也查一下 X"），不应触发提醒。
+  // 查全文尾部（600 字符），非仅 120——条件前缀可能离承诺词很远（引用中）。
+  if (CONDITIONAL_PREFIX_RE.test(tail)) return false
   if (ACTION_PROMISE_PATTERN.test(tail) && TOOL_VERB_PATTERN.test(tail)) return true
   return hasImperativeActionTail(text)
 }
@@ -107,6 +118,8 @@ export function hasWriteActionIntent(text: string): boolean {
   const tail = text.length > 600 ? text.slice(-600) : text
   // 问句收尾守卫：同 hasActionIntent——收尾问句是在等用户，不是悬空写承诺。
   if (/[？?]$/.test(tail.trimEnd())) return false
+  // 条件/否定守卫：同 hasActionIntent
+  if (CONDITIONAL_PREFIX_RE.test(tail)) return false
   if (ACTION_PROMISE_PATTERN.test(tail) && WRITE_VERB_PATTERN.test(tail)) return true
   return hasImperativeActionTail(text)
 }

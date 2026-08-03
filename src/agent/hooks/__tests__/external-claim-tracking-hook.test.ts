@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createExternalClaimTrackingHook, extractClaimedPaths } from '../external-claim-tracking-hook.js'
+import { createExternalClaimTrackingHook, extractClaimedPaths, findUnverifiedClaimRefs } from '../external-claim-tracking-hook.js'
 import type { AdvisoryEntry } from '../../advisory-bus.js'
 import type { RuntimeHookContext, RuntimeToolEvent } from '../../runtime-hooks.js'
 
@@ -235,6 +235,159 @@ describe('external-claim-tracking-hook', () => {
       } as unknown as RuntimeToolEvent)
       // should NOT be in claims — it's an assigned path
       assert.equal(hook.getClaimTracker().claims.length, 0)
+    })
+
+    // ── Phase 2：verifiedAt 核验标记（Step 1.5）──────────────────
+
+    it('marks claim verifiedAt when read_file targets the claimed path', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:42'))
+      hook.run(makeCtx(3), {
+        name: 'read_file', success: true,
+        input: { file_path: 'src/agent/loop.ts' },
+      } as unknown as RuntimeToolEvent)
+      assert.equal(hook.getClaimTracker().claims[0]!.verifiedAt, 3)
+    })
+
+    it('does NOT mark verifiedAt on failed read_file', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:42'))
+      hook.run(makeCtx(3), {
+        name: 'read_file', success: false,
+        input: { file_path: 'src/agent/loop.ts' },
+      } as unknown as RuntimeToolEvent)
+      assert.equal(hook.getClaimTracker().claims[0]!.verifiedAt, undefined)
+    })
+
+    it('does NOT mark verifiedAt when read_file targets an unrelated path', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:42'))
+      hook.run(makeCtx(3), {
+        name: 'read_file', success: true,
+        input: { file_path: 'src/other/file.ts' },
+      } as unknown as RuntimeToolEvent)
+      assert.equal(hook.getClaimTracker().claims[0]!.verifiedAt, undefined)
+    })
+
+    it('marks verifiedAt for verify-shaped bash (rg with claimed path)', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:42'))
+      hook.run(makeCtx(3), {
+        name: 'bash', success: true,
+        input: { command: 'rg -n foo src/agent/loop.ts' },
+      } as unknown as RuntimeToolEvent)
+      assert.equal(hook.getClaimTracker().claims[0]!.verifiedAt, 3)
+    })
+
+    it('does NOT mark verifiedAt for non-verify bash', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:42'))
+      hook.run(makeCtx(3), {
+        name: 'bash', success: true,
+        input: { command: 'npm run build' },
+      } as unknown as RuntimeToolEvent)
+      assert.equal(hook.getClaimTracker().claims[0]!.verifiedAt, undefined)
+    })
+
+    // ── findUnverifiedClaimRefs（deliver 门禁复用）────────────────
+
+    it('returns claimed path when referenced in text and unverified', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:100'))
+      const refs = findUnverifiedClaimRefs(hook.getClaimTracker(), 'fix: src/agent/loop.ts:100 的问题')
+      assert.deepEqual(refs, ['src/agent/loop.ts'])
+    })
+
+    it('returns empty when claim is verified', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:100'))
+      hook.run(makeCtx(2), {
+        name: 'read_file', success: true,
+        input: { file_path: 'src/agent/loop.ts' },
+      } as unknown as RuntimeToolEvent)
+      const refs = findUnverifiedClaimRefs(hook.getClaimTracker(), 'fix: src/agent/loop.ts:100 的问题')
+      assert.deepEqual(refs, [])
+    })
+
+    it('[待核] 标注行豁免——不参与引用抽取', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:100'))
+      const refs = findUnverifiedClaimRefs(
+        hook.getClaimTracker(),
+        '已修复（[待核] src/agent/loop.ts:100 尚待独立核验）',
+      )
+      assert.deepEqual(refs, [])
+    })
+
+    it('non-claimed path reference is not flagged', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:100'))
+      const refs = findUnverifiedClaimRefs(hook.getClaimTracker(), 'fix: src/tools/bar.ts:45')
+      assert.deepEqual(refs, [])
+    })
+
+    // ── Step 3：deliver 软提醒兜底 ───────────────────────────────
+
+    it('deliver_task referencing unverified claim submits external-claim-in-delivery', () => {
+      const submitted: AdvisoryEntry[] = []
+      const hook = createExternalClaimTrackingHook({
+        advisoryBus: { submit: (e: AdvisoryEntry) => { submitted.push(e) } },
+      })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:100'))
+      hook.run(makeCtx(5), {
+        name: 'deliver_task', success: true,
+        input: { message: 'fix: 修了 src/agent/loop.ts:100 的问题' },
+      } as unknown as RuntimeToolEvent)
+      assert.equal(submitted.length, 1)
+      assert.equal(submitted[0]!.key, 'external-claim-in-delivery')
+      assert.match(submitted[0]!.content, /src\/agent\/loop\.ts/)
+    })
+
+    it('deliver_task isError (hard block) does NOT submit soft reminder', () => {
+      const submitted: AdvisoryEntry[] = []
+      const hook = createExternalClaimTrackingHook({
+        advisoryBus: { submit: (e: AdvisoryEntry) => { submitted.push(e) } },
+      })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:100'))
+      hook.run(makeCtx(5), {
+        name: 'deliver_task', success: false, // isError → success=false（取反语义）
+        input: { message: 'fix: src/agent/loop.ts:100' },
+      } as unknown as RuntimeToolEvent)
+      assert.equal(submitted.length, 0)
+    })
+
+    it('deliver_task referencing verified claim does not submit', () => {
+      const submitted: AdvisoryEntry[] = []
+      const hook = createExternalClaimTrackingHook({
+        advisoryBus: { submit: (e: AdvisoryEntry) => { submitted.push(e) } },
+      })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:100'))
+      hook.run(makeCtx(2), {
+        name: 'read_file', success: true,
+        input: { file_path: 'src/agent/loop.ts' },
+      } as unknown as RuntimeToolEvent)
+      hook.run(makeCtx(5), {
+        name: 'deliver_task', success: true,
+        input: { message: 'fix: src/agent/loop.ts:100' },
+      } as unknown as RuntimeToolEvent)
+      assert.equal(submitted.length, 0)
+    })
+
+    // ── Step 2 第二判据：verifiedAt 替代 history 窗口 ────────────
+
+    it('write after verifiedAt does not fire even when history window rolled out', () => {
+      const submitted: AdvisoryEntry[] = []
+      const hook = createExternalClaimTrackingHook({
+        advisoryBus: { submit: (e: AdvisoryEntry) => { submitted.push(e) } },
+      })
+      hook.run(makeCtx(1), makeDelegateResult('src/agent/loop.ts:100'))
+      // 核验发生在 turn 2（历史窗口之外），写操作在 turn 3、history 为空
+      hook.run(makeCtx(2), {
+        name: 'read_file', success: true,
+        input: { file_path: 'src/agent/loop.ts' },
+      } as unknown as RuntimeToolEvent)
+      hook.run(makeCtx(3), makeWriteTool('src/agent/loop.ts'))
+      assert.equal(submitted.length, 0)
     })
   })
 })

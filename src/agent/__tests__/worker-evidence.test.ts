@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { WorkerResult } from '../work-order.js'
 import type { WorkerTranscript } from '../worker-session.js'
-import { verifyWorkerEvidence } from '../worker-evidence.js'
+import { reconcileCapturedWorkerFacts, verifyWorkerEvidence } from '../worker-evidence.js'
 
 function result(overrides: Partial<WorkerResult>): WorkerResult {
   return {
@@ -19,7 +19,7 @@ function result(overrides: Partial<WorkerResult>): WorkerResult {
   }
 }
 
-function transcript(toolUses: string[], errors: string[] = [], bashCommands?: string[], failedBashCommands?: string[]): WorkerTranscript {
+function transcript(toolUses: string[], errors: string[] = [], bashCommands?: string[], failedBashCommands?: string[], mutatedFiles?: string[]): WorkerTranscript {
   return {
     text: '',
     thinking: '',
@@ -29,6 +29,7 @@ function transcript(toolUses: string[], errors: string[] = [], bashCommands?: st
     repairAttempts: 0,
     bashCommands,
     failedBashCommands,
+    mutatedFiles,
   }
 }
 
@@ -357,4 +358,86 @@ test('claim language backed by real verification passes without extra risk', () 
   }), 'implementer', transcript(['run_tests']))
 
   assert.ok(!checked.risks.some(r => r.includes('宣称未经复现')))
+})
+
+
+// --- 系统捕获优先（reconcileCapturedWorkerFacts：changedFiles/verification 交叉校验）---
+
+test('reconcile: 自报与捕获一致 → 原样返回（同一引用）', () => {
+  const r = result({
+    changedFiles: ['src/a.ts'],
+    evidenceStatus: 'verified',
+    verification: { command: 'npm test', status: 'passed', scope: 'targeted' },
+  })
+  const out = reconcileCapturedWorkerFacts(r, transcript(['edit_file', 'bash'], [], ['npm test'], [], ['src/a.ts']))
+
+  assert.equal(out, r)
+})
+
+test('reconcile: 自报多出无工具痕迹的文件 → risk + verified 降 unverified', () => {
+  const checked = reconcileCapturedWorkerFacts(result({
+    changedFiles: ['src/a.ts', 'src/ghost.ts'],
+    evidenceStatus: 'verified',
+    verification: { command: 'npm test', status: 'passed', scope: 'targeted' },
+  }), transcript(['edit_file', 'bash'], [], ['npm test'], [], ['src/a.ts']))
+
+  // 并集保留自报（不误删模型真改了但捕获漏报的文件），但无痕迹文件记 risk。
+  assert.deepEqual(checked.changedFiles, ['src/a.ts', 'src/ghost.ts'])
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('自报 changedFiles 无工具调用痕迹') && r.includes('src/ghost.ts')))
+})
+
+test('reconcile: 捕获多出未自报的文件 → 并入 changedFiles，无 risk', () => {
+  const checked = reconcileCapturedWorkerFacts(result({
+    changedFiles: ['src/a.ts'],
+  }), transcript(['edit_file', 'write_file'], [], [], [], ['src/a.ts', 'src/b.ts']))
+
+  assert.deepEqual(checked.changedFiles, ['src/a.ts', 'src/b.ts'])
+  assert.equal(checked.risks.length, 0)
+})
+
+test('reconcile: transcript.mutatedFiles 缺省（捕获未激活）→ 保持自报原样放行', () => {
+  const r = result({ changedFiles: ['src/a.ts'] })
+  const out = reconcileCapturedWorkerFacts(r, transcript(['read_file']))
+
+  assert.equal(out, r)
+})
+
+test('reconcile: 真实跑过验证但漏报 verification → 补 passed 元数据（run_tests）', () => {
+  const checked = reconcileCapturedWorkerFacts(result({
+    changedFiles: ['src/a.ts'],
+  }), transcript(['edit_file', 'run_tests'], [], [], [], ['src/a.ts']))
+
+  assert.deepEqual(checked.verification, { command: 'run_tests', status: 'passed', scope: 'targeted' })
+})
+
+test('reconcile: 真实跑过验证但漏报 verification → 补 passed 元数据（验证形状 bash）', () => {
+  const checked = reconcileCapturedWorkerFacts(result({
+    changedFiles: ['src/a.ts'],
+  }), transcript(['edit_file', 'bash'], [], ['npm test'], [], ['src/a.ts']))
+
+  assert.deepEqual(checked.verification, { command: 'npm test', status: 'passed', scope: 'targeted' })
+})
+
+test('reconcile: 验证跑挂却自报 passed → 改 failed + risk', () => {
+  // 自报元数据不带数值字段（schema 放宽后的合法形状）。
+  const checked = reconcileCapturedWorkerFacts(result({
+    changedFiles: ['src/a.ts'],
+    verification: { command: 'npm test', status: 'passed', scope: 'targeted' },
+  }), transcript(['edit_file', 'bash'], ['npm test failed: 2 failing'], ['npm test'], ['npm test'], ['src/a.ts']))
+
+  assert.equal(checked.verification?.status, 'failed')
+  assert.ok(checked.risks.some(r => r.includes('自报 passed 不可信')))
+})
+
+test('reconcile: 幂等——重复调用结果不变', () => {
+  const r = result({
+    changedFiles: ['src/a.ts', 'src/ghost.ts'],
+    evidenceStatus: 'verified',
+  })
+  const t = transcript(['edit_file', 'bash'], [], ['npm test'], [], ['src/a.ts'])
+
+  const once = reconcileCapturedWorkerFacts(r, t)
+  const twice = reconcileCapturedWorkerFacts(once, t)
+  assert.deepEqual(twice, once)
 })

@@ -261,6 +261,9 @@ export interface AgentConfig {
   /** 多会话隔离：读取本会话 TodoStore。turn-end 任务进度回灌与 todo-reminder 快照
    *  统一经此读取，避免并发会话共用全局 defaultStore 串台。缺省回退全局 getTodos()。 */
   getTodos?: () => import('../tools/todo-store.js').TodoItem[]
+  /** 同上，读本会话 TodoStore 的退回计数。postSession 落 meta，供跨会话取「todo
+   *  退回率」基线——这是本仓唯一的结果侧探测器，此前触发即进黑洞。 */
+  getTodoRegressionStats?: () => import('../tools/todo-store.js').TodoRegressionStats
 }
 
 /**

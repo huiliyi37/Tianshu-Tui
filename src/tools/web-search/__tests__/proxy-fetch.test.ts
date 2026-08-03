@@ -56,7 +56,10 @@ describe('createProxyAwareFetch', () => {
   it('without proxy opts, passes init through without dispatcher', async () => {
     await withoutProxyEnv(async () => {
       const spy = spyFetch()
-      const wrapped = createProxyAwareFetch(undefined, spy.fetch)
+      // noProxy:'*' 隔离宿主机 OS 系统代理（开发机 macOS scutil --proxy 可能
+      // 读到 Clash 等），本用例验证的是「proxy-aware fetch 在无显式 proxyUrl
+      // 时透传 init 不注入 dispatcher」的 wiring，OS 回退由 proxy-resolver 覆盖。
+      const wrapped = createProxyAwareFetch({ noProxy: '*' }, spy.fetch)
       const res = await wrapped('https://example.com/search', { headers: { 'User-Agent': 'test' } })
       assert.equal(res.status, 200)
       assert.equal(res.ok, true)
@@ -131,11 +134,14 @@ describe('createProxyAwareFetch', () => {
   it('empty proxy opts behave same as undefined', async () => {
     await withoutProxyEnv(async () => {
       const spy = spyFetch()
-      const wrapped = createProxyAwareFetch({}, spy.fetch)
+      // noProxy:'*' 显式绕过宿主机 OS 系统代理（开发机 macOS 可能正开着
+      // Clash/V2Ray，scutil --proxy 会读到它）——本用例只验证「无 proxyUrl
+      // 时不强制走代理」，OS 系统代理的回退由 proxy-resolver 测试覆盖。
+      const wrapped = createProxyAwareFetch({ noProxy: '*' }, spy.fetch)
       const res = await wrapped('https://example.com/search')
       assert.equal(res.status, 200)
       const hasDispatcher = 'dispatcher' in (spy.lastInit ?? {})
-      assert.equal(hasDispatcher, false, 'empty opts should not add dispatcher')
+      assert.equal(hasDispatcher, false, 'no proxyUrl + noProxy:* should not add dispatcher')
     })
   })
 })

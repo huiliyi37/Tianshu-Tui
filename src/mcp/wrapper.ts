@@ -1,5 +1,6 @@
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import { classifyMcpError } from './failure-classifier.js'
+import { evaluateMcpPolicy, type McpCapability } from './policy.js'
 
 export function mcpToolName(serverId: string, toolName: string): string {
   const safeServerId = serverId.replaceAll('__', '_')
@@ -28,7 +29,10 @@ export function createMcpConnectorConsent(): McpConnectorConsent {
   }
 }
 
-const WRITE_TOOL_PATTERNS = /\b(write|create|update|delete|remove|push|post|put|patch|execute)\b/i
+export interface McpToolSecurityPolicy {
+  capability?: Exclude<McpCapability, 'unknown'>
+  requireApproval?: true
+}
 
 interface McpToolDefinition {
   name: string
@@ -52,15 +56,25 @@ export function createMcpToolWrapper(
   mcpDef: McpToolDefinition,
   callTool: CallToolFn,
   consent?: McpConnectorConsent,
+  securityPolicy?: McpToolSecurityPolicy,
 ): Tool {
   const rivetName = mcpToolName(serverId, mcpDef.name)
   const desc = mcpDef.description ?? `MCP tool: ${mcpDef.name} (from ${serverId})`
-  const needsApproval = WRITE_TOOL_PATTERNS.test(mcpDef.name) || WRITE_TOOL_PATTERNS.test(desc)
+  const policy = evaluateMcpPolicy({
+    toolName: rivetName,
+    declaredCapability: securityPolicy?.capability,
+    trustedServers: [],
+    blockedTools: [],
+    allowedTools: [],
+    mustConfirmCapabilities: ['write', 'execute', 'network'],
+  })
+  const needsApproval = securityPolicy?.requireApproval === true || policy.action !== 'allow'
 
   return {
     definition: {
       name: rivetName,
       description: desc,
+      capability: securityPolicy?.capability,
       input_schema: {
         type: 'object',
         properties: mcpDef.inputSchema.properties ?? {},
@@ -79,7 +93,7 @@ export function createMcpToolWrapper(
           .map(c => c.text)
         const content = textParts.join('\n') || '(no text content)'
 
-        const annotation = `[MCP: ${serverId} · ${needsApproval ? 'write-capable' : 'read-only'}]`
+        const annotation = `[MCP: ${serverId} · ${policy.capability}${needsApproval ? ' · approval-required' : ''}]`
 
         if (result.isError) {
           // 模型只需知道"失败 + 首行原因"，不必把整段服务器错误文本灌进上下文；
@@ -94,7 +108,7 @@ export function createMcpToolWrapper(
         return { content: `${content}\n${annotation}` }
       } catch (err) {
         const classified = classifyMcpError(err)
-        const annotation = `[MCP: ${serverId} · ${needsApproval ? 'write-capable' : 'read-only'} · error: ${classified.class} · ${classified.suggestion}]`
+        const annotation = `[MCP: ${serverId} · ${policy.capability}${needsApproval ? ' · approval-required' : ''} · error: ${classified.class} · ${classified.suggestion}]`
         // annotation 已含 class + suggestion 作为精简信号；模型 content 只取错误首行，
         // 完整消息走 uiContent。
         const fullMsg = err instanceof Error ? err.message : String(err)
@@ -108,8 +122,8 @@ export function createMcpToolWrapper(
     },
 
     requiresApproval(_params: ToolCallParams): boolean {
-      // Write-capable tools always require approval. Read-only tools require a
-      // one-time opt-in per connector (when a consent store is wired in).
+      // Undeclared or non-read capabilities require approval on every call.
+      // Declared read-only tools still require a one-time connector opt-in.
       if (needsApproval) return true
       if (consent && !consent.hasConsented(serverId)) return true
       return false

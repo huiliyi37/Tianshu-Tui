@@ -59,7 +59,7 @@ import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domai
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import type { ActiveStarDomain } from '../agent/star-domain.js'
 import type { StarDomainId } from '../agent/star-domain.js'
-import { skillRegistry, loadProjectSkills, listInstallableSkills, importSkillsIntoRivet, countInstalledSkills, type InstallableSkill } from '../skills/skill-loader.js'
+import { skillRegistry, loadProjectSkills, listInstallableSkills, importSkillsIntoRivet, countInstalledSkills, readSkillContent, writeSkill, uninstallSkill, type InstallableSkill } from '../skills/skill-loader.js'
 import type { MissionStore } from './mission-store.js'
 import { join, resolve, dirname } from 'node:path'
 import { readFile } from 'node:fs/promises'
@@ -71,6 +71,7 @@ import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
 import { parseAskUserQuestions } from '../tools/ask-user-question.js'
 import { grantApp as grantComputerUseApp } from '../tools/computer-use/app-grants.js'
+import { outOfWorkspaceFilePaths } from '../agent/tool-pipeline.js'
 import {
   DELEGATE_CAPABILITY_TTL_MS,
   DELEGATE_TIMEOUT_MS,
@@ -144,6 +145,8 @@ export interface ModelOption {
   alias: string
   provider: string
   contextWindow?: number
+  /** 擅长场景 — 预设定义处填充，透传到桌面模型选择器。 */
+  description?: string
 }
 
 /** PlusMenu — a model option annotated with whether it's the session's current. */
@@ -157,6 +160,8 @@ export interface SkillStatus {
   description: string
   source: string
   enabled: boolean
+  /** True when a backing file exists that the editor can open (not built-in/plugin). */
+  editable?: boolean
 }
 
 /** Minimal agent surface the manager needs — decoupled from AgentLoop for tests. */
@@ -864,7 +869,7 @@ interface InternalSession {
 }
 
 /** Tools that spawn worker agents — surfaced as delegation-tree nodes (N3). */
-const DELEGATION_TOOLS = new Set(['delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene'])
+const DELEGATION_TOOLS = new Set(['delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene', 'galaxy'])
 
 /** 审批拒绝后的 watchdog 续跑抑制窗口——与 TuiApp.APPROVAL_STALL_GRACE_MS 对齐：
  *  拒绝后立刻 stall 的自动 continue 只会重发同一个被拒调用（deny→continue→deny 环）。 */
@@ -1316,6 +1321,9 @@ export class RuntimeSessionManager {
           error: `event log could not be read — history replay is incomplete (${loadError})`,
         })
       }
+      // 首开兜底对账：sidecar 重启 / abort 吞事件留下的「运行中」死节点在此
+      // 补终态——用户打开会话即自愈（仅空闲会话；running 的由 run 收尾对账）。
+      this.sweepStaleDelegationNodes(session, 'caller_aborted')
     }
     this.touchLoaded(session)
     this.evictLoadedBeyondCap()
@@ -1395,6 +1403,8 @@ export class RuntimeSessionManager {
               error: `event log could not be read — history replay is incomplete (${loadError})`,
             })
           }
+          // 与 ensureEvents 同步路径相同的首开兜底对账。
+          this.sweepStaleDelegationNodes(session, 'caller_aborted')
         })().finally(() => {
           session.eventsLoadPromise = undefined
         })
@@ -2030,6 +2040,15 @@ export class RuntimeSessionManager {
             this.settleHandoffArchive(session)
             this.append(session, 'done', { status: session.record.status })
             this.persistRecord(session)
+            // 兜底对账：abort 路径上 worker 的终态 delegation 事件会被回调门禁
+            // 吞掉（见 sweepStaleDelegationNodes）。延迟一拍——coordinator 的
+            // abort 结算链是纯 promise，setImmediate 时 orderControllers 必已
+            // 清空，不会把仍在结算的 worker 误判为死亡。
+            const sweepReason = session.record.status === 'aborted' ? 'caller_aborted' : 'unknown'
+            setImmediate(() => {
+              if (this.sessions.get(id) !== session) return
+              this.sweepStaleDelegationNodes(session, sweepReason)
+            })
             this.maybeWatchdogAutoContinue(session)
             if (session.record.archived) this.unloadSession(session)
           } finally {
@@ -2532,6 +2551,10 @@ export class RuntimeSessionManager {
       description: s.description,
       source: s.source ?? (s.builtIn ? 'builtin' : 'rivet'),
       enabled: !session.disabledSkills.has(s.name),
+      // Editable when there's a backing file on disk (built-ins have none;
+      // plugin skills point at the plugin dir, which the editor could open
+      // but we keep read-only for safety — users edit via the plugin's own flow).
+      editable: !!s.bodyPath && s.source !== 'builtin' && s.source !== 'plugin',
     }))
   }
 
@@ -2595,6 +2618,43 @@ export class RuntimeSessionManager {
     const session = this.sessions.get(id)
     if (!session) return undefined
     return importSkillsIntoRivet(session.record.cwd, names)
+  }
+
+  /**
+   * Skills CRUD — read the full SKILL.md text for the editor. Returns null for
+   * built-in / plugin skills (no editable backing file) so the UI can show a
+   * read-only notice. Returns undefined when the session is missing.
+   */
+  readSkillContent(id: string, name: string): string | null | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return readSkillContent(name, session.record.cwd)
+  }
+
+  /**
+   * Skills CRUD — write (create or overwrite) a skill. `scope: 'global'`
+   * writes to ~/.rivet/skills (reusable across projects); 'project' writes to
+   * <cwd>/.rivet/skills. Throws on malformed frontmatter (route layer → 400).
+   * Same no-hot-load contract as install: the change takes effect next session.
+   * Returns undefined when the session is missing.
+   */
+  writeSkill(id: string, name: string, content: string, scope: 'project' | 'global'): { path: string } | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return writeSkill(name, content, session.record.cwd, scope)
+  }
+
+  /**
+   * Skills CRUD — uninstall a project-scoped skill (delete from .rivet/skills).
+   * Returns { removed: false } for built-in / plugin / global skills so the UI
+   * can show "cannot remove from here". Does NOT hot-load or emit
+   * skills_changed — same contract as install. Returns undefined when the
+   * session is missing.
+   */
+  uninstallSkill(id: string, name: string): { removed: boolean; wasDir: boolean } | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return uninstallSkill(name, session.record.cwd)
   }
 
   /**
@@ -3184,6 +3244,39 @@ export class RuntimeSessionManager {
   }
 
   /**
+   * 兜底对账：事件日志里仍标 running 的 delegation 节点，若地面真值
+   * （backgroundAborts / coordinator.orderControllers）判定其已不在跑，
+   * 补发终态事件闭环。worker 真实死亡与终态事件落盘本是两条路径——
+   * abort 时工具层补发的终态会被 onDelegationActivity 的 lifecycleGeneration
+   * 门禁吞掉，sidecar 重启时 rehydrate 也不补 delegation 终态——没有本对账，
+   * 子代理面板回放后永远显示「运行中」，kill 只能拿到 409。
+   * 只在会话空闲时调用（running 中的会话由 run 收尾统一对账）。
+   */
+  private sweepStaleDelegationNodes(session: InternalSession, failureReason: string): void {
+    if (session.running) return
+    const latest = new Map<string, string>()
+    const firstTs = new Map<string, number>()
+    for (const ev of session.events) {
+      if (ev.type !== 'delegation') continue
+      const workerId = typeof ev.data.workerId === 'string' ? ev.data.workerId : undefined
+      const status = typeof ev.data.status === 'string' ? ev.data.status : undefined
+      if (!workerId || !status) continue
+      if (!firstTs.has(workerId)) firstTs.set(workerId, ev.ts)
+      latest.set(workerId, status)
+    }
+    for (const [workerId, status] of latest) {
+      if (status !== 'running') continue
+      if (session.backgroundAborts?.has(workerId)) continue
+      if (this.isWorkerRunning(session.record.id, workerId)) continue
+      // 让补发的终态事件带上真实的存活时长（否则 elapsedMs 会从 0 起算）。
+      const startedMap = session.delegationStartedAt ?? (session.delegationStartedAt = new Map())
+      const ts = firstTs.get(workerId)
+      if (ts !== undefined && !startedMap.has(workerId)) startedMap.set(workerId, ts)
+      this.emitDelegationActivity(session, { workOrderId: workerId, status: 'failed', failureReason })
+    }
+  }
+
+  /**
    * N2 — artifact feedback re-injection. Turns a human comment on an artifact
    * into a structured next-turn prompt so the agent revises in-context. Only
    * valid on an idle session (a finished turn); returns false while running.
@@ -3432,6 +3525,14 @@ export class RuntimeSessionManager {
     this.cancelPlanAutoApprove(s, 'aborted')
     s.agent?.abort()
     this.rejectAllPending(s, 'aborted')
+    // 兜底对账：abort 升代后 run finally 失去 durability 早退，worker 终态
+    // 事件又恰被回调门禁吞掉（见 sweepStaleDelegationNodes）——在此补发。
+    // 延迟一拍：run finally（microtask）先把 session.running 落为 false，
+    // coordinator 的结算链（纯 promise）也已清空 orderControllers。
+    setImmediate(() => {
+      if (this.sessions.get(id) !== s) return
+      this.sweepStaleDelegationNodes(s, 'caller_aborted')
+    })
     // Idle sessions keep their timestamps and their log stays clean. The
     // in-memory suppression flag above still applies — a stall recovery waiting
     // on setImmediate is cancelled either way, it just no longer re-stamps a
@@ -3854,6 +3955,26 @@ export class RuntimeSessionManager {
    * (e.g. per-hunk edit picks) before it runs — flows through ApprovalResult.
    * (Intent is now a non-blocking timeline note and has no pending state.)
    */
+  /**
+   * Label an approval that would widen the write/read boundary to a directory
+   * outside the workspace, so the UI can offer "remember this directory". Absent
+   * for every other approval — the checkbox must not appear where remembering
+   * has no meaning.
+   */
+  private pathGrantHint(
+    cwd: string,
+    name: string,
+    input: Record<string, unknown>,
+  ): { dir: string; mode: 'read' | 'write' } | undefined {
+    if (name === 'request_path_access') {
+      const p = typeof input.path === 'string' ? input.path.trim() : ''
+      return p ? { dir: p, mode: input.mode === 'write' ? 'write' : 'read' } : undefined
+    }
+    const need = outOfWorkspaceFilePaths(cwd, name, input)
+    const first = need?.paths[0]
+    return need && first ? { dir: dirname(first), mode: need.mode } : undefined
+  }
+
   answerIntervention(
     id: string,
     requestId: string,
@@ -3873,6 +3994,10 @@ export class RuntimeSessionManager {
     if (approved && editedInput && typeof editedInput === 'object') {
       result.editedInput = editedInput
     }
+    // Out-of-workspace path approvals read this to persist the directory grant
+    // per-workspace. Computer Use keeps its own grant store (below) — the two
+    // remember semantics are independent, so both consume the same flag.
+    if (approved && remember === true) result.remember = true
     pend.resolve(result)
     if (!approved) s.lastApprovalDeniedAt = this.now()
     // Computer Use "always allow": approve + remember records a machine-level
@@ -4483,7 +4608,13 @@ export class RuntimeSessionManager {
       }
       session.pending.set(requestId, pend)
       this.recountApprovals(session)
-      this.append(session, 'approval_required', { requestId, toolName: name, input: redactValue(input) })
+      const pathGrant = this.pathGrantHint(session.record.cwd, name, input)
+      this.append(session, 'approval_required', {
+        requestId,
+        toolName: name,
+        input: redactValue(input),
+        ...(pathGrant ? { pathGrant } : {}),
+      })
       // Persist the pendingApprovals count NOW — if the sidecar dies while
       // blocked on this approval, rehydrate() uses the on-disk count as the
       // gate for scanning the log and closing the approval out honestly.
@@ -4829,7 +4960,10 @@ export class RuntimeSessionManager {
     if (!stream.active) {
       stream.active = true
       const first = takeUtf8Prefix(result, TOOL_RESULT_COALESCE_BYTES)
-      this.appendRaw(session, 'tool_result', { id, name, isError: false, result: first.head })
+      // partial: true 标记流式进度 chunk（区别于终态 result）。SSE 层 isError
+      // 恒为布尔，事件流必须自描述，否则客户端把每个 chunk 当独立结果渲染
+      //（delegate_batch 十几行重复工具行的成因）。终态 append 不带此字段。
+      this.appendRaw(session, 'tool_result', { id, name, isError: false, partial: true, result: first.head })
       stream.buffered = first.tail
     } else {
       stream.buffered += result
@@ -4841,6 +4975,7 @@ export class RuntimeSessionManager {
         id: stream.id,
         name: stream.name,
         isError: false,
+        partial: true,
         result: chunk.head,
       })
     }
@@ -4872,6 +5007,7 @@ export class RuntimeSessionManager {
       id: stream.id,
       name: stream.name,
       isError: false,
+      partial: true,
       result,
     })
   }

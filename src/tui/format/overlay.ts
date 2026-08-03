@@ -1366,6 +1366,14 @@ export function renderInitFlow(data: InitOverlayData, width: number, height: num
     if (rowsUsed < contentRows) push('')
   }
 
+  if (view.note && rowsUsed < contentRows) {
+    for (const d of wrapToWidth(view.note, innerWidth, 1)) {
+      if (rowsUsed >= contentRows) break
+      push(` ${color(d, theme.warning ?? theme.muted)}`)
+    }
+    if (rowsUsed < contentRows) push('')
+  }
+
   if (view.kind === 'multi-choice') {
     const options = view.options ?? []
     for (let i = 0; i < options.length; i++) {

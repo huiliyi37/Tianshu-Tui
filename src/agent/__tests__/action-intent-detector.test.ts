@@ -101,6 +101,15 @@ describe('hasActionIntent', () => {
     assert.ok(!hasActionIntent('改动完成待验证。要我跑一下测试吗？'))
     assert.ok(!hasActionIntent('Shall I run the tests now?'))
   })
+  it('条件/否定前缀不触发：「除非你想让我也…」', () => {
+    assert.ok(!hasActionIntent('不需要进一步工具调用，除非你想让我把 X 也一并审查'))
+    assert.ok(!hasActionIntent('暂时不改了，除非你想让我也 grep 一下调用方'))
+    assert.ok(!hasActionIntent('不必动这里，除非你想让我跑一下 typecheck'))
+  })
+  it('完成/生效类尾句不触发（用户操作指南，非模型行动承诺）', () => {
+    assert.ok(!hasActionIntent('重启 agent 生效。'))
+    assert.ok(!hasActionIntent('重新构建后即可。'))
+  })
   it('问句在中间、承诺在结尾时仍触发', () => {
     assert.ok(hasActionIntent('这样对吗？先假设对。接下来修改 loop.ts'))
   })

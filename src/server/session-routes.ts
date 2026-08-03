@@ -567,6 +567,42 @@ export function buildSessionRoutes(
       return { status: 200, body: result }
     }, apiToken),
 
+    // ── Skills CRUD (desktop editor) ──
+    // Read the full SKILL.md text for the editor. { content: null } for
+    // built-in / plugin skills (no editable backing file) so the UI shows a
+    // read-only notice instead of an empty editor.
+    'GET /sessions/:id/skills/:name/content': withAuth((_body, params) => {
+      const content = manager.readSkillContent(params!.id!, params!.name!)
+      if (content === undefined) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { content } }
+    }, apiToken),
+
+    // Write (create or overwrite) a skill. body: { content, scope? }. Throws →
+    // 400 on malformed frontmatter. Same no-hot-load contract as install.
+    'PUT /sessions/:id/skills/:name': withAuth((body, params) => {
+      const data = (body ?? {}) as { content?: unknown; scope?: unknown }
+      if (typeof data.content !== 'string' || !data.content.trim()) {
+        return { status: 400, body: { error: 'Missing "content" (non-empty SKILL.md text)' } }
+      }
+      const scope = data.scope === 'global' ? 'global' : 'project'
+      try {
+        const result = manager.writeSkill(params!.id!, params!.name!, data.content, scope)
+        if (!result) return { status: 404, body: { error: 'Session not found' } }
+        return { status: 200, body: { name: params!.name!, path: result.path, scope } }
+      } catch (e) {
+        return { status: 400, body: { error: e instanceof Error ? e.message : String(e) } }
+      }
+    }, apiToken),
+
+    // Uninstall a project-scoped skill (delete from .rivet/skills). 409 for
+    // built-in / plugin / global skills the project panel can't remove.
+    'DELETE /sessions/:id/skills/:name': withAuth((_body, params) => {
+      const result = manager.uninstallSkill(params!.id!, params!.name!)
+      if (result === undefined) return { status: 404, body: { error: 'Session not found' } }
+      if (!result.removed) return { status: 409, body: { error: 'Cannot remove built-in/plugin/global skill from the project panel' } }
+      return { status: 200, body: { name: params!.name!, removed: true } }
+    }, apiToken),
+
     'GET /sessions': withAuth((_body, params) => {
       const includeArchived = params?.includeArchived === 'true'
       const sessions = includeArchived

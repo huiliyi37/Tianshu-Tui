@@ -619,7 +619,7 @@ export class OpenAIClient implements StreamClient {
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
         const err = Object.assign(
-          new Error(parseOpenAIError(response.status, errorBody)),
+          new Error(parseOpenAIError(response.status, errorBody, { providerName: this.config.providerName, baseUrl: this.config.baseUrl })),
           { status: response.status },
         )
         // Attach parsed retry-after for the error classifier to use
@@ -1347,12 +1347,43 @@ function mapFinishReason(reason: string): string {
   }
 }
 
-export function parseOpenAIError(status: number, body: string): string {
+export interface ApiErrorProviderContext {
+  /** Provider name for feature gating (e.g. 'deepseek', 'glm') */
+  providerName?: string
+  baseUrl?: string
+}
+
+/**
+ * 可识别错误的行动指引。原始报错（如 "Insufficient Balance"）只陈述现象，
+ * 用户得自己猜是哪家的账户、去哪充值——在报错后追加一行中文提示，直接给
+ * 结论：哪家、余额不足、充值入口、临时退路（/model 换 provider）。
+ */
+function apiErrorHint(code: string, message: string, provider?: ApiErrorProviderContext): string {
+  const probe = `${code} ${typeof message === 'string' ? message : ''}`
+  if (!/insufficient[ _-]?(balance|quota)|余额不足|额度不足/i.test(probe)) return ''
+
+  const where = `${provider?.providerName ?? ''} ${provider?.baseUrl ?? ''}`.toLowerCase()
+  const BILLING: Array<[RegExp, string, string]> = [
+    [/deepseek/, 'DeepSeek', 'https://platform.deepseek.com/top_up'],
+    [/siliconflow|硅基/, 'SiliconFlow', 'https://cloud.siliconflow.cn'],
+    [/bigmodel|zhipu|智谱|glm/, '智谱 GLM', 'https://www.bigmodel.cn'],
+    [/minimax/, 'MiniMax', 'https://platform.minimaxi.com'],
+    [/moonshot|kimi/, 'Kimi', 'https://platform.moonshot.cn'],
+  ]
+  for (const [re, name, url] of BILLING) {
+    if (re.test(where)) {
+      return `\n提示：${name} 账户余额不足，充值后重试：${url} —— 或用 /model 临时切换到其他 provider。`
+    }
+  }
+  return '\n提示：当前 provider 账户余额不足，请充值后重试，或用 /model 切换到其他 provider。'
+}
+
+export function parseOpenAIError(status: number, body: string, provider?: ApiErrorProviderContext): string {
   try {
     const parsed = JSON.parse(body)
     const code = parsed.error?.code ?? parsed.error?.type ?? `HTTP ${status}`
     const message = parsed.error?.message ?? body
-    return `OpenAI API error (${code}): ${message}`
+    return `OpenAI API error (${code}): ${message}${apiErrorHint(String(code), String(message), provider)}`
   } catch {
     return `OpenAI API error (HTTP ${status}): ${body}`
   }

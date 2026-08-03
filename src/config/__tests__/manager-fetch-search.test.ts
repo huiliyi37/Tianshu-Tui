@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { loadConfig, getFetchConfig, setFetchConfig, getSearchConfig, setSearchConfig } from '../manager.js'
+import { loadConfig, getFetchConfig, setFetchConfig, getSearchConfig, setSearchConfig, setSearchApiKey, getSearchKeyStatus } from '../manager.js'
 
 describe('fetch config', () => {
   let dir = ''
@@ -114,5 +114,76 @@ describe('search config', () => {
     const before = getSearchConfig()
     const r = setSearchConfig({})
     assert.deepEqual(r, before)
+  })
+})
+
+describe('search API key (inline storage + masked status)', () => {
+  let dir = ''
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-search-key-'))
+    process.env.RIVET_CONFIG_PATH = join(dir, 'config.json')
+    delete process.env.BOCHA_API_KEY
+    delete process.env.BRAVE_API_KEY
+    delete process.env.TAVILY_API_KEY
+  })
+
+  afterEach(() => {
+    delete process.env.RIVET_CONFIG_PATH
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('setSearchApiKey persists inline key and getSearchKeyStatus masks it', () => {
+    const status = setSearchApiKey('bocha', 'sk-bocha-secret-12345')
+    assert.equal(status.source, 'inline')
+    assert.equal(status.ref, '***2345', 'should mask all but last 4 chars')
+    // 持久化进 config
+    assert.equal(loadConfig().search.bochaApiKey, 'sk-bocha-secret-12345')
+    // getSearchKeyStatus 也返回掩码
+    assert.equal(getSearchKeyStatus('bocha').source, 'inline')
+    assert.equal(getSearchKeyStatus('bocha').ref, '***2345')
+  })
+
+  it('getSearchConfig never returns plaintext key (only keyStatus mask)', () => {
+    setSearchApiKey('bocha', 'sk-plaintext-leak-test')
+    const snap = getSearchConfig()
+    // snapshot 不应有明文字段（key 只经 setSearchApiKey 写，不经 snapshot 读出）
+    assert.equal((snap as unknown as Record<string, unknown>).bochaApiKey, undefined)
+    // keyStatus 掩码存在
+    const bochaStatus = snap.keyStatus.bocha!
+    assert.equal(bochaStatus.source, 'inline')
+    assert.match(bochaStatus.ref, /\*\*\*/)
+  })
+
+  it('empty key clears inline value', () => {
+    setSearchApiKey('brave', 'sk-brave-key')
+    assert.equal(loadConfig().search.braveApiKey, 'sk-brave-key')
+    setSearchApiKey('brave', '')
+    assert.equal(loadConfig().search.braveApiKey, undefined)
+    assert.equal(getSearchKeyStatus('brave').source, 'none')
+  })
+
+  it('env-based key shows source:env with variable name', () => {
+    process.env.BOCHA_API_KEY = 'env-provided-key'
+    const status = getSearchKeyStatus('bocha')
+    assert.equal(status.source, 'env')
+    assert.equal(status.ref, 'BOCHA_API_KEY')
+  })
+
+  it('setSearchApiKey rejects non-keyed backends', () => {
+    assert.throws(
+      () => setSearchApiKey('bing', 'some-key'),
+      /does not support API key/,
+    )
+    assert.throws(
+      () => setSearchApiKey('duckduckgo', 'some-key'),
+      /does not support API key/,
+    )
+  })
+
+  it('setSearchConfig refuses to write inline *ApiKey fields (security filter)', () => {
+    // 通用 PUT 端点不能写入明文 key —— 只能走 setSearchApiKey 专用端点
+    setSearchConfig({ bochaApiKey: 'should-be-ignored' } as Record<string, unknown>)
+    assert.equal(loadConfig().search.bochaApiKey, undefined, 'inline key must not leak through setSearchConfig')
   })
 })

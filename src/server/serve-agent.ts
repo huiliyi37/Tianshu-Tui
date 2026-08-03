@@ -27,6 +27,7 @@ import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
 import type { ProviderHealthTracker } from '../agent/provider-health.js'
 import { MeridianIndexer } from '../repo/meridian-indexer.js'
+import { scheduleMeridianBackfill } from '../repo/meridian-backfill.js'
 import { resetLegacyMemoryIfNeeded } from '../agent/memory-epoch.js'
 import { buildCockpitSnapshot } from '../tui/cockpit/state.js'
 import { computeUsageCost, findModelPricing } from '../utils/pricing.js'
@@ -125,6 +126,8 @@ export function getOrCreateMeridianIndexer(shared: SharedRuntime, cwd: string): 
     })
   } catch { /* 清理绝不阻塞会话创建 */ }
   shared.meridianIndexers.set(cwd, indexer)
+  // 后台闲时全量索引（镜像 CLI bootstrap）——同 cwd 多会话共享单例，天然只跑一次。
+  setImmediate(() => { scheduleMeridianBackfill(indexer, cwd) })
   return indexer
 }
 
@@ -266,7 +269,7 @@ function buildSessionStores(
 ): SessionStores {
   const persist = new SessionPersist(sessionId, cwd)
   const claimStore = persist.createClaimStore()
-  persist.injectDurableClaims(claimStore)
+  persist.injectDurableClaims(claimStore, cwd)
   for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)
   // Path grants: hydrate the "remember"-persisted grants for this workspace and
   // apply standing config-declared grants (additionalReadDirs/WriteDirs). The
@@ -489,6 +492,11 @@ function assembleAgentLoop(
       agent.config.maxTurns = 0
     }
   }
+
+  // 交付门禁的影响测试覆盖检查（delivery-gate-v2.ts:330）读的是 ctx.getImpactedTests。
+  // TUI 在 bootstrapInteractiveSession 里赋值，sidecar 走 createAgentRuntime 不经过那里——
+  // 不补这一行，桌面端与插件的 moduleCoverage 恒为 undefined，该检查整体不执行。
+  stores.refs.getImpactedTests = () => [...agent.getEvidenceState().impactedTests]
 
   // Wave G: LSP late-init——per-assemble 订阅（见 attachLspTools 的设计约束注释）。
   // 不阻塞会话创建（LSP spawn 可能秒级）。

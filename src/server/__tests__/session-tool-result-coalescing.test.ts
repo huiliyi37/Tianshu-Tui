@@ -186,6 +186,26 @@ describe('session tool_result stream coalescing', () => {
     assert.equal(relevant[2]!.data.uiContent, 'compact done')
   })
 
+  // 2026-08-02 桌面 delegate_batch 行洪水修复：SSE 层 isError 恒为布尔，流式
+  // chunk 与终态无法区分——事件流必须自描述。流式（含 coalesce flush）带
+  // partial: true，终态不带（不是 partial: false，字段缺席即终态，旧 JSONL 回放
+  // 同语义）。桌面 reducer 据此按 toolUseId upsert 而非逐 chunk append。
+  it('marks streaming chunks partial: true and terminal results without the field', () => {
+    const { manager, agent, session, scheduler } = setup()
+    const cb = agent.callbacks!
+    cb.onToolResult('tool-1', 'delegate_batch', 'progress-1')
+    cb.onToolResult('tool-1', 'delegate_batch', 'progress-2')
+    scheduler.runAll()
+    cb.onToolResult('tool-1', 'delegate_batch', 'final packet', false, undefined, 'delegate_batch：2/2 通过')
+
+    const events = toolResults(manager, session.id)
+    assert.equal(events.length, 3)
+    assert.equal(events[0]!.data.partial, true, 'first immediate chunk must be partial')
+    assert.equal(events[1]!.data.partial, true, 'coalesced flush must be partial')
+    assert.ok(!('partial' in events[2]!.data), 'terminal result must not carry the partial field')
+    assert.equal(events[2]!.data.uiContent, 'delegate_batch：2/2 通过')
+  })
+
   it('treats model text as an ordering boundary for a pending tool stream', () => {
     const { manager, agent, session } = setup()
     const cb = agent.callbacks!

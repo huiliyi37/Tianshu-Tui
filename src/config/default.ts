@@ -106,6 +106,7 @@ export const DEFAULT_CONFIG: Config = {
     verificationSnapshot: 'auto',
     songlineEnabled: false,
     securityGuidance: true,
+    scoutEvidenceFirewall: false,
     desktopTools: false,
     crossSessionEnabled: true,
     hearthObserveEnabled: false,
@@ -212,6 +213,7 @@ export const DEFAULT_CONFIG: Config = {
     backends: ['bing', 'duckduckgo'],
     braveApiKeyEnv: 'BRAVE_API_KEY',
     tavilyApiKeyEnv: 'TAVILY_API_KEY',
+    bochaApiKeyEnv: 'BOCHA_API_KEY',
     timeoutMs: 15_000,
   },
   fetch: {
@@ -224,6 +226,7 @@ export const DEFAULT_CONFIG: Config = {
     renderTimeoutMs: 30_000,
     renderWaitMs: 0,
     cacheMaxAgeMs: 172_800_000,
+    jinaBaseUrl: 'https://r.jina.ai',
   },
   network: {},
   mcp: {
@@ -244,7 +247,8 @@ export const DEFAULT_CONFIG: Config = {
       code_edit: 'cheap-flash',
       test_failure_diagnosis: 'cheap-flash',
       risky_refactor: 'cheap-flash',
-      planning: 'capable',
+      // 2026-08-02：v4-flash 能力实测已超 v4-pro（去廉价化），planning 同走 flash
+      planning: 'cheap-flash',
     },
     patcherTier: 'cheap',
     escalationCap: 'off',

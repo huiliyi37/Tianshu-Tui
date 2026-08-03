@@ -21,7 +21,7 @@ export function classifyMcpError(error: unknown): ClassifiedMcpError {
   }
 
   // Network errors
-  if (/econnrefused|etimedout|socket hang up|econnreset|fetch failed|transport.*close|disconnected/i.test(msg)) {
+  if (/econnrefused|etimedout|timed out|socket hang up|econnreset|fetch failed|transport.*close|disconnected/i.test(msg)) {
     return { class: 'network', retryable: true, suggestion: 'Transient network error. Retry may succeed.' }
   }
 

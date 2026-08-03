@@ -61,6 +61,18 @@ describe('extractObligations — Norns 义务提取', () => {
     })
     assert.deepEqual(extractObligations(plan), [])
   })
+
+  it('high risk 缺 mitigation 字段（LLM 输出不可信）不崩溃且不入账', () => {
+    const plan = councilPlan({
+      contributions: [
+        contribution('tianquan', {
+          // LLM 输出可能缺 mitigation —— 类型断言模拟运行时非法输入
+          risks: [{ claim: '缓存碎裂', severity: 'high' }] as unknown as SeatContribution['risks'],
+        }),
+      ],
+    })
+    assert.deepEqual(extractObligations(plan), [])
+  })
 })
 
 describe('attachObligations — 契约挂载与 JSON 透传', () => {

@@ -21,6 +21,21 @@ describe('mcpServerConfigSchema', () => {
     assert.equal(config.url, 'http://localhost:3001/sse')
   })
 
+  it('validates explicit tool capability policies', () => {
+    const config = mcpServerConfigSchema.parse({
+      command: 'npx',
+      policy: {
+        tools: {
+          search: { capability: 'read' },
+          mutate: { capability: 'write', requireApproval: true },
+        },
+      },
+    })
+
+    assert.equal(config.policy?.tools.search?.capability, 'read')
+    assert.equal(config.policy?.tools.mutate?.requireApproval, true)
+  })
+
   it('rejects config with neither command nor url', () => {
     assert.throws(() => mcpServerConfigSchema.parse({}), /command.*url/)
   })

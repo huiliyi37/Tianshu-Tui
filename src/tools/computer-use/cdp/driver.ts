@@ -722,7 +722,7 @@ export function createCdpDriver(deps: CdpDriverDeps = {}): CdpBrowserDriver {
           } else {
             return 'unwritable';
           }
-          try { el.focus(); } catch (e) {}
+          try { el.focus(); } catch (e) { console.debug('[tianshu] focus failed', e) }
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
           return 'ok';

@@ -242,15 +242,12 @@ describe('config permissions schema', () => {
     assert.equal(parsed.routing.code_edit, 'cheap-flash')
   })
 
-  it('routes the planning model to the strong tier, all other workers to cheap-flash', () => {
+  it('routes all workers to cheap-flash by default (v4-flash 去廉价化)', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 
-    // 规划模型独立路由：planning 走强档（base planner 产出即执行分片图，
-    // 规划质量决定并行拆分好坏）。其余 worker 任务仍全部走 cheap-flash。
-    assert.equal(parsed.workers.routing.planning, 'capable')
-
+    // 2026-08-02：v4-flash 能力实测已超 v4-pro，planning 不再独立走强档，
+    // 全部 worker 任务默认走 cheap-flash；需更强可在 config 改 capable。
     for (const [task, profile] of Object.entries(parsed.workers.routing)) {
-      if (task === 'planning') continue
       assert.equal(profile, 'cheap-flash', `${task} should route to cheap-flash, got ${profile}`)
     }
   })

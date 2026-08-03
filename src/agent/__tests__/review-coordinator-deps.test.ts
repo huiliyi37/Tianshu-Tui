@@ -148,6 +148,10 @@ describe('createCoordinatorReviewDeps', () => {
       assert.match(req.objective, /客观审查姿态/)
       assert.match(req.objective, /提交存在、测试绿、作者声称已修/)
       assert.match(req.objective, /CRITICAL\/HIGH\/MEDIUM\/LOW/)
+      // 契约改造（2026-08-02）：severity/polarity/status 三语义必须进审查指令
+      assert.match(req.objective, /polarity/)
+      assert.match(req.objective, /confirmation/)
+      assert.match(req.objective, /status 表示你的审查任务是否完成/)
     }
 
     // Prompt economy: stances are assigned per axis, not stacked on all five.
@@ -185,7 +189,28 @@ describe('createCoordinatorReviewDeps', () => {
 
     assert.equal(result.findings[0]?.severity, 'HIGH')
     assert.match(result.findings[0]?.claim ?? '', /race/)
+    assert.equal(result.findings[0]?.polarity, undefined, 'worker 未上报 polarity 时缺席（blocking 判定 fail-closed 按 defect）')
     assert.deepEqual(result.infraFailures, [])
+  })
+
+  it('threads worker-reported finding polarity through to SquadronResult', async () => {
+    const coordinator: ReviewCoordinator = {
+      delegate: async () => run([]),
+      delegateBatch: async () => run([worker({
+        summary: '审查完成：一项缺陷 + 一项确认',
+        findings: [
+          { claim: 'CRITICAL 降档被钳制', evidence: 'src/a.ts:10', confidence: 'high', polarity: 'defect' },
+          { claim: '链路闭合已确认', evidence: 'src/b.ts:20', confidence: 'high', polarity: 'confirmation' },
+        ],
+        evidenceStatus: 'skipped',
+      })]),
+    }
+
+    const deps = createCoordinatorReviewDeps(coordinator)
+    const result = await deps.spawnSquadron({ files: ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'], crossModule: false, isFix: false })
+
+    assert.equal(result.findings[0]?.polarity, 'defect')
+    assert.equal(result.findings[1]?.polarity, 'confirmation')
   })
 
   it('spawns the auto wiring reviewer as two parallel inspectors (Wiring + Silence, 按文件数缩放预算)', async () => {

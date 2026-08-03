@@ -18,6 +18,10 @@ test('module-missing banner does NOT tell the user to install a browser', () => 
   const b = formatBrowserMissingBanner({ state: 'module-missing', installed: false, reason: 'Cannot find module' })
   assert.match(b, /playwright-core/)
   assert.doesNotMatch(b, /rivet browser install/)
+  // 引导安装 playwright-core 而非 chromium
+  assert.match(b, /npm i playwright-core/)
+  // 覆盖 CLI 安装用户
+  assert.match(b, /CLI 安装用户/)
   assert.match(b, /原始错误/)
 })
 

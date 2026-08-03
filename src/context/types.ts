@@ -254,4 +254,17 @@ export interface SessionMetadata {
    * >20% 时优先怀疑 task kind 分类而非调低风险阈值。
    */
   obligationGate?: { continued: number; misfires: number; honestBlocked: number }
+  /**
+   * todo 退回计数（writes / regressedWrites / regressedItems）。postSession 写入
+   * （有写入才写）——绕过 RIVET_DEBUG_TELEMETRY 门。`detectRegressions` 是本仓
+   * 唯一直接观测「模型是否守得住自己任务状态」的结果侧探测器，此前触发只渲染进
+   * 一条工具结果就丢了；落 meta 后才有跨会话的退回率基线可比。
+   */
+  todoRegressions?: { writes: number; regressedWrites: number; regressedItems: number }
+  /**
+   * `decisions` 通道的 holdout 实验臂（`decisions-experiment.ts`）。与
+   * `todoRegressions` 同时写入——没有臂标记，两组会话的退回率混在一起，
+   * 度量就退化成一个无法归因的总体数字。
+   */
+  decisionsArm?: 'off' | 'treatment' | 'holdout'
 }

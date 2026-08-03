@@ -240,6 +240,9 @@ export function createPlanTaskTool(deps: {
 
       const tasks = unifiedPlanToTeamTasks(plan)
       try {
+        if (params.onOutput) {
+          params.onOutput(`\n📋 计划已分解为 ${tasks.length} 个任务，正在派发 worker 执行…\n`)
+        }
         const run: PlanExecutorRun = await executePlan(
           {
             mode: 'standard',
@@ -255,6 +258,21 @@ export function createPlanTaskTool(deps: {
             abortSignal: params.abortSignal,
             // Review handled by the post-commit auto gate — see comment above.
             reviewGate: false,
+            onProgress: params.onOutput
+              ? (completed, total) => {
+                  const done = Math.max(0, Math.min(completed, total))
+                  params.onOutput!(`✦ plan progress: ${done}/${total} workers done\n`)
+                }
+              : undefined,
+            onWorkerSettled: params.onWorkerActivity
+              ? (result) => {
+                  params.onWorkerActivity!({
+                    workOrderId: result.workOrderId,
+                    parentToolId: params.toolUseId,
+                    status: result.status === 'failed' ? 'failed' : 'completed',
+                  })
+                }
+              : undefined,
           },
           deps.getExecutorDeps(),
         )

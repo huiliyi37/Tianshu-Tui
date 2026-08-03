@@ -5,6 +5,7 @@ export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'mini
 export interface ProviderPreset {
   key: ProviderPresetKey
   label: string
+  description: string
   provider: ProviderConfig
   defaultModelId: string
 }
@@ -13,6 +14,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   deepseek: {
     key: 'deepseek',
     label: 'DeepSeek',
+    description: '官方旗舰：1M 上下文 + 深度推理，适合重活主控',
     defaultModelId: 'deepseek-v4-pro',
     provider: {
       name: 'deepseek',
@@ -34,6 +36,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'deepseek-v4-pro',
+          description: '旗舰推理档，1M 上下文',
           alias: 'v4-pro',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
@@ -45,6 +48,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'deepseek-v4-flash',
+          description: '快速档：能力对标旗舰，成本更低',
           alias: 'v4-flash',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
@@ -59,6 +63,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   glm: {
     key: 'glm',
     label: 'GLM',
+    description: '智谱 Coding 订阅：1M 上下文 + 视觉支持',
     defaultModelId: 'glm-5.2',
     provider: {
       name: 'glm',
@@ -82,6 +87,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'glm-5.2',
+          description: '1M 上下文，视觉支持',
           alias: 'glm',
           contextWindow: 1_000_000,
           maxTokens: 131072,
@@ -100,6 +106,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   mimo: {
     key: 'mimo',
     label: 'MiMo',
+    description: '小米 MiMo：1M 上下文，性价比推理',
     defaultModelId: 'mimo-v2.5-pro',
     provider: {
       name: 'mimo',
@@ -118,6 +125,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'mimo-v2.5-pro',
+          description: 'MiMo 旗舰推理档',
           alias: 'mimo-pro',
           contextWindow: 1_000_000,
           maxTokens: 128000,
@@ -126,6 +134,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'mimo-v2.5',
+          description: 'MiMo 轻量廉价档',
           alias: 'mimo',
           contextWindow: 1_000_000,
           maxTokens: 128000,
@@ -139,6 +148,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   'mimo-api': {
     key: 'mimo-api',
     label: 'MiMo API (新)',
+    description: '小米 MiMo 按量 API，超速档',
     defaultModelId: 'mimo-v2.5-pro-ultraspeed',
     provider: {
       name: 'mimo-api',
@@ -157,6 +167,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'mimo-v2.5-pro-ultraspeed',
+          description: 'MiMo 超速档',
           alias: 'mimo-ultra',
           contextWindow: 1_000_000,
           maxTokens: 128000,
@@ -170,6 +181,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   minimax: {
     key: 'minimax',
     label: 'MiniMax',
+    description: 'MiniMax：多档模型，旗舰带视觉',
     defaultModelId: 'MiniMax-M2.7',
     provider: {
       name: 'minimax',
@@ -188,6 +200,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'MiniMax-M2.7',
+          description: 'MiniMax 均衡档',
           alias: 'minimax',
           contextWindow: 204_800,
           maxTokens: 64000,
@@ -196,6 +209,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'MiniMax-M3',
+          description: 'MiniMax 旗舰，视觉支持',
           alias: 'minimax-m3',
           contextWindow: 1_000_000,
           maxTokens: 64000,
@@ -210,6 +224,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   siliconflow: {
     key: 'siliconflow',
     label: '硅基流动 (SiliconFlow)',
+    description: '聚合站：多模型可选，含 DeepSeek/GLM/Kimi/Qwen',
     defaultModelId: 'deepseek-ai/DeepSeek-V4-Pro',
     provider: {
       name: 'siliconflow',
@@ -234,6 +249,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'deepseek-ai/DeepSeek-V4-Pro',
+          description: 'DeepSeek 旗舰推理（聚合）',
           alias: 'sf-v4-pro',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
@@ -243,6 +259,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'deepseek-ai/DeepSeek-V4-Flash',
+          description: 'DeepSeek 快档（聚合）',
           alias: 'sf-v4-flash',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
@@ -252,6 +269,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'zai-org/GLM-5.2',
+          description: 'GLM 旗舰，视觉支持（聚合）',
           alias: 'sf-glm',
           contextWindow: 1_000_000,
           maxTokens: 131_072,
@@ -262,6 +280,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'moonshotai/Kimi-K2.7-Code',
+          description: 'Kimi 编码模型（聚合）',
           alias: 'sf-kimi',
           contextWindow: 262_144,
           maxTokens: 131_072,
@@ -270,6 +289,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'Qwen/Qwen3.6-27B',
+          description: '通义 Qwen 均衡档（聚合）',
           alias: 'sf-qwen',
           contextWindow: 262_144,
           maxTokens: 131_072,
@@ -283,6 +303,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   codex: {
     key: 'codex',
     label: 'Codex',
+    description: 'OpenAI Codex：OAuth 登录，旗舰推理',
     defaultModelId: 'gpt-5.5',
     provider: {
       name: 'codex',
@@ -301,6 +322,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'gpt-5.5',
+          description: 'OpenAI 旗舰，视觉支持',
           alias: 'codex',
           contextWindow: 1_000_000,
           maxTokens: 128000,
@@ -316,6 +338,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   longcat: {
     key: 'longcat',
     label: 'LongCat (美团龙猫)',
+    description: '美团龙猫：1M 上下文，缓存读取免费',
     defaultModelId: 'LongCat-2.0',
     provider: {
       name: 'longcat',
@@ -335,6 +358,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'LongCat-2.0',
+          description: '龙猫旗舰，缓存读取免费',
           alias: 'longcat',
           contextWindow: 1_000_000,
           maxTokens: 131072,
@@ -349,11 +373,12 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   ccswitch: {
     key: 'ccswitch',
     label: 'CC Switch',
+    description: 'cc-switch 本地代理：Claude/GPT/DeepSeek 等',
     defaultModelId: 'claude-opus-4-8',
     provider: {
       name: 'ccswitch',
       apiKeyEnv: 'CC_SWITCH_PROXY_API_KEY',
-      baseUrl: 'http://127.0.0.1:8891/v1',
+      baseUrl: process.env.CC_SWITCH_PROXY_URL ?? 'http://127.0.0.1:8891/v1',
       protocol: 'openai',
       capabilities: {
         cacheControl: false,
@@ -368,6 +393,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'claude-opus-4-8',
+          description: 'Claude 最强推理',
           alias: 'cc-opus',
           contextWindow: 1_000_000,
           maxTokens: 128000,
@@ -376,6 +402,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'claude-sonnet-4-5',
+          description: 'Claude 均衡档',
           alias: 'cc-sonnet',
           contextWindow: 1_000_000,
           maxTokens: 128000,
@@ -384,6 +411,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'deepseek-v4-pro',
+          description: 'DeepSeek 旗舰（代理）',
           alias: 'cc-dsv4',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
@@ -392,6 +420,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'glm-5.2',
+          description: 'GLM 旗舰，视觉支持（代理）',
           alias: 'cc-glm',
           contextWindow: 1_000_000,
           maxTokens: 131_072,
@@ -401,6 +430,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'gpt-5.6',
+          description: 'GPT 最新旗舰',
           alias: 'cc-gpt56',
           contextWindow: 200_000,
           maxTokens: 128_000,
@@ -409,6 +439,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'gpt-5.5',
+          description: 'GPT 旗舰',
           alias: 'cc-gpt55',
           contextWindow: 200_000,
           maxTokens: 128_000,
@@ -428,6 +459,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   'zhipu-vision': {
     key: 'zhipu-vision',
     label: '智谱视觉 (GLM-4V-Flash 免费)',
+    description: '智谱免费视觉桥：只适合识图，不适合主控',
     defaultModelId: 'glm-4v-flash',
     provider: {
       name: 'zhipu-vision',
@@ -446,6 +478,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       models: [
         {
           id: 'glm-4v-flash',
+          description: '免费识图桥（8K 上下文）',
           alias: 'glm-4v-flash',
           contextWindow: 8192,
           maxTokens: 1024,

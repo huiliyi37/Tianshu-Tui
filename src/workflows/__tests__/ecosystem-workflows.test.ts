@@ -252,6 +252,11 @@ describe('ecosystem workflow helpers', () => {
     // 只读契约：不写文件、不走 team 编排、修复走 plan_task 交接。
     assert.ok(resolved?.prompt.includes('不写文件'))
     assert.ok(resolved?.prompt.includes('plan_task'))
+    // 出口按规模分流：中小修复走 plan_task；大型多维改造映射 starflow draftItems。
+    assert.ok(resolved?.prompt.includes('先问用户是否修复'))
+    assert.ok(resolved?.prompt.includes('starflow 的 draftItems'))
+    assert.ok(resolved?.prompt.includes('id: 短slug'))
+    assert.ok(resolved?.prompt.includes('不要在 /scout 流程里直接改文件'))
   })
 
   it('/scout without --dims lets the model pick 2-5 dimensions', () => {

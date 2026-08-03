@@ -5,6 +5,7 @@ import { DuckDuckGoBackend } from './duckduckgo.js'
 import { BingBackend } from './bing.js'
 import { BraveBackend } from './brave.js'
 import { TavilyBackend } from './tavily.js'
+import { BochaBackend } from './bocha.js'
 import { createProxyAwareFetch } from './proxy-fetch.js'
 
 export interface BuildBackendsDeps {
@@ -21,6 +22,36 @@ export interface BuildBackendsDeps {
 }
 
 /**
+ * Resolve a search backend's API key using the same 3-tier fallback as
+ * `api/factory.ts:resolveApiKey` for providers:
+ *   1. inline config value `search.<backend>ApiKey`（桌面端 UI 填的明文）
+ *   2. explicit env var named by `search.<backend>ApiKeyEnv`
+ *   3. standard `<BACKEND>_API_KEY` env var
+ *
+ * Lets users configure search keys either via the desktop UI (inline, no shell
+ * export needed) or via environment variables (CLI/server), mirroring how
+ * provider API keys work.
+ */
+export function resolveSearchKey(
+  config: Config,
+  env: NodeJS.ProcessEnv,
+  backend: 'bocha' | 'brave' | 'tavily',
+): string | undefined {
+  const s = config.search
+  // 1. inline config value（桌面端 UI 填的明文，与 provider.apiKey 同构）
+  const inlineKey = s[`${backend}ApiKey` as keyof typeof s]
+  if (typeof inlineKey === 'string' && inlineKey.length > 0) return inlineKey
+  // 2. 显式 env 变量名（apiKeyEnv 字段，如 BRAVE_API_KEY）
+  const envName = s[`${backend}ApiKeyEnv` as keyof typeof s]
+  if (typeof envName === 'string' && envName.length > 0) {
+    const v = env[envName]
+    if (v) return v
+  }
+  // 3. 标准变量名回退（apiKeyEnv 丢失/手动编辑场景）
+  return env[`${backend.toUpperCase()}_API_KEY`]
+}
+
+/**
  * Construct the ordered search backend chain from config. API-key backends are
  * always constructed (so their availability is decided at call time by
  * `isAvailable()`), letting a listed-but-unconfigured backend fall through to
@@ -33,10 +64,9 @@ export function buildSearchBackends(config: Config, deps: BuildBackendsDeps = {}
   // capped via boundedSearchFetch inside createProxyAwareFetch.
   const fetchImpl = deps.fetch ?? createProxyAwareFetch(deps.proxy)
   const env = deps.env ?? process.env
-  const s = config.search
 
   const backends: SearchBackend[] = []
-  for (const name of s.backends) {
+  for (const name of config.search.backends) {
     switch (name) {
       case 'bing':
         backends.push(new BingBackend(fetchImpl))
@@ -45,10 +75,14 @@ export function buildSearchBackends(config: Config, deps: BuildBackendsDeps = {}
         backends.push(new DuckDuckGoBackend(fetchImpl))
         break
       case 'brave':
-        backends.push(new BraveBackend(fetchImpl, env[s.braveApiKeyEnv], s.region))
+        backends.push(new BraveBackend(fetchImpl, resolveSearchKey(config, env, 'brave'), config.search.region))
         break
       case 'tavily':
-        backends.push(new TavilyBackend(fetchImpl, env[s.tavilyApiKeyEnv]))
+        backends.push(new TavilyBackend(fetchImpl, resolveSearchKey(config, env, 'tavily')))
+        break
+      case 'bocha':
+        // 国内直连 AI 搜索（api.bochaai.com）——Tavily 在国内的替代
+        backends.push(new BochaBackend(fetchImpl, resolveSearchKey(config, env, 'bocha')))
         break
       default:
         // Unknown backend name — skip rather than fail the whole chain.

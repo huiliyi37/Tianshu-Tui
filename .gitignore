@@ -128,10 +128,11 @@ _test-docx.html
 docs/*.html
 docs/*.docx
 
+# 冒烟/评测产物（不发布；sync 脚本只同步指定目录，天然不进公开仓）
+todo-cli/
 
-
-# 公开仓：禁止 knowledge 回灌（私有仓策略不同；仅保留 .rivet/SELF）
-.rivet/knowledge/
+# starflow 编排器运行态（状态文件随会话变化，不入仓）
+.rivet/starflow/
 
 # 第三方运行时数据目录（WorkBuddy 等工具的本地 memory）
 .workbuddy/
@@ -139,3 +140,6 @@ docs/*.docx
 # 测试临时目录（测试中断时可能残留，不应进入 git status）
 src/**/__tests__/.scoped-commit-tmp/
 src/**/__tests__/.undo-test-backup/
+
+# 公开仓：禁止 knowledge 回灌（私有仓策略不同；仅保留 .rivet/SELF）
+.rivet/knowledge/

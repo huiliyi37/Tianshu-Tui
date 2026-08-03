@@ -133,6 +133,7 @@ export function resolveLogLocations(input: { cwd: string; sessionId?: string }):
     { id: 'cache-log', label: '逐 API 请求缓存指标 + 侧路成本', path: join(sessionSub, 'cache-log.jsonl'), kind: 'file', group: 'session-diag' },
     { id: 'sensorium', label: '六维快照 / CVM / advisory 台账', path: join(telemetryDir, 'sensorium.jsonl'), kind: 'file', group: 'session-diag', gate: GATE_SENSORIUM, retention: '无上限' },
     { id: 'frames', label: '认知帧（相位、策略）', path: join(telemetryDir, 'frames.jsonl'), kind: 'file', group: 'session-diag', gate: GATE_FRAMES, retention: '1,500 行封顶' },
+    { id: 'appendix-trace', label: '逐请求附录渲染留痕（模型实际看到的自述块）', path: join(sessionSub, 'appendix-trace.jsonl'), kind: 'file', group: 'session-diag', gate: 'RIVET_APPENDIX_TRACE=1', retention: '无上限' },
     { id: 'tool-result-trace', label: '工具结果轨迹', path: join(sessionSub, 'tool-result-trace.jsonl'), kind: 'file', group: 'session-diag', gate: '命中特定诊断条件' },
     { id: 'tool-input-trace', label: '工具入参轨迹（含 hook 改写链）', path: join(sessionSub, 'tool-input-trace.jsonl'), kind: 'file', group: 'session-diag', gate: '命中特定诊断条件' },
     { id: 'pheromones', label: '会话内信息素（非跨会话）', path: join(sessionSub, 'pheromones.json'), kind: 'file', group: 'session-diag', gate: '有沉积时' },

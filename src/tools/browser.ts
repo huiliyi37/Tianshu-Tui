@@ -36,7 +36,7 @@ export interface BrowserToolOptions {
 // 此处 re-export 保持内核调用方不变。
 export { BROWSER_NAVIGATED_PREFIX, BROWSER_SCREENSHOT_OF_PREFIX } from './output-markers.js'
 import { BROWSER_NAVIGATED_PREFIX, BROWSER_SCREENSHOT_OF_PREFIX } from './output-markers.js'
-import { PLAYWRIGHT_INSTALL_HINT } from './net/playwright-driver.js'
+import { PLAYWRIGHT_INSTALL_HINT, PLAYWRIGHT_CORE_INSTALL_HINT } from './net/playwright-driver.js'
 
 /** Default allowlist: comma-separated hosts in RIVET_BROWSER_ALLOWLIST. */
 function envAllowlist(): string[] {
@@ -60,7 +60,7 @@ async function playwrightDriver(): Promise<BrowserDriver> {
   try {
     mod = (await import(specifier)) as never
   } catch {
-    throw new Error(`未安装 playwright-core。${PLAYWRIGHT_INSTALL_HINT}`)
+    throw new Error(`未安装 playwright-core。${PLAYWRIGHT_CORE_INSTALL_HINT}`)
   }
   const browser = (await mod.chromium.launch({ headless: true })) as {
     newPage: () => Promise<never>

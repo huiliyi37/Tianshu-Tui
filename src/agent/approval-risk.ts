@@ -1,6 +1,6 @@
 import { isIP } from 'node:net'
 import { isAbsolute } from 'node:path'
-import { evaluateMcpPolicy } from '../mcp/policy.js'
+import { evaluateMcpPolicy, type McpCapability } from '../mcp/policy.js'
 import type { ContextClaim } from '../context/claims.js'
 import type { Sensorium } from './sensorium.js'
 
@@ -203,6 +203,10 @@ export function assessToolRisk(
   doomLoopLevel: 'none' | 'warn' | 'blocked' = 'none',
   antibodies: ContextClaim[] = [],
   sensorium?: Sensorium,
+  /** P2-16: MCP declared capability from tool definition, plumbed through
+   *  tool-pipeline.  Falls back to 'unknown' for tools without MCP metadata,
+   *  preserving the existing fail-closed behaviour. */
+  declaredCapability?: McpCapability,
 ): RiskAssessment {
   const reasons: string[] = []
   let level: RiskLevel = 'none'
@@ -337,10 +341,11 @@ export function assessToolRisk(
     level = level === 'none' ? 'low' : level
     const policy = evaluateMcpPolicy({
       toolName,
+      declaredCapability: declaredCapability ?? 'unknown',
       trustedServers: [],
       blockedTools: [],
       allowedTools: [],
-      mustConfirmCapabilities: ['write', 'execute'],
+      mustConfirmCapabilities: ['write', 'execute', 'network'],
     })
     reasons.push(`MCP policy: ${policy.action} (${policy.reason})`)
     if (policy.action === 'block') level = 'high'

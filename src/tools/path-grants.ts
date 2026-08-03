@@ -149,6 +149,68 @@ export function listGrants(): PathGrant[] {
   return _grants.map(g => ({ ...g }))
 }
 
+/** Read the per-workspace store, tolerating a missing/corrupt file. */
+function readPersistedFile(cwd: string): PathGrant[] {
+  const file = grantsFile(cwd)
+  if (!existsSync(file)) return []
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as PathGrant[]
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((g): g is PathGrant => !!g && typeof g.root === 'string')
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The grants persisted for this workspace, as stored on disk. Display/revocation
+ * surfaces read this rather than `listGrants()`: the in-memory store also holds
+ * session-only grants and the dependency/runtime read grants, which the user
+ * never authorized explicitly and must not be offered as revocable entries.
+ */
+export function listPersistedGrants(cwd: string): PathGrant[] {
+  return readPersistedFile(cwd).map(g => ({
+    root: g.root,
+    mode: g.mode === 'write' ? 'write' : 'read',
+    grantedAt: typeof g.grantedAt === 'number' ? g.grantedAt : 0,
+    persisted: true,
+  }))
+}
+
+/**
+ * Revoke a grant by exact root. Both halves are required: dropping only the file
+ * would leave the subtree writable for the rest of the session (a "revoked"
+ * grant that still writes), and dropping only memory would resurrect it at the
+ * next startup via `loadPersistedGrants`.
+ *
+ * Matching is exact, not containment — revoking `/a` must not silently remove a
+ * separately-granted `/a/b` the user never asked about.
+ *
+ * The file is rewritten from its own contents rather than from memory: a peer
+ * session may have persisted a grant after this process hydrated, and rewriting
+ * from our (staler) memory would silently drop it.
+ */
+export function revokeGrant(root: string, opts: { cwd: string }): boolean {
+  const canonical = canonicalize(root)
+  const matches = (candidate: string): boolean => foldCase(canonicalize(candidate)) === foldCase(canonical)
+
+  const hadInMemory = _grants.some(g => matches(g.root))
+  if (hadInMemory) _grants = _grants.filter(g => !matches(g.root))
+
+  const onDisk = readPersistedFile(opts.cwd)
+  const kept = onDisk.filter(g => !matches(g.root))
+  const removedFromDisk = kept.length < onDisk.length
+  if (removedFromDisk) {
+    try {
+      mkdirSync(RIVET_DIR, { recursive: true })
+      writeFileAtomicSync(grantsFile(opts.cwd), JSON.stringify(kept, null, 2))
+    } catch {
+      /* best-effort: the in-memory revocation already took effect this session */
+    }
+  }
+  return hadInMemory || removedFromDisk
+}
+
 /** Write the currently-persisted grants to the per-workspace store. */
 function persistGrants(cwd: string): void {
   try {

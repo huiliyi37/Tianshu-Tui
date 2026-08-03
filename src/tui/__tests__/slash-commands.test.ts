@@ -1,7 +1,8 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
 import { loadConstellation } from '../../constellation/store.js'
 import { DEFAULT_CONFIG } from '../../config/default.js'
@@ -334,6 +335,107 @@ describe('resolveAppPromptInput', () => {
 
   it('未知 slash 仍返回 null', async () => {
     assert.equal(resolveAppPromptInput('/nonexistent', '/cwd'), null)
+  })
+})
+
+describe('/grant 目录授权', () => {
+  /** 清理 per-workspace store 文件残骸（grantPath persist 写真实 ~/.rivet）。 */
+  function cleanup(ws: string, dir: string): void {
+    const slug = ws.replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
+    rmSync(join(homedir(), '.rivet', `path-grants-${slug}.json`), { force: true })
+  }
+
+  it('/grant 无参列出已记住授权（空态提示）', async () => {
+    const ws = makeTestDir('grant-ws-')
+    const entries: LogEntry[] = []
+    try {
+      const ctx = makeCtx({
+        parts: ['/grant'],
+        agent: { ...(makeCtx().agent as any), cwd: ws },
+        pushStatic: (e) => { entries.push(e) },
+      })
+      const handled = await handleSlashCommand(ctx)
+      assert.equal(handled, true)
+      const content = entries.map(e => e.content).join('\n')
+      assert.match(content, /已记住的目录授权/)
+      assert.match(content, /无/)
+    } finally {
+      cleanupTestDir(ws)
+    }
+  })
+
+  it('/grant <path> 授权并记住，默认只读，重启回灌后仍生效', async () => {
+    const ws = makeTestDir('grant-ws-')
+    const dir = makeTestDir('grant-dir-')
+    const entries: LogEntry[] = []
+    try {
+      const ctx = makeCtx({
+        parts: ['/grant', dir],
+        agent: { ...(makeCtx().agent as any), cwd: ws },
+        pushStatic: (e) => { entries.push(e) },
+      })
+      const handled = await handleSlashCommand(ctx)
+      assert.equal(handled, true)
+      assert.match(entries.map(e => e.content).join('\n'), /已授权并记住\s*只读访问/)
+
+      const { isReadGranted, isWriteGranted, loadPersistedGrants, _resetGrantsForTest } = await import('../../tools/path-grants.js')
+      assert.equal(isReadGranted(join(dir, 'x')), true, 'grant in effect immediately')
+      assert.equal(isWriteGranted(join(dir, 'x')), false, 'default mode is read')
+      // 落盘：模拟新会话回灌
+      _resetGrantsForTest()
+      loadPersistedGrants(ws)
+      assert.equal(isReadGranted(join(dir, 'x')), true, 'persisted grant hydrates from the workspace store')
+    } finally {
+      const { revokeGrant, _resetGrantsForTest } = await import('../../tools/path-grants.js')
+      _resetGrantsForTest()
+      revokeGrant(dir, { cwd: ws })
+      cleanup(ws, dir)
+      cleanupTestDir(ws)
+      cleanupTestDir(dir)
+    }
+  })
+
+  it('/grant <path> write 授权读写', async () => {
+    const ws = makeTestDir('grant-ws-')
+    const dir = makeTestDir('grant-dir-')
+    try {
+      const ctx = makeCtx({
+        parts: ['/grant', dir, 'write'],
+        agent: { ...(makeCtx().agent as any), cwd: ws },
+        pushStatic: () => {},
+      })
+      const handled = await handleSlashCommand(ctx)
+      assert.equal(handled, true)
+      const { isWriteGranted } = await import('../../tools/path-grants.js')
+      assert.equal(isWriteGranted(join(dir, 'x')), true)
+    } finally {
+      const { revokeGrant, _resetGrantsForTest } = await import('../../tools/path-grants.js')
+      _resetGrantsForTest()
+      revokeGrant(dir, { cwd: ws })
+      cleanup(ws, dir)
+      cleanupTestDir(ws)
+      cleanupTestDir(dir)
+    }
+  })
+
+  it('/grant 列表在授权后显示条目', async () => {
+    const ws = makeTestDir('grant-ws-')
+    const dir = makeTestDir('grant-dir-')
+    const entries: LogEntry[] = []
+    try {
+      await handleSlashCommand(makeCtx({ parts: ['/grant', dir, 'write'], agent: { ...(makeCtx().agent as any), cwd: ws }, pushStatic: () => {} }))
+      await handleSlashCommand(makeCtx({ parts: ['/grant'], agent: { ...(makeCtx().agent as any), cwd: ws }, pushStatic: (e) => { entries.push(e) } }))
+      const content = entries.map(e => e.content).join('\n')
+      assert.ok(content.includes(dir), 'list must show the remembered root')
+      assert.match(content, /读写/)
+    } finally {
+      const { revokeGrant, _resetGrantsForTest } = await import('../../tools/path-grants.js')
+      _resetGrantsForTest()
+      revokeGrant(dir, { cwd: ws })
+      cleanup(ws, dir)
+      cleanupTestDir(ws)
+      cleanupTestDir(dir)
+    }
   })
 })
 

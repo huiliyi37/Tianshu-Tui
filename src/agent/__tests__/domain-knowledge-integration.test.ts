@@ -156,6 +156,10 @@ describe('V3 domain knowledge integration', () => {
           return runWorkerSession({
             ...config,
             client: fakeWorkerClient(capture),
+            // fakeWorkerClient 对「每个请求」断言末条 user 消息含领域知识块——
+            // 收尾轮的末条消息是收尾指令，断言会失败（被终型 catch 吞掉）。
+            // 本用例验证的是知识注入 worker 主提示词，钉旧契约保持单变量。
+            finalizeReport: false,
           })
         },
       })

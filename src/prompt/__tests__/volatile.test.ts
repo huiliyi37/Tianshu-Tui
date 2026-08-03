@@ -980,8 +980,8 @@ describe('GWT salience and Top-K selection', () => {
       }
       const parts = buildDynamicAppendixParts(ctx)
       const wrapped = buildDynamicAppendix(ctx)
-      // The wrapper should be: <context-update>\n + parts joined by \n\n + \n</context-update>
-      const expected = `<context-update>\n${parts.map(p => p.content).join('\n\n')}\n</context-update>`
+      // The wrapper should be: <context-update>\n + parts joined by \n + \n</context-update>
+      const expected = `<context-update>\n${parts.map(p => p.content).join('\n')}\n</context-update>`
       assert.equal(wrapped, expected)
     })
 
@@ -994,9 +994,14 @@ describe('GWT salience and Top-K selection', () => {
       }
       const parts = buildDynamicAppendixParts(ctx)
       const wrapped = buildDynamicAppendix(ctx)
-      const inner = wrapped.replace(/^<context-update>\n/, '').replace(/\n<\/context-update>$/, '')
-      const innerParts = inner.split('\n\n')
-      assert.deepEqual(parts.map(p => p.content), innerParts)
+      // 单 '\n' 连接时块边界不可朴素 split（块内也含 '\n'）——
+      // 用位置断言顺序：每个 part 的内容按 parts 顺序依次出现。
+      let cursor = 0
+      for (const part of parts) {
+        const at = wrapped.indexOf(part.content, cursor)
+        assert.ok(at >= cursor, `part ${part.name} should appear in wrapper order after offset ${cursor}`)
+        cursor = at + part.content.length
+      }
     })
   })
 
@@ -1053,38 +1058,28 @@ describe('stripFirstMarkdownTable', () => {
   })
 })
 
-describe('progress objective dedup (C3)', () => {
-  const sessionState = '<session-state>\nObjective: ship the feature\nStep: writing code\n</session-state>'
+describe('progress objective dedup removed (session-state carries no objective)', () => {
+  // The C3 dedup stripped `^Objective:` from session-state whenever the projection
+  // carried `<objective>`. Production session-state never emitted that prefix — the
+  // manager rendered `Task:` — and that `Task:` line was fed by `updateTask`, which
+  // had no production caller. Two dead halves covering for each other: wiring one up
+  // would have produced a duplicated objective with no working dedup. Both removed.
+  // The invariant that replaces the runtime patch lives in session-state.test.ts.
+  const sessionState = '<session-state>\nModified: src/cache.ts\n</session-state>'
+  const projection = '<task-contract status="executing"><objective>ship the feature</objective></task-contract>'
 
-  it('keeps the objective when projection has no <objective> (only a one-shot hint)', () => {
-    const ctx: VolatileContext = {
-      cwd: '/repo',
-      sessionState,
-      cognitiveProjection: '【瑶光·复现即证】上轮回复引用了文件名但未读取任何文件。',
-    }
-    const appendix = buildDynamicAppendix(ctx)
-    assert.match(appendix, /Objective: ship the feature/)
-  })
-
-  it('keeps the objective when projection is a non-actionable contract (renders no objective)', () => {
-    const ctx: VolatileContext = {
-      cwd: '/repo',
-      sessionState,
-      cognitiveProjection: '<verification-gap claims="2" verified="0" />',
-    }
-    const appendix = buildDynamicAppendix(ctx)
-    assert.match(appendix, /Objective: ship the feature/)
-  })
-
-  it('strips the duplicate objective only when projection actually carries <objective>', () => {
-    const ctx: VolatileContext = {
-      cwd: '/repo',
-      sessionState,
-      cognitiveProjection: '<task-contract status="executing"><objective>ship the feature</objective></task-contract>',
-    }
-    const appendix = buildDynamicAppendix(ctx)
-    assert.doesNotMatch(appendix, /Objective: ship the feature/)
+  it('projection objective reaches the appendix alongside session content', () => {
+    const appendix = buildDynamicAppendix({ cwd: '/repo', sessionState, cognitiveProjection: projection })
     assert.match(appendix, /<objective>ship the feature<\/objective>/)
+    assert.match(appendix, /Modified: src\/cache\.ts/)
+  })
+
+  it('session content no longer depends on what the projection carries', () => {
+    const withProjection = buildDynamicAppendix({ cwd: '/repo', sessionState, cognitiveProjection: projection })
+    const withoutProjection = buildDynamicAppendix({ cwd: '/repo', sessionState })
+    for (const appendix of [withProjection, withoutProjection]) {
+      assert.match(appendix, /Modified: src\/cache\.ts/)
+    }
   })
 })
 
@@ -1126,21 +1121,79 @@ describe('progress merges taskProgress with sessionState', () => {
     assert.doesNotMatch(appendix, /done:/)
   })
 
+  const fallbackCtx = (): VolatileContext => ({
+    cwd: '/repo',
+    taskProgress: {
+      completed: ['read docs'],
+      current: 'fix cache',
+      remaining: ['write tests'],
+      decisions: [],
+    },
+    decisions: ['use middleware'],
+  })
+
   it('taskProgress-only (no sessionState) fallback works', () => {
-    const ctx: VolatileContext = {
-      cwd: '/repo',
-      taskProgress: {
-        completed: ['read docs'],
-        current: 'fix cache',
-        remaining: ['write tests'],
-        decisions: [],
-      },
-      decisions: ['use middleware'],
-    }
-    const appendix = buildDynamicAppendix(ctx)
+    const appendix = buildDynamicAppendix(fallbackCtx())
     assert.match(appendix, /current: fix cache/)
     assert.match(appendix, /done: read docs/)
     assert.match(appendix, /next: write tests/)
-    assert.match(appendix, /use middleware/)
+  })
+
+  it('renders whatever decisions it is handed — the arm split lives at the producer', () => {
+    // This branch was unreachable in production until the session-state truthiness gate
+    // was fixed. Whether a session feeds it is decided per session in turn-end.ts
+    // (decisions-experiment.ts); the renderer stays dumb so there is one decision point.
+    assert.match(buildDynamicAppendix(fallbackCtx()), /use middleware/)
+    assert.doesNotMatch(buildDynamicAppendix({ ...fallbackCtx(), decisions: [] }), /Decisions:/)
+  })
+})
+
+describe('project-instructions 权威链契约（2026-08-02 用户裁决）', () => {
+  // CLAUDE.md 是第三方 agent 配置，内容进主提示词会污染天枢模型身份认知
+  // （2026-08-02 用户裁决）——本测试是该边界的防回归钉子：
+  // readRivetMd 只读 AGENTS.md + .rivet.md，永不 fallback 到 CLAUDE.md。
+  // 裁决出处：docs/superpowers/plans/2026-08-02-starflow-closure-quick-wins.md 任务 2。
+  const SENTINEL = 'I-AM-CLAUDE-SENTINEL'
+
+  it('AGENTS.md + .rivet.md + CLAUDE.md 并存：只注入前两者，哨兵不进块', () => {
+    const cwd = mkdtempSync(join(sandboxTmpDir(), 'volatile-auth-chain-'))
+    try {
+      writeFileSync(join(cwd, 'AGENTS.md'), '# AGENTS-SENTINEL-HEADING\n构建命令：npm run build\n', 'utf-8')
+      writeFileSync(join(cwd, '.rivet.md'), '## Stack\n测试命令：node --test\n', 'utf-8')
+      writeFileSync(join(cwd, 'CLAUDE.md'), `# Claude\n你是 Claude。\n${SENTINEL}\n`, 'utf-8')
+
+      const block = buildVolatileBlock({ cwd })
+
+      assert.match(block, /AGENTS-SENTINEL-HEADING/)
+      assert.match(block, /测试命令：node --test/)
+      assert.doesNotMatch(block, /你是 Claude/)
+      assert.doesNotMatch(block, new RegExp(SENTINEL))
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('只有 CLAUDE.md 的裸项目：project-instructions 为空，不 fallback', () => {
+    const cwd = mkdtempSync(join(sandboxTmpDir(), 'volatile-claude-only-'))
+    try {
+      writeFileSync(join(cwd, 'CLAUDE.md'), `# Claude\n${SENTINEL}\n`, 'utf-8')
+
+      const block = buildVolatileBlock({ cwd })
+
+      assert.doesNotMatch(block, /<project-instructions/)
+      assert.doesNotMatch(block, new RegExp(SENTINEL))
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('无任何项目文档：project-instructions 不出现（现状保持）', () => {
+    const cwd = mkdtempSync(join(sandboxTmpDir(), 'volatile-no-docs-'))
+    try {
+      const block = buildVolatileBlock({ cwd })
+      assert.doesNotMatch(block, /<project-instructions/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 })

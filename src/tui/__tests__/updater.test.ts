@@ -263,9 +263,14 @@ describe('fetchNpmLatestVersion proxy support', () => {
   let origFetch: typeof globalThis.fetch
   const proxyKeys = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy']
   const origProxyValues: Record<string, string | undefined> = {}
+  let origNoSystemProxy: string | undefined
 
   before(() => {
     origFetch = globalThis.fetch
+    // 系统代理（Windows 注册表 / macOS scutil）是环境变量之外的第二条代理通道——
+    // 不清掉它，开了系统代理的机器上「无代理」用例永远拿到 ProxyAgent。
+    origNoSystemProxy = process.env.RIVET_NO_SYSTEM_PROXY
+    process.env.RIVET_NO_SYSTEM_PROXY = '1'
     for (const key of proxyKeys) {
       origProxyValues[key] = process.env[key]
       delete process.env[key]
@@ -274,6 +279,8 @@ describe('fetchNpmLatestVersion proxy support', () => {
 
   after(() => {
     globalThis.fetch = origFetch
+    if (origNoSystemProxy === undefined) delete process.env.RIVET_NO_SYSTEM_PROXY
+    else process.env.RIVET_NO_SYSTEM_PROXY = origNoSystemProxy
     for (const key of proxyKeys) {
       if (origProxyValues[key] === undefined) {
         delete process.env[key]

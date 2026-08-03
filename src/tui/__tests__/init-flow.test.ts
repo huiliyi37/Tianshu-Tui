@@ -21,6 +21,25 @@ const UNKNOWN_INPUT: InitFlowInput = {
   installedSkillCount: 0,
 }
 
+const WITH_CLAUDE_INPUT: InitFlowInput = {
+  fingerprint: { language: 'typescript', hasTestInfra: false, externalAgentDocs: ['CLAUDE.md'] },
+  installedSkillCount: 0,
+}
+
+test('scope step shows informational note when external agent configs exist', () => {
+  const flow = new InitFlow(WITH_CLAUDE_INPUT)
+  const view = flow.view()
+  assert.equal(view.kind, 'multi-choice')
+  assert.match(view.note ?? '', /检测到 CLAUDE\.md（第三方 agent 配置）/)
+  assert.match(view.note ?? '', /天枢不会自动搬运或注入它（身份边界）/)
+})
+
+test('scope step has no note when no external agent configs exist', () => {
+  const flow = new InitFlow(NODE_INPUT)
+  const view = flow.view()
+  assert.equal(view.note, undefined)
+})
+
 test('scope step lists the three scopes; verify checked + recommended, skills/hooks opt-in', () => {
   const flow = new InitFlow(NODE_INPUT)
   const view = flow.view()

@@ -6,12 +6,17 @@ import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 import { GIT_TOOL, getWorkingTreeFiles, getFileDiff, getFileAtBase } from '../git.js'
 
-const TMP = join(import.meta.dirname, '.git-test-tmp')
+// 测试 repo 必须建在系统 tmpdir（仓库外）且路径每次唯一（mkdtemp）。
+// 曾用工作树内固定路径（.git-test-tmp）：多会话并发跑测试时，一个进程的
+// afterEach rmSync 恰好删掉另一进程刚 init 的 .git，后者的 `git config`
+// 找不到本地 repo 便向上爬到主仓库 → user.name/email 被写成 Test，
+// 之后所有会话的提交作者全部污染（发生一次即永久）。tmpdir 外无 repo
+// 可爬，竞态只会响亮报错；mkdtemp 唯一路径则让竞态本身消失。
+let TMP: string
 
 describe('GIT_TOOL', () => {
   beforeEach(() => {
-    rmSync(TMP, { recursive: true, force: true })
-    mkdirSync(TMP, { recursive: true })
+    TMP = mkdtempSync(join(tmpdir(), 'rivet-git-tool-'))
     execSync('git init', { cwd: TMP })
     execSync('git config user.email "test@test.com"', { cwd: TMP })
     execSync('git config user.name "Test"', { cwd: TMP })
@@ -232,11 +237,10 @@ describe('GIT_TOOL', () => {
 })
 
 describe('getWorkingTreeFiles / getFileDiff (desktop changes tab)', () => {
-  const TMP2 = join(import.meta.dirname, '.git-wt-test-tmp')
+  let TMP2: string
 
   beforeEach(() => {
-    rmSync(TMP2, { recursive: true, force: true })
-    mkdirSync(TMP2, { recursive: true })
+    TMP2 = mkdtempSync(join(tmpdir(), 'rivet-git-wt-'))
     execSync('git init', { cwd: TMP2 })
     execSync('git config user.email "test@test.com"', { cwd: TMP2 })
     execSync('git config user.name "Test"', { cwd: TMP2 })

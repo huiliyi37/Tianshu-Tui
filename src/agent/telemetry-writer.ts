@@ -60,6 +60,9 @@ export function createTelemetryWriter(cwd: string, sessionId?: string): Telemetr
 
   const dir = sessionId ? join(getSessionDir(cwd), sessionId) : join(cwd, '.rivet')
   const path = join(dir, 'sensorium.jsonl')
+  // 串行化写入：并发 appendFile 竞争会乱序（两条 write 同 tick 完成顺序不定），
+  // telemetry 的首要性质就是按写入时间有序——用 promise 链保证落盘顺序。
+  let writeChain: Promise<void> = Promise.resolve()
   const pendingWrites: Promise<void>[] = []
   let writesSinceTrim = 0
   return {
@@ -69,7 +72,8 @@ export function createTelemetryWriter(cwd: string, sessionId?: string): Telemetr
       const line = JSON.stringify(snapshot)
       const shouldTrim = ++writesSinceTrim >= TRIM_CHECK_EVERY
       if (shouldTrim) writesSinceTrim = 0
-      const writePromise = import('node:fs/promises').then(async fs => {
+      const writePromise = (writeChain = writeChain.then(async () => {
+        const fs = await import('node:fs/promises')
         await fs.mkdir(dir, { recursive: true })
         await fs.appendFile(path, line + '\n', 'utf-8')
         if (shouldTrim) {
@@ -83,7 +87,7 @@ export function createTelemetryWriter(cwd: string, sessionId?: string): Telemetr
             }
           } catch { /* trim is best-effort — never break telemetry */ }
         }
-      }).catch(() => {})
+      }).catch(() => {}))
       pendingWrites.push(writePromise)
       writePromise.finally(() => {
         const index = pendingWrites.indexOf(writePromise)

@@ -1,8 +1,10 @@
-export type McpCapability = 'read' | 'write' | 'execute' | 'network'
+export type McpCapability = 'unknown' | 'read' | 'write' | 'execute' | 'network'
 export type McpPolicyAction = 'allow' | 'confirm' | 'block' | 'require'
 
 export interface McpPolicyInput {
   toolName: string
+  /** Capability declared in local MCP configuration. Undeclared tools are unknown. */
+  declaredCapability?: McpCapability
   trustedServers: string[]
   blockedTools: string[]
   allowedTools: string[]
@@ -17,21 +19,10 @@ export interface McpPolicyDecision {
   reason: string
 }
 
-const WRITE_RE = /(?:^|[_-])(?:write|create|update|delete|remove|push|post|put|patch)(?:$|[_-])/i
-const EXECUTE_RE = /(?:^|[_-])(?:execute|run|shell|bash|command)(?:$|[_-])/i
-const NETWORK_RE = /(?:^|[_-])(?:fetch|request|http|web|download|upload)(?:$|[_-])/i
-
 function parseMcpTool(toolName: string): { serverId: string; mcpToolName: string } | null {
   const match = toolName.match(/^mcp__(.+)__(.+)$/)
   if (!match) return null
   return { serverId: match[1]!, mcpToolName: match[2]! }
-}
-
-function inferCapability(mcpToolName: string): McpCapability {
-  if (EXECUTE_RE.test(mcpToolName)) return 'execute'
-  if (WRITE_RE.test(mcpToolName)) return 'write'
-  if (NETWORK_RE.test(mcpToolName)) return 'network'
-  return 'read'
 }
 
 export function evaluateMcpPolicy(input: McpPolicyInput): McpPolicyDecision {
@@ -40,7 +31,7 @@ export function evaluateMcpPolicy(input: McpPolicyInput): McpPolicyDecision {
     return { action: 'allow', capability: 'read', reason: 'Not an MCP tool.' }
   }
 
-  const capability = inferCapability(parsed.mcpToolName)
+  const capability = input.declaredCapability ?? 'unknown'
 
   if (input.blockedTools.includes(input.toolName)) {
     return {
@@ -54,6 +45,15 @@ export function evaluateMcpPolicy(input: McpPolicyInput): McpPolicyDecision {
 
   if (input.allowedTools.includes(input.toolName)) {
     return { action: 'allow', ...parsed, capability, reason: 'MCP tool is explicitly allowed.' }
+  }
+
+  if (capability === 'unknown') {
+    return {
+      action: 'confirm',
+      ...parsed,
+      capability,
+      reason: `MCP tool ${parsed.mcpToolName} has no declared capability. Confirm each call or declare it in the server policy.`,
+    }
   }
 
   const trusted = input.trustedServers.includes(parsed.serverId)

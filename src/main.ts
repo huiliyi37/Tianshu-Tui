@@ -260,6 +260,17 @@ async function main() {
     return
   }
 
+  // rivet web search <query> / rivet web fetch <url> / rivet web status
+  // web 工具命令行入口与连通性自检——不经过 agent/LLM，确定性可脚本化。
+  // 放在 TTY 门与 bootstrap 之前：纯 CLI（SSH/CI）场景验证代理与 backend 连通性，
+  // 不需要初始化 agent、不联网到模型。
+  if (args[0] === 'web') {
+    const { runWebCLI } = await import('./cli/web-cli.js')
+    const code = await runWebCLI(args.slice(1))
+    if (code !== 0) process.exit(code)
+    return
+  }
+
   // ── Session selection → env signalling for getOrCreateSessionId ──
   // Resolve BEFORE the TTY gate so ambiguous/not-found errors are clear even in
   // a pipe; the env is still set before bootstrap reads it via getOrCreateSessionId.
@@ -306,6 +317,9 @@ async function main() {
     const { createHeadlessCoordinator } = await import('./agent/headless-coordinator.js')
     const { initializePlugins } = await import('./plugins/plugin-loader.js')
     const { createGalaxyTool } = await import('./tools/galaxy.js')
+    const { createStarflowTool } = await import('./tools/starflow.js')
+    const { createCouncilConveneTool } = await import('./tools/council-convene.js')
+    const { createTeamOrchestrateTool } = await import('./tools/team-orchestrate.js')
     const { DomainKnowledgeStore } = await import('./agent/domain-knowledge-store.js')
 
     const parsed = parseCliArgs(args)
@@ -426,6 +440,9 @@ async function main() {
           // 收编 #2：冗余义务门禁消费（headless 生产注入）
           getObligationStore: () => headlessAgentRef.current?.obligations.getStore()
             ?? { obligations: [] },
+          // 证据防火墙 Phase 2：claim tracker（headless 生产注入；hook 未装配时 fail-open）
+          getClaimTracker: () => headlessAgentRef.current?.externalClaimTracker?.(),
+          scoutFirewallConfig: cfg.agent.scoutEvidenceFirewall,
         })))
         if (presetIncludes(registryOptions.preset, 'update_goal')) {
           toolRegistry.register(createUpdateGoalTool(
@@ -449,13 +466,31 @@ async function main() {
           cwd: process.cwd(),
           sessionId,
         })
-        toolRegistry.register(createGalaxyTool({
+        const headlessGalaxyTool = createGalaxyTool({
           delegateBatch: async (requests, policy, abortSignal, onProgress, onWorkerSettled) =>
             headlessCoordinator.delegateBatch(requests, policy, abortSignal, onProgress, onWorkerSettled),
           // 路由学习（收编 #5）：headless 无 SharedRuntime，per-session 建库即可。
           domainKnowledgeStore: new DomainKnowledgeStore(join(process.cwd(), '.rivet', 'knowledge')),
           // DP 证据冗余（收编 #2）：agent 创建后由 headlessAgentRef 惰性提供。
           get obligationTracker() { return headlessAgentRef.current?.obligations },
+        })
+        toolRegistry.register(headlessGalaxyTool)
+
+        // starflow — 星流代码级编排（council→team→galaxy 硬门禁状态机）。
+        // headless 不注册 council_convene / team_orchestrate（模型不可见），
+        // 星流按相同 coordinator 包装等价自构三个子工具实例。
+        toolRegistry.register(createStarflowTool({
+          councilTool: createCouncilConveneTool({
+            delegateBatch: async (requests, policy, abortSignal, onProgress) =>
+              headlessCoordinator.delegateBatch(requests, policy, abortSignal, onProgress),
+          }),
+          teamTool: createTeamOrchestrateTool({
+            delegateBatch: async (requests, policy, abortSignal, onProgress, onWorkerSettled) =>
+              headlessCoordinator.delegateBatch(requests, policy, abortSignal, onProgress, onWorkerSettled),
+            delegate: async (request, abortSignal) => headlessCoordinator.delegate(request, abortSignal),
+          }),
+          galaxyTool: headlessGalaxyTool,
+          cwd: process.cwd(),
         }))
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
@@ -564,15 +599,29 @@ async function main() {
       process.stderr.write(`\n[T9] ${msg}\n\n`)
       process.stderr.write('Running first-time setup wizard...\n\n')
       const { runProviderConfigWizard } = await import('./config/provider-wizard.js')
-      await runProviderConfigWizard()
-      process.stderr.write('\nRestarting with new configuration...\n\n')
-      ctx = await bootstrapInteractiveSession({
-        cwd: process.cwd(),
-        args,
-        modelId: requestedModel,
-        providerName: requestedProvider,
-        asyncExtras: true,
-      })
+      const result = await runProviderConfigWizard()
+      // 用户跳过 wizard——降级启动（无 key 进 TUI，发消息时报错指引配 key）。
+      // 与桌面端「先进界面再提醒」体验对齐，不让新用户被困在启动门。
+      if (result.skipped) {
+        process.stderr.write('\nStarting in degraded mode (no API key). Configure via /config or `rivet config setup`.\n\n')
+        ctx = await bootstrapInteractiveSession({
+          cwd: process.cwd(),
+          args,
+          modelId: requestedModel,
+          providerName: requestedProvider,
+          asyncExtras: true,
+          allowMissingKey: true,
+        })
+      } else {
+        process.stderr.write('\nRestarting with new configuration...\n\n')
+        ctx = await bootstrapInteractiveSession({
+          cwd: process.cwd(),
+          args,
+          modelId: requestedModel,
+          providerName: requestedProvider,
+          asyncExtras: true,
+        })
+      }
     } else {
       throw bootErr
     }
@@ -662,6 +711,8 @@ async function main() {
     history: loadHistory(),
     contextWindow: currentModel?.contextWindow,
     gitBranch,
+    // 审批时判定工作区外路径，显示「批准并记住此目录」选项。
+    cwd: ctx.cwd,
     perfMonitor: new TuiPerfMonitor({ enabled: isTuiPerfEnabled(args) }),
     onPerfSummary: summary => {
       perfSummaryFlush = ctx!.flushTuiPerfSummary(summary)

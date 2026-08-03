@@ -96,8 +96,12 @@ test('Execution Trust Closure blocks or fails worker changes through evidence ga
 })
 
 test('Execution Trust Closure requires confirmation or raises risk for MCP write/execute tools', () => {
+  // b7e719b7 起能力只认 declaredCapability 声明（不再按工具名正则猜测）——
+  // 声明了 write/execute 的工具仍走 confirm；assessToolRisk 拿不到 MCP 配置，
+  // 一律按 undeclared → confirm 提 medium（fail-closed）。
   const writePolicy = evaluateMcpPolicy({
     toolName: 'mcp__unknown__write_file',
+    declaredCapability: 'write',
     trustedServers: [],
     blockedTools: [],
     allowedTools: [],
@@ -105,6 +109,7 @@ test('Execution Trust Closure requires confirmation or raises risk for MCP write
   })
   const executePolicy = evaluateMcpPolicy({
     toolName: 'mcp__trusted__run_command',
+    declaredCapability: 'execute',
     trustedServers: ['trusted'],
     blockedTools: [],
     allowedTools: [],
@@ -117,5 +122,5 @@ test('Execution Trust Closure requires confirmation or raises risk for MCP write
   assert.equal(executePolicy.action, 'confirm')
   assert.equal(executePolicy.capability, 'execute')
   assert.equal(risk.level, 'medium')
-  assert.ok(risk.reasons.some(r => r.includes('MCP write-capable tool')))
+  assert.ok(risk.reasons.some(r => r.includes('MCP policy: confirm')))
 })

@@ -1740,9 +1740,19 @@ describe('evaluateConvergence', () => {
       assert.equal(classifyActivityMode(history, 0), 'diagnostic')
     })
 
-    it('returns build when any file has been modified', () => {
+    it('returns build when any file has been modified (old: global flag; now: window-based)', () => {
       const history = makeHistory([
         { tool: 'read_file' }, { tool: 'grep' }, { tool: 'read_file' }, { tool: 'glob' },
+      ])
+      // Window has no edit tools → diagnostic (even though filesModified=1 from earlier turns)
+      assert.equal(classifyActivityMode(history, 1), 'diagnostic')
+    })
+
+    it('returns build when window contains recent edit tools', () => {
+      const history = makeHistory([
+        { tool: 'read_file' }, { tool: 'grep' }, { tool: 'read_file' },
+        { tool: 'edit_file' }, { tool: 'read_file' }, { tool: 'grep' },
+        { tool: 'read_file' }, { tool: 'read_file' },
       ])
       assert.equal(classifyActivityMode(history, 1), 'build')
     })
@@ -1761,7 +1771,7 @@ describe('evaluateConvergence', () => {
       const history = makeHistory([
         { tool: 'read_file' }, { tool: 'grep' }, { tool: 'read_file' },
         { tool: 'glob' }, { tool: 'read_file' }, { tool: 'grep' },
-        { tool: 'edit_file' }, { tool: 'read_file' },
+        { tool: 'run_tests' }, { tool: 'read_file' },
       ])
       assert.equal(classifyActivityMode(history, 0), 'diagnostic')
     })

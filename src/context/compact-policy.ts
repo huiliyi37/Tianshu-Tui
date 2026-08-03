@@ -71,6 +71,32 @@ export function decideCompactTier(input: CompactPolicyInput): CompactDecision {
  *  CompactionController.maybeCompact's dedicated 1M branch. */
 export const LLM_ACTION_RATIOS = { partial: 0.60, full: 0.75 } as const
 
+/**
+ * Ladder for per-token providers whose prefix cache is persistent and exact
+ * (DeepSeek). An LLM rewrite invalidates a prefix the user already paid to
+ * build, so the rung has to sit high enough that the reclaim is worth the
+ * rebuild — the same cost asymmetry that made T9 quality compaction skip these
+ * providers outright (3ffcf273).
+ *
+ * The base 0.60 rung shipped here from the token-explosion P1 fix (5482542,
+ * 2026-06-11) and predates that reasoning. It was nominally guarded by
+ * `cacheAdvisor.shouldDelayCompact`, but that guard cannot reach: its
+ * `protection = hitRate × (1 − pressure) ≥ 0.45` test caps out at 0.55 pressure
+ * even with a perfect hit rate, so a 99%-hit session still compacted at 0.60.
+ */
+export const CACHE_PRESERVING_LLM_ACTION_RATIOS = { partial: 0.75, full: 0.85 } as const
+
+/**
+ * Subscription providers keep the base ladder even when cache-preserving:
+ * flat billing makes an early reclaim cost latency but no money, which is the
+ * same split T9 encodes (`cachePreserving && !costInsensitive`).
+ */
+export function llmActionRatiosFor(profile: CompactionProfile): { partial: number; full: number } {
+  return profile.billing === 'per-token' && profile.cache === 'exact-prefix'
+    ? CACHE_PRESERVING_LLM_ACTION_RATIOS
+    : LLM_ACTION_RATIOS
+}
+
 export interface CompactActionInput extends CompactPolicyInput {
   profile: CompactionProfile
 }
@@ -101,14 +127,17 @@ export interface CompactActionDecision {
  *     Force wins over the circuit breaker: an over-window request is a hard
  *     API failure, not a tuning preference.
  *   - open breaker: no discretionary action.
- *   - 1M LLM ladder: full-llm ≥ 0.75, partial-llm ≥ 0.60 (unchanged ratios,
- *     now shared constants).
+ *   - 1M LLM ladder: provider-dependent, see {@link llmActionRatiosFor}.
+ *     0.60/0.75 by default; 0.75/0.85 for per-token providers with a persistent
+ *     exact prefix cache, where an LLM rewrite discards prefix bytes the user
+ *     already paid for.
  *   - precision band: past the accuracy ceiling but below the LLM ladder —
  *     surfaces as a deterministic `stale-round` reclaim, which still has to
  *     clear the downstream reclaim gate and cache-advisor delay. Never a forced
- *     LLM rewrite (plan §1.4). Since the ceiling moved to 0.7 (2026-07-26) this
- *     band is empty on the 1M path — partial-llm at 0.60 claims everything
- *     above it — so the branch only fires under a precisionCeilingOverride.
+ *     LLM rewrite (plan §1.4). On the default ladder this band is empty (the
+ *     ceiling is 0.7 and partial-llm at 0.60 claims everything above it), but
+ *     the cache-preserving ladder reopens it at 0.70–0.75: those providers now
+ *     get the light deterministic reclaim in the band the LLM rung vacated.
  *   - everything else: the tier policy decides a deterministic `micro`.
  */
 export function decideCompactAction(input: CompactActionInput): CompactActionDecision {
@@ -133,10 +162,11 @@ export function decideCompactAction(input: CompactActionInput): CompactActionDec
   }
 
   if (input.maxTokens >= 1_000_000) {
-    if (ratio >= LLM_ACTION_RATIOS.full) {
+    const llmRatios = llmActionRatiosFor(input.profile)
+    if (ratio >= llmRatios.full) {
       return { ...base, action: 'full-llm', reason: `full LLM compact ladder at ${(ratio * 100).toFixed(0)}%`, force: false, tier: tierDecision.tier, shouldCompact: true }
     }
-    if (ratio >= LLM_ACTION_RATIOS.partial) {
+    if (ratio >= llmRatios.partial) {
       return { ...base, action: 'partial-llm', reason: `partial LLM compact ladder at ${(ratio * 100).toFixed(0)}%`, force: false, tier: tierDecision.tier, shouldCompact: true }
     }
     if (precisionRisk) {

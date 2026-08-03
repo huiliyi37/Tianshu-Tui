@@ -145,6 +145,10 @@ const SPARSE_TREE_RETRY_DELAY_MS = 2_500
 /** Max dimension for the vision-model screenshot copy (px). */
 const VISION_MAX_DIMENSION = 1440
 
+// Shared with windows-driver (PowerShell Invoke-Expression) — see danger-guard.ts.
+import { hasDangerousPatterns } from './danger-guard.js'
+export { hasDangerousPatterns }
+
 /**
  * Whether `type` must route through clipboard paste to be reliable: any
  * character outside printable ASCII (CJK, emoji, accents…) goes through the
@@ -232,6 +236,8 @@ export function resetJxaHostForTests(): void {
 }
 
 async function runJxa(script: string, timeoutMs = OSASCRIPT_TIMEOUT_MS): Promise<string> {
+  const blocked = hasDangerousPatterns(script)
+  if (blocked) throw new Error(blocked)
   const host = getJxaHost()
   if (host && host.available()) {
     try {

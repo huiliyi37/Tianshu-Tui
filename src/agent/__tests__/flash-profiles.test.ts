@@ -60,6 +60,8 @@ describe('tierLock in recommendModelTier', () => {
       kind: 'patch_proposal',
       objective: 'Apply code change',
       consecutiveFailures: 3,
+      // 显式开启升档——缺省已改 fail-closed，本例测的是「非 tierLock 不拦升档」。
+      failureEscalationCap: 'strong',
     })
     assert.equal(rec.tier, 'strong')
     assert.ok(rec.reason.includes('failure'))

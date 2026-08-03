@@ -33,7 +33,7 @@
  * enforcement is exercised only on the matching platform.
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeGrantedRoots } from './path-grants.js'
@@ -145,9 +145,36 @@ export function defaultWritableRoots(ctx: { cwd: string; env?: NodeJS.ProcessEnv
   return [...roots]
 }
 
+/**
+ * Seatbelt matches rules against the CANONICAL path, so a rule naming a
+ * symlinked ancestor never fires. On macOS `/var` is a symlink to `/private/var`
+ * — which is where the per-user temp dir actually lives — so
+ * `(subpath "/var/folders")` denied every `mkdtemp` under $TMPDIR, and with it
+ * most of the Node/npm/git toolchain (2026-08-02). `/tmp` had its twin spelled
+ * out by hand; do it for every root instead, since cwd, user grants and
+ * RIVET_SANDBOX_WRITABLE can traverse symlinks too. Resolving also drops the
+ * trailing slash macOS puts on $TMPDIR, which `subpath` does not tolerate.
+ */
+function withCanonicalTwins(roots: string[], resolve: (p: string) => string): string[] {
+  const out = new Set<string>()
+  for (const root of roots) {
+    out.add(root)
+    try {
+      out.add(resolve(root))
+    } catch {
+      // Root does not exist yet — the literal spelling still covers it once the
+      // toolchain creates it, provided no symlink sits on the way.
+    }
+  }
+  return [...out]
+}
+
 /** Build a Seatbelt profile that allows everything except writes outside roots. */
-export function buildSeatbeltProfile(writableRoots: string[]): string {
-  const writeRules = writableRoots
+export function buildSeatbeltProfile(
+  writableRoots: string[],
+  resolvePath: (p: string) => string = (p) => realpathSync(p),
+): string {
+  const writeRules = withCanonicalTwins(writableRoots, resolvePath)
     .map(root => `  (subpath "${seatbeltQuote(root)}")`)
     .join('\n')
   return [

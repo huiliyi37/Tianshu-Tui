@@ -111,4 +111,41 @@ describe('detectProjectFingerprint', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('detects external agent config files (CLAUDE.md) as existence signal', () => {
+    const dir = tmpdir()
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: {} }))
+      writeFileSync(join(dir, 'CLAUDE.md'), '# Claude\n第三方 agent 配置，内容永不进注入链路。\n')
+      const fp = detectProjectFingerprint(dir)
+      assert.deepEqual(fp.externalAgentDocs, ['CLAUDE.md'])
+      // 语言探测不受影响。
+      assert.equal(fp.language, 'typescript')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('omits externalAgentDocs when no third-party agent config exists', () => {
+    const dir = tmpdir()
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: {} }))
+      const fp = detectProjectFingerprint(dir)
+      assert.equal(fp.externalAgentDocs, undefined)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('unknown project still reports externalAgentDocs', () => {
+    const dir = tmpdir()
+    try {
+      writeFileSync(join(dir, 'CLAUDE.md'), '# Claude\n')
+      const fp = detectProjectFingerprint(dir)
+      assert.equal(fp.language, 'unknown')
+      assert.deepEqual(fp.externalAgentDocs, ['CLAUDE.md'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

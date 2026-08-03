@@ -81,6 +81,22 @@ export async function describeImages(
   const prompt = selectVisionPrompt(options.prompt, options.accompanyingText)
   const parts: OaiContentPart[] = [{ type: 'text', text: prompt }]
   for (const url of images) {
+    // 防御：校验 data URL 格式，不合法时提前报错
+    if (!url.startsWith('data:')) {
+      throw new Error(`图片 URL 不是 data URL 格式，请检查图片数据`)
+    }
+    const commaIdx = url.indexOf(',')
+    const header = commaIdx >= 0 ? url.slice(0, commaIdx) : url
+    if (!/^data:image\/(png|jpeg|gif|webp|bmp|tiff);base64$/.test(header)) {
+      throw new Error(
+        `图片格式不受视觉模型支持（期望 image/png, image/jpeg, image/gif, image/webp），`
+        + `实际头部: ${header.slice(0, 60)}${header.length > 60 ? '…' : ''}`
+      )
+    }
+    const payloadLen = commaIdx >= 0 ? url.length - commaIdx - 1 : 0
+    if (payloadLen < 64) {
+      throw new Error(`图片数据异常短（${payloadLen} 字符），可能被截断`)
+    }
     parts.push({ type: 'image_url', image_url: { url } })
   }
 

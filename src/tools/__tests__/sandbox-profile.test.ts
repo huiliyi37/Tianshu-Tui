@@ -22,6 +22,7 @@ import {
 import { grantPath, _resetGrantsForTest } from '../path-grants.js'
 import { mkdtempSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 describe('sandbox-profile: shSingleQuote', () => {
@@ -92,6 +93,36 @@ describe('sandbox-profile: Seatbelt', () => {
     const profile = buildSeatbeltProfile(['/work'])
     assert.ok(profile.includes('(subpath "/dev/disk")'), 'disk device read/write/ioctl for hdiutil')
     assert.ok(profile.includes('(subpath "/dev/rdisk")'), 'raw disk device access for DMG creation')
+  })
+  // Seatbelt matches rules against the canonical path, so a rule naming a
+  // symlinked ancestor never fires. On macOS /var → /private/var, which is where
+  // $TMPDIR actually lives: the literal rule silently denied every mkdtemp,
+  // i.e. most of the Node/npm/git toolchain (2026-08-02).
+  it('emits the canonical twin for roots sitting behind a symlink', () => {
+    const resolve = (p: string) => {
+      const canon = p.startsWith('/var/') ? p.replace('/var/', '/private/var/') : p
+      return canon.endsWith('/') ? canon.slice(0, -1) : canon
+    }
+    const profile = buildSeatbeltProfile(['/var/folders/ab/T/'], resolve)
+    assert.ok(
+      profile.includes('(subpath "/private/var/folders/ab/T")'),
+      `canonical spelling missing:\n${profile}`,
+    )
+  })
+  it('keeps the literal root when it cannot be resolved yet', () => {
+    const profile = buildSeatbeltProfile(['/not/created/yet'], () => { throw new Error('ENOENT') })
+    assert.ok(profile.includes('(subpath "/not/created/yet")'), profile)
+  })
+  it('darwin: the real default profile actually permits mkdtemp under $TMPDIR', { skip: process.platform !== 'darwin' }, () => {
+    const profile = buildSeatbeltProfile(defaultWritableRoots({ cwd: process.cwd() }))
+    assert.ok(
+      profile.includes(`(subpath "${realpathSync(tmpdir())}")`),
+      'canonical temp dir must be writable or the whole toolchain gets EPERM',
+    )
+    // Kernel-level proof, not just a string assertion — this is the exact call
+    // (mkdtemp under $TMPDIR) that regressed.
+    const made = execFileSync('sandbox-exec', ['-p', profile, '/usr/bin/mktemp', '-d'], { encoding: 'utf8' }).trim()
+    rmSync(made, { recursive: true, force: true })
   })
   it('builds a sandbox-exec command that preserves the inner command', () => {
     const cmd = buildSeatbeltCommand('npm test', ['/work'])

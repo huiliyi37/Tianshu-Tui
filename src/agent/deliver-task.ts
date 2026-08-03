@@ -53,6 +53,8 @@ import { deserializeUnifiedPlan } from './unified-plan.js'
 import { enqueuePostCommitReviewOutcome } from './post-commit-review-queue.js'
 import { addPendingReviewFiles, consumePendingReview, __resetPostCommitReviewPending } from './post-commit-review-pending.js'
 import { isUiFilePath, isVisualVerifyTool } from './hooks/render-verify-hook.js'
+import { findUnverifiedClaimRefs } from './hooks/external-claim-tracking-hook.js'
+import { isScoutFirewallEnabled } from '../config/scout-firewall-config.js'
 import { appendMemoryEntry, countSimilarMemoryEntries } from '../memory/unified-memory.js'
 
 export interface B1Context {
@@ -128,6 +130,12 @@ export interface B1Context {
    *  义务未达 k 个独立证据会阻断交付（不静默降级为 satisfied）。缺省 →
    *  冗余门禁关闭（现状行为不变）。 */
   getObligationStore?: () => import('./evidence-obligation.js').ObligationStore
+  /** 证据防火墙 Phase 2：external-claim tracker 入口。提供且防火墙开启时，
+   *  commit 引用未核验 scout 断言会被拦截。缺省 → 门禁关闭（现状行为不变）。 */
+  getClaimTracker?: () => import('./hooks/external-claim-tracking-hook.js').ClaimTracker | undefined
+  /** config agent.scoutEvidenceFirewall 值（env RIVET_SCOUT_FIREWALL 优先，
+   *  判定走 isScoutFirewallEnabled）。 */
+  scoutFirewallConfig?: boolean
   /** W1 回归防线: Meridian blast-radius tests (EvidenceTracker.impactedTests).
    *  Absent → coverage check disabled (unchanged behavior). */
   getImpactedTests?: () => string[]
@@ -749,6 +757,22 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         }
       }
 
+      // ── 证据防火墙 Phase 2（jidoka）──────────────────────────────
+      // 位置 A：报告组装段——commit 与否都算好未核验引用，警示行恒开。
+      // 扫描面与宣称-证据对账同源（message + checklist items）。
+      const firewallTracker = ctx.getClaimTracker?.()
+      const deliveryText = [
+        typeof params.input.message === 'string' ? params.input.message : '',
+        ...(auditList ?? []).map(e => e.item),
+      ].join('\n')
+      const firewallRefs = firewallTracker
+        ? findUnverifiedClaimRefs(firewallTracker, deliveryText)
+        : []
+      if (firewallRefs.length > 0) {
+        lines.push('', `⚠ 证据防火墙：交付文本引用了 delegate 报告的路径，但本会话未独立核验：${firewallRefs.join('、')}`)
+        lines.push('  worker 的 file:line 是待核验假设——read_file/grep 确认后再作为交付结论，或标注 [待核] 降级为线索。')
+      }
+
       if (commit) {
         // Manual commit mode — user wants to review before committing.
         // Still run the full gate report, just skip the actual git commit.
@@ -776,6 +800,18 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         )
 
         const forceGate = params.input.force === true
+
+        // 位置 B：commit 硬拦——在 RED 判定之前，作为独立拦截条件并列
+        // （不与 delivery gate 的 RED 语义混合，防火墙有自己的 Recovery 文案）。
+        // force 不豁免：这是当前交付的证据债，不是预存量失败。
+        if (commit && firewallRefs.length > 0 && isScoutFirewallEnabled(ctx.scoutFirewallConfig)) {
+          lines.push('', '❌ Cannot commit: evidence firewall — 交付引用了未经独立核验的 scout/delegate 断言。')
+          lines.push('   （force 不豁免：这是当前交付的证据义务，不是预存量失败。）')
+          lines.push('', 'Recovery:')
+          lines.push(`  → 用 read_file / grep 逐一核验：${firewallRefs.join('、')}，然后重跑 deliver_task`)
+          lines.push('  → 或从提交信息/清单中移除该引用，或为该行添加 [待核] 标注（诚实降级为线索）。')
+          return { content: lines.join('\n'), isError: true }
+        }
 
         // Mechanical-change classification (computed once, reused for gate bypass
         // and post-commit review). Only meaningful when fast-path is enabled.

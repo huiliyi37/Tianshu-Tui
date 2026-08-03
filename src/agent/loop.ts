@@ -6,7 +6,8 @@ import { SessionPersist, getSessionDir, shouldAutoWriteHandoff } from './session
 import { attachSessionPersistListener } from './session-persist-listener.js'
 import { PrewarmCache } from './prewarm.js'
 import { invalidateSessionReadDedup } from '../tools/read-file.js'
-import { getTodos } from '../tools/todo.js'
+import { getTodos, getTodoRegressionStats } from '../tools/todo.js'
+import { resolveDecisionsArm } from './decisions-experiment.js'
 import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import { applyDescriptionMode } from '../tools/description-compact.js'
 import { resolvePromptBlocks } from '../prompt/block-policy.js'
@@ -115,6 +116,7 @@ import type { SensoriumEntry } from './retrospect.js'
 import { join, dirname } from 'node:path'
 import { writeFileSync, mkdirSync, existsSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { extractRegressionInventory } from './regression-inventory.js'
+import { extractPlanConstraints, renderPlanConstraints } from './plan-constraints.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
@@ -185,6 +187,9 @@ export class AgentLoop {
   evidence: EvidenceTracker
   /** 证据义务状态机（evidence-driven reasoning loop）——与 evidence 同寿命。 */
   obligations: ObligationTracker
+  /** 证据防火墙 Phase 2：external-claim tracker getter（hook 装配时回写；
+   *  hook 被禁用时保持 undefined → deliver 门禁 fail-open）。 */
+  externalClaimTracker?: () => import('./hooks/external-claim-tracking-hook.js').ClaimTracker
   /** Obligation final gate 遥测（auto-continue 触发/误触发/诚实受阻计数，postSession 落 meta）。 */
   obligationGateStats = { continued: 0, misfires: 0, honestBlocked: 0, suppressed: 0 }
   compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
@@ -1758,13 +1763,18 @@ export class AgentLoop {
     this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
     // 层3 重构回归契约：计划带「回归清单」章节时灌入 task contract，
     // deliver_task 交付前对清单逐项 grep 核验（事故链缺口 3）。best-effort。
+    // 层4 计划约束（D8 L2）：反目标/待验证假设随计划批准灌入契约，派发时兜底注入。
     try {
       const planContent = readFileSync(join(this.cwd, '.rivet', 'plans', `${plan.slug}.md`), 'utf-8')
       const inventory = extractRegressionInventory(planContent)
       if (inventory.length > 0 && this.taskContract) {
         this.taskContract = { ...this.taskContract, regressionInventory: inventory }
       }
-    } catch { /* best-effort: 清单灌入失败不影响计划批准 */ }
+      const planConstraints = renderPlanConstraints(extractPlanConstraints(planContent), `${plan.slug}.md`)
+      if (planConstraints.length > 0 && this.taskContract) {
+        this.taskContract = { ...this.taskContract, planConstraints }
+      }
+    } catch { /* best-effort: 清单/约束灌入失败不影响计划批准 */ }
     const wasPlanning = this.planModeState === 'planning'
     this.planModeState = 'off'
     if (wasPlanning) this.config.promptEngine.setPlanExitReminderPending(true)
@@ -2033,6 +2043,20 @@ export class AgentLoop {
       const og = this.obligationGateStats
       if (og.continued > 0 || og.misfires > 0 || og.honestBlocked > 0 || og.suppressed > 0) {
         this.persist?.updateMetadata({ obligationGate: og })
+      }
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
+    // todo 退回计数 → meta。detectRegressions 是本仓唯一的结果侧探测器（模型是否
+    // 守得住自己的任务状态），此前触发只进一条工具结果就丢了，退回率无从跨会话取。
+    // 与上面几项同规格：绕过 debug 门，有写入才写，闲置会话不长 meta。
+    try {
+      const todoStats = (this.config.getTodoRegressionStats ?? getTodoRegressionStats)()
+      if (todoStats.writes > 0) {
+        // 实验臂随计数一起落盘。没有它这些计数无法分组——两个臂的会话混在一起，
+        // 退回率就只是个总体数字，回答不了「decisions 通道有没有用」。
+        this.persist?.updateMetadata({
+          todoRegressions: todoStats,
+          decisionsArm: resolveDecisionsArm(this.config.sessionId),
+        })
       }
     } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
   }

@@ -22,6 +22,7 @@ export type SettingsBlockId =
   | 'review'
   | 'vision'
   | 'visionAuto'
+  | 'modelVision'
   | 'toolPreset'
   | 'approval'
   | 'checkpoint'
@@ -67,6 +68,8 @@ export interface NetDraft {
   noProxy: string
   /** Comma-separated backend chain, edited as free text. */
   searchBackends: string
+  /** Jina Reader base URL（国内可填自建反代）。 */
+  jinaBaseUrl: string
 }
 
 export interface SettingsDraft {
@@ -76,6 +79,9 @@ export interface SettingsDraft {
   /** `agent.visionAutoBridge` — own block: it matters precisely when `vision` is
    *  null, so it cannot live inside the nullable vision draft. */
   visionAutoBridge: boolean
+  /** 每模型的 supportsVision 覆盖（key = `provider:modelId`）。
+   *  /config 面板可事后给已有模型补标/去标视觉能力，不必手改 config.json。 */
+  modelVision: Record<string, boolean>
   basics: BasicsDraft
   net: NetDraft
 }
@@ -164,6 +170,16 @@ export const WORKER_TASK_KEYS: readonly string[] = [
   'compaction',
 ]
 
+/** 子代理任务类型 → 用户可读描述（路由字段 hint 用）。 */
+const WORKER_TASK_HINTS: Record<string, string> = {
+  repo_summarization: '仓库摘要：只读摸底任务',
+  code_edit: '代码编辑：写补丁的 patcher 工蜂',
+  test_failure_diagnosis: '测试失败诊断：只读分析测试报错',
+  risky_refactor: '高风险重构：跨模块改写',
+  planning: '规划：只读出计划不写实现',
+  compaction: '上下文压缩：总结对话历史',
+}
+
 /** Review sub-agent profiles that accept a per-profile model override. */
 export const REVIEW_PROFILE_KEYS: readonly string[] = [
   'reviewer',
@@ -174,6 +190,17 @@ export const REVIEW_PROFILE_KEYS: readonly string[] = [
   'code_scout',
   'doc_scout',
 ]
+
+/** 审查/子代理 profile → 用户可读描述（路由字段 hint 用）。 */
+const REVIEW_PROFILE_HINTS: Record<string, string> = {
+  reviewer: '审查员：L1/L2 对抗验证',
+  adversarial_verifier: '对抗验证器：找反证与边界',
+  verifier: '验证器：跑测试/构建确认',
+  patcher: '写工蜂：git worktree 隔离写补丁',
+  council_expert: '议事会专家：只读出观点',
+  code_scout: '代码侦察：只读搜索/结构探索',
+  doc_scout: '文档侦察：只读研究文档',
+}
 
 const INHERIT = ''
 const INHERIT_LABEL = '（继承会话模型）'
@@ -190,7 +217,7 @@ function modelOptions(env: SettingsEnv, opts?: { visionOnly?: boolean }): Settin
     .map(m => ({ id: modelRef(m.provider, m.id), label: `${m.provider} · ${m.id}` }))
 }
 
-function splitModelRef(ref: string): { provider: string; model: string } | null {
+export function splitModelRef(ref: string): { provider: string; model: string } | null {
   const idx = ref.indexOf(':')
   if (idx < 1 || idx === ref.length - 1) return null
   return { provider: ref.slice(0, idx), model: ref.slice(idx + 1) }
@@ -393,6 +420,7 @@ function workerCategory(draft: SettingsDraft): SettingsCategory {
     kind: 'enum' as const,
     block: 'workers' as const,
     effect: 'next-session' as const,
+    hint: WORKER_TASK_HINTS[task] ?? `「${task}」类子代理任务走哪个档位`,
     display: d => d.workers.routing[task] ?? UNSET_LABEL,
     options: d => profileOptions(d),
     selectedId: d => d.workers.routing[task] ?? '',
@@ -407,6 +435,7 @@ function workerCategory(draft: SettingsDraft): SettingsCategory {
       label: `档位 ${name}`,
       block: 'workers',
       effect: 'next-session',
+      hint: `「${name}」档位用哪个 provider/模型（路由按任务类型指向档位）`,
       get: d => {
         const p = d.workers.profiles[name]
         return p ? modelRef(p.provider, p.model) : ''
@@ -427,6 +456,7 @@ function workerCategory(draft: SettingsDraft): SettingsCategory {
     label: '天梁 patcher 档位',
     block: 'workers',
     effect: 'next-session',
+    hint: 'patcher 工蜂的模型能力地板（cheap/balanced/strong）；路由只抬不降',
     options: TIER_OPTIONS,
     get: d => d.workers.patcherTier,
     set: (d, value) => withWorkers(d, { ...d.workers, patcherTier: value as WorkersConfig['patcherTier'] }),
@@ -436,12 +466,13 @@ function workerCategory(draft: SettingsDraft): SettingsCategory {
     label: '失败升档天花板',
     block: 'workers',
     effect: 'next-session',
+    hint: '子代理失败时最多升到哪档模型（cheap→balanced→strong），到顶仍失败走断路器',
     options: ESCALATION_OPTIONS,
     get: d => d.workers.escalationCap,
     set: (d, value) => withWorkers(d, { ...d.workers, escalationCap: value as WorkersConfig['escalationCap'] }),
   }))
 
-  return { id: 'workers', label: '子代理', fields }
+  return { id: 'workers', label: '子代理模型路由', fields }
 }
 
 function reviewCategory(draft: SettingsDraft): SettingsCategory {
@@ -451,6 +482,7 @@ function reviewCategory(draft: SettingsDraft): SettingsCategory {
     label: name,
     block: 'review',
     effect: 'next-session',
+    hint: REVIEW_PROFILE_HINTS[name] ?? `「${name}」类子代理用哪个模型；留空回退主控`,
     sentinel: { id: INHERIT, label: INHERIT_LABEL },
     get: d => {
       const p = d.review.profiles[name]
@@ -470,6 +502,7 @@ function reviewCategory(draft: SettingsDraft): SettingsCategory {
     label: '跳过交付后自动审查',
     block: 'review',
     effect: 'next-session',
+    hint: '开箱默认开（不自动审查）；手动 /review 永远放行，不受此开关影响',
     get: d => d.review.skipAuto,
     set: (d, value) => withReview(d, { ...d.review, skipAuto: value }),
   }))
@@ -478,14 +511,15 @@ function reviewCategory(draft: SettingsDraft): SettingsCategory {
     label: '机械变更走快路径',
     block: 'review',
     effect: 'next-session',
+    hint: '格式化/重命名等机械改动跳过重型审查（减少无意义消耗）',
     get: d => d.review.mechanicalFastPath,
     set: (d, value) => withReview(d, { ...d.review, mechanicalFastPath: value }),
   }))
 
-  return { id: 'review', label: '审查子代理', fields }
+  return { id: 'review', label: '审查与子代理模型', fields }
 }
 
-function visionCategory(): SettingsCategory {
+function visionCategory(env: SettingsEnv): SettingsCategory {
   const fields: SettingsField[] = [
     modelField({
       id: 'vision.model',
@@ -557,6 +591,22 @@ function visionCategory(): SettingsCategory {
       set: (d, value) => ({ ...d, visionAutoBridge: value }),
     }),
   ]
+
+  // 事后给已有模型补标/去标视觉能力——每模型一个 toggle。
+  // env.models 来自所有 provider 的 model 卡；draft.modelVision 存覆盖值。
+  for (const m of env.models) {
+    const ref = modelRef(m.provider, m.id)
+    fields.push(boolField({
+      id: `modelVision.${ref}`,
+      label: `视觉：${m.provider} · ${m.alias ?? m.id}`,
+      block: 'modelVision',
+      effect: 'next-session',
+      hint: `勾选后该模型可作识图桥（${m.provider}/${m.id}）。/connect 建模型时没选「支持视觉」的可在此补标`,
+      get: d => d.modelVision[ref] ?? m.supportsVision,
+      set: (d, value) => ({ ...d, modelVision: { ...d.modelVision, [ref]: value } }),
+    }))
+  }
+
   return { id: 'vision', label: '识图模型', fields }
 }
 
@@ -567,6 +617,7 @@ function basicsCategory(): SettingsCategory {
       label: '工具档位',
       block: 'toolPreset',
       effect: 'next-session',
+      hint: '控制装配的工具数量：frontend 默认（28，含 browser_debug）；full 全集但占更多 system prompt',
       options: TOOL_PRESET_OPTIONS,
       get: d => d.basics.toolPreset,
       set: (d, value) => withBasics(d, { toolPreset: value }),
@@ -576,6 +627,7 @@ function basicsCategory(): SettingsCategory {
       label: '审批模式',
       block: 'approval',
       effect: 'immediate',
+      hint: '控制工具执行的审批力度：auto-safe 低风险自动/高风险确认；dangerously-skip 全免（危险）',
       options: APPROVAL_OPTIONS,
       get: d => d.basics.approval,
       set: (d, value) => withBasics(d, { approval: value }),
@@ -586,6 +638,7 @@ function basicsCategory(): SettingsCategory {
       block: 'checkpoint',
       effect: 'next-session',
       min: 0,
+      hint: 'Auto 模式下每 N 轮暂停同步进度摘要（0=关闭）；检查点是 git 级粗粒度回滚锚点',
       get: d => d.basics.checkpointEveryTurns,
       set: (d, value) => withBasics(d, { checkpointEveryTurns: value }),
     }),
@@ -595,6 +648,7 @@ function basicsCategory(): SettingsCategory {
       kind: 'enum',
       block: 'defaultDomain',
       effect: 'next-session',
+      hint: '新会话的起始星域（改变方法论与决策阈值，不改工具）；留空走默认域启明',
       display: d => d.basics.defaultDomain || UNSET_LABEL,
       options: (_d, env) => env.domains.map(x => ({ id: x.key, label: `${x.key} — ${x.name}` })),
       selectedId: d => d.basics.defaultDomain,
@@ -610,7 +664,7 @@ function basicsCategory(): SettingsCategory {
       set: (d, ref) => withBasics(d, { defaultModel: ref }),
     }),
   ]
-  return { id: 'basics', label: '基础', fields }
+  return { id: 'basics', label: '基础行为', fields }
 }
 
 function netCategory(): SettingsCategory {
@@ -620,6 +674,7 @@ function netCategory(): SettingsCategory {
       label: '国内镜像',
       block: 'mirrors',
       effect: 'next-session',
+      hint: '加速 npm/github/pypi/go/rust 拉取（GFW 用户建议开）；下次 bash 执行时生效，无需重启',
       get: d => d.net.mirrorsEnabled,
       set: (d, value) => withNet(d, { mirrorsEnabled: value }),
     }),
@@ -628,6 +683,7 @@ function netCategory(): SettingsCategory {
       label: '镜像预设',
       block: 'mirrors',
       effect: 'next-session',
+      hint: 'china 一键应用五生态国内镜像（推荐）；default 逐个自选',
       options: MIRROR_PRESET_OPTIONS,
       get: d => d.net.mirrorsPreset,
       set: (d, value) => withNet(d, { mirrorsPreset: value }),
@@ -661,6 +717,16 @@ function netCategory(): SettingsCategory {
       get: d => d.net.searchBackends,
       set: (d, value) => withNet(d, { searchBackends: value }),
     }),
+    textField({
+      id: 'fetch.jinaBaseUrl',
+      label: 'Jina Reader 地址',
+      block: 'network',
+      effect: 'next-session',
+      hint: 'web_fetch 的 JS 重页面兜底；国内可填自建反代域名',
+      placeholderLabel: 'https://r.jina.ai',
+      get: d => d.net.jinaBaseUrl,
+      set: (d, value) => withNet(d, { jinaBaseUrl: value }),
+    }),
   ]
   return { id: 'net', label: '网络与镜像', fields }
 }
@@ -672,11 +738,11 @@ function netCategory(): SettingsCategory {
  * worker profile, one per routing task). v1 has no add/remove, so the row set is
  * stable across edits and cursor indices stay meaningful.
  */
-export function buildCategories(draft: SettingsDraft): SettingsCategory[] {
+export function buildCategories(draft: SettingsDraft, env: SettingsEnv): SettingsCategory[] {
   return [
     workerCategory(draft),
     reviewCategory(draft),
-    visionCategory(),
+    visionCategory(env),
     basicsCategory(),
     netCategory(),
   ]
@@ -689,19 +755,20 @@ export function blockValue(draft: SettingsDraft, block: SettingsBlockId): unknow
     case 'review': return draft.review
     case 'vision': return draft.vision
     case 'visionAuto': return draft.visionAutoBridge
+    case 'modelVision': return draft.modelVision
     case 'toolPreset': return draft.basics.toolPreset
     case 'approval': return draft.basics.approval
     case 'checkpoint': return draft.basics.checkpointEveryTurns
     case 'defaultDomain': return draft.basics.defaultDomain
     case 'defaultModel': return draft.basics.defaultModel
     case 'mirrors': return { enabled: draft.net.mirrorsEnabled, preset: draft.net.mirrorsPreset }
-    case 'network': return { proxy: draft.net.proxy, noProxy: draft.net.noProxy }
+    case 'network': return { proxy: draft.net.proxy, noProxy: draft.net.noProxy, jinaBaseUrl: draft.net.jinaBaseUrl }
     case 'search': return draft.net.searchBackends
   }
 }
 
 const ALL_BLOCKS: readonly SettingsBlockId[] = [
-  'workers', 'review', 'vision', 'visionAuto', 'toolPreset', 'approval',
+  'workers', 'review', 'vision', 'visionAuto', 'modelVision', 'toolPreset', 'approval',
   'checkpoint', 'defaultDomain', 'defaultModel', 'mirrors', 'network', 'search',
 ]
 

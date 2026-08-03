@@ -154,6 +154,19 @@ describe('parseSeatContribution — fail-loud 判别式返回', () => {
       assert.equal(r.contribution.challenges[1]!.itemId, 'T1')
     }
   })
+  it('risks 缺 mitigation（LLM 输出不可信）→ 补空串不崩溃，后续 extractObligations 可安全消费', () => {
+    const r = parseSeatContribution('tianji', workerResult('tianji', JSON.stringify({
+      authority: 'tianji', summary: 's', additions: [], challenges: [], alternatives: [],
+      risks: [{ claim: '缓存碎裂', severity: 'high' }],
+    })))
+    assert.equal(r.ok, true)
+    if (r.ok) {
+      assert.equal(r.contribution.risks.length, 1)
+      assert.equal(r.contribution.risks[0]!.claim, '缓存碎裂')
+      assert.equal(r.contribution.risks[0]!.severity, 'high')
+      assert.equal(r.contribution.risks[0]!.mitigation, '')
+    }
+  })
   it('合法输入 → ok:true 且贡献字段与旧行为一致', () => {
     const r = parseSeatContribution('tianji', workerResult('tianji', JSON.stringify({
       authority: 'tianji', summary: 'good', additions: [{ id: 'A', title: 't', detail: 'd' }],
@@ -279,6 +292,8 @@ describe('buildSeatObjective', () => {
   it('含席位名 + schema 指令 + objective', () => {
     const o = buildSeatObjective({ authority: 'tianquan' }, input.draft)
     assert.match(o, /tianquan/); assert.match(o, /seat-contribution/); assert.match(o, /split loop.ts/)
+    // risks 字段形状已写入 schema 指令段（T2 补缺）
+    assert.match(o, /risks.*claim.*mitigation/)
   })
 })
 

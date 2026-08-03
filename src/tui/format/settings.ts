@@ -164,7 +164,10 @@ function statusLine(view: SettingsView, budget: number, theme: RivetTheme): stri
   const field = view.fields[view.fieldIndex]
   const hint = view.editor?.hint ?? field?.hint
   if (hint) return color(truncateToDisplayWidth(hint, budget), theme.muted)
-  return color(truncateToDisplayWidth('改动只写用户级 ~/.rivet/config.json；S 保存后按标注的时机生效', budget), theme.dim)
+  // 无 hint 兜底：说明面板用途 + 生效语义，比一句干巴巴的路径更有用。
+  const cat = view.categories[view.categoryIndex]
+  const catName = cat ? cat.label : '当前分类'
+  return color(truncateToDisplayWidth(`${catName} · ←→ 切分类 · Enter 编辑 · S 保存（写入 ~/.rivet/config.json，按「即时/下次会话」标注生效）`, budget), theme.dim)
 }
 
 function footerHint(view: SettingsView): string {

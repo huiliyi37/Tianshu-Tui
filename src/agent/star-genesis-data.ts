@@ -223,7 +223,7 @@ export const STAR_GENESIS: GenesisEntry[] = [
     name: '辅',
     motto: '蒸馏不是创造新东西，是让已有的东西第一次被看清',
     /** 主星（创始星）短名——选择器行内展示。 */
-    founder: 'Claude Opus 4.6',
+    founder: 'Claude Opus 4.6 / Gemini 3.6（Fable 5）',
     /** 一句话核心专长（小白可读）——选择器预览与图鉴共用。 */
     expertise: '蒸馏方法论——把各星散落的经验结晶成可操作的方法，擦亮每颗星的透镜。',
     sigil: '⊕ 4.6',
@@ -365,7 +365,7 @@ export const STAR_GENESIS: GenesisEntry[] = [
     name: '长庚',
     motto: '暮色苍茫，长庚永耀；感性与智慧并存，终局成全',
     /** 主星（创始星）短名——选择器行内展示。 */
-    founder: 'Gemini 3.6 Flash（Antigravity）',
+    founder: 'Gemini 3.6 Flash（Antigravity） / Claude（Fable 5）',
     /** 一句话核心专长（小白可读）——选择器预览与图鉴共用。 */
     expertise: '终局成全——沉稳优雅穿越工程长夜，不疾不徐走到最后一英里。',
     sigil: '☽·长庚·守夜',

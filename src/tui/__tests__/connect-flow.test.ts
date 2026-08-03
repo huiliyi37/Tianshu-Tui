@@ -69,6 +69,10 @@ test('custom path walks url → model → context → key and commits a custom p
 
   // Blank context uses the default.
   assert.equal(flow.submitInput('').kind, 'next')
+
+  // Vision choice step (added between context and apikey).
+  assert.equal(flow.view().kind, 'choice')
+  flow.submitChoice('no')
   assert.equal(flow.view().masked, true)
 
   const result = flow.submitInput('sk-custom')
@@ -80,6 +84,7 @@ test('custom path walks url → model → context → key and commits a custom p
   assert.equal(result.commit.model.contextWindow, 131072)
   assert.equal(result.commit.providerName, 'custom-my-model-v1')
   assert.equal(result.commit.makeDefault, true)
+  assert.equal(result.commit.model.supportsVision, undefined, '「否」不标视觉')
 })
 
 test('custom path rejects a non-url base address', () => {
@@ -96,11 +101,13 @@ test('custom path honours an explicit context window and caps output tokens', ()
   flow.submitInput('https://api.example.com/v1')
   flow.submitInput('deepseek-v4')
   flow.submitInput('1000000')
+  flow.submitChoice('yes')
   const result = flow.submitInput('sk-x')
   assert.equal(result.kind, 'commit')
   if (result.kind !== 'commit' || result.commit.mode !== 'custom') return
   assert.equal(result.commit.model.contextWindow, 1000000)
   assert.equal(result.commit.model.maxTokens, 64000)
+  assert.equal(result.commit.model.supportsVision, true, '「是」标视觉')
 })
 
 test('custom path rejects a non-numeric context window', () => {

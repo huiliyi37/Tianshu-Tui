@@ -28,7 +28,14 @@ export interface ProjectFingerprint {
   lintCommand?: string
   /** Whether the project appears to have test infrastructure. */
   hasTestInfra: boolean
+  /** 第三方 agent 配置文件（探测存在性供 /init 提示；内容永不进注入链路——
+   *  身份污染边界，2026-08-02 用户裁决）。可按生态扩展（GEMINI.md、.cursorrules …）。 */
+  externalAgentDocs?: string[]
 }
+
+/** 第三方 agent 配置文件清单。内容永不进任何 prompt 注入通道——CLAUDE.md 常含
+ *  身份性指令（"You are Claude…"），进主提示词会污染天枢模型的身份认知。 */
+const EXTERNAL_AGENT_DOCS = ['CLAUDE.md'] as const
 
 /** Markers that a directory contains a Go module. */
 const GO_MARKERS = ['go.mod']
@@ -141,14 +148,18 @@ function detectJava(cwd: string): ProjectFingerprint | null {
  * Detect the project fingerprint for the given directory.
  * Language detectors are tried in priority order: Node → Rust → Go → Python → Java.
  * Returns a minimal fingerprint with language='unknown' when nothing matches.
+ * 单一出口：语言探测结果统一附加第三方 agent 配置存在性信号。
  */
 export function detectProjectFingerprint(cwd: string): ProjectFingerprint {
   const detectors = [detectNode, detectRust, detectGo, detectPython, detectJava]
+  let base: ProjectFingerprint | null = null
   for (const detect of detectors) {
-    const fp = detect(cwd)
-    if (fp) return fp
+    base = detect(cwd)
+    if (base) break
   }
-  return { language: 'unknown', hasTestInfra: false }
+  const fp = base ?? { language: 'unknown' as const, hasTestInfra: false }
+  const externalAgentDocs = EXTERNAL_AGENT_DOCS.filter(f => existsSync(join(cwd, f)))
+  return externalAgentDocs.length > 0 ? { ...fp, externalAgentDocs } : fp
 }
 
 /**

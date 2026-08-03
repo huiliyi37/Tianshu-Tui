@@ -14,13 +14,13 @@
  * turn" model, whose 4000/8000-char budgets caused silent truncation.
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, relative, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeFrontmatterSource } from '../utils/frontmatter.js'
 
-export type SkillSource = 'rivet' | 'project-claude' | 'global-claude' | 'builtin' | 'plugin'
+export type SkillSource = 'rivet' | 'global-rivet' | 'project-claude' | 'global-claude' | 'builtin' | 'plugin'
 
 export interface SkillDefinition {
   name: string
@@ -126,6 +126,15 @@ export class SkillRegistry {
 
   register(skill: SkillDefinition): void {
     this.skills.set(skill.name, skill)
+  }
+
+  /** Remove a skill from the in-memory registry (used by uninstall). Note: the
+   *  registry is a process-wide singleton shared across sessions, so unregister
+   *  affects every session. Uninstall instead leaves the registry untouched so
+   *  the current session keeps working; the deleted skill disappears on the
+   *  next bootstrap. This method exists for completeness/tests. */
+  unregister(name: string): boolean {
+    return this.skills.delete(name)
   }
 
   /**
@@ -442,12 +451,17 @@ export const BUILTIN_SKILLS: SkillDefinition[] = [
       '用户让你"把 ~/.claude 的技能都装上"时，不要全量拷（常有 70+ 个）——',
       '只装当前任务确需的那一两个，其余靠原生能力。',
       '',
-      '## 运行时单一来源',
-      '本项目运行时**只从 `.rivet/skills/` 加载技能**（外加少量内置技能），',
-      '**默认不扫描任何外部目录**（不读 `~/.claude/skills` 或项目 `.claude/skills`）。',
-      '`.rivet/skills/` 同时支持两种形态：',
-      '- 扁平：`.rivet/skills/<name>.md`（单文件 Rivet 原生格式）',
-      '- 目录：`.rivet/skills/<name>/SKILL.md`（+ `references/`/`scripts/`/`assets/` 子文件夹）',
+      '## 运行时来源（三层优先级，后者覆盖前者同名）',
+      '1. 内置技能（随天枢发布）',
+      '2. 用户级 `~/.rivet/skills/`（跨项目复用）',
+      '3. 项目级 `.rivet/skills/`（项目定制，优先级最高）',
+      '`<name>.md`（扁平）与 `<name>/SKILL.md`（目录，含 references/scripts/assets）',
+      '两种形态都支持。**默认不扫描外部 `.claude` 目录**——外部技能须先复制进来。',
+      '',
+      '## 创建/编辑/卸载（桌面端扩展面板）',
+      '用户可在桌面端「扩展 → 技能」面板直接新建、编辑（Monaco）、卸载技能，',
+      '写入时选「项目」或「用户级」作用域。与安装一样，**改动手动文件后需新开会话',
+      '才生效**——会话内不热加载，以保护前缀缓存。CLI 侧也可直接编辑磁盘文件。',
       '',
       '## 用户要你"装载/导入某外部技能"时',
       '外部技能必须先**复制进 `.rivet/skills/`** 才能装载——不与外部目录混用，',
@@ -576,6 +590,108 @@ export function importSkillsIntoRivet(
     }
   }
   return { copied, skipped, errors }
+}
+
+/**
+ * Resolve where a skill's backing file lives. Project skills under
+ * `.rivet/skills`, global (user-level) skills under `~/.rivet/skills`. For a
+ * NEW skill (not yet in the registry) the directory is derived from `scope`.
+ *
+ * Returns the absolute path to the directory skill's SKILL.md or the flat .md
+ * file, plus the kind so writers know whether to mkdir.
+ */
+function resolveSkillLocation(
+  name: string,
+  cwd: string,
+  scope: 'project' | 'global',
+): { dir: string; file: string; kind: 'directory' | 'flat' } {
+  const root = scope === 'global'
+    ? join(homedir(), '.rivet', 'skills')
+    : join(cwd, '.rivet', 'skills')
+  // If a directory shape already exists at this name, keep it; otherwise prefer
+  // the directory form (matches the Claude/agentskills convention and leaves
+  // room for sub-files).
+  const dirShape = join(root, name)
+  if (existsSync(dirShape)) {
+    return { dir: dirShape, file: join(dirShape, 'SKILL.md'), kind: 'directory' }
+  }
+  const flatShape = join(root, `${name}.md`)
+  if (existsSync(flatShape)) {
+    return { dir: root, file: flatShape, kind: 'flat' }
+  }
+  // New skill — default to directory shape.
+  return { dir: dirShape, file: join(dirShape, 'SKILL.md'), kind: 'directory' }
+}
+
+/**
+ * Read the full SKILL.md content for the editor. Looks up the loaded skill by
+ * name and reads its `bodyPath` from disk. Returns null for built-in skills
+ * (no backing file) or when the file is missing — the UI shows a read-only
+ * notice in that case.
+ */
+export function readSkillContent(name: string, _cwd: string): string | null {
+  const skill = skillRegistry.get(name)
+  if (!skill || !skill.bodyPath) return null
+  try {
+    return readFileSync(skill.bodyPath, 'utf-8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Write (create or overwrite) a skill's full SKILL.md text. `content` must be
+ * a complete document including YAML frontmatter — it is parsed first to fail
+ * fast on malformed input (the route layer surfaces the error as 400). Unlike
+ * install (which skips existing entries), write is an overwrite by design so
+ * editing works.
+ *
+ * Project scope writes to `<cwd>/.rivet/skills/<name>/SKILL.md`; global scope
+ * writes to `~/.rivet/skills/<name>/SKILL.md` so the skill is reusable across
+ * projects. Like install, this does NOT hot-load into the live registry or
+ * emit skills_changed — the change takes effect on the next session to avoid
+ * shattering the prefix cache.
+ */
+export function writeSkill(
+  name: string,
+  content: string,
+  cwd: string,
+  scope: 'project' | 'global' = 'project',
+): { path: string } {
+  // Validate up front: a bad frontmatter should never reach disk.
+  parseSkillMarkdown(content, `${name}.md`)
+  const loc = resolveSkillLocation(name, cwd, scope)
+  mkdirSync(loc.dir, { recursive: true })
+  writeFileSync(loc.file, content, 'utf-8')
+  return { path: loc.file }
+}
+
+/**
+ * Uninstall a project-scoped skill: delete `<cwd>/.rivet/skills/<name>/`
+ * (directory) or `<name>.md` (flat). Returns `removed: false` when the skill
+ * is not backed by a project file (built-in / plugin / global) so the caller
+ * can surface a clear "cannot remove" message — the project panel must not be
+ * able to delete cross-project global assets or built-ins.
+ *
+ * Does NOT touch the live registry (the skill stays available this session and
+ * disappears on next bootstrap), mirroring install's no-hot-load contract.
+ */
+export function uninstallSkill(
+  name: string,
+  cwd: string,
+): { removed: boolean; wasDir: boolean } {
+  const root = join(cwd, '.rivet', 'skills')
+  const dirShape = join(root, name)
+  const flatShape = join(root, `${name}.md`)
+  if (existsSync(dirShape)) {
+    rmSync(dirShape, { recursive: true, force: true })
+    return { removed: true, wasDir: true }
+  }
+  if (existsSync(flatShape)) {
+    rmSync(flatShape, { force: true })
+    return { removed: true, wasDir: false }
+  }
+  return { removed: false, wasDir: false }
 }
 
 /** A skill discoverable under .claude/skills that can be copied into .rivet/skills. */
@@ -796,7 +912,13 @@ export function loadProjectSkills(
 ): { loaded: string[]; errors: string[] } {
   const loaded: string[] = []
   const errors: string[] = []
-  // Built-in skills first; .rivet/skills files may override by name.
+  // Load order defines override precedence (later wins on name collision):
+  //   1. built-ins (shipped, lowest)
+  //   2. global user-level ~/.rivet/skills (reusable across projects)
+  //   3. project .rivet/skills (highest — project customizations win)
+  // A project skill shadowing a same-named global one leaves the global file
+  // on disk but invisible to the registry; that is the same trade-off the
+  // builtin-override already makes.
   loaded.push(...registerBuiltinSkills())
   // Seed app-bundled skills into .rivet/skills so they ship with every install
   // and stay readable (inside the workspace). Idempotent; project copies win.
@@ -809,6 +931,9 @@ export function loadProjectSkills(
   if (names && names.length > 0) {
     errors.push(...importSkillsIntoRivet(cwd, names).errors)
   }
+  const rg = skillRegistry.loadFromDirectory(join(homedir(), '.rivet', 'skills'), 'global-rivet')
+  loaded.push(...rg.loaded)
+  errors.push(...rg.errors)
   const r = skillRegistry.loadFromDirectory(join(cwd, '.rivet', 'skills'), 'rivet')
   loaded.push(...r.loaded)
   errors.push(...r.errors)

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSearchBackends } from '../build-backends.js'
+import { buildSearchBackends, resolveSearchKey } from '../build-backends.js'
 import type { Config, SearchConfig } from '../../../config/schema.js'
 
 function cfg(search: Partial<SearchConfig>): Config {
@@ -9,6 +9,7 @@ function cfg(search: Partial<SearchConfig>): Config {
       backends: ['duckduckgo'],
       braveApiKeyEnv: 'BRAVE_API_KEY',
       tavilyApiKeyEnv: 'TAVILY_API_KEY',
+      bochaApiKeyEnv: 'BOCHA_API_KEY',
       timeoutMs: 15_000,
       ...search,
     },
@@ -54,6 +55,30 @@ describe('buildSearchBackends', () => {
     assert.equal(backends[0]!.isAvailable(), true)
   })
 
+  it('constructs bocha and reports availability by env key presence', () => {
+    // 无 key —— 构造但不可用
+    const noKey = buildSearchBackends(
+      cfg({ backends: ['bocha', 'bing'] }),
+      { fetch: noopFetch, env: {} },
+    )
+    assert.deepEqual(noKey.map(b => b.name), ['bocha', 'bing'])
+    assert.equal(noKey[0]!.isAvailable(), false, 'bocha without key must report unavailable')
+
+    // 有 key —— 可用
+    const withKey = buildSearchBackends(
+      cfg({ backends: ['bocha'] }),
+      { fetch: noopFetch, env: { BOCHA_API_KEY: 'bk' } },
+    )
+    assert.equal(withKey[0]!.isAvailable(), true)
+
+    // 自定义 env 变量名
+    const custom = buildSearchBackends(
+      cfg({ backends: ['bocha'], bochaApiKeyEnv: 'MY_BOCHA' }),
+      { fetch: noopFetch, env: { MY_BOCHA: 'bk' } },
+    )
+    assert.equal(custom[0]!.isAvailable(), true)
+  })
+
   it('skips unknown backend names', () => {
     const backends = buildSearchBackends(cfg({ backends: ['bogus', 'tavily'] }), { fetch: noopFetch, env: { TAVILY_API_KEY: 't' } })
     assert.deepEqual(backends.map(b => b.name), ['tavily'])
@@ -62,5 +87,46 @@ describe('buildSearchBackends', () => {
   it('falls back to DDG when nothing valid is configured', () => {
     const backends = buildSearchBackends(cfg({ backends: ['bogus'] }), { fetch: noopFetch, env: {} })
     assert.deepEqual(backends.map(b => b.name), ['duckduckgo'])
+  })
+})
+
+describe('search API key resolution (inline > apiKeyEnv > standard env)', () => {
+  it('inline config key wins over env vars', () => {
+    const config = cfg({
+      backends: ['bocha'],
+      bochaApiKey: 'sk-inline-secret',
+      bochaApiKeyEnv: 'MY_BOCHA_ENV',
+    })
+    const env = { MY_BOCHA_ENV: 'env-value', BOCHA_API_KEY: 'standard-value' }
+    assert.equal(resolveSearchKey(config, env, 'bocha'), 'sk-inline-secret')
+  })
+
+  it('falls back to apiKeyEnv-named variable when no inline key', () => {
+    const config = cfg({ backends: ['brave'], braveApiKeyEnv: 'MY_BRAVE' })
+    assert.equal(resolveSearchKey(config, { MY_BRAVE: 'env-value' }, 'brave'), 'env-value')
+  })
+
+  it('falls back to standard <BACKEND>_API_KEY when apiKeyEnv var missing', () => {
+    // apiKeyEnv 字段存在但对应 env 没设 → 标准变量名回退
+    const config = cfg({ backends: ['tavily'], tavilyApiKeyEnv: 'CUSTOM_UNSET' })
+    assert.equal(resolveSearchKey(config, { TAVILY_API_KEY: 'standard' }, 'tavily'), 'standard')
+  })
+
+  it('returns undefined when no key anywhere', () => {
+    const config = cfg({ backends: ['bocha'] })
+    assert.equal(resolveSearchKey(config, {}, 'bocha'), undefined)
+  })
+
+  it('empty inline key string is ignored (falls through to env)', () => {
+    // 空串视为未设置（UI 清空场景）
+    const config = cfg({ backends: ['bocha'], bochaApiKey: '' })
+    assert.equal(resolveSearchKey(config, { BOCHA_API_KEY: 'fallback' }, 'bocha'), 'fallback')
+  })
+
+  it('buildSearchBackends uses inline key → backend reports available', () => {
+    const config = cfg({ backends: ['bocha'], bochaApiKey: 'sk-inline' })
+    const backends = buildSearchBackends(config, { fetch: noopFetch, env: {} })
+    assert.equal(backends[0]!.name, 'bocha')
+    assert.equal(backends[0]!.isAvailable(), true, 'inline key should make bocha available')
   })
 })

@@ -288,7 +288,13 @@ export class McpManager {
               throw err
             }
           }
-          return createMcpToolWrapper(serverId, mcpDef, perToolCallFn, this.connectorConsent)
+          return createMcpToolWrapper(
+            serverId,
+            mcpDef,
+            perToolCallFn,
+            this.connectorConsent,
+            serverConfig.policy?.tools[mcpDef.name],
+          )
         })
 
         this.tools.push(...rivetTools)

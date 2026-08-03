@@ -958,6 +958,16 @@ export class PromptEngine {
   getCachedAppendixLength(): number {
     return this.cachedAppendix?.length ?? 0
   }
+
+  /**
+   * The appendix text as actually rendered this request. Nothing downstream of here
+   * persists it — the session JSONL keeps what the user typed, not what was injected
+   * alongside it — so without this accessor there is no way to answer "what did the
+   * model actually see" after the fact. Read by the (gated) appendix trace recorder.
+   */
+  getCachedAppendix(): string | undefined {
+    return this.cachedAppendix
+  }
   updateSessionMemory(block: string): void {
     this.sessionMemoryOverride = block
     this.rebuildFrozenBase()
@@ -1034,16 +1044,6 @@ export class PromptEngine {
 
   getToolContextLength(): number {
     return this.toolContext?.length ?? 0
-  }
-
-  /** @deprecated Use setToolContext. Kept for backward compat. */
-  setAffordanceHint(hint: string | null): void {
-    // noop — merged into setToolContext
-  }
-
-  /** @deprecated Use setToolContext. Kept for backward compat. */
-  setPolicyGuidance(guidance: string | null): void {
-    // noop — merged into setToolContext
   }
 
   setPlanCacheAdvisory(advisory: string | null): void {

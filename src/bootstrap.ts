@@ -13,13 +13,14 @@ import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici'
 import { join, resolve } from 'path'
 import { homedir } from 'os'
 import { randomUUID, createHash } from 'crypto'
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync, unlinkSync } from 'fs'
 import { spawn } from 'child_process'
 import { spawnGitSync } from './tools/spawn-git.js'
 
 import type { Config, ProviderConfig } from './config/schema.js'
 import type { AuthProvider } from './auth/types.js'
 import type { BaselineSnapshot } from './agent/worktree-baseline.js'
+import { buildModelCards } from './model/capability.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 
 import { loadConfig as loadLayeredConfig } from './config/manager.js'
@@ -49,11 +50,12 @@ import { maybeWarnNoSandbox, applySandboxPolicyForApprovalMode } from './tools/s
 import { applyConfiguredPathGrants, applyDefaultDependencyReadGrants, applyRivetRuntimeReadGrants, loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createGalaxyTool } from './tools/galaxy.js'
+import { createStarflowTool } from './tools/starflow.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import type { PlanExecutorDeps } from './agent/plan-executor.js'
 import { runTypeCheck } from './lsp/client.js'
 import { GATE_TSC_TIMEOUT_MS } from './agent/typecheck-gate.js'
-import { createCouncilConveneTool } from './tools/council-convene.js'
+import { createCouncilConveneTool, type CouncilConveneCoordinator } from './tools/council-convene.js'
 import { needsTemplatesInit } from './bootstrap/project-templates.js'
 import { debugLog } from './utils/debug.js'
 import { persistCouncilRoutingShadow } from './agent/council/council-routing.js'
@@ -81,6 +83,7 @@ import { ProviderHealthTracker } from './agent/provider-health.js'
 import { effectiveBanditMode, resolveBanditPromotion } from './agent/bandit-promotion.js'
 import { DomainKnowledgeStore } from './agent/domain-knowledge-store.js'
 import { emptyObligationStore } from './agent/evidence-obligation.js'
+import { resolvePlanConstraints } from './agent/plan-constraints.js'
 import { profileRegistry } from './agent/profile-registry.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import type { WorkerRuntimeFactory } from './agent/coordinator.js'
@@ -99,6 +102,7 @@ import { createAttackCaseTool } from './tools/attack-case.js'
 import { createPlanTaskTool } from './tools/plan-task.js'
 import { createMemoryTool } from './tools/memory.js'
 import { MeridianIndexer } from './repo/meridian-indexer.js'
+import { scheduleMeridianBackfill } from './repo/meridian-backfill.js'
 import { detectProjectFingerprint } from './repo/project-fingerprint.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { loadProjectSkills } from './skills/skill-loader.js'
@@ -159,6 +163,9 @@ export interface RuntimeRefs {
   /** 证据义务追踪器可变引用（收编 #2 的生产链）：createAgentRuntime 在 agent
    *  构建后回写；deliver_task 读 store 做门禁，galaxy DP 创建/满足冗余义务。 */
   obligationTrackerRef?: { current: import('./agent/obligation-tracker.js').ObligationTracker | null }
+  /** 证据防火墙 Phase 2：claim tracker getter 可变引用——createAgentRuntime 回写；
+   *  deliver_task 门禁经闭包惰性读取。 */
+  claimTrackerRef?: { current: (() => import('./agent/hooks/external-claim-tracking-hook.js').ClaimTracker) | null }
   /** 会话级审查门开关：TUI /review off|on 写入，deliver_task B1Context 经
    *  isAutoReviewOff 读取。初始值取 review.skipAuto 配置（配置成为会话默认）。 */
   reviewGateRef: { current: 'auto' | 'off' }
@@ -257,6 +264,7 @@ export function loadRivetConfig(cwd?: string, args: string[] = process.argv.slic
 export function resolveProviderAndAuth(
   config: Config,
   providerName?: string,
+  opts?: { allowMissingKey?: boolean },
 ): { provider: ProviderConfig; apiKey: string; auth: AuthProvider | undefined } {
   const name = providerName ?? config.provider.default
   const provider = config.provider.providers[name]
@@ -268,6 +276,18 @@ export function resolveProviderAndAuth(
   if (provider.auth?.type === 'oauth') {
     const auth = createAuthProvider(provider.auth, process.env, provider.apiKey)
     return { provider, apiKey: '', auth }
+  }
+
+  // 降级模式（allowMissingKey）：无 key 不抛错，返回空 apiKey。
+  // 用于首启跳过 wizard 的场景——让 TUI 先起来，发消息时报错指引配 key，
+  // 与桌面端「先进界面再提醒」体验对齐。OAuth 模式天然走空 apiKey，此处对齐。
+  if (opts?.allowMissingKey) {
+    try {
+      const apiKey = resolveApiKey(provider)
+      return { provider, apiKey, auth: undefined }
+    } catch {
+      return { provider, apiKey: '', auth: undefined }
+    }
   }
 
   const apiKey = resolveApiKey(provider)
@@ -388,8 +408,16 @@ export function getOrCreateSessionId(): string {
  * avoid deleting dirs that might still be in use by a concurrent worker.
  */
 export const WORKER_DIR_STALE_THRESHOLD_MS = 3_600_000 // 1 hour
+/** worker 文件（jsonl/meta 等）保留窗口：排查资产（查 worker 模型/对话），
+ *  价值随时间快速衰减；7 天后清退。目录阈值(1h)不适用——目录是遥测/信息素
+ *  临时物，文件是事后排查凭据。 */
+export const WORKER_FILE_STALE_THRESHOLD_MS = 7 * 24 * 3_600_000 // 7 days
 
-export function cleanupStaleWorkerSessionDirs(cwd: string, thresholdMs = WORKER_DIR_STALE_THRESHOLD_MS): number {
+export function cleanupStaleWorkerSessionDirs(
+  cwd: string,
+  thresholdMs = WORKER_DIR_STALE_THRESHOLD_MS,
+  fileThresholdMs = WORKER_FILE_STALE_THRESHOLD_MS,
+): number {
   const sessionsDir = getSessionDir(cwd)
   if (!existsSync(sessionsDir)) return 0
   let cleaned = 0
@@ -400,10 +428,16 @@ export function cleanupStaleWorkerSessionDirs(cwd: string, thresholdMs = WORKER_
       const fullPath = join(sessionsDir, entry)
       try {
         const st = statSync(fullPath)
-        if (!st.isDirectory()) continue
         const age = Date.now() - st.mtimeMs
-        if (age > thresholdMs) {
-          rmSync(fullPath, { recursive: true, force: true })
+        if (st.isDirectory()) {
+          if (age > thresholdMs) {
+            rmSync(fullPath, { recursive: true, force: true })
+            cleaned++
+          }
+        } else if (age > fileThresholdMs) {
+          // worker-<id>.jsonl 及附属（.meta.json/.claims.jsonl…）。evict 额度池
+          // 已排除 worker（否则洪水挤掉主会话），生命周期由此处接管——否则无限累积。
+          unlinkSync(fullPath)
           cleaned++
         }
       } catch { /* best-effort — skip unreadable entries */ }
@@ -444,9 +478,11 @@ export function createInteractiveToolRegistry(
   // delegate_task
   reg.register(createDelegateTaskTool(
     {
-      delegate: async (request) => {
+      delegate: async (request, signal) => {
         if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
-        return refs.coordinator.delegate(request)
+        // 第二参必须透传（审查 H3）：delegate_task 传了 params.abortSignal，
+        // 丢了它主路径 parentSignal 恒 undefined——abort 守卫/等槽取消全变死代码。
+        return refs.coordinator.delegate(request, signal)
       },
     },
     () => refs.claimStore ?? undefined,
@@ -473,7 +509,8 @@ export function createInteractiveToolRegistry(
   ))
 
   // galaxy — 星河集群派发（子 Agent 内部分子 Agent 并行）
-  reg.register(createGalaxyTool(
+  // 实例同时喂给 starflow（星流状态机的攻坚阶段复用同一工具）。
+  const galaxyTool = createGalaxyTool(
     {
       delegateBatch: async (requests, policy, abortSignal, onProgress, onWorkerSettled) => {
         if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
@@ -484,7 +521,8 @@ export function createInteractiveToolRegistry(
       // DP 证据冗余（收编 #2）——agent 构建后经 createAgentRuntime 回写。
       get obligationTracker() { return refs.obligationTrackerRef?.current ?? undefined },
     },
-  ))
+  )
+  reg.register(galaxyTool)
 
   // Shared plan-execution kernel deps: team_orchestrate and plan_task(execute:true)
   // run the SAME closed loop through executePlan (dispatch + scope-health +
@@ -539,30 +577,48 @@ export function createInteractiveToolRegistry(
     // 满载机器 tsc 超时曾被记成 passed 放行（2026-07-07）。
     getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*', GATE_TSC_TIMEOUT_MS),
   }
+  let teamOrchestrateTool: ReturnType<typeof createTeamOrchestrateTool> | undefined
   if (presetIncludes(toolPreset, 'team_orchestrate')) {
-    reg.register(createTeamOrchestrateTool(planExecutorDeps, {
+    teamOrchestrateTool = createTeamOrchestrateTool(planExecutorDeps, {
       defaultMaxParallel: config.agent.maxTeamParallel,
       // Pro gate（双层模式）：桌面端由 Rust 验签后注入 RIVET_PRO=1；CLI 保持软 gate。
       teamMaxEnabled: isProFeatureEnabled(config, 'teamMax'),
-    }))
+    })
+    reg.register(teamOrchestrateTool)
   }
 
   // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，默认绝不派执行；
   // autoExecute 经 executor 走完整 executePlan 闭环，与 team_orchestrate 同路径）。
-  if (presetIncludes(toolPreset, 'council_convene')) {
-    reg.register(createCouncilConveneTool({
-      delegateBatch: async (requests, policy, abortSignal, onProgress) => {
-        if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
-        return refs.coordinator.delegateBatch(requests, policy, abortSignal, onProgress)
-      },
-      getSessionId: () => refs.sessionId ?? undefined,
-      recordRoutingShadow: event => persistCouncilRoutingShadow(refs.meridianIndexer?.getDb(), event),
-      recordCouncilSession: event => recordCouncilSession(refs.meridianIndexer?.getDb(), event),
-      executor: planExecutorDeps,
-    }, config.agent.council.seats.length > 0 ? config.agent.council.seats : undefined, {
-      multiRoundEnabled: isProFeatureEnabled(config, 'councilMultiRound'),
-    }))
+  const councilCoordinator: CouncilConveneCoordinator = {
+    delegateBatch: async (requests, policy, abortSignal, onProgress) => {
+      if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
+      return refs.coordinator.delegateBatch(requests, policy, abortSignal, onProgress)
+    },
+    getSessionId: () => refs.sessionId ?? undefined,
+    recordRoutingShadow: event => persistCouncilRoutingShadow(refs.meridianIndexer?.getDb(), event),
+    recordCouncilSession: event => recordCouncilSession(refs.meridianIndexer?.getDb(), event),
+    executor: planExecutorDeps,
   }
+  const councilDefaultSeats = config.agent.council.seats.length > 0 ? config.agent.council.seats : undefined
+  const councilOptions = { multiRoundEnabled: isProFeatureEnabled(config, 'councilMultiRound') }
+  let councilConveneTool: ReturnType<typeof createCouncilConveneTool> | undefined
+  if (presetIncludes(toolPreset, 'council_convene')) {
+    councilConveneTool = createCouncilConveneTool(councilCoordinator, councilDefaultSeats, councilOptions)
+    reg.register(councilConveneTool)
+  }
+
+  // starflow — 星流代码级编排（council→team→galaxy 硬门禁状态机，替代纯 prompt 注入）。
+  // minimal/frontend 档 preset 排除 council_convene 注册，但 preset 只挡注册可见性
+  // 不挡工具构造——星流缺失的实例按相同参数等价自构，行为与注册实例一致。
+  reg.register(createStarflowTool({
+    councilTool: councilConveneTool ?? createCouncilConveneTool(councilCoordinator, councilDefaultSeats, councilOptions),
+    teamTool: teamOrchestrateTool ?? createTeamOrchestrateTool(planExecutorDeps, {
+      defaultMaxParallel: config.agent.maxTeamParallel,
+      teamMaxEnabled: isProFeatureEnabled(config, 'teamMax'),
+    }),
+    galaxyTool,
+    cwd,
+  }))
 
   // recall_capsule
   reg.register(createRecallCapsuleTool(() => cwd))
@@ -702,6 +758,8 @@ export function createInteractiveToolRegistry(
     getPalNeedsUserCases: () => refs.getProblemAttackStore?.()?.needsUserCasesSnapshot() ?? [],
     // 收编 #2：冗余义务门禁消费——生产注入（此前仅测试注入，链路不可达）。
     getObligationStore: () => refs.obligationTrackerRef?.current?.getStore() ?? emptyObligationStore(),
+    getClaimTracker: () => refs.claimTrackerRef?.current?.() ?? undefined,
+    scoutFirewallConfig: config.agent.scoutEvidenceFirewall,
   })))
 
   // update_goal — model-driven goal lifecycle control (paused/blocked/complete)
@@ -789,33 +847,8 @@ export function createAgentRuntime(deps: {
     inheritFrozenFrom: deps.inheritFrozenFrom,
   }))
 
-  // Model capability cards
-  const modelCards: ModelCapabilityCard[] = provider.models.map(m => {
-    const isPro = m.id.includes('pro') || m.alias?.includes('pro')
-    const isFlash = m.id.includes('flash') || m.alias?.includes('flash')
-    if (isPro || (!isFlash && !isPro)) {
-      return {
-        model: m.id,
-        toolUseReliability: 0.8,
-        jsonStability: 0.8,
-        editSuccessRate: 0.7,
-        testRepairRate: 0.6,
-        contextWindow: m.contextWindow,
-        cacheEconomics: 'strong' as const,
-        recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'risky_refactor'],
-      }
-    }
-    return {
-      model: m.id,
-      toolUseReliability: 0.6,
-      jsonStability: 0.65,
-      editSuccessRate: 0.5,
-      testRepairRate: 0.45,
-      contextWindow: m.contextWindow,
-      cacheEconomics: 'strong' as const,
-      recommendedTasks: ['repo_summarization', 'compaction'],
-    }
-  })
+  // Model capability cards（统一口径在 model/capability.ts——v4-flash 特例也在那里）
+  const modelCards: ModelCapabilityCard[] = buildModelCards(provider)
 
   // Review override: pre-resolve each profile's provider/model + validate
   // credentials eagerly, but defer StreamClient construction to runtimeFactory
@@ -1150,6 +1183,7 @@ export function createAgentRuntime(deps: {
       // TUI 下 refs.todoStore 即全局 defaultStore（行为不变）；server 下每会话独立。
       // 闭包绑定 refs（switchModel 重建 loop 时复用同一 refs/todoStore）→ 守住缓存不变量。
       getTodos: () => refs.todoStore.read(),
+      getTodoRegressionStats: () => refs.todoStore.getRegressionStats(),
     },
     deps.session,
     cwd,
@@ -1159,7 +1193,10 @@ export function createAgentRuntime(deps: {
   refs.coordinator = new DelegationCoordinator({
     baseToolRegistry: toolRegistry,
     modelCards,
-    maxWorkers: 3,
+    // P1-6 全局并发闸输入：不再硬编码 3，配置化（见 resolveCoordinatorMaxWorkers）。
+    // 该值同时是 CoordinatorState 的并发上限与 WorkOrderQueue 的容量基准——
+    // 全局信号量（activeWorkerCount ≤ maxWorkers）在 coordinator 层实施。
+    maxWorkers: resolveCoordinatorMaxWorkers(config),
     runtimeFactory,
     routing: workerRouting,
     providerHealth,
@@ -1208,6 +1245,13 @@ export function createAgentRuntime(deps: {
     // opted out of all prompts, so its workers inherit that. Any other mode is
     // ignored downstream — workers rely on headless approval semantics instead.
     parentApprovalMode: config.agent.approval as import('./agent/loop-types.js').ApprovalMode,
+    // D8 L2：计划约束兜底注入——objective 里带 .md 路径时自动解析反目标与待验证假设，
+    // 注入 worker 工单。best-effort，任何异常降级为空，绝不阻断派发。
+    getPlanConstraints: objective =>
+      resolvePlanConstraints(cwd, {
+        objective,
+        fromContract: agent.getTaskContract()?.planConstraints,
+      }),
   })
 
   // H4-D3 恢复半边：session meta 里有 PAL 快照就原地恢复（覆盖 resume、
@@ -1221,6 +1265,7 @@ export function createAgentRuntime(deps: {
   // 证据义务追踪器引用：deliver_task 门禁读 store（收编 #2 冗余义务消费）、
   // galaxy DP 派发创建/满足冗余义务。switchModel 重建路径经本函数每次刷新。
   if (refs.obligationTrackerRef) refs.obligationTrackerRef.current = agent.obligations
+  if (refs.claimTrackerRef) refs.claimTrackerRef.current = agent.externalClaimTracker ?? null
 
   return { agent }
 }
@@ -1921,6 +1966,22 @@ export async function switchAgentCwd(ctx: BootstrapContext, target: string): Pro
 
 // ── Aggregate Bootstrap ────────────────────────────────────────
 
+/**
+ * P1-6 全局并发闸输入：coordinator 的 maxWorkers 配置化。
+ *
+ * 读取优先级：config.agent.maxWorkers（schema 分片落地后生效，见
+ * src/config/schema.ts agentSchema）→ 环境变量 RIVET_MAX_WORKERS → 默认 3。
+ * 本函数只做解析与夹取，真正的全局并发信号量
+ * （activeWorkerCount ≤ maxWorkers，delegate()/delegateBackground/后台
+ * worker 统一入队等槽位）由 coordinator 层实现。非法值（非正整数）回退
+ * 默认 3——fail-closed 保守侧。
+ */
+function resolveCoordinatorMaxWorkers(config: Config): number {
+  const raw = (config.agent as { maxWorkers?: unknown }).maxWorkers
+  const n = typeof raw === 'number' ? raw : Number(process.env['RIVET_MAX_WORKERS'])
+  return Number.isInteger(n) && n >= 1 ? n : 3
+}
+
 export interface BootstrapOptions {
   cwd?: string
   args?: string[]
@@ -1928,6 +1989,9 @@ export interface BootstrapOptions {
   providerName?: string
   /** If true, MCP and LSP are initialized asynchronously (non-blocking) */
   asyncExtras?: boolean
+  /** 首启跳过 wizard 后降级启动：无 key 不抛错，让 TUI 先起来。
+   *  发消息时报错指引配 key（与桌面端「先进界面再提醒」对齐）。 */
+  allowMissingKey?: boolean
 }
 
 /**
@@ -1975,7 +2039,9 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   applyRivetRuntimeReadGrants()
 
   // 3. Provider + Auth
-  const { provider, apiKey, auth } = resolveProviderAndAuth(config, opts.providerName)
+  const { provider, apiKey, auth } = resolveProviderAndAuth(config, opts.providerName, {
+    ...(opts.allowMissingKey ? { allowMissingKey: true } : {}),
+  })
 
   // 4. Session infrastructure
   const { registry: sessionRegistry, sessionId, heartbeatInterval } = await createSessionInfrastructure()
@@ -2067,6 +2133,9 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
 
   // 6. Meridian indexer
   const meridianIndexer = new MeridianIndexer(cwd)
+  // 后台闲时全量索引——懒建只覆盖 agent 读过的文件，backfill 逐步补齐全项目
+  // （hash 幂等，与懒建重叠零成本）；进程退出自然终止，半成品 hash 已落库。
+  setImmediate(() => { scheduleMeridianBackfill(meridianIndexer, cwd) })
 
   // Memory epoch reset — 首次/升级后启动时一次性清空中毒的跨会话学习存量
   // （playbook.jsonl / recovery-journal / advisory-efficacy / mistake_entries），
@@ -2119,6 +2188,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     goalTrackerRef: { current: null },
     domainKnowledgeStoreRef: { current: domainKnowledgeStore },
     obligationTrackerRef: { current: null },
+    claimTrackerRef: { current: null },
     reviewGateRef: { current: config.agent.review.skipAuto ? 'off' : 'auto' },
     pluginHooks: [],
     pluginCommands: [],

@@ -60,7 +60,6 @@ describe('SessionStateManager', () => {
 
   it('renders volatile block under 500 chars', () => {
     const mgr = new SessionStateManager('test-sid')
-    mgr.updateTask('implement feature X', 'executing', ['step1', 'step2', 'step3'], 1)
     mgr.trackFileRead('/src/foo.ts', 'read:tu-1')
     mgr.trackFileModified('/src/foo.ts')
     mgr.trackFileModified('/src/bar.ts')
@@ -70,21 +69,50 @@ describe('SessionStateManager', () => {
     assert.ok(rendered.startsWith('<session-state>'))
     assert.ok(rendered.endsWith('</session-state>'))
     assert.ok(rendered.length <= 500, `rendered length ${rendered.length} exceeds 500`)
-    assert.ok(rendered.includes('implement feature X'))
-    assert.ok(rendered.includes('[executing]'))
-    assert.ok(rendered.includes('step 2/3'))
+    assert.ok(rendered.includes('Modified: /src/foo.ts, /src/bar.ts'))
+    assert.ok(rendered.includes('use approach A'))
+  })
+
+  it('renders no objective line — that fact belongs to the task-contract channel', () => {
+    const mgr = new SessionStateManager('test-sid')
+    mgr.updateTask('implement feature X', 'executing', ['step1', 'step2'], 1)
+    mgr.trackFileModified('/src/foo.ts')
+
+    const rendered = mgr.renderForVolatile()
+    // Locks the invariant that replaced the dead `^Objective:` dedup in volatile.ts:
+    // no objective here means nothing for the projection's <objective> to duplicate.
+    assert.doesNotMatch(rendered, /^(Objective|Task|Plan):/m)
+    assert.ok(!rendered.includes('implement feature X'))
+    assert.ok(rendered.includes('Modified: /src/foo.ts'))
+  })
+
+  it('emits nothing at all when there is no content to report', () => {
+    const mgr = new SessionStateManager('test-sid')
+    // An empty `<session-state></session-state>` wrapper is a non-empty string and
+    // every truthiness check downstream reads it as "state exists".
+    assert.equal(mgr.renderForVolatile(), '')
   })
 
   it('truncates volatile block when decisions overflow budget', () => {
     const mgr = new SessionStateManager('test-sid')
-    mgr.updateTask('very long task ' + 'x'.repeat(200), 'executing')
+    mgr.trackFileModified('/src/foo.ts')
     for (let i = 0; i < 10; i++) {
-      mgr.recordDecision(`decision ${i} with a long reason`, `reason ${i}`, i)
+      mgr.recordDecision(`decision ${i} ${'x'.repeat(100)}`, `reason ${i}`, i)
     }
 
     const rendered = mgr.renderForVolatile()
     assert.ok(rendered.length <= 500, `rendered length ${rendered.length} exceeds 500`)
-    assert.ok(rendered.includes('</session-state>'))
+    assert.ok(rendered.endsWith('</session-state>'))
+    assert.ok(rendered.includes('Modified: /src/foo.ts'))
+    assert.ok(!rendered.includes('Decisions:'))
+  })
+
+  it('drops the block when trimming decisions leaves nothing behind', () => {
+    const mgr = new SessionStateManager('test-sid')
+    for (let i = 0; i < 10; i++) {
+      mgr.recordDecision(`decision ${i} ${'x'.repeat(100)}`, `reason ${i}`, i)
+    }
+    assert.equal(mgr.renderForVolatile(), '')
   })
 
   it('records facts with cap', () => {

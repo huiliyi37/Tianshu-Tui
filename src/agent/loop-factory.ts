@@ -36,6 +36,7 @@ import { IntentRetrievalRouteController } from './intent-retrieval-route-control
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
 import { PrewarmController } from './prewarm-controller.js'
+import { canonicalizePhysarumFileTarget } from './hooks/physarum-file-access-hook.js'
 import { TurnStepProducer } from './turn-step-producer.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import type { Usage } from '../api/types.js'
@@ -534,6 +535,9 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getEvidenceState: () => self.evidence.getState(),
     getVerificationDebt: () => self.evidence.hasVerificationDebt(),
     obligations: self.obligations,
+    // 证据防火墙 Phase 2：external-claim tracker 回写 AgentLoop 公开属性，
+    // bootstrap 经 ref 转交 deliver_task ctx（hook 未装配时不回调 → undefined）。
+    onClaimTrackerReady: getTracker => { self.externalClaimTracker = getTracker },
     // A4（信号互扰治理）：收束类 hook 的续轮活跃判定半边（另一半是 high 义务）。
     getGoalActive: () => self.isGoalActive(),
     submitControlSignal: signal => { self.controlPlane.submit(signal) },
@@ -860,6 +864,19 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
   return new RuntimeHookPipeline(hooks, {
     onError: (err) => {
       runOnErrorHooks(userBridgeDeps, err.message)
+    },
+    onRun: event => {
+      if (event.outcome === 'completed' && !event.slow) return
+      self.telemetryWriter.write({
+        kind: 'runtime-hook-health',
+        hook: event.id,
+        phase: event.phase,
+        outcome: event.outcome,
+        durationMs: event.durationMs,
+        slow: event.slow,
+        message: event.message,
+        turn: self.session.getTurnCount(),
+      })
     },
   })
 }
@@ -1300,6 +1317,20 @@ export function createPrewarmController(self: AgentLoop): PrewarmController {
     getCwd: () => self.cwd,
     getPrewarmCache: () => self.prewarm,
     getRecentToolHistory: () => self.recentToolHistory,
+    // physarum 预测接 PrewarmCache（turn 边界）：以最近一次 read_file 成功
+    // 目标为锚取 top-3。physarum 边的键是 postTool hook 侧 canonicalize 过的
+    // repo 相对路径（physarum-file-access-hook），这里同样 canonicalize 才能
+    // 命中；没有可锚定的历史或任何异常都静默降级为空。
+    getPhysarumPredictions: () => {
+      try {
+        const lastRead = [...self.recentToolHistory].reverse()
+          .find(entry => entry.tool === 'read_file' && entry.status === 'success')?.target
+        if (!lastRead) return []
+        const anchor = canonicalizePhysarumFileTarget(self.cwd, lastRead)
+        if (!anchor) return []
+        return self.immuneHook.getPhysarum().predictNext(anchor, 3)
+      } catch { return [] }
+    },
   })
 }
 

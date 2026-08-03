@@ -27,6 +27,8 @@ export interface RecallEvent {
   gateEntries: Array<{ id: string; snippet: string }>
 }
 
+export type RecallOutcome = 'adopted' | 'rejected' | 'contradicted'
+
 export interface SessionEfficacyRecord {
   sessionId: string
   ts: number
@@ -39,6 +41,11 @@ export interface SessionEfficacyRecord {
   recalledEntryIds: string[]
   /** Wave 5: gate 准入条目中被实际引用（片段出现在召回后的 assistant 输出）的去重条目数。 */
   gateAdmittedCited: number
+  /** Explicit task-level outcomes recorded only for recalled entries. */
+  adoptedEntries: number
+  rejectedEntries: number
+  contradictedEntries: number
+  outcomeRate: number
   /** 空召回率 > 0.5 连续 ≥3 会话（含本会话）。 */
   alert: boolean
 }
@@ -55,6 +62,7 @@ function efficacyPath(cwd: string): string {
 /** 会话级召回事件收集器。tool 侧 record，postSession 侧 finalize 落盘。 */
 export class RecallEfficacyTracker {
   private events: RecallEvent[] = []
+  private outcomes = new Map<string, RecallOutcome>()
 
   constructor(private readonly sessionId: string) {}
 
@@ -78,6 +86,14 @@ export class RecallEfficacyTracker {
     return this.events.length
   }
 
+  /** Records an explicit evaluation of a recalled entry. */
+  recordOutcome(entryId: string, outcome: RecallOutcome): boolean {
+    const wasRecalled = this.events.some(event => event.entryIds.includes(entryId))
+    if (!wasRecalled) return false
+    this.outcomes.set(entryId, outcome)
+    return true
+  }
+
   /**
    * 聚合本会话账本行并落盘。
    * @param assistantTextAfterRecalls 召回发生后的 assistant 输出全文（引用率代理检测）。
@@ -99,6 +115,13 @@ export class RecallEfficacyTracker {
     }
     const nonEmpty = recalls - emptyRecalls
     const citeRate = nonEmpty > 0 ? citedRecalls / nonEmpty : 0
+    const outcomeCounts = {
+      adopted: [...this.outcomes.values()].filter(outcome => outcome === 'adopted').length,
+      rejected: [...this.outcomes.values()].filter(outcome => outcome === 'rejected').length,
+      contradicted: [...this.outcomes.values()].filter(outcome => outcome === 'contradicted').length,
+    }
+    const recalledEntries = new Set(this.events.flatMap(event => event.entryIds))
+    const outcomeRate = recalledEntries.size > 0 ? this.outcomes.size / recalledEntries.size : 0
 
     const alert = emptyRate > EMPTY_RATE_THRESHOLD
       && consecutiveHighEmptySessions(cwd) >= ALERT_CONSECUTIVE_SESSIONS - 1
@@ -113,8 +136,12 @@ export class RecallEfficacyTracker {
       citeRate: round2(citeRate),
       recalledEntryIds: [...new Set(this.events.flatMap(e => e.entryIds))].slice(0, 50),
       // gate 准入条目的引用检测：与 citedRecalls 同一代理指标（片段回现），
-      // 但按条目去重——回答"闸门放进来的知识有没有被真的用上"。
+      // 但按条目去重——回答“闸门放进来的知识有没有被真的用上”。
       gateAdmittedCited: countCitedGateEntries(this.events, assistantTextAfterRecalls),
+      adoptedEntries: outcomeCounts.adopted,
+      rejectedEntries: outcomeCounts.rejected,
+      contradictedEntries: outcomeCounts.contradicted,
+      outcomeRate: round2(outcomeRate),
       alert,
     }
 

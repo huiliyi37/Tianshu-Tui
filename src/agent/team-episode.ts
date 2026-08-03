@@ -229,8 +229,8 @@ function filesTouchedByMultipleWaves(episode: TeamEpisode): string[] {
 export function formatTeamDelivery(episode: TeamEpisode): string {
   const lines: string[] = []
   lines.push(
-    `Team delivery synthesis — ${episode.observedWaveIndexes.length}/${episode.waveCount} waves, ` +
-    `${episode.outcome.dispatched} workers${episode.complete ? '' : ' (incomplete)'}`
+    `团队交付综合 — ${episode.observedWaveIndexes.length}/${episode.waveCount} 波，` +
+    `${episode.outcome.dispatched} 个 worker${episode.complete ? '' : '（未完成）'}`
   )
 
   for (const fragment of episode.fragments) {
@@ -239,22 +239,22 @@ export function formatTeamDelivery(episode: TeamEpisode): string {
     const ok = statuses.filter(s => s.status === 'passed' || s.status === 'completed').length
     const total = statuses.length || t.planned.taskIds.length
     const ids = t.planned.taskIds.join(', ') || '—'
-    lines.push(`  wave ${t.fromWave + 1}: ${ids} (${ok}/${total} ok)`)
+    lines.push(`  波 ${t.fromWave + 1}：${ids}（${ok}/${total} 通过）`)
   }
 
   const changed = episode.changedFiles.observedChangedFiles ?? episode.changedFiles.reportedChangedFiles ?? []
-  lines.push(`Changed files (${changed.length}): ${changed.length > 0 ? changed.join(', ') : 'none'}`)
+  lines.push(`改动文件（${changed.length}）：${changed.length > 0 ? changed.join(', ') : '无'}`)
 
   const conflicts = filesTouchedByMultipleWaves(episode)
   if (conflicts.length > 0) {
-    lines.push(`⚠ Files touched by multiple waves (review for conflicts): ${conflicts.join(', ')}`)
+    lines.push(`⚠ 多波触碰的文件（请审查冲突）：${conflicts.join(', ')}`)
   }
 
   const verification = episode.outcome.verificationPassed
   const verdict = episode.outcome.reviewVerdict
     ?? (verification === true ? 'verified' : verification === false ? 'verification-failed' : 'no-verdict')
   const verifNote = verification !== undefined ? ` verification=${verification ? 'pass' : 'fail'}` : ''
-  lines.push(`Overall: review=${verdict}${verifNote}`)
+  lines.push(`总体：review=${verdict}${verifNote}`)
 
   return lines.join('\n')
 }

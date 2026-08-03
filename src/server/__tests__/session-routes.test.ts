@@ -209,7 +209,7 @@ test('intervention answer route forwards remember to the manager (computer_use g
     'POST', `/sessions/${id}/interventions/cu-1/answer`, { decision: 'approve', remember: true }, AUTH,
   )
   assert.equal(answer.status, 200)
-  assert.deepEqual(await pending, { approved: true })
+  assert.deepEqual(await pending, { approved: true, remember: true })
   assert.equal(isAppGranted('Safari'), true)
 })
 

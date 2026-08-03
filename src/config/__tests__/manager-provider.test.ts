@@ -11,6 +11,8 @@ import {
   upsertProviderModel,
   setApiKey,
   setApiKeyEnv,
+  removeProvider,
+  runConfigCLI,
 } from '../manager.js'
 
 describe('provider config mutations', () => {
@@ -142,5 +144,63 @@ describe('provider config mutations', () => {
       apiKey: 'sk',
       model: { id: 'm', contextWindow: 1000, maxTokens: 500 },
     }))
+  })
+
+  it('removeProvider refuses to delete a preset provider (deepseek)', () => {
+    // deepseek 是预设 provider——禁止删除，报可读错误
+    assert.throws(
+      () => removeProvider('deepseek'),
+      /cannot remove preset provider "deepseek"/i,
+    )
+  })
+
+  it('removeProvider allows deleting a custom provider', () => {
+    setupCustomProvider({
+      providerName: 'custom-deletable',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-temp',
+      model: { id: 'temp-model', contextWindow: 128000, maxTokens: 32000 },
+    })
+    removeProvider('custom-deletable')
+    const providers = loadConfig().provider.providers
+    assert.equal(providers['custom-deletable'], undefined)
+  })
+
+  it('setupCustomProvider throws when a provider with the same name already exists', () => {
+    setupCustomProvider({
+      providerName: 'dup-test',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-1',
+      model: { id: 'm1', contextWindow: 128000, maxTokens: 32000 },
+    })
+    assert.throws(
+      () => setupCustomProvider({
+        providerName: 'dup-test',
+        baseUrl: 'https://api.other.com/v1',
+        apiKey: 'sk-2',
+        model: { id: 'm2', contextWindow: 64000, maxTokens: 16000 },
+      }),
+      /already exists.*(use|to) edit/i,
+    )
+  })
+
+  it('CLI `remove-provider` removes a custom provider', async () => {
+    // 先创建一个自定义 provider，再通过 CLI 删除它
+    setupCustomProvider({
+      providerName: 'cli-remove-me',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-temp',
+      model: { id: 'temp-model', contextWindow: 128000, maxTokens: 32000 },
+    })
+    const out: string[] = []
+    const io = {
+      isTTY: false,
+      stdout: (l: string) => out.push(l),
+      stderr: () => {},
+      exit: () => {},
+    }
+    await runConfigCLI(['remove-provider', 'cli-remove-me'], io)
+    const providers = loadConfig().provider.providers
+    assert.equal(providers['cli-remove-me'], undefined)
   })
 })

@@ -147,6 +147,71 @@ describe('precision ceiling', () => {
     assert.match(d.reason, /precision-risk/)
   })
 
+  // The rung that ships to every DeepSeek user. It sat at 0.60 from the
+  // token-explosion P1 fix (5482542) and was nominally covered by the cache
+  // advisor, but `protection = hitRate × (1 − pressure) ≥ 0.45` tops out at
+  // 0.55 pressure with a perfect hit rate — it could never reach 0.60, so a
+  // 99%-hit session rewrote history there anyway. These lock the ladder that
+  // replaced it; a regression is silent otherwise (compaction leaves no
+  // user-visible trace beyond a cache-miss spike).
+  for (const ratio of [0.60, 0.65, 0.70, 0.74]) {
+    it(`decideCompactAction: 1M/${(ratio * 100).toFixed(0)}% per-token exact-prefix (DeepSeek) does not reach an LLM rung`, () => {
+      const d = decideCompactAction({
+        estimatedTokens: Math.round(1_000_000 * ratio),
+        maxTokens: 1_000_000,
+        turn: 1,
+        failures: { consecutiveFailures: 0 },
+        providerProfile: { cacheType: 'exact-prefix', persistent: true },
+        recentHitRate: 0.99,
+        profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'per-token', cache: 'exact-prefix' }),
+      })
+      assert.notEqual(d.action, 'partial-llm')
+      assert.notEqual(d.action, 'full-llm')
+      assert.equal(d.force, false)
+    })
+  }
+
+  it('decideCompactAction: 1M/75% per-token exact-prefix (DeepSeek) reaches partial-llm', () => {
+    const d = decideCompactAction({
+      estimatedTokens: 750_000,
+      maxTokens: 1_000_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      recentHitRate: 0.99,
+      profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'per-token', cache: 'exact-prefix' }),
+    })
+    assert.equal(d.action, 'partial-llm')
+    assert.equal(d.force, false)
+  })
+
+  it('decideCompactAction: 1M/85% per-token exact-prefix (DeepSeek) reaches full-llm', () => {
+    const d = decideCompactAction({
+      estimatedTokens: 850_000,
+      maxTokens: 1_000_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      recentHitRate: 0.99,
+      profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'per-token', cache: 'exact-prefix' }),
+    })
+    assert.equal(d.action, 'full-llm')
+  })
+
+  it('decideCompactAction: subscription keeps the base ladder — flat billing makes an early reclaim free', () => {
+    // The split mirrors T9's `cachePreserving && !costInsensitive` (3ffcf273):
+    // a subscription provider loses latency to a re-prefill, not money.
+    const d = decideCompactAction({
+      estimatedTokens: 650_000,
+      maxTokens: 1_000_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: { cacheType: 'exact-prefix', persistent: true },
+      profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'subscription', cache: 'exact-prefix' }),
+    })
+    assert.equal(d.action, 'partial-llm')
+  })
+
   it('decideCompactAction: 1M/650k subscription (GLM) reaches partial-llm without force', () => {
     const d = decideCompactAction({
       estimatedTokens: 650_000,

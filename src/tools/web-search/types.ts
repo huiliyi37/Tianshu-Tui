@@ -12,6 +12,11 @@ export interface SearchResult {
   title: string
   url: string
   snippet: string
+  /** 来源站点名（如「知乎」「GitHub」），便于模型判断来源可信度。可选——仅博查等
+   *  返回 siteName 的后端填充；bing/DDG scrape 不提供。 */
+  siteName?: string
+  /** 发布时间（ISO 字符串），便于时效性判断。可选。 */
+  publishedAt?: string
 }
 
 /** Injectable fetch — production uses `globalThis.fetch`; tests pass a stub. */

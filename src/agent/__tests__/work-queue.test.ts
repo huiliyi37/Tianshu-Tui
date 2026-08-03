@@ -326,4 +326,66 @@ describe('WorkOrderQueue', () => {
     const second = q.dequeue()!
     assert.equal(second.id, 'c')
   })
+
+  // ── cancelPending / inFlight ──
+
+  it('cancelPending removes matching orders and marks them failed', () => {
+    const q = new WorkOrderQueue()
+    const a = order('a')
+    const b = order('b')
+    const c = order('c')
+    q.enqueue(a)
+    q.enqueue(b)
+    q.enqueue(c)
+
+    const cancelled = q.cancelPending(o => o.id === 'a' || o.id === 'b')
+    assert.equal(cancelled.length, 2)
+    assert.deepEqual(cancelled.map(o => o.id), ['a', 'b'])
+    assert.equal(q.size(), 1)
+    assert.ok(q.hasFailed('a'))
+    assert.ok(q.hasFailed('b'))
+    assert.ok(!q.hasFailed('c'))
+  })
+
+  it('cancelPending does not affect in-flight orders', () => {
+    const q = new WorkOrderQueue()
+    const a = order('a')
+    const b = order('b')
+    q.enqueue(a)
+    q.enqueue(b)
+
+    const deqA = q.dequeue()!
+    q.markInFlight(deqA)
+
+    const cancelled = q.cancelPending(() => true)
+    assert.equal(cancelled.length, 1)
+    assert.equal(cancelled[0]!.id, 'b')
+    assert.equal(q.inFlight().length, 1)
+    assert.equal(q.inFlight()[0]!.id, 'a')
+  })
+
+  it('dependent marked unrunnable after dependency cancelled', () => {
+    const q = new WorkOrderQueue()
+    const parent = order('parent')
+    const child = order('child', undefined, ['parent'])
+    q.enqueue(parent)
+    q.enqueue(child)
+
+    q.cancelPending(o => o.id === 'parent')
+    assert.equal(q.dequeue(), undefined)
+    assert.equal(q.pending().length, 1)
+  })
+
+  it('inFlight returns empty when nothing is in flight', () => {
+    const q = new WorkOrderQueue()
+    assert.deepEqual(q.inFlight(), [])
+  })
+
+  it('cancelPending with no match returns empty array', () => {
+    const q = new WorkOrderQueue()
+    q.enqueue(order('a'))
+    const cancelled = q.cancelPending(() => false)
+    assert.equal(cancelled.length, 0)
+    assert.equal(q.size(), 1)
+  })
 })

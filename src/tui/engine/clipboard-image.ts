@@ -184,6 +184,15 @@ async function tryMacOSClipboard(
 
     const buf = await rf(tmpPath)
     if (!buf || buf.length === 0) return null
+
+    // TIFF → PNG 自动转换：macOS 剪贴板原生格式是 TIFF，
+    // 截图工具粘贴时若无可选的 PNG 类会直接写 TIFF 数据。
+    // 大多数视觉模型 API 不支持 TIFF，用 sips 转 PNG。
+    const mime = detectImageMime(buf, 'clipboard.png')
+    if (mime === 'image/tiff' || mime === 'image/bmp') {
+      const pngBuf = await convertToPng(buf, tmpPath, ef, td, uuid)
+      if (pngBuf) return bufToClipboardImage(pngBuf, 'clipboard.png')
+    }
     return bufToClipboardImage(buf, 'clipboard.png')
   } catch {
     return null
@@ -244,6 +253,29 @@ else { exit 1 }
 }
 
 // ── Helpers ──
+
+/** Convert TIFF/BMP buffer to PNG using macOS sips. Returns null on failure. */
+async function convertToPng(
+  buf: Buffer,
+  srcPath: string,
+  ef: (bin: string, args: string[]) => Promise<{ stdout: string }>,
+  td: string,
+  uuid: () => string,
+): Promise<Buffer | null> {
+  if (process.platform !== 'darwin') return null
+  const pngPath = `${td}/rivet-clip-${uuid()}.png`
+  try {
+    await ef('sips', ['-s', 'format', 'png', srcPath, '--out', pngPath])
+    const { readFile } = await import('node:fs/promises')
+    const pngBuf = await readFile(pngPath)
+    return pngBuf.length > 0 ? pngBuf : null
+  } catch {
+    return null
+  } finally {
+    const { unlink } = await import('node:fs/promises')
+    await unlink(pngPath).catch(() => {})
+  }
+}
 
 function bufToClipboardImage(buf: Buffer, name: string): ClipboardImage {
   const mime = detectImageMime(buf, name) ?? 'image/png'

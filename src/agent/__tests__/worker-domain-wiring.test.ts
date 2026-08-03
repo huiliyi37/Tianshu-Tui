@@ -73,7 +73,9 @@ interface Capture { request?: OaiChatRequest }
 function capturingClient(capture: Capture): StreamClient {
   return {
     stream: async (request: OaiChatRequest, callbacks: StreamCallbacks) => {
-      capture.request = request
+      // 只取第一个请求——summary 扩展等侧路调用（无 system/无冻结头的单发请求）
+      // 会覆盖尾请求，把「冻结前缀含 star-domain」的断言对象偷换掉。
+      if (!capture.request) capture.request = request
       const text = JSON.stringify(passedResult('wo'))
       callbacks.onTextDelta(text)
       callbacks.onContentBlock({ type: 'text', text })
@@ -125,7 +127,7 @@ async function delegateAndCapture(authority?: string): Promise<OaiChatRequest> {
   }
 }
 
-const WORKER_PROMPT_HEAD = 'You are a headless'
+const WORKER_PROMPT_HEAD = '你是一个无头'
 
 function firstUserMessage(request: OaiChatRequest): string {
   const first = request.messages.find(m => m.role === 'user')

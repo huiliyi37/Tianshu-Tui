@@ -1,9 +1,10 @@
-import { describe, it, before, after } from 'node:test'
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { cleanupStaleWorkerSessionDirs, restorePlanModeFromMeta, switchAgentCwd, type BootstrapContext } from '../bootstrap.js'
+import { cleanupStaleWorkerSessionDirs, restorePlanModeFromMeta, switchAgentCwd, resolveProviderAndAuth, type BootstrapContext } from '../bootstrap.js'
+import { loadConfig } from '../config/manager.js'
 import type { AgentLoop } from '../agent/loop.js'
 
 describe('cleanupStaleWorkerSessionDirs', () => {
@@ -62,6 +63,52 @@ describe('cleanupStaleWorkerSessionDirs', () => {
       process.env.RIVET_SESSION_DIR = saved
       rmSync(emptyCwd, { recursive: true, force: true })
     }
+  })
+
+  it('清理超龄 worker 文件（jsonl/meta），新鲜 worker 文件与主会话文件不动', () => {
+    // evict 额度池已排除 worker——不清文件的话 worker jsonl 无限累积
+    //（实测 46/65 个坑），这里接管其生命周期：7 天（fileThresholdMs）。
+    const eightDaysAgo = Date.now() / 1000 - 8 * 24 * 3600
+    const staleJsonl = join(sessionsDir, 'worker-wo_stale-1a2b3.jsonl')
+    writeFileSync(staleJsonl, '{}\n')
+    utimesSync(staleJsonl, eightDaysAgo, eightDaysAgo)
+    const staleMeta = join(sessionsDir, 'worker-wo_stale-1a2b3.meta.json')
+    writeFileSync(staleMeta, '{}')
+    utimesSync(staleMeta, eightDaysAgo, eightDaysAgo)
+
+    // 新鲜 worker 文件（刚写，7 天窗口内）
+    const freshJsonl = join(sessionsDir, 'worker-wo_fresh-9z8y7.jsonl')
+    writeFileSync(freshJsonl, '{}\n')
+
+    // 主会话文件：无论多老都绝不能被 worker 清理碰到
+    const mainJsonl = join(sessionsDir, 'main-old-session.jsonl')
+    writeFileSync(mainJsonl, '{}\n')
+    utimesSync(mainJsonl, eightDaysAgo, eightDaysAgo)
+
+    const cleaned = cleanupStaleWorkerSessionDirs(testCwd)
+
+    assert.equal(cleaned, 2, 'stale jsonl + meta 各计一次')
+    assert.ok(!existsSync(staleJsonl), '超龄 worker jsonl 应被清理')
+    assert.ok(!existsSync(staleMeta), '超龄 worker meta 应被清理')
+    assert.ok(existsSync(freshJsonl), '窗口内 worker 文件应幸存')
+    assert.ok(existsSync(mainJsonl), '主会话文件绝不能被 worker 清理碰到')
+  })
+
+  it('worker 文件阈值独立于目录阈值（1h 目录阈值不误伤 2h 前的 worker 文件）', () => {
+    const twoHrsAgo = Date.now() / 1000 - 2 * 3600
+    const file = join(sessionsDir, 'worker-wo_2h-file.jsonl')
+    writeFileSync(file, '{}\n')
+    utimesSync(file, twoHrsAgo, twoHrsAgo)
+
+    const dir = join(sessionsDir, 'worker-2h-dir')
+    mkdirSync(dir, { recursive: true })
+    utimesSync(dir, twoHrsAgo, twoHrsAgo)
+
+    const cleaned = cleanupStaleWorkerSessionDirs(testCwd)
+
+    assert.ok(!existsSync(dir), '2h 目录超过 1h 阈值 → 清理')
+    assert.ok(existsSync(file), '2h 文件在 7 天窗口内 → 保留（排查资产）')
+    assert.equal(cleaned, 1)
   })
 })
 
@@ -189,5 +236,44 @@ describe('switchAgentCwd 守卫', () => {
       rmSync(cwd, { recursive: true, force: true })
       rmSync(target, { recursive: true, force: true })
     }
+  })
+})
+
+describe('resolveProviderAndAuth allowMissingKey', () => {
+  let dir = ''
+  const envKeys = ['DEEPSEEK_API_KEY', 'ZHIPU_API_KEY']
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-resolve-auth-'))
+    process.env.RIVET_CONFIG_PATH = join(dir, 'config.json')
+    for (const k of envKeys) delete process.env[k]
+  })
+  afterEach(() => {
+    delete process.env.RIVET_CONFIG_PATH
+    for (const k of envKeys) delete process.env[k]
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('throws on missing key without allowMissingKey (原有行为)', () => {
+    const config = loadConfig()  // DEFAULT_CONFIG 的 deepseek provider 无 inline key、env 也无
+    assert.throws(
+      () => resolveProviderAndAuth(config, 'deepseek'),
+      /No API key configured/,
+    )
+  })
+
+  it('returns empty apiKey with allowMissingKey (降级模式)', () => {
+    const config = loadConfig()
+    const result = resolveProviderAndAuth(config, 'deepseek', { allowMissingKey: true })
+    assert.equal(result.apiKey, '')
+    assert.equal(result.provider.name, 'deepseek')
+    assert.equal(result.auth, undefined)
+  })
+
+  it('returns real apiKey when key is present even with allowMissingKey', () => {
+    process.env.DEEPSEEK_API_KEY = 'sk-test-12345'
+    const config = loadConfig()
+    const result = resolveProviderAndAuth(config, 'deepseek', { allowMissingKey: true })
+    assert.equal(result.apiKey, 'sk-test-12345', '有 key 时正常返回，allowMissingKey 不影响')
   })
 })

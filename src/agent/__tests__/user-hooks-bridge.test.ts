@@ -27,7 +27,7 @@ function writeScript(cwd: string, name: string, body: string) {
 }
 
 describe('createUserHooksBridge', () => {
-  it('emits hook_result after postTool hooks run', () => {
+  it('emits hook_result after postTool hooks run', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'rivet-hooks-bridge-'))
     try {
       mkdirSync(join(cwd, '.rivet'))
@@ -45,7 +45,8 @@ describe('createUserHooksBridge', () => {
       }
 
       const pipeline = new RuntimeHookPipeline(createUserHooksBridge(deps))
-      pipeline.runPostTool(makeCtx(2), { name: 'write_file', success: true })
+      // 500b5136 起 hook 调用推迟到微任务——必须与生产调用点一样 await。
+      await pipeline.runPostTool(makeCtx(2), { name: 'write_file', success: true })
 
       assert.equal(emissions.length, 1)
       assert.equal(emissions[0]!.meta.event, 'postTool')
@@ -59,7 +60,7 @@ describe('createUserHooksBridge', () => {
     }
   })
 
-  it('emits hook_result after preTurn/postTurn/postSession hooks run', () => {
+  it('emits hook_result after preTurn/postTurn/postSession hooks run', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'rivet-hooks-bridge-'))
     try {
       mkdirSync(join(cwd, '.rivet'))
@@ -82,9 +83,9 @@ describe('createUserHooksBridge', () => {
 
       const pipeline = new RuntimeHookPipeline(createUserHooksBridge(deps))
       const ctx = makeCtx(1)
-      pipeline.runPreTurn(ctx)
-      pipeline.runPostTurn(ctx)
-      pipeline.runPostSession(ctx)
+      await pipeline.runPreTurn(ctx)
+      await pipeline.runPostTurn(ctx)
+      await pipeline.runPostSession(ctx)
 
       assert.deepEqual(events, ['preTurn', 'postTurn', 'postSession'])
     } finally {

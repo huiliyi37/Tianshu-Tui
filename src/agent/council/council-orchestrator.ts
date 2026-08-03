@@ -69,6 +69,7 @@ export function buildSeatObjective(seat: CouncilSeat, draft: CouncilDraft): stri
     'Return a JSON WorkerResult whose `artifacts` contains ONE entry:',
     '{ "kind": "note", "title": "seat-contribution", "content": "<a JSON string of your SeatContribution>" }',
     'SeatContribution = { authority, summary, additions, risks, challenges, alternatives }.',
+    'risks = [{ claim, severity?: "high"|"medium"|"low", mitigation, itemId? }] —— mitigation 为必填缓解措施，缺省抽稀时填 ""；',
     'PlanItem (additions[]) = { id, title, detail, files?: string[] } —— files 为该条目涉及的文件路径。',
     'challenges = [{ text, severity?: "advisory"|"blocking", gate?: string, itemId?: string }] ——',
     'severity:"blocking" 是否决级质疑（未化解前计划不得编译执行，慎用、必须给出具体依据）；',
@@ -148,7 +149,11 @@ export function parseSeatContribution(seat: string, result: WorkerResult): SeatP
             authority: seat,
             summary: raw.summary ?? result.summary ?? '',
             additions: Array.isArray(raw.additions) ? raw.additions : [],
-            risks: Array.isArray(raw.risks) ? raw.risks : [],
+            risks: Array.isArray(raw.risks)
+              // LLM 输出不可信：缺 mitigation 的 risk 补空串，保证下游
+              // extractObligations 等消费方不因字段缺失崩溃（类型必填 ≠ 运行时必有）。
+              ? raw.risks.filter(r => r && typeof r === 'object').map(r => ({ ...r, mitigation: typeof r?.mitigation === 'string' ? r.mitigation : '' }))
+              : [],
             challenges: normalizeChallenges(raw.challenges),
             alternatives: Array.isArray(raw.alternatives) ? raw.alternatives : [],
             ...(raw.modelUsed ? { modelUsed: raw.modelUsed } : {}),

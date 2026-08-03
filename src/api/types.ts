@@ -57,6 +57,10 @@ export interface Message {
 export interface ToolDefinition {
   name: string
   description: string
+  /** P2-16: MCP capability declared by the server policy (read/write/execute).
+   *  Non-MCP tools leave this unset. Consumed by assessToolRisk for accurate
+   *  risk labelling instead of hardcoded 'unknown'. */
+  capability?: string
   input_schema?: {
     type: 'object'
     properties: Record<string, unknown>

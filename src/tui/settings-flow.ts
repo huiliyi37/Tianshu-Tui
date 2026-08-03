@@ -92,7 +92,7 @@ export class SettingsFlow {
   // ── view ───────────────────────────────────────────────────
 
   view(): SettingsView {
-    const categories = buildCategories(this.current)
+    const categories = buildCategories(this.current, this.env)
     const cats = categories.map(cat => ({
       id: cat.id,
       label: cat.label,
@@ -317,7 +317,7 @@ export class SettingsFlow {
   // ── internals ──────────────────────────────────────────────
 
   private setCategory(index: number): void {
-    const categories = buildCategories(this.current)
+    const categories = buildCategories(this.current, this.env)
     const next = Math.min(Math.max(0, categories.length - 1), Math.max(0, index))
     if (next !== this.catIndex) {
       this.catIndex = next
@@ -326,11 +326,11 @@ export class SettingsFlow {
   }
 
   private fieldCount(): number {
-    return buildCategories(this.current)[this.catIndex]?.fields.length ?? 0
+    return buildCategories(this.current, this.env)[this.catIndex]?.fields.length ?? 0
   }
 
   private activeField(): SettingsField | undefined {
-    return buildCategories(this.current)[this.catIndex]?.fields[this.fieldIndex]
+    return buildCategories(this.current, this.env)[this.catIndex]?.fields[this.fieldIndex]
   }
 
   private pickerOptions(): SettingsOption[] {

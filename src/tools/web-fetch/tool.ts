@@ -18,6 +18,8 @@ export interface WebFetchOptions extends HttpFetchOptions {
   renderWaitMs?: number
   /** 缓存读取有效期（默认 2 天；0 = 禁读仍写）。 */
   cacheMaxAgeMs?: number
+  /** Jina Reader 基础地址（默认 https://r.jina.ai；国内可填自建反代）。 */
+  jinaBaseUrl?: string
 }
 
 /** actions 直达渲染路径的输出组装：动作摘要进 via，execute_js 返回与失败警告附尾部。 */

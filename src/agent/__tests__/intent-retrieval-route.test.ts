@@ -112,6 +112,29 @@ describe('intent retrieval route heuristic', () => {
     assert.ok(route.taskKinds.includes('bug_fix'))
   })
 
+  it('classifies "看看这个 bug" as bug_fix — info-query phrasing with bug signal', () => {
+    const route = routeFor('看看这个 bug')
+    assert.ok(route.taskKinds.includes('bug_fix'), `expected bug_fix, got ${route.taskKinds}`)
+    assert.ok(!route.taskKinds.includes('new_feature'), '"bug" should not fall to new_feature default')
+  })
+
+  it('classifies "帮我 fix 一下" as bug_fix — English action word', () => {
+    const route = routeFor('帮我 fix 一下')
+    assert.ok(route.taskKinds.includes('bug_fix'), `expected bug_fix, got ${route.taskKinds}`)
+  })
+
+  it('classifies "改一下这个函数" as refactor — 改 added to refactor regex', () => {
+    const route = routeFor('改一下这个函数')
+    assert.ok(route.taskKinds.includes('refactor'), `expected refactor, got ${route.taskKinds}`)
+    assert.ok(!route.taskKinds.includes('new_feature'), '"改" should not fall to new_feature default')
+  })
+
+  it('classifies "删掉这个文件" as refactor — 删 added to refactor regex', () => {
+    const route = routeFor('删掉这个文件')
+    assert.ok(route.taskKinds.includes('refactor'), `expected refactor, got ${route.taskKinds}`)
+    assert.ok(!route.taskKinds.includes('new_feature'), '"删" should not fall to new_feature default')
+  })
+
   it('classifies gap-analysis inspection wording (检查…有没有缺陷) as review_audit', () => {
     const route = routeFor('检查分析一下 用户意图识别这部分 有没有缺陷和场景不覆盖 遗漏的')
 

@@ -180,10 +180,22 @@ describe('MCP tool risk', () => {
     assert.ok(result.reasons.some(r => r.includes('MCP')))
   })
 
-  it('treats MCP read-only tools as low risk', () => {
+  it('treats undeclared-capability MCP tools as medium risk (fail-closed)', () => {
+    // b7e719b7 起不再按工具名猜能力：未声明 → policy confirm → medium。
+    // 服务端已声明 read 的工具在 wrapper 层自动放行，但 assessToolRisk 拿不到
+    // MCP 配置，风险评估路径一律 fail-closed 提 medium（偏严不偏小）。
     const result = assessToolRisk('mcp__myserver__search', { query: 'test' })
-    assert.equal(result.level, 'low')
-    assert.ok(result.reasons.some(r => r.includes('MCP')))
+    assert.equal(result.level, 'medium')
+    assert.ok(result.reasons.some(r => r.includes('MCP policy: confirm')))
+  })
+
+  it('uses declared capability when plumbed through (P2-16)', () => {
+    // wrapper 声明的能力经 definition.capability → tool-pipeline 第 6 参贯通：
+    // declared read → low（与 wrapper 层免审批口径一致）；write/execute → medium。
+    // 此前该参数硬编码 'unknown'，declared-read 被误标 medium。
+    assert.equal(assessToolRisk('mcp__docs__search', { query: 'x' }, 'none', [], undefined, 'read').level, 'low')
+    assert.equal(assessToolRisk('mcp__docs__write_file', { path: 'a' }, 'none', [], undefined, 'write').level, 'medium')
+    assert.equal(assessToolRisk('mcp__docs__delete_resource', { id: '1' }, 'none', [], undefined, 'execute').level, 'medium')
   })
 
   it('MCP tool with doom-loop blocked stays at its policy-derived level (not auto-high)', () => {

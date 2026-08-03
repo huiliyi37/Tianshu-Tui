@@ -1,8 +1,11 @@
 // office-ppt: Native .pptx generation via pptxgenjs
 // Replaces the HTML .ppt fallback (create_presentation).
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, statSync } from 'node:fs'
 import { basename } from 'node:path'
+
+// Reject oversized decks before JSZip loads the whole archive into memory.
+const MAX_PPTX_SIZE = 100 * 1024 * 1024 // 100MiB
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -52,8 +55,15 @@ function unescapeXml(s) {
     .replace(/&amp;/g, '&')
 }
 
+// Per-slide XML cap: regex backtracking on pathological (unclosed-tag)
+// input scales ~k×n — a crafted deck could pin the event loop for minutes.
+const MAX_SLIDE_XML_SIZE = 50 * 1024 * 1024 // 50MiB per slide XML
+
 /** Join <a:t> runs within each <a:p> paragraph; drop empty paragraphs. */
 function extractParagraphs(xml) {
+  if (xml.length > MAX_SLIDE_XML_SIZE) {
+    return ['[slide content too large to parse]']
+  }
   const paragraphs = []
   const pRe = /<a:p\b[^>]*>([\s\S]*?)<\/a:p>/g
   let m
@@ -69,7 +79,7 @@ function extractParagraphs(xml) {
 }
 
 function slideNumber(name) {
-  return Number(name.match(/slide(\d+)\.xml$/)[1])
+  return Number(name?.match(/slide(\d+)\.xml$/)?.[1] ?? NaN)
 }
 
 /** Resolve the notes part for a slide via its .rels, falling back to same-numbered notesSlide. */
@@ -319,6 +329,10 @@ export const tools = [
       if (!existsSync(filePath)) return { content: `Error: file not found: ${filePath}`, isError: true }
 
       try {
+        const stat = statSync(filePath)
+        if (stat.size > MAX_PPTX_SIZE) {
+          return { content: `Error: file too large (${(stat.size / 1024 / 1024).toFixed(1)}MB > 100MB limit)`, isError: true }
+        }
         const JSZip = (await import('jszip')).default
         const zip = await JSZip.loadAsync(readFileSync(filePath))
 

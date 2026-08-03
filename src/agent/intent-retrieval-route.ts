@@ -326,10 +326,10 @@ function inferTaskKinds(userMessage: string, lastAssistantMessage?: string, task
   }
 
   if (hasSecurityIntent(text)) add('security_safety')
-  if (/(修复|报错|失败|异常|回归|bug|error|fail|failed|failure|exception|crash|broken|regression|重试|retry)/i.test(sanitized)) add('bug_fix')
+  if (/(修复|报错|失败|异常|回归|bug|error|fix|fail|failed|failure|exception|crash|broken|regression|重试|retry)/i.test(sanitized)) add('bug_fix')
   if (hasPerformanceIntent(text, sanitized)) add('performance_diagnosis')
   if (hasReviewIntent(sanitized)) add('review_audit')
-  if (/(重构|迁移|拆分|整理|refactor|migrate|migration|cleanup|split)/i.test(sanitized)) add('refactor')
+  if (/(重构|迁移|拆分|整理|改|修改|调整|删|删除|refactor|migrate|migration|cleanup|split)/i.test(sanitized)) add('refactor')
   if (/(新增|支持|实现功能|feature|add\s+support|implement)/i.test(sanitized)) add('new_feature')
   if (/(设计|架构|方案|选型|architecture|architect|design|strategy)/i.test(sanitized)) add('architecture_design')
   if (/(验证|跑测试|确认是否完成|verify|verification|test this|run tests)/i.test(sanitized)) add('verification')

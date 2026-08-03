@@ -10,7 +10,8 @@ import { createPermissionOverlay } from '../permissions.js'
 import type { EvidenceTrackerPublic } from '../evidence.js'
 import { ArtifactStore } from '../../artifact/store.js'
 import { _setSandboxBackendForTest, _resetSandboxBackendCache } from '../../tools/sandbox-profile.js'
-import { isWriteGranted, _resetGrantsForTest } from '../../tools/path-grants.js'
+import { isWriteGranted, _resetGrantsForTest, loadPersistedGrants, revokeGrant } from '../../tools/path-grants.js'
+import { rivetHome } from '../../config/paths.js'
 
 /** Sandbox-safe temp directory — macOS sandbox blocks os.tmpdir() /var/folders/...
  *  Must be absolute so resolve(cwd, target) in path validation works correctly. */
@@ -1438,6 +1439,68 @@ describe('executeToolUse', () => {
     } finally {
       _resetGrantsForTest()
       rmSync(external, { recursive: true, force: true })
+    }
+  })
+
+  it('approval with remember=true persists the grant per-workspace; without remember it stays session-only', async () => {
+    _resetGrantsForTest()
+    const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))
+    const external = mkdtempSync(join(testTmp(), 'rivet-ext-'))
+    const external2 = mkdtempSync(join(testTmp(), 'rivet-ext2-'))
+    try {
+      // ── remember=true：授权经 resolved.remember 落盘，模拟新会话重载后仍在 ──
+      const target = join(external, 'out.txt')
+      let approved = 0
+      const deps = makeDeps({
+        cwd: workspace,
+        config: {
+          ...makeDeps().config,
+          approvalMode: 'manual',
+          permissions: { allow: [] },
+          toolRegistry: {
+            execute: async () => ({ content: 'wrote', isError: false }),
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => true,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+      const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approved++; return { approved: true, remember: true } } }
+      const result = await executeToolUse(
+        { id: 'tu-rem', name: 'write_file', input: { file_path: target, content: 'x' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approved, 1, 'out-of-workspace write must prompt')
+      assert.equal((result.toolResult as any).is_error, false)
+
+      // 模拟新会话：清内存后从 per-workspace store 回灌——remembered grant 必须复活
+      _resetGrantsForTest()
+      loadPersistedGrants(workspace)
+      assert.equal(isWriteGranted(target), true, 'remembered grant must hydrate from the per-workspace store')
+
+      // ── remember 缺省：仅本会话生效，重载后消失（用独立目录，避免与上一步的
+      //    持久化授权同根——那会让磁盘上的 external 授权误覆盖本断言）──
+      _resetGrantsForTest()
+      const target2 = join(external2, 'out2.txt')
+      const callbacks2 = { ...noopCallbacks, onApprovalRequired: async () => { approved++; return { approved: true } } }
+      await executeToolUse(
+        { id: 'tu-norem', name: 'write_file', input: { file_path: target2, content: 'x' } },
+        deps, callbacks2 as any, 1, false,
+      )
+      assert.equal(isWriteGranted(target2), true, 'session grant active in-process')
+      _resetGrantsForTest()
+      loadPersistedGrants(workspace)
+      assert.equal(isWriteGranted(target2), false, 'un-remembered grant must not hydrate from disk')
+      assert.equal(isWriteGranted(target), true, 'remembered grant still hydrates alongside')
+    } finally {
+      _resetGrantsForTest()
+      // 清掉 store 文件里的授权条目，并彻底删除文件本身——避免测试残留真实
+      // ~/.rivet 下的 grants 文件（既有测试已累积 600+ 个此类残骸，不再添新）。
+      revokeGrant(external, { cwd: workspace })
+      revokeGrant(external2, { cwd: workspace })
+      const slug = resolvePath(workspace).replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
+      rmSync(join(rivetHome(), `path-grants-${slug}.json`), { force: true })
+      for (const d of [workspace, external, external2]) rmSync(d, { recursive: true, force: true })
     }
   })
 

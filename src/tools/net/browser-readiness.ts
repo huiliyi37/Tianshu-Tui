@@ -10,7 +10,7 @@
  * 并指向一键命令 `rivet browser install`，避免多处文案漂移。
  */
 import { existsSync } from 'node:fs'
-import { loadPlaywrightCore, PLAYWRIGHT_MANUAL_INSTALL_HINT } from './playwright-driver.js'
+import { loadPlaywrightCore, PLAYWRIGHT_MANUAL_INSTALL_HINT, PLAYWRIGHT_CORE_INSTALL_HINT } from './playwright-driver.js'
 
 export type BrowserReadyState =
   | 'ready' // chromium 可执行文件就位
@@ -75,11 +75,10 @@ export async function probeChromium(): Promise<ChromiumProbe> {
 export function formatBrowserMissingBanner(probe: ChromiumProbe): string {
   if (probe.installed) return ''
   if (probe.state === 'module-missing') {
-    // 依赖残缺不是装浏览器能解决的，单独指路。
+    // 依赖残缺不是装浏览器能解决的，单独指路——覆盖 CLI 全局安装 / 仓库开发 / 桌面端。
     return [
       '⚠ 浏览器自动化不可用：playwright-core 模块缺失（不是浏览器没下载）。',
-      '  仓库内开发：npm i playwright-core',
-      '  打包/桌面端：检查 dist/node_modules/playwright-core 是否完整',
+      PLAYWRIGHT_CORE_INSTALL_HINT,
       probe.reason ? `  （原始错误：${probe.reason}）` : '',
     ].filter(Boolean).join('\n')
   }

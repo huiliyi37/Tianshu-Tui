@@ -59,7 +59,7 @@ describe('runHandsSession', () => {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       runAgent: async (prompt, _callbacks, workerCwd) => {
         assert.equal(order.workerCwd, workerCwd)
-        assert.ok(prompt.includes(`CWD: ${workerCwd}`), prompt)
+        assert.ok(prompt.includes(`CWD：${workerCwd}`), prompt)
         // Simulate worker writing a file in the worktree it was asked to use
         assert.notEqual(workerCwd, baseDir)
         mkdirSync(join(workerCwd, 'src'), { recursive: true })

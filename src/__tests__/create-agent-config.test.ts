@@ -32,6 +32,7 @@ const testConfig = {
     verificationSnapshot: 'auto',
     songlineEnabled: true,
     securityGuidance: true,
+    scoutEvidenceFirewall: false,
     desktopTools: false,
     hearthObserveEnabled: false,
     crossSessionEnabled: true,

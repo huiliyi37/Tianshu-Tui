@@ -38,6 +38,15 @@ export async function withBrowser(fn) {
   })
   try {
     return await fn(browser)
+  } catch (err) {
+    // fn may have opened pages before throwing — close them explicitly so a
+    // stuck page can't wedge browser.close() (which also closes pages but has
+    // no per-page error containment).
+    try {
+      const pages = await browser.pages()
+      await Promise.all(pages.map(p => p.close().catch(() => {})))
+    } catch { /* browser may be mid-teardown */ }
+    throw err
   } finally {
     await browser.close()
   }

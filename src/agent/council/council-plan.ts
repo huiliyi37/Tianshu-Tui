@@ -210,13 +210,13 @@ export function aggregateCouncil(
           addConflict({ description: `Risk vs alternative on ${risk.itemId}`, left: risk.claim, right: rival.alt.proposal })
         }
       }
-      decisions.push({ id, source: c.authority, kind: 'risk', title: `Risk: ${risk.claim.slice(0, 80)}`, rationale: risk.mitigation, verdict: 'accepted', ...(conflictWith ? { conflictWith } : {}) })
+      decisions.push({ id, source: c.authority, kind: 'risk', title: `Risk: ${(risk.claim ?? '').slice(0, 80)}`, rationale: risk.mitigation, verdict: 'accepted', ...(conflictWith ? { conflictWith } : {}) })
     })
 
     // ── challenges ── 主控待裁的开放问题；blocking 级同时登记为否决冲突，
     // 走既有 open→resolved/persisted 状态机（r2 concede/revise 可化解）。
     c.challenges.forEach((ch, n) => {
-      decisions.push({ id: `${c.authority}:challenge:${n}`, source: c.authority, kind: 'challenge', title: `Challenge: ${ch.text.slice(0, 80)}`, rationale: ch.text, verdict: 'deferred' })
+      decisions.push({ id: `${c.authority}:challenge:${n}`, source: c.authority, kind: 'challenge', title: `Challenge: ${(ch.text ?? '').slice(0, 80)}`, rationale: ch.text, verdict: 'deferred' })
       if (ch.severity === 'blocking') {
         conflicts.push({
           description: `Blocking challenge from ${c.authority}`,
@@ -232,7 +232,7 @@ export function aggregateCouncil(
 
     // ── alternatives ── recommend → accepted，否则 rejected（必须带理由）。
     c.alternatives.forEach((alt, n) => {
-      decisions.push({ id: `${c.authority}:alternative:${n}`, source: c.authority, kind: 'alternative', title: alt.proposal.slice(0, 80), rationale: alt.rationale, verdict: alt.recommend ? 'accepted' : 'rejected' })
+      decisions.push({ id: `${c.authority}:alternative:${n}`, source: c.authority, kind: 'alternative', title: (alt.proposal ?? '').slice(0, 80), rationale: alt.rationale, verdict: alt.recommend ? 'accepted' : 'rejected' })
     })
   }
 

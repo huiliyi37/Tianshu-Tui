@@ -95,6 +95,7 @@ import { extractAtToken, getCompletions, applyCompletion } from '../file-complet
 import stringWidth from 'string-width'
 import { resolve } from 'node:path'
 import { existsSync, copyFileSync, statSync } from 'node:fs'
+import { isPathUnder } from '../../tools/path-grants.js'
 import { parseMentions } from '../mention-parser.js'
 import { parseMissionDraft, shouldPreviewContract, formatContractPreview, type MissionDraft } from '../mission-draft.js'
 import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../width.js'
@@ -595,6 +596,12 @@ export class TuiApp {
   /** 可脚本化 statusline 文本（ui.statusLine.command stdout 首行），渲染在输入框上方。 */
   private statusLineText: string | null = null
   /**
+   * 会话工作区根目录（agent.cwd）。审批时据此判定「工作区外路径」以决定是否
+   * 显示「批准并记住此目录」选项；未注入（测试/无头环境）时不显示该选项。
+   * /cd 切目录后经 setCwd() 刷新——顶框 cwd 显示与审批判定都跟新值一致。
+   */
+  private sessionCwd?: string
+  /**
    * Run 世代计数 —— 唯一权威的「当前 run」标识。
    * 每次 abort 自增；被中断的旧 run 的迟到回调（经 bridge 包裹时捕获的旧 gen）
    * 与当前 gen 不符即被丢弃，杜绝旧 run 的 onAbort/onTextDelta 污染新 run 状态。
@@ -662,6 +669,8 @@ export class TuiApp {
     contextWindow?: number
     /** git 分支名 */
     gitBranch?: string
+    /** 会话工作区根目录（agent.cwd）。用于审批时判定工作区外路径。 */
+    cwd?: string
     perfMonitor?: TuiPerfMonitor
     onPerfSummary?: (summary: TuiPerfSummary) => void
   }) {
@@ -671,6 +680,7 @@ export class TuiApp {
     this.rows = options.rows
     this.metricsGlanceController.contextWindow = options.contextWindow
     this.metricsGlanceController.gitBranch = options.gitBranch
+    this.sessionCwd = options.cwd
     this.perfMonitor = options.perfMonitor
     this.onPerfSummary = options.onPerfSummary
 
@@ -801,6 +811,24 @@ export class TuiApp {
       // Other overlays active → don't paste into main input
       if (this.overlay.isActive()) return
 
+      // 右键粘贴/终端菜单粘贴走 bracketed paste 文本通道，不触发 ctrl_v 按键，
+      // 因此不会调 handleCtrlV → readImageFromClipboard。若剪贴板当前是图片，
+      // 粘贴进来的文本是图片字节的乱码——在文本处理前先尝试读剪贴板图片，
+      // 命中则附图并吞掉这段 paste，避免乱码文本污染输入框。
+      // （与 Ctrl+V 互斥：右键粘贴产生 paste 事件，Ctrl+V 产生 ctrl_v 按键，不会同时触发）
+      if (this.inputLine.images.length < MAX_IMAGES) {
+        try {
+          const imgResult = await readImageFromClipboard()
+          if (imgResult) {
+            this.inputLine.addImage(imgResult.dataUrl)
+            this.writeBatcher.schedule()
+            return // 吞掉 paste——不插入乱码文本
+          }
+        } catch {
+          // 剪贴板读图失败（无图/不支持）→ 落入正常文本粘贴
+        }
+      }
+
       const trimmed = text.trim()
       // 粘贴内容看起来像图片路径 → 尝试加载为附件；失败则回退为普通文本。
       if (trimmed && looksLikeImagePath(trimmed) && !trimmed.includes('\n')) {
@@ -838,22 +866,27 @@ export class TuiApp {
           // 继续走下方全局 ctrl_c（abort / exit）
         } else {
           const ctrl = this.approvalIntentController
-          // 选项数与 formatApprovalPrompt 的渲染口径一致：已给过解释就没有「解释风险」行。
-          const optionCount = (ctrl.riskExplanation || ctrl.riskExplainPending) ? 3 : 4
+          // 选项数与 formatApprovalPrompt 的渲染口径一致：已给过解释就没有「解释风险」行；
+          // 工作区外路径审批多一个「批准并记住此目录」。
+          const hasRisk = !!(ctrl.riskExplanation || ctrl.riskExplainPending)
+          const optionCount = (hasRisk ? 3 : 4) + (ctrl.showRememberOption ? 1 : 0)
           if (key.name === 'up' || key.name === 'down') {
             const delta = key.name === 'up' ? -1 : 1
             ctrl.approvalOptionIndex = (ctrl.approvalOptionIndex + delta + optionCount) % optionCount
             this.renderLive()
           } else if (key.name === 'return') {
-            // Enter 按光标行分发；y/n/e/^E 直达键与光标确认等价。
+            // Enter 按光标行分发；y/n/e/r/^E 直达键与光标确认等价。
             if (ctrl.approvalOptionIndex === 0) this.resolveApproval({ approved: true })
             else if (ctrl.approvalOptionIndex === 1) this.resolveApproval(false)
             else if (ctrl.approvalOptionIndex === 2) this.enterApprovalEditMode()
+            else if (ctrl.showRememberOption && ctrl.approvalOptionIndex === 3) this.resolveApproval({ approved: true, remember: true })
+            else if (ctrl.showRememberOption && ctrl.approvalOptionIndex === 4) this.requestRiskExplanation()
             else this.requestRiskExplanation()
           } else if (c === 'y') this.resolveApproval({ approved: true })
           else if (key.name === 'escape' || c === 'n') this.resolveApproval(false)
           else if (key.name === 'ctrl_e') this.requestRiskExplanation()
           else if (c === 'e') this.enterApprovalEditMode()
+          else if (c === 'r' && ctrl.showRememberOption) this.resolveApproval({ approved: true, remember: true })
           // 其余按键在审批态一律吞掉，不污染输入框。
           return
         }
@@ -1452,6 +1485,20 @@ export class TuiApp {
     this.supportsVision = supportsVision
     this.visionBridgeEnabled = bridgeEnabled
     this.visionBridgeSource = bridgeSource
+  }
+
+  /**
+   * /cd 切目录后刷新会话 cwd——顶框 cwd 显示与审批路径判定都跟新值一致。
+   * 调用方（slash-commands 的 onCwdSwitch 包装）负责先用新 cwd 重读 git 分支，
+   * 再调 setGitBranch()。
+   */
+  setCwd(cwd: string): void {
+    this.sessionCwd = cwd
+  }
+
+  /** 更新顶框显示的 git 分支（/cd 到不同仓库后重读）。undefined = 非 git 目录。 */
+  setGitBranch(branch?: string): void {
+    this.metricsGlanceController.gitBranch = branch
   }
 
   /** 构建命令名谓词，供 resolveAppPromptInput 区分路径与命令。
@@ -4993,6 +5040,7 @@ export class TuiApp {
           risk: this.approvalIntentController.riskExplanation,
           riskPending: this.approvalIntentController.riskExplainPending,
           riskError: this.approvalIntentController.riskExplainError,
+          rememberOption: this.approvalIntentController.showRememberOption,
         }, this.theme)
         lines.push({ text: '' })
         for (const promptLine of promptLines) {
@@ -5088,6 +5136,7 @@ export class TuiApp {
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
+        cwd: this.sessionCwd,
         // worker 视图徽章：提示当前输入路由目标（◐ = 在跑，✓/✗ = 已终态）
         workerBadge: this.viewingWorkerId
           ? `→ ${shortOrderLabel(this.viewingWorkerId)}`
@@ -5417,7 +5466,26 @@ export class TuiApp {
     this.state.thinkStartMs = 0
   }
 
-  /** 审批处理器 — 交互式 y/n/e */
+  /**
+   * 审批的工具调用是否涉及工作区外路径（决定是否显示「批准并记住此目录」）。
+   * 与 tool-pipeline 的 outOfWorkspaceFilePaths 消费 remember 的工具集严格对齐：
+   * 只有这四个文件工具的批准会经 `resolved.remember` 持久化目录授权；其他工具
+   * （如 request_path_access，其 remember 是模型侧参数）显示了记住选项也不会
+   * 生效，宁可不显示也不给用户一个勾了没用的按钮。
+   */
+  private approvalTargetsOutOfWorkspace(cwd: string, toolName: string, input: Record<string, unknown>): boolean {
+    if (toolName !== 'read_file' && toolName !== 'write_file' && toolName !== 'edit_file' && toolName !== 'hash_edit') {
+      return false
+    }
+    const candidates: string[] = []
+    if (typeof input.file_path === 'string') candidates.push(input.file_path)
+    if (Array.isArray(input.file_paths)) {
+      for (const p of input.file_paths) if (typeof p === 'string') candidates.push(p)
+    }
+    return candidates.some(c => !isPathUnder(cwd, resolve(cwd, c)))
+  }
+
+  /** 审批处理器 — 交互式 y/n/e/r */
   private handleApprovalRequired(id: string, name: string, input: Record<string, unknown>): Promise<ApprovalResult | boolean> {
     // 权限 diff 预览：write/edit 审批前渲染变更块
     const diffPreview = formatPermissionDiff({ toolName: name, input, theme: this.theme })
@@ -5433,6 +5501,8 @@ export class TuiApp {
       this.approvalIntentController.approvalPending = { id, name, input, resolve, startMs: Date.now() }
       // 上一条待批项的风险结论绝不能留给下一条——那是最危险的一类误导。
       this.approvalIntentController.resetRiskExplanation()
+      this.approvalIntentController.showRememberOption =
+        this.sessionCwd !== undefined && this.approvalTargetsOutOfWorkspace(this.sessionCwd, name, input)
       this.input.setMode('approval')
       this.setPhase('waiting')
       this.renderLive()
@@ -5512,9 +5582,10 @@ export class TuiApp {
 
     ctrl.riskExplainPending = true
     ctrl.riskExplainError = ''
-    // 选项随即收缩为 3 行（「解释风险」行消失）——光标若正停在该行（index 3），
-    // 不收敛就越界：光标行整体消失、Enter 成死键、↓/↑ 还会跳过「批准」。
-    ctrl.approvalOptionIndex = Math.min(ctrl.approvalOptionIndex, 2)
+    // 选项随即收缩一行（「解释风险」行消失）——光标若正停在该行，不收敛就越界：
+    // 光标行整体消失、Enter 成死键、↓/↑ 还会跳过「批准」。记住选项（若显示）保留，
+    // 其上界随之从 2（无记住）变为 3（有记住）。
+    ctrl.approvalOptionIndex = Math.min(ctrl.approvalOptionIndex, ctrl.showRememberOption ? 3 : 2)
     this.renderLive()
 
     const requestedFor = pending.id

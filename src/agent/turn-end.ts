@@ -8,6 +8,7 @@ import { detectMirror } from './behavior-mirror.js'
 import { inferTaskType } from '../model/task-inferrer.js'
 import { recommendModelForTask } from '../model/capability.js'
 import { extractDecisions } from './decision-anchor.js'
+import { resolveDecisionsArm } from './decisions-experiment.js'
 import { getTodos } from '../tools/todo.js'
 
 export interface TurnEndDeps {
@@ -82,7 +83,13 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
     if (!decisions.includes(d)) decisions.push(d)
  }
   if (decisions.length > 3) decisions = decisions.slice(-3)
-  config.promptEngine.setDecisions(decisions)
+  // Holdout experiment (decisions-experiment.ts): `off` and `holdout` sessions carry
+  // no decisions into the prompt. The split lives here rather than in the renderer
+  // because the arm is session-scoped and the renderer never sees a sessionId.
+  // Extraction still runs — the arm must change what the model sees, nothing else,
+  // or the two groups would differ in more than the one variable under test.
+  const decisionsArm = resolveDecisionsArm(config.sessionId)
+  config.promptEngine.setDecisions(decisionsArm === 'treatment' ? decisions : [])
 
   // Track 3 门禁合一：v2（GREEN/YELLOW/RED，归因感知）注入时为权威；
   // 评估失败时回退 undefined（v1 语义由 evidenceSummary 消费方自行推导）。

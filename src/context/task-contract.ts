@@ -23,6 +23,11 @@ export interface TaskContract {
   /** 重构行为等价契约：改动前存在、改动后必须仍存在的功能锚点（路由/导航项/
    *  导出符号等 grep 可验证的文本断言）。deliver 前逐项核验，未覆盖项留痕报告。 */
   regressionInventory?: string[]
+  /** 计划约束（L2 计划级广播）：计划文档「反目标」「待验证假设」章节经
+   *  extractPlanConstraints + renderPlanConstraints 渲染后的条目，setActivePlan
+   *  批准计划时灌入，派发时兜底注入 worker 工单。与 constraints（用户散文按分句
+   *  抽取）来源不同；best-effort，无相关章节时保持 undefined（不写空数组）。 */
+  planConstraints?: string[]
 }
 
 const FILE_PATTERN = /(?:^|\s)((?:src|lib|test|tests|pkg|cmd|internal|docs|scripts)\/[\w./-]+\.\w+)/g

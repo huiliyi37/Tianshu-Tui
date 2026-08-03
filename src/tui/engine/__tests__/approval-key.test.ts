@@ -15,13 +15,14 @@ import type { ReadStream, WriteStream } from 'node:tty'
 import { TuiApp } from '../app.js'
 import { MockOut, MockIn } from './_harness.js'
 
-function makeApp() {
+function makeApp(cwd?: string) {
   const out = new MockOut()
   const stdin = new MockIn()
   const app = new TuiApp({
     stdout: out as unknown as WriteStream,
     stdin: stdin as unknown as ReadStream,
     cols: 80, rows: 24, modelName: 'test',
+    cwd,
   })
   return { app, out, stdin }
 }
@@ -128,4 +129,75 @@ test('审批模式请求风险解释后光标收敛——不越界成死键', as
   }).approvalIntentController
   assert.equal(ctrl.riskExplainPending, true, '解释请求应在途')
   assert.ok(ctrl.approvalOptionIndex <= 2, `光标越界：index=${ctrl.approvalOptionIndex}（3 行选项应为 0-2）`)
+})
+
+// ── 「批准并记住此目录」选项（工作区外路径审批） ─────────────────────────
+
+test('工作区外 write_file 审批：显示记住选项，r 键直达批准并记住', async () => {
+  const { app, stdin } = makeApp('/workspace')
+  let resolved: unknown = Symbol('unset')
+  void app.callbacks.onApprovalRequired!('1', 'write_file', { file_path: '/tmp/out.txt' }).then(r => { resolved = r })
+  const ctrl = (app as unknown as { approvalIntentController: { showRememberOption: boolean } }).approvalIntentController
+  await tick()
+  assert.equal(ctrl.showRememberOption, true, '工作区外路径审批必须显示记住选项')
+  stdin.dataHandler!('r')
+  await tick()
+  assert.deepEqual(resolved, { approved: true, remember: true }, 'r 键 = 批准并记住')
+})
+
+test('工作区内 write_file 审批：不显示记住选项，r 键被吞', async () => {
+  const { app, stdin } = makeApp('/workspace')
+  let resolved: unknown = Symbol('unset')
+  void app.callbacks.onApprovalRequired!('1', 'write_file', { file_path: '/workspace/src/a.ts' }).then(r => { resolved = r })
+  const ctrl = (app as unknown as { approvalIntentController: { showRememberOption: boolean } }).approvalIntentController
+  await tick()
+  assert.equal(ctrl.showRememberOption, false, '工作区内审批无记住选项')
+  stdin.dataHandler!('r')
+  await tick()
+  assert.ok(typeof resolved === 'symbol', '无记住选项时 r 键应被吞（不 resolve）')
+})
+
+test('记住选项下 ↑ 从「批准」环绕到末行「解释风险」（5 项选项表）', async () => {
+  const { app, stdin } = makeApp('/workspace')
+  let resolved: unknown = Symbol('unset')
+  void app.callbacks.onApprovalRequired!('1', 'write_file', { file_path: '/tmp/out.txt' }).then(r => { resolved = r })
+  const ctrl = (app as unknown as { approvalIntentController: { approvalOptionIndex: number } }).approvalIntentController
+  await tick()
+  stdin.dataHandler!('\x1B[A') // ↑ 环绕 → index 4（记住场景：批准/拒绝/编辑/记住/解释风险）
+  await tick()
+  assert.equal(ctrl.approvalOptionIndex, 4, '5 项选项表末行是解释风险')
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.ok(typeof resolved === 'symbol', '解释风险只拉取解释，不 resolve 审批')
+})
+
+test('记住选项下 ↓↓ 光标到「批准并记住」行，Enter 批准并记住', async () => {
+  const { app, stdin } = makeApp('/workspace')
+  let resolved: unknown = Symbol('unset')
+  void app.callbacks.onApprovalRequired!('1', 'write_file', { file_path: '/tmp/out.txt' }).then(r => { resolved = r })
+  const ctrl = (app as unknown as { approvalIntentController: { approvalOptionIndex: number } }).approvalIntentController
+  await tick()
+  stdin.dataHandler!('\x1B[B') // ↓ → 拒绝
+  stdin.dataHandler!('\x1B[B') // ↓ → 编辑
+  stdin.dataHandler!('\x1B[B') // ↓ → 批准并记住
+  await tick()
+  assert.equal(ctrl.approvalOptionIndex, 3)
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.deepEqual(resolved, { approved: true, remember: true }, 'index 3 Enter = 批准并记住')
+})
+
+test('记住选项下请求风险解释后光标收敛不越界（5 项 → 4 项）', async () => {
+  const { app, stdin } = makeApp('/workspace')
+  app.setRiskExplainer(() => new Promise(() => {}))
+  void app.callbacks.onApprovalRequired!('1', 'write_file', { file_path: '/tmp/out.txt' })
+  stdin.dataHandler!('\x1B[A') // ↑ 环绕 → index 4（解释风险）
+  stdin.dataHandler!('\r')       // 请求解释 → 选项 5 → 4
+  await tick()
+  const ctrl = (app as unknown as {
+    approvalIntentController: { approvalOptionIndex: number; riskExplainPending: boolean; showRememberOption: boolean }
+  }).approvalIntentController
+  assert.equal(ctrl.riskExplainPending, true)
+  assert.equal(ctrl.showRememberOption, true, '记住选项保留')
+  assert.ok(ctrl.approvalOptionIndex <= 3, `光标越界：index=${ctrl.approvalOptionIndex}（4 行选项应为 0-3）`)
 })

@@ -60,6 +60,52 @@ describe('DELEGATE_BATCH_TOOL', () => {
     assert.equal(calls[0]?.requests[0]?.reviewDepth, 2)
   })
 
+  it('终态事件透传派发侧身份（authority/profile）——完成后面板星域不断流', async () => {
+    const terminalEvents: Array<{ status?: string; authority?: string; profile?: string }> = []
+    const coordinator: DelegateBatchCoordinator = {
+      delegateBatch: async (requests, _policy, _signal, _onProgress, onWorkerSettled) => {
+        const run: CoordinatorRun = {
+          status: 'completed',
+          results: requests.map((r, i) => ({
+            workOrderId: `batch:${i}`,
+            status: 'passed' as const,
+            summary: 'Worker completed.',
+            findings: [],
+            artifacts: [],
+            changedFiles: [],
+            risks: [],
+            nextActions: [],
+            evidenceStatus: 'verified' as const,
+            // coordinator 盖章的派发侧身份（workerResultSchema.profile/authority）
+            profile: r.profile,
+            authority: r.authority,
+          })),
+          packet: '<worker_results>packet</worker_results>',
+        }
+        for (const r of run.results) onWorkerSettled?.(r)
+        return run
+      },
+    }
+    const tool = createDelegateBatchTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_terminal',
+      cwd: '/repo',
+      sessionTurnCount: 5,
+      input: {
+        tasks: [{ objective: 'Verify the seam.', kind: 'verify', profile: 'verifier', authority: 'yaoguang' }],
+      },
+      onWorkerActivity: (ev: any) => { if (ev.status && ev.status !== 'running') terminalEvents.push(ev) },
+    } as any)
+
+    assert.equal(result.isError, false)
+    // dual-emission contract：settle 即发 + 批末兜底重放（fleet 层去重），条数 ≥1；
+    // 这里钉的是身份透传——每条终态都必须带派发侧 authority/profile。
+    assert.ok(terminalEvents.length >= 1, '必须发出终态事件')
+    assert.ok(terminalEvents.every(e => e.authority === 'yaoguang'), '终态事件必须透传 authority')
+    assert.ok(terminalEvents.every(e => e.profile === 'verifier'), '终态事件必须透传 profile')
+  })
+
   it('exposes dependsOn in the task schema', () => {
     const tool = createDelegateBatchTool({ delegateBatch: async () => makeRun() })
     const schema = tool.definition.input_schema as any

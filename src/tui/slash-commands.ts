@@ -70,6 +70,7 @@ import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
 import { getMirrorConfig, setMirrorConfig, setCheckpointConfig, setApprovalMode as persistApprovalDefault } from '../config/manager.js'
+import { grantPath, listPersistedGrants } from '../tools/path-grants.js'
 import { SettingsFlow } from './settings-flow.js'
 import { loadSettingsDraft, loadSettingsEnv, saveSettings } from './settings-persist.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
@@ -90,6 +91,7 @@ const HELP_TEXT = `Available commands:
 /domain [list|<name>|auto|off] — Show or switch star domain personality
 /verbose — Toggle verbose tool output
 /permission [manual|auto|yolo|allow|deny|bash|remove|reset|test] — 权限模式：统一入口（Manual/Auto/YOLO 三档）
+/grant [path] [read|write] — 授权并记住工作区外目录（无参列出本工作区已记住的授权）
 /theme [cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
 /vim — Toggle vim keybindings
 /effort [off|low|medium|high|max] — Set reasoning effort
@@ -852,17 +854,17 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
       if (submitToAgent) {
-        // 协议内嵌注入（不依赖 skill 注册）：命令自包含，新会话/旧产物都可用。
-        // 来自社区 PR #17（KinoGao），原文落地。
-        submitToAgent(`进入星流（Starflow）模式。按以下五阶段协议执行任务：${task}
+        // 代码级星流：阶段流转由 starflow 工具的状态机硬门禁兜底（council→team→galaxy），
+        // 不再内嵌五阶段协议长 prompt——模型只负责需求澄清与交付叙述。
+        submitToAgent(`进入星流（Starflow）模式。任务：${task}
 
-【星流（Starflow）五阶段协议】
-阶段 0 需求澄清+环境基线：至多一轮把大白话转成目标/非目标/验收标准（模板"当我【动作】，【系统】会【可观察结果】"）；探测项目是否存在/有无 typecheck/git；空项目先脚手架子流程（git init/package.json/tsconfig/测试框架/typecheck），脚手架写操作过安全闸门（创建文件/装依赖前确认）。
-阶段 1 council 评审：council_convene({ objective, draftItems, rounds })，draftItems 从阶段 0 产出映射（id/title/detail/files）；高风险 rounds:2 低风险 rounds:1。守卫：返回 isError 或含"已禁用（COUNCIL=0）""未派发任何席位"→ 视为评审未执行，禁止前进；驳回/blocking 冲突需修订复议。通过后二选一：autoExecute:true 或取编译后 UnifiedPlan 的 planJson 传 team_orchestrate；禁止把审计 Markdown 当 planMarkdown。
-阶段 2 team 波次：team_orchestrate({ objective, planJson })；分片文件不重叠、dependsOn 排序、wave-gate 每波验证；波次失败回阶段 1 复议。
-阶段 3 galaxy 攻坚：先 galaxy({ confirm: false }) 展示维度方案（拆哪些维度/星域/worker）→ 用户确认 → galaxy({ confirm: true }) 执行；可写维度文件不重叠；多星域仅只读视角。
-阶段 4 交付门禁（按任务分级）：小工具/一次性脚本=最小可运行+运行演示通过+三项报告；工业级=typecheck exit 0 / 消费方核对 / 语义回归 / RED-GREEN 有据 / 三项报告。未运行=说"未验证"。
-全程：每阶段开始/结束用大白话同步"完成了什么/接下来什么"；任何机制回退（council 复议/team 重派/galaxy 维度失败）附带人话版错误解释。`)
+先用大白话与我确认需求（目标/非目标/验收标准，至多一轮；任务已清楚就直接进入下一步）。需求不清时先对话澄清，不要急着调工具。
+需求清楚后调用 starflow 工具执行，阶段流转与门禁由工具状态机强制执行（council 评审 → team 波次 → galaxy 攻坚），不要手工模拟这些阶段：
+- 先 starflow({ objective, draftItems, rounds, confirm: false }) 展示执行方案；我确认后再调 confirm: true 点火。
+- draftItems 从澄清产出映射（id/title/detail/files），供 council 评审与 galaxy 维度派生；高风险任务 rounds: 2。
+- 返回 blocked 时按报告里的人话解释与下一步建议处理（修订草稿重跑 / resume: true 续跑），不要绕过门禁。
+- 工具全过后会输出交付检查清单——逐项自查后调用 deliver_task 完成交付门禁；未运行的验证就说"未验证"。
+全程用大白话同步"完成了什么/接下来什么"。`)
         return true
       }
       return false
@@ -1841,6 +1843,43 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       }
 
       pushStatic(createLogEntry({ type: 'system', content: '未知子命令。用法: /permission [status|mode|allow|deny|bash|remove|reset|test]', isError: true }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/grant',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, agent, pushStatic, setIsStreaming } = ctx
+      const cwd = agent.cwd
+      const target = parts[1]
+
+      if (!target) {
+        // 无参 → 列出本工作区已记住的目录授权。只列 listPersistedGrants：
+        // 内存 store 还含依赖缓存/raw 输出目录等系统级会话授权，用户从未主动
+        // 授权过，混进列表只会让人误以为可以/需要撤销。
+        const persisted = listPersistedGrants(cwd)
+        const lines: string[] = ['本工作区已记住的目录授权', '══════════════════════']
+        if (persisted.length === 0) {
+          lines.push('（无。用 /grant <路径> [read|write] 授权并记住，或在工作区外路径审批时选「批准并记住此目录」。）')
+        } else {
+          for (const g of persisted) {
+            lines.push(`  ${g.mode === 'write' ? '✎' : '👁'} ${g.root}${g.mode === 'write' ? ' (读写)' : ' (只读)'}`)
+          }
+          lines.push('', '撤销：rivet config revoke-dir <路径>，或桌面端 设置 → 目录授权。')
+        }
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+        setIsStreaming(false)
+        return true
+      }
+
+      const mode = parts[2]?.toLowerCase() === 'write' ? 'write' : 'read'
+      grantPath(target, mode, { persist: true, cwd })
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `✓ 已授权并记住 ${mode === 'write' ? '读写' : '只读'}访问 "${target}"（本工作区，重启后仍生效）`,
+      }))
       setIsStreaming(false)
       return true
     },
@@ -3663,7 +3702,22 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       },
       openSessionPicker: () => { app.activateOverlay('chronicle') },
       openInitFlow: () => { app.openInitFlow(ctx.agent.cwd) },
-      onCwdSwitch: (target: string) => switchAgentCwd(ctx, target),
+      onCwdSwitch: async (target: string) => {
+        const res = await switchAgentCwd(ctx, target)
+        if (res.ok) {
+          // 刷新顶框 cwd + git 分支——新 cwd 可能是不同 git 仓库，必须重读分支
+          const newCwd = ctx.agent.cwd
+          app.setCwd(newCwd)
+          try {
+            const { spawnGitSync } = await import('../tools/spawn-git.js')
+            const r = spawnGitSync(['-c', 'core.quotePath=false', 'rev-parse', '--abbrev-ref', 'HEAD'], { cwd: newCwd, encoding: 'utf-8', timeout: 5000 })
+            app.setGitBranch(r.status === 0 ? r.stdout.trim() || undefined : undefined)
+          } catch {
+            app.setGitBranch(undefined)
+          }
+        }
+        return res
+      },
       allProviders,
       currentProvider: ctx.provider.name,
       currentSessionId: ctx.sessionId,

@@ -221,6 +221,8 @@ export interface FormatApprovalPromptInput {
   risk?: RiskExplanation | null
   riskPending?: boolean
   riskError?: string
+  /** 工作区外路径审批：选项表插入「批准并记住此目录」（记住 = 授权持久化到本工作区）。 */
+  rememberOption?: boolean
 }
 
 const RISK_LABEL: Record<RiskLevel, string> = { low: '低风险', medium: '中风险', high: '高风险' }
@@ -262,10 +264,11 @@ export function formatApprovalPrompt(input: FormatApprovalPromptInput, theme: Ri
   }
 
   // 光标选项列表。已经给过解释就不再出现「解释风险」行——重复入口只是噪音。
+  // 工作区外路径审批插入「批准并记住此目录」：记住把目录授权持久化到本工作区
+  // （restart 后不再询问同一目录），不勾则授权仅本会话有效。
   const options = ['批准 (Enter/y)', '拒绝 (Esc/n)', '编辑 JSON (e)']
-  if (!input.risk && !input.riskPending) {
-    options.push('解释风险 (^E)')
-  }
+  if (input.rememberOption) options.push('批准并记住此目录 (r)')
+  if (!input.risk && !input.riskPending) options.push('解释风险 (^E)')
   lines.push('')
   options.forEach((label, i) => {
     const cursor = i === input.selectedIndex

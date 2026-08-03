@@ -10,7 +10,7 @@ import type { ImportGraph } from './import-graph.js'
 import { mkdir, appendFile } from 'node:fs/promises'
 import { createCheckpoint, recordAgentTouchedFile, recordBashSideEffects, makeOwnershipGuard, type OwnershipGuard, type ClaimLookup } from './checkpoint.js'
 import { validatePath, validatePathSafe } from '../tools/path-validate.js'
-import { grantPath } from '../tools/path-grants.js'
+import { grantPath, isReadGranted } from '../tools/path-grants.js'
 import { dirname, join, resolve as resolvePath, isAbsolute } from 'node:path'
 import { getSessionDir } from './session-persist.js'
 import { classifyFailure, classifyToolFailure, classifyTestRun, isTransient, resolveErrorKind, type FailureClass } from './failure-classifier.js'
@@ -253,8 +253,11 @@ const FILE_TOOL_MODES: Record<string, 'read' | 'write'> = {
  * Resolve the absolute paths a file tool would touch that currently fall OUTSIDE
  * the workspace and are not yet covered by a grant. Empty when in-workspace or
  * already granted (validatePathSafe consults the grant store).
+ *
+ * Exported so the desktop sidecar can label an approval as a path grant without
+ * duplicating the path comparison — symlink/case handling lives in one place.
  */
-function outOfWorkspaceFilePaths(cwd: string, toolName: string, input: Record<string, unknown>): { mode: 'read' | 'write'; paths: string[] } | null {
+export function outOfWorkspaceFilePaths(cwd: string, toolName: string, input: Record<string, unknown>): { mode: 'read' | 'write'; paths: string[] } | null {
   const mode = FILE_TOOL_MODES[toolName]
   if (!mode) return null
   const candidates: string[] = []
@@ -1014,7 +1017,7 @@ export async function executeToolUse(
     const needsApproval = deps.config.toolRegistry.needsApproval(tu.name, params)
     const antibodies = deps.config.contextClaimStore?.listClaims({ kind: ['failure_pattern'], status: ['active', 'durable_candidate', 'durable'] }) ?? []
     const sensorium = deps.getSensorium?.() ?? null
-    const risk = assessToolRisk(tu.name, tu.input, deps.getDoomLoopLevel(), antibodies, sensorium ?? undefined)
+    const risk = assessToolRisk(tu.name, tu.input, deps.getDoomLoopLevel(), antibodies, sensorium ?? undefined, deps.config.toolRegistry?.get(tu.name)?.definition?.capability as import('../mcp/policy.js').McpCapability | undefined)
     latestRisk = risk
     const isHighRisk = risk.level === 'high'
     const approvalMode = deps.config.approvalMode ?? 'manual'
@@ -1100,10 +1103,10 @@ export async function executeToolUse(
     // granted. Instead of hard-blocking in execute(), route through the approval
     // flow — on approval we record a directory-subtree grant so the op proceeds.
     //
-    // NOT relaxed under dangerously-skip-permissions: widening the write
-    // boundary is the one decision YOLO does not get to make for the user
-    // (see requiresUnconditionalApproval). Unattended runs pre-authorize via
-    // permissions.additionalWriteDirs instead.
+    // request_path_access is relaxed under YOLO (B): the user already opted
+    // out of prompts. File-tool write paths under an existing read grant are
+    // auto-upgraded to write (C). The kernel sandbox still blocks writes to
+    // ungranted paths; unattended runs can pre-authorize via additionalWriteDirs.
     const pathGrantNeed = outOfWorkspaceFilePaths(deps.cwd, tu.name, tu.input)
 
     // Hard gate: arbitrary-JS / endpoint-takeover actions (computer_use
@@ -1111,8 +1114,11 @@ export async function executeToolUse(
     // allow rule, or sensorium confidence can waive them. The tool documents
     // this promise; this is where it is enforced.
     const unconditionalApproval = requiresUnconditionalApproval(tu.name, tu.input)
+    // YOLO mode: request_path_access no longer unconditional — the user already
+    // opted out of prompts; the kernel sandbox still protects write boundaries.
+    const yoloBypassesUnconditional = skipAllApproval && tu.name === 'request_path_access'
 
-    let shouldAsk = unconditionalApproval
+    let shouldAsk = (unconditionalApproval && !yoloBypassesUnconditional)
       ? true
       : skipAllApproval
         ? false
@@ -1131,6 +1137,20 @@ export async function executeToolUse(
                     : approvalMode === 'auto-safe'
                       ? isHighRisk
                       : false
+
+    // YOLO mode intelligent fallback: auto-grant write access for file-tool
+    // paths already covered by a read grant. This eliminates the validatePath →
+    // request_path_access → unconditional popup chain that makes "完全访问"
+    // (yolo + additionalReadDirs: ["/"]) meaningless for writes outside the
+    // workspace. The kernel sandbox still blocks writes to ungranted paths;
+    // unattended runs can pre-authorize via additionalWriteDirs.
+    if (skipAllApproval && pathGrantNeed) {
+      for (const p of pathGrantNeed.paths) {
+        if (pathGrantNeed.mode === 'write' && isReadGranted(p)) {
+          grantPath(dirname(p), 'write', { persist: true, cwd: deps.cwd })
+        }
+      }
+    }
 
     // Headless override — no human can answer an approval prompt here, so a
     // shouldAsk that reaches onApprovalRequired would hang (the callback returns
@@ -1209,9 +1229,15 @@ export async function executeToolUse(
       // Out-of-workspace file op approved: record a directory-subtree grant so
       // both gates (validatePathSafe + sandbox) accept it. Recompute from the
       // (possibly edited) final input so an edited path is granted, not the stale one.
+      // `remember` persists the grant to the per-workspace store so the same
+      // directory is not re-prompted in the next session; without it the grant
+      // stays in-process, which is what an unqualified "approve once" means.
       const approvedGrant = outOfWorkspaceFilePaths(deps.cwd, tu.name, tu.input)
       if (approvedGrant) {
-        for (const p of approvedGrant.paths) grantPath(dirname(p), approvedGrant.mode)
+        const persist = resolved.remember === true
+        for (const p of approvedGrant.paths) {
+          grantPath(dirname(p), approvedGrant.mode, { persist, cwd: deps.cwd })
+        }
       }
    }
 

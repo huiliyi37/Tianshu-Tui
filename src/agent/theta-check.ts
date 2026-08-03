@@ -24,6 +24,19 @@ function parseTypeScriptErrorFiles(output: string): string[] {
   return [...files]
 }
 
+/**
+ * Cap captured output at ~80KB while keeping it line-aligned: slicing mid-line
+ * leaves a partial `error TS` diagnostic that either fails the parse regex
+ * (missing a real error) or reads as a complete-but-truncated one.
+ * Exported for tests.
+ */
+export function trimCapturedOutput(s: string): string {
+  if (s.length <= 100_000) return s
+  const cut = s.length - 80_000
+  const nl = s.indexOf('\n', cut)
+  return nl >= 0 ? s.slice(nl + 1) : s.slice(cut)
+}
+
 // ── Cross-process result cache ─────────────────────────────────────
 // Multiple INDEPENDENT 天枢 TUI processes (and same-process workers) share
 // one repo and would otherwise each spawn a full `tsc --noEmit` (~6s).
@@ -246,12 +259,12 @@ function runThetaCheckInner(cwd: string, timeoutMs: number): Promise<ThetaCheckR
 
     child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString()
-      if (stdout.length > 100_000) stdout = stdout.slice(-80_000)
+      stdout = trimCapturedOutput(stdout)
     })
 
     child.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString()
-      if (stderr.length > 100_000) stderr = stderr.slice(-80_000)
+      stderr = trimCapturedOutput(stderr)
     })
 
     child.on('close', (code) => {
@@ -263,7 +276,10 @@ function runThetaCheckInner(cwd: string, timeoutMs: number): Promise<ThetaCheckR
       finish(parseTypeScriptErrorFiles(`${stdout}\n${stderr}`))
     })
 
-    child.on('error', () => {
+    child.on('error', (err) => {
+      // spawn failure (ENOENT, EACCES, etc.) — don't return a fake green
+      // result that gets cached and masks the real error for 15s.
+      timedOut = true
       finish([])
     })
   })

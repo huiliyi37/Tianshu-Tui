@@ -370,7 +370,7 @@ const LOG_PREVIEW_LINES = 80
 function applyFoldThenPartial(content: string, filePath: string, cap: ModelReadCap): string {
   const fold = foldCode(content, { filePath, maxLines: 200 })
   if (fold.wasFolded && fold.foldedLines < fold.originalLines * 0.7) {
-    return buildPartialView(fold.folded, filePath, cap.maxChars)
+    return buildPartialView(fold.folded, filePath, cap.maxChars, { lines: fold.originalLines, chars: content.length })
   }
   return buildPartialView(content, filePath, cap.maxChars)
 }

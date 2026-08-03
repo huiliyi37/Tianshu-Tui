@@ -227,11 +227,11 @@ export function resolveModelSpecWithReload(
 }
 
 /** Enumerate every selectable model across all configured providers. */
-export function listAllModels(ctx: ServeContext): { id: string; alias: string; provider: string; contextWindow?: number }[] {
-  const out: { id: string; alias: string; provider: string; contextWindow?: number }[] = []
+export function listAllModels(ctx: ServeContext): { id: string; alias: string; provider: string; contextWindow?: number; description?: string }[] {
+  const out: { id: string; alias: string; provider: string; contextWindow?: number; description?: string }[] = []
   for (const [provName, prov] of Object.entries(ctx.config.provider.providers)) {
     for (const m of prov.models) {
-      out.push({ id: m.id, alias: m.alias ?? m.id, provider: provName, contextWindow: m.contextWindow })
+      out.push({ id: m.id, alias: m.alias ?? m.id, provider: provName, contextWindow: m.contextWindow, description: m.description })
     }
   }
   return out
@@ -249,7 +249,7 @@ export function listAllModels(ctx: ServeContext): { id: string; alias: string; p
 export function listAllModelsWithReload(
   ctx: ServeContext,
   reload: () => ServeContext = resolveServeContext,
-): { id: string; alias: string; provider: string; contextWindow?: number }[] {
+): { id: string; alias: string; provider: string; contextWindow?: number; description?: string }[] {
   try {
     return listAllModels(reload())
   } catch {
@@ -358,12 +358,15 @@ export interface RunServeOptions {
 
 export interface RunningServer {
   port: number
-  close: () => void
+  close: (callback?: () => void) => void
   sessions: RuntimeSessionManager
   scheduler?: CronScheduler
   /** Shared runtime for the exit handler to access mcpManager. */
   shared: SharedRuntime
 }
+
+/** Default HTTP port for `rivet serve` (--port overrides). */
+const DEFAULT_PORT = 3100
 
 /**
  * Start the runtime API server. Returns the bound port, a close() that aborts
@@ -375,7 +378,7 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   if (!apiToken) {
     throw new Error('RIVET_SERVER_TOKEN is required for rivet serve')
   }
-  const port = opts.port ?? 3100
+  const port = opts.port ?? DEFAULT_PORT
   const ctx = opts.context ?? resolveServeContext()
   // Hot credential pickup: sessions created after a Settings edit must resolve
   // the CURRENT on-disk key, not the startup snapshot's. Only wired when the
@@ -434,10 +437,14 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
       const liveMcp = loadConfig().mcp
       const mgr = new McpManager(liveMcp)
       await mgr.initialize()
-      // Race heal: POST /mcp/servers while mgr was null already wrote disk —
-      // reconnect anything missing from the in-memory states.
-      const reconciled = await mgr.reconcileFromConfig(loadConfig().mcp)
+      // Assign mgr FIRST so POST /mcp/servers can route to connectAndDiscover
+      // immediately. Otherwise a POST between reconcile arg-eval and assignment
+      // sees mgr===null → persist-only → never auto-connects.
       sharedRuntime.mcpManager = mgr
+      // Reconcile: pick up any servers persisted while this IIFE was loading
+      // (POST before mgr was assigned). Since mgr is now live, future POSTs
+      // will call connectAndDiscover directly — no second reconcile needed.
+      const reconciled = await mgr.reconcileFromConfig(loadConfig().mcp)
       if (reconciled.length > 0) {
         sharedRuntime.sessions?.injectMcpTools(reconciled)
       } else if (mgr.getAllTools().length > 0) {
@@ -735,7 +742,7 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
     sessions,
     scheduler,
     shared: sharedRuntime,
-    close: () => {
+    close: (cb) => {
       // Legacy /prompt runs live on manager sessions too — abortAll covers both.
       sessions.abortAll()
       // Wave L: 与 TUI createShutdownHandler 对称——abort 中止 turn 后，对所有
@@ -758,7 +765,7 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
         sharedRuntime.domainStores.clear()
       }
       loopHealth.stop()
-      server.close()
+      server.close(cb)
     },
   }
 }
@@ -858,7 +865,16 @@ function writeExitBreadcrumb(reason: string, extra: Record<string, unknown> = {}
  */
 export async function serveCommand(args: string[]): Promise<void> {
   const portIdx = args.indexOf('--port')
-  const port = parseInt(portIdx >= 0 ? args[portIdx + 1]! : '3100', 10)
+  const rawPort = portIdx >= 0 ? args[portIdx + 1] : String(DEFAULT_PORT)
+  if (rawPort == null || rawPort === '') {
+    console.error('Missing value for --port (e.g. --port 3100)')
+    process.exit(1)
+  }
+  const port = parseInt(rawPort, 10)
+  if (isNaN(port) || port < 1 || port > 65535) {
+    console.error(`Invalid port: ${rawPort} (must be 1–65535)`)
+    process.exit(1)
+  }
 
   let server: RunningServer
   try {
@@ -869,8 +885,7 @@ export async function serveCommand(args: string[]): Promise<void> {
   }
 
   const shutdownServer = () => {
-    server.close()
-    process.exit(0)
+    server.close(() => process.exit(0))
   }
   process.on('SIGINT', () => {
     writeExitBreadcrumb('signal', { signal: 'SIGINT' })

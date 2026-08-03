@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -12,6 +12,8 @@ import {
   writeGrantedRoots,
   listGrants,
   loadPersistedGrants,
+  revokeGrant,
+  listPersistedGrants,
   applyConfiguredPathGrants,
   applyDefaultDependencyReadGrants,
   applyRivetRuntimeReadGrants,
@@ -27,6 +29,12 @@ mkdirSync(SCRATCH, { recursive: true })
 
 function tmp(): string {
   return mkdtempSync(join(SCRATCH, 'rivet-grants-'))
+}
+
+/** Per-workspace grants store file for a cwd（与 path-grants.grantsFile 同规则）。 */
+function grantsStoreFile(cwd: string): string {
+  const slug = resolve(cwd).replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
+  return join(rivetHome(), `path-grants-${slug}.json`)
 }
 
 describe('path-grants', () => {
@@ -134,6 +142,122 @@ describe('path-grants', () => {
       assert.equal(isWriteGranted(join(target, 'x')), false)
     } finally {
       for (const d of [cwd, target]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  it('revokeGrant removes the grant from memory AND disk at once (no session zombie)', () => {
+    const cwd = tmp()
+    const target = tmp()
+    try {
+      grantPath(target, 'write', { persist: true, cwd })
+      assert.equal(isWriteGranted(join(target, 'x')), true)
+
+      const removed = revokeGrant(target, { cwd })
+      assert.equal(removed, true)
+
+      // 内存即时失效：撤销后本会话剩余部分立刻不可写
+      assert.equal(isWriteGranted(join(target, 'x')), false, 'in-memory grant must vanish immediately')
+      // 磁盘同步失效：模拟下次启动，重载也不会复活
+      _resetGrantsForTest()
+      loadPersistedGrants(cwd)
+      assert.equal(isWriteGranted(join(target, 'x')), false, 'revoked grant must not resurrect from disk')
+      assert.deepEqual(listPersistedGrants(cwd), [], 'store file must no longer list the grant')
+    } finally {
+      _resetGrantsForTest()
+      rmSync(grantsStoreFile(cwd), { force: true })
+      for (const d of [cwd, target]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  it('revokeGrant leaves sibling grants (same prefix) untouched', () => {
+    const cwd = tmp()
+    const base = tmp()
+    try {
+      const granted = join(base, 'proj')
+      const sibling = join(base, 'proj-backup')
+      mkdirSync(granted)
+      mkdirSync(sibling)
+      grantPath(granted, 'write', { persist: true, cwd })
+      grantPath(sibling, 'write', { persist: true, cwd })
+
+      const removed = revokeGrant(granted, { cwd })
+      assert.equal(removed, true)
+      // 同前缀兄弟目录不受影响（isPathUnder 的分隔符边界）
+      assert.equal(isWriteGranted(join(sibling, 'f.txt')), true, 'sibling with common prefix must survive')
+      assert.equal(isWriteGranted(join(granted, 'f.txt')), false)
+
+      _resetGrantsForTest()
+      loadPersistedGrants(cwd)
+      assert.equal(isWriteGranted(join(sibling, 'f.txt')), true, 'sibling survives on disk too')
+      assert.equal(isWriteGranted(join(granted, 'f.txt')), false)
+    } finally {
+      _resetGrantsForTest()
+      rmSync(grantsStoreFile(cwd), { force: true })
+      for (const d of [cwd, base]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  it('revokeGrant is exact-root: revoking /a/b does not remove a separately-granted /a/b/c', () => {
+    const cwd = tmp()
+    const a = tmp()
+    const nested = join(a, 'b', 'c')
+    mkdirSync(nested, { recursive: true })
+    try {
+      grantPath(join(a, 'b'), 'write', { persist: true, cwd })
+      grantPath(nested, 'write', { persist: true, cwd })
+
+      revokeGrant(join(a, 'b'), { cwd })
+      // 独立授权的子目录必须保留——撤销 /a/b 不是撤销 /a/b/c
+      assert.equal(isWriteGranted(join(nested, 'x')), true)
+      _resetGrantsForTest()
+      loadPersistedGrants(cwd)
+      assert.equal(isWriteGranted(join(nested, 'x')), true)
+    } finally {
+      _resetGrantsForTest()
+      rmSync(grantsStoreFile(cwd), { force: true })
+      for (const d of [cwd, a]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  it('revokeGrant returns false for a path that was never granted', () => {
+    const cwd = tmp()
+    const target = tmp()
+    try {
+      assert.equal(revokeGrant(target, { cwd }), false)
+      // 也不该产生任何副作用
+      assert.deepEqual(listPersistedGrants(cwd), [])
+    } finally {
+      _resetGrantsForTest()
+      for (const d of [cwd, target]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  it('revokeGrant rewrites the store from disk contents, preserving peer-session grants', () => {
+    // 场景：本进程 hydrate 后，另一会话持久化了新授权 B；本进程撤销 A。
+    // 若从内存重写会把 B 一起丢掉——revokeGrant 必须基于磁盘内容重写。
+    const cwd = tmp()
+    const targetA = tmp()
+    const targetB = tmp()
+    try {
+      grantPath(targetA, 'write', { persist: true, cwd })
+      // 模拟 peer 会话：直接往 store 文件追加 B（不经过本进程内存）。
+      // slug 规则与 path-grants.grantsFile 一致：canonicalize(cwd) → 非字母数字替换 → 尾部 64 字符。
+      const slug = resolve(cwd).replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
+      const file = join(rivetHome(), `path-grants-${slug}.json`)
+      const onDisk = JSON.parse(readFileSync(file, 'utf-8')) as Array<{ root: string; mode: string; grantedAt: number; persisted: boolean }>
+      onDisk.push({ root: resolve(targetB), mode: 'write', grantedAt: Date.now(), persisted: true })
+      writeFileSync(file, JSON.stringify(onDisk, null, 2))
+
+      revokeGrant(targetA, { cwd })
+
+      _resetGrantsForTest()
+      loadPersistedGrants(cwd)
+      assert.equal(isWriteGranted(join(targetA, 'x')), false, 'A revoked')
+      assert.equal(listPersistedGrants(cwd).length, 1, 'B must survive the rewrite')
+    } finally {
+      _resetGrantsForTest()
+      rmSync(grantsStoreFile(cwd), { force: true })
+      for (const d of [cwd, targetA, targetB]) rmSync(d, { recursive: true, force: true })
     }
   })
 

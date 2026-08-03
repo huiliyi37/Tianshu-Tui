@@ -363,7 +363,10 @@ describe('Worker Session Isolation', () => {
       cwd: '/tmp',
       maxTurns: 1,
       contextWindow: 10000,
-      compact: { enabled: true, autoThreshold: 8000, autoFloor: 5000, model: 'deepseek-v4' }
+      compact: { enabled: true, autoThreshold: 8000, autoFloor: 5000, model: 'deepseek-v4' },
+      // 修复梯专用用例——钉旧契约（无收尾轮），否则终型轮先把报告救回、
+      // repairAttempts 恒为 0。
+      finalizeReport: false,
     })
 
     assert.equal(run.result.status, 'passed')

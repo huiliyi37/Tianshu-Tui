@@ -16,6 +16,10 @@ function makeRun(requests: DelegationRequest[]): CoordinatorRun {
       risks: [],
       nextActions: [],
       evidenceStatus: 'verified',
+      // 真实 coordinator 会把派发侧身份盖章进 WorkerResult（work-order.ts
+      // workerResultSchema.profile/authority）——mock 同形，供终态透传断言。
+      profile: r.profile,
+      authority: r.authority,
     })),
     packet: '<worker_results>packet</worker_results>',
   }
@@ -157,7 +161,7 @@ describe('GALAXY_TOOL', () => {
   })
 
   it('终态事件与批次进度经 onWorkerActivity/onOutput 上行（P1-2）', async () => {
-    const terminalEvents: Array<{ workOrderId?: string; status?: string }> = []
+    const terminalEvents: Array<{ workOrderId?: string; status?: string; authority?: string; profile?: string }> = []
     const outputs: string[] = []
     const coordinator: GalaxyCoordinator = {
       delegateBatch: async (requests, _policy, _signal, onProgress, onWorkerSettled) => {
@@ -188,6 +192,10 @@ describe('GALAXY_TOOL', () => {
     assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
     assert.equal(terminalEvents.length, 2, '每个 worker 落定必须发一条终态事件')
     assert.ok(terminalEvents.every(e => e.status === 'passed'))
+    // 终态必须带派发侧身份——否则 worker 完成后面板星域信息断流（回退机器 ID 脸）。
+    const authorities = terminalEvents.map(e => e.authority).sort()
+    assert.deepEqual(authorities, ['tianji', 'wenqu'], '终态事件必须透传 authority')
+    assert.ok(terminalEvents.every(e => typeof e.profile === 'string' && e.profile.length > 0), '终态事件必须透传 profile')
     assert.ok(outputs.some(t => t.includes('galaxy progress: 2/2')), `批次进度必须走 onOutput，got: ${outputs.join('')}`)
   })
 
@@ -249,6 +257,34 @@ describe('GALAXY_TOOL', () => {
     assert.deepEqual(reader.scope?.files, ['src/a.ts'], '只读维度不参与去重')
     assert.ok(result.content.includes('文件重叠已剥离'), `剥离清单必须进报告，got:\n${result.content}`)
     assert.ok(result.content.includes('src/a.ts'), '被剥离文件必须可见')
+  })
+
+  it('文件全被夺走的写维度被跳过并入报告（M3：不派到 scope 闸撞墙）', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const tool = createGalaxyTool(capturingCoordinator(calls))
+
+    const result = await tool.execute({
+      toolUseId: 'tu_emptied',
+      cwd: '/repo',
+      input: {
+        objective: '两个写维度文件完全相同——后者全部文件被夺走',
+        dimensions: [
+          { name: 'frontend', objective: '实现 UI', authority: 'wenqu', files: ['src/a.ts'] },
+          { name: 'backend', objective: '实现逻辑', authority: 'tianji', files: ['src/a.ts'] },
+          { name: 'search', objective: '检索相关代码', authority: 'tianxuan', profile: 'code_scout', files: ['src/z.ts'] },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
+    const reqs = calls[0]!.requests
+    assert.ok(reqs.some(r => r.authority === 'wenqu'), '首个写维度保留并派发')
+    assert.ok(!reqs.some(r => r.authority === 'tianji' && r.profile === 'patcher'), '文件全被夺走的写维度不再派发')
+    assert.ok(reqs.some(r => r.profile === 'code_scout'), '只读维度不受影响')
+    assert.ok(result.content.includes('已跳过派发'), `被夺走维度必须入报告，got:\n${result.content}`)
+    assert.ok(result.content.includes('backend'), '被跳过维度名必须可见')
   })
 
   it('tierFloor 透传到 DelegationRequest（P2-2）', async () => {

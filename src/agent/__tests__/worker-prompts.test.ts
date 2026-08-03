@@ -9,6 +9,7 @@ import {
   buildPrimaryWorkerPacket,
   buildWorkerPrompt,
   buildWorkerRepairPrompt,
+  buildFinalizationInstruction,
 } from '../worker-prompts.js'
 
 describe('worker prompts', () => {
@@ -24,15 +25,15 @@ describe('worker prompts', () => {
 
     const prompt = buildWorkerPrompt(order)
 
-    assert.ok(prompt.includes('WorkOrder ID: wo_1'))
+    assert.ok(prompt.includes('工单 ID（WorkOrder ID）：wo_1'))
     for (const tool of ['read_file', 'glob', 'grep', 'diff']) {
       assert.ok(prompt.includes(tool), `prompt should list ${tool}`)
     }
-    assert.ok(prompt.includes('Allowed tools:'))
-    assert.ok(prompt.includes('read-only Rivet worker'))
-    assert.ok(prompt.includes('Return exactly one JSON object'))
+    assert.ok(prompt.includes('允许的工具：'))
+    assert.ok(prompt.includes('只读 Rivet worker'))
+    assert.ok(prompt.includes('只返回一个 JSON 对象'))
     assert.ok(prompt.includes('"workOrderId"'))
-    assert.ok(prompt.includes('Do not call disallowed tools'))
+    assert.ok(prompt.includes('不要调用禁止的工具'))
   })
 
   // 廉价模型（LongCat/MiMo 一类）常在 JSON 字符串值里写未转义的裸双引号，
@@ -49,9 +50,9 @@ describe('worker prompts', () => {
       scope: { files: ['src/main.tsx'] },
     })
     const prompt = buildWorkerPrompt(order)
-    assert.ok(prompt.includes('JSON string discipline'), 'escape discipline heading present')
-    assert.ok(prompt.includes('Escape any double-quote inside a string'), 'specific escape rule')
-    assert.ok(prompt.includes('summary, findings[].claim/evidence, and artifacts[].content'),
+    assert.ok(prompt.includes('JSON 字符串纪律'), 'escape discipline heading present')
+    assert.ok(prompt.includes('字符串内的双引号转义为'), 'specific escape rule')
+    assert.ok(prompt.includes('summary、findings[].claim/evidence 与 artifacts[].content'),
       'discipline names the fields most prone to bare quotes')
   })
 
@@ -68,7 +69,7 @@ describe('worker prompts', () => {
       scope: { files: [] },
     })
     const prompt = buildWorkerPrompt(order)
-    assert.ok(prompt.includes('## Project Context Discovery'), 'discovery preamble still orients read-only workers')
+    assert.ok(prompt.includes('## 项目上下文探测'), 'discovery preamble still orients read-only workers')
     assert.ok(!prompt.includes('.rivet.md'), 'convention files travel in <project-instructions>, not as a tool-call instruction')
     assert.ok(!prompt.includes('AGENTS.md'), 'convention files travel in <project-instructions>, not as a tool-call instruction')
     assert.ok(!prompt.includes('CLAUDE.md'), 'no reference to other agents\' memory files')
@@ -93,16 +94,18 @@ describe('worker prompts', () => {
       scope: { files: ['src/agent/coordinator.ts'] },
     }))
 
-    assert.ok(!readOnly.includes('Do not claim that files were changed'))
+    assert.ok(!readOnly.includes('不要声称改过文件'))
     assert.ok(!readOnly.includes('If you changed files and did not run relevant verification'))
     assert.ok(!readOnly.includes('Use changedFiles ONLY'))
-    assert.ok(readOnly.includes('Do not call disallowed tools.'), 'the disallowed-tools gate still applies')
-    assert.ok(readOnly.includes('Use examinedFiles for files you read/inspected.'),
+    assert.ok(!readOnly.includes('验证执行与改动文件以系统捕获的工具调用为准'))
+    assert.ok(readOnly.includes('不要调用禁止的工具。'), 'the disallowed-tools gate still applies')
+    assert.ok(readOnly.includes('用 examinedFiles 列你读/查过的文件。'),
       'examinedFiles guidance is the half that still applies to read-only workers')
 
-    assert.ok(write.includes('Do not claim that files were changed'))
-    assert.ok(write.includes('If you changed files and did not run relevant verification'))
-    assert.ok(write.includes('Use changedFiles ONLY'))
+    assert.ok(write.includes('不要声称改过文件'))
+    assert.ok(write.includes('验证执行与改动文件以系统捕获的工具调用为准'),
+      '写工口径：changedFiles/verification 以系统捕获为准，自报仅作交叉校验')
+    assert.ok(!write.includes('Use changedFiles ONLY'))
   })
 
   it('builds a write-capable worker prompt for write work orders', () => {
@@ -116,8 +119,8 @@ describe('worker prompts', () => {
 
     const prompt = buildWorkerPrompt(order)
 
-    assert.ok(prompt.includes('write-capable Rivet worker'))
-    assert.ok(!prompt.includes('read-only'))
+    assert.ok(prompt.includes('可写 Rivet worker'))
+    assert.ok(!prompt.includes('只读'))
     for (const tool of WRITE_WORKER_TOOLS) {
       assert.ok(prompt.includes(tool), `prompt should list ${tool}`)
     }
@@ -135,10 +138,10 @@ describe('worker prompts', () => {
 
     const prompt = buildWorkerPrompt(order)
 
-    assert.ok(prompt.includes('## Working Directory'))
-    assert.ok(prompt.includes('CWD: /tmp/rivet-wt-test'))
-    assert.ok(prompt.includes('Use RELATIVE paths'))
-    assert.ok(prompt.includes('Do NOT use absolute paths'))
+    assert.ok(prompt.includes('## 工作目录'))
+    assert.ok(prompt.includes('CWD：/tmp/rivet-wt-test'))
+    assert.ok(prompt.includes('所有文件操作使用相对路径'))
+    assert.ok(prompt.includes('不要使用原仓库的绝对路径'))
   })
 
   it('builds a repair prompt with the parse error but not a new objective', () => {
@@ -153,7 +156,7 @@ describe('worker prompts', () => {
 
     const prompt = buildWorkerRepairPrompt(order, 'not json', 'Unexpected token')
 
-    assert.ok(prompt.includes('YOUR PREVIOUS ANSWER COULD NOT BE USED'))
+    assert.ok(prompt.includes('你上一条回答无法使用'))
     assert.ok(prompt.includes('Unexpected token'))
     assert.ok(prompt.includes('workOrderId'))
     assert.ok(prompt.includes('wo_1'))
@@ -176,6 +179,66 @@ describe('worker prompts', () => {
     assert.ok(prompt.includes('unverified'))
   })
 
+  // B（终轮定型）：报告契约从主提示词移到系统收尾轮。finalized 变体不得
+  // 携带 shape/转义段/inline JSON 要求（探索轮只需把活干完）；inline-json
+  // 默认不变（hands-session 等旧路径的兼容锚）。
+  describe('report contract variants (B：终轮定型)', () => {
+    const scoutOrder = () => createReadOnlyWorkOrder({
+      id: 'wo_contract',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Find routing seams.',
+      scope: { files: ['src/main.tsx'] },
+    })
+
+    it('inline-json（默认）保留完整契约：shape + 转义纪律 + JSON 要求', () => {
+      for (const prompt of [buildWorkerPrompt(scoutOrder()), buildWorkerPrompt(scoutOrder(), undefined, { reportContract: 'inline-json' })]) {
+        assert.ok(prompt.includes('只返回一个 JSON 对象'), 'inline 契约要求自产 JSON')
+        assert.ok(prompt.includes('"workOrderId"'), 'inline 契约带结果卡 shape')
+        assert.ok(prompt.includes('JSON 字符串纪律'), 'inline 契约带转义纪律')
+        assert.ok(!prompt.includes('无需自己输出报告 JSON'), 'inline 不出现收尾说明')
+      }
+    })
+
+    it('finalized 变体删掉契约段，换成收尾说明', () => {
+      const prompt = buildWorkerPrompt(scoutOrder(), undefined, { reportContract: 'finalized' })
+      assert.ok(!prompt.includes('只返回一个 JSON 对象'), 'finalized 不要求自产 JSON')
+      assert.ok(!prompt.includes('JSON 字符串纪律'), 'finalized 不带转义纪律')
+      assert.ok(!prompt.includes('"workOrderId"'), 'finalized 不带结果卡 shape')
+      assert.ok(prompt.includes('无需自己输出报告 JSON'), '说明系统会单独索取报告')
+      assert.ok(prompt.includes('系统会在收尾时基于完整会话记录单独索取结构化报告'), '说明收尾轮带历史')
+      // 执行纪律（绿非证明）不属于报告契约，两种变体都保留
+      assert.ok(prompt.includes('绿非证明，复现即证'), '执行纪律保留')
+    })
+
+    it('buildFinalizationInstruction 携带完整契约与诚实纪律', () => {
+      const instruction = buildFinalizationInstruction(scoutOrder(), false)
+      assert.ok(instruction.includes('工单 ID（原样复制）：wo_contract'), '带 order id')
+      assert.ok(instruction.includes('"workOrderId"'), '带结果卡 shape')
+      assert.ok(instruction.includes('JSON 字符串纪律'), '带转义纪律')
+      assert.ok(instruction.includes('只基于上方对话中实际发生的工具调用及其结果'), '只准基于实际工具调用与结果')
+      assert.ok(instruction.includes('不得宣称跑过未执行的验证、读过未读的文件'), '不得编造未执行的验证/未读的文件')
+      assert.ok(instruction.includes('只输出一个 JSON 对象'), '带输出纪律（含 json 字样，满足 response_format 门）')
+    })
+
+    it('buildFinalizationInstruction 按写能力选 shape', () => {
+      const writeOrder = createWriteWorkOrder({
+        id: 'wo_contract_w',
+        parentTurnId: 'turn_1',
+        kind: 'patch_proposal',
+        objective: 'Patch a file.',
+        scope: { files: ['src/a.ts'] },
+      })
+      const writeInstruction = buildFinalizationInstruction(writeOrder, true)
+      assert.ok(writeInstruction.includes('patchSummary'), '写工 shape 带 patchSummary')
+      assert.ok(writeInstruction.includes('examinedFiles'), '写工 shape 带 examinedFiles')
+      const readInstruction = buildFinalizationInstruction(scoutOrder(), false)
+      assert.ok(!readInstruction.includes('patchSummary'), '只读 shape 无 patchSummary')
+      assert.ok(readInstruction.includes('必填：列出你读/查过但未修改的全部文件'), '只读 shape 的 examinedFiles 口径')
+    })
+  })
+
   it('injects a memory knowledge packet for memory, prompt, and recall work orders', () => {
     const order = createReadOnlyWorkOrder({
       id: 'wo_memory',
@@ -188,11 +251,11 @@ describe('worker prompts', () => {
 
     const prompt = buildWorkerPrompt(order)
 
-    assert.ok(prompt.includes('## Required Knowledge Packet: memory / prompt / recall'))
+    assert.ok(prompt.includes('## 必需知识包（memory / prompt / recall 类任务）'))
     assert.ok(prompt.includes('.rivet/knowledge/manifest.md'))
     assert.ok(prompt.includes('docs/analysis/2026-06-01-project-memory-architecture-conflict.md'))
     assert.ok(prompt.includes('docs/superpowers/plans/2026-06-01-guided-memory-retrieval.md'))
-    assert.ok(prompt.includes('memory.jsonl is local structured cache'))
+    assert.ok(prompt.includes('memory.jsonl 是本地结构化缓存'))
   })
 
   it('does not inject the memory knowledge packet for unrelated work orders', () => {
@@ -207,7 +270,7 @@ describe('worker prompts', () => {
 
     const prompt = buildWorkerPrompt(order)
 
-    assert.ok(!prompt.includes('## Required Knowledge Packet: memory / prompt / recall'))
+    assert.ok(!prompt.includes('## 必需知识包（memory / prompt / recall 类任务）'))
     assert.ok(!prompt.includes('2026-06-01-project-memory-architecture-conflict.md'))
   })
 
@@ -261,7 +324,7 @@ describe('worker prompts', () => {
       assert.equal(x1Count, 1, 'top-3 cap keeps exactly one ×1 family')
       assert.ok(prompt.includes('record_general_finding'), 'points at the write-back tool')
       // 段落位置：任务卡之后（末尾注意力权重）
-      assert.ok(prompt.indexOf('## Task') < prompt.indexOf('## 将星战绩'))
+      assert.ok(prompt.indexOf('## 任务') < prompt.indexOf('## 将星战绩'))
     })
 
     it('no ledger / no authority / no cwd → no section', () => {

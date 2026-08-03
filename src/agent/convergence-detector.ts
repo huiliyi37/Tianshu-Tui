@@ -187,20 +187,25 @@ const DIAGNOSTIC_READONLY_RATIO = 0.8
 /**
  * W3：从工具轨迹 + 改动数分类会话活动模式。
  *
- * diagnostic 判据：窗口内样本 ≥4、只读（非 PRODUCTIVE_TOOLS）占比 ≥0.8、
- * filesModified = 0。改动一出现即回到 build——改动即应验证，此时催收敛
- * 走既有的验证锚点文案，不需要诊断分流。
+ * diagnostic 判据（窗口语义）：窗口内样本 ≥4、无编辑工具、只读（非 PRODUCTIVE_TOOLS）
+ * 占比 ≥0.8。`filesModifiedCount` 不参与判定（保留下划线标记弃用）——曾改过代码
+ * 但最近 N 轮纯只读的会话（verify 阶段、排查回归）也能回到 diagnostic，
+ * 收到"核实断言后收束"的正确处方。
  */
 export function classifyActivityMode(
   recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool'>>,
-  filesModifiedCount: number,
+  _filesModifiedCount: number,
   window = ACTIVITY_MODE_WINDOW,
 ): ActivityMode {
-  if (filesModifiedCount > 0) return 'build'
-  const slice = recentToolHistory.slice(-window)
-  if (slice.length < 4) return 'build'
-  const readOnly = slice.filter(h => !PRODUCTIVE_TOOLS.has(h.tool)).length
-  return readOnly / slice.length >= DIAGNOSTIC_READONLY_RATIO ? 'diagnostic' : 'build'
+  // 滑动窗口内检测编辑工具——而非全局累计 filesModifiedCount。
+  // 曾改过代码但最近 N 轮纯只读的会话（如 verify 阶段、排查回归）
+  // 应能回到 diagnostic 分类，收到"核实断言后收束"的正确处方。
+  const editTools = new Set(['edit_file', 'write_file', 'hash_edit', 'apply_patch', 'ast_edit'])
+  const windowSlice = recentToolHistory.slice(-window)
+  if (windowSlice.length > 0 && windowSlice.some(h => editTools.has(h.tool))) return 'build'
+  if (windowSlice.length < 4) return 'build'
+  const readOnly = windowSlice.filter(h => !PRODUCTIVE_TOOLS.has(h.tool)).length
+  return readOnly / windowSlice.length >= DIAGNOSTIC_READONLY_RATIO ? 'diagnostic' : 'build'
 }
 
 export interface ConvergenceResult {

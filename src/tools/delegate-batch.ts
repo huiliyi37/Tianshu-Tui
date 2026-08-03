@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
+import { deriveWorkOrderId, type CoordinatorRun, type DelegationRequest } from '../agent/coordinator.js'
 import { aggregationPolicyKinds, aggregationPolicySchema, workOrderKindSchema, type AggregationPolicy } from '../agent/work-order.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
@@ -65,6 +65,17 @@ const taskSchema = z.object({
   resume: z.string().optional(),
   maxTurns: delegateMaxTurnsSchema,
   timeoutMs: delegateTimeoutMsSchema,
+}).superRefine((data, ctx) => {
+  // P1-8 写工 scope 强制：写工（patch_proposal）必须显式声明 files——worker
+  // 只能在声明范围内改动（coordinator 的 in-flight 冲突登记 + objective-gate
+  // 越界闸门都以 scope.files 为界），空 scope 直接放行会绕过这两道防线。
+  if (data.kind === 'patch_proposal' && (!data.files || data.files.length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['files'],
+      message: 'patch_proposal（写工）任务必须声明 files——worker 只能在声明范围内改动，空 scope 无法通过越界闸门。',
+    })
+  }
 })
 
 const inputSchema = z.object({
@@ -257,10 +268,14 @@ export function createDelegateBatchTool(
       const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
       // Build authority lookup: workOrderId prefix → authority, for terminal callbacks.
       const taskAuthorityMap = new Map<number, string | undefined>()
+      // 与 coordinator 建单同口径的最终 order id（嵌套批带工具调用前缀命名空间，
+      // 顶层批仍是稳定 'batch:N'）——objectiveById/dependencies 必须按最终 id 索引。
+      const finalIdOf = (i: number): string =>
+        deriveWorkOrderId(`${params.toolUseId}:batch:${i}`, params.delegationDepth) ?? `batch:${i}`
       // Stable work-order id → objective for activity mapper + terminal callbacks.
       const objectiveById = new Map<string, string>()
       for (let i = 0; i < parsed.data.tasks.length; i++) {
-        objectiveById.set(`batch:${i}`, parsed.data.tasks[i]!.objective)
+        objectiveById.set(finalIdOf(i), parsed.data.tasks[i]!.objective)
       }
       const activityMapper = params.onWorkerActivity
         ? createDelegationActivityMapper(params.toolUseId, params.onWorkerActivity, {
@@ -275,16 +290,16 @@ export function createDelegateBatchTool(
         : undefined
       const requests: DelegationRequest[] = parsed.data.tasks.map((t, i) => {
         taskAuthorityMap.set(i, t.authority)
-        // `batch:${i}` is a stable work-order id (see deriveStableWorkOrderId);
-        // dependsOn indices resolve to those same ids so the queue can order them.
-        // 条件边对象（收编 #6）映射为 DependencyEdge（index → batch:N）。
+        // `batch:${i}` 经 deriveWorkOrderId 派生最终 id（嵌套批带命名空间）；
+        // dependsOn 索引解析为同一批内的最终 id，队列据此排序。
+        // 条件边对象（收编 #6）映射为 DependencyEdge（index → 最终 id）。
         const dependencies = t.dependsOn?.length
           ? t.dependsOn.map(d => typeof d === 'number'
-              ? `batch:${d}`
+              ? finalIdOf(d)
               : {
-                  dependsOn: `batch:${d.index}`,
+                  dependsOn: finalIdOf(d.index),
                   ...(d.onFailure ? { onFailure: d.onFailure } : {}),
-                  ...(d.alternateOrderId !== undefined ? { alternateOrderId: `batch:${d.alternateOrderId}` } : {}),
+                  ...(d.alternateOrderId !== undefined ? { alternateOrderId: finalIdOf(d.alternateOrderId) } : {}),
                 })
           : undefined
         return {
@@ -331,6 +346,9 @@ export function createDelegateBatchTool(
               workOrderId: r.workOrderId,
               parentToolId: params.toolUseId,
               objective: objectiveById.get(r.workOrderId),
+              // 终态也带派发侧盖章的身份（星域/职能）——否则完成后面板星域信息断流。
+              profile: r.profile,
+              authority: r.authority,
               status: r.status,
               progressLine: progressSnippet(r.summary),
               summary: r.summary,

@@ -8,6 +8,10 @@ import type { StreamClient, StreamCallbacks } from '../../api/stream-client.js'
 import type { OaiChatRequest } from '../../api/oai-types.js'
 import { describeImages, selectVisionPrompt } from '../vision-service.js'
 
+/** 合法占位图：payload ≥64 字符，过 vision-service.ts:97 的截断校验
+ *  （cc5f5f3d 起 fail-fast；此前用例的 ',abc' 占位已不合法）。 */
+const VALID_IMAGE = 'data:image/png;base64,' + 'A'.repeat(128)
+
 function makeMockClient(text: string): StreamClient {
   return {
     async stream(request: OaiChatRequest, callbacks: StreamCallbacks) {
@@ -26,7 +30,7 @@ function makeMockClient(text: string): StreamClient {
 
 test('describeImages sends images and returns streamed text', async () => {
   const client = makeMockClient('A terminal screenshot showing a dark theme.')
-  const result = await describeImages(client, ['data:image/png;base64,abc'])
+  const result = await describeImages(client, [VALID_IMAGE])
   assert.equal(result, 'A terminal screenshot showing a dark theme.')
 })
 
@@ -43,7 +47,7 @@ test('describeImages uses custom prompt', async () => {
       callbacks.onStopReason('stop', {})
     },
   }
-  await describeImages(client, ['data:image/png;base64,abc'], { prompt: 'What color is this?' })
+  await describeImages(client, [VALID_IMAGE], { prompt: 'What color is this?' })
   assert.equal(capturedPrompt, 'What color is this?')
 })
 
@@ -59,7 +63,7 @@ test('describeImages propagates errors', async () => {
       callbacks.onError(new Error('vision model failed'))
     },
   }
-  await assert.rejects(describeImages(client, ['data:image/png;base64,abc']), /vision model failed/)
+  await assert.rejects(describeImages(client, [VALID_IMAGE]), /vision model failed/)
 })
 
 /**
@@ -84,20 +88,20 @@ function makeRealisticClient(text: string, opts: { deltas?: boolean; block?: boo
 test('describeImages 不把增量和终值块拼成两遍', async () => {
   const desc = '这是一个发布说明弹窗，标题 v2.24.3，右下角有 Got it 按钮。'
   const client = makeRealisticClient(desc)
-  const result = await describeImages(client, ['data:image/png;base64,abc'])
+  const result = await describeImages(client, [VALID_IMAGE])
   assert.equal(result, desc)
 })
 
 test('describeImages 在只有增量、没有终值块时退回增量拼接', async () => {
   const desc = 'streamed only'
   const client = makeRealisticClient(desc, { block: false })
-  assert.equal(await describeImages(client, ['data:image/png;base64,abc']), desc)
+  assert.equal(await describeImages(client, [VALID_IMAGE]), desc)
 })
 
 test('describeImages 在只有终值块、没有增量时也拿到文本', async () => {
   const desc = 'block only'
   const client = makeRealisticClient(desc, { deltas: false })
-  assert.equal(await describeImages(client, ['data:image/png;base64,abc']), desc)
+  assert.equal(await describeImages(client, [VALID_IMAGE]), desc)
 })
 
 test('describeImages 拼接多个终值文本块（codex 逐 part 发）', async () => {
@@ -108,7 +112,7 @@ test('describeImages 拼接多个终值文本块（codex 逐 part 发）', async
       callbacks.onStopReason('stop', {})
     },
   }
-  assert.equal(await describeImages(client, ['data:image/png;base64,abc']), '第一段。第二段。')
+  assert.equal(await describeImages(client, [VALID_IMAGE]), '第一段。第二段。')
 })
 
 test('describeImages 截断标记只追加一次，且不因去重丢掉', async () => {
@@ -119,7 +123,7 @@ test('describeImages 截断标记只追加一次，且不因去重丢掉', async
       callbacks.onStopReason('length', {})
     },
   }
-  const result = await describeImages(client, ['data:image/png;base64,abc'])
+  const result = await describeImages(client, [VALID_IMAGE])
   assert.equal(result, '描述被切断了\n[图片描述被截断]')
 })
 
@@ -132,7 +136,7 @@ test('describeImages 忽略 thinking 块，不把推理当描述', async () => {
       callbacks.onStopReason('stop', {})
     },
   }
-  assert.equal(await describeImages(client, ['data:image/png;base64,abc']), '一只猫。')
+  assert.equal(await describeImages(client, [VALID_IMAGE]), '一只猫。')
 })
 
 // ── 阶段5：模式自适应 prompt ─────────────────────────────────────
@@ -164,6 +168,32 @@ test('describeImages 据 accompanyingText 切精确模式', async () => {
       callbacks.onStopReason('stop', {})
     },
   }
-  await describeImages(client, ['data:image/png;base64,abc'], { accompanyingText: '终端里这个 traceback' })
+  await describeImages(client, [VALID_IMAGE], { accompanyingText: '终端里这个 traceback' })
   assert.match(capturedPrompt, /逐字转写|OCR/)
+})
+
+
+// data URL fail-fast 校验（cc5f5f3d）自身的覆盖——校验在 client.stream 之前抛错。
+test('describeImages 拒绝异常短的 payload（可能被截断）', async () => {
+  const client = makeMockClient('should not be called')
+  await assert.rejects(
+    describeImages(client, ['data:image/png;base64,abc']),
+    /图片数据异常短（3 字符）/,
+  )
+})
+
+test('describeImages 拒绝非 data URL', async () => {
+  const client = makeMockClient('should not be called')
+  await assert.rejects(
+    describeImages(client, ['https://example.com/x.png']),
+    /不是 data URL/,
+  )
+})
+
+test('describeImages 拒绝不支持的 MIME 类型', async () => {
+  const client = makeMockClient('should not be called')
+  await assert.rejects(
+    describeImages(client, ['data:image/svg+xml;base64,' + 'A'.repeat(128)]),
+    /图片格式不受视觉模型支持/,
+  )
 })

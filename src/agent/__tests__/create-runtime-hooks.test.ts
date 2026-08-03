@@ -308,5 +308,51 @@ describe('createDefaultRuntimeHooks', () => {
       })
       assert.ok(!hooks.some(h => h.name === 'security-pattern'))
     })
+
+    // ── 证据防火墙 Phase 2：onClaimTrackerReady 回调 ─────────────
+
+    function baseDeps(advisoryBus: AdvisoryBus): import('../create-runtime-hooks.js').RuntimeHookDeps {
+      return {
+        stigmergyDeposit: async () => {},
+        stigmergyQuery: async () => [],
+        getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set() }),
+        setLoadedPheromones: () => {},
+        getThetaState: () => ({ interval: 7, lastCheckTurn: 0, toolCallCount: 0, lastThetaAt: 0, phase: 0, cycleCount: 0 }),
+        setThetaState: () => {},
+        getPredictionAccumulator: () => ({ history: [] }),
+        advisoryBus,
+      }
+    }
+
+    it('external-claim hook 装配时回调 onClaimTrackerReady，getter 返回 tracker', () => {
+      const bus: AdvisoryBus = { submit: () => {} } as unknown as AdvisoryBus
+      let captured: ((() => { claims: unknown[] }) | undefined)
+      const hooks = createDefaultRuntimeHooks({
+        ...baseDeps(bus),
+        onClaimTrackerReady: getTracker => { captured = getTracker },
+      })
+      assert.ok(hooks.some(h => h.name === 'external-claim-tracking'))
+      assert.ok(captured, 'onClaimTrackerReady 应被调用')
+      const tracker = captured!()
+      assert.ok(Array.isArray(tracker.claims))
+    })
+
+    it('RIVET_EXTERNAL_CLAIM_TRACKING=0 时不回调（hook 禁用 → 门禁 fail-open）', () => {
+      const prev = process.env.RIVET_EXTERNAL_CLAIM_TRACKING
+      process.env.RIVET_EXTERNAL_CLAIM_TRACKING = '0'
+      try {
+        const bus: AdvisoryBus = { submit: () => {} } as unknown as AdvisoryBus
+        let called = false
+        const hooks = createDefaultRuntimeHooks({
+          ...baseDeps(bus),
+          onClaimTrackerReady: () => { called = true },
+        })
+        assert.ok(!hooks.some(h => h.name === 'external-claim-tracking'))
+        assert.equal(called, false)
+      } finally {
+        if (prev === undefined) delete process.env.RIVET_EXTERNAL_CLAIM_TRACKING
+        else process.env.RIVET_EXTERNAL_CLAIM_TRACKING = prev
+      }
+    })
   })
 })

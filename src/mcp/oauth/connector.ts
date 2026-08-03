@@ -13,7 +13,7 @@ import { shouldRefresh } from '../../auth/refresh.js'
 import { rivetHome } from '../../config/paths.js'
 import type { McpOAuthProvider, McpOAuthToken } from './types.js'
 
-const REDIRECT_PORT = 1456
+const REDIRECT_PORT = parseInt(process.env.RIVET_OAUTH_PORT || '1456', 10)
 const CALLBACK_PATH = '/auth/callback'
 const CALLBACK_TIMEOUT_MS = 5 * 60_000
 const OAUTH_TIMEOUT_MS = 30_000

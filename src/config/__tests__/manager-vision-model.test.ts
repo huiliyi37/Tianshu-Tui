@@ -83,9 +83,9 @@ describe('vision model config', () => {
     const saved = setVisionModelConfig({
       provider: 'minimax',
       model: 'MiniMax-M3',
-      fallback: { provider: 'deepseek', model: 'deepseek-vl' },
+      fallback: { provider: 'deepseek', model: 'deepseek-v4-flash' },
     })
-    assert.deepEqual(saved?.fallback, { provider: 'deepseek', model: 'deepseek-vl' })
+    assert.deepEqual(saved?.fallback, { provider: 'deepseek', model: 'deepseek-v4-flash' })
   })
 
   it('rejects a malformed fallback instead of silently dropping it', () => {
@@ -108,5 +108,55 @@ describe('vision model config', () => {
     // Missing model or invalid maxTokens are rejected.
     assert.throws(() => setVisionModelConfig({ provider: 'minimax' } as unknown as Record<string, unknown>))
     assert.throws(() => setVisionModelConfig({ provider: 'minimax', model: 'MiniMax-M3', maxTokens: 0 } as unknown as Record<string, unknown>))
+  })
+
+  // ── provider/model 存在性校验（断点 2 修复）──────────────────────────────
+  // 此前 setVisionModelConfig 不校验 provider/model 存在，CLI 用户手编 provider 名
+  // 但没 setup 该 provider 时，写盘成功，运行时 buildVisionClient 静默 warn 退出
+  // （图片被丢），用户以为配了实际没生效。现在与 setDefaultModelConfig 对齐校验。
+
+  it('rejects a vision provider that is not in provider.providers', () => {
+    assert.throws(
+      () => setVisionModelConfig({ provider: 'nonexistent-prov', model: 'some-model' }),
+      /不在已配置的 provider 列表里/,
+    )
+    // 没写进 config
+    assert.equal(loadConfig().agent.visionModel, undefined)
+  })
+
+  it('rejects a vision model that does not exist under the provider', () => {
+    // minimax provider 存在，但 model 名拼错
+    assert.throws(
+      () => setVisionModelConfig({ provider: 'minimax', model: 'MiniMax-TYPO' }),
+      /没有模型 "MiniMax-TYPO"/,
+    )
+    assert.equal(loadConfig().agent.visionModel, undefined)
+  })
+
+  it('rejects a fallback provider/model that does not exist', () => {
+    // 主桥合法，fallback 的 provider 不存在
+    assert.throws(
+      () => setVisionModelConfig({
+        provider: 'minimax', model: 'MiniMax-M3',
+        fallback: { provider: 'ghost-prov', model: 'ghost-model' },
+      }),
+      /备用视觉模型.*ghost-prov/,
+    )
+    // 主桥合法，fallback 的 model 不存在
+    assert.throws(
+      () => setVisionModelConfig({
+        provider: 'minimax', model: 'MiniMax-M3',
+        fallback: { provider: 'glm', model: 'glm-typo' },
+      }),
+      /备用视觉模型.*glm-typo/,
+    )
+    // 校验失败时整体不写盘（主桥也没进 config）
+    assert.equal(loadConfig().agent.visionModel, undefined)
+  })
+
+  it('accepts alias as a valid model reference', () => {
+    // glm-5.2 的 alias 是 m28（见 DEFAULT_CONFIG preset）——校验应认 alias
+    const saved = setVisionModelConfig({ provider: 'glm', model: 'glm-5.2' })
+    assert.equal(saved?.provider, 'glm')
   })
 })

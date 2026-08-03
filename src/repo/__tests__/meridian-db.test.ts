@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { MeridianDb } from '../meridian-db.js'
+import { resolveBetterSqlite3 } from '../native-resolver.js'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -176,5 +177,109 @@ describe('meridian db', () => {
     db.saveToolPatternMinerSnapshot(snapshot)
 
     assert.deepEqual(db.loadToolPatternMinerSnapshot(), snapshot)
+  })
+
+  // ─── D6 task 1: LIKE → GLOB precision fixes ─────────────────────────
+  it('getTestsFor does not match files whose name differs only by underscore wildcard (tool_x.ts vs toolAx.ts)', () => {
+    db.upsertEdge('src/agent/toolA.test.ts:test1:1', 'src/agent/toolAx.ts:foo:1', 'tested_by', 1.0)
+    db.upsertEdge('src/agent/toolX.test.ts:test2:1', 'src/agent/tool_x.ts:foo:1', 'tested_by', 1.0)
+    assert.deepEqual(db.getTestsFor('src/agent/tool_x.ts'), ['src/agent/toolX.test.ts'])
+  })
+
+  it('getReverseDependents does not return callers of a similarly-named file (tool_x.ts vs toolAx.ts)', () => {
+    db.upsertEdge('src/agent/caller.ts:call:1', 'src/agent/toolAx.ts:foo:1', 'imports', 1.0)
+    db.upsertEdge('src/agent/realCaller.ts:call:1', 'src/agent/tool_x.ts:foo:1', 'imports', 1.0)
+    const deps = db.getReverseDependents('src/agent/tool_x.ts')
+    assert.deepEqual(deps.map(d => d.file), ['src/agent/realCaller.ts'])
+  })
+
+  it('matches file paths case-sensitively (Foo.ts vs foo.ts)', () => {
+    db.upsertEdge('src/tests/upper.test.ts:t1:1', 'src/foo.ts:bar:1', 'tested_by', 1.0)
+    db.upsertEdge('src/tests/lower.test.ts:t2:1', 'src/Foo.ts:bar:1', 'tested_by', 1.0)
+    assert.deepEqual(db.getTestsFor('src/Foo.ts'), ['src/tests/lower.test.ts'])
+  })
+
+  // ─── D6 task 2: schema version + legacy migration ──────────────────
+  it('reports schema version 1 after open', () => {
+    assert.equal(db.schemaVersion(), 1)
+  })
+
+  /** Roll user_version back to 0 so the next open sees a pre-v1 database. */
+  const markLegacy = () => {
+    const Database = resolveBetterSqlite3(import.meta.url)
+    const conn = new Database(join(dir, 'meridian.db'))
+    try { conn.pragma('user_version = 0') } finally { conn.close() }
+  }
+
+  it('migrates legacy absolute-path rows and dangling imports edges on reopen', () => {
+    // Historical dirty rows: absolute-path file + its symbol + a dangling imports edge
+    db.upsertFile({
+      filePath: '/abs/dir/legacy.ts',
+      contentHash: 'h1',
+      symbols: [{ id: '/abs/dir/legacy.ts:X:1', name: 'X', kind: 'function', filePath: '/abs/dir/legacy.ts', line: 1, exported: true, contentHash: 'h1' }],
+      edges: [],
+      imports: [],
+    })
+    db.upsertEdge('/abs/dir/legacy.ts:X:1', 'src/nonexistent.ts:*:0', 'imports', 1.0)
+    // Clean rows that must survive migration
+    db.upsertFile({
+      filePath: 'src/ok.ts',
+      contentHash: 'h2',
+      symbols: [{ id: 'src/ok.ts:Y:1', name: 'Y', kind: 'function', filePath: 'src/ok.ts', line: 1, exported: true, contentHash: 'h2' }],
+      edges: [],
+      imports: [],
+    })
+    db.upsertEdge('src/ok.ts:Y:1', 'src/ok.ts:*:0', 'imports', 1.0)
+
+    // Reopen a pre-v1 database to trigger the one-shot migration
+    db.close()
+    markLegacy()
+    db = new MeridianDb(dir)
+
+    const files = db.getAllFiles()
+    assert.ok(!files.some(f => f.startsWith('/')), `absolute-path rows remain: ${JSON.stringify(files)}`)
+    assert.ok(files.includes('src/ok.ts'), 'clean relative row must survive migration')
+    assert.equal(db.schemaVersion(), 1)
+    // Dangling imports edge purged; valid imports edge kept
+    assert.equal(db.getEdgesTo('src/nonexistent.ts:*:0').length, 0, 'dangling imports edge must be purged')
+    assert.equal(db.getEdgesTo('src/ok.ts:*:0').length, 1, 'valid imports edge must survive')
+  })
+
+  it('migration is idempotent across reopenings', () => {
+    db.upsertFile({
+      filePath: '/abs/x.ts',
+      contentHash: 'h1',
+      symbols: [{ id: '/abs/x.ts:Z:1', name: 'Z', kind: 'function', filePath: '/abs/x.ts', line: 1, exported: true, contentHash: 'h1' }],
+      edges: [],
+      imports: [],
+    })
+    db.close()
+    markLegacy()
+    db = new MeridianDb(dir)
+    assert.ok(!db.getAllFiles().some(f => f.startsWith('/')), 'first migration must purge absolute paths')
+    db.close()
+    db = new MeridianDb(dir)
+    assert.ok(!db.getAllFiles().some(f => f.startsWith('/')), 'second migration must be a no-op')
+    assert.equal(db.schemaVersion(), 1)
+  })
+
+  it('leaves edges to not-yet-indexed files alone once the db is at v1', () => {
+    // src/b.ts exists on disk but has not been indexed yet, so the edge into it
+    // looks "dangling" to the v1 purge. Re-running the purge on every open would
+    // delete it, and the unchanged content hash means it would never come back.
+    db.upsertFile({
+      filePath: 'src/a.ts',
+      contentHash: 'ha',
+      symbols: [{ id: 'src/a.ts:A:1', name: 'A', kind: 'function', filePath: 'src/a.ts', line: 1, exported: true, contentHash: 'ha' }],
+      edges: [],
+      imports: ['src/b.ts'],
+    })
+    assert.deepEqual(db.getReverseDependents('src/b.ts').map(d => d.file), ['src/a.ts'])
+
+    db.close()
+    db = new MeridianDb(dir)
+    assert.deepEqual(db.getReverseDependents('src/b.ts').map(d => d.file), ['src/a.ts'],
+      'reopen must not purge the reverse-dependency edge of an unindexed target')
+    assert.equal(db.needsParse('src/a.ts', 'ha'), false, 'source stays unchanged, so a purged edge could never be rebuilt')
   })
 })

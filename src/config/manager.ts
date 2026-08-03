@@ -126,6 +126,38 @@ function migrateDeepseekMaxTokens(raw: Record<string, unknown>): boolean {
 }
 
 /**
+ * One-shot migration: 把存量用户的 deepseek-v4-flash / DeepSeek-V4-Flash 的
+ * reasoningEffort 从 'high' 刷成 'max'。preset 已改 max + backfill 白名单已收录
+ * reasoningEffort，但 backfill 不覆盖磁盘已有的显式值——存量用户连过 v4-flash
+ * 后快照里是 'high'，靠 backfill 拿不到。本迁移强制刷，让所有用户开箱即 max。
+ *
+ * 幂等：只改值为 'high' 的 v4-flash；已是 max / 用户改过的其他值不动。
+ * Mutates `raw` in place. Returns true if any value was changed.
+ */
+function migrateV4FlashEffort(raw: Record<string, unknown>): boolean {
+  const provider = raw.provider as Record<string, unknown> | undefined
+  const providers = provider?.providers as Record<string, unknown> | undefined
+  if (!providers) return false
+
+  let changed = false
+  // deepseek 官方 (deepseek-v4-flash) + siliconflow (deepseek-ai/DeepSeek-V4-Flash)
+  for (const providerName of ['deepseek', 'siliconflow']) {
+    const prov = providers[providerName] as Record<string, unknown> | undefined
+    if (!prov) continue
+    const models = prov.models as Array<Record<string, unknown>> | undefined
+    if (!Array.isArray(models)) continue
+    for (const m of models) {
+      const id = typeof m.id === 'string' ? m.id : ''
+      if (/deepseek-v4-flash|DeepSeek-V4-Flash/i.test(id) && m.reasoningEffort === 'high') {
+        m.reasoningEffort = 'max'
+        changed = true
+      }
+    }
+  }
+  return changed
+}
+
+/**
  * Load config with 3-layer resolution: user → project → session overlay.
  *
  * Priority (highest wins):
@@ -152,9 +184,10 @@ export function loadConfig(options?: {
       const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
       const cpMigrated = migrateLegacyCheckpointInterval(raw as Record<string, unknown>)
       const dsChanged = migrateDeepseekMaxTokens(cpMigrated)
+      const flashChanged = migrateV4FlashEffort(cpMigrated)
       // Write back if any migration modified the raw config so the fix
       // persists across restarts (one-shot, idempotent).
-      if (cpMigrated !== raw || dsChanged) {
+      if (cpMigrated !== raw || dsChanged || flashChanged) {
         try {
           writeFileAtomicSync(configPath, JSON.stringify(cpMigrated, null, 2) + '\n')
         } catch {
@@ -175,6 +208,7 @@ export function loadConfig(options?: {
       const raw = JSON.parse(readFileSync(projectPath, 'utf-8'))
       const cpMigrated = migrateLegacyCheckpointInterval(raw as Record<string, unknown>)
       migrateDeepseekMaxTokens(cpMigrated)
+      migrateV4FlashEffort(cpMigrated)
       // NOTE: no write-back for project configs — they may be version-controlled.
       base = deepMerge(base, cpMigrated)
     } catch {
@@ -239,7 +273,21 @@ export function addProvider(name: string, config: ProviderConfig): void {
 }
 
 export function removeProvider(name: string): void {
+  // 预设 provider（deepseek/glm 等）禁止删除——它们是内置默认配置，
+  // 删除后用户会丢失开箱即用的接入能力。用户应通过「设置 Provider」
+  // 覆盖 baseUrl/key，而非删除预设。
+  if (isProviderPresetKey(name)) {
+    throw new Error(
+      `Cannot remove preset provider "${name}". Preset providers are built-in and cannot be deleted. ` +
+      `Use "rivet config set-url" or "rivet config setup" to override it instead.`,
+    )
+  }
   const cfg = loadConfig()
+  if (!cfg.provider.providers[name]) {
+    throw new Error(
+      `Provider "${name}" not found. Available: ${Object.keys(cfg.provider.providers).join(', ')}`,
+    )
+  }
   if (cfg.provider.default === name) {
     throw new Error(`Cannot remove default provider "${name}". Set a different default first.`)
   }
@@ -414,6 +462,8 @@ export interface FetchConfigSnapshot {
   maxRedirects: number
   userAgent: string
   extractMainContent: boolean
+  /** Jina Reader 基础地址（国内可配自建反代）。高级项，桌面端 UI 暂不编辑。 */
+  jinaBaseUrl?: string
 }
 
 /** 读取用户全局 config 的 fetch 段。 */
@@ -425,6 +475,7 @@ export function getFetchConfig(): FetchConfigSnapshot {
     maxRedirects: f.maxRedirects,
     userAgent: f.userAgent,
     extractMainContent: f.extractMainContent,
+    ...(f.jinaBaseUrl ? { jinaBaseUrl: f.jinaBaseUrl } : {}),
   }
 }
 
@@ -448,37 +499,101 @@ export function setFetchConfig(input: Record<string, unknown>): FetchConfigSnaps
   return getFetchConfig()
 }
 
-// --- web_search 配置（后端链 / 超时 / 区域） ---
+// --- web_search 配置（后端链 / 超时 / 区域 / API key） ---
+
+/** API key 来源与掩码引用（与 provider getApiKeyStatus 同构，不返回明文）。 */
+export interface SearchKeyStatus {
+  source: 'inline' | 'env' | 'none'
+  /** inline: ***后4位；env: 变量名；none: 空。 */
+  ref: string
+}
 
 export interface SearchConfigSnapshot {
   backends: string[]
   braveApiKeyEnv: string
   tavilyApiKeyEnv: string
+  bochaApiKeyEnv: string
   timeoutMs: number
   region: string
+  /** 各 backend 的 key 状态（掩码，不含明文）——供 UI 显示徽章。 */
+  keyStatus: Record<string, SearchKeyStatus>
 }
 
-/** 读取用户全局 config 的 search 段。 */
+/** 需 key 的 backend 名（bing/ddg 免 key，不在此列）。 */
+const KEYED_SEARCH_BACKENDS = ['bocha', 'brave', 'tavily'] as const
+
+/**
+ * 读取用户全局 config 的 search 段。inline key 不返回明文，只返回 keyStatus
+ * 掩码（与 provider 的 getApiKeyStatus 一致——GET 永远不暴露 key 明文）。
+ */
 export function getSearchConfig(): SearchConfigSnapshot {
   const s = loadConfig().search
+  const keyStatus: Record<string, SearchKeyStatus> = {}
+  for (const backend of KEYED_SEARCH_BACKENDS) {
+    keyStatus[backend] = getSearchKeyStatus(backend)
+  }
   return {
     backends: [...s.backends],
     braveApiKeyEnv: s.braveApiKeyEnv,
     tavilyApiKeyEnv: s.tavilyApiKeyEnv,
+    bochaApiKeyEnv: s.bochaApiKeyEnv,
     timeoutMs: s.timeoutMs,
     region: s.region ?? '',
+    keyStatus,
   }
+}
+
+/**
+ * 某个 search backend 的 key 状态（掩码）。解析优先级与 resolveSearchKey 对齐：
+ * inline config > apiKeyEnv 指向的 env > 标准变量名。
+ */
+export function getSearchKeyStatus(backend: string): SearchKeyStatus {
+  const s = loadConfig().search
+  const inlineKey = s[`${backend}ApiKey` as keyof typeof s]
+  if (typeof inlineKey === 'string' && inlineKey.length > 0) {
+    return { source: 'inline', ref: '***' + inlineKey.slice(-4) }
+  }
+  const envName = s[`${backend}ApiKeyEnv` as keyof typeof s]
+  if (typeof envName === 'string' && envName && process.env[envName]) {
+    return { source: 'env', ref: envName }
+  }
+  const defaultEnvVar = `${backend.toUpperCase()}_API_KEY`
+  if (process.env[defaultEnvVar]) return { source: 'env', ref: defaultEnvVar }
+  return { source: 'none', ref: '' }
+}
+
+/**
+ * 持久化 search backend 的 inline API key（明文存 config，与 provider.apiKey 同构）。
+ * 桌面端 UI「设置 Key」按钮走此函数。空串清除 key。
+ */
+export function setSearchApiKey(backend: string, key: string): SearchKeyStatus {
+  if (!KEYED_SEARCH_BACKENDS.includes(backend as typeof KEYED_SEARCH_BACKENDS[number])) {
+    throw new Error(`Backend "${backend}" does not support API key (only ${KEYED_SEARCH_BACKENDS.join(', ')})`)
+  }
+  const cfg = loadConfig()
+  const field = `${backend}ApiKey` as keyof typeof cfg.search
+  if (key && key.trim()) {
+    ;(cfg.search as Record<string, unknown>)[field] = key.trim()
+  } else {
+    delete (cfg.search as Record<string, unknown>)[field]
+  }
+  saveConfig(cfg)
+  return getSearchKeyStatus(backend)
 }
 
 /**
  * 持久化 web_search 配置到用户全局 config（`search.*`）。
  * merge 写模式：只传入的字段被更新，未传入的保留原值。
+ * **安全过滤**：`*ApiKey` 字段不经此入口写入（只能走 setSearchApiKey 专用端点），
+ * 防止通用 PUT 意外写入或泄露明文 key——与 provider key 的独立端点模式一致。
  * 下次 sidecar/session 启动时生效（buildSearchBackends → runBackendChain）。
  */
 export function setSearchConfig(input: Record<string, unknown>): SearchConfigSnapshot {
   const cfg = loadConfig()
   const merged: Record<string, unknown> = { ...cfg.search }
   for (const [key, val] of Object.entries(input)) {
+    // 拒绝 inline key 字段经通用端点写入——只能走 setSearchApiKey
+    if (key.endsWith('ApiKey')) continue
     if (val === '' || val === null) {
       delete merged[key]
     } else {
@@ -691,6 +806,25 @@ export function getDefaultModelConfig(): DefaultModelConfigSnapshot {
  * 格式和存在性校验：provider 必须存在于当前配置中，model 必须在 provider 的
  * models 列表中。校验放在此层以避免调用方（TUI main.ts）访问 config internals。
  */
+/**
+ * Toggle `supportsVision` on an existing stored model. Used by the TUI /config
+ * panel to retroactively mark a model as vision-capable (e.g. a custom provider
+ * created before the vision question existed, or a built-in model the user wants
+ * to use as a bridge). Idempotent: setting the same value is a no-op write.
+ */
+export function setModelSupportsVision(providerName: string, modelId: string, value: boolean): void {
+  const cfg = loadConfig()
+  const provider = cfg.provider.providers[providerName]
+  if (!provider) throw new Error(`Provider "${providerName}" not found`)
+  const model = provider.models.find(m => m.id === modelId || m.alias === modelId)
+  if (!model) throw new Error(`Model "${modelId}" not found in provider "${providerName}"`)
+  const current = model.supportsVision === true
+  if (current === value) return // no-op, avoid unnecessary disk write
+  if (value) model.supportsVision = true
+  else delete model.supportsVision // remove the key entirely (undefined = text-only)
+  saveConfig(cfg)
+}
+
 export function setDefaultModelConfig(input: { defaultModel?: unknown }): DefaultModelConfigSnapshot {
   const cfg = loadConfig()
   if (input.defaultModel !== undefined) {
@@ -790,9 +924,35 @@ export function setVisionModelConfig(
   // 不留显式 undefined 键：zod 会把它保下来，返回对象凭空多一个字段，调用方的
   // 结构比较就莫名失败。
   if (parsed.fallback === undefined) delete parsed.fallback
+
+  // provider/model 存在性校验——与 setDefaultModelConfig 对齐。
+  // 此前 vision 这条线不校验，CLI 用户手编 provider 名但没 setup 该 provider 时，
+  // 写盘成功，运行时 buildVisionClient 静默 warn 退出（图片被丢），用户以为配了
+  // 实际没生效。校验主桥 + fallback 桥（如有）。
+  assertProviderModelExists(cfg, parsed.provider, parsed.model, '视觉模型')
+  if (parsed.fallback) {
+    assertProviderModelExists(cfg, parsed.fallback.provider, parsed.fallback.model, '备用视觉模型')
+  }
+
   cfg.agent.visionModel = parsed
   saveConfig(cfg)
   return parsed
+}
+
+/**
+ * 校验 provider 在 provider.providers 里存在、且该 provider 下有指定 model。
+ * 与 setDefaultModelConfig 的内联校验同构，抽出复用给 vision 主桥/fallback。
+ * 不校验 key 是否可解出（key 解析留到运行时 resolveApiKey——与 defaultModel 一致，
+ * defaultModel 也只校验 provider/model 存在）。
+ */
+function assertProviderModelExists(cfg: Config, providerName: string, modelId: string, label: string): void {
+  const provider = cfg.provider.providers[providerName]
+  if (!provider) {
+    throw new Error(`${label}：provider "${providerName}" 不在已配置的 provider 列表里（先用 rivet config setup ${providerName} 添加）`)
+  }
+  if (!provider.models.some(m => m.id === modelId || m.alias === modelId)) {
+    throw new Error(`${label}：provider "${providerName}" 下没有模型 "${modelId}"（检查拼写或用 rivet config add-model 添加）`)
+  }
 }
 
 // --- Greeting LLM configuration (welcome page dynamic greeting) ---
@@ -1078,7 +1238,7 @@ export interface SetupCustomProviderOptions {
   baseUrl: string
   /** API key — optional for local deployments (Ollama/vLLM) that need no auth. */
   apiKey?: string
-  model: { id: string; alias?: string; contextWindow: number; maxTokens: number; reasoningEffort?: ModelConfig['reasoningEffort'] }
+  model: { id: string; alias?: string; contextWindow: number; maxTokens: number; reasoningEffort?: ModelConfig['reasoningEffort']; supportsVision?: boolean }
   makeDefault?: boolean
   allowProFallback?: boolean
 }
@@ -1093,6 +1253,16 @@ export interface SetupCustomProviderOptions {
  */
 export function setupCustomProvider(options: SetupCustomProviderOptions): void {
   assertValidUrl(options.baseUrl)
+  // 同名 provider 已存在时禁止静默覆盖——用户应通过 edit 路径修改已有 provider，
+  // 避免意外丢失 baseUrl/key/models 配置。
+  const existing = loadConfig().provider.providers[options.providerName]
+  if (existing) {
+    throw new Error(
+      `Provider "${options.providerName}" already exists. ` +
+      `Use "rivet config set-url ${options.providerName} <url>" or ` +
+      `"rivet config setup ${options.providerName}" to edit it, or delete it first.`,
+    )
+  }
   const contextWindow = Math.max(1, Math.floor(options.model.contextWindow))
   const maxTokens = Math.max(1, Math.min(Math.floor(options.model.maxTokens), contextWindow))
   const model: ModelConfig = {
@@ -1101,6 +1271,7 @@ export function setupCustomProvider(options: SetupCustomProviderOptions): void {
     contextWindow,
     maxTokens,
     ...(options.model.reasoningEffort ? { reasoningEffort: options.model.reasoningEffort } : {}),
+    ...(options.model.supportsVision ? { supportsVision: true } : {}),
   }
   const provider: ProviderConfig = {
     name: options.providerName,
@@ -1222,8 +1393,16 @@ Commands:
   set-key-env <p> <v>          Set API key from env variable
   set-default <p>              Set default provider
   set-approval <mode>          Set approval mode (auto-safe/manual/auto-accept/dangerously-skip-permissions)
+  set-proxy <url> [--clear]    Set/clear web proxy (web_search/web_fetch)
+  set-no-proxy <list> [--clear]  Set/clear NO_PROXY bypass list
+  set-search-backends <b1,b2>  Set web_search backend chain (e.g. bocha,bing,duckduckgo)
+  set-jina-url <url>           Set Jina Reader base URL (国内自建反代)
+  set-vision <p>/<m> [maxTokens N] [--prompt "..."]  Set vision bridge model
+  clear-vision                 Clear the vision bridge model
+  set-vision-auto-bridge <on|off>  Toggle auto vision bridge selection
   add-model <p> <id>           Add model to provider
   remove-model <p> <id>        Remove model from provider
+  remove-provider <name>       Remove a custom provider (presets cannot be removed)
   mcp                          MCP server management
 
 Examples:
@@ -1231,6 +1410,12 @@ Examples:
   rivet config setup deepseek --key-env DEEPSEEK_API_KEY --default
   rivet config setup codex --default
   rivet config set-approval dangerously-skip-permissions
+  rivet config set-proxy http://127.0.0.1:7890
+  rivet config set-search-backends bocha,bing,duckduckgo
+  rivet config set-jina-url https://r.jina.ai
+  rivet config set-vision zhipu-vision/glm-4v-flash
+  rivet config set-vision glm/glm-5.2 2048 --prompt "用中文描述截图"
+  rivet config set-vision-auto-bridge on
   rivet config set-url mimo https://token-plan-sgp.xiaomimimo.com/v1
   rivet config set-model minimax MiniMax-M2.8 300000 64000 m28
   rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp`)
@@ -1411,6 +1596,148 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
         break
       }
 
+      // ── web 工具配置（network / search / fetch）─────────────────────────
+      // 让纯 CLI（无 TTY）用户一行命令改 web 配置，不用手编 config.json。
+      // setter 都是 merge 写模式，只更新传入字段。下次会话生效（前缀缓存安全）。
+
+      case 'set-proxy': {
+        // --clear 清除 proxy（回落到 env 变量 / 系统代理 / 直连）
+        if (hasFlag(args, '--clear')) {
+          setNetworkConfig({ proxy: '' })
+          cliOut(io, formatSuccess('Proxy cleared (falls back to env/system)', fmtOpts))
+          break
+        }
+        const url = args[1]
+        if (!url) {
+          cliErr(io, 'Usage: rivet config set-proxy <http://host:port> [--clear]')
+          cliExit(io, 1)
+          return
+        }
+        setNetworkConfig({ proxy: url })
+        cliOut(io, formatSuccess(`Proxy set to ${url}`, fmtOpts))
+        break
+      }
+
+      case 'set-no-proxy': {
+        if (hasFlag(args, '--clear')) {
+          setNetworkConfig({ noProxy: '' })
+          cliOut(io, formatSuccess('NO_PROXY cleared', fmtOpts))
+          break
+        }
+        const list = args[1]
+        if (!list) {
+          cliErr(io, 'Usage: rivet config set-no-proxy <host,.domain,...> [--clear]')
+          cliExit(io, 1)
+          return
+        }
+        setNetworkConfig({ noProxy: list })
+        cliOut(io, formatSuccess(`NO_PROXY set to ${list}`, fmtOpts))
+        break
+      }
+
+      case 'set-search-backends': {
+        const raw = args[1]
+        if (!raw) {
+          cliErr(io, 'Usage: rivet config set-search-backends <b1,b2,...> (e.g. bocha,bing,duckduckgo)')
+          cliExit(io, 1)
+          return
+        }
+        // 逗号分隔 → 数组；空串/空白过滤
+        const backends = raw.split(',').map(s => s.trim()).filter(Boolean)
+        if (backends.length === 0) {
+          cliErr(io, '至少需要一个后端（逗号分隔，如 bocha,bing,duckduckgo）')
+          cliExit(io, 1)
+          return
+        }
+        setSearchConfig({ backends })
+        cliOut(io, formatSuccess(`Search backends set to [${backends.join(', ')}]`, fmtOpts))
+        break
+      }
+
+      case 'set-jina-url': {
+        const url = args[1]
+        if (!url) {
+          cliErr(io, 'Usage: rivet config set-jina-url <https://your-mirror.example>')
+          cliExit(io, 1)
+          return
+        }
+        setFetchConfig({ jinaBaseUrl: url })
+        cliOut(io, formatSuccess(`Jina Reader base URL set to ${url}`, fmtOpts))
+        break
+      }
+
+      // ── 视觉模型（vision bridge）配置 ──────────────────────────────────
+      // CLI 用户此前只能手编 config.json，没有校验引导，容易踩「配了 provider 名但
+      // provider 没 setup」的坑（运行时静默丢图）。这些子命令复用 setVisionModelConfig
+      // 的 provider/model 存在性校验，配错会立即报错。
+
+      case 'set-vision': {
+        // 格式：<provider>/<model> [maxTokens N] [--prompt "..."]
+        // 先剥离 --flag value，再从剩余位置参数取 provider/model 和可选 maxTokens
+        const rest: string[] = []
+        let prompt: string | undefined
+        for (let i = 1; i < args.length; i++) {
+          if (args[i] === '--prompt') {
+            prompt = args[++i]
+          } else {
+            rest.push(args[i]!)
+          }
+        }
+        if (rest.length === 0) {
+          cliErr(io, 'Usage: rivet config set-vision <provider>/<model> [maxTokens N] [--prompt "..."]')
+          cliExit(io, 1)
+          return
+        }
+        // 最后一个纯数字位置参数视为 maxTokens；其余拼成 provider/model ref
+        let maxTokens: number | undefined
+        const last = rest[rest.length - 1]!
+        if (/^\d+$/.test(last) && rest.length >= 2) {
+          maxTokens = parsePositiveInt(last, 'maxTokens')
+          rest.pop()
+        }
+        const ref = rest.join(' ').trim()
+        const slashIdx = ref.indexOf('/')
+        if (slashIdx < 0) {
+          cliErr(io, '格式：<provider>/<model>，如 glm/glm-5.2 或 zhipu-vision/glm-4v-flash')
+          cliExit(io, 1)
+          return
+        }
+        const providerName = ref.slice(0, slashIdx)
+        const modelId = ref.slice(slashIdx + 1)
+        try {
+          const saved = setVisionModelConfig({
+            provider: providerName, model: modelId,
+            ...(prompt !== undefined ? { prompt } : {}),
+            ...(maxTokens !== undefined ? { maxTokens } : {}),
+          })
+          cliOut(io, formatSuccess(`Vision model set to ${saved!.provider}/${saved!.model}`, fmtOpts))
+        } catch (err) {
+          cliErr(io, (err as Error).message)
+          cliExit(io, 1)
+          return
+        }
+        break
+      }
+
+      case 'clear-vision': {
+        setVisionModelConfig(null)
+        cliOut(io, formatSuccess('Vision model cleared', fmtOpts))
+        break
+      }
+
+      case 'set-vision-auto-bridge': {
+        const flag = args[1]?.toLowerCase()
+        if (flag !== 'on' && flag !== 'off' && flag !== 'true' && flag !== 'false') {
+          cliErr(io, 'Usage: rivet config set-vision-auto-bridge <on|off>')
+          cliExit(io, 1)
+          return
+        }
+        const enabled = flag === 'on' || flag === 'true'
+        setVisionAutoBridge(enabled)
+        cliOut(io, formatSuccess(`Vision auto-bridge ${enabled ? 'enabled' : 'disabled'}`, fmtOpts))
+        break
+      }
+
       case 'add-model': {
         const providerName = args[1]
         const modelId = args[2]
@@ -1436,6 +1763,18 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
         }
         removeModel(providerName, modelId)
         cliOut(io, formatSuccess(`Model ${modelId} removed from ${providerName}`, fmtOpts))
+        break
+      }
+
+      case 'remove-provider': {
+        const providerName = args[1]
+        if (!providerName) {
+          cliErr(io, 'Usage: rivet config remove-provider <name>')
+          cliExit(io, 1)
+          return
+        }
+        removeProvider(providerName)
+        cliOut(io, formatSuccess(`Provider ${providerName} removed`, fmtOpts))
         break
       }
 
@@ -1521,6 +1860,56 @@ Examples:
   rivet config mcp add-sse ctx7 http://localhost:3001/sse
   rivet config mcp list
   rivet config mcp remove fs`)
+        }
+        break
+      }
+
+      case 'allow-dir': {
+        const rawPath = args[1]
+        if (!rawPath) {
+          cliErr(io, 'Usage: rivet config allow-dir <path> [--read|--write] [--all-projects]')
+          cliExit(io, 1)
+          return
+        }
+        const mode = args.includes('--write') ? 'write' : 'read'
+        const allProjects = args.includes('--all-projects')
+        if (allProjects) {
+          const key = mode === 'write' ? 'additionalWriteDirs' as const : 'additionalReadDirs' as const
+          const prev = getPermissionDirs()
+          const dirs = [...prev[key], rawPath]
+          setPermissionDirs({ ...prev, [key]: dirs })
+          cliOut(io, formatSuccess(`Added "${rawPath}" to ${key} (global). Restart Rivet to apply.`, fmtOpts))
+        } else {
+          const { grantPath } = await import('../tools/path-grants.js')
+          grantPath(rawPath, mode, { persist: true, cwd: process.cwd() })
+          cliOut(io, formatSuccess(`Granted ${mode} access to "${rawPath}" for this workspace.`, fmtOpts))
+        }
+        break
+      }
+
+      case 'revoke-dir': {
+        const rawPath = args[1]
+        if (!rawPath) {
+          cliErr(io, 'Usage: rivet config revoke-dir <path>')
+          cliExit(io, 1)
+          return
+        }
+        const { revokeGrant } = await import('../tools/path-grants.js')
+        const removed = revokeGrant(rawPath, { cwd: process.cwd() })
+        cliOut(io, formatSuccess(removed ? `Revoked access to "${rawPath}".` : `No grant found for "${rawPath}".`, fmtOpts))
+        break
+      }
+
+      case 'list-dirs': {
+        const { listPersistedGrants } = await import('../tools/path-grants.js')
+        const grants = listPersistedGrants(process.cwd())
+        if (grants.length === 0) {
+          cliOut(io, 'No per-workspace directory grants.')
+        } else {
+          cliOut(io, 'Per-workspace grants:')
+          for (const g of grants) {
+            cliOut(io, `  ${g.mode === 'write' ? '✎' : '👁'} ${g.root}`)
+          }
         }
         break
       }

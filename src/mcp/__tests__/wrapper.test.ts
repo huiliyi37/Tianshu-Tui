@@ -51,7 +51,7 @@ describe('createMcpToolWrapper', () => {
       toolUseId: 'tu_1',
       cwd: '/tmp',
     })
-    assert.equal(result.content, 'Echo: hello\n[MCP: test · read-only]')
+    assert.equal(result.content, 'Echo: hello\n[MCP: test · unknown · approval-required]')
     assert.equal(result.isError, undefined)
   })
 
@@ -145,7 +145,7 @@ describe('createMcpToolWrapper', () => {
     assert.equal((tool.definition.input_schema?.properties as any).path.description, 'File path')
   })
 
-  it('requires approval for write-like MCP tools', () => {
+  it('requires approval for undeclared MCP tools', () => {
     const mcpDef = {
       name: 'create_file',
       description: 'Create or overwrite a file',
@@ -157,14 +157,14 @@ describe('createMcpToolWrapper', () => {
     assert.equal(tool.requiresApproval({ input: {}, toolUseId: '1', cwd: '/tmp' }), true)
   })
 
-  it('does not require approval for read-like MCP tools', () => {
+  it('allows declared read-only tools without a consent store', () => {
     const mcpDef = {
       name: 'search_code',
       description: 'Search code in repository',
       inputSchema: { type: 'object' as const, properties: {} },
     }
     const callTool = async () => ({ content: [{ type: 'text' as const, text: '' }], isError: false })
-    const tool = createMcpToolWrapper('grep', mcpDef, callTool)
+    const tool = createMcpToolWrapper('grep', mcpDef, callTool, undefined, { capability: 'read' })
 
     assert.equal(tool.requiresApproval({ input: {}, toolUseId: '1', cwd: '/tmp' }), false)
   })
@@ -181,13 +181,13 @@ describe('MCP connector opt-in (first-use consent)', () => {
 
   it('requires approval on first use of a connector when consent is wired', () => {
     const consent = createMcpConnectorConsent()
-    const tool = createMcpToolWrapper('ctx7', readDef, okCall, consent)
+    const tool = createMcpToolWrapper('ctx7', readDef, okCall, consent, { capability: 'read' })
     assert.equal(tool.requiresApproval(callParams), true)
   })
 
   it('stops requiring approval after the connector has been used (opted in)', async () => {
     const consent = createMcpConnectorConsent()
-    const tool = createMcpToolWrapper('ctx7', readDef, okCall, consent)
+    const tool = createMcpToolWrapper('ctx7', readDef, okCall, consent, { capability: 'read' })
     assert.equal(tool.requiresApproval(callParams), true)
     await tool.execute(callParams)
     assert.equal(tool.requiresApproval(callParams), false)
@@ -195,8 +195,8 @@ describe('MCP connector opt-in (first-use consent)', () => {
 
   it('opt-in is per connector — approving one does not unlock another', async () => {
     const consent = createMcpConnectorConsent()
-    const a = createMcpToolWrapper('serverA', readDef, okCall, consent)
-    const b = createMcpToolWrapper('serverB', readDef, okCall, consent)
+    const a = createMcpToolWrapper('serverA', readDef, okCall, consent, { capability: 'read' })
+    const b = createMcpToolWrapper('serverB', readDef, okCall, consent, { capability: 'read' })
     await a.execute(callParams)
     assert.equal(a.requiresApproval(callParams), false)
     assert.equal(b.requiresApproval(callParams), true)
@@ -209,13 +209,20 @@ describe('MCP connector opt-in (first-use consent)', () => {
       description: 'Create an issue',
       inputSchema: { type: 'object' as const, properties: {} },
     }
-    const tool = createMcpToolWrapper('gh', writeDef, okCall, consent)
+    const tool = createMcpToolWrapper('gh', writeDef, okCall, consent, { capability: 'write' })
     await tool.execute(callParams)
     assert.equal(tool.requiresApproval(callParams), true)
   })
 
-  it('without a consent store, read-only tools behave as before (no opt-in gate)', () => {
-    const tool = createMcpToolWrapper('ctx7', readDef, okCall)
+  it('without a consent store, declared read-only tools do not need approval', () => {
+    const tool = createMcpToolWrapper('ctx7', readDef, okCall, undefined, { capability: 'read' })
     assert.equal(tool.requiresApproval(callParams), false)
+  })
+
+  it('requires approval on every call for an undeclared mutating tool', async () => {
+    const consent = createMcpConnectorConsent()
+    const tool = createMcpToolWrapper('unknown', { ...readDef, name: 'mutate' }, okCall, consent)
+    await tool.execute(callParams)
+    assert.equal(tool.requiresApproval(callParams), true)
   })
 })

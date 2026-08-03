@@ -42,6 +42,8 @@ export interface FetchMarkdownOptions extends HttpFetchOptions {
   renderWaitMs?: number
   /** 缓存读取有效期（默认 2 天；0 = 禁读仍写）。 */
   cacheMaxAgeMs?: number
+  /** Jina Reader 基础地址（默认 https://r.jina.ai；国内可填自建反代）。 */
+  jinaBaseUrl?: string
 }
 
 export interface FetchMarkdownOk {
@@ -210,7 +212,10 @@ export async function fetchMarkdown(
           }
         }
         if (!via) {
-          const jinaResult = await fetchViaJina(rawUrl, deps, options)
+          const jinaResult = await fetchViaJina(rawUrl, deps, {
+            ...options,
+            ...(opts.jinaBaseUrl ? { jinaBaseUrl: opts.jinaBaseUrl } : {}),
+          })
           if (jinaResult) {
             content = jinaResult.markdown
             via = '（经 Jina Reader）'

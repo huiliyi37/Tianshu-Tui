@@ -451,21 +451,55 @@ describe('SessionEviction', () => {
   it('removes same-name session directory when evicting (getBackupDir leak)', () => {
     // Simulate what getBackupDir() creates: <session-id>/backups/
     // Without rmSync on the directory, these accumulate forever.
-    const sessDir = join(evictDir, 'worker-leak')
+    // （id 不能用 worker- 前缀——worker 会话已不进 evict 额度池。）
+    const sessDir = join(evictDir, 'sess-leak')
     mkdirSync(join(sessDir, 'backups'), { recursive: true })
     writeFileSync(join(sessDir, 'backups', 'dummy.txt'), 'test')
     // Need the .jsonl for evict to notice the session
-    writeFileSync(join(evictDir, 'worker-leak.jsonl'), '{}\n')
+    writeFileSync(join(evictDir, 'sess-leak.jsonl'), '{}\n')
 
     // Fill up to trigger eviction (limit=1, keep=another)
-    writeFileSync(join(evictDir, 'worker-keep.jsonl'), '{}\n')
+    writeFileSync(join(evictDir, 'sess-keep.jsonl'), '{}\n')
 
-    const evicted = evictOldSessionsInternal(evictDir, 'worker-keep', 1)
-    assert.ok(evicted.includes('worker-leak'))
+    const evicted = evictOldSessionsInternal(evictDir, 'sess-keep', 1)
+    assert.ok(evicted.includes('sess-leak'))
     // Directory must be gone — this is the bug we're fixing
     assert.ok(!existsSync(sessDir), 'session directory should be removed on evict')
     // Keep session's files/dirs should survive
-    assert.ok(existsSync(join(evictDir, 'worker-keep.jsonl')))
+    assert.ok(existsSync(join(evictDir, 'sess-keep.jsonl')))
+  })
+
+  it('worker jsonl 与附属文件（.claims 等）不占额度、不被驱逐——主会话被 worker 洪水挤出额度是桌面失忆事故的根因', () => {
+    const dir = join(evictDir, 'quota-isolation')
+    mkdirSync(dir, { recursive: true })
+    // 3 个主会话（最老的 main-0 应在 limit=2 时被驱逐）
+    for (let i = 0; i < 3; i++) {
+      const p = join(dir, `main-${i}.jsonl`)
+      writeFileSync(p, '{}\n')
+      const t = new Date(Date.now() - (100 - i) * 1000)
+      utimesSync(p, t, t)
+    }
+    // worker 洪水 + claims 附属文件：全部比主会话更老（曾经会先于主会话被计入并驱逐）
+    for (let i = 0; i < 5; i++) {
+      const p = join(dir, `worker-wo_${i}-abc.jsonl`)
+      writeFileSync(p, '{}\n')
+      const t = new Date(Date.now() - (200 - i) * 1000)
+      utimesSync(p, t, t)
+    }
+    writeFileSync(join(dir, 'main-1.claims.jsonl'), '{}\n')
+
+    const evicted = evictOldSessionsInternal(dir, 'main-2', 2)
+
+    // 只有主会话计数：3 主会话 - limit 2 = 驱逐 1（最老的 main-0）
+    assert.deepEqual(evicted, ['main-0'], 'worker/claims 不占额度，驱逐只按主会话计算')
+    // worker 文件全部幸存（生命周期归 cleanupStaleWorkerSessionDirs）
+    for (let i = 0; i < 5; i++) {
+      assert.ok(existsSync(join(dir, `worker-wo_${i}-abc.jsonl`)), `worker-${i} 不该被 evict 碰`)
+    }
+    // 在用主会话的 claims 附属文件不被当作"最老会话"驱逐
+    assert.ok(existsSync(join(dir, 'main-1.claims.jsonl')), 'claims 附属文件不是会话，不被驱逐')
+    assert.ok(existsSync(join(dir, 'main-1.jsonl')))
+    assert.ok(existsSync(join(dir, 'main-2.jsonl')))
   })
 })
 

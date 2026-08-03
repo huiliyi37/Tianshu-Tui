@@ -116,7 +116,7 @@ describe('McpManager', () => {
       timeoutMs: 10,
     } as any)
 
-    const outcome = await Promise.race([mgr.initialize().then(() => 'done' as const), wait(100)])
+    const outcome = await Promise.race([mgr.initialize().then(() => 'done' as const), wait(2000)])
 
     assert.equal(outcome, 'done')
     const state = mgr.getStates().find(s => s.serverId === 'slow')

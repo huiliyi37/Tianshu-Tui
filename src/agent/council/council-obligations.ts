@@ -50,7 +50,7 @@ export function extractObligations(plan: CouncilPlan): ObligationEntry[] {
 
   for (const c of plan.contributions.filter(c => (c.round ?? 1) === 1)) {
     for (const r of c.risks) {
-      if (r.severity === 'high' && r.mitigation.trim()) {
+      if (r.severity === 'high' && r.mitigation?.trim()) {
         entries.push({
           id: `high_risk_mitigation:${n++}`,
           kind: 'high_risk_mitigation',

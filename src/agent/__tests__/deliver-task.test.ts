@@ -48,6 +48,8 @@ function makeContext(opts: {
   goalAchieved?: boolean
   autoCommit?: boolean
   obligationStore?: import('../evidence-obligation.js').ObligationStore
+  claimTracker?: import('../hooks/external-claim-tracking-hook.js').ClaimTracker
+  scoutFirewall?: boolean
 }) {
   const baseline = createWorktreeBaseline({
     branch: 'feat/b1',
@@ -93,6 +95,8 @@ function makeContext(opts: {
     isGoalAchieved: opts.goalAchieved !== undefined ? () => opts.goalAchieved! : undefined,
     autoCommit: opts.autoCommit,
     getObligationStore: opts.obligationStore ? () => opts.obligationStore! : undefined,
+    getClaimTracker: opts.claimTracker ? () => opts.claimTracker! : undefined,
+    scoutFirewallConfig: opts.scoutFirewall,
   }))
 
   const params: ToolCallParams = {
@@ -2994,6 +2998,132 @@ Do not declare a streamed response duplicate in the middle of the stream.
       const result = await tool.execute({ ...params, input: { commit: true, message: 'no store' } })
       assert.equal(result.isError, undefined)
       assert.doesNotMatch(result.content, /冗余验证未达 quorum/)
+    })
+  })
+
+  // ── 证据防火墙 Phase 2（jidoka 硬门禁）──────────────────────────
+
+  describe('evidence firewall (Phase 2)', () => {
+    const unverifiedTracker = (): import('../hooks/external-claim-tracking-hook.js').ClaimTracker => ({
+      claims: [{ filePath: 'src/agent/loop.ts', turn: 1, expiresAtTurn: 99 }],
+    })
+    const verifiedTracker = (): import('../hooks/external-claim-tracking-hook.js').ClaimTracker => ({
+      claims: [{ filePath: 'src/agent/loop.ts', turn: 1, expiresAtTurn: 99, verifiedAt: 2 }],
+    })
+
+    function greenCtx(overrides: Partial<Parameters<typeof makeContext>[0]> = {}) {
+      const base: Parameters<typeof makeContext>[0] = {
+        taskId: 't1',
+        ownedFiles: ['src/a.ts'],
+        dirtyFiles: ['src/a.ts'],
+        verifications: [{ command: 'npx tsx --test src/__tests__/a.test.ts', status: 'passed', meta: { scope: 'targeted' } }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+      }
+      return makeContext({ ...base, ...overrides })
+    }
+
+    it('防火墙开 + commit + 引用未核验 claim → isError 硬拦', async () => {
+      const { tool, params } = greenCtx({ claimTracker: unverifiedTracker(), scoutFirewall: true })
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'fix: src/agent/loop.ts:100 的问题' },
+      })
+      assert.equal(result.isError, true)
+      assert.ok(result.content.includes('evidence firewall'))
+      assert.ok(result.content.includes('src/agent/loop.ts'))
+      assert.ok(result.content.includes('Recovery'))
+    })
+
+    it('claim 已 verifiedAt → 放行（走正常 gate 流程）', async () => {
+      const { tool, params } = greenCtx({ claimTracker: verifiedTracker(), scoutFirewall: true })
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'fix: src/agent/loop.ts:100 的问题' },
+      })
+      assert.equal(result.isError ?? false, false)
+      assert.doesNotMatch(result.content, /evidence firewall/)
+    })
+
+    it('引用非声称路径 → 不拦', async () => {
+      const { tool, params } = greenCtx({ claimTracker: unverifiedTracker(), scoutFirewall: true })
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'fix: src/tools/bar.ts:45 的问题' },
+      })
+      assert.equal(result.isError ?? false, false)
+    })
+
+    it('commit=false → 无 isError，警示行在报告里（报告轮恒开）', async () => {
+      const { tool, params } = greenCtx({ claimTracker: unverifiedTracker(), scoutFirewall: true })
+      const result = await tool.execute({
+        ...params,
+        input: { message: 'fix: src/agent/loop.ts:100 的问题' },
+      })
+      assert.equal(result.isError ?? false, false)
+      assert.match(result.content, /证据防火墙：交付文本引用了 delegate 报告的路径/)
+    })
+
+    it('防火墙关（config false、env 未设）→ 不拦，警示行仍在', async () => {
+      const prev = process.env.RIVET_SCOUT_FIREWALL
+      delete process.env.RIVET_SCOUT_FIREWALL
+      try {
+        const { tool, params } = greenCtx({ claimTracker: unverifiedTracker(), scoutFirewall: false })
+        const result = await tool.execute({
+          ...params,
+          input: { commit: true, message: 'fix: src/agent/loop.ts:100 的问题' },
+        })
+        assert.equal(result.isError ?? false, false)
+        assert.match(result.content, /证据防火墙：交付文本引用了 delegate 报告的路径/)
+      } finally {
+        if (prev !== undefined) process.env.RIVET_SCOUT_FIREWALL = prev
+      }
+    })
+
+    it('getClaimTracker 缺省 → 完全现状行为（无警示行）', async () => {
+      const { tool, params } = greenCtx()
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: 'fix: src/agent/loop.ts:100 的问题' },
+      })
+      assert.equal(result.isError ?? false, false)
+      assert.doesNotMatch(result.content, /证据防火墙/)
+    })
+
+    it('[待核] 标注行豁免 → 不拦不警示', async () => {
+      const { tool, params } = greenCtx({ claimTracker: unverifiedTracker(), scoutFirewall: true })
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, message: '已修复（[待核] src/agent/loop.ts:100 尚待核验）' },
+      })
+      assert.equal(result.isError ?? false, false)
+      assert.doesNotMatch(result.content, /证据防火墙/)
+    })
+
+    it('force=true 不豁免', async () => {
+      const { tool, params } = greenCtx({ claimTracker: unverifiedTracker(), scoutFirewall: true })
+      const result = await tool.execute({
+        ...params,
+        input: { commit: true, force: true, message: 'fix: src/agent/loop.ts:100 的问题' },
+      })
+      assert.equal(result.isError, true)
+      assert.ok(result.content.includes('force 不豁免'))
+    })
+
+    it('env RIVET_SCOUT_FIREWALL=1 覆盖 config false → 拦', async () => {
+      const prev = process.env.RIVET_SCOUT_FIREWALL
+      process.env.RIVET_SCOUT_FIREWALL = '1'
+      try {
+        const { tool, params } = greenCtx({ claimTracker: unverifiedTracker(), scoutFirewall: false })
+        const result = await tool.execute({
+          ...params,
+          input: { commit: true, message: 'fix: src/agent/loop.ts:100 的问题' },
+        })
+        assert.equal(result.isError, true)
+        assert.ok(result.content.includes('evidence firewall'))
+      } finally {
+        if (prev === undefined) delete process.env.RIVET_SCOUT_FIREWALL
+        else process.env.RIVET_SCOUT_FIREWALL = prev
+      }
     })
   })
 })

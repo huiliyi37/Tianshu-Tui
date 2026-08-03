@@ -15,6 +15,7 @@ import { getKnowledgeIndex } from '../memory/knowledge-index.js'
 import { getRecallTracker } from '../memory/recall-efficacy.js'
 import { renderGateFeedbackHint } from '../memory/gate-ledger.js'
 import { readCommitFacts } from '../context/project-memory-writer.js'
+import { tokenizeRecallQuery } from '../memory/query-terms.js'
 
 // ── recall helpers ──
 
@@ -35,7 +36,7 @@ const DEFINITION: ToolDefinition = {
   input_schema: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['recall', 'remember'], description: 'recall: 搜索记忆；remember: 存储一条 claim' },
+      action: { type: 'string', enum: ['recall', 'remember', 'recall_feedback'], description: 'recall: 搜索记忆；remember: 存储一条 claim；recall_feedback: 记录召回是否被采纳' },
       // recall params
       query: { type: 'string', description: '搜索关键词（对项目知识库做 BM25 + 结构化过滤的混合检索）。recall 必填。' },
       kind: { type: 'string', enum: ['user_constraint', 'user_preference', 'decision', 'file_observation', 'verification_fact', 'failure_pattern', 'security_finding', 'worker_finding', 'project_rule'], description: '按 claim 类型过滤' },
@@ -44,6 +45,8 @@ const DEFINITION: ToolDefinition = {
       limit: { type: 'number', default: 5, description: '返回的最大结果数' },
       includeHistory: { type: 'boolean', default: false, description: '在 recall 结果中包含已被取代/过期的知识条目（默认：只返回当前有效条目）' },
       includeCommitFacts: { type: 'boolean', default: false, description: '在 recall 结果中包含历史 commit 事实（query 形如 commit hash 时自动启用）' },
+      entryId: { type: 'string', description: 'recall_feedback 时的记忆 ID，可从 recall 结果中获得' },
+      outcome: { type: 'string', enum: ['adopted', 'rejected', 'contradicted'], description: 'recall_feedback 时的评估结果' },
       // remember params
       text: { type: 'string', description: 'claim 文本——简洁具体（1-3 句）。remember 必填。' },
       scope: { type: 'string', enum: ['session', 'project'], default: 'session', description: '生命周期：session（随会话消亡）或 project（跨会话存活）' },
@@ -94,7 +97,7 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
         const commitFacts = includeCommitFacts
           ? readCommitFacts(cwd)
               .filter(e => e.text.toLowerCase().includes(query.toLowerCase())
-                || query.toLowerCase().split(/\W+/).filter(t => t.length >= 3).some(t => e.text.toLowerCase().includes(t)))
+                || tokenizeRecallQuery(query).some(t => e.text.toLowerCase().includes(t)))
               .slice(-limit)
           : []
 
@@ -137,7 +140,7 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
             if (e.evidence) meta.push(`evidence:${e.evidence.slice(0, 60)}`)
             if (e.sessionId) meta.push(`session:${e.sessionId.slice(0, 8)}`)
             if (e.supersededBy) meta.push(`superseded-by:${e.supersededBy}`)
-            lines.push(`- [${e.kind}] ${e.text}${meta.length > 0 ? ` (${meta.join(', ')})` : ''}`)
+            lines.push(`- [${e.id}] [${e.kind}] ${e.text}${meta.length > 0 ? ` (${meta.join(', ')})` : ''}`)
           }
         }
         if (mdHits.length > 0) {
@@ -158,6 +161,18 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
           lines.push(`未找到与「${query}」相关的记忆。`)
         }
         return { content: lines.join('\n') }
+      }
+
+      if (action === 'recall_feedback') {
+        const entryId = typeof params.input.entryId === 'string' ? params.input.entryId.trim() : ''
+        const outcome = params.input.outcome
+        if (!entryId || (outcome !== 'adopted' && outcome !== 'rejected' && outcome !== 'contradicted')) {
+          return { content: 'Error: recall_feedback requires a recalled entryId and a valid outcome.', isError: true }
+        }
+        if (!ctx?.sessionId || !getRecallTracker(ctx.sessionId).recordOutcome(entryId, outcome)) {
+          return { content: 'Error: entryId was not recalled in this session.', isError: true }
+        }
+        return { content: `Recorded recall feedback: ${entryId} -> ${outcome}.` }
       }
 
       // action === 'remember'

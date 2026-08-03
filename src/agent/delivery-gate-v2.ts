@@ -298,7 +298,7 @@ export function createDeliveryGateV2(opts: {
     // 层 1a: latest verification totals for "声明即实测" echo
     const _lv = allVerifications.length > 0 ? allVerifications[allVerifications.length - 1] : undefined
     const latestVerificationTotals = _lv
-      ? { passed: _lv.passed, failed: _lv.failed, skipped: _lv.skipped, command: _lv.command }
+      ? { passed: _lv.passed ?? 0, failed: _lv.failed ?? 0, skipped: _lv.skipped ?? 0, command: _lv.command }
       : undefined
 
     // Nothing to deliver

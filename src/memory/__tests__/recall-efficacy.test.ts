@@ -78,6 +78,26 @@ describe('recall-efficacy', () => {
     assert.equal(record!.gateAdmittedCited, 1, 'only the verbatim-cited gate entry counts')
   })
 
+  it('records explicit adopted, rejected, and contradicted outcomes for recalled entries', () => {
+    const tracker = new RecallEfficacyTracker('sess-outcomes')
+    tracker.record('test sql', [
+      { text: 'Use parameterized queries for all SQL access', id: 'mem-1' },
+      { text: 'Use read replicas for reports', id: 'mem-2' },
+      { text: 'A legacy SQL policy was superseded', id: 'mem-3' },
+    ])
+
+    assert.equal(tracker.recordOutcome('mem-1', 'adopted'), true)
+    assert.equal(tracker.recordOutcome('mem-2', 'rejected'), true)
+    assert.equal(tracker.recordOutcome('mem-3', 'contradicted'), true)
+    assert.equal(tracker.recordOutcome('unknown', 'adopted'), false)
+
+    const record = tracker.finalize(cwd, '')
+    assert.equal(record!.adoptedEntries, 1)
+    assert.equal(record!.rejectedEntries, 1)
+    assert.equal(record!.contradictedEntries, 1)
+    assert.equal(record!.outcomeRate, 1)
+  })
+
   it('backward-compat: old ledger rows without recalledEntryIds are tolerated', () => {
     // Write a row without the new fields (simulate old-format ledger line)
     const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 12)

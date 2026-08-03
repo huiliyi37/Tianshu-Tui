@@ -3,6 +3,7 @@ import { recommendModelForTask } from '../model/capability.js'
 import type { ProviderConfig } from '../config/schema.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import type { DelegationActivity } from '../tools/types.js'
+import { BatchShortCircuitJudge, cancelRestEnabled } from './batch-short-circuit.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
@@ -28,8 +29,10 @@ import {
   type WorkerBudget,
   type WorkOrderScope,
   type WorkerFailureReason,
+  buildPolicyCancelledResult,
   clampWorkerMaxTurns,
   deriveWorkerSessionId,
+  normalizeReviewVerdictStatus,
 } from './work-order.js'
 import { buildContractProjection, type ContractProjection } from './contract-projection.js'
 import { reconcileWithObjective } from './worker-objective-gate.js'
@@ -153,6 +156,25 @@ export function deriveStableWorkOrderId(parentTurnId: string): string | undefine
     : undefined
 }
 
+/**
+ * Order id 派生（含嵌套命名空间）——coordinator 建单与 delegate-batch 预计算
+ * （objectiveById / dependencies）共用同一口径，防漂移。
+ *
+ * deriveStableWorkOrderId 只取末两段：顶层批靠它获得跨重派稳定 id（rerun 去重、
+ * fleet 卡片复用）。但 worker 内再派 delegate_batch（delegationDepth>0）会产出
+ * 同样的 'batch:N'——orderControllers/liveness/steerQueues 等 side-table 互踩，
+ * 父批 finally 还会误删嵌套 worker 的注册项（kill/steer 误伤）。嵌套批保留
+ * parentTurnId 的工具调用前缀作命名空间（每次工具调用唯一）；team:/council:
+ * 的跨波/重派语义不动；顶层批（depth 0）行为完全不变。
+ */
+export function deriveWorkOrderId(parentTurnId: string, delegationDepth?: number): string | undefined {
+  const stableId = deriveStableWorkOrderId(parentTurnId)
+  if (!stableId || (delegationDepth ?? 0) === 0) return stableId
+  if (!stableId.startsWith('batch:')) return stableId
+  const ns = parentTurnId.slice(0, parentTurnId.length - stableId.length - 1)
+  return ns ? `${ns}:${stableId}` : stableId
+}
+
 const TIER_FLOOR_RANK: Record<ModelTier, number> = { cheap: 0, balanced: 1, strong: 2 }
 
 /** 瑶光门语义：floor 是「不得低于」的硬地板，只抬升不降级。 */
@@ -161,9 +183,11 @@ export function applyTierFloor(tier: ModelTier, floor?: ModelTier): ModelTier {
   return TIER_FLOOR_RANK[tier] >= TIER_FLOOR_RANK[floor] ? tier : floor
 }
 
-/** 失败升档天花板下允许的最高档位。'off' 时不允许任何升档(返回 null)。 */
+/** 失败升档天花板下允许的最高档位。'off' 时不允许任何升档(返回 null)。
+ *  缺省 fail-closed：升档是全新会话零缓存全量重跑（成本可达 flash 数倍），
+ *  构造路径漏传 escalationCap 时必须等于关死——想开就显式配 workers.escalationCap。 */
 export function escalationTierAllowed(cap: FailureEscalationCap | undefined): ModelTier | null {
-  const effective = cap ?? 'strong'
+  const effective = cap ?? 'off'
   if (effective === 'off') return null
   return effective
 }
@@ -174,6 +198,11 @@ export interface DelegationRequest {
   kind: WorkOrderKind
   profile: WorkerProfile
   scope: WorkOrderScope
+  /** Task-level constraints rendered into the worker prompt. Absent falls back
+   *  to profile boilerplate, which is what every dispatch got before this field
+   *  existed — the plan's anti-goals died in the orchestrator's paraphrase
+   *  (see docs/design/2026-08-02-工单约束通道.md). */
+  constraints?: string[]
   /** Review-router re-entrancy depth to pass into worker tool contexts. */
   reviewDepth?: number
   /** B3: delegation nesting depth (0 = primary → worker). Requests at
@@ -364,6 +393,31 @@ export interface DelegationCoordinatorConfig {
   /** Approval mode of the primary session. Only `dangerously-skip-permissions` is
    *  delegated downward to workers (see WorkerSessionConfig.parentApprovalMode). */
   parentApprovalMode?: import('./loop-types.js').ApprovalMode
+  /** 计划约束兜底注入（D8 L2）。返回已渲染的 constraints 条目，与 request.constraints
+   *  合并后进工单（request 在前，计划级在后）。best-effort——抛错或返回空都只是少
+   *  几条约束，绝不阻断派发。 */
+  getPlanConstraints?: (objective: string) => readonly string[] | undefined
+}
+
+/**
+ * L2 计划约束兜底注入：request.constraints 在前（任务级更贴，优先占满 12 条预算），
+ * 计划级在后。getPlanConstraints 抛错时退化为只用 request.constraints——fail-open，
+ * 计划解析失败绝不影响派发。四个工单创建点共用，不复制四遍。
+ */
+export function withPlanConstraints(
+  constraints: string[] | undefined,
+  objective: string,
+  config: Pick<DelegationCoordinatorConfig, 'getPlanConstraints'>,
+): string[] | undefined {
+  if (!config.getPlanConstraints) return constraints
+  let planLevel: readonly string[] | undefined
+  try {
+    planLevel = config.getPlanConstraints(objective)
+  } catch {
+    planLevel = undefined
+  }
+  if (!planLevel || planLevel.length === 0) return constraints
+  return [...(constraints ?? []), ...planLevel]
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -685,6 +739,10 @@ export class DelegationCoordinator {
   private readonly liveness: WorkerLiveness
   /** A4: per-order controllers so a stall sweep aborts only the wedged worker. */
   private readonly orderControllers = new Map<string, AbortController>()
+  /** 策略短路取消登记簿：delegateBatch 在 abort 前登记，wrapAbort 据此出
+   *  'Delegation aborted: policy short-circuit' 消息（保证 isAbort=true 不进
+   *  重试、不记 provider 恶评），processNext catch 据此合成非故障结果。 */
+  private readonly policyCancelledIds = new Set<string>()
   /** 运行中转录快照 — per-order 活消息 getter（worker session 建好时经
    *  onSessionReady 注册；续跑/重试的新 session 覆盖旧 getter）。终态清除，
    *  读方回落到 saveWorkerSession 的落盘记录。 */
@@ -729,8 +787,17 @@ export class DelegationCoordinator {
   private static readonly MAX_PRO_UPGRADES = 3
   /** Per-profile circuit breaker for fast-failing repeatedly broken profiles. */
   readonly circuitBreaker: CircuitBreakerManager
-  /** Structured mailbox for inter-agent communication within a delegation wave. */
-  readonly mailbox: WorkerMailbox
+  /** P1-6: global worker concurrency gate — single delegate() / background /
+   *  user-launched workers bypass WorkOrderQueue, so we enforce a coordinator
+   *  level semaphore (activeWorkerCount ≤ maxWorkers) that covers ALL paths.
+   *  batch workers go through the same gate, so batch + single + background
+   *  share one concurrency budget instead of each having its own. */
+  private activeWorkerCount = 0
+  private readonly workerWaiters: Array<() => void> = []
+  /** P1-8: global in-flight file claim table. Captures scope + write intent
+   *  for every dispatched order so checkGlobalFileConflict can detect cross-
+   *  wave overlap (WorkOrderQueue only guards within one batch). */
+  private readonly inflightFiles = new Map<string, { files: string[]; writes: boolean }>()
 
   constructor(private config: DelegationCoordinatorConfig) {
     this.runWorker = config.runWorker ?? runWorkerSession
@@ -742,7 +809,6 @@ export class DelegationCoordinator {
       now: config.livenessClock,
     })
     this.circuitBreaker = config.circuitBreaker ?? new CircuitBreakerManager()
-    this.mailbox = new InMemoryMailbox()
   }
 
   /** W3: stash an aborted worker's checkpoint (bounded FIFO) and annotate the
@@ -825,6 +891,7 @@ export class DelegationCoordinator {
       try { controller.abort() } catch { /* ignore */ }
     }
     this.orderControllers.clear()
+    this.policyCancelledIds.clear()
     this.liveMessages.clear()
     this.nestedUpstream.clear()
     this.activityUpstream.clear()
@@ -1275,23 +1342,29 @@ export class DelegationCoordinator {
     return { candidate, gate }
   }
 
-  /** Drain mailbox into run packet and clear. Called after every wave (batch or single). */
-  private async drainMailboxIntoRun(run: CoordinatorRun): Promise<CoordinatorRun> {
-    const findings = this.mailbox.byType('finding')
-    const escalations = this.mailbox.byType('escalation')
+  /** Drain mailbox into run packet and clear. Called after every wave (batch or single).
+   *  P1-7: mailbox is per-wave — each delegate()/delegateBatch() creates its own
+   *  instance and passes it down, so concurrent waves never share message space. */
+  private async drainMailboxIntoRun(run: CoordinatorRun, mailbox: WorkerMailbox): Promise<CoordinatorRun> {
+    const findings = mailbox.byType('finding')
+    const escalations = mailbox.byType('escalation')
     const notes: string[] = []
     for (const f of findings) notes.push(`📬 ${f.from}: ${f.payload.summary}`)
     for (const e of escalations) notes.push(`🚨 ${e.from}: ${e.payload.summary}`)
-    this.mailbox.clear()
+    mailbox.clear()
     if (notes.length === 0) return run
     return { ...run, packet: `${run.packet}\n\nMailbox:\n${notes.join('\n')}` }
   }
 
   async delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun> {
-    // Per-call abort signal override — allows the tool pipeline to propagate
-    // its timeout signal to the coordinator without mutating config.
-    const savedSignal = this.config.abortSignal
-    if (abortSignal) this.config.abortSignal = abortSignal
+    // P1-7: per-call abort signal is passed down as a parameter — never mutated
+    // on the shared config. The old save/restore raced across concurrent
+    // delegate()/delegateBatch() calls (background worker + main batch) and
+    // could route abort to the wrong run or leave the wrong signal installed.
+    const parentSignal = abortSignal ?? this.config.abortSignal
+    // P1-7: per-wave mailbox — each wave gets a fresh instance so concurrent
+    // waves never interleave messages in a shared mailbox.
+    const waveMailbox = new InMemoryMailbox()
     try {
       // B3: hard depth cap — nesting allowed (planner workers think-then-
       // delegate) but bounded. Reject, don't throw: the requesting worker
@@ -1375,7 +1448,7 @@ export class DelegationCoordinator {
       }
 
       const isWrite = classifyProfile(request.profile) === 'hands'
-      const stableId = deriveStableWorkOrderId(request.parentTurnId)
+      const stableId = deriveWorkOrderId(request.parentTurnId, request.delegationDepth)
       const order = isWrite
         ? createWriteWorkOrder({
             id: stableId,
@@ -1384,6 +1457,7 @@ export class DelegationCoordinator {
             profile: request.profile,
             objective: request.objective,
             scope: request.scope,
+            constraints: withPlanConstraints(request.constraints, request.objective, this.config),
             reviewDepth: request.reviewDepth,
             delegationDepth: (request.delegationDepth ?? 0) + 1,
             dependencies: request.dependencies,
@@ -1401,6 +1475,7 @@ export class DelegationCoordinator {
             profile: request.profile,
             objective: request.objective,
             scope: request.scope,
+            constraints: withPlanConstraints(request.constraints, request.objective, this.config),
             reviewDepth: request.reviewDepth,
             delegationDepth: (request.delegationDepth ?? 0) + 1,
             dependencies: request.dependencies,
@@ -1432,10 +1507,12 @@ export class DelegationCoordinator {
           this.abortCheckpoints.delete(request.resumeWorkOrderId)
         }
       }
-      const run = await this.delegateOrder(order)
-      return this.drainMailboxIntoRun(run)
+      // P1-6/7/8: single delegate() goes through the same global gate as batch
+      // workers — concurrency semaphore + cross-wave file-conflict registration.
+      const run = await this.runDelegationWithGlobalGate(order, parentSignal, waveMailbox)
+      return this.drainMailboxIntoRun(run, waveMailbox)
     } finally {
-      this.config.abortSignal = savedSignal
+      // P1-7: config.abortSignal was never mutated — nothing to restore.
     }
   }
 
@@ -1473,8 +1550,11 @@ export class DelegationCoordinator {
       try {
         const expansionRun = await this.runWorker(expansionConfig)
         const expandedResult = expansionRun.result
-        // Only accept the expansion if it's actually longer
-        if (expandedResult.summary.length > result.summary.length) {
+        // Only accept the expansion when it is itself passed AND actually longer.
+        // A failed/blocked expansion (e.g. 收尾轮 JSON 解析崩后 salvage 出的长
+        // summary) must never flip a passed result — 2026-08-02 c12c8 工单：
+        // 首轮 passed 被扩展轮的 failed/json_parse 长报告翻盘成 failed。
+        if (expandedResult.status === 'passed' && expandedResult.summary.length > result.summary.length) {
           result = expandedResult
           messages = expansionRun.session.getMessages()
         }
@@ -1636,11 +1716,149 @@ export class DelegationCoordinator {
     }
   }
 
-  private async delegateOrder(order: WorkOrder): Promise<CoordinatorRun> {
+  /** P1-6: wait until activeWorkerCount < maxWorkers, then claim a slot.
+   *  abort 感知（审查 H1/H3 修复）：等槽期间监听 parentSignal——触发即从
+   *  waiter 队列移除并 reject，不再出现「主控已超时、槽位释放后僵尸唤醒
+   *  继续跑完整 worker」。 */
+  private async acquireWorkerSlot(parentSignal?: AbortSignal): Promise<void> {
+    while (this.activeWorkerCount >= this.config.maxWorkers) {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const cleanup = () => {
+          const i = this.workerWaiters.indexOf(wake)
+          if (i >= 0) this.workerWaiters.splice(i, 1)
+          parentSignal?.removeEventListener('abort', onAbort)
+        }
+        const wake = () => { if (!settled) { settled = true; cleanup(); resolve() } }
+        const onAbort = () => {
+          if (settled) return
+          settled = true
+          cleanup()
+          reject(parentSignal!.reason instanceof Error ? parentSignal!.reason : new Error('delegation aborted while waiting for a worker slot'))
+        }
+        if (parentSignal?.aborted) { onAbort(); return }
+        this.workerWaiters.push(wake)
+        parentSignal?.addEventListener('abort', onAbort, { once: true })
+      })
+    }
+    this.activeWorkerCount++
+  }
+
+  /** P1-6: release a slot and wake the next waiter. */
+  private releaseWorkerSlot(): void {
+    this.activeWorkerCount--
+    this.workerWaiters.shift()?.()
+  }
+
+  /** P1-8: cross-wave file conflict — conflicting files, or null. Same semantics
+   *  as WorkOrderQueue.hasFileConflict: two read-only workers may inspect the
+   *  same snapshot in parallel; serialization applies whenever either side can
+   *  write. The queue only guards within one batch — this table catches single
+   *  delegate() (which bypasses the queue) overlapping any in-flight worker. */
+  private checkGlobalFileConflict(order: WorkOrder): string[] | null {
+    const orderFiles = order.scope.files ?? []
+    if (orderFiles.length === 0) return null
+    const orderWrites = classifyProfile(order.profile) === 'hands'
+    const orderFileSet = new Set(orderFiles)
+    for (const [inflightId, entry] of this.inflightFiles) {
+      if (inflightId === order.id) continue
+      if (entry.files.length === 0) continue
+      if (!orderWrites && !entry.writes) continue
+      const hits = entry.files.filter(f => orderFileSet.has(f))
+      if (hits.length > 0) return hits
+    }
+    return null
+  }
+
+  /** P1-6/7/8: the single entry point for every order dispatch (single delegate,
+   *  batch, background). Enforces the global concurrency semaphore, registers
+   *  in-flight file claims for cross-wave conflict detection, and passes the
+   *  wave's abort signal / mailbox down explicitly instead of inheriting them
+   *  from shared instance state. */
+  private async runDelegationWithGlobalGate(
+    order: WorkOrder,
+    parentSignal: AbortSignal | undefined,
+    mailbox: WorkerMailbox,
+  ): Promise<CoordinatorRun> {
+    // P1-8: write workers must declare a file scope — without one, conflict
+    // detection and change-reconciliation have no boundary to check against.
+    // 豁免（审查 M1）：verifier 的合法形态就是「不声明 files 跑全量测试」，
+    // 其写副作用仅限测试文件，不在此闸口径内。
+    if (classifyProfile(order.profile) === 'hands' && order.profile !== 'verifier' && !(order.scope.files?.length)) {
+      const blocked: WorkerResult[] = [{
+        workOrderId: order.id,
+        status: 'blocked',
+        summary: 'Write worker requires an explicit scope.files — refusing to dispatch a writer with no file boundary',
+        findings: [],
+        artifacts: [{ kind: 'risk', title: 'Missing write scope', content: 'scope.files is empty for a hands-profile worker' }],
+        changedFiles: [],
+        risks: ['write worker dispatched without scope.files'],
+        nextActions: ['Re-dispatch with explicit scope.files before delegating write work'],
+        evidenceStatus: 'blocked',
+      }]
+      return {
+        status: 'completed',
+        order,
+        results: blocked,
+        packet: await buildPrimaryWorkerPacket(blocked, this.config.artifactStore),
+      }
+    }
+    // H1 修复（审查）：嵌套委派不计入全局信号量——planner（brain）持槽等子工、
+    // 子工再等槽是结构性自死锁（RIVET_MAX_WORKERS=1 时任何 planner 派发必死，
+    // 默认 3 槽时 3 个并发 planner 即死）。顶层仍受闸，嵌套恢复改动前的
+    // per-batch 语义（深度另有 maxDelegationDepth 兜底）。
+    // 深度口径：两条构造路径（delegate/delegateBatch）统一在 request 深度上
+    // +1 落 order——顶层 order.delegationDepth===1，嵌套 ≥2。
+    const nested = (order.delegationDepth ?? 0) >= 2
+    // P1-6: wait for a global concurrency slot (covers batch + single + background).
+    if (!nested) await this.acquireWorkerSlot(parentSignal)
+    try {
+      // P1-8: cross-wave conflict — 检查与登记必须在同一同步块内（审查 H2：
+      // 此前检查在 await 槽位之前，同 tick 两个同文件写工双双绕过 TOCTOU）。
+      // 等槽后被唤醒的订单用最新登记表重查，语义自洽。
+      const conflict = this.checkGlobalFileConflict(order)
+      if (conflict) {
+        const blocked: WorkerResult[] = [{
+          workOrderId: order.id,
+          status: 'blocked',
+          summary: `Cross-wave file conflict: ${conflict.join(', ')} already in-flight by another worker — refusing overlapping dispatch`,
+          findings: [],
+          artifacts: [{ kind: 'risk', title: 'Cross-wave file conflict', content: `Files in-flight: ${conflict.join(', ')}` }],
+          changedFiles: [],
+          risks: [`cross-wave file conflict: ${conflict.join(', ')}`],
+          nextActions: ['Wait for the in-flight worker to settle, or narrow scope.files to non-overlapping files'],
+          evidenceStatus: 'blocked',
+        }]
+        return {
+          status: 'completed',
+          order,
+          results: blocked,
+          packet: await buildPrimaryWorkerPacket(blocked, this.config.artifactStore),
+        }
+      }
+      this.inflightFiles.set(order.id, {
+        files: order.scope.files ?? [],
+        writes: classifyProfile(order.profile) === 'hands',
+      })
+      return await this.delegateOrder(order, parentSignal, mailbox)
+    } finally {
+      this.inflightFiles.delete(order.id)
+      if (!nested) this.releaseWorkerSlot()
+    }
+  }
+
+  /** P1-7: parentSignal / mailbox are explicit parameters (not read from
+   *  this.config / this.mailbox) so concurrent waves never inherit another
+   *  wave's abort signal or mailbox. */
+  private async delegateOrder(
+    order: WorkOrder,
+    parentSignal: AbortSignal | undefined,
+    mailbox: WorkerMailbox,
+  ): Promise<CoordinatorRun> {
     // Abort guard: if the caller's abort signal fires (e.g. tool-level timeout),
     // reject immediately instead of waiting for the worker's internal 180s timeout.
     // This prevents zombie workers from blocking the main agent loop.
-    if (this.config.abortSignal?.aborted) {
+    if (parentSignal?.aborted) {
       const abortedResults = [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'), { failureReason: 'caller_aborted' })]
       return {
         status: 'completed',
@@ -1749,7 +1967,7 @@ export class DelegationCoordinator {
     // Downward trust delegation: only dangerously-skip-permissions flows to workers.
     workerConfig.parentApprovalMode = this.config.parentApprovalMode
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
-    workerConfig.mailbox = this.mailbox
+    workerConfig.mailbox = mailbox
     // Batch-scoped shared prewarm (delegateBatch 派发前预热 + 同批 worker 互暖)。
     // 单发 delegate() 路径不入表，worker 用 AgentLoop 实例默认 cache（历史行为）。
     const batchPrewarmCache = this.batchPrewarmByOrder.get(order.id)
@@ -1762,11 +1980,16 @@ export class DelegationCoordinator {
     }
     // Enable JSON-mode repair for OpenAI-protocol providers. The repair path
     // sends a tool-free request with response_format: json_object, which is an
-    // OpenAI API standard. If the provider doesn't support it, the request
-    // fails silently and falls through to plain-text repair — no harm done.
-    // Without this, malformed worker JSON (common on LongCat) never gets the
-    // structured repair path, degrading to field-level salvage with heavy loss.
+    // OpenAI API standard. Optimistic even when the capability card says
+    // supportsResponseFormat:false (LongCat accepts it in practice and its
+    // malformed worker JSON badly needs the structured repair path) — now safe
+    // because worker-session probes the first rejection: a provider that
+    // refuses response_format gets one immediate retry WITHOUT it (the round
+    // is not wasted) and the json channel stays off for the rest of the run.
     if (!workerConfig.forceJsonRepair) workerConfig.forceJsonRepair = true
+    // B（终轮定型）：报告统一经带完整会话历史的无工具收尾轮产出（默认开）。
+    // RIVET_WORKER_FINALIZE=0 一键回退旧契约——主提示词内联 JSON、无收尾轮。
+    workerConfig.finalizeReport = process.env.RIVET_WORKER_FINALIZE !== '0'
     // Dispatch nonce: batch order ids repeat across delegation runs — without
     // this, every run appends to the same worker-batch-N.jsonl (cumulative
     // context + stale artifacts, session 2c1186f5). Same-order retries within
@@ -1791,8 +2014,8 @@ export class DelegationCoordinator {
 
     // A4: per-order AbortController merged with the parent signal — the stall
     // sweep can abort ONLY this worker without touching its batch siblings,
-    // while a parent abort still kills everything.
-    const parentSignal = this.config.abortSignal
+    // while a parent abort still kills everything. parentSignal is the explicit
+    // parameter (P1-7) — never read from this.config here.
     const orderController = new AbortController()
     const mergedSignal = parentSignal
       ? AbortSignal.any([parentSignal, orderController.signal])
@@ -1872,14 +2095,17 @@ export class DelegationCoordinator {
         let settled = false
         const onAbort = () => {
           if (settled) return
-          // Distinguish a stall-sweep abort (per-order controller fired, parent
-          // did not) from a caller abort — stalls ARE provider-relevant faults.
-          const stallAbort = orderController.signal.aborted && !parentSignal?.aborted
+          // Distinguish policy-cancel (must not go to stall/provider-fault path) from
+          // stall-sweep abort (per-order controller fired, parent did not).
+          const policyCancel = this.policyCancelledIds.has(order.id)
+          const stallAbort = !policyCancel && orderController.signal.aborted && !parentSignal?.aborted
           const stallSecs = (() => {
             const ms = this.liveness.tolerance(order.id)
             return ms ? Math.round(ms / 1000) : null
           })()
-          const abortMsg = stallAbort
+          const abortMsg = policyCancel
+            ? `Delegation aborted: policy short-circuit — aggregation already satisfied, worker ${order.id} cancelled to save budget`
+            : stallAbort
             ? `Worker ${order.id} stalled: no activity for ${stallSecs ?? '?'}s (provider: ${workerConfig.providerName ?? 'unknown'}) — upstream may be slow to first byte rather than dead; aborted by stall sweep`
             : 'Delegation aborted: caller signal fired'
 
@@ -2224,7 +2450,10 @@ export class DelegationCoordinator {
           // 升级重试是全新 config——转录快照与嵌套上行不接就在 Pro 重试段丢失。
           upgradedConfig.onSessionReady = workerConfig.onSessionReady
           upgradedConfig.onNestedDelegation = workerConfig.onNestedDelegation
-          upgradedConfig.mailbox = this.mailbox
+          upgradedConfig.mailbox = mailbox
+          // 升级重试是全新 config——finalizeReport（RIVET_WORKER_FINALIZE 灰度）
+          // 不从原 config 接就在 Pro 重试段失守（一键回退覆盖不全）。
+          upgradedConfig.finalizeReport = workerConfig.finalizeReport
 
           // Re-register liveness for retry — leash derives from the UPGRADED
           // provider (escalation may land on a slow-thinking one).
@@ -2401,6 +2630,86 @@ export class DelegationCoordinator {
     // 产出的才是最终结果，让它拿到模型元数据、也让熔断记的是最终判定。
     run = await this.maybeReviseEvidence(order, workerConfig, mergedSignal, isWrite, run)
 
+    // verdict ≠ status：审查/验证工单的结论性 failed/escalated 归一为 passed（缺陷
+    // 走 findings/polarity 通道）——必须在熔断记账、连败计数、升级判定之前，否则
+    // 审查发现会被当成 worker 运行失败（2026-08-02 三连败误升级事故）。
+    run = { ...run, result: normalizeReviewVerdictStatus(order, run.result) }
+
+    // P0-5: 契约失败升档——worker 正常返回但结果因契约破碎 blocked
+    //（json_parse / schema_mismatch）。同模型修复梯在 worker 内部已用尽
+    //（finalize 收尾轮 + repair 轮 + salvage），此时升一档模型一轮合规的概率
+    // 远高于同模型继续原地碎。复用 Flash→Pro 的配额与档位条件；只限只读路径
+    //（hands 有写闸门/续跑自有阶梯）。升档结果只在「确实更好」（不再是契约
+    // 破碎）时才替换原结果——升档是机会，不是赌博。
+    if (!isWrite
+      && run.result.status === 'blocked'
+      && (run.result.failureReason === 'json_parse' || run.result.failureReason === 'schema_mismatch')) {
+      const contractFlashTier = inferModelTierFromCard(selected)
+      const contractTierLocked = profileRegistry.get(order.profile)?.tierLock === 'cheap'
+      const contractMaxTier = escalationTierAllowed(this.config.escalationCap)
+      const canEscalateContract = !contractTierLocked
+        && contractMaxTier !== null
+        && this.proUpgradeCount < DelegationCoordinator.MAX_PRO_UPGRADES
+        && TIER_FLOOR_RANK[contractFlashTier] < TIER_FLOOR_RANK[contractMaxTier]
+      if (canEscalateContract) {
+        const upgradeCards = this.config.modelCards
+          .filter(c => {
+            const t = inferModelTierFromCard(c)
+            return TIER_FLOOR_RANK[t] > TIER_FLOOR_RANK[contractFlashTier]
+              && TIER_FLOOR_RANK[t] <= TIER_FLOOR_RANK[contractMaxTier!]
+          })
+          .sort((a, b) => TIER_FLOOR_RANK[inferModelTierFromCard(b)] - TIER_FLOOR_RANK[inferModelTierFromCard(a)])
+        const strongCard = upgradeCards[0]
+        if (strongCard) {
+          const upgradedConfig = this.config.runtimeFactory(order, strongCard, workerRegistry)
+          upgradedConfig.maxTurns = clampWorkerMaxTurns(upgradedConfig.maxTurns, order.budget.maxTurns)
+          upgradedConfig.reviewDepth = order.reviewDepth
+          upgradedConfig.parentApprovalMode = this.config.parentApprovalMode
+          upgradedConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
+          upgradedConfig.abortSignal = mergedSignal
+          upgradedConfig.onActivity = (kind, detail) => {
+            this.liveness.tick(order.id)
+            upstreamActivity?.(kind, detail)
+          }
+          // 升级重试是全新 config——转录快照/嵌套上行/灰度开关逐项接回（同 catch 路径）。
+          upgradedConfig.onSessionReady = workerConfig.onSessionReady
+          upgradedConfig.onNestedDelegation = workerConfig.onNestedDelegation
+          upgradedConfig.mailbox = mailbox
+          upgradedConfig.finalizeReport = workerConfig.finalizeReport
+          this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: upgradedConfig.providerName, isWrite }))
+          this.orderControllers.set(order.id, orderController)
+          try {
+            escalationShadows.push(this.recordEscalation(order, strongCard, `契约失败(${run.result.failureReason})升档重试`))
+            const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
+            this.recordProviderOutcome(strongCard.model, true)
+            const stillBroken = workerRun.result.status === 'blocked'
+              && (workerRun.result.failureReason === 'json_parse' || workerRun.result.failureReason === 'schema_mismatch')
+            if (!stillBroken) {
+              const escSessionMessages = typeof workerRun.session?.getMessages === 'function'
+                ? workerRun.session.getMessages()
+                : undefined
+              run = {
+                ...run,
+                result: workerRun.result,
+                sessionMessages: escSessionMessages ?? run.sessionMessages,
+                usage: workerRun.usage ?? run.usage,
+                providerName: upgradedConfig.providerName,
+              }
+              selected = strongCard
+            }
+            // 升档后契约仍碎——保留原结果：失败不源于模型档位，不浪费替换。
+          } catch {
+            // 升档运行本身抛错——保留原契约破碎结果，provider 健康记账失败。
+            this.recordProviderOutcome(strongCard.model, false)
+          } finally {
+            this.liveness.unregister(order.id)
+            this.orderControllers.delete(order.id)
+          }
+        }
+      }
+    }
+
+
     // Run completed — regardless of task verdict, the provider's API delivered.
     run.result = this.enrichResult(run.result, selected.model, run.providerName ?? workerConfig.providerName, run.usage)
     this.recordProviderOutcome(selected.model, true)
@@ -2509,9 +2818,16 @@ export class DelegationCoordinator {
      */
     onWorkerSettled?: (result: WorkerResult) => void,
   ): Promise<CoordinatorRun> {
-    // Per-call abort signal override
-    const savedSignal = this.config.abortSignal
-    if (abortSignal) this.config.abortSignal = abortSignal
+    // P1-7: per-call abort signal passed down as parameter — never mutated on
+    // the shared config (save/restore raced across concurrent calls).
+    const batchParentSignal = abortSignal ?? this.config.abortSignal
+    // P1-7: per-wave mailbox — fresh instance per delegateBatch call so
+    // concurrent waves (background worker + main batch) never interleave mail.
+    const batchMailbox = new InMemoryMailbox()
+    // Pre-create work orders for deduplication and dependency ordering
+    // （声明在 try 之外——finally 清理 policyCancelledIds 需要访问它；
+    //  声明在 try 块内会让 finally 报 TS2304，见 678a4c4c 事故）
+    const orders: WorkOrder[] = []
     try {
       // B3: depth-capped requests are rejected as blocked, not silently dropped.
       const depthCap = this.config.maxDelegationDepth ?? MAX_DELEGATION_DEPTH
@@ -2542,11 +2858,9 @@ export class DelegationCoordinator {
       write: this.config.maxWriteWorkers,
     })
 
-    // Pre-create work orders for deduplication and dependency ordering
-    const orders: WorkOrder[] = []
     for (const r of runnables) {
       const isWrite = classifyProfile(r.profile) === 'hands'
-      const stableId = deriveStableWorkOrderId(r.parentTurnId)
+      const stableId = deriveWorkOrderId(r.parentTurnId, r.delegationDepth)
       const order = isWrite
         ? createWriteWorkOrder({
             id: stableId,
@@ -2555,6 +2869,7 @@ export class DelegationCoordinator {
             profile: r.profile,
             objective: r.objective,
             scope: r.scope,
+            constraints: withPlanConstraints(r.constraints, r.objective, this.config),
             reviewDepth: r.reviewDepth,
             delegationDepth: (r.delegationDepth ?? 0) + 1,
             dependencies: r.dependencies,
@@ -2576,6 +2891,7 @@ export class DelegationCoordinator {
             profile: r.profile,
             objective: r.objective,
             scope: r.scope,
+            constraints: withPlanConstraints(r.constraints, r.objective, this.config),
             reviewDepth: r.reviewDepth,
             delegationDepth: (r.delegationDepth ?? 0) + 1,
             dependencies: r.dependencies,
@@ -2637,12 +2953,44 @@ export class DelegationCoordinator {
     const inflight: Promise<void>[] = []
     let completedCount = 0
 
+    // 短路判定器（策略达标 cancel-rest）：quorumGroups 收集从批末上移至
+    // 此处（批末 aggregateResults 复用同一份）。quorumGroups 用于组阈值解析，
+    // groupMembers/groupOf 用于组内成员范围判定。
+    const quorumGroupsForJudge = new Map<string, number>()
+    for (const req of requests) {
+      if (req.groupId && req.quorumK !== undefined && !quorumGroupsForJudge.has(req.groupId)) {
+        quorumGroupsForJudge.set(req.groupId, req.quorumK)
+      }
+    }
+    const groupMembers = new Map<string, string[]>()
+    const groupOf = new Map<string, string | undefined>()
+    for (const o of orders) {
+      groupOf.set(o.id, o.groupId)
+      if (o.groupId) {
+        const list = groupMembers.get(o.groupId) ?? []
+        list.push(o.id)
+        groupMembers.set(o.groupId, list)
+      }
+    }
+    const profileMapForJudge = new Map(orders.map(o => [o.id, o.profile] as const))
+    const judge = new BatchShortCircuitJudge(
+      policy,
+      profileMapForJudge,
+      groupMembers,
+      groupOf,
+      quorumGroupsForJudge.size > 0 ? quorumGroupsForJudge : undefined,
+    )
+    const policyLabel = typeof policy === 'object' ? `quorum k=${policy.k}` : policy
+
     const processNext = async (): Promise<void> => {
       const order = queue.dequeue()
       if (!order) return
       queue.markInFlight(order)
       try {
-        const run = await this.delegateOrder(order)
+        // P1-6/7/8: batch workers go through the same global gate as single
+        // delegates — concurrency semaphore + cross-wave conflict registration,
+        // with the wave's abort signal / mailbox passed explicitly.
+        const run = await this.runDelegationWithGlobalGate(order, batchParentSignal, batchMailbox)
         allResults.push(...run.results)
         if (run.modelTierShadows) modelTierShadows.push(...run.modelTierShadows)
         if (run.modelTierGatedDecisions) modelTierGatedDecisions.push(...run.modelTierGatedDecisions)
@@ -2652,8 +3000,32 @@ export class DelegationCoordinator {
         }
         queue.markCompleted(order)
         for (const r of run.results) onWorkerSettled?.(r)
+        // 策略短路：每个 settle 结果喂入判定器，达标则取消剩余兄弟 worker
+        if (cancelRestEnabled()) {
+          for (const r of run.results) {
+            const decision = judge.onSettle(r)
+            if (decision.kind === 'none') continue
+            const inScope = (o: WorkOrder) =>
+              (decision.kind === 'cancel_all' || o.groupId === decision.groupId) && judge.cancellable(o)
+            // pending：撤出队列，当场合成结果
+            for (const cancelled of queue.cancelPending(inScope)) {
+              const settled = buildPolicyCancelledResult(cancelled, policyLabel)
+              allResults.push(settled)
+              onWorkerSettled?.(settled)
+              completedCount++
+              onProgress?.(completedCount, orders.length)
+            }
+            // in-flight：登记后 abort（结果经 catch 合成）
+            for (const o of queue.inFlight().filter(x => x.id !== order.id && inScope(x))) {
+              this.policyCancelledIds.add(o.id)
+              this.orderControllers.get(o.id)?.abort()
+            }
+          }
+        }
       } catch (error) {
-        const failure = workerFailureResult(order, error, { failureReason: classifyWorkerError(error) })
+        const failure = this.policyCancelledIds.has(order.id)
+          ? buildPolicyCancelledResult(order, policyLabel)
+          : workerFailureResult(order, error, { failureReason: classifyWorkerError(error) })
         allResults.push(failure)
         queue.markFailed(order)
         onWorkerSettled?.(failure)
@@ -2705,16 +3077,8 @@ export class DelegationCoordinator {
     }
 
     const profileMap = new Map(orders.map(o => [o.id, o.profile] as const))
-    // quorum 组级阈值（星河收编 #1）：从派发侧 requests 收集显式声明的组阈值，
-    // 供 quorum 聚合按组覆盖全局 k（不同副本数的 DP 组需要各自的 k）。
-    const quorumGroups = new Map<string, number>()
-    for (const req of requests) {
-      if (req.groupId && req.quorumK !== undefined && !quorumGroups.has(req.groupId)) {
-        quorumGroups.set(req.groupId, req.quorumK)
-      }
-    }
     const aggregated = [
-      ...aggregateResults(allResults, policy, profileMap, undefined, quorumGroups.size > 0 ? quorumGroups : undefined),
+      ...aggregateResults(allResults, policy, profileMap, undefined, quorumGroupsForJudge.size > 0 ? quorumGroupsForJudge : undefined),
       ...depthCapped,
     ]
     // Wave 3 aggregation path: post-verifyWorkerEvidence facts only.
@@ -2736,14 +3100,13 @@ export class DelegationCoordinator {
       ...(modelTierGatedDecisions.length > 0 ? { modelTierGatedDecisions } : {}),
       ...(gatedInfluenceAudits.length > 0 ? { gatedInfluenceAudits } : {}),
     }
-    return this.drainMailboxIntoRun(baseRun)
-    // NOTE: If delegateBatch is ever changed from serial (processNext recursion)
-    // to true concurrent execution, the finally-based signal restoration below
-    // will race with in-flight orders — they'll lose access to the signal
-    // mid-flight. In that case, pass abortSignal per-call to delegateOrder
-    // instead of mutating config.abortSignal.
+    return this.drainMailboxIntoRun(baseRun, batchMailbox)
+    // NOTE (P1-7): this batch's abort signal and mailbox are explicit parameters
+    // of runDelegationWithGlobalGate → delegateOrder, so per-order dispatch is
+    // safe under true concurrent execution — no shared instance state is
+    // mutated per call, hence nothing to restore here.
     } finally {
-      this.config.abortSignal = savedSignal
+      for (const o of orders) this.policyCancelledIds.delete(o.id)
     }
   }
 }

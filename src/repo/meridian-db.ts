@@ -141,7 +141,16 @@ CREATE TABLE IF NOT EXISTS cli_entries (
   source_file TEXT NOT NULL,
   PRIMARY KEY(flag, source_file)
 );
-`
+`;
+
+/**
+ * Escape GLOB wildcards so a literal file path can be used with SQLite GLOB.
+ * LIKE treats underscore as a single-char wildcard, so path-prefix queries
+ * must use GLOB with the literal path escaped (persistence #2; D6 task 1).
+ */
+function globEscape(filePath: string): string {
+  return filePath.replace(/[*?[]/g, '[$&]')
+}
 
 export class MeridianDb {
   private conn: any = null
@@ -163,6 +172,7 @@ export class MeridianDb {
         this.conn.pragma('journal_mode = WAL')
         this.conn.pragma('busy_timeout = 3000')
         this.conn.exec(SCHEMA)
+        migrateToV1(this.conn)
       } catch (err) {
         // Packaged sidecar with a broken native bundle: fail loud, never degrade.
         if ((err as { code?: string })?.code === 'ESQLITE_BUNDLE_BROKEN') throw err
@@ -189,7 +199,7 @@ export class MeridianDb {
       this.db.prepare('DELETE FROM symbols WHERE file_path = ?').run(result.filePath)
       // Use GLOB instead of LIKE — LIKE treats _ as single-char wildcard,
       // causing mis-deletion of edges for similarly-named files (persistence #2).
-      const escapedPath = result.filePath.replace(/[*?[]/g, '[$&]')
+      const escapedPath = globEscape(result.filePath)
       this.db.prepare('DELETE FROM edges WHERE source_id GLOB ?').run(`${escapedPath}:*`)
 
       const insertSym = this.db.prepare('INSERT OR REPLACE INTO symbols (id, name, kind, file_path, line, exported, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -319,9 +329,9 @@ export class MeridianDb {
         e.kind,
         e.weight
       FROM edges e
-      WHERE e.target_id LIKE ? || ':%'
+      WHERE e.target_id GLOB ? || ':*'
         AND substr(e.source_id, 1, instr(e.source_id, ':') - 1) != ?
-    `).all(filePath, filePath) as Array<{ file: string; kind: string; weight: number }>
+    `).all(globEscape(filePath), filePath) as Array<{ file: string; kind: string; weight: number }>
   }
 
   /** Get test files associated with a source file via tested_by edges */
@@ -329,8 +339,8 @@ export class MeridianDb {
     const rows = this.db.prepare(`
       SELECT DISTINCT substr(e.source_id, 1, instr(e.source_id, ':') - 1) as file
       FROM edges e
-      WHERE e.target_id LIKE ? || ':%' AND e.kind = 'tested_by'
-    `).all(filePath) as Array<{ file: string }>
+      WHERE e.target_id GLOB ? || ':*' AND e.kind = 'tested_by'
+    `).all(globEscape(filePath)) as Array<{ file: string }>
     return rows.map(r => r.file)
   }
 
@@ -666,6 +676,16 @@ export class MeridianDb {
     }
   }
 
+  /** Current Meridian schema version (PRAGMA user_version), 0 when unavailable. */
+  schemaVersion(): number {
+    if (!this._available) return 0
+    try {
+      return (this.db.pragma('user_version', { simple: true }) as number) ?? 0
+    } catch {
+      return 0
+    }
+  }
+
   close(): void {
     if (this.conn) { this.conn.close(); this.conn = null }
   }
@@ -684,5 +704,39 @@ function createNullDb(): any {
       return () => {}
     },
   })
+}
+
+/** Current Meridian data schema version (mirrored to PRAGMA user_version). */
+const MERIDIAN_SCHEMA_VERSION = 1
+
+/**
+ * One-shot migration to schema v1: purge historical dirty rows — absolute-path
+ * file rows (written before toRepoRelative fail-closed) and dangling imports edges
+ * (written before import resolution). Never blocks DB open (errors swallowed).
+ *
+ * The user_version guard is load-bearing, not an optimization. The dangling-edge
+ * predicate ("target not in files") also matches edges pointing at files that
+ * exist on disk but have not been indexed yet — this repo has ~2.6k indexable
+ * files against a backfill cap of 2000, so those edges are permanent, and the
+ * unchanged source file's content hash keeps needsParse from ever rebuilding
+ * them. Running this on every open would scrub real reverse-dependency edges
+ * out of the graph that analyzeImpact and the delivery gate read.
+ */
+function migrateToV1(db: any): void {
+  try {
+    if (((db.pragma('user_version', { simple: true }) as number) ?? 0) >= MERIDIAN_SCHEMA_VERSION) return
+    const tx = db.transaction(() => {
+      // Absolute-path file rows: POSIX '/...' and Windows 'C:\...' / 'C:/...'
+      db.prepare("DELETE FROM files WHERE substr(path, 1, 1) = '/' OR (substr(path, 2, 1) = ':' AND path GLOB '[A-Za-z]:*')").run()
+      // Symbols of those files share the same absolute-path key
+      db.prepare("DELETE FROM symbols WHERE substr(file_path, 1, 1) = '/' OR (substr(file_path, 2, 1) = ':' AND file_path GLOB '[A-Za-z]:*')").run()
+      // Dangling imports edges: kind='imports' whose target is not a known file
+      db.prepare("DELETE FROM edges WHERE kind = 'imports' AND NOT EXISTS (SELECT 1 FROM files f WHERE edges.target_id = f.path || ':*:0')").run()
+      db.pragma('user_version = ' + MERIDIAN_SCHEMA_VERSION)
+    })
+    tx()
+  } catch {
+    // Migration must never block DB open — index still functions on dirty data.
+  }
 }
 

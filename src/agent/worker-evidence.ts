@@ -2,6 +2,10 @@ import type { WorkerResult } from './work-order.js'
 import type { WorkerTranscript } from './worker-session.js'
 import { VERIFY_BASH_RE } from './hooks/self-verify-hook.js'
 
+/** 能在批末口径（transcript=undefined）下保住 evidenceStatus=verified 的 profile。 
+ *  batch-short-circuit.ts 的 DP 义务守卫复用同一事实源，避免硬编码漂移。 */
+export const VERIFIED_CAPABLE_PROFILES = new Set(['adversarial_verifier', 'goal_judge'])
+
 function addRisk(risks: string[], risk: string): string[] {
   return risks.includes(risk) ? risks : [...risks, risk]
 }
@@ -34,6 +38,59 @@ function provenVerification(transcript: WorkerTranscript): { proven: true } | { 
 }
 
 /**
+ * 系统捕获优先的结果校正：transcript 里的工具调用痕迹是主口径，
+ * 自报 changedFiles/verification 只作交叉校验。
+ *
+ * - changedFiles：transcript.mutatedFiles 缺省（旧固件/测试）= 捕获未激活，
+ *   保持自报不校验。已激活时取 自报 ∪ 捕获；自报里无工具调用痕迹的文件记
+ *   risk，且 evidenceStatus 为 verified 时降 unverified。
+ * - verification：真实跑过验证（provenVerification）却漏报元数据 → 补一条
+ *   passed 记录；验证跑挂却自报 passed → 改 failed 并记 risk。其余保持自报。
+ *
+ * 幂等——worker-session 成功路径校一次后，聚合二次过闸再校结果不变。
+ */
+export function reconcileCapturedWorkerFacts(result: WorkerResult, transcript: WorkerTranscript): WorkerResult {
+  let next = result
+
+  if (transcript.mutatedFiles) {
+    const capturedSet = new Set(transcript.mutatedFiles)
+    const fabricated = next.changedFiles.filter(f => !capturedSet.has(f))
+    const union = [...new Set([...next.changedFiles, ...transcript.mutatedFiles])]
+    if (fabricated.length > 0 || union.length !== next.changedFiles.length) {
+      next = {
+        ...next,
+        changedFiles: union,
+        evidenceStatus: fabricated.length > 0 && next.evidenceStatus === 'verified' ? 'unverified' : next.evidenceStatus,
+        risks: fabricated.length > 0
+          ? addRisk(next.risks, `自报 changedFiles 无工具调用痕迹：${fabricated.join(', ')}`)
+          : next.risks,
+      }
+    }
+  }
+
+  const proof = provenVerification(transcript)
+  if (proof.proven && !next.verification) {
+    const verifyBash = (transcript.bashCommands ?? []).find(cmd => VERIFY_BASH_RE.test(cmd))
+    next = {
+      ...next,
+      verification: {
+        command: transcript.toolUses.includes('run_tests') ? 'run_tests' : (verifyBash ?? 'run_tests'),
+        status: 'passed',
+        scope: 'targeted',
+      },
+    }
+  } else if (!proof.proven && proof.reason === 'errored' && next.verification?.status === 'passed') {
+    next = {
+      ...next,
+      verification: { ...next.verification, status: 'failed' },
+      risks: addRisk(next.risks, '系统捕获到验证执行失败（run_tests/验证形状 bash errored），自报 passed 不可信'),
+    }
+  }
+
+  return next
+}
+
+/**
  * Verify worker evidence for mutation safety.
  *
  * Gate logic: only `changedFiles` (files actually mutated) triggers verification.
@@ -52,6 +109,11 @@ function provenVerification(transcript: WorkerTranscript): { proven: true } | { 
  * @param transcript - Optional worker transcript for behavior-backed verifier gating
  */
 export function verifyWorkerEvidence(result: WorkerResult, profile?: string, transcript?: WorkerTranscript): WorkerResult {
+  // 系统捕获优先（2026-08-01）：有 transcript 先以工具调用痕迹交叉校验自报的
+  // changedFiles/verification，再走下游门禁。幂等——worker-session 成功路径已
+  // 校过一次的结果在此重校不变；批量二次过闸不带 transcript 时自然跳过。
+  if (transcript) result = reconcileCapturedWorkerFacts(result, transcript)
+
   // 复现即证明（全星域泛化，2026-07-07）：任何 profile 宣称 verified，只要有
   // transcript 就取证——没有真实 run_tests/验证形状 bash 的执行痕迹 → 降级。
   // adversarial_verifier 额外保留"无 transcript 也 fail-closed"（其裁决会被主
@@ -102,6 +164,7 @@ export function verifyWorkerEvidence(result: WorkerResult, profile?: string, tra
         risks: addRisk(result.risks, 'goal_judge reported verified without passing verification metadata'),
       }
     }
+    // verified 资格白名单——与 batch-short-circuit.ts 共享同一事实源。
     if (profile !== 'adversarial_verifier' && profile !== 'goal_judge') {
       return {
         ...result,

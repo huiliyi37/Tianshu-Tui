@@ -1,7 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   createTeamOrchestrateTool,
+  collectBlockedAttribution,
+  collectAllDirtyRows,
   formatTeamSummary,
   teamReviewChangedFiles,
   teamReviewForceLevel,
@@ -73,11 +79,16 @@ test('team_orchestrate dispatches a standard plan first wave', async () => {
   })
   assert.equal(result.isError, false)
   assert.equal(captured.length, 2)
-  assert.match(result.content, /2 dispatched/)
+  assert.match(result.content, /派发 2/)
   const panel = decodeTeamPanelModel(result.uiContent ?? '')
   assert.ok(panel)
   assert.equal(panel.dispatched, 2)
   assert.equal(panel.tasks.length, 2)
+  // D4：出站槽——orchestration 与 summary/panel 同源一致
+  assert.equal(result.orchestration?.kind, 'team')
+  assert.equal(result.orchestration?.dispatched, panel.dispatched)
+  assert.equal(result.orchestration?.wave, 0)
+  assert.equal(result.orchestration?.totalWaves, panel.totalWaves)
 })
 
 test('team_orchestrate 透传条件依赖边（收编 #6：markdown → DependencyEdge）', async () => {
@@ -429,21 +440,21 @@ test('formatTeamSummary renders the council merge ledger when present', () => {
     advisories: ['分片 T1 与 T2 都改 src/x.ts 但未标 dependsOn —— 补一条依赖让写入顺序明确(否则会被同文件检测自动串行排波)。'],
   }), 0)
 
-  assert.match(out, /Plan conflicts/)
+  assert.match(out, /计划冲突/)
   assert.match(out, /Dependency conflict on T1/)
-  assert.match(out, /Risk ledger/)
+  assert.match(out, /风险账本/)
   assert.match(out, /\[high\] T1: race/)
-  assert.match(out, /Deferred alternatives/)
+  assert.match(out, /暂缓的备选方案/)
   assert.match(out, /Alt approach — simpler/)
   assert.match(out, /已补入执行图的分片/)
   assert.match(out, /Gap-fill shard: T3/)
-  assert.match(out, /分片建议\(不阻断\)/)
+  assert.match(out, /分片建议（不阻断）/)
 })
 
 test('formatTeamSummary omits the merge ledger on cache-hit waves (planMerge absent)', () => {
   const out = formatTeamSummary(mkSummary({ planCacheHit: true }), 0)
-  assert.doesNotMatch(out, /Plan conflicts/)
-  assert.doesNotMatch(out, /Risk ledger/)
+  assert.doesNotMatch(out, /计划冲突/)
+  assert.doesNotMatch(out, /风险账本/)
 })
 
 test('formatTeamSummary warns instead of advancing when the whole wave failed', () => {
@@ -454,9 +465,9 @@ test('formatTeamSummary warns instead of advancing when the whole wave failed', 
   }
   const out = formatTeamSummary(mkSummary({ run }), 0)
 
-  assert.match(out, /all 2 workers failed/)
-  assert.match(out, /do NOT dispatch fromWave 1/)
-  assert.doesNotMatch(out, /call team_orchestrate again with fromWave/)
+  assert.match(out, /全部 2 个 worker 失败/)
+  assert.match(out, /修复前不要派发 fromWave 1/)
+  assert.doesNotMatch(out, /再次调用 team_orchestrate 并传 fromWave/)
 })
 
 test('formatTeamSummary keeps the normal next-wave hint when a worker passed', () => {
@@ -467,14 +478,14 @@ test('formatTeamSummary keeps the normal next-wave hint when a worker passed', (
   }
   const out = formatTeamSummary(mkSummary({ run }), 0)
 
-  assert.match(out, /call team_orchestrate again with fromWave: 1/)
-  assert.doesNotMatch(out, /workers failed/)
+  assert.match(out, /再次调用 team_orchestrate 并传 fromWave: 1/)
+  assert.doesNotMatch(out, /worker 失败/)
 })
 
 test('formatTeamSummary does not warn on the onPlanReady pre-render (run absent)', () => {
   const out = formatTeamSummary(mkSummary(), 0)
-  assert.match(out, /call team_orchestrate again with fromWave: 1/)
-  assert.doesNotMatch(out, /workers failed/)
+  assert.match(out, /再次调用 team_orchestrate 并传 fromWave: 1/)
+  assert.doesNotMatch(out, /worker 失败/)
 })
 
 // ── Scope-health wiring (advisory) ─────────────────────────────────────────
@@ -918,4 +929,233 @@ test('confirm 缺省（未传）→ 直接派发（向后兼容）', async () =>
   })
   assert.equal(dispatched, true)
   assert.ok(!result.content.includes('调用 team_orchestrate'))
+})
+
+// ── 复盘 D（docs/tasks/2026-08-03-starflow-iteration-plan.md）：blocked 归属 ──
+
+test('D: blocked 且本波次 worker 有 changedFiles → 报告含工作树归属段与下一步建议', () => {
+  const summary: TeamRunSummary = {
+    mode: 'standard',
+    planned: [],
+    tasks: [],
+    waves: [{ id: 'wave-0', risk: 'low', taskIds: ['T1'], reason: 'r', parallelLimit: 1 }],
+    dispatched: 1,
+    blocked: ['T1 门禁未过'],
+    packet: '<packet/>',
+    run: {
+      status: 'completed',
+      results: [mkResult({ workOrderId: 'T1', status: 'failed', changedFiles: ['src/agent/a.ts'] })],
+      packet: '<packet/>',
+    },
+  }
+  const out = formatTeamSummary(summary, 0, { hits: [' M src/agent/a.ts'], precise: true })
+  assert.match(out, /工作树本会话已产生改动/)
+  assert.match(out, /src\/agent\/a\.ts/, 'git status 命中行原样列出')
+  assert.match(out, /下一步/, '附建议下一步')
+})
+
+test('D: 降级归属段（precise:false）——全量 dirty + 无法逐文件归属标注', () => {
+  const summary: TeamRunSummary = {
+    mode: 'standard',
+    planned: [],
+    tasks: [],
+    waves: [{ id: 'wave-0', risk: 'low', taskIds: ['T1'], reason: 'r', parallelLimit: 1 }],
+    dispatched: 1,
+    blocked: ['T1 门禁未过'],
+    packet: '<packet/>',
+    run: {
+      status: 'completed',
+      results: [mkResult({ workOrderId: 'T1', status: 'failed', changedFiles: [] })],
+      packet: '<packet/>',
+    },
+  }
+  const out = formatTeamSummary(summary, 0, { hits: [' M src/other.ts', '?? newdir/'], precise: false })
+  assert.match(out, /工作树 dirty 改动全量列出/)
+  assert.match(out, /无法逐文件归属/)
+  assert.match(out, /勿整目录 add/)
+  assert.match(out, /src\/other\.ts/)
+})
+
+test('D: 无改动 worker → 不出归属段', () => {
+  const summary: TeamRunSummary = {
+    mode: 'standard',
+    planned: [],
+    tasks: [],
+    waves: [{ id: 'wave-0', risk: 'low', taskIds: ['T1'], reason: 'r', parallelLimit: 1 }],
+    dispatched: 1,
+    blocked: ['T1 门禁未过'],
+    packet: '<packet/>',
+    run: {
+      status: 'completed',
+      results: [mkResult({ workOrderId: 'T1', status: 'failed' })],
+      packet: '<packet/>',
+    },
+  }
+  const out = formatTeamSummary(summary, 0, undefined)
+  assert.doesNotMatch(out, /工作树本会话已产生改动/)
+})
+
+test('D: collectBlockedAttribution——git 仓库命中 changedFiles；非 git 目录降级为空', () => {
+  // 非 git 目录：返回 []（降级跳过，不炸）
+  const plainDir = mkdtempSync(join(tmpdir(), 'team-attr-nogit-'))
+  assert.deepEqual(collectBlockedAttribution(plainDir, ['src/a.ts']), [])
+
+  // git 仓库：dirty 的 changedFiles 命中行原样返回
+  const dir = mkdtempSync(join(tmpdir(), 'team-attr-git-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'a.ts'), '// v1\n')
+  execFileSync('git', ['add', '-A'], { cwd: dir })
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init'], { cwd: dir })
+  writeFileSync(join(dir, 'src', 'a.ts'), '// v2\n')
+  const hits = collectBlockedAttribution(dir, ['src/a.ts'])
+  assert.ok(hits.length >= 1, `应命中 dirty 文件，got ${JSON.stringify(hits)}`)
+  assert.match(hits[0]!, /src\/a\.ts/)
+  // 未改动的路径不命中
+  assert.deepEqual(collectBlockedAttribution(dir, ['src/never-touched.ts']), [])
+})
+
+test('D: rename 与未跟踪目录的 status 行也能命中 changedFiles', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'team-attr-shape-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  writeFileSync(join(dir, 'a.txt'), 'old\n')
+  execFileSync('git', ['add', '-A'], { cwd: dir })
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init'], { cwd: dir })
+  execFileSync('git', ['mv', 'a.txt', 'b.txt'], { cwd: dir })
+  mkdirSync(join(dir, 'newdir'))
+  writeFileSync(join(dir, 'newdir', 'f.txt'), 'x\n')
+  // `R  a.txt -> b.txt` 与 `?? newdir/` 两种 status 行都应命中对应 changedFiles
+  const hits = collectBlockedAttribution(dir, ['b.txt', 'newdir/f.txt'])
+  assert.ok(hits.some(h => h.includes('b.txt')), `rename 目标应命中，got ${JSON.stringify(hits)}`)
+  assert.ok(hits.some(h => h.includes('newdir')), `未跟踪目录内文件应命中，got ${JSON.stringify(hits)}`)
+  // 未跟踪目录展开属目录级归属——必须带防误提交标注（多会话共享工作区误报修正）
+  assert.ok(hits.some(h => h.includes('newdir') && h.includes('目录级归属')), `目录级命中应带标注，got ${JSON.stringify(hits)}`)
+})
+
+test('D: 目录级命中附「可能含其他会话改动，勿整目录 add」标注', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'team-attr-dir-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  mkdirSync(join(dir, 'docs'))
+  writeFileSync(join(dir, 'docs', 'other.md'), 'x\n')
+  execFileSync('git', ['add', '-A'], { cwd: dir })
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init'], { cwd: dir })
+  writeFileSync(join(dir, 'docs', 'other.md'), 'y\n')
+  // worker 自报目录级条目：多会话共享工作区下，目录内可能混有他会话改动
+  const dirHits = collectBlockedAttribution(dir, ['docs'])
+  assert.ok(dirHits.some(h => h.includes('docs/other.md')), `目录内文件应命中，got ${JSON.stringify(dirHits)}`)
+  assert.ok(dirHits.some(h => h.includes('目录级归属')), `目录级命中必须带防误提交标注，got ${JSON.stringify(dirHits)}`)
+})
+
+test('D: quotePath=false——中文/非 ASCII 文件名命中', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'team-attr-utf8-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  writeFileSync(join(dir, '计划文档.md'), 'x\n') // 未跟踪：?? 计划文档.md
+  const hits = collectBlockedAttribution(dir, ['计划文档.md'])
+  assert.ok(hits.some(h => h.includes('计划文档.md')), `中文路径应命中（quotePath=false），got ${JSON.stringify(hits)}`)
+})
+
+test('D: collectAllDirtyRows——全量 dirty 行返回；非 git 目录降级为空', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'team-alldirty-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  writeFileSync(join(dir, 'x.txt'), 'x\n')
+  const rows = collectAllDirtyRows(dir)
+  assert.ok(rows.some(r => r.includes('x.txt')), `未跟踪文件应出现在全量行，got ${JSON.stringify(rows)}`)
+  const plainDir = mkdtempSync(join(tmpdir(), 'team-alldirty-nogit-'))
+  assert.deepEqual(collectAllDirtyRows(plainDir), [])
+})
+
+test('D: 数据源合并——diff artifact 的真实文件也能进归属段（blocked worker 自报为空）', () => {
+  const run: CoordinatorRun = {
+    status: 'completed',
+    results: [mkResult({
+      workOrderId: 'T1', status: 'blocked', changedFiles: [],
+      artifacts: [{ kind: 'diff', title: 'Patch: src/a.ts', content: 'diff --git a/src/a.ts b/src/a.ts\n+++ b/src/a.ts\n' }],
+    })],
+    packet: '<packet/>',
+  }
+  const summary: TeamRunSummary = {
+    mode: 'standard', planned: [], tasks: [],
+    waves: [{ id: 'wave-0', risk: 'low', taskIds: ['T1'], reason: 'r', parallelLimit: 1 }],
+    dispatched: 1, blocked: ['T1 门禁未过'], packet: '<packet/>', run,
+  }
+  // 与 execute 相同的合并路径：teamReviewChangedFiles（diff artifact ∪ 自报）
+  const merged = teamReviewChangedFiles(summary.run)
+  assert.deepEqual(merged, ['src/a.ts'], 'diff artifact 路径应并入自报集合')
+
+  const dir = mkdtempSync(join(tmpdir(), 'team-attr-merge-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'a.ts'), '// v1\n')
+  execFileSync('git', ['add', '-A'], { cwd: dir })
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init'], { cwd: dir })
+  writeFileSync(join(dir, 'src', 'a.ts'), '// v2\n')
+  const hits = collectBlockedAttribution(dir, merged)
+  assert.ok(hits.length >= 1, `合并路径应命中 dirty 文件，got ${JSON.stringify(hits)}`)
+  assert.match(hits[0]!, /src\/a\.ts/)
+})
+
+
+// ── D 审查修复（2026-08-03）：门禁收窄 + 降级归属 execute 全链路 ──
+
+test('D 门禁收窄：blocked 仅含 waiting for wave（健康中段波）不出归属段', async () => {
+  // 全 passed 且带 changedFiles 的健康波次——旧门禁（blocked.length>0）会因
+  // 「waiting for wave」占位出归属段+「回退」建议（行动误导）；收窄后不出。
+  const dir = mkdtempSync(join(tmpdir(), 'team-gate-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'src', 'a.ts'), 'x\n')
+  const tool = createTeamOrchestrateTool({
+    delegateBatch: async () => ({
+      status: 'completed',
+      results: [
+        mkResult({ workOrderId: 'team:T1', status: 'passed', changedFiles: ['src/a.ts'] }),
+        mkResult({ workOrderId: 'team:T2', status: 'passed', changedFiles: [] }),
+      ],
+      packet: 'p',
+    }),
+  })
+  const md = [
+    '### T1: 主线改造',
+    'Refactor `src/a.ts`',
+    '### T2: 备选调研',
+    '调研 `src/a.ts` 的替代路径',
+    '### T3: 测试覆盖',
+    '测试 `src/a.ts`',
+    '依赖 T1(onFailure:alternate:T2)',
+  ].join('\n')
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'force: healthy mid-wave', planMarkdown: md },
+    cwd: dir,
+    toolUseId: 'tu-gate',
+  })
+  assert.equal(result.isError, false)
+  assert.match(result.content, /waiting for wave/, '未来波占位仍在阻塞列表（信息不丢）')
+  assert.doesNotMatch(result.content, /工作树本会话已产生改动/, 'waiting 占位不触发精确归属段')
+  assert.doesNotMatch(result.content, /工作树 dirty 改动全量列出/, 'waiting 占位不触发降级归属段')
+  assert.doesNotMatch(result.content, /回退/, '健康中段波不应收到「回退」建议')
+})
+
+test('D 降级归属 execute 全链路：真实阻塞 + 空自报（共享模式无 diff）→ 全量 dirty 段', async () => {
+  // 审查 MEDIUM 4 的真回归：走 execute → teamReviewChangedFiles（空）→ 降级全量。
+  const dir = mkdtempSync(join(tmpdir(), 'team-fallback-'))
+  execFileSync('git', ['init', '-q'], { cwd: dir })
+  writeFileSync(join(dir, 'x.txt'), 'x\n') // 工作树有 dirty 行（来源不明——其他会话或未捕获）
+  const tool = createTeamOrchestrateTool({
+    delegateBatch: async () => ({
+      status: 'completed',
+      results: [mkResult({ workOrderId: 'team:T1', status: 'failed', changedFiles: [] })],
+      packet: 'p',
+    }),
+  })
+  const md = ['### T1: 主线改造', 'Refactor `src/a.ts`'].join('\n')
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'force: blocked worker with no file list', planMarkdown: md },
+    cwd: dir,
+    toolUseId: 'tu-fallback',
+  })
+  assert.equal(result.isError, false)
+  assert.match(result.content, /工作树 dirty 改动全量列出/)
+  assert.match(result.content, /无法逐文件归属/)
+  assert.match(result.content, /勿整目录 add/)
+  assert.match(result.content, /x\.txt/, '工作树 dirty 行原样列出')
 })

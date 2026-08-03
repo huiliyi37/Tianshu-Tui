@@ -20,8 +20,17 @@ export class ApprovalIntentController {
   approvalPending: PendingApproval | null = null
   approvalEditMode = false
   approvalEditError = ''
-  /** 审批选项列表的光标行（0 批准 / 1 拒绝 / 2 编辑 JSON / 3 解释风险）。 */
+  /**
+   * 审批选项列表的光标行。0 批准 / 1 拒绝 / 2 编辑 JSON；`showRememberOption`
+   * 时 3 为「批准并记住此目录」；无风险解释行时末项为「解释风险」。
+   */
   approvalOptionIndex = 0
+  /**
+   * 当前待批项是否涉及工作区外路径（read/write/edit/hash_edit 且目标不在
+   * cwd 下）。为 true 时选项表插入「批准并记住此目录」——记住把目录授权
+   * 持久化到本工作区存储，下次会话不再重复询问。
+   */
+  showRememberOption = false
 
   /** 风险解释（Ctrl+E 按需拉取，绝不预生成）。三态：未请求 / 在途 / 有结果。 */
   riskExplanation: RiskExplanation | null = null
@@ -34,5 +43,6 @@ export class ApprovalIntentController {
     this.riskExplainPending = false
     this.riskExplainError = ''
     this.approvalOptionIndex = 0
+    this.showRememberOption = false
   }
 }

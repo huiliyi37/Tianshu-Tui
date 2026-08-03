@@ -240,3 +240,18 @@ describe('resolveConflictsWithRebuttals — 多轮收敛', () => {
     assert.equal(out[0]!.resolution, 'prev')
   })
 })
+
+it('aggregateCouncil 容忍 worker 缺字段输出（risk.claim/ch.text/alt.proposal undefined）', () => {
+  // headless 冒烟事故：真实 worker 返回缺文本字段的 risk/challenge/alternative，
+  // 渲染层 .slice() 未防护 → council_convene 整体崩溃。
+  const seats = [{
+    authority: 'yaoguang',
+    additions: [],
+    risks: [{ severity: 'low', mitigation: 'm' }],
+    challenges: [{ severity: 'blocking' }],
+    alternatives: [{ recommend: true, rationale: 'r' }],
+    notes: [],
+  }] as any
+  const r = aggregateCouncil({ objective: 'test', items: [] } as any, seats)
+  assert.equal(r.decisions.length, 3)
+})

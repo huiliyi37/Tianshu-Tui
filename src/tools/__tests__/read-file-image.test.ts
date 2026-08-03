@@ -41,9 +41,9 @@ describe('read_file — 图片文件视觉分流', () => {
     assert.ok(result.images![0]!.startsWith('data:image/jpeg;base64,'))
   })
 
-  it('超过 5MB 的图片 → 拒绝并指向缩放/OCR 绕行', async () => {
+  it('超过 10MB 的图片 → 拒绝并指向缩放/OCR 绕行', async () => {
     const file = join(TEST_DIR, 'huge.png')
-    writeFileSync(file, Buffer.alloc(6 * 1024 * 1024, 1))
+    writeFileSync(file, Buffer.alloc(11 * 1024 * 1024, 1))
     const result = await READ_FILE_TOOL.execute(makeParams({ file_path: file }))
     assert.equal(result.isError, true)
     assert.ok(result.content.includes('image too large'))

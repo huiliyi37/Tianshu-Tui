@@ -8,16 +8,20 @@
  * 1. StarDomain / ProfileDefinition 字段消费覆盖
  * 2. RuntimeHookDeps ↔ loop-factory 实参键集合 diff
  * 3. env 开关注册表双向 completeness
+ * 4. sidecar 装配面可选依赖完备性（serve-agent.ts 与 TUI 的 parity 接线 + allowlist）
  *
  * 模式选择：
  * - 字段消费 → architecture-guards 正则扫描 + allowlist
  * - hook deps → plan-mode completeness 模式
  * - env 注册表 → plan-mode completeness 模式
+ * - sidecar 装配 → 源码正则接线检查 + allowlist
  */
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
+import { SessionStateManager } from '../agent/session-state.js'
+import { buildDynamicAppendix } from '../prompt/volatile.js'
 
 const SRC_ROOT = join(process.cwd(), 'src')
 
@@ -376,5 +380,215 @@ describe('assembly audit — env registry completeness', () => {
     const stale = registryVars.filter(v => !codeVars.has(v)).sort()
     assert.equal(stale.length, 0,
       `Registry entries with no RIVET_* reference in source code (stale entries):\n${stale.map(v => `  ${v}`).join('\n')}\n\nRun: npx tsx scripts/gen-env-registry.ts`)
+  })
+})
+
+// ── 检查项 4：sidecar 装配面可选依赖完备性 ──
+
+interface SidecarWiringCheck {
+  /** 被检查的可选依赖 */
+  dependency: string
+  /** 在 serve-agent.ts 中应当出现的接线形状 */
+  pattern: RegExp
+  /** 不接线的后果（断言失败信息） */
+  consequence: string
+}
+
+const SIDECAR_WIRING_CHECKS: SidecarWiringCheck[] = [
+  {
+    dependency: 'refs.getImpactedTests',
+    pattern: /refs\.getImpactedTests\s*=/,
+    consequence: 'delivery-gate-v2.ts:330 的 moduleCoverage 分支在桌面端/插件上永不触发',
+  },
+  {
+    dependency: 'injectDurableClaims(cwd)',
+    pattern: /injectDurableClaims\(\s*claimStore\s*,\s*cwd\s*\)/,
+    consequence: 'session-persist.ts:589 的跨项目污染门禁被整块跳过',
+  },
+]
+
+/** 已知未接线、有意暂缓的 sidecar 依赖。与 FIELD_ALLOWLIST 同治理：note + reviewDate。 */
+const SIDECAR_WIRING_ALLOWLIST: AllowlistEntry[] = [
+  {
+    field: 'MeridianIndexer.stigmergy',
+    source: 'serve-agent.getOrCreateMeridianIndexer',
+    category: 'pending',
+    note: 'getOrCreateMeridianIndexer 是 per-cwd 共享工厂（同 cwd 多 session 共享一个实例），而 stigmergy 是 session 级——直接传参会让 A 会话的信息素污染 B 会话的文件排序。这是作用域不匹配，不是漏传。待决策：把 stigmergy 改为 getFileBoost 调用时传参，或删除 meridian-behavior.ts 的 pheromone 支路（weights.pheromone=0.2 至今零贡献）。',
+    reviewDate: '2027-02-01',
+  },
+]
+
+describe('assembly audit — sidecar wiring completeness', () => {
+  const serveAgentSource = readFileSync(join(SRC_ROOT, 'server', 'serve-agent.ts'), 'utf8')
+
+  test('all TUI-parity optional deps are wired on the sidecar path', () => {
+    const missing = SIDECAR_WIRING_CHECKS
+      .filter(c => !c.pattern.test(serveAgentSource))
+      .map(c => `  ${c.dependency}: ${c.consequence}`)
+    assert.equal(missing.length, 0,
+      `sidecar 装配面漏传（桌面端与 VS Code 插件走这条路，静默降级不报错）:\n${missing.join('\n')}`)
+  })
+
+  test('sidecar allowlist entries have reviewDate within 12 months', () => {
+    const now = Date.now()
+    const oneYear = 365 * 24 * 60 * 60 * 1000
+    const expired = SIDECAR_WIRING_ALLOWLIST
+      .filter(e => { const d = new Date(e.reviewDate).getTime(); return isNaN(d) || d < now - oneYear })
+      .map(e => `  ${e.source}.${e.field}: ${e.reviewDate}`)
+    assert.equal(expired.length, 0, `过期的 sidecar allowlist 条目:\n${expired.join('\n')}`)
+  })
+
+  test('sidecar allowlist size report (growth is an alert signal)', () => {
+    console.log(`[assembly-audit] sidecar wiring allowlist size: ${SIDECAR_WIRING_ALLOWLIST.length}`)
+    assert.ok(SIDECAR_WIRING_ALLOWLIST.length < 8,
+      `sidecar allowlist has ${SIDECAR_WIRING_ALLOWLIST.length} entries — 装配面正在系统性失守`)
+  })
+})
+
+// ── 检查项 5：coordinator 构造点计划约束接线（D8 L2）──
+
+/** 生产环境 DelegationCoordinator 构造点清单。新增构造点时应在此追加；否则断言失败。 */
+const COORDINATOR_CONSTRUCTION_POINTS: Array<{
+  /** src-relative path */
+  file: string
+  /** 该构造点是否应有 getPlanConstraints */
+  expectPlanConstraints: boolean
+  reason: string
+}> = [
+  {
+    file: 'bootstrap.ts',
+    expectPlanConstraints: true,
+    reason: '主控 agent 路径——D8 L2 计划约束兜底注入的唯一构造点',
+  },
+  {
+    file: 'agent/headless-coordinator.ts',
+    expectPlanConstraints: false,
+    reason: 'headless goal_judge 单 worker（maxWorkers:1），无计划语境，有意不接。reviewDate: 2027-08-01',
+  },
+]
+
+describe('assembly audit — coordinator plan-constraints wiring (D8 L2)', () => {
+  test('bootstrap.ts DelegationCoordinator 构造点含 getPlanConstraints', () => {
+    const src = readFileSync(join(SRC_ROOT, 'bootstrap.ts'), 'utf8')
+    // 在 new DelegationCoordinator({ … }) 块内找到 getPlanConstraints
+    const coordBlock = src.match(/new DelegationCoordinator\(\{([\s\S]*?)\n  \}\)/)?.[1]
+    assert.ok(coordBlock, '找不到 DelegationCoordinator 构造块')
+    assert.ok(
+      /getPlanConstraints\s*:/.test(coordBlock),
+      'bootstrap.ts 的 DelegationCoordinator 构造块缺少 getPlanConstraints——D8 L2 计划约束兜底未接线',
+    )
+  })
+
+  test('所有 production 构造点已枚举（防止隐式第三个构造点）', () => {
+    const allSources = COORDINATOR_CONSTRUCTION_POINTS.map(p => {
+      const src = readFileSync(join(SRC_ROOT, p.file), 'utf8')
+      const count = (src.match(/new DelegationCoordinator\(/g) ?? []).length
+      return { file: p.file, count }
+    })
+    // 每个文件恰好 1 个构造点
+    for (const { file, count } of allSources) {
+      assert.equal(count, 1, `${file} 的 new DelegationCoordinator( 数量 ${count} ≠ 1——若新增构造点，请在此处追加条目`)
+    }
+  })
+
+  test('headless-coordinator 在 allowlist 中有意不接，reviewDate 未过期', () => {
+    const headless = COORDINATOR_CONSTRUCTION_POINTS.find(p => p.file === 'agent/headless-coordinator.ts')
+    assert.ok(headless, 'headless-coordinator 不在构造点清单中')
+    assert.equal(headless!.expectPlanConstraints, false)
+    const reviewMatch = headless!.reason.match(/reviewDate:\s*(\d{4}-\d{2}-\d{2})/)
+    if (reviewMatch) {
+      const reviewDate = new Date(reviewMatch[1]!).getTime()
+      const now = Date.now()
+      const oneYear = 365 * 24 * 60 * 60 * 1000
+      assert.ok(!isNaN(reviewDate) && reviewDate > now - oneYear,
+        `headless-coordinator allowlist reviewDate ${reviewMatch[1]} 已过期`)
+    }
+  })
+})
+
+// ── 检查项 6：自述块渲染分支可达性 ──
+//
+// 「有调用方」是 trivially 满足的废判据——`renderProgressBlock` 的兜底分支有调用方、
+// 有测试、也在覆盖率里，但它在生产中数月不可达：判别式问的是「字符串非空吗」，而被
+// 问的那个字符串是 `<session-state></session-state>` 空壳，恒为真值。分支活着，只是
+// 永远走不到。这一组断言抓的是这个形状。
+//
+// 通用不变量：**任何被 truthiness 判别式消费的块渲染器，无内容时必须返回空串。**
+// 违反它的代价不是多几个字节，而是它身后的整条分支静默死掉且没有任何外显信号。
+
+interface SelfStateChannel {
+  name: string
+  /** 无内容状态下的渲染结果 */
+  renderEmpty: () => string | undefined
+  /** 返回非空壳的后果 */
+  consequence: string
+}
+
+const SELF_STATE_CHANNELS: SelfStateChannel[] = [
+  {
+    name: 'session-state',
+    renderEmpty: () => new SessionStateManager('audit').renderForVolatile(),
+    consequence: '`if (ctx.sessionState)` 恒真 → <progress> 兜底分支（含 decisions）不可达',
+  },
+]
+
+describe('assembly audit — self-state render reachability', () => {
+  for (const channel of SELF_STATE_CHANNELS) {
+    test(`${channel.name} 无内容时渲染为空串，不留空壳`, () => {
+      const rendered = channel.renderEmpty() ?? ''
+      assert.equal(rendered, '',
+        `${channel.name} 无内容时返回了 ${JSON.stringify(rendered)}——${channel.consequence}`)
+    })
+  }
+
+  // 判据不是「函数被调用过」，是「这个来源的产物真的出现在附录里」。三个来源各自
+  // 独立可达——decisions 曾经只在「session-state 为空」时才读，一旦有文件被改就静默
+  // 消失；空壳恒真之后连那个窗口也没了。
+  test('<progress> 的三个来源各自独立可达', () => {
+    const empty = new SessionStateManager('audit')
+    const modified = new SessionStateManager('audit')
+    modified.trackFileModified('src/probe.ts')
+
+    const fromDecisionsAlone = buildDynamicAppendix({
+      cwd: '/repo',
+      sessionState: empty.renderForVolatile(),
+      decisions: ['decision-source-marker'],
+    })
+    assert.match(fromDecisionsAlone, /decision-source-marker/,
+      'decisions 不可达——判别式又退回成了「字符串非空」')
+
+    const fromSessionAlone = buildDynamicAppendix({ cwd: '/repo', sessionState: modified.renderForVolatile() })
+    assert.match(fromSessionAlone, /Modified: src\/probe\.ts/)
+
+    const fromTaskProgressAlone = buildDynamicAppendix({
+      cwd: '/repo',
+      taskProgress: { completed: [], current: 'task-source-marker', remaining: [], decisions: [] },
+    })
+    assert.match(fromTaskProgressAlone, /current: task-source-marker/)
+  })
+
+  test('session-state 有内容不会挤掉 decisions —— 三个来源同时在场', () => {
+    const modified = new SessionStateManager('audit')
+    modified.trackFileModified('src/probe.ts')
+    const all = buildDynamicAppendix({
+      cwd: '/repo',
+      sessionState: modified.renderForVolatile(),
+      taskProgress: { completed: [], current: 'task-source-marker', remaining: [], decisions: [] },
+      decisions: ['decision-source-marker'],
+    })
+    assert.match(all, /Modified: src\/probe\.ts/)
+    assert.match(all, /current: task-source-marker/)
+    assert.match(all, /decision-source-marker/,
+      'decisions 被 session-state 的存在挤掉了——holdout 实验的曝光量会随「改没改过文件」漂移')
+  })
+
+  test('volatile.ts 不再对预渲染字符串做裸 truthiness 判别', () => {
+    // 剥注释再匹配——这个形状为什么错，正是靠注释解释的，别让门禁咬住自己的说明。
+    const code = readFileSync(join(SRC_ROOT, 'prompt', 'volatile.ts'), 'utf8')
+      .split('\n')
+      .filter(line => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join('\n')
+    assert.doesNotMatch(code, /if\s*\(\s*ctx\.sessionState\s*\)/,
+      '裸 `if (ctx.sessionState)` 回来了——判别式必须判「有内容」而非「字符串非空」')
   })
 })

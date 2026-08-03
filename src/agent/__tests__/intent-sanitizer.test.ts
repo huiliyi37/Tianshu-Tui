@@ -66,6 +66,12 @@ describe('intent-sanitizer semantic verb extraction', () => {
     assert.equal(extractSemanticVerb('怎么用这个 API'), '怎么用')
   })
 
+  it('preserves "bug" signal when user uses info-query phrasing like "看看这个 bug"', () => {
+    // "看看这个 bug" — the verb "看看" is info-query, but "bug" must survive sanitize
+    const { sanitized } = sanitizeForIntentClassification('看看这个 bug')
+    assert.ok(sanitized.includes('bug'), `sanitized must retain "bug": ${sanitized}`)
+  })
+
   it('disambiguates candidates using verbs', () => {
     const candidates = ['review_audit', 'bug_fix']
     const result = disambiguateByVerb(candidates as any, '修复')

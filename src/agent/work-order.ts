@@ -6,6 +6,7 @@ import { profileRegistry, tierTimeoutMultiplier } from './profile-registry.js'
 import { starDomainRegistry } from './star-domain-registry.js'
 import { resolveAuthorityReason } from './star-domain.js'
 import { progressiveTimeout } from './timeout-ladder.js'
+import { repairInvalidJsonEscapes } from '../api/json-escape-repair.js'
 
 export const READ_ONLY_WORKER_TOOLS = ['read_file', 'read_section', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'repo_graph', 'related_tests'] as const
 
@@ -184,11 +185,13 @@ const verificationMetadataSchema = z.object({
   command: z.string(),
   status: z.enum(['passed', 'failed', 'blocked']),
   scope: z.enum(['full', 'targeted']),
-  exitCode: z.number(),
-  passed: z.number(),
-  failed: z.number(),
-  skipped: z.number(),
-  durationMs: z.number(),
+  // 数值字段可选（2026-08-01）：worker 自报的 verification 只作交叉校验，
+  // 系统补充的元数据（reconcileCapturedWorkerFacts）不含计数——不再硬性要求。
+  exitCode: z.number().optional(),
+  passed: z.number().optional(),
+  failed: z.number().optional(),
+  skipped: z.number().optional(),
+  durationMs: z.number().optional(),
 }) satisfies z.ZodType<VerificationMetadata>
 
 export const workerFindingSchema = z.object({
@@ -202,6 +205,11 @@ export const workerFindingSchema = z.object({
   /** file:line 引用（如 "src/agent/foo.ts:42"）或命令 exit code 引用（如 "cmd: node --test exit=0"）。
    *  一手实测必须至少带一条引用；转述推断可省略。 */
   evidenceRefs: z.array(z.string().min(1)).optional(),
+  /** 结论极性：'defect' = 缺陷发现（省略时按 defect 处理，fail-closed）；
+   *  'confirmation' = 核实通过（确认无问题/链路闭合）。审查 blocking 判定只认
+   *  defect——confirmation 单独汇总为「已核实清单」，不进 blocking 文案。
+   *  审查/验证类 worker 用，其他 worker 省略。 */
+  polarity: z.enum(['defect', 'confirmation']).optional(),
 })
 
 const workerArtifactSchema = z.object({
@@ -232,6 +240,7 @@ export type WorkerFailureReason =
   | 'schema_mismatch'
   | 'worker_crash'
   | 'worker_blocked'
+  | 'policy_short_circuit'
   | 'unknown'
 
 export const workerResultSchema = z.object({
@@ -252,7 +261,7 @@ export const workerResultSchema = z.object({
   nextActions: z.array(z.string()),
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
   /** Why the worker failed — enables recovery-strategy differentiation. */
-  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'unknown']).optional(),
+  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'policy_short_circuit', 'unknown']).optional(),
   /** Runtime metadata: 派发时的 objective，由 coordinator 盖章。
    *
    *  刻意**不进** `workerResultIngestSchema`——那份是 worker 自报的入口，zod 会
@@ -324,7 +333,7 @@ const workerResultIngestSchema = z.object({
    *  `JSON.stringify` 后交给 `parseWorkerResult` 再解一次——不收这个键的话，
    *  写工的失败原因（含续跑判据依赖的 max_turns / timeout）会在这道内部序列化
    *  边界上被静默剥掉，主控只看到一个没有原因的 blocked。 */
-  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'unknown']).optional(),
+  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'policy_short_circuit', 'unknown']).optional(),
   /** D 度量细分，同 failureReason 的内部往返纪律（见 workerResultSchema 同名注释）。 */
   parseErrorKind: z.enum(['no_json', 'json_syntax', 'schema_field', 'truncated']).optional(),
 })
@@ -345,13 +354,18 @@ export type WorkerParseErrorKind =
   | 'truncated'
 
 /** 从 parseWorkerResult 抛出的错误分类。只认 WorkerResultParseError 与
- *  extractJsonCandidates 的「无 JSON」错误；其余返回 undefined（调用方不附带）。 */
+ *  extractJsonCandidates 的「无 JSON」错误；其余返回 undefined（调用方不附带）。
+ *
+ *  zod issue 列表是 JSON 数组文本（'[' 开头），JSON.parse 报错是散文——
+ *  借此区分候选的失败层级：全 zod → schema_field（JSON 合法但字段不合规）；
+ *  任一语法错 → json_syntax（报告本身坏了，字段错只是碎片候选的副产品）。 */
 export function classifyWorkerParseError(error: unknown): WorkerParseErrorKind | undefined {
   if (error instanceof WorkerResultParseError) {
     const joined = error.parseErrors.join(' | ')
+    if (joined.includes(TRUNCATED_REPORT_MESSAGE)) return 'truncated'
     if (/Unterminated|string.*end|Unexpected end/i.test(joined)) return 'truncated'
-    if (/Required|invalid_type|invalid_union|invalid_enum|Unrecognized key|expected .+ received|too_small|too_big/i.test(joined)) return 'schema_field'
-    return 'json_syntax'
+    const hasSyntaxError = error.parseErrors.some(e => !e.trimStart().startsWith('['))
+    return hasSyntaxError ? 'json_syntax' : 'schema_field'
   }
   const msg = error instanceof Error ? error.message : String(error)
   if (/did not contain a JSON object|no JSON/i.test(msg)) return 'no_json'
@@ -410,6 +424,35 @@ function toolsForAuthority(tools: string[], authority?: string): string[] {
   return tools.filter(t => whitelist.has(t))
 }
 
+/** Per-task constraint budget. Constraints render verbatim into the worker
+ *  prompt, so an unbounded list would push out the objective it qualifies. */
+const MAX_TASK_CONSTRAINTS = 12
+/** 单条约束字符上限（含样板/任务级）。导出供 plan-constraints.ts 渲染器对齐——
+ *  渲染器必须自己保证产出 ≤ 此值并带截断指针，避免此处无声再切一刀。 */
+export const MAX_TASK_CONSTRAINT_CHARS = 400
+
+/**
+ * Profile discipline plus the dispatcher's task-level constraints.
+ *
+ * Appends rather than replaces: the profile lines carry the read-only and
+ * report-shape discipline, and a caller supplying task constraints is adding a
+ * requirement, not waiving those. Blank and duplicate entries are dropped so a
+ * caller echoing a boilerplate line cannot double it.
+ */
+function withTaskConstraints(base: string[], task?: string[]): string[] {
+  if (!task?.length) return base
+  const seen = new Set(base)
+  const extra: string[] = []
+  for (const raw of task) {
+    const item = raw.trim().slice(0, MAX_TASK_CONSTRAINT_CHARS)
+    if (!item || seen.has(item)) continue
+    seen.add(item)
+    extra.push(item)
+    if (extra.length >= MAX_TASK_CONSTRAINTS) break
+  }
+  return [...base, ...extra]
+}
+
 export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): WorkOrder {
   const id = input.id ?? `wo_${randomUUID()}`
   return workOrderSchema.parse({
@@ -419,18 +462,21 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     profile: input.profile,
     objective: input.objective,
     scope: input.scope,
-    constraints: input.constraints ?? (input.profile === 'adversarial_verifier'
-      ? [
-          'Return only evidence-backed claims.',
-          'Do not suggest edits as completed changes.',
-          'Do not request write, edit, or bash tools.',
-          'Run tests whenever possible — your verdict requires command+evidence output.',
-        ]
-      : [
-          'Return only evidence-backed claims.',
-          'Do not suggest edits as completed changes.',
-          'Do not request write, edit, bash, or test execution tools.',
-        ]),
+    constraints: withTaskConstraints(
+      input.profile === 'adversarial_verifier'
+        ? [
+            'Return only evidence-backed claims.',
+            'Do not suggest edits as completed changes.',
+            'Do not request write, edit, or bash tools.',
+            'Run tests whenever possible — your verdict requires command+evidence output.',
+          ]
+        : [
+            'Return only evidence-backed claims.',
+            'Do not suggest edits as completed changes.',
+            'Do not request write, edit, bash, or test execution tools.',
+          ],
+      input.constraints,
+    ),
     allowedTools: (() => {
       const profileDef = profileRegistry.get(input.profile)
       const tools = profileDef?.allowedTools ? [...profileDef.allowedTools] : [...READ_ONLY_WORKER_TOOLS]
@@ -481,11 +527,11 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     profile: input.profile ?? 'patcher',
     objective: input.objective,
     scope: input.scope,
-    constraints: input.constraints ?? [
+    constraints: withTaskConstraints([
       'Return a patchSummary describing all changes made.',
       'List every changed file in changedFiles.',
       'Include verification results if tests were run.',
-    ],
+    ], input.constraints),
     allowedTools: (() => {
       const writeProfile = input.profile ?? 'patcher'
       const profileDef = profileRegistry.get(writeProfile)
@@ -565,7 +611,21 @@ function extractBalancedJsonCandidates(text: string): string[] {
   return candidates
 }
 
-export function extractJsonCandidates(text: string): string[] {
+/** Marker for "the only parseable candidate was our own truncation repair".
+ *  Not a JSON.parse message — the repair succeeds, which is exactly why the
+ *  failure has to be announced explicitly. */
+const TRUNCATED_REPORT_MESSAGE = 'Worker report was cut off mid-value; only the auto-closed repair parsed'
+
+interface JsonCandidates {
+  candidates: string[]
+  /** The strategy-6 truncation repair, present only when the text was unbalanced.
+   *  Callers use identity against this to tell "parsed the report" from "parsed a
+   *  report we finished writing ourselves". */
+  repaired?: string
+}
+
+function collectJsonCandidates(text: string): JsonCandidates {
+  let repaired: string | undefined
   // Strategy 1: fenced JSON (```json ... ``` or ``` ... ```) — Codex-style multi-tag.
   const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)]
     .map(m => m[1]?.trim())
@@ -595,20 +655,24 @@ export function extractJsonCandidates(text: string): string[] {
     }
   }
 
-  if (all.length > 0) return all
+  if (all.length > 0) return { candidates: all }
 
   // Strategy 5: raw text — treat the entire trimmed message as a candidate.
   const trimmed = text.trim()
   if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-    return [trimmed]
+    return { candidates: [trimmed] }
   }
 
-  // Strategy 6: truncated JSON repair — find the first { and append } to balance.
+  // Strategy 6: truncated JSON repair — find the first {, balance braces
+  // AND close unclosed strings (maxTokens truncation mid-string is the
+  // most common "Unterminated string in JSON" cause — brace-only repair
+  // leaves the string open and JSON.parse still fails).
   const firstBrace = text.indexOf('{')
   if (firstBrace !== -1) {
     const truncated = text.slice(firstBrace)
-    // Count open vs close braces and append enough } to balance.
-    let depth = 0
+    // Stack tracks opener order so closers are emitted in correct nesting
+    // order (e.g. {"a":[{"b":"val → needs "}]} not "]} }).
+    const stack: string[] = []
     let inStr = false
     let esc = false
     for (const ch of truncated) {
@@ -616,17 +680,35 @@ export function extractJsonCandidates(text: string): string[] {
       if (ch === '\\') { esc = true; continue }
       if (ch === '"') { inStr = !inStr; continue }
       if (inStr) continue
-      if (ch === '{') depth++
-      else if (ch === '}') depth--
+      if (ch === '{') stack.push('{')
+      else if (ch === '}') { if (stack.at(-1) === '{') stack.pop() }
+      else if (ch === '[') stack.push('[')
+      else if (ch === ']') { if (stack.at(-1) === '[') stack.pop() }
     }
-    if (depth > 0) {
-      all.push(truncated + '}'.repeat(depth))
+    // Build repair suffix: close unclosed string first, then closers in
+    // reverse stack order. If `esc` is still true, the last character was
+    // a dangling `\` — strip it so the appended `"` closes the string
+    // rather than being escaped.
+    const closers = stack.reverse().map(opener => opener === '{' ? '}' : ']').join('')
+    let suffix = ''
+    if (inStr) suffix = '"'
+    suffix += closers
+    if (suffix) {
+      // A suffix is only built when the text is genuinely unbalanced, so this
+      // candidate existing at all means the report was cut off.
+      repaired = (esc ? truncated.slice(0, -1) : truncated) + suffix
+      all.push(repaired)
     }
   }
 
-  if (all.length > 0) return all
+  if (all.length > 0) return { candidates: all, repaired }
 
   throw new Error('Worker result did not contain a JSON object')
+}
+
+/** Candidate JSON substrings of a worker report, newest strategy last. */
+export function extractJsonCandidates(text: string): string[] {
+  return collectJsonCandidates(text).candidates
 }
 
 function extractJsonParseError(error: unknown): string {
@@ -635,7 +717,15 @@ function extractJsonParseError(error: unknown): string {
 }
 
 function parseJsonCandidate(candidate: string): unknown {
-  return JSON.parse(candidate) as unknown
+  // 先尝试直接解析；失败后 repair 非法 JSON 转义序列（如 Windows 路径
+  // "F:\x" 中的 \x）再试一次。worker 输出含裸反斜杠是高频故障模式。
+  try {
+    return JSON.parse(candidate) as unknown
+  } catch {
+    const repaired = repairInvalidJsonEscapes(candidate)
+    if (repaired !== null) return JSON.parse(repaired) as unknown
+    throw new Error('JSON parse failed even after escape repair')
+  }
 }
 
 function normalizeWorkerResult(raw: z.infer<typeof workerResultIngestSchema>): WorkerResult {
@@ -691,9 +781,9 @@ export class WorkerResultParseError extends Error {
 }
 
 export function parseWorkerResult(text: string, expectedWorkOrderId: string): WorkerResult {
-  // extractJsonCandidates throws when truly no JSON is found — let it propagate
+  // collectJsonCandidates throws when truly no JSON is found — let it propagate
   // so the caller's repair loop can trigger a retry with the repair prompt.
-  const candidates = extractJsonCandidates(text)
+  const { candidates, repaired } = collectJsonCandidates(text)
   const errors: string[] = []
 
   for (const candidate of candidates) {
@@ -705,12 +795,25 @@ export function parseWorkerResult(text: string, expectedWorkOrderId: string): Wo
       continue
     }
 
+    let result: WorkerResult
     try {
-      return parseWorkerResultObject(parsed, expectedWorkOrderId)
+      result = parseWorkerResultObject(parsed, expectedWorkOrderId)
     } catch (error) {
       errors.push(extractJsonParseError(error))
       continue
     }
+
+    // Reached only when every intact candidate already failed, so the only
+    // thing that parsed is the report we auto-closed ourselves. Returning it
+    // hands the caller a clean `passed` with a summary cut mid-sentence and
+    // whatever findings happened to survive — indistinguishable from a worker
+    // that genuinely had nothing to report. Throw instead: the caller's repair
+    // loop re-asks, and if retries exhaust, salvageWorkerResult recovers the
+    // same findings with status 'blocked' and evidenceStatus 'unverified'.
+    if (repaired !== undefined && candidate === repaired) {
+      throw new WorkerResultParseError(candidates.length, [TRUNCATED_REPORT_MESSAGE])
+    }
+    return result
   }
 
   // All JSON candidates failed to parse or validate. Throw so the caller's
@@ -819,6 +922,25 @@ export function salvageWorkerResult(text: string, expectedWorkOrderId: string, p
   }
 }
 
+/** verdict ≠ status（2026-08-02 审查语义失真事故）：审查/验证工单的「发现缺陷」
+ *  不是 worker 运行失败。worker 把审查结论编码成 failed/escalated 时（有 findings
+ *  且无 failureReason/parseErrorKind 等基础设施失败标记），归一为 passed：
+ *  缺陷走 findings/polarity 通道；连败计数、熔断、升级只记真实运行失败。
+ *  blocked（预算/超时死亡）不归一；非审查/验证类工单不归一。
+ *  2026-08-02 事故：3 个审查 worker 报告全部解析成功，但因 verdict=fail 被计
+ *  3 连败触发升级，且 findings 被 mapSquadronFindings 的 passed 过滤丢弃。 */
+export function normalizeReviewVerdictStatus(order: WorkOrder, result: WorkerResult): WorkerResult {
+  if (order.kind !== 'review' && order.kind !== 'verify') return result
+  if (result.status !== 'failed' && result.status !== 'escalated') return result
+  if (result.findings.length === 0) return result
+  if (result.failureReason !== undefined || result.parseErrorKind !== undefined) return result
+  return {
+    ...result,
+    status: 'passed',
+    risks: [...result.risks, 'verdict-normalized: worker 将审查结论编码为 status，已按 verdict≠status 归一为 passed（缺陷见 findings/polarity）'],
+  }
+}
+
 export function buildBlockedWorkerResult(order: WorkOrder, reason: string, failureReason?: WorkerFailureReason): WorkerResult {
   return {
     workOrderId: order.id,
@@ -835,5 +957,25 @@ export function buildBlockedWorkerResult(order: WorkOrder, reason: string, failu
     nextActions: ['Primary should continue without trusting this worker result'],
     evidenceStatus: 'blocked',
     ...(failureReason ? { failureReason } : {}),
+  }
+}
+
+/** 聚合策略中途达标（first_success 已有通过者 / quorum 组已达 k）后，
+ *  未完成的兄弟 worker 被短路取消时的合成结果。不是故障：状态 blocked
+ *  仅表示"没有产出"，evidenceStatus=skipped 表示证据门无需评估。 */
+export function buildPolicyCancelledResult(order: WorkOrder, policyLabel: string): WorkerResult {
+  return {
+    workOrderId: order.id,
+    objective: order.objective,
+    groupId: order.groupId,
+    status: 'blocked',
+    summary: `Policy short-circuit: 聚合策略（${policyLabel}）已达标，本 worker 被取消以节省预算。这不是故障，无需重派。`,
+    findings: [],
+    artifacts: [],
+    changedFiles: [],
+    risks: [`policy_short_circuit: 兄弟结果已满足 ${policyLabel}，本结果被策略性取消`],
+    nextActions: [`如需其部分产出，可 delegate_task({resume: "${order.id}"}) 续跑`],
+    evidenceStatus: 'skipped',
+    failureReason: 'policy_short_circuit',
   }
 }

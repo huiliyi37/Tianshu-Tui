@@ -15,6 +15,7 @@ import ExcelJS from 'exceljs'
 // ── shared helpers ─────────────────────────────────────────────────
 
 function colToIndex(col) {
+  if (typeof col !== 'string' || col.length === 0) return -1
   let result = 0
   for (const ch of col.toUpperCase()) {
     result = result * 26 + (ch.charCodeAt(0) - 64)

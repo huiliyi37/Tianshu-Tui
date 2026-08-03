@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { classifyOrchestrationScale } from '../agent/task-size-gate.js'
@@ -8,6 +9,7 @@ import { parseTeamTasks } from '../agent/team-plan.js'
 import { formatSealStatus, verifyPlanSeal, type SealedUnifiedPlan } from '../agent/council/council-seal.js'
 import { clearPlan, consumePlan, storePlan } from '../agent/plan-store.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
+import { buildTeamOutcome } from '../agent/orchestration-outcome.js'
 import { validatePathSafe } from './path-validate.js'
 import { createActivityStreamer, createDelegationActivityMapper, progressSnippet } from './worker-activity-stream.js'
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
@@ -23,6 +25,7 @@ import {
   type PlanExecutorRun,
   type TeamImpactAnalyzer,
 } from '../agent/plan-executor.js'
+import { resolvePlanConstraints } from '../agent/plan-constraints.js'
 
 // Back-compat re-exports: TeamOrchestrateCoordinator was the tool-layer name for
 // the executor's dependency surface; tests/bootstrap still reference these and the
@@ -61,47 +64,117 @@ function formatPlanMerge(planMerge: NonNullable<TeamRunSummary['planMerge']>): s
     if (items.length === 0) return
     lines.push(title)
     for (const item of items.slice(0, CAP)) lines.push(`  - ${item}`)
-    if (items.length > CAP) lines.push(`  … (+${items.length - CAP} more)`)
+    if (items.length > CAP) lines.push(`  …（另 ${items.length - CAP} 条）`)
   }
   section(
-    'Plan conflicts (council disagreed — adjudicate):',
+    '计划冲突（议事会意见分歧——请裁决）：',
     planMerge.conflicts.map(c => c.description),
   )
   section(
-    '已补入执行图的分片 (orthogonal shards folded in):',
+    '已补入执行图的分片（正交分片，已并入）：',
     planMerge.augmented.map(a => `${a.title} — ${a.reason}`),
   )
   section(
-    'Deferred alternatives (not in base plan):',
+    '暂缓的备选方案（不在基础计划中）：',
     planMerge.deferred.map(d => `${d.title} — ${d.reason}`),
   )
   section(
-    'Risk ledger:',
+    '风险账本：',
     planMerge.risks.map(r => `[${r.severity}]${r.taskId ? ` ${r.taskId}:` : ''} ${r.claim}`),
   )
   return lines
 }
 
-export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string {
+/** 内部共用：git status --short 全部行（core.quotePath=false——中文/非 ASCII
+ *  路径不转八进制，否则剥引号后也匹配不到 UTF-8 changedFile；同仓
+ *  diff-collector.ts 已踩过此坑）。非 git 目录/超时返回 null（调用方降级跳过）。 */
+function gitStatusRows(cwd: string): string[] | null {
+  try {
+    const out = execFileSync('git', ['-c', 'core.quotePath=false', 'status', '--short'], { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }).toString()
+    return out.split('\n').filter(l => l.trim().length > 0)
+  } catch {
+    return null
+  }
+}
+
+/** D: blocked 时的工作树归属收集——git status --short 过滤本波次 worker 的
+ *  changedFiles（系统捕获的 changedFiles 已在结果契约里），命中行原样列出，
+ *  不再猜归属。无 git 环境/超时返回 []（跳过该段）。
+ *  匹配规则：普通路径相等 / 路径在目录下 / rename 取 `->` 后新路径 /
+ *  未跟踪目录（`?? dir/`）展开为目录前缀。目录级命中（后两条规则）附
+ *  「可能含其他会话改动，勿整目录 add」标注——多会话共享工作区下，
+ *  前缀展开会把别会话在同目录的改动一并命中（2026-08-03 审查实测证伪
+ *  「只漏报不误报」后的修正：保留召回、标注风险）。 */
+export function collectBlockedAttribution(cwd: string, changedFiles: string[]): string[] {
+  if (changedFiles.length === 0) return []
+  const rows = gitStatusRows(cwd)
+  if (!rows) return [] // 非 git 目录 / 超时：降级跳过
+  // 命中级别：exact（路径/rename 新路径相等）| dir（目录级归属，需标注）。
+  const hitLevel = (line: string): 'exact' | 'dir' | null => {
+    // 剥状态码前缀（` M ` / `?? ` 等）与引号（路径含空格时 git 加引号）。
+    let p = line.slice(3).trim().replace(/^"|"$/g, '')
+    // rename 行格式 `R  a -> b`：取箭头后的新路径（worker 报告的是新文件）。
+    const arrow = p.indexOf(' -> ')
+    if (arrow >= 0) p = p.slice(arrow + 4).trim().replace(/^"|"$/g, '')
+    if (p.length === 0) return null
+    for (const f of changedFiles) {
+      if (f === p) return 'exact'
+      if (p.startsWith(`${f}/`)) return 'dir' // f 是 p 的祖先目录（目录级改动）
+      // `?? dir/` 未跟踪目录：p 是 f 的祖先目录（目录前缀展开）。
+      const dir = p.endsWith('/') ? p.slice(0, -1) : p
+      if (f.startsWith(`${dir}/`)) return 'dir'
+    }
+    return null
+  }
+  const out: string[] = []
+  for (const l of rows) {
+    const level = hitLevel(l)
+    if (!level) continue
+    out.push(level === 'dir' ? `${l}  ⟵ 目录级归属：可能含其他会话改动，勿整目录 add` : l)
+    if (out.length >= 20) break
+  }
+  return out
+}
+
+/** 降级归属：changedFiles 为空（共享 worktree 不产生 diff artifact、失败工厂
+ *  置空自报）但有真实未过 worker 时，列出工作树全部 dirty 行——无法逐文件
+ *  归属，风险由 formatTeamSummary 的文案层声明。 */
+export function collectAllDirtyRows(cwd: string): string[] {
+  return (gitStatusRows(cwd) ?? []).slice(0, 20)
+}
+
+export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0, attribution?: { hits: string[]; precise: boolean }): string {
   const lines: string[] = [
-    `team ${summary.mode}: ${summary.dispatched} dispatched, ${summary.waves.length} waves, ${summary.blocked.length} blocked${summary.planCacheHit ? ' (plan cache hit — planner fanout skipped)' : ''}`,
+    `team ${summary.mode}：派发 ${summary.dispatched}，波次 ${summary.waves.length}，阻塞 ${summary.blocked.length}${summary.planCacheHit ? '（计划缓存命中——跳过 planner fanout）' : ''}`,
   ]
   if (summary.waves.length > 0) {
-    lines.push('Waves:')
+    lines.push('波次：')
     for (const w of summary.waves) lines.push(`  ${w.id} [${w.risk}] ${w.taskIds.join(', ')} — ${w.reason}`)
   }
   if (summary.blocked.length > 0) {
-    lines.push('Blocked:')
+    lines.push('阻塞：')
     for (const b of summary.blocked) lines.push(`  - ${b}`)
+  }
+  // 归属段独立于阻塞列表：触发面是「有未过 worker」（run.results 非 passed），
+  // 与 blocked 调度占位（waiting for wave/deferred）无关——健康全过波不出段，
+  // 有 worker 未过的波即使 blocked 列表为空也出段。
+  if (attribution && attribution.hits.length > 0) {
+    if (attribution.precise) {
+      lines.push('', '工作树本会话已产生改动（git status 命中本波次 worker 的 changedFiles）：')
+    } else {
+      lines.push('', '工作树 dirty 改动全量列出（worker 未留下文件清单——共享 worktree 无 diff artifact、自报为空，无法逐文件归属；可能多为其他会话改动，提交前逐个核对、勿整目录 add）：')
+    }
+    for (const h of attribution.hits) lines.push(`  ${h}`)
+    lines.push('', '下一步：提交留用 / 回退 / 继续修订后重派——deliver_task 可按归属核验。')
   }
   if (summary.planMerge) {
     const mergeLines = formatPlanMerge(summary.planMerge)
     if (mergeLines.length > 0) lines.push('', ...mergeLines)
   }
   if (summary.advisories && summary.advisories.length > 0) {
-    lines.push('', '分片建议(不阻断):')
+    lines.push('', '分片建议（不阻断）：')
     for (const a of summary.advisories.slice(0, 3)) lines.push(`  - ${a}`)
-    if (summary.advisories.length > 3) lines.push(`  … (+${summary.advisories.length - 3} more)`)
+    if (summary.advisories.length > 3) lines.push(`  …（另 ${summary.advisories.length - 3} 条）`)
   }
   const nextWave = fromWave + 1
   if (summary.waves.length > nextWave) {
@@ -112,9 +185,9 @@ export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string
     const run = summary.run
     const allFailed = !!run && run.results.length > 0 && run.results.every(r => r.status !== 'passed')
     if (allFailed) {
-      lines.push('', `⚠ wave ${fromWave}: all ${run!.results.length} workers failed — integrate/retry before advancing; do NOT dispatch fromWave ${nextWave} until fixed.`)
+      lines.push('', `⚠ 波次 ${fromWave}：全部 ${run!.results.length} 个 worker 失败——先集成/重试再前进；修复前不要派发 fromWave ${nextWave}。`)
     } else {
-      lines.push('', `To run the next wave after integrating this wave's diffs: call team_orchestrate again with fromWave: ${nextWave}.`)
+      lines.push('', `集成完本波 diff 后运行下一波：再次调用 team_orchestrate 并传 fromWave: ${nextWave}。`)
     }
   }
   lines.push('', summary.packet)
@@ -272,6 +345,9 @@ export function createTeamOrchestrateTool(
               workOrderId: r.workOrderId,
               parentToolId: params.toolUseId,
               objective: objectiveById.get(r.workOrderId),
+              // 终态也带派发侧盖章的身份（星域/职能）——否则完成后面板星域信息断流。
+              profile: r.profile,
+              authority: r.authority,
               status: r.status,
               progressLine: progressSnippet(r.summary),
               summary: r.summary,
@@ -328,6 +404,12 @@ export function createTeamOrchestrateTool(
         return { content: lines.join('\n'), uiContent: `🚀 team 方案 · ${tasks?.length ?? '?'} 任务` }
       }
 
+      // D8 L2：从计划 markdown 解析反目标与待验证假设，自动注入 worker 工单。
+      // 在 planPath 场景下 markdown 已读进内存，零额外 IO。
+      const planConstraints = markdown
+        ? resolvePlanConstraints(params.cwd, { markdown })
+        : undefined
+
       let run: PlanExecutorRun
       try {
         run = await executePlan(
@@ -336,6 +418,7 @@ export function createTeamOrchestrateTool(
             objective,
             tasks,
             planMarkdown: markdown,
+            planConstraints: planConstraints && planConstraints.length > 0 ? planConstraints : undefined,
             fromWave: effectiveFromWave,
             maxParallel: maxParallel ?? options?.defaultMaxParallel,
             sessionId: params.sessionId,
@@ -385,10 +468,33 @@ export function createTeamOrchestrateTool(
       }
 
       const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict, undefined, run.gate, run.reviewDetail)
+      // D: 有未过 worker 时收集工作树归属段——git status 过滤本波次 worker 的
+      // changedFiles，无改动/非 git 环境自动跳过该段（不猜归属）。
+      // 数据源用 teamReviewChangedFiles（diff artifact ∪ 自报）而非裸自报：
+      // blocked/failed worker 的自报 changedFiles 被系统置空（coordinator 失败
+      // 结果工厂），真实改动只在 diff artifact 里——裸自报会让归属段静默缺失。
+      // 触发面是 run.results 非 passed，而非 summary.blocked——blocked 列表是
+      // 调度占位（waiting for wave/deferred），健康全过波不该收到归属段与
+      // 「回退」建议（2026-08-03 审查 MEDIUM 3）；未过 worker 即使 blocked
+      // 列表为空也应触发（同审查 HIGH：共享 worktree 无 diff artifact 场景）。
+      // 降级归属：changedFiles 为空时全量列出 dirty 行并标注无法逐文件归属。
+      let attribution: { hits: string[]; precise: boolean } | undefined
+      if (summary.run && summary.run.results.some(r => r.status !== 'passed')) {
+        const changed = teamReviewChangedFiles(summary.run)
+        if (changed.length > 0) {
+          const hits = collectBlockedAttribution(params.cwd, changed)
+          if (hits.length > 0) attribution = { hits, precise: true }
+        }
+        if (!attribution) {
+          const all = collectAllDirtyRows(params.cwd)
+          if (all.length > 0) attribution = { hits: all, precise: false }
+        }
+      }
       return {
-        content: formatTeamSummary(summary, effectiveFromWave) + notes.reviewNote + notes.scopeHealthNote + notes.impactNote + notes.waveGateNote + notes.deliverySynthesis + planAdvisoryNote + proGateNote,
+        content: formatTeamSummary(summary, effectiveFromWave, attribution) + notes.reviewNote + notes.scopeHealthNote + notes.impactNote + notes.waveGateNote + notes.deliverySynthesis + planAdvisoryNote + proGateNote,
         uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
+        orchestration: buildTeamOutcome(summary, effectiveFromWave, run),
       }
     },
     requiresApproval: () => false,

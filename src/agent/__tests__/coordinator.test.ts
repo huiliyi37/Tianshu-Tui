@@ -1822,6 +1822,7 @@ describe('DelegationCoordinator', () => {
       baseToolRegistry: makeRegistry(),
       modelCards: escalateCards,
       maxWorkers: 2,
+      escalationCap: 'strong',
       runtimeFactory: (order, card, workerRegistry) => {
         modelsUsed.push(card.model)
         return {
@@ -1882,6 +1883,7 @@ describe('DelegationCoordinator', () => {
       baseToolRegistry: makeRegistry(),
       modelCards: escalateCards,
       maxWorkers: 2,
+      escalationCap: 'strong',
       runtimeFactory: (order, card, workerRegistry) => {
         modelsUsed.push(card.model)
         return {
@@ -1921,6 +1923,126 @@ describe('DelegationCoordinator', () => {
     // 4th delegate: flash only (no escalation)
     assert.equal(modelsUsed.filter(m => m === 'cheap-flash').length, 4)
   })
+
+  it('P0-5: 契约失败（json_parse blocked 正常返回）→ Flash→Pro 升档，更好结果替换原结果', async () => {
+    const escalateCards: ModelCapabilityCard[] = [
+      { model: 'cheap-flash', toolUseReliability: 0.7, jsonStability: 0.7, editSuccessRate: 0.5, testRepairRate: 0.5, contextWindow: 1_000_000, cacheEconomics: 'strong', recommendedTasks: ['code_search'] },
+      { model: 'deepseek-pro', toolUseReliability: 0.95, jsonStability: 0.95, editSuccessRate: 0.9, testRepairRate: 0.85, contextWindow: 128_000, cacheEconomics: 'medium', recommendedTasks: ['patch_proposal'] },
+    ]
+    const modelsUsed: string[] = []
+    let workerCalls = 0
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: escalateCards,
+      maxWorkers: 2,
+      escalationCap: 'strong',
+      runtimeFactory: (order, card, workerRegistry) => {
+        modelsUsed.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 4,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async (config) => {
+        workerCalls++
+        // 契约破碎是「正常返回」不是异常——升档判定必须覆盖这条路径。
+        const result: WorkerResult = workerCalls === 1
+          ? {
+              workOrderId: config.order.id,
+              status: 'blocked',
+              summary: 'Parse failed after 3 attempts: Unexpected token in JSON',
+              findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [],
+              failureReason: 'json_parse',
+              evidenceStatus: 'unverified',
+            }
+          : resultFor(config.order.id)
+        return {
+          result,
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_contract_escalation',
+      objective: 'Investigate contract-failure escalation to a stronger model.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/test.ts'] },
+      budget: { maxRetries: 1, maxTurns: 4, maxTokens: 4096, timeoutMs: 30000 },
+    })
+
+    assert.equal(run.status, 'completed')
+    assert.equal(modelsUsed.join(','), 'cheap-flash,deepseek-pro', '契约失败后升档到 Pro 重跑一次')
+    assert.equal(workerCalls, 2)
+    assert.equal(run.selectedModel, 'deepseek-pro')
+    assert.equal(run.results[0]!.status, 'passed', '升档产出的合规结果替换原契约破碎结果')
+    const shadow = run.modelTierShadows!.find(s => s.reason.includes('契约失败'))
+    assert.ok(shadow, '契约失败升档必须落 shadow（配额记账）')
+  })
+
+  it('P0-5: 升档后契约仍碎 → 保留原结果、不替换 selectedModel', async () => {
+    const escalateCards: ModelCapabilityCard[] = [
+      { model: 'cheap-flash', toolUseReliability: 0.7, jsonStability: 0.7, editSuccessRate: 0.5, testRepairRate: 0.5, contextWindow: 1_000_000, cacheEconomics: 'strong', recommendedTasks: ['code_search'] },
+      { model: 'deepseek-pro', toolUseReliability: 0.95, jsonStability: 0.95, editSuccessRate: 0.9, testRepairRate: 0.85, contextWindow: 128_000, cacheEconomics: 'medium', recommendedTasks: ['patch_proposal'] },
+    ]
+    const modelsUsed: string[] = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: escalateCards,
+      maxWorkers: 2,
+      escalationCap: 'strong',
+      runtimeFactory: (order, card, workerRegistry) => {
+        modelsUsed.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 4,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async (config) => ({
+        result: {
+          workOrderId: config.order.id,
+          status: 'blocked',
+          summary: 'Parse failed: still broken even on the strong model',
+          findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [],
+          failureReason: 'json_parse',
+          evidenceStatus: 'unverified',
+        } as WorkerResult,
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_contract_still_broken',
+      objective: 'Verify the original result is kept when escalation does not help.',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/test.ts'] },
+      budget: { maxRetries: 1, maxTurns: 4, maxTokens: 4096, timeoutMs: 30000 },
+    })
+
+    assert.equal(modelsUsed.join(','), 'cheap-flash,deepseek-pro', '仍尝试了一次升档')
+    assert.equal(run.results[0]!.status, 'blocked', '升档无改善 → 原结果保留')
+    assert.equal(run.results[0]!.failureReason, 'json_parse')
+    assert.equal(run.selectedModel, 'cheap-flash', 'selectedModel 不切换到无改善的升档模型')
+  })
+
 
   it('escalationCap=off blocks Flash→Pro escalation retry entirely', async () => {
     // 升档重试是全新会话零缓存全量重跑，off 时失败重试必须留在原档卡上，
@@ -2039,6 +2161,7 @@ describe('DelegationCoordinator', () => {
       baseToolRegistry: makeRegistry(),
       modelCards: escalateCards,
       maxWorkers: 2,
+      escalationCap: 'strong',
       runtimeFactory: (order, card, workerRegistry) => {
         modelsUsed.push(card.model)
         return {
@@ -2575,7 +2698,7 @@ describe('DelegationCoordinator', () => {
 
   it('delegateBatch 同批读工共享批级 StigmergyStore；写工默认不挂、显式 opt-in 才挂（收编 #3）', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'coord-stigmergy-'))
-    const seen: Array<{ profile: string; stigmergy: unknown }> = []
+    const seen: Array<{ id: string; profile: string; stigmergy: unknown }> = []
     const coordinator = new DelegationCoordinator({
       baseToolRegistry: makeRegistry(),
       modelCards: cards,
@@ -2592,7 +2715,9 @@ describe('DelegationCoordinator', () => {
         compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       }),
       runWorker: async config => {
-        seen.push({ profile: config.order.profile, stigmergy: config.stigmergy })
+        // 按 order.id 记录——并发派发下完成顺序由事件循环决定，位置断言在
+        // 负载下会翻（seen[2]/seen[3] 对调），按 id 断言消除顺序敏感。
+        seen.push({ id: config.order.id, profile: config.order.profile, stigmergy: config.stigmergy })
         return {
           result: resultFor(config.order.id),
           transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
@@ -2605,17 +2730,23 @@ describe('DelegationCoordinator', () => {
     await coordinator.delegateBatch([
       { parentTurnId: 'batch:st:0', objective: 'Explore the alpha module for routing seams and risk patterns.', kind: 'code_search', profile: 'code_scout', scope: {} },
       { parentTurnId: 'batch:st:1', objective: 'Explore the beta module for cache affinity and hot paths.', kind: 'code_search', profile: 'code_scout', scope: {} },
-      { parentTurnId: 'batch:st:2', objective: 'Implement the gamma feature with tests and typecheck verification.', kind: 'patch_proposal', profile: 'patcher', scope: {} },
-      { parentTurnId: 'batch:st:3', objective: 'Implement the delta feature with tests and typecheck verification.', kind: 'patch_proposal', profile: 'patcher', scope: {}, batchStigmergy: true },
+      // scope.files 显式声明——P1-8 起写工空 scope 会被全局闸拦下（本用例测批级
+      // StigmergyStore，不是测闸；闸的行为见下方专项用例）。
+      { parentTurnId: 'batch:st:2', objective: 'Implement the gamma feature with tests and typecheck verification.', kind: 'patch_proposal', profile: 'patcher', scope: { files: ['src/gamma.ts'] } },
+      { parentTurnId: 'batch:st:3', objective: 'Implement the delta feature with tests and typecheck verification.', kind: 'patch_proposal', profile: 'patcher', scope: { files: ['src/delta.ts'] }, batchStigmergy: true },
     ])
 
     assert.equal(seen.length, 4)
-    const read0 = seen[0]!
+    const byId = (id: string) => seen.find(s => s.id === id)
+    const read0 = byId('st:0')!
+    const read1 = byId('st:1')!
+    const writerDefault = byId('st:2')!
+    const writerOptIn = byId('st:3')!
     assert.ok(read0.stigmergy, '读工必须拿到批级共享 store')
-    assert.equal(read0.stigmergy, seen[1]!.stigmergy, '同批读工共享同一 store 实例')
-    assert.equal(seen[2]!.stigmergy, undefined, '写工默认不挂（守护实现独立性）')
-    assert.ok(seen[3]!.stigmergy, '写工显式 opt-in 后挂')
-    assert.equal(seen[3]!.stigmergy, read0.stigmergy, 'opt-in 写工与读工共享同一批级实例')
+    assert.equal(read1.stigmergy, read0.stigmergy, '同批读工共享同一 store 实例')
+    assert.equal(writerDefault.stigmergy, undefined, '写工默认不挂（守护实现独立性）')
+    assert.ok(writerOptIn.stigmergy, '写工显式 opt-in 后挂')
+    assert.equal(writerOptIn.stigmergy, read0.stigmergy, 'opt-in 写工与读工共享同一批级实例')
     rmSync(dir, { recursive: true, force: true })
   })
 })

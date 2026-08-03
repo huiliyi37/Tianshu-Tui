@@ -203,6 +203,8 @@ describe('P1-1 retry claim conflict (Pro upgrade blocked by lock)', () => {
         { model: 'pro-model', toolUseReliability: 0.5, jsonStability: 0.5, editSuccessRate: 0.4, testRepairRate: 0.3, contextWindow: 1_000_000, cacheEconomics: 'medium', recommendedTasks: [] },
       ],
       maxWorkers: 1,
+      // 本例主体就是 Pro 升档的 claim 冲突路径——显式开启升档（缺省已 fail-closed）。
+      escalationCap: 'strong',
       sessionRegistry: sessionRegistry as any,
       sessionId: 'session-1',
       runtimeFactory: (order, card, workerRegistry) => ({

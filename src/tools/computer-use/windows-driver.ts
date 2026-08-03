@@ -36,6 +36,7 @@
 
 import { execFile } from 'node:child_process'
 import { createScriptHost, hostEnabled, HostUnavailableError, SENTINEL, type ScriptHost } from './script-host.js'
+import { hasDangerousPatterns } from './danger-guard.js'
 import {
   UIA_COM_PRELUDE,
   comReady,
@@ -183,6 +184,8 @@ export function resetPsHostForTests(): void {
 }
 
 async function runPowerShellDefault(script: string, timeoutMs = POWERSHELL_TIMEOUT_MS): Promise<string> {
+  const blocked = hasDangerousPatterns(script)
+  if (blocked) throw new Error(blocked)
   const host = getPsHost()
   if (host && host.available()) {
     try {
