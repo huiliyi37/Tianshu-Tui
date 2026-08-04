@@ -85,6 +85,8 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
   deepseek: buildEntry('deepseek', 'DeepSeek', WELL_KNOWN_DEFAULTS['deepseek']!, [
     'Exact-prefix cache: first 2 messages must remain stable for 99% hit rate',
     'Anthropic-compatible thinking format',
+    'Dual-stack: Chat Completions (default) + Responses API (opt-in, deepseek-v4-flash only)',
+    'Chat effort wire: low|high|max; medium maps to low client-side',
   ]),
   kimi: buildEntry('kimi', 'Kimi (Moonshot)', WELL_KNOWN_DEFAULTS['kimi']!, [
     'Anthropic-compatible thinking format',

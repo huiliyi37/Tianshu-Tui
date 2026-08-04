@@ -315,6 +315,8 @@ export interface TuiMetrics {
   /** 会话累计 input / output token（仅用于展示，不参与 += 累加） */
   inputTokens: number
   outputTokens: number
+  /** 会话累计 reasoning token（output 子集）；无拆分数据时 undefined */
+  reasoningTokens?: number
   /** API 最近一轮返回的真实 prompt_tokens（校准基准）；0 表示尚无数据 */
   lastRealPromptTokens: number
 }
@@ -4789,6 +4791,7 @@ export class TuiApp {
     let glanceEstimatedTokens: number | undefined
     let glanceConversationTokens: number | undefined
     let glanceMaxTokens: number | undefined
+    let glanceReasoningRatio: number | undefined
     if (metrics) {
       glanceCacheHitRate = metrics.cacheHitRate ?? undefined
       glanceCacheStatus = metrics.cacheStatus
@@ -4797,6 +4800,10 @@ export class TuiApp {
       glanceEstimatedTokens = metrics.estimatedTokens
       glanceConversationTokens = metrics.conversationTokens
       glanceMaxTokens = metrics.maxTokens
+      // reasoning 是 output 的子集：占比 = reasoning / output（非 text）
+      if (metrics.reasoningTokens !== undefined && metrics.outputTokens > 0) {
+        glanceReasoningRatio = Math.min(1, metrics.reasoningTokens / metrics.outputTokens)
+      }
     } else {
       glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
       glanceContextRatio = this.metricsGlanceController.lastContextRatio
@@ -5147,6 +5154,7 @@ export class TuiApp {
         width: cols,
         modelName: this.state.modelName,
         reasoningEffort: this.metricsGlanceController.reasoningEffortProvider?.(),
+        reasoningRatio: glanceReasoningRatio,
         cacheHitRate: glanceCacheHitRate,
         cacheStatus: glanceCacheStatus,
         estimatedTokens: glanceEstimatedTokens,

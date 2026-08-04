@@ -257,6 +257,64 @@ function checkEffortControl(entry: ProviderEntry): ConformanceCheck {
   }
 }
 
+/** DeepSeek 双栈：Chat Completions 为默认；Responses 仅 Flash（官方限制）。 */
+function checkDeepSeekDualStack(entry: ProviderEntry): ConformanceCheck {
+  if (entry.key !== 'deepseek') {
+    return {
+      id: 'deepseek_dual_stack',
+      name: 'DeepSeek dual-stack',
+      passed: true,
+      severity: 'info',
+      message: 'Not applicable',
+    }
+  }
+  const notesOk = entry.notes.some(n =>
+    /responses/i.test(n) || /dual.?stack/i.test(n) || /chat completions/i.test(n),
+  )
+  return {
+    id: 'deepseek_dual_stack',
+    name: 'DeepSeek dual-stack',
+    passed: true,
+    severity: 'info',
+    message: notesOk
+      ? 'Chat Completions default; Responses opt-in for deepseek-v4-flash (protocol=responses | RIVET_DEEPSEEK_RESPONSES=1)'
+      : 'Dual-stack ready: Chat Completions + Responses (Flash only). Document in provider notes.',
+    suggestion: notesOk
+      ? undefined
+      : 'Add a note describing Chat Completions vs Responses dual-stack and Flash-only Responses support',
+  }
+}
+
+/** DeepSeek effort 归一化：线上 Chat 只认 low|high|max，medium→low。 */
+function checkDeepSeekEffortNormalization(entry: ProviderEntry): ConformanceCheck {
+  if (entry.key !== 'deepseek') {
+    return {
+      id: 'deepseek_effort_norm',
+      name: 'DeepSeek effort normalization',
+      passed: true,
+      severity: 'info',
+      message: 'Not applicable',
+    }
+  }
+  if (entry.capabilities.effortFormat !== 'reasoning_effort') {
+    return {
+      id: 'deepseek_effort_norm',
+      name: 'DeepSeek effort normalization',
+      passed: false,
+      severity: 'warn',
+      message: `Expected effortFormat=reasoning_effort for Chat Completions wire, got ${entry.capabilities.effortFormat}`,
+      suggestion: 'DeepSeek Chat Completions uses reasoning_effort; Responses uses reasoning.effort',
+    }
+  }
+  return {
+    id: 'deepseek_effort_norm',
+    name: 'DeepSeek effort normalization',
+    passed: true,
+    severity: 'info',
+    message: 'Chat wire: medium→low; Responses wire: reasoning.effort (medium→high server-side)',
+  }
+}
+
 // ─── Aggregator ──────────────────────────────────────────────
 
 const ALL_CHECKS = [
@@ -266,6 +324,8 @@ const ALL_CHECKS = [
   checkStripParams,
   checkBugDisclosure,
   checkEffortControl,
+  checkDeepSeekDualStack,
+  checkDeepSeekEffortNormalization,
 ]
 
 export function runConformanceCheck(

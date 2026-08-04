@@ -48,11 +48,12 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
         {
           id: 'deepseek-v4-flash',
-          description: '快速档：能力对标旗舰，成本更低',
+          description: '快速档：能力对标旗舰，成本更低；effort 仅 low|high|max（默认 low）',
           alias: 'v4-flash',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
-          reasoningEffort: 'medium',
+          // Chat Completions 线上只认 low|high|max；默认 low 走 Flash 廉价思考档。
+          reasoningEffort: 'low',
           tier: 'cheap',
           pricing: { input: 1, output: 2, cacheRead: 0.02, cacheWrite: 1 },
         },
@@ -263,7 +264,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           alias: 'sf-v4-flash',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
-          reasoningEffort: 'medium',
+          reasoningEffort: 'low',
           tier: 'cheap',
           pricing: { input: 0.13, output: 0.28 },
         },

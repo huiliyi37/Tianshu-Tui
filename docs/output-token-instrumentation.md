@@ -37,7 +37,9 @@ text 主导          → 杠杆是 verbosity（Phase 2B）
 - 接线：`src/agent/turn-perception.ts`，用真实 sensorium 的
   `complexity / momentum / confidence`。仅"低复杂度 + (高 momentum 或高 confidence)"
   降一档；从不升档；floor 由 `ReasoningEffortController.set()` 下游钳制。
-- DeepSeek 预设默认 effort：`v4-pro=high`、`v4-flash=medium`（不再默认 max/high）。
+- DeepSeek 预设默认 effort：`v4-pro=high`、`v4-flash=low`（Chat 线上只认 low|high|max；UI 的 medium 映射为 low）。
+- GlanceBar 展示 `◉N%` = reasoning / output 占比（有拆分数据时）。
+- effort bandit 默认 `banditPromotion.effort=auto`：shadow 样本达标后真投票。
 
 ### Phase 2B — 自适应 verbosity（日常仍 opt-in；doom-loop 自动 escalate）
 
@@ -70,13 +72,14 @@ text 主导          → 杠杆是 verbosity（Phase 2B）
 
 1. **跑基线 → 读 reasoning 占比**：`npx tsx scripts/analyze-output-tokens.ts`，确认
    effort 默认开后的账单结构；若仍 reasoning 主导，再考虑把 pro 默认降到 medium。
-2. **effort bandit 真启用评估**：`reasoning-effort-controller.ts` 已有 P3 shadow
-   telemetry；待 `isEffortGateOpen()` 闸门(totalPulls≥30 且吻合率≥0.8)满足后，可考虑
-   让 bandit 真投票，与 2A 的确定性 gate 二选一或叠加。
-3. **GlanceBar/`/debug` 暴露 reasoning 占比**：把脚本的拆分做成实时面板一行，省得事后
-   翻 cache-log。
+2. **effort bandit 真启用**：默认 `banditPromotion.effort=auto`；`isEffortGateOpen()` /
+   `resolveBanditPromotion` 在样本与 reward margin 达标后启用真投票（仍可用
+   `shadow` / `off` / `killSwitch` 回退）。
+3. **GlanceBar/`/debug` 暴露 reasoning 占比**：GlanceBar 已展示 `◉N%`
+   （reasoning/output）；事后分析仍可用 `analyze-output-tokens.ts`。
 4. **若数据指向更强 terseness**：再评估把恒定 terseness 放 frozen base（一次性
    进缓存锚点，会话内仍稳定），届时需更新 engine-cache-stability 基线。
+5. **自托管 MTP/FP4**：见 [deepseek-self-host-mtp-fp4.md](./deepseek-self-host-mtp-fp4.md)。
 
 ## 验证
 

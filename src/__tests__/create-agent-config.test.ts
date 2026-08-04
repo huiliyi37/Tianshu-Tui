@@ -48,7 +48,7 @@ const testConfig = {
     teamSchedulerBanditEnabled: false,
     modelTierBanditEnabled: false,
     modelRoutingGatedEnabled: false,
-    banditPromotion: { modelTier: 'shadow', teamScheduler: 'shadow', modelRouting: 'shadow', effort: 'shadow', killSwitch: false },
+    banditPromotion: { modelTier: 'shadow', teamScheduler: 'shadow', modelRouting: 'shadow', effort: 'auto', killSwitch: false },
     permissions: { allow: [], deny: [], bash: { allowlist: [], denylist: [] }, additionalReadDirs: [], additionalWriteDirs: [] },
     review: { profiles: {}, skipAuto: false, mechanicalFastPath: true },
     visionAutoBridge: false,

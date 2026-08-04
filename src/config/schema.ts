@@ -56,7 +56,7 @@ export const providerSchema = z.object({
   apiKey: z.string().nullable().optional().transform(value => value ?? undefined),
   apiKeyEnv: z.string().nullable().optional().transform(value => value ?? undefined),
   baseUrl: z.string().url(),
-  protocol: z.enum(['openai']).default('openai'),
+  protocol: z.enum(['openai', 'responses']).default('openai'),
   auth: authConfigSchema.nullable().optional(),
   capabilities: providerCapabilitiesSchema,
   fallback: z.array(z.string()).optional(),
@@ -333,7 +333,7 @@ export const agentSchema = z.object({
     modelTier: banditPromotionModeSchema.default('shadow'),
     teamScheduler: banditPromotionModeSchema.default('shadow'),
     modelRouting: banditPromotionModeSchema.default('shadow'),
-    effort: banditPromotionModeSchema.default('shadow'),
+    effort: banditPromotionModeSchema.default('auto'),
     /** One-key rollback: forces every bandit path off, regardless of modes or legacy flags. */
     killSwitch: z.boolean().default(false),
   }).default({}),
@@ -526,9 +526,9 @@ export const workerRoutingSchema = z.record(z.string(), z.string()).default({
   code_edit: 'cheap-flash',
   test_failure_diagnosis: 'cheap-flash',
   risky_refactor: 'cheap-flash',
-  // 规划模型独立路由：2026-08-02 起默认走 cheap-flash（deepseek-v4-flash）——
-  // v4-flash 能力实测已超 v4-pro，成本仅 1/3；需更强可在此键改 capable。
-  planning: 'cheap-flash',
+  // 难任务不全押 Flash：planning 默认 capable（Pro）；例行任务仍可走 cheap-flash。
+  // Atropos Flash→Pro 是失败兜底，不能代替前置路由。
+  planning: 'capable',
 })
 
 export const workersSchema = z.object({

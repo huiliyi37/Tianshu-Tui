@@ -18,13 +18,13 @@ describe('model capability routing', () => {
 })
 
 describe('capabilityCardForModel（v4-flash 去廉价化）', () => {
-  it('deepseek-v4-flash 拿到略高于 pro 的强卡，推荐任务全覆盖', () => {
+  it('deepseek-v4-flash 拿到略高于 pro 的强卡，但不推荐 planning', () => {
     const card = capabilityCardForModel({ id: 'deepseek-v4-flash', alias: 'v4-flash', contextWindow: 1_000_000 })
     assert.equal(card.toolUseReliability, 0.85)
     assert.equal(card.jsonStability, 0.85)
     assert.equal(card.editSuccessRate, 0.75)
     assert.equal(card.testRepairRate, 0.65)
-    assert.ok(card.recommendedTasks.includes('planning'))
+    assert.ok(!card.recommendedTasks.includes('planning'))
     assert.ok(card.recommendedTasks.includes('code_edit'))
   })
 
@@ -33,10 +33,10 @@ describe('capabilityCardForModel（v4-flash 去廉价化）', () => {
     assert.equal(card.toolUseReliability, 0.85)
   })
 
-  it('推荐排序里 v4-flash 赢 v4-pro（含 planning）', () => {
+  it('推荐排序：planning 归 Pro；code_edit 仍可 flash 赢', () => {
     const pro = capabilityCardForModel({ id: 'deepseek-v4-pro', alias: 'v4-pro', contextWindow: 1_000_000 })
     const flash = capabilityCardForModel({ id: 'deepseek-v4-flash', alias: 'v4-flash', contextWindow: 1_000_000 })
-    assert.equal(recommendModelForTask('planning', [pro, flash]).model, 'deepseek-v4-flash')
+    assert.equal(recommendModelForTask('planning', [pro, flash]).model, 'deepseek-v4-pro')
     assert.equal(recommendModelForTask('code_edit', [pro, flash]).model, 'deepseek-v4-flash')
   })
 

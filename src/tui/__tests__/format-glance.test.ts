@@ -43,6 +43,11 @@ describe('formatGlanceBar', () => {
     assert.ok(!noEffort.includes('◎'), 'no effort badge when undefined')
   })
 
+  it('renders reasoning/(output) ratio badge ◉N%', () => {
+    const bar = stripAnsi(formatGlanceBar({ width: 120, reasoningRatio: 0.42 }, theme))
+    assert.ok(bar.includes('◉') && bar.includes('42%'), `expected ◉42% in: ${bar}`)
+  })
+
   it('cache hit rate always shown, colored by health (< 50% warning, ≥ 50% dim)', () => {
     const low = formatGlanceBar({ width: 80, cacheHitRate: 0.3 }, theme)
     assert.ok(stripAnsi(low).includes('30%'), 'cache < 50% should show')

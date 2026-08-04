@@ -11,6 +11,11 @@ import { sanitizeMessageContent } from '../utils/sanitize.js'
 import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
 import { debugLog } from '../utils/debug.js'
 import { repairInvalidJsonEscapes } from './json-escape-repair.js'
+import {
+  isDeepSeekEffortProvider,
+  normalizeDeepSeekChatEffort,
+  stripThinkingSamplingFields,
+} from './deepseek-effort.js'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -441,6 +446,16 @@ export class OpenAIClient implements StreamClient {
     // Kimi (kimi-for-coding) does not support 'max'; cap at 'high'.
     if (this.config.providerName === 'kimi' && body.reasoning_effort === 'max') {
       body.reasoning_effort = 'high'
+    }
+    // DeepSeek Chat Completions：线上只认 low|high|max；medium→low。
+    if (isDeepSeekEffortProvider(this.config.providerName) && typeof body.reasoning_effort === 'string') {
+      const normalized = normalizeDeepSeekChatEffort(body.reasoning_effort)
+      if (normalized) body.reasoning_effort = normalized
+      else delete body.reasoning_effort
+    }
+    // Thinking 开启时采样参数无效（DeepSeek 官方：不报错但无效果）——删掉避免误导。
+    if (this.config.thinking === 'enabled' && isDeepSeekEffortProvider(this.config.providerName)) {
+      stripThinkingSamplingFields(body)
     }
 
     // Apply stable system suffix (Chinese thinking instruction) — computed once

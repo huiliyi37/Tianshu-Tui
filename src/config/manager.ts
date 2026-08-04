@@ -126,13 +126,13 @@ function migrateDeepseekMaxTokens(raw: Record<string, unknown>): boolean {
 }
 
 /**
- * One-shot migration: 把存量用户的 deepseek-v4-flash / DeepSeek-V4-Flash 的
- * reasoningEffort 从 'high' 刷成 'max'。preset 已改 max + backfill 白名单已收录
- * reasoningEffort，但 backfill 不覆盖磁盘已有的显式值——存量用户连过 v4-flash
- * 后快照里是 'high'，靠 backfill 拿不到。本迁移强制刷，让所有用户开箱即 max。
+ * One-shot migration: Flash effort 对齐 Chat Completions 合法档。
  *
- * 幂等：只改值为 'high' 的 v4-flash；已是 max / 用户改过的其他值不动。
- * Mutates `raw` in place. Returns true if any value was changed.
+ * 历史：曾把 flash 的 high→max（成本反向）；后又有 medium 预设（线上非法字面量）。
+ * 现预设为 low。本迁移只把遗留的 medium（及历史上被刷成 max 的默认）收口到 low；
+ * 用户显式设的 high / off 不动。
+ *
+ * 幂等：只改 medium|max → low。Mutates `raw` in place.
  */
 function migrateV4FlashEffort(raw: Record<string, unknown>): boolean {
   const provider = raw.provider as Record<string, unknown> | undefined
@@ -148,8 +148,9 @@ function migrateV4FlashEffort(raw: Record<string, unknown>): boolean {
     if (!Array.isArray(models)) continue
     for (const m of models) {
       const id = typeof m.id === 'string' ? m.id : ''
-      if (/deepseek-v4-flash|DeepSeek-V4-Flash/i.test(id) && m.reasoningEffort === 'high') {
-        m.reasoningEffort = 'max'
+      if (!/deepseek-v4-flash|DeepSeek-V4-Flash/i.test(id)) continue
+      if (m.reasoningEffort === 'medium' || m.reasoningEffort === 'max') {
+        m.reasoningEffort = 'low'
         changed = true
       }
     }

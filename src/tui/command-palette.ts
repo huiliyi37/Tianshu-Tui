@@ -86,7 +86,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/fork', description: '把当前会话 fork 成新分支——想试另一条路又怕丢上下文时用' },
     { name: '/handoff', description: '写结构化交接文档（任务目标/已完成/卡点/下一步/坑），归档后自动注入新会话', argsHint: '[备注]' },
     { name: '/vim', description: '开关 vim 键位绑定（esc 进 normal 模式等）' },
-    { name: '/effort', description: '切换推理强度——控成本与控质量的核心旋钮。off 最省/max 最强/auto 按任务复杂度自动选', argsHint: 'off|low|medium|high|max|auto' },
+    { name: '/effort', description: '切换推理强度——控成本与控质量的核心旋钮。off 最省/max 最强/auto 按任务复杂度自动选；medium 在 DeepSeek 线上映射为 low', argsHint: 'off|low|medium|high|max|auto' },
     { name: '/domain', description: '查看或切换星域人格（改变方法论与决策阈值，不改工具）。list 列出/auto 按消息匹配/off 关闭', argsHint: 'list|<name>|auto|off' },
     { name: '/interview', description: '深度访谈澄清需求——agent 反过来问你问题，把模糊想法逼成清晰规格' },
     { name: '/team', description: '团队模式：任务按文件拆分→多 patcher 写工分波并行实现→主控集成验证。适合多文件并行写的大改动（可传计划文件路径）', argsHint: '<任务|plan.md> | max' },

@@ -105,6 +105,11 @@ export interface GlanceBarInput {
   modelName?: string
   /** 推理 effort glyph */
   reasoningEffort?: string
+  /**
+   * 会话累计 reasoning / (output − reasoning 不可用时用 output) 占比 0-1。
+   * 有拆分数据时 GlanceBar 显示 `◉42%`（思考占输出比）。
+   */
+  reasoningRatio?: number
   /** 缓存命中率 0-1 */
   cacheHitRate?: number
   /** 缓存健康度状态（projectCacheTelemetry 三态判定） */
@@ -226,6 +231,12 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
         : theme.muted
       parts.push(color(`◎${effShort}`, effColor))
     }
+    // reasoning/(output) 占比：思考 token 占输出的份额（DeepSeek 成本杠杆可视）
+    if (input.reasoningRatio !== undefined && Number.isFinite(input.reasoningRatio)) {
+      const pct = Math.round(Math.max(0, Math.min(1, input.reasoningRatio)) * 100)
+      const rColor = pct >= 80 ? theme.warning : pct >= 50 ? theme.muted : theme.dim
+      parts.push(color(`◉${pct}%`, rColor))
+    }
     if (input.cacheHitRate !== undefined) {
       const cachePct = (input.cacheHitRate * 100).toFixed(0)
       const cacheColor = input.cacheStatus === 'degraded' ? theme.warning
@@ -278,6 +289,11 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
       : eff === 'off' ? theme.dim
       : theme.muted
     parts.push(color(`◎${effShort}`, effColor))
+  }
+  if (input.reasoningRatio !== undefined && Number.isFinite(input.reasoningRatio)) {
+    const pct = Math.round(Math.max(0, Math.min(1, input.reasoningRatio)) * 100)
+    const rColor = pct >= 80 ? theme.warning : pct >= 50 ? theme.muted : theme.dim
+    parts.push(color(narrow ? `◉${pct}%` : `◉思${pct}%`, rColor))
   }
   if (input.cacheHitRate !== undefined) {
     const cachePct = (input.cacheHitRate * 100).toFixed(0)

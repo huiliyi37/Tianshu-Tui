@@ -1,11 +1,16 @@
 import { OpenAIClient } from './openai-client.js'
 import { CodexClient } from './codex-client.js'
 import { AnthropicClient } from './anthropic-client.js'
+import { DeepSeekResponsesClient } from './deepseek-responses-client.js'
 import type { StreamClient } from './stream-client.js'
 import type { ProviderCapabilities } from './provider.js'
 import { getProviderProfile } from './provider-profile.js'
 import type { ProviderConfig } from '../config/schema.js'
 import type { AuthProvider } from '../auth/types.js'
+import {
+  isDeepSeekResponsesEnabled,
+  supportsDeepSeekResponses,
+} from './deepseek-responses.js'
 
 /** Runtime parameters that vary per-model or per-call, not stored in config */
 export interface RuntimeParams {
@@ -79,6 +84,24 @@ export function createProviderClient(
       model: params.model,
       maxTokens: params.maxTokens,
       auth: params.auth,
+    })
+  }
+
+  // DeepSeek Responses 双栈：protocol=responses 或 RIVET_DEEPSEEK_RESPONSES=1，
+  // 且模型为 deepseek-v4-flash（官方暂不支持 Pro）。
+  if (
+    provider.name === 'deepseek'
+    && isDeepSeekResponsesEnabled(provider.protocol)
+    && supportsDeepSeekResponses(params.model)
+  ) {
+    return new DeepSeekResponsesClient({
+      baseUrl: provider.baseUrl,
+      apiKey: params.apiKey,
+      model: params.model,
+      maxTokens: params.maxTokens,
+      reasoningEffort: params.reasoningEffort,
+      thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
+      sessionId: params.sessionId,
     })
   }
 

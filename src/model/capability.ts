@@ -24,8 +24,12 @@ function score(task: CapabilityTask, card: ModelCapabilityCard): number {
     case 'risky_refactor':
       return card.toolUseReliability * 0.4 + card.editSuccessRate * 0.3 + card.testRepairRate * 0.3
     case 'planning':
-      // 规划偏好强推理 + 大上下文 + 稳定 JSON 产出：favor 强卡模型（v4-flash 与 pro 同档候选）
-      return card.toolUseReliability * 0.4 + card.jsonStability * 0.3 + (card.cacheEconomics === 'strong' ? 0.3 : 0) + card.contextWindow / 1_000_000
+      // 规划偏好强推理：favor 显式带 planning 推荐的强卡（Pro），不全押 Flash。
+      return card.toolUseReliability * 0.35 + card.jsonStability * 0.25
+        + (card.cacheEconomics === 'strong' ? 0.15 : 0)
+        + card.contextWindow / 1_000_000
+        + (card.recommendedTasks.includes('planning') ? 0.4 : 0)
+        + (card.recommendedTasks.includes('risky_refactor') ? 0.1 : 0)
   }
 }
 
@@ -45,16 +49,16 @@ export interface CapabilityModelInput {
   contextWindow: number
 }
 
-/** v4-flash 去廉价化（2026-08-02）：实测能力已超 v4-pro / GLM 5.2（按用户基准
- *  判断），给略高于 pro 的先验；运行时 bandit/routing-metrics 继续学习修正。
- *  recommendedTasks 全任务覆盖——推荐排序里 flash 应当能赢 pro。 */
+/** v4-flash 能力卡：工具/编辑强，但 **planning 不全押 Flash**——难规划任务
+ *  仍应走 Pro（workers.routing.planning→capable + 本卡不把 planning 标为推荐）。
+ *  recommendedTasks 覆盖日常编辑/检索/压缩；planning / risky_refactor 留给强档。 */
 const V4_FLASH_CARD = {
   toolUseReliability: 0.85,
   jsonStability: 0.85,
   editSuccessRate: 0.75,
   testRepairRate: 0.65,
   cacheEconomics: 'strong' as const,
-  recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'risky_refactor', 'planning', 'repo_summarization', 'compaction'],
+  recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'repo_summarization', 'compaction'],
 }
 
 /** 按模型产出能力卡。历史按名字一刀切（pro→强卡、flash→弱卡），
@@ -74,7 +78,8 @@ export function capabilityCardForModel(m: CapabilityModelInput): ModelCapability
       testRepairRate: 0.6,
       contextWindow: m.contextWindow,
       cacheEconomics: 'strong' as const,
-      recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'risky_refactor'],
+      // planning / risky_refactor 归强档——与 workers.routing.planning→capable 对齐
+      recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'risky_refactor', 'planning'],
     }
   }
   return {

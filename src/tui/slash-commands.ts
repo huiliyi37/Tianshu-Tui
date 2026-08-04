@@ -3258,7 +3258,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           ? 'Reasoning effort: auto (autoReasoning picks per task)'
           : `Reasoning effort set to: ${level}` }))
       } else {
-        pushStatic(createLogEntry({ type: 'system', content: `Usage: /effort [off|low|medium|high|max|auto]\n\nSet max for full reasoning on every turn. auto lets autoReasoning pick per-task complexity.` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: /effort [off|low|medium|high|max|auto]\n\nSet max for full reasoning on every turn. auto lets autoReasoning pick per-task complexity.\nOn DeepSeek, medium is kept in the UI but mapped to low on the Chat Completions wire.` }))
       }
       setIsStreaming(false)
       return true

@@ -101,7 +101,8 @@ export interface OaiChatRequest {
   stream?: boolean
   stream_options?: { include_usage?: boolean }
   temperature?: number
-  /** DeepSeek extension. */
+  /** DeepSeek extension. Chat Completions 线上只认 low|high|max；
+   *  medium 对外可保留，openai-client 归一化为 low（「DeepSeek 线上映射为 low」）。 */
   reasoning_effort?: 'low' | 'medium' | 'high' | 'max'
   /** Force the model to emit valid JSON (OpenAI-compatible json_object mode).
    *  Worker sessions set this on the final (no-tools) turn to eliminate free-text

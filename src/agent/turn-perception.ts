@@ -11,6 +11,7 @@ import { adaptThetaInterval, buildStarPhaseContext, buildTelemetrySnapshot } fro
 import type { ThetaTelemetrySnapshot } from './perception.js'
 import { createStarEvent } from './star-event.js'
 import { routeRoutineEffort } from './effort-routing.js'
+import { composeEffortWithOverlay, toolFamilyEffortOverlay } from './effort-overlay.js'
 import type { StarEvent, ThetaState } from './star-event.js'
 import type { VigorState } from './vigor.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
@@ -137,14 +138,19 @@ export class TurnPerceptionController {
       this.hasEnteredHighComplexity = true
     }
 
-    // Phase 2A effort routing (default ON; opt out with RIVET_EFFORT_ROUTING=0):
-    // step effort down one tier on routine, on-track turns. Floor is enforced
-    // downstream in ReasoningEffortController.set().
-    this.deps.setReasoningEffort(routeRoutineEffort(nextStrategy.reasoningEffort, {
+    // Phase 2A effort routing + 工具族 overlay：例行降档后与工具族天花板取 min。
+    // Floor 由 ReasoningEffortController.set() 下游钳制。
+    const routed = routeRoutineEffort(nextStrategy.reasoningEffort, {
       complexity: nextSensorium.complexity,
       momentum: nextSensorium.momentum,
       confidence: nextSensorium.confidence,
-    }))
+    })
+    const overlay = toolFamilyEffortOverlay(input.recentToolHistory.map(h => h.tool))
+    this.deps.setReasoningEffort(composeEffortWithOverlay(
+      nextStrategy.reasoningEffort,
+      routed,
+      overlay,
+    ))
     const thetaState = {
       ...input.thetaState,
       interval: adaptThetaInterval(nextStrategy.thetaCycleInterval, input.gitChangeRate),

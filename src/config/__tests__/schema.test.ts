@@ -242,14 +242,14 @@ describe('config permissions schema', () => {
     assert.equal(parsed.routing.code_edit, 'cheap-flash')
   })
 
-  it('routes all workers to cheap-flash by default (v4-flash 去廉价化)', () => {
+  it('routes routine workers to cheap-flash; planning to capable (不全押 Flash)', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 
-    // 2026-08-02：v4-flash 能力实测已超 v4-pro，planning 不再独立走强档，
-    // 全部 worker 任务默认走 cheap-flash；需更强可在 config 改 capable。
-    for (const [task, profile] of Object.entries(parsed.workers.routing)) {
-      assert.equal(profile, 'cheap-flash', `${task} should route to cheap-flash, got ${profile}`)
-    }
+    assert.equal(parsed.workers.routing.repo_summarization, 'cheap-flash')
+    assert.equal(parsed.workers.routing.code_edit, 'cheap-flash')
+    assert.equal(parsed.workers.routing.test_failure_diagnosis, 'cheap-flash')
+    assert.equal(parsed.workers.routing.risky_refactor, 'cheap-flash')
+    assert.equal(parsed.workers.routing.planning, 'capable')
   })
 })
 

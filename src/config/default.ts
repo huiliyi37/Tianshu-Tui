@@ -158,7 +158,8 @@ export const DEFAULT_CONFIG: Config = {
       modelTier: 'shadow',
       teamScheduler: 'shadow',
       modelRouting: 'shadow',
-      effort: 'shadow',
+      // effort：闸门满足后真投票（shadow 样本达标 → auto 晋升启用 bandit delta）
+      effort: 'auto',
       killSwitch: false,
     },
     permissions: {
@@ -247,8 +248,9 @@ export const DEFAULT_CONFIG: Config = {
       code_edit: 'cheap-flash',
       test_failure_diagnosis: 'cheap-flash',
       risky_refactor: 'cheap-flash',
-      // 2026-08-02：v4-flash 能力实测已超 v4-pro（去廉价化），planning 同走 flash
-      planning: 'cheap-flash',
+      // 难任务不全押 Flash：planning 默认 capable（Pro）；例行检索/编辑仍可走 flash。
+      // Atropos Flash→Pro 升档是失败兜底，不能代替前置路由。
+      planning: 'capable',
     },
     patcherTier: 'cheap',
     escalationCap: 'off',

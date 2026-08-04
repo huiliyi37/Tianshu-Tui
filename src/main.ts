@@ -1175,7 +1175,7 @@ async function main() {
         { id: 'auto', label: 'Auto', description: '按任务复杂度自动选档（架构/安全/根因→max，重构/调试→high，查看→low）', recommended: isAuto, current: isAuto },
         { id: 'max', label: 'Max', description: '完整推理链。最深度思考，适合架构设计、安全审查、根因排查', current: !isAuto && current === 'max' },
         { id: 'high', label: 'High', description: '认真推理。复杂重构、bug 修复、功能实现', current: !isAuto && current === 'high' },
-        { id: 'medium', label: 'Medium', description: '标准编码。常规改动、添加测试', current: !isAuto && current === 'medium' },
+        { id: 'medium', label: 'Medium', description: '标准编码。常规改动、添加测试（DeepSeek 线上映射为 low）', current: !isAuto && current === 'medium' },
         { id: 'low', label: 'Low', description: '轻量推理。简单查询、读取文件', current: !isAuto && current === 'low' },
         { id: 'off', label: 'Off', description: '关闭思考。最快响应，纯执行', current: !isAuto && current === 'off' },
       ]
@@ -1592,6 +1592,7 @@ async function main() {
       cost,
       inputTokens: total.input_tokens,
       outputTokens: total.output_tokens,
+      reasoningTokens: total.reasoning_tokens,
       lastRealPromptTokens: session.getLastRealPromptTokens(),
     }
   })
