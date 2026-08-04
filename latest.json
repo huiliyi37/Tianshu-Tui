@@ -1,19 +1,19 @@
 {
-  "version": "2.27.0",
-  "notes": "会话交接闭环 + 玻璃/主题修复 + TUI 输入优化 + README 大扩充",
-  "pub_date": "2026-08-02T15:25:44.150Z",
+  "version": "2.28.0",
+  "notes": "v2.28.0：starflow 四迭代（席位透传/基线预检/增量评审/blocked 归属）、全局并发闸、审查契约 polarity、新建会话去弹窗化、v4-flash 重定位、证据防火墙 Phase 2、cancel-rest 短路。Windows 条目随后续构建回流。",
+  "pub_date": "2026-08-03T08:51:10.704Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.27.0/Tianshu_2.27.0_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1NSV3ZIWjJvN0dDellUYkljeXppOTFFVjVLYzRQTzNGcFpjUGM3UlAwWmZaak5VSkVrU2w5VE5ibFZaOGJUeDBjK0wrNjJlK2RvYWl6UjlJSXlKcmdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NjgzMjA5CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6Clo1b0F2bFVOaVcyc09ySmFJaFUxU3BRYWVBMDZrQkhBVEVGUk1GWnNJZ0dhZFBXTWxMV3E5MHdXcXQrd3JrSXNBS3BmZmNMN20wR3VGOSs0SnhtdkF3PT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.28.0/Tianshu_2.28.0_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1JYWWF2V01rbkFuUStoWHpuVlgwclNnOVBtejJIZjdwVU9RbFRJSFM5eDRyQVNOSUliSTMrZXJvVE1uc1ZFTERseXkrZGhFcEdkRUYxSkpHYzJKc0FJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NzQ1NzQ1CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CmgvVUhTQzFJYUdoVkR4ZUNIaUpnem8yN1JSN3NNenlQWk8rOG9HSnBpRVF0Q0ZOQjZna2N2dlpZMUFRc3pUMGJvMHhIL3hCRGFIQk9YekVjczZiQkFnPT0K"
     },
     "darwin-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.27.0/Tianshu_2.27.0_x64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1VMbnpYNDUvUVFRdW5LQ29Odmhtb1YzeUxxUXI5WXNVOXU1T2ZDTk9Sc3I5T1pwTXVvdWt3Y0hNOVh6bWtVam8zb2pDWDRJc1JPRi9mMVp1WFBycGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1Njg0MDQ2CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CnhjUVBnNUdNUTR0WWlsZTdGZWdwVDNGbTdYZWpkWlBQNEh3KzlPRjg0WGlWNzVlUFVWbUo3cnI1NUhFQTg0UGVBbWhyTmMwcGc5NlBJL01rZENIZ0N3PT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.28.0/Tianshu_2.28.0_x64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1QyZEx5aUdYcU1ac2p5a1NZWDl1TnJkV21leW5YRERBaUZSd1B1WkJKaGs0Rjd3Zmk5VDVqRnorUjlmaEtSSHh3WVpqQzhJdWdrYzZRenRhR2QxbVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NzQ2NTg1CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6Cng2NGlQamd4Uk1IZnZ0ZmEvWjc0NFlieStXNTQzVDlvWXp3WEp4LzBmTDE1T2dHNUZ1M3h2bEIzZ1ZWcXR6Q2NJTFlWZUhmeG1qTWRMTysvbWIvMUNnPT0K"
     },
     "windows-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.27.0/Tianshu_2.27.0_x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2FaZGI1UERVZ2ZhZ0llN0RyZWJjV2JLMnMyNzdOUXl4Y284N1R0MGozRFAzVVo0aHVpazgzaEhLQkU4Z3VZRWdhZUtXcm9sRHhqUnZ6aVNzQUljUGdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NjUzODMyCWZpbGU6VGlhbnNodV8yLjI3LjBfeDY0LXNldHVwLmV4ZQpKQ2JCZGk0bEJvdjVZK2RqNTAzYXEvVlY4SFNHaTlRNGdIR0VXZ25rM09JMm10dFBGMk02aUE2MitiNlQxK2hVNkYrNGV4S0ZoOG1mYTBINE9MMWtCQT09Cg=="
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v2.28.0/Tianshu_2.28.0_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2F5SCs1UDR6dEpuTkRjUlVlZ1JaSEl1VFZIWW5rQlFvS2toeDFjbzlIMVdweWZqNVIxQ0xJUTBGUUlQYTF4OHQrb0wzVFpUS2dRQlo4eTFYZnR4NHdvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NzQ3OTQ2CWZpbGU6VGlhbnNodV8yLjI4LjBfeDY0LXNldHVwLmV4ZQoxRnA3SExnYkF3YzV0Q2FFME5ZODI0SkM1a0l1ZGo4M0FCTlJYZEdzN1MxY1NXUVh2MnFvNmF4U1dUME14dk5NOHcxZStmbExPQVU1NHMzTTdZa0NDZz09Cg=="
     }
   }
 }

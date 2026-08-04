@@ -8,6 +8,23 @@ Thank you for your interest in contributing! This document explains what you can
 2. Run `npx tsc --noEmit` and `npm test` before pushing
 3. One logical change per PR — keep it reviewable
 
+## How PRs Get Merged (Dual-Repo sync-merge Flow)
+
+This repo does **not** merge PRs with the merge button. The dev repo is the single
+source of truth; the public repo is synchronized from it. Every community PR goes
+through the same four-step disposal:
+
+1. **Review & land in dev** — approved changes enter the dev main first.
+2. **Sync to public** — the next sync run carries them here
+   (`sync: from dev repo` commits).
+3. **`sync-merged` label + close** — a maintainer marks the PR `sync-merged` and
+   closes it with a note. **A closed PR with `sync-merged` is merged, not rejected.**
+4. **Credit commit** — your name and email land as a `Co-authored-by:` trailer,
+   which is how GitHub's contributor graph counts you; you're also listed in
+   [CONTRIBUTORS.md](CONTRIBUTORS.md).
+
+Maintainers run `scripts/dispose-community-pr.sh <PR#>` for steps 3–4 (idempotent).
+
 ## Contribution Zones
 
 ### 🟢 Open Zone — Community Contributions Welcome
