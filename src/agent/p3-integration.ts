@@ -29,6 +29,20 @@ export interface P3Config {
    * chain is now inert unless explicitly enabled (unit tests only).
    * Re-enable in production only after ShadowQueue entries record mtime and
    * checkHit re-stats before returning.
+   *
+   * 2026-08-05 追加发现：上面这条"重启契约"只覆盖了一半——ShadowQueue 本身
+   * 已经补上 mtime/size/TTL 校验（`shadow-queue.ts`），但 `checkSpeculativeCache`
+   * 的服务消费点（原在 tool-pipeline.ts 工具执行前做命中短路）在 2026-07-06
+   * 就被物理删除了，不是被这个 flag 挡住——全仓 grep `checkSpeculativeCache`
+   * 只有本文件的定义和一处单测引用，零生产调用点。这意味着：即使把这个 flag
+   * 打开、把下面 enqueue 相关方法的门也打开，预测也只会被造出来又在 TTL 后
+   * 过期，从不被消费——这正是 2026-07-07 封存理由本身描述的"纯预执行是纯
+   * 成本、零收益"状态,重新触发同一个理由。真正的重启需要先决定并实现服务
+   * 消费点怎么接回 tool-pipeline.ts（短路真实工具执行前的一次 trace/harness/
+   * UI 事件一致性设计），这是比"修好 ShadowQueue 校验"更大的一块工作，本次
+   * 未做——ShadowQueue 校验修复本身是独立价值（即便投机链永远不重启，它也
+   * 让这个类不再是一个已知会跑出脏数据的定时炸弹），但只做这一半不代表可以
+   * 安全打开这个 flag。
    */
   speculativeEnabled?: boolean
   /** Background agent task executor */

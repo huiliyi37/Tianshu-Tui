@@ -200,6 +200,9 @@ export interface TurnOrchestratorDeps {
     request?: import('../api/oai-types.js').OaiChatRequest
   }>
   prewarmRecentReads: () => Promise<void>
+  /** P3 — 压缩/会话分裂后主动预热服务端前缀缓存（fire-and-forget，never throws,
+   *  never awaited here）。缺省 → 不预热（向后兼容，测试 deps 可省略）。 */
+  firePrefixPrewarm?: () => void
   runPostSession: (callbacks: AgentCallbacks) => Promise<void>
   recordProviderOutcome: (ok: boolean) => void
 
@@ -522,6 +525,10 @@ export class TurnOrchestrator {
             return
           }
           if (compactionResult.userMessageConsumed) userMessageConsumed = true
+          // P3 — 新前缀第一轮必冷；这次压缩/分裂刚把它敲定，趁真实请求还没
+          // 发出去之前抢跑一个极小请求把它焐热（摊平延迟，不是省钱：cache
+          // write 的钱无论走哪次请求都要付一次）。Fire-and-forget，不阻塞本轮。
+          if (compactionResult.compacted) this.deps.firePrefixPrewarm?.()
         }
 
         this.deps.state.streamedText = ''

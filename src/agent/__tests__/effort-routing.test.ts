@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { routeRoutineEffort, isEffortRoutingEnabled } from '../effort-routing.js'
+import { routeRoutineEffort, isEffortRoutingEnabled, escalateOnHardSignal } from '../effort-routing.js'
 
 describe('routeRoutineEffort (Phase 2A)', () => {
   const routine = { complexity: 0.2, momentum: 0.9, confidence: 0.8 }
@@ -56,5 +56,27 @@ describe('routeRoutineEffort (Phase 2A)', () => {
       if (prev === undefined) delete process.env['RIVET_EFFORT_ROUTING']
       else process.env['RIVET_EFFORT_ROUTING'] = prev
     }
+  })
+})
+
+describe('escalateOnHardSignal (Phase 2B)', () => {
+  it('forces max when verification debt is present', () => {
+    assert.equal(escalateOnHardSignal('low', { hasVerificationDebt: true, doomLoopLevel: 'none' }), 'max')
+  })
+
+  it('forces max on a doom-loop warning even without verification debt', () => {
+    assert.equal(escalateOnHardSignal('medium', { hasVerificationDebt: false, doomLoopLevel: 'warn' }), 'max')
+  })
+
+  it('forces max on a doom-loop block', () => {
+    assert.equal(escalateOnHardSignal('high', { hasVerificationDebt: false, doomLoopLevel: 'blocked' }), 'max')
+  })
+
+  it('leaves effort unchanged with no hard signal', () => {
+    assert.equal(escalateOnHardSignal('medium', { hasVerificationDebt: false, doomLoopLevel: 'none' }), 'medium')
+  })
+
+  it('is idempotent when already max', () => {
+    assert.equal(escalateOnHardSignal('max', { hasVerificationDebt: true, doomLoopLevel: 'blocked' }), 'max')
   })
 })

@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from './auto-reasoning.js'
+import type { DoomLoopLevel } from './trace-store.js'
 
 const ORDER: ReasoningEffort[] = ['off', 'low', 'medium', 'high', 'max']
 
@@ -57,4 +58,36 @@ export function routeRoutineEffort(
   const idx = ORDER.indexOf(effort)
   if (idx <= 0) return effort
   return ORDER[idx - 1]!
+}
+
+export interface HardEffortSignals {
+  /** EvidenceTracker.hasVerificationDebt() — failed verification or ≥3 unverified edits. */
+  hasVerificationDebt: boolean
+  /** Doom-loop detector output — 'warn'/'blocked' means the agent looks stuck. */
+  doomLoopLevel: DoomLoopLevel
+}
+
+/**
+ * Phase 2B: force effort to 'max' when a hard signal fires, overriding
+ * whatever the routine-turn heuristic would otherwise pick.
+ *
+ * This is the "upgrade" half of bidirectional effort scheduling — the only
+ * half that matters for DeepSeek V4, where 'low'/'medium' are server-side
+ * no-ops (see openai-client.ts DeepSeek normalization) and the routine-turn
+ * downgrade path already has nowhere lower to go than 'high'. Callers should
+ * run this BEFORE {@link routeRoutineEffort} and skip the downgrade entirely
+ * when it returns 'max'.
+ *
+ * Deliberately narrow: only verification debt and doom-loop warnings, both
+ * already-computed signals with no new tracking machinery. Plan-mode's
+ * forced 'max' and council divergence escalation are handled at their own
+ * call sites (turn-step-producer.ts, council-orchestrator.ts respectively) —
+ * this function does not duplicate them.
+ */
+export function escalateOnHardSignal(
+  effort: ReasoningEffort,
+  signals: HardEffortSignals,
+): ReasoningEffort {
+  if (signals.hasVerificationDebt || signals.doomLoopLevel !== 'none') return 'max'
+  return effort
 }

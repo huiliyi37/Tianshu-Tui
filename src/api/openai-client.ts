@@ -11,6 +11,7 @@ import { sanitizeMessageContent } from '../utils/sanitize.js'
 import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
 import { debugLog } from '../utils/debug.js'
 import { repairInvalidJsonEscapes } from './json-escape-repair.js'
+import { shouldCapReasoning } from './reasoning-chain-guard.js'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
@@ -101,6 +102,9 @@ export interface OpenAIClientConfig {
   model: string
   maxTokens: number
   reasoningEffort?: string
+  /** P2 思维链上限看门狗（reasoning-chain-guard.ts）。undefined → 默认 96,000；
+   *  <=0 → 关闭检查（无上限，旧行为）。 */
+  reasoningChainCapTokens?: number
   thinking?: 'enabled' | 'disabled'
   /** How to format thinking in the request body. 'openai' = use reasoning_effort only, others = use thinking block */
   thinkingFormat?: 'anthropic' | 'openai' | 'none'
@@ -432,6 +436,17 @@ export class OpenAIClient implements StreamClient {
     if (request.reasoning_effort && this.config.effortFormat !== 'none') {
       body.reasoning_effort = request.reasoning_effort
     }
+    // DeepSeek V4 only recognizes 'high'/'max' server-side — 'low' and 'medium'
+    // are silently coerced to 'high' by the API itself (confirmed against
+    // Agno/Together.ai/DeepSeek third-party docs, no official DeepSeek-side
+    // acknowledgment of the mapping but consistently reproduced). Whatever
+    // upstream config or effort-routing computes, normalize here so the wire
+    // value always matches what actually takes effect — otherwise routine-turn
+    // step-down (`effort-routing.ts`) silently costs nothing on this provider.
+    if (this.config.providerName === 'deepseek'
+      && (body.reasoning_effort === 'low' || body.reasoning_effort === 'medium')) {
+      body.reasoning_effort = 'high'
+    }
     // Codex (served via cliproxy) tops out at 'xhigh', not Rivet's canonical
     // 'max'. Map at the wire so the global ReasoningEffort enum stays unchanged
     // and other providers keep receiving 'max'.
@@ -687,6 +702,8 @@ export class OpenAIClient implements StreamClient {
     let lastFiredAsThinkingStall = false
     /** Whether any reasoning_content has been received — used to detect thinking stalls. */
     let receivedThinking = false
+    /** P2 96K reasoning-chain cap — set once, cuts the stream cleanly (see below). */
+    let reasoningCapHit = false
     // GLM-5.1 mandatory thinking mode outputs everything as reasoning_content
     // with no content field. Accumulate reasoning to promote if no content arrives.
     let reasoningAccum = ''
@@ -822,6 +839,20 @@ export class OpenAIClient implements StreamClient {
               reasoningAccum += parsed.choices[0].delta.reasoning_content
               receivedThinking = true
               if (reasoningRef) reasoningRef.content = reasoningAccum
+              // P2 96K 思维链上限看门狗: no native max-reasoning-tokens knob on
+              // DeepSeek, so we count client-side and cut cleanly (treated as a
+              // normal finish, NOT an error — an error would retry the whole
+              // request and pay for the runaway chain again). Empty streamedText
+              // + non-empty thinkingAccum at post-turn lands in the existing
+              // thinking-only-retry path (thinking-retry.ts), which already
+              // injects "respond directly without thinking" — no new retry
+              // machinery needed here.
+              if (!reasoningCapHit && shouldCapReasoning(reasoningAccum.length, this.config.reasoningChainCapTokens)) {
+                reasoningCapHit = true
+                streamDone = true
+                reader.cancel().catch(() => {})
+                break
+              }
             }
           } catch {
             // Skip malformed SSE lines
@@ -891,8 +922,15 @@ export class OpenAIClient implements StreamClient {
       }
       this._textAccum = ''
 
-      // If no usage chunk arrived, emit stop reason now
-      if (this.pendingStopReason) {
+      // If no usage chunk arrived, emit stop reason now. reasoningCapHit is a
+      // clean client-side cutoff (not a server finish_reason), so it takes a
+      // distinct, greppable stop reason instead of falling through to whatever
+      // pendingStopReason happens to hold (normally none yet, since the server
+      // never got to finish on its own).
+      if (reasoningCapHit) {
+        callbacks.onStopReason?.('reasoning_chain_capped', {})
+        this.pendingStopReason = null
+      } else if (this.pendingStopReason) {
         callbacks.onStopReason?.(mapFinishReason(this.pendingStopReason), {})
         this.pendingStopReason = null
       }

@@ -66,6 +66,14 @@ describe('LLM speculation wiring (loop-factory → turn-orchestrator → p3)', (
       // The engine's only consumer was ShadowQueue pre-execution; with serving
       // cut (stale-read incident) an opted-in engine would burn side-path LLM
       // calls for nothing — so the factory never constructs it anymore.
+      //
+      // 2026-08-05 (P4 排雷): ShadowQueue 本身已补 mtime/size/TTL 校验
+      // （shadow-queue.ts）——但这条断言仍必须保持"不构造"，因为核实发现
+      // `checkSpeculativeCache` 的服务消费点在 tool-pipeline.ts 里是被物理删除
+      // 的，不是被某个 flag 挡住（全仓 grep 零生产调用点）。光修好 ShadowQueue
+      // 校验、不接回服务消费点就打开这条链，等于精确复现 2026-07-07 封存理由
+      // 本身写的那句话："纯预执行是纯成本、零收益"。重启需要先把服务消费点
+      // 设计接回去，这块工作本次未做，是识别到的新增范围，留给下一次评估。
       assert.equal(deps.speculateDuringBatch, undefined, 'sealed chain must not inject the dep')
       assert.equal(loop.llmSpeculationEngine, null, 'engine must not be constructed')
       assert.equal(client.calls.length, 0, 'no speculative LLM call may fire')

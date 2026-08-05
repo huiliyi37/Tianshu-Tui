@@ -2230,6 +2230,13 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   })
   refs.promptEngine = agent.config.promptEngine
   wireFrozenSnapshotPersist(persist, agent.config.promptEngine)
+  // P3 — resume 后主动预热服务端前缀缓存：长间隔后 provider 端 TTL 大概率
+  // 已过期，且不像轮内压缩场景有"下一轮"帮忙自然回暖——resume 完成到用户敲
+  // 下第一条消息之间就是唯一的、真实请求还没占用的空窗。只在真有历史可暖时
+  // 才发（否则等于对着空前缀发一个没有意义的 ping）。fire-and-forget。
+  if (wasSessionResumed() && existingMessages.length > 0) {
+    agent.firePrefixPrewarm()
+  }
   // 兜底模型续跑：meta + JSONL 审计，对齐 switchAgentSession/桌面 resume-fallback 语义。
   if (startupResume.fallbackUsed && startupResume.target) {
     try {

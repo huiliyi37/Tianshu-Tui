@@ -122,7 +122,7 @@ import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot, createSidePathUsageRecorder, createReclaimDecisionRecorder } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot, createSidePathUsageRecorder, createReclaimDecisionRecorder, createPrefixPrewarmRunner } from "./loop-factory.js";
 import type { TurnStepProducer } from './turn-step-producer.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
@@ -825,6 +825,7 @@ export class AgentLoop {
       setReasoningEffort: effort => { this.setReasoningEffort(effort, 'programmatic') },
       getFingerprint: () => this.config.promptEngine.getFingerprint(),
       submitControlSignal: signal => { this.controlPlane.submit(signal) },
+      getVerificationDebt: () => this.evidence.hasVerificationDebt(),
     })
     this.intent = new TurnIntentController()
     this.contextInjection = new ContextInjectionController({
@@ -1339,6 +1340,16 @@ export class AgentLoop {
     // autoReasoning 档位）不得覆盖，保护显式用户意图。
     if (source === 'programmatic' && this.userReasoningOverride) return
     this.reasoningEffort.set(effort)
+  }
+
+  /**
+   * P3 — 主动预热服务端前缀缓存。压缩/会话分裂后由 turn-orchestrator 在轮内
+   * 自动触发；resume 场景没有"轮内"时机（agent 刚构造，还没开始第一轮），
+   * 由 bootstrap.ts 在恢复完成后显式调一次。fire-and-forget：从不 await、
+   * 从不重试、从不影响调用方。
+   */
+  firePrefixPrewarm(): void {
+    createPrefixPrewarmRunner(this)()
   }
 
   shadowEffortTelemetry(

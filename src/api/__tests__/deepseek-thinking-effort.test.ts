@@ -80,6 +80,14 @@ test('DeepSeek thinking 模式：thinking 块与 reasoning_effort 必须并存',
   )
 })
 
+test('DeepSeek low/medium 在服务端会被静默改判成 high —— 客户端本地归一化到 high，不发死文字', async () => {
+  const lowBody = await captureBody({ ...DEEPSEEK_CONFIG, reasoningEffort: 'low' }, baseRequest)
+  assert.equal(lowBody.reasoning_effort, 'high', "low 对 DeepSeek V4 是服务端无效值，本地应归一化为 'high'")
+
+  const mediumBody = await captureBody({ ...DEEPSEEK_CONFIG, reasoningEffort: 'medium' }, baseRequest)
+  assert.equal(mediumBody.reasoning_effort, 'high', "medium 对 DeepSeek V4 是服务端无效值，本地应归一化为 'high'")
+})
+
 test('DeepSeek thinking disabled：不发 thinking 块也不发 reasoning_effort', async () => {
   const body = await captureBody(
     { ...DEEPSEEK_CONFIG, thinking: 'disabled' },
