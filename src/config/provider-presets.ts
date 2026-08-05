@@ -52,7 +52,12 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           alias: 'v4-flash',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
-          reasoningEffort: 'medium',
+          // DeepSeek V4 only honors 'high'/'max' server-side — 'low'/'medium' are
+          // silently coerced to 'high'. Setting 'medium' here would have zero
+          // effect (openai-client.ts normalizes it anyway) but reads as if it
+          // saved cost when it never did. 'high' is the real, honest floor;
+          // the only actionable lever left is escalating to 'max' on hard signals.
+          reasoningEffort: 'high',
           tier: 'cheap',
           pricing: { input: 1, output: 2, cacheRead: 0.02, cacheWrite: 1 },
         },
@@ -263,7 +268,16 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           alias: 'sf-v4-flash',
           contextWindow: 1_000_000,
           maxTokens: 384_000,
-          reasoningEffort: 'medium',
+          // Same 'medium' is a no-op as deepseek-v4-flash above (this IS DeepSeek
+          // V4 weights, just proxied). Separately: 'siliconflow' has no entry in
+          // WELL_KNOWN_DEFAULTS (src/api/provider.ts) so effortFormat/thinkingFormat
+          // resolve to 'none'/'none' — reasoning_effort and the thinking block are
+          // currently never sent at all for ANY siliconflow model (this field is
+          // presently inert for a second, more severe reason). Left unfixed here:
+          // fixing it means adding a WELL_KNOWN_DEFAULTS entry, which also affects
+          // sf-glm (GLM-5.2, a different reasoning protocol than DeepSeek's
+          // preserved-thinking) and needs live verification before being trusted.
+          reasoningEffort: 'high',
           tier: 'cheap',
           pricing: { input: 0.13, output: 0.28 },
         },

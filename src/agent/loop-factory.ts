@@ -36,6 +36,7 @@ import { IntentRetrievalRouteController } from './intent-retrieval-route-control
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
 import { PrewarmController } from './prewarm-controller.js'
+import { firePrefixPrewarm } from './prefix-prewarm.js'
 import { canonicalizePhysarumFileTarget } from './hooks/physarum-file-access-hook.js'
 import { TurnStepProducer } from './turn-step-producer.js'
 import { skillRegistry } from '../skills/skill-loader.js'
@@ -118,6 +119,44 @@ export function createReclaimDecisionRecorder(self: AgentLoop): (record: Reclaim
           .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
       }).catch(() => {})
     } catch { /* telemetry is best-effort — never break compaction */ }
+  }
+}
+
+/**
+ * P3 — 压缩/会话分裂/resume 后主动预热服务端前缀缓存（`prefix-prewarm.ts`）。
+ * fire-and-forget：调用方（turn-orchestrator/bootstrap）不 await 这个函数本身
+ * 的返回，结果异步落一行 `event:'prewarm'` 到 cache-log.jsonl，失败静默。
+ */
+export function createPrefixPrewarmRunner(self: AgentLoop): () => void {
+  return () => {
+    try {
+      firePrefixPrewarm({
+        client: self.config.client,
+        getMessages: () => self.session.getMessages(),
+        buildRequest: messages => self.config.promptEngine.buildOaiRequest(
+          messages,
+          undefined,
+          self.config.contextWindow,
+          { sidePath: true },
+        ),
+        onResult: result => {
+          const sid = self.config.sessionId ?? 'anon'
+          const line = JSON.stringify({
+            event: 'prewarm',
+            t: Date.now(),
+            model: self.config.promptEngine.getModel(),
+            ok: result.ok,
+            elapsedMs: result.elapsedMs,
+            ...(result.error ? { error: result.error.slice(0, 300) } : {}),
+          })
+          import('node:fs/promises').then(fs => {
+            const dir = join(getSessionDir(self.cwd), sid)
+            return fs.mkdir(dir, { recursive: true })
+              .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+          }).catch(() => {})
+        },
+      })
+    } catch { /* prewarm is best-effort — never break the turn boundary */ }
   }
 }
 
@@ -1110,6 +1149,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     buildTurnRequest: (turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks) =>
       self.turnStepProducer.buildTurnRequest(turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
     prewarmRecentReads: () => self.prewarmController.prewarmRecentReads(),
+    firePrefixPrewarm: createPrefixPrewarmRunner(self),
     runPostSession: (callbacks) => self.runPostSession(callbacks),
     recordProviderOutcome: (ok) => { self.recordProviderOutcome(ok) },
 

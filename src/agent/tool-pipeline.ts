@@ -1866,6 +1866,12 @@ export async function executeToolUse(
      } catch {
         deps.prewarm.invalidate(tu.input.file_path as string)
      }
+      // ShadowQueue 投机预读队列失效（P4 解封配套）：队列不像 PrewarmCache
+      // 按文件路径索引，没有对应单个 key 的失效方式（grep/glob/list_dir 的
+      // target 常是目录，不是被改的那个文件）——整队清空是这个数据结构下
+      // 唯一安全的等价物。checkHit 自带 mtime/size/TTL 校验兜底，这里是额外
+      // 的一层尽早失效，不是唯一防线。
+      deps.p3?.queue.clear()
    }
 
     // Prewarm grep-matched files: grep→read_file is the most common tool sequence.

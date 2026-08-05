@@ -49,6 +49,62 @@ describe('parseStream / SSE parsing', () => {
     assert.equal(stopReason, 'end_turn')
   })
 
+  it('P2: cuts the stream cleanly (not as an error) once accumulated reasoning crosses the cap', async () => {
+    // Cap of 5 tokens ≈ 20 chars — trivially exceeded by the deltas below.
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek', reasoningChainCapTokens: 5 })
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"this is a long chain of thought that keeps going"},"index":0}]}\n\n'))
+        // A second delta the guard must never see — proves the stream was really cut, not just capped-then-continued.
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"more thinking after the cap should have fired"},"index":0}]}\n\n'))
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const response = new Response(stream)
+
+    const thoughts: string[] = []
+    let stopReason: string | undefined
+    let textEmitted = false
+
+    await (client as any).parseStreamFromReader(
+      response.body!.getReader(),
+      {
+        onThinkingDelta: (t: string) => thoughts.push(t),
+        onTextDelta: () => { textEmitted = true },
+        onStopReason: (reason: string) => { stopReason = reason },
+      },
+    )
+
+    assert.equal(stopReason, 'reasoning_chain_capped', 'cap hit must surface a distinct, greppable stop reason')
+    assert.equal(thoughts.length, 1, 'only the first delta should have been processed before the cut')
+    assert.equal(textEmitted, false, 'DeepSeek must not promote capped reasoning to visible text (GLM-only behavior)')
+  })
+
+  it('P2: reasoning cap disabled (0) never cuts even a very long chain', async () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek', reasoningChainCapTokens: 0 })
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: {"choices":[{"delta":{"reasoning_content":"${'x'.repeat(500_000)}"},"index":0}]}\n\n`))
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"done"},"index":0,"finish_reason":"stop"}]}\n\n'))
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const response = new Response(stream)
+
+    let stopReason: string | undefined
+    const texts: string[] = []
+    await (client as any).parseStreamFromReader(
+      response.body!.getReader(),
+      { onTextDelta: (t: string) => texts.push(t), onStopReason: (reason: string) => { stopReason = reason } },
+    )
+    assert.equal(texts.join(''), 'done', 'a disabled cap must let the full stream through to the real answer')
+    assert.equal(stopReason, 'end_turn')
+  })
+
   it('handles empty stream', async () => {
     const client = new OpenAIClient(TEST_CONFIG)
     const stream = new ReadableStream({

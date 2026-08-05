@@ -216,6 +216,22 @@ function seatTierFloor(seat: CouncilSeat, objective: string): Pick<CouncilFanout
   return { tierFloor: route.tier }
 }
 
+/** Council 分歧升档（effort 双向调度的 council 分支，见 effort-routing.ts
+ *  escalateOnHardSignal 头注释）：round2 只在 round1 有冲突时才扇出（见
+ *  runCouncilDebate 调用点），所以能进到这里本身就是"分歧信号已确认"——
+ *  没有单独的 divergence 阈值判断,冲突存在即升档。当前 coordinator/WorkOrder
+ *  管线只有模型档位（tierFloor: cheap/balanced/strong）这一条已接通的升档
+ *  通道，没有独立的 reasoning-effort 下限通道，所以这里升的是 tierFloor 到
+ *  最高档 'strong'，不是字面意义的 effort='max'——同一意图('第二轮值得更贵
+ *  的模型')在现有管线里的落地方式。显式声明 provider+model 的席位保留原样，
+ *  不覆盖用户的显式选择。 */
+function round2DivergenceTierFloor(seat: CouncilSeat, objective: string): Pick<CouncilFanoutRequest, 'tierFloor'> {
+  if (seat.provider && seat.model) return {}
+  const base = seatTierFloor(seat, objective)
+  if (base.tierFloor === 'strong') return base
+  return { tierFloor: 'strong' }
+}
+
 /** 单轮会诊：恰一次 delegateBatch 扇出席位 → 裁决 → 渲染。绝不派 worker 执行 / 分波。 */
 export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promise<CouncilPlan> {
   const convenedAt = deps.now() // 全程只取一次时钟，喂 shadow / meta / md，杜绝双取不一致。
@@ -347,7 +363,7 @@ export async function runCouncilDebate(input: CouncilInput, deps: CouncilDeps): 
     scope: {},
     authority: seat.authority,
     ...seatModelOverride(seat),
-    ...seatTierFloor(seat, input.draft.objective),
+    ...round2DivergenceTierFloor(seat, input.draft.objective),
   }))
   const run2 = await deps.delegateBatch(r2requests, 'all_required', input.abortSignal,
     deps.onSeatProgress

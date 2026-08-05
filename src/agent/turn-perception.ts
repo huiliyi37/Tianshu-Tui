@@ -10,7 +10,7 @@ import type { Sensorium, SensoriumInput, StrategyProfile } from './sensorium.js'
 import { adaptThetaInterval, buildStarPhaseContext, buildTelemetrySnapshot } from './perception.js'
 import type { ThetaTelemetrySnapshot } from './perception.js'
 import { createStarEvent } from './star-event.js'
-import { routeRoutineEffort } from './effort-routing.js'
+import { routeRoutineEffort, escalateOnHardSignal } from './effort-routing.js'
 import type { StarEvent, ThetaState } from './star-event.js'
 import type { VigorState } from './vigor.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
@@ -30,6 +30,9 @@ export interface TurnPerceptionDeps {
   getFingerprint(): PrefixFingerprint
   /** Wave 2 控制面：hook 结构化事实上报出口（shadow 记账，不改 prompt）。 */
   submitControlSignal?(signal: import('./control-plane.js').ControlSignal): void
+  /** Phase 2B hard-signal effort escalation（effort-routing.ts escalateOnHardSignal）。
+   *  缺省 → 该信号不参与升档判定（只剩 routine 降档 + doom 信号）。 */
+  getVerificationDebt?(): boolean
 }
 
 export interface PerceptionInput {
@@ -137,10 +140,21 @@ export class TurnPerceptionController {
       this.hasEnteredHighComplexity = true
     }
 
+    // Phase 2B hard-signal escalation: verification debt or a doom-loop warning
+    // forces 'max', bypassing the routine-turn downgrade below entirely — this
+    // is the only actionable "upgrade" half of bidirectional effort scheduling
+    // (see effort-routing.ts escalateOnHardSignal for why downgrade alone is
+    // moot on DeepSeek V4). Uses the doomLevel already computed above for
+    // sensoriumInput — no extra tracking, no new fingerprint pass.
+    const hardEscalated = escalateOnHardSignal(nextStrategy.reasoningEffort, {
+      hasVerificationDebt: this.deps.getVerificationDebt?.() ?? false,
+      doomLoopLevel: sensoriumInput.doomLevel,
+    })
     // Phase 2A effort routing (default ON; opt out with RIVET_EFFORT_ROUTING=0):
     // step effort down one tier on routine, on-track turns. Floor is enforced
-    // downstream in ReasoningEffortController.set().
-    this.deps.setReasoningEffort(routeRoutineEffort(nextStrategy.reasoningEffort, {
+    // downstream in ReasoningEffortController.set(). Skipped when a hard signal
+    // already escalated to 'max' — nothing left to route down from there.
+    this.deps.setReasoningEffort(hardEscalated === 'max' ? 'max' : routeRoutineEffort(hardEscalated, {
       complexity: nextSensorium.complexity,
       momentum: nextSensorium.momentum,
       confidence: nextSensorium.confidence,
