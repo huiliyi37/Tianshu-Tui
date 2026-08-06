@@ -3247,7 +3247,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | 'auto' | undefined
       const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max' | 'auto'> = ['off', 'low', 'medium', 'high', 'max', 'auto']
       if (!level) {
-        // 无参数 → 打开交互式选择面板（上下选、回车确认）。
+        // 无参数 → 重置面板类型后打开交互式选择面板（上下选、回车确认）。
+        ctx.setChoicePanelKind?.('effort')
         surfacePush?.('choice-panel')
         setIsStreaming(false)
         return true

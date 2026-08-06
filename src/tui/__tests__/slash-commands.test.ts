@@ -903,6 +903,31 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
   })
 })
 
+describe('/effort', () => {
+  it('resets stale choice-panel kind before opening the picker', async () => {
+    let kind = 'ask-user-question'
+    const events: string[] = []
+
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/effort'],
+      setChoicePanelKind: (next) => {
+        kind = next
+        events.push(`kind:${next}`)
+      },
+      surfacePush: (id) => {
+        events.push(`push:${id}`)
+      },
+    }))
+
+    assert.equal(handled, true)
+    assert.equal(kind, 'effort')
+    assert.deepEqual(events, [
+      'kind:effort',
+      'push:choice-panel',
+    ])
+  })
+})
+
 describe('/permission', () => {
   // Isolate real config writes (setCheckpointConfig / any persist) to a temp file.
   let prevConfigPath: string | undefined
