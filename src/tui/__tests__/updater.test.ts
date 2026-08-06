@@ -11,6 +11,7 @@ import {
   withResumeArgs,
   checkForUpdate,
   fetchNpmLatestVersion,
+  fetchGitHubLatestVersion,
   npmPackageExists,
 } from '../updater.js'
 import { WinStreamDecoder } from '../../platform.js'
@@ -328,6 +329,49 @@ describe('fetchNpmLatestVersion proxy support', () => {
     }
     await fetchNpmLatestVersion('tianshu-tui')
     assert.equal(capturedDispatcher, undefined)
+  })
+})
+
+describe('non-JSON 200 responses (proxy interception)', () => {
+  let origFetch: typeof globalThis.fetch
+
+  before(() => {
+    origFetch = globalThis.fetch
+  })
+
+  after(() => {
+    globalThis.fetch = origFetch
+  })
+
+  // 代理/网关劫持时可能以 200 返回 GBK 编码的 HTML 错误页，
+  // res.json() 会抛 SyntaxError —— 两处 fetch 都必须吞掉并返回 null，
+  // 否则 /update 命令以 unhandled promise rejection 崩溃。
+  it('fetchNpmLatestVersion returns null on HTML body with 200', async () => {
+    globalThis.fetch = async () =>
+      new Response('<html><body>proxy error</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=GBK' },
+      })
+    assert.equal(await fetchNpmLatestVersion('tianshu-tui'), null)
+  })
+
+  it('fetchNpmLatestVersion returns null on non-UTF-8 bytes', async () => {
+    // GBK 编码的中文（非合法 UTF-8），复现 "Unexpected token ''" 现场。
+    globalThis.fetch = async () =>
+      new Response(Buffer.from([0xb4, 0xed, 0xce, 0xf3, 0xd2, 0xb3, 0xc3, 0xe6]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    assert.equal(await fetchNpmLatestVersion('tianshu-tui'), null)
+  })
+
+  it('fetchGitHubLatestVersion returns null on HTML body with 200', async () => {
+    globalThis.fetch = async () =>
+      new Response('<html><body>blocked</body></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      })
+    assert.equal(await fetchGitHubLatestVersion('owner', 'repo'), null)
   })
 })
 
