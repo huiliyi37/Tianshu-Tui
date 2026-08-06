@@ -29,6 +29,8 @@
     "!dist/node_modules/**",
     "dist/node_modules/better-sqlite3/",
     "scripts/fetch-native-sqlite.js",
+    "scripts/prune-installed-wasms.js",
+    "scripts/tree-sitter-wasm-keep.js",
     "README.md",
     "LICENSE",
     "completions/"
@@ -37,7 +39,7 @@
     "rivet": "dist/main.js"
   },
   "scripts": {
-    "postinstall": "patch-package || node -e 1 && node scripts/install-git-hooks.mjs || node -e 1 && node scripts/fetch-native-sqlite.js || node -e 1",
+    "postinstall": "patch-package || node -e 1 && node scripts/install-git-hooks.mjs || node -e 1 && node scripts/fetch-native-sqlite.js || node -e 1 && node scripts/prune-installed-wasms.js || node -e 1",
     "prepack": "npm run build && node scripts/stage-cli-sqlite-wrapper.js",
     "dev": "tsup --watch",
     "build": "tsup",
@@ -65,23 +67,11 @@
     "@ast-grep/lang-json": "^0.0.7",
     "@ast-grep/lang-python": "^0.0.6",
     "@ast-grep/napi": "^0.44.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "chalk": "^5.6.2",
-    "diff": "^9.0.0",
     "esbuild": "^0.28.1",
-    "get-east-asian-width": "^1.6.0",
-    "parquet-wasm": "^0.7.2",
-    "parquetjs": "^0.11.2",
-    "pixelmatch": "^7.2.0",
     "playwright-core": "1.62.0",
-    "pngjs": "^7.0.0",
-    "string-width": "^8.2.1",
     "tree-sitter-wasms": "^0.1.13",
-    "turndown": "^7.2.4",
     "typescript": "^5.7.0",
-    "undici": "^8.3.0",
-    "web-tree-sitter": "^0.24.7",
-    "zod": "^3.24.0"
+    "web-tree-sitter": "^0.24.7"
   },
   "optionalDependencies": {
     "better-sqlite3": "^12.10.0"
@@ -90,15 +80,27 @@
     "esbuild": "^0.28.1"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@tauri-apps/cli": "^2.11.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/diff": "^7.0.2",
     "@types/node": "^22.0.0",
     "@types/pngjs": "^6.0.5",
     "@types/turndown": "^5.0.6",
+    "chalk": "^5.6.2",
+    "diff": "^9.0.0",
+    "get-east-asian-width": "^1.6.0",
+    "parquet-wasm": "^0.7.2",
+    "parquetjs": "^0.11.2",
     "patch-package": "^8.0.0",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
+    "string-width": "^8.2.1",
     "ts-morph": "^28.0.0",
     "tsup": "^8.4.0",
-    "tsx": "^4.22.0"
+    "tsx": "^4.22.0",
+    "turndown": "^7.2.4",
+    "undici": "^8.3.0",
+    "zod": "^3.24.0"
   }
 }
