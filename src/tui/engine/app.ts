@@ -30,7 +30,13 @@ import { ApprovalIntentController } from './approval-intent-controller.js'
 import { MetricsGlanceController } from './metrics-glance-controller.js'
 import { StreamRenderController } from './stream-render-controller.js'
 import { InputController } from './input-controller.js'
-import { ANSI, color, fg, bg, QUERY_CURSOR_POS, osc52Clipboard } from './ansi.js'
+import { ANSI, color, fg, bg, QUERY_CURSOR_POS, osc52Clipboard, imageProtocol } from './ansi.js'
+import {
+  encodeTermImage,
+  parseImageDataUrl,
+  prepareTermImageForCommit,
+  type PreparedTermImage,
+} from './term-image.js'
 
 import type { CacheStatus } from '../status-types.js'
 import { debugLog } from '../../utils/debug.js'
@@ -183,6 +189,15 @@ export function looksLikeFilePath(
     return !isKnownCommand(firstToken)
   }
   return false
+}
+
+/**
+ * 入口图片规范化：过滤非法 data URL 并按 MAX_IMAGES 截断。
+ * 气泡提示、终端渲染、onSubmitCallback 三处必须看到同一个数组。
+ */
+function normalizeSubmitImages(images?: string[]): string[] | undefined {
+  if (!images || images.length === 0) return images
+  return images.filter(u => parseImageDataUrl(u) !== null).slice(0, MAX_IMAGES)
 }
 
 /** 从 slashCommands 提示列表构建命令名谓词。
@@ -641,8 +656,10 @@ export class TuiApp {
   private inputController = new InputController()
   /** 输入框最近一次获得焦点的时间戳，用于 Ctrl+V 剪贴板图片防抖 */
   private lastInputFocusAt = 0
-  /** 批量回放 pending commit 时抑制每次 commitAbove 的 renderLive，最后统一画一帧。 */
+  /** overlay 退出回放排队的主屏 commit 时抑制每个条目的 renderLive，最后统一画一帧。 */
   private suppressCommitRender = false
+  /** renderLive requests deferred while an async overlay-commit pump is active. */
+  private deferredCommitRender = false
   /** 原始 stdout（用于直接写 DEC 私有模式如 bracketed paste 开关） */
   private stdout: WriteStream
   private terminalRestored = false
@@ -701,11 +718,12 @@ export class TuiApp {
       // alt screen 切换统一驱动 CPR 污染检测的暂停/恢复，覆盖所有 overlay
       // 入口（含直接调 this.overlay.activate 的快捷键路径）。
       onEnterAltScreen: () => this.live.suppressProbe(),
-      // 退出 alt screen 时恢复探针，并回放 overlay 期间排队的主屏 commit
-      // （deactivateInternal 先置 active=null 再退 alt screen，回放不会递归入队）。
+      // 退出 alt screen 时恢复探针，并驱动 pump 回放 overlay 期间排队的主屏
+      // commit（deactivateInternal 先置 active=null 再退 alt screen，同步条目
+      // 在 pump 同步段内排空，不会递归入队；异步条目后续微任务续跑）。
       onExitAltScreen: () => {
         this.live.resumeProbe()
-        this.flushPendingMainCommits()
+        this.requestPump()
       },
     })
     this.input = new InputHandler({ stdin: options.stdin, mode: 'input' })
@@ -716,7 +734,13 @@ export class TuiApp {
       history: options.history,
       placeholder: '询问任何事，或 / 唤起命令',
       onTabComplete: () => this.handleTabComplete(),
-      onSubmit: (text, images) => this.handleInputSubmit(text, images),
+      // handleInputSubmit 是 async：回调内任何异常都会成为 rejected Promise，
+      // 必须显式 catch 收口为一条警告行，否则 void 掉的是 unhandled rejection。
+      onSubmit: (text, images) => {
+        void this.handleInputSubmit(text, images).catch((err: unknown) => {
+          this.commitStatic(color(`⚠ 提交处理出错：${err instanceof Error ? err.message : String(err)}`, this.theme.warning))
+        })
+      },
     })
 
     // Write batcher: coalesce render calls
@@ -984,9 +1008,10 @@ export class TuiApp {
         // 空闲时 ESC 落入输入框的 vim normal/insert 切换（保持原行为）。
         if (this.inputLine.vimEnabled) {
           if (this.overlay.isActive()) {
-            // 直连 deactivate 也要清 detail 指针——否则看过一次的 job/worker
-            // 日志把后续 pager 内容永久劫持（pagerContent 把 detail 排在最前）。
-            this.overlay.deactivate()
+            // 键盘直连退出也走统一收口：suppress 窗口包住回放，避免叠影；
+            // detail 指针必清——否则看过一次的 job/worker 日志把后续 pager
+            // 内容永久劫持（pagerContent 把 detail 排在最前）。
+            this.exitOverlayCore()
             this.workerDetailWorkerId = null
             this.jobDetailId = null
             this.renderLive()
@@ -1004,7 +1029,8 @@ export class TuiApp {
           // 空闲 + vim：ESC 落入输入框处理 vim 模式切换
         } else {
           if (this.overlay.isActive()) {
-            this.overlay.deactivate()
+            // 键盘直连退出走统一收口，理由同上（vim 分支注释）。
+            this.exitOverlayCore()
             this.workerDetailWorkerId = null
             this.jobDetailId = null
             this.renderLive()
@@ -1289,7 +1315,9 @@ export class TuiApp {
   private contractBypass = false
 
   /** 输入提交主流程（InputLine onSubmit 回调；原构造器闭包提取，逻辑零改动）。 */
-  private handleInputSubmit(text: string, images?: string[]): void {
+  private async handleInputSubmit(text: string, images?: string[]): Promise<void> {
+    // 入口先规范化图片数组，后续气泡/渲染/回调看到的是同一份。
+    images = normalizeSubmitImages(images)
     let trimmed = text.trim()
     const hasImages = images && images.length > 0
     // 允许只发图片：空文本时补一个占位 prompt，让后端能触发 run。
@@ -1341,8 +1369,9 @@ export class TuiApp {
     // slash 命令（/ 开头）仍归主会话——用户在视图内还需要 /tasks 等导航。
     if (this.viewingWorkerId && trimmed && !trimmed.startsWith('/')) {
       const target = this.viewingWorkerId
+      // 先等气泡+图片落 scrollback 再 steer：worker 输出不得先于用户气泡。
+      await this.awaitUserCommit(`[→ ${shortOrderLabel(target)}] ${trimmed}`, images)
       const delivered = this.workerSteer?.(target, trimmed) ?? false
-      this.commitUserPrompt(`[→ ${shortOrderLabel(target)}] ${trimmed}`, images)
       if (!delivered) {
         this.commitStatic(color('⚠ 该子代理已结束或不支持直达，消息未送达', this.theme.warning))
       }
@@ -1353,7 +1382,7 @@ export class TuiApp {
     // W4a: agent 执行中 → 入队（turn 边界 drain 注入）。
     // 同时立即 commit 用户气泡到 scrollback，确保用户始终能看到自己说了什么。
     if (this.agentBusy && trimmed) {
-      this.commitUserPrompt(trimmed, images)
+      await this.awaitUserCommit(trimmed, images)
       this.steerBuffer.push(trimmed)
       this.renderLive()
       return
@@ -1385,7 +1414,7 @@ export class TuiApp {
     // Commit user message to scrollback（steer 已单独 commit 时跳过）
     if (trimmed) {
       if (!steerMerged) {
-        this.commitUserPrompt(submitText.trim(), images)
+        await this.awaitUserCommit(submitText.trim(), images)
       }
       // 新 run 启动前丢弃上一 run 未 finalize 的流式残留：blockWriter 缓冲
       // 与 streamRenderer pending 若不清，会把上一轮文字追加进新轮输出。
@@ -1407,7 +1436,10 @@ export class TuiApp {
     if (key.name === 'return') {
       this.contractPreview = null
       this.contractBypass = true
-      this.handleInputSubmit(pending.text, pending.images)
+      // 与 InputLine onSubmit 注册处同款收口：async 调用必须显式 catch。
+      void this.handleInputSubmit(pending.text, pending.images).catch((err: unknown) => {
+        this.commitStatic(color(`⚠ 提交处理出错：${err instanceof Error ? err.message : String(err)}`, this.theme.warning))
+      })
       return true
     }
     if (key.char === 'e') {
@@ -1648,17 +1680,46 @@ export class TuiApp {
     }
   }
 
-  /** 停用 overlay */
-  deactivateOverlay(): void {
+  /**
+   * overlay 退出的统一收口：所有「退出 overlay」路径必须经此，
+   * 不得裸调 this.overlay.deactivate()。
+   * 收口点保证：suppressCommitRender 包住 deactivate——deactivate 触发
+   * onExitAltScreen → requestPump，排队的主屏 commit 在 suppress 窗口内
+   * 回放时只写 scrollback 不重绘 live，最后由调用方 renderLive 画唯一帧，
+   * 避免「回放帧 + 退出帧」两层框体叠影/残帧。
+   */
+  private exitOverlayCore(): void {
+    // Every overlay exit path (including direct keyboard Esc) must restore the
+    // normal lone-Esc input behavior. Keep this reset at the shared core so
+    // callers cannot accidentally leave escapeImmediate enabled.
     this.input.setEscapeImmediate(false)
     const wasActive = this.overlay.isActive()
-    // suppressCommitRender 必须在 overlay.deactivate() 之前置位：deactivate 触发
-    // onExitAltScreen → flushPendingMainCommits，回放的 commitAbove 会调 renderLive
-    // 画第一帧；suppress 让回放只 write 到 scrollback，最后由本方法统一 renderLive
-    // 画唯一帧，避免两层框体叠影。
-    if (wasActive) this.suppressCommitRender = true
-    this.overlay.deactivate()
-    if (wasActive) this.suppressCommitRender = false
+    if (!wasActive) return
+    this.suppressCommitRender = true
+    try {
+      this.overlay.deactivate()
+    } finally {
+      const pump = this.mainCommitPump
+      if (!pump) {
+        this.suppressCommitRender = false
+      } else {
+        const finish = () => {
+          this.suppressCommitRender = false
+          if (this.deferredCommitRender && !this.overlay.isActive()) {
+            this.deferredCommitRender = false
+            this.renderLive()
+          }
+        }
+        void pump.then(finish, finish)
+      }
+    }
+  }
+
+  /** 停用 overlay */
+  deactivateOverlay(): void {
+    // 统一收口：suppress 窗口让回放只写 scrollback，最后由本方法
+    // 统一 renderLive 画唯一帧，避免两层框体叠影。
+    this.exitOverlayCore()
     // 记录焦点回归时间：Ctrl+V 剪贴板图片防抖窗口起点
     this.lastInputFocusAt = Date.now()
     this.workerDetailWorkerId = null
@@ -3228,14 +3289,36 @@ export class TuiApp {
    * Commits the user prompt to scrollback and fires onSubmitCallback.
    */
   submitText(text: string, images?: string[]): void {
-    this.commitUserPrompt(text, images)
-    this.blockWriter.discard()
-    this.streamRenderer.reset()
-    this.streamRenderController.assistantHeaderDone = false
-    this.agentBusy = true
-    this.state.turnStartMs = Date.now()
-    this.streamRenderController.lastActivityMs = Date.now()
-    this.onSubmitCallback?.(text, images)
+    // 入口先规范化图片数组，气泡/渲染/回调看到的是同一份。
+    images = normalizeSubmitImages(images)
+    // 带图提交是异步原子单元（转码完成后「气泡+图片」一起落 scrollback），
+    // agent 必须等它落地后再启动，保证图片先于 assistant 输出。
+    const pending = this.commitUserPrompt(text, images)
+    const start = () => {
+      this.blockWriter.discard()
+      this.streamRenderer.reset()
+      this.streamRenderController.assistantHeaderDone = false
+      this.agentBusy = true
+      this.state.turnStartMs = Date.now()
+      this.streamRenderController.lastActivityMs = Date.now()
+      this.onSubmitCallback?.(text, images)
+    }
+    // fire-and-forget 链上任何异常（prepare 漏网 / start 回调抛错）都静默，
+    // 绝不让 void 路径产生 unhandled rejection。
+    if (pending) {
+      void pending.then((written) => {
+        // 显示失败（written=false）不阻塞 agent：内容已交给 agent，只留一条
+        // muted 警告告知用户气泡没写出来。
+        if (!written) {
+          try {
+            this.commitStatic(color('⚠ 用户消息显示失败，但内容已发送给 agent', this.theme.muted))
+          } catch {
+            // stdout may remain unavailable; display failure must not prevent delivery.
+          }
+        }
+        start()
+      }).catch(() => {})
+    } else start()
   }
 
   /**
@@ -3243,17 +3326,68 @@ export class TuiApp {
    * 写入 scrollback 内容，再重绘 live region。
    * 不走该协议的裸 commit 会留下 ghost 行 / 覆盖已提交文本。
    *
-   * overlay（alt screen）激活期间主屏写入一律排队、一个字节都不写：
-   * clearForCommit 的 cursorUp+擦除与正文会落进 alt screen 擦花/顶滚动面板，
-   * 而 OverlayEngine 的行级 diff 缓存（lastFrame）对此无感知，之后只有光标
-   * 变化行被重绘——计划审批卡「按一下方向键才出来一行」的根因。
-   * 队列在 onExitAltScreen（flushPendingMainCommits）统一回放。
+   * 所有主屏 commit 统一经 enqueueMainCommit 定序：队列空闲时同步直写；
+   * 前方有异步条目（带图 prepare）或 overlay 激活时严格 FIFO 排队。
+   * overlay（alt screen）激活期间主屏写入一个字节都不写：clearForCommit 的
+   * cursorUp+擦除与正文会落进 alt screen 擦花/顶滚动面板，而 OverlayEngine
+   * 的行级 diff 缓存（lastFrame）对此无感知——计划审批卡「按一下方向键才
+   * 出来一行」的根因。排队条目在 overlay 退出时由 pump 回放。
    */
   private commitAbove(write: () => void): void {
-    if (this.overlay.isActive()) {
-      this.pendingMainCommits.push(write)
-      return
+    this.enqueueMainCommit(write)
+  }
+
+  /** 主屏 commit 队列条目：ready 为同步写闭包，或 prepare 完成后兑现写闭包的 Promise。 */
+  private mainCommitQueue: Array<{
+    ready: (() => void) | Promise<() => void>
+    /** 写完成后 resolve true；prepare 拒绝/写入抛错被跳过时 resolve false。 */
+    done: (written: boolean) => void
+  }> = []
+
+  /** 单实例 pump 互斥锁（非 null = 有 pump 在跑或刚同步排空待 settle）。 */
+  private mainCommitPump: Promise<void> | null = null
+
+  /** pump 同步段执行标志：堵住 mainCommitPump 赋值前的再入窗口。 */
+  private mainCommitPumping = false
+
+  /**
+   * 唯一有序 main commit 队列入口。位置在调用时一次性分配。
+   *
+   * 同步 fast path 契约：「队列空闲 + 无 pump 在跑 + overlay 未激活 + ready 是同步闭包」
+   * 四条件同时满足才走同步 fast path——立即 atomicCommitNow 并返回 null
+   * （保持 commitStatic/commitAbove 既有同步契约）。否则入队、requestPump，
+   * 返回 job 完成时 resolve 的 Promise<boolean>：true=已写出，false=prepare
+   * 拒绝或写入抛错被跳过（resolve 而非 reject，不给调用方制造 unhandled
+   * rejection）。前方存在 async barrier（带图 prepare）时后续条目严格
+   * FIFO 延后，哪怕它本身是同步闭包也绝不越过。
+   */
+  private enqueueMainCommit(ready: (() => void) | Promise<() => void>): Promise<boolean> | null {
+    if (
+      typeof ready === 'function'
+      && this.mainCommitQueue.length === 0
+      && this.mainCommitPump === null
+      && !this.mainCommitPumping
+      && !this.overlay.isActive()
+    ) {
+      try {
+        this.atomicCommitNow(ready)
+        return null
+      } catch {
+        return Promise.resolve(false)
+      }
     }
+    let done!: (written: boolean) => void
+    const finished = new Promise<boolean>(resolve => { done = resolve })
+    this.mainCommitQueue.push({ ready, done })
+    this.requestPump()
+    return finished
+  }
+
+  /**
+   * 纯同步原子提交窗口：cork → clearForCommit → write → flushNow → uncork。
+   * 函数内严禁任何 await——擦除与写入之间插入异步会把原子窗口掏空。
+   */
+  private atomicCommitNow(write: () => void): void {
     // H3：clearForCommit + commit + renderLive 三段写入用 cork/uncork 合并为一次 flush，
     // 减少 syscall 与中间态可见（提交时的瞬时闪烁）。协议顺序不变。
     const s = this.stdout as WriteStream & { cork?: () => void; uncork?: () => void }
@@ -3268,20 +3402,52 @@ export class TuiApp {
     }
   }
 
-  /** overlay 期间排队的主屏 commit。退出 alt screen 时 FIFO 回放（见 onExitAltScreen）。 */
-  private pendingMainCommits: Array<() => void> = []
+  /** 启动单实例 pump；pump 在跑 / 队列空 / overlay 激活时直接返回。 */
+  private requestPump(): void {
+    if (this.mainCommitPumping || this.mainCommitQueue.length === 0 || this.overlay.isActive()) return
+    this.mainCommitPumping = true
+    const pump = this.drainMainCommits()
+    this.mainCommitPump = pump
+    const settle = () => {
+      this.mainCommitPumping = false
+      if (this.mainCommitPump === pump) this.mainCommitPump = null
+      // 竞态收口：pump 同步排空后、本 settle 前入队的条目在这里续跑；
+      // drain 逐条目 try/catch 自身不抛，rejection 分支仅作兜底。
+      this.requestPump()
+    }
+    void pump.then(settle, settle)
+  }
 
   /**
-   * 回放 overlay 期间排队的主屏 commit。挂在 OverlayEngine.onExitAltScreen 上，
-   * 覆盖全部退出路径（deactivateOverlay / Esc 直连 deactivate / unregister /
-   * overlay 切换）。调用时 active 已置 null，commitAbove 走正常直写，不会递归入队。
+   * pump 循环：取队首（先不 shift）→ ready 是 Promise 则先 await（此时绝未
+   * 触碰 live 区）→ await 后重新检查 overlay，激活则保留队首退出（overlay
+   * 退出路径的 requestPump 续跑）→ 未激活才 shift 并 atomicCommitNow。
+   * 每个条目独立 try/catch：单条目异常只跳过该条目，不丢剩余队列。
    */
-  private flushPendingMainCommits(): void {
-    if (this.pendingMainCommits.length === 0) return
-    const queued = this.pendingMainCommits
-    this.pendingMainCommits = []
-    for (const write of queued) {
-      this.commitAbove(write)
+  private async drainMainCommits(): Promise<void> {
+    while (this.mainCommitQueue.length > 0) {
+      const job = this.mainCommitQueue[0]!
+      let write: () => void
+      try {
+        write = typeof job.ready === 'function' ? job.ready : await job.ready
+      } catch {
+        // prepare 失败：跳过该条目继续（commitUserPrompt 内部已把 prepare
+        // 失败降级为纯气泡闭包，正常不会走到这）。以 false 告知调用方未写出。
+        this.mainCommitQueue.shift()
+        job.done(false)
+        continue
+      }
+      // await 期间 overlay 可能（重）激活——主屏内容绝不可写进 alt screen。
+      if (this.overlay.isActive()) return
+      this.mainCommitQueue.shift()
+      let written = true
+      try {
+        this.atomicCommitNow(write)
+      } catch {
+        // 单条目写异常不丢剩余队列；以 false 告知调用方写入失败被跳过。
+        written = false
+      }
+      job.done(written)
     }
   }
 
@@ -3289,30 +3455,98 @@ export class TuiApp {
    * 统一用户消息提交入口。在 scrollback 中写入 ▍ You 气泡。
    * 所有 submit 路径（idle / slash passthrough / steer）共用此入口，
    * 确保用户始终能在终端历史中看到自己输入的内容。
+   *
+   * 返回值语义：直接透传 enqueueMainCommit 的返回值——
+   * 仅当四条件同步 fast path 真正同步执行时返回 null；其余一律返回
+   * 完成 Promise<boolean>（true=气泡已写出，false=写入失败被跳过）。
+   * 调用方需要「气泡已落地」保证时必须 await 返回值；返回 null 时
+   * 写入已在返回前同步完成。任何「前方无 barrier 即已同步写出」的
+   * 调用方推断都是错的（overlay 激活时同样入队返回 Promise）。
+   * 有图且终端支持图形协议：ready 为立即启动的 prepare 任务，转码完成后
+   * 兑现「气泡 + 图片」写闭包；队列位置在调用当刻预订，prepare 再慢、
+   * overlay 中途激活，物理回放顺序都不倒。
+   * 注意 await 语义的边界：await 返回的 Promise 保证「图片位于
+   * 所属用户气泡下方、先于 assistant 输出」；该 Promise resolve 的值
+   * 表示写入是否成功。
    */
-  private commitUserPrompt(content: string, images?: string[]): void {
-    this.commitAbove(() => {
-      const hasImages = images && images.length > 0
-      let imageNote = ''
-      if (hasImages) {
-        imageNote = `\n${color(`📎 ${images.length} image${images.length > 1 ? 's' : ''} attached`, this.theme.muted)}`
-        if (!this.supportsVision) {
-          if (this.visionBridgeEnabled) {
-            // 提示反映真实桥接来源，而非未经验证的话术。桥接=图先经视觉模型转文字描述再发。
-            const src = this.visionBridgeSource === 'auto' ? '（自动选用的视觉模型）' : ''
-            imageNote += `\n${color(`🖼 主模型不识图，将经识图桥${src}生成图片描述后发送`, this.theme.muted)}`
-          } else {
-            imageNote += `\n${color('⚠ 当前模型不支持识图，且无可用识图桥，图片未发送。请在 Settings → 识图模型 选一个视觉模型（或配置 agent.visionModel）。', this.theme.warning)}`
+  private commitUserPrompt(content: string, images?: string[]): Promise<boolean> | null {
+    const protocol = imageProtocol()
+    const withImages = images && images.length > 0 && protocol !== 'none'
+    if (!withImages) {
+      return this.enqueueMainCommit(() => this.writeUserBubbleLines(content, images))
+    }
+    const ready = (async (): Promise<() => void> => {
+      // 渲染失败的任何异常都静默降级为纯文本气泡——绝不让 fire-and-forget
+      // 路径产生 unhandled rejection。
+      let prepared: PreparedTermImage[] = []
+      try {
+        for (const dataUrl of images.slice(0, MAX_IMAGES)) {
+          const img = await prepareTermImageForCommit(dataUrl, protocol as 'kitty' | 'iterm2')
+          if (img) prepared.push(img)
+        }
+      } catch {
+        prepared = []
+      }
+      return () => {
+        this.writeUserBubbleLines(content, images)
+        if (prepared.length > 0) {
+          // 宽高在写入当刻取最新终端尺寸：转码期间的 resize 不会用过期值编码。
+          const cols = Math.max(10, this.columns - 4)
+          const maxRows = Math.max(5, Math.min(40, (this.stdout.rows || 24) - 6))
+          for (const img of prepared) {
+            const seq = encodeTermImage(img, protocol as 'kitty' | 'iterm2', cols, maxRows)
+            // 图形序列不含换行；光标收尾按协议规范显式定义：
+            // - kitty（默认 C=0）：placement 后光标右移 c 列、下移 r 行——已停在
+            //   图片下方一行的 col c，只需 \r 归列首（补 \n 会多一个空行）。
+            //   依据：kitty spec「cursor must be moved to the right by the number
+            //   of cols ... and down by the number of rows in the placement」。
+            // - iTerm2 OSC 1337：光标停在图片最后一行的右缘（wezterm#317 对真实
+            //   iTerm2 的观测；wezterm#3266 须补换行提示符才落到图片下方）——
+            //   需 \r\n：归列首并下移到图片下方。
+            if (seq) this.commit.writeRaw(seq + (protocol === 'kitty' ? '\r' : '\r\n'))
           }
         }
       }
-      const formatted = formatUserMessage({
-        content: content.trim() + imageNote,
-        width: this.columns,
-      }, this.theme)
-      this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
-      this.state.committedCount++
-    })
+    })()
+    return this.enqueueMainCommit(ready)
+  }
+
+  /** Await a queued user commit and surface a display failure without blocking delivery. */
+  private async awaitUserCommit(content: string, images?: string[]): Promise<boolean> {
+    const pending = this.commitUserPrompt(content, images)
+    const written = pending ? await pending : true
+    if (!written) {
+      try {
+        this.commitStatic(color('⚠ 用户消息显示失败，但内容已发送给 agent', this.theme.muted))
+      } catch {
+        // A broken stdout must not prevent the caller from delivering the input.
+      }
+    }
+    return written
+  }
+
+  /** 气泡正文（须在 commitAbove 窗口内调用）。 */
+  private writeUserBubbleLines(content: string, images?: string[]): void {
+    const hasImages = images && images.length > 0
+    let imageNote = ''
+    if (hasImages) {
+      imageNote = `\n${color(`📎 ${images.length} image${images.length > 1 ? 's' : ''} attached`, this.theme.muted)}`
+      if (!this.supportsVision) {
+        if (this.visionBridgeEnabled) {
+          // 提示反映真实桥接来源，而非未经验证的话术。桥接=图先经视觉模型转文字描述再发。
+          const src = this.visionBridgeSource === 'auto' ? '（自动选用的视觉模型）' : ''
+          imageNote += `\n${color(`🖼 主模型不识图，将经识图桥${src}生成图片描述后发送`, this.theme.muted)}`
+        } else {
+          imageNote += `\n${color('⚠ 当前模型不支持识图，且无可用识图桥，图片未发送。请在 Settings → 识图模型 选一个视觉模型（或配置 agent.visionModel）。', this.theme.warning)}`
+        }
+      }
+    }
+    const formatted = formatUserMessage({
+      content: content.trim() + imageNote,
+      width: this.columns,
+    }, this.theme)
+    this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+    this.state.committedCount++
   }
 
   // ── W3: phase + ticker ───────────────────────────────────────
@@ -4728,6 +4962,10 @@ export class TuiApp {
   }
 
   private renderLive(): void {
+    if (this.suppressCommitRender) {
+      this.deferredCommitRender = true
+      return
+    }
     // start() 之前所有 setter / 用户输入回调都不应触发真正的 stdout 输出。
     // 构造后到 main.ts 清屏写欢迎屏之间若渲染一版输入框，旧帧可能残留在
     // 欢迎屏上方形成重影；统一在 start() 置 started=true 后才开始绘制。
@@ -5666,7 +5904,7 @@ export class TuiApp {
     if (!handled) {
       // 透传给 agent 前 commit 用户消息到 scrollback，确保 slash 命令
       // 也能在终端历史中看到（之前只有 agent 回复无用户气泡）。
-      this.commitUserPrompt(input)
+      await this.awaitUserCommit(input)
 
       if (this.agentBusy) {
         // 当前 run 仍在执行：把透传 slash 命令按高优先级排进 steer 队列，

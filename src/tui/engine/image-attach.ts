@@ -8,13 +8,8 @@
  */
 
 import { readFile, unlink } from 'node:fs/promises'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { basename, extname } from 'node:path'
-import { tmpdir } from 'node:os'
-import { randomUUID } from 'node:crypto'
-
-const execFileAsync = promisify(execFile)
+import { basename, extname, join } from 'node:path'
+import { makeImageTempDir, removeImageTempDir, resizeCandidates, runImageTool } from './image-tool.js'
 
 /** Provider cap: 10 MB decoded per image (matches common vision API limits). */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -29,6 +24,9 @@ const IMAGE_MIMES: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
   '.gif': 'image/gif',
+  '.tiff': 'image/tiff',
+  '.tif': 'image/tiff',
+  '.bmp': 'image/bmp',
 }
 
 export interface ImageAttachment {
@@ -43,8 +41,12 @@ export interface LoadImageOptions {
   maxEdge?: number
 }
 
-/** Detect MIME type from magic bytes; falls back to file extension. */
-export function detectImageMime(buf: Buffer, filePath: string): string | null {
+/**
+ * 仅按 magic bytes 识别 MIME；不识别即返回 null。
+ * 不做扩展名 fallback——真实图片（png/jpeg/webp/gif/tiff/bmp）都有可靠 magic，
+ * 任意内容改名 .png 不应进入转码流程。保留 filePath 参数仅为兼容既有调用签名。
+ */
+export function detectImageMime(buf: Buffer, _filePath: string): string | null {
   if (buf.length >= 8) {
     // PNG: 89 50 4E 47
     if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
@@ -84,8 +86,7 @@ export function detectImageMime(buf: Buffer, filePath: string): string | null {
       return 'image/bmp'
     }
   }
-  const ext = extname(filePath).toLowerCase()
-  return IMAGE_MIMES[ext] ?? null
+  return null
 }
 
 /** Returns true if the file extension looks like a supported image. */
@@ -95,26 +96,14 @@ export function looksLikeImagePath(text: string): boolean {
 }
 
 async function trySystemResize(path: string, maxEdge: number): Promise<Buffer | null> {
-  const outPath = `${tmpdir()}/rivet-img-${randomUUID()}.png`
-  const commands: { bin: string; args: string[] }[] = [
-    // macOS built-in
-    { bin: 'sips', args: ['-Z', String(maxEdge), path, '--out', outPath] },
-    // ImageMagick v7
-    { bin: 'magick', args: [path, '-resize', `${maxEdge}x${maxEdge}>`, outPath] },
-    // ImageMagick v6
-    { bin: 'convert', args: [path, '-resize', `${maxEdge}x${maxEdge}>`, outPath] },
-  ]
-  for (const { bin, args } of commands) {
-    try {
-      await execFileAsync(bin, args, { timeout: 15000 })
-      const resized = await readFile(outPath)
-      await unlink(outPath).catch(() => { /* best-effort cleanup */ })
-      return Buffer.from(resized)
-    } catch {
-      // try next command
-    }
+  const dir = await makeImageTempDir()
+  const outPath = join(dir, 'out.png')
+  try {
+    // runImageTool 一体化完成「执行 + 读回 + PNG 校验」，失败返回 null
+    return await runImageTool(resizeCandidates(path, outPath, maxEdge), outPath)
+  } finally {
+    await removeImageTempDir(dir)
   }
-  return null
 }
 
 async function compressImage(path: string, maxEdge: number, maxBytes: number): Promise<Buffer> {
@@ -129,7 +118,7 @@ async function compressImage(path: string, maxEdge: number, maxBytes: number): P
 /**
  * Load an image from disk and return it as a base64 data URL.
  *
- * - Validates format by magic bytes + extension.
+ * - Validates format by magic bytes (no extension fallback).
  * - Rejects unsupported formats.
  * - If the decoded file exceeds maxBytes, attempts to resize to maxEdge using
  *   system tools (sips on macOS, ImageMagick elsewhere).

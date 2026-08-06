@@ -48,6 +48,11 @@ function makeApp() {
 
 const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;?]*[a-zA-Z]/g, '')
 
+// ask 面板提交经 submitText → commitUserPrompt，overlay 激活时
+// 返回完成 Promise（不再同步直写）——onSubmit 在面板关闭、队列回放后才触发，
+// 断言前需让出一个 tick。
+const tick = (ms = 20) => new Promise<void>(r => setTimeout(r, ms))
+
 const act = (workOrderId: string, status: DelegationActivity['status'], extra: Partial<DelegationActivity> = {}): DelegationActivity => ({
   workOrderId,
   parentToolId: 'tool-1',
@@ -110,7 +115,7 @@ test('team wave 推进：提交时间线行且重复推送去重', () => {
   assert.ok(!stripAnsi(out.chunks.join('')).includes('wave 1/2 完成'), '重复推送被去重')
 })
 
-test('ask 面板：单选数字键快选 → 提交页 → Enter 显式提交', () => {
+test('ask 面板：单选数字键快选 → 提交页 → Enter 显式提交', async () => {
   const { app, stdin } = makeApp()
   app.registerOverlays({ choicePanelData: () => ({ title: '', choices: [], selectedIndex: 0 }) })
   let submitted: string | undefined
@@ -125,11 +130,12 @@ test('ask 面板：单选数字键快选 → 提交页 → Enter 显式提交', 
   assert.ok(app.pendingAskFlow, '面板仍在（等待显式提交）')
 
   stdin.dataHandler!('\r') // 提交页光标默认在「提交回答」
+  await tick() // commitUserPrompt 返回 Promise，回放后才触发 onSubmit
   assert.equal(submitted, 'Beta', '提交页 Enter 发出答案')
   assert.equal(app.pendingAskFlow, undefined, '提交后流清理')
 })
 
-test('ask 面板：多选数字键切换 + Enter 确认 + 提交页提交', () => {
+test('ask 面板：多选数字键切换 + Enter 确认 + 提交页提交', async () => {
   const { app, stdin } = makeApp()
   app.registerOverlays({ choicePanelData: () => ({ title: '', choices: [], selectedIndex: 0 }) })
   const submitted: string[] = []
@@ -145,12 +151,13 @@ test('ask 面板：多选数字键切换 + Enter 确认 + 提交页提交', () =
   stdin.dataHandler!('\r') // Enter 确认多选 → 提交页
   assert.equal(submitted.length, 0, '确认多选只进提交页，不直接提交')
   stdin.dataHandler!('\r') // 提交页 Enter → 提交
+  await tick() // 等待队列回放后 onSubmit 才触发
   assert.equal(submitted.length, 1, '提交页 Enter 后提交一次')
   assert.ok(submitted[0]!.includes('X') && submitted[0]!.includes('Z'), `多选答案含 X 与 Z: ${submitted[0]}`)
   assert.ok(!submitted[0]!.includes('Y'), '未选 Y')
 })
 
-test('ask 面板：←→ 切 Tab 乱序答题，提交页确认后按题组串', () => {
+test('ask 面板：←→ 切 Tab 乱序答题，提交页确认后按题组串', async () => {
   const { app, stdin } = makeApp()
   app.registerOverlays({ choicePanelData: () => ({ title: '', choices: [], selectedIndex: 0 }) })
   let submitted: string | undefined
@@ -170,6 +177,7 @@ test('ask 面板：←→ 切 Tab 乱序答题，提交页确认后按题组串'
   assert.equal(submitted, undefined, '答完两题仍待显式提交')
 
   stdin.dataHandler!('\r') // 提交页 Enter
+  await tick() // 等待队列回放后 onSubmit 才触发
   assert.equal(submitted, '第一题 → A2\n第二题 → B1', 'composeAnswers 按题组串')
   assert.equal(app.pendingAskFlow, undefined)
 })
