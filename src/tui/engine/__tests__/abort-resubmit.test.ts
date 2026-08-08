@@ -379,3 +379,79 @@ test('G: convergence abort 不受 watchdog 泛化影响，仍不自动续跑', a
   await tick()
   assert.equal(runs.length, 0, 'convergence 中断不得自动续跑')
 })
+
+// ── 中断收尾窗口：ESC 后抢跑的提交不得静默丢失 ──────────────────────
+//
+// Bug：ESC 后 handleAbort 同步清 agentBusy，但 AgentLoop 的 run promise 还没
+// settle，_running 仍为 true。此刻提交 → agentBusy 置回 true → agent.run() 撞
+// re-entry guard 静默 return → 旧 run settle 时的终结回调被 bridge 按 gen 丢弃
+// → agentBusy 永远挂着 → 后续输入全进 steer 队列等一个不存在的注入边界。
+// 用户表现：打断后发消息模型收不到，得再按几次 ESC 才恢复。
+
+test('中断收尾窗口内的提交被挂起，run settle 后自动发出', async () => {
+  const { app, stdin } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  let agentRunning = false
+  app.setAgentRunningProbe(() => agentRunning)
+
+  app.setInput('first')
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.deepEqual(runs, ['first'], 'run A 已发起')
+  agentRunning = true // AgentLoop 进入 in-flight
+
+  stdin.dataHandler!('\x03') // 中断：TUI 立刻回 idle，但 run 尚未 settle
+  await tick()
+  assert.equal(app.busy, false, 'abort 后 agentBusy 复位')
+
+  app.setInput('second')
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.deepEqual(runs, ['first'], '收尾窗口内不得发起新 run（会撞 re-entry guard）')
+  assert.equal(app.steerBuffer.hasPending(), false, '也不得塞进 steer 队列（没有活跃 run 就 drain 不了）')
+
+  agentRunning = false
+  app.notifyRunSettled()
+  await tick()
+  assert.deepEqual(runs, ['first', 'second'], 'run settle 后挂起的消息自动发出')
+})
+
+test('探针显示 run 已结束时，收尾标记不再拦截提交（陈旧标记自愈）', async () => {
+  const { app, stdin } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  let agentRunning = false
+  app.setAgentRunningProbe(() => agentRunning)
+
+  app.setInput('first')
+  stdin.dataHandler!('\r')
+  await tick()
+  agentRunning = true
+  stdin.dataHandler!('\x03')
+  await tick()
+
+  // notifyRunSettled 因故没到（漏信号），但 run 其实已经结束——
+  // 只信标记会让消息永久挂起，比原 bug 更糟，故须对着探针校验。
+  agentRunning = false
+  app.setInput('second')
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.deepEqual(runs, ['first', 'second'], '探针说没在跑就该照常提交，不被陈旧标记扣住')
+})
+
+test('re-entry 兜底：notifyRunRejected 复位 busy，不留死闩', async () => {
+  const { app, stdin } = makeApp()
+  app.onSubmit(() => { /* run 挂起 */ })
+
+  app.setInput('x')
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.equal(app.busy, true)
+
+  app.notifyRunRejected()
+  await tick()
+  assert.equal(app.busy, false, 'run 被 guard 拒绝后 busy 必须复位，否则后续输入全进队列')
+})

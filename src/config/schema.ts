@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { mcpConfigSchema, type McpConfig } from '../mcp/config.js'
 import { THEME_NAMES } from '../tui/theme.js'
+import { MIN_MAX_EVENTS_DISK_BYTES, MIN_MAX_LOADED_SESSIONS, MIN_IDLE_AGENT_TTL_MS } from './runtime-lean.js'
 
 export const modelConfigSchema = z.object({
   id: z.string(),
@@ -44,6 +45,9 @@ export const authConfigSchema = z.discriminatedUnion('type', [
 ])
 
 export const providerCapabilitiesSchema = z.object({
+  supportsThinking: z.boolean().optional(),
+  thinkingFormat: z.enum(['anthropic', 'openai', 'none']).optional(),
+  effortFormat: z.enum(['reasoning_effort', 'output_config', 'none']).optional(),
   cacheControl: z.boolean().default(false),
   stripParams: z.array(z.string()).default([]),
   toolJsonBug: z.boolean().default(false),
@@ -265,6 +269,13 @@ export const agentSchema = z.object({
   resumeFallbackModel: z.string().optional(),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
   songlineEnabled: z.boolean().default(false),
+  /** Explicit opt-in for constellation post-session milestone capture. Default false. */
+  constellationEnabled: z.boolean().default(false),
+  /** Explicit opt-in for companion presence heartbeat. Default false. */
+  companionPresenceEnabled: z.boolean().default(false),
+  /** Session-end dream / skill-distill. Default true when a sessionId exists;
+   *  lean profile forces this off. */
+  dreamEnabled: z.boolean().default(true),
   /** 写操作后的安全模式正则告警（层1）。默认开：纯正则、零 API 调用、命中才注入，
    *  与其他 advisory hook 同档。设 false 或 RIVET_SECURITY_GUIDANCE=0 关闭。
    *  配置项存在的意义是让桌面端用户也能关——GUI 启动的 sidecar 继承不到 shell 环境变量。 */
@@ -307,6 +318,14 @@ export const agentSchema = z.object({
    *  batch/background 统一入闸；嵌套委派豁免（否则 planner 持槽等子工死锁）。
    *  缺省 3；RIVET_MAX_WORKERS env 可覆盖。 */
   maxWorkers: z.number().int().min(1).optional(),
+  /** 只读 worker（explore 池）并发帽（S1 分池）。缺省 = maxWorkers；
+   *  galaxy 多维度只读 fan-out 可调大（如 6）换取墙钟收益。与 maxWorkers
+   *  的关系：总并发上限 = max(maxWorkers, maxExploreWorkers, maxWriteWorkers)。 */
+  maxExploreWorkers: z.number().int().min(1).optional(),
+  /** 写 worker（hands 池）并发帽（S1 分池）。缺省 = maxWorkers。
+   *  建议保持与 maxWorkers 相同或更小——写写互斥天然序列化，放大写池
+   *  不提升并行度，只增加冲突等待。 */
+  maxWriteWorkers: z.number().int().min(1).optional(),
   /** Default max concurrent workers per team wave when input.maxParallel is unset. Clamped 1..5. */
   maxTeamParallel: z.number().int().min(1).max(5).default(3),
   /** council_convene seat configuration — custom seats with optional per-seat
@@ -709,6 +728,8 @@ export const proSchema = z.object({
     /** 无人值守自动化（付费版 v1 · T2）：非 always-review 审查策略 +
      *  含 computer_use 的定时任务。 */
     unattendedAutomation: z.boolean().default(true),
+    /** Pro 扩展 provider 节点（闭源模块注册；无 pro 模块的构建不消费此开关）。 */
+    spark: z.boolean().default(true),
   }).default({}),
 }).default({})
 
@@ -746,6 +767,30 @@ const promptSchema = z.object({
 
 export type PromptConfig = z.infer<typeof promptSchema>
 
+const runtimeDomainSchema = z.object({
+  lean: z.boolean().optional(),
+  maxLoadedSessions: z.number().int().min(MIN_MAX_LOADED_SESSIONS).optional(),
+  idleAgentTtlMs: z.number().int().min(MIN_IDLE_AGENT_TTL_MS).optional(),
+  maxEventsDiskBytes: z.number().int().min(MIN_MAX_EVENTS_DISK_BYTES).optional(),
+  /** 该域会话的工具装配档位（defaultDomain 钉定该域时生效）。 */
+  toolPreset: z.enum(['minimal', 'frontend', 'full', 'taiyi']).optional(),
+}).default({})
+
+const runtimeSchema = z.object({
+  lean: z.boolean().default(false),
+  maxLoadedSessions: z.number().int().min(MIN_MAX_LOADED_SESSIONS).optional(),
+  idleAgentTtlMs: z.number().int().min(MIN_IDLE_AGENT_TTL_MS).optional(),
+  maxEventsDiskBytes: z.number().int().min(MIN_MAX_EVENTS_DISK_BYTES).optional(),
+  /**
+   * 按域覆盖（2026-08-04）：`defaultDomain` 钉定某域时，该域的 lean/阈值/
+   * 工具档位覆盖全局 runtime 值。手动 /domain 切换发生在运行期（装配已过，
+   * 工具指纹与 runtimeLean 冻结）——只影响下次启动的域钉定，文档化取舍。
+   */
+  domains: z.record(z.string(), runtimeDomainSchema).optional(),
+}).default({})
+
+export type RuntimeConfig = z.infer<typeof runtimeSchema>
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -772,6 +817,12 @@ export const configSchema = z.object({
     preset: z.enum(['minimal', 'frontend', 'full']).optional(),
   }).default({}),
   prompt: promptSchema,
+  /**
+   * Runtime resource profile. `lean` expands into existing knobs (minimal tools,
+   * lean prompt, no embeddings, no Meridian startup backfill, tighter session
+   * pool). Env `RIVET_LEAN=1` overrides. Optional pool/disk caps override lean defaults.
+   */
+  runtime: runtimeSchema,
   pro: proSchema,
   plugins: z.object({
     enabled: z.record(z.boolean()).default({}),
@@ -797,6 +848,7 @@ export type Config = {
   verify: VerifyConfig
   tools: { preset?: 'minimal' | 'frontend' | 'full' | undefined }
   prompt: PromptConfig
+  runtime: RuntimeConfig
   pro: ProConfig
   plugins: { enabled: Record<string, boolean> }
 }

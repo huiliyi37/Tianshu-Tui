@@ -169,6 +169,89 @@ describe('runConfigCLI web tool commands', () => {
   })
 })
 
+describe('runConfigCLI model capability commands', () => {
+  let dir = ''
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-config-cli-'))
+    process.env.RIVET_CONFIG_PATH = join(dir, 'config.json')
+  })
+
+  afterEach(() => {
+    delete process.env.RIVET_CONFIG_PATH
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('set-default-model persists agent.defaultModel with provider:modelId', async () => {
+    const { stdout, io } = makeIo()
+    await runConfigCLI(['set-default-model', 'glm:glm-5.2'], io)
+    assert.equal(loadConfig().agent.defaultModel, 'glm:glm-5.2')
+    assert.match(stdout.join('\n'), /Default model set to glm:glm-5\.2/)
+  })
+
+  it('set-default-model without args shows usage and exits 1', async () => {
+    const { stderr, exits, io } = makeIo()
+    await runConfigCLI(['set-default-model'], io)
+    assert.deepEqual(exits, [1])
+    assert.match(stderr.join('\n'), /Usage: rivet config set-default-model/)
+  })
+
+  it('set-default-model rejects a malformed value (missing colon)', async () => {
+    const { stderr, exits, io } = makeIo()
+    await runConfigCLI(['set-default-model', 'glm-5.2'], io)
+    assert.deepEqual(exits, [1])
+    assert.match(stderr.join('\n'), /provider:modelId/)
+  })
+
+  it('set-default-model rejects an unknown provider', async () => {
+    const { stderr, exits, io } = makeIo()
+    await runConfigCLI(['set-default-model', 'ghost:x'], io)
+    assert.deepEqual(exits, [1])
+    assert.match(stderr.join('\n'), /Provider "ghost" not found/)
+    assert.equal(loadConfig().agent.defaultModel, undefined, '校验失败不应写盘')
+  })
+
+  it('add-model --vision marks the model vision-capable', async () => {
+    const { io } = makeIo()
+    await runConfigCLI(['add-model', 'deepseek', 'vision-test', '128000', '32000', '--vision'], io)
+    const model = loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'vision-test')!
+    assert.equal(model.supportsVision, true)
+  })
+
+  it('add-model without --vision leaves supportsVision absent', async () => {
+    const { io } = makeIo()
+    await runConfigCLI(['add-model', 'deepseek', 'plain-test', '128000', '32000'], io)
+    const model = loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'plain-test')!
+    assert.equal(model.supportsVision, undefined)
+  })
+
+  it('set-model-vision on/off toggles the flag', async () => {
+    const { stdout, io } = makeIo()
+    await runConfigCLI(['set-model-vision', 'deepseek', 'deepseek-v4-pro', 'on'], io)
+    assert.equal(loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'deepseek-v4-pro')!.supportsVision, true)
+    assert.match(stdout.join('\n'), /Vision enabled for deepseek-v4-pro/)
+    await runConfigCLI(['set-model-vision', 'deepseek', 'deepseek-v4-pro', 'off'], io)
+    assert.equal(loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'deepseek-v4-pro')!.supportsVision, false)
+  })
+
+  it('set-model-vision rejects an invalid flag or missing args', async () => {
+    const { stderr, exits, io } = makeIo()
+    await runConfigCLI(['set-model-vision', 'deepseek', 'deepseek-v4-pro', 'maybe'], io)
+    assert.deepEqual(exits, [1])
+    assert.match(stderr.join('\n'), /Usage: rivet config set-model-vision/)
+    await runConfigCLI(['set-model-vision', 'deepseek'], io)
+    assert.deepEqual(exits, [1, 1])
+    assert.match(stderr.join('\n'), /Usage: rivet config set-model-vision/)
+  })
+
+  it('set-model-vision rejects an unknown model', async () => {
+    const { stderr, exits, io } = makeIo()
+    await runConfigCLI(['set-model-vision', 'deepseek', 'ghost-model', 'on'], io)
+    assert.deepEqual(exits, [1])
+    assert.match(stderr.join('\n'), /Model "ghost-model" not found/)
+  })
+})
+
 describe('runConfigCLI vision commands', () => {
   let dir = ''
 

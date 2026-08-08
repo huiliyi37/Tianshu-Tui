@@ -21,6 +21,7 @@ import { resolveCompactionEconomics } from '../compact/compaction-profile.js'
 import { gateToolDefinitions } from './tool-tiers.js'
 import { applyDescriptionMode } from '../tools/description-compact.js'
 import { inferModelTierFromName, type ModelTier } from './model-tier-policy.js'
+import { isRuntimeLeanForDomain } from '../config/runtime-lean.js'
 
 export interface ModelSpec {
   id: string
@@ -45,6 +46,10 @@ export interface AgentConfigInput {
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
   songlineEnabled?: boolean
+  constellationEnabled?: boolean
+  companionPresenceEnabled?: boolean
+  dreamEnabled?: boolean
+  runtimeLean?: boolean
   securityGuidance?: boolean
   hearthObserveEnabled?: boolean
   antiAnchoring?: AntiAnchoringConfig
@@ -85,13 +90,21 @@ export interface AgentConfigInput {
   /** /cd: previous PromptEngine whose frozen snapshots the new one inherits.
    *  resume 场景传盘存 FrozenSnapshotData（<id>.frozen.json），同语义。 */
   inheritFrozenFrom?: PromptEngine | FrozenSnapshotData
+  /** 资源压力状态行回调（见 AgentConfig.onStatusLine）。 */
+  onStatusLine?: (text: string | null) => void
+  /** Per-session 工具白名单（蒸馏回放等自动化场景）。 */
+  allowedTools?: string[]
+  /** 会话冻结的 wire 变换上下文（spark truncate N 等）。由会话装配层
+   *  （bootstrap.createAgentRuntime）从 meta 读回或按注册默认冻结后传入；
+   *  流向 client（wire 截断）与锚点提取两个消费点，保证同一会话 N 恒定。 */
+  wireContext?: import('../api/pro-registry.js').WireTransformContext
 }
 
 export interface MainAgentConfigInputParams {
   apiKey: string
   model: ModelSpec
   cwd: string
-  config: Pick<Config, 'agent' | 'compact'>
+  config: Pick<Config, 'agent' | 'compact' | 'runtime'>
   sessionId: string
   toolDefinitions: ToolDefinition[]
   provider: ProviderConfig
@@ -103,6 +116,12 @@ export interface MainAgentConfigInputParams {
   /** /cd: previous PromptEngine whose frozen snapshots the new one inherits.
    *  resume 场景传盘存 FrozenSnapshotData（<id>.frozen.json），同语义。 */
   inheritFrozenFrom?: PromptEngine | FrozenSnapshotData
+  /** 资源压力状态行回调（见 AgentConfig.onStatusLine）。 */
+  onStatusLine?: (text: string | null) => void
+  /** Per-session 工具白名单（蒸馏回放等自动化场景）。 */
+  allowedTools?: string[]
+  /** 会话冻结的 wire 变换上下文（见 AgentConfigInput.wireContext）。 */
+  wireContext?: import('../api/pro-registry.js').WireTransformContext
 }
 
 export function createMainAgentConfigInput(params: MainAgentConfigInputParams): AgentConfigInput {
@@ -118,6 +137,12 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     sessionMemoryBlock: params.sessionMemoryBlock,
     approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions',
     songlineEnabled: params.config.agent.songlineEnabled,
+    constellationEnabled: params.config.agent.constellationEnabled,
+    companionPresenceEnabled: params.config.agent.companionPresenceEnabled,
+    dreamEnabled: params.config.agent.dreamEnabled,
+    // 域级 lean 覆盖：defaultDomain 钉定某域且 runtime.domains[域].lean 配置时
+    // 用域值（如 taiyi 域默认 lean）；env 主开关恒优先。auto 域回退全局。
+    runtimeLean: isRuntimeLeanForDomain(params.config.agent.defaultDomain, params.config.runtime, params.cwd),
     securityGuidance: params.config.agent.securityGuidance,
     hearthObserveEnabled: params.config.agent.hearthObserveEnabled,
     crossSessionEnabled: params.config.agent.crossSessionEnabled,
@@ -138,20 +163,27 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     habituationThreshold: params.habituationThreshold,
     permissions: params.config.agent.permissions as PermissionConfig,
     inheritFrozenFrom: params.inheritFrozenFrom,
+    onStatusLine: params.onStatusLine,
+    allowedTools: params.allowedTools,
+    wireContext: params.wireContext,
     toolGating: params.config.agent.toolGating
       ? {
           enabled: params.config.agent.toolGating.enabled,
-          coreOverride: params.config.agent.toolGating.coreTools,
+          // Per-session 白名单（蒸馏回放）优先于 config coreOverride——让 LLM
+          // 只看到白名单工具，收窄自动化任务的能力边界。
+          coreOverride: params.allowedTools ?? params.config.agent.toolGating.coreTools,
           extraCore: params.config.agent.toolGating.extraCore,
           disabledTools: params.config.agent.toolGating.disabledTools,
         }
-      : undefined,
+      : params.allowedTools
+        ? { enabled: true, coreOverride: params.allowedTools }
+        : undefined,
  }
 }
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'blockPolicy' | 'providerProfile' | 'providerName' | 'compactionProfile' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'securityGuidance' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'domainKeywordRouting' | 'defaultDomain' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision' | 'visionClient' | 'visionModelPrompt' | 'visionModelMaxTokens' | 'visionBridge'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'blockPolicy' | 'providerProfile' | 'providerName' | 'compactionProfile' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'constellationEnabled' | 'companionPresenceEnabled' | 'dreamEnabled' | 'runtimeLean' | 'securityGuidance' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'domainKeywordRouting' | 'defaultDomain' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision' | 'visionClient' | 'visionModelPrompt' | 'visionModelMaxTokens' | 'visionBridge' | 'onStatusLine' | 'wireContext'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -167,6 +199,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     thinkingBudget,
     auth: input.auth,
     sessionId: input.sessionId,
+    wireContext: input.wireContext,
   })
 
   const client = buildFallbackChain(primaryClient, provider, model, input)
@@ -232,6 +265,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     blockPolicy,
     providerProfile: getProviderProfile(provider.name, model.contextWindow),
     providerName: provider.name,
+    wireContext: input.wireContext,
     // Model-aware compaction economics: billing from provider identity
     // (oauth/baseUrl hints for custom providers), cache kind from the provider
     // profile with the aggregator escape hatch (deepseek-native capability +
@@ -250,6 +284,10 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,
     songlineEnabled: input.songlineEnabled,
+    constellationEnabled: input.constellationEnabled,
+    companionPresenceEnabled: input.companionPresenceEnabled,
+    dreamEnabled: input.dreamEnabled,
+    runtimeLean: input.runtimeLean,
     securityGuidance: input.securityGuidance,
     hearthObserveEnabled: input.hearthObserveEnabled,
     crossSessionEnabled: input.crossSessionEnabled,
@@ -276,6 +314,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     visionModelPrompt: visionBridge?.prompt,
     visionModelMaxTokens: visionBridge?.maxTokens,
     visionBridge: deriveVisionBridgeStatus(model.supportsVision ?? false, visionBridge, input),
+    onStatusLine: input.onStatusLine,
  }
 }
 

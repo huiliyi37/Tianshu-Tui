@@ -4,6 +4,7 @@ import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { isAbsolute, join, relative, resolve } from 'path'
 import { sessionsDir } from '../config/paths.js'
 import type { ContentBlock, Message } from '../api/types.js'
+import { normalizeOaiMessage, normalizeOaiMessages } from '../api/oai-types.js'
 import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
 import { stableStringify } from '../api/stable-json.js'
 import { parseFrozenSnapshotData, type FrozenSnapshotData } from '../prompt/frozen-snapshot.js'
@@ -102,10 +103,11 @@ export function serializeSessionMessage(message: Message, maxChars = MAX_SESSION
 }
 
 export function serializeOaiSessionMessage(message: OaiMessage, maxChars = MAX_SESSION_MESSAGE_JSON_CHARS): string {
-  return serializeSessionJsonValue(message, maxChars, () => ({
-    role: message.role,
-    content: truncateString(JSON.stringify(message), maxChars),
-    ...(message.role === 'tool' ? { tool_call_id: message.tool_call_id } : {}),
+  const normalized = normalizeOaiMessage(message)
+  return serializeSessionJsonValue(normalized, maxChars, () => ({
+    role: normalized.role,
+    content: truncateString(JSON.stringify(normalized), maxChars),
+    ...(normalized.role === 'tool' ? { tool_call_id: normalized.tool_call_id } : {}),
   } as OaiMessage))
 }
 
@@ -252,7 +254,11 @@ export class SessionPersist {
       } catch { /* skip malformed rows */ }
     }
     // 压#7: Validate tool_call/tool_result pairing
-    const { messages: repaired, hadOrphans, strippedWriteTool } = this.repairOrphanToolCalls(messages)
+    // Normalize legacy/partial assistant rows before pairing repair. In
+    // particular, an empty `tool_calls` array must not be mistaken for an
+    // orphan batch (and must never reach the provider on resume).
+    const normalized = normalizeOaiMessages(messages)
+    const { messages: repaired, hadOrphans, strippedWriteTool } = this.repairOrphanToolCalls(normalized)
     if (hadOrphans) {
       // Orphan tool_use entries were stripped from history: the stream committed
       // a tool_calls block but no matching result durably landed. The interruption
@@ -282,7 +288,7 @@ export class SessionPersist {
             + 'still need; verify state before assuming any side effects took hold.</system-reminder>',
       })
     }
-    return repaired
+    return repaired.map(normalizeOaiMessage)
   }
 
   /** Tools whose orphan recovery must be non-destructive: the file may already

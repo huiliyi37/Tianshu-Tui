@@ -120,6 +120,7 @@ describe('nested delegation upstream', () => {
     assert.equal(received.length, 1)
     assert.equal(received[0]!.workOrderId, 'wo_sub:S1')
     assert.equal(received[0]!.parentWorkerId, run.results[0]!.workOrderId, '盖上派发方 order id')
+    assert.equal(received[0]!.parentAttemptId, run.results[0]!.attemptId, '盖上派发方 attempt id')
   })
 
   it('preserves a deeper parentWorkerId already stamped downstream', async () => {

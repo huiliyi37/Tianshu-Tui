@@ -60,13 +60,39 @@ export interface DepositInput {
 }
 
 /** 星河路由记录（收编 #5）：一次 galaxy/维度派发的路由事实。
- *  按 taskShape（归一化维度名）聚合胜率，供 formatGalaxyProposal 回召。 */
+ *  按 taskShape（归一化维度名）聚合胜率，供 formatGalaxyProposal 回召。
+ *  model（收编 S4）：实际执行模型——DP 副本 A/B 轮换后按模型沉淀性价比。
+ *  costTokens（收编 L3）：该 worker 的总 token 消耗（input+output）——
+ *  胜率之外的成本维度，proposal 据此展示「每通过成本」。 */
 export interface GalaxyRoutingRecord {
   dimensionName: string
   authority: string
   /** 归一化任务形状（小写去空白）——胜率聚合键。 */
   taskShape: string
   status: 'passed' | 'failed' | 'blocked'
+  /** 实际执行模型（可能为空：旧记录/未记账）。 */
+  model?: string
+  /** 该 worker 的 token 消耗合计（input+output，可能为空：旧记录）。 */
+  costTokens?: number
+  /** 基础设施失败归因（取值同 WorkerFailureReason：timeout / max_turns /
+   *  claim_conflict / worker_crash…）。**有值即表示这次失败不可归因到模型能力**，
+   *  胜率统计必须剔除，否则学到的是「谁常撞超时」而非「谁做得好」。
+   *  语义失败（objective gate 判定的假验证、写工越界）不带此字段——那类
+   *  才是真正反映执行质量的失败。落盘用宽松 string：跨版本读回旧记录时，
+   *  枚举演进不应让整条记录失效。 */
+  failureReason?: string
+  /** EP 分片 vs DP 副本（新记录必有值，缺省 'expert' 由 schema 保证；
+   *  **缺此字段 = PR #26 之前的旧记录**，与「已知是 EP」可分）。
+   *  与 comparisonGroupId 组合出三种语义：
+   *  - expert + 无组 = 普通分片，任务各不相同，胜率/成本不可跨条比；
+   *  - expert + 有组 = 多视角对照，同任务不同 authority，对照维度是星域；
+   *  - data + 有组 = DP 副本对照，同任务不同 model，对照维度是模型（S4 A/B 的
+   *    干净数据源，也是唯一能直接支撑「哪个模型性价比高」的形状）。 */
+  parallelism?: 'expert' | 'data'
+  /** 同任务对照组 ID（DP 副本组 / 多视角组，同 DelegationRequest.groupId）。
+   *  **可比性的唯一判据**：有组才能配对比较，无组不可。没有它，同一维度多次
+   *  运行的记录会被误当成同一次对照。 */
+  comparisonGroupId?: string
   depositedAt: number
 }
 
@@ -343,10 +369,22 @@ export class DomainKnowledgeStore {
   /** 沉淀一条路由事实（galaxy 结算时调用）。追加式（每次执行一条，供胜率
    *  统计），有界截断（MAX_ROUTING_RECORDS，LRU 语义）。 */
   recordGalaxyRouting(record: Omit<GalaxyRoutingRecord, 'depositedAt'>): void {
-    const records = this.loadRoutingRecords()
-    records.push({ ...record, depositedAt: Date.now() })
-    const capped = records.slice(-MAX_ROUTING_RECORDS)
-    this.routingCache = capped
+    this.recordGalaxyRoutingBatch([record])
+  }
+
+  /**
+   * Record several routing facts with one cache update and one debounce reset.
+   * Galaxy normally deposits one fact per worker dimension, so batching avoids
+   * repeatedly scheduling the same background flush during a single run.
+   */
+  recordGalaxyRoutingBatch(records: readonly Omit<GalaxyRoutingRecord, 'depositedAt'>[]): void {
+    if (records.length === 0) return
+    const existing = this.loadRoutingRecords()
+    const depositedAt = Date.now()
+    for (let index = 0; index < records.length; index++) {
+      existing.push({ ...records[index]!, depositedAt: depositedAt + index })
+    }
+    this.routingCache = existing.slice(-MAX_ROUTING_RECORDS)
     this.routingDirty = true
     this.scheduleFlush()
   }

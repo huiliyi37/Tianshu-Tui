@@ -3,6 +3,69 @@ const CD_BOILERPLATE_RE = /^\s*cd\s+(?:"[^"]*"|'[^']*'|[^\s&]+)\s*&&\s*/
 
 const TARGET_MAX_CHARS = 50
 
+export type BashCommandActivity = 'readonly' | 'productive'
+
+/** Shell control/redirection syntax makes a command unsafe to prove read-only. */
+const BASH_EFFECTFUL_SYNTAX_RE = /(?:&&|\|\||[;|<>`&\r\n]|\$\()/
+
+/** Commands whose single-process form has no project-state write action. */
+const BASH_SIMPLE_READONLY_RE =
+  /^(?:grep|rg|ls|cat|head|tail|wc|jq|sort|uniq|pwd|which|file|stat|du|df|ps|top)(?:\s|$)/
+
+/** Git subcommands that only inspect repository state in their normal form. */
+const BASH_GIT_READONLY_RE =
+  /^git\s+(?:log|status|diff|show|grep|rev-parse|ls-files)(?:\s|$)/
+
+/** Narrow sed allowance: line-range printing only (`sed -n '1,20p' file`). */
+const BASH_SED_PRINT_RE =
+  /^sed\s+-n\s+(['"])(?:\d+|\$)(?:,(?:\d+|\$))?p\1(?:\s+--)?(?:\s+\S+)+$/
+
+/** Reading one environment variable is observational; arbitrary echo remains productive. */
+const BASH_ECHO_ENV_RE =
+  /^echo\s+\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[A-Za-z_][A-Za-z0-9_]*\})$/
+
+function stripCdBoilerplate(command: string): string {
+  let rest = command
+  while (CD_BOILERPLATE_RE.test(rest)) {
+    const stripped = rest.replace(CD_BOILERPLATE_RE, '')
+    if (stripped.trim() === '') break
+    rest = stripped
+  }
+  return rest.trim()
+}
+
+/**
+ * Conservatively classify a full bash command before its history target is
+ * truncated. Anything ambiguous is productive: false negatives only retain
+ * the stronger convergence guidance, while false read-only labels suppress it.
+ */
+export function classifyBashCommandActivity(command: string): BashCommandActivity {
+  let rest = stripCdBoilerplate(command)
+  if (rest.startsWith('rtk ')) rest = rest.slice(4).trimStart()
+  if (rest === '' || BASH_EFFECTFUL_SYNTAX_RE.test(rest)) return 'productive'
+
+  if (BASH_GIT_READONLY_RE.test(rest)) {
+    return /(?:^|\s)--(?:output|ext-diff|textconv|open-files-in-pager)(?:=|\s|$)/.test(rest)
+      ? 'productive'
+      : 'readonly'
+  }
+  if (rest.startsWith('sed ')) {
+    return BASH_SED_PRINT_RE.test(rest) && !/(?:^|\s)-i(?:\s|$)/.test(rest)
+      ? 'readonly'
+      : 'productive'
+  }
+  if (/^sort(?:\s|$)/.test(rest)) {
+    return /(?:^|\s)(?:-o\S*|--(?:output|compress-program)(?:=\S*)?)(?:\s|$)/.test(rest)
+      ? 'productive'
+      : 'readonly'
+  }
+  if (/^rg(?:\s|$)/.test(rest) && /(?:^|\s)--pre(?:=|\s)/.test(rest)) {
+    return 'productive'
+  }
+  if (BASH_ECHO_ENV_RE.test(rest)) return 'readonly'
+  return BASH_SIMPLE_READONLY_RE.test(rest) ? 'readonly' : 'productive'
+}
+
 /**
  * 从 bash 命令提取历史/信息素/轨迹用的 target。
  *
@@ -12,13 +75,7 @@ const TARGET_MAX_CHARS = 50
  * target 恢复「这条命令实际做什么」的语义。
  */
 export function bashCommandTarget(command: string): string {
-  let rest = command
-  while (CD_BOILERPLATE_RE.test(rest)) {
-    const stripped = rest.replace(CD_BOILERPLATE_RE, '')
-    if (stripped.trim() === '') break // 纯 cd：cd 本身就是目标，保留
-    rest = stripped
-  }
-  return rest.trim().slice(0, TARGET_MAX_CHARS)
+  return stripCdBoilerplate(command).slice(0, TARGET_MAX_CHARS)
 }
 
 /** file_path > path > command > action 的统一 target 提取（原 4 处逐字重复的三元链）。 */

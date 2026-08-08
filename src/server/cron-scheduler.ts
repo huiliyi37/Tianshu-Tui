@@ -14,7 +14,18 @@ import { errorContext, serverLogger } from './logger.js'
 
 // ─── Types ────────────────────────────────────────────────────
 
-export type CronTriggerType = 'interval' | 'cron' | 'oneshot'
+export type CronTriggerType = 'interval' | 'cron' | 'oneshot' | 'startup' | 'app-open' | 'file-change' | 'git-push' | 'focus-change'
+
+/** 全部合法的 trigger type（normalizeScheduledTask 校验用）。 */
+const TRIGGER_TYPE_SET: ReadonlySet<string> = new Set([
+  'interval', 'cron', 'oneshot', 'startup', 'app-open', 'file-change', 'git-push', 'focus-change',
+])
+
+/** 事件触发类型——由外部事件（非时间轮询）驱动。spec 语义随类型变化：
+ *  startup/app-open/focus-change=空；file-change=监听路径（相对 cwd）；git-push=分支名（空=任意分支）。 */
+export const EVENT_TRIGGER_TYPES: ReadonlySet<CronTriggerType> = new Set([
+  'startup', 'app-open', 'file-change', 'git-push', 'focus-change',
+])
 
 export interface CronTrigger {
   type: CronTriggerType
@@ -265,6 +276,14 @@ function nextCronTime(expr: string, from: number): number | null {
 
 export function computeNextTrigger(task: ScheduledTask, now: number): number | null {
   switch (task.trigger.type) {
+    case 'startup':
+    case 'app-open':
+    case 'file-change':
+    case 'git-push':
+    case 'focus-change':
+      // 事件触发器——不参与 tick 轮询。由外部事件（OS 开机 / 应用打开 / 文件
+      // 变更 / git push / 窗口聚焦）经 CronScheduler.fireByEvent() 显式触发。
+      return null
     case 'interval': {
       const ms = parseInt(task.trigger.spec, 10)
       if (isNaN(ms) || ms <= 0) return null
@@ -382,6 +401,42 @@ export class CronScheduler {
     this.persist()
     void this.fireTask(updated, task.triggerCount, { forceAttended: true, manual: true })
     return true
+  }
+
+  /** 事件触发器入口：fire 所有匹配指定类型（+ 可选 spec）的启用任务。
+   *  供 startup/app-open（wiring 启动时调）、file-change/git-push/focus-change
+   *  （wiring 注册的事件监听器命中时调）使用。
+   *  - triggerType：事件类型（必须在 EVENT_TRIGGER_TYPES 里）
+   *  - specMatch：可选——file-change 按监听路径匹配（task.spec 前缀或全等），
+   *    git-push 按分支名匹配（空 spec=任意分支都 fire）。省略=该类型全部 fire。
+   *  返回 fire 的任务数。 */
+  fireByEvent(
+    triggerType: CronTriggerType,
+    specMatch?: { spec?: string },
+  ): number {
+    if (!EVENT_TRIGGER_TYPES.has(triggerType)) return 0
+    let fired = 0
+    for (const task of [...this.table]) {
+      if (task.trigger.type !== triggerType) continue
+      if (task.enabled === false) continue
+      // spec 匹配：省略=全匹配；给 spec 时——事件 spec 空的任务（任意）总是 fire，
+      // 非空的需 spec 全等或事件 spec 是给定路径的前缀（监听父目录覆盖子路径）。
+      if (specMatch?.spec !== undefined && task.trigger.spec) {
+        const eventSpec = task.trigger.spec
+        const given = specMatch.spec
+        if (eventSpec !== given && !given.startsWith(eventSpec + '/')) continue
+      }
+      const updated: ScheduledTask = {
+        ...cloneTask(task),
+        lastTriggeredAt: new Date().toISOString(),
+        triggerCount: task.triggerCount + 1,
+      }
+      this.table = this.table.map(t => (t.id === task.id ? updated : t))
+      void this.fireTask(updated, task.triggerCount)
+      fired++
+    }
+    if (fired > 0) this.persist()
+    return fired
   }
 
   // ─── Lifecycle ─────────────────────────────────────────────
@@ -555,7 +610,9 @@ export function normalizeRetry(retry: unknown): ScheduledTaskRetry | undefined {
   return { maxAttempts: Math.min(Math.floor(maxAttempts), 10), backoffMs: Math.min(safeBackoff, 60 * 60 * 1000) }
 }
 
-function validateTriggerOrThrow(trigger: CronTrigger): void {
+/** Trigger 校验（cron 表达式 / interval 正整数 / oneshot ISO / startup/app-open 可空）。
+ *  导出供 schedule 工具与 scheduler 内部共用同一校验口径。 */
+export function validateTriggerOrThrow(trigger: CronTrigger): void {
   if (trigger.type === 'cron') {
     const next = nextCronTime(trigger.spec, Date.now())
     if (next === null) {
@@ -576,6 +633,7 @@ function validateTriggerOrThrow(trigger: CronTrigger): void {
     const ts = new Date(trigger.spec).getTime()
     if (isNaN(ts)) throw new Error(`Invalid oneshot time "${trigger.spec}".`)
   }
+  // startup / app-open：事件触发，spec 不参与调度（可为空或描述性备注），无需校验。
 }
 
 function normalizeScheduledTask(value: unknown): ScheduledTask | null {
@@ -585,7 +643,7 @@ function normalizeScheduledTask(value: unknown): ScheduledTask | null {
   if (typeof task.prompt !== 'string') return null
   if (!task.trigger || typeof task.trigger !== 'object') return null
   const trigger = task.trigger as Partial<CronTrigger>
-  if (trigger.type !== 'interval' && trigger.type !== 'cron' && trigger.type !== 'oneshot') return null
+  if (!TRIGGER_TYPE_SET.has(trigger.type as CronTriggerType)) return null
   if (typeof trigger.spec !== 'string') return null
   const allowedTools = Array.isArray(task.allowedTools) && task.allowedTools.every(t => typeof t === 'string')
     ? [...task.allowedTools]
@@ -596,7 +654,7 @@ function normalizeScheduledTask(value: unknown): ScheduledTask | null {
     id: task.id,
     prompt: task.prompt,
     allowedTools,
-    trigger: { type: trigger.type, spec: trigger.spec },
+    trigger: { type: trigger.type as CronTriggerType, spec: trigger.spec },
     createdAt,
     triggerCount,
     ...(typeof task.recurringMaxAgeMs === 'number' && Number.isFinite(task.recurringMaxAgeMs) ? { recurringMaxAgeMs: task.recurringMaxAgeMs } : {}),
@@ -621,4 +679,19 @@ function cloneTask(task: ScheduledTask): ScheduledTask {
     trigger: { ...task.trigger },
     ...(task.retry ? { retry: { ...task.retry } } : {}),
   }
+}
+
+// ─── Active scheduler registration ──────────────────────────
+// serve() 实例化 CronScheduler 后调 setActiveScheduler 登记；工具（如
+// schedule_create/list/delete）经 getActiveScheduler() 拿到实例，在 agent
+// 对话中自助管理定时任务。非 serve 环境（CLI 无调度器）返回 undefined，
+// default-registry 据此**不注册**那三个工具（见 tools/schedule/tool.ts）。
+let activeScheduler: CronScheduler | undefined
+
+export function setActiveScheduler(scheduler: CronScheduler | undefined): void {
+  activeScheduler = scheduler
+}
+
+export function getActiveScheduler(): CronScheduler | undefined {
+  return activeScheduler
 }

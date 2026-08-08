@@ -76,6 +76,28 @@ describe('runResumePreflightOai', () => {
     assert.strictEqual(report.syntheticResultsInserted, 0)
   })
 
+  it('removes an empty tool_calls array on the clean fast path', () => {
+    const messages: OaiMessage[] = [
+      { role: 'user', content: 'continue' },
+      { role: 'assistant', content: 'already answered', tool_calls: [] },
+    ]
+
+    const report = runResumePreflightOai(messages)
+    assert.strictEqual(report.repaired, true)
+    assert.strictEqual(report.safe, true)
+    assert.deepStrictEqual(report.messages[1], { role: 'assistant', content: 'already answered' })
+    assert.equal('tool_calls' in report.messages[1]!, false)
+  })
+
+  it('keeps recovered null-content assistants valid after empty tool_calls removal', () => {
+    const report = runResumePreflightOai([
+      { role: 'assistant', content: null, tool_calls: [] },
+    ])
+
+    assert.deepStrictEqual(report.messages, [{ role: 'assistant', content: '' }])
+    assert.strictEqual(report.safe, true)
+  })
+
   it('repairs orphan tool_calls by inserting synthetic results', () => {
     const messages: OaiMessage[] = [
       { role: 'user', content: 'read file' },

@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, realpathSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import { MeridianDb } from './meridian-db.js'
@@ -6,11 +6,22 @@ import { MeridianBehavior } from './meridian-behavior.js'
 import { parseFile, parseTypeScriptFile, initParser, detectLang } from './meridian-parser.js'
 import { buildRepoMap } from './meridian-graph.js'
 import { analyzeImpact, inferTestedByTargets } from './meridian-impact.js'
-import type { RepoMapResult } from './meridian-types.js'
+import { extractExpressRoutes, extractJsxChildren } from './meridian-framework.js'
+import type { RepoMapResult, MeridianSymbol, MeridianSymbolKind, MeridianEdge } from './meridian-types.js'
+import type { CallSite } from './meridian-types.js'
 import type { RepoMapOptions } from './meridian-graph.js'
 import type { ImpactResult } from './meridian-impact.js'
 import type { StigmergyStore } from '../context/stigmergy.js'
 import { classifyPath } from '../context/attention-filter.js'
+
+// ─── 语言扩展评估门（wave4 T10，2026-08）─────────────────────────────
+// 评估结论：tree-sitter-wasms@0.1.13 实际分发的 grammar 仅 3 个——typescript、
+// python、go（本地 node_modules/tree-sitter-wasms/out/ 实测 3 个 wasm，
+// 无 rust/java）。依计划 T10「可得再增，不可得后置」裁决：Rust/Java 扩展
+// 后置，不为凑语言数引入新依赖。
+// 依赖升级路径：待 tree-sitter-wasms 发布包含 tree-sitter-rust.wasm /
+// tree-sitter-java.wasm 的版本后，在 meridian-parser.ts 的 LANG_WASM /
+// EXT_TO_LANG 注册新语言并补对应 walkSymbols/walkCalls 解析器，即完成扩展。
 
 const TS_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx']
 const ALL_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go']
@@ -26,6 +37,107 @@ export function isMeridianIndexablePath(rel: string): boolean {
   if (IGNORE_PATTERNS.some(p => rel.includes(p))) return false
   if (classifyPath(rel).silent) return false
   return ALL_EXTENSIONS.some(ext => rel.endsWith(ext))
+}
+
+// ─── Flow 查询（wave4 T9）：named-symbol BFS，≤1 个未命名桥 ──────────
+// 吸收 CodeGraph MAX_BRIDGE=1 设计：从命名符号出发沿边双向 BFS，路径上
+// 允许穿过至多 maxBridges 个未命名节点（`file:*:0` 占位，如 imports 边的
+// target），起点与命中点都必须命名符号——未命名节点只作桥、不进结果。
+
+export interface FlowQueryOptions {
+  /** BFS 深度上限（默认 4）。 */
+  maxHops?: number
+  /** 路径允许的未命名桥数上限（默认 1 = CodeGraph MAX_BRIDGE=1）。 */
+  maxBridges?: number
+}
+
+export interface FlowHit {
+  symbolId: string
+  name: string
+  kind: MeridianSymbolKind
+  filePath: string
+  line: number
+  /** 到达该命中点的 BFS 跳数。 */
+  hops: number
+  /** 路径经过的未命名桥数（0 = 全程命名符号直达）。 */
+  bridges: number
+}
+
+/** 未命名占位 id（`file:*:0`）判定——flow 两端 named 约束的核心谓词。 */
+export function isUnnamedSymbolId(id: string): boolean {
+  return /:\*:0$/.test(id)
+}
+
+/** named-symbol BFS：seed 必须是命名符号；返回的命中点也全是命名符号。 */
+export function queryFlow(db: MeridianDb, seedId: string, opts?: FlowQueryOptions): FlowHit[] {
+  const maxHops = opts?.maxHops ?? 4
+  const maxBridges = opts?.maxBridges ?? 1
+  // 两端 named 约束：未命名 seed 直接拒绝（空结果）。
+  if (isUnnamedSymbolId(seedId)) return []
+  const seedFile = seedId.split(':')[0]!
+  const seed = db.getSymbolsForFile(seedFile).find(s => s.id === seedId)
+  if (!seed) return []
+
+  const hits = new Map<string, FlowHit>()
+  const visited = new Set<string>()
+  let frontier: Array<{ id: string; bridges: number; hops: number }> = [{ id: seedId, bridges: 0, hops: 0 }]
+  visited.add(`${seedId}:0`)
+
+  for (let hop = 0; hop < maxHops && frontier.length > 0; hop++) {
+    const next: Array<{ id: string; bridges: number; hops: number }> = []
+    for (const cur of frontier) {
+      const neighbors = [
+        ...db.getEdgesFrom(cur.id).map(e => e.targetId),
+        ...db.getEdgesTo(cur.id).map(e => e.sourceId),
+      ]
+      for (const nid of neighbors) {
+        const unnamed = isUnnamedSymbolId(nid)
+        const bridges = cur.bridges + (unnamed ? 1 : 0)
+        if (bridges > maxBridges) continue
+        const key = `${nid}:${bridges}`
+        if (visited.has(key)) continue
+        visited.add(key)
+        if (unnamed) {
+          next.push({ id: nid, bridges, hops: cur.hops + 1 })
+        } else {
+          const file = nid.split(':')[0]!
+          const sym = db.getSymbolsForFile(file).find(s => s.id === nid)
+          if (sym) {
+            // 同一符号多条路径命中：保留 bridges 更小的那条（≤1 桥优先）。
+            const existing = hits.get(nid)
+            if (!existing || bridges < existing.bridges) {
+              hits.set(nid, { symbolId: nid, name: sym.name, kind: sym.kind, filePath: sym.filePath, line: sym.line, hops: cur.hops + 1, bridges })
+            }
+            next.push({ id: nid, bridges, hops: cur.hops + 1 })
+          }
+        }
+      }
+    }
+    frontier = next
+  }
+  return [...hits.values()].sort((a, b) => a.hops - b.hops || a.symbolId.localeCompare(b.symbolId))
+}
+
+/** 删除文件处理（wave4 T9）：文件删除后，跨文件入边复活为 pending——target
+ *  从具体符号 `file:sym:line` 重定向到文件级占位 `file:*:0`，依赖关系不静默
+ *  断裂（getReverseDependents 的 GLOB `file:*` 仍命中该文件）。文件重新索引
+ *  时 buildCallEdges 会按名字重建精确边。返回复活（pending）的入边条数。 */
+export function reviveDeletedFile(db: MeridianDb, rel: string): number {
+  const symbols = db.getSymbolsForFile(rel)
+  let revived = 0
+  for (const sym of symbols) {
+    for (const edge of db.getEdgesTo(sym.id)) {
+      const sourceFile = edge.sourceId.split(':')[0]
+      if (sourceFile && sourceFile !== rel) {
+        db.upsertEdge(edge.sourceId, `${rel}:*:0`, edge.kind, edge.weight, edge.confidence ?? 'extracted')
+        revived++
+      }
+    }
+  }
+  // 清空该文件的符号与出边（files 行保留占位，contentHash 置空使重现文件
+  // 的 needsParse 判定必然为 true，触发重新解析）。
+  db.upsertFile({ filePath: rel, contentHash: '', symbols: [], edges: [], imports: [], calls: [] })
+  return revived
 }
 
 export class MeridianIndexer {
@@ -56,6 +168,10 @@ export class MeridianIndexer {
     if (rel === null) return
     if (this.indexing.has(rel)) return
     if (!this.isIndexable(rel)) return
+    // Bail before touching the disk, not after. Everything below — read, hash,
+    // tree-sitter parse — exists only to fill the index, and the 1-hop import
+    // expansion at the bottom multiplies it across every direct dependency.
+    if (!this.db.available) return
 
     const absPath = resolve(this.cwd, rel)
     if (!existsSync(absPath)) return
@@ -77,20 +193,39 @@ export class MeridianIndexer {
       // reverse-dependency lookups (getReverseDependents) actually match. The
       // 1-hop expansion below reuses the same resolved set to avoid re-resolving.
       const resolvedImports = this.resolveImports(rel, result.imports)
-      this.db.upsertFile({ ...result, imports: resolvedImports })
-      this.db.recordAccess(rel)
 
-      // Build tested_by edges if this is a test file
-      if (this.isTestFile(rel)) {
-        this.buildTestEdges(rel)
-      }
-
-      // 1-hop expand: parse direct imports (reuse resolved set)
+      // 1-hop expand first: cross-file symbols must be in the DB before the
+      // framework extraction below resolves handlers/components by name.
       for (const resolved of resolvedImports) {
         if (!this.indexing.has(resolved)) {
           await this.indexFile(resolved)
         }
       }
+
+      // Framework edges (CodeGraph mechanism absorption — route_handles/jsx_children).
+      // knownSymbols = this file + symbols from reachable files (cross-file
+      // handlers/components resolve); fileSymbols stays this-file-only so the
+      // JSX enclosing selection never compares against foreign line numbers
+      // (review MEDIUM-1).
+      const known = [...result.symbols, ...resolvedImports.flatMap(imp => this.db.getSymbolsForFile(imp))]
+      const fw = this.extractFrameworkEdges(rel, source, result.symbols, known)
+      // Single upsertFile with the complete symbol set — a second upsertFile
+      // would wipe tested_by edges built below (review MEDIUM-2).
+      this.db.upsertFile({ ...result, imports: resolvedImports, symbols: [...result.symbols, ...fw.symbols] })
+      this.db.recordAccess(rel)
+
+      // Build tested_by edges if this file is a test
+      if (this.isTestFile(rel)) {
+        this.buildTestEdges(rel)
+      }
+
+      for (const e of fw.edges) {
+        this.db.upsertEdge(e.sourceId, e.targetId, e.kind, e.weight, e.confidence ?? 'extracted')
+      }
+
+      // Cross-file call resolution runs after the import expansion above, so
+      // symbols reachable via imports are already in the DB when matched.
+      this.buildCallEdges(rel, result.calls)
     } finally {
       this.indexing.delete(rel)
     }
@@ -107,7 +242,52 @@ export class MeridianIndexer {
     const source = readFileSync(absPath, 'utf-8')
     const result = await parseFile(rel, source)
     const resolvedImports = this.resolveImports(rel, result.imports)
-    this.db.upsertFile({ ...result, imports: resolvedImports })
+    // Framework extraction on the hot-update path too (review HIGH-1): upsertFile
+    // wipes all symbols/out-edges for the file, so without this the route symbols
+    // and route_handles/jsx_children edges disappear after every agent edit until
+    // the next full backfill.
+    const known = [...result.symbols, ...resolvedImports.flatMap(imp => this.db.getSymbolsForFile(imp))]
+    const fw = this.extractFrameworkEdges(rel, source, result.symbols, known)
+    this.db.upsertFile({ ...result, imports: resolvedImports, symbols: [...result.symbols, ...fw.symbols] })
+    // Hot-update must rebuild tested_by edges too (review LOW-1) — keep this
+    // path in lockstep with indexFile.
+    if (this.isTestFile(rel)) {
+      this.buildTestEdges(rel)
+    }
+    for (const e of fw.edges) {
+      this.db.upsertEdge(e.sourceId, e.targetId, e.kind, e.weight, e.confidence ?? 'extracted')
+    }
+    this.buildCallEdges(rel, result.calls)
+  }
+
+  /** Shared framework-edge extraction (route_handles/jsx_children) for the
+   *  indexFile and invalidateFile paths — keeps the two production paths in
+   *  lockstep so hot updates never silently drop framework edges.
+   *  fileSymbols must stay this-file-only (JSX enclosing selection compares
+   *  line numbers); knownSymbols may include cross-file symbols (route handler /
+   *  component name matching). */
+  private extractFrameworkEdges(
+    rel: string,
+    source: string,
+    fileSymbols: MeridianSymbol[],
+    knownSymbols: MeridianSymbol[],
+  ): { symbols: MeridianSymbol[]; edges: MeridianEdge[] } {
+    const out: { symbols: MeridianSymbol[]; edges: MeridianEdge[] } = { symbols: [], edges: [] }
+    const fw = extractExpressRoutes(rel, source, knownSymbols)
+    out.symbols.push(...fw.symbols)
+    out.edges.push(...fw.edges)
+    const jsx = extractJsxChildren(rel, source, fileSymbols, knownSymbols)
+    out.edges.push(...jsx.edges)
+    return out
+  }
+
+  /** 删除文件处理（wave4 T9）：跨文件入边复活为 pending 而非静默断裂。
+   *  已删除/不可索引的文件直接忽略。返回复活（pending）的入边条数。 */
+  removeFile(filePath: string): number {
+    const rel = this.toRepoRelative(filePath)
+    if (rel === null) return 0
+    if (!this.isIndexable(rel)) return 0
+    return reviveDeletedFile(this.db, rel)
   }
 
   async query(seedFile: string, opts?: Partial<RepoMapOptions>): Promise<RepoMapResult> {
@@ -146,6 +326,26 @@ export class MeridianIndexer {
     }
   }
 
+  /** Resolve same-file-unresolved call sites against cross-file symbols by name.
+   *  Unique match → inferred; multiple matches → ambiguous on every candidate.
+   *  Confidence drives the CONFIDENCE_MULTIPLIER discount in the graph layer. */
+  private buildCallEdges(fromFile: string, calls: CallSite[]): void {
+    if (calls.length === 0) return
+    const allSymbols = this.db.getAllSymbols()
+    for (const call of calls) {
+      const matches = allSymbols.filter(s => s.name === call.name && s.filePath !== fromFile)
+      if (matches.length === 0) continue
+      if (matches.length === 1) {
+        const target = matches[0]
+        if (target) this.db.upsertEdge(call.sourceId, target.id, 'calls', 1.0, 'inferred')
+      } else {
+        for (const m of matches) {
+          this.db.upsertEdge(call.sourceId, m.id, 'calls', 1.0, 'ambiguous')
+        }
+      }
+    }
+  }
+
   getStats() {
     return this.db.getStats()
   }
@@ -161,8 +361,39 @@ export class MeridianIndexer {
    *  outside the project boundary. */
   private toRepoRelative(filePath: string): string | null {
     const absCwd = resolve(this.cwd)
-    const absFile = resolve(this.cwd, filePath)
+    // Symlink hardening: canonicalize both sides before the prefix check.
+    // Without resolving cwd, a repo reached through a symlink (macOS
+    // /var→/private/var temp dirs, symlinked home/mount/repo) lets the
+    // resolved file escape the boundary while the string prefix still
+    // matches — the indexer must never read/parse/store files outside
+    // the project boundary. Mirrors src/tools/path-validate.ts:46-50.
+    let realCwd: string
+    try {
+      realCwd = realpathSync(this.cwd)
+    } catch {
+      realCwd = absCwd
+    }
+    const absFile = resolve(absCwd, filePath)
+    // Prefix guard BEFORE slicing (review MEDIUM-3): a shared-prefix outside path
+    // (e.g. cwd+'-other/...') would otherwise leave a residual suffix that lands
+    // inside realCwd after rebasing and pass the check.
     if (!absFile.startsWith(absCwd + '/')) return null
+    let realFile: string
+    try {
+      // Existing file: resolve symlinks so an in-repo link pointing outside
+      // the project boundary fails the prefix check.
+      realFile = realpathSync(absFile)
+    } catch {
+      // Non-existent file (classification probe): resolve within the real cwd
+      // domain — realpath(absFile) would throw, and an unresolved absFile
+      // compared against a realpath'd cwd mismatches on macOS /var→/private/var.
+      // Rebase the cwd-relative suffix (may contain ../ segments — resolve
+      // normalizes them, the prefix check below rejects escapes).
+      realFile = resolve(realCwd, '.' + absFile.slice(absCwd.length))
+    }
+    if (!realFile.startsWith(realCwd + '/')) return null
+    // Key by the non-canonical relative path so DB keys stay stable
+    // regardless of symlink resolution differences across runs.
     return absFile.slice(absCwd.length + 1)
   }
 

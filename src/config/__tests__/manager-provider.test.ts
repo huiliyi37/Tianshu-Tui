@@ -1,18 +1,21 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   loadConfig,
   setupProvider,
   setupCustomProvider,
+  addProvider,
   updateProviderBaseUrl,
   upsertProviderModel,
   setApiKey,
   setApiKeyEnv,
+  setDefaultProvider,
   removeProvider,
   runConfigCLI,
+  setModelSupportsVision,
 } from '../manager.js'
 
 describe('provider config mutations', () => {
@@ -146,11 +149,57 @@ describe('provider config mutations', () => {
     }))
   })
 
-  it('removeProvider refuses to delete a preset provider (deepseek)', () => {
-    // deepseek 是预设 provider——禁止删除，报可读错误
+  it('removeProvider refuses to delete the default provider (deepseek)', () => {
+    // deepseek 是默认 provider——default 保护拦截（预设名拦截已放开：
+    // 删除预设名条目后 unconfigured 卡片回归，随时可重新配置）
     assert.throws(
       () => removeProvider('deepseek'),
-      /cannot remove preset provider "deepseek"/i,
+      /cannot remove default provider "deepseek"/i,
+    )
+  })
+
+  it('removeProvider removes the user-layer entry of a built-in preset name (defaults re-fill on load)', () => {
+    // deepseek 在 DEFAULT_CONFIG 内置——loadConfig 的 4 层合并会在用户层删除后
+    // 回填出厂预设，因此列表仍显示出厂 deepseek。验证删除动作到达用户层（磁盘）：
+    // 用户配置中不应再有 deepseek 条目。
+    setDefaultProvider('kimi')
+    removeProvider('deepseek')
+    const raw = JSON.parse(readFileSync(process.env.RIVET_CONFIG_PATH!, 'utf-8'))
+    assert.equal(raw.provider.providers['deepseek'], undefined)
+    // 出厂回填：合并视图里 deepseek 仍在（预设 clone）
+    assert.equal(loadConfig().provider.providers['deepseek']?.apiKeyEnv, 'DEEPSEEK_API_KEY')
+  })
+
+  it('removeProvider allows deleting a legacy custom provider whose name collides with a preset', () => {
+    // 历史死锁：setupCustomProvider 曾允许用预设名创建条目，删除时被按名字拦截
+    // （Cannot remove preset provider）。存量撞名条目用 addProvider 构造，修复后应可删除。
+    addProvider('zhipu-vision', {
+      name: 'zhipu-vision',
+      baseUrl: 'https://custom.example.com/v1',
+      apiKey: 'sk-legacy',
+      protocol: 'openai',
+      capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none', prefixCompletion: false },
+      thinking: 'enabled',
+      maxTokens: 8000,
+      allowProFallback: false,
+      models: [{ id: 'custom-model', contextWindow: 128000, maxTokens: 8000 }],
+      unsupported: [],
+    })
+    removeProvider('zhipu-vision')
+    assert.equal(loadConfig().provider.providers['zhipu-vision'], undefined)
+  })
+
+  it('setupCustomProvider rejects built-in preset names', () => {
+    // zhipu-vision 是预设 key 但不在默认 providers map——修复前 setupCustomProvider
+    // 会成功创建（死锁入口），修复后源头拦截
+    assert.throws(
+      () => setupCustomProvider({
+        providerName: 'zhipu-vision',
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'sk',
+        model: { id: 'm', contextWindow: 1000, maxTokens: 500 },
+      }),
+      /built-in preset name/i,
     )
   })
 
@@ -202,5 +251,25 @@ describe('provider config mutations', () => {
     await runConfigCLI(['remove-provider', 'cli-remove-me'], io)
     const providers = loadConfig().provider.providers
     assert.equal(providers['cli-remove-me'], undefined)
+  })
+
+  // 回归闸：preset 视觉模型（glm-5.2）取消勾选时若 delete 字段，preset backfill
+  // 会把缺席当成"没表态"回灌 true——用户下次启动看到勾选自己跳回来。
+  it('unchecking vision on a preset model survives reload (backfill must not re-fill it)', () => {
+    setModelSupportsVision('glm', 'glm-5.2', false)
+    const model = loadConfig().provider.providers.glm!.models.find(m => m.id === 'glm-5.2')!
+    assert.equal(model.supportsVision, false, 'explicit false must not be overwritten by preset backfill')
+  })
+
+  it('setModelSupportsVision can toggle vision on and off', () => {
+    setModelSupportsVision('deepseek', 'deepseek-v4-pro', true)
+    assert.equal(loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'deepseek-v4-pro')!.supportsVision, true)
+    setModelSupportsVision('deepseek', 'deepseek-v4-pro', false)
+    assert.equal(loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'deepseek-v4-pro')!.supportsVision, false)
+  })
+
+  it('setModelSupportsVision rejects unknown provider or model', () => {
+    assert.throws(() => setModelSupportsVision('ghost', 'x', true), /Provider "ghost" not found/)
+    assert.throws(() => setModelSupportsVision('deepseek', 'ghost-model', true), /Model "ghost-model" not found/)
   })
 })

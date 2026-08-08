@@ -86,9 +86,13 @@ describe('appendix trace sink', () => {
 
     assert.equal(lines.length, 2)
     const parsed = lines.map(l => JSON.parse(l))
-    assert.deepEqual(parsed.map(p => p.turn), [1, 2])
-    assert.equal(parsed[0].content, APPENDIX)
-    assert.deepEqual(parsed[0].blocks, ['git-status', 'progress', 'cognitive-mirror'])
+    // 落盘是 fire-and-forget 的并发 append（见上），行序无保证——按 turn 取记录，
+    // 不按行序断言：本用例要证的是「每次渲染落一行且内容逐字保真」，不是排序。
+    assert.deepEqual(parsed.map(p => p.turn).sort((a, b) => a - b), [1, 2])
+    const first = parsed.find(p => p.turn === 1)
+    assert.ok(first, 'turn 1 的记录必须落盘')
+    assert.equal(first.content, APPENDIX)
+    assert.deepEqual(first.blocks, ['git-status', 'progress', 'cognitive-mirror'])
   })
 
   it('skips an absent appendix rather than writing an empty record', () => {

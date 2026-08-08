@@ -81,9 +81,12 @@ function renderLine(t: TodoItem, theme: RivetTheme, maxContentWidth: number): st
     : `  ${color(glyph, theme.muted)} `
   const prefixW = displayWidth(prefix, WIDE)
   const contentBudget = maxContentWidth + 4 - prefixW
-  const content = displayWidth(t.content, WIDE) > contentBudget
-    ? `${truncateToDisplayWidth(t.content, contentBudget - ELLIPSIS_W, WIDE)}…`
-    : t.content
+  // 进行中的项念现在时（activeForm），其余念祈使式的 content——面板读起来
+  // 是「正在做什么 / 还要做什么」，而不是一列同构的祈使句。缺席时回退 content。
+  const text = t.status === 'in_progress' ? (t.activeForm ?? t.content) : t.content
+  const content = displayWidth(text, WIDE) > contentBudget
+    ? `${truncateToDisplayWidth(text, contentBudget - ELLIPSIS_W, WIDE)}…`
+    : text
 
   const styled = t.status === 'in_progress'
     ? color(content, theme.primary, { bold: true })

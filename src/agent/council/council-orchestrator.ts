@@ -1,4 +1,5 @@
 import { extractJsonCandidates, type WorkerResult } from '../work-order.js'
+import type { IdentifiedWorkerResult } from '../coordinator.js'
 import { aggregateCouncil, applyResolutionsToMergedItems, resolveConflictsWithRebuttals, type CouncilDraft, type CouncilPlan, type SeatChallenge, type SeatContribution, type SeatRebuttal } from './council-plan.js'
 import { renderCouncilPlan } from './council-render.js'
 import {
@@ -32,7 +33,8 @@ export interface CouncilDeps {
     policy: 'all_required',
     signal?: AbortSignal,
     onProgress?: (completed: number, total: number) => void,
-  ) => Promise<{ results: WorkerResult[]; workerModels?: Array<{ workOrderId: string; model: string }> }>
+    onWorkerSettled?: (result: IdentifiedWorkerResult) => void,
+  ) => Promise<{ results: IdentifiedWorkerResult[]; workerModels?: Array<{ workOrderId: string; model: string }> }>
   /** 注入时钟，保持 aggregate 纯净、编排可测。 */
   now: () => number
   /** 旁路记录席位路由 shadow —— 默认缺省。绝不影响真实派发。 */
@@ -43,6 +45,8 @@ export interface CouncilDeps {
    *  seat 参数在异步并行场景下仅为近似值（onProgress 只回调 completed 计数，
    *  不含具体 workOrderId），建议 consumer 仅使用计数语义。 */
   onSeatProgress?: (seat: string, status: 'running' | 'done') => void
+  /** Per-worker terminal callback; used to close fast seats before batch completion. */
+  onWorkerSettled?: (result: IdentifiedWorkerResult) => void
 }
 
 export interface CouncilInput {
@@ -132,6 +136,39 @@ export function buildSeatRebuttalObjective(
 export type SeatParseResult =
   | { ok: true; contribution: SeatContribution }
   | { ok: false; reason: 'missing_artifact' | 'malformed_json'; detail: string }
+
+/** 流会消息里按失败子类计数的席位失败类。budget_exhausted 优先于 missing_artifact：
+ *  blocked+timeout 的 worker 结果没有 seat-contribution artifact，parseSeatContribution
+ *  会返回 missing_artifact——但「预算耗尽」是更该突出的成因（2026-08-07 分析文档 P0-2）。 */
+export type SeatFailureClass = 'missing_artifact' | 'malformed_json' | 'budget_exhausted' | 'no_result'
+
+/** 按最终（重试后）结果归类席位失败子类。 */
+export function classifySeatFailure(
+  result: WorkerResult | undefined,
+  parsed: SeatParseResult | null,
+): SeatFailureClass {
+  if (result && result.status === 'blocked' && (result.failureReason === 'timeout' || result.failureReason === 'max_turns')) {
+    return 'budget_exhausted'
+  }
+  if (parsed && !parsed.ok) return parsed.reason
+  return 'no_result'
+}
+
+/** 失败席位按子类分组渲染，供流会 throw 消息说明成因：
+ *  「missing_artifact×2：天权、天府；budget_exhausted×1：天璇」。 */
+export function renderFailureBreakdown(
+  failedSeats: string[],
+  failReasonByAuthority: ReadonlyMap<string, SeatFailureClass>,
+): string {
+  const byClass = new Map<SeatFailureClass, string[]>()
+  for (const seat of failedSeats) {
+    const cls = failReasonByAuthority.get(seat) ?? 'no_result'
+    const list = byClass.get(cls) ?? []
+    list.push(seat)
+    byClass.set(cls, list)
+  }
+  return [...byClass.entries()].map(([cls, seats]) => `${cls}×${seats.length}：${seats.join('、')}`).join('；')
+}
 
 /** 解析席位 WorkerResult → SeatContribution。失败返回 ok:false 供调用方重试/留痕。 */
 export function parseSeatContribution(seat: string, result: WorkerResult): SeatParseResult {
@@ -249,7 +286,8 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
           // 完成顺序 ≠ 席位数组顺序。只传计数，不传具体席位名避免张冠李戴。
           deps.onSeatProgress?.(`${completed}/${total}`, 'done')
         }
-      : undefined)
+      : undefined,
+    deps.onWorkerSettled)
   // ── fail-loud 解析：失败席位收集重试，绝不静默空降级 ──
   const contribByAuthority = new Map<string, SeatContribution>()
   const retrySeats: CouncilSeat[] = []
@@ -272,6 +310,7 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
 
   // ── 单席重试一次：换 -retry parentTurnId 绕开队列 authority 去重 ──
   const failedSeats: string[] = []
+  const failReasonByAuthority = new Map<string, SeatFailureClass>()
   if (retrySeats.length > 0) {
     const retryRequests: CouncilFanoutRequest[] = retrySeats.map(seat => ({
       parentTurnId: `council:seat-${seat.authority}-retry`,
@@ -283,7 +322,7 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
       ...seatModelOverride(seat),
       ...seatTierFloor(seat, input.draft.objective),
     }))
-    const retryRun = await deps.delegateBatch(retryRequests, 'all_required', input.abortSignal)
+    const retryRun = await deps.delegateBatch(retryRequests, 'all_required', input.abortSignal, undefined, deps.onWorkerSettled)
     for (const seat of retrySeats) {
       const result = retryRun.results.find(r => r.workOrderId === `council:seat-${seat.authority}-retry`)
       const parsed = result ? parseSeatContribution(seat.authority, result) : null
@@ -291,6 +330,7 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
         contribByAuthority.set(seat.authority, withModelBackfill(parsed.contribution, retryRun, result!.workOrderId))
       } else {
         failedSeats.push(seat.authority)
+        failReasonByAuthority.set(seat.authority, classifySeatFailure(result, parsed))
         const detail = parsed && !parsed.ok ? parsed.detail : (failDetails.get(seat.authority) ?? `席位 ${seat.authority} 重试仍无结果`)
         contribByAuthority.set(seat.authority, {
           authority: seat.authority,
@@ -305,7 +345,8 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
   const quorum = councilQuorum(input.seats.length)
   const validCount = input.seats.length - failedSeats.length
   if (validCount < quorum) {
-    throw new Error(`议事会流会：有效席位 ${validCount}/${input.seats.length} 不足法定人数 ${quorum}（贡献解析失败：${failedSeats.join(', ')}）`)
+    const breakdown = renderFailureBreakdown(failedSeats, failReasonByAuthority)
+    throw new Error(`议事会流会：有效席位 ${validCount}/${input.seats.length} 不足法定人数 ${quorum}（${breakdown}）`)
   }
 
   const contributions = input.seats.map(seat => contribByAuthority.get(seat.authority)!)
@@ -352,7 +393,8 @@ export async function runCouncilDebate(input: CouncilInput, deps: CouncilDeps): 
   const run2 = await deps.delegateBatch(r2requests, 'all_required', input.abortSignal,
     deps.onSeatProgress
       ? (completed, total) => { deps.onSeatProgress?.(`${completed}/${total}`, 'done') }
-      : undefined)
+      : undefined,
+    deps.onWorkerSettled)
   const r2Contributions: SeatContribution[] = input.seats.map(seat => {
     const result = run2.results.find(r => r.workOrderId === `council:seat-${seat.authority}-r2`)
     if (!result) return { authority: seat.authority, summary: '', additions: [], risks: [], challenges: [], alternatives: [], round: 2 }

@@ -29,6 +29,7 @@ const HEX_RE = /^#[0-9a-fA-F]{6}$/
 const SEMANTIC_KEYS = [
   'primary', 'secondary', 'success', 'warning', 'error', 'dim', 'muted',
   'pulseQuiet', 'pulseActive', 'pulseAlert', 'userColor', 'assistantColor', 'systemColor',
+  'brandColor',
 ] as const
 
 describe('palette completeness snapshot', () => {
@@ -46,6 +47,19 @@ describe('palette completeness snapshot', () => {
       }
       assert.ok(entry.background === 'dark' || entry.background === 'light', `${name}.background`)
       assert.ok(entry.description.length > 0, `${name}.description`)
+    }
+  })
+
+  it('fallback rail never leaks truecolor hex tokens', () => {
+    for (const name of THEME_NAMES) {
+      const fallback = THEMES[name].fallback
+      for (const key of SEMANTIC_KEYS) {
+        assert.doesNotMatch(
+          fallback[key],
+          HEX_RE,
+          `${name}.fallback.${key} must stay on the named ANSI color rail`,
+        )
+      }
     }
   })
 
@@ -104,6 +118,18 @@ describe('custom themes', () => {
     // 未覆盖 token 继承 cobalt
     assert.equal(entry.truecolor.success, THEMES.cobalt.truecolor.success)
     assert.equal(entry.description, 'test theme')
+  })
+
+  it('custom theme fallback rail stays on named ANSI colors (no hex leak)', () => {
+    registerCustomTheme('hexleak', { base: 'cobalt' })
+    const entry = resolveThemeEntry('custom:hexleak')!
+    for (const key of SEMANTIC_KEYS) {
+      assert.doesNotMatch(
+        entry.fallback[key],
+        HEX_RE,
+        `custom fallback.${key} must stay on the named ANSI color rail`,
+      )
+    }
   })
 
   it('setTheme accepts custom: names and unknown names are no-ops', () => {

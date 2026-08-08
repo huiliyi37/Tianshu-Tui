@@ -448,3 +448,179 @@ describe('/config/vision-auto-bridge', () => {
     assert.equal((await router('PUT', '/config/vision-auto-bridge', { enabled: true }, {})).status, 401)
   })
 })
+
+describe('POST /config/providers model vision round-trip', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-config-routes-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('persists supportsVision=true on an added model and returns it in the list', async () => {
+    writeConfig(home, {})
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const setup = await router('POST', '/config/providers', {
+      providerName: 'deepseek',
+      model: { id: 'vis-roundtrip', contextWindow: 128000, maxTokens: 32000, supportsVision: true },
+    }, AUTH)
+    assert.equal(setup.status, 200)
+
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    assert.equal(list.status, 200)
+    const body = list.body as { providers: { name: string; models: { id: string; supportsVision?: boolean }[] }[] }
+    const ds = body.providers.find(p => p.name === 'deepseek')!
+    assert.equal(ds.models.find(m => m.id === 'vis-roundtrip')?.supportsVision, true)
+  })
+
+  it('explicit supportsVision=false on a preset vision model survives (no backfill re-fill)', async () => {
+    writeConfig(home, {})
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    // glm-5.2 是 preset 视觉模型：显式 false 必须写盘，且 GET 返回 false
+    const setup = await router('POST', '/config/providers', {
+      providerName: 'glm',
+      model: { id: 'glm-5.2', contextWindow: 1000000, maxTokens: 131072, supportsVision: false },
+    }, AUTH)
+    assert.equal(setup.status, 200)
+
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    assert.equal(list.status, 200)
+    const body = list.body as { providers: { name: string; models: { id: string; supportsVision?: boolean }[] }[] }
+    const glm = body.providers.find(p => p.name === 'glm')!
+    assert.equal(glm.models.find(m => m.id === 'glm-5.2')?.supportsVision, false)
+  })
+
+  it('rejects a malformed model payload', async () => {
+    writeConfig(home, {})
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router('POST', '/config/providers', {
+      providerName: 'deepseek',
+      model: { id: 'bad', contextWindow: -1, maxTokens: 32000 },
+    }, AUTH)
+    assert.equal(res.status, 400)
+  })
+})
+
+describe('provider delete: preset-name deadlock', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-config-routes-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('POST /config/providers/custom rejects built-in preset names', async () => {
+    writeConfig(home, {})
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router('POST', '/config/providers/custom', {
+      providerName: 'zhipu-vision',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk',
+      model: { id: 'm', contextWindow: 128000, maxTokens: 32000 },
+    }, AUTH)
+    assert.equal(res.status, 400)
+    assert.match((res.body as { error: string }).error, /built-in preset name/i)
+  })
+
+  it('DELETE /config/providers/:name removes a legacy custom entry whose name collides with a preset', async () => {
+    // 历史死锁存量：setupCustomProvider 曾允许用预设名创建条目，删除被按名字拦截。
+    // 直接写盘构造存量条目（zhipu-vision 不在 DEFAULT_CONFIG，删除后不回填）。
+    const configPath = join(home, 'config.json')
+    writeFileSync(configPath, JSON.stringify({
+      provider: {
+        default: 'deepseek',
+        providers: {
+          'zhipu-vision': {
+            name: 'zhipu-vision',
+            baseUrl: 'https://custom.example.com/v1',
+            apiKey: 'sk-legacy',
+            protocol: 'openai',
+            capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none', prefixCompletion: false },
+            thinking: 'enabled',
+            maxTokens: 8000,
+            allowProFallback: false,
+            models: [{ id: 'custom-model', contextWindow: 128000, maxTokens: 8000 }],
+            unsupported: [],
+          },
+        },
+      },
+      pro: {},
+    }, null, 2) + '\n')
+
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const del = await router('DELETE', '/config/providers/zhipu-vision', {}, AUTH)
+    assert.equal(del.status, 200)
+    assert.deepEqual(del.body, { ok: true, removed: 'zhipu-vision' })
+
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    assert.equal(list.status, 200)
+    const body = list.body as { providers: { name: string }[] }
+    assert.equal(body.providers.find(p => p.name === 'zhipu-vision'), undefined)
+  })
+
+  it('GET /config/providers returns presetKeys for frontend name-collision validation', async () => {
+    writeConfig(home, {})
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    assert.equal(list.status, 200)
+    const body = list.body as { presetKeys: string[] }
+    assert.ok(Array.isArray(body.presetKeys))
+    assert.ok(body.presetKeys.includes('deepseek'))
+    assert.ok(body.presetKeys.includes('zhipu-vision'))
+  })
+
+  it('GET /config/providers sorts configured providers by recommended preset order (deepseek first)', async () => {
+    // 故意用非推荐序写盘：glm → minimax → deepseek，断言响应重排为 deepseek 第一。
+    const stub = {
+      name: 'x',
+      baseUrl: 'https://api.example.com/v1',
+      protocol: 'openai',
+      capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none', prefixCompletion: false },
+      thinking: 'enabled',
+      maxTokens: 8000,
+      models: [{ id: 'm', contextWindow: 128000, maxTokens: 8000 }],
+      unsupported: [],
+    }
+    writeFileSync(join(home, 'config.json'), JSON.stringify({
+      provider: {
+        default: 'deepseek',
+        providers: {
+          glm: { ...stub, name: 'glm' },
+          minimax: { ...stub, name: 'minimax' },
+          deepseek: { ...stub, name: 'deepseek' },
+        },
+      },
+      pro: {},
+    }, null, 2) + '\n')
+
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    assert.equal(list.status, 200)
+    const names = (list.body as { providers: { name: string }[] }).providers.map(p => p.name)
+    assert.equal(names[0], 'deepseek', `deepseek 必须排第一（got ${names.join(',')}）`)
+    assert.ok(names.indexOf('glm') < names.indexOf('minimax'), 'glm 应排在 minimax 前（preset 原序）')
+  })
+
+  it('DELETE /config/providers/:name still refuses the default provider', async () => {
+    writeConfig(home, {})
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    // deepseek 是默认 provider（writeConfig 的 default 字段）——default 保护仍在
+    const res = await router('DELETE', '/config/providers/deepseek', {}, AUTH)
+    assert.equal(res.status, 400)
+    assert.match((res.body as { error: string }).error, /default provider/i)
+  })
+})

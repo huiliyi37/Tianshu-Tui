@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { startServer } from './index.js'
+import { loadProModule } from '../api/pro-registry.js'
 import { desktopDir, desktopSessionsDir } from '../config/paths.js'
 import { serverLogger } from './logger.js'
 import { createRoutes, type ServerState } from './routes.js'
@@ -28,7 +29,10 @@ import { buildBrowserRoutes } from './browser-routes.js'
 import { buildProjectTemplatesRoutes } from './project-templates-routes.js'
 import { buildProjectDocsRoutes } from './project-docs-routes.js'
 import { buildCacheRoutes } from './cache-routes.js'
-import { CronScheduler } from './cron-scheduler.js'
+import { buildSpeechRoutes } from './speech-routes.js'
+import { createWhisperEngine } from './whisper-engine.js'
+import { existsSync } from 'node:fs'
+import { CronScheduler, setActiveScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
 import { buildMcpRoutes } from './mcp-api.js'
 import { buildPluginRoutes } from './plugin-api.js'
@@ -37,6 +41,7 @@ import { TaskRegistry } from './task-registry.js'
 import { JsonTaskStore } from './task-store.js'
 import { SessionRuntimePool } from './session-runtime-pool.js'
 import { loadConfig, getGreetingConfig } from '../config/manager.js'
+import { isRuntimeLeanAspect, resolveSessionPoolOptions } from '../config/runtime-lean.js'
 import { isProFeatureEnabled } from '../config/pro-license.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from '../platform.js'
 import { resolveApiKey } from '../api/factory.js'
@@ -157,10 +162,26 @@ export interface ResolvedModelSpec {
  * Resolve a model id (or alias) to its provider/apiKey/auth/model spec, scanning
  * every configured provider. Returns null when the id is unknown or the target
  * provider has no usable API key (kept fail-closed, like switchAgentRuntime).
+ *
+ * `provider:modelId`（或 `provider:alias`）显式消歧——deepseek 与 deepseek-spark
+ * 共享同一 wire 型号名时，裸 id 仍优先扫到的第一个节点（兼容旧会话），带前缀
+ * 则只查该 provider。
  */
 export function resolveModelSpec(ctx: ServeContext, modelId: string): ResolvedModelSpec | null {
-  for (const [provName, prov] of Object.entries(ctx.config.provider.providers)) {
-    const found = prov.models.find((m) => m.id === modelId || m.alias === modelId)
+  const colon = modelId.indexOf(':')
+  const pinnedProvider = colon > 0 ? modelId.slice(0, colon) : undefined
+  const modelRef = pinnedProvider ? modelId.slice(colon + 1) : modelId
+  if (!modelRef) return null
+
+  const entries = pinnedProvider
+    ? (() => {
+        const prov = ctx.config.provider.providers[pinnedProvider]
+        return prov ? [[pinnedProvider, prov] as const] : []
+      })()
+    : Object.entries(ctx.config.provider.providers)
+
+  for (const [provName, prov] of entries) {
+    const found = prov.models.find((m) => m.id === modelRef || m.alias === modelRef)
     if (!found) continue
 
     let provider = ctx.provider
@@ -374,6 +395,10 @@ const DEFAULT_PORT = 3100
  * API. Throws if no token is available (fail-closed).
  */
 export async function runServe(opts: RunServeOptions = {}): Promise<RunningServer> {
+  // Pro 扩展点加载（spec 3b）：桌面 sidecar 生产路径。必须在 config-routes
+  // 首次查询之前完成——否则 spark 节点不可见（合并视图查不到注册项）。
+  await loadProModule()
+
   const apiToken = (opts.token ?? process.env.RIVET_SERVER_TOKEN)?.trim()
   if (!apiToken) {
     throw new Error('RIVET_SERVER_TOKEN is required for rivet serve')
@@ -404,10 +429,13 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   }
 
   // N1: durable session storage so sessions survive sidecar restarts.
+  const lean = isRuntimeLeanAspect('pool', ctx.config.runtime?.lean)
+  const sessionPool = resolveSessionPoolOptions(ctx.config.runtime, lean)
   const persistence = opts.ephemeral
     ? undefined
     : new FileSessionPersistence(
         opts.sessionDir ?? desktopSessionsDir(),
+        { maxEventsDiskBytes: sessionPool.maxEventsDiskBytes },
       )
 
   // Wave J: sidecar 级 SharedRuntime——providerHealth 跨 session 共享让
@@ -469,7 +497,7 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   const missionStore = new MissionStore()
   // cold /health does not pay for tools/Meridian/council.
   const sessions = new RuntimeSessionManager({
-    createAgent: async (cwd, sessionId, approvalMode, modelId) => {
+    createAgent: async (cwd, sessionId, approvalMode, modelId, allowedTools) => {
       const agentMod = await loadServeAgent()
       // Capture the goal-handles resolver on first load (dynamic import is
       // cached, so this runs once). Used by resolveGoalHandles below.
@@ -488,10 +516,13 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
         sharedRuntime,
         specReload,
         modelId,
+        allowedTools,
       )
     },
     defaultCwd: process.cwd(),
     persistence,
+    maxLoadedSessions: sessionPool.maxLoadedSessions,
+    idleAgentTtlMs: sessionPool.idleAgentTtlMs,
     // R1 — late-bound getter: registry resolves async after server start.
     getSessionRegistry: () => sessionRegistry,
     // Goal mode — late-bound per-session goal handles (refs + sessionDir +
@@ -617,6 +648,16 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   // Plugin routes: presets + install/enable/remove for desktop plugin market UI.
   Object.assign(routes, buildPluginRoutes(apiToken))
 
+  // Speech routes: whisper.cpp 本地语音转写。bin/model 由环境变量注入
+  // （Tauri 打包侧设 RIVET_WHISPER_BIN/MODEL），缺失时 engine=null → 503，
+  // 前端降级到 Web Speech API。
+  const whisperBin = process.env.RIVET_WHISPER_BIN
+  const whisperModel = process.env.RIVET_WHISPER_MODEL
+  const whisperEngine = whisperBin && whisperModel && existsSync(whisperBin) && existsSync(whisperModel)
+    ? createWhisperEngine({ binPath: whisperBin, modelPath: whisperModel })
+    : null
+  Object.assign(routes, buildSpeechRoutes(whisperEngine))
+
   // Open file in system editor / reveal in file manager — thin wrapper so the
   // Desktop webview can request the sidecar to open a local path without
   // needing a Tauri plugin.
@@ -702,6 +743,7 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   if (!opts.ephemeral) {
     const rivetDir = desktopDir()
     scheduler = new CronScheduler({ schedulePath: join(rivetDir, 'scheduled_tasks.json') })
+    setActiveScheduler(scheduler)
     const registry = new TaskRegistry({ taskStore: new JsonTaskStore(join(rivetDir, 'tasks')) })
     taskRegistry = registry
     const runtimePool = new SessionRuntimePool({ manager: sessions, defaultCwd: process.cwd() })
@@ -709,7 +751,7 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
     // one wins the lock and runs the scheduler — the rest stay idle instead of
     // double-firing every scheduled task.
     const lock = new CronLock({ lockPath: join(rivetDir, 'scheduled_tasks.lock') })
-    wiring = new CronWiring({ scheduler, registry, runtimePool, lock })
+    wiring = new CronWiring({ scheduler, registry, runtimePool, lock, cwd: process.cwd() })
     void wiring.start().catch(() => { /* non-fatal: scheduler stays idle */ })
     Object.assign(routes, buildScheduleRoutes(scheduler, apiToken, {
       getStatus: () => wiring?.getStatus(),
@@ -747,25 +789,28 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
       sessions.abortAll()
       // Wave L: 与 TUI createShutdownHandler 对称——abort 中止 turn 后，对所有
       // session 显式 shutdown 释放 coordinator stallSweep + 在途 worker 句柄。
-      // 进程退出 OS 会回收，但显式 shutdown 语义清晰、对齐双侧路径。
-      sessions.shutdownAll()
-      void wiring?.stop()
-      wiring?.dispose()
-      taskRegistry?.dispose()
-      scheduler?.stop()
-      // Kill MCP child processes synchronously — async shutdown() may not
-      // complete before the process exits, leaving orphaned subprocesses.
-      sharedRuntime.mcpManager?.killChildrenSync()
-      // Wave G: 释放 per-cwd 共享 Meridian/LSP 资源（module may still be loading).
-      if (serveAgentMod) {
-        serveAgentMod.disposeSharedCwdResources(sharedRuntime)
-      } else {
-        sharedRuntime.meridianIndexers.clear()
-        sharedRuntime.lspManagers.clear()
-        sharedRuntime.domainStores.clear()
+      // 共享资源要等 claims/worker finally 完成后再拆，避免 handoff 紧接着
+      // 进入同一工作区时撞上上一会话的文件归属。
+      const finish = () => {
+        void wiring?.stop()
+        wiring?.dispose()
+        taskRegistry?.dispose()
+        scheduler?.stop()
+        // Kill MCP child processes synchronously — async shutdown() may not
+        // complete before the process exits, leaving orphaned subprocesses.
+        sharedRuntime.mcpManager?.killChildrenSync()
+        // Wave G: 释放 per-cwd 共享 Meridian/LSP 资源（module may still be loading).
+        if (serveAgentMod) {
+          serveAgentMod.disposeSharedCwdResources(sharedRuntime)
+        } else {
+          sharedRuntime.meridianIndexers.clear()
+          sharedRuntime.lspManagers.clear()
+          sharedRuntime.domainStores.clear()
+        }
+        loopHealth.stop()
+        server.close(cb)
       }
-      loopHealth.stop()
-      server.close(cb)
+      void sessions.shutdownAll().then(finish, finish)
     },
   }
 }

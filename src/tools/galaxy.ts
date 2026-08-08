@@ -28,9 +28,12 @@ import {
   delegateTimeoutMsSchema,
   toBudgetOverride,
 } from './delegate-budget.js'
-import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import type { DelegationActivity, DelegationIdentity, Tool, ToolCallParams, ToolResult } from './types.js'
 import { createActivityStreamer, createDelegationActivityMapper, progressSnippet } from './worker-activity-stream.js'
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
+import { validateGalaxyDimensionContract } from '../agent/galaxy-contract.js'
+import { buildGalaxyBudgetInputs, isReviewGalaxyDimension, mapGalaxyDimensionToKind, mapGalaxyDimensionToProfile, mapGalaxyDimensionToTaskShape } from '../agent/galaxy-budget.js'
+import type { RuntimeCoordinatorSnapshot } from '../agent/runtime-self-model.js'
 
 // ── Coordinator interface（与 delegate_batch 同构） ──────────────────────
 
@@ -40,8 +43,13 @@ export interface GalaxyCoordinator {
     policy?: AggregationPolicy,
     abortSignal?: AbortSignal,
     onProgress?: (completed: number, total: number) => void,
-    onWorkerSettled?: (result: import('../agent/work-order.js').WorkerResult) => void,
+    onWorkerSettled?: (result: CoordinatorRun['results'][number]) => void,
   ): Promise<CoordinatorRun>
+  /** Read-only runtime boundary check; absent in lightweight test/worker hosts. */
+  getRuntimeSnapshot?: () => RuntimeCoordinatorSnapshot
+  /** S4：DP 副本 A/B 候选模型池。缺省 undefined → DP 副本全部走默认路由
+   *  （与旧行为一致，不轮换）。 */
+  getCandidateModels?: () => Array<{ provider: string; model: string }>
   /** 星河路由学习（收编 #5）：结算时沉淀路由事实、proposal 时召回胜率。
    *  缺省 undefined → 路由学习关闭（现状行为）。 */
   domainKnowledgeStore?: import('../agent/domain-knowledge-store.js').DomainKnowledgeStore
@@ -49,6 +57,39 @@ export interface GalaxyCoordinator {
    *  evidenceStatus=verified 各计一次独立证据；deliver_task 门禁消费。
    *  缺省 undefined → 不创建义务（现状行为）。 */
   obligationTracker?: import('../agent/obligation-tracker.js').ObligationTracker
+}
+
+function terminalActivity(
+  result: CoordinatorRun['results'][number],
+  parentToolId: string,
+  objective?: string,
+): DelegationActivity {
+  const identity = result as CoordinatorRun['results'][number] & DelegationIdentity
+  return {
+    workOrderId: result.workOrderId,
+    parentToolId,
+    ...(identity.dispatchId ? { dispatchId: identity.dispatchId } : {}),
+    ...(identity.attemptId ? { attemptId: identity.attemptId } : {}),
+    ...(identity.parentAttemptId ? { parentAttemptId: identity.parentAttemptId } : {}),
+    profile: result.profile,
+    authority: result.authority,
+    objective,
+    status: result.status,
+    progressLine: progressSnippet(result.summary),
+    summary: result.summary,
+    failureReason: result.failureReason,
+    model: result.model,
+    provider: result.provider,
+    usage: result.usage,
+    artifactId: result.diffArtifactId,
+    changedFiles: result.changedFiles.length > 0 ? result.changedFiles : undefined,
+    findingsCount: result.findings.length > 0 ? result.findings.length : undefined,
+    topFinding: result.findings[0]?.claim,
+    verificationBrief: result.verification
+      ? { status: result.verification.status, passed: result.verification.passed, failed: result.verification.failed }
+      : undefined,
+    evidenceStatus: result.evidenceStatus,
+  }
 }
 
 // ── Schema ───────────────────────────────────────────────────────────────
@@ -122,41 +163,11 @@ const galaxyInputSchema = z.object({
 })
 
 // ── Dimension → WorkOrderKind 映射 ──────────────────────────────────────
-
-const DIMENSION_KIND_MAP: Record<string, WorkOrderKind> = {
-  review: 'review',
-  verify: 'verify',
-  test: 'verify',
-  plan: 'plan',
-  design: 'plan',
-  docs: 'doc_research',
-  research: 'doc_research',
-  search: 'code_search',
-  scout: 'code_search',
-  frontend: 'patch_proposal',
-  backend: 'patch_proposal',
-  impl: 'patch_proposal',
-  patch: 'patch_proposal',
-  fix: 'patch_proposal',
-}
+// 语义分类与 profile / taskShape 共用 galaxy-budget 的单一事实源，避免两张
+// 映射表兜底方向相反（详见 galaxy-budget.ts 模块注释）。
 
 function mapDimensionToKind(name: string): WorkOrderKind {
-  const key = name.toLowerCase().replace(/[\s_-]/g, '')
-  return DIMENSION_KIND_MAP[key] ?? 'code_search'
-}
-
-function mapDimensionToProfile(name: string): string {
-  const key = name.toLowerCase().replace(/[\s_-]/g, '')
-  if (key === 'review' || key === 'verify') return 'reviewer'
-  if (key === 'plan') return 'planner'
-  if (key === 'docs' || key === 'research') return 'doc_scout'
-  // 实现类维度（含 design/frontend/backend 等）默认用 patcher（可写）
-  return 'patcher'
-}
-
-function isReviewDimension(name: string): boolean {
-  const key = name.toLowerCase().replace(/[\s_-]/g, '')
-  return key === 'review' || key === 'verify'
+  return mapGalaxyDimensionToKind(name)
 }
 
 function galaxyWorkerParentTurnId(
@@ -183,56 +194,134 @@ const GALAXY_GLYPH = '🌌'
 
 /** 任务形状限定枚举（收编 #5 设计推荐）——自由文本聚类成本高且不稳定
  *  （frontend / Frontend UI / 前端 各自独立，胜率被稀释成精确重名匹配）。
- *  经 mapDimensionToKind 两跳推导：维度名 → WorkOrderKind → 形状，单一映射源。 */
-type GalaxyTaskShape = 'impl' | 'review' | 'explore' | 'plan' | 'docs'
+ *  分类与 profile / kind 同源于 galaxy-budget 的 classifyGalaxyDimension。 */
+type GalaxyTaskShape = ReturnType<typeof mapGalaxyDimensionToTaskShape>
 
 function normalizeTaskShape(name: string): GalaxyTaskShape {
-  switch (mapDimensionToKind(name)) {
-    case 'patch_proposal': return 'impl'
-    case 'review':
-    case 'verify': return 'review'
-    case 'plan': return 'plan'
-    case 'doc_research': return 'docs'
-    default: return 'explore'
-  }
+  return mapGalaxyDimensionToTaskShape(name)
 }
 
-/** 同 taskShape 历史路由按 authority 聚合胜率（收编 #5 召回侧）。 */
+/** 同 taskShape 历史路由按 authority × model 聚合胜率（收编 #5 召回侧 + S4
+ *  模型维度）——DP 副本 A/B 沉淀后，proposal 能对比「同任务形状下哪个模型
+ *  性价比最高」。model 缺失（旧记录）归入 '' 组展示为「默认」。
+ *  L3：同时聚合 token 成本，输出「每通过成本」——质量与成本双目标可见。 */
 function buildRoutingStats(
   store: import('../agent/domain-knowledge-store.js').DomainKnowledgeStore,
   dimensions: z.infer<typeof dimensionSchema>[],
-): Array<{ dimensionName: string; taskShape: string; authority: string; passed: number; total: number; passRate: string }> {
-  const out: Array<{ dimensionName: string; taskShape: string; authority: string; passed: number; total: number; passRate: string }> = []
+): Array<{ dimensionName: string; taskShape: string; authority: string; model: string; passed: number; total: number; passRate: string; costPerPass?: number }> {
+  const out: Array<{ dimensionName: string; taskShape: string; authority: string; model: string; passed: number; total: number; passRate: string; costPerPass?: number }> = []
   for (const d of dimensions) {
     const taskShape = normalizeTaskShape(d.name)
     const records = store.recallGalaxyRouting(taskShape)
     if (records.length === 0) continue
-    const byAuthority = new Map<string, import('../agent/domain-knowledge-store.js').GalaxyRoutingRecord[]>()
+    const byKey = new Map<string, import('../agent/domain-knowledge-store.js').GalaxyRoutingRecord[]>()
     for (const r of records) {
-      const list = byAuthority.get(r.authority)
+      const key = `${r.authority}\u0000${r.model ?? ''}`
+      const list = byKey.get(key)
       if (list) list.push(r)
-      else byAuthority.set(r.authority, [r])
+      else byKey.set(key, [r])
     }
-    for (const [authority, rs] of byAuthority) {
+    for (const [key, rs] of byKey) {
+      const [authority, model] = key.split('\u0000')
       const passed = rs.filter(r => r.status === 'passed').length
-      out.push({ dimensionName: d.name, taskShape, authority, passed, total: rs.length, passRate: String(Math.round((passed / rs.length) * 100)) })
+      const totalCost = rs.reduce((acc, r) => acc + (r.costTokens ?? 0), 0)
+      out.push({
+        dimensionName: d.name,
+        taskShape,
+        authority: authority!,
+        model: model!,
+        passed,
+        total: rs.length,
+        passRate: String(Math.round((passed / rs.length) * 100)),
+        ...(passed > 0 && totalCost > 0 ? { costPerPass: Math.round(totalCost / passed) } : {}),
+      })
     }
   }
   return out
+}
+
+/** 写维度判定（proposal 预检与 execute 剥离共用同一事实来源——两处漂移会让
+ *  proposal 承诺的与 execute 实际执行的不一致）。 */
+function dimensionIsWriteCapable(dim: z.infer<typeof dimensionSchema>): boolean {
+  return profileIsWriteCapable((dim.profile ?? mapGalaxyDimensionToProfile(dim.name)) as import('../agent/work-order.js').WorkerProfile)
+}
+
+/** 静态预检（proposal 阶段）：写维度文件范围的重叠与覆盖缺口。
+ *  只读维度并行读同一文件是安全的（work-queue.hasFileConflict 读读放行），
+ *  因此只对写维度做认领归属分析。与 execute 阶段的剥离逻辑同构：
+ *  fileOwner 按写维度首次认领，后续声明同一文件的写维度将丢失该文件；
+ *  声明文件全被夺走的写维度会被跳过派发。在用户确认前暴露这两类问题，
+ *  把返工堵在派发之前。 */
+export interface GalaxyPlanPrecheckIssue {
+  dimensionIndex: number
+  dimensionName: string
+  files: string[]
+  kind: 'overlap' | 'emptied'
+}
+
+export function analyzeWriteDimensionPlan(
+  dimensions: readonly z.infer<typeof dimensionSchema>[],
+): GalaxyPlanPrecheckIssue[] {
+  const issues: GalaxyPlanPrecheckIssue[] = []
+  const fileOwner = new Map<string, number>()
+  for (let i = 0; i < dimensions.length; i++) {
+    const dim = dimensions[i]!
+    if (!dimensionIsWriteCapable(dim)) continue
+    for (const f of dim.files ?? []) {
+      if (!fileOwner.has(f)) fileOwner.set(f, i)
+    }
+  }
+  for (let i = 0; i < dimensions.length; i++) {
+    const dim = dimensions[i]!
+    if (!dimensionIsWriteCapable(dim)) continue
+    const owned = dim.files ?? []
+    const overlaps: string[] = []
+    let kept = 0
+    for (const f of owned) {
+      const owner = fileOwner.get(f)
+      if (owner === undefined || owner === i) { kept++; continue }
+      overlaps.push(f)
+    }
+    if (overlaps.length > 0) {
+      issues.push({ dimensionIndex: i, dimensionName: dim.name, files: overlaps, kind: 'overlap' })
+    }
+    // 原本有文件、全部被夺走 → execute 将跳过派发（emptiedWriteDims）。
+    // 原本就没声明文件的写维度不预警——其命运由 coordinator 的 scope 闸独立裁决。
+    if (owned.length > 0 && kept === 0) {
+      issues.push({ dimensionIndex: i, dimensionName: dim.name, files: owned, kind: 'emptied' })
+    }
+  }
+  return issues
+}
+
+function formatPlanPrecheck(issues: GalaxyPlanPrecheckIssue[]): string {
+  if (issues.length === 0) {
+    return ['', '── 静态预检 ──', '✓ 写维度文件范围无重叠、无覆盖缺口。'].join('\n')
+  }
+  const lines: string[] = ['', '── 静态预检（执行前修正，避免派发后返工）──']
+  for (const issue of issues) {
+    if (issue.kind === 'overlap') {
+      lines.push(`⚠ 维度「${issue.dimensionName}」的文件与更早的写维度重叠，执行时将被剥离：${issue.files.join(', ')}`)
+    } else {
+      lines.push(`⚠ 维度「${issue.dimensionName}」声明的文件全部被其他写维度认领，派发时将被跳过：${issue.files.join(', ')}`)
+    }
+  }
+  lines.push('请调整维度划分：写维度文件范围必须互不重叠。')
+  return lines.join('\n')
 }
 
 function formatGalaxyProposal(
   objective: string,
   dimensions: z.infer<typeof dimensionSchema>[],
   autoReview: boolean,
-  routingStats?: Array<{ dimensionName: string; taskShape: string; authority: string; passed: number; total: number; passRate: string }>,
+  routingStats?: Array<{ dimensionName: string; taskShape: string; authority: string; model: string; passed: number; total: number; passRate: string; costPerPass?: number }>,
 ): string {
   const lines: string[] = [
     `${GALAXY_GLYPH} 星河集群方案`,
     '',
     `目标：${objective}`,
     '',
-    `分子 Agent 组成（${dimensions.length} 个维度${autoReview && !dimensions.some(d => isReviewDimension(d.name)) ? ' + 1 自动审查' : ''}）：`,
+    `分子 Agent 组成（${dimensions.length} 个维度${autoReview && !dimensions.some(d => isReviewGalaxyDimension(d.name)) ? ' + 1 自动审查' : ''}）：`,
   ]
 
   for (let i = 0; i < dimensions.length; i++) {
@@ -248,18 +337,20 @@ function formatGalaxyProposal(
     lines.push(`     ${d.objective}`)
   }
 
-  if (autoReview && !dimensions.some(d => isReviewDimension(d.name))) {
+  if (autoReview && !dimensions.some(d => isReviewGalaxyDimension(d.name))) {
     const yaoguang = starDomainRegistry.get('yaoguang')
     const label = yaoguang ? `瑶光（${yaoguang.motto.slice(0, 12)}…）` : '瑶光'
     lines.push(`  ${dimensions.length + 1}. review — ${label}`)
     lines.push(`     审查以上所有维度的输出，验证正确性、完整性和安全性`)
   }
 
-  // 路由学习召回（收编 #5）：同任务形状的历史路由，按 authority 聚合胜率。
+  // 路由学习召回（收编 #5 + S4 + L3）：同任务形状的历史路由，按
+  // authority × model 聚合胜率与每通过成本——模型性价比（质量/成本）对比可见。
   if (routingStats && routingStats.length > 0) {
-    lines.push('', '历史路由（同任务形状 · 按 authority 聚合胜率）：')
+    lines.push('', '历史路由（同任务形状 · authority × 模型：胜率 / 每通过成本）：')
     for (const r of routingStats) {
-      lines.push(`  ${r.authority} @ ${r.dimensionName}: ${r.passed}/${r.total} 通过（${r.passRate}%）`)
+      const cost = r.costPerPass !== undefined ? ` · 每通过 ~${(r.costPerPass / 1000).toFixed(1)}k tokens` : ''
+      lines.push(`  ${r.authority} @ ${r.dimensionName}${r.model ? ` · ${r.model}` : ' · 默认'}: ${r.passed}/${r.total} 通过（${r.passRate}%）${cost}`)
     }
   }
 
@@ -364,7 +455,11 @@ function formatGalaxyResult(
     const fallbackNote = target.requestedModel && actualModel && actualModel !== target.requestedModel
       ? ` ⚠ 模型回退：请求 ${target.requestedModel} → 实际 ${actualModel}`
       : ''
-    lines.push(`  ${target.label}: ${digest}${fallbackNote}`)
+    // M2 时间账：每维度 wall-clock（含等槽排队）——排队长/执行慢可区分。
+    const wallNote = r.durationMs !== undefined
+      ? ` · ${(r.durationMs / 1000).toFixed(1)}s`
+      : ''
+    lines.push(`  ${target.label}: ${digest}${fallbackNote}${wallNote}`)
     if (r.changedFiles.length > 0) {
       lines.push(`      changed: ${r.changedFiles.slice(0, 5).join(', ')}`)
       if (r.changedFiles.length > 5) lines.push(`      … (+${r.changedFiles.length - 5} more)`)
@@ -551,6 +646,22 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
 
       const { objective, dimensions, autoReview, confirm, policy, planPath } = parsed.data
 
+      // Validate the complete plan before creating obligations or reserving
+      // workers. This mirrors Codex's spawn protocol: invalid child
+      // configuration is rejected atomically and all corrections are shown
+      // together instead of failing after a partial fan-out.
+      const contractIssues = validateGalaxyDimensionContract(dimensions)
+      if (contractIssues.length > 0) {
+        return {
+          content: [
+            'Galaxy contract validation failed:',
+            ...contractIssues.map(issue => `- dimension #${issue.dimensionIndex + 1}: ${issue.message}`),
+          ].join('\n'),
+          isError: true,
+          errorKind: 'format_error',
+        }
+      }
+
       // D8 L2：从 planPath 解析计划约束（反目标/待验证假设），合并进各维度的 constraints。
       const planConstraints = planPath
         ? resolvePlanConstraints(params.cwd, { planPath, objective })
@@ -573,6 +684,28 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
         ? (isQuorumPolicy ? policy! : { kind: 'quorum', k: 1 })
         : (policy ?? 'all_required')
 
+      // Viability gate: a coordinator that is already shutting down must not
+      // admit a new fan-out. This is especially important during handoff or
+      // model/session replacement: existing workers are allowed to settle, but
+      // a new Galaxy request would otherwise reserve claims after shutdown has
+      // begun. Other degraded signals remain observable and are handled by the
+      // coordinator's normal liveness/claim gates rather than being blanket
+      // rejected here.
+      let runtime: RuntimeCoordinatorSnapshot | undefined
+      try {
+        runtime = coordinator.getRuntimeSnapshot?.()
+      } catch {
+        // Runtime telemetry is advisory; a broken snapshot must not prevent a
+        // normal Galaxy dispatch. The coordinator's own gates remain active.
+      }
+      if (runtime?.shuttingDown) {
+        return {
+          content: '星河已拦截：协调器正在关闭或移交中，暂不接受新的集群派发；请等待当前任务收尾后重试。',
+          isError: true,
+          errorKind: 'runtime_gate',
+        }
+      }
+
       // Pre-flight: validate file paths
       for (let i = 0; i < dimensions.length; i++) {
         const dimension = dimensions[i]!
@@ -587,7 +720,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
           }
         }
         const stars = dimension.authorities ?? []
-        const profile = (dimension.profile ?? mapDimensionToProfile(dimension.name)) as import('../agent/work-order.js').WorkerProfile
+        const profile = (dimension.profile ?? mapGalaxyDimensionToProfile(dimension.name)) as import('../agent/work-order.js').WorkerProfile
         if (dimension.parallelism === 'data') {
           if (!dimension.replicas) {
             return { content: `星河已拦截：DP 维度「${dimension.name}」必须指定 replicas（2–5）。`, isError: true }
@@ -613,9 +746,11 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
           ? buildRoutingStats(coordinator.domainKnowledgeStore, dimensions)
           : undefined
         const proposal = formatGalaxyProposal(objective, dimensions, autoReview, routingStats)
+        const precheck = formatPlanPrecheck(analyzeWriteDimensionPlan(dimensions))
         return {
           content: [
             proposal,
+            precheck,
             '',
             '请确认此星河方案是否可行。确认后调用 galaxy({..., confirm: true}) 启动执行。',
             '如需调整维度或星域，请说明修改内容。',
@@ -634,7 +769,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
       const dataParallelGroups = new Map<number, GalaxyDataParallelGroup>()
       const dpObligationByDim = new Map<number, string>()
       const explicitReviewIndexes = new Set(
-        dimensions.flatMap((dimension, index) => isReviewDimension(dimension.name) ? [index] : []),
+        dimensions.flatMap((dimension, index) => isReviewGalaxyDimension(dimension.name) ? [index] : []),
       )
 
       for (let i = 0; i < dimensions.length; i++) {
@@ -663,13 +798,26 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
 
         for (let j = 0; j < stars.length; j++) {
           const star = stars[j]!
-          const profile = (dim.profile ?? mapDimensionToProfile(dim.name)) as import('../agent/work-order.js').WorkerProfile
+          const profile = (dim.profile ?? mapGalaxyDimensionToProfile(dim.name)) as import('../agent/work-order.js').WorkerProfile
           for (let replicaIndex = 0; replicaIndex < replicaCount; replicaIndex++) {
             const parentTurnId = galaxyWorkerParentTurnId(params.toolUseId, i, j, isDataParallel ? replicaIndex : undefined)
             dimensionIndexByParentTurnId.set(parentTurnId, i)
             if (isDataParallel) replicaIndexByParentTurnId.set(parentTurnId, replicaIndex)
             const workOrderId = workerOrderId(parentTurnId)
             if (isDataParallel) dataParallelGroups.get(i)!.workOrderIds.push(workOrderId)
+
+            // S4：DP 副本模型 A/B——副本 1 走默认路由，副本 2..N 轮换候选
+            // 模型（仅当未显式 modelOverride 且协调器提供候选池）。同一任务
+            // 不同模型跑出独立副本，结算时按 model 沉淀路由事实，供后续
+            // proposal 选择「同任务形状下性价比最高」的模型。
+            let modelOverride = dim.modelOverride
+            if (isDataParallel && modelOverride === undefined && replicaIndex > 0) {
+              const candidates = coordinator.getCandidateModels?.() ?? []
+              if (candidates.length > 0) {
+                const candidate = candidates[(replicaIndex - 1) % candidates.length]!
+                modelOverride = { provider: candidate.provider, model: candidate.model }
+              }
+            }
 
             requests.push({
             parentTurnId,
@@ -688,7 +836,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
               ? [...(dim.constraints ?? []), ...planConstraints]
               : dim.constraints,
             scope: { files: dim.files, symbols: dim.symbols },
-            modelOverride: dim.modelOverride,
+            modelOverride,
             tierFloor: dim.tierFloor,
             groupId: dataParallelGroupId ?? perspectiveGroupId,
             quorumK: isDataParallel ? Math.floor(dim.replicas! / 2) + 1 : undefined,
@@ -708,11 +856,9 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
       // ── 文件重叠去重：只对可写维度生效（只读维度并行读同一快照是安全的，
       // work-queue 也只序列化写侧）；被剥离的文件显式进报告——重叠本质是
       // 维度划分问题，静默丢弃会让维度丢上下文且无人知晓。
-      const writeDim = (idx: number): boolean =>
-        profileIsWriteCapable((dimensions[idx]!.profile ?? mapDimensionToProfile(dimensions[idx]!.name)) as import('../agent/work-order.js').WorkerProfile)
       const fileOwner = new Map<string, number>() // file path → first WRITE dimension index
       for (let i = 0; i < dimensions.length; i++) {
-        if (!writeDim(i)) continue
+        if (!dimensionIsWriteCapable(dimensions[i]!)) continue
         for (const f of dimensions[i]!.files ?? []) {
           if (!fileOwner.has(f)) fileOwner.set(f, i)
         }
@@ -720,7 +866,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
       const strippedByDim = new Map<number, string[]>()
       for (const req of requests) {
         const dimIdx = dimensionIndexByParentTurnId.get(req.parentTurnId)
-        if (dimIdx === undefined || !writeDim(dimIdx)) continue
+        if (dimIdx === undefined || !dimensionIsWriteCapable(dimensions[dimIdx]!)) continue
         const owned = dimensions[dimIdx]?.files ?? []
         const deduped: string[] = []
         for (const f of owned) {
@@ -739,7 +885,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
       const emptiedWriteDims: string[] = []
       for (let i = requests.length - 1; i >= 0; i--) {
         const dimIdx = dimensionIndexByParentTurnId.get(requests[i]!.parentTurnId)
-        if (dimIdx === undefined || !writeDim(dimIdx)) continue
+        if (dimIdx === undefined || !dimensionIsWriteCapable(dimensions[dimIdx]!)) continue
         const originalCount = dimensions[dimIdx]?.files?.length ?? 0
         const currentCount = requests[i]!.scope?.files?.length ?? 0
         if (originalCount > 0 && currentCount === 0) {
@@ -776,6 +922,17 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
           dependencies: executionWorkerIds,
         })
       }
+      // Freeze the dispatch plan before handing it to the coordinator.  This
+      // is the same stable-plan boundary used by Codex's typed spawn events:
+      // the result can explain what was planned, what was actually dispatched,
+      // and which write shards were intentionally skipped.
+      const plannedWorkerCount = requests.length
+      const plannedDataWorkers = [...dataParallelGroups.values()]
+        .reduce((total, group) => total + group.workOrderIds.length, 0)
+      const plannedParallelism = {
+        expert: Math.max(0, plannedWorkerCount - plannedDataWorkers),
+        data: plannedDataWorkers,
+      }
 
       // Activity streaming
       const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
@@ -810,30 +967,8 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
       // Per-worker terminal status（与 delegate-batch 同构，galaxy 是第二个接入者）：
       // 快速 worker 落定即翻 ✓/✗，不等最慢兄弟；FleetRegistry 去重终态重放。
       const emitTerminal = params.onWorkerActivity
-        ? (r: import('../agent/work-order.js').WorkerResult) => {
-            params.onWorkerActivity!({
-              workOrderId: r.workOrderId,
-              parentToolId: params.toolUseId,
-              objective: objectiveById.get(r.workOrderId),
-              // 终态也带派发侧盖章的身份（星域/职能）——否则完成后面板星域信息断流。
-              profile: r.profile,
-              authority: r.authority,
-              status: r.status,
-              progressLine: progressSnippet(r.summary),
-              summary: r.summary,
-              failureReason: r.failureReason,
-              model: r.model,
-              provider: r.provider,
-              usage: r.usage,
-              artifactId: r.diffArtifactId,
-              changedFiles: r.changedFiles.length > 0 ? r.changedFiles : undefined,
-              findingsCount: r.findings.length > 0 ? r.findings.length : undefined,
-              topFinding: r.findings[0]?.claim,
-              verificationBrief: r.verification
-                ? { status: r.verification.status, passed: r.verification.passed, failed: r.verification.failed }
-                : undefined,
-              evidenceStatus: r.evidenceStatus,
-            })
+        ? (r: CoordinatorRun['results'][number]) => {
+            activityMapper?.finish(terminalActivity(r, params.toolUseId, objectiveById.get(r.workOrderId)))
           }
         : undefined
 
@@ -853,6 +988,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
           emitTerminal ?? undefined,
         )
       } catch (err) {
+        activityMapper?.dispose()
         const msg = err instanceof Error ? err.message : String(err)
         return {
           content: `星河执行失败：${msg}`,
@@ -860,23 +996,65 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
         }
       }
 
-      // 路由学习沉淀（收编 #5）：结算时按维度记录路由事实，供下次 proposal
-      // 召回聚合胜率。best-effort——store 故障绝不影响交付。
+      // Backstop terminal emission runs through finish so coalesced tails are
+      // flushed before terminal state and late timers are sealed.
+      if (emitTerminal) {
+        for (const result of run.results) emitTerminal(result)
+      }
+      activityMapper?.dispose()
+
+      // 路由学习沉淀（收编 #5 + S4 + L3）：结算时按维度记录路由事实（含实际
+      // 执行模型、成本、失败归因与 EP/DP 对照组）。best-effort——store 故障
+      // 绝不影响交付。
       if (coordinator.domainKnowledgeStore) {
         try {
           const resultsById = new Map(run.results.map(r => [r.workOrderId, r]))
+          const modelByWorkOrder = new Map((run.workerModels ?? []).map(w => [w.workOrderId, w.model]))
+          const routingRecords: Array<{
+            dimensionName: string
+            authority: string
+            taskShape: string
+            status: 'passed' | 'failed' | 'blocked'
+            model?: string
+            costTokens?: number
+            failureReason?: string
+            parallelism?: 'expert' | 'data'
+            comparisonGroupId?: string
+          }> = []
           for (const req of requests) {
             const dimIndex = dimensionIndexByParentTurnId.get(req.parentTurnId)
             const dim = dimIndex === undefined ? undefined : dimensions[dimIndex]
             const result = resultsById.get(workerOrderId(req.parentTurnId))
             if (!dim || !result) continue
-            coordinator.domainKnowledgeStore.recordGalaxyRouting({
+            routingRecords.push({
               dimensionName: dim.name,
               authority: req.authority ?? 'unknown',
               taskShape: normalizeTaskShape(dim.name),
               // escalated 视同 blocked：结论不可采信，不记作通过
               status: result.status === 'escalated' ? 'blocked' : result.status,
+              model: modelByWorkOrder.get(workerOrderId(req.parentTurnId)) ?? req.modelOverride?.model,
+              // L3：token 成本入账——胜率之外的「每通过成本」维度
+              costTokens: result.usage
+                ? (result.usage.input_tokens ?? 0) + (result.usage.output_tokens ?? 0)
+                : undefined,
+              // 失败归因：有 failureReason = 基础设施死法（超时/轮次耗尽/崩溃），
+              // 与模型能力无关；语义失败（gate 拦的假验证、越界）不带此字段。
+              // 不记它的话，「谁常接难活、谁常撞门禁」会被当成「谁能力差」。
+              ...(result.failureReason ? { failureReason: result.failureReason } : {}),
+              // EP/DP 标记 + 对照组：DP 组内同任务不同模型可配对比较，
+              // EP 分片之间混任务难度不可比。缺此两项则 S4 的 A/B 沉淀无从识别。
+              ...(dim.parallelism ? { parallelism: dim.parallelism } : {}),
+              ...(req.groupId ? { comparisonGroupId: req.groupId } : {}),
             })
+          }
+          if (routingRecords.length > 0) {
+            const store = coordinator.domainKnowledgeStore
+            if (typeof store.recordGalaxyRoutingBatch === 'function') {
+              store.recordGalaxyRoutingBatch(routingRecords)
+            } else {
+              // Keep compatibility with lightweight test/integration doubles.
+              for (const record of routingRecords) store.recordGalaxyRouting(record)
+            }
           }
         } catch {
           // best-effort
@@ -944,6 +1122,11 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
         uiContent: formatGalaxyUi(run, dimensions),
         orchestration: {
           kind: 'galaxy',
+          runId: params.toolUseId,
+          planned: plannedWorkerCount,
+          dispatched: run.results.length,
+          skipped: emptiedWriteDims,
+          parallelism: plannedParallelism,
           dimensions: { passed: galaxyPassed, total: galaxyTotal, failed: failedDimensions },
         },
       }
@@ -954,28 +1137,23 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
     isEnabled: () => true,
     // 外层超时必须覆盖 worker pool 的波次 × profile 预算，否则工具层先杀
     timeoutMs: (params) => {
-      const dims = (params?.input?.dimensions as Array<{ name?: string; authorities?: string[]; authority?: string; profile?: string; timeoutMs?: number; parallelism?: 'expert' | 'data'; replicas?: number; tierFloor?: string }> | undefined) ?? []
-      const profiles: Array<string | undefined> = []
-      const tierFloors: Array<string | undefined> = []
-      const requestedTimeoutMs: Array<number | undefined> = []
-      for (const d of dims) {
-        const stars = d.authorities ?? (d.authority ? [d.authority] : [])
-        const replicaCount = d.parallelism === 'data' ? d.replicas ?? 1 : 1
-        // 与执行侧保持一致：profile 省略时按维度名推导（实现类落到可写 patcher，
-        // 续跑轮次更多）——按 undefined（只读）算会低估外层预算。
-        const effectiveProfile = d.profile ?? (d.name ? mapDimensionToProfile(d.name) : undefined)
-        for (let i = 0; i < stars.length * replicaCount; i++) {
-          profiles.push(effectiveProfile)
-          tierFloors.push(d.tierFloor)
-          requestedTimeoutMs.push(d.timeoutMs)
-        }
-      }
+      const dims = (params?.input?.dimensions as Array<{
+        name?: string
+        authorities?: string[]
+        authority?: string
+        profile?: string
+        timeoutMs?: number
+        parallelism?: 'expert' | 'data'
+        replicas?: number
+        tierFloor?: string
+      }> | undefined) ?? []
+      const { profiles, tierFloors, requestedTimeoutMs } = buildGalaxyBudgetInputs(dims)
       // autoReview 依赖全部执行维度，是事实上的 +1 串行波次——它的预算必须
       // 加在执行预算之后，而不是混进 profiles 一起算：混入会让 allHands 判定
       // 失效（reviewer 非写工），写工续跑倍率被拉低，总预算反而变小，外层可能
       // 在审查跑到一半时硬杀，丢掉全部 partial 打捞。
       const autoReview = (params?.input?.autoReview as boolean | undefined) ?? true
-      const hasExplicitReview = dims.some(d => d.name !== undefined && isReviewDimension(d.name))
+      const hasExplicitReview = dims.some(d => d.name !== undefined && isReviewGalaxyDimension(d.name))
       const execMs = delegationToolTimeoutMs(
         params?.sessionTurnCount,
         profiles,

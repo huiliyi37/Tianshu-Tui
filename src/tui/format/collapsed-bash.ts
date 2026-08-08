@@ -11,6 +11,7 @@
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { displayWidth, truncateToDisplayWidth } from '../width.js'
+import { hiddenLinesMarker } from './hidden-lines.js'
 import { truncationHint } from '../truncation-marker.js'
 
 // ── Types ──────────────────────────────────────────────────────
@@ -162,7 +163,8 @@ export function formatCollapsedBashGroup(input: FormatCollapsedBashGroupInput): 
           lines.push(`${childPrefix}${color(trimmed, previewColor)}`)
         }
         if (allLines.length > 3) {
-          const moreNote = entry.isError ? `… +${allLines.length - 3} earlier lines` : `… +${allLines.length - 3} more lines`
+          // 失败时保留的是尾部，被藏的是上文，故用 earlier 变体。
+          const moreNote = hiddenLinesMarker(allLines.length - 3, entry.isError ? 'earlier' : 'hidden')
           lines.push(color(`${childPrefix}${moreNote}`, theme.muted))
         }
       }

@@ -452,6 +452,33 @@ describe('active claims volatile context', () => {
   })
 })
 
+describe('excluded-path anchors dynamic appendix (spec 3c 动作 B)', () => {
+  it('renders <excluded-paths> in the dynamic appendix only (cache-safe), with XML escaping', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      excludedPathAnchors: ['方案 A 不是最优（<锁竞争>）', 'B path doesn\'t work & rejected'],
+    }
+
+    const appendix = buildDynamicAppendix(ctx)
+    const stable = buildStableVolatileBlock(ctx)
+
+    assert.match(appendix, /<excluded-paths note="推理截断补偿/)
+    assert.match(appendix, /- 方案 A 不是最优（&lt;锁竞争&gt;）/, '锚点内容须经 XML 转义')
+    assert.match(appendix, /- B path doesn't work &amp; rejected/)
+    // cache-safe 纪律（同 intent-retrieval-route）：只进 dynamic appendix，
+    // 不进 stable volatile——锚点追加不得打碎冻结前缀。
+    assert.doesNotMatch(stable, /excluded-paths/)
+  })
+
+  it('renders nothing when absent or empty (non-spark sessions: zero byte diff)', () => {
+    const absent = buildDynamicAppendix({ cwd: '/repo' })
+    assert.doesNotMatch(absent, /excluded-paths/)
+
+    const empty = buildDynamicAppendix({ cwd: '/repo', excludedPathAnchors: [] })
+    assert.doesNotMatch(empty, /excluded-paths/)
+  })
+})
+
 describe('worktree-warning dynamic appendix', () => {
   const base: VolatileContext = { cwd: '/project', gitStatus: '' }
 

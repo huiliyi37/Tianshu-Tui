@@ -181,6 +181,51 @@ describe('team orchestrator skeleton', () => {
     assert.equal(summary.tasks.length, 1)
   })
 
+  it('max mode settles planner fanout through the per-worker callback', async () => {
+    const settled: string[] = []
+    const summary = await runTeamSkeleton({
+      mode: 'max',
+      objective: 'settle every planner activity before execution starts',
+      onWorkerSettled: result => settled.push(result.workOrderId),
+    }, {
+      delegateBatch: async (requests, _policy, _signal, _progress, onWorkerSettled) => {
+        const isPlannerBatch = requests.some(r => r.parentTurnId.includes('planner-'))
+        const results = requests.map(r => ({
+          workOrderId: r.parentTurnId.includes('tianquan')
+            ? 'team:planner-tianquan'
+            : r.parentTurnId.includes('tianfu')
+              ? 'team:planner-tianfu'
+              : 'team:planner-tianxuan',
+          status: 'passed' as const,
+          summary: 'p',
+          findings: [],
+          artifacts: isPlannerBatch && r.parentTurnId.includes('tianquan')
+            ? [{ kind: 'note' as const, title: 'perspective-plan', content: JSON.stringify({
+                perspective: 'tianquan',
+                tasks: [{
+                  id: 'T1', title: 'impl', objective: 'impl', files: ['src/x.ts'],
+                  profile: 'patcher', kind: 'patch_proposal', verification: [],
+                  dependsOn: [], riskTier: 'low', touchSet: ['src/x.ts'],
+                }],
+              }) }]
+            : [],
+          changedFiles: [],
+          risks: [],
+          nextActions: [],
+          evidenceStatus: 'verified' as const,
+        }))
+        for (const result of results) onWorkerSettled?.(result)
+        return { status: 'completed', results, packet: isPlannerBatch ? 'planned' : 'executed' }
+      },
+    })
+
+    assert.ok(summary.tasks.length > 0)
+    assert.deepEqual(
+      settled.filter(id => id.startsWith('team:planner-')).sort(),
+      ['team:planner-tianfu', 'team:planner-tianquan', 'team:planner-tianxuan'],
+    )
+  })
+
   it('max mode routes planners via kind=plan and executors via kind=patch_proposal', async () => {
     const kinds: string[] = []
     await runTeamSkeleton({ mode: 'max', objective: 'design a coherent subsystem now' }, {
@@ -592,6 +637,109 @@ depends: T1
 
       // Tasks should be dispatched normally when prior results passed
       assert.ok(captured.length > 0, 'tasks should be dispatched when dependency passed')
+    })
+
+    // ── 跨波回执（2026-08-05 闭环审计）──────────────────────────────
+    // 此前上一波的验收结论只进 tool 输出给主控看，下一波 worker 一无所知。
+    // 这几条钉住「反馈 → 下一波工单」这一环真的接上了。
+
+    it('上一波失败被压成约束下传给本波 worker', async () => {
+      let captured: DelegationRequest[] = []
+      await runTeamSkeleton({
+        mode: 'standard',
+        objective: 'multi-wave feedback',
+        parentTurnId: 'turn-feedback',
+        fromWave: 1,
+        priorResults: [
+          { workOrderId: 'team:T1', status: 'failed', summary: '', findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [], evidenceStatus: 'unverified', failureReason: 'timeout' },
+        ],
+        planMarkdown: `### T1: First edit\n修改 src/a.ts\n\n### T2: Second edit\n修改 src/a.ts\n`,
+      }, {
+        delegateBatch: async (requests) => { captured = requests; return run('wave1') },
+      })
+
+      assert.ok(captured.length > 0, 'wave 1 应有任务派发')
+      const constraints = captured[0]!.constraints ?? []
+      assert.ok(
+        constraints.some(c => c.includes('T1') && c.includes('timeout')),
+        `回执未注入，实际 constraints: ${JSON.stringify(constraints)}`,
+      )
+    })
+
+    it('上一波门禁未过项下传', async () => {
+      let captured: DelegationRequest[] = []
+      await runTeamSkeleton({
+        mode: 'standard',
+        objective: 'gate feedback',
+        parentTurnId: 'turn-gate-fb',
+        fromWave: 1,
+        priorWaveGateFailures: ['npx tsc --noEmit'],
+        planMarkdown: `### T1: First edit\n修改 src/a.ts\n\n### T2: Second edit\n修改 src/a.ts\n`,
+      }, {
+        delegateBatch: async (requests) => { captured = requests; return run('wave1') },
+      })
+
+      const constraints = captured[0]?.constraints ?? []
+      assert.ok(constraints.some(c => c.includes('门禁未过') && c.includes('tsc')), JSON.stringify(constraints))
+    })
+
+    it('上一波计划外改动下传并提示勿扩大范围', async () => {
+      let captured: DelegationRequest[] = []
+      await runTeamSkeleton({
+        mode: 'standard',
+        objective: 'scope feedback',
+        parentTurnId: 'turn-scope-fb',
+        fromWave: 1,
+        priorScopeLeaks: ['src/unplanned.ts'],
+        planMarkdown: `### T1: First edit\n修改 src/a.ts\n\n### T2: Second edit\n修改 src/a.ts\n`,
+      }, {
+        delegateBatch: async (requests) => { captured = requests; return run('wave1') },
+      })
+
+      const constraints = captured[0]?.constraints ?? []
+      assert.ok(constraints.some(c => c.includes('src/unplanned.ts')), JSON.stringify(constraints))
+    })
+
+    it('上一波全通过时不注入回执——不给 worker 增加无谓上下文', async () => {
+      let captured: DelegationRequest[] = []
+      await runTeamSkeleton({
+        mode: 'standard',
+        objective: 'clean wave',
+        parentTurnId: 'turn-clean',
+        fromWave: 1,
+        priorResults: [
+          { workOrderId: 'team:T1', status: 'passed', summary: 'ok', findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [], evidenceStatus: 'verified' },
+        ],
+        planMarkdown: `### T1: First edit\n修改 src/a.ts\n\n### T2: Second edit\n修改 src/a.ts\n`,
+      }, {
+        delegateBatch: async (requests) => { captured = requests; return run('wave1') },
+      })
+
+      for (const r of captured) {
+        const constraints = r.constraints ?? []
+        assert.ok(!constraints.some(c => c.startsWith('上一波')), JSON.stringify(constraints))
+      }
+    })
+
+    it('回执排在计划级约束之后（计划是长期契约，回执是临时情报）', async () => {
+      let captured: DelegationRequest[] = []
+      await runTeamSkeleton({
+        mode: 'standard',
+        objective: 'ordering',
+        parentTurnId: 'turn-order',
+        fromWave: 1,
+        planConstraints: ['不得引入新依赖'],
+        priorWaveGateFailures: ['npx tsc --noEmit'],
+        planMarkdown: `### T1: First edit\n修改 src/a.ts\n\n### T2: Second edit\n修改 src/a.ts\n`,
+      }, {
+        delegateBatch: async (requests) => { captured = requests; return run('wave1') },
+      })
+
+      const constraints = captured[0]?.constraints ?? []
+      const planIdx = constraints.findIndex(c => c.includes('不得引入新依赖'))
+      const fbIdx = constraints.findIndex(c => c.includes('门禁未过'))
+      assert.ok(planIdx >= 0 && fbIdx >= 0, JSON.stringify(constraints))
+      assert.ok(planIdx < fbIdx, '计划约束应排在回执之前')
     })
 
     it('priorResults undefined — backward compatible, no blocking', async () => {

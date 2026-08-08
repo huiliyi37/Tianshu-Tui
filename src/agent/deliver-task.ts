@@ -27,6 +27,21 @@ import type { Tool, ToolCallParams, ToolResult, DelegationActivity } from '../to
 import { createDelegationActivityMapper } from '../tools/worker-activity-stream.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
+import { debugLog } from '../utils/debug.js'
+
+/**
+ * 阶段时间戳标记（commit 卡死诊断插桩，主控可靠性闭环 2026-08-06）。
+ * 返回 (stage) => void：记录「execute 开始以来的相对毫秒」到 debug 通道
+ * （RIVET_DEBUG=1 才输出，生产零开销）。下次 deliver_task commit=true 卡死时，
+ * 日志里最后一个 stage 就是卡点：在 execute 内（缺 execute:return）或
+ * execute 已返回但工具未完成（全标记齐全 = harness 结果回传层卡死）。
+ */
+export function createStageMarker(prefix: string): (stage: string) => void {
+  const t0 = Date.now()
+  return (stage: string): void => {
+    debugLog(`[${prefix}] ${stage} +${Date.now() - t0}ms`)
+  }
+}
 import type { DeliveryGateV2 } from './delivery-gate-v2.js'
 import { filterExternalNoise } from './delivery-gate-v2.js'
 import { summarizeOwnershipHealth } from './ownership-health.js'
@@ -417,6 +432,8 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
     },
 
     async execute(params: ToolCallParams): Promise<ToolResult> {
+      const mark = createStageMarker('deliver-task')
+      mark('execute:start')
       const ctx = getB1Context(params)
       const reviewDepth = params.reviewDepth ?? ctx.reviewDepth ?? 0
       ctx.ownership.autoOwnFromLedger()
@@ -432,6 +449,7 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           }
         : undefined
       const report = ctx.gate.getReport([], currentDirtyFiles, ctx.getCurrentSnapshotRef?.(), moduleCoverage)
+      mark('report:done')
 
       // Cap file lists and filter external noise to keep the GREEN/YELLOW signal readable.
       const FILE_LIST_CAP = 5
@@ -1042,8 +1060,10 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         const cohesionOverride = forceGate
           || (adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length > 0)
         const cohesion = checkCommitCohesion(filesToCommit)
+        mark('cohesion:done')
         if (cohesion.needsWarning && !cohesionOverride) {
           lines.push('', ...cohesion.warningLines.map(l => `  ${l}`))
+          mark('cohesion:denied')
           return { content: lines.join('\n'), isError: true }
         }
         if (cohesion.needsWarning && cohesionOverride) {
@@ -1058,6 +1078,7 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         // evidence that a new commit actually landed (vs. agent guessing from
         // a possibly-stale git status snapshot).
         const headBefore = spawnGitSync(['rev-parse', '--short', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 5000 })
+        mark('commit:before')
         const headBeforeHash = headBefore.status === 0 ? headBefore.stdout.trim() : null
 
         const executor = ctx.commitOwnedFiles ?? ((cwd, files, msg) => commitScopedFiles({ cwd, files, message: msg }))
@@ -1071,6 +1092,7 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
         if (commitResult.output) lines.push(`   ${commitResult.output}`)
         // Post-commit truth readback: verify HEAD actually moved + surface hash.
         const headAfter = spawnGitSync(['rev-parse', '--short', 'HEAD'], { cwd: params.cwd, encoding: 'utf-8', timeout: 5000 })
+        mark('commit:after')
         const headAfterHash = headAfter.status === 0 ? headAfter.stdout.trim() : null
         if (headBeforeHash && headAfterHash) {
           if (headBeforeHash !== headAfterHash) {
@@ -1242,16 +1264,6 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
                   // 的真实 worker id，审查 round 结束时逐个补发终态，否则它们
                   // 永远挂在子代理面板 running（deliver_task 非委派工具，走不到
                   // clearGroup）。
-                  const seenReviewWorkerIds = new Set<string>()
-                  const trackedUpstream = params.onWorkerActivity
-                    ? (a: DelegationActivity) => {
-                        seenReviewWorkerIds.add(a.workOrderId)
-                        params.onWorkerActivity!(a)
-                      }
-                    : undefined
-                  const activityMapper = trackedUpstream
-                    ? createDelegationActivityMapper(params.toolUseId, trackedUpstream)
-                    : undefined
                   const reviewTerminalOf = (outcome: ReviewOutcome) => {
                     // rejected = 审查正常走完并发现问题（已落地，不是系统失败）
                     const terminalStatus: DelegationActivity['status'] =
@@ -1271,11 +1283,16 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
                       : undefined
                     return { terminalStatus, failureReason, progressLine, summary }
                   }
-                  const settleReviewWorkers = (outcome: ReviewOutcome): void => {
-                    if (!params.onWorkerActivity || seenReviewWorkerIds.size === 0) return
+                  const settleReviewWorkers = (
+                    outcome: ReviewOutcome,
+                    activityMapper: ReturnType<typeof createDelegationActivityMapper> | undefined,
+                    latestByWorker: Map<string, DelegationActivity>,
+                  ): void => {
+                    if (!activityMapper || latestByWorker.size === 0) return
                     const { terminalStatus, failureReason, progressLine, summary } = reviewTerminalOf(outcome)
-                    for (const wid of seenReviewWorkerIds) {
-                      params.onWorkerActivity({
+                    for (const [wid, latest] of latestByWorker) {
+                      activityMapper.finish({
+                        ...latest,
                         workOrderId: wid,
                         parentToolId: params.toolUseId,
                         profile: 'reviewer',
@@ -1285,13 +1302,14 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
                         ...(summary ? { summary } : {}),
                       })
                     }
-                    seenReviewWorkerIds.clear()
+                    latestByWorker.clear()
                   }
                   const runReviewOnce = async (
                     targetChange: ChangeSet,
                     runMode: ReviewMode,
                     timeoutMs: number,
                     controller: AbortController,
+                    activityMapper: ReturnType<typeof createDelegationActivityMapper> | undefined,
                   ): Promise<ReviewOutcome> => {
                     const fallbackTier = runMode === 'auto' ? 'auto' as const : (targetChange.forceLevel ?? effectiveReviewLevel ?? 'L2')
                     let reviewTimer: NodeJS.Timeout | undefined
@@ -1351,6 +1369,18 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
                     }
                     const timeoutMs = reviewWorkflowBudgetMs(runMode, targetChange.forceLevel)
                     const runBudgetSec = Math.round(timeoutMs / 1000)
+                    // Each detached review owns one mapper lifecycle. A follow-up
+                    // review must not reuse a mapper that has already been sealed.
+                    const latestByWorker = new Map<string, DelegationActivity>()
+                    const trackedUpstream = params.onWorkerActivity
+                      ? (activity: DelegationActivity) => {
+                          latestByWorker.set(activity.workOrderId, activity)
+                          params.onWorkerActivity!(activity)
+                        }
+                      : undefined
+                    const activityMapper = trackedUpstream
+                      ? createDelegationActivityMapper(params.toolUseId, trackedUpstream)
+                      : undefined
                     // 审查门 UI 可见性（detached 路径此前对用户完全隐形）：
                     // 启动行走 onOutput；「审查门自身」发 phantom running/终态事件
                     // （独立于 worker 事件，保证 nudge/超时也至少有始有终）；
@@ -1358,7 +1388,7 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
                     params.onOutput?.(`\n⏳ 提交后审查启动中 (${runMode}${targetChange.forceLevel ? ' ' + targetChange.forceLevel : ''}, ≤${runBudgetSec}s)——审查 worker 进度见子代理面板...\n`)
                     const reviewRunId = `review-gate-${String(commitRef).slice(0, 7)}-${Math.random().toString(36).slice(2, 7)}`
                     params.onWorkerActivity?.({ workOrderId: reviewRunId, parentToolId: params.toolUseId, profile: 'reviewer', status: 'running', progressLine: `审查门启动 (${runMode}…)` })
-                    void runReviewOnce(targetChange, runMode, timeoutMs, controller).then(outcome => {
+                    void runReviewOnce(targetChange, runMode, timeoutMs, controller, activityMapper).then(outcome => {
                       enqueuePostCommitReviewOutcome({
                         lines: [`提交 ${commitRef} 的提交后审查完成：`, ...formatReviewOutcomeLines(outcome)],
                         verdict: outcome.verdict,
@@ -1376,8 +1406,9 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
                       })
                       // 真实审查 worker（wo_<uuid>）补终态——它们只发过 running，
                       // 不补会永远挂在子代理面板（deliver_task 不走 clearGroup）。
-                      settleReviewWorkers(outcome)
+                      settleReviewWorkers(outcome, activityMapper, latestByWorker)
                     }).catch(() => { /* runReviewOnce never rejects; double guard */ }).finally(() => {
+                      activityMapper?.dispose()
                       postCommitReviewInFlight = false
                       if (params.abortSignal?.aborted) return
                       // 补审：在飞期间到达的 commit 已并入会话 pending（inFlight
@@ -1401,6 +1432,7 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
                   }
 
                   const commitRef = headAfterHash ?? 'HEAD'
+                  mark('review:dispatch-start')
 
                   if (explicitReviewLevel) {
                     // Explicit review_level (补丁 1 方案 A): unified with

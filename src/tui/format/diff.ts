@@ -6,6 +6,7 @@
 
 import { ANSI, color, fileLink } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { hiddenLinesMarker } from './hidden-lines.js'
 
 export interface FormatDiffInput {
   /** diff 文本内容 */
@@ -123,7 +124,7 @@ export function formatDiff(input: FormatDiffInput, theme: RivetTheme): string[] 
   type Row = { line: string; label: string | null }
   const rows: Row[] = allLines.map((line, i) => ({ line, label: lineNumbers?.[i] ?? null }))
   const displayRows: Row[] = truncated
-    ? [...rows.slice(0, headCount), { line: `... ${allLines.length - maxLines} lines hidden ...`, label: null }, ...rows.slice(-headCount)]
+    ? [...rows.slice(0, headCount), { line: hiddenLinesMarker(allLines.length - maxLines), label: null }, ...rows.slice(-headCount)]
     : rows
 
   const lines: string[] = []

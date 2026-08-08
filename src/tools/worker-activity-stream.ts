@@ -1,6 +1,7 @@
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
 import type { ContractProjection } from '../agent/contract-projection.js'
 import type { DelegationActivity } from './types.js'
+import type { OutputStreamScheduler } from './output-stream-budget.js'
 
 /** Shorten a work order id to a human label: "wo_team:T1" → "T1". */
 export function shortOrderLabel(workOrderId: string): string {
@@ -44,12 +45,38 @@ export interface DelegationActivityMapperOpts {
   contractOf?: (workOrderId: string) => ContractProjection | undefined
   /** text/thinking delta 尾沿合并窗口（ms），默认 120。测试可注入小值。 */
   coalesceMs?: number
+  /** Injectable timer seam for deterministic lifecycle tests. */
+  scheduler?: OutputStreamScheduler
+}
+
+export interface DelegationActivityMapperController {
+  (event: WorkerActivityEvent): void
+  /** Flush one worker, or every pending worker when omitted. */
+  flush(workOrderId?: string): void
+  /** Flush and permanently reject further running events for this worker. */
+  seal(workOrderId: string): void
+  /** Seal first, then emit one terminal activity. */
+  finish(activity: DelegationActivity): void
+  /** Cancel every timer and reject all future activity. */
+  dispose(): void
 }
 
 const DEFAULT_COALESCE_MS = 120
 
+function activityAttemptKey(activity: {
+  workOrderId: string
+  attemptId?: string
+  dispatchId?: string
+}): string {
+  if (activity.attemptId) return `attempt:${activity.attemptId}`
+  if (activity.dispatchId) return `dispatch:${activity.dispatchId}:${activity.workOrderId}`
+  return `legacy:${activity.workOrderId}`
+}
+
 /** text/thinking 尾沿合并槽：同 kind 连续 delta 累积进 parts，到时/切换/非流式事件触发 flush。 */
 interface PendingStreamSlot {
+  /** Object identity plus generation fence stale queued timer callbacks. */
+  timerGeneration: number
   kind: 'text' | 'thinking'
   parts: string[]
   /** 首个 delta 原样保留作透传基底（profile/authority/objective/contract）。 */
@@ -57,20 +84,25 @@ interface PendingStreamSlot {
   /** 组成事件里首个非空 objective/contract（可能晚于首个 delta 才携带）。 */
   objective?: string
   contract?: ContractProjection
-  timer?: ReturnType<typeof setTimeout>
+  timer?: unknown
+}
+
+const defaultActivityScheduler: OutputStreamScheduler = {
+  setTimeout: (callback, ms) => setTimeout(callback, ms),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
 
 /**
- * 共享的 WorkerActivityEvent → DelegationActivity 映射器（delegate_task /
- * delegate_batch / team_orchestrate 三处委派工具复用）。
+ * 共享的 WorkerActivityEvent → DelegationActivity 映射器。
  *
- * 在事件流上做 per-worker 计数聚合（CC AgentProgress 对标）：
+ * 在事件流上按派发 attempt 聚合计数。无 identity 的旧事件仍按
+ * stable worker 归约，保持历史会话的兼容性：
  * - tool_use 事件累计工具调用次数
  * - turn 事件携带累计 token 总数（worker 每 turn 结束上报一次）
  * 每条 running 事件都带上最新计数，读模型（FleetRegistry / 桌面面板）只做归约。
- * objective 仅在该 worker 首条 running 事件携带（避免每 tick 重复传输）。
+ * objective 仅在该 attempt 首条 running 事件携带（避免每 tick 重复传输）。
  *
- * text/thinking delta 做 per-worker 尾沿合并（默认 120ms）：同 kind 连续 delta
+ * text/thinking delta 做 per-attempt 尾沿合并（默认 120ms）：同 kind 连续 delta
  * 累积为一条发出，eventDetail 是 parts 拼接全文（下游 WorkerMirrorStore 靠它重建
  * 完整转录，一个字节都不能丢）——否则每个 token 一条事件会打满 TUI 帧。flush
  * 触发：尾沿定时器到时 / 同 worker kind 切换（text↔thinking，先 flush 旧槽再起
@@ -81,7 +113,9 @@ export function createDelegationActivityMapper(
   parentToolId: string,
   onWorkerActivity: (activity: DelegationActivity) => void,
   opts?: DelegationActivityMapperOpts,
-): (event: WorkerActivityEvent) => void {
+): DelegationActivityMapperController {
+  // Runtime identity isolates redispatches of a stable workOrderId. Legacy
+  // activity has no identity and therefore retains the original worker key.
   const counters = new Map<string, { toolUseCount: number; tokenCount: number }>()
   const objectiveSent = new Set<string>()
   // contract 与 objective 分开记账。objective 的「没查到就下条再试」是有意的
@@ -90,38 +124,63 @@ export function createDelegationActivityMapper(
   // 的约定去重就会漏。
   const contractSent = new Set<string>()
   const coalesceMs = opts?.coalesceMs ?? DEFAULT_COALESCE_MS
+  const scheduler = opts?.scheduler ?? defaultActivityScheduler
   // pending 槽 flush 即删；槽数受单次委派的 worker 数约束，不随事件流增长。
   const pending = new Map<string, PendingStreamSlot>()
+  const sealed = new Set<string>()
+  const sealedWorkers = new Set<string>()
+  const finished = new Set<string>()
+  const attemptOwners = new Map<string, string>()
+  let disposed = false
 
-  const counterOf = (workOrderId: string) => {
-    let c = counters.get(workOrderId)
+  const counterOf = (attemptKey: string) => {
+    let c = counters.get(attemptKey)
     if (!c) {
       c = { toolUseCount: 0, tokenCount: 0 }
-      counters.set(workOrderId, c)
+      counters.set(attemptKey, c)
     }
     return c
   }
 
-  // 实际发出一条 activity。objective/contract 的「首条携带、查不到下条再试」
-  // 记账以发出时刻为准——被合并延迟的首条事件照常携带。
-  const emit = (event: WorkerActivityEvent, detail: string | undefined) => {
-    const c = counterOf(event.workOrderId)
+  const safeEmit = (activity: DelegationActivity): boolean => {
+    if (disposed) return false
+    try {
+      onWorkerActivity(activity)
+      return true
+    } catch {
+      // UI/activity sinks are observational and must not break worker dispatch.
+      return false
+    }
+  }
+
+  // objective/contract 的「首条携带、查不到下条再试」以发出时刻为准。
+  const emitRunning = (event: WorkerActivityEvent, detail: string | undefined) => {
+    const attemptKey = activityAttemptKey(event)
+    const c = counterOf(attemptKey)
     const line = activityProgressLine(event)
     let objective: string | undefined
     let contract: ContractProjection | undefined
-    if (!objectiveSent.has(event.workOrderId)) {
+    if (!objectiveSent.has(attemptKey)) {
       // Prefer coordinator-attached objective; fall back to tool-side lookup.
       objective = event.objective ?? opts?.objectiveOf?.(event.workOrderId)
-      if (objective) objectiveSent.add(event.workOrderId)
+      if (objective) objectiveSent.add(attemptKey)
     }
-    if (!contractSent.has(event.workOrderId)) {
+    if (!contractSent.has(attemptKey)) {
       // Contract: coordinator 随事件携带（首选）；contractOf 为工具侧兜底。
       contract = event.contract ?? opts?.contractOf?.(event.workOrderId)
-      if (contract) contractSent.add(event.workOrderId)
+      if (contract) contractSent.add(attemptKey)
     }
-    onWorkerActivity({
+    const identity = event as WorkerActivityEvent & {
+      attemptId?: string
+      dispatchId?: string
+      parentAttemptId?: string
+    }
+    safeEmit({
       workOrderId: event.workOrderId,
       parentToolId,
+      ...(identity.attemptId ? { attemptId: identity.attemptId } : {}),
+      ...(identity.dispatchId ? { dispatchId: identity.dispatchId } : {}),
+      ...(identity.parentAttemptId ? { parentAttemptId: identity.parentAttemptId } : {}),
       profile: event.profile,
       authority: event.authority,
       authorityReason: event.authorityReason,
@@ -133,50 +192,134 @@ export function createDelegationActivityMapper(
       eventKind: event.kind,
       eventDetail: detail,
       ...(contract ? { contract } : {}),
-    })
+    } as DelegationActivity)
   }
 
-  const flushPending = (workOrderId: string) => {
-    const slot = pending.get(workOrderId)
-    if (!slot) return
-    if (slot.timer) clearTimeout(slot.timer)
-    pending.delete(workOrderId)
+  const cancelSlotTimer = (slot: PendingStreamSlot): void => {
+    slot.timerGeneration += 1
+    if (slot.timer === undefined) return
+    scheduler.clearTimeout(slot.timer)
+    slot.timer = undefined
+  }
+
+  const flushPending = (
+    attemptKey: string,
+    expectedSlot?: PendingStreamSlot,
+    allowSealed = false,
+  ): void => {
+    const slot = pending.get(attemptKey)
+    if (!slot || (expectedSlot && slot !== expectedSlot)) return
+    cancelSlotTimer(slot)
+    pending.delete(attemptKey)
+    if (disposed || (!allowSealed && sealed.has(attemptKey))) return
     const merged: WorkerActivityEvent = { ...slot.base }
     if (slot.objective !== undefined) merged.objective = slot.objective
     if (slot.contract !== undefined) merged.contract = slot.contract
-    emit(merged, slot.parts.join(''))
+    emitRunning(merged, slot.parts.join(''))
   }
 
-  return (event: WorkerActivityEvent) => {
+  const flush = (workOrderId?: string): void => {
+    if (disposed) return
+    if (workOrderId !== undefined) {
+      for (const [attemptKey, slot] of [...pending.entries()]) {
+        if (slot.base.workOrderId === workOrderId) flushPending(attemptKey)
+      }
+      return
+    }
+    for (const attemptKey of [...pending.keys()]) flushPending(attemptKey)
+  }
+
+  const sealAttempt = (attemptKey: string): void => {
+    if (disposed || sealed.has(attemptKey)) return
+    // Mark closed before flushing so re-entrant sink callbacks cannot reopen it.
+    sealed.add(attemptKey)
+    flushPending(attemptKey, undefined, true)
+    counters.delete(attemptKey)
+    objectiveSent.delete(attemptKey)
+    contractSent.delete(attemptKey)
+  }
+
+  const seal = (workOrderId: string): void => {
+    if (disposed) return
+    sealedWorkers.add(workOrderId)
+    const keys = [...attemptOwners.entries()]
+      .filter(([, owner]) => owner === workOrderId)
+      .map(([attemptKey]) => attemptKey)
+    if (keys.length === 0) keys.push(activityAttemptKey({ workOrderId }))
+    for (const attemptKey of keys) sealAttempt(attemptKey)
+  }
+
+  const finish = (activity: DelegationActivity): void => {
+    if (disposed) return
+    const attemptKey = activityAttemptKey(activity)
+    attemptOwners.set(attemptKey, activity.workOrderId)
+    if (activity.status === 'running' || finished.has(attemptKey)) return
+    sealAttempt(attemptKey)
+    if (safeEmit(activity)) finished.add(attemptKey)
+  }
+
+  const dispose = (): void => {
+    if (disposed) return
+    disposed = true
+    for (const slot of pending.values()) cancelSlotTimer(slot)
+    pending.clear()
+    counters.clear()
+    objectiveSent.clear()
+    contractSent.clear()
+    sealed.clear()
+    sealedWorkers.clear()
+    finished.clear()
+    attemptOwners.clear()
+  }
+
+  const mapper = ((event: WorkerActivityEvent) => {
+    if (disposed) return
+    const attemptKey = activityAttemptKey(event)
+    attemptOwners.set(attemptKey, event.workOrderId)
+    if (sealedWorkers.has(event.workOrderId) || sealed.has(attemptKey)) return
     if (event.kind === 'text' || event.kind === 'thinking') {
-      const cur = pending.get(event.workOrderId)
-      if (cur && cur.kind !== event.kind) flushPending(event.workOrderId)
-      let slot = pending.get(event.workOrderId)
+      const cur = pending.get(attemptKey)
+      if (cur && cur.kind !== event.kind) flushPending(attemptKey)
+      let slot = pending.get(attemptKey)
       if (!slot) {
-        slot = { kind: event.kind, parts: [], base: event }
-        pending.set(event.workOrderId, slot)
+        slot = { timerGeneration: 0, kind: event.kind, parts: [], base: event }
+        pending.set(attemptKey, slot)
       }
       if (event.detail) slot.parts.push(event.detail)
       if (slot.objective === undefined && event.objective !== undefined) slot.objective = event.objective
       if (slot.contract === undefined && event.contract !== undefined) slot.contract = event.contract
       // 尾沿定时器：每个新 delta 重置；unref 不拖进程退出。
-      if (slot.timer) clearTimeout(slot.timer)
-      const timer = setTimeout(() => flushPending(event.workOrderId), coalesceMs)
-      if (typeof timer.unref === 'function') timer.unref()
+      cancelSlotTimer(slot)
+      const generation = ++slot.timerGeneration
+      const expectedSlot = slot
+      let timer: unknown
+      timer = scheduler.setTimeout(() => {
+        if (disposed || sealedWorkers.has(event.workOrderId) || sealed.has(attemptKey)) return
+        if (pending.get(attemptKey) !== expectedSlot) return
+        if (expectedSlot.timerGeneration !== generation || expectedSlot.timer !== timer) return
+        flushPending(attemptKey, expectedSlot)
+      }, coalesceMs)
       slot.timer = timer
+      ;(timer as { unref?: () => void })?.unref?.()
       return
     }
     // 非流式事件：先 flush 该 worker 的 pending（合并事件按到达时序携带此前计数），
     // 再更新计数并即时透传本事件。
-    flushPending(event.workOrderId)
-    const c = counterOf(event.workOrderId)
+    flushPending(attemptKey)
+    const c = counterOf(attemptKey)
     if (event.kind === 'tool_use') c.toolUseCount += 1
     if (event.kind === 'turn') {
       const n = Number(event.detail)
       if (Number.isFinite(n) && n > c.tokenCount) c.tokenCount = n
     }
-    emit(event, event.detail)
-  }
+    emitRunning(event, event.detail)
+  }) as DelegationActivityMapperController
+
+  mapper.flush = flush
+  mapper.seal = seal
+  mapper.finish = finish
+  mapper.dispose = dispose
+  return mapper
 }
 
 /**

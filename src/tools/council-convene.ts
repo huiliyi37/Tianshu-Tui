@@ -17,7 +17,7 @@ import { serializeUnifiedPlan, unifiedPlanToTeamTasks } from '../agent/unified-p
 import { storePlan } from '../agent/plan-store.js'
 import { executePlan, type PlanExecutorDeps } from '../agent/plan-executor.js'
 import { createDelegationActivityMapper, progressSnippet } from './worker-activity-stream.js'
-import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import type { DelegationActivity, DelegationIdentity, Tool, ToolCallParams, ToolResult } from './types.js'
 
 /** Coordinator surface the council tool needs — only `delegateBatch` drives the
  *  single-round seat fanout. Telemetry/shadow recorders are optional旁路.
@@ -30,11 +30,44 @@ export interface CouncilConveneCoordinator {
     policy?: AggregationPolicy,
     abortSignal?: AbortSignal,
     onProgress?: (completed: number, total: number) => void,
+    onWorkerSettled?: (result: CoordinatorRun['results'][number]) => void,
   ): Promise<CoordinatorRun>
   getSessionId?: () => string | undefined
   recordRoutingShadow?: (event: CouncilRoutingShadowEvent) => void
   recordCouncilSession?: (event: CouncilSessionEvent) => void
   executor?: PlanExecutorDeps
+}
+
+function terminalActivity(
+  result: CoordinatorRun['results'][number],
+  parentToolId: string,
+  objective?: string,
+  authority?: string,
+): DelegationActivity {
+  const identity = result as CoordinatorRun['results'][number] & DelegationIdentity
+  return {
+    workOrderId: result.workOrderId,
+    parentToolId,
+    ...(identity.dispatchId ? { dispatchId: identity.dispatchId } : {}),
+    ...(identity.attemptId ? { attemptId: identity.attemptId } : {}),
+    ...(identity.parentAttemptId ? { parentAttemptId: identity.parentAttemptId } : {}),
+    profile: result.profile ?? 'council_expert',
+    ...(authority ? { authority } : {}),
+    objective,
+    status: result.status,
+    progressLine: progressSnippet(result.summary),
+    summary: result.summary,
+    failureReason: result.failureReason,
+    model: result.model,
+    provider: result.provider,
+    usage: result.usage,
+    findingsCount: result.findings.length > 0 ? result.findings.length : undefined,
+    topFinding: result.findings[0]?.claim,
+    verificationBrief: result.verification
+      ? { status: result.verification.status, passed: result.verification.passed, failed: result.verification.failed }
+      : undefined,
+    evidenceStatus: result.evidenceStatus,
+  }
 }
 
 // DEFAULT_COUNCIL_SEATS 下沉至 council-routing.ts（CouncilSeat 定义所在），此处
@@ -222,13 +255,35 @@ export function createCouncilConveneTool(
           })
         : undefined
 
+      try {
+
       // Collect delegateBatch results for terminal event emission (P1 fix).
       // Each delegateBatch call stores its results; after plan is available,
       // we emit terminal events per contribution → workOrderId match.
-      const batchResults: Array<{ results: import('../agent/work-order.js').WorkerResult[]; workerModels?: Array<{ workOrderId: string; model: string }> }> = []
+      const batchResults: Array<{ results: CoordinatorRun['results']; workerModels?: Array<{ workOrderId: string; model: string }> }> = []
+
+      const emitSeatTerminal = (
+        result: CoordinatorRun['results'][number],
+        summaryOf?: (authority: string) => string | undefined,
+      ): void => {
+        if (!params.onWorkerActivity) return
+        const seatId = result.workOrderId.startsWith('council:seat-')
+          ? result.workOrderId.slice('council:seat-'.length)
+          : undefined
+        const isR2 = seatId?.endsWith('-r2') ?? false
+        const authority = seatId?.replace(/(-(r2|retry|reconvene))+$/, '')
+        const contributionSummary = authority ? summaryOf?.(authority) : undefined
+        const summary = (isR2 ? (result.summary || contributionSummary) : (contributionSummary || result.summary))?.trim() ?? ''
+        activityMapper?.finish(terminalActivity(
+          { ...result, summary },
+          params.toolUseId,
+          authority ? seatObjectiveByAuthority.get(authority) : undefined,
+          authority,
+        ))
+      }
 
       const deps: CouncilDeps = {
-        delegateBatch: async (requests, policy, signal, onProgress) => {
+        delegateBatch: async (requests, policy, signal, onProgress, onWorkerSettled) => {
           // W1: inject onActivity into each council fanout request so seat
           // workers appear in the desktop subagent panel (WorkerListPane /
           // WorkerThreadView) alongside delegate_batch / team_orchestrate workers.
@@ -238,7 +293,13 @@ export function createCouncilConveneTool(
                 onActivity: (ev: WorkerActivityEvent) => activityMapper(ev),
               }))
             : requests
-          const run = await coordinator.delegateBatch(augmentedRequests as unknown as DelegationRequest[], policy, signal, onProgress)
+          const run = await coordinator.delegateBatch(
+            augmentedRequests as unknown as DelegationRequest[],
+            policy,
+            signal,
+            onProgress,
+            onWorkerSettled ?? (result => emitSeatTerminal(result)),
+          )
           batchResults.push({ results: run.results, workerModels: run.workerModels })
           return { results: run.results, workerModels: run.workerModels }
         },
@@ -248,8 +309,22 @@ export function createCouncilConveneTool(
         // 实时进度：每席完成时通过工具流式输出推送到 UI。
         // seat 参数在并行场景下为 "N/total" 计数而非具体席位名（见 council-orchestrator 注释）。
         onSeatProgress: params.onOutput
-          ? (seat, _status) => { params.onOutput?.(`♟ ${seat} 席完成\n`) }
+          ? (seat, _status) => {
+              // 保留纯文本兜底给非 TUI 消费方。
+              params.onOutput?.(`♟ ${seat} 席完成\n`)
+              // 推更新帧（TUI 消费，与 skeleton 同构，decodeFrameLastWins 取末帧）。
+              // onSeatProgress 只回调计数不含席位名，帧中所有席位保持 running；
+              // TUI 侧经 ActivityStore 合并 fleet 拿到各席真实状态与真实 round。
+              params.onOutput?.(encodeCouncilPanel({
+                schemaVersion: 1,
+                objective,
+                seats: councilSeats.map(s => ({ authority: s.authority, status: 'running', round: 1 })),
+                verdict: { accepted: 0, rejected: 0, deferred: 0, conflicts: 0 },
+                pillarsMode: pillarsActive,
+              }))
+            }
           : undefined,
+        onWorkerSettled: result => emitSeatTerminal(result),
       }
 
       // Terminal event emission for every seat worker that actually ran —
@@ -259,38 +334,25 @@ export function createCouncilConveneTool(
       const emitSeatTerminals = (summaryOf?: (authority: string) => string | undefined, fromBatch = 0): void => {
         if (!params.onWorkerActivity) return
         for (const batch of batchResults.slice(fromBatch)) {
-          for (const r of batch.results) {
-            const seatId = r.workOrderId.startsWith('council:seat-')
-              ? r.workOrderId.slice('council:seat-'.length)
-              : undefined
-            const isR2 = seatId?.endsWith('-r2') ?? false
-            const authority = seatId?.replace(/(-(r2|retry|reconvene))+$/, '')
-            const contribSummary = authority ? summaryOf?.(authority) : undefined
-            // r2 rebuttal seats report their own packet; r1 seats prefer the
-            // parsed contribution summary (cleaner than the raw worker packet).
-            const summary = (isR2 ? (r.summary || contribSummary) : (contribSummary || r.summary))?.trim() ?? ''
-            params.onWorkerActivity!({
-              workOrderId: r.workOrderId,
-              parentToolId: params.toolUseId,
-              profile: 'council_expert',
-              ...(authority ? { authority } : {}),
-              objective: authority ? seatObjectiveByAuthority.get(authority) : undefined,
-              status: r.status,
-              progressLine: progressSnippet(summary) || undefined,
-              summary: summary || undefined,
-              failureReason: r.status !== 'passed' ? r.failureReason : undefined,
-              model: r.model,
-              provider: r.provider,
-              usage: r.usage,
-              findingsCount: r.findings.length > 0 ? r.findings.length : undefined,
-              topFinding: r.findings[0]?.claim,
-              verificationBrief: r.verification
-                ? { status: r.verification.status, passed: r.verification.passed, failed: r.verification.failed }
-                : undefined,
-              evidenceStatus: r.evidenceStatus,
-            })
-          }
+          for (const result of batch.results) emitSeatTerminal(result, summaryOf)
         }
+      }
+
+      // 派发前推 skeleton 帧：TUI 据此显示议事会分组与席位骨架。
+      // 与 team_orchestrate 的 onPlanReady skeleton 同构。
+      //
+      // round 恒 1：第二轮只在 round 1 跑完且 aggregate.conflicts 非空时才扇出
+      // （runCouncilDebate），配了 rounds≥2 不等于会有 r2。派发前就标 r2 会让
+      // 界面显示一批根本没跑过的第二轮席位；真实 round 由 fleet 的 workOrderId
+      // 后缀（-r2）在 TUI 侧解析。
+      if (params.onOutput) {
+        params.onOutput(encodeCouncilPanel({
+          schemaVersion: 1,
+          objective,
+          seats: councilSeats.map(s => ({ authority: s.authority, status: 'running', round: 1 })),
+          verdict: { accepted: 0, rejected: 0, deferred: 0, conflicts: 0 },
+          pillarsMode: pillarsActive,
+        }))
       }
 
       let plan
@@ -532,7 +594,18 @@ export function createCouncilConveneTool(
         content: parts.join('\n') + proGateNote,
         uiContent: summarizeCouncilPlan(plan) + '\n' + encodeCouncilPanel(councilPanel),
         isError: false,
-        orchestration: { kind: 'council', disabled: false },
+        orchestration: {
+          kind: 'council',
+          disabled: false,
+          seats: {
+            total: councilSeats.length,
+            passed: councilSeats.length - (plan.meta.failedSeats?.length ?? 0),
+            failed: plan.meta.failedSeats?.length ?? 0,
+          },
+        },
+      }
+      } finally {
+        activityMapper?.dispose()
       }
     },
     requiresApproval: () => false,

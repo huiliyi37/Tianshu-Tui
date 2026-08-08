@@ -27,15 +27,18 @@ test('detectImageMime recognizes PNG', () => {
   assert.equal(detectImageMime(buf, '/foo/bar.png'), 'image/png')
 })
 
-test('detectImageMime falls back to extension', () => {
+test('detectImageMime returns null when magic is unrecognized (no extension fallback)', () => {
   const buf = Buffer.from('not a real image')
-  assert.equal(detectImageMime(buf, '/foo/bar.jpg'), 'image/jpeg')
+  assert.equal(detectImageMime(buf, '/foo/bar.jpg'), null)
 })
 
 test('looksLikeImagePath recognizes supported extensions', () => {
   assert.equal(looksLikeImagePath('/tmp/shot.png'), true)
   assert.equal(looksLikeImagePath('/tmp/shot.JPG'), true)
   assert.equal(looksLikeImagePath('/tmp/shot.webp'), true)
+  assert.equal(looksLikeImagePath('/tmp/scan.tiff'), true)
+  assert.equal(looksLikeImagePath('/tmp/scan.TIF'), true)
+  assert.equal(looksLikeImagePath('/tmp/scan.BMP'), true)
   assert.equal(looksLikeImagePath('/tmp/shot.txt'), false)
 })
 

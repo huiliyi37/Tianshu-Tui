@@ -167,12 +167,12 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
         const entryId = typeof params.input.entryId === 'string' ? params.input.entryId.trim() : ''
         const outcome = params.input.outcome
         if (!entryId || (outcome !== 'adopted' && outcome !== 'rejected' && outcome !== 'contradicted')) {
-          return { content: 'Error: recall_feedback requires a recalled entryId and a valid outcome.', isError: true }
+          return { content: '错误：recall_feedback 需要一个已召回的 entryId 和合法的 outcome。', isError: true }
         }
         if (!ctx?.sessionId || !getRecallTracker(ctx.sessionId).recordOutcome(entryId, outcome)) {
-          return { content: 'Error: entryId was not recalled in this session.', isError: true }
+          return { content: '错误：该 entryId 在本会话中没有被召回过。', isError: true }
         }
-        return { content: `Recorded recall feedback: ${entryId} -> ${outcome}.` }
+        return { content: `已记录召回反馈：${entryId} → ${outcome}。` }
       }
 
       // action === 'remember'

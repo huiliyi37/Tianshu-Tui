@@ -32,12 +32,16 @@ export class SessionRuntimePool implements RuntimePool {
   acquire(taskId: string): Promise<RuntimeHandle> {
     this.size++
     const handle: RuntimeHandle = {
-      execute: async (prompt, signal, _allowedTools, onSessionStart, options): Promise<RuntimeResult> => {
+      execute: async (prompt, signal, allowedTools, onSessionStart, options): Promise<RuntimeResult> => {
         const session = this.manager.createSession({
           cwd: this.defaultCwd,
           title: `${this.titlePrefix}:${taskId.slice(0, 8)}`,
           // 无人值守（auto-proceed）：审批请求 fail-closed 中止本次运行。
           unattended: options?.unattended === true,
+          // Per-session 工具白名单（蒸馏回放等自动化场景）——经 ensureAgent →
+          // createAgent → gateToolDefinitions coreOverride 通路收窄 LLM 可见工具。
+          // undefined = 默认全量（行为不变）；[] = 空白名单；['computer_use'] = 只用 GUI。
+          ...(allowedTools !== undefined ? { allowedTools } : {}),
         })
         // Link the visible session to the task immediately, so the desktop can
         // jump to the thread even if the run subsequently fails.

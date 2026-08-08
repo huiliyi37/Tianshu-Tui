@@ -64,6 +64,39 @@ export function isAssistantWithTools(msg: OaiMessage): msg is OaiAssistantMessag
     && msg.tool_calls.length > 0
 }
 
+/**
+ * Normalize assistant messages before they are persisted or sent over the
+ * wire. OpenAI-compatible APIs distinguish between an omitted `tool_calls`
+ * field and an empty array; the latter is invalid (`minItems: 1`) even when
+ * the assistant has ordinary text content. Empty arrays can survive in old
+ * session files or be produced by partial tool-call recovery, so remove them
+ * without mutating the caller's message object.
+ */
+export function normalizeOaiMessage(message: OaiMessage): OaiMessage {
+  if (message.role !== 'assistant' || !Array.isArray(message.tool_calls) || message.tool_calls.length > 0) {
+    return message
+  }
+
+  const { tool_calls: _, ...rest } = message
+  // A null assistant content is valid only alongside a real tool call for the
+  // providers we support. Once the empty array is removed, use an empty text
+  // value so a recovered message remains a valid assistant message.
+  return { ...rest, content: rest.content ?? '' }
+}
+
+/** Return the original array when no message needs normalization. */
+export function normalizeOaiMessages(messages: OaiMessage[]): OaiMessage[] {
+  let normalized: OaiMessage[] | undefined
+  for (let i = 0; i < messages.length; i++) {
+    const message = normalizeOaiMessage(messages[i]!)
+    if (message !== messages[i]) {
+      normalized ??= messages.slice()
+      normalized[i] = message
+    }
+  }
+  return normalized ?? messages
+}
+
 export function isUserMessage(msg: OaiMessage): msg is OaiUserMessage {
   return msg.role === 'user'
 }

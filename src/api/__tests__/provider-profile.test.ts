@@ -27,6 +27,30 @@ describe('getProviderCacheDefaults', () => {
     assert.equal(p.cacheType, 'none')
   })
 
+  it('returns deepseek-spark profile with exact-prefix caching (2026-08-07 gap fix)', () => {
+    // Missing entry used to fall back to cacheType 'none' → aggressive compact
+    // tiers (51/71/85%) + persistent-exact-prefix delay protections disabled
+    // for every spark session.
+    const p = getProviderCacheDefaults('deepseek-spark')
+    assert.equal(p.cacheType, 'exact-prefix')
+    assert.equal(p.persistent, true)
+    assert.equal(p.minCacheTokens, 64)
+    assert.ok(p.attentionProfile, 'spark inherits the deepseek attention profile')
+  })
+
+  it('deepseek-spark carries the 85% compaction schedule overrides', () => {
+    // Product decision 2026-08-07 ("85% 再压缩"): no history-rewriting
+    // compaction before 85% of the window — tier compact ratio, precision
+    // ceiling and the 1M LLM ladder all move together.
+    const p = getProviderCacheDefaults('deepseek-spark')
+    assert.equal(p.compaction?.ratios?.compact, 0.85)
+    assert.equal(p.compaction?.precisionCeiling, 0.85)
+    assert.deepEqual(p.compaction?.llmLadder, { partial: 0.85, full: 0.9 })
+    // Safety rungs stay strategy-default: only the compact rung is overridden.
+    assert.equal(p.compaction?.ratios?.reactive, undefined)
+    assert.equal(p.compaction?.ratios?.ceiling, undefined)
+  })
+
   it('returns minimax profile', () => {
     const p = getProviderCacheDefaults('minimax')
     assert.equal(p.cacheType, 'none')

@@ -54,6 +54,8 @@ describe('runThetaCheck cross-process cache', () => {
     clearThetaCache()
     const result = await runThetaCheck(dir, 20_000)
     assert.deepEqual(result.errors, ['seeded.ts'], 'should reuse seeded disk result, not spawn')
+    // 旧格式缓存（无 outcome 字段）兼容读取：按正缓存处理
+    assert.equal(result.outcome, 'type_errors')
   })
 
   it('a held lock makes a concurrent caller reuse last result without spawning', async () => {
@@ -70,6 +72,52 @@ describe('runThetaCheck cross-process cache', () => {
     // Must not block on a real tsc (~6s) — returns the prior result fast.
     assert.ok(Date.now() - start < 2_000, 'lock-held path must not spawn tsc')
     assert.deepEqual(result.errors, ['prev.ts'], 'reuses last on-disk result under contention')
+    // 锁竞争不再伪装成新鲜成功——outcome 标 busy（诚实归因）
+    assert.equal(result.outcome, 'busy')
+  })
+
+  it('negative cache: 锁竞争 + fresh 负缓存 → backoff（不 spawn 不伪装）', async () => {
+    const dir = makeProject()
+    const neg = {
+      result: { errors: [], durationMs: 15_000, timedOut: true, outcome: 'timeout' },
+      cachedAt: Date.now(),
+      negative: true,
+    }
+    writeFileSync(cacheFile(dir), JSON.stringify(neg))
+    writeFileSync(lockFile(dir), JSON.stringify({ pid: 999999, at: Date.now() }))
+    clearThetaCache()
+
+    const result = await runThetaCheck(dir, 20_000)
+    assert.equal(result.outcome, 'backoff', '负缓存窗口内锁竞争也返回 backoff')
+    assert.deepEqual(result.errors, [])
+  })
+
+  it('negative cache: 无磁盘结果 + 锁竞争 → busy（不再是空错误且非超时的假绿）', async () => {
+    const dir = makeProject()
+    writeFileSync(lockFile(dir), JSON.stringify({ pid: 999999, at: Date.now() }))
+    clearThetaCache()
+
+    const result = await runThetaCheck(dir, 20_000)
+    assert.equal(result.outcome, 'busy', '锁竞争且无可用结果必须显式 busy')
+    assert.equal(result.timedOut, false)
+  })
+
+  it('half-open probe: 负缓存过期后成功运行覆盖为正值（失败状态清除）', async () => {
+    const dir = makeProject()
+    // 61 秒前的负缓存——已过期，半开探针允许放行
+    const staleNeg = {
+      result: { errors: [], durationMs: 15_000, timedOut: true, outcome: 'timeout' },
+      cachedAt: Date.now() - 61_000,
+      negative: true,
+    }
+    writeFileSync(cacheFile(dir), JSON.stringify(staleNeg))
+    clearThetaCache()
+
+    const result = await runThetaCheck(dir, 20_000)
+    assert.equal(result.outcome, 'ok', '过期负缓存放行真实检查')
+    const disk = JSON.parse(readFileSync(cacheFile(dir), 'utf8'))
+    assert.equal(disk.negative, false, '成功结果必须覆盖负缓存')
+    assert.equal(disk.result.outcome, 'ok')
   })
 
   it('steals a stale lock (crashed owner) and proceeds', async () => {

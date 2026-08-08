@@ -6,7 +6,6 @@ import { getTargetPlatform, getShellCommand, type ShellCommand } from '../platfo
 import type { ContextLedger } from '../context/types.js'
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
-import { selectRelevantClaims, type ClaimRelevanceInput } from '../context/claim-relevance.js'
 import { summarizeGitStatus } from './git-status-summary.js'
 import type { PlaybookBullet } from '../agent/playbook.js'
 import type { WorktreeReality } from '../agent/worktree-reality.js'
@@ -205,6 +204,9 @@ export interface ToolHistoryEntry {
   tool: string
   target: string
   status: 'success' | 'failed' | 'running'
+  /** Full-command classification captured before bash target truncation.
+   * Missing/unknown legacy entries fail closed as productive. */
+  bashActivity?: 'readonly' | 'productive'
   /** Tool name + sorted-args hash for dedup (fingerprint granularity).
    *  edit_file(a.ts, "x", "y") and edit_file(a.ts, "y", "z") get different hashes. */
   argsHash?: string
@@ -216,6 +218,10 @@ export interface ToolHistoryEntry {
    *  rejection) — the model can fix it in the next turn. Convergence detector
    *  excludes these from errorPenalty to avoid false stagnation signals. */
   transient?: boolean
+  /** Turn the call was recorded in (bumped by addUserMessage). Enables
+   *  turn-scoped queries ("did the previous turn call any tool") instead of
+   *  sliding-window scans. Not rendered into any prompt block. */
+  turn?: number
 }
 
 export interface VolatileContext {
@@ -273,6 +279,11 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal and historical user-message injection. */
   intentRetrievalRoute?: string | null
+  /** Excluded-path anchors（spec 3c 动作 B）— spark 会话专属：wire 层截断
+   *  丢失的推理前段中「已排除的路径」，防模型走回头路。
+   *  Cache-safe: rendered ONLY into the dynamic appendix；追加式 + cap，
+   *  字节只在语义变化时变化。非 spark 会话恒 undefined → 零渲染。 */
+  excludedPathAnchors?: string[]
   /** Task depth advisory — TDD strategy hint for wiring/system tasks.
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Only present when taskDepthLayer !== 'unit'. */
@@ -609,6 +620,14 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
       const tail = readFiles.length > 5 ? ` …及另外 ${readFiles.length - 5} 个文件` : ''
       push(`<read-file-dedup-hint>已读取 ${readFiles.length} 个文件：${listed}${tail}。上述文件无需重复读取，除非磁盘内容已变更。</read-file-dedup-hint>`)
     }
+  }
+
+  // Excluded-path anchors (spec 3c 动作 B): spark 会话专属——wire 层截断丢失的
+  // 推理前段以「已排除路径」回灌，防走回头路（SAT conflict clause 类比）。
+  // 追加式 + cap（engine 侧维护），字节只在语义变化时变；非 spark 恒空 → 零渲染。
+  if (ctx.excludedPathAnchors && ctx.excludedPathAnchors.length > 0) {
+    const items = ctx.excludedPathAnchors.map(a => `- ${escapeXml(a)}`).join('\n')
+    push(`<excluded-paths note="推理截断补偿：以下路径已在早前推理中显式排除，勿重复尝试">\n${items}\n</excluded-paths>`)
   }
 
   // Git status: changes on commit, prefix stable within a turn sequence

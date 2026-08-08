@@ -132,9 +132,10 @@ export const dependencyEdgeSchema = z.object({
 })
 
 export type DependencyEdge = z.infer<typeof dependencyEdgeSchema>
+export type DependencyRef = string | DependencyEdge
 
 /** 依赖的实际 id：字符串边取自身，条件边取 dependsOn。 */
-export function dependencyId(dep: string | DependencyEdge): string {
+export function dependencyId(dep: DependencyRef): string {
   return typeof dep === 'string' ? dep : dep.dependsOn
 }
 
@@ -283,6 +284,10 @@ export const workerResultSchema = z.object({
   model: z.string().optional(),
   /** Runtime metadata: provider used by the worker. */
   provider: z.string().optional(),
+  /** Runtime metadata: coordinator-stamped dispatch scope and execution identity. */
+  dispatchId: z.string().optional(),
+  attemptId: z.string().optional(),
+  parentAttemptId: z.string().optional(),
   /** Runtime metadata: cumulative token usage for this worker run. */
   usage: z.object({
     input_tokens: z.number().optional(),
@@ -296,6 +301,9 @@ export const workerResultSchema = z.object({
    *  由解析侧在 terminal 路径盖章——worker 自报不可信，但 hands 路径会经
    *  parseWorkerResult 内部往返一次，ingest 侧也要放行此键（同 failureReason 纪律）。 */
   parseErrorKind: z.enum(['no_json', 'json_syntax', 'schema_field', 'truncated']).optional(),
+  /** M2 时间账：worker 从进全局并发门到 settle 的墙钟（含等槽排队），由
+   *  coordinator 在 settle 后补账——非 worker 自报字段，不进 ingest schema。 */
+  durationMs: z.number().optional(),
 })
 
 const workerResultIngestSchema = z.object({
@@ -337,6 +345,11 @@ const workerResultIngestSchema = z.object({
   /** D 度量细分，同 failureReason 的内部往返纪律（见 workerResultSchema 同名注释）。 */
   parseErrorKind: z.enum(['no_json', 'json_syntax', 'schema_field', 'truncated']).optional(),
 })
+
+/** Worker 自报结果提交契约（对外导出）。与 workerResultIngestSchema 严格同源——
+ *  同一 schema 对象，worker 端提交模板与解析侧校验共用一份定义，任何修改
+ *  两侧自然同步，不会漂移。 */
+export const WORKER_RESULT_SUBMIT_SCHEMA = workerResultIngestSchema
 
 export type WorkerResult = z.infer<typeof workerResultSchema>
 
@@ -743,15 +756,17 @@ function normalizeWorkerResult(raw: z.infer<typeof workerResultIngestSchema>): W
 }
 
 function parseWorkerResultObject(parsed: unknown, expectedWorkOrderId: string): WorkerResult {
-  // Fault tolerance for cheap models:
+  // Fault tolerance for cheap models — but ONLY for genuine worker packets:
   // - Force workOrderId to expected value (models may omit or hallucinate it).
   // - Default missing status to 'blocked' (flash models frequently omit it).
-  // Only apply when the JSON has at least workOrderId (real worker packet),
-  // NOT for incidental JSON objects (e.g. {"note":"not the result"}).
+  // A summary-only object without workOrderId (e.g. {"summary":"done",
+  // "status":"passed"}) is NOT a worker packet: patching an id onto it would
+  // fabricate a fake green. Leave it untouched so workerResultIngestSchema
+  // rejects it and the caller's repair loop fires instead.
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const obj = parsed as Record<string, unknown>
     const hasWorkOrderId = typeof obj.workOrderId === 'string' && obj.workOrderId.length > 0
-    if (hasWorkOrderId || typeof obj.summary === 'string') {
+    if (hasWorkOrderId) {
       obj.workOrderId = expectedWorkOrderId
       if (obj.status === undefined || obj.status === null || obj.status === '') {
         obj.status = 'blocked'

@@ -1,9 +1,30 @@
 import { extractJsonCandidates, type WorkerResult } from './work-order.js'
 import { dependencyId } from './work-order.js'
+import type { DependencyRef } from './work-order.js'
 import type { TeamTask, RiskItem } from './team-plan.js'
 import { mergeRoleFor, type ExpertRole } from './expert-router.js'
 import { starDomainRegistry } from './star-domain-registry.js'
 import { validateTaskGraph, type TaskGraph } from './task-graph.js'
+
+/** 条件边稳定键：plain 与 edge 按完整语义去重（edge 含 onFailure/alternateOrderId）。 */
+function dependencyKey(dep: DependencyRef): string {
+  return typeof dep === 'string'
+    ? `plain:${dep}`
+    : `edge:${dep.dependsOn}:${dep.onFailure ?? ''}:${dep.alternateOrderId ?? ''}`
+}
+
+/** 去重并克隆依赖引用：对象边保留完整语义（不 map 成主 id），返回新数组。 */
+function dedupeDependencyRefs(refs: DependencyRef[]): DependencyRef[] {
+  const seen = new Set<string>()
+  const out: DependencyRef[] = []
+  for (const r of refs) {
+    const key = dependencyKey(r)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(typeof r === 'string' ? r : { ...r })
+  }
+  return out
+}
 
 // ── Perspective output schema ──────────────────────────────────────────────
 
@@ -128,14 +149,14 @@ export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): Me
   const specialists = others.filter(p => roleOf(p) === 'specialist' || roleOf(p) === 'base')
 
   // Step 1: Deep-clone base tasks as the graph (avoid polluting caller's objects)
-  // 条件边（收编 #6）：merge 只关心主依赖关系——深拷贝处映射 dependencyId，
-  // 后续集合操作（sameDependencySet/并集/includes）全为 string 语义；条件边
-  // 的运行时分支由 coordinator 处理。
+  // 条件边（收编 #6）：深拷贝保留完整对象边（onFailure/alternateOrderId），
+  // 运行时分支由 coordinator 消费；本层集合操作统一按主依赖 id 比较
+  // （dependencyId），去重按完整语义键（dependencyKey）。
   const tasks: TeamTask[] = base.tasks.map(t => ({
     ...t,
     files: [...t.files],
     touchSet: [...t.touchSet],
-    dependsOn: t.dependsOn.map(dependencyId),
+    dependsOn: dedupeDependencyRefs(t.dependsOn),
     verification: [...t.verification],
   }))
   const taskIndex = new Map(tasks.map(t => [t.id, t]))
@@ -258,7 +279,7 @@ export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): Me
       if (parts.length < 2 || !pairwiseDisjoint(parts.map(filesOfTask))) continue
       const shards = parts.map(p => adoptShard(p, existingIds))
       for (const s of shards) {
-        s.dependsOn = [...new Set([...s.dependsOn, ...b.dependsOn])].filter(d => d !== b.id && d !== s.id)
+        s.dependsOn = dedupeDependencyRefs([...s.dependsOn, ...b.dependsOn]).filter(d => dependencyId(d) !== b.id && dependencyId(d) !== s.id)
         existingIds.add(s.id)
       }
       const bi = tasks.findIndex(t => t.id === b.id)
@@ -268,9 +289,23 @@ export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): Me
       for (const s of shards) taskIndex.set(s.id, s)
       const replacementIds = shards.map(s => s.id)
       for (const t of tasks) {
-        if (t.dependsOn.includes(b.id)) {
-          t.dependsOn = [...new Set([...t.dependsOn.filter(d => d !== b.id), ...replacementIds])]
+        if (!t.dependsOn.some(d => dependencyId(d) === b.id)) continue
+        // 依赖 BIG 的边重连到全部 replacement：对象边保留 onFailure/alternateOrderId
+        // 语义，plain 字符串降级为对每个 replacement 的普通依赖。
+        const kept = t.dependsOn.filter(d => dependencyId(d) !== b.id)
+        const reconnected: DependencyRef[] = []
+        for (const d of t.dependsOn) {
+          if (dependencyId(d) !== b.id) continue
+          for (const id of replacementIds) {
+            if (typeof d === 'string') reconnected.push(id)
+            else reconnected.push({
+              dependsOn: id,
+              ...(d.onFailure ? { onFailure: d.onFailure } : {}),
+              ...(d.alternateOrderId !== undefined ? { alternateOrderId: d.alternateOrderId } : {}),
+            })
+          }
         }
+        t.dependsOn = dedupeDependencyRefs([...kept, ...reconnected])
       }
       for (const p of parts) consumed.add(p)
       augmented.push({ source: src.perspective, title: `Monolith-split: ${b.id} → [${replacementIds.join(', ')}]`, reason: `${domainName(src.perspective)} cleanly partitioned a coarse base shard into parallel orthogonal shards` })

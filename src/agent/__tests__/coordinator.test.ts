@@ -13,6 +13,7 @@ import {
   shouldDelegateObjective,
   type WorkerRuntimeFactory,
 } from '../coordinator.js'
+import { classifyProfile } from '../coordination-policy.js'
 import { READ_ONLY_WORKER_TOOLS, WRITE_WORKER_TOOLS, type WorkerResult } from '../work-order.js'
 import { CollaborationProtocol } from '../collaboration-protocol.js'
 import { profileRegistry } from '../profile-registry.js'
@@ -1754,6 +1755,131 @@ describe('DelegationCoordinator', () => {
     assert.equal(sessionRegistry.acquireClaim('other-session', 'src/claim-failure-cleanup.ts'), true)
   })
 
+  it('shutdownAndWait waits for an aborted writer before handoff', async () => {
+    const claims = new Map<string, string>()
+    const sessionRegistry = {
+      acquireClaim: (sessionId: string, filePath: string) => {
+        const owner = claims.get(filePath)
+        if (owner && owner !== sessionId) return false
+        claims.set(filePath, sessionId)
+        return true
+      },
+      releaseClaim: (sessionId: string, filePath: string) => {
+        if (claims.get(filePath) === sessionId) claims.delete(filePath)
+      },
+    }
+    let started!: () => void
+    const startedPromise = new Promise<void>(resolve => { started = resolve })
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 1,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      sessionRegistry: sessionRegistry as never,
+      sessionId: 's-old',
+      runHands: async config => {
+        await config.runAgent('', { onTurnComplete: () => {} } as never, '/repo')
+        return { result: resultFor(config.order.id), usage: {} }
+      },
+      runWorker: async config => {
+        started()
+        await new Promise<void>(resolve => {
+          if (config.abortSignal?.aborted) { resolve(); return }
+          config.abortSignal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getMessages: () => [], getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const pending = coordinator.delegate({
+      parentTurnId: 'handoff_writer',
+      objective: 'Hold a write claim until shutdown explicitly releases it before the next session starts.',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      scope: { files: ['src/handoff-claim.ts'] },
+    })
+    await startedPromise
+    assert.equal(await coordinator.shutdownAndWait(1_000), true)
+    await pending
+
+    assert.equal(sessionRegistry.acquireClaim('s-new', 'src/handoff-claim.ts'), true)
+  })
+
+  it('shutdownAndWait reports a timeout while a provider ignores abort', async () => {
+    const claims = new Map<string, string>()
+    const sessionRegistry = {
+      acquireClaim: (sessionId: string, filePath: string) => {
+        const owner = claims.get(filePath)
+        if (owner && owner !== sessionId) return false
+        claims.set(filePath, sessionId)
+        return true
+      },
+      releaseClaim: (sessionId: string, filePath: string) => {
+        if (claims.get(filePath) === sessionId) claims.delete(filePath)
+      },
+    }
+    let started!: () => void
+    const startedPromise = new Promise<void>(resolve => { started = resolve })
+    let finish!: () => void
+    const finishPromise = new Promise<void>(resolve => { finish = resolve })
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 1,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      sessionRegistry: sessionRegistry as never,
+      sessionId: 's-main',
+      runWorker: async config => {
+        started()
+        await finishPromise
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getMessages: () => [], getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const pending = coordinator.delegate({
+      parentTurnId: 'handoff_timeout',
+      objective: 'Keep a write claim while the provider ignores abort.',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      scope: { files: ['src/handoff-timeout-claim.ts'] },
+    })
+    await startedPromise
+    assert.equal(await coordinator.shutdownAndWait(1), false)
+    assert.equal(sessionRegistry.acquireClaim('s-new', 'src/handoff-timeout-claim.ts'), false)
+
+    finish()
+    await pending
+    assert.equal(sessionRegistry.acquireClaim('s-new', 'src/handoff-timeout-claim.ts'), true)
+  })
+
   it('blocks write worker when files are already claimed by another session', async () => {
     const claims = new Map<string, string>()
     // Pre-claim a file for another session
@@ -2748,5 +2874,279 @@ describe('DelegationCoordinator', () => {
     assert.ok(writerOptIn.stigmergy, '写工显式 opt-in 后挂')
     assert.equal(writerOptIn.stigmergy, read0.stigmergy, 'opt-in 写工与读工共享同一批级实例')
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('S1 分池：explore 池可超过 maxWorkers，write 池守 maxWriteWorkers', async () => {
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+    let exploreActive = 0
+    let writeActive = 0
+    let explorePeak = 0
+    let writePeak = 0
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      maxExploreWorkers: 4,
+      maxWriteWorkers: 1,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => {
+        const isWrite = classifyProfile(config.order.profile) === 'hands'
+        if (isWrite) { writeActive++; writePeak = Math.max(writePeak, writeActive) }
+        else { exploreActive++; explorePeak = Math.max(explorePeak, exploreActive) }
+        await sleep(40)
+        if (isWrite) writeActive--
+        else exploreActive--
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+      runHands: async config => {
+        writeActive++; writePeak = Math.max(writePeak, writeActive)
+        await sleep(40)
+        writeActive--
+        return {
+          result: resultFor(config.order.id),
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const run = await coordinator.delegateBatch([
+      { parentTurnId: 'pool:e0', objective: 'Explore module A for routing seams and risk patterns.', kind: 'code_search', profile: 'code_scout', scope: { files: ['src/a.ts'] } },
+      { parentTurnId: 'pool:e1', objective: 'Explore module B for cache affinity and hot paths.', kind: 'code_search', profile: 'code_scout', scope: { files: ['src/b.ts'] } },
+      { parentTurnId: 'pool:e2', objective: 'Explore module C for delegation boundaries and gates.', kind: 'code_search', profile: 'code_scout', scope: { files: ['src/c.ts'] } },
+      { parentTurnId: 'pool:e3', objective: 'Explore module D for evidence flow and verification debt.', kind: 'code_search', profile: 'code_scout', scope: { files: ['src/d.ts'] } },
+      { parentTurnId: 'pool:w0', objective: 'Implement feature W0 with tests and typecheck verification.', kind: 'patch_proposal', profile: 'patcher', scope: { files: ['src/w0.ts'] } },
+      { parentTurnId: 'pool:w1', objective: 'Implement feature W1 with tests and typecheck verification.', kind: 'patch_proposal', profile: 'patcher', scope: { files: ['src/w1.ts'] } },
+    ])
+
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results.length, 6)
+    assert.equal(explorePeak, 4, 'explore 池应突破 maxWorkers=2 跑到 4 并发')
+    assert.equal(writePeak, 1, 'write 池守 maxWriteWorkers=1')
+    assert.ok(run.results.every(r => typeof r.durationMs === 'number'), 'M2: settle 结果携带 wall-clock 墙钟')
+  })
+
+  it('S1 分池：未配置池帽时行为与旧版一致（总并发 ≤ maxWorkers）', async () => {
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
+    let active = 0
+    let peak = 0
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+      runWorker: async config => {
+        active++
+        peak = Math.max(peak, active)
+        await sleep(40)
+        active--
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    await coordinator.delegateBatch([
+      { parentTurnId: 'pool:r0', objective: 'Explore module A for routing seams and risk patterns.', kind: 'code_search', profile: 'code_scout', scope: { files: ['src/a.ts'] } },
+      { parentTurnId: 'pool:r1', objective: 'Explore module B for cache affinity and hot paths.', kind: 'code_search', profile: 'code_scout', scope: { files: ['src/b.ts'] } },
+      { parentTurnId: 'pool:r2', objective: 'Explore module C for delegation boundaries and gates.', kind: 'code_search', profile: 'code_scout', scope: { files: ['src/c.ts'] } },
+      { parentTurnId: 'pool:r3', objective: 'Explore module D for evidence flow and verification debt.', kind: 'code_search', profile: 'code_scout', scope: { files: ['src/d.ts'] } },
+    ])
+
+    assert.ok(peak <= 2, `未配置分池时并发峰值应 ≤ maxWorkers，实际 ${peak}`)
+  })
+
+  // 并发 delegate() 绕开 delegateBatch 的 WorkOrderQueue 限流，直接压在
+  // coordinator 信号量上——这是唯一能让 acquireWorkerSlot 的 while 循环真正
+  // 排队的路径（batch 内部按 totalWorkerCap 起循环，从不排队），也是此前
+  // poolCount 快照 bug 与唤错人 bug 的暴露面。真实触发场景：后台委派 /
+  // 嵌套派发 / 两个波次并行时多个派发源同时进闸。
+  // order.id 是生成的 wo_<uuid>，用 scope 文件名给每个 order 一个可读标识。
+  const orderTag = (order: { id: string; scope?: { files?: string[] } }): string =>
+    order.scope?.files?.[0] ?? order.id
+
+  const poolCoordinator = (opts: {
+    maxWorkers: number
+    maxExploreWorkers?: number
+    maxWriteWorkers?: number
+    /** 每个 order 的占位时长（ms），缺省取 hold。 */
+    holdFor?: (orderId: string) => number
+    hold: number
+  }, onRun?: (orderId: string) => void, onSettle?: (orderId: string) => void): DelegationCoordinator => new DelegationCoordinator({
+    baseToolRegistry: makeRegistry(),
+    modelCards: cards,
+    maxWorkers: opts.maxWorkers,
+    ...(opts.maxExploreWorkers === undefined ? {} : { maxExploreWorkers: opts.maxExploreWorkers }),
+    ...(opts.maxWriteWorkers === undefined ? {} : { maxWriteWorkers: opts.maxWriteWorkers }),
+    runtimeFactory: (order, card, workerRegistry) => ({
+      order,
+      client: {} as StreamClient,
+      promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+      toolRegistry: workerRegistry,
+      cwd: '/repo',
+      maxTurns: 2,
+      contextWindow: card.contextWindow,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+    }),
+    runWorker: async config => {
+      const tag = orderTag(config.order)
+      onRun?.(tag)
+      await new Promise<void>(r => setTimeout(r, opts.holdFor?.(tag) ?? opts.hold))
+      onSettle?.(tag)
+      return {
+        result: resultFor(config.order.id),
+        transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }
+    },
+    runHands: async config => {
+      const tag = orderTag(config.order)
+      onRun?.(tag)
+      await new Promise<void>(r => setTimeout(r, opts.holdFor?.(tag) ?? opts.hold))
+      onSettle?.(tag)
+      return {
+        result: resultFor(config.order.id),
+        session: { getTurnCount: () => 1 } as never,
+        usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }
+    },
+  })
+
+  const exploreRequest = (id: string, file: string) => ({
+    parentTurnId: id,
+    objective: `Explore ${file} for routing seams, cache affinity and delegation boundaries.`,
+    kind: 'code_search' as const,
+    profile: 'code_scout',
+    scope: { files: [file] },
+  })
+  const writeRequest = (id: string, file: string) => ({
+    parentTurnId: id,
+    objective: `Implement the feature in ${file} with tests and typecheck verification.`,
+    kind: 'patch_proposal' as const,
+    profile: 'patcher',
+    scope: { files: [file] },
+  })
+
+  it('等槽队列：同角色占满池帽后排队者仍能拿到槽（poolCount 不得是快照）', async () => {
+    const coordinator = poolCoordinator({ maxWorkers: 2, hold: 30 })
+    // 4 个同角色并发单发、槽位只有 2 —— 后两个必然排队。修复前 poolCount 被
+    // 取成 const 快照，`poolCount >= poolCap` 在循环里恒真，排队者被唤醒后
+    // 立刻重新入队，永远等不到槽（只能靠 abort 打破）。
+    const runs = await Promise.all([
+      coordinator.delegate(exploreRequest('slot:q0', 'src/q0.ts')),
+      coordinator.delegate(exploreRequest('slot:q1', 'src/q1.ts')),
+      coordinator.delegate(exploreRequest('slot:q2', 'src/q2.ts')),
+      coordinator.delegate(exploreRequest('slot:q3', 'src/q3.ts')),
+    ])
+
+    assert.equal(runs.length, 4)
+    for (const run of runs) {
+      assert.equal(run.status, 'completed', `排队的 delegate 应正常完成：${run.packet}`)
+    }
+  })
+
+  it('等槽队列：释放写槽立刻交给等写池的 waiter，不空转在 explore waiter 上', async () => {
+    // explore 池帽 1、write 池帽 1、总帽 2：两池各占一个，再各排一个。
+    // 长跑的读工把 explore 池按住，短跑的写工先 settle——腾出的写槽只有排队
+    // 的写工吃得下。裸 shift() 唤的是队首那个等 explore 池的 waiter（它进不
+    // 去，原地重排且不链式唤醒），写槽只能空转到长读工 settle 才被接手。
+    // 断言用「并发重叠」而非耗时阈值：修复后排队写工与长读工同时在跑；
+    // 空转版本里它只能等读工结束后才启动，两者永不重叠。
+    const active = new Set<string>()
+    const overlapAtStart = new Map<string, string[]>()
+    const coordinator = poolCoordinator(
+      {
+        maxWorkers: 2,
+        maxExploreWorkers: 1,
+        maxWriteWorkers: 1,
+        hold: 20,
+        holdFor: id => (id.includes('e-hold') ? 1500 : 20),
+      },
+      id => { overlapAtStart.set(id, [...active]); active.add(id) },
+      id => { active.delete(id) },
+    )
+
+    const longExplore = coordinator.delegate(exploreRequest('slot:e-hold', 'src/e-hold.ts'))
+    const shortWrite = coordinator.delegate(writeRequest('slot:w-hold', 'src/w-hold.ts'))
+    // 两个先占位者必须真正进入执行，之后的两个才是信号量上的排队者。
+    for (let i = 0; i < 200 && active.size < 2; i++) await new Promise<void>(r => setTimeout(r, 5))
+    assert.equal(active.size, 2, '两池应各有一个 worker 在跑')
+
+    const queuedExplore = coordinator.delegate(exploreRequest('slot:e-wait', 'src/e-wait.ts'))
+    const queuedWrite = coordinator.delegate(writeRequest('slot:w-wait', 'src/w-wait.ts'))
+
+    const runs = await Promise.all([longExplore, shortWrite, queuedExplore, queuedWrite])
+    for (const run of runs) {
+      assert.equal(run.status, 'completed', `分池排队应全部完成：${run.packet}`)
+    }
+    assert.deepEqual([...overlapAtStart.keys()].sort(), ['src/e-hold.ts', 'src/e-wait.ts', 'src/w-hold.ts', 'src/w-wait.ts'])
+    assert.ok(
+      overlapAtStart.get('src/w-wait.ts')?.includes('src/e-hold.ts'),
+      '排队写工应在长读工仍在跑时就接手腾出的写槽（唤错人会让写槽空转到读工 settle）',
+    )
+  })
+
+  it('S4 候选池：无凭据的 provider 不进 DP 副本轮换池', () => {
+    const providers = {
+      deepseek: { name: 'deepseek', apiKey: 'sk-configured', models: [{ id: 'deepseek-v4-pro' }] },
+      glm: { name: 'glm', models: [{ id: 'glm-5.2' }] },
+      minimax: { name: 'minimax', apiKey: 'sk-also-configured', models: [{ id: 'MiniMax-M2.7' }] },
+    } as never
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 1,
+      providers,
+      runtimeFactory: (order, card, workerRegistry) => ({
+        order,
+        client: {} as StreamClient,
+        promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+        toolRegistry: workerRegistry,
+        cwd: '/repo',
+        maxTurns: 2,
+        contextWindow: card.contextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      }),
+    })
+
+    const previousGlmKey = process.env.GLM_API_KEY
+    delete process.env.GLM_API_KEY
+    try {
+      const candidates = coordinator.getCandidateModels()
+      assert.deepEqual(
+        candidates.map(c => c.provider),
+        ['deepseek', 'minimax'],
+        'preset 快照里没配 key 的 glm 不应成为 DP 副本候选',
+      )
+    } finally {
+      if (previousGlmKey !== undefined) process.env.GLM_API_KEY = previousGlmKey
+    }
   })
 })

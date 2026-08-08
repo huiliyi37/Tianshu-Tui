@@ -23,7 +23,7 @@ export interface ConvergenceInput {
   /** Context window size (200_000 or 1_000_000) */
   contextWindow: number
   /** Recent tool history (last N entries) */
-  recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target' | 'argsHash'>>
+  recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target' | 'argsHash' | 'bashActivity'>>
   /** Evidence state with edit/verification tracking */
   evidenceState: Pick<EvidenceState, 'filesModified' | 'filesRead' | 'deliveryStatus'>
   /** Optional tool call fingerprints for oscillation detection (A→B→A→B patterns). */
@@ -187,13 +187,14 @@ const DIAGNOSTIC_READONLY_RATIO = 0.8
 /**
  * W3：从工具轨迹 + 改动数分类会话活动模式。
  *
- * diagnostic 判据（窗口语义）：窗口内样本 ≥4、无编辑工具、只读（非 PRODUCTIVE_TOOLS）
- * 占比 ≥0.8。`filesModifiedCount` 不参与判定（保留下划线标记弃用）——曾改过代码
- * 但最近 N 轮纯只读的会话（verify 阶段、排查回归）也能回到 diagnostic，
- * 收到"核实断言后收束"的正确处方。
+ * diagnostic 判据（窗口语义）：窗口内样本 ≥4、无编辑工具、只读占比 ≥0.8。
+ * bash 是否只读由执行记录器基于完整 command 预先标注；这里不再从已截断 target
+ * 反推。缺少标签的历史条目 fail-closed 为 productive。`filesModifiedCount` 不参与
+ * 判定（保留下划线标记弃用）——曾改过代码但最近 N 轮纯只读的会话（verify 阶段、
+ * 排查回归）也能回到 diagnostic，收到"核实断言后收束"的正确处方。
  */
 export function classifyActivityMode(
-  recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool'>>,
+  recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool' | 'target' | 'bashActivity'>>,
   _filesModifiedCount: number,
   window = ACTIVITY_MODE_WINDOW,
 ): ActivityMode {
@@ -204,7 +205,10 @@ export function classifyActivityMode(
   const windowSlice = recentToolHistory.slice(-window)
   if (windowSlice.length > 0 && windowSlice.some(h => editTools.has(h.tool))) return 'build'
   if (windowSlice.length < 4) return 'build'
-  const readOnly = windowSlice.filter(h => !PRODUCTIVE_TOOLS.has(h.tool)).length
+  const readOnly = windowSlice.filter(h =>
+    !PRODUCTIVE_TOOLS.has(h.tool)
+    || (h.tool === 'bash' && h.bashActivity === 'readonly'),
+  ).length
   return readOnly / windowSlice.length >= DIAGNOSTIC_READONLY_RATIO ? 'diagnostic' : 'build'
 }
 

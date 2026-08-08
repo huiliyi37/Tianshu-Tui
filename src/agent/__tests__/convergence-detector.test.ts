@@ -2,16 +2,23 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { classifyActivityMode, computeFlowBeacon, evaluateConvergence } from '../convergence-detector.js'
 import type { ConvergenceInput, ConvergenceSignals, FlowBeaconInput, PhaseClass } from '../convergence-detector.js'
+import { bashCommandTarget, classifyBashCommandActivity } from '../tool-target.js'
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
 function makeHistory(
-  entries: Array<{ tool: string; status?: 'success' | 'failed'; target?: string }>,
+  entries: Array<{
+    tool: string
+    status?: 'success' | 'failed'
+    target?: string
+    bashActivity?: 'readonly' | 'productive'
+  }>,
 ) {
   return entries.map(e => ({
     tool: e.tool,
     status: e.status ?? 'success',
     target: e.target ?? e.tool,
+    bashActivity: e.bashActivity,
   }))
 }
 
@@ -1788,6 +1795,120 @@ describe('evaluateConvergence', () => {
         ...Array.from({ length: 8 }, (_, i) => ({ tool: 'read_file', target: `f${i}.ts` })),
       ])
       assert.equal(classifyActivityMode(history, 0), 'diagnostic')
+    })
+
+    it('classifies bash read-only probes as diagnostic (defect 1: bash取证会话误判 build)', () => {
+      // 会话 aa9737bb 实测形态：grep/sed/python3 解析 jsonl + read_file。
+      // python inline code 无法静态证明只读，fail-closed 为 productive；其余 7/8
+      // 仍是可靠只读证据，达到 0.8 门槛 → diagnostic。
+      const history = makeHistory([
+        {
+          tool: 'bash',
+          target: "grep -n 'turnCallLimitAdvisoryFired' src/agent/turn-orchestrator.ts",
+          bashActivity: classifyBashCommandActivity(
+            "grep -n 'turnCallLimitAdvisoryFired' src/agent/turn-orchestrator.ts",
+          ),
+        },
+        { tool: 'read_file', target: 'src/agent/turn-orchestrator.ts' },
+        {
+          tool: 'bash',
+          target: "python3 -c \"import json; json.load(open('x.jsonl'))\"",
+          bashActivity: classifyBashCommandActivity(
+            "python3 -c \"import json; json.load(open('x.jsonl'))\"",
+          ),
+        },
+        { tool: 'grep', target: 'src/agent' },
+        { tool: 'read_file', target: 'src/agent/convergence-detector.ts' },
+        {
+          tool: 'bash',
+          target: 'git log --oneline -6',
+          bashActivity: classifyBashCommandActivity('git log --oneline -6'),
+        },
+        { tool: 'read_file', target: 'src/agent/advisory-bus.ts' },
+        {
+          tool: 'bash',
+          target: 'git diff package.json',
+          bashActivity: classifyBashCommandActivity('git diff package.json'),
+        },
+      ])
+      assert.equal(classifyActivityMode(history, 0), 'diagnostic')
+    })
+
+    it('still classifies bash write operations as build (bash跑测试/提交是产出)', () => {
+      const history = makeHistory([
+        { tool: 'bash', target: 'npm exec -- tsx --test src/agent/__tests__/x.test.ts' },
+        { tool: 'bash', target: 'git add -A && git commit -m "feat: x"' },
+        { tool: 'read_file' }, { tool: 'grep' },
+        { tool: 'read_file' }, { tool: 'grep' },
+        { tool: 'read_file' }, { tool: 'grep' },
+      ])
+      assert.equal(classifyActivityMode(history, 0), 'build')
+    })
+
+    it('treats allowlisted prefixes followed by shell writes as build', () => {
+      const commands = [
+        'grep foo input.txt && touch changed.txt',
+        'grep foo input.txt > report.txt',
+        'grep foo input.txt | tee report.txt',
+      ]
+      for (const target of commands) {
+        const bashActivity = classifyBashCommandActivity(target)
+        const history = makeHistory([
+          { tool: 'bash', target, bashActivity },
+          { tool: 'bash', target, bashActivity },
+          ...Array.from({ length: 6 }, () => ({ tool: 'read_file' })),
+        ])
+        assert.equal(classifyActivityMode(history, 0), 'build', target)
+      }
+    })
+
+    it('treats arbitrary interpreters and mutable subcommands as build', () => {
+      const commands = [
+        'python3 -c "open(\'x\',\'w\').write(\'bad\')"',
+        'node -e "require(\'fs\').writeFileSync(\'x\',\'bad\')"',
+        'find . -name "*.tmp" -delete',
+        'git branch -D feature',
+        'git remote set-url origin https://example.invalid/repo',
+        'env rm -rf build',
+        'npx tsx scripts/mutate-state.ts',
+      ]
+      for (const target of commands) {
+        const bashActivity = classifyBashCommandActivity(target)
+        const history = makeHistory([
+          { tool: 'bash', target, bashActivity },
+          { tool: 'bash', target, bashActivity },
+          ...Array.from({ length: 6 }, () => ({ tool: 'read_file' })),
+        ])
+        assert.equal(classifyActivityMode(history, 0), 'build', target)
+      }
+    })
+
+    it('fails closed when a truncated bash target hides a write suffix', () => {
+      const command = `grep needle ${'a'.repeat(60)} && touch changed.txt`
+      const target = bashCommandTarget(command)
+      const bashActivity = classifyBashCommandActivity(command)
+      assert.equal(target.length, 50, '前置：历史 target 已截断，写后缀不可见')
+      const history = makeHistory([
+        { tool: 'bash', target, bashActivity },
+        { tool: 'bash', target, bashActivity },
+        ...Array.from({ length: 6 }, () => ({ tool: 'read_file' })),
+      ])
+      assert.equal(classifyActivityMode(history, 0), 'build')
+    })
+
+    it('treats bash with empty target as productive (fallback: 旧条目无 target 不豁免)', () => {
+      // 3/8 只读（read_file×3）< 0.8 → build；bash target 空按 PRODUCTIVE_TOOLS 原语义
+      const history = makeHistory([
+        { tool: 'bash', target: '' },
+        { tool: 'bash' },
+        { tool: 'read_file' },
+        { tool: 'bash', target: '   ' },
+        { tool: 'read_file' },
+        { tool: 'grep' },
+        { tool: 'read_file' },
+        { tool: 'glob' },
+      ])
+      assert.equal(classifyActivityMode(history, 0), 'build')
     })
   })
 

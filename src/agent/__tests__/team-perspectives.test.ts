@@ -4,6 +4,7 @@ import { buildPlannerObjective, foldVerificationIntoTasks, normalizePerspective,
 import type { TeamPerspectivePlan } from '../team-perspectives.js'
 import type { TeamTask } from '../team-plan.js'
 import type { WorkerResult } from '../work-order.js'
+import { dependencyId, type DependencyEdge } from '../work-order.js'
 
 function makeTask(id: string, riskTier: TeamTask['riskTier'] = 'low'): TeamTask {
   return {
@@ -416,6 +417,68 @@ describe('mergePerspectivesByRole', () => {
     assert.ok(merged.deferred.some(d => d.title === 'Use a bento layout' && d.source === 'wenqu'))
     assert.ok(!merged.accepted.some(a => a.title === 'Use a bento layout'))
     assert.ok(merged.deferred.some(d => d.title.includes('Advisory') && d.source === 'wenqu'))
+  })
+
+  it('preserves conditional dependency edges (onFailure/alternateOrderId) from the base graph', () => {
+    const tianquan = basePerspective({
+      tasks: [
+        makeTask('T1'),
+        { ...makeTask('T2'), dependsOn: [{ dependsOn: 'T1', onFailure: 'skip' }] },
+        { ...makeTask('T3'), dependsOn: [{ dependsOn: 'T2', onFailure: 'alternate', alternateOrderId: 'T1' }] },
+      ],
+    })
+    const tianfu = normalizePerspective('tianfu', {})
+    const merged = mergePerspectives(tianquan, tianfu)
+
+    // The merge must preserve the full edge objects — the runtime conditional
+    // branch (skip/alternate) is consumed by the coordinator, not here.
+    assert.deepEqual(merged.tasks[1]!.dependsOn, [{ dependsOn: 'T1', onFailure: 'skip' }])
+    assert.deepEqual(merged.tasks[2]!.dependsOn, [{ dependsOn: 'T2', onFailure: 'alternate', alternateOrderId: 'T1' }])
+  })
+
+  it('does not treat edge metadata differences as a dependency ordering conflict (primary id comparison)', () => {
+    const tianquan = basePerspective({
+      tasks: [{ ...makeTask('T1'), dependsOn: [{ dependsOn: 'T0', onFailure: 'skip' }] }],
+    })
+    const tianfu = normalizePerspective('tianfu', {})
+    const tianxuan = normalizePerspective('tianxuan', {
+      tasks: [{ ...makeTask('T1'), dependsOn: [{ dependsOn: 'T0', onFailure: 'alternate', alternateOrderId: 'T2' }] }],
+    })
+    const merged = mergePerspectivesByRole([tianquan, tianfu, tianxuan])
+    assert.equal(
+      merged.conflicts.filter(c => c.description.includes('Dependency conflict')).length,
+      0,
+      'same primary dependency set with different edge metadata is not an ordering conflict',
+    )
+  })
+
+  it('monolith-split reconnects dependents that referenced the block via a conditional edge', () => {
+    const coarse: TeamTask = {
+      ...makeTask('BIG'),
+      files: ['src/a.ts', 'src/b.ts'],
+      touchSet: ['src/a.ts', 'src/b.ts'],
+    }
+    const dependent: TeamTask = {
+      ...makeTask('AFTER'),
+      dependsOn: [{ dependsOn: 'BIG', onFailure: 'skip' }],
+    }
+    const tianquan = basePerspective({ tasks: [coarse, dependent] })
+    const tianfu = normalizePerspective('tianfu', {})
+    const partA: TeamTask = { ...makeTask('BIG_A'), files: ['src/a.ts'], touchSet: ['src/a.ts'] }
+    const partB: TeamTask = { ...makeTask('BIG_B'), files: ['src/b.ts'], touchSet: ['src/b.ts'] }
+    const tianxuan = normalizePerspective('tianxuan', { tasks: [partA, partB] })
+
+    const merged = mergePerspectives(tianquan, tianfu, tianxuan)
+
+    const after = merged.tasks.find(t => t.id === 'AFTER')!
+    // The edge's primary id (BIG) is gone → reconnected to the replacement
+    // shards; no dangling reference to the split block survives. 重连保留
+    // 对象边语义（onFailure 随边带到每个 replacement）——按主 id 比较断言。
+    assert.ok(after.dependsOn.some(d => dependencyId(d) === 'BIG_A'), 'AFTER 必须重连到 BIG_A')
+    assert.ok(after.dependsOn.some(d => dependencyId(d) === 'BIG_B'), 'AFTER 必须重连到 BIG_B')
+    assert.ok(!after.dependsOn.some(d => dependencyId(d) === 'BIG'), '不允许残留指向 BIG 的 dangling 边')
+    const edgeToA = after.dependsOn.find((d): d is DependencyEdge => typeof d !== 'string' && d.dependsOn === 'BIG_A')
+    assert.ok(edgeToA?.onFailure === 'skip', '重连的对象边必须保留 onFailure 语义')
   })
 
   it('reproduces the trio merge (backward compat via mergePerspectives wrapper)', () => {

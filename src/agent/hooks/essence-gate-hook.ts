@@ -20,9 +20,16 @@ export interface EssenceGateHookDeps {
   getFailureJournal?: () => FailureJournal
   /** 侧路 LLM 调用（廉价路由，实现方负责 usage 落账 + 超时）。 */
   complete: (prompt: string, timeoutMs: number) => Promise<string>
+  /** 内层 LLM fail-closed 预算。缺省 15s（essence-gate.ts DEFAULT_TIMEOUT_MS）。
+   *  必须 < 本 hook 的外层 budgetMs（20s），否则外层先炸产生假超时。 */
+  timeoutMs?: number
   /** 裁决结果回调（诊断/遥测用）。 */
   onResult?: (result: EssenceGateResult) => void
 }
+
+/** 外层 Runtime Hook 预算（ms）。必须 > 内层 fail-closed（默认 15s）——
+ *  内层超时先完成 fail-closed，外层护栏只是兜底，不该抢跑。 */
+export const ESSENCE_GATE_HOOK_BUDGET_MS = 20_000
 
 /** 失败模式 → salvage 候选。只送检测出的聚合模式，不送单条失败流水。 */
 function failurePatternCandidates(journal: FailureJournal, sessionId?: string): KnowledgeCandidate[] {
@@ -40,7 +47,9 @@ export function createEssenceGateHook(deps: EssenceGateHookDeps): PostSessionRun
   return {
     phase: 'postSession',
     name: 'essence-gate',
+    budgetMs: ESSENCE_GATE_HOOK_BUDGET_MS,
     async run() {
+      const startedAt = Date.now()
       const candidates = [...deps.getCandidates()]
       const journal = deps.getFailureJournal?.()
       if (journal) candidates.push(...failurePatternCandidates(journal, deps.sessionId))
@@ -48,11 +57,13 @@ export function createEssenceGateHook(deps: EssenceGateHookDeps): PostSessionRun
       if (candidates.length === 0) return
 
       const result = await runEssenceGate(
-        { cwd: deps.cwd, sessionId: deps.sessionId, complete: deps.complete },
+        { cwd: deps.cwd, sessionId: deps.sessionId, complete: deps.complete, timeoutMs: deps.timeoutMs },
         candidates,
       )
       // 闭环 1（反馈回路）：裁决落账——后续会话经 analyzeGateFeedback 与
       // recall-efficacy join，度量闸门准入标准是否过宽/过严。
+      // 兼容字段：候选数 / 耗时 / 失败归因（timeout vs invalid_output vs llm_error），
+      // 让「外层假超时」与「内层真实失败」在账本上可区分。
       writeGateLedgerRow(deps.cwd, {
         sessionId: deps.sessionId ?? 'unknown',
         ts: Date.now(),
@@ -60,6 +71,9 @@ export function createEssenceGateHook(deps: EssenceGateHookDeps): PostSessionRun
         rejected: result.rejectedRefs,
         superseded: result.supersededRefs,
         failedClosed: result.failedClosed,
+        candidateCount: candidates.length,
+        durationMs: Date.now() - startedAt,
+        failureReason: result.failureReason,
       })
       deps.onResult?.(result)
     },

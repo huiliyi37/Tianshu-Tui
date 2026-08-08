@@ -18,6 +18,9 @@ import { join, isAbsolute } from 'node:path'
 import { analyzeImpact } from '../repo/meridian-impact.js'
 import { getSessionDir } from './session-persist.js'
 import type { AgentCallbacks } from './loop-types.js'
+import { anchorsFromBlocks } from './reasoning-anchors.js'
+import { proRegistry } from '../api/pro-registry.js'
+import type { ContentBlock } from '../api/types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { computeCompactAttribution } from './compact-attribution.js'
 import type { ReclaimDecisionRecord } from '../compact/reclaim-estimate.js'
@@ -37,9 +40,12 @@ import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
 import { PrewarmController } from './prewarm-controller.js'
 import { canonicalizePhysarumFileTarget } from './hooks/physarum-file-access-hook.js'
+import { createLlmSpeculationEngine, normalizeLlmSpeculationConfig } from './llm-speculation.js'
 import { TurnStepProducer } from './turn-step-producer.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import type { Usage } from '../api/types.js'
+import { runGateCompletion } from './gate-completion.js'
+export { runGateCompletion, type GateCompletionClient } from './gate-completion.js'
 
 /**
  * Side-path usage accounting (2026-07-06 cost blind spot fix): side-path
@@ -53,8 +59,8 @@ import type { Usage } from '../api/types.js'
  *     main-turn entries so turn-sequence analysis stays clean
  * Never consumes the engine/wire divergence probes — those belong to main turns.
  */
-export function createSidePathUsageRecorder(self: AgentLoop): (kind: string, usage: Partial<Usage>, model?: string) => void {
-  return (kind, usage, model) => {
+export function createSidePathUsageRecorder(self: AgentLoop): (kind: string, usage: Partial<Usage>, model?: string, provider?: string) => void {
+  return (kind, usage, model, provider) => {
     try {
       if (!usage.input_tokens && !usage.output_tokens) return
       self.session.addSidePathUsage(usage)
@@ -67,6 +73,10 @@ export function createSidePathUsageRecorder(self: AgentLoop): (kind: string, usa
         kind,
         t: Date.now(),
         model: model ?? self.config.promptEngine.getModel(),
+        // provider 维度（T3）：spark 与官方 deepseek 的 wire 模型 id 相同，
+        // 无此字段两者在日志里无法区分。默认主会话 provider；专用 compact
+        // client 等跨 provider 侧路由调用方显式传入。
+        provider: provider ?? self.config.providerName,
         input,
         cacheRead: usage.cache_read_input_tokens ?? 0,
         cacheCreate: usage.cache_creation_input_tokens ?? 0,
@@ -173,6 +183,9 @@ export function createTurnStreamController(self: AgentLoop): TurnStreamControlle
           // model 让每条记录可溯源到具体模型 — /model 运行时切换后，
           // 同一会话的 cache-log 会跨多个模型，无此字段无法归因。
           model: self.config.promptEngine.getModel(),
+          // provider 维度（T3）：主轮行是 spark vs 官方对照的主体——
+          // 两者 wire 模型 id 相同，缺此字段收益无法度量。
+          provider: self.config.providerName,
           input: usage.input_tokens,
           cacheRead: usage.cache_read_input_tokens,
           cacheCreate: usage.cache_creation_input_tokens,
@@ -467,7 +480,13 @@ export function buildRuntimeSnapshot(self: AgentLoop, extra?: Partial<RuntimeHoo
 return {
       cwd: self.cwd,
       turn: self.session.getTurnCount(),
-      recentToolHistory: self.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target, argsHash: h.argsHash })),
+      recentToolHistory: self.recentToolHistory.map(h => ({
+        tool: h.tool,
+        status: h.status,
+        target: h.target,
+        argsHash: h.argsHash,
+        bashActivity: h.bashActivity,
+      })),
       sensorium: self.sensorium,
       strategy: self.strategy,
       vigor: self.vigorState,
@@ -482,7 +501,12 @@ return {
       touchedUiFiles: self.touchedUiFiles,
       sawVisualVerify: self.sawVisualVerify,
       lastThinkingLength: self.lastThinkingContent.length || undefined,
-      lastTurnHadTools: self.recentToolHistory.some(h => h.status === 'success') || undefined,
+      // Turn-scoped: "did the PREVIOUS turn issue any tool call" — not "is there a
+      // success within the 5-entry sliding window". The old window query made
+      // `false` unreachable via `|| undefined` (value domain collapsed to
+      // {true, undefined}), permanently blocking the reasoning-spiral hook.
+      // Entries carry the turn number they were recorded in (recordToolHistory).
+      lastTurnHadTools: self.recentToolHistory.some(h => h.turn === self.session.getTurnCount() - 1),
       ...extra,
     }
 }
@@ -626,11 +650,12 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     setCycleClose: self.config.sessionRegistry
       ? (sessionId, closeHash) => self.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
       : undefined,
-    constellationEnabled: self.config.sessionId !== undefined,
+    // True opt-in (config defaults false). Lean forces off even if config opts in.
+    constellationEnabled: !self.config.runtimeLean && self.config.constellationEnabled === true,
     constellationCwd: self.cwd,
     getConstellationPendingMark: () => self.pendingLeaveMark,
     getConstellationNumericId: () => self._sessionNumericId,
-    companionPresenceEnabled: self.config.sessionId !== undefined,
+    companionPresenceEnabled: !self.config.runtimeLean && self.config.companionPresenceEnabled === true,
     companionPresenceCwd: self.cwd,
     getCognitiveSnapshot: () => {
       if (!self.vigorState || !self.sensorium) return null
@@ -674,7 +699,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getPrevSessionCycleClose: self.config.sessionRegistry
       ? () => self.config.sessionRegistry!.getLastCycleClose()
       : undefined,
-    ...(self.config.sessionId ? {
+    ...(self.config.sessionId && self.config.dreamEnabled !== false && !self.config.runtimeLean ? {
       dream: {
         cwd: self.cwd,
         sessionId: self.config.sessionId,
@@ -693,8 +718,9 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       },
       getRegisteredSkills: () => skillRegistry.list().map(s => ({ name: s.name, triggers: s.triggers })),
     } : {}),
-    meridianIndexer: self.config.meridianIndexer,
-    physarumFileAccess: {
+    // Lean: skip postTool meridian/physarum hooks (tools still use indexer via bootstrap).
+    meridianIndexer: self.config.runtimeLean ? undefined : self.config.meridianIndexer,
+    physarumFileAccess: self.config.runtimeLean ? undefined : {
       getPhysarum: () => self.immuneHook.getPhysarum(),
       // Predictions feed ONLY the prewarm cache (mtime+size validated at
       // consume time). The ShadowQueue enqueue was removed with the 2026-07-07
@@ -770,33 +796,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         },
         getFailureJournal: () => self.failureJournal,
         complete: async (prompt: string, timeoutMs: number) => {
-          // 独立新建 request（不复用主请求对象）——无 prefixProbe、无 mutation 风险
-          const request = {
-            model: '', // client already binds the model
-            messages: [{ role: 'user' as const, content: prompt }],
-            max_tokens: 2048,
-            stream: true,
-          }
-          const chunks: string[] = []
-          let streamError: Error | undefined
-          const abort = new AbortController()
-          const timer = setTimeout(() => abort.abort(), timeoutMs)
-          try {
-            await gateClient.stream(request, {
-              onTextDelta: text => { chunks.push(text) },
-              onThinkingDelta: () => {},
-              onContentBlock: () => {},
-              onStopReason: (_reason, usage) => {
-                recordSidePath('essence_gate', usage ?? {})
-              },
-              onError: err => { streamError = err },
-            }, abort.signal)
-          } finally {
-            clearTimeout(timer)
-          }
-          if (streamError) throw streamError
-          if (abort.signal.aborted) throw new Error('essence-gate LLM timeout')
-          return chunks.join('')
+          return runGateCompletion(gateClient, recordSidePath, prompt, timeoutMs)
         },
       }
     })(),
@@ -1050,14 +1050,32 @@ export function buildProgressDigest(input: ProgressDigestInput): string {
 }
 
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
-  // Tier 2 LLM speculation: SEALED with the speculative chain (2026-07-07).
-  // The engine's only consumer was the ShadowQueue pre-execution path; with
-  // serving cut (2026-07-06 stale-read incident) and enqueue gated off, an
-  // opted-in engine would burn side-path LLM calls for nothing. The engine
-  // module + unit tests stay; `speculateDuringBatch` is simply never injected
-  // (orchestrator's optional call stays a no-op). Do NOT reconstruct it until
-  // the re-enable contract in P3Config.speculativeEnabled is met.
+  // Tier 2 LLM speculation: SEALED by default with the speculative chain
+  // (2026-07-07) — `speculateDuringBatch` not injected, engine not constructed.
+  // 状态更新（2026-08-07 T5b）：观察态（RIVET_SPEC_OBSERVE=1 **且**
+  // llmSpeculation.enabled 显式开——llm 臂发真实侧路调用、花真金白银，须双重
+  // opt-in）下重新构造引擎：预测经 p3.enqueueLlmPredictions 只入队记统计，
+  // serving 仍封存（tool-pipeline 只 observeSpeculativeCache 窥视，不取内容）。
+  // 侧路调用缓存安全是结构性保证（copy-on-write suffix / prefixProbe 剥离 /
+  // 新数组，见 llm-speculation.ts 硬边界 + 回归测试）；usage 经
+  // createSidePathUsageRecorder 记账（kind=llm-speculation），零成本盲区。
+  const specObserve = process.env['RIVET_SPEC_OBSERVE'] === '1'
+  const specConfig = normalizeLlmSpeculationConfig(self.config.llmSpeculation)
+  let speculateDuringBatch: ((params: { request: import('../api/oai-types.js').OaiChatRequest; toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>; turn: number; signal?: AbortSignal }) => void) | undefined
+  if (specObserve && specConfig.enabled) {
+    const recordSidePath = createSidePathUsageRecorder(self)
+    const engine = createLlmSpeculationEngine({
+      client: self.config.client,
+      config: self.config.llmSpeculation,
+      enqueue: predictions => { self.p3.enqueueLlmPredictions(predictions) },
+      writeTelemetry: record => { self.telemetryWriter.write(record) },
+      recordUsage: usage => { recordSidePath('llm-speculation', usage) },
+    })
+    self.llmSpeculationEngine = engine
+    speculateDuringBatch = params => { engine.maybeSpeculate(params) }
+  }
   return new TurnOrchestrator({
+    ...(speculateDuringBatch ? { speculateDuringBatch } : {}),
     // === Lifecycle ===
     initializeRun: (userInput, callbacks, images) => self.turnStepProducer.initializeRun(userInput, callbacks, images),
     stopFsWatcher: () => { self.stopFsWatcher() },
@@ -1093,7 +1111,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     appendSystemReminder: (content, cls) => { self.session.appendSystemReminder(content, cls) },
     appendSystemReminderAndReport: (content) => self.session.appendSystemReminderAndReport(content),
     resetSrCount: () => { self.session.resetSrCount() },
-    addAssistantBlocks: (blocks) => { self.session.addAssistantBlocks(blocks) },
+    addAssistantBlocks: (blocks) => {
+      self.session.addAssistantBlocks(blocks)
+      // 锚点提取（spec 3c 动作 B）：写入侧每条消息恰好一次（幂等）。
+      // 开源构建/非 spark：extractor 恒 undefined → 零行为差异。
+      maybeExtractAnchors(self, blocks)
+    },
     addUsage: (usage) => { self.session.addUsage(usage) },
     getEstimatedTokens: () => self.session.getEstimatedTokens(),
     getMessages: () => self.session.getMessages(),
@@ -1141,6 +1164,10 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       self.recentToolHistory,
       self.evidence.getState().filesModified.size,
     ),
+
+    // === 星域感知（缺陷 2 修复）：B2 收敛提醒对探寻型星域降级文案 ===
+    // 用 id（'tianji'）而非 name（'天机'）——调用方按 id 匹配探寻域列表。
+    getStarDomain: () => self.sessionDomain?.id ?? null,
 
     // === Abort signal ===
     getAbortSignal: () => self.abortController?.signal,
@@ -1377,4 +1404,19 @@ export function createIntentRetrievalRouteController(self: AgentLoop): IntentRet
     getModel: () => self.config.promptEngine.getModel(),
     getAbortSignal: () => self.abortController?.signal,
   })
+}
+
+/**
+ * 写入侧锚点提取（spec 3c 动作 B 接线）：
+ * addAssistantBlocks 落库后立即提取——每条消息恰好一次（幂等），
+ * 与 wire 层的截断共享同一 extractor/N（闭源注册）；丢失域才提取。
+ * 导出供集成测试（anchors-wiring.test.ts）。
+ */
+export function maybeExtractAnchors(self: AgentLoop, blocks: ContentBlock[]): void {
+  const extractor = proRegistry.getAnchorExtractor(self.config.providerName ?? '')
+  if (!extractor) return
+  const anchors = anchorsFromBlocks(blocks, extractor, self.config.promptEngine.getModel(), self.config.wireContext)
+  if (anchors.length > 0) {
+    self.config.promptEngine.appendExcludedPathAnchors(anchors)
+  }
 }

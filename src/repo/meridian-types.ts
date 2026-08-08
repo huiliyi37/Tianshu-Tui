@@ -1,6 +1,6 @@
-export type MeridianSymbolKind = 'function' | 'class' | 'interface' | 'type' | 'variable' | 'method' | 'enum'
+export type MeridianSymbolKind = 'function' | 'class' | 'interface' | 'type' | 'variable' | 'method' | 'enum' | 'route'
 
-export type MeridianEdgeKind = 'imports' | 'calls' | 'contains' | 'type_of' | 'co_edit' | 'tested_by'
+export type MeridianEdgeKind = 'imports' | 'calls' | 'contains' | 'type_of' | 'co_edit' | 'tested_by' | 'route_handles' | 'jsx_children'
 
 export type EdgeConfidence = 'extracted' | 'inferred' | 'ambiguous'
 
@@ -28,12 +28,26 @@ export interface MeridianEdge {
   confidence?: EdgeConfidence
 }
 
+/** A call site whose callee did not resolve to a same-file symbol.
+ *  The indexer matches it against cross-file symbols by name after
+ *  upserting the file, so the incremental index path rebuilds these edges
+ *  together with the file. */
+export interface CallSite {
+  /** Symbol id of the enclosing (calling) symbol — never the callee. */
+  sourceId: string
+  /** Callee name extracted from the call_expression. */
+  name: string
+  line: number
+}
+
 export interface ParseResult {
   filePath: string
   contentHash: string
   symbols: MeridianSymbol[]
   edges: MeridianEdge[]
   imports: string[]
+  /** Same-file-unresolved call sites, matched cross-file by the indexer. */
+  calls: CallSite[]
 }
 
 export interface RepoMapEntry {

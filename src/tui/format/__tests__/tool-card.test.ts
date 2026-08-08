@@ -78,6 +78,28 @@ describe('formatToolCardLive', async () => {
     assert.ok(header.includes('Run(sleep 1)') || header.includes('bash'), 'title present')
     assert.equal(lines.length, 1 + 3, 'fixed height with spinner')
   })
+
+  // tailLines=0 是并发折叠用的：live 区只给最新一张卡展开输出，其余仅标题行。
+  // `slice(-0)` 等价于 `slice(0)`，天真实现会把整个 tail 全量摊开——与意图相反。
+  it('tailLines=0 只出标题行，不摊开整个 tail', async () => {
+    const lines = formatToolCardLive({
+      toolName: 'bash',
+      toolInput: { command: 'npm test' },
+      outputTail: 'line1\nline2\nline3\nline4\nline5',
+      columns: 80,
+      tailLines: 0,
+    }, theme)
+    assert.equal(lines.length, 1, `应只有标题行，实得 ${lines.length} 行: ${lines.map(stripAnsi).join(' | ')}`)
+    const plain = stripAnsi(lines[0]!)
+    assert.ok(!plain.includes('line1') && !plain.includes('line5'), 'tail 内容不出现')
+  })
+
+  it('tailLines=0 且无输出时也不补占位行', async () => {
+    const lines = formatToolCardLive({
+      toolName: 'read', toolInput: { path: 'a.ts' }, outputTail: '', columns: 80, tailLines: 0,
+    }, theme)
+    assert.equal(lines.length, 1, '无输出也只有标题行')
+  })
 })
 
 describe('formatToolCard — inline edit diff (write family + isDiffContent)', async () => {

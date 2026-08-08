@@ -246,6 +246,10 @@ export interface TurnOrchestratorDeps {
   /** 会话活动模式。diagnostic = 近窗口只读为主 + 零改动（排查/根因分析）。
    *  B2 催收敛文案据此分流为"先核实断言再收束"。缺省 = 恒 build（旧行为）。 */
   getActivityMode?: () => 'diagnostic' | 'build'
+  // === 星域感知（缺陷 2 修复，会话 aa9737bb 审查）===
+  /** 活跃星域 id（如 'tianji'）。B2 对探寻型星域（天机/天璇/破军）降级
+   *  收敛文案——探寻价值被系统承认，不催"输出结论"。缺省 = null。 */
+  getStarDomain?: () => string | null
 
   // === Abort signal ===
   // === Abort signal ===
@@ -1045,27 +1049,45 @@ export class TurnOrchestrator {
           // 不强制截断（避免打断合法大批量编辑），仅收敛建议。
           if (!turnCallLimitAdvisoryFired && turn >= 12) {
             turnCallLimitAdvisoryFired = true
-            // W3 诊断态分流（incident 20b9714e）：对排查会话催"输出结论"会在
-            // 证据不足时直接诱发脑补——改为要求先核实将写进结论的断言。
-            const diagnostic = this.deps.getActivityMode?.() === 'diagnostic'
-            const content = diagnostic
-              ? '本轮已进行 12+ 次 API 调用。先用工具核实你将要写进结论的关键断言（ls/grep/read 实际文件），核实完再收束；没有工具证据的推断必须标注"未核实"。会话自身状态可用 session_vitals 取证。'
-              : '本轮已进行 12+ 次 API 调用，请收敛当前动作并输出结论，不要继续发散。'
-            if (this.deps.submitAdvisory) {
-              this.deps.submitAdvisory({
-                key: 'turn-call-limit',
-                priority: 0.68,
-                category: 'discipline',
-                content,
-                channel: 'system-reminder',
-                immediate: true,
-                // 诊断态可核销：采纳签名 = 后续轮出现认知型工具调用（去核实）。
-                expect: diagnostic
-                  ? { kind: 'tool_appears', tools: ['read_file', 'grep', 'glob', 'list_dir', 'bash'], withinTurns: 2 }
-                  : undefined,
-              })
+            // 缺陷 2 修复（会话 aa9737bb 审查）：planning 态是合法探寻
+            // （规划/设计/调研），高轮次是任务性质不是发散——催收敛只产生
+            // 妥协（该会话 L572-576 模型自我收束放弃取证）。planning 态
+            // 完全不发收敛提醒。
+            if (this.deps.getPlanModeState() === 'planning') {
+              // 不发——规划/探寻模式的高轮次是任务性质，不是发散
             } else {
-              this.deps.appendSystemReminder(`<system-reminder>${content}</system-reminder>`)
+              // W3 诊断态分流（incident 20b9714e）：对排查会话催"输出结论"会在
+              // 证据不足时直接诱发脑补——改为要求先核实将写进结论的断言。
+              const diagnostic = this.deps.getActivityMode?.() === 'diagnostic'
+              // 缺陷 2 第二层：探寻型星域（天机/天璇/破军）即使被判 build
+              // 也降级为诊断文案——不催"输出结论"，只要求核实断言。
+              const starDomain = this.deps.getStarDomain?.() ?? null
+              const exploringDomain = starDomain !== null && ['tianji', 'tianxuan', 'pojun'].includes(starDomain)
+              const effectiveDiagnostic = diagnostic || exploringDomain
+              const content = effectiveDiagnostic
+                ? '本轮已进行 12+ 次 API 调用。先用工具核实你将要写进结论的关键断言（ls/grep/read 实际文件），核实完再收束；没有工具证据的推断必须标注"未核实"。会话自身状态可用 session_vitals 取证。'
+                : '本轮已进行 12+ 次 API 调用，请收敛当前动作并输出结论，不要继续发散。'
+              if (this.deps.submitAdvisory) {
+                this.deps.submitAdvisory({
+                  key: 'turn-call-limit',
+                  priority: 0.68,
+                  category: 'discipline',
+                  content,
+                  channel: 'system-reminder',
+                  immediate: true,
+                  // 诊断态可核销：采纳签名 = 后续轮出现认知型工具调用（去核实）。
+                  // build 态可核销（缺陷 3 修复）：course_changed = 观察窗内出现
+                  // 前置对照窗未见过的工具族×文件面粗签名 → adopted。build 态
+                  // 要求的是「改变方向」，不是「随便调个工具」——course_changed
+                  // 比 tool_appears 更贴合。纳入采纳统计后 efficacy 负反馈环
+                  // （delivered≥3 冷却 / ≥6 静默）能自动降频无效重复注入。
+                  expect: effectiveDiagnostic
+                    ? { kind: 'tool_appears', tools: ['read_file', 'grep', 'glob', 'list_dir', 'bash'], withinTurns: 2 }
+                    : { kind: 'course_changed', withinTurns: 2 },
+                })
+              } else {
+                this.deps.appendSystemReminder(`<system-reminder>${content}</system-reminder>`)
+              }
             }
           }
 
@@ -1361,6 +1383,14 @@ export class TurnOrchestrator {
           voluntary: false,
           detail: 'exhausted without a final turn',
         }, callbacks)
+        // postSession 与 natural-finish / abort 两条路径对齐：此前这里只重置 TUI
+        // 状态机，整个 postSession 阶段被跳过——telemetry-flush、dream、
+        // skill-distill、advisory 核销、flushAdvisoryEfficacy 全部不跑。对每轮
+        // 都用工具直到预算耗尽的 worker（只读 scout 的常态）这就是主路径，
+        // 跨会话效力先验因此长期收不到 worker 侧样本。
+        // 不复用 completeTurn：它内部会再跑一次 runPostTurn，而本轮的 postTurn
+        // 已在循环内执行过。照 abort 路径（下方 catch）的写法直接补 postSession。
+        await this.deps.runPostSession(callbacks)
         callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), true)
       }
     } catch (err) {

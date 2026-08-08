@@ -62,6 +62,7 @@ import type { BootstrapContext } from '../bootstrap.js'
 import type { Config } from '../config/schema.js'
 import { isProFeatureEnabled } from '../config/pro-license.js'
 import { loadConfig, saveConfig } from '../config/manager.js'
+import { PROVIDER_PRESETS, isProviderPresetKey } from '../config/provider-presets.js'
 import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
 import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
 import { switchAgentRuntime, switchAgentSession, switchAgentCwd, restorePlanModeFromMeta } from '../bootstrap.js'
@@ -3247,7 +3248,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | 'auto' | undefined
       const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max' | 'auto'> = ['off', 'low', 'medium', 'high', 'max', 'auto']
       if (!level) {
-        // 无参数 → 打开交互式选择面板（上下选、回车确认）。
+        // 无参数 → 重置面板类型后打开交互式选择面板（上下选、回车确认）。
+        // 不重置的话，先开过 /permission 等面板后 choicePanelKind 残留，
+        // 选择面板会按旧类型渲染（PR #29 移植）。
+        ctx.setChoicePanelKind?.('effort')
         surfacePush?.('choice-panel')
         setIsStreaming(false)
         return true
@@ -3874,9 +3878,11 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
         app.commitStatic('   ⚠️ 若有其他天枢/rivet 会话在运行，请一并退出——否则 npm 覆盖全局包时仍会命中文件占用而失败。')
         app.commitStatic(`   日志：${schedule.logPath}`)
         setTimeout(() => {
-          ctx.shutdown()
-          app.dispose()
-          process.exit(0)
+          void (async () => {
+            await ctx.shutdown()
+            app.dispose()
+            process.exit(0)
+          })()
         }, 400)
         return true
       }
@@ -3898,9 +3904,11 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
 
       app.commitStatic('✅ Update complete. Restarting...')
       setTimeout(() => {
-        ctx.shutdown()
-        app.dispose()
-        restartProcess(ctx.sessionId)
+        void (async () => {
+          await ctx.shutdown()
+          app.dispose()
+          restartProcess(ctx.sessionId)
+        })()
       }, 250)
       return true
     },
@@ -4016,7 +4024,15 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     description: "连接模型服务商（选内置或自定义，填写 API 密钥）",
     immediate: true,
     handler: ({ app }) => {
-      app.startConnect()
+      // 配置读写就在这一层做（同 /config 的先例）——把已配置 provider 列表注入
+      // 向导，让它能提供「为已有服务商添加模型」分支。
+      const cfg = loadConfig()
+      const existing = Object.entries(cfg.provider.providers).map(([name, p]) => ({
+        name,
+        label: isProviderPresetKey(name) ? PROVIDER_PRESETS[name].label : name,
+        modelCount: p.models.length,
+      }))
+      app.startConnect(existing)
       return true
     },
   })

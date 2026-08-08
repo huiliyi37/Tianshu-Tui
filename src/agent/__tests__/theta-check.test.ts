@@ -35,6 +35,7 @@ describe('runThetaCheck', () => {
     assert.deepEqual(result.errors, [])
     assert.ok(result.durationMs >= 0)
     assert.equal(result.timedOut, false)
+    assert.equal(result.outcome, 'ok')
   })
 
   it('returns error file paths for invalid TypeScript', async () => {
@@ -46,6 +47,7 @@ describe('runThetaCheck', () => {
     assert.ok(result.errors.length > 0)
     assert.ok(result.errors.some(e => e.endsWith('broken.ts')), `expected broken.ts in ${result.errors.join(', ')}`)
     assert.equal(result.timedOut, false)
+    assert.equal(result.outcome, 'type_errors')
   })
 
   it('returns empty errors when no parseable file errors are emitted', async () => {
@@ -57,6 +59,8 @@ describe('runThetaCheck', () => {
     assert.deepEqual(result.errors, [])
     assert.ok(result.durationMs >= 0)
     assert.equal(result.timedOut, false)
+    // tsc 非零退出（缺 tsconfig）——不伪装成 ok
+    assert.equal(result.outcome, 'type_errors')
   })
 
   it('reports timeout metadata for very short timeouts', async () => {
@@ -67,6 +71,24 @@ describe('runThetaCheck', () => {
 
     assert.deepEqual(result.errors, [])
     assert.equal(result.timedOut, true)
+    assert.equal(result.outcome, 'timeout')
+  })
+
+  it('negative cache: timeout 后 60s 窗口内返回 backoff（不再 spawn）', async () => {
+    const dir = makeProject()
+    writeFileSync(join(dir, 'valid.ts'), 'export const x: number = 42\n')
+
+    // 第一次：极短预算 → timeout
+    const first = await runThetaCheck(dir, 1)
+    assert.equal(first.outcome, 'timeout')
+
+    // 第二次：负缓存窗口内 → backoff，不 spawn（errors 空、非超时、快速返回）
+    const start = Date.now()
+    const second = await runThetaCheck(dir, 10_000)
+    assert.equal(second.outcome, 'backoff', '负缓存窗口内必须返回 backoff')
+    assert.deepEqual(second.errors, [])
+    assert.equal(second.timedOut, false)
+    assert.ok(Date.now() - start < 2000, 'backoff 路径不得 spawn tsc')
   })
 })
 

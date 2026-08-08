@@ -221,6 +221,87 @@ describe('CronScheduler', () => {
     // 停止后不再触发
     assert.equal(firedTasks.length, countBeforeStop)
   })
+
+  // ── 事件触发器 fireByEvent（startup / app-open）──
+
+  it('fireByEvent: fires matching enabled tasks, skips paused and other types', () => {
+    const boot1 = createScheduledTask('boot task', { type: 'startup', spec: '' })
+    const boot2 = createScheduledTask('boot task 2', { type: 'startup', spec: '' })
+    boot2.enabled = false
+    const open1 = createScheduledTask('open task', { type: 'app-open', spec: '' })
+    const interval1 = createScheduledTask('interval', { type: 'interval', spec: '999999' })
+    scheduler.add(boot1)
+    scheduler.add(boot2)
+    scheduler.add(open1)
+    scheduler.add(interval1)
+
+    const fired = scheduler.fireByEvent('startup')
+    assert.equal(fired, 1, '只有 boot1（enabled）fire，boot2 paused 跳过')
+    assert.equal(firedTasks.length, 1)
+    assert.equal(firedTasks[0]!.prompt, 'boot task')
+
+    const fired2 = scheduler.fireByEvent('app-open')
+    assert.equal(fired2, 1, '只有 open1 fire')
+    assert.equal(firedTasks.length, 2)
+    assert.equal(firedTasks[1]!.prompt, 'open task')
+
+    // interval 任务不被事件触发影响
+    assert.equal(scheduler.list().find(t => t.id === interval1.id)!.triggerCount, 0)
+  })
+
+  it('fireByEvent: 更新 lastTriggeredAt 和 triggerCount', () => {
+    const task = createScheduledTask('boot', { type: 'startup', spec: '' })
+    scheduler.add(task)
+    assert.equal(scheduler.list()[0]!.triggerCount, 0)
+
+    scheduler.fireByEvent('startup')
+    const updated = scheduler.list().find(t => t.id === task.id)!
+    assert.equal(updated.triggerCount, 1)
+    assert.ok(updated.lastTriggeredAt, 'lastTriggeredAt 已设置')
+  })
+
+  // ── 事件触发器 spec 匹配（file-change / git-push）──
+
+  it('fireByEvent: file-change 按 spec 路径匹配（前缀覆盖子路径）', () => {
+    const srcWatcher = createScheduledTask('watch src', { type: 'file-change', spec: 'src' })
+    const anyWatcher = createScheduledTask('watch all', { type: 'file-change', spec: '' })
+    const docsWatcher = createScheduledTask('watch docs', { type: 'file-change', spec: 'docs' })
+    scheduler.add(srcWatcher)
+    scheduler.add(anyWatcher)
+    scheduler.add(docsWatcher)
+
+    // 文件 src/foo.ts 变更 → 匹配 src（前缀）+ 空 spec（任意）
+    const fired = scheduler.fireByEvent('file-change', { spec: 'src/foo.ts' })
+    assert.equal(fired, 2, 'src 前缀匹配 + 空 spec 全匹配')
+    const firedPrompts = firedTasks.slice(-2).map(f => f.prompt).sort()
+    assert.deepEqual(firedPrompts, ['watch all', 'watch src'])
+
+    // docs/README.md 变更 → 只匹配 docs + 空 spec，不匹配 src
+    const fired2 = scheduler.fireByEvent('file-change', { spec: 'docs/README.md' })
+    assert.equal(fired2, 2)
+  })
+
+  it('fireByEvent: git-push 空匹配 + 带分支的按 spec 匹配', () => {
+    const anyBranch = createScheduledTask('any push', { type: 'git-push', spec: '' })
+    const mainOnly = createScheduledTask('main only', { type: 'git-push', spec: 'main' })
+    scheduler.add(anyBranch)
+    scheduler.add(mainOnly)
+
+    // main 分支推送 → 匹配空 spec（任意）+ main 全等
+    const firedMain = scheduler.fireByEvent('git-push', { spec: 'main' })
+    assert.equal(firedMain, 2)
+
+    // dev 分支推送 → 只匹配空 spec（任意），不匹配 main
+    const firedDev = scheduler.fireByEvent('git-push', { spec: 'dev' })
+    assert.equal(firedDev, 1)
+  })
+
+  it('fireByEvent: focus-change 无 spec 全匹配', () => {
+    const focusTask = createScheduledTask('on focus', { type: 'focus-change', spec: '' })
+    scheduler.add(focusTask)
+    const fired = scheduler.fireByEvent('focus-change')
+    assert.equal(fired, 1)
+  })
 })
 
 // ─── computeNextTrigger ──────────────────────────────────────
@@ -374,10 +455,22 @@ describe('computeNextTrigger', () => {
   })
 
   it('cron: rejects out-of-range field values', () => {
-    for (const spec of ['60 * * * *', '* 24 * * *', '* * 32 * *', '* * * 13 *', '* * * * 8', '1-70 * * * *']) {
+    for (const spec of ['60 * * * *', '* 24 * * *', '* * * 13 *', '* * * * 8', '1-70 * * * *']) {
       const task = createScheduledTask('test', { type: 'cron', spec })
       assert.equal(computeNextTrigger(task, Date.now()), null, `should reject "${spec}"`)
     }
+  })
+
+  // ── 事件触发器（startup / app-open）── 不参与 tick 轮询 ──
+
+  it('startup trigger: computeNextTrigger 恒返回 null（不参与 tick）', () => {
+    const task = createScheduledTask('boot task', { type: 'startup', spec: '' })
+    assert.equal(computeNextTrigger(task, Date.now()), null)
+  })
+
+  it('app-open trigger: computeNextTrigger 恒返回 null（不参与 tick）', () => {
+    const task = createScheduledTask('open task', { type: 'app-open', spec: '' })
+    assert.equal(computeNextTrigger(task, Date.now()), null)
   })
 })
 

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { findProjectConfig } from '../config/manager.js'
 import { userConfigPath } from '../config/paths.js'
+import { isRuntimeLeanAspect } from '../config/runtime-lean.js'
 
 /**
  * A3 前缀预算上限（字符）。frozen 块超出后由 truncateBlock 截断。
@@ -200,7 +201,7 @@ export function resolvePromptBlocks(cwd: string): PromptBlockPolicy {
   profile = parseProfile(process.env.RIVET_PROMPT_PROFILE) ?? profile
   toolDescriptions = parseToolMode(process.env.RIVET_PROMPT_TOOL_DESC) ?? toolDescriptions
 
-  const resolved = profile ?? 'standard'
+  const resolved = profile ?? (isRuntimeLeanAspect('prompt', undefined, cwd) ? 'lean' : 'standard')
   const baseline = PROFILE_BASELINE[resolved]
 
   const policy: PromptBlockPolicy = {

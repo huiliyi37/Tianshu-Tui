@@ -903,6 +903,45 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
   })
 })
 
+describe('/effort', () => {
+  it('resets stale choice-panel kind before opening the picker', async () => {
+    // 复现污染现场：面板类型残留为 ask-user-question（如先开过 ask 面板），
+    // /effort 必须重置为 effort，否则渲染器按旧类型渲染。
+    let kind: string = 'ask-user-question'
+    const events: string[] = []
+
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/effort'],
+      setChoicePanelKind: (next) => {
+        kind = next
+        events.push(`kind:${next}`)
+      },
+      surfacePush: (id) => {
+        events.push(`push:${id}`)
+      },
+    }))
+
+    assert.equal(handled, true)
+    assert.equal(kind, 'effort')
+    assert.deepEqual(events, [
+      'kind:effort',
+      'push:choice-panel',
+    ])
+  })
+
+  it('resets permission panel kind before opening the picker', async () => {
+    // 更常见的污染路径：先 /permission 再 /effort，kind 残留 permission。
+    let kind: string = 'permission'
+
+    await handleSlashCommand(makeCtx({
+      parts: ['/effort'],
+      setChoicePanelKind: (next) => { kind = next },
+    }))
+
+    assert.equal(kind, 'effort')
+  })
+})
+
 describe('/permission', () => {
   // Isolate real config writes (setCheckpointConfig / any persist) to a temp file.
   let prevConfigPath: string | undefined

@@ -306,6 +306,7 @@ describe('isTestRunInvocation', () => {
 describe('resolveErrorKind（结构化短路解析）', () => {
   it('errorKind 直读优先', () => {
     assert.equal(resolveErrorKind({ errorKind: 'probe_miss' }), 'probe_miss')
+    assert.equal(resolveErrorKind({ errorKind: 'runtime_gate' }), 'runtime_gate')
     assert.equal(resolveErrorKind({ errorKind: 'timeout', errorClass: 'environment' }), 'timeout')
   })
 
@@ -327,6 +328,10 @@ describe('classifyToolFailure（结构优先的工具失败分类）', () => {
     assert.equal(r.class, 'timeout')
     assert.equal(r.confidence, 1)
     assert.equal(r.retryable, true)
+
+    const gate = classifyToolFailure({ errorKind: 'runtime_gate' }, '协调器正在关闭')
+    assert.equal(gate.class, 'runtime_gate')
+    assert.equal(gate.retryable, false)
   })
 
   it('结构短路结果与文本分类的 retryable 语义一致', () => {

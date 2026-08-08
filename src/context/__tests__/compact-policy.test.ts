@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { decideCompactTier, decideCompactAction, tierForRatio, recordCompactFailure, recordCompactSuccess } from '../compact-policy.js'
-import { precisionCeilingRatio } from '../../compact/constants.js'
+import { precisionCeilingRatio, compactPolicyRatios } from '../../compact/constants.js'
 import { deriveCompactionProfile } from '../../compact/compaction-profile.js'
+import { getProviderCacheDefaults } from '../../api/provider-profile.js'
 
 describe('compact policy', () => {
   it('chooses progressive tiers from balanced token ratio', () => {
@@ -170,6 +171,70 @@ describe('precision ceiling', () => {
       assert.equal(d.force, false)
     })
   }
+
+  // ── deepseek-spark 85% schedule (ProviderProfile.compaction overrides) ──
+  // Product decision 2026-08-07 ("85% 再压缩"): spark defers every
+  // history-rewriting reclaim to 85% of the 1M window. Three levers move
+  // together — tier compact ratio, precision ceiling, LLM ladder — and these
+  // tests pin the *composed* behaviour through the real PROFILES entry, so a
+  // regression in any one lever fails here.
+  describe('deepseek-spark 85% compaction schedule', () => {
+    const spark = getProviderCacheDefaults('deepseek-spark')
+    const sparkAction = (ratio: number, extra?: Partial<Parameters<typeof decideCompactAction>[0]>) => decideCompactAction({
+      estimatedTokens: Math.round(1_000_000 * ratio),
+      maxTokens: 1_000_000,
+      turn: 1,
+      failures: { consecutiveFailures: 0 },
+      providerProfile: spark,
+      recentHitRate: 0.99,
+      profile: deriveCompactionProfile({ contextWindow: 1_000_000, billing: 'per-token', cache: 'exact-prefix' }),
+      ...extra,
+    })
+
+    it('does nothing at 70–84% — the band the default ceiling (0.7) and ladder (0.75) would have claimed', () => {
+      for (const ratio of [0.70, 0.75, 0.80, 0.84]) {
+        const d = sparkAction(ratio)
+        assert.equal(d.action, 'none', `ratio ${ratio} must not reclaim`)
+        assert.equal(d.precisionRisk, false, `ratio ${ratio} is below the spark 0.85 ceiling`)
+      }
+    })
+
+    it('reaches partial-llm exactly at 85%, even with a red-hot cache', () => {
+      // recentHitRate 0.99 nudges the adaptive tier ratios up (compact→0.88),
+      // but the action ladder is the deciding lever on 1M — the user contract
+      // is "compaction happens at 85%", not "85% unless the cache is warm".
+      const d = sparkAction(0.85)
+      assert.equal(d.action, 'partial-llm')
+      assert.equal(d.force, false)
+    })
+
+    it('escalates to full-llm at 90%', () => {
+      assert.equal(sparkAction(0.90).action, 'full-llm')
+    })
+
+    it('keeps the 95% hard ceiling (checkpoint) untouched', () => {
+      const d = sparkAction(0.96)
+      assert.equal(d.action, 'checkpoint')
+      assert.equal(d.force, true)
+    })
+
+    it('tier ladder: compact tier starts at 0.85, not the cache-preserving 0.86 nor the ceiling 0.7', () => {
+      const ceiling = spark.compaction?.precisionCeiling
+      assert.equal(tierForRatio(0.84, spark, null, ceiling), 1, '0.84 is watch (≥0.72), not compact')
+      assert.equal(tierForRatio(0.85, spark, null, ceiling), 2)
+    })
+
+    it('an explicit user precisionCeilingOverride still wins over the provider default', () => {
+      const d = sparkAction(0.60, { precisionCeilingOverride: 0.5, recentHitRate: 0.95 })
+      assert.equal(d.precisionRisk, true)
+      assert.equal(d.action, 'stale-round')
+    })
+
+    it('compactPolicyRatios merges the partial override over cache-preserving defaults', () => {
+      const ratios = compactPolicyRatios(spark)
+      assert.deepEqual(ratios, { watch: 0.72, compact: 0.85, reactive: 0.92, ceiling: 0.95 })
+    })
+  })
 
   it('decideCompactAction: 1M/75% per-token exact-prefix (DeepSeek) reaches partial-llm', () => {
     const d = decideCompactAction({

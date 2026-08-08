@@ -39,6 +39,13 @@ const DRAFTS = [
   { id: 'review', title: '审查', detail: '审查登录逻辑' },
 ]
 
+const MANY_DRAFTS = [
+  ...DRAFTS,
+  { id: 'backend', title: 'backend', detail: 'backend logic' },
+  { id: 'docs', title: 'docs', detail: 'documentation' },
+  { id: 'tests', title: 'tests', detail: 'additional tests' },
+]
+
 describe('STARFLOW_TOOL', () => {
   it('confirm 缺省 → 只展示执行方案，三个子工具零调用', async () => {
     const { tool, calls } = makeTool()
@@ -83,6 +90,11 @@ describe('STARFLOW_TOOL', () => {
     assert.equal(calls.council.length, 1)
     assert.equal(calls.team.length, 1)
     assert.equal(calls.galaxy.length, 1)
+    assert.equal(result.orchestration?.kind, 'starflow')
+    assert.equal(result.orchestration?.phase, 'done')
+    assert.equal(result.orchestration?.done, true)
+    assert.ok(result.orchestration?.runId)
+    assert.ok((result.orchestration?.revision ?? 0) > 0)
     assert.match(result.content, /星流执行报告/)
     assert.match(result.content, /交付检查清单/)
     assert.match(result.uiContent ?? '', /全阶段通过/)
@@ -119,9 +131,88 @@ describe('STARFLOW_TOOL', () => {
     assert.equal(oneDim.errorKind, 'format_error')
   })
 
+  it('invalid Galaxy contract is rejected before council/team/galaxy dispatch', async () => {
+    const { tool, calls } = makeTool()
+    const invalid = await tool.execute({
+      toolUseId: 'tu_contract_preflight',
+      cwd: '/repo',
+      input: {
+        objective: 'validate starflow before dispatch',
+        galaxyDims: [
+          { name: 'review', objective: 'check', authority: 'yaoguang', authorities: ['yaoguang', 'tianji'] },
+          { name: 'backend', objective: 'inspect', authority: 'tianji' },
+        ],
+        confirm: true,
+      },
+    })
+
+    assert.equal(invalid.isError, true)
+    assert.equal(invalid.errorKind, 'format_error')
+    assert.match(invalid.content, /Starflow Galaxy contract validation failed|must set either/i)
+    assert.equal(calls.council.length + calls.team.length + calls.galaxy.length, 0)
+  })
+
   it('timeoutMs 覆盖三阶段串行预算（大于任一单工具的 10 分钟）', () => {
     const { tool } = makeTool()
     const budget = tool.timeoutMs?.({ input: { objective: 'x' }, toolUseId: 'tu_7', cwd: '/repo' })
     assert.ok(typeof budget === 'number' && budget > 600_000, `预算应超过单工具 600s 上限，实际 ${budget}`)
+  })
+
+  it('autoReview:false removes the extra Galaxy review timeout budget', () => {
+    const { tool } = makeTool()
+    const galaxyDims = [
+      { name: 'impl', objective: 'write', authority: 'tianliang' },
+      { name: 'backend', objective: 'inspect', authority: 'tianji' },
+    ]
+    const withReview = tool.timeoutMs?.({ input: { objective: 'x', galaxyDims, autoReview: true }, toolUseId: 'tu_review_budget', cwd: '/repo' })
+    const withoutReview = tool.timeoutMs?.({ input: { objective: 'x', galaxyDims, autoReview: false }, toolUseId: 'tu_no_review_budget', cwd: '/repo' })
+    assert.ok(typeof withReview === 'number' && typeof withoutReview === 'number')
+    assert.ok(withReview! > withoutReview!)
+  })
+
+  it('timeoutMs follows draft-derived dimensions and does not double-count explicit review', () => {
+    const { tool } = makeTool()
+    const twoDims = tool.timeoutMs?.({
+      input: { objective: 'x', draftItems: DRAFTS, autoReview: false },
+      toolUseId: 'tu_derived_two',
+      cwd: '/repo',
+    })
+    const fiveDims = tool.timeoutMs?.({
+      input: { objective: 'x', draftItems: MANY_DRAFTS, autoReview: false },
+      toolUseId: 'tu_derived_five',
+      cwd: '/repo',
+    })
+    assert.ok(typeof twoDims === 'number' && typeof fiveDims === 'number')
+    assert.ok(fiveDims! > twoDims!, `five derived dimensions must widen the budget (${fiveDims} vs ${twoDims})`)
+
+    const explicitReview = tool.timeoutMs?.({
+      input: { objective: 'x', draftItems: DRAFTS, autoReview: true },
+      toolUseId: 'tu_explicit_review',
+      cwd: '/repo',
+    })
+    assert.equal(explicitReview, twoDims, 'a derived review dimension already covers the review wave')
+  })
+
+  it('timeoutMs carries derived EP/DP profile, tier, and per-dimension budget inputs', () => {
+    const { tool } = makeTool()
+    const base = tool.timeoutMs?.({
+      input: { objective: 'x', draftItems: DRAFTS, autoReview: false },
+      toolUseId: 'tu_budget_base',
+      cwd: '/repo',
+    })
+    const tuned = tool.timeoutMs?.({
+      input: {
+        objective: 'x',
+        autoReview: false,
+        galaxyDims: [
+          { name: 'impl', objective: 'write', authority: 'tianliang', parallelism: 'data', replicas: 2, tierFloor: 'strong', timeoutMs: 900_000 },
+          { name: 'review', objective: 'check', authority: 'yaoguang' },
+        ],
+      },
+      toolUseId: 'tu_budget_tuned',
+      cwd: '/repo',
+    })
+    assert.ok(typeof base === 'number' && typeof tuned === 'number')
+    assert.ok(tuned! > base!, `explicit DP/tier/requested budget must widen the timeout (${tuned} vs ${base})`)
   })
 })

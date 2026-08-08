@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createGalaxyTool, type GalaxyCoordinator } from '../galaxy.js'
 import { deriveStableWorkOrderId, type CoordinatorRun, type DelegationRequest } from '../../agent/coordinator.js'
 
-function makeRun(requests: DelegationRequest[]): CoordinatorRun {
+function makeRun(requests: DelegationRequest[], opts?: { durationMs?: number }): CoordinatorRun {
   return {
     status: 'completed',
     results: requests.map(r => ({
@@ -16,6 +16,7 @@ function makeRun(requests: DelegationRequest[]): CoordinatorRun {
       risks: [],
       nextActions: [],
       evidenceStatus: 'verified',
+      ...(opts?.durationMs !== undefined ? { durationMs: opts.durationMs } : {}),
       // 真实 coordinator 会把派发侧身份盖章进 WorkerResult（work-order.ts
       // workerResultSchema.profile/authority）——mock 同形，供终态透传断言。
       profile: r.profile,
@@ -35,6 +36,112 @@ function capturingCoordinator(calls: Array<{ requests: DelegationRequest[] }>): 
 }
 
 describe('GALAXY_TOOL', () => {
+  it('rejects ambiguous or duplicate EP/DP contracts before dispatch', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const tool = createGalaxyTool(capturingCoordinator(calls))
+
+    const result = await tool.execute({
+      toolUseId: 'tu_contract',
+      cwd: '/repo',
+      input: {
+        objective: 'validate the galaxy plan',
+        dimensions: [
+          { name: 'Review', objective: 'check the change', authority: 'yaoguang', authorities: ['yaoguang', 'tianji'] },
+          { name: ' review ', objective: 'duplicate name', authority: 'tianji', replicas: 2 },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, true)
+    assert.match(result.content, /ambiguous|duplicates dimension|cannot set replicas/i)
+    assert.equal(calls.length, 0, 'invalid plans must not reach the coordinator')
+  })
+
+  it('blocks new fan-out while the coordinator is shutting down', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator = capturingCoordinator(calls)
+    coordinator.getRuntimeSnapshot = () => ({
+      activeWorkers: 1,
+      maxWorkers: 2,
+      pendingWorkers: 0,
+      stalledWorkers: 0,
+      inFlightFileScopes: 1,
+      backgroundRunning: 0,
+      activeClaims: 1,
+      providerDegradation: 0,
+      shuttingDown: true,
+    })
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_shutdown',
+      cwd: '/repo',
+      input: {
+        objective: 'do not admit new work during handoff',
+        dimensions: [
+          { name: 'backend', objective: 'inspect backend', authority: 'tianji' },
+          { name: 'review', objective: 'review the plan', authority: 'yaoguang' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, true)
+    assert.match(result.content, /正在关闭|移交/)
+    assert.equal(result.errorKind, 'runtime_gate')
+    assert.equal(calls.length, 0, 'shutdown gate must reject before fan-out')
+  })
+
+  it('keeps dispatch fail-open when optional runtime telemetry throws', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator = capturingCoordinator(calls)
+    coordinator.getRuntimeSnapshot = () => { throw new Error('health probe unavailable') }
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_runtime_probe',
+      cwd: '/repo',
+      input: {
+        objective: 'dispatch despite optional telemetry failure',
+        dimensions: [
+          { name: 'backend', objective: 'inspect backend', authority: 'tianji' },
+          { name: 'review', objective: 'review the plan', authority: 'yaoguang' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
+    assert.equal(calls.length, 1, 'telemetry failure must not suppress a valid dispatch')
+  })
+
+  it('rejects duplicate EP authorities and malformed DP replicas atomically', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const tool = createGalaxyTool(capturingCoordinator(calls))
+
+    const result = await tool.execute({
+      toolUseId: 'tu_contract_dp',
+      cwd: '/repo',
+      input: {
+        objective: 'validate parallel work',
+        dimensions: [
+          { name: 'perspectives', objective: 'independent review', authorities: ['tianji', 'tianji'] },
+          { name: 'replicas', objective: 'independent evidence', authority: 'yaoguang', parallelism: 'data' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, true)
+    assert.match(result.content, /repeats authority|requires replicas/i)
+    assert.equal(calls.length, 0)
+  })
+
   it('DP 副本跨维度不撞 work order ID（B2 回归）', async () => {
     const calls: Array<{ requests: DelegationRequest[] }> = []
     const tool = createGalaxyTool(capturingCoordinator(calls))
@@ -54,6 +161,11 @@ describe('GALAXY_TOOL', () => {
     })
 
     assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
+    assert.equal(result.orchestration?.kind, 'galaxy')
+    assert.equal(result.orchestration?.runId, 'tu_dp')
+    assert.equal(result.orchestration?.planned, 4)
+    assert.equal(result.orchestration?.dispatched, 4)
+    assert.deepEqual(result.orchestration?.parallelism, { expert: 0, data: 4 })
     const ids = calls[0]!.requests.map(r => deriveStableWorkOrderId(r.parentTurnId ?? ''))
     assert.equal(ids.length, 4)
     assert.equal(new Set(ids).size, 4, `work order IDs must be unique, got: ${ids.join(', ')}`)
@@ -598,5 +710,378 @@ describe('GALAXY_TOOL — DP 证据冗余（收编 #2）', () => {
     const tool = createGalaxyTool(capturingCoordinator([]))
     const result = await tool.execute({ toolUseId: 'tu_ob3', cwd: '/repo', input: dpInput() })
     assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
+  })
+})
+
+describe('GALAXY_PLAN_PRECHECK', () => {
+  it('写维度文件重叠 → overlap 问题，且 proposal 展示', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const tool = createGalaxyTool(capturingCoordinator(calls))
+
+    const result = await tool.execute({
+      toolUseId: 'tu_precheck_overlap',
+      cwd: '/repo',
+      input: {
+        objective: 'proposal with overlap',
+        dimensions: [
+          { name: 'frontend', objective: '改前端', authority: 'wenqu', files: ['src/app.ts', 'src/btn.ts'] },
+          { name: 'backend', objective: '改后端', authority: 'tianji', files: ['src/app.ts', 'src/api.ts'] },
+        ],
+        autoReview: false,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    assert.equal(calls.length, 0, 'proposal 阶段零派发')
+    assert.match(result.content, /静态预检/)
+    assert.match(result.content, /「backend」的文件与更早的写维度重叠，执行时将被剥离：src\/app\.ts/)
+    // 覆盖缺口：backend 的 src/app.ts 被剥离后仍剩 src/api.ts，不算 emptied。
+    assert.doesNotMatch(result.content, /全部被其他写维度认领/)
+  })
+
+  it('写维度文件全被夺走 → emptied 问题，proposal 预警', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const tool = createGalaxyTool(capturingCoordinator(calls))
+
+    const result = await tool.execute({
+      toolUseId: 'tu_precheck_emptied',
+      cwd: '/repo',
+      input: {
+        objective: 'proposal with emptied write dim',
+        dimensions: [
+          { name: 'frontend', objective: '改前端', authority: 'wenqu', files: ['src/app.ts'] },
+          { name: 'backend', objective: '改后端', authority: 'tianji', files: ['src/app.ts'] },
+        ],
+        autoReview: false,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    assert.match(result.content, /「backend」声明的文件全部被其他写维度认领，派发时将被跳过：src\/app\.ts/)
+  })
+
+  it('只读维度文件重叠不预警（并行读同一快照安全）', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const tool = createGalaxyTool(capturingCoordinator(calls))
+
+    const result = await tool.execute({
+      toolUseId: 'tu_precheck_readonly',
+      cwd: '/repo',
+      input: {
+        objective: 'readonly overlap is fine',
+        dimensions: [
+          { name: 'search', objective: '检索', authority: 'tianji', profile: 'code_scout', files: ['src/app.ts'] },
+          { name: 'review', objective: '审查', authority: 'yaoguang', profile: 'reviewer', files: ['src/app.ts'] },
+        ],
+        autoReview: false,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    assert.match(result.content, /✓ 写维度文件范围无重叠、无覆盖缺口/)
+  })
+
+  it('S4: DP 副本 2..N 轮换候选模型，副本 1 走默认路由', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator = capturingCoordinator(calls)
+    coordinator.getCandidateModels = () => [
+      { provider: 'minimax', model: 'MiniMax-M2.7' },
+      { provider: 'glm', model: 'glm-5.2' },
+    ]
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_ab',
+      cwd: '/repo',
+      input: {
+        objective: 'ab test across replicas',
+        dimensions: [
+          { name: 'verify', objective: '独立验证注入链', authority: 'yaoguang', parallelism: 'data', replicas: 3, files: ['src/a.ts'] },
+          { name: 'search', objective: '检索代码', authority: 'tianji', profile: 'code_scout' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
+    const reqs = calls[0]!.requests
+    const dpReqs = reqs.filter(r => r.parentTurnId?.includes('-galaxy-0:'))
+    assert.equal(dpReqs.length, 3, 'DP 维度派发 3 个副本')
+    assert.equal(dpReqs[0]!.modelOverride, undefined, '副本 1 走默认路由')
+    assert.deepEqual(dpReqs[1]!.modelOverride, { provider: 'minimax', model: 'MiniMax-M2.7' }, '副本 2 轮换到候选 1')
+    assert.deepEqual(dpReqs[2]!.modelOverride, { provider: 'glm', model: 'glm-5.2' }, '副本 3 轮换到候选 2')
+  })
+
+  it('S4: 显式 modelOverride 时副本不轮换', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator = capturingCoordinator(calls)
+    coordinator.getCandidateModels = () => [{ provider: 'minimax', model: 'MiniMax-M2.7' }]
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_ab_override',
+      cwd: '/repo',
+      input: {
+        objective: 'explicit override wins',
+        dimensions: [
+          { name: 'verify', objective: '独立验证', authority: 'yaoguang', parallelism: 'data', replicas: 2, files: ['src/a.ts'], modelOverride: { provider: 'deepseek', model: 'deepseek-v4-pro' } },
+          { name: 'search', objective: '检索代码', authority: 'tianji', profile: 'code_scout' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    const dpReqs = calls[0]!.requests.filter(r => r.parentTurnId?.includes('-galaxy-0:'))
+    assert.equal(dpReqs.length, 2)
+    for (const req of dpReqs) {
+      assert.deepEqual(req.modelOverride, { provider: 'deepseek', model: 'deepseek-v4-pro' }, '显式覆盖优先，不轮换')
+    }
+  })
+
+  it('S4: 结算路由事实带实际执行模型（modelOverride 回退）', async () => {
+    const recorded: Array<Record<string, unknown>> = []
+    const coordinator = capturingCoordinator([])
+    coordinator.getCandidateModels = () => [{ provider: 'minimax', model: 'MiniMax-M2.7' }]
+    coordinator.domainKnowledgeStore = {
+      recallGalaxyRouting: () => [],
+      recordGalaxyRoutingBatch: (records: Array<Record<string, unknown>>) => recorded.push(...records),
+    } as never
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_ab_record',
+      cwd: '/repo',
+      input: {
+        objective: 'record routing with model',
+        dimensions: [
+          { name: 'verify', objective: '独立验证', authority: 'yaoguang', parallelism: 'data', replicas: 2, files: ['src/a.ts'] },
+          { name: 'search', objective: '检索代码', authority: 'tianji', profile: 'code_scout' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    assert.ok(recorded.length > 0, '结算必须沉淀路由事实')
+    const dpWithModel = recorded.find(r => r.taskShape === 'review' && r.model === 'MiniMax-M2.7')
+    assert.ok(dpWithModel, '副本 2 轮换模型的记录必须带实际模型进入路由事实')
+    assert.ok(recorded.some(r => r.taskShape === 'review' && r.model === undefined), '副本 1 默认路由无 model 覆盖')
+  })
+
+  it('M2: 维度报告展示 wall-clock（含等槽排队的总墙钟）', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator = capturingCoordinator(calls)
+    const originalRun = coordinator.delegateBatch
+    coordinator.delegateBatch = async (requests) => {
+      const run = await originalRun!(requests)
+      for (const r of run.results) r.durationMs = 1250
+      return run
+    }
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_timebook',
+      cwd: '/repo',
+      input: {
+        objective: 'time book across dimensions',
+        dimensions: [
+          { name: 'frontend', objective: '改前端', authority: 'wenqu', profile: 'patcher', files: ['src/app.ts'] },
+          { name: 'review', objective: '审查', authority: 'yaoguang', profile: 'reviewer' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    assert.match(result.content, /· 1\.3s/, '每维度耗时（1.25s → 1.3s）进报告')
+  })
+
+  it('L3: 结算路由事实带 token 成本（input+output）', async () => {
+    const recorded: Array<Record<string, unknown>> = []
+    const coordinator = capturingCoordinator([])
+    coordinator.domainKnowledgeStore = {
+      recallGalaxyRouting: () => [],
+      recordGalaxyRoutingBatch: (records: Array<Record<string, unknown>>) => recorded.push(...records),
+    } as never
+    const originalRun = coordinator.delegateBatch
+    coordinator.delegateBatch = async (requests) => {
+      const run = await originalRun!(requests)
+      for (const r of run.results) {
+        r.usage = { input_tokens: 1200, output_tokens: 300, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+      }
+      return run
+    }
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_cost',
+      cwd: '/repo',
+      input: {
+        objective: 'cost tracking across replicas',
+        dimensions: [
+          { name: 'verify', objective: '独立验证', authority: 'yaoguang', parallelism: 'data', replicas: 2, files: ['src/a.ts'] },
+          { name: 'search', objective: '检索代码', authority: 'tianji', profile: 'code_scout' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    assert.ok(recorded.length > 0)
+    const withCost = recorded.filter(r => typeof r.costTokens === 'number')
+    assert.equal(withCost.length, 3, '3 个 worker 全部带成本')
+    assert.ok(withCost.every(r => r.costTokens === 1500), '成本 = input + output')
+  })
+
+  it('L3: proposal 展示每通过成本（质量/成本双目标可见）', async () => {
+    const coordinator = capturingCoordinator([])
+    coordinator.domainKnowledgeStore = {
+      recallGalaxyRouting: () => [
+        { dimensionName: 'verify', authority: 'yaoguang', taskShape: 'review', status: 'passed', model: 'deepseek-v4-pro', costTokens: 9000, depositedAt: 1 },
+        { dimensionName: 'verify', authority: 'yaoguang', taskShape: 'review', status: 'passed', model: 'deepseek-v4-pro', costTokens: 11000, depositedAt: 2 },
+        { dimensionName: 'verify', authority: 'yaoguang', taskShape: 'review', status: 'failed', model: 'deepseek-v4-pro', costTokens: 5000, depositedAt: 3 },
+      ],
+      recordGalaxyRoutingBatch: () => {},
+    } as never
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_prop_cost',
+      cwd: '/repo',
+      input: {
+        objective: 'proposal with cost stats',
+        dimensions: [
+          { name: 'verify', objective: '独立验证', authority: 'yaoguang' },
+          { name: 'search', objective: '检索代码', authority: 'tianji', profile: 'code_scout' },
+        ],
+        autoReview: false,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    assert.match(result.content, /每通过成本/)
+    assert.match(result.content, /2\/3 通过（67%） · 每通过 ~12\.5k tokens/, '成本只按通过次摊销（25000/2）')
+  })
+
+  it('P0: 基础设施失败带 failureReason 入账（与模型能力失败可分）', async () => {
+    const recorded: Array<Record<string, unknown>> = []
+    const coordinator = capturingCoordinator([])
+    coordinator.domainKnowledgeStore = {
+      recallGalaxyRouting: () => [],
+      recordGalaxyRoutingBatch: (records: Array<Record<string, unknown>>) => recorded.push(...records),
+    } as never
+    const originalRun = coordinator.delegateBatch
+    coordinator.delegateBatch = async (requests) => {
+      const run = await originalRun!(requests)
+      // 第一个 worker 撞超时（基础设施），其余正常结束（语义结果）
+      const first = run.results[0]
+      if (first) {
+        first.status = 'blocked'
+        first.failureReason = 'timeout'
+      }
+      return run
+    }
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_failreason',
+      cwd: '/repo',
+      input: {
+        objective: 'attribute infrastructure failures',
+        dimensions: [
+          { name: 'frontend', objective: '改前端', authority: 'wenqu', files: ['src/a.ts'] },
+          { name: 'search', objective: '检索代码', authority: 'tianji', profile: 'code_scout' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    const timedOut = recorded.filter(r => r.failureReason === 'timeout')
+    assert.equal(timedOut.length, 1, '超时 worker 的路由事实必须带 failureReason')
+    assert.equal(timedOut[0]!.status, 'blocked')
+    assert.ok(
+      recorded.filter(r => r.failureReason === undefined).length > 0,
+      '未标注基础设施死因的记录不写该字段——语义失败与它形状不同',
+    )
+  })
+
+  it('P0: DP 副本带 data 标记与对照组 ID，普通 EP 分片有标记但无对照组', async () => {
+    const recorded: Array<Record<string, unknown>> = []
+    const coordinator = capturingCoordinator([])
+    coordinator.domainKnowledgeStore = {
+      recallGalaxyRouting: () => [],
+      recordGalaxyRoutingBatch: (records: Array<Record<string, unknown>>) => recorded.push(...records),
+    } as never
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_epdp',
+      cwd: '/repo',
+      input: {
+        objective: 'mark EP vs DP for comparability',
+        dimensions: [
+          { name: 'verify', objective: '独立验证', authority: 'yaoguang', parallelism: 'data', replicas: 2, files: ['src/a.ts'] },
+          { name: 'search', objective: '检索代码', authority: 'tianji', profile: 'code_scout' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    const dp = recorded.filter(r => r.parallelism === 'data')
+    assert.equal(dp.length, 2, '两个 DP 副本都要标 parallelism')
+    const groupIds = new Set(dp.map(r => r.comparisonGroupId))
+    assert.equal(groupIds.size, 1, '同组副本共享同一对照组 ID')
+    assert.ok(typeof [...groupIds][0] === 'string', '对照组 ID 必须落盘，否则同维度多次运行会被误当同一次对照')
+
+    // 可比性判据是 comparisonGroupId 的有无，不是 parallelism——普通 EP 分片
+    // 同样带 'expert' 标记（schema 默认值），但没有对照组，不可跨分片比较。
+    const single = recorded.filter(r => r.taskShape === 'explore')
+    assert.equal(single.length, 1)
+    assert.equal(single[0]!.parallelism, 'expert', '普通分片标 expert（schema 默认），与旧记录的 undefined 可分')
+    assert.equal(single[0]!.comparisonGroupId, undefined, '普通单派发无对照组，不可与他人配对比较')
+  })
+
+  it('P0: 多视角维度共享对照组 ID（同任务不同星域也是干净对照）', async () => {
+    const recorded: Array<Record<string, unknown>> = []
+    const coordinator = capturingCoordinator([])
+    coordinator.domainKnowledgeStore = {
+      recallGalaxyRouting: () => [],
+      recordGalaxyRoutingBatch: (records: Array<Record<string, unknown>>) => recorded.push(...records),
+    } as never
+    const tool = createGalaxyTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_perspectives',
+      cwd: '/repo',
+      input: {
+        objective: 'multi-perspective comparability',
+        dimensions: [
+          { name: 'review', objective: '独立审查', authorities: ['yaoguang', 'tianji'] },
+          { name: 'search', objective: '检索代码', authority: 'tianxuan', profile: 'code_scout' },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined)
+    const perspectives = recorded.filter(r => r.taskShape === 'review')
+    assert.equal(perspectives.length, 2)
+    const groupIds = new Set(perspectives.map(r => r.comparisonGroupId))
+    assert.equal(groupIds.size, 1, '多视角同组共享对照组 ID')
+    // 多视角是 expert 语义（不同专家）但同 objective，故可比——对照维度是
+    // authority 而非 model，与 DP 的模型 A/B 是两类不同的对照。
+    assert.ok(perspectives.every(r => r.parallelism === 'expert'), '多视角属 EP 语义')
+    assert.notEqual(perspectives[0]!.authority, perspectives[1]!.authority, '组内 authority 不同才构成对照')
   })
 })

@@ -4,6 +4,28 @@ import { dirname, join } from 'node:path'
 import { existsSync } from 'node:fs'
 
 /**
+ * How far up to look for the packed `native/` dir.
+ *
+ * Deepest real caller is `dist/<area>/<sub>/*.js` (3 hops to `dist`); 5 leaves
+ * room without wandering far enough to hit an unrelated `native/` outside the
+ * install root.
+ */
+const MAX_NATIVE_LOOKUP_DEPTH = 5
+
+/** First `native/better_sqlite3.node` at or above `startDir`, else null. */
+function findPackedNative(startDir: string): string | null {
+  let dir = startDir
+  for (let depth = 0; depth <= MAX_NATIVE_LOOKUP_DEPTH; depth++) {
+    const candidate = join(dir, 'native', 'better_sqlite3.node')
+    if (existsSync(candidate)) return candidate
+    const parent = dirname(dir)
+    if (parent === dir) break // filesystem root
+    dir = parent
+  }
+  return null
+}
+
+/**
  * Resolve a usable better-sqlite3 `Database` constructor.
  *
  * Two distinct runtimes:
@@ -13,6 +35,11 @@ import { existsSync } from 'node:fs'
  *      stage-runtime-deps.js) and the native binary at `dist/native/
  *      better_sqlite3.node` (packed by pack-native.js). The wrapper is loaded
  *      and bound to that binary via better-sqlite3's `nativeBinding` option.
+ *
+ *      The probe walks UP from the caller's directory. `dist` is a tsc tree, not
+ *      a single-file bundle, so callers live in `dist/repo/`, `dist/agent/` etc.
+ *      while `native/` sits at the `dist` root — a same-directory probe only ever
+ *      matched `dist/main.js` and silently missed every real caller.
  *
  *      ⚠ Loading the raw `.node` directly does NOT work: it exports the internal
  *      addon object ({ Database, Statement, ... } with C++ signatures), not the
@@ -35,8 +62,7 @@ export function resolveBetterSqlite3(moduleUrl: string): any | null {
   let selfPath: string | null = null
   try {
     selfPath = fileURLToPath(moduleUrl)
-    const candidate = join(dirname(selfPath), 'native', 'better_sqlite3.node')
-    if (existsSync(candidate)) nativePath = candidate
+    nativePath = findPackedNative(dirname(selfPath))
   } catch {
     // moduleUrl is not a file URL — treat as non-bundled.
   }

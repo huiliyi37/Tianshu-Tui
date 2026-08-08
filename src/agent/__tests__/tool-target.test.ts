@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { bashCommandTarget, toolTargetFromInput } from '../tool-target.js'
+import { bashCommandTarget, classifyBashCommandActivity, toolTargetFromInput } from '../tool-target.js'
 
 describe('bashCommandTarget', () => {
   it('剥离 cd <path> && 样板后再截断——根因场景', () => {
@@ -30,6 +30,76 @@ describe('bashCommandTarget', () => {
   it('无 cd 前缀的命令行为不变（纯截断）', () => {
     assert.equal(bashCommandTarget('npm run build'), 'npm run build')
     assert.equal(bashCommandTarget('y'.repeat(80)), 'y'.repeat(50))
+  })
+})
+
+describe('classifyBashCommandActivity', () => {
+  it('recognizes only conservative single-command read probes', () => {
+    const commands = [
+      "grep -n 'needle' src/a.ts",
+      'rg needle src',
+      "sed -n '1,20p' src/a.ts",
+      'git log --oneline -6',
+      'git diff package.json',
+      'cd /repo && git status --short',
+      'rtk grep needle src/a.ts',
+      'echo $HOME',
+      'sort input.txt',
+    ]
+    for (const command of commands) {
+      assert.equal(classifyBashCommandActivity(command), 'readonly', command)
+    }
+  })
+
+  it('fails closed for shell composition, redirection, and substitution', () => {
+    const commands = [
+      'grep foo input.txt && touch changed.txt',
+      'grep foo input.txt > report.txt',
+      'grep foo input.txt | tee report.txt',
+      'grep "$(touch changed.txt)" input.txt',
+      'sort -o report.txt input.txt',
+      "sed -n '1p' -i input.txt",
+      'git diff --output=report.txt',
+    ]
+    for (const command of commands) {
+      assert.equal(classifyBashCommandActivity(command), 'productive', command)
+    }
+  })
+
+  it('does not whitelist interpreters, arbitrary scripts, or mutable subcommands', () => {
+    const commands = [
+      'python3 -c "open(\'x\',\'w\').write(\'bad\')"',
+      'node -e "require(\'fs\').writeFileSync(\'x\',\'bad\')"',
+      'find . -name "*.tmp" -delete',
+      'git branch -D feature',
+      'git remote set-url origin https://example.invalid/repo',
+      'env rm -rf build',
+      'npx tsx scripts/mutate-state.ts',
+    ]
+    for (const command of commands) {
+      assert.equal(classifyBashCommandActivity(command), 'productive', command)
+    }
+  })
+
+  it('requires complete command tokens and rejects sort output variants', () => {
+    const commands = [
+      'grep-malicious --write',
+      'git diff-malicious --write',
+      'sort\t-o report.txt input.txt',
+      'sort -oreport.txt input.txt',
+      'sort --compress-program=touch input.txt',
+      'rg --pre touch needle src',
+      'git grep --open-files-in-pager=touch needle',
+    ]
+    for (const command of commands) {
+      assert.equal(classifyBashCommandActivity(command), 'productive', command)
+    }
+  })
+
+  it('sees write suffixes beyond the 50-character history target', () => {
+    const command = `grep needle ${'a'.repeat(60)} && touch changed.txt`
+    assert.equal(bashCommandTarget(command).includes('touch'), false)
+    assert.equal(classifyBashCommandActivity(command), 'productive')
   })
 })
 

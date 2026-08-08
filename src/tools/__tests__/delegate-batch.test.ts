@@ -22,7 +22,46 @@ function makeRun(): CoordinatorRun {
   }
 }
 
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
 describe('DELEGATE_BATCH_TOOL', () => {
+  it('settle-time and backstop terminals share mapper.finish without late running replay', async () => {
+    const events: Array<{ status: string; eventKind?: string; eventDetail?: string }> = []
+    const coordinator: DelegateBatchCoordinator = {
+      delegateBatch: async (requests, _policy, _signal, _progress, onWorkerSettled) => {
+        requests[0]!.onActivity?.({
+          workOrderId: 'batch:0',
+          profile: 'code_scout',
+          kind: 'text',
+          detail: 'tail',
+        })
+        const base = makeRun()
+        const run: CoordinatorRun = {
+          ...base,
+          results: [{ ...base.results[0]!, workOrderId: 'batch:0' }],
+        }
+        onWorkerSettled?.(run.results[0]!)
+        return run
+      },
+    }
+    const tool = createDelegateBatchTool(coordinator)
+
+    await tool.execute({
+      toolUseId: 'tu_batch_mapper_finish',
+      cwd: '/repo',
+      sessionTurnCount: 5,
+      input: { tasks: [{ objective: 'flush the batch tail' }] },
+      onWorkerActivity: (event: any) => events.push(event),
+    } as any)
+
+    assert.deepEqual(events.map(event => [event.status, event.eventKind, event.eventDetail]), [
+      ['running', 'text', 'tail'],
+      ['passed', undefined, undefined],
+    ])
+    await sleep(150)
+    assert.equal(events.length, 2)
+  })
+
   it('exposes work-order kind and aggregation policy enums from the work-order schema', () => {
     const tool = createDelegateBatchTool({ delegateBatch: async () => makeRun() })
     const schema = tool.definition.input_schema as any

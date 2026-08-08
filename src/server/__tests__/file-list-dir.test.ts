@@ -80,6 +80,24 @@ test('listDirEntries: respects gitignore', async () => {
   }
 })
 
+test('listDirEntries: respects gitignore for directories too', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-listdir-'))
+  try {
+    writeFileSync(join(dir, '.gitignore'), '.tmp-abort-*\ncoverage/\n')
+    mkdirSync(join(dir, '.tmp-abort-123'))
+    mkdirSync(join(dir, 'coverage'))
+    mkdirSync(join(dir, 'src'))
+
+    const entries = await listDirEntries(dir)
+    const names = entries.map(e => e.name)
+    assert.ok(names.includes('src'), 'non-ignored dir present')
+    assert.ok(!names.includes('.tmp-abort-123'), 'glob-ignored dir excluded')
+    assert.ok(!names.includes('coverage'), 'dir-only pattern (trailing slash) excluded')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('listDirEntries: non-existent directory returns empty array', async () => {
   const entries = await listDirEntries(join(tmpdir(), 'does-not-exist-xyz-123'))
   assert.deepEqual(entries, [])

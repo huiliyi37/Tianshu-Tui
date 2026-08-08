@@ -139,6 +139,11 @@ export async function runHeadless(config: HeadlessRunConfig): Promise<HeadlessRu
   return {
     exitCode: success ? 0 : 1,
     stdout,
+    // 失败必须有出口：非 JSON 模式下 stdout 只承载 payload.text，模型一个字
+    // 没输出就失败时（provider 报错、鉴权失败、模型名非法）text 为空串，
+    // error 又只存在于 payload.json——json 未开时整条错误信息就此蒸发，
+    // 用户看到的是 exit 1 加全空输出。stderr 字段此前定义了却从未被写过。
+    ...(success ? {} : { stderr: error ?? 'Unknown error' }),
     // streamJson 的终止态已由 result 信封承载——遗留 payload 一并输出会在同一条
     // NDJSON 流里出现两个 schema 的收尾（且无 type 字段），消费者按 type 分派
     // 会在最后一行拿到 undefined。

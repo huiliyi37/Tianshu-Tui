@@ -59,6 +59,11 @@ export type ConnectCommit =
       model: { id: string; alias: string; contextWindow: number; maxTokens: number; supportsVision?: boolean }
       makeDefault: boolean
     }
+  | {
+      mode: 'add-model'
+      providerName: string
+      model: { id: string; contextWindow: number; maxTokens: number; supportsVision?: boolean }
+    }
 
 export type ConnectStepResult =
   | { kind: 'next'; view: ConnectView }
@@ -67,6 +72,7 @@ export type ConnectStepResult =
 
 type Phase =
   | 'provider'
+  | 'pick-existing'
   | 'preset-apikey'
   | 'diy-url'
   | 'diy-model'
@@ -74,13 +80,24 @@ type Phase =
   | 'diy-vision'
   | 'diy-apikey'
 
+/** A provider already configured on disk, offered by the add-model branch. */
+export interface ConnectProviderRef {
+  name: string
+  label?: string
+  modelCount: number
+}
+
 interface Collected {
   presetKey?: ProviderPresetKey
   baseUrl?: string
   modelId?: string
   contextWindow?: number
   supportsVision?: boolean
+  /** Set when the flow is adding a model to an existing provider (3-step path). */
+  existingProvider?: string
 }
+
+const ADD_MODEL_CHOICE = 'existing'
 
 function presetProviderOptions(): ConnectChoiceOption[] {
   const rank = (k: ProviderPresetKey): number => (RECOMMENDED_PRESETS.includes(k) ? 0 : 1)
@@ -117,15 +134,42 @@ export class ConnectFlow {
   private phase: Phase = 'provider'
   private readonly collected: Collected = {}
 
+  constructor(private readonly existing: ConnectProviderRef[] = []) {}
+
+  /** n 是全路径编号（diy 5 步）；加模型路径少 url/apikey 两步，显示 n-1 / 3。 */
+  private diyStepLabel(n: number): string {
+    return this.collected.existingProvider ? `步骤 ${n - 1} / 3` : `步骤 ${n} / 5`
+  }
+
   /** The view for the current step. */
   view(): ConnectView {
     switch (this.phase) {
-      case 'provider':
+      case 'provider': {
+        const options = presetProviderOptions()
+        if (this.existing.length > 0) {
+          options.push({
+            id: ADD_MODEL_CHOICE,
+            label: '为已有服务商添加模型…',
+            description: '给已配置的服务商追加一个模型（不改动现有配置）',
+          })
+        }
         return {
           kind: 'choice',
           title: '连接模型服务商',
           subtitle: '选择一个内置服务商（自动带出接口地址），或自定义',
-          options: presetProviderOptions(),
+          options,
+        }
+      }
+      case 'pick-existing':
+        return {
+          kind: 'choice',
+          title: '为哪个服务商添加模型？',
+          subtitle: '选择已配置的服务商，只需填模型信息（无需 API 地址 / 密钥）',
+          options: this.existing.map(p => ({
+            id: p.name,
+            label: p.label ?? p.name,
+            description: `${p.modelCount} 个模型`,
+          })),
         }
       case 'preset-apikey': {
         const preset = PROVIDER_PRESETS[this.collected.presetKey!]
@@ -149,7 +193,7 @@ export class ConnectFlow {
           kind: 'input',
           title: '输入模型型号',
           subtitle: '例如 deepseek-v4-flash',
-          stepLabel: '步骤 2 / 5',
+          stepLabel: this.diyStepLabel(2),
         }
       case 'diy-context':
         return {
@@ -158,7 +202,7 @@ export class ConnectFlow {
           // 上下文窗口驱动自动压缩阈值 —— 必须照模型服务商官方 API 的真实值填。
           // 填小了会过早压缩(丢上下文、碎缓存);填大了会撞 API 上限来不及自救。
           subtitle: '请照官方 API 文档的真实值填(它决定自动压缩点);DeepSeek V4 填 1000000,回车用默认',
-          stepLabel: '步骤 3 / 5',
+          stepLabel: this.diyStepLabel(3),
           placeholder: String(DEFAULT_CONTEXT_WINDOW),
           defaultValue: String(DEFAULT_CONTEXT_WINDOW),
         }
@@ -167,6 +211,7 @@ export class ConnectFlow {
           kind: 'choice',
           title: '这个模型支持视觉（识图）吗？',
           subtitle: '支持图片输入的模型勾「是」，之后可在「识图」配置里选它做识图桥',
+          stepLabel: this.diyStepLabel(4),
           options: [
             { id: 'no', label: '否（纯文本）' },
             { id: 'yes', label: '是（多模态，可识图）' },
@@ -177,7 +222,7 @@ export class ConnectFlow {
           kind: 'input',
           title: '输入 API Key',
           subtitle: CONFIG_HINT,
-          stepLabel: '步骤 5 / 5',
+          stepLabel: this.diyStepLabel(5),
           masked: true,
         }
     }
@@ -187,7 +232,36 @@ export class ConnectFlow {
   submitChoice(id: string): ConnectStepResult {
     if (this.phase === 'diy-vision') {
       this.collected.supportsVision = id === 'yes'
+      if (this.collected.existingProvider) {
+        // 加模型路径到此结束——provider 已存在，无需 API Key。
+        const providerName = this.collected.existingProvider
+        const modelId = this.collected.modelId!
+        const contextWindow = this.collected.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+        return {
+          kind: 'commit',
+          commit: {
+            mode: 'add-model',
+            providerName,
+            model: {
+              id: modelId,
+              contextWindow,
+              maxTokens: Math.min(DEFAULT_MAX_OUTPUT, contextWindow),
+              ...(this.collected.supportsVision ? { supportsVision: true } : {}),
+            },
+          },
+          summary: `已为 ${providerName} 添加模型 ${modelId}`,
+        }
+      }
       this.phase = 'diy-apikey'
+      return { kind: 'next', view: this.view() }
+    }
+    if (this.phase === 'pick-existing') {
+      const ref = this.existing.find(p => p.name === id)
+      if (!ref) {
+        return { kind: 'error', message: `未知服务商：${id}`, view: this.view() }
+      }
+      this.collected.existingProvider = ref.name
+      this.phase = 'diy-model'
       return { kind: 'next', view: this.view() }
     }
     if (this.phase !== 'provider') {
@@ -195,6 +269,10 @@ export class ConnectFlow {
     }
     if (id === CUSTOM_CHOICE) {
       this.phase = 'diy-url'
+      return { kind: 'next', view: this.view() }
+    }
+    if (id === ADD_MODEL_CHOICE) {
+      this.phase = 'pick-existing'
       return { kind: 'next', view: this.view() }
     }
     const key = id as ProviderPresetKey
@@ -221,6 +299,7 @@ export class ConnectFlow {
     const value = raw.trim()
     switch (this.phase) {
       case 'provider':
+      case 'pick-existing':
       case 'diy-vision':
         return { kind: 'error', message: '当前步骤需要选择，而非输入。', view: this.view() }
 

@@ -37,9 +37,34 @@ export interface AskUserQuestionItem {
  * Returns [] when no valid question is present.
  */
 export function parseAskUserQuestions(input: Record<string, unknown>): AskUserQuestionItem[] {
-  const cleanOptions = (raw: unknown): string[] => Array.isArray(raw)
-    ? raw.filter((o): o is string => typeof o === 'string' && o.trim().length > 0)
-    : []
+  /**
+   * 把一项 LLM 输入规整成 string[] 形式。
+   * LLM 在生产 schema 下可能给三类形态：
+   * - string[]：标准格式（string trim 后非空保留）
+   * - { label, description }[]：Anthropic 原生 ask_user_question schema；只取 label
+   * - 混入 null / 无 label 对象 / 纯字符串：跳过无效项
+   * 任何「整条 options 都是无效」的情况由调用方负责判断（panel 已有的
+   * options.length === 0 过滤会兜底），parser 这里只做规整。
+   */
+  const cleanOptions = (raw: unknown): string[] => {
+    if (!Array.isArray(raw)) return []
+    const out: string[] = []
+    for (const item of raw) {
+      if (typeof item === 'string') {
+        const t = item.trim()
+        if (t.length > 0) out.push(t)
+      } else if (item !== null && typeof item === 'object') {
+        const label = (item as Record<string, unknown>).label
+        if (typeof label === 'string') {
+          const t = label.trim()
+          if (t.length > 0) out.push(t)
+        }
+        // 缺 label 的对象跳过，不抛错——保持静默降级（panel 有兜底）
+      }
+      // null / 非对象非字符串：跳过
+    }
+    return out
+  }
 
   if (Array.isArray(input.questions) && input.questions.length > 0) {
     const items: AskUserQuestionItem[] = []
@@ -50,22 +75,35 @@ export function parseAskUserQuestions(input: Record<string, unknown>): AskUserQu
         ? q.prompt.trim()
         : (typeof q.question === 'string' ? q.question.trim() : '')
       if (!prompt) continue
+      // options 字段名兼容：标准 'options' + 别名 'choices'（部分 SDK 用）
+      const rawOptions = Array.isArray(q.options)
+        ? q.options
+        : Array.isArray(q.choices)
+          ? q.choices
+          : []
+      // 多选字段名兼容：snake_case 'allow_multiple' + camelCase 'multiSelect'（Anthropic 原生）
+      const allowMultiple = q.allow_multiple === true || q.multiSelect === true
       items.push({
         id: typeof q.id === 'string' && q.id.trim() ? q.id.trim() : `q${items.length + 1}`,
         prompt,
-        options: cleanOptions(q.options),
-        allowMultiple: q.allow_multiple === true,
+        options: cleanOptions(rawOptions),
+        allowMultiple,
       })
     }
     return items
   }
 
   if (typeof input.question === 'string' && input.question.trim()) {
+    const rawOptions = Array.isArray(input.options)
+      ? input.options
+      : Array.isArray(input.choices)
+        ? input.choices
+        : []
     return [{
       id: 'q1',
       prompt: input.question.trim(),
-      options: cleanOptions(input.options),
-      allowMultiple: input.allow_multiple === true,
+      options: cleanOptions(rawOptions),
+      allowMultiple: input.allow_multiple === true || input.multiSelect === true,
     }]
   }
 

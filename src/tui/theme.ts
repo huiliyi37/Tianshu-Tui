@@ -72,13 +72,17 @@ function makeContextColor(c: Pick<ColorSet, 'dim' | 'warning' | 'error'>) {
   }
 }
 
-function buildTheme(colors: ColorSet, overrides?: ThemeOverrides): RivetTheme {
+function buildTheme(
+  colors: ColorSet,
+  overrides?: ThemeOverrides,
+  auxiliaryDefault = '#9aa2b1',
+): RivetTheme {
   return {
     ...colors,
-    muted: overrides?.muted ?? '#9aa2b1',
+    muted: overrides?.muted ?? auxiliaryDefault,
     userColor: overrides?.userColor ?? colors.primary,
     assistantColor: overrides?.assistantColor ?? colors.secondary,
-    systemColor: overrides?.systemColor ?? '#9aa2b1',
+    systemColor: overrides?.systemColor ?? auxiliaryDefault,
     brandColor: overrides?.brandColor ?? colors.primary,
     toolColor: makeToolColor(colors),
     contextColor: makeContextColor(colors),
@@ -97,7 +101,9 @@ export interface ThemeEntry {
 function buildEntry(def: ThemePaletteDef): ThemeEntry {
   return {
     truecolor: buildTheme(def.truecolor, def.overrides),
-    fallback: buildTheme(def.fallback, def.fallbackOverrides),
+    // fallback 轨必须保持纯 ANSI 命名色。复用 truecolor 的 hex 默认值会让
+    // level 0/1 终端重新收到 38;2 序列，等于悄悄绕过能力降级。
+    fallback: buildTheme(def.fallback, def.fallbackOverrides, def.fallback.dim),
     background: def.background,
     description: def.description,
   }
@@ -135,7 +141,9 @@ export function registerCustomTheme(name: string, input: CustomThemeInput): void
   customThemes.set(name, {
     truecolor: buildTheme(colors, overrides),
     // 16 色轨没有 hex 可映射，继承 base 的 fallback（自定义 hex 只在 truecolor 生效）。
-    fallback: buildTheme(baseDef.fallback, baseDef.fallbackOverrides),
+    // 第三个参数锁死辅助色默认值 = base fallback 的命名色，避免 muted/systemColor
+    // 落回 truecolor 轨的 hex 默认值，让 level 0/1 终端收到 38;2 序列。
+    fallback: buildTheme(baseDef.fallback, baseDef.fallbackOverrides, baseDef.fallback.dim),
     background,
     description: input.description ?? `Custom theme (base: ${baseName})`,
   })

@@ -24,6 +24,13 @@ import type { WorkerResult } from './work-order.js'
 export const MAX_BUDGET_CONTINUATIONS = 4
 
 /**
+ * 停滞判据：一轮预算耗尽时，工具调用数 ≤ 此值的轮次视为「产出停滞」——墙钟基本
+ * 花在等首字节/空转而非干活，原样续跑只会再烧一轮墙钟（2026-08-07 议事会分析：
+ * 文档实测活跃轮 tool 31–47，远高于此值；600s 里 ≤3 次工具调用即「等首字节空转」）。
+ */
+export const STALL_TOOL_CALL_THRESHOLD = 3
+
+/**
  * 一次 hands 会话里，首轮之外最多再跑几次 agent。**续跑、JSON 解析修复、写闸门
  * 修复共用这一本账**——三条路径都可能在同一次会话里触发，各记各的会叠乘成
  * 「N 续跑 × 2 解析修复 + 1 闸门修复」。共用总账把最坏情况钉死在 1 + (MAX+1) = MAX+2 轮。
@@ -48,6 +55,9 @@ export interface ContinuationInput {
   sharedWorktree: boolean
   /** 上一轮是否交回了会话消息——续跑靠它承接上下文。 */
   hasSessionMessages: boolean
+  /** 上一轮的产出度量。elapsed 不引入：failureReason ∈ CONTINUABLE 本身已证明该轮
+   *  烧完了预算，toolCalls 少 + 预算耗尽 = 停滞，无需额外计时。缺席时不判（旧调用点）。 */
+  productivity?: { toolCalls: number }
 }
 
 export type ContinuationDecision =
@@ -77,6 +87,13 @@ export function decideContinuation(input: ContinuationInput): ContinuationDecisi
   }
   if (!input.hasSessionMessages) {
     return { proceed: false, skipReason: '上一轮没有会话消息可承接，续跑等于从零重来' }
+  }
+  if (input.productivity && reason === 'timeout' && input.productivity.toolCalls <= STALL_TOOL_CALL_THRESHOLD) {
+    // 只拦墙钟空转（timeout）：600s 里 ≤3 次工具调用 = 等首字节，原样续跑只会再烧
+    // 一轮墙钟。max_turns 撞顶时调用少是正常形态（轮次本就少），不拦——否则集成测试
+    // 里 2 轮撞顶的 mock worker 会被误判停滞（2026-08-07 分析文档点名的是「墙钟被
+    // 首字节等待吃光」，不是轮次预算耗尽）。
+    return { proceed: false, skipReason: `上轮产出停滞（仅 ${input.productivity.toolCalls} 次工具调用即耗尽墙钟预算）——原样续跑只会再烧一轮墙钟` }
   }
   if (input.isWrite) {
     const mode = input.sharedWorktree ? '共享 worktree' : '隔离 worktree'

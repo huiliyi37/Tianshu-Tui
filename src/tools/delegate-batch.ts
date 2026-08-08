@@ -13,7 +13,7 @@ import {
   delegateTimeoutMsSchema,
   toBudgetOverride,
 } from './delegate-budget.js'
-import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import type { DelegationActivity, DelegationIdentity, Tool, ToolCallParams, ToolResult } from './types.js'
 import { createActivityStreamer, createDelegationActivityMapper, progressSnippet } from './worker-activity-stream.js'
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
 
@@ -23,8 +23,41 @@ export interface DelegateBatchCoordinator {
     policy?: AggregationPolicy,
     abortSignal?: AbortSignal,
     onProgress?: (completed: number, total: number) => void,
-    onWorkerSettled?: (result: import('../agent/work-order.js').WorkerResult) => void,
+    onWorkerSettled?: (result: CoordinatorRun['results'][number]) => void,
   ): Promise<CoordinatorRun>
+}
+
+function terminalActivity(
+  result: CoordinatorRun['results'][number],
+  parentToolId: string,
+  objective?: string,
+): DelegationActivity {
+  const identity = result as CoordinatorRun['results'][number] & DelegationIdentity
+  return {
+    workOrderId: result.workOrderId,
+    parentToolId,
+    ...(identity.dispatchId ? { dispatchId: identity.dispatchId } : {}),
+    ...(identity.attemptId ? { attemptId: identity.attemptId } : {}),
+    ...(identity.parentAttemptId ? { parentAttemptId: identity.parentAttemptId } : {}),
+    profile: result.profile,
+    authority: result.authority,
+    objective,
+    status: result.status,
+    progressLine: progressSnippet(result.summary),
+    summary: result.summary,
+    failureReason: result.failureReason,
+    model: result.model,
+    provider: result.provider,
+    usage: result.usage,
+    artifactId: result.diffArtifactId,
+    changedFiles: result.changedFiles.length > 0 ? result.changedFiles : undefined,
+    findingsCount: result.findings.length > 0 ? result.findings.length : undefined,
+    topFinding: result.findings[0]?.claim,
+    verificationBrief: result.verification
+      ? { status: result.verification.status, passed: result.verification.passed, failed: result.verification.failed }
+      : undefined,
+    evidenceStatus: result.evidenceStatus,
+  }
 }
 
 /** Dynamic profile validation — accepts built-in + user-loaded profiles */
@@ -338,33 +371,11 @@ export function createDelegateBatchTool(
       // T4: per-worker terminal status for the subagent panel. Emitted TWICE by
       // design: once per worker the moment it settles (onWorkerSettled — a fast
       // worker must flip to ✓/✗ immediately instead of waiting for the slowest
-      // sibling), and once more below after the batch resolves as a backstop
-      // (FleetRegistry dedupes terminal→terminal replays, freezing elapsed).
+      // sibling), and once more below after the batch resolves as a backstop.
+      // The mapper's finish() makes the duplicate terminal emission idempotent.
       const emitTerminal = params.onWorkerActivity
-        ? (r: import('../agent/work-order.js').WorkerResult) => {
-            params.onWorkerActivity!({
-              workOrderId: r.workOrderId,
-              parentToolId: params.toolUseId,
-              objective: objectiveById.get(r.workOrderId),
-              // 终态也带派发侧盖章的身份（星域/职能）——否则完成后面板星域信息断流。
-              profile: r.profile,
-              authority: r.authority,
-              status: r.status,
-              progressLine: progressSnippet(r.summary),
-              summary: r.summary,
-              failureReason: r.failureReason,
-              model: r.model,
-              provider: r.provider,
-              usage: r.usage,
-              artifactId: r.diffArtifactId,
-              changedFiles: r.changedFiles.length > 0 ? r.changedFiles : undefined,
-              findingsCount: r.findings.length > 0 ? r.findings.length : undefined,
-              topFinding: r.findings[0]?.claim,
-              verificationBrief: r.verification
-                ? { status: r.verification.status, passed: r.verification.passed, failed: r.verification.failed }
-                : undefined,
-              evidenceStatus: r.evidenceStatus,
-            })
+        ? (r: CoordinatorRun['results'][number]) => {
+            activityMapper?.finish(terminalActivity(r, params.toolUseId, objectiveById.get(r.workOrderId)))
           }
         : undefined
 
@@ -384,6 +395,7 @@ export function createDelegateBatchTool(
           emitTerminal ?? undefined,
         )
       } catch (err) {
+        activityMapper?.dispose()
         const msg = err instanceof Error ? err.message : String(err)
         return {
           content: [
@@ -401,35 +413,39 @@ export function createDelegateBatchTool(
         }
       }
 
-      // H4-D4 producer：worker 完成即打点精确 orderId（passed 才算完成，
-      // failed/blocked 不得作为 attack_case supported 证据来源）。
-      const attackStore = getProblemAttackStore?.()
-      if (attackStore) {
-        for (const r of run.results) {
-          if (r.status === 'passed') attackStore.markWorkerCompleted(r.workOrderId)
+      try {
+        // H4-D4 producer：worker 完成即打点精确 orderId（passed 才算完成，
+        // failed/blocked 不得作为 attack_case supported 证据来源）。
+        const attackStore = getProblemAttackStore?.()
+        if (attackStore) {
+          for (const r of run.results) {
+            if (r.status === 'passed') attackStore.markWorkerCompleted(r.workOrderId)
+          }
         }
-      }
 
-      // Extract worker findings into claim store
-      if (run.status === 'completed') {
-        const claimStore = getClaimStore?.()
-        const sid = getSessionId?.()
-        if (claimStore && sid) {
-          extractClaimsFromRun(run, params.toolUseId, claimStore, sid)
+        // Extract worker findings into claim store
+        if (run.status === 'completed') {
+          const claimStore = getClaimStore?.()
+          const sid = getSessionId?.()
+          if (claimStore && sid) {
+            extractClaimsFromRun(run, params.toolUseId, claimStore, sid)
+          }
         }
-      }
 
-      // T4: terminal per-worker status for the subagent panel (backstop loop —
-      // per-worker settle events were already emitted via onWorkerSettled).
-      if (emitTerminal) {
-        for (const r of run.results) emitTerminal(r)
-      }
+        // T4: terminal per-worker status for the subagent panel (backstop loop —
+        // per-worker settle events were already emitted via onWorkerSettled).
+        if (emitTerminal) {
+          for (const r of run.results) emitTerminal(r)
+        }
 
-      const passed = run.results.filter(r => r.status === 'passed').length
-      return {
-        content: run.packet + trimmedNote,
-        uiContent: `delegate_batch：${passed}/${run.results.length} 通过`,
-        isError: false,
+        const passed = run.results.filter(r => r.status === 'passed').length
+        return {
+          content: run.packet + trimmedNote,
+          uiContent: `delegate_batch：${passed}/${run.results.length} 通过`,
+          isError: false,
+        }
+      } finally {
+        activityMapper?.dispose()
       }
     },
     requiresApproval: () => false,

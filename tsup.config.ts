@@ -1,9 +1,20 @@
 import { defineConfig, type Options } from 'tsup'
 import { builtinModules } from 'node:module'
 import { createRequire } from 'node:module'
+import { existsSync } from 'node:fs'
 
 const require = createRequire(import.meta.url)
-const pkgVersion = require('./package.json').version as string
+const pkgJson = require('./package.json') as { version: string; scripts?: Record<string, string> }
+const pkgVersion = pkgJson.version
+// Used by onSuccess to tell "tsup ran standalone" from "tsup is step 1 of a
+// chain that stages the runtime payload next".
+const pkgScripts = pkgJson.scripts ?? {}
+
+// src/pro/index.ts 作为独立 entry：闭源模块产物 dist/pro/index.js，供
+// loadProModule 的 dist 形态候选路径加载（桌面 sidecar 运行时）。
+// 条件存在：公开仓经 sync 同步后没有 src/pro/（--exclude 'pro/'），
+// 硬编码 entry 会让开源构建报 entry not found——存在才加入。
+const proEntry = existsSync('src/pro/index.ts') ? ['src/pro/index.ts'] : []
 
 // better-sqlite3 is kept `external` (below) and never imported as a bare
 // specifier at runtime — the live consumers (session-registry, meridian-db) load
@@ -13,7 +24,9 @@ const pkgVersion = require('./package.json').version as string
 // option. No esbuild plugin / NullDatabase shim is needed.
 
 export default defineConfig({
-  entry: ['src/main.ts', 'src/workers/cpu-worker.ts'],
+  // src/pro/index.ts 作为独立 entry：闭源模块产物 dist/pro/index.js，
+  // 供 loadProModule 的 dist 形态候选路径加载（桌面 sidecar 运行时）。
+  entry: ['src/main.ts', 'src/workers/cpu-worker.ts', ...proEntry],
   format: ['esm'],
   target: 'node24',
   // Inject the package version as a build-time constant so the packaged sidecar
@@ -77,6 +90,41 @@ export default defineConfig({
     } catch (err) {
       console.warn('[tsup] seed-capsule bundling skipped:', (err as Error).message)
     }
+
+    // `clean: true` wipes the staged native/wasm payload but leaves the directory
+    // skeleton, so `node dist/main.js` still starts and then silently degrades:
+    // meridian (tree-sitter), ast-grep, the typescript LSP fallback and
+    // better-sqlite3 all fail to resolve. That shape ran unnoticed for two days
+    // (2026-08-03/04, 303 meridian-index failures swallowed by hook isolation).
+    //
+    // onSuccess runs at the end of the *tsup* step, so under `npm run build` the
+    // payload is legitimately still missing — pack-native and stage-runtime-deps
+    // are the next two links in that chain. Ask npm which script invoked us and
+    // read its command: if the caller re-stages, staying quiet is correct, and
+    // warning would send someone chasing a problem that fixes itself one line
+    // later. Reaching the warning means tsup ran on its own — `npm run dev`
+    // (watch), `build:bundle`, or a bare `npx tsup` — and that dist is fine to
+    // *bundle-test*, unfit to *run*.
+    //
+    // Deriving this from the script body rather than a name list keeps it honest
+    // when the chain is renamed. Restaging here is deliberately not an option:
+    // under a cross-arch packaging run (`TAURI_ENV_TARGET_TRIPLE` set)
+    // pack-native downloads a foreign-arch prebuild, and no watch rebuild should
+    // trigger a download.
+    try {
+      const { verifyStagedRuntime } = await import('./scripts/staged-runtime-verify.js')
+      const staged = verifyStagedRuntime('dist')
+      const caller = process.env.npm_lifecycle_event
+      const callerScript = caller ? (pkgScripts[caller] ?? '') : ''
+      const callerRestages = callerScript.includes('stage-runtime-deps')
+      if (!staged.ok && !callerRestages) {
+        console.warn('[tsup] ⚠ dist/node_modules 载荷为空 — 原生/wasm 依赖不可解析')
+        console.warn('[tsup]   直接 node dist/main.js 会静默降级：meridian(tree-sitter)/ast-grep/typescript LSP/better-sqlite3')
+        console.warn('[tsup]   要可运行的产物请跑 `npm run build`（tsup + pack-native + stage-runtime-deps）')
+      }
+    } catch (err) {
+      console.warn('[tsup] staged-runtime check skipped:', (err as Error).message)
+    }
   },
   // tsup externalizes every package.json dependency by default. For a packaged
   // sidecar (no node_modules shipped) that's fatal: pure-JS deps left as bare
@@ -119,6 +167,10 @@ export default defineConfig({
     'turndown',
     'pixelmatch',
     'pngjs',
+    // .xlsx 提取（doc-extract.ts）。必须内联而不能留作可选外部依赖：xlsx 的引擎
+    // 链是 exceljs → soffice，而桌面包不带 LibreOffice、macOS 的 textutil 也只
+    // 读 docx——缺了它，2.29.0 的 excel 文档附件在多数机器上直接失效。
+    'exceljs',
   ],
   esbuildPlugins: [],
   // platform:node makes esbuild externalize bare node builtin requires (e.g.

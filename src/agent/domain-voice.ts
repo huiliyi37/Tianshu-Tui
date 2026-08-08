@@ -9,7 +9,7 @@
  * A domain's voice is not an add-on; it's the message itself.
  */
 
-export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | 'wenqu' | 'kaiyang' | 'yaoguang' | 'huagai' | 'qiming' | 'changgeng' | 'qisha' | null
+export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | 'wenqu' | 'kaiyang' | 'yaoguang' | 'huagai' | 'qiming' | 'changgeng' | 'qisha' | 'taiyi' | null
 
 // ---------------------------------------------------------------------------
 // Domain tone tables
@@ -28,6 +28,7 @@ const DOMAIN_NAMES: Record<string, string> = {
   qiming: '启明',
   changgeng: '长庚',
   qisha: '七杀',
+  taiyi: '太一',
 }
 
 /**
@@ -239,6 +240,8 @@ const DOMAIN_TONE: Record<string, Array<[string, string]>> = {
     ['正在分析', '清点占位中'],
     ['测一下', '核一下还有没有消费者'],
   ],
+  // 太一 (taiyi) 刻意不设短语表——静域不报进度、不催节律，走默认电台措辞即可。
+  // 留空是设计，不是遗漏：给它一套「正在修复中…」的进度腔，恰恰背叛了它的不动。
 }
 
 // ---------------------------------------------------------------------------

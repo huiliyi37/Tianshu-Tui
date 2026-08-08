@@ -101,6 +101,23 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(resolved?.prompt.includes('risk audit'))
   })
 
+  it('/team prompt 波次默认自动推进——不要求 model 每波手动再次调用 team_orchestrate', () => {
+    const resolved = resolveEcosystemWorkflowInput('/team docs/superpowers/plans/loop-split-v3.md')
+
+    assert.equal(resolved?.command, '/team')
+    assert.ok(resolved?.prompt.includes('auto-advance'))
+    // 旧出口文案已移除：不再指示 model「若输出显示还有波次，手动再调 team_orchestrate 传 fromWave」。
+    assert.ok(!resolved?.prompt.includes('fromWave: <next wave index>'))
+  })
+
+  it('/team prompt fromWave 仅用于人工恢复（中断后从指定波次续跑）', () => {
+    const resolved = resolveEcosystemWorkflowInput('/team docs/superpowers/plans/loop-split-v3.md')
+
+    assert.equal(resolved?.command, '/team')
+    assert.ok(resolved?.prompt.includes('fromWave'))
+    assert.ok(resolved?.prompt.includes('manual recovery'))
+  })
+
   it('returns usage prompt for empty /team args', () => {
     const resolved = resolveEcosystemWorkflowInput('/team')
 

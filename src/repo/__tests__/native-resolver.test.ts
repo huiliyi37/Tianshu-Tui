@@ -46,6 +46,64 @@ describe('native-resolver', () => {
     instance.close()
   })
 
+  it('finds the packed native/ from a nested caller (dist is a tsc tree, not a bundle)', () => {
+    // Real callers live at dist/repo/meridian-db.js, dist/agent/*.js … while
+    // native/ sits at the dist root. A same-directory probe only ever matched
+    // dist/main.js, so every real caller fell through to Path 2 and picked up
+    // the binary-less staged wrapper — sqlite off everywhere, no error.
+    const root = join(tmpdir(), `native-resolver-nested-${process.pid}-${Date.now()}`)
+    mkdirSync(join(root, 'native'), { recursive: true })
+    mkdirSync(join(root, 'repo'), { recursive: true })
+    writeFileSync(join(root, 'native', 'better_sqlite3.node'), 'not a real addon')
+    try {
+      // The throw IS the assertion that Path 1 matched: tmpdir has no resolvable
+      // wrapper, and only Path 1 reports that as a packaging bug. Before the fix
+      // this same input returned null.
+      assert.throws(
+        () => resolveBetterSqlite3(pathToFileURL(join(root, 'repo', 'meridian-db.js')).href),
+        (err: unknown) => (err as { code?: string })?.code === 'ESQLITE_BUNDLE_BROKEN',
+        'a caller one level down must still see the packed native/',
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves from a real dist/<area>/ caller when the bundle is packed', (t) => {
+    if (!existsSync(join(process.cwd(), 'dist', 'native', 'better_sqlite3.node'))) {
+      t.skip('dist/native/better_sqlite3.node not found — run: node scripts/pack-native.js')
+      return
+    }
+    // Byte-for-byte what meridian-db.js passes as import.meta.url at runtime.
+    const url = pathToFileURL(join(process.cwd(), 'dist', 'repo', 'meridian-db.js')).href
+    const db = resolveBetterSqlite3(url)
+    assert.ok(db, 'nested dist caller must resolve a constructor')
+    const instance = new db(':memory:')
+    instance.exec('CREATE TABLE t (x INTEGER)')
+    instance.prepare('INSERT INTO t VALUES (?)').run(11)
+    assert.equal((instance.prepare('SELECT x FROM t').get() as { x: number }).x, 11)
+    instance.close()
+  })
+
+  it('stops walking up before it can bind an unrelated native/ binary', () => {
+    // Walking up is bounded: an ancestor far above the install root is somebody
+    // else's, and binding a stranger's .node is worse than not finding one.
+    const root = join(tmpdir(), `native-resolver-deep-${process.pid}-${Date.now()}`)
+    const deep = join(root, 'a', 'b', 'c', 'd', 'e', 'f', 'g')
+    mkdirSync(join(root, 'native'), { recursive: true })
+    mkdirSync(deep, { recursive: true })
+    writeFileSync(join(root, 'native', 'better_sqlite3.node'), 'not a real addon')
+    try {
+      assert.equal(
+        resolveBetterSqlite3(pathToFileURL(join(deep, 'mod.js')).href),
+        null,
+        'seven levels up is out of range',
+      )
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('throws (no silent degrade) when native binary is present but wrapper is unresolvable', () => {
     // A location OUTSIDE the repo so node module resolution finds no
     // better-sqlite3 — but with a native/ binary present, which is exactly the

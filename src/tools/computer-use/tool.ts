@@ -111,8 +111,9 @@ const BROWSER_ONLY_ACTIONS: ReadonlySet<ComputerUseAction> = new Set([
   'navigate', 'read_page', 'js_eval', 'tabs', 'browser_adopt',
 ] as ComputerUseAction[])
 
-/** Arbitrary-code / endpoint-takeover surface — approval can NEVER be skipped
- *  by a per-app grant (mirrors browser.ts's fail-closed posture). */
+/** Arbitrary-code / endpoint-takeover surface — approval can never be skipped
+ *  by a per-app grant (mirrors browser.ts's fail-closed posture). YOLO mode
+ *  waives approvals wholesale in the pipeline, not here. */
 const ALWAYS_APPROVE_ACTIONS: ReadonlySet<ComputerUseAction> = new Set([
   'js_eval', 'browser_adopt',
 ] as ComputerUseAction[])
@@ -309,7 +310,7 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
    * the rendered line: role, title and value), each with its ancestor chain
    * for orientation. Line order and indentation are preserved.
    */
-  function filterTreeLines(tree: string, query: string): { matched: number; text: string } {
+  function filterTreeLines(tree: string, query: string): { matched: number; total: number; text: string } {
     const lines = tree.split('\n')
     const needle = query.toLowerCase()
     const keep = new Set<number>()
@@ -333,7 +334,7 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
       }
     }
     const text = lines.filter((_, i) => keep.has(i)).join('\n')
-    return { matched, text }
+    return { matched, total: lines.length, text }
   }
 
   /** Fallback orientation when a query matches nothing: menu bar + windows. */
@@ -545,9 +546,9 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
 浏览器快速路径：Chrome 系目标（Chrome/Chromium/Edge/Brave）在有 DevTools（CDP）后端可用时自动使用——快照秒级完成，窗口被遮挡时点击/输入仍有效。对浏览器 launch_app 会启动专用自动化 profile（登录态跨会话保留）。浏览器专属操作：
 - navigate(app, url)：导航到 URL，或 "back" / "forward" / "reload"。
 - read_page(app)：完整页面文本（innerText）——无树节点上限；用于阅读文章/长内容。
-- js_eval(app, expression)：在页面中运行 JavaScript 并返回结果（始终需要审批）。
+- js_eval(app, expression)：在页面中运行 JavaScript 并返回结果（需要审批；自治/YOLO 档免审批）。
 - tabs(app, tab_op, tab?, url?)：列出/激活/新建/关闭浏览器标签页（tab 是 list 中的 1-based 索引）。
-- browser_adopt(endpoint)：附加到你用 --remote-debugging-port 启动的 Chrome（始终需要审批）。
+- browser_adopt(endpoint)：附加到你用 --remote-debugging-port 启动的 Chrome（需要审批；自治/YOLO 档免审批）。
 
 反馈循环：每次变更操作后工具会重新读取 UI 并附加变化摘要（新增/移除的元素）。UI 变化时 ref 缓存会刷新——diff 中显示的 ref 立即可点击，操作之前的 ref 已失效。如果目标 ref 失效，工具会在恰好一个元素仍匹配相同 role+title 时自动重拍快照并重试；否则刷新缓存并请你重新选择目标。`,
       input_schema: {
@@ -688,11 +689,14 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
             if (typeof query !== 'string' || !query.trim()) {
               return { content: 'find 需要非空 "query"，用于匹配角色/标题/值。', isError: true }
             }
-            const { tree, refs } = await snapshotIntoCache(driver, params, app)
-            const { matched, text } = filterTreeLines(tree, query.trim())
+            const { tree } = await snapshotIntoCache(driver, params, app)
+            const { matched, total, text } = filterTreeLines(tree, query.trim())
             if (matched === 0) {
               return {
-                content: `在 ${app} 中未找到匹配 "${query.trim()}" 的元素（已扫描 ${refs.length} 个）。顶层结构供定位：\n${treeOutline(tree)}`,
+                content:
+                  `在 ${app} 中未找到匹配 "${query.trim()}" 的元素（匹配 0 行，共扫描 ${total} 行）。` +
+                  `find 仅匹配可访问性树行（角色/标题/值）——文档正文等文本值可能不在树行中，可 snapshot 查看全文。` +
+                  `顶层结构供定位：\n${treeOutline(tree)}`,
               }
             }
             const capNote = matched > FIND_MAX_LINES ? `\n（仅显示前 ${FIND_MAX_LINES} 条匹配——请缩小查询）` : ''
@@ -731,8 +735,11 @@ export function createComputerUseTool(options: ComputerUseToolOptions = {}): Too
                 errorKind: 'timeout',
               }
             }
+            const { total: lastTotal } = filterTreeLines(lastTree, needle)
             return {
-              content: `wait_for 在 ${deadline}ms 后超时——"${needle}" 未出现在 ${app}。当前顶层结构：\n${treeOutline(lastTree)}\n（ref 缓存已刷新——详情请 find/snapshot。）`,
+              content:
+                `wait_for 在 ${deadline}ms 后超时——"${needle}" 未出现在 ${app}（匹配 0 行，共扫描 ${lastTotal} 行；` +
+                `仅匹配树行文本，文档正文等文本值可能不在树中）。当前顶层结构：\n${treeOutline(lastTree)}\n（ref 缓存已刷新——详情请 find/snapshot。）`,
               isError: true,
               errorKind: 'timeout',
             }

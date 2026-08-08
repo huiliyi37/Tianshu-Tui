@@ -188,12 +188,34 @@ export class MeridianDb {
     return this.conn
   }
 
+  /**
+   * Whether the index is actually backed by sqlite.
+   *
+   * Callers must consult this BEFORE doing expensive work whose only consumer is
+   * the index (reading a file, hashing it, running tree-sitter). Feeding the
+   * no-op DB is not merely wasted storage: `needsParse` can never observe a
+   * previous write, so every caller re-does the same work forever.
+   *
+   * Touching `this.db` first is load-bearing — `_available` starts out `true`
+   * and only becomes accurate once the lazy connection has been attempted.
+   */
+  get available(): boolean {
+    void this.db
+    return this._available
+  }
+
   needsParse(filePath: string, contentHash: string): boolean {
+    // No index means nothing to refresh. Returning `true` here (the shape the
+    // no-op DB produces on its own, since its `get()` always yields undefined)
+    // tells callers to parse and store — into a sink that keeps no record — so
+    // the very next call asks again.
+    if (!this.available) return false
     const row = this.db.prepare('SELECT content_hash FROM files WHERE path = ?').get(filePath) as { content_hash: string } | undefined
     return !row || row.content_hash !== contentHash
   }
 
   upsertFile(result: ParseResult): void {
+    if (!this.available) return
     const tx = this.db.transaction(() => {
       this.db.prepare('INSERT OR REPLACE INTO files (path, content_hash) VALUES (?, ?)').run(result.filePath, result.contentHash)
       this.db.prepare('DELETE FROM symbols WHERE file_path = ?').run(result.filePath)
@@ -234,6 +256,19 @@ export class MeridianDb {
     }))
   }
 
+  /** Get every indexed symbol — cross-file callee-name matching reads this. */
+  getAllSymbols(): MeridianSymbol[] {
+    return (this.db.prepare('SELECT * FROM symbols').all() as Array<Record<string, unknown>>).map(row => ({
+      id: row.id as string,
+      name: row.name as string,
+      kind: row.kind as MeridianSymbol['kind'],
+      filePath: row.file_path as string,
+      line: row.line as number,
+      exported: (row.exported as number) === 1,
+      contentHash: row.content_hash as string,
+    }))
+  }
+
   getEdgesFrom(symbolId: string): MeridianEdge[] {
     return (this.db.prepare('SELECT * FROM edges WHERE source_id = ?').all(symbolId) as Array<Record<string, unknown>>).map(row => ({
       sourceId: row.source_id as string,
@@ -255,6 +290,7 @@ export class MeridianDb {
   }
 
   recordAccess(filePath: string): void {
+    if (!this.available) return
     this.db.prepare('INSERT INTO access_log (file_path) VALUES (?)').run(filePath)
   }
 

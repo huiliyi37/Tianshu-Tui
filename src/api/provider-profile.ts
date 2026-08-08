@@ -6,6 +6,24 @@ export interface AttentionProfile {
   collapseAgeTurns: number
 }
 
+/**
+ * Provider-specific compaction-schedule overrides. Absent = the strategy
+ * defaults derived from cacheType/persistent apply unchanged. Consumed at the
+ * derivation points (compactPolicyRatios / decideCompactTier /
+ * decideCompactAction) so no call site needs provider special-casing.
+ * Structural duplicate of CompactPolicyRatios fields to avoid an
+ * api→compact import cycle (compact/constants already imports this module).
+ */
+export interface ProviderCompactionOverrides {
+  /** Partial override of the strategy tier ratios (watch/compact/reactive/ceiling). */
+  ratios?: { watch?: number; compact?: number; reactive?: number; ceiling?: number }
+  /** Replaces the window-derived precision ceiling (accuracy guard). An
+   *  explicit user-config override still wins over this provider default. */
+  precisionCeiling?: number
+  /** 1M-window LLM compact ladder rungs (partial/full rewrite trigger ratios). */
+  llmLadder?: { partial: number; full: number }
+}
+
 export interface ProviderProfile {
   cacheType: CacheType
   persistent: boolean
@@ -14,12 +32,31 @@ export interface ProviderProfile {
   ttlSeconds?: number
   contextWindow: number
   attentionProfile?: AttentionProfile
+  compaction?: ProviderCompactionOverrides
 }
 
 const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
   deepseek: {
     cacheType: 'exact-prefix', persistent: true, minCacheTokens: 64,
     attentionProfile: { effectiveAttentionRatio: 0.95, toolDensityThreshold: 0.7, collapseAgeTurns: 8 },
+  },
+  // Spark (DeepSeek 极速版): same official endpoint & cache semantics as the
+  // deepseek entry. Was missing entirely until 2026-08-07 — the 'none'
+  // fallback silently degraded the whole compact ladder (aggressive tiers at
+  // 51/71/85% instead of 73/87/93%) and disabled the persistent-exact-prefix
+  // delay protections for every spark session.
+  // compaction overrides (product decision 2026-08-07, "85% 再压缩"): spark
+  // sessions defer history-rewriting compaction until 85% of the window —
+  // tier compact ratio, the 1M precision ceiling, and the 1M LLM ladder all
+  // move to 0.85 (full-llm rung 0.90; reactive/ceiling guards stay put).
+  'deepseek-spark': {
+    cacheType: 'exact-prefix', persistent: true, minCacheTokens: 64,
+    attentionProfile: { effectiveAttentionRatio: 0.95, toolDensityThreshold: 0.7, collapseAgeTurns: 8 },
+    compaction: {
+      ratios: { compact: 0.85 },
+      precisionCeiling: 0.85,
+      llmLadder: { partial: 0.85, full: 0.9 },
+    },
   },
   anthropic: { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 4096, ttlSeconds: 300 },
   openai: { cacheType: 'partial-prefix', persistent: false, minCacheTokens: 1024, cacheGranularity: 128, ttlSeconds: 600 },

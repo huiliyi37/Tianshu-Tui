@@ -284,7 +284,6 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.doesNotMatch(seenContexts[1]!, /name="天梁"/)
   })
 
-
   it('stores cache diagnostic when latest turn hit rate is low', async () => {
     const session = new SessionContext()
     const registry = new ToolRegistry()
@@ -2055,7 +2054,7 @@ describe('AgentLoop — convergence score-abort grace turn', () => {
   })
 })
 
-describe('AgentLoop — recordToolHistory errorClass threading', () => {
+describe('AgentLoop — recordToolHistory metadata threading', () => {
   it('writes errorClass into recentToolHistory entry (loop-factory drop-param guard)', () => {
     const session = new SessionContext()
     const registry = new ToolRegistry()
@@ -2067,6 +2066,21 @@ describe('AgentLoop — recordToolHistory errorClass threading', () => {
     const entry = agent.recentToolHistory.at(-1)
     assert.equal(entry?.errorClass, 'timeout', 'errorClass must survive into the history entry')
     assert.equal(entry?.target, 'sleep 99', 'target should be stripped of cd boilerplate (none here)')
+  })
+
+  it('classifies the full bash command before truncating its history target', () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const client = mockClient([makeTextBlock('ok')])
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
+    const command = `grep needle ${'a'.repeat(60)} && touch changed.txt`
+
+    agent.recordToolHistory('bash', { command }, false, 'ok')
+
+    const entry = agent.recentToolHistory.at(-1)
+    assert.equal(entry?.target.includes('touch'), false, '前置：历史 target 已截断掉写后缀')
+    assert.equal(entry?.bashActivity, 'productive', '效果标签必须来自未截断的完整 command')
   })
 })
 

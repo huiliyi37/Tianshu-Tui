@@ -14,7 +14,8 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import type { WorkerResult, WorkOrder } from './work-order.js'
+import type { DependencyEdge, WorkerResult, WorkOrder } from './work-order.js'
+import { dependencyId } from './work-order.js'
 import { serializeUnifiedPlan, type UnifiedPlan } from './unified-plan.js'
 
 const CHECKPOINT_DIR = '.rivet/checkpoints'
@@ -38,8 +39,21 @@ export interface WaveCheckpoint {
   lastCompletedWave: number
   /** Results from all completed waves. */
   completedResults: WorkerResult[]
-  /** Remaining tasks not yet dispatched. */
-  remainingOrders: Array<Pick<WorkOrder, 'id' | 'objective' | 'profile' | 'kind' | 'scope' | 'authority'>>
+  /**
+   * Remaining tasks not yet dispatched.
+   *
+   * `dependsOn` 随任务一起存盘（2026-08-05）：此前 checkpoint 只存
+   * id/objective/profile/kind/scope/authority，resume 重建计划时依赖恒为空，
+   * 剩余任务之间的显式顺序（T3 依赖 T2）与条件边（onFailure=skip/alternate）
+   * 全部丢失——重新分波只能靠同文件串行等启发式反推，可能乱序执行。
+   * 数据源 TeamTask 本来就带 dependsOn，是保存时没拷。
+   *
+   * 旧 checkpoint 无此字段 → 读回为 undefined，按空依赖处理（向后兼容）。
+   */
+  remainingOrders: Array<
+    Pick<WorkOrder, 'id' | 'objective' | 'profile' | 'kind' | 'scope' | 'authority'>
+    & { dependsOn?: Array<string | DependencyEdge> }
+  >
   /** Original objective for context. */
   objective: string
   /** Total waves planned. */
@@ -103,6 +117,13 @@ export function listCheckpoints(cwd: string): Array<{ groupId: string; wave: num
  */
 export function buildResumeFromCheckpoint(cp: WaveCheckpoint): { planJson: string; prompt: string } | null {
   if (cp.remainingOrders.length === 0) return null
+  // 只保留指向「同样还没跑」的任务的依赖。被依赖方若已在前面的波完成，它不在
+  // remainingOrders 里——留着这条边会让 validateUnifiedPlan 判 dangling 而拒绝
+  // 整份计划。剥掉等价于「该依赖已满足」，与 dispatchWaveAt 对跨波已完成依赖
+  // 的处理同口径。
+  const remainingIds = new Set(cp.remainingOrders.map(o => o.id))
+  const keepDeps = (deps: Array<string | DependencyEdge> | undefined): Array<string | DependencyEdge> =>
+    (deps ?? []).filter(d => remainingIds.has(dependencyId(d)))
   const plan: UnifiedPlan = {
     version: 1,
     objective: cp.objective,
@@ -113,7 +134,7 @@ export function buildResumeFromCheckpoint(cp: WaveCheckpoint): { planJson: strin
       profile: order.profile,
       kind: order.kind,
       files: order.scope.files ?? [],
-      dependsOn: [],
+      dependsOn: keepDeps(order.dependsOn),
       riskTier: 'medium' as const,
     })),
     source: 'team_orchestrate',

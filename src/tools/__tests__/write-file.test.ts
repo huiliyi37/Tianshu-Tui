@@ -236,3 +236,60 @@ describe('write_file tool — blind-overwrite guard', () => {
     assert.equal(readFileSync(file, 'utf-8'), original, 'File should be rolled back to original content')
   })
 })
+
+describe('write_file tool — rewrite-loop hint (A-type placeholder loop)', () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true })
+    mkdirSync(TEST_DIR, { recursive: true })
+  })
+
+  it('second write to the same path appends a rewrite-loop hint', async () => {
+    const file = join(TEST_DIR, 'loop.txt')
+    const r1 = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'version one\n',
+    }))
+    assert.ok(!r1.isError)
+    assert.ok(!r1.content.includes('疑似重写循环'), 'first write must not hint')
+
+    // Second write overwrites with different content; observe first so the
+    // blind-overwrite guard lets it through (mirrors a real rewrite loop).
+    markObserved(file)
+    const r2 = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'version two\n',
+    }))
+    assert.ok(!r2.isError)
+    assert.ok(r2.content.includes('疑似重写循环'), `second write must hint, got: ${r2.content}`)
+    assert.ok(r2.content.includes('指针是正常截断'), 'hint explains the pointer echo is not a placeholder')
+  })
+
+  it('hint is session-scoped — a fresh session writing once has no hint', async () => {
+    const file = join(TEST_DIR, 'cross-session.txt')
+    const sessionA = 'sess-a'
+    const sessionB = 'sess-b'
+
+    const rA1 = await WRITE_FILE_TOOL.execute({
+      ...makeParams({ file_path: file, content: 'a1\n' }),
+      sessionId: sessionA,
+    })
+    assert.ok(!rA1.isError)
+    markObserved(file)
+    const rA2 = await WRITE_FILE_TOOL.execute({
+      ...makeParams({ file_path: file, content: 'a2\n' }),
+      sessionId: sessionA,
+    })
+    assert.ok(rA2.content.includes('疑似重写循环'), 'second write in the same session hints')
+
+    // Fresh session, first write to the same path: must NOT hint. Content is
+    // byte-identical to disk so the blind-overwrite guard (which keys on the
+    // same sessionId) does not intercept — this test targets the hint, not
+    // the guard.
+    const rB1 = await WRITE_FILE_TOOL.execute({
+      ...makeParams({ file_path: file, content: 'a2\n' }),
+      sessionId: sessionB,
+    })
+    assert.ok(!rB1.isError)
+    assert.ok(!rB1.content.includes('疑似重写循环'), `fresh session first write must not hint, got: ${rB1.content}`)
+  })
+})

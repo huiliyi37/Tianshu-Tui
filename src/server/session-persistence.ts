@@ -16,10 +16,13 @@
  */
 import {
   appendFileSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -39,7 +42,10 @@ import type {
 } from './session-manager.js'
 
 export class FileSessionPersistence implements SessionPersistenceAdapter {
-  constructor(private readonly baseDir: string) {}
+  constructor(
+    private readonly baseDir: string,
+    private readonly opts: { maxEventsDiskBytes?: number } = {},
+  ) {}
 
   /** Per-session event write buffer — batches high-frequency appendFileSync
    *  (streaming deltas can fire hundreds per turn) into one disk write per
@@ -51,6 +57,9 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
    *  death, where page-cache contents survive. */
   private eventBuffers = new Map<string, BufferedLine[]>()
   private flushTimer: ReturnType<typeof setTimeout> | null = null
+  /** Per-session deferred-trim in-flight guard: one queued trim per session
+   *  (flush 热路径只入队，裁剪在 setImmediate 中执行——见 deferTrim）。 */
+  private pendingTrims = new Set<string>()
   private static readonly FLUSH_INTERVAL_MS = 100
   private static readonly FLUSH_MAX_LINES = 50
   /** 稀疏索引间距：每 ≥N 个事件在 events.index.jsonl 记一条 {seq, offset}。
@@ -66,15 +75,24 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
    *  events are replaced with a truncated stub that preserves seq/ts/type for
    *  recovery diagnostics. */
   private static readonly MAX_EVENT_JSON_BYTES = 1_000_000 // 1 MB
+  /** Default whole-file disk cap (overridable via constructor / runtime.lean). */
+  private static readonly DEFAULT_MAX_EVENTS_DISK_BYTES = 50 * 1024 * 1024
   /** Events that must be on disk the moment they are appended. Delta/phase
    *  chatter stays on the debounce timer. */
   private static readonly CRITICAL_TYPES: ReadonlySet<string> = new Set([
     'user', 'tool_result', 'status', 'error', 'done',
     'approval_required', 'approval_resolved', 'unattended_halt',
+    // Domain record snapshots are saved synchronously with these events. Flush
+    // both immediately so a crash cannot restore metadata without its timeline.
+    'domain_resolved', 'domain_changed',
     // Plan Mode draft invalidation — desktop "起草中" should not wait on the
     // 100ms debounce timer after a successful write_file/edit_file.
     'plan_draft',
   ])
+
+  private maxEventsDiskBytes(): number {
+    return this.opts.maxEventsDiskBytes ?? FileSessionPersistence.DEFAULT_MAX_EVENTS_DISK_BYTES
+  }
 
   private dir(id: string): string {
     return join(this.baseDir, sanitize(id))
@@ -131,7 +149,7 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   }
 
   /** Flush a single session's buffered events to disk immediately. */
-  private flushSession(sessionId: string): void {
+  private flushSession(sessionId: string, immediateTrim = false): void {
     const buf = this.eventBuffers.get(sessionId)
     if (!buf || buf.length === 0) return
     this.eventBuffers.set(sessionId, [])
@@ -151,6 +169,95 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
     } catch {
       // 索引是纯加速层——写失败下次读走全量重建。
       this.indexTracks.delete(sessionId)
+    }
+    // Bound unbounded append-only growth: keep the tail under the disk cap.
+    // 裁剪从 flush 热路径移出：常规 flush 入队延迟执行（setImmediate），只有
+    // 关闭路径（flushSync）同步裁——读前/关前保证磁盘已收敛。
+    try {
+      if (immediateTrim) this.trimEventsFileIfNeeded(sessionId, d)
+      else this.deferTrim(sessionId, d)
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /** 把裁剪排入 setImmediate，同会话最多一个在途任务（pendingTrims 去重）。
+   *  事件循环有空档才执行，flush 关键路径不被 openSync/readSync/rename 阻塞。 */
+  private deferTrim(sessionId: string, dir: string): void {
+    if (this.pendingTrims.has(sessionId)) return
+    this.pendingTrims.add(sessionId)
+    setImmediate(() => {
+      try {
+        // 会话可能已被 deleteSession 移除（目录没了）→ statSync 失败即返回。
+        this.trimEventsFileIfNeeded(sessionId, dir)
+      } catch {
+        /* best-effort */
+      } finally {
+        this.pendingTrims.delete(sessionId)
+      }
+    })
+  }
+
+  /**
+   * If events.jsonl exceeds maxEventsDiskBytes, rewrite keeping only the
+   * trailing bytes (aligned to the next newline). Invalidates the sparse index
+   * so the next cold read rebuilds it.
+   */
+  trimEventsFileIfNeeded(sessionId: string, dir?: string): void {
+    const d = dir ?? this.dir(sessionId)
+    const file = join(d, 'events.jsonl')
+    let size = 0
+    try { size = statSync(file).size } catch { return }
+    const max = this.maxEventsDiskBytes()
+    if (size <= max) return
+
+    let tail: Buffer | null = null
+    let keepLen = 0
+    const fd = openSync(file, 'r')
+    try {
+      const keepFrom = size - max
+      // Align to next newline so we don't keep a partial leading event.
+      const probe = Buffer.alloc(Math.min(64 * 1024, size - keepFrom))
+      const n = readSync(fd, probe, 0, probe.length, keepFrom)
+      const nl = probe.subarray(0, n).indexOf(0x0a)
+      const start = nl >= 0 ? keepFrom + nl + 1 : keepFrom
+      keepLen = size - start
+      if (keepLen <= 0 || keepLen >= size) return
+      tail = Buffer.alloc(keepLen)
+      readSync(fd, tail, 0, keepLen, start)
+    } finally {
+      // Close before rename — Windows cannot replace a file while any handle is open.
+      closeSync(fd)
+    }
+    if (!tail) return
+
+    const tmp = join(d, 'events.jsonl.trim.tmp')
+    writeFileSync(tmp, tail)
+    renameSync(tmp, file)
+    // Drop sparse index — offsets are now wrong.
+    try { rmSync(join(d, 'events.index.jsonl'), { force: true }) } catch { /* ok */ }
+    this.indexTracks.delete(sessionId)
+    // 裁剪审计 marker（无 seq 的纯磁盘标记）：读路径把缺 seq 的行当损坏行丢弃
+    // （parseEventsJsonlRaw / scanLogWithOffsets 同语义），所以它只对磁盘审计
+    // 可见——桌面端如需在事件流里感知裁剪，应由 SessionManager 层经 appendMarker
+    // 写带 seq 的 marker（persistence 层没有 seq 来源，不能安全自造）。
+    // 去重：保留区里已有 events_trimmed marker（上轮写入后保尾裁剪会把它留在
+    // 窗口内）→ 不再追加。高频超限下每轮 flush 都会触发 trim，重复 marker
+    // 会让文件在 max+markerLen 附近持续膨胀。
+    try {
+      if (tail.indexOf(EVENTS_TRIMMED_MARKER) === -1) {
+        appendFileSync(
+          file,
+          JSON.stringify({
+            ts: Date.now(),
+            type: 'events_trimmed',
+            data: { removedBytes: size - keepLen, keptBytes: keepLen },
+          }) + '\n',
+          'utf8',
+        )
+      }
+    } catch {
+      /* marker is best-effort — never break the trim itself */
     }
   }
 
@@ -191,10 +298,10 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   }
 
   /** Flush ALL session buffers — called by the debounce timer + flushSync. */
-  private flushAll(): void {
+  private flushAll(immediateTrim = false): void {
     this.flushTimer = null
     for (const id of this.eventBuffers.keys()) {
-      this.flushSession(id)
+      this.flushSession(id, immediateTrim)
     }
   }
 
@@ -204,7 +311,14 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
       clearTimeout(this.flushTimer)
       this.flushTimer = null
     }
-    this.flushAll()
+    this.flushAll(true)
+    // 排空在途延迟裁剪：flushAll(true) 只覆盖仍有 buffer 的会话，critical
+    // flush 已清空 buffer 并排队的 trim 在这里同步完成——shutdown 前磁盘必须
+    // 收敛到上限内。setImmediate 回调稍后重跑是幂等的（size ≤ max 直接返回）。
+    for (const id of [...this.pendingTrims]) {
+      try { this.trimEventsFileIfNeeded(id) } catch { /* best-effort */ }
+      this.pendingTrims.delete(id)
+    }
   }
 
   saveImage(sessionId: string, imgId: string, base64: string, mime: string): void {
@@ -276,6 +390,108 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
   loadEvents(id: string): SessionEvent[] {
     this.flushSession(id)
     return this.readEvents(this.dir(id))
+  }
+
+  /**
+   * Return the maximum durable event seq without trusting index.json.lastSeq.
+   * The sparse index is only a seek anchor; its line and byte offset are
+   * validated before the tail is scanned. Any uncertainty falls back to a
+   * complete valid-line scan so callers never receive a stale high-water mark.
+   */
+  loadEventHighWater(id: string): number {
+    this.flushSession(id)
+    if ((this.eventBuffers.get(id)?.length ?? 0) > 0) {
+      throw new Error(`Unable to establish durable event high-water for ${id}: buffered events remain`)
+    }
+
+    const file = join(this.dir(id), 'events.jsonl')
+    let size: number
+    try {
+      size = statSync(file).size
+    } catch (error) {
+      if (isMissingFile(error)) return 0
+      throw error
+    }
+    if (size === 0) return 0
+
+    const entries = readHighWaterIndexEntries(join(this.dir(id), 'events.index.jsonl'))
+    const anchor = entries?.[entries.length - 1]
+    if (anchor) {
+      const indexed = this.scanFromHighWaterAnchor(file, size, anchor)
+      if (indexed !== null) return indexed
+    }
+
+    // Missing/corrupt/trimmed/misaligned indexes are an explicit slow path.
+    return this.scanEventFileMax(file, size)
+  }
+
+  /** Validate the final sparse-index anchor and scan from its byte offset. */
+  private scanFromHighWaterAnchor(file: string, expectedSize: number, anchor: IndexEntry): number | null {
+    if (
+      !Number.isSafeInteger(anchor.seq) ||
+      anchor.seq < 0 ||
+      !Number.isSafeInteger(anchor.offset) ||
+      anchor.offset < 0 ||
+      anchor.offset >= expectedSize
+    ) return null
+
+    const fd = openSync(file, 'r')
+    try {
+      if (anchor.offset > 0) {
+        const previous = Buffer.allocUnsafe(1)
+        if (readSync(fd, previous, 0, 1, anchor.offset - 1) !== 1 || previous[0] !== 0x0a) {
+          return null
+        }
+      }
+      const bytes = Buffer.allocUnsafe(expectedSize - anchor.offset)
+      let read = 0
+      while (read < bytes.length) {
+        const n = readSync(fd, bytes, read, bytes.length - read, anchor.offset + read)
+        if (n <= 0) return null
+        read += n
+      }
+      if (read !== bytes.length) return null
+
+      const text = bytes.toString('utf8')
+      const firstLineEnd = text.indexOf('\n')
+      const firstLine = firstLineEnd < 0 ? text : text.slice(0, firstLineEnd)
+      const first = parseEventLine(firstLine)
+      if (!first || first.seq !== anchor.seq) return null
+
+      const highWater = maxSeqInEventsText(text)
+      if (highWater < anchor.seq) return null
+      return this.assertStableFileMax(file, expectedSize, highWater)
+    } catch {
+      return null
+    } finally {
+      closeSync(fd)
+    }
+  }
+
+  /** Complete fallback scan; malformed and seq-less marker lines are ignored. */
+  private scanEventFileMax(file: string, expectedSize: number): number {
+    let text: string
+    try {
+      text = readFileSync(file, 'utf8')
+    } catch (error) {
+      throw new Error(`Unable to establish durable event high-water: cannot read ${file}`, { cause: error })
+    }
+    const highWater = maxSeqInEventsText(text)
+    return this.assertStableFileMax(file, expectedSize, highWater)
+  }
+
+  /** Refuse a result if a concurrent trim/append changed the file while reading. */
+  private assertStableFileMax(file: string, expectedSize: number, highWater: number): number {
+    let actualSize: number
+    try {
+      actualSize = statSync(file).size
+    } catch (error) {
+      throw new Error(`Unable to establish durable event high-water: ${file} changed while reading`, { cause: error })
+    }
+    if (actualSize !== expectedSize) {
+      throw new Error(`Unable to establish durable event high-water: ${file} changed while reading`)
+    }
+    return highWater
   }
 
   /**
@@ -487,6 +703,9 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
     this.flushSession(id)
     this.eventBuffers.delete(id)
     this.indexTracks.delete(id)
+    // 在途的延迟裁剪任务指向的目录即将消失——清掉防 Set 泄漏，回调里
+    // statSync 失败也会自行返回。
+    this.pendingTrims.delete(id)
     try { rmSync(this.dir(id), { recursive: true, force: true }) } catch { /* best-effort */ }
   }
 
@@ -570,6 +789,10 @@ function sanitize(id: string): string {
   return id.replace(/[^A-Za-z0-9._-]/g, '_')
 }
 
+/** events_trimmed marker 行的指纹子串——trim 去重用它判断保留区里是否已有
+ *  marker（普通事件行的 type 不可能是这个值）。 */
+const EVENTS_TRIMMED_MARKER = Buffer.from('"type":"events_trimmed"')
+
 /** 事件写缓冲行：flush 时既要行文本（落盘）也要 seq（稀疏索引条目）。 */
 interface BufferedLine {
   line: string
@@ -585,6 +808,80 @@ interface IndexTrack {
 interface IndexEntry {
   seq: number
   offset: number
+}
+
+/** Strict index reader for seq allocation; unlike pagination, no malformed line
+ * may be ignored because an omitted anchor could make the result stale. */
+function readHighWaterIndexEntries(file: string): IndexEntry[] | null {
+  let text: string
+  try {
+    text = readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+  const entries: IndexEntry[] = []
+  for (const raw of text.split('\n')) {
+    const trimmed = raw.trim()
+    if (!trimmed) continue
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      return null
+    }
+    if (!parsed || typeof parsed !== 'object') return null
+    const entry = parsed as Partial<IndexEntry>
+    const seq = entry.seq
+    const offset = entry.offset
+    if (
+      typeof seq !== 'number' ||
+      !Number.isSafeInteger(seq) ||
+      seq < 0 ||
+      typeof offset !== 'number' ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0
+    ) return null
+    const previous = entries[entries.length - 1]
+    if (previous && (seq <= previous.seq || offset <= previous.offset)) return null
+    entries.push({ seq, offset })
+  }
+  // An index created after a partial historical scan does not cover the head;
+  // using it as a high-water anchor could miss a larger seq before offset 0.
+  if (entries.length === 0 || entries[0]!.offset !== 0) return null
+  return entries
+}
+
+/** Parse one JSONL line using the same event validity boundary as the worker. */
+function parseEventLine(line: string): { seq: number } | null {
+  const trimmed = line.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = JSON.parse(trimmed) as { seq?: unknown; type?: unknown }
+    if (
+      parsed &&
+      typeof parsed.seq === 'number' &&
+      Number.isSafeInteger(parsed.seq) &&
+      parsed.seq >= 0 &&
+      typeof parsed.type === 'string'
+    ) return { seq: parsed.seq }
+  } catch {
+    // Corrupt/torn lines are deliberately ignored by the full scan.
+  }
+  return null
+}
+
+/** Maximum seq among valid event lines; seq-less disk markers are ignored. */
+function maxSeqInEventsText(text: string): number {
+  let highWater = 0
+  for (const line of text.split('\n')) {
+    const parsed = parseEventLine(line)
+    if (parsed && parsed.seq > highWater) highWater = parsed.seq
+  }
+  return highWater
+}
+
+function isMissingFile(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
 }
 
 /**

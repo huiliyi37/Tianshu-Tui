@@ -10,6 +10,7 @@ import { chunkByDefinitions } from './chunker-treesitter.js'
 import { VectorIndex, type VectorIndexSnapshot } from './vector-index.js'
 import { reciprocalRankFusion } from './hybrid-search.js'
 import { type EmbeddingProvider, NullEmbeddingProvider } from './embedding-provider.js'
+import { rankSearchCandidates } from './search-salience.js'
 
 /** Cap on chunks embedded in one pass to bound first-search latency/cost. */
 const MAX_EMBED_CHUNKS = 4000
@@ -318,7 +319,7 @@ export class SemanticIndex {
   }
 
   search(query: string, limit = 10) {
-    return this.index.search(query, limit)
+    return rankSearchCandidates(this.index.search(query, Math.max(limit * 3, 20)), query, limit)
   }
 
   /** True when a usable embedding provider is wired in. */
@@ -382,13 +383,13 @@ export class SemanticIndex {
    */
   async searchHybrid(query: string, limit = 10): Promise<{ hits: SearchHit[]; backend: 'bm25' | 'hybrid' }> {
     const bm25Hits = this.index.search(query, Math.max(limit, 20))
-    if (!this.provider.isAvailable()) return { hits: bm25Hits.slice(0, limit), backend: 'bm25' }
+    if (!this.provider.isAvailable()) return { hits: rankSearchCandidates(bm25Hits, query, limit), backend: 'bm25' }
 
     try {
       if (this.vectorsDirty || this.vectors.size === 0) await this.ensureVectors()
       const [queryVec] = await this.provider.embed([query])
       if (!queryVec || queryVec.length === 0 || this.vectors.size === 0) {
-        return { hits: bm25Hits.slice(0, limit), backend: 'bm25' }
+        return { hits: rankSearchCandidates(bm25Hits, query, limit), backend: 'bm25' }
       }
       const vectorHits = this.vectors.search(queryVec, Math.max(limit, 20))
 
@@ -415,9 +416,9 @@ export class SemanticIndex {
         if (hit) hits.push({ ...hit, score: f.rrfScore })
         if (hits.length >= limit) break
       }
-      return { hits, backend: 'hybrid' }
+      return { hits: rankSearchCandidates(hits, query, limit), backend: 'hybrid' }
     } catch {
-      return { hits: bm25Hits.slice(0, limit), backend: 'bm25' }
+      return { hits: rankSearchCandidates(bm25Hits, query, limit), backend: 'bm25' }
     }
   }
 

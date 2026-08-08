@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AgentLoop } from '../loop.js'
 import { buildRuntimeSnapshot, createToolExecutionController, createSidePathUsageRecorder, createReclaimDecisionRecorder, createTurnStreamController } from '../loop-factory.js'
+import { runGateCompletion, type GateCompletionClient } from '../gate-completion.js'
 import { TurnCacheObservability } from '../cache-log-observability.js'
 
 /**
@@ -16,7 +17,7 @@ function fakeLoop(over: Partial<Record<string, unknown>> = {}): AgentLoop {
     cwd: '/work',
     session: { getTurnCount: () => 7 },
     recentToolHistory: [
-      { tool: 'bash', status: 'ok', target: 'ls', extra: 'dropped' },
+      { tool: 'bash', status: 'ok', target: 'ls', bashActivity: 'readonly', extra: 'dropped' },
       { tool: 'read_file', status: 'error', target: 'a.ts' },
     ],
     sensorium: { mood: 'calm' },
@@ -44,11 +45,11 @@ test('buildRuntimeSnapshot maps the bounded AgentLoop slice into a snapshot', ()
   assert.deepEqual(snap.thetaTelemetry, { lastTimedOut: true, consecutiveTimeouts: 2 })
 })
 
-test('buildRuntimeSnapshot projects recentToolHistory to tool/status/target only', () => {
+test('buildRuntimeSnapshot preserves bash activity but drops unrelated history fields', () => {
   const snap = buildRuntimeSnapshot(fakeLoop())
   assert.deepEqual(snap.recentToolHistory, [
-    { tool: 'bash', status: 'ok', target: 'ls', argsHash: undefined },
-    { tool: 'read_file', status: 'error', target: 'a.ts', argsHash: undefined },
+    { tool: 'bash', status: 'ok', target: 'ls', argsHash: undefined, bashActivity: 'readonly' },
+    { tool: 'read_file', status: 'error', target: 'a.ts', argsHash: undefined, bashActivity: undefined },
   ])
   // the source object's extra keys must not leak into the snapshot
   assert.equal('extra' in (snap.recentToolHistory[0] as object), false)
@@ -122,7 +123,7 @@ test('createSidePathUsageRecorder books usage and appends a side_path cache-log 
     const self = {
       cwd: '/work',
       session: { addSidePathUsage: (u: Record<string, unknown>) => { booked.push(u) } },
-      config: { sessionId: 'test-session', promptEngine: { getModel: () => 'deepseek-v4' } },
+      config: { sessionId: 'test-session', providerName: 'deepseek-spark', promptEngine: { getModel: () => 'deepseek-v4' } },
     } as unknown as AgentLoop
 
     const record = createSidePathUsageRecorder(self)
@@ -158,6 +159,8 @@ test('createSidePathUsageRecorder books usage and appends a side_path cache-log 
     assert.equal(line.event, 'side_path')
     assert.equal(line.kind, 'llm-speculation')
     assert.equal(line.model, 'deepseek-v4')
+    // T3 provider 维度：spark 与官方同 model，side_path 行必须带 provider 才可对照
+    assert.equal(line.provider, 'deepseek-spark')
     assert.equal(line.input, 95_000)
     assert.equal(line.cacheRead, 94_000)
     assert.equal(line.cacheCreate, 500)
@@ -335,4 +338,71 @@ test('turn cache-log writes measured observability fields once and then omits th
     if (prevEnv === undefined) delete process.env.RIVET_SESSION_DIR
     else process.env.RIVET_SESSION_DIR = prevEnv
   }
+})
+
+// ── runGateCompletion：essence-gate 侧路调用的有界性 ──────────────
+// 假超时根因：内部 timer 只 abort 不 reject，底层 stream 忽略 abort 时
+// 会拖到外层 hook 预算（10s）才炸。race 保证「内层超时立即 reject」。
+
+function neverClient(): GateCompletionClient {
+  return {
+    stream: async () => new Promise<void>(() => {}), // 忽略 abort，永不返回
+  }
+}
+
+function textClient(chunks: string[], error?: Error): GateCompletionClient {
+  return {
+    stream: async (_req, handlers) => {
+      for (const c of chunks) handlers.onTextDelta(c)
+      handlers.onStopReason('stop', { input_tokens: 10, output_tokens: 5 })
+      if (error) handlers.onError(error)
+    },
+  }
+}
+
+test('runGateCompletion 拼接文本增量并落 side-path usage', async () => {
+  const sidePaths: Array<{ kind: string; usage: { input_tokens: number } }> = []
+  const out = await runGateCompletion(
+    textClient(['hel', 'lo']),
+    (kind, usage) => sidePaths.push({ kind, usage: { input_tokens: usage.input_tokens ?? 0 } }),
+    'prompt',
+    5000,
+  )
+  assert.equal(out, 'hello')
+  assert.deepEqual(sidePaths, [{ kind: 'essence_gate', usage: { input_tokens: 10 } }])
+})
+
+test('runGateCompletion 对永不 resolve 且忽略 abort 的 stream 有界 reject（race 保底）', async () => {
+  const start = Date.now()
+  await assert.rejects(
+    runGateCompletion(neverClient(), () => {}, 'prompt', 40),
+    /essence-gate LLM timeout/,
+  )
+  const elapsed = Date.now() - start
+  assert.ok(elapsed < 1000, `必须在内层预算点 reject，实际 ${elapsed}ms`)
+})
+
+test('runGateCompletion 超时优先于 stream error（abort 引发的 onError 不掩盖归因）', async () => {
+  // stream 在 abort 后抛 AbortError——旧代码会把它当 streamError 抛
+  const abortClient: GateCompletionClient = {
+    stream: async (_req, handlers, signal) => {
+      await new Promise<void>(resolve => {
+        signal.addEventListener('abort', () => {
+          handlers.onError(new Error('aborted'))
+          resolve()
+        })
+      })
+    },
+  }
+  await assert.rejects(
+    runGateCompletion(abortClient, () => {}, 'prompt', 30),
+    /essence-gate LLM timeout/,
+  )
+})
+
+test('runGateCompletion 非超时 stream 错误原样上抛', async () => {
+  await assert.rejects(
+    runGateCompletion(textClient([], new Error('network reset')), () => {}, 'prompt', 5000),
+    /network reset/,
+  )
 })

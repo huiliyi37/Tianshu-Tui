@@ -176,6 +176,10 @@ export interface SessionMetadata {
   title?: string
   /** Session lifecycle status */
   status?: 'active' | 'completed' | 'archived'
+  /** Worker 会话收尾时的失败归因（如 'timeout' / 'max_turns' / 'json_parse'）——
+   *  事后无需翻 jsonl 即可从 meta 区分「正常完成 / 预算耗尽 / 解析失败」。
+   *  正常完成（status=completed 且无失败）不写。 */
+  failureReason?: string
   /** Number of turns (user messages) processed */
   turnCount?: number
   /** Total tool calls executed */
@@ -243,6 +247,13 @@ export interface SessionMetadata {
    */
   speculationStats?: Record<string, { enqueued: number; hits: number }>
   /**
+   * 会话冻结的 wire 变换上下文（2026-08-07 spark T1）。首启时从 pro 注册的
+   * 默认值（env 解析）冻结一次，此后 resume/跨端恒以本值回传 wire 截断与
+   * 锚点提取——env 漂移不再打穿前缀缓存。非 spark 会话恒缺席（零字节差异）。
+   * 结构镜像 api/pro-registry.ts 的 WireTransformContext（内联避免 context→api 引依赖）。
+   */
+  wireContext?: { truncateN?: { flash: number; pro: number } }
+  /**
    * Tier 2 LLM speculation 引擎自身的调用计数（fired/parseFailures/errors）。
    * speculationStats.llm 只记 shadow-queue 侧的 enqueued/hits——没有本字段，
    * 「spec 到底发了几次 API 调用」无法从磁盘考证（2026-07-06 成本盲区修复）。
@@ -260,7 +271,39 @@ export interface SessionMetadata {
    * 唯一直接观测「模型是否守得住自己任务状态」的结果侧探测器，此前触发只渲染进
    * 一条工具结果就丢了；落 meta 后才有跨会话的退回率基线可比。
    */
-  todoRegressions?: { writes: number; regressedWrites: number; regressedItems: number }
+  todoRegressions?: {
+    writes: number
+    regressedWrites: number
+    regressedItems: number
+    /** v2 检测器：删除完成项只计退休、同项重现才计回归。缺省 = legacy v1
+     *  （删除也算回归）——旧会话不与 v2 汇总混算。 */
+    detectorVersion?: number
+    /** 主动退休的已完成项数（删除完成项，非回归）。 */
+    retiredCompletedItems?: number
+  }
+  /**
+   * Theta 检查摘要（主控可靠性闭环 Wave 1）——一次一结果的 meta 落盘。
+   * 每次真实尝试（通过 controller 全部 gate）完成时覆盖写入：
+   * attempts/outcomes 是累计值，last* 是最后一次结果。timeoutOverrunMs > 0
+   * 表示实际耗时超过预算（事件循环饥饿无法硬抢占，但超预算必须可见）。
+   */
+  thetaCheckSummary?: {
+    /** 累计尝试次数（= thetaTelemetry.requestedCount）。 */
+    attempts: number
+    /** 各 outcome 累计（ok/type_errors/timeout/spawn_error/busy/backoff）。 */
+    outcomes: Record<string, number>
+    /** 最后一次尝试的 outcome。 */
+    lastOutcome: string
+    lastDurationMs: number | null
+    /** busy/backoff 抑制累计。 */
+    suppressedCount: number
+    /** 连续真实超时（推进退避的那个计数）。 */
+    consecutiveTimeouts: number
+    /** 内层预算（ms，THETA_BUDGET_MS=15_000）。 */
+    budgetMs: number
+    /** lastDurationMs - budgetMs；>0 = 超预算（只有 timeout 才有意义）。 */
+    timeoutOverrunMs?: number
+  }
   /**
    * `decisions` 通道的 holdout 实验臂（`decisions-experiment.ts`）。与
    * `todoRegressions` 同时写入——没有臂标记，两组会话的退回率混在一起，

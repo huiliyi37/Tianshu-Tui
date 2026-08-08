@@ -29,6 +29,7 @@ describe('meridian db data integrity (D6 task 3)', () => {
       symbols: [{ id: 'src/a.ts:A:1', name: 'A', kind: 'function', filePath: 'src/a.ts', line: 1, exported: true, contentHash: 'h1' }],
       edges: [],
       imports: [],
+      calls: [],
     })
     const files = db.getAllFiles()
     assert.ok(files.every(f => !ABS_PATH_RE.test(f)), `absolute-path rows leaked: ${JSON.stringify(files)}`)
@@ -43,6 +44,7 @@ describe('meridian db data integrity (D6 task 3)', () => {
       symbols: [{ id: 'src/a.ts:A:1', name: 'A', kind: 'function', filePath: 'src/a.ts', line: 1, exported: true, contentHash: 'h1' }],
       edges: [],
       imports: [],
+      calls: [],
     })
     db.upsertEdge('src/a.ts:A:1', 'src/a.ts:*:0', 'imports', 1.0)
     db.close()

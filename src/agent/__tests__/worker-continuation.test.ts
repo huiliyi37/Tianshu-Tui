@@ -91,6 +91,35 @@ describe('decideContinuation', () => {
       assert.match(shared.skipReason, /共享 worktree/)
     }
   })
+
+  it('墙钟超时 + 产出停滞（工具调用 ≤ 3）→ 不续，skipReason 说明停滞', () => {
+    for (const toolCalls of [0, 1, 2, 3]) {
+      const decision = decideContinuation(input({ result: result({ failureReason: 'timeout' }), productivity: { toolCalls } }))
+      assert.equal(decision.proceed, false, `toolCalls=${toolCalls} 停滞应拦截`)
+      if (!decision.proceed) {
+        assert.match(decision.skipReason, /停滞/, `skipReason 应含「停滞」：${decision.skipReason}`)
+        assert.match(decision.skipReason, /工具调用/)
+      }
+    }
+  })
+
+  it('墙钟超时 + 产出正常（工具调用 > 3）→ 照常续跑，活跃慢通道不受影响', () => {
+    for (const toolCalls of [4, 31, 47]) {
+      const decision = decideContinuation(input({ result: result({ failureReason: 'timeout' }), productivity: { toolCalls } }))
+      assert.equal(decision.proceed, true, `toolCalls=${toolCalls} 活跃轮应放行`)
+    }
+  })
+
+  it('轮次撞顶（max_turns）调用少 → 不判停滞（轮次本就少是正常形态，非墙钟空转）', () => {
+    for (const toolCalls of [0, 1, 2, 3]) {
+      const decision = decideContinuation(input({ result: result({ failureReason: 'max_turns' }), productivity: { toolCalls } }))
+      assert.equal(decision.proceed, true, `max_turns toolCalls=${toolCalls} 不应被停滞判据拦截`)
+    }
+  })
+
+  it('未提供 productivity 度量 → 维持原判据（向后兼容，不误伤旧调用点）', () => {
+    assert.equal(decideContinuation(input({ productivity: undefined })).proceed, true)
+  })
 })
 
 describe('decideHandsContinuation', () => {

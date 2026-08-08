@@ -1,8 +1,34 @@
-import { describe, it } from 'node:test'
+import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ShadowQueue } from '../shadow-queue.js'
 
+/**
+ * 等待异步落队完成（execute + stat 并行后才 push）。
+ * 固定 sleep 在高负载下两头出错：期望命中的用例假失败，期望 miss 的用例则
+ * 因「还没入队」而 miss——绿得毫无意义。轮询实际队列长度才是确定的。
+ */
+async function waitForEnqueue(queue: ShadowQueue, expected = 1): Promise<void> {
+  for (let i = 0; i < 400; i++) {
+    if (queue.cachedCount >= expected) return
+    await new Promise(r => setTimeout(r, 5))
+  }
+  throw new Error(`enqueue did not settle: cachedCount=${queue.cachedCount} expected>=${expected}`)
+}
+
 describe('ShadowQueue', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-shadow-queue-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('enqueues predicted tool execution', () => {
     const queue = new ShadowQueue({
       execute: async () => 'result',
@@ -11,19 +37,21 @@ describe('ShadowQueue', () => {
     assert.equal(queue.pending(), 1)
   })
 
-  it('returns cached result on hit', async () => {
+  it('returns cached result on hit when the target file is unchanged since enqueue', async () => {
+    const target = join(dir, 'foo.ts')
+    writeFileSync(target, 'export const a = 1\n')
     const queue = new ShadowQueue({
       execute: async () => 'cached-content',
     })
-    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'src/foo.ts' })
-    await new Promise(r => setTimeout(r, 20))
-    const hit = queue.checkHit('read_file', 'src/foo.ts')
+    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: target })
+    await waitForEnqueue(queue)
+    const hit = queue.checkHit('read_file', target)
     assert.equal(hit, 'cached-content')
   })
 
   it('returns undefined on miss', () => {
     const queue = new ShadowQueue({ execute: async () => 'x' })
-    assert.equal(queue.checkHit('read_file', 'src/other.ts'), undefined)
+    assert.equal(queue.checkHit('read_file', join(dir, 'other.ts')), undefined)
   })
 
   it('does not enqueue below probability threshold', () => {
@@ -74,13 +102,17 @@ describe('ShadowQueue', () => {
   })
 
   it('tracks per-source enqueue/hit stats', async () => {
+    const a = join(dir, 'a.ts')
+    const b = join(dir, 'b.ts')
+    const c = join(dir, 'c.ts')
+    writeFileSync(a, '1'); writeFileSync(b, '2'); writeFileSync(c, '3')
     const queue = new ShadowQueue({ execute: async () => 'content' })
-    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'a.ts', source: 'llm' })
-    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'b.ts', source: 'physarum-file' })
-    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'c.ts' }) // defaults to tool-pattern
-    await new Promise(r => setTimeout(r, 20))
+    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: a, source: 'llm' })
+    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: b, source: 'physarum-file' })
+    queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: c }) // defaults to tool-pattern
+    await waitForEnqueue(queue)
 
-    queue.checkHit('read_file', 'a.ts')
+    queue.checkHit('read_file', a)
 
     const stats = queue.statsBySource()
     assert.equal(stats.llm.enqueued, 1)
@@ -98,5 +130,77 @@ describe('ShadowQueue', () => {
     // enqueue returns void, not Promise — caller cannot accidentally float it
     const result = queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: 'src/foo.ts' })
     assert.equal(result, undefined, 'enqueue must return void')
+  })
+
+  describe('staleness validation (2026-07-06 stale-read incident fix)', () => {
+    it('rejects a hit when the target file was edited after enqueue (mtime/size moved)', async () => {
+      const target = join(dir, 'edited.ts')
+      writeFileSync(target, 'v1\n')
+      const queue = new ShadowQueue({ execute: async () => 'stale content read at enqueue time' })
+      queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: target })
+      await waitForEnqueue(queue)
+
+      // Simulate an edit landing between the speculative read and the real read.
+      // Sleep a beat first: some filesystems have coarse mtime granularity and
+      // an edit in the same tick could keep mtime identical — size still moves.
+      await new Promise(r => setTimeout(r, 10))
+      writeFileSync(target, 'v2 — much longer content than v1\n')
+
+      const hit = queue.checkHit('read_file', target)
+      assert.equal(hit, undefined, 'an edit after enqueue must invalidate the cached read, never serve stale content')
+    })
+
+    it('rejects a hit when the target was deleted after enqueue', async () => {
+      const target = join(dir, 'deleted.ts')
+      writeFileSync(target, 'v1\n')
+      const queue = new ShadowQueue({ execute: async () => 'content' })
+      queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: target })
+      await waitForEnqueue(queue)
+
+      rmSync(target)
+
+      assert.equal(queue.checkHit('read_file', target), undefined)
+    })
+
+    it('rejects a hit when the target never existed (stat failed at enqueue time — cannot verify freshness)', async () => {
+      const queue = new ShadowQueue({ execute: async () => 'content for a path that was never real' })
+      const target = join(dir, 'never-existed.ts')
+      queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: target })
+      await waitForEnqueue(queue)
+
+      assert.equal(queue.checkHit('read_file', target), undefined, 'unverifiable entries must never be served, not treated as fresh')
+    })
+
+    it('rejects a hit past the TTL even when the file is unchanged', async () => {
+      const target = join(dir, 'aged-out.ts')
+      writeFileSync(target, 'v1\n')
+      const queue = new ShadowQueue({ execute: async () => 'content', ttlMs: 15 })
+      queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: target })
+      await new Promise(r => setTimeout(r, 40)) // enqueue settle (~20ms) + past the 15ms TTL
+
+      assert.equal(queue.checkHit('read_file', target), undefined, 'TTL must expire an entry even if the underlying file never changed')
+    })
+
+    it('serves the hit when well within TTL and the file is unchanged', async () => {
+      const target = join(dir, 'fresh.ts')
+      writeFileSync(target, 'v1\n')
+      const queue = new ShadowQueue({ execute: async () => 'content', ttlMs: 60_000 })
+      queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: target })
+      await waitForEnqueue(queue)
+
+      assert.equal(queue.checkHit('read_file', target), 'content')
+    })
+
+    it('clear() empties the queue — the write/edit invalidation call site invokes this on any write success', async () => {
+      const target = join(dir, 'foo.ts')
+      writeFileSync(target, 'v1\n')
+      const queue = new ShadowQueue({ execute: async () => 'content' })
+      queue.enqueue({ tool: 'read_file', probability: 0.8, likelyTarget: target })
+      await waitForEnqueue(queue)
+
+      queue.clear()
+
+      assert.equal(queue.checkHit('read_file', target), undefined, 'clear() must drop entries queued before any write')
+    })
   })
 })

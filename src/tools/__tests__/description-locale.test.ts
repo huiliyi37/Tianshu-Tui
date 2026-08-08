@@ -58,6 +58,9 @@ const EXTRA_TOOL_MODULES = [
   '../session-vitals.js',
   '../apply-patch.js',
   '../browser-debug/tool.js',
+  // schedule 三工具按 isSchedulerAvailable() 条件注册（CLI 无调度器时不入表），
+  // 注册表枚举扫不到，必须按模块导出扫——否则门控一加，英文描述就失去守卫。
+  '../schedule/tool.js',
   '../../lsp/tools.js',
 ] as const
 

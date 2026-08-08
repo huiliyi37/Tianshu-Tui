@@ -139,6 +139,69 @@ describe('settings persist', () => {
     assert.equal(loadConfig().network.proxy, undefined)
   })
 
+  it('只拨 lean 开关不写阈值——lean 收紧默认继续生效（审查 HIGH 回归）', () => {
+    const before = loadSettingsDraft()
+    // 用户只拨 lean 开关 on，不碰阈值
+    const draft: SettingsDraft = { ...before, basics: { ...before.basics, runtimeLean: true } }
+    saveSettings({ draft, blocks: dirtyBlocks(before, draft) })
+
+    // 磁盘上 lean:true 落盘，但阈值字段必须保持缺失——显式写 16/30min/50MB
+    // 会让 resolveSessionPoolOptions 因显式值优先而放弃 lean 收紧。
+    const runtime = loadConfig().runtime!
+    assert.equal(runtime.lean, true)
+    assert.equal(runtime.maxLoadedSessions, undefined, '未编辑的阈值不得显式落盘')
+    assert.equal(runtime.idleAgentTtlMs, undefined)
+    assert.equal(runtime.maxEventsDiskBytes, undefined)
+  })
+
+  it('编辑阈值后落盘该值，且 lean 状态一并保存', () => {
+    const before = loadSettingsDraft()
+    const draft: SettingsDraft = {
+      ...before,
+      basics: { ...before.basics, runtimeLean: true, maxLoadedSessions: 8 },
+    }
+    saveSettings({ draft, blocks: dirtyBlocks(before, draft) })
+
+    const runtime = loadConfig().runtime!
+    assert.equal(runtime.lean, true)
+    assert.equal(runtime.maxLoadedSessions, 8)
+    assert.equal(runtime.idleAgentTtlMs, undefined, '未编辑的阈值保持缺失')
+    assert.equal(runtime.maxEventsDiskBytes, undefined)
+  })
+
+  it('lean 开启时面板回落显示 lean 收紧值（审查 LOW 回归）', () => {
+    const before = loadSettingsDraft()
+    const draft: SettingsDraft = { ...before, basics: { ...before.basics, runtimeLean: true } }
+    saveSettings({ draft, blocks: dirtyBlocks(before, draft) })
+
+    const after = loadSettingsDraft()
+    // 无显式阈值 + lean → 回落 4 / 10min / 10MB（与运行时生效值一致）
+    assert.equal(after.basics.maxLoadedSessions, 4)
+    assert.equal(after.basics.idleAgentTtlMs, 10 * 60_000)
+    assert.equal(after.basics.maxEventsDiskBytes, 10 * 1024 * 1024)
+  })
+
+  it('最小集绑定星域：写 defaultDomain + lean/taiyi 域覆盖，一键启动', () => {
+    const before = loadSettingsDraft()
+    const draft: SettingsDraft = { ...before, basics: { ...before.basics, domainBind: 'changgeng' } }
+    saveSettings({ draft, blocks: dirtyBlocks(before, draft) })
+
+    assert.equal(loadConfig().agent.defaultDomain, 'changgeng')
+    const runtime = loadConfig().runtime!
+    assert.equal(runtime.lean, false, '绑定不得写全局 lean（审查 F1：波及所有域且清空不还原）')
+    assert.equal(runtime.domains?.changgeng?.lean, true)
+    assert.equal(runtime.domains?.changgeng?.toolPreset, 'taiyi')
+    // 回读时推断绑定状态
+    assert.equal(loadSettingsDraft().basics.domainBind, 'changgeng')
+
+    // 清空绑定 = 恢复默认域（域覆盖保留）
+    const bound = loadSettingsDraft()
+    const cleared: SettingsDraft = { ...bound, basics: { ...bound.basics, domainBind: '' } }
+    saveSettings({ draft: cleared, blocks: dirtyBlocks(bound, cleared) })
+    assert.equal(loadConfig().agent.defaultDomain, 'qiming')
+    assert.equal(loadConfig().runtime!.domains?.changgeng?.lean, true, '域覆盖保留')
+  })
+
   it('单个 setter 失败只报自己那块，其他块照写', () => {
     const before = loadSettingsDraft()
     const draft: SettingsDraft = {

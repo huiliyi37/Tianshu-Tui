@@ -40,6 +40,10 @@ export const COGNITIVE_FRAME_LITE_KIND = 'cognitive-frame-lite'
 export const ADVISORY_OUTCOME_KIND = 'advisory-outcome'
 /** holdout 反事实组（shadow 扣留判定），与投递组分 kind 便于回放对照。 */
 export const ADVISORY_HOLDOUT_KIND = 'advisory-holdout'
+/** 会话结束时观察窗口还没走完的送达（每会话一条汇总）。区分「测不到」与
+ *  「没效果」：worker 中位 2 轮而 expect 窗口 2-4 轮，绝大多数 pending 在结束
+ *  时未到期，实测 88 个 worker 只产出 3 条 outcome。这条汇总让盲区本身可见。 */
+export const ADVISORY_UNRESOLVED_KIND = 'advisory-unresolved'
 
 /** RIVET_DEBUG_TELEMETRY 未开时仍放行的轻量 kind 白名单（每条单行 <200B）。 */
 const LITE_KINDS: ReadonlySet<string> = new Set([
@@ -48,6 +52,7 @@ const LITE_KINDS: ReadonlySet<string> = new Set([
   COGNITIVE_FRAME_LITE_KIND,
   ADVISORY_OUTCOME_KIND,
   ADVISORY_HOLDOUT_KIND,
+  ADVISORY_UNRESOLVED_KIND,
 ])
 
 export function createTelemetryWriter(cwd: string, sessionId?: string): TelemetryWriter {

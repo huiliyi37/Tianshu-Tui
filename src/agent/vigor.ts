@@ -49,6 +49,7 @@ const FAILURE_CLASS_PHASIC_WEIGHT: ReadonlyMap<FailureClass, number> = new Map<F
   ['flaky', 0.5],
   // Environment missing — external dependency issue
   ['missing_dep', 0.2],
+  ['runtime_gate', 0.2],
   ['permission_denied', 0.2],
   ['env_missing', 0.2],
   // Semantic failures — agent's cognitive error

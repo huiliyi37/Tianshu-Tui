@@ -194,17 +194,19 @@ describe('collectFiles configurable exclusion', () => {
     const dir = join(process.cwd(), '.test-tmp', `ast-env-exclude-${randomBytes(4).toString('hex')}`)
     const prev = process.env.RIVET_AST_EXCLUDE
     return (async () => {
-      await mkdir(join(dir, 'target'), { recursive: true })  // Rust-style output dir
+      await mkdir(join(dir, 'vendor'), { recursive: true })  // Go-style vendored deps
       await mkdir(join(dir, 'src'), { recursive: true })
-      await writeFile(join(dir, 'target', 'release'), 'binary')
+      await writeFile(join(dir, 'vendor', 'dep.go'), 'package dep')
       await writeFile(join(dir, 'src', 'main.rs'), 'source')
-      // target is NOT in the default exclude list
+      // This example used to be `target`, which now sits in the shared baseline
+      // — the override is for dirs the baseline does NOT know about, so the
+      // example has to be one of those or it proves nothing.
       let files = await collectFiles(dir)
-      assert.ok(files.some(f => f.includes('target')), 'target collected without env override')
+      assert.ok(files.some(f => f.includes('vendor')), 'vendor collected without env override')
 
-      process.env.RIVET_AST_EXCLUDE = 'target, vendor'
+      process.env.RIVET_AST_EXCLUDE = 'vendor, generated'
       files = await collectFiles(dir)
-      assert.ok(!files.some(f => f.includes('target')), 'target excluded via RIVET_AST_EXCLUDE')
+      assert.ok(!files.some(f => f.includes('vendor')), 'vendor excluded via RIVET_AST_EXCLUDE')
       assert.ok(files.some(f => f.includes('main.rs')), 'src still collected')
 
       await rm(dir, { recursive: true, force: true })

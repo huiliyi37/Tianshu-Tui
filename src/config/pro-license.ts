@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Config } from './schema.js'
 
-export type ProFeature = 'computerUse' | 'chatGateway' | 'teamMax' | 'councilMultiRound' | 'unattendedAutomation'
+export type ProFeature = 'computerUse' | 'chatGateway' | 'teamMax' | 'councilMultiRound' | 'unattendedAutomation' | 'spark'
 
 export interface ProLicenseInfo {
   enabled: boolean
@@ -18,19 +18,31 @@ function defaultLicensePath(): string {
 /**
  * Resolve whether the current installation is running as Pro.
  *
- * Priority:
- * 1. config.pro.enabled = true
- * 2. RIVET_PRO=1 environment variable
- * 3. Presence of a non-empty ~/.rivet/pro.license file
+ * Two regimes keyed by `RIVET_DESKTOP` (注入自桌面端 Tauri，CLI 无此变量):
  *
- * The license key itself is not cryptographically verified here; this module
- * only answers "is Pro configured/active". Online license-server validation,
- * seat management, and expiry checks belong to a separate licensing service.
+ * **桌面端（RIVET_DESKTOP=1，硬 gate）**: 只认 `RIVET_PRO === '1'`——它由
+ * Rust 端 `activation.rs` Ed25519 验签后注入，Basic 时 `env_remove`，是可信
+ * 单一来源。config.pro.enabled / pro.license 文件两条路径被显式封死，防止
+ * Basic 用户改 config.json 一行即绕过 Rust 验签白嫖 Pro。
+ *
+ * **CLI（无 RIVET_DESKTOP，软 gate）**: 保留三路径（config > env > file），
+ * 不验签——开源版有意放开，会编译会改配置的人不是付费群体。
+ *
+ * The license key itself is not cryptographically verified in this module;
+ * desktop relies on Rust-side Ed25519 verification, CLI intentionally does not.
  */
 export function resolveProLicense(
   config: Config,
   licensePath = defaultLicensePath()
 ): ProLicenseInfo {
+  // 桌面端硬 gate：Rust 注入 RIVET_DESKTOP 标记 → 只认 RIVET_PRO（同样由 Rust
+  // 验签后注入），封 config/file 后门。
+  if (process.env.RIVET_DESKTOP === '1') {
+    return process.env.RIVET_PRO === '1'
+      ? { enabled: true, source: 'env' }
+      : { enabled: false, source: 'none' }
+  }
+  // CLI 软 gate：三路径，有意不验签（开源版）。
   if (config.pro?.enabled) {
     return { enabled: true, source: 'config', licenseKey: config.pro.licenseKey }
   }

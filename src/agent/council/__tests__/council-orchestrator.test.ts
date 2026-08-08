@@ -286,6 +286,42 @@ describe('runCouncil — 单席重试 + 法定人数 fail-loud', () => {
     assert.equal(calls, 2)
     assert.deepEqual(plan.meta.failedSeats, ['tianfu'])
   })
+
+  it('流会 throw 消息按失败子类计数：missing_artifact / budget_exhausted 各报席位名', async () => {
+    // 3 席中 2 席失败：tianquan 预算耗尽 blocked（无 artifact），tianfu 解析失败（畸形 JSON）。
+    // 法定人数 ⌈2/3×3⌉=2，有效 1 < 2 → 流会。throw 消息必须说出每个失败子类各几席。
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => ({
+        results: reqs.map(r => {
+          const isRetry = r.parentTurnId.endsWith('-retry')
+          const make = isRetry ? retryResult : workerResult
+          if (r.authority === 'tianquan') {
+            // 预算耗尽 blocked：status=blocked + failureReason=timeout，无 seat-contribution artifact
+            const blocked = make(r.authority, goodJson(r.authority))
+            blocked.status = 'blocked'
+            blocked.failureReason = 'timeout'
+            blocked.artifacts = blocked.artifacts.filter(a => a.title !== 'seat-contribution')
+            return blocked
+          }
+          // tianfu 畸形 JSON → malformed_json
+          return make(r.authority, r.authority === 'tianfu' ? '{not json' : goodJson(r.authority))
+        }),
+      }),
+      now: () => 1,
+    }
+    await assert.rejects(
+      () => runCouncil(threeSeats, deps),
+      (err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        assert.match(msg, /流会/, `throw 是流会：${msg}`)
+        assert.match(msg, /budget_exhausted/, `消息应含 budget_exhausted 分类：${msg}`)
+        assert.match(msg, /tianquan/, `budget_exhausted 应点名 tianquan：${msg}`)
+        assert.match(msg, /malformed_json/, `消息应含 malformed_json 分类：${msg}`)
+        assert.match(msg, /tianfu/, `malformed_json 应点名 tianfu：${msg}`)
+        return true
+      },
+    )
+  })
 })
 
 describe('buildSeatObjective', () => {

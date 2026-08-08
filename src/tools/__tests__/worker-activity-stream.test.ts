@@ -16,6 +16,37 @@ function ev(over: Partial<WorkerActivityEvent>): WorkerActivityEvent {
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
+class FakeActivityScheduler {
+  private nextId = 1
+  private callbacks = new Map<number, () => void>()
+  private active = new Set<number>()
+
+  setTimeout(callback: () => void, _ms: number): number {
+    const id = this.nextId++
+    this.callbacks.set(id, callback)
+    this.active.add(id)
+    return id
+  }
+
+  clearTimeout(handle: unknown): void {
+    this.active.delete(handle as number)
+  }
+
+  /** Simulate an already-queued callback even after clearTimeout. */
+  runQueued(id: number): void {
+    this.active.delete(id)
+    this.callbacks.get(id)?.()
+  }
+
+  get handles(): number[] {
+    return [...this.callbacks.keys()]
+  }
+
+  get size(): number {
+    return this.active.size
+  }
+}
+
 describe('shortOrderLabel', () => {
   it('strips wo_ prefix and takes the last colon segment', () => {
     assert.equal(shortOrderLabel('wo_abc123'), 'abc123')
@@ -108,6 +139,124 @@ describe('createActivityStreamer', () => {
 })
 
 describe('createDelegationActivityMapper', () => {
+  it('finish 先 flush pending 再发终态，迟到 timer/raw activity 不得复活 worker', () => {
+    const acts: DelegationActivity[] = []
+    const scheduler = new FakeActivityScheduler()
+    const map = createDelegationActivityMapper('p', a => acts.push(a), { scheduler })
+
+    map(ev({ workOrderId: 'wo_a', kind: 'text', detail: 'tail' }))
+    const [timer] = scheduler.handles
+    map.finish({ workOrderId: 'wo_a', parentToolId: 'p', status: 'passed', summary: 'done' })
+
+    assert.deepEqual(acts.map(a => [a.status, a.eventKind, a.eventDetail]), [
+      ['running', 'text', 'tail'],
+      ['passed', undefined, undefined],
+    ])
+    assert.equal(scheduler.size, 0)
+    scheduler.runQueued(timer!)
+    map(ev({ workOrderId: 'wo_a', kind: 'tool_use', detail: 'late-tool' }))
+    assert.equal(acts.length, 2, 'seal 后 queued timer 与 raw activity 都必须被丢弃')
+  })
+
+  it('重置 timer 后，旧 queued callback 不能提前 flush 当前 slot', () => {
+    const acts: DelegationActivity[] = []
+    const scheduler = new FakeActivityScheduler()
+    const map = createDelegationActivityMapper('p', a => acts.push(a), { scheduler })
+
+    map(ev({ workOrderId: 'wo_a', kind: 'text', detail: 'A' }))
+    const firstTimer = scheduler.handles.at(-1)!
+    map(ev({ workOrderId: 'wo_a', kind: 'text', detail: 'B' }))
+    const secondTimer = scheduler.handles.at(-1)!
+
+    scheduler.runQueued(firstTimer)
+    assert.equal(acts.length, 0, '已取消但入队的旧 callback 不得 flush 新 timer 所属 slot')
+    scheduler.runQueued(secondTimer)
+    assert.equal(acts.length, 1)
+    assert.equal(acts[0]!.eventDetail, 'AB')
+  })
+
+  it('dispose 清空 timer/state，并永久忽略后续 raw/finish', () => {
+    const acts: DelegationActivity[] = []
+    const scheduler = new FakeActivityScheduler()
+    const map = createDelegationActivityMapper('p', a => acts.push(a), { scheduler })
+
+    map(ev({ workOrderId: 'wo_a', kind: 'thinking', detail: 'pending' }))
+    const [timer] = scheduler.handles
+    assert.equal(scheduler.size, 1)
+    map.dispose()
+    assert.equal(scheduler.size, 0)
+
+    scheduler.runQueued(timer!)
+    map(ev({ workOrderId: 'wo_a', kind: 'tool_use', detail: 'late' }))
+    map.finish({ workOrderId: 'wo_a', parentToolId: 'p', status: 'failed' })
+    assert.deepEqual(acts, [])
+  })
+
+  it('sink throw 被隔离，finish 仍 seal 且不会重复发射', () => {
+    const attempted: DelegationActivity[] = []
+    const scheduler = new FakeActivityScheduler()
+    const map = createDelegationActivityMapper('p', a => {
+      attempted.push(a)
+      throw new Error('ui sink failed')
+    }, { scheduler })
+
+    map(ev({ workOrderId: 'wo_a', kind: 'text', detail: 'tail' }))
+    const [timer] = scheduler.handles
+    assert.doesNotThrow(() => {
+      map.finish({ workOrderId: 'wo_a', parentToolId: 'p', status: 'blocked' })
+    })
+    assert.deepEqual(attempted.map(a => a.status), ['running', 'blocked'])
+
+    assert.doesNotThrow(() => scheduler.runQueued(timer!))
+    assert.doesNotThrow(() => map(ev({ workOrderId: 'wo_a', kind: 'tool_use' })))
+    assert.deepEqual(attempted.map(a => a.status), ['running', 'blocked'])
+  })
+
+  it('成功终态幂等；终态 sink throw 不标记 finished，backstop 可重试一次', () => {
+    const attempted: DelegationActivity[] = []
+    let terminalAttempts = 0
+    const map = createDelegationActivityMapper('p', a => {
+      attempted.push(a)
+      if (a.status !== 'running' && terminalAttempts++ === 0) throw new Error('terminal sink failed')
+    })
+
+    const terminal: DelegationActivity = {
+      workOrderId: 'wo_a', parentToolId: 'p', status: 'failed', summary: 'nope',
+    }
+    map.finish(terminal)
+    map.finish(terminal)
+    map.finish(terminal)
+
+    assert.deepEqual(attempted.map(a => a.status), ['failed', 'failed'])
+    // First attempt threw, so one retry succeeded; later duplicate finish is ignored.
+    assert.equal(terminalAttempts, 2)
+  })
+
+  it('同一 stable worker 的新 attempt 可在同一 mapper 中重新派发', () => {
+    const acts: DelegationActivity[] = []
+    const map = createDelegationActivityMapper('p', a => acts.push(a))
+
+    map(ev({ workOrderId: 'team:planner-tianquan', attemptId: 'attempt-1', kind: 'tool_use' }))
+    map.finish({
+      workOrderId: 'team:planner-tianquan', parentToolId: 'p', attemptId: 'attempt-1', status: 'passed',
+    })
+    map(ev({ workOrderId: 'team:planner-tianquan', attemptId: 'attempt-2', kind: 'tool_use' }))
+    map.finish({
+      workOrderId: 'team:planner-tianquan', parentToolId: 'p', attemptId: 'attempt-2', status: 'failed',
+    })
+
+    assert.deepEqual(acts.map(a => [a.attemptId, a.status]), [
+      ['attempt-1', 'running'],
+      ['attempt-1', 'passed'],
+      ['attempt-2', 'running'],
+      ['attempt-2', 'failed'],
+    ])
+    assert.deepEqual(
+      acts.filter(a => a.status === 'running').map(a => a.toolUseCount),
+      [1, 1],
+    )
+  })
+
   it('tool_use 累计计数，turn 事件更新 tokenCount', () => {
     const acts: DelegationActivity[] = []
     const map = createDelegationActivityMapper('parent_1', a => acts.push(a))

@@ -296,14 +296,16 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
     const tail = (input.outputTail ?? '').replace(/\n+$/, '')
     return tail ? tail.split('\n') : undefined
   })()
-  const tailCount = input.tailLines ?? 3
+  // 负值与 0 都归零：`slice(-0)` 等于 `slice(0)`，会把整个 tail 全量摊开——
+  // 正是 tailLines=0（并发时折叠非焦点卡片）想避免的相反效果。
+  const tailCount = Math.max(0, input.tailLines ?? 3)
   // BODY_FIRST_PREFIX = '⎿  ' (3 display columns) — content has columns-3 available.
   const maxWidth = Math.max(10, input.columns - 3)
 
   // 固定 tail 区域高度：内容不足时顶部补空行，避免卡片高度随输出变化而跳动。
   const isBrowserDebug = input.toolName === 'browser_debug'
   const tailLines: string[] = []
-  if (tailRows && tailRows.length > 0) {
+  if (tailCount > 0 && tailRows && tailRows.length > 0) {
     const shown = tailRows.slice(-tailCount).map(l => {
       // 按显示宽度截断（CJK 2 列、ambiguous 2 列）。… 自身 2 列，预算留给它。
       const ellW = displayWidth('…', WIDE)
@@ -315,8 +317,8 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
     tailLines.push(...indentBody(shown, '', theme))
   }
 
-  // 无输出时显示占位符，保持固定高度
-  if (tailLines.length === 0) {
+  // 无输出时显示占位符，保持固定高度（tailCount=0 表示只要标题行，不占位）
+  if (tailCount > 0 && tailLines.length === 0) {
     tailLines.push(`${color(BODY_FIRST_PREFIX, theme.dim)}${color('…', theme.dim)}`)
   }
   while (tailLines.length < tailCount) {

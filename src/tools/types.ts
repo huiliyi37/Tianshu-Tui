@@ -13,7 +13,16 @@ import type { OrchestrationOutcome } from '../agent/orchestration-outcome.js'
  * replacing) the existing text progress stream. `running` carries the latest
  * activity line; a terminal status carries the worker's outcome.
  */
-export interface DelegationActivity {
+export interface DelegationIdentity {
+  /** Optional dispatch scope; stable across workers from one tool invocation. */
+  dispatchId?: string
+  /** Optional execution identity; unique for one worker attempt. */
+  attemptId?: string
+  /** Execution identity of the parent worker for nested delegation. */
+  parentAttemptId?: string
+}
+
+export interface DelegationActivity extends DelegationIdentity {
   /** Stable per-worker id within a run (work order id), distinct from the tool id. */
   workOrderId: string
   /** The delegation tool call that spawned this worker (delegation tree parent). */

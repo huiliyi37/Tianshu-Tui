@@ -29,7 +29,7 @@ function collectEnvVars(): Map<string, EnvEntry> {
 
   for (const file of files) {
     const content = readFileSync(file, 'utf8')
-    const relPath = relative(SRC_ROOT, file)
+    const relPath = relative(SRC_ROOT, file).replace(/\\/g, '/')
 
     // 三种引用模式（与 assembly-audit.test.ts 的 collectRivetVars 对齐）：
     // 1. process.env.RIVET_*（直接）

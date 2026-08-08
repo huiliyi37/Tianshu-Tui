@@ -44,6 +44,7 @@ function seedFileWithExports(db: MeridianDb, filePath: string, symbols: Array<{ 
     })),
     edges: [],
     imports: [],
+    calls: [],
   })
 }
 

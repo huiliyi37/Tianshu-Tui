@@ -81,6 +81,43 @@ describe('P3Integration', () => {
     assert.equal(p3.checkSpeculativeCache('read_file', 'src/next.ts'), undefined)
   })
 
+  it('observe mode (T5b): enqueue arms open for stats, serving stays sealed', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'p3-observe-'))
+    try {
+      const target = join(dir, 'next.ts')
+      writeFileSync(target, 'content')
+      // production observe shape: speculativeObserve only, execute 缺省 no-op
+      const p3 = new P3Integration({ speculativeObserve: true })
+
+      p3.enqueueLlmPredictions([{ tool: 'read_file', likelyTarget: target, probability: 0.9, source: 'llm' }])
+      const deadline = Date.now() + 2_000
+      while (p3.queue.cachedCount === 0 && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      assert.equal(p3.queue.statsBySource().llm.enqueued, 1, 'observe mode must enqueue for stats')
+
+      // serving 恒封存：即便条目在队里也不得供内容
+      assert.equal(p3.checkSpeculativeCache('read_file', target), undefined,
+        'serving must stay sealed in observe-only mode')
+
+      // 窥视路径记 hit（mtime 新鲜 → would-hit），仍不返回任何内容
+      p3.observeSpeculativeCache('read_file', target)
+      assert.equal(p3.queue.statsBySource().llm.hits, 1, 'observe peek must record the would-hit')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('observe peek is a no-op when sealed (default shape)', () => {
+    const p3 = new P3Integration()
+    p3.observeSpeculativeCache('read_file', 'src/a.ts')
+    const stats = p3.queue.statsBySource()
+    assert.equal(Object.values(stats).every(s => s.hits === 0), true)
+  })
+
   it('enqueues physarum file predictions as read_file speculation (opt-in only)', () => {
     const executed: string[] = []
     const p3 = new P3Integration({

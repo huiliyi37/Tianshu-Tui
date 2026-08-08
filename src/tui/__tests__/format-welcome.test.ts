@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import stringWidth from 'string-width'
 import { formatWelcome } from '../format/welcome.js'
 import { getTheme } from '../theme.js'
+import { color } from '../engine/ansi.js'
 import { displayWidth } from '../width.js'
 import { boxCharsFor, boxInnerWidth, boxOuterWidth } from '../box-chars.js'
 
@@ -78,6 +79,85 @@ test('底框与 app.ts 输入框底边同构（tl/bl + h×(inner+2) + tr/br）',
   const inner = boxInnerWidth(cols)
   const box = boxOf(render({ columns: cols }))
   assert.equal(strip(box.at(-1)!), `${chars.bl}${chars.h.repeat(inner + 2)}${chars.br}`)
+})
+
+/** 提取一段着色后的首个前景色 SGR（含 24-bit 与 8/16 色命名档 30-39 / 90-99）。 */
+const firstFg = (line: string): string | null => {
+  const m = line.match(/\x1B\[(?:38;2;\d+;\d+;\d+|3[0-9]|9[0-9])/)
+  return m ? m[0]! : null
+}
+
+/** 检测首段着色是否带 `bold`（1）/ `dim`（2）SGR 属性——用作视觉权重断言的 ground truth。 */
+const firstAttr = (line: string): string | null => {
+  const m = line.match(/\x1B\[(?:1|2|22)m/)
+  return m ? m[0]! : null
+}
+
+/** theme.muted 套上 `color()` 后产出的前景色 SGR——用作色档 ground truth。
+ *  muted 在多套主题里都比 dim 提亮一档且带轻微色相偏移（Tianshu #adb2bf、
+ *  Starfield #aab4d4、Slate #8b93a3），符合"精致但不抢眼"的诉求。 */
+const mutedFg = ((): string | null => {
+  const sample = `${color('x', theme.muted)}x`
+  return firstFg(sample)
+})()
+
+test('框线着色：左/右竖线 + 顶框 + 底框的 SGR 与 theme.muted 一致 + 视觉权重 bold', () => {
+  // 不变量：色档 = muted（提亮一档带色相偏移，避免纯中性灰的"表格感"），
+  // 视觉权重 = bold（让框线在暗底上有"压"住的份量，避免纯色色块感）。
+  // 与 app.ts 输入框静息档形成可读层次：输入框静息档 = dim（更退），
+  // 欢迎框 = muted + bold（更精致），两框咬合但有视觉区分。
+  // 必须用 truecolor 主题才能区分 dim/muted/pulseQuiet（fallback 轨三者是同一命名色 "gray"）。
+  const tcTheme = getTheme(3)
+  const frameFg = firstFg(`${color('x', tcTheme.muted)}x`)
+  assert.ok(frameFg, 'theme.muted 须能套出 SGR 序列，否则 helper 与主题同时坏，断言无意义')
+  const chars = boxCharsFor('thin')
+  // 在真色主题下重渲染
+  const lines = formatWelcome({
+    modelName: base.modelName, cwd: base.cwd, sessionId: base.sessionId,
+    priorMsgCount: base.priorMsgCount, columns: 80, rows: base.rows,
+    version: base.version, approvalMode: base.approvalMode,
+  }, tcTheme)
+  const box = boxOf(lines)
+
+  // 左竖线 `│`：首段着色就是它
+  assert.equal(
+    firstFg(box[1]!), frameFg,
+    `左竖线 SGR 应等于 theme.muted（${frameFg}），实得 ${firstFg(box[1]!)}`,
+  )
+  // 顶框首字符 `╭` 着色应是 muted
+  assert.equal(
+    firstFg(box[0]!), frameFg,
+    `顶框首段着色应是 theme.muted，实得 ${firstFg(box[0]!)}`,
+  )
+  // 底框
+  assert.equal(strip(box.at(-1)!), `${chars.bl}${chars.h.repeat(boxInnerWidth(80) + 2)}${chars.br}`)
+  assert.equal(
+    firstFg(box.at(-1)!), frameFg,
+    `底框首段着色应是 theme.muted，实得 ${firstFg(box.at(-1)!)}`,
+  )
+  // 反断言：不能是 pulseQuiet（真色轨下能区分的关键）
+  const pulseFg = firstFg(`${color('x', tcTheme.pulseQuiet)}x`)
+  assert.notEqual(
+    firstFg(box.at(-1)!), pulseFg,
+    `底框不该是 pulseQuiet（${pulseFg}）——该色档在深底上近乎隐形`,
+  )
+  // 反断言：不能是纯 dim（避免"表格中性灰"的回归）
+  const dimFg2 = firstFg(`${color('x', tcTheme.dim)}x`)
+  assert.notEqual(
+    firstFg(box.at(-1)!), dimFg2,
+    `底框不该是 theme.dim（${dimFg2}）——中性灰会让框线读起来像表格`,
+  )
+  // 视觉权重：边线字符位的 SGR 序列里应含 bold（ANSI.BOLD = ESC[1m）
+  // color(text, muted, { bold:true }) 输出的格式是 ESC[1m + 颜色 SGR + ...
+  // color() 的 bold 前缀在 color 前缀之前（ansi.ts:188），所以首段属性 SGR = ESC[1m
+  assert.equal(
+    firstAttr(box.at(-1)!), '\x1B[1m',
+    `底框首段属性 SGR 须是 bold（[1m），实得 ${JSON.stringify(firstAttr(box.at(-1)!))}；视觉权重不足会让框线像表格线`,
+  )
+  assert.equal(
+    firstAttr(box[1]!), '\x1B[1m',
+    `左竖线首段属性 SGR 须是 bold，实得 ${JSON.stringify(firstAttr(box[1]!))}`,
+  )
 })
 
 // ── 北斗 ────────────────────────────────────────────────────────────

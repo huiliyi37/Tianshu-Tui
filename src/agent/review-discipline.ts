@@ -180,7 +180,7 @@ export interface ChangeSet {
    *  showing the same generic template every time. Absent for slash-review paths. */
   commitMessage?: string
   /** Files whose size exceeds {@link LARGE_FILE_WARN_THRESHOLD}. Review workers
-   *  use this to avoid reading entire large files (use offset/limit instead).
+   *  use this to focus on high-signal ranges before exact offset/limit reads.
    *  Set by deliver_task before spawning review; absent in test / slash-review paths. */
   largeFiles?: ReadonlyArray<{ path: string; sizeBytes: number }>
 }

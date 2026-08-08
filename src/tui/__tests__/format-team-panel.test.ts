@@ -143,3 +143,77 @@ describe('formatTeamPanel', () => {
     assert.ok(plain.includes('审查全文共 10 行'), 'total line counter')
   })
 })
+
+/**
+ * live 精简档：面板高度随 DAG 规模无界增长，会被定高视口的高水位固化成输入框
+ * 上方的常驻空白。compact 只作用于 live 区，scrollback 的终态面板仍是完整档。
+ */
+describe('formatTeamPanel — compact（live 区精简）', () => {
+  it('已完成的波折叠成波头一行，不逐任务展开', () => {
+    const waveOneDone: TeamPanelModel = {
+      ...model,
+      currentWave: 1,
+      tasks: model.tasks.map(t => (t.id === 't2' ? { ...t, status: 'done' as const } : t)),
+    }
+    const full = buildTeamPanelLines(waveOneDone, 80).join('\n')
+    const lean = buildTeamPanelLines(waveOneDone, 80, { compact: true }).join('\n')
+
+    assert.ok(full.includes('explore api'), '完整档展开已完成波的任务')
+    assert.ok(!lean.includes('explore api'), 'compact 折叠已完成波的任务行')
+    assert.ok(lean.includes('wave-1'), '波头保留（进度条已表达结果）')
+    assert.ok(lean.includes('patch retry'), '未完成波仍展开')
+  })
+
+  it('一个任务至多一条续行', () => {
+    const rich: TeamPanelModel = {
+      ...model,
+      tasks: model.tasks.map(t => (t.id === 't1' ? { ...t, elapsedMs: 12_000, activity: 'grep FleetWorkerView' } : t)),
+    }
+    const contCount = (s: string): number => (s.match(/⎿/g) ?? []).length
+    const full = contCount(buildTeamPanelLines(rich, 80).join('\n'))
+    const lean = contCount(buildTeamPanelLines(rich, 80, { compact: true }).join('\n'))
+    assert.ok(full > lean, `compact 应减少续行: full=${full} lean=${lean}`)
+
+    const leanLines = buildTeamPanelLines(rich, 80, { compact: true })
+    const t1Idx = leanLines.findIndex(l => l.includes('explore api'))
+    assert.ok(t1Idx >= 0, 't1 任务行在')
+    assert.ok(!leanLines[t1Idx + 2]?.includes('⎿'), 't1 之后至多一条 ⎿ 续行')
+  })
+
+  it('任务数超上限时折叠成 …(+N) 并给出 /tasks 入口', () => {
+    const many: TeamPanelModel = {
+      ...model,
+      currentWave: 0,
+      totalWaves: 1,
+      waves: [{ id: 'wave-1', taskIds: Array.from({ length: 10 }, (_, i) => `t${i}`), risk: 'low', reason: 'parallel-safe' }],
+      tasks: Array.from({ length: 10 }, (_, i) => ({
+        id: `t${i}`,
+        title: `task number ${i}`,
+        authority: 'pojun',
+        profile: 'explorer',
+        kind: 'explore',
+        dependsOn: [],
+        riskTier: 'low' as const,
+        files: [],
+        status: 'running' as const,
+      })),
+    }
+    const lean = buildTeamPanelLines(many, 80, { compact: true })
+    const plain = lean.join('\n')
+    assert.ok(plain.includes('…(+4) 个任务'), `10 个任务应折叠 4 个: ${plain}`)
+    assert.ok(plain.includes('/tasks'), '给出查看入口')
+    assert.ok(plain.includes('task number 0'), '前若干任务仍展开')
+    assert.ok(!plain.includes('task number 9'), '超上限的任务不渲染')
+
+    // 无界增长的回归闸：完整档随任务数线性长，compact 有硬顶。
+    const full = buildTeamPanelLines(many, 80)
+    assert.ok(lean.length < full.length, `compact 应更短: lean=${lean.length} full=${full.length}`)
+    assert.ok(lean.length <= 14, `compact 面板行数应有硬顶: ${lean.length} 行`)
+  })
+
+  it('默认档（不传 compact）行为不变', () => {
+    const a = buildTeamPanelLines(model, 80)
+    const b = buildTeamPanelLines(model, 80, {})
+    assert.deepEqual(a, b, '空 opts 等价于旧调用')
+  })
+})

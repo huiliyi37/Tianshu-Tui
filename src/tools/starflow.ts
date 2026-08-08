@@ -15,8 +15,11 @@ import {
   deriveGalaxyDims,
   runStarflow,
   starflowStatePath,
+  type StarflowDraftItem,
   type StarflowGalaxyDimension,
 } from '../agent/starflow-orchestrator.js'
+import { validateGalaxyDimensionContract } from '../agent/galaxy-contract.js'
+import { buildGalaxyBudgetInputs, isReviewGalaxyDimension } from '../agent/galaxy-budget.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 const GLYPH = '🌠'
@@ -63,10 +66,32 @@ const inputSchema = z.object({
   draftItems: z.array(draftItemSchema).optional(),
   galaxyDims: z.array(dimensionSchema).min(2).max(5).optional(),
   rounds: z.union([z.literal(1), z.literal(2)]).optional(),
+  autoReview: z.boolean().optional(),
   seats: z.array(seatSchema).optional(),
   confirm: z.boolean().optional(),
   resume: z.boolean().optional(),
 })
+
+/** timeoutMs is evaluated before inputSchema, so keep its plan projection defensive. */
+function timeoutDraftItems(value: unknown): StarflowDraftItem[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return value.filter((item): item is StarflowDraftItem => {
+    if (!item || typeof item !== 'object') return false
+    const candidate = item as Record<string, unknown>
+    return typeof candidate.id === 'string'
+      && typeof candidate.title === 'string'
+      && typeof candidate.detail === 'string'
+  })
+}
+
+function timeoutGalaxyDims(value: unknown): StarflowGalaxyDimension[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  return value.filter((dimension): dimension is StarflowGalaxyDimension => {
+    if (!dimension || typeof dimension !== 'object') return false
+    const candidate = dimension as Record<string, unknown>
+    return typeof candidate.name === 'string' && typeof candidate.objective === 'string'
+  })
+}
 
 export interface StarflowToolDeps {
   councilTool: Tool
@@ -175,6 +200,7 @@ export function createStarflowTool(deps: StarflowToolDeps): Tool {
             maxItems: 5,
           },
           rounds: { type: 'number', enum: [1, 2], description: 'council 辩论轮数（默认 1；高风险任务传 2 启用反驳轮）。' },
+          autoReview: { type: 'boolean', default: true, description: 'Whether Galaxy adds the automatic review wave; defaults to true.' },
           seats: {
             type: 'array',
             description: 'council 席位覆盖（同 council_convene 的 seats，透传到首轮与复议轮）。修订轮推荐只召回「上轮否决的席位 + 与修订点相关的域席」，而非默认全量。',
@@ -203,16 +229,31 @@ export function createStarflowTool(deps: StarflowToolDeps): Tool {
       if (!parsed.success) {
         return { content: `星流参数错误：${parsed.error.message}`, isError: true, errorKind: 'format_error' }
       }
-      const { objective, draftItems, galaxyDims, rounds, seats, confirm, resume } = parsed.data
+      const { objective, draftItems, galaxyDims, rounds, seats, autoReview, confirm, resume } = parsed.data
 
       // galaxy 维度的最终来源：显式 galaxyDims 优先，缺省从 draftItems 派生。
       const dims: StarflowGalaxyDimension[] = galaxyDims ?? deriveGalaxyDims(draftItems)
+
+      // Fail before council/team when the downstream Galaxy plan is ambiguous.
+      // Codex validates spawn arguments before creating children; Starflow
+      // should not spend two earlier phases on a plan that Galaxy rejects.
+      const contractIssues = validateGalaxyDimensionContract(dims)
+      if (contractIssues.length > 0) {
+        return {
+          content: [
+            'Starflow Galaxy contract validation failed:',
+            ...contractIssues.map(issue => '- dimension #' + (issue.dimensionIndex + 1) + ': ' + issue.message),
+          ].join('\n'),
+          isError: true,
+          errorKind: 'format_error',
+        }
+      }
 
       // ── Phase 1: Proposal（confirm 缺省/false）────────────────────
       // 纯静态方案展示——不调任何子工具（零派发），与 galaxy proposal 同构。
       if (!confirm) {
         return {
-          content: formatProposal(objective, rounds ?? 1, dims, !galaxyDims, starflowStatePath(deps.cwd, objective)),
+          content: formatProposal(objective, rounds ?? 1, dims, !galaxyDims, starflowStatePath(deps.cwd, objective, params.sessionId)),
           uiContent: `${GLYPH} 星流方案 · ${dims.length >= 2 ? `${dims.length} 维度` : '无攻坚维度'}`,
         }
       }
@@ -220,11 +261,26 @@ export function createStarflowTool(deps: StarflowToolDeps): Tool {
       // ── Phase 2: Execute ──────────────────────────────────────────
       const run = await runStarflow(
         { councilTool: deps.councilTool, teamTool: deps.teamTool, galaxyTool: deps.galaxyTool, cwd: deps.cwd, params },
-        { objective, ...(draftItems ? { draftItems } : {}), ...(galaxyDims ? { galaxyDims } : {}), ...(rounds ? { rounds } : {}), ...(seats && seats.length > 0 ? { seats } : {}), ...(resume ? { resume } : {}) },
+        { objective, ...(draftItems ? { draftItems } : {}), ...(galaxyDims ? { galaxyDims } : {}), ...(rounds ? { rounds } : {}), ...(seats && seats.length > 0 ? { seats } : {}), ...(autoReview === undefined ? {} : { autoReview }), ...(resume ? { resume } : {}) },
       )
       const blocked = run.state.phase !== 'done'
       return {
         content: run.report,
+        orchestration: {
+          kind: 'starflow',
+          runId: run.state.runId,
+          phase: run.state.phase,
+          done: !blocked,
+          resumed: run.resumed ?? Boolean(resume),
+          revision: run.state.revision,
+          phases: Object.fromEntries(
+            Object.entries(run.state.phases).map(([phase, record]) => [phase, {
+              status: record?.status,
+              at: record?.at,
+              ...(record?.elapsedMs === undefined ? {} : { elapsedMs: record.elapsedMs }),
+            }]),
+          ) as import('../agent/orchestration-outcome.js').StarflowOrchestrationOutcome['phases'],
+        },
         // blocked 是工具管线的失败信号（同 galaxy DP quorum 未达成的 isError 先例）。
         isError: blocked || undefined,
         uiContent: `${GLYPH} 星流 · ${blocked ? `受阻于 ${run.state.phase} 阶段` : '全阶段通过，待交付'}`,
@@ -241,16 +297,28 @@ export function createStarflowTool(deps: StarflowToolDeps): Tool {
       const councilMs = delegationToolTimeoutMs(turnCount, [undefined, undefined, undefined], { taskCount: 3 })
       // team worker 多为写工（patcher），按 3 个写工估波次预算。
       const teamMs = delegationToolTimeoutMs(turnCount, ['patcher', 'patcher', 'patcher'], { taskCount: 3 })
-      const dims = (params?.input?.galaxyDims as Array<{ authorities?: string[]; authority?: string; parallelism?: string; replicas?: number }> | undefined) ?? []
-      const galaxyProfiles: Array<string | undefined> = []
-      for (const d of dims.length >= 2 ? dims : [{}, {}]) {
-        const stars = d.authorities?.length ? d.authorities.length : 1
-        const replicas = d.parallelism === 'data' ? d.replicas ?? 1 : 1
-        for (let i = 0; i < stars * replicas; i++) galaxyProfiles.push(undefined)
-      }
-      const galaxyMs = delegationToolTimeoutMs(turnCount, galaxyProfiles, { taskCount: galaxyProfiles.length })
-      // autoReview 追加的审查维度是事实上的 +1 串行波次（同 galaxy.ts 注释）。
-      const reviewMs = delegationToolTimeoutMs(turnCount, ['reviewer'], { taskCount: 1 })
+      // runStarflow derives the same dimensions when galaxyDims is omitted;
+      // use that normalized plan so the outer timeout covers the actual
+      // EP/DP fan-out instead of an arbitrary two-worker fallback.
+      const rawDims = timeoutGalaxyDims(params?.input?.galaxyDims)
+      const draftItems = timeoutDraftItems(params?.input?.draftItems)
+      const dims = rawDims ?? deriveGalaxyDims(draftItems)
+      const executableDims = dims.length >= 2 ? dims : []
+      const budgetInputs = buildGalaxyBudgetInputs(executableDims)
+      const galaxyMs = budgetInputs.profiles.length > 0
+        ? delegationToolTimeoutMs(turnCount, budgetInputs.profiles, {
+            taskCount: budgetInputs.profiles.length,
+            requestedTimeoutMs: budgetInputs.requestedTimeoutMs,
+            tierFloors: budgetInputs.tierFloors,
+          })
+        : 0
+      // autoReview is an additional serial wave only when Galaxy does not
+      // already contain an explicit review/verify dimension.
+      const autoReview = (params?.input?.autoReview as boolean | undefined) ?? true
+      const hasExplicitReview = executableDims.some(d => isReviewGalaxyDimension(d.name))
+      const reviewMs = autoReview && executableDims.length > 0 && !hasExplicitReview
+        ? delegationToolTimeoutMs(turnCount, ['reviewer'], { taskCount: 1 })
+        : 0
       return councilMs + teamMs + galaxyMs + reviewMs
     },
   }

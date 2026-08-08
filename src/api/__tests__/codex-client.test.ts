@@ -72,6 +72,89 @@ describe('CodexClient', () => {
     assert.equal(input[2].output, 'file.txt')
   })
 
+  it('maps forced OAI object-form tool_choice to Responses API function selection (submit_result final round)', async () => {
+    const client = new CodexClient({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      model: 'gpt-5.5',
+      maxTokens: 64000,
+    })
+
+    const body = (client as any).buildRequestBody({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'finalize the report' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'submit_result',
+          description: 'Submit the final result',
+          parameters: { type: 'object', properties: {} },
+        },
+      }],
+      tool_choice: { type: 'function', function: { name: 'submit_result' } },
+      max_tokens: 64000,
+    })
+
+    assert.deepEqual(body.tool_choice, { type: 'function', name: 'submit_result' },
+      'OAI {type:function,function:{name}} must map to Responses API {type:function,name}')
+    assert.equal(body.parallel_tool_calls, false,
+      'Forced single function must disable parallel tool calls')
+    assert.ok(Array.isArray(body.tools) && body.tools.length === 1, 'Tools preserved')
+    assert.equal(body.tools[0].name, 'submit_result')
+  })
+
+  it('keeps parallel_tool_calls for ordinary workers without forced tool_choice', async () => {
+    const client = new CodexClient({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      model: 'gpt-5.5',
+      maxTokens: 64000,
+    })
+
+    const body = (client as any).buildRequestBody({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'do something' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'bash',
+          description: 'Run a command',
+          parameters: { type: 'object', properties: {} },
+        },
+      }],
+      max_tokens: 64000,
+    })
+
+    assert.equal(body.parallel_tool_calls, true, 'Ordinary workers keep parallel tool calls')
+    assert.equal(body.tool_choice, undefined, 'No tool_choice field when not forced')
+    assert.ok(Array.isArray(body.tools) && body.tools.length === 1, 'Tools converted')
+    assert.equal(body.tools[0].name, 'bash')
+  })
+
+  it('passes through string-form tool_choice (auto/none) and keeps parallel_tool_calls', async () => {
+    const client = new CodexClient({
+      baseUrl: 'https://chatgpt.com/backend-api/codex',
+      model: 'gpt-5.5',
+      maxTokens: 64000,
+    })
+
+    const body = (client as any).buildRequestBody({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'speculate' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'bash',
+          description: 'Run a command',
+          parameters: { type: 'object', properties: {} },
+        },
+      }],
+      tool_choice: 'none',
+      max_tokens: 64000,
+    })
+
+    assert.equal(body.tool_choice, 'none', 'Responses API accepts "none" string form')
+    assert.equal(body.parallel_tool_calls, true, 'String tool_choice is not a forced single function')
+  })
+
   it('parses SSE stream with output_text and reasoning events', async () => {
     const client = new CodexClient({
       baseUrl: 'https://chatgpt.com/backend-api/codex',

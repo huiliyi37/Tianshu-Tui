@@ -111,6 +111,7 @@ function buildEntries(
   summary: WorkerFleetSummary | undefined,
   width: number,
   maxRows: number,
+  compact = false,
 ): FleetLine[] {
   const rule = Math.min(Math.max(40, width), 80)
   const lines: FleetLine[] = []
@@ -148,16 +149,34 @@ function buildEntries(
     // 预算 = 总宽 − 前缀（` ├─ ● ` 6 列）− 实际尾（elapsed），不再用偏小的
     // 常数 8——尾部 `  12m30s` 一类最坏就到 8 列，常数预算在长尾时仍会折行。
     const objective = w.contract?.objective
+    const identity = formatWorkerIdentity({ profile: w.profile, authority: w.authority })
+    const stats: string[] = []
+    if (w.toolUseCount > 0) stats.push(`${w.toolUseCount} 工具`)
+    if (w.tokenCount > 0) stats.push(`${fmtTokens(w.tokenCount)} tok`)
+
+    // 紧凑档（live 区）：身份 + 目标 + 计数压进同一行——对标 CC 的
+    // `● general-purpose  {描述}  7m 44s · 68.6k tokens`。每 worker 恒 1 行，
+    // 舰队规模不再按 2 倍放大 live region 高度。
+    if (compact) {
+      const prefix = ` ${branch} ${glyph} ${identity}  `
+      const tailParts = [...stats]
+      if (elapsed) tailParts.push(elapsed)
+      const tail = tailParts.length > 0 ? `  ${tailParts.join(' · ')}` : ''
+      const budget = rule - displayWidth(prefix, WIDE) - displayWidth(tail, WIDE)
+      const mainText = truncate(objective ?? labels[i]!, Math.max(8, budget))
+      lines.push({ text: `${prefix}${mainText}${tail}`, kind: 'worker', status: w.status })
+      continue
+    }
+
+    // 主行：任务优先。有 objective 用 objective，否则回退身份。
+    // 预算 = 总宽 − 前缀（` ├─ ● ` 6 列）− 实际尾（elapsed），不再用偏小的
+    // 常数 8——尾部 `  12m30s` 一类最坏就到 8 列，常数预算在长尾时仍会折行。
     const prefix = ` ${branch} ${glyph} `
     const tail = elapsed ? `  ${elapsed}` : ''
     const mainText = truncate(objective ?? labels[i]!, rule - displayWidth(prefix, WIDE) - displayWidth(tail, WIDE))
     lines.push({ text: `${prefix}${mainText}${tail}`, kind: 'worker', status: w.status })
 
     // 续行：身份 · 计数 · 状态词（objective 已在主行时，身份下沉到这里）。
-    const identity = formatWorkerIdentity({ profile: w.profile, authority: w.authority })
-    const stats: string[] = []
-    if (w.toolUseCount > 0) stats.push(`${w.toolUseCount} 工具`)
-    if (w.tokenCount > 0) stats.push(`${fmtTokens(w.tokenCount)} tok`)
     const metaParts = [identity, ...stats, statusWord(w.status)]
     const head = ` ${cont}   `
     const metaLine = truncate(metaParts.join(' · '), Math.max(0, rule - displayWidth(head, WIDE)))
@@ -168,8 +187,9 @@ function buildEntries(
     lines.push({ text: ` └─ …(+${overflow})`, kind: 'overflow' })
   }
 
-  // 退路提示（kimi-code 的 Ctrl+B 提示对标）：让管理入口随块可见，不靠记忆
-  if (running > 0) {
+  // 退路提示（kimi-code 的 Ctrl+B 提示对标）：让管理入口随块可见，不靠记忆。
+  // 紧凑档省掉整行——入口由调用方并进汇总头（见 app.ts 的 chrome 段）。
+  if (running > 0 && !compact) {
     lines.push({ text: ' ⎿ /tasks 管理面板（↑↓ 选择 · f 切入 · x 停止）', kind: 'hint' })
   }
 
@@ -185,8 +205,9 @@ export function buildWorkerFleetLines(
   summary: WorkerFleetSummary | undefined,
   width = 80,
   maxRows = 6,
+  compact = false,
 ): string[] {
-  return buildEntries(workers, summary, width, maxRows).map(l => l.text)
+  return buildEntries(workers, summary, width, maxRows, compact).map(l => l.text)
 }
 
 /**
@@ -199,8 +220,9 @@ export function formatWorkerFleet(
   width = 80,
   summary?: WorkerFleetSummary,
   maxRows = 6,
+  compact = false,
 ): string[] {
-  const entries = buildEntries(workers, summary, width, maxRows)
+  const entries = buildEntries(workers, summary, width, maxRows, compact)
   return entries.map(l => {
     if (l.kind === 'worker') {
       if (l.status === 'running') return color(l.text, theme.primary)

@@ -273,7 +273,7 @@ export class TurnStepProducer {
       this.self.config.promptEngine.setWorktreeReality(null)
     }
 
-    this.self.bindSessionDomain(userInput)
+    this.self.bindSessionDomain(userInput, callbacks)
     this.self.contextInjection.recordUserInputClaims(userInput)
     this.self.contextInjection.refreshPlaybookLessons(userInput)
 
@@ -678,11 +678,14 @@ export class TurnStepProducer {
     }
 
     // P1a 核销闭环：把本轮实际送达的条目（含 expect 谓词）交给 readback 跟踪。
-    // 送达轮 = 当前 turn；postTurn 的 advisory-readback-evaluate 按窗口核销。
+    // 必须与 runtime hook snapshot 使用同一 session turn 时钟；这里的 `turn` 是
+    // TurnOrchestrator.run 局部序号，而 postTool/postTurn 观察事件使用 session
+    // turn。混用会让 B2 在局部 turn=13 送达、事件却落在 session turn=2，
+    // course_changed 永远无法核销。
     // 控制面 tee（Wave 2）：单次 drain → 不可变快照 → 多路分发。readback 与
     // control adapter 消费同一快照；adapter 绝不自行 drain（一次性消费边界）。
     const deliveredSnapshot = this.self.advisoryBus.drainDelivered()
-    this.self.advisoryReadback.track(deliveredSnapshot, turn)
+    this.self.advisoryReadback.track(deliveredSnapshot, this.self.session.getTurnCount())
     this.self.controlPlane.submitAll(signalsFromDelivered(deliveredSnapshot))
 
     // Phase 0 观测：advisory 投递账本落盘（仅有活动时写，避免遥测噪音），

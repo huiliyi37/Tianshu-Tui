@@ -52,7 +52,9 @@ export function buildCacheRoutes(deps: CacheRoutesDeps): Record<string, RouteHan
         const aggregate = await aggregateCacheUsage({
           sessionsRoot,
           days,
-          resolvePricing: model => findModelPricing(providers, providerName, model),
+          // 行级 provider（T3）优先——spark 与官方同 model 不同价时各按各价；
+          // 旧行无 provider 回退默认 provider（原行为）。
+          resolvePricing: (model, provider) => findModelPricing(providers, provider ?? providerName, model),
         })
         // 回看天数只由 aggregate.windowDays 表达——`days` 在 aggregate 里是按天
         // 明细数组，再加一个同名标量会被 spread 覆盖成数组，两种含义撞车。

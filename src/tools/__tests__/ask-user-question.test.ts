@@ -162,4 +162,85 @@ describe('parseAskUserQuestions', () => {
     assert.ok(text.includes('  1. A'))
     assert.ok(text.includes('  2. B'))
   })
+
+  // ── LLM API schema 兼容：以下三种格式都会被原 schema 拒收——
+  // 工具 spec 写的是 string[] + allow_multiple，但 Claude / 部分 SDK 会
+  // 按 Anthropic 原生 schema 输出对象数组 / choices 字段 / multiSelect。
+  // 这些不能静默吞掉，否则面板被 openAskUserQuestionPanel 的 options 空过滤
+  // 整个踢出，用户看到的只有 LLM 输出流里的题面（「只剩问题没选项」）。
+
+  it('Anthropic 对象数组 options: [{label, description}] 兼容为字符串数组', () => {
+    const items = parseAskUserQuestions({
+      questions: [{
+        prompt: '选一个',
+        options: [
+          { label: 'A', description: 'aaa' },
+          { label: 'B', description: 'bbb' },
+          { label: 'C', description: 'ccc' },
+        ],
+      }],
+    })
+    assert.equal(items.length, 1)
+    assert.deepEqual(items[0]!.options, ['A', 'B', 'C'])
+  })
+
+  it('对象数组里只取 label，忽略 description/preview 等其他字段', () => {
+    const items = parseAskUserQuestions({
+      questions: [{
+        prompt: '选',
+        options: [
+          { label: '  苹果  ', description: 'apple' },
+          { label: '香蕉', preview: 'yellow' },
+        ],
+      }],
+    })
+    // label 前后空白应清掉（与 string[] 路径一致）
+    assert.deepEqual(items[0]!.options, ['苹果', '香蕉'])
+  })
+
+  it('对象数组里如果整条没 label，跳过该条不抛错', () => {
+    const items = parseAskUserQuestions({
+      questions: [{
+        prompt: '选',
+        options: [
+          { description: 'no label' },
+          { label: 'B' },
+          null,
+          'plain-string',
+        ],
+      }],
+    })
+    // null 跳过，{description only} 跳过（没 label），'plain-string' 算字符串保留
+    assert.deepEqual(items[0]!.options, ['B', 'plain-string'])
+  })
+
+  it('choices 别名等价于 options', () => {
+    const items = parseAskUserQuestions({
+      questions: [{ prompt: '选', choices: ['X', 'Y'] }],
+    })
+    assert.deepEqual(items[0]!.options, ['X', 'Y'])
+  })
+
+  it('multiSelect (camelCase) 等价于 allow_multiple (snake_case)', () => {
+    const items = parseAskUserQuestions({
+      questions: [{ prompt: '多选', options: ['A', 'B'], multiSelect: true }],
+    })
+    assert.equal(items[0]!.allowMultiple, true)
+  })
+
+  it('混合 schema 字段：对象数组 + multiSelect 同时存在', () => {
+    const items = parseAskUserQuestions({
+      questions: [{
+        prompt: '多选',
+        options: [
+          { label: 'A' },
+          { label: 'B' },
+          { label: 'C' },
+        ],
+        multiSelect: true,
+      }],
+    })
+    assert.deepEqual(items[0]!.options, ['A', 'B', 'C'])
+    assert.equal(items[0]!.allowMultiple, true)
+  })
 })

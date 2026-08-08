@@ -233,6 +233,22 @@ function classifyByPattern(error: unknown): ClassifiedError {
     }
   }
 
+  // Some OpenAI-compatible gateways return provider overload as a structured
+  // error body without preserving the HTTP 503 status on the thrown Error.
+  // Keep these errors in the overloaded category so FallbackStreamClient can
+  // switch to a configured backup provider instead of treating them as an
+  // unknown, non-fallbackable failure.
+  if (/service[_\s-]*unavailable|too\s+busy|temporarily\s+unavailable|server\s+overload|overloaded|capacity/i.test(lower)) {
+    return {
+      retryable: true,
+      retryDelayMs: 3000,
+      shouldReconnect: true,
+      category: 'overloaded',
+      userMessage: 'Service is busy. Retrying or switching provider.',
+      maxRetries: 3,
+    }
+  }
+
   // Upstream stream closed before first payload (cliproxy / proxy errors)
   if (/empty_stream|upstream.*stream.*closed|stream.*closed.*before.*payload/i.test(lower)) {
     return {

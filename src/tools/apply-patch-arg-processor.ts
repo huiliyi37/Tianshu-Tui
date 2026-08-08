@@ -18,6 +18,7 @@
  */
 
 import type { ToolArgProcessor } from '../agent/tool-arg-post-processor.js'
+import { POINTER_INTERNAL_TAG } from './pointer-tag.js'
 
 export const APPLY_PATCH_POINTER_PREFIX = '[patch applied to'
 
@@ -68,7 +69,7 @@ export const applyPatchArgProcessor: ToolArgProcessor = {
 
     return JSON.stringify({
       ...parsed,
-      diff: `${APPLY_PATCH_POINTER_PREFIX} ${files.length} file(s): ${shown}${more} — ${hunks} hunks, ${diff.length} chars. 已成功应用，勿重放——历史正常截断，查看用 read_file / git diff。]`,
+      diff: `${APPLY_PATCH_POINTER_PREFIX} ${files.length} file(s): ${shown}${more} — ${hunks} hunks, ${diff.length} chars. 已成功应用，勿重放——历史正常截断，查看用 read_file / git diff。${POINTER_INTERNAL_TAG} display-only pointer]`,
     })
   },
 }

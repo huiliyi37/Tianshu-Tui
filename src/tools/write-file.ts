@@ -16,6 +16,23 @@ import { formatActivePlanDraftReceipt, canonicalizePathForCompare } from '../age
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
+// Rewrite-loop hint (A-type placeholder loop): after a large write, the arg
+// post-processor replaces the echoed content with a "[file written to …]"
+// pointer. Lower-tier models read that echo as "I wrote a placeholder" and
+// rewrite the same path repeatedly — each new write gets truncated to another
+// pointer, accumulating "evidence" (7 rewrites in the 2026-08-01 desktop
+// session; pointer-regurgitation B-type is already handled by pointer-guard).
+// Track per-session write counts and nudge from the 2nd write onward — a soft
+// warning, never a block (legitimate iterative edits must keep working).
+const rewriteCounts = new Map<string, number>()
+function rewriteLoopHint(sessionId: string | undefined, filePath: string): string {
+  const key = `${sessionId ?? 'default'}:${filePath}`
+  const n = (rewriteCounts.get(key) ?? 0) + 1
+  rewriteCounts.set(key, n)
+  if (n < 2) return ''
+  return `\n\n⚠ 疑似重写循环：本会话已 ${n} 次写入 ${toPosixPath(filePath)}。每次写入都已成功落盘——历史消息里的 "[file written to …]" 指针是正常截断（省 token），不是占位符。若只是想确认内容，请 read_file 查看，无需重写。`
+}
+
 export const WRITE_FILE_TOOL: Tool = {
   definition: {
     name: 'write_file',
@@ -230,7 +247,7 @@ export const WRITE_FILE_TOOL: Tool = {
     const receipt = draftReceipt
       ?? `已写入 ${finalContent.length} 字节（${lines} 行）到 ${toPosixPath(filePath)}——内容与你提交的一致`
     return {
-      content: receipt + (warn ? '\n\n' + warn : ''),
+      content: receipt + rewriteLoopHint(params.sessionId, filePath) + (warn ? '\n\n' + warn : ''),
       uiContent,
       changedRanges,
     }

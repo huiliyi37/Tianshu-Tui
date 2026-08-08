@@ -88,6 +88,7 @@ import type {
   SessionEvent,
   SessionEventType,
   SessionRecord,
+  ResolvedDomainRecord,
   PlanDraft,
 } from './protocol.js'
 import { redactValue, redactText, truncateUtf16Safe } from './redact.js'
@@ -95,7 +96,14 @@ import { redactValue, redactText, truncateUtf16Safe } from './redact.js'
 // The session wire contract (event types, records, statuses) lives in
 // protocol.ts so the desktop can share it type-only. Re-export so existing
 // server-side importers keep working unchanged.
-export type { SessionStatus, SessionEvent, SessionEventType, SessionRecord, PlanDraft } from './protocol.js'
+export type {
+  SessionStatus,
+  SessionEvent,
+  SessionEventType,
+  SessionRecord,
+  ResolvedDomainRecord,
+  PlanDraft,
+} from './protocol.js'
 
 // Compile-time drift guards: the wire copies of ApprovalMode / PlanModeState in
 // protocol.ts must stay identical to the runtime definitions. If either side
@@ -182,6 +190,10 @@ export interface DelegateWorkerInput {
 export interface DelegateActivityUpdate {
   workOrderId: string
   parentToolId?: string
+  /** Runtime execution identity; absent on legacy background updates. */
+  dispatchId?: string
+  attemptId?: string
+  parentAttemptId?: string
   profile?: string
   authority?: string
   /** Why this authority was chosen（worker 命中理由，桌面镜像用）。 */
@@ -219,7 +231,13 @@ export interface DelegateActivityUpdate {
 }
 
 export interface ManagedAgent {
-  run(prompt: string, callbacks: AgentCallbacks, images?: string[]): Promise<void>
+  /**
+   * 包装 `AgentLoop.run`。返回值透传其 outcome——`skipped-already-running`
+   * 表示 re-entry guard 命中、本次没起任何轮次；sidecar 自身不消费它，但不能把
+   * 它在类型上抹成 void，否则调用方失去「这次到底跑没跑」的判据。
+   * 错误预检等本地短路路径仍返回 void。
+   */
+  run(prompt: string, callbacks: AgentCallbacks, images?: string[]): Promise<void | import('../agent/loop.js').AgentRunOutcome>
   abort(): void
   listArtifacts(): Artifact[]
   readArtifact(id: string): Promise<string | null>
@@ -375,7 +393,7 @@ export interface ManagedAgent {
    * worker。与 abort() 严格分离——abort 中止当前 turn 但保留 agent 可继续运行，
    * shutdown 是终结性操作。Optional 以兼容 lightweight test doubles。
    */
-  shutdown?(): void
+  shutdown?(): void | boolean | Promise<void | boolean>
   /**
    * I1: 直接召集议事会评审一个 artifact 中的 council-plan-json 草案。
    * 由桌面 CouncilSurface 调用；实际实现持有 coordinator 与 artifactStore。
@@ -418,6 +436,12 @@ export type AgentFactory = (
    * or fall back to the default when the id no longer resolves.
    */
   modelId?: string,
+  /**
+   * Per-session 工具白名单（蒸馏回放等自动化场景）。有值时 LLM 的工具列表
+   * 收窄到这个集合（经 gateToolDefinitions coreOverride 通路）。缺省 =
+   * 默认全量（行为不变）。工厂实现可忽略（test doubles）。
+   */
+  allowedTools?: string[],
 ) => ManagedAgent | Promise<ManagedAgent>
 
 /**
@@ -479,6 +503,11 @@ export interface CreateSessionInput {
    * 立即拒绝并 fail-closed 中止本次运行（中止原因入事件流 + 走查工件）。
    */
   unattended?: boolean
+  /**
+   * Per-session 工具白名单（蒸馏回放等自动化场景）。有值时 LLM 的工具列表
+   * 收窄到这个集合。缺省 / undefined = 默认全量（行为不变）。
+   */
+  allowedTools?: string[]
   /**
    * P1b（安全）：客户端是否具备计划倒计时自动批准 UI。
    * 仅 desktop/TUI 设置 true；vscode-extension 不设置（默认 false）→ sidecar
@@ -551,6 +580,12 @@ export interface SessionPersistenceAdapter {
    */
   loadRecords?(): SessionRecord[]
   loadEvents?(sessionId: string): SessionEvent[]
+  /**
+   * Return the maximum valid sequence already durable for one session. This
+   * is the allocation high-water mark; `SessionRecord.lastSeq` is only a
+   * snapshot and may lag the append-only event log after an abrupt exit.
+   */
+  loadEventHighWater?(sessionId: string): number
   /**
    * Async event-log read for the reconnect-replay path (optional). Adapters
    * that implement it should do a non-blocking file read and keep JSON parsing
@@ -728,7 +763,19 @@ interface ActiveRunSettlement {
   claimsReleased: boolean
   promise: Promise<void>
   resolve: () => void
+  /** Abort reconciliation state; kept on the exact run token for idempotence. */
+  staleSweep?: {
+    expectedGeneration: number
+    attempts: number
+    scheduled: boolean
+    finishedGeneration?: number
+  }
 }
+
+// Coordinator abort salvage currently waits up to five seconds. Reconcile with
+// a small margin, but never keep the process alive or emit a guessed result.
+const ABORT_RECONCILE_RETRY_DELAY_MS = 50
+const ABORT_RECONCILE_MAX_RETRIES = 120
 
 interface InternalSession {
   record: SessionRecord
@@ -956,6 +1003,17 @@ export function extractObjective(input: Record<string, unknown>): string {
 }
 
 /**
+ * N3 组头的 `并行委派 × N` 计数：delegate_batch 从 input.tasks 读批大小，
+ * 其余派发工具（单发/议事/团队/星河）不携带——workerIdentity 只在
+ * taskCount > 0 时渲染 `× N`。Exported for unit tests.
+ */
+export function delegationTaskCount(name: string, input: Record<string, unknown>): number | undefined {
+  if (name !== 'delegate_batch') return undefined
+  const tasks = input.tasks
+  return Array.isArray(tasks) && tasks.length > 0 ? tasks.length : undefined
+}
+
+/**
  * Scan an event log for approvals that were requested but never resolved —
  * i.e. the run was interrupted (sidecar restart) while blocked on them.
  * Used by rehydrate() to close them out honestly instead of leaving a
@@ -1117,9 +1175,26 @@ export class RuntimeSessionManager {
    *  worker handles). The lightweight record/events stay; ensureAgent rebuilds
    *  on demand. Caller guarantees the session is not running. */
   private releaseAgent(s: InternalSession): void {
-    if (!s.agent) return
-    try { s.agent.shutdown?.() } catch { /* best-effort */ }
+    let shutdownResult: void | boolean | Promise<void | boolean> | undefined
+    try { shutdownResult = s.agent?.shutdown?.() } catch { /* best-effort */ }
     s.agent = null
+    // A built agent may own claims even when the session has gone idle.  Wait
+    // for async coordinator cleanup before releasing them; otherwise a worker
+    // that ignored abort could race a new session during idle eviction.
+    if (shutdownResult && typeof (shutdownResult as Promise<void>).then === 'function') {
+      void Promise.resolve(shutdownResult).then(
+        (settled) => { if (settled !== false) this.releaseClaimsIfIdle(s) },
+        () => undefined,
+      )
+    } else if (shutdownResult !== false) {
+      this.releaseClaimsIfIdle(s)
+    }
+  }
+
+  /** Release claims only after the session has no active run settlement. */
+  private releaseClaimsIfIdle(s: InternalSession): void {
+    if (s.running || s.activeRunSettlement) return
+    try { this.getRegistry?.()?.releaseAllClaims(s.record.id) } catch { /* best-effort */ }
   }
 
   /**
@@ -1160,7 +1235,8 @@ export class RuntimeSessionManager {
     if (typeof p.loadRecords === 'function' && typeof p.loadEvents === 'function') {
       let records: SessionRecord[]
       try { records = p.loadRecords() } catch { return }
-      for (const rec of records) {
+      for (const rawRecord of records) {
+        const rec = sanitizeSessionDomain(rawRecord)
         const wasRunning = rec.status === 'running'
         const session: InternalSession = {
           record: {
@@ -1194,10 +1270,36 @@ export class RuntimeSessionManager {
           // find approval_required events with no matching approval_resolved,
           // and append 'sidecar-restart' resolutions so the replayed timeline
           // shows WHAT was pending instead of a dangling, unanswerable card.
+          let markerEvents: SessionEvent[] | undefined
           let orphans: Array<{ requestId: string; toolName: string }> = []
           if (rec.pendingApprovals > 0) {
-            try { orphans = findOrphanedApprovals(p.loadEvents!(rec.id)) } catch { /* best-effort */ }
+            try {
+              markerEvents = p.loadEvents!(rec.id)
+              orphans = findOrphanedApprovals(markerEvents)
+            } catch { /* high-water fallback below remains authoritative */ }
           }
+          // `lastSeq` is a record snapshot and can lag events.jsonl while a
+          // long delegation is still running. Allocate recovery markers above
+          // the durable log high-water, otherwise replay cursors can discard
+          // the restart reason as a duplicate or backwards sequence.
+          let durableHighWater: number
+          try {
+            if (markerEvents) {
+              durableHighWater = markerEvents.reduce((max, event) => Math.max(max, event.seq), 0)
+            } else if (p.loadEventHighWater) {
+              durableHighWater = p.loadEventHighWater(rec.id)
+            } else {
+              markerEvents = p.loadEvents!(rec.id)
+              durableHighWater = markerEvents.reduce((max, event) => Math.max(max, event.seq), 0)
+            }
+          } catch {
+            // Do not append sequence-bearing markers from an untrusted stale
+            // snapshot. The in-memory session remains aborted; a later open
+            // can retry recovery after the storage read becomes available.
+            continue
+          }
+          session.seq = Math.max(session.seq, durableHighWater)
+          session.record.lastSeq = session.seq
           // Persist the markers straight to disk WITHOUT keeping the log
           // resident. They re-appear when ensureEvents() reads it on first open.
           const appendMarker = (type: SessionEventType, data: Record<string, unknown>) => {
@@ -1234,7 +1336,11 @@ export class RuntimeSessionManager {
     } catch {
       return
     }
-    for (const ps of restored) {
+    for (const rawPersisted of restored) {
+      const ps = {
+        ...rawPersisted,
+        record: sanitizeSessionDomain(rawPersisted.record),
+      }
       const events = ps.events.slice().sort((a, b) => a.seq - b.seq)
       const maxSeq = events.length ? events[events.length - 1]!.seq : ps.record.lastSeq
       const wasRunning = ps.record.status === 'running'
@@ -1755,6 +1861,117 @@ export class RuntimeSessionManager {
     try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* non-fatal */ }
   }
 
+  private canReconcileAbortedRun(
+    session: InternalSession,
+    expectedGeneration: number,
+    settlement?: ActiveRunSettlement,
+    requireIdle = false,
+  ): boolean {
+    if (this.sessions.get(session.record.id) !== session) return false
+    if (session.tombstoned || session.record.archived) return false
+    if (session.record.status !== 'aborted') return false
+    if (session.lifecycleGeneration !== expectedGeneration) return false
+    if (settlement && session.activeRunSettlement && session.activeRunSettlement !== settlement) return false
+    if (requireIdle && session.running) return false
+    return true
+  }
+
+  private hasLiveCoordinatorDelegation(session: InternalSession): boolean {
+    const latest = new Map<string, { workerId: string; status: string }>()
+    for (const ev of session.events) {
+      if (ev.type !== 'delegation') continue
+      const workerId = typeof ev.data.workerId === 'string' ? ev.data.workerId : undefined
+      const status = typeof ev.data.status === 'string' ? ev.data.status : undefined
+      if (!workerId || !status) continue
+      const attemptId = typeof ev.data.attemptId === 'string' ? ev.data.attemptId : undefined
+      const dispatchId = typeof ev.data.dispatchId === 'string' ? ev.data.dispatchId : undefined
+      const key = attemptId ?? (dispatchId ? `${dispatchId}:${workerId}` : workerId)
+      latest.set(key, { workerId, status })
+    }
+    for (const { workerId, status } of latest.values()) {
+      if (status !== 'running' || session.backgroundAborts?.has(workerId)) continue
+      try {
+        if (this.isWorkerRunning(session.record.id, workerId)) return true
+      } catch {
+        // Unknown ground truth must not be converted into a fabricated failure.
+        return true
+      }
+    }
+    return false
+  }
+
+  private scheduleAbortStaleDelegationSweep(
+    session: InternalSession,
+    settlement: ActiveRunSettlement,
+    expectedGeneration: number,
+  ): void {
+    const state = settlement.staleSweep ?? (settlement.staleSweep = {
+      expectedGeneration,
+      attempts: 0,
+      scheduled: false,
+    })
+    if (state.expectedGeneration !== expectedGeneration) {
+      state.expectedGeneration = expectedGeneration
+      state.attempts = 0
+      state.finishedGeneration = undefined
+    }
+    if (state.scheduled || state.finishedGeneration === expectedGeneration) return
+    state.scheduled = true
+    void settlement.promise.then(() => {
+      setImmediate(() => this.runAbortStaleDelegationSweep(session, settlement))
+    })
+  }
+
+  private runAbortStaleDelegationSweep(
+    session: InternalSession,
+    settlement: ActiveRunSettlement,
+  ): void {
+    const state = settlement.staleSweep
+    if (!state?.scheduled) return
+    const expectedGeneration = state.expectedGeneration
+    const finish = () => {
+      state.scheduled = false
+      state.finishedGeneration = state.expectedGeneration
+    }
+    const retry = () => {
+      if (state.attempts >= ABORT_RECONCILE_MAX_RETRIES) {
+        // Stop after a bounded window without fabricating a terminal event when
+        // coordinator liveness never becomes authoritative.
+        finish()
+        return
+      }
+      state.attempts++
+      const timer = setTimeout(
+        () => this.runAbortStaleDelegationSweep(session, settlement),
+        ABORT_RECONCILE_RETRY_DELAY_MS,
+      )
+      timer.unref?.()
+    }
+
+    if (!settlement.settled
+      || !this.canReconcileAbortedRun(session, expectedGeneration, settlement, true)) {
+      finish()
+      return
+    }
+    if (this.hasLiveCoordinatorDelegation(session)) {
+      retry()
+      return
+    }
+    try {
+      this.sweepStaleDelegationNodes(session, 'caller_aborted')
+    } catch {
+      retry()
+      return
+    }
+    // Re-check after the sweep so a liveness transition cannot end the chain
+    // between the pre-check and the sweep's own ground-truth read.
+    if (this.hasLiveCoordinatorDelegation(session)) {
+      retry()
+      return
+    }
+    finish()
+  }
+
   private cancelPlanDraftTimer(session: InternalSession): void {
     if (session.planDraftTimer !== undefined) {
       this.planEventScheduler.clearTimeout(session.planDraftTimer)
@@ -1842,6 +2059,7 @@ export class RuntimeSessionManager {
         // P1b：随 record 持久化，sidecar 重启/rehydrate 后由恢复路径读回——
         // 否则重启后静默失去倒计时自动批准（fail-closed 但前后不一致）。
         ...(input.planAutoApproveUi === true ? { planAutoApproveUi: true } : {}),
+        ...(input.allowedTools !== undefined ? { allowedTools: [...input.allowedTools] } : {}),
       },
       agent: null,
       approvalMode: input.approvalMode,
@@ -2028,6 +2246,13 @@ export class RuntimeSessionManager {
               session.running = false
             }
             this.releaseRunClaims(id, runSettlement)
+            if (session.record.status === 'aborted') {
+              this.scheduleAbortStaleDelegationSweep(
+                session,
+                runSettlement,
+                session.lifecycleGeneration,
+              )
+            }
             if (!ownsDurability()) {
               if (this.ownsSessionDurability(session) && session.record.archived) {
                 this.unloadSession(session)
@@ -2040,14 +2265,17 @@ export class RuntimeSessionManager {
             this.settleHandoffArchive(session)
             this.append(session, 'done', { status: session.record.status })
             this.persistRecord(session)
-            // 兜底对账：abort 路径上 worker 的终态 delegation 事件会被回调门禁
-            // 吞掉（见 sweepStaleDelegationNodes）。延迟一拍——coordinator 的
-            // abort 结算链是纯 promise，setImmediate 时 orderControllers 必已
-            // 清空，不会把仍在结算的 worker 误判为死亡。
+            // Fast-path reconciliation; abort-specific delayed cleanup is
+            // handled by the settlement-aware retry chain.
             const sweepReason = session.record.status === 'aborted' ? 'caller_aborted' : 'unknown'
             setImmediate(() => {
               if (this.sessions.get(id) !== session) return
-              this.sweepStaleDelegationNodes(session, sweepReason)
+              try {
+                this.sweepStaleDelegationNodes(session, sweepReason)
+              } catch {
+                // Reconciliation is best-effort and must not surface as an
+                // uncaught task after the parent run has already settled.
+              }
             })
             this.maybeWatchdogAutoContinue(session)
             if (session.record.archived) this.unloadSession(session)
@@ -2070,6 +2298,13 @@ export class RuntimeSessionManager {
           session.running = false
         }
         this.releaseRunClaims(id, runSettlement)
+        if (session.record.status === 'aborted') {
+          this.scheduleAbortStaleDelegationSweep(
+            session,
+            runSettlement,
+            session.lifecycleGeneration,
+          )
+        }
         if (ownsDurability()) {
           this.append(session, 'done', { status: session.record.status })
           this.persistRecord(session)
@@ -2272,6 +2507,7 @@ export class RuntimeSessionManager {
       session.record.id,
       session.approvalMode,
       session.record.model,
+      session.record.allowedTools,
     )
     const finish = (agent: ManagedAgent): ManagedAgent => {
       session.agent = agent
@@ -2357,6 +2593,10 @@ export class RuntimeSessionManager {
     try {
       if (session.domainState === null) agent.setSessionDomain?.(null)
       else if (session.domainState !== undefined) agent.setSessionDomain?.(session.domainState)
+      else if (session.record.domain === 'auto' && session.record.resolvedDomain) {
+        const restored = resolveDomainState(session.record.resolvedDomain.key)
+        if (restored?.state) agent.setSessionDomain?.(restored.state)
+      }
     } catch { /* non-fatal */ }
     try {
       if (session.disabledSkills.size > 0) agent.setDisabledSkills?.(new Set(session.disabledSkills))
@@ -2445,13 +2685,15 @@ export class RuntimeSessionManager {
    * PlusMenu — set the session's star domain by selection key (auto | off |
    * <domainId>). Updates the stored selection (applied on lazy build), live-
    * mutates an already-built agent, persists the key, and emits domain_changed.
-   * Returns false when the session is missing or the key is unknown.
+   * Returns false when the session is missing/running or the key is unknown.
    */
   setDomain(id: string, key: string): boolean {
     const session = this.sessions.get(id)
     if (!session) return false
+    if (session.running) return false
     const resolved = resolveDomainState(key)
     if (!resolved) return false
+    delete session.record.resolvedDomain
     session.domainState = resolved.state
     session.record.domain = resolved.key
     try {
@@ -2476,7 +2718,16 @@ export class RuntimeSessionManager {
     if (!session) return undefined
     const current = session.record.model
     const all = this.listModelsFn?.() ?? []
-    return all.map((m) => ({ ...m, current: m.id === current || m.alias === current }))
+    return all.map((m) => {
+      const ref = `${m.provider}:${m.id}`
+      const currentFlag = !!current && (
+        current === ref
+        || current === `${m.provider}:${m.alias}`
+        || current === m.id
+        || current === m.alias
+      )
+      return { ...m, current: currentFlag }
+    })
   }
 
   /**
@@ -3254,25 +3505,43 @@ export class RuntimeSessionManager {
    */
   private sweepStaleDelegationNodes(session: InternalSession, failureReason: string): void {
     if (session.running) return
-    const latest = new Map<string, string>()
+    const latest = new Map<string, {
+      workerId: string
+      status: string
+      attemptId?: string
+      dispatchId?: string
+      parentAttemptId?: string
+    }>()
     const firstTs = new Map<string, number>()
     for (const ev of session.events) {
       if (ev.type !== 'delegation') continue
       const workerId = typeof ev.data.workerId === 'string' ? ev.data.workerId : undefined
       const status = typeof ev.data.status === 'string' ? ev.data.status : undefined
       if (!workerId || !status) continue
-      if (!firstTs.has(workerId)) firstTs.set(workerId, ev.ts)
-      latest.set(workerId, status)
+      const attemptId = typeof ev.data.attemptId === 'string' ? ev.data.attemptId : undefined
+      const dispatchId = typeof ev.data.dispatchId === 'string' ? ev.data.dispatchId : undefined
+      const parentAttemptId = typeof ev.data.parentAttemptId === 'string' ? ev.data.parentAttemptId : undefined
+      const key = attemptId ?? (dispatchId ? `${dispatchId}:${workerId}` : workerId)
+      if (!firstTs.has(key)) firstTs.set(key, ev.ts)
+      latest.set(key, { workerId, status, attemptId, dispatchId, parentAttemptId })
     }
-    for (const [workerId, status] of latest) {
+    for (const [key, current] of latest) {
+      const { workerId, status, attemptId, dispatchId, parentAttemptId } = current
       if (status !== 'running') continue
       if (session.backgroundAborts?.has(workerId)) continue
       if (this.isWorkerRunning(session.record.id, workerId)) continue
       // 让补发的终态事件带上真实的存活时长（否则 elapsedMs 会从 0 起算）。
       const startedMap = session.delegationStartedAt ?? (session.delegationStartedAt = new Map())
-      const ts = firstTs.get(workerId)
-      if (ts !== undefined && !startedMap.has(workerId)) startedMap.set(workerId, ts)
-      this.emitDelegationActivity(session, { workOrderId: workerId, status: 'failed', failureReason })
+      const ts = firstTs.get(key)
+      if (ts !== undefined && !startedMap.has(key)) startedMap.set(key, ts)
+      this.emitDelegationActivity(session, {
+        workOrderId: workerId,
+        attemptId,
+        dispatchId,
+        parentAttemptId,
+        status: 'failed',
+        failureReason,
+      })
     }
   }
 
@@ -3491,6 +3760,7 @@ export class RuntimeSessionManager {
     const s = this.sessions.get(id)
     if (!s) return false
     const wasRunning = s.running
+    const settlement = s.activeRunSettlement
     // Is there actually anything to stop? Must be sampled before the timers
     // below are cleared. rehydrate() loads EVERY persisted session into memory,
     // so abortAll() (sidecar shutdown + the global POST /abort) walks all of
@@ -3512,6 +3782,7 @@ export class RuntimeSessionManager {
       this.cancelPlanDraftTimer(s)
       s.planDraftLastEmit = undefined
     }
+    const expectedGeneration = s.lifecycleGeneration
     // 窄窗口竞态修复：watchdog stall 后 finally → setImmediate 续跑之间，用户
     // abort 对已停会话是空操作。设此标记让 setImmediate 守卫放弃续跑。
     s.watchdogRecoveryCancelled = true
@@ -3523,15 +3794,23 @@ export class RuntimeSessionManager {
     }
     // abort = 用户参与——取消倒计时自动批准
     this.cancelPlanAutoApprove(s, 'aborted')
+    if (settlement) {
+      this.scheduleAbortStaleDelegationSweep(s, settlement, expectedGeneration)
+    }
     s.agent?.abort()
     this.rejectAllPending(s, 'aborted')
     // 兜底对账：abort 升代后 run finally 失去 durability 早退，worker 终态
     // 事件又恰被回调门禁吞掉（见 sweepStaleDelegationNodes）——在此补发。
-    // 延迟一拍：run finally（microtask）先把 session.running 落为 false，
-    // coordinator 的结算链（纯 promise）也已清空 orderControllers。
+    // Keep the one-tick fast path; delayed coordinator cleanup is handled by
+    // the exact-settlement retry chain above.
     setImmediate(() => {
-      if (this.sessions.get(id) !== s) return
-      this.sweepStaleDelegationNodes(s, 'caller_aborted')
+      if (!this.canReconcileAbortedRun(s, expectedGeneration, settlement)) return
+      try {
+        this.sweepStaleDelegationNodes(s, 'caller_aborted')
+      } catch {
+        // The settlement-aware chain owns retries; an observational sweep must
+        // never turn an injected liveness-reader failure into an uncaught task.
+      }
     })
     // Idle sessions keep their timestamps and their log stays clean. The
     // in-memory suppression flag above still applies — a stall recovery waiting
@@ -3556,13 +3835,25 @@ export class RuntimeSessionManager {
    * abortAll() 分离：abortAll 仅中止当前 turn，shutdownAll 是终结性操作。
    * best-effort：任一 session shutdown 抛错不影响其他。
    */
-  shutdownAll(): void {
+  shutdownAll(): Promise<void> {
     if (this.idleSweepTimer) {
       clearInterval(this.idleSweepTimer)
       this.idleSweepTimer = undefined
     }
+    const pending: Promise<void>[] = []
     for (const s of this.sessions.values()) {
-      try { s.agent?.shutdown?.() } catch { /* best-effort */ }
+      let shutdownResult: void | boolean | Promise<void | boolean> | undefined
+      try {
+        shutdownResult = s.agent?.shutdown?.()
+      } catch { /* best-effort */ }
+      const releaseIdleClaims = (settled?: void | boolean) => {
+        if (settled !== false) this.releaseClaimsIfIdle(s)
+      }
+      if (shutdownResult && typeof (shutdownResult as Promise<void>).then === 'function') {
+        pending.push(Promise.resolve(shutdownResult).then(releaseIdleClaims, () => undefined))
+      } else if (shutdownResult !== false) {
+        releaseIdleClaims()
+      }
       try { s.jobs?.killAll() } catch { /* best-effort */ }
       // Drain any coalescing delta window so the tail is never lost on exit.
       try { this.flushDeltaBuf(s) } catch { /* best-effort */ }
@@ -3570,6 +3861,7 @@ export class RuntimeSessionManager {
     }
     // Flush any buffered events to disk before exit.
     this.persistence?.flushSync?.()
+    return pending.length > 0 ? Promise.all(pending).then(() => undefined) : Promise.resolve()
   }
 
   /**
@@ -4265,6 +4557,9 @@ export class RuntimeSessionManager {
     a: {
       workOrderId: string
       parentToolId?: string
+      dispatchId?: string
+      attemptId?: string
+      parentAttemptId?: string
       /** 嵌套委派的父 worker order id（顶层委派缺省）。 */
       parentWorkerId?: string
       profile?: string
@@ -4294,14 +4589,18 @@ export class RuntimeSessionManager {
     },
   ): void {
     const startedMap = session.delegationStartedAt ?? (session.delegationStartedAt = new Map())
-    let started = startedMap.get(a.workOrderId)
+    const attemptKey = a.attemptId ?? (a.dispatchId ? `${a.dispatchId}:${a.workOrderId}` : a.workOrderId)
+    let started = startedMap.get(attemptKey)
     if (started === undefined) {
       started = this.now()
-      startedMap.set(a.workOrderId, started)
+      startedMap.set(attemptKey, started)
     }
     this.append(session, 'delegation', {
       workerId: a.workOrderId,
       parentId: a.parentToolId,
+      dispatchId: a.dispatchId,
+      attemptId: a.attemptId,
+      parentAttemptId: a.parentAttemptId,
       // 嵌套委派的真实父 worker（parentId 是工具调用 id，只够挂到工具卡下；
       // 层级树渲染要靠这个字段）。
       parentWorkerId: a.parentWorkerId,
@@ -4334,6 +4633,7 @@ export class RuntimeSessionManager {
       verificationBrief: a.verificationBrief,
       evidenceStatus: a.evidenceStatus,
     })
+    if (a.status !== 'running') startedMap.delete(attemptKey)
   }
 
   private buildCallbacks(session: InternalSession): AgentCallbacks {
@@ -4345,6 +4645,27 @@ export class RuntimeSessionManager {
     // 可能是别会话的更新计划，审批卡因此发错/丢失（2026-07-25 修复）。
     const planSubmitToolIds = new Map<string, { slug: string; title: string }>()
     return {
+      onDomainResolved: (resolved) => {
+        if (!isActive()) return
+        const knownDomain = starDomainRegistry.get(resolved.key)
+        const eventPayload: ResolvedDomainRecord = {
+          key: redactText(resolved.key),
+          name: truncateUtf16Safe(redactText(resolved.name), 160),
+          matchedKeywords: resolved.matchedKeywords
+            .slice(0, 3)
+            .map((keyword) => truncateUtf16Safe(redactText(keyword), 80)),
+          reason: resolved.reason,
+        }
+        if (session.record.domain === 'auto' && knownDomain) {
+          session.record.resolvedDomain = {
+            ...eventPayload,
+            key: knownDomain.id,
+            name: eventPayload.name || knownDomain.name,
+          }
+        }
+        this.append(session, 'domain_resolved', { ...eventPayload })
+        this.persistRecord(session)
+      },
       onTextDelta: (text) => {
         if (!isActive()) return
         this.flushToolResultBuf(session)
@@ -4378,6 +4699,8 @@ export class RuntimeSessionManager {
         if (DELEGATION_TOOLS.has(name)) {
           this.append(session, 'delegation', {
             workerId: toolId,
+            toolName: name,
+            taskCount: delegationTaskCount(name, input),
             objective: extractObjective(input),
             profile: typeof input.profile === 'string' ? input.profile : undefined,
             status: 'running',
@@ -5131,6 +5454,67 @@ function parseImageDataUrl(url: string): { mime: string; base64: string } | null
   const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(url)
   if (!m) return null
   return { mime: m[1]!.toLowerCase(), base64: m[2]! }
+}
+
+/**
+ * Normalize persisted domain selection and optional Auto-resolution metadata.
+ * Unknown/deleted selections fail open to Auto; malformed or stale resolutions
+ * are removed so the next run can route normally.
+ */
+function sanitizeSessionDomain(record: SessionRecord): SessionRecord {
+  const raw = record as Omit<SessionRecord, 'domain' | 'resolvedDomain'> & {
+    domain?: unknown
+    resolvedDomain?: unknown
+  }
+  const rawDomain = typeof raw.domain === 'string' ? raw.domain : 'auto'
+  const selection = resolveDomainState(rawDomain)
+  const normalizedDomain = selection?.key ?? 'auto'
+  const { domain: _domain, resolvedDomain: _resolvedDomain, ...rest } = record
+  const base: SessionRecord = { ...rest, domain: normalizedDomain }
+
+  // Resolution metadata is meaningful only for a canonical persisted Auto
+  // selection. Unknown/deleted domains and legacy aliases fail open and must
+  // reroute instead of inheriting a stale resolution.
+  if (raw.domain !== 'auto' || normalizedDomain !== 'auto') return base
+  const resolvedDomain = sanitizeResolvedDomainRecord(raw.resolvedDomain)
+  return resolvedDomain ? { ...base, resolvedDomain } : base
+}
+
+function sanitizeResolvedDomainRecord(value: unknown): ResolvedDomainRecord | undefined {
+  if (typeof value === 'string') {
+    const definition = starDomainRegistry.get(value)
+    if (!definition) return undefined
+    return {
+      key: definition.id,
+      name: truncateUtf16Safe(definition.name, 160),
+      matchedKeywords: [],
+      reason: 'fallback',
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.key !== 'string'
+    || candidate.key.length === 0
+    || candidate.key.length > 128
+  ) return undefined
+  const definition = starDomainRegistry.get(candidate.key)
+  if (!definition) return undefined
+  const name = typeof candidate.name === 'string' && candidate.name.trim()
+    ? truncateUtf16Safe(redactText(candidate.name), 160)
+    : truncateUtf16Safe(definition.name, 160)
+  const matchedKeywords = Array.isArray(candidate.matchedKeywords)
+    ? candidate.matchedKeywords
+        .filter((keyword): keyword is string => typeof keyword === 'string')
+        .slice(0, 3)
+        .map((keyword) => truncateUtf16Safe(redactText(keyword), 80))
+    : []
+  return {
+    key: definition.id,
+    name,
+    matchedKeywords,
+    reason: candidate.reason === 'keyword' ? 'keyword' : 'fallback',
+  }
 }
 
 /**

@@ -3,6 +3,7 @@ import { extname, basename, resolve, join } from 'path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePathSafe } from './path-validate.js'
 import { relativePosix } from '../path-format.js'
+import { isScanExcludedDir } from './scan-excludes.js'
 
 export const FILE_INFO_TOOL: Tool = {
   definition: {
@@ -78,8 +79,14 @@ export const FILE_INFO_TOOL: Tool = {
       lines.push(`Encoding: ${isText ? 'text' : 'binary'}`)
     } else if (ls.isDirectory()) {
       const dirInfo = await scanDirectory(absPath)
-      lines.push(`Files: ${dirInfo.fileCount}`)
-      lines.push(`Total size: ${formatBytes(dirInfo.totalSize)}`)
+      // A lower bound printed as an exact count is a wrong answer, not a
+      // rounded one — say which it is.
+      const approx = dirInfo.truncated ? '≥' : ''
+      lines.push(`Files: ${approx}${dirInfo.fileCount}`)
+      lines.push(`Total size: ${approx}${formatBytes(dirInfo.totalSize)}`)
+      if (dirInfo.truncated) {
+        lines.push('Note: partial tally — build/dependency subtrees skipped, or the file/depth cap was reached.')
+      }
       lines.push(`Modified: ${ls.mtime.toISOString()}`)
     } else if (ls.isSymbolicLink()) {
       lines.push(`Modified: ${ls.mtime.toISOString()}`)
@@ -146,30 +153,61 @@ export function formatPermissions(mode: number, platform: NodeJS.Platform = proc
 interface DirScanResult {
   fileCount: number
   totalSize: number
+  /** A limit was hit — the numbers are lower bounds, not totals. */
+  truncated: boolean
 }
+
+/**
+ * Bounds for the recursive directory tally.
+ *
+ * Every file here costs a `stat`, so an unbounded walk turns one `file_info`
+ * call into as many syscalls as the tree is deep and wide — pointing it at this
+ * repo's `desktop/src-tauri/target/debug/deps` meant 19433 of them. A summary
+ * does not need to be exact to be useful, but it does need to come back.
+ */
+const MAX_SCAN_FILES = 5_000
+const MAX_SCAN_DEPTH = 12
 
 async function scanDirectory(dir: string): Promise<DirScanResult> {
   let fileCount = 0
   let totalSize = 0
-  try {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
+  let truncated = false
+
+  async function walk(current: string, depth: number): Promise<void> {
+    let entries
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      return // unreadable directory — keep what we have
+    }
+    for (const entry of entries) {
+      if (fileCount >= MAX_SCAN_FILES) {
+        truncated = true
+        return
+      }
       if (entry.name.startsWith('.')) continue
       if (entry.isDirectory()) {
-        const sub = await scanDirectory(join(dir, entry.name))
-        fileCount += sub.fileCount
-        totalSize += sub.totalSize
+        // Skipping the build/dependency trees is the difference between
+        // summarising a project and summarising its compiler output. Callers
+        // that genuinely want those pass them as the root, which still works —
+        // this only prunes them when found *inside* another tree.
+        if (isScanExcludedDir(entry.name) || depth >= MAX_SCAN_DEPTH) {
+          truncated = true
+          continue
+        }
+        await walk(join(current, entry.name), depth + 1)
       } else if (entry.isFile()) {
         fileCount++
         try {
-          const s = await stat(join(dir, entry.name))
+          const s = await stat(join(current, entry.name))
           totalSize += s.size
         } catch {
-          // unreadable file — skip
+          // unreadable file — counted, but its size is unknown
         }
       }
     }
-  } catch {
-    // unreadable directory — return what we have
   }
-  return { fileCount, totalSize }
+
+  await walk(dir, 0)
+  return { fileCount, totalSize, truncated }
 }

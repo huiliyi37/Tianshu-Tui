@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry, virtueEncouragementEntry, KEY_COOLDOWN_TURNS } from '../advisory-bus.js'
+import type { AdvisoryEntry } from '../advisory-bus.js'
 
 describe('AdvisoryBus', () => {
   it('renders empty when no entries', () => {
@@ -682,13 +683,20 @@ describe('priority tier (constitutional/operational/informational)', () => {
       bus.confirmSrDelivered(srs[0]!.key)
 
       // Re-submit same key → fresh incident
+      // 缺陷 3 修复后 SR 纳入 key 冷却：readonly-spiral 冷却 3 轮。
+      // renderEpoch 语义（跨 run 冷却修复）：冷却按 render 次数计——
+      // 送达 epoch=1，需 render 推进到 epoch ≥ 4 才越过 3 轮冷却窗。
+      // 先空转 3 次 render 推进 epoch，再重新提交。
+      bus.render(undefined, 6)  // epoch 2 — 空转推进
+      bus.render(undefined, 7)  // epoch 3
+      bus.render(undefined, 8)  // epoch 4 — 冷却期满
       bus.submit({
         key: 'readonly-spiral', priority: 0.65, category: 'discipline',
         content: '连续只读 again', channel: 'system-reminder', immediate: true,
       })
-      bus.render(undefined, 6)
+      bus.render(undefined, 9)
       srs = bus.drainSystemReminders()
-      assert.equal(srs.length, 1, 'new submission with same key appears')
+      assert.equal(srs.length, 1, 'new submission with same key appears (冷却期满)')
 
       // requeue again — counter must be fresh (not accumulated from previous incident)
       bus.requeueSr(srs[0]!.key, srs[0]!.content, srs[0]!.srClass)  // carry #1 fresh
@@ -819,6 +827,66 @@ describe('W2 表扬治理（2026-07-25 advisory-ecology-repair）', () => {
     bus.submit({ key: 'guard', priority: 0.6, category: 'discipline', content: '先验证' })
     const out = bus.render(undefined, 2)
     assert.ok(out.includes('guard'), '未注册 key 每轮照常竞争')
+  })
+
+  it('缺陷 3：SR 通道纳入 key 冷却——turn-call-limit 送达后冷却窗内不重复注入', () => {
+    const cooldown = KEY_COOLDOWN_TURNS.get('turn-call-limit')!
+    assert.ok(cooldown >= 1, 'turn-call-limit 必须在冷却注册表内')
+
+    const bus = new AdvisoryBus()
+    const srEntry = (): AdvisoryEntry => ({
+      key: 'turn-call-limit', priority: 0.68, category: 'discipline',
+      content: '本轮已进行 12+ 次 API 调用，请收敛当前动作并输出结论。',
+      channel: 'system-reminder', immediate: true,
+    })
+
+    // 第 1 轮：SR 正常送达（走完整 confirm 生命周期记账送达轮）
+    bus.submit(srEntry())
+    bus.render(undefined, 1)
+    let srs = bus.drainSystemReminders()
+    assert.equal(srs.length, 1, '首轮 SR 正常进入待送队列')
+    bus.confirmSrDelivered(srs[0]!.key)
+    bus.drainLedger()
+
+    // 冷却窗内（第 2 轮起）：重复提交被吞——不进 SR 待送队列
+    for (let turn = 2; turn < 1 + cooldown; turn++) {
+      bus.submit(srEntry())
+      bus.render(undefined, turn)
+      const pending = bus.drainSystemReminders()
+      assert.equal(pending.length, 0, `第 ${turn} 轮 SR 在冷却窗内不得重复注入（距送达 ${turn - 1} < ${cooldown}）`)
+    }
+    const delta = bus.drainLedger()
+    assert.ok(delta.dropped >= cooldown - 1, '冷却吞掉的 SR 逐条计入 dropped 遥测')
+    assert.ok(delta.droppedKeys.includes('turn-call-limit'), '丢弃 key 可从遥测回放')
+
+    // 冷却期满：恢复送达
+    bus.submit(srEntry())
+    bus.render(undefined, 1 + cooldown)
+    const pendingAfter = bus.drainSystemReminders()
+    assert.equal(pendingAfter.length, 1, '冷却期满 SR 恢复送达——治理的是洪流不是消灭')
+  })
+
+  it('跨 run 局部 turn 重置后，SR 冷却仍按单调渲染周期到期', () => {
+    const cooldown = KEY_COOLDOWN_TURNS.get('turn-call-limit')!
+    const bus = new AdvisoryBus()
+    const attemptAtTurn12 = (): number => {
+      bus.submit({
+        key: 'turn-call-limit', priority: 0.68, category: 'discipline',
+        content: '本轮已进行 12+ 次 API 调用，请收敛当前动作并输出结论。',
+        channel: 'system-reminder', immediate: true,
+      })
+      bus.render(undefined, 12)
+      const pending = bus.drainSystemReminders()
+      if (pending[0]) bus.confirmSrDelivered(pending[0].key)
+      return pending.length
+    }
+
+    assert.equal(attemptAtTurn12(), 1, '首次 run 正常送达')
+    for (let run = 2; run <= cooldown; run++) {
+      assert.equal(attemptAtTurn12(), 0, `第 ${run} 个 run 仍在冷却窗内`)
+    }
+    assert.equal(attemptAtTurn12(), 1,
+      '局部 turn 每个 run 都回到 12，冷却也必须最终恢复，不能永久静默')
   })
 })
 

@@ -62,6 +62,9 @@ export interface AgentConfig {
   stigmergyStore?: import('../context/stigmergy.js').StigmergyStore
   /** Provider registry key (e.g. 'deepseek') — used as ProviderHealthTracker id. */
   providerName?: string
+  /** 会话冻结的 wire 变换上下文（spark truncate N 等）。随 meta 持久化、
+   *  resume 读回；wire 截断与锚点提取两个消费点必须同源取这份（同 N 互补）。 */
+  wireContext?: import('../api/pro-registry.js').WireTransformContext
   /** Cost-aware reclaim profile resolved from provider+model economics
    *  (billing / cache kind / reclaim floors). Absent → controllers derive a
    *  conservative per-token fallback from providerProfile. */
@@ -171,6 +174,18 @@ export interface AgentConfig {
   defaultDomain?: string
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. Disabled by default. */
   songlineEnabled?: boolean
+  /** Explicit opt-in for constellation post-session milestone capture. Default false. */
+  constellationEnabled?: boolean
+  /** Explicit opt-in for companion presence heartbeat. Default false. */
+  companionPresenceEnabled?: boolean
+  /** Session-end dream / skill-distill. Default true; lean forces off. */
+  dreamEnabled?: boolean
+  /** Runtime lean profile — trims postTool meridian/physarum and postSession dream. */
+  runtimeLean?: boolean
+  /** 资源压力状态行回调（TUI setStatusLine 通道）：resource_pressure trigger
+   *  触发时收到提醒文本，资源恢复时收到 null 清除。缺省不接（sidecar/worker
+   *  无 TUI）。只承载资源压力信息，不与其他状态行来源（StatusLineRunner）协调。 */
+  onStatusLine?: (text: string | null) => void
   /** 安全模式正则告警（层1）。默认开；false 或 RIVET_SECURITY_GUIDANCE=0 关闭。 */
   securityGuidance?: boolean
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). Disabled by default. */
@@ -296,6 +311,13 @@ export interface AutonomyCheckpointInfo {
   paused: true
 }
 
+export interface DomainResolvedPayload {
+  key: string
+  name: string
+  matchedKeywords: string[]
+  reason: 'keyword' | 'fallback'
+}
+
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
@@ -307,6 +329,8 @@ export interface AgentCallbacks {
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string; voluntary?: boolean; source?: string }) => void
+  /** Auto session domain resolved at the first bind; observability only. */
+  onDomainResolved?: (payload: DomainResolvedPayload) => void
   /** R4 — structured course-correction signal surfaced to the desktop conversation. */
   onDecisionShift?: (shift: DecisionShift) => void
   /**

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated, toolCardTitle } from '../format/tool-card.js'
 import { formatDiff, isDiffContent } from '../format/diff.js'
 import { formatThinking } from '../format/thinking.js'
+import { displayWidth } from '../width.js'
 import { getTheme } from '../theme.js'
 
 const theme = getTheme()
@@ -239,7 +240,8 @@ describe('formatDiff', () => {
   it('truncates long diffs', () => {
     const long = Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n')
     const lines = formatDiff({ content: long, maxLines: 30 }, theme)
-    assert.ok(lines.some(l => stripAnsi(l).includes('hidden')))
+    // 与其余长输出塌缩共用同一标记（hiddenLinesMarker），不再自造文案。
+    assert.ok(lines.some(l => stripAnsi(l).includes('已隐藏 30 行')), `塌缩标记缺失: ${lines.map(stripAnsi).join('|')}`)
   })
 
   it('renders line-number gutter for hunk-bearing diffs', () => {
@@ -356,5 +358,65 @@ describe('formatThinking', () => {
     assert.ok(plain.some(l => l.includes('conclusion')))
     // No truncation for small content
     assert.ok(!plain.some(l => l.includes('more lines')))
+  })
+
+  /**
+   * 窄窗口回归：推理文本多是长句，按逻辑行封顶时一行 wrap 成三四个显示行，
+   * 8 行逻辑行能占二十个显示行——而 live 区高度峰值会被定高视口固化成输入框
+   * 上方的常驻空白。maxRows 按 wrap 后的显示行收口。
+   */
+  describe('maxRows（按显示行封顶，窄窗口）', () => {
+    const longLine = (i: number): string => `推理片段 ${i} ` + '这是一段很长的推理文本用于触发折行'.repeat(4)
+    const rowsOf = (line: string, columns: number): number =>
+      Math.max(1, Math.ceil(displayWidth(stripAnsi(line)) / Math.max(10, columns - 2)))
+
+    it('长句在窄终端下按显示行收口，不超预算', () => {
+      const text = Array.from({ length: 12 }, (_, i) => longLine(i)).join('\n')
+      const columns = 60
+      const body = formatThinking({
+        text, elapsedMs: 5000, header: false, expanded: true, maxRows: 4, columns,
+      }, theme)
+      const contentRows = body
+        .filter(l => !stripAnsi(l).includes('上方省略'))
+        .reduce((sum, l) => sum + rowsOf(l, columns), 0)
+      assert.ok(contentRows <= 4, `正文显示行数应 ≤ 4，实得 ${contentRows}（${body.length} 个逻辑行）`)
+    })
+
+    it('同样的文本按 maxLines 封顶会远超预算（对照）', () => {
+      const text = Array.from({ length: 12 }, (_, i) => longLine(i)).join('\n')
+      const columns = 60
+      const body = formatThinking({
+        text, elapsedMs: 5000, header: false, expanded: true, maxLines: 8,
+      }, theme)
+      const contentRows = body
+        .filter(l => !stripAnsi(l).includes('上方省略'))
+        .reduce((sum, l) => sum + rowsOf(l, columns), 0)
+      assert.ok(contentRows > 8, `逻辑行封顶下显示行数应显著超出，实得 ${contentRows}`)
+    })
+
+    it('保留最新内容并给出省略计数', () => {
+      const text = Array.from({ length: 10 }, (_, i) => `think ${i}`).join('\n')
+      const plain = formatThinking({
+        text, elapsedMs: 5000, header: false, expanded: true, maxRows: 3, columns: 80,
+      }, theme).map(stripAnsi)
+      assert.ok(plain.some(l => l.includes('think 9')), '最新一行保留')
+      assert.ok(!plain.some(l => l.includes('think 0')), '最旧一行被省略')
+      assert.ok(plain.some(l => l.includes('上方省略')), '给出省略提示')
+    })
+
+    it('单行长过预算时仍保留它，不产出空推理区', () => {
+      const body = formatThinking({
+        text: longLine(1), elapsedMs: 5000, header: false, expanded: true, maxRows: 1, columns: 40,
+      }, theme)
+      assert.ok(body.length >= 1, '至少保留一行')
+      assert.ok(stripAnsi(body.join('')).includes('推理片段 1'), '内容仍在')
+    })
+
+    it('不传 maxRows 时行为不变（仍按 maxLines）', () => {
+      const text = Array.from({ length: 20 }, (_, i) => `think line ${i}`).join('\n')
+      const a = formatThinking({ text, elapsedMs: 5000, expanded: true, maxLines: 5 }, theme)
+      const b = formatThinking({ text, elapsedMs: 5000, expanded: true, maxLines: 5, columns: 80 }, theme)
+      assert.deepEqual(a, b, '只给 columns 不给 maxRows 不改变行为')
+    })
   })
 })

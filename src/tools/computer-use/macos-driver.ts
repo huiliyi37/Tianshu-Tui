@@ -19,10 +19,18 @@
  * the whole tree and counting to the Nth labeled element.
  */
 
-import { execFile } from 'node:child_process'
+import { execFile, type ExecFileException } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFile, unlink } from 'node:fs/promises'
+
+/** execFile shape as used by the driver — injectable for tests. */
+export type ExecFileLike = (
+  cmd: string,
+  args: readonly string[],
+  opts: { timeout: number },
+  cb: (err: ExecFileException | null, stdout?: string) => void,
+) => { stdin?: { end: (data?: string) => void } }
 import { randomUUID } from 'node:crypto'
 import { createScriptHost, hostEnabled, HostUnavailableError, SENTINEL, type ScriptHost } from './script-host.js'
 
@@ -371,19 +379,63 @@ async function windowCenter(app: string, jxa: JxaRunner): Promise<{ x: number; y
  * Clipboard-paste input path, shared by pasteText and non-ASCII type().
  * Overwrites the clipboard (documented tool behavior for paste_text).
  */
-async function pasteViaClipboard(app: string, text: string, jxa: JxaRunner): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = execFile('pbcopy', [], { timeout: 5_000 }, (err) => (err ? reject(err) : resolve()))
-    child.stdin?.end(text)
-  })
-  const script = `
+/**
+ * Backup the system clipboard text (best-effort — empty on failure).
+ * Restore is text-level only: rich-text/file pasteboard types degrade to text.
+ */
+async function backupClipboardText(exec: ExecFileLike): Promise<string> {
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      exec('pbpaste', [], { timeout: 5_000 }, (err, stdout) => (err ? reject(err) : resolve(stdout ?? '')))
+    })
+  } catch {
+    return ''
+  }
+}
+
+/** Restore a text backup to the system clipboard (best-effort). */
+async function restoreClipboardText(text: string, exec: ExecFileLike): Promise<void> {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = exec('pbcopy', [], { timeout: 5_000 }, (err) => (err ? reject(err) : resolve()))
+      child.stdin?.end(text)
+    })
+  } catch {
+    // best-effort — a failed restore must not fail the type action
+  }
+}
+
+/**
+ * Clipboard-paste input path, shared by pasteText and non-ASCII type().
+ * Overwrites the clipboard (documented tool behavior for paste_text); when
+ * `restore` is set (type path) the previous clipboard text is restored
+ * afterwards — typing must not clobber the user's clipboard.
+ */
+async function pasteViaClipboard(
+  app: string,
+  text: string,
+  jxa: JxaRunner,
+  opts: { restore?: boolean; exec?: ExecFileLike } = {},
+): Promise<void> {
+  const exec: ExecFileLike = opts.exec ?? (execFile as unknown as ExecFileLike)
+  let backup = ''
+  if (opts.restore) backup = await backupClipboardText(exec)
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = exec('pbcopy', [], { timeout: 5_000 }, (err) => (err ? reject(err) : resolve()))
+      child.stdin?.end(text)
+    })
+    const script = `
     const se = Application('System Events');
     se.processes.byName(${jxaString(app)}).frontmost = true;
     delay(0.1);
     se.keystroke('v', { using: ['command down'] });
     'ok';
   `
-  await jxa(script)
+    await jxa(script)
+  } finally {
+    if (opts.restore) await restoreClipboardText(backup, exec)
+  }
 }
 
 /** Downsample a PNG to VISION_MAX_DIMENSION via macOS-bundled sips. */
@@ -450,8 +502,14 @@ async function captureWindow(app: string, jxa: JxaRunner): Promise<{ png: Buffer
 }
 
 /** Real macOS driver. Pass a runner to bypass the resident host (tests). */
-export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
+export interface MacosDriverOptions {
+  /** Injectable execFile (tests) — defaults to child_process.execFile. */
+  execFile?: ExecFileLike
+}
+
+export function createMacosDriver(runner?: JxaRunner, opts: MacosDriverOptions = {}): ComputerUseDriver {
   const jxa: JxaRunner = runner ?? runJxa
+  const exec: ExecFileLike = opts.execFile ?? (execFile as unknown as ExecFileLike)
   return {
     async listApps(): Promise<AppInfo[]> {
       const script = `
@@ -720,7 +778,8 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
       // Cmd+V bypasses the IME entirely. ASCII keeps the keystroke path
       // (no clipboard side effect).
       if (needsClipboardInput(text)) {
-        await pasteViaClipboard(app, text, jxa)
+        // Restore the previous clipboard — typing must not clobber the user's.
+        await pasteViaClipboard(app, text, jxa, { restore: true, exec })
         return
       }
       const script = `
@@ -850,10 +909,20 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
     },
 
     async pasteText(app: string, text: string): Promise<void> {
-      await pasteViaClipboard(app, text, jxa)
+      await pasteViaClipboard(app, text, jxa, { exec })
     },
 
     async checkPermissions(): Promise<PermissionStatus> {
+      // Warm up the JXA host first: the very first osascript spawn + System
+      // Events handshake can exceed a tight probe timeout on cold start,
+      // which used to report "Accessibility missing" while the permission
+      // was actually granted. Best-effort — a failed warm-up must not block
+      // the probe itself.
+      try {
+        await jxa('1', 15_000)
+      } catch {
+        // warm-up failed — proceed with the probe anyway
+      }
       // Accessibility: must probe an actual AX attribute read. Merely listing
       // processes (se.processes.length) succeeds with only the Automation
       // permission and false-positives when Accessibility is missing — reading
@@ -861,7 +930,7 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
       // assistive access" without the Accessibility grant).
       let accessibility = false
       try {
-        await jxa(`const se = Application('System Events'); se.processes.byName('Finder').windows(); 'ok';`, 5_000)
+        await jxa(`const se = Application('System Events'); se.processes.byName('Finder').windows(); 'ok';`, 15_000)
         accessibility = true
       } catch {
         accessibility = false
@@ -872,7 +941,7 @@ export function createMacosDriver(runner?: JxaRunner): ComputerUseDriver {
       const probe = join(tmpdir(), `rivet-cu-probe-${randomUUID()}.png`)
       try {
         await new Promise<void>((resolve, reject) => {
-          execFile('screencapture', ['-x', '-R', '0,0,1,1', probe], { timeout: 5_000 }, (err) => {
+          exec('screencapture', ['-x', '-R', '0,0,1,1', probe], { timeout: 5_000 }, (err) => {
             if (err) reject(err)
             else resolve()
           })

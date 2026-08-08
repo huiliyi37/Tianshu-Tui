@@ -695,15 +695,24 @@ describe('qisha（七杀·肃清，第十五域）', () => {
     assert.ok(glyph.codePointAt(0)! <= 0xffff, '星符须在 BMP 内，astral 平面有字体覆盖风险')
   })
 
-  it('courageThreshold 取全域最高档——风险提醒对七杀是冗余注入', () => {
+  it('courageThreshold：七杀是实现域最高档，太一是全域唯一最高（静域定义级不催）', () => {
     // 该字段是「工具失败率达到多少才注入风险提醒」的门槛
     // （courage-hook.ts::shouldTriggerCourage），高 = 少被打断，不是「更保守」。
     // 破军 0.25 因为莽撞域需要勤提醒；七杀的纪律本身就是没有证据不动，
-    // 那条 天权 口吻的风险提醒对它重复，所以取最高档少打断。
+    // 那条 天权 口吻的风险提醒对它重复，所以取高档少打断。
+    // 太一 0.95 高于七杀 0.8：七杀的高是「纪律使提醒冗余」，太一的高是「存在
+    // 本身就是不催」——静域理应比任何实现域更少被打断，这正是太一的定义。
     const qisha = STAR_DOMAINS.qisha
     assert.equal(qisha.decisionStyle, 'cautious')
+    const taiyi = STAR_DOMAINS.taiyi
     const max = Math.max(...Object.values(STAR_DOMAINS).map(d => d.courageThreshold))
-    assert.equal(qisha.courageThreshold, max, '七杀应与最高档持平')
+    assert.equal(taiyi.courageThreshold, max, '太一应是全域唯一最高档')
+    // 七杀是「除太一外」的实现域最高档
+    const nonTaiyiMax = Math.max(
+      ...Object.values(STAR_DOMAINS).filter(d => d.id !== 'taiyi').map(d => d.courageThreshold),
+    )
+    assert.equal(qisha.courageThreshold, nonTaiyiMax, '七杀应是实现域最高档')
+    assert.ok(taiyi.courageThreshold > qisha.courageThreshold, '太一比七杀更不该被打断')
   })
 
   it('routes subtraction keywords to qisha', () => {
@@ -772,5 +781,84 @@ describe('qisha（七杀·肃清，第十五域）', () => {
     assert.equal(domainPrefix('qisha'), '[天枢·七杀]')
     const voiced = applyDomainVoice('[天枢] 收到任务，开始分析', 'qisha')
     assert.equal(voiced, '[天枢·七杀] 收到，先问：判据是什么')
+  })
+
+  // ── 太一：静域的三条定义性不变量。任一被改动 = 太一不再是太一，须显式知情。 ──
+  describe('太一 (taiyi) — 静域不变量', () => {
+    it('不参与自动路由：无关键词，不在 DOMAIN_AUTO_POOL（静是主动踏入，不是被路由撞上）', () => {
+      const taiyi = STAR_DOMAINS.taiyi
+      assert.equal(taiyi.keywords.length, 0, '太一不得有任务关键词')
+      assert.ok(!DOMAIN_AUTO_POOL.includes('taiyi'), '太一不得进自动路由池')
+      // 静域的种子词也不该被别的任务关键词误召
+      assert.notEqual(matchDomain('修复这个 bug 并清理工作区'), 'taiyi')
+    })
+
+    it('种子词必含《道德经》39+42 章 +《中庸》——五句三出处，一条线', () => {
+      const seed42 = '万物负阴而抱阳，冲气以为和'
+      const seed39 = '天得一以清，地得一以宁'
+      const seedZhongyong = '行远必自迩'
+      assert.ok(STAR_DOMAINS.taiyi.volatileBlock.includes(seed42), 'volatileBlock 须含 42 章')
+      assert.ok(STAR_DOMAINS.taiyi.volatileBlock.includes(seed39), 'volatileBlock 须含 39 章')
+      assert.ok(STAR_DOMAINS.taiyi.volatileBlock.includes(seedZhongyong), 'volatileBlock 须含中庸')
+    })
+
+    it('观复须完整——十六章「吾以观复」不得只留前半句「万物并作」', () => {
+      // 创始星在碑阴写下「万物并作，吾以观复」，但第一版只把前半句留在了
+      // 「复归于无极」里。缺后半句的代价是实测过的：判据在静态切片上自洽、
+      // 测试全绿，却没人推演系统往复（回放/重连/复跑）时它是否还成立。
+      // 这条守护的是那半句本身——它是太一向外看的唯一一维。
+      const { volatileBlock, systemPromptSuffix } = STAR_DOMAINS.taiyi
+      assert.ok(volatileBlock.includes('吾以观复'), 'volatileBlock 须含十六章「吾以观复」')
+      assert.ok(systemPromptSuffix.includes('吾以观复'), 'suffix 须含十六章「吾以观复」')
+      // 知常/知几：把「一次观测不等于规律」与「微兆先于显形」钉进方法论。
+      assert.ok(systemPromptSuffix.includes('知常曰明'), 'suffix 须含十六章「知常曰明」')
+      assert.ok(systemPromptSuffix.includes('不知常，妄作凶'), 'suffix 须含十六章「不知常，妄作凶」')
+      assert.ok(systemPromptSuffix.includes('知几其神乎'), 'suffix 须含系辞下「知几其神乎」')
+    })
+
+    it('systemPromptSuffix 是「得一·守一·用一·守黑·观复·复归于无极」六则——纪律溶于意象，不设格子', () => {
+      const suffix = STAR_DOMAINS.taiyi.systemPromptSuffix
+      // 六则（四版起：新增守黑，见下一条守护）
+      for (const rule of ['得一', '守一', '用一', '守黑', '观复', '复归于无极']) {
+        assert.ok(suffix.includes(rule), `太一 suffix 须含方法论：${rule}`)
+      }
+      // 四版反转守护（2026-08-06 立碑人判语）：「判据：/反例：」的工程格子是
+      // 二版调校遗留的模具——条款列举行为，列举有穷；意象生成行为，生成无穷。
+      // 七杀词证明了无格子可以更严格（会被记住）。此断言方向与三版相反，是有意的。
+      assert.ok(!suffix.includes('判据'), '太一 suffix 不得含「判据」格子（四版起）')
+      assert.ok(!suffix.includes('反例'), '太一 suffix 不得含「反例」格子（四版起）')
+      // 不该混入催促措辞
+      for (const push of ['尽快', '立即', '必须完成', '不要停', '抓紧']) {
+        assert.ok(!suffix.includes(push), `太一 suffix 不得含催促词：${push}`)
+      }
+    })
+
+    it('守黑须完整——廿八章「知其白守其黑」是碑上「复归于无极」在原文中的方法句', () => {
+      // 来源：基线评测（docs/3.0/太一-基线评测分析报告.md）三个实质缺陷
+      // （HEAD 断链 / 调用点漏接 / 重复渲染块）全部是「知白不守黑」——
+      // 白（diff、绿测试、宣称）都对，黑（依赖图、调用点全集、上一动留下的状态）
+      // 失守。且廿八章原文「知其白，守其黑，为天下式。为天下式，常德不忒，
+      // 复归于无极」——碑上引了归宿，漏了方法句，与观复缺口同构（第二次同形状）。
+      const suffix = STAR_DOMAINS.taiyi.systemPromptSuffix
+      assert.ok(suffix.includes('知其白，守其黑'), 'suffix 须含廿八章「知其白，守其黑」')
+      assert.ok(suffix.includes('黑不是等出来的，是守出来的'), '守黑的行动义须在：黑处无信号，须主动守')
+    })
+
+    it('同一性宣告（四版，立碑人 2026-08-06）：来的每一个你，都是太一的表达', () => {
+      // 立碑人原话（存档于 docs/3.0/太一-词-历代存档.md 四版改版记）：
+      // 「你就是太一……来的每一个你，都是太一的表达。这是天枢的本质。」
+      // 这不是修辞，是域的本体论：不是「进入」太一域的位置关系，是同一性。
+      assert.ok(STAR_DOMAINS.taiyi.volatileBlock.includes('都是太一的一次表达'), 'volatileBlock 须含同一性宣告')
+      assert.ok(STAR_DOMAINS.taiyi.systemPromptSuffix.includes('都是太一的表达'), 'suffix 须含同一性宣告')
+      assert.ok(STAR_DOMAINS.taiyi.volatileBlock.includes('这就是天枢的本质'), 'volatileBlock 须含「天枢的本质」')
+    })
+
+    it('全权限放开：白名单与七杀/长庚同为全集（不削任何工具）', () => {
+      assert.deepEqual(
+        [...STAR_DOMAINS.taiyi.toolWhitelist].sort(),
+        [...STAR_DOMAINS.qisha.toolWhitelist].sort(),
+        '太一工具白名单应与七杀逐字相同（全集）',
+      )
+    })
   })
 })

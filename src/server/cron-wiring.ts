@@ -19,6 +19,9 @@
 import { CronScheduler, type UnsubscribeTaskDue } from './cron-scheduler.js'
 import { CronLock } from './cron-lock.js'
 import { TaskRegistry, type RuntimePool } from './task-registry.js'
+import { serverLogger } from './logger.js'
+import { uptime } from 'node:os'
+import { startEventTriggers, stopEventTriggers } from './event-triggers.js'
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -28,6 +31,8 @@ export interface CronWiringConfig {
   lock?: CronLock
   /** 提供 runtime 池后，cron 任务会自动调度到 runtime 执行 */
   runtimePool?: RuntimePool
+  /** 工作目录——事件触发器（file-change/git-push）监听的相对基准。 */
+  cwd?: string
 }
 
 export interface CronWiringStatus {
@@ -43,6 +48,7 @@ export class CronWiring {
   private scheduler: CronScheduler
   private registry: TaskRegistry
   private lock?: CronLock
+  private cwd?: string
   private unsubscribeTaskDue: UnsubscribeTaskDue
   private unsubscribeLockLost?: () => void
 
@@ -50,6 +56,7 @@ export class CronWiring {
     this.scheduler = config.scheduler
     this.registry = config.registry
     this.lock = config.lock
+    this.cwd = config.cwd
     this.unsubscribeLockLost = this.lock?.onLockLost(() => {
       this.scheduler.stop()
     })
@@ -95,11 +102,32 @@ export class CronWiring {
 
     this.scheduler.start()
 
+    // 事件触发器 fire（startup / app-open）：
+    // - startup：OS 开机自启时触发。用 os.uptime() 判定——系统启动后 5 分钟内
+    //   打开天枢，极大概率是开机自启（用户手动打开一般在开机很久后）。false
+    //   positive（开机后立刻手动打开）代价很低：多跑一次 startup 任务。
+    // - app-open：每次 sidecar 启动（= 应用打开）都 fire。
+    // 两者都只在抢到锁（owner）时触发，避免多进程重复 fire。
+    const BOOT_TRIGGER_UPTIME_SEC = 300
+    if (uptime() < BOOT_TRIGGER_UPTIME_SEC) {
+      const n = this.scheduler.fireByEvent('startup')
+      if (n > 0) serverLogger.info(`startup trigger fired ${n} task(s)`)
+    }
+    const appOpenCount = this.scheduler.fireByEvent('app-open')
+    if (appOpenCount > 0) serverLogger.info(`app-open trigger fired ${appOpenCount} task(s)`)
+
+    // 事件触发器监听器（file-change / git-push）——扫描现有任务注册 watcher。
+    // 仅在有 cwd 且抢到锁时启动。任务增删需重启 sidecar 才更新监听集合（v1）。
+    if (this.cwd) {
+      startEventTriggers(this.scheduler, this.cwd)
+    }
+
     return this.getStatus()
   }
 
   /** 停止调度器并释放锁 */
   async stop(): Promise<void> {
+    stopEventTriggers()
     this.scheduler.stop()
     this.lock?.release()
   }

@@ -322,6 +322,45 @@ export interface EfficacyStatsProvider {
   (key: string): { delivered: number; adopted: number } | null
 }
 
+// ─── T7 效力排序（2026-08-04 advisory 反馈环）──────────────────────
+// 效力数据此前只在 priority 完全相等时做 tie-break（compareEntries 的
+// secondaryScore），而各 hook 的 priority 高度分散（0.4/0.45/0.55/0.58/
+// 0.6/0.65/0.68/0.7/0.79），精确相等极罕见——adoptionRate 与 lift 排序在
+// 生产中近乎死代码。两天日志实测：self-verify（priority 0.58、采纳率 77%）
+// 被丢弃 319 次全场最多，而 todo-missing（priority 0.70、采纳率 12%）稳定
+// 占用槽位——0.70 恒大于 0.58，效力数据一次都没被查询过。
+//
+// 改为让效力在有界区间内调整有效优先级，使"说了有人听"的提醒能跨 priority
+// 赢得预算。三道防线沿用 T6 正向臂：不 mutation 条目（alive 跨渲染周期持有
+// 同一批引用，原地累加会复合）、cap 不越 0.8 fail-open 豁免线、无样本视为
+// 中性零调整（无数据时行为与改动前逐位一致）。
+
+/** 效力对有效优先级的最大调整幅度（±）。可用 RIVET_ADVISORY_EFFICACY_SPAN 覆盖。 */
+export const DEFAULT_EFFICACY_PRIORITY_SPAN = 0.15
+/** 采纳率达到满置信度所需的决出样本数；不足按比例缩放调整幅度 */
+export const EFFICACY_CONFIDENT_SAMPLES = 5
+/** 调整后的有效优先级下限——再低也保留参赛资格，不等于静音 */
+export const EFFICACY_PRIORITY_FLOOR = 0.05
+/** 调整后的有效优先级上限——不得触及 0.8 的 efficacy fail-open 豁免线 */
+export const EFFICACY_PRIORITY_CAP = 0.79
+
+/** RIVET_ADVISORY_EFFICACY_SPAN 解析：合法 [0,0.5] 数字生效，'0' 关闭调整，非法/缺省用默认值 */
+export function parseEfficacySpan(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return DEFAULT_EFFICACY_PRIORITY_SPAN
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0 || n > 0.5) return DEFAULT_EFFICACY_PRIORITY_SPAN
+  return n
+}
+
+/**
+ * 效力信号 — 供有效优先级做有界调整。
+ * `score` 归一 [0,1]（0.5 = 中性），`confidence` 归一 [0,1]（样本充分度）。
+ * null = 无样本，排序零调整。
+ */
+export interface EfficacySignalProvider {
+  (key: string): { score: number; confidence: number } | null
+}
+
 /** 习惯化查询接口 — 由 AdvisoryReadback 实现（结构化鸭子类型，便于测试） */
 export interface HabituationPolicy {
   getIgnoredStreak(key: string): number
@@ -404,10 +443,10 @@ export class AdvisoryBus {
   private srPendingDelivery = new Map<string, AdvisoryEntry>()
   /** W2：key → requeue 携带次数（跨轮延迟送达追踪，超 SR_CARRY_LIMIT 则 dropped）。 */
   private srCarryCount = new Map<string, number>()
-  /** W2 结算限流：KEY_COOLDOWN_TURNS 注册 key → 上次实际送达的轮号。 */
-  private lastDeliveredTurnByKey = new Map<string, number>()
-  /** 最近一次 render 的轮号——SR 确认回调（confirmSrDelivered）没有 turn 上下文时用它记账。 */
-  private lastRenderTurn = 0
+  /** W2 结算限流：KEY_COOLDOWN_TURNS 注册 key → 上次实际送达的单调渲染序号。 */
+  private lastDeliveredRenderByKey = new Map<string, number>()
+  /** 会话内单调渲染序号。不能使用 render(turn) 的 run-local turn；它每次 run 都从 0 重置。 */
+  private renderEpoch = 0
   /** Wave 1 账本：SR 提交数与被 SessionContext cap 丢弃数。 */
   private ledgerSrSubmitted = 0
   private ledgerSrDropped = 0
@@ -425,6 +464,10 @@ export class AdvisoryBus {
   // ── Lift 消费端（因果账本闭环,2026-07-04 第四轮）──
   /** 成熟 lift 查询 — null = 样本不足不下结论。 */
   private liftProvider: ((key: string) => number | null) | null = null
+  /** T7 效力排序：有界调整有效优先级的信号源。null = 效力不参与排序（旧行为）。 */
+  private efficacySignal: EfficacySignalProvider | null = null
+  /** 效力调整幅度 — 构造期解析一次，避免每轮 render 读 env。 */
+  private readonly efficacySpan = parseEfficacySpan(process.env.RIVET_ADVISORY_EFFICACY_SPAN)
   /** key → 负 lift 静音的剩余渲染周期数（与习惯化 silenceRemaining 独立,遥测可区分） */
   private liftMuteRemaining = new Map<string, number>()
   /** 静音期满后的 probation 名单 — 放行一次送达以收集新证据,之后 lift 仍 ≤0 才再静音 */
@@ -500,6 +543,12 @@ export class AdvisoryBus {
     this.efficacyStats = provider
   }
 
+  /** T7：注入效力信号（成熟 lift 优先，回退置信度加权的采纳率）。
+   *  缺省 = 效力只做同 priority 的 tie-break（改动前的行为）。 */
+  setEfficacySignalProvider(provider: EfficacySignalProvider): void {
+    this.efficacySignal = provider
+  }
+
   /** W6 开销节流：由 pressure-monitor 设置。Wave 2 统一预算消费此信号。 */
   setOverheadThrottled(throttled: boolean): void {
     this.overheadThrottled = throttled
@@ -543,13 +592,13 @@ export class AdvisoryBus {
     this.srCarryCount.delete(key)
     this.ledgerRendered++
     this.delivered.push({ key: entry.key, category: entry.category, tier: entry.tier, expect: entry.expect })
-    this.recordDeliveredTurn([entry.key], this.lastRenderTurn)
+    this.recordDeliveredRender([entry.key], this.renderEpoch)
   }
 
-  /** W2 结算限流：记录注册 key 的实际送达轮号（非注册 key 零开销跳过）。 */
-  private recordDeliveredTurn(keys: Iterable<string>, turn: number): void {
+  /** W2 结算限流：记录注册 key 的实际送达渲染序号（非注册 key 零开销跳过）。 */
+  private recordDeliveredRender(keys: Iterable<string>, renderEpoch: number): void {
     for (const key of keys) {
-      if (KEY_COOLDOWN_TURNS.has(key)) this.lastDeliveredTurnByKey.set(key, turn)
+      if (KEY_COOLDOWN_TURNS.has(key)) this.lastDeliveredRenderByKey.set(key, renderEpoch)
     }
   }
 
@@ -678,6 +727,9 @@ export class AdvisoryBus {
    *   被静态 persona 顶掉——静音栈的一环。)
    */
   render(activeStarDomain?: string, turn = 0): string {
+    // `turn` 是 TurnOrchestrator.run 内的局部序号，每个用户 run 都从 0 重置。
+    // key 冷却必须使用会话内单调时钟，否则 B2 固定在 turn=12 触发后会永久静默。
+    const renderEpoch = ++this.renderEpoch
     // T6 正向臂 keys——render 周期内 accumulated，在 effectivePriority 消费后随 render 结束丢弃
     let positiveArmKeys = new Set<string>()
     // ── Phase 2 状态机:candidate → pending → confirmed/revoked ──
@@ -738,19 +790,20 @@ export class AdvisoryBus {
 
     // ── W2 key 级送达冷却：注册 key 距上次实际送达不足 N 轮 → 吞掉计 dropped ──
     // 放在一切竞争逻辑之前——冷却中的条目不该占 MUTEX/预算/挂起任何一席。
-    // system-reminder 通道不受 key 级冷却影响：SR 有独立的 requeue/carry/confirm 生命周期。
-    this.lastRenderTurn = turn
+    // 缺陷 3 修复（会话 aa9737bb 审查）：SR 通道此前豁免冷却——B2 turn-call-limit
+    // 走 SR 通道，KEY_COOLDOWN_TURNS 注册的 3 轮冷却形同虚设，每个 run 都重复注入
+    // 收敛提醒（实测 82 渲染仅 5 采纳）。现 SR 也检查冷却：冷却期内吞掉（计 dropped）。
+    // 调用方（B2 等）按 run 重新 submit，冷却过后自动恢复送达——吞掉 ≠ 永久丢失。
+    // 不用 requeueSr：requeue 的条目进 systemReminderOut 后绕过 render 冷却检查，
+    // 下轮 drain 即送达，冷却形同虚设；且 SR_CARRY_LIMIT=2 会在 3 轮冷却期内
+    // 永久丢弃（confirmSrDropped），不如吞掉等调用方重提。
     {
       const cooled: AdvisoryEntry[] = []
       const swallowed: string[] = []
       for (const e of all) {
-        if (e.channel === 'system-reminder') {
-          cooled.push(e) // SR lifecycle managed separately — skip cooldown
-          continue
-        }
         const cooldown = KEY_COOLDOWN_TURNS.get(e.key)
-        const last = cooldown !== undefined ? this.lastDeliveredTurnByKey.get(e.key) : undefined
-        if (cooldown !== undefined && last !== undefined && turn - last < cooldown) {
+        const last = cooldown !== undefined ? this.lastDeliveredRenderByKey.get(e.key) : undefined
+        if (cooldown !== undefined && last !== undefined && renderEpoch - last < cooldown) {
           swallowed.push(e.key)
         } else {
           cooled.push(e)
@@ -994,7 +1047,7 @@ export class AdvisoryBus {
         this.statusSink(statusEntries)
         this.ledgerRendered += statusEntries.length
         this.delivered.push(...statusEntries.map(e => ({ key: e.key, category: e.category, tier: e.tier, expect: e.expect })))
-        this.recordDeliveredTurn(statusEntries.map(e => e.key), turn)
+        this.recordDeliveredRender(statusEntries.map(e => e.key), renderEpoch)
       }
     }
 
@@ -1028,11 +1081,26 @@ export class AdvisoryBus {
       if (lift !== undefined && lift !== null) return (lift + 1) / 2
       return this.adoptionRateProvider?.(key) ?? 0.5
     }
+    // T7 效力调整量：跨 priority 让"说了有人听"的提醒赢得预算。
+    // 豁免集与负 lift 静音同源——宪法级 / 立即送达 / 星域条目不参与效力排序。
+    // 返回 0 表示不调整（无 provider、豁免、或无样本），此时优先级原样透传，
+    // 不进 clamp——否则 CONSTITUTIONAL_PRIORITY(0.9) 会被压到 0.79。
+    const efficacyAdjust = (e: AdvisoryEntry): number => {
+      if (!this.efficacySignal) return 0
+      if (e.tier === 'constitutional' || e.immediate === true || e.category === 'star_domain') return 0
+      const sig = this.efficacySignal(e.key)
+      if (!sig) return 0
+      const score = Math.max(0, Math.min(1, sig.score))
+      const confidence = Math.max(0, Math.min(1, sig.confidence))
+      return (score - 0.5) * 2 * this.efficacySpan * confidence
+    }
     const effectivePriority = (e: AdvisoryEntry): number => {
-      if (positiveArmKeys.has(e.key)) {
-        return Math.max(e.priority, Math.min(0.79, e.priority + 0.05)) // 单调不减，cap 不越 0.8 豁免线
-      }
-      return e.priority
+      const base = positiveArmKeys.has(e.key)
+        ? Math.max(e.priority, Math.min(0.79, e.priority + 0.05)) // 单调不减，cap 不越 0.8 豁免线
+        : e.priority
+      const delta = efficacyAdjust(e)
+      if (delta === 0) return base
+      return Math.max(EFFICACY_PRIORITY_FLOOR, Math.min(EFFICACY_PRIORITY_CAP, base + delta))
     }
     const compareEntries = (a: AdvisoryEntry, b: AdvisoryEntry): number => {
       const pa = effectivePriority(a)
@@ -1108,7 +1176,7 @@ export class AdvisoryBus {
       expect: e.expect,
     })))
     // W2 冷却记账只算真实送达（holdout 扣留条目模型没看到，不占冷却窗）
-    this.recordDeliveredTurn(sorted.map(e => e.key), turn)
+    this.recordDeliveredRender(sorted.map(e => e.key), renderEpoch)
     // holdout 反事实组:扣留但照常核销（shadow 桶,自发完成率基线）
     this.delivered.push(...heldOut.map(e => ({
       key: e.key,
@@ -1145,10 +1213,13 @@ export class AdvisoryBus {
       return ''
     }
 
-    const lines = sorted.map(e => {
-      const ep = effectivePriority(e)
-      return `  <entry key="${escapeXml(e.key)}" priority="${ep.toFixed(2)}" category="${e.category}">${escapeXml(this.applyTone(e))}</entry>`
-    })
+    // 渲染声明的是条目自身的 priority，不是排序用的有效优先级：效力信号与
+    // 正向臂逐轮变化，把它们写进注入文本会让同一条 ttl>1 的建议在 alive 周期
+    // 内字节抖动，而 advisory 走 appendix 通道（前缀缓存敏感）。有效优先级只
+    // 参与 Top-N 竞争，不进 prompt。
+    const lines = sorted.map(e =>
+      `  <entry key="${escapeXml(e.key)}" priority="${e.priority.toFixed(2)}" category="${e.category}">${escapeXml(this.applyTone(e))}</entry>`,
+    )
 
     // TTL 递减：TTL > 1 的条目保留到 alive，下轮继续
     this.alive = sorted
@@ -1178,6 +1249,8 @@ export class AdvisoryBus {
     this.systemReminderOut = []
     this.srPendingDelivery.clear()
     this.srCarryCount.clear()
+    this.lastDeliveredRenderByKey.clear()
+    this.renderEpoch = 0
     this.ledgerSrSubmitted = 0
     this.ledgerSrDropped = 0
     this.ledgerSrCarried = 0

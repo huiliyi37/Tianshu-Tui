@@ -5,6 +5,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { presetIncludes, resolveToolPreset, __resetToolPresetForTest, type ToolPreset } from '../tool-preset.js'
 import { createDefaultToolRegistry } from '../default-registry.js'
+import { setActiveScheduler, type CronScheduler } from '../../server/cron-scheduler.js'
+
+const SCHEDULE_TOOLS = ['schedule_create', 'schedule_list', 'schedule_delete'] as const
 
 const BOOTSTRAP_TOOLS = [
   'delegate_task', 'undo', 'delegate_batch', 'team_orchestrate', 'council_convene',
@@ -41,16 +44,49 @@ describe('presetIncludes', () => {
   it('full includes everything', () => {
     for (const n of BOOTSTRAP_TOOLS) assert.ok(presetIncludes('full', n), n)
   })
+
+  it('taiyi 白名单档：门控工具全 false，核心工具不受门控影响', () => {
+    for (const drop of ['web_crawl', 'web_map', 'monitor', 'ast_edit', 'related_tests', 'inspect_project', 'import_resource', 'file_info', 'leave_mark', 'browser_debug']) {
+      assert.ok(!presetIncludes('taiyi', drop), `taiyi must drop ${drop}`)
+    }
+    // 非门控工具（无条件注册）不受 presetIncludes 影响——由 registry 侧条件排除
+    for (const keep of ['bash', 'read_file', 'edit_file', 'git']) {
+      assert.ok(presetIncludes('taiyi', keep), `taiyi keeps ${keep}`)
+    }
+  })
 })
 
 describe('assembly counts per preset', () => {
-  it('minimal=29 / frontend=30 / full=48（完整装配口径）', () => {
+  // 口径 = 无调度器的 CLI 交互模式。schedule 三工具按 isSchedulerAvailable()
+  // 条件注册，有调度器的 serve/桌面端各档 +3（见下一条用例）。
+  it('minimal=29 / frontend=30 / full=49（完整装配口径）', () => {
     assert.equal(totalCount('minimal'), 29)
     assert.equal(totalCount('frontend'), 30)
     // 118d0505：monitor 工具（full 档专属）入注册表，full 44 → 45
     // B3：web_crawl/web_map（full 档专属）入注册表，full 45 → 47
     // 视觉副驾：ask_image 无条件注册（各档 +1），28/29/47 → 29/30/48
-    assert.equal(totalCount('full'), 48)
+    // capability 能力索引（full 档专属，查询面低频，同 repo_graph/semantic_search），48 → 49
+    // cli_discover CLI 能力发现与安装（full 档专属，安装审批硬闸门），49 → 50
+    assert.equal(totalCount('full'), 50)
+  })
+
+  it('schedule 三工具按调度器存在与否条件注册', () => {
+    for (const n of SCHEDULE_TOOLS) {
+      assert.ok(!createDefaultToolRegistry([], { preset: 'full' }).has(n), `无调度器不注册 ${n}`)
+    }
+    // serve/桌面端：调度器在 serve 启动期登记，而 agent 工具表是 ensureAgent
+    // 懒建的，必然晚于登记——所以这些运行时照常拿到三个工具，各档 +3。
+    setActiveScheduler({} as unknown as CronScheduler)
+    try {
+      for (const n of SCHEDULE_TOOLS) {
+        assert.ok(createDefaultToolRegistry([], { preset: 'full' }).has(n), `有调度器要注册 ${n}`)
+      }
+      assert.equal(totalCount('minimal'), 32)
+      // cli_discover full 档 +1：49→50（无调度器）/ 52→53（有调度器）
+      assert.equal(totalCount('full'), 53)
+    } finally {
+      setActiveScheduler(undefined)
+    }
   })
 
   it('kernel(default-registry) minimal 排除 ast_edit/inspect_project/related_tests/import_resource/leave_mark', () => {
@@ -70,6 +106,33 @@ describe('assembly counts per preset', () => {
       assert.ok(reg.has('import_resource'))
     } finally {
       delete process.env.RIVET_IMPORT_RESOURCE
+    }
+  })
+
+  it('capability 注册后可见性：full 档注册，minimal/frontend 不含', () => {
+    for (const preset of ['minimal', 'frontend'] as const) {
+      assert.ok(!createDefaultToolRegistry([], { preset }).has('capability'), `${preset} 不含 capability`)
+    }
+    assert.ok(createDefaultToolRegistry([], { preset: 'full' }).has('capability'), 'full 含 capability')
+  })
+
+  it('env force-on：RIVET_CAPABILITY=1 在 minimal 下补入 capability', () => {
+    process.env.RIVET_CAPABILITY = '1'
+    try {
+      const reg = createDefaultToolRegistry([], { preset: 'minimal' })
+      assert.ok(reg.has('capability'))
+    } finally {
+      delete process.env.RIVET_CAPABILITY
+    }
+  })
+
+  it('taiyi 装配：白名单工具保留，无条件工具被排除', () => {
+    const reg = createDefaultToolRegistry([], { preset: 'taiyi' })
+    for (const keep of ['read_file', 'write_file', 'edit_file', 'hash_edit', 'grep', 'glob', 'bash', 'job', 'git', 'diff', 'run_tests', 'todo', 'plan']) {
+      assert.ok(reg.has(keep), `taiyi must keep ${keep}`)
+    }
+    for (const drop of ['web_fetch', 'web_search', 'ask_image', 'repo_map', 'read_section', 'ast_grep', 'skill']) {
+      assert.ok(!reg.has(drop), `taiyi must drop ${drop}`)
     }
   })
 })
@@ -115,6 +178,32 @@ describe('resolveToolPreset precedence', () => {
     writeFileSync(join(dir, '.rivet-config.json'), JSON.stringify({ tools: { preset: 'huge' } }))
     __resetToolPresetForTest()
     assert.equal(resolveToolPreset(dir), 'frontend')
+  })
+
+  it('RIVET_TOOL_PRESET=taiyi 解析为 taiyi 档', () => {
+    process.env.RIVET_TOOL_PRESET = 'taiyi'
+    __resetToolPresetForTest()
+    assert.equal(resolveToolPreset(dir), 'taiyi')
+  })
+
+  it('域 toolPreset：defaultDomain 钉定域且配置了域档位时按域装配', () => {
+    writeFileSync(join(dir, '.rivet-config.json'), JSON.stringify({
+      runtime: { domains: { taiyi: { toolPreset: 'taiyi' } } },
+    }))
+    __resetToolPresetForTest()
+    assert.equal(resolveToolPreset(dir, 'taiyi'), 'taiyi')
+    // 其他域/无域回退全局（无 tools.preset → frontend）
+    assert.equal(resolveToolPreset(dir, 'qiming'), 'frontend')
+    assert.equal(resolveToolPreset(dir), 'frontend')
+  })
+
+  it('域 toolPreset：changgeng 参考 taiyi 同样生效（动态域集合）', () => {
+    writeFileSync(join(dir, '.rivet-config.json'), JSON.stringify({
+      runtime: { domains: { changgeng: { toolPreset: 'taiyi' } } },
+    }))
+    __resetToolPresetForTest()
+    assert.equal(resolveToolPreset(dir, 'changgeng'), 'taiyi')
+    assert.equal(resolveToolPreset(dir, 'taiyi'), 'frontend', '未配置的域不受影响')
   })
 })
 

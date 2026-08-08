@@ -2,6 +2,7 @@ import { existsSync, readdirSync, lstatSync } from 'node:fs'
 import { resolve, extname, join } from 'node:path'
 import type { Dirent } from 'node:fs'
 import { isRestrictedPath } from '../platform/restricted-paths.js'
+import { SCAN_EXCLUDE_DIRS } from './scan-excludes.js'
 
 // ── language inference ────────────────────────────────────────────
 
@@ -99,9 +100,12 @@ export function buildLangMap(napi: typeof import('@ast-grep/napi')): Record<stri
  *
  *  Extendable via RIVET_AST_EXCLUDE (comma-separated dir names) for project-
  *  specific output dirs (lib, target, .output, vendor, etc.). */
+// Shared baseline plus this tool's own extras (`.rivet` included here: AST
+// search over stored plans and knowledge is noise). The hand-kept copy this
+// replaces had lost `target`.
 const BASE_EXCLUDE_DIRS = [
-  'node_modules', '.git', '.rivet',
-  'dist', 'build', 'out', '.next', '.turbo', 'coverage', '.nyc_output',
+  ...SCAN_EXCLUDE_DIRS,
+  '.rivet', 'out', '.turbo', 'coverage', '.nyc_output',
 ]
 function resolveExcludeDirs(): Set<string> {
   const env = process.env.RIVET_AST_EXCLUDE

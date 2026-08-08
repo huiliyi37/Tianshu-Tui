@@ -61,6 +61,41 @@ class HangingAgent implements ManagedAgent {
   rewindToMessages(_msgs: OaiMessage[]): void {}
 }
 
+/** Abort settles after the coordinator handle disappears, while the terminal
+ * callback still belongs to the pre-abort lifecycle generation. */
+class DelayedSettlementAgent implements ManagedAgent {
+  private resolveRun?: () => void
+  private callbacks?: AgentCallbacks
+  constructor(
+    private readonly workerId: string,
+    private readonly onWorkerGone: () => void,
+  ) {}
+  run(_p: string, cb: AgentCallbacks): Promise<void> {
+    this.callbacks = cb
+    cb.onDelegationActivity?.({ workOrderId: this.workerId, parentToolId: 'tool_1', status: 'running' })
+    return new Promise<void>((res) => { this.resolveRun = res })
+  }
+  abort(): void {
+    setTimeout(() => {
+      this.onWorkerGone()
+      // This callback is intentionally late: session-manager's generation gate
+      // must drop it, leaving reconciliation to the post-settlement sweep.
+      this.callbacks?.onDelegationActivity?.({
+        workOrderId: this.workerId,
+        parentToolId: 'tool_1',
+        status: 'failed',
+        failureReason: 'caller_aborted',
+      })
+      this.resolveRun?.()
+    }, 15)
+  }
+  listArtifacts(): Artifact[] { return [] }
+  readArtifact(): Promise<string | null> { return Promise.resolve(null) }
+  getMessages(): OaiMessage[] { return [] }
+  replaceMessages(_msgs: OaiMessage[]): void {}
+  rewindToMessages(_msgs: OaiMessage[]): void {}
+}
+
 /** Lazy adapter：走懒启动路径，loadEvents 只在首开时被调。 */
 class LazyMemoryPersistence implements SessionPersistenceAdapter {
   records = new Map<string, SessionRecord>()
@@ -103,6 +138,21 @@ async function waitForTerminalDelegation(
 ): Promise<SessionEvent | undefined> {
   for (let i = 0; i < 20; i++) {
     await tick()
+    const found = mgr.getEvents(sessionId, 0)?.events.find(
+      (e) => e.type === 'delegation' && e.data.workerId === workerId && e.data.status !== 'running',
+    )
+    if (found) return found
+  }
+  return undefined
+}
+
+async function waitForTerminalDelegationWithDelay(
+  mgr: RuntimeSessionManager,
+  sessionId: string,
+  workerId: string,
+): Promise<SessionEvent | undefined> {
+  for (let i = 0; i < 30; i++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25))
     const found = mgr.getEvents(sessionId, 0)?.events.find(
       (e) => e.type === 'delegation' && e.data.workerId === workerId && e.data.status !== 'running',
     )
@@ -195,6 +245,61 @@ test('abort path: worker killed mid-run gets caller_aborted terminal via sweep',
   const terminal = await waitForTerminalDelegation(mgr, rec.id, 'wo_abort')
   assert.ok(terminal, 'aborted worker must be closed by the sweep')
   assert.equal(terminal.data.status, 'failed')
+  assert.equal(terminal.data.failureReason, 'caller_aborted')
+  mgr.shutdownAll()
+})
+
+test('abort settlement sweep: delayed worker settlement is reconciled after coordinator liveness clears', async () => {
+  let coordinatorLive = true
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new DelayedSettlementAgent('wo_delayed', () => { coordinatorLive = false }),
+    defaultCwd: '/work',
+    approvalTimeoutMs: 0,
+    watchdogContinueDelayMs: 0,
+  })
+  const rec = mgr.createSession({ cwd: '/work', title: 't', prompt: 'go' })
+  mgr.setCoordinatorRef(rec.id, () => ({
+    isWorkerRunning: () => coordinatorLive,
+  } as unknown as import('../../agent/coordinator.js').DelegationCoordinator))
+  await tick()
+  assert.equal(mgr.abort(rec.id), true)
+  assert.equal(mgr.abort(rec.id), true, 'repeated abort remains idempotent')
+
+  const terminal = await waitForTerminalDelegationWithDelay(mgr, rec.id, 'wo_delayed')
+  assert.ok(terminal, 'post-settlement reconciliation must close a delayed worker')
+  assert.equal(terminal.data.status, 'failed')
+  assert.equal(terminal.data.failureReason, 'caller_aborted')
+  const terminals = mgr.getEvents(rec.id, 0)!.events.filter(
+    (e) => e.type === 'delegation' && e.data.workerId === 'wo_delayed' && e.data.status !== 'running',
+  )
+  assert.equal(terminals.length, 1, 'reconciliation must be idempotent')
+  mgr.shutdownAll()
+})
+
+test('abort settlement sweep: live coordinator handle delays reconciliation without false failure', async () => {
+  let coordinatorLive = true
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new HangingAgent('wo_lingering'),
+    defaultCwd: '/work',
+    approvalTimeoutMs: 0,
+    watchdogContinueDelayMs: 0,
+  })
+  const rec = mgr.createSession({ cwd: '/work', title: 't', prompt: 'go' })
+  mgr.setCoordinatorRef(rec.id, () => ({
+    isWorkerRunning: () => coordinatorLive,
+  } as unknown as import('../../agent/coordinator.js').DelegationCoordinator))
+  await tick()
+  mgr.abort(rec.id) // parent run settles immediately; coordinator lingers
+
+  await new Promise<void>((resolve) => setTimeout(resolve, 75))
+  const whileLive = mgr.getEvents(rec.id, 0)!.events.find(
+    (e) => e.type === 'delegation' && e.data.workerId === 'wo_lingering' && e.data.status !== 'running',
+  )
+  assert.equal(whileLive, undefined, 'live coordinator ground truth must prevent false failure')
+
+  coordinatorLive = false
+  const terminal = await waitForTerminalDelegationWithDelay(mgr, rec.id, 'wo_lingering')
+  assert.ok(terminal, 'retry must reconcile after coordinator liveness clears')
   assert.equal(terminal.data.failureReason, 'caller_aborted')
   mgr.shutdownAll()
 })

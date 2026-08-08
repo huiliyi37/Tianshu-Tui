@@ -38,6 +38,7 @@ import { evaluateWaveGate, formatWaveGate, getWaveGate, isWaveGateEnabled, setWa
 import { evaluateSkillGate, extractRequiredSkills, formatSkillGateBlock, getInvokedSkills, isSkillGateEnabled } from './skill-gate.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { clearCheckpoint, deriveTeamGroupId, loadCheckpoint, saveCheckpoint, type WaveCheckpoint } from './wave-checkpoint.js'
+import { buildTeamOutcome, type TeamOrchestrationOutcome } from './orchestration-outcome.js'
 
 /** Narrow surface for meridian structural impact analysis, so tests can mock it
  *  without the full MeridianIndexer. MeridianIndexer satisfies this structurally. */
@@ -103,6 +104,9 @@ export interface PlanExecutorOptions {
    *  已渲染为 ≤400 字符的约束条目。透传进每波派发的 request.constraints（任务级
    *  约束在前，计划级在后）。缺省不注入——解析不到就是空，不报错不拦截。 */
   planConstraints?: string[]
+  /** 上一波 scope-health 检出的计划外改动文件。由 executePlanWaves 在循环内
+   *  从上一波 run 传入——单波直调时缺省为空，行为不变。 */
+  priorScopeLeaks?: string[]
 }
 
 export interface PlanExecutorRun {
@@ -116,6 +120,9 @@ export interface PlanExecutorRun {
     /** 波间硬门禁结果（非末波评估；空串 = 未评估或禁用）。 */
     waveGateNote: string
   }
+  /** 本波 scope-health 检出的计划外改动文件——由 executePlanWaves 传给下一波
+   *  做跨波回执（见 team-wave-feedback.ts）。空数组 = 无泄漏或未评估。 */
+  scopeLeakedFiles?: string[]
   /** 波间硬门禁结构化结果（从 evaluateWaveGate 返回值直接构造），
    *  供桌面端渲染 gate 失败卡。非末波且评估后才有值。 */
   gate?: { wave: number; passed: boolean; failures: string[] }
@@ -205,6 +212,8 @@ export function buildWaveCheckpoint(
       kind: task.kind,
       scope: { files: task.files },
       authority: taskAuthority(task),
+      // 依赖随任务存盘——resume 重建计划要靠它恢复剩余任务间的顺序与条件边。
+      ...(task.dependsOn.length > 0 ? { dependsOn: task.dependsOn } : {}),
     }))
   return {
     groupId: deriveTeamGroupId(opts.objective),
@@ -271,6 +280,15 @@ export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorD
   // session-scoped so the plan_task → team_orchestrate bridge survives).
   const priorResults = opts.fromWave > 0 ? getWaveResults(opts.sessionId) : undefined
 
+  // 跨波回执数据源（2026-08-05 闭环审计）：上一波门禁未过项。入口硬门禁在上方
+  // 已放行（要么通过、要么复评通过、要么被 throw 拦住），走到这里说明本波可以
+  // 派发——但上一波「曾经红过什么」对下一波 worker 仍是有用情报，一并下传。
+  const priorWaveGateFailures = opts.fromWave > 0
+    ? (getWaveGate(opts.sessionId)?.checks ?? [])
+        .filter(c => c.status === 'failed' || (c.blocking === true && c.status !== 'passed'))
+        .map(c => c.command)
+    : []
+
   const summary = await runTeamSkeleton(
     {
       mode: opts.mode,
@@ -284,10 +302,14 @@ export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorD
       priorResults,
       teamSchedulerBanditEnabled: deps.isTeamSchedulerBanditEnabled?.() === true,
       onActivity: opts.onActivity,
+      onWorkerSettled: opts.onWorkerSettled,
       onPlanReady: opts.onPlanReady,
       // D8 L2：计划约束透传（team-orchestrator 分片在 TeamRunInput 消费并并入
       // waveToRequests 的 request.constraints）。条件注入——空则不带，fail-open。
       ...(opts.planConstraints && opts.planConstraints.length > 0 ? { planConstraints: opts.planConstraints } : {}),
+      // 跨波回执：条件注入，空则不带字段——wave 0 与一切正常的波次行为不变。
+      ...(priorWaveGateFailures.length > 0 ? { priorWaveGateFailures } : {}),
+      ...(opts.priorScopeLeaks && opts.priorScopeLeaks.length > 0 ? { priorScopeLeaks: opts.priorScopeLeaks } : {}),
     } as TeamRunInput,
     {
       delegateBatch: (requests, policy, abortSignal, onProgress, onWorkerSettled) =>
@@ -531,10 +553,146 @@ export async function executePlan(opts: PlanExecutorOptions, deps: PlanExecutorD
     summary,
     reviewVerdict,
     notes: { reviewNote, scopeHealthNote, impactNote, deliverySynthesis, waveGateNote },
+    ...(scopeLeakedFiles.length > 0 ? { scopeLeakedFiles } : {}),
     gate,
     // P4 fix: reviewVerdict is just a single enum word (e.g. "verified") — the
     // real content with evidence is reviewNote. Strip leading newlines for the
     // inline panel display.
     ...(reviewNote ? { reviewDetail: reviewNote.replace(/^\n+/, '').slice(0, 1000) } : {}),
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 共享多波驱动（Wave 3A）：team_orchestrate / plan_task 复用的多波闭环。
+// executePlan 保持单波语义不变；本驱动按 fromWave 逐波推进、判定停止、
+// 聚合每波结果，让调用方不再各自手写波循环。
+// ─────────────────────────────────────────────────────────────────────
+
+/** 多波驱动护栏：单次 executePlanWaves 最多推进的波数（防 totalWaves 异常 /
+ *  计划循环导致的失控续波）。 */
+export const EXECUTE_PLAN_WAVES_GUARDRAIL = 10
+
+export interface WaveStopContext {
+  /** 已中止 → 停止推进下一波。 */
+  abortSignal?: AbortSignal
+}
+
+/**
+ * 多波驱动的停止判据（纯函数）。输入单波 outcome，返回是否应停止推进下一波。
+ *  - 本波零通过且存在 worker → 整波失败，续波无意义
+ *  - wave gate failed（非末波出口评估）→ 下一波入口会被硬拦，直接停
+ *  - review rejected / inconclusive → 改动被驳回（inconclusive = review 未
+ *    实际执行，不可视为通过），停止
+ *  - abort → 调用方取消
+ *  isError 不在本函数：executePlan 在 dispatch / 门禁 / review 失败时抛错，
+ *  由 executePlanWaves 让异常向上传播即停；「无下一波」「10 波护栏」是循环
+ *  级判据（依赖 wave 序号），由 executePlanWaves 的 break 条件承担。
+ */
+export function classifyWaveStop(outcome: TeamOrchestrationOutcome, ctx: WaveStopContext = {}): boolean {
+  if (ctx.abortSignal?.aborted) return true
+  if (outcome.workers.total > 0 && outcome.workers.passed === 0) return true
+  if (outcome.waveGate && !outcome.waveGate.passed) return true
+  if (outcome.reviewVerdict === 'rejected' || outcome.reviewVerdict === 'inconclusive') return true
+  return false
+}
+
+/**
+ * 聚合多波 PlanExecutorRun 为单波形状的结果（与 executePlan 返回值兼容，
+ *  team_orchestrate / plan_task 可直接按单波结果消费）。
+ *  - summary：run.results 并集（保序）、dispatched 累计，其余取最后一波
+ *  - notes：各波对应字段拼接——scope-health / delivery synthesis / review /
+ *    wave-gate 任一波的内容都不丢
+ *  - gate / reviewDetail：取最近一个有值的（gate 只在非末波出口出现，
+ *    reviewDetail 只在末波 review 出现；中途停止时最近 gate 恰是停止原因）
+ *  每波完整对象仍保留在 runs（逐波 gate/reviewDetail 差异读 runs[i]）。
+ */
+export function aggregatePlanExecutorRuns(runs: PlanExecutorRun[]): PlanExecutorRun {
+  if (runs.length === 0) throw new Error('aggregatePlanExecutorRuns: no runs to aggregate')
+  const summaries = runs.map(run => run.summary)
+  const lastRun = runs[runs.length - 1]!
+  const last = lastRun.summary
+  const results = summaries.flatMap(summary => summary.run?.results ?? [])
+  const summary: TeamRunSummary = {
+    ...last,
+    dispatched: summaries.reduce((n, s) => n + s.dispatched, 0),
+    run: last.run ? { ...last.run, results } : undefined,
+  }
+  const notes: PlanExecutorRun['notes'] = {
+    reviewNote: runs.map(run => run.notes.reviewNote).filter(Boolean).join('\n'),
+    scopeHealthNote: runs.map(run => run.notes.scopeHealthNote).filter(Boolean).join('\n'),
+    impactNote: runs.map(run => run.notes.impactNote).filter(Boolean).join('\n'),
+    deliverySynthesis: runs.map(run => run.notes.deliverySynthesis).filter(Boolean).join('\n'),
+    waveGateNote: runs.map(run => run.notes.waveGateNote).filter(Boolean).join('\n'),
+  }
+  const gate = [...runs].reverse().find(run => run.gate)?.gate
+  const reviewDetail = [...runs].reverse().find(run => run.reviewDetail)?.reviewDetail
+  return {
+    summary,
+    reviewVerdict: lastRun.reviewVerdict,
+    notes,
+    ...(gate ? { gate } : {}),
+    ...(reviewDetail ? { reviewDetail } : {}),
+  }
+}
+
+export interface PlanExecutorWavesOptions {
+  /** 起始波（缺省 0）。 */
+  startWave?: number
+  /** false 时只执行 startWave 一波（单波语义的便捷入口）。缺省 true。 */
+  autoAdvance?: boolean
+  /** 波数硬上限（exclusive：wave < maxWaves）。缺省 startWave + 10（护栏）；
+   *  计划真实总波数更小则按 outcome.totalWaves 提前 break。 */
+  maxWaves?: number
+  /** 每波完成回调（run 已入 runs 后、停止判定前调用）。 */
+  onWave?: (run: PlanExecutorRun, wave: number) => void
+}
+
+export interface PlanExecutorWavesResult {
+  /** 每波完整 run（含各自 gate/reviewDetail/results），逐波差异读这里。 */
+  runs: PlanExecutorRun[]
+  /** 聚合视图（aggregatePlanExecutorRuns 输出，单波形状）。 */
+  run: PlanExecutorRun
+}
+
+/**
+ * 共享多波驱动：按 fromWave 逐波调用 executePlan，每波独立持久化 checkpoint
+ * 与波结果（executePlan 内部职责，此处不重复），停止判定后聚合返回。
+ *  - 波序号由 startWave 驱动（不接受 fromWave——循环内逐波覆盖）。
+ *  - 中间波不提前执行末波 review：executePlan 的 isLastWave 由 fromWave 判定，
+ *    本驱动每波传真实 wave 序号，末波 review / episode closure / checkpoint
+ *    清除只在最后一波触发。
+ *  - isError 停止：executePlan 在 dispatch / 波间硬门禁入口 / review gate
+ *    失败时抛错，本驱动让异常向上传播（调用方 try/catch 包装），不再推进后续波。
+ */
+export async function executePlanWaves(
+  opts: Omit<PlanExecutorOptions, 'fromWave'> & PlanExecutorWavesOptions,
+  deps: PlanExecutorDeps,
+): Promise<PlanExecutorWavesResult> {
+  const startWave = opts.startWave ?? 0
+  const autoAdvance = opts.autoAdvance ?? true
+  const maxWaves = opts.maxWaves ?? startWave + EXECUTE_PLAN_WAVES_GUARDRAIL
+  if (maxWaves <= startWave) {
+    throw new Error(`executePlanWaves: maxWaves (${maxWaves}) must be > startWave (${startWave})`)
+  }
+  // 解构出驱动字段，剩余透传给单波 executePlan（多余键运行时被忽略）。
+  const { startWave: _startWave, autoAdvance: _autoAdvance, maxWaves: _maxWaves, onWave, ...planOpts } = opts
+  const runs: PlanExecutorRun[] = []
+  // 跨波回执：上一波的 scope 泄漏没有会话级 store（门禁与 worker 结果都有），
+  // 由本驱动在循环内直接接力。单波直调 executePlan 时该字段缺省为空。
+  let priorScopeLeaks: string[] = []
+  for (let wave = startWave; wave < maxWaves; wave++) {
+    const run = await executePlan(
+      { ...planOpts, fromWave: wave, ...(priorScopeLeaks.length > 0 ? { priorScopeLeaks } : {}) },
+      deps,
+    )
+    priorScopeLeaks = run.scopeLeakedFiles ?? []
+    runs.push(run)
+    onWave?.(run, wave)
+    const outcome = buildTeamOutcome(run.summary, wave, run)
+    const stop = classifyWaveStop(outcome, { abortSignal: opts.abortSignal })
+    // 停止：本波判据（零通过 / waveGate / review / abort）、autoAdvance=false、
+    // 或已到计划末波（wave + 1 >= totalWaves；maxWaves 为护栏后备上限）。
+    if (stop || !autoAdvance || wave + 1 >= outcome.totalWaves) break
+  }
+  return { runs, run: aggregatePlanExecutorRuns(runs) }
 }

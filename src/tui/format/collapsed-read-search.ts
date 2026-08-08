@@ -13,6 +13,7 @@
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { displayWidth, truncateToDisplayWidth } from '../width.js'
+import { hiddenLinesMarker } from './hidden-lines.js'
 import { EXPAND_HINT } from '../truncation-marker.js'
 
 // ── Types ──────────────────────────────────────────────────────
@@ -302,7 +303,7 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
         }
         const limit = expanded ? 30 : 3
         if (lineCount > limit) {
-          lines.push(`  ${childPrefix} ${color(`… +${lineCount - limit} 行`, theme.dim)}`)
+          lines.push(`  ${childPrefix} ${color(hiddenLinesMarker(lineCount - limit), theme.dim)}`)
         }
       }
     }

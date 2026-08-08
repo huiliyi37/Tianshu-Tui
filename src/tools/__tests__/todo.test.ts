@@ -120,7 +120,7 @@ describe('TodoStore', () => {
     assert.equal(store.read()[0]!.content, 'New')
   })
 
-  it('detectRegressions flags completed→non-completed and dropped items', () => {
+  it('detectRegressions v2: completed→pending 命中回归，删除完成项只计退休', () => {
     const store = new TodoStore()
     store.write([
       { id: '1', content: 'Build parser', status: 'completed' },
@@ -128,23 +128,90 @@ describe('TodoStore', () => {
       { id: '3', content: 'Write docs', status: 'in_progress' },
     ])
     // Model rebuilds from lossy memory: id 1 reset to pending, id 2 dropped.
-    const regressions = store.detectRegressions([
+    const detection = store.detectRegressions([
       { id: '1', content: 'Build parser', status: 'pending' },
       { id: '3', content: 'Write docs', status: 'in_progress' },
     ])
-    assert.equal(regressions.length, 2)
-    assert.ok(regressions.some(r => r.includes('Build parser') && r.includes('pending')))
-    assert.ok(regressions.some(r => r.includes('Wire CLI') && r.includes('已从清单移除')))
+    assert.deepEqual(detection.retired, ['Wire CLI'], '删除完成项 = 主动退休，不进回归')
+    assert.equal(detection.regressed.length, 1, '只有真实重开算回归')
+    assert.ok(detection.regressed[0]!.includes('Build parser'))
+    assert.ok(detection.regressed[0]!.includes('pending'))
   })
 
   it('detectRegressions returns empty when completed items stay completed', () => {
     const store = new TodoStore()
     store.write([{ id: '1', content: 'Done thing', status: 'completed' }])
-    const regressions = store.detectRegressions([
+    const detection = store.detectRegressions([
       { id: '1', content: 'Done thing', status: 'completed' },
       { id: '2', content: 'New thing', status: 'pending' },
     ])
-    assert.deepEqual(regressions, [])
+    assert.deepEqual(detection, { regressed: [], retired: [] })
+  })
+
+  it('v2 场景 1：新波次替换零回归（主动替换清单不警告）', () => {
+    const store = new TodoStore()
+    store.write([
+      { id: '1', content: 'Fix auth', status: 'completed' },
+      { id: '2', content: 'Fix cache', status: 'completed' },
+    ])
+    // 切换到新波次：整份清单替换为不相关项
+    const detection = store.detectRegressions([
+      { id: 'a', content: 'Implement search', status: 'pending' },
+      { id: 'b', content: 'Add telemetry', status: 'pending' },
+    ])
+    assert.deepEqual(detection.regressed, [], '波次替换不得警告')
+    assert.deepEqual(detection.retired.sort(), ['Fix auth', 'Fix cache'])
+    store.recordWrite(detection)
+    assert.equal(store.getRegressionStats().retiredCompletedItems, 2)
+  })
+
+  it('v2 场景 2：直接 completed→pending 命中回归', () => {
+    const store = new TodoStore()
+    store.write([{ id: '1', content: 'Build parser', status: 'completed' }])
+    const detection = store.detectRegressions([
+      { id: '1', content: 'Build parser', status: 'pending' },
+    ])
+    assert.equal(detection.regressed.length, 1)
+    assert.ok(detection.regressed[0]!.includes('Build parser'))
+  })
+
+  it('v2 场景 3：删除后换 ID 同内容重现 → 命中回归（跨 write）', () => {
+    const store = new TodoStore()
+    store.write([{ id: '1', content: 'Fix auth', status: 'completed' }])
+    // 第一波：删除完成项（退休）——tombstone 写入发生在 write 里
+    store.write([])
+    // 第二波：换 ID 但同内容重现为 pending——真实重开
+    const detection = store.detectRegressions([
+      { id: '9', content: 'Fix auth', status: 'pending' },
+    ])
+    assert.equal(detection.regressed.length, 1, '同内容换 ID 重现必须命中')
+    assert.ok(detection.regressed[0]!.includes('退休后重新出现'))
+    // 消费：write 命中指纹 → tombstone 清除，同一重开只警告一次
+    store.write([{ id: '9', content: 'Fix auth', status: 'pending' }])
+    const second = store.detectRegressions([
+      { id: '9', content: 'Fix auth', status: 'pending' },
+    ])
+    assert.deepEqual(second.regressed, [], 'tombstone 已被消费，不重复警告')
+  })
+
+  it('v2 场景 4：正常 completed 清理只计退休', () => {
+    const store = new TodoStore()
+    store.write([{ id: '1', content: 'Done', status: 'completed' }])
+    const detection = store.detectRegressions([])
+    assert.deepEqual(detection.regressed, [])
+    assert.deepEqual(detection.retired, ['Done'])
+    store.recordWrite(detection)
+    assert.equal(store.getRegressionStats().retiredCompletedItems, 1)
+  })
+
+  it('v2：退休后以 completed 重现不算回归（正常重做完）', () => {
+    const store = new TodoStore()
+    store.write([{ id: '1', content: 'Fix auth', status: 'completed' }])
+    store.write([]) // 退休
+    // 模型重做完成：同一内容以 completed 重现
+    store.write([{ id: '1', content: 'Fix auth', status: 'completed' }])
+    const detection = store.detectRegressions([{ id: '1', content: 'Fix auth', status: 'completed' }])
+    assert.deepEqual(detection, { regressed: [], retired: [] }, 'completed 重现清除 tombstone，无任何回归')
   })
 })
 
@@ -153,16 +220,36 @@ describe('TodoStore', () => {
 describe('TodoStore regression counters', () => {
   it('starts at zero and reports writes as the denominator', () => {
     const store = new TodoStore()
-    assert.deepEqual(store.getRegressionStats(), { writes: 0, regressedWrites: 0, regressedItems: 0 })
-    store.recordWrite([])
-    store.recordWrite([])
-    assert.deepEqual(store.getRegressionStats(), { writes: 2, regressedWrites: 0, regressedItems: 0 })
+    assert.deepEqual(store.getRegressionStats(), {
+      writes: 0, regressedWrites: 0, regressedItems: 0,
+      detectorVersion: 2, retiredCompletedItems: 0,
+    })
+    store.recordWrite({ regressed: [], retired: [] })
+    store.recordWrite({ regressed: [], retired: [] })
+    assert.deepEqual(store.getRegressionStats(), {
+      writes: 2, regressedWrites: 0, regressedItems: 0,
+      detectorVersion: 2, retiredCompletedItems: 0,
+    })
   })
 
   it('counts a write once but every regressed item within it', () => {
     const store = new TodoStore()
-    store.recordWrite(['a（completed → pending）', 'b（已从清单移除）'])
-    assert.deepEqual(store.getRegressionStats(), { writes: 1, regressedWrites: 1, regressedItems: 2 })
+    store.recordWrite({ regressed: ['a（completed → pending）', 'b（退休后重新出现为 pending）'], retired: [] })
+    assert.deepEqual(store.getRegressionStats(), {
+      writes: 1, regressedWrites: 1, regressedItems: 2,
+      detectorVersion: 2, retiredCompletedItems: 0,
+    })
+  })
+
+  it('retired items accumulate separately from regressions', () => {
+    const store = new TodoStore()
+    store.recordWrite({ regressed: [], retired: ['a', 'b'] })
+    store.recordWrite({ regressed: ['c（completed → pending）'], retired: ['d'] })
+    const stats = store.getRegressionStats()
+    assert.equal(stats.writes, 2)
+    assert.equal(stats.regressedWrites, 1)
+    assert.equal(stats.regressedItems, 1)
+    assert.equal(stats.retiredCompletedItems, 3, '退休与回归分开累计')
   })
 
   it('the tool path feeds the counters on every write', async () => {
@@ -184,7 +271,7 @@ describe('TodoStore regression counters', () => {
 
   it('getRegressionStats hands back a copy — callers cannot mutate the tally', () => {
     const store = new TodoStore()
-    store.recordWrite(['x'])
+    store.recordWrite({ regressed: ['x'], retired: [] })
     const snapshot = store.getRegressionStats()
     snapshot.writes = 999
     assert.equal(store.getRegressionStats().writes, 1)

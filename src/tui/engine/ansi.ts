@@ -259,6 +259,52 @@ export function fileLink(text: string, filePath: string, cwd = process.cwd()): s
   return hyperlink(text, `file://${abs}`)
 }
 
+// ── 终端内联图片协议 ──────────────────────────────────────────
+
+/** 支持的终端内联图片协议。'none' 表示降级为文本占位。 */
+export type ImageProtocol = 'kitty' | 'iterm2' | 'none'
+
+let imageProtocolOverride: ImageProtocol | null = null
+
+/** 测试/配置钩子：强制指定图片协议（null 恢复自动检测）。 */
+export function setImageProtocol(value: ImageProtocol | null): void {
+  imageProtocolOverride = value
+}
+
+/**
+ * 内联图片协议启发式检测，与 detectHyperlinkSupport 同构：
+ * - 环境开关优先：`RIVET_IMAGES=0/off` 关闭，`kitty`/`iterm2` 强制指定
+ * - kitty 协议：kitty（TERM 前缀）、ghostty、WezTerm、Warp、Konsole
+ * - iTerm2 协议：iTerm.app
+ * - tmux/screen 与 dumb 终端保守降级（图形序列需 passthrough，默认关闭）
+ */
+export function detectImageProtocol(
+  env: NodeJS.ProcessEnv = process.env,
+  isTTY: boolean = Boolean(process.stdout.isTTY),
+): ImageProtocol {
+  const override = env.RIVET_IMAGES?.toLowerCase()
+  if (override === '0' || override === 'off' || override === 'none') return 'none'
+  if (override === 'kitty' || override === 'iterm2') return override
+  const term = env.TERM ?? ''
+  if (term === 'dumb' || !isTTY) return 'none'
+  if (env.TMUX || term.startsWith('screen')) return 'none'
+  const program = env.TERM_PROGRAM ?? ''
+  if (program === 'iTerm.app') return 'iterm2'
+  if (term.startsWith('xterm-kitty')) return 'kitty'
+  if (['ghostty', 'WezTerm', 'WarpTerminal', 'konsole'].includes(program)) return 'kitty'
+  if (env.KONSOLE_VERSION) return 'kitty'
+  return 'none'
+}
+
+let detectedImageProtocol: ImageProtocol | null = null
+
+/** 当前生效的图片协议（带缓存 + override 钩子）。 */
+export function imageProtocol(): ImageProtocol {
+  if (imageProtocolOverride !== null) return imageProtocolOverride
+  if (detectedImageProtocol === null) detectedImageProtocol = detectImageProtocol()
+  return detectedImageProtocol
+}
+
 // ── 终端查询 ──────────────────────────────────────────────────
 
 /** 查询光标位置。终端会通过 stdin 返回 `\x1B[row;colR`。 */

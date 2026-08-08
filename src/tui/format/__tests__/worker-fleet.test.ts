@@ -254,3 +254,59 @@ describe('CJK objective 的宽度账（显示列而非字符数）', () => {
     assert.ok(displayWidth(main, { ambiguousAsWide: true }) <= 40, `超宽：${main}`)
   })
 })
+
+/**
+ * 紧凑档（live 区 chrome 段的子代理带）：对标 CC 的
+ * `● general-purpose  {描述}  7m 44s · 68.6k tokens`——每 agent 恒 1 行。
+ * 两行树把舰队规模按 2 倍放大成 live region 高度，而峰值会被定高视口的高水位
+ * 固化成输入框上方的常驻空白。
+ */
+describe('buildWorkerFleetLines — compact（chrome 段子代理带）', () => {
+  const three = [
+    worker({ workerId: 'w1', contract: contract({ objective: '分析架构' }), toolUseCount: 2, tokenCount: 1200 }),
+    worker({ workerId: 'w2', contract: contract({ objective: '修复类型' }), toolUseCount: 5, tokenCount: 3100 }),
+    worker({ workerId: 'w3', contract: contract({ objective: '补测试' }), toolUseCount: 1, tokenCount: 400 }),
+  ]
+
+  it('每 worker 恒 1 行：3 个 worker = 头 + 3 行', () => {
+    const lean = buildWorkerFleetLines(three, { done: 0, total: 3, running: 3 }, 80, 6, true)
+    assert.equal(lean.length, 1 + 3, `应为汇总头 + 每 worker 1 行，实得 ${lean.length}: ${lean.join(' | ')}`)
+    const full = buildWorkerFleetLines(three, { done: 0, total: 3, running: 3 }, 80, 6)
+    assert.ok(full.length > lean.length, `完整档应更高: full=${full.length} lean=${lean.length}`)
+  })
+
+  it('身份与计数压进同一行，不再另起续行', () => {
+    const lean = buildWorkerFleetLines([three[0]!], { done: 0, total: 1, running: 1 }, 80, 6, true)
+    const row = lean[1]!
+    assert.ok(row.includes('分析架构'), `目标在行内: ${row}`)
+    assert.ok(row.includes('2 工具'), `工具计数在同一行: ${row}`)
+    assert.ok(row.includes('tok'), `token 计数在同一行: ${row}`)
+  })
+
+  it('紧凑档不产出独立的 /tasks 提示行（入口由调用方并进汇总头）', () => {
+    const lean = buildWorkerFleetLines(three, { done: 0, total: 3, running: 3 }, 80, 6, true)
+    assert.ok(!lean.some(l => l.includes('管理面板')), `不应有独立提示行: ${lean.join(' | ')}`)
+  })
+
+  it('超过 maxRows 折叠成 …(+N)，总行数有硬顶', () => {
+    const many = Array.from({ length: 9 }, (_, i) =>
+      worker({ workerId: `w${i}`, contract: contract({ objective: `任务 ${i}` }) }))
+    const lean = buildWorkerFleetLines(many, { done: 0, total: 9, running: 9 }, 80, 4, true)
+    assert.ok(lean.some(l => l.includes('…(+5)')), `应折叠 5 个: ${lean.join(' | ')}`)
+    assert.equal(lean.length, 1 + 4 + 1, `头 + 4 行 + 折叠行，实得 ${lean.length}`)
+  })
+
+  it('宽度账：紧凑行不超终端宽度（CJK 按显示列）', () => {
+    const w = worker({ contract: contract({ objective: '审查认证模块的令牌刷新逻辑与并发安全边界并给出修复建议' }), elapsedMs: 90_000, toolUseCount: 12, tokenCount: 45_000 })
+    for (const text of buildWorkerFleetLines([w], undefined, 80, 6, true)) {
+      const plain = text.replace(/\x1B\[[0-9;]*m/g, '')
+      assert.ok(displayWidth(plain, { ambiguousAsWide: true }) <= 80, `超宽：${plain}`)
+    }
+  })
+
+  it('默认档（不传 compact）行为不变', () => {
+    const a = buildWorkerFleetLines(three, { done: 0, total: 3, running: 3 }, 80, 6)
+    const b = buildWorkerFleetLines(three, { done: 0, total: 3, running: 3 }, 80, 6, false)
+    assert.deepEqual(a, b)
+  })
+})

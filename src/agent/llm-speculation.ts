@@ -6,12 +6,16 @@
  * input cost ≈ 0) and asks the model to predict the next read-only tool calls.
  * Predictions feed the existing ShadowQueue speculative execution chain.
  * NOTE (2026-07-06): tool-pipeline no longer SERVES ShadowQueue results to the
- * model — the cache had no mtime/TTL validation and served pre-edit file
+ * model — the cache then had no mtime/TTL validation and served pre-edit file
  * content as a live read_file result (stale-read incident).
- * SEALED (2026-07-07): loop-factory no longer constructs this engine at all —
- * with serving cut, an opted-in engine would burn side-path LLM calls for
- * nothing. Module + unit tests kept for the re-enable contract described in
- * P3Config.speculativeEnabled (ShadowQueue must gain mtime validation first).
+ * SEALED (2026-07-07): with serving cut, an opted-in engine would burn
+ * side-path LLM calls for nothing — loop-factory stopped constructing it.
+ * 状态更新（2026-08-07 spark v2）：当年的重启契约（ShadowQueue mtime 校验）
+ * **已实现**（shadow-queue.ts + 测试），封存维持原因 = 经济性待证。观察态
+ * （RIVET_SPEC_OBSERVE=1 且 llmSpeculation.enabled）下 loop-factory 重新构造
+ * 本引擎：预测只入队记统计（enqueue-only），serving 仍封存；解封 serving
+ * 需观察数据 + 用户确认（T5c）。缓存安全是结构性保证（见下方硬边界），
+ * 不构成解封障碍。
  *
  * Hard boundaries:
  * - Never mutates the main request or its messages array (prefix safety).

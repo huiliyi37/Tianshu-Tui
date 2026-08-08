@@ -1,62 +1,200 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { createThetaController, THETA_MAX_SESSION, THETA_MAX_PER_TURN, type ThetaControllerHost, type ThetaTelemetryState } from '../theta-controller.js'
+import type { ThetaCheckResult, ThetaOutcome } from '../theta-check.js'
 
-describe('Theta rate limit: consecutive timeout backoff', () => {
-  it('should not backoff when there are zero consecutive timeouts', () => {
-    const consecutiveTimeouts = 0
-    const cooldown = consecutiveTimeouts === 0 ? 0
-      : Math.min(4, consecutiveTimeouts)
-    assert.strictEqual(cooldown, 0)
+/**
+ * 真实 controller 测试（主控可靠性闭环 Wave 1）。
+ *
+ * 旧版 theta-rate-limit.test.ts 是复制算术的假测试（把 controller 里的
+ * `Math.min(4, consecutiveTimeouts)` 抄一遍再断言）——它永远绿，但证明不了
+ * controller 行为。这里注入 mock runner + mock host，直接驱动 controller。
+ */
+
+function makeTelemetry(over: Partial<ThetaTelemetryState> = {}): ThetaTelemetryState {
+  return {
+    lastReason: null,
+    lastDurationMs: null,
+    lastErrorCount: 0,
+    lastTimedOut: false,
+    requestedCount: 0,
+    consecutiveTimeouts: 0,
+    cooldownUntilTurn: 0,
+    suppressedCount: 0,
+    outcomes: { ok: 0, type_errors: 0, timeout: 0, spawn_error: 0, busy: 0, backoff: 0 },
+    ...over,
+  }
+}
+
+function makeHost(over: Partial<ThetaControllerHost> = {}): ThetaControllerHost {
+  return {
+    cwd: '/work',
+    thetaCheckInFlight: false,
+    thetaRequestsThisTurn: 0,
+    thetaTelemetry: makeTelemetry(),
+    session: { getTurnCount: () => 1 },
+    repairHintTracker: { recordFailure: () => {} },
+    ...over,
+  }
+}
+
+function result(outcome: ThetaOutcome, errors: string[] = []): ThetaCheckResult {
+  return { errors, durationMs: 10, timedOut: outcome === 'timeout', outcome }
+}
+
+/** 同步 runner——把 controller 的 async 流程收进微任务，测试无需等待真实 tsc。 */
+function syncRunner(r: ThetaCheckResult): (cwd: string) => Promise<ThetaCheckResult> {
+  return async () => r
+}
+
+/** 让 controller 的 promise 链（then/finally）跑完。 */
+async function settle(): Promise<void> {
+  await new Promise(resolve => setImmediate(resolve))
+}
+
+describe('theta-controller: outcome 分类与退避', () => {
+  it('真实 timeout 推进连续超时退避并累计 outcome', async () => {
+    const host = makeHost()
+    const request = createThetaController(host, syncRunner(result('timeout')))
+
+    request('elm')
+    await settle()
+
+    assert.equal(host.thetaTelemetry.consecutiveTimeouts, 1)
+    assert.equal(host.thetaTelemetry.cooldownUntilTurn, 2, 'cooldown = currentTurn(1) + 1')
+    assert.equal(host.thetaTelemetry.lastTimedOut, true)
+    assert.equal(host.thetaTelemetry.outcomes.timeout, 1)
   })
 
-  it('should backoff 1 turn after 1 consecutive timeout', () => {
-    const consecutiveTimeouts = 1
-    const cooldown = Math.min(4, consecutiveTimeouts)
-    assert.strictEqual(cooldown, 1)
+  it('成功结果清零连续超时（含 type_errors——tsc 跑了就有答案）', async () => {
+    const host = makeHost({
+      // 退避已过期（cooldownUntilTurn=0）——请求可放行，成功结果负责清零
+      thetaTelemetry: makeTelemetry({ consecutiveTimeouts: 3, cooldownUntilTurn: 0 }),
+    })
+    const request = createThetaController(host, syncRunner(result('type_errors', ['a.ts'])))
+
+    request('elm')
+    await settle()
+
+    assert.equal(host.thetaTelemetry.consecutiveTimeouts, 0)
+    assert.equal(host.thetaTelemetry.cooldownUntilTurn, 0)
+    assert.equal(host.thetaTelemetry.lastTimedOut, false)
+    assert.equal(host.thetaTelemetry.outcomes.type_errors, 1)
   })
 
-  it('should backoff 2 turns after 2 consecutive timeouts', () => {
-    const consecutiveTimeouts = 2
-    const cooldown = Math.min(4, consecutiveTimeouts)
-    assert.strictEqual(cooldown, 2)
+  it('busy/backoff 只记抑制次数，不推进退避', async () => {
+    for (const outcome of ['busy', 'backoff'] as const) {
+      const host = makeHost({
+        thetaTelemetry: makeTelemetry({ consecutiveTimeouts: 2, cooldownUntilTurn: 0 }),
+      })
+      const request = createThetaController(host, syncRunner(result(outcome)))
+
+      request('elm')
+      await settle()
+
+      assert.equal(host.thetaTelemetry.consecutiveTimeouts, 2, `${outcome} 不得推进退避`)
+      assert.equal(host.thetaTelemetry.lastTimedOut, false)
+      assert.equal(host.thetaTelemetry.suppressedCount, 1, `${outcome} 记一次抑制`)
+    }
   })
 
-  it('should cap at 4 turns for 4+ consecutive timeouts', () => {
-    const consecutiveTimeouts = 5
-    const cooldown = Math.min(4, consecutiveTimeouts)
-    assert.strictEqual(cooldown, 4)
+  it('spawn_error 不推进退避（不是 timeout），也不伪装成绿色', async () => {
+    const host = makeHost({
+      thetaTelemetry: makeTelemetry({ consecutiveTimeouts: 1, cooldownUntilTurn: 0 }),
+    })
+    const request = createThetaController(host, syncRunner(result('spawn_error')))
+
+    request('elm')
+    await settle()
+
+    assert.equal(host.thetaTelemetry.consecutiveTimeouts, 1, 'spawn_error 不是 timeout，不得推进退避')
+    assert.equal(host.thetaTelemetry.lastTimedOut, false)
+    assert.equal(host.thetaTelemetry.outcomes.spawn_error, 1)
   })
 
-  it('should reset consecutive timeouts on success', () => {
-    let consecutiveTimeouts = 3
-    const lastTimedOut = false
-    if (!lastTimedOut) consecutiveTimeouts = 0
-    assert.strictEqual(consecutiveTimeouts, 0)
+  it('cooldown 窗口内拒绝请求（真实超时后的退避）', async () => {
+    let runs = 0
+    const host = makeHost({
+      thetaTelemetry: makeTelemetry({ consecutiveTimeouts: 1, cooldownUntilTurn: 5 }),
+      session: { getTurnCount: () => 4 },
+    })
+    const request = createThetaController(host, async () => { runs++; return result('ok') })
+
+    request('elm')
+    assert.equal(runs, 0, 'cooldown 未过期不得 spawn')
+    assert.equal(host.thetaTelemetry.requestedCount, 0, '被拒绝的请求不计入 requestedCount')
   })
 })
 
-describe('Theta rate limit: per-turn and session caps', () => {
-  it('enforces per-turn cap of 2', () => {
-    const MAX_PER_TURN = 2
-    let requestsThisTurn = 0
-    assert.ok(requestsThisTurn < MAX_PER_TURN)
-    requestsThisTurn++
-    assert.ok(requestsThisTurn < MAX_PER_TURN)
-    requestsThisTurn++
-    assert.ok(!(requestsThisTurn < MAX_PER_TURN))
+describe('theta-controller: 上限与防重入', () => {
+  it('in-flight 防重入', async () => {
+    let runs = 0
+    const host = makeHost({ thetaCheckInFlight: true })
+    const request = createThetaController(host, async () => { runs++; return result('ok') })
+
+    request('elm')
+
+    assert.equal(runs, 0)
+    assert.equal(host.thetaTelemetry.requestedCount, 0)
   })
 
-  it('enforces session cap of 40', () => {
-    const MAX_SESSION = 40
-    const requestedCount = 40
-    assert.ok(!(requestedCount < MAX_SESSION))
+  it('per-turn cap 2', async () => {
+    let runs = 0
+    const host = makeHost({ thetaRequestsThisTurn: THETA_MAX_PER_TURN })
+    const request = createThetaController(host, async () => { runs++; return result('ok') })
+
+    request('elm')
+
+    assert.equal(runs, 0)
   })
 
-  it('cooldown blocks requests until turn expires', () => {
-    const cooldownUntilTurn = 5
-    const currentTurn = 4
-    assert.ok(currentTurn < cooldownUntilTurn)
-    const currentTurn2 = 5
-    assert.ok(!(currentTurn2 < cooldownUntilTurn))
+  it('session cap 40', async () => {
+    let runs = 0
+    const host = makeHost({
+      thetaTelemetry: makeTelemetry({ requestedCount: THETA_MAX_SESSION }),
+    })
+    const request = createThetaController(host, async () => { runs++; return result('ok') })
+
+    request('elm')
+
+    assert.equal(runs, 0)
+  })
+
+  it('每次真实尝试都记入 requestedCount 与 lastReason', async () => {
+    const host = makeHost()
+    const request = createThetaController(host, syncRunner(result('ok')))
+
+    request('elm-micro-release')
+    await new Promise(resolve => setImmediate(resolve))
+
+    assert.equal(host.thetaTelemetry.requestedCount, 1)
+    assert.equal(host.thetaTelemetry.lastReason, 'elm-micro-release')
+    assert.equal(host.thetaTelemetry.lastTimedOut, false)
+  })
+
+  it('onThetaResult 收到一次一结果（含耗时与预算）', async () => {
+    const seen: Array<{ outcome: ThetaOutcome; budgetMs: number }> = []
+    const host = makeHost({
+      onThetaResult: (r, budgetMs) => seen.push({ outcome: r.outcome, budgetMs }),
+    })
+    const request = createThetaController(host, syncRunner(result('timeout')))
+
+    request('elm')
+    await settle()
+
+    assert.deepEqual(seen, [{ outcome: 'timeout', budgetMs: 15_000 }])
+  })
+
+  it('type_errors 结果把错误文件喂给 repairHintTracker', async () => {
+    const failed: string[] = []
+    const host = makeHost({
+      repairHintTracker: { recordFailure: (file: string) => { failed.push(file) } },
+    })
+    const request = createThetaController(host, syncRunner(result('type_errors', ['src/a.ts', 'src/b.ts'])))
+
+    request('elm')
+    await settle()
+
+    assert.deepEqual(failed, ['src/a.ts', 'src/b.ts'])
   })
 })

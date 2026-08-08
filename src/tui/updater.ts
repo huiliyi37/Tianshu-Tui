@@ -336,7 +336,14 @@ export async function fetchNpmLatestVersion(
   const url = `${NPM_REGISTRY_URL}/${encodeURIComponent(packageName)}/latest`
   const res = await fetchWithRetry(url, { headers: { Accept: 'application/json' } })
   if (!res || !res.ok) return null
-  const data = await res.json() as { version?: string; time?: Record<string, string> }
+  // 代理/网关可能以 200 返回非 JSON 错误页（如 GBK 编码的 HTML 拦截页，Windows 代码页 936 常见），
+  // 此时 res.json() 抛 SyntaxError —— 按「任何失败返回 null」契约吞掉。
+  let data: { version?: string; time?: Record<string, string> }
+  try {
+    data = await res.json() as { version?: string; time?: Record<string, string> }
+  } catch {
+    return null
+  }
   if (typeof data.version !== 'string') return null
   return { version: data.version, publishedAt: data.time?.[data.version], source: 'npm' }
 }
@@ -382,7 +389,13 @@ export async function fetchGitHubLatestVersion(
     },
   })
   if (!res || !res.ok) return null
-  const data = await res.json() as { tag_name?: string; published_at?: string }
+  let data: { tag_name?: string; published_at?: string }
+  try {
+    data = await res.json() as { tag_name?: string; published_at?: string }
+  } catch {
+    // 同 npm 路径：200 但响应体非 JSON（代理拦截页等）→ 视为查询失败。
+    return null
+  }
   const tag = data.tag_name
   if (typeof tag !== 'string') return null
   const version = tag.replace(/^v/, '')

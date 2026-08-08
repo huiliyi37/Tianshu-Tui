@@ -2,7 +2,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { decomposeObjective, renderTaskGraphSummary } from '../agent/task-planner.js'
 import { taskGraphToUnifiedPlan, unifiedPlanToTeamTasks, serializeUnifiedPlan, renderUnifiedPlanSummary, validateUnifiedPlan } from '../agent/unified-plan.js'
 import type { DelegationCoordinator } from '../agent/coordinator.js'
-import { executePlan, type PlanExecutorDeps, type PlanExecutorRun } from '../agent/plan-executor.js'
+import { executePlanWaves, type PlanExecutorDeps, type PlanExecutorWavesResult } from '../agent/plan-executor.js'
 import { extractRequiredSkills } from '../agent/skill-gate.js'
 import { storePlan } from '../agent/plan-store.js'
 import { classifyTaskDepth, type TaskContract } from '../context/task-contract.js'
@@ -127,7 +127,7 @@ export function createPlanTaskTool(deps: {
       description: `把高层目标分解成 TaskGraph DAG——水平正交分片（horizontal orthogonal shards），可选按波次逐波执行。
 
 适用于需要结构化规划的多步骤工作（重构、功能开发）。每个分片是完整自包含的单元（实现 + 跑 tsc/lint/相关测试到绿），由一个有能力的 flash 端到端负责——不是垂直角色流水线（不拆独立的 lint/type/import/test/verify 步骤）。列出范围文件让规划器按模块切出正交分片以并行执行；同模块文件留在同一分片。
-设 execute: true 通过 team 编排器执行计划（与 team_orchestrate 同一执行路径）。worker 直接写入共享工作区——用 git diff 审查聚合结果。
+设 execute: true 自动完成所有可推进波次——共享多波驱动 executePlanWaves 从 wave 0 逐波推进至计划末波或停止判据（与 team_orchestrate 同一执行路径）。worker 直接写入共享工作区——用 git diff 审查聚合结果。
 
 输出为 UnifiedPlan JSON——传给 team_orchestrate 的 planJson 参数做多波次续跑。`,
       input_schema: {
@@ -224,12 +224,13 @@ export function createPlanTaskTool(deps: {
         }
       }
 
-      // Step 4: execute via the shared plan executor — the SAME closed loop as
-      // team_orchestrate, minus the review gate. plan_task's post-execution path
-      // is the commit flow, whose post-commit auto review gate already covers the
-      // diff; running a review-squadron here too would double-review. So
-      // reviewGate:false — plan_task still gets dispatch + scope-health +
-      // telemetry + reward/episode closure, just no review-squadron dispatch.
+      // Step 4: execute via the shared multi-wave driver — the SAME closed loop
+      // as team_orchestrate (auto-advancing every advanceable wave), minus the
+      // review gate. plan_task's post-execution path is the commit flow, whose
+      // post-commit auto review gate already covers the diff; running a
+      // review-squadron here too would double-review. So reviewGate:false —
+      // plan_task still gets dispatch + scope-health + telemetry +
+      // reward/episode closure, just no review-squadron dispatch.
       const coordinator = deps.getCoordinator()
       if (!coordinator) {
         return {
@@ -243,13 +244,16 @@ export function createPlanTaskTool(deps: {
         if (params.onOutput) {
           params.onOutput(`\n📋 计划已分解为 ${tasks.length} 个任务，正在派发 worker 执行…\n`)
         }
-        const run: PlanExecutorRun = await executePlan(
+        // executePlanWaves 按 startWave 逐波推进、自动判定停止、聚合每波结果；
+        // 中间波不提前触发末波 review（isLastWave 由真实 wave 序号判定）。
+        const { run }: PlanExecutorWavesResult = await executePlanWaves(
           {
             mode: 'standard',
             objective,
             tasks,
             requiredSkills,
-            fromWave: 0,
+            startWave: 0,
+            autoAdvance: true,
             maxParallel: 3,
             sessionId: params.sessionId,
             parentTurnId: `plan:${params.toolUseId ?? Date.now()}`,

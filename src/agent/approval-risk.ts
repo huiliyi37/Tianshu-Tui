@@ -24,6 +24,23 @@ export interface RiskAssessment {
 /** Force-push detection pattern — used by assessToolRisk for clearer reason text. */
 const FORCE_PUSH_PATTERN = /\bgit\s+push\b[^\n]*\s--force(?:-with-lease)?\b/i
 
+/**
+ * Global package installs — mutate the user environment, not the project.
+ * npm/pnpm/yarn/bun are only risky when paired with -g/--global (bare install
+ * stays auto-safe in SAFE_WRITE_PATTERNS); pip installs to global site-packages
+ * unless --user or inside a venv; brew/cargo install always write outside the
+ * project. Shared by DANGEROUS_BASH_PATTERNS (manual-mode approval) and
+ * RISKY_WRITE_PATTERNS (auto-safe gate) — single source of truth.
+ */
+const GLOBAL_INSTALL_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  // package manager + -g/--global anywhere in the command (covers `npm install -g` and `npm -g install`)
+  /\b(?:npm|pnpm|yarn|bun)\b(?=[^\n]*(?:\s(?:-g|--global)\b))[^\n]*\b(?:install|i|add)\b/,
+  // pip default-global unless --user or inside a venv (.venv/bin/pip / venv/bin/pip / activate chain)
+  /\bpip(?<!\.venv\/bin\/pip)(?<!venv\/bin\/pip)(?<![\s\S]*\bactivate\b)(?:3)?\s+install\b(?![^\n]*(?:\s--user\b))/,
+  // homebrew / cargo install — always user-global scope
+  /\b(?:brew|cargo)\s+install\b/,
+]
+
 // Destructive commands — uses shared pattern list
 export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\brm\s+-(?:[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\b/,  // rm -rf, rm -fr
@@ -45,6 +62,7 @@ export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\bnpm\s+(?:publish|unpublish)\b/,                          // irreversible registry operations
   /\bxargs\b.*\brm\b/,                                        // mass deletion via xargs pipe
   /\bbase64\b[^\n]*\|\s*(?:sh|bash|zsh|fish)\b/,             // obfuscated execution via base64 decode
+  ...GLOBAL_INSTALL_PATTERNS,                                  // global package installs — environment-level mutation
 ]
 
 /**
@@ -76,6 +94,7 @@ export const RISKY_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\b(?:chmod|chown|chgrp)\b/,                       // permission/ownership mutations
   /\bgit\s+(?:add|commit|checkout|switch|restore|reset|clean|merge|rebase|cherry-pick|push|pull)\b/,
   /\b(?:npm|pnpm|yarn|bun)\s+(?:remove|rm|update|upgrade|dedupe)\b/,
+  ...GLOBAL_INSTALL_PATTERNS,                                  // 全局安装——改的是用户环境，auto-safe 不放行
 ]
 
 /**
@@ -164,23 +183,23 @@ export function requiresBashWriteApproval(toolName: string, input: Record<string
 }
 
 /**
- * Actions whose approval can NEVER be waived — by approval mode (incl.
- * dangerously-skip-permissions), permissions.allow rules, sensorium
- * auto-approve, or per-app grants.
+ * Actions whose approval can never be waived in supervised (manual) or default
+ * (auto-safe) modes — permissions.allow rules, sensorium auto-approve, and
+ * per-app grants cannot bypass them.
  *
  * computer_use js_eval runs arbitrary JS inside the user's real browser
  * (cookies/localStorage/logged-in sessions); browser_adopt takes over an
- * external DevTools endpoint.
+ * external DevTools endpoint. request_path_access widens the kernel write
+ * boundary.
  *
- * request_path_access WIDENS THE KERNEL WRITE BOUNDARY. YOLO means "stop asking
- * me about ordinary tool calls"; it must not mean "silently dissolve the only
- * boundary that exists when nobody is watching". This is the one approval that
- * stays — it fires only on an actual denial, and `remember: true` makes it a
- * once-per-path-per-workspace cost, not a per-command one.
+ * YOLO (dangerously-skip-permissions, 桌面端"自治/完全访问") waives this gate
+ * entirely — the user explicitly chose maximum autonomy and the safety net is
+ * checkpoints + rollback, not prompts. The waiver lives in tool-pipeline.ts
+ * (yoloBypassesUnconditional); this predicate stays mode-agnostic.
  *
  * In every case the tool's own requiresApproval() already returns true, but
- * that is only consulted in manual mode — the "always needs approval" promise
- * must be enforced as a pipeline hard gate.
+ * that is only consulted in manual mode — the hard-gate promise for the
+ * supervised/default modes is enforced in the pipeline.
  */
 export function requiresUnconditionalApproval(toolName: string, input: Record<string, unknown>): boolean {
   if (toolName === 'request_path_access') return true

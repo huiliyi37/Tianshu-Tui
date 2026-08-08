@@ -52,6 +52,7 @@ import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking
 import { createGeneralLedgerHook } from './hooks/general-ledger-hook.js'
 import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
 import { createDeadEndDetectorHook } from './hooks/dead-end-detector.js'
+import { createProbeDisciplineHook } from './hooks/probe-discipline-hook.js'
 import { createScriptIterationDetectorHook } from './hooks/script-iteration-detector.js'
 import { createBatchConvergenceHook } from './hooks/batch-convergence-hook.js'
 import { createRegressionBisectHook } from './hooks/regression-bisect-hook.js'
@@ -674,6 +675,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       deposit: deps.stigmergyDeposit,
       obligations: deps.obligations,
     }))
+  }
+
+  // Probe Discipline: postTool hook — 诊断轮连续 ≥3 个只读工具而零探针 →
+  // 提示「30 秒探针能否杀死当前假设」。太一域洞察机制化（2026-08-07）。
+  // 冷却 8 次工具调用（防狂轰滥炸）；env RIVET_PROBE_DISCIPLINE=0 可关。
+  if (deps.advisoryBus && process.env.RIVET_PROBE_DISCIPLINE !== '0') {
+    hooks.push(createProbeDisciplineHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Script-Iteration Detector: postTool hook — 同一脚本文件 edit→bash(run)→truncated→edit

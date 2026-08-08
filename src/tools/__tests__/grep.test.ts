@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs'
 import { spawnSync } from 'child_process'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -186,6 +186,44 @@ describe('GREP_TOOL', () => {
       process.env.PATH = savedPath
       resetResolvedEnvCache()
       rmSync(fbDir, { recursive: true, force: true })
+    }
+  })
+
+  it('native fallback prunes build trees instead of walking into them', async (t) => {
+    if (process.getuid?.() === 0) {
+      t.skip('root ignores file permissions, so the tripwire below proves nothing')
+      return
+    }
+    // Asserting on the *output* would prove nothing: GitignoreFilter's
+    // DEFAULT_IGNORE already contains `target`, so matches under it never
+    // surface either way. The cost is the walk itself — readdir plus an lstat
+    // per entry, paid before any file-level filter runs — so the test has to
+    // observe descent, not results. Hence the unreadable tripwire: reaching it
+    // raises EACCES, which this walk propagates as a tool error.
+    const dir = mkdtempSync(join(tmpdir(), 'grep-prune-'))
+    const savedPath = process.env.PATH
+    const locked = join(dir, 'target', 'locked')
+    try {
+      mkdirSync(join(dir, 'src'), { recursive: true })
+      mkdirSync(locked, { recursive: true })
+      writeFileSync(join(dir, 'src', 'hit.ts'), 'const PRUNE_NEEDLE = 1\n')
+      writeFileSync(join(dir, '.rivet-config.json'), JSON.stringify({ env: { resolve: false } }))
+      chmodSync(locked, 0o000)
+      resetResolvedEnvCache()
+      process.env.PATH = join(dir, 'no-binaries-here')
+
+      const result = await GREP_TOOL.execute({
+        input: { pattern: 'PRUNE_NEEDLE', literal: true },
+        toolUseId: 'test',
+        cwd: dir,
+      })
+      assert.ok(!result.isError, `walked into target/: ${result.content}`)
+      assert.ok(result.content.includes('hit.ts'), 'the ordinary source hit must survive pruning')
+    } finally {
+      chmodSync(locked, 0o755)
+      process.env.PATH = savedPath
+      resetResolvedEnvCache()
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 

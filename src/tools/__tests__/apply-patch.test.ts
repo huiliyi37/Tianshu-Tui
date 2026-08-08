@@ -103,7 +103,66 @@ index 2e65efe..a2005b8 100644
       cwd: repoDir,
     })
     assert.equal(result.isError, true)
-    assert.match(result.content, /折叠后的历史指针/)
+    assert.match(result.content, /历史消息里的显示指针/)
+  })
+
+  // 交叉 echo 的另一半：PR #25 让 apply_patch 的指针能被别的工具识别（出方向），
+  // 这里补 apply_patch 识别别的工具的指针（入方向）。write_file 侧的守卫早就
+  // 「Checks ALL pointer prefixes」，apply_patch 此前只认自己那一个前缀。
+  it('rejects another tool pointer echoed into diff (cross-tool, inbound)', async () => {
+    const writePtr = '[file written to /x/y.ts — 40 lines, 900 chars. #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file to review.]'
+    const result = await APPLY_PATCH_TOOL.execute({
+      input: { diff: writePtr },
+      toolUseId: 'toolu_test',
+      cwd: repoDir,
+    })
+    assert.equal(result.isError, true)
+    assert.match(result.content, /显示指针/)
+  })
+
+  it('rejects a plan pointer echoed into diff', async () => {
+    const planPtr = '[plan persisted to .rivet/plans/x.md — 5 lines, 100 chars. 已成功落盘，勿重贴——历史正常截断，查看用 read_file。#RIVET-POINTER-DISPLAY-ONLY# display-only pointer]'
+    const result = await APPLY_PATCH_TOOL.execute({
+      input: { diff: planPtr },
+      toolUseId: 'toolu_test',
+      cwd: repoDir,
+    })
+    assert.equal(result.isError, true)
+    // 必须断言是「守卫」拦的：光看 isError 区分不出——守卫不拦时 diff 会走到
+    // git apply，那边同样会失败返回 isError，测试照样绿（弱断言）。
+    assert.match(result.content, /显示指针/)
+  })
+
+  // marker 决定这次拦截会不会被计数：pointer-regurgitation-hook 的
+  // WRITE_CLASS_TOOLS 本就含 apply_patch 但靠该 marker 识别，
+  // tool-history-recorder 也靠它把这类格式错标 transient（不计入 errorPenalty）。
+  it('tags pointer rejections with the guard marker so the hook can count them', async () => {
+    for (const diff of [
+      '[patch applied to 2 file(s): a.py, b.py — 4 hunks, 9000 chars. Use read_file / git diff to inspect.]',
+      '[file written to /x/y.ts — 40 lines, 900 chars. #RIVET-POINTER-DISPLAY-ONLY# Display placeholder — never emit this as content; use read_file to review.]',
+    ]) {
+      const result = await APPLY_PATCH_TOOL.execute({ input: { diff }, toolUseId: 'toolu_test', cwd: repoDir })
+      assert.equal(result.isError, true)
+      assert.match(result.content, /pointer placeholder from message history/, `missing marker for: ${diff.slice(0, 30)}`)
+    }
+  })
+
+  it('still applies a real diff that merely mentions a pointer prefix in context', async () => {
+    // 真实 diff 的正文里出现方括号文本不该被误拦——守卫要的是「整行是指针」。
+    const diffWithText = `diff --git a/file.txt b/file.txt
+index 2e65efe..a2005b8 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-original
++see [patch applied to] note in docs
+`
+    const result = await APPLY_PATCH_TOOL.execute({
+      input: { diff: diffWithText },
+      toolUseId: 'toolu_test',
+      cwd: repoDir,
+    })
+    assert.ok(!result.isError, result.content)
   })
 
   it('rolls back a patch that introduces a fatal Python syntax error', async () => {

@@ -23,6 +23,11 @@ import { computeUsageCost } from '../utils/pricing.js'
 export interface CacheUsageRow {
   t: number
   model: string
+  /** Provider name (2026-08-07 T3). Spark shares wire model ids with official
+   *  DeepSeek (`deepseek-v4-flash`) — without this dimension the two are
+   *  indistinguishable in the log. Absent on rows written before the field
+   *  existed; those aggregate under the bare model key (legacy behaviour). */
+  provider?: string
   input: number
   cacheRead: number
   cacheCreate: number
@@ -49,6 +54,9 @@ export interface UsageTotals {
 
 export interface ModelUsage extends UsageTotals {
   model: string
+  /** Provider dimension — set when the underlying rows carried it. Same model
+   *  served by two providers (spark vs official) produces two entries. */
+  provider?: string
 }
 
 export interface DayUsage extends UsageTotals {
@@ -69,7 +77,10 @@ export interface CacheUsageAggregate {
   windowDays: number
 }
 
-export type PricingResolver = (model: string) => ModelConfig['pricing'] | undefined
+/** Optional second arg (2026-08-07 T3): row provider — lets resolvers price
+ *  the same wire model id differently per provider once tariffs diverge.
+ *  Single-arg resolvers stay valid (extra arg ignored). */
+export type PricingResolver = (model: string, provider?: string) => ModelConfig['pricing'] | undefined
 
 function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
@@ -95,6 +106,7 @@ export function parseUsageRows(content: string): CacheUsageRow[] {
     return [{
       t,
       model: typeof record.model === 'string' && record.model ? record.model : 'unknown',
+      ...(typeof record.provider === 'string' && record.provider ? { provider: record.provider } : {}),
       input,
       cacheRead: num(record.cacheRead) ?? 0,
       cacheCreate: num(record.cacheCreate) ?? 0,
@@ -191,12 +203,26 @@ export function aggregateUsageRows(rows: readonly CacheUsageRow[], options: Aggr
 
   const total = newAccumulator()
   const byDay = new Map<string, Accumulator>()
-  const byModel = new Map<string, Accumulator>()
-  const byDayModel = new Map<string, Map<string, Accumulator>>()
+  // provider × model rollup (T3): spark and official DeepSeek share wire model
+  // ids, so the rollup key must include provider when present. Legacy rows
+  // without provider keep the bare-model key — they aggregate exactly as before.
+  interface ModelBucket { acc: Accumulator; model: string; provider?: string }
+  const byModel = new Map<string, ModelBucket>()
+  const byDayModel = new Map<string, Map<string, ModelBucket>>()
+  const bucketKey = (row: CacheUsageRow): string => row.provider ? `${row.provider}\u0000${row.model}` : row.model
+  const bucketFor = (map: Map<string, ModelBucket>, row: CacheUsageRow): ModelBucket => {
+    const key = bucketKey(row)
+    let bucket = map.get(key)
+    if (!bucket) {
+      bucket = { acc: newAccumulator(), model: row.model, ...(row.provider ? { provider: row.provider } : {}) }
+      map.set(key, bucket)
+    }
+    return bucket
+  }
 
   for (const row of rows) {
     if (row.t < windowStart || row.t > now) continue
-    const pricing = resolvePricing?.(row.model)
+    const pricing = resolvePricing?.(row.model, row.provider)
     addRow(total, row, pricing)
 
     const day = dayKey(row.t)
@@ -204,21 +230,17 @@ export function aggregateUsageRows(rows: readonly CacheUsageRow[], options: Aggr
     if (!dayAcc) byDay.set(day, dayAcc = newAccumulator())
     addRow(dayAcc, row, pricing)
 
-    let modelAcc = byModel.get(row.model)
-    if (!modelAcc) byModel.set(row.model, modelAcc = newAccumulator())
-    addRow(modelAcc, row, pricing)
+    addRow(bucketFor(byModel, row).acc, row, pricing)
 
     let dayModels = byDayModel.get(day)
     if (!dayModels) byDayModel.set(day, dayModels = new Map())
-    let dayModelAcc = dayModels.get(row.model)
-    if (!dayModelAcc) dayModels.set(row.model, dayModelAcc = newAccumulator())
-    addRow(dayModelAcc, row, pricing)
+    addRow(bucketFor(dayModels, row).acc, row, pricing)
   }
 
-  const sortModels = (entries: ReadonlyMap<string, Accumulator>): ModelUsage[] =>
-    [...entries.entries()]
-      .map(([model, acc]) => ({ model, ...toTotals(acc) }))
-      .sort((a, b) => b.cost - a.cost || b.input - a.input || a.model.localeCompare(b.model))
+  const sortModels = (entries: ReadonlyMap<string, ModelBucket>): ModelUsage[] =>
+    [...entries.values()]
+      .map(({ model, provider, acc }) => ({ model, ...(provider ? { provider } : {}), ...toTotals(acc) }))
+      .sort((a, b) => b.cost - a.cost || b.input - a.input || a.model.localeCompare(b.model) || (a.provider ?? '').localeCompare(b.provider ?? ''))
 
   const days: DayUsage[] = [...byDay.entries()]
     .sort(([a], [b]) => a.localeCompare(b))

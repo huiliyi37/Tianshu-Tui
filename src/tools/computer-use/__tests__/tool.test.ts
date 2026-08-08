@@ -721,6 +721,17 @@ test('find: value text matches too; zero hits fall back to the outline', async (
   assert.equal(blank.isError, true)
 })
 
+test('T2-RED: find 未命中消息报匹配行数与树行语义提示', async () => {
+  const driver = new FakeDriver()
+  driver.tree = 'Menu bar: File | Edit | View\n[1] AXWindow "Doc"\n  [2] AXStaticText "文本" = 你好'
+  driver.refs = []
+  const tool = darwinTool(driver, ['Safari'])
+  const miss = await tool.execute(params({ action: 'find', app: 'Safari', query: 'zzz' }))
+  assert.equal(miss.isError, undefined)
+  assert.match(miss.content, /匹配 0 行，共扫描 3 行/, '应报匹配数与扫描总数，而非「已扫描 0 个」')
+  assert.match(miss.content, /仅匹配可访问性树行/, '应提示 find 只匹配树行（文档正文可能不在树中）')
+})
+
 // ── wait_for ──────────────────────────────────────────────────────
 
 test('wait_for: appears on a later poll → success with matching lines and timing', async () => {

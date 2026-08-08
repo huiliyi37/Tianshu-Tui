@@ -5,7 +5,13 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { needsClipboardInput, hasDangerousPatterns } from '../macos-driver.js'
+import {
+  needsClipboardInput,
+  hasDangerousPatterns,
+  createMacosDriver,
+  type JxaRunner,
+  type ExecFileLike,
+} from '../macos-driver.js'
 import { createComputerUseTool } from '../tool.js'
 
 test('needsClipboardInput: ASCII 走 keystroke', () => {
@@ -72,4 +78,79 @@ test('hasDangerousPatterns: 放行驱动真实模板与普通参数', () => {
     assert.equal(hasDangerousPatterns(t), null, `template must pass: ${t.slice(0, 60)}`)
   }
   assert.equal(hasDangerousPatterns(''), null)
+})
+
+// ── T1 RED: type 非 ASCII 走剪贴板后必须恢复原内容 ──
+
+interface ExecCall {
+  cmd: string
+  stdinInput?: string
+}
+
+/** execFile mock：pbpaste 返回 backup，pbcopy 捕获 stdin 输入，screencapture 成功。 */
+function mockExecFile(calls: ExecCall[], backup: string): (cmd: string, args: readonly string[], opts: unknown, cb: (err: Error | null, stdout?: string) => void) => unknown {
+  return (cmd, _args, _opts, cb) => {
+    const call: ExecCall = { cmd }
+    calls.push(call)
+    if (cmd === 'pbpaste') {
+      cb(null, backup)
+    } else if (cmd === 'screencapture') {
+      cb(null, '')
+    } else {
+      cb(null, '')
+    }
+    return { stdin: { end: (s?: string) => { call.stdinInput = s ?? '' } } }
+  }
+}
+
+test('T1-RED: type 非 ASCII 走剪贴板路径后恢复原剪贴板内容', async () => {
+  const calls: ExecCall[] = []
+  const exec = mockExecFile(calls, '原剪贴板内容') as unknown as ExecFileLike
+  const runner: JxaRunner = async () => 'ok'
+  const driver = createMacosDriver(runner, { execFile: exec })
+  await driver.type('Finder', '你好 世界')
+  const pbcopyCalls = calls.filter((c) => c.cmd === 'pbcopy')
+  // 修复后：写入一次 + 恢复一次，且恢复内容 = 备份内容
+  assert.equal(pbcopyCalls.length, 2, 'type 非 ASCII 应 pbcopy 两次（写入+恢复）')
+  assert.equal(pbcopyCalls[1]!.stdinInput, '原剪贴板内容', '恢复内容应为备份的原剪贴板')
+})
+
+test('T1-RED: paste_text 保持文档化覆盖行为（pbcopy 仅一次）', async () => {
+  const calls: ExecCall[] = []
+  const exec = mockExecFile(calls, '原剪贴板内容') as unknown as ExecFileLike
+  const runner: JxaRunner = async () => 'ok'
+  const driver = createMacosDriver(runner, { execFile: exec })
+  await driver.pasteText('Finder', 'PASTE')
+  const pbcopyCalls = calls.filter((c) => c.cmd === 'pbcopy')
+  assert.equal(pbcopyCalls.length, 1, 'paste_text 应保持覆盖行为（仅写入一次）')
+})
+
+// ── T3 RED: checkPermissions 探测超时与预热 ──
+
+test('T3-RED: checkPermissions 探测使用 15s 超时（冷启动不误报）', async () => {
+  let seenTimeout = 0
+  const runner: JxaRunner = async (_script, timeoutMs) => {
+    seenTimeout = timeoutMs ?? 0
+    return 'ok'
+  }
+  const calls: ExecCall[] = []
+  const exec = mockExecFile(calls, '') as unknown as ExecFileLike
+  const driver = createMacosDriver(runner, { execFile: exec })
+  const perm = await driver.checkPermissions()
+  assert.equal(perm.accessibility, true)
+  assert.equal(seenTimeout, 15_000, '探测超时应为 15s（与 OSASCRIPT_TIMEOUT_MS 一致），当前 5s 冷启动误报')
+})
+
+test('T3-RED: checkPermissions 探测前先预热 host（warm-up 最先执行）', async () => {
+  const scriptOrder: string[] = []
+  const runner: JxaRunner = async (script) => {
+    scriptOrder.push(script.trim().slice(0, 40))
+    return 'ok'
+  }
+  const calls: ExecCall[] = []
+  const exec = mockExecFile(calls, '') as unknown as ExecFileLike
+  const driver = createMacosDriver(runner, { execFile: exec })
+  await driver.checkPermissions()
+  assert.ok(scriptOrder.length >= 2, '应有 warm-up + 探测两次脚本调用')
+  assert.match(scriptOrder[0] ?? '', /^1$/, 'warm-up 脚本应最先执行')
 })

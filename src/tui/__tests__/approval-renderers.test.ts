@@ -40,7 +40,7 @@ describe('approval renderers', () => {
     assert.ok(text.includes('Path: src/foo.ts'))
     assert.ok(text.includes('5 lines'))
     assert.ok(text.includes('line1'))
-    assert.ok(text.includes('+1 more lines'))
+    assert.ok(text.includes('已隐藏 1 行'), `塌缩标记应为统一格式: ${text}`)
   })
 
   it('write_file: handles path alias', () => {

@@ -93,6 +93,12 @@ export interface ResourcePressureClassifierInput {
   sessionByteLimit: number
   /** Optional memory leak trend slope, bytes per sample */
   memoryTrendBytesPerSample?: number
+  /**
+   * When true (ResourceSensor post-reset cooldown), absolute heap ratios do not
+   * contribute warn/error — only disk pressure and (after samples accumulate)
+   * rising trend evidence. Prevents desktop cross-session heap residual lockout.
+   */
+  suppressAbsoluteMemoryPressure?: boolean
 }
 
 // ─── Classifiers ──────────────────────────────────────────────
@@ -245,14 +251,17 @@ export function classifyResourcePressure(input: ResourcePressureClassifierInput)
   const heapRatio = input.memoryLimitBytes > 0 ? input.heapUsedBytes / input.memoryLimitBytes : 0
   const diskRatio = input.sessionByteLimit > 0 ? input.sessionBytes / input.sessionByteLimit : 0
   const trend = input.memoryTrendBytesPerSample ?? 0
+  const suppressHeap = input.suppressAbsoluteMemoryPressure === true
 
-  if (heapRatio >= 0.9) {
-    evidence.push(`Heap used at ${(heapRatio * 100).toFixed(1)}% of limit (${input.heapUsedBytes}/${input.memoryLimitBytes} bytes)`)
-    actions.push('Enter minimal mode and trigger auto-compact before continuing')
-    actions.push('Start a fresh session if memory does not drop after compaction')
-  } else if (heapRatio >= 0.75) {
-    evidence.push(`Heap used at ${(heapRatio * 100).toFixed(1)}% of limit (${input.heapUsedBytes}/${input.memoryLimitBytes} bytes)`)
-    actions.push('Enter degraded mode and avoid high-risk or memory-heavy tools')
+  if (!suppressHeap) {
+    if (heapRatio >= 0.9) {
+      evidence.push(`Heap used at ${(heapRatio * 100).toFixed(1)}% of limit (${input.heapUsedBytes}/${input.memoryLimitBytes} bytes)`)
+      actions.push('Enter minimal mode and trigger auto-compact before continuing')
+      actions.push('Start a fresh session if memory does not drop after compaction')
+    } else if (heapRatio >= 0.75) {
+      evidence.push(`Heap used at ${(heapRatio * 100).toFixed(1)}% of limit (${input.heapUsedBytes}/${input.memoryLimitBytes} bytes)`)
+      actions.push('Enter degraded mode and avoid high-risk or memory-heavy tools')
+    }
   }
 
   if (trend > 0 && input.memoryLimitBytes > 0 && trend / input.memoryLimitBytes >= 0.03) {
@@ -271,10 +280,11 @@ export function classifyResourcePressure(input: ResourcePressureClassifierInput)
 
   if (evidence.length === 0) return null
 
+  const heapError = !suppressHeap && heapRatio >= 0.9
   return {
     trigger: 'resource_pressure',
-    severity: heapRatio >= 0.9 || diskRatio >= 1 ? 'error' : 'warn',
-    summary: heapRatio >= 0.9
+    severity: heapError || diskRatio >= 1 ? 'error' : 'warn',
+    summary: heapError
       ? 'Memory pressure critical — minimal mode recommended'
       : diskRatio >= 1
         ? 'Session persistence too large — checkpoint/truncate required'

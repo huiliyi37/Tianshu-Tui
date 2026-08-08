@@ -71,7 +71,7 @@ skill 是可复用的工作流 playbook。available-skills 区块列出了每个
     // read on demand (Tier-3). The body itself is never truncated.
     const tree = files.map(f => `  ${f.path}`).join('\n')
     const filesBlock = [
-      `<skill-files dir="${skill.skillDir}" note="按上方指令需要时再用 read_file/grep/glob 按需读取。不要预先全部加载。大文件须用 read_file 的 offset/limit 完整翻完——切勿基于半截内容行动。">`,
+      `<skill-files dir="${skill.skillDir}" note="按上方指令需要时再用 read_file/grep/glob 按需读取。不要预先全部加载。大文件先用 read_file(focus=...) 提取关键片段，缺口再用 offset/limit 精读；切勿把摘要当成完整文件。">`,
       tree,
       '</skill-files>',
     ].join('\n')

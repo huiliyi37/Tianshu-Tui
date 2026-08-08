@@ -608,6 +608,62 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 
 > 桌面端还有 Cockpit 驾驶舱、SideChat 旁路提问（⌘;）、Rewind 时间旅行、主题/Glass/壁纸、Mirror 镜像加速等独有特性——详见 [桌面端用户指南](docs/desktop-guide.md)。
 
+### 🎙️ 语音输入（桌面端）
+
+输入框的麦克风按钮支持语音输入，**macOS 与 Windows 通用**。识别由**本地 whisper.cpp 引擎**完成——离线、隐私（录音不上传任何服务器），中英文混杂场景的精度优于系统自带识别。
+
+**首次使用引导**
+
+- 首次点击麦克风会自动下载识别模型（tiny 约 75MB，国内走镜像加速）。下载未完成时点击会提示「语音识别失败（whisper-unavailable）」，稍候重试即可。
+- macOS 首次使用会请求麦克风权限：点击「允许」即可；若误拒，到「系统设置 → 隐私与安全性 → 麦克风」中开启本应用。
+- Windows 若提示权限被拒，在「系统设置 → 隐私 → 麦克风」中允许本应用。
+
+**注意事项**
+
+- 识别全程在本地完成，录音不离开设备。
+- 点击一次开始录音，再点一次结束并识别。
+- 本地引擎不可用时（如模型未下载），macOS 自动回退系统语音识别；Windows 则提示模型未就绪。
+- 追求更高精度可换用 base 模型（约 244MB）：`desktop/scripts/fetch-whisper-runtime.js --with-base` 预下载。
+- 网络受限环境可设 `RIVET_WHISPER_PROXY=http://代理:端口` 加速模型下载。
+
+### ⚡ Lean 资源档（低内存 / 低磁盘）
+
+内存或磁盘吃紧时使用 Lean 档：精简工具集与提示词、关闭 embeddings、收紧会话池（4 会话 / 10 分钟 TTL / 10MB 事件日志）。适合低配机器或长时间多会话运行。
+
+**开启方式**（任选其一）：
+
+- 环境变量：`RIVET_LEAN=1` 全局开启；`RIVET_LEAN_ASPECT=tools,prompt,embeddings,meridian,pool` 按需只开部分子项（`RIVET_LEAN=0` 可显式关闭）
+- TUI：`/config` → Basics → Lean 资源档（开关 + 三个阈值）
+- 桌面端：设置 → 行为 → Lean 资源档
+
+**资源压力提醒**：运行时内存 ≥75% / 磁盘 ≥80% 会在状态行显示警告（仅提醒，不自动改配置）——可人工开 Lean 或开新会话应对。
+
+**阈值默认**：Lean 4 会话 / 600000ms（10 分钟）/ 10MB，正常 16 / 1800000ms（30 分钟）/ 50MB；事件日志磁盘下限 1,000,000 字节。
+
+**最小工具集（taiyi 档）**：`RIVET_TOOL_PRESET=taiyi`（或项目配置 `tools.preset: "taiyi"`）只装配高频核心工具（读写/检索/bash/git/测试/交付/计划等 16 个），去掉编排/浏览器/网络/视觉等重工具——适合评测「只留关键工具是否够用」。`full` 档一键回退全集。
+
+**按域覆盖（runtime.domains）**：`defaultDomain` 钉定某域时，该域的 lean/阈值/工具档位覆盖全局配置（其他域不受影响）：
+
+```jsonc
+{
+  "runtime": {
+    "domains": {
+      "taiyi": {
+        "lean": true,
+        "toolPreset": "taiyi",
+        "maxLoadedSessions": 4,
+        "idleAgentTtlMs": 600000,
+        "maxEventsDiskBytes": 10485760
+      }
+    }
+  }
+}
+```
+
+解析链：`RIVET_LEAN` 环境变量（恒优先）→ 域覆盖 → 全局 runtime。桌面端：设置 → 行为 → Lean 资源档 → 按域覆盖（域列表随新增星域自动扩展）。注意：域覆盖在会话装配期生效（启动钉定域时）；运行中 `/domain` 切换不影响已冻结的工具集与 lean（改工具指纹会重建前缀缓存）。
+
+**无需改文件的一键启动**：`/config` → Basics → 「最小集绑定星域」——选中某域（如 changgeng 或 taiyi），保存即自动写入 `defaultDomain` 钉定该域 + 该域的 lean/taiyi 最小工具档覆盖。此后 `rivet` 裸启动即进入该星域的最小集会话；配合「默认模型」字段（`agent.defaultModel`，`provider:modelId` 格式）即可完全免参数启动。清空绑定则恢复默认域（域覆盖配置保留）。
+
 ## ⌨️ 斜杠命令
 
 **会话与项目**
@@ -701,7 +757,7 @@ Node.js 22 · TypeScript strict（`noUncheckedIndexedAccess`）· T9 ANSI 渲染
 ```bash
 npx tsc --noEmit                                    # 类型检查
 npm test                                             # 所有测试（13,000+ 用例）
-npm run build                                        # tsup 打包
+npm run build                                        # tsup 打包 + 原生/wasm 载荷落位
 node dist/main.js                                    # 启动 TUI
 node dist/main.js -p "fix the typo"                  # 无界面模式
 ```

@@ -47,9 +47,10 @@ function makeScriptedAgent(script: Array<{ error?: string; text?: string }>): { 
       if (step.error) {
         // AgentLoop reports stream errors via onError and resolves — mirror that.
         callbacks.onError(new Error(step.error))
-        return
+        return 'completed'
       }
       callbacks.onTextDelta(step.text ?? '')
+      return 'completed'
     },
   }
   return { agent, attempts: () => i }

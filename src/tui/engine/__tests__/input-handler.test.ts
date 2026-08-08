@@ -401,7 +401,8 @@ describe('InputHandler · 粘贴控制符过滤（P1-3）', () => {
 describe('InputHandler · 不完整 CSI 超时兜底（P1-4）', () => {
   it('半个 CSI 超时后按 unknown 消费首字节，后续按键不卡死', async () => {
     const stdin = makeStdin()
-    const handler = new InputHandler({ stdin, escapeTimeoutMs: 20 })
+    // 不完整 CSI 走独立的 partialSequenceTimeoutMs（默认 500ms，与 ESC 响应速度解耦）
+    const handler = new InputHandler({ stdin, escapeTimeoutMs: 20, partialSequenceTimeoutMs: 20 })
     const keys: KeyPress[] = []
     handler.onKey('*', (k) => keys.push(k))
 
@@ -418,7 +419,7 @@ describe('InputHandler · 不完整 CSI 超时兜底（P1-4）', () => {
 
   it('正常分 chunk 的完整序列不误触发兜底', async () => {
     const stdin = makeStdin()
-    const handler = new InputHandler({ stdin, escapeTimeoutMs: 50 })
+    const handler = new InputHandler({ stdin, escapeTimeoutMs: 50, partialSequenceTimeoutMs: 50 })
     const keys: KeyPress[] = []
     handler.onKey('*', (k) => keys.push(k))
 
@@ -427,6 +428,75 @@ describe('InputHandler · 不完整 CSI 超时兜底（P1-4）', () => {
     await delay(80)
     assert.ok(keys.some(k => k.name === 'up'), '完整序列解析为 up')
     assert.ok(!keys.some(k => k.raw === '\x1B' && k.name === 'unknown'), '不得产生 ESC 墓碑')
+    handler.dispose()
+  })
+
+  it('不完整 CSI 的兜底超时与 ESC 响应速度解耦（默认值分离）', async () => {
+    const stdin = makeStdin()
+    // 只给 ESC 20ms，partial 用默认 500ms：半截 CSI 在 ESC 超时窗口内不该被腰斩。
+    const handler = new InputHandler({ stdin, escapeTimeoutMs: 20 })
+    const keys: KeyPress[] = []
+    handler.onKey('*', (k) => keys.push(k))
+
+    stdin.emitData('\x1B[')
+    await delay(60) // 远超 escapeTimeoutMs，但远小于 partialSequenceTimeoutMs
+    assert.equal(keys.length, 0, `ESC 超时不应触发 CSI 兜底: ${JSON.stringify(keys)}`)
+
+    stdin.emitData('A') // 慢到达的后半截仍应拼成完整序列
+    await delay(10)
+    assert.ok(keys.some(k => k.name === 'up'), '延迟到达的序列仍正确解析为 up')
+    handler.dispose()
+  })
+})
+
+/**
+ * CPR（cursor position report）是终端对 DSR `\x1B[6n` 探针的自动回吐，不是用户
+ * 按键。它一旦被超时兜底腰斩，残体绝不能退化成可打印字符——那正是用户在输入框里
+ * 看到 `[66;` 的成因（按 ESC 打断时 handleAbort 会重绘并新发探针，与按键撞车）。
+ */
+describe('InputHandler · CPR 残体不泄漏进按键流', () => {
+  it('被截断的 CPR 超时后整段丢弃，不产生任何按键', async () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin, escapeTimeoutMs: 20, partialSequenceTimeoutMs: 20 })
+    const keys: KeyPress[] = []
+    handler.onKey('*', (k) => keys.push(k))
+
+    stdin.emitData('\x1B[66;') // CPR 少了结尾的 R
+    await delay(50)
+    assert.equal(keys.length, 0, `CPR 残体不得产生按键: ${JSON.stringify(keys.map(k => k.char || k.name))}`)
+
+    stdin.emitData('x')
+    await delay(10)
+    assert.deepEqual(keys.map(k => k.char), ['x'], '丢弃残体后后续按键正常')
+    handler.dispose()
+  })
+
+  it('多种截断位置都不泄漏（\\x1B[66 / \\x1B[66; / \\x1B[66;1）', async () => {
+    for (const partial of ['\x1B[66', '\x1B[66;', '\x1B[66;1']) {
+      const stdin = makeStdin()
+      const handler = new InputHandler({ stdin, escapeTimeoutMs: 20, partialSequenceTimeoutMs: 20 })
+      const keys: KeyPress[] = []
+      handler.onKey('*', (k) => keys.push(k))
+
+      stdin.emitData(partial)
+      await delay(50)
+      assert.equal(keys.length, 0, `${JSON.stringify(partial)} 泄漏了按键: ${JSON.stringify(keys.map(k => k.char || k.name))}`)
+      handler.dispose()
+    }
+  })
+
+  it('完整 CPR 仍走 cpr 通道且不产生按键', async () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin, escapeTimeoutMs: 20, partialSequenceTimeoutMs: 20 })
+    const keys: KeyPress[] = []
+    const cprs: Array<[number, number]> = []
+    handler.onKey('*', (k) => keys.push(k))
+    handler.onCpr((row, col) => cprs.push([row, col]))
+
+    stdin.emitData('\x1B[66;1R')
+    await delay(10)
+    assert.deepEqual(cprs, [[66, 1]], 'CPR 正常上报')
+    assert.equal(keys.length, 0, 'CPR 不产生按键')
     handler.dispose()
   })
 })

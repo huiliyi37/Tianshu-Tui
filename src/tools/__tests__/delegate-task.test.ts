@@ -6,6 +6,8 @@ import { profileRegistry } from '../../agent/profile-registry.js'
 import { MAX_BUDGET_CONTINUATIONS, MAX_HANDS_EXTRA_RUNS } from '../../agent/worker-continuation.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
 function makeRun(): CoordinatorRun {
   return {
     status: 'completed',
@@ -26,6 +28,36 @@ function makeRun(): CoordinatorRun {
 }
 
 describe('DELEGATE_TASK_TOOL', () => {
+  it('终态经 mapper.finish 排在合并尾沿之后，延迟 timer 不再补发 running', async () => {
+    const events: Array<{ status: string; eventKind?: string; eventDetail?: string }> = []
+    const coordinator: DelegateTaskCoordinator = {
+      delegate: async request => {
+        request.onActivity?.({
+          workOrderId: 'wo_1',
+          profile: 'code_scout',
+          kind: 'text',
+          detail: 'tail',
+        })
+        return makeRun()
+      },
+    }
+    const tool = createDelegateTaskTool(coordinator)
+
+    await tool.execute({
+      toolUseId: 'tu_mapper_finish',
+      cwd: '/repo',
+      input: { objective: 'flush the activity tail' },
+      onWorkerActivity: (event: any) => events.push(event),
+    } as any)
+
+    assert.deepEqual(events.map(event => [event.status, event.eventKind, event.eventDetail]), [
+      ['running', 'text', 'tail'],
+      ['passed', undefined, undefined],
+    ])
+    await sleep(150)
+    assert.equal(events.length, 2)
+  })
+
   it('validates input and calls the coordinator', async () => {
     const calls: DelegationRequest[] = []
     const coordinator: DelegateTaskCoordinator = {

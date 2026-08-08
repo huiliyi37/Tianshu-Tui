@@ -166,6 +166,35 @@ describe('work-order contract', () => {
     assert.equal(result.status, 'passed')
   })
 
+  it('rejects summary-only results without workOrderId (no fabricated green)', () => {
+    // A summary-only object (e.g. {"summary":"done","status":"passed"}) is NOT
+    // a worker packet — patching an id onto it would fabricate a fake passed.
+    // Must throw so the caller's repair loop fires instead of a green.
+    assert.throws(
+      () => parseWorkerResult(JSON.stringify({
+        summary: 'done',
+        status: 'passed',
+      }), 'wo_1'),
+      WorkerResultParseError,
+    )
+  })
+
+  it('defaults missing status to blocked only for real packets with workOrderId', () => {
+    // Fault tolerance applies to genuine worker packets: a real workOrderId
+    // with a missing status defaults to 'blocked' (never fabricated 'passed').
+    const result = parseWorkerResult(JSON.stringify({
+      workOrderId: 'wo_1',
+      summary: 'real packet without status',
+      findings: [],
+      artifacts: [],
+      changedFiles: [],
+      risks: [],
+      nextActions: [],
+    }), 'wo_1')
+    assert.equal(result.status, 'blocked')
+    assert.equal(result.workOrderId, 'wo_1')
+  })
+
   it('builds a blocked result without leaking raw transcript content', () => {
     const order = createReadOnlyWorkOrder({
       id: 'wo_1',

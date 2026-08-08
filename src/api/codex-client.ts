@@ -183,6 +183,23 @@ export class CodexClient implements StreamClient {
       body.tools = tools
     }
 
+    // OAI 对象形式 tool_choice（{type:'function',function:{name}}）映射为
+    // Responses API 强制函数选择 { type:'function', name }（W2E）。auto/none
+    // 字符串原生透传（Responses API 接受 "auto"/"none"）。强制选择只允许单函数：
+    // parallel_tool_calls 置 false。指定函数不在 tools 中时忽略（避免把不存在的
+    // 函数强塞给 API，与 anthropic-client W2D 同策略）。
+    if (request.tool_choice && tools.length > 0) {
+      if (typeof request.tool_choice === 'object') {
+        const name = request.tool_choice.function.name
+        if (tools.some(t => t.name === name)) {
+          body.tool_choice = { type: 'function', name }
+          body.parallel_tool_calls = false
+        }
+      } else {
+        body.tool_choice = request.tool_choice
+      }
+    }
+
     return body
   }
 

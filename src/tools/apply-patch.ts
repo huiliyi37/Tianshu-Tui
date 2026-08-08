@@ -8,6 +8,7 @@ import { checkSyntax } from './syntax-check.js'
 import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
 import { incrementEditFailCount, resetEditFailCount, recordSuccessfulEdit } from './read-file.js'
 import { APPLY_PATCH_POINTER_PREFIX } from './apply-patch-arg-processor.js'
+import { detectPointerPlaceholder, POINTER_GUARD_ERROR_MARKER } from './pointer-guard.js'
 import { landingWriteFile, delegatedToToolResult, isDelegateRejected } from './client-delegate.js'
 
 /** Post-apply syntax verification + rollback. Default on; RIVET_APPLY_PATCH_VERIFY=0
@@ -124,14 +125,30 @@ export const APPLY_PATCH_TOOL: Tool = {
       return { content: 'apply_patch 需要非空的 "diff" 字符串。', isError: true }
     }
 
-    // Pointer-regurgitation guard: the arg processor collapses large diffs in
-    // message history to "[patch applied to …]". The model sometimes echoes
-    // that pointer back as the diff — applying it is meaningless and confusing.
-    if (diff.trimStart().startsWith(APPLY_PATCH_POINTER_PREFIX)) {
+    // Pointer-regurgitation guard，两条并存：
+    //
+    // 1) 自己的折叠指针 —— 前缀匹配即拦。不能只靠下面的通用检测：tag 补齐
+    //    之前产生的历史指针不带 #RIVET-POINTER-DISPLAY-ONLY#，过不了
+    //    detectPointerPlaceholder 的「前缀 + marker」双条件，而它们仍散落在
+    //    长会话的历史里。
+    // 2) 其他工具的指针交叉 echo 进 diff —— write_file / edit_file / hash_edit /
+    //    plan 的占位符同样会被模型当成内容传进来。write_file 侧的守卫早就
+    //    「Checks ALL pointer prefixes」，apply_patch 此前只认自己那一个前缀，
+    //    是这组守卫里唯一的窄口。
+    //
+    // 两条都必须带 POINTER_GUARD_ERROR_MARKER：pointer-regurgitation-hook 的
+    // WRITE_CLASS_TOOLS 本就含 apply_patch，但它靠该 marker 计数；缺了它这里的
+    // 拦截既不会升级提醒，也不会被 tool-history-recorder 标 transient（会被当成
+    // 真实失败，污染 convergence 的 errorPenalty）。
+    const echoedPointer = diff.trimStart().startsWith(APPLY_PATCH_POINTER_PREFIX)
+      ? APPLY_PATCH_POINTER_PREFIX
+      : detectPointerPlaceholder(diff)
+    if (echoedPointer) {
       return {
-        content: `错误："diff" 是折叠后的历史指针（"${APPLY_PATCH_POINTER_PREFIX} …"），不是真正的 unified diff。`
-          + '该占位符只在大 patch 应用后的历史消息中出现——从来不是合法输入。'
-          + '请提供实际的 unified diff，或先用 read_file / git diff 查看当前状态。',
+        content: `错误："diff" 是历史消息里的显示指针（"${echoedPointer} …"），不是真正的 unified diff。`
+          + '该占位符只在大内容写入/应用后的历史消息中出现——从来不是合法输入。'
+          + '请提供实际的 unified diff，或先用 read_file / git diff 查看当前状态。'
+          + `\n\n[${POINTER_GUARD_ERROR_MARKER}]`,
         isError: true,
       }
     }

@@ -3,6 +3,7 @@ import { join } from 'path'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { relativePosix } from '../path-format.js'
 import { classifyPath } from '../context/attention-filter.js'
+import { SCAN_EXCLUDE_DIRS } from './scan-excludes.js'
 
 interface PackageJson {
   scripts?: Record<string, string>
@@ -10,9 +11,7 @@ interface PackageJson {
   devDependencies?: Record<string, string>
 }
 
-const EXCLUDE_DIRS = new Set([
-  'node_modules', '.git', 'dist', '.next', 'build', 'target', '__pycache__',
-])
+const EXCLUDE_DIRS = SCAN_EXCLUDE_DIRS
 
 function shouldSkipBroadDiscoveryDir(cwd: string, fullPath: string, name: string): boolean {
   if (EXCLUDE_DIRS.has(name)) return true

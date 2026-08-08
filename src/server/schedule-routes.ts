@@ -28,7 +28,10 @@ function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   }
 }
 
-const TRIGGER_TYPES: CronTriggerType[] = ['interval', 'cron', 'oneshot']
+const TRIGGER_TYPES: CronTriggerType[] = ['interval', 'cron', 'oneshot', 'startup', 'app-open', 'file-change', 'git-push', 'focus-change']
+/** 事件触发类型——spec 可空（触发时机由事件决定，非时间表达式）。
+ *  file-change 的 spec 是监听路径（相对 cwd）；git-push 的 spec 是分支名（空=任意）；其余 spec 空。 */
+const EVENT_TRIGGER_TYPES: ReadonlySet<string> = new Set(['startup', 'app-open', 'file-change', 'git-push', 'focus-change'])
 
 export interface ScheduleRouteOptions {
   getStatus?: () => Promise<unknown> | undefined
@@ -56,7 +59,10 @@ export function buildScheduleRoutes(
         return { status: 400, body: { error: 'Missing "prompt"' } }
       }
       const t = data.trigger
-      if (!t || !t.type || !TRIGGER_TYPES.includes(t.type as CronTriggerType) || !t.spec) {
+      // 事件触发类型（startup/app-open）spec 可空；时间触发类型必须给 spec。
+      const isEventTrigger = t?.type && EVENT_TRIGGER_TYPES.has(t.type)
+      if (!t || !t.type || !TRIGGER_TYPES.includes(t.type as CronTriggerType)
+        || (!isEventTrigger && !t.spec)) {
         return { status: 400, body: { error: 'Invalid "trigger" (need {type, spec})' } }
       }
       if (data.reviewPolicy !== undefined && !normalizeReviewPolicy(data.reviewPolicy)) {
@@ -122,6 +128,13 @@ export function buildScheduleRoutes(
       const ok = scheduler.remove(params!.id!)
       if (!ok) return { status: 404, body: { error: 'Scheduled task not found' } }
       return { status: 200, body: { removed: true } }
+    }, apiToken),
+
+    // focus-change：前端 Tauri window focus/blur event 命中时调入，fire 所有
+    // focus-change 类型任务。不经轮询——纯由前端事件驱动。
+    'POST /schedule/trigger-focus': withAuth(() => {
+      const fired = scheduler.fireByEvent('focus-change')
+      return { status: 200, body: { fired } }
     }, apiToken),
   }
 }

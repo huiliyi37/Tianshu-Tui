@@ -60,6 +60,62 @@ test('parseUsageRows: 缺 model 落 unknown，缺 cacheRead/output 落 0', () =>
   assert.equal(rows[0]!.output, 0)
 })
 
+test('parseUsageRows: provider 字段透传（T3），缺席/空串则不设', () => {
+  const content = [
+    JSON.stringify({ t: NOW, model: 'deepseek-v4-flash', provider: 'deepseek-spark', input: 100 }),
+    JSON.stringify({ event: 'side_path', kind: 'llm-speculation', t: NOW, model: 'deepseek-v4-flash', provider: 'deepseek', input: 50 }),
+    JSON.stringify({ t: NOW, model: 'deepseek-v4-flash', input: 100 }), // 旧行无 provider
+    JSON.stringify({ t: NOW, model: 'deepseek-v4-flash', provider: '', input: 100 }), // 空串视为缺席
+  ].join('\n')
+  const rows = parseUsageRows(content)
+  assert.equal(rows.length, 4)
+  assert.equal(rows[0]!.provider, 'deepseek-spark')
+  assert.equal(rows[1]!.provider, 'deepseek')
+  assert.equal(rows[2]!.provider, undefined)
+  assert.equal(rows[3]!.provider, undefined)
+})
+
+test('aggregateUsageRows: 同 model 不同 provider 分行（spark vs 官方对照）', () => {
+  const rows: CacheUsageRow[] = [
+    mainRow({ model: 'deepseek-v4-flash', provider: 'deepseek', input: 1000, cacheRead: 900 }),
+    mainRow({ model: 'deepseek-v4-flash', provider: 'deepseek-spark', input: 2000, cacheRead: 500 }),
+    mainRow({ model: 'deepseek-v4-flash', provider: 'deepseek-spark', input: 2000, cacheRead: 700 }),
+  ]
+  const agg = aggregateUsageRows(rows, { now: NOW })
+  assert.equal(agg.models.length, 2, '同 model 双 provider 必须各自成行')
+  const official = agg.models.find(m => m.provider === 'deepseek')!
+  const spark = agg.models.find(m => m.provider === 'deepseek-spark')!
+  assert.equal(official.hitRate, 90)
+  assert.equal(spark.requests, 2)
+  assert.equal(spark.hitRate, 30) // (500+700)/(2000+2000)
+  // 天级明细同样分行
+  assert.equal(agg.days[0]!.models.length, 2)
+})
+
+test('aggregateUsageRows: 旧行（无 provider）与新行不合并、legacy 聚合行为不变', () => {
+  const rows: CacheUsageRow[] = [
+    mainRow({ model: 'deepseek-v4-flash', input: 1000, cacheRead: 800 }), // legacy
+    mainRow({ model: 'deepseek-v4-flash', provider: 'deepseek-spark', input: 1000, cacheRead: 200 }),
+  ]
+  const agg = aggregateUsageRows(rows, { now: NOW })
+  assert.equal(agg.models.length, 2)
+  const legacy = agg.models.find(m => m.provider === undefined)!
+  assert.equal(legacy.hitRate, 80, 'legacy 行独立聚合，口径与旧版一致')
+})
+
+test('aggregateUsageRows: resolvePricing 收到行级 provider（同 model 各按各价）', () => {
+  const seen: Array<string | undefined> = []
+  const rows: CacheUsageRow[] = [
+    mainRow({ model: 'deepseek-v4-flash', provider: 'deepseek-spark' }),
+    mainRow({ model: 'deepseek-v4-flash' }),
+  ]
+  aggregateUsageRows(rows, {
+    now: NOW,
+    resolvePricing: (_model, provider) => { seen.push(provider); return deepseekPricing },
+  })
+  assert.deepEqual(seen.sort(), ['deepseek-spark', undefined].sort())
+})
+
 test('aggregateUsageRows: 加权命中率只算主请求行（ΣcacheRead/Σinput）', () => {
   const rows: CacheUsageRow[] = [
     mainRow({ input: 1000, cacheRead: 900 }),

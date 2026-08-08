@@ -18,6 +18,7 @@ import {
   getRoutingConfig,
   getSearchConfig,
   getToolPresetConfig,
+  getRuntimeLeanConfig,
   getVisionAutoBridge,
   getVisionModelConfig,
   loadConfig,
@@ -32,6 +33,7 @@ import {
   setRoutingConfig,
   setSearchConfig,
   setToolPresetConfig,
+  setRuntimeLeanConfig,
   setVisionAutoBridge,
   setVisionModelConfig,
 } from '../config/manager.js'
@@ -39,6 +41,7 @@ import { buildDomainPickerEntries } from '../agent/domain-picker-entries.js'
 import type { SettingsBlockId, SettingsDraft, SettingsEnv } from './settings-model.js'
 import { splitModelRef } from './settings-model.js'
 import type { SettingsSaveResult } from './settings-flow.js'
+import { resolveLeanDefaults } from '../config/runtime-lean.js'
 
 /** Runtime side-effects the panel cannot do by itself. */
 export interface SettingsHooks {
@@ -74,13 +77,25 @@ export function loadSettingsDraft(): SettingsDraft {
     visionAutoBridge: getVisionAutoBridge(),
     // modelVision 只存用户在面板里的覆盖；初始为空，display 时 fallback 到模型卡的 supportsVision。
     modelVision: {},
-    basics: {
-      toolPreset: getToolPresetConfig().preset ?? 'frontend',
-      approval: cfg.agent.approval,
-      checkpointEveryTurns: getCheckpointConfig().checkpointEveryTurns,
-      defaultDomain: getDefaultDomainConfig().defaultDomain,
-      defaultModel: getDefaultModelConfig().defaultModel ?? '',
-    },
+    basics: (() => {
+      // 单次 getRuntimeLeanConfig 复用（原 8 次 loadConfig 读盘）；阈值回落
+      // 统一调 resolveLeanDefaults——与 settings-model intField get 同源。
+      const leanCfg = getRuntimeLeanConfig()
+      const leanDefaults = resolveLeanDefaults(leanCfg.lean)
+      return {
+        toolPreset: getToolPresetConfig().preset ?? 'frontend',
+        runtimeLean: leanCfg.lean,
+        maxLoadedSessions: leanCfg.maxLoadedSessions ?? leanDefaults.maxLoadedSessions,
+        idleAgentTtlMs: leanCfg.idleAgentTtlMs ?? leanDefaults.idleAgentTtlMs,
+        maxEventsDiskBytes: leanCfg.maxEventsDiskBytes ?? leanDefaults.maxEventsDiskBytes,
+        // 绑定星域：defaultDomain 钉定 + 该域 lean 覆盖同时成立时显示绑定状态
+        domainBind: inferDomainBind(),
+        approval: cfg.agent.approval,
+        checkpointEveryTurns: getCheckpointConfig().checkpointEveryTurns,
+        defaultDomain: getDefaultDomainConfig().defaultDomain,
+        defaultModel: getDefaultModelConfig().defaultModel ?? '',
+      }
+    })(),
     net: {
       mirrorsEnabled: mirrors.enabled,
       mirrorsPreset: mirrors.preset,
@@ -113,6 +128,17 @@ export function loadSettingsEnv(): SettingsEnv {
 
 function parseBackends(raw: string): string[] {
   return raw.split(',').map(s => s.trim()).filter(s => s.length > 0)
+}
+
+/** 推断「最小集绑定星域」：defaultDomain 钉定某域且该域配置了完整绑定
+ * （lean + taiyi 工具档）时视为绑定（面板显示）；否则空（不绑定）。
+ * 审查 F2：仅 lean 不算绑定——绑定语义是 lean+taiyi 组合。 */
+function inferDomainBind(): string {
+  const leanCfg = getRuntimeLeanConfig()
+  const domain = getDefaultDomainConfig().defaultDomain
+  if (!domain || domain === 'auto') return ''
+  const slice = leanCfg.domains?.[domain]
+  return slice?.lean === true && slice.toolPreset === 'taiyi' ? domain : ''
 }
 
 /**
@@ -180,6 +206,30 @@ export function saveSettings(
       case 'toolPreset':
         attempt(block, () => setToolPresetConfig({ preset: draft.basics.toolPreset }))
         break
+      case 'runtimeLean': {
+        // 只写发生变化的子字段（审查 HIGH 修复）：阈值未被编辑时保持磁盘无
+        // 显式值，让 lean 收紧默认（4/10min/10MB）在消费端继续生效——无条件
+        // 把回落值写盘会把「无显式值、lean 默认生效」形态变成显式非 lean 值，
+        // resolveSessionPoolOptions 因显式值优先而不再采用 lean 收紧。
+        const baseline = loadSettingsDraft().basics
+        const patch: {
+          lean: boolean
+          maxLoadedSessions?: number
+          idleAgentTtlMs?: number
+          maxEventsDiskBytes?: number
+        } = { lean: draft.basics.runtimeLean }
+        if (draft.basics.maxLoadedSessions !== baseline.maxLoadedSessions) {
+          patch.maxLoadedSessions = draft.basics.maxLoadedSessions
+        }
+        if (draft.basics.idleAgentTtlMs !== baseline.idleAgentTtlMs) {
+          patch.idleAgentTtlMs = draft.basics.idleAgentTtlMs
+        }
+        if (draft.basics.maxEventsDiskBytes !== baseline.maxEventsDiskBytes) {
+          patch.maxEventsDiskBytes = draft.basics.maxEventsDiskBytes
+        }
+        attempt(block, () => setRuntimeLeanConfig(patch))
+        break
+      }
       case 'approval':
         attempt(block, () => {
           // 落盘 + 运行时同步。hook 缺失（非交互路径）时只落盘，并如实报告。
@@ -194,6 +244,22 @@ export function saveSettings(
       case 'defaultDomain':
         attempt(block, () => setDefaultDomainConfig({ defaultDomain: draft.basics.defaultDomain }))
         break
+      case 'domainBind': {
+        // 最小集绑定：选中域 → 钉定 defaultDomain + 写该域 lean/taiyi 覆盖
+        //（域覆盖的 lean 即让该域会话 lean 生效，无需动全局 runtime.lean——
+        // 全局 lean 会波及所有域且清空绑定不还原，审查 F1）；清空 → 恢复
+        // 默认域 qiming（域覆盖保留，用户可另行调整）。
+        const bind = draft.basics.domainBind ?? ''
+        if (bind) {
+          attempt(block, () => setDefaultDomainConfig({ defaultDomain: bind }))
+          attempt(block, () => setRuntimeLeanConfig({
+            domains: { [bind]: { lean: true, toolPreset: 'taiyi' } },
+          }))
+        } else {
+          attempt(block, () => setDefaultDomainConfig({ defaultDomain: 'qiming' }))
+        }
+        break
+      }
       case 'defaultModel':
         attempt(block, () => setDefaultModelConfig({ defaultModel: draft.basics.defaultModel }))
         break

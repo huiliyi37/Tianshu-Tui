@@ -1,6 +1,7 @@
 import { OpenAIClient } from './openai-client.js'
 import { CodexClient } from './codex-client.js'
 import { AnthropicClient } from './anthropic-client.js'
+import { proRegistry } from './pro-registry.js'
 import type { StreamClient } from './stream-client.js'
 import type { ProviderCapabilities } from './provider.js'
 import { getProviderProfile } from './provider-profile.js'
@@ -17,6 +18,9 @@ export interface RuntimeParams {
   auth?: AuthProvider
   /** Stable session identifier for cache routing affinity */
   sessionId?: string
+  /** Session-frozen wire-transform context (e.g. spark truncate N) — resolved
+   *  once at session start from meta/defaults, byte-stable across resume. */
+  wireContext?: import('./pro-registry.js').WireTransformContext
 }
 
 /**
@@ -72,6 +76,11 @@ export function createProviderClient(
   capabilities: ProviderCapabilities,
   params: RuntimeParams,
 ): StreamClient {
+  // Pro 注册的 client 工厂优先（协议非 OpenAI/Anthropic 兼容时由 pro 模块提供）。
+  // 开源构建注册表恒空 → 恒 miss → 走原路径，行为与现状完全一致。
+  const proFactory = proRegistry.getClientFactory(provider.name)
+  if (proFactory) return proFactory(provider, capabilities, params)
+
   // Codex OAuth uses the Responses API, not chat/completions
   if (provider.name === 'codex' && provider.auth?.type === 'oauth') {
     return new CodexClient({
@@ -120,7 +129,13 @@ export function createProviderClient(
     reasoningEffort: params.reasoningEffort,
     sessionId: params.sessionId,
     providerName: provider.name,
+    // Preserved-thinking protocol family: derived from capability rather than
+    // provider name — covers deepseek/mimo/spark (all deepseek-native) without
+    // leaking the pro provider name into open-source wire code.
+    preservedThinkingProtocol: provider.capabilities.prefixCache === 'deepseek-native'
+      || provider.name === 'deepseek' || provider.name === 'mimo',
     providerProfile: getProviderProfile(provider.name, modelContextWindow(provider, params.model)),
+    wireContext: params.wireContext,
     unsupported: provider.unsupported.length > 0
       ? provider.unsupported
       : capabilities.stripParams,

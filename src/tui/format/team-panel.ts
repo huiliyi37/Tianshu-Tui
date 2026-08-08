@@ -102,10 +102,28 @@ function seg(text: string, colorKey?: keyof RivetTheme, bold?: boolean): Segment
   return bold ? { text, colorKey: colorKey ?? 'primary', bold } : (colorKey ? { text, colorKey } : { text })
 }
 
-function buildEntries(model: TeamPanelModel, width: number): PanelLine[] {
+/** live 区精简选项。scrollback 里的终态面板不传，保持完整详情。 */
+export interface TeamPanelFormatOptions {
+  /**
+   * 精简模式：已完成的波折叠成波头一行、每任务至多一条续行、展开任务数封顶。
+   * 面板高度随 DAG 规模无界增长时，会被定高视口的高水位固化成输入框上方的
+   * 常驻空白——live 区只需看清当前在跑什么，历史波次的逐任务详情在 scrollback。
+   */
+  compact?: boolean
+  /** 精简模式下展开的任务数上限，超出折叠成 `…(+N)`。 */
+  maxTasks?: number
+}
+
+const COMPACT_MAX_TASKS = 6
+
+function buildEntries(model: TeamPanelModel, width: number, opts?: TeamPanelFormatOptions): PanelLine[] {
   const rule = Math.min(Math.max(48, width), 76)
   const out: PanelLine[] = []
   const tasks = new Map(model.tasks.map(t => [t.id, t]))
+  const compact = opts?.compact === true
+  const maxTasks = Math.max(1, opts?.maxTasks ?? COMPACT_MAX_TASKS)
+  let shownTasks = 0
+  let hiddenTasks = 0
 
   // ── 标题行：◆ 团队编队 · 模式 · wave 进度 ──────────────────────
   // max 模式高亮（warning bold）——它意味着更强模型/更高预算，值得一眼看出。
@@ -149,7 +167,17 @@ function buildEntries(model: TeamPanelModel, width: number): PanelLine[] {
     if (wave.reason) waveLine.push(seg(`  ${truncate(wave.reason, Math.max(8, rule - 30))}`, 'dim'))
     out.push(waveLine)
 
+    // 精简模式：已完成的波只留波头（进度条已表达结果），不逐任务展开。
+    if (compact && complete) continue
+
     for (const task of waveTasks) {
+      if (compact) {
+        if (shownTasks >= maxTasks) {
+          hiddenTasks++
+          continue
+        }
+        shownTasks++
+      }
       const glyph = statusGlyph(task.status)
       const glyphColor = statusColorKey(task.status)
       // 任务行：缩进 + glyph + id(对齐列) + title；终态/待命降 muted 聚焦运行中
@@ -168,19 +196,29 @@ function buildEntries(model: TeamPanelModel, width: number): PanelLine[] {
 
       // ⎿ 续行：依赖 / 实时活动 / 终态摘要（muted，一类一行）
       const cont = `     ${'⎿'} `
-      if (task.dependsOn.length > 0 && task.status === 'waiting') {
-        out.push([seg(cont, 'dim'), seg(`依赖 ${task.dependsOn.join(', ')}`, 'muted')])
-      }
+      const depLine = task.dependsOn.length > 0 && task.status === 'waiting'
+        ? `依赖 ${task.dependsOn.join(', ')}`
+        : null
       const liveMeta: string[] = []
       if (typeof task.elapsedMs === 'number' && task.status !== 'waiting') liveMeta.push(formatElapsed(task.elapsedMs))
       if (task.activity) liveMeta.push(task.activity)
-      if (liveMeta.length > 0) {
-        out.push([seg(cont, 'dim'), seg(truncate(liveMeta.join(' · '), rule - 8), 'muted')])
-      }
-      if (task.summary && task.status !== 'waiting') {
-        out.push([seg(cont, 'dim'), seg(truncate(task.summary, rule - 8), 'muted')])
+      const metaLine = liveMeta.length > 0 ? liveMeta.join(' · ') : null
+      const summaryLine = task.summary && task.status !== 'waiting' ? task.summary : null
+
+      if (compact) {
+        // 一任务至多一条续行：正在跑的看活动，跑完的看摘要，没起跑的看依赖。
+        const only = metaLine ?? summaryLine ?? depLine
+        if (only) out.push([seg(cont, 'dim'), seg(truncate(only, rule - 8), 'muted')])
+      } else {
+        if (depLine) out.push([seg(cont, 'dim'), seg(depLine, 'muted')])
+        if (metaLine) out.push([seg(cont, 'dim'), seg(truncate(metaLine, rule - 8), 'muted')])
+        if (summaryLine) out.push([seg(cont, 'dim'), seg(truncate(summaryLine, rule - 8), 'muted')])
       }
     }
+  }
+
+  if (hiddenTasks > 0) {
+    out.push([seg('   '), seg(`…(+${hiddenTasks}) 个任务 · /tasks 查看`, 'dim')])
   }
 
   // ── 阻塞列表（有才显示，警告色） ─────────────────────────────────
@@ -251,15 +289,15 @@ function buildEntries(model: TeamPanelModel, width: number): PanelLine[] {
 /**
  * 生成 TeamPanel 的纯文本行（无颜色，便于宽度计算/测试）。
  */
-export function buildTeamPanelLines(model: TeamPanelModel, width = 80): string[] {
-  return buildEntries(model, width).map(line => line.map(s => s.text).join(''))
+export function buildTeamPanelLines(model: TeamPanelModel, width = 80, opts?: TeamPanelFormatOptions): string[] {
+  return buildEntries(model, width, opts).map(line => line.map(s => s.text).join(''))
 }
 
 /**
  * 渲染 TeamPanel 为分段上色的 ANSI 行（语义色与 /tasks overlay 一致）。
  */
-export function formatTeamPanel(model: TeamPanelModel, theme: RivetTheme, width = 80): string[] {
-  return buildEntries(model, width).map(line =>
+export function formatTeamPanel(model: TeamPanelModel, theme: RivetTheme, width = 80, opts?: TeamPanelFormatOptions): string[] {
+  return buildEntries(model, width, opts).map(line =>
     line.map(s => {
       if (!s.colorKey) return s.text
       const accent = theme[s.colorKey] as string

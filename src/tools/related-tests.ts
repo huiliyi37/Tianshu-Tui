@@ -4,6 +4,7 @@ import { isAbsolute } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import type { MeridianIndexer } from '../repo/meridian-indexer.js'
 import { analyzeImpact } from '../repo/meridian-impact.js'
+import { scheduleMeridianBackfill } from '../repo/meridian-backfill.js'
 
 async function fileExists(path: string): Promise<boolean> {
   try { await stat(path); return true } catch { return false }
@@ -176,7 +177,11 @@ export function createRelatedTestsTool(
       }
 
       // Prefer meridian SQL (real import graph) over hardcoded path heuristics.
-      const db = getIndexer()?.getDb()
+      const indexer = getIndexer()
+      if (indexer) {
+        scheduleMeridianBackfill(indexer, params.cwd, { reason: 'ondemand' })
+      }
+      const db = indexer?.getDb()
       if (db && !isAbsolute(file)) {
         const testedBy = db.getTestsFor(file)
         const impact = analyzeImpact(db, [file])

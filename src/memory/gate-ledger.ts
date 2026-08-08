@@ -29,6 +29,12 @@ export interface GateLedgerRow {
   rejected: Array<{ textHash: string; snippet: string }>
   superseded: Array<{ oldId: string; newId: string }>
   failedClosed: boolean
+  /** 本轮送审候选数（去重后）。缺省 = 旧版本行（无此字段）。 */
+  candidateCount?: number
+  /** 本轮 gate 运行耗时 ms。缺省 = 旧版本行。 */
+  durationMs?: number
+  /** 失败归因：timeout / invalid_output / llm_error。成功行缺省。 */
+  failureReason?: 'timeout' | 'invalid_output' | 'llm_error'
 }
 
 export interface GateFeedbackSummary {

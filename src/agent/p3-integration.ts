@@ -23,14 +23,28 @@ export interface P3Config {
   /**
    * Master switch for the speculative pre-execution chain (miner→IdleSpec,
    * physarum/LLM predictions→ShadowQueue). Default OFF — SEALED 2026-07-07.
-   * Serving was already cut on 2026-07-06 (ShadowQueue has no mtime/TTL
-   * validation and served pre-edit file content as a live read_file result);
-   * with serving gone the background pre-reads were pure cost, so the whole
-   * chain is now inert unless explicitly enabled (unit tests only).
-   * Re-enable in production only after ShadowQueue entries record mtime and
-   * checkHit re-stats before returning.
+   * Serving was cut on 2026-07-06 after the stale-read incident (ShadowQueue
+   * then had no mtime/TTL validation and served pre-edit file content as a
+   * live read_file result).
+   *
+   * ⚠ 状态更新（2026-08-07 spark v2 T5a）：当年的重启契约——「ShadowQueue 记录
+   * mtime、checkHit 返回前重新 stat」——**已全部实现**（shadow-queue.ts P3-P4
+   * 修复：enqueue 并行 stat 留痕 + checkHit 重 stat 比对 + 不可验证 fail-closed
+   * + TTL 兜底 + 写后整队 clear，均有测试）。封存**维持**的原因是经济性而非
+   * 安全性：解封前影子遥测的结论是「预执行纯耗资源、命中率不高」。重启决策
+   * 依据 = speculativeObserve 观察态采回的新命中率数据（flash 能力升级后预测
+   * 质量前提已变）+ 用户确认。
    */
   speculativeEnabled?: boolean
+  /**
+   * 观察态（2026-08-07 spark v2 T5b · RIVET_SPEC_OBSERVE=1）：打开 enqueue 各臂
+   * 与命中统计，**绝不 serve**（checkSpeculativeCache 仍由 speculativeEnabled
+   * 单独把门）。execute 保持缺省 no-op —— 观察只需要 target 匹配 + mtime 新鲜度
+   * 就能测「会不会命中」，不必真读文件（真预读正是当年被判纯耗资源的成本）。
+   * 每条预测的代价 ≈ 一次 stat()。stats 经 statsBySource → postSession 落
+   * meta.speculationStats，跨会话累积成解封依据。
+   */
+  speculativeObserve?: boolean
   /** Background agent task executor */
   backgroundExecute?: (task: BackgroundTask) => Promise<string>
   /** JIT tool executor */
@@ -79,11 +93,14 @@ export class P3Integration {
   readonly effortBandit: LinUCBBandit
   readonly jit: AgentJIT
   private readonly speculativeEnabled: boolean
+  /** enqueue 各臂的总闸：全量启用或观察态任一为真即开。serving 只看 speculativeEnabled。 */
+  private readonly observeEnabled: boolean
   private lastTool: string | null = null
   private _effortShadowRecords = new Map<string, EffortShadowRecord>()
 
   constructor(config: P3Config = {}) {
     this.speculativeEnabled = config.speculativeEnabled === true
+    this.observeEnabled = this.speculativeEnabled || config.speculativeObserve === true
     this.miner = new ToolPatternMiner()
     this.queue = new ShadowQueue({
       execute: config.execute ?? (async () => ''),
@@ -113,21 +130,28 @@ export class P3Integration {
     if (this.lastTool) {
       this.miner.record(this.lastTool, toolName, { targetPath: currentTarget })
     }
-    // Speculative pre-execution SEALED by default — see P3Config.speculativeEnabled.
-    if (this.speculativeEnabled) this.idleSpec.onToolStart(toolName)
+    // Speculative enqueue SEALED by default; observe mode opens it for stats.
+    if (this.observeEnabled) this.idleSpec.onToolStart(toolName)
   }
 
-  /** SEALED 2026-07-07 (no production caller) — results are NEVER served to the
-   *  model (2026-07-06 stale-read incident: ShadowQueue entries carry no
-   *  mtime/TTL, so a pre-edit read was served after three file mutations).
-   *  Re-enable only after checkHit gains an mtime re-stat comparison. */
+  /** Serving 仍封存（无生产调用方）——观察态也**不经这里**取内容。
+   *  历史脉络：2026-07-06 stale-read 事故切 serving；mtime 重启契约现已实现
+   *  （shadow-queue.ts），封存维持原因 = 经济性待证，见 P3Config.speculativeEnabled。 */
   checkSpeculativeCache(toolName: string, target: string): string | undefined {
     if (!this.speculativeEnabled) return undefined
     return this.idleSpec.checkCache(toolName, target)
   }
 
+  /** T5b 观察态窥视：真实工具执行时按 tool+target 记 would-hit/miss 统计
+   *  （经 checkHit 的 mtime/TTL 校验——陈旧条目如实计 miss），**恒不返回内容**。
+   *  封存态 no-op。与 checkSpeculativeCache 分离：serving 的门不因观察被碰。 */
+  observeSpeculativeCache(toolName: string, target: string): void {
+    if (!this.observeEnabled) return
+    this.idleSpec.checkCache(toolName, target)
+  }
+
   enqueuePhysarumFilePredictions(input: PhysarumFilePredictionInput): void {
-    if (!this.speculativeEnabled) return
+    if (!this.observeEnabled) return
     const toolPredictions = this.miner.predict(input.afterToolName, 0)
     const topToolPrediction = toolPredictions[0]
     if (topToolPrediction && topToolPrediction.tool !== 'read_file') return
@@ -149,7 +173,7 @@ export class P3Integration {
    *  ShadowQueue re-applies the read-only whitelist and minProbability gate, so
    *  this is a thin pass-through that just tags the source. */
   enqueueLlmPredictions(predictions: ToolPrediction[]): void {
-    if (!this.speculativeEnabled) return
+    if (!this.observeEnabled) return
     for (const prediction of predictions) {
       this.queue.enqueue({ ...prediction, source: 'llm' })
     }

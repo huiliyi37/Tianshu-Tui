@@ -1110,13 +1110,14 @@ export async function executeToolUse(
     const pathGrantNeed = outOfWorkspaceFilePaths(deps.cwd, tu.name, tu.input)
 
     // Hard gate: arbitrary-JS / endpoint-takeover actions (computer_use
-    // js_eval / browser_adopt) always ask — no approval mode (incl. YOLO),
-    // allow rule, or sensorium confidence can waive them. The tool documents
-    // this promise; this is where it is enforced.
+    // js_eval / browser_adopt) and kernel-boundary widening (request_path_access)
+    // always ask in supervised/default modes — no allow rule or sensorium
+    // confidence can waive them there.
     const unconditionalApproval = requiresUnconditionalApproval(tu.name, tu.input)
-    // YOLO mode: request_path_access no longer unconditional — the user already
-    // opted out of prompts; the kernel sandbox still protects write boundaries.
-    const yoloBypassesUnconditional = skipAllApproval && tu.name === 'request_path_access'
+    // YOLO (自治/完全访问) waives the unconditional gate entirely: the user
+    // explicitly chose maximum autonomy — checkpoints/rollback are the safety
+    // net, not prompts. Deny rules and self-kill protection still apply above.
+    const yoloBypassesUnconditional = skipAllApproval
 
     let shouldAsk = (unconditionalApproval && !yoloBypassesUnconditional)
       ? true
@@ -1295,13 +1296,19 @@ export async function executeToolUse(
     const toolTarget = toolTargetFromInput(tu.name, tu.input)
     const priorReadLoopPlaceholders = countRecentReadLoopPlaceholders(deps.trajectory.getEntries(), toolTarget)
     deps.p3?.onToolStart(tu.name, toolTarget)
+    // T5b 观察态窥视（RIVET_SPEC_OBSERVE=1 时才有实效，封存态 no-op）：
+    // 在真实工具执行点按 tool+target 记 would-hit/miss——这是命中率数据的
+    // 唯一采集口。恒不取内容，serving 维持封存。
+    deps.p3?.observeSpeculativeCache(tu.name, toolTarget)
 
     // P3-C speculative chain SEALED (2026-07-06 服务路径切除 → 2026-07-07 全链
-    // 关停): ShadowQueue 缓存无 mtime/TTL 校验，预读结果曾在文件多次变更后仍被
-    // 当作 read_file 结果返回（TDX 事故：模型推理"文件被回退"并连锁触发
-    // old_string not found / hash_edit stale / 重读风暴）。服务切除后影子遥测
-    // 观察一日即定论：预执行纯耗资源、命中率数据不改变重启前提（mtime 校验
-    // 无论如何都要做），遂整链封存。重启契约见 P3Config.speculativeEnabled。
+    // 关停): 当时 ShadowQueue 缓存无 mtime/TTL 校验，预读结果曾在文件多次变更后
+    // 仍被当作 read_file 结果返回（TDX 事故：模型推理"文件被回退"并连锁触发
+    // old_string not found / hash_edit stale / 重读风暴）。
+    // 状态更新（2026-08-07）：mtime 契约已实现（shadow-queue.ts，含写后
+    // queue.clear 失效），封存维持原因 = 经济性——当年影子遥测判"预执行纯耗
+    // 资源"。观察态（RIVET_SPEC_OBSERVE=1）重新采命中率，解封 serving 由
+    // 数据 + 用户确认决定。见 P3Config.speculativeEnabled / speculativeObserve。
 
     const traceId = tu.id
     traceStore = startTraceEvent(traceStore, {
@@ -1866,6 +1873,12 @@ export async function executeToolUse(
      } catch {
         deps.prewarm.invalidate(tu.input.file_path as string)
      }
+      // ShadowQueue 投机预读队列失效（P4 解封配套）：队列不像 PrewarmCache
+      // 按文件路径索引，没有对应单个 key 的失效方式（grep/glob/list_dir 的
+      // target 常是目录，不是被改的那个文件）——整队清空是这个数据结构下
+      // 唯一安全的等价物。checkHit 自带 mtime/size/TTL 校验兜底，这里是额外
+      // 的一层尽早失效，不是唯一防线。
+      deps.p3?.queue.clear()
    }
 
     // Prewarm grep-matched files: grep→read_file is the most common tool sequence.

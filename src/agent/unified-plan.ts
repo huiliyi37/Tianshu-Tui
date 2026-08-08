@@ -8,7 +8,7 @@
  * enabling plan caching and re-execution without re-running the LLM fanout.
  */
 
-import type { WorkOrderKind, WorkerProfile } from './work-order.js'
+import { dependencyEdgeSchema, dependencyId, type DependencyRef, type WorkOrderKind, type WorkerProfile } from './work-order.js'
 import type { TaskGraph, TaskGraphNode } from './task-graph.js'
 import { validateTaskGraph } from './task-graph.js'
 import type { TeamTask, TeamTaskDraft } from './team-plan.js'
@@ -28,8 +28,8 @@ export interface UnifiedTaskNode {
   kind: WorkOrderKind
   /** File scope for the task (may be empty for global tasks). */
   files: string[]
-  /** Task IDs this node depends on (must complete before dispatch). */
-  dependsOn: string[]
+  /** Task dependencies. Conditional edges preserve failure routing metadata. */
+  dependsOn: DependencyRef[]
   /** Risk classification for scheduling (affects serialization and review gates). */
   riskTier: 'low' | 'medium' | 'high'
   /** Logical group for wave grouping. Undefined = auto-group by file overlap. */
@@ -73,7 +73,7 @@ export function taskGraphToUnifiedPlan(
     profile: node.profile,
     kind: node.kind,
     files: node.files,
-    dependsOn: node.dependsOn,
+    dependsOn: node.dependsOn.map(dependencyId),
     riskTier: node.riskTier,
   }))
 
@@ -101,7 +101,7 @@ export function unifiedPlanToTaskGraph(plan: UnifiedPlan): TaskGraph {
       profile: node.profile,
       kind: node.kind,
       files: node.files,
-      dependsOn: node.dependsOn,
+      dependsOn: node.dependsOn.map(dependencyId),
       riskTier: node.riskTier,
     })),
     createdAt: plan.createdAt,
@@ -160,18 +160,18 @@ export interface OverlapCheckTask {
   id: string
   files: string[]
   touchSet?: string[]
-  dependsOn: string[]
+  dependsOn: DependencyRef[]
 }
 
 /** Build transitive dependency reachability: id → set of all ids it depends on
  *  (directly or transitively). Visited-guarded so cycles don't loop forever. */
-function buildDependencyReachability(tasks: Array<{ id: string; dependsOn: string[] }>): Map<string, Set<string>> {
+function buildDependencyReachability(tasks: Array<{ id: string; dependsOn: DependencyRef[] }>): Map<string, Set<string>> {
   const direct = new Map<string, string[]>()
-  for (const t of tasks) direct.set(t.id, t.dependsOn)
+  for (const t of tasks) direct.set(t.id, t.dependsOn.map(dependencyId))
   const reach = new Map<string, Set<string>>()
   for (const t of tasks) {
     const acc = new Set<string>()
-    const stack = [...t.dependsOn]
+    const stack = t.dependsOn.map(dependencyId)
     while (stack.length > 0) {
       const dep = stack.pop()!
       if (acc.has(dep)) continue
@@ -248,8 +248,9 @@ export function validateUnifiedPlan(plan: UnifiedPlan): UnifiedPlanValidation {
   // Check for dangling dependencies
   for (const node of plan.tasks) {
     for (const dep of node.dependsOn) {
-      if (!ids.has(dep)) {
-        nodeErrors.push({ nodeId: node.id, error: `depends on unknown task: ${dep}` })
+      const depId = dependencyId(dep)
+      if (!ids.has(depId)) {
+        nodeErrors.push({ nodeId: node.id, error: `depends on unknown task: ${depId}` })
       }
     }
   }
@@ -304,7 +305,7 @@ export function deserializeUnifiedPlan(json: string): UnifiedPlan | null {
       if (typeof node.profile !== 'string') return null
       if (typeof node.kind !== 'string') return null
       if (!Array.isArray(node.files)) return null
-      if (!Array.isArray(node.dependsOn)) return null
+      if (!node.dependsOn.every(dep => typeof dep === 'string' || dependencyEdgeSchema.safeParse(dep).success)) return null
     }
     return plan
   } catch {
@@ -351,7 +352,7 @@ export function renderUnifiedPlanSummary(plan: UnifiedPlan): string {
         depthMap.set(nodeId, 0)
         return 0
       }
-      const max = Math.max(0, ...node.dependsOn.map(d => getDepth(d) + 1))
+      const max = Math.max(0, ...node.dependsOn.map(d => getDepth(dependencyId(d)) + 1))
       depthMap.set(nodeId, max)
       return max
     }
@@ -369,7 +370,7 @@ export function renderUnifiedPlanSummary(plan: UnifiedPlan): string {
       const label = depth === 0 ? 'Wave 1 (no deps)' : `Wave ${depth + 1}`
       lines.push(`${label}:`)
       for (const node of nodes) {
-        const deps = node.dependsOn.length > 0 ? ` ← ${node.dependsOn.join(', ')}` : ''
+        const deps = node.dependsOn.length > 0 ? ` ← ${node.dependsOn.map(dependencyId).join(', ')}` : ''
         lines.push(`  ${node.id} [${node.profile}] ${node.title}${deps}`)
       }
     }

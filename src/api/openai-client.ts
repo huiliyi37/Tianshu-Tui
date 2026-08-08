@@ -1,9 +1,10 @@
 import type { StreamClient, WireDivergence } from './stream-client.js'
 import type { StreamCallbacks } from './stream-client.js'
+import { normalizeOaiMessage } from './oai-types.js'
 import type { OaiChatRequest, OaiMessage } from './oai-types.js'
+import { proRegistry } from './pro-registry.js'
 import { estimateOaiTokens } from '../compact/micro.js'
 import type { ProviderProfile } from './provider-profile.js'
-import { shouldInjectPrefix, buildPrefixMessage } from './prefix-completion.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
 import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
@@ -115,6 +116,16 @@ export interface OpenAIClientConfig {
   providerProfile?: ProviderProfile
   /** Provider name for feature gating (e.g. 'glm' for web_search) */
   providerName?: string
+  /** Session-frozen wire-transform context (spark truncate N 等)。随会话 meta
+   *  冻结、resume 读回——wire 字节在 env 漂移/跨端下保持稳定（前缀缓存前提）。 */
+  wireContext?: import('./pro-registry.js').WireTransformContext
+  /**
+   * Preserved-thinking protocol family (DeepSeek native: reasoning_content echoed
+   * back on tool-call turns). Factory derives it from capabilities.prefixCache ===
+   * 'deepseek-native' — covers deepseek/mimo/spark without name hardcoding.
+   * Fallback to the legacy name set when absent (tests construct without it).
+   */
+  preservedThinkingProtocol?: boolean
   /** Enable DeepSeek Beta prefix completion (skip preamble) */
   prefixCompletion?: boolean
   /** Use max_completion_tokens instead of max_tokens (MiMo requires this per API docs) */
@@ -263,6 +274,9 @@ export class OpenAIClient implements StreamClient {
   private lastRequestMessages: OaiChatRequest['messages'] = []
   /** Accumulated text for DeepSeek tool-JSON-in-content fallback (网#1). */
   private _textAccum = ''
+  /** Whether any content delta has started this stream (channel monotonicity:
+   *  reasoning_content arriving after content is a protocol anomaly, reclassified as text). */
+  private contentStarted = false
   /** Stable suffix appended to system message for Chinese thinking (computed once, cache-safe). */
   private readonly systemSuffix: string
   /**
@@ -283,7 +297,7 @@ export class OpenAIClient implements StreamClient {
   private lastWireDivergence: WireDivergence | null = null
 
   constructor(private config: OpenAIClientConfig) {
-    this.systemSuffix = (config.providerName === 'mimo' || config.providerName === 'deepseek') && config.thinking === 'enabled'
+    this.systemSuffix = (config.preservedThinkingProtocol ?? (config.providerName === 'mimo' || config.providerName === 'deepseek')) && config.thinking === 'enabled'
       ? '\n\n请在内部思考链中使用中文进行推理。不要在回复中输出你的推理过程，只输出最终答案或工具调用。'
       : ''
     this._sanitizedCount = 0
@@ -319,7 +333,7 @@ export class OpenAIClient implements StreamClient {
     // - Thinking disabled: always strip
     const isGlm = this.config.providerName === 'glm'
     const isPreservedThinking = this.config.thinking === 'enabled' && !isGlm
-      && (this.config.providerName === 'deepseek' || this.config.providerName === 'mimo')
+      && (this.config.preservedThinkingProtocol ?? (this.config.providerName === 'deepseek' || this.config.providerName === 'mimo'))
     const messages = request.messages.map(m => {
       if (m.role !== 'assistant') return m
       const hasToolCalls = Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
@@ -331,7 +345,14 @@ export class OpenAIClient implements StreamClient {
         return { ...m, reasoning_content: '' }
       }
       if (!('reasoning_content' in m)) return m
-      if (isPreservedThinking && hasToolCalls) return m
+      if (isPreservedThinking && hasToolCalls) {
+        // Pro wire transform（spec 3c 截断落点）：闭源模块注册的 copy-on-write
+        // 消息变换（如 reasoning 尾部截断）。开源构建注册表恒空 → 原样返回。
+        // wireContext = 会话冻结参数（truncate N），保证 resume/跨端字节稳定。
+        const transform = proRegistry.getWireTransform(this.config.providerName ?? '')
+        if (transform) return transform(m, this.config.model, this.config.wireContext)
+        return m
+      }
       const { reasoning_content: _, ...rest } = m
       // DeepSeek requires assistant messages to have `content` or `tool_calls`.
       // After stripping reasoning_content, ensure `content` exists.
@@ -339,7 +360,7 @@ export class OpenAIClient implements StreamClient {
         (rest as Record<string, unknown>).content = ''
       }
       return rest
-    })
+    }).map(normalizeOaiMessage)
 
     const body: Record<string, unknown> = {
       // 空 model 回退到 client 绑定值——侧路调用（essence-gate / vision bridge）
@@ -563,6 +584,7 @@ export class OpenAIClient implements StreamClient {
       this.toolCallHintFired.clear()
       this.pendingStopReason = null
       this._textAccum = ''
+      this.contentStarted = false
 
       // Inject previous reasoning into messages on retry so the model can
       // resume from where it left off instead of restarting from scratch.
@@ -818,7 +840,10 @@ export class OpenAIClient implements StreamClient {
             this.processDelta(parsed, callbacks)
             // Track whether text/content was received (for reasoning promotion fallback)
             if (parsed.choices?.[0]?.delta?.content) textReceived = true
-            if (parsed.choices?.[0]?.delta?.reasoning_content) {
+            // Late reasoning (after content started) was reclassified as text in
+            // processDelta — exclude it from the thinking accumulation so the
+            // persisted thinking block matches the live UI channel.
+            if (parsed.choices?.[0]?.delta?.reasoning_content && !textReceived) {
               reasoningAccum += parsed.choices[0].delta.reasoning_content
               receivedThinking = true
               if (reasoningRef) reasoningRef.content = reasoningAccum
@@ -844,7 +869,7 @@ export class OpenAIClient implements StreamClient {
               const parsed = JSON.parse(payload)
               this.processDelta(parsed, callbacks)
               if (parsed.choices?.[0]?.delta?.content) textReceived = true
-              if (parsed.choices?.[0]?.delta?.reasoning_content) {
+              if (parsed.choices?.[0]?.delta?.reasoning_content && !textReceived) {
                 reasoningAccum += parsed.choices[0].delta.reasoning_content
                 receivedThinking = true
                 if (reasoningRef) reasoningRef.content = reasoningAccum
@@ -890,6 +915,7 @@ export class OpenAIClient implements StreamClient {
         callbacks.onContentBlock?.({ type: 'text', text: finalText })
       }
       this._textAccum = ''
+      this.contentStarted = false
 
       // If no usage chunk arrived, emit stop reason now
       if (this.pendingStopReason) {
@@ -1010,12 +1036,22 @@ export class OpenAIClient implements StreamClient {
 
     const delta = choice.delta
 
-    // DeepSeek reasoning_content → thinking delta
+    // DeepSeek reasoning_content → thinking delta.
+    // Channel monotonicity: once content has started, a later reasoning_content
+    // is a protocol anomaly (desktop C→R 折叠: code block then conclusion).
+    // Reclassify it as text so the final conclusion stays in the visible reply
+    // instead of being folded into the thinking timeline.
     if (delta.reasoning_content) {
-      callbacks.onThinkingDelta?.(delta.reasoning_content)
+      if (this.contentStarted) {
+        callbacks.onTextDelta?.(delta.reasoning_content)
+        this._textAccum += delta.reasoning_content
+      } else {
+        callbacks.onThinkingDelta?.(delta.reasoning_content)
+      }
     }
 
     if (delta.content) {
+      this.contentStarted = true
       callbacks.onTextDelta?.(delta.content)
       // Always accumulate: the final text content block (emitted at stream end)
       // is built from this — it is what the agent loop persists into session

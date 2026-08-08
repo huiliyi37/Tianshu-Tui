@@ -67,6 +67,20 @@ export interface EssenceGateResult {
   supersededRefs: Array<{ oldId: string; newId: string }>
   /** true = LLM 不可用或输出不可解析，本轮什么都没写（fail-closed）。 */
   failedClosed: boolean
+  /** 失败归因（failedClosed=true 时）：timeout=内层预算超时 / invalid_output=
+   *  输出不可解析 / llm_error=其他侧路错误。gate-ledger 据此区分假超时与真实失败。 */
+  failureReason?: 'timeout' | 'invalid_output' | 'llm_error'
+  /** 本次 gate 运行耗时（ms，含 LLM 调用）。 */
+  durationMs?: number
+}
+
+/** 内层预算超时的哨兵错误——runEssenceGate 据此把超时与一般 LLM 错误分开归因。
+ *  由侧路调用方（loop-factory 的 runGateCompletion）在预算点 reject。 */
+export class EssenceGateTimeoutError extends Error {
+  constructor(message = 'essence-gate LLM timeout') {
+    super(message)
+    this.name = 'EssenceGateTimeoutError'
+  }
 }
 
 export interface EssenceGateDeps {
@@ -232,6 +246,7 @@ export async function runEssenceGate(
   deps: EssenceGateDeps,
   rawCandidates: KnowledgeCandidate[],
 ): Promise<EssenceGateResult> {
+  const startedAt = Date.now()
   const candidates = dedupeCandidates(rawCandidates).slice(0, deps.maxCandidates ?? DEFAULT_MAX_CANDIDATES)
   if (candidates.length === 0) {
     return { admitted: [], rejected: 0, superseded: 0, admittedRefs: [], rejectedRefs: [], supersededRefs: [], failedClosed: false }
@@ -248,14 +263,20 @@ export async function runEssenceGate(
   let raw: string
   try {
     raw = await deps.complete(prompt, deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-  } catch {
-    // fail-closed：LLM 不可用不写入，绝不回退正则直写
-    return { admitted: [], rejected: 0, superseded: 0, admittedRefs: [], rejectedRefs: [], supersededRefs: [], failedClosed: true }
+  } catch (error) {
+    // fail-closed：LLM 不可用不写入，绝不回退正则直写。
+    // 归因：超时哨兵（内层预算点 reject）→ timeout；其余 → llm_error。
+    return {
+      admitted: [], rejected: 0, superseded: 0, admittedRefs: [], rejectedRefs: [], supersededRefs: [],
+      failedClosed: true,
+      failureReason: error instanceof EssenceGateTimeoutError ? 'timeout' : 'llm_error',
+      durationMs: Date.now() - startedAt,
+    }
   }
 
   const verdicts = parseGateVerdicts(raw, candidates.length)
   if (verdicts === null) {
-    return { admitted: [], rejected: 0, superseded: 0, admittedRefs: [], rejectedRefs: [], supersededRefs: [], failedClosed: true }
+    return { admitted: [], rejected: 0, superseded: 0, admittedRefs: [], rejectedRefs: [], supersededRefs: [], failedClosed: true, failureReason: 'invalid_output', durationMs: Date.now() - startedAt }
   }
 
   const admitted: MemoryEntry[] = []
@@ -312,5 +333,5 @@ export async function runEssenceGate(
     }
   }
 
-  return { admitted, rejected, superseded, admittedRefs, rejectedRefs, supersededRefs, failedClosed: false }
+  return { admitted, rejected, superseded, admittedRefs, rejectedRefs, supersededRefs, failedClosed: false, durationMs: Date.now() - startedAt }
 }

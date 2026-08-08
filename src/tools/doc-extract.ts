@@ -20,7 +20,7 @@ import { accessSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 
-export type ExtractEngine = 'pdftotext' | 'textutil' | 'soffice' | 'pandoc'
+export type ExtractEngine = 'pdftotext' | 'textutil' | 'soffice' | 'pandoc' | 'exceljs'
 
 export interface DocExtractSuccess {
   ok: true
@@ -41,7 +41,7 @@ export const EXTRACTION_CAVEAT =
   '[extracted-text] Converted from a binary document — layout may be lossy (tables, multi-column, figures). Do not base negative conclusions ("X is not in the document") on this text alone; consult the original file.'
 
 /** Extensions the extraction pipeline knows how to handle. */
-const EXTRACTABLE = new Set(['.pdf', '.docx', '.doc', '.rtf', '.odt', '.pptx', '.odp'])
+const EXTRACTABLE = new Set(['.pdf', '.docx', '.doc', '.rtf', '.odt', '.pptx', '.odp', '.xlsx', '.xls', '.ods'])
 
 export function isExtractableDocument(filePath: string): boolean {
   return EXTRACTABLE.has(extname(filePath).toLowerCase())
@@ -99,6 +99,42 @@ async function runSoffice(filePath: string, runner: CommandRunner): Promise<stri
   }
 }
 
+/** 用 exceljs 读 .xlsx → markdown 表格（纯 JS，跨平台，无系统依赖）。
+ *  参照 plugins/office-excel 的 xlsx_read 逻辑：sheet 名 + 数据行，
+ *  公式单元格显示结果，200 行截断。仅 .xlsx（exceljs 不支持 .xls）。
+ *  可选依赖——未安装时抛错让引擎链 fallback 到 soffice。 */
+async function runExceljs(filePath: string, _runner?: CommandRunner): Promise<string> {
+  let ExcelJS: typeof import('exceljs')
+  try {
+    ExcelJS = await import('exceljs')
+  } catch {
+    throw new Error('exceljs not installed — falling back to soffice')
+  }
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(filePath)
+  const parts: string[] = []
+  const MAX_ROWS = 200
+  wb.eachSheet((sheet) => {
+    const rows: string[] = []
+    sheet.eachRow({ includeEmpty: true }, (row, rowNum) => {
+      if (rowNum > MAX_ROWS) return
+      const values = (row.values ?? []) as readonly unknown[]
+      const cells = values.slice(1).map((v: unknown) => {
+        if (v === null || v === undefined) return ''
+        if (typeof v === 'object' && 'result' in v && 'formula' in v) {
+          return `${(v as { result: unknown }).result} (=${(v as { formula: string }).formula})`
+        }
+        return String(v)
+      })
+      rows.push(`| ${cells.join(' | ')} |`)
+    })
+    if (rows.length > 0) {
+      parts.push(`### ${sheet.name}\n\n${rows.join('\n')}${sheet.rowCount > MAX_ROWS ? `\n_... (${sheet.rowCount - MAX_ROWS} more rows)_` : ''}`)
+    }
+  })
+  return parts.join('\n\n') || '(empty workbook)'
+}
+
 function textutilAvailable(platform: string): boolean {
   if (platform !== 'darwin') return false
   try {
@@ -128,6 +164,13 @@ export function buildEngineChain(ext: string, platform: string = process.platfor
       return [...(textutilAvailable(platform) ? [textutil] : []), soffice]
     case '.pptx':
     case '.odp':
+      return [soffice]
+    case '.xlsx':
+      // exceljs（纯 JS）优先；soffice 兜底（LibreOffice 能读 xlsx）。
+      return [{ engine: 'exceljs', run: runExceljs }, soffice]
+    case '.xls':
+    case '.ods':
+      // exceljs 不支持 .xls/.ods——只有 soffice。
       return [soffice]
     default:
       return []

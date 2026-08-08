@@ -12,6 +12,8 @@ function makeData(overrides: Partial<PlanPickerData> = {}): PlanPickerData {
     entries: [
       { slug: 'fix-memory-leak', title: 'Fix Memory Leak', status: 'submitted', createdAt: '2026-07-04 13:00' },
       { slug: 'perm-unify', title: '权限入口三档统一', status: 'submitted', createdAt: '2026-07-04 12:00', options: ['Manual', 'Auto', 'YOLO'] },
+      { slug: 'approved-plan', title: 'Approved Plan', status: 'approved', createdAt: '2026-07-03 12:00' },
+      { slug: 'rejected-plan', title: 'Rejected Plan', status: 'rejected', createdAt: '2026-07-02 12:00' },
       { slug: 'old-plan', title: 'Old Plan', status: 'executed', createdAt: '2026-07-01 09:00' },
     ],
     selectedIndex: 0,
@@ -36,10 +38,20 @@ test('renderPlanPicker: selected entry has > cursor and shows meta', () => {
   assert.ok(joined.includes('Manual / Auto / YOLO'), 'options listed for multi-approach plan')
 })
 
-test('renderPlanPicker: status icons reflect plan status', () => {
-  const plain = renderPlanPicker(makeData(), 70, 20, theme).map(stripAnsi).join('\n')
-  assert.ok(plain.includes('📋'), 'submitted icon present')
-  assert.ok(plain.includes('🏁'), 'executed icon present')
+test('renderPlanPicker: status glyphs are monochrome and width-stable', () => {
+  const previous = process.env.RIVET_ASCII_UI
+  process.env.RIVET_ASCII_UI = '0'
+  try {
+    const plain = renderPlanPicker(makeData(), 70, 20, theme).map(stripAnsi).join('\n')
+    assert.ok(plain.includes('◇'), 'submitted glyph present')
+    assert.ok(plain.includes('✓'), 'approved glyph present')
+    assert.ok(plain.includes('✗'), 'rejected glyph present')
+    assert.ok(plain.includes('◆'), 'executed glyph present')
+    assert.doesNotMatch(plain, /[✅❌🏁📋]/u, 'core overlay chrome should not use colored emoji')
+  } finally {
+    if (previous === undefined) delete process.env.RIVET_ASCII_UI
+    else process.env.RIVET_ASCII_UI = previous
+  }
 })
 
 test('renderPlanPicker: footer shows navigation hints', () => {

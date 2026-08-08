@@ -7,6 +7,7 @@
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { uiGlyphs } from '../ui-glyphs.js'
 import { wrapByDisplayWidth } from './worker-dispatch-card.js'
 import {
   frameTop,
@@ -37,7 +38,7 @@ export function renderSideQuestion(
 
   const lines: string[] = [
     frameTop(width, theme, 'subtle'),
-    frameTitle('💬 侧问 · 不进入对话历史', width, theme),
+    frameTitle(`${uiGlyphs().sideQuestion} 侧问 · 不进入对话历史`, width, theme),
   ]
 
   const body: string[] = []

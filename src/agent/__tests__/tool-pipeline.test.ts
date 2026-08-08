@@ -1304,9 +1304,10 @@ describe('executeToolUse', () => {
     assert.equal((result.toolResult as any).is_error, false)
   })
 
-  it('computer_use js_eval / browser_adopt always prompt — even in dangerously-skip-permissions and with allow rules', async () => {
-    // Hard gate: arbitrary JS in the user's browser / DevTools endpoint
-    // takeover can never ride YOLO, allowlists, or sensorium auto-approve.
+  it('computer_use js_eval / browser_adopt ride dangerously-skip-permissions — YOLO waives the unconditional gate', async () => {
+    // 自治/完全访问 (YOLO) is the user's explicit opt-out of prompts: the
+    // safety net is checkpoints + rollback, so even the arbitrary-JS /
+    // endpoint-takeover surface executes without asking.
     for (const input of [
       { action: 'js_eval', app: 'Google Chrome', expression: '1+1' },
       { action: 'browser_adopt', endpoint: 'localhost:9222' },
@@ -1317,6 +1318,42 @@ describe('executeToolUse', () => {
         config: {
           ...makeDeps().config,
           approvalMode: 'dangerously-skip-permissions',
+          permissions: { allow: [] },
+          toolRegistry: {
+            execute: async () => { executed = true; return { content: 'ran', isError: false } },
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => true,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+      const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+
+      const result = await executeToolUse(
+        { id: `tu-cu-${input.action}`, name: 'computer_use', input },
+        deps, callbacks as any, 1, false,
+      )
+
+      assert.equal(approvalCalls, 0, `${input.action} must NOT prompt in YOLO`)
+      assert.equal(executed, true, `${input.action} must execute in YOLO`)
+      assert.equal((result.toolResult as any).is_error, false)
+    }
+  })
+
+  it('computer_use js_eval / browser_adopt still prompt in auto-safe — allow rules and sensorium confidence cannot waive the gate', async () => {
+    // Outside YOLO the hard gate holds: arbitrary JS in the user's browser /
+    // DevTools endpoint takeover can never ride allowlists or sensorium
+    // auto-approve in supervised/default modes.
+    for (const input of [
+      { action: 'js_eval', app: 'Google Chrome', expression: '1+1' },
+      { action: 'browser_adopt', endpoint: 'localhost:9222' },
+    ]) {
+      let approvalCalls = 0
+      let executed = false
+      const deps = makeDeps({
+        config: {
+          ...makeDeps().config,
+          approvalMode: 'auto-safe',
           permissions: { allow: [{ tool: 'computer_use' }] },
           toolRegistry: {
             execute: async () => { executed = true; return { content: 'ran', isError: false } },
@@ -1330,11 +1367,11 @@ describe('executeToolUse', () => {
       const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
 
       const result = await executeToolUse(
-        { id: `tu-cu-${input.action}`, name: 'computer_use', input },
+        { id: `tu-cu-safe-${input.action}`, name: 'computer_use', input },
         deps, callbacks as any, 1, false,
       )
 
-      assert.equal(approvalCalls, 1, `${input.action} must prompt even in YOLO`)
+      assert.equal(approvalCalls, 1, `${input.action} must prompt in auto-safe`)
       assert.equal(executed, false, `denied ${input.action} must not execute`)
       assert.equal((result.toolResult as any).is_error, true)
     }

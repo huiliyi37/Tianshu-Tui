@@ -1,4 +1,5 @@
 import type { Message, ContentBlock } from '../api/types.js'
+import { normalizeOaiMessages } from '../api/oai-types.js'
 import type { OaiMessage, OaiToolMessage } from '../api/oai-types.js'
 import { groupIntoRounds, computeInvariantStatus, groupIntoRoundsOai } from './rounds.js'
 import type { ResumePreflightReport } from './types.js'
@@ -251,21 +252,25 @@ export function runResumePreflightOai(
   messages: OaiMessage[],
   options?: OaiResumePreflightOptions,
 ): OaiResumePreflightReport {
-  if (isToolAdjacencyCleanOai(messages)) {
+  // Normalize before the adjacency fast path. A resumed session containing
+  // `{ tool_calls: [] }` is otherwise returned unchanged and sent directly to
+  // the provider, which rejects the empty array before generation starts.
+  const normalized = normalizeOaiMessages(messages)
+  if (isToolAdjacencyCleanOai(normalized)) {
     return {
-      messageCount: messages.length,
-      roundCount: groupIntoRoundsOai(messages).length,
-      repaired: false,
+      messageCount: normalized.length,
+      roundCount: groupIntoRoundsOai(normalized).length,
+      repaired: normalized !== messages,
       syntheticResultsInserted: 0,
       safe: true,
-      messages,
+      messages: normalized,
     }
   }
 
   // Index every tool message by id as a FIFO queue so identical-id results
   // (rare, pollution) are consumed deterministically front-to-back.
   const toolMsgsById = new Map<string, OaiToolMessage[]>()
-  for (const m of messages) {
+  for (const m of normalized) {
     if (m.role === 'tool') {
       const q = toolMsgsById.get(m.tool_call_id) ?? []
       q.push(m)
@@ -283,7 +288,7 @@ export function runResumePreflightOai(
     }
   }())
 
-  for (const m of messages) {
+  for (const m of normalized) {
     if (m.role === 'tool') continue // re-emitted in-position below; leftovers are dropped
     repaired.push(m)
     if (m.role !== 'assistant' || !('tool_calls' in m) || !m.tool_calls || m.tool_calls.length === 0) continue

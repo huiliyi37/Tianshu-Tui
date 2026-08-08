@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, getSessionDir, projectSlug, serializeSessionMessage, formatExitSummary, shouldAutoWriteHandoff } from '../session-persist.js'
 import type { OaiMessage } from '../../api/oai-types.js'
+import { appendChecksum } from '../checksum.js'
 
 describe('SessionPersist', () => {
   let tempDir: string
@@ -326,6 +327,14 @@ describe('SessionPersist — persisted messages', () => {
     }
 
     assert.deepEqual(persist.loadOai(), messages)
+  })
+
+  it('normalizes legacy empty tool_calls rows while loading a session', () => {
+    const persist = new SessionPersist('test-session-empty-tool-calls', tempDir)
+    const malformed = JSON.stringify({ role: 'assistant', content: 'recovered', tool_calls: [] })
+    writeFileSync(persist.getFilePath(), appendChecksum(malformed) + '\n')
+
+    assert.deepEqual(persist.loadOai(), [{ role: 'assistant', content: 'recovered' }])
   })
 
   it('migrates legacy session messages to OAI on loadOai', async () => {

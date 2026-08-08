@@ -112,28 +112,49 @@ export const DEFAULT_DOMAIN: StarDomainId = 'tianquan'
  *  华盖出池同理：长程守昼是承诺型气质，应用户明示选择，而非关键词偶遇。 */
 export const DOMAIN_AUTO_POOL: readonly StarDomainId[] = ['tianquan', 'kaiyang', 'yaoguang', 'tianliang']
 
-export function buildActiveDomain(
+export interface ActiveDomainResolution {
+  domain: ActiveStarDomain
+  matchedKeywords: string[]
+  reason: 'keyword' | 'fallback'
+}
+
+/** Resolve Auto exactly once, retaining the registry's audit detail for observers. */
+export function resolveActiveDomain(
   taskDescription: string,
   opts?: { keywordRouting?: boolean },
-): ActiveStarDomain {
-  // keywordRouting 默认 true 以保持直接调用方（测试 / 工具侧）的旧语义；
-  // 会话 Auto 路径经 bindSessionDomain 显式传入 config.domainKeywordRouting。
+): ActiveDomainResolution {
   const keywordRouting = opts?.keywordRouting !== false
-  // auto 池 = 内置均衡域 + 自定义域（显式创建即显式开启）。
-  // 委派路径（deriveAuthority / dispatcher 的 matchDomain 直调）不经此池，保持全集。
   const pool = [
     ...DOMAIN_AUTO_POOL,
     ...starDomainRegistry.list().filter((d) => d.isCustom).map((d) => d.id),
   ]
-  const id = keywordRouting
-    ? (matchDomain(taskDescription, pool) ?? DEFAULT_DOMAIN)
-    : DEFAULT_DOMAIN
-  const domain = starDomainRegistry.get(id) ?? STAR_DOMAINS[DEFAULT_DOMAIN]
-  return {
-    id: id as StarDomainId,
-    name: domain.name,
-    volatileBlock: domain.volatileBlock,
-    motto: domain.motto,
-    courageThreshold: domain.courageThreshold,
+  const detail = keywordRouting
+    ? starDomainRegistry.matchDomainDetailed(taskDescription, pool)
+    : null
+  let matchedId: string | null = null
+  let matchedKeywords: string[] = []
+  if (detail?.verdict === 'hit' && typeof detail.id === 'string') {
+    matchedId = detail.id
+    matchedKeywords = detail.matchedKeywords.slice(0, 3)
   }
+  const id = matchedId ?? DEFAULT_DOMAIN
+  const definition = starDomainRegistry.get(id) ?? STAR_DOMAINS[DEFAULT_DOMAIN]
+  return {
+    domain: {
+      id: id as StarDomainId,
+      name: definition.name,
+      volatileBlock: definition.volatileBlock,
+      motto: definition.motto,
+      courageThreshold: definition.courageThreshold,
+    },
+    matchedKeywords,
+    reason: matchedId ? 'keyword' : 'fallback',
+  }
+}
+
+export function buildActiveDomain(
+  taskDescription: string,
+  opts?: { keywordRouting?: boolean },
+): ActiveStarDomain {
+  return resolveActiveDomain(taskDescription, opts).domain
 }

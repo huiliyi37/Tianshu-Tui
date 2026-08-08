@@ -3,8 +3,8 @@
  *
  * name/defaultHint/files 由 scripts/gen-env-registry.ts 生成，勿手改；
  * description 字段人工维护，重新生成时按 name 保留。
- * 最后生成：2026-08-02T18:27:30.969Z
- * 共 133 个变量。
+ * 最后生成：2026-08-06T14:58:05.150Z
+ * 共 144 个变量。
  *
  * 每个条目含：名称 / 默认值提示 / 引用文件 / 简要说明。
  * 当源码中新增 RIVET_* 引用但注册表未同步时，
@@ -23,6 +23,12 @@ export interface EnvRegistryEntry {
 }
 
 export const ENV_REGISTRY: EnvRegistryEntry[] = [
+  {
+    name: 'RIVET_ADVISORY_EFFICACY_SPAN',
+    defaultHint: '',
+    files: ['agent/advisory-bus.ts', 'agent/__tests__/advisory-efficacy-sort.test.ts'],
+    description: '效力对 advisory 有效优先级的最大调整幅度（±），0 关闭效力排序',
+  },
   {
     name: 'RIVET_ADVISORY_HOLDOUT',
     defaultHint: '',
@@ -62,7 +68,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_ASCII_UI',
     defaultHint: '',
-    files: ['tui/term-caps.ts', 'tui/engine/__tests__/app-core.test.ts', 'tui/__tests__/format-welcome.test.ts'],
+    files: ['tui/term-caps.ts', 'tui/format/__tests__/side-question.test.ts', 'tui/engine/__tests__/app-core.test.ts', 'tui/__tests__/format-plan-picker.test.ts', 'tui/__tests__/format-welcome.test.ts'],
     description: '',
   },
   {
@@ -140,7 +146,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_CONFIG_PATH',
     defaultHint: '',
-    files: ['tui/__tests__/settings-persist.test.ts', 'tui/__tests__/slash-commands.test.ts', 'tools/__tests__/tool-preset.test.ts', 'plugins/__tests__/integration/git-source-mirror-fallback.test.ts', 'config/paths.ts', 'config/__tests__/config-cli.test.ts', 'config/__tests__/layered-config.test.ts', 'config/__tests__/manager-editor.test.ts', 'config/__tests__/manager-fetch-search.test.ts', 'config/__tests__/manager-permission-dirs.test.ts', 'config/__tests__/manager-provider.test.ts', 'config/__tests__/manager-routing.test.ts', 'config/__tests__/manager-shell.test.ts', 'config/__tests__/manager-ui.test.ts', 'config/__tests__/manager-vision-model.test.ts', 'config/__tests__/preset-model-backfill.test.ts', 'config/__tests__/provider-wizard.test.ts'],
+    files: ['tui/__tests__/settings-persist.test.ts', 'tui/__tests__/slash-commands.test.ts', 'tools/__tests__/tool-preset.test.ts', 'plugins/__tests__/integration/git-source-mirror-fallback.test.ts', 'config/paths.ts', 'config/__tests__/config-cli.test.ts', 'config/__tests__/layered-config.test.ts', 'config/__tests__/manager-editor.test.ts', 'config/__tests__/manager-fetch-search.test.ts', 'config/__tests__/manager-permission-dirs.test.ts', 'config/__tests__/manager-provider.test.ts', 'config/__tests__/manager-routing.test.ts', 'config/__tests__/manager-shell.test.ts', 'config/__tests__/manager-ui.test.ts', 'config/__tests__/manager-vision-model.test.ts', 'config/__tests__/preset-model-backfill.test.ts', 'config/__tests__/provider-wizard.test.ts', 'config/__tests__/runtime-lean-aspect.test.ts', 'config/__tests__/runtime-lean.test.ts', '__tests__/bootstrap.test.ts'],
     description: '',
   },
   {
@@ -206,7 +212,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_DEBUG',
     defaultHint: '',
-    files: ['utils/debug.ts', 'api/__tests__/openai-client-tool-stream-log.test.ts', 'agent/__tests__/tool-pipeline.test.ts'],
+    files: ['utils/debug.ts', 'tui/engine/__tests__/image-tool.test.ts', 'api/__tests__/openai-client-tool-stream-log.test.ts', 'agent/__tests__/deliver-task.test.ts', 'agent/__tests__/tool-pipeline.test.ts'],
     description: '',
   },
   {
@@ -250,6 +256,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     defaultHint: '',
     files: ['agent/decisions-experiment.ts'],
     description: 'decisions 通道注入：默认/0 关，1 强制开（确定性复现用），experiment 按会话 90/10 分组跑 holdout 实验。该分支曾因 session-state 空壳恒真而不可达，开启是未度量的行为变更，退出阈值见 decisions-experiment.ts',
+  },
+  {
+    name: 'RIVET_DESKTOP',
+    defaultHint: '',
+    files: ['config/pro-license.ts', 'config/__tests__/pro-license.test.ts'],
+    description: '由桌面端 Tauri 注入（CLI 无此变量），Pro 授权判定的分流开关：置位走桌面硬 gate（只认同样由 Rust 注入的 RIVET_PRO），缺席走 CLI 软 gate（config > env > file 三路径）',
   },
   {
     name: 'RIVET_DESKTOP_DIR',
@@ -366,6 +378,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     description: '',
   },
   {
+    name: 'RIVET_IMAGES',
+    defaultHint: '',
+    files: ['tui/engine/ansi.ts'],
+    description: '',
+  },
+  {
     name: 'RIVET_IMPORT_RESOURCE',
     defaultHint: '',
     files: ['tools/default-registry.ts', 'tools/__tests__/tool-preset.test.ts'],
@@ -399,6 +417,18 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     name: 'RIVET_LANGUAGE_ANCHOR',
     defaultHint: '',
     files: ['agent/create-runtime-hooks.ts'],
+    description: '',
+  },
+  {
+    name: 'RIVET_LEAN',
+    defaultHint: '',
+    files: ['repo/__tests__/meridian-backfill.test.ts', 'config/runtime-lean.ts', 'config/__tests__/runtime-lean-aspect.test.ts', 'config/__tests__/runtime-lean.test.ts'],
+    description: 'Runtime lean profile (minimal tools, lean prompt, no embeddings, no Meridian startup backfill, tighter session pool).',
+  },
+  {
+    name: 'RIVET_LEAN_ASPECT',
+    defaultHint: '',
+    files: ['config/runtime-lean.ts', 'config/__tests__/runtime-lean-aspect.test.ts'],
     description: '',
   },
   {
@@ -554,7 +584,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_PROMPT_PROFILE',
     defaultHint: 'profile',
-    files: ['prompt/block-policy.ts', 'prompt/__tests__/block-policy.test.ts'],
+    files: ['prompt/block-policy.ts', 'prompt/__tests__/block-policy.test.ts', 'config/__tests__/runtime-lean.test.ts'],
     description: '',
   },
   {
@@ -684,6 +714,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     description: '',
   },
   {
+    name: 'RIVET_SKIP_STAGED_RUNTIME_CHECK',
+    defaultHint: '',
+    files: ['platform/staged-runtime-guard.ts'],
+    description: '',
+  },
+  {
     name: 'RIVET_STREAM_RESULT_MAX',
     defaultHint: '',
     files: ['stream-json.ts', '__tests__/stream-json.test.ts'],
@@ -702,6 +738,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     description: '',
   },
   {
+    name: 'RIVET_TEST_CANDIDATE_KEY',
+    defaultHint: '',
+    files: ['agent/__tests__/candidate-models.test.ts'],
+    description: '仅测试用：候选池凭据过滤测试的假 API key 注入点，生产代码不读',
+  },
+  {
     name: 'RIVET_TEST_GLM_KEY',
     defaultHint: '',
     files: ['__tests__/switch-agent-session.test.ts'],
@@ -716,7 +758,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_TOOL_PRESET',
     defaultHint: '',
-    files: ['tools/tool-preset.ts', 'tools/__tests__/tool-preset.test.ts'],
+    files: ['tools/tool-preset.ts', 'tools/__tests__/tool-preset.test.ts', 'config/__tests__/runtime-lean.test.ts'],
     description: '',
   },
   {
@@ -776,7 +818,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_WAVE_GATE',
     defaultHint: '',
-    files: ['agent/wave-gate.ts'],
+    files: ['tools/__tests__/plan-task.test.ts', 'agent/wave-gate.ts', 'agent/__tests__/plan-executor.test.ts'],
     description: '',
   },
   {
@@ -789,6 +831,30 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     name: 'RIVET_WEB_MAP',
     defaultHint: '',
     files: ['tools/default-registry.ts'],
+    description: '',
+  },
+  {
+    name: 'RIVET_WHISPER_BIN',
+    defaultHint: '',
+    files: ['server/serve.ts', 'server/speech-routes.ts', 'server/__tests__/speech-routes.test.ts'],
+    description: '',
+  },
+  {
+    name: 'RIVET_WHISPER_FETCH_SCRIPT',
+    defaultHint: '',
+    files: ['server/speech-routes.ts', 'server/__tests__/speech-routes.test.ts'],
+    description: '',
+  },
+  {
+    name: 'RIVET_WHISPER_MODEL',
+    defaultHint: '',
+    files: ['server/serve.ts', 'server/speech-routes.ts', 'server/__tests__/speech-routes.test.ts'],
+    description: '',
+  },
+  {
+    name: 'RIVET_WHISPER_PROXY',
+    defaultHint: '',
+    files: ['server/speech-routes.ts', 'server/__tests__/speech-routes.test.ts'],
     description: '',
   },
   {

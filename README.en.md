@@ -585,6 +585,24 @@ The desktop app builds a visual interaction layer on top of the TUI's full capab
 
 > The desktop app also has Cockpit, SideChat (⌘;), Rewind time-travel, themes/Glass/wallpaper, Mirror acceleration, and other exclusive features — see the [Desktop User Guide](docs/desktop-guide.md).
 
+### 🎙️ Voice Input (Desktop)
+
+The composer's microphone button supports voice input on **both macOS and Windows**. Recognition runs on a **local whisper.cpp engine** — offline and private (audio never leaves your device), with better accuracy than built-in system speech recognition for mixed Chinese/English speech.
+
+**First-run guide**
+
+- The first click auto-downloads the recognition model (tiny ~75MB, mirror-accelerated for CN networks). If you click before the download finishes, you'll see "Speech recognition failed (whisper-unavailable)" — just retry shortly after.
+- macOS requests microphone permission on first use: click **Allow**. If denied by mistake, enable the app under **System Settings → Privacy & Security → Microphone**.
+- On Windows, if permission is denied, allow the app under **System Settings → Privacy → Microphone**.
+
+**Notes**
+
+- Recognition is fully local; recordings never leave the device.
+- Click once to start recording, click again to stop and transcribe.
+- When the local engine is unavailable (e.g. model not downloaded), macOS falls back to the system speech recognizer; Windows shows a model-not-ready hint instead.
+- For higher accuracy, switch to the base model (~244MB): pre-download with `desktop/scripts/fetch-whisper-runtime.js --with-base`.
+- On restricted networks, set `RIVET_WHISPER_PROXY=http://proxy:port` to accelerate model downloads.
+
 ## Slash Commands
 
 **Session & project**
@@ -676,7 +694,7 @@ Node.js 22 · TypeScript strict (`noUncheckedIndexedAccess`) · T9 ANSI renderin
 ```bash
 npx tsc --noEmit                                    # typecheck
 npm test                                             # all tests (13,000+ cases)
-npm run build                                        # tsup bundle
+npm run build                                        # tsup bundle + staged native/wasm payload
 node dist/main.js                                    # launch TUI
 node dist/main.js -p "fix the typo"                  # headless mode
 ```

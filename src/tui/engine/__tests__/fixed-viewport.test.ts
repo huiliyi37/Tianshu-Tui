@@ -8,7 +8,7 @@
  *     - budget<=0 → 原样返回（空闲塌回）。
  *  2. TuiApp 活动期（thinking/streaming）连续帧的 live region 总 display rows
  *     恒定 —— 输入框屏幕坐标不随字符增长浮动。
- *  3. 首轮完成后 idle 不塌回——保持 ceiling 把输入框压底（首帧欢迎屏仍走自然流）。
+ *  3. 空闲期与活动期同口径（高水位跨轮保留）——高度单调不缩，输入框不来回弹。
  *  4. 小终端（rows=10）预算收缩，live region 不超屏。
  *  5. liveMaxRowsFor 终端高度感知（min(28, rows-1)，下限 4）。
  */
@@ -134,24 +134,62 @@ test('streaming 文本增长期间同样只涨不缩', async () => {
   assert.ok(heights[heights.length - 1]! < 28, `heights=${heights.join(',')}`)
 })
 
-test('turn 结束（isFinal）后保持压底——输入框不悬在半空占推理区域', async () => {
+test('turn 结束（isFinal）后高度不回缩——回缩即输入框上跳、屏底露黑洞', async () => {
   const { app } = makeApp({ cols: 80, rows: 40 })
   app.callbacks.onThinkingDelta('思考中……\n')
   await flush()
   const active = liveRows(app)
-  assert.ok(active > 5)
 
   await (app as unknown as { handleTurnComplete: (u: object, t: number, f: boolean) => Promise<void> })
     .handleTurnComplete({ input_tokens: 10, output_tokens: 5 }, 1, true)
   await flush()
   const idle = liveRows(app)
-  // 首轮完成后 idle 不应塌回——ceiling 垫到满屏，输入框保持压底。
-  // 落差无界要求（旧契约 idle < active 废除），允许 idle ≈ ceiling ≥ active。
-  const terminalRows = 40
-  const chromeRows = 6 // GlanceBar(1) + 输入框(3) + 提示行(~2)
-  const ceiling = Math.min(terminalRows - chromeRows - 2, liveMaxRowsFor(terminalRows) - chromeRows)
-  assert.ok(idle >= active || idle >= ceiling - 2,
-    `空闲期应保持压底: idle=${idle} active=${active} ceiling≈${ceiling}`)
+
+  // clearForCommit 按旧高度擦到屏末，commit 正文 + 新 region 填不满差额 —— 缩多少
+  // 就在输入框下方露多少行黑。空闲期动态内容归零不等于预算可以归零。
+  assert.ok(idle >= active, `轮末高度回缩: idle=${idle} active=${active}`)
+})
+
+/**
+ * 来回弹的回归闸。两种归零策略都栽在这里：空闲期 budget 归零 → 落差 = 本轮动态
+ * 内容峰值（40 行终端实测 23 行，region 5 ↔ 28）；空闲期恒垫 ceiling → 落差挪到
+ * 下一轮提交时刻，照样弹。此前无测试锚定「轮间高度」，两种策略各自的单点断言都
+ * 能全绿。
+ */
+test('连续多轮 live region 高度单调不缩——输入框不在屏底与屏中来回弹', async () => {
+  const { app } = makeApp({ cols: 80, rows: 40 })
+  const priv = app as unknown as {
+    setPhase: (p: string) => void
+    renderLive: () => void
+    agentBusy: boolean
+    handleTurnComplete: (u: object, t: number, f: boolean) => Promise<void>
+  }
+  const heights: number[] = []
+
+  for (let turn = 1; turn <= 3; turn++) {
+    // 轮开局：用户提交 → 进入活动期
+    priv.agentBusy = true
+    priv.setPhase('thinking')
+    priv.renderLive()
+    await flush()
+    heights.push(liveRows(app))
+
+    for (let i = 0; i < 5; i++) {
+      app.callbacks.onThinkingDelta(`推理片段 ${i}\n`)
+      await flush()
+    }
+    app.callbacks.onTextDelta('简短回复。')
+    await flush()
+    heights.push(liveRows(app))
+
+    await priv.handleTurnComplete({ input_tokens: 10, output_tokens: 5 }, turn, true)
+    await flush()
+    heights.push(liveRows(app))
+  }
+
+  // 只断言不回缩：回缩才是上跳。高度可以单向长到 ceiling（不超屏由别处保证），
+  // 长出来的部分是下一轮的预留位，不是抖动。
+  assertNoShrink(heights)
 })
 
 test('首帧走自然流，不补空行撑底（凭空造的空白只能堆在欢迎屏某一侧，比自然流更难看）', async () => {

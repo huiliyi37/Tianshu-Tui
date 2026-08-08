@@ -17,6 +17,7 @@ function draft(): SettingsDraft {
     modelVision: {},
     basics: {
       toolPreset: 'minimal',
+      runtimeLean: false,
       approval: 'auto-safe',
       checkpointEveryTurns: 0,
       defaultDomain: 'qiming',
@@ -179,6 +180,20 @@ describe('SettingsFlow editing', () => {
     assert.equal(flow.view().mode, 'browse')
     assert.equal(flow.view().fields[flow.view().fieldIndex]?.value, '5')
     assert.deepEqual(flow.dirty(), ['checkpoint'])
+  })
+
+  it('lean 阈值 intField 可编辑且整块计入 runtimeLean dirty', () => {
+    const flow = open()
+    gotoCategory(flow, 'basics')
+    focusField(flow, 'runtime.maxLoadedSessions')
+    assert.equal(flow.view().fields[flow.view().fieldIndex]?.value, '16')
+    flow.activate()
+    flow.clearBuffer()
+    for (const ch of '8') flow.typeChar(ch)
+    flow.activate()
+    assert.equal(flow.view().mode, 'browse')
+    assert.equal(flow.view().fields[flow.view().fieldIndex]?.value, '8')
+    assert.deepEqual(flow.dirty(), ['runtimeLean'])
   })
 
   it('识图子字段在未选模型时明确报错，而不是静默无效', () => {

@@ -12,6 +12,12 @@
  */
 
 import type { ReviewConfig, WorkersConfig } from '../config/schema.js'
+import {
+  MIN_MAX_EVENTS_DISK_BYTES,
+  MIN_MAX_LOADED_SESSIONS,
+  MIN_IDLE_AGENT_TTL_MS,
+  resolveLeanDefaults,
+} from '../config/runtime-lean.js'
 
 /**
  * Save granularity. Each id maps to exactly one config setter in
@@ -24,9 +30,11 @@ export type SettingsBlockId =
   | 'visionAuto'
   | 'modelVision'
   | 'toolPreset'
+  | 'runtimeLean'
   | 'approval'
   | 'checkpoint'
   | 'defaultDomain'
+  | 'domainBind'
   | 'defaultModel'
   | 'mirrors'
   | 'network'
@@ -54,6 +62,14 @@ export interface VisionDraft {
 
 export interface BasicsDraft {
   toolPreset: string
+  runtimeLean: boolean
+  /** Lean 阈值（可选：未设置时 UI 显示默认值，persist 只写有值的块）。 */
+  maxLoadedSessions?: number
+  idleAgentTtlMs?: number
+  maxEventsDiskBytes?: number
+  /** 最小集绑定星域：选中即 defaultDomain 钉定该域 + domains[域] lean/taiyi。
+   *  空串 = 不绑定（defaultDomain 回 qiming）。 */
+  domainBind?: string
   approval: string
   checkpointEveryTurns: number
   defaultDomain: string
@@ -622,6 +638,48 @@ function basicsCategory(): SettingsCategory {
       get: d => d.basics.toolPreset,
       set: (d, value) => withBasics(d, { toolPreset: value }),
     }),
+    boolField({
+      id: 'runtime.lean',
+      label: '精简运行时（lean）',
+      block: 'runtimeLean',
+      effect: 'next-session',
+      hint: '降低资源占用：minimal 工具、lean 提示词、关 embeddings、关 Meridian 启动回填、更紧会话驻留。RIVET_LEAN=1 也可开',
+      get: d => d.basics.runtimeLean,
+      set: (d, value) => withBasics(d, { runtimeLean: value }),
+    }),
+    intField({
+      id: 'runtime.maxLoadedSessions',
+      label: '最大会话驻留数',
+      block: 'runtimeLean',
+      effect: 'next-session',
+      min: MIN_MAX_LOADED_SESSIONS,
+      hint: 'sidecar 同时驻留的会话数上限。Lean 下默认 4，正常 16',
+      get: d => d.basics.maxLoadedSessions
+        ?? resolveLeanDefaults(d.basics.runtimeLean).maxLoadedSessions,
+      set: (d, value) => withBasics(d, { maxLoadedSessions: value }),
+    }),
+    intField({
+      id: 'runtime.idleAgentTtlMs',
+      label: '空闲 Agent TTL（毫秒）',
+      block: 'runtimeLean',
+      effect: 'next-session',
+      min: MIN_IDLE_AGENT_TTL_MS,
+      hint: '空闲超过此时长的会话 Agent 被卸载。Lean 下默认 600000（10 分钟），正常 1800000（30 分钟）',
+      get: d => d.basics.idleAgentTtlMs
+        ?? resolveLeanDefaults(d.basics.runtimeLean).idleAgentTtlMs,
+      set: (d, value) => withBasics(d, { idleAgentTtlMs: value }),
+    }),
+    intField({
+      id: 'runtime.maxEventsDiskBytes',
+      label: '事件日志磁盘上限（字节）',
+      block: 'runtimeLean',
+      effect: 'next-session',
+      min: MIN_MAX_EVENTS_DISK_BYTES,
+      hint: 'events.jsonl 超过此上限时保留尾部并写入 events_trimmed 裁剪标记。Lean 下默认 10485760（10 MB），正常 52428800（50 MB）',
+      get: d => d.basics.maxEventsDiskBytes
+        ?? resolveLeanDefaults(d.basics.runtimeLean).maxEventsDiskBytes,
+      set: (d, value) => withBasics(d, { maxEventsDiskBytes: value }),
+    }),
     enumField({
       id: 'agent.approval',
       label: '审批模式',
@@ -653,6 +711,21 @@ function basicsCategory(): SettingsCategory {
       options: (_d, env) => env.domains.map(x => ({ id: x.key, label: `${x.key} — ${x.name}` })),
       selectedId: d => d.basics.defaultDomain,
       apply: (d, value) => (value.trim() ? withBasics(d, { defaultDomain: value.trim() }) : { error: '星域不能为空' }),
+    },
+    {
+      id: 'agent.domainBind',
+      label: '最小集绑定星域（lean 一键启动）',
+      kind: 'enum',
+      block: 'domainBind',
+      effect: 'next-session',
+      hint: '选中某域：defaultDomain 钉定该域 + 写入 lean 与 taiyi 最小工具档——rivet 启动即该域的最小集会话，无需启动参数。清空 = 恢复默认域',
+      display: d => d.basics.domainBind || '（不绑定）',
+      options: (_d, env) => [
+        { id: '', label: '（不绑定）' },
+        ...env.domains.filter(x => x.key !== 'auto').map(x => ({ id: x.key, label: `${x.key} — ${x.name}` })),
+      ],
+      selectedId: d => d.basics.domainBind ?? '',
+      apply: (d, value) => withBasics(d, { domainBind: value.trim() }),
     },
     modelField({
       id: 'agent.defaultModel',
@@ -757,9 +830,16 @@ export function blockValue(draft: SettingsDraft, block: SettingsBlockId): unknow
     case 'visionAuto': return draft.visionAutoBridge
     case 'modelVision': return draft.modelVision
     case 'toolPreset': return draft.basics.toolPreset
+    case 'runtimeLean': return {
+      lean: draft.basics.runtimeLean,
+      maxLoadedSessions: draft.basics.maxLoadedSessions,
+      idleAgentTtlMs: draft.basics.idleAgentTtlMs,
+      maxEventsDiskBytes: draft.basics.maxEventsDiskBytes,
+    }
     case 'approval': return draft.basics.approval
     case 'checkpoint': return draft.basics.checkpointEveryTurns
     case 'defaultDomain': return draft.basics.defaultDomain
+    case 'domainBind': return draft.basics.domainBind ?? ''
     case 'defaultModel': return draft.basics.defaultModel
     case 'mirrors': return { enabled: draft.net.mirrorsEnabled, preset: draft.net.mirrorsPreset }
     case 'network': return { proxy: draft.net.proxy, noProxy: draft.net.noProxy, jinaBaseUrl: draft.net.jinaBaseUrl }
@@ -768,8 +848,8 @@ export function blockValue(draft: SettingsDraft, block: SettingsBlockId): unknow
 }
 
 const ALL_BLOCKS: readonly SettingsBlockId[] = [
-  'workers', 'review', 'vision', 'visionAuto', 'modelVision', 'toolPreset', 'approval',
-  'checkpoint', 'defaultDomain', 'defaultModel', 'mirrors', 'network', 'search',
+  'workers', 'review', 'vision', 'visionAuto', 'modelVision', 'toolPreset', 'runtimeLean', 'approval',
+  'checkpoint', 'defaultDomain', 'domainBind', 'defaultModel', 'mirrors', 'network', 'search',
 ]
 
 /**

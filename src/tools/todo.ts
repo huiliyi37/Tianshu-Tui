@@ -13,6 +13,8 @@ const todoItemSchema = z.object({
   id: z.string().min(1),
   content: z.string().min(1),
   status: z.enum(VALID_STATUSES),
+  /** 进行中的现在时说法（如「正在修复认证 bug」）；缺席时面板回退 content。 */
+  activeForm: z.string().min(1).optional(),
 })
 
 const acceptanceItemSchema = z.object({
@@ -142,8 +144,9 @@ TDD 纪律：
               type: 'object',
               properties: {
                 id: { type: 'string', description: '任务唯一标识' },
-                content: { type: 'string', description: '任务描述' },
+                content: { type: 'string', description: '任务描述（祈使式，如「修复认证 bug」）' },
                 status: { type: 'string', enum: [...VALID_STATUSES], description: '任务状态' },
+                activeForm: { type: 'string', description: '进行中的现在时说法（如「正在修复认证 bug」）；可选，缺省时面板显示 content' },
               },
               required: ['id', 'content', 'status'],
             },
@@ -185,12 +188,11 @@ TDD 纪律：
         return { content: TodoStore.formatList(todos) }
       }
 
-      // Warn (don't block) when this write resets or drops a previously
-      // completed item — the signature of post-compaction memory loss. A
-      // legitimate re-open is still allowed; the model just gets told so it
-      // can confirm rather than silently redo finished work. (Thread 3)
-      const regressions = store.detectRegressions(data.todos)
-      store.recordWrite(regressions)
+      // v2 检测（主控可靠性闭环）：删除完成项 = 主动退休（波次切换的正常形态），
+      // 不警告；只有真实重开（completed → pending/in_progress，含退休后同内容
+      // 换 ID 重现）才提示——合法重开仍允许，模型只是被告知以确认而非静默重做。
+      const detection = store.detectRegressions(data.todos)
+      store.recordWrite(detection)
 
       store.write(data.todos)
 
@@ -221,9 +223,9 @@ TDD 纪律：
         content += '\n\n' + notice
       }
 
-      if (regressions.length > 0) {
-        const warn = regressions.map(r => `  - ${r}`).join('\n')
-        content = `⚠️ ${regressions.length} 项此前已完成的任务被重置或移除：\n${warn}\n\n`
+      if (detection.regressed.length > 0) {
+        const warn = detection.regressed.map(r => `  - ${r}`).join('\n')
+        content = `⚠️ ${detection.regressed.length} 项此前已完成的任务被重置或移除：\n${warn}\n\n`
             + `若非有意为之（例如长任务后凭记忆重建清单），请重新标为 completed。不要重做已完成的工作。\n\n${content}`
       }
 

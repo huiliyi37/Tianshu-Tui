@@ -1,9 +1,13 @@
 export interface ServerLogger {
+  info(message: string, context?: Record<string, unknown>): void
   warn(message: string, context?: Record<string, unknown>): void
   error(message: string, context?: Record<string, unknown>): void
 }
 
 let activeLogger: ServerLogger = {
+  info: (message, context) => {
+    console.log(formatLog('INFO', message, context))
+  },
   warn: (message, context) => {
     console.warn(formatLog('WARN', message, context))
   },
@@ -13,6 +17,9 @@ let activeLogger: ServerLogger = {
 }
 
 export const serverLogger: ServerLogger = {
+  info(message, context) {
+    activeLogger.info(message, context)
+  },
   warn(message, context) {
     activeLogger.warn(message, context)
   },
@@ -27,6 +34,9 @@ export function setServerLogger(logger: ServerLogger): void {
 
 export function resetServerLogger(): void {
   activeLogger = {
+    info: (message, context) => {
+      console.log(formatLog('INFO', message, context))
+    },
     warn: (message, context) => {
       console.warn(formatLog('WARN', message, context))
     },

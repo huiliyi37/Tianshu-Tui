@@ -319,7 +319,7 @@ const FINDING_CONTRACT = [
 ].join('\n')
 
 /**
- * 大文件警告：审查 worker 不得整文件读取这些文件，必须用 read_file + offset/limit。
+ * 大文件警告：审查 worker 先做焦点定位，再读取高信号片段。
  */
 function formatLargeFileWarnings(change: ChangeSet): string | null {
   if (!change.largeFiles || change.largeFiles.length === 0) return null
@@ -332,8 +332,8 @@ function formatLargeFileWarnings(change: ChangeSet): string | null {
   }
   lines.push(
     '',
-    '不要整文件读取上述文件——用 read_file + offset/limit 只读改动区间（从 git diff 推断范围）。',
-    '用 grep 搜索 diff 中引用的特定符号。若需超出 diff 的上下文，只读改动行附近的相关段落。',
+    '不要整文件读取上述文件——先用 grep/repo_graph 或 read_file(focus="审查重点") 定位关键片段。',
+    '若需精确核验，再用 read_file + offset/limit 只读改动行附近的相关段落。',
   )
   return lines.join('\n')
 }
@@ -385,7 +385,7 @@ function squadronRequests(change: ChangeSet, options: CoordinatorReviewDepsOptio
 // 2026-07-24 再标定:12 轮对首次大 read 场景仍系统性不足(近 4 天 5 个审查
 // worker 全部 max-turns 耗尽,prompt 累加 30-50 万 token)。放大到 20 轮/360s
 // ——1M 窗口下单轮才 ~5 万 token,空间不是瓶颈;根治靠 worker read cap
-// (readCapOverride)+ 机械化 read 分页约束(见 earlyConvergenceHint)。
+// (readCapOverride)+ 机械化 focused-read/精确分页约束(见 earlyConvergenceHint)。
 // 外层 AUTO_REVIEW_BUDGET_MS 相应放宽到 420s;detached 后审查不阻塞交付,
 // 成本仅为后台时长。
 // 2026-08-01 再标定(廉价模型能力强但首字节延迟高,给足轮次和时间):
@@ -406,7 +406,7 @@ const FALLBACK_TIMEOUT_MS = 360_000
 /** 早收敛预算计划 — 按规模分级:
  *  小改动(≤15轮)强收敛——禁止扩散探索,强制半数轮次前产出草案;
  *  大改动宽松——保留分页约束和收尾期限。
- *  read 规则必须机械可执行(带参数即合规)——此前的"禁止整文件 read"是
+ *  read 规则必须机械可执行(先聚焦、再精读)——此前的"禁止整文件 read"是
  *  意图性表述,模型首读时不遵守(2026-07-24 诊断:失败 worker 首读全量、
  *  后续 read 全带 offset/limit,说明它会用,缺的是首读时的硬规则)。 */
 function earlyConvergenceHint(maxTurns: number, timeoutMs: number): string {
@@ -424,7 +424,7 @@ function earlyConvergenceHint(maxTurns: number, timeoutMs: number): string {
   return [
     `预算约束(${maxTurns} 轮/${timeoutS}s),按此节奏收敛:`,
     `1) 首轮先 git diff/git show 锁定改动区间,再决定读什么;`,
-    `2) read_file 每次调用都必须带 offset+limit(limit≤200)——包括第一次读。无参数的整文件 read 会把几万字符永久钉进后续每轮上下文,直接烧光你的轮次预算。定位符号用 grep,看区段用 read_section;`,
+    `2) 首次阅读先用 grep/repo_graph 或 read_file(focus="审查重点")，只把高相关片段放入上下文；已知行号后再用 offset+limit(limit≤200) 精读。禁止无焦点整文件 read；看区段可用 read_section;`,
     `3) 第 ${draftDeadline} 轮前产出结论草案;`,
     `4) 第 ${finalDeadline} 轮停止一切探索,输出 verdict JSON——未覆盖项显式标注,best-effort 结论优于无结论。`,
   ].join('\n')

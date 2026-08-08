@@ -45,8 +45,12 @@ import {
   setShellConfig,
   getCheckpointConfig,
   setCheckpointConfig,
+  getApprovalConfig,
+  setApprovalConfig,
   getToolPresetConfig,
   setToolPresetConfig,
+  getRuntimeLeanConfig,
+  setRuntimeLeanConfig,
   getNetworkConfig,
   setNetworkConfig,
   getMirrorConfig,
@@ -79,7 +83,7 @@ import { resolve, isAbsolute } from 'node:path'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { rivetHome } from '../config/paths.js'
-import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '../config/provider-presets.js'
+import { allPresetKeys, resolvePreset, resolvePresetBaseUrl, resolvePresetLabel } from '../api/pro-registry.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
 import { queryDeepSeekBalance, type BalanceResult } from '../api/balance-client.js'
 import { probeProviderKey } from '../api/key-probe.js'
@@ -114,33 +118,42 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
     'GET /config/providers': withAuth(() => {
       const cfg = loadConfig()
       const defaultName = cfg.provider.default
+      // 推荐序：官方 deepseek 第一、pro 注册的 spark 紧随其后，其余保持 allPresetKeys 原序。
+      // 已配置列表也按此排序，避免 Object.entries 插入序把 spark 甩到末尾。
+      const presetRank = new Map(allPresetKeys().map((k, i) => [k, i]))
       const providers: ProviderListItem[] = []
 
       for (const [name, p] of Object.entries(cfg.provider.providers)) {
         providers.push({
           name,
-          label: (providerPresetKeys as string[]).includes(name)
-            ? PROVIDER_PRESETS[name as ProviderPresetKey].label
-            : name,
+          label: resolvePresetLabel(name) ?? name,
           baseUrl: p.baseUrl,
           isDefault: name === defaultName,
           keyStatus: getApiKeyStatus(name),
           models: p.models.map(m => ({ id: m.id, alias: m.alias, contextWindow: m.contextWindow, maxTokens: m.maxTokens, supportsVision: m.supportsVision })),
-          isPreset: (providerPresetKeys as string[]).includes(name),
+          isPreset: resolvePreset(name) !== undefined,
           allowProFallback: p.allowProFallback ?? false,
         })
       }
+      providers.sort((a, b) => {
+        const ra = presetRank.get(a.name) ?? Number.MAX_SAFE_INTEGER
+        const rb = presetRank.get(b.name) ?? Number.MAX_SAFE_INTEGER
+        if (ra !== rb) return ra - rb
+        return a.name.localeCompare(b.name)
+      })
 
-      const unconfigured = providerPresetKeys
+      // 合并视图：静态 + pro-registry 运行时注册（开源版注册表恒空 = 现状）
+      const unconfigured = allPresetKeys()
         .filter(k => !cfg.provider.providers[k])
-        .map(k => ({
-          key: k,
-          label: PROVIDER_PRESETS[k].label,
-          description: PROVIDER_PRESETS[k].description,
-          defaultModelId: PROVIDER_PRESETS[k].defaultModelId,
-        }))
+        .map(k => {
+          const r = resolvePreset(k)
+          const label = r && 'static' in r ? r.static.label : (r as { label?: string } | undefined)?.label
+          const description = r && 'static' in r ? r.static.description : (r as { description?: string } | undefined)?.description
+          const defaultModelId = r && 'static' in r ? r.static.defaultModelId : (r as { defaultModelId?: string } | undefined)?.defaultModelId
+          return { key: k, label: label ?? k, description, defaultModelId }
+        })
 
-      return { status: 200, body: { providers, unconfigured } }
+      return { status: 200, body: { providers, unconfigured, presetKeys: allPresetKeys() } }
     }, apiToken),
 
     'POST /config/providers': withAuth((body) => {
@@ -263,9 +276,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       if (!baseUrl) {
         const cfg = loadConfig()
         const stored = cfg.provider.providers[provider]
-        baseUrl = stored?.baseUrl ?? (providerPresetKeys.includes(provider as ProviderPresetKey)
-          ? PROVIDER_PRESETS[provider as ProviderPresetKey].provider.baseUrl
-          : undefined)
+        baseUrl = stored?.baseUrl ?? resolvePresetBaseUrl(provider)
       }
       if (!baseUrl) return { status: 400, body: { error: `cannot resolve baseUrl for provider "${provider}"` } }
       const result = await probeProviderKey(apiKey, baseUrl)
@@ -385,6 +396,43 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
     }, apiToken),
 
+    // Runtime lean profile — expands into minimal tools / lean prompt / no
+    // embeddings / tighter session pool. Takes effect next session (pool caps
+    // on next sidecar start).
+    'GET /config/runtime-lean': withAuth(() => {
+      return { status: 200, body: getRuntimeLeanConfig() }
+    }, apiToken),
+
+    'PUT /config/runtime-lean': withAuth((body) => {
+      const { lean, maxLoadedSessions, idleAgentTtlMs, maxEventsDiskBytes, domains } = (body ?? {}) as {
+        lean?: unknown
+        maxLoadedSessions?: unknown
+        idleAgentTtlMs?: unknown
+        maxEventsDiskBytes?: unknown
+        domains?: Record<string, unknown> | null
+      }
+      if (
+        lean === undefined
+        && maxLoadedSessions === undefined
+        && idleAgentTtlMs === undefined
+        && maxEventsDiskBytes === undefined
+        && domains === undefined
+      ) {
+        return { status: 400, body: { error: 'lean or a pool/disk cap or domains is required' } }
+      }
+      try {
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            ...setRuntimeLeanConfig({ lean, maxLoadedSessions, idleAgentTtlMs, maxEventsDiskBytes, domains }),
+          },
+        }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
     // 默认星域（auto | tianshu | …）+ Auto 关键词路由——下个会话生效。
     'GET /config/default-domain': withAuth(() => {
       const domains = starDomainRegistry.list().map(d => ({ id: d.id, name: d.name, motto: d.motto }))
@@ -443,6 +491,23 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
       try {
         return { status: 200, body: { ok: true, ...setCheckpointConfig({ checkpointEveryTurns }) } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // Approval mode (授权档位) — 桌面端设置页：监督/默认/自治/完全访问。
+    'GET /config/approval': withAuth(() => {
+      return { status: 200, body: getApprovalConfig() }
+    }, apiToken),
+
+    'PUT /config/approval': withAuth((body) => {
+      const { approval } = (body ?? {}) as { approval?: unknown }
+      if (approval === undefined) {
+        return { status: 400, body: { error: 'approval is required' } }
+      }
+      try {
+        return { status: 200, body: { ok: true, ...setApprovalConfig({ approval }) } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

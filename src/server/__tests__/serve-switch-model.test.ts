@@ -138,3 +138,64 @@ test('listAllModelsWithReload: falls back to the snapshot when the fresh read th
   const models = listAllModelsWithReload(snapshot, () => { throw new Error('mid-edit config') })
   assert.deepEqual(models.map((m) => m.id).sort(), ['deepseek-flash', 'deepseek-pro'])
 })
+
+function twinProviders(): Record<string, ProviderConfig> {
+  // deepseek + deepseek-spark 共享同一 wire model id（API 型号名不能改）
+  const models = [
+    { id: 'deepseek-v4-flash', alias: 'v4-flash', contextWindow: 1_000_000, maxTokens: 384_000 },
+    { id: 'deepseek-v4-pro', alias: 'v4-pro', contextWindow: 1_000_000, maxTokens: 384_000 },
+  ]
+  const mk = (name: string, aliasFlash: string, aliasPro: string): ProviderConfig => ({
+    name,
+    apiKey: `sk-${name}`,
+    baseUrl: 'https://api.deepseek.com/v1',
+    protocol: 'openai',
+    capabilities: { cacheControl: false, stripParams: [], toolJsonBug: true, prefixCache: 'deepseek-native', prefixCompletion: true },
+    models: [
+      { ...models[0]!, alias: aliasFlash },
+      { ...models[1]!, alias: aliasPro },
+    ],
+    thinking: 'enabled',
+    maxTokens: 384_000,
+    unsupported: [],
+  } as ProviderConfig)
+  return {
+    deepseek: mk('deepseek', 'v4-flash', 'v4-pro'),
+    'deepseek-spark': mk('deepseek-spark', 'spark-flash', 'spark-pro'),
+  }
+}
+
+test('resolveModelSpec: provider:modelId 消歧到 spark，不撞官方 deepseek', () => {
+  const ctx = ctxWith(twinProviders())
+  const stay = () => ctx // 禁止回落到本机真实 config
+  const bare = resolveModelSpecWithReload(ctx, 'deepseek-v4-flash', stay)
+  assert.ok(bare)
+  assert.equal(bare!.provider.name, 'deepseek', '裸 id 仍优先官方节点（兼容旧会话）')
+
+  const spark = resolveModelSpecWithReload(ctx, 'deepseek-spark:deepseek-v4-flash', stay)
+  assert.ok(spark, 'provider 前缀必须能解析 spark')
+  assert.equal(spark!.provider.name, 'deepseek-spark')
+  assert.equal(spark!.model.id, 'deepseek-v4-flash', 'wire model id 不变')
+  assert.equal(spark!.apiKey, 'sk-deepseek-spark')
+
+  const byAlias = resolveModelSpecWithReload(ctx, 'deepseek-spark:spark-flash', stay)
+  assert.ok(byAlias)
+  assert.equal(byAlias!.provider.name, 'deepseek-spark')
+  assert.equal(byAlias!.model.id, 'deepseek-v4-flash')
+})
+
+test('resolveModelSpec: 未知 provider 前缀或该节点无此模型 → null', () => {
+  const ctx = ctxWith(twinProviders())
+  const stay = () => ctx
+  assert.equal(resolveModelSpecWithReload(ctx, 'nope:deepseek-v4-flash', stay), null)
+  assert.equal(resolveModelSpecWithReload(ctx, 'deepseek-spark:ghost-model', stay), null)
+})
+
+test('listAllModels: 同 wire id 在两节点各出一条（欢迎页/选择器不丢 spark）', () => {
+  const ctx = ctxWith(twinProviders())
+  const models = listAllModelsWithReload(ctx, () => ctx)
+  const flash = models.filter((m) => m.id === 'deepseek-v4-flash')
+  assert.equal(flash.length, 2, '两节点同 id 必须都列出')
+  assert.deepEqual(flash.map((m) => m.provider).sort(), ['deepseek', 'deepseek-spark'])
+  assert.ok(models.some((m) => m.provider === 'deepseek-spark' && m.alias === 'spark-flash'))
+})

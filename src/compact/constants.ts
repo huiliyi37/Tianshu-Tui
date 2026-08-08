@@ -68,13 +68,29 @@ function strategyForCacheType(cacheType: CacheType, persistent: boolean): Compac
   return 'balanced'
 }
 
+/** Profile slice consumed by ratio derivation — includes the optional
+ *  per-provider compaction overrides (ProviderProfile.compaction). */
+export type CompactRatioProfile = Pick<ProviderProfile, 'cacheType' | 'persistent'> & {
+  compaction?: ProviderProfile['compaction']
+}
+
 export function compactProviderStrategy(providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>): CompactProviderStrategy {
   if (!providerProfile) return 'balanced'
   return strategyForCacheType(providerProfile.cacheType, providerProfile.persistent)
 }
 
-export function compactPolicyRatios(providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>): CompactPolicyRatios {
-  return STRATEGY_POLICY_RATIOS[compactProviderStrategy(providerProfile)]
+export function compactPolicyRatios(providerProfile?: CompactRatioProfile): CompactPolicyRatios {
+  const base = STRATEGY_POLICY_RATIOS[compactProviderStrategy(providerProfile)]
+  const o = providerProfile?.compaction?.ratios
+  if (!o) return base
+  // Merge defined overrides only — a partial override must not erase the
+  // strategy defaults for the other rungs.
+  return {
+    watch: o.watch ?? base.watch,
+    compact: o.compact ?? base.compact,
+    reactive: o.reactive ?? base.reactive,
+    ceiling: o.ceiling ?? base.ceiling,
+  }
 }
 
 export function compactThresholds(input: number | CompactStrategyInput): CompactThresholds {
@@ -167,7 +183,7 @@ export interface CompactionConfig {
  * - Low hit rate → compact freely (cache already broken, nothing to protect)
  */
 export function adaptiveCompactPolicyRatios(
-  providerProfile: Pick<ProviderProfile, 'cacheType' | 'persistent'> | undefined,
+  providerProfile: CompactRatioProfile | undefined,
   recentHitRate: number | null,
 ): CompactPolicyRatios {
   const base = compactPolicyRatios(providerProfile)

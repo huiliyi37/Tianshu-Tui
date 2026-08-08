@@ -13,10 +13,9 @@ import { join } from 'node:path'
 import { relativePosix } from '../path-format.js'
 import { GitignoreFilter } from '../tools/gitignore.js'
 import { classifyPath } from '../context/attention-filter.js'
+import { SCAN_EXCLUDE_DIRS } from '../tools/scan-excludes.js'
 
-const EXCLUDE_DIRS = new Set([
-  'node_modules', '.git', 'dist', '.next', 'build', 'target', '__pycache__',
-])
+const EXCLUDE_DIRS = SCAN_EXCLUDE_DIRS
 const MAX_FILES = 2000
 
 async function walk(
@@ -160,6 +159,9 @@ export async function listDirEntries(dir: string): Promise<DirEntry[]> {
     if (s.isSymbolicLink()) continue
     if (s.isDirectory()) {
       if (EXCLUDE_DIRS.has(name)) continue
+      // 与文件分支同规则：gitignore 目录（.tmp-abort-*、coverage 等）不进树。
+      // EXCLUDE_DIRS 只兜底 6 个硬编码常见项，项目自己的忽略规则靠这里生效。
+      if (gitignore.isIgnored(dir, fullPath)) continue
       entries.push({ name, isDirectory: true })
     } else if (s.isFile()) {
       if (gitignore.isIgnored(dir, fullPath)) continue

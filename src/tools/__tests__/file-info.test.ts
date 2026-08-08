@@ -96,6 +96,38 @@ describe('FILE_INFO_TOOL', () => {
     assert.equal(result.isError, undefined)
     assert.match(result.content, /Exists: true/)
   })
+
+  it('skips nested build trees and says the tally is partial', async () => {
+    // Each file costs a stat, so the tally has to prune what it cannot afford
+    // to count: the tree this stands in for held 19433 files.
+    mkdirSync(join(tmpCwd, 'src', 'target', 'debug', 'deps'), { recursive: true })
+    for (let i = 0; i < 30; i++) {
+      writeFileSync(join(tmpCwd, 'src', 'target', 'debug', 'deps', `dep${i}.rlib`), 'x'.repeat(1024))
+    }
+    const result = await FILE_INFO_TOOL.execute(makeParams({ path: 'src' }, tmpCwd))
+    assert.equal(result.isError, undefined)
+    // 4 real sources; the 30 artefacts must not be in the count.
+    assert.match(result.content, /Files: ≥4\b/, `counted the build tree: ${result.content}`)
+    assert.match(result.content, /partial tally/)
+  })
+
+  it('reports an exact count when nothing was skipped', async () => {
+    // The "≥" has to mean something — an ordinary tree must not carry it.
+    const result = await FILE_INFO_TOOL.execute(makeParams({ path: 'src' }, tmpCwd))
+    assert.equal(result.isError, undefined)
+    assert.match(result.content, /Files: 4\b/)
+    assert.doesNotMatch(result.content, /partial tally/)
+  })
+
+  it('counts a build tree the caller asked for by name', async () => {
+    // Pruning applies to trees found inside another walk, not to an explicit
+    // request — "how big is target/" is a fair question.
+    mkdirSync(join(tmpCwd, 'target'), { recursive: true })
+    writeFileSync(join(tmpCwd, 'target', 'artifact.bin'), 'x'.repeat(512))
+    const result = await FILE_INFO_TOOL.execute(makeParams({ path: 'target' }, tmpCwd))
+    assert.equal(result.isError, undefined)
+    assert.match(result.content, /Files: 1\b/)
+  })
 })
 
 describe('formatPermissions', () => {

@@ -36,6 +36,10 @@ const REGISTRY: Partial<Record<FailureClass, DiagnosisEntry>> = {
     diagnosis: '缺少依赖——命令或包未安装。',
     userAction: '系统缺少此命令或包。需要安装（如 npm install / pip install）或使用替代方案。这不是代码问题。',
   },
+  runtime_gate: {
+    diagnosis: '运行时生命周期门禁——协调器正在关闭或会话正在移交。',
+    userAction: '等待当前 worker 收尾或 handoff 完成后重试，不要为了绕过门禁修改代码。',
+  },
   timeout: {
     diagnosis: '操作超时——命令在限时内未完成。',
     userAction: '操作超时。可增大 timeout 参数、拆分任务分批执行、或检查是否有死循环/未完成的异步调用。',

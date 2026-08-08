@@ -323,7 +323,7 @@ export function formatPermissionModeLine(
   input: { approvalMode?: string; planMode?: boolean; askMode?: boolean; planDraftPath?: string },
   theme: RivetTheme,
 ): string {
-  const hint = color('(shift+tab 切换 plan · /ask 切换问答)', theme.dim)
+  const hint = color('(shift+tab plan · /ask 问答)', theme.dim)
   if (input.askMode) {
     return `  ${color('⏵ ask mode', theme.warning)} ${hint}`
   }

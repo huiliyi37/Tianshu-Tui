@@ -23,6 +23,7 @@ import type { GenesisEntry } from '../../agent/star-genesis-data.js'
 import type { TranscriptMessage } from '../scrollback-transcript.js'
 import type { ConnectView } from '../connect-flow.js'
 import type { InitView } from '../init-flow.js'
+import { uiGlyphs } from '../ui-glyphs.js'
 import {
   frameTop as formatBorder,
   frameBottom as formatBottomBorder,
@@ -1187,12 +1188,13 @@ export interface PlanPickerData {
   selectedIndex: number
 }
 
-function planStatusIcon(status: PlanPickerEntry['status']): string {
+function planStatusGlyph(status: PlanPickerEntry['status'], theme: RivetTheme): string {
+  const glyphs = uiGlyphs()
   switch (status) {
-    case 'approved': return '✅'
-    case 'rejected': return '❌'
-    case 'executed': return '🏁'
-    default: return '📋'
+    case 'approved': return color(glyphs.planApproved, theme.success)
+    case 'rejected': return color(glyphs.planRejected, theme.error)
+    case 'executed': return color(glyphs.planExecuted, theme.secondary)
+    default: return color(glyphs.planSubmitted, theme.dim)
   }
 }
 
@@ -1222,7 +1224,7 @@ export function renderPlanPicker(data: PlanPickerData, width: number, height: nu
     if (rowsUsed >= contentRows) break
     const e = data.entries[i]!
     const selected = i === data.selectedIndex
-    const icon = planStatusIcon(e.status)
+    const icon = planStatusGlyph(e.status, theme)
     const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
     const labelColor = selected ? theme.primary : theme.secondary
     const title = selected ? color(e.title, labelColor, { bold: true }) : color(e.title, labelColor)

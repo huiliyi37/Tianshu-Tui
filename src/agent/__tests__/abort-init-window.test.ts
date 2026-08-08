@@ -49,7 +49,7 @@ const cbs = (onAbort: () => void) => ({
 })
 
 describe('AgentLoop — abort init-window (A)', () => {
-  it('creates the abortController eagerly before any await in run()', () => {
+  it('creates the abortController eagerly before any await in run()', async () => {
     const client: StreamClient = {
       stream: async (_r: unknown, cb: StreamCallbacks) => { cb.onStopReason('end_turn', {}) },
     } as unknown as StreamClient
@@ -59,7 +59,7 @@ describe('AgentLoop — abort init-window (A)', () => {
     // Synchronously after run() returns its pending promise we are parked on the
     // first await (warmupMemories); the controller must already exist.
     assert.ok(agent.abortController, 'controller created eagerly (no null window)')
-    return p
+    await p
   })
 
   it('honors abort fired during the init/warmup window (no longer a no-op)', async () => {

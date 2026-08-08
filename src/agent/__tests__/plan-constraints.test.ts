@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { extractPlanConstraints, renderPlanConstraints, resolvePlanConstraints, type PlanConstraint } from '../plan-constraints.js'
 import { withPlanConstraints } from '../coordinator.js'
@@ -119,6 +120,15 @@ function makeTempPlan(): string {
   return plan
 }
 
+/** 隔离 cwd —— 断言「解析不到 → []」时必须用空仓库。解析链最后一环是回落到
+ *  最近 APPROVED 计划（有意设计），拿真实仓库 cwd 会读到 .rivet/plans/ 里的
+ *  真计划而返回非空，把「路径没读成」误判成「逃逸守卫失效」。 */
+function makeIsolatedCwd(): string {
+  const cwd = mkdtempSync(join(tmpdir(), 'plan-constraints-cwd-'))
+  mkdirSync(join(cwd, '.rivet', 'plans'), { recursive: true })
+  return cwd
+}
+
 test('优先级：markdown 与 planPath 不同 → 取 markdown 那份', () => {
   const plan = makeTempPlan()
   const md = '# P\n\n## 反目标\n\n- 来自 markdown\n'
@@ -128,17 +138,27 @@ test('优先级：markdown 与 planPath 不同 → 取 markdown 那份', () => {
 })
 
 test('objective 识别：<绝对路径> 命中；路径不存在 → [] 不抛错', () => {
-  const plan = makeTempPlan()
-  const hit = resolvePlanConstraints(process.cwd(), { objective: `做 X 的落地实施 <${plan}>` })
-  assert.equal(hit.length, 1)
-  assert.ok(hit[0]!.includes('[计划反目标]'))
-  const miss = resolvePlanConstraints(process.cwd(), { objective: `做 X <${join(process.cwd(), '.rivet', 'no-such-plan.md')}>` })
-  assert.deepEqual(miss, [])
+  const cwd = makeIsolatedCwd()
+  try {
+    const plan = join(cwd, 'plan.md')
+    writeFileSync(plan, '# P\n\n## 反目标\n\n- 不扩展范围\n')
+    const hit = resolvePlanConstraints(cwd, { objective: `做 X 的落地实施 <${plan}>` })
+    assert.equal(hit.length, 1)
+    assert.ok(hit[0]!.includes('[计划反目标]'))
+    const miss = resolvePlanConstraints(cwd, { objective: `做 X <${join(cwd, '.rivet', 'no-such-plan.md')}>` })
+    assert.deepEqual(miss, [])
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
 })
 
 test('路径逃逸：objective 塞 ../../etc/passwd.md → 不读，返回 []', () => {
-  const res = resolvePlanConstraints(process.cwd(), { objective: '落地 <../../etc/passwd.md>' })
-  assert.deepEqual(res, [])
+  const cwd = makeIsolatedCwd()
+  try {
+    assert.deepEqual(resolvePlanConstraints(cwd, { objective: '落地 <../../etc/passwd.md>' }), [])
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
 })
 
 test('RIVET_PLAN_CONSTRAINTS=0 → 恒返回 []，测试后恢复', () => {

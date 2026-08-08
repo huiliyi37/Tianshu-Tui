@@ -51,7 +51,10 @@ import { getPaletteCommands } from '../tui/command-palette.js'
 import { RECOMMENDED_MAX_SKILLS } from '../skills/skill-loader.js'
 import { validatePath } from '../tools/path-validate.js'
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { extname, relative, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { extractDocumentText, EXTRACTION_CAVEAT } from '../tools/doc-extract.js'
 import type { HookEntry, HookEvent, HooksConfig } from '../hooks/user-hooks-runner.js'
 import { loadHooksConfig, VALID_EVENTS } from '../hooks/user-hooks-runner.js'
 import { buildDistillPrompt } from '../prompt/rpa-distill.js'
@@ -77,6 +80,9 @@ type SessionRouteDependencies = {
 
 /** Vision upload guards — provider-safe formats and a per-image byte ceiling. */
 const MAX_IMAGES = 4
+/** Document attachment guards (word/excel/pdf — extracted server-side). */
+const MAX_DOCUMENTS = 4
+const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 
 /** Cap on a single CI check log payload returned to the desktop (tail-kept). */
 const MAX_CHECK_LOG_CHARS = 200_000
@@ -487,8 +493,15 @@ export function buildSessionRoutes(
       if (typeof data.key !== 'string' || !data.key.trim()) {
         return { status: 400, body: { error: 'Missing or invalid "key"' } }
       }
+      const session = manager.getSession(params!.id!)
+      if (!session) {
+        return { status: 404, body: { error: 'Session not found' } }
+      }
+      if (session.status === 'running') {
+        return { status: 409, body: { error: 'Cannot switch domain while session is running' } }
+      }
       if (!manager.setDomain(params!.id!, data.key.trim())) {
-        return { status: 404, body: { error: 'Session not found or unknown domain key' } }
+        return { status: 404, body: { error: 'Unknown domain key' } }
       }
       return { status: 200, body: { id: params!.id!, domain: data.key.trim() } }
     }, apiToken),
@@ -717,7 +730,7 @@ export function buildSessionRoutes(
     }, apiToken),
 
     'POST /sessions/:id/prompt': withAuth(async (body, params) => {
-      const data = (body ?? {}) as { prompt?: string; images?: unknown }
+      const data = (body ?? {}) as { prompt?: string; images?: unknown; documents?: unknown }
       if (!data.prompt || typeof data.prompt !== 'string' || !data.prompt.trim()) {
         return { status: 400, body: { error: 'Missing or empty "prompt" field' } }
       }
@@ -741,6 +754,29 @@ export function buildSessionRoutes(
           }
         }
         images = data.images as string[]
+      }
+
+      // Validate documents: array of { name, dataUrl } for office/pdf files.
+      // Server extracts text via doc-extract (pdftotext/textutil/soffice/exceljs)
+      // and prepends to prompt — same injection pattern as the vision bridge.
+      let documents: Array<{ name: string; dataUrl: string }> | undefined
+      if (data.documents !== undefined) {
+        if (!Array.isArray(data.documents) || data.documents.length === 0) {
+          return { status: 400, body: { error: '"documents" must be a non-empty array' } }
+        }
+        if (data.documents.length > MAX_DOCUMENTS) {
+          return { status: 400, body: { error: `Max ${MAX_DOCUMENTS} documents allowed` } }
+        }
+        for (const doc of data.documents) {
+          if (typeof doc !== 'object' || doc === null || typeof (doc as { name?: unknown }).name !== 'string' || typeof (doc as { dataUrl?: unknown }).dataUrl !== 'string') {
+            return { status: 400, body: { error: 'Each document must be { name: string, dataUrl: string }' } }
+          }
+          const dataUrl = (doc as { dataUrl: string }).dataUrl
+          if (decodedBase64Bytes(dataUrl) > MAX_DOCUMENT_BYTES) {
+            return { status: 400, body: { error: `Each document must be <= ${Math.round(MAX_DOCUMENT_BYTES / 1024 / 1024)}MB` } }
+          }
+        }
+        documents = data.documents as Array<{ name: string; dataUrl: string }>
       }
 
       // Slash 翻译层（对齐 TUI 端 resolveAppPromptInput 行为）。
@@ -777,6 +813,17 @@ export function buildSessionRoutes(
       // 非 darwin 平台工具未注册，enableTool 静默 no-op。
       if (/@computer\b/i.test(prompt)) {
         await manager.enableTool(params!.id!, 'computer_use')
+      }
+
+      // 文档附件：落盘 → extractDocumentText 抽取文本 → 前置进 prompt。
+      // session-manager.run 是同步入口，抽取是异步——故在 route 层（async handler）
+      // 完成抽取，拼进 prompt 后调 run（签名不变）。和 vision bridge 同模式：
+      // 把非文本附件转成文本注入 prompt。
+      if (documents && documents.length > 0) {
+        const docTexts = await extractDocumentsToText(documents)
+        if (docTexts) {
+          prompt = `${docTexts}\n\n${prompt}`
+        }
       }
 
       const ok = manager.run(params!.id!, prompt, images)
@@ -1857,4 +1904,35 @@ export function buildSessionRoutes(
   }
 
   return routes
+}
+
+/** 把文档附件（base64 dataUrl）落盘到临时目录，调 extractDocumentText 抽取文本，
+ *  返回拼好的前置块（含 EXTRACTION_CAVEAT）。失败的单个文档降级为错误提示，
+ *  不阻断整体发送。 */
+async function extractDocumentsToText(
+  documents: Array<{ name: string; dataUrl: string }>,
+): Promise<string | null> {
+  const parts: string[] = []
+  const tmpBase = mkdtempSync(join(tmpdir(), 'rivet-doc-'))
+  try {
+    for (const doc of documents) {
+      const ext = extname(doc.name).toLowerCase() || '.bin'
+      const tmpPath = join(tmpBase, `${doc.name.replace(/[^A-Za-z0-9._-]/g, '_')}`)
+      try {
+        const base64 = doc.dataUrl.split(',')[1] ?? ''
+        writeFileSync(tmpPath, Buffer.from(base64, 'base64'))
+        const result = await extractDocumentText(tmpPath)
+        if (result.ok) {
+          parts.push(`[document: ${doc.name}]\n${EXTRACTION_CAVEAT}\n\n${result.text}`)
+        } else {
+          parts.push(`[document: ${doc.name}]\n(extraction failed: ${result.suggestion})`)
+        }
+      } catch (err) {
+        parts.push(`[document: ${doc.name}]\n(extraction error: ${(err as Error).message})`)
+      }
+    }
+  } finally {
+    rmSync(tmpBase, { recursive: true, force: true })
+  }
+  return parts.length > 0 ? parts.join('\n\n---\n\n') : null
 }

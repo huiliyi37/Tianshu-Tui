@@ -49,6 +49,7 @@ class LazyMemoryPersistence implements SessionPersistenceAdapter {
   records = new Map<string, SessionRecord>()
   events = new Map<string, SessionEvent[]>()
   loadEventsCalls: string[] = []
+  loadEventHighWaterCalls: string[] = []
 
   constructor(seed: PersistedSession[] = []) {
     for (const s of seed) {
@@ -69,6 +70,10 @@ class LazyMemoryPersistence implements SessionPersistenceAdapter {
   loadEvents(id: string): SessionEvent[] {
     this.loadEventsCalls.push(id)
     return (this.events.get(id) ?? []).map((e) => ({ ...e }))
+  }
+  loadEventHighWater(id: string): number {
+    this.loadEventHighWaterCalls.push(id)
+    return Math.max(0, ...(this.events.get(id) ?? []).map((e) => e.seq))
   }
 }
 
@@ -473,6 +478,29 @@ test('lazy rehydrate flags an interrupted run aborted without reading the log', 
   )
   assert.ok(marker, 'restart marker persisted')
   assert.ok(marker!.seq > 2, 'seq does not regress')
+})
+
+test('lazy rehydrate allocates restart markers above the durable event high-water', () => {
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'stale-index', status: 'running', createdAt: 1, updatedAt: 5,
+      cwd: '/work', lastSeq: 2, pendingApprovals: 0,
+    },
+    events: [ev(1, 'status', { status: 'running' }), ev(9, 'tool_use', {})],
+  }]
+  const mem = new LazyMemoryPersistence(seed)
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+  })
+
+  const markers = (mem.events.get('stale-index') ?? []).filter(
+    (e) => (e.type === 'status' && e.data.reason === 'sidecar-restart') || e.type === 'resume_offer',
+  )
+  assert.deepEqual(markers.map((e) => e.seq), [10, 11])
+  assert.deepEqual(mem.loadEventHighWaterCalls, ['stale-index'])
+  assert.equal(mem.loadEventsCalls.length, 0)
+  assert.equal(mgr.getSession('stale-index')?.lastSeq, 11)
 })
 
 test('lazy rehydrate closes out approvals the crash left dangling', async () => {

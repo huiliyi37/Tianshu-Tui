@@ -45,18 +45,22 @@ export function frameBottom(width: number, theme: RivetTheme, style?: BorderStyl
 
 /** 居中标题栏（full 风格用）。 */
 export function frameTitleCenter(title: string, width: number, theme: RivetTheme): string {
-  const padded = ` ${title} `
-  const remaining = Math.max(0, width - 2 - stringWidth(padded))
+  const remaining = Math.max(0, width - 4 - stringWidth(title))
   const left = Math.floor(remaining / 2)
   const right = remaining - left
-  return color('│' + ' '.repeat(left) + padded + ' '.repeat(right) + '│', theme.dim)
+  // title 允许自带 ANSI。边框分段着色，避免 title 内部 RESET 把右侧填充和边框
+  // 恢复成终端默认色；标题本身由调用方决定层级，框架只负责结构色。
+  return color('│' + ' '.repeat(left) + ' ', theme.dim)
+    + title
+    + color(' ' + ' '.repeat(right) + '│', theme.dim)
 }
 
 /** 左对齐标题栏（subtle 风格用）。 */
 export function frameTitleLeft(title: string, width: number, theme: RivetTheme): string {
-  const padded = ` ${title} `
-  const remaining = Math.max(0, width - 2 - stringWidth(padded))
-  return color('│' + padded + ' '.repeat(remaining) + '│', theme.dim)
+  const remaining = Math.max(0, width - 4 - stringWidth(title))
+  return color('│ ', theme.dim)
+    + title
+    + color(' ' + ' '.repeat(remaining) + '│', theme.dim)
 }
 
 /** @deprecated Use frameTitleLeft or frameTitleCenter explicitly. */

@@ -218,6 +218,15 @@ export function resolveCapabilities(
   if (!configOverrides) return base
 
   // Merge config overrides — config values win over well-known defaults
+  if (configOverrides.supportsThinking !== undefined) {
+    base.supportsThinking = configOverrides.supportsThinking
+  }
+  if (configOverrides.thinkingFormat !== undefined) {
+    base.thinkingFormat = configOverrides.thinkingFormat
+  }
+  if (configOverrides.effortFormat !== undefined) {
+    base.effortFormat = configOverrides.effortFormat
+  }
   if (configOverrides.cacheControl !== undefined) {
     base.supportsCacheControl = configOverrides.cacheControl
   }

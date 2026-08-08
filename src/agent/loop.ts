@@ -60,7 +60,7 @@ import { TurnPerceptionController } from './turn-perception.js'
 import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
-import { buildActiveDomain, type ActiveStarDomain, type StarDomainId } from './star-domain.js'
+import { resolveActiveDomain, type ActiveStarDomain, type StarDomainId } from './star-domain.js'
 import { starDomainRegistry } from './star-domain-registry.js'
 import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
 import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
@@ -86,12 +86,13 @@ import { PressureMonitor } from '../context/pressure-monitor.js'
 import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
+import { buildRuntimeSelfModel } from './runtime-self-model.js'
 import { CacheAdvisor } from '../cache/advisor.js'
 import type { RecallMetricsSummary } from '../cache/recall-metrics.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, P3Integration } from './p3-integration.js'
 import { ImmuneHook } from './immune-hook.js'
-import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, HOLDOUT_MIN_DELIVERED, parseHoldoutRate, disciplineReanchorEntry } from './advisory-bus.js'
+import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, EFFICACY_CONFIDENT_SAMPLES, HOLDOUT_MIN_DELIVERED, parseHoldoutRate, disciplineReanchorEntry } from './advisory-bus.js'
 import { AdvisoryReadback, type EfficacyPriorCounts } from './advisory-readback.js'
 import { applyDomainAdvisoryTone } from './domain-advisory-tone.js'
 import { createDestructiveGateState } from '../tools/destructive-gate.js'
@@ -137,6 +138,15 @@ import { type EffortShadowRecord } from './p3-reward.js'
 import { TurnCacheObservability } from './cache-log-observability.js'
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
+
+/**
+ * `AgentLoop.run()` 的结果。
+ *
+ * `skipped-already-running` 表示 re-entry guard 命中、本次调用没有发起任何轮次。
+ * 调用方必须处理它——TUI 在调 run() 之前就把自己置成了 busy，静默跳过会让那个
+ * busy 永远挂着。
+ */
+export type AgentRunOutcome = 'completed' | 'skipped-already-running'
 
 /**
  * Build the tiny approved-plan pointer block injected into the dynamic appendix.
@@ -561,6 +571,10 @@ export class AgentLoop {
     consecutiveTimeouts: number
     /** Turn number at which backoff expires. 0 = no backoff active. */
     cooldownUntilTurn: number
+    /** busy/backoff 抑制次数——与真实超时分开记账（主控可靠性闭环 Wave 1）。 */
+    suppressedCount: number
+    /** 各 outcome 累计（ok/type_errors/timeout/spawn_error/busy/backoff）。 */
+    outcomes: Record<import('./theta-check.js').ThetaOutcome, number>
   } = {
     lastReason: null,
     lastDurationMs: null,
@@ -569,6 +583,8 @@ export class AgentLoop {
     requestedCount: 0,
     consecutiveTimeouts: 0,
     cooldownUntilTurn: 0,
+    suppressedCount: 0,
+    outcomes: { ok: 0, type_errors: 0, timeout: 0, spawn_error: 0, busy: 0, backoff: 0 },
   }
   /** Max theta checks per session. Prevents runaway tsc spawning. */
   thetaRequestsThisTurn = 0
@@ -731,6 +747,19 @@ export class AgentLoop {
     if (process.env.RIVET_ADVISORY_LIFT_CONSUMER !== '0') {
       this.advisoryBus.setLiftProvider(key => this.advisoryReadback.getMatureLift(key))
     }
+    // T7 效力排序：让效力跨 priority 参与预算竞争（此前只在 priority 完全相等
+    // 时做 tie-break，而 hook 的 priority 高度分散——实测 self-verify 采纳 77%
+    // 却因 0.58 < 0.70 恒输给采纳 12% 的 todo-missing）。成熟 lift 已过样本门
+    // 故满置信；回退采纳率时按决出样本数缩放，避免单样本改写优先级。
+    // RIVET_ADVISORY_EFFICACY_SPAN=0 关闭调整（回退纯 priority 排序）。
+    this.advisoryBus.setEfficacySignalProvider(key => {
+      const lift = this.advisoryReadback.getMatureLift(key)
+      if (lift !== null) return { score: (lift + 1) / 2, confidence: 1 }
+      const rate = this.advisoryReadback.getAdoptionRate(key)
+      if (rate === null) return null
+      const decided = this.advisoryReadback.getDecidedCount(key)
+      return { score: rate, confidence: Math.min(1, decided / EFFICACY_CONFIDENT_SAMPLES) }
+    })
     // Phase 2 阶段抑制：产出流 = 近期编辑+验证交替且无失败（navigator 沉默规则）。
     // 只影响 encouragement/typecheck/informational 白名单——守护类不受抑制。
     // 判据本体在 production-flow.ts（EFE/affordance 的 wuwei 让位共用同一处）。
@@ -788,13 +817,16 @@ export class AgentLoop {
         } catch { /* ledger is best-effort */ }
       })
     }
-    // Speculative pre-execution chain SEALED (2026-07-07): no execute callback
-    // and speculativeEnabled unset → miner still records patterns, but nothing
-    // is pre-executed or cached. Serving was cut 2026-07-06 (ShadowQueue had no
-    // mtime validation and served pre-edit file content as a live read_file
-    // result); without serving the background pre-reads were pure cost.
-    // See P3Config.speculativeEnabled for the re-enable contract.
-    this.p3 = createP3Integration()
+    // Speculative pre-execution chain SEALED by default (2026-07-07): no
+    // execute callback and speculativeEnabled unset → miner still records
+    // patterns, but nothing is pre-executed, cached, or served.
+    // 状态更新（2026-08-07 T5a/T5b）：mtime 重启契约已实现（shadow-queue.ts），
+    // 封存维持原因 = 经济性。RIVET_SPEC_OBSERVE=1 开观察态：enqueue 各臂 +
+    // 命中统计活，serving 仍封存；execute 保持 no-op（观察不真预读，每条
+    // 预测代价 ≈ 一次 stat）。stats 经 postSession 落 meta.speculationStats。
+    this.p3 = createP3Integration(
+      process.env['RIVET_SPEC_OBSERVE'] === '1' ? { speculativeObserve: true } : {},
+    )
 
 
     // Physarum + Immune system — construction only, DB reads deferred to warmupMemories() (S9)
@@ -925,8 +957,11 @@ export class AgentLoop {
       },
       // Side-path usage accounting: summary calls are billed but used to
       // discard their usage — book them into session totals + cache-log.
+      // provider：专用 compact client（compact.provider+model）跑在自己的
+      // provider 上，行里如实标注；未配置时回退主会话 provider（recorder 默认）。
       recordSummaryUsage: (usage, model) => {
-        createSidePathUsageRecorder(this)('compact-summary', usage, model)
+        const provider = this.config.compactClient ? this.config.compact?.provider : undefined
+        createSidePathUsageRecorder(this)('compact-summary', usage, model, provider)
       },
       onReclaimDecision: createReclaimDecisionRecorder(this),
       writeProbe: createWriteEvidenceProbe(this.cwd),
@@ -1099,11 +1134,12 @@ export class AgentLoop {
     this.modelRoutingShadow.record(currentSensorium, efe)
   }
 
-  bindSessionDomain(taskDescription: string): void {
+  bindSessionDomain(taskDescription: string, callbacks?: AgentCallbacks): void {
     if (this.sessionDomain !== undefined) return
     // 首次绑定前检查 defaultDomain 配置——非 auto 时钉定，让所有入口
     //（TUI/headless/server/外部）统一在此钉定，不再依赖入口层各显神通。
-    if (isStarSoulEnabled()) {
+    const starSoulEnabled = isStarSoulEnabled()
+    if (starSoulEnabled) {
       const key = this.config.defaultDomain ?? 'qiming'
       if (key !== 'auto') {
         const pinned = starDomainRegistry.get(key) ?? starDomainRegistry.get('qiming')
@@ -1125,13 +1161,22 @@ export class AgentLoop {
     // 工程域 + 自定义域）内 matchDomain，未命中回退天权（DEFAULT_DOMAIN）；
     // 显式 false 时固定落到 DEFAULT_DOMAIN。池外特化域（含华盖）仅手动/钉定/
     // 委派进入。仅 defaultDomain='auto' 的会话走到这里，其余已被钉定。
-    this.sessionDomain = isStarSoulEnabled()
-      ? buildActiveDomain(taskDescription, {
+    const resolution = starSoulEnabled
+      ? resolveActiveDomain(taskDescription, {
           keywordRouting: this.config.domainKeywordRouting !== false,
         })
       : null
+    this.sessionDomain = resolution?.domain ?? null
     this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(this.sessionDomain))
     this.persistSessionDomain()
+    if (resolution) {
+      callbacks?.onDomainResolved?.({
+        key: resolution.domain.id,
+        name: resolution.domain.name,
+        matchedKeywords: resolution.matchedKeywords,
+        reason: resolution.reason,
+      })
+    }
   }
 
   /** 域变更即写 meta.domain——TUI /resume 恢复原域的依据（bootstrap
@@ -1579,6 +1624,7 @@ export class AgentLoop {
         sessionBytes: disk?.sessionBytes ?? 0,
         sessionByteLimit: disk?.sessionByteLimit ?? Number.POSITIVE_INFINITY,
         memoryTrendBytesPerSample: this.latestResourceSnapshot.memoryTrendBytesPerSample,
+        suppressAbsoluteMemoryPressure: this.latestResourceSnapshot.memoryCooldownActive,
       },
     })
 
@@ -1595,7 +1641,56 @@ export class AgentLoop {
     if (trigger && trigger.severity === 'error' && trigger.trigger) {
       this.firedRecoveryTriggers.add(trigger.trigger)
     }
+
+    // 资源压力 TUI 提醒：只展示、不自动改任何配置（用户自行 /lean 或开新会话）。
+    // 其他 trigger 或资源恢复时清除之前设置的状态行（仅当本会话设置过，避免
+    // 覆盖 StatusLineRunner 命令模式的状态行）。
+    const pressureText = trigger?.trigger === 'resource_pressure'
+      ? this.buildResourcePressureStatusLine()
+      : null
+    if (pressureText !== null) {
+      if (!this.resourceStatusLineActive || this.resourceStatusLineText !== pressureText) {
+        this.config.onStatusLine?.(pressureText)
+        this.resourceStatusLineActive = true
+        this.resourceStatusLineText = pressureText
+      }
+    } else if (this.resourceStatusLineActive) {
+      this.config.onStatusLine?.(null)
+      this.resourceStatusLineActive = false
+      this.resourceStatusLineText = null
+    }
   }
+
+  /** 资源压力状态行文本：heap ≥75% warn / ≥90% error、disk ≥80% warn /
+   *  ≥100% error（阈值与 classifyResourcePressure 一致）；cooldown 期间
+   *  （跨会话内存残差）只报 disk。纯展示——不自动改任何配置。 */
+  private buildResourcePressureStatusLine(): string | null {
+    const snap = this.latestResourceSnapshot
+    if (!snap) return null
+    const { memory, disk } = snap
+    const heapRatio = memory.memoryLimitBytes > 0 ? memory.heapUsedBytes / memory.memoryLimitBytes : 0
+    const suppressHeap = snap.memoryCooldownActive === true
+    if (!suppressHeap) {
+      if (heapRatio >= 0.9) {
+        return `⚠ Memory CRITICAL ${Math.round(heapRatio * 100)}% — open new session with RIVET_LEAN=1 recommended`
+      }
+      if (heapRatio >= 0.75) {
+        return `⚠ Memory ${Math.round(heapRatio * 100)}% — session may slow down, /lean to reduce`
+      }
+    }
+    if (disk && disk.sessionByteLimit > 0) {
+      const diskRatio = disk.sessionBytes / disk.sessionByteLimit
+      if (diskRatio >= 1) return '⚠ Session log FULL — events will be trimmed, checkpoint now'
+      if (diskRatio >= 0.8) {
+        return `⚠ Session log ${formatBytes(disk.sessionBytes)} — near limit, checkpoint recommended`
+      }
+    }
+    return null
+  }
+
+  /** 最近一次经 onStatusLine 推送的资源压力状态行（非 null 表示会话曾设置过）。 */
+  private resourceStatusLineText: string | null = null
+  private resourceStatusLineActive = false
 
   /** 中#5: Check for tool_calls that have no matching tool_result. */
   private detectPendingTools(): boolean {
@@ -1641,6 +1736,27 @@ export class AgentLoop {
   requestThetaCheck(reason: string): void {
       if (this.config.thetaCheckDisabled) return
       requestThetaCheck(this, reason);
+  }
+
+  /** Theta 一次一结果回调（controller host 接口）——落 meta 摘要。
+   *  事件循环饥饿无法同线程硬抢占，验收目标是「无重复 spawn、结果可归因」：
+   *  每次尝试都有唯一 outcome，超预算（timeoutOverrunMs > 0）可见。 */
+  onThetaResult(result: import('./theta-check.js').ThetaCheckResult, budgetMs: number): void {
+    const t = this.thetaTelemetry
+    try {
+      this.persist?.updateMetadata({
+        thetaCheckSummary: {
+          attempts: t.requestedCount,
+          outcomes: t.outcomes,
+          lastOutcome: result.outcome,
+          lastDurationMs: result.durationMs,
+          suppressedCount: t.suppressedCount,
+          consecutiveTimeouts: t.consecutiveTimeouts,
+          budgetMs,
+          timeoutOverrunMs: result.durationMs > budgetMs ? result.durationMs - budgetMs : undefined,
+        },
+      })
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 */ }
   }
 
   /** Physarum provider health: feed stream outcomes into the tracker.
@@ -1890,6 +2006,30 @@ export class AgentLoop {
       .sort((a, b) => b.delivered - a.delivered)
       .slice(0, 5)
     const s = this.sensorium
+    let runtime: import('./runtime-self-model.js').RuntimeSelfModel | null = null
+    try {
+      const coordinator = this.config.coordinatorRef?.()
+      if (coordinator) {
+        const verification = this.evidence.getVerificationSummary()
+        runtime = buildRuntimeSelfModel({
+          phase: this.planModeState,
+          turn: this.session.getTurnCount(),
+          contextRatio: contextWindow > 0 ? estimatedTokens / contextWindow : 1,
+          sensorium: s ? {
+            pressure: s.pressure,
+            confidence: s.confidence,
+            stability: s.stability,
+          } : null,
+          verificationDebt: verification.total > 0
+            ? verification.pending / verification.total
+            : (this.evidence.hasVerificationDebt() ? 1 : 0),
+          coordinator: coordinator.getRuntimeSnapshot(),
+        })
+      }
+    } catch {
+      // session_vitals is diagnostic; a missing coordinator must never break it.
+      runtime = null
+    }
     return {
       ctx: {
         estimatedTokens,
@@ -1913,6 +2053,7 @@ export class AgentLoop {
         ignored: this.guardianActivity.advisoriesIgnored,
         top,
       },
+      runtime,
       turn: this.session.getTurnCount(),
     }
   }
@@ -1930,8 +2071,8 @@ export class AgentLoop {
    *  Side paths are billed like any other call, and silently discarding their
    *  usage was a real cost blind spot (2026-07-06). `kind` keeps the sources
    *  distinguishable in `cache-log.jsonl`. */
-  recordSidePathUsage(kind: string, usage: Partial<import('../api/types.js').Usage>, model?: string): void {
-    createSidePathUsageRecorder(this)(kind, usage, model)
+  recordSidePathUsage(kind: string, usage: Partial<import('../api/types.js').Usage>, model?: string, provider?: string): void {
+    createSidePathUsageRecorder(this)(kind, usage, model, provider)
   }
 
   /** 本会话 frozen 前缀的分块归因（`/prefix-budget`）。档位来自会话启动时
@@ -2078,16 +2219,20 @@ export class AgentLoop {
     return this._running
   }
 
-  async run(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<void> {
+  async run(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<AgentRunOutcome> {
     // Re-entry guard: prevent concurrent agent.run() calls.
     // React strict mode or rapid re-submits could trigger handleSubmit
     // while a previous run is still in-flight, corrupting SessionContext.
     // Claim the guard synchronously before any await (including the
     // cancelIdleCompaction drain) so a duplicate run() that arrives during the
     // drain sees _running=true and no-ops instead of racing _runInner.
+    //
+    // 返回 'skipped' 而非静默 return：调用方（TUI）在此之前已把自己置为 busy，
+    // 若这里无声无息地走掉，busy 就再没人清——用户按 ESC 后立刻发的消息会落进
+    // 一个没有活跃 run 的队列里，永远等不到注入边界。调用方据此复位并如实告知。
     if (this._running) {
       debugLog('[agent] run() called while already running — skipping duplicate')
-      return
+      return 'skipped-already-running'
     }
     this._running = true
     // Eager abort controller: created synchronously before any await (incl. the
@@ -2156,6 +2301,7 @@ export class AgentLoop {
       }
 
       await this._runInner(userInput, callbacks, images)
+      return 'completed'
     } finally {
       this._running = false
       this.scheduleIdleCompaction()
@@ -2672,3 +2818,9 @@ export class AgentLoop {
 
 }
 
+/** 资源压力状态行里的字节格式化（B/KB/MB）。 */
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
+}

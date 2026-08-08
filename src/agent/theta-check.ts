@@ -8,10 +8,27 @@ import { resolveNpmCliCommand, buildStdioEnvWithNodePath } from '../platform/res
 
 const require = createRequire(import.meta.url)
 
+/** Theta 尝试的诚实归因——每个返回值都说得清「这次到底发生了什么」。
+ *  - ok: tsc 正常退出 0，无类型错误
+ *  - type_errors: tsc 非零退出（有类型错误；errors 可能因解析不到文件而为空）
+ *  - timeout: 内层预算超时（唯一推进连续超时退避的结局）
+ *  - spawn_error: tsc 进程 spawn 失败（ENOENT/EACCES）——不再是 timeout 的伪装
+ *  - busy: 跨进程锁被占且无可用结果——不再伪装成「空错误且非超时」的假绿
+ *  - backoff: 负缓存窗口内（60s 内刚 timeout/spawn_error）——不重复 spawn */
+export type ThetaOutcome = 'ok' | 'type_errors' | 'timeout' | 'spawn_error' | 'busy' | 'backoff'
+
 export interface ThetaCheckResult {
   errors: string[]
   durationMs: number
+  /** 兼容字段——等价于 outcome === 'timeout'。旧消费者（theta-hook 等）不迁移。 */
   timedOut: boolean
+  outcome: ThetaOutcome
+}
+
+/** outcome 推断（旧格式缓存无 outcome 字段时的兼容读取）。 */
+export function inferOutcome(result: Pick<ThetaCheckResult, 'errors' | 'timedOut' | 'outcome'>): ThetaOutcome {
+  if (result.outcome) return result.outcome
+  return result.timedOut ? 'timeout' : result.errors.length > 0 ? 'type_errors' : 'ok'
 }
 
 function parseTypeScriptErrorFiles(output: string): string[] {
@@ -50,11 +67,31 @@ export function trimCapturedOutput(s: string): string {
 // theta is best-effort: a slightly stale or empty result is always preferable
 // to a redundant tsc spawn or a blocked agent loop.
 const CACHE_TTL_MS = 15_000
+/** 负缓存（timeout/spawn_error）窗口：60s 内同 cwd 不重复 spawn，返回 backoff。
+ *  到期后由既有原子锁放行一个半开探针，成功即写正缓存覆盖失败状态。 */
+const NEG_CACHE_TTL_MS = 60_000
 const LOCK_STALE_BUFFER_MS = 5_000
 
 interface DiskCacheEntry {
   result: ThetaCheckResult
   cachedAt: number
+  /** true = 失败状态（负缓存）。旧格式条目（无此字段）按正缓存读。 */
+  negative?: boolean
+}
+
+function isNegative(entry: DiskCacheEntry): boolean {
+  return entry.negative === true || entry.result.outcome === 'timeout' || entry.result.outcome === 'spawn_error'
+}
+
+function backoffResult(entry: DiskCacheEntry): ThetaCheckResult {
+  return { errors: [], durationMs: 0, timedOut: false, outcome: 'backoff' }
+}
+
+/** 锁竞争且无新鲜结果时的诚实归因——保留旧结果内容但不伪装成 fresh 成功。 */
+function busyResult(entry: DiskCacheEntry | null): ThetaCheckResult {
+  return entry
+    ? { ...entry.result, outcome: 'busy', durationMs: 0, timedOut: false }
+    : { errors: [], durationMs: 0, timedOut: false, outcome: 'busy' }
 }
 
 // Per-cwd in-memory layer — keyed by cwd so a worktree worker (repoB) never
@@ -77,6 +114,8 @@ function readDiskCache(cwd: string): DiskCacheEntry | null {
     const raw = readFileSync(cacheFile(cwd), 'utf8')
     const parsed = JSON.parse(raw) as DiskCacheEntry
     if (!parsed || typeof parsed.cachedAt !== 'number' || !Array.isArray(parsed.result?.errors)) return null
+    // 旧格式条目（无 outcome 字段）：按 errors/timedOut 推断 outcome
+    parsed.result.outcome = inferOutcome(parsed.result as ThetaCheckResult)
     return parsed
   } catch {
     return null
@@ -131,19 +170,26 @@ function releaseLock(cwd: string): void {
  * Best-effort: missing tsc, missing tsconfig, and timeouts return an empty
  * error set so the agent loop never blocks. Cross-process dedup ensures only
  * one process per repo runs tsc within a TTL window.
+ *
+ * 结果诚实（主控可靠性闭环）：timeout/spawn_error 写入 60s 负缓存，窗口内
+ * 返回 `backoff`（不再 spawn）；锁竞争无新鲜结果返回 `busy`（不再伪装成
+ * 「空错误且非超时」的假绿）；spawn error 单独归因 `spawn_error`。
  */
 export function runThetaCheck(cwd: string, timeoutMs = 15_000): Promise<ThetaCheckResult> {
-  // L1: fresh in-process result for this cwd
+  // L1: fresh in-process result for this cwd（正/负缓存共用同一 TTL 判定）
   const mem = memCache.get(cwd)
-  if (mem && (Date.now() - mem.cachedAt) < CACHE_TTL_MS) {
-    return Promise.resolve(mem.result)
+  if (mem) {
+    const ttl = isNegative(mem) ? NEG_CACHE_TTL_MS : CACHE_TTL_MS
+    if ((Date.now() - mem.cachedAt) < ttl) {
+      return Promise.resolve(isNegative(mem) ? backoffResult(mem) : mem.result)
+    }
   }
   // L1: in-flight in this process for this cwd
   const flight = memInFlight.get(cwd)
   if (flight) return flight
 
   const promise = resolveThetaCheck(cwd, timeoutMs).then(result => {
-    memCache.set(cwd, { result, cachedAt: Date.now() })
+    memCache.set(cwd, { result, cachedAt: Date.now(), negative: isNegativeOutcome(result) })
     memInFlight.delete(cwd)
     return result
   }).catch(err => {
@@ -154,24 +200,31 @@ export function runThetaCheck(cwd: string, timeoutMs = 15_000): Promise<ThetaChe
   return promise
 }
 
+function isNegativeOutcome(result: ThetaCheckResult): boolean {
+  return result.outcome === 'timeout' || result.outcome === 'spawn_error'
+}
+
 async function resolveThetaCheck(cwd: string, timeoutMs: number): Promise<ThetaCheckResult> {
   // L2: fresh on-disk result shared across processes
   const disk = readDiskCache(cwd)
-  if (disk && (Date.now() - disk.cachedAt) < CACHE_TTL_MS) {
-    return disk.result
+  if (disk) {
+    const age = Date.now() - disk.cachedAt
+    const ttl = isNegative(disk) ? NEG_CACHE_TTL_MS : CACHE_TTL_MS
+    if (age < ttl) {
+      return isNegative(disk) ? backoffResult(disk) : disk.result
+    }
   }
   // Cross-process in-flight dedup: only the lock winner spawns tsc.
   if (!tryAcquireLock(cwd, timeoutMs)) {
-    // Another process is running tsc. Best-effort: reuse the last on-disk
-    // result (even if past TTL) rather than spawn a redundant tsc. If there
-    // is nothing yet, return empty — theta is a soft hint, never a blocker.
-    return disk?.result ?? { errors: [], durationMs: 0, timedOut: false }
+    // Another process is running tsc. 有新鲜结果 → 上面已返回；这里只剩
+    // 「无新鲜结果」：显式 busy（保留旧内容但不伪装 fresh），绝不返回假绿。
+    return busyResult(disk)
   }
   try {
     const result = await runThetaCheckInner(cwd, timeoutMs)
-    // Don't cache timed-out results: a transient timeout shouldn't pin a fake
-    // green for the whole TTL window — let the next caller retry.
-    if (!result.timedOut) writeDiskCache(cwd, { result, cachedAt: Date.now() })
+    // 失败状态（timeout/spawn_error）写 60s 负缓存；成功/有错误写 15s 正缓存
+    // （覆盖旧负缓存 = 半开探针成功，失败状态清除）。
+    writeDiskCache(cwd, { result, cachedAt: Date.now(), negative: isNegativeOutcome(result) })
     return result
   } finally {
     releaseLock(cwd)
@@ -243,18 +296,18 @@ function runThetaCheckInner(cwd: string, timeoutMs: number): Promise<ThetaCheckR
     let settled = false
     let timedOut = false
 
-    const finish = (errors: string[], didTimeOut = timedOut): void => {
+    const finish = (errors: string[], outcome: ThetaOutcome): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      resolve({ errors, durationMs: Date.now() - start, timedOut: didTimeOut })
+      resolve({ errors, durationMs: Date.now() - start, timedOut: outcome === 'timeout', outcome })
     }
 
     const timer = setTimeout(() => {
       timedOut = true
       gracefulKill(child)
       setTimeout(() => forceKill(child), 3000)
-      finish([])
+      finish([], 'timeout')
     }, timeoutMs)
 
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -270,17 +323,18 @@ function runThetaCheckInner(cwd: string, timeoutMs: number): Promise<ThetaCheckR
     child.on('close', (code) => {
       if (timedOut) return
       if (code === 0) {
-        finish([])
+        finish([], 'ok')
         return
       }
-      finish(parseTypeScriptErrorFiles(`${stdout}\n${stderr}`))
+      // tsc 非零退出 = 有类型错误（即便本次没解析到文件路径——不伪装成 ok）
+      finish(parseTypeScriptErrorFiles(`${stdout}\n${stderr}`), 'type_errors')
     })
 
-    child.on('error', (err) => {
-      // spawn failure (ENOENT, EACCES, etc.) — don't return a fake green
-      // result that gets cached and masks the real error for 15s.
-      timedOut = true
-      finish([])
+    child.on('error', () => {
+      // spawn failure (ENOENT, EACCES, etc.) — 单独归因 spawn_error：
+      // 不得伪装成 timeout（旧实现 timedOut=true），更不得伪装成绿色。
+      // 负缓存由 resolveThetaCheck 统一写入（60s 窗口内不再重复 spawn）。
+      finish([], 'spawn_error')
     })
   })
 }

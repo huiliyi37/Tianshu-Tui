@@ -10,6 +10,7 @@
 
 import { ANSI, color, fg, bg, hyperlink } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { hiddenLinesMarker } from './hidden-lines.js'
 import { latexToBlock } from '../pi/latex-block.js'
 import { renderMathInText, latexToUnicode } from '../pi/latex-to-unicode.js'
 
@@ -472,7 +473,7 @@ function formatCodeBlock(language: string | undefined, content: string, columns:
   }
 
   if (truncated) {
-    result.push(color(`… (${lines.length - MAX_CODE_LINES} more lines)`, theme.muted))
+    result.push(color(hiddenLinesMarker(lines.length - MAX_CODE_LINES), theme.muted))
   }
 
   return result

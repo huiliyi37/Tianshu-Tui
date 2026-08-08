@@ -81,13 +81,34 @@ export interface InputHandlerOptions {
   /** 初始输入模式 */
   mode?: InputMode
   /** 单独 ESC 字节的刷新超时（ms）。期间无后续字节则派发 escape。
-   *  80ms 平衡低延迟和高延迟 SSH（原 40ms 在 150ms+ RTT 连接上会导致方向键序列被拆包）。 */
+   *  80ms 平衡低延迟和高延迟 SSH（原 40ms 在 150ms+ RTT 连接上会导致方向键序列被拆包）。
+   *  这个值直接决定按 ESC 打断的响应速度，不能为了兼容慢终端而拉长。 */
   escapeTimeoutMs?: number
+  /**
+   * 不完整 CSI/SS3 序列的兜底超时（ms）。
+   *
+   * 与 `escapeTimeoutMs` 分开：buffer 已经是 `\x1B[…` 时就确定不是孤立 ESC 键
+   * （用户敲不出这个组合），超时只为兜「终端半途断供导致 buffer 永久滞留」，
+   * 不影响任何按键响应速度，故给足余量。此前两者共用 80ms，等于把兜底的宽容度
+   * 绑死在 ESC 响应速度上——高负载或 SSH 下 stdin 分包间隔轻易超过 80ms，
+   * 正常序列被腰斩后残体会被当成普通字符送进输入框。
+   * 500ms 对齐 Node readline 的 `escapeCodeTimeout` 默认值。
+   */
+  partialSequenceTimeoutMs?: number
 }
 
 /** Bracketed paste 标记（DEC 2004） */
 const PASTE_START = '\x1B[200~'
 const PASTE_END = '\x1B[201~'
+
+/**
+ * 尚未收完的 CPR 响应形状：`\x1B[66`、`\x1B[66;`、`\x1B[66;1`（缺结尾的 `R`）。
+ *
+ * CPR 是终端对 DSR `\x1B[6n` 探针的自动回吐，不是用户按键。它一旦被超时兜底
+ * 腰斩，剩余部分不该退化成可打印字符——那会让 `[66;` 这样的残片出现在输入框里。
+ * 完整体由 parseInput 的 CPR 分支正常消费，这里只管被截断的半截。
+ */
+const CPR_PARTIAL_RE = /^\x1B\[\d+(;\d*)?$/
 
 export type InputMode = 'normal' | 'input' | 'overlay' | 'approval'
 
@@ -160,6 +181,7 @@ export class InputHandler {
    *  `\x1B[{row};{col}R` 不是按键，单独走这个通道（LiveEngine 自愈用）。 */
   private cprHandlers = new Set<(row: number, col: number) => void>()
   private escapeTimeoutMs: number
+  private partialSequenceTimeoutMs: number
   private escapeTimer: ReturnType<typeof setTimeout> | null = null
   /** 当为 true 时，单独的 ESC 字节立即派发为 escape，不等待超时。
    *  用于 overlay 激活场景，避免 ESC 关闭/退出有 40ms 可感知延迟。 */
@@ -184,6 +206,7 @@ export class InputHandler {
     this.stdin = options.stdin
     this.mode = options.mode ?? 'input'
     this.escapeTimeoutMs = options.escapeTimeoutMs ?? 80
+    this.partialSequenceTimeoutMs = options.partialSequenceTimeoutMs ?? 500
     // WSL 边缘情况：stdin 可能不是 TTY（如管道输入），setRawMode 会抛错
     if (this.stdin.isTTY) {
       try { this.stdin.setRawMode(true) } catch { /* best-effort */ }
@@ -388,6 +411,13 @@ export class InputHandler {
       // clearTimeout（handleData），不会误触发。
       const flushPartial = (): void => {
         if (this.pasteActive || (!this.inputBuffer.startsWith('\x1B[') && !this.inputBuffer.startsWith('\x1BO'))) return
+        // CPR 残体整段丢弃，不走「消费 ESC + 剩余重解析」那条路：CPR 是终端对
+        // DSR 探针的自动回吐，不是用户输入，剥掉 ESC 后剩下的 `[66;1R` 会被逐字
+        // 当可打印字符送进输入框（用户看到的就是输入框里冒出 `[66;`）。
+        if (CPR_PARTIAL_RE.test(this.inputBuffer)) {
+          this.inputBuffer = ''
+          return
+        }
         this.dispatch({ raw: '\x1B', char: '', name: 'unknown', ctrl: false, meta: false, shift: false })
         this.inputBuffer = this.inputBuffer.slice(1)
         this.processInputBuffer()
@@ -397,7 +427,7 @@ export class InputHandler {
         this.escapeTimer = setTimeout(() => {
           this.escapeTimer = null
           flushPartial()
-        }, this.escapeTimeoutMs)
+        }, this.partialSequenceTimeoutMs)
       }
     }
   }

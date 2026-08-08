@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { MeridianDb } from '../meridian-db.js'
 import { resolveBetterSqlite3 } from '../native-resolver.js'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -27,6 +27,7 @@ describe('meridian db', () => {
       symbols: [{ id: 'src/foo.ts:hello:1', name: 'hello', kind: 'function', filePath: 'src/foo.ts', line: 1, exported: true, contentHash: 'abc123' }],
       edges: [],
       imports: ['./bar.js'],
+      calls: [],
     })
     const symbols = db.getSymbolsForFile('src/foo.ts')
     assert.equal(symbols.length, 1)
@@ -35,7 +36,7 @@ describe('meridian db', () => {
 
   it('skips re-parse when hash matches', () => {
     assert.equal(db.needsParse('src/foo.ts', 'hash1'), true)
-    db.upsertFile({ filePath: 'src/foo.ts', contentHash: 'hash1', symbols: [], edges: [], imports: [] })
+    db.upsertFile({ filePath: 'src/foo.ts', contentHash: 'hash1', symbols: [], edges: [], imports: [], calls: [] })
     assert.equal(db.needsParse('src/foo.ts', 'hash1'), false)
     assert.equal(db.needsParse('src/foo.ts', 'hash2'), true)
   })
@@ -49,6 +50,7 @@ describe('meridian db', () => {
       ],
       edges: [{ sourceId: 'src/a.ts:A:1', targetId: 'src/b.ts:B:1', kind: 'imports', weight: 1.0 }],
       imports: ['./b.js'],
+      calls: [],
     })
     const edges = db.getEdgesFrom('src/a.ts:A:1')
     assert.equal(edges.length, 2) // explicit edge + import edge from first symbol
@@ -68,12 +70,14 @@ describe('meridian db', () => {
       symbols: [{ id: 'a:X:1', name: 'X', kind: 'function', filePath: 'src/a.ts', line: 1, exported: true, contentHash: 'h1' }],
       edges: [{ sourceId: 'a:X:1', targetId: 'b:Y:1', kind: 'calls', weight: 1.0 }],
       imports: [],
+      calls: [],
     })
     db.upsertFile({
       filePath: 'src/b.ts', contentHash: 'h2',
       symbols: [{ id: 'b:Y:1', name: 'Y', kind: 'function', filePath: 'src/b.ts', line: 1, exported: true, contentHash: 'h2' }],
       edges: [{ sourceId: 'b:Y:1', targetId: 'c:Z:1', kind: 'calls', weight: 1.0 }],
       imports: [],
+      calls: [],
     })
     const neighbors = db.getNeighborIds('a:X:1', 2)
     assert.ok(neighbors.has('b:Y:1'))
@@ -86,6 +90,7 @@ describe('meridian db', () => {
       symbols: [{ id: 'a:X:1', name: 'X', kind: 'function', filePath: 'src/a.ts', line: 1, exported: true, contentHash: 'h1' }],
       edges: [{ sourceId: 'a:X:1', targetId: 'b:Y:1', kind: 'calls', weight: 1.0 }],
       imports: [],
+      calls: [],
     })
     const stats = db.getStats()
     assert.equal(stats.files, 1)
@@ -219,6 +224,7 @@ describe('meridian db', () => {
       symbols: [{ id: '/abs/dir/legacy.ts:X:1', name: 'X', kind: 'function', filePath: '/abs/dir/legacy.ts', line: 1, exported: true, contentHash: 'h1' }],
       edges: [],
       imports: [],
+      calls: [],
     })
     db.upsertEdge('/abs/dir/legacy.ts:X:1', 'src/nonexistent.ts:*:0', 'imports', 1.0)
     // Clean rows that must survive migration
@@ -228,6 +234,7 @@ describe('meridian db', () => {
       symbols: [{ id: 'src/ok.ts:Y:1', name: 'Y', kind: 'function', filePath: 'src/ok.ts', line: 1, exported: true, contentHash: 'h2' }],
       edges: [],
       imports: [],
+      calls: [],
     })
     db.upsertEdge('src/ok.ts:Y:1', 'src/ok.ts:*:0', 'imports', 1.0)
 
@@ -252,6 +259,7 @@ describe('meridian db', () => {
       symbols: [{ id: '/abs/x.ts:Z:1', name: 'Z', kind: 'function', filePath: '/abs/x.ts', line: 1, exported: true, contentHash: 'h1' }],
       edges: [],
       imports: [],
+      calls: [],
     })
     db.close()
     markLegacy()
@@ -273,6 +281,7 @@ describe('meridian db', () => {
       symbols: [{ id: 'src/a.ts:A:1', name: 'A', kind: 'function', filePath: 'src/a.ts', line: 1, exported: true, contentHash: 'ha' }],
       edges: [],
       imports: ['src/b.ts'],
+      calls: [],
     })
     assert.deepEqual(db.getReverseDependents('src/b.ts').map(d => d.file), ['src/a.ts'])
 
@@ -281,5 +290,45 @@ describe('meridian db', () => {
     assert.deepEqual(db.getReverseDependents('src/b.ts').map(d => d.file), ['src/a.ts'],
       'reopen must not purge the reverse-dependency edge of an unindexed target')
     assert.equal(db.needsParse('src/a.ts', 'ha'), false, 'source stays unchanged, so a purged edge could never be rebuilt')
+  })
+})
+
+describe('meridian db with sqlite unavailable', () => {
+  // Point stateDir at a regular file: existsSync passes (so no mkdir), then
+  // opening <file>/meridian.db fails. Same degraded state a missing native
+  // binding produces, without having to break the install to reach it.
+  let notADir: string
+  let db: MeridianDb
+  let realWarn: typeof console.warn
+
+  beforeEach(() => {
+    notADir = join(tmpdir(), `meridian-degraded-${process.pid}-${Date.now()}`)
+    writeFileSync(notADir, 'a file where a directory is expected')
+    db = new MeridianDb(notADir)
+    realWarn = console.warn
+    console.warn = () => {} // degrading warns by design; not the subject here
+  })
+
+  afterEach(() => {
+    console.warn = realWarn
+    rmSync(notADir, { force: true })
+  })
+
+  it('reports itself unavailable', () => {
+    assert.equal(db.available, false)
+  })
+
+  it('answers needsParse with false so callers stop parsing into a sink', () => {
+    // Unguarded, the no-op DB's get() returns undefined, which the raw query
+    // reads as "hash changed" — so every caller re-reads and re-parses the same
+    // file forever, and in the indexer that fans out across its whole import
+    // list on each pass.
+    assert.equal(db.needsParse('src/a.ts', 'hash-1'), false)
+    db.upsertFile({ filePath: 'src/a.ts', contentHash: 'hash-1', symbols: [], edges: [], imports: [], calls: [] })
+    assert.equal(db.needsParse('src/a.ts', 'hash-1'), false, 'a write that went nowhere must not flip it either')
+  })
+
+  it('accepts writes without throwing', () => {
+    assert.doesNotThrow(() => db.recordAccess('src/a.ts'))
   })
 })

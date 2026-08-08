@@ -12,6 +12,8 @@
  * is constructed.
  */
 
+import { isRuntimeLeanAspect } from '../config/runtime-lean.js'
+
 export interface EmbeddingProvider {
   /** Stable id for cache invalidation when the model changes. */
   readonly id: string
@@ -112,7 +114,7 @@ export interface EmbeddingConfig {
  */
 export function createEmbeddingProvider(opts: EmbeddingConfig = {}): EmbeddingProvider {
   const env = process.env
-  if (env.RIVET_NO_EMBEDDINGS === '1') return new NullEmbeddingProvider()
+  if (env.RIVET_NO_EMBEDDINGS === '1' || isRuntimeLeanAspect('embeddings')) return new NullEmbeddingProvider()
 
   const baseUrl = opts.baseUrl
     ?? env.RIVET_EMBEDDING_BASE_URL

@@ -2,6 +2,8 @@ export type FailureClass =
   | 'type_error'
   | 'assertion'
   | 'missing_dep'
+  /** Runtime lifecycle gate (shutdown/handoff), not a model or code failure. */
+  | 'runtime_gate'
   | 'timeout'
   | 'snapshot'
   | 'module_resolution'
@@ -65,6 +67,7 @@ const CANONICAL: Record<FailureClass, { suggestion: string; retryable: boolean }
   type_error: { suggestion: 'Fix type annotation or interface. Do not change business logic.', retryable: false },
   assertion: { suggestion: 'Compare expected vs actual. Determine if test expectation is wrong or implementation is buggy before changing code.', retryable: false },
   missing_dep: { suggestion: 'Report missing dependency. Do not silently change the test command.', retryable: false },
+  runtime_gate: { suggestion: 'Runtime lifecycle gate is active. Wait for shutdown/handoff to settle, then retry manually; do not change code.', retryable: false },
   timeout: { suggestion: 'Check for infinite loops, unawaited async, or slow operations. Consider increasing timeout.', retryable: true },
   snapshot: { suggestion: 'Review snapshot diff. If change is intentional, update snapshots.', retryable: false },
   module_resolution: { suggestion: 'Check import path, file existence, and package.json exports.', retryable: false },

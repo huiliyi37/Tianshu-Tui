@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { bashGitBypassesScope, isDestructiveGitAction } from '../approval-risk.js'
-import { assessToolRisk, DANGEROUS_BASH_PATTERNS, BASH_WRITE_PATTERNS, bashCommandMayWrite, requiresBashWriteApproval, requiresUnconditionalApproval, CONFIDENCE_THRESHOLDS } from '../approval-risk.js'
+import { assessToolRisk, DANGEROUS_BASH_PATTERNS, BASH_WRITE_PATTERNS, bashCommandMayWrite, isSafeWriteOnly, requiresBashWriteApproval, requiresUnconditionalApproval, CONFIDENCE_THRESHOLDS } from '../approval-risk.js'
 import type { ContextClaim } from '../../context/claims.js'
 import type { Sensorium } from '../sensorium.js'
 
@@ -332,6 +332,33 @@ describe('BASH_WRITE_PATTERNS — deny bash writes by default', () => {
     assert.ok(bashCommandMayWrite('cat <<EOF > file.txt'))
     assert.ok(bashCommandMayWrite("tee file.txt <<'MARKER'"))
     assert.ok(bashCommandMayWrite("cat > /tmp/test.ts << 'TEST_EOF'"))
+  })
+})
+
+describe('global package installs — approval gate (bash global-install guard)', () => {
+  it('npm install -g requires approval — not auto-safe', () => {
+    assert.equal(isSafeWriteOnly('npm install -g typescript'), false)
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('npm install -g typescript')))
+  })
+
+  it('bare npm install stays auto-safe (local install semantics preserved)', () => {
+    assert.equal(isSafeWriteOnly('npm install lodash'), true)
+    assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('npm install lodash')))
+  })
+
+  it('flags pnpm/yarn/bun global installs too', () => {
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('pnpm add -g foo')))
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('yarn add --global bar')))
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('bun i -g baz')))
+  })
+
+  it('flags pip/brew/cargo installs (default-global) but not --user/venv', () => {
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('pip install flask')))
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('pip3 install flask')))
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('brew install jq')))
+    assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('cargo install ripgrep')))
+    assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('pip install --user flask')))
+    assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('.venv/bin/pip install flask')))
   })
 })
 

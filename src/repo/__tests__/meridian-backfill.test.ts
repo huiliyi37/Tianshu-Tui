@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { MeridianIndexer, isMeridianIndexablePath } from '../meridian-indexer.js'
 import { scheduleMeridianBackfill, DEFAULT_MERIDIAN_BACKFILL_MAX } from '../meridian-backfill.js'
 
-const ENV_KEYS = ['RIVET_MERIDIAN_BACKFILL', 'RIVET_MERIDIAN_BACKFILL_MAX'] as const
+const ENV_KEYS = ['RIVET_MERIDIAN_BACKFILL', 'RIVET_MERIDIAN_BACKFILL_MAX', 'RIVET_LEAN'] as const
 
 let dir: string
 let savedEnv: Array<string | undefined>
@@ -135,6 +135,29 @@ describe('scheduleMeridianBackfill', () => {
     const handle = scheduleMeridianBackfill(fakeIndexer(calls), dir)
     await handle.done
 
+    assert.equal(calls.length, 0)
+  })
+
+  it('startup 默认不回填（需 RIVET_MERIDIAN_BACKFILL=1）', async () => {
+    writeRel(dir, 'a.ts')
+    const calls: string[] = []
+    await scheduleMeridianBackfill(fakeIndexer(calls), dir, { reason: 'startup' }).done
+    assert.equal(calls.length, 0)
+  })
+
+  it('startup + RIVET_MERIDIAN_BACKFILL=1 才回填', async () => {
+    process.env.RIVET_MERIDIAN_BACKFILL = '1'
+    writeRel(dir, 'a.ts')
+    const calls: string[] = []
+    await scheduleMeridianBackfill(fakeIndexer(calls), dir, { reason: 'startup' }).done
+    assert.equal(calls.length, 1)
+  })
+
+  it('lean 关闭 ondemand 回填', async () => {
+    process.env.RIVET_LEAN = '1'
+    writeRel(dir, 'a.ts')
+    const calls: string[] = []
+    await scheduleMeridianBackfill(fakeIndexer(calls), dir, { reason: 'ondemand' }).done
     assert.equal(calls.length, 0)
   })
 

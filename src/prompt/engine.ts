@@ -198,6 +198,9 @@ export class PromptEngine {
   private decisions?: string[]
   private activeDomain?: VolatileContext['activeDomain']
   private activeClaims?: VolatileContext['activeClaims']
+  /** spec 3c 动作 B：排除路径锚点（spark 会话专属；追加式 + cap，创建序稳定）。
+   *  非 spark 会话恒空 → <excluded-paths> 零渲染零字节差异。 */
+  private excludedPathAnchors: string[] = []
   private playbookLessons?: VolatileContext['playbookLessons']
   private onLessonsRendered?: (ids: string[]) => void
   private sessionMemoryOverride?: string
@@ -552,7 +555,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, invokedSkillsBlock: skillRegistry.renderInvokedSkillsBlock([...this.invokedSkillNames], this.config.volatileCtx.cwd) ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, controlPlaneBlock: this.controlPlaneBlock, tersenessEscalate: this.tersenessEscalate, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, askModeState: this.askModeState, activePlanFilePath: this.activePlanFilePath, planExitReminderPending: this.planExitReminderPending, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, invokedSkillsBlock: skillRegistry.renderInvokedSkillsBlock([...this.invokedSkillNames], this.config.volatileCtx.cwd) ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, controlPlaneBlock: this.controlPlaneBlock, tersenessEscalate: this.tersenessEscalate, decisions: this.decisions, activeClaims: this.activeClaims, excludedPathAnchors: this.excludedPathAnchors.length > 0 ? this.excludedPathAnchors : undefined, playbookLessons: this.playbookLessons, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, askModeState: this.askModeState, activePlanFilePath: this.activePlanFilePath, planExitReminderPending: this.planExitReminderPending, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
             // One-shot: the plan-mode exit reminder is snapshotted into dynamicCtx
             // above; clear it so it renders on this turn only, not every subsequent turn.
             if (this.planExitReminderPending) this.planExitReminderPending = false
@@ -1018,6 +1021,23 @@ export class PromptEngine {
 
   updateActiveClaims(claims: ContextClaim[]): void {
     this.activeClaims = claims
+  }
+
+  /** spec 3c 动作 B：追加排除路径锚点。去重（保首见序）+ cap 溢出淘汰最旧——
+   *  字节只在语义变化（新锚点/挤出）时变化，appendixDelta 可吸收。 */
+  appendExcludedPathAnchors(anchors: string[]): void {
+    const MAX_ANCHORS = 20
+    for (const a of anchors) {
+      if (!this.excludedPathAnchors.includes(a)) this.excludedPathAnchors.push(a)
+    }
+    if (this.excludedPathAnchors.length > MAX_ANCHORS) {
+      this.excludedPathAnchors = this.excludedPathAnchors.slice(-MAX_ANCHORS)
+    }
+  }
+
+  /** 已收集锚点数（loop 惰性重建判空用）。 */
+  getExcludedPathAnchorCount(): number {
+    return this.excludedPathAnchors.length
   }
 
   updatePlaybookLessons(lessons: PlaybookBullet[]): void {

@@ -252,6 +252,19 @@ describe('galaxy routing records', () => {
     } finally { cleanup() }
   })
 
+  test('batch record + recall preserves all routing facts', () => {
+    const store = makeStore()
+    try {
+      store.recordGalaxyRoutingBatch([
+        { dimensionName: 'review', authority: 'yaoguang', taskShape: 'review', status: 'passed' },
+        { dimensionName: 'search', authority: 'tianji', taskShape: 'search', status: 'failed' },
+      ])
+
+      assert.equal(store.recallGalaxyRouting('review').length, 1)
+      assert.equal(store.recallGalaxyRouting('search')[0]!.status, 'failed')
+    } finally { cleanup() }
+  })
+
   test('unknown taskShape recalls nothing', () => {
     const store = makeStore()
     try {

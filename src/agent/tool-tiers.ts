@@ -75,6 +75,10 @@ export const EXTENDED_TOOLS = [
   'browser',
   'computer_use',
   'repo_graph',
+  // capability 能力索引（2026-07-31 装配）：只读查询本机 dev CLI 能力与缺口
+  // （preflight），full 档注册。查询面低频——同 repo_graph/semantic_search
+  // 定位，不占 CORE 常驻字节；主控需要时 /tools enable 挂回，worker 始终可用。
+  'capability',
   // council_convene 留在 EXTENDED（不随 team_orchestrate 升入 CORE）：
   // 议事会是多视角审查决策，使用频率远低于编排、每次调用的成本也更高
   // （fanout 3-5 审查 worker），不适合占 CORE 常驻字节预算。

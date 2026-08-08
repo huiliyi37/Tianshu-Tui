@@ -7,6 +7,7 @@
  * 空虚真值纪律：拿不到的数据显式标注"无数据"，绝不编数字。
  */
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import type { RuntimeSelfModel } from '../agent/runtime-self-model.js'
 
 /** 运行时提供给工具的生命体征快照（AgentLoop.getSessionVitals 的返回形状） */
 export interface SessionVitalsData {
@@ -23,6 +24,8 @@ export interface SessionVitalsData {
     /** delivered 降序 top5 */
     top: Array<{ key: string; delivered: number; adopted: number; ignored: number; silenced: boolean }>
   }
+  /** Read-only orchestration self-model; absent in worker/non-agent contexts. */
+  runtime?: RuntimeSelfModel | null
   turn: number
 }
 
@@ -65,6 +68,24 @@ export function formatVitals(v: SessionVitalsData): string {
   if (v.advisories.top.length > 0) {
     for (const t of v.advisories.top) {
       lines.push(`- ${t.key}: delivered=${t.delivered} adopted=${t.adopted} ignored=${t.ignored}${t.silenced ? ' [已静默]' : ''}`)
+    }
+  }
+  lines.push('')
+  lines.push('## 运行时自模型')
+  if (!v.runtime) {
+    lines.push('- 无数据（协调器未挂接或当前为 worker 上下文）')
+  } else {
+    const r = v.runtime
+    const phase = r.phase ? ` phase=${r.phase}` : ''
+    lines.push(`- health=${r.health} attention=${r.attention}${phase} confidence=${r.confidence.toFixed(2)}`)
+    lines.push(`- workers=${r.activeWorkers}/${r.maxWorkers} pending=${r.pendingWorkers} stalled=${r.stalledWorkers} fileScopes=${r.inFlightFileScopes} claims=${r.activeClaims}`)
+    lines.push(`- providerDegradation=${pct(r.providerDegradation)} contextPressure=${pct(r.contextPressure)} verificationDebt=${pct(r.verificationDebt)}`)
+    if (r.signals.length === 0) {
+      lines.push('- signals=none')
+    } else {
+      for (const signal of r.signals.slice(0, 5)) {
+        lines.push(`- signal ${signal.kind} [${signal.attention}] score=${signal.score.toFixed(2)}: ${signal.reason}`)
+      }
     }
   }
   return lines.join('\n')

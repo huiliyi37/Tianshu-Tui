@@ -42,6 +42,7 @@ export const ALLOWED_EXTERNALS = new Set([
   'mammoth',
   'playwright-core',
   '@mariozechner/clipboard',
+  'exceljs', // Office .xlsx 读写（文档附件管线）。随包分发（stage-runtime-deps ROOTS），不内联。
 ])
 
 const SKIP_DIRS = new Set(['node_modules', 'native', 'bundled-skills', 'seed-capsules'])
@@ -96,30 +97,52 @@ export async function scanDist(distDir, { allowed = ALLOWED_EXTERNALS } = {}) {
     violations.get(importer).add(spec)
   }
 
-  const gate = {
+  const makeGate = (entryFile) => ({
     name: 'rivet-runtime-import-gate',
     setup(build) {
-      // 只拦裸导入；相对/绝对路径走默认解析（dist 内部必须自洽，解析失败
-      // esbuild 会原样报错，同样是打包事故）。
-      build.onResolve({ filter: /^[^./]/ }, (args) => {
+      // 只拦裸导入。注意：bundle:true 模式下 esbuild 解析相对 import 后会以
+      // 绝对路径再次触发 onResolve（Windows 上是 D:\...，匹配 /^[^./]/），
+      // 必须显式排除绝对路径，否则 dist 内部的 chunk 互引会被误判为裸导入。
+      build.onResolve({ filter: /.*/ }, (args) => {
         const spec = args.path
+        // 相对/绝对路径 → 走默认解析（dist 内部必须自洽）。
+        if (spec.startsWith('.')) return null
+        if (spec.startsWith('/')) return null
+        // Windows 绝对路径（盘符:\）也走默认解析。
+        if (/^[a-zA-Z]:[\\/]/.test(spec)) return null
         if (BARE_BUILTINS.has(spec.replace(/^node:/, ''))) return { external: true }
         if (allowed.has(pkgRoot(spec))) return { external: true }
-        addViolation(args.importer || '(entry)', spec)
+        // 单 entry 模式下，入口文件自身的裸导入 args.importer 为空——用当前
+        // entry 路径兜底，违规才能正确归到文件而非笼统的 '(entry)'。
+        addViolation(args.importer || entryFile, spec)
         return { external: true } // 不中断，收集全部违规一次报完
       })
     },
-  }
-
-  await esbuild.build({
-    entryPoints: files,
-    bundle: true,
-    write: false,
-    outdir: join(distDir, '.import-scan-out'), // write:false 不落盘，仅为满足多入口校验
-    platform: 'node',
-    format: 'esm',
-    logLevel: 'silent',
-    plugins: [gate],
   })
+
+  // 逐文件喂给 esbuild，而非一次性把全部 .js 当 entryPoints。
+  // 原因：tsup code-splitting 产出互相 import 的共享 chunk，把 main.js 与
+  // chunk-*.js 一起塞进一次 esbuild.build(bundle:true) 时，被引用的 entry
+  // 既在 entryPoints 里又要被标 external，esbuild 直接报
+  // "entry point cannot be marked as external"（v2.28.0 发版实测）。
+  // 逐文件单 entry + bundle:true：相对导入正常跟进，gate 插件照常拦裸导入，
+  // 不会触发 entry 互引冲突。每文件一个 esbuild 实例代价可接受（dist 几十~百个文件）。
+  for (const file of files) {
+    try {
+      await esbuild.build({
+        entryPoints: [file],
+        bundle: true,
+        write: false,
+        outdir: join(distDir, '.import-scan-out'), // write:false 不落盘，仅为满足多入口校验
+        platform: 'node',
+        format: 'esm',
+        logLevel: 'silent',
+        plugins: [makeGate(file)],
+      })
+    } catch {
+      // 单文件解析失败（语法错等）——不是本次要拦的「裸导入」事故，跳过；
+      // 真正的 bundle 错误会在 tsup 阶段暴露。这里只关心 bare import 违规。
+    }
+  }
   return violations
 }

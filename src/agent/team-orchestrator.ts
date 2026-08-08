@@ -6,6 +6,7 @@ import { debugLog } from '../utils/debug.js'
 import { parseTeamTaskDrafts, parseTeamTasks, buildUnifiedTeamPlan, hasOverlappingFiles, type TeamTaskDraft, type TeamTask, type UnifiedTeamPlan } from './team-plan.js'
 import { groupTeamTasks, type TeamWave } from './team-grouping.js'
 import { buildTeamWaveTelemetry, type TeamWaveTelemetry } from './team-wave-telemetry.js'
+import { buildPriorWaveFeedback } from './team-wave-feedback.js'
 import { createTeamSchedulerBandit, parallelismForTeamSchedulerArm, recommendTeamSchedulerArm, summarizeTeamSchedulerBandit, teamSchedulerArmForParallelism, type TeamSchedulerBanditState, type TeamSchedulerContext } from './team-scheduler-bandit.js'
 import { applyTeamSchedulerInfluence, evaluateTeamSchedulerGate } from './team-scheduler-gate.js'
 import { buildTeamSchedulerShadowEvent, type TeamSchedulerShadowEvent } from './team-scheduler-shadow.js'
@@ -51,6 +52,8 @@ export interface TeamRunInput {
   /** T9 P3: real-time worker activity upstream — injected into every
    *  dispatched DelegationRequest so the TeamPanel can show live progress. */
   onActivity?: DelegationRequest['onActivity']
+  /** Per-worker settlement callback, including the max-mode planner fanout. */
+  onWorkerSettled?: (result: import('./work-order.js').WorkerResult) => void
   /** Fleet viz: invoked once the wave plan is computed but BEFORE workers are
    *  dispatched, so the UI can render the wave/task DAG (all waiting) up front
    *  and overlay running state from live worker activity. The summary carries
@@ -62,6 +65,11 @@ export interface TeamRunInput {
   /** 计划约束（D8 L2）：team-orchestrate 从 planPath 解析的反目标/待验证假设。
    *  透传进每个 DelegationRequest.constraints（任务级约束在前，计划级在后）。 */
   planConstraints?: string[]
+  /** 上一波波间门禁的失败项（仅未通过时提供）。与 priorResults / priorScopeLeaks
+   *  一起压成跨波回执注入下一波工单——闭合「验收 → 反馈 → 下一波」回路。 */
+  priorWaveGateFailures?: string[]
+  /** 上一波 scope-health 检出的计划外改动文件 */
+  priorScopeLeaks?: string[]
 }
 
 export interface TeamRunSummary {
@@ -71,6 +79,9 @@ export interface TeamRunSummary {
   waves: TeamWave[]
   dispatched: number
   blocked: string[]
+  /** 跨波条件边（审查 F1）：onFailure=skip 依赖失败而按语义跳过的任务——
+   *  与 blocked 区分，不触发波次阻塞语义。 */
+  skipped?: string[]
   packet: string
   run?: CoordinatorRun
   /** Track 2: true when the max-mode planner fanout was skipped via plan cache. */
@@ -324,25 +335,60 @@ async function dispatchWaveAt(
   ]
 
   // ── Cross-wave failure propagation ──────────────────────────────
-  // Block tasks whose dependencies failed in a prior wave.
+  // Block/skip tasks whose dependencies failed in a prior wave. 条件边语义与
+  // coordinator intra-batch 消费对齐（审查 F1）：onFailure=skip → 任务记
+  // skipped 不执行（非阻塞）；onFailure=alternate → 备选已过放行、备选未决
+  // 等待、备选也失败记 skipped；无条件边失败 → blocked。
   const priorResults = input.priorResults
   const crossWaveBlocked: string[] = []
+  const crossWaveSkipped: string[] = []
+  const blockedTaskIds: string[] = []
+  const skippedTaskIds: string[] = []
+  // 提升到函数级：失败传播与下方依赖剥离共用（剥离需按 failedIds 判「备选
+  // 已过」边）。priorResults 为空时两个 Set 恒空，行为不变。
+  const failedIds = new Set(
+    (priorResults ?? []).filter(r => r.status !== 'passed').map(r => extractTaskIdFromWorkOrderId(r.workOrderId))
+  )
+  const priorPassedIds = new Set(
+    (priorResults ?? []).filter(r => r.status === 'passed').map(r => extractTaskIdFromWorkOrderId(r.workOrderId)).filter(Boolean)
+  )
   if (priorResults && priorResults.length > 0) {
-    const failedIds = new Set(
-      priorResults
-        .filter(r => r.status !== 'passed')
-        .map(r => extractTaskIdFromWorkOrderId(r.workOrderId))
-    )
     if (failedIds.size > 0) {
-      // Return a new wave object with only non-blocked task IDs — never mutates
+      // Return a new wave object with only runnable task IDs — never mutates
       // the original wave, guarding against future wave caching scenarios.
       const filteredTaskIds: string[] = []
       for (const taskId of dispatchWave.taskIds) {
         const task = taskMap.get(taskId)
         if (!task) { filteredTaskIds.push(taskId); continue }
-        const failedDeps = (task.dependsOn ?? []).filter(dep => failedIds.has(dependencyId(dep)))
-        if (failedDeps.length > 0) {
-          crossWaveBlocked.push(`${taskId}: blocked by prior wave failure (${failedDeps.join(', ')})`)
+        const failedDepIds: string[] = []
+        const skippedDepIds: string[] = []
+        const waitingAlternates: string[] = []
+        for (const dep of task.dependsOn ?? []) {
+          const depId = dependencyId(dep)
+          if (!failedIds.has(depId)) continue
+          if (typeof dep === 'string') { failedDepIds.push(depId); continue }
+          if (dep.onFailure === 'skip') { skippedDepIds.push(depId); continue }
+          if (dep.onFailure === 'alternate' && dep.alternateOrderId) {
+            const altId = extractTaskIdFromWorkOrderId(dep.alternateOrderId)
+            if (priorPassedIds.has(altId)) continue // 备选已过 → 依赖链满足，放行
+            if (failedIds.has(altId)) { skippedDepIds.push(depId); continue } // 备选也失败 → 跳过
+            waitingAlternates.push(`${depId}→${dep.alternateOrderId}`)
+            continue
+          }
+          failedDepIds.push(depId)
+        }
+        // 判定优先级与 coordinator intra-batch 对齐（审查 fcb8106b）：
+        // 任一 skip 依赖 → 任务整体 skipped（即使同时有普通失败依赖）；
+        // 否则普通失败 → blocked；否则备选未决 → blocked waiting。
+        if (skippedDepIds.length > 0) {
+          crossWaveSkipped.push(`${taskId}: skipped — conditional dependency failed (onFailure=skip): ${skippedDepIds.join(', ')}`)
+          skippedTaskIds.push(taskId)
+        } else if (failedDepIds.length > 0) {
+          crossWaveBlocked.push(`${taskId}: blocked by prior wave failure (${failedDepIds.join(', ')})`)
+          blockedTaskIds.push(taskId)
+        } else if (waitingAlternates.length > 0) {
+          crossWaveBlocked.push(`${taskId}: waiting for alternate (${waitingAlternates.join(', ')})`)
+          blockedTaskIds.push(taskId)
         } else {
           filteredTaskIds.push(taskId)
         }
@@ -361,19 +407,20 @@ async function dispatchWaveAt(
   // handled the case where T1 *failed*; here we handle the case where it
   // *succeeded* — strip the now-satisfied dep so the coordinator doesn't block.
   if (priorResults && priorResults.length > 0) {
-    const priorPassedIds = new Set(
-      priorResults
-        .filter(r => r.status === 'passed')
-        .map(r => extractTaskIdFromWorkOrderId(r.workOrderId))
-        .filter(Boolean)
-    )
     for (const req of requests) {
       if (req.dependencies && req.dependencies.length > 0) {
         const filtered = req.dependencies.filter(d => {
           // dependency format is "team:T1", prior ID is "T1"
           const rawId = dependencyId(d)
           const depId = rawId.includes(':') ? rawId.slice(rawId.lastIndexOf(':') + 1) : rawId
-          return !priorPassedIds.has(depId)
+          if (priorPassedIds.has(depId)) return false
+          // 条件边（审查 F1）：主依赖失败但备选已过 → 依赖链已满足，剥掉该边，
+          // 否则 coordinator 会按未满足依赖 blockedDependencyResult 误拦。
+          if (typeof d === 'object' && d.onFailure === 'alternate' && d.alternateOrderId) {
+            const altId = extractTaskIdFromWorkOrderId(d.alternateOrderId)
+            if (failedIds.has(depId) && priorPassedIds.has(altId)) return false
+          }
+          return true
         })
         req.dependencies = filtered.length > 0 ? filtered : undefined
       }
@@ -386,7 +433,64 @@ async function dispatchWaveAt(
       r.constraints = [...(r.constraints ?? []), ...input.planConstraints]
     }
   }
+  // 跨波回执（2026-08-05 闭环审计）：上一波的失败、门禁未过项、计划外改动
+  // 压成几条约束下传。此前这些结论只进 tool 输出给主控看，下一波 worker
+  // 对上一波一无所知，常在同一个坑上再摔一次。走与 planConstraints 同一条
+  // L1 通道，排在计划级约束之后（计划是长期契约，回执是本波临时情报）。
+  // 空反馈不注入任何字段——wave 0 与全员通过的波次行为与改动前逐位一致。
+  const priorFeedback = buildPriorWaveFeedback({
+    priorResults,
+    waveGateFailures: input.priorWaveGateFailures,
+    scopeLeaks: input.priorScopeLeaks,
+  })
+  if (priorFeedback.length > 0) {
+    for (const r of requests) {
+      r.constraints = [...(r.constraints ?? []), ...priorFeedback]
+    }
+  }
+  // 被过滤任务的合成结果（审查 fcb8106b）：skipped/blocked 必须进入 wave
+  // results——后续波 failedIds 才能沿依赖链传播（下游感知上游失败/skip，
+  // 而非被 coordinator 当 unmet 误拦），并随 checkpoint completedResults
+  // 覆盖 /team-resume 恢复路径。waiting alternate 同样合成 blocked（与
+  // coordinator 对未决依赖的 blockedDependencyResult 一致）。
+  const buildSyntheticResults = (): import('./work-order.js').WorkerResult[] => {
+    const parentPrefix = input.parentTurnId ?? 'team'
+    const synthetic: import('./work-order.js').WorkerResult[] = []
+    for (let i = 0; i < blockedTaskIds.length; i++) {
+      const detail = crossWaveBlocked[i]!
+      synthetic.push({
+        workOrderId: `${parentPrefix}:team:${blockedTaskIds[i]!}`,
+        status: 'blocked',
+        summary: detail,
+        findings: [],
+        artifacts: [{ kind: 'risk', title: 'Dependency blocked', content: detail }],
+        changedFiles: [],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'blocked',
+      })
+    }
+    for (let i = 0; i < skippedTaskIds.length; i++) {
+      const detail = crossWaveSkipped[i]!
+      synthetic.push({
+        workOrderId: `${parentPrefix}:team:${skippedTaskIds[i]!}`,
+        status: 'blocked',
+        summary: detail,
+        findings: [],
+        artifacts: [{ kind: 'risk', title: 'Dependency skipped', content: detail }],
+        changedFiles: [],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'skipped',
+      })
+    }
+    return synthetic
+  }
+
   if (requests.length === 0) {
+    // 本波全部任务被跨波过滤：合成结果通过 run 进入 wave-results-store，
+    // 使链式传播与 checkpoint 恢复路径依然生效（early return 不能丢传播）。
+    const synthetic = buildSyntheticResults()
     return {
       mode: input.mode,
       planned,
@@ -394,6 +498,10 @@ async function dispatchWaveAt(
       waves,
       dispatched: 0,
       blocked: [...remainingBlocked, ...crossWaveBlocked],
+      skipped: crossWaveSkipped.length > 0 ? crossWaveSkipped : undefined,
+      run: synthetic.length > 0
+        ? { status: 'completed', results: synthetic, packet: `team: wave ${targetWave.id} produced no dispatchable requests.` }
+        : undefined,
       packet: `team: wave ${targetWave.id} produced no dispatchable requests.`,
     }
   }
@@ -408,12 +516,19 @@ async function dispatchWaveAt(
       tasks,
       waves,
       dispatched: requests.length,
-      blocked: remainingBlocked,
+      // 预览与实际派发结果一致（审查 fcb8106b）：跨波 blocked/skipped 同步进预览。
+      blocked: [...remainingBlocked, ...crossWaveBlocked],
+      skipped: crossWaveSkipped.length > 0 ? crossWaveSkipped : undefined,
       packet: `[wave ${fromWave + 1}/${waves.length}] dispatching ${requests.length} workers…`,
     }, fromWave)
   }
 
   const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
+
+  const synthetic = buildSyntheticResults()
+  if (synthetic.length > 0) {
+    run.results = [...(run.results ?? []), ...synthetic]
+  }
   try {
     deps.recordTeamWaveTelemetry?.(buildTeamWaveTelemetry({
       sessionId: deps.sessionId ?? 'unknown',
@@ -436,6 +551,7 @@ async function dispatchWaveAt(
     waves,
     dispatched: requests.length,
     blocked: [...remainingBlocked, ...crossWaveBlocked],
+    skipped: crossWaveSkipped.length > 0 ? crossWaveSkipped : undefined,
     packet: `[wave ${fromWave + 1}/${waves.length}] ${run.packet}`,
     run,
   }
@@ -504,7 +620,13 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
         authority: perspective,
         onActivity: input.onActivity,
       }))
-      plannerRun = await deps.delegateBatch(plannerRequests, 'all_required', input.abortSignal)
+      plannerRun = await deps.delegateBatch(
+        plannerRequests,
+        'all_required',
+        input.abortSignal,
+        undefined,
+        input.onWorkerSettled,
+      )
 
       const planFor = (perspective: string): TeamPerspectivePlan => {
         const result = plannerRun!.results.find(r => r.workOrderId.includes(`planner-${perspective}`))

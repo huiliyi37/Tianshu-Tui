@@ -8,6 +8,9 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { StreamClient } from '../../api/stream-client.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
@@ -17,6 +20,7 @@ import { DelegationCoordinator } from '../coordinator.js'
 import { READ_ONLY_WORKER_TOOLS, buildBlockedWorkerResult, deriveWorkerSessionId, type WorkOrder } from '../work-order.js'
 import { profileRegistry } from '../profile-registry.js'
 import type { WorkerCheckpoint, WorkerSessionConfig } from '../worker-session.js'
+import { loadWorkerSession, workerSessionPath } from '../worker-session-persist.js'
 
 function fakeTool(name: string): Tool {
   return {

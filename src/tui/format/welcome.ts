@@ -2,7 +2,7 @@
  * T9 格式化函数 — 首屏欢迎（概念 D「星阁」定稿：圆角框 + 北斗刊头 + 单列正文）。
  *
  * 渲染结构（10 行）：
- *   ╭─ 天枢  T I Ā N S H Ū  Code ───────────────────────────── v2.23.0 ─╮
+ *   ╭─ 天枢  T I Ā N S H Ū  Code ───────────────────────────── v2.28.0 ─╮
  *   │ ✦────────∙─────✦────✧──────✧──────────────────────────────       │
  *   │ ╰─✧────✧─╯                                                       │
  *   │                                                                  │
@@ -115,8 +115,18 @@ function tildify(cwd: string): string {
  * 星阁渲染器 —— 把框几何、字形档位与主题色绑定成一组闭包。
  * 拆出来是因为北斗两行要跨行对齐列位，必须共用同一把宽度尺。
  */
-function starLoft(theme: RivetTheme, chars: BoxCharSet, ascii: boolean, cal: { ambiguousAsWide?: boolean }) {
-  const quiet = theme.pulseQuiet
+function starLoft(
+  theme: RivetTheme,
+  chars: BoxCharSet,
+  ascii: boolean,
+  cal: { ambiguousAsWide?: boolean },
+  frame: string,
+  frameOpts: { bold: true },
+) {
+  /** 框线档：色 = theme.muted（提亮一档带色相偏移，避免纯中性灰的"表格感"），
+   *  视觉权重 = bold（让框线在暗底上有"压"住的份量，避免纯色色块感）。
+   *  与 app.ts 输入框静息档形成可读层次：输入框 = dim（更退），欢迎框 = muted + bold（更精致）。
+   *  pulseQuiet 在深底上近乎隐形（实测回归），不能用作 chrome。 */
   /** 连线：按显示列数产出，字符宽 >1 时用空格补足余数，保证列位精确。 */
   const rule = (cols: number): string => {
     if (cols <= 0) return ''
@@ -142,24 +152,24 @@ function starLoft(theme: RivetTheme, chars: BoxCharSet, ascii: boolean, cal: { a
       text += color(g, tone(star.mag), i === 0 ? { bold: true } : undefined)
       col += displayWidth(g, cal)
       if (star.gap > 0) {
-        text += color(rule(star.gap), quiet)
+        text += color(rule(star.gap), frame, frameOpts)
         col += star.gap
       }
     })
     const natural = col
-    if (width > col) text += color(rule(width - col), quiet)
+    if (width > col) text += color(rule(width - col), frame, frameOpts)
     return { text, bowlRight, natural }
   }
 
   /** 次行：`╰─✧────✧─╯`，右角落在天权正下方。 */
   const bowl = (bowlRight: number): string => {
     const [bl, br] = ascii ? ['\\', '/'] : [chars.bl, chars.br]
-    let text = color(bl, quiet)
+    let text = color(bl, frame, frameOpts)
     let col = displayWidth(bl, cal)
     for (const star of DIPPER_BOWL) {
       const target = Math.round(bowlRight * star.at)
       if (target > col) {
-        text += color(rule(target - col), quiet)
+        text += color(rule(target - col), frame, frameOpts)
         col = target
       }
       const g = glyph(star.mag)
@@ -167,10 +177,10 @@ function starLoft(theme: RivetTheme, chars: BoxCharSet, ascii: boolean, cal: { a
       col += displayWidth(g, cal)
     }
     if (bowlRight > col) {
-      text += color(rule(bowlRight - col), quiet)
+      text += color(rule(bowlRight - col), frame, frameOpts)
       col = bowlRight
     }
-    return text + color(br, quiet)
+    return text + color(br, frame, frameOpts)
   }
 
   return { rule, top, bowl }
@@ -217,8 +227,12 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   // 块，不参与 LiveEngine 回顶计算，按终端实际渲染宽度对齐右边线即可，
   // 不必像 live region 那样一律取 wide 上界（那会让右边线在多数终端内缩数列）。
   const cal = { ambiguousAsWide: ambiguousWideEnabled() }
-  const loft = starLoft(theme, chars, ascii, cal)
-  const vBar = color(chars.v, theme.pulseQuiet)
+  // 框线档提到外层——vBar、顶底框、starLoft 内的框线衍生（斗身边线、尾随续线）
+  // 全部走同一种色 + 视觉权重（muted + bold），确保"框"作为一个整体立得住。
+  const frameOpts = { bold: true } as const
+  const frame = theme.muted
+  const loft = starLoft(theme, chars, ascii, cal, frame, frameOpts)
+  const vBar = color(chars.v, frame, frameOpts)
 
   /** 框内一行：内容截断/补齐到 inner，两侧竖边线。 */
   const row = (content: string): string => {
@@ -251,13 +265,13 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   const wordmarkW = displayWidth(wordmarkPlain, cal)
   const fill = outer - 8 - wordmarkW - displayWidth(versionText, cal)
   const topBorder = versionText && fill >= 2
-    ? color(`${chars.tl}${chars.h} `, theme.pulseQuiet) + wordmarkFor(wordmarkPlain)
-      + ` ${color(loft.rule(fill), theme.pulseQuiet)} ${color(versionText, theme.dim)}`
-      + color(` ${chars.h}${chars.tr}`, theme.pulseQuiet)
-    : color(`${chars.tl}${chars.h} `, theme.pulseQuiet) + wordmarkFor(wordmarkPlain)
-      + color(` ${loft.rule(Math.max(0, outer - 5 - wordmarkW))}${chars.tr}`, theme.pulseQuiet)
+    ? color(`${chars.tl}${chars.h} `, frame, frameOpts) + wordmarkFor(wordmarkPlain)
+      + ` ${color(loft.rule(fill), frame, frameOpts)} ${color(versionText, theme.dim)}`
+      + color(` ${chars.h}${chars.tr}`, frame, frameOpts)
+    : color(`${chars.tl}${chars.h} `, frame, frameOpts) + wordmarkFor(wordmarkPlain)
+      + color(` ${loft.rule(Math.max(0, outer - 5 - wordmarkW))}${chars.tr}`, frame, frameOpts)
 
-  const bottomBorder = color(`${chars.bl}${chars.h.repeat(inner + 2)}${chars.br}`, theme.pulseQuiet)
+  const bottomBorder = color(`${chars.bl}${chars.h.repeat(inner + 2)}${chars.br}`, frame, frameOpts)
 
   // 北斗两行：装不下整幅就整块省掉，不画半只勺子。
   const probe = loft.top(0)

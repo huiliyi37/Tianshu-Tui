@@ -113,6 +113,32 @@ describe('coordinator activity upstream (T9 P3)', () => {
     assert.equal(events[1]!.detail, 'hello')
   })
 
+  it('stamps each stable-id dispatch with a distinct attempt identity', async () => {
+    const firstEvents: WorkerActivityEvent[] = []
+    const secondEvents: WorkerActivityEvent[] = []
+    const coordinator = makeCoordinator(emittingWorker)
+    const request = {
+      parentTurnId: 'council:seat-tianquan',
+      objective: 'trace the authentication flow across multiple coordinator modules',
+      kind: 'code_search' as const,
+      profile: 'code_scout' as const,
+      scope: { files: ['a.ts'] },
+    }
+
+    const first = await coordinator.delegate({ ...request, onActivity: event => firstEvents.push(event) })
+    const second = await coordinator.delegate({ ...request, onActivity: event => secondEvents.push(event) })
+
+    const firstAttempt = firstEvents[0]!.attemptId
+    const secondAttempt = secondEvents[0]!.attemptId
+    assert.ok(firstAttempt, 'activity carries the first dispatch attempt id')
+    assert.ok(secondAttempt, 'activity carries the second dispatch attempt id')
+    assert.notEqual(firstAttempt, secondAttempt, 'stable worker ids must not identify two dispatch attempts')
+    assert.equal(firstEvents[0]!.dispatchId, request.parentTurnId)
+    assert.equal(secondEvents[0]!.dispatchId, request.parentTurnId)
+    assert.equal(first.results[0]!.attemptId, firstAttempt, 'terminal result keeps activity identity')
+    assert.equal(second.results[0]!.attemptId, secondAttempt, 'terminal result keeps activity identity')
+  })
+
   it('a throwing upstream callback does not break dispatch', async () => {
     const coordinator = makeCoordinator(emittingWorker)
     const run = await coordinator.delegate({

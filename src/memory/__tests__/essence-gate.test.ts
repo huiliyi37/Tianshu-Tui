@@ -13,6 +13,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { runEssenceGate, parseGateVerdicts, type KnowledgeCandidate } from '../essence-gate.js'
+import { runGateCompletion } from '../../agent/gate-completion.js'
 import { appendMemoryEntry, readMemoryEntries, recallMemoryEntries, isCurrentEntry } from '../unified-memory.js'
 
 function candidate(text: string, overrides: Partial<KnowledgeCandidate> = {}): KnowledgeCandidate {
@@ -39,6 +40,48 @@ describe('essence-gate', () => {
     assert.equal(result.failedClosed, true)
     assert.equal(result.admitted.length, 0)
     assert.equal(existsSync(join(cwd, '.rivet', 'knowledge', 'memory.jsonl')), false, 'no file may be created')
+  })
+
+  it('fail-closed: timeout 归因 failureReason=timeout 且有界返回', async () => {
+    // 完整链路：runGateCompletion（race 保底，忽略 abort 的 stream）作为 complete
+    // 实现——旧实现（timer 只 abort 不 reject）会让这个测试挂到外层 hook 预算。
+    const neverClient = {
+      stream: async () => new Promise<void>(() => {}),
+    }
+    const start = Date.now()
+    const result = await runEssenceGate(
+      {
+        cwd,
+        timeoutMs: 30,
+        complete: (prompt, timeoutMs) => runGateCompletion(neverClient, () => {}, prompt, timeoutMs),
+      },
+      [candidate('This project uses immutable spread patterns everywhere in reducers')],
+    )
+    const elapsed = Date.now() - start
+
+    assert.equal(result.failedClosed, true)
+    assert.equal(result.failureReason, 'timeout', '超时必须显式归因为 timeout，而非笼统 llm_error')
+    assert.equal(result.admitted.length, 0)
+    assert.ok(elapsed < 1000, `内层超时必须先于外层预算 fail-closed，实际 ${elapsed}ms`)
+    assert.ok(result.durationMs !== undefined && result.durationMs >= 30, '结果应携带耗时')
+  })
+
+  it('fail-closed: LLM error → failureReason=llm_error', async () => {
+    const result = await runEssenceGate(
+      { cwd, complete: async () => { throw new Error('llm down') } },
+      [candidate('This project uses immutable spread patterns everywhere in reducers')],
+    )
+    assert.equal(result.failedClosed, true)
+    assert.equal(result.failureReason, 'llm_error')
+  })
+
+  it('fail-closed: unparseable output → failureReason=invalid_output', async () => {
+    const result = await runEssenceGate(
+      { cwd, complete: async () => 'sorry I cannot help with that' },
+      [candidate('Prefer connection pooling for database access in this repository')],
+    )
+    assert.equal(result.failedClosed, true)
+    assert.equal(result.failureReason, 'invalid_output')
   })
 
   it('fail-closed: unparseable LLM output writes nothing', async () => {

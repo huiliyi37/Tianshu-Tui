@@ -21,6 +21,7 @@ import { gracefulKill } from '../platform.js'
 import { hashLine } from './hash-edit.js'
 import { registerGrepFileAccess } from './read-file.js'
 import { isRestrictedPath } from '../platform/restricted-paths.js'
+import { isScanExcludedDir } from './scan-excludes.js'
 
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
@@ -125,11 +126,16 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     }
 
     try {
-      const results = await nativeSearch(absPath, regex, glob, maxResults, params.cwd, contextLines)
+      const { results, timedOut } = await nativeSearch(absPath, regex, glob, maxResults, params.cwd, contextLines)
+      // A partial result that reads like a complete one is worse than no result:
+      // "no matches" would be taken as proof the string is absent.
+      const TIMEOUT_NOTE = timedOut
+        ? `[grep] 回退搜索在 ${TIMEOUT_MS / 1000}s 后超时，以下结果不完整——缩小 path 或改用更具体的 glob 重试。\n`
+        : ''
       if (results.length === 0) {
-        return { content: `[grep] 未找到 ripgrep (rg) 或其执行失败；已使用慢速回退。\n${GREP_EMPTY_RESULT}` }
+        return { content: `[grep] 未找到 ripgrep (rg) 或其执行失败；已使用慢速回退。\n${TIMEOUT_NOTE}${timedOut ? '' : GREP_EMPTY_RESULT}` }
       }
-      const FALLBACK_PREFIX = '[grep] 未找到 ripgrep (rg) 或其执行失败；已使用慢速回退。\n'
+      const FALLBACK_PREFIX = '[grep] 未找到 ripgrep (rg) 或其执行失败；已使用慢速回退。\n' + TIMEOUT_NOTE
       const text = results.length > maxResults
         ? FALLBACK_PREFIX + results.slice(0, maxResults).join('\n') + '\n...（已截断）'
         : FALLBACK_PREFIX + results.join('\n')
@@ -417,6 +423,12 @@ async function tryRipgrep(
   })
 }
 
+interface NativeSearchOutcome {
+  results: string[]
+  /** Hit the deadline — `results` is whatever the walk reached in time. */
+  timedOut: boolean
+}
+
 async function nativeSearch(
   absPath: string,
   regex: RegExp,
@@ -424,14 +436,27 @@ async function nativeSearch(
   maxResults: number,
   cwd: string,
   contextLines: number = 0,
-): Promise<string[]> {
+): Promise<NativeSearchOutcome> {
   const filter = await GitignoreFilter.create(cwd)
   const globRegex = glob ? globToRegex(glob) : null
   const results: string[] = []
   const visited = new Set<string>()
+  // Same budget ripgrep gets. Without one this walk is unbounded: it is only
+  // reached when rg is missing or already timed out, i.e. exactly when the tree
+  // is hostile.
+  const deadline = Date.now() + TIMEOUT_MS
+  let timedOut = false
+
+  /** Deadline check that latches the flag, so the reason survives the unwind. */
+  function outOfTime(): boolean {
+    if (Date.now() < deadline) return false
+    timedOut = true
+    return true
+  }
 
   async function walk(dir: string, isRoot: boolean): Promise<void> {
     if (results.length >= maxResults) return
+    if (outOfTime()) return
 
     let real: string
     try {
@@ -454,6 +479,11 @@ async function nativeSearch(
     }
     for (const entry of entries) {
       if (results.length >= maxResults) return
+      if (outOfTime()) return
+      // Prune before the lstat. Descending costs a readdir plus an lstat for
+      // every entry below, and the per-file gitignore check further down cannot
+      // refund any of it — it runs after the walk has already paid.
+      if (entry.isDirectory() && isScanExcludedDir(entry.name)) continue
       const fullPath = join(dir, entry.name)
       const s = await lstat(fullPath).catch(() => null)
       if (!s || s.isSymbolicLink()) continue
@@ -480,13 +510,13 @@ async function nativeSearch(
     const matched = await searchFile(absPath, regex, maxResults, contextLines)
     for (const line of matched) {
       results.push(`${relPath}:${line}`)
-      if (results.length >= maxResults) return results
+      if (results.length >= maxResults) return { results, timedOut }
     }
   } else {
     await walk(absPath, true)
   }
 
-  return results
+  return { results, timedOut }
 }
 
 async function searchFile(

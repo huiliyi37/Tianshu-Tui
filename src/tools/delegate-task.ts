@@ -14,12 +14,45 @@ import {
   delegateTimeoutMsSchema,
   toBudgetOverride,
 } from './delegate-budget.js'
-import type { Tool, ToolCallParams, ToolResult } from './types.js'
+import type { DelegationActivity, DelegationIdentity, Tool, ToolCallParams, ToolResult } from './types.js'
 import { createActivityStreamer, createDelegationActivityMapper, progressSnippet } from './worker-activity-stream.js'
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
 
 export interface DelegateTaskCoordinator {
   delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
+}
+
+function terminalActivity(
+  result: CoordinatorRun['results'][number],
+  parentToolId: string,
+  objective: string,
+  authority?: string,
+): DelegationActivity {
+  const identity = result as CoordinatorRun['results'][number] & DelegationIdentity
+  return {
+    workOrderId: result.workOrderId,
+    parentToolId,
+    ...(identity.dispatchId ? { dispatchId: identity.dispatchId } : {}),
+    ...(identity.attemptId ? { attemptId: identity.attemptId } : {}),
+    ...(identity.parentAttemptId ? { parentAttemptId: identity.parentAttemptId } : {}),
+    authority,
+    objective,
+    status: result.status,
+    progressLine: progressSnippet(result.summary),
+    summary: result.summary,
+    failureReason: result.failureReason,
+    model: result.model,
+    provider: result.provider,
+    usage: result.usage,
+    artifactId: result.diffArtifactId,
+    changedFiles: result.changedFiles.length > 0 ? result.changedFiles : undefined,
+    findingsCount: result.findings.length > 0 ? result.findings.length : undefined,
+    topFinding: result.findings[0]?.claim,
+    verificationBrief: result.verification
+      ? { status: result.verification.status, passed: result.verification.passed, failed: result.verification.failed }
+      : undefined,
+    evidenceStatus: result.evidenceStatus,
+  }
 }
 
 /** Dynamic profile validation — accepts built-in + user-loaded profiles */
@@ -156,106 +189,90 @@ export function createDelegateTaskTool(
           }
         : undefined
 
-      const run = await coordinator.delegate({
-        parentTurnId: params.toolUseId,
-        objective: taskObjective,
-        kind: parsed.data.kind ?? 'code_search',
-        profile: (parsed.data.profile ?? DEFAULT_DELEGATE_PROFILE) as import('../agent/work-order.js').WorkerProfile,
-        authority: parsed.data.authority,
-        scope: {
-          files: parsed.data.files,
-          symbols: parsed.data.symbols,
-        },
-        reviewDepth: params.reviewDepth,
-        delegationDepth: params.delegationDepth ?? 0,
-        sessionTurn: params.sessionTurnCount,
-        onActivity,
-        // 嵌套委派透传：本 worker 再派 sub-worker 时，sub-worker 的活动
-        // （coordinator 已盖 parentWorkerId）直通同一条 UI 通道。
-        onNestedActivity: params.onWorkerActivity,
-        resumeWorkOrderId: parsed.data.resume,
-        budget: toBudgetOverride(parsed.data),
-      }, params.abortSignal)
+      let run: CoordinatorRun
+      try {
+        run = await coordinator.delegate({
+          parentTurnId: params.toolUseId,
+          objective: taskObjective,
+          kind: parsed.data.kind ?? 'code_search',
+          profile: (parsed.data.profile ?? DEFAULT_DELEGATE_PROFILE) as import('../agent/work-order.js').WorkerProfile,
+          authority: parsed.data.authority,
+          scope: {
+            files: parsed.data.files,
+            symbols: parsed.data.symbols,
+          },
+          reviewDepth: params.reviewDepth,
+          delegationDepth: params.delegationDepth ?? 0,
+          sessionTurn: params.sessionTurnCount,
+          onActivity,
+          // 嵌套委派透传：本 worker 再派 sub-worker 时，sub-worker 的活动
+          // （coordinator 已盖 parentWorkerId）直通同一条 UI 通道。
+          onNestedActivity: params.onWorkerActivity,
+          resumeWorkOrderId: parsed.data.resume,
+          budget: toBudgetOverride(parsed.data),
+        }, params.abortSignal)
 
-      // T4: terminal per-worker status for the subagent panel.
-      if (params.onWorkerActivity) {
-        for (const r of run.results) {
-          params.onWorkerActivity({
-            workOrderId: r.workOrderId,
-            parentToolId: params.toolUseId,
-            authority: parsed.data.authority,
-            objective: taskObjective,
-            status: r.status,
-            progressLine: progressSnippet(r.summary),
-            summary: r.summary,
-            failureReason: r.failureReason,
-            model: r.model,
-            provider: r.provider,
-            usage: r.usage,
-            artifactId: r.diffArtifactId,
-            changedFiles: r.changedFiles.length > 0 ? r.changedFiles : undefined,
-            findingsCount: r.findings.length > 0 ? r.findings.length : undefined,
-            topFinding: r.findings[0]?.claim,
-            verificationBrief: r.verification
-              ? { status: r.verification.status, passed: r.verification.passed, failed: r.verification.failed }
-              : undefined,
-            evidenceStatus: r.evidenceStatus,
-          })
+        // T4: finish flushes any coalesced tail before the terminal event and
+        // seals the worker so a queued timer cannot resurrect it.
+        for (const result of run.results) {
+          activityMapper?.finish(terminalActivity(result, params.toolUseId, taskObjective, parsed.data.authority))
         }
-      }
 
-      // H4-D4 producer：worker 完成即打点精确 orderId——attack_case 的
-      // worker: 证据验真依赖此记录（passed 才算完成；failed/blocked 的
-      // worker 结果不得作为 supported 证据来源）。
-      const attackStore = getProblemAttackStore?.()
-      if (attackStore) {
-        for (const r of run.results) {
-          if (r.status === 'passed') attackStore.markWorkerCompleted(r.workOrderId)
+        // H4-D4 producer：worker 完成即打点精确 orderId——attack_case 的
+        // worker: 证据验真依赖此记录（passed 才算完成；failed/blocked 的
+        // worker 结果不得作为 supported 证据来源）。
+        const attackStore = getProblemAttackStore?.()
+        if (attackStore) {
+          for (const r of run.results) {
+            if (r.status === 'passed') attackStore.markWorkerCompleted(r.workOrderId)
+          }
         }
-      }
 
-      // Extract worker findings into claim store
-      if (run.status === 'completed') {
-        const claimStore = getClaimStore?.()
-        const sid = getSessionId?.()
-        if (claimStore && sid) {
-          const createdAt = Date.now()
-          for (const result of run.results) {
-            if (result.status !== 'passed') continue
-            const evidencePaths = result.changedFiles.slice(0, 3)
-            for (const finding of result.findings) {
-              const claimText = typeof finding === 'string' ? finding : finding.claim
-              const confidence = typeof finding === 'string' ? 0.7
-                : finding.confidence === 'high' ? 0.85
-                : finding.confidence === 'medium' ? 0.7
-                : 0.55
-              const proposal: ClaimProposal = {
-                kind: 'worker_finding',
-                scope: 'session',
-                text: claimText,
-                confidence,
-                fitness: confidence >= 0.85 ? 5 : confidence >= 0.7 ? 3 : 2,
-                source: { actor: 'worker', sessionId: sid, turn: params.sessionTurnCount ?? 0, eventId: `${params.toolUseId}:worker` },
-                evidence: [{
-                  id: `${params.toolUseId}:finding`,
-                  kind: 'worker',
-                  summary: typeof finding === 'string' ? finding : finding.evidence,
-                  path: evidencePaths[0],
+        // Extract worker findings into claim store
+        if (run.status === 'completed') {
+          const claimStore = getClaimStore?.()
+          const sid = getSessionId?.()
+          if (claimStore && sid) {
+            const createdAt = Date.now()
+            for (const result of run.results) {
+              if (result.status !== 'passed') continue
+              const evidencePaths = result.changedFiles.slice(0, 3)
+              for (const finding of result.findings) {
+                const claimText = typeof finding === 'string' ? finding : finding.claim
+                const confidence = typeof finding === 'string' ? 0.7
+                  : finding.confidence === 'high' ? 0.85
+                  : finding.confidence === 'medium' ? 0.7
+                  : 0.55
+                const proposal: ClaimProposal = {
+                  kind: 'worker_finding',
+                  scope: 'session',
+                  text: claimText,
+                  confidence,
+                  fitness: confidence >= 0.85 ? 5 : confidence >= 0.7 ? 3 : 2,
+                  source: { actor: 'worker', sessionId: sid, turn: params.sessionTurnCount ?? 0, eventId: `${params.toolUseId}:worker` },
+                  evidence: [{
+                    id: `${params.toolUseId}:finding`,
+                    kind: 'worker',
+                    summary: typeof finding === 'string' ? finding : finding.evidence,
+                    path: evidencePaths[0],
+                    createdAt,
+                  }],
                   createdAt,
-                }],
-                createdAt,
-                tags: ['worker', result.workOrderId],
+                  tags: ['worker', result.workOrderId],
+                }
+                claimStore.propose(proposal)
               }
-              claimStore.propose(proposal)
             }
           }
         }
-      }
 
-      return {
-        content: run.packet,
-        uiContent: formatUiContent(run),
-        isError: false,
+        return {
+          content: run.packet,
+          uiContent: formatUiContent(run),
+          isError: false,
+        }
+      } finally {
+        activityMapper?.dispose()
       }
     },
     requiresApproval: () => false,

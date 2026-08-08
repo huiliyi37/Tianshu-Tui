@@ -6,6 +6,7 @@
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createDelegationActivityMapper } from '../tools/worker-activity-stream.js'
+import type { DelegationActivity, DelegationIdentity } from '../tools/types.js'
 import type { DelegateWorkerInput, DelegateActivityUpdate, ManagedAgent, RuntimeSessionManager } from './session-manager.js'
 import { SessionPersist, getSessionDir } from '../agent/session-persist.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
@@ -48,6 +49,8 @@ import type { PlanItem } from '../agent/council/council-plan.js'
 import type { CouncilPanelModel } from '../tui/council-panel-model.js'
 import type { McpManager } from '../mcp/manager.js'
 import { findProjectConfig } from '../config/manager.js'
+import { proRegistry } from '../api/pro-registry.js'
+import { anchorsFromMessages } from '../agent/reasoning-anchors.js'
 import type { Config } from '../config/schema.js'
 import { readFileSync } from 'node:fs'
 import {
@@ -127,7 +130,7 @@ export function getOrCreateMeridianIndexer(shared: SharedRuntime, cwd: string): 
   } catch { /* 清理绝不阻塞会话创建 */ }
   shared.meridianIndexers.set(cwd, indexer)
   // 后台闲时全量索引（镜像 CLI bootstrap）——同 cwd 多会话共享单例，天然只跑一次。
-  setImmediate(() => { scheduleMeridianBackfill(indexer, cwd) })
+  setImmediate(() => { scheduleMeridianBackfill(indexer, cwd, { reason: 'startup' }) })
   return indexer
 }
 
@@ -445,6 +448,7 @@ function assembleAgentLoop(
   approvalMode: ApprovalMode | undefined,
   registry?: SessionRegistry,
   shared?: SharedRuntime,
+  allowedTools?: string[],
 ): AgentLoop {
   // Wave J: domainKnowledgeStore 优先从 sidecar SharedRuntime.domainStores
   // 按 cwd 取；fallback 是 per-call new（与 bootstrap 单 session 行为一致——
@@ -481,6 +485,8 @@ function assembleAgentLoop(
     sharedProviderHealth: shared?.providerHealth,
     // I4: user hook results → desktop event stream via the session manager.
     emitHookResult: (results, meta) => shared?.sessions?.emitHookResult(sessionId, results, meta),
+    // Per-session 工具白名单（蒸馏回放等自动化场景）。
+    allowedTools,
   })
 
   // approvalMode 在 createAgentRuntime 内部未接收；构造后立即覆盖
@@ -512,6 +518,20 @@ function assembleAgentLoop(
   // Phase 2: 注册 coordinator 引用到 session-manager，让桌面 per-worker steer/kill 路由可达。
   // 闭包每次实时读 stores.refs.coordinator——switchModel 会替换 coordinator，闭包必须跟到新实例。
   shared?.sessions?.setCoordinatorRef(sessionId, () => stores.refs.coordinator ?? undefined)
+
+  // 锚点补课（spec 3c 动作 B）：sidecar 重启恢复与 switchModel 重建都会新建
+  // PromptEngine（锚点数组归零），而历史消息在 wire 上仍被截断——从完整历史
+  // 惰性重建（与逐轮增量同粒度，并集确定性等价；append 去重保证幂等）。
+  // spark 唯一发布面是桌面端，此处正是主生产路径；TUI 对应接线在
+  // bootstrap.ts 的 resume 分支。非 spark / 开源构建 extractor 恒 undefined → 零行为差异。
+  const priorMessages = stores.session.getMessages()
+  if (priorMessages.length > 0) {
+    const anchorExtractor = proRegistry.getAnchorExtractor(spec.provider.name)
+    if (anchorExtractor) {
+      const anchors = anchorsFromMessages(priorMessages, anchorExtractor, spec.model.id, agent.config.wireContext)
+      if (anchors.length > 0) agent.config.promptEngine.appendExcludedPathAnchors(anchors)
+    }
+  }
 
   return agent
 }
@@ -598,6 +618,7 @@ export function buildManagedAgent(
   shared?: SharedRuntime,
   reload?: () => ServeContext,
   preferredModelId?: string,
+  allowedTools?: string[],
 ): import('./session-manager.js').ManagedAgent {
   const stores = buildSessionStores(ctx, cwd, sessionId, registry, shared)
   // Register stores so the session-manager's goal methods can reach
@@ -615,7 +636,7 @@ export function buildManagedAgent(
         ? resolveModelSpecWithReload(ctx, preferredModelId, reload)
         : resolveModelSpecWithReload(ctx, preferredModelId)
       : null) ?? resolveInitialSpec(ctx, reload)
-  let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
+  let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared, allowedTools)
   // Rebuild the loop on a new spec, preserving conversation + stores. Shared
   // by switchModel and the run pre-flight self-heal below.
   const rebuildOnSpec = (next: ResolvedModelSpec) => {
@@ -624,7 +645,7 @@ export function buildManagedAgent(
     void oldAgent.cancelIdleCompaction()
     spec = next
     const liveApprovalMode = oldAgent.config.approvalMode
-    agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, liveApprovalMode, registry, shared)
+    agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, liveApprovalMode, registry, shared, allowedTools)
     if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
       try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
     }
@@ -695,11 +716,14 @@ export function buildManagedAgent(
       // 持久化切换（与 TUI bootstrap.switchAgentRuntime 同源）：metadata.model/
       // provider 反映当前模型，JSONL 落 model_switch 审计行——没有这两笔，
       // 桌面端换模型在会话日志里是隐形的。best-effort，不阻塞切换。
+      // 会话侧存 provider:modelId，避免 deepseek / deepseek-spark 同 wire id 撞车
+      // （resume / listModels current 才能消歧）；发给 API 的仍是 spec.model.id。
+      const modelRef = `${spec.provider.name}:${spec.model.id}`
       try {
         stores.persist.updateMetadata({ model: spec.model.id, provider: spec.provider.name })
         stores.persist.appendModelSwitch({ from: fromModel, to: spec.model.id, provider: spec.provider.name })
       } catch { /* persistence is best-effort — never block a model switch */ }
-      return spec.model.id
+      return modelRef
     },
     // Context usage display (desktop header progress bar) — real occupancy
     // (last API prompt_tokens + tail estimate), provider-agnostic.
@@ -736,10 +760,21 @@ export function buildManagedAgent(
     },
     // Wave L: 进程退出释放本 session 的 coordinator timer + in-flight worker
     // 句柄。abort() 仅中止当前 turn；shutdown() 是终结性操作。
-    shutdown: () => {
+    shutdown: async () => {
       try { void agent.cancelIdleCompaction() } catch { /* best-effort */ }
-      try { stores.refs.coordinator?.shutdown() } catch { /* best-effort */ }
+      const coordinator = stores.refs.coordinator
+      let settled = !coordinator
+      try {
+        if (coordinator?.shutdownAndWait) settled = await coordinator.shutdownAndWait()
+        else if (coordinator) {
+          coordinator.shutdown()
+          settled = false
+        }
+      } catch {
+        settled = false
+      }
       shared?.sessions?.clearCoordinatorRef(sessionId)
+      return settled
     },
     // I1: 桌面端议事会入口，直接评审 artifact 中的 council-plan-json。
     conveneCouncil: (input) => conveneCouncilOnCoordinator(agent, stores.refs.coordinator, stores.refs, input),
@@ -934,6 +969,24 @@ async function delegateWorkerOnCoordinator(
 ): Promise<void> {
   if (!coordinator) throw new Error('DelegationCoordinator not initialized')
   const profile = input.profile && input.profile.trim() ? input.profile.trim() : 'code_scout'
+  const activityMapper = createDelegationActivityMapper(opts.workerId, (a) => {
+    opts.onActivity({
+      workOrderId: opts.workerId,
+      parentToolId: a.parentToolId,
+      ...(a.dispatchId ? { dispatchId: a.dispatchId } : {}),
+      ...(a.attemptId ? { attemptId: a.attemptId } : {}),
+      ...(a.parentAttemptId ? { parentAttemptId: a.parentAttemptId } : {}),
+      profile: a.profile ?? profile,
+      authority: a.authority,
+      status: a.status,
+      progressLine: a.progressLine,
+      toolUseCount: a.toolUseCount,
+      tokenCount: a.tokenCount,
+      eventKind: a.eventKind,
+      eventDetail: a.eventDetail,
+      contract: a.contract,
+    })
+  })
   const request: import('../agent/coordinator.js').DelegationRequest = {
     // Use the manager-owned workerId as the stable node key (parentTurnId derives
     // the work order id), so every activity update merges into the same panel node.
@@ -946,46 +999,50 @@ async function delegateWorkerOnCoordinator(
     // Reuse the shared mapper so user-dispatched workers get the same live
     // counters (toolUseCount/tokenCount) and eventKind/eventDetail passthrough
     // as agent-initiated delegations.
-    onActivity: createDelegationActivityMapper(opts.workerId, (a) => {
-      opts.onActivity({
-        workOrderId: opts.workerId,
-        parentToolId: a.parentToolId,
-        profile: a.profile ?? profile,
-        authority: a.authority,
-        status: a.status,
-        progressLine: a.progressLine,
-        toolUseCount: a.toolUseCount,
-        tokenCount: a.tokenCount,
-        eventKind: a.eventKind,
-        eventDetail: a.eventDetail,
-        contract: a.contract,
-      })
-    }),
+    onActivity: activityMapper,
   }
   if (input.authority) request.authority = input.authority
   if (input.resume) request.resumeWorkOrderId = input.resume
-  const run = await coordinator.delegate(request, opts.signal)
-  const result = run.results[0]
-  const status: DelegateActivityUpdate['status'] = result?.status ?? (run.status === 'skipped' ? 'blocked' : 'passed')
-  opts.onActivity({
-    workOrderId: opts.workerId,
-    profile,
-    status,
-    progressLine: result?.summary ? result.summary.slice(0, 120) : undefined,
-    failureReason: result?.failureReason,
-    summary: buildDelegateSummary(input, run),
-    changedFiles: result?.changedFiles && result.changedFiles.length > 0 ? result.changedFiles : undefined,
-    artifactId: result?.diffArtifactId,
-    model: run.selectedModel ?? result?.model,
-    provider: result?.provider,
-    usage: result?.usage,
-    // 终态证据摘要（与 delegate_task 的 emitTerminal 对齐）。
-    findingsCount: result?.findings && result.findings.length > 0 ? result.findings.length : undefined,
-    topFinding: result?.findings?.[0]?.claim,
-    verificationBrief: result?.verification
-      ? { status: result.verification.status, passed: result.verification.passed, failed: result.verification.failed }
-      : undefined,
-    evidenceStatus: result?.evidenceStatus,
-  })
+  try {
+    const run = await coordinator.delegate(request, opts.signal)
+    const result = run.results[0]
+    if (result) {
+      const identity = result as typeof result & DelegationIdentity
+      const terminal: DelegationActivity = {
+        workOrderId: result.workOrderId,
+        parentToolId: opts.workerId,
+        ...(identity.dispatchId ? { dispatchId: identity.dispatchId } : {}),
+        ...(identity.attemptId ? { attemptId: identity.attemptId } : {}),
+        ...(identity.parentAttemptId ? { parentAttemptId: identity.parentAttemptId } : {}),
+        profile,
+        status: result.status,
+        progressLine: result.summary ? result.summary.slice(0, 120) : undefined,
+        failureReason: result.failureReason,
+        summary: buildDelegateSummary(input, run),
+        changedFiles: result.changedFiles.length > 0 ? result.changedFiles : undefined,
+        artifactId: result.diffArtifactId,
+        model: run.selectedModel ?? result.model,
+        provider: result.provider,
+        usage: result.usage,
+        // 终态证据摘要（与 delegate_task 的 emitTerminal 对齐）。
+        findingsCount: result.findings.length > 0 ? result.findings.length : undefined,
+        topFinding: result.findings[0]?.claim,
+        verificationBrief: result.verification
+          ? { status: result.verification.status, passed: result.verification.passed, failed: result.verification.failed }
+          : undefined,
+        evidenceStatus: result.evidenceStatus,
+      }
+      activityMapper.finish(terminal)
+    } else {
+      activityMapper.finish({
+        workOrderId: opts.workerId,
+        parentToolId: opts.workerId,
+        profile,
+        status: run.status === 'skipped' ? 'blocked' : 'passed',
+        summary: buildDelegateSummary(input, run),
+      })
+    }
+  } finally {
+    activityMapper.dispose()
+  }
 }
-

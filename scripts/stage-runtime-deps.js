@@ -36,6 +36,7 @@ import { createRequire } from 'node:module'
 import { isForeignPlatformPackage } from './runtime-platform-filter.js'
 import { pruneTreeSitterWasms } from './tree-sitter-wasm-keep.js'
 import { pruneTypescriptStaging } from './typescript-stage-trim.js'
+import { writeStagingMarker, clearStagingMarker } from './staged-runtime-verify.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '..')
@@ -52,6 +53,7 @@ const ROOTS = [
   'web-tree-sitter', // tree-sitter chunker (wasm loader)
   'tree-sitter-wasms', // grammar .wasm files (loaded by path)
   'playwright-core', // headless chromium driver (variable-specifier dynamic import — tsup 无法内联)
+  'exceljs', // Office .xlsx 读写（文档附件管线）。纯 JS，体积 ~22MB 不宜内联进主 bundle，随包分发。与 mammoth 同类（mammoth 是 optional 走 lazy，exceljs 是正式依赖走必装）。
 ]
 
 function pkgDir(name) {
@@ -112,6 +114,10 @@ function readDeps(dir) {
 
 if (existsSync(destModules)) rmSync(destModules, { recursive: true, force: true })
 mkdirSync(destModules, { recursive: true })
+// Every exit path below except the final success leaves this marker behind, so
+// an interrupted run can never be mistaken for a complete one (2026-08-03: a
+// dead run left 65 dirs / 0 files and shipped silently for two days).
+writeStagingMarker(join(repoRoot, 'dist'), 'copying root package closure')
 
 const visited = new Set()
 const queue = [...ROOTS]
@@ -200,7 +206,12 @@ console.log(
 )
 
 // ── better-sqlite3: lean JS wrapper + zero-degrade load assertion ──
+writeStagingMarker(join(repoRoot, 'dist'), 'better-sqlite3 wrapper + native load assertion')
 stageBetterSqlite3Wrapper()
+
+// Reached only when every stage above succeeded — each failure path exits(1)
+// with the marker still on disk.
+clearStagingMarker(join(repoRoot, 'dist'))
 
 function stageBetterSqlite3Wrapper() {
   const src = pkgDir('better-sqlite3')

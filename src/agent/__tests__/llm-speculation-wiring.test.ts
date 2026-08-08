@@ -56,21 +56,54 @@ describe('LLM speculation wiring (loop-factory → turn-orchestrator → p3)', (
     }
   })
 
-  it('does not inject speculateDuringBatch even when config opts in (chain SEALED 2026-07-07)', async () => {
+  it('does not inject speculateDuringBatch even when config opts in (SEALED without observe env)', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'llm-spec-wiring-'))
     try {
       const client = mockClient('[{"tool":"read_file","target":"src/next.ts","probability":0.9}]')
       const loop = makeLoop(cwd, { client, llmSpeculation: { enabled: true } })
       const deps = (loop as unknown as { turnOrchestrator: { deps: Record<string, unknown> } }).turnOrchestrator['deps']
 
-      // The engine's only consumer was ShadowQueue pre-execution; with serving
-      // cut (stale-read incident) an opted-in engine would burn side-path LLM
-      // calls for nothing — so the factory never constructs it anymore.
+      // 双重 opt-in 缺一不可：config 开但 RIVET_SPEC_OBSERVE 未设 → 维持封存。
       assert.equal(deps.speculateDuringBatch, undefined, 'sealed chain must not inject the dep')
       assert.equal(loop.llmSpeculationEngine, null, 'engine must not be constructed')
       assert.equal(client.calls.length, 0, 'no speculative LLM call may fire')
       assert.equal(loop.p3.queue.statsBySource().llm.enqueued, 0)
     } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('RIVET_SPEC_OBSERVE=1 + config enabled → engine constructed, enqueue-only, serving stays sealed (T5b)', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'llm-spec-wiring-'))
+    const prevEnv = process.env['RIVET_SPEC_OBSERVE']
+    process.env['RIVET_SPEC_OBSERVE'] = '1'
+    try {
+      const client = mockClient('[{"tool":"read_file","target":"src/next.ts","probability":0.9}]')
+      const loop = makeLoop(cwd, { client, llmSpeculation: { enabled: true } })
+      const deps = (loop as unknown as { turnOrchestrator: { deps: Record<string, unknown> } }).turnOrchestrator['deps'] as {
+        speculateDuringBatch?: (params: { request: OaiChatRequest; toolUses: Array<{ id: string; name: string; input: Record<string, unknown> }>; turn: number }) => void
+      }
+
+      assert.ok(deps.speculateDuringBatch, 'observe mode must inject the dep')
+      assert.ok(loop.llmSpeculationEngine, 'observe mode must construct the engine')
+
+      // 发一次投机调用：预测应入队（llm 臂统计），但 serving 恒封存。
+      deps.speculateDuringBatch!({
+        request: { model: 'deepseek-v4-flash', messages: [{ role: 'user', content: 'hi' }] } as OaiChatRequest,
+        toolUses: [{ id: 't1', name: 'bash', input: { command: 'sleep 1' } }],
+        turn: 1,
+      })
+      const deadline = Date.now() + 2_000
+      while (loop.p3.queue.statsBySource().llm.enqueued === 0 && Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 10))
+      }
+      assert.equal(client.calls.length, 1, 'speculative LLM call fires in observe mode')
+      assert.equal(loop.p3.queue.statsBySource().llm.enqueued, 1, 'prediction enqueued for stats')
+      assert.equal(loop.p3.checkSpeculativeCache('read_file', 'src/next.ts'), undefined,
+        'serving stays sealed — observe mode never returns cached content')
+    } finally {
+      if (prevEnv === undefined) delete process.env['RIVET_SPEC_OBSERVE']
+      else process.env['RIVET_SPEC_OBSERVE'] = prevEnv
       rmSync(cwd, { recursive: true, force: true })
     }
   })

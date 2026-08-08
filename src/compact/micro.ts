@@ -5,8 +5,6 @@ import { estimateImageTokens } from '../context/image-tokens.js'
 import { collapseToolResult } from './context-collapse.js'
 import { ARTIFACT_MARKER_REGEX } from './recovery-ref.js'
 
-const CHARS_PER_TOKEN = 4
-
 /**
  * Compact a tool message: first try semantic Context Collapse (for old messages),
  * then fall back to truncation.

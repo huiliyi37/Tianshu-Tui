@@ -44,6 +44,20 @@ export interface AdvisoryOutcomeEvent {
   shadow?: boolean
 }
 
+/**
+ * 会话结束时仍未走完观察窗口的送达 — 观测用，不进 adopted/ignored 账本。
+ * 高 unresolved 占比意味着该场景的 expect 窗口比会话本身还长，
+ * 说明的是「测不到」而不是「没效果」。
+ */
+export interface UnresolvedExpectation {
+  key: string
+  expectKind: AdvisoryExpectation['kind']
+  deliveredTurn: number
+  /** 距 deadline 还差几轮 */
+  turnsShort: number
+  shadow?: boolean
+}
+
 /** per-key 累计采纳统计 */
 export interface AdvisoryKeyStats {
   delivered: number
@@ -232,6 +246,35 @@ export class AdvisoryReadback {
     return decided
   }
 
+  /**
+   * 会话结束核销 — postSession 调用。先按当前证据跑一次正常 evaluate（到期的
+   * 照常判定），再把仍未到期的 pending 清空并如实报告。
+   *
+   * 未到期的**不判 ignored**：advisory 在末轮送达时，模型根本没有走完观察窗口
+   * 的机会，判忽略会把"没机会响应"记成"听了不做"。这类假 ignored 会经
+   * ignoredStreak（习惯化静音）、efficacy 负反馈、跨会话 lift 先验三条路径压低
+   * 该 key 的效力评分，最终静音掉本可能有效的提醒。worker 尤其吃这一刀——
+   * 中位只跑 2 轮，而 verify_attempted 窗口 2 轮、pattern_absent 4 轮，几乎所有
+   * pending 在会话结束时都未到期（实测 88 个 worker 只产出 3 条 outcome）。
+   *
+   * 所以这里只把它们作为 unresolved 报出去做观测，不进 adopted/ignored 账本。
+   */
+  flushAtSessionEnd(turn: number): { decided: number; unresolved: UnresolvedExpectation[] } {
+    const decided = this.evaluate(turn)
+    const unresolved = this.pending.map(p => {
+      const window = p.expect.withinTurns ?? DEFAULT_WINDOW[p.expect.kind]
+      return {
+        key: p.key,
+        expectKind: p.expect.kind,
+        deliveredTurn: p.deliveredTurn,
+        turnsShort: Math.max(0, p.deliveredTurn + window - 1 - turn),
+        ...(p.shadow ? { shadow: true } : {}),
+      }
+    })
+    this.pending = []
+    return { decided, unresolved }
+  }
+
   /** 读取并清空本次评估以来的判定事件（遥测落盘用） */
   drainOutcomes(): AdvisoryOutcomeEvent[] {
     const out = this.outcomes
@@ -265,6 +308,16 @@ export class AdvisoryReadback {
     const decided = adopted + (s?.ignored ?? 0) + (p?.ignored ?? 0)
     if (decided <= 0) return null
     return adopted / decided
+  }
+
+  /**
+   * 决出样本数（会话实测 + 先验）— T7 效力排序的置信度分母。
+   * 口径与 getAdoptionRate 一致：同源合并，避免"率含先验、样本数不含"的错配。
+   */
+  getDecidedCount(key: string): number {
+    const s = this.stats.get(key)
+    const p = this.priors.get(key)
+    return (s?.adopted ?? 0) + (s?.ignored ?? 0) + (p?.adopted ?? 0) + (p?.ignored ?? 0)
   }
 
   /**

@@ -1,20 +1,25 @@
 /**
  * Advisory-Readback Hook — advisory 采纳核销的运行时接线（P1a）。
  *
- * 双半边设计：
+ * 三半边设计：
  *   postTool 半边 — 把每个工具事件（完整 target/command + 错误状态）喂进
  *     AdvisoryReadback 的观察日志。不走 recentToolHistory：那是截断的滚动窗口
  *     （重轮次 20+ 调用会把窗口内证据挤掉），也不带 turn 标记。
  *   postTurn 半边 — 对到期的 expect 谓词核销，判定 adopted/ignored，
  *     并把判定事件落遥测（kind: 'advisory-outcome'）。
+ *   postSession 半边 — 会话结束时最后核销一次，并把仍未走完观察窗口的送达
+ *     作为 unresolved 报出。此前没有这一半边：末轮送达的 advisory 会随会话
+ *     结束被静默丢弃，既不产生 outcome 也不留任何痕迹。worker 首当其冲——
+ *     中位只跑 2 轮而窗口 2-4 轮，实测 88 个 worker 仅产出 3 条 outcome，
+ *     效力账本上 worker 场景近乎空白。
  *
  * 送达跟踪（track）不在 hook 里：render 发生在 buildTurnRequest（turn-step-producer），
  * hook 管线拿不到那个时点——由 turn-step-producer 在 render 后直接调用。
  */
 
-import type { PostToolRuntimeHook, PostTurnRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
+import type { PostSessionRuntimeHook, PostToolRuntimeHook, PostTurnRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
 import type { AdvisoryReadback } from '../advisory-readback.js'
-import { ADVISORY_OUTCOME_KIND, ADVISORY_HOLDOUT_KIND } from '../telemetry-writer.js'
+import { ADVISORY_OUTCOME_KIND, ADVISORY_HOLDOUT_KIND, ADVISORY_UNRESOLVED_KIND } from '../telemetry-writer.js'
 
 export interface AdvisoryReadbackHookDeps {
   readback: AdvisoryReadback
@@ -45,7 +50,7 @@ export function extractObservedTarget(tool: RuntimeToolEvent): string {
 
 export function createAdvisoryReadbackHooks(
   deps: AdvisoryReadbackHookDeps,
-): [PostToolRuntimeHook, PostTurnRuntimeHook] {
+): [PostToolRuntimeHook, PostTurnRuntimeHook, PostSessionRuntimeHook] {
   const observer: PostToolRuntimeHook = {
     phase: 'postTool',
     name: 'advisory-readback-observe',
@@ -75,5 +80,34 @@ export function createAdvisoryReadbackHooks(
     },
   }
 
-  return [observer, evaluator]
+  const finalizer: PostSessionRuntimeHook = {
+    phase: 'postSession',
+    name: 'advisory-readback-finalize',
+    run(ctx: RuntimeHookContext): void {
+      const { decided, unresolved } = deps.readback.flushAtSessionEnd(ctx.snapshot.turn)
+      if (decided > 0) {
+        for (const o of deps.readback.drainOutcomes()) {
+          deps.writeTelemetry?.({ kind: o.shadow ? ADVISORY_HOLDOUT_KIND : ADVISORY_OUTCOME_KIND, ...o })
+        }
+        deps.onOutcomes?.(deps.readback.getTotals())
+      }
+      if (unresolved.length === 0) return
+      // 一条汇总而非逐条：每会话一行，体量可控且足以回答"盲区有多大、卡在哪些 key"。
+      const byKey: Record<string, number> = {}
+      let maxTurnsShort = 0
+      for (const u of unresolved) {
+        byKey[u.key] = (byKey[u.key] ?? 0) + 1
+        if (u.turnsShort > maxTurnsShort) maxTurnsShort = u.turnsShort
+      }
+      deps.writeTelemetry?.({
+        kind: ADVISORY_UNRESOLVED_KIND,
+        turn: ctx.snapshot.turn,
+        count: unresolved.length,
+        maxTurnsShort,
+        byKey,
+      })
+    },
+  }
+
+  return [observer, evaluator, finalizer]
 }

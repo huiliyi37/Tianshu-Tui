@@ -101,6 +101,9 @@ describe('AgentLoop reliability integration', () => {
       resourceSensorOptions: {
         memoryLimitBytes: 1_000,
         memoryUsage: () => ({ rss: 750, heapUsed: 750 }),
+        // e1af595e0 后 DEFAULT_MEMORY_COOLDOWN_SAMPLES 非 0——不显式清零会被
+        // cooldown 压制 resource pressure，degraded 拦截不触发（既有红修复）。
+        initialMemoryCooldownSamples: 0,
       },
     }, session, TEST_CWD)
 

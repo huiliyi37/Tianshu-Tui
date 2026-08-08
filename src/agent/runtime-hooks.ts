@@ -31,7 +31,7 @@ export interface RuntimeToolEvent {
 export interface RuntimeHookSnapshot {
   cwd: string
   turn: number
-  recentToolHistory: Array<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target' | 'argsHash' | 'errorClass'>>
+  recentToolHistory: Array<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target' | 'argsHash' | 'errorClass' | 'bashActivity'>>
   sensorium: Sensorium | null
   sensoriumInput?: SensoriumInput
   providerDegradationRatio?: number
@@ -97,30 +97,37 @@ export interface RuntimeHookContext {
 export interface PreTurnRuntimeHook {
   phase: 'preTurn'
   name: string
+  /** 单 hook 预算覆盖（ms）。缺省用全局 hookTimeoutMs（默认 10s）。
+   *  essence-gate 等内外层超时层级 hook 必须声明——外层预算要 > 内层 fail-closed。 */
+  budgetMs?: number
   run(ctx: RuntimeHookContext): Promise<void> | void
 }
 
 export interface AfterPerceptionRuntimeHook {
   phase: 'afterPerception'
   name: string
+  budgetMs?: number
   run(ctx: RuntimeHookContext): Promise<void> | void
 }
 
 export interface PostToolRuntimeHook {
   phase: 'postTool'
   name: string
+  budgetMs?: number
   run(ctx: RuntimeHookContext, tool: RuntimeToolEvent): Promise<void> | void
 }
 
 export interface PostTurnRuntimeHook {
   phase: 'postTurn'
   name: string
+  budgetMs?: number
   run(ctx: RuntimeHookContext): Promise<void> | void
 }
 
 export interface PostSessionRuntimeHook {
   phase: 'postSession'
   name: string
+  budgetMs?: number
   run(ctx: RuntimeHookContext): Promise<void> | void
 }
 
@@ -151,6 +158,8 @@ export interface RuntimeHookRunEvent {
   phase: RuntimeHookPhase
   outcome: RuntimeHookRunOutcome
   durationMs: number
+  /** 本次执行生效的预算（单 hook budgetMs 或全局 hookTimeoutMs）——遥测可归因。 */
+  budgetMs?: number
   slow: boolean
   message?: string
 }
@@ -311,7 +320,7 @@ export class RuntimeHookPipeline {
       }
 
       const startedAt = Date.now()
-      const timeoutMs = this.options.hookTimeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS
+      const timeoutMs = hook.budgetMs ?? this.options.hookTimeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS
       const slowMs = this.options.hookSlowMs ?? DEFAULT_HOOK_SLOW_MS
       let timeout: ReturnType<typeof setTimeout> | undefined
       let timedOut = false
@@ -350,6 +359,7 @@ export class RuntimeHookPipeline {
           phase,
           outcome,
           durationMs,
+          budgetMs: timeoutMs,
           slow: outcome === 'completed' && durationMs >= slowMs,
           message,
         })

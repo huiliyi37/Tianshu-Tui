@@ -224,7 +224,11 @@ describe('formatPermissionModeLine（输入框下方权限模式行，CC parity�
   it('默认 auto-safe，含 shift+tab 提示', () => {
     const plain = stripAnsi(formatPermissionModeLine({}, theme))
     assert.ok(plain.includes('⏵ auto-safe'), `should show auto-safe: ${plain}`)
-    assert.ok(plain.includes('shift+tab'), 'should hint cycle key')
+    assert.ok(
+      plain.includes('(shift+tab plan · /ask 问答)'),
+      `should keep the shortcut hint compact: ${plain}`,
+    )
+    assert.ok(!plain.includes('切换'), 'persistent chrome should avoid tutorial-style copy')
   })
 
   it('plan mode 优先于权限模式，含 shift+tab 提示', () => {

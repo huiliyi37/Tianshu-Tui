@@ -1,6 +1,5 @@
 import type { CompactCircuitBreakerState, CompactDecision, CompactTier } from './types.js'
-import { adaptiveCompactPolicyRatios, compactPolicyRatios, precisionCeilingRatio } from '../compact/constants.js'
-import type { ProviderProfile } from '../api/provider-profile.js'
+import { adaptiveCompactPolicyRatios, compactPolicyRatios, precisionCeilingRatio, type CompactRatioProfile } from '../compact/constants.js'
 import type { CompactionAction, CompactionProfile } from '../compact/compaction-profile.js'
 
 export interface CompactPolicyInput {
@@ -8,7 +7,9 @@ export interface CompactPolicyInput {
   maxTokens: number
   turn: number
   failures: CompactCircuitBreakerState
-  providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
+  /** Includes optional per-provider compaction overrides (ratios /
+   *  precisionCeiling / llmLadder) — see ProviderProfile.compaction. */
+  providerProfile?: CompactRatioProfile
   /** Recent cache hit rate (0-1).  When ≥0.85, thresholds are shifted higher
    *  via adaptiveCompactPolicyRatios to delay compaction and protect the
    *  valuable prefix cache.  When null, falls back to base ratios. */
@@ -16,13 +17,14 @@ export interface CompactPolicyInput {
   /** Optional explicit precision-ceiling override (0-1). When provided it
    *  replaces the window-derived default from {@link precisionCeilingRatio}.
    *  The ceiling forces compaction regardless of cache warmth once context
-   *  usage reaches it, guarding model accuracy. */
+   *  usage reaches it, guarding model accuracy. Wins over the provider-profile
+   *  default (user config > provider default). */
   precisionCeilingOverride?: number
 }
 
 export function tierForRatio(
   ratio: number,
-  providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>,
+  providerProfile?: CompactRatioProfile,
   recentHitRate?: number | null,
   precisionCeiling?: number,
 ): CompactTier {
@@ -60,9 +62,13 @@ export function decideCompactTier(input: CompactPolicyInput): CompactDecision {
   }
   const ratio = input.maxTokens > 0 ? input.estimatedTokens / input.maxTokens : 1
   // Precision ceiling is derived from the window (larger windows hit accuracy
-  // degradation sooner), or overridden by config. It forces compaction once
-  // reached, even when a hot prefix cache would otherwise delay it.
-  const precisionCeiling = precisionCeilingRatio(input.maxTokens, input.precisionCeilingOverride)
+  // degradation sooner), or overridden by config / provider profile. It forces
+  // compaction once reached, even when a hot prefix cache would otherwise
+  // delay it. Precedence: explicit config override > provider default > window.
+  const precisionCeiling = precisionCeilingRatio(
+    input.maxTokens,
+    input.precisionCeilingOverride ?? input.providerProfile?.compaction?.precisionCeiling,
+  )
   const tier = tierForRatio(ratio, input.providerProfile, input.recentHitRate, precisionCeiling)
   return { tier, reason: reasonForTier(tier), shouldCompact: tier > 0 }
 }
@@ -142,7 +148,10 @@ export interface CompactActionDecision {
  */
 export function decideCompactAction(input: CompactActionInput): CompactActionDecision {
   const ratio = input.maxTokens > 0 ? input.estimatedTokens / input.maxTokens : 1
-  const precisionCeiling = precisionCeilingRatio(input.maxTokens, input.precisionCeilingOverride)
+  const precisionCeiling = precisionCeilingRatio(
+    input.maxTokens,
+    input.precisionCeilingOverride ?? input.providerProfile?.compaction?.precisionCeiling,
+  )
   const precisionRisk = precisionCeiling < 1 && ratio >= precisionCeiling
   const tierDecision = decideCompactTier(input)
   const base = { precisionRisk, profile: input.profile }
@@ -162,7 +171,9 @@ export function decideCompactAction(input: CompactActionInput): CompactActionDec
   }
 
   if (input.maxTokens >= 1_000_000) {
-    const llmRatios = llmActionRatiosFor(input.profile)
+    // Provider-profile ladder override (e.g. spark "no rewrite before 85%")
+    // wins over the billing/cache-derived default rungs.
+    const llmRatios = input.providerProfile?.compaction?.llmLadder ?? llmActionRatiosFor(input.profile)
     if (ratio >= llmRatios.full) {
       return { ...base, action: 'full-llm', reason: `full LLM compact ladder at ${(ratio * 100).toFixed(0)}%`, force: false, tier: tierDecision.tier, shouldCompact: true }
     }

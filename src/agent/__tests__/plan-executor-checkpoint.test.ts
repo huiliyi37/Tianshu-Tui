@@ -79,6 +79,34 @@ describe('buildWaveCheckpoint', () => {
     assert.equal(cp.completedResults.length, 1)
   })
 
+  // 依赖随任务存盘（2026-08-05）：此前只存 id/objective/profile/kind/scope/
+  // authority，resume 时依赖恒空——剩余任务间的顺序与条件边全丢。数据源
+  // TeamTask 本来就带 dependsOn，是保存时没拷。
+  it('persists dependsOn so /team-resume can restore ordering', () => {
+    const withDeps: TeamRunSummary = {
+      ...summary,
+      tasks: [
+        mkTask('T1', ['src/a.ts']),
+        { ...mkTask('T2', ['src/b.ts']), dependsOn: ['T1'] },
+        { ...mkTask('T3', ['src/c.ts']), dependsOn: [{ dependsOn: 'T2', onFailure: 'skip' }] },
+      ],
+      waves: [
+        { id: 'w0', taskIds: ['T1'], reason: '', parallelLimit: 3, risk: 'low' },
+        { id: 'w1', taskIds: ['T2', 'T3'], reason: '', parallelLimit: 3, risk: 'low' },
+      ],
+    }
+    const cp = buildWaveCheckpoint({ objective: 'obj', fromWave: 0 }, withDeps, null)
+    const t2 = cp.remainingOrders.find(o => o.id === 'T2')
+    const t3 = cp.remainingOrders.find(o => o.id === 'T3')
+    assert.deepEqual(t2?.dependsOn, ['T1'])
+    assert.deepEqual(t3?.dependsOn, [{ dependsOn: 'T2', onFailure: 'skip' }])
+  })
+
+  it('omits dependsOn entirely for tasks that have none (no empty-array noise on disk)', () => {
+    const cp = buildWaveCheckpoint({ objective: 'obj', fromWave: 0 }, summary, null)
+    assert.equal(cp.remainingOrders[0]!.dependsOn, undefined)
+  })
+
   it('accumulates prior completed results across waves', () => {
     const prior: WaveCheckpoint = {
       groupId: deriveTeamGroupId('obj'),

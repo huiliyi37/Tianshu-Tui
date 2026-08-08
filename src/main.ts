@@ -13,12 +13,21 @@
 // that might trigger fs operations against system-protected directories.
 import { installEpermFilter } from './platform/eperm-filter.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from './platform.js'
+import { assertStagedRuntimeIntact } from './platform/staged-runtime-guard.js'
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
 installEpermFilter()
+// `tsup --clean` empties dist/ but keeps the dist/node_modules skeleton, and an
+// empty package dir shadows the parent node_modules instead of falling through
+// — so a bare `npm run build` yields a bundle whose native/wasm deps silently
+// fail to resolve. Heal it when the parent tree can cover the gap, refuse to
+// start when it cannot. No-op outside a staged layout (tsx dev runs).
+assertStagedRuntimeIntact(dirname(fileURLToPath(import.meta.url)))
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { maybePrintStaticPromptCacheWarning } from './cli/prompt-version-warning.js'
-import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig, setApprovalMode as persistApprovalDefault, setDefaultDomainConfig, setDefaultModelConfig } from './config/manager.js'
+import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, upsertProviderModel, setUiConfig, setApprovalMode as persistApprovalDefault, setDefaultDomainConfig, setDefaultModelConfig } from './config/manager.js'
 import { isProFeatureEnabled } from './config/pro-license.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
@@ -150,7 +159,7 @@ async function shutdown(code: number = 0): Promise<void> {
     cleanup: [
       () => {
         // Delegate core cleanup to bootstrap shutdown handler.
-        ctx?.shutdown()
+        return ctx?.shutdown()
       },
       () => eventStream?.close(),
       () => {
@@ -354,14 +363,34 @@ async function main() {
     }
     // headless 此前完全忽略 --model/--provider（只有 TUI 路径经
     // bootstrapInteractiveSession 生效）——对齐：显式 flag 优先，缺省走配置默认。
-    const provName = requestedProvider ?? cfg.provider.default
+    // agent.defaultModel（"provider:modelId"）与 TUI 同源消费——bootstrap.ts 早已
+    // 按它挑 provider + model，headless 却只看 provider.default + models[0]。
+    // 同一份配置两条路径解读不同：TUI 用 defaultModel 跑得好好的，headless 却
+    // 按列表首项拿到另一个模型（本机实测首项是脏值 over-setup，API 直接拒绝）。
+    // 显式 --provider/--model 恒优先；defaultModel 指向的 provider/model 不存在
+    // 时逐级回退到原行为，不让一处配置错误把 headless 整个卡死。
+    const defaultModelRef = cfg.agent.defaultModel
+    const defaultModelParts = defaultModelRef && defaultModelRef.includes(':')
+      ? {
+          provider: defaultModelRef.slice(0, defaultModelRef.indexOf(':')),
+          modelId: defaultModelRef.slice(defaultModelRef.indexOf(':') + 1),
+        }
+      : null
+    const preferredProvider = defaultModelParts && cfg.provider.providers[defaultModelParts.provider]
+      ? defaultModelParts.provider
+      : undefined
+    const provName = requestedProvider ?? preferredProvider ?? cfg.provider.default
     const prov = cfg.provider.providers[provName]
     if (!prov) { process.stderr.write(`Provider not configured: ${provName}. Run: rivet config setup <provider>\n`); process.exit(1) }
     const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
     if (!key) { process.stderr.write(`API key not set. Export ${prov.apiKeyEnv ?? 'API_KEY'} or run: rivet config setup ${prov.name}\n`); process.exit(1) }
 
-    const model = requestedModel
-      ? (prov.models.find(m => m.id === requestedModel || m.alias === requestedModel) ?? prov.models[0]!)
+    // provName 若来自 defaultModel 前缀，modelId 才是同一份配置的另一半；
+    // 显式 --provider 换了服务商时不沿用 defaultModel 的 modelId（跨商无意义）。
+    const defaultModelId = provName === defaultModelParts?.provider ? defaultModelParts.modelId : undefined
+    const wantedModelId = requestedModel ?? defaultModelId
+    const model = wantedModelId
+      ? (prov.models.find(m => m.id === wantedModelId || m.alias === wantedModelId) ?? prov.models[0]!)
       : prov.models[0]!
     const sessionId = crypto.randomUUID()
 
@@ -469,6 +498,7 @@ async function main() {
         const headlessGalaxyTool = createGalaxyTool({
           delegateBatch: async (requests, policy, abortSignal, onProgress, onWorkerSettled) =>
             headlessCoordinator.delegateBatch(requests, policy, abortSignal, onProgress, onWorkerSettled),
+          getRuntimeSnapshot: () => headlessCoordinator.getRuntimeSnapshot(),
           // 路由学习（收编 #5）：headless 无 SharedRuntime，per-session 建库即可。
           domainKnowledgeStore: new DomainKnowledgeStore(join(process.cwd(), '.rivet', 'knowledge')),
           // DP 证据冗余（收编 #2）：agent 创建后由 headlessAgentRef 惰性提供。
@@ -563,6 +593,8 @@ async function main() {
 
     if (result.stdout) process.stdout.write(result.stdout + '\n')
     else if (result.json) process.stdout.write(JSON.stringify(result.json) + '\n')
+    // 失败诊断走 stderr——与 stdout 分流，不干扰 --json / --stream-json 的机器消费。
+    if (result.stderr) process.stderr.write(result.stderr + '\n')
     // In goal mode, success is "goal achieved", not merely "no API error". A run
     // that exhausts the iteration/context budget without the completion marker
     // exits non-zero so CI/scripts can detect incomplete goals.
@@ -723,6 +755,9 @@ async function main() {
   // app 在此处必定非 null（前有 app = new TuiApp 赋值，无重赋 null 路径）
   const tuiApp = app!
   tuiApp.setApprovalMode(ctx!.config.agent.approval ?? 'auto-safe')
+  // 资源压力状态行回填：agent 在 bootstrap 里已把 onStatusLine 晚绑定到
+  // ctx.setStatusLine，此刻 TUI 就绪，把 sink 接到状态行渲染。
+  ctx.setStatusLine = text => tuiApp.setStatusLine(text)
   // 审批提示的 Ctrl+E 风险解释：侧路请求，只在按键时才发。
   tuiApp.setRiskExplainer(async (toolName, input) => explainToolRisk({
     client: ctx?.agent.config.client,
@@ -1310,7 +1345,10 @@ async function main() {
         return
       }
     }
-    try { setDefaultDomainConfig({ defaultDomain: key }) } catch (err) {
+    try {
+      setDefaultDomainConfig({ defaultDomain: key })
+      tuiApp.commitStatic(`已设为默认星域：${key}（新会话起始生效）`)
+    } catch (err) {
       tuiApp.commitStatic(`⚠️ 设置默认失败: ${(err as Error).message}`)
     }
     if (midSession) tuiApp.commitStatic(DOMAIN_SWITCH_CACHE_WARNING)
@@ -1325,8 +1363,12 @@ async function main() {
     } else {
       tuiApp.commitStatic(`⚠️ Model switch failed: ${res.error ?? 'unknown error'}`)
     }
+    // 成功必须出声：s 与 Enter 此前的可见反馈完全相同（都只有
+    // "Model switched to: X"），用户无从判断"设为默认"到底有没有落盘，
+    // 实测写入一直是好的、只是没说——照 permission 面板的样板补确认。
     try {
       setDefaultModelConfig({ defaultModel: `${provider}:${modelId}` })
+      tuiApp.commitStatic(`已设为默认模型：${provider}:${modelId}（新会话起始生效）`)
     } catch (err) {
       tuiApp.commitStatic(`⚠️ 设置默认失败: ${(err as Error).message}`)
     }
@@ -1342,6 +1384,7 @@ async function main() {
     tuiApp.commitStatic(`Theme switched to: ${themeName}`)
     try {
       setUiConfig({ theme: themeName })
+      tuiApp.commitStatic(`已设为默认主题：${themeName}（重启后仍生效）`)
     } catch (err) {
       tuiApp.commitStatic(`⚠️ 设置默认失败: ${(err as Error).message}`)
     }
@@ -1457,6 +1500,8 @@ async function main() {
     try {
       if (commit.mode === 'preset') {
         setupProvider(commit.setup)
+      } else if (commit.mode === 'add-model') {
+        upsertProviderModel(commit.providerName, commit.model)
       } else {
         setupCustomProvider({
           providerName: commit.providerName,
@@ -1727,10 +1772,25 @@ async function main() {
     const callbacks = sinks.length > 0
       ? tapAgentCallbacks(base, (event) => { for (const s of sinks) s(event) })
       : base
-    ctx!.agent.run(resolved.prompt, callbacks, images).catch((err) => {
-      process.stderr.write(`[T9] Agent error: ${(err as Error)?.message}\n`)
-    })
+    ctx!.agent.run(resolved.prompt, callbacks, images)
+      .then((outcome) => {
+        // re-entry guard 命中：本次没发起任何轮次，而 TUI 已把自己置成 busy。
+        // 不复位的话那个 busy 再没人清，后续消息会全进 steer 队列等一个不存在的
+        // 注入边界（界面却显示「已排队」）。
+        if (outcome === 'skipped-already-running') app!.notifyRunRejected()
+      })
+      .catch((err) => {
+        process.stderr.write(`[T9] Agent error: ${(err as Error)?.message}\n`)
+      })
+      .finally(() => {
+        // promise settle 是唯一一定会到达的终结信号——回调会被 bridge 的世代守卫
+        // 按 gen 丢弃。中断收尾窗口在此结束，期间挂起的消息由它补发。
+        app!.notifyRunSettled()
+      })
   })
+
+  // 中断收尾窗口靠它对着真相校验，而不是只信 notifyRunSettled 那一条信号。
+  app.setAgentRunningProbe(() => ctx?.agent.isRunning() === true)
 
   // ── Wire abort ───────────────────────────────────────────────
   app.onAbort(() => {
@@ -1924,8 +1984,8 @@ async function main() {
   // 不补空行撑底 —— 试过两种补法都不成立：补在欢迎屏之后，欢迎屏钉在顶部、输入框沉到
   // 底，中间撑开一大片空白（Claude Code v2.1.168 的 #66191 形态）；补在欢迎屏之前，
   // 整块下沉，空白全堆到上方。输出流 append-only，凭空造出的空白只能二选一地堆在某侧，
-  // 两者都比自然流难看。真正扎眼的「输入框下方死区」另有其因（活动期动态段恒定垫高、
-  // 轮末塌回），已由 getDynamicBudget 的轮内高水位治本。
+  // 两者都比自然流难看。真正扎眼的「输入框下方死区」另有其因——动态段垫高与轮末塌回
+  // 曾是两套口径，已在 getDynamicBudget 收口为内容驱动（空闲期同样走自然流）。
   app.start()
 
   // 首屏交接提醒（resume 场景）：上下文已过半的会话，建议先 /handoff 再开新会话——

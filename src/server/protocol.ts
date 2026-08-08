@@ -85,6 +85,7 @@ export type SessionEventType =
   // PlusMenu — per-session model / star-domain / skill selection changes.
   | 'model_switched'
   | 'domain_changed'
+  | 'domain_resolved'
   | 'skills_changed'
   // I4 — user-defined .rivet/hooks.json script results.
   | 'hook_result'
@@ -123,6 +124,13 @@ export interface SessionEvent {
   ts: number
   type: SessionEventType
   data: Record<string, unknown>
+}
+
+export interface ResolvedDomainRecord {
+  key: string
+  name: string
+  matchedKeywords: string[]
+  reason: 'keyword' | 'fallback'
 }
 
 export interface SessionRecord {
@@ -178,6 +186,18 @@ export interface SessionRecord {
    * live ActiveStarDomain. Absent → 'auto'.
    */
   domain?: string
+  /**
+   * First resolved Auto domain display payload. This is restoration-only
+   * metadata: `domain` remains `auto`, and this value never enters prompts,
+   * messages, or frozen snapshots. Unknown ids are discarded during rehydrate.
+   */
+  resolvedDomain?: ResolvedDomainRecord
+  /**
+   * Per-session 工具白名单（蒸馏回放等自动化场景）。有值时 LLM 的工具列表
+   * 收窄到这个集合（经 gateToolDefinitions 的 coreOverride 通路）。缺省 /
+   * undefined = 默认全量工具集（行为不变）。空数组 = 空白名单。
+   */
+  allowedTools?: string[]
   /** Visual glyph for the current star-domain selection (for UI badges). */
   domainGlyph?: string
   /** Semantic accent color key for the current star-domain selection. */

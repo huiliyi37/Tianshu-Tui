@@ -150,7 +150,18 @@ test('non-critical events stay buffered until debounce/flushSync (no per-delta w
 })
 
 test('every critical type flushes immediately', () => {
-  const critical = ['user', 'tool_result', 'status', 'error', 'done', 'approval_required', 'approval_resolved', 'unattended_halt'] as const
+  const critical = [
+    'user',
+    'tool_result',
+    'status',
+    'error',
+    'done',
+    'approval_required',
+    'approval_resolved',
+    'unattended_halt',
+    'domain_resolved',
+    'domain_changed',
+  ] as const
   for (const type of critical) {
     const dir = tmp()
     try {
@@ -266,6 +277,79 @@ test('loadEventsAsync returns [] for a session with no log', async () => {
   try {
     const p = new FileSessionPersistence(dir)
     assert.deepEqual(await p.loadEventsAsync('nope'), [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('loadEventHighWater flushes buffered events and ignores a torn tail', () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    p.appendEvent('s1', ev(1))
+    p.appendEvent('s1', ev(2))
+
+    // The high-water query must establish a durable view before scanning; both
+    // events are still in the debounce buffer at this point.
+    assert.equal(p.loadEventHighWater('s1'), 2)
+
+    appendFileSync(join(dir, 's1', 'events.jsonl'), '{"seq":3,"ts":1,"type":"text_delta"')
+    assert.equal(p.loadEventHighWater('s1'), 2, 'torn final JSONL line is not a seq')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('loadEventHighWater takes the maximum across out-of-order events and seq-less markers', () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    p.appendEvent('s1', ev(1))
+    p.appendEvent('s1', ev(100))
+    p.appendEvent('s1', ev(2))
+    p.flushSync()
+    appendFileSync(
+      join(dir, 's1', 'events.jsonl'),
+      JSON.stringify({ ts: 999, type: 'events_trimmed', data: {} }) + '\n',
+    )
+    assert.equal(p.loadEventHighWater('s1'), 100)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('loadEventHighWater falls back to a full scan for a missing or misaligned sparse index', () => {
+  const dir = tmp()
+  try {
+    const p = new FileSessionPersistence(dir)
+    for (let seq = 1; seq <= 1200; seq++) p.appendEvent('s1', ev(seq))
+    p.flushSync()
+    const idxFile = join(dir, 's1', 'events.index.jsonl')
+    const entries = readFileSync(idxFile, 'utf8').trim().split('\n')
+      .map((line) => JSON.parse(line) as { seq: number; offset: number })
+    const last = entries[entries.length - 1]!
+
+    // Offset points into the anchor line; the full scan must still recover 1200.
+    writeFileSync(
+      idxFile,
+      `${JSON.stringify(entries[0])}\n${JSON.stringify({ ...last, offset: last.offset + 1 })}\n`,
+      'utf8',
+    )
+    assert.equal(p.loadEventHighWater('s1'), 1200)
+
+    // A syntactically valid but wrong anchor seq is equally untrusted.
+    writeFileSync(
+      idxFile,
+      `${JSON.stringify(entries[0])}\n${JSON.stringify({ ...last, seq: 9999 })}\n`,
+      'utf8',
+    )
+    assert.equal(p.loadEventHighWater('s1'), 1200)
+
+    // Missing/corrupt index also takes the complete scan path.
+    rmSync(idxFile)
+    assert.equal(p.loadEventHighWater('s1'), 1200)
+    writeFileSync(idxFile, '{"seq":501', 'utf8')
+    assert.equal(p.loadEventHighWater('s1'), 1200)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

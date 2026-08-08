@@ -326,4 +326,51 @@ describe('RuntimeHookPipeline', () => {
     assert.deepEqual(events, [{ id: 'slow', slow: true }])
     assert.equal(pipeline.getStats()[0]!.slowRuns, 1)
   })
+
+  it('per-hook budgetMs 覆盖全局超时（未声明的 hook 仍走全局护栏）', async () => {
+    const errors: RuntimeHookError[] = []
+    const events: Array<{ id: string; outcome: string; budgetMs?: number }> = []
+    const wedged: PreTurnRuntimeHook = {
+      phase: 'preTurn',
+      name: 'wedged',
+      budgetMs: 20,
+      run: () => new Promise<void>(() => {}),
+    }
+    const normal: PreTurnRuntimeHook = {
+      phase: 'preTurn',
+      name: 'normal',
+      run: async () => { await new Promise(resolve => setTimeout(resolve, 5)) },
+    }
+    const pipeline = new RuntimeHookPipeline([wedged, normal], {
+      hookTimeoutMs: 5000, // 全局 5s——wedged 若误走全局会拖 5s
+      hookSlowMs: 10,
+      onError: error => errors.push(error),
+      onRun: event => events.push({ id: event.id, outcome: event.outcome, budgetMs: event.budgetMs }),
+    })
+
+    const start = Date.now()
+    await pipeline.runPreTurn(makeContext())
+    const elapsed = Date.now() - start
+
+    assert.ok(elapsed < 2000, `per-hook budget 必须生效，实际 ${elapsed}ms`)
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0]!.hookName, 'wedged')
+    assert.match(errors[0]!.message, /timed out after 20ms/)
+    assert.equal(events.find(e => e.id === 'wedged')?.outcome, 'timed_out')
+    assert.equal(events.find(e => e.id === 'wedged')?.budgetMs, 20, '事件必须带结构化 budgetMs')
+    assert.equal(events.find(e => e.id === 'normal')?.outcome, 'completed')
+    assert.equal(events.find(e => e.id === 'normal')?.budgetMs, 5000, '未声明预算的 hook 用全局值')
+  })
+
+  it('未传 hookTimeoutMs 时默认 10 秒护栏（事件 budgetMs=10000）', async () => {
+    const events: Array<{ id: string; budgetMs?: number }> = []
+    const quick: PreTurnRuntimeHook = { phase: 'preTurn', name: 'quick', run: async () => {} }
+    const pipeline = new RuntimeHookPipeline([quick], {
+      onRun: event => events.push({ id: event.id, budgetMs: event.budgetMs }),
+    })
+
+    await pipeline.runPreTurn(makeContext())
+
+    assert.equal(events[0]!.budgetMs, 10_000)
+  })
 })

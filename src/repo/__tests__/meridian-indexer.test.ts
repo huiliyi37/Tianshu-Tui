@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { MeridianIndexer } from '../meridian-indexer.js'
@@ -195,6 +195,217 @@ describe('MeridianIndexer attention indexing scope', () => {
       await indexer.indexFile(resolve(cwd, '.codex', 'hooks.ts'))
       const stats = indexer.getStats()
       assert.equal(stats.files, 0, 'absolute silent path must not enter the DB')
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('builds cross-file calls edge with inferred confidence on unique name match', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-calls-inferred-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-calls-inferred-state-'))
+    mkdirSync(join(cwd, 'src'), { recursive: true })
+    writeFileSync(join(cwd, 'src', 'b.ts'), 'export function helper() {}\n')
+    writeFileSync(join(cwd, 'src', 'a.ts'), "import { helper } from './b.js'\nexport function a() { helper() }\n")
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      await indexer.indexFile('src/a.ts')
+      const db = indexer.getDb()
+      const aSym = db.getSymbolsForFile('src/a.ts').find(s => s.name === 'a')
+      assert.ok(aSym)
+      const calls = db.getEdgesFrom(aSym.id).filter(e => e.kind === 'calls')
+      assert.equal(calls.length, 1, `expected one calls edge, got ${JSON.stringify(calls)}`)
+      const inferred = calls[0]
+      assert.ok(inferred)
+      assert.equal(inferred.targetId, 'src/b.ts:helper:1')
+      assert.equal(inferred.confidence, 'inferred')
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('builds ambiguous calls edges when callee name matches multiple symbols', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-calls-ambiguous-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-calls-ambiguous-state-'))
+    mkdirSync(join(cwd, 'src'), { recursive: true })
+    writeFileSync(join(cwd, 'src', 'b.ts'), 'export function helper() {}\n')
+    writeFileSync(join(cwd, 'src', 'c.ts'), 'export function helper() {}\n')
+    writeFileSync(join(cwd, 'src', 'a.ts'), 'export function a() { helper() }\n')
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      await indexer.indexFile('src/b.ts')
+      await indexer.indexFile('src/c.ts')
+      await indexer.indexFile('src/a.ts')
+      const db = indexer.getDb()
+      const aSym = db.getSymbolsForFile('src/a.ts').find(s => s.name === 'a')
+      assert.ok(aSym)
+      const calls = db.getEdgesFrom(aSym.id).filter(e => e.kind === 'calls')
+      assert.equal(calls.length, 2, `expected two ambiguous calls edges, got ${JSON.stringify(calls)}`)
+      assert.ok(calls.every(e => e.confidence === 'ambiguous'), 'ambiguous name match must stay ambiguous')
+      assert.deepEqual(calls.map(e => e.targetId).sort(), ['src/b.ts:helper:1', 'src/c.ts:helper:1'])
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('persists extracted and inferred calls edges together through the indexFile production path', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-calls-mixed-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-calls-mixed-state-'))
+    mkdirSync(join(cwd, 'src'), { recursive: true })
+    writeFileSync(join(cwd, 'src', 'b.ts'), 'export function remote() {}\n')
+    writeFileSync(
+      join(cwd, 'src', 'a.ts'),
+      "import { remote } from './b.js'\nexport function local() {}\nexport function entry() { local(); remote() }\n",
+    )
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      await indexer.indexFile('src/a.ts')
+      const db = indexer.getDb()
+      const entry = db.getSymbolsForFile('src/a.ts').find(s => s.name === 'entry')
+      assert.ok(entry)
+      const calls = db.getEdgesFrom(entry.id).filter(e => e.kind === 'calls')
+      assert.equal(calls.length, 2, `expected extracted + inferred calls edges, got ${JSON.stringify(calls)}`)
+      const extracted = calls.find(e => e.confidence === 'extracted')
+      assert.ok(extracted, 'same-file call must land at extracted confidence')
+      assert.equal(extracted.targetId, 'src/a.ts:local:2')
+      const inferred = calls.find(e => e.confidence === 'inferred')
+      assert.ok(inferred, 'cross-file unique-name call must land at inferred confidence')
+      assert.equal(inferred.targetId, 'src/b.ts:remote:1')
+
+      // Re-indexing replaces, never accumulates — upsertFile clears the file's
+      // out-edges before inserting the fresh parse result.
+      await indexer.indexFile('src/a.ts')
+      const after = db.getEdgesFrom(entry.id).filter(e => e.kind === 'calls')
+      assert.equal(after.length, 2, `re-index must not accumulate calls edges, got ${JSON.stringify(after)}`)
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('MeridianIndexer when the index is unavailable', () => {
+  it('gives up before touching the disk', async (t) => {
+    if (process.getuid?.() === 0) {
+      t.skip('root ignores file permissions, so an unreadable file proves nothing')
+      return
+    }
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-degraded-'))
+    // stateDir as a regular file → sqlite cannot open → index unavailable.
+    const stateDir = join(tmpdir(), `meridian-indexer-degraded-state-${process.pid}-${Date.now()}`)
+    writeFileSync(stateDir, 'a file where a directory is expected')
+    mkdirSync(join(cwd, 'src'))
+    const target = join(cwd, 'src', 'a.ts')
+    writeFileSync(target, 'export const a = 1\n')
+    // Make the read itself observable: reaching readFileSync throws EACCES.
+    // That read, its hash, and the tree-sitter parse behind it all feed an
+    // index that cannot store them — and the 1-hop import expansion repeats
+    // the whole thing for every dependency, on every read_file.
+    chmodSync(target, 0o000)
+    const realWarn = console.warn
+    console.warn = () => {}
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      await indexer.indexFile('src/a.ts')
+    } finally {
+      console.warn = realWarn
+      chmodSync(target, 0o644)
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { force: true })
+    }
+  })
+
+  it('rejects symlink escape — file inside repo pointing outside project boundary', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-symlink-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-symlink-state-'))
+    const outsideDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-symlink-outside-'))
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      // Real target outside the repo root
+      const target = join(outsideDir, 'leak.ts')
+      writeFileSync(target, 'export const leak = 1\n')
+      // Symlink inside repo → outside target
+      const linkPath = join(cwd, 'src', 'leak-link.ts')
+      mkdirSync(join(cwd, 'src'), { recursive: true })
+      symlinkSync(target, linkPath)
+
+      assert.equal(callToRepoRelative(indexer, linkPath), null, 'symlink escape must fail closed')
+      assert.equal(callToRepoRelative(indexer, join(cwd, 'src', 'app.ts')), 'src/app.ts', 'in-repo file unaffected')
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+      rmSync(outsideDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects shared-prefix escape when the file does not exist (MEDIUM-3)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-shared-prefix-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-shared-prefix-state-'))
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      // Dir name shares the cwd prefix but sits outside it; file does not exist
+      const escape = `${cwd}-other/ghost.ts`
+      assert.equal(callToRepoRelative(indexer, escape), null, 'shared-prefix escape must be rejected')
+      assert.equal(callToRepoRelative(indexer, 'src/ok.ts'), 'src/ok.ts', 'in-repo path unaffected')
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  function writeTestFixture(cwd: string): void {
+    // SUT + its test file; the test file ALSO contains an Express route so the
+    // framework-extraction second upsertFile path is exercised.
+    mkdirSync(join(cwd, 'src'), { recursive: true })
+    writeFileSync(join(cwd, 'src', 'app.ts'), 'export function health() { return 1 }\n')
+    writeFileSync(join(cwd, 'src', 'app.test.ts'), `
+import { health } from './app.js'
+const app = { get: () => {} }
+app.get('/health', health)
+`)
+  }
+
+  it('keeps tested_by edges when a test file also contains routes (MEDIUM-2)', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-tb-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-tb-state-'))
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      writeTestFixture(cwd)
+      await indexer.indexFile('src/app.test.ts')
+      const edges = indexer['db'].getEdgesFrom('src/app.test.ts:*:0')
+      assert.ok(edges.some(e => e.kind === 'tested_by'), `tested_by edge must survive, got ${JSON.stringify(edges.map(e => e.kind))}`)
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
+  it('rebuilds tested_by edges on invalidateFile hot-update (LOW-1)', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-tb-hot-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-tb-hot-state-'))
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      writeTestFixture(cwd)
+      await indexer.indexFile('src/app.test.ts')
+      assert.ok(indexer['db'].getEdgesFrom('src/app.test.ts:*:0').some(e => e.kind === 'tested_by'), 'baseline tested_by exists')
+      writeFileSync(join(cwd, 'src', 'app.test.ts'), `
+import { health } from './app.js'
+const app = { get: () => {} }
+app.get('/health', health)
+// edited by agent
+`)
+      await indexer.invalidateFile('src/app.test.ts')
+      assert.ok(indexer['db'].getEdgesFrom('src/app.test.ts:*:0').some(e => e.kind === 'tested_by'), 'tested_by must be rebuilt on hot-update')
     } finally {
       indexer.close()
       rmSync(cwd, { recursive: true, force: true })

@@ -6,6 +6,7 @@
 
 import { color } from '../engine/ansi.js'
 import { useAsciiGlyphs } from '../term-caps.js'
+import { displayWidth } from '../width.js'
 import type { RivetTheme } from '../theme.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 
@@ -20,6 +21,16 @@ export interface FormatThinkingInput {
   expanded?: boolean
   /** 正文最大行数。默认 8。commit 时可加大。 */
   maxLines?: number
+  /**
+   * 正文最大**显示**行数（wrap 之后）。给定时取代 `maxLines`。
+   *
+   * 推理文本多是长句，窄终端上一个逻辑行会 wrap 成三四个显示行——按逻辑行封顶
+   * 时 8 行能占到二十个显示行，而 live 区的高度峰值会被定高视口固化成输入框
+   * 上方的常驻空白。需要同时给 `columns` 才能度量。
+   */
+  maxRows?: number
+  /** 终端列数，`maxRows` 生效时用于度量 wrap。 */
+  columns?: number
   /** 推理已完成（提交到 scrollback）。头部用过去式「✶ 已推理」而非进行时「◐ 凝思中…」。默认 false。 */
   done?: boolean
   /** 当前激活的星域 ID（如 qiming / changgeng / wenqu / tianshu 等） */
@@ -72,19 +83,43 @@ export function formatThinking(input: FormatThinkingInput, theme: RivetTheme): s
     }
   }
 
-  // ── Content lines (保留最新 maxLines 行的 tail，带淡色树脉前缀) ─
+  // ── Content lines (保留最新若干行的 tail，带淡色树脉前缀) ────────
   if (input.expanded && textLines.length > 0) {
-    const max = input.maxLines ?? DEFAULT_MAX_LINES
     const prefix = color('│ ', theme.dim)
-    if (textLines.length > max) {
-      lines.push(`${prefix}${color(`… 上方省略 ${textLines.length - max} 行`, theme.dim)}`)
+    const kept = input.maxRows != null && input.columns
+      ? tailWithinRows(textLines, input.maxRows, input.columns)
+      : textLines.slice(-(input.maxLines ?? DEFAULT_MAX_LINES))
+    const omitted = textLines.length - kept.length
+    if (omitted > 0) {
+      lines.push(`${prefix}${color(`… 上方省略 ${omitted} 行`, theme.dim)}`)
     }
-    for (const line of textLines.slice(-max)) {
+    for (const line of kept) {
       lines.push(`${prefix}${color(line, theme.muted)}`)
     }
   }
 
   return lines
+}
+
+/**
+ * 自尾部向前收取逻辑行，使其 wrap 后的显示行数不超过 budget。
+ * 至少保留 1 行——哪怕它自己就超预算，空的推理区比截没了更难理解。
+ */
+function tailWithinRows(textLines: readonly string[], budget: number, columns: number): string[] {
+  const limit = Math.max(1, budget)
+  // 前缀 `│ ` 占 2 列，正文可用宽度相应减少。
+  const width = Math.max(10, columns - 2)
+  const kept: string[] = []
+  let rows = 0
+  for (let i = textLines.length - 1; i >= 0; i--) {
+    const line = textLines[i]!
+    const lineRows = Math.max(1, Math.ceil(displayWidth(line) / width))
+    if (kept.length > 0 && rows + lineRows > limit) break
+    kept.unshift(line)
+    rows += lineRows
+    if (rows >= limit) break
+  }
+  return kept
 }
 
 function getThinkingStatus(elapsedMs: number): string {

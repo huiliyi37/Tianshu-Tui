@@ -18,8 +18,10 @@
 
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomicSync } from '../fs-atomic.js'
+import { buildPrewarmValue, type PrewarmValue } from './prewarm-file.js'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 
 // ── 类型 ─────────────────────────────────────────────────────────────────
@@ -33,10 +35,22 @@ export interface StarflowPhaseRecord {
   /** 阶段摘要（工具输出的首行/关键行截断）。 */
   summary: string
   at: number
+  /** Wall-clock duration of the phase, when it reached a checkpoint. */
+  elapsedMs?: number
+  /** Full phase output in the session artifact store, when available. */
+  rawArtifactId?: string
+  /** Fallback raw report path when no artifact store was injected. */
+  rawPath?: string
 }
 
 export interface StarflowState {
   objective: string
+  /** Stable logical run identity carried across a cross-session resume. */
+  runId: string
+  /** Monotonic checkpoint revision; used to make state inspection auditable. */
+  revision: number
+  /** Session namespace used for new writes; resume can still discover older sessions. */
+  sessionId?: string
   /** 下一个要执行的阶段；blocked 时停留在受阻阶段（resume 从该阶段重跑）。 */
   phase: StarflowPhase
   phases: Partial<Record<'council' | 'team' | 'galaxy' | 'deliver', StarflowPhaseRecord>>
@@ -45,6 +59,9 @@ export interface StarflowState {
   planJson?: string
   /** team 阶段已消耗的复议次数（回 council 复议上限 1 次，跨 resume 记账）。 */
   teamRetries: number
+  /** M1：team 阶段已通过的最大波号——blocked/resume 时从此续跑，不重跑
+   *  已完成波次（工作树改动与契约已落地）。 */
+  completedTeamWaves?: number
   blockedReason?: string
   updatedAt: number
 }
@@ -102,6 +119,8 @@ export interface StarflowInput {
    *  修订轮推荐只召回「上轮否决的席位 + 与修订点相关的域席」，而非默认全量。 */
   seats?: StarflowSeat[]
   /** 从 `.rivet/starflow/` 状态文件续跑——已过门禁的阶段不重复执行。 */
+  /** Optional Galaxy post-review wave; defaults to enabled. */
+  autoReview?: boolean
   resume?: boolean
 }
 
@@ -117,6 +136,8 @@ export interface StarflowDeps {
 
 export interface StarflowRun {
   state: StarflowState
+  /** True when this invocation resumed a persisted run. */
+  resumed?: boolean
   /** 阶段报告（每阶段：状态/摘要/门禁判定；blocked 时给出停在哪、为什么、下一步）。 */
   report: string
 }
@@ -128,6 +149,15 @@ const GLYPH = '🌠'
 const MAX_TEAM_WAVES = 10
 /** 摘要截断长度。 */
 const SUMMARY_CAP = 160
+/** Starflow phase heartbeat cadence. Kept below the TUI stale-info threshold so
+ * long council/team/galaxy calls remain visibly active even while the provider
+ * is waiting for its first byte. */
+let STARFLOW_HEARTBEAT_MS = 10_000
+
+/** Test-only: shrink the phase heartbeat cadence without waiting in real time. */
+export function __setStarflowHeartbeatMs(ms: number): void {
+  STARFLOW_HEARTBEAT_MS = Math.max(1, Math.trunc(ms))
+}
 
 /** council 否决标志（council-convene.ts 编译门文案）：blocking challenge 未化解。 */
 const COUNCIL_VETO_RE = /^## ⛔ 议事会否决/m
@@ -160,34 +190,195 @@ function starflowDir(cwd: string): string {
   return join(cwd, '.rivet', 'starflow')
 }
 
-export function starflowStatePath(cwd: string, objective: string): string {
-  const hash = createHash('sha1').update(objective).digest('hex').slice(0, 12)
+export function starflowStatePath(cwd: string, objective: string, sessionId?: string): string {
+  const hash = createHash('sha1')
+    .update(objective)
+    .update('\0')
+    .update(sessionId ?? '')
+    .digest('hex')
+    .slice(0, 12)
   return join(starflowDir(cwd), `${hash}.json`)
 }
 
-function freshState(objective: string, now: number): StarflowState {
-  return { objective, phase: 'council', phases: {}, teamRetries: 0, updatedAt: now }
+const STARFLOW_LEASE_TTL_MS = 60_000
+
+function starflowRunId(objective: string, sessionId?: string, toolUseId?: string): string {
+  return createHash('sha1')
+    .update('starflow-run\0')
+    .update(objective)
+    .update('\0')
+    .update(sessionId ?? '')
+    .update('\0')
+    .update(toolUseId ?? '')
+    .digest('hex')
+    .slice(0, 16)
 }
 
-function loadState(cwd: string, objective: string): StarflowState | undefined {
+function starflowLeasePath(cwd: string, objective: string): string {
+  const hash = createHash('sha1').update('starflow-lease\0').update(objective).digest('hex').slice(0, 16)
+  return join(starflowDir(cwd), `${hash}.lease`)
+}
+
+interface StarflowLease {
+  release: () => void
+}
+
+function leaseOwnerIsAlive(path: string, now: number): boolean {
   try {
-    const path = starflowStatePath(cwd, objective)
+    const ageMs = now - statSync(path).mtimeMs
+    if (ageMs > STARFLOW_LEASE_TTL_MS) return false
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as { pid?: number }
+    if (!Number.isInteger(raw.pid) || raw.pid! <= 0) return false
+    if (!isProcessAlive(raw.pid!)) return false
+    return true
+  } catch {
+    // A competing process can be between open(O_EXCL) and its small owner
+    // payload write. Treat a fresh, unreadable lease as occupied; only an old
+    // or missing file is eligible for stale cleanup.
+    try { return now - statSync(path).mtimeMs <= STARFLOW_LEASE_TTL_MS } catch { return false }
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Acquire one logical lease per objective, independent of session namespace. */
+function acquireStarflowLease(cwd: string, objective: string, runId: string): StarflowLease | undefined {
+  const path = starflowLeasePath(cwd, objective)
+  mkdirSync(starflowDir(cwd), { recursive: true })
+  const owner = JSON.stringify({ pid: process.pid, runId, acquiredAt: Date.now() })
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(path, 'wx')
+      try { writeFileSync(fd, owner, 'utf8') } finally { closeSync(fd) }
+      const refresh = setInterval(() => {
+        try { utimesSync(path, new Date(), new Date()) } catch { /* owner already released */ }
+      }, Math.floor(STARFLOW_LEASE_TTL_MS / 3))
+      refresh.unref?.()
+      return {
+        release: () => {
+          clearInterval(refresh)
+          try {
+            const current = JSON.parse(readFileSync(path, 'utf8')) as { runId?: string }
+            if (current.runId === runId) unlinkSync(path)
+          } catch { /* stale cleanup is best-effort */ }
+        },
+      }
+    } catch {
+      if (leaseOwnerIsAlive(path, Date.now())) return undefined
+      try { unlinkSync(path) } catch { /* another owner may have won the race */ }
+    }
+  }
+  return undefined
+}
+
+function freshState(objective: string, now: number, sessionId?: string, toolUseId?: string): StarflowState {
+  return {
+    objective,
+    runId: starflowRunId(objective, sessionId, toolUseId),
+    revision: 0,
+    ...(sessionId ? { sessionId } : {}),
+    phase: 'council',
+    phases: {},
+    teamRetries: 0,
+    updatedAt: now,
+  }
+}
+
+function readStateFile(path: string, objective: string): StarflowState | undefined {
+  try {
     if (!existsSync(path)) return undefined
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as StarflowState
     if (parsed.objective !== objective || typeof parsed.phase !== 'string') return undefined
-    return parsed
+    return {
+      ...parsed,
+      runId: typeof parsed.runId === 'string' && parsed.runId.length > 0
+        ? parsed.runId
+        : starflowRunId(objective, parsed.sessionId),
+      revision: Number.isSafeInteger(parsed.revision) && parsed.revision! >= 0 ? parsed.revision! : 0,
+    }
   } catch {
     return undefined
   }
 }
 
-/** 状态落盘是 resume 便利，写盘失败绝不影响编排（同 checkpoint 先例）。 */
-function saveState(cwd: string, state: StarflowState): void {
+/**
+ * Resume first prefers this session's namespace, then discovers the newest
+ * matching state from another session. This prevents concurrent sessions from
+ * overwriting one another while preserving handoff/resume across sessions.
+ */
+function loadState(cwd: string, objective: string, sessionId?: string): StarflowState | undefined {
+  const preferred = readStateFile(starflowStatePath(cwd, objective, sessionId), objective)
+  if (preferred) return preferred
+
+  const candidates: StarflowState[] = []
+  try {
+    for (const entry of readdirSync(starflowDir(cwd))) {
+      if (!entry.endsWith('.json')) continue
+      const state = readStateFile(join(starflowDir(cwd), entry), objective)
+      if (state) candidates.push(state)
+    }
+  } catch {
+    return undefined
+  }
+  const newest = candidates.sort((a, b) => b.updatedAt - a.updatedAt)[0]
+  return newest
+}
+
+/** State writes use the shared temp+rename primitive so a killed session cannot
+ * leave half a JSON document that silently resets a later resume. */
+function saveState(cwd: string, state: StarflowState): boolean {
   try {
     mkdirSync(starflowDir(cwd), { recursive: true })
-    writeFileSync(starflowStatePath(cwd, state.objective), JSON.stringify(state, null, 2), 'utf8')
+    const nextState: StarflowState = {
+      ...state,
+      revision: state.revision + 1,
+      updatedAt: Math.max(state.updatedAt, Date.now()),
+    }
+    writeFileAtomicSync(starflowStatePath(cwd, state.objective, state.sessionId), JSON.stringify(nextState, null, 2))
+    state.revision = nextState.revision
+    state.updatedAt = nextState.updatedAt
+    return true
   } catch {
-    // best-effort
+    return false
+  }
+}
+
+async function persistPhaseOutput(
+  deps: StarflowDeps,
+  state: StarflowState,
+  phase: 'council' | 'team' | 'galaxy' | 'deliver',
+  content: string,
+): Promise<Pick<StarflowPhaseRecord, 'rawArtifactId' | 'rawPath'>> {
+  if (!content.trim()) return {}
+  try {
+    const artifactId = deps.params.artifactStore
+      ? await deps.params.artifactStore.save({
+          tool: 'starflow',
+          target: `${state.objective}:${phase}`,
+          rawContent: content,
+          summary: firstLine(content),
+          sections: [],
+        })
+      : undefined
+    if (artifactId) return { rawArtifactId: artifactId }
+  } catch {
+    // Fall through to the project-local raw report so a store failure never
+    // turns into information loss.
+  }
+
+  try {
+    const rawPath = `${starflowStatePath(deps.cwd, state.objective, state.sessionId)}.${phase}.raw`
+    writeFileAtomicSync(rawPath, content)
+    return { rawPath }
+  } catch {
+    return {}
   }
 }
 
@@ -219,6 +410,28 @@ export function deriveGalaxyDims(items: StarflowDraftItem[] | undefined): Starfl
     })
   }
   return dims.slice(0, 5)
+}
+
+/** M3：预取事实摘要块——`<path>：首行/前 200 字符`，总量 ≤1500 字符。
+ *  注入派生 galaxy 维度的 objective 前部，让 worker 省掉首轮文件探索。 */
+const PREWARM_FACT_CAP = 1500
+const PREWARM_LINE_CAP = 200
+
+export function buildPrewarmFactBlock(values: PrewarmValue[]): string | undefined {
+  const lines: string[] = ['── 目标文件预取摘要（评审期间已读取，供直接引用）──']
+  let budget = PREWARM_FACT_CAP
+  for (const v of values) {
+    if (budget <= 0) { lines.push('…（摘要截断）'); break }
+    const head = (v.uiContent ?? v.content ?? '').split('\n').map(l => l.trim()).find(l => l.length > 0) ?? ''
+    const snippet = head.length > PREWARM_LINE_CAP ? `${head.slice(0, PREWARM_LINE_CAP)}…` : head
+    if (!snippet) continue
+    const line = `  ${v.canonicalPath}：${snippet}`
+    if (line.length > budget) { lines.push('…（摘要截断）'); break }
+    lines.push(line)
+    budget -= line.length
+  }
+  if (lines.length <= 1) return undefined
+  return lines.join('\n')
 }
 
 // ── council 输入增强（复盘 A-D：基线预检 C + 增量评审 B） ─────────────────
@@ -313,6 +526,12 @@ function councilGate(result: ToolResult): GateResult {
   }
   if (!outcome && (result.content.includes('已禁用') || result.content.includes('未派发任何席位'))) {
     return { ok: false, reason: '评审未执行（council 已禁用或未派发任何席位，COUNCIL=0？）' }
+  }
+  // 席位全部失败：与 teamGate 的 workers.passed===0 同构的防御分支。当前流会路径
+  // 先 throw → isError 拦截，这里通常不可达；但法定人数逻辑变化后（如失败不再
+  // throw 时）gate 不能静默放行大面积失败。
+  if (outcome?.seats && outcome.seats.total > 0 && outcome.seats.passed === 0) {
+    return { ok: false, reason: `议事会席位全部失败（${outcome.seats.total} 席均未产出贡献）` }
   }
   const veto = COUNCIL_VETO_RE.exec(result.content)
   if (veto) {
@@ -469,31 +688,116 @@ function subParams(deps: StarflowDeps, tag: string): ToolCallParams {
   return { ...deps.params, input: {}, toolUseId: `${deps.params.toolUseId}-starflow-${tag}`, cwd: deps.cwd }
 }
 
+/** Keep the primary TUI alive while a nested phase is waiting on a provider or
+ * a worker wave. The heartbeat is text-streamed through the normal tool output
+ * path, so existing renderers update `lastActivityMs` without a new transport. */
+async function runWithPhaseHeartbeat<T>(
+  deps: StarflowDeps,
+  phase: 'council' | 'team' | 'galaxy',
+  task: () => Promise<T>,
+): Promise<T> {
+  const startedAt = Date.now()
+  const heartbeat = setInterval(() => {
+    const elapsedS = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+    deps.params.onOutput?.(`${GLYPH} 星流 · ${phase} 阶段执行中（已 ${elapsedS}s；子代理活动见任务面板）\n`)
+  }, STARFLOW_HEARTBEAT_MS)
+  heartbeat.unref?.()
+  try {
+    return await task()
+  } finally {
+    clearInterval(heartbeat)
+  }
+}
+
 export async function runStarflow(deps: StarflowDeps, input: StarflowInput): Promise<StarflowRun> {
   const now = () => Date.now()
-  const state = (input.resume ? loadState(deps.cwd, input.objective) : undefined)
-    ?? freshState(input.objective, now())
-  // 非 resume 的显式重跑：丢弃旧状态从头来（freshState 已覆盖）。
-  let teamRetried = false
+  const loadedState = input.resume ? loadState(deps.cwd, input.objective, deps.params.sessionId) : undefined
+  const state = loadedState
+    ? { ...loadedState, ...(deps.params.sessionId ? { sessionId: deps.params.sessionId } : {}) }
+    : freshState(input.objective, now(), deps.params.sessionId, deps.params.toolUseId)
+  const lease = acquireStarflowLease(deps.cwd, input.objective, state.runId)
+  if (!lease) {
+    state.blockedReason = 'another Starflow run for this objective is still active; wait for its checkpoint or resume it later'
+    return { state, report: buildReport(state, false), resumed: Boolean(loadedState) }
+  }
 
-  const block = (phase: 'council' | 'team' | 'galaxy', reason: string, summary: string): StarflowRun => {
-    state.phase = phase
-    state.phases[phase] = { status: 'blocked', summary, at: now() }
-    state.blockedReason = reason
+  try {
+  // Promote a cross-session resume into the new session namespace immediately,
+  // including when the loaded state is already `done` and no phase re-runs.
+  if (loadedState && deps.params.sessionId && loadedState.sessionId !== deps.params.sessionId) {
+    saveState(deps.cwd, state)
+  }
+  // 非 resume 的显式重跑：丢弃旧状态从头来（freshState 已覆盖）。
+  const result = await runStarflowUnlocked(deps, input, state)
+  return { ...result, resumed: Boolean(loadedState) }
+  } finally {
+    lease.release()
+  }
+}
+
+async function runStarflowUnlocked(deps: StarflowDeps, input: StarflowInput, state: StarflowState): Promise<StarflowRun> {
+  const now = () => Date.now()
+  let teamRetried = false
+  /** M3：council 等待期预取的目标文件摘要（galaxy 派生维度注入用）。 */
+  let prewarmFactBlock: string | undefined
+  const phaseStartedAt = new Map<'council' | 'team' | 'galaxy' | 'deliver', number>()
+  const phaseOutputs = new Map<'council' | 'team' | 'galaxy' | 'deliver', string[]>()
+  const beginPhase = (phase: 'council' | 'team' | 'galaxy' | 'deliver'): void => {
+    if (!phaseStartedAt.has(phase)) phaseStartedAt.set(phase, now())
+  }
+  const rememberPhaseOutput = (phase: 'council' | 'team' | 'galaxy' | 'deliver', content: string): void => {
+    if (!content.trim()) return
+    const outputs = phaseOutputs.get(phase) ?? []
+    outputs.push(content)
+    phaseOutputs.set(phase, outputs)
+  }
+  const phaseRawContent = (phase: 'council' | 'team' | 'galaxy' | 'deliver', fallback: string): string => {
+    const outputs = phaseOutputs.get(phase)
+    return outputs && outputs.length > 0 ? outputs.join('\n\n--- phase output ---\n\n') : fallback
+  }
+  const phaseElapsed = (phase: 'council' | 'team' | 'galaxy' | 'deliver'): number | undefined => {
+    const started = phaseStartedAt.get(phase)
+    return started === undefined ? undefined : Math.max(0, now() - started)
+  }
+
+  const checkpoint = async (
+    phase: 'council' | 'team' | 'galaxy' | 'deliver',
+    record: StarflowPhaseRecord,
+    rawContent: string,
+  ): Promise<void> => {
+    const persisted = await persistPhaseOutput(deps, state, phase, rawContent)
+    state.phases[phase] = { ...record, ...persisted }
     state.updatedAt = now()
     saveState(deps.cwd, state)
+  }
+  const block = async (phase: 'council' | 'team' | 'galaxy', reason: string, summary: string, rawContent = summary): Promise<StarflowRun> => {
+    state.phase = phase
+    state.blockedReason = reason
+    const elapsedMs = phaseElapsed(phase)
+    await checkpoint(phase, { status: 'blocked', summary, at: now(), ...(elapsedMs === undefined ? {} : { elapsedMs }) }, phaseRawContent(phase, rawContent))
+    deps.params.onOutput?.(`${GLYPH} 星流 · ${phase} 阶段已保存中断检查点，可用 resume: true 续跑\n`)
     return { state, report: buildReport(state, teamRetried) }
   }
-  const pass = (phase: 'council' | 'team' | 'galaxy' | 'deliver', next: StarflowPhase, summary: string, status: 'passed' | 'skipped' = 'passed'): void => {
-    state.phases[phase] = { status, summary, at: now() }
+  const pass = async (
+    phase: 'council' | 'team' | 'galaxy' | 'deliver',
+    next: StarflowPhase,
+    summary: string,
+    status: 'passed' | 'skipped' = 'passed',
+    rawContent = summary,
+  ): Promise<void> => {
+    const elapsedMs = phaseElapsed(phase)
     state.phase = next
     state.blockedReason = undefined
-    state.updatedAt = now()
-    saveState(deps.cwd, state)
+    // Persist the completed phase and the next phase in one atomic snapshot.
+    // The previous order wrote a checkpoint and then immediately wrote the
+    // phase transition again, doubling filesystem work on every successful
+    // stage without adding recovery information.
+    await checkpoint(phase, { status, summary, at: now(), ...(elapsedMs === undefined ? {} : { elapsedMs }) }, phaseRawContent(phase, rawContent))
   }
 
   // ── 阶段 1：council 评审 ─────────────────────────────────────────────
   if (state.phase === 'council') {
+    beginPhase('council')
     deps.params.onOutput?.(`${GLYPH} 星流 · 阶段 1/4 council 评审\n`)
     const councilInput: Record<string, unknown> = { objective: input.objective, confirm: true }
     if (input.draftItems && input.draftItems.length > 0) {
@@ -504,30 +808,63 @@ export async function runStarflow(deps: StarflowDeps, input: StarflowInput): Pro
     }
     if (input.rounds) councilInput.rounds = input.rounds
     if (input.seats && input.seats.length > 0) councilInput.seats = input.seats
-    const result = await deps.councilTool.execute({ ...subParams(deps, 'council'), input: councilInput })
+    // M3：council 等待期预热——与评审并行预取草稿目标文件（OS 缓存 + 事实
+    // 摘要），galaxy 派生维度据此省掉首轮探索。best-effort：预取失败绝不影响
+    // 评审；显式 galaxyDims 不注入（用户已给精确定义）。
+    const prewarmFiles = input.draftItems?.flatMap(i => i.files ?? []) ?? []
+    const prewarmPromise = prewarmFiles.length > 0
+      ? Promise.all(prewarmFiles.slice(0, 20).map(f => buildPrewarmValue(deps.cwd, f))).then(vals => vals.filter((v): v is PrewarmValue => v !== undefined))
+      : Promise.resolve([] as PrewarmValue[])
+    let result: ToolResult
+    try {
+      result = await runWithPhaseHeartbeat(deps, 'council', () =>
+        deps.councilTool.execute({ ...subParams(deps, 'council'), input: councilInput }))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      rememberPhaseOutput('council', message)
+      return block('council', `council 执行中断：${message}`, message)
+    }
+    const prewarmed = await prewarmPromise
+    // M3：跨阶段共享（galaxy 段消费）——函数顶部声明，council 块内赋值。
+    prewarmFactBlock = prewarmed.length > 0 ? buildPrewarmFactBlock(prewarmed) : undefined
+    rememberPhaseOutput('council', result.content)
     const gate = councilGate(result)
-    if (!gate.ok) return block('council', gate.reason, firstLine(result.content))
+    if (!gate.ok) return block('council', gate.reason, firstLine(result.content), result.content)
     const planJson = extractPlanJson(result.content)
     if (planJson) state.planJson = planJson
-    pass('council', 'team', firstLine(result.content))
+    await pass('council', 'team', firstLine(result.content), 'passed', result.content)
   }
 
   // ── 阶段 2：team 波次（失败可回 council 复议一次） ─────────────────────
   if (state.phase === 'team') {
+    beginPhase('team')
     deps.params.onOutput?.(`${GLYPH} 星流 · 阶段 2/4 team 波次\n`)
     for (;;) {
       // 多波计划：team_orchestrate 每次只派一个就绪波次，按续波提示逐波推进。
-      let fromWave = 0
+      // M1：复议/恢复时从已通过的最大波号续跑（completedTeamWaves 是已通过
+      // 波号，下一波 = +1），不重跑已完成波次。
+      let fromWave = (state.completedTeamWaves ?? -1) + 1
       let lastResult: ToolResult | undefined
       const waveTag = state.teamRetries > 0 ? `team-r${state.teamRetries}` : 'team'
       for (let wave = 0; wave < MAX_TEAM_WAVES; wave++) {
-        const teamInput: Record<string, unknown> = { objective: input.objective, confirm: true, fromWave }
+        const teamInput: Record<string, unknown> = { objective: input.objective, confirm: true, fromWave, autoAdvance: false }
+        // autoAdvance 显式钉死 false：波次推进由星流外层状态机逐波驱动（每波后保留回
+        // council 复议的控制权），不能交给 team 内部自动推进——缺省时该值依赖
+        // fromWave 是否传入隐式联动，显式声明才不随调用形态漂移。
         if (state.planJson) teamInput.planJson = state.planJson
-        lastResult = await deps.teamTool.execute({ ...subParams(deps, `${waveTag}-w${fromWave}`), input: teamInput })
+        try {
+          lastResult = await runWithPhaseHeartbeat(deps, 'team', () =>
+            deps.teamTool.execute({ ...subParams(deps, `${waveTag}-w${fromWave}`), input: teamInput }))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          rememberPhaseOutput('team', message)
+          return block('team', `team 执行中断：${message}`, message)
+        }
+        rememberPhaseOutput('team', lastResult.content)
         const gate = teamGate(lastResult)
         if (!gate.ok) {
           // 复议上限 1 次：回 council（rounds:2 复议轮）重审契约后再跑 team。
-          if (state.teamRetries >= 1) return block('team', gate.reason, firstLine(lastResult.content))
+          if (state.teamRetries >= 1) return block('team', gate.reason, firstLine(lastResult.content), lastResult.content)
           state.teamRetries++
           teamRetried = true
           state.updatedAt = now()
@@ -540,51 +877,88 @@ export async function runStarflow(deps: StarflowDeps, input: StarflowInput): Pro
             reInput.objective = augmentCouncilObjective(input.objective, input.draftItems, deps.cwd, { precheck: false })
           }
           if (input.seats && input.seats.length > 0) reInput.seats = input.seats
-          const reResult = await deps.councilTool.execute({ ...subParams(deps, 'council-retry'), input: reInput })
+          phaseStartedAt.set('council', now())
+          let reResult: ToolResult
+          try {
+            reResult = await runWithPhaseHeartbeat(deps, 'council', () =>
+              deps.councilTool.execute({ ...subParams(deps, 'council-retry'), input: reInput }))
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            rememberPhaseOutput('council', message)
+            return block('team', `复议执行中断：${message}`, message)
+          }
+          rememberPhaseOutput('council', reResult.content)
           const reGate = councilGate(reResult)
-          if (!reGate.ok) return block('team', `复议未过：${reGate.reason}`, firstLine(reResult.content))
+          if (!reGate.ok) return block('team', `复议未过：${reGate.reason}`, firstLine(reResult.content), reResult.content)
           state.planJson = extractPlanJson(reResult.content) ?? state.planJson
+          const reElapsedMs = phaseElapsed('council')
+          await checkpoint('council', {
+            status: reGate.ok ? 'passed' : 'blocked',
+            summary: firstLine(reResult.content),
+            at: now(),
+            ...(reElapsedMs === undefined ? {} : { elapsedMs: reElapsedMs }),
+          }, phaseRawContent('council', reResult.content))
           break // 跳出波次循环，外层 for(;;) 重跑 team
+        }
+        // M1：波次通过即记账（含末波）——后续 blocked/resume 从 completedTeamWaves 续跑。
+        if (state.completedTeamWaves === undefined || fromWave > state.completedTeamWaves) {
+          state.completedTeamWaves = fromWave
+          state.updatedAt = now()
+          saveState(deps.cwd, state)
         }
         const next = nextWaveOf(lastResult)
         if (next === undefined) break // 无下一波 = 已跑到末波
         fromWave = next
         if (wave === MAX_TEAM_WAVES - 1) {
-          return block('team', `波次推进超过上限（${MAX_TEAM_WAVES}）——异常续波循环`, firstLine(lastResult.content))
+          return block('team', `波次推进超过上限（${MAX_TEAM_WAVES}）——异常续波循环`, firstLine(lastResult.content), lastResult.content)
         }
       }
       if (lastResult && !teamGate(lastResult).ok) continue // 已决定复议：回外层循环
-      pass('team', 'galaxy', firstLine(lastResult?.content ?? ''))
+      await pass('team', 'galaxy', firstLine(lastResult?.content ?? ''), 'passed', lastResult?.content ?? '')
       break
     }
   }
 
   // ── 阶段 3：galaxy 攻坚 ──────────────────────────────────────────────
   if (state.phase === 'galaxy') {
+    beginPhase('galaxy')
     const derived = input.galaxyDims ?? deriveGalaxyDims(input.draftItems)
-    if (derived.length < 2) {
+    // M3：只对派生维度注入预取摘要（显式 galaxyDims 是用户精确定义，不稀释）。
+    const dimsWithFacts = !input.galaxyDims && prewarmFactBlock
+      ? derived.map(d => ({ ...d, objective: `${prewarmFactBlock}\n\n${d.objective}` }))
+      : derived
+    if (dimsWithFacts.length < 2) {
       // 无显式维度也无可派生草稿——galaxy schema 要求 min 2，不足即跳过。
       const why = input.galaxyDims
-        ? `显式 galaxyDims 仅 ${derived.length} 个（min 2），跳过攻坚`
+        ? `显式 galaxyDims 仅 ${dimsWithFacts.length} 个（min 2），跳过攻坚`
         : '无 draftItems 可派生维度，跳过攻坚'
-      pass('galaxy', 'deliver', why, 'skipped')
+      await pass('galaxy', 'deliver', why, 'skipped')
     } else {
-      deps.params.onOutput?.(`${GLYPH} 星流 · 阶段 3/4 galaxy 攻坚（${derived.length} 维度）\n`)
-      const dims = derived.slice(0, 5)
-      const result = await deps.galaxyTool.execute({
-        ...subParams(deps, 'galaxy'),
-        input: { objective: input.objective, dimensions: dims, autoReview: true, confirm: true },
-      })
+      deps.params.onOutput?.(`${GLYPH} 星流 · 阶段 3/4 galaxy 攻坚（${dimsWithFacts.length} 维度）\n`)
+      const dims = dimsWithFacts.slice(0, 5)
+      let result: ToolResult
+      try {
+        result = await runWithPhaseHeartbeat(deps, 'galaxy', () => deps.galaxyTool.execute({
+          ...subParams(deps, 'galaxy'),
+          input: { objective: input.objective, dimensions: dims, autoReview: input.autoReview ?? true, confirm: true },
+        }))
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        rememberPhaseOutput('galaxy', message)
+        return block('galaxy', `galaxy 执行中断：${message}`, message)
+      }
+      rememberPhaseOutput('galaxy', result.content)
       const gate = galaxyGate(result)
-      if (!gate.ok) return block('galaxy', gate.reason, firstLine(result.content))
+      if (!gate.ok) return block('galaxy', gate.reason, firstLine(result.content), result.content)
       const truncated = derived.length > 5 ? `（草稿 ${derived.length} 项截断为 5 维）` : ''
-      pass('galaxy', 'deliver', `${firstLine(result.content)}${truncated}`)
+      await pass('galaxy', 'deliver', `${firstLine(result.content)}${truncated}`, 'passed', result.content)
     }
   }
 
   // ── 阶段 4：交付清单（硬门禁归 deliver_task，此处只输出清单） ────────────
   if (state.phase === 'deliver') {
-    pass('deliver', 'done', '交付清单已输出，待调用 deliver_task')
+    beginPhase('deliver')
+    await pass('deliver', 'done', '交付清单已输出，待调用 deliver_task')
   }
 
   return { state, report: buildReport(state, teamRetried) }

@@ -201,6 +201,61 @@ describe('AnthropicClient message conversion', () => {
   })
 })
 
+describe('tool_choice mapping', () => {
+  it('maps forced function tool_choice to Anthropic tool choice when function exists in tools', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [{ role: 'user', content: 'test' }],
+      max_tokens: 4096,
+      tools: [
+        { type: 'function', function: { name: 'submit_result', description: '', parameters: { type: 'object', properties: {} } } },
+      ],
+      tool_choice: { type: 'function', function: { name: 'submit_result' } },
+    })
+    assert.deepEqual(body.tool_choice, { type: 'tool', name: 'submit_result' })
+  })
+
+  it('does not emit tool_choice for auto mode', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [{ role: 'user', content: 'test' }],
+      max_tokens: 4096,
+      tools: [
+        { type: 'function', function: { name: 'submit_result', description: '', parameters: { type: 'object', properties: {} } } },
+      ],
+      tool_choice: 'auto',
+    })
+    assert.equal(body.tool_choice, undefined)
+  })
+
+  it('does not emit tool_choice when no tools provided even with forced choice', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [{ role: 'user', content: 'test' }],
+      max_tokens: 4096,
+      tool_choice: { type: 'function', function: { name: 'submit_result' } },
+    })
+    assert.equal(body.tool_choice, undefined)
+  })
+
+  it('does not emit tool_choice when forced function is not among tools', () => {
+    const client = makeClient()
+    const body = client.buildRequestBodyForTest({
+      model: 'claude-opus-4-7',
+      messages: [{ role: 'user', content: 'test' }],
+      max_tokens: 4096,
+      tools: [
+        { type: 'function', function: { name: 'other_tool', description: '', parameters: { type: 'object', properties: {} } } },
+      ],
+      tool_choice: { type: 'function', function: { name: 'submit_result' } },
+    })
+    assert.equal(body.tool_choice, undefined)
+  })
+})
+
 describe('cache_control breakpoint injection', () => {
   it('injects BP1 on last tool definition (1h TTL)', () => {
     const client = makeClient()

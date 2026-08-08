@@ -12,6 +12,7 @@
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { displayWidth, truncateToDisplayWidth } from '../width.js'
+import { hiddenLinesMarker } from './hidden-lines.js'
 import type { RiskExplanation, RiskLevel } from '../../agent/risk-explain.js'
 
 export interface ApprovalRenderer {
@@ -87,7 +88,7 @@ const fileWriteRenderer: ApprovalRenderer = {
       }
       if (contentLines.length > 4) {
         const prefix = color('│ ', theme.dim)
-        const more = color(`… +${contentLines.length - 4} more lines`, theme.muted)
+        const more = color(hiddenLinesMarker(contentLines.length - 4), theme.muted)
         lines.push(`${prefix}${more}`)
       }
     }

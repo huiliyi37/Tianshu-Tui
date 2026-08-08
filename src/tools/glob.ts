@@ -6,10 +6,9 @@ import { relativePosix } from '../path-format.js'
 import { GitignoreFilter } from './gitignore.js'
 import { classifyPath } from '../context/attention-filter.js'
 import { isRestrictedPath } from '../platform/restricted-paths.js'
+import { SCAN_EXCLUDE_DIRS } from './scan-excludes.js'
 
-const EXCLUDE_DIRS = new Set([
-  'node_modules', '.git', 'dist', '.next', 'build', 'target', '__pycache__',
-])
+const EXCLUDE_DIRS = SCAN_EXCLUDE_DIRS
 const MAX_RESULTS = 500
 
 function escapeRegex(str: string): string {

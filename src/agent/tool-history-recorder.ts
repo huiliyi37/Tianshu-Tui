@@ -4,7 +4,7 @@ import type { ToolErrorClass } from '../tools/types.js'
 import type { FailureClass } from './failure-classifier.js'
 import { createHash } from 'node:crypto'
 import { TYPECHECK_CMD_RE } from './typecheck-gate.js'
-import { toolTargetFromInput } from './tool-target.js'
+import { classifyBashCommandActivity, toolTargetFromInput } from './tool-target.js'
 import { isUiFilePath, isVisualVerifyTool } from './hooks/render-verify-hook.js'
 import { POINTER_GUARD_ERROR_MARKER } from '../tools/pointer-guard.js'
 
@@ -27,6 +27,9 @@ export function recordToolHistory(
     // recoil. Visible status stays honest; only the immune amplifier is neutralised.
     const immuneError = errorClass === 'environment' ? false : isError
     const target = toolTargetFromInput(name, input ?? {})
+    const bashActivity = name === 'bash' && typeof input.command === 'string'
+      ? classifyBashCommandActivity(input.command)
+      : undefined
     // Deterministic argsHash: tool name + sorted input keys → SHA-256 first 8 hex chars.
     const argsHash = createHash('sha256')
       .update(`${name}:${JSON.stringify(input, Object.keys(input).sort())}`)
@@ -46,6 +49,12 @@ export function recordToolHistory(
       tool: name,
       target,
       status: isError ? 'failed' : 'success',
+      ...(bashActivity ? { bashActivity } : {}),
+      // Turn the call belongs to: addUserMessage() bumps turnCount, so calls
+      // between two user messages share the same turn number. Consumers can
+      // then ask "did the previous turn issue any tool call" instead of
+      // scanning a sliding window (reasoning-spiral-hook wiring).
+      turn: self.session.getTurnCount(),
       argsHash,
       error: isError ? result.slice(0, 50) : undefined,
       ...(isError && errorClass ? { errorClass } : {}),

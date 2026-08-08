@@ -4,6 +4,7 @@
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { hiddenLinesMarker } from './hidden-lines.js'
 
 export interface PermissionDiffInput {
   toolName: string
@@ -91,7 +92,7 @@ function formatWritePreview(params: Record<string, unknown>, theme: RivetTheme):
       lines.push(`│ ${color(cl.slice(0, 58), theme.dim)}`)
     }
     if (contentLines.length > 4) {
-      lines.push(color(`│ … +${contentLines.length - 4} more lines`, theme.muted))
+      lines.push(color(`│ ${hiddenLinesMarker(contentLines.length - 4)}`, theme.muted))
     }
   }
 

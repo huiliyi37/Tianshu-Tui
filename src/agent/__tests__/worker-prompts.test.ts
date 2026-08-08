@@ -212,14 +212,19 @@ describe('worker prompts', () => {
       assert.ok(prompt.includes('绿非证明，复现即证'), '执行纪律保留')
     })
 
-    it('buildFinalizationInstruction 携带完整契约与诚实纪律', () => {
+    it('buildFinalizationInstruction 引导唯一 submit_result 工具，不诱导散文 JSON', () => {
       const instruction = buildFinalizationInstruction(scoutOrder(), false)
       assert.ok(instruction.includes('工单 ID（原样复制）：wo_contract'), '带 order id')
-      assert.ok(instruction.includes('"workOrderId"'), '带结果卡 shape')
-      assert.ok(instruction.includes('JSON 字符串纪律'), '带转义纪律')
       assert.ok(instruction.includes('只基于上方对话中实际发生的工具调用及其结果'), '只准基于实际工具调用与结果')
       assert.ok(instruction.includes('不得宣称跑过未执行的验证、读过未读的文件'), '不得编造未执行的验证/未读的文件')
-      assert.ok(instruction.includes('只输出一个 JSON 对象'), '带输出纪律（含 json 字样，满足 response_format 门）')
+      assert.ok(instruction.includes('submit_result'), '引导唯一 submit_result 工具提交结果')
+      assert.ok(!instruction.includes('只输出一个 JSON 对象'), '正常路径不再要求裸 JSON——避免诱导散文 JSON')
+    })
+
+    it('buildFinalizationInstruction 无工具 fallback 保留完整 JSON shape', () => {
+      const instruction = buildFinalizationInstruction(scoutOrder(), false)
+      assert.ok(instruction.includes('"workOrderId"'), 'fallback 带结果卡 shape')
+      assert.ok(instruction.includes('JSON 字符串纪律'), 'fallback 带转义纪律')
     })
 
     it('buildFinalizationInstruction 按写能力选 shape', () => {

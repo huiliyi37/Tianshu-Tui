@@ -7,7 +7,7 @@ import { resolveProLicense, isProEnabled, isProFeatureEnabled } from '../pro-lic
 import { DEFAULT_CONFIG } from '../default.js'
 import type { Config } from '../schema.js'
 
-const ALL_FEATURES_ON = { computerUse: true, chatGateway: true, teamMax: true, councilMultiRound: true, unattendedAutomation: true }
+const ALL_FEATURES_ON = { computerUse: true, chatGateway: true, teamMax: true, councilMultiRound: true, unattendedAutomation: true, spark: true }
 
 function baseConfig(): Config {
   // Start from the real default and only mutate `pro` for the test.
@@ -16,18 +16,22 @@ function baseConfig(): Config {
   return cfg
 }
 
-describe('resolveProLicense', () => {
+describe('resolveProLicense — CLI 软 gate（无 RIVET_DESKTOP）', () => {
   const originalEnv = process.env.RIVET_PRO
+  const originalDesktop = process.env.RIVET_DESKTOP
   let tmpLicense: string
 
   beforeEach(() => {
     delete process.env.RIVET_PRO
+    delete process.env.RIVET_DESKTOP   // 默认测 CLI 软 gate（无 RIVET_DESKTOP）
     tmpLicense = join(mkdtempSync(join(tmpdir(), 'pro-license-')), 'pro.license')
   })
 
   afterEach(() => {
     if (originalEnv !== undefined) process.env.RIVET_PRO = originalEnv
     else delete process.env.RIVET_PRO
+    if (originalDesktop !== undefined) process.env.RIVET_DESKTOP = originalDesktop
+    else delete process.env.RIVET_DESKTOP
     try { unlinkSync(tmpLicense) } catch { /* ignore */ }
   })
 
@@ -79,12 +83,79 @@ describe('resolveProLicense', () => {
   })
 })
 
+describe('resolveProLicense — 桌面端硬 gate（RIVET_DESKTOP=1）', () => {
+  const originalPro = process.env.RIVET_PRO
+  const originalDesktop = process.env.RIVET_DESKTOP
+  let tmpLicense: string
+
+  beforeEach(() => {
+    process.env.RIVET_DESKTOP = '1'
+    delete process.env.RIVET_PRO
+    tmpLicense = join(mkdtempSync(join(tmpdir(), 'pro-desktop-')), 'pro.license')
+  })
+
+  afterEach(() => {
+    if (originalPro !== undefined) process.env.RIVET_PRO = originalPro
+    else delete process.env.RIVET_PRO
+    if (originalDesktop !== undefined) process.env.RIVET_DESKTOP = originalDesktop
+    else delete process.env.RIVET_DESKTOP
+    try { unlinkSync(tmpLicense) } catch { /* ignore */ }
+  })
+
+  it('RIVET_PRO=1（Rust 验签后注入）→ enabled', () => {
+    process.env.RIVET_PRO = '1'
+    const info = resolveProLicense(baseConfig(), tmpLicense)
+    assert.equal(info.enabled, true)
+    assert.equal(info.source, 'env')
+  })
+
+  it('无 RIVET_PRO → disabled（Basic）', () => {
+    const info = resolveProLicense(baseConfig(), tmpLicense)
+    assert.equal(info.enabled, false)
+    assert.equal(info.source, 'none')
+  })
+
+  it('config.pro.enabled=true 后门被封死（硬 gate 安全核心）', () => {
+    const config = baseConfig()
+    config.pro = { enabled: true, licenseKey: 'stolen', features: { ...ALL_FEATURES_ON } }
+    const info = resolveProLicense(config, tmpLicense)
+    // 即使用户手改 config.json 写 pro.enabled=true，无 RIVET_PRO 仍是 Basic——
+    // Rust 端 Ed25519 验签是唯一解锁路径。
+    assert.equal(info.enabled, false, 'config.pro.enabled 后门在桌面端必须失效')
+    assert.equal(info.source, 'none')
+  })
+
+  it('pro.license 文件后门被封死', () => {
+    writeFileSync(tmpLicense, 'fake-license-key')
+    const info = resolveProLicense(baseConfig(), tmpLicense)
+    assert.equal(info.enabled, false, 'pro.license 文件后门在桌面端必须失效')
+    assert.equal(info.source, 'none')
+  })
+
+  it('config + file + RIVET_PRO=1 同时存在 → 只认 RIVET_PRO', () => {
+    process.env.RIVET_PRO = '1'
+    writeFileSync(tmpLicense, 'fake')
+    const config = baseConfig()
+    config.pro = { enabled: true, licenseKey: 'stolen', features: { ...ALL_FEATURES_ON } }
+    const info = resolveProLicense(config, tmpLicense)
+    assert.equal(info.enabled, true)
+    assert.equal(info.source, 'env', '桌面端唯一可信源是 RIVET_PRO')
+  })
+})
+
 describe('isProFeatureEnabled', () => {
   const originalEnv = process.env.RIVET_PRO
+  const originalDesktop = process.env.RIVET_DESKTOP
+
+  beforeEach(() => {
+    delete process.env.RIVET_DESKTOP   // 测 CLI 软 gate 语义（config.enabled 可解锁）
+  })
 
   afterEach(() => {
     if (originalEnv !== undefined) process.env.RIVET_PRO = originalEnv
     else delete process.env.RIVET_PRO
+    if (originalDesktop !== undefined) process.env.RIVET_DESKTOP = originalDesktop
+    else delete process.env.RIVET_DESKTOP
   })
 
   it('returns false when Pro is disabled', () => {

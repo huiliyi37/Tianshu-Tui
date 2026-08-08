@@ -3,10 +3,14 @@ import { join, basename, resolve } from 'path'
 import { relativePosix } from '../path-format.js'
 import { classifyPath } from '../context/attention-filter.js'
 import type { Tool, ToolCallParams } from './types.js'
+import { SCAN_EXCLUDE_DIRS } from './scan-excludes.js'
 
+// Shared baseline plus this tool's own extras. It used to be a hand-kept copy
+// that had lost `target` — which is where a Rust/Tauri project keeps the
+// largest tree it owns.
 const EXCLUDE_DIRS = new Set([
-  'node_modules', '.git', 'dist', 'build', '.next', 'coverage',
-  '__pycache__', '.turbo', '.cache',
+  ...SCAN_EXCLUDE_DIRS,
+  'coverage', '.turbo', '.cache',
 ])
 const DEFAULT_MAX_FILES = 200
 const DEFAULT_DEPTH = 4

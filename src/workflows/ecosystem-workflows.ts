@@ -333,7 +333,8 @@ If the objective IS a Markdown plan file path (e.g. .rivet/knowledge/...md or do
      plan_task auto-detects the plan file, turns its - [ ] checklist into self-contained patcher shards,
      and stores the plan so team_orchestrate can pick it up automatically.
   3. Workers write into the shared workspace. Review the aggregate changes (git diff/git status) — there is nothing to manually merge.
-  4. If the output shows remaining waves, call team_orchestrate with { mode: 'standard', objective, fromWave: <next wave index> }.
+  4. team_orchestrate auto-advances through the remaining waves by default — do NOT re-invoke it per wave.
+     Pass fromWave only for manual recovery (e.g. resuming after an interruption): it runs just that one wave.
      (No need to pass planJson — team_orchestrate reads it from the internal plan store.)
 
 If the objective is a free-form task description (no plan file):

@@ -1,0 +1,63 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { createProbeDisciplineHook } from '../hooks/probe-discipline-hook.js'
+import type { RuntimeToolEvent } from '../runtime-hooks.js'
+
+interface Submitted {
+  category: string
+  content: string
+}
+
+function makeDeps() {
+  const submitted: Submitted[] = []
+  const advisoryBus = { submit: (a: Submitted) => { submitted.push(a) } }
+  return { submitted, advisoryBus }
+}
+
+function ev(name: string): RuntimeToolEvent {
+  return { name, success: true }
+}
+
+test('fires after 3 consecutive read-only tools', async () => {
+  const { submitted, advisoryBus } = makeDeps()
+  const hook = createProbeDisciplineHook({ advisoryBus })
+  for (const n of ['read_file', 'grep', 'glob']) {
+    await hook.run({} as never, ev(n))
+  }
+  assert.equal(submitted.length, 1)
+  assert.equal(submitted[0]!.category, 'discipline')
+  assert.ok(submitted[0]!.content.includes('探针'), 'content mentions probe')
+})
+
+test('does not fire before the threshold', async () => {
+  const { submitted, advisoryBus } = makeDeps()
+  const hook = createProbeDisciplineHook({ advisoryBus })
+  await hook.run({} as never, ev('read_file'))
+  await hook.run({} as never, ev('grep'))
+  assert.equal(submitted.length, 0)
+})
+
+test('a write/verify tool breaks the read streak', async () => {
+  const { submitted, advisoryBus } = makeDeps()
+  const hook = createProbeDisciplineHook({ advisoryBus })
+  await hook.run({} as never, ev('read_file'))
+  await hook.run({} as never, ev('grep'))
+  await hook.run({} as never, ev('bash'))
+  await hook.run({} as never, ev('read_file'))
+  await hook.run({} as never, ev('grep'))
+  assert.equal(submitted.length, 0, 'streak reset by non-readonly tool')
+})
+
+test('cooldown prevents repeated injection within 8 calls', async () => {
+  const { submitted, advisoryBus } = makeDeps()
+  const hook = createProbeDisciplineHook({ advisoryBus })
+  // First trigger at call 3
+  for (let i = 0; i < 3; i++) await hook.run({} as never, ev('read_file'))
+  assert.equal(submitted.length, 1)
+  // 7 more readonly calls — still inside cooldown (8 calls), no second inject
+  for (let i = 0; i < 7; i++) await hook.run({} as never, ev('read_file'))
+  assert.equal(submitted.length, 1, 'cooldown suppresses second injection')
+  // Call 11 crosses the cooldown window → second injection
+  await hook.run({} as never, ev('read_file'))
+  assert.equal(submitted.length, 2, 'injection repeats after cooldown')
+})

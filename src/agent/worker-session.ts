@@ -1,12 +1,15 @@
 import type { StreamClient } from '../api/stream-client.js'
-import type { Usage } from '../api/types.js'
+import type { ContentBlockToolUse, Usage } from '../api/types.js'
+import { zodToJsonSchema } from 'zod-to-json-schema'
 import type { CompactionConfig } from '../compact/constants.js'
 import { PromptEngine } from '../prompt/engine.js'
 import { ToolRegistry } from '../tools/registry.js'
 import { AgentLoop } from './loop.js'
 import { SessionContext } from './context.js'
+import { SessionPersist } from './session-persist.js'
 import { classifyFailure, isTransient } from './failure-classifier.js'
 import {
+  WORKER_RESULT_SUBMIT_SCHEMA,
   buildBlockedWorkerResult,
   clampWorkerMaxTurns,
   classifyWorkerParseError,
@@ -289,11 +292,25 @@ async function runOnce(
   // 代价：工具真死锁不再被 stall 提前杀，改由 budget 墙钟兜底（更晚但有界）——
   // 误杀健康长任务的代价比晚杀死锁高，取此交换。
   const toolsInFlight = new Map<string, { name: string; since: number }>()
+  // 模型首字节等待同样可能长时间没有任何 worker 事件。单独记录最近一次
+  // 活动，让 keepalive 只在真正静默时播报；这条心跳会同时喂给 TUI 和
+  // coordinator 的上游活动流，避免健康请求被渲染层误报为「No response」。
+  let lastActivityAt = Date.now()
+  const emitActivity = (kind: WorkerActivityKind, detail?: string): void => {
+    lastActivityAt = Date.now()
+    onActivity?.(kind, detail)
+  }
   const keepalive = setInterval(() => {
+    const now = Date.now()
+    if (now - lastActivityAt < TOOL_KEEPALIVE_MS) return
     const oldest = toolsInFlight.values().next().value
-    if (!oldest) return
-    const elapsedS = Math.round((Date.now() - oldest.since) / 1000)
-    onActivity?.('lifecycle', `tool still running: ${oldest.name} (${elapsedS}s, ${toolsInFlight.size} in flight)`)
+    if (oldest) {
+      const elapsedS = Math.round((now - oldest.since) / 1000)
+      emitActivity('lifecycle', `tool still running: ${oldest.name} (${elapsedS}s, ${toolsInFlight.size} in flight)`)
+      return
+    }
+    const elapsedS = Math.round((now - lastActivityAt) / 1000)
+    emitActivity('lifecycle', `model request still running: waiting for first response (${elapsedS}s)`)
   }, TOOL_KEEPALIVE_MS)
   keepalive.unref?.()
   try {
@@ -301,11 +318,11 @@ async function runOnce(
     onTextDelta: (delta) => {
       text += delta
       transcript.text += delta
-      onActivity?.('text', delta)
+      emitActivity('text', delta)
     },
     onThinkingDelta: (delta) => {
       transcript.thinking += delta
-      onActivity?.('thinking', delta)
+      emitActivity('thinking', delta)
     },
     onToolUse: (id, name, input) => {
       toolsInFlight.set(id, { name, since: Date.now() })
@@ -330,7 +347,7 @@ async function runOnce(
       }
       // 活动流带关键参数(name(arg))——桌面委派 UI / TUI worker mirror 直接展示,
       // 光秃工具名无法回答"它在读哪个文件/跑什么命令"。
-      onActivity?.('tool_use', summarizeToolUseLine(name, input))
+      emitActivity('tool_use', summarizeToolUseLine(name, input))
     },
     onToolResult: (id, name, result, isError) => {
       toolsInFlight.delete(id)
@@ -340,12 +357,12 @@ async function runOnce(
         const failedCommand = bashCommandById.get(id)
         if (failedCommand) (transcript.failedBashCommands ??= []).push(failedCommand)
       }
-      onActivity?.('tool_result', name)
+      emitActivity('tool_result', name)
     },
     // usage 是累计快照（getTotalUsage）——上报累计 token 总数，供 fleet 面板实时显示。
     onTurnComplete: (usage) => {
       const total = (usage?.input_tokens ?? 0) + (usage?.output_tokens ?? 0)
-      if (total > 0) onActivity?.('turn', String(total))
+      if (total > 0) emitActivity('turn', String(total))
     },
     // WC: 输入直达 — drain coordinator 注入的 per-order steer 队列
     onSteerDrain: onSteerDrain ? () => onSteerDrain() : undefined,
@@ -380,6 +397,86 @@ async function runOnce(
 function isResponseFormatRejection(err: Error | undefined): boolean {
   if (!err) return false
   return /response_format|json_object|json.mode|unknown\s+(parameter|field|argument)|unrecognized\s+(parameter|field|argument)|not[-_ ]supported/i.test(err.message)
+}
+
+/** 终型收尾轮强制工具（W2C）：唯一 submit_result。OAI 对象形式 tool_choice，
+ *  anthropic/codex client 层各自映射为 provider 强制工具选择（W2D/W2E）。 */
+const SUBMIT_RESULT_TOOL_NAME = 'submit_result'
+/** submit_result 的 parameters 与 WORKER_RESULT_SUBMIT_SCHEMA（work-order.ts，
+ *  workerResultIngestSchema 同源）严格一致——模型看到的参数形状与解析侧 ingest
+ *  权威校验共用一份定义，改 schema 两侧自然同步。zod-to-json-schema 是 MCP SDK
+ *  的传递依赖（package-lock 已锁定，未直接声明）。 */
+const SUBMIT_RESULT_PARAMETERS: Record<string, unknown> = zodToJsonSchema(
+  WORKER_RESULT_SUBMIT_SCHEMA,
+  { target: 'openApi3' },
+)
+
+/**
+ * 阶段 1 终型（W2C）：唯一 submit_result 工具 + forced tool_choice。模型把完整
+ * 报告作为工具参数提交——参数形状与 ingest 校验同源；散文伴随输出忽略（最终
+ * 结果只取工具参数，不拼散文）。
+ *
+ * 捕获恰好一个 ContentBlockToolUse(name='submit_result') 且参数未截断 → 序列化
+ * 参数走 parseWorkerResult/ingest 权威校验（缺 workOrderId / 非法 status 等抛错
+ * 即回退，绝不把未过校验的模型输出当报告）。零/多 tool-call、截断参数（
+ * argsTruncated）、provider 拒绝（stream error）→ { ok: false }，调用方回退无
+ * 工具 json_object 终型——fallback 至多一次，同 worker run 不重复白烧。
+ *
+ * 成功返回的 text 与 JSON 终型同构：调用方把它当 latestText 交给下游同一套
+ * parse + reconcile 管线，证据门不因工具路径被绕过。
+ */
+async function attemptWithSubmitTool(
+  config: WorkerSessionConfig,
+  session: SessionContext,
+  order: WorkOrder,
+  hasWriteTools: boolean,
+): Promise<{ ok: true; text: string } | { ok: false }> {
+  const toolUses: ContentBlockToolUse[] = []
+  let error: Error | undefined
+  await config.client.stream(
+    {
+      model: config.promptEngine.getModel(),
+      messages: [
+        ...session.getMessages(),
+        { role: 'user' as const, content: buildFinalizationInstruction(order, hasWriteTools) },
+      ],
+      // 报告再生与修复轮同档（16384）——报告写大被截时照样需要这份空间。
+      max_tokens: Math.min(16384, order.budget.maxTokens ?? config.contextWindow),
+      stream: true,
+      tools: [{
+        type: 'function' as const,
+        function: {
+          name: SUBMIT_RESULT_TOOL_NAME,
+          description: '提交最终 WorkerResult 报告：把完整报告作为参数 JSON 传入，与参数 JSON Schema 对齐。',
+          parameters: SUBMIT_RESULT_PARAMETERS,
+        },
+      }],
+      tool_choice: { type: 'function' as const, function: { name: SUBMIT_RESULT_TOOL_NAME } },
+    },
+    {
+      onTextDelta: () => {}, // 伴随散文忽略——结果只取 submit_result 参数。
+      onThinkingDelta: () => {},
+      onContentBlock: (block) => { if (block.type === 'tool_use') toolUses.push(block) },
+      onStopReason: () => {},
+      onError: (e) => { error = e },
+    },
+    config.abortSignal,
+  ).catch((e: unknown) => { error = e as Error })
+  if (error) return { ok: false }
+  // 契约：恰好一个 tool_use 且必须是 submit_result——零 tool-call、多 tool-call
+  // （即使其中一个是 submit_result）一律回退无工具终型。
+  if (toolUses.length !== 1) return { ok: false }
+  const call = toolUses[0]!
+  if (call.name !== SUBMIT_RESULT_TOOL_NAME) return { ok: false }
+  if (call.argsTruncated) return { ok: false }
+  try {
+    const serialized = JSON.stringify(call.input)
+    // 权威校验：与解析侧 ingest 共用同一 schema，抛错即回退。
+    parseWorkerResult(serialized, order.id)
+    return { ok: true, text: serialized }
+  } catch {
+    return { ok: false }
+  }
 }
 
 /**
@@ -457,6 +554,15 @@ async function finalizeWorkerReport(
   // 收尾轮不走 AgentLoop，没有任何自然流式事件——先发一条 lifecycle 喂 stall
   // clock，再把 delta 按 'text' 上行（与探索轮同一保活通道）。
   config.onActivity?.('lifecycle', 'finalizing report')
+  // 阶段 1（首选，W2C）：唯一 submit_result 工具 + forced tool_choice。成功即
+  // 返回——结果已过 parseWorkerResult 权威校验。
+  const toolResult = await attemptWithSubmitTool(config, session, order, hasWriteTools)
+  if (toolResult.ok) {
+    config.onActivity?.('lifecycle', 'finalize accepted via submit_result tool')
+    return toolResult.text
+  }
+  // 阶段 2（fallback 一次，同 worker run 不重复白烧）：provider 拒绝工具定义、
+  // 零/多/截断 tool-call、参数过不了权威校验，都落到无工具 json_object 终型。
   const attempt = async (withJson: boolean): Promise<{ text: string; error?: Error }> => {
     let text = ''
     let error: Error | undefined
@@ -639,7 +745,7 @@ export async function runOnceWithTransientRetry(
   throw new Error('runOnceWithTransientRetry: exhausted retries')
 }
 
-export async function runWorkerSession(config: WorkerSessionConfig): Promise<WorkerSessionRun> {
+async function runWorkerSessionImpl(config: WorkerSessionConfig): Promise<WorkerSessionRun> {
   if (config.activeClaims && config.activeClaims.length > 0) {
     config.promptEngine.updateActiveClaims(config.activeClaims)
   }
@@ -970,4 +1076,41 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
       config.abortSignal.removeEventListener('abort', onParentAbort)
     }
   }
+}
+
+/**
+ * runWorkerSession 的收尾包装（P0-3：席位 worker 会话结束后 meta 有终态）。
+ *
+ * 内部实现有 6+ 个返回点（正常 parse / parse-salvaged / parse-blocked / abort /
+ * max-turns 回退 / 兜底 blocked），逐一注入收尾会漏——统一经 wrapper 出口写终态。
+ *
+ * 收尾语义（与 loop.ts:990-997 的启动侧对应）：
+ * - 正常结束（含 blocked/salvaged）：status='completed' + cleanExit=true，失败归因
+ *   走 failureReason（salvage 路径已带 'timeout'/'max_turns'/'json_parse' 等）。
+ * - caller_aborted：**不写**——保持 active + cleanExit:false，与 R1 crash-recoverable
+ *   语义一致（abort 后父会话可能接管续跑，不能误标已收尾）。
+ * - crash（本函数 throw）：不经过此出口，天然保持 active——「还在跑/跑挂了」可区分。
+ *
+ * 只写 worker 自己的会话 meta（sessionId 派生自 order.id），不碰主会话。
+ */
+export async function runWorkerSession(config: WorkerSessionConfig): Promise<WorkerSessionRun> {
+  const run = await runWorkerSessionImpl(config)
+  // caller_aborted：不写终态——保持 active + cleanExit:false，与 R1 crash-recoverable
+  // 语义一致（abort 后父会话可能接管续跑，不能误标已收尾）。timeout 是预算耗尽
+  // （文档要修的形态），failureReason 已编码在结果上，正常写终态 + 归因。
+  if (run.result.failureReason === 'caller_aborted') {
+    return run
+  }
+  try {
+    const persist = new SessionPersist(deriveWorkerSessionId(config.order.id, config.sessionNonce), config.cwd)
+    const failureReason = run.result.failureReason
+    persist.updateMetadata({
+      status: 'completed',
+      cleanExit: true,
+      ...(failureReason ? { failureReason } : {}),
+    })
+  } catch {
+    // meta 写回失败不吞结果——worker 已完成，收尾标注只是可观测性增强。
+  }
+  return run
 }

@@ -155,6 +155,35 @@ describe('readFilePayload', () => {
     assert.ok(payload.modelContent.length < log.length, 'model should only receive preview, not full log')
   })
 
+  it('returns focused source ranges when a task query is provided', async () => {
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    const source = [
+      'export function unrelatedHelper(): string {',
+      '  return "noise".repeat(20)',
+      '}',
+      '',
+      'export function targetDispatch(): string {',
+      '  return "dispatch"',
+      '}',
+      '',
+      'export function unrelatedTail(): number {',
+      '  return 42',
+      '}',
+    ].join('\n')
+    writeFileSync(join(dir, 'src/focused.ts'), source, 'utf-8')
+
+    const payload = await readFilePayload(dir, {
+      filePath: 'src/focused.ts',
+      focus: 'target dispatch',
+      modelCap: { maxChars: 1_200, headChars: 800, tailChars: 200 },
+    })
+
+    assert.equal(payload.rawContent, source, 'focused reads must retain full raw content for artifact recovery')
+    assert.match(payload.modelContent, /\[focused-read\]/)
+    assert.match(payload.modelContent, /targetDispatch/)
+    assert.ok(!payload.modelContent.includes('return 42'), 'unrelated body should be omitted')
+  })
+
   it('allows explicit ranges for large log-like files', async () => {
     mkdirSync(join(dir, 'logs'), { recursive: true })
     const log = Array.from({ length: 500 }, (_, i) => `event ${i} ${'x'.repeat(80)}`).join('\n')
@@ -252,6 +281,37 @@ describe('READ_FILE_TOOL multi-read', () => {
     assert.ok(!result.isError)
     assert.match(result.content, /const a = 1/)
   })
+
+  it('re-evaluates focus queries instead of serving a stale read-ref', async () => {
+    const { READ_FILE_TOOL } = await import('../read-file.js')
+    writeFileSync(join(dir, 'src', 'focus.ts'), [
+      'export function alpha(): string {',
+      '  return "alpha".repeat(20)',
+      '}',
+      '',
+      'export function beta(): string {',
+      '  return "beta".repeat(20)',
+      '}',
+    ].join('\n'), 'utf-8')
+
+    const sessionId = `focused-read-${Date.now()}`
+    const first = await READ_FILE_TOOL.execute({
+      input: { file_path: 'src/focus.ts', focus: 'alpha' },
+      toolUseId: 'focus-1',
+      cwd: dir,
+      sessionId,
+    })
+    const second = await READ_FILE_TOOL.execute({
+      input: { file_path: 'src/focus.ts', focus: 'beta' },
+      toolUseId: 'focus-2',
+      cwd: dir,
+      sessionId,
+    })
+
+    assert.match(first.content, /alpha/)
+    assert.match(second.content, /beta/)
+    assert.doesNotMatch(second.content, /\[read-ref\]/)
+  })
 })
 
 describe('readCapOverride (2026-07-24 worker max-turns 诊断)', () => {
@@ -340,4 +400,3 @@ describe('readCapOverride (2026-07-24 worker max-turns 诊断)', () => {
     assert.doesNotMatch(result.content, /── PARTIAL view of/)
   })
 })
-

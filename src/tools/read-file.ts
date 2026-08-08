@@ -15,6 +15,7 @@ import { foldCode } from '../compact/code-fold.js'
 import { canUsePrewarmForRead, consumePrewarm } from '../agent/prewarm-file.js'
 import { canonicalPathKey } from '../path-format.js'
 import { OFFICE_EXTENSIONS, readOfficeFile } from './office-reader.js'
+import { buildFocusedReadView } from './focused-read.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: Promise<GitignoreFilter>; ts: number }>()
@@ -360,6 +361,8 @@ function getGitignoreFilter(cwd: string): Promise<GitignoreFilter> {
 }
 
 const MAX_TOOL_INPUT_BYTES = 100 * 1024
+/** Focused reads may scan a larger source file, but never load unbounded data. */
+const MAX_FOCUS_SCAN_BYTES = 2 * 1024 * 1024
 const LOG_PREVIEW_LINES = 80
 
 /**
@@ -466,6 +469,10 @@ export interface ReadFilePayloadOptions {
   filePath: string
   offset?: number
   limit?: number
+  /** Task-oriented query. Returns a structural summary plus high-signal ranges. */
+  focus?: string
+  /** Maximum number of focused match windows to return. */
+  focusMaxMatches?: number
   /** Per-call model read cap. Defaults to {@link DEFAULT_MODEL_READ_CAP}. */
   modelCap?: ModelReadCap
   /**
@@ -546,9 +553,17 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
 
   const fileSize = fileStat.size
   const hasExplicitRange = options.offset !== undefined || options.limit !== undefined
+  const focus = typeof options.focus === 'string' ? options.focus.trim() : ''
+  const hasFocus = focus.length > 0 && !hasExplicitRange
   const policy = decideReadPolicy({ filePath, sizeBytes: fileSize, hasExplicitRange })
 
-  if (fileSize > MAX_TOOL_INPUT_BYTES && !hasExplicitRange) {
+  if (hasFocus && fileSize > MAX_FOCUS_SCAN_BYTES) {
+    throw new Error(
+      `Focused read refuses files over ${(MAX_FOCUS_SCAN_BYTES / 1024 / 1024).toFixed(0)}MB. Use grep or an explicit offset/limit range first.`,
+    )
+  }
+
+  if (fileSize > MAX_TOOL_INPUT_BYTES && !hasExplicitRange && !hasFocus) {
     if (policy.action === 'partial') {
       // Large source file: read and return PARTIAL view instead of hard error
       const content = options.prefetchedContent ?? await readFile(filePath, 'utf-8')
@@ -575,6 +590,22 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
 
   if (policy.action === 'reject-with-range' && !hasExplicitRange) {
     throw new Error(`${policy.reason}. Use offset and limit to read a specific range.`)
+  }
+
+  if (hasFocus) {
+    const focused = buildFocusedReadView({
+      filePath,
+      content,
+      focus,
+      maxChars: cap.maxChars,
+      maxMatches: options.focusMaxMatches,
+    })
+    return {
+      canonicalPath: filePath,
+      rawContent: content,
+      modelContent: focused.content,
+      uiContent: buildFileUiOutput(content, 80),
+    }
   }
 
   if (policy.action === 'preview' && !hasExplicitRange) {
@@ -659,6 +690,7 @@ export const READ_FILE_TOOL: Tool = {
     description: `从文件系统读取文件，支持可选的行范围。
 
 - 约 50,000 行以内的文件完整返回——不要自己切成小片分多次读
+- focus="..." 用于按当前任务提取关键代码：返回结构摘要和高相关行段，避免把无关正文塞进上下文
 - offset/limit 只用于已知子区间（如第 800-900 行），不要拿它当长文件的绕行手段
 - 超过约 2000 行的文件返回 PARTIAL 视图并附导航提示
 - 不要重读未变更的文件——此前结果仍在上下文里
@@ -676,6 +708,8 @@ export const READ_FILE_TOOL: Tool = {
 
         offset: { type: 'integer', description: '起始读取行号（从 1 开始）' },
         limit: { type: 'integer', description: '最多读取的行数' },
+        focus: { type: 'string', description: '任务关键词或问题；只返回结构摘要和相关片段' },
+        focus_max_matches: { type: 'integer', description: 'focus 最多返回的片段数量（默认 8）' },
       },
       required: ['file_path'],
     },
@@ -685,7 +719,9 @@ export const READ_FILE_TOOL: Tool = {
     // Multi-read branch: file_paths array
     const filePaths = params.input.file_paths as string[] | undefined
     if (filePaths && filePaths.length > 0) {
-      return await handleMultiRead(params, filePaths.slice(0, 5))
+      const focus = typeof params.input.focus === 'string' ? params.input.focus : undefined
+      const focusMaxMatches = typeof params.input.focus_max_matches === 'number' ? params.input.focus_max_matches : undefined
+      return await handleMultiRead(params, filePaths.slice(0, 5), focus, focusMaxMatches)
     }
 
     let payload: ReadFilePayload
@@ -703,6 +739,8 @@ export const READ_FILE_TOOL: Tool = {
     const filePath = params.input.file_path as string
     const offset = (params.input.offset as number) ?? 1
     const limit = params.input.limit as number | undefined
+    const focus = typeof params.input.focus === 'string' ? params.input.focus.trim() : ''
+    const focusedRead = focus.length > 0 && params.input.offset === undefined && params.input.limit === undefined
     let dedupKey: string | null = null
     let currentMtimeMs: number | null = null
     let currentSizeBytes: number | null = null
@@ -713,9 +751,11 @@ export const READ_FILE_TOOL: Tool = {
         const currentStat = await stat(canonical)
         currentMtimeMs = currentStat.mtimeMs
         currentSizeBytes = currentStat.size
-        dedupKey = readHistoryKey(params.cwd, canonical, offset, limit, params.sessionId)
-        const prior = readHistory.get(dedupKey)
-        if (prior && prior.mtimeMs === currentMtimeMs && prior.sizeBytes === currentSizeBytes && prior.artifactId) {
+        if (!focusedRead) {
+          dedupKey = readHistoryKey(params.cwd, canonical, offset, limit, params.sessionId)
+        }
+        const prior = focusedRead || !dedupKey ? undefined : readHistory.get(dedupKey)
+        if (!focusedRead && prior && prior.mtimeMs === currentMtimeMs && prior.sizeBytes === currentSizeBytes && prior.artifactId) {
           if (params.artifactStore) {
             const slice = await sliceFromArtifact(params.artifactStore, prior.artifactId, offset, limit)
             if (slice !== null) {
@@ -732,8 +772,8 @@ export const READ_FILE_TOOL: Tool = {
           }
           debugLog(`[read-dedup] artifact unreadable, falling through to normal read file=${canonical}`)
         }
-        const fullEntry = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical))
-        if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && fullEntry.sizeBytes === currentSizeBytes && fullEntry.artifactId && (offset !== 1 || limit !== undefined)) {
+        const fullEntry = focusedRead ? undefined : fileReadHistory.get(fileHistoryKey(params.sessionId, canonical))
+        if (!focusedRead && fullEntry && fullEntry.mtimeMs === currentMtimeMs && fullEntry.sizeBytes === currentSizeBytes && fullEntry.artifactId && (offset !== 1 || limit !== undefined)) {
           if (params.artifactStore) {
             const slice = await sliceFromArtifact(params.artifactStore, fullEntry.artifactId, offset, limit)
             if (slice !== null) {
@@ -758,7 +798,7 @@ export const READ_FILE_TOOL: Tool = {
 
     // ── 重复读取检测 ──
     // 检测本轮是否已读过同一文件且未变更，若是则在前端注入提醒。
-    const unchangedRepeat = (canonical && currentMtimeMs !== null && currentSizeBytes !== null && dedupKey)
+    const unchangedRepeat = (!focusedRead && canonical && currentMtimeMs !== null && currentSizeBytes !== null && dedupKey)
       ? isUnchangedRepeatRead(canonical, currentMtimeMs, currentSizeBytes, dedupKey, offset, limit, params.sessionId)
       : false
 
@@ -861,6 +901,7 @@ export const READ_FILE_TOOL: Tool = {
         filePath,
         ...(params.input.offset !== undefined ? { offset } : {}),
         ...(params.input.limit !== undefined ? { limit } : {}),
+        ...(focusedRead ? { focus, focusMaxMatches: typeof params.input.focus_max_matches === 'number' ? params.input.focus_max_matches : undefined } : {}),
         modelCap: computedCap,
         prefetchedContent,
         preferFoldOnOverflow: params.readCapOverride !== undefined,
@@ -979,7 +1020,12 @@ export const READ_FILE_TOOL: Tool = {
 
 /** Handle multi-file read: file_paths array. Reads up to 5 files, each with
  *  an independent per-file budget derived from the overall model read cap. */
-async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise<import('./types.js').ToolResult> {
+async function handleMultiRead(
+  params: ToolCallParams,
+  paths: string[],
+  focus?: string,
+  focusMaxMatches?: number,
+): Promise<import('./types.js').ToolResult> {
   const computedCap = params.readCapOverride ?? computeModelReadCap({
     contextWindow: params.contextWindow,
     providerProfile: params.providerProfile,
@@ -998,8 +1044,13 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
     const trimmed = rawPath.trim()
     if (!trimmed) continue
     try {
-      const payload = await readFilePayload(params.cwd, { filePath: trimmed, modelCap: perFileCap, preferFoldOnOverflow: params.readCapOverride !== undefined })
-      const relPath = relative(params.cwd, payload.canonicalPath)
+      const payload = await readFilePayload(params.cwd, {
+        filePath: trimmed,
+        ...(focus ? { focus, focusMaxMatches } : {}),
+        modelCap: perFileCap,
+        preferFoldOnOverflow: params.readCapOverride !== undefined,
+      })
+      const relPath = relative(params.cwd, payload.canonicalPath).replaceAll('\\', '/')
       sections.push(`── ${relPath} ──\n${payload.modelContent}`)
       totalBytes += payload.rawContent.length
 
@@ -1031,4 +1082,3 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
     uiContent: `Read ${paths.length - errors}/${paths.length} files (${(totalBytes / 1024).toFixed(1)} KB total)`,
   }
 }
-

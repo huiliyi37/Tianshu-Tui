@@ -12,9 +12,21 @@
  */
 import { join, relative } from 'node:path'
 import { scanDist } from './runtime-import-scan.js'
+import { verifyStagedRuntime } from './staged-runtime-verify.js'
 
 const repoRoot = join(import.meta.dirname, '..')
 const distDir = process.argv[2] ?? join(repoRoot, 'dist')
+
+// Specifier allowlisting only proves an import *may* resolve; it says nothing
+// about whether staging actually put the package on disk. Check the payload
+// first — a skeleton-only dist passes every specifier check (2026-08-03).
+const staged = verifyStagedRuntime(distDir)
+if (!staged.ok) {
+  console.error('✗ assert-runtime-imports: dist/node_modules staging 不完整——拒绝发残包')
+  for (const p of staged.problems) console.error(`  ${p}`)
+  console.error('  修复：node scripts/pack-native.js && node scripts/stage-runtime-deps.js')
+  process.exit(1)
+}
 
 const violations = await scanDist(distDir)
 if (violations.size > 0) {
@@ -25,4 +37,8 @@ if (violations.size > 0) {
   console.error('  修复：把包加入 tsup.config.ts noExternal 内联，或加入 stage-runtime-deps ROOTS 随包分发。')
   process.exit(1)
 }
-console.log('✅ assert-runtime-imports: dist/ 所有导入均可随包解析')
+console.log(
+  staged.skipped
+    ? '✅ assert-runtime-imports: dist/ 所有导入均可随包解析（未 stage node_modules，跳过载荷校验）'
+    : '✅ assert-runtime-imports: dist/ 所有导入均可随包解析，staged 载荷非空',
+)

@@ -45,8 +45,6 @@ const RUST_MARKERS = ['Cargo.toml']
 const PYTHON_MARKERS = ['pyproject.toml', 'requirements.txt', 'setup.py', 'setup.cfg', 'Pipfile']
 /** Markers that a directory contains a Java/Gradle project. */
 const JAVA_MARKERS = ['build.gradle', 'build.gradle.kts', 'pom.xml', 'mvnw']
-/** Markers for TypeScript/JavaScript (Node.js) projects. */
-const NODE_MARKERS = ['package.json']
 
 function hasAny(cwd: string, markers: readonly string[]): boolean {
   return markers.some(m => existsSync(join(cwd, m)))
@@ -160,13 +158,6 @@ export function detectProjectFingerprint(cwd: string): ProjectFingerprint {
   const fp = base ?? { language: 'unknown' as const, hasTestInfra: false }
   const externalAgentDocs = EXTERNAL_AGENT_DOCS.filter(f => existsSync(join(cwd, f)))
   return externalAgentDocs.length > 0 ? { ...fp, externalAgentDocs } : fp
-}
-
-/**
- * True when the project has no detectable language markers at all.
- */
-export function isUnknownProject(cwd: string): boolean {
-  return detectProjectFingerprint(cwd).language === 'unknown'
 }
 
 /**

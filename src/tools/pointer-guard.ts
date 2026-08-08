@@ -18,6 +18,7 @@
 import { WRITE_FILE_POINTER_PREFIX } from './write-file-arg-processor.js'
 import { EDIT_FILE_POINTER_PREFIX } from './edit-file-arg-processor.js'
 import { HASH_EDIT_POINTER_PREFIX } from './hash-edit-arg-processor.js'
+import { APPLY_PATCH_POINTER_PREFIX } from './apply-patch-arg-processor.js'
 import { POINTER_INTERNAL_TAG } from './pointer-tag.js'
 import { readFile } from 'node:fs/promises'
 import { toPosixPath } from '../path-format.js'
@@ -32,6 +33,7 @@ export const POINTER_PLACEHOLDER_PREFIXES: readonly string[] = [
   WRITE_FILE_POINTER_PREFIX,
   EDIT_FILE_POINTER_PREFIX,
   HASH_EDIT_POINTER_PREFIX,
+  APPLY_PATCH_POINTER_PREFIX,
   EDIT_NEW_BLOCK_POINTER_PREFIX,
   PLAN_POINTER_PREFIX,
 ]

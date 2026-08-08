@@ -118,3 +118,85 @@ test('custom path rejects a non-numeric context window', () => {
   const result = flow.submitInput('abc')
   assert.equal(result.kind, 'error')
 })
+
+test('add-model option is hidden when no providers are configured', () => {
+  const flow = new ConnectFlow()
+  const ids = (flow.view().options ?? []).map(o => o.id)
+  assert.ok(!ids.includes('existing'), 'no configured providers → no add-model option')
+})
+
+test('add-model option appears when providers exist', () => {
+  const flow = new ConnectFlow([{ name: 'deepseek', label: 'DeepSeek', modelCount: 2 }])
+  const ids = (flow.view().options ?? []).map(o => o.id)
+  assert.ok(ids.includes('existing'))
+})
+
+test('add-model path: pick provider → model → context → vision commits add-model', () => {
+  const flow = new ConnectFlow([
+    { name: 'deepseek', label: 'DeepSeek', modelCount: 2 },
+    { name: 'glm', label: 'GLM', modelCount: 3 },
+  ])
+  // provider step → add-model branch
+  assert.equal(flow.submitChoice('existing').kind, 'next')
+  const pickView = flow.view()
+  assert.equal(pickView.kind, 'choice')
+  assert.equal(pickView.title, '为哪个服务商添加模型？')
+  const pickIds = (pickView.options ?? []).map(o => o.id)
+  assert.deepEqual(pickIds, ['deepseek', 'glm'])
+
+  // pick the provider → straight to model id (no URL step)
+  assert.equal(flow.submitChoice('glm').kind, 'next')
+  assert.equal(flow.view().title, '输入模型型号')
+  assert.equal(flow.view().stepLabel, '步骤 1 / 3')
+
+  assert.equal(flow.submitInput('glm-vision-x').kind, 'next')
+  assert.equal(flow.view().stepLabel, '步骤 2 / 3')
+  assert.equal(flow.submitInput('131072').kind, 'next')
+  assert.equal(flow.view().stepLabel, '步骤 3 / 3')
+
+  // vision choice ends the flow — no API key step for an existing provider
+  const result = flow.submitChoice('yes')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit') return
+  assert.equal(result.commit.mode, 'add-model')
+  if (result.commit.mode !== 'add-model') return
+  assert.equal(result.commit.providerName, 'glm')
+  assert.equal(result.commit.model.id, 'glm-vision-x')
+  assert.equal(result.commit.model.contextWindow, 131072)
+  assert.equal(result.commit.model.maxTokens, 64000)
+  assert.equal(result.commit.model.supportsVision, true)
+  assert.match(result.summary, /glm.*glm-vision-x/)
+})
+
+test('add-model path: vision "no" leaves supportsVision absent', () => {
+  const flow = new ConnectFlow([{ name: 'deepseek', modelCount: 1 }])
+  flow.submitChoice('existing')
+  flow.submitChoice('deepseek')
+  flow.submitInput('text-only-x')
+  flow.submitInput('')
+  const result = flow.submitChoice('no')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'add-model') return
+  assert.equal(result.commit.model.supportsVision, undefined)
+})
+
+test('add-model path: unknown provider choice is rejected', () => {
+  const flow = new ConnectFlow([{ name: 'deepseek', modelCount: 1 }])
+  flow.submitChoice('existing')
+  const result = flow.submitChoice('ghost')
+  assert.equal(result.kind, 'error')
+  assert.equal(flow.view().kind, 'choice')
+})
+
+test('diy path still shows 5-step labels after the change', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('custom')
+  flow.submitInput('https://api.example.com/v1')
+  assert.equal(flow.view().stepLabel, '步骤 2 / 5')
+  flow.submitInput('m')
+  assert.equal(flow.view().stepLabel, '步骤 3 / 5')
+  flow.submitInput('')
+  assert.equal(flow.view().stepLabel, '步骤 4 / 5')
+  flow.submitChoice('no')
+  assert.equal(flow.view().stepLabel, '步骤 5 / 5')
+})

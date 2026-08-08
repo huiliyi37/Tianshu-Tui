@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import type { MeridianSymbol, MeridianEdge, ParseResult, MeridianSymbolKind } from './meridian-types.js'
+import type { MeridianSymbol, MeridianEdge, ParseResult, MeridianSymbolKind, CallSite } from './meridian-types.js'
 
 // web-tree-sitter 0.24.x uses declare module, import as namespace
 import type Parser from 'web-tree-sitter'
@@ -80,85 +80,144 @@ export async function parseTypeScriptFile(filePath: string, source: string): Pro
   const symbols: MeridianSymbol[] = []
   const edges: MeridianEdge[] = []
   const imports: string[] = []
+  const calls: CallSite[] = []
   const contentHash = createHash('sha256').update(source).digest('hex').slice(0, 16)
 
-  function walk(node: SyntaxNode, parentId?: string): void {
+  // Pass 1: symbols + contains edges
+  function walkSymbols(node: SyntaxNode, parentId?: string): void {
     const row = node.startPosition.row + 1
     const isExported = node.parent?.type === 'export_statement'
 
-    let kind: MeridianSymbolKind | null = null
-    let name: string | null = null
-
-    switch (node.type) {
-      case 'function_declaration':
-        kind = 'function'
-        name = node.childForFieldName('name')?.text ?? null
-        break
-      case 'class_declaration':
-        kind = 'class'
-        name = node.childForFieldName('name')?.text ?? null
-        break
-      case 'interface_declaration':
-        kind = 'interface'
-        name = node.childForFieldName('name')?.text ?? null
-        break
-      case 'type_alias_declaration':
-        kind = 'type'
-        name = node.childForFieldName('name')?.text ?? null
-        break
-      case 'enum_declaration':
-        kind = 'enum'
-        name = node.childForFieldName('name')?.text ?? null
-        break
-      case 'method_definition':
-        kind = 'method'
-        name = node.childForFieldName('name')?.text ?? null
-        break
-      case 'lexical_declaration':
-      case 'variable_declaration': {
-        const declarator = node.namedChildren.find((c: SyntaxNode) => c.type === 'variable_declarator')
-        if (declarator) {
-          const init = declarator.childForFieldName('value')
-          if (init && (init.type === 'arrow_function' || init.type === 'function')) {
-            kind = 'function'
-          } else {
-            kind = 'variable'
-          }
-          name = declarator.childForFieldName('name')?.text ?? null
-        }
-        break
+    if (node.type === 'import_statement') {
+      const sourceNode = node.childForFieldName('source')
+      if (sourceNode) {
+        const raw = sourceNode.text.replace(/['"]/g, '')
+        if (raw.startsWith('.')) imports.push(raw)
       }
-      case 'import_statement': {
-        const sourceNode = node.childForFieldName('source')
-        if (sourceNode) {
-          const raw = sourceNode.text.replace(/['"]/g, '')
-          if (raw.startsWith('.')) imports.push(raw)
-        }
-        return
-      }
+      return
     }
 
-    if (kind && name) {
-      const id = makeId(filePath, name, row)
-      symbols.push({ id, name, kind, filePath, line: row, exported: isExported, contentHash })
+    const info = tsSymbolInfo(node)
+    if (info) {
+      const id = makeId(filePath, info.name, row)
+      symbols.push({ id, name: info.name, kind: info.kind, filePath, line: row, exported: isExported, contentHash })
       if (parentId) {
         edges.push({ sourceId: parentId, targetId: id, kind: 'contains', weight: 1.0, confidence: 'extracted' })
       }
       for (const child of node.namedChildren) {
-        walk(child, id)
+        walkSymbols(child, id)
       }
       return
     }
 
     for (const child of node.namedChildren) {
-      walk(child, parentId)
+      walkSymbols(child, parentId)
     }
   }
 
-  walk(tree.rootNode)
+  walkSymbols(tree.rootNode)
+
+  // Pass 2: call edges — resolve callee names against the complete local
+  // symbol table (hoisting-safe), leave the rest for cross-file matching.
+  const localByName = new Map<string, MeridianSymbol[]>()
+  for (const s of symbols) {
+    const arr = localByName.get(s.name) ?? []
+    arr.push(s)
+    localByName.set(s.name, arr)
+  }
+
+  function walkCalls(node: SyntaxNode, ownerId?: string): void {
+    const info = tsSymbolInfo(node)
+    if (info) ownerId = makeId(filePath, info.name, node.startPosition.row + 1)
+
+    if (node.type === 'call_expression' && ownerId) {
+      const name = calleeName(node)
+      if (name) {
+        const locals = localByName.get(name)
+        if (locals && locals.length > 0) {
+          for (const l of locals) {
+            edges.push({ sourceId: ownerId, targetId: l.id, kind: 'calls', weight: 1.0, confidence: 'extracted' })
+          }
+        } else {
+          calls.push({ sourceId: ownerId, name, line: node.startPosition.row + 1 })
+        }
+      }
+    }
+
+    for (const child of node.namedChildren) {
+      walkCalls(child, ownerId)
+    }
+  }
+
+  walkCalls(tree.rootNode)
   tree.delete()
 
-  return { filePath, contentHash, symbols, edges, imports }
+  return { filePath, contentHash, symbols, edges, imports, calls }
+}
+
+/** Extract the declared kind+name of a TS symbol node, or null. */
+function tsSymbolInfo(node: SyntaxNode): { kind: MeridianSymbolKind; name: string } | null {
+  let kind: MeridianSymbolKind | null = null
+  let name: string | null = null
+
+  switch (node.type) {
+    case 'function_declaration':
+      kind = 'function'
+      name = node.childForFieldName('name')?.text ?? null
+      break
+    case 'class_declaration':
+      kind = 'class'
+      name = node.childForFieldName('name')?.text ?? null
+      break
+    case 'interface_declaration':
+      kind = 'interface'
+      name = node.childForFieldName('name')?.text ?? null
+      break
+    case 'type_alias_declaration':
+      kind = 'type'
+      name = node.childForFieldName('name')?.text ?? null
+      break
+    case 'enum_declaration':
+      kind = 'enum'
+      name = node.childForFieldName('name')?.text ?? null
+      break
+    case 'method_definition':
+      kind = 'method'
+      name = node.childForFieldName('name')?.text ?? null
+      break
+    case 'lexical_declaration':
+    case 'variable_declaration': {
+      const declarator = node.namedChildren.find((c: SyntaxNode) => c.type === 'variable_declarator')
+      if (declarator) {
+        const init = declarator.childForFieldName('value')
+        if (init && (init.type === 'arrow_function' || init.type === 'function')) {
+          kind = 'function'
+        } else {
+          kind = 'variable'
+        }
+        name = declarator.childForFieldName('name')?.text ?? null
+      }
+      break
+    }
+  }
+
+  if (kind && name) return { kind, name }
+  return null
+}
+
+/** Extract the callee name of a call_expression, or null for dynamic callees
+ *  (IIFEs, chained calls, computed members). member_expression yields its
+ *  property name — local method calls resolve extracted, foreign ones usually
+ *  degrade to ambiguous via cross-file name matching. */
+function calleeName(node: SyntaxNode): string | null {
+  const fn = node.childForFieldName('function')
+  if (!fn) return null
+  if (fn.type === 'identifier') return fn.text
+  if (fn.type === 'member_expression') {
+    const prop = fn.childForFieldName('property')
+    if (prop && prop.type === 'property_identifier') return prop.text
+  }
+  return null
 }
 
 // --- Python parser ---
@@ -227,7 +286,7 @@ export async function parsePythonFile(filePath: string, source: string): Promise
   walk(tree.rootNode)
   tree.delete()
 
-  return { filePath, contentHash, symbols, edges, imports }
+  return { filePath, contentHash, symbols, edges, imports, calls: [] }
 }
 
 // --- Go parser ---
@@ -297,5 +356,5 @@ export async function parseGoFile(filePath: string, source: string): Promise<Par
   walk(tree.rootNode)
   tree.delete()
 
-  return { filePath, contentHash, symbols, edges, imports }
+  return { filePath, contentHash, symbols, edges, imports, calls: [] }
 }

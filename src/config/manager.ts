@@ -5,9 +5,12 @@ import { z } from 'zod'
 import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
-import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
+import { findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
+import { cloneResolvedPreset, resolvePreset } from '../api/pro-registry.js'
 import { backfillPresetModelFields } from './preset-model-backfill.js'
 import { invalidateToolPreset } from '../tools/tool-preset.js'
+import { invalidatePromptBlocks } from '../prompt/block-policy.js'
+import { validateRuntimeLeanSlice, type RuntimeLeanConfigSlice } from './runtime-lean.js'
 import { formatProviderCard, formatSuccess, formatError, formatMcpServerList, type FormatOpts } from './cli-format.js'
 
 const APPROVAL_MODES = ['auto-safe', 'manual', 'auto-accept', 'dangerously-skip-permissions'] as const
@@ -273,21 +276,17 @@ export function addProvider(name: string, config: ProviderConfig): void {
 }
 
 export function removeProvider(name: string): void {
-  // 预设 provider（deepseek/glm 等）禁止删除——它们是内置默认配置，
-  // 删除后用户会丢失开箱即用的接入能力。用户应通过「设置 Provider」
-  // 覆盖 baseUrl/key，而非删除预设。
-  if (isProviderPresetKey(name)) {
-    throw new Error(
-      `Cannot remove preset provider "${name}". Preset providers are built-in and cannot be deleted. ` +
-      `Use "rivet config set-url" or "rivet config setup" to override it instead.`,
-    )
-  }
   const cfg = loadConfig()
   if (!cfg.provider.providers[name]) {
     throw new Error(
       `Provider "${name}" not found. Available: ${Object.keys(cfg.provider.providers).join(', ')}`,
     )
   }
+  // 默认 provider 保护：防止 default 悬空（需先 setDefaultProvider 到别的 provider）。
+  // 不再按预设名拦截——预设模板（PROVIDER_PRESETS）是代码内静态定义，删除配置
+  // 条目后该预设会重新出现在「未配置」列表（allPresetKeys 过滤），随时可重新配置，
+  // 开箱即用能力并未丢失。按名字拦截曾造成死锁：setupCustomProvider 允许用预设名
+  // 创建自定义条目，删除时却被误判为内置预设而拒绝。
   if (cfg.provider.default === name) {
     throw new Error(`Cannot remove default provider "${name}". Set a different default first.`)
   }
@@ -683,6 +682,34 @@ export function setCheckpointConfig(input: {
   return { checkpointEveryTurns: cfg.agent.checkpointEveryTurns }
 }
 
+// --- Approval mode (桌面端设置页授权档位) ---
+
+export interface ApprovalConfigSnapshot {
+  approval: string
+}
+
+export const APPROVAL_MODE_OPTIONS = ['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions'] as const
+
+/** Snapshot of the agent approval mode for the desktop settings UI. */
+export function getApprovalConfig(): ApprovalConfigSnapshot {
+  return { approval: loadConfig().agent.approval }
+}
+
+/** Persist the agent approval mode (e.g. dangerously-skip-permissions for
+ *  full autonomy). Takes effect at the next run(). */
+export function setApprovalConfig(input: { approval?: unknown }): ApprovalConfigSnapshot {
+  const cfg = loadConfig()
+  if (input.approval !== undefined) {
+    const v = String(input.approval)
+    if (!(APPROVAL_MODE_OPTIONS as readonly string[]).includes(v)) {
+      throw new Error(`approval must be one of: ${APPROVAL_MODE_OPTIONS.join(', ')}`)
+    }
+    cfg.agent.approval = v as typeof cfg.agent.approval
+  }
+  saveConfig(cfg)
+  return { approval: cfg.agent.approval }
+}
+
 // --- Delivery auto-commit toggle ---
 
 export interface DeliveryConfigSnapshot {
@@ -710,7 +737,7 @@ export interface ToolPresetConfigSnapshot {
   preset: 'minimal' | 'frontend' | 'full'
 }
 
-const TOOL_PRESETS = new Set(['minimal', 'frontend', 'full'])
+const TOOL_PRESETS = new Set(['minimal', 'frontend', 'full', 'taiyi'])
 
 /** Snapshot of the tool preset for the desktop/TUI settings UI. */
 export function getToolPresetConfig(): ToolPresetConfigSnapshot {
@@ -734,6 +761,97 @@ export function setToolPresetConfig(input: { preset?: unknown }): ToolPresetConf
   // 长驻进程（desktop sidecar）内 memo 必须失效，否则新会话拿到旧档位。
   invalidateToolPreset()
   return { preset: cfg.tools.preset ?? 'frontend' }
+}
+
+// --- Runtime lean (resource profile) ---
+
+export interface RuntimeLeanConfigSnapshot {
+  lean: boolean
+  maxLoadedSessions?: number
+  idleAgentTtlMs?: number
+  maxEventsDiskBytes?: number
+}
+
+/** 域级 runtime 覆盖（runtime.domains[domainId]，见 runtime-lean.ts）。 */
+export interface RuntimeDomainConfigSnapshot extends RuntimeLeanConfigSnapshot {
+  toolPreset?: 'minimal' | 'frontend' | 'full' | 'taiyi'
+}
+
+/** Snapshot of runtime.lean (+ optional pool caps) for desktop/TUI settings. */
+export function getRuntimeLeanConfig(): RuntimeLeanConfigSnapshot & { domains?: Record<string, RuntimeDomainConfigSnapshot> } {
+  const runtime = loadConfig().runtime ?? { lean: false }
+  return {
+    lean: runtime.lean === true,
+    ...(runtime.maxLoadedSessions !== undefined ? { maxLoadedSessions: runtime.maxLoadedSessions } : {}),
+    ...(runtime.idleAgentTtlMs !== undefined ? { idleAgentTtlMs: runtime.idleAgentTtlMs } : {}),
+    ...(runtime.maxEventsDiskBytes !== undefined ? { maxEventsDiskBytes: runtime.maxEventsDiskBytes } : {}),
+    ...(runtime.domains && Object.keys(runtime.domains).length > 0
+      ? { domains: runtime.domains as Record<string, RuntimeDomainConfigSnapshot> }
+      : {}),
+  }
+}
+
+/** 校验单个域覆盖条目（lean/阈值委托 validateRuntimeLeanSlice，toolPreset 自校验）。 */
+function validateDomainSlice(id: string, slice: unknown): void {
+  if (typeof slice !== 'object' || slice === null) {
+    throw new Error(`domains.${id} must be an object`)
+  }
+  const s = slice as Record<string, unknown>
+  validateRuntimeLeanSlice(s, `domains.${id}`)
+  if (s.toolPreset !== undefined && (typeof s.toolPreset !== 'string' || !TOOL_PRESETS.has(s.toolPreset))) {
+    throw new Error(`domains.${id}.toolPreset must be one of minimal/frontend/full/taiyi`)
+  }
+}
+
+/**
+ * Persist runtime.lean. Takes effect at the NEXT session for tool/prompt/hook
+ * assembly (prefix-cache safe). Session pool caps apply on next sidecar start.
+ *
+ * `domains` 为增量合并：`{ [domainId]: slice | null }`——null 删除该域覆盖，
+ * 缺省字段保留磁盘现值。其余字段同全局语义。
+ */
+export function setRuntimeLeanConfig(input: {
+  lean?: unknown
+  maxLoadedSessions?: unknown
+  idleAgentTtlMs?: unknown
+  maxEventsDiskBytes?: unknown
+  domains?: Record<string, unknown> | null
+}): RuntimeLeanConfigSnapshot & { domains?: Record<string, RuntimeDomainConfigSnapshot> } {
+  const cfg = loadConfig()
+  const next = { ...(cfg.runtime ?? { lean: false }) }
+  // lean/三阈值校验统一委托 validateRuntimeLeanSlice（下限与 schema/UI 同源，
+  // 消除手写 `< N` 抛错——maxEventsDiskBytes 下限曾在此处与 UI 漂移过）。
+  validateRuntimeLeanSlice(input as Record<string, unknown>)
+  // 校验通过即代表这四个字段类型合规，但 TS 看不见这层保证——`unknown` 经
+  // `!== undefined` 只收窄到 `{} | null`。故在校验之后取一次收窄视图，而不是
+  // 逐字段 as：那会让"哪些字段已被 validate 担保"散落成四处独立断言。
+  const validated = input as RuntimeLeanConfigSlice
+  if (validated.lean !== undefined) next.lean = validated.lean
+  if (validated.maxLoadedSessions !== undefined) next.maxLoadedSessions = validated.maxLoadedSessions
+  if (validated.idleAgentTtlMs !== undefined) next.idleAgentTtlMs = validated.idleAgentTtlMs
+  if (validated.maxEventsDiskBytes !== undefined) next.maxEventsDiskBytes = validated.maxEventsDiskBytes
+  if (input.domains !== undefined) {
+    if (input.domains === null) {
+      next.domains = undefined
+    } else {
+      if (typeof input.domains !== 'object') throw new Error('domains must be an object')
+      const merged = { ...(next.domains ?? {}) }
+      for (const [id, slice] of Object.entries(input.domains)) {
+        if (slice === null) {
+          delete merged[id]
+          continue
+        }
+        validateDomainSlice(id, slice)
+        merged[id] = { ...(merged[id] ?? {}), ...(slice as Record<string, unknown>) }
+      }
+      next.domains = merged
+    }
+  }
+  cfg.runtime = next
+  saveConfig(cfg)
+  invalidateToolPreset()
+  invalidatePromptBlocks()
+  return getRuntimeLeanConfig()
 }
 
 // --- Default star domain (new-session initial domain + Auto keyword routing) ---
@@ -811,6 +929,10 @@ export function getDefaultModelConfig(): DefaultModelConfigSnapshot {
  * panel to retroactively mark a model as vision-capable (e.g. a custom provider
  * created before the vision question existed, or a built-in model the user wants
  * to use as a bridge). Idempotent: setting the same value is a no-op write.
+ *
+ * 显式 false 而非 delete：缺席会被 preset backfill 当成"没表态"回灌 true，
+ * 用户对 preset 视觉模型的取消勾选下次 loadConfig 就消失了。消费侧一律
+ * `=== true` / `?? false`，写 false 与缺席行为等价。
  */
 export function setModelSupportsVision(providerName: string, modelId: string, value: boolean): void {
   const cfg = loadConfig()
@@ -818,10 +940,9 @@ export function setModelSupportsVision(providerName: string, modelId: string, va
   if (!provider) throw new Error(`Provider "${providerName}" not found`)
   const model = provider.models.find(m => m.id === modelId || m.alias === modelId)
   if (!model) throw new Error(`Model "${modelId}" not found in provider "${providerName}"`)
-  const current = model.supportsVision === true
-  if (current === value) return // no-op, avoid unnecessary disk write
-  if (value) model.supportsVision = true
-  else delete model.supportsVision // remove the key entirely (undefined = text-only)
+  // 直接比较而非 `=== true`：从未设置（undefined）→ false 也是真实表态，必须写盘。
+  if (model.supportsVision === value) return // no-op, avoid unnecessary disk write
+  model.supportsVision = value
   saveConfig(cfg)
 }
 
@@ -1197,9 +1318,9 @@ export function setProviderAllowProFallback(providerName: string, allowProFallba
 
 export function setupProvider(options: SetupProviderOptions): void {
   const cfg = loadConfig()
-  const presetKey = options.preset ?? (isProviderPresetKey(options.providerName) ? options.providerName : undefined)
+  const presetKey = options.preset ?? (resolvePreset(options.providerName) ? options.providerName : undefined)
   const current = cfg.provider.providers[options.providerName]
-  const base = presetKey ? cloneProviderPreset(presetKey) : current
+  const base = presetKey ? cloneResolvedPreset(presetKey) : current
   if (!base) throw new Error(`Provider "${options.providerName}" not found and no preset is available`)
   const next: ProviderConfig = structuredClone(base)
   next.name = options.providerName
@@ -1252,6 +1373,15 @@ export interface SetupCustomProviderOptions {
  * works out of the box.
  */
 export function setupCustomProvider(options: SetupCustomProviderOptions): void {
+  // 自定义 provider 拒绝内置预设名：撞名条目在列表里显示预设 label、删除时曾
+  // 被预设名拦截（历史死锁）。想覆盖预设行为请走 setupProvider
+  // （POST /config/providers，克隆预设后覆盖字段）。
+  if (isProviderPresetKey(options.providerName)) {
+    throw new Error(
+      `Cannot create custom provider "${options.providerName}": it is a built-in preset name. ` +
+      `Use a different name, or configure the preset via "rivet config setup".`,
+    )
+  }
   assertValidUrl(options.baseUrl)
   // 同名 provider 已存在时禁止静默覆盖——用户应通过 edit 路径修改已有 provider，
   // 避免意外丢失 baseUrl/key/models 配置。
@@ -1392,6 +1522,7 @@ Commands:
   set-key <p> <key>            Set API key for provider
   set-key-env <p> <v>          Set API key from env variable
   set-default <p>              Set default provider
+  set-default-model <p>:<m>    Set default model for new sessions (agent.defaultModel)
   set-approval <mode>          Set approval mode (auto-safe/manual/auto-accept/dangerously-skip-permissions)
   set-proxy <url> [--clear]    Set/clear web proxy (web_search/web_fetch)
   set-no-proxy <list> [--clear]  Set/clear NO_PROXY bypass list
@@ -1400,7 +1531,8 @@ Commands:
   set-vision <p>/<m> [maxTokens N] [--prompt "..."]  Set vision bridge model
   clear-vision                 Clear the vision bridge model
   set-vision-auto-bridge <on|off>  Toggle auto vision bridge selection
-  add-model <p> <id>           Add model to provider
+  add-model <p> <id> [ctx] [max] [--vision]  Add model to provider (--vision marks it vision-capable)
+  set-model-vision <p> <m> <on|off>  Toggle vision support on a stored model
   remove-model <p> <id>        Remove model from provider
   remove-provider <name>       Remove a custom provider (presets cannot be removed)
   mcp                          MCP server management
@@ -1416,6 +1548,9 @@ Examples:
   rivet config set-vision zhipu-vision/glm-4v-flash
   rivet config set-vision glm/glm-5.2 2048 --prompt "用中文描述截图"
   rivet config set-vision-auto-bridge on
+  rivet config set-default-model glm:glm-5.2
+  rivet config add-model deepseek my-vision-model 128000 32000 --vision
+  rivet config set-model-vision deepseek deepseek-v4-pro on
   rivet config set-url mimo https://token-plan-sgp.xiaomimimo.com/v1
   rivet config set-model minimax MiniMax-M2.8 300000 64000 m28
   rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp`)
@@ -1744,12 +1879,43 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
         const contextWindow = parseInt(args[3] ?? '1000000')
         const maxTokens = parseInt(args[4] ?? '64000')
         if (!providerName || !modelId) {
-          cliErr(io, 'Usage: rivet config add-model <provider> <model-id> [context-window] [max-tokens]')
+          cliErr(io, 'Usage: rivet config add-model <provider> <model-id> [context-window] [max-tokens] [--vision]')
           cliExit(io, 1)
           return
         }
-        addModel(providerName, { id: modelId, contextWindow, maxTokens })
+        addModel(providerName, {
+          id: modelId,
+          contextWindow,
+          maxTokens,
+          ...(hasFlag(args, '--vision') ? { supportsVision: true } : {}),
+        })
         cliOut(io, formatSuccess(`Model ${modelId} added to ${providerName}`, fmtOpts))
+        break
+      }
+
+      case 'set-default-model': {
+        const value = args[1]
+        if (!value) {
+          cliErr(io, 'Usage: rivet config set-default-model <provider:modelId>')
+          cliExit(io, 1)
+          return
+        }
+        const saved = setDefaultModelConfig({ defaultModel: value })
+        cliOut(io, formatSuccess(`Default model set to ${saved.defaultModel}`, fmtOpts))
+        break
+      }
+
+      case 'set-model-vision': {
+        const providerName = args[1]
+        const modelId = args[2]
+        const flag = args[3]
+        if (!providerName || !modelId || (flag !== 'on' && flag !== 'off')) {
+          cliErr(io, 'Usage: rivet config set-model-vision <provider> <model-id> <on|off>')
+          cliExit(io, 1)
+          return
+        }
+        setModelSupportsVision(providerName, modelId, flag === 'on')
+        cliOut(io, formatSuccess(`Vision ${flag === 'on' ? 'enabled' : 'disabled'} for ${modelId} (${providerName})`, fmtOpts))
         break
       }
 

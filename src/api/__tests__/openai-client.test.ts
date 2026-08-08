@@ -828,3 +828,118 @@ describe('system suffix copy-on-write (2026-07-06 double-append regression)', ()
     assert.equal(client.consumeWireDivergence(), null)
   })
 })
+
+describe('wire message normalization', () => {
+  const NOOP_CALLBACKS = {
+    onTextDelta: () => {},
+    onThinkingDelta: () => {},
+    onContentBlock: () => {},
+    onStopReason: () => {},
+    onError: () => {},
+  }
+
+  it('omits empty assistant tool_calls before sending a resumed request', async () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    let body: any
+    ;(client as any).sendStream = async (next: any) => { body = next }
+    const request: any = {
+      model: 'gpt-4o',
+      stream: true,
+      messages: [
+        { role: 'user', content: 'continue' },
+        { role: 'assistant', content: 'already answered', tool_calls: [] },
+      ],
+    }
+
+    await client.stream(request, NOOP_CALLBACKS as any)
+
+    assert.deepStrictEqual(body.messages[1], { role: 'assistant', content: 'already answered' })
+    assert.deepStrictEqual(request.messages[1], { role: 'assistant', content: 'already answered', tool_calls: [] })
+  })
+})
+
+describe('content→reasoning channel ordering (C→R 折叠防护)', () => {
+  const CODE = '```html\n<div class="record-id-doc">\n  <span>No ID</span>\n</div>\n```'
+  const CONCLUSION = '代码已经完整给出，复制后可直接运行。'
+
+  function frame(delta: Record<string, unknown>, extra: Record<string, unknown> = {}): string {
+    return `data: ${JSON.stringify({ choices: [{ delta, index: 0, ...extra }] })}\n\n`
+  }
+
+  function runSse(client: OpenAIClient, frames: string[]) {
+    const stream = new ReadableStream({
+      start(controller) {
+        const enc = new TextEncoder()
+        for (const f of frames) controller.enqueue(enc.encode(f))
+        controller.close()
+      },
+    })
+    const response = new Response(stream)
+    const textParts: string[] = []
+    const thinkingParts: string[] = []
+    const blocks: Array<{ type: string; text?: string; thinking?: string }> = []
+    const promise = (client as any).parseStreamFromReader(
+      response.body!.getReader(),
+      {
+        onTextDelta: (t: string) => textParts.push(t),
+        onThinkingDelta: (t: string) => thinkingParts.push(t),
+        onContentBlock: (b: { type: string; text?: string; thinking?: string }) => blocks.push(b),
+      },
+    )
+    return { textParts, thinkingParts, blocks, promise }
+  }
+
+  it('C→R 异常顺序：content 已开始后 reasoning 不得折叠为 thinking', async () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek', thinking: 'enabled' })
+    const { textParts, thinkingParts, blocks, promise } = runSse(client, [
+      frame({ content: CODE }),
+      frame({ reasoning_content: CONCLUSION }),
+      frame({}, { finish_reason: 'stop' }),
+      'data: [DONE]\n\n',
+    ])
+    await promise
+    const full = textParts.join('')
+    assert.ok(full.includes('record-id-doc'), '代码块应留在正式文本')
+    assert.ok(full.includes(CONCLUSION), '结论不得被折叠——应出现在正式文本')
+    assert.ok(!thinkingParts.join('').includes(CONCLUSION), '结论不得进入 thinking 通道')
+    assert.ok(!blocks.some(b => b.type === 'thinking' && b.thinking?.includes(CONCLUSION)), '流末 thinking 块不得含结论')
+  })
+
+  it('R→C 正常基线：reasoning 保持 thinking、content 保持 text', async () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek', thinking: 'enabled' })
+    const { textParts, thinkingParts, promise } = runSse(client, [
+      frame({ reasoning_content: '先分析一下需求…' }),
+      frame({ content: CONCLUSION }),
+      frame({}, { finish_reason: 'stop' }),
+      'data: [DONE]\n\n',
+    ])
+    await promise
+    assert.ok(thinkingParts.join('').includes('先分析一下需求…'), '先行 reasoning 仍走 thinking')
+    assert.ok(textParts.join('').includes(CONCLUSION), '结论留在正式文本')
+  })
+
+  it('同一 chunk 双字段：reasoning 与 content 均不丢失', async () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek', thinking: 'enabled' })
+    const { textParts, thinkingParts, promise } = runSse(client, [
+      frame({ reasoning_content: '推理片段', content: '正文片段' }),
+      frame({}, { finish_reason: 'stop' }),
+      'data: [DONE]\n\n',
+    ])
+    await promise
+    assert.ok(thinkingParts.join('').includes('推理片段'), '同 chunk reasoning 进 thinking')
+    assert.ok(textParts.join('').includes('正文片段'), '同 chunk content 进 text')
+  })
+
+  it('tool-call turn：tool_calls 前的 reasoning 不泄露为 text', async () => {
+    const client = new OpenAIClient({ ...TEST_CONFIG, providerName: 'deepseek', thinking: 'enabled' })
+    const { textParts, thinkingParts, promise } = runSse(client, [
+      frame({ reasoning_content: '内部推理…' }),
+      frame({ tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{"cmd":"ls"}' } }] }),
+      frame({}, { finish_reason: 'tool_calls' }),
+      'data: [DONE]\n\n',
+    ])
+    await promise
+    assert.ok(thinkingParts.join('').includes('内部推理…'), 'tool-call 轮 reasoning 走 thinking')
+    assert.ok(!textParts.join('').includes('内部推理…'), 'tool-call 轮 reasoning 不泄露为 text')
+  })
+})

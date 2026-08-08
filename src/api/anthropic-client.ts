@@ -1,5 +1,5 @@
 import type { StreamClient, StreamCallbacks } from './stream-client.js'
-import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from './oai-types.js'
+import type { OaiChatRequest, OaiMessage } from './oai-types.js'
 import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
@@ -45,6 +45,7 @@ interface AnthropicRequestBody {
   messages: AnthropicMessage[]
   stream: boolean
   thinking?: { type: 'enabled'; budget_tokens: number }
+  tool_choice?: { type: 'tool'; name: string }
 }
 
 export class AnthropicClient implements StreamClient {
@@ -160,6 +161,16 @@ export class AnthropicClient implements StreamClient {
       body.thinking = { type: 'enabled', budget_tokens: this.config.thinkingBudget }
     }
 
+    // OAI 对象形式 tool_choice（{type:'function',function:{name}}）映射为
+    // Anthropic { type:'tool', name }。auto/none 是 Anthropic 默认行为，不产生字段；
+    // 指定函数不在 tools 中时忽略（避免把不存在的函数强塞给 API）。
+    if (request.tool_choice && typeof request.tool_choice === 'object' && tools) {
+      const name = request.tool_choice.function.name
+      if (tools.some(t => t.name === name)) {
+        body.tool_choice = { type: 'tool', name }
+      }
+    }
+
     // ── Four cache_control breakpoints ──────────────────────────────
     // BP1: last tool definition (1h TTL — tools rarely change)
     if (tools && tools.length > 0) {
@@ -173,11 +184,10 @@ export class AnthropicClient implements StreamClient {
 
     // BP3 & BP4: locate target positions in messages
     let firstUserIdx = -1
-    let lastUserIdx = -1
     for (let i = 0; i < messages.length; i++) {
       if (messages[i]!.role === 'user') {
-        if (firstUserIdx === -1) firstUserIdx = i
-        lastUserIdx = i
+        firstUserIdx = i
+        break
       }
     }
 
