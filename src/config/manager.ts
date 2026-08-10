@@ -2,12 +2,13 @@ import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
 import { z } from 'zod'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, modelConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ProviderCapabilitiesConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, modelConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ProviderCapabilitiesConfig, type ProviderAdvancedConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 import { cloneResolvedPreset, resolvePreset } from '../api/pro-registry.js'
 import { backfillPresetModelFields } from './preset-model-backfill.js'
+import { writeSecret, readSecret } from './secrets-store.js'
 import { invalidateToolPreset } from '../tools/tool-preset.js'
 import { invalidatePromptBlocks } from '../prompt/block-policy.js'
 import { validateRuntimeLeanSlice, type RuntimeLeanConfigSlice } from './runtime-lean.js'
@@ -206,6 +207,34 @@ function migrateV4FlashEffort(raw: Record<string, unknown>): boolean {
 }
 
 /**
+ * One-shot migration: plaintext provider.apiKey values in config.json move
+ * into the 0600 secrets.json store, leaving only a keyRef pointer behind.
+ * Idempotent — providers already on keyRef (or without an inline key) are
+ * untouched. Mutates `raw` in place. Returns true if any value was changed.
+ */
+function migrateInlineApiKeys(raw: Record<string, unknown>): boolean {
+  const provider = raw.provider as Record<string, unknown> | undefined
+  const providers = provider?.providers as Record<string, unknown> | undefined
+  if (!providers) return false
+  let changed = false
+  for (const [name, entry] of Object.entries(providers)) {
+    if (!entry || typeof entry !== 'object') continue
+    const prov = entry as Record<string, unknown>
+    if (typeof prov.apiKey !== 'string' || prov.apiKey.length === 0) continue
+    if (prov.keyRef) continue
+    try {
+      writeSecret(name, prov.apiKey)
+    } catch {
+      continue // secrets write failed — keep the inline key rather than lose it
+    }
+    delete prov.apiKey
+    prov.keyRef = name
+    changed = true
+  }
+  return changed
+}
+
+/**
  * Load config with 3-layer resolution: user → project → session overlay.
  *
  * Priority (highest wins):
@@ -232,9 +261,10 @@ export function loadConfig(options?: {
     const cpMigrated = migrateLegacyCheckpointInterval(raw)
     const dsChanged = migrateDeepseekMaxTokens(cpMigrated)
     const flashChanged = migrateV4FlashEffort(cpMigrated)
+    const keysMoved = migrateInlineApiKeys(cpMigrated)
     // Write back if any migration modified the raw config so the fix
     // persists across restarts (one-shot, idempotent).
-    if (cpMigrated !== raw || dsChanged || flashChanged) {
+    if (cpMigrated !== raw || dsChanged || flashChanged || keysMoved) {
       try {
         writeFileAtomicSync(configPath, JSON.stringify(cpMigrated, null, 2) + '\n')
       } catch {
@@ -287,7 +317,17 @@ export function loadConfig(options?: {
     const sources = [configPath, ...(projectPath ? [projectPath] : [])].join(' / ')
     throw new ConfigLoadError(`${formatZodError(parsed.error, 'rivet')}\n涉及的配置文件：${sources}`)
   }
-  return backfillPresetModelFields(parsed.data)
+  const config = backfillPresetModelFields(parsed.data)
+  // Materialize keyRef secrets into in-memory apiKey — runtime consumers read
+  // provider.apiKey in ~10 places; disk never sees this value (saveConfig
+  // strips it back out for keyRef providers).
+  for (const provider of Object.values(config.provider.providers)) {
+    if (provider.keyRef && !provider.apiKey) {
+      const secret = readSecret(provider.keyRef)
+      if (secret) provider.apiKey = secret
+    }
+  }
+  return config
 }
 
 /** Load config with backward-compatible signature (no options). */
@@ -296,7 +336,16 @@ export function loadConfigDefault(): Config {
 }
 
 export function saveConfig(config: Config): void {
-  writeFileAtomicSync(getUserConfigPath(), JSON.stringify(config, null, 2) + '\n')
+  // keyRef providers carry a materialized in-memory apiKey (see loadConfig) —
+  // strip it before writing so plaintext never returns to config.json.
+  const needsStrip = Object.values(config.provider.providers).some(p => p.keyRef && p.apiKey)
+  const toWrite = needsStrip ? structuredClone(config) : config
+  if (needsStrip) {
+    for (const provider of Object.values(toWrite.provider.providers)) {
+      if (provider.keyRef && provider.apiKey) provider.apiKey = undefined
+    }
+  }
+  writeFileAtomicSync(getUserConfigPath(), JSON.stringify(toWrite, null, 2) + '\n')
 }
 
 // --- Provider management ---
@@ -1239,10 +1288,12 @@ export function setUiConfig(input: { theme?: unknown }): UiConfig {
 }
 
 export function setApiKey(providerName: string, key: string): void {
+  writeSecret(providerName, key)
   const cfg = loadConfig()
   const provider = cfg.provider.providers[providerName]
   if (!provider) throw new Error(`Provider "${providerName}" not found`)
-  provider.apiKey = key
+  provider.keyRef = providerName
+  ;(provider as unknown as { apiKey?: string | null }).apiKey = null
   ;(provider as unknown as { apiKeyEnv?: string | null }).apiKeyEnv = null
   saveConfig(cfg)
 }
@@ -1253,12 +1304,15 @@ export function setApiKeyEnv(providerName: string, envVar: string): void {
   if (!provider) throw new Error(`Provider "${providerName}" not found`)
   provider.apiKeyEnv = envVar
   ;(provider as unknown as { apiKey?: string | null }).apiKey = null
+  ;(provider as unknown as { keyRef?: string | null }).keyRef = null
   saveConfig(cfg)
 }
 
 export function getApiKeyStatus(providerName: string): { source: 'inline' | 'env' | 'none'; ref: string } {
   const provider = getProvider(providerName)
   if (!provider) return { source: 'none', ref: '' }
+  // keyRef-backed secret: loadConfig materializes it into provider.apiKey, so
+  // this branch also reports the masked tail of the secrets-store value.
   if (provider.apiKey) return { source: 'inline', ref: '***' + provider.apiKey.slice(-4) }
   if (provider.apiKeyEnv && process.env[provider.apiKeyEnv]) {
     return { source: 'env', ref: provider.apiKeyEnv }
@@ -1280,8 +1334,12 @@ export interface SetupProviderOptions {
   apiKeyEnv?: string
   baseUrl?: string
   model?: ModelConfig
+  /** 批量模型回填（免密钥 preset 探测路径）——每项走与 model 相同的合并语义。 */
+  models?: Array<Partial<ModelConfig> & { id: string }>
   makeDefault?: boolean
   allowProFallback?: boolean
+  /** Advanced knobs (timeout/retry/temperature/proxy) — undefined = untouched. */
+  advanced?: ProviderAdvancedConfig
 }
 
 function assertValidUrl(value: string): void {
@@ -1360,6 +1418,18 @@ export function setProviderAllowProFallback(providerName: string, allowProFallba
   saveConfig(cfg)
 }
 
+/**
+ * Write advanced knobs field-by-field. `!== undefined` guards are load-bearing:
+ * `maxRetries: 0` and `temperature: 0` are legal values a truthy check would drop.
+ */
+function applyAdvancedConfig(target: ProviderConfig, advanced?: ProviderAdvancedConfig): void {
+  if (!advanced) return
+  if (advanced.requestTimeoutMs !== undefined) target.requestTimeoutMs = advanced.requestTimeoutMs
+  if (advanced.maxRetries !== undefined) target.maxRetries = advanced.maxRetries
+  if (advanced.temperature !== undefined) target.temperature = advanced.temperature
+  if (advanced.proxy !== undefined) target.proxy = advanced.proxy
+}
+
 export function setupProvider(options: SetupProviderOptions): void {
   const cfg = loadConfig()
   const presetKey = options.preset ?? (resolvePreset(options.providerName) ? options.providerName : undefined)
@@ -1374,12 +1444,15 @@ export function setupProvider(options: SetupProviderOptions): void {
     next.baseUrl = options.baseUrl
   }
   if (options.apiKey) {
-    next.apiKey = options.apiKey
+    writeSecret(options.providerName, options.apiKey)
+    next.keyRef = options.providerName
+    ;(next as unknown as { apiKey?: string | null }).apiKey = null
     ;(next as unknown as { apiKeyEnv?: string | null }).apiKeyEnv = null
   }
   if (options.apiKeyEnv) {
     next.apiKeyEnv = options.apiKeyEnv
     ;(next as unknown as { apiKey?: string | null }).apiKey = null
+    ;(next as unknown as { keyRef?: string | null }).keyRef = null
   }
   if (options.model) {
     const model = clampModelTokens(options.model)
@@ -1390,11 +1463,21 @@ export function setupProvider(options: SetupProviderOptions): void {
     if (existing) next.models[existingIndex] = mergeModelUpdate(existing, model)
     else next.models.unshift(model)
   }
+  if (options.models) {
+    for (const raw of options.models) {
+      const model = clampModelTokens(modelConfigSchema.parse(raw))
+      const existingIndex = next.models.findIndex(item => item.id === model.id || (model.alias !== undefined && item.alias === model.alias))
+      const existing = existingIndex >= 0 ? next.models[existingIndex] : undefined
+      if (existing) next.models[existingIndex] = mergeModelUpdate(existing, model)
+      else next.models.push(model)
+    }
+  }
   cfg.provider.providers[options.providerName] = next
   if (options.makeDefault) cfg.provider.default = options.providerName
   if (options.allowProFallback !== undefined) {
     next.allowProFallback = options.allowProFallback
   }
+  applyAdvancedConfig(next, options.advanced)
   saveConfig(cfg)
 }
 
@@ -1415,6 +1498,8 @@ export interface RegisterProviderOptions {
   models?: Array<Partial<ModelConfig> & { id: string }>
   makeDefault?: boolean
   allowProFallback?: boolean
+  /** Advanced knobs (timeout/retry/temperature/proxy) — undefined = untouched. */
+  advanced?: ProviderAdvancedConfig
   /** Overwrite an existing entry. Without this flag a same-name write throws —
    *  silent overwrites used to lose baseUrl/key/models. */
   force?: boolean
@@ -1449,9 +1534,10 @@ export function registerProvider(options: RegisterProviderOptions): void {
     )
   }
   const models = (options.models ?? []).map(raw => modelConfigSchema.parse(raw))
+  if (options.apiKey) writeSecret(options.providerName, options.apiKey)
   const provider: ProviderConfig = {
     name: options.providerName,
-    ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+    ...(options.apiKey ? { keyRef: options.providerName } : {}),
     ...(options.apiKeyEnv ? { apiKeyEnv: options.apiKeyEnv } : {}),
     baseUrl: options.baseUrl,
     protocol: options.protocol ?? 'openai',
@@ -1462,6 +1548,7 @@ export function registerProvider(options: RegisterProviderOptions): void {
     models,
     unsupported: [],
   }
+  applyAdvancedConfig(provider, options.advanced)
   const cfg = loadConfig()
   cfg.provider.providers[options.providerName] = provider
   if (options.makeDefault) cfg.provider.default = options.providerName
@@ -1597,6 +1684,27 @@ Examples:
   rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp`)
 }
 
+/** Mask every credential in a config snapshot for display (`config show`).
+ *  provider.apiKey may be a secrets-store value materialized by loadConfig. */
+function maskKey(value: string | undefined): string | undefined {
+  if (!value) return value
+  return '***' + value.slice(-4)
+}
+
+export function maskConfigSecrets(config: Config): Config {
+  const masked = structuredClone(config)
+  for (const provider of Object.values(masked.provider.providers)) {
+    provider.apiKey = maskKey(provider.apiKey)
+  }
+  const search = masked.search
+  if (search) {
+    search.bochaApiKey = maskKey(search.bochaApiKey)
+    search.braveApiKey = maskKey(search.braveApiKey)
+    search.tavilyApiKey = maskKey(search.tavilyApiKey)
+  }
+  return masked
+}
+
 export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promise<void> {
   const cmd = args[0]
   const useColor = io.isTTY ?? (process.stdout.isTTY ?? false)
@@ -1618,7 +1726,7 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
 
     switch (cmd) {
       case 'show':
-        cliOut(io, JSON.stringify(loadConfig(), null, 2))
+        cliOut(io, JSON.stringify(maskConfigSecrets(loadConfig()), null, 2))
         break
 
       case 'providers': {

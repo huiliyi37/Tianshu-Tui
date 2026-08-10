@@ -1,19 +1,18 @@
-import { createInterface } from 'node:readline/promises'
+import { createInterface, type Interface as ReadlineInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
-import type { ModelConfig } from './schema.js'
-import { loadConfig, registerProvider, setupProvider } from './manager.js'
+import { loadConfig, setupProvider } from './manager.js'
 import { userConfigPath } from './paths.js'
-import { findPresetModel, isProviderPresetKey, providerPresetKeys } from './provider-presets.js'
-import { probeProvider, type ProbeOptions, type ProbeReport } from '../api/provider-probe.js'
-import { matchModelIds } from '../api/model-id-matcher.js'
-import { toModelDescriptors } from './provider-cli.js'
-import { suggestProviderName } from '../tui/connect-flow.js'
+import { isProviderPresetKey, providerPresetKeys } from './provider-presets.js'
 
+/**
+ * 降级版 readline 首启向导：只做内置 preset 的最小接入（选 provider → key → 设默认）。
+ * TUI 内首启走 /connect overlay；自定义端点走 `rivet provider add`（probe-first）。
+ */
 export interface ProviderWizardIO {
   ask?: (question: string) => Promise<string>
+  /** Masked input for secrets. Falls back to `ask` when absent (tests script it). */
+  askSecret?: (question: string) => Promise<string>
   write?: (line: string) => void
-  /** Injectable probe (tests stub this; production hits the real endpoint). */
-  probe?: (options: ProbeOptions) => Promise<ProbeReport>
 }
 
 function yes(value: string): boolean {
@@ -21,99 +20,59 @@ function yes(value: string): boolean {
   return normalized === 'y' || normalized === 'yes'
 }
 
-function positiveIntOrDefault(value: string, fallback: number, label: string): number {
-  const trimmed = value.trim()
-  if (!trimmed) return fallback
-  const parsed = Number.parseInt(trimmed, 10)
-  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${label} must be a positive integer`)
-  return parsed
-}
-
-/** Parse "1,3-5" style selection into 0-based indices; empty → all. */
-export function parseModelSelection(answer: string, count: number): number[] {
-  const trimmed = answer.trim()
-  if (!trimmed) return Array.from({ length: count }, (_, i) => i)
-  const picked = new Set<number>()
-  for (const part of trimmed.split(/[,，\s]+/)) {
-    if (!part) continue
-    const range = part.match(/^(\d+)\s*-\s*(\d+)$/)
-    if (range) {
-      const from = Number.parseInt(range[1]!, 10)
-      const to = Number.parseInt(range[2]!, 10)
-      for (let i = Math.min(from, to); i <= Math.max(from, to); i++) {
-        if (i >= 1 && i <= count) picked.add(i - 1)
-      }
-      continue
-    }
-    const single = Number.parseInt(part, 10)
-    if (Number.isInteger(single) && single >= 1 && single <= count) picked.add(single - 1)
-  }
-  return [...picked].sort((a, b) => a - b)
-}
-
 async function ask(io: Required<Pick<ProviderWizardIO, 'ask'>>, question: string): Promise<string> {
   return (await io.ask(question)).trim()
 }
 
-/** Probe-first custom provider onboarding — same core as `rivet provider add`. */
-async function runCustomProviderWizard(
-  io: Required<Pick<ProviderWizardIO, 'ask'>> & ProviderWizardIO,
-  write: (line: string) => void,
-): Promise<void> {
-  const askIo = { ask: io.ask! }
-  const probe = io.probe ?? probeProvider
-
-  const baseUrl = await ask(askIo, 'Base URL (e.g. https://api.example.com/v1): ')
-  if (!/^https?:\/\/\S+$/i.test(baseUrl)) throw new Error(`Invalid base URL: "${baseUrl}"`)
-  const apiKeyRaw = await ask(askIo, 'API key (Enter to skip — local endpoints need none): ')
-  const apiKey = apiKeyRaw || undefined
-
-  write(`Probing ${baseUrl} ...`)
-  let report: ProbeReport
-  try {
-    report = await probe({ baseUrl, apiKey })
-  } catch (e) {
-    throw new Error(`Probe failed: ${e instanceof Error ? e.message : String(e)}`)
-  }
-  write(`  Models list: ${report.modelsOk ? `${report.models.length} model(s)` : 'unavailable'}`)
-  write(`  Completion probe: ${report.completionOk ? 'ok' : 'failed/skipped'}`)
-  if (report.hints.reasoningSplit) write('  Hint: endpoint emits reasoning_content → capabilities.reasoningSplit: true')
-  for (const error of report.errors) write(`  ⚠ ${error}`)
-
-  let models: Array<Partial<ModelConfig> & { id: string }> = []
-  if (report.models.length > 0) {
-    const matches = matchModelIds(report.models)
-    const { models: descriptors, notes } = toModelDescriptors(matches)
-    matches.forEach((match, i) => {
-      const tag = match.entry ? (match.tier === 'fuzzy' ? ` ≈ ${match.entry.canonicalId} (低置信)` : ` ≈ ${match.entry.canonicalId}`) : ' [TODO: 未知模型]'
-      write(`  ${i + 1}. ${match.rawId}${tag}`)
-    })
-    for (const note of notes) write(`  ${note}`)
-    const selection = parseModelSelection(await ask(askIo, `Select models [1-${report.models.length}] (Enter = all, e.g. "1,3-5"): `), report.models.length)
-    if (selection.length === 0) throw new Error('No models selected — aborting (re-run and pick at least one).')
-    models = selection.map(i => descriptors[i]!)
-  } else {
-    const modelId = await ask(askIo, 'Model ID (endpoint returned no model list): ')
-    if (!modelId) throw new Error('No model ID provided — aborting.')
-    models = [{ id: modelId }]
+/**
+ * Masked terminal input: keypresses are swallowed so the secret never
+ * renders, even when pasted. Non-TTY stdin (pipes/CI) can't suppress echo —
+ * warn and recommend env-var storage instead.
+ */
+async function askSecretTty(rl: ReadlineInterface, question: string): Promise<string> {
+  if (!input.isTTY || typeof input.setRawMode !== 'function') {
+    output.write(`${question}(non-interactive stdin — input is NOT masked; prefer env-var storage)\n`)
+    return (await rl.question(question)).trim()
   }
 
-  const defaultName = suggestProviderName(baseUrl)
-  const nameAnswer = await ask(askIo, `Provider name [${defaultName}]: `)
-  const providerName = (nameAnswer || defaultName).toLowerCase()
-  if (isProviderPresetKey(providerName)) {
-    throw new Error(`"${providerName}" is a built-in preset name — pick a different name for a custom provider.`)
-  }
-  const makeDefault = yes(await ask(askIo, 'Set as default? [Y/n]: ') || 'y')
+  output.write(question)
+  const sigintListeners = rl.listeners('SIGINT') as Array<(...args: unknown[]) => void>
+  sigintListeners.forEach(l => rl.removeListener('SIGINT', l))
+  input.setRawMode(true)
+  input.resume()
 
-  registerProvider({
-    providerName,
-    baseUrl,
-    ...(apiKey ? { apiKey } : {}),
-    models,
-    makeDefault,
+  let secret = ''
+
+  return await new Promise<string>((resolve, reject) => {
+    const onKeypress = (_chunk: unknown, key?: { name?: string; ctrl?: boolean; meta?: boolean }) => {
+      if (!key) return
+      if (key.name === 'return' || key.name === 'enter') {
+        output.write('\n')
+        cleanup()
+        resolve(secret.trim())
+      } else if (key.ctrl && key.name === 'c') {
+        output.write('\n')
+        cleanup()
+        reject(new Error('Interrupted during API key input'))
+      } else if (key.name === 'backspace') {
+        secret = secret.slice(0, -1)
+      } else if (key.ctrl && key.name === 'u') {
+        secret = ''
+      } else if (!key.ctrl && !key.meta) {
+        const text = typeof _chunk === 'string' ? _chunk : Buffer.isBuffer(_chunk) ? _chunk.toString('utf8') : ''
+        secret += text.replace(/[\r\n]/g, '')
+      }
+    }
+    let settled = false
+    const cleanup = () => {
+      if (settled) return
+      settled = true
+      input.setRawMode!(false)
+      input.removeListener('keypress', onKeypress)
+      sigintListeners.forEach(l => rl.on('SIGINT', l))
+    }
+    input.on('keypress', onKeypress)
   })
-  write(`Provider "${providerName}" registered with ${models.length} model(s).`)
 }
 
 /**
@@ -121,16 +80,19 @@ async function runCustomProviderWizard(
  * 此时不应重试 bootstrap——调用方应让会话以降级模式启动（发消息时报错指引配 key）。
  */
 export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promise<{ skipped?: boolean }> {
-  let close: (() => void) | undefined
-  let askFn = io.ask
-  if (!askFn) {
-    const rl = createInterface({ input, output })
-    askFn = question => rl.question(question)
-    close = () => rl.close()
+  let rl: ReadlineInterface | undefined
+  let askFn: (question: string) => Promise<string>
+  let askSecretFn: (question: string) => Promise<string>
+  if (io.ask) {
+    askFn = io.ask
+    askSecretFn = io.askSecret ?? io.ask
+  } else {
+    rl = createInterface({ input, output })
+    askFn = question => rl!.question(question)
+    askSecretFn = question => askSecretTty(rl!, question)
   }
 
   const write = io.write ?? (line => output.write(`${line}\n`))
-  const wizardIo: ProviderWizardIO & Required<Pick<ProviderWizardIO, 'ask'>> = { ...io, ask: askFn }
   const askIo = { ask: askFn }
 
   try {
@@ -153,91 +115,41 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
       return { skipped: true }
     }
 
-    const providerAnswer = await ask(askIo, `Provider [${providerPresetKeys.join('|')}|custom]: `)
-    if ((providerAnswer || '').toLowerCase() === 'custom') {
-      await runCustomProviderWizard(wizardIo, write)
-      write('Run "rivet provider list" to inspect.')
-      return {}
+    const providerAnswer = await ask(askIo, `Provider [${providerPresetKeys.join('|')}]: `)
+    const providerName = (providerAnswer || config.provider.default).toLowerCase()
+    if (providerName === 'custom') {
+      write('Custom endpoints are handled by the probe-first CLI:')
+      write('  rivet provider add <name> --base-url <url> [--api-key *** | --api-key-env VAR] [--default]')
+      throw new Error('Custom provider setup aborted — use `rivet provider add` (see above).')
     }
-    const providerName = providerAnswer || config.provider.default
-    const current = config.provider.providers[providerName]
-    const preset = isProviderPresetKey(providerName) ? providerName : undefined
-    if (!current && !preset) {
-      throw new Error(`Provider "${providerName}" is not configured and has no built-in preset`)
+    if (!isProviderPresetKey(providerName) && !config.provider.providers[providerName]) {
+      throw new Error(`Provider "${providerName}" has no built-in preset and is not configured`)
     }
-
-    const baseProvider = current ?? (preset ? loadConfig().provider.providers[preset] : undefined)
-    const currentModel = baseProvider?.models[0]
 
     let apiKey: string | undefined
     let apiKeyEnv: string | undefined
-    const isOAuth = providerName === 'codex' || current?.auth?.type === 'oauth'
+    const isOAuth = providerName === 'codex' || config.provider.providers[providerName]?.auth?.type === 'oauth'
     if (!isOAuth) {
       write('How to store the API key:')
       write(`  inline - write it to ${userConfigPath()} (recommended for personal use)`)
       write('  env    - read it from a shell environment variable (for shared/CI setups)')
       write('  keep   - leave the existing key setting unchanged')
-      write('（个人使用直接回车选 inline，key 会写入上面的配置文件；env/keep 给进阶场景用）')
       const authMode = await ask(askIo, 'Auth mode [inline|env|keep]: ')
       if (authMode === 'env') {
         apiKeyEnv = await ask(askIo, 'API key env var: ')
       } else if (authMode === 'inline' || authMode === '') {
-        apiKey = await ask(askIo, 'API key: ')
-      } else if (authMode && authMode !== 'keep') {
+        apiKey = await askSecretFn('API key (input hidden): ')
+      } else if (authMode !== 'keep') {
         throw new Error(`Unknown auth mode: ${authMode}`)
       }
     }
 
-    const defaultUrl = current?.baseUrl ?? baseProvider?.baseUrl ?? ''
-    const urlAnswer = await ask(askIo, `Base URL [${defaultUrl}]: `)
-    const baseUrl = urlAnswer || undefined
+    const makeDefault = yes(await ask(askIo, 'Set as default? [Y/n]: ') || 'y')
 
-    const modelId = await ask(askIo, `Model ID [${currentModel?.id ?? ''}]: `)
-    let model: ModelConfig | undefined
-    if (modelId) {
-      const aliasAnswer = await ask(askIo, 'Model alias: ')
-      // Preset-aware defaults: a known model (e.g. deepseek-v4-pro) defaults
-      // to its real context window instead of a blanket 128K — compaction
-      // thresholds scale with this value, so a wrong small window silently
-      // triggers premature compaction on 1M models.
-      const presetModel = findPresetModel(providerName, modelId)
-      const defaultContextWindow = presetModel?.contextWindow ?? currentModel?.contextWindow ?? 128000
-      const defaultMaxTokens = presetModel?.maxTokens ?? currentModel?.maxTokens ?? 64000
-      const contextWindow = positiveIntOrDefault(
-        await ask(askIo, `Context window [${defaultContextWindow}]: `),
-        defaultContextWindow,
-        'context window',
-      )
-      const maxTokens = positiveIntOrDefault(
-        await ask(askIo, `Max tokens [${defaultMaxTokens}]: `),
-        defaultMaxTokens,
-        'max tokens',
-      )
-      model = {
-        id: modelId,
-        ...(aliasAnswer ? { alias: aliasAnswer } : {}),
-        contextWindow,
-        maxTokens,
-        reasoningEffort: presetModel?.reasoningEffort ?? currentModel?.reasoningEffort,
-      }
-    }
-
-    const makeDefault = yes(await ask(askIo, 'Set as default? [y/N]: '))
-    const allowProFallback = yes(await ask(askIo, 'Allow strong/pro models as fallback? [y/N]: '))
-
-    setupProvider({
-      providerName,
-      preset,
-      apiKey,
-      apiKeyEnv,
-      baseUrl,
-      model,
-      makeDefault,
-      allowProFallback,
-    })
-    write(`Provider ${providerName} configured. Run "rivet config providers" to inspect.`)
+    setupProvider({ providerName, apiKey, apiKeyEnv, makeDefault })
+    write(`Provider ${providerName} configured. Run "rivet provider list" to inspect.`)
     return {}
   } finally {
-    close?.()
+    rl?.close()
   }
 }

@@ -223,7 +223,7 @@ describe('config permissions schema', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 
     assert.deepEqual(parsed.provider.providers.codex?.auth, { type: 'oauth', provider: 'codex' })
-    assert.equal(parsed.provider.providers.codex?.models[0]?.id, 'gpt-5.5')
+    assert.equal(parsed.provider.providers.codex?.models[0]?.id, 'gpt-5.6-sol')
   })
 
   it('keeps DEFAULT_CONFIG default provider and model specs valid', () => {

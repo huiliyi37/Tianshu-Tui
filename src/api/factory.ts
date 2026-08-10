@@ -7,6 +7,7 @@ import type { ProviderCapabilities } from './provider.js'
 import { getProviderProfile } from './provider-profile.js'
 import { getCatalogEntry } from './provider-catalog.js'
 import type { ProviderConfig } from '../config/schema.js'
+import { readSecret } from '../config/secrets-store.js'
 import type { AuthProvider } from '../auth/types.js'
 
 /** Runtime parameters that vary per-model or per-call, not stored in config */
@@ -28,15 +29,20 @@ export interface RuntimeParams {
  * Resolve the API key from config, falling back to environment variable.
  *
  * Fallback order:
- *   1. provider.apiKey (inline key in config)
- *   2. provider.apiKeyEnv (explicit env var name in config)
- *   3. Standard env var: `<PROVIDER_NAME_UPPER>_API_KEY` (e.g. DEEPSEEK_API_KEY)
+ *   1. provider.keyRef (pointer into secrets.json — config.json holds no plaintext)
+ *   2. provider.apiKey (legacy inline key in config)
+ *   3. provider.apiKeyEnv (explicit env var name in config)
+ *   4. Standard env var: `<PROVIDER_NAME_UPPER>_API_KEY` (e.g. DEEPSEEK_API_KEY)
  *
- * Step 3 handles the common case where a user has the standard env var set but
+ * Step 4 handles the common case where a user has the standard env var set but
  * the provider config lost its apiKeyEnv reference (manual edits, migration,
  * or deleting/re-entering the key in the desktop UI).
  */
 export function resolveApiKey(provider: ProviderConfig): string {
+  if (provider.keyRef) {
+    const secret = readSecret(provider.keyRef)
+    if (secret) return secret
+  }
   if (provider.apiKey) return provider.apiKey
   if (provider.apiKeyEnv) {
     const env = process.env[provider.apiKeyEnv]

@@ -5,6 +5,7 @@
  * wizard; same-name writes require explicit --force.
  */
 import { loadConfig, registerProvider, removeProvider, getApiKeyStatus } from './manager.js'
+import { readSecret } from './secrets-store.js'
 import { probeProvider, type ProbeReport } from '../api/provider-probe.js'
 import { matchModelIds, type ModelMatchResult } from '../api/model-id-matcher.js'
 import type { ModelAliasMetadata } from '../api/model-aliases.js'
@@ -50,7 +51,11 @@ Examples:
 }
 
 /** Resolve a usable API key without throwing — local endpoints need none. */
-function bestEffortApiKey(provider: { apiKey?: string; apiKeyEnv?: string; name: string }): string | undefined {
+function bestEffortApiKey(provider: { apiKey?: string; apiKeyEnv?: string; keyRef?: string; name: string }): string | undefined {
+  if (provider.keyRef) {
+    const secret = readSecret(provider.keyRef)
+    if (secret) return secret
+  }
   if (provider.apiKey) return provider.apiKey
   if (provider.apiKeyEnv && process.env[provider.apiKeyEnv]) return process.env[provider.apiKeyEnv]
   const standard = process.env[`${provider.name.toUpperCase()}_API_KEY`]

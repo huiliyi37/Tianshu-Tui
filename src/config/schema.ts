@@ -130,6 +130,9 @@ const providerBaseSchema = z.object({
   name: z.string(),
   apiKey: z.string().nullable().optional().transform(value => value ?? undefined),
   apiKeyEnv: z.string().nullable().optional().transform(value => value ?? undefined),
+  /** Pointer into ~/.rivet/secrets.json (0600). Preferred over inline apiKey —
+   *  config.json never holds the plaintext key. Resolved first in the key chain. */
+  keyRef: z.string().nullable().optional().transform(value => value ?? undefined),
   baseUrl: z.string().url(),
   /** Wire protocol of the endpoint. 'openai' = chat/completions-compatible;
    *  'anthropic' = /v1/messages with cache_control breakpoints. Factory dispatch
@@ -164,6 +167,21 @@ const providerBaseSchema = z.object({
    * 即便小上下文也迟迟不出首 token 时，才需要显式抬高这个 base。
    */
   firstByteTimeoutMs: z.number().int().positive().optional(),
+  /**
+   * Total request timeout (ms) for the whole stream. Three-layer division:
+   * firstByteTimeoutMs = pre-first-chunk, thinkingStallTimeoutMs = reasoning
+   * stall, requestTimeoutMs = entire request. 目前仅落盘，消费点后续波次接入。
+   */
+  requestTimeoutMs: z.number().int().positive().optional(),
+  /** Max retry attempts for retryable API errors (0 disables). 目前仅落盘。 */
+  maxRetries: z.number().int().min(0).max(10).optional(),
+  /** Provider-level sampling temperature default. 目前仅落盘；per-model 覆盖为后续波次。 */
+  temperature: z.number().min(0).max(2).optional(),
+  /**
+   * Per-provider HTTP proxy override; takes precedence over the global
+   * network.proxy. 目前仅落盘，消费点后续波次接入。
+   */
+  proxy: z.string().optional(),
   unsupported: z.array(z.string()).default([]),
   /**
    * Provider usage calibration factor for `prompt_tokens` (0–1).
@@ -950,6 +968,8 @@ export type Config = {
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
+/** Optional advanced knobs carried through wizard commits and drafts. */
+export type ProviderAdvancedConfig = Pick<ProviderConfig, 'requestTimeoutMs' | 'maxRetries' | 'temperature' | 'proxy'>
 export type AuthConfig = z.infer<typeof authConfigSchema>
 export type ProviderCapabilitiesConfig = z.infer<typeof providerCapabilitiesSchema>
 export type ModelConfig = z.infer<typeof modelConfigSchema>

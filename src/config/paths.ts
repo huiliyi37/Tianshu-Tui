@@ -155,6 +155,16 @@ export function updateCheckPath(): string {
   return join(rivetHome(), 'update-check.json')
 }
 
+/**
+ * /connect wizard draft — unfinished provider setup, saved on Esc and offered
+ * for resume next time. Never holds a plaintext key: only a keyRef into
+ * secrets.json. TTL/cleanup is owned by the reader. `base` lets tests inject
+ * a temporary home without RIVET_HOME.
+ */
+export function connectDraftPath(base?: string): string {
+  return join(base ?? rivetHome(), 'connect-draft.json')
+}
+
 /** Directory for durable claims exports from slash commands. */
 export function exportsDir(): string {
   return join(rivetHome(), 'exports')

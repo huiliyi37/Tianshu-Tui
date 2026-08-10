@@ -635,32 +635,18 @@ async function main() {
   } catch (bootErr) {
     const msg = (bootErr as Error).message ?? ''
     if (msg.includes('No API key') || msg.includes('not configured')) {
-      process.stderr.write(`\n[T9] ${msg}\n\n`)
-      process.stderr.write('Running first-time setup wizard...\n\n')
-      const { runProviderConfigWizard } = await import('./config/provider-wizard.js')
-      const result = await runProviderConfigWizard()
-      // 用户跳过 wizard——降级启动（无 key 进 TUI，发消息时报错指引配 key）。
-      // 与桌面端「先进界面再提醒」体验对齐，不让新用户被困在启动门。
-      if (result.skipped) {
-        process.stderr.write('\nStarting in degraded mode (no API key). Configure via /config or `rivet config setup`.\n\n')
-        ctx = await bootstrapInteractiveSession({
-          cwd: process.cwd(),
-          args,
-          modelId: requestedModel,
-          providerName: requestedProvider,
-          asyncExtras: true,
-          allowMissingKey: true,
-        })
-      } else {
-        process.stderr.write('\nRestarting with new configuration...\n\n')
-        ctx = await bootstrapInteractiveSession({
-          cwd: process.cwd(),
-          args,
-          modelId: requestedModel,
-          providerName: requestedProvider,
-          asyncExtras: true,
-        })
-      }
+      // 无 key：降级启动，由 TUI 首启钩子自动打开 /connect 向导。
+      // 此处必为 TTY 交互分支（上方已拦截非 TTY），不再走 readline 向导——
+      // readline 版仅保留给 `rivet config setup` CLI（manager.ts）。
+      process.stderr.write(`\n[T9] ${msg}\nStarting in degraded mode — /connect 向导将自动打开...\n\n`)
+      ctx = await bootstrapInteractiveSession({
+        cwd: process.cwd(),
+        args,
+        modelId: requestedModel,
+        providerName: requestedProvider,
+        asyncExtras: true,
+        allowMissingKey: true,
+      })
     } else {
       throw bootErr
     }
@@ -1504,6 +1490,7 @@ async function main() {
     tuiApp.commitStatic(`Reasoning effort → ${label}`)
   }, /* connectExec: */ (commit, summary) => {
     // Connect 向导提交回调：写盘 → 重载 → 内存回填 → 即时切到新默认模型。
+    // 返回 false = 写盘失败——app 侧据此保留草稿（恢复场景下输入不作废）。
     try {
       if (commit.mode === 'preset') {
         setupProvider(commit.setup)
@@ -1517,11 +1504,12 @@ async function main() {
           protocol: commit.protocol,
           models: commit.models,
           makeDefault: commit.makeDefault,
+          ...(commit.advanced ? { advanced: commit.advanced } : {}),
         })
       }
     } catch (e) {
       tuiApp.commitStatic(`⚠️ 配置保存失败: ${e instanceof Error ? e.message : String(e)}`)
-      return
+      return false
     }
 
     // Reload from disk and hot-swap the in-memory provider table so
@@ -1550,6 +1538,7 @@ async function main() {
         ? `✅ ${summary}`
         : `✅ ${summary}\n（已保存到配置。若模型未切换，重启天枢后生效。）`,
     )
+    return true
   }, /* planPickerExec: */ (slug: string) => {
     // Plan Picker Enter 回调：批准选中计划并自动 kickoff 分波执行（与 /plan-approve 共用）。
     // 手动批准 = 用户参与——取消倒计时自动批准
