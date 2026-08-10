@@ -7,6 +7,7 @@
 import { loadConfig, registerProvider, removeProvider, getApiKeyStatus } from './manager.js'
 import { readSecret } from './secrets-store.js'
 import { probeProvider, type ProbeReport } from '../api/provider-probe.js'
+import { normalizeBaseUrl } from '../api/endpoint-map.js'
 import { matchModelIds, type ModelMatchResult } from '../api/model-id-matcher.js'
 import type { ModelAliasMetadata } from '../api/model-aliases.js'
 import type { ModelConfig } from './schema.js'
@@ -110,12 +111,14 @@ function formatProbeSummary(report: ProbeReport): string[] {
 
 async function cmdAdd(args: string[], io: ProviderCliIO): Promise<void> {
   const name = args[1]
-  const baseUrl = readFlag(args, '--base-url')
-  if (!name || !baseUrl) {
+  const rawBaseUrl = readFlag(args, '--base-url')
+  if (!name || !rawBaseUrl) {
     err(io, 'Usage: rivet provider add <name> --base-url <url> [--api-key KEY|--api-key-env ENV] [--protocol anthropic] [--no-probe] [--force] [--default]')
     exit(io, 1)
     return
   }
+  const baseUrl = normalizeBaseUrl(rawBaseUrl)
+  if (baseUrl !== rawBaseUrl) out(io, `Base URL normalized: ${rawBaseUrl} → ${baseUrl}`)
   const apiKey = readFlag(args, '--api-key')
   const apiKeyEnv = readFlag(args, '--api-key-env')
   const protocolRaw = readFlag(args, '--protocol')
@@ -131,7 +134,7 @@ async function cmdAdd(args: string[], io: ProviderCliIO): Promise<void> {
   let models: Array<Partial<ModelConfig> & { id: string }> = []
   if (!noProbe) {
     out(io, `Probing ${baseUrl} ...`)
-    const report = await probeProvider({ baseUrl, apiKey: key, protocol })
+    const report = await probeProvider({ baseUrl, apiKey: key, protocol, providerName: name })
     for (const line of formatProbeSummary(report)) out(io, `  ${line}`)
     if (report.models.length > 0) {
       const { models: descriptors, notes } = toModelDescriptors(matchModelIds(report.models))
@@ -170,6 +173,7 @@ async function cmdModels(args: string[], io: ProviderCliIO): Promise<void> {
     baseUrl: provider.baseUrl,
     apiKey: bestEffortApiKey(provider),
     protocol: provider.protocol,
+    providerName: name,
     skipCompletion: true,
   })
   if (!report.modelsOk) {
@@ -199,6 +203,7 @@ async function cmdProbe(args: string[], io: ProviderCliIO): Promise<void> {
     baseUrl: provider.baseUrl,
     apiKey: bestEffortApiKey(provider),
     protocol: provider.protocol,
+    providerName: name,
     probeModel: provider.models[0]?.id,
   })
   for (const line of formatProbeSummary(report)) out(io, line)

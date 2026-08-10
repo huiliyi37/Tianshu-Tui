@@ -98,7 +98,7 @@ export type ConnectStepResult =
   | { kind: 'next'; view: ConnectView }
   | { kind: 'error'; message: string; view: ConnectView }
   /** Async probe request — the TUI runs probeProvider and calls applyProbe/probeFailed. */
-  | { kind: 'probe'; baseUrl: string; apiKey?: string; protocol: 'openai' | 'anthropic'; probeModel?: string }
+  | { kind: 'probe'; baseUrl: string; apiKey?: string; protocol: 'openai' | 'anthropic'; probeModel?: string; providerName?: string }
   | { kind: 'commit'; commit: ConnectCommit; summary: string }
 
 type Phase =
@@ -1240,6 +1240,7 @@ export class ConnectFlow {
         baseUrl: preset.provider.baseUrl,
         apiKey: undefined,
         protocol: preset.provider.protocol ?? 'openai',
+        providerName: key,
       }
     }
     this.collected.presetKey = key
@@ -1295,6 +1296,7 @@ export class ConnectFlow {
           apiKey: this.collected.apiKey,
           probeModel: preset.defaultModelId,
           protocol: preset.provider.protocol ?? 'openai',
+          providerName: key,
         }
       }
 

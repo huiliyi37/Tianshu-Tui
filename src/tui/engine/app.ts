@@ -2139,7 +2139,7 @@ export class TuiApp {
       this.connectInput = ''
       this.connectError = undefined
       this.overlay.rerender()
-      void probeProvider({ baseUrl: result.baseUrl, apiKey: result.apiKey, protocol: result.protocol, probeModel: result.probeModel })
+      void probeProvider({ baseUrl: result.baseUrl, apiKey: result.apiKey, protocol: result.protocol, probeModel: result.probeModel, providerName: result.providerName })
         .then(report => {
           if (this.connectFlow === flow && flow) this.advanceConnect(flow.applyProbe(report))
         })

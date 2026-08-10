@@ -73,6 +73,20 @@ describe('probeProvider', () => {
     server = undefined
   })
 
+  it('classifies quota exhaustion (FreeTierOnly 403) as a billing problem, not auth', async () => {
+    server = await startServer((_req, res) => {
+      res.writeHead(403, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ code: 'AllocationQuota.FreeTierOnly', message: 'Free quota exhausted. To continue accessing the model on a paid basis, please add funds.' }))
+    })
+
+    const report = await probeProvider({ baseUrl: server.baseUrl, apiKey: 'sk-ok', skipCompletion: true })
+    assert.equal(report.modelsOk, false)
+    assert.ok(report.errors.some(e => e.includes('Quota/billing problem')), report.errors.join('; '))
+    assert.ok(!report.errors.some(e => e.includes('Authentication failed')), report.errors.join('; '))
+    await server.close()
+    server = undefined
+  })
+
   it('flags a non-SSE 200 completion with missing-/v1 guidance', async () => {
     server = await startServer((req, res) => {
       if (req.url === '/v1/models') {
@@ -105,6 +119,98 @@ describe('probeProvider', () => {
     const report = await probeProvider({ baseUrl: server.baseUrl, probeModel: 'ghost-model' })
     assert.equal(report.completionOk, false)
     assert.ok(report.errors.some(e => e.includes('404')), report.errors.join('; '))
+    await server.close()
+    server = undefined
+  })
+
+  it('prefers a discovered model over the suggested probeModel for completion', async () => {
+    let probedModel = ''
+    server = await startServer((req, res) => {
+      if (req.url === '/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'workspace-model' }] }))
+        return
+      }
+      let body = ''
+      req.on('data', chunk => { body += chunk })
+      req.on('end', () => {
+        probedModel = (JSON.parse(body) as { model: string }).model
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')
+      })
+    })
+
+    const report = await probeProvider({ baseUrl: server.baseUrl, probeModel: 'template-default' })
+    assert.equal(report.completionOk, true)
+    assert.equal(probedModel, 'workspace-model')
+    await server.close()
+    server = undefined
+  })
+
+  it('uses the suggested probeModel when it exists in the discovered list', async () => {
+    let probedModel = ''
+    server = await startServer((req, res) => {
+      if (req.url === '/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'expensive-flagship' }, { id: 'template-default' }] }))
+        return
+      }
+      let body = ''
+      req.on('data', chunk => { body += chunk })
+      req.on('end', () => {
+        probedModel = (JSON.parse(body) as { model: string }).model
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n')
+      })
+    })
+
+    const report = await probeProvider({ baseUrl: server.baseUrl, probeModel: 'template-default' })
+    assert.equal(report.completionOk, true)
+    assert.equal(probedModel, 'template-default')
+    await server.close()
+    server = undefined
+  })
+
+  it('normalizes a pasted full chat URL instead of double-appending paths', async () => {
+    const hits: string[] = []
+    server = await startServer((req, res) => {
+      hits.push(req.url ?? '')
+      if (req.url === '/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'm1' }] }))
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end(sse([JSON.stringify({ choices: [{ delta: { content: 'ok' } }] })]))
+    })
+
+    const report = await probeProvider({ baseUrl: `${server.baseUrl}/chat/completions` })
+    assert.equal(report.modelsOk, true)
+    assert.equal(report.completionOk, true)
+    assert.deepEqual(hits, ['/v1/models', '/v1/chat/completions'])
+    await server.close()
+    server = undefined
+  })
+
+  it('version-less base (oneapi-style) gets /v1 inserted before the paths', async () => {
+    const hits: string[] = []
+    server = await startServer((req, res) => {
+      hits.push(req.url ?? '')
+      if (req.url === '/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'm1' }] }))
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end(sse([JSON.stringify({ choices: [{ delta: { content: 'ok' } }] })]))
+    })
+
+    // startServer's baseUrl ends in /v1 — strip it to simulate a bare /api base.
+    const bareBase = server.baseUrl.replace(/\/v1$/, '')
+    const report = await probeProvider({ baseUrl: bareBase })
+    assert.equal(report.modelsOk, true)
+    assert.equal(report.completionOk, true)
+    assert.deepEqual(hits, ['/v1/models', '/v1/chat/completions'])
     await server.close()
     server = undefined
   })

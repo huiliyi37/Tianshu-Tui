@@ -13,10 +13,14 @@
  * user's tokens, so nothing here is mandatory.
  */
 
+import { normalizeBaseUrl, resolveProbeEndpoints } from './endpoint-map.js'
+
 export interface ProbeOptions {
   baseUrl: string
   apiKey?: string
   protocol?: 'openai' | 'anthropic'
+  /** Provider/preset name — selects the endpoint-path mapping (unknown → OpenAI-compatible default). */
+  providerName?: string
   /** Per-request timeout. Default 15s — cold endpoints should not hang onboarding. */
   timeoutMs?: number
   /** Model for the completion probe. Defaults to the first fetched model id. */
@@ -48,6 +52,10 @@ const MAX_BODY_BYTES = 64 * 1024
 
 function authHeaders(apiKey?: string): Record<string, string> {
   return apiKey ? { authorization: `Bearer ${apiKey}` } : {}
+}
+
+function anthropicHeaders(apiKey?: string): Record<string, string> {
+  return apiKey ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } : {}
 }
 
 async function fetchWithProbeTimeout(
@@ -82,6 +90,9 @@ function parseModelIds(payload: unknown): string[] {
 
 function classifyHttpError(status: number, bodyText: string, baseUrl: string): string {
   const snippet = bodyText.slice(0, 200).replace(/\s+/g, ' ').trim()
+  if (/quota|FreeTierOnly|insufficient|arrearage/i.test(bodyText)) {
+    return `Quota/billing problem (HTTP ${status}). The API key is valid but the account quota is exhausted or unpaid — enable paid access or top up in the provider console${snippet ? ` — server said: ${snippet}` : ''}.`
+  }
   if (status === 401 || status === 403) {
     return `Authentication failed (HTTP ${status}). Check the API key${snippet ? ` — server said: ${snippet}` : ''}.`
   }
@@ -92,12 +103,14 @@ function classifyHttpError(status: number, bodyText: string, baseUrl: string): s
 }
 
 async function fetchModelList(options: ProbeOptions, errors: string[]): Promise<string[]> {
-  const base = options.baseUrl.replace(/\/+$/, '')
-  const url = options.protocol === 'anthropic' ? `${base}/v1/models` : `${base}/models`
+  const anthropic = options.protocol === 'anthropic'
+  const url = anthropic
+    ? `${normalizeBaseUrl(options.baseUrl)}/v1/models`
+    : resolveProbeEndpoints(options.baseUrl, options.providerName).modelsUrl
   try {
     const response = await fetchWithProbeTimeout(url, {
       method: 'GET',
-      headers: authHeaders(options.apiKey),
+      headers: anthropic ? anthropicHeaders(options.apiKey) : authHeaders(options.apiKey),
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     if (!response.ok) {
       const bodyText = await response.text().catch(() => '')
@@ -125,7 +138,7 @@ interface CompletionProbeOutcome {
 }
 
 async function probeOpenAICompletion(options: ProbeOptions, model: string): Promise<CompletionProbeOutcome> {
-  const url = `${options.baseUrl.replace(/\/+$/, '')}/chat/completions`
+  const url = resolveProbeEndpoints(options.baseUrl, options.providerName).chatUrl
   const startedAt = Date.now()
   try {
     const response = await fetchWithProbeTimeout(url, {
@@ -167,7 +180,7 @@ async function probeOpenAICompletion(options: ProbeOptions, model: string): Prom
 }
 
 async function probeAnthropicCompletion(options: ProbeOptions, model: string): Promise<CompletionProbeOutcome> {
-  const url = `${options.baseUrl.replace(/\/+$/, '')}/v1/messages`
+  const url = `${normalizeBaseUrl(options.baseUrl)}/v1/messages`
   const startedAt = Date.now()
   try {
     const response = await fetchWithProbeTimeout(url, {
@@ -231,7 +244,12 @@ export async function probeProvider(options: ProbeOptions): Promise<ProbeReport>
   }
 
   if (options.skipCompletion) return report
-  const model = options.probeModel ?? models[0]
+  // 型号选取：模板建议型号在发现列表中存在则优先（预设挑的是已知档，避免随机
+  // 拿昂贵档做补全）；否则用实测发现的第一个——模板型号可能在该端点不存在
+  // （如百炼按量计费按业务空间开放模型），拿不存在的型号探测会误报失败。
+  const model = options.probeModel && models.includes(options.probeModel)
+    ? options.probeModel
+    : (models[0] ?? options.probeModel)
   if (!model) {
     errors.push('Completion probe skipped: no model id available (fetch a list first or pass probeModel).')
     return report
