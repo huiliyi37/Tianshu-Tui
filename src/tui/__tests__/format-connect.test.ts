@@ -67,3 +67,52 @@ test('renderConnect: error line is rendered', () => {
   const out = renderConnect(data, 60, 20, theme).map(stripAnsi).join('\n')
   assert.match(out, /API 密钥不能为空/)
 })
+
+// ── Scroll window (short terminals) ────────────────────────────
+
+function manyOptions(n: number): Array<{ id: string; label: string; description: string }> {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `opt-${i}`,
+    label: `服务商 ${i}`,
+    description: `描述 ${i}`,
+  }))
+}
+
+test('renderConnect: cursor far down the list stays visible in a short window', () => {
+  const data: ConnectOverlayData = {
+    view: { kind: 'choice', title: '连接模型服务商', options: manyOptions(19) },
+    input: '',
+    selectedIndex: 15,
+  }
+  const lines = renderConnect(data, 60, 14, theme)
+  const out = lines.map(stripAnsi).join('\n')
+  assert.match(out, /服务商 15/, 'selected option visible')
+  assert.doesNotMatch(out, /服务商 0[^0-9]/, 'top options scrolled out')
+  assert.match(out, /↑ 以上还有/, 'top truncation indicator')
+  assert.match(out, /↓ 以下还有/, 'bottom truncation indicator')
+  assert.ok(lines.length <= 14, `frame fits height (${lines.length})`)
+})
+
+test('renderConnect: cursor at top renders from the start without top indicator', () => {
+  const data: ConnectOverlayData = {
+    view: { kind: 'choice', title: '连接模型服务商', options: manyOptions(19) },
+    input: '',
+    selectedIndex: 0,
+  }
+  const lines = renderConnect(data, 60, 14, theme)
+  const out = lines.map(stripAnsi).join('\n')
+  assert.match(out, /服务商 0[^0-9]/)
+  assert.doesNotMatch(out, /↑ 以上还有/)
+  assert.match(out, /↓ 以下还有/)
+})
+
+test('renderConnect: everything fits means no indicators', () => {
+  const data: ConnectOverlayData = {
+    view: { kind: 'choice', title: '连接模型服务商', options: manyOptions(3) },
+    input: '',
+    selectedIndex: 2,
+  }
+  const out = renderConnect(data, 60, 30, theme).map(stripAnsi).join('\n')
+  assert.doesNotMatch(out, /以上还有|以下还有/)
+  assert.match(out, /服务商 2[^0-9]/)
+})

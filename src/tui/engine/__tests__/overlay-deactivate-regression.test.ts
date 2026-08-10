@@ -10,11 +10,25 @@
  * 027744ae / bb6a9329 / 03f73669 / e6ba2a27 序列）。此测试锁定正确行为。
  */
 
-import { describe, it } from 'node:test'
+import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { makeApp, stripAnsi } from './_harness.js'
 
 describe('Overlay deactivate · picker exit regression', () => {
+  // startConnect() 现在会读盘（connect-draft.json），测试需隔离 RIVET_HOME。
+  let home = ''
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-overlay-reg-'))
+    process.env.RIVET_HOME = home
+  })
+  afterEach(() => {
+    delete process.env.RIVET_HOME
+    rmSync(home, { recursive: true, force: true })
+  })
+
   it('deactivateOverlay writes exactly one live region after overlay exit', () => {
     const { app, out } = makeApp()
     out.clear()

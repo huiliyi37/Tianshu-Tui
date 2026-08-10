@@ -623,6 +623,33 @@ function wrapToWidth(text: string, width: number, maxLines: number): string[] {
 }
 
 /**
+ * 列表视口滚动窗口（无状态）：保证 selectedIndex 所在项可见。
+ * 策略：先向上收纳（光标下移越过视口才滚动，选中项贴底），再向下填满剩余行；
+ * 光标在顶部时窗口从头开始——等价于"按需跟随"的经典终端菜单行为。
+ */
+function scrollWindow(heights: number[], selectedIndex: number, budget: number): { start: number; end: number } {
+  const n = heights.length
+  if (n === 0 || budget <= 0) return { start: 0, end: 0 }
+  const total = heights.reduce((a, b) => a + b, 0)
+  if (total <= budget) return { start: 0, end: n }
+  const sel = Math.min(Math.max(selectedIndex, 0), n - 1)
+  let used = Math.min(heights[sel]!, budget)
+  let start = sel
+  while (start > 0 && used + heights[start - 1]! <= budget) { start--; used += heights[start]! }
+  let end = sel + 1
+  while (end < n && used + heights[end]! <= budget) { used += heights[end]!; end++ }
+  return { start, end }
+}
+
+/** scrollWindow + 为上下截断指示行预留行预算（两趟收敛即可）。 */
+function scrollWindowWithIndicators(heights: number[], selectedIndex: number, budget: number): { start: number; end: number } {
+  let win = scrollWindow(heights, selectedIndex, budget)
+  const indicators = (win.start > 0 ? 1 : 0) + (win.end < heights.length ? 1 : 0)
+  if (indicators > 0) win = scrollWindow(heights, selectedIndex, Math.max(1, budget - indicators))
+  return win
+}
+
+/**
  * 渲染 Domain Picker overlay（CC 风星域选择器）。
  *
  * 列表（cursor + current 标记 + name + dim meta）→ 分隔线 → 选中项 essence 预览。
@@ -1119,11 +1146,17 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
     return lines
   }
 
-  // Each choice takes 1-2 lines (label + optional description). Calculate
-  // how many fit, with wrapping for long descriptions.
+  // Each choice takes 1-2 lines (label + optional description). A scroll
+  // window keeps the cursor visible in short terminals instead of silently
+  // truncating choices beyond the viewport.
+  const choiceHeights = data.choices.map(c => 1 + (c.description ? wrapToWidth(c.description, innerWidth, 2).length : 0))
+  const win = scrollWindowWithIndicators(choiceHeights, data.selectedIndex, contentRows)
   let rowsUsed = 0
-  for (let i = 0; i < data.choices.length; i++) {
-    if (rowsUsed >= contentRows) break
+  if (win.start > 0) {
+    lines.push(padLine(`   ${color(`↑ 以上还有 ${win.start} 项`, theme.muted)}`, width, theme))
+    rowsUsed++
+  }
+  for (let i = win.start; i < win.end && rowsUsed < contentRows; i++) {
     const c = data.choices[i]!
     const selected = i === data.selectedIndex
 
@@ -1145,6 +1178,10 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
         rowsUsed++
       }
     }
+  }
+  if (win.end < data.choices.length && rowsUsed < contentRows) {
+    lines.push(padLine(`   ${color(`↓ 以下还有 ${data.choices.length - win.end} 项`, theme.muted)}`, width, theme))
+    rowsUsed++
   }
 
   // Pad remaining rows
@@ -1219,9 +1256,14 @@ export function renderPlanPicker(data: PlanPickerData, width: number, height: nu
     return lines
   }
 
+  const entryHeights = data.entries.map(e => 2) // label line + meta line when selected; conservative uniform height
+  const win = scrollWindowWithIndicators(entryHeights, data.selectedIndex, contentRows)
   let rowsUsed = 0
-  for (let i = 0; i < data.entries.length; i++) {
-    if (rowsUsed >= contentRows) break
+  if (win.start > 0) {
+    lines.push(padLine(`   ${color(`↑ 以上还有 ${win.start} 项`, theme.muted)}`, width, theme))
+    rowsUsed++
+  }
+  for (let i = win.start; i < win.end && rowsUsed < contentRows; i++) {
     const e = data.entries[i]!
     const selected = i === data.selectedIndex
     const icon = planStatusGlyph(e.status, theme)
@@ -1240,6 +1282,10 @@ export function renderPlanPicker(data: PlanPickerData, width: number, height: nu
         rowsUsed++
       }
     }
+  }
+  if (win.end < data.entries.length && rowsUsed < contentRows) {
+    lines.push(padLine(`   ${color(`↓ 以下还有 ${data.entries.length - win.end} 项`, theme.muted)}`, width, theme))
+    rowsUsed++
   }
 
   while (rowsUsed < contentRows) {
@@ -1292,10 +1338,33 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
     if (rowsUsed < contentRows) push('')
   }
 
+  if (view.report && view.report.length > 0) {
+    for (const line of view.report) {
+      if (rowsUsed >= contentRows) break
+      const toneColor = line.tone === 'ok'
+        ? theme.success
+        : line.tone === 'fail'
+          ? theme.error ?? theme.primary
+          : line.tone === 'head'
+            ? theme.secondary
+            : theme.muted
+      const opts = line.tone === 'head' ? { bold: true } : undefined
+      for (const d of wrapToWidth(line.text, innerWidth, 2)) {
+        if (rowsUsed >= contentRows) break
+        push(` ${color(d, toneColor, opts)}`)
+      }
+    }
+    if (rowsUsed < contentRows) push('')
+  }
+
   if (view.kind === 'choice' || view.kind === 'multi-choice') {
     const options = view.options ?? []
-    for (let i = 0; i < options.length; i++) {
-      if (rowsUsed >= contentRows) break
+    // Scroll window keeps the cursor visible in short terminals (e.g. the
+    // 19-item provider list) instead of silently truncating beyond viewport.
+    const optionHeights = options.map(o => 1 + (o.description ? wrapToWidth(o.description, innerWidth, 2).length : 0))
+    const win = scrollWindowWithIndicators(optionHeights, data.selectedIndex, contentRows - rowsUsed)
+    if (win.start > 0) push(`   ${color(`↑ 以上还有 ${win.start} 项`, theme.muted)}`)
+    for (let i = win.start; i < win.end && rowsUsed < contentRows; i++) {
       const opt = options[i]!
       const selected = i === data.selectedIndex
       const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
@@ -1312,6 +1381,9 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
           push(`     ${color(d, theme.muted)}`)
         }
       }
+    }
+    if (win.end < options.length && rowsUsed < contentRows) {
+      push(`   ${color(`↓ 以下还有 ${options.length - win.end} 项`, theme.muted)}`)
     }
   } else if (view.kind === 'busy') {
     push(` ${color('⠋ 请稍候…', theme.primary, { bold: true })}`)
@@ -1387,8 +1459,10 @@ export function renderInitFlow(data: InitOverlayData, width: number, height: num
 
   if (view.kind === 'multi-choice') {
     const options = view.options ?? []
-    for (let i = 0; i < options.length; i++) {
-      if (rowsUsed >= contentRows) break
+    const optionHeights = options.map(o => 1 + (o.description ? wrapToWidth(o.description, innerWidth, 2).length : 0))
+    const win = scrollWindowWithIndicators(optionHeights, data.selectedIndex, contentRows - rowsUsed)
+    if (win.start > 0) push(`   ${color(`↑ 以上还有 ${win.start} 项`, theme.muted)}`)
+    for (let i = win.start; i < win.end && rowsUsed < contentRows; i++) {
       const opt = options[i]!
       const selected = i === data.selectedIndex
       const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
@@ -1403,6 +1477,9 @@ export function renderInitFlow(data: InitOverlayData, width: number, height: num
           push(`     ${color(d, theme.muted)}`)
         }
       }
+    }
+    if (win.end < options.length && rowsUsed < contentRows) {
+      push(`   ${color(`↓ 以下还有 ${options.length - win.end} 项`, theme.muted)}`)
     }
   } else {
     // confirm step: the file list about to be written.

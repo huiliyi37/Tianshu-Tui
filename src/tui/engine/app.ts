@@ -112,7 +112,9 @@ import { boxCharsFor, boxInnerWidth } from '../box-chars.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderDomainGenesisCard, genesisCardMaxScroll, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderInitFlow } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData, InitOverlayData } from '../format/overlay.js'
-import { ConnectFlow, type ConnectCommit, type ConnectProviderRef, type ConnectStepResult } from '../connect-flow.js'
+import { ConnectFlow, DIY_PENDING_KEY_REF, type ConnectCommit, type ConnectProviderRef, type ConnectStepResult } from '../connect-flow.js'
+import { readConnectDraft, saveConnectDraft, clearConnectDraft } from '../connect-draft.js'
+import { readSecret, writeSecret, deleteSecret } from '../../config/secrets-store.js'
 import { probeProvider } from '../../api/provider-probe.js'
 import { InitFlow, probeInitFlowInput, type InitCommit, type InitStepResult } from '../init-flow.js'
 import { renderSettings } from '../format/settings.js'
@@ -1893,7 +1895,14 @@ export class TuiApp {
 
   /** 打开 /connect 服务商配置向导（选内置服务商或自定义，填写密钥）。 */
   startConnect(existing?: ConnectProviderRef[]): void {
-    this.connectFlow = new ConnectFlow(existing)
+    const draft = readConnectDraft()
+    // 草稿只存 secrets.json 引用——恢复时物化密钥交给 flow；引用失效（secrets
+    // 被清）时传 undefined，normalizeDraft 的降级链会滑回密钥输入步。
+    const restoredKey = draft?.collected.keyRef ? readSecret(draft.collected.keyRef) : undefined
+    const flow = new ConnectFlow(existing, draft, restoredKey)
+    // 结构合法但语义不可恢复的草稿（preset 已删等）——顺手清掉，免得反复弹提示。
+    if (flow.draftRejected) clearConnectDraft()
+    this.connectFlow = flow
     this.connectInput = ''
     this.connectError = undefined
     this.input.setMode('input')
@@ -2130,7 +2139,7 @@ export class TuiApp {
       this.connectInput = ''
       this.connectError = undefined
       this.overlay.rerender()
-      void probeProvider({ baseUrl: result.baseUrl, apiKey: result.apiKey, protocol: result.protocol })
+      void probeProvider({ baseUrl: result.baseUrl, apiKey: result.apiKey, protocol: result.protocol, probeModel: result.probeModel })
         .then(report => {
           if (this.connectFlow === flow && flow) this.advanceConnect(flow.applyProbe(report))
         })
@@ -2142,7 +2151,8 @@ export class TuiApp {
       return
     }
     if (result.kind === 'next') {
-      this.connectInput = ''
+      // 草稿恢复会在这里一次性预填输入缓冲（restoredInput 读后即清）。
+      this.connectInput = this.connectFlow?.takeRestoredInput() ?? ''
       this.connectError = undefined
       this.overlayController.nav().connectIndex = 0
       this.overlay.rerender()
@@ -2153,7 +2163,14 @@ export class TuiApp {
     // it after leaves a ghost frame (see overlay-deactivate-regression).
     const exec = this.overlayController.getConnectExec()
     this.connectFlow = undefined
-    exec?.(result.commit, result.summary)
+    // exec 失败（如 registerProvider 撞名）时草稿必须保留，否则恢复场景下
+    // 用户全部输入作废——返回值 undefined 视为成功（兼容旧签名）。
+    const ok = exec?.(result.commit, result.summary) ?? true
+    if (ok) {
+      clearConnectDraft()
+      // 暂存密钥已由 registerProvider 以最终 provider 名重写——清掉占位条目。
+      deleteSecret(DIY_PENDING_KEY_REF)
+    }
     this.deactivateOverlay()
   }
 
@@ -2202,10 +2219,36 @@ export class TuiApp {
   }
 
   private cancelConnect(): void {
+    const flow = this.connectFlow
+    let savedDraft = false
+    if (flow && !flow.draftPromptPending()) {
+      // Esc 在恢复提示上 → 文件原样保留；有进展 → 落盘（含未回车文本）；
+      // 选过「重新开始」且无新进展 → 清掉旧草稿。
+      const secretInfo = flow.draftSecretInfo()
+      // 密钥步上未回车的文本可能是半截明文 key——绝不落盘。
+      const draft = flow.toDraft(secretInfo.onKeyStep ? undefined : this.connectInput)
+      if (draft) {
+        // 草稿磁盘永不落明文：密钥先进 secrets.json（0600），草稿只留引用。
+        if (secretInfo.apiKey) {
+          const ref = secretInfo.presetKey ?? DIY_PENDING_KEY_REF
+          try {
+            writeSecret(ref, secretInfo.apiKey)
+            draft.collected.keyRef = ref
+          } catch { /* secrets 写失败 → 草稿保留其余进度，恢复时降级回密钥步 */ }
+        }
+        saveConnectDraft(draft)
+        savedDraft = true
+      } else if (flow.wasDraftDiscarded()) {
+        clearConnectDraft()
+        deleteSecret(DIY_PENDING_KEY_REF)
+      }
+    }
     this.connectFlow = undefined
     // Buffer the notice into scrollback before exiting the overlay, so the
     // deactivate repaint paints a single clean frame (no ghost of the overlay).
-    this.commitStatic('已取消服务商配置。')
+    this.commitStatic(savedDraft
+      ? '已取消服务商配置。进度已存为草稿（密钥单独存于 secrets.json），下次 /connect 可恢复。'
+      : '已取消服务商配置。')
     this.deactivateOverlay()
   }
 
@@ -6329,7 +6372,7 @@ export class TuiApp {
     themePickerData?: () => ThemePickerData
     choicePanelData?: () => ChoicePanelData
     planPickerData?: () => PlanPickerData
-  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, domainPickerSaveDefaultExec?: (key: string) => void, modelPickerSaveDefaultExec?: (provider: string, modelId: string) => void, themePickerExec?: (key: string) => void, themePickerSaveDefaultExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void, planPickerExec?: (slug: string) => void, initExec?: (commit: InitCommit, summary: string) => void): void {
+  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, domainPickerSaveDefaultExec?: (key: string) => void, modelPickerSaveDefaultExec?: (provider: string, modelId: string) => void, themePickerExec?: (key: string) => void, themePickerSaveDefaultExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => boolean | void, planPickerExec?: (slug: string) => void, initExec?: (commit: InitCommit, summary: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)

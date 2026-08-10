@@ -172,3 +172,17 @@ test('renderChoicePanel: input sub-mode renders current value', () => {
   assert.ok(plain.includes('请补充测试用例'), 'input value present')
   assert.ok(!plain.includes('可留空'), 'placeholder hidden when value present')
 })
+
+// ── Scroll window (short terminals) ────────────────────────────
+
+test('renderChoicePanel: selected choice stays visible in a short panel', () => {
+  const choices = Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, label: `选项${i}` }))
+  const data: ChoicePanelData = { title: '长列表', choices, selectedIndex: 9 }
+  const lines = renderChoicePanel(data, 50, 12, theme)
+  const plain = lines.map(stripAnsi).join('\n')
+  assert.ok(plain.includes('选项9'), 'selected choice visible')
+  assert.ok(!plain.includes('选项0'), 'top choices scrolled out')
+  assert.ok(plain.includes('↑ 以上还有'), 'top indicator')
+  assert.ok(plain.includes('↓ 以下还有'), 'bottom indicator')
+  assert.ok(lines.length <= 12, `frame fits height (${lines.length})`)
+})

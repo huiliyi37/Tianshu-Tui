@@ -77,7 +77,7 @@ export class OverlayController {
   private themePickerSaveDefaultExec?: (key: string) => void
   private choicePanelExec?: (id: string) => void
   private planPickerExec?: (slug: string) => void
-  private connectExec?: (commit: ConnectCommit, summary: string) => void
+  private connectExec?: (commit: ConnectCommit, summary: string) => boolean | void
   private initExec?: (commit: InitCommit, summary: string) => void
   private cockpitPanel: Panel = 'summary'
 
@@ -161,8 +161,8 @@ export class OverlayController {
   setChoicePanelExec(fn: ((id: string) => void) | undefined): void { this.choicePanelExec = fn }
   getPlanPickerExec(): ((slug: string) => void) | undefined { return this.planPickerExec }
   setPlanPickerExec(fn: ((slug: string) => void) | undefined): void { this.planPickerExec = fn }
-  getConnectExec(): ((commit: ConnectCommit, summary: string) => void) | undefined { return this.connectExec }
-  setConnectExec(fn: ((commit: ConnectCommit, summary: string) => void) | undefined): void { this.connectExec = fn }
+  getConnectExec(): ((commit: ConnectCommit, summary: string) => boolean | void) | undefined { return this.connectExec }
+  setConnectExec(fn: ((commit: ConnectCommit, summary: string) => boolean | void) | undefined): void { this.connectExec = fn }
   getInitExec(): ((commit: InitCommit, summary: string) => void) | undefined { return this.initExec }
   setInitExec(fn: ((commit: InitCommit, summary: string) => void) | undefined): void { this.initExec = fn }
 

@@ -5,7 +5,13 @@ import { PROVIDER_PRESETS, cloneProviderPreset, providerPresetKeys } from '../pr
 
 describe('provider presets', () => {
   it('contains required built-in provider modes', () => {
-    assert.deepEqual([...providerPresetKeys].sort(), ['ccswitch', 'codex', 'dashscope', 'deepseek', 'glm', 'longcat', 'mimo', 'mimo-api', 'minimax', 'openrouter', 'relay', 'siliconflow', 'zhipu-vision'].sort())
+    assert.deepEqual([...providerPresetKeys].sort(), ['ccswitch', 'codex', 'dashscope', 'deepseek', 'glm', 'kimi', 'longcat', 'mimo', 'mimo-api', 'minimax', 'ollama', 'openai', 'openrouter', 'relay', 'siliconflow', 'volc', 'zhipu-vision'].sort())
+  })
+
+  it('ollama is the only keyless preset (local, no auth)', () => {
+    const keyless = providerPresetKeys.filter(k => PROVIDER_PRESETS[k].keyless)
+    assert.deepEqual(keyless, ['ollama'])
+    assert.equal(PROVIDER_PRESETS.ollama.provider.baseUrl, 'http://127.0.0.1:11434/v1')
   })
 
   it('every preset parses as ProviderConfig', () => {
@@ -15,11 +21,11 @@ describe('provider presets', () => {
     }
   })
 
-  it('codex preset uses OAuth and gpt-5.5', () => {
+  it('codex preset uses OAuth and gpt-5.6-sol', () => {
     const codex = cloneProviderPreset('codex')
     assert.deepEqual(codex.auth, { type: 'oauth', provider: 'codex' })
     assert.equal(codex.capabilities.cacheControl, true)
-    assert.equal(codex.models[0]?.id, 'gpt-5.5')
+    assert.equal(codex.models[0]?.id, 'gpt-5.6-sol')
   })
 
   it('deepseek cost defaults: pro=high effort, flash=medium effort', () => {

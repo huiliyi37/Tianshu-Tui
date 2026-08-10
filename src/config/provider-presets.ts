@@ -1,11 +1,24 @@
 import type { ModelConfig, ProviderConfig } from './schema.js'
 
-export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'siliconflow' | 'longcat' | 'ccswitch' | 'zhipu-vision' | 'dashscope' | 'openrouter' | 'relay'
+export type ProviderPresetKey = 'deepseek' | 'glm' | 'kimi' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'openai' | 'siliconflow' | 'longcat' | 'ccswitch' | 'zhipu-vision' | 'dashscope' | 'volc' | 'openrouter' | 'relay' | 'ollama'
+
+/** 一种计费模式对应一个官方 Base URL（如百炼的按量计费 / token plan）。 */
+export interface ProviderBillingMode {
+  id: string
+  label: string
+  description?: string
+  /** 可含 {WorkspaceId} 等占位符——端点确认步要求用户替换后才能探测。 */
+  baseUrl: string
+}
 
 export interface ProviderPreset {
   key: ProviderPresetKey
   label: string
   description: string
+  /** 免密钥端点（如本地 Ollama）——向导跳过 key 步直接探测。 */
+  keyless?: boolean
+  /** 多于一种计费模式时，向导在选类型后插入「计费模式」选择步。 */
+  billingModes?: ProviderBillingMode[]
   provider: ProviderConfig
   defaultModelId: string
 }
@@ -101,6 +114,50 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
       ],
       unsupported: ['stream_options'],
+    },
+  },
+  kimi: {
+    key: 'kimi',
+    label: 'Moonshot Kimi',
+    description: '月之暗面：K3 旗舰推理 + K2.7 代码档',
+    defaultModelId: 'kimi-k3',
+    provider: {
+      name: 'kimi',
+      apiKeyEnv: 'MOONSHOT_API_KEY',
+      baseUrl: 'https://api.moonshot.cn/v1',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        prefixCache: 'none',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 32_768,
+      models: [
+        {
+          id: 'kimi-k3',
+          description: 'K3 旗舰：2.8T MoE，1M 上下文',
+          alias: 'k3',
+          contextWindow: 1_000_000,
+          maxTokens: 32_768,
+          reasoningEffort: 'high',
+          tier: 'strong',
+          pricing: { input: 4, output: 16, cacheRead: 0.4, cacheWrite: 4 },
+        },
+        {
+          id: 'kimi-k2.7-code',
+          description: 'K2.7 代码档：面向编程任务',
+          alias: 'k27-code',
+          contextWindow: 262_144,
+          maxTokens: 32_768,
+          reasoningEffort: 'high',
+          tier: 'strong',
+          pricing: { input: 0.6, output: 2.5, cacheRead: 0.1, cacheWrite: 0.6 },
+        },
+      ],
+      unsupported: [],
     },
   },
   mimo: {
@@ -294,11 +351,72 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       unsupported: [],
     },
   },
+  // openai 必须排在 codex 之前：别名表按 preset 顺序合并重复 canonical
+  // （gpt-5.6-sol 两处都有），保留首个条目的元数据——官方 API 定价优先于
+  // codex 的订阅折算价。
+  openai: {
+    key: 'openai',
+    label: 'OpenAI',
+    description: 'OpenAI 官方 API：GPT-5.6 系列（Sol 旗舰 / Terra 均衡 / Luna 轻量）',
+    defaultModelId: 'gpt-5.6-sol',
+    provider: {
+      name: 'openai',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      baseUrl: 'https://api.openai.com/v1',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        // OpenAI prompt caching 是服务端自动的，无需客户端标记。
+        prefixCache: 'none',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 128_000,
+      models: [
+        {
+          id: 'gpt-5.6-sol',
+          description: '旗舰：1.05M 上下文，视觉支持',
+          alias: 'sol',
+          contextWindow: 1_050_000,
+          maxTokens: 128_000,
+          reasoningEffort: 'max',
+          tier: 'strong',
+          supportsVision: true,
+          pricing: { input: 5, output: 30, cacheRead: 2.5, cacheWrite: 5 },
+        },
+        {
+          id: 'gpt-5.6-terra',
+          description: '均衡档：日常任务性价比之选',
+          alias: 'terra',
+          contextWindow: 400_000,
+          maxTokens: 128_000,
+          reasoningEffort: 'high',
+          tier: 'strong',
+          supportsVision: true,
+          pricing: { input: 2.5, output: 15, cacheRead: 1.25, cacheWrite: 2.5 },
+        },
+        {
+          id: 'gpt-5.6-luna',
+          description: '轻量档：低成本快速任务',
+          alias: 'luna',
+          contextWindow: 400_000,
+          maxTokens: 128_000,
+          reasoningEffort: 'medium',
+          tier: 'cheap',
+          supportsVision: true,
+          pricing: { input: 1, output: 6, cacheRead: 0.5, cacheWrite: 1 },
+        },
+      ],
+      unsupported: [],
+    },
+  },
   codex: {
     key: 'codex',
     label: 'Codex',
     description: 'OpenAI Codex：OAuth 登录，旗舰推理',
-    defaultModelId: 'gpt-5.5',
+    defaultModelId: 'gpt-5.6-sol',
     provider: {
       name: 'codex',
       baseUrl: 'https://chatgpt.com/backend-api/codex',
@@ -315,10 +433,10 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       maxTokens: 128000,
       models: [
         {
-          id: 'gpt-5.5',
-          description: 'OpenAI 旗舰，视觉支持',
+          id: 'gpt-5.6-sol',
+          description: 'OpenAI 旗舰（Sol），视觉支持',
           alias: 'codex',
-          contextWindow: 1_000_000,
+          contextWindow: 1_050_000,
           maxTokens: 128000,
           reasoningEffort: 'max',
           tier: 'strong',
@@ -490,9 +608,23 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   // 默认 thinkingBlockType='enabled'，对不支持 thinking 的 model 显式设 'none'）。
   dashscope: {
     key: 'dashscope',
-    label: '通义千问 (DashScope)',
+    label: '阿里云百炼 (DashScope)',
     description: '阿里 DashScope：Qwen 系列官方端点，OpenAI 兼容协议',
     defaultModelId: 'qwen3-max',
+    billingModes: [
+      {
+        id: 'payg',
+        label: '按量计费',
+        description: '需替换 {WorkspaceId} 为你的业务空间 ID（百炼控制台可查）',
+        baseUrl: 'https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1',
+      },
+      {
+        id: 'token-plan',
+        label: 'token plan',
+        description: '订阅制 token 套餐专用端点',
+        baseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+      },
+    ],
     provider: {
       name: 'dashscope',
       apiKeyEnv: 'DASHSCOPE_API_KEY',
@@ -590,6 +722,85 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           maxTokens: 32_768,
           reasoningEffort: 'high',
           tier: 'strong',
+        },
+      ],
+      unsupported: [],
+    },
+  },
+  volc: {
+    key: 'volc',
+    label: '火山方舟 (豆包)',
+    description: '火山引擎方舟：豆包 Doubao 系列，OpenAI 兼容端点',
+    defaultModelId: 'doubao-seed-2.0-pro',
+    provider: {
+      name: 'volc',
+      apiKeyEnv: 'VOLC_API_KEY',
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        prefixCache: 'none',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 32_768,
+      // 方舟模型以控制台接入点为准——探测（/v3/models）能拉到真实列表，
+      // 下表仅兜底推荐，型号随方舟发布更新。
+      models: [
+        {
+          id: 'doubao-seed-2.0-pro',
+          description: '豆包旗舰（以方舟控制台接入点为准）',
+          alias: 'doubao-pro',
+          contextWindow: 262_144,
+          maxTokens: 32_768,
+          reasoningEffort: 'high',
+          tier: 'strong',
+        },
+        {
+          id: 'doubao-seed-2.0-flash',
+          description: '豆包快速档：低延迟轻量任务',
+          alias: 'doubao-flash',
+          contextWindow: 131_072,
+          maxTokens: 16_384,
+          reasoningEffort: 'medium',
+          tier: 'cheap',
+        },
+      ],
+      unsupported: [],
+    },
+  },
+  // 本地 Ollama —— 免密钥，向导跳过 key 步直接探测。
+  // 模型表只是兜底示例：探测能拉到用户实际 pull 的模型列表。
+  ollama: {
+    key: 'ollama',
+    label: '本地 Ollama',
+    description: '本地部署（默认 11434 端口），无需 API Key',
+    keyless: true,
+    defaultModelId: 'qwen3',
+    provider: {
+      name: 'ollama',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        prefixCache: 'none',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 32_768,
+      models: [
+        {
+          id: 'qwen3',
+          description: '示例模型（按你实际 pull 的模型替换）',
+          alias: 'ollama-qwen3',
+          contextWindow: 32_768,
+          maxTokens: 8_192,
+          reasoningEffort: 'medium',
+          tier: 'cheap',
         },
       ],
       unsupported: [],
