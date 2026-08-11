@@ -302,6 +302,10 @@ export function loadConfig(options?: {
         if (entry && typeof entry === 'object' && !(entry as Record<string, unknown>).name) {
           (entry as Record<string, unknown>).name = key
         }
+        // 非内置名的 provider 只能来自用户配置层 → 视为用户已保存（进模型切换器）。
+        if (entry && typeof entry === 'object' && !(key in DEFAULT_CONFIG.provider.providers)) {
+          (entry as Record<string, unknown>).userSaved = true
+        }
       }
     }
   }
@@ -1407,6 +1411,7 @@ export function upsertProviderModel(providerName: string, model: ModelConfig, op
     const preferred = provider.models.splice(preferredIndex, 1)[0]
     if (preferred) provider.models.unshift(preferred)
   }
+  provider.userSaved = true
   saveConfig(cfg)
 }
 
@@ -1473,6 +1478,7 @@ export function setupProvider(options: SetupProviderOptions): void {
     }
   }
   cfg.provider.providers[options.providerName] = next
+  next.userSaved = true
   if (options.makeDefault) cfg.provider.default = options.providerName
   if (options.allowProFallback !== undefined) {
     next.allowProFallback = options.allowProFallback
@@ -1547,6 +1553,7 @@ export function registerProvider(options: RegisterProviderOptions): void {
     allowProFallback: options.allowProFallback ?? false,
     models,
     unsupported: [],
+    userSaved: true,
   }
   applyAdvancedConfig(provider, options.advanced)
   const cfg = loadConfig()
@@ -1562,6 +1569,7 @@ export function addModel(providerName: string, model: ModelConfig): void {
   const provider = cfg.provider.providers[providerName]
   if (!provider) throw new Error(`Provider "${providerName}" not found`)
   provider.models.push(model)
+  provider.userSaved = true
   saveConfig(cfg)
 }
 

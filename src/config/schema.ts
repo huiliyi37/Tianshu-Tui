@@ -151,6 +151,9 @@ const providerBaseSchema = z.object({
    *  is fetched. Runtime model resolution treats an empty list as "no models
    *  declared" — the provider still works when addressed via probe-filled entries. */
   models: z.array(modelConfigSchema).default([]),
+  /** 用户显式保存过的 provider（/connect 落库、provider CLI、手写 config）。
+   *  模型切换器只列 userSaved 的 provider——内置默认 fleet 不进列表。 */
+  userSaved: z.boolean().optional(),
   thinking: z.enum(['enabled', 'disabled']).default('enabled'),
   maxTokens: z.number().int().positive().default(64000),
   /**

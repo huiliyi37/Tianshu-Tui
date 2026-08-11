@@ -191,7 +191,7 @@ export interface SlashHandlerContext {
   maxTokens: number
   availableModels: Array<{ id: string; alias: string }>
   onModelSwitch: (modelId: string) => { ok: boolean; error?: string }
-  allProviders: Record<string, { models: Array<{ id: string; alias: string }> }>
+  allProviders: Record<string, { models: Array<{ id: string; alias: string }>; userSaved?: boolean }>
   currentProvider: string
   currentSessionId: string
   /**
@@ -969,8 +969,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const cmd = parts[0]!.toLowerCase()
       const targetModel = parts[1]
       if (!targetModel || targetModel === 'list') {
+        // 只列用户已保存的 provider——内置预设舰队不刷屏。
         const lines: string[] = []
         for (const [provName, prov] of Object.entries(ctx.allProviders)) {
+          if (!prov.userSaved) continue
           const marker = provName === ctx.currentProvider ? ' ← current' : ''
           lines.push(`[${provName}]${marker}`)
           for (const m of prov.models) {
@@ -978,6 +980,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
             lines.push(`  ${m.alias} (${m.id})${isCurrent ? ' ←' : ''}`)
           }
         }
+        if (lines.length === 0) lines.push('(尚无已保存的 provider——运行 /connect 接入后模型会出现在这里)')
         pushStatic(createLogEntry({ type: 'system', content: `Models:\n${lines.join('\n')}\n\nCurrent: ${ctx.model} [${ctx.currentProvider}]\nContext: ${ctx.maxTokens.toLocaleString()} tokens\nCost: ¥${ctx.cost.toFixed(4)}` }))
       } else {
         const result = ctx.onModelSwitch(targetModel)
@@ -3672,9 +3675,9 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
   const rollbackTokenRef: MutableRefLike<string | null> = { current: null }
   let cacheHitRate = 0
 
-  const allProviders: Record<string, { models: Array<{ id: string; alias: string }> }> = {}
+  const allProviders: Record<string, { models: Array<{ id: string; alias: string }>; userSaved?: boolean }> = {}
   for (const [name, prov] of Object.entries(ctx.config.provider.providers)) {
-    allProviders[name] = { models: prov.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })) }
+    allProviders[name] = { models: prov.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })), ...(prov.userSaved ? { userSaved: true } : {}) }
   }
 
   function buildHandlerContext(input: string): SlashHandlerContext {

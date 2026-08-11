@@ -975,6 +975,9 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
 
   const sel = data.selectedIndex
   const visible = data.entries.slice(0, listRows)
+  if (data.entries.length === 0) {
+    lines.push(padLine(color('  尚无已保存的 provider——运行 /connect 接入后模型会出现在这里', theme.muted), width, theme))
+  }
   for (let i = 0; i < visible.length; i++) {
     const e = visible[i]!
     const selected = i === sel

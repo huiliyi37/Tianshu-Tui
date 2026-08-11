@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -285,5 +285,46 @@ describe('provider config mutations', () => {
   it('setModelSupportsVision rejects unknown provider or model', () => {
     assert.throws(() => setModelSupportsVision('ghost', 'x', true), /Provider "ghost" not found/)
     assert.throws(() => setModelSupportsVision('deepseek', 'ghost-model', true), /Model "ghost-model" not found/)
+  })
+
+  // userSaved —— 模型切换器只显示用户真正保存过的 provider，出厂预设舰队不进列表。
+  it('built-in preset names start without userSaved', () => {
+    const providers = loadConfig().provider.providers
+    assert.equal(providers.deepseek!.userSaved, undefined)
+    assert.equal(providers.glm!.userSaved, undefined)
+  })
+
+  it('write paths stamp userSaved on the provider', () => {
+    setupProvider({ providerName: 'deepseek' })
+    assert.equal(loadConfig().provider.providers.deepseek!.userSaved, true)
+
+    upsertProviderModel('glm', { id: 'glm-custom', contextWindow: 128000, maxTokens: 8000 })
+    assert.equal(loadConfig().provider.providers.glm!.userSaved, true)
+
+    registerProvider({
+      providerName: 'custom-saved',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-saved',
+      models: [{ id: 'm-saved', contextWindow: 128000, maxTokens: 32000 }],
+    })
+    assert.equal(loadConfig().provider.providers['custom-saved']!.userSaved, true)
+  })
+
+  it('loadConfig marks non-default provider names from the config file as userSaved', () => {
+    writeFileSync(process.env.RIVET_CONFIG_PATH!, JSON.stringify({
+      provider: {
+        providers: {
+          'my-relay': {
+            baseUrl: 'https://relay.example.com/v1',
+            protocol: 'openai',
+            models: [{ id: 'relay-model', contextWindow: 128000, maxTokens: 32000 }],
+          },
+        },
+      },
+    }))
+    const providers = loadConfig().provider.providers
+    assert.equal(providers['my-relay']!.userSaved, true)
+    // 内置名未被用户文件触碰 → 依旧无标记。
+    assert.equal(providers.deepseek!.userSaved, undefined)
   })
 })

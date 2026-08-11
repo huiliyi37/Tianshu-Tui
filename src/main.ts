@@ -1095,7 +1095,9 @@ async function main() {
     modelPickerData: () => {
       const activeModelId = ctx?.agent.config.promptEngine.getModel()
       const entries: { id: string; alias: string; provider: string; current: boolean; contextWindow: number }[] = []
+      // 只显示用户已保存的 provider（userSaved）——内置预设舰队不进切换器。
       for (const [provName, prov] of Object.entries(ctx?.config.provider.providers ?? {})) {
+        if (!prov.userSaved) continue
         for (const m of prov.models) {
           entries.push({
             id: m.id,
