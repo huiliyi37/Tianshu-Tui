@@ -31,7 +31,7 @@ function toProbe(flow: ConnectFlow, { url = 'https://api.example.com/v1', key = 
 
 /** D2：把未知模型补参表单步走完（默认数字 + 指定模板），直到离开补参队列。 */
 function answerUnknownModels(flow: ConnectFlow, template: 'generic' | 'reasoning' = 'generic', applyRest = false): void {
-  while (flow.view().kind === 'form' && /未知模型补参/.test(flow.view().title)) {
+  while (flow.view().kind === 'form' && /模型补参/.test(flow.view().title)) {
     if (template === 'reasoning') flow.toggleAdvancedField('template')
     if (applyRest) flow.toggleAdvancedField('applyRest')
     assert.equal(flow.submitAdvancedForm().kind, 'next')
@@ -1390,7 +1390,7 @@ test('D2: DIY unknown model single-step form — arranged fields, values land in
 
   const formView = flow.view()
   assert.equal(formView.kind, 'form')
-  assert.match(formView.title, /未知模型补参/)
+  assert.match(formView.title, /模型补参/)
   assert.match(formView.subtitle ?? '', /acme\/x-9000/)
   const fields = formView.fields ?? []
   assert.deepEqual(fields.map(f => f.id), ['contextWindow', 'maxTokens', 'template'])
@@ -1419,6 +1419,52 @@ test('D2: DIY unknown model single-step form — arranged fields, values land in
   assert.equal(model.contextWindow, 200_000)
   assert.equal(model.maxTokens, 32_768)
   assert.deepEqual(model.capabilities, { reasoningSplit: true })
+})
+
+test('KB: 半已知模型进补参表单——已知 ctx 预填、模板预置推理（kimi-k2.6）', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe(report({ models: ['kimi-k2.6'] }))
+  flow.submitChoice('continue')
+  assert.equal(flow.confirm().kind, 'next')
+
+  const form = flow.view()
+  assert.equal(form.kind, 'form')
+  assert.match(form.subtitle ?? '', /官方规格不完整/)
+  const fields = form.fields ?? []
+  assert.equal(fields[0]!.value, '262144', 'KB 已知窗口预填')
+  assert.equal(fields[1]!.value, '32768', '官网未公布最大输出 → 默认值待确认')
+  assert.match(fields[2]!.value, /推理/, 'KB reasoningSplit → 模板预置推理')
+
+  assert.equal(flow.submitAdvancedForm().kind, 'next')
+  flow.submitChoice('none')
+  flow.submitInput('kimi-relay')
+  const result = flow.submitChoice('save')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') throw new Error('expected custom commit')
+  const model = result.commit.models[0]!
+  assert.equal(model.id, 'kimi-k2.6')
+  assert.equal(model.contextWindow, 262_144)
+  assert.equal(model.maxTokens, 32_768)
+  assert.deepEqual(model.capabilities, { reasoningSplit: true })
+})
+
+test('KB: 完全已知模型（glm-4.6）免补参，元数据直达 commit', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe(report({ models: ['glm-4.6', 'mystery-z'] }))
+  flow.submitChoice('continue')
+  assert.equal(flow.confirm().kind, 'next')
+  // glm-4.6 命中知识库（ctx/max 齐全）不进队列；mystery-z 未知进表单。
+  assert.match(flow.view().subtitle ?? '', /mystery-z/)
+  answerUnknownModels(flow)
+  flow.submitChoice('none')
+  flow.submitInput('glm-relay')
+  const result = flow.submitChoice('save')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') throw new Error('expected custom commit')
+  const glm = result.commit.models.find(m => m.id === 'glm-4.6')!
+  assert.equal(glm.contextWindow, 204_800, 'KB 窗口直接落盘')
+  assert.equal(glm.maxTokens, 131_072, 'KB 最大输出直接落盘')
+  assert.deepEqual(glm.capabilities, { reasoningSplit: true }, 'KB reasoning 直接落盘')
 })
 
 test('D2: applyRest stamps the same override onto all remaining unknowns', () => {
@@ -1462,7 +1508,7 @@ test('D2: preset path also stops at advanced steps for discovered unknowns', () 
   flow.toggle('1')
   flow.toggle('2')
   assert.equal(flow.confirm().kind, 'next')
-  assert.match(flow.view().title, /未知模型补参/)
+  assert.match(flow.view().title, /模型补参/)
   answerUnknownModels(flow)
   // preset 路径补参完回能力检测步。
   assert.match(flow.view().title, /能力检测/)

@@ -539,7 +539,7 @@ export class ConnectFlow {
     }
     const rebuildProbed = (): ProbedModel[] | undefined => {
       if (!c.probedSelection || c.probedSelection.length === 0) return undefined
-      const matches = matchModelIds(c.probedSelection.map(s => s.rawId))
+      const matches = matchModelIds(c.probedSelection.map(s => s.rawId), aliasTableWithProbeInfos(undefined))
       return c.probedSelection.map((sel, i) => ({
         rawId: sel.rawId,
         // matchModelIds maps input 1:1 — index i is always present.
@@ -1109,6 +1109,8 @@ export class ConnectFlow {
         const rawId = this.unknownQueue[0] ?? ''
         const idx = this.unknownTotal - this.unknownQueue.length + 1
         const rest = this.unknownQueue.length - 1
+        const queued = (this.collected.probedModels ?? []).find(p => p.rawId === rawId)
+        const partialKnown = queued?.match.entry !== undefined
         const d = this.advancedDraft
         const fields: ConnectFormField[] = [
           { id: 'contextWindow', kind: 'text', label: '上下文窗口', value: d.contextWindow, hint: `官方文档的真实值；回车用默认 ${DEFAULT_CONTEXT_WINDOW}` },
@@ -1131,8 +1133,10 @@ export class ConnectFlow {
         }
         return {
           kind: 'form',
-          title: '未知模型补参',
-          subtitle: `${rawId}（${idx}/${this.unknownTotal}）不在别名表——↑↓ 选字段，数字可直接编辑，Enter 确认`,
+          title: '模型补参',
+          subtitle: partialKnown
+            ? `${rawId}（${idx}/${this.unknownTotal}）官方规格不完整——已预填已知项，核对后 Enter 确认`
+            : `${rawId}（${idx}/${this.unknownTotal}）不在别名表——↑↓ 选字段，数字可直接编辑，Enter 确认`,
           stepLabel: this.advancedStepLabel(),
           fields,
         }
@@ -1221,13 +1225,17 @@ export class ConnectFlow {
     this.collected.probedModels = picked
     this.modelsFilter = ''
     this.advancedReturnPhase = this.phase === 'preset-models' ? 'capability' : 'diy-thinking'
-    // D2：别名表不认识的勾选模型 → 逐个进高级步补元数据（未知模型先按
-    // modelName 匹配，matchModelIds 的 L1–L3 已做；L4 无匹配项才走这里）。
-    const unknowns = picked.filter(p => !p.match.entry).map(p => p.rawId)
-    if (unknowns.length > 0) {
-      this.unknownQueue = unknowns
-      this.unknownTotal = unknowns.length
-      this.resetAdvancedDraft()
+    // D2：元数据不全的勾选模型 → 逐个进补参步。完全未知（L4）要填全部；
+    // 命中别名表/知识库但缺 contextWindow 或 maxTokens 的（官网未公布等）
+    // 预填已知项、只补缺失项。
+    const needsInput = picked.filter(p => {
+      const m = p.match.entry?.metadata
+      return !m || m.contextWindow === undefined || m.maxTokens === undefined
+    }).map(p => p.rawId)
+    if (needsInput.length > 0) {
+      this.unknownQueue = needsInput
+      this.unknownTotal = needsInput.length
+      this.prepareAdvancedDraft(needsInput[0]!)
       this.phase = 'model-advanced'
     } else {
       this.phase = this.advancedReturnPhase
@@ -1262,11 +1270,13 @@ export class ConnectFlow {
 
   // ── 未知模型补参单步表单 ──────────────────────────────────────
 
-  private resetAdvancedDraft(): void {
+  /** 进入某个模型的补参表单：已知元数据预填，缺失项落默认值。 */
+  private prepareAdvancedDraft(rawId: string): void {
+    const meta = (this.collected.probedModels ?? []).find(p => p.rawId === rawId)?.match.entry?.metadata
     this.advancedDraft = {
-      contextWindow: String(DEFAULT_CONTEXT_WINDOW),
-      maxTokens: String(DEFAULT_ADVANCED_MAX_OUTPUT),
-      template: 'generic',
+      contextWindow: String(meta?.contextWindow ?? DEFAULT_CONTEXT_WINDOW),
+      maxTokens: String(meta?.maxTokens ?? DEFAULT_ADVANCED_MAX_OUTPUT),
+      template: meta?.capabilities?.reasoningSplit ? 'reasoning' : 'generic',
       applyRest: false,
     }
   }
@@ -1313,8 +1323,8 @@ export class ConnectFlow {
       this.unknownQueue = []
     }
     this.collected.modelOverrides = overrides
-    this.resetAdvancedDraft()
     this.phase = this.unknownQueue.length > 0 ? 'model-advanced' : this.advancedReturnPhase
+    if (this.unknownQueue.length > 0) this.prepareAdvancedDraft(this.unknownQueue[0]!)
     return { kind: 'next', view: this.view() }
   }
 
@@ -1325,7 +1335,7 @@ export class ConnectFlow {
     }
     this.collected.modelOverrides = undefined
     this.unknownQueue = []
-    this.resetAdvancedDraft()
+    this.prepareAdvancedDraft('')
     this.phase = this.advancedReturnPhase === 'capability' ? 'preset-models' : 'diy-models'
     return { kind: 'next', view: this.view() }
   }
@@ -2011,6 +2021,15 @@ export class ConnectFlow {
     // alias-table metadata wins over the blanket wizard answer.
     if (this.collected.thinkingSplit && caps.thinkingBlock === undefined && caps.reasoningSplit === undefined) {
       caps.reasoningSplit = true
+    }
+    // 补参表单的输出覆盖表内元数据——半已知模型（缺 ctx/max）走过表单，
+    // 用户核对过的值才是最终意图（generic 选择会抹掉表内的 reasoningSplit）。
+    const override = this.collected.modelOverrides?.[match.rawId]
+    if (override) {
+      descriptor.contextWindow = override.contextWindow
+      descriptor.maxTokens = override.maxTokens
+      if (override.template === 'reasoning') caps.reasoningSplit = true
+      else delete caps.reasoningSplit
     }
     if (Object.keys(caps).length > 0) descriptor.capabilities = caps
     return descriptor

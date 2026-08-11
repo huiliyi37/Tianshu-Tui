@@ -411,10 +411,24 @@ describe('aliasTableWithProbeInfos', () => {
     assert.equal(empty.entry, undefined, '无元数据的 id 不合成条目，仍走 L4')
   })
 
-  it('returns the base table unchanged without infos', async () => {
+  it('returns the enriched base table (别名表 + 官网知识库) without infos', async () => {
     const { aliasTableWithProbeInfos } = await import('../provider-probe.js')
-    const { MODEL_ALIAS_TABLE } = await import('../model-aliases.js')
-    assert.equal(aliasTableWithProbeInfos(undefined), MODEL_ALIAS_TABLE)
-    assert.equal(aliasTableWithProbeInfos({}), MODEL_ALIAS_TABLE)
+    const { ENRICHED_ALIAS_TABLE } = await import('../model-meta-kb.js')
+    const { matchModelId } = await import('../model-id-matcher.js')
+    assert.equal(aliasTableWithProbeInfos(undefined), ENRICHED_ALIAS_TABLE)
+    assert.equal(aliasTableWithProbeInfos({}), ENRICHED_ALIAS_TABLE)
+
+    // 官网知识库命中：GLM 全系规格免补参（大小写不敏感）。
+    const table = aliasTableWithProbeInfos(undefined)
+    const glm = matchModelId('GLM-4.6', table)
+    assert.notEqual(glm.entry, undefined, 'KB 收录 glm-4.6')
+    assert.equal(glm.entry?.metadata.contextWindow, 204_800)
+    assert.equal(glm.entry?.metadata.maxTokens, 131_072)
+    assert.deepEqual(glm.entry?.metadata.capabilities, { reasoningSplit: true })
+
+    // Kimi 官网未公布最大输出 → 半已知（有 ctx 无 max，向导预填已知项）。
+    const kimi = matchModelId('kimi-k2.6', table)
+    assert.equal(kimi.entry?.metadata.contextWindow, 262_144)
+    assert.equal(kimi.entry?.metadata.maxTokens, undefined)
   })
 })

@@ -14,7 +14,8 @@
  */
 
 import { normalizeBaseUrl, resolveProbeEndpoints } from './endpoint-map.js'
-import { MODEL_ALIAS_TABLE, type ModelAliasEntry, type ModelAliasMetadata } from './model-aliases.js'
+import { type ModelAliasEntry, type ModelAliasMetadata } from './model-aliases.js'
+import { ENRICHED_ALIAS_TABLE } from './model-meta-kb.js'
 
 export interface ProbeOptions {
   baseUrl: string
@@ -371,7 +372,7 @@ export async function probeProvider(options: ProbeOptions): Promise<ProbeReport>
  */
 export function aliasTableWithProbeInfos(
   infos: Record<string, ProbedModelInfo> | undefined,
-  base: readonly ModelAliasEntry[] = MODEL_ALIAS_TABLE,
+  base: readonly ModelAliasEntry[] = ENRICHED_ALIAS_TABLE,
 ): readonly ModelAliasEntry[] {
   if (!infos || Object.keys(infos).length === 0) return base
   const known = new Set(base.map(e => e.canonicalId))
