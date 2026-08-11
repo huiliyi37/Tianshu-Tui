@@ -1338,6 +1338,16 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
     if (rowsUsed < contentRows) push('')
   }
 
+  if (view.filter !== undefined && rowsUsed < contentRows) {
+    // 多选步的即时搜索行：查询文本 + 光标 + 过滤后/总数计数。
+    const query = view.filter.length > 0
+      ? color(view.filter, theme.secondary)
+      : color('输入关键字过滤模型…', theme.dim)
+    const counter = color(` ${view.options?.length ?? 0}/${view.optionTotal ?? 0}`, theme.muted)
+    push(` ${color('>', theme.primary, { bold: true })} ${query}${color('▏', theme.primary, { bold: true })}${counter}`)
+    if (rowsUsed < contentRows) push('')
+  }
+
   if (view.report && view.report.length > 0) {
     for (const line of view.report) {
       if (rowsUsed >= contentRows) break
@@ -1407,7 +1417,7 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
   const footer = view.kind === 'choice'
     ? compactHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']])
     : view.kind === 'multi-choice'
-      ? compactHints([['↑↓', '移动'], ['空格', '勾选'], ['Enter', '确认'], ['Esc', '取消']])
+      ? compactHints([['↑↓', '移动'], ['空格', '勾选'], ['输入', '搜索'], ['Ctrl+A', '全选'], ['Enter', '确认'], ['Esc', '取消']])
       : view.kind === 'busy'
         ? compactHints([['Esc', '取消']])
         : compactHints([['Enter', '提交'], ['Esc', '取消']])

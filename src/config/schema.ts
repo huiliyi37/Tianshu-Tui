@@ -168,18 +168,22 @@ const providerBaseSchema = z.object({
    */
   firstByteTimeoutMs: z.number().int().positive().optional(),
   /**
-   * Total request timeout (ms) for the whole stream. Three-layer division:
-   * firstByteTimeoutMs = pre-first-chunk, thinkingStallTimeoutMs = reasoning
-   * stall, requestTimeoutMs = entire request. 目前仅落盘，消费点后续波次接入。
+   * Total request timeout (ms) for a single stream attempt — replaces the
+   * built-in hard cap (10min / glm 20min), enforced strictly (no progress-based
+   * extension). Three-layer division: firstByteTimeoutMs = pre-first-chunk,
+   * thinkingStallTimeoutMs = reasoning stall, requestTimeoutMs = entire request.
+   * 消费点：openai-client / anthropic-client 硬顶（OPT-003 波次接入）。
    */
   requestTimeoutMs: z.number().int().positive().optional(),
-  /** Max retry attempts for retryable API errors (0 disables). 目前仅落盘。 */
+  /** Max retry attempts for retryable API errors (0 disables). undefined =
+   *  保留客户端内置默认。消费点：openai/anthropic 重试预算。 */
   maxRetries: z.number().int().min(0).max(10).optional(),
-  /** Provider-level sampling temperature default. 目前仅落盘；per-model 覆盖为后续波次。 */
+  /** Provider-level sampling temperature default。思考模式下不注入（推理服务端
+   *  拒绝调温 / Anthropic 要求 thinking temperature=1）；per-model 覆盖为后续波次。 */
   temperature: z.number().min(0).max(2).optional(),
   /**
    * Per-provider HTTP proxy override; takes precedence over the global
-   * network.proxy. 目前仅落盘，消费点后续波次接入。
+   * network.proxy. 消费点：客户端构造 undici ProxyAgent 经 fetch dispatcher 透传。
    */
   proxy: z.string().optional(),
   unsupported: z.array(z.string()).default([]),

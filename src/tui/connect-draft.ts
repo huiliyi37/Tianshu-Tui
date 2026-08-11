@@ -24,7 +24,9 @@ export const CONNECT_DRAFT_PHASES = [
   'probe-report',
   'preset-models',
   'capability',
+  'ask-default',
   'confirm',
+  'diy-protocol',
   'diy-url',
   'diy-apikey',
   'diy-probing',
@@ -49,6 +51,8 @@ export interface ConnectDraftCollected {
   /** Billing plan id (presets with billingModes, e.g. 百炼 按量计费 / token plan). */
   billingMode?: string
   baseUrl?: string
+  /** Wire protocol chosen on the DIY path (custom providers; defaults to openai). */
+  protocol?: 'openai' | 'anthropic'
   /** Secrets-store pointer (never the key itself). Restored via readSecret. */
   keyRef?: string
   modelId?: string
@@ -128,6 +132,7 @@ export function readConnectDraft(base?: string): ConnectDraft | undefined {
   if (isString(collected.presetKey)) clean.presetKey = collected.presetKey
   if (isString(collected.billingMode)) clean.billingMode = collected.billingMode
   if (isString(collected.baseUrl)) clean.baseUrl = collected.baseUrl
+  if (collected.protocol === 'openai' || collected.protocol === 'anthropic') clean.protocol = collected.protocol
   if (isString(collected.keyRef)) clean.keyRef = collected.keyRef
   if (isString(collected.modelId)) clean.modelId = collected.modelId
   if (isString(collected.providerName)) clean.providerName = collected.providerName

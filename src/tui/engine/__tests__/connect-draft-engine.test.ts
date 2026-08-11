@@ -64,6 +64,7 @@ describe('connect draft · engine wiring', () => {
     const a = internals(app)
     app.startConnect()
     a.connectFlow!.submitChoice('custom')
+    a.connectFlow!.submitChoice('openai')
     // 模拟打了半个 URL 还没回车。
     a.connectInput = 'https://half-typed.example.com/v1'
     a.cancelConnect()
@@ -96,6 +97,7 @@ describe('connect draft · engine wiring', () => {
     const a = internals(app)
     app.startConnect()
     a.connectFlow!.submitChoice('custom')
+    a.connectFlow!.submitChoice('openai')
     a.advanceConnect(a.connectFlow!.submitInput('https://api.example.com/v1'))
     // 直接喂给 flow（不经 advanceConnect）——避免测试发起真实网络探测。
     // submitInput 已把 key 收进 collected 并进入 busy 态。
@@ -113,6 +115,7 @@ describe('connect draft · engine wiring', () => {
     const a = internals(app)
     app.startConnect()
     a.connectFlow!.submitChoice('custom')
+    a.connectFlow!.submitChoice('openai')
     a.advanceConnect(a.connectFlow!.submitInput('https://api.example.com/v1'))
     a.connectInput = 'sk-half-typed'
     a.cancelConnect()

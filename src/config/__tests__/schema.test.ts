@@ -66,10 +66,10 @@ describe('model capabilities override (per-model thinking split)', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
     const dashscope = parsed.provider.providers.dashscope
     assert.ok(dashscope, 'dashscope must be in DEFAULT_CONFIG')
-    const qmax = dashscope.models.find(m => m.id === 'qwen3-max')
-    const qplus = dashscope.models.find(m => m.id === 'qwen-plus')
+    const qmax = dashscope.models.find(m => m.id === 'qwen3.8-max')
     assert.equal(qmax?.capabilities?.thinkingBlock, 'enabled')
-    assert.equal(qplus?.capabilities?.thinkingBlock, 'none')
+    assert.equal(qmax?.capabilities?.effortFormat, 'reasoning_effort')
+    assert.equal(qmax?.contextWindow, 1_000_000)
   })
 })
 

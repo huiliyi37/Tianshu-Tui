@@ -22,13 +22,16 @@ import type { SetupProviderOptions } from '../config/manager.js'
 import type { ModelConfig, ProviderAdvancedConfig } from '../config/schema.js'
 import { PROVIDER_PRESETS, providerPresetKeys, isProviderPresetKey, type ProviderPresetKey, type ProviderPreset } from '../config/provider-presets.js'
 import { matchModelIds, type ModelMatchResult } from '../api/model-id-matcher.js'
-import type { ProbeReport } from '../api/provider-probe.js'
+import { aliasTableWithProbeInfos, type ProbeReport } from '../api/provider-probe.js'
+import { normalizeBaseUrl } from '../api/endpoint-map.js'
 import type { ConnectDraft, ConnectDraftCollected } from './connect-draft.js'
 
 const CUSTOM_CHOICE = 'custom'
 const OPENAI_COMPAT_CHOICE = 'openai-compat'
 const DEFAULT_CONTEXT_WINDOW = 131_072
 const DEFAULT_MAX_OUTPUT = 64_000
+/** 未知模型高级步的默认最大输出（保守值，用户可按官方文档改）。 */
+const DEFAULT_ADVANCED_MAX_OUTPUT = 32_768
 /** Providers the wizard recommends first (project is DeepSeek-optimized). */
 const RECOMMENDED_PRESETS: readonly ProviderPresetKey[] = ['deepseek']
 
@@ -66,6 +69,10 @@ export interface ConnectView {
   report?: ProbeLine[]
   /** choice / multi-choice steps */
   options?: ConnectChoiceOption[]
+  /** Active type-to-search query on searchable multi-choice steps (never persisted). */
+  filter?: string
+  /** Unfiltered option count — with `filter` set, renderer shows shown/total. */
+  optionTotal?: number
   /** input step */
   masked?: boolean
   placeholder?: string
@@ -112,12 +119,22 @@ type Phase =
   | 'probe-report'
   | 'preset-models'
   | 'capability'
+  | 'ask-default'
   | 'confirm'
+  | 'advanced-settings'
+  | 'advanced-request-timeout'
+  | 'advanced-max-retries'
+  | 'advanced-temperature'
+  | 'advanced-proxy'
+  | 'diy-protocol'
   | 'diy-url'
   | 'diy-apikey'
   | 'diy-probing'
   | 'diy-probe-failed'
   | 'diy-models'
+  | 'model-advanced-context'
+  | 'model-advanced-max'
+  | 'model-advanced-template'
   | 'diy-model'
   | 'diy-context'
   | 'diy-vision'
@@ -138,11 +155,23 @@ interface ProbedModel {
   checked: boolean
 }
 
+/** 用户为别名表未收录（L4 unknown）模型手填的元数据（D2 高级步产物）。 */
+export interface ModelOverride {
+  contextWindow: number
+  maxTokens: number
+  /** generic = 纯文本补全；reasoning = reasoning_content 思考分块。 */
+  template: 'generic' | 'reasoning'
+}
+
 interface Collected {
   presetKey?: ProviderPresetKey
   /** Billing plan id chosen at the preset-billing step (presets with billingModes). */
   billingMode?: string
   baseUrl?: string
+  /** Wire protocol for the DIY/custom path (defaults to openai-compatible). */
+  protocol?: 'openai' | 'anthropic'
+  /** Set when the entered URL was normalized (request-path tail stripped) at collection. */
+  urlNormalized?: boolean
   apiKey?: string
   modelId?: string
   /** Provider name chosen at the naming step — commit happens on confirm. */
@@ -161,8 +190,12 @@ interface Collected {
   probedModels?: ProbedModel[]
   /** Thinking answer applied to models without declared thinking capabilities. */
   thinkingSplit?: boolean
+  /** Answer to the "replace the current default provider?" question (C1). */
+  makeDefault?: boolean
   /** Advanced knobs — data pipe only; the wizard has no UI entry for them yet. */
   advanced?: ProviderAdvancedConfig
+  /** D2: hand-entered metadata for alias-table-unknown models, keyed by raw id. */
+  modelOverrides?: Record<string, ModelOverride>
 }
 
 const ADD_MODEL_CHOICE = 'existing'
@@ -179,7 +212,9 @@ const DRAFT_PHASE_LABEL: Record<string, string> = {
   'probe-report': '连通性测试',
   'preset-models': '选择模型',
   'capability': '能力检测',
+  'ask-default': '设为默认',
   'confirm': '确认保存',
+  'diy-protocol': '选择协议类型',
   'diy-url': '填写 API 地址',
   'diy-apikey': '输入 API Key',
   'diy-probing': '端点探测',
@@ -219,7 +254,7 @@ function presetProviderOptions(): ConnectChoiceOption[] {
   options.push({
     id: CUSTOM_CHOICE,
     label: '自定义服务商…',
-    description: '填写 API 地址与密钥，自动探测模型列表（任意 OpenAI 兼容接口）',
+    description: 'OpenAI 兼容 / Anthropic 原生——先选协议，再填地址与密钥，自动探测模型',
   })
   return options
 }
@@ -346,8 +381,22 @@ export class ConnectFlow {
   private draftRejectedFlag = false
   private wasDiscardedFlag = false
   private restoredInputValue?: string
+  /** Type-to-search query on the models multi-choice steps — transient UI state. */
+  private modelsFilter = ''
+  /** D2: rawIds of checked unknown models still awaiting manual metadata. */
+  private unknownQueue: string[] = []
+  private unknownTotal = 0
+  /** Partial numeric answers for the unknown model currently being detailed. */
+  private advancedPartial: { contextWindow?: number; maxTokens?: number } = {}
+  /** Where the advanced queue exits to (preset path → capability, DIY → thinking). */
+  private advancedReturnPhase: 'capability' | 'diy-thinking' = 'capability'
 
-  constructor(private readonly existing: ConnectProviderRef[] = [], draft?: ConnectDraft, restoredKey?: string) {
+  constructor(
+    private readonly existing: ConnectProviderRef[] = [],
+    draft?: ConnectDraft,
+    restoredKey?: string,
+    private readonly currentDefault?: string,
+  ) {
     if (draft) {
       const restored = this.normalizeDraft(draft, restoredKey)
       if (restored) {
@@ -406,6 +455,7 @@ export class ConnectFlow {
       ...(c.presetKey ? { presetKey: c.presetKey } : {}),
       ...(c.billingMode ? { billingMode: c.billingMode } : {}),
       ...(c.baseUrl ? { baseUrl: c.baseUrl } : {}),
+      ...(c.protocol ? { protocol: c.protocol } : {}),
       // apiKey is deliberately absent: the draft never holds plaintext keys —
       // the app layer attaches a secrets-store keyRef before saving.
       ...(c.modelId ? { modelId: c.modelId } : {}),
@@ -423,10 +473,19 @@ export class ConnectFlow {
         : {}),
     }
     const trimmed = pendingInput?.trim()
+    // 未知模型补参子步是瞬态——草稿回落到模型选择步（勾选集已持久化，
+    // 恢复后重走补参；半途填的数字不入库）。
+    let phase: Phase = this.phase === 'model-advanced-context' || this.phase === 'model-advanced-max' || this.phase === 'model-advanced-template'
+      ? (this.advancedReturnPhase === 'capability' ? 'preset-models' : 'diy-models')
+      : this.phase
+    // 高级设置子菜单同为瞬态——回落确认步（已存旋钮值随 collected.advanced 持久化）。
+    if (phase === 'advanced-settings' || phase === 'advanced-request-timeout' || phase === 'advanced-max-retries' || phase === 'advanced-temperature' || phase === 'advanced-proxy') {
+      phase = 'confirm'
+    }
     return {
       version: 1,
       savedAt: Date.now(),
-      phase: this.phase,
+      phase,
       collected,
       ...(trimmed ? { pendingInput: trimmed } : {}),
     }
@@ -457,6 +516,7 @@ export class ConnectFlow {
     const pending = draft.pendingInput
     const base: Collected = {
       ...(c.baseUrl ? { baseUrl: c.baseUrl } : {}),
+      ...(c.protocol ? { protocol: c.protocol } : {}),
       ...(restoredKey ? { apiKey: restoredKey } : {}),
       ...(c.reasoningSplitHint !== undefined ? { reasoningSplitHint: c.reasoningSplitHint } : {}),
       ...(c.thinkingSplit !== undefined ? { thinkingSplit: c.thinkingSplit } : {}),
@@ -505,7 +565,7 @@ export class ConnectFlow {
         const key = c.presetKey
         if (!key || !isProviderPresetKey(key)) return undefined
         const preset = PROVIDER_PRESETS[key]
-        if (!preset || preset.provider.auth?.type === 'oauth' || preset.keyless) return undefined
+        if (!preset || preset.provider.auth?.type === 'oauth') return undefined
         if (!billingValid(key)) return { phase: 'preset-billing', collected: { presetKey: key } }
         return {
           phase: 'preset-endpoint',
@@ -549,7 +609,7 @@ export class ConnectFlow {
         if (!billingValid(key)) return { phase: 'preset-billing', collected: { presetKey: key } }
         const probed = rebuildProbed()
         if (!probed) return { phase: 'preset-apikey', collected: { presetKey: key, ...billingSpread() }, restoredInput: restoredKey ?? '' }
-        return { phase: 'preset-models', collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), probedModels: probed } }
+        return { phase: 'preset-models', collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), ...(restoredKey ? { apiKey: restoredKey } : {}), probedModels: probed } }
       }
       case 'capability': {
         const key = c.presetKey
@@ -559,8 +619,9 @@ export class ConnectFlow {
         if (!billingValid(key)) return { phase: 'preset-billing', collected: { presetKey: key } }
         const probed = rebuildProbed()
         if (!probed) return { phase: 'preset-apikey', collected: { presetKey: key, ...billingSpread() }, restoredInput: restoredKey ?? '' }
-        return { phase: 'preset-models', collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), probedModels: probed } }
+        return { phase: 'preset-models', collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), ...(restoredKey ? { apiKey: restoredKey } : {}), probedModels: probed } }
       }
+      case 'ask-default':
       case 'confirm': {
         // Probe results are not persisted — slide back one step: DIY to the
         // naming step (name prefilled), keyless to thinking, preset to the key.
@@ -586,11 +647,17 @@ export class ConnectFlow {
         if (!preset || preset.provider.auth?.type === 'oauth') return undefined
         if (!billingValid(key)) return { phase: 'preset-billing', collected: { presetKey: key } }
         const probedSel = rebuildProbed()
-        if (probedSel) return { phase: 'preset-models', collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), probedModels: probedSel } }
+        if (probedSel) return { phase: 'preset-models', collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), ...(restoredKey ? { apiKey: restoredKey } : {}), probedModels: probedSel } }
         return { phase: 'preset-apikey', collected: { presetKey: key, ...billingSpread() }, restoredInput: restoredKey ?? '' }
       }
+      case 'diy-protocol':
+        return { phase: 'diy-protocol', collected: {} }
       case 'diy-url':
-        return { phase: 'diy-url', collected: {}, restoredInput: pending ?? '' }
+        return {
+          phase: 'diy-url',
+          collected: { ...(c.protocol ? { protocol: c.protocol } : {}) },
+          restoredInput: pending ?? '',
+        }
       case 'diy-apikey': {
         if (!c.baseUrl) return undefined
         return { phase: 'diy-apikey', collected: base, restoredInput: pending ?? restoredKey ?? '' }
@@ -655,9 +722,9 @@ export class ConnectFlow {
     }
   }
 
-  /** n 是全路径编号（diy 8 步，含探测报告与确认步）；加模型路径少 url/apikey 两步，显示 n-1 / 3。 */
+  /** n 是全路径编号（diy 9 步：协议 > 地址 > 密钥 > 探测 > 报告 > 模型 > 思考 > 命名 > 确认）；加模型路径少 url/apikey 两步，显示 n-1 / 3。 */
   private diyStepLabel(n: number): string {
-    return this.collected.existingProvider ? `步骤 ${n - 1} / 3` : `步骤 ${n} / 8`
+    return this.collected.existingProvider ? `步骤 ${n - 1} / 3` : `步骤 ${n} / 9`
   }
 
   /** preset 路径编号。n 取 6 步骨架的序号；带计费模式步的 preset 整体后移一位（共 7 步）。 */
@@ -667,11 +734,51 @@ export class ConnectFlow {
     return hasBilling ? `步骤 ${n + 1} / 7` : `步骤 ${n} / 6`
   }
 
+  /** 未知模型高级子步沿用模型选择步的编号——总步数不因补参而变。 */
+  private advancedStepLabel(): string {
+    const key = this.collected.presetKey
+    const presetPath = !!key && !PROVIDER_PRESETS[key].keyless && !this.collected.providerName
+    return presetPath ? this.presetStepLabel(4) : this.diyStepLabel(6)
+  }
+
+  /** 高级设置子菜单沿用确认步编号——可选入口不占主流程步数（OPT-003）。 */
+  private confirmStepLabel(): string {
+    const key = this.collected.presetKey
+    const isPresetPath = !!key && !PROVIDER_PRESETS[key].keyless && !this.collected.providerName
+    return isPresetPath ? this.presetStepLabel(6) : this.diyStepLabel(9)
+  }
+
+  /** 写/清单个高级旋钮；undefined = 删除该键（恢复内置默认），全空则整体回落 undefined。 */
+  private applyAdvancedKnob<K extends keyof ProviderAdvancedConfig>(key: K, value: ProviderAdvancedConfig[K] | undefined): void {
+    const adv = this.collected.advanced ?? {}
+    if (value === undefined) delete adv[key]
+    else adv[key] = value
+    this.collected.advanced = Object.keys(adv).length > 0 ? adv : undefined
+  }
+
   /** 所选计费模式对应的官方地址；无计费步时退回 preset 默认地址。 */
   private presetBaseUrl(): string {
     const preset = PROVIDER_PRESETS[this.collected.presetKey!]
     const mode = preset.billingModes?.find(m => m.id === this.collected.billingMode)
     return mode?.baseUrl ?? preset.provider.baseUrl
+  }
+
+  /** The provider name this walk will commit (preset key, or the DIY naming answer). */
+  private targetProviderName(): string | undefined {
+    return this.collected.presetKey ?? this.collected.providerName
+  }
+
+  /** C1: 只有已存在「另一个」默认服务商时才问是否替换；首个服务商静默设默认。 */
+  private needsDefaultAsk(): boolean {
+    const target = this.targetProviderName()
+    return !!this.currentDefault && !!target && this.currentDefault !== target
+  }
+
+  /** Forward transition into the confirm gate — via the default question when it applies. */
+  private gotoConfirm(): void {
+    this.phase = this.needsDefaultAsk() && this.collected.makeDefault === undefined
+      ? 'ask-default'
+      : 'confirm'
   }
 
   /** The view for the current step. */
@@ -756,7 +863,7 @@ export class ConnectFlow {
           kind: 'input',
           title: `确认 ${preset.label} 的服务地址`,
           subtitle: hasPlaceholder
-            ? '已按所选计费模式的官方地址模板预填——请把 {WorkspaceId} 替换为你的真实业务空间 ID'
+            ? '已按所选计费模式的官方地址模板预填——请把 {WorkspaceId} 替换为你的真实业务空间 ID（百炼控制台 → 左侧「业务空间」→ 进入空间查看 ID）'
             : `已按官方地址预填（${preset.provider.protocol ?? 'openai'} 协议），回车确认或直接修改`,
           stepLabel: this.presetStepLabel(2),
           placeholder: url,
@@ -773,6 +880,7 @@ export class ConnectFlow {
       case 'probe-report': {
         const preset = this.collected.presetKey ? PROVIDER_PRESETS[this.collected.presetKey] : undefined
         const isPresetPath = !!preset && !preset.keyless
+        const keylessPreset = !!preset && preset.keyless
         const report = this.collected.probeReport
         const usable = !!report && (report.modelsOk || report.completionOk)
         const afterModels = (this.collected.probedModels?.length ?? 0) > 0
@@ -789,32 +897,39 @@ export class ConnectFlow {
           else options.push({ id: 'rekey', label: '重新输入 API Key' })
           options.push({ id: 'edit-url', label: '修改服务地址', description: this.presetBaseUrl() })
           if (!usable) options.push({ id: 'save-anyway', label: '跳过探测直接保存', description: '不校验端点；配置仍可事后用 /connect 修正' })
+        } else if (keylessPreset) {
+          options.push({ id: 'edit-url', label: '修改服务地址', description: this.presetBaseUrl(), ...(!usable ? { recommended: true } : {}) })
         } else {
           options.push({ id: 'rekey', label: '重新输入 API Key' })
         }
         return {
           kind: 'choice',
           title: usable ? '连通性测试通过' : '连通性测试未通过',
-          subtitle: preset ? `${preset.label} · ${this.collected.baseUrl ?? this.presetBaseUrl()}` : this.collected.baseUrl,
-          stepLabel: isPresetPath ? this.presetStepLabel(5) : this.diyStepLabel(4),
+          subtitle: `${preset ? `${preset.label} · ${this.collected.baseUrl ?? this.presetBaseUrl()}` : this.collected.baseUrl}${this.collected.urlNormalized ? '（已规范化：去除请求路径尾段）' : ''}`,
+          stepLabel: isPresetPath ? this.presetStepLabel(3) : this.diyStepLabel(5),
           report: report ? probeReportLines(report) : undefined,
           options,
         }
       }
       case 'preset-models': {
         const probed = this.collected.probedModels ?? []
-        const templateIds = new Set((PROVIDER_PRESETS[this.collected.presetKey!].provider.models ?? []).map(m => m.id))
+        const preset = PROVIDER_PRESETS[this.collected.presetKey!]
+        const templateIds = new Set((preset.provider.models ?? []).map(m => m.id))
         return {
           kind: 'multi-choice',
           title: '选择要添加的模型',
-          subtitle: '预设模型已勾选；探测新发现的按别名表回填元数据，空格可调整',
-          stepLabel: this.presetStepLabel(3),
-          options: probed.map((p, i) => ({
+          subtitle: preset.aggregator
+            ? '聚合平台模型多——默认全不选；输入关键字过滤，Ctrl+A 全选'
+            : '预设模型已勾选；探测新发现的按别名表回填元数据，空格可调整',
+          stepLabel: this.presetStepLabel(4),
+          options: this.filteredModelIndexes(probed).map(i => ({
             id: String(i),
-            label: p.rawId,
-            description: `${templateIds.has(p.rawId) ? '预设' : '探测发现'} · ${matchDescription(p.match)}`,
-            checked: p.checked,
+            label: probed[i]!.rawId,
+            description: `${templateIds.has(probed[i]!.rawId) ? '预设' : '探测发现'} · ${matchDescription(probed[i]!.match)}`,
+            checked: probed[i]!.checked,
           })),
+          filter: this.modelsFilter,
+          optionTotal: probed.length,
         }
       }
       case 'capability': {
@@ -825,35 +940,111 @@ export class ConnectFlow {
           kind: 'choice',
           title: '能力检测',
           subtitle: `${preset.label} · ${names}`,
-          stepLabel: this.presetStepLabel(4),
+          stepLabel: this.presetStepLabel(5),
           report: this.collected.probeReport
             ? capabilityLines(this.collected.probeReport, picked, preset)
             : undefined,
           options: [
-            { id: 'continue', label: '继续连通性测试', recommended: true },
+            { id: 'continue', label: '继续保存确认', recommended: true },
             { id: 'back', label: '返回模型选择' },
           ],
         }
       }
-      case 'confirm': {
-        const isPresetPath = !!this.collected.presetKey && !PROVIDER_PRESETS[this.collected.presetKey].keyless && !this.collected.providerName
+      case 'ask-default': {
+        const presetPath = !!this.collected.presetKey && !PROVIDER_PRESETS[this.collected.presetKey].keyless
+        const target = this.targetProviderName() ?? '新服务商'
         return {
           kind: 'choice',
-          title: '确认保存配置',
-          subtitle: this.confirmSummary(),
-          stepLabel: isPresetPath ? this.presetStepLabel(6) : this.diyStepLabel(8),
+          title: '设为默认服务商？',
+          subtitle: `当前默认是 ${this.currentDefault}——保存后可随时用 /model 切换`,
+          stepLabel: presetPath ? this.presetStepLabel(6) : this.diyStepLabel(9),
           options: [
-            { id: 'save', label: '确认并保存', recommended: true },
+            { id: 'yes', label: `是，以后默认用 ${target}`, recommended: true },
+            { id: 'no', label: `否，只添加，默认仍是 ${this.currentDefault}` },
             { id: 'back', label: '返回上一步' },
           ],
         }
       }
+      case 'confirm': {
+        return {
+          kind: 'choice',
+          title: '确认保存配置',
+          subtitle: this.confirmSummary(),
+          stepLabel: this.confirmStepLabel(),
+          options: [
+            { id: 'save', label: '确认并保存', recommended: true },
+            { id: 'advanced', label: '高级设置…', description: '超时 / 重试 / 温度 / 代理——仅少数场景需要' },
+            { id: 'back', label: '返回上一步' },
+          ],
+        }
+      }
+      case 'advanced-settings': {
+        const adv = this.collected.advanced ?? {}
+        return {
+          kind: 'choice',
+          title: '高级设置',
+          subtitle: '按需调整；「完成」返回确认步',
+          stepLabel: this.confirmStepLabel(),
+          options: [
+            { id: 'requestTimeoutMs', label: '请求超时', description: adv.requestTimeoutMs !== undefined ? `${adv.requestTimeoutMs} ms` : '未设置（内置 10 分钟硬顶）' },
+            { id: 'maxRetries', label: '重试次数', description: adv.maxRetries !== undefined ? `${adv.maxRetries} 次` : '未设置（内置默认）' },
+            { id: 'temperature', label: '采样温度', description: adv.temperature !== undefined ? String(adv.temperature) : '未设置（思考模式下不生效）' },
+            { id: 'proxy', label: 'HTTP 代理', description: adv.proxy ?? '未设置（跟随全局 network.proxy）' },
+            { id: 'done', label: '完成', recommended: true },
+          ],
+        }
+      }
+      case 'advanced-request-timeout':
+        return {
+          kind: 'input',
+          title: '高级设置：请求超时',
+          subtitle: '单次流式请求的总时限（毫秒），替换内置 10 分钟硬顶；回车清空 = 恢复内置',
+          stepLabel: this.confirmStepLabel(),
+          placeholder: '例如 300000',
+        }
+      case 'advanced-max-retries':
+        return {
+          kind: 'input',
+          title: '高级设置：重试次数',
+          subtitle: '可重试错误（限流/超时/网络抖动）的最大重试次数，0 = 禁用；回车清空 = 恢复内置',
+          stepLabel: this.confirmStepLabel(),
+          placeholder: '0–10',
+        }
+      case 'advanced-temperature':
+        return {
+          kind: 'input',
+          title: '高级设置：采样温度',
+          subtitle: '0–2，例如 0 = 贪心解码；思考模式下不注入（推理服务端拒绝调温）；回车清空 = 用服务端默认',
+          stepLabel: this.confirmStepLabel(),
+          placeholder: '0–2',
+        }
+      case 'advanced-proxy':
+        return {
+          kind: 'input',
+          title: '高级设置：HTTP 代理',
+          subtitle: '该服务商专用代理，优先于全局 network.proxy；回车清空 = 取消',
+          stepLabel: this.confirmStepLabel(),
+          placeholder: 'http://127.0.0.1:7890',
+        }
+      case 'diy-protocol':
+        return {
+          kind: 'choice',
+          title: '选择 API 协议',
+          subtitle: '大多数中转/网关是 OpenAI 兼容协议；Anthropic 原生端点选第二项',
+          stepLabel: this.diyStepLabel(1),
+          options: [
+            { id: 'openai', label: 'OpenAI 兼容（/v1/chat/completions）', recommended: true },
+            { id: 'anthropic', label: 'Anthropic 原生（/v1/messages）' },
+          ],
+        }
       case 'diy-url':
         return {
           kind: 'input',
           title: '输入服务商 API 地址',
-          subtitle: '例如 https://api.deepseek.com/v1（可粘贴）',
-          stepLabel: '步骤 1 / 8',
+          subtitle: this.collected.protocol === 'anthropic'
+            ? '例如 https://api.anthropic.com（协议：Anthropic 原生）'
+            : '例如 https://api.deepseek.com/v1（可粘贴）',
+          stepLabel: this.diyStepLabel(2),
           placeholder: 'https://',
         }
       case 'diy-apikey':
@@ -861,7 +1052,7 @@ export class ConnectFlow {
           kind: 'input',
           title: '输入 API Key',
           subtitle: `${CONFIG_HINT}；本地端点（Ollama/vLLM）可直接回车跳过`,
-          stepLabel: this.diyStepLabel(2),
+          stepLabel: this.diyStepLabel(3),
           masked: true,
         }
       case 'diy-probing':
@@ -869,14 +1060,14 @@ export class ConnectFlow {
           kind: 'busy',
           title: '正在探测端点…',
           subtitle: '拉取模型列表（GET /models）并做一次最小补全，消耗极少量 token',
-          stepLabel: this.diyStepLabel(3),
+          stepLabel: this.diyStepLabel(4),
         }
       case 'diy-probe-failed':
         return {
           kind: 'choice',
           title: '端点探测未成功',
           subtitle: this.collected.probeError ?? '未能获取模型列表',
-          stepLabel: this.diyStepLabel(3),
+          stepLabel: this.diyStepLabel(4),
           options: [
             { id: 'manual', label: '手动输入模型型号', description: '跳过探测，直接填写模型信息' },
             { id: 'back', label: '返回修改 API 地址', description: '地址可能缺 /v1 后缀或拼写有误' },
@@ -887,14 +1078,63 @@ export class ConnectFlow {
         return {
           kind: 'multi-choice',
           title: '选择要添加的模型',
-          subtitle: '探测到的模型已按别名表回填元数据；空格取消不需要的项',
-          stepLabel: this.diyStepLabel(5),
-          options: probed.map((p, i) => ({
+          subtitle: '探测到的模型已按别名表回填元数据；空格取消不需要的项，输入关键字过滤',
+          stepLabel: this.diyStepLabel(6),
+          options: this.filteredModelIndexes(probed).map(i => ({
             id: String(i),
-            label: p.rawId,
-            description: matchDescription(p.match),
-            checked: p.checked,
+            label: probed[i]!.rawId,
+            description: matchDescription(probed[i]!.match),
+            checked: probed[i]!.checked,
           })),
+          filter: this.modelsFilter,
+          optionTotal: probed.length,
+        }
+      }
+      case 'model-advanced-context': {
+        const rawId = this.unknownQueue[0] ?? ''
+        const idx = this.unknownTotal - this.unknownQueue.length + 1
+        return {
+          kind: 'input',
+          title: `未知模型补参：上下文窗口`,
+          subtitle: `${rawId}（${idx}/${this.unknownTotal}）不在别名表——请照官方文档填上下文窗口 tokens，回车用默认`,
+          stepLabel: this.advancedStepLabel(),
+          placeholder: String(DEFAULT_CONTEXT_WINDOW),
+          defaultValue: String(DEFAULT_CONTEXT_WINDOW),
+        }
+      }
+      case 'model-advanced-max': {
+        const rawId = this.unknownQueue[0] ?? ''
+        const idx = this.unknownTotal - this.unknownQueue.length + 1
+        return {
+          kind: 'input',
+          title: `未知模型补参：最大输出 tokens`,
+          subtitle: `${rawId}（${idx}/${this.unknownTotal}）单次输出上限，回车用默认；不得超过上下文窗口`,
+          stepLabel: this.advancedStepLabel(),
+          placeholder: String(DEFAULT_ADVANCED_MAX_OUTPUT),
+          defaultValue: String(DEFAULT_ADVANCED_MAX_OUTPUT),
+        }
+      }
+      case 'model-advanced-template': {
+        const rawId = this.unknownQueue[0] ?? ''
+        const idx = this.unknownTotal - this.unknownQueue.length + 1
+        const rest = this.unknownQueue.length - 1
+        const options: ConnectChoiceOption[] = [
+          { id: 'generic', label: '通用文本模型（无思考输出）' },
+          { id: 'reasoning', label: '推理模型（reasoning_content 返回思考）' },
+        ]
+        if (rest > 0) {
+          options.push(
+            { id: 'apply-generic', label: `通用文本 · 并把本组参数套用到其余 ${rest} 个未知模型` },
+            { id: 'apply-reasoning', label: `推理 · 并把本组参数套用到其余 ${rest} 个未知模型` },
+          )
+        }
+        options.push({ id: 'back', label: '返回模型选择' })
+        return {
+          kind: 'choice',
+          title: `未知模型补参：能力模板`,
+          subtitle: `${rawId}（${idx}/${this.unknownTotal}）——模板决定思考路由配置，拿不准选「通用文本」`,
+          stepLabel: this.advancedStepLabel(),
+          options,
         }
       }
       case 'diy-model':
@@ -904,7 +1144,7 @@ export class ConnectFlow {
           subtitle: this.collected.existingProvider
             ? '例如 deepseek-v4-flash'
             : '探测未发现模型列表——手动填写一个模型型号（例如 deepseek-v4-flash）',
-          stepLabel: this.diyStepLabel(this.collected.existingProvider ? 2 : 5),
+          stepLabel: this.diyStepLabel(this.collected.existingProvider ? 2 : 6),
         }
       case 'diy-context':
         return {
@@ -936,7 +1176,7 @@ export class ConnectFlow {
           subtitle: split
             ? '探测发现端点返回 reasoning_content —— 建议选「支持」'
             : '支持思考输出的模型会启用思考档路由；不确定选「不支持」',
-          stepLabel: this.diyStepLabel(6),
+          stepLabel: this.diyStepLabel(7),
           options: [
             { id: 'none', label: '不支持（纯文本补全）', recommended: !split },
             { id: 'split', label: '支持（reasoning_content 分块返回）', recommended: split },
@@ -948,7 +1188,7 @@ export class ConnectFlow {
           kind: 'input',
           title: '给这个服务商起个名字',
           subtitle: '用于配置与切换（小写字母/数字/-/_），回车用建议名',
-          stepLabel: this.diyStepLabel(7),
+          stepLabel: this.diyStepLabel(8),
           placeholder: suggestProviderName(this.collected.baseUrl ?? ''),
           defaultValue: suggestProviderName(this.collected.baseUrl ?? ''),
         }
@@ -979,7 +1219,60 @@ export class ConnectFlow {
       return { kind: 'error', message: '请至少勾选一个模型（空格勾选，或 Esc 取消）。', view: this.view() }
     }
     this.collected.probedModels = picked
-    this.phase = this.phase === 'preset-models' ? 'capability' : 'diy-thinking'
+    this.modelsFilter = ''
+    this.advancedReturnPhase = this.phase === 'preset-models' ? 'capability' : 'diy-thinking'
+    // D2：别名表不认识的勾选模型 → 逐个进高级步补元数据（未知模型先按
+    // modelName 匹配，matchModelIds 的 L1–L3 已做；L4 无匹配项才走这里）。
+    const unknowns = picked.filter(p => !p.match.entry).map(p => p.rawId)
+    if (unknowns.length > 0) {
+      this.unknownQueue = unknowns
+      this.unknownTotal = unknowns.length
+      this.advancedPartial = {}
+      this.phase = 'model-advanced-context'
+    } else {
+      this.phase = this.advancedReturnPhase
+    }
+    return { kind: 'next', view: this.view() }
+  }
+
+  private onModelsMultiChoice(): boolean {
+    return this.phase === 'diy-models' || this.phase === 'preset-models'
+  }
+
+  /** Indexes into probedModels that match the search filter (all when empty). */
+  private filteredModelIndexes(probed: ProbedModel[]): number[] {
+    const query = this.modelsFilter.trim().toLowerCase()
+    const indexes = probed.map((_, i) => i)
+    if (!query) return indexes
+    return indexes.filter(i => probed[i]!.rawId.toLowerCase().includes(query))
+  }
+
+  /** Type-to-search on the models steps; the query is transient UI state. */
+  typeModelFilter(char: string): void {
+    if (this.onModelsMultiChoice()) this.modelsFilter += char
+  }
+
+  backspaceModelFilter(): void {
+    if (this.onModelsMultiChoice()) this.modelsFilter = this.modelsFilter.slice(0, -1)
+  }
+
+  clearModelFilter(): void {
+    if (this.onModelsMultiChoice()) this.modelsFilter = ''
+  }
+
+  /** Ctrl+A: check everything (only filter matches while a filter is active);
+   *  when everything targeted is already checked, uncheck it instead. */
+  toggleAllModels(): ConnectStepResult {
+    if (!this.onModelsMultiChoice()) {
+      return { kind: 'error', message: '当前步骤无模型可全选。', view: this.view() }
+    }
+    const probed = this.collected.probedModels ?? []
+    const targets = this.filteredModelIndexes(probed)
+    if (targets.length === 0) {
+      return { kind: 'error', message: `没有匹配「${this.modelsFilter}」的模型。`, view: this.view() }
+    }
+    const check = !targets.every(i => probed[i]!.checked)
+    for (const i of targets) probed[i]!.checked = check
     return { kind: 'next', view: this.view() }
   }
 
@@ -992,17 +1285,19 @@ export class ConnectFlow {
   applyProbe(report: ProbeReport): ConnectStepResult {
     if (this.phase === 'preset-probing') {
       this.collected.probeReport = report
-      if (report.modelsOk || report.completionOk) {
-        const built = this.buildPresetModelSelection()
-        if (built.length > 0) {
-          this.collected.probedModels = built
-          this.phase = 'preset-models'
-        } else {
-          this.phase = 'confirm'
-        }
-      } else {
-        this.phase = 'probe-report'
+      const keyless = !!this.collected.presetKey && PROVIDER_PRESETS[this.collected.presetKey].keyless
+      if (keyless) this.collected.reasoningSplitHint = report.hints.reasoningSplit === true
+      if (keyless && report.models.length > 0) {
+        // 免密钥 preset 没有模板模型表——与 DIY 相同，按别名表回填发现型号。
+        const matches = matchModelIds(report.models, aliasTableWithProbeInfos(report.modelInfos))
+        this.collected.probedModels = matches.map(match => ({
+          rawId: match.rawId,
+          match,
+          checked: true,
+        }))
       }
+      // 报告永远紧跟探测（与 DIY 叙事一致）——continue 时再进模型选择。
+      this.phase = 'probe-report'
       return { kind: 'next', view: this.view() }
     }
     if (this.phase !== 'diy-probing') {
@@ -1011,7 +1306,7 @@ export class ConnectFlow {
     this.collected.probeReport = report
     this.collected.reasoningSplitHint = report.hints.reasoningSplit === true
     if (report.models.length > 0) {
-      const matches = matchModelIds(report.models)
+      const matches = matchModelIds(report.models, aliasTableWithProbeInfos(report.modelInfos))
       this.collected.probedModels = matches.map(match => ({
         rawId: match.rawId,
         match,
@@ -1063,6 +1358,44 @@ export class ConnectFlow {
       }
       return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
     }
+    if (this.phase === 'diy-protocol') {
+      if (id !== 'openai' && id !== 'anthropic') {
+        return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
+      }
+      this.collected.protocol = id
+      this.phase = 'diy-url'
+      return { kind: 'next', view: this.view() }
+    }
+    if (this.phase === 'model-advanced-template') {
+      if (id === 'back') {
+        // 返回模型选择重挑——已补的元数据作废，避免与新的勾选集对不上。
+        this.collected.modelOverrides = undefined
+        this.unknownQueue = []
+        this.advancedPartial = {}
+        this.phase = this.advancedReturnPhase === 'capability' ? 'preset-models' : 'diy-models'
+        return { kind: 'next', view: this.view() }
+      }
+      const applyRest = id.startsWith('apply-')
+      const template = (applyRest ? id.slice('apply-'.length) : id) as ModelOverride['template']
+      if (template !== 'generic' && template !== 'reasoning') {
+        return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
+      }
+      const override: ModelOverride = {
+        contextWindow: this.advancedPartial.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+        maxTokens: this.advancedPartial.maxTokens ?? DEFAULT_ADVANCED_MAX_OUTPUT,
+        template,
+      }
+      const overrides = this.collected.modelOverrides ?? {}
+      overrides[this.unknownQueue.shift()!] = override
+      if (applyRest) {
+        for (const rawId of this.unknownQueue) overrides[rawId] = override
+        this.unknownQueue = []
+      }
+      this.collected.modelOverrides = overrides
+      this.advancedPartial = {}
+      this.phase = this.unknownQueue.length > 0 ? 'model-advanced-context' : this.advancedReturnPhase
+      return { kind: 'next', view: this.view() }
+    }
     if (this.phase === 'diy-vision') {
       this.collected.supportsVision = id === 'yes'
       if (this.collected.existingProvider) {
@@ -1095,7 +1428,7 @@ export class ConnectFlow {
       this.collected.thinkingSplit = id === 'split'
       // 免密钥 preset（本地 Ollama）：presetKey 即服务商名，跳过命名步直接进确认。
       if (this.collected.presetKey && PROVIDER_PRESETS[this.collected.presetKey].keyless) {
-        this.phase = 'confirm'
+        this.gotoConfirm()
         return { kind: 'next', view: this.view() }
       }
       this.phase = 'diy-name'
@@ -1113,7 +1446,7 @@ export class ConnectFlow {
     }
     if (this.phase === 'capability') {
       if (id === 'continue') {
-        this.phase = 'probe-report'
+        this.gotoConfirm()
         return { kind: 'next', view: this.view() }
       }
       if (id === 'back') {
@@ -1126,16 +1459,14 @@ export class ConnectFlow {
       const keylessPreset = !!this.collected.presetKey && PROVIDER_PRESETS[this.collected.presetKey].keyless
       if (id === 'continue') {
         if (this.collected.presetKey && !keylessPreset) {
-          if ((this.collected.probedModels?.length ?? 0) > 0) {
-            this.phase = 'confirm'
-            return { kind: 'next', view: this.view() }
+          if ((this.collected.probedModels?.length ?? 0) === 0) {
+            const built = this.buildPresetModelSelection()
+            if (built.length > 0) this.collected.probedModels = built
           }
-          const built = this.buildPresetModelSelection()
-          if (built.length > 0) {
-            this.collected.probedModels = built
+          if ((this.collected.probedModels?.length ?? 0) > 0) {
             this.phase = 'preset-models'
           } else {
-            this.phase = 'confirm'
+            this.gotoConfirm()
           }
         } else if (this.collected.probedModels && this.collected.probedModels.length > 0) {
           this.phase = 'diy-models'
@@ -1150,7 +1481,7 @@ export class ConnectFlow {
         return { kind: 'next', view: this.view() }
       }
       if (id === 'edit-url') {
-        if (!this.collected.presetKey || keylessPreset) {
+        if (!this.collected.presetKey) {
           return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
         }
         this.phase = 'preset-endpoint'
@@ -1158,14 +1489,47 @@ export class ConnectFlow {
         return { kind: 'next', view: this.view() }
       }
       if (id === 'save-anyway') {
+        this.gotoConfirm()
+        return { kind: 'next', view: this.view() }
+      }
+      return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
+    }
+    if (this.phase === 'ask-default') {
+      if (id === 'yes') {
+        this.collected.makeDefault = true
         this.phase = 'confirm'
+        return { kind: 'next', view: this.view() }
+      }
+      if (id === 'no') {
+        this.collected.makeDefault = false
+        this.phase = 'confirm'
+        return { kind: 'next', view: this.view() }
+      }
+      if (id === 'back') {
+        const key = this.collected.presetKey
+        if (key && PROVIDER_PRESETS[key].keyless) {
+          this.phase = 'diy-thinking'
+        } else if (key) {
+          this.phase = 'capability'
+        } else {
+          this.phase = 'diy-name'
+          this.restoredInputValue = this.collected.providerName ?? ''
+        }
         return { kind: 'next', view: this.view() }
       }
       return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
     }
     if (this.phase === 'confirm') {
       if (id === 'save') return this.finalizeCommit()
+      if (id === 'advanced') {
+        this.phase = 'advanced-settings'
+        return { kind: 'next', view: this.view() }
+      }
       if (id === 'back') {
+        if (this.needsDefaultAsk() && this.collected.makeDefault !== undefined) {
+          this.phase = 'ask-default'
+          return { kind: 'next', view: this.view() }
+        }
         const key = this.collected.presetKey
         if (key && PROVIDER_PRESETS[key].keyless) {
           this.phase = 'diy-thinking'
@@ -1182,6 +1546,26 @@ export class ConnectFlow {
         return { kind: 'next', view: this.view() }
       }
       return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
+    }
+    if (this.phase === 'advanced-settings') {
+      if (id === 'done') {
+        this.phase = 'confirm'
+        return { kind: 'next', view: this.view() }
+      }
+      // 进入单项输入子步——预填当前值，留空回车即清除。
+      const target: Record<string, Phase> = {
+        requestTimeoutMs: 'advanced-request-timeout',
+        maxRetries: 'advanced-max-retries',
+        temperature: 'advanced-temperature',
+        proxy: 'advanced-proxy',
+      }
+      const next = target[id]
+      if (!next) return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
+      const adv = this.collected.advanced
+      const current = adv?.[id as keyof ProviderAdvancedConfig]
+      this.restoredInputValue = current !== undefined ? String(current) : ''
+      this.phase = next
+      return { kind: 'next', view: this.view() }
     }
     if (this.phase === 'diy-probe-failed') {
       if (id === 'manual') {
@@ -1206,7 +1590,12 @@ export class ConnectFlow {
     if (this.phase !== 'provider') {
       return { kind: 'error', message: '当前步骤需要输入文本，而非选择。', view: this.view() }
     }
-    if (id === CUSTOM_CHOICE || id === OPENAI_COMPAT_CHOICE) {
+    if (id === CUSTOM_CHOICE) {
+      this.phase = 'diy-protocol'
+      return { kind: 'next', view: this.view() }
+    }
+    if (id === OPENAI_COMPAT_CHOICE) {
+      this.collected.protocol = 'openai'
       this.phase = 'diy-url'
       return { kind: 'next', view: this.view() }
     }
@@ -1228,20 +1617,13 @@ export class ConnectFlow {
         summary: `已选择 ${preset.label} · ${preset.defaultModelId}（OAuth）。请运行 /login 完成登录。`,
       }
     }
-    // 免密钥端点（本地 Ollama）——跳过 key 步，直接进探测管线。
+    // 免密钥端点（本地 Ollama）——跳过 key 步，先确认/修改服务地址再探测。
     // 后续复用 DIY 阶段；commitCustom 时默认名取 presetKey（见 diy-name）。
     if (preset.keyless) {
       this.collected.presetKey = key
-      this.collected.baseUrl = preset.provider.baseUrl
       this.collected.apiKey = undefined
-      this.phase = 'diy-probing'
-      return {
-        kind: 'probe',
-        baseUrl: preset.provider.baseUrl,
-        apiKey: undefined,
-        protocol: preset.provider.protocol ?? 'openai',
-        providerName: key,
-      }
+      this.phase = 'preset-endpoint'
+      return { kind: 'next', view: this.view() }
     }
     this.collected.presetKey = key
     this.phase = preset.billingModes && preset.billingModes.length > 0 ? 'preset-billing' : 'preset-apikey'
@@ -1256,18 +1638,101 @@ export class ConnectFlow {
       case 'provider':
       case 'pick-existing':
       case 'preset-billing':
+      case 'diy-protocol':
       case 'diy-vision':
       case 'diy-thinking':
       case 'diy-probe-failed':
       case 'probe-report':
       case 'preset-models':
       case 'capability':
+      case 'ask-default':
       case 'confirm':
+      case 'advanced-settings':
       case 'diy-models':
+      case 'model-advanced-template':
         return { kind: 'error', message: '当前步骤需要选择，而非输入。', view: this.view() }
       case 'diy-probing':
       case 'preset-probing':
         return { kind: 'error', message: '正在探测端点，请稍候…', view: this.view() }
+
+      case 'advanced-request-timeout': {
+        if (value.length === 0) {
+          this.applyAdvancedKnob('requestTimeoutMs', undefined)
+        } else {
+          const parsed = Number.parseInt(value, 10)
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            return { kind: 'error', message: '请填写正整数毫秒数，或回车清空恢复内置硬顶。', view: this.view() }
+          }
+          this.applyAdvancedKnob('requestTimeoutMs', parsed)
+        }
+        this.phase = 'advanced-settings'
+        return { kind: 'next', view: this.view() }
+      }
+
+      case 'advanced-max-retries': {
+        if (value.length === 0) {
+          this.applyAdvancedKnob('maxRetries', undefined)
+        } else {
+          const parsed = Number.parseInt(value, 10)
+          if (!Number.isFinite(parsed) || parsed < 0 || parsed > 10) {
+            return { kind: 'error', message: '请填写 0–10 的整数（0 = 禁用重试），或回车清空恢复内置默认。', view: this.view() }
+          }
+          this.applyAdvancedKnob('maxRetries', parsed)
+        }
+        this.phase = 'advanced-settings'
+        return { kind: 'next', view: this.view() }
+      }
+
+      case 'advanced-temperature': {
+        if (value.length === 0) {
+          this.applyAdvancedKnob('temperature', undefined)
+        } else {
+          const parsed = Number.parseFloat(value)
+          if (!Number.isFinite(parsed) || parsed < 0 || parsed > 2) {
+            return { kind: 'error', message: '请填写 0–2 之间的数字，或回车清空用服务端默认。', view: this.view() }
+          }
+          this.applyAdvancedKnob('temperature', parsed)
+        }
+        this.phase = 'advanced-settings'
+        return { kind: 'next', view: this.view() }
+      }
+
+      case 'advanced-proxy': {
+        if (value.length === 0) {
+          this.applyAdvancedKnob('proxy', undefined)
+        } else {
+          if (!isLikelyUrl(value)) {
+            return { kind: 'error', message: '请填写合法的 http(s) 代理地址，或回车清空取消。', view: this.view() }
+          }
+          this.applyAdvancedKnob('proxy', value)
+        }
+        this.phase = 'advanced-settings'
+        return { kind: 'next', view: this.view() }
+      }
+
+      case 'model-advanced-context': {
+        const parsed = value.length === 0 ? DEFAULT_CONTEXT_WINDOW : Number.parseInt(value, 10)
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return { kind: 'error', message: '请填写正整数（token 数），或回车用默认值。', view: this.view() }
+        }
+        this.advancedPartial.contextWindow = parsed
+        this.phase = 'model-advanced-max'
+        return { kind: 'next', view: this.view() }
+      }
+
+      case 'model-advanced-max': {
+        const parsed = value.length === 0 ? DEFAULT_ADVANCED_MAX_OUTPUT : Number.parseInt(value, 10)
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return { kind: 'error', message: '请填写正整数（token 数），或回车用默认值。', view: this.view() }
+        }
+        const window = this.advancedPartial.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+        if (parsed > window) {
+          return { kind: 'error', message: `最大输出不能超过上下文窗口（${window}）。`, view: this.view() }
+        }
+        this.advancedPartial.maxTokens = parsed
+        this.phase = 'model-advanced-template'
+        return { kind: 'next', view: this.view() }
+      }
 
       case 'preset-apikey': {
         if (value.length === 0) {
@@ -1286,13 +1751,15 @@ export class ConnectFlow {
           return { kind: 'error', message: '请填写合法的 http(s) 地址。', view: this.view() }
         }
         if (url.includes('{') || url.includes('}')) {
-          return { kind: 'error', message: '地址仍含 {WorkspaceId} 占位符——请替换为你的真实业务空间 ID（百炼控制台可查）。', view: this.view() }
+          return { kind: 'error', message: '地址仍含 {WorkspaceId} 占位符——请替换为你的真实业务空间 ID（百炼控制台 → 左侧「业务空间」→ 进入空间查看）。', view: this.view() }
         }
-        this.collected.baseUrl = url
+        const normalized = normalizeBaseUrl(url)
+        this.collected.urlNormalized = normalized !== url
+        this.collected.baseUrl = normalized
         this.phase = 'preset-probing'
         return {
           kind: 'probe',
-          baseUrl: url,
+          baseUrl: normalized,
           apiKey: this.collected.apiKey,
           probeModel: preset.defaultModelId,
           protocol: preset.provider.protocol ?? 'openai',
@@ -1304,7 +1771,9 @@ export class ConnectFlow {
         if (!isLikelyUrl(value)) {
           return { kind: 'error', message: '请填写合法的 http(s) 地址。', view: this.view() }
         }
-        this.collected.baseUrl = value
+        const normalized = normalizeBaseUrl(value)
+        this.collected.urlNormalized = normalized !== value
+        this.collected.baseUrl = normalized
         this.phase = 'diy-apikey'
         return { kind: 'next', view: this.view() }
       }
@@ -1317,7 +1786,7 @@ export class ConnectFlow {
           kind: 'probe',
           baseUrl: this.collected.baseUrl!,
           apiKey: this.collected.apiKey,
-          protocol: 'openai',
+          protocol: this.collected.protocol ?? 'openai',
         }
       }
 
@@ -1359,7 +1828,7 @@ export class ConnectFlow {
           return { kind: 'error', message: `「${name}」是内置服务商名——请换一个名字（配置内置服务商请在第一步直接选它）。`, view: this.view() }
         }
         this.collected.providerName = name
-        this.phase = 'confirm'
+        this.gotoConfirm()
         return { kind: 'next', view: this.view() }
       }
     }
@@ -1384,27 +1853,30 @@ export class ConnectFlow {
           providerName: key!,
           preset: key!,
           apiKey: this.collected.apiKey,
-          makeDefault: true,
+          makeDefault: this.collected.makeDefault ?? true,
           ...(this.collected.baseUrl && this.collected.baseUrl !== preset.provider.baseUrl
             ? { baseUrl: this.collected.baseUrl }
             : {}),
           ...(models ? { models } : {}),
+          ...(this.collected.advanced ? { advanced: this.collected.advanced } : {}),
         },
       },
       summary: models ? `已连接 ${preset.label} · ${models.length} 个模型` : `已连接 ${preset.label} · ${preset.defaultModelId}`,
     }
   }
 
-  /** 预设模型表 ∪ 探测新发现：预设 id 默认勾选，新发现仅当别名表认识才勾选。 */
+  /** 预设模型表 ∪ 探测新发现：预设 id 默认勾选，新发现仅当别名表认识才勾选。
+   *  聚合平台例外——模型列表又长又杂，默认全不选，由用户搜索/勾选。 */
   private buildPresetModelSelection(): ProbedModel[] {
-    const templateIds = (PROVIDER_PRESETS[this.collected.presetKey!].provider.models ?? []).map(m => m.id)
+    const preset = PROVIDER_PRESETS[this.collected.presetKey!]
+    const templateIds = (preset.provider.models ?? []).map(m => m.id)
     const discovered = (this.collected.probeReport?.models ?? []).filter(id => !templateIds.includes(id))
-    const matches = matchModelIds([...templateIds, ...discovered])
+    const matches = matchModelIds([...templateIds, ...discovered], aliasTableWithProbeInfos(this.collected.probeReport?.modelInfos))
     const templateSet = new Set(templateIds)
     return matches.map((match, i) => ({
       rawId: matches[i]!.rawId,
       match: matches[i]!,
-      checked: templateSet.has(match.rawId) || match.entry !== undefined,
+      checked: preset.aggregator ? false : templateSet.has(match.rawId) || match.entry !== undefined,
     }))
   }
 
@@ -1426,6 +1898,8 @@ export class ConnectFlow {
       parts.push('未进行端点探测')
     }
     if (c.apiKey) parts.push('密钥存入 ~/.rivet/secrets.json')
+    if (c.advanced && Object.keys(c.advanced).length > 0) parts.push(`已调 ${Object.keys(c.advanced).length} 项高级设置`)
+    parts.push(c.makeDefault === false ? `保留现有默认服务商（${this.currentDefault}）` : '设为默认服务商')
     return parts.join('；')
   }
 
@@ -1449,9 +1923,9 @@ export class ConnectFlow {
         providerName,
         baseUrl: this.collected.baseUrl!,
         apiKey: this.collected.apiKey,
-        protocol: 'openai',
+        protocol: this.collected.protocol ?? 'openai',
         models,
-        makeDefault: true,
+        makeDefault: this.collected.makeDefault ?? true,
         ...(this.collected.advanced ? { advanced: this.collected.advanced } : {}),
       },
       summary: `已连接 ${providerName} · ${models.length} 个模型`,
@@ -1478,7 +1952,7 @@ export class ConnectFlow {
         setup: {
           providerName: key,
           preset: key,
-          makeDefault: true,
+          makeDefault: this.collected.makeDefault ?? true,
           ...(models.length > 0 ? { models } : {}),
           ...(this.collected.baseUrl && this.collected.baseUrl !== preset.provider.baseUrl
             ? { baseUrl: this.collected.baseUrl }
@@ -1493,9 +1967,17 @@ export class ConnectFlow {
   /** Matcher result → config descriptor, keeping the RAW endpoint id callable. */
   private descriptorFor(match: ModelMatchResult): Partial<ModelConfig> & { id: string } {
     if (!match.entry) {
-      // Unknown model: apply the thinking answer, leave sizes to schema defaults.
+      // Unknown model: D2 overrides win; otherwise apply the thinking answer
+      // and leave sizes to schema defaults.
       const descriptor: Partial<ModelConfig> & { id: string } = { id: match.rawId }
-      if (this.collected.thinkingSplit) descriptor.capabilities = { reasoningSplit: true }
+      const override = this.collected.modelOverrides?.[match.rawId]
+      if (override) {
+        descriptor.contextWindow = override.contextWindow
+        descriptor.maxTokens = override.maxTokens
+        if (override.template === 'reasoning') descriptor.capabilities = { reasoningSplit: true }
+      } else if (this.collected.thinkingSplit) {
+        descriptor.capabilities = { reasoningSplit: true }
+      }
       return descriptor
     }
     const metadata = match.entry.metadata

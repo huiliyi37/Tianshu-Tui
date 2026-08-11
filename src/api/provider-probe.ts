@@ -14,6 +14,7 @@
  */
 
 import { normalizeBaseUrl, resolveProbeEndpoints } from './endpoint-map.js'
+import { MODEL_ALIAS_TABLE, type ModelAliasEntry, type ModelAliasMetadata } from './model-aliases.js'
 
 export interface ProbeOptions {
   baseUrl: string
@@ -34,6 +35,13 @@ export interface CapabilityHints {
   reasoningSplit?: boolean
 }
 
+/** Per-model metadata surfaced by rich models endpoints (DashScope 原生形态)。 */
+export interface ProbedModelInfo {
+  contextWindow?: number
+  maxOutputTokens?: number
+  maxReasoningTokens?: number
+}
+
 export interface ProbeReport {
   models: string[]
   /** GET /models returned a usable list. */
@@ -43,6 +51,8 @@ export interface ProbeReport {
   hints: CapabilityHints
   /** First-byte latency of the completion probe. */
   latencyMs?: number
+  /** 端点自带规格元数据时按模型 id 携带——消费侧物化 contextWindow/maxTokens，跳过手填。 */
+  modelInfos?: Record<string, ProbedModelInfo>
   /** Classified human-readable problems (empty when everything succeeded). */
   errors: string[]
 }
@@ -102,8 +112,95 @@ function classifyHttpError(status: number, bodyText: string, baseUrl: string): s
   return `HTTP ${status}${snippet ? ` — ${snippet}` : ''}`
 }
 
-async function fetchModelList(options: ProbeOptions, errors: string[]): Promise<string[]> {
+/**
+ * DashScope（百炼）原生模型列表形态：`{output: {models: [{model, model_info,
+ * inference_metadata}]}}`——与 OpenAI 兼容形状的 `{data: [{id}]}` 完全不同，
+ * 但带真实规格元数据（context_window / max_output_tokens / max_reasoning_tokens）。
+ * 只保留文本产出模型（response_modality 含 Text / Multimodal），过滤图像/语音/向量。
+ */
+function parseDashscopeNative(payload: unknown): { ids: string[]; infos: Record<string, ProbedModelInfo>; rawCount: number } | null {
+  const list = (payload as { output?: { models?: unknown } })?.output?.models
+  if (!Array.isArray(list)) return null
+  const ids: string[] = []
+  const infos: Record<string, ProbedModelInfo> = {}
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const id = (item as { model?: unknown }).model
+    if (typeof id !== 'string') continue
+    const modalities = (item as { inference_metadata?: { response_modality?: unknown } }).inference_metadata?.response_modality
+    const textual = Array.isArray(modalities)
+      && modalities.some(m => m === 'Text' || m === 'Multimodal')
+    if (!textual) continue
+    ids.push(id)
+    const raw = (item as { model_info?: Record<string, unknown> }).model_info
+    if (raw && typeof raw === 'object') {
+      const info: ProbedModelInfo = {}
+      if (typeof raw.context_window === 'number') info.contextWindow = raw.context_window
+      if (typeof raw.max_output_tokens === 'number') info.maxOutputTokens = raw.max_output_tokens
+      if (typeof raw.max_reasoning_tokens === 'number') info.maxReasoningTokens = raw.max_reasoning_tokens
+      if (Object.keys(info).length > 0) infos[id] = info
+    }
+  }
+  return { ids, infos, rawCount: list.length }
+}
+
+/**
+ * DashScope 原生模型列表 URL。compatible-mode base 换轨到 /api/v1（同一 workspace
+ * 主机两种形态并存，实测 /api/v1/models 带元数据而 compatible-mode 只有裸 id）；
+ * 已经是 /api/v1 形态则直接追加。分页上限 page_size=200（服务端拒绝更大的值）。
+ */
+function dashscopeNativeModelsUrl(baseUrl: string, pageNo: number): string | null {
+  const base = normalizeBaseUrl(baseUrl)
+  const query = `page_no=${pageNo}&page_size=${DASHSCOPE_MODELS_PAGE_SIZE}`
+  if (/\/compatible-mode\/v\d+$/i.test(base)) {
+    return `${base.replace(/\/compatible-mode\/v\d+$/i, '/api/v1')}/models?${query}`
+  }
+  if (/\/api\/v\d+$/i.test(base)) {
+    return `${base}/models?${query}`
+  }
+  return null
+}
+
+const DASHSCOPE_MODELS_PAGE_SIZE = 200
+const DASHSCOPE_MODELS_MAX_PAGES = 3
+
+async function fetchDashscopeNativeModels(options: ProbeOptions): Promise<{ ids: string[]; infos: Record<string, ProbedModelInfo> } | null> {
+  const ids: string[] = []
+  const infos: Record<string, ProbedModelInfo> = {}
+  for (let pageNo = 1; pageNo <= DASHSCOPE_MODELS_MAX_PAGES; pageNo++) {
+    const url = dashscopeNativeModelsUrl(options.baseUrl, pageNo)
+    if (!url) return null
+    try {
+      const response = await fetchWithProbeTimeout(url, {
+        method: 'GET',
+        headers: authHeaders(options.apiKey),
+      }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      if (!response.ok) return ids.length > 0 ? { ids, infos } : null
+      const parsed = parseDashscopeNative(await response.json() as unknown)
+      if (!parsed) return ids.length > 0 ? { ids, infos } : null
+      ids.push(...parsed.ids)
+      Object.assign(infos, parsed.infos)
+      // 不满一页 = 已到尾页（按原始条目数判定，过滤不能影响翻页）。
+      if (parsed.rawCount < DASHSCOPE_MODELS_PAGE_SIZE) break
+    } catch {
+      return ids.length > 0 ? { ids, infos } : null
+    }
+  }
+  return ids.length > 0 ? { ids, infos } : null
+}
+
+interface FetchedModelList {
+  ids: string[]
+  infos?: Record<string, ProbedModelInfo>
+}
+
+async function fetchModelList(options: ProbeOptions, errors: string[]): Promise<FetchedModelList> {
   const anthropic = options.protocol === 'anthropic'
+  // DashScope：优先原生形态（带规格元数据），失败回退 OpenAI 兼容形状。
+  if (!anthropic && options.providerName === 'dashscope') {
+    const native = await fetchDashscopeNativeModels(options)
+    if (native) return { ids: native.ids, infos: Object.keys(native.infos).length > 0 ? native.infos : undefined }
+  }
   const url = anthropic
     ? `${normalizeBaseUrl(options.baseUrl)}/v1/models`
     : resolveProbeEndpoints(options.baseUrl, options.providerName).modelsUrl
@@ -115,18 +212,18 @@ async function fetchModelList(options: ProbeOptions, errors: string[]): Promise<
     if (!response.ok) {
       const bodyText = await response.text().catch(() => '')
       errors.push(`GET /models failed: ${classifyHttpError(response.status, bodyText, options.baseUrl)}`)
-      return []
+      return { ids: [] }
     }
     const payload = await response.json() as unknown
     const ids = parseModelIds(payload)
     if (ids.length === 0) errors.push('GET /models returned no usable model ids.')
-    return ids
+    return { ids }
   } catch (error) {
     const reason = error instanceof Error && error.name === 'AbortError'
       ? `timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`
       : (error instanceof Error ? error.message : String(error))
     errors.push(`GET /models failed: ${reason}`)
-    return []
+    return { ids: [] }
   }
 }
 
@@ -233,7 +330,8 @@ async function readCappedText(response: Response): Promise<string> {
 
 export async function probeProvider(options: ProbeOptions): Promise<ProbeReport> {
   const errors: string[] = []
-  const models = await fetchModelList(options, errors)
+  const fetched = await fetchModelList(options, errors)
+  const models = fetched.ids
 
   const report: ProbeReport = {
     models,
@@ -241,6 +339,7 @@ export async function probeProvider(options: ProbeOptions): Promise<ProbeReport>
     completionOk: false,
     hints: {},
     errors,
+    ...(fetched.infos ? { modelInfos: fetched.infos } : {}),
   }
 
   if (options.skipCompletion) return report
@@ -263,4 +362,29 @@ export async function probeProvider(options: ProbeOptions): Promise<ProbeReport>
   report.latencyMs = outcome.latencyMs
   if (outcome.error) errors.push(outcome.error)
   return report
+}
+
+/**
+ * 探测元数据 → 临时别名表条目：端点自报的规格是权威的，合成条目让发现的模型
+ * 直接命中匹配（带真实 contextWindow/maxTokens），不落 L4 手填。已在别名表中的
+ * 条目不覆盖——preset 元数据含 pricing / effort 等人工配置，优先保留。
+ */
+export function aliasTableWithProbeInfos(
+  infos: Record<string, ProbedModelInfo> | undefined,
+  base: readonly ModelAliasEntry[] = MODEL_ALIAS_TABLE,
+): readonly ModelAliasEntry[] {
+  if (!infos || Object.keys(infos).length === 0) return base
+  const known = new Set(base.map(e => e.canonicalId))
+  const synthetic: ModelAliasEntry[] = []
+  for (const [id, info] of Object.entries(infos)) {
+    if (known.has(id)) continue
+    const metadata: ModelAliasMetadata = {}
+    if (info.contextWindow !== undefined) metadata.contextWindow = info.contextWindow
+    if (info.maxOutputTokens !== undefined) metadata.maxTokens = info.maxOutputTokens
+    // 端点声明推理 token 上限 → 思考输出走独立通道（百炼实测 reasoning_content）。
+    if (info.maxReasoningTokens !== undefined) metadata.capabilities = { reasoningSplit: true }
+    if (Object.keys(metadata).length === 0) continue
+    synthetic.push({ canonicalId: id, aliases: [], metadata })
+  }
+  return synthetic.length > 0 ? [...base, ...synthetic] : base
 }

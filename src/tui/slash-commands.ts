@@ -4069,7 +4069,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
         label: isProviderPresetKey(name) ? PROVIDER_PRESETS[name].label : name,
         modelCount: p.models.length,
       }))
-      app.startConnect(existing)
+      app.startConnect(existing, cfg.provider.default)
       return true
     },
   })

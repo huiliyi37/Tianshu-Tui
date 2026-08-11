@@ -6,7 +6,7 @@
  */
 import { loadConfig, registerProvider, removeProvider, getApiKeyStatus } from './manager.js'
 import { readSecret } from './secrets-store.js'
-import { probeProvider, type ProbeReport } from '../api/provider-probe.js'
+import { probeProvider, aliasTableWithProbeInfos, type ProbeReport } from '../api/provider-probe.js'
 import { normalizeBaseUrl } from '../api/endpoint-map.js'
 import { matchModelIds, type ModelMatchResult } from '../api/model-id-matcher.js'
 import type { ModelAliasMetadata } from '../api/model-aliases.js'
@@ -137,7 +137,7 @@ async function cmdAdd(args: string[], io: ProviderCliIO): Promise<void> {
     const report = await probeProvider({ baseUrl, apiKey: key, protocol, providerName: name })
     for (const line of formatProbeSummary(report)) out(io, `  ${line}`)
     if (report.models.length > 0) {
-      const { models: descriptors, notes } = toModelDescriptors(matchModelIds(report.models))
+      const { models: descriptors, notes } = toModelDescriptors(matchModelIds(report.models, aliasTableWithProbeInfos(report.modelInfos)))
       models = descriptors
       for (const note of notes) err(io, note)
     }
@@ -181,7 +181,7 @@ async function cmdModels(args: string[], io: ProviderCliIO): Promise<void> {
     exit(io, 1)
     return
   }
-  const { models, notes } = toModelDescriptors(matchModelIds(report.models))
+  const { models, notes } = toModelDescriptors(matchModelIds(report.models, aliasTableWithProbeInfos(report.modelInfos)))
   for (const note of notes) err(io, note)
   out(io, JSON.stringify({ models }, null, 2))
 }

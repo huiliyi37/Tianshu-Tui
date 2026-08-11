@@ -14,6 +14,7 @@ import { debugLog } from '../utils/debug.js'
 import { repairInvalidJsonEscapes } from './json-escape-repair.js'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { ProxyAgent } from 'undici'
 
 /**
  * Parse accumulated tool_call arguments into an input object.
@@ -170,6 +171,22 @@ export interface OpenAIClientConfig {
    * 0 = discard prompt_tokens; use local estimate instead.
    */
   usageCalibrationFactor?: number
+  /**
+   * Total request timeout (ms) for a single stream attempt — replaces the
+   * 10min（glm 20min）硬顶 base。显式配置即严格：不做按进度续期（续期机制只
+   * 服务于内置默认），到点直接 abort。firstByte/thinkingStall/read 三层计时器
+   * 不受影响，谁先到谁生效。
+   */
+  requestTimeoutMs?: number
+  /** Max retry attempts for retryable API errors. undefined = 保留内置默认
+   *  （thinking 1 次 / slow-thinking 2 次 / 非 thinking 5 次）；0 = 禁用重试。 */
+  maxRetries?: number
+  /** Provider-level sampling temperature default (0–2)。仅当请求未显式指定
+   *  temperature 且 thinking 未启用时注入——推理模式下多数服务端拒绝调温。 */
+  temperature?: number
+  /** Per-provider HTTP proxy（优先于全局 network.proxy）。构造时物化为
+   *  undici ProxyAgent，经 fetchWithTimeout 的 dispatcher 槽位透传。 */
+  proxy?: string
 }
 
 interface ToolCallChunk {
@@ -319,12 +336,15 @@ export class OpenAIClient implements StreamClient {
   private prevWireSignatures: Array<{ sig: string; len: number; role: string }> | null = null
   /** Latest wire divergence (consume-once via consumeWireDivergence). */
   private lastWireDivergence: WireDivergence | null = null
+  /** undici ProxyAgent for config.proxy (undefined = no per-provider proxy). */
+  private readonly proxyDispatcher: ProxyAgent | undefined
 
   constructor(private config: OpenAIClientConfig) {
     this.systemSuffix = Boolean(config.preservedThinkingProtocol) && config.thinking === 'enabled'
       ? '\n\n请在内部思考链中使用中文进行推理。不要在回复中输出你的推理过程，只输出最终答案或工具调用。'
       : ''
     this._sanitizedCount = 0
+    this.proxyDispatcher = config.proxy ? new ProxyAgent(config.proxy) : undefined
   }
 
   // ── Incremental sanitize ─────────────────────────────────────
@@ -422,7 +442,12 @@ export class OpenAIClient implements StreamClient {
       body.response_format = { type: 'json_object' }
     }
 
-    if (request.temperature !== undefined) body.temperature = request.temperature
+    if (request.temperature !== undefined) {
+      body.temperature = request.temperature
+    } else if (this.config.temperature !== undefined && this.config.thinking !== 'enabled') {
+      // provider 级采样温度默认值；思考模式下多数推理服务端拒绝调温，不注入。
+      body.temperature = this.config.temperature
+    }
 
     // Provider-specific reasoning output separation (e.g. MiniMax sends thinking
     // in a dedicated reasoning_content field rather than embedded in content).
@@ -649,7 +674,7 @@ export class OpenAIClient implements StreamClient {
         },
         body: JSON.stringify(effectiveBody),
         signal: lifecycle.signal,
-      }, fetchTimeout)
+      }, fetchTimeout, this.proxyDispatcher)
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
@@ -694,9 +719,10 @@ export class OpenAIClient implements StreamClient {
       // 前缀缓存，重试命中近 100% 缓存（实测 deepseek 99.4% hit、~12s 完成），代价极低。
       // 给它们 2 次重试，让「单次服务端 thinking 卡死」甚至「连续两次卡死」都能自愈而
       // 不冒泡成错误。maxTotalDurationMs 仍是总时长兜底，防 runaway。
-      maxTotalRetries: isThinking
+      // provider 级 maxRetries 显式配置时覆盖上述内置默认（0 = 禁用重试）。
+      maxTotalRetries: this.config.maxRetries ?? (isThinking
         ? (SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '') ? 2 : 1)
-        : undefined,
+        : undefined),
       onRetry: (info) => {
         if (info.classified.category === 'rate_limit') {
           callbacks.onRateLimit?.(info.classified.retryDelayMs)
@@ -753,7 +779,10 @@ export class OpenAIClient implements StreamClient {
     // 续 60s 一档，绝对上限 3×基础（30min）兜底 runaway。
     const timeoutController = new AbortController()
     const isGlm = this.config.providerName === 'glm'
-    const baseStreamMs = isGlm ? 20 * 60_000 : 10 * 60_000
+    // provider 级 requestTimeoutMs：显式配置 = 严格总时限（不做按进度续期——
+    // 续期机制只服务于内置默认，避免用户设了 5min 却被续到 15min）。
+    const explicitRequestTimeoutMs = this.config.requestTimeoutMs
+    const baseStreamMs = explicitRequestTimeoutMs ?? (isGlm ? 20 * 60_000 : 10 * 60_000)
     const streamStartedAt = Date.now()
     let lastDataEventAt = streamStartedAt
     let hardCapExtended = false
@@ -772,7 +801,9 @@ export class OpenAIClient implements StreamClient {
       if (action.extended) hardCapExtended = true
       maxStreamTimer = setTimeout(checkHardCap, action.rearmMs)
     }
-    let maxStreamTimer: ReturnType<typeof setTimeout> = setTimeout(checkHardCap, baseStreamMs)
+    let maxStreamTimer: ReturnType<typeof setTimeout> = explicitRequestTimeoutMs !== undefined
+      ? setTimeout(() => timeoutController.abort(), explicitRequestTimeoutMs)
+      : setTimeout(checkHardCap, baseStreamMs)
 
     // Wire both external and timeout signals to reader.cancel() so that
     // either agent.abort() OR the hard timeout can interrupt blocking read().
@@ -819,17 +850,23 @@ export class OpenAIClient implements StreamClient {
     try {
       resetIdleTimer()
       let streamDone = false
+      // 硬顶 abort 可能发生在 reader.read() 阻塞期间——cancel() 让 read() 以
+      // done=true 返回，若不在此显式抛出会变成"静默正常结束"，严格时限形同虚设。
+      const throwIfHardCapAborted = (): void => {
+        if (!timeoutController.signal.aborted) return
+        const mins = Math.round((Date.now() - streamStartedAt) / 60_000)
+        throw new Error(explicitRequestTimeoutMs !== undefined
+          ? `OpenAI SSE stream request timeout (${Math.round(explicitRequestTimeoutMs / 1000)}s, provider requestTimeoutMs) — total request duration exceeded configured limit`
+          : hardCapExtended
+            ? `OpenAI SSE stream hard timeout (~${mins}min, progress-extended) — stream exceeded maximum duration`
+            : 'OpenAI SSE stream hard timeout (10min) — stream stopped progressing')
+      }
       while (!streamDone) {
         // Check both external signal and internal timeout signal.
         // External signal: agent.abort() / worker budget / Ctrl+C
         // Timeout signal: hard 10min ceiling on stream duration
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-        if (timeoutController.signal.aborted) {
-          const mins = Math.round((Date.now() - streamStartedAt) / 60_000)
-          throw new Error(hardCapExtended
-            ? `OpenAI SSE stream hard timeout (~${mins}min, progress-extended) — stream exceeded maximum duration`
-            : 'OpenAI SSE stream hard timeout (10min) — stream stopped progressing')
-        }
+        throwIfHardCapAborted()
 
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
@@ -841,7 +878,10 @@ export class OpenAIClient implements StreamClient {
             : `OpenAI SSE stream idle timeout (${secs}s)`
           throw new Error(msg)
         }
-        if (done) break
+        if (done) {
+          throwIfHardCapAborted()
+          break
+        }
 
         receivedFirstChunk = true
 

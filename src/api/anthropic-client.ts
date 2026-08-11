@@ -5,6 +5,7 @@ import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
 import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
 import { parseJsonObjectWithEscapeRepair } from './json-escape-repair.js'
+import { ProxyAgent } from 'undici'
 
 export interface AnthropicClientConfig {
   baseUrl: string
@@ -12,6 +13,15 @@ export interface AnthropicClientConfig {
   model: string
   maxTokens: number
   thinkingBudget?: number
+  /** 总时限（ms）：替换内置 10min 硬顶，显式配置即严格。 */
+  requestTimeoutMs?: number
+  /** 重试次数覆盖；undefined = 内置默认（5），0 = 禁用。 */
+  maxRetries?: number
+  /** 采样温度默认值（clamp 到 Anthropic 合法的 0–1）；thinking 启用时不注入
+   *  （Anthropic 要求 thinking 请求 temperature=1）。 */
+  temperature?: number
+  /** Per-provider HTTP proxy（优先于全局 network.proxy）。 */
+  proxy?: string
 }
 
 interface AnthropicContentBlock {
@@ -45,11 +55,17 @@ interface AnthropicRequestBody {
   messages: AnthropicMessage[]
   stream: boolean
   thinking?: { type: 'enabled'; budget_tokens: number }
+  temperature?: number
   tool_choice?: { type: 'tool'; name: string }
 }
 
 export class AnthropicClient implements StreamClient {
-  constructor(private config: AnthropicClientConfig) {}
+  /** undici ProxyAgent for config.proxy (undefined = no per-provider proxy). */
+  private readonly proxyDispatcher: ProxyAgent | undefined
+
+  constructor(private config: AnthropicClientConfig) {
+    this.proxyDispatcher = config.proxy ? new ProxyAgent(config.proxy) : undefined
+  }
 
   setReasoningEffort(_effort: string): void {
     // Anthropic doesn't use reasoning_effort — thinking budget is set at construction
@@ -84,7 +100,7 @@ export class AnthropicClient implements StreamClient {
         },
         body: JSON.stringify(body),
         signal: lifecycle.signal,
-      }, this.config.thinkingBudget && this.config.thinkingBudget > 0 ? 90_000 : 45_000)
+      }, this.config.thinkingBudget && this.config.thinkingBudget > 0 ? 90_000 : 45_000, this.proxyDispatcher)
 
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '')
@@ -105,6 +121,8 @@ export class AnthropicClient implements StreamClient {
       await this.processSSEStream(response, callbacks, signal, lifecycle)
     }, signal, {
       maxTotalDurationMs: 10 * 60_000,
+      // provider 级 maxRetries 显式配置时覆盖内置默认（0 = 禁用重试）。
+      maxTotalRetries: this.config.maxRetries,
       onRetry: (info) => {
         if (info.classified.category === 'rate_limit') {
           callbacks.onRateLimit?.(info.classified.retryDelayMs)
@@ -159,6 +177,10 @@ export class AnthropicClient implements StreamClient {
     if (tools) body.tools = tools
     if (this.config.thinkingBudget && this.config.thinkingBudget > 0) {
       body.thinking = { type: 'enabled', budget_tokens: this.config.thinkingBudget }
+    } else if (this.config.temperature !== undefined) {
+      // provider 级采样温度默认值；Anthropic 合法范围 0–1（config 层允许 0–2）。
+      // thinking 启用时不注入——Anthropic 要求 thinking 请求 temperature=1。
+      body.temperature = Math.max(0, Math.min(1, this.config.temperature))
     }
 
     // OAI 对象形式 tool_choice（{type:'function',function:{name}}）映射为
@@ -354,8 +376,9 @@ export class AnthropicClient implements StreamClient {
     // Hard timeout guarantee: ensures reader.read() is unblocked even if
     // reader.cancel() alone cannot break the TCP connection (keep-alive hang).
     // Matches the OpenAIClient pattern — max stream duration = 10 minutes.
+    // provider 级 requestTimeoutMs 显式配置时替换内置 10min。
     const timeoutController = new AbortController()
-    const maxStreamMs = 10 * 60_000
+    const maxStreamMs = this.config.requestTimeoutMs ?? 10 * 60_000
     const maxStreamTimer = setTimeout(() => timeoutController.abort(), maxStreamMs)
     const streamStartedAt = Date.now()
 
@@ -374,17 +397,26 @@ export class AnthropicClient implements StreamClient {
 
     try {
       resetIdleTimer()
+      // 硬顶 abort 可能发生在 reader.read() 阻塞期间——cancel() 让 read() 以
+      // done=true 返回，若不在此显式抛出会变成"静默正常结束"，严格时限形同虚设。
+      const throwIfHardCapAborted = (): void => {
+        if (!timeoutController.signal.aborted) return
+        throw new Error(this.config.requestTimeoutMs !== undefined
+          ? `Anthropic SSE stream request timeout (${Math.round(this.config.requestTimeoutMs / 1000)}s, provider requestTimeoutMs) — total request duration exceeded configured limit`
+          : 'Anthropic SSE stream hard timeout (10min) — stream exceeded maximum duration')
+      }
       while (true) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-        if (timeoutController.signal.aborted) {
-          throw new Error('Anthropic SSE stream hard timeout (10min) — stream exceeded maximum duration')
-        }
+        throwIfHardCapAborted()
 
         const { done, value } = await reader.read()
         // Check timeout AFTER read — reader.cancel() from idle timer causes
         // read() to return done=true, but we must throw, not silently break.
         if (streamTimedOut) throw new Error('Anthropic SSE stream idle timeout (180s)')
-        if (done) break
+        if (done) {
+          throwIfHardCapAborted()
+          break
+        }
         receivedFirstChunk = true
 
         buffer += decoder.decode(value, { stream: true })

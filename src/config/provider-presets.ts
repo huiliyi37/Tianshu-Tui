@@ -17,6 +17,8 @@ export interface ProviderPreset {
   description: string
   /** 免密钥端点（如本地 Ollama）——向导跳过 key 步直接探测。 */
   keyless?: boolean
+  /** 中转/聚合平台（模型多且杂）——向导模型多选默认全不选，提供搜索/全选。 */
+  aggregator?: boolean
   /** 多于一种计费模式时，向导在选类型后插入「计费模式」选择步。 */
   billingModes?: ProviderBillingMode[]
   provider: ProviderConfig
@@ -282,6 +284,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     key: 'siliconflow',
     label: '硅基流动 (SiliconFlow)',
     description: '聚合站：多模型可选，含 DeepSeek/GLM/Kimi/Qwen',
+    aggregator: true,
     defaultModelId: 'deepseek-ai/DeepSeek-V4-Pro',
     provider: {
       name: 'siliconflow',
@@ -486,6 +489,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     key: 'ccswitch',
     label: 'CC Switch',
     description: 'cc-switch 本地代理：Claude/GPT/DeepSeek 等',
+    aggregator: true,
     defaultModelId: 'claude-opus-4-8',
     provider: {
       name: 'ccswitch',
@@ -610,13 +614,13 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     key: 'dashscope',
     label: '阿里云百炼 (DashScope)',
     description: '阿里 DashScope：Qwen 系列官方端点，OpenAI 兼容协议',
-    defaultModelId: 'qwen3-max',
+    defaultModelId: 'qwen3.8-max',
     billingModes: [
       {
         id: 'payg',
         label: '按量计费',
         description: '需替换 {WorkspaceId} 为你的业务空间 ID（百炼控制台可查）',
-        baseUrl: 'https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1',
+        baseUrl: 'https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
       },
       {
         id: 'token-plan',
@@ -635,23 +639,45 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       maxTokens: 32_768,
       models: [
         {
-          id: 'qwen3-max',
-          description: 'Qwen3 旗舰（支持 thinking）',
+          id: 'qwen3.8-max',
+          description: 'Qwen3.8 旗舰（1M 上下文，支持 thinking）',
           alias: 'qs-max',
-          contextWindow: 262_144,
-          maxTokens: 32_768,
+          contextWindow: 1_000_000,
+          maxTokens: 131_072,
+          reasoningEffort: 'high',
+          tier: 'strong',
+          pricing: { input: 12, output: 36, cacheRead: 1.5, cacheWrite: 15 },
+          capabilities: { thinkingBlock: 'enabled', effortFormat: 'reasoning_effort' },
+        },
+        {
+          id: 'qwen3.7-max',
+          description: 'Qwen3.7 旗舰（1M 上下文，支持 thinking）',
+          alias: 'qs37-max',
+          contextWindow: 1_000_000,
+          maxTokens: 131_072,
           reasoningEffort: 'high',
           tier: 'strong',
           capabilities: { thinkingBlock: 'enabled', effortFormat: 'reasoning_effort' },
         },
         {
-          id: 'qwen-plus',
-          description: 'Qwen 均衡档（无 thinking）',
-          alias: 'qs-plus',
-          contextWindow: 131_072,
-          maxTokens: 8_192,
+          id: 'qwen3.7-plus',
+          description: 'Qwen3.7 均衡档（1M 上下文，支持 thinking）',
+          alias: 'qs37-plus',
+          contextWindow: 1_000_000,
+          maxTokens: 131_072,
+          reasoningEffort: 'medium',
           tier: 'balanced',
-          capabilities: { thinkingBlock: 'none', effortFormat: 'none' },
+          capabilities: { thinkingBlock: 'enabled', effortFormat: 'reasoning_effort' },
+        },
+        {
+          id: 'qwen3.7-flash',
+          description: 'Qwen3.7 快速档（1M 上下文，低成本）',
+          alias: 'qs37-flash',
+          contextWindow: 1_000_000,
+          maxTokens: 131_072,
+          reasoningEffort: 'medium',
+          tier: 'cheap',
+          capabilities: { thinkingBlock: 'enabled', effortFormat: 'reasoning_effort' },
         },
       ],
       unsupported: [],
@@ -664,6 +690,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     key: 'openrouter',
     label: 'OpenRouter',
     description: 'OpenRouter 聚合：OpenAI / Claude / Gemini / 开源模型',
+    aggregator: true,
     defaultModelId: 'anthropic/claude-sonnet-4.5',
     provider: {
       name: 'openrouter',
@@ -704,6 +731,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     key: 'relay',
     label: '自建中转 (one-api / new-api)',
     description: '通用 OpenAI 兼容中转模板（one-api / new-api 等），baseUrl 走 RELAY_BASE_URL 环境变量',
+    aggregator: true,
     defaultModelId: 'gpt-5',
     provider: {
       name: 'relay',

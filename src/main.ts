@@ -1535,8 +1535,8 @@ async function main() {
 
     tuiApp.commitStatic(
       liveApplied
-        ? `✅ ${summary}`
-        : `✅ ${summary}\n（已保存到配置。若模型未切换，重启天枢后生效。）`,
+        ? `✅ ${summary}\n下一步：直接开始对话——/model 可随时切换模型，/connect 可再添加服务商。`
+        : `✅ ${summary}\n（已保存到配置。若模型未切换，重启天枢后生效。）\n下一步：/model 切换模型，/connect 再添加服务商。`,
     )
     return true
   }, /* planPickerExec: */ (slug: string) => {
@@ -2029,7 +2029,7 @@ async function main() {
   // 让新用户点选内置服务商 + 粘贴密钥即可开跑，无需手改 config.json。
   if (ctx && !ctx.auth && (!ctx.apiKey || ctx.apiKey.trim() === '') && existingMsgCount === 0) {
     app.commitStatic('尚未配置模型服务商的 API 密钥 — 正在打开配置向导（/connect 可随时再次打开）。')
-    app.startConnect()
+    app.startConnect(undefined, ctx?.config.provider.default)
   }
 
   // 启动期主动环境体检：git 缺失时(尤其 Windows，Git Bash 是命令执行首选 shell)

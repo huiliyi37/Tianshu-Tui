@@ -1894,12 +1894,12 @@ export class TuiApp {
   }
 
   /** 打开 /connect 服务商配置向导（选内置服务商或自定义，填写密钥）。 */
-  startConnect(existing?: ConnectProviderRef[]): void {
+  startConnect(existing?: ConnectProviderRef[], currentDefault?: string): void {
     const draft = readConnectDraft()
     // 草稿只存 secrets.json 引用——恢复时物化密钥交给 flow；引用失效（secrets
     // 被清）时传 undefined，normalizeDraft 的降级链会滑回密钥输入步。
     const restoredKey = draft?.collected.keyRef ? readSecret(draft.collected.keyRef) : undefined
-    const flow = new ConnectFlow(existing, draft, restoredKey)
+    const flow = new ConnectFlow(existing, draft, restoredKey, currentDefault)
     // 结构合法但语义不可恢复的草稿（preset 已删等）——顺手清掉，免得反复弹提示。
     if (flow.draftRejected) clearConnectDraft()
     this.connectFlow = flow
@@ -2123,6 +2123,13 @@ export class TuiApp {
       error: this.connectError,
       selectedIndex: this.overlayController.nav().connectIndex,
     }
+  }
+
+  /** 搜索过滤缩短选项列表后，光标索引可能越界——收敛回有效范围。 */
+  private clampConnectIndex(): void {
+    const count = this.connectFlow?.view().options?.length ?? 0
+    const nav = this.overlayController.nav()
+    nav.connectIndex = count > 0 ? Math.min(nav.connectIndex, count - 1) : 0
   }
 
   /** 推进 connect 向导：next 清空输入、error 显示提示、commit 落库并关闭。 */
@@ -2521,6 +2528,29 @@ export class TuiApp {
         if (view.kind === 'multi-choice' && key.char === ' ') {
           const opt = options[nav.connectIndex]
           if (opt) this.advanceConnect(this.connectFlow.toggle(opt.id))
+          return true
+        }
+        if (view.kind === 'multi-choice' && key.name === 'ctrl_a') {
+          this.advanceConnect(this.connectFlow.toggleAllModels())
+          return true
+        }
+        // Type-to-search：多选步的可打印字符进过滤器（不再是吞掉）。
+        if (view.kind === 'multi-choice' && (key.name === 'backspace' || key.name === 'ctrl_h')) {
+          this.connectFlow.backspaceModelFilter()
+          this.clampConnectIndex()
+          this.overlay.rerender()
+          return true
+        }
+        if (view.kind === 'multi-choice' && key.ctrl && c === 'u') {
+          this.connectFlow.clearModelFilter()
+          this.clampConnectIndex()
+          this.overlay.rerender()
+          return true
+        }
+        if (view.kind === 'multi-choice' && this.isPrintableKey(key)) {
+          this.connectFlow.typeModelFilter(key.char)
+          this.clampConnectIndex()
+          this.overlay.rerender()
           return true
         }
         if (key.name === 'return') {

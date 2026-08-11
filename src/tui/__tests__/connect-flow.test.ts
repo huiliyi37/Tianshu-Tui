@@ -20,12 +20,22 @@ function report(overrides: Partial<ProbeReport> = {}): ProbeReport {
 /** Drive the DIY flow to the probe request and return it. */
 function toProbe(flow: ConnectFlow, { url = 'https://api.example.com/v1', key = 'sk-x' } = {}) {
   flow.submitChoice('custom')
+  flow.submitChoice('openai')
   flow.submitInput(url)
   const result = flow.submitInput(key)
   assert.equal(result.kind, 'probe')
   if (result.kind !== 'probe') throw new Error('unreachable')
   assert.equal(flow.view().kind, 'busy')
   return result
+}
+
+/** D2：把未知模型补参步走完（回车用默认数字 + 指定模板），直到离开补参序列。 */
+function answerUnknownModels(flow: ConnectFlow, template: 'generic' | 'reasoning' = 'generic'): void {
+  while (flow.view().kind === 'input' && /未知模型补参/.test(flow.view().title)) {
+    assert.equal(flow.submitInput('').kind, 'next')
+    assert.equal(flow.submitInput('').kind, 'next')
+    assert.equal(flow.submitChoice(template).kind, 'next')
+  }
 }
 
 test('provider step lists built-in presets plus a custom option', () => {
@@ -43,7 +53,48 @@ test('provider step lists built-in presets plus a custom option', () => {
   assert.match(deepseek?.description ?? '', /^https?:\/\//)
 })
 
-test('preset path: 6 steps — key → endpoint → models → capability → connectivity → save', () => {
+test('A1: pasted full request URL is normalized — probe and commit use the base (DIY)', () => {
+  const flow = new ConnectFlow()
+  const probe = toProbe(flow, { url: 'https://api.example.com/v1/chat/completions' })
+  assert.equal(probe.baseUrl, 'https://api.example.com/v1')
+  flow.applyProbe(report({ models: ['some-model'] }))
+  assert.match(flow.view().subtitle ?? '', /已规范化/)
+  flow.submitChoice('continue')
+  flow.confirm()
+  answerUnknownModels(flow)
+  flow.submitChoice('none')
+  flow.submitInput('example-com')
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind === 'commit' && result.commit.mode === 'custom') {
+    assert.equal(result.commit.baseUrl, 'https://api.example.com/v1')
+  }
+})
+
+test('A1: preset endpoint step normalizes a pasted models URL before probing', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('deepseek')
+  flow.submitInput('sk-test')
+  const probe = flow.submitInput('https://api.deepseek.com/v1/models')
+  assert.equal(probe.kind, 'probe')
+  if (probe.kind === 'probe') assert.equal(probe.baseUrl, 'https://api.deepseek.com/v1')
+})
+
+test('A2: preset half-pass (completion ok, models failed) shows the report page first', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('deepseek')
+  flow.submitInput('sk-test')
+  flow.submitInput('')
+  // 百炼按量计费形态：/models 400 降级，补全通——不能静默进模型步。
+  const after = flow.applyProbe(report({ models: [], modelsOk: false, completionOk: true }))
+  assert.equal(after.kind, 'next')
+  assert.match(flow.view().title, /连通性测试/)
+  const cont = flow.submitChoice('continue')
+  assert.equal(cont.kind, 'next')
+  assert.match(flow.view().title, /选择要添加的模型/)
+})
+
+test('preset path: 6 steps — key → endpoint → connectivity → models → capability → save', () => {
   const flow = new ConnectFlow()
   assert.equal(flow.submitChoice('deepseek').kind, 'next')
   const keyView = flow.view()
@@ -65,35 +116,35 @@ test('preset path: 6 steps — key → endpoint → models → capability → co
   assert.equal(probe.apiKey, 'sk-test-123')
   assert.equal(probe.probeModel, 'deepseek-v4-pro')
 
-  // [3/6] Model selection — preset templates checked by default.
+  // [3/6] Connectivity report — right after the probe (narrative order).
   assert.equal(flow.applyProbe(report({ models: ['deepseek-v4-pro'], latencyMs: 132 })).kind, 'next')
+  const reportView = flow.view()
+  assert.match(reportView.title, /连通性测试通过/)
+  assert.equal(reportView.stepLabel, '步骤 3 / 6')
+  const texts = (reportView.report ?? []).map(l => l.text)
+  assert.ok(texts.some(t => /✔ 1\/3 检查端点连通性/.test(t)), 'checklist line 1')
+  assert.ok(texts.some(t => /✔ 2\/3 获取模型列表（1 个）/.test(t)), 'checklist line 2')
+  assert.ok(texts.some(t => /✔ 3\/3 发送最小推理请求（首字节 132ms）/.test(t)), 'checklist line 3')
+
+  // [4/6] Model selection — preset templates checked by default.
+  assert.equal(flow.submitChoice('continue').kind, 'next')
   const modelsView = flow.view()
   assert.equal(modelsView.kind, 'multi-choice')
-  assert.equal(modelsView.stepLabel, '步骤 3 / 6')
+  assert.equal(modelsView.stepLabel, '步骤 4 / 6')
   assert.deepEqual(modelsView.options?.map(o => o.label), ['deepseek-v4-pro', 'deepseek-v4-flash'])
   assert.deepEqual(modelsView.options?.map(o => o.checked), [true, true])
   assert.match(modelsView.options?.[0]?.description ?? '', /预设/)
 
-  // [4/6] Capability check — measured rows + metadata inferences.
+  // [5/6] Capability check — measured rows + metadata inferences.
   assert.equal(flow.confirm().kind, 'next')
   const capView = flow.view()
   assert.match(capView.title, /能力检测/)
-  assert.equal(capView.stepLabel, '步骤 4 / 6')
+  assert.equal(capView.stepLabel, '步骤 5 / 6')
   const caps = (capView.report ?? []).map(l => l.text)
   assert.ok(caps.some(t => /✔ Chat Completion（实测）/.test(t)), 'completion row')
   assert.ok(caps.some(t => /✔ 流式输出 SSE（实测）/.test(t)), 'streaming row')
   assert.ok(caps.some(t => /✔ Tool Calling/.test(t)), 'tool calling row')
   assert.ok(caps.some(t => /满足 coding agent 的基本要求/.test(t)), 'verdict row')
-
-  // [5/6] Connectivity test — full 3-check checklist.
-  assert.equal(flow.submitChoice('continue').kind, 'next')
-  const reportView = flow.view()
-  assert.match(reportView.title, /连通性测试通过/)
-  assert.equal(reportView.stepLabel, '步骤 5 / 6')
-  const texts = (reportView.report ?? []).map(l => l.text)
-  assert.ok(texts.some(t => /✔ 1\/3 检查端点连通性/.test(t)), 'checklist line 1')
-  assert.ok(texts.some(t => /✔ 2\/3 获取模型列表（1 个）/.test(t)), 'checklist line 2')
-  assert.ok(texts.some(t => /✔ 3\/3 发送最小推理请求（首字节 132ms）/.test(t)), 'checklist line 3')
 
   // [6/6] Save confirm with the capability-check summary.
   assert.equal(flow.submitChoice('continue').kind, 'next')
@@ -126,7 +177,7 @@ test('preset path: failed probe shows a structured report with causes and advice
   const view = flow.view()
   assert.equal(view.kind, 'choice')
   assert.match(view.title, /连通性测试未通过/)
-  assert.equal(view.stepLabel, '步骤 5 / 6')
+  assert.equal(view.stepLabel, '步骤 3 / 6')
   const texts = (view.report ?? []).map(l => l.text)
   assert.ok(texts.some(t => /✘ 1\/3 检查端点连通性/.test(t)))
   assert.ok(texts.some(t => /Authentication failed/.test(t)), 'error line present')
@@ -190,6 +241,7 @@ test('diy path: url → key emits a probe request (empty key allowed for local e
 
   const local = new ConnectFlow()
   local.submitChoice('custom')
+  local.submitChoice('openai')
   local.submitInput('http://127.0.0.1:11434/v1')
   const localProbe = local.submitInput('')
   assert.equal(localProbe.kind, 'probe')
@@ -199,6 +251,7 @@ test('diy path: url → key emits a probe request (empty key allowed for local e
 test('diy path rejects a non-url base address', () => {
   const flow = new ConnectFlow()
   flow.submitChoice('custom')
+  flow.submitChoice('openai')
   const result = flow.submitInput('not-a-url')
   assert.equal(result.kind, 'error')
   assert.equal(flow.view().title, '输入服务商 API 地址')
@@ -235,6 +288,7 @@ test('diy path: probed models become a multi-select with metadata backfill', () 
 
   const confirmed = flow.confirm()
   assert.equal(confirmed.kind, 'next')
+  answerUnknownModels(flow, 'reasoning')
 
   // Thinking question — hint pre-recommends the split option.
   const thinkingView = flow.view()
@@ -335,6 +389,7 @@ test('diy path: preset name is rejected at the name step', () => {
   flow.applyProbe(report({ models: ['some-model'] }))
   flow.submitChoice('continue')
   flow.confirm()
+  answerUnknownModels(flow)
   flow.submitChoice('none')
   const result = flow.submitInput('deepseek')
   assert.equal(result.kind, 'error')
@@ -347,6 +402,7 @@ test('diy path: invalid provider name characters rejected', () => {
   flow.applyProbe(report({ models: ['some-model'] }))
   flow.submitChoice('continue')
   flow.confirm()
+  answerUnknownModels(flow)
   flow.submitChoice('none')
   const result = flow.submitInput('My Provider!')
   assert.equal(result.kind, 'error')
@@ -469,9 +525,9 @@ test('draft: valid draft opens the resume prompt; resume restores the key step',
   assert.equal(flow.submitInput('sk-test-123').kind, 'next')
   const probe = flow.submitInput('')
   assert.equal(probe.kind, 'probe')
-  assert.equal(flow.applyProbe(report()).kind, 'next')      // [3/6] models
-  assert.equal(flow.confirm().kind, 'next')                 // [4/6] capability
-  assert.equal(flow.submitChoice('continue').kind, 'next')  // [5/6] report
+  assert.equal(flow.applyProbe(report()).kind, 'next')      // [3/6] report
+  assert.equal(flow.submitChoice('continue').kind, 'next')  // [4/6] models
+  assert.equal(flow.confirm().kind, 'next')                 // [5/6] capability
   assert.equal(flow.submitChoice('continue').kind, 'next')  // [6/6] confirm
   const commit = flow.submitChoice('save')
   assert.equal(commit.kind, 'commit')
@@ -618,7 +674,7 @@ test('provider step lists the new spec presets (kimi/openai/volc/ollama) + compa
   assert.match(ollama?.description ?? '', /免密钥/)
 })
 
-test('kimi preset: key → endpoint → probe → models → capability → report → commit', () => {
+test('kimi preset: key → endpoint → probe → report → models → capability → commit', () => {
   const flow = new ConnectFlow()
   const afterPick = flow.submitChoice('kimi')
   assert.equal(afterPick.kind, 'next')
@@ -627,11 +683,11 @@ test('kimi preset: key → endpoint → probe → models → capability → repo
   const probe = flow.submitInput('')
   assert.equal(probe.kind, 'probe')
   assert.equal(flow.applyProbe(report()).kind, 'next')
+  assert.match(flow.view().title, /连通性测试/)
+  assert.equal(flow.submitChoice('continue').kind, 'next')
   if (flow.view().kind === 'multi-choice') {
     assert.equal(flow.confirm().kind, 'next')
     assert.match(flow.view().title, /能力检测/)
-    assert.equal(flow.submitChoice('continue').kind, 'next')
-    assert.match(flow.view().title, /连通性测试/)
     assert.equal(flow.submitChoice('continue').kind, 'next')
   }
   assert.match(flow.view().title, /确认保存/)
@@ -651,25 +707,182 @@ test('openai-compat choice routes into the DIY url step', () => {
   assert.match(flow.view().title, /API 地址/)
 })
 
-test('ollama keyless: pick → probe immediately (no key step)', () => {
+test('B3: custom entry asks the wire protocol first (step 1 / 9)', () => {
+  const flow = new ConnectFlow()
+  assert.equal(flow.submitChoice('custom').kind, 'next')
+  const view = flow.view()
+  assert.equal(view.kind, 'choice')
+  assert.match(view.title, /协议/)
+  assert.equal(view.stepLabel, '步骤 1 / 9')
+  assert.deepEqual(view.options?.map(o => o.id), ['openai', 'anthropic'])
+  assert.equal(flow.submitChoice('ghost').kind, 'error')
+  assert.equal(flow.submitChoice('openai').kind, 'next')
+  assert.equal(flow.view().stepLabel, '步骤 2 / 9')
+})
+
+test('B3: anthropic protocol flows through probe and commit', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('custom')
+  flow.submitChoice('anthropic')
+  assert.match(flow.view().subtitle ?? '', /Anthropic/)
+  flow.submitInput('https://api.anthropic.com')
+  const probe = flow.submitInput('sk-ant-x')
+  assert.equal(probe.kind, 'probe')
+  if (probe.kind !== 'probe') return
+  assert.equal(probe.protocol, 'anthropic')
+  flow.applyProbe(report({ models: ['claude-sonnet-4-5'] }))
+  flow.submitChoice('continue')
+  flow.confirm()
+  flow.submitChoice('none')
+  flow.submitInput('anthropic-relay')
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') return
+  assert.equal(result.commit.protocol, 'anthropic')
+})
+
+test('B3: diy-url draft keeps the chosen protocol on resume', () => {
+  const flow = new ConnectFlow([], draft({
+    phase: 'diy-url',
+    collected: { protocol: 'anthropic' },
+  }))
+  flow.submitChoice('resume')
+  assert.match(flow.view().title, /API 地址/)
+  assert.match(flow.view().subtitle ?? '', /Anthropic/)
+  flow.submitInput('https://api.anthropic.com')
+  const probe = flow.submitInput('sk-ant-x')
+  assert.equal(probe.kind, 'probe')
+  if (probe.kind === 'probe') assert.equal(probe.protocol, 'anthropic')
+})
+
+// ── C1: 默认服务商替换确认（仅当已有「另一个」默认时询问）──
+
+function diyToName(flow: ConnectFlow): void {
+  toProbe(flow)
+  flow.applyProbe(report({ models: ['some-model'] }))
+  flow.submitChoice('continue')
+  flow.confirm()
+  answerUnknownModels(flow)
+  flow.submitChoice('none')
+}
+
+test('C1: another default exists → ask-default gate before confirm (yes replaces)', () => {
+  const flow = new ConnectFlow([], undefined, undefined, 'deepseek')
+  diyToName(flow)
+  flow.submitInput('my-relay')
+  assert.match(flow.view().title, /设为默认/)
+  assert.match(flow.view().subtitle ?? '', /deepseek/)
+  assert.equal(flow.submitChoice('yes').kind, 'next')
+  assert.match(flow.view().title, /确认保存/)
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') return
+  assert.equal(result.commit.makeDefault, true)
+})
+
+test('C1: answering no keeps the existing default on commit', () => {
+  const flow = new ConnectFlow([], undefined, undefined, 'deepseek')
+  diyToName(flow)
+  flow.submitInput('my-relay')
+  assert.equal(flow.submitChoice('no').kind, 'next')
+  assert.match(flow.view().title, /确认保存/)
+  assert.match(flow.view().subtitle ?? '', /保留现有默认/)
+  const result = flow.submitChoice('save')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') throw new Error('expected custom commit')
+  assert.equal(result.commit.makeDefault, false)
+})
+
+test('C1: confirm back returns to the question, then further back to naming', () => {
+  const flow = new ConnectFlow([], undefined, undefined, 'deepseek')
+  diyToName(flow)
+  flow.submitInput('my-relay')
+  flow.submitChoice('yes')
+  assert.match(flow.view().title, /确认保存/)
+  assert.equal(flow.submitChoice('back').kind, 'next')
+  assert.match(flow.view().title, /设为默认/)
+  assert.equal(flow.submitChoice('back').kind, 'next')
+  assert.match(flow.view().title, /起个名字/)
+  assert.equal(flow.takeRestoredInput(), 'my-relay')
+})
+
+test('C1: no existing default → straight to confirm, silently default', () => {
+  const flow = new ConnectFlow()
+  diyToName(flow)
+  flow.submitInput('my-relay')
+  assert.match(flow.view().title, /确认保存/)
+  const result = flow.submitChoice('save')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') throw new Error('expected custom commit')
+  assert.equal(result.commit.makeDefault, true)
+})
+
+test('C1: reconfiguring the provider that is already default skips the question', () => {
+  const flow = new ConnectFlow([], undefined, undefined, 'deepseek')
+  flow.submitChoice('deepseek')
+  flow.submitInput('sk-x')
+  flow.submitInput('')
+  flow.applyProbe(report({ models: ['deepseek-v4-pro'] }))
+  flow.submitChoice('continue')
+  flow.confirm()
+  flow.submitChoice('continue')
+  assert.match(flow.view().title, /确认保存/)
+})
+
+test('C2: WorkspaceId template step carries the console path hint', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('dashscope')
+  flow.submitChoice('payg')
+  flow.submitInput('sk-x')
+  assert.match(flow.view().subtitle ?? '', /业务空间/)
+  const blocked = flow.submitInput('')
+  assert.equal(blocked.kind, 'error')
+  if (blocked.kind === 'error') assert.match(blocked.message, /业务空间/)
+})
+
+test('ollama keyless: pick → endpoint confirm (prefilled, editable) → probe', () => {
   const flow = new ConnectFlow()
   const result = flow.submitChoice('ollama')
-  assert.equal(result.kind, 'probe')
-  if (result.kind !== 'probe') return
-  assert.equal(result.baseUrl, 'http://127.0.0.1:11434/v1')
-  assert.equal(result.apiKey, undefined)
+  assert.equal(result.kind, 'next')
+  const view = flow.view()
+  assert.equal(view.kind, 'input')
+  assert.match(view.title, /服务地址/)
+  assert.equal(view.defaultValue, 'http://127.0.0.1:11434/v1')
+  // Enter accepts the prefilled address and fires the probe without a key.
+  const probe = flow.submitInput('')
+  assert.equal(probe.kind, 'probe')
+  if (probe.kind !== 'probe') return
+  assert.equal(probe.baseUrl, 'http://127.0.0.1:11434/v1')
+  assert.equal(probe.apiKey, undefined)
   assert.equal(flow.view().kind, 'busy')
+})
+
+test('ollama keyless: edited endpoint address is probed and committed', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('ollama')
+  const probe = flow.submitInput('http://192.168.1.50:11434/v1')
+  assert.equal(probe.kind, 'probe')
+  if (probe.kind !== 'probe') return
+  assert.equal(probe.baseUrl, 'http://192.168.1.50:11434/v1')
+  flow.applyProbe(report({ models: ['qwen3:8b'] }))
+  flow.submitChoice('continue')
+  flow.confirm()
+  flow.submitChoice('none')
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'preset') return
+  assert.equal(result.commit.setup.baseUrl, 'http://192.168.1.50:11434/v1')
 })
 
 test('ollama keyless: probe success → report → models → thinking → confirm → preset commit', () => {
   const flow = new ConnectFlow()
   flow.submitChoice('ollama')
+  flow.submitInput('')
   flow.applyProbe(report({ models: ['qwen3:8b', 'llama3.1'] }))
   assert.match(flow.view().title, /连通性测试/)
   assert.equal(flow.submitChoice('continue').kind, 'next')
   assert.equal(flow.view().kind, 'multi-choice')
   const confirmed = flow.confirm()
   assert.equal(confirmed.kind, 'next')
+  answerUnknownModels(flow)
   assert.equal(flow.submitChoice('none').kind, 'next')
   assert.match(flow.view().title, /确认保存/)
   const result = flow.submitChoice('save')
@@ -680,12 +893,17 @@ test('ollama keyless: probe success → report → models → thinking → confi
   assert.equal(result.commit.setup.providerName, 'ollama')
   assert.equal(result.commit.setup.preset, 'ollama')
   assert.deepEqual(result.commit.setup.models?.map(m => m.id), ['qwen3:8b', 'llama3.1'])
+  // D2：llama3.1 不在别名表——补参（默认窗口/输出）落进 commit；
+  // qwen3:8b 走 L2 归一命中 qwen3 条目，直接用别名表元数据。
+  assert.equal(result.commit.setup.models?.[1]?.contextWindow, 131_072)
+  assert.equal(result.commit.setup.models?.[1]?.maxTokens, 32_768)
   assert.equal(result.commit.setup.apiKey, undefined)
 })
 
 test('ollama keyless: probe without model list → manual model → preset commit', () => {
   const flow = new ConnectFlow()
   flow.submitChoice('ollama')
+  flow.submitInput('')
   flow.applyProbe(report({ models: [] }))
   assert.match(flow.view().title, /连通性测试/)
   assert.equal(flow.submitChoice('continue').kind, 'next')
@@ -737,6 +955,25 @@ test('draft: preset transient phases resume at the endpoint step; Enter re-probe
   }
 })
 
+test('draft: keyless (ollama) drafts resume at the endpoint step and re-probe keyless', () => {
+  for (const phase of ['preset-endpoint', 'preset-probing', 'probe-report'] as const) {
+    const flow = new ConnectFlow([], draft({
+      phase,
+      collected: { presetKey: 'ollama' },
+    }))
+    flow.submitChoice('resume')
+    const view = flow.view()
+    assert.equal(view.kind, 'input', phase)
+    assert.match(view.title, /服务地址/, phase)
+    const probe = flow.submitInput('')
+    assert.equal(probe.kind, 'probe', phase)
+    if (probe.kind === 'probe') {
+      assert.equal(probe.apiKey, undefined, phase)
+      assert.equal(probe.baseUrl, 'http://127.0.0.1:11434/v1', phase)
+    }
+  }
+})
+
 test('draft: preset confirm without a selection resumes at the key step', () => {
   const flow = new ConnectFlow([], draft({
     phase: 'confirm',
@@ -761,6 +998,28 @@ test('draft: preset-endpoint resume keeps the edited URL and restored key', () =
   if (probe.kind === 'probe') {
     assert.equal(probe.baseUrl, 'https://relay.example.com/v1')
     assert.equal(probe.apiKey, 'sk-saved')
+  }
+})
+
+test('draft: resuming past the key step keeps the restored key through commit', () => {
+  for (const phase of ['preset-models', 'capability'] as const) {
+    const flow = new ConnectFlow([], draft({
+      phase,
+      collected: {
+        presetKey: 'deepseek',
+        keyRef: 'deepseek',
+        probedSelection: [{ rawId: 'deepseek-v4-pro', checked: true }],
+      },
+    }), 'sk-saved')
+    flow.submitChoice('resume')
+    assert.match(flow.view().title, /选择要添加的模型/, phase)
+    assert.equal(flow.confirm().kind, 'next', phase)
+    assert.equal(flow.submitChoice('continue').kind, 'next', phase)
+    const result = flow.submitChoice('save')
+    assert.equal(result.kind, 'commit', phase)
+    if (result.kind !== 'commit' || result.commit.mode !== 'preset') continue
+    // 回归点：恢复链跳过密钥步时 commit 必须仍带密钥，否则 provider 落盘无凭证。
+    assert.equal(result.commit.setup.apiKey, 'sk-saved', phase)
   }
 })
 
@@ -798,13 +1057,15 @@ test('spec guard: no keyed preset commits straight from the key step', () => {
     const result = flow.submitInput(endpointInput)
     assert.notEqual(result.kind, 'commit', `${key} committed without probe/confirm`)
     assert.equal(result.kind, 'probe', key)
-    // 探测通过 → 模型 → 能力检测 → 连通性测试 → 确认步，全程无自动落盘。
+    // 探测通过 → 报告 → 模型 → 能力检测 → 确认步，全程无自动落盘。
     assert.equal(flow.applyProbe(report()).kind, 'next', key)
+    assert.match(flow.view().title, /连通性测试/, key)
+    assert.equal(flow.submitChoice('continue').kind, 'next', key)
     if (flow.view().kind === 'multi-choice') {
+      // 聚合平台默认全不选——先全选再确认，走通后续步骤。
+      if (preset.aggregator) assert.equal(flow.toggleAllModels().kind, 'next', `${key} select-all`)
       assert.equal(flow.confirm().kind, 'next', key)
       assert.match(flow.view().title, /能力检测/, key)
-      assert.equal(flow.submitChoice('continue').kind, 'next', key)
-      assert.match(flow.view().title, /连通性测试/, key)
       assert.equal(flow.submitChoice('continue').kind, 'next', key)
     }
     assert.match(flow.view().title, /确认保存/, key)
@@ -826,16 +1087,15 @@ test('draft: preset-models resume rebuilds the selection and commits it', () => 
   flow.submitChoice('resume')
   const view = flow.view()
   assert.equal(view.kind, 'multi-choice')
-  assert.equal(view.stepLabel, '步骤 3 / 6')
+  assert.equal(view.stepLabel, '步骤 4 / 6')
   assert.equal(view.options?.[0]?.label, 'deepseek-v4-pro')
   assert.equal(view.options?.[0]?.checked, true)
   assert.equal(view.options?.[1]?.checked, false)
-  // Save walks capability → probe-report (no report after restore) → commit.
+  // Save walks capability → confirm → commit.
   assert.equal(flow.confirm().kind, 'next')
   assert.match(flow.view().title, /能力检测/)
   assert.equal(flow.submitChoice('continue').kind, 'next')
-  assert.match(flow.view().title, /连通性测试/)
-  assert.equal(flow.submitChoice('save-anyway').kind, 'next')
+  assert.match(flow.view().title, /确认保存/)
   const result = flow.submitChoice('save')
   assert.equal(result.kind, 'commit')
   if (result.kind !== 'commit' || result.commit.mode !== 'preset') return
@@ -848,27 +1108,26 @@ test('confirm back: preset returns to capability, then to model selection', () =
   flow.submitInput('sk-x')
   flow.submitInput('')
   flow.applyProbe(report({ models: ['deepseek-v4-pro'] }))
-  flow.confirm()
   flow.submitChoice('continue')
+  flow.confirm()
   flow.submitChoice('continue')
   assert.match(flow.view().title, /确认保存/)
   assert.equal(flow.submitChoice('back').kind, 'next')
   assert.match(flow.view().title, /能力检测/)
   assert.equal(flow.submitChoice('back').kind, 'next')
   assert.equal(flow.view().kind, 'multi-choice')
-  assert.equal(flow.view().stepLabel, '步骤 3 / 6')
+  assert.equal(flow.view().stepLabel, '步骤 4 / 6')
   // Re-walk and save still commits the same config.
   assert.equal(flow.confirm().kind, 'next')
-  flow.submitChoice('continue')
   flow.submitChoice('continue')
   assert.equal(flow.submitChoice('save').kind, 'commit')
 })
 
 // ── billing-mode step (dashscope: 按量计费 / token plan) ──
 
-const PAYG_URL = 'https://ws-123.cn-beijing.maas.aliyuncs.com/api/v1'
+const PAYG_URL = 'https://ws-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'
 
-test('dashscope: 7 steps — billing → key → endpoint({WorkspaceId}) → models → capability → connectivity → save', () => {
+test('dashscope: 7 steps — billing → key → endpoint({WorkspaceId}) → report → models → capability → save', () => {
   const flow = new ConnectFlow()
   assert.equal(flow.submitChoice('dashscope').kind, 'next')
 
@@ -889,7 +1148,7 @@ test('dashscope: 7 steps — billing → key → endpoint({WorkspaceId}) → mod
   // [3/7] Endpoint prefilled from the payg template — placeholder must be replaced.
   const urlView = flow.view()
   assert.equal(urlView.stepLabel, '步骤 3 / 7')
-  assert.equal(urlView.defaultValue, 'https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1')
+  assert.equal(urlView.defaultValue, 'https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1')
   assert.match(urlView.subtitle ?? '', /WorkspaceId/)
   const blocked = flow.submitInput('') // Enter keeps the unfilled template
   assert.equal(blocked.kind, 'error')
@@ -900,12 +1159,12 @@ test('dashscope: 7 steps — billing → key → endpoint({WorkspaceId}) → mod
   assert.equal(probe.baseUrl, PAYG_URL)
   assert.equal(probe.apiKey, 'sk-bailian')
 
-  // [4/7] models → [5/7] capability → [6/7] connectivity → [7/7] confirm.
-  assert.equal(flow.applyProbe(report({ models: ['qwen3-max'] })).kind, 'next')
+  // [4/7] report → [5/7] models → [6/7] capability → [7/7] confirm.
+  assert.equal(flow.applyProbe(report({ models: ['qwen3.8-max'] })).kind, 'next')
   assert.equal(flow.view().stepLabel, '步骤 4 / 7')
-  assert.equal(flow.confirm().kind, 'next')
-  assert.equal(flow.view().stepLabel, '步骤 5 / 7')
   assert.equal(flow.submitChoice('continue').kind, 'next')
+  assert.equal(flow.view().stepLabel, '步骤 5 / 7')
+  assert.equal(flow.confirm().kind, 'next')
   assert.equal(flow.view().stepLabel, '步骤 6 / 7')
   assert.equal(flow.submitChoice('continue').kind, 'next')
   const confirmView = flow.view()
@@ -932,9 +1191,9 @@ test('dashscope: token plan prefills its own endpoint and commits it', () => {
   assert.equal(probe.kind, 'probe')
   if (probe.kind !== 'probe') return
   assert.equal(probe.baseUrl, 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1')
-  flow.applyProbe(report({ models: ['qwen3-max'] }))
-  flow.confirm()
+  flow.applyProbe(report({ models: ['qwen3.8-max'] }))
   flow.submitChoice('continue')
+  flow.confirm()
   flow.submitChoice('continue')
   const result = flow.submitChoice('save')
   assert.equal(result.kind, 'commit')
@@ -970,9 +1229,9 @@ test('draft: dashscope billing + edited URL round-trips and keeps the override o
   assert.match(restored.view().title, /服务地址/)
   const probe = restored.submitInput(PAYG_URL)
   assert.equal(probe.kind, 'probe')
-  restored.applyProbe(report({ models: ['qwen3-max'] }))
-  restored.confirm()
+  restored.applyProbe(report({ models: ['qwen3.8-max'] }))
   restored.submitChoice('continue')
+  restored.confirm()
   restored.submitChoice('continue')
   const result = restored.submitChoice('save')
   assert.equal(result.kind, 'commit')
@@ -1002,4 +1261,393 @@ test('quota-exhausted probe errors get account-level guidance, not key advice', 
   const texts = (flow.view().report ?? []).map(l => l.text)
   assert.ok(texts.some(t => /免费额度已用完/.test(t)), 'quota cause present')
   assert.ok(!texts.some(t => /重新输入 API Key/.test(t)), 'misleading key advice dropped')
+})
+
+// ── D1 聚合平台多选：默认全不选 / 搜索 / 全选 ─────────────────────
+
+/** Drive an aggregator preset (siliconflow) to the models multi-choice step. */
+function siliconflowToModels(flow: ConnectFlow, discovered: string[] = []): void {
+  flow.submitChoice('siliconflow')
+  flow.submitInput('sk-sf')
+  flow.submitInput('')
+  flow.applyProbe(report({ models: [...PROVIDER_PRESETS.siliconflow.provider.models.map(m => m.id), ...discovered] }))
+  assert.equal(flow.submitChoice('continue').kind, 'next')
+  assert.equal(flow.view().kind, 'multi-choice')
+}
+
+test('D1: aggregator preset defaults ALL models to unchecked (template + discovered)', () => {
+  const flow = new ConnectFlow()
+  siliconflowToModels(flow, ['vendor/mystery-model'])
+  const view = flow.view()
+  assert.deepEqual(view.options?.map(o => o.checked), view.options?.map(() => false))
+  assert.match(view.subtitle ?? '', /聚合平台/)
+  // 非聚合 preset 不受影响——模板默认勾选。
+  const plain = new ConnectFlow()
+  plain.submitChoice('deepseek')
+  plain.submitInput('sk-x')
+  plain.submitInput('')
+  plain.applyProbe(report({ models: ['deepseek-v4-pro'] }))
+  plain.submitChoice('continue')
+  assert.deepEqual(plain.view().options?.map(o => o.checked), [true, true])
+})
+
+test('D1: aggregator with nothing checked cannot confirm (guarded error)', () => {
+  const flow = new ConnectFlow()
+  siliconflowToModels(flow)
+  const res = flow.confirm()
+  assert.equal(res.kind, 'error')
+  assert.match(res.kind === 'error' ? res.message : '', /至少勾选一个模型/)
+})
+
+test('D1: type-to-search filters options but ids keep mapping to real indexes', () => {
+  const flow = new ConnectFlow()
+  siliconflowToModels(flow, ['vendor/mystery-model'])
+  const total = flow.view().options?.length ?? 0
+  assert.ok(total >= 6)
+  assert.equal(flow.view().filter, '')
+  assert.equal(flow.view().optionTotal, total)
+
+  for (const ch of 'mystery') flow.typeModelFilter(ch)
+  const filtered = flow.view()
+  assert.equal(filtered.filter, 'mystery')
+  assert.deepEqual(filtered.options?.map(o => o.label), ['vendor/mystery-model'])
+  assert.equal(filtered.optionTotal, total)
+  // id 仍是原数组下标——toggle 按 id 打到正确条目。
+  const id = filtered.options?.[0]?.id
+  assert.notEqual(id, '0')
+  assert.equal(flow.toggle(id!).kind, 'next')
+  assert.equal(flow.view().options?.[0]?.checked, true)
+
+  flow.backspaceModelFilter()
+  assert.equal(flow.view().filter, 'myster')
+  flow.clearModelFilter()
+  assert.equal(flow.view().filter, '')
+  assert.equal(flow.view().options?.length, total)
+})
+
+test('D1: Ctrl+A select-all toggles everything; with a filter it only touches matches', () => {
+  const flow = new ConnectFlow()
+  siliconflowToModels(flow, ['vendor/mystery-model'])
+  const total = flow.view().options?.length ?? 0
+
+  // 带过滤的全选：只勾匹配项。
+  for (const ch of 'mystery') flow.typeModelFilter(ch)
+  assert.equal(flow.toggleAllModels().kind, 'next')
+  assert.equal(flow.view().options?.[0]?.checked, true)
+  flow.clearModelFilter()
+  const checkedCount = () => (flow.view().options ?? []).filter(o => o.checked).length
+  assert.equal(checkedCount(), 1)
+
+  // 空过滤全选：全部勾上；再来一次全部取消。
+  assert.equal(flow.toggleAllModels().kind, 'next')
+  assert.equal(checkedCount(), total)
+  assert.equal(flow.toggleAllModels().kind, 'next')
+  assert.equal(checkedCount(), 0)
+
+  // 过滤无匹配 → 报错而不是乱勾。
+  for (const ch of 'zzz-no-such') flow.typeModelFilter(ch)
+  const res = flow.toggleAllModels()
+  assert.equal(res.kind, 'error')
+})
+
+test('D1: DIY models step also supports search and select-all', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe(report({ models: ['alpha-one', 'beta-two'] }))
+  flow.submitChoice('continue')
+  assert.equal(flow.view().kind, 'multi-choice')
+  // DIY 探测默认全勾——先手动全取消，再验证过滤全选只勾匹配项。
+  flow.toggle('0')
+  flow.toggle('1')
+  flow.typeModelFilter('beta')
+  assert.deepEqual(flow.view().options?.map(o => o.label), ['beta-two'])
+  flow.toggleAllModels()
+  flow.clearModelFilter()
+  assert.deepEqual(flow.view().options?.map(o => [o.label, o.checked]), [['alpha-one', false], ['beta-two', true]])
+})
+
+test('D1: filter is transient — confirm resets it and keeps only picked models', () => {
+  const flow = new ConnectFlow()
+  siliconflowToModels(flow)
+  flow.toggleAllModels()
+  flow.typeModelFilter('GLM')
+  assert.ok((flow.view().options?.length ?? 0) > 0)
+  assert.equal(flow.confirm().kind, 'next')
+  assert.match(flow.view().title, /能力检测/)
+  // 回到模型步（capability → back）时过滤器已清。
+  flow.submitChoice('back')
+  assert.equal(flow.view().filter, '')
+})
+
+// ── D2 未知模型高级选项（补参）─────────────────────────────────────
+
+test('D2: DIY unknown model walks context → max → template; values land in commit', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe(report({ models: ['acme/x-9000'] }))
+  flow.submitChoice('continue')
+  assert.equal(flow.confirm().kind, 'next')
+
+  const ctxView = flow.view()
+  assert.equal(ctxView.kind, 'input')
+  assert.match(ctxView.title, /上下文窗口/)
+  assert.match(ctxView.subtitle ?? '', /acme\/x-9000/)
+  assert.equal(ctxView.defaultValue, '131072')
+
+  // 非数字与超窗都有守卫。
+  assert.equal(flow.submitInput('abc').kind, 'error')
+  assert.equal(flow.submitInput('200000').kind, 'next')
+  assert.equal(flow.submitInput('999999').kind, 'error')
+  assert.match(flow.view().title, /最大输出/)
+  assert.equal(flow.submitInput('').kind, 'next') // 默认 32768
+
+  const tplView = flow.view()
+  assert.equal(tplView.kind, 'choice')
+  assert.match(tplView.title, /能力模板/)
+  // 单个未知模型没有 apply-* 选项。
+  assert.ok(!(tplView.options ?? []).some(o => o.id.startsWith('apply-')))
+  assert.equal(flow.submitChoice('reasoning').kind, 'next')
+  assert.match(flow.view().title, /深度思考/) // diy-thinking
+
+  flow.submitChoice('none')
+  flow.submitInput('acme-relay')
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') return
+  const model = result.commit.models[0]!
+  assert.equal(model.id, 'acme/x-9000')
+  assert.equal(model.contextWindow, 200_000)
+  assert.equal(model.maxTokens, 32_768)
+  assert.deepEqual(model.capabilities, { reasoningSplit: true })
+})
+
+test('D2: apply-rest stamps the same override onto all remaining unknowns', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe(report({ models: ['uno-unknown', 'dos-unknown', 'tres-unknown'] }))
+  flow.submitChoice('continue')
+  flow.confirm()
+  flow.submitInput('')
+  flow.submitInput('')
+  const tpl = flow.view()
+  assert.ok((tpl.options ?? []).some(o => o.id === 'apply-generic'), '其余 2 个未知 → 出现 apply 选项')
+  assert.equal(flow.submitChoice('apply-generic').kind, 'next')
+  // 队列一次清空——直接到思考步，不再逐个补参。
+  assert.match(flow.view().title, /深度思考/)
+  flow.submitChoice('none')
+  flow.submitInput('bulk')
+  const result = flow.submitChoice('save')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') throw new Error('expected custom commit')
+  for (const m of result.commit.models) {
+    assert.equal(m.contextWindow, 131_072)
+    assert.equal(m.maxTokens, 32_768)
+    assert.equal(m.capabilities, undefined, 'generic 模板不带 reasoningSplit')
+  }
+})
+
+test('D2: preset path also stops at advanced steps for discovered unknowns', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('deepseek')
+  flow.submitInput('sk-x')
+  flow.submitInput('')
+  flow.applyProbe(report({ models: ['deepseek-v4-pro', 'deepseek-v4-flash', 'brand-new-mystery'] }))
+  flow.submitChoice('continue')
+  // 只勾新发现的未知模型（探测发现的未知项默认不勾——显式勾上）。
+  const view = flow.view()
+  const mysteryOpt = (view.options ?? []).find(o => o.label === 'brand-new-mystery')
+  assert.ok(mysteryOpt)
+  assert.equal(mysteryOpt!.checked, false)
+  flow.toggle('0')
+  flow.toggle('1')
+  flow.toggle('2')
+  assert.equal(flow.confirm().kind, 'next')
+  assert.match(flow.view().title, /未知模型补参/)
+  answerUnknownModels(flow)
+  // preset 路径补参完回能力检测步。
+  assert.match(flow.view().title, /能力检测/)
+})
+
+test('D2: back from the template step returns to model selection, overrides discarded', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe(report({ models: ['acme/x-9000'] }))
+  flow.submitChoice('continue')
+  flow.confirm()
+  flow.submitInput('99999')
+  flow.submitInput('8192')
+  assert.equal(flow.submitChoice('back').kind, 'next')
+  assert.equal(flow.view().kind, 'multi-choice')
+  // 重新确认走默认补参——99999 没被记住。
+  assert.equal(flow.confirm().kind, 'next')
+  assert.match(flow.view().subtitle ?? '', /acme\/x-9000/)
+  assert.equal(flow.view().defaultValue, '131072')
+})
+
+test('D2: draft saved on an advanced step downgrades to the models step', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe(report({ models: ['acme/x-9000'] }))
+  flow.submitChoice('continue')
+  flow.confirm()
+  flow.submitInput('50000')
+  const draft = flow.toDraft('12')
+  assert.ok(draft)
+  assert.equal(draft!.phase, 'diy-models')
+  // 半途数字不落盘，勾选集保留。
+  assert.ok(!JSON.stringify(draft).includes('50000'))
+  assert.deepEqual(draft!.collected.probedSelection, [{ rawId: 'acme/x-9000', checked: true }])
+})
+
+// ── 高级设置（OPT-003）：confirm 步可选入口 + 循环子菜单 ──
+
+/** Drive the deepseek preset path to the confirm step. */
+function toConfirmPreset(): ConnectFlow {
+  const flow = new ConnectFlow()
+  assert.equal(flow.submitChoice('deepseek').kind, 'next')
+  assert.equal(flow.submitInput('sk-test-123').kind, 'next')
+  const probe = flow.submitInput('')
+  assert.equal(probe.kind, 'probe')
+  if (probe.kind !== 'probe') throw new Error('unreachable')
+  assert.equal(flow.applyProbe(report({ models: ['deepseek-v4-pro'] })).kind, 'next')
+  assert.equal(flow.submitChoice('continue').kind, 'next') // [4/6] models
+  assert.equal(flow.confirm().kind, 'next')                // [5/6] capability
+  assert.equal(flow.submitChoice('continue').kind, 'next') // [6/6] confirm
+  return flow
+}
+
+test('advanced: confirm step exposes the optional entry; submenu lists 4 knobs unset', () => {
+  const flow = toConfirmPreset()
+  const confirmView = flow.view()
+  assert.ok((confirmView.options ?? []).some(o => o.id === 'advanced' && !o.recommended))
+
+  assert.equal(flow.submitChoice('advanced').kind, 'next')
+  const menu = flow.view()
+  assert.equal(menu.kind, 'choice')
+  assert.match(menu.title, /高级设置/)
+  // 步数标签不变——高级设置不是新步骤。
+  assert.equal(menu.stepLabel, '步骤 6 / 6')
+  const opts = menu.options ?? []
+  assert.deepEqual(opts.map(o => o.id), ['requestTimeoutMs', 'maxRetries', 'temperature', 'proxy', 'done'])
+  assert.match(opts[0]!.description ?? '', /未设置/)
+  assert.match(opts[3]!.description ?? '', /未设置/)
+  assert.equal(opts[4]!.recommended, true)
+})
+
+test('advanced: values round-trip into the menu and are forwarded to the commit', () => {
+  const flow = toConfirmPreset()
+  flow.submitChoice('advanced')
+
+  assert.equal(flow.submitChoice('requestTimeoutMs').kind, 'next')
+  assert.equal(flow.view().kind, 'input')
+  assert.equal(flow.takeRestoredInput(), '') // 未设置 → 空预填
+  assert.equal(flow.submitInput('300000').kind, 'next')
+
+  assert.equal(flow.submitChoice('temperature').kind, 'next')
+  assert.equal(flow.submitInput('0').kind, 'next')
+
+  assert.equal(flow.submitChoice('proxy').kind, 'next')
+  assert.equal(flow.submitInput('http://127.0.0.1:7890').kind, 'next')
+
+  const menu = flow.view()
+  assert.match(menu.options?.[0]?.description ?? '', /300000 ms/)
+  assert.match(menu.options?.[2]?.description ?? '', /^0$/)
+  assert.match(menu.options?.[3]?.description ?? '', /127\.0\.0\.1:7890/)
+
+  assert.equal(flow.submitChoice('done').kind, 'next')
+  assert.equal(flow.view().title.match(/确认保存/) !== null, true)
+  assert.match(flow.view().subtitle ?? '', /已调 3 项高级设置/)
+
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'preset') return
+  assert.deepEqual(result.commit.setup.advanced, {
+    requestTimeoutMs: 300000,
+    temperature: 0,
+    proxy: 'http://127.0.0.1:7890',
+  })
+})
+
+test('advanced: empty input clears a knob and the commit drops the advanced block', () => {
+  const flow = toConfirmPreset()
+  flow.submitChoice('advanced')
+  flow.submitChoice('maxRetries')
+  assert.equal(flow.submitInput('0').kind, 'next')
+  assert.match(flow.view().options?.[1]?.description ?? '', /^0 次$/)
+  // 再进子步：预填当前值；空回车清除。
+  flow.submitChoice('maxRetries')
+  assert.equal(flow.takeRestoredInput(), '0')
+  assert.equal(flow.submitInput('').kind, 'next')
+  assert.match(flow.view().options?.[1]?.description ?? '', /未设置/)
+  flow.submitChoice('done')
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'preset') return
+  assert.equal(result.commit.setup.advanced, undefined)
+})
+
+test('advanced: invalid inputs are rejected with guidance, staying on the input step', () => {
+  const flow = toConfirmPreset()
+  flow.submitChoice('advanced')
+
+  flow.submitChoice('requestTimeoutMs')
+  const badTimeout = flow.submitInput('abc')
+  assert.equal(badTimeout.kind, 'error')
+  if (badTimeout.kind === 'error') assert.match(badTimeout.message, /正整数毫秒数/)
+  assert.equal(flow.view().kind, 'input')
+  assert.equal(flow.submitInput('-5').kind, 'error')
+
+  flow.submitInput('60000') // 合法值收尾，回菜单
+  flow.submitChoice('maxRetries')
+  const badRetries = flow.submitInput('11')
+  assert.equal(badRetries.kind, 'error')
+  if (badRetries.kind === 'error') assert.match(badRetries.message, /0–10/)
+  flow.submitInput('')
+
+  flow.submitChoice('temperature')
+  const badTemp = flow.submitInput('3')
+  assert.equal(badTemp.kind, 'error')
+  if (badTemp.kind === 'error') assert.match(badTemp.message, /0–2/)
+  flow.submitInput('')
+
+  flow.submitChoice('proxy')
+  const badProxy = flow.submitInput('not a url')
+  assert.equal(badProxy.kind, 'error')
+  if (badProxy.kind === 'error') assert.match(badProxy.message, /代理地址/)
+  flow.submitInput('')
+})
+
+test('advanced: draft saved on an advanced phase downgrades to the confirm step', () => {
+  const flow = toConfirmPreset()
+  flow.submitChoice('advanced')
+  flow.submitChoice('requestTimeoutMs')
+  const draft = flow.toDraft('12')
+  assert.ok(draft)
+  assert.equal(draft!.phase, 'confirm')
+  // 半途输入不落盘。
+  assert.ok(!JSON.stringify(draft).includes('advanced-request-timeout'))
+})
+
+test('E3: probe modelInfos materialize specs for discovered models — no D2 manual fill', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe(report({
+    models: ['acme/x-9000'],
+    modelInfos: {
+      'acme/x-9000': { contextWindow: 1_000_000, maxOutputTokens: 131_072, maxReasoningTokens: 262_144 },
+    },
+  }))
+  flow.submitChoice('continue')
+  // 确认勾选后直接进思考步——端点元数据已给出规格，不进未知模型补参队列。
+  assert.equal(flow.confirm().kind, 'next')
+  assert.equal(flow.view().kind, 'choice')
+  assert.match(flow.view().title, /思考|推理/)
+  flow.submitChoice('none')
+  flow.submitInput('acme')
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'custom') return
+  const model = result.commit.models.find(m => m.id === 'acme/x-9000')
+  assert.equal(model?.contextWindow, 1_000_000)
+  assert.equal(model?.maxTokens, 131_072)
+  assert.deepEqual(model?.capabilities, { reasoningSplit: true })
 })

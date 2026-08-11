@@ -107,6 +107,10 @@ export function createProviderClient(
       model: params.model,
       maxTokens: params.maxTokens,
       thinkingBudget,
+      requestTimeoutMs: provider.requestTimeoutMs,
+      maxRetries: provider.maxRetries,
+      temperature: provider.temperature,
+      proxy: provider.proxy,
     })
   }
 
@@ -122,6 +126,11 @@ export function createProviderClient(
     thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
     thinkingStallTimeoutMs: provider.thinkingStallTimeoutMs ?? wire?.thinkingStallTimeoutMs,
     firstByteTimeoutMs: provider.firstByteTimeoutMs,
+    // 高级配置四旋钮（OPT-003）：provider 级运行时消费点。
+    requestTimeoutMs: provider.requestTimeoutMs,
+    maxRetries: provider.maxRetries,
+    temperature: provider.temperature,
+    proxy: provider.proxy,
     thinkingBlockType: capabilities.thinkingBlockType,
     reasoningSplit: capabilities.reasoningSplit,
     thinkingBudgetField: capabilities.thinkingBudgetField,

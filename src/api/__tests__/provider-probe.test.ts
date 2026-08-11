@@ -273,3 +273,148 @@ describe('probeProvider', () => {
     server = undefined
   })
 })
+
+describe('dashscope native models enrichment (E3)', () => {
+  let server: { baseUrl: string; close: () => Promise<void> } | undefined
+
+  after(async () => {
+    await server?.close()
+  })
+
+  function nativeModel(id: string, modality: string[], info?: Record<string, unknown>) {
+    return {
+      model: id,
+      name: id,
+      model_info: info ?? null,
+      inference_metadata: { response_modality: modality },
+    }
+  }
+
+  it('switches compatible-mode base to /api/v1/models, parses native shape, filters modalities, carries metadata', async () => {
+    const seenUrls: string[] = []
+    server = await startServer((req, res) => {
+      seenUrls.push(req.url ?? '')
+      if ((req.url ?? '').startsWith('/api/v1/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({
+          output: {
+            models: [
+              nativeModel('qwen-new-max', ['Text'], { context_window: 1_000_000, max_output_tokens: 131_072, max_reasoning_tokens: 262_144 }),
+              nativeModel('qwen-image-3', ['Image']),
+              nativeModel('qwen-audio-x', ['Audio']),
+              nativeModel('qwen-vl-new', ['Multimodal'], { context_window: 131_072 }),
+            ],
+          },
+        }))
+        return
+      }
+      if (req.url === '/compatible-mode/v1/chat/completions') {
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end(sse([JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] })]))
+        return
+      }
+      res.writeHead(404).end()
+    })
+
+    const baseUrl = server.baseUrl.replace(/\/v1$/, '/compatible-mode/v1')
+    const report = await probeProvider({ baseUrl, apiKey: 'sk-x', providerName: 'dashscope' })
+    assert.deepEqual(report.models, ['qwen-new-max', 'qwen-vl-new'])
+    assert.equal(report.modelsOk, true)
+    assert.equal(report.completionOk, true)
+    assert.deepEqual(report.modelInfos?.['qwen-new-max'], {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 131_072,
+      maxReasoningTokens: 262_144,
+    })
+    assert.ok(!('qwen-image-3' in (report.modelInfos ?? {})))
+    // 补全仍走 compatible-mode 路径（/api/v1 没有 OpenAI 风格 chat）。
+    assert.ok(seenUrls.some(u => u === '/compatible-mode/v1/chat/completions'))
+    await server.close()
+    server = undefined
+  })
+
+  it('falls back to the OpenAI-compatible /models when the native endpoint fails', async () => {
+    server = await startServer((req, res) => {
+      if ((req.url ?? '').startsWith('/api/v1/models')) {
+        res.writeHead(500).end()
+        return
+      }
+      if (req.url === '/compatible-mode/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'fallback-model' }] }))
+        return
+      }
+      res.writeHead(404).end()
+    })
+
+    const baseUrl = server.baseUrl.replace(/\/v1$/, '/compatible-mode/v1')
+    const report = await probeProvider({ baseUrl, apiKey: 'sk-x', providerName: 'dashscope', skipCompletion: true })
+    assert.deepEqual(report.models, ['fallback-model'])
+    assert.equal(report.modelInfos, undefined)
+    assert.deepEqual(report.errors, [])
+    await server.close()
+    server = undefined
+  })
+
+  it('paginates while a page is full (raw count, not filtered count)', async () => {
+    const pages: string[] = []
+    server = await startServer((req, res) => {
+      const url = req.url ?? ''
+      if (url.startsWith('/api/v1/models')) {
+        pages.push(url)
+        const pageNo = Number(new URL(`http://x${url}`).searchParams.get('page_no'))
+        res.writeHead(200, { 'content-type': 'application/json' })
+        if (pageNo === 1) {
+          // 满页 200 条：199 图像 + 1 文本——过滤后只有 1 条，但必须翻页。
+          const models = Array.from({ length: 199 }, (_, i) => nativeModel(`img-${i}`, ['Image']))
+          models.push(nativeModel('qwen-page1-text', ['Text'], { context_window: 1000 }))
+          res.end(JSON.stringify({ output: { models } }))
+        } else {
+          res.end(JSON.stringify({ output: { models: [nativeModel('qwen-page2-text', ['Text'], { context_window: 2000 })] } }))
+        }
+        return
+      }
+      res.writeHead(404).end()
+    })
+
+    const baseUrl = server.baseUrl.replace(/\/v1$/, '/compatible-mode/v1')
+    const report = await probeProvider({ baseUrl, apiKey: 'sk-x', providerName: 'dashscope', skipCompletion: true })
+    assert.deepEqual(report.models, ['qwen-page1-text', 'qwen-page2-text'])
+    assert.equal(pages.length, 2)
+    await server.close()
+    server = undefined
+  })
+})
+
+describe('aliasTableWithProbeInfos', () => {
+  it('synthesizes entries for unknown ids and never overrides existing table entries', async () => {
+    const { aliasTableWithProbeInfos } = await import('../provider-probe.js')
+    const { matchModelId } = await import('../model-id-matcher.js')
+
+    const table = aliasTableWithProbeInfos({
+      'qwen3.8-max': { contextWindow: 12345 }, // 已在别名表（preset 模板）——不覆盖
+      'brand-new-model': { contextWindow: 500_000, maxOutputTokens: 65_536, maxReasoningTokens: 81_920 },
+      'no-metadata-model': {},
+    })
+
+    const kept = matchModelId('qwen3.8-max', table)
+    assert.equal(kept.tier, 'exact')
+    assert.equal(kept.entry?.metadata.contextWindow, 1_000_000)
+
+    const synthesized = matchModelId('brand-new-model', table)
+    assert.equal(synthesized.tier, 'exact')
+    assert.equal(synthesized.entry?.metadata.contextWindow, 500_000)
+    assert.equal(synthesized.entry?.metadata.maxTokens, 65_536)
+    assert.deepEqual(synthesized.entry?.metadata.capabilities, { reasoningSplit: true })
+
+    const empty = matchModelId('no-metadata-model', table)
+    assert.equal(empty.entry, undefined, '无元数据的 id 不合成条目，仍走 L4')
+  })
+
+  it('returns the base table unchanged without infos', async () => {
+    const { aliasTableWithProbeInfos } = await import('../provider-probe.js')
+    const { MODEL_ALIAS_TABLE } = await import('../model-aliases.js')
+    assert.equal(aliasTableWithProbeInfos(undefined), MODEL_ALIAS_TABLE)
+    assert.equal(aliasTableWithProbeInfos({}), MODEL_ALIAS_TABLE)
+  })
+})

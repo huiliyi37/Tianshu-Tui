@@ -28,6 +28,8 @@ export async function fetchWithTimeout(
   url: string | URL,
   init: RequestInit,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  /** undici dispatcher（如 ProxyAgent）——provider 级代理覆盖的透传槽位。 */
+  dispatcher?: unknown,
 ): Promise<Response> {
   const userSignal = init.signal
   // Own controller + timer instead of AbortSignal.timeout: AbortSignal.timeout
@@ -46,7 +48,7 @@ export async function fetchWithTimeout(
     : timeoutController.signal
 
   try {
-    return await fetch(url, { ...init, signal: combinedSignal })
+    return await fetch(url, { ...init, signal: combinedSignal, ...(dispatcher ? { dispatcher } : {}) } as RequestInit)
   } catch (err) {
     const name = (err as Error).name
     // Our pre-first-byte timeout fired. Always wrap with a descriptive message
