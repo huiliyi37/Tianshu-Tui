@@ -183,6 +183,7 @@ test('renderChoicePanel: selected choice stays visible in a short panel', () => 
   assert.ok(plain.includes('选项9'), 'selected choice visible')
   assert.ok(!plain.includes('选项0'), 'top choices scrolled out')
   assert.ok(plain.includes('↑ 以上还有'), 'top indicator')
-  assert.ok(plain.includes('↓ 以下还有'), 'bottom indicator')
+  // 居中窗口已够到列表尾部——底部无截断，且光标下方邻项可见。
+  assert.ok(plain.includes('选项10'), 'option below the cursor visible (centered window)')
   assert.ok(lines.length <= 12, `frame fits height (${lines.length})`)
 })

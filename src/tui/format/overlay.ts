@@ -624,8 +624,8 @@ function wrapToWidth(text: string, width: number, maxLines: number): string[] {
 
 /**
  * 列表视口滚动窗口（无状态）：保证 selectedIndex 所在项可见。
- * 策略：先向上收纳（光标下移越过视口才滚动，选中项贴底），再向下填满剩余行；
- * 光标在顶部时窗口从头开始——等价于"按需跟随"的经典终端菜单行为。
+ * 策略：以光标为锚交替向下/向上扩展窗口，光标大致停在视口纵向中部——
+ * 长列表上下滚动都逐项平滑推进，不会贴边或整屏跳动。
  */
 function scrollWindow(heights: number[], selectedIndex: number, budget: number): { start: number; end: number } {
   const n = heights.length
@@ -635,9 +635,16 @@ function scrollWindow(heights: number[], selectedIndex: number, budget: number):
   const sel = Math.min(Math.max(selectedIndex, 0), n - 1)
   let used = Math.min(heights[sel]!, budget)
   let start = sel
-  while (start > 0 && used + heights[start - 1]! <= budget) { start--; used += heights[start]! }
   let end = sel + 1
-  while (end < n && used + heights[end]! <= budget) { used += heights[end]!; end++ }
+  let up = true
+  while (used < budget && (start > 0 || end < n)) {
+    const upFits = start > 0 && used + heights[start - 1]! <= budget
+    const downFits = end < n && used + heights[end]! <= budget
+    if (!upFits && !downFits) break
+    if (upFits && (up || !downFits)) { start--; used += heights[start]! }
+    else { used += heights[end]!; end++ }
+    up = !up
+  }
   return { start, end }
 }
 
@@ -1311,6 +1318,17 @@ export interface ConnectOverlayData {
   error?: string
   /** Selected option index for choice-kind steps. */
   selectedIndex: number
+  /** 输入光标在缓冲中的位置（默认贴末尾）。 */
+  cursorPos?: number
+  /** 光标本帧是否可见（闪烁期由 app 逐帧计算；默认可见）。 */
+  cursorVisible?: boolean
+  /** form 步当前选中字段下标。 */
+  formFieldIndex?: number
+  /**
+   * 渲染方回填：本帧硬件光标落点（1-based 行/列）。null = 无光标。
+   * 光标是终端原生 caret——落在字符格边界上、零占位、不挤压文本。
+   */
+  caret?: { row: number; col: number } | null
 }
 
 function maskSecret(value: string): string {
@@ -1319,6 +1337,7 @@ function maskSecret(value: string): string {
 
 export function renderConnect(data: ConnectOverlayData, width: number, height: number, theme: RivetTheme): string[] {
   const { view } = data
+  data.caret = null
   const lines: string[] = []
   lines.push(formatBorder(width, theme, 'subtle'))
   const titleBar = view.stepLabel ? `${view.title}   ${view.stepLabel}` : view.title
@@ -1339,12 +1358,16 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
   }
 
   if (view.filter !== undefined && rowsUsed < contentRows) {
-    // 多选步的即时搜索行：查询文本 + 光标 + 过滤后/总数计数。
-    const query = view.filter.length > 0
-      ? color(view.filter, theme.secondary)
-      : color('输入关键字过滤模型…', theme.dim)
+    // 多选步即时搜索行：查询文本 + 计数。占位文字仅空查询时显示（非实体）；
+    // caret 是硬件光标——空时停在占位符前方（句首），非空贴在查询末尾。
+    const hasQuery = view.filter.length > 0
+    const text = hasQuery ? color(view.filter, theme.secondary) : color('输入关键字过滤模型…', theme.dim)
     const counter = color(` ${view.options?.length ?? 0}/${view.optionTotal ?? 0}`, theme.muted)
-    push(` ${color('>', theme.primary, { bold: true })} ${query}${color('▏', theme.primary, { bold: true })}${counter}`)
+    if (data.cursorVisible !== false) {
+      // 行首 │ 边框 1 列 + ' > ' 前缀 3 列 → 文本第 5 列起；col 为 1-based。
+      data.caret = { row: lines.length + 1, col: 5 + (hasQuery ? stringWidth(view.filter) : 0) }
+    }
+    push(` ${color('>', theme.primary, { bold: true })} ${text}${counter}`)
     if (rowsUsed < contentRows) push('')
   }
 
@@ -1397,11 +1420,44 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
     }
   } else if (view.kind === 'busy') {
     push(` ${color('⠋ 请稍候…', theme.primary, { bold: true })}`)
+  } else if (view.kind === 'form') {
+    // 单步表单：字段竖排，选中行带硬件 caret（text 字段）或高亮值（toggle）。
+    const fields = view.fields ?? []
+    const active = Math.min(Math.max(data.formFieldIndex ?? 0, 0), Math.max(0, fields.length - 1))
+    for (let i = 0; i < fields.length && rowsUsed < contentRows; i++) {
+      const f = fields[i]!
+      const selected = i === active
+      const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
+      const labelStr = color(`${f.label}：`, selected ? theme.primary : theme.muted, selected ? { bold: true } : undefined)
+      let valueStr: string
+      if (f.kind === 'toggle') {
+        valueStr = color(f.value, selected ? theme.primary : theme.muted)
+      } else {
+        valueStr = color(f.value, selected ? theme.secondary : theme.muted)
+        if (selected && data.cursorVisible !== false) {
+          const caretPos = Math.min(Math.max(data.cursorPos ?? f.value.length, 0), f.value.length)
+          // caret col = 行首 │ 边框 1 列 + 纯文本前缀宽 + 值前缀宽 + 1（1-based）。
+          const prefixWidth = stringWidth(` ${CURSOR} ${f.label}：`)
+          data.caret = { row: lines.length + 1, col: prefixWidth + stringWidth(f.value.slice(0, caretPos)) + 2 }
+        }
+      }
+      const hint = selected && f.hint ? color(`  ${f.hint}`, theme.dim) : ''
+      push(` ${cursor} ${labelStr}${valueStr}${hint}`)
+    }
   } else {
     const shown = view.masked ? maskSecret(data.input) : data.input
-    const cursor = color('▏', theme.primary, { bold: true })
-    const body = shown.length > 0 ? color(shown, theme.secondary) : color(view.placeholder ?? '', theme.dim)
-    push(` ${color('>', theme.primary, { bold: true })} ${body}${cursor}`)
+    // 掩码步按码点展示，先把 UTF-16 位置换算成码点。
+    const utf16Pos = Math.min(Math.max(data.cursorPos ?? data.input.length, 0), data.input.length)
+    const pos = view.masked ? [...data.input.slice(0, utf16Pos)].length : utf16Pos
+    // 光标是硬件 caret（格子边界、零占位），不在行内画任何字形；
+    // 占位符仅空输入时显示，非实体。
+    const body = shown.length > 0
+      ? color(shown, theme.secondary)
+      : color(view.placeholder ?? '', theme.dim)
+    if (data.cursorVisible !== false) {
+      data.caret = { row: lines.length + 1, col: 5 + stringWidth(shown.slice(0, pos)) }
+    }
+    push(` ${color('>', theme.primary, { bold: true })} ${body}`)
   }
 
   if (data.error && rowsUsed < contentRows) {
@@ -1420,7 +1476,9 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
       ? compactHints([['↑↓', '移动'], ['空格', '勾选'], ['输入', '搜索'], ['Ctrl+A', '全选'], ['Enter', '确认'], ['Esc', '取消']])
       : view.kind === 'busy'
         ? compactHints([['Esc', '取消']])
-        : compactHints([['Enter', '提交'], ['Esc', '取消']])
+        : view.kind === 'form'
+          ? compactHints([['↑↓', '选字段'], ['←→', '移光标'], ['空格', '切换'], ['Enter', '确认'], ['Esc', '返回']])
+          : compactHints([['←→', '移动'], ['Enter', '提交'], ['Esc', '取消']])
   lines.push(formatFooter(footer, width, theme, 'subtle'))
   lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines

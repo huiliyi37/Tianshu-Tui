@@ -29,12 +29,12 @@ function toProbe(flow: ConnectFlow, { url = 'https://api.example.com/v1', key = 
   return result
 }
 
-/** D2：把未知模型补参步走完（回车用默认数字 + 指定模板），直到离开补参序列。 */
-function answerUnknownModels(flow: ConnectFlow, template: 'generic' | 'reasoning' = 'generic'): void {
-  while (flow.view().kind === 'input' && /未知模型补参/.test(flow.view().title)) {
-    assert.equal(flow.submitInput('').kind, 'next')
-    assert.equal(flow.submitInput('').kind, 'next')
-    assert.equal(flow.submitChoice(template).kind, 'next')
+/** D2：把未知模型补参表单步走完（默认数字 + 指定模板），直到离开补参队列。 */
+function answerUnknownModels(flow: ConnectFlow, template: 'generic' | 'reasoning' = 'generic', applyRest = false): void {
+  while (flow.view().kind === 'form' && /未知模型补参/.test(flow.view().title)) {
+    if (template === 'reasoning') flow.toggleAdvancedField('template')
+    if (applyRest) flow.toggleAdvancedField('applyRest')
+    assert.equal(flow.submitAdvancedForm().kind, 'next')
   }
 }
 
@@ -1381,32 +1381,32 @@ test('D1: filter is transient — confirm resets it and keeps only picked models
 
 // ── D2 未知模型高级选项（补参）─────────────────────────────────────
 
-test('D2: DIY unknown model walks context → max → template; values land in commit', () => {
+test('D2: DIY unknown model single-step form — arranged fields, values land in commit', () => {
   const flow = new ConnectFlow()
   toProbe(flow)
   flow.applyProbe(report({ models: ['acme/x-9000'] }))
   flow.submitChoice('continue')
   assert.equal(flow.confirm().kind, 'next')
 
-  const ctxView = flow.view()
-  assert.equal(ctxView.kind, 'input')
-  assert.match(ctxView.title, /上下文窗口/)
-  assert.match(ctxView.subtitle ?? '', /acme\/x-9000/)
-  assert.equal(ctxView.defaultValue, '131072')
+  const formView = flow.view()
+  assert.equal(formView.kind, 'form')
+  assert.match(formView.title, /未知模型补参/)
+  assert.match(formView.subtitle ?? '', /acme\/x-9000/)
+  const fields = formView.fields ?? []
+  assert.deepEqual(fields.map(f => f.id), ['contextWindow', 'maxTokens', 'template'])
+  assert.equal(fields[0]!.value, '131072', '窗口默认值预填')
+  // 单个未知模型没有 applyRest 字段。
+  assert.ok(!fields.some(f => f.id === 'applyRest'))
 
   // 非数字与超窗都有守卫。
-  assert.equal(flow.submitInput('abc').kind, 'error')
-  assert.equal(flow.submitInput('200000').kind, 'next')
-  assert.equal(flow.submitInput('999999').kind, 'error')
-  assert.match(flow.view().title, /最大输出/)
-  assert.equal(flow.submitInput('').kind, 'next') // 默认 32768
-
-  const tplView = flow.view()
-  assert.equal(tplView.kind, 'choice')
-  assert.match(tplView.title, /能力模板/)
-  // 单个未知模型没有 apply-* 选项。
-  assert.ok(!(tplView.options ?? []).some(o => o.id.startsWith('apply-')))
-  assert.equal(flow.submitChoice('reasoning').kind, 'next')
+  flow.editAdvancedField('contextWindow', 'abc')
+  assert.equal(flow.submitAdvancedForm().kind, 'error')
+  flow.editAdvancedField('contextWindow', '200000')
+  flow.editAdvancedField('maxTokens', '999999')
+  assert.equal(flow.submitAdvancedForm().kind, 'error')
+  flow.editAdvancedField('maxTokens', '') // 空 = 默认 32768
+  flow.toggleAdvancedField('template')    // → reasoning
+  assert.equal(flow.submitAdvancedForm().kind, 'next')
   assert.match(flow.view().title, /深度思考/) // diy-thinking
 
   flow.submitChoice('none')
@@ -1421,17 +1421,18 @@ test('D2: DIY unknown model walks context → max → template; values land in c
   assert.deepEqual(model.capabilities, { reasoningSplit: true })
 })
 
-test('D2: apply-rest stamps the same override onto all remaining unknowns', () => {
+test('D2: applyRest stamps the same override onto all remaining unknowns', () => {
   const flow = new ConnectFlow()
   toProbe(flow)
   flow.applyProbe(report({ models: ['uno-unknown', 'dos-unknown', 'tres-unknown'] }))
   flow.submitChoice('continue')
   flow.confirm()
-  flow.submitInput('')
-  flow.submitInput('')
-  const tpl = flow.view()
-  assert.ok((tpl.options ?? []).some(o => o.id === 'apply-generic'), '其余 2 个未知 → 出现 apply 选项')
-  assert.equal(flow.submitChoice('apply-generic').kind, 'next')
+  const form = flow.view()
+  const applyRest = (form.fields ?? []).find(f => f.id === 'applyRest')
+  assert.ok(applyRest, '其余 2 个未知 → 出现 applyRest 字段')
+  assert.match(applyRest!.label, /其余 2 个/)
+  flow.toggleAdvancedField('applyRest')
+  assert.equal(flow.submitAdvancedForm().kind, 'next')
   // 队列一次清空——直接到思考步，不再逐个补参。
   assert.match(flow.view().title, /深度思考/)
   flow.submitChoice('none')
@@ -1467,20 +1468,20 @@ test('D2: preset path also stops at advanced steps for discovered unknowns', () 
   assert.match(flow.view().title, /能力检测/)
 })
 
-test('D2: back from the template step returns to model selection, overrides discarded', () => {
+test('D2: backFromAdvanced returns to model selection, edits discarded', () => {
   const flow = new ConnectFlow()
   toProbe(flow)
   flow.applyProbe(report({ models: ['acme/x-9000'] }))
   flow.submitChoice('continue')
   flow.confirm()
-  flow.submitInput('99999')
-  flow.submitInput('8192')
-  assert.equal(flow.submitChoice('back').kind, 'next')
+  flow.editAdvancedField('contextWindow', '99999')
+  flow.editAdvancedField('maxTokens', '8192')
+  assert.equal(flow.backFromAdvanced().kind, 'next')
   assert.equal(flow.view().kind, 'multi-choice')
   // 重新确认走默认补参——99999 没被记住。
   assert.equal(flow.confirm().kind, 'next')
   assert.match(flow.view().subtitle ?? '', /acme\/x-9000/)
-  assert.equal(flow.view().defaultValue, '131072')
+  assert.equal((flow.view().fields ?? [])[0]!.value, '131072')
 })
 
 test('D2: draft saved on an advanced step downgrades to the models step', () => {
@@ -1489,7 +1490,7 @@ test('D2: draft saved on an advanced step downgrades to the models step', () => 
   flow.applyProbe(report({ models: ['acme/x-9000'] }))
   flow.submitChoice('continue')
   flow.confirm()
-  flow.submitInput('50000')
+  flow.editAdvancedField('contextWindow', '50000')
   const draft = flow.toDraft('12')
   assert.ok(draft)
   assert.equal(draft!.phase, 'diy-models')

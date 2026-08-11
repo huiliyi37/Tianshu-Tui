@@ -366,6 +366,11 @@ export type TuiMetricsProvider = () => TuiMetrics | null
  */
 export { TOOL_ACCUMULATOR_MAX_BYTES, capToolAccumulator } from './tool-accumulator.js'
 
+// ── /connect 输入光标闪烁参数 ──────────────────────────────────
+// 静止常亮；移动/增删激活后按 500ms 间隔持续闪烁，直到换步/关闭复位。
+const CONNECT_BLINK_PERIOD_MS = 500
+const CONNECT_BLINK_TICK_MS = 250
+
 // ── TuiApp ─────────────────────────────────────────────────────
 
 export class TuiApp {
@@ -406,6 +411,16 @@ export class TuiApp {
   private connectFlow?: ConnectFlow
   private connectInput = ''
   private connectError?: string
+  /** 输入光标在缓冲中的位置（支持 ←→ 移动与中间插入/删除）。 */
+  private connectCursor = 0
+  /** form 步当前选中字段下标。 */
+  private connectFormFieldIndex = 0
+  /** 渲染方回填的硬件光标落点（每帧更新，供 overlay engine 定位终端光标）。 */
+  private connectCaret: { row: number; col: number } | null = null
+  /** 最近一次移动/增删的时间戳（0 = 未激活）——激活后光标按 500ms 间隔闪烁。 */
+  private connectEditActiveAt = 0
+  /** 闪烁驱动定时器（仅闪烁期间存活）。 */
+  private connectBlinkTimer: ReturnType<typeof setInterval> | null = null
   /** /init 交互式初始化向导：无头状态机 + 当前步校验错误。 */
   private initFlow?: InitFlow
   private initError?: string
@@ -1903,7 +1918,7 @@ export class TuiApp {
     // 结构合法但语义不可恢复的草稿（preset 已删等）——顺手清掉，免得反复弹提示。
     if (flow.draftRejected) clearConnectDraft()
     this.connectFlow = flow
-    this.connectInput = ''
+    this.setConnectInput('', true)
     this.connectError = undefined
     this.input.setMode('input')
     this.activateOverlay('connect')
@@ -2122,6 +2137,9 @@ export class TuiApp {
       input: this.connectInput,
       error: this.connectError,
       selectedIndex: this.overlayController.nav().connectIndex,
+      cursorPos: this.connectCursor,
+      cursorVisible: this.connectCursorVisibleNow(),
+      formFieldIndex: this.connectFormFieldIndex,
     }
   }
 
@@ -2130,6 +2148,58 @@ export class TuiApp {
     const count = this.connectFlow?.view().options?.length ?? 0
     const nav = this.overlayController.nav()
     nav.connectIndex = count > 0 ? Math.min(nav.connectIndex, count - 1) : 0
+  }
+
+  /** 赋值输入缓冲并把光标停到末尾；resetBlink 时清空闪烁激活态（预填等静止场景）。 */
+  private setConnectInput(value: string, resetBlink: boolean): void {
+    this.connectInput = value
+    this.connectCursor = value.length
+    if (resetBlink) {
+      this.connectEditActiveAt = 0
+      this.stopConnectBlink()
+    }
+  }
+
+  /** 搜索框闪烁联动：非空 → 激活闪烁（打字刷新相位）；清空 → 停止闪烁、
+   *  光标常亮停在占位符前方。下一步推进会经 setConnectInput 整体复位。 */
+  private syncConnectFilterBlink(): void {
+    const filter = this.connectFlow?.view().filter ?? ''
+    if (filter.length > 0) this.markConnectEditActivity()
+    else {
+      this.connectEditActiveAt = 0
+      this.stopConnectBlink()
+    }
+  }
+
+  /** 移动/增删发生时调用：记录激活时间，启动闪烁定时器（已在跑则复用）。 */
+  private markConnectEditActivity(): void {
+    this.connectEditActiveAt = Date.now()
+    if (!this.connectBlinkTimer) {
+      this.connectBlinkTimer = setInterval(() => this.tickConnectBlink(), CONNECT_BLINK_TICK_MS)
+      this.connectBlinkTimer.unref?.() // 不拦进程退出（测试场景无清理也不悬挂）
+    }
+  }
+
+  /** 光标此刻是否可见：静止常亮；激活后按 500ms 间隔持续翻转，直到复位。 */
+  private connectCursorVisibleNow(): boolean {
+    if (this.connectEditActiveAt === 0) return true
+    const elapsed = Date.now() - this.connectEditActiveAt
+    return Math.floor(elapsed / CONNECT_BLINK_PERIOD_MS) % 2 === 0
+  }
+
+  private tickConnectBlink(): void {
+    if (this.overlay.activeId() !== 'connect') {
+      this.stopConnectBlink()
+      return
+    }
+    this.overlay.rerender()
+  }
+
+  private stopConnectBlink(): void {
+    if (this.connectBlinkTimer) {
+      clearInterval(this.connectBlinkTimer)
+      this.connectBlinkTimer = null
+    }
   }
 
   /** 推进 connect 向导：next 清空输入、error 显示提示、commit 落库并关闭。 */
@@ -2143,7 +2213,7 @@ export class TuiApp {
       // probe-first：flow 进入 busy 态，异步探测完成后把 report 回灌。
       // 探测期间用户 Esc 会清掉 connectFlow —— 回调先核对实例再回灌。
       const flow = this.connectFlow
-      this.connectInput = ''
+      this.setConnectInput('', true)
       this.connectError = undefined
       this.overlay.rerender()
       void probeProvider({ baseUrl: result.baseUrl, apiKey: result.apiKey, protocol: result.protocol, probeModel: result.probeModel, providerName: result.providerName })
@@ -2158,10 +2228,23 @@ export class TuiApp {
       return
     }
     if (result.kind === 'next') {
-      // 草稿恢复会在这里一次性预填输入缓冲（restoredInput 读后即清）。
-      this.connectInput = this.connectFlow?.takeRestoredInput() ?? ''
+      // 草稿恢复会在这里一次性预填输入缓冲（restoredInput 读后即清）；
+      // 否则把步骤的 defaultValue 预填进缓冲区——预填地址等应是可直接编辑的
+      // 实体，而不是灰底占位符（placeholder 只提示、不随编辑变化）。
+      const restored = this.connectFlow?.takeRestoredInput()
+      const nextView = this.connectFlow?.view()
+      this.setConnectInput(
+        restored && restored.length > 0
+          ? restored
+          : (nextView?.kind === 'input' ? nextView.defaultValue ?? '' : ''),
+        true,
+      )
       this.connectError = undefined
       this.overlayController.nav().connectIndex = 0
+      this.connectFormFieldIndex = 0
+      // form 步：光标落首个可编辑字段末尾（setConnectInput 刚把光标归零）。
+      const firstField = nextView?.kind === 'form' ? (nextView.fields ?? [])[0] : undefined
+      if (firstField && firstField.kind === 'text') this.connectCursor = firstField.value.length
       this.overlay.rerender()
       return
     }
@@ -2514,9 +2597,83 @@ export class TuiApp {
     // characters (incl. 'q') feed the input buffer instead of closing the overlay.
     if (id === 'connect' && this.connectFlow) {
       const view = this.connectFlow.view()
-      if (key.name === 'escape') { this.cancelConnect(); return true }
+      if (key.name === 'escape') {
+        // form 步 Esc = 返回模型选择重挑（对应旧「返回模型选择」选项）；
+        // 其余步骤维持全局语义：取消向导（落草稿）。
+        if (view.kind === 'form') this.advanceConnect(this.connectFlow.backFromAdvanced())
+        else this.cancelConnect()
+        return true
+      }
       if (view.kind === 'busy') {
         // 探测进行中——除 Esc（上面已处理）外吞掉所有按键。
+        return true
+      }
+      if (view.kind === 'form') {
+        const fields = view.fields ?? []
+        if (fields.length === 0) return true
+        const idx = Math.min(this.connectFormFieldIndex, fields.length - 1)
+        const field = fields[idx]!
+        const selectField = (i: number): void => {
+          this.connectFormFieldIndex = i
+          const f = fields[i]!
+          this.connectCursor = f.kind === 'text' ? f.value.length : 0
+          // 换字段 = 静止起点：光标常亮，下次编辑再激活闪烁。
+          this.connectEditActiveAt = 0
+          this.stopConnectBlink()
+          this.overlay.rerender()
+        }
+        if (key.name === 'down') { selectField((idx + 1) % fields.length); return true }
+        if (key.name === 'up') { selectField((idx - 1 + fields.length) % fields.length); return true }
+        if (field.kind === 'toggle') {
+          if (key.name === 'left' || key.name === 'right' || key.char === ' ') {
+            this.connectFlow.toggleAdvancedField(field.id)
+            this.connectError = undefined
+            this.overlay.rerender()
+          }
+          return true
+        }
+        // text 字段——与输入步同套光标编辑语义，缓冲真源在 flow 草稿。
+        if (key.name === 'return') { this.advanceConnect(this.connectFlow.submitAdvancedForm()); return true }
+        if (key.name === 'left') {
+          this.connectCursor = Math.max(0, this.connectCursor - 1)
+          this.markConnectEditActivity()
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'right') {
+          this.connectCursor = Math.min(field.value.length, this.connectCursor + 1)
+          this.markConnectEditActivity()
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'backspace' || key.name === 'ctrl_h') {
+          if (this.connectCursor > 0) {
+            const v = field.value
+            this.connectFlow.editAdvancedField(field.id, v.slice(0, this.connectCursor - 1) + v.slice(this.connectCursor))
+            this.connectCursor--
+          }
+          this.connectError = undefined
+          this.markConnectEditActivity()
+          this.overlay.rerender()
+          return true
+        }
+        if (key.ctrl && c === 'u') {
+          this.connectFlow.editAdvancedField(field.id, '')
+          this.connectCursor = 0
+          this.connectError = undefined
+          this.markConnectEditActivity()
+          this.overlay.rerender()
+          return true
+        }
+        if (this.isPrintableKey(key)) {
+          const v = field.value
+          this.connectFlow.editAdvancedField(field.id, v.slice(0, this.connectCursor) + key.char + v.slice(this.connectCursor))
+          this.connectCursor += key.char.length
+          this.connectError = undefined
+          this.markConnectEditActivity()
+          this.overlay.rerender()
+          return true
+        }
         return true
       }
       if (view.kind === 'choice' || view.kind === 'multi-choice') {
@@ -2526,29 +2683,40 @@ export class TuiApp {
         if (key.name === 'down') { if (count > 0) { nav.connectIndex = (nav.connectIndex + 1) % count; this.overlay.rerender() } return true }
         if (key.name === 'up') { if (count > 0) { nav.connectIndex = (nav.connectIndex - 1 + count) % count; this.overlay.rerender() } return true }
         if (view.kind === 'multi-choice' && key.char === ' ') {
+          // 勾选不推进步骤——原地重绘，光标保持不动（走 advanceConnect 会被
+          // next 分支重置 connectIndex，光标会跳回第一项）。
           const opt = options[nav.connectIndex]
-          if (opt) this.advanceConnect(this.connectFlow.toggle(opt.id))
+          if (opt) {
+            const res = this.connectFlow.toggle(opt.id)
+            this.connectError = res.kind === 'error' ? res.message : undefined
+            this.overlay.rerender()
+          }
           return true
         }
         if (view.kind === 'multi-choice' && key.name === 'ctrl_a') {
-          this.advanceConnect(this.connectFlow.toggleAllModels())
+          const res = this.connectFlow.toggleAllModels()
+          this.connectError = res.kind === 'error' ? res.message : undefined
+          this.overlay.rerender()
           return true
         }
         // Type-to-search：多选步的可打印字符进过滤器（不再是吞掉）。
         if (view.kind === 'multi-choice' && (key.name === 'backspace' || key.name === 'ctrl_h')) {
           this.connectFlow.backspaceModelFilter()
+          this.syncConnectFilterBlink()
           this.clampConnectIndex()
           this.overlay.rerender()
           return true
         }
         if (view.kind === 'multi-choice' && key.ctrl && c === 'u') {
           this.connectFlow.clearModelFilter()
+          this.syncConnectFilterBlink()
           this.clampConnectIndex()
           this.overlay.rerender()
           return true
         }
         if (view.kind === 'multi-choice' && this.isPrintableKey(key)) {
           this.connectFlow.typeModelFilter(key.char)
+          this.syncConnectFilterBlink()
           this.clampConnectIndex()
           this.overlay.rerender()
           return true
@@ -2566,14 +2734,49 @@ export class TuiApp {
       }
       // input step
       if (key.name === 'return') { this.advanceConnect(this.connectFlow.submitInput(this.connectInput)); return true }
+      if (key.name === 'left') {
+        this.connectCursor = Math.max(0, this.connectCursor - 1)
+        this.markConnectEditActivity()
+        this.overlay.rerender()
+        return true
+      }
+      if (key.name === 'right') {
+        this.connectCursor = Math.min(this.connectInput.length, this.connectCursor + 1)
+        this.markConnectEditActivity()
+        this.overlay.rerender()
+        return true
+      }
       // Backspace has two encodings: \x7f → 'backspace', \x08 → 'ctrl_h'.
       // Matching both (mirroring InputLine.handleKey) keeps delete working on
       // terminals/SSH sessions whose backspace emits BS (\x08) — otherwise the
       // key is swallowed by the trailing `return true` and the user can type
       // but not erase.
-      if (key.name === 'backspace' || key.name === 'ctrl_h') { this.connectInput = this.connectInput.slice(0, -1); this.connectError = undefined; this.overlay.rerender(); return true }
-      if (key.ctrl && c === 'u') { this.connectInput = ''; this.connectError = undefined; this.overlay.rerender(); return true }
-      if (this.isPrintableKey(key)) { this.connectInput += key.char; this.connectError = undefined; this.overlay.rerender(); return true }
+      if (key.name === 'backspace' || key.name === 'ctrl_h') {
+        if (this.connectCursor > 0) {
+          this.connectInput = this.connectInput.slice(0, this.connectCursor - 1) + this.connectInput.slice(this.connectCursor)
+          this.connectCursor--
+        }
+        this.connectError = undefined
+        this.markConnectEditActivity()
+        this.overlay.rerender()
+        return true
+      }
+      if (key.ctrl && c === 'u') {
+        this.connectInput = ''
+        this.connectCursor = 0
+        this.connectError = undefined
+        this.markConnectEditActivity()
+        this.overlay.rerender()
+        return true
+      }
+      if (this.isPrintableKey(key)) {
+        this.connectInput = this.connectInput.slice(0, this.connectCursor) + key.char + this.connectInput.slice(this.connectCursor)
+        this.connectCursor += key.char.length
+        this.connectError = undefined
+        this.markConnectEditActivity()
+        this.overlay.rerender()
+        return true
+      }
       return true
     }
 
@@ -6605,8 +6808,15 @@ export class TuiApp {
     })
 
     // Connect Wizard — /connect 服务商配置向导；数据来自 app 持有的 ConnectFlow。
+    // render 时渲染方把硬件光标落点回填进 data.caret，caret() 供引擎定位。
     this.overlay.register('connect', {
-      render: (_w, _h) => renderConnect(this.getConnectOverlayData(), this.columns, this.rows, this.theme),
+      render: (_w, _h) => {
+        const data = this.getConnectOverlayData()
+        const lines = renderConnect(data, this.columns, this.rows, this.theme)
+        this.connectCaret = data.caret ?? null
+        return lines
+      },
+      caret: () => this.connectCaret,
     })
 
     // Init Wizard — /init 交互式项目初始化；数据来自 app 持有的 InitFlow。

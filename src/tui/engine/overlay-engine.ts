@@ -25,6 +25,13 @@ export type OverlayId = 'starmap' | 'cockpit' | 'chronicle' | 'pager' | 'command
 export interface OverlayRenderer {
   /** 渲染 overlay 内容。返回 ANSI 格式化后的行数组。 */
   render(width: number, height: number): string[]
+  /**
+   * 本帧硬件光标的落点（1-based 行/列）；null = 隐藏硬件光标。
+   * 输入类 overlay 用它呈现"格子边界"光标——终端原生光标不占字符格、
+   * 不挤压文本，位置由渲染方按显示宽度折算。未提供此方法的 overlay
+   * 维持光标隐藏（进 alt screen 时已 HIDE）。
+   */
+  caret?(width: number, height: number): { row: number; col: number } | null
   /** overlay 激活时的回调 */
   onActivate?(): void
   /** overlay 失活时的回调 */
@@ -137,6 +144,8 @@ export class OverlayEngine {
 
   private exitAltScreen(): void {
     if (!this.inAltScreen) return
+    // 恢复终端默认光标形状（overlay 期间曾切稳态竖条抑制原生闪烁）。
+    this.stdout.write(ANSI.CURSOR_SHAPE_DEFAULT)
     this.stdout.write(ANSI.SHOW_CURSOR)
     this.stdout.write(ANSI.ALT_SCREEN_OFF)
     this.inAltScreen = false
@@ -198,10 +207,17 @@ export class OverlayEngine {
     this.lastCols = cols
     this.lastRows = rows
 
-    // 无变化短路：diff 为空则不写（idle/无操作时零输出）。
-    if (body.length === 0) return
+    // 闪烁帧只改光标可见性、行内容不变——caret 处理必须在"空 diff 短路"
+    // 之外执行，否则硬件光标不翻转。
+    const caretPos = renderer.caret ? renderer.caret(cols, rows) : undefined
+    if (body.length === 0 && caretPos === undefined) return
     // 整帧用 CSI 2026 同步输出包裹，原子刷新——overlay 导航（翻页/回溯）时
     // 逐行擦写不再撕裂/闪烁。
-    this.stdout.write(ANSI.BEGIN_SYNC + body + ANSI.END_SYNC)
+    if (body.length > 0) this.stdout.write(ANSI.BEGIN_SYNC + body + ANSI.END_SYNC)
+    if (caretPos !== undefined) {
+      // 稳态竖条（DECSCUSR 6）：关掉终端原生闪烁，节奏完全由应用 DECTCEM 控制；
+      // 每帧重写幂等无副作用。
+      this.stdout.write(caretPos ? cursorTo(caretPos.row, caretPos.col) + ANSI.CURSOR_STEADY_BAR + ANSI.SHOW_CURSOR : ANSI.HIDE_CURSOR)
+    }
   }
 }

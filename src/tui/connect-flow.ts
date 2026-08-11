@@ -41,7 +41,7 @@ const CONFIG_HINT = '密钥将保存到 ~/.rivet/secrets.json（0600 权限，co
  *  最终名重写并清理。单实例向导，覆盖写安全。 */
 export const DIY_PENDING_KEY_REF = 'diy-pending'
 
-export type ConnectStepKind = 'choice' | 'multi-choice' | 'input' | 'busy'
+export type ConnectStepKind = 'choice' | 'multi-choice' | 'input' | 'form' | 'busy'
 
 export interface ConnectChoiceOption {
   id: string
@@ -50,6 +50,16 @@ export interface ConnectChoiceOption {
   recommended?: boolean
   /** Checkbox state on multi-choice steps (space toggles). */
   checked?: boolean
+}
+
+/** One arranged row of a form step (未知模型补参等)。 */
+export interface ConnectFormField {
+  id: string
+  label: string
+  /** text = 可编辑缓冲（当前文本）；toggle = 选项标签（←→/空格切换）。 */
+  kind: 'text' | 'toggle'
+  value: string
+  hint?: string
 }
 
 /** One rendered line of the probe report (overlay applies tone colors). */
@@ -77,6 +87,8 @@ export interface ConnectView {
   masked?: boolean
   placeholder?: string
   defaultValue?: string
+  /** form step — arranged editable rows. */
+  fields?: ConnectFormField[]
 }
 
 /** Config mutation to perform once the wizard reaches a terminal state. */
@@ -132,9 +144,7 @@ type Phase =
   | 'diy-probing'
   | 'diy-probe-failed'
   | 'diy-models'
-  | 'model-advanced-context'
-  | 'model-advanced-max'
-  | 'model-advanced-template'
+  | 'model-advanced'
   | 'diy-model'
   | 'diy-context'
   | 'diy-vision'
@@ -386,8 +396,13 @@ export class ConnectFlow {
   /** D2: rawIds of checked unknown models still awaiting manual metadata. */
   private unknownQueue: string[] = []
   private unknownTotal = 0
-  /** Partial numeric answers for the unknown model currently being detailed. */
-  private advancedPartial: { contextWindow?: number; maxTokens?: number } = {}
+  /** Form draft for the unknown model currently being detailed (single-step form). */
+  private advancedDraft: { contextWindow: string; maxTokens: string; template: 'generic' | 'reasoning'; applyRest: boolean } = {
+    contextWindow: String(DEFAULT_CONTEXT_WINDOW),
+    maxTokens: String(DEFAULT_ADVANCED_MAX_OUTPUT),
+    template: 'generic',
+    applyRest: false,
+  }
   /** Where the advanced queue exits to (preset path → capability, DIY → thinking). */
   private advancedReturnPhase: 'capability' | 'diy-thinking' = 'capability'
 
@@ -475,7 +490,7 @@ export class ConnectFlow {
     const trimmed = pendingInput?.trim()
     // 未知模型补参子步是瞬态——草稿回落到模型选择步（勾选集已持久化，
     // 恢复后重走补参；半途填的数字不入库）。
-    let phase: Phase = this.phase === 'model-advanced-context' || this.phase === 'model-advanced-max' || this.phase === 'model-advanced-template'
+    let phase: Phase = this.phase === 'model-advanced'
       ? (this.advancedReturnPhase === 'capability' ? 'preset-models' : 'diy-models')
       : this.phase
     // 高级设置子菜单同为瞬态——回落确认步（已存旋钮值随 collected.advanced 持久化）。
@@ -1090,51 +1105,36 @@ export class ConnectFlow {
           optionTotal: probed.length,
         }
       }
-      case 'model-advanced-context': {
-        const rawId = this.unknownQueue[0] ?? ''
-        const idx = this.unknownTotal - this.unknownQueue.length + 1
-        return {
-          kind: 'input',
-          title: `未知模型补参：上下文窗口`,
-          subtitle: `${rawId}（${idx}/${this.unknownTotal}）不在别名表——请照官方文档填上下文窗口 tokens，回车用默认`,
-          stepLabel: this.advancedStepLabel(),
-          placeholder: String(DEFAULT_CONTEXT_WINDOW),
-          defaultValue: String(DEFAULT_CONTEXT_WINDOW),
-        }
-      }
-      case 'model-advanced-max': {
-        const rawId = this.unknownQueue[0] ?? ''
-        const idx = this.unknownTotal - this.unknownQueue.length + 1
-        return {
-          kind: 'input',
-          title: `未知模型补参：最大输出 tokens`,
-          subtitle: `${rawId}（${idx}/${this.unknownTotal}）单次输出上限，回车用默认；不得超过上下文窗口`,
-          stepLabel: this.advancedStepLabel(),
-          placeholder: String(DEFAULT_ADVANCED_MAX_OUTPUT),
-          defaultValue: String(DEFAULT_ADVANCED_MAX_OUTPUT),
-        }
-      }
-      case 'model-advanced-template': {
+      case 'model-advanced': {
         const rawId = this.unknownQueue[0] ?? ''
         const idx = this.unknownTotal - this.unknownQueue.length + 1
         const rest = this.unknownQueue.length - 1
-        const options: ConnectChoiceOption[] = [
-          { id: 'generic', label: '通用文本模型（无思考输出）' },
-          { id: 'reasoning', label: '推理模型（reasoning_content 返回思考）' },
+        const d = this.advancedDraft
+        const fields: ConnectFormField[] = [
+          { id: 'contextWindow', kind: 'text', label: '上下文窗口', value: d.contextWindow, hint: `官方文档的真实值；回车用默认 ${DEFAULT_CONTEXT_WINDOW}` },
+          { id: 'maxTokens', kind: 'text', label: '最大输出 tokens', value: d.maxTokens, hint: `单次输出上限，不得超过窗口；默认 ${DEFAULT_ADVANCED_MAX_OUTPUT}` },
+          {
+            id: 'template',
+            kind: 'toggle',
+            label: '能力模板',
+            value: d.template === 'generic' ? '通用文本模型（无思考输出）' : '推理模型（reasoning_content 返回思考）',
+            hint: '决定思考路由配置，拿不准选「通用文本」',
+          },
         ]
         if (rest > 0) {
-          options.push(
-            { id: 'apply-generic', label: `通用文本 · 并把本组参数套用到其余 ${rest} 个未知模型` },
-            { id: 'apply-reasoning', label: `推理 · 并把本组参数套用到其余 ${rest} 个未知模型` },
-          )
+          fields.push({
+            id: 'applyRest',
+            kind: 'toggle',
+            label: `套用到其余 ${rest} 个未知模型`,
+            value: d.applyRest ? '是' : '否',
+          })
         }
-        options.push({ id: 'back', label: '返回模型选择' })
         return {
-          kind: 'choice',
-          title: `未知模型补参：能力模板`,
-          subtitle: `${rawId}（${idx}/${this.unknownTotal}）——模板决定思考路由配置，拿不准选「通用文本」`,
+          kind: 'form',
+          title: '未知模型补参',
+          subtitle: `${rawId}（${idx}/${this.unknownTotal}）不在别名表——↑↓ 选字段，数字可直接编辑，Enter 确认`,
           stepLabel: this.advancedStepLabel(),
-          options,
+          fields,
         }
       }
       case 'diy-model':
@@ -1227,8 +1227,8 @@ export class ConnectFlow {
     if (unknowns.length > 0) {
       this.unknownQueue = unknowns
       this.unknownTotal = unknowns.length
-      this.advancedPartial = {}
-      this.phase = 'model-advanced-context'
+      this.resetAdvancedDraft()
+      this.phase = 'model-advanced'
     } else {
       this.phase = this.advancedReturnPhase
     }
@@ -1258,6 +1258,76 @@ export class ConnectFlow {
 
   clearModelFilter(): void {
     if (this.onModelsMultiChoice()) this.modelsFilter = ''
+  }
+
+  // ── 未知模型补参单步表单 ──────────────────────────────────────
+
+  private resetAdvancedDraft(): void {
+    this.advancedDraft = {
+      contextWindow: String(DEFAULT_CONTEXT_WINDOW),
+      maxTokens: String(DEFAULT_ADVANCED_MAX_OUTPUT),
+      template: 'generic',
+      applyRest: false,
+    }
+  }
+
+  /** App 每次增删键回写整段字段文本（缓冲真源在 flow，app 只持光标位置）。 */
+  editAdvancedField(fieldId: string, value: string): void {
+    if (this.phase !== 'model-advanced') return
+    if (fieldId === 'contextWindow') this.advancedDraft.contextWindow = value
+    else if (fieldId === 'maxTokens') this.advancedDraft.maxTokens = value
+  }
+
+  /** toggle 字段切换：能力模板 generic↔reasoning；套用其余 是↔否。 */
+  toggleAdvancedField(fieldId: string): void {
+    if (this.phase !== 'model-advanced') return
+    if (fieldId === 'template') {
+      this.advancedDraft.template = this.advancedDraft.template === 'generic' ? 'reasoning' : 'generic'
+    } else if (fieldId === 'applyRest') {
+      this.advancedDraft.applyRest = !this.advancedDraft.applyRest
+    }
+  }
+
+  /** Enter：校验两个数字并把本个模型的补参落进 modelOverrides，队列推进。 */
+  submitAdvancedForm(): ConnectStepResult {
+    if (this.phase !== 'model-advanced') {
+      return { kind: 'error', message: '当前步骤不是补参表单。', view: this.view() }
+    }
+    const d = this.advancedDraft
+    const contextWindow = d.contextWindow.trim().length === 0 ? DEFAULT_CONTEXT_WINDOW : Number.parseInt(d.contextWindow, 10)
+    if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+      return { kind: 'error', message: '上下文窗口请填写正整数（token 数），或清空用默认值。', view: this.view() }
+    }
+    const maxTokens = d.maxTokens.trim().length === 0 ? DEFAULT_ADVANCED_MAX_OUTPUT : Number.parseInt(d.maxTokens, 10)
+    if (!Number.isFinite(maxTokens) || maxTokens <= 0) {
+      return { kind: 'error', message: '最大输出请填写正整数（token 数），或清空用默认值。', view: this.view() }
+    }
+    if (maxTokens > contextWindow) {
+      return { kind: 'error', message: `最大输出不能超过上下文窗口（${contextWindow}）。`, view: this.view() }
+    }
+    const override: ModelOverride = { contextWindow, maxTokens, template: d.template }
+    const overrides = this.collected.modelOverrides ?? {}
+    overrides[this.unknownQueue.shift()!] = override
+    if (d.applyRest) {
+      for (const rawId of this.unknownQueue) overrides[rawId] = override
+      this.unknownQueue = []
+    }
+    this.collected.modelOverrides = overrides
+    this.resetAdvancedDraft()
+    this.phase = this.unknownQueue.length > 0 ? 'model-advanced' : this.advancedReturnPhase
+    return { kind: 'next', view: this.view() }
+  }
+
+  /** Esc：返回模型选择重挑——已补的元数据作废，避免与新的勾选集对不上。 */
+  backFromAdvanced(): ConnectStepResult {
+    if (this.phase !== 'model-advanced') {
+      return { kind: 'error', message: '当前步骤不是补参表单。', view: this.view() }
+    }
+    this.collected.modelOverrides = undefined
+    this.unknownQueue = []
+    this.resetAdvancedDraft()
+    this.phase = this.advancedReturnPhase === 'capability' ? 'preset-models' : 'diy-models'
+    return { kind: 'next', view: this.view() }
   }
 
   /** Ctrl+A: check everything (only filter matches while a filter is active);
@@ -1364,36 +1434,6 @@ export class ConnectFlow {
       }
       this.collected.protocol = id
       this.phase = 'diy-url'
-      return { kind: 'next', view: this.view() }
-    }
-    if (this.phase === 'model-advanced-template') {
-      if (id === 'back') {
-        // 返回模型选择重挑——已补的元数据作废，避免与新的勾选集对不上。
-        this.collected.modelOverrides = undefined
-        this.unknownQueue = []
-        this.advancedPartial = {}
-        this.phase = this.advancedReturnPhase === 'capability' ? 'preset-models' : 'diy-models'
-        return { kind: 'next', view: this.view() }
-      }
-      const applyRest = id.startsWith('apply-')
-      const template = (applyRest ? id.slice('apply-'.length) : id) as ModelOverride['template']
-      if (template !== 'generic' && template !== 'reasoning') {
-        return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
-      }
-      const override: ModelOverride = {
-        contextWindow: this.advancedPartial.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
-        maxTokens: this.advancedPartial.maxTokens ?? DEFAULT_ADVANCED_MAX_OUTPUT,
-        template,
-      }
-      const overrides = this.collected.modelOverrides ?? {}
-      overrides[this.unknownQueue.shift()!] = override
-      if (applyRest) {
-        for (const rawId of this.unknownQueue) overrides[rawId] = override
-        this.unknownQueue = []
-      }
-      this.collected.modelOverrides = overrides
-      this.advancedPartial = {}
-      this.phase = this.unknownQueue.length > 0 ? 'model-advanced-context' : this.advancedReturnPhase
       return { kind: 'next', view: this.view() }
     }
     if (this.phase === 'diy-vision') {
@@ -1649,7 +1689,7 @@ export class ConnectFlow {
       case 'confirm':
       case 'advanced-settings':
       case 'diy-models':
-      case 'model-advanced-template':
+      case 'model-advanced':
         return { kind: 'error', message: '当前步骤需要选择，而非输入。', view: this.view() }
       case 'diy-probing':
       case 'preset-probing':
@@ -1707,30 +1747,6 @@ export class ConnectFlow {
           this.applyAdvancedKnob('proxy', value)
         }
         this.phase = 'advanced-settings'
-        return { kind: 'next', view: this.view() }
-      }
-
-      case 'model-advanced-context': {
-        const parsed = value.length === 0 ? DEFAULT_CONTEXT_WINDOW : Number.parseInt(value, 10)
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-          return { kind: 'error', message: '请填写正整数（token 数），或回车用默认值。', view: this.view() }
-        }
-        this.advancedPartial.contextWindow = parsed
-        this.phase = 'model-advanced-max'
-        return { kind: 'next', view: this.view() }
-      }
-
-      case 'model-advanced-max': {
-        const parsed = value.length === 0 ? DEFAULT_ADVANCED_MAX_OUTPUT : Number.parseInt(value, 10)
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-          return { kind: 'error', message: '请填写正整数（token 数），或回车用默认值。', view: this.view() }
-        }
-        const window = this.advancedPartial.contextWindow ?? DEFAULT_CONTEXT_WINDOW
-        if (parsed > window) {
-          return { kind: 'error', message: `最大输出不能超过上下文窗口（${window}）。`, view: this.view() }
-        }
-        this.advancedPartial.maxTokens = parsed
-        this.phase = 'model-advanced-template'
         return { kind: 'next', view: this.view() }
       }
 
