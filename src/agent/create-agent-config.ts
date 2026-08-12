@@ -10,7 +10,7 @@ import { FallbackStreamClient } from '../api/fallback-client.js'
 import type { AgentConfig } from './loop-types.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
-import type { ProviderConfig, Config, ModelConfig } from '../config/schema.js'
+import type { ProviderConfig, Config, ModelConfig, ProviderCapabilitiesConfig } from '../config/schema.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router.js'
 import type { LlmSpeculationConfigInput } from './llm-speculation.js'
@@ -31,6 +31,8 @@ export interface ModelSpec {
   /** Model accepts image inputs (multimodal user messages). Gates the
    *  tool-boundary vision channel (computer_use screenshots). */
   supportsVision?: boolean
+  /** Per-model capability overrides (e.g. Qwen3-max supports thinking, Qwen-plus does not). */
+  capabilities?: ProviderCapabilitiesConfig
 }
 
 export interface AgentConfigInput {
@@ -186,7 +188,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
   'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'cwd' | 'blockPolicy' | 'providerProfile' | 'providerName' | 'compactionProfile' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'constellationEnabled' | 'companionPresenceEnabled' | 'dreamEnabled' | 'runtimeLean' | 'securityGuidance' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'llmSpeculation' | 'autoDelegateEnabled' | 'domainKeywordRouting' | 'defaultDomain' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy' | 'supportsVision' | 'visionClient' | 'visionModelPrompt' | 'visionModelMaxTokens' | 'visionBridge' | 'onStatusLine' | 'wireContext'
 > {
   const { model, apiKey, cwd, provider } = input
-  const capabilities = resolveCapabilities(provider.name, provider.capabilities)
+  const capabilities = resolveCapabilities(provider.name, provider.capabilities, model.capabilities)
   const thinkingBudget = model.reasoningEffort === 'max'
     ? 64000
     : Math.min(16000, Math.floor(model.contextWindow * 0.02))
@@ -414,7 +416,10 @@ function buildFallbackChain(
       name,
       create: () => {
         const fp = input.allProviders![name]!
-        const fCaps = resolveCapabilities(fp.name, fp.capabilities)
+        // Resolve a fallback model that is safe by default: cheap tier only,
+        // unless the user explicitly opts in via allowProFallback.
+        const fModel = resolveFallbackModel(fp)
+        const fCaps = resolveCapabilities(fp.name, fp.capabilities, fModel.capabilities)
         // Resolve fallback API key — fail loudly instead of silently returning
         // primary so the user knows their fallback provider is misconfigured.
         let fApiKey: string
@@ -426,9 +431,6 @@ function buildFallbackChain(
             `Set ${fp.apiKeyEnv ?? `<PROVIDER>_API_KEY`} env var or inline apiKey in config.`
           )
         }
-        // Resolve a fallback model that is safe by default: cheap tier only,
-        // unless the user explicitly opts in via allowProFallback.
-        const fModel = resolveFallbackModel(fp)
         return createProviderClient(fp, fCaps, {
           apiKey: fApiKey,
           model: fModel.id,
@@ -502,7 +504,7 @@ function buildCompactClient(
     return undefined
   }
 
-  const caps = resolveCapabilities(prov.name, prov.capabilities)
+  const caps = resolveCapabilities(prov.name, prov.capabilities, spec.capabilities)
   // A dedicated compact client always runs the generous char budget (up to ~16K
   // chars at 1M). maxTokens only caps output (billed per generated token), so a
   // high ceiling is cost-neutral but prevents truncating a generous CJK summary
@@ -573,7 +575,7 @@ function tryBuildVisionClientFrom(
         + '改用 Settings → Providers 把 key 存进配置，就不依赖启动方式了）',
     }
   }
-  const caps = resolveCapabilities(prov.name, prov.capabilities)
+  const caps = resolveCapabilities(prov.name, prov.capabilities, spec.capabilities)
   const maxTokens = Math.min(requestedMaxTokens, spec.maxTokens)
   const client = createProviderClient(prov, caps, {
     apiKey,

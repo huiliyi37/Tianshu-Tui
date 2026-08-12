@@ -63,6 +63,10 @@ const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
   codex: { cacheType: 'partial-prefix', persistent: false, minCacheTokens: 1024, cacheGranularity: 128, ttlSeconds: 600 },
   google: { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 4096, ttlSeconds: 3600 },
   qwen: { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 1024, ttlSeconds: 300 },
+  // DashScope (阿里通义千问官方 OpenAI 兼容端点). Same cache profile as the
+  // legacy 'qwen' key — explicit-breakpoint is retained for back-compat with
+  // any config that referenced the old key. New configs use 'dashscope'.
+  dashscope: { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 1024, ttlSeconds: 300 },
   vllm: { cacheType: 'block-kv', persistent: false, minCacheTokens: 0 },
   glm: {
     // GLM-5.2 supports implicit exact-prefix context cache (隐式缓存) like DeepSeek —

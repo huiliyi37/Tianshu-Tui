@@ -5,6 +5,7 @@ import { proRegistry } from './pro-registry.js'
 import type { StreamClient } from './stream-client.js'
 import type { ProviderCapabilities } from './provider.js'
 import { getProviderProfile } from './provider-profile.js'
+import { getCatalogEntry } from './provider-catalog.js'
 import type { ProviderConfig } from '../config/schema.js'
 import type { AuthProvider } from '../auth/types.js'
 
@@ -53,23 +54,9 @@ export function resolveApiKey(provider: ProviderConfig): string {
 /**
  * Create a streaming API client for the given provider.
  *
- * All providers use OpenAI Chat Completions format.
- * Codex OAuth is the sole exception (uses the Responses API).
+ * Dispatch order: pro-registry factory → Codex OAuth (Responses API) →
+ * provider.protocol ('anthropic' → AnthropicClient, else OpenAI-compatible).
  */
-
-/** SLOW_THINKING providers 的 thinking-stall 默认值（ms）。
- *  仅对已知易在纯 thinking 阶段卡死的 provider 启用；
- *  其余 provider 默认 undefined（沿用既有行为：取 readMs，等于禁用）。
- *  取值依据：基于「chunk 空闲窗」而非「总时长」的语义——远小于 300s read 兜底、
- *  远大于合法 reasoning delta 间隙，仅命中 reasoning 完全停流的真卡死。
- *  - glm 420s：GLM reasoning 合法停顿可达数分钟，窗口给宽。
- *  - deepseek 120s：实测服务端偶发「吐 2 字符 reasoning 后彻底静默」的卡死，
- *    旧行为要干等满 300s read 才判死；而中止后重试命中近 100% 前缀缓存、~12s 即恢复，
- *    故用 120s 更早判死 + 快速热缓存重试。健康流每几秒吐一次 reasoning，永不受影响。 */
-const SLOW_THINKING_STALL_DEFAULT_MS: Record<string, number> = {
-  glm: 420_000,
-  deepseek: 120_000,
-}
 
 export function createProviderClient(
   provider: ProviderConfig,
@@ -91,11 +78,13 @@ export function createProviderClient(
     })
   }
 
-  // Anthropic native protocol — uses explicit cache_control breakpoints.
-  // Protocol is determined by provider config, NOT by model name.
-  // Example: Qwen via OpenCode Go uses Anthropic /v1/messages, but direct
-  // Qwen API (dashscope) is OpenAI-compatible. The provider config knows which.
-  if (provider.name === 'anthropic' || capabilities.prefixCacheStrategy === 'anthropic-cache-control') {
+  // Anthropic native protocol — explicit cache_control breakpoints.
+  // Dispatch is driven ONLY by provider.protocol (schema-normalized: a provider
+  // named 'anthropic' defaults to protocol 'anthropic' unless explicitly
+  // overridden). Names and capability heuristics are not consulted here —
+  // e.g. Qwen via OpenCode Go speaks /v1/messages because ITS DESCRIPTOR says
+  // protocol 'anthropic', while direct Qwen API (dashscope) says 'openai'.
+  if (provider.protocol === 'anthropic') {
     const budgetMap: Record<string, number> = {
       max: params.maxTokens,
       high: Math.floor(params.maxTokens * 0.6),
@@ -115,6 +104,9 @@ export function createProviderClient(
     })
   }
 
+  // Wire quirks from the catalog (stall defaults / max_completion_tokens / UA).
+  const wire = getCatalogEntry(provider.name)?.wire
+
   return new OpenAIClient({
     baseUrl: provider.baseUrl,
     apiKey: params.apiKey,
@@ -122,26 +114,32 @@ export function createProviderClient(
     maxTokens: params.maxTokens,
     auth: params.auth,
     thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
-    thinkingStallTimeoutMs: provider.thinkingStallTimeoutMs ?? SLOW_THINKING_STALL_DEFAULT_MS[provider.name],
+    thinkingStallTimeoutMs: provider.thinkingStallTimeoutMs ?? wire?.thinkingStallTimeoutMs,
     firstByteTimeoutMs: provider.firstByteTimeoutMs,
-    thinkingFormat: capabilities.thinkingFormat,
+    thinkingBlockType: capabilities.thinkingBlockType,
+    reasoningSplit: capabilities.reasoningSplit,
+    thinkingBudgetField: capabilities.thinkingBudgetField,
+    effortCap: capabilities.effortCap,
     effortFormat: capabilities.effortFormat,
     reasoningEffort: params.reasoningEffort,
     sessionId: params.sessionId,
     providerName: provider.name,
-    // Preserved-thinking protocol family: derived from capability rather than
-    // provider name — covers deepseek/mimo/spark (all deepseek-native) without
-    // leaking the pro provider name into open-source wire code.
-    preservedThinkingProtocol: provider.capabilities.prefixCache === 'deepseek-native'
-      || provider.name === 'deepseek' || provider.name === 'mimo',
+    // 401/403 报错里点名 key 的环境变量，用户知道去哪检查。
+    apiKeyEnv: provider.apiKeyEnv,
+    // Preserved-thinking protocol family: table-driven capability, not provider
+    // name — the pro spark preset declares it via capabilities override, so no
+    // pro provider name leaks into open-source wire code. Distinct from the
+    // deepseek-native prefix-cache strategy (GLM/longcat share the cache
+    // strategy but have independent reasoning — they must NOT get this).
+    preservedThinkingProtocol: capabilities.preservedThinkingProtocol ?? false,
     providerProfile: getProviderProfile(provider.name, modelContextWindow(provider, params.model)),
     wireContext: params.wireContext,
     unsupported: provider.unsupported.length > 0
       ? provider.unsupported
       : capabilities.stripParams,
     prefixCompletion: provider.capabilities.prefixCompletion,
-    useMaxCompletionTokens: provider.name === 'mimo' || provider.name === 'mimo-api' || provider.name === 'minimax',
-    userAgent: provider.name === 'kimi' ? 'KimiCLI/1.0' : undefined,
+    useMaxCompletionTokens: wire?.useMaxCompletionTokens,
+    userAgent: wire?.userAgent,
     usageCalibrationFactor: provider.usageCalibrationFactor,
     capabilities: { hasToolJsonInContentBug: capabilities.hasToolJsonInContentBug },
   })

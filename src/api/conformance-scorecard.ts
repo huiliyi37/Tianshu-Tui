@@ -1,9 +1,9 @@
 /**
  * Provider Conformance Scorecard
  *
- * Consumes a ProviderEntry (from provider-registry) and optional config-level
- * overrides to produce a ConformanceReport. The report identifies gaps between
- * declared capabilities and expected behavior patterns.
+ * Consumes a ProviderEntry (derived view from provider-catalog) and optional
+ * config-level overrides to produce a ConformanceReport. The report identifies
+ * gaps between declared capabilities and expected behavior patterns.
  *
  * Intended consumers:
  *   - `npm run benchmark` provider conformance tasks
@@ -11,7 +11,7 @@
  *   - Runtime warning when a provider is first used
  */
 
-import type { ProviderEntry } from './provider-registry.js'
+import type { ProviderEntry } from './provider-catalog.js'
 import type { ProviderCapabilities } from './provider.js'
 
 // ─── Types ───────────────────────────────────────────────────
@@ -69,16 +69,17 @@ function checkThinkingSupport(entry: ProviderEntry): ConformanceCheck {
     }
   }
 
-  // Only thinkingFormat is critical here — effort control is checked separately
-  const formatOk = caps.thinkingFormat !== 'none'
+  // thinkingBlockType or effortFormat can satisfy thinking support
+  const hasBlock = caps.thinkingBlockType !== 'none'
+  const hasEffort = caps.effortFormat !== 'none'
 
-  if (formatOk) {
+  if (hasBlock || hasEffort) {
     return {
       id: 'has_thinking',
       name: 'Thinking support',
       passed: true,
       severity: 'info',
-      message: `Thinking supported (format: ${caps.thinkingFormat}, effort: ${caps.effortFormat})`,
+      message: `Thinking supported (block: ${caps.thinkingBlockType}, effort: ${caps.effortFormat})`,
     }
   }
 
@@ -87,8 +88,8 @@ function checkThinkingSupport(entry: ProviderEntry): ConformanceCheck {
     name: 'Thinking support',
     passed: false,
     severity: 'error',
-    message: 'thinkingFormat is "none" but supportsThinking is true — provider cannot send thinking blocks',
-    suggestion: 'Set thinkingFormat to "anthropic" or "openai" to match the provider API',
+    message: 'supportsThinking is true but neither thinkingBlockType nor effortFormat is configured — provider has no way to control reasoning',
+    suggestion: 'Set thinkingBlockType to "enabled"/"adaptive" or effortFormat to "reasoning_effort"',
   }
 }
 
@@ -361,7 +362,7 @@ function runCheckId(fn: (entry: ProviderEntry) => ConformanceCheck): string {
     label: '',
     capabilities: {
       supportsThinking: false,
-      thinkingFormat: 'none',
+      thinkingBlockType: 'none',
       supportsCacheControl: true,
       stripParams: [],
       hasToolJsonInContentBug: false,

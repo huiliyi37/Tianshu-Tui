@@ -3,13 +3,85 @@ import { mcpConfigSchema, type McpConfig } from '../mcp/config.js'
 import { THEME_NAMES } from '../tui/theme.js'
 import { MIN_MAX_EVENTS_DISK_BYTES, MIN_MAX_LOADED_SESSIONS, MIN_IDLE_AGENT_TTL_MS } from './runtime-lean.js'
 
+/**
+ * Capability override fields valid at BOTH provider and model level — pure
+ * semantics about the model's reasoning behavior. All optional: when absent,
+ * `resolveCapabilities` falls through to the prior layer (model → provider →
+ * WELL_KNOWN_DEFAULTS[name] → DEFAULT_CAPABILITIES).
+ */
+export const modelCapabilitiesSchema = z.object({
+  /** What type of thinking block to send. 'enabled' / 'adaptive' / 'none' (no block). */
+  thinkingBlock: z.enum(['enabled', 'adaptive', 'none']).optional(),
+  /** How reasoning effort is signaled to the upstream API. */
+  effortFormat: z.enum(['reasoning_effort', 'output_config', 'none']).optional(),
+  /** Per-effort-level ceiling — values above are clamped (e.g. {max:'high'}). */
+  effortCap: z.record(z.string(), z.string()).optional(),
+  /** Provider separates reasoning into a `reasoning_content` response field. */
+  reasoningSplit: z.boolean().optional(),
+  /** Field name carrying the thinking budget inside the thinking block (Claude: 'budget_tokens'). */
+  thinkingBudgetField: z.enum(['budget_tokens']).optional(),
+  /** DeepSeek preserved-thinking wire protocol (echo reasoning_content on tool turns).
+   *  Declared by DeepSeek-derived providers not in WELL_KNOWN_DEFAULTS (e.g. pro spark). */
+  preservedThinkingProtocol: z.boolean().optional(),
+}).default({})
+
+export type ModelCapabilitiesConfig = z.infer<typeof modelCapabilitiesSchema>
+
+/**
+ * Provider-level capabilities = model-level semantics + endpoint wire fields.
+ * The wire fields (param stripping, cache strategy, usage bugs) describe the
+ * ENDPOINT and are meaningless at model level — a relay forwards whatever the
+ * upstream expects regardless of which model is addressed.
+ */
+export const providerCapabilitiesSchema = z.object({
+  // Endpoint wire fields — optional so presets and user config can omit them
+  // and let `resolveCapabilities` fall through to WELL_KNOWN_DEFAULTS[name].
+  // Distinguishing "not declared" (undefined) from "declared as false/empty" is
+  // essential: an explicit `cacheControl: false` means "user wants this off"
+  // even when WELL_KNOWN would enable it; an omitted field means "use WELL_KNOWN".
+  cacheControl: z.boolean().optional(),
+  stripParams: z.array(z.string()).optional(),
+  toolJsonBug: z.boolean().optional(),
+  prefixCache: z.enum(['deepseek-native', 'anthropic-cache-control', 'none']).optional(),
+  prefixCompletion: z.boolean().optional(),
+  // Model-level semantic fields (shared shape with modelCapabilitiesSchema).
+  thinkingBlock: z.enum(['enabled', 'adaptive', 'none']).optional(),
+  effortFormat: z.enum(['reasoning_effort', 'output_config', 'none']).optional(),
+  effortCap: z.record(z.string(), z.string()).optional(),
+  reasoningSplit: z.boolean().optional(),
+  thinkingBudgetField: z.enum(['budget_tokens']).optional(),
+  preservedThinkingProtocol: z.boolean().optional(),
+}).default({})
+
+/** Conservative fallback when a model's context window is unknown. */
+export const DEFAULT_MODEL_CONTEXT_WINDOW = 131_072
+/** Conservative output ceiling for models with unknown maxTokens — high enough
+ *  for real work, low enough to stay under most endpoints' output caps. */
+export const DEFAULT_MODEL_MAX_TOKENS = 8_192
+
+/**
+ * Infer a context window from size suffixes in the model id
+ * ('glm-4.6-air-128k' → 131072, 'qwen-long-1m' → 1048576).
+ * Unit must sit at a token boundary so 'kimi-k2' / 'minimax-m3' never match.
+ */
+export function inferModelContextWindow(modelId: string): number | undefined {
+  const match = modelId.toLowerCase().match(/(\d+)\s*([km])(?=$|[-_.\s@:])/)
+  if (!match) return undefined
+  const n = Number(match[1])
+  if (!Number.isFinite(n) || n <= 0 || n > 4096) return undefined
+  return match[2] === 'k' ? n * 1024 : n * 1024 * 1024
+}
+
 export const modelConfigSchema = z.object({
   id: z.string(),
   alias: z.string().optional(),
   /** 擅长场景 — 展示在模型选择器（ModelPicker），预设定义处填充。 */
   description: z.string().optional(),
-  contextWindow: z.number().int().positive(),
-  maxTokens: z.number().int().positive(),
+  /** Optional: absent → inferred from the model id ('-128k'/'-1m' suffix),
+   *  else DEFAULT_MODEL_CONTEXT_WINDOW. Wave-3 probe will refine this. */
+  contextWindow: z.number().int().positive().optional(),
+  /** Optional: absent → DEFAULT_MODEL_MAX_TOKENS, clamped to contextWindow. */
+  maxTokens: z.number().int().positive().optional(),
   reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
   /** Model accepts image inputs (multimodal user messages). Declared per model,
    *  NOT per provider — mixed text/vision model fleets under one provider are
@@ -31,6 +103,16 @@ export const modelConfigSchema = z.object({
   }).optional(),
   /** Model tier for routing/fallback decisions. Overrides name-based inference. */
   tier: z.enum(['cheap', 'balanced', 'strong']).optional(),
+  /** Per-model capability overrides (e.g. Qwen3-max supports thinking, Qwen-plus
+   *  does not). Semantic fields only — endpoint wire behavior lives at provider
+   *  level. Merged on top of provider-level capabilities in `resolveCapabilities`. */
+  capabilities: modelCapabilitiesSchema.optional(),
+}).transform(model => {
+  const contextWindow = model.contextWindow
+    ?? inferModelContextWindow(model.id)
+    ?? DEFAULT_MODEL_CONTEXT_WINDOW
+  const maxTokens = Math.min(model.maxTokens ?? DEFAULT_MODEL_MAX_TOKENS, contextWindow)
+  return { ...model, contextWindow, maxTokens }
 })
 
 export const authConfigSchema = z.discriminatedUnion('type', [
@@ -44,23 +126,16 @@ export const authConfigSchema = z.discriminatedUnion('type', [
   }),
 ])
 
-export const providerCapabilitiesSchema = z.object({
-  supportsThinking: z.boolean().optional(),
-  thinkingFormat: z.enum(['anthropic', 'openai', 'none']).optional(),
-  effortFormat: z.enum(['reasoning_effort', 'output_config', 'none']).optional(),
-  cacheControl: z.boolean().default(false),
-  stripParams: z.array(z.string()).default([]),
-  toolJsonBug: z.boolean().default(false),
-  prefixCache: z.enum(['deepseek-native', 'anthropic-cache-control', 'none']).default('none'),
-  prefixCompletion: z.boolean().default(false),
-}).default({})
-
-export const providerSchema = z.object({
+const providerBaseSchema = z.object({
   name: z.string(),
   apiKey: z.string().nullable().optional().transform(value => value ?? undefined),
   apiKeyEnv: z.string().nullable().optional().transform(value => value ?? undefined),
   baseUrl: z.string().url(),
-  protocol: z.enum(['openai']).default('openai'),
+  /** Wire protocol of the endpoint. 'openai' = chat/completions-compatible;
+   *  'anthropic' = /v1/messages with cache_control breakpoints. Factory dispatch
+   *  is driven ONLY by this field — provider names and capability heuristics are
+   *  not consulted. A provider NAMED 'anthropic' defaults to protocol 'anthropic'. */
+  protocol: z.enum(['openai', 'anthropic']).default('openai'),
   auth: authConfigSchema.nullable().optional(),
   capabilities: providerCapabilitiesSchema,
   fallback: z.array(z.string()).optional(),
@@ -69,7 +144,10 @@ export const providerSchema = z.object({
   /** Allow strong/pro tier models to be used as fallback. Default false to avoid
    *  cold-start cache-miss cost on large-context pro models. */
   allowProFallback: z.boolean().optional(),
-  models: z.array(modelConfigSchema).min(1),
+  /** Optional: Wave-3 probe flow can register a provider before its model list
+   *  is fetched. Runtime model resolution treats an empty list as "no models
+   *  declared" — the provider still works when addressed via probe-filled entries. */
+  models: z.array(modelConfigSchema).default([]),
   thinking: z.enum(['enabled', 'disabled']).default('enabled'),
   maxTokens: z.number().int().positive().default(64000),
   /**
@@ -96,6 +174,18 @@ export const providerSchema = z.object({
    */
   usageCalibrationFactor: z.number().min(0).max(1).optional(),
 })
+
+/** Name-based protocol normalization: a provider literally named 'anthropic'
+ *  is presumed to speak /v1/messages unless the config explicitly says
+ *  otherwise (e.g. an OpenAI-compatible proxy). Preprocess runs before
+ *  defaults, so an explicit `protocol: 'openai'` is preserved. */
+export const providerSchema = z.preprocess(raw => {
+  if (raw !== null && typeof raw === 'object' && !('protocol' in raw)) {
+    const name = (raw as Record<string, unknown>).name
+    if (name === 'anthropic') return { ...(raw as Record<string, unknown>), protocol: 'anthropic' }
+  }
+  return raw
+}, providerBaseSchema)
 
 export const permissionAllowRuleSchema = z.object({
   tool: z.string().min(1),

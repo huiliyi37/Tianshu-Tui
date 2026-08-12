@@ -1,6 +1,6 @@
 import type { ModelConfig, ProviderConfig } from './schema.js'
 
-export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'siliconflow' | 'longcat' | 'ccswitch' | 'zhipu-vision'
+export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'siliconflow' | 'longcat' | 'ccswitch' | 'zhipu-vision' | 'dashscope' | 'openrouter' | 'relay'
 
 export interface ProviderPreset {
   key: ProviderPresetKey
@@ -232,17 +232,11 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       baseUrl: 'https://api.siliconflow.cn/v1',
       protocol: 'openai',
       capabilities: {
-        cacheControl: false,
-        stripParams: [],
-        // 默认模型是 SiliconFlow 代理的 DeepSeek —— 沿用其"工具 JSON 混进正文"的
-        // 模型固有 bug 处理;换到聚合站里的其他模型时该开关无害(仅在检测到正文
-        // 内 tool JSON 时才生效)。
+        // WELL_KNOWN_DEFAULTS['siliconflow'] provides canonical cacheControl / stripParams
+        // / prefixCache / prefixCompletion. Default model is a DeepSeek proxy → keep
+        // the DeepSeek "tool JSON leaks into content" bug marker here; other fields
+        // fall through to WELL_KNOWN.
         toolJsonBug: true,
-        // SiliconFlow 对 DeepSeek-V4 / GLM-5.2 计"Cached Input"价 → 存在服务端隐式
-        // 前缀缓存,按 deepseek-native 记账以保住前缀缓存优化;但前缀补全(beta 续写
-        // 端点)是 deepseek.com 专属,聚合网关没有 → 关。
-        prefixCache: 'deepseek-native',
-        prefixCompletion: false,
       },
       thinking: 'enabled',
       maxTokens: 384_000,
@@ -488,6 +482,117 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         },
       ],
       unsupported: ['stream_options'],
+    },
+  },
+  // 阿里 DashScope（通义千问 Qwen 官方 OpenAI 兼容端点）。
+  // 模型能力分裂：Qwen3-max 支持 thinking block，Qwen-plus/turbo 不支持 ——
+  // 由用户在 models[].capabilities 里按 model 覆盖（WELL_KNOWN_DEFAULTS 给出
+  // 默认 thinkingBlockType='enabled'，对不支持 thinking 的 model 显式设 'none'）。
+  dashscope: {
+    key: 'dashscope',
+    label: '通义千问 (DashScope)',
+    description: '阿里 DashScope：Qwen 系列官方端点，OpenAI 兼容协议',
+    defaultModelId: 'qwen3-max',
+    provider: {
+      name: 'dashscope',
+      apiKeyEnv: 'DASHSCOPE_API_KEY',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      protocol: 'openai',
+      capabilities: {},
+      thinking: 'enabled',
+      maxTokens: 32_768,
+      models: [
+        {
+          id: 'qwen3-max',
+          description: 'Qwen3 旗舰（支持 thinking）',
+          alias: 'qs-max',
+          contextWindow: 262_144,
+          maxTokens: 32_768,
+          reasoningEffort: 'high',
+          tier: 'strong',
+          capabilities: { thinkingBlock: 'enabled', effortFormat: 'reasoning_effort' },
+        },
+        {
+          id: 'qwen-plus',
+          description: 'Qwen 均衡档（无 thinking）',
+          alias: 'qs-plus',
+          contextWindow: 131_072,
+          maxTokens: 8_192,
+          tier: 'balanced',
+          capabilities: { thinkingBlock: 'none', effortFormat: 'none' },
+        },
+      ],
+      unsupported: [],
+    },
+  },
+  // OpenRouter — 国际聚合，含 OpenAI/Claude/Anthropic/开源模型。
+  // thinking block 透传不稳定（多数模型只支持 reasoning_effort 透传），
+  // 故 WELL_KNOWN_DEFAULTS 设 thinkingBlockType='none'、effortFormat='reasoning_effort'。
+  openrouter: {
+    key: 'openrouter',
+    label: 'OpenRouter',
+    description: 'OpenRouter 聚合：OpenAI / Claude / Gemini / 开源模型',
+    defaultModelId: 'anthropic/claude-sonnet-4.5',
+    provider: {
+      name: 'openrouter',
+      apiKeyEnv: 'OPENROUTER_API_KEY',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      protocol: 'openai',
+      capabilities: {},
+      thinking: 'enabled',
+      maxTokens: 32_768,
+      models: [
+        {
+          id: 'anthropic/claude-sonnet-4.5',
+          description: 'Claude Sonnet 4.5（聚合）',
+          alias: 'or-sonnet',
+          contextWindow: 200_000,
+          maxTokens: 32_768,
+          reasoningEffort: 'high',
+          tier: 'strong',
+        },
+        {
+          id: 'openai/gpt-5',
+          description: 'GPT-5（聚合）',
+          alias: 'or-gpt5',
+          contextWindow: 200_000,
+          maxTokens: 32_768,
+          reasoningEffort: 'high',
+          tier: 'strong',
+        },
+      ],
+      unsupported: [],
+    },
+  },
+  // one-api / new-api 自建中转通用模板。
+  // 不预设具体模型 —— baseUrl 从环境变量取，用户按需填模型列表。
+  // WELL_KNOWN_DEFAULTS['relay'] 提供 thinking 能力默认值（block=none + effort=reasoning_effort），
+  // 与 ccswitch 同模板，但默认 config 不激活，让用户手动启用以避免体验重复。
+  relay: {
+    key: 'relay',
+    label: '自建中转 (one-api / new-api)',
+    description: '通用 OpenAI 兼容中转模板（one-api / new-api 等），baseUrl 走 RELAY_BASE_URL 环境变量',
+    defaultModelId: 'gpt-5',
+    provider: {
+      name: 'relay',
+      apiKeyEnv: 'RELAY_API_KEY',
+      baseUrl: process.env.RELAY_BASE_URL ?? 'http://127.0.0.1:3000/v1',
+      protocol: 'openai',
+      capabilities: {},
+      thinking: 'enabled',
+      maxTokens: 32_768,
+      models: [
+        {
+          id: 'gpt-5',
+          description: '示例模型（按需替换）',
+          alias: 'relay-gpt5',
+          contextWindow: 200_000,
+          maxTokens: 32_768,
+          reasoningEffort: 'high',
+          tier: 'strong',
+        },
+      ],
+      unsupported: [],
     },
   },
 }

@@ -9,8 +9,23 @@ import type { ProviderCapabilitiesConfig } from '../config/schema.js'
 export interface ProviderCapabilities {
   /** Whether thinking mode (extended reasoning) is supported */
   supportsThinking: boolean
-  /** How to format the thinking parameter in requests */
-  thinkingFormat: 'anthropic' | 'openai' | 'none'
+  /** What type of thinking block to send in the request body.
+   *  'enabled' = {thinking:{type:'enabled'}} (DeepSeek, GLM, MiMo, Claude)
+   *  'adaptive' = {thinking:{type:'adaptive'}} (MiniMax)
+   *  'none' = no thinking block; use reasoning_effort param instead (OpenAI, Codex, Kimi) */
+  thinkingBlockType: 'enabled' | 'adaptive' | 'none'
+  /** Whether the provider separates reasoning into a `reasoning_content` field (MiniMax) */
+  reasoningSplit?: boolean
+  /** Which field name carries the thinking budget inside the thinking block (Claude: 'budget_tokens') */
+  thinkingBudgetField?: 'budget_tokens'
+  /** Per-provider effort ceiling — values above this cap are clamped (Codex: max→xhigh, Kimi: max→high) */
+  effortCap?: Record<string, string>
+  /** DeepSeek preserved-thinking wire protocol: assistant tool-call turns must echo
+   *  `reasoning_content`, and the Chinese-thinking system suffix applies. Declared by
+   *  providers whose wire format is DeepSeek-derived (DeepSeek, MiMo; pro spark via
+   *  its own preset) — NOT by every provider that merely shares the deepseek-native
+   *  prefix-cache strategy (GLM/longcat/siliconflow have independent reasoning). */
+  preservedThinkingProtocol?: boolean
   /** Whether cache_control blocks are respected by the provider */
   supportsCacheControl: boolean
   /** Top-level request parameters to strip before sending */
@@ -50,7 +65,8 @@ export function mapDeepSeekUsage(raw: Record<string, unknown>): Usage {
 
 export const DEEPSEEK_CAPABILITIES: ProviderCapabilities = {
   supportsThinking: true,
-  thinkingFormat: 'anthropic',
+  thinkingBlockType: 'enabled',
+  preservedThinkingProtocol: true,
   supportsCacheControl: false,
   stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
   hasToolJsonInContentBug: true,
@@ -62,7 +78,7 @@ export const DEEPSEEK_CAPABILITIES: ProviderCapabilities = {
 
 export const DEFAULT_CAPABILITIES: ProviderCapabilities = {
   supportsThinking: false,
-  thinkingFormat: 'none',
+  thinkingBlockType: 'none',
   supportsCacheControl: true,
   stripParams: [],
   hasToolJsonInContentBug: false,
@@ -80,7 +96,8 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   deepseek: DEEPSEEK_CAPABILITIES,
   kimi: {
     supportsThinking: true,
-    thinkingFormat: 'anthropic',
+    thinkingBlockType: 'enabled',
+    effortCap: { max: 'high' },
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
     hasToolJsonInContentBug: false,
@@ -90,7 +107,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   glm: {
     supportsThinking: true,
-    thinkingFormat: 'openai',
+    thinkingBlockType: 'enabled',
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier'],
     hasToolJsonInContentBug: false,
@@ -103,7 +120,8 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   minimax: {
     supportsThinking: true,
-    thinkingFormat: 'openai',
+    thinkingBlockType: 'adaptive',
+    reasoningSplit: true,
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
     hasToolJsonInContentBug: false,
@@ -113,7 +131,8 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   mimo: {
     supportsThinking: true,
-    thinkingFormat: 'openai',
+    thinkingBlockType: 'enabled',
+    preservedThinkingProtocol: true,
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
     hasToolJsonInContentBug: false,
@@ -123,7 +142,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   'mimo-api': {
     supportsThinking: true,
-    thinkingFormat: 'openai',
+    thinkingBlockType: 'enabled',
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
     hasToolJsonInContentBug: false,
@@ -132,8 +151,8 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     supportsResponseFormat: false,
   },
   'opencode-go': {
-    supportsThinking: true,
-    thinkingFormat: 'openai',
+    supportsThinking: false,
+    thinkingBlockType: 'none',
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
     hasToolJsonInContentBug: false,
@@ -143,7 +162,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   openai: {
     supportsThinking: true,
-    thinkingFormat: 'openai',
+    thinkingBlockType: 'none',
     supportsCacheControl: true,
     stripParams: [],
     hasToolJsonInContentBug: false,
@@ -153,7 +172,8 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   codex: {
     supportsThinking: true,
-    thinkingFormat: 'openai',
+    thinkingBlockType: 'none',
+    effortCap: { max: 'xhigh' },
     supportsCacheControl: true,
     stripParams: [],
     hasToolJsonInContentBug: false,
@@ -163,7 +183,8 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   },
   claude: {
     supportsThinking: true,
-    thinkingFormat: 'anthropic',
+    thinkingBlockType: 'enabled',
+    thinkingBudgetField: 'budget_tokens',
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier'],
     hasToolJsonInContentBug: false,
@@ -178,8 +199,8 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
   // behavior doesn't ride on the DEFAULT_CAPABILITIES fallback
   // (session 2c1186f5 scout postmortem).
   longcat: {
-    supportsThinking: true,
-    thinkingFormat: 'openai',
+    supportsThinking: false,
+    thinkingBlockType: 'none',
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
     hasToolJsonInContentBug: false,
@@ -193,7 +214,64 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     // 其 Rectifier 翻译层会将 OpenAI 格式转为 Claude/DeepSeek 等上游原生格式。
     // 后端模型不认识 reasoning_effort 时按 OpenAI 兼容约定静默忽略（降级）。
     supportsThinking: true,
-    thinkingFormat: 'openai',
+    thinkingBlockType: 'none',
+    supportsCacheControl: false,
+    stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+    hasToolJsonInContentBug: false,
+    effortFormat: 'reasoning_effort',
+    prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
+  },
+  // ── Aggregator / relay providers ─────────────────────────────────────────
+  // SiliconFlow aggregator (硅基流动). Default model in preset is DeepSeek-proxied
+  // → toolJsonBug:true set in preset overrides. Server-side implicit prefix caching
+  // on DeepSeek-V4 / GLM-5.2 (charges for cached input) → deepseek-native strategy
+  // to preserve cache-aware compaction.
+  siliconflow: {
+    supportsThinking: true,
+    thinkingBlockType: 'enabled',
+    supportsCacheControl: false,
+    stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+    hasToolJsonInContentBug: false,
+    effortFormat: 'reasoning_effort',
+    prefixCacheStrategy: 'deepseek-native',
+    supportsResponseFormat: false,
+    mapUsage: mapDeepSeekUsage,
+  },
+  // DashScope (阿里通义千问官方 OpenAI 兼容端点). Qwen3-max supports thinking
+  // block; Qwen-plus/turbo do not — per-model override via `models[].capabilities`.
+  // DashScope OpenAI-compatible endpoint does not accept cache_control breakpoints
+  // (that's Anthropic protocol); cache profile is 'explicit-breakpoint' only via
+  // the legacy PROFILES['qwen'] entry kept for back-compat.
+  dashscope: {
+    supportsThinking: true,
+    thinkingBlockType: 'enabled',
+    supportsCacheControl: false,
+    stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+    hasToolJsonInContentBug: false,
+    effortFormat: 'reasoning_effort',
+    prefixCacheStrategy: 'none',
+    supportsResponseFormat: true,
+  },
+  // OpenRouter international aggregator. thinking block passthrough is unstable
+  // across the model fleet → thinkingBlockType:'none', rely on reasoning_effort
+  // passthrough only. Users can override per-model via `models[].capabilities`.
+  openrouter: {
+    supportsThinking: true,
+    thinkingBlockType: 'none',
+    supportsCacheControl: false,
+    stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+    hasToolJsonInContentBug: false,
+    effortFormat: 'reasoning_effort',
+    prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
+  },
+  // one-api / new-api self-hosted relay (generic template, not activated by
+  // default to avoid overlap with ccswitch). Same shape as ccswitch — relay
+  // entry point passes reasoning_effort through, upstream Rectifier translates.
+  relay: {
+    supportsThinking: true,
+    thinkingBlockType: 'none',
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
     hasToolJsonInContentBug: false,
@@ -204,41 +282,75 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
 }
 
 /**
+ * Apply a single layer of `ProviderCapabilitiesConfig` overrides onto a base
+ * `ProviderCapabilities` in place. Undefined fields in `overrides` are treated
+ * as "not declared" and fall through to the base (which is typically
+ * `WELL_KNOWN_DEFAULTS[name]` or the output of a prior layer).
+ *
+ * Also derives `supportsThinking` from the user-declared thinking fields:
+ *   - thinkingBlock ∈ {'enabled','adaptive'} or effortFormat ∈ {'reasoning_effort','output_config'}
+ *     → supportsThinking = true
+ *   - thinkingBlock === 'none' AND effortFormat === 'none'
+ *     → supportsThinking = false
+ *   - otherwise: keep base value (no signal either way)
+ */
+function applyOverrides(
+  base: ProviderCapabilities,
+  overrides?: ProviderCapabilitiesConfig,
+): ProviderCapabilities {
+  if (!overrides) return base
+
+  // Legacy fields
+  if (overrides.cacheControl !== undefined) base.supportsCacheControl = overrides.cacheControl
+  if (overrides.stripParams !== undefined) base.stripParams = overrides.stripParams
+  if (overrides.toolJsonBug !== undefined) base.hasToolJsonInContentBug = overrides.toolJsonBug
+  if (overrides.prefixCache !== undefined) base.prefixCacheStrategy = overrides.prefixCache
+
+  // Thinking fields — direct assignment; 'none' is a valid explicit value.
+  if (overrides.thinkingBlock !== undefined) base.thinkingBlockType = overrides.thinkingBlock
+  if (overrides.effortFormat !== undefined) base.effortFormat = overrides.effortFormat
+  if (overrides.effortCap !== undefined) base.effortCap = { ...overrides.effortCap }
+  if (overrides.reasoningSplit !== undefined) base.reasoningSplit = overrides.reasoningSplit
+  if (overrides.thinkingBudgetField !== undefined) base.thinkingBudgetField = overrides.thinkingBudgetField
+  if (overrides.preservedThinkingProtocol !== undefined) base.preservedThinkingProtocol = overrides.preservedThinkingProtocol
+
+  // Derive supportsThinking from declared thinking capability.
+  const declaresThinking =
+    overrides.thinkingBlock === 'enabled' || overrides.thinkingBlock === 'adaptive'
+    || overrides.effortFormat === 'reasoning_effort' || overrides.effortFormat === 'output_config'
+  const declaresNoThinking =
+    overrides.thinkingBlock === 'none' && overrides.effortFormat === 'none'
+  if (declaresThinking) base.supportsThinking = true
+  else if (declaresNoThinking) base.supportsThinking = false
+
+  return base
+}
+
+/**
  * Resolve capabilities for a provider by name, merged with optional
- * config-level overrides. Well-known defaults provide the base;
- * explicit config capabilities take precedence.
+ * config-level and model-level overrides.
+ *
+ * Merge order (later wins):
+ *   1. `WELL_KNOWN_DEFAULTS[providerName]` (or `DEFAULT_CAPABILITIES` for unknown providers)
+ *   2. `providerOverrides` (from `provider.capabilities` in user config / preset)
+ *   3. `modelOverrides` (from `provider.models[i].capabilities`)
+ *
+ * All override fields are optional: an omitted field falls through to the
+ * prior layer. An explicit value (including `'none'` / `false` / `[]`) wins.
  */
 export function resolveCapabilities(
   providerName: string,
-  configOverrides?: ProviderCapabilitiesConfig,
+  providerOverrides?: ProviderCapabilitiesConfig,
+  modelOverrides?: ProviderCapabilitiesConfig,
 ): ProviderCapabilities {
-  const base = WELL_KNOWN_DEFAULTS[providerName]
-    ?? structuredClone(DEFAULT_CAPABILITIES)
+  // Shallow copy, not structuredClone: entries may carry a mapUsage function.
+  // Safe — applyOverrides only assigns top-level fields (effortCap gets a new object).
+  const base: ProviderCapabilities = {
+    ...(WELL_KNOWN_DEFAULTS[providerName] ?? DEFAULT_CAPABILITIES),
+  }
 
-  if (!configOverrides) return base
-
-  // Merge config overrides — config values win over well-known defaults
-  if (configOverrides.supportsThinking !== undefined) {
-    base.supportsThinking = configOverrides.supportsThinking
-  }
-  if (configOverrides.thinkingFormat !== undefined) {
-    base.thinkingFormat = configOverrides.thinkingFormat
-  }
-  if (configOverrides.effortFormat !== undefined) {
-    base.effortFormat = configOverrides.effortFormat
-  }
-  if (configOverrides.cacheControl !== undefined) {
-    base.supportsCacheControl = configOverrides.cacheControl
-  }
-  if (configOverrides.stripParams.length > 0) {
-    base.stripParams = configOverrides.stripParams
-  }
-  if (configOverrides.toolJsonBug !== undefined) {
-    base.hasToolJsonInContentBug = configOverrides.toolJsonBug
-  }
-  if (configOverrides.prefixCache !== 'none') {
-    base.prefixCacheStrategy = configOverrides.prefixCache
-  }
+  applyOverrides(base, providerOverrides)
+  applyOverrides(base, modelOverrides)
 
   return base
 }

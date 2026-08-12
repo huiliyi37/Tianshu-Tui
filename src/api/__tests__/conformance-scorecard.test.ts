@@ -5,7 +5,8 @@ import {
   formatConformanceReport,
   type ConformanceReport,
 } from '../conformance-scorecard.js'
-import { PROVIDER_REGISTRY, getProviderEntry, addProviderEntry, type ProviderEntry } from '../provider-registry.js'
+import { PROVIDER_CATALOG, getProviderEntry, addCatalogEntry, type ProviderEntry } from '../provider-catalog.js'
+import { WELL_KNOWN_DEFAULTS } from '../provider.js'
 import type { ProviderCapabilities } from '../provider.js'
 
 // ─── DeepSeek ────────────────────────────────────────────────
@@ -80,7 +81,7 @@ test('strict mode promotes warnings to errors', () => {
   // Build an entry with a known warn-level issue
   const caps: ProviderCapabilities = {
     supportsThinking: true,
-    thinkingFormat: 'anthropic',
+    thinkingBlockType: 'enabled',
     supportsCacheControl: false,
     stripParams: [],
     hasToolJsonInContentBug: false,
@@ -88,7 +89,7 @@ test('strict mode promotes warnings to errors', () => {
     prefixCacheStrategy: 'none',
     supportsResponseFormat: true,
   }
-  addProviderEntry('strict_test', 'StrictTest', caps)
+  addCatalogEntry('strict_test', caps, { label: 'StrictTest' })
 
   const entry = getProviderEntry('strict_test')
   assert.ok(entry)
@@ -105,7 +106,8 @@ test('strict mode promotes warnings to errors', () => {
   assert.ok(!strictEffortCheck!.passed)
   assert.equal(strictEffortCheck!.severity, 'error')
 
-  delete (PROVIDER_REGISTRY as Record<string, ProviderEntry>)['strict_test']
+  delete (PROVIDER_CATALOG as Record<string, ProviderEntry>)['strict_test']
+  delete (WELL_KNOWN_DEFAULTS as Record<string, unknown>)['strict_test']
 })
 
 // ─── Report structure ────────────────────────────────────────
@@ -160,7 +162,7 @@ test('formatConformanceReport produces markdown', () => {
 test('formatConformanceReport includes suggestions when issues found', () => {
   const caps: ProviderCapabilities = {
     supportsThinking: true,
-    thinkingFormat: 'none',  // mismatch — will fail
+    thinkingBlockType: 'none',  // mismatch — will fail
     supportsCacheControl: false,
     stripParams: [],
     hasToolJsonInContentBug: false,
@@ -168,7 +170,7 @@ test('formatConformanceReport includes suggestions when issues found', () => {
     prefixCacheStrategy: 'none',
     supportsResponseFormat: true,
   }
-  addProviderEntry('fmt_test', 'FmtTest', caps)
+  addCatalogEntry('fmt_test', caps, { label: 'FmtTest' })
 
   const entry = getProviderEntry('fmt_test')
   assert.ok(entry)
@@ -178,13 +180,14 @@ test('formatConformanceReport includes suggestions when issues found', () => {
   assert.ok(report.failed > 0, `Expected failures but got ${report.failed} failed`)
   assert.ok(md.includes('Suggestions'))
 
-  delete (PROVIDER_REGISTRY as Record<string, ProviderEntry>)['fmt_test']
+  delete (PROVIDER_CATALOG as Record<string, ProviderEntry>)['fmt_test']
+  delete (WELL_KNOWN_DEFAULTS as Record<string, unknown>)['fmt_test']
 })
 
 // ─── All built-in providers are at least warn-free ───────────
 
 test('all built-in providers have passing required checks', () => {
-  for (const [key] of Object.entries(PROVIDER_REGISTRY)) {
+  for (const [key] of Object.entries(PROVIDER_CATALOG)) {
     const entry = getProviderEntry(key)
     assert.ok(entry)
     const report = runConformanceCheck(entry!)
@@ -202,7 +205,7 @@ test('capabilityOverrides are applied to effective entry', () => {
   const report = runConformanceCheck(entry!, {
     capabilityOverrides: {
       supportsThinking: false,
-      thinkingFormat: 'none',
+      thinkingBlockType: 'none',
     },
   })
   const thinkingCheck = report.checks.find(c => c.id === 'has_thinking')

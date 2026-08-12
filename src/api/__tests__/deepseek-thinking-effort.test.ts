@@ -7,7 +7,7 @@
  * (high 默认 / max)。
  *
  * BUG（修复前）：openai-client 的 thinking dispatch 对 usesThinkingBlock 提供商
- * (DeepSeek thinkingFormat='anthropic') 只发 body.thinking，**漏发 reasoning_effort**
+ * (DeepSeek thinkingBlockType='enabled') 只发 body.thinking，**漏发 reasoning_effort**
  * —— 配置的 reasoningEffort='max' 被静默丢弃，DeepSeek 退回服务端默认 effort。
  * reasoning_effort 仅在 else 分支(纯 OpenAI)或 request.reasoning_effort 存在时才发，
  * 而 buildOaiRequest 从不填 request.reasoning_effort。
@@ -25,9 +25,10 @@ const DEEPSEEK_CONFIG: OpenAIClientConfig = {
   maxTokens: 8192,
   providerName: 'deepseek',
   thinking: 'enabled',
-  thinkingFormat: 'anthropic',
+  thinkingBlockType: 'enabled',
   effortFormat: 'reasoning_effort',
   reasoningEffort: 'max',
+  preservedThinkingProtocol: true,
 }
 
 // 捕获 stream() 实际发出的请求体（mock fetch 返回一个立即结束的 SSE 流）。

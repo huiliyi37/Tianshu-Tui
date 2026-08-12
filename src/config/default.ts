@@ -94,6 +94,13 @@ export const DEFAULT_CONFIG: Config = {
       minimax: cloneProviderPreset('minimax'),
       codex: cloneProviderPreset('codex'),
       ccswitch: cloneProviderPreset('ccswitch'),
+      // Aggregator / relay providers — registered but not the default.
+      // Users pick them from the provider selector when they have the
+      // corresponding API key / self-hosted relay running.
+      siliconflow: cloneProviderPreset('siliconflow'),
+      dashscope: cloneProviderPreset('dashscope'),
+      openrouter: cloneProviderPreset('openrouter'),
+      relay: cloneProviderPreset('relay'),
     },
   },
   agent: {

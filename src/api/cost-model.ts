@@ -39,6 +39,10 @@ const PER_TOKEN_PROVIDERS = new Set<string>([
   'kimi',
   'vllm',
   'opencode-go',
+  'siliconflow', // aggregator — per-token
+  'dashscope', // 阿里通义千问 — per-token
+  'openrouter', // aggregator — per-token
+  'relay', // self-hosted one-api/new-api relay — per-token (default assumption)
 ])
 
 export interface CostModelHints {

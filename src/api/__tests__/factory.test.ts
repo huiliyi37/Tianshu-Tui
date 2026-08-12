@@ -8,6 +8,7 @@ import { AnthropicClient } from '../anthropic-client.js'
 import { ApiKeyAuth } from '../../auth/api-key.js'
 import { cloneProviderPreset } from '../../config/provider-presets.js'
 import type { ProviderConfig } from '../../config/schema.js'
+import { providerSchema } from '../../config/schema.js'
 
 const deepseekProvider: ProviderConfig = {
   name: 'deepseek',
@@ -181,26 +182,18 @@ describe('createProviderClient', () => {
     })
     assert.ok(client)
   })
-  it('creates AnthropicClient for anthropic provider with cache-control strategy', () => {
+  it('creates AnthropicClient for a custom provider declaring protocol anthropic', () => {
     const anthropicProvider: ProviderConfig = {
-      name: 'anthropic',
-      baseUrl: 'https://api.anthropic.com',
-      protocol: 'openai',
-      capabilities: {
-        cacheControl: true,
-        stripParams: [],
-        toolJsonBug: false,
-        prefixCache: 'anthropic-cache-control',
-        prefixCompletion: false,
-      },
+      name: 'my-claude-proxy',
+      baseUrl: 'https://proxy.example.com',
+      protocol: 'anthropic',
+      capabilities: {},
       thinking: 'enabled',
       maxTokens: 64000,
       models: [{ id: 'claude-opus-4-7', contextWindow: 200000, maxTokens: 32000 }],
       unsupported: [],
     }
-    const caps = resolveCapabilities('anthropic')
-    // Override to anthropic-cache-control strategy
-    caps.prefixCacheStrategy = 'anthropic-cache-control'
+    const caps = resolveCapabilities('claude')
     const client = createProviderClient(anthropicProvider, caps, {
       ...runtimeParams,
       model: 'claude-opus-4-7',
@@ -208,30 +201,48 @@ describe('createProviderClient', () => {
     assert.ok(client instanceof AnthropicClient)
   })
 
-  it('creates AnthropicClient when provider.name is anthropic regardless of prefixCacheStrategy', () => {
-    const anthropicProvider: ProviderConfig = {
+  it('schema parses a provider named "anthropic" to protocol anthropic (end-to-end dispatch)', () => {
+    const parsed = providerSchema.parse({
       name: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
-      protocol: 'openai',
-      capabilities: {
-        cacheControl: false,
-        stripParams: [],
-        toolJsonBug: false,
-        prefixCache: 'none',
-        prefixCompletion: false,
-      },
-      thinking: 'enabled',
-      maxTokens: 64000,
       models: [{ id: 'claude-opus-4-7', contextWindow: 200000, maxTokens: 32000 }],
-      unsupported: [],
-    }
-    const caps = resolveCapabilities('claude') // claude has prefixCacheStrategy='none'
-    const client = createProviderClient(anthropicProvider, caps, {
-      ...runtimeParams,
-      model: 'claude-opus-4-7',
     })
+    assert.equal(parsed.protocol, 'anthropic')
+    const caps = resolveCapabilities('anthropic')
+    const client = createProviderClient(parsed, caps, { ...runtimeParams, model: 'claude-opus-4-7' })
     assert.ok(client instanceof AnthropicClient)
   })
+
+  it('explicit protocol openai overrides the anthropic-name normalization', () => {
+    const parsed = providerSchema.parse({
+      name: 'anthropic',
+      baseUrl: 'https://openai-compatible.example.com/v1',
+      protocol: 'openai',
+      models: [{ id: 'claude-opus-4-7', contextWindow: 200000, maxTokens: 32000 }],
+    })
+    assert.equal(parsed.protocol, 'openai')
+    const caps = resolveCapabilities('anthropic')
+    const client = createProviderClient(parsed, caps, { ...runtimeParams, model: 'claude-opus-4-7' })
+    assert.ok(client instanceof OpenAIClient)
+  })
+
+  it('does NOT route to AnthropicClient via the retired prefixCacheStrategy backdoor', () => {
+    const anthropicProvider: ProviderConfig = {
+      name: 'some-openai-wire-endpoint',
+      baseUrl: 'https://api.example.com/v1',
+      protocol: 'openai',
+      capabilities: { prefixCache: 'anthropic-cache-control' },
+      thinking: 'enabled',
+      maxTokens: 64000,
+      models: [{ id: 'some-model', contextWindow: 128000, maxTokens: 8192 }],
+      unsupported: [],
+    }
+    const caps = resolveCapabilities('claude')
+    caps.prefixCacheStrategy = 'anthropic-cache-control'
+    const client = createProviderClient(anthropicProvider, caps, runtimeParams)
+    assert.ok(client instanceof OpenAIClient, 'dispatch is protocol-driven; capability heuristics must not switch wire clients')
+  })
+
   it('injects thinkingStallTimeoutMs default for glm provider', () => {
     const glmProvider: ProviderConfig = {
       name: 'glm',
