@@ -557,19 +557,34 @@ test('draft: diy-models resume recomputes matcher results and keeps checkbox sta
   assert.match(view.options?.[1]?.description ?? '', /未知模型/)
 })
 
-test('draft: transient phases resume at the key step with the key prefilled', () => {
-  for (const phase of ['diy-probing', 'diy-probe-failed'] as const) {
+test('draft: transient probe phases resume at the address step — Enter re-fires the probe', () => {
+  // 探测中/失败/报告页都是瞬态——恢复到触发探测的地址步（预填地址），
+  // 回车直接再探测；密钥已随 keyRef 恢复，不让用户重输。
+  for (const phase of ['diy-probing', 'diy-probe-failed', 'probe-report'] as const) {
     const flow = new ConnectFlow([], draft({
       phase,
       collected: { baseUrl: 'https://api.example.com/v1', keyRef: 'diy-pending' },
     }), 'sk-x')
     flow.submitChoice('resume')
     const view = flow.view()
-    assert.equal(view.kind, 'input')
-    assert.match(view.title, /API Key/)
-    // 不预填的话，用户一回车就把存好的 key 清掉了（空输入=本地端点语义）。
-    assert.equal(flow.takeRestoredInput(), 'sk-x')
+    assert.match(view.title, /API 地址/, phase)
+    assert.equal(flow.takeRestoredInput(), 'https://api.example.com/v1', phase)
+    const probe = flow.submitInput('https://api.example.com/v1')
+    assert.equal(probe.kind, 'probe', phase)
+    if (probe.kind === 'probe') assert.equal(probe.apiKey, 'sk-x', phase)
   }
+})
+
+test('probe-failed back → address step prefilled; resubmit re-probes without re-entering the key', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.probeFailed('boom')
+  flow.submitChoice('back')
+  assert.match(flow.view().title, /API 地址/)
+  assert.equal(flow.takeRestoredInput(), 'https://api.example.com/v1')
+  const probe = flow.submitInput('https://api.example.com/v1')
+  assert.equal(probe.kind, 'probe')
+  if (probe.kind === 'probe') assert.equal(probe.apiKey, 'sk-x')
 })
 
 test('draft: diy-models without a stored selection falls back to the key step', () => {

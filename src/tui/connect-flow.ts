@@ -608,7 +608,8 @@ export class ConnectFlow {
         // (key already restored via keyRef; Enter re-fires the probe).
         const key = c.presetKey
         if (!key || !isProviderPresetKey(key)) {
-          if (c.baseUrl) return { phase: 'diy-apikey', collected: base, restoredInput: restoredKey ?? '' }
+          // DIY 探测瞬态——回地址步预填地址，重提即再探测（密钥已随 keyRef 恢复）。
+          if (c.baseUrl) return { phase: 'diy-url', collected: base, restoredInput: c.baseUrl }
           return undefined
         }
         const preset = PROVIDER_PRESETS[key]
@@ -696,8 +697,9 @@ export class ConnectFlow {
       }
       case 'diy-probing':
       case 'diy-probe-failed': {
+        // 探测瞬态——回地址步预填地址；重提地址直接再探测，密钥不必重输。
         if (!c.baseUrl) return undefined
-        return { phase: 'diy-apikey', collected: base, restoredInput: restoredKey ?? '' }
+        return { phase: 'diy-url', collected: base, restoredInput: c.baseUrl }
       }
       case 'diy-models': {
         if (!c.baseUrl) return undefined
@@ -1641,6 +1643,7 @@ export class ConnectFlow {
       }
       if (id === 'back') {
         this.phase = 'diy-url'
+        this.restoredInputValue = this.collected.baseUrl ?? ''
         return { kind: 'next', view: this.view() }
       }
       return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
@@ -1817,6 +1820,17 @@ export class ConnectFlow {
         const normalized = normalizeBaseUrl(value)
         this.collected.urlNormalized = normalized !== value
         this.collected.baseUrl = normalized
+        // 密钥已在手（探测失败回来改地址 / 草稿恢复）→ 重提地址直接再探测，
+        // 不让用户把密钥步重走一遍。
+        if (this.collected.apiKey !== undefined) {
+          this.phase = 'diy-probing'
+          return {
+            kind: 'probe',
+            baseUrl: normalized,
+            apiKey: this.collected.apiKey,
+            protocol: this.collected.protocol ?? 'openai',
+          }
+        }
         this.phase = 'diy-apikey'
         return { kind: 'next', view: this.view() }
       }
