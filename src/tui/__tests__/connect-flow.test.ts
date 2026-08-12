@@ -752,6 +752,41 @@ test('draft: no progress before the key is saved — pre-key Esc is a pure cance
   assert.ok(flow.toDraft())
 })
 
+test('keyless DIY: submitting an empty key is progress and address retries skip the key step', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('custom')
+  flow.submitChoice('openai')
+  flow.submitInput('http://127.0.0.1:11434/v1')
+  const firstProbe = flow.submitInput('')
+  assert.equal(firstProbe.kind, 'probe')
+  assert.equal(flow.hasProgress(), true, '明确提交空密钥后已经越过凭证门槛')
+  const snap = flow.toDraft()
+  assert.ok(snap)
+  assert.equal(snap.collected.authConfirmed, true)
+  assert.equal(snap.collected.keyRef, undefined)
+
+  flow.probeFailed('offline')
+  flow.submitChoice('back')
+  const retry = flow.submitInput('http://127.0.0.1:11434/v1')
+  assert.equal(retry.kind, 'probe', '修改地址后直接重探，不重新进入密钥步')
+  if (retry.kind === 'probe') assert.equal(retry.apiKey, undefined)
+})
+
+test('draft: keyless DIY transient phases restore to address and re-probe without a secret ref', () => {
+  for (const phase of ['diy-probing', 'diy-probe-failed', 'probe-report'] as const) {
+    const flow = new ConnectFlow([], draft({
+      phase,
+      collected: { baseUrl: 'http://127.0.0.1:11434/v1', authConfirmed: true },
+    }))
+    flow.submitChoice('resume')
+    assert.match(flow.view().title, /API 地址/, phase)
+    assert.equal(flow.takeRestoredInput(), 'http://127.0.0.1:11434/v1', phase)
+    const probe = flow.submitInput('http://127.0.0.1:11434/v1')
+    assert.equal(probe.kind, 'probe', phase)
+    if (probe.kind === 'probe') assert.equal(probe.apiKey, undefined, phase)
+  }
+})
+
 test('draft: preset step 2 (API key) has no draft; endpoint step (post-key) does', () => {
   const flow = new ConnectFlow()
   flow.submitChoice('deepseek')

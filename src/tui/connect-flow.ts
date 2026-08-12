@@ -184,6 +184,8 @@ interface Collected {
   /** Set when the entered URL was normalized (request-path tail stripped) at collection. */
   urlNormalized?: boolean
   apiKey?: string
+  /** User has submitted the credential step; true also represents an intentional empty key. */
+  authConfirmed?: boolean
   modelId?: string
   /** Provider name chosen at the naming step — commit happens on confirm. */
   providerName?: string
@@ -472,8 +474,8 @@ export class ConnectFlow {
   hasProgress(): boolean {
     if (this.phase === 'draft') return false
     const c = this.collected
-    // 密钥保存前没有任何东西真正入库——Esc 纯取消，不落草稿。
-    if (c.apiKey !== undefined) return true
+    // 密钥步骤已提交才算进展；authConfirmed 同时覆盖无密钥本地端点。
+    if (c.authConfirmed || c.apiKey !== undefined) return true
     if (c.existingProvider) return true // 加模型路径无密钥步，进入流程即有进展
     const key = c.presetKey
     if (key && PROVIDER_PRESETS[key]?.keyless
@@ -501,6 +503,7 @@ export class ConnectFlow {
       ...(c.contextWindow !== undefined ? { contextWindow: c.contextWindow } : {}),
       ...(c.supportsVision !== undefined ? { supportsVision: c.supportsVision } : {}),
       ...(c.existingProvider ? { existingProvider: c.existingProvider } : {}),
+      ...(c.authConfirmed !== undefined ? { authConfirmed: c.authConfirmed } : {}),
       ...(c.makeDefault !== undefined ? { makeDefault: c.makeDefault } : {}),
       ...(c.reasoningSplitHint !== undefined ? { reasoningSplitHint: c.reasoningSplitHint } : {}),
       ...(c.thinkingSplit !== undefined ? { thinkingSplit: c.thinkingSplit } : {}),
@@ -560,6 +563,7 @@ export class ConnectFlow {
       ...(c.baseUrl ? { baseUrl: c.baseUrl } : {}),
       ...(c.protocol ? { protocol: c.protocol } : {}),
       ...(restoredKey ? { apiKey: restoredKey } : {}),
+      ...(c.authConfirmed !== undefined ? { authConfirmed: c.authConfirmed } : {}),
       ...(c.makeDefault !== undefined ? { makeDefault: c.makeDefault } : {}),
       ...(c.reasoningSplitHint !== undefined ? { reasoningSplitHint: c.reasoningSplitHint } : {}),
       ...(c.thinkingSplit !== undefined ? { thinkingSplit: c.thinkingSplit } : {}),
@@ -707,8 +711,10 @@ export class ConnectFlow {
       case 'diy-url':
         return {
           phase: 'diy-url',
-          collected: { ...(c.protocol ? { protocol: c.protocol } : {}) },
-          restoredInput: pending ?? '',
+          // authConfirmed distinguishes an intentional empty key from a key step
+          // the user has not submitted yet; keep it so address resubmission can re-probe.
+          collected: base,
+          restoredInput: pending ?? c.baseUrl ?? '',
         }
       case 'diy-apikey': {
         if (!c.baseUrl) return undefined
@@ -1864,6 +1870,7 @@ export class ConnectFlow {
           return { kind: 'error', message: 'API 密钥不能为空。', view: this.view() }
         }
         this.collected.apiKey = value
+        this.collected.authConfirmed = true
         this.phase = 'preset-endpoint'
         return { kind: 'next', view: this.view() }
       }
@@ -1901,7 +1908,7 @@ export class ConnectFlow {
         this.collected.baseUrl = normalized
         // 密钥已在手（探测失败回来改地址 / 草稿恢复）→ 重提地址直接再探测，
         // 不让用户把密钥步重走一遍。
-        if (this.collected.apiKey !== undefined) {
+        if (this.collected.authConfirmed || this.collected.apiKey !== undefined) {
           this.phase = 'diy-probing'
           return {
             kind: 'probe',
@@ -1917,6 +1924,7 @@ export class ConnectFlow {
       case 'diy-apikey': {
         // Empty is allowed — local deployments (Ollama/vLLM) need no auth.
         this.collected.apiKey = value.length > 0 ? value : undefined
+        this.collected.authConfirmed = true
         this.phase = 'diy-probing'
         return {
           kind: 'probe',

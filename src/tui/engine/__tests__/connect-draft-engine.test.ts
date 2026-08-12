@@ -107,6 +107,22 @@ describe('connect draft · engine wiring', () => {
     assert.equal(readSecret(DIY_PENDING_KEY_REF), 'sk-live-key')
   })
 
+  it('Esc after confirming an empty key saves a keyless draft without a secret ref', () => {
+    const { app } = makeApp()
+    const a = internals(app)
+    app.startConnect()
+    a.connectFlow!.submitChoice('custom')
+    a.connectFlow!.submitChoice('openai')
+    a.advanceConnect(a.connectFlow!.submitInput('http://127.0.0.1:11434/v1'))
+    a.connectFlow!.submitInput('') // 明确确认本地端点无密钥；不经 advanceConnect，避免真实探测
+    a.cancelConnect()
+    const draft = readConnectDraft(home)
+    assert.ok(draft)
+    assert.equal(draft.phase, 'diy-probing')
+    assert.equal(draft.collected.authConfirmed, true)
+    assert.equal(draft.collected.keyRef, undefined)
+  })
+
   it('Esc on the key step saves nothing — the key was never submitted', () => {
     const { app } = makeApp()
     const a = internals(app)

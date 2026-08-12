@@ -58,6 +58,8 @@ export interface ConnectDraftCollected {
   modelId?: string
   /** Provider name chosen at the naming step (DIY path, carried into confirm). */
   providerName?: string
+  /** User submitted the credential step, including an intentional empty key for local endpoints. */
+  authConfirmed?: boolean
   /** Default-provider answer captured at the ask-default step. */
   makeDefault?: boolean
   contextWindow?: number
@@ -138,6 +140,7 @@ export function readConnectDraft(base?: string): ConnectDraft | undefined {
   if (isString(collected.keyRef)) clean.keyRef = collected.keyRef
   if (isString(collected.modelId)) clean.modelId = collected.modelId
   if (isString(collected.providerName)) clean.providerName = collected.providerName
+  if (typeof collected.authConfirmed === 'boolean') clean.authConfirmed = collected.authConfirmed
   if (typeof collected.makeDefault === 'boolean') clean.makeDefault = collected.makeDefault
   if (typeof collected.contextWindow === 'number') clean.contextWindow = collected.contextWindow
   if (typeof collected.supportsVision === 'boolean') clean.supportsVision = collected.supportsVision
