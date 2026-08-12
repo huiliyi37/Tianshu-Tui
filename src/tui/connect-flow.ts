@@ -22,7 +22,7 @@ import type { SetupProviderOptions } from '../config/manager.js'
 import type { ModelConfig, ProviderAdvancedConfig } from '../config/schema.js'
 import { PROVIDER_PRESETS, providerPresetKeys, isProviderPresetKey, type ProviderPresetKey, type ProviderPreset } from '../config/provider-presets.js'
 import { matchModelIds, type ModelMatchResult } from '../api/model-id-matcher.js'
-import { aliasTableWithProbeInfos, type ProbeReport } from '../api/provider-probe.js'
+import { aliasTableWithProbeInfos, isVisionCapableId, VISION_PROBE_GROUND_TRUTH, type ProbeReport } from '../api/provider-probe.js'
 import { normalizeBaseUrl } from '../api/endpoint-map.js'
 import type { ConnectDraft, ConnectDraftCollected } from './connect-draft.js'
 
@@ -129,6 +129,7 @@ type Phase =
   | 'preset-endpoint'
   | 'preset-probing'
   | 'probe-report'
+  | 'reprobe-pick'
   | 'preset-models'
   | 'capability'
   | 'ask-default'
@@ -327,11 +328,20 @@ function probeReportLines(report: ProbeReport): ProbeLine[] {
     text: `${checkMark(report.modelsOk)} 2/3 获取模型列表${report.modelsOk ? `（${report.models.length} 个）` : ''}`,
     tone: report.modelsOk ? 'ok' : 'fail',
   })
+  const step3 = report.visionTested ? '3/3 视觉真测（发送内置图片）' : '3/3 发送最小推理请求'
   lines.push({
-    text: `${checkMark(report.completionOk)} 3/3 发送最小推理请求${report.completionOk && report.latencyMs !== undefined ? `（首字节 ${report.latencyMs}ms）` : ''}`,
+    text: `${checkMark(report.completionOk)} ${step3}${report.completionOk && report.latencyMs !== undefined ? `（首字节 ${report.latencyMs}ms）` : ''}`,
     tone: report.completionOk ? 'ok' : 'fail',
   })
   if (report.hints.reasoningSplit) lines.push({ text: '✔ 探测到思考分块（reasoning_content）', tone: 'ok' })
+  // 视觉真测通过：展示模型回答 + 图片真相，供用户肉眼核对（不做自动判分）。
+  // 失败时不展示任何模型输出——只保留下方错误与可能原因/建议操作。
+  if (report.visionTested && report.completionOk) {
+    lines.push({ text: '模型回答：', tone: 'head' })
+    lines.push({ text: report.visionAnswer?.trim() ? report.visionAnswer.trim() : '（模型未返回文本）', tone: 'muted' })
+    lines.push({ text: '图片真实内容：', tone: 'head' })
+    lines.push({ text: VISION_PROBE_GROUND_TRUTH, tone: 'muted' })
+  }
   if (report.errors.length === 0) {
     lines.push({ text: '端点配置有效，满足 coding agent 的基本要求。', tone: 'ok' })
     return lines
@@ -364,7 +374,14 @@ function capabilityLines(
     ? { text: '✔ 思考分块 reasoning_content（实测）', tone: 'ok' }
     : { text: '⚠ 未检测到思考分块（不影响使用）', tone: 'muted' })
   const vision = meta?.supportsVision === true
-  lines.push({ text: `${vision ? '✔' : '⚠'} Vision ${vision ? '支持' : '不支持'}（按模型元数据）`, tone: vision ? 'ok' : 'muted' })
+  if (report.visionTested) {
+    lines.push({
+      text: `${checkMark(report.completionOk)} Vision 视觉真测（实测：内置图片${report.completionOk ? '描述成功' : '未通过'}）`,
+      tone: report.completionOk ? 'ok' : 'fail',
+    })
+  } else {
+    lines.push({ text: `${vision ? '✔' : '⚠'} Vision ${vision ? '支持' : '不支持'}（按模型元数据）`, tone: vision ? 'ok' : 'muted' })
+  }
   const toolKnown = known !== undefined || template !== undefined
   lines.push(toolKnown
     ? { text: '✔ Tool Calling 工具调用（已知模型，元数据支持）', tone: 'ok' }
@@ -504,6 +521,8 @@ export class ConnectFlow {
     if (phase === 'advanced-settings' || phase === 'advanced-request-timeout' || phase === 'advanced-max-retries' || phase === 'advanced-temperature' || phase === 'advanced-proxy') {
       phase = 'confirm'
     }
+    // 换型号重探的挑选步是瞬态——回落报告步（恢复后再从报告页进入）。
+    if (phase === 'reprobe-pick') phase = 'probe-report'
     return {
       version: 1,
       savedAt: Date.now(),
@@ -936,6 +955,10 @@ export class ConnectFlow {
         } else {
           options.push({ id: 'rekey', label: '重新输入 API Key' })
         }
+        // 补全失败但拉到了模型列表 → 换一个型号重探（聚合站常见：建议型号没收录）。
+        if (report && !report.completionOk && report.models.length > 0) {
+          options.push({ id: 'reprobe-pick', label: '换个模型重探', description: `从探测到的 ${report.models.length} 个型号里另选一个再试` })
+        }
         return {
           kind: 'choice',
           title: usable ? '连通性测试通过' : '连通性测试未通过',
@@ -943,6 +966,27 @@ export class ConnectFlow {
           stepLabel: isPresetPath ? this.presetStepLabel(3) : this.diyStepLabel(5),
           report: report ? probeReportLines(report) : undefined,
           options,
+        }
+      }
+      case 'reprobe-pick': {
+        // 换模型重探：从已拉取的型号里挑一个再试。别名表认识的识图/多模态档
+        // 排在最前——聚合站命名杂，视觉探测尤其需要用户选对型号。
+        const models = this.collected.probeReport?.models ?? []
+        const sorted = models.slice().sort((a, b) => Number(isVisionCapableId(b)) - Number(isVisionCapableId(a)))
+        const firstVisionIdx = sorted.findIndex(id => isVisionCapableId(id))
+        const preset = this.collected.presetKey ? PROVIDER_PRESETS[this.collected.presetKey] : undefined
+        const isPresetPath = !!preset && !preset.keyless
+        return {
+          kind: 'choice',
+          title: '选择重探用的模型',
+          subtitle: '回车即用所选型号重新探测；视觉真测需选识图/多模态型号',
+          stepLabel: isPresetPath ? this.presetStepLabel(3) : this.diyStepLabel(5),
+          options: sorted.map((id, i) => ({
+            id,
+            label: id,
+            description: isVisionCapableId(id) ? '识图/多模态（别名表认识，可跑视觉真测）' : undefined,
+            ...(i === firstVisionIdx ? { recommended: true } : {}),
+          })),
         }
       }
       case 'preset-models': {
@@ -1561,7 +1605,41 @@ export class ConnectFlow {
         this.gotoConfirm()
         return { kind: 'next', view: this.view() }
       }
+      if (id === 'reprobe-pick') {
+        if ((this.collected.probeReport?.models.length ?? 0) === 0) {
+          return { kind: 'error', message: '没有可选型号——模型列表未拉取成功。', view: this.view() }
+        }
+        this.phase = 'reprobe-pick'
+        return { kind: 'next', view: this.view() }
+      }
       return { kind: 'error', message: `未知选项：${id}`, view: this.view() }
+    }
+    if (this.phase === 'reprobe-pick') {
+      const models = this.collected.probeReport?.models ?? []
+      if (!models.includes(id)) {
+        return { kind: 'error', message: `未知型号：${id}`, view: this.view() }
+      }
+      const presetKey = this.collected.presetKey
+      if (presetKey) {
+        const preset = PROVIDER_PRESETS[presetKey]
+        this.phase = 'preset-probing'
+        return {
+          kind: 'probe',
+          baseUrl: this.collected.baseUrl ?? this.presetBaseUrl(),
+          apiKey: this.collected.apiKey,
+          probeModel: id,
+          protocol: preset.provider.protocol ?? 'openai',
+          providerName: presetKey,
+        }
+      }
+      this.phase = 'diy-probing'
+      return {
+        kind: 'probe',
+        baseUrl: this.collected.baseUrl!,
+        apiKey: this.collected.apiKey,
+        probeModel: id,
+        protocol: this.collected.protocol ?? 'openai',
+      }
     }
     if (this.phase === 'ask-default') {
       if (id === 'yes') {
@@ -1713,6 +1791,7 @@ export class ConnectFlow {
       case 'diy-thinking':
       case 'diy-probe-failed':
       case 'probe-report':
+      case 'reprobe-pick':
       case 'preset-models':
       case 'capability':
       case 'ask-default':

@@ -15,7 +15,23 @@
 
 import { normalizeBaseUrl, resolveProbeEndpoints } from './endpoint-map.js'
 import { type ModelAliasEntry, type ModelAliasMetadata } from './model-aliases.js'
+import { matchModelId } from './model-id-matcher.js'
 import { ENRICHED_ALIAS_TABLE } from './model-meta-kb.js'
+
+/**
+ * 视觉真测内置图：16×16 纯红方块（79 字节 PNG）。选探测模型是视觉档时，
+ * 最小补全改为携带这张图的多模态请求——模型能正常描述即视为通过；
+ * 回答文本与图片真相一并回报，由用户肉眼核对，不做字符串自动判分。
+ */
+export const VISION_PROBE_IMAGE_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR42mO4o6ZGEmIY1TCqYfhqAAATqigQ9kvG0QAAAABJRU5ErkJggg=='
+export const VISION_PROBE_GROUND_TRUTH = '一张 16×16 像素的纯红色正方形图片'
+const VISION_PROBE_PROMPT = '请用一句简短的话描述这张图片的内容。'
+const VISION_PROBE_MAX_TOKENS = 100
+
+/** 别名表认定为识图/多模态的型号才走视觉真测（metadata.supportsVision）。 */
+export function isVisionCapableId(rawId: string, table: readonly ModelAliasEntry[] = ENRICHED_ALIAS_TABLE): boolean {
+  return matchModelId(rawId, table).entry?.metadata.supportsVision === true
+}
 
 export interface ProbeOptions {
   baseUrl: string
@@ -54,6 +70,12 @@ export interface ProbeReport {
   latencyMs?: number
   /** 端点自带规格元数据时按模型 id 携带——消费侧物化 contextWindow/maxTokens，跳过手填。 */
   modelInfos?: Record<string, ProbedModelInfo>
+  /** 实际用于补全探测的型号（选取策略可能与建议型号不同）。 */
+  probedModel?: string
+  /** 补全探测携带了内置图片（所选型号为别名表认定的视觉/多模态档）。 */
+  visionTested?: boolean
+  /** 视觉真测时模型的描述文本——成功才携带，失败报告不展示模型输出。 */
+  visionAnswer?: string
   /** Classified human-readable problems (empty when everything succeeded). */
   errors: string[]
 }
@@ -233,19 +255,47 @@ interface CompletionProbeOutcome {
   hints: CapabilityHints
   latencyMs?: number
   error?: string
+  /** 流式回答文本（视觉真测展示用；非视觉探测也会顺带提取）。 */
+  answer?: string
 }
 
-async function probeOpenAICompletion(options: ProbeOptions, model: string): Promise<CompletionProbeOutcome> {
+/** 从 SSE 流文本中重建助手回答（delta.content 拼接；容忍 keep-alive 等非 JSON 行）。 */
+function extractSseAssistantText(bodyText: string): string {
+  let text = ''
+  for (const line of bodyText.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) continue
+    const payload = trimmed.slice(5).trim()
+    if (payload === '[DONE]') continue
+    try {
+      const parsed = JSON.parse(payload) as {
+        choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }>
+      }
+      const piece = parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.message?.content
+      if (typeof piece === 'string') text += piece
+    } catch { /* 非 JSON 数据行——忽略 */ }
+  }
+  return text.trim()
+}
+
+async function probeOpenAICompletion(options: ProbeOptions, model: string, vision: boolean): Promise<CompletionProbeOutcome> {
   const url = resolveProbeEndpoints(options.baseUrl, options.providerName).chatUrl
   const startedAt = Date.now()
+  // 视觉真测：多模态 content（内置图片 + 描述指令）；否则纯文本 "hi"。
+  const content: unknown = vision
+    ? [
+        { type: 'image_url', image_url: { url: VISION_PROBE_IMAGE_DATA_URI } },
+        { type: 'text', text: VISION_PROBE_PROMPT },
+      ]
+    : 'hi'
   try {
     const response = await fetchWithProbeTimeout(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders(options.apiKey) },
       body: JSON.stringify({
         model,
-        messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 8,
+        messages: [{ role: 'user', content }],
+        max_tokens: vision ? VISION_PROBE_MAX_TOKENS : 8,
         stream: true,
       }),
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
@@ -268,7 +318,7 @@ async function probeOpenAICompletion(options: ProbeOptions, model: string): Prom
     }
     const hints: CapabilityHints = {}
     if (bodyText.includes('reasoning_content')) hints.reasoningSplit = true
-    return { ok: true, hints, latencyMs }
+    return { ok: true, hints, latencyMs, answer: extractSseAssistantText(bodyText) }
   } catch (error) {
     const reason = error instanceof Error && error.name === 'AbortError'
       ? `completion probe timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`
@@ -344,23 +394,35 @@ export async function probeProvider(options: ProbeOptions): Promise<ProbeReport>
   }
 
   if (options.skipCompletion) return report
-  // 型号选取：模板建议型号在发现列表中存在则优先（预设挑的是已知档，避免随机
-  // 拿昂贵档做补全）；否则用实测发现的第一个——模板型号可能在该端点不存在
-  // （如百炼按量计费按业务空间开放模型），拿不存在的型号探测会误报失败。
-  const model = options.probeModel && models.includes(options.probeModel)
-    ? options.probeModel
-    : (models[0] ?? options.probeModel)
+  // 型号选取：建议型号在列表中存在则优先；建议型号是视觉档但端点没有它时
+  // （聚合站命名各异），优先挑别名表认识的识图/多模态型号——盲取 models[0]
+  // 容易撞上 embedding/TTS 或未开通的型号导致误报失败；其余情况回退首个发现。
+  const wantVision = !!options.probeModel && isVisionCapableId(options.probeModel)
+  let model: string | undefined
+  if (options.probeModel && models.includes(options.probeModel)) {
+    model = options.probeModel
+  } else if (wantVision) {
+    model = models.find(id => isVisionCapableId(id)) ?? models[0] ?? options.probeModel
+  } else {
+    model = models[0] ?? options.probeModel
+  }
   if (!model) {
     errors.push('Completion probe skipped: no model id available (fetch a list first or pass probeModel).')
     return report
   }
 
+  // 视觉真测仅对 OpenAI 兼容协议生效（anthropic 探测保持纯文本最小请求）。
+  const vision = wantVision && options.protocol !== 'anthropic' && isVisionCapableId(model)
   const outcome = options.protocol === 'anthropic'
     ? await probeAnthropicCompletion(options, model)
-    : await probeOpenAICompletion(options, model)
+    : await probeOpenAICompletion(options, model, vision)
+  report.probedModel = model
+  if (vision) report.visionTested = true
   report.completionOk = outcome.ok
   report.hints = outcome.hints
   report.latencyMs = outcome.latencyMs
+  // 失败不展示模型输出——只在成功时携带回答文本。
+  if (outcome.ok && vision && outcome.answer) report.visionAnswer = outcome.answer
   if (outcome.error) errors.push(outcome.error)
   return report
 }

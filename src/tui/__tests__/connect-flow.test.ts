@@ -587,6 +587,57 @@ test('probe-failed back → address step prefilled; resubmit re-probes without r
   if (probe.kind === 'probe') assert.equal(probe.apiKey, 'sk-x')
 })
 
+test('vision real-test success shows the model answer and the image ground truth', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe({
+    models: ['glm-4v-flash'],
+    modelsOk: true,
+    completionOk: true,
+    hints: {},
+    errors: [],
+    visionTested: true,
+    visionAnswer: '一张红色的正方形图片',
+    probedModel: 'glm-4v-flash',
+  })
+  const view = flow.view()
+  const text = view.report?.map(l => l.text).join('\n') ?? ''
+  assert.match(text, /视觉真测/, '3/3 步应改称视觉真测')
+  assert.match(text, /一张红色的正方形图片/, '展示模型回答')
+  assert.match(text, /纯红色正方形/, '展示图片真相供用户核对')
+})
+
+test('probe-report completion failure offers 换个模型重探; vision ids sort first and pick re-fires the probe', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe({
+    models: ['agnes-random-text', 'glm-5.2'],
+    modelsOk: true,
+    completionOk: false,
+    hints: {},
+    errors: ['HTTP 404 from https://api.example.com/v1 — model id does not exist'],
+  })
+  const report = flow.view()
+  assert.ok(report.options?.some(o => o.id === 'reprobe-pick'), '补全失败且有模型列表 → 提供换模型重探')
+  flow.submitChoice('reprobe-pick')
+  const pick = flow.view()
+  assert.match(pick.title, /选择重探用的模型/)
+  assert.equal(pick.options?.[0]?.id, 'glm-5.2', '别名表认识的视觉档排最前')
+  const probe = flow.submitChoice('glm-5.2')
+  assert.equal(probe.kind, 'probe')
+  if (probe.kind === 'probe') assert.equal(probe.probeModel, 'glm-5.2')
+})
+
+test('draft: reprobe-pick is transient — toDraft maps it back to probe-report', () => {
+  const flow = new ConnectFlow()
+  toProbe(flow)
+  flow.applyProbe({ models: ['m1'], modelsOk: true, completionOk: false, hints: {}, errors: ['boom'] })
+  flow.submitChoice('reprobe-pick')
+  const snap = flow.toDraft()
+  assert.ok(snap)
+  assert.equal(snap.phase, 'probe-report')
+})
+
 test('draft: diy-models without a stored selection falls back to the key step', () => {
   const flow = new ConnectFlow([], draft({
     phase: 'diy-models',

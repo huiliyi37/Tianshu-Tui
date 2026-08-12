@@ -274,6 +274,75 @@ describe('probeProvider', () => {
   })
 })
 
+describe('vision real-test (视觉真测)', () => {
+  let server: { baseUrl: string; close: () => Promise<void> } | undefined
+
+  after(async () => {
+    await server?.close()
+  })
+
+  function visionServer(modelIds: string[], answer: string, capture: { model?: string; body?: unknown }) {
+    return startServer((req, res) => {
+      if (req.url === '/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: modelIds.map(id => ({ id })) }))
+        return
+      }
+      let body = ''
+      req.on('data', chunk => { body += chunk })
+      req.on('end', () => {
+        capture.body = JSON.parse(body)
+        capture.model = (capture.body as { model: string }).model
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end(sse([JSON.stringify({ choices: [{ delta: { content: answer } }] })]))
+      })
+    })
+  }
+
+  it('sends the built-in image when the probe model is vision-capable, and reports the answer', async () => {
+    const capture: { model?: string; body?: unknown } = {}
+    server = await visionServer(['glm-4v-flash'], '一张红色的正方形图片', capture)
+    const report = await probeProvider({ baseUrl: server.baseUrl, apiKey: 'sk-x', probeModel: 'glm-4v-flash' })
+    assert.equal(report.completionOk, true)
+    assert.equal(report.visionTested, true)
+    assert.equal(report.visionAnswer, '一张红色的正方形图片')
+    assert.equal(report.probedModel, 'glm-4v-flash')
+    const content = (capture.body as { messages: Array<{ content: unknown }> }).messages[0]!.content
+    assert.ok(Array.isArray(content), '视觉真测必须是多模态 content 数组')
+    const parts = content as Array<Record<string, unknown>>
+    assert.ok(parts.some(p => p.type === 'image_url'), '携带内置图片')
+    assert.ok(JSON.stringify(parts).startsWith('[') && JSON.stringify(parts).includes('data:image/png;base64,'))
+    await server.close()
+    server = undefined
+  })
+
+  it('falls back to a discovered vision-capable model when the suggested one is absent', async () => {
+    const capture: { model?: string } = {}
+    // 聚合站没有 glm-4v-flash；列表里第一个是纯文本模型，glm-5.2 是别名表认识的视觉档。
+    server = await visionServer(['some-text-model', 'glm-5.2'], '红色方块', capture)
+    const report = await probeProvider({ baseUrl: server.baseUrl, apiKey: 'sk-x', probeModel: 'glm-4v-flash' })
+    assert.equal(report.completionOk, true)
+    assert.equal(report.probedModel, 'glm-5.2', '必须优先挑别名表认识的视觉档，而非 models[0]')
+    assert.equal(report.visionTested, true)
+    assert.equal(report.visionAnswer, '红色方块')
+    await server.close()
+    server = undefined
+  })
+
+  it('keeps the plain-text probe for non-vision models (no visionTested flag)', async () => {
+    const capture: { body?: unknown } = {}
+    server = await visionServer(['deepseek-chat'], 'hi', capture)
+    const report = await probeProvider({ baseUrl: server.baseUrl, apiKey: 'sk-x', probeModel: 'deepseek-chat' })
+    assert.equal(report.completionOk, true)
+    assert.equal(report.visionTested, undefined)
+    assert.equal(report.visionAnswer, undefined)
+    const content = (capture.body as { messages: Array<{ content: unknown }> }).messages[0]!.content
+    assert.equal(content, 'hi')
+    await server.close()
+    server = undefined
+  })
+})
+
 describe('dashscope native models enrichment (E3)', () => {
   let server: { baseUrl: string; close: () => Promise<void> } | undefined
 
