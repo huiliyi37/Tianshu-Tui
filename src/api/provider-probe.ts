@@ -23,7 +23,7 @@ import { ENRICHED_ALIAS_TABLE } from './model-meta-kb.js'
  * 最小补全改为携带这张图的多模态请求——模型能正常描述即视为通过；
  * 回答文本与图片真相一并回报，由用户肉眼核对，不做字符串自动判分。
  */
-export const VISION_PROBE_IMAGE_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR42mO4o6ZGEmIY1TCqYfhqAAATqigQ9kvG0QAAAABJRU5ErkJggg=='
+export const VISION_PROBE_IMAGE_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR42mP4z8BAEmIY1TCqYfhqAACQ+f8B8u7oVwAAAABJRU5ErkJggg=='
 export const VISION_PROBE_GROUND_TRUTH = '一张 16×16 像素的纯红色正方形图片'
 const VISION_PROBE_PROMPT = '请用一句简短的话描述这张图片的内容。'
 const VISION_PROBE_MAX_TOKENS = 100
@@ -318,7 +318,16 @@ async function probeOpenAICompletion(options: ProbeOptions, model: string, visio
     }
     const hints: CapabilityHints = {}
     if (bodyText.includes('reasoning_content')) hints.reasoningSplit = true
-    return { ok: true, hints, latencyMs, answer: extractSseAssistantText(bodyText) }
+    const answer = extractSseAssistantText(bodyText)
+    if (vision && answer.length === 0) {
+      return {
+        ok: false,
+        hints,
+        latencyMs,
+        error: 'Vision probe returned an SSE stream but no answer text — image understanding was not demonstrated.',
+      }
+    }
+    return { ok: true, hints, latencyMs, answer }
   } catch (error) {
     const reason = error instanceof Error && error.name === 'AbortError'
       ? `completion probe timed out after ${options.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`

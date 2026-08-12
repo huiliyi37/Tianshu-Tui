@@ -1,7 +1,8 @@
 import { describe, it, after } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import { probeProvider } from '../provider-probe.js'
+import { inflateSync } from 'node:zlib'
+import { probeProvider, VISION_PROBE_IMAGE_DATA_URI } from '../provider-probe.js'
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void
 
@@ -327,6 +328,56 @@ describe('vision real-test (视觉真测)', () => {
     assert.equal(report.visionAnswer, '红色方块')
     await server.close()
     server = undefined
+  })
+
+  it('the built-in image is exactly 16×16 pure RGB red', () => {
+    const png = Buffer.from(VISION_PROBE_IMAGE_DATA_URI.split(',')[1]!, 'base64')
+    assert.equal(png.subarray(1, 4).toString('ascii'), 'PNG')
+    assert.equal(png.readUInt32BE(16), 16)
+    assert.equal(png.readUInt32BE(20), 16)
+    assert.equal(png[24], 8, '8-bit channels')
+    assert.equal(png[25], 2, 'RGB color type')
+
+    const idat: Buffer[] = []
+    for (let offset = 8; offset < png.length;) {
+      const length = png.readUInt32BE(offset)
+      const type = png.subarray(offset + 4, offset + 8).toString('ascii')
+      if (type === 'IDAT') idat.push(png.subarray(offset + 8, offset + 8 + length))
+      offset += 12 + length
+    }
+    const raw = inflateSync(Buffer.concat(idat))
+    const stride = 16 * 3
+    let previous = Buffer.alloc(stride)
+    for (let y = 0; y < 16; y++) {
+      const filter = raw[y * (stride + 1)]
+      assert.equal(filter, 0, 'fixture uses unfiltered scanlines so pixel truth stays transparent')
+      const row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1))
+      for (let x = 0; x < stride; x += 3) assert.deepEqual([...row.subarray(x, x + 3)], [255, 0, 0])
+      previous = Buffer.from(row)
+    }
+    assert.equal(previous.length, stride)
+  })
+
+  it('does not pass a vision real-test when the SSE stream contains no answer text', async () => {
+    server = await startServer((req, res) => {
+      if (req.url === '/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'glm-4v-flash' }] }))
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end('data: [DONE]\n\n')
+    })
+    try {
+      const report = await probeProvider({ baseUrl: server.baseUrl, probeModel: 'glm-4v-flash' })
+      assert.equal(report.visionTested, true)
+      assert.equal(report.completionOk, false)
+      assert.equal(report.visionAnswer, undefined)
+      assert.ok(report.errors.some(error => /no answer text/i.test(error)), report.errors.join('; '))
+    } finally {
+      await server.close()
+      server = undefined
+    }
   })
 
   it('keeps the plain-text probe for non-vision models (no visionTested flag)', async () => {
