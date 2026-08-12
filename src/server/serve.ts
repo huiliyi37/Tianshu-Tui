@@ -155,7 +155,7 @@ export interface ResolvedModelSpec {
   provider: ProviderConfig
   apiKey: string
   auth?: AuthProvider
-  model: { id: string; maxTokens: number; contextWindow: number; reasoningEffort?: ModelConfig['reasoningEffort'] }
+  model: { id: string; maxTokens: number; contextWindow: number; reasoningEffort?: ModelConfig['reasoningEffort']; capabilities?: ModelConfig['capabilities'] }
 }
 
 /**

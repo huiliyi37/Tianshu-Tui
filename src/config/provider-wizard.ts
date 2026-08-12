@@ -1,13 +1,19 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import type { ModelConfig } from './schema.js'
-import { loadConfig, setupProvider } from './manager.js'
+import { loadConfig, registerProvider, setupProvider } from './manager.js'
 import { userConfigPath } from './paths.js'
 import { findPresetModel, isProviderPresetKey, providerPresetKeys } from './provider-presets.js'
+import { probeProvider, type ProbeOptions, type ProbeReport } from '../api/provider-probe.js'
+import { matchModelIds } from '../api/model-id-matcher.js'
+import { toModelDescriptors } from './provider-cli.js'
+import { suggestProviderName } from '../tui/connect-flow.js'
 
 export interface ProviderWizardIO {
   ask?: (question: string) => Promise<string>
   write?: (line: string) => void
+  /** Injectable probe (tests stub this; production hits the real endpoint). */
+  probe?: (options: ProbeOptions) => Promise<ProbeReport>
 }
 
 function yes(value: string): boolean {
@@ -23,8 +29,91 @@ function positiveIntOrDefault(value: string, fallback: number, label: string): n
   return parsed
 }
 
+/** Parse "1,3-5" style selection into 0-based indices; empty → all. */
+export function parseModelSelection(answer: string, count: number): number[] {
+  const trimmed = answer.trim()
+  if (!trimmed) return Array.from({ length: count }, (_, i) => i)
+  const picked = new Set<number>()
+  for (const part of trimmed.split(/[,，\s]+/)) {
+    if (!part) continue
+    const range = part.match(/^(\d+)\s*-\s*(\d+)$/)
+    if (range) {
+      const from = Number.parseInt(range[1]!, 10)
+      const to = Number.parseInt(range[2]!, 10)
+      for (let i = Math.min(from, to); i <= Math.max(from, to); i++) {
+        if (i >= 1 && i <= count) picked.add(i - 1)
+      }
+      continue
+    }
+    const single = Number.parseInt(part, 10)
+    if (Number.isInteger(single) && single >= 1 && single <= count) picked.add(single - 1)
+  }
+  return [...picked].sort((a, b) => a - b)
+}
+
 async function ask(io: Required<Pick<ProviderWizardIO, 'ask'>>, question: string): Promise<string> {
   return (await io.ask(question)).trim()
+}
+
+/** Probe-first custom provider onboarding — same core as `rivet provider add`. */
+async function runCustomProviderWizard(
+  io: Required<Pick<ProviderWizardIO, 'ask'>> & ProviderWizardIO,
+  write: (line: string) => void,
+): Promise<void> {
+  const askIo = { ask: io.ask! }
+  const probe = io.probe ?? probeProvider
+
+  const baseUrl = await ask(askIo, 'Base URL (e.g. https://api.example.com/v1): ')
+  if (!/^https?:\/\/\S+$/i.test(baseUrl)) throw new Error(`Invalid base URL: "${baseUrl}"`)
+  const apiKeyRaw = await ask(askIo, 'API key (Enter to skip — local endpoints need none): ')
+  const apiKey = apiKeyRaw || undefined
+
+  write(`Probing ${baseUrl} ...`)
+  let report: ProbeReport
+  try {
+    report = await probe({ baseUrl, apiKey })
+  } catch (e) {
+    throw new Error(`Probe failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+  write(`  Models list: ${report.modelsOk ? `${report.models.length} model(s)` : 'unavailable'}`)
+  write(`  Completion probe: ${report.completionOk ? 'ok' : 'failed/skipped'}`)
+  if (report.hints.reasoningSplit) write('  Hint: endpoint emits reasoning_content → capabilities.reasoningSplit: true')
+  for (const error of report.errors) write(`  ⚠ ${error}`)
+
+  let models: Array<Partial<ModelConfig> & { id: string }> = []
+  if (report.models.length > 0) {
+    const matches = matchModelIds(report.models)
+    const { models: descriptors, notes } = toModelDescriptors(matches)
+    matches.forEach((match, i) => {
+      const tag = match.entry ? (match.tier === 'fuzzy' ? ` ≈ ${match.entry.canonicalId} (低置信)` : ` ≈ ${match.entry.canonicalId}`) : ' [TODO: 未知模型]'
+      write(`  ${i + 1}. ${match.rawId}${tag}`)
+    })
+    for (const note of notes) write(`  ${note}`)
+    const selection = parseModelSelection(await ask(askIo, `Select models [1-${report.models.length}] (Enter = all, e.g. "1,3-5"): `), report.models.length)
+    if (selection.length === 0) throw new Error('No models selected — aborting (re-run and pick at least one).')
+    models = selection.map(i => descriptors[i]!)
+  } else {
+    const modelId = await ask(askIo, 'Model ID (endpoint returned no model list): ')
+    if (!modelId) throw new Error('No model ID provided — aborting.')
+    models = [{ id: modelId }]
+  }
+
+  const defaultName = suggestProviderName(baseUrl)
+  const nameAnswer = await ask(askIo, `Provider name [${defaultName}]: `)
+  const providerName = (nameAnswer || defaultName).toLowerCase()
+  if (isProviderPresetKey(providerName)) {
+    throw new Error(`"${providerName}" is a built-in preset name — pick a different name for a custom provider.`)
+  }
+  const makeDefault = yes(await ask(askIo, 'Set as default? [Y/n]: ') || 'y')
+
+  registerProvider({
+    providerName,
+    baseUrl,
+    ...(apiKey ? { apiKey } : {}),
+    models,
+    makeDefault,
+  })
+  write(`Provider "${providerName}" registered with ${models.length} model(s).`)
 }
 
 /**
@@ -41,6 +130,7 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
   }
 
   const write = io.write ?? (line => output.write(`${line}\n`))
+  const wizardIo: ProviderWizardIO & Required<Pick<ProviderWizardIO, 'ask'>> = { ...io, ask: askFn }
   const askIo = { ask: askFn }
 
   try {
@@ -55,6 +145,7 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
     if (!yes(skipAnswer)) {
       write('')
       write('Skipped. You can configure later with:')
+      write('  rivet provider add <name> --base-url <url>   (probe-first, any OpenAI-compatible endpoint)')
       write('  rivet config setup deepseek --key YOUR_KEY --default')
       write('  (or run `rivet config` for the interactive wizard)')
       write('  (or set DEEPSEEK_API_KEY environment variable)')
@@ -62,7 +153,12 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
       return { skipped: true }
     }
 
-    const providerAnswer = await ask(askIo, 'Provider [deepseek|glm|mimo|minimax|codex]: ')
+    const providerAnswer = await ask(askIo, `Provider [${providerPresetKeys.join('|')}|custom]: `)
+    if ((providerAnswer || '').toLowerCase() === 'custom') {
+      await runCustomProviderWizard(wizardIo, write)
+      write('Run "rivet provider list" to inspect.')
+      return {}
+    }
     const providerName = providerAnswer || config.provider.default
     const current = config.provider.providers[providerName]
     const preset = isProviderPresetKey(providerName) ? providerName : undefined

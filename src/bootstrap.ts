@@ -973,7 +973,7 @@ export function createAgentRuntime(deps: {
           const ovMaxTokens = isWrite
             ? Math.min(16384, ovSpec?.maxTokens ?? ovContextWindow)
             : Math.min(16384, ovSpec?.maxTokens ?? ovContextWindow)
-          const ovCapabilities = resolveCapabilities(ovProvider.name, ovProvider.capabilities)
+          const ovCapabilities = resolveCapabilities(ovProvider.name, ovProvider.capabilities, ovSpec?.capabilities)
           debugLog(`[worker-model] modelOverride active: profile=${_order.profile} authority=${_order.authority} → ${ovProvider.name}/${ovModel} isWrite=${isWrite}`)
           return {
             order: _order,
@@ -1031,7 +1031,7 @@ export function createAgentRuntime(deps: {
           ? Math.min(16384, overrideSpec?.maxTokens ?? overrideContextWindow)
           : Math.min(16384, overrideSpec?.maxTokens ?? overrideContextWindow)
         debugLog(`[worker-model] review-override active: profile=${_order.profile} model=${overrideResolved.modelId} isWrite=${isWrite}`)
-        const overrideCapabilities = resolveCapabilities(overrideResolved.providerName, overrideResolved.providerConfig.capabilities)
+        const overrideCapabilities = resolveCapabilities(overrideResolved.providerName, overrideResolved.providerConfig.capabilities, overrideSpec?.capabilities)
         return {
           order: _order,
           providerName: overrideResolved.providerName,
@@ -1121,7 +1121,7 @@ export function createAgentRuntime(deps: {
 
     debugLog(`[worker-model] runtimeFactory: kind=${_order.kind} profile=${_order.profile} model=${workerModel} provider=${workerProvider.name} contextWindow=${workerContextWindow}`)
 
-    const workerCapabilities = resolveCapabilities(workerProvider.name, workerProvider.capabilities)
+    const workerCapabilities = resolveCapabilities(workerProvider.name, workerProvider.capabilities, workerModelSpec?.capabilities)
     return {
       order: _order,
       providerName: workerProvider.name,

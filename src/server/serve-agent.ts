@@ -600,7 +600,7 @@ function specOfContext(ctx: ServeContext): ResolvedModelSpec {
     provider: ctx.provider,
     apiKey: ctx.apiKey,
     auth: ctx.auth,
-    model: { id: ctx.model.id, maxTokens: ctx.model.maxTokens, contextWindow: ctx.model.contextWindow, reasoningEffort: ctx.model.reasoningEffort },
+    model: { id: ctx.model.id, maxTokens: ctx.model.maxTokens, contextWindow: ctx.model.contextWindow, reasoningEffort: ctx.model.reasoningEffort, capabilities: ctx.model.capabilities },
   }
 }
 

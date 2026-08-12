@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import {
   loadConfig,
   setupProvider,
-  setupCustomProvider,
+  registerProvider,
   addProvider,
   updateProviderBaseUrl,
   upsertProviderModel,
@@ -78,12 +78,12 @@ describe('provider config mutations', () => {
     assert.deepEqual(config.provider.providers.codex!.auth, { type: 'oauth', provider: 'codex' })
   })
 
-  it('setupCustomProvider materializes a full OpenAI-wire provider and makes it default', () => {
-    setupCustomProvider({
+  it('registerProvider materializes a full OpenAI-wire provider and makes it default', () => {
+    registerProvider({
       providerName: 'custom-my-model',
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'sk-custom',
-      model: { id: 'my-model', alias: 'mine', contextWindow: 1_000_000, maxTokens: 2_000_000 },
+      models: [{ id: 'my-model', alias: 'mine', contextWindow: 1_000_000, maxTokens: 2_000_000 }],
       makeDefault: true,
     })
     const config = loadConfig()
@@ -96,7 +96,21 @@ describe('provider config mutations', () => {
     assert.equal(provider.models[0]?.contextWindow, 1_000_000)
     // Output tokens are capped to the context window.
     assert.equal(provider.models[0]?.maxTokens, 1_000_000)
-    assert.equal(provider.capabilities.prefixCache, 'none')
+    // No hardcoded capability boilerplate — undeclared fields fall through to
+    // DEFAULT_CAPABILITIES in resolveCapabilities.
+    assert.deepEqual(provider.capabilities, {})
+  })
+
+  it('registerProvider honors an explicit protocol option', () => {
+    registerProvider({
+      providerName: 'custom-anthropic-wire',
+      baseUrl: 'https://claude.example.com',
+      apiKey: 'sk-custom',
+      protocol: 'anthropic',
+      models: [{ id: 'claude-sonnet', contextWindow: 200_000, maxTokens: 32_000 }],
+    })
+    const provider = loadConfig().provider.providers['custom-anthropic-wire']!
+    assert.equal(provider.protocol, 'anthropic')
   })
 
   // The desktop Settings edit form submits only {id, alias, contextWindow,
@@ -140,12 +154,12 @@ describe('provider config mutations', () => {
     assert.equal(model.tier, 'cheap')
   })
 
-  it('setupCustomProvider rejects an invalid base URL', () => {
-    assert.throws(() => setupCustomProvider({
+  it('registerProvider rejects an invalid base URL', () => {
+    assert.throws(() => registerProvider({
       providerName: 'custom-bad',
       baseUrl: 'not-a-url',
       apiKey: 'sk',
-      model: { id: 'm', contextWindow: 1000, maxTokens: 500 },
+      models: [{ id: 'm', contextWindow: 1000, maxTokens: 500 }],
     }))
   })
 
@@ -189,45 +203,45 @@ describe('provider config mutations', () => {
     assert.equal(loadConfig().provider.providers['zhipu-vision'], undefined)
   })
 
-  it('setupCustomProvider rejects built-in preset names', () => {
+  it('registerProvider rejects built-in preset names', () => {
     // zhipu-vision 是预设 key 但不在默认 providers map——修复前 setupCustomProvider
     // 会成功创建（死锁入口），修复后源头拦截
     assert.throws(
-      () => setupCustomProvider({
+      () => registerProvider({
         providerName: 'zhipu-vision',
         baseUrl: 'https://api.example.com/v1',
         apiKey: 'sk',
-        model: { id: 'm', contextWindow: 1000, maxTokens: 500 },
+        models: [{ id: 'm', contextWindow: 1000, maxTokens: 500 }],
       }),
       /built-in preset name/i,
     )
   })
 
   it('removeProvider allows deleting a custom provider', () => {
-    setupCustomProvider({
+    registerProvider({
       providerName: 'custom-deletable',
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'sk-temp',
-      model: { id: 'temp-model', contextWindow: 128000, maxTokens: 32000 },
+      models: [{ id: 'temp-model', contextWindow: 128000, maxTokens: 32000 }],
     })
     removeProvider('custom-deletable')
     const providers = loadConfig().provider.providers
     assert.equal(providers['custom-deletable'], undefined)
   })
 
-  it('setupCustomProvider throws when a provider with the same name already exists', () => {
-    setupCustomProvider({
+  it('registerProvider throws when a provider with the same name already exists', () => {
+    registerProvider({
       providerName: 'dup-test',
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'sk-1',
-      model: { id: 'm1', contextWindow: 128000, maxTokens: 32000 },
+      models: [{ id: 'm1', contextWindow: 128000, maxTokens: 32000 }],
     })
     assert.throws(
-      () => setupCustomProvider({
+      () => registerProvider({
         providerName: 'dup-test',
         baseUrl: 'https://api.other.com/v1',
         apiKey: 'sk-2',
-        model: { id: 'm2', contextWindow: 64000, maxTokens: 16000 },
+        models: [{ id: 'm2', contextWindow: 64000, maxTokens: 16000 }],
       }),
       /already exists.*(use|to) edit/i,
     )
@@ -235,11 +249,11 @@ describe('provider config mutations', () => {
 
   it('CLI `remove-provider` removes a custom provider', async () => {
     // 先创建一个自定义 provider，再通过 CLI 删除它
-    setupCustomProvider({
+    registerProvider({
       providerName: 'cli-remove-me',
       baseUrl: 'https://api.example.com/v1',
       apiKey: 'sk-temp',
-      model: { id: 'temp-model', contextWindow: 128000, maxTokens: 32000 },
+      models: [{ id: 'temp-model', contextWindow: 128000, maxTokens: 32000 }],
     })
     const out: string[] = []
     const io = {

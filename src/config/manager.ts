@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
 import { z } from 'zod'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, modelConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ProviderCapabilitiesConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
@@ -12,9 +12,54 @@ import { invalidateToolPreset } from '../tools/tool-preset.js'
 import { invalidatePromptBlocks } from '../prompt/block-policy.js'
 import { validateRuntimeLeanSlice, type RuntimeLeanConfigSlice } from './runtime-lean.js'
 import { formatProviderCard, formatSuccess, formatError, formatMcpServerList, type FormatOpts } from './cli-format.js'
+import { formatZodError } from './format-zod-error.js'
 
 const APPROVAL_MODES = ['auto-safe', 'manual', 'auto-accept', 'dangerously-skip-permissions'] as const
 type ApprovalModeConfig = typeof APPROVAL_MODES[number]
+
+/**
+ * Config load failure (malformed JSON or schema violation). Always thrown —
+ * never silently downgraded to defaults, so a broken config surfaces at
+ * startup instead of distorting behavior (wrong contextWindow, lost keys).
+ */
+export class ConfigLoadError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ConfigLoadError'
+  }
+}
+
+/** Convert a JSON.parse error position into 1-based line:column. */
+function lineColAt(text: string, position: number): string {
+  let line = 1
+  let col = 1
+  for (let i = 0; i < position && i < text.length; i++) {
+    if (text[i] === '\n') { line++; col = 1 } else col++
+  }
+  return `${line}:${col}`
+}
+
+/**
+ * Read + parse a config layer. Malformed JSON throws a ConfigLoadError with
+ * the file path and line:column (plus a terminal bell for attention) —
+ * falling back to defaults is forbidden.
+ */
+function readConfigJson(path: string): Record<string, unknown> {
+  const text = readFileSync(path, 'utf-8')
+  try {
+    const raw = JSON.parse(text)
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new ConfigLoadError(`\u0007配置文件 ${path} 顶层必须是 JSON 对象——拒绝回退默认配置，请修正后重试。`)
+    }
+    return raw as Record<string, unknown>
+  } catch (e) {
+    if (e instanceof ConfigLoadError) throw e
+    const detail = e instanceof Error ? e.message : String(e)
+    const posMatch = detail.match(/position (\d+)/)
+    const where = posMatch ? `（第 ${lineColAt(text, Number.parseInt(posMatch[1]!, 10))} 处）` : ''
+    throw new ConfigLoadError(`\u0007配置文件 ${path} JSON 解析失败${where}：${detail}——拒绝回退默认配置，请修正后重试。`)
+  }
+}
 
 export function getUserConfigPath(): string {
   return userConfigPath()
@@ -183,40 +228,32 @@ export function loadConfig(options?: {
   // Layer 2: user global config
   const configPath = getUserConfigPath()
   if (existsSync(configPath)) {
-    try {
-      const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
-      const cpMigrated = migrateLegacyCheckpointInterval(raw as Record<string, unknown>)
-      const dsChanged = migrateDeepseekMaxTokens(cpMigrated)
-      const flashChanged = migrateV4FlashEffort(cpMigrated)
-      // Write back if any migration modified the raw config so the fix
-      // persists across restarts (one-shot, idempotent).
-      if (cpMigrated !== raw || dsChanged || flashChanged) {
-        try {
-          writeFileAtomicSync(configPath, JSON.stringify(cpMigrated, null, 2) + '\n')
-        } catch {
-          // best-effort — migration still applied in memory
-        }
+    const raw = readConfigJson(configPath)
+    const cpMigrated = migrateLegacyCheckpointInterval(raw)
+    const dsChanged = migrateDeepseekMaxTokens(cpMigrated)
+    const flashChanged = migrateV4FlashEffort(cpMigrated)
+    // Write back if any migration modified the raw config so the fix
+    // persists across restarts (one-shot, idempotent).
+    if (cpMigrated !== raw || dsChanged || flashChanged) {
+      try {
+        writeFileAtomicSync(configPath, JSON.stringify(cpMigrated, null, 2) + '\n')
+      } catch {
+        // best-effort — migration still applied in memory
       }
-      base = deepMerge(base, cpMigrated)
-    } catch {
-      // malformed user config — fall through to defaults
     }
+    base = deepMerge(base, cpMigrated)
   }
 
   // Layer 3: project config
   const projectPath = options?.projectConfigPath
     ?? (options?.cwd ? findProjectConfig(options.cwd) : undefined)
   if (projectPath && existsSync(projectPath)) {
-    try {
-      const raw = JSON.parse(readFileSync(projectPath, 'utf-8'))
-      const cpMigrated = migrateLegacyCheckpointInterval(raw as Record<string, unknown>)
-      migrateDeepseekMaxTokens(cpMigrated)
-      migrateV4FlashEffort(cpMigrated)
-      // NOTE: no write-back for project configs — they may be version-controlled.
-      base = deepMerge(base, cpMigrated)
-    } catch {
-      // malformed project config — skip
-    }
+    const raw = readConfigJson(projectPath)
+    const cpMigrated = migrateLegacyCheckpointInterval(raw)
+    migrateDeepseekMaxTokens(cpMigrated)
+    migrateV4FlashEffort(cpMigrated)
+    // NOTE: no write-back for project configs — they may be version-controlled.
+    base = deepMerge(base, cpMigrated)
   }
 
   // Layer 4: session overlay (runtime-only, e.g. from CLI flags)
@@ -243,7 +280,14 @@ export function loadConfig(options?: {
   // deepMerge replaced the array wholesale above — so preset fields added later
   // (e.g. supportsVision) are missing from every config already on disk. Refill
   // the absent ones here; see preset-model-backfill.ts for the scope limits.
-  return backfillPresetModelFields(configSchema.parse(base))
+  const parsed = configSchema.safeParse(base)
+  if (!parsed.success) {
+    // 绝不回退默认——校验失败说明用户配置里有真实错误，静默降级会让错误
+    // 一直藏着（错误的 contextWindow 直接扭曲压缩行为）。
+    const sources = [configPath, ...(projectPath ? [projectPath] : [])].join(' / ')
+    throw new ConfigLoadError(`${formatZodError(parsed.error, 'rivet')}\n涉及的配置文件：${sources}`)
+  }
+  return backfillPresetModelFields(parsed.data)
 }
 
 /** Load config with backward-compatible signature (no options). */
@@ -1354,25 +1398,37 @@ export function setupProvider(options: SetupProviderOptions): void {
   saveConfig(cfg)
 }
 
-export interface SetupCustomProviderOptions {
+export interface RegisterProviderOptions {
   providerName: string
   baseUrl: string
   /** API key — optional for local deployments (Ollama/vLLM) that need no auth. */
   apiKey?: string
-  model: { id: string; alias?: string; contextWindow: number; maxTokens: number; reasoningEffort?: ModelConfig['reasoningEffort']; supportsVision?: boolean }
+  /** Env var name holding the API key. */
+  apiKeyEnv?: string
+  /** Wire protocol of the endpoint. Default 'openai'. */
+  protocol?: 'openai' | 'anthropic'
+  /** Capability overrides; omitted fields fall through to catalog defaults. */
+  capabilities?: ProviderCapabilitiesConfig
+  /** Model list — may be empty (probe-filled later) or multi-model. Each entry
+   *  is normalized through modelConfigSchema (contextWindow inference +
+   *  maxTokens clamping), so partial backfills from the matcher are safe. */
+  models?: Array<Partial<ModelConfig> & { id: string }>
   makeDefault?: boolean
   allowProFallback?: boolean
+  /** Overwrite an existing entry. Without this flag a same-name write throws —
+   *  silent overwrites used to lose baseUrl/key/models. */
+  force?: boolean
 }
 
 /**
- * Create (or overwrite) a brand-new OpenAI-compatible provider from the minimal
- * inputs the in-TUI /connect DIY wizard collects. Unlike `setupProvider`, this
- * does not require an existing entry or a built-in preset — it materializes a
- * complete `ProviderConfig` with conservative capability defaults (no vendor
- * prefix-cache assumptions, no param stripping) so any OpenAI-wire endpoint
- * works out of the box.
+ * Unified provider write core — the single function that materializes a
+ * ProviderConfig from scratch. Consumed by the CLI (`rivet provider add`),
+ * the desktop HTTP routes, and the in-TUI /connect wizard. Unlike
+ * `setupProvider`, this does not require an existing entry or a built-in
+ * preset; capabilities left undeclared fall through to DEFAULT_CAPABILITIES
+ * in `resolveCapabilities`.
  */
-export function setupCustomProvider(options: SetupCustomProviderOptions): void {
+export function registerProvider(options: RegisterProviderOptions): void {
   // 自定义 provider 拒绝内置预设名：撞名条目在列表里显示预设 label、删除时曾
   // 被预设名拦截（历史死锁）。想覆盖预设行为请走 setupProvider
   // （POST /config/providers，克隆预设后覆盖字段）。
@@ -1383,42 +1439,27 @@ export function setupCustomProvider(options: SetupCustomProviderOptions): void {
     )
   }
   assertValidUrl(options.baseUrl)
-  // 同名 provider 已存在时禁止静默覆盖——用户应通过 edit 路径修改已有 provider，
-  // 避免意外丢失 baseUrl/key/models 配置。
   const existing = loadConfig().provider.providers[options.providerName]
-  if (existing) {
+  if (existing && !options.force) {
     throw new Error(
       `Provider "${options.providerName}" already exists. ` +
       `Use "rivet config set-url ${options.providerName} <url>" or ` +
-      `"rivet config setup ${options.providerName}" to edit it, or delete it first.`,
+      `"rivet config setup ${options.providerName}" to edit it, or delete it first ` +
+      `(pass --force to overwrite).`,
     )
   }
-  const contextWindow = Math.max(1, Math.floor(options.model.contextWindow))
-  const maxTokens = Math.max(1, Math.min(Math.floor(options.model.maxTokens), contextWindow))
-  const model: ModelConfig = {
-    id: options.model.id,
-    ...(options.model.alias ? { alias: options.model.alias } : {}),
-    contextWindow,
-    maxTokens,
-    ...(options.model.reasoningEffort ? { reasoningEffort: options.model.reasoningEffort } : {}),
-    ...(options.model.supportsVision ? { supportsVision: true } : {}),
-  }
+  const models = (options.models ?? []).map(raw => modelConfigSchema.parse(raw))
   const provider: ProviderConfig = {
     name: options.providerName,
     ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+    ...(options.apiKeyEnv ? { apiKeyEnv: options.apiKeyEnv } : {}),
     baseUrl: options.baseUrl,
-    protocol: 'openai',
-    capabilities: {
-      cacheControl: false,
-      stripParams: [],
-      toolJsonBug: false,
-      prefixCache: 'none',
-      prefixCompletion: false,
-    },
+    protocol: options.protocol ?? 'openai',
+    capabilities: options.capabilities ?? {},
     thinking: 'enabled',
-    maxTokens,
+    maxTokens: models.reduce((max, m) => Math.max(max, m.maxTokens), 64_000),
     allowProFallback: options.allowProFallback ?? false,
-    models: [model],
+    models,
     unsupported: [],
   }
   const cfg = loadConfig()

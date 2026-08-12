@@ -27,7 +27,7 @@ assertStagedRuntimeIntact(dirname(fileURLToPath(import.meta.url)))
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { maybePrintStaticPromptCacheWarning } from './cli/prompt-version-warning.js'
-import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, upsertProviderModel, setUiConfig, setApprovalMode as persistApprovalDefault, setDefaultDomainConfig, setDefaultModelConfig } from './config/manager.js'
+import { loadConfig as loadRivetConfig, setupProvider, registerProvider, upsertProviderModel, setUiConfig, setApprovalMode as persistApprovalDefault, setDefaultDomainConfig, setDefaultModelConfig } from './config/manager.js'
 import { isProFeatureEnabled } from './config/pro-license.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
@@ -231,6 +231,13 @@ async function main() {
   if (args[0] === 'config') {
     const { runConfigCLI } = await import('./config/manager.js')
     await runConfigCLI(args.slice(1))
+    return
+  }
+
+  // rivet provider <add|list|models|probe|remove> — 统一 provider 接入 CLI
+  if (args[0] === 'provider') {
+    const { runProviderCLI } = await import('./config/provider-cli.js')
+    await runProviderCLI(args.slice(1))
     return
   }
 
@@ -525,7 +532,7 @@ async function main() {
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,
-          model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
+          model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort, capabilities: model.capabilities },
           cwd: process.cwd(),
           provider: prov,
           allProviders: cfg.provider.providers,
@@ -1503,11 +1510,12 @@ async function main() {
       } else if (commit.mode === 'add-model') {
         upsertProviderModel(commit.providerName, commit.model)
       } else {
-        setupCustomProvider({
+        registerProvider({
           providerName: commit.providerName,
           baseUrl: commit.baseUrl,
-          apiKey: commit.apiKey,
-          model: commit.model,
+          ...(commit.apiKey ? { apiKey: commit.apiKey } : {}),
+          protocol: commit.protocol,
+          models: commit.models,
           makeDefault: commit.makeDefault,
         })
       }

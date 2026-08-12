@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { loadConfig } from '../manager.js'
-import { runProviderConfigWizard } from '../provider-wizard.js'
+import { parseModelSelection, runProviderConfigWizard } from '../provider-wizard.js'
+import type { ProbeReport } from '../../api/provider-probe.js'
 
 function scriptedIo(answers: string[]) {
   const lines: string[] = []
@@ -20,6 +21,16 @@ function scriptedIo(answers: string[]) {
       },
     },
   }
+}
+
+function stubProbe(models: string[]): (options: unknown) => Promise<ProbeReport> {
+  return async () => ({
+    models,
+    modelsOk: true,
+    completionOk: true,
+    hints: { reasoningSplit: true },
+    errors: [],
+  })
 }
 
 describe('provider config wizard', () => {
@@ -75,5 +86,94 @@ describe('provider config wizard', () => {
     // 空回车 = 跳过（默认 n）
     const result = await runProviderConfigWizard(scriptedIo(['']).io)
     assert.equal(result.skipped, true)
+  })
+
+  it('custom path: probe-first onboarding registers probed models via the unified core', async () => {
+    const { lines, io } = scriptedIo([
+      'Y',                        // configure now
+      'custom',                   // provider choice
+      'https://relay.example.com/v1', // base url
+      'sk-relay',                 // api key
+      '1',                        // select first model only
+      '',                         // provider name → host-derived default
+      '',                         // default? Enter = yes
+    ])
+    await runProviderConfigWizard({ ...io, probe: stubProbe(['deepseek-v4-pro', 'mystery-model']) })
+
+    const config = loadConfig()
+    const provider = config.provider.providers['relay-example-com']!
+    assert.ok(provider, 'host-derived provider name registered')
+    assert.equal(config.provider.default, 'relay-example-com')
+    assert.equal(provider.baseUrl, 'https://relay.example.com/v1')
+    assert.equal(provider.apiKey, 'sk-relay')
+    // Only the selected model lands; alias-table metadata backfilled.
+    assert.equal(provider.models.length, 1)
+    assert.equal(provider.models[0]!.id, 'deepseek-v4-pro')
+    assert.equal(provider.models[0]!.contextWindow, 1_000_000)
+    // Probe output surfaced to the user.
+    assert.ok(lines.some(l => l.includes('2 model(s)')))
+    assert.ok(lines.some(l => l.includes('reasoning_content')))
+  })
+
+  it('custom path: empty selection aborts without writing config', async () => {
+    const { io } = scriptedIo([
+      'Y',
+      'custom',
+      'https://relay.example.com/v1',
+      '',
+      '99', // out-of-range selection → nothing picked
+    ])
+    await assert.rejects(
+      runProviderConfigWizard({ ...io, probe: stubProbe(['some-model']) }),
+      /No models selected/,
+    )
+    assert.equal(loadConfig().provider.providers['relay-example-com'], undefined)
+  })
+
+  it('custom path: rejects a built-in preset name', async () => {
+    const { io } = scriptedIo([
+      'Y',
+      'custom',
+      'https://relay.example.com/v1',
+      '',
+      '',          // all models
+      'deepseek',  // preset name
+    ])
+    await assert.rejects(
+      runProviderConfigWizard({ ...io, probe: stubProbe(['some-model']) }),
+      /built-in preset name/,
+    )
+  })
+
+  it('custom path: endpoint without a model list falls back to manual model id', async () => {
+    const { io } = scriptedIo([
+      'Y',
+      'custom',
+      'https://relay.example.com/v1',
+      '',
+      'my-local-model', // manual model id
+      'local-box',      // name
+      'n',              // not default
+    ])
+    await runProviderConfigWizard({ ...io, probe: async () => ({ models: [], modelsOk: false, completionOk: true, hints: {}, errors: [] }) })
+    const provider = loadConfig().provider.providers['local-box']!
+    assert.equal(provider.models[0]!.id, 'my-local-model')
+    // schema materialization filled the sizes.
+    assert.equal(provider.models[0]!.contextWindow, 131_072)
+  })
+})
+
+describe('parseModelSelection', () => {
+  it('empty answer selects all', () => {
+    assert.deepEqual(parseModelSelection('', 3), [0, 1, 2])
+  })
+  it('parses singles, ranges and dedupes', () => {
+    assert.deepEqual(parseModelSelection('1,3-5,3', 6), [0, 2, 3, 4])
+  })
+  it('ignores out-of-range entries', () => {
+    assert.deepEqual(parseModelSelection('0,7,2', 3), [1])
+  })
+  it('accepts Chinese comma and whitespace separators', () => {
+    assert.deepEqual(parseModelSelection('1，3 4', 4), [0, 2, 3])
   })
 })

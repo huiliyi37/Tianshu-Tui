@@ -433,13 +433,14 @@ describe('error handling', () => {
     assert.ok(!out.includes('platform.deepseek.com'))
   })
 
-  it('does not append billing hint for unrelated errors', () => {
+  it('does not append billing hint for unrelated errors (401 gets the auth hint instead)', () => {
     const body = JSON.stringify({
       error: { code: 'invalid_api_key', message: 'Incorrect API key provided' },
     })
     assert.equal(
       parseOpenAIError(401, body, { providerName: 'deepseek', baseUrl: 'https://api.deepseek.com/v1' }),
-      'OpenAI API error (invalid_api_key): Incorrect API key provided',
+      'OpenAI API error (invalid_api_key): Incorrect API key provided'
+      + '\n提示：鉴权失败（HTTP 401）——请检查 API key 是否正确，或用 /connect 重新配置。',
     )
   })
 })
@@ -754,11 +755,12 @@ describe('usage calibration (GLM prompt_tokens inflation)', () => {
 })
 
 describe('system suffix copy-on-write (2026-07-06 double-append regression)', () => {
-  // DeepSeek + thinking enabled → non-empty systemSuffix at construction.
+  // Preserved-thinking protocol + thinking enabled → non-empty systemSuffix at construction.
   const SUFFIX_CONFIG: OpenAIClientConfig = {
     ...TEST_CONFIG,
     providerName: 'deepseek',
     thinking: 'enabled',
+    preservedThinkingProtocol: true,
   }
 
   const NOOP_CALLBACKS = {

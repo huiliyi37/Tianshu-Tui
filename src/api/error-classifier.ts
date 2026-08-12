@@ -162,6 +162,19 @@ function classifyByStatus(status: number): ClassifiedError | null {
     }
   }
 
+  // 404 — usually a wrong model id or a wrong endpoint path (missing /v1).
+  // Point at the command that lists what the endpoint actually serves.
+  if (status === 404) {
+    return {
+      retryable: false,
+      retryDelayMs: 0,
+      shouldReconnect: false,
+      category: 'client_error',
+      userMessage: 'Not found (404) — verify the model id with `rivet provider models <provider>`.',
+      maxRetries: 0,
+    }
+  }
+
   // Other 4xx
   if (status >= 400 && status < 500) {
     return {
@@ -364,6 +377,20 @@ function extractRetryAfter(error: unknown): number | undefined {
  * Priority: status code → error name → message pattern → fallback.
  */
 export function classifyApiError(error: unknown): ClassifiedError {
+  // Non-SSE 200 (openai-client content-type gate): the endpoint answered but
+  // not with a stream — wrong path / no streaming support. Retrying repeats
+  // the same misconfiguration; surface the original actionable message.
+  if (error != null && typeof error === 'object' && (error as Record<string, unknown>).nonSse === true) {
+    return {
+      retryable: false,
+      retryDelayMs: 0,
+      shouldReconnect: false,
+      category: 'client_error',
+      userMessage: extractMessage(error) ?? 'Endpoint returned a non-SSE 200 response.',
+      maxRetries: 0,
+    }
+  }
+
   // 0. Image processing errors (400/500 wrapping image rejection):
   //    Check before status-code classification so these bypass generic 4xx/5xx.
   //    Pattern source: grok-build retry.rs — "Could not process image" (400),

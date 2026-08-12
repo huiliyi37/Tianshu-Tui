@@ -150,14 +150,17 @@ describe('loadConfig — 3-layer resolution', () => {
     rmSync(customConfigPath, { force: true })
   })
 
-  it('gracefully skips malformed project config', () => {
+  it('refuses to load with a malformed project config (fail-closed, Wave 4)', () => {
+    // Silent skip used to hide a broken project config behind defaults —
+    // wrong contextWindow, lost keys. Now it fails loudly at startup.
     const projectDir = join(tempDir, 'malformed-project')
     mkdirSync(projectDir, { recursive: true })
     writeFileSync(join(projectDir, '.rivet-config.json'), 'not valid json {{{')
 
-    const config = loadConfig({ cwd: projectDir })
-    // Falls back to global/user config (not default 'auto-safe' if user has custom config)
-    assert.ok(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions'].includes(config.agent.approval))
+    assert.throws(
+      () => loadConfig({ cwd: projectDir }),
+      (e: unknown) => e instanceof Error && e.name === 'ConfigLoadError' && e.message.includes('JSON 解析失败'),
+    )
 
     rmSync(projectDir, { recursive: true, force: true })
   })
