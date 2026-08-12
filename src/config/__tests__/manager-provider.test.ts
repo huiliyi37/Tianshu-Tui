@@ -8,6 +8,7 @@ import {
   setupProvider,
   registerProvider,
   addProvider,
+  addModel,
   updateProviderBaseUrl,
   upsertProviderModel,
   setApiKey,
@@ -17,6 +18,7 @@ import {
   runConfigCLI,
   setModelSupportsVision,
 } from '../manager.js'
+import { DEFAULT_CONFIG } from '../default.js'
 
 describe('provider config mutations', () => {
   let dir = ''
@@ -326,5 +328,26 @@ describe('provider config mutations', () => {
     assert.equal(providers['my-relay']!.userSaved, true)
     // 内置名未被用户文件触碰 → 依旧无标记。
     assert.equal(providers.deepseek!.userSaved, undefined)
+  })
+
+  it('addModel sets userSaved=true on the provider', () => {
+    writeFileSync(process.env.RIVET_CONFIG_PATH!, JSON.stringify(DEFAULT_CONFIG))
+    addProvider('my-relay', { name: 'my-relay', baseUrl: 'https://relay.example.com/v1', protocol: 'openai', capabilities: { thinkingBlock: 'none', effortFormat: 'none', prefixCache: 'none', prefixCompletion: false, toolJsonBug: false, cacheControl: false }, maxTokens: 4096 } as any)
+    addModel('my-relay', { id: 'relay-v1', contextWindow: 16384, maxTokens: 8192 })
+    const providers = loadConfig().provider.providers
+    assert.equal(providers['my-relay']!.userSaved, true)
+  })
+
+  it('addProvider inline sets userSaved=true on the constructed provider', () => {
+    writeFileSync(process.env.RIVET_CONFIG_PATH!, JSON.stringify(DEFAULT_CONFIG))
+    addProvider('my-new-provider', {
+      name: 'my-new-provider',
+      baseUrl: 'https://example.com/v1',
+      protocol: 'openai',
+      capabilities: { thinkingBlock: 'none', effortFormat: 'none', prefixCache: 'none', prefixCompletion: false, toolJsonBug: false, cacheControl: false },
+      maxTokens: 4096,
+    } as any)
+    const providers = loadConfig().provider.providers
+    assert.equal(providers['my-new-provider']!.userSaved, true)
   })
 })

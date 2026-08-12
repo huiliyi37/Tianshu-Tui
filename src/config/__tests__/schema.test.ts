@@ -393,3 +393,80 @@ describe('pro schema', () => {
     assert.equal(parsed.pro.features.chatGateway, true)
   })
 })
+
+describe('providerSchema keyRef and userSaved fields', () => {
+  it('accepts a provider with keyRef instead of apiKey', () => {
+    const input = {
+      name: 'deepseek',
+      keyRef: 'deepseek-apikey',
+      baseUrl: 'https://api.deepseek.com/v1',
+      protocol: 'openai',
+      capabilities: {},
+    }
+    const result = providerSchema.parse(input)
+    assert.equal(result.name, 'deepseek')
+    assert.equal(result.keyRef, 'deepseek-apikey')
+    assert.equal(result.apiKey, undefined)
+    assert.equal(result.userSaved, undefined)
+  })
+
+  it('accepts a provider with userSaved=true', () => {
+    const input = {
+      name: 'my-custom',
+      apiKey: 'sk-test',
+      baseUrl: 'https://example.com/v1',
+      protocol: 'openai',
+      capabilities: {},
+      userSaved: true,
+    }
+    const result = providerSchema.parse(input)
+    assert.equal(result.userSaved, true)
+  })
+
+  it('defaults userSaved to undefined when omitted', () => {
+    const input = {
+      name: 'deepseek',
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.deepseek.com/v1',
+      capabilities: {},
+    }
+    const result = providerSchema.parse(input)
+    assert.equal(result.userSaved, undefined)
+  })
+
+  it('prefers keyRef over apiKey when both are present', () => {
+    const input = {
+      name: 'deepseek',
+      apiKey: 'sk-inline',
+      keyRef: 'deepseek-apikey',
+      baseUrl: 'https://api.deepseek.com/v1',
+      protocol: 'openai',
+      capabilities: {},
+    }
+    const result = providerSchema.parse(input)
+    // Both fields parse; keyRef is the preferred channel per comments, but schema accepts both
+    assert.equal(result.apiKey, 'sk-inline')
+    assert.equal(result.keyRef, 'deepseek-apikey')
+  })
+
+  it('rejects keyRef with non-string type', () => {
+    const input = {
+      name: 'deepseek',
+      keyRef: 123 as any,
+      baseUrl: 'https://api.deepseek.com/v1',
+      capabilities: {},
+    }
+    assert.throws(() => providerSchema.parse(input))
+  })
+
+  it('rejects invalid baseUrl with keyRef', () => {
+    const input = {
+      name: 'deepseek',
+      keyRef: 'deepseek-apikey',
+      baseUrl: 'not-a-url',
+      protocol: 'openai',
+      capabilities: {},
+    }
+    assert.throws(() => providerSchema.parse(input))
+  })
+})

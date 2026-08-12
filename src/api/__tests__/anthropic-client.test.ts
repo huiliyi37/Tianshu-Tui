@@ -472,3 +472,87 @@ describe('Retry-After header extraction on 429', () => {
     assert.equal(retryAfterMs, 5_000)
   })
 })
+
+describe('AnthropicClient HTTP request construction', () => {
+  const NOOP_CALLBACKS = {
+    onTextDelta: () => {},
+    onThinkingDelta: () => {},
+    onContentBlock: () => {},
+    onStopReason: () => {},
+  }
+
+  it('strips trailing slash from baseUrl before appending /v1/messages', async () => {
+    let capturedUrl = ''
+    const mockFetch = (globalThis as any).fetch = async (url: string) => {
+      capturedUrl = url
+      return new Response(JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 1 } } }), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    }
+    const client = new AnthropicClient({
+      baseUrl: 'https://api.anthropic.com/',
+      apiKey: 'test-key',
+      model: 'claude-opus-4-7',
+      maxTokens: 4096,
+    })
+    await client.stream(
+      { model: 'claude-opus-4-7', messages: [{ role: 'user', content: 'hi' }], max_tokens: 4096 },
+      NOOP_CALLBACKS as any,
+      undefined,
+    ).catch(() => {})
+    assert.equal(capturedUrl, 'https://api.anthropic.com/v1/messages')
+    ;(globalThis as any).fetch = undefined
+  })
+
+  it('sends apiKey as x-api-key header', async () => {
+    let capturedHeaders: Record<string, string> = {}
+    const mockFetch = (globalThis as any).fetch = async (_url: string, init?: Record<string, unknown>) => {
+      capturedHeaders = (init?.headers as Record<string, string>) ?? {}
+      return new Response(JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 1 } } }), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    }
+    const client = new AnthropicClient({
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-test-123',
+      model: 'claude-opus-4-7',
+      maxTokens: 4096,
+    })
+    await client.stream(
+      { model: 'claude-opus-4-7', messages: [{ role: 'user', content: 'hi' }], max_tokens: 4096 },
+      NOOP_CALLBACKS as any,
+      undefined,
+    ).catch(() => {})
+    assert.equal(capturedHeaders['x-api-key'], 'sk-test-123')
+    assert.equal(capturedHeaders['Content-Type'], 'application/json')
+    assert.equal(capturedHeaders['anthropic-version'], '2023-06-01')
+    assert.equal(capturedHeaders['Accept'], 'text/event-stream')
+    ;(globalThis as any).fetch = undefined
+  })
+
+  it('accepts a baseUrl without trailing slash normally', async () => {
+    let capturedUrl = ''
+    const mockFetch = (globalThis as any).fetch = async (url: string) => {
+      capturedUrl = url
+      return new Response(JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 1 } } }), {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    }
+    const client = new AnthropicClient({
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'test-key',
+      model: 'claude-opus-4-7',
+      maxTokens: 4096,
+    })
+    await client.stream(
+      { model: 'claude-opus-4-7', messages: [{ role: 'user', content: 'hi' }], max_tokens: 4096 },
+      NOOP_CALLBACKS as any,
+      undefined,
+    ).catch(() => {})
+    assert.equal(capturedUrl, 'https://api.anthropic.com/v1/messages')
+    ;(globalThis as any).fetch = undefined
+  })
+})
