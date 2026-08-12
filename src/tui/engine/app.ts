@@ -113,6 +113,7 @@ import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderDomainGenesisCard, genesisCardMaxScroll, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderInitFlow } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData, InitOverlayData } from '../format/overlay.js'
 import { ConnectFlow, type ConnectCommit, type ConnectProviderRef, type ConnectStepResult } from '../connect-flow.js'
+import { probeProvider } from '../../api/provider-probe.js'
 import { InitFlow, probeInitFlowInput, type InitCommit, type InitStepResult } from '../init-flow.js'
 import { renderSettings } from '../format/settings.js'
 import type { SettingsFlow, SettingsSaveRequest, SettingsSaveResult, SettingsView } from '../settings-flow.js'
@@ -2122,6 +2123,24 @@ export class TuiApp {
       this.overlay.rerender()
       return
     }
+    if (result.kind === 'probe') {
+      // probe-first：flow 进入 busy 态，异步探测完成后把 report 回灌。
+      // 探测期间用户 Esc 会清掉 connectFlow —— 回调先核对实例再回灌。
+      const flow = this.connectFlow
+      this.connectInput = ''
+      this.connectError = undefined
+      this.overlay.rerender()
+      void probeProvider({ baseUrl: result.baseUrl, apiKey: result.apiKey, protocol: result.protocol })
+        .then(report => {
+          if (this.connectFlow === flow && flow) this.advanceConnect(flow.applyProbe(report))
+        })
+        .catch(e => {
+          if (this.connectFlow === flow && flow) {
+            this.advanceConnect(flow.probeFailed(e instanceof Error ? e.message : String(e)))
+          }
+        })
+      return
+    }
     if (result.kind === 'next') {
       this.connectInput = ''
       this.connectError = undefined
@@ -2446,15 +2465,28 @@ export class TuiApp {
     if (id === 'connect' && this.connectFlow) {
       const view = this.connectFlow.view()
       if (key.name === 'escape') { this.cancelConnect(); return true }
-      if (view.kind === 'choice') {
+      if (view.kind === 'busy') {
+        // 探测进行中——除 Esc（上面已处理）外吞掉所有按键。
+        return true
+      }
+      if (view.kind === 'choice' || view.kind === 'multi-choice') {
         const options = view.options ?? []
         const count = options.length
         const nav = this.overlayController.nav()
         if (key.name === 'down') { if (count > 0) { nav.connectIndex = (nav.connectIndex + 1) % count; this.overlay.rerender() } return true }
         if (key.name === 'up') { if (count > 0) { nav.connectIndex = (nav.connectIndex - 1 + count) % count; this.overlay.rerender() } return true }
-        if (key.name === 'return') {
+        if (view.kind === 'multi-choice' && key.char === ' ') {
           const opt = options[nav.connectIndex]
-          if (opt) this.advanceConnect(this.connectFlow.submitChoice(opt.id))
+          if (opt) this.advanceConnect(this.connectFlow.toggle(opt.id))
+          return true
+        }
+        if (key.name === 'return') {
+          if (view.kind === 'multi-choice') {
+            this.advanceConnect(this.connectFlow.confirm())
+          } else {
+            const opt = options[nav.connectIndex]
+            if (opt) this.advanceConnect(this.connectFlow.submitChoice(opt.id))
+          }
           return true
         }
         return true

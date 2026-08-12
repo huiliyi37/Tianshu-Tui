@@ -167,36 +167,38 @@ probeProvider({ baseUrl, apiKey, protocol }) →
 
 ## 任务分解（按 wave 推进，每 wave 独立可验证）
 
-### Wave 1 — catalog 合并（纯内部，无行为变化）
+### Wave 1 — catalog 合并（纯内部，无行为变化） ✅ 539b4ba
 
-- [ ] 新建 `provider-catalog.ts`：迁入 WELL_KNOWN_DEFAULTS 全部条目 + registry 的 label/notes + profile 的缓存档案 + factory 的 wire 杂项（useMaxCompletionTokens/userAgent/stall 默认）
-- [ ] `resolveCapabilities` base 改读 catalog；`provider-registry.ts` 删除，引用点（conformance-scorecard、getProviderProfile 等）迁移
-- [ ] factory.ts 的 providerName 硬编码全部改读 catalog.wire
-- [ ] 验证：现有 provider/openai-client/factory/conformance 测试全绿 + 新增"catalog 与 presets 名称对齐"守卫测试
+- [x] 新建 `provider-catalog.ts`：迁入 registry 的 label/notes + profile 的缓存档案 + factory 的 wire 杂项（useMaxCompletionTokens/userAgent/stall 默认）。**设计偏差**：capability 数据本体留在 `provider.ts`（WELL_KNOWN_DEFAULTS），catalog 以 live reference 持有（`entry.capabilities === WELL_KNOWN_DEFAULTS[key]` 恒等守卫）——避免运行期 import 循环，同时结构性杜绝漂移。
+- [x] `resolveCapabilities` base 改读 catalog；`provider-registry.ts` 删除，引用点（conformance-scorecard、getProviderProfile 等）迁移
+- [x] factory.ts 的 providerName 硬编码全部改读 catalog.wire
+- [x] 验证：现有 provider/openai-client/factory/conformance 测试全绿 + 新增"catalog 与 presets 名称对齐"守卫测试
 
-### Wave 2 — protocol 做实 + descriptor schema 重写
+### Wave 2 — protocol 做实 + descriptor schema 重写 ✅ (本分支)
 
-- [ ] schema.ts：`protocol` 枚举加 `'anthropic'`；providerSchema 按描述符形态重写；models[] 允许空
-- [ ] factory.ts 按 protocol 分发；删除 `name === 'anthropic'` 与 prefixCache 后门
-- [ ] modelSchema contextWindow/maxTokens 改 optional + 三级兜底推断函数
-- [ ] 预设（provider-presets.ts）标注 protocol；setupCustomProvider 删除硬编码
-- [ ] 验证：factory 协议分发测试（openai/anthropic 各一条自定义 provider 端到端走通 mock）
+- [x] schema.ts：`protocol` 枚举加 `'anthropic'`；providerSchema 拆分 provider/model 两级 capabilities（wire 字段仅 provider 级）；models[] 允许空（`.default([])`，为 Wave-3 probe 预注册铺路）；provider 名 'anthropic' 经 z.preprocess 归一化为 protocol 'anthropic'（显式声明优先）
+- [x] factory.ts 按 protocol 分发；删除 `name === 'anthropic'` 与 prefixCache 后门
+- [x] modelSchema contextWindow/maxTokens 改 optional + 三级兜底推断函数（`inferModelContextWindow`：id 尺寸后缀 → DEFAULT_MODEL_CONTEXT_WINDOW；maxTokens clamp 到 contextWindow）
+- [x] 预设 protocol 标注：预设全为 openai-wire，默认值即覆盖，无需逐条标注；setupCustomProvider 删除硬编码（capabilities 样板移除，protocol 改参数传入，HTTP 路由透传）
+- [x] 验证：factory 协议分发测试（openai/anthropic 自定义 provider + schema 归一化端到端 + 旧后门失效守卫）
 
-### Wave 3 — probe + 统一入口 + 模型拉取匹配
+### Wave 3 — probe + 统一入口 + 模型拉取匹配 ✅ (本分支)
 
-- [ ] `provider-probe.ts`：/models + 最小补全探测 + capability hints
-- [ ] catalog 模型别名表：`canonicalId + aliases[] + 元数据`（首批从 provider-presets 的 models 数据灌入，替代 findPresetModel 的散点查询）
-- [ ] `model-id-matcher.ts`：L1 exact → L2 normalize（剥厂商前缀/变体后缀）→ L3 fuzzy（带置信阈值）→ L4 unknown 骨架，四级管道；置信度决定回填是否标注
-- [ ] CLI `rivet provider add/list/models/probe/remove`（manager.ts 写入核心统一，同名需 --force）；`models` 输出经匹配管道的可粘贴 `models[]` 片段（命中带元数据，unknown 带 TODO）
-- [ ] `/connect` DIY 重写（多模型、probe 预填、思考能力问句）；首启 wizard 并入
-- [ ] 桌面 config-routes 切换到统一核心
-- [ ] 验证：对一个 mock OpenAI 兼容服务（测试内起 http server）跑 add→probe→models→首次补全全流程；匹配管道用 siliconflow/openrouter 真实 ID 形态（带前缀/`:free`）的样例数据测 L1-L4 各级
+- [x] `provider-probe.ts`：/models + 最小补全探测 + capability hints（✅ 64b693d；协议感知 models 路径，anthropic 走 `/v1/models` + x-api-key）
+- [x] catalog 模型别名表：`canonicalId + aliases[] + 元数据`（✅ f8a0419；`model-aliases.ts` 从 provider-presets 的 models 灌入，元数据 = ModelConfig 去掉 id/alias/contextWindow/maxTokens 后两字段转 optional）
+- [x] `model-id-matcher.ts`：L1 exact → L2 normalize（剥厂商前缀/变体后缀）→ L3 fuzzy（带置信阈值）→ L4 unknown 骨架，四级管道；置信度决定回填是否标注（✅ f8a0419；L2 双趟：先保前缀再剥前缀，防 `:free` 聚合 ID 塌缩到裸 ID 条目）
+- [x] CLI `rivet provider add/list/models/probe/remove`（manager.ts 写入核心统一，同名需 --force）；`models` 输出经匹配管道的可粘贴 `models[]` 片段（命中带元数据，unknown 带 TODO）（✅ 1b324a9；写入核心 `registerProvider`，models 经 modelConfigSchema.parse 归一，CLI 注册进 main.ts 分发）
+- [x] `/connect` DIY 重写（多模型、probe 预填、思考能力问句）；首启 wizard 并入（✅ 本提交；DIY 改 url→key→probe→multi-select→thinking→name 五步，新增 multi-choice/busy 视图态；首启 wizard 加 custom 分支走 probe + registerProvider。**设计偏差**：DIY 未加 protocol 问句，默认 openai——anthropic 自建端点走 CLI `--protocol anthropic`）
+- [x] 桌面 config-routes 切换到统一核心（✅ 1b324a9；custom 路由改走 registerProvider，新增 force 透传）
+- [x] 验证：对一个 mock OpenAI 兼容服务（测试内起 http server）跑 add→probe→models→首次补全全流程；匹配管道用 siliconflow/openrouter 真实 ID 形态（带前缀/`:free`）的样例数据测 L1-L4 各级（✅ `provider-onboarding-e2e.test.ts` 走 add→models→OpenAIClient 真实流式补全全链；匹配管道样例测试见 model-id-matcher.test.ts）
 
-### Wave 4 — 错误层
+### Wave 4 — 错误层 ✅ (本分支)
 
-- [ ] manager.ts 配置加载：坏 JSON 响铃 + zod 路径格式化器（抽到 `src/config/format-zod-error.ts` 全库共用）
-- [ ] openai-client content-type 检查 + error-classifier 新规则（401 带 env 名 / 404 提示 models 命令 / 非 SSE 200）
-- [ ] 验证：坏 JSON、缺字段、401/404/非 SSE 四类场景的错误文案快照测试
+- [x] manager.ts 配置加载：坏 JSON 响铃 + zod 路径格式化器（抽到 `src/config/format-zod-error.ts` 全库共用）（✅ 本提交；`ConfigLoadError` + `readConfigJson` 双通道 fail-closed——用户层与项目层坏 JSON 均响铃 `\u0007` + 路径 + 行:列，顶层非对象同样拒绝；loadConfig 收尾改 `safeParse` + `formatZodError` 点名 offending 字段与涉及文件。**行为变化**：layered-config 旧测试"静默跳过坏项目配置"按新契约改写为 expect throw）
+- [x] openai-client content-type 检查 + error-classifier 新规则（401 带 env 名 / 404 提示 models 命令 / 非 SSE 200）（✅ 本提交；content-type 门放行空/event-stream/octet-stream，其余 200 抛带 `nonSse:true` 标记的可操作错误；`statusHint` 401/403 点名 `apiKeyEnv`（factory 透传），404 提示 `rivet provider models`；classifier 对应两条非重试规则——非 SSE 透传原文案）
+- [x] 验证：坏 JSON、缺字段、401/404/非 SSE 四类场景的错误文案快照测试（✅ 本提交；`config-load-error.test.ts` 坏 JSON/顶层非对象/zod 路径/formatZodPath 单测 + `error-message-snapshot.test.ts` 401 含 env 名、404、非 SSE http mock 全链精确文案断言）
+
+**设计偏差**：`apiErrorHint`（余额不足指引）未按原计划下沉为 classifier 规则——它依赖解析后的错误 body 与 provider 上下文，留在 `parseOpenAIError` 内联最贴近信息源；classifier 只新增 404 / 非 SSE 两条状态规则，职责不混。
 
 ## 风险与取舍
 

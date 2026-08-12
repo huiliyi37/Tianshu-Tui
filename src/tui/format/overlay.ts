@@ -1292,7 +1292,7 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
     if (rowsUsed < contentRows) push('')
   }
 
-  if (view.kind === 'choice') {
+  if (view.kind === 'choice' || view.kind === 'multi-choice') {
     const options = view.options ?? []
     for (let i = 0; i < options.length; i++) {
       if (rowsUsed >= contentRows) break
@@ -1300,9 +1300,12 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
       const selected = i === data.selectedIndex
       const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
       const star = opt.recommended ? color('★', theme.warning ?? theme.primary, { bold: true }) : ' '
+      const box = view.kind === 'multi-choice'
+        ? `${opt.checked ? color('☑', theme.success) : color('☐', theme.muted)} `
+        : ''
       const labelColor = selected ? theme.primary : theme.secondary
       const label = selected ? color(opt.label, labelColor, { bold: true }) : color(opt.label, labelColor)
-      push(` ${cursor} ${star} ${label}`)
+      push(` ${cursor} ${star} ${box}${label}`)
       if (opt.description && rowsUsed < contentRows) {
         for (const d of wrapToWidth(opt.description, innerWidth, 2)) {
           if (rowsUsed >= contentRows) break
@@ -1310,6 +1313,8 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
         }
       }
     }
+  } else if (view.kind === 'busy') {
+    push(` ${color('⠋ 请稍候…', theme.primary, { bold: true })}`)
   } else {
     const shown = view.masked ? maskSecret(data.input) : data.input
     const cursor = color('▏', theme.primary, { bold: true })
@@ -1329,7 +1334,11 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
 
   const footer = view.kind === 'choice'
     ? compactHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']])
-    : compactHints([['Enter', '提交'], ['Esc', '取消']])
+    : view.kind === 'multi-choice'
+      ? compactHints([['↑↓', '移动'], ['空格', '勾选'], ['Enter', '确认'], ['Esc', '取消']])
+      : view.kind === 'busy'
+        ? compactHints([['Esc', '取消']])
+        : compactHints([['Enter', '提交'], ['Esc', '取消']])
   lines.push(formatFooter(footer, width, theme, 'subtle'))
   lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
