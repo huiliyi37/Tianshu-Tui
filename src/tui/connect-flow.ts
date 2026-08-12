@@ -451,11 +451,17 @@ export class ConnectFlow {
     return this.wasDiscardedFlag
   }
 
-  /** Whether anything worth persisting was entered (drives Esc-time save). */
+  /** 是否有值得持久化的进展（驱动 Esc 落盘）——草稿从「密钥已保存」起才算数。 */
   hasProgress(): boolean {
     if (this.phase === 'draft') return false
-    if (this.phase !== 'provider') return true
-    return Object.keys(this.collected).length > 0
+    const c = this.collected
+    // 密钥保存前没有任何东西真正入库——Esc 纯取消，不落草稿。
+    if (c.apiKey !== undefined) return true
+    if (c.existingProvider) return true // 加模型路径无密钥步，进入流程即有进展
+    const key = c.presetKey
+    if (key && PROVIDER_PRESETS[key]?.keyless
+      && this.phase !== 'provider' && this.phase !== 'pick-existing' && this.phase !== 'preset-billing') return true
+    return false
   }
 
   /**
@@ -478,6 +484,7 @@ export class ConnectFlow {
       ...(c.contextWindow !== undefined ? { contextWindow: c.contextWindow } : {}),
       ...(c.supportsVision !== undefined ? { supportsVision: c.supportsVision } : {}),
       ...(c.existingProvider ? { existingProvider: c.existingProvider } : {}),
+      ...(c.makeDefault !== undefined ? { makeDefault: c.makeDefault } : {}),
       ...(c.reasoningSplitHint !== undefined ? { reasoningSplitHint: c.reasoningSplitHint } : {}),
       ...(c.thinkingSplit !== undefined ? { thinkingSplit: c.thinkingSplit } : {}),
       ...(c.advanced ? { advanced: c.advanced } : {}),
@@ -521,9 +528,10 @@ export class ConnectFlow {
   }
 
   /**
-   * Draft → RestoredState with a fixed downgrade chain. Never resumes into
-   * transient phases (probing/probe-failed fall back to diy-apikey, Enter
-   * re-fires the probe); slides DOWN (never up) when prerequisite data is
+   * Draft → RestoredState with a fixed downgrade chain. Restores to the exact
+   * saved step whenever its prerequisites survive (step number must round-trip);
+   * transient phases (probing/probe-failed) fall back to their trigger step so
+   * Enter re-fires the probe; slides DOWN only when prerequisite data is
    * missing; rejects wholesale on stale presets or deleted providers.
    */
   private normalizeDraft(draft: ConnectDraft, restoredKey?: string): RestoredState | undefined {
@@ -533,6 +541,7 @@ export class ConnectFlow {
       ...(c.baseUrl ? { baseUrl: c.baseUrl } : {}),
       ...(c.protocol ? { protocol: c.protocol } : {}),
       ...(restoredKey ? { apiKey: restoredKey } : {}),
+      ...(c.makeDefault !== undefined ? { makeDefault: c.makeDefault } : {}),
       ...(c.reasoningSplitHint !== undefined ? { reasoningSplitHint: c.reasoningSplitHint } : {}),
       ...(c.thinkingSplit !== undefined ? { thinkingSplit: c.thinkingSplit } : {}),
       ...(c.advanced ? { advanced: c.advanced } : {}),
@@ -634,18 +643,23 @@ export class ConnectFlow {
         if (!billingValid(key)) return { phase: 'preset-billing', collected: { presetKey: key } }
         const probed = rebuildProbed()
         if (!probed) return { phase: 'preset-apikey', collected: { presetKey: key, ...billingSpread() }, restoredInput: restoredKey ?? '' }
-        return { phase: 'preset-models', collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), ...(restoredKey ? { apiKey: restoredKey } : {}), probedModels: probed } }
+        return {
+          phase: 'capability',
+          collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), ...(restoredKey ? { apiKey: restoredKey } : {}), probedModels: probed },
+        }
       }
       case 'ask-default':
       case 'confirm': {
-        // Probe results are not persisted — slide back one step: DIY to the
-        // naming step (name prefilled), keyless to thinking, preset to the key.
+        // 前提数据齐全 → 精确恢复到存档步（步骤号与保存时往返一致）；
+        // 缺数据才下滑：DIY 到命名/密钥步，keyless 到思考步，预设到密钥步。
+        const exact = draft.phase === 'confirm' ? 'confirm' as const : 'ask-default' as const
         const key = c.presetKey
         if (key && isProviderPresetKey(key) && PROVIDER_PRESETS[key]?.keyless && c.baseUrl) {
           const probed = rebuildProbed()
           const collected: Collected = { ...base }
           if (probed) collected.probedModels = probed
           else if (c.modelId) collected.modelId = c.modelId
+          if (c.thinkingSplit !== undefined) return { phase: exact, collected }
           return { phase: 'diy-thinking', collected }
         }
         if (c.baseUrl) {
@@ -655,6 +669,7 @@ export class ConnectFlow {
           const collected: Collected = { ...base }
           if (probed) collected.probedModels = probed
           else if (c.modelId) collected.modelId = c.modelId
+          if (c.providerName) return { phase: exact, collected: { ...collected, providerName: c.providerName } }
           return { phase: 'diy-name', collected, restoredInput: c.providerName ?? '' }
         }
         if (!key || !isProviderPresetKey(key)) return undefined
@@ -662,8 +677,10 @@ export class ConnectFlow {
         if (!preset || preset.provider.auth?.type === 'oauth') return undefined
         if (!billingValid(key)) return { phase: 'preset-billing', collected: { presetKey: key } }
         const probedSel = rebuildProbed()
-        if (probedSel) return { phase: 'preset-models', collected: { presetKey: key, ...billingSpread(), ...baseUrlSpread(), ...(restoredKey ? { apiKey: restoredKey } : {}), probedModels: probedSel } }
-        return { phase: 'preset-apikey', collected: { presetKey: key, ...billingSpread() }, restoredInput: restoredKey ?? '' }
+        const collected: Collected = { presetKey: key, ...billingSpread(), ...baseUrlSpread(), ...(restoredKey ? { apiKey: restoredKey } : {}) }
+        if (probedSel) collected.probedModels = probedSel
+        // 有勾选集 → 常规确认步；无模型 → 「跳过探测直接保存」的草稿，同样可确认。
+        return { phase: exact, collected }
       }
       case 'diy-protocol':
         return { phase: 'diy-protocol', collected: {} }

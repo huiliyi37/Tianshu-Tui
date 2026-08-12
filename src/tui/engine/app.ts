@@ -2312,8 +2312,8 @@ export class TuiApp {
     const flow = this.connectFlow
     let savedDraft = false
     if (flow && !flow.draftPromptPending()) {
-      // Esc 在恢复提示上 → 文件原样保留；有进展 → 落盘（含未回车文本）；
-      // 选过「重新开始」且无新进展 → 清掉旧草稿。
+      // Esc 在恢复提示上 → 文件原样保留；密钥已保存后有进展 → 落盘（含未回车文本）；
+      // 密钥保存前 Esc 纯取消不落草稿；选过「重新开始」且无新进展 → 清掉旧草稿。
       const secretInfo = flow.draftSecretInfo()
       // 密钥步上未回车的文本可能是半截明文 key——绝不落盘。
       const draft = flow.toDraft(secretInfo.onKeyStep ? undefined : this.connectInput)

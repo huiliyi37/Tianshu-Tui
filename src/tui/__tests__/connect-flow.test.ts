@@ -581,6 +581,55 @@ test('draft: diy-models without a stored selection falls back to the key step', 
   assert.match(flow.view().title, /API Key/)
 })
 
+test('draft: capability/ask-default/confirm restore to the exact saved step', () => {
+  const collected = {
+    presetKey: 'deepseek',
+    keyRef: 'deepseek',
+    probedSelection: [{ rawId: 'deepseek-v4-pro', checked: true }],
+  }
+  const cap = new ConnectFlow([], draft({ phase: 'capability', collected }), 'sk-x')
+  cap.submitChoice('resume')
+  assert.match(cap.view().title, /能力检测/)
+  assert.equal(cap.view().stepLabel, '步骤 5 / 6')
+
+  const ask = new ConnectFlow([], draft({ phase: 'ask-default', collected }), 'sk-x')
+  ask.submitChoice('resume')
+  assert.match(ask.view().title, /设为默认/)
+
+  const conf = new ConnectFlow([], draft({ phase: 'confirm', collected }), 'sk-x')
+  conf.submitChoice('resume')
+  assert.match(conf.view().title, /确认保存/)
+  assert.equal(conf.view().stepLabel, '步骤 6 / 6')
+})
+
+test('draft: preset confirm without models (skip-probe) still restores to confirm', () => {
+  const flow = new ConnectFlow([], draft({
+    phase: 'confirm',
+    collected: { presetKey: 'deepseek', keyRef: 'deepseek' },
+  }), 'sk-x')
+  flow.submitChoice('resume')
+  assert.match(flow.view().title, /确认保存/)
+})
+
+test('draft: diy confirm restores exactly when name + models survive', () => {
+  const flow = new ConnectFlow([], draft({
+    phase: 'confirm',
+    collected: {
+      baseUrl: 'https://api.example.com/v1',
+      keyRef: 'diy-pending',
+      providerName: 'my-relay',
+      probedSelection: [{ rawId: 'm1', checked: true }],
+      makeDefault: false,
+    },
+  }), 'sk-x')
+  flow.submitChoice('resume')
+  assert.match(flow.view().title, /确认保存/)
+  // 无现存默认服务商（needsDefaultAsk false）——back 直接回命名步。
+  const back = flow.submitChoice('back')
+  assert.equal(back.kind, 'next')
+  assert.match(flow.view().title, /起个名字/)
+})
+
 test('draft: diy-name without a thinking answer slides down to the thinking step', () => {
   const flow = new ConnectFlow([], draft({
     phase: 'diy-name',
@@ -623,12 +672,31 @@ test('draft: discard returns to the provider list and flags wasDraftDiscarded', 
   assert.match(flow.view().title, /连接模型服务商/)
 })
 
-test('draft: fresh flow has no progress; toDraft returns undefined', () => {
+test('draft: no progress before the key is saved — pre-key Esc is a pure cancel', () => {
   const flow = new ConnectFlow()
   assert.equal(flow.hasProgress(), false)
   assert.equal(flow.toDraft(), undefined)
   flow.submitChoice('custom')
+  flow.submitChoice('openai')
+  flow.submitInput('https://api.example.com/v1') // URL 步——仍未存密钥
+  assert.equal(flow.hasProgress(), false, '密钥保存前不落草稿')
+  assert.equal(flow.toDraft(), undefined)
+  flow.submitInput('sk-x') // 密钥提交 → 探测 busy
   assert.equal(flow.hasProgress(), true)
+  assert.ok(flow.toDraft())
+})
+
+test('draft: preset step 2 (API key) has no draft; endpoint step (post-key) does', () => {
+  const flow = new ConnectFlow()
+  flow.submitChoice('deepseek')
+  assert.match(flow.view().title, /API 密钥/)
+  assert.equal(flow.view().stepLabel, '步骤 2 / 6')
+  assert.equal(flow.hasProgress(), false)
+  assert.equal(flow.toDraft(), undefined)
+  flow.submitInput('sk-test')
+  const snap = flow.toDraft()
+  assert.ok(snap)
+  assert.equal(snap.phase, 'preset-endpoint')
 })
 
 test('draft: toDraft snapshots progress, carries pending input, drops transient fields', () => {
@@ -974,14 +1042,17 @@ test('draft: keyless (ollama) drafts resume at the endpoint step and re-probe ke
   }
 })
 
-test('draft: preset confirm without a selection resumes at the key step', () => {
+test('draft: preset confirm without a selection is the skip-probe path — resumes at confirm', () => {
   const flow = new ConnectFlow([], draft({
     phase: 'confirm',
     collected: { presetKey: 'deepseek', keyRef: 'deepseek' },
   }), 'sk-saved')
   flow.submitChoice('resume')
-  assert.match(flow.view().title, /API 密钥/)
-  assert.equal(flow.takeRestoredInput(), 'sk-saved')
+  assert.match(flow.view().title, /确认保存/)
+  const result = flow.submitChoice('save')
+  assert.equal(result.kind, 'commit')
+  if (result.kind !== 'commit' || result.commit.mode !== 'preset') return
+  assert.equal(result.commit.setup.apiKey, 'sk-saved')
 })
 
 test('draft: preset-endpoint resume keeps the edited URL and restored key', () => {
@@ -1002,28 +1073,36 @@ test('draft: preset-endpoint resume keeps the edited URL and restored key', () =
 })
 
 test('draft: resuming past the key step keeps the restored key through commit', () => {
-  for (const phase of ['preset-models', 'capability'] as const) {
-    const flow = new ConnectFlow([], draft({
-      phase,
-      collected: {
-        presetKey: 'deepseek',
-        keyRef: 'deepseek',
-        probedSelection: [{ rawId: 'deepseek-v4-pro', checked: true }],
-      },
-    }), 'sk-saved')
-    flow.submitChoice('resume')
-    assert.match(flow.view().title, /选择要添加的模型/, phase)
-    assert.equal(flow.confirm().kind, 'next', phase)
-    assert.equal(flow.submitChoice('continue').kind, 'next', phase)
-    const result = flow.submitChoice('save')
-    assert.equal(result.kind, 'commit', phase)
-    if (result.kind !== 'commit' || result.commit.mode !== 'preset') continue
+  const collected = {
+    presetKey: 'deepseek',
+    keyRef: 'deepseek',
+    probedSelection: [{ rawId: 'deepseek-v4-pro', checked: true }],
+  }
+  // preset-models → 恢复到模型步，confirm 进能力检测后保存。
+  const models = new ConnectFlow([], draft({ phase: 'preset-models', collected }), 'sk-saved')
+  models.submitChoice('resume')
+  assert.match(models.view().title, /选择要添加的模型/)
+  assert.equal(models.confirm().kind, 'next')
+  assert.equal(models.submitChoice('continue').kind, 'next')
+  const mCommit = models.submitChoice('save')
+  assert.equal(mCommit.kind, 'commit')
+  if (mCommit.kind === 'commit' && mCommit.commit.mode === 'preset') {
+    assert.equal(mCommit.commit.setup.apiKey, 'sk-saved')
+  }
+  // capability → 精确恢复到能力检测步（步骤号与存档时一致）。
+  const cap = new ConnectFlow([], draft({ phase: 'capability', collected }), 'sk-saved')
+  cap.submitChoice('resume')
+  assert.match(cap.view().title, /能力检测/)
+  assert.equal(cap.submitChoice('continue').kind, 'next')
+  const cCommit = cap.submitChoice('save')
+  assert.equal(cCommit.kind, 'commit')
+  if (cCommit.kind === 'commit' && cCommit.commit.mode === 'preset') {
     // 回归点：恢复链跳过密钥步时 commit 必须仍带密钥，否则 provider 落盘无凭证。
-    assert.equal(result.commit.setup.apiKey, 'sk-saved', phase)
+    assert.equal(cCommit.commit.setup.apiKey, 'sk-saved')
   }
 })
 
-test('draft: DIY confirm phase resumes at the naming step with the name prefilled', () => {
+test('draft: DIY confirm phase resumes at the confirm step; name round-trips via back', () => {
   const flow = new ConnectFlow([], draft({
     phase: 'confirm',
     collected: {
@@ -1034,6 +1113,8 @@ test('draft: DIY confirm phase resumes at the naming step with the name prefille
     },
   }), 'sk-x')
   flow.submitChoice('resume')
+  assert.match(flow.view().title, /确认保存/)
+  flow.submitChoice('back')
   assert.match(flow.view().title, /起个名字/)
   assert.equal(flow.takeRestoredInput(), 'my-relay')
 })

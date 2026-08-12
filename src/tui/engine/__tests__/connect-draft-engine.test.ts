@@ -59,19 +59,16 @@ describe('connect draft · engine wiring', () => {
     rmSync(home, { recursive: true, force: true })
   })
 
-  it('Esc with progress saves a draft carrying unsubmitted input', () => {
+  it('Esc before the key is saved creates no draft (pure cancel)', () => {
     const { app } = makeApp()
     const a = internals(app)
     app.startConnect()
     a.connectFlow!.submitChoice('custom')
     a.connectFlow!.submitChoice('openai')
-    // 模拟打了半个 URL 还没回车。
+    // 模拟打了半个 URL 还没回车——密钥未保存，Esc 不落草稿。
     a.connectInput = 'https://half-typed.example.com/v1'
     a.cancelConnect()
-    const draft = readConnectDraft(home)
-    assert.ok(draft)
-    assert.equal(draft.phase, 'diy-url')
-    assert.equal(draft.pendingInput, 'https://half-typed.example.com/v1')
+    assert.equal(existsSync(connectDraftPath(home)), false)
   })
 
   it('Esc on the first step creates no draft file', () => {
@@ -110,7 +107,7 @@ describe('connect draft · engine wiring', () => {
     assert.equal(readSecret(DIY_PENDING_KEY_REF), 'sk-live-key')
   })
 
-  it('Esc mid-typing on the key step drops the partial plaintext input', () => {
+  it('Esc on the key step saves nothing — the key was never submitted', () => {
     const { app } = makeApp()
     const a = internals(app)
     app.startConnect()
@@ -119,11 +116,22 @@ describe('connect draft · engine wiring', () => {
     a.advanceConnect(a.connectFlow!.submitInput('https://api.example.com/v1'))
     a.connectInput = 'sk-half-typed'
     a.cancelConnect()
+    assert.equal(existsSync(connectDraftPath(home)), false)
+  })
+
+  it('Esc past the key step carries unsubmitted input on the next step', () => {
+    const { app } = makeApp()
+    const a = internals(app)
+    app.startConnect()
+    a.connectFlow!.submitChoice('deepseek')
+    a.advanceConnect(a.connectFlow!.submitInput('sk-test'))
+    // 端点步打了半个地址还没回车——落草稿时带上 pendingInput。
+    a.connectInput = 'https://half-endpoint.example.com'
+    a.cancelConnect()
     const draft = readConnectDraft(home)
     assert.ok(draft)
-    assert.equal(draft.phase, 'diy-apikey')
-    assert.ok(!JSON.stringify(draft).includes('sk-half-typed'), '半截密钥不得落盘')
-    assert.equal(draft.pendingInput, undefined)
+    assert.equal(draft.phase, 'preset-endpoint')
+    assert.equal(draft.pendingInput, 'https://half-endpoint.example.com')
   })
 
   it('Esc on the resume prompt leaves the draft untouched', () => {

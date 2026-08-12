@@ -58,6 +58,8 @@ export interface ConnectDraftCollected {
   modelId?: string
   /** Provider name chosen at the naming step (DIY path, carried into confirm). */
   providerName?: string
+  /** Default-provider answer captured at the ask-default step. */
+  makeDefault?: boolean
   contextWindow?: number
   supportsVision?: boolean
   existingProvider?: string
@@ -136,6 +138,7 @@ export function readConnectDraft(base?: string): ConnectDraft | undefined {
   if (isString(collected.keyRef)) clean.keyRef = collected.keyRef
   if (isString(collected.modelId)) clean.modelId = collected.modelId
   if (isString(collected.providerName)) clean.providerName = collected.providerName
+  if (typeof collected.makeDefault === 'boolean') clean.makeDefault = collected.makeDefault
   if (typeof collected.contextWindow === 'number') clean.contextWindow = collected.contextWindow
   if (typeof collected.supportsVision === 'boolean') clean.supportsVision = collected.supportsVision
   if (isString(collected.existingProvider)) clean.existingProvider = collected.existingProvider
