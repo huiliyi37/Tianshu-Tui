@@ -60,6 +60,28 @@ describe('D2 · multi-line Up/Down', () => {
     assert.equal(input.value, 'prev1', '单行 Up 走历史')
     assert.equal(historyValue, 'prev1')
   })
+
+  it('Up preserves a grapheme column without splitting a ZWJ emoji', () => {
+    const family = '👨‍👩‍👧'
+    const input = new InputLine({ value: `${family}x\nz` })
+
+    input.handleKey('up', '', false, false)
+    assert.equal(input.cursor, family.length, 'cursor must land after the complete emoji cluster')
+
+    input.handleKey('unknown', 'Q', false, false)
+    assert.equal(input.value, `${family}Qx\nz`)
+  })
+
+  it('Down preserves a grapheme column without splitting a surrogate pair', () => {
+    const input = new InputLine({ value: 'z\n😀x' })
+    input.setValue(input.value, 1)
+
+    input.handleKey('down', '', false, false)
+    assert.equal(input.cursor, 4, 'cursor must land after the complete emoji')
+
+    input.handleKey('unknown', 'Q', false, false)
+    assert.equal(input.value, 'z\n😀Qx')
+  })
 })
 
 describe('D4 · Shift+Enter inserts newline without submitting', () => {

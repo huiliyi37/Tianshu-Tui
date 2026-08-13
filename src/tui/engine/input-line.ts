@@ -965,19 +965,20 @@ export class InputLine {
 
   // ── Multi-line Navigation ────────────────────────────────────
 
-  /** 当前光标的（行,列），列以 code-unit 计。 */
+  /** 当前光标的（行,列），列以 grapheme 计。 */
   private getLineCol(pos: number): { line: number; col: number } {
     const parts = this._value.slice(0, pos).split('\n')
-    return { line: parts.length - 1, col: parts[parts.length - 1]!.length }
+    return { line: parts.length - 1, col: graphemeBoundaries(parts[parts.length - 1]!).length - 1 }
   }
 
-  /** 由（行,列）还原 code-unit 偏移，col 超出行长则贴到行尾。 */
+  /** 由（行,grapheme 列）还原 code-unit 偏移，col 超出行长则贴到行尾。 */
   private posFromLineCol(line: number, col: number): number {
     const lines = this._value.split('\n')
     const clampedLine = Math.max(0, Math.min(line, lines.length - 1))
     let pos = 0
     for (let i = 0; i < clampedLine; i++) pos += lines[i]!.length + 1 // +1 = '\n'
-    pos += Math.min(col, lines[clampedLine]!.length)
+    const bounds = graphemeBoundaries(lines[clampedLine]!)
+    pos += bounds[Math.min(Math.max(0, col), bounds.length - 1)]!
     return pos
   }
 

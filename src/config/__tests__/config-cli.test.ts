@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { loadConfig, runConfigCLI, type ConfigCliIO } from '../manager.js'
+import { resolveTransportType } from '../../mcp/transport-factory.js'
 
 function makeIo() {
   const stdout: string[] = []
@@ -98,6 +99,16 @@ describe('runConfigCLI provider commands', () => {
     await runConfigCLI(['setup', 'deepseek', '--key-env', '--default'], io)
     assert.deepEqual(exits, [1])
     assert.match(stderr.join('\n'), /--key-env requires a value/)
+  })
+
+  it('configures add-sse servers to use the legacy SSE transport', async () => {
+    const { io } = makeIo()
+    await runConfigCLI(['mcp', 'add-sse', 'legacy', 'http://localhost:3001/sse'], io)
+
+    const server = loadConfig().mcp.servers['legacy']
+    assert.ok(server)
+    assert.equal(server.transportHint, 'sse')
+    assert.equal(resolveTransportType(server), 'sse-legacy')
   })
 })
 

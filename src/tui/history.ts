@@ -6,6 +6,7 @@ import { historyPath } from '../config/paths.js'
 
 export const MAX_HISTORY = 1000
 const HISTORY_PATH = historyPath()
+let historyAppendQueue: Promise<void> = Promise.resolve()
 
 export function loadHistory(): string[] {
   try {
@@ -38,8 +39,14 @@ export function appendHistory(entry: string): void {
 
 /** 异步持久化历史记录，不阻塞调用方。供 key handler 等延迟敏感路径使用。 */
 export async function appendHistoryAsync(entry: string): Promise<void> {
-  const history = nextHistoryAfterSubmit(await loadHistoryAsync(), entry)
-  await writeFileAtomicAsync(HISTORY_PATH, JSON.stringify(history, null, 2))
+  const pending = historyAppendQueue.then(async () => {
+    const history = nextHistoryAfterSubmit(await loadHistoryAsync(), entry)
+    await writeFileAtomicAsync(HISTORY_PATH, JSON.stringify(history, null, 2))
+  })
+  // Keep later appends runnable after a rejected write while preserving the
+  // rejection for this caller.
+  historyAppendQueue = pending.catch(() => {})
+  return pending
 }
 
 /** 模糊搜索历史记录，返回匹配项及得分 */

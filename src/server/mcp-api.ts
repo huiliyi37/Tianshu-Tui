@@ -119,6 +119,9 @@ export function buildMcpRoutes(
       if (input.env && typeof input.env === 'object') configInput.env = input.env as Record<string, string>
       if (input.headers && typeof input.headers === 'object') configInput.headers = input.headers as Record<string, string>
       if (typeof input.cwd === 'string') configInput.cwd = input.cwd
+      if (typeof input.transportHint === 'string') configInput.transportHint = input.transportHint
+      if (input.auth && typeof input.auth === 'object') configInput.auth = input.auth
+      if (input.policy && typeof input.policy === 'object') configInput.policy = input.policy
 
       const parsed = mcpServerConfigSchema.safeParse(configInput)
       if (!parsed.success) {

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isCompletePng, runImageTool } from '../image-tool.js'
+import { isCompletePng, resizeCandidates, runImageTool } from '../image-tool.js'
 
 // 1x1 transparent PNG（含完整 IHDR + IEND）
 const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
@@ -118,4 +118,11 @@ test('runImageTool：全部失败但无 RIVET_DEBUG 时保持静默', async () =
   } finally {
     if (origDebug !== undefined) process.env.RIVET_DEBUG = origDebug
   }
+})
+
+test('resizeCandidates：macOS sips 缩放时显式输出 PNG', () => {
+  assert.deepEqual(resizeCandidates('/tmp/in.jpg', '/tmp/out.png', 1568, 'darwin')[0], {
+    bin: 'sips',
+    args: ['-Z', '1568', '-s', 'format', 'png', '/tmp/in.jpg', '--out', '/tmp/out.png'],
+  })
 })

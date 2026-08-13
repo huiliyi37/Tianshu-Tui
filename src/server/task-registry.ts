@@ -131,11 +131,11 @@ export class TaskRegistry {
     const force = input.force ?? false
 
     // 整块串行化：find → build → save 在同一个 per-key 锁内完成
-    const record = await this.serialized(idempotencyKey, async () => {
+    const { record, created } = await this.serialized(idempotencyKey, async () => {
       // 去重检查（force 跳过）
       if (!force) {
         const existing = await this.store.findActiveByIdempotencyKey(idempotencyKey)
-        if (existing) return existing
+        if (existing) return { record: existing, created: false }
       }
 
       const timeoutMs = input.timeoutMs ??
@@ -161,11 +161,12 @@ export class TaskRegistry {
 
       await this.store.save(r)
       this.emit({ taskId: r.id, type: 'created', timestamp: r.createdAt })
-      return r
+      return { record: r, created: true }
     })
 
-    // 如有 runtime 池，立即调度
-    if (this.runtimePool) {
+    // Deduplicated callers share the original execution. Scheduling an existing
+    // record again would run the same task twice and duplicate its side effects.
+    if (created && this.runtimePool) {
       this.scheduleExecution(record).catch(err => {
         this.transition(record.id, 'failed', { error: String(err) }).catch(transitionErr => {
           serverLogger.error('Failed to mark task execution failure', {

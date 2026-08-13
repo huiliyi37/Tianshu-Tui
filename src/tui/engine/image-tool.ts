@@ -116,7 +116,7 @@ export function resizeCandidates(
     ]
   }
   return [
-    { bin: 'sips', args: ['-Z', String(maxEdge), inPath, '--out', outPath] },
+    { bin: 'sips', args: ['-Z', String(maxEdge), '-s', 'format', 'png', inPath, '--out', outPath] },
     { bin: 'magick', args: [inPath, '-resize', `${maxEdge}x${maxEdge}>`, outPath] },
     { bin: 'convert', args: [inPath, '-resize', `${maxEdge}x${maxEdge}>`, outPath] },
   ]

@@ -65,6 +65,46 @@ test('POST /mcp/servers persists even when manager is null (startup race)', asyn
   })
 })
 
+test('POST /mcp/servers preserves transport, auth, and tool policy config', async () => {
+  await withTempHome(async () => {
+    const routes = buildMcpRoutes({
+      getMcpManager: () => null,
+      apiToken: 'tok',
+    })
+    const res = await routes['POST /mcp/servers']!(
+      {
+        serverId: 'remote',
+        url: 'https://mcp.example.com/sse',
+        transportHint: 'sse',
+        auth: { type: 'oauth', provider: 'github', scopes: ['repo'] },
+        policy: {
+          tools: {
+            search: { capability: 'read' },
+            mutate: { capability: 'write', requireApproval: true },
+          },
+        },
+      },
+      undefined,
+      { authorization: 'Bearer tok' },
+      undefined,
+    )
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+
+    const { loadConfig } = await import('../../config/manager.js')
+    assert.deepEqual(loadConfig().mcp.servers['remote'], {
+      url: 'https://mcp.example.com/sse',
+      transportHint: 'sse',
+      auth: { type: 'oauth', provider: 'github', scopes: ['repo'] },
+      policy: {
+        tools: {
+          search: { capability: 'read' },
+          mutate: { capability: 'write', requireApproval: true },
+        },
+      },
+    })
+  })
+})
+
 test('POST /mcp/servers hot-connects and notifies onToolsReady when manager live', async () => {
   await withTempHome(async () => {
     const mgr = new McpManager({ enabled: true, servers: {} })

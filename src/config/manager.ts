@@ -1972,7 +1972,7 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
             return
           }
           const cfg = loadConfig()
-          cfg.mcp.servers[id] = { url }
+          cfg.mcp.servers[id] = { url, transportHint: 'sse' }
           saveConfig(cfg)
           cliOut(io, formatSuccess(`MCP server "${id}" added (sse: ${url}). Restart Rivet to connect.`, fmtOpts))
         } else if (subcmd === 'remove') {

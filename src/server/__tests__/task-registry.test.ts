@@ -331,6 +331,43 @@ describe('TaskRegistry', () => {
     assert.equal(all.length, 1)
   })
 
+  it('deduplicated createTask schedules the existing task only once', async () => {
+    let releaseExecution!: () => void
+    const executionBlocked = new Promise<void>((resolve) => { releaseExecution = resolve })
+    let markRuntimeReleased!: () => void
+    const runtimeReleased = new Promise<void>((resolve) => { markRuntimeReleased = resolve })
+    let executeCalls = 0
+    const runtimePool = {
+      size: 0,
+      acquire: async () => ({
+        execute: async () => {
+          executeCalls++
+          await executionBlocked
+          return { summary: 'done', changedFiles: [] }
+        },
+        release: markRuntimeReleased,
+      }),
+    }
+    const registryWithRuntime = new TaskRegistry({ taskStore: store, runtimePool })
+
+    try {
+      const first = await registryWithRuntime.createTask({
+        prompt: 'run once', source: 'api', callerId: 'u1', idempotencyKey: 'same-key',
+      })
+      const duplicate = await registryWithRuntime.createTask({
+        prompt: 'run once', source: 'api', callerId: 'u1', idempotencyKey: 'same-key',
+      })
+
+      assert.equal(duplicate.id, first.id)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      assert.equal(executeCalls, 1, 'returning an existing task must not start it again')
+    } finally {
+      releaseExecution()
+      if (executeCalls > 0) await runtimeReleased
+      registryWithRuntime.dispose()
+    }
+  })
+
   it('concurrent createTask with force creates two tasks', async () => {
     const [t1, t2] = await Promise.all([
       registry.createTask({ prompt: 'concurrent', source: 'api', callerId: 'u1' }),
