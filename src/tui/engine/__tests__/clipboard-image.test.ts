@@ -81,6 +81,19 @@ test('RED #3: readImageFromClipboard returns null when reader throws → no cras
   setClipboardReader(null)
 })
 
+test('injected clipboard reader isolates the plain-text fallback from the host clipboard', async () => {
+  const mod = await import('../clipboard-image.js')
+  const { setClipboardReader, readTextFromClipboard } = mod
+
+  setClipboardReader({
+    async readImage() { return null },
+    async readText() { return 'injected text' },
+  })
+
+  assert.equal(await readTextFromClipboard(), 'injected text')
+  setClipboardReader(null)
+})
+
 test('RED #4: tryShellClipboard returns null when no shell tools available', async () => {
   const mod = await import('../clipboard-image.js')
   const { tryShellClipboard } = mod

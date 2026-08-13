@@ -75,8 +75,11 @@ test('RED #2: Ctrl+V onAnyKey → handleCtrlV → inputLine.addImage (end-to-end
 // ── RED #3: 剪贴板里没图 → fallback 到文本 Ctrl+V ─────────────────────
 test('RED #3: Ctrl+V with no image in clipboard → text fallback', async () => {
   const { app, stdin } = makeApp()
+  setClipboardReader({
+    async readImage() { return null },
+    async readText() { return 'clipboard text' },
+  })
   app.start()
-  setClipboardReader({ async readImage() { return null } })
   ;(app as any).lastInputFocusAt = Date.now() - 2_000
 
   stdin.dataHandler!('\x16')
@@ -85,11 +88,9 @@ test('RED #3: Ctrl+V with no image in clipboard → text fallback', async () => 
   setClipboardReader(null)
 
   // reader 报 null → handleCtrlV 调 readTextFromClipboard 走文本路径
-  // readTextFromClipboard 在 mock stdin 不可用 → 整体 silently no-op
-  // 接线断言：images 不增，value 不被填
+  // 接线断言：images 不增，value 插入 mock 文本
   assert.equal((app as any).getInputImagesCount(), 0, 'no image → no addImage call')
-  // 文本 path 调 insertText 但 mock env 无 clipboard 工具 → null → value 仍空
-  assert.equal(app.getInputValue(), '', 'no text in clipboard → value stays empty')
+  assert.equal(app.getInputValue(), 'clipboard text', 'no image → text fallback is inserted')
 })
 
 // ── RED #4: 焦点防抖 1s 内的 Ctrl+V 跳过剪贴板读图 ───────────────────

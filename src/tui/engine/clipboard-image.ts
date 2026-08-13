@@ -32,6 +32,8 @@ export interface ClipboardImage {
 
 export interface ClipboardReader {
   readImage(): Promise<ClipboardImage | null>
+  /** Optional text fallback; omission means the injected clipboard has no text. */
+  readText?(): Promise<string | null>
 }
 
 export interface ShellClipboardOpts {
@@ -75,6 +77,14 @@ export async function readImageFromClipboard(): Promise<ClipboardImage | null> {
  * Used as fallback when Ctrl+V finds no image in clipboard.
  */
 export async function readTextFromClipboard(): Promise<string | null> {
+  if (_reader) {
+    try {
+      return await _reader.readText?.() ?? null
+    } catch {
+      return null
+    }
+  }
+
   const pf = process.platform
   try {
     if (pf === 'darwin') {
