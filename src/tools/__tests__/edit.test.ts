@@ -337,7 +337,8 @@ describe('edit_file tool', () => {
 
     const { __setFileReadMtimeForTests } = await import('../read-file.js')
     const oldMtime = statSync(filePath).mtimeMs
-    __setFileReadMtimeForTests(filePath, oldMtime)
+    // 记录 mtime 设为真实值减 5s：staleness 判定不受文件系统毫秒粒度影响
+    __setFileReadMtimeForTests(filePath, oldMtime - 5000)
 
     writeFileSync(filePath, 'const x = 1\nconst y = 2\n// added comment\n')
 
@@ -361,7 +362,8 @@ describe('edit_file tool', () => {
 
     const { __setFileReadMtimeForTests } = await import('../read-file.js')
     const oldMtime = statSync(filePath).mtimeMs
-    __setFileReadMtimeForTests(filePath, oldMtime)
+    // 记录 mtime 设为真实值减 5s：staleness 判定不受文件系统毫秒粒度影响
+    __setFileReadMtimeForTests(filePath, oldMtime - 5000)
 
     writeFileSync(filePath, 'foo\nfoo\nbaz\nbar\n// added\n')
     // Now only 2 'foo' occurrences instead of 3
@@ -385,7 +387,8 @@ describe('edit_file tool', () => {
 
     const { __setFileReadMtimeForTests } = await import('../read-file.js')
     const oldMtime = statSync(filePath).mtimeMs
-    __setFileReadMtimeForTests(filePath, oldMtime)
+    // 记录 mtime 设为真实值减 5s：staleness 判定不受文件系统毫秒粒度影响
+    __setFileReadMtimeForTests(filePath, oldMtime - 5000)
 
     writeFileSync(filePath, 'foo\nfoo\nbar\n// added\n')
     // Still 2 'foo' occurrences
@@ -409,7 +412,8 @@ describe('edit_file tool', () => {
 
     const { __setFileReadMtimeForTests } = await import('../read-file.js')
     const oldMtime = statSync(filePath).mtimeMs
-    __setFileReadMtimeForTests(filePath, oldMtime)
+    // 记录 mtime 设为真实值减 5s：staleness 判定不受文件系统毫秒粒度影响
+    __setFileReadMtimeForTests(filePath, oldMtime - 5000)
 
     writeFileSync(filePath, 'function foo() {\n  return 99\n}\n')
 

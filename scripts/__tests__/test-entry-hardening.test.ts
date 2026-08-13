@@ -20,7 +20,7 @@
 
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DEFAULT_TEST_TIMEOUT_MS } from '../test-runner-flags.js'
@@ -33,6 +33,9 @@ const MANIFESTS = [
   'desktop/package.json',
   'vscode-extension/package.json',
 ]
+
+// 公开仓同步树不带 desktop/ 等子包——按实际存在的清单审计，门禁照样非空扫。
+const presentManifests = MANIFESTS.filter(m => existsSync(join(repoRoot, m)))
 
 interface DirectEntry {
   manifest: string
@@ -48,7 +51,7 @@ interface DirectEntry {
  */
 function collectDirectNodeTestEntries(): DirectEntry[] {
   const out: DirectEntry[] = []
-  for (const manifest of MANIFESTS) {
+  for (const manifest of presentManifests) {
     const raw = readFileSync(join(repoRoot, manifest), 'utf8')
     const scripts = (JSON.parse(raw) as { scripts?: Record<string, string> }).scripts ?? {}
     for (const [script, command] of Object.entries(scripts)) {
@@ -64,9 +67,11 @@ function collectDirectNodeTestEntries(): DirectEntry[] {
 describe('测试入口挂死护栏', () => {
   test('审计到的直接 node --test 入口不为空（保证这条门禁没在空扫）', () => {
     const entries = collectDirectNodeTestEntries()
+    const hasDesktop = presentManifests.includes('desktop/package.json')
+    const minEntries = hasDesktop ? 3 : 2
     assert.ok(
-      entries.length >= 3,
-      `期望至少 3 个直接入口（root test:desktop / desktop test / vscode-extension test），`
+      entries.length >= minEntries,
+      `期望至少 ${minEntries} 个直接入口（root test:desktop${hasDesktop ? ' / desktop test' : ''} / vscode-extension test），`
         + `实际 ${entries.length} 个：${entries.map(e => `${e.manifest}:${e.script}`).join(', ')}`,
     )
   })

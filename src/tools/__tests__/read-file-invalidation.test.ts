@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -160,6 +160,8 @@ describe('read history invalidation after edits', () => {
     // External writer changes the file (different content AND size)
     const external = Array.from({ length: 100 }, (_, i) => `extern ${i + 1}`.padEnd(80, ' ')).join('\n')
     writeFileSync(fp, external, 'utf-8')
+    const bumped = new Date(Date.now() + 5000)
+    utimesSync(fp, bumped, bumped)
 
     const edit = await EDIT_FILE_TOOL.execute(params({
       file_path: fp,
@@ -175,6 +177,9 @@ describe('read history invalidation after edits', () => {
     await READ_FILE_TOOL.execute(params({ file_path: fp }, 'sessA'))
 
     writeFileSync(fp, 'totally new\ncontent here\n', 'utf-8')
+    // 显式抬升 mtime：毫秒级时间戳下外部写入可能与记录时刻同刻，造成偶发漏判
+    const bumped = new Date(Date.now() + 5000)
+    utimesSync(fp, bumped, bumped)
 
     const r = await READ_SECTION_TOOL.execute(params({ file_path: fp, section: 'L1-L2' }, 'sessA'))
     assert.ok(r.content.includes('已变更'), `staleness note must appear: ${r.content.slice(0, 120)}`)

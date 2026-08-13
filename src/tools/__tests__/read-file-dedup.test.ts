@@ -215,6 +215,10 @@ describe('isUnchangedRepeatRead (任务 B1)', () => {
 
     // Modify the file
     await writeFile(fp, 'new content\n', 'utf-8')
+    // 显式抬升 mtime：同毫秒写入时 mtime+size 全同会偶发误判 unchanged
+    const { utimes } = await import('node:fs/promises')
+    const bumped = new Date(Date.now() + 5000)
+    await utimes(fp, bumped, bumped)
     const newStat = await stat(fp)
     const dedupKey = `${dir}::${fp}::1::all`
 

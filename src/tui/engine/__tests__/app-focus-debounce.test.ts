@@ -11,11 +11,18 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ReadStream, WriteStream } from 'node:tty'
 import { TuiApp } from '../app.js'
-import { setClipboardReader } from '../clipboard-image.js'
+import { setClipboardReader, FOCUS_DEBOUNCE_MS } from '../clipboard-image.js'
 import { MockOut, MockIn } from './_harness.js'
 
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 const PNG_DATA_URL = `data:image/png;base64,${PNG_B64}`
+
+/** 轮询直到墙钟确定越过焦点防抖窗口——固定 sleep 在全量测试满载时会迟到不足 */
+async function clearFocusDebounce(focusAt: number): Promise<void> {
+  while (Date.now() - focusAt < FOCUS_DEBOUNCE_MS + 150) {
+    await new Promise((r) => setTimeout(r, 50))
+  }
+}
 
 function makeApp() {
   const out = new MockOut(120, 24)
@@ -83,10 +90,11 @@ test('RED: TuiApp+Ctrl+V after 1s focus window → image reader called, image at
     },
   })
   const { app, out, stdin } = makeApp()
+  const focusAt = Date.now()
   app.start()
 
-  // Wait > 1s (FOCUS_DEBOUNCE_MS) to clear the debounce window
-  await new Promise((r) => setTimeout(r, 1100))
+  // Wait past FOCUS_DEBOUNCE_MS to clear the debounce window
+  await clearFocusDebounce(focusAt)
 
   stdin.dataHandler!('\x16')
   await tick(50)
@@ -104,8 +112,9 @@ test('RED: TuiApp+Ctrl+V with no image (null) → text fallback, 0 images', asyn
     },
   })
   const { app, out, stdin } = makeApp()
+  const focusAt = Date.now()
   app.start()
-  await new Promise((r) => setTimeout(r, 1100))
+  await clearFocusDebounce(focusAt)
 
   stdin.dataHandler!('\x16')
   await tick(50)
@@ -124,8 +133,9 @@ test('RED: TuiApp+Ctrl+V in non-input mode (overlay) → handler short-circuits,
     },
   })
   const { app, stdin } = makeApp()
+  const focusAt = Date.now()
   app.start()
-  await new Promise((r) => setTimeout(r, 1100))
+  await clearFocusDebounce(focusAt)
 
   // Force the input handler into a non-input mode (simulate overlay active)
   ;(app as unknown as { input: { setMode: (m: string) => void } }).input.setMode('overlay')

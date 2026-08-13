@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { extractPlanConstraints, renderPlanConstraints, resolvePlanConstraints, constraintsFromUnifiedPlan, findApprovedPlanConstraints, resetApprovedPlanCache, type PlanConstraint } from '../plan-constraints.js'
@@ -328,21 +328,34 @@ function makeApprovedPlanCwd(antiGoal: string): string {
   return cwd
 }
 
-test('缓存：TTL 内原地改写（目录 mtime 不变）→ 仍读到旧值；新增计划 → 立即失效', () => {
+test('缓存：TTL 内原地改写（目录 mtime 不变）→ 仍读到旧值；新增计划 → 立即失效', async () => {
   const cwd = makeApprovedPlanCwd('旧条目')
+  const iso = (offsetMs: number) => new Date(Date.now() + offsetMs).toISOString()
   try {
+    // 目录 mtime 钉到固定值再首读——缓存基准即钉住值。不依赖文件系统的隐式
+    // 目录 mtime 行为（WSL2 ext4 实测 in-place rewrite 也可能 bump 目录 mtime）。
+    const plansDir = join(cwd, '.rivet', 'plans')
+    const pinDirMtime = () => { const t = new Date(1_700_000_005_000); utimesSync(plansDir, t, t) }
+    pinDirMtime()
     const first = findApprovedPlanConstraints(cwd)
     assert.deepEqual(first, ['[计划反目标] 旧条目'])
 
-    // 原地改写同一文件（改内容不更新父目录 mtime）→ TTL 内应命中缓存读旧值。
+    // 原地改写同一文件后把目录 mtime 钉回原值 → TTL 内应命中缓存读旧值。
     writeFileSync(join(cwd, '.rivet', 'plans', 'p1.md'),
-      `# P\n\n> **Status: APPROVED** — ${new Date().toISOString()}\n\n## 反目标\n\n- 新条目（原地改写）\n`)
+      `# P\n\n> **Status: APPROVED** — ${iso(1000)}\n\n## 反目标\n\n- 新条目（原地改写）\n`)
+    pinDirMtime()
     const stale = findApprovedPlanConstraints(cwd)
     assert.deepEqual(stale, ['[计划反目标] 旧条目'], 'TTL 内原地改写应读到缓存旧值（目录 mtime 未变）')
 
+    // 「最新计划」按文件 birthtime 排序——birthtime 不可写，且本机实测亚毫秒内
+    // 连续创建会同值平局。等一个真实间隔再建 p2，保证它的 birthtime 严格晚于 p1。
+    await new Promise(r => setTimeout(r, 20))
     // 新增计划文件（改变目录 mtime）→ 立即失效重读。
     writeFileSync(join(cwd, '.rivet', 'plans', 'p2.md'),
-      `# P2\n\n> **Status: APPROVED** — ${new Date().toISOString()}\n\n## 反目标\n\n- 新增计划的条目\n`)
+      `# P2\n\n> **Status: APPROVED** — ${iso(2000)}\n\n## 反目标\n\n- 新增计划的条目\n`)
+    // 显式抬升目录 mtime：毫秒粒度下新增文件可能与缓存记录同刻，失效判定不触发
+    const bumpedAt = new Date(Date.now() + 5000)
+    utimesSync(join(cwd, '.rivet', 'plans'), bumpedAt, bumpedAt)
     const fresh = findApprovedPlanConstraints(cwd)
     assert.deepEqual(fresh, ['[计划反目标] 新增计划的条目'], '目录 mtime 变化应立即失效')
 

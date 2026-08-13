@@ -188,9 +188,13 @@ describe('timeoutMs', () => {
 // ── Integration: parse real plan file ──
 
 describe('integration: parse real plan file', () => {
-  it('parses tianshu-omp plan checklist into items with file paths', async () => {
+  it('parses tianshu-omp plan checklist into items with file paths', async (t) => {
     const { readFile } = await import('node:fs/promises')
-    const content = await readFile('.rivet/knowledge/tianshu-omp-convergence-precision-backport.md', 'utf-8')
+    const { existsSync } = await import('node:fs')
+    const fixture = '.rivet/knowledge/tianshu-omp-convergence-precision-backport.md'
+    // fixture 在公开仓同步树缺失（.rivet/knowledge/ 整目录忽略）——不是回归。
+    if (!existsSync(fixture)) return t.skip(`${fixture} not in this tree`)
+    const content = await readFile(fixture, 'utf-8')
     const items = parseChecklistItems(content)
     // The updated plan has ~12+ checklist items
     assert.ok(items.length >= 8, `expected at least 8 checklist items, got ${items.length}`)

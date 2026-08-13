@@ -1,11 +1,13 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 const SKILL_PATH = join(process.cwd(), '.claude/skills/writing-plans/SKILL.md')
+// 公开仓同步树不带 .claude/skills/——文件不在就跳过，不是回归。
+const SKIP_REASON = existsSync(SKILL_PATH) ? false : 'writing-plans SKILL.md not in this tree'
 
-test('writing-plans skill: no spawn-subagent triggers in plan phase', () => {
+test('writing-plans skill: no spawn-subagent triggers in plan phase', { skip: SKIP_REASON }, () => {
   const content = readFileSync(SKILL_PATH, 'utf-8')
 
   // ── HARD BLOCKS ────────────────────────────────────────────────
@@ -42,7 +44,7 @@ test('writing-plans skill: no spawn-subagent triggers in plan phase', () => {
   }
 })
 
-test('writing-plans skill: anti-spawn guard rail is present', () => {
+test('writing-plans skill: anti-spawn guard rail is present', { skip: SKIP_REASON }, () => {
   const content = readFileSync(SKILL_PATH, 'utf-8')
 
   // ── REQUIRED GUARDS ────────────────────────────────────────────
@@ -81,7 +83,7 @@ test('writing-plans skill: anti-spawn guard rail is present', () => {
   }
 })
 
-test('writing-plans skill: Plan Mode design-doc branch forbids bash/commit recipes', () => {
+test('writing-plans skill: Plan Mode design-doc branch forbids bash/commit recipes', { skip: SKIP_REASON }, () => {
   const content = readFileSync(SKILL_PATH, 'utf-8')
   const idx = content.indexOf('#### 3.1a Plan Mode')
   assert.ok(idx >= 0, 'must have §3.1a Plan Mode design-doc section')

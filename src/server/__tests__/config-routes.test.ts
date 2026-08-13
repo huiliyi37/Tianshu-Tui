@@ -40,7 +40,12 @@ describe('GET /config/computer-use', () => {
     assert.equal(res.status, 200)
     const body = res.body as { available: boolean; proRequired: boolean; platform: string; permissions: unknown; grants: unknown[] }
     assert.equal(body.available, false)
-    assert.equal(body.proRequired, true)
+    // proRequired 只在平台支持时成立；Linux 等平台不支持时两者皆 false。
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      assert.equal(body.proRequired, true)
+    } else {
+      assert.equal(body.proRequired, false)
+    }
     assert.equal(body.platform, process.platform)
     assert.equal(body.permissions, null)
   })

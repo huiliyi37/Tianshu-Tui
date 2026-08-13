@@ -12,7 +12,7 @@
 
 import { test, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createRouter } from '../index.js'
@@ -103,6 +103,9 @@ test('交接 run：prompt 指向项目内文档，收尾归档到 <id>.handoff.m
   mkdirSync(join(workDir, '.rivet'), { recursive: true })
   const srcPath = join(workDir, '.rivet', 'HANDOFF.md')
   writeFileSync(srcPath, '# Handoff 交接内容\n')
+  // 归档判定是 mtime > 登记时刻（严格大于）：同毫秒写入会平局，显式抬升 mtime
+  const bumped = new Date(Date.now() + 5000)
+  utimesSync(srcPath, bumped, bumped)
   agent.finish()
   await tick()
 

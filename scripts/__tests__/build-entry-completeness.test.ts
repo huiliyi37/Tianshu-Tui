@@ -1,11 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 
 const pkg = JSON.parse(read('../../package.json')) as { scripts: Record<string, string> }
-const tauriConf = read('../../desktop/src-tauri/tauri.conf.json')
+// 公开仓同步树不带 desktop/——tauri 配置存在才审计，缺失跳过该子测试。
+const TAURI_CONF_URL = new URL('../../desktop/src-tauri/tauri.conf.json', import.meta.url)
+const tauriConf = existsSync(TAURI_CONF_URL) ? readFileSync(TAURI_CONF_URL, 'utf8') : null
 const updater = read('../../src/tui/updater.ts')
 
 // `npm run build` used to be a bare `tsup`, while a complete `build:dist`
@@ -69,11 +71,11 @@ describe('build entry completeness', () => {
     assert.ok(prepack.indexOf('run build') < prepack.indexOf('stage-cli-sqlite-wrapper.js'), prepack)
   })
 
-  it('tauri keeps staging on its own — it can run without a prior root build', () => {
+  it('tauri keeps staging on its own — it can run without a prior root build', { skip: tauriConf === null ? 'desktop/src-tauri not in this tree' : false }, () => {
     // Redundant with `npm run build` when a release script runs both, and both
     // scripts are idempotent, so the cost is ~6s. Dropping it would leave
     // `tauri build` on its own producing a degraded sidecar.
-    const before = JSON.parse(tauriConf).build.beforeBuildCommand as string
+    const before = JSON.parse(tauriConf!).build.beforeBuildCommand as string
     assert.match(before, /pack-native\.js/)
     assert.match(before, /stage-runtime-deps\.js/)
   })

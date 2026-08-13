@@ -15,7 +15,7 @@ async function makeFakeBin(): Promise<string> {
   const src = `#!/usr/bin/env node
 import { writeFileSync } from 'node:fs'
 if (process.env.WHISPER_FAKE_FAIL) { process.exit(1) }
-if (process.env.WHISPER_FAKE_HANG) { await new Promise(() => {}); }
+if (process.env.WHISPER_FAKE_HANG) { setInterval(() => {}, 60_000); await new Promise(() => {}); }
 const argv = process.argv.slice(2)
 const i = argv.indexOf('-f')
 if (i >= 0 && argv[i + 1]) writeFileSync(argv[i + 1] + '.txt', 'hello world', 'utf8')
