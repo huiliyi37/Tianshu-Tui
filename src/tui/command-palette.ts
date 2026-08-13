@@ -52,6 +52,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/queue', description: '排队一条消息到下轮——busy 时也可攒，回车随下条一并发送（无参预览队列）', argsHint: '<text>' },
     { name: '/compact', description: '压缩上下文：汇总工具输出、折叠已结讨论、保留关键决策。过半时主动用比等自动压缩更省 token' },
     { name: '/connect', description: '连接模型服务商（选内置或自定义，填写 API 密钥）' },
+    { name: '/disconnect', description: '断开服务商——整组删除该 key 注册的模型列表并清除密钥' },
     { name: '/config', description: '设置面板 — 子代理路由 / 审查子代理 / 识图模型 / 基础项' },
     { name: '/model', description: '查看或切换当前会话模型。多 Provider 用户高频，切换后下轮生效', argsHint: 'list|<model-id>' },
     { name: '/model list', description: '列出所有可用模型（含已配置的 Provider 下全部模型）' },

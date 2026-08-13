@@ -4077,6 +4077,22 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
+  register("/disconnect", {
+    description: "断开服务商（整组删除该 key 注册的模型列表并清除密钥）",
+    immediate: true,
+    handler: ({ app }) => {
+      const cfg = loadConfig()
+      const saved = Object.entries(cfg.provider.providers).filter(([, p]) => p.userSaved)
+      if (saved.length === 0) {
+        app.commitStatic('尚无已保存的服务商——先用 /connect 接入。')
+        return true
+      }
+      app.choicePanelKind = 'disconnect'
+      app.activateOverlay('choice-panel')
+      return true
+    },
+  })
+
   // /config —— 设置面板。配置读写就在这一层做（同 /mirror 的先例），app.ts 只拿
   // 一个纯状态机和一个落盘闭包，不引 config manager。
   const openSettingsPanel = (): boolean => {

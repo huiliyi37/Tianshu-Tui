@@ -317,6 +317,30 @@ describe('vision real-test (视觉真测)', () => {
     server = undefined
   })
 
+  it('extracts a content-parts array answer (OpenAI-compatible delta.content array form)', async () => {
+    server = await startServer((req, res) => {
+      if (req.url === '/v1/models') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ data: [{ id: 'glm-4v-flash' }] }))
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end(sse([
+        JSON.stringify({ choices: [{ delta: { content: [{ type: 'text', text: '一张红色' }] } }] }),
+        JSON.stringify({ choices: [{ delta: { content: [{ type: 'text', text: '的正方形' }] } }] }),
+      ]))
+    })
+    try {
+      const report = await probeProvider({ baseUrl: server.baseUrl, probeModel: 'glm-4v-flash' })
+      assert.equal(report.visionTested, true)
+      assert.equal(report.completionOk, true, 'content-parts 数组形态的回答不应被判为无回答')
+      assert.equal(report.visionAnswer, '一张红色的正方形')
+    } finally {
+      await server.close()
+      server = undefined
+    }
+  })
+
   it('falls back to a discovered vision-capable model when the suggested one is absent', async () => {
     const capture: { model?: string } = {}
     // 聚合站没有 glm-4v-flash；列表里第一个是纯文本模型，glm-5.2 是别名表认识的视觉档。

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import http from 'node:http'
 import { loadConfig } from '../manager.js'
+import { readSecret } from '../secrets-store.js'
 import { runProviderCLI, toModelDescriptors } from '../provider-cli.js'
 import { matchModelIds } from '../../api/model-id-matcher.js'
 
@@ -171,6 +172,17 @@ describe('rivet provider CLI', () => {
     const { io: removeIO } = captureIO()
     await runProviderCLI(['remove', 'temp'], removeIO)
     assert.equal(loadConfig().provider.providers['temp'], undefined)
+  })
+
+  it('remove reports group size and clears the stored API key', async () => {
+    const { io } = captureIO()
+    await runProviderCLI(['add', 'keyed', '--base-url', 'https://t.example.com/v1', '--api-key', 'sk-keyed', '--no-probe'], io)
+
+    const { io: removeIO, stdout } = captureIO()
+    await runProviderCLI(['remove', 'keyed'], removeIO)
+    assert.ok(stdout.some(line => line.includes('removed (0 models)')), stdout.join('\n'))
+    assert.ok(stdout.some(line => line.includes('API key deleted from secrets.json')), stdout.join('\n'))
+    assert.equal(readSecret('keyed'), undefined)
   })
 
   it('rejects an invalid --protocol value', async () => {

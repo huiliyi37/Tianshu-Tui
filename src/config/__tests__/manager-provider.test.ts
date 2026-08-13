@@ -1,10 +1,11 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   loadConfig,
+  saveConfig,
   setupProvider,
   registerProvider,
   addProvider,
@@ -18,6 +19,7 @@ import {
   runConfigCLI,
   setModelSupportsVision,
 } from '../manager.js'
+import { readSecret, writeSecret, secretsPath } from '../secrets-store.js'
 import { DEFAULT_CONFIG } from '../default.js'
 
 describe('provider config mutations', () => {
@@ -101,6 +103,34 @@ describe('provider config mutations', () => {
     // No hardcoded capability boilerplate — undeclared fields fall through to
     // DEFAULT_CAPABILITIES in resolveCapabilities.
     assert.deepEqual(provider.capabilities, {})
+  })
+
+  it('saveConfig never persists a provider apiKey, even without keyRef', () => {
+    const config = loadConfig()
+    config.provider.providers['legacy-inline'] = {
+      name: 'legacy-inline',
+      baseUrl: 'https://legacy.example.com/v1',
+      apiKey: 'sk-must-not-reach-config',
+      protocol: 'openai',
+      models: [{ id: 'legacy-model', contextWindow: 128000, maxTokens: 8192 }],
+      userSaved: true,
+    } as any
+    saveConfig(config)
+    const raw = readFileSync(process.env.RIVET_CONFIG_PATH!, 'utf8')
+    assert.ok(!raw.includes('sk-must-not-reach-config'))
+    const parsed = JSON.parse(raw)
+    assert.equal('apiKey' in parsed.provider.providers['legacy-inline'], false)
+  })
+
+  it('registerProvider rejects apiKey and apiKeyEnv together before persisting config', () => {
+    assert.throws(() => registerProvider({
+      providerName: 'ambiguous-auth',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-ambiguous',
+      apiKeyEnv: 'AMBIGUOUS_API_KEY',
+      models: [{ id: 'm', contextWindow: 128000, maxTokens: 8192 }],
+    }), /apiKey.*apiKeyEnv|credential source|either/i)
+    assert.equal(loadConfig().provider.providers['ambiguous-auth'], undefined)
   })
 
   it('registerProvider honors an explicit protocol option', () => {
@@ -349,5 +379,133 @@ describe('provider config mutations', () => {
     } as any)
     const providers = loadConfig().provider.providers
     assert.equal(providers['my-new-provider']!.userSaved, true)
+  })
+})
+
+describe('removeProvider secret cleanup（一个 key 一个模型组）', () => {
+  let dir = ''
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-provider-remove-'))
+    process.env.RIVET_CONFIG_PATH = join(dir, 'config.json')
+  })
+
+  afterEach(() => {
+    delete process.env.RIVET_CONFIG_PATH
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('deletes the provider secret together with the model group', () => {
+    registerProvider({
+      providerName: 'relay-a',
+      baseUrl: 'https://relay.example.com/v1',
+      apiKey: 'sk-group',
+      models: [{ id: 'm1', contextWindow: 128000, maxTokens: 8192 }, { id: 'm2', contextWindow: 128000, maxTokens: 8192 }],
+    })
+    assert.equal(readSecret('relay-a'), 'sk-group')
+    const result = removeProvider('relay-a')
+    assert.equal(result.modelCount, 2)
+    assert.equal(result.keyRef, 'relay-a')
+    assert.equal(result.secretDeleted, true)
+    assert.deepEqual(result.keyRefSharedWith, [])
+    assert.equal(readSecret('relay-a'), undefined)
+    // 库里只剩默认 provider 的密钥位——空库场景 secrets.json 会被整体移除。
+  })
+
+  it('clears agent.defaultModel when it points into the removed provider', () => {
+    registerProvider({
+      providerName: 'relay-default-model',
+      baseUrl: 'https://relay.example.com/v1',
+      apiKey: 'sk-default-model',
+      models: [{ id: 'm1', contextWindow: 128000, maxTokens: 8192 }],
+    })
+    const cfg = loadConfig()
+    cfg.agent.defaultModel = 'relay-default-model:m1'
+    saveConfig(cfg)
+
+    const result = removeProvider('relay-default-model')
+
+    assert.equal(result.defaultModelCleared, true)
+    assert.equal(loadConfig().agent.defaultModel, undefined)
+  })
+
+  it('reports secretDeleted=false when keyRef has no stored secret', () => {
+    addProvider('relay-missing-secret', {
+      name: 'relay-missing-secret',
+      baseUrl: 'https://relay.example.com/v1',
+      protocol: 'openai',
+      capabilities: { thinkingBlock: 'none', effortFormat: 'none', prefixCache: 'none', prefixCompletion: false, toolJsonBug: false, cacheControl: false },
+      maxTokens: 4096,
+      keyRef: 'missing-secret',
+      models: [{ id: 'm1', contextWindow: 128000, maxTokens: 8192 }],
+    } as any)
+
+    const result = removeProvider('relay-missing-secret')
+
+    assert.equal(result.secretDeleted, false)
+  })
+
+  it('unlinks secrets.json when the deleted key was the last entry', () => {
+    registerProvider({
+      providerName: 'solo-relay',
+      baseUrl: 'https://relay.example.com/v1',
+      apiKey: 'sk-solo',
+      models: [{ id: 'm1', contextWindow: 128000, maxTokens: 8192 }],
+    })
+    // 出厂预设走 apiKeyEnv 不占 secrets 位——solo-relay 是唯一条目。
+    assert.ok(existsSync(secretsPath()))
+    removeProvider('solo-relay')
+    assert.equal(existsSync(secretsPath()), false)
+  })
+
+  it('keepSecret leaves the key in place', () => {
+    registerProvider({
+      providerName: 'relay-keep',
+      baseUrl: 'https://relay.example.com/v1',
+      apiKey: 'sk-keep',
+      models: [{ id: 'm1', contextWindow: 128000, maxTokens: 8192 }],
+    })
+    const result = removeProvider('relay-keep', { keepSecret: true })
+    assert.equal(result.secretDeleted, false)
+    assert.equal(readSecret('relay-keep'), 'sk-keep')
+  })
+
+  it('keeps the secret when another provider still references the same keyRef', () => {
+    registerProvider({
+      providerName: 'relay-shared',
+      baseUrl: 'https://relay.example.com/v1',
+      apiKey: 'sk-shared',
+      models: [{ id: 'm1', contextWindow: 128000, maxTokens: 8192 }],
+    })
+    // 手改配置共享 keyRef 的合法场景：第二个条目指向同一 keyRef。
+    const cfg = loadConfig()
+    addProvider('relay-shared-2', {
+      ...cfg.provider.providers['relay-shared']!,
+      name: 'relay-shared-2',
+      keyRef: 'relay-shared',
+    })
+    const result = removeProvider('relay-shared')
+    assert.equal(result.secretDeleted, false)
+    assert.deepEqual(result.keyRefSharedWith, ['relay-shared-2'])
+    assert.equal(readSecret('relay-shared'), 'sk-shared')
+    // 第二个条目删除后密钥才清。
+    const second = removeProvider('relay-shared-2')
+    assert.equal(second.secretDeleted, true)
+    assert.equal(readSecret('relay-shared'), undefined)
+  })
+
+  it('reports secretDeleted=false for a keyless provider', () => {
+    addProvider('local-box', {
+      name: 'local-box',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      protocol: 'openai',
+      capabilities: { thinkingBlock: 'none', effortFormat: 'none', prefixCache: 'none', prefixCompletion: false, toolJsonBug: false, cacheControl: false },
+      maxTokens: 4096,
+      models: [{ id: 'llama', contextWindow: 8192, maxTokens: 4096 }],
+    } as any)
+    const result = removeProvider('local-box')
+    assert.equal(result.keyRef, undefined)
+    assert.equal(result.secretDeleted, false)
+    assert.equal(result.modelCount, 1)
   })
 })

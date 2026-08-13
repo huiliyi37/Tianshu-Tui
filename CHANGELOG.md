@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-08-13 — 交付门禁：共同归属文件可随整体验证一起提交
+
+### Changed
+
+- **`deliver_task` adopt 语义扩展** — 共同归属文件（其他会话也改过的文件，含仍活跃的会话）不再只能等对方崩溃/冻结后接管：当前会话对合并后的整体改动验证有把握（typecheck + 相关测试通过）时，可用 `adopt=[路径]` 连同它们一起提交。状态报告的 Co-owned 段落新增此路径提示；认领警告从「确认对方已结束」改为「提交会把对方改动一起落地，须已验证整体」。
+
+## 2026-08-12 — 一个 API key 一个模型组：整组删除
+
+### Added
+
+- **TUI /disconnect 命令** — 列出所有已保存服务商（每个即一个 API key 注册的模型组），选中后二次确认整组删除：provider 条目、模型列表与 secrets.json 中的密钥一并清除。同一 key 值被多个条目使用时以指纹提示「共用同一 key」，删除互不联动；当前默认 provider 标注不可删除。
+- **`rivet provider remove` 输出增强** — 报告删除的模型数量与密钥处置（已清除 / 因共享 keyRef 保留 / 无密钥条目）。
+
+### Changed
+
+- **provider 删除同步清理密钥** — `removeProvider` 现在会删除 secrets.json 中对应的 keyRef 条目（此前留下孤儿密钥）。该修复覆盖全部删除路径：`rivet provider remove`、`rivet config remove-provider`、桌面端 `DELETE /config/providers/:name`。仍被其他 provider 引用的共享 keyRef 不受影响。
+
 ## 2026-07-15 — v2.17.4: 输出过滤扩展 + TUI 修复
 
 ### Fixed

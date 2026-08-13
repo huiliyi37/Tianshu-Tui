@@ -43,7 +43,7 @@ Commands:
   models <name>                 Fetch the endpoint's model list and print a
                                 pasteable models[] snippet (alias-table matched)
   probe <name>                  Probe a configured provider (models + completion)
-  remove <name>                 Remove a provider
+  remove <name>                 Remove a provider (its model group + stored API key)
 
 Examples:
   rivet provider add my-relay --base-url http://127.0.0.1:3000/v1 --api-key-env RELAY_API_KEY
@@ -232,8 +232,15 @@ function cmdRemove(args: string[], io: ProviderCliIO): void {
     exit(io, 1)
     return
   }
-  removeProvider(name)
-  out(io, `Provider "${name}" removed.`)
+  const result = removeProvider(name)
+  const secretNote = !result.keyRef
+    ? ''
+    : result.secretDeleted
+      ? ' API key deleted from secrets.json.'
+      : result.keyRefSharedWith.length > 0
+        ? ` Key ref "${result.keyRef}" still referenced by ${result.keyRefSharedWith.join(', ')} — secret kept.`
+        : ' (no stored key found)'
+  out(io, `Provider "${name}" removed (${result.modelCount} models).${secretNote}`)
 }
 
 export async function runProviderCLI(args: string[], io: ProviderCliIO = {}): Promise<void> {

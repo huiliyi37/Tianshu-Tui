@@ -11,6 +11,7 @@
  */
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { rivetHome, userConfigPath } from './paths.js'
 
@@ -70,4 +71,14 @@ export function deleteSecret(keyRef: string, base?: string): void {
     return
   }
   writeStore(store, base)
+}
+
+/** 展示安全的短指纹——用于标记共用同一 key 的条目，不打印密钥材料。 */
+export function secretFingerprint(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 8)
+}
+
+export function fingerprintForKeyRef(keyRef: string, base?: string): string | undefined {
+  const value = readSecret(keyRef, base)
+  return value ? secretFingerprint(value) : undefined
 }

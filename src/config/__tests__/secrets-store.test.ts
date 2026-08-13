@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync, statSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { secretsPath, readSecret, writeSecret, deleteSecret } from '../secrets-store.js'
+import { secretsPath, readSecret, writeSecret, deleteSecret, secretFingerprint, fingerprintForKeyRef } from '../secrets-store.js'
 import { loadConfig, saveConfig, runConfigCLI } from '../manager.js'
 import { resolveApiKey } from '../../api/factory.js'
 import type { ProviderConfig } from '../schema.js'
@@ -163,5 +163,34 @@ describe('config show masks secrets', () => {
     const out = lines.join('\n')
     assert.ok(!out.includes('sk-super-secret-1234'), 'show output must not contain the key')
     assert.ok(out.includes('***1234'), 'masked tail is shown')
+  })
+})
+
+describe('secret fingerprint', () => {
+  let dir = ''
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-secrets-fp-'))
+    process.env.RIVET_CONFIG_PATH = join(dir, 'config.json')
+  })
+
+  afterEach(() => {
+    delete process.env.RIVET_CONFIG_PATH
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('is deterministic, short, hex, and never leaks key material', () => {
+    const fp = secretFingerprint('sk-abc-123')
+    assert.equal(fp, secretFingerprint('sk-abc-123'))
+    assert.equal(fp.length, 8)
+    assert.match(fp, /^[0-9a-f]{8}$/)
+    assert.ok(!fp.includes('sk-abc'), 'fingerprint must not contain key material')
+    assert.notEqual(fp, secretFingerprint('sk-abc-124'))
+  })
+
+  it('fingerprintForKeyRef reads through the store and returns undefined for missing refs', () => {
+    writeSecret('relay-x', 'sk-shared-value')
+    assert.equal(fingerprintForKeyRef('relay-x'), secretFingerprint('sk-shared-value'))
+    assert.equal(fingerprintForKeyRef('ghost'), undefined)
   })
 })

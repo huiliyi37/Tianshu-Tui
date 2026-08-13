@@ -8,7 +8,7 @@ import { userConfigPath } from './paths.js'
 import { findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 import { cloneResolvedPreset, resolvePreset } from '../api/pro-registry.js'
 import { backfillPresetModelFields } from './preset-model-backfill.js'
-import { writeSecret, readSecret } from './secrets-store.js'
+import { writeSecret, readSecret, deleteSecret } from './secrets-store.js'
 import { invalidateToolPreset } from '../tools/tool-preset.js'
 import { invalidatePromptBlocks } from '../prompt/block-policy.js'
 import { validateRuntimeLeanSlice, type RuntimeLeanConfigSlice } from './runtime-lean.js'
@@ -340,14 +340,12 @@ export function loadConfigDefault(): Config {
 }
 
 export function saveConfig(config: Config): void {
-  // keyRef providers carry a materialized in-memory apiKey (see loadConfig) —
-  // strip it before writing so plaintext never returns to config.json.
-  const needsStrip = Object.values(config.provider.providers).some(p => p.keyRef && p.apiKey)
-  const toWrite = needsStrip ? structuredClone(config) : config
-  if (needsStrip) {
-    for (const provider of Object.values(toWrite.provider.providers)) {
-      if (provider.keyRef && provider.apiKey) provider.apiKey = undefined
-    }
+  // provider.apiKey is a runtime-only materialized value. Persisted provider
+  // credentials must be either keyRef or apiKeyEnv; config.json never receives
+  // plaintext API keys, including legacy objects that have no keyRef yet.
+  const toWrite = structuredClone(config)
+  for (const provider of Object.values(toWrite.provider.providers)) {
+    provider.apiKey = undefined
   }
   writeFileAtomicSync(getUserConfigPath(), JSON.stringify(toWrite, null, 2) + '\n')
 }
@@ -372,9 +370,24 @@ export function addProvider(name: string, config: ProviderConfig): void {
   saveConfig(cfg)
 }
 
-export function removeProvider(name: string): void {
+export interface RemoveProviderResult {
+  name: string
+  /** 被删除条目携带的模型数（整组删除的规模）。 */
+  modelCount: number
+  /** 条目指向 secrets.json 的引用；keyless/inline/env 条目为 undefined。 */
+  keyRef?: string
+  /** 是否清理了指向被删 provider 的 agent.defaultModel。 */
+  defaultModelCleared: boolean
+  /** 是否已从 secrets.json 删除对应密钥。 */
+  secretDeleted: boolean
+  /** 其他 provider 仍引用同一 keyRef 时列出——密钥因此保留。 */
+  keyRefSharedWith: string[]
+}
+
+export function removeProvider(name: string, options?: { keepSecret?: boolean }): RemoveProviderResult {
   const cfg = loadConfig()
-  if (!cfg.provider.providers[name]) {
+  const entry = cfg.provider.providers[name]
+  if (!entry) {
     throw new Error(
       `Provider "${name}" not found. Available: ${Object.keys(cfg.provider.providers).join(', ')}`,
     )
@@ -387,8 +400,24 @@ export function removeProvider(name: string): void {
   if (cfg.provider.default === name) {
     throw new Error(`Cannot remove default provider "${name}". Set a different default first.`)
   }
+  const keyRef = entry.keyRef
+  const modelCount = entry.models.length
+  const defaultModelCleared = cfg.agent.defaultModel?.startsWith(`${name}:`) ?? false
+  if (defaultModelCleared) delete cfg.agent.defaultModel
   delete cfg.provider.providers[name]
   saveConfig(cfg)
+
+  // 一个 key 对应一个模型组：条目删除即整组删除，密钥随之清除（否则成孤儿）。
+  // 仍被其他 provider 引用的 keyRef 保留——手改配置共享 keyRef 的场景合法存在。
+  let secretDeleted = false
+  const keyRefSharedWith = keyRef
+    ? Object.entries(cfg.provider.providers).filter(([, p]) => p.keyRef === keyRef).map(([n]) => n)
+    : []
+  if (keyRef && !options?.keepSecret && keyRefSharedWith.length === 0 && readSecret(keyRef) !== undefined) {
+    deleteSecret(keyRef)
+    secretDeleted = true
+  }
+  return { name, modelCount, keyRef, defaultModelCleared, secretDeleted, keyRefSharedWith }
 }
 
 export function setDefaultProvider(name: string): void {
@@ -1520,6 +1549,9 @@ export interface RegisterProviderOptions {
  * in `resolveCapabilities`.
  */
 export function registerProvider(options: RegisterProviderOptions): void {
+  if (options.apiKey && options.apiKeyEnv) {
+    throw new Error('Provider credentials must use either apiKey or apiKeyEnv, not both.')
+  }
   // 自定义 provider 拒绝内置预设名：撞名条目在列表里显示预设 label、删除时曾
   // 被预设名拦截（历史死锁）。想覆盖预设行为请走 setupProvider
   // （POST /config/providers，克隆预设后覆盖字段）。

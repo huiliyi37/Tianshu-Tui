@@ -1526,7 +1526,7 @@ async function main() {
             if (!modelAlias) {
               runtime = { needed: true, switched: false, error: '默认 provider 没有可用模型' }
             } else {
-              const res = switchAgentRuntime(ctx, modelAlias)
+              const res = switchAgentRuntime(ctx, modelAlias, fresh.provider.default)
               if (res.ok && res.modelName) {
                 tuiApp.setModelInfo(res.modelName, res.contextWindow)
                 attachJobSubscription()

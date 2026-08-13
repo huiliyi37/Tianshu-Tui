@@ -272,10 +272,25 @@ function extractSseAssistantText(bodyText: string): string {
         choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }>
       }
       const piece = parsed.choices?.[0]?.delta?.content ?? parsed.choices?.[0]?.message?.content
-      if (typeof piece === 'string') text += piece
+      text += contentPieceToText(piece)
     } catch { /* 非 JSON 数据行——忽略 */ }
   }
   return text.trim()
+}
+
+/**
+ * delta.content 可为字符串，也可为 content-parts 数组（OpenAI 兼容视觉端点
+ * 流式返回的常见形态，如 [{type:'text',text:'…'}]）——统一还原为文本。
+ */
+function contentPieceToText(piece: unknown): string {
+  if (typeof piece === 'string') return piece
+  if (!Array.isArray(piece)) return ''
+  return piece
+    .filter((part): part is { type?: unknown; text?: unknown } =>
+      typeof part === 'object' && part !== null)
+    .filter(part => part.type === 'text' && typeof part.text === 'string')
+    .map(part => part.text as string)
+    .join('')
 }
 
 async function probeOpenAICompletion(options: ProbeOptions, model: string, vision: boolean): Promise<CompletionProbeOutcome> {

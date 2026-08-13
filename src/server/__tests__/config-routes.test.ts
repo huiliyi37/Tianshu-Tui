@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRouter } from '../index.js'
 import { buildConfigRoutes } from '../config-routes.js'
+import { readSecret, writeSecret } from '../../config/secrets-store.js'
 
 const TOKEN = 'secret-token'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
@@ -622,5 +623,34 @@ describe('provider delete: preset-name deadlock', () => {
     const res = await router('DELETE', '/config/providers/deepseek', {}, AUTH)
     assert.equal(res.status, 400)
     assert.match((res.body as { error: string }).error, /default provider/i)
+  })
+
+  it('DELETE /config/providers/:name also clears the keyRef secret from secrets.json', async () => {
+    writeFileSync(join(home, 'config.json'), JSON.stringify({
+      provider: {
+        default: 'deepseek',
+        providers: {
+          'relay-gone': {
+            name: 'relay-gone',
+            baseUrl: 'https://relay.example.com/v1',
+            keyRef: 'relay-gone',
+            protocol: 'openai',
+            capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none', prefixCompletion: false },
+            maxTokens: 8000,
+            models: [{ id: 'm', contextWindow: 128000, maxTokens: 8000 }],
+            userSaved: true,
+          },
+        },
+      },
+      pro: {},
+    }, null, 2) + '\n')
+    writeSecret('relay-gone', 'sk-route-delete')
+    assert.equal(readSecret('relay-gone'), 'sk-route-delete')
+
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const del = await router('DELETE', '/config/providers/relay-gone', {}, AUTH)
+    assert.equal(del.status, 200)
+    assert.deepEqual(del.body, { ok: true, removed: 'relay-gone' })
+    assert.equal(readSecret('relay-gone'), undefined)
   })
 })
