@@ -28,45 +28,17 @@ Provider 是「模型接入点」——你告诉天枢从哪里调用模型、�
 
 ## 配置方式概览
 
-### 方式一：交互式向导（推荐首次使用）
+### 方式一：TUI `/connect`（推荐首次使用）
 
-在终端运行：
+运行：
 
 ```bash
-rivet config
+rivet
 ```
 
-会进入 TTY 交互向导，依次询问：
+首次没有可用 API Key 时，天枢先显示主界面，再自动打开 `/connect`。在该界面选择内置 Provider 或自定义 OpenAI-compatible 服务，按步骤完成认证和模型选择；配置成功后会直接切换到可用会话。
 
-1. **选择 Provider**：输入 `deepseek` / `glm` / `mimo` / `minimax` / `codex`，或直接回车使用当前默认
-2. **认证方式**（非 Codex）：
-   - `env` → 输入环境变量名（如 `DEEPSEEK_API_KEY`）
-   - `inline` → 直接粘贴 API Key
-   - `keep` → 保持现有配置不变
-3. **Base URL**：直接回车使用预设地址，或输入自定义地址
-4. **Model ID**：直接回车使用默认模型，或输入自定义模型 ID
-5. **Model Alias**（可选）：简写别名
-6. **Context Window**：直接回车使用预设值
-7. **Max Tokens**：直接回车使用预设值
-8. **设为默认？** `[y/N]`：输入 `y` 将此 Provider 设为默认
-
-示例输出：
-
-```
-Rivet provider configuration
-Built-in providers: deepseek, glm, mimo, minimax, codex
-Current default: deepseek
-Provider [deepseek|glm|mimo|minimax|codex]: deepseek
-Auth mode [env|inline|keep]: env
-API key env var: DEEPSEEK_API_KEY
-Base URL [https://api.deepseek.com/v1]: 
-Model ID [deepseek-v4-pro]: 
-Model alias: 
-Context window [1000000]: 
-Max tokens [163000]: 
-Set as default? [y/N]: y
-Provider deepseek configured. Run "rivet config providers" to inspect.
-```
+之后随时在 TUI 输入 `/connect` 添加或更新 Provider。`rivet config` 只显示脚本化配置命令帮助，不再启动 readline 交互向导。
 
 ### 方式二：命令行脚本化配置
 

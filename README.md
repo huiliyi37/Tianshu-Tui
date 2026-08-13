@@ -103,7 +103,7 @@ Add-Content $PROFILE ". C:\path\to\rivet.ps1"
 
 ### 4. 配置 API Key（首次必做）
 
-**直接安装的用户无需手动配置**——首次启动会自动进入引导，粘贴 DeepSeek key 即可：桌面端是连接向导，CLI 首启缺 key 时也会自动弹出配置向导。之后随时修改：桌面端 Settings → Provider，CLI 里 `rivet config`。
+**直接安装的用户无需手动配置**——首次运行 `rivet` 会先进入主界面，再自动打开 `/connect`；在那里选择服务商并完成认证。之后随时输入 `/connect` 添加或调整 Provider；桌面端也可在 Settings → Provider 管理配置。
 
 **开发者拉源码启动**（或想在启动前预先配好）才需要手动来：
 
@@ -152,7 +152,7 @@ rivet --goal "修复所有类型错误" --budget 50   # 无头目标自主模式
 | `--skip-welcome` | 跳过欢迎屏 |
 | `--stream-events <path>` | 把本次 run 镜像为 NDJSON `SessionEvent` 写入文件 |
 
-子命令：`rivet config`（交互式配置）、`rivet serve`（启动 sidecar HTTP/SSE）、`rivet sessions`（列会话）、`rivet logs`（日志落点）、`rivet browser status` / `rivet browser install [--no-mirror]`（`browser_debug` 所需 chromium 的体检与一键安装，默认走国内镜像）。
+子命令：`rivet config`（查看配置命令帮助；交互式 Provider 配置使用 TUI `/connect`）、`rivet serve`（启动 sidecar HTTP/SSE）、`rivet sessions`（列会话）、`rivet logs`（日志落点）、`rivet browser status` / `rivet browser install [--no-mirror]`（`browser_debug` 所需 chromium 的体检与一键安装，默认走国内镜像）。
 
 ### 自动更新
 
@@ -175,7 +175,8 @@ rivet --goal "修复所有类型错误" --budget 50   # 无头目标自主模式
 会话内用 `/model <name>` 随时切换提供商。
 
 ```bash
-rivet config                          # 交互式设置（TTY）
+rivet                                 # 启动 TUI；首次缺 key 时自动打开 /connect
+rivet config                          # 查看配置命令帮助
 rivet config setup codex --default    # Codex 走 OAuth（首次浏览器登录）
 rivet config show                     # 查看完整配置
 ```

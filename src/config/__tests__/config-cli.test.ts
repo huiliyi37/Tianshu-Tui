@@ -39,13 +39,12 @@ describe('runConfigCLI provider commands', () => {
     assert.match(stdout.join('\n'), /setup <provider>/)
   })
 
-  it('runs provider wizard when config has no args in TTY', async () => {
+  it('prints help and /connect guidance when config has no args in TTY', async () => {
     const { stdout, exits, io } = makeIo()
-    let wizardRuns = 0
-    await runConfigCLI([], { ...io, isTTY: true, runWizard: async () => { wizardRuns++ } })
-    assert.equal(wizardRuns, 1)
+    await runConfigCLI([], { ...io, isTTY: true })
     assert.equal(exits.length, 0)
-    assert.equal(stdout.join('\n'), '')
+    assert.match(stdout.join('\n'), /Usage: rivet config <command>/)
+    assert.match(stdout.join('\n'), /\/connect/)
   })
 
   it('setup updates provider url, env key, model, and default', async () => {
