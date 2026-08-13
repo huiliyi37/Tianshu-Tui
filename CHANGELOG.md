@@ -10,7 +10,7 @@
 
 ### Added
 
-- **TUI /disconnect 命令** — 列出所有已保存服务商（每个即一个 API key 注册的模型组），选中后二次确认整组删除：provider 条目、模型列表与 secrets.json 中的密钥一并清除。同一 key 值被多个条目使用时以指纹提示「共用同一 key」，删除互不联动；当前默认 provider 标注不可删除。
+- **TUI /disconnect 命令** — 列出所有已保存服务商（每个即一个 API key 注册的模型组），选中后二次确认整组删除：provider 条目、模型列表与 secrets.json 中的密钥一并清除。同一 keyRef 被多个条目引用时提示「共用同一 key」（独立管理、删除互不联动）；当前默认 provider 标注不可删除。
 - **`rivet provider remove` 输出增强** — 报告删除的模型数量与密钥处置（已清除 / 因共享 keyRef 保留 / 无密钥条目）。
 
 ### Changed

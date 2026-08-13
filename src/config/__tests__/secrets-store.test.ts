@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, statSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { secretsPath, readSecret, writeSecret, deleteSecret, secretFingerprint, fingerprintForKeyRef } from '../secrets-store.js'
@@ -68,11 +68,21 @@ describe('inline apiKey migration', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  /** Seed config.json with a legacy inline key (no keyRef). */
+  /**
+   * Seed config.json with a legacy inline key (no keyRef). saveConfig now
+   * strips plaintext apiKey before writing, so a legacy file can only be
+   * constructed by writing the raw JSON directly.
+   */
   function seedInlineKey(): void {
     const cfg = loadConfig()
-    cfg.provider.providers.deepseek!.apiKey = 'sk-legacy-plaintext'
-    saveConfig(cfg)
+    const raw = JSON.parse(JSON.stringify(cfg)) as {
+      provider: { providers: Record<string, { apiKey?: string; keyRef?: string } | undefined> }
+    }
+    const deepseek = raw.provider.providers.deepseek
+    if (!deepseek) throw new Error('deepseek provider missing from default config')
+    deepseek.apiKey = 'sk-legacy-plaintext'
+    delete deepseek.keyRef
+    writeFileSync(join(dir, 'config.json'), JSON.stringify(raw, null, 2))
     assert.ok(readFileSync(join(dir, 'config.json'), 'utf8').includes('sk-legacy-plaintext'))
   }
 
@@ -155,8 +165,9 @@ describe('config show masks secrets', () => {
   })
 
   it('never prints a plaintext provider key', async () => {
+    writeSecret('deepseek', 'sk-super-secret-1234')
     const cfg = loadConfig()
-    cfg.provider.providers.deepseek!.apiKey = 'sk-super-secret-1234'
+    cfg.provider.providers.deepseek!.keyRef = 'deepseek'
     saveConfig(cfg)
     const lines: string[] = []
     await runConfigCLI(['show'], { stdout: line => lines.push(line), isTTY: false })
