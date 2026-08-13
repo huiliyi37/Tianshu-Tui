@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { switchAgentRuntime } from '../bootstrap.js'
+import { resolveProviderForModel, switchAgentRuntime } from '../bootstrap.js'
 import type { BootstrapContext } from '../bootstrap.js'
 
 function makeCtx(providers: Record<string, unknown>, currentName = 'p1'): BootstrapContext {
@@ -16,6 +16,31 @@ function makeCtx(providers: Record<string, unknown>, currentName = 'p1'): Bootst
     provider: { name: currentName },
   } as unknown as BootstrapContext
 }
+
+test('显式 provider 约束只解析该 provider 下的同名模型', () => {
+  delete process.env.__RIVET_TEST_WRONG_PROVIDER_KEY__
+  const ctx = makeCtx({
+    first: { name: 'first', apiKeyEnv: '__RIVET_TEST_WRONG_PROVIDER_KEY__', models: [{ id: 'shared-model' }] },
+    second: { name: 'second', apiKey: 'second-key', models: [{ id: 'shared-model' }] },
+  })
+
+  const resolved = resolveProviderForModel(ctx, 'shared-model', 'second')
+  assert.ok(resolved && !('error' in resolved))
+  assert.equal(resolved.providerName, 'second')
+  assert.equal(resolved.apiKey, 'second-key')
+})
+
+test('未显式指定 provider 时保持按配置顺序解析的旧语义', () => {
+  delete process.env.__RIVET_TEST_FIRST_PROVIDER_KEY__
+  const ctx = makeCtx({
+    first: { name: 'first', apiKeyEnv: '__RIVET_TEST_FIRST_PROVIDER_KEY__', models: [{ id: 'shared-model' }] },
+    second: { name: 'second', apiKey: 'second-key', models: [{ id: 'shared-model' }] },
+  })
+
+  const resolved = resolveProviderForModel(ctx, 'shared-model')
+  assert.ok(resolved && 'error' in resolved)
+  assert.match(resolved.error, /first/)
+})
 
 test('未知模型返回 not found，不重建 agent', () => {
   const ctx = makeCtx({

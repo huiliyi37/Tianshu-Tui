@@ -587,8 +587,8 @@ export class TuiApp {
    * 退出 plan 时原样恢复；`/yes` 等在 planning 期间改审批时同步更新此 stash。
    */
   approvalModeBeforePlan: string | null = null
-  /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) / 'plan-approval' (计划审批) / 'ask-user-question' (问题选项选择) */
-  choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' | 'plan-approval' | 'ask-user-question' = 'effort'
+  /** choice-panel 当前模式：'effort' (推理强度) / 'permission' (权限选择) / 'permission-yolo-confirm' (YOLO 二次确认) / 'plan-approval' (计划审批) / 'ask-user-question' (问题选项选择) / 'disconnect' (断开服务商选择) / 'disconnect-confirm' (断开二次确认) / 'disconnect-retarget' (默认 provider 改设新默认) */
+  choicePanelKind: 'effort' | 'permission' | 'permission-yolo-confirm' | 'plan-approval' | 'ask-user-question' | 'disconnect' | 'disconnect-confirm' | 'disconnect-retarget' = 'effort'
   /** 当前待审批计划信息（plan-approval 面板使用）。 */
   pendingPlanApproval: PlanSubmittedInfo | undefined = undefined
   /** 待审批计划正文预览摘要（开面板时一次性提取；随面板关闭/重开更新）。 */
@@ -3382,7 +3382,7 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.modelPickerData?.().entries[cur] : undefined
-        if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.id)
+        if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.provider, entry.id)
         this.deactivateOverlay()
         return true
       }
@@ -6605,7 +6605,7 @@ export class TuiApp {
     themePickerData?: () => ThemePickerData
     choicePanelData?: () => ChoicePanelData
     planPickerData?: () => PlanPickerData
-  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, domainPickerSaveDefaultExec?: (key: string) => void, modelPickerSaveDefaultExec?: (provider: string, modelId: string) => void, themePickerExec?: (key: string) => void, themePickerSaveDefaultExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => boolean | void, planPickerExec?: (slug: string) => void, initExec?: (commit: InitCommit, summary: string) => void): void {
+  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (provider: string, modelId: string) => void, domainPickerSaveDefaultExec?: (key: string) => void, modelPickerSaveDefaultExec?: (provider: string, modelId: string) => void, themePickerExec?: (key: string) => void, themePickerSaveDefaultExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => boolean | void, planPickerExec?: (slug: string) => void, initExec?: (commit: InitCommit, summary: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)

@@ -27,7 +27,7 @@ assertStagedRuntimeIntact(dirname(fileURLToPath(import.meta.url)))
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { maybePrintStaticPromptCacheWarning } from './cli/prompt-version-warning.js'
-import { loadConfig as loadRivetConfig, setupProvider, registerProvider, upsertProviderModel, setUiConfig, setApprovalMode as persistApprovalDefault, setDefaultDomainConfig, setDefaultModelConfig } from './config/manager.js'
+import { loadConfig as loadRivetConfig, setupProvider, registerProvider, upsertProviderModel, removeProvider, setDefaultProvider, setUiConfig, setApprovalMode as persistApprovalDefault, setDefaultDomainConfig, setDefaultModelConfig } from './config/manager.js'
 import { isProFeatureEnabled } from './config/pro-license.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
@@ -54,6 +54,7 @@ import { formatWelcome } from './tui/format/welcome.js'
 import { HANDOFF_NUDGE_RATIO, formatHandoffNudge } from './tui/handoff.js'
 import { color } from './tui/engine/ansi.js'
 import type { RewindMode } from './tui/format/rewind.js'
+import { buildDisconnectEntries, toChoiceEntries, buildConfirmTitle, buildDisconnectImpactText, buildPostDeleteMessage, buildRetargetEntries, toRetargetChoiceEntries, buildRetargetTitle, type DisconnectEntry, type PostDeleteRuntimeOutcome } from './tui/disconnect-flow.js'
 import { explainToolRisk } from './agent/risk-explain.js'
 import { askSideQuestion } from './agent/side-question.js'
 import { collectPostBoundaryEditIds } from './agent/file-history.js'
@@ -71,6 +72,7 @@ import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff 
 import { listPlansSync, rejectPlan } from './plan/plan-store.js'
 import { resolveAutoApproveMs, shouldArm } from './tui/plan-auto-approve.js'
 import type { PlanPickerEntry } from './tui/format/overlay.js'
+import { isCurrentModelSelection } from './tui/model-picker-selection.js'
 import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries, DOMAIN_SWITCH_CACHE_WARNING } from './agent/domain-picker-entries.js'
@@ -939,6 +941,9 @@ async function main() {
       return undefined
     }
   }
+  // /disconnect 两段式面板的闭包状态：列表页选定目标后进入确认页。
+  let disconnectTarget: string | undefined
+  let disconnectEntries: DisconnectEntry[] = []
   tuiApp.registerOverlays({
     // Pager — scrollback 内容 或 当前选中 worker 的 detail（用于 /tasks Enter）
     pagerContent: () => {
@@ -1094,6 +1099,7 @@ async function main() {
     }),
     modelPickerData: () => {
       const activeModelId = ctx?.agent.config.promptEngine.getModel()
+      const activeProvider = ctx?.provider.name
       const entries: { id: string; alias: string; provider: string; current: boolean; contextWindow: number }[] = []
       // 只显示用户已保存的 provider（userSaved）——内置预设舰队不进切换器。
       for (const [provName, prov] of Object.entries(ctx?.config.provider.providers ?? {})) {
@@ -1103,7 +1109,7 @@ async function main() {
             id: m.id,
             alias: m.alias ?? m.id,
             provider: provName,
-            current: m.id === activeModelId,
+            current: isCurrentModelSelection(provName, m.id, activeProvider, activeModelId),
             contextWindow: m.contextWindow,
           })
         }
@@ -1155,6 +1161,37 @@ async function main() {
           { id: 'confirm-yolo', label: '⚠ 确认进入 YOLO', description: '无轮次刹车 · 无进度播报 · 所有工具直接执行（沙箱仍拦项目外写入）。回滚兜底：/rollback + git 检查点。也可直接输入 /yes。设为默认后重启仍是 YOLO。' },
         ]
         return { title: '确认 YOLO 模式 / Confirm YOLO', choices: entries, selectedIndex: 0 }
+      }
+      if (tuiApp.choicePanelKind === 'disconnect') {
+        // 每次打开重算——配置可能刚被 /connect 改过。
+        const cfg = loadRivetConfig()
+        disconnectEntries = buildDisconnectEntries(cfg.provider.providers, {
+          defaultProvider: cfg.provider.default,
+          defaultModelRef: cfg.agent.defaultModel,
+        })
+        return {
+          title: '断开服务商 / Disconnect（一个 key 一组模型，整组删除并清除密钥）',
+          choices: toChoiceEntries(disconnectEntries),
+          selectedIndex: 0,
+        }
+      }
+      if (tuiApp.choicePanelKind === 'disconnect-confirm') {
+        const entry = disconnectEntries.find(e => e.name === disconnectTarget)
+        const title = entry ? buildConfirmTitle(entry) : `断开「${disconnectTarget ?? ''}」？`
+        const impact = entry ? buildDisconnectImpactText(entry) : '删除 provider 条目和模型列表'
+        const entries = [
+          { id: 'cancel', label: '取消', description: '不做任何更改。', current: true },
+          { id: 'confirm-disconnect', label: `⚠ 确认删除 ${disconnectTarget ?? ''}`, description: `${impact}，不可撤销。` },
+        ]
+        return { title, choices: entries, selectedIndex: 0 }
+      }
+      if (tuiApp.choicePanelKind === 'disconnect-retarget') {
+        const cfg = loadRivetConfig()
+        return {
+          title: buildRetargetTitle(cfg.provider.default),
+          choices: toRetargetChoiceEntries(buildRetargetEntries(cfg.provider.providers, cfg.provider.default)),
+          selectedIndex: 0,
+        }
       }
       if (tuiApp.choicePanelKind === 'plan-approval') {
         const info = tuiApp.pendingPlanApproval
@@ -1311,10 +1348,10 @@ async function main() {
       }
     }
     if (midSession) tuiApp.commitStatic(DOMAIN_SWITCH_CACHE_WARNING)
-  }, /* modelPickerExec: */ (modelId: string) => {
+  }, /* modelPickerExec: */ (provider: string, modelId: string) => {
     // Model Picker Enter 回调：执行模型切换。
     try { ctx!.agent.abort() } catch {}
-    const res = switchAgentRuntime(ctx!, modelId)
+    const res = switchAgentRuntime(ctx!, modelId, provider)
     if (res.ok && res.modelName) {
       tuiApp.setModelInfo(res.modelName, res.contextWindow)
       attachJobSubscription()
@@ -1350,7 +1387,7 @@ async function main() {
   }, /* modelPickerSaveDefaultExec: */ (provider: string, modelId: string) => {
     // Model Picker S 键回调：切换模型 + 设为默认并持久化。
     try { ctx!.agent.abort() } catch {}
-    const res = switchAgentRuntime(ctx!, modelId)
+    const res = switchAgentRuntime(ctx!, modelId, provider)
     if (res.ok && res.modelName) {
       tuiApp.setModelInfo(res.modelName, res.contextWindow)
       attachJobSubscription()
@@ -1427,6 +1464,88 @@ async function main() {
         applyPermission('dangerously-skip-permissions')
       } else {
         tuiApp.commitStatic('已取消 — 权限模式未改变。')
+      }
+      return
+    }
+    if (tuiApp.choicePanelKind === 'disconnect') {
+      // 列表页回车：默认 provider 不能直接删 → 引导改设新默认；其余进二次确认。
+      // 面板会先被 deactivate，setImmediate 后再推起下一张。
+      tuiApp.choicePanelKind = 'effort' // reset
+      disconnectTarget = id
+      const entry = disconnectEntries.find(e => e.name === id)
+      if (entry?.isDefault) {
+        const cfg = loadRivetConfig()
+        if (buildRetargetEntries(cfg.provider.providers, cfg.provider.default).length === 0) {
+          tuiApp.commitStatic('⚠️ 没有其他已接入的 provider 可改设为默认——无法删除当前默认。', { isError: true })
+          return
+        }
+      }
+      setImmediate(() => {
+        tuiApp.choicePanelKind = entry?.isDefault ? 'disconnect-retarget' : 'disconnect-confirm'
+        tuiApp.activateOverlay('choice-panel')
+      })
+      return
+    }
+    if (tuiApp.choicePanelKind === 'disconnect-retarget') {
+      tuiApp.choicePanelKind = 'effort' // reset
+      try {
+        setDefaultProvider(id)
+        if (ctx) ctx.config.provider = loadRivetConfig().provider
+        tuiApp.commitStatic(`默认 provider → ${id}。原默认现已解锁，可返回列表删除。`)
+      } catch (err) {
+        tuiApp.commitStatic(`⚠️ 设置默认失败：${(err as Error).message}`, { isError: true })
+        return
+      }
+      // 改设成功 → 重开断开列表，用户可接着删原默认。
+      setImmediate(() => {
+        tuiApp.choicePanelKind = 'disconnect'
+        tuiApp.activateOverlay('choice-panel')
+      })
+      return
+    }
+    if (tuiApp.choicePanelKind === 'disconnect-confirm') {
+      tuiApp.choicePanelKind = 'effort' // reset
+      const target = disconnectTarget
+      disconnectTarget = undefined
+      if (id !== 'confirm-disconnect' || !target) {
+        tuiApp.commitStatic('已取消 — 未做任何更改。')
+        return
+      }
+      const currentProviderName = ctx?.provider.name
+      try {
+        const result = removeProvider(target)
+        const fresh = loadRivetConfig()
+        let runtime: PostDeleteRuntimeOutcome = { needed: false, switched: false }
+        if (ctx) {
+          ctx.config.provider = fresh.provider
+          if (currentProviderName === target) {
+            // 当前会话正用被删的模型组——迁移到默认 provider 首个模型。
+            // switchAgentRuntime 会先验证模型和凭证；失败时不应提前 abort 当前 agent。
+            const prov = fresh.provider.providers[fresh.provider.default]
+            const modelAlias = prov?.models[0]?.alias ?? prov?.models[0]?.id
+            if (!modelAlias) {
+              runtime = { needed: true, switched: false, error: '默认 provider 没有可用模型' }
+            } else {
+              const res = switchAgentRuntime(ctx, modelAlias)
+              if (res.ok && res.modelName) {
+                tuiApp.setModelInfo(res.modelName, res.contextWindow)
+                attachJobSubscription()
+                runtime = { needed: true, switched: true, targetModel: res.modelName }
+              } else {
+                runtime = { needed: true, switched: false, error: res.error ?? '运行时切换未成功' }
+              }
+            }
+          }
+        }
+        const secretNote = result.secretDeleted
+          ? '，API key 已清除'
+          : result.keyRefSharedWith.length > 0
+            ? `；keyRef 仍被 ${result.keyRefSharedWith.join('、')} 引用，密钥保留`
+            : ''
+        const message = buildPostDeleteMessage(target, { modelCount: result.modelCount, secretNote }, runtime)
+        tuiApp.commitStatic(message.text, { isError: message.isError })
+      } catch (err) {
+        tuiApp.commitStatic(`⚠️ 断开失败：${(err as Error).message}`, { isError: true })
       }
       return
     }

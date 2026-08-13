@@ -1529,8 +1529,9 @@ export interface ResolvedModelTarget {
   alias?: string
   contextWindow?: number
 }
-export function resolveProviderForModel(ctx: Pick<BootstrapContext, 'config' | 'provider' | 'apiKey' | 'auth'>, modelId: string): ResolvedModelTarget | { error: string } | null {
+export function resolveProviderForModel(ctx: Pick<BootstrapContext, 'config' | 'provider' | 'apiKey' | 'auth'>, modelId: string, targetProvider?: string): ResolvedModelTarget | { error: string } | null {
   for (const [provName, prov] of Object.entries(ctx.config.provider.providers)) {
+    if (targetProvider && provName !== targetProvider) continue
     const found = prov.models.find(m => m.id === modelId || m.alias === modelId)
     if (!found) continue
     let provider = ctx.provider
@@ -1567,11 +1568,11 @@ export function resolveProviderForModel(ctx: Pick<BootstrapContext, 'config' | '
  *
  * session / persist / toolRegistry / refs / fileHistory 等全部复用，前缀缓存与历史不受影响。
  */
-export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): SwitchModelResult {
+export function switchAgentRuntime(ctx: BootstrapContext, modelId: string, targetProvider?: string): SwitchModelResult {
   // 切换前记录当前模型 id，供 JSONL 审计事件的 from 字段。
   let fromModel: string | undefined
   try { fromModel = ctx.agent.config.promptEngine.getModel() } catch { /* idle/未初始化 */ }
-  const resolved = resolveProviderForModel(ctx, modelId)
+  const resolved = resolveProviderForModel(ctx, modelId, targetProvider)
   if (!resolved) return { ok: false, error: `Model "${modelId}" not found in any provider.` }
   if ('error' in resolved) return { ok: false, error: resolved.error }
   const { provider, apiKey, auth, providerName: provName } = resolved
