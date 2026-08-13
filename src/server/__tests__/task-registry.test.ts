@@ -368,6 +368,43 @@ describe('TaskRegistry', () => {
     }
   })
 
+  it('reschedules a persisted pending task after process restart', async () => {
+    const pending = makeRecord('task_pending', undefined, 'pending', 'api', 'restart-key')
+    await store.save(pending)
+
+    let executeCalls = 0
+    let markRuntimeReleased!: () => void
+    const runtimeReleased = new Promise<void>((resolve) => { markRuntimeReleased = resolve })
+    const restartedRegistry = new TaskRegistry({
+      taskStore: new JsonTaskStore(TEST_DIR),
+      runtimePool: {
+        size: 0,
+        acquire: async () => ({
+          execute: async () => {
+            executeCalls++
+            return { summary: 'recovered', changedFiles: [] }
+          },
+          release: markRuntimeReleased,
+        }),
+      },
+    })
+
+    try {
+      const returned = await restartedRegistry.createTask({
+        prompt: pending.prompt,
+        source: pending.source,
+        callerId: pending.callerId,
+        idempotencyKey: pending.idempotencyKey,
+      })
+      assert.equal(returned.id, pending.id)
+      await runtimeReleased
+      assert.equal(executeCalls, 1)
+      assert.equal((await restartedRegistry.getTask(pending.id))?.status, 'completed')
+    } finally {
+      restartedRegistry.dispose()
+    }
+  })
+
   it('concurrent createTask with force creates two tasks', async () => {
     const [t1, t2] = await Promise.all([
       registry.createTask({ prompt: 'concurrent', source: 'api', callerId: 'u1' }),
@@ -442,19 +479,33 @@ describe('TaskRegistry', () => {
     assert.equal(apiTasks.length, 2)
   })
 
-  it('recoverStaleTasks marks running tasks as timed_out', async () => {
+  it('recoverStaleTasks marks running tasks as timed_out and resumes pending tasks', async () => {
     const t1 = await registry.createTask({ prompt: 'a', source: 'cron' })
     const t2 = await registry.createTask({ prompt: 'b', source: 'api' })
     await registry.transition(t1.id, 'running')
     await registry.transition(t2.id, 'running')
 
+    const pending = await registry.createTask({ prompt: 'pending', source: 'api' })
+    let markRuntimeReleased!: () => void
+    const runtimeReleased = new Promise<void>((resolve) => { markRuntimeReleased = resolve })
+    registry.setRuntimePool({
+      size: 0,
+      acquire: async () => ({
+        execute: async () => ({ summary: 'resumed', changedFiles: [] }),
+        release: markRuntimeReleased,
+      }),
+    })
+
     const recovered = await registry.recoverStaleTasks()
     assert.equal(recovered.length, 2)
+
+    await runtimeReleased
 
     const check1 = await registry.getTask(t1.id)
     const check2 = await registry.getTask(t2.id)
     assert.equal(check1!.status, 'timed_out')
     assert.equal(check2!.status, 'timed_out')
+    assert.equal((await registry.getTask(pending.id))?.status, 'completed')
   })
 
   it('getActiveTasks returns only pending and running', async () => {
