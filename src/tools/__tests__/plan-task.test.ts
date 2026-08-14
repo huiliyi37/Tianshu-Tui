@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { extractPlanPath, parseChecklistItems, parseChecklistSections, createPlanTaskTool } from '../plan-task.js'
@@ -242,6 +242,7 @@ describe('createPlanTaskTool execute:true multi-wave driver', () => {
   // 写一份 2-item checklist 计划文件到 .rivet/plans/（plan_task 快速路径读取，
   // 路径相对 CWD=仓库根）。唯一文件名避免并发会话/重复运行冲突，测试结束清理。
   function writeWavePlan(): string {
+    mkdirSync('.rivet/plans', { recursive: true })
     const name = `.rivet/plans/waves-${process.pid}-${Date.now()}.md`
     writeFileSync(name, PLAN_MD, 'utf-8')
     return name
@@ -338,6 +339,7 @@ describe('createPlanTaskTool execute:true multi-wave driver', () => {
 
 describe('integration: sectioned plan via plan_task', () => {
   it('章节计划 execute:false → 任务数 = 章节数（不再逐项切碎片）', async () => {
+    mkdirSync('.rivet/plans', { recursive: true })
     const name = `.rivet/plans/sections-${process.pid}-${Date.now()}.md`
     writeFileSync(name, [
       '### Shard A',

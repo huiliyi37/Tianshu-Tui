@@ -2,12 +2,13 @@ import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { chmodSync, writeFileSync, rmSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { RUN_TESTS_TOOL, parseOutput } from '../run-tests.js'
 import { makeTestDir, cleanupTestDir } from './_test-tmp.js'
 
-// output-store.ts 的 rawDir() 使用 os.tmpdir()，沙箱下无写权限。
-// rawDir() 懒加载且受 TMPDIR 环境变量控制——在 import 后覆盖即可。
-const FAKE_TMP = mkdtempSync(join(process.cwd(), '.test-tmp', 'fake-tmp-'))
+// output-store.ts 的 rawDir() 懒加载且受 TMPDIR 控制。全量 runner 已保证
+// os.tmpdir() 可写；这里保持短路径，避免 tsx 的 Unix socket 超过平台上限。
+const FAKE_TMP = mkdtempSync(join(tmpdir(), 'rivet-run-tests-'))
 process.env.TMPDIR = FAKE_TMP
 process.env.TMP = FAKE_TMP
 process.env.TEMP = FAKE_TMP
