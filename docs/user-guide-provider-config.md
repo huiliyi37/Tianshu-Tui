@@ -778,4 +778,5 @@ curl https://open.bigmodel.cn/api/coding/paas/v4/models \
 - 实现计划：[Provider 配置模式优化实现计划](./plans/2026-05-28-设计一下我们模型接入的provider的模式配置优化-比如初始化的时候-输入-r.md)
 - Provider 预设源码：src/config/provider-presets.ts
 - 配置管理器：src/config/manager.ts
-- 配置向导：src/config/provider-wizard.ts
+- TUI Provider 接入流程：src/tui/connect-flow.ts
+- Provider 探测：src/api/provider-probe.ts
