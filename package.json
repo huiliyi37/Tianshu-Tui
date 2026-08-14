@@ -39,7 +39,7 @@
     "rivet": "dist/main.js"
   },
   "scripts": {
-    "postinstall": "patch-package && (node scripts/install-git-hooks.mjs || node -e 1) && (node scripts/fetch-native-sqlite.js || node -e 1) && (node scripts/prune-installed-wasms.js || node -e 1)",
+    "postinstall": "(node scripts/install-git-hooks.mjs || node -e 1) && (node scripts/fetch-native-sqlite.js || node -e 1) && (node scripts/prune-installed-wasms.js || node -e 1)",
     "prepack": "npm run build && node scripts/stage-cli-sqlite-wrapper.js",
     "dev": "tsup --watch",
     "build": "tsup && node scripts/pack-native.js && node scripts/stage-runtime-deps.js",

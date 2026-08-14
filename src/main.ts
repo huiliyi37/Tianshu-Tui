@@ -770,8 +770,25 @@ async function main() {
   }
 
   // ── Build TuiApp ─────────────────────────────────────────────
-  const currentModel = ctx.provider.models[0]
-  const modelName = currentModel?.alias ?? currentModel?.id ?? 'unknown'
+  // 状态栏初始模型名：优先取配置的默认模型（agent.defaultModel 的 modelId），
+  // 与 bootstrap 的默认启动模型解析同源；未配置时回退 provider 首模型。
+  // 修复：此前恒取 provider.models[0]（预设首模型），设置默认模型后重启，
+  // 状态栏仍显示旧默认（如 v4-pro）而非用户配置的模型（如 v4-flash）。
+  const configuredModelId = (() => {
+    const ref = ctx.config.agent.defaultModel
+    return ref && ref.includes(':') ? ref.slice(ref.indexOf(':') + 1) : undefined
+  })()
+  const configuredModel = configuredModelId
+    ? ctx.provider.models.find(m => m.id === configuredModelId || m.alias === configuredModelId)
+    : undefined
+  // 当前模型 spec：配置的默认模型优先；未配置/不匹配回退 provider 首模型。
+  // currentModel 供状态栏模型名、上下文窗口等 UI 元数据使用。
+  const currentModel = configuredModel ?? ctx.provider.models[0]
+  // 显示名：配置的默认模型优先（匹配到用 alias；未匹配到用原始 modelId——
+  // 与 bootstrap 运行时解析同源，避免显示与运行时不一致）；未配置回退 provider 首模型。
+  const modelName = configuredModelId
+    ? (configuredModel?.alias ?? configuredModelId)
+    : (currentModel?.alias ?? currentModel?.id ?? 'unknown')
 
   // git branch（启动时读取一次，GlanceBar 显示）
   let gitBranch: string | undefined
@@ -860,7 +877,13 @@ async function main() {
   ctx!.agent.onAskUserQuestionRequested = (info) => {
     setImmediate(() => tuiApp.openAskUserQuestionPanel(info))
   }
+  // 初始星域显示：agent 已钉定（resume/已绑定）用 agent 的；全新会话未绑定时
+  // 按配置 defaultDomain 显示（非 auto）——与 bindSessionDomain 首条消息的钉定
+  // 同源，避免启动时状态栏落回 glance-bar 的「天枢」兜底显示。
   const initialDomain = ctx!.agent.getSessionDomain()?.name
+    ?? (ctx!.config.agent.defaultDomain && ctx!.config.agent.defaultDomain !== 'auto'
+      ? starDomainRegistry.get(ctx!.config.agent.defaultDomain)?.name
+      : undefined)
   if (initialDomain) {
     tuiApp.setSessionStarDomain(initialDomain)
   }
