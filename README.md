@@ -210,6 +210,10 @@ rivet config show                     # 查看完整配置
 
 内置能直接看图的模型：`glm-5.2`（glm / ccswitch）、`MiniMax-M3`（minimax）、`zai-org/GLM-5.2`（siliconflow）、`gpt-5.5`（codex）。**默认的 `deepseek-v4-pro` 不支持**，用 DeepSeek 当主控就需要桥。
 
+需要添加新的视觉 endpoint 时，在 TUI 输入 `/vision`。它会从 endpoint 的 `/models` 获取候选，只允许选择刚发现的模型，并对所选模型发送一次真实图片验证；验证成功后才保存专用视觉 Provider，不会替换默认 Provider 或进入普通模型路由。inline API key 只写入 `secrets.json`，环境变量方式只保存变量名。
+
+如果视觉 Provider 已经配置好，再使用 `/config` 或桌面 Settings → 集成 → 识图模型从已有 `supportsVision` 模型中选择即可。
+
 ```jsonc
 {
   "agent": {

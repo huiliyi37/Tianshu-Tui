@@ -40,6 +40,24 @@
 
 ## 配识图桥
 
+### 推荐：TUI `/vision`
+
+在 TUI 输入 `/vision`，按以下步骤添加一个专用识图服务：
+
+1. 输入视觉服务的 `https://...` endpoint 和专用 provider 名称；
+2. 选择直接粘贴 API Key，或输入环境变量名；
+3. 天枢从该 endpoint 的 `/models` 获取候选；
+4. 只从刚返回的候选中选择一个模型；
+5. 对所选模型发送一次测试图片。收到非空回答后才保存配置。
+
+这个流程会新建或复用一个**仅用于识图桥**的 provider 和模型，不会改变默认 Provider、主控模型或普通模型选择器。粘贴的 key 只写入 `secrets.json`；环境变量方式只保存变量名，且变量必须对运行 TUI 的进程可见。
+
+发现、图片验证或保存失败时，原有识图桥配置不会被替换。自定义 endpoint、聚合服务和未在内置列表中的模型也可以使用：只要 endpoint 返回该模型，仍会对它发送同样的图片验证。
+
+### 已有 Provider 或高级配置
+
+如果视觉 Provider 和模型已经配置好，可在 Settings、`/config` 或命令行直接选择桥接模型。手改配置时可使用：
+
 ```jsonc
 {
   "agent": {
@@ -59,7 +77,7 @@
 }
 ```
 
-两个前提：该 provider 已配好 key，且目标模型声明了 `supportsVision`。
+手动选择的两个前提：该 provider 已配好 key，且目标模型声明了 `supportsVision`。`/vision` 会在图片验证成功后自动创建这两个配置项。
 
 `fallback` 是**主备双桥**：主视觉模型报 5xx / 超时才切备用（同 `FallbackStreamClient` 机制）。备桥起不来（缺 key、模型不存在）不致命，只在日志里点名并降级为单桥。
 
@@ -83,7 +101,7 @@ ask_image { question: "逐字念出红色报错那一行", imageId: "img_2" }
 
 ### 桌面端
 
-**Settings → 集成 → 识图模型**。Provider / 模型下拉只列**已配置且声明支持图片输入**的组合，留空即关闭桥接。同一张卡里还有**备用识图模型**（主桥 5xx/超时时切）和**未配置时自动选桥**开关——桌面端与 TUI 面板功能对等，只装其中一个也能把识图配全。
+**Settings → 集成 → 识图模型**适合从已有 Provider 中选择视觉模型。Provider / 模型下拉只列**已配置且声明支持图片输入**的组合，留空即关闭桥接。同一张卡里还有**备用识图模型**（主桥 5xx/超时时切）和**未配置时自动选桥**开关。需要添加新 endpoint、发现模型并进行真实图片验证时，使用 TUI `/vision`。
 
 卡片顶部那一行是**当前会话的真实桥状态**（读 `GET /sessions/:id/vision-bridge`），不是"配置里有没有这个键"：显示「主控模型原生支持识图」/「识图桥已生效」/「图片不会被看到（附原因）」。没有打开会话时它会明说状态未知，而不是拿配置冒充运行时事实。
 
@@ -91,7 +109,7 @@ ask_image { question: "逐字念出红色报错那一行", imageId: "img_2" }
 
 ### TUI
 
-`/config` 打开设置面板 → 左栏选**识图模型** → `Enter` 选模型 → `S` 保存。候选同桌面端：只列**已配置且声明 `supportsVision`** 的 provider/模型组合，选第一项「（关闭）」即关掉桥接；`prompt`、`maxTokens`、以及「未配置时自动选桥」开关都在同一分类里改。面板写的是用户级 `~/.rivet/config.json`，**下次会话生效**（会话模型在首个请求前就钉住了，中途换会碎前缀缓存）。
+`/config` 打开设置面板 → 左栏选**识图模型** → `Enter` 选模型 → `S` 保存。这个面板适合从**已配置且声明 `supportsVision`** 的 provider/模型组合中选择，选第一项「（关闭）」即关掉桥接；`prompt`、`maxTokens`、以及「未配置时自动选桥」开关都在同一分类里改。要添加新的视觉 endpoint 并验证图片，请使用独立的 `/vision` 流程。面板写的是用户级 `~/.rivet/config.json`，**下次会话生效**（会话模型在首个请求前就钉住了，中途换会碎前缀缓存）。
 
 `/settings`、`/setup` 是同一面板的别名。
 
@@ -140,7 +158,7 @@ token 按分辨率估算（OpenAI 分块规则，实现在 `src/context/image-to
 
 | 原因 | 对策 |
 |------|------|
-| provider 不在已配置列表里 | 先 `rivet config setup <provider>` 或在桌面端 Settings → Providers 里加 |
+| provider 不在已配置列表里 | 新 endpoint 推荐使用 `/vision` 发现并验证；已有普通 Provider 则用 `/connect`、`rivet config setup <provider>` 或桌面端 Settings → Providers 添加 |
 | 模型不在该 provider 的 `models` 里 | 补一条 model，或换成上表里的模型 |
 | 该模型没声明 `supportsVision` | 自定义模型手写 `"supportsVision": true` |
 | **没有可用的 key** | 最常见：key 只存在环境变量里，而 GUI / Dock 启动的桌面端没继承到 shell profile。把 key 写进配置，或从终端启动。（`config.env` 那套只作用于命令执行，不改进程自身环境） |
