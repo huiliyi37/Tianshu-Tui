@@ -20,8 +20,8 @@
  */
 
 import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
 import { spawnGitSync } from '../tools/spawn-git.js'
+import { spawnHidden } from '../tools/spawn-hidden.js'
 import { join, isAbsolute } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult, DelegationActivity } from '../tools/types.js'
 import { createDelegationActivityMapper } from '../tools/worker-activity-stream.js'
@@ -42,6 +42,44 @@ export function createStageMarker(prefix: string): (stage: string) => void {
     debugLog(`[${prefix}] ${stage} +${Date.now() - t0}ms`)
   }
 }
+
+/**
+ * 义务账 gate 的默认异步执行器（2026-08-09 楔子清理）：spawnHidden + 60s 超时，
+ * 不阻塞事件循环。摘要语义与旧 spawnSync 路径一致（尾部 3 行 / 300 字符）。
+ */
+function runGateAsync(command: string, cwd: string): Promise<{ ok: boolean; detail?: string }> {
+  return new Promise((resolvePromise) => {
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const tail = (): string => `${stdout}\n${stderr}`.trim().split('\n').slice(-3).join('\n').slice(0, 300)
+    const settle = (r: { ok: boolean; detail?: string }): void => {
+      if (settled) return
+      settled = true
+      resolvePromise(r)
+    }
+    try {
+      const child = spawnHidden(command, [], { cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
+      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
+      const timer = setTimeout(() => {
+        try { child.kill('SIGKILL') } catch { /* already gone */ }
+        settle({ ok: false, detail: tail() })
+      }, 60_000)
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (code === 0) settle({ ok: true })
+        else settle({ ok: false, detail: tail() })
+      })
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        settle({ ok: false, detail: err.message })
+      })
+    } catch (err) {
+      settle({ ok: false, detail: err instanceof Error ? err.message : String(err) })
+    }
+  })
+}
 import type { DeliveryGateV2 } from './delivery-gate-v2.js'
 import { filterExternalNoise } from './delivery-gate-v2.js'
 import { summarizeOwnershipHealth } from './ownership-health.js'
@@ -60,6 +98,7 @@ import { analyzeImpact } from '../repo/meridian-impact.js'
 import { evaluateTestPresence, testPresenceGateEnabled } from './test-presence.js'
 import { auditDeliveryClaims, claimAuditEnabled } from './claim-audit.js'
 import { scanFilesForProbes, formatProbeHits, type ProbeHit } from './probe-detector.js'
+import { checkStructureGate } from './structure-gate.js'
 import { findApprovedPlanInventory, verifyRegressionInventory, formatInventoryReport, type InventorySearcher } from './regression-inventory.js'
 import { verifyObligations, formatObligationReport, type GateRunner, type PlanWithObligations } from './council/council-obligations.js'
 import { declaredVerificationCommands, reconcileVerificationCommands, formatVerificationReconcileReport } from './verification-reconcile.js'
@@ -133,6 +172,10 @@ export interface B1Context {
   /** Injectable probe scanner for the probe-residue gate. Absent → the real
    *  scanFilesForProbes with readFileSync is used. Tests pass a mock. */
   scanProbes?: (files: string[], cwd: string) => import('./probe-detector.js').ProbeHit[]
+  /** Injectable structure-ratchet checker for the advisory structure gate
+   *  (行数棘轮预警). Absent → the real checkStructureGate (fs reads) is used.
+   *  Tests pass a mock. */
+  checkStructure?: typeof checkStructureGate
   /** 层3 重构回归契约：当前主控任务契约 getter。契约带 regressionInventory
    *  时交付前逐项核验；缺失时回退到最近 APPROVED 计划的「回归清单」章节。 */
   getTaskContract?: () => import('../context/task-contract.js').TaskContract | undefined
@@ -682,17 +725,11 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           }
         }
         if (storedPlan?.obligations && storedPlan.obligations.length > 0) {
-          const runGate: GateRunner = ctx.obligationGateRunner ?? ((command) => {
-            try {
-              const res = spawnSync(command, { cwd: params.cwd, shell: true, encoding: 'utf-8', timeout: 60_000 })
-              if (res.status === 0) return { ok: true }
-              const tail = `${res.stdout ?? ''}\n${res.stderr ?? ''}`.trim().split('\n').slice(-3).join('\n')
-              return { ok: false, detail: tail.slice(0, 300) }
-            } catch (err) {
-              return { ok: false, detail: err instanceof Error ? err.message : String(err) }
-            }
-          })
-          const results = verifyObligations(storedPlan.obligations, runGate)
+          // 默认 runner 异步化（2026-08-09）：spawnSync 会把整个 sidecar 事件循环
+          // 冻结至 60s 超时——/health、SSE 全灭，桌面端探针误判 hung。改 spawnHidden
+          // 异步执行，摘要语义不变（尾部 3 行 / 300 字符）。
+          const runGate: GateRunner = ctx.obligationGateRunner ?? ((command) => runGateAsync(command, params.cwd))
+          const results = await verifyObligations(storedPlan.obligations, runGate)
           lines.push(...formatObligationReport(results))
         }
       } catch {
@@ -1052,6 +1089,19 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
           }
         } catch {
           // best-effort: never let probe scanning break delivery
+        }
+
+        // Structure gate（行数棘轮预警）: committed files over their named
+        // ceiling or the new-file redline get an actionable split nudge.
+        // YELLOW, non-blocking — the hard stop is architecture-guards in
+        // npm test; this surfaces the ratchet before CI does.
+        try {
+          const structure = (ctx.checkStructure ?? checkStructureGate)(filesToCommit, params.cwd)
+          if (structure.needsWarning) {
+            lines.push('', ...structure.warningLines.map(l => `  ${l}`))
+          }
+        } catch {
+          // best-effort: never let the structure nudge break delivery
         }
 
         // Cohesion gate: RED if files span too many areas (unless force=true)

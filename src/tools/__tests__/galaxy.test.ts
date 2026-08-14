@@ -399,6 +399,61 @@ describe('GALAXY_TOOL', () => {
     assert.ok(result.content.includes('backend'), '被跳过维度名必须可见')
   })
 
+  it('B：审查族维度文件全被夺走时降级为只读验证继续派发，不 splice', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const tool = createGalaxyTool(capturingCoordinator(calls))
+
+    const result = await tool.execute({
+      toolUseId: 'tu_downgrade',
+      cwd: '/repo',
+      input: {
+        objective: 'verify 维度显式声明可写 profile，文件与写维度重叠',
+        dimensions: [
+          { name: 'frontend', objective: '实现 UI', authority: 'wenqu', files: ['src/a.ts'] },
+          { name: 'verify', objective: '验证实现', authority: 'yaoguang', profile: 'patcher', files: ['src/a.ts'] },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
+    const reqs = calls[0]!.requests
+    const verifier = reqs.find(r => r.authority === 'yaoguang')
+    assert.ok(verifier, '审查族维度被夺空后必须继续派发而非跳过')
+    assert.deepEqual(verifier.scope?.files ?? ['sentinel'], [], '降级后 scope.files 清空，凭 objective 界定范围')
+    assert.match(verifier.objective, /不得修改任何文件/, '降级 objective 必须带只读约束')
+    assert.ok(result.content.includes('降级'), `降级必须入报告，got:\n${result.content}`)
+    assert.ok(result.content.includes('verify'), '降级维度名必须可见')
+    assert.ok(!result.content.includes('已跳过派发'), '审查族降级不得混入跳过清单')
+  })
+
+  it('B：verify 维度默认只读——不参与文件归属，files 原样保留', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const tool = createGalaxyTool(capturingCoordinator(calls))
+
+    const result = await tool.execute({
+      toolUseId: 'tu_verify_ro',
+      cwd: '/repo',
+      input: {
+        objective: 'verify 维度与写维度声明同一文件——只读并行读安全',
+        dimensions: [
+          { name: 'frontend', objective: '实现 UI', authority: 'wenqu', files: ['src/a.ts'] },
+          { name: 'verify', objective: '验证实现', authority: 'yaoguang', files: ['src/a.ts'] },
+        ],
+        autoReview: false,
+        confirm: true,
+      },
+    })
+
+    assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
+    const reqs = calls[0]!.requests
+    const verifier = reqs.find(r => r.authority === 'yaoguang')
+    assert.ok(verifier, '默认 verify 维度必须派发')
+    assert.deepEqual(verifier.scope?.files, ['src/a.ts'], '只读维度不参与去重，声明文件原样保留')
+    assert.match(verifier.objective, /只读验证/, 'verify 维度 objective 走验证模板而非工业级交付模板')
+  })
+
   it('tierFloor 透传到 DelegationRequest（P2-2）', async () => {
     const calls: Array<{ requests: DelegationRequest[] }> = []
     const tool = createGalaxyTool(capturingCoordinator(calls))

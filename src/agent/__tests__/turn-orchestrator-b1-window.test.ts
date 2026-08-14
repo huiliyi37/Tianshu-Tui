@@ -127,4 +127,12 @@ describe('B1 readonly-spiral 窗口感知阈值', () => {
     assert.equal(spiral.length, 1, '200K 窗口 4 轮只读触发 B1')
     assert.match(spiral[0]!, /连续 4 次只读操作/)
   })
+
+  it('同一 run 内只提醒一次：18 轮连续只读只触发 1 次（修复：清零后重新累积会周期性复触发，实测 58 轮 run 内 9/18/27 三次）', async () => {
+    const agent = makeAgent(mockClientReadOnly(18), 1_000_000)
+    await agent.run('read around', makeCallbacks())
+    const reminders = remindersIn(agent.session)
+    const spiral = reminders.filter(r => r.includes('只读操作'))
+    assert.equal(spiral.length, 1, '18 轮只读（2×阈值）只能触发一次 B1')
+  })
 })

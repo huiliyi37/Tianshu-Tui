@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   jitteredBackoff,
@@ -42,6 +42,9 @@ function createCollector(): { infos: RetryInfo[]; onRetry: (info: RetryInfo) => 
     onRetry: (info: RetryInfo) => infos.push(info),
   }
 }
+
+// setImmediate 未被 mock（只 mock setTimeout/Date），用它 flush 微任务 + delay promise 解析
+const flush = () => new Promise<void>((r) => setImmediate(r))
 
 // ---------------------------------------------------------------------------
 // jitteredBackoff
@@ -271,5 +274,47 @@ describe('withStructuredRetry', () => {
       maxTotalDurationMs: 30_000,
     })
     assert.equal(result, 'ok')
+  })
+
+  it('预算耗尽：错误立即冒泡，不再被 unknown/retryable 分类空转一拍', async () => {
+    // 回归：2026-08-09 事故（deepseek-spark 911s 挂死）解剖遗留——预算错误文案
+    // 不命中分类器任何模式 → fallback unknown/retryable → maxTotalRetries > 1 时
+    // 预算错误自身再走两拍重试延迟，且 attempt 计数递增，用户文案从
+    // "across 1 attempt(s)" 漂成 "across 2/3 attempt(s)"。
+    mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+    try {
+      let calls = 0
+      const { infos, onRetry } = createCollector()
+      let err: Error | null = null
+      const p = withStructuredRetry(
+        async () => {
+          calls++
+          // 首次尝试即耗穿预算（911s），抛出可重试的 500
+          mock.timers.tick(911_000)
+          throw new FakeApiError('Server error (500)', 500)
+        },
+        undefined,
+        { maxTotalRetries: 5, maxTotalDurationMs: 600_000, onRetry },
+      ).catch((e: Error) => { err = e })
+
+      for (let i = 0; i < 5; i++) await flush()
+      // 多轮 tick：重试延迟 = retryDelayMs 2000 + jitter 最多 +50%，5s 覆盖一轮。
+      // 旧行为（预算错误被分类空转）会注册第二个 delay timer，第二轮 tick 放它
+      // 过并让错误在断言处快速失败——不挂起。
+      for (let round = 0; round < 3; round++) {
+        mock.timers.tick(5_000)
+        for (let i = 0; i < 5; i++) await flush()
+      }
+      await p
+
+      assert.equal(calls, 1, '预算耗尽后不得再发起新尝试')
+      // 第一次失败（500）的重试回调允许有一次；预算错误自身不得再触发
+      assert.equal(infos.length, 1, `预算错误不得再空转，got ${infos.length} retries`)
+      assert.ok(err)
+      assert.match((err as unknown as Error).message, /Retry budget exhausted/)
+      assert.match((err as unknown as Error).message, /across 1 attempt\(s\)/)
+    } finally {
+      mock.timers.reset()
+    }
   })
 })

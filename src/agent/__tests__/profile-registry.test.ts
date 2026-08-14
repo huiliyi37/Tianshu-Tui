@@ -4,7 +4,7 @@ import { writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { ProfileRegistry, profileRegistry, delegationToolTimeoutMs, tierTimeoutMultiplier, DEFAULT_DELEGATE_CONCURRENCY } from '../profile-registry.js'
+import { ProfileRegistry, profileRegistry, profileCanEditFiles, delegationToolTimeoutMs, tierTimeoutMultiplier, DEFAULT_DELEGATE_CONCURRENCY } from '../profile-registry.js'
 import { progressiveTimeout, WORKER_EXIT_GRACE_MS } from '../timeout-ladder.js'
 import { MAX_BUDGET_CONTINUATIONS, MAX_HANDS_EXTRA_RUNS } from '../worker-continuation.js'
 
@@ -21,8 +21,8 @@ describe('ProfileRegistry', () => {
     registry = new ProfileRegistry()
   })
 
-  it('has 19 built-in profiles (9 core + 6 flash-army + designer + council_expert + goal_judge + perspective_planner)', async () => {
-    assert.equal(registry.list().length, 19)
+  it('has 20 built-in profiles (9 core + 6 flash-army + designer + council_expert + goal_judge + perspective_planner + verify_scout)', async () => {
+    assert.equal(registry.list().length, 20)
   })
 
   // 2026-07-04 缺陷复盘: scout 读了过时文档把 Ink 组件当成现状上报,规划者照单全收。
@@ -117,9 +117,9 @@ describe('ProfileRegistry', () => {
     assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'format_checker', 'perspective_planner', 'reviewer', 'troubleshooter'])
   })
 
-  it('getProfileNames returns all 19 names', async () => {
+  it('getProfileNames returns all 20 names', async () => {
     const names = registry.getProfileNames().sort()
-    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'goal_judge', 'import_organizer', 'lint_fixer', 'patcher', 'perspective_planner', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier'])
+    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'goal_judge', 'import_organizer', 'lint_fixer', 'patcher', 'perspective_planner', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier', 'verify_scout'])
   })
 
   it('rejects overriding built-in profiles', async () => {
@@ -361,5 +361,32 @@ describe('delegationToolTimeoutMs (A2: wave-scaled batch timeout)', () => {
     assert.equal(tierTimeoutMultiplier('cheap'), 1.0)
     assert.equal(tierTimeoutMultiplier(undefined), 1.0)
     assert.equal(tierTimeoutMultiplier('unknown'), 1.0)
+  })
+})
+
+describe('profileCanEditFiles（B：文件写权判定）', () => {
+  it('编辑工具集收敛为六个文件写工具——bash/run_tests 不算文件写权', () => {
+    assert.equal(profileCanEditFiles('patcher'), true)
+    assert.equal(profileCanEditFiles('reviewer'), false)
+    assert.equal(profileCanEditFiles('code_scout'), false)
+    // run_tests 有执行权，但 verify_scout 不能改文件
+    assert.equal(profileCanEditFiles('verify_scout'), false)
+    assert.equal(profileCanEditFiles('unknown-profile'), false)
+  })
+
+  it('verify_scout 注册为内置 profile：只读 + run_tests，无任何编辑工具', () => {
+    const p = profileRegistry.get('verify_scout')
+    assert.ok(p, 'verify_scout 必须注册')
+    assert.equal(p.role, 'readonly_plus_test')
+    assert.ok(p.allowedTools.includes('run_tests'), '验证维度必须有执行测试的能力')
+    assert.ok(p.allowedTools.includes('read_file'))
+    assert.ok(!p.allowedTools.includes('edit_file'))
+    assert.ok(!p.allowedTools.includes('write_file'))
+    assert.ok(!p.allowedTools.includes('bash'))
+  })
+
+  it('verify_scout 带验证证据纪律（命令 + exit code + 失败项）', () => {
+    const p = profileRegistry.get('verify_scout')!
+    assert.match(p.expertisePrompt, /exit code|退出码/)
   })
 })

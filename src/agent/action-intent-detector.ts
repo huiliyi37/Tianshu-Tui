@@ -46,6 +46,32 @@ const IMPERATIVE_HEAD_RE =
 const COMPLETION_MARKER_RE =
   /(了|已|完成|完毕|通过|失败|成功|中断|报错|生效|即可|✓|✗|done\b|passed\b|failed\b|finished\b)/i
 
+/**
+ * 强完成标记（同句共现路径专用）——"已完成/提交成功/通过了"等明确的完成态
+ * 汇报。与 COMPLETION_MARKER_RE 的区别：不含单字"了"（"改好了之后"是计划
+ * 描述），且用"已+动词"组合而非单字"已"（"已确认的问题"是名词短语）。
+ * 描述过去操作的句子（"上一轮已完成 write_file"）不是悬空承诺。
+ */
+const STRONG_COMPLETION_RE =
+  /(?:已(?:完成|提交|写完|修复|更新|修改|通过)|完成了?|完毕|提交成功|通过了?|成功|done\b|finished\b|passed\b)/i
+
+/**
+ * 前置条件等待——承诺依赖用户/外部动作（"登录后""等你确认后"），
+ * 是等待行为而非悬空承诺（误报现场：wrangler 未登录时承诺"登录后我来执行"）。
+ * 等待语义必须**同句完整**：等待词 + 后续承诺词（我再/我就/我来/我会）同句共现
+ *（间隔 ≤40 字符且不含逗号——"你跑 X，我来改 Y"逗号连接是分工句式，不是等待）
+ * 才生效——"你跑一下 typecheck。我来修改 loop.ts"跨句，"我来修改"是真实承诺，
+ * 不被吞（c522132a4 审查反例；逗号边界为 88a5fb8b1 审查 MEDIUM）。
+ */
+const PRECONDITION_WAIT_RE =
+  /(?:登录后|确认后|批准后|审核后|等你(?:的)?(?:确认|回复|消息|决定|反馈|拍板)|待(?:你|其)?确认|你(?:先|来)?(?:跑|执行|操作|做|登录|确认|回复))[^。！？!?，,\n]{0,40}?(?:我再|我就|我来|我(?:才)?会)/i
+
+/**
+ * 决策权交还——尾句把决定权交回用户（"你定""等你拍板"），不是悬空承诺。
+ */
+const DECISION_HANDOFF_RE =
+  /(?:你定|你(?:来|说)?(?:决定|拍板|确认|回复|选择)|等你(?:决定|确认|回复|消息)|你说了算|你看(?:着办|怎么|要不要|是否可以)|由你(?:决定|来定))/i
+
 function lastSentence(text: string): string {
   const parts = text.split(/[。！？!?\n]+/)
   for (let i = parts.length - 1; i >= 0; i--) {
@@ -76,7 +102,11 @@ function hasSameSentencePair(
   verbPattern: RegExp,
 ): boolean {
   for (const sentence of splitSentences(text)) {
-    if (promisePattern.test(sentence) && verbPattern.test(sentence)) return true
+    if (promisePattern.test(sentence) && verbPattern.test(sentence)) {
+      // 同句含强完成标记 → 完成态汇报（"上一轮已完成 write_file"）而非悬空承诺
+      if (STRONG_COMPLETION_RE.test(sentence)) continue
+      return true
+    }
   }
   return false
 }
@@ -100,7 +130,7 @@ export function hasImperativeActionTail(text: string): boolean {
  * 来源：交付总结含 ✓/passed/任务完成 时被 action-intent gate 误判的回归。
  */
 export const DELIVERY_SIGNAL_RE =
-  /(?:typecheck\s*[✓✗]|^\d+\s*passed|^\d+\/\d+\s*[✓✗]|任务完成[，。]|交付[。！]|commit\s+[0-9a-f]{7}|^[✓✗]\s|(?:^|\n)>?\s*(?:fix|feat|refactor|test|chore|docs|perf)[(:]\s)/mi
+  /(?:typecheck\s*[✓✗]|^\d+\s*passed|^\d+\/\d+\s*[✓✗]|任务完成[，。]|交付[。！]|commit\s+[0-9a-f]{7}|^[✓✗]\s|(?:^|\n)>?\s*(?:fix|feat|refactor|test|chore|docs|perf)[(:]\s|提交\s*[0-9a-f]{7}|^\d+\s*\/\s*\d+\s*(?:个|项)?(?:测试)?通过)/mi
 
 /**
  * 条件/否定前缀——在行动承诺词附近出现了"除非""不需要""不必"等时，
@@ -115,9 +145,6 @@ const CONDITIONAL_PREFIX_RE = /(?:除非|不需要|不必|不用|无需|没必�
  */
 export function hasActionIntent(text: string): boolean {
   if (!text) return false
-  // 交付/收尾守卫：全文含强交付信号时直接返回 false，
-  // 不再检测尾部 600 字符或尾句——这是已完成的汇报，不是悬空的行动承诺。
-  if (DELIVERY_SIGNAL_RE.test(text)) return false
   const tail = text.length > 600 ? text.slice(-600) : text
   // 问句收尾守卫：整轮以问句收尾 = 把控制权交还用户（请求决策/许可），不是
   // 悬空的行动承诺——即便尾部同时出现承诺词与工具动词。此守卫原本只装在
@@ -130,9 +157,18 @@ export function hasActionIntent(text: string): boolean {
   // 也属于假设性表述（如"不需要改，除非你想让我也查一下 X"），不应触发提醒。
   // 查全文尾部（600 字符），非仅 120——条件前缀可能离承诺词很远（引用中）。
   if (CONDITIONAL_PREFIX_RE.test(tail)) return false
-  // 承诺关系必须在同一句内成立（跨句共现是总结/列举误报的根源，见 hasSameSentencePair）。
+  // 前置条件等待守卫：承诺依赖用户/外部动作（"登录后""等你确认后"）是等待行为
+  if (PRECONDITION_WAIT_RE.test(tail)) return false
+  // 决策权交还守卫：尾句把决定权交回用户（"你定"）不是悬空承诺
+  if (DECISION_HANDOFF_RE.test(tail)) return false
+  // 承诺检测优先于交付信号：交付信号不能吞掉同一窗口内的真实承诺
+  //（c522132a4 过度修复反例："已提交 X。接下来我要重写 Y"——全文 DELIVERY
+  //  短路把尾部承诺吞掉。先检承诺，无承诺时交付信号才兜底短路，且与承诺同窗）
   if (hasSameSentencePair(tail, ACTION_PROMISE_PATTERN, TOOL_VERB_PATTERN)) return true
-  return hasImperativeActionTail(text)
+  if (hasImperativeActionTail(text)) return true
+  // 交付/收尾信号（与承诺检测同窗，尾部 600 字符）
+  if (DELIVERY_SIGNAL_RE.test(tail)) return false
+  return false
 }
 
 /**
@@ -141,17 +177,22 @@ export function hasActionIntent(text: string): boolean {
  */
 export function hasWriteActionIntent(text: string): boolean {
   if (!text) return false
-  if (DELIVERY_SIGNAL_RE.test(text)) return false
   const tail = text.length > 600 ? text.slice(-600) : text
   // 问句收尾守卫：同 hasActionIntent——收尾问句是在等用户，不是悬空写承诺。
   if (/[？?]$/.test(tail.trimEnd())) return false
   // 条件/否定守卫：同 hasActionIntent
   if (CONDITIONAL_PREFIX_RE.test(tail)) return false
-  // 承诺关系必须在同一句内成立（同 hasActionIntent 的跨句误报回归）。
+  // 前置条件等待守卫：同 hasActionIntent
+  if (PRECONDITION_WAIT_RE.test(tail)) return false
+  // 决策权交还守卫：同 hasActionIntent
+  if (DECISION_HANDOFF_RE.test(tail)) return false
+  // 承诺检测优先于交付信号：同 hasActionIntent（交付汇报+尾部新承诺混合形态）
   if (hasSameSentencePair(tail, ACTION_PROMISE_PATTERN, WRITE_VERB_PATTERN)) return true
-  return hasImperativeActionTail(text)
+  if (hasImperativeActionTail(text)) return true
+  // 交付/收尾信号（与承诺检测同窗，尾部 600 字符）
+  if (DELIVERY_SIGNAL_RE.test(tail)) return false
+  return false
 }
-
 /**
  * 会推进"写承诺"的工具——文件写入、状态变更命令、测试执行、计划/交付操作。
  * 故意用白名单（未知工具视为只读）：漏判的代价只是一次多余的 nudge，
@@ -162,6 +203,7 @@ const WRITE_ADVANCING_TOOLS: ReadonlySet<string> = new Set([
   'bash', 'sandbox_exec', 'git', 'fastgit',
   'run_tests', 'jest', 'mocha', 'vitest',
   'plan', 'plan_task', 'undo', 'team_orchestrate', 'job', 'browser',
+  'deliver_task', 'starflow', 'galaxy',
   'create_document', 'create_pdf', 'create_presentation', 'create_spreadsheet',
   'create_image', 'export_file',
 ])

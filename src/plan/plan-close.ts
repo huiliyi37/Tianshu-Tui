@@ -69,7 +69,12 @@ function findTaskBlocks(lines: string[]): TaskBlock[] {
     }
     if (inFence) continue
 
-    const match = lines[i]!.match(/^###\s+Task\s+(\d+)\b/)
+    // 任务块标题三种合法形态：### Task N（基础模板）、### Wave N（>8 任务大计划
+    // 的 submit 门禁强制分波格式，见 prompt/volatile.ts plan-methodology）、
+    // ### 任务 N（中文习惯写法）。只认 Task 时，按门禁要求分波的计划 close 永远
+    // 0 匹配——「No matching task blocks found for selection: all」（2026-08-09
+    // 会话 mskl1neqgwksu66h 实录，模型被迫手工编辑计划文件闭环）。
+    const match = lines[i]!.match(/^###\s+(?:Task|Wave|任务)\s+(\d+)\b/)
     if (!match) continue
     if (blocks.length > 0) {
       blocks[blocks.length - 1]!.endLineExclusive = i

@@ -373,4 +373,37 @@ describe('RuntimeHookPipeline', () => {
 
     assert.equal(events[0]!.budgetMs, 10_000)
   })
+
+  it('setDisabledHookIds 热更：禁用后 runPhase skip 且 manifest 反映，恢复后重新执行', async () => {
+    const order: string[] = []
+    const hookA: PreTurnRuntimeHook = { phase: 'preTurn', name: 'a', run: async () => { order.push('a') } }
+    const hookB: PreTurnRuntimeHook = { phase: 'preTurn', name: 'b', run: async () => { order.push('b') } }
+    const events: Array<{ id: string; outcome: string }> = []
+    const pipeline = new RuntimeHookPipeline([hookA, hookB], {
+      onRun: event => events.push({ id: event.id, outcome: event.outcome }),
+    })
+
+    // 初始全启用
+    await pipeline.runPreTurn(makeContext())
+    assert.deepEqual(order, ['a', 'b'])
+    assert.deepEqual(pipeline.getManifest().map(m => [m.id, m.enabled]), [['a', true], ['b', true]])
+
+    // 热更：禁用 a
+    pipeline.setDisabledHookIds(['a'])
+    order.length = 0
+    events.length = 0
+    await pipeline.runPreTurn(makeContext())
+    assert.deepEqual(order, ['b'], '禁用的 hook 不再执行')
+    assert.equal(pipeline.isEnabled('a'), false)
+    assert.equal(pipeline.isEnabled('b'), true)
+    assert.deepEqual(pipeline.getManifest().map(m => [m.id, m.enabled]), [['a', false], ['b', true]])
+    assert.equal(events.find(e => e.id === 'a')?.outcome, 'skipped', '禁用 hook 发布 skipped 事件')
+
+    // 热更：恢复 a（空禁用集）
+    pipeline.setDisabledHookIds([])
+    order.length = 0
+    await pipeline.runPreTurn(makeContext())
+    assert.deepEqual(order, ['a', 'b'], '恢复后重新执行')
+    assert.equal(pipeline.isEnabled('a'), true)
+  })
 })

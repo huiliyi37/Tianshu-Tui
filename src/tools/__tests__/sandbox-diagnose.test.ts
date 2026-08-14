@@ -144,12 +144,12 @@ describe('recordSandboxLearn', () => {
   })
 
   it('never throws when the target directory is unwritable', () => {
+    assert.doesNotThrow(() => recordSandboxLearn({
+      cwd: '/w', command: 'x', backend: 'none', deniedPaths: [], retried: false,
     // Path under an existing FILE: mkdir fails ENOTDIR everywhere, fast.
     // NOT a /proc/... path — on WSL2, mkdir on procfs returns ENOENT, and
     // Node's recursive mkdirSync reads that as "parent missing", retrying the
     // same mkdir forever (infinite loop, ~100% CPU). ENOTDIR terminates it.
-    assert.doesNotThrow(() => recordSandboxLearn({
-      cwd: '/w', command: 'x', backend: 'none', deniedPaths: [], retried: false,
     }, '/dev/null/nonexistent-rivet-learn'))
   })
 })

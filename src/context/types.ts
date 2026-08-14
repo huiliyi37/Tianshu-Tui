@@ -259,6 +259,9 @@ export interface SessionMetadata {
    * 结构镜像 api/pro-registry.ts 的 WireTransformContext（内联避免 context→api 引依赖）。
    */
   wireContext?: { truncateN?: { flash: number; pro: number } }
+  /** 目标锚（spec 3c 动作 B 补强）：会话当前目标陈述，随用户实质指令更新，
+   *  resume/跨端从 meta 恢复（与 wireContext 同一固化语义）。 */
+  goalAnchor?: string
   /**
    * Tier 2 LLM speculation 引擎自身的调用计数（fired/parseFailures/errors）。
    * speculationStats.llm 只记 shadow-queue 侧的 enqueued/hits——没有本字段，

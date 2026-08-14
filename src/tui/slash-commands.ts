@@ -3828,8 +3828,10 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     description: "Clear screen",
     immediate: true,
     handler: () => {
-      process.stdout.write('\x1B[2J\x1B[H')
+      // 先退出流式态再清屏重绘，最终帧反映非流式状态；清屏走 app.clearScreen()
+      // 单一实现（含 live.reset()+renderLive()，此前手写 stdout 漏了 reset）。
       app.setStreamingState(false)
+      app.clearScreen()
       return true
     },
   })

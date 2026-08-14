@@ -5,9 +5,12 @@ import { classifyOrchestrationScale } from '../agent/task-size-gate.js'
 import type { TeamRunSummary } from '../agent/team-orchestrator.js'
 import { deserializeUnifiedPlan, unifiedPlanToTeamTasks, validateUnifiedPlan } from '../agent/unified-plan.js'
 import { groupTeamTasks } from '../agent/team-grouping.js'
-import { parseTeamTasks } from '../agent/team-plan.js'
+import { parseTeamTasks, type TeamTask } from '../agent/team-plan.js'
 import { formatSealStatus, verifyPlanSeal, type SealedUnifiedPlan } from '../agent/council/council-seal.js'
-import { clearPlan, consumePlan, storePlan } from '../agent/plan-store.js'
+import { clearPlan, consumePlan, getStoredPlan, storePlan } from '../agent/plan-store.js'
+import { profileRegistry } from '../agent/profile-registry.js'
+import { progressiveTimeout, WORKER_EXIT_GRACE_MS } from '../agent/timeout-ladder.js'
+import { MAX_BUDGET_CONTINUATIONS } from '../agent/worker-continuation.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import { buildTeamOutcome } from '../agent/orchestration-outcome.js'
 import { validatePathSafe } from './path-validate.js'
@@ -18,6 +21,7 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 // closure live in the agent layer so plan_task and team_orchestrate share one path.
 import {
   executePlanWaves,
+  EXECUTE_PLAN_WAVES_GUARDRAIL,
   teamReviewChangedFiles,
   teamReviewForceLevel,
   teamReviewFocusHint,
@@ -51,6 +55,61 @@ const inputSchema = z.object({
    *  confirm:true → 点火。缺省 undefined → 直接执行（现状行为，向后兼容）。 */
   confirm: z.boolean().optional(),
 })
+
+/**
+ * team_orchestrate 工具层超时上限——1 小时护栏。
+ *
+ * 为什么需要护栏：timeoutMs 是整次调用（可多波自动推进，≤10 波）的墙钟上限。
+ * 公式按「最坏波次 × 最坏 worker 预算 × 续跑次数」放大后，异常计划（循环/
+ * 巨量任务）可能把天花板推到小时级以上。真正的卡死判定归 worker 内部
+ * 600s budget + worker-liveness 静默探测（timeout-ladder.ts 注释声明的架构
+ * 意图）——工具层只需兜住「多波/续跑不误杀」，不必兜「死循环早发现」。
+ */
+export const TEAM_TIMEOUT_CEIL_MS = 3_600_000 // 1 hour
+
+/**
+ * 工具层超时 = 单 worker 最坏预算 × tier 倍率 × 波次数 × 续跑次数 + GRACE，
+ * 封顶 TEAM_TIMEOUT_CEIL_MS。对齐 delegate 系 delegationToolTimeoutMs 的
+ * 同源公式（profile-registry.ts:717），修复固定 600s 在多波/长预算下先于
+ * 内层开枪、整调用 reject 丢 partial 的硬缺陷（B+A 方案）。
+ *
+ * tasks 可解析（planJson 或 plan-store peek）时按真实分组算波数；无任务
+ * 上下文时用护栏上界兜底（不误杀、不失控）。
+ *
+ * - budget：各任务 profile.defaultTimeoutMs 的最大值（无 profile 时
+ *   progressiveTimeout(sessionTurn)，缺省 480s）；无任务时 600s。
+ * - tierMul：1.5（strong 档上界，profile-registry.ts TIER_TIMEOUT_MULTIPLIER）。
+ * - waves：groupTeamTasks 静态波数（与执行同函数同参数，是执行波数上界）。
+ * - runs：1 + MAX_BUDGET_CONTINUATIONS（续跑每轮带完整 budget）。
+ */
+export function teamOrchestrateTimeoutMs(params?: ToolCallParams): number {
+  let tasks: TeamTask[] | undefined
+  const planJson = params?.input?.planJson as string | undefined
+  const plan = planJson ? deserializeUnifiedPlan(planJson) : undefined
+  const stored = !planJson && !plan ? getStoredPlan(params?.sessionId) : undefined
+  if (plan) {
+    tasks = unifiedPlanToTeamTasks(plan)
+  } else if (stored) {
+    const storedPlan = deserializeUnifiedPlan(stored)
+    if (storedPlan) tasks = unifiedPlanToTeamTasks(storedPlan)
+  }
+
+  let budget = 600_000
+  let waves = EXECUTE_PLAN_WAVES_GUARDRAIL
+  if (tasks && tasks.length > 0) {
+    let maxProfileBudget = 0
+    for (const t of tasks) {
+      const pb = t.profile ? profileRegistry.get(t.profile)?.defaultTimeoutMs : undefined
+      if (pb && pb > maxProfileBudget) maxProfileBudget = pb
+    }
+    budget = maxProfileBudget > 0 ? maxProfileBudget : progressiveTimeout(params?.sessionTurnCount)
+    waves = groupTeamTasks(tasks).length
+  }
+
+  const tierMul = 1.5
+  const runs = 1 + MAX_BUDGET_CONTINUATIONS
+  return Math.min(TEAM_TIMEOUT_CEIL_MS, budget * tierMul * waves * runs + WORKER_EXIT_GRACE_MS)
+}
 
 /**
  * Render the council merge ledger (max mode, first wave) so the perspective work
@@ -510,6 +569,6 @@ export function createTeamOrchestrateTool(
     requiresApproval: () => false,
     isConcurrencySafe: () => false,
     isEnabled: () => true,
-    timeoutMs: () => 600_000,
+    timeoutMs: (params) => teamOrchestrateTimeoutMs(params),
   }
 }

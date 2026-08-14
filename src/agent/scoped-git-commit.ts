@@ -1,5 +1,6 @@
 import { spawnGitSync } from '../tools/spawn-git.js'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 export interface ScopedCommitInput {
   cwd: string
@@ -34,15 +35,50 @@ function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 }
 
+/** Classify owned paths before `git add`: a path missing from BOTH the worktree
+ *  and the git index is stale — its deletion was already committed by another
+ *  session. Staging it fails with a raw "pathspec did not match" error that
+ *  costs a full outer deliver_task retry. Skip and report instead. A missing
+ *  worktree copy still present in the index is a staged deletion (D status):
+ *  `git add -- <path>` stages the removal, so it must be kept. */
+function classifyStalePaths(cwd: string, files: string[]): { addable: string[]; stale: string[] } {
+  const addable: string[] = []
+  const missing: string[] = []
+  for (const f of files) {
+    if (existsSync(join(cwd, f))) addable.push(f)
+    else missing.push(f)
+  }
+  if (missing.length === 0) return { addable, stale: [] }
+  const ls = runGit(cwd, ['ls-files', '-z', '--', ...missing])
+  const inIndex = new Set(ls.ok ? ls.output.split('\0').filter(Boolean) : [])
+  const stale: string[] = []
+  for (const f of missing) {
+    if (inIndex.has(f)) addable.push(f) // deletion not yet staged — git add stages it
+    else stale.push(f)                  // gone from the index too — committed externally
+  }
+  return { addable, stale }
+}
+
 export function commitScopedFiles(input: ScopedCommitInput): ScopedCommitResult {
   if (!input.message.trim()) return { ok: false, output: 'Commit message is required.' }
 
   const files = normalizeFiles(input.cwd, input.files)
   if (files.length === 0) return { ok: false, output: 'No owned files to commit.' }
 
+  const { addable, stale } = classifyStalePaths(input.cwd, files)
+  if (addable.length === 0) {
+    return {
+      ok: false,
+      output: `No owned files to commit: every owned path is stale — already deleted and committed by another session: ${stale.join(', ')}. Refresh the owned set before retrying.`,
+    }
+  }
+  const staleNote = stale.length > 0
+    ? `⚠ Skipped ${stale.length} stale path(s) already committed externally: ${stale.join(', ')}\n`
+    : ''
+
   for (let attempt = 0; ; attempt++) {
     // add is idempotent — safe to re-run when the commit step hit a lock.
-    const add = runGit(input.cwd, ['add', '--', ...files])
+    const add = runGit(input.cwd, ['add', '--', ...addable])
     if (!add.ok) {
       const delay = LOCK_RETRY_DELAYS_MS[attempt]
       if (delay !== undefined && isLockContention(add.output)) {
@@ -52,7 +88,7 @@ export function commitScopedFiles(input: ScopedCommitInput): ScopedCommitResult 
       return add
     }
 
-    const commit = runGit(input.cwd, ['commit', '-m', input.message, '--only', '--', ...files])
+    const commit = runGit(input.cwd, ['commit', '-m', input.message, '--only', '--', ...addable])
     if (!commit.ok) {
       const delay = LOCK_RETRY_DELAYS_MS[attempt]
       if (delay !== undefined && isLockContention(commit.output)) {
@@ -62,10 +98,11 @@ export function commitScopedFiles(input: ScopedCommitInput): ScopedCommitResult 
       // Provide friendlier error for common "nothing changed" case
       const lower = commit.output.toLowerCase()
       if (lower.includes('nothing to commit') || lower.includes('no changes')) {
-        return { ok: false, output: `No changes in owned files to commit (${files.join(', ')}). Files may have been committed already or not modified.` }
+        return { ok: false, output: `No changes in owned files to commit (${addable.join(', ')}). Files may have been committed already or not modified.` }
       }
     }
-    return commit
+    if (!commit.ok) return commit
+    return { ok: true, output: staleNote + commit.output }
   }
 }
 

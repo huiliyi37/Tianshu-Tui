@@ -14,6 +14,9 @@ import {
 } from '../pointer-guard.js'
 import { editFileArgProcessor } from '../edit-file-arg-processor.js'
 import { planSubmitArgProcessor } from '../plan-submit-arg-processor.js'
+import { writeFileArgProcessor, WRITE_FILE_POINTER_PREFIX } from '../write-file-arg-processor.js'
+import { hashEditArgProcessor, HASH_EDIT_POINTER_PREFIX } from '../hash-edit-arg-processor.js'
+import { applyPatchArgProcessor, APPLY_PATCH_POINTER_PREFIX } from '../apply-patch-arg-processor.js'
 import { WRITE_FILE_TOOL } from '../write-file.js'
 import { EDIT_FILE_TOOL } from '../edit.js'
 import { HASH_EDIT_TOOL } from '../hash-edit.js'
@@ -138,6 +141,36 @@ describe('pointer prefix drift guards', () => {
     const parsed = JSON.parse(out) as { plan: string }
     assert.ok(parsed.plan.startsWith(PLAN_POINTER_PREFIX),
       `plan pointer must start with "${PLAN_POINTER_PREFIX}" — update pointer-guard.ts if the render changed`)
+  })
+
+  it('write_file collapse output starts with WRITE_FILE_POINTER_PREFIX', () => {
+    const args = JSON.stringify({ file_path: '/tmp/big.ts', content: 'c'.repeat(3000) })
+    const out = writeFileArgProcessor.process(args)
+    assert.ok(out, 'processor must collapse above threshold')
+    const parsed = JSON.parse(out!) as { content: string }
+    assert.ok(parsed.content.startsWith(WRITE_FILE_POINTER_PREFIX),
+      `write_file pointer must start with "${WRITE_FILE_POINTER_PREFIX}" — update pointer-guard.ts if the render changed`)
+  })
+
+  it('hash_edit collapse output starts with HASH_EDIT_POINTER_PREFIX', () => {
+    // 阈值 8000（2026-08 对齐 edit_file）——测试内容必须超过它才折叠。
+    const args = JSON.stringify({ file_path: '/tmp/big.ts', anchors: ['L1:abc12345'], new_string: 'd'.repeat(9000) })
+    const out = hashEditArgProcessor.process(args)
+    assert.ok(out, 'processor must collapse above threshold')
+    const parsed = JSON.parse(out!) as { new_string: string }
+    assert.ok(parsed.new_string.startsWith(HASH_EDIT_POINTER_PREFIX),
+      `hash_edit pointer must start with "${HASH_EDIT_POINTER_PREFIX}" — update pointer-guard.ts if the render changed`)
+  })
+
+  it('apply_patch collapse output starts with APPLY_PATCH_POINTER_PREFIX', () => {
+    // 折叠需要 diff 含可解析的文件头（+++ b/...），纯字符 diff 不折叠（保持原文）。
+    const patch = '--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-old\n+new\n'.repeat(300)
+    const args = JSON.stringify({ diff: patch })
+    const out = applyPatchArgProcessor.process(args)
+    assert.ok(out, 'processor must collapse above threshold')
+    const parsed = JSON.parse(out!) as { diff: string }
+    assert.ok(parsed.diff.startsWith(APPLY_PATCH_POINTER_PREFIX),
+      `apply_patch pointer must start with "${APPLY_PATCH_POINTER_PREFIX}" — update pointer-guard.ts if the render changed`)
   })
 })
 
@@ -270,5 +303,14 @@ describe('resolveIdempotentPointer', () => {
     const value = `[new block 40 chars — #RIVET-POINTER-DISPLAY-ONLY# placeholder, never emit as content]`
     const r = await resolveIdempotentPointer({ mode: 'edit', filePath: fp, value, matchedPrefix: '[new block' })
     assert.equal(r, null, 'pathless pointer must not resolve')
+  })
+
+  it('edit mode: resolves edit_file new_string pointer now that it carries a colon path', async () => {
+    const fp = join(dir, 'g.ts')
+    writeFileSync(fp, 'content on disk')
+    const value = `[new block ${fp}: 40 chars — 已落盘，勿重做。 #RIVET-POINTER-DISPLAY-ONLY# Display placeholder.]`
+    const r = await resolveIdempotentPointer({ mode: 'edit', filePath: fp, value, matchedPrefix: '[new block' })
+    assert.ok(r, 'path-carrying new_string pointer (colon separator) must resolve as no-op')
+    assert.match(r!.content, /已应用|幂等|无需/)
   })
 })

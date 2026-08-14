@@ -9,7 +9,6 @@ import { wrapSystemReminder } from '../prompt/system-reminder.js'
 import { INLINE_TOOL_RESULT_MAX_CHARS } from '../compact/constants.js'
 import { ToolArgPostProcessorRegistry } from './tool-arg-post-processor.js'
 import { planSubmitArgProcessor } from '../tools/plan-submit-arg-processor.js'
-import { writeFileArgProcessor } from '../tools/write-file-arg-processor.js'
 import { editFileArgProcessor } from '../tools/edit-file-arg-processor.js'
 import { hashEditArgProcessor } from '../tools/hash-edit-arg-processor.js'
 import { applyPatchArgProcessor } from '../tools/apply-patch-arg-processor.js'
@@ -93,6 +92,13 @@ export type MessageMutation =
 export class SessionContext {
   private state: SessionState
   private onMutation: ((m: MessageMutation) => void) | null = null
+  /** Goal-anchor tracking（spec 3c 动作 B 补强）：user 消息进入时提取当前
+   *  目标，仅在实质变化时回调（延续指令/系统注入不触发）。
+   *  开源侧只提供挂钩；提取器由装配方按 provider 注入（非 spark 恒 null →
+   *  零行为差异）。 */
+  private goalExtractor: ((messages: OaiMessage[]) => string | null) | null = null
+  private onGoalChanged: ((goal: string | null) => void) | null = null
+  private currentGoal: string | null = null
   /** Tool argument post-processors — intercept large args before entering oaiMessages */
   private argProcessors: ToolArgPostProcessorRegistry
   /**
@@ -126,7 +132,10 @@ export class SessionContext {
     // Register built-in arg processors
     this.argProcessors = new ToolArgPostProcessorRegistry()
     this.argProcessors.register(planSubmitArgProcessor)
-    this.argProcessors.register(writeFileArgProcessor)
+    // write_file 指针已停用（2026-08-10）：worker 模型把历史里的指针当格式模仿、
+    // 回吐为 content（galaxy worker 会话 21 次拦截、单 worker 370 万 token 空转）——
+    // 省的 token 不抵行为代价。writeFileArgProcessor 文件保留，供 pointer-guard
+    // 识别并幂等化解存量会话里的历史指针。
     this.argProcessors.register(editFileArgProcessor)
     this.argProcessors.register(hashEditArgProcessor)
     this.argProcessors.register(applyPatchArgProcessor)
@@ -139,6 +148,39 @@ export class SessionContext {
    */
   setMutationListener(fn: (m: MessageMutation) => void): void {
     this.onMutation = fn
+  }
+
+  /**
+   * Goal-anchor tracking（spec 3c 动作 B 补强）：装配方注入目标提取器与变更
+   * 回调（spark provider 注册了 goalExtractor 才调用；非 spark 不调用 →
+   * addUserMessage 零额外行为）。提取器输入当前消息历史，输出当前目标；
+   * 仅当目标实质变化（goalChanged 语义）时回调——延续指令轮零写入。
+   *
+   * @param initialBaseline 装配方已知的当前目标（meta 固化值）。非 null 时
+   *   跳过初始提取兜底——frozen 值优先（「meta 已有值 → 恒用之」语义），
+   *   防止初始提取无条件覆盖已固化目标（审查 HIGH-2）。
+   */
+  setGoalTracking(
+    extractor: (messages: OaiMessage[]) => string | null,
+    onGoalChanged: (goal: string | null) => void,
+    initialBaseline: string | null = null,
+  ): void {
+    this.goalExtractor = extractor
+    this.onGoalChanged = onGoalChanged
+    this.currentGoal = initialBaseline
+    // 初始提取仅在无基线时兜底（resume 补课场景：meta 未固化时从历史提取）
+    if (initialBaseline === null) {
+      const initial = extractor(this.state.oaiMessages)
+      if (initial !== null && initial !== this.currentGoal) {
+        this.currentGoal = initial
+        onGoalChanged(initial)
+      }
+    }
+  }
+
+  /** 当前目标（测试/装配方查询用）。 */
+  getGoalAnchor(): string | null {
+    return this.currentGoal
   }
 
   addUserMessage(content: string, images?: string[]): void {
@@ -158,6 +200,15 @@ export class SessionContext {
     this.state.estimatedTokens += t
     this.state.tailEstimate += t
     this.state.turnCount++
+    // Goal-anchor 更新：新 user 消息进入后重提目标，实质变化才回调。
+    // 未注入 extractor（非 spark）→ 恒跳过，零额外行为。
+    if (this.goalExtractor) {
+      const next = this.goalExtractor(this.state.oaiMessages)
+      if (next !== null && next !== this.currentGoal) {
+        this.currentGoal = next
+        this.onGoalChanged?.(next)
+      }
+    }
     this.onMutation?.({ type: 'append', message: msg })
   }
 

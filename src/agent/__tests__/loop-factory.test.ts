@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AgentLoop } from '../loop.js'
-import { buildRuntimeSnapshot, createToolExecutionController, createSidePathUsageRecorder, createReclaimDecisionRecorder, createTurnStreamController } from '../loop-factory.js'
+import { buildRuntimeSnapshot, createToolExecutionController, createSidePathUsageRecorder, createReclaimDecisionRecorder, createTurnStreamController, resolveDisabledHookIds, resolveHookDisabledEnv } from '../loop-factory.js'
 import { runGateCompletion, type GateCompletionClient } from '../gate-completion.js'
 import { TurnCacheObservability } from '../cache-log-observability.js'
 
@@ -405,4 +405,68 @@ test('runGateCompletion 非超时 stream 错误原样上抛', async () => {
     runGateCompletion(textClient([], new Error('network reset')), () => {}, 'prompt', 5000),
     /network reset/,
   )
+})
+
+test('resolveDisabledHookIds: config.hookAssembly.disabled 生效（无 env 时）', () => {
+  const prev = process.env.RIVET_HOOKS_DISABLED
+  try {
+    delete process.env.RIVET_HOOKS_DISABLED
+    assert.deepEqual(
+      resolveDisabledHookIds({ hookAssembly: { disabled: ['dream', 'kick'] } }),
+      ['dream', 'kick'],
+    )
+    assert.equal(resolveDisabledHookIds({ hookAssembly: {} }), undefined)
+    assert.equal(resolveDisabledHookIds({}), undefined)
+  } finally {
+    if (prev === undefined) delete process.env.RIVET_HOOKS_DISABLED
+    else process.env.RIVET_HOOKS_DISABLED = prev
+  }
+})
+
+test('resolveDisabledHookIds: RIVET_HOOKS_DISABLED env 优先于 config，逗号分隔去空白', () => {
+  const prev = process.env.RIVET_HOOKS_DISABLED
+  try {
+    process.env.RIVET_HOOKS_DISABLED = 'dream, skill-distill ,'
+    assert.deepEqual(
+      resolveDisabledHookIds({ hookAssembly: { disabled: ['kick'] } }),
+      ['dream', 'skill-distill'],
+    )
+  } finally {
+    if (prev === undefined) delete process.env.RIVET_HOOKS_DISABLED
+    else process.env.RIVET_HOOKS_DISABLED = prev
+  }
+})
+
+test('resolveDisabledHookIds: env 为空字符串时回落 config', () => {
+  const prev = process.env.RIVET_HOOKS_DISABLED
+  try {
+    process.env.RIVET_HOOKS_DISABLED = ''
+    assert.deepEqual(
+      resolveDisabledHookIds({ hookAssembly: { disabled: ['kick'] } }),
+      ['kick'],
+    )
+  } finally {
+    if (prev === undefined) delete process.env.RIVET_HOOKS_DISABLED
+    else process.env.RIVET_HOOKS_DISABLED = prev
+  }
+})
+
+test('resolveHookDisabledEnv: env 解析与回落（热更回调与装配同源）', () => {
+  const prev = process.env.RIVET_HOOKS_DISABLED
+  try {
+    // 未设 → undefined（热更回调回落 config 值）
+    delete process.env.RIVET_HOOKS_DISABLED
+    assert.equal(resolveHookDisabledEnv(), undefined)
+
+    // 设置 → 解析列表（env 恒优先于 config，热更回调据此不覆盖 env 禁用集）
+    process.env.RIVET_HOOKS_DISABLED = 'dream, kick'
+    assert.deepEqual(resolveHookDisabledEnv(), ['dream', 'kick'])
+
+    // 空字符串 → undefined（回落 config）
+    process.env.RIVET_HOOKS_DISABLED = ''
+    assert.equal(resolveHookDisabledEnv(), undefined)
+  } finally {
+    if (prev === undefined) delete process.env.RIVET_HOOKS_DISABLED
+    else process.env.RIVET_HOOKS_DISABLED = prev
+  }
 })

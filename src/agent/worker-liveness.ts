@@ -12,7 +12,7 @@
 import {
   REASONING_FIRST_BYTE_TIMEOUT_MS,
   SLOW_FIRST_BYTE_TIMEOUT_MS,
-  SLOW_THINKING_PROVIDERS,
+  isSlowThinkingProvider,
   FIRST_BYTE_PER_100K_MS,
 } from '../api/openai-client.js'
 
@@ -28,6 +28,11 @@ const RETRY_WINDOW_MS = 30_000
 
 export interface DeriveWorkerStallOpts {
   providerName?: string
+  /** Worker 端点 baseUrl——慢思考判定的第二级启发式（host 子串），见
+   *  isSlowThinkingProvider（2026-08-09：自定义名如 deepseek-spark 精确名必漏判）。 */
+  baseUrl?: string
+  /** 显式慢思考声明（provider config slowThinking），优先级最高。 */
+  slowThinking?: boolean
   isWrite?: boolean
   /** Worker uses thinking mode. Default true — provider schema 的 thinking 默认
    *  'enabled'（src/config/schema.ts），未知时按 true 取保守长绳。 */
@@ -48,7 +53,11 @@ export function deriveWorkerStallMs(opts: DeriveWorkerStallOpts): number {
   const base = opts.isWrite ? WRITE_STALL_MS : EXPLORE_STALL_MS
   const thinking = opts.thinking ?? true
   if (!thinking) return base
-  const firstByteBase = SLOW_THINKING_PROVIDERS.has(opts.providerName ?? '')
+  const firstByteBase = isSlowThinkingProvider({
+    providerName: opts.providerName,
+    baseUrl: opts.baseUrl,
+    slowThinking: opts.slowThinking,
+  })
     ? SLOW_FIRST_BYTE_TIMEOUT_MS
     : REASONING_FIRST_BYTE_TIMEOUT_MS
   return Math.max(base, firstByteBase + FIRST_BYTE_SIZE_MARGIN_MS + RETRY_WINDOW_MS)

@@ -126,11 +126,12 @@ export function createProviderClient(
     thinking: provider.thinking as 'enabled' | 'disabled' | undefined,
     thinkingStallTimeoutMs: provider.thinkingStallTimeoutMs ?? wire?.thinkingStallTimeoutMs,
     firstByteTimeoutMs: provider.firstByteTimeoutMs,
-    // 高级配置四旋钮（OPT-003）：provider 级运行时消费点。
+    // Advanced provider knobs and slow-thinking override are both runtime inputs.
     requestTimeoutMs: provider.requestTimeoutMs,
     maxRetries: provider.maxRetries,
     temperature: provider.temperature,
     proxy: provider.proxy,
+    slowThinking: provider.slowThinking,
     thinkingBlockType: capabilities.thinkingBlockType,
     reasoningSplit: capabilities.reasoningSplit,
     thinkingBudgetField: capabilities.thinkingBudgetField,

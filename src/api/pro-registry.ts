@@ -37,6 +37,11 @@ export type WireTransform = (m: OaiMessage, model: string | undefined, ctx?: Wir
  *  「提取域 = 截断丢失域」精确互补，N 失配即重复注入或漏补偿。 */
 export type ReasoningAnchorExtractor = (reasoning: string, model: string | undefined, ctx?: WireTransformContext) => string[]
 
+/** 目标锚提取（spec 3c 动作 B 补强）：从消息历史中提取「当前目标」陈述。
+ *  目标载体在 user 消息（wire 截断不触及），返回 null = 无实质目标（首轮
+ *  前的延续指令/系统注入/空会话）。开源版注册表恒空 → 不提取、零行为差异。 */
+export type GoalExtractor = (messages: OaiMessage[]) => string | null
+
 /** pro 注册的额外 preset（key 不在 ProviderPresetKey 联合类型内） */
 export interface ProPresetEntry {
   key: string
@@ -62,6 +67,9 @@ export interface ProRegistry {
   /** 推理锚点提取：按 providerName 注册，agent 落库时调用（spec 3c 动作 B） */
   registerAnchorExtractor(providerName: string, fn: ReasoningAnchorExtractor): void
   getAnchorExtractor(providerName: string): ReasoningAnchorExtractor | undefined
+  /** 目标锚提取：按 providerName 注册，user 消息进入时调用（spec 3c 动作 B 补强） */
+  registerGoalExtractor(providerName: string, fn: GoalExtractor): void
+  getGoalExtractor(providerName: string): GoalExtractor | undefined
   /** wire 上下文默认值：会话首启时开源侧调用一次取当前默认（如 env 解析的
    *  截断 N），冻结进会话 meta；此后恒以 meta 值经 ctx 回传。闭源边界：env
    *  变量名与解析逻辑留在 pro 模块内，开源侧只见结构化默认值。 */
@@ -74,6 +82,7 @@ function createRegistry(): ProRegistry {
   const clientFactories = new Map<string, ProClientFactory>()
   const wireTransforms = new Map<string, WireTransform>()
   const anchorExtractors = new Map<string, ReasoningAnchorExtractor>()
+  const goalExtractors = new Map<string, GoalExtractor>()
   const wireContextDefaults = new Map<string, () => WireTransformContext>()
   return {
     registerPreset(entry) {
@@ -102,6 +111,12 @@ function createRegistry(): ProRegistry {
     },
     getAnchorExtractor(providerName) {
       return anchorExtractors.get(providerName)
+    },
+    registerGoalExtractor(providerName, fn) {
+      goalExtractors.set(providerName, fn)
+    },
+    getGoalExtractor(providerName) {
+      return goalExtractors.get(providerName)
     },
     registerWireContextDefaults(providerName, fn) {
       wireContextDefaults.set(providerName, fn)

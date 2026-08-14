@@ -1,5 +1,6 @@
 import type { PostToolRuntimeHook, RuntimeHookContext, RuntimeToolEvent } from '../runtime-hooks.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
+import type { SrClass } from '../context.js'
 import { POINTER_GUARD_ERROR_MARKER } from '../../tools/pointer-guard.js'
 
 /**
@@ -21,6 +22,11 @@ import { POINTER_GUARD_ERROR_MARKER } from '../../tools/pointer-guard.js'
  *      已积累多个占位符样本——这正是回吐的诱发环境（模型批量写文件时最容易
  *      模仿历史里的工具调用格式）。在首犯发生**之前**注入一次机制说明。
  *
+ * 2026-08-10（galaxy worker 21 次拦截复盘）：reminder 改走 functional 通道——
+ *   discipline 每轮限 1 条（context.ts W1 分级），worker 密集工具轮里额度被
+ *   convergence/B1/B2 抢占，8 次犯规 0 条落地。functional 不限流；每轮一条由
+ *   hook 侧 lastReminderTurn 去重兜底。
+ *
  * Tier coordination: key='pointer-regurgitation', category='discipline',
  * priority=0.72 — above self-verify (0.58): repeated regurgitation means
  * writes are failing NOW and any other discipline advice is moot until fixed.
@@ -29,7 +35,7 @@ import { POINTER_GUARD_ERROR_MARKER } from '../../tools/pointer-guard.js'
 
 export interface PointerRegurgitationHookDeps {
   advisoryBus: Pick<AdvisoryBus, 'submit'>
-  addSystemReminder?: (content: string) => void
+  addSystemReminder?: (content: string, cls?: SrClass) => void
 }
 
 /** Session-wide guard-rejection count before the advisory escalates.
@@ -45,11 +51,12 @@ export function createPointerRegurgitationHook(deps: PointerRegurgitationHookDep
   let offenseCount = 0
   let successfulWrites = 0
   let prophylaxisFired = false
+  let lastReminderTurn = -1
 
   return {
     phase: 'postTool',
     name: 'pointer-regurgitation',
-    run(_ctx: RuntimeHookContext, tool: RuntimeToolEvent): void {
+    run(ctx: RuntimeHookContext, tool: RuntimeToolEvent): void {
       // ── 前置提醒：连写场景下，在首犯之前解释一次占位符机制 ──
       if (!tool.isError && WRITE_CLASS_TOOLS.has(tool.name)) {
         successfulWrites++
@@ -84,11 +91,19 @@ export function createPointerRegurgitationHook(deps: PointerRegurgitationHookDep
           + `不要模仿历史里的占位符格式。恢复协议：①在参数里写出完整的真实文本（哪怕很长）；②需要旧内容时先 read_file；③若同批内容反复被拒，检查你是否在复制自己历史消息里的工具调用——那些参数已被重写，不可复用。`,
         ttl: 2,
       })
-      deps.addSystemReminder?.(
-        '<system-reminder>你刚才的写入调用失败，原因是你把 "[file written to …]" 这类显示占位符当成了真实内容传给参数。'
-        + '这是工具历史压缩产生的指针，不是合法输入。修复：在参数中写出完整的真实内容（可以是完整代码），'
-        + '不要复制历史消息里的工具调用格式。</system-reminder>',
-      )
+      // reminder 走 functional 通道（不限流）：discipline 每轮限 1 条
+      // （context.ts W1 分级），worker 密集工具轮里额度常被 convergence/B1/B2
+      // 抢占——2026-08-10 galaxy worker 8 次犯规 0 条落地。每轮一条由
+      // lastReminderTurn 去重兜底。
+      if (lastReminderTurn !== ctx.snapshot.turn) {
+        lastReminderTurn = ctx.snapshot.turn
+        deps.addSystemReminder?.(
+          '<system-reminder>你刚才的写入调用失败，原因是你把 "[file written to …]" 这类显示占位符当成了真实内容传给参数。'
+          + '这是工具历史压缩产生的指针，不是合法输入。修复：在参数中写出完整的真实内容（可以是完整代码），'
+          + '不要复制历史消息里的工具调用格式。</system-reminder>',
+          'functional',
+        )
+      }
     },
   }
 }

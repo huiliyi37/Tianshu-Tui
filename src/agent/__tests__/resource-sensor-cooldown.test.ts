@@ -68,6 +68,49 @@ describe('ResourceSensor session-boundary cooldown', () => {
     assert.equal(modeForRecoveryTrigger(cooled).mode, 'full')
   })
 
+  it('startup RSS ramp during cooldown stays out of the trend window', () => {
+    let rss = 200_000_000
+    const sensor = new ResourceSensor({
+      memoryLimitBytes: 2_000_000_000,
+      memoryUsage: () => ({ rss: (rss += 250_000_000), heapUsed: rss / 4 }),
+      initialMemoryCooldownSamples: 3,
+    })
+
+    // Cold-start ramp at +250MB/sample (the test-huiliyi37 false positive):
+    sensor.sampleMemory()
+    sensor.sampleMemory()
+    const snap = sensor.sample()
+    assert.equal(snap.memoryCooldownActive, false, 'cooldown expires on the 3rd sample')
+    assert.equal(snap.memoryTrendBytesPerSample, 0, 'cooldown samples feed no trend')
+
+    const trigger = classifyResourcePressure({
+      rssBytes: snap.memory.rssBytes,
+      heapUsedBytes: snap.memory.heapUsedBytes,
+      memoryLimitBytes: snap.memory.memoryLimitBytes,
+      sessionBytes: 0,
+      sessionByteLimit: Number.POSITIVE_INFINITY,
+      memoryTrendBytesPerSample: snap.memoryTrendBytesPerSample,
+      suppressAbsoluteMemoryPressure: snap.memoryCooldownActive,
+    })
+    assert.equal(trigger, null, 'startup ramp must not fire resource_pressure')
+  })
+
+  it('sustained rise after cooldown still produces a positive trend', () => {
+    let rss = 200_000_000
+    const sensor = new ResourceSensor({
+      memoryLimitBytes: 2_000_000_000,
+      memoryUsage: () => ({ rss: (rss += 250_000_000), heapUsed: rss / 4 }),
+      initialMemoryCooldownSamples: 3,
+    })
+
+    sensor.sampleMemory()
+    sensor.sampleMemory()
+    sensor.sampleMemory()
+    sensor.sampleMemory()
+    const snap = sensor.sample()
+    assert.ok(snap.memoryTrendBytesPerSample > 0, 'post-cooldown rise feeds the trend window')
+  })
+
   it('disk pressure still fires during memory cooldown', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-sensor-disk-'))
     try {

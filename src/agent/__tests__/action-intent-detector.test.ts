@@ -68,6 +68,36 @@ describe('hasActionIntent', () => {
   it('已完成任务的总结（不含行动承诺标记）', () => {
     assert.ok(!hasActionIntent('我已经完成了修改，以下是涉及的文件'))
   })
+  it('完成态汇报不算写承诺（同句"已完成"+写动词）', () => {
+    // 误报现场：描述过去操作（"上一轮完成了 write_file"）被同句共现路径当悬空承诺
+    assert.ok(!hasWriteActionIntent('我这就汇报：上一轮完成了 write_file 和 edit_file，全部测试通过。'))
+  })
+  it('中文提交交付信号（提交 <hash>）', () => {
+    // DELIVERY_SIGNAL_RE 只认英文 "commit <hash>"——中文交付报告漏保护。
+    // 用完成态"已提交"（无歧义）；"接下来提交 <hash>"是未来时态承诺，不算交付。
+    assert.ok(!hasWriteActionIntent('已提交 899d594d9。'))
+  })
+  it('交付汇报 + 尾部新承诺：承诺不被交付信号吞掉', () => {
+    // 审查反例（c522132a4 过度修复）：DELIVERY 全文短路 vs 承诺尾部 600 窗口
+    assert.ok(hasWriteActionIntent('已提交 899d594d9。接下来我要重写 loop.ts'))
+    assert.ok(hasActionIntent('已提交 899d594d9。接下来我要重写 loop.ts'))
+  })
+  it('让用户验证 + 自己动手：承诺不被前置等待吞掉', () => {
+    // 审查反例（c522132a4 过度修复）："你跑…"单独命中 PRECONDITION_WAIT_RE
+    assert.ok(hasWriteActionIntent('你跑一下 typecheck。我来修改 loop.ts'))
+  })
+  it('逗号连接的同句分工句式：承诺不被前置等待吞掉', () => {
+    // 88a5fb8b1 审查 MEDIUM：间隔字符类不排除逗号——"你跑 X，我来改 Y"同句
+    // 命中等待守卫吞掉承诺（句号分隔已覆盖，逗号边界漏了）
+    assert.ok(hasWriteActionIntent('你跑一下 typecheck，我来修改 loop.ts'))
+  })
+  it('带前置条件（登录后）的承诺是等待行为，不算悬空', () => {
+    // 误报现场：wrangler 未登录，承诺"登录后我来执行"——等用户前置动作
+    assert.ok(!hasActionIntent('登录后我来执行迁移和部署。'))
+  })
+  it('决策权交还（你定）不算承诺', () => {
+    assert.ok(!hasActionIntent('只修①或全修，你定。'))
+  })
   it('"Git Bash" 含 Bash 但不触发工具动词误配', () => {
     // 回归：Git Bash 是产品名，不是 bash 工具调用
     assert.ok(!hasActionIntent('让我看看 Git Bash 的探测逻辑'))
@@ -234,5 +264,10 @@ describe('turnUsedOnlyReadTools', () => {
     assert.equal(turnUsedOnlyReadTools([
       { name: 'delegate_batch', input: { tasks: [{ profile: 'code_scout' }, { profile: 'patcher' }] } },
     ]), false)
+  })
+  it('交付/编排写工具不算只读（deliver_task 提交轮曾被误判只读触发误报提醒）', () => {
+    assert.equal(turnUsedOnlyReadTools([{ name: 'deliver_task', input: {} }]), false)
+    assert.equal(turnUsedOnlyReadTools([{ name: 'starflow', input: {} }]), false)
+    assert.equal(turnUsedOnlyReadTools([{ name: 'galaxy', input: {} }]), false)
   })
 })

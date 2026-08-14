@@ -149,7 +149,7 @@ export function createStarflowTool(deps: StarflowToolDeps): Tool {
 - draftItems：需求澄清后的计划草稿（id/title/detail/files），喂给 council 评审；galaxyDims 缺省时也从它派生维度。修订重提时：未变条目保持 revision 不变并标 previousVerdict:'passed'（starflow 会在评审渲染中标注「沿用前轮通过结论」，不重审）；修订条目 bump revision 时**必须同时移除 previousVerdict**——两字段同现的条目被视为已修订，重新评审不沿用
 - seats：council 席位覆盖（同 council_convene 的 seats，authority/charter/tierHint/provider/model）。**修订轮推荐只召回「上轮否决的席位 + 与修订点相关的域席」，而非默认全量**——成本立降且否决拦截力不减
 - galaxyDims：显式攻坚维度（2-5 个，结构同 galaxy 工具的 dimensions）；缺省按 draftItems 派生，派生不出 ≥2 个则跳过攻坚阶段
-- rounds：council 辩论轮数（1-2，默认 1；高风险任务传 2）
+- rounds：council 辩论轮数（1-2，默认 1；高风险任务传 2）。⚠ rounds≥2 受 councilMultiRound Pro 门钳制——Basic 未启用时降级单轮继续（不拒绝），输出标注「已按单轮执行——Pro 门」
 - resume：blocked/中断后传 true 从状态文件续跑，已过门禁的阶段不重复执行
 
 ## 出口
@@ -199,7 +199,7 @@ export function createStarflowTool(deps: StarflowToolDeps): Tool {
             minItems: 2,
             maxItems: 5,
           },
-          rounds: { type: 'number', enum: [1, 2], description: 'council 辩论轮数（默认 1；高风险任务传 2 启用反驳轮）。' },
+          rounds: { type: 'number', enum: [1, 2], description: 'council 辩论轮数（默认 1；高风险任务传 2 启用反驳轮）。⚠ rounds≥2 受 councilMultiRound Pro 门钳制——Basic 未启用时降级单轮继续（不拒绝），输出标注「已按单轮执行——Pro 门」。' },
           autoReview: { type: 'boolean', default: true, description: 'Whether Galaxy adds the automatic review wave; defaults to true.' },
           seats: {
             type: 'array',

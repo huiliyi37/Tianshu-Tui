@@ -19,6 +19,7 @@ import {
   type WorkOrder,
   type WorkerResult,
 } from './work-order.js'
+import { STALL_TOOL_CALL_THRESHOLD } from './worker-continuation.js'
 import { toolArgSummary } from '../tui/tool-label.js'
 import { buildWorkerPrompt, buildWorkerRepairPrompt, buildFinalizationInstruction, workerOrderHasWriteTools } from './worker-prompts.js'
 import { reconcileCapturedWorkerFacts } from './worker-evidence.js'
@@ -69,6 +70,11 @@ export interface WorkerSessionConfig {
   compact: CompactionConfig
   /** Provider key used for this worker run (e.g. 'deepseek', 'openai'). */
   providerName?: string
+  /** Worker 端点 baseUrl 与显式慢思考声明——供 deriveWorkerStallMs 的
+   *  isSlowThinkingProvider 三级判定（名称/URL/配置），自定义 provider 名
+   *  不再漏判慢速窗口。 */
+  baseUrl?: string
+  slowThinking?: boolean
   /** Whether to use response_format: json_object on the repair turn (when the
    *  provider supports it) to force valid JSON output. The repair turn is a
    *  tool-free single-shot request, so json_object does not conflict with
@@ -708,16 +714,27 @@ export function buildMaxTurnsExhaustedResult(
   }
   const salvaged = salvageWorkerResult(latestText, order.id, parseError)
   if (salvaged) {
+    // 空跑标记（2026-08-10 worker 日志实证：rivet-continuation 两个 worker 撞
+    // max_turns 但 0 工具调用——纯推理空转被轮次切断）。工具调用 ≤ 阈值 =
+    // 产出停滞（等首字节/空转），failureReason 标 'stalled' 而非 'max_turns'，
+    // 让主控/议事会区分「空跑」与「真干活没干完」；续跑判据不含 stalled，
+    // 不会对空跑原样续跑再烧一轮预算。
+    // maxTurns 下限：预算 1-3 轮却只做 ≤3 次调用是「预算太小」不是「空跑」；
+    // 只有预算 ≥4 轮仍停滞才算纯推理空转（worker 日志实证：48 轮 0 工具调用）。
+    const stalled = maxTurns >= 4 && transcript.toolUses.length <= STALL_TOOL_CALL_THRESHOLD
     return {
       ...salvaged,
-      risks: [...salvaged.risks, `max-turns: exhausted without a final turn (budget ${maxTurns} turns, ${transcript.toolUses.length} tool calls) — findings salvaged from a mid-work report, treat as unverified leads`],
-      failureReason: 'max_turns',
+      risks: [...salvaged.risks, `${stalled ? 'stalled' : 'max-turns'}: exhausted without a final turn (budget ${maxTurns} turns, ${transcript.toolUses.length} tool calls) — findings salvaged from a mid-work report, treat as unverified leads`],
+      failureReason: stalled ? 'stalled' : 'max_turns',
     }
   }
+  const stalled = maxTurns >= 4 && transcript.toolUses.length <= STALL_TOOL_CALL_THRESHOLD
   const blocked = buildBlockedWorkerResult(
     order,
-    `max-turns: exhausted without a final turn. Worker used its full ${maxTurns}-turn budget while still exploring (${transcript.toolUses.length} tool calls issued, no verdict JSON produced). This is a deterministic budget failure — do NOT trust any prose the model wrote about missing context; re-dispatch with a bigger budget or a narrower scope.`,
-    'max_turns',
+    stalled
+      ? `stalled: exhausted without a final turn. Worker used its full ${maxTurns}-turn budget with only ${transcript.toolUses.length} tool call(s) — pure reasoning spin, no real work done. Re-dispatch with a narrower scope or check provider health; do NOT retry the same objective verbatim.`
+      : `max-turns: exhausted without a final turn. Worker used its full ${maxTurns}-turn budget while still exploring (${transcript.toolUses.length} tool calls issued, no verdict JSON produced). This is a deterministic budget failure — do NOT trust any prose the model wrote about missing context; re-dispatch with a bigger budget or a narrower scope.`,
+    stalled ? 'stalled' : 'max_turns',
   )
   return latestText.trim()
     ? {

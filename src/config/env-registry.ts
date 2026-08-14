@@ -3,8 +3,8 @@
  *
  * name/defaultHint/files 由 scripts/gen-env-registry.ts 生成，勿手改；
  * description 字段人工维护，重新生成时按 name 保留。
- * 最后生成：2026-08-08T13:52:47.926Z
- * 共 149 个变量。
+ * 最后生成：2026-08-13T18:50:28.964Z
+ * 共 153 个变量。
  *
  * 每个条目含：名称 / 默认值提示 / 引用文件 / 简要说明。
  * 当源码中新增 RIVET_* 引用但注册表未同步时，
@@ -114,6 +114,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     description: '',
   },
   {
+    name: 'RIVET_BUNDLED_RIPGREP_DIR',
+    defaultHint: '',
+    files: ['tools/grep.ts'],
+    description: '',
+  },
+  {
     name: 'RIVET_BUNDLED_SKILLS_DIR',
     defaultHint: '',
     files: ['skills/skill-loader.ts'],
@@ -158,8 +164,14 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_CONFIG_PATH',
     defaultHint: '',
-    files: ['tui/__tests__/settings-persist.test.ts', 'tui/__tests__/slash-commands.test.ts', 'tools/__tests__/tool-preset.test.ts', 'plugins/__tests__/integration/git-source-mirror-fallback.test.ts', 'config/paths.ts', 'config/__tests__/config-cli.test.ts', 'config/__tests__/layered-config.test.ts', 'config/__tests__/manager-editor.test.ts', 'config/__tests__/manager-fetch-search.test.ts', 'config/__tests__/manager-permission-dirs.test.ts', 'config/__tests__/manager-provider.test.ts', 'config/__tests__/manager-routing.test.ts', 'config/__tests__/manager-shell.test.ts', 'config/__tests__/manager-ui.test.ts', 'config/__tests__/manager-vision-model.test.ts', 'config/__tests__/preset-model-backfill.test.ts', 'config/__tests__/runtime-lean-aspect.test.ts', 'config/__tests__/runtime-lean.test.ts', '__tests__/bootstrap.test.ts'],
+    files: ['tui/__tests__/settings-persist.test.ts', 'tui/__tests__/slash-commands.test.ts', 'tools/__tests__/tool-preset.test.ts', 'plugins/__tests__/integration/git-source-mirror-fallback.test.ts', 'config/paths.ts', 'config/__tests__/config-cli.test.ts', 'config/__tests__/config-watcher.test.ts', 'config/__tests__/layered-config.test.ts', 'config/__tests__/manager-editor.test.ts', 'config/__tests__/manager-fetch-search.test.ts', 'config/__tests__/manager-permission-dirs.test.ts', 'config/__tests__/manager-provider.test.ts', 'config/__tests__/manager-routing.test.ts', 'config/__tests__/manager-shell.test.ts', 'config/__tests__/manager-ui.test.ts', 'config/__tests__/manager-vision-model.test.ts', 'config/__tests__/preset-model-backfill.test.ts', 'config/__tests__/runtime-lean-aspect.test.ts', 'config/__tests__/runtime-lean.test.ts', '__tests__/bootstrap.test.ts'],
     description: '',
+  },
+  {
+    name: 'RIVET_CONFIG_WATCH',
+    defaultHint: '',
+    files: ['config/config-watcher.ts', 'config/__tests__/config-watcher.test.ts'],
+    description: '=0 关闭 config HMR 热更（config-watcher 不 watch 配置文件）',
   },
   {
     name: 'RIVET_CONTROL_PLANE',
@@ -384,6 +396,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     description: '',
   },
   {
+    name: 'RIVET_HOOKS_DISABLED',
+    defaultHint: '',
+    files: ['agent/loop-factory.ts', 'agent/__tests__/loop-factory.test.ts'],
+    description: '逗号分隔的 CVM 管线禁用 hook id 列表，优先于 config.hooks.disabled（热更见 config-watcher）',
+  },
+  {
     name: 'RIVET_HYPERLINKS',
     defaultHint: '',
     files: ['tui/engine/ansi.ts'],
@@ -446,7 +464,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_LEAN_AUTO',
     defaultHint: '',
-    files: ['config/runtime-lean.ts', 'config/__tests__/runtime-lean.test.ts'],
+    files: ['config/__tests__/runtime-lean.test.ts'],
     description: '',
   },
   {
@@ -666,6 +684,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     description: '',
   },
   {
+    name: 'RIVET_RIPGREP_PATH',
+    defaultHint: '',
+    files: ['tools/grep.ts'],
+    description: '',
+  },
+  {
     name: 'RIVET_RTK',
     defaultHint: '',
     files: ['tools/bash.ts', 'tools/__tests__/bash.test.ts'],
@@ -674,7 +698,7 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_SANDBOX',
     defaultHint: '',
-    files: ['tools/bash.ts', 'tools/sandbox-profile.ts', 'tools/__tests__/sandbox-profile.test.ts'],
+    files: ['bootstrap.ts', 'tools/bash.ts', 'tools/sandbox-profile.ts', 'tools/__tests__/sandbox-profile.test.ts'],
     description: '追加可写根目录，平台分隔符分隔（POSIX 用 :，Windows 用 ;）。与工具链画像、会话授权合并。',
   },
   {

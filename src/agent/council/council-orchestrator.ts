@@ -77,7 +77,7 @@ export function buildSeatObjective(seat: CouncilSeat, draft: CouncilDraft): stri
     'PlanItem (additions[]) = { id, title, detail, files?: string[] } —— files 为该条目涉及的文件路径。',
     'challenges = [{ text, severity?: "advisory"|"blocking", gate?: string, itemId?: string }] ——',
     'severity:"blocking" 是否决级质疑（未化解前计划不得编译执行，慎用、必须给出具体依据）；',
-    'gate 填可验证的验收命令（如 "npx tsc --noEmit"、"npm test"），会编译进任务验收门波间强制执行；',
+    'gate 填可验证的验收命令（如 "npx tsc --noEmit"、"npm test"；结构/拆分类条目用 "npm run structure:check" 执行 max-lines 棘轮与架构 guard），会编译进任务验收门波间强制执行；',
     'itemId 指向被质疑的条目 id，缺省为全局质疑。',
     `Set authority to "${seat.authority}".`,
   ].join('\n')
@@ -147,7 +147,10 @@ export function classifySeatFailure(
   result: WorkerResult | undefined,
   parsed: SeatParseResult | null,
 ): SeatFailureClass {
-  if (result && result.status === 'blocked' && (result.failureReason === 'timeout' || result.failureReason === 'max_turns')) {
+  // stalled = 预算耗尽子类（轮次耗尽 + 空转），与 timeout/max_turns 同归
+  // budget_exhausted（2026-08-10 空跑标记接入流会归类）。
+  if (result && result.status === 'blocked'
+    && (result.failureReason === 'timeout' || result.failureReason === 'max_turns' || result.failureReason === 'stalled')) {
     return 'budget_exhausted'
   }
   if (parsed && !parsed.ok) return parsed.reason

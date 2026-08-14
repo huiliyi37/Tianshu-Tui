@@ -479,6 +479,32 @@ describe('excluded-path anchors dynamic appendix (spec 3c 动作 B)', () => {
   })
 })
 
+describe('goal-anchor dynamic appendix (spec 3c 动作 B 补强)', () => {
+  it('renders <current-goal> in the dynamic appendix only (cache-safe), with XML escaping', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      goalAnchor: '修复侧边栏宽度（<315px 防重叠>）& 悬浮位置',
+    }
+
+    const appendix = buildDynamicAppendix(ctx)
+    const stable = buildStableVolatileBlock(ctx)
+
+    assert.match(appendix, /<current-goal note="会话当前目标/)
+    assert.match(appendix, /修复侧边栏宽度（&lt;315px 防重叠&gt;）&amp; 悬浮位置/, '目标内容须经 XML 转义')
+    // cache-safe 纪律：只进 dynamic appendix，不进 stable volatile——
+    // 目标锚不得打碎冻结前缀。
+    assert.doesNotMatch(stable, /current-goal/)
+  })
+
+  it('renders nothing when absent or null (non-spark sessions: zero byte diff)', () => {
+    const absent = buildDynamicAppendix({ cwd: '/repo' })
+    assert.doesNotMatch(absent, /current-goal/)
+
+    const nulled = buildDynamicAppendix({ cwd: '/repo', goalAnchor: null })
+    assert.doesNotMatch(nulled, /current-goal/)
+  })
+})
+
 describe('worktree-warning dynamic appendix', () => {
   const base: VolatileContext = { cwd: '/project', gitStatus: '' }
 

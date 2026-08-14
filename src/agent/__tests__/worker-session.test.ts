@@ -389,11 +389,14 @@ describe('buildMaxTurnsExhaustedResult (2026-07-24 假 summary 事故)', () => {
     assert.match(note!.content, /session-manager/)
   })
 
-  it('空输出 → blocked 且不附 partial artifact', () => {
+  it('空输出 + 停滞调用数（预算 12 只做 3 次调用）→ blocked 标 stalled，不附 partial artifact', () => {
+    // 2026-08-10 空跑标记：预算 ≥4 轮却只做 ≤3 次工具调用 = 纯推理空转，
+    // failureReason 标 'stalled' 而非 'max_turns'，让主控区分「空跑」与「没干完」。
     const result = buildMaxTurnsExhaustedResult(makeOrder('wo_mt3'), exploringTranscript(3), '   ', 12)
     assert.ok(result)
     assert.equal(result!.status, 'blocked')
-    assert.equal(result!.failureReason, 'max_turns')
+    assert.equal(result!.failureReason, 'stalled')
+    assert.match(result!.summary, /stalled: exhausted without a final turn/)
     assert.equal(result!.artifacts.some(a => a.title === 'Max-turns worker partial output'), false)
   })
 

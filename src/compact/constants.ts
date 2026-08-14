@@ -162,8 +162,12 @@ export function summaryOutputBudgetChars(
 
 export interface CompactionConfig {
   enabled: boolean
-  autoThreshold: number
-  autoFloor: number
+  /** @deprecated Superseded by ratio-based policy (compactPolicyRatios).
+   *  Not read by the runtime — retained only for config compatibility. */
+  autoThreshold?: number
+  /** @deprecated Superseded by ratio-based policy (compactPolicyRatios).
+   *  Not read by the runtime — retained only for config compatibility. */
+  autoFloor?: number
   model: string
   /** Provider hosting the compaction model. When set together with `model`,
    *  compaction is routed to a dedicated cheap client (own cache). Optional. */

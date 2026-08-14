@@ -310,6 +310,18 @@ describe('BASH_WRITE_PATTERNS — deny bash writes by default', () => {
     assert.ok(bashCommandMayWrite('npm test >> test.log'))
   })
 
+  it('ignores no-op /dev/null redirects when classifying writes', () => {
+    assert.equal(bashCommandMayWrite('grep -n "lint" package.json 2>/dev/null'), false)
+    assert.equal(bashCommandMayWrite('cmd 2>/dev/null | head'), false)
+    assert.equal(bashCommandMayWrite('cmd >/dev/null 2>&1'), false)
+    assert.equal(bashCommandMayWrite('cmd 2> /dev/null'), false)
+  })
+
+  it('still treats redirects to real files as writes', () => {
+    assert.ok(bashCommandMayWrite('cmd 2> err.log'))
+    assert.ok(bashCommandMayWrite('echo hi > out.txt'))
+  })
+
   it('detects filesystem, git, and package-manager mutations', () => {
     assert.ok(BASH_WRITE_PATTERNS.some(p => p.test('touch src/new.ts')))
     assert.ok(bashCommandMayWrite('git add src/a.ts && git commit -m "x"'))

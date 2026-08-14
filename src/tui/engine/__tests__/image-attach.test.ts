@@ -64,3 +64,33 @@ test('loadImageAttachment rejects unsupported formats', async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('loadImageAttachment advertises resized JPEG bytes as PNG', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-img-'))
+  const path = join(dir, 'large.jpg')
+  const oversizedJpeg = Buffer.concat([
+    Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46]),
+    Buffer.alloc(192),
+  ])
+  writeFileSync(path, oversizedJpeg)
+  let resizeCalls = 0
+  try {
+    const attachment = await loadImageAttachment(path, {
+      maxBytes: 100,
+      maxEdge: 32,
+      resizeImage: async () => {
+        resizeCalls++
+        return Buffer.from(PNG_B64, 'base64')
+      },
+    })
+    const encoded = attachment.dataUrl.split(',')[1]!
+    const payload = Buffer.from(encoded, 'base64')
+
+    assert.equal(resizeCalls, 1)
+    assert.equal(attachment.mime, 'image/png')
+    assert.ok(attachment.dataUrl.startsWith('data:image/png;base64,'))
+    assert.equal(detectImageMime(payload, path), 'image/png')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

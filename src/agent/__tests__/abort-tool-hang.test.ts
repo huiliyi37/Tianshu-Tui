@@ -135,3 +135,45 @@ describe('AgentLoop — abort settles when stuck in tool-batch approval (0B)', (
     assert.equal(secondRan, true, '中止后新 run 应真正执行 stream（_running 已复位）')
   })
 })
+
+/**
+ * GREEN (2026-08-10 desktop 写文件中断修复): abort 路径下 run() 的 finally 必须
+ * drain 持久化 writeChain。现场：addToolResults 已提交（executeBatch 测试证明），
+ * 但正常收尾的 runPostSession → runBeforeComplete 被 abort 异常路径跳过 →
+ * pending append 不落盘 → 恢复时 preflight 合成"会话中断"占位。
+ */
+describe('AgentLoop — abort path drains pending persist writes (finally)', () => {
+  it('calls _persistDrain when run() settles via abort', async () => {
+    const client = {
+      stream: async (_r: unknown, cb: StreamCallbacks) => { emitToolUse(cb) },
+    } as unknown as StreamClient
+    const agent = makeAgent(client)
+
+    let drained = 0
+    ;(agent as any)._persistDrain = async () => { drained++ }
+
+    const p = agent.run('do it', cbs({ onApprovalRequired: () => new Promise<boolean>(() => {}) }))
+    await new Promise(r => setTimeout(r, 80))
+    agent.abort()
+    await p
+
+    assert.ok(drained >= 1, 'abort 收尾必须 drain 持久化（runPostSession 或 finally 至少一次）')
+  })
+
+  it('normal completion also drains (no regression, idempotent)', async () => {
+    const client = {
+      stream: async (_r: unknown, cb: StreamCallbacks) => {
+        cb.onTextDelta('ok')
+        cb.onContentBlock({ type: 'text', text: 'ok' } as never)
+        cb.onStopReason('end_turn', { input_tokens: 3, output_tokens: 2 })
+      },
+    } as unknown as StreamClient
+    const agent = makeAgent(client)
+
+    let drained = 0
+    ;(agent as any)._persistDrain = async () => { drained++ }
+
+    await agent.run('normal', cbs())
+    assert.ok(drained >= 1, '正常完成路径同样触发 drain（runPostSession 或 finally）')
+  })
+})

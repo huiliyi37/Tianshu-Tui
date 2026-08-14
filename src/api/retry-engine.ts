@@ -86,6 +86,21 @@ function applyDelayJitter(delayMs: number): number {
 // Retry types
 // ---------------------------------------------------------------------------
 
+/**
+ * Terminal budget-exhaustion error thrown by `withStructuredRetry` when the
+ * `maxTotalDurationMs` budget is spent. Distinct class (not just a message
+ * pattern) so the engine's own catch can recognize it before the classifier —
+ * its message matches no classifier pattern and would otherwise be judged
+ * unknown/retryable, spinning one more backoff delay and drifting the
+ * user-facing "across N attempt(s)" count (2026-08-09 911s 挂死事故遗留).
+ */
+export class RetryBudgetExhaustedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RetryBudgetExhaustedError'
+  }
+}
+
 export interface RetryOptions {
   /** Upper bound on total retry attempts (default: 5). */
   maxTotalRetries?: number
@@ -137,7 +152,7 @@ export async function withStructuredRetry<T>(
 
       // Check global duration budget
       if (maxDuration && Date.now() - startTime > maxDuration) {
-        throw new Error(
+        throw new RetryBudgetExhaustedError(
           `Retry budget exhausted: total retry time exceeded ${Math.round(maxDuration / 1000)}s ` +
           `across ${attempt} attempt(s). Provider may be unavailable — try again later or switch provider.`,
         )
@@ -145,6 +160,14 @@ export async function withStructuredRetry<T>(
 
       return await fn()
     } catch (err: unknown) {
+      // Engine-internal sentinel: budget exhaustion is terminal — rethrow
+      // before classification. Feeding it to classifyApiError would judge it
+      // unknown/retryable (its message matches no pattern) and burn one more
+      // backoff delay while incrementing the attempt count in the message.
+      if (err instanceof RetryBudgetExhaustedError) {
+        throw err
+      }
+
       const classified = classifyApiError(err)
 
       // Non-retryable → propagate immediately

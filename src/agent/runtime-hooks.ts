@@ -269,6 +269,19 @@ export class RuntimeHookPipeline {
     }
   }
 
+  /** 运行时替换禁用集（config HMR 热更入口）。runPhase 每次检查
+   *  disabledHookIds.has，set 后下一轮立即生效；getManifest 自动反映新状态。
+   *  只影响运行时行为（跳过/执行），不改变注册集——装配仍由
+   *  createDefaultRuntimeHooks 编译期决定。 */
+  setDisabledHookIds(ids: Iterable<string>): void {
+    this.disabledHookIds = new Set(ids)
+  }
+
+  /** 查询单个 hook 当前是否启用（热更后与 getManifest 同源）。 */
+  isEnabled(name: string): boolean {
+    return !this.disabledHookIds.has(name)
+  }
+
   getManifest(): RuntimeHookManifestEntry[] {
     return this.registeredHooks.map(hook => ({
       id: hook.name,

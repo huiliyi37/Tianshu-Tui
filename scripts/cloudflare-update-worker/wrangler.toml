@@ -8,3 +8,8 @@ compatibility_date = "2024-09-01"
 routes = [
   { pattern = "update.plotstudio.cn/*", zone_name = "plotstudio.cn" }
 ]
+
+# /pay/* 转发到履约服（同账号 workers.dev 子请求会被 Cloudflare 拦，走 Service Binding）。
+[[services]]
+binding = "FULFILL_SERVICE"
+service = "tianshu-fulfillment-server"

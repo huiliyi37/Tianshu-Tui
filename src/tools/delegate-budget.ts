@@ -12,9 +12,9 @@ import { z } from 'zod'
 import type { WorkerBudget } from '../agent/work-order.js'
 
 export const MIN_DELEGATE_MAX_TURNS = 2
-export const MAX_DELEGATE_MAX_TURNS = 80
+export const MAX_DELEGATE_MAX_TURNS = 100
 export const MIN_DELEGATE_TIMEOUT_MS = 30_000
-export const MAX_DELEGATE_TIMEOUT_MS = 1_800_000
+export const MAX_DELEGATE_TIMEOUT_MS = 2_700_000
 
 export const delegateMaxTurnsSchema = z.number().int()
   .min(MIN_DELEGATE_MAX_TURNS).max(MAX_DELEGATE_MAX_TURNS).optional()
@@ -23,7 +23,7 @@ export const delegateTimeoutMsSchema = z.number().int()
   .min(MIN_DELEGATE_TIMEOUT_MS).max(MAX_DELEGATE_TIMEOUT_MS).optional()
 
 export const MAX_TURNS_TOOL_DESCRIPTION =
-  `可选，本次派发的轮次预算（${MIN_DELEGATE_MAX_TURNS}-${MAX_DELEGATE_MAX_TURNS}）。默认按 profile 走（只读 24 / 写工 32）。查一个具体位置给 6-10 就够，扫一遍模块给 40+。预算耗尽会自动续跑，但续跑要重新盘点上下文，一次给够更划算。`
+  `可选，本次派发的轮次预算（${MIN_DELEGATE_MAX_TURNS}-${MAX_DELEGATE_MAX_TURNS}）。默认按 profile 走（只读 24 / 写工 48）。查一个具体位置给 6-10 就够，扫一遍模块给 40+。预算耗尽会自动续跑，但续跑要重新盘点上下文，一次给够更划算。`
 
 export const TIMEOUT_MS_TOOL_DESCRIPTION =
   `可选，本次派发的时间预算（毫秒，${MIN_DELEGATE_TIMEOUT_MS}-${MAX_DELEGATE_TIMEOUT_MS}）。默认按 profile 走。外层工具超时会跟着放宽，不必额外操心。`

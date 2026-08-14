@@ -97,15 +97,15 @@ describe('verifyObligations + formatObligationReport — 交付前核验', () =>
     { id: 'deferred_decision:2', kind: 'deferred_decision', text: '暂缓项待裁', source: 'tianfu' },
   ]
 
-  it('白名单 gate 真实执行判 settled/unsettled；非白名单与暂缓项 → manual', () => {
+  it('白名单 gate 真实执行判 settled/unsettled；非白名单与暂缓项 → manual', async () => {
     const ran: string[] = []
-    const results = verifyObligations(entries, cmd => { ran.push(cmd); return { ok: false, detail: '3 failed' } })
+    const results = await verifyObligations(entries, cmd => { ran.push(cmd); return { ok: false, detail: '3 failed' } })
     assert.deepEqual(ran, ['npx tsc --noEmit'], '只执行白名单形状命令')
     assert.deepEqual(results.map(r => r.status), ['unsettled', 'manual', 'manual'])
   })
 
-  it('报告：unsettled 强警告，manual 要求逐项披露；空账零输出', () => {
-    const results = verifyObligations(entries, () => ({ ok: false, detail: 'x' }))
+  it('报告：unsettled 强警告，manual 要求逐项披露；空账零输出', async () => {
+    const results = await verifyObligations(entries, () => ({ ok: false, detail: 'x' }))
     const report = formatObligationReport(results).join('\n')
     assert.match(report, /议事会义务账核验/)
     assert.match(report, /验收 gate 未通过/)
@@ -113,9 +113,9 @@ describe('verifyObligations + formatObligationReport — 交付前核验', () =>
     assert.deepEqual(formatObligationReport([]), [])
   })
 
-  it('gate 全过 → 全 settled 无警告', () => {
+  it('gate 全过 → 全 settled 无警告', async () => {
     const gateOnly = entries.slice(0, 1)
-    const results = verifyObligations(gateOnly, () => ({ ok: true }))
+    const results = await verifyObligations(gateOnly, () => ({ ok: true }))
     assert.equal(results[0]!.status, 'settled')
     const report = formatObligationReport(results).join('\n')
     assert.match(report, /1\/1 已清偿/)

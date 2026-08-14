@@ -29,6 +29,7 @@ describe('ResourceSensor', () => {
     const sensor = new ResourceSensor({
       memoryLimitBytes: 1_000,
       memoryUsage: () => ({ rss: rss += 100, heapUsed: rss / 2 }),
+      initialMemoryCooldownSamples: 0, // bypass cooldown exclusion — tests the regression math itself
     })
 
     sensor.sampleMemory()

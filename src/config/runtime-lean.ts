@@ -123,9 +123,8 @@ export function isRuntimeLean(configLean?: boolean, cwd?: string): boolean {
 
   const user = readRuntimeSection(userConfigPath())
   if (user?.lean === true) return true
-  // 桌面 sidecar：Rust 侧判定低内存（≤8GB）注入的信号，作为最后回退。
-  // 显式 env（RIVET_LEAN=1/0）与 config runtime.lean 恒优先——用户可关。
-  if (process.env.RIVET_LEAN_AUTO === '1') return true
+  // 2026-08-09 产品决策：删除 RIVET_LEAN_AUTO 最后回退——不再按内存自动降级，
+  // 8GB 机器默认全功能；低内存由桌面端弹一次性引导，用户自主选择开启。
   return false
 }
 

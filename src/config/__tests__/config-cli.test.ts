@@ -1,9 +1,10 @@
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, realpathSync } from 'node:fs'
+import { mkdtempSync, rmSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { loadConfig, runConfigCLI, type ConfigCliIO } from '../manager.js'
+import { resolveTransportType } from '../../mcp/transport-factory.js'
 
 function makeIo() {
   const stdout: string[] = []
@@ -97,6 +98,16 @@ describe('runConfigCLI provider commands', () => {
     await runConfigCLI(['setup', 'deepseek', '--key-env', '--default'], io)
     assert.deepEqual(exits, [1])
     assert.match(stderr.join('\n'), /--key-env requires a value/)
+  })
+
+  it('configures add-sse servers to use the legacy SSE transport', async () => {
+    const { io } = makeIo()
+    await runConfigCLI(['mcp', 'add-sse', 'legacy', 'http://localhost:3001/sse'], io)
+
+    const server = loadConfig().mcp.servers['legacy']
+    assert.ok(server)
+    assert.equal(server.transportHint, 'sse')
+    assert.equal(resolveTransportType(server), 'sse-legacy')
   })
 })
 
@@ -466,5 +477,56 @@ describe('runConfigCLI directory grants', () => {
     await runConfigCLI(['allow-dir'], io)
     assert.deepEqual(exits, [1])
     assert.match(stderr.join('\n'), /Usage: rivet config allow-dir/)
+  })
+})
+
+describe('runConfigCLI hook 装配命令（P2 Wave 3，L2 审查修复）', () => {
+  let dir: string
+  let cfgPath: string
+  let prevConfigPath: string | undefined
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-cli-hooks-'))
+    cfgPath = join(dir, 'config.json')
+    prevConfigPath = process.env.RIVET_CONFIG_PATH
+    process.env.RIVET_CONFIG_PATH = cfgPath
+    const base = loadConfig() as unknown as Record<string, unknown>
+    delete (base as { hooks?: unknown }).hooks
+    writeFileSync(cfgPath, JSON.stringify(base))
+  })
+
+  afterEach(() => {
+    if (prevConfigPath === undefined) delete process.env.RIVET_CONFIG_PATH
+    else process.env.RIVET_CONFIG_PATH = prevConfigPath
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('list-hooks 输出配置面（config/env/effective 三行）', async () => {
+    const { stdout, io } = makeIo()
+    await runConfigCLI(['list-hooks'], io)
+    const out = stdout.join('\n')
+    assert.match(out, /hooks\.disabled \(config\): \[\]/)
+    assert.match(out, /effective disabled: \[\]/)
+  })
+
+  it('set-hook-disabled 写入 config 且可被 --enable 移除', async () => {
+    const { io } = makeIo()
+    await runConfigCLI(['set-hook-disabled', 'dream-distill'], io)
+    assert.deepEqual(loadConfig().hooks.disabled, ['dream-distill'])
+
+    // 追加第二个
+    await runConfigCLI(['set-hook-disabled', 'kick'], io)
+    assert.deepEqual(loadConfig().hooks.disabled, ['dream-distill', 'kick'])
+
+    // --enable 移除
+    await runConfigCLI(['set-hook-disabled', 'dream-distill', '--enable'], io)
+    assert.deepEqual(loadConfig().hooks.disabled, ['kick'])
+  })
+
+  it('set-hook-disabled 缺参时 cliExit(1) 且输出 Usage', async () => {
+    const { stderr, exits, io } = makeIo()
+    await runConfigCLI(['set-hook-disabled'], io)
+    assert.deepEqual(exits, [1])
+    assert.match(stderr.join('\n'), /Usage: rivet config set-hook-disabled/)
   })
 })

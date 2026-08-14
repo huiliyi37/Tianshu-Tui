@@ -31,6 +31,7 @@ import {
   getApiKeyStatus,
   setupProvider,
   registerProvider,
+  updateProviderTunables,
   removeProvider,
   removeModel,
   setDefaultProvider,
@@ -147,6 +148,8 @@ export interface ProviderListItem {
   models: { id: string; alias?: string; supportsVision?: boolean }[]
   isPreset: boolean
   allowProFallback: boolean
+  /** 三态：undefined = 按名称/baseUrl 启发式；true/false 压过启发式。 */
+  slowThinking?: boolean
 }
 
 export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandler> {
@@ -169,6 +172,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
           models: p.models.map(m => ({ id: m.id, alias: m.alias, contextWindow: m.contextWindow, maxTokens: m.maxTokens, supportsVision: m.supportsVision })),
           isPreset: resolvePreset(name) !== undefined,
           allowProFallback: p.allowProFallback ?? false,
+          ...(p.slowThinking !== undefined ? { slowThinking: p.slowThinking } : {}),
         })
       }
       providers.sort((a, b) => {
@@ -222,10 +226,8 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
     }, apiToken),
 
     'POST /config/providers/custom': withAuth((body) => {
-      // 凭空创建一个 provider（不依赖预设）——支持 Ollama/vLLM/OpenAI 直连/
-      // 第三方兼容端点。与 setupProvider 区别：后者要求 providerName 在预设或
-      // 已存在，本端点走统一写入核心 registerProvider 从零 materialize。
-      const { providerName, apiKey, apiKeyEnv, baseUrl, makeDefault, model, models, allowProFallback, protocol, force } = body as {
+      // Materialize a custom provider through the unified registration core.
+      const { providerName, apiKey, apiKeyEnv, baseUrl, makeDefault, model, models, allowProFallback, protocol, force, slowThinking } = body as {
         providerName?: string
         apiKey?: string
         apiKeyEnv?: string
@@ -236,6 +238,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         allowProFallback?: boolean
         protocol?: 'openai' | 'anthropic'
         force?: boolean
+        slowThinking?: boolean
       }
       if (!providerName) return { status: 400, body: { error: 'providerName is required' } }
       if (!baseUrl) return { status: 400, body: { error: 'baseUrl is required' } }
@@ -267,8 +270,41 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
           makeDefault,
           allowProFallback,
           force,
+          ...(slowThinking !== undefined ? { slowThinking } : {}),
         })
         return { status: 200, body: { ok: true, providerName } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // 字段级更新已存在 provider 的 tunable 参数（slowThinking / firstByteTimeoutMs /
+    // thinkingStallTimeoutMs）。fields 中值为 null 的键 = 删除恢复启发式——
+    // undefined 属性会被 JSON.stringify 丢弃（传输层静默失效），null 才是
+    // 可传输的删键编码（manager 层 null 与 undefined 同视为删键）。
+    'POST /config/providers/tunables': withAuth((body) => {
+      const { providerName, fields } = (body ?? {}) as {
+        providerName?: string
+        fields?: Record<string, unknown>
+      }
+      if (!providerName) return { status: 400, body: { error: 'providerName is required' } }
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
+        return { status: 400, body: { error: 'fields object is required' } }
+      }
+      try {
+        const provider = updateProviderTunables(providerName, fields)
+        return {
+          status: 200,
+          body: {
+            ok: true,
+            providerName,
+            tunables: {
+              slowThinking: provider.slowThinking,
+              firstByteTimeoutMs: provider.firstByteTimeoutMs,
+              thinkingStallTimeoutMs: provider.thinkingStallTimeoutMs,
+            },
+          },
+        }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }
@@ -555,12 +591,12 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
     }, apiToken),
 
     'PUT /config/approval': withAuth((body) => {
-      const { approval } = (body ?? {}) as { approval?: unknown }
+      const { approval, unsandboxed } = (body ?? {}) as { approval?: unknown; unsandboxed?: unknown }
       if (approval === undefined) {
         return { status: 400, body: { error: 'approval is required' } }
       }
       try {
-        return { status: 200, body: { ok: true, ...setApprovalConfig({ approval }) } }
+        return { status: 200, body: { ok: true, ...setApprovalConfig({ approval, unsandboxed }) } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

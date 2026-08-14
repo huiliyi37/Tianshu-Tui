@@ -47,6 +47,9 @@
 
 **方式 A：桌面端（开箱即用）** —— 从 [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载：macOS `.dmg` · Windows `.msi` · Linux `.AppImage`。
 
+> **Windows 支持范围**：Windows 10（1809+，建议 22H2）/ Windows 11。界面渲染依赖 **WebView2 Runtime**——Win11 与多数 Win10 已预装；缺失时安装器会自动下载（离线环境可到 <https://aka.ms/webview2installer> 手动安装）。「设置 → 运行时与关于」页可查看当前 WebView2 版本。
+> **Win10 平板模式已知行为**：平板模式下切换应用会把上一个应用滑出屏幕——computer_use 的快照已做遮挡/后台自愈（PrintWindow 渲染），无需关闭平板模式。
+
 **方式 B：npm 全局安装（推荐，使用命令行）** —— 已发布为 `tianshu-tui`，无需本地构建，且每次启动自动检查更新：
 
 ```bash

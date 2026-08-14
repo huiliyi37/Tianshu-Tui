@@ -2,6 +2,7 @@ import { defineConfig, type Options } from 'tsup'
 import { builtinModules } from 'node:module'
 import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
+import { SCAN_ALLOWED, RUNTIME_BUNDLED, verifyConsistency } from './scripts/external-deps.js'
 
 const require = createRequire(import.meta.url)
 const pkgJson = require('./package.json') as { version: string; scripts?: Record<string, string> }
@@ -9,6 +10,32 @@ const pkgVersion = pkgJson.version
 // Used by onSuccess to tell "tsup ran standalone" from "tsup is step 1 of a
 // chain that stages the runtime payload next".
 const pkgScripts = pkgJson.scripts ?? {}
+
+// 强制内联的纯 JS 依赖（不进 dist/node_modules）。与 RUNTIME_BUNDLED 互斥——
+// 单一数据源不变量 3（exceljs 曾同时出现在 noExternal 与 ROOTS，2026-08-10 收敛）。
+const FORCE_BUNDLED = [
+  'string-width',
+  'get-east-asian-width',
+  'chalk',
+  'ink',
+  'react',
+  'diff',
+  'undici',
+  'zod',
+  '@modelcontextprotocol/sdk',
+  'turndown',
+  'pixelmatch',
+  'pngjs',
+]
+
+// 构建期自检：外部依赖清单漂移在构建时 fail loud，而不是发布后缺包。
+verifyConsistency()
+{
+  const overlap = FORCE_BUNDLED.filter((n) => RUNTIME_BUNDLED.includes(n))
+  if (overlap.length > 0) {
+    throw new Error(`tsup: noExternal 与 RUNTIME_BUNDLED 重叠: ${overlap.join(', ')} — 见 scripts/external-deps.js 不变量 3`)
+  }
+}
 
 // src/pro/index.ts 作为独立 entry：闭源模块产物 dist/pro/index.js，供
 // loadProModule 的 dist 形态候选路径加载（桌面 sidecar 运行时）。
@@ -136,45 +163,12 @@ export default defineConfig({
   // (native, lazily required in syntax-check), and the native/wasm packages that
   // are dynamically imported behind feature gates (better-sqlite3 via
   // native-resolver, @ast-grep/*, web-tree-sitter, tree-sitter-wasms, typescript).
-  external: [
-    'esbuild',
-    /^node:/,
-    // Bare-specifier node builtins (e.g. `assert`, `fs`) so esbuild externalizes
-    // them instead of routing CJS deps' internal `require('assert')` through a
-    // throwing __require shim (undici hit exactly this). node: forms covered above.
-    ...builtinModules,
-    'better-sqlite3',
-    '@ast-grep/napi',
-    '@ast-grep/lang-json',
-    '@ast-grep/lang-python',
-    'web-tree-sitter',
-    'tree-sitter-wasms',
-    'typescript',
-    // Optional dev-only devtools dependency of ink; not installed and only
-    // reached when DEV devtools are enabled. Keep it external so bundling ink
-    // doesn't fail on the missing module.
-    'react-devtools-core',
-    // Optional Office docx reader (npm i mammoth for .docx support without LibreOffice)
-    'mammoth',
-  ],
-  noExternal: [
-    'string-width',
-    'get-east-asian-width',
-    'chalk',
-    'ink',
-    'react',
-    'diff',
-    'undici',
-    'zod',
-    '@modelcontextprotocol/sdk',
-    'turndown',
-    'pixelmatch',
-    'pngjs',
-    // .xlsx 提取（doc-extract.ts）。必须内联而不能留作可选外部依赖：xlsx 的引擎
-    // 链是 exceljs → soffice，而桌面包不带 LibreOffice、macOS 的 textutil 也只
-    // 读 docx——缺了它，2.29.0 的 excel 文档附件在多数机器上直接失效。
-    'exceljs',
-  ],
+  // 单一数据源：scripts/external-deps.js 的 SCAN_ALLOWED（随包分发 + 惰性
+  // 解析全集）+ node builtins。Bare-specifier builtins（assert/fs 等）也
+  // externalize，避免 esbuild 把 CJS 依赖内部 require('assert') 路由到抛错的
+  // __require shim（undici 曾命中）。node: 形式由 /^node:/ 覆盖。
+  external: [...SCAN_ALLOWED, /^node:/, ...builtinModules],
+  noExternal: FORCE_BUNDLED,
   esbuildPlugins: [],
   // platform:node makes esbuild externalize bare node builtin requires (e.g.
   // undici's internal `require('assert')`) instead of emitting a throwing

@@ -479,9 +479,19 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
         // Sessions created during init may have missed the first tool snapshot.
         sharedRuntime.sessions?.injectMcpTools(mgr.getAllTools())
       }
-      serverLogger.warn(`MCP: ${mgr.getStates().filter(s => s.status === 'connected').length} servers connected, ${mgr.getAllTools().length} tools`)
+      const mcpStates = mgr.getStates()
+      const connected = mcpStates.filter(s => s.status === 'connected').length
+      const failed = mcpStates.filter(s => s.status === 'error' || s.status === 'degraded')
+      if (failed.length > 0) {
+        // Fail loud: silently missing MCP tools is worse than a noisy boot.
+        serverLogger.error(`MCP: ${connected} connected, ${mgr.getAllTools().length} tools, ${failed.length} failed:`, {
+          failedServers: failed.map(s => `${s.serverId}${s.error ? ` — ${s.error}` : ''}${s.errorHint ? ` (${s.errorHint})` : ''}`),
+        })
+      } else {
+        serverLogger.warn(`MCP: ${connected} servers connected, ${mgr.getAllTools().length} tools`)
+      }
     } catch (err) {
-      serverLogger.warn('MCP initialization failed:', { error: (err as Error)?.message ?? String(err) })
+      serverLogger.error('MCP initialization failed:', { error: (err as Error)?.message ?? String(err) })
     }
   })()
 
@@ -728,8 +738,22 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
     buildHealthRoute(sessions, startedAt, version, apiToken, () =>
       opts.ephemeral ? true : sessionRegistry !== undefined,
     () => resolveServeContext().configured,
-    () => loopHealth.snapshot(),
-    ),
+    () => {
+      const snap = loopHealth.snapshot()
+      // 2026-08-09 卡顿归因遥测：>2s 的事件循环尖峰落 sidecar 日志（带堆/RSS），
+      // 让桌面端 degraded 横幅事后可区分 GC / swap / 同步阻塞（此前横幅亮了
+      // 却无任何数据可查，2026-08-09 首轮响应排查的观测缺口）。仅尖峰时写，
+      // 健康路径零开销。完全卡死时 /health 当窗答不出——尖峰记在恢复后首个
+      // 响应的 maxMs 里（loop-health.ts 注释的窗口语义），正好够归因。
+      if (snap.maxMs > 2000) {
+        const mem = process.memoryUsage()
+        console.warn(
+          `[loop-lag] event-loop stall: max=${Math.round(snap.maxMs)}ms p99=${Math.round(snap.p99Ms)}ms ` +
+          `heapUsed=${Math.round(mem.heapUsed / 1048576)}MB rss=${Math.round(mem.rss / 1048576)}MB`,
+        )
+      }
+      return snap
+    }),
   )
 
   // Greeting route: algorithm templates + flash LLM for the desktop welcome page.

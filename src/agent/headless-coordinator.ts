@@ -43,8 +43,6 @@ export function buildModelCards(provider: ProviderConfig): ModelCapabilityCard[]
 
 const HEADLESS_COMPACT: CompactionConfig = {
   enabled: false,
-  autoThreshold: 800_000,
-  autoFloor: 500_000,
   model: 'flash',
 }
 
@@ -90,7 +88,7 @@ export function createHeadlessCoordinator(input: HeadlessCoordinatorInput): Dele
       cwd: input.cwd,
       // Far backstop only — the work order budget (clamped via clampWorkerMaxTurns)
       // is the real turn controller.
-      maxTurns: 40,
+      maxTurns: 100,
       contextWindow: ctxWindow,
       compact: HEADLESS_COMPACT,
       activeClaims: [],

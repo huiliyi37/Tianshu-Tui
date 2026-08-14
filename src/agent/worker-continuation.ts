@@ -20,8 +20,12 @@ import type { WorkerResult } from './work-order.js'
  *  KV-cache 压缩将每轮上下文成本降至传统 attention 的约 1/5–1/10，4 轮续跑基本
  *  不会因 KV cache 膨胀导致退化。收益：减少 hard-fail（blocked），增加 partial
  *  result salvage 概率。外层 timeout 相应增大（3x → 5x）。
- */
-export const MAX_BUDGET_CONTINUATIONS = 4
+ *
+ *  4→6（2026-08-10 桌面 starflow 会话实证）：写工预算 300→600s 后，长 shard
+ *  单轮仍可能撞墙钟；续跑撞顶 "续跑 3/4 · 时间预算耗尽" 意味着改了一半的
+ *  partial 被放弃。每轮续跑字节都是热前缀缓存（成本 ≈ 一轮推理），多给 2 轮
+ *  续跑比让 partial 白扔更省总轮次。外层 timeout 已按 runs 放大，无硬截断风险。 */
+export const MAX_BUDGET_CONTINUATIONS = 6
 
 /**
  * 停滞判据：一轮预算耗尽时，工具调用数 ≤ 此值的轮次视为「产出停滞」——墙钟基本
@@ -81,7 +85,7 @@ export type ContinuationDecision =
 export function decideContinuation(input: ContinuationInput): ContinuationDecision {
   const reason = input.result.failureReason
   if (!reason || !CONTINUABLE_REASONS.has(reason)) {
-    return { proceed: false, skipReason: `failureReason=${reason ?? 'none'} 不属于预算耗尽` }
+    return { proceed: false, skipReason: `failureReason=${reason ?? 'none'} 不属于可续跑原因（注意：stalled 是预算耗尽的空跑子类，同样不续跑——空跑原样续跑只会再烧一轮预算）` }
   }
   if (input.aborted) {
     return { proceed: false, skipReason: '调用方已中止——用户按了停，不要自作主张接着跑' }
@@ -129,7 +133,7 @@ export interface HandsContinuationInput {
 export function decideHandsContinuation(input: HandsContinuationInput): ContinuationDecision {
   const reason = input.result.failureReason
   if (!reason || !CONTINUABLE_REASONS.has(reason)) {
-    return { proceed: false, skipReason: `failureReason=${reason ?? 'none'} 不属于预算耗尽` }
+    return { proceed: false, skipReason: `failureReason=${reason ?? 'none'} 不属于可续跑原因（注意：stalled 是预算耗尽的空跑子类，同样不续跑——空跑原样续跑只会再烧一轮预算）` }
   }
   if (input.aborted) {
     return { proceed: false, skipReason: '调用方已中止——用户按了停，不要自作主张接着跑' }

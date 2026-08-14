@@ -32,6 +32,18 @@ describe('isPrivateIP', () => {
     assert.equal(isPrivateIP('::1'), true)
   })
 
+  it('detects IPv4-mapped private IPv6 addresses', () => {
+    assert.equal(isPrivateIP('::ffff:127.0.0.1'), true)
+    assert.equal(isPrivateIP('::ffff:10.0.0.1'), true)
+    assert.equal(isPrivateIP('::ffff:a9fe:a9fe'), true)
+  })
+
+  it('detects reserved IPv6 ranges', () => {
+    assert.equal(isPrivateIP('::'), true)
+    assert.equal(isPrivateIP('fe90::1'), true)
+    assert.equal(isPrivateIP('ff02::1'), true)
+  })
+
   it('allows public IPv6', () => {
     assert.equal(isPrivateIP('2001:4860:4860::8888'), false)
   })

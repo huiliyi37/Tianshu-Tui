@@ -14,6 +14,7 @@ import {
   WORKER_RESULT_SUBMIT_SCHEMA,
   WorkerResultParseError,
   WRITE_WORKER_TOOLS,
+  clampWorkerMaxTurns,
 } from '../work-order.js'
 
 describe('work-order contract', () => {
@@ -262,8 +263,9 @@ describe('work-order contract', () => {
     assert.equal(order.disallowedTools.includes('delegate_task'), true)
     assert.equal(order.disallowedTools.includes('delegate_batch'), true)
     // Self-contained shards run a full implement+verify loop, so write workers
-    // get a generous turn budget (raised from 14 — flash has a 1M window).
-    assert.equal(order.budget.maxTurns, 32)
+    // get a generous turn budget (raised from 14, then 32→48 with the 600s
+    // wall-clock alignment — flash has a 1M window).
+    assert.equal(order.budget.maxTurns, 48)
     assert.ok(order.dedupeKey.startsWith('write:'))
   })
 
@@ -742,5 +744,27 @@ describe('work-order task constraints', () => {
     const r = buildPolicyCancelledResult(order, 'quorum k=2')
     assert.equal(r.groupId, 'replica-set-a')
     assert.equal(r.objective, 'find the bug')
+  })
+})
+
+/**
+ * Regression (2026-08-10 c8108f646 审查 HIGH): runtime factory 默认 maxTurns:40
+ * 曾把写工 order 预算 48 / 显式 100 经 clampWorkerMaxTurns 静默截断为 40——
+ * 上轮"写工 32→48"放宽在生产路径从未生效。修复后 runtime 默认提到 100，
+ * clamp 语义不变（min），48/100 不再被截断。此测试钉死：runtime 默认必须
+ * ≥ 显式预算上限，否则放大类改动会再次"构建≠接线≠有效"。
+ */
+describe('clampWorkerMaxTurns — runtime default must not cap explicit budgets', () => {
+  it('write-order budget 48 survives the runtime-default clamp', () => {
+    assert.equal(clampWorkerMaxTurns(100, 48), 48, '写工 48 轮预算不能被 runtime 默认截断')
+  })
+
+  it('explicit budget 100 survives the runtime-default clamp', () => {
+    assert.equal(clampWorkerMaxTurns(100, 100), 100, '显式 100 轮预算不能被 runtime 默认截断')
+  })
+
+  it('tighter per-profile caps still bite (min semantics preserved)', () => {
+    assert.equal(clampWorkerMaxTurns(100, 6), 6, 'reviewer=6 等紧预算仍应生效')
+    assert.equal(clampWorkerMaxTurns(100, 24), 24, '只读工 24 轮仍应生效')
   })
 })

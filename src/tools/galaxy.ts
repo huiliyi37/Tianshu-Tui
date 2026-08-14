@@ -16,7 +16,7 @@ import { z } from 'zod'
 import { deriveStableWorkOrderId, type CoordinatorRun, type DelegationRequest } from '../agent/coordinator.js'
 import { classifyProfile } from '../agent/coordination-policy.js'
 import { aggregationPolicyKinds, aggregationPolicySchema, type AggregationPolicy, type WorkOrderKind } from '../agent/work-order.js'
-import { profileIsWriteCapable, profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
+import { profileCanEditFiles, profileIsWriteCapable, profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import { formatWorkerResultDigest } from '../agent/worker-result-digest.js'
 import { validatePathSafe } from './path-validate.js'
@@ -93,7 +93,7 @@ const dimensionSchema = z.object({
   replicas: z.number().int().min(2).max(5).optional().describe(
     '仅 parallelism=data 时必填，表示独立只读副本数量（2–5）。',
   ),
-  profile: profileStringSchema.optional().describe('worker profile。省略时按维度名推导：review/verify → reviewer，plan → planner，docs/research → doc_scout，其余（含实现类）→ patcher'),
+  profile: profileStringSchema.optional().describe('worker profile。省略时按维度名推导：review → reviewer，verify → verify_scout（只读+run_tests），plan → planner，docs/research → doc_scout，其余（含实现类）→ patcher'),
   tierFloor: z.enum(['cheap', 'balanced', 'strong']).optional().describe(
     '模型档位硬地板（瑶光门）：声明后路由只抬不降。审查/验证维度建议 strong，实现维度按需。',
   ),
@@ -208,9 +208,11 @@ function buildRoutingStats(
 }
 
 /** 写维度判定（proposal 预检与 execute 剥离共用同一事实来源——两处漂移会让
- *  proposal 承诺的与 execute 实际执行的不一致）。 */
+ *  proposal 承诺的与 execute 实际执行的不一致）。B：改用文件编辑权判定——
+ *  bash/run_tests 有执行权但不改文件，持此能力的验证维度可以并行读快照，
+ *  不参与写维度文件认领。 */
 function dimensionIsWriteCapable(dim: z.infer<typeof dimensionSchema>): boolean {
-  return profileIsWriteCapable((dim.profile ?? mapGalaxyDimensionToProfile(dim.name)) as import('../agent/work-order.js').WorkerProfile)
+  return profileCanEditFiles((dim.profile ?? mapGalaxyDimensionToProfile(dim.name)) as import('../agent/work-order.js').WorkerProfile)
 }
 
 /** 静态预检（proposal 阶段）：写维度文件范围的重叠与覆盖缺口。
@@ -269,6 +271,8 @@ function formatPlanPrecheck(issues: GalaxyPlanPrecheckIssue[]): string {
   for (const issue of issues) {
     if (issue.kind === 'overlap') {
       lines.push(`⚠ 维度「${issue.dimensionName}」的文件与更早的写维度重叠，执行时将被剥离：${issue.files.join(', ')}`)
+    } else if (isReviewGalaxyDimension(issue.dimensionName)) {
+      lines.push(`⚠ 维度「${issue.dimensionName}」是审查族，声明的文件全部被其他写维度认领，执行时将降级为只读验证继续派发：${issue.files.join(', ')}`)
     } else {
       lines.push(`⚠ 维度「${issue.dimensionName}」声明的文件全部被其他写维度认领，派发时将被跳过：${issue.files.join(', ')}`)
     }
@@ -388,6 +392,7 @@ function formatGalaxyResult(
   dataParallelGroups: GalaxyDataParallelGroup[],
   strippedFiles: Array<{ label: string; files: string[] }> = [],
   emptiedDims: string[] = [],
+  downgradedReviewDims: string[] = [],
 ): string {
   const passed = run.results.filter(r => r.status === 'passed').length
   const total = run.results.length
@@ -460,6 +465,12 @@ function formatGalaxyResult(
   // 文件全被夺走的写维度（M3）：跳过派发而非派到闸口撞墙，必须可见。
   if (emptiedDims.length > 0) {
     lines.push(`  ⚠ 写维度文件全部被其他维度夺走，已跳过派发（请核查维度划分）：${emptiedDims.join('、')}`)
+    lines.push('')
+  }
+
+  // B：审查族维度被夺空后降级为只读验证继续派发，必须可见。
+  if (downgradedReviewDims.length > 0) {
+    lines.push(`  ⚠ 审查族维度文件被夺空，已降级为只读验证继续派发：${downgradedReviewDims.join('、')}`)
     lines.push('')
   }
 
@@ -697,8 +708,8 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
           if (dimension.authorities?.length) {
             return { content: `星河已拦截：DP 维度「${dimension.name}」只能使用单个 authority；多专家意见请使用 expert 模式的 authorities。`, isError: true }
           }
-          if (profileIsWriteCapable(profile)) {
-            return { content: `星河已拦截：DP 维度「${dimension.name}」使用了可写 profile「${profile}」。DP 只允许独立只读/验证副本，写入请拆成 EP 单专家分片。`, isError: true }
+          if (profileCanEditFiles(profile)) {
+            return { content: `星河已拦截：DP 维度「${dimension.name}」使用了可编辑文件的 profile「${profile}」。DP 只允许独立只读/验证副本（验证副本可 run_tests），写入请拆成 EP 单专家分片。`, isError: true }
           }
         }
         if (stars.length > 1 && classifyProfile(profile) === 'hands') {
@@ -794,6 +805,8 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
               ? `${dim.objective}\n\nData-parallel replica ${replicaIndex + 1}/${replicaCount}: independently inspect the same evidence. Do not modify files, do not assume other replicas' conclusions, and report concrete evidence, uncertainty, and recommended follow-up.`
               : stars.length > 1
               ? `${dim.objective}\n\n多视角分析：你与其他星域专家独立检查同一问题，但不共享实时上下文。只做证据驱动的分析与建议，不修改文件；明确列出依据、风险和建议。其他视角：${stars.filter(s => s !== star).map(s => { const sd = starDomainRegistry.get(s); return sd ? sd.name : s }).join('、')}。`
+              : isReviewGalaxyDimension(dim.name)
+              ? `${dim.objective}\n\n只读验证：不修改任何文件；可运行测试验证行为（run_tests），输出证据包（命令、exit code、通过/失败计数、失败项原文）。`
               : profileIsWriteCapable(profile)
               ? `${dim.objective}\n\n工业级交付要求：1. 读代码→2. 先写失败测试复现问题（RED）→3. 修改代码使测试通过（GREEN）→4. 运行 typecheck/lint→5. 确认路径通达。不满足任何一条不算完成。注意：不先写测试直接改代码会被 evidence gate 拦截。`
               : `${dim.objective}\n\n只读分析：不修改任何文件；给出证据驱动的结论、不确定项和建议。`,
@@ -851,14 +864,23 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
       // 并入报告。只认 original>0 → deduped=0（被夺走）；原本就无 files 的写维度
       // 不拦（其命运由 coordinator 的 scope 闸独立裁决，galaxy 层不越权）。
       // 「全部文件被夺走」本质是维度划分问题，必须可见。
+      // B：审查族维度声明 files 的本意是聚焦审查范围而非独占写权——被夺空时
+      // 降级为只读验证继续派发（objective 界定范围），不整个维度跳过。
       const emptiedWriteDims: string[] = []
+      const downgradedReviewDims: string[] = []
       for (let i = requests.length - 1; i >= 0; i--) {
         const dimIdx = dimensionIndexByParentTurnId.get(requests[i]!.parentTurnId)
         if (dimIdx === undefined || !dimensionIsWriteCapable(dimensions[dimIdx]!)) continue
-        const originalCount = dimensions[dimIdx]?.files?.length ?? 0
+        const dim = dimensions[dimIdx]!
+        const originalCount = dim.files?.length ?? 0
         const currentCount = requests[i]!.scope?.files?.length ?? 0
-        if (originalCount > 0 && currentCount === 0) {
-          emptiedWriteDims.unshift(dimensions[dimIdx]!.name)
+        if (originalCount === 0 || currentCount > 0) continue
+        if (isReviewGalaxyDimension(dim.name)) {
+          ;(requests[i] as any).scope = { ...requests[i]!.scope, files: [] }
+          requests[i]!.objective = `${requests[i]!.objective}\n\n⚠ 维度文件范围已被其他写维度独占，降级为只读验证：不得修改任何文件；验证范围以上文 objective 为准。`
+          downgradedReviewDims.push(dim.name)
+        } else {
+          emptiedWriteDims.unshift(dim.name)
           requests.splice(i, 1)
         }
       }
@@ -1080,7 +1102,7 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
       return {
         content: formatGalaxyResult(run, targets, [...dataParallelGroups.values()],
           [...strippedByDim.entries()].map(([idx, files]) => ({ label: dimensions[idx]!.name, files })),
-          emptiedWriteDims),
+          emptiedWriteDims, downgradedReviewDims),
         // DP quorum 未达成 → isError，让主 agent 的工具管线感知到失败信号，
         // 而非只靠报告文本判断（展示层→判定层的断层修复）。
         isError: dataParallelGroups.size > 0

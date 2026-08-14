@@ -6,8 +6,11 @@
  * while guaranteeing perspective diversity (a base skeleton + a constraint gate
  * + a challenger, plus any matched domain specialist).
  *
- * Routing only — never selects a model tier. Council research profiles are
- * tierLock:'cheap' (Flash), so "flash routing is enough" holds by construction.
+ * Routing only — never selects a model tier. Council research (review) profiles
+ * are tierLock:'cheap' (Flash); team max 的 perspective_planner 规划席刻意不设
+ * tierLock——model-tier-policy 对 planning 路由返回 strong + hardFloor:'strong'
+ * （规划质量直接决定并行拆分质量，见 model-tier-policy.ts:77）。旧注释声称
+ * "flash routing is enough" 仅对 research 成立，对 planning 不成立，已修正。
  */
 
 import { starDomainRegistry } from './star-domain-registry.js'

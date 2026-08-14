@@ -24,6 +24,7 @@ const testProvider: ProviderConfig = {
 const testConfig = {
   agent: {
     approval: 'manual',
+    unsandboxed: false,
     maxTurns: 50,
     mode: 'code',
     autoReasoning: false,

@@ -827,7 +827,14 @@ export function buildSessionRoutes(
       }
 
       const ok = manager.run(params!.id!, prompt, images)
-      if (!ok) return { status: 409, body: { error: 'Session is missing or already running' } }
+      // 区分两种拒绝：session 缺失（404，前端可提示重新打开）与执行中（409 busy，
+      // 前端显示"正在执行中"而非错误 toast——用户连续发消息时这是正常排队语义）。
+      if (!ok) {
+        if (!manager.getSession(params!.id!)) {
+          return { status: 404, body: { error: 'Session not found' } }
+        }
+        return { status: 409, body: { error: 'Session is already running', code: 'busy' } }
+      }
       return { status: 200, body: manager.getSession(params!.id!) }
     }, apiToken),
 

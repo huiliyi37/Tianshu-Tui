@@ -237,6 +237,7 @@ export type WorkerFailureReason =
   | 'claim_conflict'
   | 'timeout'
   | 'max_turns'
+  | 'stalled'
   | 'json_parse'
   | 'schema_mismatch'
   | 'worker_crash'
@@ -264,7 +265,7 @@ export const workerResultSchema = z.object({
   /** worker 自报的研究覆盖规模，可审计性计数；两 schema 必须同时加，否则 ingest 入口 zod strip 剥掉 */
   sourcesReviewed: z.number().int().min(0).optional(),
   /** Why the worker failed — enables recovery-strategy differentiation. */
-  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'policy_short_circuit', 'unknown']).optional(),
+  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'stalled', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'policy_short_circuit', 'unknown']).optional(),
   /** Runtime metadata: 派发时的 objective，由 coordinator 盖章。
    *
    *  刻意**不进** `workerResultIngestSchema`——那份是 worker 自报的入口，zod 会
@@ -345,7 +346,7 @@ const workerResultIngestSchema = z.object({
    *  `JSON.stringify` 后交给 `parseWorkerResult` 再解一次——不收这个键的话，
    *  写工的失败原因（含续跑判据依赖的 max_turns / timeout）会在这道内部序列化
    *  边界上被静默剥掉，主控只看到一个没有原因的 blocked。 */
-  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'policy_short_circuit', 'unknown']).optional(),
+  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'stalled', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'policy_short_circuit', 'unknown']).optional(),
   /** D 度量细分，同 failureReason 的内部往返纪律（见 workerResultSchema 同名注释）。 */
   parseErrorKind: z.enum(['no_json', 'json_syntax', 'schema_field', 'truncated']).optional(),
 })
@@ -568,7 +569,10 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
       // context, so write workers need a generous turn budget to finish a
       // long-program shard without being cut off mid-task. Flash has a 1M window;
       // 8–14 turns was far too tight for real implement+verify work.
-      maxTurns: input.budget?.maxTurns ?? 32,
+      // 32→48 (2026-08-10): 写工预算 300→600s 后单轮能跑更长，但轮数 32 仍会在
+      // 多文件 shard（每文件 read+write+test 各 1-2 轮）里先撞顶；与 600s 墙钟
+      // 对齐——墙钟先于轮数开枪，续跑才有意义。
+      maxTurns: input.budget?.maxTurns ?? 48,
       maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultMaxTokens ?? 16384,
       timeoutMs: Math.round((input.budget?.timeoutMs
         ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultTimeoutMs

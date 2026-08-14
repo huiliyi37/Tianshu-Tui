@@ -654,3 +654,141 @@ describe('provider delete: preset-name deadlock', () => {
     assert.equal(readSecret('relay-gone'), undefined)
   })
 })
+
+describe('POST /config/providers/tunables', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-config-routes-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  async function createCustomProvider(router: ReturnType<typeof createRouter>) {
+    writeConfig(home, {})
+    const res = await router('POST', '/config/providers/custom', {
+      providerName: 'my-spark',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-test',
+      model: { id: 'm1', contextWindow: 128000, maxTokens: 32000 },
+      slowThinking: true,
+    }, AUTH)
+    assert.equal(res.status, 200)
+  }
+
+  it('updates whitelisted tunables and reports them', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    await createCustomProvider(router)
+
+    const res = await router('POST', '/config/providers/tunables', {
+      providerName: 'my-spark',
+      fields: { slowThinking: false, firstByteTimeoutMs: 120_000 },
+    }, AUTH)
+    assert.equal(res.status, 200)
+    const body = res.body as { ok: boolean; tunables: { slowThinking: boolean; firstByteTimeoutMs: number } }
+    assert.equal(body.ok, true)
+    assert.equal(body.tunables.slowThinking, false)
+    assert.equal(body.tunables.firstByteTimeoutMs, 120_000)
+
+    // 落盘生效：GET 列表透出 slowThinking（三态）
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    const providers = (list.body as { providers: { name: string; slowThinking?: boolean }[] }).providers
+    const spark = providers.find(p => p.name === 'my-spark')!
+    assert.equal(spark.slowThinking, false)
+  })
+
+  it('undefined field value deletes the key (restore heuristic)', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    await createCustomProvider(router)
+
+    const res = await router('POST', '/config/providers/tunables', {
+      providerName: 'my-spark',
+      fields: { slowThinking: undefined },
+    }, AUTH)
+    assert.equal(res.status, 200)
+    const body = res.body as { tunables: { slowThinking: unknown } }
+    assert.equal(body.tunables.slowThinking, undefined)
+
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    const providers = (list.body as { providers: { name: string; slowThinking?: boolean }[] }).providers
+    const spark = providers.find(p => p.name === 'my-spark')!
+    assert.equal('slowThinking' in spark, false, '删键后 GET 不应再透出 slowThinking')
+  })
+
+  it('null survives JSON serialization and deletes the key (transport-safe)', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    await createCustomProvider(router)
+
+    // 真实 HTTP 传输：JSON.stringify 丢弃 undefined 属性但保留 null。
+    // 前端「取消勾选 → 恢复启发式」必须以 null 编码删键，否则服务端收到空 fields
+    // 静默 200 不删键（提交后审查 HIGH-1）。
+    const wire = JSON.parse(JSON.stringify({ providerName: 'my-spark', fields: { slowThinking: null } }))
+    const res = await router('POST', '/config/providers/tunables', wire, AUTH)
+    assert.equal(res.status, 200)
+    const body = res.body as { tunables: { slowThinking: unknown } }
+    assert.equal(body.tunables.slowThinking, undefined)
+
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    const spark = (list.body as { providers: { name: string; slowThinking?: boolean }[] }).providers.find(p => p.name === 'my-spark')!
+    assert.equal('slowThinking' in spark, false)
+  })
+
+  it('undefined is dropped by JSON serialization — key stays (semantic guard)', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    await createCustomProvider(router)
+
+    // 固化语义：undefined 属性过不了 JSON.stringify，服务端收到空 fields。
+    // 若未来有人试图用 undefined 表达删键，此用例打红——删键必须显式传 null。
+    const wire = JSON.parse(JSON.stringify({ providerName: 'my-spark', fields: { slowThinking: undefined } }))
+    const res = await router('POST', '/config/providers/tunables', wire, AUTH)
+    assert.equal(res.status, 200)
+    const list = await router('GET', '/config/providers', {}, AUTH)
+    const spark = (list.body as { providers: { name: string; slowThinking?: boolean }[] }).providers.find(p => p.name === 'my-spark')!
+    assert.equal(spark.slowThinking, true, 'JSON 往返丢 undefined → 键必须保持（createCustomProvider 设了 true）')
+  })
+
+  it('rejects missing providerName / fields', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    writeConfig(home, {})
+    const noName = await router('POST', '/config/providers/tunables', { fields: { slowThinking: true } }, AUTH)
+    assert.equal(noName.status, 400)
+    assert.match((noName.body as { error: string }).error, /providerName is required/)
+
+    const noFields = await router('POST', '/config/providers/tunables', { providerName: 'deepseek' }, AUTH)
+    assert.equal(noFields.status, 400)
+    assert.match((noFields.body as { error: string }).error, /fields object is required/)
+
+    const badFields = await router('POST', '/config/providers/tunables', { providerName: 'deepseek', fields: [] }, AUTH)
+    assert.equal(badFields.status, 400)
+  })
+
+  it('rejects unknown fields and unknown providers with 400', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    await createCustomProvider(router)
+
+    const unknownField = await router('POST', '/config/providers/tunables', {
+      providerName: 'my-spark',
+      fields: { apiKey: 'sk-x' },
+    }, AUTH)
+    assert.equal(unknownField.status, 400)
+    assert.match((unknownField.body as { error: string }).error, /Unknown tunable field "apiKey"/)
+
+    const unknownProvider = await router('POST', '/config/providers/tunables', {
+      providerName: 'nope',
+      fields: { slowThinking: true },
+    }, AUTH)
+    assert.equal(unknownProvider.status, 400)
+  })
+
+  it('rejects unauthorized requests', async () => {
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router('POST', '/config/providers/tunables', { providerName: 'deepseek', fields: { slowThinking: true } }, {})
+    assert.equal(res.status, 401)
+  })
+})

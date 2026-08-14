@@ -87,6 +87,23 @@ describe('pointer-regurgitation hook', () => {
     assert.equal(submitted.length, 1, 'prophylaxis is redundant after the full mechanism explanation')
   })
 
+  it('escalation reminder uses the functional channel and dedups per turn', () => {
+    // 2026-08-10 galaxy worker 事故：8 次犯规 0 条 reminder 落地——discipline
+    // 通道每轮限 1 条（context.ts W1 分级），额度被 convergence/B1/B2 抢占。
+    const reminders: Array<{ content: string; cls?: string }> = []
+    const hook = createPointerRegurgitationHook({
+      advisoryBus: { submit: () => {} },
+      addSystemReminder: (content, cls) => { reminders.push({ content, cls }) },
+    })
+
+    hook.run(makeCtx(5), guardRejection('write_file'))
+    hook.run(makeCtx(5), guardRejection('write_file')) // same turn — deduped
+    hook.run(makeCtx(6), guardRejection('write_file'))
+    assert.equal(reminders.length, 2, 'one reminder per turn, every turn with an offense')
+    assert.equal(reminders[0]!.cls, 'functional', 'must bypass the 1-per-turn discipline cap')
+    assert.ok(reminders[0]!.content.includes('显示占位符'))
+  })
+
   it('ignores unrelated tool errors and successful non-write calls', () => {
     const submitted: SubmittedAdvisory[] = []
     const hook = createPointerRegurgitationHook({ advisoryBus: { submit: (a) => { submitted.push(a as SubmittedAdvisory) } } })

@@ -1783,7 +1783,7 @@ export class DelegationCoordinator {
 
       // 续跑重新占用 liveness 槽位——首轮的 finally 已经把它清掉了，不重注册的话
       // stall sweep 看不到这一轮，静默卡死没人收。跑完必须再清，否则槽位泄漏。
-      this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: workerConfig.providerName, isWrite }))
+      this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: workerConfig.providerName, baseUrl: workerConfig.baseUrl, slowThinking: workerConfig.slowThinking, isWrite }))
       this.ensureStallSweep()
       debugLog(`[worker-continuation] ${order.id} 第 ${attempt} 次续跑（${decision.reason}）`)
       // 补偿轮对用户是不可见的额外时间：不发事件的话，面板上只看到一个 worker
@@ -1847,7 +1847,7 @@ export class DelegationCoordinator {
       ...order,
       objective: buildRevisionObjective(order.objective, decision.shortfall, current.result.summary),
     }
-    this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: workerConfig.providerName, isWrite }))
+    this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: workerConfig.providerName, baseUrl: workerConfig.baseUrl, slowThinking: workerConfig.slowThinking, isWrite }))
     this.ensureStallSweep()
     debugLog(`[worker-revision] ${order.id} 证据不达标（${decision.shortfall}），打回复核一轮`)
     emitLifecycle(workerConfig, `证据复核 · ${SHORTFALL_LABEL[decision.shortfall]}`)
@@ -2444,7 +2444,7 @@ export class DelegationCoordinator {
     // A4: arm the stall clock only once dispatch is committed (all early
     // blocked returns above never register, so they can't leak entries).
     this.orderControllers.set(order.id, orderController)
-    this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: workerConfig.providerName, isWrite }))
+    this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: workerConfig.providerName, baseUrl: workerConfig.baseUrl, slowThinking: workerConfig.slowThinking, isWrite }))
     this.ensureStallSweep()
 
     try {
@@ -2586,7 +2586,7 @@ export class DelegationCoordinator {
             break
           }
           // Re-register liveness for the retry attempt
-          this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: workerConfig.providerName, isWrite }))
+          this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: workerConfig.providerName, baseUrl: workerConfig.baseUrl, slowThinking: workerConfig.slowThinking, isWrite }))
           this.orderControllers.set(order.id, orderController)
           try {
             if (role === 'hands') {
@@ -2721,7 +2721,7 @@ export class DelegationCoordinator {
 
           // Re-register liveness for retry — leash derives from the UPGRADED
           // provider (escalation may land on a slow-thinking one).
-          this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: upgradedConfig.providerName, isWrite }))
+          this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: upgradedConfig.providerName, baseUrl: upgradedConfig.baseUrl, slowThinking: upgradedConfig.slowThinking, isWrite }))
 
           try {
             if (role === 'hands') {
@@ -2937,7 +2937,7 @@ export class DelegationCoordinator {
           upgradedConfig.onNestedDelegation = workerConfig.onNestedDelegation
           upgradedConfig.mailbox = mailbox
           upgradedConfig.finalizeReport = workerConfig.finalizeReport
-          this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: upgradedConfig.providerName, isWrite }))
+          this.liveness.register(order.id, this.config.workerStallMs ?? deriveWorkerStallMs({ providerName: upgradedConfig.providerName, baseUrl: upgradedConfig.baseUrl, slowThinking: upgradedConfig.slowThinking, isWrite }))
           this.orderControllers.set(order.id, orderController)
           try {
             escalationShadows.push(this.recordEscalation(order, strongCard, `契约失败(${run.result.failureReason})升档重试`))

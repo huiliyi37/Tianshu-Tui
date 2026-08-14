@@ -1,4 +1,5 @@
-import { spawn } from 'child_process'
+import { spawn, execFileSync } from 'child_process'
+import { existsSync } from 'fs'
 import { spawnHidden } from './spawn-hidden.js'
 import { createReadStream } from 'fs'
 import { lstat, readdir, realpath, readFile, stat } from 'fs/promises'
@@ -274,6 +275,61 @@ async function registerGrepFilesFromOutput(content: string, cwd: string, session
   }
 }
 
+/**
+ * 解析 rg 二进制路径，带架构探活。
+ *
+ * 优先级：RIVET_RIPGREP_PATH env（调试/覆盖）> 自带 rg（RIVET_BUNDLED_RIPGREP_DIR，
+ * 桌面端打包时由 Rust 注入，架构与目标平台匹配）> 系统 PATH 的 'rg'。
+ *
+ * 关键：每个候选首次解析时跑一次 rg --version 探活。系统 rg 可能架构不符
+ * （如 ARM64 rg 在 x64 机器上报 Exec format error）——此前这种情况被静默吞掉，
+ * grep 降级到慢速遍历。现在探活失败会记录具体原因并尝试下一个候选，debugLog
+ * 里能看到"Exec format error"而非笼统的"未找到"。
+ *
+ * 结果缓存到 rgResolvedPath，同进程内不重复探活。
+ */
+let rgResolvedPath: string | null | undefined
+
+function resolveRgPath(): string | null {
+  if (rgResolvedPath !== undefined) return rgResolvedPath
+
+  const ext = process.platform === 'win32' ? '.exe' : ''
+  const candidates: { path: string; label: string }[] = []
+
+  // 1. RIVET_RIPGREP_PATH（显式覆盖，不探活——用户说啥是啥）
+  const override = process.env.RIVET_RIPGREP_PATH
+  if (override) {
+    rgResolvedPath = override
+    return override
+  }
+
+  // 2. 自带 rg（RIVET_BUNDLED_RIPGREP_DIR，桌面端打包注入）
+  const bundledDir = process.env.RIVET_BUNDLED_RIPGREP_DIR
+  if (bundledDir) {
+    const bundledRg = bundledDir + require('path').sep + 'rg' + ext
+    if (existsSync(bundledRg)) candidates.push({ path: bundledRg, label: 'bundled' })
+  }
+
+  // 3. 系统 PATH 的 rg（裸 'rg'，spawn 时由 PATH 解析）
+  candidates.push({ path: 'rg', label: 'system' })
+
+  // 探活：跑 rg --version，第一个成功的即为结果。
+  for (const c of candidates) {
+    try {
+      execFileSync(c.path, ['--version'], { encoding: 'utf8', timeout: 5_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      debugLog(`[grep] rg resolved: ${c.label} (${c.path})`)
+      rgResolvedPath = c.path
+      return c.path
+    } catch (err) {
+      debugLog(`[grep] rg candidate ${c.label} (${c.path}) failed probe: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  debugLog('[grep] no usable rg found after probing all candidates')
+  rgResolvedPath = null
+  return null
+}
+
 async function tryRipgrep(
   pattern: string,
   absPath: string,
@@ -313,7 +369,13 @@ async function tryRipgrep(
 
     let child: ReturnType<typeof spawn>
     try {
-      child = track(spawnHidden('rg', args, {
+      const rgBin = resolveRgPath()
+      if (!rgBin) {
+        debugLog('[grep] no usable rg resolved — falling back to native search')
+        resolve(null)
+        return
+      }
+      child = track(spawnHidden(rgBin, args, {
         cwd,
         env: getResolvedEnv(cwd),
         stdio: ['ignore', 'pipe', 'pipe'],

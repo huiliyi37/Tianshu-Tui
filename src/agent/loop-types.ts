@@ -97,6 +97,15 @@ export interface AgentConfig {
   getSessionMemoryState?: () => import('../context/types.js').LedgerSessionMemoryState | undefined
   hooks?: HookRegistry
   runtimeHooks?: RuntimeHookPipeline
+  /** P2: CVM 五阶段管线装配配置（来自磁盘 Config.hooks，bootstrap 填入）。
+   *  disabled 会话级禁用的 hook id；交互模式可热更（config-watcher 更新
+   *  RuntimeHookPipeline.setDisabledHookIds）。与上方 hooks（用户自定义
+   *  HookRegistry）独立。 */
+  hookAssembly?: {
+    disabled?: string[]
+    timeoutMs?: number
+    slowMs?: number
+  }
   /** I4: emit user hook results to the desktop event stream. */
   emitHookResult?: (results: HookResult[], meta: { event: HookEvent; turn?: number; toolName?: string; error?: string }) => void
   /** Lazy-binding getter for plugin-contributed hooks (absolute script paths).

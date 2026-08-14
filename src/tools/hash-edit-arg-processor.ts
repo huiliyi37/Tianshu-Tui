@@ -18,8 +18,11 @@ import { POINTER_INTERNAL_TAG } from './pointer-tag.js'
 
 export const HASH_EDIT_POINTER_PREFIX = '[hash_edit applied to'
 
-/** new_string length (chars) above which we collapse to a pointer. */
-export const HASH_EDIT_THRESHOLD = 2000
+/** new_string length (chars) above which we collapse to a pointer.
+ *  2000→8000（2026-08）：对齐 edit_file 阈值——同一段替换块此前走 hash_edit
+ *  截断、走 edit_file 不截断，模型无法预测截断边界；hash_edit 是增量编辑
+ *  （new_string 为块内容），8000 与 edit_file 的块级容忍一致，缓存风险等同。 */
+export const HASH_EDIT_THRESHOLD = 8000
 
 export const hashEditArgProcessor = createFileContentArgProcessor({
   toolName: 'hash_edit',

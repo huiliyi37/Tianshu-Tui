@@ -311,8 +311,9 @@ export interface RuntimeHookDeps {
   getMaxTurns?: () => number
 
   // ── 轮内防御三层加固（2026-07）──
-  /** 注入 system-reminder 到消息流末尾（不经 advisory bus 优先级竞争）。 */
-  addSystemReminder?: (content: string) => void
+  /** 注入 system-reminder 到消息流末尾（不经 advisory bus 优先级竞争）。
+   *  cls 缺省 'discipline'（每轮限 1 条）；必须送达的纠偏用 'functional'。 */
+  addSystemReminder?: (content: string, cls?: 'user' | 'functional' | 'discipline') => void
 
   // ── 运行走查工件（付费版 v1 · T1）──
   /** computer_use 步骤时间线记录器 + postSession walkthrough 工件组装。

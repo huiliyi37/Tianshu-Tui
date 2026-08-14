@@ -88,24 +88,30 @@ export interface ObligationCheckResult {
   detail?: string
 }
 
-export type GateRunner = (command: string) => { ok: boolean; detail?: string }
+// 允许 Promise：deliver 路径的默认 runner 是异步 spawn（spawnSync 曾最长阻塞
+// 事件循环 60s——2026-08-09 桌面端「sidecar 无响应」横幅的楔子之一）。同步注入
+// （测试桩）经 await 兼容。
+export type GateRunner = (command: string) => { ok: boolean; detail?: string } | Promise<{ ok: boolean; detail?: string }>
 
 /**
  * 交付前逐项核验：advisory_gate 且白名单形状 → 真实执行判 settled/unsettled；
  * 其余义务（暂缓项/缓解承诺/非白名单 gate）无法机器裁定 → manual，
  * 交付报告必须逐项披露着落。
  */
-export function verifyObligations(
+export async function verifyObligations(
   obligations: readonly ObligationEntry[],
   runGate: GateRunner,
-): ObligationCheckResult[] {
-  return obligations.map(entry => {
+): Promise<ObligationCheckResult[]> {
+  const out: ObligationCheckResult[] = []
+  for (const entry of obligations) {
     if (entry.kind === 'advisory_gate' && entry.gate && isRunnableVerifyCommand(entry.gate)) {
-      const res = runGate(entry.gate)
-      return { entry, status: res.ok ? 'settled' as const : 'unsettled' as const, detail: res.detail }
+      const res = await runGate(entry.gate)
+      out.push({ entry, status: res.ok ? 'settled' as const : 'unsettled' as const, detail: res.detail })
+      continue
     }
-    return { entry, status: 'manual' as const }
-  })
+    out.push({ entry, status: 'manual' as const })
+  }
+  return out
 }
 
 /** 渲染义务账核验报告（deliver_task 交付报告用；空账返回空数组）。 */

@@ -1,19 +1,19 @@
 {
-  "version": "3.0.0",
-  "notes": "v2.28.0：starflow 四迭代（席位透传/基线预检/增量评审/blocked 归属）、全局并发闸、审查契约 polarity、新建会话去弹窗化、v4-flash 重定位、证据防火墙 Phase 2、cancel-rest 短路。Windows 条目随后续构建回流。",
-  "pub_date": "2026-08-08T11:59:46.307Z",
+  "version": "3.1.1",
+  "notes": "v3.1.0 更新内容：\n\n【桌面端】\n- Win10 适配：窗口阴影、WebView2 检测、会话区滚动条修复、截图稳定性提升\n- 设置页新增「完全权限」档（跳过审批 + 关闭写沙箱）\n- 滚动体验：滚轮回底不再被抢占，16 个滚动事故场景修复\n- 启动与首轮响应优化（编译缓存 / 看门狗降噪 / 首屏骨架）\n- 8GB 内存机器默认全功能，不再自动降级\n- 语音识别：系统识别恢复主链路\n- 性能设置保存修复、会话流小窗闪烁修复、模型视觉标记可发现性\n- ripgrep 自带分发：grep 工具不再依赖系统 PATH\n\n【CLI / Agent】\n- 目标锚系统：长任务目标固化，跨端回显，不再随上下文漂移\n- 提交后自动审查默认开启（可配置关闭）\n- action-intent 误报守卫、交付信号解析修复\n- 工具链：edit_file 指针带路径、hash_edit 截断阈值提升\n\n【其他】\n- computer-use 截图与窗口恢复稳定性提升",
+  "pub_date": "2026-08-10T05:12:28.493Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.0.0/Tianshu_3.0.0_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2ZYYnhpWEtiMHV0L0dDRkMzc1kwL0Vad3hHRHFHNkdMY3JFSWlZWSt3bHRhK2NWaEFnNWI2UmtFdEJCMFBUVjRiV3VaUGxhaXBaeklHNnNNUG1JOWcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MTg5NDI5CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CjN5N25EblNpcy9iNVNoK0FONWxhSjZNampKcG9yenpNMzJMNFVJMjhacUtIZUtUZUZZS3lVQ1VSZzliSXJjVnY5RElTVGZyMTNIMGFxMTE5TDYrUkJ3PT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.1.1/Tianshu_3.1.1_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1JQWjhnbDRINGsvV3ZTd01LcDgwQ0wxajVxT0U4eG1iVXdlOUFPdEtNQjVtRHVNQ3lBazBPQldJMy9Tc3c4MXhLNm1zWjB1TGRXSUNuVmhKckNRV2c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzM2OTk0CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6Ck5sdWdRZUFxS0Q3dUZFdUVaS0xUeVpvNnN5YU1uZm5xOFB1RndQZ3dnVTBhcjhmTEpiTXJRN3k4a2dYTERoVHBGMENEUjFiVTdVVFRYY2tnWTZFMkRnPT0K"
     },
     "darwin-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.0.0/Tianshu_3.0.0_x64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1RtVUUrbk5zZC9pRzllbGpHNlM2b0J1dU1FYTRBa09OTU9aKzRJTHZ4eSttZWZjaEdLWGVCNXU5QkdEa2t1QzRTUWZMMU9VSTgvZWhmREtIRXZRWVE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MTkwMzg0CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CkFrUmdSSmppOWNkR0g2ZHhhclBlMnFiT0NPMGNMaDdreDAxMS9FZllVNm1iSDhEWG9TS1RtUUtVeVh1K2VJdnRvYiszcEpDNitDOUpKbDlUU0hjQUNRPT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.1.1/Tianshu_3.1.1_x64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1hvTzd6R21CQ3VIV1RiVG5KdVhqMTYzUEFDdWdpQlVncjBLNkFqSGpVeE16MUtUazB4b2U1QUg4blQ4aDRXMVYxSFFkS0srWnhrMk04dCsxWVZLeEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzM4NzQ1CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CkxKcHlZWmFucGUzYXVUZlpUK3dmdWRIVjJoS29vd2tPUXZseVVac1JzWU82RGJzSDJjeGxOSkpkMmIvSUE0T1ZrZW8wNHlRWURWR1RrR1orWk8yM0JnPT0K"
     },
     "windows-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.0.0/Tianshu_3.0.0_x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2NMbTFLZFNJSU9ZVldrNUpWMnM3N1l2Y3VSZ2ZwN21ITXVoVWNIUWVZaXdoajhrdjI3OW52Y2lXMDJUd1k1L3RaL1A0ejFmaTN5b3lCQlZ2OWRQV2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MTg5OTMzCWZpbGU6VGlhbnNodV8zLjAuMF94NjQtc2V0dXAuZXhlClNSay8zMXdYMFdCaHRvZ2E5WFlSalg5VjJja2hpVDUyYzdzUWlTSUI5M0c1K1lWSHQ5U0lETERUMWtMMFUxNUVLejMrNi8wT0JwQVVSSnd3eE9oekFRPT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.1.1/Tianshu_3.1.1_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1VUbGg5K0JNeitTYVNERHpwbjNuWHB0YXVjdG40R2J2dVVXVS9mTythNHhVNDlRZ1ptOFVhTm1sMHY1NjFxeWt5QWllcEdxNnJza1pBa3dsaTYxTHdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg2MzI2NzYyCWZpbGU6VGlhbnNodV8zLjEuMV94NjQtc2V0dXAuZXhlCjVocGtiNlcwN1JyY1B5K3d1b0JrVEhmWGZQZTBONmk2Y2tXTXdlYmRmOGs4VDdyUm03Q1l0eFpiUUF6UjNicTJ5eG9sT2VjUlF4ajFHSHhic0ZBSUJ3PT0K"
     }
   }
 }

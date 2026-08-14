@@ -15,7 +15,9 @@ export function writeFileAtomicSync(filePath: string, data: string): void {
   const suffix = randomUUID().slice(0, 8)
   const tmpPath = filePath + '.' + suffix + '.tmp'
   try {
-    writeFileSync(tmpPath, data, 'utf-8')
+    // 0o600: files written here are user-private (config with API keys,
+    // sessions) — align with token-store.ts; rename preserves the mode.
+    writeFileSync(tmpPath, data, { encoding: 'utf-8', mode: 0o600 })
     renameSync(tmpPath, filePath)
   } catch (err) {
     try { unlinkSync(tmpPath) } catch { /* ignore cleanup failure */ }
@@ -33,7 +35,7 @@ export async function writeFileAtomicAsync(filePath: string, data: string): Prom
   const suffix = randomUUID().slice(0, 8)
   const tmpPath = filePath + '.' + suffix + '.tmp'
   try {
-    await writeFile(tmpPath, data, 'utf-8')
+    await writeFile(tmpPath, data, { encoding: 'utf-8', mode: 0o600 })
     await rename(tmpPath, filePath)
   } catch (err) {
     try { await unlink(tmpPath) } catch { /* ignore cleanup failure */ }

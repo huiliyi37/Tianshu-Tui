@@ -284,6 +284,12 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix；追加式 + cap，
    *  字节只在语义变化时变化。非 spark 会话恒 undefined → 零渲染。 */
   excludedPathAnchors?: string[]
+  /** Goal anchor（spec 3c 动作 B 补强）— 会话当前目标的常驻回显，对抗长
+   *  会话 attention 稀释。覆盖语义（目标只有一个），随用户实质指令更新。
+   *  Cache-safe: rendered ONLY into the dynamic appendix；目标不变时字节
+   *  恒等（cacheRead 可命中），仅目标切换时变化。非 spark 恒 undefined →
+   *  零渲染。 */
+  goalAnchor?: string | null
   /** Task depth advisory — TDD strategy hint for wiring/system tasks.
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Only present when taskDepthLayer !== 'unit'. */
@@ -628,6 +634,14 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   if (ctx.excludedPathAnchors && ctx.excludedPathAnchors.length > 0) {
     const items = ctx.excludedPathAnchors.map(a => `- ${escapeXml(a)}`).join('\n')
     push(`<excluded-paths note="推理截断补偿：以下路径已在早前推理中显式排除，勿重复尝试">\n${items}\n</excluded-paths>`)
+  }
+
+  // Goal anchor（spec 3c 动作 B 补强）：会话当前目标的常驻回显——目标从
+  // 「首轮位置」复制到「每轮最新位置」，对抗长会话 attention 稀释。
+  // 只进 dynamic appendix（缓存安全）：目标不变时字节恒等（cacheRead 命中），
+  // 目标随用户实质指令切换时变化（appendixDelta 吸收）。非 spark 恒空 → 零渲染。
+  if (ctx.goalAnchor) {
+    push(`<current-goal note="会话当前目标——所有工作应服务于它">\n${escapeXml(ctx.goalAnchor)}\n</current-goal>`)
   }
 
   // Git status: changes on commit, prefix stable within a turn sequence

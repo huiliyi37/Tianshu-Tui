@@ -37,6 +37,17 @@ export default {
     const url = new URL(request.url)
     const path = url.pathname
 
+    // /pay/* → 履约服（Service Binding 直连，同账号 workers.dev 子请求会被拦）。
+    // 2026-08-10：pay.plotstudio.cn 独立域名路由在边缘侧始终不激活（DNS/路由/证书
+    // 全部正常但 TLS 握手被重置），购买页改挂到本已验证可用的主机名路径下。
+    if (path === '/pay' || path.startsWith('/pay/')) {
+      if (!env.FULFILL_SERVICE) return new Response('fulfill not bound\n', { status: 502 })
+      const inner = path === '/pay' ? '/' : path.slice(4) // '/pay/x' → '/x'
+      const headers = new Headers(request.headers)
+      headers.set('x-pay-prefix', '/pay') // 履约服据此把 returnUrl 拼成镜像路径
+      return env.FULFILL_SERVICE.fetch(new Request(`https://fulfill.internal${inner}${url.search}`, { method: request.method, headers, body: request.body }))
+    }
+
     // 健康检查
     if (path === '/' || path === '/health') {
       return new Response('tianshu-update-mirror ok\n', {

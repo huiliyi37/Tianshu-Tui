@@ -23,6 +23,9 @@ describe('isRunnableVerifyCommand', () => {
       'npx tsc --noEmit',
       'npm test',
       'npm run test:unit',
+      // 结构棘轮门（B3）：council 席位 gate / 波间门禁 / deliver 义务账三链路
+      // 都以 npm run 形态执行它，白名单命中是这条回路成立的前提。
+      'npm run structure:check',
       'pnpm run build',
       'node --test src/foo.test.ts',
       'cargo test',

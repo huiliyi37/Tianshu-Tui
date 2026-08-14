@@ -330,8 +330,14 @@ const MAX_WEDGE_REPEATS = 3
  *  and the provider rejects the following request ("insufficient tool messages
  *  following tool_calls"). Draining here lands the commit in-order in the common
  *  (abort-cooperative) case; the bound preserves responsiveness when a tool is
- *  wedged, and runResumePreflightOai backstops any overrun at request-build time. */
-const TOOL_ABORT_DRAIN_MS = 3000
+ *  wedged, and runResumePreflightOai backstops any overrun at request-build time.
+ *
+ *  3000→6000 (2026-08-10 desktop 事故链): sidecar 事件循环 stall 实测峰值
+ *  4375ms（TianshuData/.rivet/logs 12 条 loop-lag：2065-4375ms）。abort 若落在
+ *  尖峰窗口内，3s drain 等不到 batch 提交 → 结果丢失 → 恢复时 preflight 合成
+ *  "[auto-recovered] 写入已确认" 占位（test-huiliyi37 会话 55 条实证）。6s 覆盖
+ *  4.4s 峰值 + 余量；wedged 工具的兜底仍是 runResumePreflightOai。 */
+const TOOL_ABORT_DRAIN_MS = 6000
 
 /** Order-preserving fingerprint of a tool batch (name + input). Two batches with
  *  the same tools and args produce the same string, so a model re-emitting an
@@ -435,6 +441,11 @@ export class TurnOrchestrator {
     let finalTurnCompleted = false
     let actionIntentFiredThisRun = false
     let turnCallLimitAdvisoryFired = false
+    // B1 readonly-spiral 的 run 级一次性标志：与 B2 对称——触发后本 run 不再
+    // 重复提醒。此前仅清零计数器，清零后连续只读重新累积到阈值又触发，
+    // 长只读 run 里周期性复触发（实测 58 轮 run 内 9/18/27 三次），且重复
+    // 提醒不改变模型行为（模型继续只读），纯噪音。
+    let readonlySpiralAdvisoryFired = false
     // Obligation final gate（evidence-driven reasoning loop Wave 3）：
     // 本 run 内最多自动续轮一次（跨义务共享配额——多义务也不追加第二轮）；
     // 记录续轮时的义务 store 版本以判定误触发（续轮后 version 未变 =
@@ -1032,7 +1043,8 @@ export class TurnOrchestrator {
           // 此时 action-intent gate 不触发（未声明写入），但信息已足够——
           // 注入一次性提醒推动模型行动。
           const b1Limit = b1ReadOnlyLimitForWindow(this.deps.getContextWindow?.() ?? 200_000)
-          if (this.deps.state.consecutiveReadOnlyTurns >= b1Limit) {
+          if (!readonlySpiralAdvisoryFired && this.deps.state.consecutiveReadOnlyTurns >= b1Limit) {
+            readonlySpiralAdvisoryFired = true // run 级一次性，清零后不再复触发
             const n = this.deps.state.consecutiveReadOnlyTurns
             this.deps.state.consecutiveReadOnlyTurns = 0 // 一次性，不重复提醒
             const content = `本轮已连续 ${n} 次只读操作（read_file/grep/glob 等），信息可能已足够 — 请基于已有理解开始行动（编辑、测试、或输出结论），不需要继续读取更多文件。`

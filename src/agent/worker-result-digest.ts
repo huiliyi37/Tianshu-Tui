@@ -13,6 +13,7 @@
 function digestHonesty(failureReason?: string, evidenceStatus?: string): string | null {
   switch (failureReason) {
     case 'max_turns': return '预算耗尽 · 摘要可能不完整'
+    case 'stalled': return '空跑 · 预算耗尽却几乎无工具调用（纯推理空转）'
     case 'json_parse': return '结果解析失败 · 已从碎片恢复'
     case 'worker_crash': return 'Worker 异常终止'
     case 'timeout': return 'Worker 超时'

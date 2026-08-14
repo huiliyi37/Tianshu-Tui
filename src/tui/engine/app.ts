@@ -4329,6 +4329,18 @@ export class TuiApp {
     return res.handled
   }
 
+  /**
+   * 全屏清屏 + live 区重置重绘——/clear 语义的唯一实现。内建注册与
+   * slash-commands.ts 的 TUI 覆盖版都委托这里，避免覆盖版绕过私有
+   * renderLive 手写 stdout（曾漏掉 live.reset() 致清屏后 live 区状态陈旧）。
+   * 直写 stdout 在 /tui/engine/ 白名单内（见 architecture-guards）。
+   */
+  clearScreen(): void {
+    process.stdout.write('\x1B[2J\x1B[H')
+    this.live.reset()
+    this.renderLive()
+  }
+
   /** 注册内置 slash 命令（/clear、/starmap、/chronicle、/exit）。 */
   private registerBuiltinSlashCommands(): void {
     this.slashRegistry.registerMany([
@@ -4337,9 +4349,7 @@ export class TuiApp {
         description: 'Clear screen',
         immediate: true,
         handler: () => {
-          process.stdout.write('\x1B[2J\x1B[H')
-          this.live.reset()
-          this.renderLive()
+          this.clearScreen()
           return true
         },
       },

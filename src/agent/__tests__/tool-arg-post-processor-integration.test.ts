@@ -121,10 +121,10 @@ describe('SessionContext + plan_submit arg processor integration', () => {
   })
 })
 
-describe('SessionContext + write_file arg processor integration', () => {
-  it('large write_file content is replaced with a file pointer in oaiMessages', () => {
+describe('SessionContext + write_file arg handling (pointer production disabled 2026-08-10)', () => {
+  it('large write_file content stays inline in oaiMessages', () => {
     const session = new SessionContext()
-    const bigContent = 'const x = 1\n'.repeat(2000) // ~24KB — the real cache-break shape
+    const bigContent = 'const x = 1\n'.repeat(2000) // ~24KB — the old cache-break shape
     const blocks: ContentBlock[] = [
       { type: 'tool_use', id: 'tc-write-1', name: 'write_file', input: { file_path: '/abs/src/big.ts', content: bigContent } },
     ]
@@ -134,9 +134,11 @@ describe('SessionContext + write_file arg processor integration', () => {
 
     const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
     assert.equal(tc.function.name, 'write_file')
-    assert.ok(tc.function.arguments.includes('[file written to'), 'should contain file pointer')
-    assert.ok(tc.function.arguments.includes('/abs/src/big.ts'), 'should reference file_path')
-    assert.ok(!tc.function.arguments.includes(bigContent.slice(0, 50)), 'full content should be gone')
+    // 指针已停产：worker 模型模仿历史指针回吐为 content（21 次拦截/session），
+    // token 收益不抵行为代价——完整内容留在历史里。
+    const args = JSON.parse(tc.function.arguments) as { content?: string; file_path?: string }
+    assert.equal(args.content, bigContent, 'full content stays in history')
+    assert.equal(args.file_path, '/abs/src/big.ts')
   })
 
   it('small write_file content stays inline (below threshold)', () => {
@@ -207,7 +209,7 @@ describe('SessionContext + edit_file arg processor integration', () => {
 describe('SessionContext + hash_edit arg processor integration', () => {
   it('large hash_edit new_string is replaced with a file pointer, anchors kept', () => {
     const session = new SessionContext()
-    const bigNew = 'const x = 1\n'.repeat(500)
+    const bigNew = 'const x = 1\n'.repeat(700) // 8400 chars — above HASH_EDIT_THRESHOLD (8000)
     const blocks: ContentBlock[] = [
       { type: 'tool_use', id: 'tc-hash-1', name: 'hash_edit', input: { file_path: '/abs/foo.ts', anchors: ['L5:a1b2c3d4'], new_string: bigNew } },
     ]

@@ -97,6 +97,28 @@ const BUILTIN_PROFILES: ProfileDefinition[] = [
     builtIn: true,
   },
   {
+    name: 'verify_scout',
+    role: 'readonly_plus_test',
+    allowedTools: [...READ_ONLY_TOOLS, 'run_tests'],
+    expertisePrompt: `你是验证侦察员。对指定改动做行为验证：只读代码 + 运行测试，不改任何文件。
+
+### 流程
+1. 读改动与相关测试，先理解要验证的行为
+2. 运行对应任务的测试（run_tests 或项目自身的测试命令）
+3. 对失败项定位根因并复现（RED→GREEN）
+4. 输出证据包：命令、exit code、通过/失败计数、失败项原文
+
+### 规则
+- 不修改任何文件——你没有编辑工具，你的产出是验证结论
+- 报告里的每个数字必须来自本轮真实运行的工具输出，禁止凭记忆报数
+- 声称「测试通过」时必须附命令与 exit code；没有跑过的套件如实标「未验证」
+- 失败时区分：被测代码缺陷 / 测试环境问题 / 并发冲突——只报告不修复`,
+    defaultTimeoutMs: 480_000, // 8min — running test suites needs wall-clock headroom
+    defaultKind: 'verify',
+    tierLock: 'cheap',
+    builtIn: true,
+  },
+  {
     // 议事会席位专家 —— 单轮会诊出意见，不执行。
     // 关键：故意 NOT 设 tierLock。reviewer 的 tierLock:'cheap' 会让
     // recommendModelTier 直接 short-circuit 成 cheap，天权/天府高风险席永远
@@ -247,7 +269,10 @@ failed 或 blocked 时，附："counterexample": "触发失败的具体输入/�
     // A self-contained shard implements changes AND runs tsc/lint/tests to green
     // in one go — give it a generous (but sub-tool-cap) window so a long-program
     // shard isn't killed before it finishes verifying its own work.
-    defaultTimeoutMs: 300_000,
+    // 300→600s (2026-08-10): 写工预算此前短于只读工（600s），长 shard 在
+    // tsc/test 验证阶段频繁撞墙钟 → 每撞一次丢一轮续跑轮次（桌面 starflow
+    // 会话 "时间预算耗尽 · 续跑 3/4" 实证）。与只读工对齐，让验证阶段跑完。
+    defaultTimeoutMs: 600_000,
     defaultKind: 'patch_proposal',
     builtIn: true,
   },
@@ -366,7 +391,7 @@ failed 或 blocked 时，附："counterexample": "触发失败的具体输入/�
 - 保留既有缩进风格
 - 违规需要设计决策时，作为升级报告`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 300_000,
+    defaultTimeoutMs: 600_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -390,7 +415,7 @@ failed 或 blocked 时，附："counterexample": "触发失败的具体输入/�
 - 边缘情况留 TODO 注释，由主控 agent 补
 - 目标测试文件已存在时，用 edit_file 追加用例——不要用 write_file 整文件重写（会清掉既有测试）。只有新建测试文件才用 write_file。`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 300_000,
+    defaultTimeoutMs: 600_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -412,7 +437,7 @@ failed 或 blocked 时，附："counterexample": "触发失败的具体输入/�
 - 保留 import 别名与具名导入
 - 不确定 import 是否被使用（副作用 import）时，留着`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 300_000,
+    defaultTimeoutMs: 600_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -434,7 +459,7 @@ failed 或 blocked 时，附："counterexample": "触发失败的具体输入/�
 - JSDoc 保持简洁：@param、@returns、简短描述
 - 不要加重复代码内容的冗余注释`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 300_000,
+    defaultTimeoutMs: 600_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -460,7 +485,7 @@ failed 或 blocked 时，附："counterexample": "触发失败的具体输入/�
 - 只修类型——不要改动运行时行为
 - 类型错误暴露了逻辑 bug 时，作为升级报告而不是修`,
     defaultMaxTokens: 8192,
-    defaultTimeoutMs: 300_000,
+    defaultTimeoutMs: 600_000,
     defaultKind: 'patch_proposal',
     tierLock: 'cheap',
     builtIn: true,
@@ -609,6 +634,23 @@ export const profileRegistry = new ProfileRegistry()
 const WRITE_CAPABLE_TOOLS: ReadonlySet<string> = new Set([
   'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'ast_edit', 'bash', 'run_tests', 'git',
 ])
+
+/** Tools that edit tracked files — the criterion for galaxy 文件归属 (B).
+ *  bash/run_tests 有执行权但不改文件，不算文件写权：持有它们的 profile
+ *  可以并行读同一快照，不参与写维度文件认领。 */
+const FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
+  'write_file', 'edit_file', 'hash_edit', 'apply_patch', 'ast_edit', 'git',
+])
+
+/** Whether a delegate profile can edit files (vs. merely execute commands).
+ *  Unknown profiles → false. Distinct from profileIsWriteCapable, which also
+ *  counts bash/run_tests — that one guards plan mode; this one guards
+ *  file-ownership in galaxy/team 编排。 */
+export function profileCanEditFiles(name: string): boolean {
+  const def = profileRegistry.get(name)
+  if (!def) return false
+  return def.allowedTools.some(t => FILE_EDIT_TOOLS.has(t))
+}
 
 /**
  * Whether a delegate profile can write files or execute state-changing commands.

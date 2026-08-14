@@ -101,7 +101,7 @@ describe('维度语义单一事实源', () => {
     for (const name of SAMPLES) {
       const semantic = classifyGalaxyDimension(name)
       const expectedProfile = {
-        review: 'reviewer', verify: 'reviewer', plan: 'planner',
+        review: 'reviewer', verify: 'verify_scout', plan: 'planner',
         docs: 'doc_scout', search: 'code_scout', impl: 'patcher',
       }[semantic]
       const expectedKind = {
@@ -166,6 +166,6 @@ describe('buildGalaxyBudgetInputs 不受语义归一改动影响（回归）', (
       { name: '验证与回归', authority: 'yaoguang', parallelism: 'data', replicas: 3 },
     ])
     assert.equal(out.profiles.length, 3)
-    assert.deepEqual(out.profiles, ['reviewer', 'reviewer', 'reviewer'])
+    assert.deepEqual(out.profiles, ['verify_scout', 'verify_scout', 'verify_scout'])
   })
 })

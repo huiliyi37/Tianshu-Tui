@@ -284,3 +284,112 @@ describe('executeBatch backfills a result for every tool_use (no orphans)', () =
     }
   })
 })
+
+/**
+ * RED probe (2026-08-10 desktop "写文件时服务中断" 调查): batch 中第二个工具
+ * 执行中途 abort 时，第一个已成功执行的结果必须仍进入 addToolResults。
+ * 现场证据（test-huiliyi37 会话 jsonl L199-201）：edit_file batch 两个调用
+ * 都变成 auto-recovered 占位，第一个在 trace 里有成功记录——结果在
+ * addToolResults 之前丢失。本测试用真实 executeBatch 复现该路径。
+ */
+describe('executeBatch mid-batch abort keeps completed results', () => {
+  it('commits the first tool result when abort fires during the second tool', async () => {
+    const collected: any[] = []
+    const ac = new AbortController()
+    // 第一个工具立即成功；第二个工具挂起直到 abort
+    const deps = {
+      config: {
+        toolRegistry: {
+          execute: async (name: string, params: any) => {
+            if (name === 'second') {
+              await new Promise((_, reject) => {
+                params.abortSignal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+              })
+            }
+            return { content: `result-of-${name}`, isError: false }
+          },
+          get: (name: string) => ({
+            definition: { input_schema: {} },
+            isConcurrencySafe: () => false,
+            timeoutMs: () => 5000,
+          }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+        hooks: null,
+        lspEnabled: false,
+        sessionId: 'test-session',
+        contextWindow: 200_000,
+        promptEngine: { getModel: () => 'test-model' },
+      },
+      cwd: '/tmp/test',
+      harness: {
+        executeTool: async ({ execute }: any) => {
+          const r = await execute()
+          return { content: r.content, isError: r.isError ?? false, retried: false }
+        },
+      },
+      prewarm: { get: () => null, invalidate: () => {} },
+      evidence: { getState: () => ({ filesModified: new Set<string>() }), trackFileRead: () => {}, trackFileModified: () => {} },
+      repairHintTracker: { recordSuccess: () => {}, recordFailure: () => {} },
+      repairPipeline: { run: (input: any) => ({ output: input, telemetry: [] }) },
+      runtimeHooks: { runPostTool: async () => {} },
+      contextInjection: { setCerebellarHint: () => {}, clearCerebellarHint: () => {} },
+      buildRuntimeSnapshot: () => ({}),
+      requestThetaCheck: () => {},
+      getAutoReasoning: () => false,
+      getReasoningEffort: () => undefined,
+      setClientReasoningEffort: () => {},
+      getVigorState: () => ({}),
+      setVigorState: () => {},
+      trajectory: { getEntries: () => [] },
+      getPredictionAccumulator: () => createPredictionAccumulator(),
+      setPredictionAccumulator: () => {},
+      getDoomLoopLevel: () => 'none' as const,
+      getSessionTurnCount: () => 1,
+      getSessionId: () => 'test-session',
+      addToolResults: (results: any[]) => { collected.push(...results) },
+      recordToolHistory: () => {},
+      getSensorium: () => null,
+      getReliabilityDecision: () => null,
+      getTurnBudget: () => createTurnBudget(0),
+      beginToolBatchObservability: () => {},
+      endToolBatchObservability: () => {},
+    } as unknown as ToolExecutionDeps
+    const controller = new ToolExecutionController(deps)
+
+    const batchPromise = controller.executeBatch({
+      toolUses: [
+        { id: 'first', name: 'first', input: {} },
+        { id: 'second', name: 'second', input: {} },
+      ],
+      callbacks: { onToolResult: () => {} } as any,
+      turn: 1,
+      checkpointCreatedThisTurn: false,
+      abortSignal: ac.signal,
+      traceStore: { events: [], toolFingerprints: [] } as any,
+      importGraph: null,
+      lastConflictCheckCount: 0,
+      latestRisk: { level: 'none', reasons: [], suggestedAction: '' } as any,
+    })
+
+    // 等第一个工具完成后触发 abort（第二个工具执行中）
+    await new Promise(r => setTimeout(r, 50))
+    ac.abort()
+
+    let outcome: string
+    try {
+      await batchPromise
+      outcome = 'resolved'
+    } catch {
+      outcome = 'rejected'
+    }
+
+    const firstResult = collected.find((r) => r.type === 'tool_result' && r.tool_use_id === 'first')
+    const secondResult = collected.find((r) => r.type === 'tool_result' && r.tool_use_id === 'second')
+    console.log(`[RED-probe] outcome=${outcome} collected=${collected.length} first=${firstResult ? 'present' : 'MISSING'} second=${secondResult ? 'present' : 'MISSING'}`)
+    assert.ok(firstResult, `first tool's completed result must be committed (outcome=${outcome}, collected=${collected.length})`)
+    assert.ok(typeof firstResult.content === 'string' && firstResult.content.includes('result-of-first'), 'first result content must be the real tool output, not a placeholder')
+    assert.ok(secondResult, 'second tool must also have a backfilled/aborted result so tool_calls pairing stays balanced')
+  })
+})

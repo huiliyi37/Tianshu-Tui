@@ -11,6 +11,7 @@ import {
   addProvider,
   addModel,
   updateProviderBaseUrl,
+  updateProviderTunables,
   upsertProviderModel,
   setApiKey,
   setApiKeyEnv,
@@ -40,6 +41,53 @@ describe('provider config mutations', () => {
     const provider = loadConfig().provider.providers.deepseek!
     assert.equal(provider.baseUrl, 'https://gateway.example.com/v1')
     assert.equal(provider.models[0]?.id, 'deepseek-v4-pro')
+  })
+
+  it('updateProviderTunables writes whitelisted fields only', () => {
+    updateProviderTunables('deepseek', { slowThinking: true, firstByteTimeoutMs: 120_000, thinkingStallTimeoutMs: 90_000 })
+    const p = loadConfig().provider.providers.deepseek!
+    assert.equal(p.slowThinking, true)
+    assert.equal(p.firstByteTimeoutMs, 120_000)
+    assert.equal(p.thinkingStallTimeoutMs, 90_000)
+  })
+
+  it('updateProviderTunables deletes keys on undefined (restore heuristic)', () => {
+    updateProviderTunables('deepseek', { slowThinking: true })
+    assert.equal(loadConfig().provider.providers.deepseek!.slowThinking, true)
+    // undefined 语义 = 删键恢复启发式，不是写 false
+    updateProviderTunables('deepseek', { slowThinking: undefined })
+    const p = loadConfig().provider.providers.deepseek!
+    assert.equal('slowThinking' in p, false)
+    assert.equal(p.slowThinking, undefined)
+  })
+
+  it('updateProviderTunables treats null as delete-key too (JSON transport encoding)', () => {
+    // JSON.stringify 丢弃 undefined 属性但保留 null——HTTP 传输下删键必须以
+    // null 编码（否则服务端收到空 fields 静默 200，见 config-routes 往返测试）。
+    updateProviderTunables('deepseek', { slowThinking: true })
+    assert.equal(loadConfig().provider.providers.deepseek!.slowThinking, true)
+    updateProviderTunables('deepseek', { slowThinking: null })
+    const p = loadConfig().provider.providers.deepseek!
+    assert.equal('slowThinking' in p, false)
+    assert.equal(p.slowThinking, undefined)
+  })
+
+  it('updateProviderTunables rejects unknown fields', () => {
+    assert.throws(() => updateProviderTunables('deepseek', { apiKey: 'sk-x' }), /Unknown tunable field "apiKey"/)
+    // 白名单字段缺席的字段名也拒收——只处理显式传入的 key
+    assert.throws(() => updateProviderTunables('deepseek', { baseUrl: 'https://x.example/v1' }), /Unknown tunable field "baseUrl"/)
+  })
+
+  it('updateProviderTunables rejects invalid values without touching disk', () => {
+    assert.throws(() => updateProviderTunables('deepseek', { slowThinking: 'yes' }), /Invalid value for "slowThinking"/)
+    assert.throws(() => updateProviderTunables('deepseek', { firstByteTimeoutMs: -5 }), /Invalid value for "firstByteTimeoutMs"/)
+    assert.throws(() => updateProviderTunables('deepseek', { thinkingStallTimeoutMs: 0 }), /Invalid value/)
+    // 拒收后原字段未被污染
+    assert.equal(loadConfig().provider.providers.deepseek!.slowThinking, undefined)
+  })
+
+  it('updateProviderTunables throws on unknown provider', () => {
+    assert.throws(() => updateProviderTunables('nope', { slowThinking: true }), /not found/)
   })
 
   it('upserts a model and makes it preferred', () => {

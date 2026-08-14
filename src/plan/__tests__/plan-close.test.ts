@@ -120,4 +120,27 @@ describe('closePlanMarkdown', () => {
   it('throws when no selected task blocks match', () => {
     assert.throws(() => closePlanMarkdown(fixture, { tasks: '9' }), /No matching task blocks/)
   })
+
+  it('closes Wave-headed plans (submit 门禁强制的大计划分波格式)', () => {
+    // 复刻 2026-08-09 会话 mskl1neqgwksu66h 的失败现场：>8 checkbox 的计划被
+    // 门禁要求写成 ### Wave N，旧解析器只认 ### Task N → close all 永远 0 匹配。
+    const input = `# 大计划\n\n## 任务分解（RED→GREEN）\n\n### Wave 1 — 公式实现\n\n- [ ] 新建测试\n- [ ] 实现函数\n\n### Wave 2 — 回归与交付\n\n- [ ] 回归：\`npm test\`\n`
+
+    const result = closePlanMarkdown(input, { tasks: 'all', updateClosure: false })
+
+    assert.deepEqual(result.changes.map(change => change.taskNumber), [1, 2])
+    assert.equal(result.totalChangedCheckboxes, 3)
+    assert.ok(result.content.includes('### Wave 1 — 公式实现\n\n- [x] 新建测试\n- [x] 实现函数'))
+    assert.ok(result.content.includes('### Wave 2 — 回归与交付\n\n- [x] 回归：`npm test`'))
+  })
+
+  it('closes 任务-headed plans（中文标题写法）', () => {
+    const input = `# 计划\n\n### 任务 1 — 甲\n\n- [ ] 改：\`src/a.ts\`\n\n### 任务 2 — 乙\n\n- [ ] 测：\`src/a.test.ts\`\n`
+
+    const result = closePlanMarkdown(input, { tasks: '2', updateClosure: false })
+
+    assert.deepEqual(result.changes, [{ taskNumber: 2, checkboxCount: 1, changedCheckboxCount: 1 }])
+    assert.ok(result.content.includes('### 任务 1 — 甲\n\n- [ ] 改：`src/a.ts`'))
+    assert.ok(result.content.includes('### 任务 2 — 乙\n\n- [x] 测：`src/a.test.ts`'))
+  })
 })

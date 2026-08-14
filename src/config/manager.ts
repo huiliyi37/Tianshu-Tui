@@ -2,7 +2,8 @@ import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
 import { z } from 'zod'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, modelConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ProviderCapabilitiesConfig, type ProviderAdvancedConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
+import { resolveProfileName, resolveProfileOverlay, resolveHookDisabledEnv } from './profile.js'
+import { configSchema, providerBaseSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, modelConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ProviderCapabilitiesConfig, type ProviderAdvancedConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
@@ -250,6 +251,8 @@ export function loadConfig(options?: {
   cwd?: string
   projectConfigPath?: string
   sessionOverlay?: Record<string, unknown>
+  /** 显式 profile 名（优先于 RIVET_PROFILE env）。见 profile.ts。 */
+  profile?: string
 }): Config {
   // Layer 1: defaults
   let base = DEFAULT_CONFIG as unknown as Record<string, unknown>
@@ -284,6 +287,14 @@ export function loadConfig(options?: {
     migrateV4FlashEffort(cpMigrated)
     // NOTE: no write-back for project configs — they may be version-controlled.
     base = deepMerge(base, cpMigrated)
+  }
+
+  // Layer 3.5: profile overlay（RIVET_PROFILE env / --profile flag，见 profile.ts）。
+  // 命名配置覆盖块：$RIVET_HOME/profiles/<name>.json 或内置 lean。位于 project 与
+  // session overlay 之间——profile 可覆盖项目配置，session overlay 可覆盖 profile。
+  const profileOverlay = resolveProfileOverlay(resolveProfileName(options?.profile))
+  if (Object.keys(profileOverlay).length > 0) {
+    base = deepMerge(base, profileOverlay)
   }
 
   // Layer 4: session overlay (runtime-only, e.g. from CLI flags)
@@ -348,6 +359,36 @@ export function saveConfig(config: Config): void {
     provider.apiKey = undefined
   }
   writeFileAtomicSync(getUserConfigPath(), JSON.stringify(toWrite, null, 2) + '\n')
+}
+
+// --- P2 hook 装配配置面（list-hooks / set-hook-disabled）---
+
+/** 当前 hook 装配配置面：config 值 / env 生效集 / 最终生效集。
+ *  env 解析与装配侧同源（profile.resolveHookDisabledEnv）。 */
+export function listHooksConfig(): {
+  disabled: string[] | undefined
+  envDisabled: string[] | undefined
+  effectiveDisabled: string[]
+} {
+  const cfg = loadConfig()
+  const envDisabled = resolveHookDisabledEnv()
+  return {
+    disabled: cfg.hooks.disabled,
+    envDisabled,
+    effectiveDisabled: envDisabled ?? cfg.hooks.disabled ?? [],
+  }
+}
+
+/** 写用户 config 的 hooks.disabled：enable=true 移除、否则加入。返回新列表。 */
+export function setHookDisabled(hookId: string, enable: boolean): { disabled: string[] } {
+  const cfg = loadConfig()
+  const current = cfg.hooks.disabled ?? []
+  const next = enable
+    ? current.filter(id => id !== hookId)
+    : current.includes(hookId) ? current : [...current, hookId]
+  cfg.hooks = { ...cfg.hooks, disabled: next }
+  saveConfig(cfg)
+  return { disabled: next }
 }
 
 // --- Provider management ---
@@ -812,18 +853,20 @@ export function setCheckpointConfig(input: {
 
 export interface ApprovalConfigSnapshot {
   approval: string
+  unsandboxed: boolean
 }
 
 export const APPROVAL_MODE_OPTIONS = ['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions'] as const
 
 /** Snapshot of the agent approval mode for the desktop settings UI. */
 export function getApprovalConfig(): ApprovalConfigSnapshot {
-  return { approval: loadConfig().agent.approval }
+  const cfg = loadConfig()
+  return { approval: cfg.agent.approval, unsandboxed: cfg.agent.unsandboxed ?? false }
 }
 
 /** Persist the agent approval mode (e.g. dangerously-skip-permissions for
- *  full autonomy). Takes effect at the next run(). */
-export function setApprovalConfig(input: { approval?: unknown }): ApprovalConfigSnapshot {
+ *  full autonomy) and optional sandbox bypass. Takes effect at the next run(). */
+export function setApprovalConfig(input: { approval?: unknown; unsandboxed?: unknown }): ApprovalConfigSnapshot {
   const cfg = loadConfig()
   if (input.approval !== undefined) {
     const v = String(input.approval)
@@ -832,8 +875,12 @@ export function setApprovalConfig(input: { approval?: unknown }): ApprovalConfig
     }
     cfg.agent.approval = v as typeof cfg.agent.approval
   }
+  if (input.unsandboxed !== undefined) {
+    if (typeof input.unsandboxed !== 'boolean') throw new Error('unsandboxed must be a boolean')
+    cfg.agent.unsandboxed = input.unsandboxed
+  }
   saveConfig(cfg)
-  return { approval: cfg.agent.approval }
+  return { approval: cfg.agent.approval, unsandboxed: cfg.agent.unsandboxed ?? false }
 }
 
 // --- Delivery auto-commit toggle ---
@@ -1648,6 +1695,8 @@ export interface RegisterProviderOptions {
   /** Overwrite an existing entry. Without this flag a same-name write throws —
    *  silent overwrites used to lose baseUrl/key/models. */
   force?: boolean
+  /** Explicitly mark a slow-thinking endpoint; undefined keeps name/baseUrl heuristics. */
+  slowThinking?: boolean
 }
 
 /**
@@ -1692,6 +1741,7 @@ export function registerProvider(options: RegisterProviderOptions): void {
     thinking: 'enabled',
     maxTokens: models.reduce((max, m) => Math.max(max, m.maxTokens), 64_000),
     allowProFallback: options.allowProFallback ?? false,
+    ...(options.slowThinking !== undefined ? { slowThinking: options.slowThinking } : {}),
     models,
     unsupported: [],
     userSaved: true,
@@ -1702,6 +1752,51 @@ export function registerProvider(options: RegisterProviderOptions): void {
   cfg.provider.providers[options.providerName] = provider
   if (options.makeDefault) cfg.provider.default = options.providerName
   saveProviderConfigWithSecret(cfg, previousConfig, options.apiKey ? options.providerName : undefined, options.apiKey)
+}
+
+/**
+ * 白名单字段：存量 provider 的可调运行时参数（schema.ts 已认，但创建路径之外
+ * 没有写入通道——2026-08-09 计划任务 2 补齐编辑路径）。
+ * 字段值 undefined 或 null = 删除该键，恢复按名称/baseUrl 的启发式推导
+ * （slowThinking 三态的「默认」档；firstByteTimeoutMs/thinkingStallTimeoutMs 的
+ * undefined = 用推导值）。null 是 JSON.stringify 下唯一可传输的删键编码——
+ * undefined 属性会被序列化丢弃（传输层静默失效，见 config-routes 往返测试）。
+ */
+const TUNABLE_FIELD_KEYS = ['slowThinking', 'firstByteTimeoutMs', 'thinkingStallTimeoutMs'] as const
+
+/**
+ * 字段级更新已存在 provider 的 tunable 参数。白名单外字段、非法值一律拒收
+ * （抛错不落盘）；每个字段复用 providerSchema 对应字段的 zod 校验，与创建路径
+ * 同源。返回更新后的 ProviderConfig。
+ */
+export function updateProviderTunables(providerName: string, fields: Record<string, unknown>): ProviderConfig {
+  const cfg = loadConfig()
+  const provider = cfg.provider.providers[providerName]
+  if (!provider) throw new Error(`Provider "${providerName}" not found`)
+
+  const shape = providerBaseSchema.shape as Record<string, z.ZodTypeAny>
+  for (const [key, value] of Object.entries(fields)) {
+    if (!(TUNABLE_FIELD_KEYS as readonly string[]).includes(key)) {
+      throw new Error(`Unknown tunable field "${key}". Allowed: ${TUNABLE_FIELD_KEYS.join(', ')}`)
+    }
+    if (value === undefined || value === null) {
+      delete (provider as unknown as Record<string, unknown>)[key]
+      continue
+    }
+    // ③ 审查项：白名单与 schema 的对应关系不是类型强制的——未来白名单加键
+    // 而忘加 schema 字段时，这里必须报友好错误而不是裸 TypeError。
+    const fieldSchema = shape[key]
+    if (!fieldSchema) {
+      throw new Error(`Internal inconsistency: tunable field "${key}" has no schema entry — add it to providerSchema`)
+    }
+    const parsed = fieldSchema.safeParse(value)
+    if (!parsed.success) {
+      throw new Error(`Invalid value for "${key}": ${parsed.error.message}`)
+    }
+    ;(provider as unknown as Record<string, unknown>)[key] = parsed.data
+  }
+  saveConfig(cfg)
+  return provider
 }
 
 // --- Model management ---
@@ -1803,6 +1898,8 @@ Commands:
   set-default <p>              Set default provider
   set-default-model <p>:<m>    Set default model for new sessions (agent.defaultModel)
   set-approval <mode>          Set approval mode (auto-safe/manual/auto-accept/dangerously-skip-permissions)
+  list-hooks                   Show CVM hook assembly config (config/env/effective disabled)
+  set-hook-disabled <id> [--enable]  Disable (or re-enable with --enable) a CVM runtime hook
   set-proxy <url> [--clear]    Set/clear web proxy (web_search/web_fetch)
   set-no-proxy <list> [--clear]  Set/clear NO_PROXY bypass list
   set-search-backends <b1,b2>  Set web_search backend chain (e.g. bocha,bing,duckduckgo)
@@ -2019,6 +2116,38 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
         }
         const saved = setApprovalMode(mode)
         cliOut(io, formatSuccess(`Approval mode set to ${saved}`, fmtOpts))
+        break
+      }
+
+      // ── P2 hook 装配配置面 ──────────────────────────────────────────────
+      // list-hooks 只输出配置解析结果（CLI 前置命令无 AgentLoop 管线实例，
+      // 不声称运行时 manifest）；set-hook-disabled 写用户 config，TUI 交互
+      // 会话中经 config-watcher 即时热更（下一轮生效）。
+
+      case 'list-hooks': {
+        const { disabled, envDisabled, effectiveDisabled } = listHooksConfig()
+        cliOut(io, `hooks.disabled (config): ${JSON.stringify(disabled ?? [])}`)
+        if (envDisabled) {
+          cliOut(io, `RIVET_HOOKS_DISABLED (env): ${JSON.stringify(envDisabled)}（优先于 config）`)
+        }
+        cliOut(io, `effective disabled: ${JSON.stringify(effectiveDisabled)}`)
+        cliOut(io, '生效时机：TUI 交互会话中改配置即时热更（下一轮）；timeoutMs/slowMs 重启生效。')
+        break
+      }
+
+      case 'set-hook-disabled': {
+        const hookId = args[1]
+        if (!hookId) {
+          cliErr(io, 'Usage: rivet config set-hook-disabled <id> [--enable]')
+          cliExit(io, 1)
+          return
+        }
+        const enable = hasFlag(args, '--enable')
+        const { disabled } = setHookDisabled(hookId, enable)
+        cliOut(io, formatSuccess(
+          `hooks.disabled ${enable ? '移除' : '加入'} ${hookId} → ${JSON.stringify(disabled)}（交互会话即时热更）`,
+          fmtOpts,
+        ))
         break
       }
 
@@ -2263,7 +2392,7 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
             return
           }
           const cfg = loadConfig()
-          cfg.mcp.servers[id] = { url }
+          cfg.mcp.servers[id] = { url, transportHint: 'sse' }
           saveConfig(cfg)
           cliOut(io, formatSuccess(`MCP server "${id}" added (sse: ${url}). Restart Rivet to connect.`, fmtOpts))
         } else if (subcmd === 'remove') {

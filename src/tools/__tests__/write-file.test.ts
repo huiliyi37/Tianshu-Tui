@@ -235,6 +235,19 @@ describe('write_file tool — blind-overwrite guard', () => {
     assert.ok(result.content.includes('已自动回滚'), `Expected rollback note, got: ${result.content}`)
     assert.equal(readFileSync(file, 'utf-8'), original, 'File should be rolled back to original content')
   })
+
+  it('removes a newly written file with a fatal syntax error (no backup to restore)', async () => {
+    // 2026-08-10 galaxy worker 事故：trackFileChange 只备份已存在文件，新文件
+    // 无备份 → restoreLatestBackup 必然失败，坏文件曾带「自动回滚失败」留盘。
+    const file = join(TEST_DIR, 'brand-new.py')
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'def foo():\n    return (1\n',
+    }))
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('新文件已自动移除'), `Expected removal note, got: ${result.content}`)
+    assert.ok(!existsSync(file), 'broken new file must be removed from disk')
+  })
 })
 
 describe('write_file tool — rewrite-loop hint (A-type placeholder loop)', () => {
@@ -261,7 +274,7 @@ describe('write_file tool — rewrite-loop hint (A-type placeholder loop)', () =
     }))
     assert.ok(!r2.isError)
     assert.ok(r2.content.includes('疑似重写循环'), `second write must hint, got: ${r2.content}`)
-    assert.ok(r2.content.includes('指针是正常截断'), 'hint explains the pointer echo is not a placeholder')
+    assert.ok(r2.content.includes('read_file'), 'hint points at read_file instead of rewriting')
   })
 
   it('hint is session-scoped — a fresh session writing once has no hint', async () => {
@@ -291,5 +304,85 @@ describe('write_file tool — rewrite-loop hint (A-type placeholder loop)', () =
     })
     assert.ok(!rB1.isError)
     assert.ok(!rB1.content.includes('疑似重写循环'), `fresh session first write must not hint, got: ${rB1.content}`)
+  })
+
+  it('byte-identical rewrite flags same content explicitly', async () => {
+    const file = join(TEST_DIR, 'same-content.txt')
+    const content = 'identical payload\n'
+    const r1 = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content }))
+    assert.ok(!r1.isError)
+    markObserved(file)
+    const r2 = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content }))
+    assert.ok(r2.content.includes('疑似重写循环'), 'second write hints')
+    assert.ok(r2.content.includes('内容与上次相同'),
+      `identical-content rewrite must be flagged, got: ${r2.content}`)
+  })
+
+  it('content-changing iterations do not re-hint after the first warning', async () => {
+    const file = join(TEST_DIR, 'iterate.txt')
+    const r1 = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'v1\n' }))
+    assert.ok(!r1.content.includes('疑似重写循环'), 'first write must not hint')
+    markObserved(file)
+    const r2 = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'v2\n' }))
+    assert.ok(r2.content.includes('疑似重写循环'), 'first content change warns')
+    markObserved(file)
+    const r3 = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'v3\n' }))
+    assert.ok(!r3.content.includes('疑似重写循环'),
+      'subsequent content-changing iterations must not re-hint (B1 lesson: repeated reminders are noise)')
+  })
+})
+
+describe('write_file tool — append mode (chunked writes)', () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true })
+    mkdirSync(TEST_DIR, { recursive: true })
+  })
+
+  it('append creates a missing file, then concatenates without adding a newline', async () => {
+    const file = join(TEST_DIR, 'chunks.sql')
+    const r1 = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'first\n', mode: 'append' }))
+    assert.ok(!r1.isError, `append create: ${r1.content}`)
+    assert.ok(r1.content.includes('已追加'), `append receipt: ${r1.content}`)
+
+    const r2 = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'second\n', mode: 'append' }))
+    assert.ok(!r2.isError)
+    assert.equal(readFileSync(file, 'utf-8'), 'first\nsecond\n')
+  })
+
+  it('append bypasses the blind-overwrite guard (no information destroyed)', async () => {
+    const file = join(TEST_DIR, 'unobserved.txt')
+    writeFileSync(file, 'existing\n')
+    // Never read this session — overwrite would be blocked, append must pass.
+    const result = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'more\n', mode: 'append' }))
+    assert.ok(!result.isError, `append must not hit the blind-overwrite guard: ${result.content}`)
+    assert.equal(readFileSync(file, 'utf-8'), 'existing\nmore\n')
+  })
+
+  it('append skips the fatal syntax check — mid-chunk files are intentionally incomplete', async () => {
+    const file = join(TEST_DIR, 'partial.py')
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'def foo():\n    return (1\n',
+      mode: 'append',
+    }))
+    assert.ok(!result.isError, `mid-chunk append must not fail: ${result.content}`)
+    assert.ok(existsSync(file), 'mid-chunk file must not be rolled back/removed')
+  })
+
+  it('repeated appends to one path do not trip the rewrite-loop hint', async () => {
+    const file = join(TEST_DIR, 'multi-chunk.txt')
+    for (const chunk of ['c1\n', 'c2\n', 'c3\n']) {
+      const r = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: chunk, mode: 'append' }))
+      assert.ok(!r.isError)
+      assert.ok(!r.content.includes('疑似重写循环'), `chunked append must not hint: ${r.content}`)
+    }
+    assert.equal(readFileSync(file, 'utf-8'), 'c1\nc2\nc3\n')
+  })
+
+  it('rejects an invalid mode', async () => {
+    const file = join(TEST_DIR, 'bad-mode.txt')
+    const result = await WRITE_FILE_TOOL.execute(makeParams({ file_path: file, content: 'x\n', mode: 'upsert' }))
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('mode'), `should explain valid modes: ${result.content}`)
   })
 })

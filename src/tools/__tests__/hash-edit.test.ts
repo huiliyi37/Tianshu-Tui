@@ -500,7 +500,7 @@ describe('hash_edit', () => {
     const idx = content.indexOf('新鲜锚点（链式安全）：')
     if (idx === -1) return []
     return content.slice(idx).split('\n').slice(1)
-      .filter(l => /^L\d+:[0-9a-f]{8}$/.test(l))
+      .filter(l => /^L\d+:[0-9a-f]{8}/.test(l))
   }
 
   it('success output returns fresh anchors matching the new file content', async () => {
@@ -523,12 +523,15 @@ describe('hash_edit', () => {
     // Context-before (L1), first new (L2), last new (L4), context-after (L5)
     assert.deepEqual(fresh.map(a => a.split(':')[0]), ['L1', 'L2', 'L4', 'L5'])
 
-    // Every returned anchor hash must match the actual line now on disk.
+    // Every returned anchor hash must match the actual line now on disk,
+    // and each anchor line must carry a content snippet (model confirmation).
     const newLines = readFileSync(filePath, 'utf-8').split('\n')
     for (const anchor of fresh) {
-      const [pos, hash] = anchor.split(':') as [string, string]
-      const lineNo = parseInt(pos.slice(1), 10)
-      assert.equal(hash, h(newLines[lineNo - 1]!), `anchor ${anchor} does not match file content "${newLines[lineNo - 1]}"`)
+      const m = /^L(\d+):([0-9a-f]{8})/.exec(anchor)
+      assert.ok(m, `anchor ${anchor} must match L{n}:{hash} prefix`)
+      const lineNo = parseInt(m[1]!, 10)
+      assert.equal(m[2], h(newLines[lineNo - 1]!), `anchor ${anchor} does not match file content "${newLines[lineNo - 1]}"`)
+      assert.match(anchor, / → /, `anchor ${anchor} should carry a content snippet (model confirmation)`)
     }
   })
 

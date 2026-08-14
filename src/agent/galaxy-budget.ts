@@ -50,7 +50,7 @@ export function classifyGalaxyDimension(name: string): GalaxyDimensionSemantic {
 
 const PROFILE_BY_SEMANTIC: Readonly<Record<GalaxyDimensionSemantic, string>> = {
   review: 'reviewer',
-  verify: 'reviewer',
+  verify: 'verify_scout',
   plan: 'planner',
   docs: 'doc_scout',
   search: 'code_scout',

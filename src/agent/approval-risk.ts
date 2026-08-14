@@ -136,8 +136,21 @@ export const SED_BYPASS_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\bsed\b.*\b(?:\/etc\/|\.ssh\/|authorized_keys|shadow|passwd)\b/,
 ]
 
+/**
+ * No-op redirects to /dev/null (`2>/dev/null`, `&>/dev/null`, `>/dev/null`).
+ * Stripped before write detection so read-only commands that merely silence
+ * output are not misclassified as writes — reliability degraded mode blocks
+ * `bash_write`, so a false positive here locks out plain greps.
+ */
+const DEV_NULL_REDIRECT_PATTERN = /(?:^|\s)(?:\d+|&)?>>?\s*\/dev\/null\b/g
+
+function stripDevNullRedirects(command: string): string {
+  return command.replace(DEV_NULL_REDIRECT_PATTERN, ' ')
+}
+
 export function bashCommandMayWrite(command: string): boolean {
-  return BASH_WRITE_PATTERNS.some(pattern => pattern.test(command))
+  const normalized = stripDevNullRedirects(command)
+  return BASH_WRITE_PATTERNS.some(pattern => pattern.test(normalized))
 }
 
 /**
@@ -145,9 +158,10 @@ export function bashCommandMayWrite(command: string): boolean {
  * 命中 RISKY_WRITE_PATTERNS 或 DANGEROUS_BASH_PATTERNS 则返回 false。
  */
 export function isSafeWriteOnly(command: string): boolean {
-  if (RISKY_WRITE_PATTERNS.some(p => p.test(command))) return false
-  if (DANGEROUS_BASH_PATTERNS.some(p => p.test(command))) return false
-  return SAFE_WRITE_PATTERNS.some(p => p.test(command))
+  const normalized = stripDevNullRedirects(command)
+  if (RISKY_WRITE_PATTERNS.some(p => p.test(normalized))) return false
+  if (DANGEROUS_BASH_PATTERNS.some(p => p.test(normalized))) return false
+  return SAFE_WRITE_PATTERNS.some(p => p.test(normalized))
 }
 
 /** Detect scope-bypassing bash git commands (unscoped add/commit/stash). */

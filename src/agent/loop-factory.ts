@@ -9,6 +9,7 @@ import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { createUserHooksBridge, runOnErrorHooks } from './hooks/user-hooks-bridge.js'
 import { recordSkillInvoked } from './skill-gate.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
+import { resolveHookDisabledEnv } from '../config/profile.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
 import { setGeneralLedgerTelemetrySink } from './general-ledger.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
@@ -543,12 +544,26 @@ function buildLazyCopilotCompletion(self: AgentLoop): (system: string, user: str
   }
 }
 
+/**
+ * 解析 RIVET_HOOKS_DISABLED env（逗号分隔，去空白）。undefined = env 未设。
+ * 装配与热更两条路径共用，保证 env 优先级一致。
+ * 实现位于 config 层（profile.ts）——装配侧 re-export 保持单一事实源。
+ */
+export { resolveHookDisabledEnv } from '../config/profile.js'
+
+/**
+ * 解析禁用的 hook id 列表：RIVET_HOOKS_DISABLED env 优先于
+ * config.hooks.disabled（经 AgentLoop 选项 hookAssembly 传入）。导出以锁定契约。
+ */
+export function resolveDisabledHookIds(config: { hookAssembly?: { disabled?: string[] } }): string[] | undefined {
+  return resolveHookDisabledEnv() ?? config.hookAssembly?.disabled
+}
+
 export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline {
   // 将星账本遥测（Y8）：读/写事件落 sensorium.jsonl 同通道，让「账本是否在被
   // 使用、哪个星在生长」可观测。模块级 sink——worker prompt 合并与工具读写共用。
   setGeneralLedgerTelemetrySink(event => self.telemetryWriter.write({ ...event }))
-  const userBridgeDeps = {
-    cwd: self.cwd,
+  const userBridgeDeps = {    cwd: self.cwd,
     sessionId: self.config.sessionId,
     getTurn: () => self.session.getTurnCount(),
     emitHookResult: self.config.emitHookResult,
@@ -675,7 +690,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getLastUserInputRunTurn: () => self.lastUserInputRunTurn,
     getIntentObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 500) ?? null,
     getMaxTurns: () => self.config.maxTurns,
-    addSystemReminder: content => { self.session.appendSystemReminder(content) },
+    addSystemReminder: (content, cls) => { self.session.appendSystemReminder(content, cls) },
     // W5 (render-verify): check if browser/computer_use are registered for capability degradation.
     // browser_debug 是渲染验证主工具（CORE since 2026-07-15），必须计入——否则它可用时
     // 仍会走「缺少视觉验证工具」降级文案。
@@ -888,6 +903,11 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
   // I4: when any runtime hook throws, run user `onError` hooks and emit the
   // result to the desktop event stream.
   return new RuntimeHookPipeline(hooks, {
+    // P2: hookAssembly 接线（来自磁盘 Config.hooks，bootstrap 填入选项）——
+    // disabled 装配时生效（交互模式可热更）；timeoutMs/slowMs 为启动快照。
+    disabledHookIds: resolveDisabledHookIds(self.config),
+    hookTimeoutMs: self.config.hookAssembly?.timeoutMs,
+    hookSlowMs: self.config.hookAssembly?.slowMs,
     onError: (err) => {
       runOnErrorHooks(userBridgeDeps, err.message)
     },

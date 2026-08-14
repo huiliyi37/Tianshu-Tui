@@ -978,6 +978,8 @@ export function createAgentRuntime(deps: {
           return {
             order: _order,
             providerName: ovProvider.name,
+            baseUrl: ovProvider.baseUrl,
+            slowThinking: ovProvider.slowThinking,
             client: createProviderClient(ovProvider, ovCapabilities, {
               apiKey: ovApiKey,
               model: ovModel,
@@ -995,9 +997,9 @@ export function createAgentRuntime(deps: {
             toolRegistry: workerRegistry,
             blockPolicy: blocks,
             cwd,
-            maxTurns: 40,
+            maxTurns: 100,
             contextWindow: ovContextWindow,
-            compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+            compact: { enabled: false, model: 'flash' },
             activeClaims: claimStore.listActiveClaims(),
             domainKnowledgeStore,
             forceJsonRepair: ovCapabilities.supportsResponseFormat,
@@ -1035,6 +1037,8 @@ export function createAgentRuntime(deps: {
         return {
           order: _order,
           providerName: overrideResolved.providerName,
+          baseUrl: overrideResolved.providerConfig.baseUrl,
+          slowThinking: overrideResolved.providerConfig.slowThinking,
           client: createProviderClient(
             overrideResolved.providerConfig,
             overrideCapabilities,
@@ -1055,9 +1059,9 @@ export function createAgentRuntime(deps: {
           toolRegistry: workerRegistry,
           blockPolicy: blocks,
           cwd,
-          maxTurns: 40,
+          maxTurns: 100,
           contextWindow: overrideContextWindow,
-          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+          compact: { enabled: false, model: 'flash' },
           activeClaims: claimStore.listActiveClaims(),
           domainKnowledgeStore,
           forceJsonRepair: overrideCapabilities.supportsResponseFormat,
@@ -1125,6 +1129,8 @@ export function createAgentRuntime(deps: {
     return {
       order: _order,
       providerName: workerProvider.name,
+      baseUrl: workerProvider.baseUrl,
+      slowThinking: workerProvider.slowThinking,
       client: createProviderClient(workerProvider, workerCapabilities, {
         apiKey: workerApiKey,
         model: workerModel,
@@ -1144,9 +1150,9 @@ export function createAgentRuntime(deps: {
       toolRegistry: workerRegistry,
       blockPolicy: blocks,
       cwd,
-      maxTurns: 40,
+      maxTurns: 100,
       contextWindow: workerContextWindow,
-      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      compact: { enabled: false, model: 'flash' },
       activeClaims: claimStore.listActiveClaims(),
       domainKnowledgeStore,
       // Use response_format: json_object on repair turns when the provider
@@ -1195,6 +1201,14 @@ export function createAgentRuntime(deps: {
     {
       ...agentCfg,
       toolRegistry,
+      // P2: CVM 管线装配配置——磁盘 Config.hooks 填入 AgentLoop 选项
+      // （createRuntimeHooksPipeline 经 resolveDisabledHookIds 消费；
+      // 交互模式热更见 config-watcher）。
+      hookAssembly: {
+        disabled: config.hooks.disabled,
+        timeoutMs: config.hooks.timeoutMs,
+        slowMs: config.hooks.slowMs,
+      },
       // YOLO 联动无限轮次——启动恢复路径。运行时切换（/yes、权限面板、sidecar
       // serve.ts）都会把 maxTurns 置 0，唯独「持久化 YOLO 为默认 → 重启」的构造
       // 路径漏了联动：YOLO 会话按 config maxTurns（如 50）跑，turn 45 注入预算
@@ -2095,6 +2109,11 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
 
   // YOLO removes the approval boundary, so the kernel write boundary becomes
   // the only one. Turn the sandbox on before the startup notice is computed.
+  // Exception: agent.unsandboxed — 「完全权限」档显式关沙箱，设
+  // RIVET_SANDBOX=0 后 applySandboxPolicyForApprovalMode 看到显式值即 no-op。
+  if (config.agent.unsandboxed) {
+    process.env.RIVET_SANDBOX = '0'
+  }
   applySandboxPolicyForApprovalMode(config.agent.approval)
 
   // Announce the command sandbox's protection level up-front. Stays silent when
@@ -2340,6 +2359,39 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
       const anchors = anchorsFromMessages(existingMessages, extractor, agent.config.promptEngine.getModel(), agent.config.wireContext)
       if (anchors.length > 0) agent.config.promptEngine.appendExcludedPathAnchors(anchors)
     }
+  }
+  // 目标锚注入（spec 3c 动作 B 补强）：resume 有历史 → 从 meta 或历史重建；
+  // 首启无历史 → 仅注入增量跟踪（第一条 user 消息进入时经 setGoalTracking
+  // 提取初始目标）。非 spark extractor 恒 undefined → 零行为差异。
+  const goalExtractor = proRegistry.getGoalExtractor(effectiveProviderName ?? '')
+  if (goalExtractor) {
+    let baseline: string | null = null
+    if (existingMessages.length > 0) {
+      const frozenGoal = persist.loadMetadata()?.goalAnchor
+      if (frozenGoal) {
+        agent.config.promptEngine.setGoalAnchor(frozenGoal)
+        baseline = frozenGoal
+      } else {
+        const goal = goalExtractor(existingMessages as never)
+        if (goal) {
+          agent.config.promptEngine.setGoalAnchor(goal)
+          baseline = goal
+          try { persist.updateMetadata({ goalAnchor: goal }) } catch { /* best-effort */ }
+        }
+      }
+    }
+    // 后续 user 消息增量更新（延续指令不触发；变更回调更新 engine + meta）。
+    // initialBaseline = frozen ?? 历史提取——防止初始提取覆盖已固化目标（审查 HIGH-2）。
+    session.setGoalTracking(
+      (msgs) => goalExtractor(msgs as never),
+      (next) => {
+        agent.config.promptEngine.setGoalAnchor(next)
+        if (next !== null) {
+          try { persist.updateMetadata({ goalAnchor: next }) } catch { /* best-effort */ }
+        }
+      },
+      baseline,
+    )
   }
   // 兜底模型续跑：meta + JSONL 审计，对齐 switchAgentSession/桌面 resume-fallback 语义。
   if (startupResume.fallbackUsed && startupResume.target) {

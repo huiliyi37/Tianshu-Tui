@@ -44,7 +44,7 @@ export const editFileArgProcessor: ToolArgProcessor = {
     return JSON.stringify({
       ...parsed,
       old_string: `${EDIT_FILE_POINTER_PREFIX} ${filePath}: replaced ${oldStr.length}-char block, preview: "${preview}". 已成功落盘，勿重做——历史正常截断，查看用 read_file。${POINTER_INTERNAL_TAG} display-only pointer]`,
-      new_string: `[new block ${newStr.length} chars — 已落盘，勿重做。${POINTER_INTERNAL_TAG} display-only pointer]`,
+      new_string: `[new block ${filePath}: ${newStr.length} chars — 已落盘，勿重做。${POINTER_INTERNAL_TAG} display-only pointer]`,
     })
   },
 }

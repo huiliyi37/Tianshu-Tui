@@ -85,6 +85,8 @@ import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
+import { watchConfigForHooks } from '../config/config-watcher.js'
+import type { ConfigWatcherHandle } from '../config/config-watcher.js'
 import { type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { buildRuntimeSelfModel } from './runtime-self-model.js'
 import { CacheAdvisor } from '../cache/advisor.js'
@@ -123,7 +125,7 @@ import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot, createSidePathUsageRecorder, createReclaimDecisionRecorder } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot, createSidePathUsageRecorder, createReclaimDecisionRecorder, resolveHookDisabledEnv } from "./loop-factory.js";
 import type { TurnStepProducer } from './turn-step-producer.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
@@ -526,6 +528,9 @@ export class AgentLoop {
   strategy: StrategyProfile | null = null
   vigorState: VigorState = createVigorState()
   runtimeHooks: RuntimeHookPipeline
+  /** P2 Wave 2: config HMR watcher（非 headless 模式装配）。persistent:false
+   *  不阻塞进程退出；AgentLoop 会话结束即随实例回收。 */
+  configWatcher: ConfigWatcherHandle | null = null
   perception: TurnPerceptionController
   intent: TurnIntentController
   contextInjection: ContextInjectionController
@@ -848,6 +853,18 @@ export class AgentLoop {
     this.meridianDbForWarmup = meridianDb
 
     this.runtimeHooks = this.config.runtimeHooks ?? createRuntimeHooksPipeline(this)
+    // P2 Wave 2: config HMR —— 非 headless 交互模式装配。配置变更（hooks.disabled）
+    // 经 watcher 热更到管线，下一轮生效。缓存影响：hook 开关不动工具指纹/system
+    // prompt 字节；hook 注入内容可能改变下一请求 appendix，重建一次后恢复命中。
+    // 仅热更 disabled；timeoutMs/slowMs 保持启动快照。
+    if (!this.config.headless) {
+      this.configWatcher = watchConfigForHooks({
+        cwd: this.cwd,
+        // env 优先（与装配路径 resolveDisabledHookIds 同源）：RIVET_HOOKS_DISABLED
+        // 是启动级约束，热更只应用 config 变更，不覆盖 env 禁用集。
+        onHooksChange: hooks => this.runtimeHooks.setDisabledHookIds(resolveHookDisabledEnv() ?? hooks.disabled ?? []),
+      })
+    }
     this.perception = new TurnPerceptionController({
       cwd: this.cwd,
       maxTurns: this.config.maxTurns,

@@ -61,3 +61,26 @@ test('cooldown prevents repeated injection within 8 calls', async () => {
   await hook.run({} as never, ev('read_file'))
   assert.equal(submitted.length, 2, 'injection repeats after cooldown')
 })
+
+test('zero-anchor read streak fires 取证 (evidence-first), not plain probe', async () => {
+  const { submitted, advisoryBus } = makeDeps()
+  const hook = createProbeDisciplineHook({ advisoryBus })
+  for (const n of ['read_file', 'grep', 'glob']) {
+    await hook.run({} as never, ev(n))
+  }
+  assert.equal(submitted.length, 1)
+  assert.ok(submitted[0]!.content.includes('取证'), 'zero-anchor reads should nudge evidence collection')
+  assert.ok(submitted[0]!.content.includes('锚点'), 'mentions observation anchors')
+})
+
+test('anchored read streak fires plain probe (has evidence, needs kill)', async () => {
+  const { submitted, advisoryBus } = makeDeps()
+  const hook = createProbeDisciplineHook({ advisoryBus })
+  // read_section 恒算锚点；再补带 context_lines 的 grep
+  await hook.run({} as never, { ...ev('read_section'), input: {} })
+  await hook.run({} as never, { ...ev('grep'), input: { pattern: 'x', context_lines: 3 } })
+  await hook.run({} as never, { ...ev('glob'), input: { pattern: '**/*.ts' } })
+  assert.equal(submitted.length, 1)
+  assert.ok(submitted[0]!.content.includes('探针'), 'anchored reads → probe nudge')
+  assert.ok(!submitted[0]!.content.includes('锚点'), 'anchored reads should not nudge evidence collection')
+})

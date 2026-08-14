@@ -35,18 +35,26 @@ export function hashLine(line: string): string {
  * @param newLineCount  number of lines inserted (0 for pure deletion)
  */
 export function buildFreshAnchors(newFileLines: string[], editStart0: number, newLineCount: number): string {
+  // 每个锚点行附带该行内容（截断 80 字符）——模型无需 read_file 即可确认
+  // 写入结果（对标 grok-build hashline 的 LINE:HASH→CONTENT；2026-08 实测：
+  // 无内容行的锚点让模型无法确认自己写了什么，是 A 型重写循环的温床）。
+  const lineWithContent = (lineNo0: number): string => {
+    const content = (newFileLines[lineNo0] ?? '').replace(/\s+$/, '')
+    const snippet = content.length > 80 ? `${content.slice(0, 80)}…` : content
+    return `L${lineNo0 + 1}:${hashLine(newFileLines[lineNo0]!)} → ${snippet}`
+  }
   const parts: string[] = []
   if (editStart0 > 0) {
-    parts.push(`L${editStart0}:${hashLine(newFileLines[editStart0 - 1]!)}`)
+    parts.push(lineWithContent(editStart0 - 1))
   }
   if (newLineCount > 0) {
-    parts.push(`L${editStart0 + 1}:${hashLine(newFileLines[editStart0]!)}`)
+    parts.push(lineWithContent(editStart0))
   }
   if (newLineCount > 1) {
-    parts.push(`L${editStart0 + newLineCount}:${hashLine(newFileLines[editStart0 + newLineCount - 1]!)}`)
+    parts.push(lineWithContent(editStart0 + newLineCount - 1))
   }
   if (editStart0 + newLineCount < newFileLines.length) {
-    parts.push(`L${editStart0 + newLineCount + 1}:${hashLine(newFileLines[editStart0 + newLineCount]!)}`)
+    parts.push(lineWithContent(editStart0 + newLineCount))
   }
   return parts.length > 0 ? `\n新鲜锚点（链式安全）：\n${parts.join('\n')}` : ''
 }
@@ -143,15 +151,16 @@ interface Anchor {
 /** Parse "L<num>:<hex>" or "L<num>" into { line, hash }.
  *  Returns null on parse failure. */
 function parseAnchor(raw: string): Anchor | null {
-  // Full format: L<num>:<8-char-hex>
-  const fullMatch = /^L(\d+):([0-9a-f]{8})$/.exec(raw)
+  // Full format: L<num>:<8-char-hex>，容忍行尾内容后缀（fresh anchors 现附
+  // " → content" snippet，模型回灌整行时不得解析失败）。
+  const fullMatch = /^L(\d+):([0-9a-f]{8})(?:\s|$)/.exec(raw)
   if (fullMatch) {
     const line = parseInt(fullMatch[1]!, 10)
     if (line < 1) return null
     return { line, hash: fullMatch[2]! }
   }
   // Position-only format: L<num>
-  const posMatch = /^L(\d+)$/.exec(raw)
+  const posMatch = /^L(\d+)(?:\s|$)/.exec(raw)
   if (posMatch) {
     const line = parseInt(posMatch[1]!, 10)
     if (line < 1) return null

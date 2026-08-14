@@ -568,6 +568,40 @@ function assembleAgentLoop(
       if (anchors.length > 0) agent.config.promptEngine.appendExcludedPathAnchors(anchors)
     }
   }
+  // 目标锚注入（spec 3c 动作 B 补强）：无条件注入——resume 有历史 → 从 meta
+  // 或历史重建基线；首启无历史 → 初始基线 null，第一条 user 消息进入时经
+  // addUserMessage 增量提取建立目标（审查 HIGH-1：注入不得放在 priorMessages
+  // 块内，否则桌面端新会话目标锚永不建立）。非 spark extractor 恒 undefined
+  // → 零行为差异。
+  const goalExtractor = proRegistry.getGoalExtractor(spec.provider.name)
+  if (goalExtractor) {
+    const frozen = stores.persist.loadMetadata()?.goalAnchor
+    // 历史提取结果复用（审查：不得对同一输入二次调用 extractor——
+    // baseline 与写入 meta 的值必须同源，不依赖确定性才等价）
+    let goalFromHistory: string | null = null
+    if (frozen) {
+      agent.config.promptEngine.setGoalAnchor(frozen)
+    } else if (priorMessages.length > 0) {
+      goalFromHistory = goalExtractor(priorMessages as never)
+      if (goalFromHistory) {
+        agent.config.promptEngine.setGoalAnchor(goalFromHistory)
+        try { stores.persist.updateMetadata({ goalAnchor: goalFromHistory }) } catch { /* best-effort */ }
+      }
+    }
+    // 后续 user 消息进入时增量更新（延续指令不触发；变更回调更新 engine + meta）
+    // initialBaseline = frozen ?? 历史提取结果（同源复用，防初始提取覆盖）
+    const baseline = frozen ?? goalFromHistory
+    stores.session.setGoalTracking(
+      (msgs) => goalExtractor(msgs as never),
+      (next) => {
+        agent.config.promptEngine.setGoalAnchor(next)
+        if (next !== null) {
+          try { stores.persist.updateMetadata({ goalAnchor: next }) } catch { /* best-effort */ }
+        }
+      },
+      baseline,
+    )
+  }
 
   return agent
 }

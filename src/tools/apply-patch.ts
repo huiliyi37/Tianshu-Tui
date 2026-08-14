@@ -140,6 +140,10 @@ export const APPLY_PATCH_TOOL: Tool = {
     // WRITE_CLASS_TOOLS 本就含 apply_patch，但它靠该 marker 计数；缺了它这里的
     // 拦截既不会升级提醒，也不会被 tool-history-recorder 标 transient（会被当成
     // 真实失败，污染 convergence 的 errorPenalty）。
+    // 有意设计：apply_patch 不做 resolveIdempotentPointer 幂等化解——diff 输入
+    // 无目标路径字段，无法与指针记录做路径比对；宁可硬错误让模型 read_file /
+    // git diff 重取现状，也不把「编辑从未真正应用」误判为成功（与 write/edit/
+    // hash_edit/plan 的宽容路径不对称是刻意的 fail-safe）。
     const echoedPointer = diff.trimStart().startsWith(APPLY_PATCH_POINTER_PREFIX)
       ? APPLY_PATCH_POINTER_PREFIX
       : detectPointerPlaceholder(diff)

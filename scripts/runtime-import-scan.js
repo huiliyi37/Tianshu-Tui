@@ -15,35 +15,18 @@
  *   is a build error, caught before packaging. (正则扫字符串会把 ajv codegen
  *   模板里的 require("ajv/...") 文本误报成裸导入，所以走真解析。)
  *
- * Allowlist mirrors the packages resolvable at runtime in the packaged app:
- *   - tsup.config.ts `external`（esbuild / better-sqlite3 / @ast-grep/* /
- *     web-tree-sitter / tree-sitter-wasms / typescript / react-devtools-core /
- *     mammoth）——由 stage-runtime-deps.js 随包分发或特性门后惰性解析；
- *   - playwright-core —— 变量化动态 import，tsup 无法内联，随包分发；
- *   - @mariozechner/clipboard —— 可选剪贴板原生库，未安装时静默回退 shell
- *     链（clipboard-image.ts），与 mammoth 同类。
- * tsup.config.ts / stage-runtime-deps.js 变动时保持同步。
+ * Allowlist comes from scripts/external-deps.js (SCAN_ALLOWED) — the single
+ * source of truth for dist runtime externals. Do NOT edit the set here;
+ * change external-deps.js instead (tsup.config.ts external and
+ * stage-runtime-deps.js ROOTS derive from the same data).
  */
 import { readdirSync, statSync } from 'node:fs'
 import { join, extname } from 'node:path'
 import { builtinModules } from 'node:module'
 import * as esbuild from 'esbuild'
+import { SCAN_ALLOWED } from './external-deps.js'
 
-export const ALLOWED_EXTERNALS = new Set([
-  'esbuild',
-  'better-sqlite3',
-  '@ast-grep/napi',
-  '@ast-grep/lang-json',
-  '@ast-grep/lang-python',
-  'web-tree-sitter',
-  'tree-sitter-wasms',
-  'typescript',
-  'react-devtools-core',
-  'mammoth',
-  'playwright-core',
-  '@mariozechner/clipboard',
-  'exceljs', // Office .xlsx 读写（文档附件管线）。随包分发（stage-runtime-deps ROOTS），不内联。
-])
+export const ALLOWED_EXTERNALS = new Set(SCAN_ALLOWED)
 
 const SKIP_DIRS = new Set(['node_modules', 'native', 'bundled-skills', 'seed-capsules'])
 

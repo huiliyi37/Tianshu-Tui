@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { userConfigPath } from '../paths.js'
 import { configSchema } from '../schema.js'
+import { loadConfig } from '../manager.js'
 
 describe('Config schema integration', () => {
   const configPath = userConfigPath()
@@ -69,5 +70,20 @@ describe('Config schema integration', () => {
     // minimax uses apiKeyEnv, not apiKey
     assert.equal(config.provider.providers.minimax!.apiKeyEnv, 'MINIMAX_API_KEY')
     assert.equal(config.provider.providers.minimax!.apiKey, undefined)
+  })
+
+  it('hooks 块 parse：缺省为空对象，合法值通过，非法值拒绝', () => {
+    // 缺省：hooks 恒存在且为空（loadConfig 走 DEFAULT 合并 + parse）
+    const base = loadConfig()
+    assert.deepEqual(base.hooks, {})
+
+    // 合法值：在 DEFAULT 之上覆盖 hooks 块
+    const withHooks = loadConfig({ sessionOverlay: { hooks: { disabled: ['dream', 'kick'], timeoutMs: 5000, slowMs: 1000 } } })
+    assert.deepEqual(withHooks.hooks, { disabled: ['dream', 'kick'], timeoutMs: 5000, slowMs: 1000 })
+
+    // 非法值：disabled 非数组 / timeoutMs 非正数
+    assert.throws(() => configSchema.parse({ ...base, hooks: { disabled: 'dream' } }))
+    assert.throws(() => configSchema.parse({ ...base, hooks: { timeoutMs: -1 } }))
+    assert.throws(() => configSchema.parse({ ...base, hooks: { slowMs: 0 } }))
   })
 })

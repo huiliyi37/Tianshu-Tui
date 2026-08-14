@@ -98,10 +98,58 @@ import { runTuiShutdownSequence } from './tui/engine/shutdown-sequence.js'
 // ── CLI args ───────────────────────────────────────────────────
 
 const args = process.argv.slice(2)
+
+// --help / --version run before any TTY requirement so they work piped,
+// headless, or in CI. No TUI is started on these paths.
+if (args.includes('--help') || args.includes('-h')) {
+  process.stdout.write(`rivet — 天枢 Tianshu terminal coding agent
+
+Usage:
+  rivet [options]                    interactive TUI (requires TTY)
+  rivet -p "<prompt>" [--json] [--stream-json]   headless one-shot
+  rivet --goal "<task>" [--budget N] [--json] [--stream-json]   headless goal mode
+  rivet sessions                     list sessions and exit
+  rivet logs                         list log locations and exit
+
+Options:
+  --model <name>           use a specific model (e.g. deepseek-v4-pro)
+  --provider <name>        use a specific provider
+  --profile <name>         boot with a named config profile (RIVET_HOME/profiles/<name>.json or built-in lean)
+  -c, --continue           resume the most recent session for this cwd
+  -r, --resume [id|prefix] resume a specific session (bare = open picker)
+  --new                    force a brand-new session
+  --list                   list sessions and exit
+  -p, --print "<prompt>"   headless: answer one prompt, then exit
+  --goal "<task>"          headless goal autonomy (--budget N caps turns)
+  --json | --stream-json   headless output format
+  --stream-events <path>   mirror the run as NDJSON SessionEvents to a file
+  --skip-welcome           skip the welcome page
+  --screen-reader          screen-reader mode
+  --dangerously-skip-permissions   skip permission prompts (high risk)
+  -h, --help               show this help and exit
+  -v, --version            print version and exit
+`)
+  process.exit(0)
+}
+if (args.includes('--version') || args.includes('-v')) {
+  const root = detectInstallRoot()
+  const version = root ? getCurrentVersion(root) : null
+  process.stdout.write(`tianshu-tui v${version ?? 'unknown'}\n`)
+  process.exit(0)
+}
+
 const modelArgIdx = args.indexOf('--model')
 const requestedModel = modelArgIdx >= 0 ? args[modelArgIdx + 1] : undefined
 const providerArgIdx = args.indexOf('--provider')
 const requestedProvider = providerArgIdx >= 0 ? args[providerArgIdx + 1] : undefined
+
+// P2 Wave 3: --profile <name> → 注入 RIVET_PROFILE（loadConfig 的 profile 层消费）。
+// 显式 flag 优先于既有 env（后者原样保留）。
+const profileArgIdx = args.indexOf('--profile')
+const requestedProfile = profileArgIdx >= 0 ? args[profileArgIdx + 1] : undefined
+if (requestedProfile !== undefined && !requestedProfile.startsWith('-')) {
+  process.env.RIVET_PROFILE = requestedProfile
+}
 
 // R1: default startup is a fresh session. Session selection flags (Claude Code parity):
 //   --continue / -c              → resume the most recent session for this cwd

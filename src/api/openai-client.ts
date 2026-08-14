@@ -156,6 +156,11 @@ export interface OpenAIClientConfig {
    * OpenAI 兼容模型即便小上下文也迟迟不出首 token 时才需要显式抬高 base。
    */
   firstByteTimeoutMs?: number
+  /**
+   * 显式声明本端点为慢思考（更长首字节/read 窗口、思考重试上限 2）。
+   * 三态：undefined = 按 providerName/baseUrl 启发式（isSlowThinkingProvider）。
+   */
+  slowThinking?: boolean
   /** Provider-specific capability flags (网#1). */
   capabilities?: {
     /** DeepSeek sometimes emits tool JSON as plain text content. */
@@ -216,6 +221,38 @@ const FIRST_BYTE_MAX_MS = 420_000
 const GLM_READ_TIMEOUT_MS = 720_000
 /** Providers whose thinking mode can exceed 90s before first token. */
 export const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'minimax'])
+
+/**
+ * 慢思考端点的 baseUrl host 特征（第二级启发式）。自定义 provider 名自由发挥
+ * （如 deepseek-spark），精确名匹配必然漏判（2026-08-09 会话 mskl1neqgwksu66h：
+ * deepseek-spark 拿到 90s/180s 紧窗口而非 180s/300s）。按 hostname 子串匹配，
+ * 覆盖官方域名与自建中转。
+ */
+const SLOW_THINKING_HOST_HINTS = ['deepseek', 'bigmodel.cn', 'xiaomimimo', 'minimax', 'chatgpt.com']
+
+/**
+ * 慢思考 provider 判定（三级优先级）：
+ *   1. 显式配置 slowThinking（provider config / client config）——true/false 都压过启发式；
+ *   2. providerName 精确命中 SLOW_THINKING_PROVIDERS（既有行为）；
+ *   3. baseUrl hostname 子串命中 SLOW_THINKING_HOST_HINTS。
+ */
+export function isSlowThinkingProvider(input: {
+  providerName?: string
+  baseUrl?: string
+  slowThinking?: boolean
+}): boolean {
+  if (input.slowThinking !== undefined) return input.slowThinking
+  if (SLOW_THINKING_PROVIDERS.has(input.providerName ?? '')) return true
+  if (input.baseUrl) {
+    try {
+      const host = new URL(input.baseUrl).hostname.toLowerCase()
+      return SLOW_THINKING_HOST_HINTS.some((hint) => host.includes(hint))
+    } catch {
+      // 非法 baseUrl 跳过 URL 启发式
+    }
+  }
+  return false
+}
 /**
  * Per-process cap on the always-on tool-stream event log (logToolStreamEvent).
  * These events fire only on rare streaming pathologies (ambiguous continuation
@@ -345,6 +382,15 @@ export class OpenAIClient implements StreamClient {
       : ''
     this._sanitizedCount = 0
     this.proxyDispatcher = config.proxy ? new ProxyAgent(config.proxy) : undefined
+  }
+
+  /** 慢思考端点判定（名称/URL/显式配置三级，见 isSlowThinkingProvider）。 */
+  private get isSlowThinking(): boolean {
+    return isSlowThinkingProvider({
+      providerName: this.config.providerName,
+      baseUrl: this.config.baseUrl,
+      slowThinking: this.config.slowThinking,
+    })
   }
 
   // ── Incremental sanitize ─────────────────────────────────────
@@ -609,7 +655,7 @@ export class OpenAIClient implements StreamClient {
     // guard and the pre-first-chunk SSE idle timer.
     const estInputTokens = estimateOaiTokens((body.messages as OaiMessage[]) ?? [])
     const derivedFirstByteBaseMs = isThinking
-      ? (SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '') ? SLOW_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
+      ? (this.isSlowThinking ? SLOW_FIRST_BYTE_TIMEOUT_MS : REASONING_FIRST_BYTE_TIMEOUT_MS)
       : FIRST_BYTE_TIMEOUT_MS
     const firstByteMs = computeFirstByteTimeoutMs({
       baseMs: this.config.firstByteTimeoutMs ?? derivedFirstByteBaseMs,
@@ -719,9 +765,9 @@ export class OpenAIClient implements StreamClient {
       // 前缀缓存，重试命中近 100% 缓存（实测 deepseek 99.4% hit、~12s 完成），代价极低。
       // 给它们 2 次重试，让「单次服务端 thinking 卡死」甚至「连续两次卡死」都能自愈而
       // 不冒泡成错误。maxTotalDurationMs 仍是总时长兜底，防 runaway。
-      // provider 级 maxRetries 显式配置时覆盖上述内置默认（0 = 禁用重试）。
+      // An explicit provider maxRetries overrides the built-in thinking budget (0 disables retries).
       maxTotalRetries: this.config.maxRetries ?? (isThinking
-        ? (SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '') ? 2 : 1)
+        ? (this.isSlowThinking ? 2 : 1)
         : undefined),
       onRetry: (info) => {
         if (info.classified.category === 'rate_limit') {
@@ -814,7 +860,7 @@ export class OpenAIClient implements StreamClient {
     const resetIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer)
       const isReasoning = this.config.thinking === 'enabled'
-      const isSlowProvider = SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '')
+      const isSlowProvider = this.isSlowThinking
       // Prefer the size-scaled first-byte budget computed by sendStream (B);
       // fall back to the derived value for direct callers (tests) that omit it.
       const firstByteMs = firstByteTimeoutMs ?? (isSlowProvider ? SLOW_FIRST_BYTE_TIMEOUT_MS

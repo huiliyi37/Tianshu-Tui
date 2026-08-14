@@ -37,6 +37,11 @@ import { isForeignPlatformPackage } from './runtime-platform-filter.js'
 import { pruneTreeSitterWasms } from './tree-sitter-wasm-keep.js'
 import { pruneTypescriptStaging } from './typescript-stage-trim.js'
 import { writeStagingMarker, clearStagingMarker } from './staged-runtime-verify.js'
+import { RUNTIME_BUNDLED, verifyConsistency } from './external-deps.js'
+
+// 单一数据源自检：清单漂移（重复 / RUNTIME_BUNDLED 漏列进 SCAN_ALLOWED）在
+// 分发前 fail loud，而不是打包后缺包。tsup.config.ts 构建期也跑同一校验。
+verifyConsistency()
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '..')
@@ -44,17 +49,8 @@ const srcModules = join(repoRoot, 'node_modules')
 const destModules = join(repoRoot, 'dist', 'node_modules')
 
 // Root packages that must be resolvable at runtime in the packaged sidecar.
-const ROOTS = [
-  'esbuild', // syntax-check JS/TS parser (native Go binary)
-  'typescript', // in-process tsc LSP fallback
-  '@ast-grep/napi', // structural search / ast-edit (native addon)
-  '@ast-grep/lang-json',
-  '@ast-grep/lang-python',
-  'web-tree-sitter', // tree-sitter chunker (wasm loader)
-  'tree-sitter-wasms', // grammar .wasm files (loaded by path)
-  'playwright-core', // headless chromium driver (variable-specifier dynamic import — tsup 无法内联)
-  'exceljs', // Office .xlsx 读写（文档附件管线）。纯 JS，体积 ~22MB 不宜内联进主 bundle，随包分发。与 mammoth 同类（mammoth 是 optional 走 lazy，exceljs 是正式依赖走必装）。
-]
+// 单一数据源：scripts/external-deps.js RUNTIME_BUNDLED（含每包注释）。
+const ROOTS = [...RUNTIME_BUNDLED]
 
 function pkgDir(name) {
   // Flat (hoisted) layout: node_modules/<name>. Scoped names keep the slash.

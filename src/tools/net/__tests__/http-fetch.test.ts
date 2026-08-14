@@ -73,6 +73,21 @@ describe('httpFetchGuarded', () => {
     )
   })
 
+  it('rejects an IPv4-mapped loopback target before fetching', async () => {
+    let fetched = false
+    await assert.rejects(
+      () => httpFetchGuarded('http://mapped.example.test/private', {
+        lookup: async () => ({ address: '::ffff:127.0.0.1', family: 6 }),
+        fetch: mockFetch(async () => {
+          fetched = true
+          return new Response('should not run')
+        }),
+      }),
+      (err: unknown) => err instanceof SSRFError && err.address === '::ffff:127.0.0.1',
+    )
+    assert.equal(fetched, false)
+  })
+
   it('rejects unsupported protocol', async () => {
     await assert.rejects(
       async () => httpFetchGuarded('file:///etc/passwd', { lookup: publicLookup() }),

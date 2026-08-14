@@ -455,6 +455,7 @@ const WORKER_RESULTS_HINT = `<worker_results_hint>
 /** 失败原因 → 主控该怎么办。派发没完成时，光给一个 enum 值等于没说。 */
 const FAILURE_GUIDANCE: Record<string, string> = {
   max_turns: '轮次预算耗尽（已自动续跑仍未收敛）——缩小 objective 或用 maxTurns 调大预算后重派',
+  stalled: '空跑：整轮预算只做了 ≤3 次工具调用（纯推理空转）——不是没干完，是没在干。换更窄的 objective 重派，或先查 provider 健康；不要原样重试',
   timeout: '时间预算耗尽（已自动续跑仍未收敛）——拆小任务或用 timeoutMs 调大预算后重派',
   caller_aborted: '被调用方中止——用户按了停或外层超时，不要自动重派',
   circuit_open: '该 profile 连续失败已熔断——改用别的 profile 或自己内联做',

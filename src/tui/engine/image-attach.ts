@@ -39,6 +39,8 @@ export interface ImageAttachment {
 export interface LoadImageOptions {
   maxBytes?: number
   maxEdge?: number
+  /** PNG-producing resize hook; injectable so the oversized-image path is testable. */
+  resizeImage?: (path: string, maxEdge: number) => Promise<Buffer | null>
 }
 
 /**
@@ -106,8 +108,13 @@ async function trySystemResize(path: string, maxEdge: number): Promise<Buffer | 
   }
 }
 
-async function compressImage(path: string, maxEdge: number, maxBytes: number): Promise<Buffer> {
-  const resized = await trySystemResize(path, maxEdge)
+async function compressImage(
+  path: string,
+  maxEdge: number,
+  maxBytes: number,
+  resizeImage: (path: string, maxEdge: number) => Promise<Buffer | null>,
+): Promise<Buffer> {
+  const resized = await resizeImage(path, maxEdge)
   if (resized && resized.length <= maxBytes) return resized
 
   throw new Error(
@@ -132,13 +139,15 @@ export async function loadImageAttachment(
 
   const raw = await readFile(absolutePath)
   let buf: Buffer = Buffer.from(raw) as Buffer
-  const mime = detectImageMime(buf, absolutePath)
+  let mime = detectImageMime(buf, absolutePath)
   if (!mime) {
     throw new Error(`Unsupported image format: ${absolutePath}`)
   }
 
   if (buf.length > maxBytes) {
-    buf = (await compressImage(absolutePath, maxEdge, maxBytes)) as Buffer
+    buf = await compressImage(absolutePath, maxEdge, maxBytes, options.resizeImage ?? trySystemResize)
+    // Every resize candidate is required to produce a validated PNG.
+    mime = 'image/png'
   }
 
   const b64 = buf.toString('base64')

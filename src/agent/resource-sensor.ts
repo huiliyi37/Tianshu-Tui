@@ -30,10 +30,11 @@ export interface ResourceSensorOptions {
   now?: () => number
   memoryUsage?: () => Pick<NodeJS.MemoryUsage, 'rss' | 'heapUsed'>
   /**
-   * After construction / reset(), ignore absolute heap warn/error for this many
-   * samples. Desktop sidecar heap is process-shared across sessions — a fresh
-   * agent must not inherit the previous session's pressure lockout.
-   * Default 3.
+   * After construction / reset(), suppress memory-pressure signals for this many
+   * samples: absolute heap warn/error stays muted, and cooldown samples are kept
+   * out of the RSS trend window so the startup ramp is not read as a leak.
+   * Desktop sidecar heap is process-shared across sessions — a fresh agent must
+   * not inherit the previous session's pressure lockout. Default 3.
    */
   initialMemoryCooldownSamples?: number
 }
@@ -164,8 +165,14 @@ export class ResourceSensor {
       heapUsedBytes: usage.heapUsed,
       memoryLimitBytes: this.memoryLimitBytes,
     }
-    this.memorySamples = [...this.memorySamples, sample].slice(-MAX_MEMORY_SAMPLES)
-    if (this.memoryCooldownRemaining > 0) this.memoryCooldownRemaining -= 1
+    if (this.memoryCooldownRemaining > 0) {
+      // Startup ramp (module load, first prompt assembly) inflates RSS for the
+      // first few samples — keeping them out of the trend window stops the
+      // regression slope from reporting the cold start as a memory leak.
+      this.memoryCooldownRemaining -= 1
+    } else {
+      this.memorySamples = [...this.memorySamples, sample].slice(-MAX_MEMORY_SAMPLES)
+    }
     return sample
   }
 

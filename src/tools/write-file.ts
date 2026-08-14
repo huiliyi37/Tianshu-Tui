@@ -1,4 +1,5 @@
-import { mkdir, stat, readFile } from 'node:fs/promises'
+import { appendFile, mkdir, rm, stat, readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { dirname, relative, extname } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
@@ -16,45 +17,58 @@ import { formatActivePlanDraftReceipt, canonicalizePathForCompare } from '../age
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
-// Rewrite-loop hint (A-type placeholder loop): after a large write, the arg
-// post-processor replaces the echoed content with a "[file written to …]"
-// pointer. Lower-tier models read that echo as "I wrote a placeholder" and
-// rewrite the same path repeatedly — each new write gets truncated to another
-// pointer, accumulating "evidence" (7 rewrites in the 2026-08-01 desktop
-// session; pointer-regurgitation B-type is already handled by pointer-guard).
-// Track per-session write counts and nudge from the 2nd write onward — a soft
-// warning, never a block (legitimate iterative edits must keep working).
-const rewriteCounts = new Map<string, number>()
-function rewriteLoopHint(sessionId: string | undefined, filePath: string): string {
+// Rewrite-loop hint: repeated writes of the same path usually mean the model
+// lost track of what landed on disk (7 rewrites in the 2026-08-01 desktop
+// session). Track per-session write counts and nudge from the 2nd write
+// onward — a soft warning, never a block (legitimate iterative edits must
+// keep working).
+const rewriteCounts = new Map<string, { count: number; lastHash: string; warned: boolean }>()
+function rewriteLoopHint(sessionId: string | undefined, filePath: string, content: string): string {
   const key = `${sessionId ?? 'default'}:${filePath}`
-  const n = (rewriteCounts.get(key) ?? 0) + 1
-  rewriteCounts.set(key, n)
+  const prev = rewriteCounts.get(key)
+  // 内容指纹：同内容重复写是最确定的浪费（token 重发+磁盘写），每次提示并
+  // 附加「内容与上次相同」；内容不同的迭代只提示一次（B1 教训：重复提醒
+  // 不改变行为，纯噪音——A 型重写循环的内容往往不同，首次警告已足够）。
+  const hash = createHash('sha256').update(content).digest('hex').slice(0, 16)
+  const n = (prev?.count ?? 0) + 1
+  const sameContent = prev?.lastHash === hash
+  rewriteCounts.set(key, { count: n, lastHash: hash, warned: prev?.warned ?? false })
   if (n < 2) return ''
-  return `\n\n⚠ 疑似重写循环：本会话已 ${n} 次写入 ${toPosixPath(filePath)}。每次写入都已成功落盘——历史消息里的 "[file written to …]" 指针是正常截断（省 token），不是占位符。若只是想确认内容，请 read_file 查看，无需重写。`
+  if (!sameContent && (prev?.warned ?? false)) return ''
+  rewriteCounts.set(key, { count: n, lastHash: hash, warned: true })
+  return `\n\n⚠ 疑似重写循环：本会话已 ${n} 次写入 ${toPosixPath(filePath)}${sameContent ? '，且本次内容与上次相同' : ''}。每次写入都已成功落盘。若只是想确认内容，请 read_file 查看，无需重写。`
 }
 
 export const WRITE_FILE_TOOL: Tool = {
   definition: {
     name: 'write_file',
-    description: `创建或覆盖一个文件。自动创建父目录。
+    description: `创建、覆盖或追加一个文件。自动创建父目录。
 
 ### 用法
 - 对已有文件的定点修改优先用 edit_file
 - write_file 只用于新文件或整文件重写
 - 始终提供绝对文件路径
-- content 是完整文件内容，不是 diff
+- overwrite 时 content 是完整文件内容（不是 diff）；append 时 content 是本次追加的块
 - 父目录不存在时自动创建
+- mode 缺省 overwrite；append 把内容原样追加到文件末尾（不自动加换行）
+- 单次内容过大时分块写新文件：先 overwrite 第一块，再用 append 依次追加后续块；绝不要用分块方式修改已有文件的中间部分
 
 ### 示例
 好的：write_file(file_path="/abs/path/src/new-component.tsx", content="...full file content...")
+好的：write_file(file_path="/abs/path/big-data.sql", content="...chunk 2...", mode="append")
 坏的：用 write_file 只改已有文件里的一行（应改用 edit_file）
 
-**注意：** 磁盘上的文件是唯一事实来源。大内容写入后，消息历史里只保留一个指向 \`file_path\` 的短指针而不是完整内容——**看到指针说明那次写入已成功落盘，不是你写了占位符，绝不要因此重写文件**；后续轮次如需回看写入内容，用 \`read_file\`。`,
+**注意：** 磁盘上的文件是唯一事实来源。写入成功后无需重写或回贴内容确认；后续轮次如需回看写入内容，用 \`read_file\`。`,
     input_schema: {
       type: 'object',
       properties: {
         file_path: { type: 'string', description: '文件的绝对路径。先提供此参数。' },
-        content: { type: 'string', description: '完整文件内容（不是 diff）。最后提供此参数。' },
+        content: { type: 'string', description: '完整文件内容（append 时为本块内容；不是 diff）。最后提供此参数。' },
+        mode: {
+          type: 'string',
+          enum: ['overwrite', 'append'],
+          description: '写入模式。缺省 overwrite 整文件覆盖；append 原样追加到文件末尾（不自动加换行），用于分块写入新文件。',
+        },
       },
       required: ['file_path', 'content'],
     },
@@ -68,9 +82,17 @@ export const WRITE_FILE_TOOL: Tool = {
       return { content: `错误：${e instanceof Error ? e.message : '路径逃逸出项目目录'}`, isError: true }
     }
     const content = params.input.content as string
+    const rawMode = params.input.mode
+    if (rawMode !== undefined && rawMode !== 'overwrite' && rawMode !== 'append') {
+      return { content: `错误：mode 只支持 'overwrite'（缺省）或 'append'，收到 ${JSON.stringify(rawMode)}。`, isError: true }
+    }
+    const append = rawMode === 'append'
 
-    // Office: Markdown → .docx
+    // Office: Markdown → .docx（仅整篇覆盖；追加对该格式无意义）
     if (extname(filePath).toLowerCase() === '.docx') {
+      if (append) {
+        return { content: '错误：append 模式不支持 .docx（该格式走 Markdown 整篇转换写入）。', isError: true }
+      }
       try {
         const result = await writeMarkdownAsDocx(filePath, content)
         return {
@@ -145,6 +167,26 @@ export const WRITE_FILE_TOOL: Tool = {
       haveOldContentForDiff = true
     }
 
+    // ── append 分块写通道（kimi-code Write 同款语义）──────────────────────
+    // 不读不回写既有内容；跳过盲覆盖守卫（追加无信息销毁）；跳过整文件语法检查
+    // 与回滚（分块中途文件天然不完整）；不计入重写循环提示（分块本就是多次写
+    // 同一路径）。delegated 落地仅支持整篇覆盖 —— append 始终本地 appendFile。
+    if (append) {
+      if (fileExists) {
+        trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'write', toolCallId: params.toolUseId ?? 'write_file' })
+      }
+      const eol = fileExists ? await detectFileEol(filePath) : null
+      const chunk = applyEol(content, chooseEol(filePath, eol, getTargetEol()))
+      try {
+        await appendFile(filePath, chunk)
+      } catch (e) {
+        return { content: `错误：追加写入失败：${e instanceof Error ? e.message : '未知错误'}`, isError: true }
+      }
+      await recordSuccessfulEdit(filePath, params.sessionId)
+      const total = (await stat(filePath)).size
+      return { content: `已追加 ${chunk.length} 字符到 ${toPosixPath(filePath)}（文件现共 ${total} 字节）。` }
+    }
+
     // Blind-overwrite guard (fail-closed): overwriting an existing file this
     // session never observed (no read_file / grep hit / prior own edit —
     // lastKnownFileState has no entry) destroys content the model has never
@@ -205,10 +247,22 @@ export const WRITE_FILE_TOOL: Tool = {
     const syntax = await checkSyntax(filePath, finalContent)
     if (syntax.fatal) {
       const relPath = relative(params.cwd, filePath)
-      const restored = restoreLatestBackup(params.cwd, relPath, params.sessionId)
+      let rollbackMsg: string
+      if (!fileExists && land.kind !== 'delegated') {
+        // 新文件没有备份可恢复（trackFileChange 只备份已存在文件）——
+        // 回滚 = 移除刚写入的坏文件，不把语法损坏的残尸留在磁盘上。
+        try {
+          await rm(filePath, { force: true })
+          rollbackMsg = '新文件已自动移除（写入前不存在，无备份可恢复）。'
+        } catch {
+          rollbackMsg = '自动回滚失败。'
+        }
+      } else {
+        const restored = restoreLatestBackup(params.cwd, relPath, params.sessionId)
+        rollbackMsg = restored ? '更改已自动回滚。' : '自动回滚失败。'
+      }
       const fails = incrementEditFailCount(filePath)
       const gatePrefix = fails >= 3 ? `此文件已连续写入失败 ${fails} 次，再次编辑前必须先重新 read_file。\n\n` : ''
-      const rollbackMsg = restored ? '更改已自动回滚。' : '自动回滚失败。'
       return {
         content: gatePrefix + `错误：${syntax.fatal}\n\n${rollbackMsg}\n\n请修复内容后重试。`,
         isError: true,
@@ -247,7 +301,7 @@ export const WRITE_FILE_TOOL: Tool = {
     const receipt = draftReceipt
       ?? `已写入 ${finalContent.length} 字节（${lines} 行）到 ${toPosixPath(filePath)}——内容与你提交的一致`
     return {
-      content: receipt + rewriteLoopHint(params.sessionId, filePath) + (warn ? '\n\n' + warn : ''),
+      content: receipt + rewriteLoopHint(params.sessionId, filePath, content) + (warn ? '\n\n' + warn : ''),
       uiContent,
       changedRanges,
     }

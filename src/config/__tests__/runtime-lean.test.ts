@@ -62,17 +62,13 @@ describe('runtime-lean', () => {
     assert.equal(isRuntimeLean(false), false)
   })
 
-  it('RIVET_LEAN_AUTO=1 enables lean as the last fallback', () => {
+  it('RIVET_LEAN_AUTO 不再生效（2026-08-09 产品决策：不自动降级，改引导提醒）', () => {
     process.env.RIVET_LEAN_AUTO = '1'
-    // 无显式 env / config → auto 生效
+    // 无显式 env / config 时 AUTO 也不得开启 lean
+    assert.equal(isRuntimeLean(undefined), false, 'RIVET_LEAN_AUTO 已废弃，不得再触发 lean')
+    // 显式 env / config 行为不变
+    process.env.RIVET_LEAN = '1'
     assert.equal(isRuntimeLean(undefined), true)
-    // 显式 env 压过 auto（用户可关）
-    process.env.RIVET_LEAN = '0'
-    assert.equal(isRuntimeLean(undefined), false, 'RIVET_LEAN=0 必须压过 auto')
-    delete process.env.RIVET_LEAN
-    // 显式 config 压过 auto
-    assert.equal(isRuntimeLean(false), false, 'runtime.lean=false 必须压过 auto')
-    assert.equal(isRuntimeLean(true), true, 'runtime.lean=true 与 auto 一致')
   })
 
   it('lean expands tool preset to minimal when preset unset', () => {

@@ -133,4 +133,49 @@ describe('commitScopedFiles', () => {
     assert.equal(git(['rev-parse', 'HEAD']).trim(), before)
     assert.equal(existsSync(lockPath), true)
   })
+
+  it('commits deletions of tracked files whose worktree copy is gone (D status)', () => {
+    // Anchor: git add -- <path> stages deletions — the D-status path must keep working.
+    rmSync(join(TMP, 'owned.txt'))
+    const before = git(['rev-parse', 'HEAD']).trim()
+
+    const result = commitScopedFiles({ cwd: TMP, files: ['owned.txt'], message: 'fix: remove owned' })
+
+    assert.equal(result.ok, true, `expected deletion commit, got: ${result.output}`)
+    assert.notEqual(git(['rev-parse', 'HEAD']).trim(), before)
+    const committedFiles = git(['show', '--name-only', '--pretty=format:', 'HEAD']).split('\n').filter(Boolean)
+    assert.deepEqual(committedFiles, ['owned.txt'])
+    assert.equal(existsSync(join(TMP, 'owned.txt')), false)
+  })
+
+  it('skips stale owned paths (deleted and committed externally) and reports them', () => {
+    // owned.txt is removed from both worktree and index by an external commit —
+    // the owned set is stale. other.txt carries this session's change.
+    git(['rm', 'owned.txt'])
+    git(['commit', '-m', 'external removal'])
+    writeFileSync(join(TMP, 'other.txt'), 'owned change')
+
+    const result = commitScopedFiles({ cwd: TMP, files: ['owned.txt', 'other.txt'], message: 'fix: skip stale' })
+
+    assert.equal(result.ok, true, `stale path must not abort the commit, got: ${result.output}`)
+    assert.match(result.output, /owned\.txt/, 'stale path must be reported in the output')
+    const committedFiles = git(['show', '--name-only', '--pretty=format:', 'HEAD']).split('\n').filter(Boolean)
+    assert.deepEqual(committedFiles, ['other.txt'])
+    const status = git(['status', '--porcelain'])
+    assert.equal(status, '', 'worktree must be clean after the scoped commit')
+  })
+
+  it('returns an actionable message when every owned path is stale', () => {
+    git(['rm', 'owned.txt'])
+    git(['commit', '-m', 'external removal'])
+    const before = git(['rev-parse', 'HEAD']).trim()
+
+    const result = commitScopedFiles({ cwd: TMP, files: ['owned.txt'], message: 'fix: all stale' })
+
+    assert.equal(result.ok, false)
+    assert.doesNotMatch(result.output, /did not match any files/, 'raw pathspec error must be replaced by an actionable message')
+    assert.match(result.output, /stale/i)
+    assert.match(result.output, /owned\.txt/)
+    assert.equal(git(['rev-parse', 'HEAD']).trim(), before)
+  })
 })
