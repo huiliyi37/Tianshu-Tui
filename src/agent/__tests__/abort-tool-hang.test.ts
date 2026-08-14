@@ -101,10 +101,10 @@ describe('AgentLoop — abort settles when stuck in tool-batch approval (0B)', (
     agent.abort()
 
     // run() 必须迅速 settle（loop 级 rejectOnAbort 竞速 executeBatch），否则超时失败。
-    // 预算 5s：门禁对抗的是 240s 心跳看门狗级卡死，1s 在满载机器上会误杀。
+    // 生产路径允许 6s 工具 abort drain 以完成持久化；额外 1s 只吸收 timer 调度抖动。
     await Promise.race([
       p,
-      new Promise((_, rej) => setTimeout(() => rej(new Error('run() 未在 5s 内 settle —— 工具阶段 abort 仍卡死')), 5000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('run() 未在 7s 内 settle —— 工具阶段 abort 仍卡死')), 7000)),
     ])
     assert.equal(aborted, true, 'onAbort 应在中止卡死审批后触发')
   })

@@ -3,8 +3,8 @@
  *
  * name/defaultHint/files 由 scripts/gen-env-registry.ts 生成，勿手改；
  * description 字段人工维护，重新生成时按 name 保留。
- * 最后生成：2026-08-13T18:50:28.964Z
- * 共 153 个变量。
+ * 最后生成：2026-08-14T12:14:21.241Z
+ * 共 149 个变量。
  *
  * 每个条目含：名称 / 默认值提示 / 引用文件 / 简要说明。
  * 当源码中新增 RIVET_* 引用但注册表未同步时，
@@ -192,36 +192,6 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     description: '',
   },
   {
-    name: 'RIVET_CU_CDP',
-    defaultHint: '',
-    files: ['pro/computer-use/tool.ts', 'pro/computer-use/__tests__/tool.test.ts'],
-    description: '',
-  },
-  {
-    name: 'RIVET_CU_CDP_URL',
-    defaultHint: '',
-    files: ['pro/computer-use/cdp/chrome.ts'],
-    description: '',
-  },
-  {
-    name: 'RIVET_CU_COM',
-    defaultHint: '',
-    files: ['pro/computer-use/windows-uia-com.ts', 'pro/computer-use/__tests__/windows-driver.test.ts', 'pro/computer-use/__tests__/windows-uia-com.test.ts'],
-    description: '',
-  },
-  {
-    name: 'RIVET_CU_FEEDBACK',
-    defaultHint: '',
-    files: ['pro/computer-use/tool.ts'],
-    description: '',
-  },
-  {
-    name: 'RIVET_CU_HOST',
-    defaultHint: '',
-    files: ['pro/computer-use/script-host.ts'],
-    description: '',
-  },
-  {
     name: 'RIVET_CVM_VECTOR',
     defaultHint: '',
     files: ['agent/hooks/cognitive-capsule-router.ts'],
@@ -392,13 +362,13 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
   {
     name: 'RIVET_HOME',
     defaultHint: '',
-    files: ['tui/__tests__/updater.test.ts', 'tools/__tests__/tool-preset.test.ts', 'server/__tests__/config-routes.test.ts', 'server/__tests__/mcp-hot-add.test.ts', 'server/__tests__/mcp-inject-tools.test.ts', 'server/__tests__/path-grants-routes.test.ts', 'server/__tests__/plugin-api.test.ts', 'server/__tests__/project-docs-routes.test.ts', 'server/__tests__/session-manager.test.ts', 'server/__tests__/session-routes.test.ts', 'server/__tests__/worker-log-route.test.ts', 'prompt/__tests__/block-policy.test.ts', 'plugins/__tests__/design-plugin-lib.test.ts', 'plugins/__tests__/plugin-installer.test.ts', 'plugins/__tests__/plugin-loader.test.ts', 'mcp/oauth/__tests__/connector.test.ts', 'config/paths.ts', 'config/__tests__/config-cli.test.ts', 'config/__tests__/remove-model.test.ts', 'cli/__tests__/prompt-version-warning.test.ts', 'api/deepseek-platform-client.ts', 'agent/__tests__/session-cd.test.ts'],
+    files: ['tui/__tests__/history-async.test.ts', 'tui/__tests__/updater.test.ts', 'tools/__tests__/tool-preset.test.ts', 'server/__tests__/config-routes.test.ts', 'server/__tests__/mcp-hot-add.test.ts', 'server/__tests__/mcp-inject-tools.test.ts', 'server/__tests__/path-grants-routes.test.ts', 'server/__tests__/plugin-api.test.ts', 'server/__tests__/project-docs-routes.test.ts', 'server/__tests__/session-manager.test.ts', 'server/__tests__/session-routes.test.ts', 'server/__tests__/worker-log-route.test.ts', 'prompt/__tests__/block-policy.test.ts', 'plugins/__tests__/design-plugin-lib.test.ts', 'plugins/__tests__/plugin-installer.test.ts', 'plugins/__tests__/plugin-loader.test.ts', 'mcp/oauth/__tests__/connector.test.ts', 'config/paths.ts', 'config/__tests__/config-cli.test.ts', 'config/__tests__/config-watcher.test.ts', 'config/__tests__/profile.test.ts', 'config/__tests__/remove-model.test.ts', 'cli/__tests__/prompt-version-warning.test.ts', 'api/deepseek-platform-client.ts', 'agent/__tests__/session-cd.test.ts'],
     description: '',
   },
   {
     name: 'RIVET_HOOKS_DISABLED',
     defaultHint: '',
-    files: ['agent/loop-factory.ts', 'agent/__tests__/loop-factory.test.ts'],
+    files: ['config/profile.ts', 'agent/__tests__/loop-factory.test.ts'],
     description: '逗号分隔的 CVM 管线禁用 hook id 列表，优先于 config.hooks.disabled（热更见 config-watcher）',
   },
   {
@@ -621,6 +591,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     name: 'RIVET_PROBE_TRACKING',
     defaultHint: '',
     files: ['agent/create-runtime-hooks.ts'],
+    description: '',
+  },
+  {
+    name: 'RIVET_PROFILE',
+    defaultHint: '',
+    files: ['main.ts', 'config/profile.ts', 'config/__tests__/config-watcher.test.ts'],
     description: '',
   },
   {

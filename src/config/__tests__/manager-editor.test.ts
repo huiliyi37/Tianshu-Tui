@@ -53,16 +53,19 @@ describe('approval mode config', () => {
   })
 
   it('snapshot matches the loaded agent.approval (defaults are environment-dependent)', () => {
-    assert.deepEqual(getApprovalConfig(), { approval: loadConfig().agent.approval })
+    assert.deepEqual(getApprovalConfig(), {
+      approval: loadConfig().agent.approval,
+      unsandboxed: loadConfig().agent.unsandboxed ?? false,
+    })
   })
 
   it('persists a valid approval mode and reads it back', () => {
     const a = setApprovalConfig({ approval: 'dangerously-skip-permissions' })
-    assert.deepEqual(a, { approval: 'dangerously-skip-permissions' })
+    assert.deepEqual(a, { approval: 'dangerously-skip-permissions', unsandboxed: false })
     assert.deepEqual(loadConfig().agent.approval, 'dangerously-skip-permissions')
     // Back to a safe mode — the settings UI must be able to dial it down.
     setApprovalConfig({ approval: 'auto-safe' })
-    assert.deepEqual(getApprovalConfig(), { approval: 'auto-safe' })
+    assert.deepEqual(getApprovalConfig(), { approval: 'auto-safe', unsandboxed: false })
   })
 
   it('rejects an invalid approval value (nothing persisted)', () => {
