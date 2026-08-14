@@ -61,6 +61,7 @@ import {
   setPermissionDirs,
   getVisionAutoBridge,
   getVisionModelConfig,
+  registerVisionModelConfig,
   setVisionAutoBridge,
   setVisionModelConfig,
   getGreetingConfig,
@@ -86,6 +87,7 @@ import { rivetHome } from '../config/paths.js'
 import { allPresetKeys, resolvePreset, resolvePresetBaseUrl, resolvePresetLabel } from '../api/pro-registry.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
 import { queryDeepSeekBalance, type BalanceResult } from '../api/balance-client.js'
+import { discoverVisionModels, validateVisionModel } from '../api/vision-model-onboarding.js'
 import { probeProviderKey } from '../api/key-probe.js'
 import { getDeepSeekUserSummary, getDeepSeekCostReport } from '../api/deepseek-platform-client.js'
 import { listGrantedApps, revokeApp } from '../tools/computer-use/app-grants.js'
@@ -99,6 +101,40 @@ function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
       return { status: 401, body: { error: 'Unauthorized' } }
     }
     return handler(body, params, headers, res)
+  }
+}
+
+interface ParsedVisionCredentials {
+  baseUrl?: string
+  providerName?: string
+  apiKey?: string
+  apiKeyEnv?: string
+  error?: string
+}
+
+/** Resolve only nonblank credential input; env values never leave this boundary. */
+function parseVisionCredentials(body: unknown): ParsedVisionCredentials {
+  const { baseUrl, providerName, apiKey, apiKeyEnv } = (body ?? {}) as Record<string, unknown>
+  if (baseUrl !== undefined && typeof baseUrl !== 'string') return { error: 'baseUrl must be a string' }
+  if (providerName !== undefined && typeof providerName !== 'string') return { error: 'providerName must be a string' }
+  if (apiKey !== undefined && typeof apiKey !== 'string') return { error: 'apiKey must be a string' }
+  if (apiKeyEnv !== undefined && typeof apiKeyEnv !== 'string') return { error: 'apiKeyEnv must be a string' }
+
+  const normalizedKey = typeof apiKey === 'string' ? apiKey.trim() : undefined
+  const normalizedEnv = typeof apiKeyEnv === 'string' ? apiKeyEnv.trim() : undefined
+  if (apiKey !== undefined && !normalizedKey) return { error: 'apiKey must not be blank' }
+  if (apiKeyEnv !== undefined && !normalizedEnv) return { error: 'apiKeyEnv must not be blank' }
+  if (normalizedKey && normalizedEnv) return { error: 'apiKey and apiKeyEnv cannot both be set' }
+  if (normalizedEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(normalizedEnv)) {
+    return { error: 'apiKeyEnv must be a valid environment variable name' }
+  }
+  const resolvedKey = normalizedKey ?? (normalizedEnv ? process.env[normalizedEnv]?.trim() : undefined)
+  if (normalizedEnv && !resolvedKey) return { error: `Environment variable "${normalizedEnv}" is not set or is blank in the server process` }
+  return {
+    ...(typeof baseUrl === 'string' && baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+    ...(typeof providerName === 'string' && providerName.trim() ? { providerName: providerName.trim() } : {}),
+    ...(resolvedKey ? { apiKey: resolvedKey } : {}),
+    ...(normalizedEnv ? { apiKeyEnv: normalizedEnv } : {}),
   }
 }
 
@@ -754,6 +790,52 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       try {
         const saved = setVisionModelConfig(config as Record<string, unknown> | null)
         return { status: 200, body: { ok: true, config: saved } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    'POST /config/vision-model/discover': withAuth(async (body) => {
+      const { baseUrl, providerName, apiKey, apiKeyEnv, error } = parseVisionCredentials(body)
+      if (error) return { status: 400, body: { error } }
+      if (!baseUrl) return { status: 400, body: { error: 'baseUrl is required' } }
+      try {
+        const result = await discoverVisionModels({
+          baseUrl,
+          ...(apiKey ? { apiKey } : {}),
+          ...(providerName ? { providerName } : {}),
+        })
+        return { status: 200, body: result }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    'POST /config/vision-model/onboard': withAuth(async (body) => {
+      const { baseUrl, providerName, apiKey, apiKeyEnv, error } = parseVisionCredentials(body)
+      const { modelId } = (body ?? {}) as { modelId?: unknown }
+      if (error) return { status: 400, body: { error } }
+      if (!providerName) return { status: 400, body: { error: 'providerName is required' } }
+      if (!baseUrl) return { status: 400, body: { error: 'baseUrl is required' } }
+      if (typeof modelId !== 'string' || !modelId.trim()) {
+        return { status: 400, body: { error: 'modelId is required' } }
+      }
+      try {
+        await validateVisionModel({
+          baseUrl,
+          ...(apiKey ? { apiKey } : {}),
+          providerName,
+          modelId: modelId.trim(),
+        })
+        const config = registerVisionModelConfig({
+          providerName,
+          baseUrl,
+          // apiKeyEnv resolves only for the upstream validation request; config persists its name.
+          ...(apiKey && !apiKeyEnv ? { apiKey } : {}),
+          ...(apiKeyEnv ? { apiKeyEnv } : {}),
+          modelId: modelId.trim(),
+        })
+        return { status: 200, body: { ok: true, config } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

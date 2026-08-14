@@ -61,7 +61,8 @@ import type { SlashCommand } from './slash-command-registry.js'
 import type { BootstrapContext } from '../bootstrap.js'
 import type { Config } from '../config/schema.js'
 import { isProFeatureEnabled } from '../config/pro-license.js'
-import { loadConfig, saveConfig } from '../config/manager.js'
+import { loadConfig, saveConfig, registerVisionModelConfig } from '../config/manager.js'
+import { discoverVisionModels, validateVisionModel } from '../api/vision-model-onboarding.js'
 import { PROVIDER_PRESETS, isProviderPresetKey } from '../config/provider-presets.js'
 import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
 import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
@@ -4073,6 +4074,45 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
         modelCount: p.models.length,
       }))
       app.startConnect(existing, cfg.provider.default)
+      return true
+    },
+  })
+
+  register("/vision", {
+    description: "配置识图桥（发现模型、图片验证后保存；不改变主服务商）",
+    immediate: true,
+    handler: ({ app }) => {
+      app.startVisionOnboarding(async request => {
+        const apiKeyEnv = request.body.apiKeyEnv
+        if (apiKeyEnv && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(apiKeyEnv)) {
+          throw new Error('apiKeyEnv must be a valid environment variable name')
+        }
+        const resolvedEnvKey = apiKeyEnv ? process.env[apiKeyEnv]?.trim() : undefined
+        if (apiKeyEnv && !resolvedEnvKey) {
+          throw new Error(`Environment variable "${apiKeyEnv}" is not set or is blank in this process`)
+        }
+        const requestWithResolvedKey = {
+          ...request.body,
+          ...(resolvedEnvKey ? { apiKey: resolvedEnvKey } : {}),
+        }
+        if (request.kind === 'discover') {
+          return await discoverVisionModels(requestWithResolvedKey)
+        }
+        await validateVisionModel({
+          baseUrl: request.body.baseUrl,
+          providerName: request.body.providerName,
+          modelId: request.body.modelId,
+          ...(requestWithResolvedKey.apiKey ? { apiKey: requestWithResolvedKey.apiKey } : {}),
+        })
+        registerVisionModelConfig({
+          providerName: request.body.providerName,
+          baseUrl: request.body.baseUrl,
+          ...(request.body.apiKey && !apiKeyEnv ? { apiKey: request.body.apiKey } : {}),
+          ...(apiKeyEnv ? { apiKeyEnv } : {}),
+          modelId: request.body.modelId,
+        })
+        return {}
+      })
       return true
     },
   })

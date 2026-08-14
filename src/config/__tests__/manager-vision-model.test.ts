@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { loadConfig, getVisionModelConfig, setVisionModelConfig } from '../manager.js'
+import { loadConfig, getVisionModelConfig, registerVisionModelConfig, setVisionModelConfig } from '../manager.js'
 
 describe('vision model config', () => {
   let dir = ''
@@ -158,5 +158,50 @@ describe('vision model config', () => {
     // glm-5.2 的 alias 是 m28（见 DEFAULT_CONFIG preset）——校验应认 alias
     const saved = setVisionModelConfig({ provider: 'glm', model: 'glm-5.2' })
     assert.equal(saved?.provider, 'glm')
+  })
+
+  it('atomically registers a dedicated vision provider without changing the default provider', () => {
+    const before = loadConfig()
+    const saved = registerVisionModelConfig({
+      providerName: 'vision-custom',
+      baseUrl: 'https://vision.example/v1',
+      apiKeyEnv: 'VISION_API_KEY',
+      modelId: 'custom-vision-1',
+    })
+
+    const after = loadConfig()
+    assert.equal(after.provider.default, before.provider.default)
+    assert.deepEqual(saved, { provider: 'vision-custom', model: 'custom-vision-1', maxTokens: 1024 })
+    assert.deepEqual(after.agent.visionModel, saved)
+    assert.equal(after.provider.providers['vision-custom']?.models[0]?.supportsVision, true)
+    assert.equal(after.provider.providers['vision-custom']?.models[0]?.maxTokens, 1024)
+  })
+
+  it('does not mutate config when dedicated vision registration validation fails', () => {
+    const before = JSON.stringify(loadConfig())
+    assert.throws(() => registerVisionModelConfig({
+      providerName: 'vision-invalid',
+      baseUrl: 'not-a-url',
+      modelId: 'custom-vision-1',
+    }))
+    assert.equal(JSON.stringify(loadConfig()), before)
+  })
+
+  it('refuses to overwrite the default or a non-vision provider', () => {
+    const before = JSON.stringify(loadConfig())
+    const defaultProvider = loadConfig().provider.default
+    assert.throws(() => registerVisionModelConfig({
+      providerName: defaultProvider,
+      baseUrl: 'https://vision.example/v1',
+      apiKey: 'sk-test',
+      modelId: 'custom-vision-1',
+    }), /cannot replace the default provider/)
+    assert.throws(() => registerVisionModelConfig({
+      providerName: 'minimax',
+      baseUrl: 'https://vision.example/v1',
+      apiKey: 'sk-test',
+      modelId: 'custom-vision-1',
+    }), /not a compatible dedicated vision provider/)
+    assert.equal(JSON.stringify(loadConfig()), before)
   })
 })

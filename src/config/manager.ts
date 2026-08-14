@@ -1186,6 +1186,95 @@ export function setVisionModelConfig(
   return parsed
 }
 
+export interface RegisterVisionModelConfigOptions {
+  providerName: string
+  baseUrl: string
+  apiKey?: string
+  apiKeyEnv?: string
+  modelId: string
+}
+
+/**
+ * Register an image-analysis-only provider and select it as the vision bridge in
+ * one config write. The primary provider/default model are deliberately left
+ * untouched; this entry is consumed only through agent.visionModel.
+ */
+export function registerVisionModelConfig(
+  options: RegisterVisionModelConfigOptions,
+): VisionModelConfigSnapshot {
+  const providerName = z.string().trim().min(1).parse(options.providerName)
+  const modelId = z.string().trim().min(1).parse(options.modelId)
+  const apiKey = options.apiKey?.trim()
+  const apiKeyEnv = options.apiKeyEnv?.trim()
+  if (apiKey && apiKeyEnv) {
+    throw new Error('Vision provider credentials must use either apiKey or apiKeyEnv, not both.')
+  }
+  if (options.apiKey !== undefined && !apiKey) throw new Error('Vision provider apiKey must not be blank.')
+  if (options.apiKeyEnv !== undefined && !apiKeyEnv) throw new Error('Vision provider apiKeyEnv must not be blank.')
+  assertValidUrl(options.baseUrl)
+
+  const model = modelConfigSchema.parse({ id: modelId, maxTokens: 1024, supportsVision: true })
+  const vision = visionModelConfigSchema.parse({ provider: providerName, model: modelId, maxTokens: 1024 })
+  const provider: ProviderConfig = {
+    name: providerName,
+    ...(apiKey ? { keyRef: providerName } : {}),
+    ...(apiKeyEnv ? { apiKeyEnv } : {}),
+    baseUrl: options.baseUrl,
+    protocol: 'openai',
+    capabilities: {},
+    thinking: 'enabled',
+    maxTokens: 1024,
+    allowProFallback: false,
+    models: [model],
+    unsupported: [],
+    userSaved: true,
+  }
+
+  const cfg = loadConfig()
+  const existing = cfg.provider.providers[providerName]
+  if (providerName === cfg.provider.default) {
+    throw new Error(`Vision provider "${providerName}" cannot replace the default provider.`)
+  }
+  if (existing && !isCompatibleVisionProvider(cfg, existing, providerName, options.baseUrl, apiKey, apiKeyEnv)) {
+    throw new Error(`Provider "${providerName}" is not a compatible dedicated vision provider.`)
+  }
+
+  const previousProvider = existing
+  const previousVision = cfg.agent.visionModel
+  cfg.provider.providers[providerName] = provider
+  cfg.agent.visionModel = vision
+  saveConfig(cfg)
+  try {
+    if (apiKey) writeSecret(providerName, apiKey)
+  } catch (error) {
+    if (previousProvider) cfg.provider.providers[providerName] = previousProvider
+    else delete cfg.provider.providers[providerName]
+    if (previousVision) cfg.agent.visionModel = previousVision
+    else delete (cfg.agent as Record<string, unknown>).visionModel
+    try {
+      saveConfig(cfg)
+    } catch {
+      // Preserve the original secret-write error; a failed rollback is actionable from config state.
+    }
+    throw error
+  }
+  return vision
+}
+
+function isCompatibleVisionProvider(
+  cfg: Config,
+  existing: ProviderConfig,
+  providerName: string,
+  baseUrl: string,
+  apiKey: string | undefined,
+  apiKeyEnv: string | undefined,
+): boolean {
+  if (cfg.agent.visionModel?.provider !== providerName || existing.baseUrl !== baseUrl) return false
+  if (apiKeyEnv) return existing.apiKeyEnv === apiKeyEnv
+  if (apiKey) return existing.keyRef === providerName && existing.apiKey === apiKey
+  return !existing.keyRef && !existing.apiKeyEnv
+}
+
 /**
  * 校验 provider 在 provider.providers 里存在、且该 provider 下有指定 model。
  * 与 setDefaultModelConfig 的内联校验同构，抽出复用给 vision 主桥/fallback。

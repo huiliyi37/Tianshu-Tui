@@ -113,6 +113,7 @@ import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderDomainGenesisCard, genesisCardMaxScroll, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderInitFlow } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData, InitOverlayData } from '../format/overlay.js'
 import { ConnectFlow, DIY_PENDING_KEY_REF, type ConnectCommit, type ConnectProviderRef, type ConnectStepResult } from '../connect-flow.js'
+import { VisionOnboardingFlow, type VisionCandidate, type VisionOnboardingRequest, type VisionOnboardingResult } from '../vision-onboarding-flow.js'
 import { readConnectDraft, saveConnectDraft, clearConnectDraft } from '../connect-draft.js'
 import { readSecret, writeSecret, deleteSecret } from '../../config/secrets-store.js'
 import { probeProvider } from '../../api/provider-probe.js'
@@ -421,6 +422,11 @@ export class TuiApp {
   private connectEditActiveAt = 0
   /** 闪烁驱动定时器（仅闪烁期间存活）。 */
   private connectBlinkTimer: ReturnType<typeof setInterval> | null = null
+  /** /vision 独立识图桥向导：只发 discover/onboard 请求，不复用通用 provider onboarding。 */
+  private visionOnboardingFlow?: VisionOnboardingFlow
+  private visionInput = ''
+  private visionError?: string
+  private visionExec?: (request: VisionOnboardingRequest) => Promise<{ candidates?: VisionCandidate[] }>
   /** /init 交互式初始化向导：无头状态机 + 当前步校验错误。 */
   private initFlow?: InitFlow
   private initError?: string
@@ -899,6 +905,15 @@ export class TuiApp {
           this.connectError = undefined
           this.overlay.rerender()
         }
+        return
+      }
+      if (this.overlay.activeId() === 'vision-onboarding' && this.visionOnboardingFlow?.view().kind === 'input') {
+        const before = this.visionInput.slice(0, this.connectCursor)
+        const after = this.visionInput.slice(this.connectCursor)
+        this.visionInput = before + text + after
+        this.connectCursor += text.length
+        this.visionError = undefined
+        this.overlay.rerender()
         return
       }
       // Settings panel editing a text field → paste into its buffer (proxy URL,
@@ -1792,6 +1807,7 @@ export class TuiApp {
       case 'history-search':
       case 'chronicle':
       case 'connect':
+      case 'vision-onboarding':
       case 'init':
       case 'settings':
       case 'jobs':
@@ -1922,6 +1938,18 @@ export class TuiApp {
     this.connectError = undefined
     this.input.setMode('input')
     this.activateOverlay('connect')
+  }
+
+  /** Open the dedicated image-recognition bridge wizard. */
+  startVisionOnboarding(execute: (request: VisionOnboardingRequest) => Promise<{ candidates?: VisionCandidate[] }>): void {
+    this.visionOnboardingFlow = new VisionOnboardingFlow()
+    this.visionExec = execute
+    this.visionInput = ''
+    this.connectCursor = 0
+    this.visionError = undefined
+    this.overlayController.nav().connectIndex = 0
+    this.input.setMode('input')
+    this.activateOverlay('vision-onboarding')
   }
 
   /**
@@ -2141,6 +2169,56 @@ export class TuiApp {
       cursorVisible: this.connectCursorVisibleNow(),
       formFieldIndex: this.connectFormFieldIndex,
     }
+  }
+
+  /** Dedicated vision overlay data; rendering intentionally reuses only the generic wizard surface. */
+  getVisionOnboardingOverlayData(): ConnectOverlayData {
+    const view = this.visionOnboardingFlow?.view() ?? { kind: 'choice' as const, title: '', options: [] }
+    return {
+      view: view as unknown as ConnectOverlayData['view'],
+      input: this.visionInput,
+      error: this.visionError,
+      selectedIndex: this.overlayController.nav().connectIndex,
+    }
+  }
+
+  private advanceVisionOnboarding(result: VisionOnboardingResult): void {
+    const flow = this.visionOnboardingFlow
+    if (!flow) return
+    if (result.kind === 'error') {
+      this.visionError = result.message
+      this.overlay.rerender()
+      return
+    }
+    if (result.kind === 'next') {
+      this.visionInput = ''
+      this.visionError = undefined
+      this.overlayController.nav().connectIndex = 0
+      this.overlay.rerender()
+      return
+    }
+    if (result.kind === 'done') {
+      this.visionOnboardingFlow = undefined
+      this.visionExec = undefined
+      this.commitStatic(result.summary)
+      this.deactivateOverlay()
+      return
+    }
+    const execute = this.visionExec
+    if (!execute) {
+      this.advanceVisionOnboarding(flow.requestFailed('识图桥服务端请求未接线'))
+      return
+    }
+    this.visionInput = ''
+    this.visionError = undefined
+    this.overlay.rerender()
+    void execute(result.request).then(response => {
+      if (this.visionOnboardingFlow !== flow) return
+      if (result.request.kind === 'discover') this.advanceVisionOnboarding(flow.applyDiscovery(response.candidates ?? []))
+      else this.advanceVisionOnboarding(flow.applyOnboardSuccess())
+    }).catch(error => {
+      if (this.visionOnboardingFlow === flow) this.advanceVisionOnboarding(flow.requestFailed(error instanceof Error ? error.message : String(error)))
+    })
   }
 
   /** 搜索过滤缩短选项列表后，光标索引可能越界——收敛回有效范围。 */
@@ -2592,6 +2670,52 @@ export class TuiApp {
     const id = this.overlay.activeId()
     const c = key.char.toLowerCase()
     const isSearch = id === 'command-palette' || id === 'history-search'
+
+    // Dedicated vision bridge wizard. It has no provider probe or config write path:
+    // injected executor calls the same discovery/onboarding service boundary as Desktop.
+    if (id === 'vision-onboarding' && this.visionOnboardingFlow) {
+      const flow = this.visionOnboardingFlow
+      const view = flow.view()
+      if (key.name === 'escape') {
+        this.visionOnboardingFlow = undefined
+        this.visionExec = undefined
+        this.deactivateOverlay()
+        return true
+      }
+      if (view.kind === 'busy') return true
+      if (view.kind === 'choice') {
+        const options = view.options ?? []
+        const nav = this.overlayController.nav()
+        if (key.name === 'down') { if (options.length) { nav.connectIndex = (nav.connectIndex + 1) % options.length; this.overlay.rerender() }; return true }
+        if (key.name === 'up') { if (options.length) { nav.connectIndex = (nav.connectIndex - 1 + options.length) % options.length; this.overlay.rerender() }; return true }
+        if (key.name === 'return') {
+          const option = options[nav.connectIndex]
+          if (option) this.advanceVisionOnboarding(flow.choose(option.id))
+          return true
+        }
+        return true
+      }
+      if (key.name === 'return') { this.advanceVisionOnboarding(flow.submit(this.visionInput)); return true }
+      if (key.name === 'left') { this.connectCursor = Math.max(0, this.connectCursor - 1); this.overlay.rerender(); return true }
+      if (key.name === 'right') { this.connectCursor = Math.min(this.visionInput.length, this.connectCursor + 1); this.overlay.rerender(); return true }
+      if (key.name === 'backspace' || key.name === 'ctrl_h') {
+        if (this.connectCursor > 0) {
+          this.visionInput = this.visionInput.slice(0, this.connectCursor - 1) + this.visionInput.slice(this.connectCursor)
+          this.connectCursor--
+        }
+        this.visionError = undefined
+        this.overlay.rerender()
+        return true
+      }
+      if (key.ctrl && c === 'u') { this.visionInput = ''; this.connectCursor = 0; this.visionError = undefined; this.overlay.rerender(); return true }
+      if (this.isPrintableKey(key)) {
+        this.visionInput = this.visionInput.slice(0, this.connectCursor) + key.char + this.visionInput.slice(this.connectCursor)
+        this.connectCursor += key.char.length
+        this.visionError = undefined
+        this.overlay.rerender()
+      }
+      return true
+    }
 
     // Connect wizard — a stateful choice/input overlay. Handled first so typed
     // characters (incl. 'q') feed the input buffer instead of closing the overlay.
@@ -6620,6 +6744,12 @@ export class TuiApp {
     this.overlayController.setConnectExec(connectExec)
     this.overlayController.setPlanPickerExec(planPickerExec)
     this.overlayController.setInitExec(initExec)
+    // Dedicated vision bridge wizard. It shares only generic wizard rendering;
+    // state, endpoint discovery, and persistence are distinct from /connect.
+    this.overlay.register('vision-onboarding', {
+      render: (_w, _h) => renderConnect(this.getVisionOnboardingOverlayData(), this.columns, this.rows, this.theme),
+    })
+
     // Pager — page / mode / search / message 由 overlayNav 注入（覆盖 provider 的静态值）
     this.overlay.register('pager', {
       render: (_w, _h) => {
