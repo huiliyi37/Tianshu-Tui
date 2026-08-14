@@ -191,6 +191,22 @@ describe('connect wizard · 输入光标移动与闪烁', () => {
     assert.equal(a.connectCursor, buf.length - 2)
   })
 
+  it('bracketed paste inserts at the cursor and leaves it after the pasted text', async () => {
+    const { app, stdin } = makeApp()
+    const a = toEndpointStep(app)
+    const before = a.connectInput
+    a.handleOverlayKey({ name: 'left', char: '' })
+    a.handleOverlayKey({ name: 'left', char: '' })
+    const cursorBefore = a.connectCursor
+    stdin.dataHandler?.('\x1B[200~PASTED\x1B[201~')
+    await new Promise(resolve => setImmediate(resolve))
+
+    assert.equal(a.connectInput, before.slice(0, cursorBefore) + 'PASTED' + before.slice(cursorBefore))
+    assert.equal(a.connectCursor, cursorBefore + 'PASTED'.length)
+    a.handleOverlayKey({ name: '', char: 'X' })
+    assert.equal(a.connectInput, before.slice(0, cursorBefore) + 'PASTEDX' + before.slice(cursorBefore))
+  })
+
   it('移动激活闪烁：首 500ms 常亮、之后每 500ms 翻转、激活后持续闪烁', () => {
     const a = toEndpointStep(makeApp().app)
     a.handleOverlayKey({ name: 'left', char: '' })

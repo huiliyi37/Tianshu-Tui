@@ -901,7 +901,11 @@ export class TuiApp {
       if (this.overlay.activeId() === 'connect' && this.connectFlow) {
         const view = this.connectFlow.view()
         if (view.kind === 'input') {
-          this.connectInput += text
+          const before = this.connectInput.slice(0, this.connectCursor)
+          const after = this.connectInput.slice(this.connectCursor)
+          this.connectInput = before + text + after
+          this.connectCursor += text.length
+          this.connectEditActiveAt = Date.now()
           this.connectError = undefined
           this.overlay.rerender()
         }
