@@ -770,24 +770,28 @@ async function main() {
   }
 
   // ── Build TuiApp ─────────────────────────────────────────────
-  // 状态栏初始模型名：优先取配置的默认模型（agent.defaultModel 的 modelId），
-  // 与 bootstrap 的默认启动模型解析同源；未配置时回退 provider 首模型。
-  // 修复：此前恒取 provider.models[0]（预设首模型），设置默认模型后重启，
-  // 状态栏仍显示旧默认（如 v4-pro）而非用户配置的模型（如 v4-flash）。
+  // 状态栏初始模型名：以运行时实际模型为准（promptEngine 装配值，覆盖
+  // resume 恢复模型与显式 --model 场景），回退链：运行时模型 → 配置默认
+  // 模型（agent.defaultModel）→ provider 首模型。此前恒取 provider.models[0]，
+  // 设置默认模型后重启状态栏仍显示旧默认（如 v4-pro），与后台实际运行
+  // （如 v4-flash）不一致。
+  let runtimeModelId: string | undefined
+  try { runtimeModelId = ctx.agent.config.promptEngine.getModel() } catch { /* 未初始化 */ }
   const configuredModelId = (() => {
     const ref = ctx.config.agent.defaultModel
     return ref && ref.includes(':') ? ref.slice(ref.indexOf(':') + 1) : undefined
   })()
-  const configuredModel = configuredModelId
-    ? ctx.provider.models.find(m => m.id === configuredModelId || m.alias === configuredModelId)
+  const displayRef = runtimeModelId ?? configuredModelId
+  const configuredModel = displayRef
+    ? ctx.provider.models.find(m => m.id === displayRef || m.alias === displayRef)
     : undefined
-  // 当前模型 spec：配置的默认模型优先；未配置/不匹配回退 provider 首模型。
+  // 当前模型 spec：显示基准模型优先；未匹配回退 provider 首模型。
   // currentModel 供状态栏模型名、上下文窗口等 UI 元数据使用。
   const currentModel = configuredModel ?? ctx.provider.models[0]
-  // 显示名：配置的默认模型优先（匹配到用 alias；未匹配到用原始 modelId——
-  // 与 bootstrap 运行时解析同源，避免显示与运行时不一致）；未配置回退 provider 首模型。
-  const modelName = configuredModelId
-    ? (configuredModel?.alias ?? configuredModelId)
+  // 显示名：匹配到用 alias；未匹配用原始 modelId（与 bootstrap 运行时解析
+  // 同源，避免显示与运行时不一致）；无基准回退 provider 首模型。
+  const modelName = displayRef
+    ? (configuredModel?.alias ?? displayRef)
     : (currentModel?.alias ?? currentModel?.id ?? 'unknown')
 
   // git branch（启动时读取一次，GlanceBar 显示）
