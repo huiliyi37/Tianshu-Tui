@@ -2183,6 +2183,7 @@ export class TuiApp {
       input: this.visionInput,
       error: this.visionError,
       selectedIndex: this.overlayController.nav().connectIndex,
+      cursorPos: this.connectCursor,
     }
   }
 
@@ -2196,6 +2197,7 @@ export class TuiApp {
     }
     if (result.kind === 'next') {
       this.visionInput = ''
+      this.connectCursor = 0
       this.visionError = undefined
       this.overlayController.nav().connectIndex = 0
       this.overlay.rerender()

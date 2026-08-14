@@ -1553,8 +1553,30 @@ function applyAdvancedConfig(target: ProviderConfig, advanced?: ProviderAdvanced
   if (advanced.proxy !== undefined) target.proxy = advanced.proxy
 }
 
+/** Persist the config first; a failed secret write must not leave a dangling keyRef. */
+function saveProviderConfigWithSecret(config: Config, previousConfig: Config, keyRef?: string, apiKey?: string): void {
+  saveConfig(config)
+  if (!keyRef || !apiKey) return
+  try {
+    writeSecret(keyRef, apiKey)
+  } catch (error) {
+    try {
+      saveConfig(previousConfig)
+    } catch (rollbackError) {
+      throw new Error(
+        `Failed to save API key and could not restore the previous configuration: ${
+          rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+        }`,
+        { cause: error },
+      )
+    }
+    throw error
+  }
+}
+
 export function setupProvider(options: SetupProviderOptions): void {
   const cfg = loadConfig()
+  const previousConfig = structuredClone(cfg)
   const presetKey = options.preset ?? (resolvePreset(options.providerName) ? options.providerName : undefined)
   const current = cfg.provider.providers[options.providerName]
   const base = presetKey ? cloneResolvedPreset(presetKey) : current
@@ -1567,7 +1589,6 @@ export function setupProvider(options: SetupProviderOptions): void {
     next.baseUrl = options.baseUrl
   }
   if (options.apiKey) {
-    writeSecret(options.providerName, options.apiKey)
     next.keyRef = options.providerName
     ;(next as unknown as { apiKey?: string | null }).apiKey = null
     ;(next as unknown as { apiKeyEnv?: string | null }).apiKeyEnv = null
@@ -1602,7 +1623,7 @@ export function setupProvider(options: SetupProviderOptions): void {
     next.allowProFallback = options.allowProFallback
   }
   applyAdvancedConfig(next, options.advanced)
-  saveConfig(cfg)
+  saveProviderConfigWithSecret(cfg, previousConfig, options.apiKey ? options.providerName : undefined, options.apiKey)
 }
 
 export interface RegisterProviderOptions {
@@ -1661,7 +1682,6 @@ export function registerProvider(options: RegisterProviderOptions): void {
     )
   }
   const models = (options.models ?? []).map(raw => modelConfigSchema.parse(raw))
-  if (options.apiKey) writeSecret(options.providerName, options.apiKey)
   const provider: ProviderConfig = {
     name: options.providerName,
     ...(options.apiKey ? { keyRef: options.providerName } : {}),
@@ -1678,9 +1698,10 @@ export function registerProvider(options: RegisterProviderOptions): void {
   }
   applyAdvancedConfig(provider, options.advanced)
   const cfg = loadConfig()
+  const previousConfig = structuredClone(cfg)
   cfg.provider.providers[options.providerName] = provider
   if (options.makeDefault) cfg.provider.default = options.providerName
-  saveConfig(cfg)
+  saveProviderConfigWithSecret(cfg, previousConfig, options.apiKey ? options.providerName : undefined, options.apiKey)
 }
 
 // --- Model management ---

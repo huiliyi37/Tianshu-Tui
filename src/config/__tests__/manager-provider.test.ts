@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -131,6 +131,26 @@ describe('provider config mutations', () => {
       models: [{ id: 'm', contextWindow: 128000, maxTokens: 8192 }],
     }), /apiKey.*apiKeyEnv|credential source|either/i)
     assert.equal(loadConfig().provider.providers['ambiguous-auth'], undefined)
+  })
+
+  it('restores preset config when writing its inline key fails', () => {
+    mkdirSync(join(dir, 'secrets.json'))
+    assert.throws(() => setupProvider({ providerName: 'deepseek', apiKey: 'sk-unwritable' }))
+    const provider = loadConfig().provider.providers.deepseek!
+    assert.equal(provider.keyRef, undefined)
+    assert.equal(readSecret('deepseek'), undefined)
+  })
+
+  it('removes a custom provider from config when writing its inline key fails', () => {
+    mkdirSync(join(dir, 'secrets.json'))
+    assert.throws(() => registerProvider({
+      providerName: 'unwritable-key-provider',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-unwritable',
+      models: [{ id: 'm', contextWindow: 128000, maxTokens: 8192 }],
+    }))
+    assert.equal(loadConfig().provider.providers['unwritable-key-provider'], undefined)
+    assert.equal(readSecret('unwritable-key-provider'), undefined)
   })
 
   it('registerProvider honors an explicit protocol option', () => {

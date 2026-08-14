@@ -8,6 +8,7 @@ interface AppInternals {
   registerOverlays(data: Record<string, never>): void
   handleOverlayKey(key: { name: string; char?: string; ctrl?: boolean }): boolean
   overlay: { activeId(): string | null }
+  getVisionOnboardingOverlayData(): { input: string; cursorPos?: number }
 }
 
 function internals(app: unknown): AppInternals { return app as AppInternals }
@@ -27,6 +28,9 @@ describe('vision onboarding overlay', () => {
     assert.equal(app.overlay.activeId(), 'vision-onboarding')
     for (const char of 'https://vision.example/v1') app.handleOverlayKey(key(char))
     app.handleOverlayKey({ name: 'return', char: '' })
+    const providerNameStep = app.getVisionOnboardingOverlayData()
+    assert.equal(providerNameStep.input, '')
+    assert.equal(providerNameStep.cursorPos, 0)
     for (const char of 'vision-custom') app.handleOverlayKey(key(char))
     app.handleOverlayKey({ name: 'return', char: '' })
     app.handleOverlayKey({ name: 'return', char: '' })
