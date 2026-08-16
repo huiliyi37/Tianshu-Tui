@@ -1661,7 +1661,7 @@ async function main() {
   // slash 命令提示列表：静态 palette 命令 + 动态已加载 skill 的 /skill <name>
   const paletteHints = getPaletteCommands()
     .filter(c => c.name.startsWith('/'))
-    .map(c => ({ name: c.name, description: c.description, ...(c.argsHint ? { argsHint: c.argsHint } : {}) }))
+    .map(c => ({ name: c.name, description: c.description, ...(c.argsHint ? { argsHint: c.argsHint } : {}), ...(c.tier === 'core' ? { tier: 'core' as const } : {}) }))
   const skillHints = skillRegistry.list().map(s => ({
     name: `/skill ${s.name}`,
     description: s.description ? s.description.split('\n')[0]! : `Load skill: ${s.name}`,

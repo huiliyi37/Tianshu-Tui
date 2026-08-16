@@ -19,6 +19,9 @@ export interface SlashHintEntry {
   /** 可选参数提示（ghost text，P3）：输入精确匹配「命令名+空格」时在光标后
    *  暗色提示（如 /effort → 'off|low|medium|high|max'）。纯渲染层拼接，不进 buffer。 */
   argsHint?: string
+  /** 核心层标记（见 command-palette.ts PaletteCommand.tier）：空 query 的
+   *  提示列表只展示核心层。skills 动态条目不带此标记 → 进阶层。 */
+  tier?: 'core'
 }
 
 /**
@@ -56,7 +59,15 @@ type ScoredEntry = { entry: SlashHintEntry; score: number }
  * 同分时保持原始顺序（stable sort）。
  */
 export function filterSlashCommands(commands: readonly SlashHintEntry[], query: string): SlashHintEntry[] {
-  if (!query) return [...commands]
+  if (!query) {
+    // 空 query（输入恰好 `/`）：只展示核心层。全量 65+ 条按定义序浏览对普通
+    // 用户是噪音墙，常用命令被淹没；核心层（~20 条高频）+ footer 引导后，
+    // 多打一个字符即过滤全量，Ctrl+P 面板永远全量——分层只影响发现性，
+    // 不删任何命令。清单无 core 标注（如纯 skills 形态）时回退全量。
+    // 键导航 / Tab 补全 / 渲染三处共用本函数，分层在此单点生效即整体一致。
+    const core = commands.filter(c => c.tier === 'core')
+    return core.length > 0 ? core : [...commands]
+  }
   const lower = query.toLowerCase()
   const scored: ScoredEntry[] = []
   for (const c of commands) {
@@ -146,6 +157,11 @@ export function formatSlashHint(input: FormatSlashHintInput, theme: RivetTheme):
   const footerParts: string[] = []
   if (overflowBelow > 0) {
     footerParts.push(`↓ ${overflowBelow} more`)
+  }
+  // 空 query = 核心层视图：给出「还有更多」的明确出口，否则用户不知道
+  // 进阶命令的存在（65+ 条只露 20 条，发现性反而变差）。
+  if (!query && input.commands.length > filtered.length) {
+    footerParts.push(`核心 ${filtered.length}/${input.commands.length} · 输入即过滤全部 · ctrl+p 面板`)
   }
   footerParts.push('↑↓ navigate', 'tab complete', '↵ run')
   lines.push(color(`  ${footerParts.join(' · ')}`, theme.dim))
