@@ -452,6 +452,9 @@ export class TuiApp {
    * 把排队内容拉回输入框交还用户（Claude Code 风格，见 notifyRunSettled）。
    */
   private abortSteerBackfill = false
+  /** 守护中断（watchdog/convergence）pending 标志：settle 时消费，用于区分
+   *  「run 自然结束」与「守护中断自动续跑」——后者不回填排队队列。 */
+  private guardianAbortPending = false
   /**
    * 查询 agent 是否仍有未 settle 的 run（main.ts 注入 → `ctx.agent.isRunning()`）。
    *
@@ -1297,7 +1300,11 @@ export class TuiApp {
       },
       onIntentNote: (intent) => this.handleIntentNote(intent),
       onAutonomyCheckpoint: (info) => this.handleAutonomyCheckpoint(info),
-      onSteerDrain: () => this.steerBuffer.drain(),
+      // 工具边界只注入紧急意图（halt=now / redirect=next）：普通消息（later：
+      // guidance/question/augment/ack）留在队列等 run 结束后回填输入框、由用户
+      // 再次 Enter 确认发送——与「⏳ 已排队」文案一致（此前无过滤 drain 会把
+      // 排队中的普通消息自动注入给 AI，界面显示排队、实际已发出，是撒谎）。
+      onSteerDrain: () => this.steerBuffer.drain('next'),
       onDelegationActivity: (activity) => this.handleDelegationActivity(activity),
     }
 
@@ -1599,12 +1606,23 @@ export class TuiApp {
     this.abortSettling = false
     const backfill = this.abortSteerBackfill
     this.abortSteerBackfill = false
+    const guardian = this.guardianAbortPending
+    this.guardianAbortPending = false
     const pending = this.pendingSubmitAfterAbort
     if (!pending) {
-      // 无补发消息的 settle：用户主动 ESC 的收尾才回填（守护中断自动续跑，
-      // 排队指引留在队列等 drain）。有补发消息时新 run 即将发起，队列随它
-      // 在工具边界 drain，不动。
-      if (backfill) this.backfillSteerToInput()
+      // 无补发消息的 settle：
+      //  - 用户主动 ESC 的收尾回填（Claude Code 风格）；
+      //  - run 自然结束（isFinal 已复位 busy）同样回填——AI 输出期间排队的普通
+      //    消息不再在工具边界自动注入（onSteerDrain 只 drain 紧急意图），run
+      //    结束即交还用户确认（再次 Enter 发送），与 ESC 路径同语义；
+      //  - 守护中断（watchdog/convergence）自动续跑：guardian 时不回填，队列
+      //    保留等续跑 run 结束后的 settle 再回填，或下次提交归并。
+      // 有补发消息时新 run 即将发起，队列随它在工具边界 drain，不动。
+      if (backfill) {
+        this.backfillSteerToInput()
+      } else if (!guardian && !this.agentBusy) {
+        this.backfillSteerToInput()
+      }
       return
     }
     this.pendingSubmitAfterAbort = null
@@ -4987,6 +5005,11 @@ export class TuiApp {
     // 自动续跑，排队指引应留在队列里等 drain，不该被拉回输入框。
     this.abortSteerBackfill =
       this.abortSettling && !reason?.startsWith('watchdog') && !reason?.startsWith('convergence')
+    // 守护中断标志：notifyRunSettled 消费——自然结束（isFinal）的回填逻辑
+    // 不得误伤守护中断（自动续跑时把排队消息拉回输入框会打断续跑流程）。
+    // ?? false：reason 可选（undefined）时 startsWith 短路出 undefined。
+    this.guardianAbortPending =
+      (this.abortSettling && (reason?.startsWith('watchdog') || reason?.startsWith('convergence'))) ?? false
     this.state.isStreaming = false
     this.state.isThinking = false
     this.setPhase('idle')
