@@ -22,6 +22,9 @@ export interface SidePanelInput {
   /** 面板总宽度（含边框），通常 24-32 列 */
   columns: number
   todos: TodoItem[]
+  /** 跨 run 陈旧标记：当前 run 未写过 todo 且清单全完成 → 侧栏任务段收起
+   *  （与主区门禁同语义，见 shouldShowTaskPanel）。 */
+  todosStale?: boolean
   workers: FleetWorkerView[]
   currentTool?: { name: string; elapsedMs: number }
   currentToolName?: string
@@ -135,7 +138,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
   //    todoExpanded 展开态强制显示且放宽行数，completed 逐条可回看）──
   lines.push(sectionDivider())
   const todosExpanded = input.todoExpanded === true
-  const taskLines = (todosExpanded || shouldShowTaskPanel(input.todos, input.phase ?? ''))
+  const taskLines = (todosExpanded || shouldShowTaskPanel(input.todos, input.phase ?? '', input.todosStale === true))
     ? formatTaskList(input.todos, theme, {
       width: contentW,
       maxRows: todosExpanded ? 15 : MAX_TASK_ROWS,

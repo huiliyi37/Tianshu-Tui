@@ -44,9 +44,12 @@ export interface TaskListOptions {
  * 永久渲染，并作为 chrome 首元素在超屏/行宽少算时被反复挤入 scrollback，
  * 形成同一块的多份副本）。运行中或仍有未完成项时显示。
  */
-export function shouldShowTaskPanel(items: readonly TodoItem[], phase: string): boolean {
+export function shouldShowTaskPanel(items: readonly TodoItem[], phase: string, todosStale = false): boolean {
   if (items.length === 0) return false
-  if (phase === 'idle' && items.every(t => t.status === 'completed')) return false
+  // 全完成清单在两种情况下收起：run 已结束（idle），或清单属于更早的 run
+  // （todosStale：当前 run 尚未写过 todo——旧 5/5 复活挂在新 run 头上，观感
+  // 即「任务计数不更新」）。todoExpanded 强制回看由调用方短路，不进这里。
+  if (items.every(t => t.status === 'completed') && (phase === 'idle' || todosStale)) return false
   return true
 }
 

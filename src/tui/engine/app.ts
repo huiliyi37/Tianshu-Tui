@@ -699,6 +699,12 @@ export class TuiApp {
   private sidePanelLeaderTimer: ReturnType<typeof setTimeout> | null = null
   /** todo 徽章高亮熄灭定时器（活动期外 ticker 停转，靠它在 1s 后重绘恢复正常色） */
   private todoFlashTimer: ReturnType<typeof setTimeout> | null = null
+  /** 本 run 是否写入过 todo（用户提交重置，updateTodos 检测到清单签名变化置位）。
+   *  用于跨 run 陈旧显示 gate：新 run 未写 todo 前，上一轮**全部完成**的清单
+   *  不再占用任务面板与 GlanceBar 徽章（观感即「◇ 任务 (5/5) 不更新」——旧值
+   *  复活挂在新 run 头上，直到 AI 首次 todo write）。部分完成清单不受影响
+   *  （AI 大概率续写）；守护中断的自动续跑视为同一任务的延续，不重置。 */
+  private todosWrittenThisRun = false
   /** 监控型 overlay（激活期间随数据/tick 实时重绘，而非打开瞬间的快照） */
   private static readonly LIVE_OVERLAY_IDS: ReadonlySet<string> = new Set(['tasks', 'cockpit', 'jobs'])
   /** live overlay 上次重绘时间戳（节流 ≥400ms） */
@@ -1499,6 +1505,7 @@ export class TuiApp {
       this.streamRenderer.reset()
       this.streamRenderController.assistantHeaderDone = false
       this.agentBusy = true
+      this.todosWrittenThisRun = false
     }
     // Reset turn timer for the new turn
     this.state.turnStartMs = Date.now()
@@ -1613,6 +1620,7 @@ export class TuiApp {
     this.streamRenderer.reset()
     this.streamRenderController.assistantHeaderDone = false
     this.agentBusy = true
+    this.todosWrittenThisRun = false
     this.state.turnStartMs = Date.now()
     this.streamRenderController.lastActivityMs = Date.now()
     this.onSubmitCallback?.(pending.text, pending.images)
@@ -3497,6 +3505,7 @@ export class TuiApp {
       this.streamRenderer.reset()
       this.streamRenderController.assistantHeaderDone = false
       this.agentBusy = true
+      this.todosWrittenThisRun = false
       this.state.turnStartMs = Date.now()
       this.streamRenderController.lastActivityMs = Date.now()
       this.onSubmitCallback?.(text, images)
@@ -4133,6 +4142,11 @@ export class TuiApp {
     const prevDone = prev.reduce((n, x) => n + (x.status === 'completed' ? 1 : 0), 0)
     const nextDone = items.reduce((n, x) => n + (x.status === 'completed' ? 1 : 0), 0)
     this.state.todos = items
+    // 本 run 写入检测（清单身份签名变化 = 新写入）：签名覆盖 id/status/内容，
+    // 与 provider 轮询的同值拉取（ticker 每 120ms 拉一次）区分——只有 AI 真正
+    // 写了新清单才算「本 run 有 todo」，见 todosWrittenThisRun 注释。
+    const sig = (xs: readonly TodoItem[]): string => xs.map(x => `${x.id}:${x.status}:${x.content}`).join('|')
+    if (sig(items) !== sig(prev)) this.todosWrittenThisRun = true
     if (!isReducedMotion() && (nextDone > prevDone || items.length !== prev.length)) {
       this.state.todoFlashUntil = Date.now() + 1000
       if (this.todoFlashTimer) clearTimeout(this.todoFlashTimer)
@@ -5369,6 +5383,9 @@ export class TuiApp {
       const t = this.state.todos
       const total = t.length
       if (total === 0) return undefined
+      // 跨 run 陈旧 gate（同 shouldShowTaskPanel）：全完成 + 本 run 未写 →
+      // 徽章不显示，避免旧 5/5 复活挂在新 run 头上冒充当前进度。
+      if (!this.todosWrittenThisRun && t.every(x => x.status === 'completed')) return undefined
       return {
         total,
         done: t.filter(x => x.status === 'completed').length,
@@ -5666,7 +5683,7 @@ export class TuiApp {
     // 3b. 常驻任务面板（todo 列表）——空列表不渲染；run 空闲且全部完成时隐藏
     //    （shouldShowTaskPanel；todoExpanded 展开态强制显示以回看 completed）。
     //    宽屏时已由 side panel 承载。
-    if (!showSidePanel && this.state.todos.length > 0 && (this.state.todoExpanded || shouldShowTaskPanel(this.state.todos, this.state.phase))) {
+    if (!showSidePanel && this.state.todos.length > 0 && (this.state.todoExpanded || shouldShowTaskPanel(this.state.todos, this.state.phase, !this.todosWrittenThisRun))) {
       const taskLines = formatTaskList(this.state.todos, this.theme, {
         width: cols,
         maxRows: this.state.todoExpanded ? 15 : 6,
@@ -6001,6 +6018,7 @@ export class TuiApp {
         columns: sidePanelWidth,
         todos: this.state.todos,
         phase: this.state.phase,
+        todosStale: !this.todosWrittenThisRun,
         todoExpanded: this.state.todoExpanded,
         workers: this.fleetFrame(cols, false).activeWorkers,
         teamModel: this.liveTeamModel ? this.teamModelWithLiveStatus(this.liveTeamModel) : null,
@@ -6274,6 +6292,7 @@ export class TuiApp {
       this.streamRenderer.reset()
       this.streamRenderController.assistantHeaderDone = false
       this.agentBusy = true
+      this.todosWrittenThisRun = false
       this.state.turnStartMs = Date.now()
       this.streamRenderController.lastActivityMs = Date.now()
       this.onSubmitCallback?.(input)
