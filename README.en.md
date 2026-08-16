@@ -523,7 +523,7 @@ Tianshu's command-line interface runs on a purpose-built **T9 rendering engine**
 | **Inline terminal images** | Renders images right in the terminal via the kitty / iTerm2 graphics protocols (tool artifacts, screenshot verifications). Auto-detects the protocol; `RIVET_IMAGES=0` disables, `kitty`/`iterm2` forces one. |
 | **@mention completion** | Type `@file:` / `@folder:` / `@symbol:` to trigger path completion (via `git ls-files`; supports the quoted form `@file:"a b.ts"` for paths with spaces). Pasting an image auto-converts to inline base64 (3-tier fallback across macOS/Linux/Windows). |
 | **Rewind** | Double-tap `ESC` (within 400ms) to open message history; pick any past user message to rewind to, with three restore granularities (conversation only / code only / both) and a precise file-impact preview for code actions. See [Rewind](#rewind). |
-| **Command palette** | `Ctrl+Esc` opens a fuzzy-searchable list of all slash commands and surface actions (toggle side panel, switch theme, enter Cockpit, etc.) — ↑/↓ to select, Enter to run. |
+| **Command palette** | `Ctrl+P` opens a fuzzy-searchable list of all slash commands and surface actions (toggle side panel, switch theme, enter Cockpit, etc.) — ↑/↓ to select, Enter to run, `Ctrl+P` again to close. Rebinds the original `Ctrl+Esc`, which Windows reserves for the Start menu and which legacy escape sequences cannot distinguish from plain Esc. |
 | **Cockpit** | Open via the palette or `/cockpit <panel>`. An 8-panel fullscreen view — summary / trace / verify / context / safety / model / mcp / advisory — switch focus with ←/→/Tab. Real-time view of doom-loop level, delivery/verification status, cache + speculative pre-read stats, MCP connections, advisory lifts, etc. |
 | **Multi-agent panels** | `/tasks` opens a fullscreen worker detail view (fusing the live view + JSONL transcript, with Contract/Activity/Result/Transcript sections and honesty labels); on wide terminals (≥100 columns), `Ctrl+]` toggles a right-side drawer showing the fleet tree, team-wave DAG, todos, and token gauge in real time. |
 | **Themes & accessibility** | `/theme [name\|list]` switches palettes; the `auto` theme probes the terminal background via OSC 11 to adapt light/dark. Truecolor / 256-color / 16-color auto-downgrade. `/vim` toggles vim keybindings; `ui.reducedMotion: true` staticizes spinner and badge animation (accessibility). |
@@ -535,7 +535,7 @@ Tianshu's command-line interface runs on a purpose-built **T9 rendering engine**
 | `Enter` | Send · `Shift+Enter` for newline |
 | `Ctrl+C` | Three states: abort the current run while the agent is active; clear the input line when there's input; double-press within 2s when idle to exit |
 | `Esc` | Close overlay / exit worker view; interrupt while the agent runs; toggle normal↔insert in vim mode; double-tap (<400ms) to rewind |
-| `Ctrl+Esc` | Command palette |
+| `Ctrl+P` | Command palette (rebinds Ctrl+Esc, reserved by the Windows Start menu) |
 | `Ctrl+]` | Toggle the right-side drawer (wide terminals) |
 | `Ctrl+R` | History-search overlay (only when idle) |
 | `Ctrl+O` | Expand/collapse the most recently truncated tool result |

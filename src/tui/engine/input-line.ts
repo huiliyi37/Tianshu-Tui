@@ -700,7 +700,8 @@ export class InputLine {
         case 'ctrl_b': return this.moveLeft()
         case 'ctrl_f': return this.moveRight()
         case 'ctrl_n': return this.historyNext()
-        case 'ctrl_p': return this.historyPrev()
+        // Ctrl+P 已让位给命令面板（TuiApp 全局拦截）；多行时翻上一条历史
+        // 用 Ctrl+R 历史搜索。ctrl_n 保留 readline 对偶（下一条）。
         case 'ctrl_minus':
         case 'ctrl_z': return this.undo()
         case 'ctrl_y': return this.redo()
@@ -987,7 +988,8 @@ export class InputLine {
     if (this._value.includes('\n')) {
       // 多行：方向键专注行间导航，到首行原地停，不翻历史（防误触——
       // 多行编辑时光标频繁停在首行，按上想继续编辑却跳走）。
-      // 多行时翻历史用 Ctrl+P（historyPrev）/ Ctrl+N（historyNext）。
+      // 多行时翻历史用 Ctrl+N（下一条）/ Ctrl+R（历史搜索）；Ctrl+P 已让位
+      // 给命令面板，多行时上一条历史经 Ctrl+R 全屏搜索可达。
       const { line, col } = this.getLineCol(this._cursor)
       if (line > 0) {
         this.sealUndo()

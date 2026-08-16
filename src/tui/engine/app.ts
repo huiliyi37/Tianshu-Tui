@@ -1055,8 +1055,21 @@ export class TuiApp {
         }
         return
       }
+      if (key.name === 'ctrl_p') {
+        // Ctrl+P → 命令面板开关。原 Ctrl+Esc 三条送达路径全断：Windows 宿主
+        // 被「开始菜单」抢占（事件到不了终端）、传统转义序列下与单独 Esc 同码
+        // （0x1B）、kitty 增强键盘的 \x1B[27;5u 未被解析器映射。Ctrl+P（0x10）
+        // 在所有终端可靠送达。翻历史入口不受影响：单行 ↑/↓、Ctrl+N、Ctrl+R。
+        if (this.overlay.isActive() && this.overlay.activeId() === 'command-palette') {
+          this.deactivateOverlay()
+        } else {
+          this.activateOverlay('command-palette')
+        }
+        return
+      }
       if (key.name === 'escape' && key.ctrl) {
-        // Ctrl+Esc → 激活命令面板
+        // Ctrl+Esc → 激活命令面板（见上方 Ctrl+P 注释：此路径当前解析器
+        // 不可达，保留给未来增强键盘协议映射，主键位为 Ctrl+P）
         this.overlayController.resetNav()
         this.overlay.activate('command-palette')
         return

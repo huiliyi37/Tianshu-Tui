@@ -157,8 +157,8 @@ const HELP_TEXT = `Available commands:
 /rollback [<N>] — Rollback file changes (alias of /undo)
 /write-plan — Write current plan to file
 Ctrl+C — Interrupt current turn (press twice to exit)
-Ctrl+P / Ctrl+N — 翻历史命令（上一条 / 下一条；多行编辑时方向键不翻历史，用这组）
-Ctrl+Esc — 命令面板（模糊搜索全部命令与界面动作）
+↑ / Ctrl+N — 翻历史命令（单行 ↑ 上一条；多行编辑时方向键只做行间导航，用 Ctrl+R 历史搜索）
+Ctrl+P — 命令面板（模糊搜索全部命令与界面动作；Ctrl+Esc 被 Windows「开始菜单」抢占，已换绑）
 
 ▌▌ 上下文与缓存（DeepSeek V4 成本关键）▌▌
 

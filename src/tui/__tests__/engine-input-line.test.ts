@@ -431,12 +431,12 @@ describe('InputLine', () => {
       assert.equal(input.value, 'line1\nline2\nline3') // value 不变，只是光标上移
     })
 
-    it('多行内容：Ctrl+P 仍能翻历史（替代入口）', () => {
+    it('多行内容：Ctrl+P 不再翻历史（已让位给命令面板，Ctrl+R 兜底）', () => {
       const input = new InputLine({ history: ['old1', 'old2'] })
       input.setValue('line1\nline2', 0)
       const ev = input.handleKey('ctrl_p', '', true, false)
-      assert.ok(ev?.type === 'change')
-      assert.equal(input.value, 'old1') // Ctrl+P 翻到历史，不受多行禁用影响
+      assert.equal(ev, null) // Ctrl+P 被 TuiApp 全局拦截开命令面板，InputLine 不响应
+      assert.equal(input.value, 'line1\nline2')
     })
   })
 

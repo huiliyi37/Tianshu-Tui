@@ -9,7 +9,7 @@
  *   │ deepseek-v4 · ◎high · auto-safe                                  │
  *   │ ~/app/deepseek-tui/opencode-tui · #7281                          │
  *   │                                                                  │
- *   │ /init 生成项目说明   /domain 切换星域   /help 全部命令 · ctrl+esc  │
+ *   │ /init 生成项目说明   /domain 切换星域   /help 全部命令 · ctrl+p   │
  *   │ ⏜ /handoff 上下文 50%–70% 时交接给新会话                          │
  *   ╰──────────────────────────────────────────────────────────────────╯
  *
@@ -95,7 +95,7 @@ const DIPPER_BOWL = [
 const TIPS = [
   { cmd: '/init', desc: '生成项目说明' },
   { cmd: '/domain', desc: '切换星域' },
-  { cmd: '/help', desc: '全部命令 · ctrl+esc 命令面板' },
+  { cmd: '/help', desc: '全部命令 · ctrl+p 命令面板' },
 ] as const
 
 function truncateToWidth(text: string, maxWidth: number): string {
