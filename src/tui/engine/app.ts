@@ -892,6 +892,12 @@ export class TuiApp {
       }
       // Other overlays active → don't paste into main input
       if (this.overlay.isActive()) return
+      // 确认窗口内粘贴 = 继续对话：取消 pending-exit 再插入文本
+      // （与打字路径的取消同一状态位，见 handleKey 的 Normal input processing）。
+      if (this.inputController.ctrlCPendingSince > 0) {
+        this.inputController.ctrlCPendingSince = 0
+        this.renderLive()
+      }
 
       // 右键粘贴/终端菜单粘贴走 bracketed paste 文本通道，不触发 ctrl_v 按键，
       // 因此不会调 handleCtrlV → readImageFromClipboard。若剪贴板当前是图片，
@@ -1034,8 +1040,9 @@ export class TuiApp {
         if (this.isAgentActive()) {
           // Agent active (含首 token 前/纯工具窗口): abort current agent run
           this.handleAbort()
-        } else if (this.inputController.ctrlCPendingSince > 0) {
-          // Second Ctrl+C within window → exit
+        } else if (this.inputController.ctrlCPendingSince > 0 && !this.inputLine.value.trim()) {
+          // Second Ctrl+C within window → exit（有输入时不退出——窗口内
+          // 打过字说明用户在继续对话，退化为清空输入，见下方分支）
           this.inputController.ctrlCPendingSince = 0
           this.dispose()
           if (this.onExitCallback) {
@@ -1044,8 +1051,10 @@ export class TuiApp {
             process.exit(0)
           }
         } else if (this.inputLine.value.trim()) {
-          // Idle with input: clear input line, don't exit
+          // Idle with input: clear input line, don't exit（同时取消可能
+          // 残留的确认窗口——清空输入后提示行没有理由继续显示）
           this.inputLine.setValue('')
+          this.inputController.ctrlCPendingSince = 0
           this.renderLive()
         } else {
           // Idle with empty input: first Ctrl+C → show hint, start 2s window
@@ -1062,6 +1071,18 @@ export class TuiApp {
         return
       }
       if (key.name === 'escape') {
+        // Ctrl+C pending-exit 确认窗口内：Esc = 取消退出、恢复输入框。优先于
+        // vim 切换 / 双击 rewind / overlay 关闭——屏幕处于退出提示态（输入框
+        // 被隐藏），用户此刻按 Esc 的意图是「回到对话」。overlay 激活时的 Esc
+        // 已在上方 handleOverlayKey 消费（先关 overlay），不会走到这里。
+        if (this.inputController.ctrlCPendingSince > 0) {
+          this.inputController.ctrlCPendingSince = 0
+          // 取消用的 Esc 不计入双击 rewind 计时，避免「取消后立刻双击 Esc」
+          // 误开 rewind overlay。
+          this.inputController.lastEscAt = 0
+          this.renderLive()
+          return
+        }
         // Vim 模式下：overlay/agent 激活时 ESC 关闭 overlay 或中断 agent，
         // 空闲时 ESC 落入输入框的 vim normal/insert 切换（保持原行为）。
         if (this.inputLine.vimEnabled) {
@@ -1216,6 +1237,12 @@ export class TuiApp {
         return
       }
       // ── Normal input processing ─────────────────────────────
+      // 确认窗口内的任何编辑键 = 用户继续对话：取消 pending-exit，恢复输入框。
+      // 否则字符进 value 但输入框仍被隐藏（幽灵输入），Enter 还会提交不可见内容。
+      if (this.inputController.ctrlCPendingSince > 0) {
+        this.inputController.ctrlCPendingSince = 0
+        this.renderLive()
+      }
       const event = this.inputLine.handleKey(key.name, key.char, key.ctrl, key.meta, key.shift)
       // 选区剪切/复制的 OSC52 drain（终端支持时写系统剪贴板，不支持者无害忽略）
       const clip = this.inputLine.takeClipboardOut()
@@ -5698,7 +5725,9 @@ export class TuiApp {
     }
 
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
-    if (this.inputController.ctrlCPendingSince > 0) {
+    // 渲染防御：输入框有内容时永远显示输入框——提示行只在空输入时取代它，
+    // 兜住一切未取消 pending 的漏网路径（粘贴竞态等），杜绝幽灵输入。
+    if (this.inputController.ctrlCPendingSince > 0 && !this.inputLine.value) {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
       const inputVal = this.inputLine.value
