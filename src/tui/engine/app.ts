@@ -5897,23 +5897,8 @@ export class TuiApp {
         })
       }
 
-      lines.push({ text: topBorder })
-      if (vimNormalMode) {
-        lines.push({
-          text: this.renderInputRow(`${vimModeLabel}${colorizeInputLine(withPastePills(withGhost(withFenceTint(inputLines[0] ?? '', 0), 0)))}`, innerWidth, leftBar, rightBar),
-          ...(inputDisplay.caret.line === 0 ? { caretCol: caretColFor(0) } : {}),
-        })
-        for (let i = 1; i < inputLines.length; i++) {
-          pushInputRow(inputLines[i]!, i)
-        }
-      } else {
-        for (let i = 0; i < inputLines.length; i++) {
-          pushInputRow(inputLines[i]!, i)
-        }
-      }
-      lines.push({ text: botBorder })
-
-      // 5a. 图片附件摘要（输入框正下方、权限模式行上方）
+      // ── 辅助行（状态/metrics/提示）全部在输入框上方 ──────────────
+      // 5a. 图片附件摘要（输入框上方、状态行上方）
       const imageCount = this.inputLine.images.length
       if (imageCount > 0) {
         const imageLabel = `📎 ${imageCount} image${imageCount > 1 ? 's' : ''}`
@@ -5921,7 +5906,7 @@ export class TuiApp {
       }
 
       // 5b. 状态行：左 metrics（模型/effort/cache/ctx/耗时）+ 右权限模式（右对齐）——
-      //     顶框不再承载指标，收敛到输入框正下方这一行（权限行仍是单一事实来源）。
+      //     顶框不再承载指标，收敛到输入框上方这一行（权限行仍是单一事实来源）。
       //     slash 提示打开时权限让位；整行放不下时权限独占下一行。
       const permLine = formatPermissionModeLine({ approvalMode: this._approvalMode, planMode: planModeActive, askMode: askModeActive }, this.theme)
       const permTrim = permLine.trimStart()
@@ -5972,6 +5957,23 @@ export class TuiApp {
         }
         lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
       }
+
+      // 输入框：chrome 段最后一行（滚动到底时贴屏幕底部，Claude Code 风格）。
+      lines.push({ text: topBorder })
+      if (vimNormalMode) {
+        lines.push({
+          text: this.renderInputRow(`${vimModeLabel}${colorizeInputLine(withPastePills(withGhost(withFenceTint(inputLines[0] ?? '', 0), 0)))}`, innerWidth, leftBar, rightBar),
+          ...(inputDisplay.caret.line === 0 ? { caretCol: caretColFor(0) } : {}),
+        })
+        for (let i = 1; i < inputLines.length; i++) {
+          pushInputRow(inputLines[i]!, i)
+        }
+      } else {
+        for (let i = 0; i < inputLines.length; i++) {
+          pushInputRow(inputLines[i]!, i)
+        }
+      }
+      lines.push({ text: botBorder })
     }
 
     if (this.screenReader) {
