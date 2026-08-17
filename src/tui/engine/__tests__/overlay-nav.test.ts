@@ -199,6 +199,59 @@ test('command-palette: ↓ past viewport scrolls so the selected command stays v
   assert.ok(!after.includes('/n00'), 'first command scrolled off')
 })
 
+test('command-palette: wrap from last item back to first restores the top of the list', () => {
+  const { app, out, stdin } = makeApp(12)
+  const commands = Array.from({ length: 20 }, (_, i) => ({
+    label: `/w${String(i).padStart(2, '0')}`,
+  }))
+  app.registerOverlays({ paletteCommands: () => ({ commands, selectedIndex: 0 }) })
+  app.activateOverlay('command-palette')
+  const press = (k: string) => stdin.dataHandler!(SEQ[k] ?? k)
+  const screen = () => stripAnsi(reconstructScreen(out.chunks.join('')))
+
+  for (let i = 0; i < 20; i++) press('down') // 20 items: wrap back to 0
+  const after = screen()
+  assert.ok(after.includes('/w00'), 'wrap to start shows the first command')
+  assert.ok(!after.includes('/w19'), 'last command is off-screen after wrap')
+})
+
+test('command-palette: wrap from first item to last shows the end of the list', () => {
+  const { app, out, stdin } = makeApp(12)
+  const commands = Array.from({ length: 20 }, (_, i) => ({
+    label: `/w${String(i).padStart(2, '0')}`,
+  }))
+  app.registerOverlays({ paletteCommands: () => ({ commands, selectedIndex: 0 }) })
+  app.activateOverlay('command-palette')
+  const press = (k: string) => stdin.dataHandler!(SEQ[k] ?? k)
+  const screen = () => stripAnsi(reconstructScreen(out.chunks.join('')))
+
+  press('up')
+  const after = screen()
+  assert.ok(after.includes('/w19'), 'wrap-up shows the last command')
+  assert.ok(!after.includes('/w00'), 'first command is off-screen')
+})
+
+test('command-palette: filtering after scroll resets the window to the top', () => {
+  const { app, out, stdin } = makeApp(12)
+  const commands = Array.from({ length: 30 }, (_, i) => ({
+    label: `/n${String(i).padStart(2, '0')}`,
+  }))
+  const filter = () => {
+    const q = app.getOverlayQuery()
+    return q ? commands.filter(c => c.label.includes(q)) : commands
+  }
+  app.registerOverlays({ paletteCommands: () => ({ commands: filter(), selectedIndex: 0 }) })
+  app.activateOverlay('command-palette')
+  const press = (k: string) => stdin.dataHandler!(SEQ[k] ?? k)
+  const screen = () => stripAnsi(reconstructScreen(out.chunks.join('')))
+
+  for (let i = 0; i < 12; i++) press('down')
+  stdin.dataHandler!('0') // query '0' → /n00, /n10, /n20
+  const after = screen()
+  assert.ok(after.includes('/n00'), 'filter reset shows the first match')
+  assert.ok(!after.includes('/n12'), 'scrolled item is gone after filter')
+})
+
 test('command-palette: ↓ 循环到末再回 0', () => {
   const { app, stdin } = makeApp()
   let executed = -1

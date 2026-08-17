@@ -155,6 +155,24 @@ describe('renderCommandPalette', () => {
     assert.ok(/↑:\d+/.test(footerBottom), `↑:N overflow when more items above, got ${footerBottom}`)
     assert.ok(!/↓:\d+/.test(footerBottom), 'no ↓:N overflow at end')
   })
+
+  it('out-of-range selectedIndex still highlights the last command', () => {
+    const lines = renderCommandPalette(
+      { commands: manyCommands, selectedIndex: 99 },
+      60, 15, theme,
+    ).map(stripAnsi)
+    const last = lines.find(l => l.includes('/c39'))
+    assert.ok(last?.includes('>'), 'clamps highlight onto the last item')
+  })
+
+  it('empty command list does not throw and has no cursor', () => {
+    const lines = renderCommandPalette(
+      { commands: [], selectedIndex: 0 },
+      60, 15, theme,
+    ).map(stripAnsi)
+    assert.ok(lines.some(l => l.includes('命令面板')))
+    assert.ok(!lines.some(l => /^\s*>/.test(l) || l.includes('> /') || l.trimStart().startsWith('>')), 'no selection cursor')
+  })
 })
 
 describe('renderChronicle', () => {

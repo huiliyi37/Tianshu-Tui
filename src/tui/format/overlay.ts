@@ -350,16 +350,17 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
     : '命令面板'
   lines.push(formatTitleLeft(title, width, theme))
 
-  const maxItems = height - 5 // border + title + footer + border = 4; +1 safety
+  const maxItems = Math.max(0, height - 5) // border + title + footer + border = 4; +1 safety
   const count = data.commands.length
-  const scrollOffset = listWindowOffset(data.selectedIndex, count, maxItems)
+  const selected = count === 0 ? -1 : Math.max(0, Math.min(data.selectedIndex, count - 1))
+  const scrollOffset = listWindowOffset(Math.max(0, selected), count, maxItems)
   const visible = data.commands.slice(scrollOffset, scrollOffset + maxItems)
   const overflowAbove = scrollOffset
   const overflowBelow = count - scrollOffset - visible.length
 
   for (let i = 0; i < visible.length; i++) {
     const cmd = visible[i]!
-    const isSelected = scrollOffset + i === data.selectedIndex
+    const isSelected = scrollOffset + i === selected
     const prefix = isSelected
       ? color(CURSOR, theme.primary, { bold: true })
       : ' '
