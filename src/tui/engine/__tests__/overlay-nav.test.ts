@@ -199,6 +199,23 @@ test('command-palette: ↓ past viewport scrolls so the selected command stays v
   assert.ok(!after.includes('/n00'), 'first command scrolled off')
 })
 
+test('command-palette: ↑ after scrolling moves the cursor without jumping the window', () => {
+  const { app, out, stdin } = makeApp(12)
+  const commands = Array.from({ length: 30 }, (_, i) => ({
+    label: `/n${String(i).padStart(2, '0')}`,
+  }))
+  app.registerOverlays({ paletteCommands: () => ({ commands, selectedIndex: 0 }) })
+  app.activateOverlay('command-palette')
+  const press = (k: string) => stdin.dataHandler!(SEQ[k] ?? k)
+  const screen = () => stripAnsi(reconstructScreen(out.chunks.join('')))
+
+  for (let i = 0; i < 12; i++) press('down') // selected=12, window start=6 (maxItems=7)
+  for (let i = 0; i < 6; i++) press('up')   // selected=6, top of the same window
+  const after = screen()
+  assert.ok(after.includes('/n06'), 'cursor at the top of the scrolled window')
+  assert.ok(!after.includes('/n00'), 'window does not jump back to the first page')
+})
+
 test('command-palette: wrap from last item back to first restores the top of the list', () => {
   const { app, out, stdin } = makeApp(12)
   const commands = Array.from({ length: 20 }, (_, i) => ({

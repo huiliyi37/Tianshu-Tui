@@ -156,6 +156,20 @@ describe('renderCommandPalette', () => {
     assert.ok(!/↓:\d+/.test(footerBottom), 'no ↓:N overflow at end')
   })
 
+  it('↑ inside a scrolled viewport keeps the window still', () => {
+    // Window already starts at 10 (items 10..19). selected=12 is inside it, so
+    // ↑ must move the cursor only — not re-pin the selection to the last row.
+    const lines = renderCommandPalette(
+      { commands: manyCommands, selectedIndex: 12, scrollOffset: 10 },
+      60, 15, theme,
+    ).map(stripAnsi)
+    assert.ok(lines.some(l => l.includes('/c10')), 'window stays at previous start')
+    assert.ok(!lines.some(l => l.includes('/c03')), 'does not jump back to pin-to-bottom')
+    const selectedLine = lines.find(l => l.includes('/c12'))
+    assert.ok(selectedLine?.includes('>'), 'cursor stays on /c12')
+    assert.equal(lines.filter(l => l.includes('>')).length, 1, 'exactly one cursor')
+  })
+
   it('out-of-range selectedIndex still highlights the last command', () => {
     const lines = renderCommandPalette(
       { commands: manyCommands, selectedIndex: 99 },

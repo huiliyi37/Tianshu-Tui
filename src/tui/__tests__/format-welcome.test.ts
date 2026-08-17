@@ -265,10 +265,18 @@ test('home 下的 cwd 缩写为 ~', () => {
 
 test('上手行按框宽贪心装填，窄框只留装得下的条目', () => {
   const wide = strip(boxOf(render({ columns: 100 }))[7]!)
-  assert.ok(wide.includes('/init') && wide.includes('/domain') && wide.includes('/help'), '宽框三条齐上')
+  assert.ok(wide.includes('/init') && wide.includes('/domain') && wide.includes('/help'), '宽框斜杠命令齐上')
+  assert.ok(wide.includes('ctrl+p'), '宽框露出独立的 ctrl+p 引导')
   const narrow = strip(boxOf(render({ columns: 56 }))[7]!)
   assert.ok(narrow.includes('/init'), '窄框保留第一条')
   assert.ok(!narrow.includes('/help'), '装不下的条目整条略去，不截半句')
+})
+
+test('ctrl+p 与斜杠命令同走 brandColor，说明走 muted', () => {
+  const joined = render({ columns: 120 }).join('\n')
+  assert.ok(joined.includes(color('ctrl+p', theme.brandColor)), 'ctrl+p 用 brandColor，与 /init 同档')
+  assert.ok(joined.includes(color('/init', theme.brandColor)), '/init 用 brandColor')
+  assert.ok(joined.includes(color('命令面板', theme.muted)), '说明文字仍走 muted')
 })
 
 // ── 降级 ────────────────────────────────────────────────────────────

@@ -110,7 +110,7 @@ import { parseMissionDraft, shouldPreviewContract, formatContractPreview, type M
 import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../width.js'
 import { boxCharsFor, boxInnerWidth } from '../box-chars.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderDomainGenesisCard, genesisCardMaxScroll, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderInitFlow } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, followListWindow, renderChronicle, renderTasks, renderDomainPicker, renderDomainGenesisCard, genesisCardMaxScroll, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderInitFlow } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData, InitOverlayData } from '../format/overlay.js'
 import { ConnectFlow, DIY_PENDING_KEY_REF, type ConnectCommit, type ConnectProviderRef, type ConnectStepResult } from '../connect-flow.js'
 import { VisionOnboardingFlow, type VisionCandidate, type VisionOnboardingRequest, type VisionOnboardingResult } from '../vision-onboarding-flow.js'
@@ -6901,11 +6901,19 @@ export class TuiApp {
       },
     })
 
-    // Command palette — selectedIndex 由 overlayNav 注入
+    // Command palette — selectedIndex / scrollOffset 由 overlayNav 注入，渲染时跟随选中项
     this.overlay.register('command-palette', {
       render: (_w, _h) => {
         const data = overlayData?.paletteCommands?.() ?? { commands: [], selectedIndex: 0 }
-        return renderCommandPalette({ ...data, selectedIndex: this.overlayController.nav().paletteIndex, searchText: this.overlayController.getQuery() || data.searchText }, this.columns, this.rows, this.theme)
+        const nav = this.overlayController.nav()
+        const maxItems = Math.max(0, this.rows - 5)
+        nav.paletteScroll = followListWindow(nav.paletteIndex, data.commands.length, maxItems, nav.paletteScroll)
+        return renderCommandPalette({
+          ...data,
+          selectedIndex: nav.paletteIndex,
+          scrollOffset: nav.paletteScroll,
+          searchText: this.overlayController.getQuery() || data.searchText,
+        }, this.columns, this.rows, this.theme)
       },
     })
 

@@ -324,17 +324,23 @@ export interface PaletteData {
   commands: PaletteCommand[]
   selectedIndex: number
   searchText?: string
+  /** Previous viewport start. ↑ moves the cursor inside the window;
+   *  the window only shifts when the selection would leave it. */
+  scrollOffset?: number
 }
 
 /**
- * Keep selectedIndex inside a viewport of maxVisible rows.
- * Stateless: once the selection leaves the first page it sits on the last
- * visible row (Codex ensure_selected_visible / slash-hint follow-selection).
+ * Keep `selected` inside a viewport of `maxVisible` rows, given the previous
+ * window start. Matches Codex `ensure_selected_visible`.
  */
-function listWindowOffset(selected: number, count: number, maxVisible: number): number {
+export function followListWindow(selected: number, count: number, maxVisible: number, scroll = 0): number {
   if (maxVisible <= 0 || count <= maxVisible) return 0
   const sel = Math.max(0, Math.min(selected, count - 1))
-  return Math.max(0, Math.min(sel - maxVisible + 1, count - maxVisible))
+  const maxScroll = count - maxVisible
+  let start = Math.max(0, Math.min(scroll, maxScroll))
+  if (sel < start) start = sel
+  else if (sel >= start + maxVisible) start = sel - maxVisible + 1
+  return Math.max(0, Math.min(start, maxScroll))
 }
 
 /**
@@ -353,7 +359,7 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
   const maxItems = Math.max(0, height - 5) // border + title + footer + border = 4; +1 safety
   const count = data.commands.length
   const selected = count === 0 ? -1 : Math.max(0, Math.min(data.selectedIndex, count - 1))
-  const scrollOffset = listWindowOffset(Math.max(0, selected), count, maxItems)
+  const scrollOffset = followListWindow(Math.max(0, selected), count, maxItems, data.scrollOffset ?? 0)
   const visible = data.commands.slice(scrollOffset, scrollOffset + maxItems)
   const overflowAbove = scrollOffset
   const overflowBelow = count - scrollOffset - visible.length
