@@ -327,6 +327,17 @@ export interface PaletteData {
 }
 
 /**
+ * Keep selectedIndex inside a viewport of maxVisible rows.
+ * Stateless: once the selection leaves the first page it sits on the last
+ * visible row (Codex ensure_selected_visible / slash-hint follow-selection).
+ */
+function listWindowOffset(selected: number, count: number, maxVisible: number): number {
+  if (maxVisible <= 0 || count <= maxVisible) return 0
+  const sel = Math.max(0, Math.min(selected, count - 1))
+  return Math.max(0, Math.min(sel - maxVisible + 1, count - maxVisible))
+}
+
+/**
  * 渲染 CommandPalette overlay（命令面板）。
  */
 export function renderCommandPalette(data: PaletteData, width: number, height: number, theme: RivetTheme): string[] {
@@ -340,11 +351,15 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
   lines.push(formatTitleLeft(title, width, theme))
 
   const maxItems = height - 5 // border + title + footer + border = 4; +1 safety
-  const visible = data.commands.slice(0, maxItems)
+  const count = data.commands.length
+  const scrollOffset = listWindowOffset(data.selectedIndex, count, maxItems)
+  const visible = data.commands.slice(scrollOffset, scrollOffset + maxItems)
+  const overflowAbove = scrollOffset
+  const overflowBelow = count - scrollOffset - visible.length
 
   for (let i = 0; i < visible.length; i++) {
     const cmd = visible[i]!
-    const isSelected = i === data.selectedIndex
+    const isSelected = scrollOffset + i === data.selectedIndex
     const prefix = isSelected
       ? color(CURSOR, theme.primary, { bold: true })
       : ' '
@@ -368,7 +383,10 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter(compactHints([['↑↓', '选择'], ['Enter', '执行'], ['Esc', '取消']]), width, theme, 'subtle'))
+  const hints: [string, string][] = [['↑↓', '选择'], ['Enter', '执行'], ['Esc', '取消']]
+  if (overflowAbove > 0) hints.unshift(['↑', String(overflowAbove)])
+  if (overflowBelow > 0) hints.push(['↓', String(overflowBelow)])
+  lines.push(formatFooter(compactHints(hints), width, theme, 'subtle'))
   lines.push(formatBottomBorder(width, theme, 'subtle'))
 
   return lines
