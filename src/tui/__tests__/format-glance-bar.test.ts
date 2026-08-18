@@ -35,7 +35,7 @@ describe('formatGlanceLeft cwd display', () => {
       branch: 'main',
       cwd: '/Users/test/app',
     }), theme))
-    assert.match(out, / main/, 'branch shows with git glyph')
+    assert.match(out, /⎇ main/, 'branch shows with git glyph')
     assert.match(out, /\/Users\/test\/app/, 'cwd should appear after branch')
   })
 
@@ -75,8 +75,17 @@ describe('formatGlanceLeft cwd display', () => {
     const out = stripAnsi(formatGlanceLeft(baseInput({
       branch: 'main',
     }), theme))
-    assert.match(out, / main/, 'branch shows with git glyph')
+    assert.match(out, /⎇ main/, 'branch shows with git glyph')
     assert.equal(out.includes('~'), false, 'no cwd part when undefined')
+  })
+
+  it('prefixes long branch names with git glyph so they read as git, not leftover chrome', () => {
+    const out = stripAnsi(formatGlanceLeft(baseInput({
+      branch: 'feat/v2.4-hardening',
+      cwd: 'D:\\Tianshu-Tui\\desktop-widget',
+    }), theme))
+    assert.match(out, /⎇ feat\/v2\.4-hardening/)
+    assert.ok(out.includes('desktop-widget'))
   })
 
   it('shows neither branch nor cwd when both undefined', () => {

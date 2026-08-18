@@ -163,9 +163,9 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
   const narrow = input.narrow ?? input.width < 60
   const domainGlyph = input.domainGlyph ?? ''
   const domainLabel = input.domainName ?? '天枢'
-  // 分支带 git 符号——视觉上更醒目，是开发高频关注的信息，用 secondary 中亮色
-  // （比此前的 dim 灰更突出，与星域 primary 形成层次）。
-  const branchPart = !narrow && input.branch ? ` ${input.branch}` : ''
+  // 分支带 git 符号（与 markdown 提交标签同一 ⎇）——没有字形时
+  // `feat/v2.4-hardening` 会贴在星域名后，看起来像误修残留。
+  const branchPart = !narrow && input.branch ? ` ⎇ ${input.branch}` : ''
   // cwd 跟在分支后——辅助信息，用 dim（比 muted 略亮，与分支 secondary 形成层次）。
   // 窄终端（<60列）不显示避免挤爆。
   const cwdPart = !narrow && input.cwd ? ` ${shortenCwd(input.cwd)}` : ''

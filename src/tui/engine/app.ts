@@ -5673,8 +5673,13 @@ export class TuiApp {
   /**
    * 动态区高度预算（display rows）。renderLive 把动态段垫高/截断到恰好该值。
    *
-   * 活动期与空闲期同口径：取「出现过的最大动态高度」，封顶 `ACTIVITY_ROWS_CAP`，
-   * 只涨不缩。live region 总高度单调不降，输入框屏幕坐标于是稳定。
+   * 高水位记的是 **live region 总高度**（动态 + chrome），不是只记动态段。
+   * slash 提示、权限行、todo 面板都在 chrome：只钉动态段时，chrome 一关总高度
+   * 就掉，输入框上跳——用户看到「有时贴底、有时又浮起来」。chrome 关掉后用
+   * 动态垫行补差额，总高度只涨不缩，输入框屏幕坐标才稳。
+   *
+   * 封顶 `liveMaxRowsFor`（与 LiveEngine.maxRows 同口径）。不再额外减 2：
+   * 那 2 行会在 visor 贴满时变成输入框底下的黑洞。
    *
    * 高度一旦缩小，相对定位下就是输入框上跳——`clearForCommit` 按旧高度擦到屏末，
    * 写回的 commit 正文 + 新 region 填不满，差额留成屏底黑洞。而空闲期动态内容
@@ -5683,7 +5688,7 @@ export class TuiApp {
    * 之间往返一次。反过来空闲期按 ceiling 恒垫满（更早的实现）也只是把这一跳挪到
    * 下一轮提交时刻，同样弹，且把刚提交的正文顶出可视区。
    *
-   * 代价：稳态下输入框上方保留「本会话用过的最大动态高度」那么多空白，它是下一轮
+   * 代价：稳态下输入框上方保留「本会话用过的最大 live 高度」那么多空白，它是下一轮
    * 的预留位——内容到来时原地填入、输入框不动，正是定高视口要买的东西。不跳与
    * 空白是同一件事的两面：高度恒定 ⟺ 空白 = 峰值 − 当前内容，两者都要就只能把
    * 峰值本身压小（进行中工具卡每个占「标题 + 末 3 行输出」，并发几个就二十行）。
@@ -5697,20 +5702,18 @@ export class TuiApp {
    */
   private getDynamicBudget(chromeRows: number, dynamicRows: number): number {
     if (this.state.phase === 'idle' && this.state.turnNumber === 0) return 0
-    const terminalRows = this.rows || 24
-    const raw = terminalRows - chromeRows - 2
-    // 上界 = min(不超屏, liveMaxRows - chromeRows)，与 LiveEngine 同口径。
-    const ceiling = Math.max(0, Math.min(raw, liveMaxRowsFor(terminalRows) - chromeRows))
-    this.dynamicRowsHighWater = Math.min(ceiling, Math.max(this.dynamicRowsHighWater, dynamicRows))
-    return this.dynamicRowsHighWater
+    const cap = liveMaxRowsFor(this.rows || 24)
+    const total = dynamicRows + chromeRows
+    this.liveRowsHighWater = Math.min(cap, Math.max(this.liveRowsHighWater, total))
+    return Math.max(0, this.liveRowsHighWater - chromeRows)
   }
 
   /**
-   * 动态段高水位（display rows），跨轮保留。曾在 `setPhase('idle')` 归零以免
-   * 「一次长 thinking 把之后每轮都垫高」，但归零即高度回缩，而回缩就是输入框
-   * 上跳——空白换稳定是这里刻意做的取舍，上限见 `ACTIVITY_ROWS_CAP`。
+   * live region 总高度高水位（display rows = 动态 + chrome），跨轮保留。
+   * 曾在 `setPhase('idle')` 归零以免「一次长 thinking 把之后每轮都垫高」，
+   * 但归零即高度回缩，而回缩就是输入框上跳——空白换稳定是这里刻意做的取舍。
    */
-  private dynamicRowsHighWater = 0
+  private liveRowsHighWater = 0
 
   /**
    * @file 节点 exists 诊断（按输入值缓存——同值不重复 existsSync）。
@@ -6490,9 +6493,9 @@ export class TuiApp {
       lines = lines.slice(chromeStart)
       chromeStart = 0
     } else {
-      // ── 活动期定高视口：动态段恒定占位（不足垫空行、超出截最旧行），
-      //    live region 总高度逐帧不变 → 输入框在 thinking/streaming 全程钉在原位。
-      //    空闲期 budget=0 原样返回，塌回自然流。度量与 LiveEngine.rowsForLine 同口径。
+      // ── 定高视口：动态段垫到「总高度高水位 − chrome」，slash/todo 等 chrome
+      //    关掉后垫行补上，输入框不上跳。turn 0 仍 budget=0（欢迎屏不撑空白）。
+      //    度量与 LiveEngine.rowsForLine 同口径。
       let chromeRows = 0
       for (let i = chromeStart; i < lines.length; i++) {
         chromeRows += this.displayRowsFor(lines[i]!.text, cols)

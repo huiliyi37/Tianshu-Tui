@@ -22,9 +22,8 @@ describe('Unified Shell Bracket Elements', () => {
     const plain = stripAnsi(leftStr)
     assert.ok(plain.includes('✹'))
     assert.ok(plain.includes('天枢'))
-    // 64e8b56c9 起分支不再带括号（三阶色阶：星域 accent → 分支 secondary → cwd dim），
-    // 只跟在星域名后空一格。
-    assert.ok(plain.includes(' main'), plain)
+    // 64e8b56c9 起分支不再带括号；⎇ 标记 git 身份，避免长分支名贴在星域后像残留。
+    assert.ok(plain.includes('⎇ main'), plain)
     assert.ok(!plain.includes('(main)'), '括号形态已废弃')
     
     // Check custom CJK stripAnsiLen matches string-width
