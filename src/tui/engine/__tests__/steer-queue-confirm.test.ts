@@ -1,23 +1,24 @@
 /**
- * T9 steer 队列确认语义测试（问题1 回归）：
+ * T9 steer 队列语义：
  *
- * 契约（对齐 kimi-cli / codex：普通消息在 AI 输出期间只入队，turn 结束后交还用户）：
- *  1. 工具边界（onSteerDrain）不得注入普通排队消息（later 级）——消息保持排队，
- *     等待 run 结束后回填输入框、由用户再次 Enter 确认发送。
- *  2. 工具边界仍注入紧急意图（halt=now / redirect=next）——用户主动喊停/改方向
- *     的 steer 特性保留。
- *  3. run 正常结束（onTurnComplete isFinal → notifyRunSettled）后，队列残留
- *     回填输入框（⏮ 已把 N 条排队消息拉回输入框），steerBuffer 清空。
- *  4. 回填后用户再次按 Enter → 消息作为新 run 提交（onSubmit 收到）。
- *
- * RED 基线：修复前测试 1/3/4 失败（onSteerDrain 无过滤 drain 全部 + 正常结束不回填）。
+ * 契约（对齐 Claude Code：普通消息在 AI 输出期间只入队，本轮结束后自动作为下一轮发出）：
+ *  1. 工具边界（onSteerDrain）不得注入普通排队消息（later 级）——不混进当前轮的
+ *     [User guidance]，否则界面显示「已排队」实际已注入，是撒谎。
+ *  2. 工具边界仍注入紧急意图（halt=now / redirect=next）。
+ *  3. run 正常结束（onTurnComplete isFinal → notifyRunSettled）后，排队内容
+ *     自动作为新 run 发出，不回填输入框等用户再按 Enter。
+ *     agent.run() 的 finally 可能抢在 isFinal 的 await flush 之前到达，
+ *     仍须自动发出（不得因当时仍 busy 而吞掉队列）。
+ *  4. 支持多条 FIFO：先发第一条，其余留在队列；下一次 settle 再发下一条。
+ *  5. ESC 中断仍回填输入框（用户主动喊停，交还编辑权）。
+ *  6. ⏳ 已排队 条贴在输入框上方（chrome），不夹在 thinking 与工具卡之间随输出跑。
  */
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ReadStream, WriteStream } from 'node:tty'
 import { TuiApp } from '../app.js'
-import { MockOut, MockIn, stripAnsi } from './_harness.js'
+import { MockOut, MockIn, stripAnsi, makeApp as makeHarnessApp } from './_harness.js'
 
 function makeApp() {
   const out = new MockOut()
@@ -32,28 +33,29 @@ function makeApp() {
 
 const tick = () => new Promise(r => setTimeout(r, 10))
 
+function lastFrameLines(out: { chunks: string[] }): string[] {
+  const last = out.chunks[out.chunks.length - 1] ?? ''
+  return stripAnsi(last).split('\n').filter(l => l.trim() !== '')
+}
+
 // ── 契约 1: 工具边界不注入普通排队消息 ─────────────────────────
 
 test('工具边界不注入普通排队消息：later 级消息保持排队', async () => {
   const { app, stdin } = makeApp()
   app.onSubmit(() => {})
 
-  // 发起第一个 run → agentBusy = true
   app.setInput('task A')
   stdin.dataHandler!('\r')
   await tick()
   assert.equal(app.busy, true, '前置：agentBusy 应为 true')
 
-  // AI 输出中提交普通消息 → 排队
   app.setInput('note during busy')
   stdin.dataHandler!('\r')
   await tick()
   assert.ok(app.steerBuffer.hasPending(), '前置：消息应在 steer buffer 中排队')
 
-  // 模拟工具边界（agent 回调触发 onSteerDrain）
   const drained = app.callbacks.onSteerDrain?.() ?? null
 
-  // 普通消息不得被注入（保持排队等 run 结束回填）
   assert.equal(drained, null, '普通排队消息不应被格式化为 [User guidance] 注入')
   assert.equal(app.steerBuffer.hasPending(), true, '普通排队消息应留在队列')
 })
@@ -68,7 +70,6 @@ test('工具边界仍注入紧急意图（halt/redirect 即时 steer 保留）',
   stdin.dataHandler!('\r')
   await tick()
 
-  // 用户喊停 → pushNow（halt 意图，优先级 now）
   app.steerBuffer.pushNow('停')
   assert.ok(app.steerBuffer.hasPending())
 
@@ -78,38 +79,125 @@ test('工具边界仍注入紧急意图（halt/redirect 即时 steer 保留）',
   assert.equal(app.steerBuffer.hasPending(), false, 'halt 注入后队列应清空')
 })
 
-// ── 契约 3: run 正常结束后队列回填输入框 ───────────────────────
+// ── 契约 3: run 正常结束后自动发出 ─────────────────────────────
 
-test('run 正常结束后：队列残留回填输入框，steerBuffer 清空', async () => {
+test('run 正常结束后：排队内容自动作为新 run 发出，不回填输入框', async () => {
   const { app, stdin } = makeApp()
-  app.onSubmit(() => {})
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
 
-  // run A：busy 时排队一条普通消息
   app.setInput('task A')
   stdin.dataHandler!('\r')
   await tick()
-  app.setInput('note 1')
+  app.setInput('全权交由你负责！请你继续推进！')
   stdin.dataHandler!('\r')
   await tick()
   assert.ok(app.steerBuffer.hasPending(), '前置：消息应在 steer buffer 中排队')
 
-  // 结束 run A：isFinal → agentBusy 复位（main.ts 随后在 finally 调 notifyRunSettled）
   app.callbacks.onTurnComplete({ input_tokens: 100, output_tokens: 10 }, 1, true)
   await tick()
   assert.equal(app.busy, false, '前置：isFinal 后 agentBusy 应为 false')
   app.notifyRunSettled()
   await tick()
 
-  // 排队消息回填输入框，队列清空
-  assert.equal(app.getInputValue(), 'note 1', '排队消息应回填到输入框')
-  assert.equal(app.steerBuffer.hasPending(), false, '回填后 steerBuffer 应清空')
+  assert.equal(app.getInputValue(), '', '不应回填输入框')
+  assert.equal(app.steerBuffer.hasPending(), false, '发出后队列应清空')
+  assert.equal(runs.length, 2, '排队内容应自动发起新 run')
+  assert.equal(runs[1], '全权交由你负责！请你继续推进！')
   const sb = app.getScrollbackContent()
-  assert.ok(sb.includes('拉回输入框'), `scrollback 应有回填提示，实际: ${sb.slice(-200)}`)
+  assert.equal(sb.includes('拉回输入框'), false, '不应出现回填提示')
 })
 
-// ── 契约 4: 回填后再次 Enter 提交 ──────────────────────────────
+test('promise settle 抢在 isFinal flush 之前：仍自动发出，不回填', async () => {
+  const { app, stdin } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
 
-test('回填后再次 Enter：排队消息作为新 run 提交', async () => {
+  app.setInput('task A')
+  stdin.dataHandler!('\r')
+  await tick()
+  app.setInput('全权交由你负责！请你继续推进！')
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.ok(app.steerBuffer.hasPending())
+
+  // 生产顺序：onTurnComplete(isFinal) 先 await flush（仍 busy），
+  // agent.run() finally 立刻 notifyRunSettled。
+  app.callbacks.onTurnComplete({ input_tokens: 100, output_tokens: 10 }, 1, true)
+  app.notifyRunSettled()
+  await tick()
+
+  assert.equal(app.getInputValue(), '', '不应回填输入框')
+  assert.equal(app.steerBuffer.hasPending(), false, '发出后队列应清空')
+  assert.equal(runs.length, 2, 'finally 抢跑时排队内容仍应自动发出')
+  assert.equal(runs[1], '全权交由你负责！请你继续推进！')
+})
+
+// ── 契约 4: 多条 FIFO ──────────────────────────────────────────
+
+test('多条排队 FIFO：settle 先发第一条，其余留队等下一轮 settle', async () => {
+  const { app, stdin } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  app.setInput('task A')
+  stdin.dataHandler!('\r')
+  await tick()
+  app.setInput('note 1')
+  stdin.dataHandler!('\r')
+  await tick()
+  app.setInput('note 2')
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.equal(app.steerBuffer.getPending().length, 2)
+
+  app.callbacks.onTurnComplete({ input_tokens: 10, output_tokens: 1 }, 1, true)
+  await tick()
+  app.notifyRunSettled()
+  await tick()
+
+  assert.equal(runs[1], 'note 1', '先发第一条')
+  assert.deepEqual([...app.steerBuffer.getPending()], ['note 2'], '第二条留队')
+  assert.equal(app.busy, true, '自动发出后应进入新 run')
+
+  app.callbacks.onTurnComplete({ input_tokens: 10, output_tokens: 1 }, 2, true)
+  await tick()
+  app.notifyRunSettled()
+  await tick()
+
+  assert.equal(runs[2], 'note 2', '下一轮 settle 再发第二条')
+  assert.equal(app.steerBuffer.hasPending(), false)
+})
+
+// ── 契约 5: ESC 仍回填 ─────────────────────────────────────────
+
+test('ESC abort settle：队列回填输入框，不自动发出', async () => {
+  const { app, stdin } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+  let agentRunning = false
+  app.setAgentRunningProbe(() => agentRunning)
+
+  app.setInput('task A')
+  stdin.dataHandler!('\r')
+  await tick()
+  agentRunning = true
+  app.setInput('note 1')
+  stdin.dataHandler!('\r')
+  await tick()
+
+  app.callbacks.onAbort()
+  await tick()
+  agentRunning = false
+  app.notifyRunSettled()
+  await tick()
+
+  assert.equal(runs.length, 1, 'ESC 后不应自动发出排队内容')
+  assert.equal(app.getInputValue(), 'note 1', '应回填输入框交还编辑')
+  assert.equal(app.steerBuffer.hasPending(), false)
+})
+
+test('自然结束时输入框有草稿：不自动发出，队列保留', async () => {
   const { app, stdin } = makeApp()
   const runs: string[] = []
   app.onSubmit((t) => { runs.push(t) })
@@ -121,19 +209,58 @@ test('回填后再次 Enter：排队消息作为新 run 提交', async () => {
   stdin.dataHandler!('\r')
   await tick()
 
-  // 结束 run A → 回填
-  app.callbacks.onTurnComplete({ input_tokens: 100, output_tokens: 10 }, 1, true)
+  app.setInput('草稿')
+  app.callbacks.onTurnComplete({ input_tokens: 10, output_tokens: 1 }, 1, true)
   await tick()
   app.notifyRunSettled()
   await tick()
-  assert.equal(app.getInputValue(), 'note 1', '前置：回填已完成')
 
-  // 用户再次 Enter
+  assert.equal(runs.length, 1, '有草稿时不自动发出')
+  assert.equal(app.getInputValue(), '草稿')
+  assert.deepEqual([...app.steerBuffer.getPending()], ['note 1'])
+})
+
+// ── 契约 6: banner 贴输入框 ─────────────────────────────────────
+
+test('⏳ 已排队条贴在输入框上方，不夹在 thinking 与工具卡之间', async () => {
+  const { app, out, stdin } = makeHarnessApp({ cols: 80, rows: 24 })
+  app.onSubmit(() => {})
+
+  app.setInput('task A')
   stdin.dataHandler!('\r')
   await tick()
+  app.callbacks.onThinkingDelta('思考中：分析代码结构。\n')
+  await tick()
+  app.setInput('全权交由你负责！请你继续推进！')
+  stdin.dataHandler!('\r')
+  await tick()
+  app.setInput('第二条排队')
+  stdin.dataHandler!('\r')
+  await tick()
+  app.callbacks.onToolUse('t1', 'apply_edit', { path: 'src/a.ts', replacement: 'foo' })
+  await tick()
 
-  assert.equal(runs.length, 2, '回填内容应作为新 run 提交')
-  assert.equal(runs[1], 'note 1', '提交内容应为排队消息')
-  const sb = app.getScrollbackContent()
-  assert.ok(stripAnsi(sb).includes('note 1'), 'scrollback 应包含回填消息气泡')
+  const lines = lastFrameLines(out)
+  const bannerIdx = lines.findIndex(l => l.includes('已排队'))
+  const toolIdx = lines.findIndex(l => /(?:^|\s)-\s*Tool\b|apply_edit|src\/a\.ts/.test(l))
+  const topIdx = lines.findIndex(l => /^[╭┌]/.test(l))
+  assert.ok(bannerIdx >= 0, `应渲染已排队条，帧: ${lines.join(' | ')}`)
+  assert.ok(toolIdx >= 0, `应渲染工具卡，帧: ${lines.join(' | ')}`)
+  assert.ok(topIdx >= 0, `应有输入框顶边，帧: ${lines.join(' | ')}`)
+  assert.ok(bannerIdx < topIdx, '已排队条应在输入框上方')
+  assert.ok(
+    lines[bannerIdx]!.includes('全权交由你负责'),
+    `预览应是 FIFO 下一条（第一条），帧: ${lines[bannerIdx]}`,
+  )
+  assert.ok(lines[bannerIdx]!.includes('+1'), `多条应显示 +N，帧: ${lines[bannerIdx]}`)
+  if (toolIdx >= 0) {
+    assert.ok(
+      bannerIdx > toolIdx,
+      `已排队条不应夹在工具卡之上（banner=${bannerIdx} tool=${toolIdx}）：${lines.join(' | ')}`,
+    )
+  }
+  assert.ok(
+    topIdx - bannerIdx <= 3,
+    `已排队条应贴着输入框（gap=${topIdx - bannerIdx}）：${lines.join(' | ')}`,
+  )
 })

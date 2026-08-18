@@ -171,6 +171,18 @@ export class SteerBuffer {
     return entry?.text ?? null
   }
 
+  /**
+   * 取出队列头部一条的原文（drain 序：优先级再 FIFO），不包 [User guidance]。
+   * 给 run 结束后自动发出下一条用——drain() 的注入格式不能当新 prompt。
+   */
+  shift(): string | null {
+    if (this.pending.length === 0) return null
+    const first = this.sorted()[0]!
+    this.pending = this.pending.filter(entry => entry.id !== first.id)
+    this.notify()
+    return first.text
+  }
+
   /** Take back the most recently queued message (Up-arrow recall). */
   popLast(): string | null {
     if (this.pending.length === 0) return null

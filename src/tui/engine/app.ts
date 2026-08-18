@@ -480,12 +480,19 @@ export class TuiApp {
   /**
    * ESC 回填资格：仅用户主动中断（ESC/Ctrl+C，非 watchdog/convergence 守护）
    * 开启的收尾窗口才置位。settle 时若 steer 队列仍有排队指引且输入框为空，
-   * 把排队内容拉回输入框交还用户（Claude Code 风格，见 notifyRunSettled）。
+   * 把排队内容拉回输入框交还用户（仅用户主动 ESC；自然结束走自动发出）。
    */
   private abortSteerBackfill = false
   /** 守护中断（watchdog/convergence）pending 标志：settle 时消费，用于区分
    *  「run 自然结束」与「守护中断自动续跑」——后者不回填排队队列。 */
   private guardianAbortPending = false
+  /**
+   * handleTurnComplete 在飞计数。isFinal 先 await flush，agent.run() 的 finally
+   * 会抢先 notifyRunSettled；此时不能立刻开新 run，否则会冲掉尚未 finalize 的
+   * writer。settle 只置 pendingQueueDispatch，等 complete 收尾后再发出。
+   */
+  private turnCompleteInFlight = 0
+  private pendingQueueDispatch = false
   /**
    * 查询 agent 是否仍有未 settle 的 run（main.ts 注入 → `ctx.agent.isRunning()`）。
    *
@@ -1390,10 +1397,8 @@ export class TuiApp {
       },
       onIntentNote: (intent) => this.handleIntentNote(intent),
       onAutonomyCheckpoint: (info) => this.handleAutonomyCheckpoint(info),
-      // 工具边界只注入紧急意图（halt=now / redirect=next）：普通消息（later：
-      // guidance/question/augment/ack）留在队列等 run 结束后回填输入框、由用户
-      // 再次 Enter 确认发送——与「⏳ 已排队」文案一致（此前无过滤 drain 会把
-      // 排队中的普通消息自动注入给 AI，界面显示排队、实际已发出，是撒谎）。
+      // 工具边界只注入紧急意图（halt=now / redirect=next）：普通消息（later）
+      // 留在队列，等本轮结束后自动作为下一轮发出——不混进当前轮 [User guidance]。
       onSteerDrain: () => this.steerBuffer.drain('next'),
       onDelegationActivity: (activity) => this.handleDelegationActivity(activity),
     }
@@ -1702,17 +1707,14 @@ export class TuiApp {
     const pending = this.pendingSubmitAfterAbort
     if (!pending) {
       // 无补发消息的 settle：
-      //  - 用户主动 ESC 的收尾回填（Claude Code 风格）；
-      //  - run 自然结束（isFinal 已复位 busy）同样回填——AI 输出期间排队的普通
-      //    消息不再在工具边界自动注入（onSteerDrain 只 drain 紧急意图），run
-      //    结束即交还用户确认（再次 Enter 发送），与 ESC 路径同语义；
-      //  - 守护中断（watchdog/convergence）自动续跑：guardian 时不回填，队列
-      //    保留等续跑 run 结束后的 settle 再回填，或下次提交归并。
-      // 有补发消息时新 run 即将发起，队列随它在工具边界 drain，不动。
+      //  - 用户主动 ESC：回填输入框交还编辑（不自动发出）；
+      //  - run 自然结束：排队内容自动作为下一轮发出（Claude Code 队列）；
+      //  - 守护中断（watchdog/convergence）自动续跑：不消费队列。
       if (backfill) {
         this.backfillSteerToInput()
-      } else if (!guardian && !this.agentBusy) {
-        this.backfillSteerToInput()
+      } else if (!guardian) {
+        this.pendingQueueDispatch = true
+        this.flushPendingQueueDispatch()
       }
       return
     }
@@ -1730,8 +1732,7 @@ export class TuiApp {
   }
 
   /**
-   * ESC settle 回填（Claude Code 风格）：run 已终结，steer 队列再没有活跃
-   * run 能在工具边界 drain 它——把排队指引按序拼回输入框，交还用户改发/重发。
+   * ESC settle：run 已终结，把排队指引按序拼回输入框，交还用户改发/重发。
    * 输入框已有草稿则不动（不抢用户正在敲的内容），队列留待下次提交归并。
    * 消费用 getPendingEntries()+clear() 而非 drain()：drain 会把文本包进
    * [User guidance] 注入格式，这里要的是原文（契约见 esc-abort-steer-preserve 测试）。
@@ -1749,6 +1750,36 @@ export class TuiApp {
       })
       this.state.committedCount++
     })
+    this.renderLive()
+  }
+
+  /**
+   * 自然结束 settle：把队列头部一条作为新 run 发出（气泡在入队时已 commit）。
+   * 多条 FIFO 留在 buffer，等这一轮再 settle。输入框有草稿则不动，避免抢输入。
+   *
+   * 必须等 handleTurnComplete 收尾且 TUI 已 idle：isFinal 的 await flush
+   * 与 agent.run() finally 存在竞态，中途开新 run 会冲掉 writer/renderer。
+   */
+  private flushPendingQueueDispatch(): void {
+    if (!this.pendingQueueDispatch) return
+    if (this.turnCompleteInFlight > 0) return
+    if (this.agentBusy) return
+    this.pendingQueueDispatch = false
+    this.dispatchQueuedAfterSettle()
+  }
+
+  private dispatchQueuedAfterSettle(): void {
+    if (this.inputLine.value.trim().length > 0) return
+    const text = this.steerBuffer.shift()
+    if (!text) return
+    this.blockWriter.discard()
+    this.streamRenderer.reset()
+    this.streamRenderController.assistantHeaderDone = false
+    this.agentBusy = true
+    this.todosWrittenThisRun = false
+    this.state.turnStartMs = Date.now()
+    this.streamRenderController.lastActivityMs = Date.now()
+    this.onSubmitCallback?.(text)
     this.renderLive()
   }
 
@@ -5201,6 +5232,8 @@ export class TuiApp {
   }
 
   private async handleTurnComplete(usage: Partial<Usage>, turnNumber: number, isFinal: boolean): Promise<void> {
+    this.turnCompleteInFlight++
+    try {
     this.state.turnNumber = turnNumber
 
     // A completed turn (even intermediate) is forward progress: the stream
@@ -5280,6 +5313,10 @@ export class TuiApp {
       this.setPhase('waiting')
       this.writeBatcher.flushNow()
     }
+    } finally {
+      this.turnCompleteInFlight--
+      this.flushPendingQueueDispatch()
+    }
   }
 
   /**
@@ -5330,6 +5367,7 @@ export class TuiApp {
         trailingNewline: true,
       })
     })
+    this.flushPendingQueueDispatch()
   }
 
   /**
@@ -5990,25 +6028,7 @@ export class TuiApp {
       lines.push({ text: line })
     }
 
-    // 2b. 队列预览：⏳ 已排队: "最后一条前 60 字符"（↑ 取回编辑）。
-    //     全宽反色条（CC 对标）：排队 prompt 是「已提交但未生效」的用户输入，
-    //     单行 muted 提示存在感不足，容易被误认为已丢失。
-    //
-    //     「已排队」只在真有活跃 run 时才成立——steer 队列靠工具边界 drain，没有
-    //     活跃 run 就永远注入不了。此时仍显示「已排队」是界面在撒谎，用户会以为
-    //     消息已送达而一直等。无 run 时如实说它还没发出，并给出可操作的下一步。
-    if (this.steerBuffer.hasPending()) {
-      const pending = this.steerBuffer.getPending()
-      const last = pending[pending.length - 1]!
-      const preview = last.length > 60 ? `${last.slice(0, 60)}…` : last
-      const more = pending.length > 1 ? `（+${pending.length - 1} 条）` : ''
-      const deliverable = this.agentBusy && !this.isAgentRunSettling()
-      lines.push({
-        text: this.clampLine(deliverable
-          ? this.renderBanner(`⏳ 已排队: "${preview}"${more} · ↑ 取回编辑`, this.theme.secondary)
-          : this.renderBanner(`⏸ 未发出: "${preview}"${more} · 回车随下条一并发送 · ↑ 取回编辑`, this.theme.warning)),
-      })
-    }
+    // 2b. 队列预览已下移到输入框 chrome（贴底，不夹在 thinking/工具卡之间）。
 
     // 2b2. 活动源归一：fleet / council / team / todo 四源投影到 ActivityStore，
     //      经 formatActivityBand 输出 chrome 段统一 band（替代之前散落三处的 push）。
@@ -6464,6 +6484,21 @@ export class TuiApp {
           lines.push({ text: this.clampLine(`${marker}${name}`) })
         }
         lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
+      }
+
+      // ⏳ 已排队：贴在输入框顶边正上方（chrome），不放进动态段——否则会夹在
+      // thinking / 工具卡之间随输出上漂。多条时 footer 显示 +N。
+      if (this.steerBuffer.hasPending()) {
+        const next = this.steerBuffer.getPendingEntries()[0]!
+        const pendingCount = this.steerBuffer.getPending().length
+        const preview = next.text.length > 60 ? `${next.text.slice(0, 60)}…` : next.text
+        const more = pendingCount > 1 ? `（+${pendingCount - 1} 条）` : ''
+        const deliverable = this.agentBusy && !this.isAgentRunSettling()
+        lines.push({
+          text: this.clampLine(deliverable
+            ? this.renderBanner(`⏳ 已排队: "${preview}"${more} · ↑ 取回编辑`, this.theme.secondary)
+            : this.renderBanner(`⏸ 未发出: "${preview}"${more} · 将在本轮结束后自动发出 · ↑ 取回编辑`, this.theme.warning)),
+        })
       }
 
       // 输入框：chrome 段最后一行（滚动到底时贴屏幕底部，Claude Code 风格）。

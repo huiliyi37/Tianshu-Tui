@@ -199,4 +199,15 @@ describe('SteerBuffer', () => {
     assert.equal(e.intent, 'redirect')
     assert.equal(e.priority, 'next')
   })
+
+  it('shift 按 FIFO 取出原文，不包 [User guidance]', () => {
+    const buf = new SteerBuffer()
+    buf.push('note 1')
+    buf.push('note 2')
+    assert.equal(buf.shift(), 'note 1')
+    assert.deepEqual([...buf.getPending()], ['note 2'])
+    assert.equal(buf.shift(), 'note 2')
+    assert.equal(buf.shift(), null)
+    assert.equal(buf.hasPending(), false)
+  })
 })
