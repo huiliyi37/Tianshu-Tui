@@ -30,13 +30,14 @@ describe('shortenCwd', () => {
 })
 
 describe('formatGlanceLeft cwd display', () => {
-  it('shows branch + cwd on wide terminal', () => {
+  it('shows cwd on wide terminal and omits git branch', () => {
     const out = stripAnsi(formatGlanceLeft(baseInput({
       branch: 'main',
       cwd: '/Users/test/app',
     }), theme))
-    assert.match(out, /⎇ main/, 'branch shows with git glyph')
-    assert.match(out, /\/Users\/test\/app/, 'cwd should appear after branch')
+    assert.equal(out.includes('main'), false, 'git branch is not shown on the input chrome')
+    assert.equal(out.includes('⎇'), false, 'no git glyph')
+    assert.match(out, /\/Users\/test\/app/, 'cwd should still appear')
   })
 
   it('shows shortened cwd (~ prefix)', () => {
@@ -46,45 +47,45 @@ describe('formatGlanceLeft cwd display', () => {
     }), theme))
     // home 被替换为 ~（跨平台）
     assert.ok(out.includes('~/projects/foo'), `expected ~/projects/foo in: ${out}`)
+    assert.equal(out.includes('dev'), false, 'branch omitted')
   })
 
-  it('uses three-tier color hierarchy (accent > secondary > dim)', () => {
-    // 分支用 git 符号增强醒目度；色阶 primary/accent > secondary > dim
+  it('uses accent for domain and dim for cwd (no branch tier)', () => {
     const out = formatGlanceLeft(baseInput({
       branch: 'feature',
       cwd: '/tmp/proj',
     }), theme)
-    // 含三种 ANSI 色码段（星域 accent + 分支 secondary + cwd dim）
     const colorSegments = out.match(/\x1b\[[0-9;]*m/g) ?? []
-    assert.ok(colorSegments.length >= 6, `expect >=6 color codes (open+close for 3 tiers), got ${colorSegments.length}`)
+    assert.ok(colorSegments.length >= 4, `expect >=4 color codes (open+close for domain + cwd), got ${colorSegments.length}`)
   })
 
-  it('hides branch and cwd on narrow terminal (<60 cols)', () => {
+  it('hides cwd on narrow terminal (<60 cols)', () => {
     const out = stripAnsi(formatGlanceLeft(baseInput({
       width: 40,
       branch: 'main',
       cwd: '/Users/test/app',
     }), theme))
-    // 窄终端时分支和 cwd 都不显示（只留星域名），避免挤爆
-    assert.equal(out.includes(' main'), false, 'branch hidden when narrow')
+    assert.equal(out.includes('main'), false, 'branch hidden')
     assert.equal(out.includes('/Users/test/app'), false, 'cwd hidden when narrow')
     assert.ok(out.includes('天枢'), 'domain name always shows')
   })
 
-  it('shows branch only when cwd is undefined', () => {
+  it('does not show branch when cwd is undefined', () => {
     const out = stripAnsi(formatGlanceLeft(baseInput({
       branch: 'main',
     }), theme))
-    assert.match(out, /⎇ main/, 'branch shows with git glyph')
-    assert.equal(out.includes('~'), false, 'no cwd part when undefined')
+    assert.equal(out.includes('main'), false)
+    assert.equal(out.includes('⎇'), false)
+    assert.ok(out.includes('天枢'))
   })
 
-  it('prefixes long branch names with git glyph so they read as git, not leftover chrome', () => {
+  it('does not paint long branch names on the input chrome', () => {
     const out = stripAnsi(formatGlanceLeft(baseInput({
       branch: 'feat/v2.4-hardening',
       cwd: 'D:\\Tianshu-Tui\\desktop-widget',
     }), theme))
-    assert.match(out, /⎇ feat\/v2\.4-hardening/)
+    assert.equal(out.includes('feat/v2.4-hardening'), false)
+    assert.equal(out.includes('⎇'), false)
     assert.ok(out.includes('desktop-widget'))
   })
 

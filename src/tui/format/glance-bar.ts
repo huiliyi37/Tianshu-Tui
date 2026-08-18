@@ -97,9 +97,9 @@ export interface GlanceBarInput {
   /** 当前星域标识 */
   domainGlyph?: string
   domainName?: string
-  /** Git 分支名 */
+  /** Git 分支名（保留字段以兼容调用方；输入框顶边不展示）。 */
   branch?: string
-  /** 当前工作目录（~ 缩写后显示在分支后，帮助多会话/多仓库区分） */
+  /** 当前工作目录（~ 缩写后显示，帮助多会话/多仓库区分） */
   cwd?: string
   /** 模型名称 */
   modelName?: string
@@ -163,11 +163,7 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
   const narrow = input.narrow ?? input.width < 60
   const domainGlyph = input.domainGlyph ?? ''
   const domainLabel = input.domainName ?? '天枢'
-  // 分支带 git 符号（与 markdown 提交标签同一 ⎇）——没有字形时
-  // `feat/v2.4-hardening` 会贴在星域名后，看起来像误修残留。
-  const branchPart = !narrow && input.branch ? ` ⎇ ${input.branch}` : ''
-  // cwd 跟在分支后——辅助信息，用 dim（比 muted 略亮，与分支 secondary 形成层次）。
-  // 窄终端（<60列）不显示避免挤爆。
+  // cwd 用 dim。窄终端（<60列）不显示避免挤爆。git 分支不进顶边——用户不需要。
   const cwdPart = !narrow && input.cwd ? ` ${shortenCwd(input.cwd)}` : ''
 
   // 星域专属 accent 色；单色克制主题降级为 muted
@@ -176,8 +172,7 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
   const glyphPart = domainGlyph ? `${color(domainGlyph, accentColor)} ` : ''
   // worker 视图徽章：切入子代理视图时提示当前输入路由目标
   const workerPart = input.workerBadge ? ` ${color(`[${input.workerBadge}]`, theme.secondary)}` : ''
-  // 三阶色阶层次：accent(星域·最醒目) → secondary(分支·中亮) → dim(cwd·辅助)
-  return `${glyphPart}${color(domainLabel, accentColor)}${color(branchPart, theme.secondary)}${color(cwdPart, theme.dim)}${workerPart}`
+  return `${glyphPart}${color(domainLabel, accentColor)}${color(cwdPart, theme.dim)}${workerPart}`
 }
 
 /** 高占用成本提示：上下文 ≥70% 在底栏常驻建议开新会话——继续推进会触发压缩
