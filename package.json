@@ -12,13 +12,13 @@
     "ai",
     "cli"
   ],
-  "homepage": "https://github.com/huiliyi37/Tianshu-Tui#readme",
+  "homepage": "https://github.com/huiliyi37/Tianshu-harness#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/huiliyi37/Tianshu-Tui.git"
+    "url": "git+https://github.com/huiliyi37/Tianshu-harness.git"
   },
   "bugs": {
-    "url": "https://github.com/huiliyi37/Tianshu-Tui/issues"
+    "url": "https://github.com/huiliyi37/Tianshu-harness/issues"
   },
   "engines": {
     "node": ">=24"
