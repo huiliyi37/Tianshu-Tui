@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-harness?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
+  <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
   <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
   <img src="https://img.shields.io/badge/Tests-13%2C000%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
@@ -43,7 +43,7 @@ Tianshu (天枢) is a high-performance terminal coding agent runtime featuring a
 
 ### 2. Install (pick one)
 
-**A. Desktop app (ready to use)** — download from [GitHub Releases](https://github.com/huiliyi37/Tianshu-harness/releases/latest): macOS `.dmg` · Windows `.msi` · Linux `.AppImage`.
+**A. Desktop app (ready to use)** — download from [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest): macOS `.dmg` · Windows `.msi` · Linux `.AppImage`.
 
 **B. npm global install (recommended for the CLI)** — published as `tianshu-tui`, no local build needed, with auto update checks on startup:
 
@@ -55,7 +55,7 @@ rivet
 **C. Build from source**:
 
 ```bash
-git clone https://github.com/huiliyi37/Tianshu-harness.git
+git clone https://github.com/huiliyi37/Tianshu-Tui.git
 cd Tianshu-Tui
 npm install
 npm run build      # produces dist/main.js
@@ -878,9 +878,9 @@ Write only the fields you want to override; defaults are deep-merged. Full schem
 
 ## 🤝 Community & Support
 
-- **Usage questions / discussions** → [GitHub Discussions](https://github.com/huiliyi37/Tianshu-harness/discussions)
-- **Bug reports / feature requests** → [GitHub Issues](https://github.com/huiliyi37/Tianshu-harness/issues)
-- **Security vulnerabilities** → [Report privately](https://github.com/huiliyi37/Tianshu-harness/security/advisories/new) (do not open a public issue)
+- **Usage questions / discussions** → [GitHub Discussions](https://github.com/huiliyi37/Tianshu-Tui/discussions)
+- **Bug reports / feature requests** → [GitHub Issues](https://github.com/huiliyi37/Tianshu-Tui/issues)
+- **Security vulnerabilities** → [Report privately](https://github.com/huiliyi37/Tianshu-Tui/security/advisories/new) (do not open a public issue)
 - **Contributing** → See [CONTRIBUTING.md](CONTRIBUTING.md)
 - **Support guide** → See [SUPPORT.md](SUPPORT.md)
 

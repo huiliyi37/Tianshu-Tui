@@ -18,13 +18,13 @@
     "cursor",
     "agent"
   ],
-  "homepage": "https://github.com/huiliyi37/Tianshu-harness#readme",
+  "homepage": "https://github.com/huiliyi37/Tianshu-Tui#readme",
   "bugs": {
-    "url": "https://github.com/huiliyi37/Tianshu-harness/issues"
+    "url": "https://github.com/huiliyi37/Tianshu-Tui/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/huiliyi37/Tianshu-harness"
+    "url": "https://github.com/huiliyi37/Tianshu-Tui"
   },
   "engines": {
     "vscode": "^1.85.0"

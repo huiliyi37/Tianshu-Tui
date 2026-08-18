@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-harness?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
+  <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
   <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
   <img src="https://img.shields.io/badge/Tests-13%2C000%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
@@ -45,7 +45,7 @@
 
 ### 2. 安装（任选其一）
 
-**方式 A：桌面端（开箱即用）** —— 从 [GitHub Releases](https://github.com/huiliyi37/Tianshu-harness/releases/latest) 下载：macOS `.dmg` · Windows `.msi` · Linux `.AppImage`。
+**方式 A：桌面端（开箱即用）** —— 从 [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载：macOS `.dmg` · Windows `.msi` · Linux `.AppImage`。
 
 > **Windows 支持范围**：Windows 10（1809+，建议 22H2）/ Windows 11。界面渲染依赖 **WebView2 Runtime**——Win11 与多数 Win10 已预装；缺失时安装器会自动下载（离线环境可到 <https://aka.ms/webview2installer> 手动安装）。「设置 → 运行时与关于」页可查看当前 WebView2 版本。
 > **Win10 平板模式已知行为**：平板模式下切换应用会把上一个应用滑出屏幕——computer_use 的快照已做遮挡/后台自愈（PrintWindow 渲染），无需关闭平板模式。
@@ -62,7 +62,7 @@ rivet
 **方式 C：从源码构建**：
 
 ```bash
-git clone https://github.com/huiliyi37/Tianshu-harness.git
+git clone https://github.com/huiliyi37/Tianshu-Tui.git
 cd Tianshu-Tui
 npm install
 npm run build      # 生成 dist/main.js
@@ -1013,9 +1013,9 @@ rivet logs open desktop            # 打开 sidecar 日志目录（GUI 起不来
 
 ## 🤝 社区与支持
 
-- **使用问题 / 讨论** → [GitHub Discussions](https://github.com/huiliyi37/Tianshu-harness/discussions)
-- **Bug 报告 / 功能请求** → [GitHub Issues](https://github.com/huiliyi37/Tianshu-harness/issues)
-- **安全漏洞** → [私密报告](https://github.com/huiliyi37/Tianshu-harness/security/advisories/new)（不要开公开 issue）
+- **使用问题 / 讨论** → [GitHub Discussions](https://github.com/huiliyi37/Tianshu-Tui/discussions)
+- **Bug 报告 / 功能请求** → [GitHub Issues](https://github.com/huiliyi37/Tianshu-Tui/issues)
+- **安全漏洞** → [私密报告](https://github.com/huiliyi37/Tianshu-Tui/security/advisories/new)（不要开公开 issue）
 - **贡献代码** → 见 [CONTRIBUTING.md](CONTRIBUTING.md)
 - **求助指南** → 见 [SUPPORT.md](SUPPORT.md)
 

@@ -79,7 +79,7 @@ RIVET_HOME=$(mktemp -d)/rivet node tests/smoke.e2e.ts
 - 下载端点（`runtime-downloader.ts` 顺序尝试）：
   1. `https://update.plotstudio.cn/tianshu/releases/download`（CF Worker 镜像，
      白名单见 `scripts/cloudflare-update-worker/src/worker.js`）
-  2. `https://github.com/huiliyi37/Tianshu-harness/releases/download`
+  2. `https://github.com/huiliyi37/Tianshu-Tui/releases/download`
 - 插件侧三级 CLI 探测：settings `tianshu.cliPath` → PATH 上的 `rivet` →
   globalStorage 缓存的运行时（缺则带进度下载 + sha256 校验 + 解压）
 
