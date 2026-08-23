@@ -3,7 +3,7 @@ import { statSync, readFileSync } from 'node:fs'
 import { runTypeCheck, type LspCheckResult } from '../lsp/client.js'
 import type { Diagnostic } from '../lsp/diagnostics.js'
 import { loadDeclaredVerify, matchVerifyRoutes } from '../config/verify-config.js'
-import { spawnHidden } from '../tools/spawn-hidden.js'
+import { parseVerifyCommand, spawnVerifyArgv } from './verify-command.js'
 
 /**
  * Deterministic, session-independent typecheck backstop for the review gate.
@@ -319,6 +319,9 @@ export type DeclaredCommandRunner = (cwd: string, command: string) => Promise<{ 
 const DECLARED_TIMEOUT_MS = 120_000
 const OUTPUT_TAIL_CHARS = 600
 
+// 执行前强制过 parseVerifyCommand（H4 收口）：声明命令虽来自 .rivet-config.json，
+// 但模型可经编辑配置文件间接注入恶意 shell——解析失败按「无法执行」收口
+// （exit -1，同超时/崩溃语义，gate 视为验证未通过），绝不退回字符串拼 shell。
 const defaultDeclaredRunner: DeclaredCommandRunner = (cwd, command) =>
   new Promise((resolve) => {
     let out = ''
@@ -329,7 +332,12 @@ const defaultDeclaredRunner: DeclaredCommandRunner = (cwd, command) =>
       resolve({ exitCode, output: out })
     }
     try {
-      const child = spawnHidden(command, [], { cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      const argv = parseVerifyCommand(command)
+      if (!argv) {
+        settle(-1)
+        return
+      }
+      const child = spawnVerifyArgv(cwd, argv, { stdio: ['ignore', 'pipe', 'pipe'] })
       child.stdout?.on('data', (d: Buffer) => { out += d.toString() })
       child.stderr?.on('data', (d: Buffer) => { out += d.toString() })
       const timer = setTimeout(() => {

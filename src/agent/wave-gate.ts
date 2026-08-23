@@ -16,7 +16,7 @@
 
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { spawnHidden } from '../tools/spawn-hidden.js'
+import { parseVerifyCommand, spawnVerifyArgv } from './verify-command.js'
 import { gateTypecheckRunner, runChangedFilesTypecheckOutcomeMemo, typecheckGateEnabled, type TypecheckRunner } from './typecheck-gate.js'
 import { evaluateTestPresence, testPresenceGateEnabled } from './test-presence.js'
 
@@ -40,11 +40,11 @@ export interface WaveGateRecord {
   checkedAt: number
 }
 
-/** 可直接执行的验证命令白名单形状（测试/编译/类型检查）。 */
-const RUNNABLE_VERIFY_RE = /^\s*(npx?\s+(tsc|vitest|jest|tsx)\b|npm\s+(test\b|run\s+\S+)|pnpm\s+(test\b|run\s+\S+)|yarn\s+(test\b|run\s+\S+)|node\s+--test\b|cargo\s+(test|check)\b|go\s+(test|vet|build)\b|pytest\b|python\s+-m\s+pytest\b|make\s+(test|check)\b)/
-
+/** 可执行验证命令判定：能解析成安全 argv 才算（H4 收口后白名单 = token
+ *  字符集 + argv 形状双重校验，而非行首正则——`npx tsx; curl …|sh` 这类
+ *  恶意后缀不再穿透）。council-obligations 的 advisory_gate 分类同源复用。 */
 export function isRunnableVerifyCommand(command: string): boolean {
-  return RUNNABLE_VERIFY_RE.test(command)
+  return parseVerifyCommand(command) !== null
 }
 
 const gates = new Map<string, WaveGateRecord>()
@@ -84,9 +84,14 @@ export interface EvaluateWaveGateInput {
   fileExists?: (relPath: string) => boolean
 }
 
-// 异步 spawn（spawnHidden 模式，同 typecheck-gate.ts 的 declared runner）——
-// 同步 spawnSync 最长阻塞主线程 5 分钟，期间 TUI 完全无响应。
+// 异步 spawn（同 typecheck-gate.ts 的 declared runner）——同步 spawnSync 最长
+// 阻塞主线程 5 分钟，期间 TUI 完全无响应。执行前强制过 parseVerifyCommand：
+// 解析失败按不可执行收口，绝不退回字符串拼 shell。
 function defaultRunCommand(cwd: string, command: string): Promise<{ ok: boolean; detail?: string }> {
+  const argv = parseVerifyCommand(command)
+  if (!argv) {
+    return Promise.resolve({ ok: false, detail: '非白名单验证命令形状——拒绝 shell 执行' })
+  }
   return new Promise((resolvePromise) => {
     let stdout = ''
     let stderr = ''
@@ -100,7 +105,7 @@ function defaultRunCommand(cwd: string, command: string): Promise<{ ok: boolean;
       resolvePromise(result)
     }
     try {
-      const child = spawnHidden(command, [], { cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawnVerifyArgv(cwd, argv, { stdio: ['ignore', 'pipe', 'pipe'] })
       child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
       child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
       const timer = setTimeout(() => {

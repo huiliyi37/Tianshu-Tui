@@ -3,7 +3,7 @@
  * HTTP listener is up (or on first session), so /health cold-start does not pay
  * for AgentLoop / tools / Meridian / council / MCP SDK graph.
  */
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createDelegationActivityMapper } from '../tools/worker-activity-stream.js'
 import type { DelegationActivity, DelegationIdentity } from '../tools/types.js'
@@ -49,6 +49,7 @@ import type { PlanItem } from '../agent/council/council-plan.js'
 import type { CouncilPanelModel } from '../tui/council-panel-model.js'
 import type { McpManager } from '../mcp/manager.js'
 import { findProjectConfig } from '../config/manager.js'
+import { isProjectTrusted, notifyUntrustedOnce } from '../config/project-trust.js'
 import { proRegistry } from '../api/pro-registry.js'
 import { anchorsFromMessages } from '../agent/reasoning-anchors.js'
 import type { Config } from '../config/schema.js'
@@ -437,6 +438,12 @@ export function mergeProjectAgentConfig(
   try {
     const projectPath = findProjectConfig(cwd)
     if (!projectPath) return startupConfig
+    // 信任门：agent 块含 approval/unsandboxed 等授权键——未授信项目不并入
+    // （与 loadConfig Layer 3 剥离同语义；桌面端项目信任 UI 落地前的 fail-closed）。
+    if (!isProjectTrusted(dirname(projectPath))) {
+      notifyUntrustedOnce('config', dirname(projectPath))
+      return startupConfig
+    }
     const raw = JSON.parse(readFileSync(projectPath, 'utf-8')) as Record<string, unknown>
     const agent = raw?.agent
     if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return startupConfig

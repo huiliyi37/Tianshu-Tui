@@ -29,10 +29,14 @@ describe('mergeProjectAgentConfig', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'config-merge-'))
+    // 信任门（project-trust.ts）：未授信项目的 agent 块不并入。本套件按
+    // 「已授信」语义测试合并行为——env 覆盖，不写真实信任库。
+    process.env.RIVET_TRUST_PROJECT = '1'
   })
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
+    delete process.env.RIVET_TRUST_PROJECT
   })
 
   it('no project config → returns startup config unmodified', () => {

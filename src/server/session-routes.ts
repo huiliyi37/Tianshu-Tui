@@ -33,6 +33,7 @@
  */
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
+import { allowedCorsOrigin } from './cors.js'
 import { SseStream } from './sse-stream.js'
 import type { RuntimeSessionManager } from './session-manager.js'
 import type { Artifact } from '../artifact/types.js'
@@ -1252,7 +1253,7 @@ export function buildSessionRoutes(
       return { status: 200, body: { path: relPath, entries } }
     }, apiToken),
 
-    'GET /sessions/:id/stream': withAuth(async (_body, params, _headers, res) => {
+    'GET /sessions/:id/stream': withAuth(async (_body, params, headers, res) => {
       if (!res) return { status: 500, body: { error: 'SSE response stream is unavailable' } }
       const id = params!.id!
       const since = Number(params?.since ?? 0) || 0
@@ -1283,7 +1284,7 @@ export function buildSessionRoutes(
         unsubscribe?.()
         unsubscribe = undefined
       }
-      const sse = new SseStream(res, cleanup)
+      const sse = new SseStream(res, cleanup, allowedCorsOrigin(headers ?? {}))
       // 冷热双通道：回放最前发 replay_window 合成元事件（不落盘、seq=0），
       // 告知前端本次回放窗口与磁盘完整范围——diskFirstSeq < floorSeq 时
       // 前端显示「加载更早的历史」，经 GET /events?before= 分页回填。
@@ -1604,15 +1605,16 @@ export function buildSessionRoutes(
     // Vision — serve a persisted user-attached image by id. The desktop fetches
     // this with the Bearer header (img src cannot carry headers, so the client
     // turns the bytes into a blob object URL). Binary response: take over `res`.
-    'GET /sessions/:id/images/:imgId': withAuth((_body, params, _headers, res) => {
+    'GET /sessions/:id/images/:imgId': withAuth((_body, params, headers, res) => {
       if (!res) return { status: 500, body: { error: 'Response stream is unavailable' } }
       const img = manager.readImage(params!.id!, params!.imgId!)
       if (!img) return { status: 404, body: { error: 'Image not found' } }
+      const origin = allowedCorsOrigin(headers ?? {})
       res.writeHead(200, {
         'Content-Type': img.mime,
         'Content-Length': img.bytes.length,
         'Cache-Control': 'private, max-age=31536000, immutable',
-        'Access-Control-Allow-Origin': '*',
+        ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}),
       })
       res.end(img.bytes)
       return { status: 200, handled: true }

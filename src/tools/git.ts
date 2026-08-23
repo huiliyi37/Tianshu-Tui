@@ -5,6 +5,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { auditCommitTagScope } from './commit-audit.js'
 import { createWorkspaceGuard } from '../agent/workspace-guard.js'
 import { killProcessTree } from './process-kill.js'
+import { detectSensitiveFile } from './sensitive-file-detector.js'
 
 const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'log_graph', 'stash', 'stash_pop'] as const
 type GitAction = (typeof ACTIONS)[number]
@@ -499,6 +500,16 @@ export const GIT_TOOL: Tool = {
           }
 
           const scopedFiles = getScopedCommitFiles(cwd, params.ownedFiles, params.sessionModifiedFiles)
+          // 敏感文件硬门：将要暂存或已暂存的文件名先过 detectSensitiveFile——凭据/密钥
+          // 文件不得入库（文件可能经 bash 写入工作区，绕过了文件工具的 validatePath 校验，
+          // 这是入库前的最后一道闸）。fail-closed：只按文件名判，白名单照常生效。
+          const sensitiveScoped = scopedFiles.filter(f => detectSensitiveFile(f).sensitive)
+          if (sensitiveScoped.length > 0) {
+            return {
+              content: `敏感文件拦截：commit 范围含凭据/密钥文件（${sensitiveScoped.join(', ')}），已中止。阅读或提交凭据/密钥文件不被允许；如确为模板/样例，请改用 .example 后缀或移入 fixtures/ 白名单目录。`,
+              isError: true,
+            }
+          }
           const commitArgs = ['commit', '-m', message]
           if (scopedFiles.length > 0) {
             await runGit(['add', '--', ...scopedFiles], cwd, params.abortSignal)
@@ -507,6 +518,20 @@ export const GIT_TOOL: Tool = {
             return {
               content: '未提供会话归属文件给 git commit，且不存在已暂存变更。请使用 deliver_task 并设 commit=true 做归属范围内交付，或在你有意手动管理 git 时显式暂存文件。',
               isError: true,
+            }
+          } else {
+            // 无会话归属文件时提交的是「已暂存」内容——暂存名单同样过敏感门。
+            const stagedList = await runGitSafe(['diff', '--cached', '--name-only'], cwd, params.abortSignal)
+            const sensitiveStaged = stagedList.output
+              .split('\n')
+              .map(l => l.trim())
+              .filter(l => l.length > 0)
+              .filter(f => detectSensitiveFile(f).sensitive)
+            if (sensitiveStaged.length > 0) {
+              return {
+                content: `敏感文件拦截：已暂存内容含凭据/密钥文件（${sensitiveStaged.join(', ')}），已中止提交。请先 git restore --staged 排除这些文件。`,
+                isError: true,
+              }
             }
           }
 

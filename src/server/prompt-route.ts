@@ -16,6 +16,7 @@
  */
 import type { ServerResponse } from 'node:http'
 import type { RouteHandler } from './index.js'
+import { allowedCorsOrigin } from './cors.js'
 import { SseStream } from './sse-stream.js'
 
 /** A session event as forwarded to the legacy SSE wire. */
@@ -41,7 +42,7 @@ export interface PromptRouteDeps {
 const FORWARDED_TYPES = new Set(['text_delta', 'tool_use', 'tool_result', 'turn_complete', 'error'])
 
 export function buildPromptHandler(deps: PromptRouteDeps): RouteHandler {
-  return async (body: unknown, _params, _headers, res) => {
+  return async (body: unknown, _params, headers, res) => {
     const data = body as { prompt?: string }
     if (!data?.prompt || typeof data.prompt !== 'string' || !data.prompt.trim()) {
       return { status: 400, body: { error: 'Missing or empty "prompt" field' } }
@@ -50,14 +51,14 @@ export function buildPromptHandler(deps: PromptRouteDeps): RouteHandler {
       return { status: 500, body: { error: 'SSE response stream is unavailable' } }
     }
 
-    handlePromptSSE(deps, res, data.prompt)
+    handlePromptSSE(deps, res, data.prompt, allowedCorsOrigin(headers ?? {}))
     return { status: 200, handled: true }
   }
 }
 
-export function handlePromptSSE(deps: PromptRouteDeps, res: ServerResponse, prompt: string): void {
+export function handlePromptSSE(deps: PromptRouteDeps, res: ServerResponse, prompt: string, corsOrigin?: string): void {
   const started = deps.startPrompt(prompt)
-  const sse = new SseStream(res)
+  const sse = new SseStream(res, undefined, corsOrigin)
   if (!started) {
     sse.send('error', { error: 'Failed to create a session for this prompt' })
     sse.close()

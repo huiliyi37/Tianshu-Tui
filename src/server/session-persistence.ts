@@ -156,7 +156,7 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
     let d: string
     try {
       d = this.ensureDir(sessionId)
-      appendFileSync(join(d, 'events.jsonl'), buf.map((b) => b.line).join(''), 'utf8')
+      appendFileSync(join(d, 'events.jsonl'), buf.map((b) => b.line).join(''), { encoding: 'utf8', mode: 0o600 })
     } catch {
       // Re-queue on failure — better to retry than lose events.
       const existing = this.eventBuffers.get(sessionId) ?? []

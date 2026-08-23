@@ -26,6 +26,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { getNetworkConfig } from '../config/manager.js'
 import type { RouteHandler } from './index.js'
+import { isAuthorizedRequest } from './auth.js'
 import { errorContext, serverLogger } from './logger.js'
 
 export interface SpeechEngine {
@@ -66,8 +67,8 @@ export function buildWhisperFetchChildEnv(
   return env
 }
 
-export function buildSpeechRoutes(engine: SpeechEngine | null): Record<string, RouteHandler> {
-  return {
+export function buildSpeechRoutes(engine: SpeechEngine | null, apiToken?: string): Record<string, RouteHandler> {
+  const routes: Record<string, RouteHandler> = {
     'GET /speech/model/status': async () => {
       const bin = process.env.RIVET_WHISPER_BIN
       const model = process.env.RIVET_WHISPER_MODEL
@@ -153,4 +154,15 @@ export function buildSpeechRoutes(engine: SpeechEngine | null): Record<string, R
       }
     },
   }
+  // 路由级鉴权（防御纵深）：生产流量本有 index.ts 全局门，此处保证构建器
+  // 被直接挂载（测试/二次 createServer）时同样不裸奔。未传 token 的直连
+  // 消费方（测试）保持原行为。
+  if (!apiToken) return routes
+  const wrap = (h: RouteHandler): RouteHandler => async (body, params, headers, res) => {
+    if (!isAuthorizedRequest({ body, headers }, apiToken)) {
+      return { status: 401, body: { error: 'Unauthorized' } }
+    }
+    return h(body, params, headers, res)
+  }
+  return Object.fromEntries(Object.entries(routes).map(([k, h]) => [k, wrap(h)]))
 }

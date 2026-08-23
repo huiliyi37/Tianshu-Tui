@@ -13,7 +13,7 @@ import { join, basename, dirname } from 'node:path'
 import { cpSync } from 'node:fs'
 import { execSync, execFileSync } from 'node:child_process'
 import { rivetHome } from '../config/paths.js'
-import { parseManifest, type PluginManifest, type PluginPackageJson } from './manifest.js'
+import { parseManifest, PLUGIN_NAME_PATTERN, type PluginManifest, type PluginPackageJson } from './manifest.js'
 import { cloneGitSource, GitCloneError } from './git-source.js'
 
 // ── npm resolution ─────────────────────────────────────────────────
@@ -335,6 +335,11 @@ export function getInstalledPlugins(): InstalledPluginInfo[] {
  * Remove an installed plugin (deletes its directory).
  */
 export function removePlugin(name: string): RemoveResult {
+  // name 直接拼进递归 rmSync 的目标——模式校验防路径穿越（纵深防御，
+  // 与 manifest schema 同一约束；调用方 name 来自用户/桌面端输入）。
+  if (!PLUGIN_NAME_PATTERN.test(name)) {
+    return { ok: false, error: `Invalid plugin name: "${name}"` }
+  }
   const dir = join(pluginsDir(), name)
   if (!existsSync(dir)) {
     return { ok: false, error: `Plugin "${name}" is not installed.` }

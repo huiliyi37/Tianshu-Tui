@@ -13,7 +13,8 @@ import type { SwebenchInstance, RunRecord } from './swebench-run.js'
 
 const { join } = await import('node:path')
 const { existsSync, mkdirSync } = await import('node:fs')
-const { execSync } = await import('node:child_process')
+const { execFileSync } = await import('node:child_process')
+const { sanitizeSegment, runGit } = await import('./swebench-helpers.js')
 
 if (!parentPort) throw new Error('Worker must be spawned with worker_threads')
 
@@ -44,15 +45,20 @@ parentPort.on('message', async (msg: { type: 'run'; instance: SwebenchInstance }
   }
 
   try {
-    const workDir = join(opts.workRoot, instance.instance_id)
+    const workDir = join(opts.workRoot, sanitizeSegment(instance.instance_id))
 
-    // Clone repo
+    // Clone repo — 数据集字段不可信，参数数组执行（同 swebench-run.ts）
     if (!existsSync(join(workDir, '.git'))) {
       const url = `${process.env.GITHUB_MIRROR || 'https://github.com'}/${instance.repo}.git`
       mkdirSync(workDir, { recursive: true })
-      execSync(`git init && git remote add origin ${url} && git fetch --depth 50 origin ${instance.base_commit} && git checkout -b main ${instance.base_commit} && git tag swebench-base`, { cwd: workDir, timeout: 300_000 })
+      runGit(workDir, ['init'])
+      runGit(workDir, ['remote', 'add', 'origin', url])
+      runGit(workDir, ['fetch', '--depth', '50', 'origin', instance.base_commit], 300_000)
+      runGit(workDir, ['checkout', '-b', 'main', instance.base_commit])
+      runGit(workDir, ['tag', 'swebench-base'])
     } else {
-      execSync('git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null', { cwd: workDir })
+      runGit(workDir, ['checkout', '--', '.'])
+      runGit(workDir, ['clean', '-fd'])
     }
 
     // Run agent
@@ -64,8 +70,8 @@ parentPort.on('message', async (msg: { type: 'run'; instance: SwebenchInstance }
     record.agentText = result.json?.text ?? ''
 
     try {
-      const patch = execSync(
-        'git diff swebench-base',
+      const patch = execFileSync(
+        'git', ['diff', 'swebench-base'],
         { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 },
       )
       if (patch.trim()) {

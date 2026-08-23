@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import type { Tool, ToolCallParams } from './types.js'
 import { checkSyntax } from './syntax-check.js'
 import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
+import { validatePathSafe } from './path-validate.js'
 import { incrementEditFailCount, resetEditFailCount, recordSuccessfulEdit } from './read-file.js'
 import { APPLY_PATCH_POINTER_PREFIX } from './apply-patch-arg-processor.js'
 import { detectPointerPlaceholder, POINTER_GUARD_ERROR_MARKER } from './pointer-guard.js'
@@ -171,6 +172,13 @@ export const APPLY_PATCH_TOOL: Tool = {
           return { rel, abs, existedBefore: existsSync(abs) }
         })
       : []
+    // 目标过 validatePathSafe：git apply 自身拒绝绝对路径/..，但 verify/backup
+    // 与 client-delegate 在 git 之前就读写这些 join 出来的绝对路径——符号链接
+    // 目录场景下仍需工作区边界把关。
+    for (const t of targets) {
+      const check = validatePathSafe(params.cwd, t.rel, 'write')
+      if (!check.ok) return { content: `错误：补丁目标 ${t.rel}：${check.error}`, isError: true }
+    }
     for (const t of targets) {
       if (t.existedBefore) {
         trackFileChange(params.cwd, { filePath: t.rel, action: 'edit', toolCallId: params.toolUseId ?? 'apply_patch' })

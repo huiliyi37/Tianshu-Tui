@@ -79,10 +79,19 @@ export function resolveTestSpawn(
 ): ResolvedTestSpawn {
   if (!deps.isWindows) return { command, args: [...args], shell: false }
 
-  // Quote only when needed: shell:true makes Node join argv into one cmd.exe
-  // command line, so spaces would otherwise split a single token into two.
-  const quote = (s: string): string =>
-    /\s/.test(s) && !(s.startsWith('"') && s.endsWith('"')) ? `"${s}"` : s
+  // shell:true 让 Node 把 argv 拼成单条 cmd.exe 命令行——引号必须覆盖一切
+  // 非安全字符（空白、& | < > ^ ( ) 等元字符），否则仓库可控的文件名
+  // （如 a&calc.cmd）可注入 cmd。% 与内部 " 在双引号内仍危险（变量展开/
+  // 断引），消毒替换为 _——fail-closed 方向；已整体带引号且内部干净的
+  // token 原样通过（不双重加引）。
+  const CMD_SAFE = /^[A-Za-z0-9@_+=:,.\/\\-]+$/
+  const quote = (raw: string): string => {
+    if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"') && !/[%"]/.test(raw.slice(1, -1))) {
+      return raw
+    }
+    const s = raw.replace(/[%"]/g, '_')
+    return CMD_SAFE.test(s) ? s : `"${s}"`
+  }
 
   if (command === 'tsx') {
     // Prefer the project-local shim so targeted tsx runs work without a global tsx.

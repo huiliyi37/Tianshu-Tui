@@ -1479,6 +1479,259 @@ describe('executeToolUse', () => {
     }
   })
 
+  it('safe bash writes with out-of-workspace targets do NOT auto-approve in no-sandbox auto-safe (H6)', async () => {
+    // `echo key >> ~/.ssh/authorized_keys` / `cp payload D:\x\b` 以前经 SAFE_WRITE_PATTERNS
+    // 零提示执行——写目标在 cwd 外时必须回到人工审批。
+    _setSandboxBackendForTest('none')
+    const cases: Array<{ command: string; label: string }> = [
+      { command: 'echo ssh-key >> ~/.ssh/authorized_keys', label: 'tilde redirect target' },
+      { command: 'cp payload D:\\x\\b.exe', label: 'drive-letter cp target' },
+      { command: 'mkdir /usr/local/share/x', label: 'POSIX-absolute mkdir target' },
+    ]
+    try {
+      for (const { command, label } of cases) {
+        let approvalCalls = 0
+        let executed = false
+        const deps = makeDeps({
+          config: {
+            ...makeDeps().config,
+            approvalMode: 'auto-safe',
+            permissions: { allow: [] },
+            toolRegistry: {
+              execute: async () => { executed = true; return { content: 'ok', isError: false } },
+              get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+              needsApproval: () => false,
+              resolveName: (n: string) => n,
+            },
+          } as any,
+        })
+        const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+        const result = await executeToolUse(
+          { id: 'tu-bash-oow', name: 'bash', input: { command } },
+          deps, callbacks as any, 1, false,
+        )
+        assert.equal(approvalCalls, 1, `${label} must prompt despite safe-write pattern`)
+        assert.equal(executed, false, `${label} must not execute without approval`)
+        assert.equal((result.toolResult as any).is_error, true)
+      }
+    } finally {
+      _resetSandboxBackendCache()
+    }
+  })
+
+  it('in-workspace safe bash writes still auto-approve (no approval fatigue regression)', async () => {
+    _setSandboxBackendForTest('none')
+    let approvalCalls = 0
+    let executed = 0
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed++; return { content: 'ok', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+    try {
+      for (const command of ['echo hi > out.txt', 'npm install', 'mkdir src/new']) {
+        await executeToolUse(
+          { id: 'tu-bash-iw', name: 'bash', input: { command } },
+          deps, callbacks as any, 1, false,
+        )
+      }
+      assert.equal(approvalCalls, 0, 'in-workspace safe writes must stay auto-approved')
+      assert.equal(executed, 3)
+    } finally {
+      _resetSandboxBackendCache()
+    }
+  })
+
+  it('export_file with out-of-workspace destination routes through the approval flow in auto-safe (M7)', async () => {
+    _resetGrantsForTest()
+    const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))
+    const external = mkdtempSync(join(testTmp(), 'rivet-ext-'))
+    const dest = join(external, 'logo.svg')
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      cwd: workspace,
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'exported', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return true } }
+    try {
+      const result = await executeToolUse(
+        { id: 'tu-export-oow', name: 'export_file', input: { destination_path: dest, content: '<svg/>' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approvalCalls, 1, 'out-of-workspace export must prompt despite auto-safe')
+      assert.equal(executed, true, 'op proceeds after approval')
+      assert.equal((result.toolResult as any).is_error, false)
+      assert.equal(isWriteGranted(dest), true, 'write grant recorded on approval')
+    } finally {
+      _resetGrantsForTest()
+      rmSync(external, { recursive: true, force: true })
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('ast_edit with out-of-workspace paths routes through the approval flow instead of hard-failing (M7)', async () => {
+    _resetGrantsForTest()
+    const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))
+    const external = mkdtempSync(join(testTmp(), 'rivet-ext-'))
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      cwd: workspace,
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'edited', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return true } }
+    try {
+      const result = await executeToolUse(
+        { id: 'tu-ast-oow', name: 'ast_edit', input: { paths: [join(external, 'x.ts')], rule: { pattern: 'x' } } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approvalCalls, 1, 'out-of-workspace ast_edit must prompt')
+      assert.equal(executed, true)
+      assert.equal((result.toolResult as any).is_error, false)
+    } finally {
+      _resetGrantsForTest()
+      rmSync(external, { recursive: true, force: true })
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('open_path / create_document out-of-workspace targets route through the approval flow (M7)', async () => {
+    _resetGrantsForTest()
+    const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))
+    const external = mkdtempSync(join(testTmp(), 'rivet-ext-'))
+    try {
+      const calls: Record<string, number> = { open_path: 0, create_document: 0 }
+      const deps = makeDeps({
+        cwd: workspace,
+        config: {
+          ...makeDeps().config,
+          approvalMode: 'auto-safe',
+          permissions: { allow: [] },
+          toolRegistry: {
+            execute: async () => ({ content: 'ok', isError: false }),
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+      const callbacks = {
+        ...noopCallbacks,
+        onApprovalRequired: async (_id: string, name: string) => { calls[name] = (calls[name] ?? 0) + 1; return true },
+      }
+      await executeToolUse(
+        { id: 'tu-open-oow', name: 'open_path', input: { path: join(external, 'report.pdf') } },
+        deps, callbacks as any, 1, false,
+      )
+      await executeToolUse(
+        { id: 'tu-credoc-oow', name: 'create_document', input: { destination_path: join(external, 'notes.md'), content: 'x' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(calls['open_path'], 1, 'out-of-workspace open_path must prompt')
+      assert.equal(calls['create_document'], 1, 'out-of-workspace create_document must prompt')
+    } finally {
+      _resetGrantsForTest()
+      rmSync(external, { recursive: true, force: true })
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('export_file tilde destinations expand to home and route through approval (no lexical-cwd laundering)', async () => {
+    // `~/x` 若不展开，resolve(cwd, '~/x') 会词法落进工作区而绕过门禁——路由必须与
+    // execute 侧同做 expandHome。
+    _resetGrantsForTest()
+    const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))
+    let approvalCalls = 0
+    const deps = makeDeps({
+      cwd: workspace,
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => ({ content: 'exported', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return true } }
+    try {
+      await executeToolUse(
+        { id: 'tu-export-tilde', name: 'export_file', input: { destination_path: '~/rivet-test-export-oow.svg', content: 'x' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approvalCalls, 1, 'tilde destination must prompt (expands outside cwd)')
+    } finally {
+      _resetGrantsForTest()
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('in-workspace export_file destination does not route through the path-grant flow', async () => {
+    _resetGrantsForTest()
+    const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      cwd: workspace,
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'exported', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+          resolveName: (n: string) => n,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+    try {
+      await executeToolUse(
+        { id: 'tu-export-iw', name: 'export_file', input: { destination_path: join(workspace, 'assets', 'out.svg'), content: 'x' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approvalCalls, 0, 'in-workspace export destination needs no path grant')
+      assert.equal(executed, true)
+    } finally {
+      _resetGrantsForTest()
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   it('approval with remember=true persists the grant per-workspace; without remember it stays session-only', async () => {
     _resetGrantsForTest()
     const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))

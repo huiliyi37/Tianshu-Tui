@@ -11,6 +11,7 @@ import { mkdir, appendFile } from 'node:fs/promises'
 import { createCheckpoint, recordAgentTouchedFile, recordBashSideEffects, makeOwnershipGuard, type OwnershipGuard, type ClaimLookup } from './checkpoint.js'
 import { validatePath, validatePathSafe } from '../tools/path-validate.js'
 import { grantPath, isReadGranted } from '../tools/path-grants.js'
+import { expandHome } from '../platform.js'
 import { dirname, join, resolve as resolvePath, isAbsolute } from 'node:path'
 import { getSessionDir } from './session-persist.js'
 import { classifyFailure, classifyToolFailure, classifyTestRun, isTransient, resolveErrorKind, type FailureClass } from './failure-classifier.js'
@@ -26,7 +27,7 @@ import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints, getDoomLoopThresholds } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
-import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval, requiresUnconditionalApproval } from './approval-risk.js'
+import { assessToolRisk, CONFIDENCE_THRESHOLDS, hasOutOfWorkspaceWriteTarget, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval, requiresUnconditionalApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix, learnFileApproval } from './permissions.js'
 import { isSelfDestructiveKill, selfProcessTree } from './self-preservation.js'
@@ -241,12 +242,15 @@ async function emitToolResultTrace(input: {
  * approval-driven path grant (rather than a hard "Path outside workspace" error).
  * `read_section` is artifact-id based and `apply_patch` embeds paths in a patch
  * body — neither has a single extractable path, so they rely on request_path_access.
+ * `ast_edit` (paths 数组) 走同一门禁；export_file / create_document / open_path 的
+ * 参数形态不同（destination/source/path + execute 侧 trim），在下方专门分支提取。
  */
 const FILE_TOOL_MODES: Record<string, 'read' | 'write'> = {
   read_file: 'read',
   write_file: 'write',
   edit_file: 'write',
   hash_edit: 'write',
+  ast_edit: 'write',
 }
 
 /**
@@ -258,12 +262,33 @@ const FILE_TOOL_MODES: Record<string, 'read' | 'write'> = {
  * duplicating the path comparison — symlink/case handling lives in one place.
  */
 export function outOfWorkspaceFilePaths(cwd: string, toolName: string, input: Record<string, unknown>): { mode: 'read' | 'write'; paths: string[] } | null {
+  // 外部导出面（export_file/create_document）：destination 写侧优先于 source 读侧
+  // ——更强的授权面决定整组 mode（返回结构保持单 mode 形态，桌面端 pathGrantHint
+  // 依赖）。execute 侧对路径做 trim + expandHome（~ 展开到家目录），这里必须做
+  // 同样的归一——否则 `~/Desktop/x.svg` 会词法 resolve 进 cwd 而绕过门禁。
+  if (toolName === 'export_file' || toolName === 'create_document') {
+    const dest = typeof input.destination_path === 'string' ? expandHome(input.destination_path.trim()) : ''
+    const src = toolName === 'export_file' && typeof input.source_path === 'string' ? expandHome(input.source_path.trim()) : ''
+    if (dest && !validatePathSafe(cwd, dest, 'write').ok) return { mode: 'write', paths: [resolvePath(cwd, dest)] }
+    if (src && !validatePathSafe(cwd, src, 'read').ok) return { mode: 'read', paths: [resolvePath(cwd, src)] }
+    return null
+  }
+  // open_path：只读打开（OS opener，不回读内容）；execute 侧同样 trim + expandHome
+  if (toolName === 'open_path') {
+    const p = typeof input.path === 'string' ? expandHome(input.path.trim()) : ''
+    if (p && !validatePathSafe(cwd, p, 'read').ok) return { mode: 'read', paths: [resolvePath(cwd, p)] }
+    return null
+  }
   const mode = FILE_TOOL_MODES[toolName]
   if (!mode) return null
   const candidates: string[] = []
   if (typeof input.file_path === 'string') candidates.push(input.file_path)
   if (Array.isArray(input.file_paths)) {
     for (const p of input.file_paths) if (typeof p === 'string') candidates.push(p)
+  }
+  // ast_edit 的 paths 数组（文件或目录）；缺省 ['.'] 不在此展开——默认值即 cwd 本身
+  if (Array.isArray(input.paths)) {
+    for (const p of input.paths) if (typeof p === 'string') candidates.push(p)
   }
   const paths: string[] = []
   for (const c of candidates) {
@@ -1089,6 +1114,10 @@ export async function executeToolUse(
       && approvalMode === 'auto-safe'
       && bashCommand.length > 0
       && isSafeWriteOnly(bashCommand)
+      // 写目标必须留在工作区内：pipeline 的路径校验只覆盖文件工具，bash 写目标
+      // （重定向/cp/mkdir 参数）不经 validatePathSafe——`echo k >> ~/.ssh/authorized_keys`
+      // / `cp a D:\Startup\x.exe` 不能按"安全写"静默放行。
+      && !hasOutOfWorkspaceWriteTarget(bashCommand)
     const bashWriteRequiresApproval =
       requiresBashWriteApproval(tu.name, tu.input)
       && !allowlisted && !bashAllowlisted

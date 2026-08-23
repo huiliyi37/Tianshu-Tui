@@ -27,6 +27,9 @@ function writeScript(cwd: string, name: string, body: string) {
 }
 
 describe('createUserHooksBridge', () => {
+  // 信任门（project-trust.ts）：项目 hooks 仅在项目授信后执行。本套件的临时
+  // 目录并非用户授信项目，按已授信语义测试——env 覆盖，不污染真实信任库。
+  process.env.RIVET_TRUST_PROJECT = '1'
   it('emits hook_result after postTool hooks run', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'rivet-hooks-bridge-'))
     try {

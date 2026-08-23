@@ -123,6 +123,45 @@ describe('GIT_TOOL', () => {
     assert.equal(execSync('git rev-parse --short HEAD', { cwd: TMP, encoding: 'utf-8' }).trim(), headBefore)
   })
 
+  it('blocks commit when owned (scoped) files include a sensitive file', async () => {
+    writeFileSync(join(TMP, 'a.txt'), 'hello')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "init"', { cwd: TMP })
+    const headBefore = execSync('git rev-parse --short HEAD', { cwd: TMP, encoding: 'utf-8' }).trim()
+    // .env 可能经 bash 写入（绕过文件工具校验）——入库前最后一道闸必须拦下
+    writeFileSync(join(TMP, '.env'), 'KEY=1')
+    writeFileSync(join(TMP, 'src-change.txt'), 'x')
+
+    const result = await GIT_TOOL.execute({
+      input: { action: 'commit', message: 'leak creds' },
+      toolUseId: 'tu_sens_scoped',
+      cwd: TMP,
+      sessionModifiedFiles: [join(TMP, '.env'), join(TMP, 'src-change.txt')],
+    })
+    assert.equal(result.isError, true)
+    assert.match(result.content, /敏感文件拦截/)
+    assert.match(result.content, /\.env/)
+    assert.equal(execSync('git rev-parse --short HEAD', { cwd: TMP, encoding: 'utf-8' }).trim(), headBefore)
+  })
+
+  it('blocks commit when already-staged content includes a sensitive file', async () => {
+    writeFileSync(join(TMP, 'a.txt'), 'hello')
+    execSync('git add .', { cwd: TMP })
+    execSync('git commit -m "init"', { cwd: TMP })
+    const headBefore = execSync('git rev-parse --short HEAD', { cwd: TMP, encoding: 'utf-8' }).trim()
+    writeFileSync(join(TMP, 'credentials'), 'token=x')  // 无扩展名 credentials（M4 新模式）
+    execSync('git add credentials', { cwd: TMP })
+
+    const result = await GIT_TOOL.execute({
+      input: { action: 'commit', message: 'staged leak' },
+      toolUseId: 'tu_sens_staged',
+      cwd: TMP,
+    })
+    assert.equal(result.isError, true)
+    assert.match(result.content, /敏感文件拦截/)
+    assert.equal(execSync('git rev-parse --short HEAD', { cwd: TMP, encoding: 'utf-8' }).trim(), headBefore)
+  })
+
   it('rejects unknown action', async () => {
     const result = await GIT_TOOL.execute({
       input: { action: 'push' },

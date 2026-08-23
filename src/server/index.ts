@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { isAuthorizedRequest } from './auth.js'
+import { allowedCorsOrigin } from './cors.js'
 import { errorContext, serverLogger } from './logger.js'
 
 // 10MB — the prompt route carries up to 4 base64 image data URLs. Compressed
@@ -93,12 +94,31 @@ export function createRouter(routes: Record<string, RouteHandler>) {
 export async function startServer(port: number, routes: Record<string, RouteHandler>, apiToken?: string): Promise<{ close: (cb?: (err?: Error) => void) => void }> {
   const router = createRouter(routes)
 
+  // CORS：只反射已知 webview 来源（见 cors.ts——SSE/图片路由同源反射）。
+  const corsOrigin = allowedCorsOrigin
+
+  // Host 校验：DNS rebinding 让浏览器带着攻击者域名的 Host 直连 127.0.0.1。
+  // 仅接受回环形态；无 Host（HTTP/1.0 工具客户端）放行。
+  const isLoopbackHost = (host: string | undefined, p: number): boolean => {
+    if (host === undefined) return true
+    const h = host.toLowerCase()
+    return h === `127.0.0.1:${p}` || h === `localhost:${p}` || h === `[::1]:${p}`
+      || h === '127.0.0.1' || h === 'localhost' || h === '[::1]'
+  }
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // CORS: allow Tauri dev mode (localhost:5273 → 127.0.0.1:<port>) and
-    // production (tauri://localhost). Bound to 127.0.0.1 so no external exposure.
+    const reqHeaders = normalizeHeaders(req)
+
+    if (!isLoopbackHost(req.headers.host, port)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Forbidden: non-loopback Host' }))
+      return
+    }
+
+    const origin = corsOrigin(reqHeaders)
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
+        ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}),
         'Access-Control-Allow-Methods': 'GET, POST, DELETE, PUT, PATCH, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       })
@@ -106,21 +126,20 @@ export async function startServer(port: number, routes: Record<string, RouteHand
       return
     }
 
-    const reqHeaders = normalizeHeaders(req)
     // Health endpoint is intentionally not auth-gated — the desktop shell and
     // Rust monitor probe it from cold-start / token-rotation windows where the
     // Bearer token may not be available yet. No user data is exposed.
     // Use startsWith so /health?foo=bar also bypasses auth.
     const isHealth = req.url?.startsWith('/health') ?? false
     if (!isHealth && !isAuthorizedRequest({ headers: reqHeaders }, apiToken)) {
-      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+      res.writeHead(401, { 'Content-Type': 'application/json', ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}) })
       res.end(JSON.stringify({ error: 'Unauthorized' }))
       return
     }
 
     const body = await readBody(req)
     if (body === BODY_TOO_LARGE) {
-      res.writeHead(413, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
+      res.writeHead(413, { 'Content-Type': 'application/json', ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}) })
       res.end(JSON.stringify({ error: 'Request body too large' }))
       return
     }
@@ -129,7 +148,7 @@ export async function startServer(port: number, routes: Record<string, RouteHand
     if (result.handled) return
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
+      ...(origin ? { 'Access-Control-Allow-Origin': origin } : {}),
       ...result.headers,
     }
     res.writeHead(result.status, headers)

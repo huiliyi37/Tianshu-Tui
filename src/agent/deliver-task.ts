@@ -21,7 +21,7 @@
 
 import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { spawnGitSync } from '../tools/spawn-git.js'
-import { spawnHidden } from '../tools/spawn-hidden.js'
+import { parseVerifyCommand, spawnVerifyArgv } from './verify-command.js'
 import { join, isAbsolute } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult, DelegationActivity } from '../tools/types.js'
 import { createDelegationActivityMapper } from '../tools/worker-activity-stream.js'
@@ -43,23 +43,22 @@ export function createStageMarker(prefix: string): (stage: string) => void {
   }
 }
 
-/**
- * 义务账 gate 的默认异步执行器（2026-08-09 楔子清理）：spawnHidden + 60s 超时，
- * 不阻塞事件循环。摘要语义与旧 spawnSync 路径一致（尾部 3 行 / 300 字符）。
- */
+/** 义务账 gate 的默认异步执行器（2026-08-09 楔子清理）：60s 超时不阻塞事件循环，
+ *  摘要尾部 3 行 / 300 字符。H4 收口：gate 命令源是议事会席位输出，先过
+ *  parseVerifyCommand，解析失败按不可执行收口，绝不退回字符串拼 shell。 */
 function runGateAsync(command: string, cwd: string): Promise<{ ok: boolean; detail?: string }> {
+  const argv = parseVerifyCommand(command)
+  if (!argv) return Promise.resolve({ ok: false, detail: '非白名单 gate 命令形状——拒绝 shell 执行' })
   return new Promise((resolvePromise) => {
     let stdout = ''
     let stderr = ''
     let settled = false
     const tail = (): string => `${stdout}\n${stderr}`.trim().split('\n').slice(-3).join('\n').slice(0, 300)
     const settle = (r: { ok: boolean; detail?: string }): void => {
-      if (settled) return
-      settled = true
-      resolvePromise(r)
+      if (!settled) { settled = true; resolvePromise(r) }
     }
     try {
-      const child = spawnHidden(command, [], { cwd, shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawnVerifyArgv(cwd, argv, { stdio: ['ignore', 'pipe', 'pipe'] })
       child.stdout?.on('data', (d: Buffer) => { stdout += d.toString() })
       child.stderr?.on('data', (d: Buffer) => { stderr += d.toString() })
       const timer = setTimeout(() => {

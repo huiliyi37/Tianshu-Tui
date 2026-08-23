@@ -175,4 +175,35 @@ describe('bash tool requiresApproval', () => {
       false,
     )
   })
+
+  it('flags git add of a sensitive file (dead gate wired)', async () => {
+    const tool = await getBashTool()
+    assert.equal(
+      tool.requiresApproval!({ toolUseId: 't1', cwd: '/repo', input: { command: 'git add .env' } }),
+      true,
+    )
+    assert.equal(
+      tool.requiresApproval!({ toolUseId: 't1', cwd: '/repo', input: { command: 'git add src/a.ts credentials.json .npmrc' } }),
+      true,
+    )
+  })
+
+  it('allows git add of ordinary files', async () => {
+    const tool = await getBashTool()
+    assert.equal(
+      tool.requiresApproval!({ toolUseId: 't1', cwd: '/repo', input: { command: 'git add -- src/a.ts src/b.ts' } }),
+      false,
+    )
+  })
+
+  it('flags destructive Windows shell families (del /s, Remove-Item -Recurse, find -delete)', async () => {
+    const tool = await getBashTool()
+    for (const command of ['del /s /q C:\\build', 'DEL /S dist', 'rd /s dist', 'rmdir /S /Q dist', 'Remove-Item -Recurse -Force C:\\x', 'remove-item -force ~/y', 'find / -delete', 'shred secret.key', 'TRUNCATE TABLE users', 'rm -r -f build']) {
+      assert.equal(
+        tool.requiresApproval!({ toolUseId: 't1', cwd: '/repo', input: { command } }),
+        true,
+        `must flag: ${command}`,
+      )
+    }
+  })
 })

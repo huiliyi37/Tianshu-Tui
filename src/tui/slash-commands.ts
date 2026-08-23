@@ -10,6 +10,7 @@ import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { resolveCustomCommand } from '../commands/loader.js'
+import { trustProject, untrustProject, isProjectTrusted, listTrustedProjects } from '../config/project-trust.js'
 import { getTheme, setTheme, getActiveThemeName, THEMES, listCustomThemes } from './theme.js'
 import {
   checkForUpdate,
@@ -33,7 +34,7 @@ import { exportDurableClaims, importClaims } from '../context/claim-export.js'
 import { resolveEcosystemWorkflowInput } from '../workflows/ecosystem-workflows.js'
 import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { buildHandoffPrompt } from './handoff.js'
 import { ensureVerifyDeclaration, renderRivetMdStack, upsertStackSection } from '../bootstrap/verify-declaration.js'
 import { exportsDir } from '../config/paths.js'
@@ -65,6 +66,7 @@ import { loadConfig, saveConfig, registerVisionModelConfig } from '../config/man
 import { discoverVisionModels, validateVisionModel } from '../api/vision-model-onboarding.js'
 import { PROVIDER_PRESETS, isProviderPresetKey } from '../config/provider-presets.js'
 import { installPlugin, removePlugin, getInstalledPlugins, isPluginInstalled } from '../plugins/plugin-installer.js'
+import { parseManifest } from '../plugins/manifest.js'
 import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
 import { switchAgentRuntime, switchAgentSession, switchAgentCwd, restorePlanModeFromMeta } from '../bootstrap.js'
 import { loadTodos, setTodoSession } from '../tools/todo.js'
@@ -1177,6 +1179,40 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       // （loadPrevHandoff 注入管线认 <id>.handoff.md）。
       ctx.onHandoffStart?.(projectPath, archivePath)
       ctx.submitToAgent(buildHandoffPrompt(projectPath, note))
+      return true
+    },
+  },
+  {
+    name: '/trust',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming, agent } = ctx
+      const action = parts[1]?.toLowerCase()
+      const lines: string[] = []
+      if (action === 'off') {
+        untrustProject(agent.cwd)
+        lines.push(
+          '已撤销当前项目的信任（/trust off）。',
+          '项目级 hooks 即刻停用；项目配置中的安全敏感键自下次会话起恢复忽略。',
+        )
+      } else if (action === 'status') {
+        lines.push(
+          `项目信任状态：${isProjectTrusted(agent.cwd) ? '已授信' : '未授信'}`,
+          `已授信项目数：${listTrustedProjects().length}（清单存于 ~/.rivet/project-trust.json）`,
+          '未授信时：项目 hooks 不执行；项目配置的 permissions/mcp/hooks/providers/env/ui.statusLine/agent.approval 等安全键被忽略。',
+        )
+      } else if (action === undefined) {
+        trustProject(agent.cwd)
+        lines.push(
+          '已授信当前项目（/trust）。',
+          '项目级 hooks 即刻生效；项目配置安全键自下次会话（重启）起参与合并。',
+          '仅对你本机生效，绝不写回仓库；/trust off 可随时撤销。',
+        )
+      } else {
+        lines.push('用法：/trust（授信）· /trust status（查询）· /trust off（撤销）')
+      }
+      pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      setIsStreaming(false)
       return true
     },
   },
@@ -4406,12 +4442,43 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
 
       if (sub === 'install') {
         if (!arg) {
-          app.commitStatic('Usage: /plugin install <local-path>')
+          app.commitStatic('Usage: /plugin install <local-path> [--confirm]')
           app.commitStatic('Install a plugin from a local directory.\n')
           return true
         }
-        app.commitStatic(`Installing plugin from ${arg}...`)
-        installPlugin({ kind: 'local', path: arg }).then((result) => {
+        // 安装前预检（与桌面端 plugin-api 同语义）：先读 manifest 展示工具与
+        // 权限声明，用户复核后加 --confirm 才真正落盘——权限展示不再发生在
+        // 安装完成之后。
+        const confirmFlag = arg.endsWith(' --confirm')
+        const srcPath = confirmFlag ? arg.slice(0, -' --confirm'.length).trim() : arg
+        if (!confirmFlag) {
+          try {
+            const pkgJsonPath = resolve(srcPath, 'package.json')
+            const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) as { tianshu?: unknown }
+            const parsed = parseManifest(pkg.tianshu)
+            if (parsed.ok) {
+              const m = parsed.manifest
+              const perms = m.permissions
+              const permStr = Object.entries(perms).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'
+              app.commitStatic(
+                `Plugin preflight — review before install:\n` +
+                `  Name: ${m.name} v${m.version}\n` +
+                `  Tools: ${m.tools.map(t => t.name).join(', ') || 'none'}\n` +
+                `  Declared permissions: ${permStr}\n` +
+                `  Source: ${resolve(srcPath)}\n` +
+                `插件代码在下次会话启动时以完整权限加载（声明权限为提示性）。\n` +
+                `确认安装请执行: /plugin install ${srcPath} --confirm`
+              )
+            } else {
+              app.commitStatic(`✗ Manifest invalid: ${parsed.errors.join('; ')}`, { isError: true })
+            }
+          } catch (err) {
+            app.commitStatic(`✗ Preflight failed: ${(err as Error).message}`, { isError: true })
+          }
+          return true
+        }
+        app.commitStatic(`Installing plugin from ${srcPath}...`)
+        installPlugin({ kind: 'local', path: srcPath }).then((result) => {
           if (result.ok) {
             const perms = result.manifest.permissions
             const permStr = Object.entries(perms).filter(([, v]) => v).map(([k]) => k).join(', ') || 'none'

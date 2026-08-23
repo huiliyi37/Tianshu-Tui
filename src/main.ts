@@ -91,6 +91,7 @@ import { computeUsageCost, findModelPricing } from './utils/pricing.js'
 import { projectCacheTelemetry } from './tui/cache-telemetry.js'
 import { CachePanelSource } from './tui/cache-panel-source.js'
 import { sessionsDir } from './config/paths.js'
+import { trustProject, untrustProject, isProjectTrusted } from './config/project-trust.js'
 import { fetchOfficialUsage } from './cache/deepseek-official-usage.js'
 import type { CacheStatus } from './tui/status-types.js'
 import { TuiPerfMonitor, isTuiPerfEnabled } from './tui/engine/perf-monitor.js'
@@ -151,6 +152,12 @@ const requestedProfile = profileArgIdx >= 0 ? args[profileArgIdx + 1] : undefine
 if (requestedProfile !== undefined && !requestedProfile.startsWith('-')) {
   process.env.RIVET_PROFILE = requestedProfile
 }
+
+// --trust / --untrust：workspace-trust 授信/撤销（幂等）。项目级 hooks 与配置
+// 安全敏感键在授信前一律忽略（fail-closed，src/config/project-trust.ts）。
+// 须在任何 loadConfig 之前执行——下方 bootstrap 链会消费项目层配置。
+if (args.includes('--trust')) trustProject(process.cwd())
+if (args.includes('--untrust')) untrustProject(process.cwd())
 
 // R1: default startup is a fresh session. Session selection flags (Claude Code parity):
 //   --continue / -c              → resume the most recent session for this cwd

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { bashGitBypassesScope, isDestructiveGitAction } from '../approval-risk.js'
-import { assessToolRisk, DANGEROUS_BASH_PATTERNS, BASH_WRITE_PATTERNS, bashCommandMayWrite, isSafeWriteOnly, requiresBashWriteApproval, requiresUnconditionalApproval, CONFIDENCE_THRESHOLDS } from '../approval-risk.js'
+import { bashGitBypassesScope, isDestructiveGitAction, hasOutOfWorkspaceWriteTarget } from '../approval-risk.js'
+import { assessToolRisk, DANGEROUS_BASH_PATTERNS, BASH_WRITE_PATTERNS, bashCommandMayWrite, isSafeWriteOnly, requiresBashWriteApproval, requiresUnconditionalApproval, CONFIDENCE_THRESHOLDS, RISKY_WRITE_PATTERNS, DESTRUCTIVE_EXTENDED_PATTERNS } from '../approval-risk.js'
 import type { ContextClaim } from '../../context/claims.js'
 import type { Sensorium } from '../sensorium.js'
 
@@ -662,5 +662,156 @@ describe('requiresUnconditionalApproval — sandbox boundary', () => {
     assert.equal(requiresUnconditionalApproval('bash', { command: 'rm -rf /' }), false)
     assert.equal(requiresUnconditionalApproval('write_file', { file_path: '/etc/hosts' }), false)
     assert.equal(requiresUnconditionalApproval('computer_use', { action: 'screenshot' }), false)
+  })
+})
+
+describe('destructive command families — whole-family coverage (M2)', () => {
+  describe('rm with split flags', () => {
+    it('catches rm -r -f (split flags hit the same gate as rm -rf)', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -r -f x')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -f -r x')))
+    })
+    it('catches long-form --recursive --force', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rm --recursive --force x')))
+    })
+    it('still catches combined forms', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -rf /tmp')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -fr /tmp')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('sudo rm -rf /')))
+    })
+    it('flags are order-independent and may interleave paths', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -v -f -r build')))
+    })
+    it('does NOT flag rm with only one of -r/-f (stays in risky-write tier)', () => {
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -r build')))
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -f tmp.log')))
+    })
+    it('flag window does not leak across command separators', () => {
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -r build; ls -f')))
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('rm -r build && grep -f pat')))
+    })
+  })
+
+  describe('PowerShell destructive cmdlets', () => {
+    it('catches Remove-Item with -Recurse/-Force (any casing, any order)', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('Remove-Item -Recurse -Force C:\\x')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('remove-item -force C:\\x')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('REMOVE-ITEM C:\\x -recurse')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('powershell -Command "Remove-Item -Recurse ~/secrets"')))
+    })
+    it('does not flag plain Remove-Item without -Recurse/-Force', () => {
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('Remove-Item C:\\tmp\\one.txt')))
+    })
+    it('catches format-volume as extended destructive', () => {
+      assert.ok(DESTRUCTIVE_EXTENDED_PATTERNS.some(p => p.test('Format-Volume -DriveLetter D')))
+      const result = assessToolRisk('bash', { command: 'Format-Volume -DriveLetter D' }, 'none', [], undefined)
+      assert.ok(result.reasons.some(r => r.includes('extended destructive')))
+    })
+  })
+
+  describe('cmd.exe recursive deletion', () => {
+    it('catches del/rd/rmdir with /s (any casing, flags possibly separated)', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('del /s /q C:\\build')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('DEL /S C:\\build')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rd /s /q dist')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('RMDIR /S dist')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('rmdir C:\\x /s')))
+    })
+    it('does not flag del/rd/rmdir without /s', () => {
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('del one.txt')))
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('rd dist')))
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('dir /s')))  // dir 是列举，不是删除
+    })
+  })
+
+  describe('find -delete / shred / rsync --delete / TRUNCATE TABLE', () => {
+    it('catches find ... -delete (including find / -delete)', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('find / -delete')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('find . -name "*.log" -delete')))
+      const result = assessToolRisk('bash', { command: 'find / -delete' }, 'none', [], undefined)
+      assert.equal(result.level, 'high')
+    })
+    it('does not flag find without -delete', () => {
+      assert.ok(!DANGEROUS_BASH_PATTERNS.some(p => p.test('find . -name "*.log"')))
+    })
+    it('catches shred', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('shred secret.key')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('shred -u draft.txt')))
+    })
+    it('catches rsync --delete as a risky write (approval even without sandbox)', () => {
+      assert.ok(RISKY_WRITE_PATTERNS.some(p => p.test('rsync -a --delete src/ dst/')))
+      assert.ok(RISKY_WRITE_PATTERNS.some(p => p.test('RSYNC --delete src/ dst/')))
+      assert.ok(bashCommandMayWrite('rsync -a --delete src/ dst/'))
+      assert.ok(!isSafeWriteOnly('rsync -a --delete src/ dst/'))
+    })
+    it('catches TRUNCATE TABLE (SQL) alongside existing DROP TABLE', () => {
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('TRUNCATE TABLE users')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('echo "truncate table users" | psql')))
+      assert.ok(DANGEROUS_BASH_PATTERNS.some(p => p.test('drop table users')))  // 既有覆盖不回退
+    })
+  })
+})
+
+describe('hasOutOfWorkspaceWriteTarget — safe-write auto-approval scope (H6)', () => {
+  it('flags tilde targets', () => {
+    assert.equal(hasOutOfWorkspaceWriteTarget('echo key >> ~/.ssh/authorized_keys'), true)
+    assert.equal(hasOutOfWorkspaceWriteTarget('cp payload ~/Startup/x.exe'), true)
+  })
+  it('flags drive-letter and POSIX-absolute targets', () => {
+    assert.equal(hasOutOfWorkspaceWriteTarget('cp a D:\\x\\b'), true)
+    assert.equal(hasOutOfWorkspaceWriteTarget('cp a D:/x/b'), true)
+    assert.equal(hasOutOfWorkspaceWriteTarget('mkdir /usr/local/bin/x'), true)
+  })
+  it('flags env-var expansion and .. traversal tokens', () => {
+    assert.equal(hasOutOfWorkspaceWriteTarget('cp a $APPDATA/Microsoft/Windows/Start Menu/Startup/x.exe'), true)
+    assert.equal(hasOutOfWorkspaceWriteTarget('echo x > %APPDATA%\\evil.bat'), true)
+    assert.equal(hasOutOfWorkspaceWriteTarget('cp a ../../outside.txt'), true)
+    assert.equal(hasOutOfWorkspaceWriteTarget('cp a ..'), true)
+  })
+  it('flags redirect targets glued without spaces', () => {
+    assert.equal(hasOutOfWorkspaceWriteTarget('echo x>>~/ssh/authorized_keys'), true)
+    assert.equal(hasOutOfWorkspaceWriteTarget('echo x >"D:\\x\\y"'), true)
+  })
+  it('does NOT flag in-workspace targets', () => {
+    assert.equal(hasOutOfWorkspaceWriteTarget('echo hi > out.txt'), false)
+    assert.equal(hasOutOfWorkspaceWriteTarget('npm install'), false)
+    assert.equal(hasOutOfWorkspaceWriteTarget('mkdir src/new'), false)
+    assert.equal(hasOutOfWorkspaceWriteTarget('cp a ./out/b.txt'), false)
+    assert.equal(hasOutOfWorkspaceWriteTarget('cat x | tee notes.md'), false)
+  })
+  it('dev-null silencing is not a workspace escape', () => {
+    assert.equal(hasOutOfWorkspaceWriteTarget('grep foo bar 2>/dev/null'), false)
+  })
+})
+
+describe('sensitive git add — runtime gate wiring', () => {
+  it('assessToolRisk flags git add .env as high (auto-safe must prompt)', () => {
+    const result = assessToolRisk('bash', { command: 'git add .env' }, 'none', [], undefined)
+    assert.equal(result.level, 'high')
+    assert.ok(result.reasons.some(r => r.includes('credential/key files')))
+  })
+  it('does not flag scoped git add of normal files', () => {
+    const result = assessToolRisk('bash', { command: 'git add -- src/a.ts' }, 'none', [], undefined)
+    assert.ok(!result.reasons.some(r => r.includes('credential/key files')))
+  })
+})
+
+describe('export_file — out-of-workpath risk assessment (M7)', () => {
+  it('flags export_file with absolute destination as medium', () => {
+    const result = assessToolRisk('export_file', { destination_path: '/tmp/out.svg', content: 'x' }, 'none', [], undefined)
+    assert.equal(result.level, 'medium')
+    assert.ok(result.reasons.some(r => r.includes('out-of-workspace')))
+  })
+  it('flags drive-letter and tilde destinations', () => {
+    assert.equal(assessToolRisk('export_file', { destination_path: 'H:\\zhuomian\\logo.png', content: 'x' }, 'none', [], undefined).level, 'medium')
+    assert.equal(assessToolRisk('export_file', { destination_path: '~/Desktop/x.svg', content: 'x' }, 'none', [], undefined).level, 'medium')
+  })
+  it('flags export_file copy-mode source outside workspace', () => {
+    const result = assessToolRisk('export_file', { destination_path: 'out.bin', source_path: 'C:\\Users\\x\\secret.bin' }, 'none', [], undefined)
+    assert.equal(result.level, 'medium')
+  })
+  it('relative in-project destination stays low-surface', () => {
+    const result = assessToolRisk('export_file', { destination_path: 'assets/out.svg', content: 'x' }, 'none', [], undefined)
+    assert.equal(result.level, 'none')
   })
 })

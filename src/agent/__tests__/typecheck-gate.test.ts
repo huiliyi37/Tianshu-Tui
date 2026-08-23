@@ -20,6 +20,10 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { invalidateVerifyConfig } from '../../config/verify-config.js'
 
+// 信任门（project-trust.ts）：未授信项目的声明 verify 命令不加载。声明类
+// 用例按「已授信」语义测试——env 覆盖，不写真实信任库。
+process.env.RIVET_TRUST_PROJECT = '1'
+
 const CWD = '/repo'
 
 function diag(file: string, line: number, message: string, severity: Diagnostic['severity'] = 'error'): Diagnostic {

@@ -20,7 +20,8 @@ import {
 import { readFile, writeFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
+import { sanitizeSegment, runGit } from './swebench-helpers.js'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -406,19 +407,22 @@ async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions
     startedAt: new Date().toISOString(),
   }
 
-  const workDir = join(opts.workRoot, instance.instance_id)
+  // 数据集字段（repo/base_commit/instance_id）来自不可信 parquet/jsonl——
+  // 一律参数数组 spawn，杜绝模板字符串进 shell 的命令注入面。
+  const workDir = join(opts.workRoot, sanitizeSegment(instance.instance_id))
   if (!existsSync(join(workDir, '.git'))) {
     const url = `${process.env.GITHUB_MIRROR || 'https://github.com'}/${instance.repo}.git`
     console.log(`  Cloning ${url} @ ${instance.base_commit.slice(0, 8)}...`)
     mkdirSync(workDir, { recursive: true })
-    execSync(`git init`, { cwd: workDir })
-    execSync(`git remote add origin ${url}`, { cwd: workDir })
-    execSync(`git fetch --depth 50 origin ${instance.base_commit}`, { cwd: workDir, timeout: 300_000 })
-    execSync(`git checkout -b main ${instance.base_commit}`, { cwd: workDir })
+    runGit(workDir, ['init'])
+    runGit(workDir, ['remote', 'add', 'origin', url])
+    runGit(workDir, ['fetch', '--depth', '50', 'origin', instance.base_commit], 300_000)
+    runGit(workDir, ['checkout', '-b', 'main', instance.base_commit])
     // Save base commit ref for later diff extraction
-    execSync(`git tag swebench-base`, { cwd: workDir })
+    runGit(workDir, ['tag', 'swebench-base'])
   } else {
-    execSync('git checkout -- . 2>/dev/null; git clean -fd 2>/dev/null', { cwd: workDir })
+    runGit(workDir, ['checkout', '--', '.'])
+    runGit(workDir, ['clean', '-fd'])
   }
 
   const prompt = buildSwebenchPrompt(instance)
@@ -429,8 +433,8 @@ async function runSingleInstance(instance: SwebenchInstance, opts: RunnerOptions
   // Extract patch regardless of exit code — agent may produce valid fix
   // even if verification tools (pytest, etc.) are unavailable
   try {
-      const patch = execSync(
-        'git diff swebench-base',
+      const patch = execFileSync(
+        'git', ['diff', 'swebench-base'],
         { cwd: workDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 },
       )
     if (patch.trim()) {

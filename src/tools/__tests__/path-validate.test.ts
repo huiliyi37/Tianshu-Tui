@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { validatePath, validatePathSafe } from '../path-validate.js'
@@ -114,6 +114,97 @@ describe('validatePathSafe with out-of-workspace grants', () => {
       const r = validatePathSafe(cwd, '/etc/hosts', 'read')
       assert.equal(r.ok, false)
       if (!r.ok) assert.match(r.error, /request_path_access/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('validatePathSafe — sensitive file hard gate across path forms (M3)', () => {
+  beforeEach(() => _resetGrantsForTest())
+
+  function makeCwd(): string {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-sens-'))
+    mkdirSync(join(cwd, 'scripts'), { recursive: true })
+    return cwd
+  }
+
+  it('blocks .env inside the workspace', () => {
+    const cwd = makeCwd()
+    try {
+      const r = validatePathSafe(cwd, '.env', 'read')
+      assert.equal(r.ok, false)
+      if (!r.ok) assert.match(r.error, /Sensitive file blocked/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('blocks scripts/../.env — whitelist is evaluated on the canonicalized form, not the raw prefix', () => {
+    const cwd = makeCwd()
+    try {
+      const r = validatePathSafe(cwd, join('scripts', '..', '.env'), 'read')
+      assert.equal(r.ok, false)
+      if (!r.ok) assert.match(r.error, /Sensitive file blocked/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('blocks trailing-slash / trailing-dot / case variants', () => {
+    const cwd = makeCwd()
+    try {
+      for (const p of ['.env/', '.env.', '.ENV', join('config', '.Env.Local')]) {
+        const r = validatePathSafe(cwd, p, 'read')
+        assert.equal(r.ok, false, `${p} must be blocked`)
+        if (!r.ok) assert.match(r.error, /Sensitive file blocked/)
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('blocks the realpath form when the raw name is obfuscated (existing file, resolved name is sensitive)', () => {
+    const cwd = makeCwd()
+    try {
+      // 真实存在的伪装文件：裸名不带敏感后缀，但 realpath/resolve 后的规范名是 .env 变体。
+      // 8.3 短名（CREDEN~1.JSON）在同一机制下收敛——realpath 展开后过敏感检测。
+      writeFileSync(join(cwd, '.env.local'), 'X=1')
+      const r = validatePathSafe(cwd, join(cwd, '.ENV.LOCAL'), 'read')
+      assert.equal(r.ok, false)
+      if (!r.ok) assert.match(r.error, /Sensitive file blocked/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('still allows whitelisted fixture/script paths (canonical form keeps the whitelist)', () => {
+    const cwd = makeCwd()
+    try {
+      writeFileSync(join(cwd, 'scripts', 'gen-creds.ts'), 'x')
+      const r = validatePathSafe(cwd, join('scripts', '..', 'scripts', 'gen-creds.ts'), 'read')
+      assert.equal(r.ok, true, 'canonicalized scripts/ path stays whitelisted')
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('sensitive check wins over the out-of-workspace error (fail-closed ordering kept)', () => {
+    const cwd = makeCwd()
+    try {
+      const r = validatePathSafe(cwd, join('..', '.env'), 'read')
+      assert.equal(r.ok, false)
+      if (!r.ok) assert.match(r.error, /Sensitive file blocked/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('returns the original-cwd-based resolved path for clean files (contract unchanged)', () => {
+    const cwd = makeCwd()
+    try {
+      const r = validatePathSafe(cwd, join('src', 'a.ts'), 'read')
+      assert.deepEqual(r, { ok: true, path: join(cwd, 'src', 'a.ts') })
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }

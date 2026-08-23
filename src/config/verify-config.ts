@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, dirname } from 'node:path'
 import { findProjectConfig } from './manager.js'
 import { verifySchema, type VerifyConfig } from './schema.js'
+import { isProjectTrusted, notifyUntrustedOnce } from './project-trust.js'
 
 /** A path-routed verify route after schema parsing. */
 export type VerifyRoute = NonNullable<VerifyConfig['routes']>[number]
@@ -27,6 +28,14 @@ export function loadDeclaredVerify(cwd: string): VerifyConfig {
   if (!path || !existsSync(path)) return {}
   const cached = memo.get(path)
   if (cached) return cached
+  // 信任门：声明命令是仓库内容驱动的执行通道（runDeclaredCheck 会真实 spawn）。
+  // 未授信项目返回空声明——与 loadConfig Layer 3 的 verify 剥离同一语义。
+  // 不缓存未授信结果：/trust 授信后无需 invalidate 即刻生效。
+  const projectDir = dirname(path)
+  if (!isProjectTrusted(projectDir)) {
+    notifyUntrustedOnce('config', projectDir)
+    return {}
+  }
   try {
     const raw = JSON.parse(readFileSync(path, 'utf-8')) as { verify?: unknown }
     const parsed = verifySchema.parse(raw.verify ?? {})

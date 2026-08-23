@@ -12,7 +12,7 @@ export class SseStream {
    * stop keepalive timers) immediately instead of waiting for — or missing —
    * the response 'close' event. Not invoked on a local, intentional close().
    */
-  constructor(res: ServerResponse, onDead?: () => void) {
+  constructor(res: ServerResponse, onDead?: () => void, corsOrigin?: string) {
     this.res = res
     this.onDead = onDead
     res.writeHead(200, {
@@ -21,11 +21,11 @@ export class SseStream {
       Connection: 'keep-alive',
       // CORS: the SSE response takes over `res` (handled:true), bypassing the
       // router's header logic in index.ts — so it must set the same
-      // Access-Control-Allow-Origin the REST responses do. Without it, the
-      // Tauri webview (origin tauri://localhost, cross-origin to 127.0.0.1:<port>)
-      // blocks the stream and the client loops forever on "reconnecting" while
-      // plain GETs (which DO get CORS via the router) keep working.
-      'Access-Control-Allow-Origin': '*',
+      // Access-Control-Allow-Origin the REST responses do (webview 来源反射，
+      // 见 cors.ts). Without it, the Tauri webview (origin tauri://localhost,
+      // cross-origin to 127.0.0.1:<port>) blocks the stream and the client
+      // loops forever on "reconnecting" while plain GETs keep working.
+      ...(corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}),
       // E4 — protocol version (SSE bypasses router header merge).
       [TIANSHU_PROTOCOL_HEADER]: String(TIANSHU_PROTOCOL_VERSION),
     })

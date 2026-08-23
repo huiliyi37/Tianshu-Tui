@@ -11,11 +11,15 @@ describe('verify-config (A1/A2)', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'verify-config-'))
     invalidateVerifyConfig()
+    // 信任门（project-trust.ts）：未授信项目的声明命令不加载。本套件按
+    // 「已授信」语义测试加载行为——env 覆盖，不写真实信任库。
+    process.env.RIVET_TRUST_PROJECT = '1'
   })
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
     invalidateVerifyConfig()
+    delete process.env.RIVET_TRUST_PROJECT
   })
 
   it('loads declared verify commands from .rivet-config.json', () => {
@@ -96,6 +100,7 @@ describe('matchVerifyRoutes (A3)', () => {
 
   it('loads routes from .rivet-config.json', () => {
     const dir = mkdtempSync(join(tmpdir(), 'verify-routes-cfg-'))
+    process.env.RIVET_TRUST_PROJECT = '1'
     try {
       writeFileSync(join(dir, '.rivet-config.json'), JSON.stringify({
         verify: { routes: [{ match: 'desktop/src/**', run: 'tsc -p desktop', kind: 'typecheck' }] },
@@ -107,6 +112,7 @@ describe('matchVerifyRoutes (A3)', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
       invalidateVerifyConfig()
+      delete process.env.RIVET_TRUST_PROJECT
     }
   })
 })

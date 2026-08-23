@@ -26,17 +26,6 @@ export function validatePathSafe(cwd: string, inputPath: string, mode: 'read' | 
   // /d/sky/... 若不翻译会被当 POSIX 绝对路径 resolve 成 <cwd盘>:\d\sky\...。
   inputPath = translateWindowsShellPath(inputPath)
 
-  // Sensitive file check — fail-closed BEFORE path escape check.
-  // Hard-gate: refuse to read/commit .env, credentials, private keys etc.
-  // even when the path is inside the workspace.
-  const sensitiveResult = detectSensitiveFile(inputPath)
-  if (sensitiveResult.sensitive) {
-    return {
-      ok: false,
-      error: `Sensitive file blocked: ${inputPath} matches sensitive pattern "${sensitiveResult.patternName}". Reading or committing credential/key files is not permitted. If this is a false positive (e.g. a template or fixture), rename the file or move it to a whitelisted path.`,
-    }
-  }
-
   // Returned path stays original-cwd-based to preserve the existing contract
   // (callers compute relative labels / read via this path). Validation, however,
   // canonicalizes both sides: without resolving cwd, a cwd reached through a
@@ -67,6 +56,24 @@ export function validatePathSafe(cwd: string, inputPath: string, mode: 'read' | 
   } catch {
     real = resolveNearestExisting(realResolved, realCwd)
   }
+
+  // Sensitive file check — fail-closed BEFORE path escape check, and across every
+  // addressable FORM of the path: raw input, lexical resolve, realpath canonical
+  // form. 此前只查裸输入串——`scripts/../.env` 因裸前缀白名单逃逸、`.env/`/`.env.`/
+  // `.ENV` 靠 detector 内归一化收敛、8.3 短名（CREDEN~1.JSON）靠 realpath 展开收敛。
+  // 白名单按规范形评估：裸前缀（scripts/…）不再单独放行。Hard-gate: refuse to
+  // read/commit .env, credentials, private keys etc. even when the path is inside
+  // the workspace or covered by a grant. 返回路径契约不变（仍返回 resolved）。
+  for (const form of [inputPath, resolved, realResolved, real]) {
+    const sensitiveResult = detectSensitiveFile(form)
+    if (sensitiveResult.sensitive) {
+      return {
+        ok: false,
+        error: `Sensitive file blocked: ${inputPath} matches sensitive pattern "${sensitiveResult.patternName}". Reading or committing credential/key files is not permitted. If this is a false positive (e.g. a template or fixture), rename the file or move it to a whitelisted path.`,
+      }
+    }
+  }
+
   const rel = relative(realCwd, real)
 
   if (rel === '') {

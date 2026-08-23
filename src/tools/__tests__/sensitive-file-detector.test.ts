@@ -78,6 +78,70 @@ describe('sensitive-file-detector', () => {
     })
   })
 
+  describe('detectSensitiveFile — normalization robustness (M3)', () => {
+    it('detects case variants', () => {
+      assert.equal(detectSensitiveFile('.ENV').sensitive, true)
+      assert.equal(detectSensitiveFile('.Env.Local').sensitive, true)
+      assert.equal(detectSensitiveFile('CREDENTIALS.JSON').sensitive, true)
+      assert.equal(detectSensitiveFile('DEBUG.KEYSTORE').sensitive, true)
+    })
+
+    it('detects trailing separator / trailing dot / trailing space forms', () => {
+      assert.equal(detectSensitiveFile('.env/').sensitive, true)
+      assert.equal(detectSensitiveFile('.env.').sensitive, true)
+      assert.equal(detectSensitiveFile('.env ').sensitive, true)
+      assert.equal(detectSensitiveFile('config/credentials.json/').sensitive, true)
+    })
+
+    it('detects backslash-separated Windows paths', () => {
+      assert.equal(detectSensitiveFile('C:\\repo\\.env').sensitive, true)
+      assert.equal(detectSensitiveFile('C:\\repo\\config\\credentials.json').sensitive, true)
+      assert.equal(detectSensitiveFile('C:\\Users\\x\\.ssh\\id_rsa').sensitive, true)
+    })
+
+    it('whitelists still apply case-insensitively', () => {
+      assert.equal(detectSensitiveFile('FIXTURES/.env').sensitive, false)
+      assert.equal(detectSensitiveFile('Scripts/gen-creds.ts').sensitive, false)
+      assert.equal(detectSensitiveFile('docs/.ENV.EXAMPLE').sensitive, false)
+    })
+
+    it('returns the original path untouched', () => {
+      const r = detectSensitiveFile('.ENV/')
+      assert.equal(r.path, '.ENV/')
+      assert.equal(r.sensitive, true)
+    })
+  })
+
+  describe('detectSensitiveFile — default read-grant blind spots (M4)', () => {
+    it('detects extensionless credentials (cargo/gem)', () => {
+      assert.equal(detectSensitiveFile('~/.cargo/credentials').sensitive, true)
+      assert.equal(detectSensitiveFile('~/.gem/credentials').sensitive, true)
+      assert.equal(detectSensitiveFile('credentials').sensitive, true)
+      assert.equal(detectSensitiveFile('C:\\Users\\x\\.cargo\\credentials').sensitive, true)
+    })
+
+    it('detects .netrc and .git-credentials', () => {
+      assert.equal(detectSensitiveFile('~/.netrc').sensitive, true)
+      assert.equal(detectSensitiveFile('~/.git-credentials').sensitive, true)
+      assert.equal(detectSensitiveFile('C:\\Users\\x\\_netrc').sensitive, false) // _netrc 不在模式内
+    })
+
+    it('detects Android debug.keystore', () => {
+      assert.equal(detectSensitiveFile('android/debug.keystore').sensitive, true)
+      assert.equal(detectSensitiveFile('debug.keystore').sensitive, true)
+    })
+
+    it('does NOT flag source files with credentials in the stem', () => {
+      assert.equal(detectSensitiveFile('src/credentials.ts').sensitive, false)
+      assert.equal(detectSensitiveFile('src/credentials.test.ts').sensitive, false)
+      assert.equal(detectSensitiveFile('docs/credentials.md').sensitive, false)
+    })
+
+    it('does NOT flag settings.xml (too generic, deliberately excluded)', () => {
+      assert.equal(detectSensitiveFile('~/.m2/settings.xml').sensitive, false)
+    })
+  })
+
   describe('detectSensitiveGitAdd', () => {
     it('detects git add .env', () => {
       const files = detectSensitiveGitAdd('git add .env')
@@ -103,6 +167,23 @@ describe('sensitive-file-detector', () => {
     it('handles git add with flags', () => {
       const files = detectSensitiveGitAdd('git add -A')
       assert.equal(files.length, 0) // -A is a flag, not a file
+    })
+
+    it('matches case-insensitively (PowerShell/cmd command casing)', () => {
+      const files = detectSensitiveGitAdd('GIT ADD .env')
+      assert.deepEqual(files, ['.env'])
+    })
+
+    it('detects cased sensitive file arguments', () => {
+      const files = detectSensitiveGitAdd('git add src/a.ts .ENV debug.KEYSTORE')
+      assert.ok(files.includes('.ENV'))
+      assert.ok(files.includes('debug.KEYSTORE'))
+    })
+
+    it('does not flag unparseable/odd commands (no crash, no false gate)', () => {
+      assert.equal(detectSensitiveGitAdd('').length, 0)
+      assert.equal(detectSensitiveGitAdd('git add').length, 0)
+      assert.equal(detectSensitiveGitAdd('git add   ').length, 0)
     })
   })
 })

@@ -5,12 +5,12 @@
  *   不 cat/read/commit .env、credentials.*、*private*key*、*token*、*secret* 等文件。
  *   发现此类文件出现在 git add 或工具输出中时，立即警告用户并中止。
  *
- * 现状核实：path-validate.ts 只做路径逃逸校验，无敏感文件名模式检测。
- * bash.ts 有 SENSITIVE_ENV_KEYWORDS 但只管环境变量值泄漏，不管文件访问。
- * 即：这条 hard-gate 目前纯靠 prompt 维持，运行时零守护。
+ * 集成现状：validatePathSafe 对原始输入 + resolve + realpath 规范形逐一过本检测
+ * （path-validate.ts）；bash.requiresApproval / assessToolRisk / git commit 暂存路径
+ * 经 detectSensitiveGitAdd / detectSensitiveFile 走同一门禁。运行时 fail-closed，
+ * prompt 约束（AGENTS.md Agent 安全保护，硬闸门）是第一层，这里是第二层。
  *
  * 设计：fail-closed（拒绝并解释），不是 advisory 软提醒。
- * 集成到 validatePathSafe 中，作为路径逃逸检查之前的第二道防线。
  *
  * 正则来源（匹配的真实文件名模式）：
  *   `.env` → 项目根目录常见环境变量文件
@@ -68,6 +68,23 @@ const SENSITIVE_FILE_PATTERNS: Array<{ name: string; re: RegExp }> = [
     name: 'secrets/token file',
     re: /(^|\/)(?:secret[s]?|token[s]?|auth[_-]?token[s]?)\.(?:json|yaml|yml|ini|env)$/,
   },
+  // 无扩展名 credentials（basename 精确匹配）——~/.cargo/credentials、~/.gem/credentials
+  // 等包管理器/云 CLI 的落盘凭证。带扩展名的源码（credentials.ts）不受影响；
+  // 仓库里真叫 credentials 的文件会被拦截读取，与 SECURITY.md 声明的意图一致。
+  {
+    name: 'credentials (extensionless)',
+    re: /(^|\/)credentials$/,
+  },
+  // .netrc（FTP/HTTP 明文凭证）/ .git-credentials（git credential store 明文 PAT）
+  {
+    name: '.netrc / .git-credentials',
+    re: /(^|\/)(?:\.netrc|\.git-credentials)$/,
+  },
+  // Android debug.keystore——APK 签名密钥（发布签名身份的调试对映物）
+  {
+    name: 'Android debug keystore',
+    re: /(^|\/)debug\.keystore$/,
+  },
 ]
 
 /** 白名单模式——这些路径即使匹配敏感模式也不拦截 */
@@ -90,19 +107,34 @@ export interface SensitiveFileResult {
   path: string
 }
 
+/** 匹配前归一化：反斜杠→正斜杠（Windows 分隔符统一可比）、小写化（大小写不敏感）。 */
+function normalizeForMatch(inputPath: string): string {
+  return inputPath.replace(/\\/g, '/').toLowerCase()
+}
+
+/** 剥尾部空白/点/分隔符：`.env/`、`.env.`、`.env ` 都是 `.env` 的可寻址形态
+ * （Win32 打开文件时自动剥掉尾部点与空格，POSIX 忽略尾部分隔符）。只影响匹配。 */
+function stripTrailingArtifacts(p: string): string {
+  return p.replace(/[\s./]+$/, '')
+}
+
 /**
  * 检测路径是否为敏感文件。
- * @param inputPath 输入路径（相对或绝对）
+ * @param inputPath 输入路径（相对或绝对）；匹配在归一化形式上进行（分隔符统一、
+ *   小写、剥尾部修饰），返回值中的 path 保持原样
  * @returns 是否敏感 + 匹配的模式名
  */
 export function detectSensitiveFile(inputPath: string): SensitiveFileResult {
-  // 先检查白名单——白名单优先
+  const normalized = normalizeForMatch(inputPath)
+  const stripped = stripTrailingArtifacts(normalized)
+  // 先检查白名单——白名单优先。归一化与剥尾两种形态都放行：`fixtures/` 目录白名单
+  // 依赖尾部斜杠，剥尾后不能反而失去白名单资格。
   for (const re of WHITELIST_PATTERNS) {
-    if (re.test(inputPath)) return { sensitive: false, path: inputPath }
+    if (re.test(normalized) || re.test(stripped)) return { sensitive: false, path: inputPath }
   }
 
   for (const { name, re } of SENSITIVE_FILE_PATTERNS) {
-    if (re.test(inputPath)) {
+    if (re.test(stripped)) {
       return { sensitive: true, patternName: name, path: inputPath }
     }
   }
@@ -119,9 +151,9 @@ export function detectSensitiveFile(inputPath: string): SensitiveFileResult {
  * @returns 匹配到的敏感文件名数组（可能为空）
  */
 export function detectSensitiveGitAdd(command: string): string[] {
-  // 匹配 `git add <file>` — 提取文件参数
+  // 匹配 `git add <file>` — 提取文件参数（PowerShell/cmd 命令名不区分大小写 → /gi）
   // 来源：prompt security 段 "发现此类文件出现在 git add 中时中止"
-  const gitAddRe = /git\s+add\s+(.+)/g
+  const gitAddRe = /git\s+add\s+(.+)/gi
   const sensitiveFiles: string[] = []
 
   let match: RegExpExecArray | null

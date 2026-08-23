@@ -48,7 +48,11 @@ export async function fetchWithTimeout(
     : timeoutController.signal
 
   try {
-    return await fetch(url, { ...init, signal: combinedSignal, ...(dispatcher ? { dispatcher } : {}) } as RequestInit)
+    // API 出口默认拒绝重定向：聊天/补全端点不存在合法重定向，而 undici 跨源
+    // 重定向只剥 Authorization/Cookie——Anthropic 协议的 x-api-key 会原样转发
+    // 到重定向目标（凭证泄漏）。显式传 init.redirect 的调用方不受影响。
+    const redirect = init.redirect ?? 'error'
+    return await fetch(url, { ...init, redirect, signal: combinedSignal, ...(dispatcher ? { dispatcher } : {}) } as RequestInit)
   } catch (err) {
     const name = (err as Error).name
     // Our pre-first-byte timeout fired. Always wrap with a descriptive message

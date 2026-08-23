@@ -168,7 +168,9 @@ export class OAuthAuth implements AuthProvider {
 
       this.server = server
 
-      server.listen(port, () => {
+      // 绑回环：回调监听只需本机浏览器可达。全接口绑定会把 loopback code
+      // 交换面暴露给 LAN（state+PKCE 已兜底，此处收紧暴露面）。
+      server.listen(port, '127.0.0.1', () => {
         if (this.config.onUserCode) {
           this.config.onUserCode(authUrl)
         } else {

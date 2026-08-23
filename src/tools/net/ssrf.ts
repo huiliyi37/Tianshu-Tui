@@ -28,6 +28,10 @@ for (const [network, prefix] of [
   ['fe80::', 10],
   ['ff00::', 8],
   ['2001:db8::', 32],
+  // NAT64/6to4 过渡段——内嵌 IPv4 的形态可绕过 v4 黑名单直连其映射的
+  // 私有/链路本地地址（如 64:ff9b::a9fe:a9fe → 169.254.169.254）。
+  ['64:ff9b::', 96],
+  ['2002::', 16],
 ] as const) {
   RESERVED_IPS.addSubnet(network, prefix, 'ipv6')
 }

@@ -5,6 +5,7 @@
  * 算法模板即时返回；flash LLM 结果缓存当天，跨天自动失效。
  */
 import type { RouteHandler } from './index.js'
+import { isAuthorizedRequest } from './auth.js'
 import { serverLogger } from './logger.js'
 
 // ── 算法模板池（服务端兜底）───────────────────────────────────────────────
@@ -159,10 +160,10 @@ export function buildGreetingRoute(
   baseUrl: string,
   apiKey: string,
   getConfig?: () => { enabled: boolean; model: string },
+  apiToken?: string,
 ): Record<string, RouteHandler> {
   const DEFAULT_MODEL = 'deepseek-v4-flash'
-  return {
-    'GET /greeting': async (_body, params, _headers): Promise<{ status: number; body: GreetingResponse }> => {
+  const greetingHandler: RouteHandler = async (_body, params, _headers): Promise<{ status: number; body: GreetingResponse }> => {
       const hour = Number(params?.hour)
       const locale = params?.locale ?? 'zh-CN'
 
@@ -197,6 +198,15 @@ export function buildGreetingRoute(
 
       // fallback: 算法模板
       return { status: 200, body: { greeting: pickTemplate(hour), source: 'algorithm' } }
+    }
+  // 路由级鉴权（防御纵深，同 speech-routes）——未传 token 的直连消费方保持原行为。
+  if (!apiToken) return { 'GET /greeting': greetingHandler }
+  return {
+    'GET /greeting': async (body, params, headers, res) => {
+      if (!isAuthorizedRequest({ body, headers }, apiToken)) {
+        return { status: 401, body: { error: 'Unauthorized' } }
+      }
+      return greetingHandler(body, params, headers, res)
     },
   }
 }

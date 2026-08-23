@@ -11,6 +11,10 @@
 
 import { z } from 'zod'
 
+/** 插件名约束——同时是安装目录名与卸载目标。禁止分隔符/`..`/绝对路径形态，
+ *  阻断 manifest name 路径穿越（安装可新建任意可写目录、removePlugin 可递归删除）。 */
+export const PLUGIN_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
 // ── Tool descriptor (market display + conflict detection) ──────────
 
 export const toolDescriptorSchema = z.object({
@@ -54,8 +58,9 @@ export const pluginHookSchema = z.object({
 export type PluginHookDeclaration = z.infer<typeof pluginHookSchema>
 
 export const pluginManifestSchema = z.object({
-  /** Unique plugin id (npm package name convention). */
-  name: z.string().min(1).max(128),
+  /** Unique plugin id (npm package name convention). Charset-restricted:
+   *  doubles as the install directory name — see PLUGIN_NAME_PATTERN. */
+  name: z.string().min(1).max(128).regex(PLUGIN_NAME_PATTERN),
   /** Semver version. */
   version: z.string().min(1).max(32),
   /** Short description for market display. */

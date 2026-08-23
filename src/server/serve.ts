@@ -20,6 +20,7 @@ import { buildMissionRoutes } from './mission-routes.js'
 import { MissionStore } from './mission-store.js'
 import { buildHealthRoute } from './health-route.js'
 import { buildGreetingRoute } from './greeting-route.js'
+import { isAuthorizedRequest } from './auth.js'
 import { LoopHealthMonitor } from './loop-health.js'
 import { buildScheduleRoutes } from './schedule-routes.js'
 import { buildTaskRoutes } from './task-routes.js'
@@ -675,12 +676,17 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   const whisperEngine = whisperBin && whisperModel && existsSync(whisperBin) && existsSync(whisperModel)
     ? createWhisperEngine({ binPath: whisperBin, modelPath: whisperModel })
     : null
-  Object.assign(routes, buildSpeechRoutes(whisperEngine))
+  Object.assign(routes, buildSpeechRoutes(whisperEngine, apiToken))
 
   // Open file in system editor / reveal in file manager — thin wrapper so the
   // Desktop webview can request the sidecar to open a local path without
   // needing a Tauri plugin.
-  routes['POST /open-file'] = async (body) => {
+  routes['POST /open-file'] = async (body, _params, headers) => {
+    // 路由级鉴权（防御纵深）：open-file 会以用户身份启动 explorer/编辑器，
+    // 不能只靠 index.ts 全局门。
+    if (!isAuthorizedRequest({ body, headers }, apiToken)) {
+      return { status: 401, body: { error: 'Unauthorized' } }
+    }
     const filePath = (body as Record<string, unknown>)?.path
     if (typeof filePath !== 'string' || !filePath) {
       return { status: 400, body: { error: 'Missing path' } }
@@ -764,7 +770,7 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   const greetingApiKey = deepseekProvider?.apiKey ?? ctx.apiKey
   Object.assign(
     routes,
-    buildGreetingRoute(greetingBaseUrl, greetingApiKey, () => getGreetingConfig()),
+    buildGreetingRoute(greetingBaseUrl, greetingApiKey, () => getGreetingConfig(), apiToken),
   )
 
   // N3: async orchestration — cron scheduler → task registry → runtime pool that

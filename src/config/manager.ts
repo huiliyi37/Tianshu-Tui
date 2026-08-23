@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
-import { resolve, join } from 'path'
+import { resolve, join, dirname } from 'path'
+import { isProjectTrusted, stripUntrustedProjectKeys, notifyUntrustedOnce } from './project-trust.js'
 import { z } from 'zod'
 import { resolveProfileName, resolveProfileOverlay, resolveHookDisabledEnv } from './profile.js'
 import { configSchema, providerBaseSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, modelConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ProviderCapabilitiesConfig, type ProviderAdvancedConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
@@ -347,8 +348,16 @@ export function loadConfig(options?: {
     migrateV4FlashEffort(cpMigrated)
     migrateLegacyCapabilities(cpMigrated)
     migrateAnthropicProtocol(cpMigrated)
+    // 信任门：项目配置可能来自不可信仓库。未授信时剥离安全敏感键再合并
+    // （SECURITY.md 信任边界——仓库内容不能自我授权审批豁免/进程拉起/出口改向）。
+    const projectDir = dirname(projectPath)
+    const trusted = isProjectTrusted(projectDir)
+    const effective = trusted
+      ? cpMigrated
+      : stripUntrustedProjectKeys(cpMigrated)
+    if (!trusted) notifyUntrustedOnce('config', projectDir)
     // NOTE: no write-back for project configs — they may be version-controlled.
-    base = deepMerge(base, cpMigrated)
+    base = deepMerge(base, effective)
   }
 
   // Layer 3.5: profile overlay（RIVET_PROFILE env / --profile flag，见 profile.ts）。

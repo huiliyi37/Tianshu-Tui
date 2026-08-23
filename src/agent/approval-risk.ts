@@ -3,6 +3,7 @@ import { isAbsolute } from 'node:path'
 import { evaluateMcpPolicy, type McpCapability } from '../mcp/policy.js'
 import type { ContextClaim } from '../context/claims.js'
 import type { Sensorium } from './sensorium.js'
+import { detectSensitiveGitAdd } from '../tools/sensitive-file-detector.js'
 
 export type RiskLevel = 'none' | 'low' | 'medium' | 'high'
 
@@ -43,7 +44,23 @@ const GLOBAL_INSTALL_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
 
 // Destructive commands — uses shared pattern list
 export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
-  /\brm\s+-(?:[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*)\b/,  // rm -rf, rm -fr
+  // rm 递归+强制：合并形态（-rf/-fr）与拆分形态（rm -r -f / --recursive --force，顺序任意）同门禁。
+  // 检查窗口止于下一个命令分隔符（;&| 换行），避免 `rm -r build; ls -f` 跨段误报。
+  // /i：长旗标按「含 r」「含 f」字符判（--verbose 含 r 会被视为递归旗标）——刻意偏严，
+  // 误报只是多一次审批，漏报是静默 rm -rf。
+  /\brm\b(?=[^\n;&|]*\s-{1,2}[a-z]*r)(?=[^\n;&|]*\s-{1,2}[a-z]*f)/i,
+  // ── Windows 原生 shell 破坏族（本产品主力平台无内核沙箱，rm -rf 的等价命令必须同门禁）──
+  // PowerShell Remove-Item -Recurse/-Force（含无歧义缩写 -r/-fo）≈ rm -rf。
+  // PS 命令与参数名不区分大小写 → /i。
+  /\bremove-item\b(?=[^\n;&|]*\s-{1,2}(?:r(?:ecurse)?|fo(?:rce)?)\b)/i,
+  // cmd 递归删除：del /s、rd /s、rmdir /s（开关可分离可乱序：DEL /S /Q）。cmd 大小写不敏感 → /i。
+  /\b(?:del|rd|rmdir)\b(?=[^\n;&|]*\s\/s\b)/i,
+  // GNU find -delete（含 find / -delete）——批量删除，rm -rf 的搜索形态
+  /\bfind\b[^\n|;&]*\s-delete\b/i,
+  // shred——不可恢复覆写删除（比 rm 更彻底，直接进最高档）
+  /\bshred\b/i,
+  // SQL 清表（SECURITY.md 声明 TRUNCATE 受门禁——与既有 DROP TABLE 同档）
+  /\btruncate\s+table\b/i,
   /\bgit\s+reset\s+--hard\b/,
   /\bgit\s+clean\s+-[a-zA-Z]*f\b/,
   /\bgit\s+checkout\s+--(?:\s|$)/,      // discard working-tree changes (panic-chain 事故: checkout -- 不可逆销毁)
@@ -73,8 +90,9 @@ export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
  */
 /**
  * 低风险写命令——在无沙箱环境（Windows 原生）下，auto-safe 模式可自动放行，
- * 避免每次 mkdir/touch/echo>file 都打断用户审批。这些命令的写目标通常是项目内
- * 文件（tool-pipeline 会校验路径在工作区内）。
+ * 避免每次 mkdir/touch/echo>file 都打断用户审批。注意：bash 的写目标不经
+ * tool-pipeline 的文件工具路径校验——放行必须叠加 hasOutOfWorkspaceWriteTarget
+ * （见 tool-pipeline safeWriteInNoSandbox），目标在 cwd 外时仍回人工审批。
  */
 export const SAFE_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\b(?:mkdir|touch|cp)\b/,                          // create/copy — non-destructive
@@ -94,6 +112,7 @@ export const RISKY_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\b(?:chmod|chown|chgrp)\b/,                       // permission/ownership mutations
   /\bgit\s+(?:add|commit|checkout|switch|restore|reset|clean|merge|rebase|cherry-pick|push|pull)\b/,
   /\b(?:npm|pnpm|yarn|bun)\s+(?:remove|rm|update|upgrade|dedupe)\b/,
+  /\brsync\b[^\n]*\s--delete\b/i,                    // rsync --delete —— 目标侧删除（空源目录 = 整目录抹除）
   ...GLOBAL_INSTALL_PATTERNS,                                  // 全局安装——改的是用户环境，auto-safe 不放行
 ]
 
@@ -129,6 +148,7 @@ export const DESTRUCTIVE_EXTENDED_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
   /\btruncate\s+-s\s+0\b/,                  // truncate file to zero
   /\bdd\s+if=.*of=\/dev\//,                 // dd writing to device
   /\bmkfs\b/,                               // filesystem formatting
+  /\bformat-volume\b/i,                     // PowerShell 卷格式化（mkfs 的 PS 等价；PS 大小写不敏感 → /i）
 ]
 
 /** Sed bypass detection — sed modifying security-critical files */
@@ -162,6 +182,34 @@ export function isSafeWriteOnly(command: string): boolean {
   if (RISKY_WRITE_PATTERNS.some(p => p.test(normalized))) return false
   if (DANGEROUS_BASH_PATTERNS.some(p => p.test(normalized))) return false
   return SAFE_WRITE_PATTERNS.some(p => p.test(normalized))
+}
+
+/**
+ * 无沙箱 auto-safe「安全写」自动放行的第二道闸：命令 token 里只要有一个指向
+ * cwd 之外（~ / POSIX 绝对 / Windows 盘符 / $VAR 或 %VAR% 展开 / .. 穿越），
+ * 就不能按工作区内写放行。tool-pipeline 的路径校验只覆盖文件工具——bash 的
+ * 写目标（重定向、cp/mkdir 参数）不经 validatePathSafe，`echo key >> ~/.ssh/authorized_keys`
+ * / `cp payload D:\Startup\x.exe` 若不在此拦下，会在 auto-safe 下零提示执行。
+ * token 先剥 /dev/null 静默重定向（与 bashCommandMayWrite 同口径），再按重定向/
+ * 管道符切开以覆盖 `echo x>>~/f` 粘接形态；`./out.txt`、`src/x`、裸文件名不受影响。
+ */
+export function hasOutOfWorkspaceWriteTarget(command: string): boolean {
+  for (const token of stripDevNullRedirects(command).split(/\s+/)) {
+    for (const raw of token.split(/[<>|;&]+/)) {
+      // 剥首尾引号：`>"D:\x\y"` 的目标与 `~/f'` 等引号包裹形态同样要判
+      const frag = raw.replace(/^['"]+|['"]+$/g, '')
+      if (frag === '') continue
+      if (frag.startsWith('~')) return true
+      if (frag.startsWith('/') || frag.startsWith('\\')) return true
+      if (/^[A-Za-z]:[\\/]/.test(frag)) return true
+      // $VAR / ${VAR} 单独或带路径后缀——展开结果位置未知，fail-closed；
+      // awk 的 $1 位置参数（数字开头）不在此列，避免误伤常规文本处理
+      if (/^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)(?:[\\/].*)?$/.test(frag)) return true
+      if (/%[^%\s]+%/.test(frag)) return true
+      if (frag === '..' || frag.startsWith('../') || frag.startsWith('..\\')) return true
+    }
+  }
+  return false
 }
 
 /** Detect scope-bypassing bash git commands (unscoped add/commit/stash). */
@@ -299,6 +347,12 @@ export function assessToolRisk(
       reasons.push('unscoped git command bypasses scope — use deliver_task or git tool with ownedFiles instead')
       level = 'high'
     }
+    // git add 敏感文件硬门（detectSensitiveGitAdd 此前零生产调用点）：命令文本暂存
+    // 凭据/密钥文件 → high，auto-safe 也要走审批。检测器不抛——不可解析命令只是漏报，不会崩。
+    if (detectSensitiveGitAdd(cmd).length > 0) {
+      reasons.push('git add stages credential/key files — prompt hard-gate')
+      level = 'high'
+    }
     // Command injection detection
     for (const p of INJECTION_PATTERNS) {
       if (p.test(cmd)) {
@@ -335,6 +389,17 @@ export function assessToolRisk(
   // Write operations
   if (toolName === 'write_file' || toolName === 'edit_file') {
     level = level === 'none' ? 'low' : level
+  }
+
+  // export_file：外部导出面。destination/source 任一形似工作区外路径（绝对路径/
+  // 盘符/~）即至少 medium——此处无 cwd 可用，按与上面 path-traversal 相同的
+  // 绝对路径启发式判；主闸在 pipeline 的 out-of-workspace 路由（pathGrantNeed）。
+  if (toolName === 'export_file') {
+    const exportTargets = [input.destination_path, input.source_path].filter((v): v is string => typeof v === 'string')
+    if (exportTargets.some(p => isAbsolute(p) || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('~'))) {
+      reasons.push('export to out-of-workspace path')
+      level = level === 'high' ? 'high' : 'medium'
+    }
   }
 
   // Web fetch URL risk

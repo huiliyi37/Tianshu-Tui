@@ -21,8 +21,9 @@
  *   fetch-native-sqlite.js — CLI 用户 postinstall，从镜像快速拉取
  */
 
-import { createWriteStream, existsSync, mkdirSync, copyFileSync, writeFileSync, rmSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { mkdir, unlink } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -96,6 +97,50 @@ function writeFailedMarker(lastError) {
 }
 
 const TARBALL = `better-sqlite3-v${version}-node-v${ABI}-${PLATFORM_TOKEN}-${ARCH_TOKEN}.tar.gz`
+
+// ── 完整性钉扎（供应链防线）────────────────────────────────────────────
+// 官方 release tarball 的 SHA-256（v12.10.0；ABI 127=node22、137=node24）。
+// 来源：github.com 直连下载计算，npmmirror 双源交叉验证一致。
+// 升级 better-sqlite3 版本时须重新生成本表（sha256sum 各平台 tarball），
+// 否则新版本走「无钉扎」策略（见 verifyTarball）——kkgithub 镜像将拒绝服务。
+const SHA256_PINNED = {
+  'better-sqlite3-v12.10.0-node-v127-darwin-arm64.tar.gz': '35533f9ada82cb3f33760c1dc2f128f77c2b34ec2b2ede722824cb64cd50a46a',
+  'better-sqlite3-v12.10.0-node-v127-darwin-x64.tar.gz': '8d2ef0eb7f880f88882f0a7a7362a15e2d210a077681f0672d0dfc8b919bd91b',
+  'better-sqlite3-v12.10.0-node-v127-linux-arm64.tar.gz': 'efb625877ea517be6003c14dbabdb748d0ac172ab50bc4e5af08c2cb272b70c6',
+  'better-sqlite3-v12.10.0-node-v127-linux-x64.tar.gz': '899dcec7d0e4e2ec35db783a9155b878ae15754512585de7352bbd33cb1d6c48',
+  'better-sqlite3-v12.10.0-node-v127-win32-arm64.tar.gz': '81ab2327e76e8cc6290a08528d41f19b913d4c5146bfd12c159970fa59559d48',
+  'better-sqlite3-v12.10.0-node-v127-win32-x64.tar.gz': '86a12ba6f19ecf1e4db4effaf5918e716d4d4fb60b0316e18d95d569ba62d6bc',
+  'better-sqlite3-v12.10.0-node-v137-darwin-arm64.tar.gz': 'b140983c8befcef30532ea615aa106c770f2f95cd20994d31ca593c0b4e85423',
+  'better-sqlite3-v12.10.0-node-v137-darwin-x64.tar.gz': 'a02f8e9c2024f2bd4386e58671524fcf722c5187b549f46a955d8e9c3b22f733',
+  'better-sqlite3-v12.10.0-node-v137-linux-arm64.tar.gz': '7648f3a8295cf03a036eb392b66fbef75347662d654f6ab558f5f33c9e47d69a',
+  'better-sqlite3-v12.10.0-node-v137-linux-x64.tar.gz': 'c2f7503e6cc3a2b1dc9fd03e7194934438f42e0724ecac6696da0582585362f2',
+  'better-sqlite3-v12.10.0-node-v137-win32-arm64.tar.gz': '406e45058184a8f2d2f541fa8deb06933e29bf4dc384fa069c0930dde6e75681',
+  'better-sqlite3-v12.10.0-node-v137-win32-x64.tar.gz': '0f6d948e6438f64c983d08a2048ef10d6f467f36a8c08f20d31f585c019eb83c',
+}
+
+/**
+ * 校验策略：
+ *   有钉扎    → 所有镜像一律校验，不匹配即硬失败换下一路（被替换的镜像无法
+ *               投毒——产物是加载进 agent 进程的原生代码）；
+ *   无钉扎    → 仅允许既有基础设施源（npmmirror registry/CDN、github 官方），
+ *               第三方代理 kkgithub 拒绝——版本升级漏更新哈希表时收窄暴露面，
+ *               而不是放行全部镜像。
+ */
+async function verifyTarball(tmpTar, mirrorName) {
+  const expected = SHA256_PINNED[TARBALL]
+  if (!expected) {
+    if (mirrorName === 'kkgithub') {
+      throw new Error(`no SHA-256 pin for ${TARBALL} — third-party proxy rejected without pin (regenerate SHA256_PINNED on version bump)`)
+    }
+    console.warn(`[fetch-native-sqlite] ⚠ no SHA-256 pin for ${TARBALL} — allowing infra mirror (${mirrorName}) unverified`)
+    return
+  }
+  const hash = createHash('sha256').update(readFileSync(tmpTar)).digest('hex')
+  if (hash !== expected) {
+    throw new Error(`SHA-256 mismatch for ${TARBALL} from ${mirrorName}: got ${hash}`)
+  }
+  console.log(`[fetch-native-sqlite] SHA-256 verified (${hash.slice(0, 12)}…)`)
+}
 
 // ── 镜像源（按优先级）────────────────────────────────────────────────
 // 四路预编译 + 一路源码编译（stage 4），穷尽后才降级——不能随便降级到内存模式。
@@ -219,6 +264,7 @@ async function downloadAndExtract(url, destDir, mirrorName) {
 
   try {
     await downloadFile(url, tmpTar)
+    await verifyTarball(tmpTar, mirrorName)
     await extractNodeBinary(tmpTar, destDir)
   } finally {
     try { await unlink(tmpTar) } catch { /* ignore */ }

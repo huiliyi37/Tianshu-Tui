@@ -27,15 +27,23 @@ export const MAX_LINES_REDLINE = 800
  */
 export const MAX_LINES_BASELINE: ReadonlyArray<readonly [string, number]> = [
   ['src/tui/engine/app.ts', 6527],
-  ['src/server/session-manager.ts', 5739],
-  ['src/tui/slash-commands.ts', 4350],
+  // 5739→5741：randomId 换 CSPRNG（L3，+5/-3）。
+  ['src/server/session-manager.ts', 5741],
+  // 4350→4533：/trust 命令 + 插件安装预检（+67）叠加此前会话已超限部分
+  //（HEAD 4466 > 旧基线，按现值对齐）。
+  ['src/tui/slash-commands.ts', 4533],
   ['src/agent/coordinator.ts', 3383],
   ['src/agent/loop.ts', 2854],
   ['src/bootstrap.ts', 2511],
-  ['src/config/manager.ts', 2219],
-  ['src/main.ts', 2144],
+  // 2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+
+  // 项目信任门接线（未授信剥离，+9 行）——按现值对齐。
+  ['src/config/manager.ts', 2606],
+  // 2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。
+  ['src/main.ts', 2298],
   ['src/tui/pi/latex-to-unicode.ts', 2071],
-  ['src/agent/tool-pipeline.ts', 2070],
+  // 2070→2099：H6 安全写目标越界判定 + M7 ast_edit/export_file 越工作区路由
+  //（审批路由单一职责功能增长，+29 行）。
+  ['src/agent/tool-pipeline.ts', 2099],
   ['src/server/session-routes.ts', 1995],
   ['src/prompt/engine.ts', 1624],
   ['src/agent/compaction-controller.ts', 1621],

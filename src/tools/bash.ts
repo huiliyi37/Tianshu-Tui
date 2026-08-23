@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DANGEROUS_BASH_PATTERNS } from '../agent/approval-risk.js'
+import { detectSensitiveGitAdd } from './sensitive-file-detector.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
@@ -933,9 +934,15 @@ export const BASH_TOOL: Tool = {
     // Check BOTH raw and rewritten commands.
     // rtkRewrite may expand aliases/macros into dangerous commands
     // that the raw form does not match.
-    return DANGEROUS_BASH_PATTERNS.some(
+    if (DANGEROUS_BASH_PATTERNS.some(
       pattern => pattern.test(rawCommand) || pattern.test(rewrittenCommand),
-    )
+    )) {
+      return true
+    }
+    // git add 敏感文件硬门（prompt 安全纪律的运行时落地）：命令文本暂存凭据/密钥
+    // 文件 → 需审批。检测器 fail-closed 且不抛——不可解析的命令最多漏报，不会崩。
+    return detectSensitiveGitAdd(rawCommand).length > 0
+      || detectSensitiveGitAdd(rewrittenCommand).length > 0
   },
 
   isConcurrencySafe: () => false,

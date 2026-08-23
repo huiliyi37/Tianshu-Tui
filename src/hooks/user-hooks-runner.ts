@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { ANTI_INTERACTIVE_ENV } from '../tools/resolved-env.js'
+import { isProjectTrusted, notifyUntrustedOnce } from '../config/project-trust.js'
 
 export type HookEvent =
   | 'preTurn'
@@ -50,6 +51,13 @@ export const VALID_EVENTS = new Set<HookEvent>(['preTurn', 'postTurn', 'postTool
 export function loadHooksConfig(cwd: string): HooksConfig {
   const path = join(cwd, '.rivet', 'hooks.json')
   if (!existsSync(path)) return { hooks: [] }
+
+  // 信任门：hooks.json 属仓库内容，未授信项目一律不执行（脚本经 shell 跑、
+  // 拿完整用户权限——SECURITY.md 信任边界要求它不能自我授权）。
+  if (!isProjectTrusted(cwd)) {
+    notifyUntrustedOnce('hooks', cwd)
+    return { hooks: [] }
+  }
 
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { hooks?: HookEntry[] }

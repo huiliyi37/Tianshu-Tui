@@ -82,7 +82,9 @@ export class SessionBatchWriter {
     if (text.length > 0) {
       this.ensureCodecFormat()
       const frame = encodeBatch(text)
-      if (frame.length > 0) appendFileSync(this.filePath, frame)
+      // mode 仅在文件创建时生效——首次落盘即 0600（转录含未脱敏对话，
+      // fs-atomic 的 0600 只覆盖后续重写路径）。
+      if (frame.length > 0) appendFileSync(this.filePath, frame, { mode: 0o600 })
     }
   }
 
@@ -99,7 +101,7 @@ export class SessionBatchWriter {
     this.ensureCodecFormat()
     const frame = encodeBatch(text)
     if (frame.length === 0) return
-    await appendFile(this.filePath, frame)
+    await appendFile(this.filePath, frame, { mode: 0o600 })
     await this.fdatasyncQuiet()
   }
 

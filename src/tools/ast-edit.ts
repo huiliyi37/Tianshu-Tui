@@ -8,6 +8,7 @@ import { incrementEditFailCount, resetEditFailCount } from './read-file.js'
 import { checkSyntax } from './syntax-check.js'
 import { trackFileChange, restoreLatestBackup } from '../agent/recovery-stack.js'
 import { loadAstGrepNapi } from './ast-grep-napi.js'
+import { validatePathSafe } from './path-validate.js'
 
 /** Post-write syntax verification + rollback for ast_edit. Default on;
  *  RIVET_AST_EDIT_VERIFY=0 falls back to the pre-write ERROR-node gate only. */
@@ -152,10 +153,23 @@ export const AST_EDIT_TOOL: Tool = {
     await ensureDynamicLangsRegistered(napi)
 
     const allFiles: string[] = []
+    const mode = dryRun ? 'read' : 'write'
+    const cwd = params.cwd ?? process.cwd()
     for (const p of paths) {
-      const resolved = resolve(params.cwd ?? process.cwd(), p)
+      // 工作区边界 + 授权 + 敏感文件硬门——ast_edit 是写类工具，路径必须与其余
+      // 文件工具走同一校验（此前完全绕过 validatePath，是沙箱逃逸面）。
+      const check = validatePathSafe(cwd, p, mode)
+      if (!check.ok) return { content: `错误：${check.error}`, isError: true }
       try {
-        allFiles.push(...await collectFiles(resolved))
+        const collected = await collectFiles(check.path)
+        // 收集结果同样过校验：工作区内的符号链接目录可能指向外部。
+        for (const f of collected) {
+          const fcheck = validatePathSafe(cwd, f, mode)
+          if (!fcheck.ok) {
+            return { content: `错误：${fcheck.error}`, isError: true }
+          }
+          allFiles.push(fcheck.path)
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         return { content: `错误：${message}`, isError: true }

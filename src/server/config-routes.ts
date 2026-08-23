@@ -82,7 +82,8 @@ import {
 import { applyConfiguredPathGrants, listPersistedGrants, revokeGrant } from '../tools/path-grants.js'
 import { expandHome } from '../platform.js'
 import { resolve, isAbsolute } from 'node:path'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, mkdirSync } from 'node:fs'
+import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'node:path'
 import { rivetHome } from '../config/paths.js'
 import { allPresetKeys, resolvePreset, resolvePresetBaseUrl, resolvePresetLabel } from '../api/pro-registry.js'
@@ -981,7 +982,9 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       try {
         const filePath = join(rivetHome(), 'deepseek-platform-auth.json')
         mkdirSync(join(rivetHome()), { recursive: true })
-        writeFileSync(filePath, JSON.stringify({ token, cookies: cookies ?? '', savedAt: Date.now() }), 'utf-8')
+        // 原子写（0600）——平台会话 token 与 Cookie 属账号级凭证，与 secrets.json
+        // 同级保护；此前的裸 writeFileSync 以默认 0644 落盘。
+        writeFileAtomicSync(filePath, JSON.stringify({ token, cookies: cookies ?? '', savedAt: Date.now() }) + '\n')
         return { status: 200, body: { ok: true, loggedIn: true } }
       } catch (err) {
         return { status: 500, body: { error: (err as Error).message } }
@@ -991,7 +994,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
     'DELETE /config/deepseek/auth': withAuth(() => {
       const filePath = join(rivetHome(), 'deepseek-platform-auth.json')
       if (existsSync(filePath)) {
-        try { writeFileSync(filePath, '{}', 'utf-8') } catch { /* best-effort */ }
+        try { writeFileAtomicSync(filePath, '{}\n') } catch { /* best-effort */ }
       }
       return { status: 200, body: { ok: true, loggedIn: false } }
     }, apiToken),

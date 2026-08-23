@@ -17,6 +17,7 @@
  *    across sessions (B4).
  */
 import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
+import { randomUUID } from 'node:crypto'
 import { debugLog } from '../utils/debug.js'
 import { collectPostBoundaryEditIds } from '../agent/file-history.js'
 import { loadConfig } from '../config/manager.js'
@@ -5630,9 +5631,10 @@ export class RuntimeSessionManager {
 }
 
 function randomId(): string {
-  return (
-    Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
-  )
+  // CSPRNG：会话/请求 id 可见于路由路径——时间戳+Math.random（≈41 位熵）
+  // 可预测，若未来任一路由把「知道 id」当授权即成漏洞。长度与旧格式相近，
+  // 保留日期前缀便于人工排查。
+  return new Date().toISOString().slice(0, 10).replace(/-/g, '') + randomUUID().replace(/-/g, '').slice(0, 12)
 }
 
 /** Phase 2 — queue lane 条目归并进新 prompt 时 lane 部分的小节头。 */

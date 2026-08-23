@@ -251,3 +251,61 @@ describe('ast-edit onFileWrite', () => {
     assert.ok(!out.includes('\\n'), `multi-line change should not be collapsed to literal \\n: ${out}`)
   })
 })
+
+// ── 工作区边界与敏感文件门（安全修复：ast_edit 曾完全绕过 validatePath）──────
+
+describe('ast_edit path validation', () => {
+  async function callRaw(params: Record<string, unknown>) {
+    return astEdit.execute({
+      input: params,
+      cwd: testDir,
+      toolUseId: 'test-edit',
+      abortSignal: new AbortController().signal,
+      onOutput: undefined,
+    } as unknown as ToolCallParams)
+  }
+
+  it('rejects a path outside the workspace (escape via ..)', async () => {
+    const result = await callRaw({
+      ops: [{ find: 'var $A = $B', replace: 'var $A = $B' }],
+      paths: ['../escape-target.ts'],
+      dryRun: true,
+    })
+    assert.ok(result.isError, `expected workspace-boundary rejection, got: ${result.content}`)
+    assert.match(result.content, /工作区|workspace|权限|boundary|outside/i)
+  })
+
+  it('rejects an absolute path outside the workspace', async () => {
+    const result = await callRaw({
+      ops: [{ find: 'var $A = $B', replace: 'var $A = $B' }],
+      paths: [join(testDir, '..', 'abs-escape.ts')],
+      dryRun: true,
+    })
+    assert.ok(result.isError, `expected rejection, got: ${result.content}`)
+  })
+
+  it('rejects a sensitive file (.env) even inside the workspace', async () => {
+    await writeFile(join(testDir, '.env'), 'KEY=value\n')
+    try {
+      const result = await callRaw({
+        ops: [{ find: 'var $A = $B', replace: 'var $A = $B' }],
+        paths: ['.env'],
+        dryRun: true,
+      })
+      assert.ok(result.isError, `expected sensitive-file rejection, got: ${result.content}`)
+      assert.match(result.content, /敏感|sensitive/i)
+    } finally {
+      await rm(join(testDir, '.env'), { force: true })
+    }
+  })
+
+  it('still allows an in-workspace file after validation wiring', async () => {
+    const out = await call({
+      ops: [{ find: 'var a = 1', replace: 'var a = 2' }],
+      paths: ['other.ts'],
+      lang: 'TypeScript',
+      dryRun: true,
+    })
+    assert.ok(out.length > 0)
+  })
+})
