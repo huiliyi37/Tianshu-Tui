@@ -274,6 +274,14 @@ export class TurnStepProducer {
     }
 
     this.self.bindSessionDomain(userInput, callbacks)
+    if (
+      this.self.domainWasAutoResolved &&
+      this.self.getSessionTurnCount() > 0 &&
+      this.self.driftDetector
+    ) {
+      const drift = this.self.driftDetector.evaluate(userInput)
+      if (drift) callbacks.onDomainDrift?.(drift)
+    }
     this.self.contextInjection.recordUserInputClaims(userInput)
     this.self.contextInjection.refreshPlaybookLessons(userInput)
 

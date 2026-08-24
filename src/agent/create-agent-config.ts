@@ -62,7 +62,8 @@ export interface AgentConfigInput {
   crossSessionEnabled?: boolean
   /** Session Auto keyword routing; default true（auto 池内匹配，未命中回退天权）. */
   domainKeywordRouting?: boolean
-  /** 默认星域（qiming | … | auto）。非 auto 时 bindSessionDomain 首次钉定，auto 时走关键词路由。 */
+  /** 默认星域（qiming | … | auto）。未作会话选择时非 auto 默认首次钉定；
+   * 默认或会话选择为 Auto 时走关键词路由。 */
   defaultDomain?: string
   goalJudge?: { enabled?: boolean; maxRuns?: number; browser?: boolean }
   auth?: AuthProvider

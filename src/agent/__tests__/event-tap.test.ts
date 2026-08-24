@@ -314,6 +314,26 @@ describe('event-tap — 可选回调不被凭空具现', () => {
     assert.equal(tap.onPhaseChange, undefined)
     assert.equal(tap.onDelegationActivity, undefined)
     assert.equal(tap.onIntentNote, undefined)
+    assert.equal(tap.onDomainDrift, undefined)
+  })
+
+  test('domain drift 只在内层定义时投影为同名事件', () => {
+    const seen: string[] = []
+    const { tap, rec } = harness({
+      onDomainDrift: (drift) => { seen.push(drift.recommendedId) },
+    })
+
+    tap.onDomainDrift!({
+      currentId: 'tianliang',
+      currentName: '天梁',
+      recommendedId: 'tianquan',
+      recommendedName: '天权',
+      matchedKeywords: ['审查', '方案'],
+    })
+
+    assert.deepEqual(seen, ['tianquan'])
+    assert.equal(at(rec, 0).type, 'domain_drift')
+    assert.equal(at(rec, 0).data.recommendedId, 'tianquan')
   })
 
   test('内层定义了才包裹，并发出对应事件', () => {

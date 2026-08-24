@@ -62,6 +62,7 @@ import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { resolveActiveDomain, type ActiveStarDomain, type StarDomainId } from './star-domain.js'
 import { starDomainRegistry } from './star-domain-registry.js'
+import { DomainDriftDetector } from './domain-drift-detector.js'
 import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
 import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
 import { buildDepartureMilestone } from '../constellation/milestone.js'
@@ -282,6 +283,12 @@ export class AgentLoop {
   lastConflictCheckCount = 0
   predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   sessionDomain: ActiveStarDomain | null | undefined
+  /** Distinguishes an untouched session from an explicit per-session Auto
+   * selection while both still expose `sessionDomain === undefined` before
+   * the first bind. */
+  private sessionDomainSelection: 'default' | 'auto' | 'manual' = 'default'
+  private _domainWasAutoResolved = false
+  private _driftDetector: DomainDriftDetector | null = null
   /** Agent's self-chosen departure mark (leave_mark tool); sealed by the
    *  constellation post-session hook. Null until the agent leaves a mark. */
   pendingLeaveMark: import('../tools/types.js').LeaveMarkInput | null = null
@@ -1164,10 +1171,10 @@ export class AgentLoop {
 
   bindSessionDomain(taskDescription: string, callbacks?: AgentCallbacks): void {
     if (this.sessionDomain !== undefined) return
-    // 首次绑定前检查 defaultDomain 配置——非 auto 时钉定，让所有入口
-    //（TUI/headless/server/外部）统一在此钉定，不再依赖入口层各显神通。
+    // 未作会话级选择时才消费持久 defaultDomain。显式 Auto 同样以
+    // sessionDomain=undefined 等待首条任务，但必须越过这里进入关键词路由。
     const starSoulEnabled = isStarSoulEnabled()
-    if (starSoulEnabled) {
+    if (starSoulEnabled && this.sessionDomainSelection !== 'auto') {
       const key = this.config.defaultDomain ?? 'qiming'
       if (key !== 'auto') {
         const pinned = starDomainRegistry.get(key) ?? starDomainRegistry.get('qiming')
@@ -1188,13 +1195,16 @@ export class AgentLoop {
     // domainKeywordRouting 默认 true：Auto 按消息在 DOMAIN_AUTO_POOL（四个均衡
     // 工程域 + 自定义域）内 matchDomain，未命中回退天权（DEFAULT_DOMAIN）；
     // 显式 false 时固定落到 DEFAULT_DOMAIN。池外特化域（含华盖）仅手动/钉定/
-    // 委派进入。仅 defaultDomain='auto' 的会话走到这里，其余已被钉定。
+    // 委派进入。defaultDomain='auto' 或会话显式 Auto 走到这里，其余已钉定。
     const resolution = starSoulEnabled
       ? resolveActiveDomain(taskDescription, {
           keywordRouting: this.config.domainKeywordRouting !== false,
         })
       : null
     this.sessionDomain = resolution?.domain ?? null
+    this._domainWasAutoResolved = resolution !== null
+    this._driftDetector = resolution ? new DomainDriftDetector(resolution.domain.id) : null
+    if (resolution) this.sessionDomainSelection = 'auto'
     this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(this.sessionDomain))
     this.persistSessionDomain()
     if (resolution) {
@@ -1534,13 +1544,17 @@ export class AgentLoop {
     return 'task'
   }
 
-  /** Get the currently active star domain (null = no domain, undefined = not yet resolved). */
+  /** Get the active domain (null = disabled/unavailable, undefined = not yet
+   * resolved, including an explicit Auto selection waiting for its next task). */
   getSessionDomain(): ActiveStarDomain | null | undefined {
     return this.sessionDomain
   }
 
   /** Manually set the active star domain. Pass null to disable, or a valid ActiveStarDomain. */
   setSessionDomain(domain: ActiveStarDomain | null): void {
+    this.sessionDomainSelection = 'manual'
+    this._domainWasAutoResolved = false
+    this._driftDetector = null
     this.sessionDomain = domain
     this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(domain))
     this.persistSessionDomain()
@@ -1548,8 +1562,23 @@ export class AgentLoop {
 
   /** Reset domain to undefined so the next run() will auto-detect from user input. */
   resetSessionDomain(): void {
+    this.sessionDomainSelection = 'auto'
+    this._domainWasAutoResolved = false
+    this._driftDetector = null
     this.sessionDomain = undefined
     this.config.promptEngine.setActiveDomain(undefined)
+    this.persistSessionDomain()
+  }
+
+  /** Restore a previously resolved Auto session without re-routing or
+   * re-emitting onDomainResolved. Unlike manual selection, drift observation
+   * remains active for subsequent turns. */
+  restoreAutoResolvedDomain(domain: ActiveStarDomain): void {
+    this.sessionDomainSelection = 'auto'
+    this._domainWasAutoResolved = true
+    this._driftDetector = new DomainDriftDetector(domain.id)
+    this.sessionDomain = domain
+    this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(domain))
     this.persistSessionDomain()
   }
 
@@ -1560,6 +1589,14 @@ export class AgentLoop {
    */
   getSessionTurnCount(): number {
     return this.session.getTurnCount()
+  }
+
+  get domainWasAutoResolved(): boolean {
+    return this._domainWasAutoResolved
+  }
+
+  get driftDetector(): DomainDriftDetector | null {
+    return this._driftDetector
   }
 
   /**

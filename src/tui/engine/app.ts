@@ -307,6 +307,7 @@ import { describeIntentNote } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { DelegationActivity } from '../../tools/types.js'
 import type { AutonomyCheckpointInfo } from '../../agent/loop-types.js'
+import type { DomainDriftResult } from '../../agent/domain-drift-detector.js'
 import { FleetRegistry } from '../fleet-registry.js'
 import { JobRegistry, type JobRow } from '../job-registry.js'
 import { renderJobsOverlay } from '../format/jobs-panel.js'
@@ -333,6 +334,7 @@ export interface AgentCallbacks {
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; voluntary?: boolean; source?: string }) => void
   onIntentNote?: (intent: IntentPreview) => void
+  onDomainDrift?: (drift: DomainDriftResult) => void
   onSteerDrain?: () => string | null
   /** C3 — autonomy checkpoint pause (cruise) / progress ping (unleashed). */
   onAutonomyCheckpoint?: (info: AutonomyCheckpointInfo) => void

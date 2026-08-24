@@ -52,6 +52,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { formatWelcome } from './tui/format/welcome.js'
 import { HANDOFF_NUDGE_RATIO, formatHandoffNudge } from './tui/handoff.js'
+import { formatDomainDriftNudge } from './tui/domain-drift-nudge.js'
 import { color } from './tui/engine/ansi.js'
 import type { RewindMode } from './tui/format/rewind.js'
 import { buildDisconnectEntries, toChoiceEntries, buildConfirmTitle, buildDisconnectImpactText, buildPostDeleteMessage, buildRetargetEntries, toRetargetChoiceEntries, buildRetargetTitle, type DisconnectEntry, type PostDeleteRuntimeOutcome } from './tui/disconnect-flow.js'
@@ -1967,7 +1968,9 @@ async function main() {
     // 判定空闲时触发（busy 时输入已被 TuiApp 入队 steerBuffer），故此处无需再自管
     // isStreaming 标志——正是「双门异步清除时机不同」造成 Esc 后死会话的根因。
     // run 生命周期回调（完成/错误/中止）由 bridge 桥接到 TuiApp，并带世代守卫。
-    const base = wrapCallbacksWithTuiApp(app!)
+    const base = wrapCallbacksWithTuiApp(app!, {
+      onDomainDrift: (drift) => app!.commitStatic(formatDomainDriftNudge(drift)),
+    })
     // The tap wraps the OUTSIDE of the bridge rather than riding its `original`
     // parameter: bridge.ts lets `original.onApprovalRequired` *replace* the
     // app's handler (bridge.ts:77-80), so passing an observer in there would

@@ -154,6 +154,13 @@ export function tapAgentCallbacks(
       fn(shift)
     }
   }
+  if (inner.onDomainDrift) {
+    const fn = inner.onDomainDrift.bind(inner)
+    tapped.onDomainDrift = (drift) => {
+      emit('domain_drift', redactValue(drift) as Record<string, unknown>)
+      fn(drift)
+    }
+  }
   if (inner.onDelegationActivity) {
     const fn = inner.onDelegationActivity.bind(inner)
     // 投影与 session-manager.appendDelegation 逐字段对齐（含 workerId/parentId

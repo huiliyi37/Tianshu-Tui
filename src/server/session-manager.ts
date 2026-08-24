@@ -364,6 +364,8 @@ export interface ManagedAgent {
   setSessionDomain?(domain: ActiveStarDomain | null): void
   /** PlusMenu (domain) — reset to Auto (next run auto-detects from input). */
   resetSessionDomain?(): void
+  /** Restore a persisted Auto resolution while retaining drift observation. */
+  restoreAutoResolvedDomain?(domain: ActiveStarDomain): void
   /** PlusMenu (domain) — read the current selection (Auto when undefined). */
   getSessionDomain?(): ActiveStarDomain | null | undefined
   /**
@@ -2646,8 +2648,9 @@ export class RuntimeSessionManager {
    * Re-apply the session's PlusMenu selections (star domain, disabled skills) to
    * its live agent. Idempotent — called both after a lazy build (ensureAgent)
    * and after a model rebuild (switchModel) so the selections survive a fresh
-   * AgentLoop. A domainState of undefined means Auto → leave the agent's own
-   * auto-detection untouched.
+   * AgentLoop. A domainState of undefined means an explicit session Auto and
+   * must be replayed: a fresh AgentLoop otherwise mistakes it for "unselected"
+   * and re-applies its persistent defaultDomain.
    */
   private applySelections(session: InternalSession): void {
     const agent = session.agent
@@ -2660,9 +2663,18 @@ export class RuntimeSessionManager {
     try {
       if (session.domainState === null) agent.setSessionDomain?.(null)
       else if (session.domainState !== undefined) agent.setSessionDomain?.(session.domainState)
-      else if (session.record.domain === 'auto' && session.record.resolvedDomain) {
-        const restored = resolveDomainState(session.record.resolvedDomain.key)
-        if (restored?.state) agent.setSessionDomain?.(restored.state)
+      else if (session.record.domain === 'auto') {
+        if (session.record.resolvedDomain) {
+          const restored = resolveDomainState(session.record.resolvedDomain.key)
+          if (restored?.state) {
+            if (agent.restoreAutoResolvedDomain) agent.restoreAutoResolvedDomain(restored.state)
+            else agent.setSessionDomain?.(restored.state)
+          } else {
+            agent.resetSessionDomain?.()
+          }
+        } else {
+          agent.resetSessionDomain?.()
+        }
       }
     } catch { /* non-fatal */ }
     try {
@@ -4840,6 +4852,18 @@ export class RuntimeSessionManager {
         }
         this.append(session, 'domain_resolved', { ...eventPayload })
         this.persistRecord(session)
+      },
+      onDomainDrift: (drift) => {
+        if (!isActive()) return
+        this.append(session, 'domain_drift', {
+          currentId: redactText(drift.currentId),
+          currentName: truncateUtf16Safe(redactText(drift.currentName), 160),
+          recommendedId: redactText(drift.recommendedId),
+          recommendedName: truncateUtf16Safe(redactText(drift.recommendedName), 160),
+          matchedKeywords: drift.matchedKeywords
+            .slice(0, 4)
+            .map((keyword) => truncateUtf16Safe(redactText(keyword), 80)),
+        })
       },
       onTextDelta: (text) => {
         if (!isActive()) return

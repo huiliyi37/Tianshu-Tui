@@ -768,6 +768,7 @@ export function buildManagedAgent(
     // PlusMenu — star domain (delegate to the live agent).
     setSessionDomain: (domain) => agent.setSessionDomain(domain),
     resetSessionDomain: () => agent.resetSessionDomain(),
+    restoreAutoResolvedDomain: (domain) => agent.restoreAutoResolvedDomain(domain),
     getSessionDomain: () => agent.getSessionDomain(),
     // PlusMenu — skills (per-session discovery filter on the live agent).
     setDisabledSkills: (names) => agent.setDisabledSkills(names),
