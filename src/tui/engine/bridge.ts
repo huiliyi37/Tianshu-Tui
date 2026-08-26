@@ -89,6 +89,10 @@ export function wrapCallbacksWithTuiApp(
       app.callbacks.onPhaseChange?.(phase, detail)
       original.onPhaseChange?.(phase, detail)
     },
+    onDomainDrift: (drift) => {
+      if (!live()) return
+      original.onDomainDrift?.(drift)
+    },
     onIntentNote: (intent) => {
       // 迟到的旧 run 方向提示 → 丢弃，不为已死的 run 追加时间线卡片。
       if (!live()) return

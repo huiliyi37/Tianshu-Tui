@@ -6,32 +6,105 @@
  * engine 为 null 时（whisper 运行时未打包/未就绪）返回 503，前端据此降级。
  *
  * GET /speech/model/status — 引擎就绪状态（设置页展示）。
- *   按 RIVET_WHISPER_BIN / RIVET_WHISPER_MODEL 环境变量探测文件存在性，
- *   探测不到 → false；model 为当前启用模型的文件名（无则 null）。
+ *   当前模型 = models/.active（下载即切换的持久化选择）优先，回退
+ *   RIVET_WHISPER_MODEL；按文件存在性探测。
  *   返回 200 { binReady, modelReady, model, installing }。
  *
- * POST /speech/model/install — 下载 whisper 模型（设置页 tiny/base 切换）。
- * body: { model: 'tiny'|'base' }；spawn 系统 node 执行
- *   desktop/scripts/fetch-whisper-runtime.js（--model tiny|base）。
- *   安装状态存模块级变量防并发；完成返回 200 { ok }，
- *   失败 500 { error: 'model-install-failed' }，进行中 409 { error: 'install-in-progress' }。
+ * POST /speech/model/install — 下载 whisper 模型（设置页 tiny/base/small/turbo 切换）。
+ * body: { model: 'tiny'|'base'|'small'|'turbo' }；spawn 系统 node 执行
+ *   desktop/scripts/fetch-whisper-runtime.js（--model <key>）。
+ *   安装状态存模块级变量防并发；完成后写 models/.active（内容 = 模型文件名，
+ *   下载即切换的持久化锚点）并调 onModelInstalled（serve.ts 重建引擎，当前进程
+ *   即刻生效）；失败 500 { error: 'model-install-failed' }，进行中 409。
  *   脚本路径可用 RIVET_WHISPER_FETCH_SCRIPT 覆盖（测试注入 fake 脚本）。
  *   下载走 curl，需代理时读设置 `network.proxy` 注入子进程
  *   （RIVET_WHISPER_PROXY / HTTPS_PROXY）——GUI 启动的 sidecar 往往没有 shell 代理环境。
  */
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { getNetworkConfig } from '../config/manager.js'
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
 import { errorContext, serverLogger } from './logger.js'
+import { createWhisperEngine } from './whisper-engine.js'
 
 export interface SpeechEngine {
   /** 转写一个 wav 文件，返回识别文本。 */
   transcribe(wavPath: string, opts?: { lang?: string }): Promise<{ text: string }>
+}
+
+export interface SpeechRouteOptions {
+  /** 模型目录（models/）：.active 持久化选择的读写位置。缺省由
+   *  RIVET_WHISPER_MODEL 的 dirname 推断。 */
+  modelDir?: string
+  /** install 成功后回调——serve.ts 用它重建引擎（当前进程即刻切换模型）。
+   *  返回重建是否成功（引擎可用）；install 响应据此填 modelReady。 */
+  onModelInstalled?: () => boolean
+}
+
+/** 可安装模型白名单：key（install/status 契约）→ ggml 模型文件名。 */
+export const INSTALLABLE_MODELS = {
+  tiny: 'ggml-tiny.bin',
+  base: 'ggml-base.bin',
+  small: 'ggml-small.bin',
+  turbo: 'ggml-large-v3-turbo-q5_0.bin',
+} as const
+export type InstallableModel = keyof typeof INSTALLABLE_MODELS
+
+/** 模型目录里记录「当前启用模型」的隐藏文件（内容 = 文件名）。 */
+export const ACTIVE_MODEL_FILE = '.active'
+
+/**
+ * 解析当前启用模型：models/.active（下载即切换的持久化选择）优先；
+ * 无 .active 或指向的文件不存在 → 回退 env 指定的模型。解析不到返回 null。
+ * 纯函数——serve.ts 启动/重建、status 路由共用，单测覆盖。
+ */
+export function resolveActiveModel(
+  envModel: string | undefined,
+  modelDir: string | undefined,
+): { file: string; path: string } | null {
+  const dir = modelDir ?? (envModel ? dirname(envModel) : undefined)
+  if (!dir) return null
+  const activePath = join(dir, ACTIVE_MODEL_FILE)
+  if (existsSync(activePath)) {
+    try {
+      const file = readActiveModelFileSync(activePath)
+      if (file) {
+        const path = join(dir, file)
+        if (existsSync(path)) return { file, path }
+      }
+    } catch { /* .active 读取失败（权限/并发半写）→ 回退 env */ }
+  }
+  if (!envModel || !existsSync(envModel)) return null
+  return { file: basename(envModel), path: envModel }
+}
+
+function readActiveModelFileSync(p: string): string | null {
+  // .active 是 20 字节内的文件名，同步读（启动路径 + status 高频调用）。
+  const content = readFileSync(p, 'utf8').trim()
+  if (!content || content.includes('/') || content.includes('..')) return null
+  return content
+}
+
+/** 模型目录推断：.active 持久化选择与引擎工厂共用的单一来源。 */
+function resolveModelDir(): string | undefined {
+  const envModel = process.env.RIVET_WHISPER_MODEL
+  return envModel ? dirname(envModel) : undefined
+}
+
+/**
+ * 按当前配置装配 whisper 引擎：模型 = .active（下载即切换的持久化选择）优先，
+ * 回退 RIVET_WHISPER_MODEL。serve.ts 启动与 install 后重建共用。
+ */
+export function createSpeechEngineFromEnv(): SpeechEngine | null {
+  const bin = process.env.RIVET_WHISPER_BIN
+  const envModel = process.env.RIVET_WHISPER_MODEL
+  const resolved = resolveActiveModel(envModel, resolveModelDir())
+  if (!resolved || !bin || !existsSync(bin) || !existsSync(resolved.path)) return null
+  return createWhisperEngine({ binPath: bin, modelPath: resolved.path })
 }
 
 /** 模块级安装状态：任一安装进行中为 true，防止并发下载两个模型互相踩半截文件。 */
@@ -67,24 +140,32 @@ export function buildWhisperFetchChildEnv(
   return env
 }
 
-export function buildSpeechRoutes(engine: SpeechEngine | null, apiToken?: string): Record<string, RouteHandler> {
+export function buildSpeechRoutes(
+  getEngine: () => SpeechEngine | null,
+  apiToken?: string,
+  opts?: SpeechRouteOptions,
+): Record<string, RouteHandler> {
+  const modelDir = opts?.modelDir
   const routes: Record<string, RouteHandler> = {
     'GET /speech/model/status': async () => {
       const bin = process.env.RIVET_WHISPER_BIN
-      const model = process.env.RIVET_WHISPER_MODEL
+      const envModel = process.env.RIVET_WHISPER_MODEL
+      const resolved = resolveActiveModel(envModel, modelDir)
       return {
         status: 200,
         body: {
           binReady: !!bin && existsSync(resolve(bin)),
-          modelReady: !!model && existsSync(resolve(model)),
-          model: model ? basename(model) : null,
+          modelReady: resolved !== null,
+          // env 存在但解析不到（文件缺失）时仍显示文件名——设置页据此提示
+          // 该下载哪个模型；完全未配置才显示 null。
+          model: resolved ? resolved.file : envModel ? basename(envModel) : null,
           installing,
         },
       }
     },
     'POST /speech/model/install': async (body) => {
       const model = (body as { model?: unknown }).model
-      if (model !== 'tiny' && model !== 'base') {
+      if (typeof model !== 'string' || !(model in INSTALLABLE_MODELS)) {
         return { status: 400, body: { error: 'invalid-model' } }
       }
       if (installing) {
@@ -95,8 +176,6 @@ export function buildSpeechRoutes(engine: SpeechEngine | null, apiToken?: string
       const script =
         process.env.RIVET_WHISPER_FETCH_SCRIPT ||
         join(process.cwd(), 'desktop', 'scripts', 'fetch-whisper-runtime.js')
-      // tiny/base 均走 --model（fetch 脚本 --with-base 等价 --model all 会连带
-      // 确保 tiny；--model base 严格只下 base，语义精确）。
       const args = ['--model', model]
       installing = true
       try {
@@ -115,7 +194,16 @@ export function buildSpeechRoutes(engine: SpeechEngine | null, apiToken?: string
             else reject(new Error(`fetch-whisper-runtime exit ${code}: ${stderr.trim().slice(0, 200)}`))
           })
         })
-        return { status: 200, body: { ok: true } }
+        // 下载成功 → 写 .active（下载即切换的持久化锚点）→ 通知 serve 重建引擎。
+        // 模型目录不可得（env 未配置的测试场景）时跳过持久化，回调照常。
+        const dir = modelDir ?? resolveModelDir()
+        if (dir) {
+          await writeFile(join(dir, ACTIVE_MODEL_FILE), INSTALLABLE_MODELS[model as InstallableModel], 'utf8')
+        }
+        // modelReady = 引擎重建结果：重建失败（如 bin 缺失）显式暴露给前端，
+        // 避免「模型已就绪」toast 与实际转写可用性漂移。
+        const modelReady = opts?.onModelInstalled?.() ?? true
+        return { status: 200, body: { ok: true, modelReady } }
       } catch (err) {
         serverLogger.warn('Speech model install failed', { ...errorContext(err) })
         return { status: 500, body: { error: 'model-install-failed' } }
@@ -124,6 +212,7 @@ export function buildSpeechRoutes(engine: SpeechEngine | null, apiToken?: string
       }
     },
     'POST /speech/transcribe': async (body) => {
+      const engine = getEngine()
       if (!engine) {
         return { status: 503, body: { error: 'whisper-unavailable' } }
       }

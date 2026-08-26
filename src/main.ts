@@ -48,10 +48,12 @@ import {
   shiftTabPlanToggleHint,
 } from './agent/plan-mode.js'
 import type { ApprovalMode } from './agent/loop-types.js'
+import { TIER_HINT, TIER_TO_WIRE, formatPermissionLabel, formatTierLabel } from './agent/approval-vocabulary.js'
 import { readFileSync, statSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { formatWelcome } from './tui/format/welcome.js'
 import { HANDOFF_NUDGE_RATIO, formatHandoffNudge } from './tui/handoff.js'
+import { formatDomainDriftNudge } from './tui/domain-drift-nudge.js'
 import { color } from './tui/engine/ansi.js'
 import type { RewindMode } from './tui/format/rewind.js'
 import { buildDisconnectEntries, toChoiceEntries, buildConfirmTitle, buildDisconnectImpactText, buildPostDeleteMessage, buildRetargetEntries, toRetargetChoiceEntries, buildRetargetTitle, type DisconnectEntry, type PostDeleteRuntimeOutcome } from './tui/disconnect-flow.js'
@@ -70,6 +72,7 @@ import { StatusLineRunner } from './tui/statusline.js'
 import { buildVerboseTranscript } from './tui/transcript-verbose.js'
 import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
 import { listPlansSync, readPlanSync, rejectPlan, stripPlanChrome } from './plan/plan-store.js'
+import { formatPlanReviewDate } from './tui/format/plan-review.js'
 import { resolveAutoApproveMs, shouldArm } from './tui/plan-auto-approve.js'
 import type { PlanPickerEntry } from './tui/format/overlay.js'
 import { isCurrentModelSelection } from './tui/model-picker-selection.js'
@@ -713,10 +716,11 @@ async function main() {
   // ── 主题装载 ──────────────────────────────────────────────────
   // 1. 注册 ~/.rivet/themes/*.json 自定义主题（custom:<name> 引用）
   // 2. 解析配置值：'auto' → OSC 11 背景检测（500ms 超时，COLORFGBG 兜底）
-  //    → cobalt(dark)/paper(light)；未配置时保持向后兼容的 tianshu。
-  // 3. setTheme 对未知名（如自定义主题文件被删）no-op，落到 tianshu 兜底。
+  //    → graphite(dark)/paper(light)。未配置与未知名（自定义文件被删）
+  //    落到 graphite，与 dsh-tui / theme.ts 内存默认对齐。
+  // 3. 已持久化的 ui.theme（含旧默认 tianshu）照旧尊重，不改写磁盘。
   loadCustomThemes()
-  const configuredTheme = ctx.config.ui?.theme ?? 'tianshu'
+  const configuredTheme = ctx.config.ui?.theme ?? 'graphite'
   let themeName: string = configuredTheme
   if (configuredTheme === 'auto') {
     // 必须在 TUI 接管 stdin 前查询——此处 raw-mode 探测后即恢复。
@@ -726,7 +730,7 @@ async function main() {
       process.stderr.write(`[T9] Theme auto-detect: ${detected} background → ${themeName}\n`)
     }
   }
-  if (!setTheme(themeName)) setTheme('tianshu')
+  if (!setTheme(themeName)) setTheme('graphite')
   const theme = getTheme()
 
   // ── Spinner 词池 / reducedMotion 配置接线 ─────────────────────
@@ -833,7 +837,7 @@ async function main() {
   ctx!.agent.onPlanApprovalRequested = (info) => {
     // 工具执行期间直接推 overlay 可能与 turn 收尾渲染冲突，defer 到下一事件循环。
     // 预览摘要在开面板时一次性读取（避免渲染路径每帧读盘；修订重提同 slug 也能取到新内容）。
-    setImmediate(() => tuiApp.openPlanApprovalPanel(info, planExcerptFor(info.slug)))
+    setImmediate(() => tuiApp.openPlanApprovalPanel(info, planReviewViewFor(info.slug)))
     // Goal 模式倒计时自动批准（2026-07-24，与 sidecar 同语义同 env）：
     // goal 激活 + 窗口开启才武装；非 goal 会话保持纯手动审批。
     const delayMs = resolveAutoApproveMs()
@@ -1003,22 +1007,18 @@ async function main() {
       return { content: `无法读取计划文件（${preview.draftPath ?? preview.slug}）。文件可能已被移动或删除。`, title: '计划预览', footerHints }
     }
   }
-  // 审批卡片的计划正文预览：剥 chrome 后取前 6 行非空行（截 76 列）。
-  // 读不到计划（已删/盘外）返回 undefined，面板退化为纯标题。
-  const planExcerptFor = (slug: string): string | undefined => {
+  // 钉底审阅卡：剥 chrome 后的全文 + 本地提交日期。读不到计划则只画标题。
+  const planReviewViewFor = (slug: string): { body?: string; date?: string } => {
     try {
       const doc = listPlansSync(ctx!.agent.cwd).find(p => p.slug === slug)
-      if (!doc) return undefined
-      const out: string[] = []
-      for (const raw of stripPlanChrome(doc.content)) {
-        const t = raw.trim()
-        if (!t) continue
-        out.push(t.length > 76 ? `${t.slice(0, 75)}…` : t)
-        if (out.length >= 6) break
+      if (!doc) return {}
+      const body = stripPlanChrome(doc.content).join('\n')
+      return {
+        ...(body.trim() ? { body } : {}),
+        date: formatPlanReviewDate(doc.createdAt),
       }
-      return out.length > 0 ? out.join('\n') : undefined
     } catch {
-      return undefined
+      return {}
     }
   }
   // /disconnect 两段式面板的闭包状态：列表页选定目标后进入确认页。
@@ -1236,18 +1236,18 @@ async function main() {
       if (tuiApp.choicePanelKind === 'permission') {
         const current = ctx?.agent.config.approvalMode ?? 'auto-safe'
         const entries = [
-          { id: 'manual', label: 'Manual', description: '每个高风险工具都弹确认。最大控制，适合敏感项目。', current: current === 'manual' },
-          { id: 'auto-safe', label: 'Auto', description: '低/无风险工具自动执行，高风险仍需确认。可配每 N 轮暂停检查点。', current: current === 'auto-safe', recommended: true },
-          { id: 'dangerously-skip-permissions', label: 'YOLO', description: '全自动执行，无审批打扰；写边界仍在（沙箱自动开启），仅工作区外写会询问。回滚兜底（/rollback + git 检查点）。需二次确认。', current: current === 'dangerously-skip-permissions' },
+          { id: TIER_TO_WIRE.supervise, label: formatTierLabel('supervise'), description: TIER_HINT.zh.supervise, current: current === 'manual' },
+          { id: TIER_TO_WIRE.auto, label: formatTierLabel('auto'), description: TIER_HINT.zh.auto, current: current === 'auto-safe', recommended: true },
+          { id: TIER_TO_WIRE.unattended, label: formatTierLabel('unattended'), description: `${TIER_HINT.zh.unattended} 需二次确认。`, current: current === 'dangerously-skip-permissions' },
         ]
         return { title: '权限模式 / Permission', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
       }
       if (tuiApp.choicePanelKind === 'permission-yolo-confirm') {
         const entries = [
           { id: 'cancel', label: '取消', description: '保持当前权限模式不变。', current: true },
-          { id: 'confirm-yolo', label: '⚠ 确认进入 YOLO', description: '无轮次刹车 · 无进度播报 · 所有工具直接执行（沙箱仍拦项目外写入）。回滚兜底：/rollback + git 检查点。也可直接输入 /yes。设为默认后重启仍是 YOLO。' },
+          { id: 'confirm-yolo', label: '⚠ 确认进入全自动', description: '无轮次刹车 · 无进度播报 · 所有工具直接执行（沙箱仍拦项目外写入）。回滚兜底：/rollback + git 检查点。也可直接输入 /yes。设为默认后重启仍是全自动。' },
         ]
-        return { title: '确认 YOLO 模式 / Confirm YOLO', choices: entries, selectedIndex: 0 }
+        return { title: '确认全自动 / Confirm Unattended', choices: entries, selectedIndex: 0 }
       }
       if (tuiApp.choicePanelKind === 'disconnect') {
         // 每次打开重算——配置可能刚被 /connect 改过。
@@ -1530,7 +1530,7 @@ async function main() {
       } catch (err) {
         tuiApp.commitStatic(`⚠ 权限模式已切换但持久化失败: ${(err as Error).message}`)
       }
-      const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[mode] ?? mode
+      const label = formatPermissionLabel(mode)
       const turnNote = mode === 'dangerously-skip-permissions' ? '（无限轮次）' : ''
       tuiApp.commitStatic(`权限模式 → ${label}${turnNote}（已设为默认，重启后仍生效）`)
     }
@@ -1645,11 +1645,10 @@ async function main() {
     if (tuiApp.choicePanelKind === 'plan-approval') {
       // 计划审批面板回调：approve / approve:<idx> / reject / reject-exit。
       const info = tuiApp.pendingPlanApproval
+      const rejectComment = tuiApp.choicePanelInputBuffer.trim()
       // 任何审批决策 = 用户参与——取消倒计时自动批准
       tuiApp.cancelPlanAutoApprove()
-      tuiApp.choicePanelKind = 'effort' // reset
-      tuiApp.pendingPlanApproval = undefined
-      tuiApp.planApprovalExcerpt = undefined
+      tuiApp.clearPlanReviewState()
       if (!info) return
       const deps = {
         cwd: ctx!.agent.cwd,
@@ -1675,16 +1674,15 @@ async function main() {
           deps.notify(doc ? `计划「${info.title}」已驳回，已退出 plan mode。` : '已退出 plan mode。')
         })
       } else if (id === '__reject_comment__') {
-        const comment = tuiApp.choicePanelInputBuffer.trim()
         void rejectPlan(ctx!.agent.cwd, info.slug).then(doc => {
           if (!doc) {
             deps.notify('计划不存在或已被删除。')
             return
           }
-          deps.notify(`计划「${info.title}」已驳回${comment ? '（含反馈）' : ''}，可继续修订。`)
-          if (comment) {
+          deps.notify(`计划「${info.title}」已驳回${rejectComment ? '（含反馈）' : ''}，可继续修订。`)
+          if (rejectComment) {
             deps.submitToAgent(
-              `User rejected the plan. Feedback:\n\n${comment}\n\nRevise the plan in \`.rivet/plans/${info.slug}.md\`, then call plan action=submit again.`,
+              `User rejected the plan. Feedback:\n\n${rejectComment}\n\nRevise the plan in \`.rivet/plans/${info.slug}.md\`, then call plan action=submit again.`,
             )
           }
         })
@@ -1967,7 +1965,9 @@ async function main() {
     // 判定空闲时触发（busy 时输入已被 TuiApp 入队 steerBuffer），故此处无需再自管
     // isStreaming 标志——正是「双门异步清除时机不同」造成 Esc 后死会话的根因。
     // run 生命周期回调（完成/错误/中止）由 bridge 桥接到 TuiApp，并带世代守卫。
-    const base = wrapCallbacksWithTuiApp(app!)
+    const base = wrapCallbacksWithTuiApp(app!, {
+      onDomainDrift: (drift) => app!.commitStatic(formatDomainDriftNudge(drift)),
+    })
     // The tap wraps the OUTSIDE of the bridge rather than riding its `original`
     // parameter: bridge.ts lets `original.onApprovalRequired` *replace* the
     // app's handler (bridge.ts:77-80), so passing an observer in there would
@@ -2201,7 +2201,7 @@ async function main() {
   // 曾是两套口径，已在 getDynamicBudget 收口为内容驱动（空闲期同样走自然流）。
   app.start()
 
-  // 首屏交接提醒（resume 场景）：上下文占用 ≥70% 的会话，建议先 /handoff 再开新会话——
+  // 首屏交接提醒（resume 场景）：上下文占用 ≥60% 的会话，建议先 /handoff 再开新会话——
   // 交接自动注入新会话，比整段回连省前缀重建成本。
   if (existingMsgCount > 0) {
     try {

@@ -4,7 +4,8 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills, seedBundledSkillsFrom, loadProjectSkills, writeSkill, readSkillContent, uninstallSkill } from '../skill-loader.js'
+import { createHash } from 'node:crypto'
+import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills, seedBundledSkillsFrom, loadProjectSkills, writeSkill, readSkillContent, uninstallSkill, retireMatchingSkillCopies } from '../skill-loader.js'
 import { readFileSync } from 'node:fs'
 import { validatePathSafe } from '../../tools/path-validate.js'
 
@@ -249,6 +250,50 @@ Router body.`, 'utf-8')
   it('seed returns [] when source dir is missing', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'rivet-cwd-'))
     assert.deepEqual(seedBundledSkillsFrom(join(cwd, 'nope'), cwd), [])
+  })
+
+  // ── Retired bundled skill cleanup ─────────────────────────────────
+
+  const sha = (content: string) => createHash('sha256').update(content).digest('hex')
+
+  it('retires dir-shaped copy when content matches the repo version', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-retire-'))
+    const skillsDir = join(cwd, '.rivet', 'skills')
+    mkdirSync(join(skillsDir, 'writing-plans'), { recursive: true })
+    writeFileSync(join(skillsDir, 'writing-plans', 'SKILL.md'), 'REPO', 'utf-8')
+
+    const removed = retireMatchingSkillCopies(cwd, [{ name: 'writing-plans', sha256: sha('REPO') }])
+    assert.deepEqual(removed, ['writing-plans'])
+    assert.ok(!existsSync(join(skillsDir, 'writing-plans')))
+  })
+
+  it('keeps user-modified copy when content differs from the repo version', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-retire-'))
+    const skillsDir = join(cwd, '.rivet', 'skills')
+    mkdirSync(join(skillsDir, 'writing-plans'), { recursive: true })
+    writeFileSync(join(skillsDir, 'writing-plans', 'SKILL.md'), 'CUSTOMIZED', 'utf-8')
+
+    const removed = retireMatchingSkillCopies(cwd, [{ name: 'writing-plans', sha256: sha('REPO') }])
+    assert.deepEqual(removed, [])
+    assert.ok(existsSync(join(skillsDir, 'writing-plans', 'SKILL.md')))
+    assert.equal(readFileSync(join(skillsDir, 'writing-plans', 'SKILL.md'), 'utf-8'), 'CUSTOMIZED')
+  })
+
+  it('retires flat copy (<name>.md) on hash match', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-retire-'))
+    const skillsDir = join(cwd, '.rivet', 'skills')
+    mkdirSync(skillsDir, { recursive: true })
+    writeFileSync(join(skillsDir, 'research-spec.md'), 'REPO', 'utf-8')
+
+    const removed = retireMatchingSkillCopies(cwd, [{ name: 'research-spec', sha256: sha('REPO') }])
+    assert.deepEqual(removed, ['research-spec'])
+    assert.ok(!existsSync(join(skillsDir, 'research-spec.md')))
+  })
+
+  it('no copy present → nothing removed', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-retire-'))
+    const removed = retireMatchingSkillCopies(cwd, [{ name: 'writing-plans', sha256: sha('REPO') }])
+    assert.deepEqual(removed, [])
   })
 
   // ── Desktop CRUD primitives ──────────────────────────────────────

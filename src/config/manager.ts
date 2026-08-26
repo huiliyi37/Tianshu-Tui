@@ -1102,14 +1102,14 @@ export function setRuntimeLeanConfig(input: {
       next.domains = undefined
     } else {
       if (typeof input.domains !== 'object') throw new Error('domains must be an object')
-      const merged = { ...(next.domains ?? {}) }
+      const merged = { ...next.domains }
       for (const [id, slice] of Object.entries(input.domains)) {
         if (slice === null) {
           delete merged[id]
           continue
         }
         validateDomainSlice(id, slice)
-        merged[id] = { ...(merged[id] ?? {}), ...(slice as Record<string, unknown>) }
+        merged[id] = { ...merged[id], ...(slice as Record<string, unknown>) }
       }
       next.domains = merged
     }

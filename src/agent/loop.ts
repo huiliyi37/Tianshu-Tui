@@ -1,4 +1,5 @@
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
+import { renderPlanExecutingBlock } from '../prompt/volatile.js'
 import type { KnowledgeCandidate } from '../memory/essence-gate.js'
 import { ControlPlaneController } from './control-plane-adapters.js'
 import { SessionContext } from './context.js'
@@ -42,7 +43,6 @@ import type { ImportGraph } from './import-graph.js'
 import type { PlanModeState } from './plan-mode.js'
 import { createActivePlanDraftPath } from './plan-mode.js'
 import type { AskModeState } from './ask-mode.js'
-import { WRITING_PLANS_SKILL } from './plan-delegation.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
 import { ctclSanitizerPass } from './ctcl-sanitizer.js'
@@ -62,6 +62,7 @@ import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { resolveActiveDomain, type ActiveStarDomain, type StarDomainId } from './star-domain.js'
 import { starDomainRegistry } from './star-domain-registry.js'
+import { DomainDriftDetector } from './domain-drift-detector.js'
 import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
 import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
 import { buildDepartureMilestone } from '../constellation/milestone.js'
@@ -282,6 +283,12 @@ export class AgentLoop {
   lastConflictCheckCount = 0
   predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   sessionDomain: ActiveStarDomain | null | undefined
+  /** Distinguishes an untouched session from an explicit per-session Auto
+   * selection while both still expose `sessionDomain === undefined` before
+   * the first bind. */
+  private sessionDomainSelection: 'default' | 'auto' | 'manual' = 'default'
+  private _domainWasAutoResolved = false
+  private _driftDetector: DomainDriftDetector | null = null
   /** Agent's self-chosen departure mark (leave_mark tool); sealed by the
    *  constellation post-session hook. Null until the agent leaves a mark. */
   pendingLeaveMark: import('../tools/types.js').LeaveMarkInput | null = null
@@ -1164,10 +1171,10 @@ export class AgentLoop {
 
   bindSessionDomain(taskDescription: string, callbacks?: AgentCallbacks): void {
     if (this.sessionDomain !== undefined) return
-    // 首次绑定前检查 defaultDomain 配置——非 auto 时钉定，让所有入口
-    //（TUI/headless/server/外部）统一在此钉定，不再依赖入口层各显神通。
+    // 未作会话级选择时才消费持久 defaultDomain。显式 Auto 同样以
+    // sessionDomain=undefined 等待首条任务，但必须越过这里进入关键词路由。
     const starSoulEnabled = isStarSoulEnabled()
-    if (starSoulEnabled) {
+    if (starSoulEnabled && this.sessionDomainSelection !== 'auto') {
       const key = this.config.defaultDomain ?? 'qiming'
       if (key !== 'auto') {
         const pinned = starDomainRegistry.get(key) ?? starDomainRegistry.get('qiming')
@@ -1188,13 +1195,16 @@ export class AgentLoop {
     // domainKeywordRouting 默认 true：Auto 按消息在 DOMAIN_AUTO_POOL（四个均衡
     // 工程域 + 自定义域）内 matchDomain，未命中回退天权（DEFAULT_DOMAIN）；
     // 显式 false 时固定落到 DEFAULT_DOMAIN。池外特化域（含华盖）仅手动/钉定/
-    // 委派进入。仅 defaultDomain='auto' 的会话走到这里，其余已被钉定。
+    // 委派进入。defaultDomain='auto' 或会话显式 Auto 走到这里，其余已钉定。
     const resolution = starSoulEnabled
       ? resolveActiveDomain(taskDescription, {
           keywordRouting: this.config.domainKeywordRouting !== false,
         })
       : null
     this.sessionDomain = resolution?.domain ?? null
+    this._domainWasAutoResolved = resolution !== null
+    this._driftDetector = resolution ? new DomainDriftDetector(resolution.domain.id) : null
+    if (resolution) this.sessionDomainSelection = 'auto'
     this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(this.sessionDomain))
     this.persistSessionDomain()
     if (resolution) {
@@ -1534,13 +1544,47 @@ export class AgentLoop {
     return 'task'
   }
 
-  /** Get the currently active star domain (null = no domain, undefined = not yet resolved). */
+  /** Get the active domain (null = disabled/unavailable, undefined = not yet
+   * resolved, including an explicit Auto selection waiting for its next task). */
+  // ── 星域胶囊（消息级注入记账，≤2 枚）──────────────────────
+  // 胶囊正文经消息流注入（/capsule → submitToAgent），与 recall_capsule 同
+  // cache-safe 纪律：索引常驻冻结前缀（<seed-capsules> 一行/星），正文只进
+  // 消息。本状态仅做并发上限记账与命令回显，不触碰 promptEngine/persist——
+  // 正文已在会话历史不可撤回，上限防的是方法论叠加噪音；agent 重建后清零是
+  // 正确语义（历史里的胶囊内容仍对模型生效）。
+  static readonly MAX_CAPSULES = 2
+  private _activeCapsuleStars: string[] = []
+
+  listCapsules(): string[] {
+    return [...this._activeCapsuleStars]
+  }
+
+  noteCapsuleInjection(star: string): { ok: true } | { ok: false; error: string } {
+    if (this._activeCapsuleStars.includes(star)) return { ok: false, error: `${star} 胶囊已在生效中` }
+    if (this._activeCapsuleStars.length >= AgentLoop.MAX_CAPSULES) {
+      return { ok: false, error: `胶囊已达上限（${AgentLoop.MAX_CAPSULES} 枚，当前 ${this._activeCapsuleStars.join(' + ')}）。先 /capsule off 摘除一枚——过多方法论叠加会稀释主域身份` }
+    }
+    this._activeCapsuleStars.push(star)
+    return { ok: true }
+  }
+
+  /** 摘除记账：胶囊正文已在消息历史不可撤回，此处只解除上限占用与回显。 */
+  clearCapsule(star: string): { ok: true } | { ok: false; error: string } {
+    const idx = this._activeCapsuleStars.indexOf(star)
+    if (idx === -1) return { ok: false, error: `${star} 未在胶囊生效名单中` }
+    this._activeCapsuleStars.splice(idx, 1)
+    return { ok: true }
+  }
+
   getSessionDomain(): ActiveStarDomain | null | undefined {
     return this.sessionDomain
   }
 
   /** Manually set the active star domain. Pass null to disable, or a valid ActiveStarDomain. */
   setSessionDomain(domain: ActiveStarDomain | null): void {
+    this.sessionDomainSelection = 'manual'
+    this._domainWasAutoResolved = false
+    this._driftDetector = null
     this.sessionDomain = domain
     this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(domain))
     this.persistSessionDomain()
@@ -1548,8 +1592,23 @@ export class AgentLoop {
 
   /** Reset domain to undefined so the next run() will auto-detect from user input. */
   resetSessionDomain(): void {
+    this.sessionDomainSelection = 'auto'
+    this._domainWasAutoResolved = false
+    this._driftDetector = null
     this.sessionDomain = undefined
     this.config.promptEngine.setActiveDomain(undefined)
+    this.persistSessionDomain()
+  }
+
+  /** Restore a previously resolved Auto session without re-routing or
+   * re-emitting onDomainResolved. Unlike manual selection, drift observation
+   * remains active for subsequent turns. */
+  restoreAutoResolvedDomain(domain: ActiveStarDomain): void {
+    this.sessionDomainSelection = 'auto'
+    this._domainWasAutoResolved = true
+    this._driftDetector = new DomainDriftDetector(domain.id)
+    this.sessionDomain = domain
+    this.config.promptEngine.setActiveDomain(this.withDomainKnowledge(domain))
     this.persistSessionDomain()
   }
 
@@ -1560,6 +1619,14 @@ export class AgentLoop {
    */
   getSessionTurnCount(): number {
     return this.session.getTurnCount()
+  }
+
+  get domainWasAutoResolved(): boolean {
+    return this._domainWasAutoResolved
+  }
+
+  get driftDetector(): DomainDriftDetector | null {
+    return this._driftDetector
   }
 
   /**
@@ -1826,6 +1893,10 @@ export class AgentLoop {
     // Re-entering cancels any pending exit reminder from a prior exit.
     this.config.promptEngine.setPlanExitReminderPending(false)
     this.config.promptEngine.setActivePlan(null)
+    // Re-entering plan mode is the unmount point for the <plan-executing>
+    // advisory (execution completion has no mechanical signal — the block
+    // stays mounted until the next planning cycle begins).
+    this.config.promptEngine.setPlanExecutingBlock(null)
 
     const cwd = this.cwd
     if (opts?.planFilePath) {
@@ -1837,7 +1908,6 @@ export class AgentLoop {
       if (!existsSync(abs)) writeFileSync(abs, '', 'utf-8')
     }
     this.syncPlanModeToConfig()
-    this.markSkillInvoked(WRITING_PLANS_SKILL)
     // 主动 plan mode 链路：带活跃任务契约进入时，注入一次性并行调研 advisory。
     // 主控自主决定切分（不硬派）——advisory 只给方法与素材（scope 文件分组提示）。
     // 优先使用 DisciplineEligibility.requiresEngineeringDiscipline，回退到 isActionable。
@@ -1873,9 +1943,7 @@ export class AgentLoop {
 
   /**
    * Shared plan-mode teardown: drop the draft pointer (removing the draft file
-   * when it is still empty, so toggling in and out doesn't litter .rivet/plans/)
-   * and release the writing-plans skill pin — leaving it invoked would re-inject
-   * the full planning skill into every post-approval execution turn.
+   * when it is still empty, so toggling in and out doesn't litter .rivet/plans/).
    */
   private releasePlanModeArtifacts(): void {
     const draft = this.activePlanFilePath
@@ -1890,7 +1958,6 @@ export class AgentLoop {
       // the canonical plan lives in .rivet/plans/<slug>.md once submitted.
       this.config.taskLedger?.removeEventsByPath(draft)
     }
-    this.markSkillCompleted(WRITING_PLANS_SKILL)
   }
 
   /**
@@ -1902,9 +1969,16 @@ export class AgentLoop {
   setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null): void {
     if (!plan) {
       this.config.promptEngine.setActivePlan(null)
+      // Clears the <plan-executing> advisory — re-entering plan mode (or an
+      // explicit clear) unmounts it. Execution completion has no mechanical
+      // signal, so the block intentionally stays mounted until then.
+      this.config.promptEngine.setPlanExecutingBlock(null)
       return
     }
     this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
+    // Mount the native executing-plans replacement for the approved-plan
+    // execution window (cache-safe dynamic appendix).
+    this.config.promptEngine.setPlanExecutingBlock(renderPlanExecutingBlock())
     // 层3 重构回归契约：计划带「回归清单」章节时灌入 task contract，
     // deliver_task 交付前对清单逐项 grep 核验（事故链缺口 3）。best-effort。
     // 层4 计划约束（D8 L2）：反目标/待验证假设随计划批准灌入契约，派发时兜底注入。

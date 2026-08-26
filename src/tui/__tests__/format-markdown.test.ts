@@ -128,7 +128,7 @@ describe('formatMarkdown', () => {
     // 不含会污染选区复制的 box-drawing 边框字符
     assert.ok(!plain.some(l => l.includes('┌')), 'no top-left border')
     assert.ok(!plain.some(l => l.includes('└')), 'no bottom-left border')
-    assert.ok(!plain.some(l => /^│/.test(l)), 'no left vertical bar on code lines')
+    assert.ok(!plain.some(l => l.startsWith('│')), 'no left vertical bar on code lines')
   })
 
   it('renders headers with glyphs', () => {

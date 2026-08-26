@@ -53,7 +53,7 @@ test('状态行（metrics/权限模式）位于输入框上方', async () => {
   const botIdx = lines.findIndex(l => /^[╰└]/.test(l))
   assert.ok(botIdx >= 0)
   // 状态行特征：权限模式（auto-safe / plan / ask）在输入框上方
-  const permIdx = lines.findIndex(l => l.includes('auto-safe') || l.includes('plan') || l.includes('ask'))
+  const permIdx = lines.findIndex(l => l.includes('自动') || l.includes('监督') || l.includes('全自动') || l.includes('plan') || l.includes('ask'))
   if (permIdx >= 0) {
     assert.ok(permIdx < botIdx, `状态行（行 ${permIdx}）应在输入框（行 ${botIdx}）上方`)
   }

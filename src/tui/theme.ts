@@ -187,7 +187,7 @@ export function getActiveThemeBackground(): 'dark' | 'light' {
 
 export function getTheme(colorLevel?: number): RivetTheme {
   const level = colorLevel ?? chalk.level
-  const entry = resolveThemeEntry(activeTheme) ?? THEMES.cobalt
+  const entry = resolveThemeEntry(activeTheme) ?? THEMES.graphite
   // level 2（256 色）走 truecolor 轨：ansi.ts fg() 会现场量化为 38;5。
   return level >= 2 ? entry.truecolor : entry.fallback
 }

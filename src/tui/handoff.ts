@@ -9,7 +9,7 @@
  */
 
 /** 上下文占用达到该比例时提醒 /handoff（首屏 resume + 会话中各一次）。 */
-export const HANDOFF_NUDGE_RATIO = 0.7
+export const HANDOFF_NUDGE_RATIO = 0.6
 
 /**
  * 交接指令全文——经 submitToAgent 发给 agent 执行。
@@ -41,7 +41,7 @@ export function buildHandoffPrompt(absPath: string, note?: string): string {
 }
 
 /**
- * 70% 交接提醒文案。ratio 为 estimatedTokens/contextWindow（调用方保证 ≥0）。
+ * 60% 交接提醒文案。ratio 为 estimatedTokens/contextWindow（调用方保证 ≥0）。
  */
 export function formatHandoffNudge(ratio: number): string {
   const pct = Math.round(ratio * 100)

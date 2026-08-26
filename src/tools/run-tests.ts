@@ -84,7 +84,7 @@ export function resolveTestSpawn(
   // （如 a&calc.cmd）可注入 cmd。% 与内部 " 在双引号内仍危险（变量展开/
   // 断引），消毒替换为 _——fail-closed 方向；已整体带引号且内部干净的
   // token 原样通过（不双重加引）。
-  const CMD_SAFE = /^[A-Za-z0-9@_+=:,.\/\\-]+$/
+  const CMD_SAFE = /^[A-Za-z0-9@_+=:,./\\-]+$/
   const quote = (raw: string): string => {
     if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"') && !/[%"]/.test(raw.slice(1, -1))) {
       return raw

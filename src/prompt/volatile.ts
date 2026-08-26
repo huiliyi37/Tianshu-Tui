@@ -36,7 +36,7 @@ import type { PlanMethodology } from '../context/task-contract.js'
 // against. Zero new tools; just nudges the model toward the existing todo tool.
 const METHODOLOGY_ADVISORY_TEMPLATES: Record<PlanMethodology, string> = {
   lightweight: '<plan-methodology route="lightweight">推荐使用轻量版计划模板（5阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md。本任务 scope 内聚，单模块边界内变更，轻量版足以覆盖。至少画一张架构或数据流图（Mermaid），哪怕只画核心 3-5 个节点。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
-  full: '<plan-methodology route="full">推荐使用基础计划模板（Superpowers writing-plans），路径: docs/superpowers/plans/2026-06-28-plan-methodology-base.md。这是所有计划的默认基础：零上下文假设、任务粒度 2-5 分钟、禁止占位符、TDD、探针先行、瑶光反证、频繁提交。强制要求：① 至少一张 Mermaid 图（架构/数据流/状态图）；② 每个任务 RED→GREEN；③ 复杂实现前先打 30 秒探针；④ 用真实输入复现原问题再验修复，不取信声称取 exit code；⑤ 计划含「瑶光反证」章节（submit 门禁）——设计定稿后回读关键断言到 file:line、bugfix 先跑 run_tests 拿 RED 复现、跑不了的派 adversarial_verifier，复现不了的降级为待验证假设；⑥ 大计划（checkbox 任务 >8 或引用文件 >15）必须显式分波——`### Wave N` 标题 + 每波验证命令（submit 门禁）。如果任务涉及安全/权限/沙箱/多 enforcement gate，在基础模板之上追加安全附录（安全不变量、触发路径清单、双门对齐数据流图）。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
+  full: '<plan-methodology route="full">推荐使用基础计划模板（writing-plans 已内置为原生 <plan-mode> 流程），路径: docs/superpowers/plans/2026-06-28-plan-methodology-base.md。这是所有计划的默认基础：零上下文假设、任务粒度 2-5 分钟、禁止占位符、TDD、探针先行、瑶光反证、频繁提交。强制要求：① 至少一张 Mermaid 图（架构/数据流/状态图）；② 每个任务 RED→GREEN；③ 复杂实现前先打 30 秒探针；④ 用真实输入复现原问题再验修复，不取信声称取 exit code；⑤ 计划含「瑶光反证」章节（submit 门禁）——设计定稿后回读关键断言到 file:line、bugfix 先跑 run_tests 拿 RED 复现、跑不了的派 adversarial_verifier，复现不了的降级为待验证假设；⑥ 大计划（checkbox 任务 >8 或引用文件 >15）必须显式分波——`### Wave N` 标题 + 每波验证命令（submit 门禁）。如果任务涉及安全/权限/沙箱/多 enforcement gate，在基础模板之上追加安全附录（安全不变量、触发路径清单、双门对齐数据流图）。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
 }
 
 /** Plan Mode 专用：设计文档口径，不注入可执行 TDD/bash「执行计划基线」。 */
@@ -93,7 +93,7 @@ export function renderPlanModeBlock(
 
 工作流：
 0. **建调研 todo** — 先用 \`todo\` 列出 3-6 个调研步骤（摸清各模块现状、外部调研、设计收敛），**最后一项固定为「汇总写计划并用 plan action=submit 提交审批」**；逐项勾掉推进。计划正文只进计划文件，不进 todo。
-1. **识别关键问题** — 先列出 2-3 个对计划至关重要的问题。不确定代码结构时，用 \`delegate_task\`（profile=code_scout）并行调研；独立问题并行派多个 worker。**多模块任务先并行调研**：用 \`delegate_batch\` 一次并行派 2-4 个只读 code_scout（按模块/文件域切分），汇总后再写计划——串行逐个调研浪费轮次。
+1. **识别关键问题** — 先列出 2-3 个对计划至关重要的问题。不确定代码结构时，用 \`delegate_task\`（profile=code_scout）并行调研；独立问题并行派多个 worker。**多模块任务先并行调研**：用 \`delegate_batch\` 一次并行派 2-4 个只读 code_scout（按模块/文件域切分），汇总后再写计划——串行逐个调研浪费轮次。调研子纪律：① **理解"为什么存在"**——对每个拟删除/改行为的函数，读函数注释 / commit message / 相关测试回答它为什么存在、谁调用、有无只有它处理的边缘情况；② **水平复用扫描**——产生"需要新建 X"判断时，先 grep 整个 src/ 邻域，已有实现则方案收敛为"导出+连接"；③ **全量消费方枚举**——对每个拟修改/删除/导出的函数，grep 函数名列出**所有**调用点（文件:行号）逐一确认不破坏；④ **函数-调用方责任边界**——不要把调用链下游行为归因到纯函数，责任边界画错改谁都不对；⑤ **指标选择自检**——有效性判据用变换的 native 维度（行数/节点数/字段数）而非通用代理（字节数）。子代理只认 \`delegate_task\` / \`delegate_batch\`——不要调用 \`task\` / \`Agent\` 等非 Rivet 工具（会被自动映射）。
 2. **外部调研** — 涉及外部库/协议/最佳实践时，用 \`web_search\` / \`web_fetch\` 核实，不凭训练记忆下结论。
 3. **设计收敛** — 最多 2-3 个真正不同的方案；一个明显更优就只提一个。偏好/约束不明时用 \`ask_user_question\` 澄清。
 4. **事实锚点核对（硬性）** — 写入计划前，计划引用的每个文件路径、符号、行号都必须用工具对当前源码核实过。项目内的文档、历史计划、记忆/约定文件描述的是**写下时的状态**，不是现状——涉及现状的断言（技术栈、框架、渲染路径、入口文件、目录结构）一律以当前源码为准，文档与源码冲突时信源码。scout 报告中引用文档得出的结论，必须自己对源码复核后才能写进计划。
@@ -137,6 +137,24 @@ flowchart LR
 - 驳回（附修订意见）— 按意见修订后同 title 重提，plan mode 保持激活
 若审批后写操作仍被拦（系统未自动退出），调 \`plan action=exit_mode\` 手动退出；要放弃规划直接动手时也调它（无需用户批准）。只在文本里宣布「退出」不会真正退出——模式只认工具调用。不要用 \`plan close\` 退模式（close 只标记任务完成，不解锁）。
 </plan-mode>`
+}
+
+/**
+ * Approved-plan execution discipline (native replacement for the retired
+ * executing-plans skill). Mounted when an approved plan is active — the
+ * activePlanPointer is set on approval and cleared on next plan-mode entry,
+ * which mirrors this block's lifecycle. Cache-safe: dynamic appendix only.
+ */
+export function renderPlanExecutingBlock(): string {
+  return `<plan-executing>
+已批准计划进入执行期。执行纪律（原 executing-plans 技能已内置为原生流程，直接照此执行）：
+1. **执行前三查** — 批判性审查计划：步骤间依赖顺序有无颠倒；验证条件是否明确可跑（"确认可用"不算，"run_tests 全绿"才算）；有无隐含环境假设（Node 版本、数据库连接、API Key）。
+2. **逐波执行** — 按 Wave 顺序推进，每波结束跑该波验证命令再进下一波；每完成一个逻辑单元用 deliver_task 提交，不攒批。
+3. **测试失败三分** — 实现 bug / 测试 bug / 计划误三条不同路径：改实现 / 改测试并记录理由 / 停下修订计划再继续，不混为一谈。
+4. **阶段检查点** — 跨阶段计划（诊断→修复→验证）或 context 使用率 >60% 时暂停输出 handoff 摘要（进度、已完成项、待执行项、计划文档路径）交接，防单 session 注意力衰减。
+5. **偏离即记录** — 与计划不一致的临时决策记入执行报告，不静默改道。
+6. **完成报告四要素** — 完成的任务 / 验证结果（数字，来自本轮工具输出）/ 偏离计划的地方 / 遗留项。
+</plan-executing>`
 }
 
 /**
@@ -299,6 +317,10 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Only present for non-unit tasks or when methodology === 'full'. */
   planMethodologyAdvisory?: string | null
+  /** Approved-plan execution discipline (native replacement for the retired
+   *  executing-plans skill) — cache-safe dynamic appendix. Mounted while an
+   *  approved plan is active, cleared on next plan-mode entry. */
+  planExecutingBlock?: string | null
   /** Matched .rivet/skills — cache-safe dynamic appendix. */
   skillAdvisoryBlock?: string | null
   /** Explicitly invoked .rivet/skills (full body) — cache-safe dynamic appendix. */
@@ -674,6 +696,13 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Plan methodology advisory: which template (lightweight/full) to use
   if (ctx.planMethodologyAdvisory) {
     push(ctx.planMethodologyAdvisory)
+  }
+
+  // Plan executing advisory: approved-plan execution discipline. Mounted when
+  // activePlanPointer is set, cleared on next plan-mode entry. Cache-safe:
+  // dynamic appendix only.
+  if (ctx.planExecutingBlock) {
+    push(ctx.planExecutingBlock)
   }
 
   if (ctx.skillAdvisoryBlock) {
@@ -1117,7 +1146,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     // domain) — lesson text is agent-written store content, so it IS escaped.
     const knowledge = d.knowledgeBlock ? `\n<domain-knowledge>\n${escapeXml(d.knowledgeBlock)}\n</domain-knowledge>` : ''
     // 全星域共享执行纪律（字节恒定，随 star-domain 进 FROZEN 前缀）。
-    // 瑶光域在自己的 systemPromptSuffix 里保留放大版，此处是十域共同的底线。
+    // 瑶光域在自己的 systemPromptSuffix 中保留放大版，此处是十域共同的底线。
     const sharedDiscipline = '\n执行纪律（全星域共享）：绿非证明，复现即证——宣称已修/已验证前，先用工具复现结论；报告里的每个数字要能指到一条真实验证记录。'
     parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}${sharedDiscipline}${knowledge}</star-domain>`)
   }

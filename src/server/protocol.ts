@@ -93,6 +93,7 @@ export type SessionEventType =
   | 'model_switched'
   | 'domain_changed'
   | 'domain_resolved'
+  | 'domain_drift'
   | 'skills_changed'
   // I4 — user-defined .rivet/hooks.json script results.
   | 'hook_result'

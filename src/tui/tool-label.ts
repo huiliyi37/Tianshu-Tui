@@ -33,7 +33,7 @@ export function statusPhaseText(activitySummary: string | undefined, tools: Tool
 }
 
 function pathBasename(value: unknown): string {
-  return String(value ?? '').replace(/^.*[\/]/, '')
+  return String(value ?? '').replace(/^.*[/]/, '')
 }
 
 function formatInputValue(value: unknown): string {

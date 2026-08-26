@@ -10,6 +10,8 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { cpuPool } from '../cpu-pool.js'
 import {
   diffUnifiedRaw,
@@ -70,5 +72,74 @@ describe('cpuPool availability', () => {
   it('cpuPool.available reflects RIVET_CPU_POOL setting', () => {
     const disabled = process.env.RIVET_CPU_POOL === '0'
     assert.equal(cpuPool.available, !disabled)
+  })
+})
+
+// ── Idle recycle（子进程隔离验证）──
+// 主进程内真实 spawn worker 会留下 MessagePort ref（unref 不覆盖），阻塞
+// node:test 退出——因此用子进程验证「任务完成后 worker 被空闲回收、进程可
+// 退出」。无回收的实现中该子进程永不退出，withTimeout 断言失败 → RED。
+
+const RUN_SCRIPT = `
+import { cpuPool } from './src/workers/cpu-pool.ts'
+try {
+  const r = await cpuPool.run('diffUnifiedRaw', ['t.txt', 'a\\n', 'b\\n', 4000])
+  console.log('result:' + (typeof r))
+} catch (err) {
+  // 禁用路径（RIVET_CPU_POOL=0）下 run 立即 reject——捕获后正常退出
+  console.log('rejected:' + (err instanceof Error ? err.message : String(err)))
+}
+`
+
+function spawnPoolRunner(env: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', RUN_SCRIPT], {
+      cwd: process.cwd(),
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stderr = ''
+    // 失败路径（error / 非零退出 / 外部 reject）先 kill 子进程：挂起的 runner
+    // 会经 stderr pipe 保持句柄 ref，拖住测试进程自身退出（审查 LOW-3）。
+    const fail = (err: Error): void => {
+      try { child.kill() } catch { /* already gone */ }
+      reject(err)
+    }
+    child.stderr.on('data', (chunk: Buffer) => { stderr += String(chunk) })
+    child.on('error', fail)
+    child.on('close', (code) => {
+      if (code !== 0) fail(new Error(`runner exited ${code}: ${stderr.slice(0, 300)}`))
+      else resolve(code)
+    })
+  })
+}
+
+describe('cpuPool idle recycle', () => {
+  it('任务完成后 worker 被回收，进程在 idle 窗口后退出', async () => {
+    const exit = await Promise.race([
+      spawnPoolRunner({ RIVET_CPU_POOL_IDLE_MS: '100' }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('runner 未退出：worker 未被空闲回收')), 10_000)),
+    ])
+    assert.equal(exit, 0)
+  })
+
+  it('禁用 worker（RIVET_CPU_POOL=0）时进程同样可退出（回归护栏）', async () => {
+    const exit = await Promise.race([
+      spawnPoolRunner({ RIVET_CPU_POOL: '0' }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('runner 未退出（禁用路径）')), 10_000)),
+    ])
+    assert.equal(exit, 0)
+  })
+
+  it('非法 RIVET_CPU_POOL_IDLE_MS 值（非数字）回退默认，任务与退出不受影响', async () => {
+    // 修复前 NaN → setTimeout(NaN) 立即回收 → 每次 run() 重新 spawn（性能抖动，
+    // 功能仍正确）。本测试是回归护栏：非法值不 crash、任务成功、进程可退出。
+    // 回退默认 10s 空闲 → 子进程 ~11s 后退出；超时 25s 覆盖（不能设 10s，
+    // 会与回退默认的回收窗口竞争）。
+    const exit = await Promise.race([
+      spawnPoolRunner({ RIVET_CPU_POOL_IDLE_MS: 'abc' }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('runner 未退出（非法 IDLE 值路径）')), 25_000)),
+    ])
+    assert.equal(exit, 0)
   })
 })

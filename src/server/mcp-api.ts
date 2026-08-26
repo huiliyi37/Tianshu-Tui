@@ -32,7 +32,7 @@ function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
 
 function cloneMcpServers(): Record<string, McpServerConfig> {
   const cfg = loadConfig()
-  return { ...cfg.mcp?.servers ?? {} }
+  return { ...cfg.mcp?.servers }
 }
 
 function persistMcpServers(servers: Record<string, McpServerConfig>): void {

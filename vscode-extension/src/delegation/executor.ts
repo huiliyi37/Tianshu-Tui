@@ -12,6 +12,7 @@ import type { SidecarClient } from '../sidecar/client.js'
 import type { SessionEvent } from '../sidecar/protocol.js'
 import { DiffDecorationController, computeLineRanges, type PendingEdit } from './diff-decorations.js'
 import { DelegateCodeLensProvider } from './codelens.js'
+import { APPLY_EDIT_AUTO_ACCEPT_MS } from './pending-policy.js'
 
 const HEARTBEAT_MS = 25_000
 const PROTOCOL_MIN = 1
@@ -31,7 +32,7 @@ export class DelegationExecutor implements vscode.Disposable {
   /** Resolvers waiting on CodeLens accept/reject (requestId → settle). */
   private readonly pendingDecisions = new Map<
     string,
-    { resolve: (status: 'ok' | 'rejected') => void; timer: ReturnType<typeof setTimeout> }
+    { resolve: (status: 'ok' | 'rejected') => void; timer?: ReturnType<typeof setTimeout> }
   >()
 
   constructor(
@@ -92,8 +93,8 @@ export class DelegationExecutor implements vscode.Disposable {
     if (this.heartbeat) clearInterval(this.heartbeat)
     this.heartbeat = undefined
     for (const [, p] of this.pendingDecisions) {
-      clearTimeout(p.timer)
-      p.resolve('ok') // auto-accept on detach so agent is not stuck
+      if (p.timer) clearTimeout(p.timer)
+      p.resolve('ok') // 已落盘：切会话时按接受收口，避免 agent 挂死
     }
     this.pendingDecisions.clear()
     this.decorations.clear()
@@ -172,14 +173,17 @@ export class DelegationExecutor implements vscode.Disposable {
     }
     await this.decorations.show(pending)
     this.codeLenses.refresh()
+    void vscode.window.showInformationMessage(`天枢改了 ${relPath}，请在编辑器 CodeLens 接受或拒绝。`)
 
-    // Wait for Accept / Reject (15s → auto-accept per plan timeout window).
     const status = await new Promise<'ok' | 'rejected'>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingDecisions.delete(requestId)
-        resolve('ok')
-      }, 15_000)
-      this.pendingDecisions.set(requestId, { resolve, timer })
+      const entry: { resolve: (status: 'ok' | 'rejected') => void; timer?: ReturnType<typeof setTimeout> } = { resolve }
+      if (APPLY_EDIT_AUTO_ACCEPT_MS > 0) {
+        entry.timer = setTimeout(() => {
+          this.pendingDecisions.delete(requestId)
+          resolve('ok')
+        }, APPLY_EDIT_AUTO_ACCEPT_MS)
+      }
+      this.pendingDecisions.set(requestId, entry)
     })
 
     if (status === 'rejected') {
@@ -212,7 +216,7 @@ export class DelegationExecutor implements vscode.Disposable {
     if (!pending) return
     const waiter = this.pendingDecisions.get(pending.requestId)
     if (!waiter) return
-    clearTimeout(waiter.timer)
+    if (waiter.timer) clearTimeout(waiter.timer)
     this.pendingDecisions.delete(pending.requestId)
     waiter.resolve(status)
   }

@@ -9,6 +9,7 @@ import { launchSidecar, SidecarLaunchError, type SidecarHandle } from './sidecar
 import { SidecarClient } from './sidecar/client.js'
 import { CockpitProvider } from './views/cockpit-provider.js'
 import { registerChangesView } from './views/changes-view.js'
+import { registerLauncherView } from './views/launcher-view.js'
 import { DelegationExecutor } from './delegation/executor.js'
 import { StatusBarController } from './views/status-bar.js'
 import { registerCommitMessageCommand } from './scm/commit-message.js'
@@ -47,6 +48,7 @@ export function activate(context: vscode.ExtensionContext): void {
   )
 
   const changesTree = registerChangesView(context, () => ensureClient(provider, cwd), cwd ?? '')
+  registerLauncherView(context)
   delegation = new DelegationExecutor(() => ensureClient(provider, cwd), cwd ?? '')
   delegation.register(context)
   statusBar = new StatusBarController()
@@ -80,11 +82,11 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(CockpitProvider.viewType, provider, {
-      webviewOptions: { retainContextWhenHidden: true },
+    vscode.commands.registerCommand('tianshu.openInEditor', () => {
+      provider.openInEditor()
     }),
     vscode.commands.registerCommand('tianshu.newSession', () => {
-      void vscode.commands.executeCommand('tianshu.cockpit.focus')
+      provider.openInEditor()
     }),
     vscode.commands.registerCommand('tianshu.restartSidecar', async () => {
       disposeSidecar()
@@ -105,7 +107,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const ref = sel.isEmpty
         ? `@file:${rel}`
         : `@file:${rel} (L${sel.start.line + 1}-L${sel.end.line + 1})\n\`\`\`\n${snippet}\n\`\`\``
-      await vscode.commands.executeCommand('tianshu.cockpit.focus')
+      provider.openInEditor()
       // 视图可能刚被唤起，webview 尚在装配——短暂延迟后投递
       setTimeout(() => provider.insertToComposer(ref), 300)
     }),
@@ -126,7 +128,7 @@ export function activate(context: vscode.ExtensionContext): void {
         ? `@file:${rel}`
         : `@file:${rel} (L${sel.start.line + 1}-L${sel.end.line + 1})`
       const text = `${prefix}\n${instruction.trim()}`
-      await vscode.commands.executeCommand('tianshu.cockpit.focus')
+      provider.openInEditor()
       await provider.submitPrompt(text)
     }),
     { dispose: disposeSidecar },

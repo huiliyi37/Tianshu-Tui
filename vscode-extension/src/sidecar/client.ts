@@ -6,17 +6,20 @@
  */
 import type {
   ApprovalAnswer,
+  CockpitSnapshot,
   CreateSessionRequest,
   DomainEntry,
   ModelEntry,
   PlanDocument,
   ProviderConfigList,
+  RewindPoint,
   SessionEvent,
   SessionRecord,
   SetupCustomProviderRequest,
   SetupProviderRequest,
   WorkingTreeFile,
 } from './protocol.js'
+import { classifyStreamEvent } from './stream-accept.js'
 
 export class SidecarClient {
   private readonly baseUrl: string
@@ -45,8 +48,9 @@ export class SidecarClient {
     return (await res.json()) as T
   }
 
-  async listSessions(): Promise<SessionRecord[]> {
-    const body = await this.request<{ sessions: SessionRecord[] }>('GET', '/sessions')
+  async listSessions(opts?: { includeArchived?: boolean }): Promise<SessionRecord[]> {
+    const q = opts?.includeArchived ? '?includeArchived=true' : ''
+    const body = await this.request<{ sessions: SessionRecord[] }>('GET', `/sessions${q}`)
     return body.sessions
   }
 
@@ -54,8 +58,95 @@ export class SidecarClient {
     return this.request('POST', '/sessions', req)
   }
 
+  archiveSession(id: string): Promise<{ archived: boolean }> {
+    return this.request('DELETE', `/sessions/${encodeURIComponent(id)}`)
+  }
+
+  unarchiveSession(id: string): Promise<{ archived: boolean }> {
+    return this.request('POST', `/sessions/${encodeURIComponent(id)}/unarchive`, {})
+  }
+
+  renameSession(id: string, title: string): Promise<{ id: string; title: string }> {
+    return this.request('PATCH', `/sessions/${encodeURIComponent(id)}`, { title })
+  }
+
+  deleteSessionPermanent(id: string): Promise<{ deleted: boolean }> {
+    return this.request('DELETE', `/sessions/${encodeURIComponent(id)}/permanent`)
+  }
+
+  async searchSessions(q: string): Promise<{ sessionId: string; title: string; snippet: string }[]> {
+    const body = await this.request<{ results: { sessionId: string; title: string; snippet: string }[] }>(
+      'GET',
+      `/sessions/search?q=${encodeURIComponent(q)}`,
+    )
+    return body.results
+  }
+
+  getApprovalConfig(): Promise<{ approval: string; unsandboxed: boolean }> {
+    return this.request('GET', '/config/approval')
+  }
+
+  setApprovalConfig(approval: string): Promise<{ approval: string }> {
+    return this.request('PUT', '/config/approval', { approval })
+  }
+
+  getCheckpointConfig(): Promise<{ checkpointEveryTurns: number }> {
+    return this.request('GET', '/config/checkpoint')
+  }
+
+  setCheckpointConfig(checkpointEveryTurns: number): Promise<{ checkpointEveryTurns: number }> {
+    return this.request('PUT', '/config/checkpoint', { checkpointEveryTurns })
+  }
+
+  getDefaultModelConfig(): Promise<{ defaultModel: string | null }> {
+    return this.request('GET', '/config/default-model')
+  }
+
+  setDefaultModelConfig(defaultModel: string): Promise<{ defaultModel: string | null }> {
+    return this.request('PUT', '/config/default-model', { defaultModel })
+  }
+
+  getDefaultDomainConfig(): Promise<{
+    defaultDomain: string
+    domains: { id: string; name: string; motto: string }[]
+  }> {
+    return this.request('GET', '/config/default-domain')
+  }
+
+  setDefaultDomainConfig(defaultDomain: string): Promise<{ defaultDomain: string }> {
+    return this.request('PUT', '/config/default-domain', { defaultDomain })
+  }
+
+  setEffort(id: string, effort: string): Promise<{ id: string; effort: string }> {
+    return this.request('POST', `/sessions/${encodeURIComponent(id)}/effort`, { effort })
+  }
+
+  setAskMode(id: string, state: 'asking' | 'off'): Promise<{ id: string; askMode: string }> {
+    return this.request('POST', `/sessions/${encodeURIComponent(id)}/ask-mode`, { state })
+  }
+
+  listRewindPoints(id: string): Promise<{ points: RewindPoint[] }> {
+    return this.request('GET', `/sessions/${encodeURIComponent(id)}/rewind-points`)
+  }
+
+  rewind(id: string, messageIndex: number, rollbackFiles?: boolean): Promise<SessionRecord> {
+    return this.request('POST', `/sessions/${encodeURIComponent(id)}/rewind`, { messageIndex, rollbackFiles })
+  }
+
   getSession(id: string): Promise<SessionRecord> {
     return this.request('GET', `/sessions/${encodeURIComponent(id)}`)
+  }
+
+  /** 冷通道：seq < before 的更早历史页（绕过内存环）。 */
+  getHistoryPage(
+    id: string,
+    before: number,
+    limit = 200,
+  ): Promise<{ events: SessionEvent[]; firstSeq: number; lastSeq: number }> {
+    return this.request(
+      'GET',
+      `/sessions/${encodeURIComponent(id)}/events?before=${before}&limit=${limit}`,
+    )
   }
 
   prompt(id: string, prompt: string, images?: string[]): Promise<SessionRecord> {
@@ -65,9 +156,30 @@ export class SidecarClient {
   /**
    * T3 — 运行中插话。409（提交瞬间 run 恰好收束）返回 'idle' 而不抛错，
    * 由调用方回退 /prompt 开新 turn——与桌面端 steerSession 同一约定，输入不丢。
+   * `{ laneId }` 升级仍 queued 的 queue 条目；409 且文案含 no longer queued → lane_gone。
    */
-  async steer(id: string, text: string): Promise<'queued' | 'idle'> {
+  async steer(id: string, input: string | { laneId: string }): Promise<'queued' | 'idle' | 'lane_gone'> {
     const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(id)}/steer`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify(typeof input === 'string' ? { text: input } : { laneId: input.laneId }),
+    })
+    if (res.status === 409) {
+      let detail = ''
+      try { detail = ((await res.json()) as { error?: string }).error ?? '' } catch { /* non-json */ }
+      return detail.includes('no longer queued') ? 'lane_gone' : 'idle'
+    }
+    if (!res.ok) {
+      let detail = ''
+      try { detail = ((await res.json()) as { error?: string }).error ?? '' } catch { /* non-json */ }
+      throw new Error(`POST /sessions/${encodeURIComponent(id)}/steer → ${res.status}${detail ? `: ${detail}` : ''}`)
+    }
+    return 'queued'
+  }
+
+  /** busy 排队跟进。409 idle → 调用方回退 /prompt。 */
+  async queue(id: string, text: string): Promise<{ laneId: string } | 'idle'> {
+    const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(id)}/queue`, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ text }),
@@ -76,9 +188,25 @@ export class SidecarClient {
     if (!res.ok) {
       let detail = ''
       try { detail = ((await res.json()) as { error?: string }).error ?? '' } catch { /* non-json */ }
-      throw new Error(`POST /sessions/${encodeURIComponent(id)}/steer → ${res.status}${detail ? `: ${detail}` : ''}`)
+      throw new Error(`POST /sessions/${encodeURIComponent(id)}/queue → ${res.status}${detail ? `: ${detail}` : ''}`)
     }
-    return 'queued'
+    return (await res.json()) as { laneId: string }
+  }
+
+  /** 撤回仍 queued 的条目。404/409 返回 false，不抛。 */
+  async retractQueued(id: string, laneId: string): Promise<boolean> {
+    const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(id)}/queue/retract`, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ laneId }),
+    })
+    if (res.status === 404 || res.status === 409) return false
+    if (!res.ok) {
+      let detail = ''
+      try { detail = ((await res.json()) as { error?: string }).error ?? '' } catch { /* non-json */ }
+      throw new Error(`POST /sessions/${encodeURIComponent(id)}/queue/retract → ${res.status}${detail ? `: ${detail}` : ''}`)
+    }
+    return true
   }
 
   abort(id: string): Promise<{ aborted: boolean }> {
@@ -162,6 +290,11 @@ export class SidecarClient {
     return this.request('POST', '/config/providers/custom', req)
   }
 
+  /** 座舱快照 — 上下文占用/压缩态 + 缓存命中率与成本（TUI /cockpit 同源）。 */
+  getCockpit(id: string): Promise<CockpitSnapshot> {
+    return this.request('GET', `/sessions/${encodeURIComponent(id)}/cockpit`)
+  }
+
   /** Plan mode — 计划正文（原生审批卡数据源）。 */
   async readPlan(id: string, slug: string): Promise<PlanDocument> {
     const body = await this.request<{ plan: PlanDocument }>(
@@ -195,6 +328,11 @@ export class SidecarClient {
   /** 手动进出 plan mode（state 驱动走 plan_mode SSE 事件回流，客户端不做本地臆测）。 */
   setPlanMode(id: string, state: 'planning' | 'off'): Promise<unknown> {
     return this.request('POST', `/sessions/${encodeURIComponent(id)}/plan-mode`, { state })
+  }
+
+  /** 写交接文档并归档（与 TUI /handoff、桌面 Plus 同语义）。 */
+  handoff(id: string, note?: string): Promise<SessionRecord> {
+    return this.request('POST', `/sessions/${encodeURIComponent(id)}/handoff`, note ? { note } : {})
   }
 
   /** E4 — register / heartbeat client landing capabilities. */
@@ -255,10 +393,10 @@ export class SidecarClient {
           onStateChange?.(true)
           retryMs = 500
           await this.consumeSse(res.body, (ev) => {
-            if (ev.seq > lastSeq) {
-              lastSeq = ev.seq
-              onEvent(ev)
-            }
+            const kind = classifyStreamEvent(ev.seq, lastSeq)
+            if (kind === 'dup') return
+            if (kind === 'next') lastSeq = ev.seq
+            onEvent(ev)
           })
         } catch {
           // fall through to retry

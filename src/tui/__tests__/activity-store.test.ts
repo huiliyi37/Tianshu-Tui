@@ -1,5 +1,6 @@
 /**
- * activity-store 测试 — AC1（归一投影 + 席位去重合并）与 AC2（每 item 恒 1 行 + 封顶折叠）。
+ * activity-store 测试 — AC1（归一投影 + 席位去重合并）与 AC2
+ * （running 扁平行 + 统一计数头 + 最新 ⎿ + /tasks 尾行）。
  */
 
 import { describe, it } from 'node:test'
@@ -26,6 +27,7 @@ import type { TodoItem } from '../../tools/todo-store.js'
 import type { JobRow } from '../job-registry.js'
 import { displayWidth } from '../width.js'
 import { getTheme } from '../theme.js'
+import { resetSpinnerConfig } from '../format/spinner-status.js'
 
 const theme = getTheme()
 function stripAnsi(s: string): string {
@@ -139,11 +141,20 @@ describe('projectFleet', () => {
     assert.equal(agent.id, 'batch:0')
   })
 
+  it('forwards the latest activity line for the ⎿ 子行', () => {
+    const [item] = projectFleet([worker({
+      workerId: 'batch:0',
+      profile: 'patcher',
+      activity: '⚙ Read src/a.ts',
+    })])
+    assert.equal(item!.activity, '⚙ Read src/a.ts')
+  })
+
   it('maps -r2 seat to round 2 with a done terminal state', () => {
     const [seat] = projectFleet([worker({
       workerId: 'council:seat-yaoguang-r2',
       authority: 'yaoguang',
-      status: 'passed',
+      status: 'completed',
       terminal: true,
       panelStatus: 'done',
     })])
@@ -315,53 +326,61 @@ describe('mergeActivityItems', () => {
 
 describe('buildActivityBandLines', () => {
   const bandItems: ActivityItem[] = [
-    { id: 'council:seat-tianquan', kind: 'council-seat', label: '评审安全边界', status: 'running', groupId: 'council', round: 2 },
+    { id: 'council:seat-tianquan', kind: 'council-seat', label: '评审安全边界', status: 'running', groupId: 'council', round: 2, elapsedMs: 3000 },
     { id: 'council:seat-tianji', kind: 'council-seat', label: '评审接口', status: 'done', groupId: 'council', modelUsed: 'deepseek-v4' },
-    { id: 'batch:0', kind: 'agent', label: '修复 bug', status: 'running', groupId: 'fleet' },
-    { id: 'T1', kind: 'team-task', label: '修认证 bug', status: 'running', groupId: 'team', phaseIndex: 0 },
+    { id: 'batch:0', kind: 'agent', label: '修复 bug', status: 'running', groupId: 'fleet', elapsedMs: 1000, toolUseCount: 2, tokenCount: 1200, activity: '⚙ Read src/a.ts' },
+    { id: 'T1', kind: 'team-task', label: '修认证 bug', status: 'running', groupId: 'team', phaseIndex: 0, elapsedMs: 2000 },
     { id: '1', kind: 'todo', label: '写测试', status: 'pending', groupId: 'todo' },
   ]
 
-  it('renders one group header + exactly one line per item', () => {
+  it('只渲染 running：统一计数头 + 每 item 1 行 + 最新子代理 ⎿ + /tasks 尾行', () => {
     const lines = buildActivityBandLines(bandItems, { maxRows: 10 })
-    // 4 组头 + 5 item 行 = 9 行；组头与 item 交替排列（GROUP_ORDER 顺序）
-    assert.equal(lines.length, 4 + 5)
-    assert.match(lines[0]!, /◐ 议事会 · 1\/2 席/)
-    assert.match(lines[1]!, / ├─ ◐ 评审安全边界/)
-    assert.match(lines[2]!, / ├─ ✓ 评审接口/)
-    assert.match(lines[3]!, /◐ 编队 · 1 执行中/)
-    assert.match(lines[4]!, / ├─ ◐ 修认证 bug/)
-    assert.match(lines[5]!, /◐ 1 子代理执行中/)
-    assert.match(lines[6]!, / ├─ ◐ 修复 bug/)
-    assert.match(lines[7]!, /◐ 待办 · 0\/1/)
-    assert.match(lines[8]!, / ├─ ○ 写测试/)
+    assert.ok(lines[0]!.includes('◐ 1 子代理 · 1 编队 · 1 席'), `计数头: ${lines[0]}`)
+    assert.ok(!lines.some(l => l.includes('├─')), '不再用树形前缀')
+    assert.ok(!lines.some(l => l.includes('评审接口') || l.includes('写测试')), 'done/pending 不进带')
+    assert.ok(lines.some(l => l.includes('修复 bug')), 'running 子代理在列')
+    assert.ok(lines.some(l => l.includes('修认证 bug')), 'running 编队在列')
+    assert.ok(lines.some(l => l.includes('评审安全边界')), 'running 席在列')
+    assert.ok(lines.some(l => l.includes('⎿') && l.includes('Read src/a.ts')), '最新子代理挂 ⎿')
+    assert.equal(lines[lines.length - 1], '/tasks 管理')
   })
 
-  it('caps items at maxRows and folds the rest as …(+N)', () => {
+  it('caps items at maxRows and folds the rest as …(+N) · /tasks', () => {
     const lines = buildActivityBandLines(bandItems, { maxRows: 2 })
-    // 组头行不计入 maxRows 预算，item 行恒 1 行、封顶 2 行 + …(+3)
-    const itemLines = lines.filter(l => /^ ├─/.test(l))
+    const itemLines = lines.filter(l => l.includes('修复 bug') || l.includes('修认证 bug') || l.includes('评审安全边界'))
     assert.equal(itemLines.length, 2)
-    assert.ok(lines[lines.length - 1]!.includes('…(+3)'))
+    assert.ok(lines[lines.length - 1]!.includes('…(+1)'), `折叠: ${lines[lines.length - 1]}`)
+    assert.ok(lines[lines.length - 1]!.includes('/tasks 管理'))
   })
 
   it('each item occupies exactly one line — no embedded newlines', () => {
     const lines = buildActivityBandLines([
       { id: 'x', kind: 'agent', label: '多\n行\n标签', status: 'running', groupId: 'fleet' },
     ])
-    assert.equal(lines.length, 2) // 头 + 1 item 行
-    assert.ok(!lines[1]!.includes('\n'))
-    assert.match(lines[1]!, /多 行 标签/) // 换行被压平
+    // 单条 running：无计数头；无 activity/toolUseCount → 无 ⎿；恒有尾行
+    assert.equal(lines.length, 2)
+    assert.ok(!lines[0]!.includes('\n'))
+    assert.match(lines[0]!, /多 行 标签/)
+    assert.equal(lines[1], '/tasks 管理')
   })
 
   it('returns empty for no items', () => {
     assert.deepEqual(buildActivityBandLines([]), [])
   })
 
-  it('renders council seat tail with round and modelUsed', () => {
-    const lines = buildActivityBandLines([bandItems[0]!, bandItems[1]!], { maxRows: 10 })
-    assert.match(lines[1]!, /r2/)
-    assert.match(lines[2]!, /deepseek-v4/)
+  it('done-only 输入不渲染带（终态已进 scrollback）', () => {
+    assert.deepEqual(buildActivityBandLines([
+      { id: 'd', kind: 'agent', label: '已完成', status: 'done', groupId: 'fleet' },
+    ]), [])
+  })
+
+  it('renders running council seat tail with round and modelUsed', () => {
+    const lines = buildActivityBandLines([
+      { id: 'council:seat-tianquan', kind: 'council-seat', label: '评审安全边界', status: 'running', groupId: 'council', round: 2, modelUsed: 'deepseek-v4', elapsedMs: 4000 },
+    ], { maxRows: 10 })
+    const row = lines.find(l => l.includes('评审安全边界'))!
+    assert.match(row, /r2/)
+    assert.match(row, /deepseek-v4/)
   })
 
   it('preserves round-2 seat identity even when prefix constant is used in ids', () => {
@@ -369,13 +388,41 @@ describe('buildActivityBandLines', () => {
     const lines = buildActivityBandLines([
       { id: viaConst, kind: 'council-seat', label: 'L', status: 'running', groupId: 'council' },
     ])
-    assert.match(lines[1]!, /├─ ◐ L/)
+    assert.match(lines[0]!, / L/)
+    assert.ok(!lines[0]!.includes('├─'))
+  })
+
+  it('零工具且无活动行时挂 ⎿ 启动中…', () => {
+    const lines = buildActivityBandLines([
+      { id: 'w1', kind: 'agent', label: '侦察', status: 'running', groupId: 'fleet', toolUseCount: 0 },
+    ])
+    assert.ok(lines.some(l => l.includes('⎿') && l.includes('启动中…')), lines.join(' | '))
+  })
+
+  it('spinner 随 tick 换帧；后缀从右丢', () => {
+    resetSpinnerConfig()
+    const item: ActivityItem = {
+      id: 'w1',
+      kind: 'agent',
+      label: '审查认证模块',
+      status: 'running',
+      groupId: 'fleet',
+      toolUseCount: 12,
+      tokenCount: 45_000,
+      elapsedMs: 90_000,
+    }
+    const a = buildActivityBandLines([item], { tick: 0, width: 80 })[0]!
+    const b = buildActivityBandLines([item], { tick: 1, width: 80 })[0]!
+    assert.notEqual(a[1], b[1], `glyph 应随 tick 变: ${a} vs ${b}`)
+    const narrow = buildActivityBandLines([item], { tick: 0, width: 28 })[0]!
+    assert.ok(narrow.includes('12 工具'), `工具段优先保留: ${narrow}`)
+    assert.ok(!narrow.includes('1m30s') && !narrow.includes('90'), `窄宽丢掉右侧耗时: ${narrow}`)
   })
 })
 /**
  * band 的高度与宽度回归闸。
  *
- * 两条都踩过：组内 item 被折叠光后仍渲染孤零零的组头（白占一行且是纯噪音）；
+ * 计数头只一条（按 kind 汇总，含被折叠组）；超 maxRows 折进尾行，不留空组头。
  * 调用方漏传 width 时按默认 80 截断，窄终端上折行 → rowsForLine 少算 → 旧帧
  * 残留被顶进 scrollback。
  */
@@ -387,26 +434,27 @@ describe('formatActivityBand — 高度与宽度', () => {
       label: `${gid} 项 ${i}`,
       status: 'running' as const,
       groupId: gid,
+      elapsedMs: (n - i) * 1000,
     }))
 
-  it('预算耗尽的组不渲染空组头', () => {
+  it('超封顶折叠进尾行，不留空组头', () => {
     const items = [...group('council', 3), ...group('team', 3), ...group('fleet', 3)]
     const lines = buildActivityBandLines(items, { maxRows: 3, width: 80 })
-    assert.ok(lines.some(l => l.includes('议事会')), '有预算的组渲染组头')
-    assert.ok(!lines.some(l => l.includes('编队')), '预算耗尽的组不应留下孤组头')
-    assert.ok(!lines.some(l => l.includes('子代理执行中')), '预算耗尽的组不应留下孤组头')
-    assert.ok(lines.some(l => l.includes('…(+6)')), `折叠计数应含被跳过的整组: ${lines.join(' | ')}`)
-    // 组头 1 + item 3 + 折叠 1
-    assert.equal(lines.length, 5, `总行数: ${lines.join(' | ')}`)
+    assert.ok(lines[0]!.includes('3 子代理') && lines[0]!.includes('3 编队') && lines[0]!.includes('3 席'), `统一计数头含被折叠组: ${lines[0]}`)
+    assert.ok(lines.some(l => l.includes('…(+6)')), `折叠计数应含被截断项: ${lines.join(' | ')}`)
+    // 头 + 3 item +（最新 agent 可能 ⎿）+ 折叠尾行
+    assert.ok(lines.length <= 1 + 3 + 1 + 1, `总行数有界: ${lines.join(' | ')}`)
+    assert.equal(lines.filter(l => l.includes('项 ')).length, 3)
   })
 
-  it('总行数有界：组头只为有内容的组产出', () => {
+  it('总行数有界：计数头最多 1 行，item 行数等于 maxRows', () => {
     const items = [...group('council', 5), ...group('team', 5), ...group('fleet', 5)]
     const lines = buildActivityBandLines(items, { maxRows: 6, width: 80 })
-    const headers = lines.filter(l => !l.includes('├─') && !l.includes('└─'))
-    const itemLines = lines.filter(l => l.includes('├─'))
+    const headers = lines.filter(l => l.includes('◐'))
+    const itemLines = lines.filter(l => /项 \d/.test(l))
     assert.equal(itemLines.length, 6, 'item 行数等于 maxRows')
-    assert.ok(headers.length <= 2, `15 项 / maxRows=6 时最多 2 个组有内容，实得 ${headers.length} 个组头`)
+    assert.equal(headers.length, 1, `只一条统一计数头，实得 ${headers.length}`)
+    assert.ok(lines[lines.length - 1]!.includes('/tasks'))
   })
 
   it('宽度账：显式 width 下不超（CJK 与省略号按 2 列）', () => {
@@ -423,10 +471,9 @@ describe('formatActivityBand — 高度与宽度', () => {
     }]
     for (const width of [40, 60, 80, 120]) {
       for (const line of buildActivityBandLines(long, { maxRows: 6, width })) {
-        const limit = Math.min(Math.max(40, width), 80)
         assert.ok(
-          displayWidth(line, { ambiguousAsWide: true }) <= limit,
-          `width=${width} 超宽 ${displayWidth(line, { ambiguousAsWide: true })}>${limit}: ${line}`,
+          displayWidth(line, { ambiguousAsWide: true }) <= width,
+          `width=${width} 超宽 ${displayWidth(line, { ambiguousAsWide: true })}>${width}: ${line}`,
         )
       }
     }

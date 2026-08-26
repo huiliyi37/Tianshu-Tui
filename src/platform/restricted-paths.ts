@@ -37,19 +37,19 @@ const WINDOWS_RESTRICTED_PATTERNS: readonly RegExp[] = [
 
 /** macOS system directories with restrictive ACLs (EPERM under SIP/TCC). */
 const MACOS_RESTRICTED_PATTERNS: readonly RegExp[] = [
-  /(^|\/)\.Spotlight-V100([\/]|$)/i,
-  /(^|\/)\.fseventsd([\/]|$)/i,
-  /(^|\/)\.TemporaryItems([\/]|$)/i,
-  /(^|\/)\.DocumentRevisions-V100([\/]|$)/i,
-  /(^|\/)\.Trashes([\/]|$)/i,
+  /(^|\/)\.Spotlight-V100([/]|$)/i,
+  /(^|\/)\.fseventsd([/]|$)/i,
+  /(^|\/)\.TemporaryItems([/]|$)/i,
+  /(^|\/)\.DocumentRevisions-V100([/]|$)/i,
+  /(^|\/)\.Trashes([/]|$)/i,
 ]
 
 /** Linux system paths that commonly cause EACCES on readdir. */
 const LINUX_RESTRICTED_PATTERNS: readonly RegExp[] = [
-  /^\/proc\/\d+\/(fd|map_files|task\/\d+\/fd)([\/]|$)/,
-  /^\/sys\/kernel\/debug([\/]|$)/,
-  /^\/sys\/fs\/cgroup([\/]|$)/,
-  /(^|\/)lost\+found([\/]|$)/,
+  /^\/proc\/\d+\/(fd|map_files|task\/\d+\/fd)([/]|$)/,
+  /^\/sys\/kernel\/debug([/]|$)/,
+  /^\/sys\/fs\/cgroup([/]|$)/,
+  /(^|\/)lost\+found([/]|$)/,
 ]
 
 const ALL_RESTRICTED: readonly RegExp[] = [

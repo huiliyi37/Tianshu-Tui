@@ -36,7 +36,9 @@ export interface DelegationActivity extends DelegationIdentity {
   authority?: string
   /** Why this authority was chosen (from WorkOrder.authorityReason). */
   authorityReason?: string
-  status: 'running' | 'passed' | 'completed' | 'failed' | 'blocked' | 'escalated'
+  /** UI 活动带终态词汇（2026-08-25 收口）：'completed' 是唯一「跑完且通过」态——
+   *  WorkerResult.status 的 'passed' 由 terminalActivity 统一映射而来，两值不再分裂并存。 */
+  status: 'running' | 'completed' | 'failed' | 'blocked' | 'escalated'
   /** Worker task objective — prefer on first running + terminal events only
    *  to avoid repeating the same text on every activity tick. */
   objective?: string

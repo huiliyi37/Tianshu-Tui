@@ -27,7 +27,7 @@ function view(partial: Partial<FleetWorkerView> & { workerId: string }): FleetWo
     shortLabel: partial.workerId,
     parentToolId: 'tool-1',
     profile: 'reviewer',
-    status: 'passed',
+    status: 'completed',
     panelStatus: 'done',
     terminal: true,
     activityLog: [],
@@ -98,7 +98,7 @@ describe('FleetRegistry.clearGroup 返回归档视图', () => {
     const fleet = new FleetRegistry()
     fleet.apply(act('w1', 'running'), 1000)
     fleet.apply(act('w2', 'running'), 2000)
-    fleet.apply(act('w1', 'passed', { progressLine: 'done', toolUseCount: 20 }), 3000)
+    fleet.apply(act('w1', 'completed', { progressLine: 'done', toolUseCount: 20 }), 3000)
     fleet.apply(act('w2', 'failed', { progressLine: 'boom' }), 4000)
 
     const { settled } = fleet.clearGroup('tool-1', 5000)
@@ -131,10 +131,10 @@ describe('FleetRegistry 终态重放防御', () => {
   it('terminal→terminal 重放：elapsed 冻结在首次终态，unread 不重复标记', () => {
     const fleet = new FleetRegistry()
     fleet.apply(act('w1', 'running'), 1000)
-    fleet.apply(act('w1', 'passed', { progressLine: 'done' }), 5000)
+    fleet.apply(act('w1', 'completed', { progressLine: 'done' }), 5000)
     fleet.markSeen('w1') // 用户已查看 → unread 清除
     // 批末兜底循环重放（带 usage/model 补齐）
-    fleet.apply(act('w1', 'passed', { progressLine: 'done', usage: { input_tokens: 100, output_tokens: 50 }, model: 'm-x' }), 9000)
+    fleet.apply(act('w1', 'completed', { progressLine: 'done', usage: { input_tokens: 100, output_tokens: 50 }, model: 'm-x' }), 9000)
     const w = fleet.getWorkerById('w1', 10_000)!
     assert.equal(w.elapsedMs, 4000, 'elapsed 冻结在首次终态（5000-1000），不被重放推高')
     assert.equal(w.unread, false, '已读状态不被重放覆盖')
@@ -147,7 +147,7 @@ describe('FleetRegistry 终态重放防御', () => {
     fleet.apply(act('w1', 'running'), 1000)
     fleet.apply(act('w1', 'failed'), 2000)
     fleet.apply(act('w1', 'running'), 3000) // 重跑
-    fleet.apply(act('w1', 'passed'), 6000)
+    fleet.apply(act('w1', 'completed'), 6000)
     const w = fleet.getWorkerById('w1', 7000)!
     assert.equal(w.status, 'passed')
     // 重跑起新记录，耗时按本轮计（6000-3000）。此前共用同一条记录时这里是

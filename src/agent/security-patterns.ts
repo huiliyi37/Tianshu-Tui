@@ -242,7 +242,7 @@ export const SECURITY_PATTERNS: SecurityPattern[] = [
     // 刻意不认短值、占位符（xxx/your-…/<…>/env 读取/${}）——密钥泄露的代价高,
     // 但误报会让这条规则被无视,所以宁可漏报明显是示例的写法。
     pathFilter: p => !endsWithAny(p, DOC_EXTS),
-    regex: /(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd)\s*[:=]\s*["'`](?!(?:x{3,}|your[-_]|my[-_]|test|dummy|example|placeholder|change[-_]?me|\$\{|<|\.\.\.))[A-Za-z0-9_\-./+=]{16,}["'`]|\b(?:sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_\-]{30,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/i,
+    regex: /(?:api[_-]?key|secret[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|password|passwd)\s*[:=]\s*["'`](?!(?:x{3,}|your[-_]|my[-_]|test|dummy|example|placeholder|change[-_]?me|\$\{|<|\.\.\.))[A-Za-z0-9_\-./+=]{16,}["'`]|\b(?:sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|gho_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|AIza[A-Za-z0-9_-]{30,}|xox[baprs]-[A-Za-z0-9-]{10,})\b/i,
     reminder:
       '⚠️ 安全警告:代码里出现疑似硬编码的密钥/令牌/口令。密钥一旦进 git 历史就收不回来——即使后续提交删掉,历史里仍可检出,必须视为已泄露并轮换。\n\n改法:从环境变量或密钥管理服务读取（process.env.X / os.environ["X"]），把真实值放进 .env 并确认 .env 已被 .gitignore 忽略;示例值写成明显的占位符（your-api-key-here）。\n\n若这是测试用的假值,把它改成一眼可辨的占位形状（xxx…/dummy-…),既消除告警也让读者不误当真值。',
   },

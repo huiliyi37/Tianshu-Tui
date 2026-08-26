@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+Ask + 复制/引用 + 薄版 queue（3.5.6）：
+
+- **询问模式**：工具栏 Ask / `/ask` 走 `POST /ask-mode`，与计划模式互斥；进行中出 Ask 徽章
+- **复制 / 引用**：用户与助手气泡（运行中也显示）。复制走宿主剪贴板；引用按行加 `>` 回填输入框，已有草稿不覆盖
+- **运行中发送改排队**：不再默认立即 steer。排队卡可「立即插话」或撤回回输入框；run 恰好结束时 409 降级成新 turn，不双发
+
+薄版 rewind（3.5.5）：
+
+- **退到这里**：空闲时用户气泡可退到该条之前（对话截断到该条本身也去掉）；可选一并回滚本会话 checkpoint 文件。运行中隐藏按钮
+- **草稿回填**：收到 SSE `rewind` 后原文回到输入框，再发送是新 turn
+- `/rewind` `/undo` 指向该入口；不做桌面时间轴、精确逐文件 rewind、编辑后重发
+
+长会话历史（3.5.4）：
+
+- **加载更早的历史**：SSE `replay_window` 此前因 seq=0 被订阅去重丢掉。现放行元事件；磁盘还有更早内容时消息列顶出「加载更早的历史」，经 `GET /events?before=` 前插
+- **phase / 插话送达**：运行中 phase 条；`steer_delivered` 出「插话已注入」
+
+日用摩擦收口（3.5.3）：
+
+- **单座舱**：去掉活动栏完整 chat（点星星会换掉资源管理器）。入口：底栏「天枢」、命令面板、资源管理器「天枢」两项。变更审查挂到 Explorer「天枢变更」
+- **设置固化默认**：默认模型 / 星域走 `PUT /config/default-*`，只在设置页保存时写入；工具栏草稿不影响全局。权限档改用自绘下拉
+- **自动档暂停卡**：消费 `autonomy_checkpoint` / `watchdog_recovery`，「继续」发 `continue` 走 `/prompt`（不是续跑 resume）
+- **推理强度**：工具栏 + `/effort auto|off|low|medium|high|max` 走 `POST /sessions/:id/effort`
+- `/compact` 仍诚实 blocked（sidecar 无压缩路由）
+
+座舱日用缺口（对照桌面 / TUI，只动插件 + 委托超时）：
+
+- **斜杠命令**：输入 `/` 出菜单；`/yes` `/permission` `/handoff` `/resume` `/plan-mode` 本地落地，不再被 sidecar 400
+- **委托编辑**：CodeLens 不再 15 秒自动接受；内核 `apply_edit` 人审窗口改为 5 分钟，超时才 fail-back
+- **续跑**：处理 `resume_offer`，失败/中止会话显示「续跑」
+- **粘贴图片**：剪贴板图片随 prompt 提交（png/jpeg/webp/gif，最多 4 张）
+- **版本**：扩展号对齐内核 3.5.2；无 CLI 自举先拉当前 runtime，404 回退 `runtime-v3.4.0`
+- **会话管理**：顶栏当前标题 + 会话抽屉；搜索标题/id（≥2 字兼搜正文）；改名 / 归档 / 恢复 / 永久删除；新建可选隔离 worktree
+- **设置页**：新会话默认权限（监督/自动/全自动）+ 自动档检查点轮数；已配置提供商列表 + 再加 key（与 CLI / 桌面共用 `~/.rivet`）
+- **座舱进编辑区**：底栏「天枢」、新建会话、发送到天枢默认在中间打开，不再挤掉左侧文件列表
+- **新会话先选模型/星域**：顶栏「＋ 新会话」改成主按钮；无活跃会话时工具栏可选模型与星域，首条消息按所选创建（不再静默用默认模型）
+
+缓存与上下文可观测性（对齐桌面端驾驶舱，此前插件端对两者完全不可见）：
+
+- **座舱统计条**：工具栏下方常驻——上下文占用进度条（按压缩态 healthy/warning/compacting/critical 着色，hover 显示占用明细与轮数）+ 累计前缀缓存命中率（hover 显示近 3 轮与 cacheDiagnostic）+ 会话成本 USD（hover 显示 token 构成）；数据源 `GET /sessions/:id/cockpit`，与桌面端/TUI 同源，turn 收束即时刷新 + 30s 兜底轮询（覆盖空闲压缩等无事件状态变化）
+- **逐 turn 用量脚注**：每次 turn 结束出 `⚡ 命中% ↑输入 ↓输出` 小字——消费此前被 reducer 静默丢弃的 `turn_complete.usage` SSE 事件；无 usage 或全零（旧内核/合成事件）不出
+- **修复**：变更审查视图丢失 turn 收束时的刷新信号——事件名笔误 `turn_completed` → `turn_complete`（原条件永不成立，仅靠 status 事件掩盖）
+- 协议镜像补齐：`SessionRecord.contextTokens/contextWindow`（内核已返回，此前未镜像）；旧内核无 cockpit 路由时统计条静默隐藏，不影响对话
+
 ## 3.4.0 — 2026-08-17
 
 版本号对齐内核（3.0.0 → 3.4.0，与 CLI / 桌面端同步）+ 输入历史召回。

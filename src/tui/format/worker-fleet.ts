@@ -27,7 +27,7 @@ export interface WorkerFleetSummary {
 function statusGlyph(status: FleetWorkerView['status']): string {
   switch (status) {
     case 'running': return '◐'
-    case 'passed': return '✓'
+    case 'completed': return '✓'
     case 'completed': return '✓'
     case 'failed': return '✗'
     case 'blocked': return '⊗'
@@ -46,7 +46,7 @@ function statusColorKey(status: FleetWorkerView['status'], failureReason?: strin
   if (status === 'completed' && failureReason === 'review-findings') return 'warning'
   switch (status) {
     case 'running': return 'primary'
-    case 'passed': return 'success'
+    case 'completed': return 'success'
     case 'completed': return 'success'
     case 'failed': return 'error'
     default: return 'warning'
@@ -226,7 +226,7 @@ export function formatWorkerFleet(
   return entries.map(l => {
     if (l.kind === 'worker') {
       if (l.status === 'running') return color(l.text, theme.primary)
-      if (l.status === 'passed') return color(l.text, theme.success)
+      if (l.status === 'completed') return color(l.text, theme.success)
       return color(l.text, theme.warning)
     }
     if (l.kind === 'hint') return color(l.text, theme.dim)
@@ -253,7 +253,7 @@ export function formatWorkerFleetSettled(
 ): string[] {
   if (workers.length === 0) return []
   const rule = Math.min(Math.max(40, width), 80)
-  const passed = workers.filter(w => w.status === 'passed').length
+  const passed = workers.filter(w => w.status === 'completed').length
   const totalTools = workers.reduce((n, w) => n + w.toolUseCount, 0)
   const totalTokens = workers.reduce((n, w) => n + w.tokenCount, 0)
   const maxElapsed = workers.reduce((n, w) => Math.max(n, w.elapsedMs), 0)

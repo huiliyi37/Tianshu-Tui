@@ -6,6 +6,7 @@
  */
 
 import { homedir } from 'node:os'
+import { formatPermissionChrome } from '../../agent/approval-vocabulary.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import { ANSI, color } from '../engine/ansi.js'
@@ -24,6 +25,7 @@ export function shortenCwd(cwd: string): string {
 import { displayWidth, truncateToDisplayWidth } from '../width.js'
 import { getActiveThemeName, type RivetTheme } from '../theme.js'
 import type { CacheStatus } from '../status-types.js'
+import { HANDOFF_NUDGE_RATIO } from '../handoff.js'
 
 /** 星域名称 → 主题语义色键（用于 input border / prompt accent 着色）。 */
 export function resolveStarDomainAccent(domainName: string | undefined, theme: RivetTheme): string {
@@ -76,8 +78,8 @@ export interface TodoSummary {
 }
 
 /**
- * Todo 计数徽章（badge-first）：compact 档 `◇2/5`（done/total），
- * full 档分态计数 `◐1 ☐3 ☒2`（in_progress / pending / completed）。
+ * Todo 计数徽章（badge-first）：compact 档 `≡2/5`（done/total），
+ * full 档分态计数 `◐1 ○3 ✓2`（in_progress / pending / completed）。
  * 无 todo 返回 null（不占位）。flash 时反色高亮（done 增加 / total 变化后 ~1s，
  * 由 app 侧计时；reducedMotion 时 app 不传 flash，保持静态色）。
  */
@@ -85,8 +87,8 @@ function formatTodoBadge(t: TodoSummary, compact: boolean, theme: RivetTheme, fl
   if (t.total <= 0) return null
   const pending = Math.max(0, t.total - t.done - t.inProgress)
   const text = compact
-    ? `◇${t.done}/${t.total}`
-    : `◐${t.inProgress} ☐${pending} ☒${t.done}`
+    ? `≡${t.done}/${t.total}`
+    : `◐${t.inProgress} ○${pending} ✓${t.done}`
   if (flash) return `${ANSI.REVERSE}${text}${ANSI.RESET}`
   return color(text, theme.primary)
 }
@@ -180,10 +182,10 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
   return `${glyphPart}${color(domainLabel, accentColor)}${color(branchPart, theme.secondary)}${color(cwdPart, theme.dim)}${workerPart}`
 }
 
-/** 高占用成本提示：上下文 ≥70% 在底栏常驻建议开新会话——继续推进会触发压缩
- *  （前缀缓存全量重建，成本高）。compact 档用短文案。与 HANDOFF_NUDGE_RATIO 同档。 */
+/** 高占用成本提示：上下文 ≥ HANDOFF_NUDGE_RATIO 在底栏常驻建议开新会话——继续推进会触发压缩
+ *  （前缀缓存全量重建，成本高）。compact 档用短文案。与交接提醒同档。 */
 function contextNewSessionHint(ratio: number, theme: RivetTheme, compact: boolean): string {
-  if (ratio < 0.7) return ''
+  if (ratio < HANDOFF_NUDGE_RATIO) return ''
   return color(compact ? '·建议新会话' : ' · 上下文偏高建议开新会话（压缩成本高）', theme.warning)
 }
 
@@ -211,7 +213,7 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
     parts.push(color(`⚙ ${input.jobsRunning}`, theme.primary))
   }
 
-  // Todo 计数徽章：与编排徽章相邻（cache% 之前），compact `◇2/5` / full 分态计数；
+  // Todo 计数徽章：与编排徽章相邻（cache% 之前），compact `≡2/5` / full 分态计数；
   // 变化后 ~1s 反色高亮。无 todo 不占位。
   if (input.todoSummary) {
     const badge = formatTodoBadge(input.todoSummary, compact, theme, input.todoFlash === true)
@@ -325,7 +327,7 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
 /**
  * 输入框下方常驻权限模式行（CC 的 `⏵⏵ bypass permissions on` 位）。
  * 单一事实来源：GlanceBar 不再显示权限 badge，全部收敛到这一行。
- * 着色沿用旧 badge 映射：safe=muted / ask=warning / yolo=error / auto=success / plan=primary。
+ * 着色沿用旧 badge 映射：自动=muted / ask=warning / 全自动=error / auto-accept=success / plan=primary。
  */
 export function formatPermissionModeLine(
   input: { approvalMode?: string; planMode?: boolean; askMode?: boolean; planDraftPath?: string },
@@ -342,10 +344,11 @@ export function formatPermissionModeLine(
     return `  ${color('⏵ plan mode', theme.primary)}${draft} ${hint}`
   }
   const mode = input.approvalMode ?? 'auto-safe'
-  const [label, modeColor] = mode === 'manual' ? ['manual', theme.warning]
-    : mode === 'dangerously-skip-permissions' ? ['yolo', theme.error]
-    : mode === 'auto-accept' ? ['auto-accept', theme.success]
-    : [mode, theme.muted]
+  const chrome = formatPermissionChrome(mode)
+  const [label, modeColor] = mode === 'manual' ? [chrome, theme.warning]
+    : mode === 'dangerously-skip-permissions' ? [chrome, theme.error]
+    : mode === 'auto-accept' ? [chrome, theme.success]
+    : [chrome, theme.muted]
   return `  ${color(`⏵ ${label}`, modeColor)} ${hint}`
 }
 

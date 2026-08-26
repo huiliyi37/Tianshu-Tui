@@ -169,7 +169,7 @@ export function buildWritingPlanPrompt(options: WritingPlanPromptOptions): strin
 \`\`\`markdown
 # [功能名称] 实现计划
 
-> **面向 AI 代理：** 使用 executing-plans 逐任务实现，或用 plan_task + team_orchestrate 编排多任务。
+> **面向 AI 代理：** 逐任务实现并按波验证（原生计划执行纪律，见 <plan-executing> 块），或用 plan_task + team_orchestrate 编排多任务。
 
 **目标：** [一句话描述]
 
@@ -201,7 +201,7 @@ export function buildWritingPlanPrompt(options: WritingPlanPromptOptions): strin
 收尾：
 "计划已完成并保存到 \`${path}\`。两种执行方式：
 1. 子代理驱动（推荐）
-2. 内联执行（使用 executing-plans）
+2. 内联执行（按原生计划执行纪律逐任务推进）
 选哪种方式？"
 `
 }

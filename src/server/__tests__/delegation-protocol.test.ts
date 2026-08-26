@@ -169,7 +169,7 @@ describe('E4 routes + protocol header', () => {
       )
       assert.equal(cap.status, 200)
       assert.equal(cap.headers?.[TIANSHU_PROTOCOL_HEADER], String(TIANSHU_PROTOCOL_VERSION))
-      assert.ok(DELEGATE_TIMEOUT_MS.apply_edit > 0)
+      assert.ok(DELEGATE_TIMEOUT_MS.apply_edit >= 60_000, 'apply_edit 人审窗口至少 1 分钟，禁止退回 15s 自动接受')
       manager.shutdownAll()
     } finally {
       rmSync(cwd, { recursive: true, force: true })

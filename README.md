@@ -47,7 +47,7 @@
 
 **方式 A：桌面端（开箱即用）** —— 从 [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载：macOS `.dmg` · Windows `.msi` · Linux `.AppImage`。
 
-> **Windows 支持范围**：Windows 10（1809+，建议 22H2）/ Windows 11。界面渲染依赖 **WebView2 Runtime**——Win11 与多数 Win10 已预装；缺失时安装器会自动下载（离线环境可到 <https://aka.ms/webview2installer> 手动安装）。「设置 → 运行时与关于」页可查看当前 WebView2 版本。
+> **Windows 支持范围**：Windows 10（1809+，建议 22H2）/ Windows 11。界面渲染依赖 **WebView2 Runtime（建议 ≥ 120）**——v3.5 起的滚动与渲染优化需要较新运行时，旧版会导致会话区滚动卡顿。自 3.5.3 起安装器内嵌完整离线安装包（无需联网、系统级注册）；存量用户经自动更新升级后若提示运行时过旧，到「设置 → 运行时与关于」或提示条里的链接下载 [WebView2 离线安装包](https://go.microsoft.com/fwlink/p/?LinkId=2124703)，双击安装后重启应用即可。
 > **Win10 平板模式已知行为**：平板模式下切换应用会把上一个应用滑出屏幕——computer_use 的快照已做遮挡/后台自愈（PrintWindow 渲染），无需关闭平板模式。
 
 **方式 B：npm 全局安装（推荐，使用命令行）** —— 已发布为 `tianshu-tui`，无需本地构建，且每次启动自动检查更新：
@@ -150,7 +150,7 @@ rivet --goal "修复所有类型错误" --budget 50   # 无头目标自主模式
 | `--resume` `-r`（裸） | 启动后打开会话选择器 |
 | `--new` | 强制开新会话 |
 | `--list` · `rivet sessions` | 打印会话列表后退出 |
-| `--dangerously-skip-permissions` | 单次会话 YOLO（跳过所有审批） |
+| `--dangerously-skip-permissions` | 单次会话全自动（跳过所有审批；沙箱仍开） |
 | `--screen-reader` | 读屏模式（动态段整体不渲染、周期重绘停转） |
 | `--skip-welcome` | 跳过欢迎屏 |
 | `--stream-events <path>` | 把本次 run 镜像为 NDJSON `SessionEvent` 写入文件 |
@@ -261,15 +261,15 @@ rivet config show                     # 查看完整配置
 
 | 模式 | 命令 | 行为 |
 |------|------|------|
-| **Manual** | `/permission manual` | 每个高风险工具都弹确认。最大控制，适合敏感项目。 |
-| **Auto**（默认） | `/permission auto [轮次]` | 低/无风险工具自动执行，高风险仍确认。可配每 N 轮暂停检查点（`/permission auto 20`），默认关闭。 |
-| **YOLO** | `/permission yolo confirm` 或 `/yes` | 全自动执行，无刹车无打扰。回滚兜底（`/rollback` + git 检查点）。`/permission yolo` 需二次确认；`/yes` 即时生效（显式输入命令即视为确认），`/yes off` 退出。 |
+| **监督** | `/permission supervise`（别名 `manual`） | 每个高风险工具都弹确认。最大控制，适合敏感项目。 |
+| **自动**（默认） | `/permission auto [轮次]`（别名 `default`） | 低/无风险工具自动执行，高风险仍确认。可配每 N 轮暂停检查点（`/permission auto 20`），默认关闭。 |
+| **全自动** | `/permission unattended confirm` 或 `/yes`（别名 `yolo`） | 免审批执行，无刹车无打扰；写沙箱仍开。回滚兜底（`/rollback` + git 检查点）。未带 `confirm` 先看风险说明；`/yes` 即时生效（显式输入即视为确认），`/yes off` 回到自动。 |
 
-> **Windows 注意**：Windows 原生无文件系统沙箱。天枢桌面版安装包内嵌 PortableGit（完整 Git + Git Bash，开箱即用，不依赖用户自装 Git for Windows；已装系统 Git 时优先用系统版）。无沙箱环境下，安全写命令在 Auto 模式自动放行，风险写（rm/mv/git 写操作）仍需审批。
+> **Windows 注意**：Windows 原生无文件系统沙箱。天枢桌面版安装包内嵌 PortableGit（完整 Git + Git Bash，开箱即用，不依赖用户自装 Git for Windows；已装系统 Git 时优先用系统版）。无沙箱环境下，安全写命令在自动档自动放行，风险写（rm/mv/git 写操作）仍需审批。
 
 ```bash
-rivet config set-approval dangerously-skip-permissions  # 启动即 YOLO
-rivet --dangerously-skip-permissions                    # 单次会话 YOLO
+rivet config set-approval dangerously-skip-permissions  # 启动即全自动
+rivet --dangerously-skip-permissions                    # 单次会话全自动
 ```
 
 会话内用 `/permission` 管理（无参弹出交互式选择面板）：
@@ -277,9 +277,9 @@ rivet --dangerously-skip-permissions                    # 单次会话 YOLO
 ```
 /permission                              # 弹出模式选择面板（上下选 + 回车确认）
 /permission status                       # 文字视图：当前模式 + 所有 allow/deny/bash 规则
-/permission manual                       # 切 Manual
-/permission auto [轮次]                  # 切 Auto，可选检查点间隔（0=关）
-/permission yolo confirm                 # 切 YOLO（未带 confirm 先弹风险说明）
+/permission supervise                    # 切监督（别名 manual）
+/permission auto [轮次]                  # 切自动，可选检查点间隔（0=关）
+/permission unattended confirm           # 切全自动（别名 yolo；未带 confirm 先弹风险说明）
 /permission mode <auto-accept|auto-safe|manual|dangerously-skip-permissions>  # 高级四模式切换
 /permission allow <tool> [param=value]…  # 白名单工具（可带参数条件，如 command="git status"）
 /permission deny  <tool> [param=value]…  # 黑名单工具（deny 优先于 allow 和 mode）
@@ -292,7 +292,7 @@ rivet --dangerously-skip-permissions                    # 单次会话 YOLO
 
 > 规则分两层：`[config]`（`~/.rivet/config.json` 持久化）与 `[session]`（仅本次会话）。`deny` 始终优先；`reset` 只清 session 覆盖层。
 
-**Auto 检查点**：在 Auto 模式下，可设置每 N 轮暂停并同步进度摘要（改了哪些文件 / token 用量），确认方向后继续（`/permission auto 20`）。桌面端设置面板可直接配置。
+**自动档检查点**：在自动档下，可设置每 N 轮暂停并同步进度摘要（改了哪些文件 / token 用量），确认方向后继续（`/permission auto 20`）。桌面端设置面板可直接配置。
 
 跳过提示**不会**禁用工具验证、路径安全、证据追踪、检查点和交付门禁。沙箱后端、路径授权、风险分级详见 [沙箱与权限](docs/user-guide-sandbox-permissions.md)。
 
@@ -511,19 +511,17 @@ rivet --resume                   # 启动后打开会话选择器
 
 | Skill | 说明 |
 |-------|------|
-| `writing-plans` | 结构化计划写作，含 Mermaid 图、spec 段落、验证计划 |
-| `executing-plans` | 任务图分解，按 wave 执行，每 wave 验证 |
+| `visual-acceptance` | 前端/UI 改动验收：截图比对、渲染自检、交互走查 |
 | `subagent-driven-development` | 委派复杂任务，类型化 profile、批量调度、并行 worker |
-| `agent-harness-testing` | TDD 可行性探针、测试脚手架、red-green-refactor |
-| `research-spec` | 研究 + spec 工作流：探索 → 条件矩阵 → 反证表 |
 
 ```
-/skill writing-plans                # 加载并立即执行该 skill
-/skill writing-plans <你的任务>     # 加载并传入初始任务
-/skill off writing-plans            # 停止重复注入该 skill
+/skill visual-acceptance <你的任务>    # 加载并立即执行该 skill
+/skill off visual-acceptance           # 停止重复注入该 skill
 ```
 
 也可在 `.rivet/skills/` 放一个带 YAML frontmatter（`name`、`description`、`triggers`）的 `.md` 自定义 skill。
+
+> `writing-plans` / `executing-plans` 已内置为原生流程（规划期按系统提示的 `<plan-mode>` 纪律、执行期按 `<plan-executing>` 纪律执行），不再需要技能文件。`agent-harness-testing` / `cognitive-alignment` / `research-spec` 撤出默认分发，归档在 [`docs/skills/optional/`](docs/skills/optional/)——需要时手动拷入 `.rivet/skills/` 即可启用。
 
 ### 跨会话知识
 
@@ -709,8 +707,8 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 |------|------|
 | `/model [name\|list]` | 显示或切换模型/提供商 |
 | `/effort [off\|low\|medium\|high\|max\|auto]` | 控制推理深度（无参数弹出选择面板）。默认 `high`（Pro）/ `medium`（Flash），例行轮自动降档；手动设 `max` 永不被降级 |
-| `/permission [manual\|auto\|yolo\|allow\|deny\|bash\|remove\|reset\|test]` | 权限模式：Manual / Auto / YOLO 三档统一 |
-| `/yes [off]` | 一键 YOLO（`/yes off` 退出，回 Auto）—— 持久化为默认 |
+| `/permission [supervise\|auto\|unattended\|manual\|yolo\|allow\|deny\|bash\|remove\|reset\|test]` | 权限模式：监督 / 自动 / 全自动 |
+| `/yes [off]` | 一键全自动（`/yes off` 回到自动）—— 持久化为默认 |
 | `/domain [list\|<name>\|auto\|off]` | 查看或切换星域人格 |
 
 **规划与编排**

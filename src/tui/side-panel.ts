@@ -145,6 +145,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
       showProgressBar: false,
       expanded: todosExpanded,
       expandHint: todosExpanded ? 'ctrl+x t 收起' : undefined,
+      tick: 0,
     })
     : []
   if (taskLines.length > 0) {
@@ -152,7 +153,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
       lines.push(line(taskLine))
     }
   } else {
-    lines.push(line(color('◇ 任务 (0/0)', theme.secondary, { bold: true })))
+    lines.push(line(color('≡ 任务 · 0/0', theme.muted)))
     lines.push(line(muted('  暂无任务')))
   }
 

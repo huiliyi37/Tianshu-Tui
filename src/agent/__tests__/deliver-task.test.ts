@@ -835,7 +835,7 @@ describe('deliver-task — semantic task delivery tool', () => {
       },
       {
         outcome: { tier: 'auto', verdict: 'nudge' },
-        status: 'passed', failureReason: undefined, progress: /审查门完成 \(nudge\)：变更琐碎，免深审/,
+        status: 'completed', failureReason: undefined, progress: /审查门完成 \(nudge\)：变更琐碎，免深审/,
       },
     ]
     for (const c of cases) {

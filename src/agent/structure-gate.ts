@@ -15,79 +15,22 @@
 
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join, relative, sep } from 'node:path'
+import budgetsManifest from '../../scripts/source-budgets.manifest.json' with { type: 'json' }
 
-/** 表外产品源文件的新增红线（物理行）。 */
-export const MAX_LINES_REDLINE = 800
+/** 表外产品源文件的新增红线（物理行）。单一事实源在 manifest（redline 字段）。 */
+export const MAX_LINES_REDLINE: number = budgetsManifest.redline
 
 /**
- * 巨石点名 ceiling：取录入时现值，只降不升——增长必须在同一 PR 里改这张表，
- * review 可见；拆分落地后手动收紧对应条目（或直接删掉让红线接管）。
- * 存量不追溯：表内文件不因历史体量翻红，只拦继续膨胀。
- * __tests__ 不在守备范围（与 architecture-guards 其余 guard 的豁免口径一致）。
+ * 巨石点名 ceiling：取录入时现值，只降不升——增长必须在同一 PR 里改
+ * scripts/source-budgets.manifest.json（纯数据 diff，review 可见）；拆分落地
+ * 后收紧对应条目（或直接删掉让红线接管）。存量不追溯。__tests__ 不在守备
+ * 范围（与 architecture-guards 其余 guard 的豁免口径一致）。
+ * JSON import 由 tsup 内联进 bundle（esbuild 原生支持）——npm 安装态不依赖
+ * scripts/ 目录随包分发。
  */
-export const MAX_LINES_BASELINE: ReadonlyArray<readonly [string, number]> = [
-  ['src/tui/engine/app.ts', 6527],
-  // 5739→5741：randomId 换 CSPRNG（L3，+5/-3）。
-  ['src/server/session-manager.ts', 5741],
-  // 4350→4533：/trust 命令 + 插件安装预检（+67）叠加此前会话已超限部分
-  //（HEAD 4466 > 旧基线，按现值对齐）。
-  ['src/tui/slash-commands.ts', 4533],
-  ['src/agent/coordinator.ts', 3383],
-  ['src/agent/loop.ts', 2854],
-  ['src/bootstrap.ts', 2511],
-  // 2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+
-  // 项目信任门接线（未授信剥离，+9 行）——按现值对齐。
-  ['src/config/manager.ts', 2606],
-  // 2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。
-  ['src/main.ts', 2298],
-  ['src/tui/pi/latex-to-unicode.ts', 2071],
-  // 2070→2099：H6 安全写目标越界判定 + M7 ast_edit/export_file 越工作区路由
-  //（审批路由单一职责功能增长，+29 行）。
-  ['src/agent/tool-pipeline.ts', 2099],
-  ['src/server/session-routes.ts', 1995],
-  ['src/prompt/engine.ts', 1624],
-  ['src/agent/compaction-controller.ts', 1621],
-  // 1595→1613：本文件的 YELLOW 预警门接线（ctx 钩子 + 检查块）落在 deliver-task。
-  ['src/agent/deliver-task.ts', 1613],
-  ['src/tui/format/overlay.ts', 1492],
-  ['src/api/openai-client.ts', 1492],
-  // 1462→1471：B2 收敛轨迹门（会话 506a5e86 优化，deps getter + AND 门判定，+9 行）。
-  ['src/agent/turn-orchestrator.ts', 1471],
-  // 1470→1473：注入 B2 收敛轨迹 getter（getConvergenceScoreHistory，+3 行）。
-  ['src/agent/loop-factory.ts', 1473],
-  ['src/agent/advisory-bus.ts', 1273],
-  ['src/agent/convergence-detector.ts', 1260],
-  ['src/tui/engine/input-line.ts', 1236],
-  ['src/prompt/volatile.ts', 1197],
-  ['src/agent/turn-step-producer.ts', 1169],
-  ['src/agent/worker-session.ts', 1155],
-  ['src/tools/galaxy.ts', 1158],
-  ['src/pro/computer-use/windows-driver.ts', 1136],
-  ['src/tools/read-file.ts', 1123],
-  ['src/server/serve-agent.ts', 1118],
-  ['src/tools/browser-debug/tool.ts', 1084],
-  ['src/server/session-persistence.ts', 1062],
-  ['src/agent/problem-attack-loop.ts', 1027],
-  ['src/agent/hooks/cognitive-capsule-router.ts', 1026],
-  ['src/agent/work-order.ts', 1004],
-  ['src/tools/run-tests.ts', 995],
-  ['src/server/serve.ts', 989],
-  ['src/agent/starflow-orchestrator.ts', 988],
-  ['src/pro/computer-use/macos-driver.ts', 976],
-  ['src/agent/create-runtime-hooks.ts', 958],
-  ['src/tools/bash.ts', 943],
-  ['src/skills/skill-loader.ts', 941],
-  ['src/config/env-registry.ts', 944],
-  ['src/server/config-routes.ts', 899],
-  ['src/pro/computer-use/cdp/driver.ts', 899],
-  ['src/pro/computer-use/tool.ts', 891],
-  ['src/pro/computer-use/windows-uia-com.ts', 888],
-  ['src/config/schema.ts', 891],
-  ['src/agent/session-persist.ts', 874],
-  // 797→884：schema v2 遥测保留机制（migrateToV2/cleanupExpiredRows/WAL checkpoint/LIKE 前缀索引，2026-08-17 存储膨胀修复）。
-  ['src/repo/meridian-db.ts', 884],
-  ['src/tui/settings-model.ts', 865],
-]
+export const MAX_LINES_BASELINE: ReadonlyArray<readonly [string, number]> = Object.entries(
+  budgetsManifest.budgets,
+).map(([file, spec]) => [file, spec.ceiling] as const)
 
 /** 物理行数（wc -l 口径：按换行计，仓规尾部单换行时恰为可见行数）。 */
 export function countPhysicalLines(content: string): number {
@@ -167,7 +110,7 @@ export function checkStructureGate(
       warningLines.push(`  ${v.file}: ${v.lines} 行 > ${v.kind} ${v.limit}（${hint}）`)
     }
     warningLines.push('沿接缝拆分：提取子模块后按区域分批 deliver_task，而不是继续膨胀。')
-    warningLines.push('确需增长/确属单一职责：在同一 PR 修改 src/agent/structure-gate.ts 的 MAX_LINES_BASELINE 并说明理由。')
+    warningLines.push('确需增长/确属单一职责：在同一 PR 修改 scripts/source-budgets.manifest.json 并说明理由（纯数据 diff）。')
     warningLines.push('验证：npm run structure:check')
   }
 

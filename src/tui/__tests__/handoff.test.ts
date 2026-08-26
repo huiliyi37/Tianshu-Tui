@@ -36,15 +36,15 @@ describe('buildHandoffPrompt — 交接指令', () => {
   })
 })
 
-describe('formatHandoffNudge — 70% 交接提醒', () => {
+describe('formatHandoffNudge — 60% 交接提醒', () => {
   it('文案含百分比与 /handoff 指引', () => {
-    const s = formatHandoffNudge(0.73)
-    assert.ok(s.includes('73%'), `含百分比: ${s}`)
+    const s = formatHandoffNudge(0.63)
+    assert.ok(s.includes('63%'), `含百分比: ${s}`)
     assert.ok(s.includes('/handoff'), `含命令指引: ${s}`)
     assert.match(s, /省前缀重建成本/)
   })
 
-  it('阈值常量为 0.7', () => {
-    assert.equal(HANDOFF_NUDGE_RATIO, 0.7)
+  it('阈值常量为 0.6', () => {
+    assert.equal(HANDOFF_NUDGE_RATIO, 0.6)
   })
 })

@@ -59,7 +59,7 @@ test('renderFleetDetail: shows parent tool id for context', () => {
 })
 
 test('renderFleetDetail: shows status-specific glyph for terminal workers', () => {
-  const lines = renderFleetDetail(mkWorker({ status: 'passed', terminal: true }), 60, 20, theme)
+  const lines = renderFleetDetail(mkWorker({ status: 'completed', terminal: true }), 60, 20, theme)
   const plain = lines.map(stripAnsi).join('\n')
   assert.ok(plain.includes('✓') || plain.includes('passed') || plain.includes('done'), 'terminal status shown')
 })

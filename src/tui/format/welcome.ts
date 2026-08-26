@@ -9,8 +9,8 @@
  *   │ deepseek-v4 · ◎high · auto-safe                                  │
  *   │ ~/app/deepseek-tui/opencode-tui · #7281                          │
  *   │                                                                  │
- *   │ /init 生成项目说明   /domain 切换星域   /help 全部命令   ctrl+p 命令面板   │
- *   │ ⏜ /handoff 上下文 50%–70% 时交接给新会话                          │
+ *   │ /model 切换模型（中途会缓存碎）   /init 生成项目说明   /domain 切换星域   /help 全部命令   │
+ *   │ ⏜ /handoff 上下文 60% 后交接给新会话                          │
  *   ╰──────────────────────────────────────────────────────────────────╯
  *
  * 设计纪律：
@@ -31,6 +31,7 @@
  */
 
 import { homedir } from 'node:os'
+import { formatPermissionChrome } from '../../agent/approval-vocabulary.js'
 import { color } from '../engine/ansi.js'
 import { displayWidth, truncateToDisplayWidth, ambiguousWideEnabled } from '../width.js'
 import { boxCharsFor, boxInnerWidth, type BoxCharSet } from '../box-chars.js'
@@ -91,12 +92,14 @@ const DIPPER_BOWL = [
   { name: '天玑', mag: 2.44, at: 0.78 }, // Phecda  斗身右下
 ] as const
 
-/** 首屏引导：按框宽贪心装填，装不下的整条不显示。 */
+/** 首屏引导：按框宽贪心装填，装不下的整条不显示。
+ *  `/model` 置顶——用户不知道怎么切模型是真实投诉；ctrl+p 命令面板
+ *  可从输入框 slash 菜单进，不占首屏。中途切换会打碎前缀缓存，必须写上。 */
 const TIPS = [
+  { cmd: '/model', desc: '切换模型（中途会缓存碎）' },
   { cmd: '/init', desc: '生成项目说明' },
   { cmd: '/domain', desc: '切换星域' },
   { cmd: '/help', desc: '全部命令' },
-  { cmd: 'ctrl+p', desc: '命令面板' },
 ] as const
 
 function truncateToWidth(text: string, maxWidth: number): string {
@@ -283,7 +286,7 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   }
 
   // 配置行 + 位置行（沿用概念 A 的信息设计）。
-  const modeLabel = input.approvalMode === 'dangerously-skip-permissions' ? 'yolo' : input.approvalMode
+  const modeLabel = input.approvalMode ? formatPermissionChrome(input.approvalMode) : input.approvalMode
   const modeSuffix = modeLabel ? ` ${color('·', theme.dim)} ${color(modeLabel, theme.muted)}` : ''
   const idLabel = input.numericId ? `#${input.numericId}` : session
   // 框内不用 `·` 隔开 model 与 effort（effort 本就是模型属性）：`·` 与 `◎` 都是
@@ -304,10 +307,10 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   if (tipsText) body.push('', tipsText)
 
   // handoff 提示行：使用中提醒（非启动引导），独立成行避免贪心装填挤压。
-  // 与会话中 formatHandoffNudge 同口径——首屏先埋一次认知，≥70% 时再提醒。
+  // 与会话中 formatHandoffNudge 同口径——首屏先埋一次认知，≥60% 时再提醒。
   // 内容不带边线（row() 统一加），超宽时 truncateToDisplayWidth 安全截断带色串。
-  const handoffFull = `${color('⏜', theme.secondary)} ${color('/handoff', theme.brandColor)} ${color('上下文 70% 后交接给新会话（文档自动注入，比续跑省前缀重建）', theme.muted)}`
-  const handoffShort = `${color('⏜', theme.secondary)} ${color('/handoff', theme.brandColor)} ${color('上下文 70% 后交接给新会话', theme.muted)}`
+  const handoffFull = `${color('⏜', theme.secondary)} ${color('/handoff', theme.brandColor)} ${color('上下文 60% 后交接给新会话（文档自动注入，比续跑省前缀重建）', theme.muted)}`
+  const handoffShort = `${color('⏜', theme.secondary)} ${color('/handoff', theme.brandColor)} ${color('上下文 60% 后交接给新会话', theme.muted)}`
   body.push(displayWidth(handoffFull, cal) > inner ? handoffShort : handoffFull)
 
   // 首尾空行是呼吸位：清屏后不贴顶边，底框也不与输入框顶框直接粘连

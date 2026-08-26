@@ -135,7 +135,7 @@ function sanitizeDomainId(domainId: string): string | null {
 function redactSecrets(text: string): string {
   return text
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, `$1${REDACTED}`)
-    .replace(/((?:api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,'\"]+/gi, `$1${REDACTED}`)
+    .replace(/((?:api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,'"]+/gi, `$1${REDACTED}`)
     .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, 'sk-xxx')
 }
 

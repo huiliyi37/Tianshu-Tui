@@ -91,10 +91,10 @@ describe('architecture guards', () => {
   })
 
   test('no direct process.stdout.write outside LiveEngine', () => {
-    // 白名单：/tui/engine/ 是渲染回路的唯一合法直写层；cli/、headless.ts、
+    // 白名单：/tui/engine/ 是渲染回路的唯一合法直写层；cli/、headless.ts、worker-process/child.ts（NDJSON 协议通道，非渲染）,
     // main.ts 是无 LiveEngine 竞争的进程入口面（banner/错误/非 TUI 子命令）。
     // TUI 运行态内的直写（如曾经的 slash-commands /clear）一律违规。
-    const whitelist = ['/tui/engine/', '/__tests__/', '/cli/', 'src/headless.ts', 'src/main.ts']
+    const whitelist = ['/tui/engine/', '/__tests__/', '/cli/', 'src/headless.ts', 'src/main.ts', 'src/agent/worker-process/child.ts']
     const scanned = allSrcFiles.filter(f => !whitelist.some(w => f.includes(w)))
     assert.ok(scanned.length > 0, 'guard corpus empty after whitelist — guard would scan nothing')
     const violations = scanPattern(

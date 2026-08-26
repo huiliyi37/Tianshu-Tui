@@ -32,6 +32,14 @@ export type KnownEventType =
   | 'model_switched'
   | 'domain_changed'
   | 'resume_offer'
+  | 'autonomy_checkpoint'
+  | 'watchdog_recovery'
+  | 'steer_delivered'
+  | 'replay_window'
+  | 'rewind'
+  | 'ask_mode'
+  | 'queue_pending'
+  | 'queue_status'
   | 'done'
   | 'tool_delegate'
 
@@ -54,6 +62,48 @@ export interface SessionRecord {
   error?: string
   pendingApprovals: number
   approvalMode?: ApprovalMode
+  archived?: boolean
+  /** 上下文占用（enrichRecord 活填充，桌面端 header 进度条数据源；旧内核缺省）。 */
+  contextTokens?: number
+  contextWindow?: number
+  /** 会话推理强度覆盖（enrichRecord；off|low|medium|high|max|auto）。 */
+  reasoningEffort?: string
+}
+
+/** turn_complete SSE 事件的 usage 载荷 — dev 仓 src/api/types.ts::Usage 镜像。 */
+export interface TurnUsage {
+  /** cache-inclusive：input = 未命中 + cache_read + cache_creation。 */
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+}
+
+/**
+ * GET /sessions/:id/cockpit 快照子集 — 与 TUI /cockpit、桌面端驾驶舱同一数据源
+ * （buildCockpitSnapshot）。此处只镜像 webview 统计条消费的字段。
+ */
+export interface CockpitSnapshot {
+  context: {
+    estimatedTokens: number
+    maxTokens: number
+    rounds: number
+    /** healthy | warning(>50%) | compacting(>80%) | critical(>95%)。 */
+    compactionState: string
+  } | null
+  model: {
+    name: string
+    /** 0-1；cache_read / input_tokens（cache-inclusive 分母）。 */
+    cacheHitRate: number
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    /** USD。 */
+    cost: number
+    recentTurnHitRate: number | null
+    cacheDiagnostic: string | null
+  }
 }
 
 export interface CreateSessionRequest {
@@ -63,6 +113,7 @@ export interface CreateSessionRequest {
   approvalMode?: ApprovalMode
   model?: string
   domain?: string
+  isolatedWorktree?: boolean
 }
 
 export interface ApprovalAnswer {
@@ -135,6 +186,14 @@ export interface SetupCustomProviderRequest {
   apiKey?: string
   makeDefault?: boolean
   model: { id: string; alias?: string }
+}
+
+/** GET /sessions/:id/rewind-points 条目 — 仅 user+string；seq 可能缺。 */
+export interface RewindPoint {
+  index: number
+  content: string
+  timestamp: number
+  seq?: number
 }
 
 /** GET /sessions/:id/plans/:slug — plan mode 计划文档（server plan-store 镜像子集）。 */

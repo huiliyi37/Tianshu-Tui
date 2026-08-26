@@ -56,7 +56,7 @@ export function formatWorkerView(
   if (view.tokenCount > 0) stats.push(`${formatTokenCount(view.tokenCount)} tok`)
   const statsStr = stats.length > 0 ? ` · ${stats.join(' · ')}` : ''
   const elapsed = formatElapsed(view.elapsedMs)
-  const statusGlyph = view.terminal ? (view.status === 'passed' ? '✓' : '✗') : '◐'
+  const statusGlyph = view.terminal ? (view.status === 'completed' ? '✓' : '✗') : '◐'
 
   const headText = ` ╭─ ${statusGlyph} ${label} (${view.shortLabel})${statsStr} · ${elapsed}`
   const hint = view.terminal ? 'Esc 退出' : 'Esc 退出 · 输入直达'

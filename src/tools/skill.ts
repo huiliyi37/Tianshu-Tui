@@ -1,5 +1,5 @@
 import type { Tool } from './types.js'
-import { skillRegistry, listSkillFiles } from '../skills/skill-loader.js'
+import { skillRegistry, listSkillFiles, RETIRED_BUNDLED_SKILLS } from '../skills/skill-loader.js'
 
 /**
  * Tier-2 skill activation. The discovery block (volatile appendix) lists every
@@ -43,6 +43,16 @@ skill 是可复用的工作流 playbook。available-skills 区块列出了每个
 
     const skill = skillRegistry.get(name) ?? skillRegistry.list().find(s => s.name.toLowerCase() === name.toLowerCase())
     if (!skill) {
+      // Retired skills map to native flows instead of a hard error — old plan
+      // texts still say "使用 executing-plans", and the model may call this
+      // tool by reflex. Point it at the native replacement.
+      const retired = RETIRED_BUNDLED_SKILLS.find(e => e.name.toLowerCase() === name.toLowerCase())
+      if (retired) {
+        return {
+          content: `Skill「${name}」已退役并内置为原生流程，无需加载技能文件——规划期直接按系统提示的 <plan-mode> 纪律执行，执行期按 <plan-executing> 纪律执行。`,
+          uiContent: `已映射到原生流程：${name}`,
+        }
+      }
       const available = skillRegistry.list().map(s => s.name).sort()
       const list = available.length > 0 ? available.join(', ') : '（未加载任何 skill）'
       return {

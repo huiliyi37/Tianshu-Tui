@@ -17,6 +17,31 @@ export interface SessionRecord {
   lastSeq: number
   pendingApprovals: number
   approvalMode?: string
+  archived?: boolean
+  contextTokens?: number
+  contextWindow?: number
+  reasoningEffort?: string
+}
+
+/** 座舱快照子集（宿主桥转发 GET /sessions/:id/cockpit；null = 旧内核无路由）。 */
+export interface CockpitSnapshot {
+  context: {
+    estimatedTokens: number
+    maxTokens: number
+    rounds: number
+    compactionState: string
+  } | null
+  model: {
+    name: string
+    cacheHitRate: number
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    cost: number
+    recentTurnHitRate: number | null
+    cacheDiagnostic: string | null
+  }
 }
 
 export interface ModelEntry {
@@ -73,6 +98,30 @@ export type HostMsg =
   | { type: 'plan'; sessionId: string; plan: PlanDocument }
   | { type: 'planDecisionResult'; sessionId: string; slug: string; decision: 'approve' | 'reject'; ok: boolean; message?: string }
   | { type: 'planEditResult'; sessionId: string; slug: string; ok: boolean; message?: string }
+  | { type: 'cockpit'; sessionId: string; snapshot: CockpitSnapshot | null }
+  | { type: 'sessionClosed' }
+  | {
+      type: 'settings'
+      approval: string
+      checkpointEveryTurns: number
+      defaultModel?: string | null
+      defaultDomain?: string
+      models?: ModelEntry[]
+      domains?: DomainEntry[]
+    }
+  | { type: 'settingsSaveResult'; ok: boolean; message?: string }
+  | { type: 'searchHits'; reqId: number; results: { sessionId: string; title: string; snippet: string }[] }
+  | { type: 'catalog'; models: ModelEntry[]; domains: DomainEntry[] }
+  | { type: 'earlierEvents'; sessionId: string; events: SessionEvent[]; firstSeq: number; error?: string }
+  | { type: 'rewindPoints'; sessionId: string; points: RewindPoint[] }
+  | { type: 'retractResult'; sessionId: string; laneId: string; ok: boolean; text: string }
+
+export interface RewindPoint {
+  index: number
+  content: string
+  timestamp: number
+  seq?: number
+}
 
 interface VsCodeApi {
   postMessage(msg: unknown): void

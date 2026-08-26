@@ -35,12 +35,12 @@ test('WorkerMirror: 进行中的 text 尾巴出现在 getMessages 末尾（未�
 test('WorkerMirror: 终态封口 text 并追加 status 消息', () => {
   const store = new WorkerMirrorStore()
   store.apply(ev({ eventKind: 'text', eventDetail: '总结中' }), 1)
-  store.apply(ev({ status: 'passed', progressLine: 'all done' }), 2)
+  store.apply(ev({ status: 'completed', progressLine: 'all done' }), 2)
   const msgs = store.getMessages('wo_1')
   assert.equal(msgs.length, 2)
   assert.equal(msgs[0]!.content, '总结中')
   assert.equal(msgs[1]!.kind, 'status')
-  assert.ok(msgs[1]!.content.includes('passed'))
+  assert.ok(msgs[1]!.content.includes('completed'))
   assert.ok(msgs[1]!.content.includes('all done'))
 })
 
@@ -74,7 +74,7 @@ test('WorkerMirror: per-worker 隔离', () => {
 test('WorkerMirror: 稳定 id 再派发 → 新一轮转录，不续在上一轮后面', () => {
   const store = new WorkerMirrorStore()
   store.apply(ev({ workOrderId: 'batch:0', eventKind: 'text', eventDetail: '第一轮在看缓存' }), 1)
-  store.apply(ev({ workOrderId: 'batch:0', status: 'passed', progressLine: '第一轮结论' }), 2)
+  store.apply(ev({ workOrderId: 'batch:0', status: 'completed', progressLine: '第一轮结论' }), 2)
 
   store.apply(ev({ workOrderId: 'batch:0', eventKind: 'text', eventDetail: '第二轮在补测试' }), 10)
   const msgs = store.getMessages('batch:0')
@@ -90,8 +90,8 @@ test('WorkerMirror: 稳定 id 再派发 → 新一轮转录，不续在上一轮
 test('WorkerMirror: 同轮内终态重放不清空本轮转录', () => {
   const store = new WorkerMirrorStore()
   store.apply(ev({ workOrderId: 'batch:0', eventKind: 'text', eventDetail: '本轮正文' }), 1)
-  store.apply(ev({ workOrderId: 'batch:0', status: 'passed', progressLine: '结论' }), 2)
-  store.apply(ev({ workOrderId: 'batch:0', status: 'passed', progressLine: '结论' }), 3)
+  store.apply(ev({ workOrderId: 'batch:0', status: 'completed', progressLine: '结论' }), 2)
+  store.apply(ev({ workOrderId: 'batch:0', status: 'completed', progressLine: '结论' }), 3)
 
   const joined = store.getMessages('batch:0').map(m => m.content).join('\n')
   assert.match(joined, /本轮正文/, '终态重放走的是终态分支，不该被当成新一轮')

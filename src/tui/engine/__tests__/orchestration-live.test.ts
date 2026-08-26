@@ -67,8 +67,8 @@ test('委派工具终态：scrollback 提交完成沉淀卡', () => {
   app.callbacks.onToolUse('tool-1', 'delegate_batch', { tasks: [{}, {}] })
   onActivity(act('w1', 'running'))
   onActivity(act('w2', 'running'))
-  onActivity(act('w1', 'passed', { progressLine: 'found 3 issues', toolUseCount: 20, tokenCount: 253_200 }))
-  onActivity(act('w2', 'passed', { progressLine: 'clean', toolUseCount: 17, tokenCount: 220_100 }))
+  onActivity(act('w1', 'completed', { progressLine: 'found 3 issues', toolUseCount: 20, tokenCount: 253_200 }))
+  onActivity(act('w2', 'completed', { progressLine: 'clean', toolUseCount: 17, tokenCount: 220_100 }))
 
   out.clear()
   app.callbacks.onToolResult('tool-1', 'delegate_batch', 'delegate_batch: 2/2 passed', false)

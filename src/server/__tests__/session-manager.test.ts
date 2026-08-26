@@ -219,6 +219,29 @@ test('domain resolution callback appends a redacted replayable event', () => {
   assert.equal(manager.getSession(s.id)!.domain, 'auto', 'observability must not replace the Auto selection key')
 })
 
+test('domain drift callback appends a redacted replayable SSE event', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go', domain: 'auto' })
+
+  agents[0]!.callbacks!.onDomainDrift!({
+    currentId: 'tianliang',
+    currentName: '天梁 token=current-secret',
+    recommendedId: 'tianquan',
+    recommendedName: '天权 token=recommended-secret',
+    matchedKeywords: ['审查', 'token=keyword-secret', '方案', '评估', '不得保留'],
+  })
+
+  const event = manager.getEvents(s.id, 0)!.events.find((candidate) => candidate.type === 'domain_drift')
+  assert.ok(event)
+  assert.deepEqual(event.data, {
+    currentId: 'tianliang',
+    currentName: '天梁 token=[REDACTED]',
+    recommendedId: 'tianquan',
+    recommendedName: '天权 token=[REDACTED]',
+    matchedKeywords: ['审查', 'token=[REDACTED]', '方案', '评估'],
+  })
+})
+
 // Redaction now lives ONLY here (the legacy /prompt route forwards manager
 // events verbatim since its session rebase) — this is the single trust boundary
 // keeping secrets out of event logs and every SSE stream.
@@ -862,7 +885,7 @@ test('T4: onDelegationActivity emits per-worker delegation with progress + elaps
   cb.onDelegationActivity!({
     workOrderId: 'wo:T1',
     parentToolId: 'tool-1',
-    status: 'passed',
+    status: 'completed',
     progressLine: 'found it',
   })
   const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'delegation')
@@ -915,6 +938,8 @@ class PlusFakeAgent implements ManagedAgent {
   domain: ActiveStarDomain | null | undefined = undefined
   disabled = new Set<string>()
   model = 'model-a'
+  resetDomainCalls = 0
+  restoredAutoDomainCalls = 0
   private resolveRun?: () => void
   run(_p: string, cb: AgentCallbacks): Promise<void> { this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
   finish(): void { this.resolveRun?.() }
@@ -925,7 +950,8 @@ class PlusFakeAgent implements ManagedAgent {
   replaceMessages(m: OaiMessage[]): void { this.messages = m }
   rewindToMessages(m: OaiMessage[]): void { this.messages = m }
   setSessionDomain(d: ActiveStarDomain | null): void { this.domain = d }
-  resetSessionDomain(): void { this.domain = undefined }
+  resetSessionDomain(): void { this.resetDomainCalls++; this.domain = undefined }
+  restoreAutoResolvedDomain(d: ActiveStarDomain): void { this.restoredAutoDomainCalls++; this.domain = d }
   getSessionDomain(): ActiveStarDomain | null | undefined { return this.domain }
   setDisabledSkills(names: Set<string>): void { this.disabled = new Set(names) }
   switchModel(modelId: string): string | null {
@@ -1002,6 +1028,16 @@ test('PlusMenu: domain selection applies to a lazily-built agent', async () => {
   assert.equal(agents[0]!.domain?.id, 'tianshu')
 })
 
+test('PlusMenu: explicit Auto is replayed to a lazily-built agent', async () => {
+  const { manager, agents } = makePlusManager()
+  const s = manager.createSession({ domain: 'auto' })
+
+  manager.run(s.id, '请实现、交付、编写并测试一个用户注册功能')
+
+  assert.equal(agents[0]!.resetDomainCalls, 1)
+  assert.equal(agents[0]!.domain, undefined)
+})
+
 test('Auto resolution survives agent rebuild without a second domain_resolved event', async () => {
   const agents: AutoResolvingFakeAgent[] = []
   const saved: SessionRecord[] = []
@@ -1043,6 +1079,7 @@ test('Auto resolution survives agent rebuild without a second domain_resolved ev
   assert.equal(manager.run(session.id, '重建后的新消息'), true)
 
   assert.equal(agents[1]!.domain?.id, 'kaiyang', 'rebuild must restore the first resolved domain')
+  assert.equal(agents[1]!.restoredAutoDomainCalls, 1, 'rebuild must retain Auto lifecycle semantics')
   assert.equal(
     manager.getEvents(session.id, 0)!.events.filter((event) => event.type === 'domain_resolved').length,
     1,
@@ -1235,6 +1272,10 @@ test('PlusMenu: listModels flags current; switchModel updates record + emits', a
 // 优先级改动在本机真实配置下静默失效。
 test('PlusMenu: createSession model precedence — project config beats injected default, explicit input beats project', async () => {
   const projectDir = mkdtempSync(join(tmpdir(), 'rivet-plus-proj-'))
+  // 信任门预存债收口：项目层 provider 键未授信即剥离（project-trust.ts）。
+  // 本用例测优先级不测信任——显式授信后按原意图断言。
+  const prevTrust = process.env.RIVET_TRUST_PROJECT
+  process.env.RIVET_TRUST_PROJECT = '1'
   try {
     writeFileSync(join(projectDir, '.rivet-config.json'), JSON.stringify({
       provider: {
@@ -1273,6 +1314,8 @@ test('PlusMenu: createSession model precedence — project config beats injected
     const s2 = manager.createSession({ model: 'model-a' })
     assert.equal(manager.getSession(s2.id)!.model, 'model-a')
   } finally {
+    if (prevTrust === undefined) delete process.env.RIVET_TRUST_PROJECT
+    else process.env.RIVET_TRUST_PROJECT = prevTrust
     rmSync(projectDir, { recursive: true, force: true })
   }
 })

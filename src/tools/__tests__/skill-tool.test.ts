@@ -42,6 +42,14 @@ describe('skill tool', () => {
     assert.match(res.content, /small/)
   })
 
+  it('retired skill name → native-flow mapping, not an error', async () => {
+    const res = await call('executing-plans')
+    assert.equal(res.isError, undefined)
+    assert.match(res.content, /已退役并内置为原生流程/)
+    assert.match(res.content, /<plan-executing>/)
+    assert.ok(!/未找到 skill/.test(res.content))
+  })
+
   it('missing name → error', async () => {
     const res = await call('')
     assert.equal(res.isError, true)

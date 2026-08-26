@@ -1,7 +1,7 @@
 /**
  * 跨 run 陈旧 todo 清单的显示契约。
  *
- * 背景：「◇ 任务 (5/5) 有时候不会更新」——同步链路本身健全（todo/plan_task
+ * 背景：「≡ 任务 · 5/5 有时候不会更新」——同步链路本身健全（todo/plan_task
  * 工具结果即时刷新 + 120ms ticker 兜底 + 每帧直读 state.todos），真正的机制
  * 是跨 run 陈旧显示：上一轮**全部完成**的清单在新 run 期间（phase≠idle）原样
  * 复活，直到 AI 首次写入新 todo 才变化。用户看到新任务已开工、计数却停在
@@ -48,10 +48,10 @@ function setup() {
   return t
 }
 
-const PANEL_TITLE = '◇ 任务'
-// glanceDensity 默认 compact：徽章格式 `◇done/total`（full 档才是 ◐☐☒ 分态）
-const BADGE_DONE5 = '◇5/5'
-const BADGE_DONE1 = '◇1/1'
+const PANEL_TITLE = '≡ 任务'
+// glanceDensity 默认 compact：徽章格式 `≡done/total`（full 档才是 ◐○✓ 分态）
+const BADGE_DONE5 = '≡5/5'
+const BADGE_DONE1 = '≡1/1'
 const tick = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 test('新 run 未写 todo 前：上一轮全完成清单隐藏（面板 + 徽章）', async () => {

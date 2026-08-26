@@ -41,13 +41,13 @@ const GREETING_WORDS = 'hi|hello|hey|你好|您好|谢谢|多谢|谢谢你|ok|ok
 const CONTINUATION_PATTERN = /^(?:继续|然后呢|然后|接着|下一步|做\s*[PpTtSs]\d+|go|continue|next|好\s*(?:继续|做|的\s*(?:继续|做)))[。.!\uff01？?\s]*$/i
 
 /** Matches a message that is *entirely* a greeting or polite ack (no substantive content). */
-const NON_ACTIONABLE_PATTERN = new RegExp('^(?:' + GREETING_WORDS + ')[\u3002.!\uff01\uff1f?\s]*$', 'i')
+const NON_ACTIONABLE_PATTERN = new RegExp('^(?:' + GREETING_WORDS + ')[\u3002.!\uff01\uff1f?s]*$', 'i')
 
 /**
  * Matches a greeting *prefix* followed by substantive content on the next line.
  * Used by stripGreetingPrefix to peel off greeting lines before real instructions.
  */
-const GREETING_PREFIX_RE = new RegExp('^(?:' + GREETING_WORDS + ')[\u3002.,!\uff01\uff1f?\s]*(?:\n|$)', 'i')
+const GREETING_PREFIX_RE = new RegExp('^(?:' + GREETING_WORDS + ')[\u3002.,!\uff01\uff1f?s]*(?:\n|$)', 'i')
 
 const STATUS_RANK: Record<Exclude<ContractStatus, 'blocked'>, number> = {
   exploring: 0,

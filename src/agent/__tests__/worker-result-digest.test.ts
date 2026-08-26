@@ -54,3 +54,34 @@ describe('formatWorkerResultDigest', () => {
     assert.doesNotMatch(dU, /个来源/)
   })
 })
+
+describe('formatWorkerResultDigest — failureReason 12 值全映射（组合矩阵收口）', () => {
+  const base = {
+    status: 'failed' as const,
+    summary: 'worker done',
+    findingsCount: 0,
+    changedFilesCount: 0,
+  }
+  // 文案来源：worker-result-digest.ts digestHonesty switch 分支。
+  const cases: Array<[string, string]> = [
+    ['max_turns', '预算耗尽'],
+    ['stalled', '空跑'],
+    ['json_parse', '结果解析失败'],
+    ['worker_crash', 'Worker 异常终止'],
+    ['timeout', 'Worker 超时'],
+    ['caller_aborted', '已被取消'],
+    ['worker_blocked', 'Worker 被阻断'],
+    ['circuit_open', '熔断开启'],
+    ['claim_conflict', '文件归属冲突'],
+    ['schema_mismatch', '结果形状不符'],
+    ['policy_short_circuit', '策略短路'],
+    ['unknown', '失败原因未归类'],
+  ]
+
+  for (const [reason, label] of cases) {
+    it(`${reason} → 「${label}」`, () => {
+      const out = formatWorkerResultDigest({ ...base, failureReason: reason })
+      assert.ok(out.includes(label), `expected digest to carry "${label}", got: ${out}`)
+    })
+  }
+})

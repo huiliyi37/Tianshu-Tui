@@ -71,6 +71,20 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           tier: 'cheap',
           pricing: { input: 1, output: 2, cacheRead: 0.02, cacheWrite: 1 },
         },
+        {
+          // 官方（api-docs.deepseek.com/zh-cn/quick_start/pricing）：1M 上下文、
+          // 384K 输出、支持思考/非思考、Json/Tool/前缀续写齐全、FIM 不支持；
+          // 定价与 v4-flash 同档。图片按尺寸换算 token 计入计费。
+          id: 'deepseek-v4-flash-vision-exp',
+          description: '视觉实验档：支持图像输入（截图看图），1M 上下文',
+          alias: 'v4-vision',
+          contextWindow: 1_000_000,
+          maxTokens: 384_000,
+          reasoningEffort: 'medium',
+          tier: 'cheap',
+          supportsVision: true,
+          pricing: { input: 1, output: 2, cacheRead: 0.02, cacheWrite: 1 },
+        },
       ],
       unsupported: [],
     },

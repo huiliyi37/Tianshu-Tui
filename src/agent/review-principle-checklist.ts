@@ -85,7 +85,7 @@ function extractListSection(entry: string, label: string): string[] {
   for (const line of remaining.split('\n')) {
     const trimmed = line.trim()
     if (trimmed === '') continue
-    if (/^\*\*[^*]+\*\*:/.test(trimmed) || /^### /.test(trimmed)) break
+    if (/^\*\*[^*]+\*\*:/.test(trimmed) || trimmed.startsWith('### ')) break
     if (trimmed.startsWith('-')) {
       lines.push(trimmed.replace(/^-\s*/, '').trim())
     }

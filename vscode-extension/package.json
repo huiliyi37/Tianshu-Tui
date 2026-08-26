@@ -2,7 +2,7 @@
   "name": "tianshu-vscode",
   "displayName": "天枢 Tianshu",
   "description": "天枢 agent 座舱 — DeepSeek 前缀缓存优化的终端编程智能体，VS Code / Cursor 插件端",
-  "version": "3.4.0",
+  "version": "3.5.6",
   "publisher": "tianshu",
   "license": "Apache-2.0",
   "icon": "media/icon.png",
@@ -40,25 +40,15 @@
   "main": "./dist/extension.js",
   "activationEvents": [],
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "tianshu",
-          "title": "天枢",
-          "icon": "media/icon.svg"
-        }
-      ]
-    },
     "views": {
-      "tianshu": [
+      "explorer": [
         {
-          "type": "webview",
-          "id": "tianshu.cockpit",
-          "name": "座舱"
+          "id": "tianshu.launcher",
+          "name": "天枢"
         },
         {
           "id": "tianshu.changes",
-          "name": "变更审查"
+          "name": "天枢变更"
         }
       ]
     },
@@ -66,6 +56,10 @@
       {
         "command": "tianshu.newSession",
         "title": "天枢: 新建会话"
+      },
+      {
+        "command": "tianshu.openInEditor",
+        "title": "天枢: 在编辑器中打开座舱"
       },
       {
         "command": "tianshu.restartSidecar",

@@ -109,7 +109,7 @@ rivet --goal "fix all type errors" --budget 50  # headless goal autonomy, max 50
 | `--resume` `-r` (bare) | Open the session picker after startup |
 | `--new` | Force a brand-new session |
 | `--list` · `rivet sessions` | Print the session list and exit |
-| `--dangerously-skip-permissions` | One-session YOLO (skip all approvals) |
+| `--dangerously-skip-permissions` | One-session Unattended (skip all approvals; write sandbox stays on) |
 | `--screen-reader` | Screen-reader mode (dynamic segments not rendered; periodic redraw halted) |
 | `--skip-welcome` | Skip the welcome screen |
 | `--stream-events <path>` | Mirror this run as NDJSON `SessionEvent`s to a file |
@@ -214,15 +214,17 @@ See [Provider Config](docs/user-guide-provider-config.md) for the full reference
 
 ## Approval & Permissions
 
-| Mode | Behavior |
-|------|----------|
-| `auto-safe` (default) | Low-risk actions auto-approve; high-risk still asks |
-| `manual` | Ask whenever a tool declares approval required |
-| `dangerously-skip-permissions` | Skip all interactive prompts — trusted workspaces only |
+Three public tiers, all managed through `/permission`:
+
+| Mode | Command | Behavior |
+|------|---------|----------|
+| **Supervise** | `/permission supervise` (alias `manual`) | Confirm every high-risk tool. Maximum control. |
+| **Auto** (default) | `/permission auto [turns]` (alias `default`) | Auto-run low/no-risk tools; still confirm high-risk. Optional pause every N turns (`/permission auto 20`); off by default. |
+| **Unattended** | `/permission unattended confirm` or `/yes` (alias `yolo`) | Skip approval prompts; write sandbox stays on. Rollback is the safety net (`/rollback` + git checkpoints). Without `confirm`, first shows the risk notice; `/yes` takes effect immediately (typing the command counts as confirm); `/yes off` returns to Auto. |
 
 ```bash
-rivet config set-approval dangerously-skip-permissions
-rivet --dangerously-skip-permissions   # one-session override
+rivet config set-approval dangerously-skip-permissions  # start Unattended
+rivet --dangerously-skip-permissions                    # one-session Unattended
 ```
 
 Manage permission mode and tool/bash allow-deny rules in a session with `/permission` (no args opens an interactive picker):
@@ -230,9 +232,9 @@ Manage permission mode and tool/bash allow-deny rules in a session with `/permis
 ```
 /permission                              # open the mode picker (arrow keys + Enter)
 /permission status                       # text view: current mode + all allow/deny/bash rules
-/permission manual                       # switch to Manual
+/permission supervise                    # switch to Supervise (alias manual)
 /permission auto [turns]                 # switch to Auto, optional checkpoint interval (0=off)
-/permission yolo confirm                 # switch to YOLO (without confirm, first shows the risk notice)
+/permission unattended confirm           # switch to Unattended (alias yolo; without confirm, first shows the risk notice)
 /permission mode <auto-accept|auto-safe|manual|dangerously-skip-permissions>  # advanced 4-mode switch
 /permission allow <tool> [param=value]…  # allowlist a tool (optional param conditions, e.g. command="git status")
 /permission deny  <tool> [param=value]…  # blocklist a tool (deny beats allow and mode)
@@ -241,12 +243,12 @@ Manage permission mode and tool/bash allow-deny rules in a session with `/permis
 /permission remove allow|deny|bashAllow|bashDeny <index|pattern>  # remove a rule
 /permission reset                        # clear this session's runtime overlay (config rules untouched)
 /permission test <tool> <json input>     # dry-run: would a tool be allowed/blocked on given input
-/yes                                     # one-key YOLO (shortcut for /permission yolo); /yes off exits
+/yes                                     # one-key Unattended (shortcut for /permission yolo); /yes off returns to Auto
 ```
 
 > Rules come in two layers: `[config]` (persisted in `~/.rivet/config.json`) and `[session]` (current session only). `deny` always wins; `reset` only clears the session overlay.
 
-**Auto checkpoints**: in Auto mode, set a pause every N turns to sync a progress summary (files changed / token usage) and confirm direction before continuing (`/permission auto 20`). The desktop settings panel configures this directly.
+**Auto checkpoints**: in Auto, set a pause every N turns to sync a progress summary (files changed / token usage) and confirm direction before continuing (`/permission auto 20`). The desktop settings panel configures this directly.
 
 Skipping prompts does **not** disable tool validation, path safety, evidence tracking,
 checkpoints, or delivery gates. For sandbox backends, path grants, and risk
@@ -631,8 +633,8 @@ The composer's microphone button supports voice input on **both macOS and Window
 |---------|-------------|
 | `/model [name\|list]` | Show or switch model/provider |
 | `/effort [off\|low\|medium\|high\|max\|auto]` | Control reasoning depth (no args opens a picker) |
-| `/permission [status\|mode\|allow\|deny\|bash\|remove\|reset\|test]` | Manage permission mode and tool/bash allow-deny rules |
-| `/yes [off]` | One-key YOLO (`/yes off` exits, back to Auto) — persisted as default |
+| `/permission [supervise\|auto\|unattended\|manual\|yolo\|allow\|deny\|bash\|remove\|reset\|test]` | Permission mode: Supervise / Auto / Unattended |
+| `/yes [off]` | One-key Unattended (`/yes off` returns to Auto) — persisted as default |
 | `/domain [list\|<name>\|auto\|off]` | Show or switch star-domain persona |
 
 **Planning & orchestration**

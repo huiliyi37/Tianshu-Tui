@@ -19,8 +19,8 @@ export type DelegateKind = 'apply_edit' | 'terminal_exec'
 export const DELEGATE_KINDS: readonly DelegateKind[] = ['apply_edit', 'terminal_exec']
 
 export const DELEGATE_TIMEOUT_MS: Record<DelegateKind, number> = {
-  /** Human accept/reject window; no decision → auto-accept path on client, or fail-back if silent. */
-  apply_edit: 15_000,
+  /** CodeLens 人审窗口。超时 silent → fail-back 内核本地写。插件不再 15s 自动接受。 */
+  apply_edit: 5 * 60_000,
   terminal_exec: 5 * 60_000,
 }
 

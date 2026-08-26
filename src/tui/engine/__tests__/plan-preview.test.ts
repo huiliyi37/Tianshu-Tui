@@ -73,6 +73,7 @@ function makeApp(rows = 24) {
       selectedIndex: 0,
     }),
   })
+  app.start()
   return { app, out, stdin }
 }
 
@@ -114,8 +115,12 @@ const PLAN_INFO: PlanSubmittedInfo = { slug: 'fix-cache', title: '重构缓存�
 
 test('审批卡 v → pager 显示计划全文，q 返回审批卡', () => {
   const { app, out, stdin } = makeApp()
-  app.openPlanApprovalPanel(PLAN_INFO, '摘要行')
-  assert.ok(screenOf(out).includes('计划审批'), '前置：审批卡已打开')
+  app.openPlanApprovalPanel(PLAN_INFO, { body: PLAN_BODY, date: '2026-08-26' })
+  const opened = screenOf(out)
+  assert.ok(opened.includes('计划审批'), '前置：钉底审阅卡已打开')
+  assert.ok(opened.includes('2026-08-26'), '标题标日期')
+  assert.ok(opened.includes('❯'), '输入框仍可见')
+  assert.ok(!opened.includes('低阶'), '不标模型档')
 
   out.clear()
   stdin.dataHandler!('v')
@@ -137,7 +142,7 @@ test('审批卡 v → pager 显示计划全文，q 返回审批卡', () => {
 
 test('审批卡预览 Esc 同样返回审批卡', () => {
   const { app, out, stdin } = makeApp()
-  app.openPlanApprovalPanel(PLAN_INFO, '摘要行')
+  app.openPlanApprovalPanel(PLAN_INFO, { body: PLAN_BODY, date: '2026-08-26' })
   stdin.dataHandler!('v')
   out.clear()
   stdin.dataHandler!('\x1B')

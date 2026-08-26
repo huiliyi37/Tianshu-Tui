@@ -88,23 +88,38 @@ describe('skill-gate 会话记录', () => {
 describe('evaluateSkillGate', () => {
   it('可加载未加载 → missing；运行时没有 → unavailable；已加载 → 都不进', () => {
     const verdict = evaluateSkillGate(
-      ['executing-plans', 'alien-skill', 'writing-plans'],
+      ['subagent-driven-development', 'alien-skill', 'brainstorming'],
       {
-        availableNames: new Set(['executing-plans', 'writing-plans']),
-        invokedNames: new Set(['writing-plans']),
+        availableNames: new Set(['subagent-driven-development', 'brainstorming']),
+        invokedNames: new Set(['brainstorming']),
       },
     )
-    assert.deepEqual(verdict.missing, ['executing-plans'])
+    assert.deepEqual(verdict.missing, ['subagent-driven-development'])
     assert.deepEqual(verdict.unavailable, ['alien-skill'])
+    assert.deepEqual(verdict.native, [])
   })
 
-  it('名称比较大小写不敏感', () => {
+  it('退役名（executing-plans / writing-plans）→ native 桶，不拦', () => {
+    const verdict = evaluateSkillGate(
+      ['executing-plans', 'writing-plans'],
+      {
+        availableNames: new Set(),
+        invokedNames: new Set(),
+      },
+    )
+    assert.deepEqual(verdict.native, ['executing-plans', 'writing-plans'])
+    assert.deepEqual(verdict.missing, [])
+    assert.deepEqual(verdict.unavailable, [])
+  })
+
+  it('名称比较大小写不敏感（含退役名映射）', () => {
     const verdict = evaluateSkillGate(['Executing-Plans'], {
       availableNames: new Set(['executing-plans']),
       invokedNames: new Set(['EXECUTING-PLANS']),
     })
     assert.deepEqual(verdict.missing, [])
     assert.deepEqual(verdict.unavailable, [])
+    assert.deepEqual(verdict.native, ['Executing-Plans'])
   })
 })
 

@@ -30,8 +30,7 @@ import { buildBrowserRoutes } from './browser-routes.js'
 import { buildProjectTemplatesRoutes } from './project-templates-routes.js'
 import { buildProjectDocsRoutes } from './project-docs-routes.js'
 import { buildCacheRoutes } from './cache-routes.js'
-import { buildSpeechRoutes } from './speech-routes.js'
-import { createWhisperEngine } from './whisper-engine.js'
+import { buildSpeechRoutes, createSpeechEngineFromEnv, type SpeechEngine } from './speech-routes.js'
 import { existsSync } from 'node:fs'
 import { CronScheduler, setActiveScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
@@ -668,15 +667,9 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   // Plugin routes: presets + install/enable/remove for desktop plugin market UI.
   Object.assign(routes, buildPluginRoutes(apiToken))
 
-  // Speech routes: whisper.cpp 本地语音转写。bin/model 由环境变量注入
-  // （Tauri 打包侧设 RIVET_WHISPER_BIN/MODEL），缺失时 engine=null → 503，
-  // 前端降级到 Web Speech API。
-  const whisperBin = process.env.RIVET_WHISPER_BIN
-  const whisperModel = process.env.RIVET_WHISPER_MODEL
-  const whisperEngine = whisperBin && whisperModel && existsSync(whisperBin) && existsSync(whisperModel)
-    ? createWhisperEngine({ binPath: whisperBin, modelPath: whisperModel })
-    : null
-  Object.assign(routes, buildSpeechRoutes(whisperEngine, apiToken))
+  // Speech routes：whisper.cpp 本地转写；模型经 models/.active 下载即切换。
+  let whisperEngine: SpeechEngine | null = createSpeechEngineFromEnv()
+  Object.assign(routes, buildSpeechRoutes(() => whisperEngine, apiToken, { onModelInstalled: () => { whisperEngine = createSpeechEngineFromEnv(); return whisperEngine !== null } }))
 
   // Open file in system editor / reveal in file manager — thin wrapper so the
   // Desktop webview can request the sidecar to open a local path without

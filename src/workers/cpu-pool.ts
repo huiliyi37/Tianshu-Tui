@@ -28,6 +28,18 @@ import { fileURLToPath } from 'node:url'
 
 const SOFT_TIMEOUT_MS = 5000
 const HARD_STUCK_MS = 10_000
+/** 空闲回收窗口：任务全部 settle 后 N ms 内无新任务 → terminate worker。
+ *  worker 的空闲线程持有 MessagePort（unref 不覆盖），会阻止 node:test
+ *  子进程退出——写工具测试（真实执行 edit/write → edit-diff → cpuPool）因此
+ *  占住并发槽导致全量套件挂起（2026-08 root-cause）。回收后 _worker=null
+ *  且 _dead 不变，下次 run() 重新 spawn，生产高频任务不受影响。
+ *  环境变量覆盖供测试注入短值。 */
+const IDLE_TERMINATE_MS = (() => {
+  const parsed = Number(process.env.RIVET_CPU_POOL_IDLE_MS)
+  // 非法/非有限/非正值回退默认：NaN 会让 setTimeout 立即触发，导致每次
+  // run() 后 worker 即时回收、下次任务重新 spawn（功能正确但性能抖动）。
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10_000
+})()
 const DISABLED = process.env.RIVET_CPU_POOL === '0'
 
 // ── Worker path resolution ──
@@ -57,6 +69,7 @@ let _worker: Worker | null = null
 let _dead = DISABLED // permanent-disable flag
 let _seq = 0
 let _lastTaskStart = 0 // timestamp of the most recent postMessage
+let _idleTimer: ReturnType<typeof setTimeout> | null = null // idle-recycle timer
 
 interface Pending {
   resolve: (value: unknown) => void
@@ -65,6 +78,27 @@ interface Pending {
 }
 
 const _pending = new Map<number, Pending>()
+
+// ── Idle recycle ─────────────────────────────────────────────
+
+/** 取消待执行的空闲回收（新任务到达时）。 */
+function disarmIdleRecycle(): void {
+  if (_idleTimer !== null) {
+    clearTimeout(_idleTimer)
+    _idleTimer = null
+  }
+}
+
+/** 全部任务 settle 后启动空闲回收计时：超时 terminate worker（可复用）。 */
+function armIdleRecycle(): void {
+  if (_idleTimer !== null) return
+  _idleTimer = setTimeout(() => {
+    _idleTimer = null
+    if (_worker !== null) {
+      killWorker()
+    }
+  }, IDLE_TERMINATE_MS)
+}
 
 // ── Internal helpers ──
 
@@ -84,6 +118,7 @@ function spawnWorker(): Worker | null {
     p.clear()
     if (msg.ok) p.resolve(msg.result)
     else p.reject(new Error(msg.error ?? 'unknown worker error'))
+    if (_pending.size === 0) armIdleRecycle()
   })
   w.on('error', () => {
     killWorker()
@@ -95,6 +130,7 @@ function spawnWorker(): Worker | null {
 }
 
 function killWorker(): void {
+  disarmIdleRecycle()
   if (!_worker) return
   // Reject all pending promises
   for (const p of _pending.values()) {
@@ -144,6 +180,7 @@ export const cpuPool = {
   run(task: string, args: unknown[], softMs = SOFT_TIMEOUT_MS): Promise<unknown> {
     const worker = getWorker()
     if (!worker) return Promise.reject(new Error('CPU pool unavailable'))
+    disarmIdleRecycle()
 
     return new Promise<unknown>((resolve, reject) => {
       const id = ++_seq
@@ -154,6 +191,7 @@ export const cpuPool = {
         settled = true
         _pending.delete(id)
         reject(new Error(`CPU task '${task}' timed out after ${softMs}ms`))
+        if (_pending.size === 0) armIdleRecycle()
       }, softMs)
 
       const clear = () => {

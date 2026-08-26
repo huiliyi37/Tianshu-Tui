@@ -1,6 +1,4 @@
-/** Plan-phase star-domain delegation — shared by plan-mode block, writing-plans workflow, TUI/desktop entry. */
-
-export const WRITING_PLANS_SKILL = 'writing-plans'
+/** Plan-phase star-domain delegation — shared by plan-mode block, TUI/desktop entry. */
 
 /** Task-type → star-domain authority routing (read-only scouts in plan mode). */
 export const PLAN_DELEGATION_AUTHORITY_LINES = [
@@ -17,20 +15,4 @@ export function renderPlanDelegationGuide(): string {
 - 按任务类型选 authority：${PLAN_DELEGATION_AUTHORITY_LINES.join('；')}
 - findings 是待核验假设 — 引用前用 read_file / grep 独立确认
 - 禁止 patcher；禁止把主线任务委派出去`
-}
-
-/** Minimal agent surface for activating the writing-plans workflow. */
-export interface PlanWorkflowAgent {
-  planModeState?: 'off' | 'planning'
-  enterPlanMode?(opts?: { planFilePath?: string }): void
-  markSkillInvoked?(name: string): void
-}
-
-/** Enter plan mode (if needed) and pin writing-plans skill for appendix injection. */
-export function activateWritingPlanWorkflow(agent: PlanWorkflowAgent): void {
-  if (agent.planModeState !== 'planning') {
-    agent.enterPlanMode?.()
-  } else {
-    agent.markSkillInvoked?.(WRITING_PLANS_SKILL)
-  }
 }

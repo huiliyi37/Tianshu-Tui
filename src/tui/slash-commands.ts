@@ -6,6 +6,7 @@ import { forkSession, listBranches, countMessageLines } from '../agent/session-f
 import { type StarDomainId } from '../agent/star-domain.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import { DOMAIN_SWITCH_CACHE_WARNING } from '../agent/domain-picker-entries.js'
+import { getCapsuleByStar, listCapsuleStars } from '../agent/seed-capsule-store.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
@@ -72,6 +73,7 @@ import { switchAgentRuntime, switchAgentSession, switchAgentCwd, restorePlanMode
 import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
+import { formatPermissionLabel, parsePermissionAlias, tierToMode } from '../agent/approval-vocabulary.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
 import { getMirrorConfig, setMirrorConfig, setCheckpointConfig, setApprovalMode as persistApprovalDefault } from '../config/manager.js'
 import { grantPath, listPersistedGrants } from '../tools/path-grants.js'
@@ -94,10 +96,11 @@ const HELP_TEXT = `Available commands:
 /compact [status|llm] — Micro-compact context (/compact status for stats)
 /model [name|list] — Show or switch model
 /domain [list|<name>|auto|off] — Show or switch star domain personality
+/capsule [off] <star> — 星域胶囊：把某星完整方法论注入对话（≤2 枚，消息级零缓存代价，同 recall_capsule）
 /verbose — Toggle verbose tool output
-/permission [manual|auto|yolo|allow|deny|bash|remove|reset|test] — 权限模式：统一入口（Manual/Auto/YOLO 三档）
+/permission [supervise|auto|unattended|manual|yolo|allow|deny|bash|remove|reset|test] — 权限模式：监督 / 自动 / 全自动
 /grant [path] [read|write] — 授权并记住工作区外目录（无参列出本工作区已记住的授权）
-/theme [cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
+/theme [graphite|paper|cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: graphite)
 /vim — Toggle vim keybindings
 /effort [off|low|medium|high|max] — Set reasoning effort
 /undo [<number>|preview <number>] — Undo file changes with preview
@@ -167,7 +170,7 @@ Ctrl+P — 命令面板（模糊搜索全部命令与界面动作；Ctrl+Esc 被
 
 ⚠ 上下文占用直接影响 token 成本——尽早 /handoff 比触发压缩划算得多。
 
-  · 70% 以上 → 建议 /handoff 写交接文档后开新会话（交接自动注入，比续跑省前缀重建成本）
+  · 60% 以上 → 建议 /handoff 写交接文档后开新会话（交接自动注入，比续跑省前缀重建成本）
   · 70%-78% → 触发自动压缩，压缩本身 token 支出很高（整段历史重写一次）
   · 80% 以上 → 压缩 + 前缀缓存大概率碎裂，每轮 cache miss，成本数倍
   · 版本升级后请勿连接旧会话——提示词结构变化会让缓存整体碎裂
@@ -1476,7 +1479,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         if (criteria.length === 0) {
           pushStatic(createLogEntry({ type: 'system', content: '当前无验收项（提取未完成或失败）。\n用 /goal-criteria set \'["..."]\' 手动设置。' }))
         } else {
-          pushStatic(createLogEntry({ type: 'system', content: `📋 Judge 验收项（${criteria.length} 项）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\n用 /goal-criteria set \'["..."]\' 覆盖。` }))
+          pushStatic(createLogEntry({ type: 'system', content: `📋 Judge 验收项（${criteria.length} 项）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\n用 /goal-criteria set '["..."]' 覆盖。` }))
         }
       }
       setIsStreaming(false)
@@ -1518,6 +1521,52 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       tracker.pause('Paused by user', 'user')
       await persistGoalState(ctx, tracker)
       pushStatic(createLogEntry({ type: 'system', content: `⏸ Goal paused: ${tracker.getGoal()}\nIteration: ${tracker.getIteration()}/${tracker.getMaxIterations()} | Use /goal-resume to continue.` }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/capsule',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const sub = parts[1]?.toLowerCase()
+      const off = sub === 'off' || sub === 'rm' || sub === 'remove'
+      const target = (off ? parts[2] : parts[1])
+      if (!sub || sub === 'list' || sub === 'status') {
+        const current = ctx.agent.getSessionDomain()
+        const active = ctx.agent.listCapsules()
+        const activeLines = active.length > 0 ? active.map(n => `  ◉ ${n}`).join('\n') : '  （无）'
+        pushStatic(createLogEntry({ type: 'system', content: `星域胶囊（消息级注入——正文进对话不进前缀，零缓存代价）\n\n主域: ${current ? `${current.name} (${current.id})` : '未绑定'}\n生效中 (${active.length}/2):\n${activeLines}\n\n/capsule <星名> 注入 · /capsule off <星名> 摘除 — 最多 2 枚。` }))
+      } else if (!target) {
+        pushStatic(createLogEntry({ type: 'system', content: '用法: /capsule <星名> 注入 · /capsule off <星名> 摘除 · /capsule 查看。星名同 recall_capsule（如 天权 / 瑶光 / 天璇）。', isError: true }))
+      } else if (off) {
+        const result = ctx.agent.clearCapsule(target)
+        if (result.ok) {
+          pushStatic(createLogEntry({ type: 'system', content: `已摘除胶囊记账: ${target}\n生效中: ${ctx.agent.listCapsules().join(' + ') || '无'}\n（已注入的正文仍在会话历史中对模型生效，摘除只释放槽位。）` }))
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: result.error, isError: true }))
+        }
+      } else {
+        const cwd = ctx.agent.cwd
+        const capsule = getCapsuleByStar(cwd, target)
+        if (!capsule) {
+          const known = listCapsuleStars(cwd)
+          pushStatic(createLogEntry({ type: 'system', content: `没有「${target}」的胶囊。已知星域: ${known.join(', ') || '（无）'}\n（胶囊正文来自 seed-capsule，与 recall_capsule 同源。）`, isError: true }))
+        } else {
+          const note = ctx.agent.noteCapsuleInjection(capsule.star)
+          if (!note.ok) {
+            pushStatic(createLogEntry({ type: 'system', content: note.error, isError: true }))
+          } else if (ctx.submitToAgent) {
+            ctx.submitToAgent(`[星域胶囊注入] 用户经 /capsule 请求在当前主域（身份不变、不切换星域）的前提下，按下列${capsule.star}方法论处理接下来的任务：\n\n${capsule.block}`)
+            pushStatic(createLogEntry({ type: 'system', content: `已注入 ${capsule.star} 胶囊（封存于 ${capsule.sealedAt}）——正文随下一条消息进入对话，前缀缓存零影响。\n生效中: ${ctx.agent.listCapsules().join(' + ')}` }))
+          } else {
+            // 记账已占用槽位——注入通道缺失时回滚，避免白占
+            ctx.agent.clearCapsule(capsule.star)
+            pushStatic(createLogEntry({ type: 'system', content: '当前环境无消息注入通道（headless/测试）。可让模型自行调用 recall_capsule 工具——同样的胶囊正文，同样零缓存代价。', isError: true }))
+          }
+        }
+      }
       setIsStreaming(false)
       return true
     },
@@ -1660,10 +1709,11 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
 
         const lines: string[] = []
         const currentMode = agent.config.approvalMode ?? 'manual'
-        const currentLabel = { manual: 'Manual', 'auto-safe': 'Auto', 'auto-accept': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[currentMode] ?? currentMode
+        const currentLabel = formatPermissionLabel(currentMode)
         lines.push(`当前权限: ${currentLabel} (${currentMode})`)
         lines.push('')
-        lines.push('快速切换: /permission manual | /permission auto [轮次] | /permission yolo [confirm]')
+        lines.push('快速切换: /permission supervise | /permission auto [轮次] | /permission unattended [confirm]')
+        lines.push('别名: manual → 监督 · yolo → 全自动 · /yes → 全自动')
         lines.push('')
 
         if (allow.length > 0) {
@@ -1708,18 +1758,19 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
-      // ── 三档快速切换 ──
+      // ── 三档快速切换（主词 + 旧别名） ──
 
-      if (sub === 'manual') {
-        agent.setApprovalMode('manual')
+      const aliased = parsePermissionAlias(sub)
+      if (aliased === 'supervise') {
+        agent.setApprovalMode(tierToMode('supervise'))
         ctx.setAutoSafe(false)
-        ctx.persistApprovalMode?.('manual')
-        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 Manual — 所有高风险操作都需人工确认（已设为默认，重启后仍生效）' }))
+        ctx.persistApprovalMode?.(tierToMode('supervise'))
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 监督 — 所有高风险操作都需人工确认（已设为默认，重启后仍生效）' }))
         setIsStreaming(false)
         return true
       }
 
-      if (sub === 'auto') {
+      if (aliased === 'auto' && sub !== 'auto-accept') {
         const intervalRaw = parts[2]
         if (intervalRaw !== undefined) {
           const v = Number(intervalRaw)
@@ -1730,21 +1781,21 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           }
           setCheckpointConfig({ checkpointEveryTurns: v })
         }
-        agent.setApprovalMode('auto-safe')
+        agent.setApprovalMode(tierToMode('auto'))
         ctx.setAutoSafe(true)
-        ctx.persistApprovalMode?.('auto-safe')
+        ctx.persistApprovalMode?.(tierToMode('auto'))
         const interval = intervalRaw !== undefined ? Number(intervalRaw) : undefined
         const cpNote = interval !== undefined ? (interval > 0 ? `，检查点每 ${interval} 轮暂停` : '，检查点已关闭') : ''
-        pushStatic(createLogEntry({ type: 'system', content: `✓ 已切换至 Auto — 低/无风险工具自动执行，高风险仍需确认${cpNote}（已设为默认，重启后仍生效）\n\n  调整检查点: /permission auto <轮数>（0 = 关）` }))
+        pushStatic(createLogEntry({ type: 'system', content: `✓ 已切换至 自动 — 低/无风险工具自动执行，高风险仍需确认${cpNote}（已设为默认，重启后仍生效）\n\n  调整检查点: /permission auto <轮数>（0 = 关）` }))
         setIsStreaming(false)
         return true
       }
 
-      if (sub === 'yolo') {
+      if (aliased === 'unattended') {
         const confirmed = parts[2]?.toLowerCase() === 'confirm'
         if (!confirmed) {
           pushStatic(createLogEntry({ type: 'system', content: [
-            '⚠ YOLO 模式风险说明',
+            '⚠ 全自动风险说明',
             '',
             '  · 无轮次刹车 — run 一直执行到完成或 maxTurns 上限',
             '  · 无进度播报 — 完全静默运行',
@@ -1753,16 +1804,16 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
             '  · 回滚兜底：/rollback + git 检查点',
             '  · Windows 注意：沙箱能力降级',
             '',
-            '确认进入: /permission yolo confirm  或  /yes',
+            '确认进入: /permission unattended confirm  或  /permission yolo confirm  或  /yes',
           ].join('\n') }))
           setIsStreaming(false)
           return true
         }
-        agent.setApprovalMode('dangerously-skip-permissions')
+        agent.setApprovalMode(tierToMode('unattended'))
         agent.config.maxTurns = 0
         ctx.setAutoSafe(false)
-        ctx.persistApprovalMode?.('dangerously-skip-permissions')
-        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰（已设为默认，重启后仍生效）。/rollback 可随时回滚。关闭: /yes off' }))
+        ctx.persistApprovalMode?.(tierToMode('unattended'))
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 全自动 — 全自动执行，无刹车无打扰（已设为默认，重启后仍生效）。/rollback 可随时回滚。关闭: /yes off' }))
         setIsStreaming(false)
         return true
       }
@@ -3366,8 +3417,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     name: '/yes',
     immediate: true,
     handler(ctx) {
-      // 一键 YOLO 快捷键（/permission 的捷径）。显式输入命令即视为确认，无需二次确认。
-      // /yes / /yes on → YOLO；/yes off → 回到 Auto。均持久化为默认，重启后仍生效。
+      // 一键全自动（/permission 的捷径）。显式输入命令即视为确认，无需二次确认。
+      // /yes / /yes on → 全自动；/yes off → 回到自动。均持久化为默认，重启后仍生效。
       const { parts, agent, pushStatic, setIsStreaming } = ctx
       const arg = parts[1]?.toLowerCase()
       if (arg === 'off') {
@@ -3375,7 +3426,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         agent.config.maxTurns = 200
         ctx.setAutoSafe(true)
         ctx.persistApprovalMode?.('auto-safe')
-        pushStatic(createLogEntry({ type: 'system', content: '✓ 已退出 YOLO，切回 Auto — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。' }))
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已退出全自动，切回 自动 — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。' }))
         setIsStreaming(false)
         return true
       }
@@ -3383,7 +3434,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       agent.config.maxTurns = 0
       ctx.setAutoSafe(false)
       ctx.persistApprovalMode?.('dangerously-skip-permissions')
-      pushStatic(createLogEntry({ type: 'system', content: '✓ YOLO 已开启 — 全自动执行，无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback' }))
+      pushStatic(createLogEntry({ type: 'system', content: '✓ 全自动已开启 — 无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback' }))
       setIsStreaming(false)
       return true
     },
@@ -4325,12 +4376,12 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
   })
 
   register("/permission", {
-    description: "权限模式：Manual / Auto / YOLO 三档统一入口",
+    description: "权限模式：监督 / 自动 / 全自动",
     immediate: true,
     handler: () => {
       // Delegate to the main permission handler — it reads approvalMode live.
       app.setApprovalMode(ctx.agent.config.approvalMode ?? 'manual')
-      app.commitStatic(`当前权限: ${ctx.agent.config.approvalMode ?? 'manual'} — /permission manual|auto|yolo 快速切换 · /yes 一键 YOLO`)
+      app.commitStatic(`当前权限: ${formatPermissionLabel(ctx.agent.config.approvalMode)} (${ctx.agent.config.approvalMode ?? 'manual'}) — /permission supervise|auto|unattended 快速切换 · /yes 一键全自动`)
       app.setStreamingState(false)
       return true
     },
@@ -4338,7 +4389,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
 
   // /yes：一键 YOLO。显式输入即确认；同步 TUI badge，planning 叠层时更新 stash。
   register("/yes", {
-    description: "一键 YOLO（/yes off 退出）— 持久化为默认",
+    description: "一键全自动（/yes off 回到自动）— 持久化为默认",
     immediate: true,
     handler: ({ trimmed }) => {
       const arg = trimmed.split(/\s+/)[1]?.toLowerCase()
@@ -4359,12 +4410,12 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       }
       if (arg === 'off') {
         applyLive('auto-safe')
-        app.commitStatic('✓ 已退出 YOLO，切回 Auto — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。')
+        app.commitStatic('✓ 已退出全自动，切回 自动 — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。')
         app.setStreamingState(false)
         return true
       }
       applyLive('dangerously-skip-permissions')
-      app.commitStatic('✓ YOLO 已开启 — 全自动执行，无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback')
+      app.commitStatic('✓ 全自动已开启 — 无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback')
       app.setStreamingState(false)
       return true
     },

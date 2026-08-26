@@ -312,7 +312,7 @@ describe('council_convene 工具', () => {
 
     const passed = events.find(e => e.workOrderId === 'council:seat-tianfu')
     assert.ok(passed, 'passed 席位应收到终态事件')
-    assert.equal(passed!.status, 'passed')
+    assert.equal(passed!.status, 'completed')
     assert.equal(passed!.summary, 'tianfu-said', 'passed 席位优先带解析后的贡献摘要')
     assert.equal(passed!.parentToolId, 't1')
   })
@@ -351,7 +351,7 @@ describe('council_convene 工具', () => {
     assert.equal(degraded!.verdict.conflicts, 0)
     assert.ok(degraded!.seats.length >= 1, '降级帧含席位终态')
     assert.ok(events.find(e => e.workOrderId === 'council:seat-tianquan' && e.status === 'failed'))
-    assert.ok(events.find(e => e.workOrderId === 'council:seat-tianfu' && e.status === 'passed'))
+    assert.ok(events.find(e => e.workOrderId === 'council:seat-tianfu' && e.status === 'completed'))
     assert.ok(events.find(e => e.workOrderId === 'council:seat-tianquan-retry'), '重试 worker 也须终态')
   })
 
@@ -393,7 +393,7 @@ describe('council_convene 工具', () => {
       'council:seat-tianquan',
       'council:seat-tianquan-r2',
     ], 'r1 与 r2 各 workOrderId 恰好一条终态，无重复无遗漏')
-    assert.ok(events.every(e => e.status === 'passed'))
+    assert.ok(events.every(e => e.status === 'completed'))
     // r2 事件的 authority 剥掉 -r2 后缀
     const r2 = events.find(e => e.workOrderId === 'council:seat-tianquan-r2')
     assert.equal(r2!.authority, 'tianquan')

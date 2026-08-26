@@ -250,7 +250,7 @@ function extractListItems(text: string): string[] {
     if (m?.[1]) {
       const content = m[1].trim()
       // 过滤掉纯编号前缀（如 "P1: xxx" 取 "xxx"），保留有意义的内容
-      const cleaned = content.replace(/^(?:\*?\*?[A-Za-z]*\d+\*?\*?\s*[:：\-\.]\s*)/, '').trim()
+      const cleaned = content.replace(/^(?:\*?\*?[A-Za-z]*\d+\*?\*?\s*[:：\-.]\s*)/, '').trim()
       if (cleaned.length > 2) {
         items.push(cleaned)
       }

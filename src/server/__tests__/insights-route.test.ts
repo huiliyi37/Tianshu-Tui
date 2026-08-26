@@ -72,7 +72,7 @@ test('GET /sessions/:id/insights aggregates delegation usage and cost', async ()
     workOrderId: 'wo-1',
     parentToolId: 'tool-1',
     profile: 'scout',
-    status: 'passed',
+    status: 'completed',
     model: 'deepseek-v4-pro',
     provider: 'deepseek',
     usage: {

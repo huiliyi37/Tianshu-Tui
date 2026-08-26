@@ -25,12 +25,13 @@ export interface SandboxDenial {
  * Denial fingerprints.
  * - Seatbelt returns EPERM  → "Operation not permitted"
  * - bwrap/firejail mount the root read-only → EROFS → "Read-only file system"
- * Both families are accepted regardless of backend: a command may shell out to
+ * - Landlock allow-list denials → EACCES → "Permission denied"
+ * All families are accepted regardless of backend: a command may shell out to
  * something that reports the other wording, and a false positive here only
  * costs an extra hint line.
  */
 const DENIAL_MARKERS =
-  /Operation not permitted|operation not permitted|Read-only file system|read-only file system|\bEPERM\b|\bEROFS\b/
+  /Operation not permitted|operation not permitted|Read-only file system|read-only file system|Permission denied|permission denied|\bEPERM\b|\bEROFS\b|\bEACCES\b/
 
 /** bwrap failing to construct the sandbox itself (exit 127 + its own prefix). */
 const BWRAP_SELF_FAILURE = /^bwrap: /m
@@ -38,20 +39,25 @@ const BWRAP_SELF_FAILURE = /^bwrap: /m
 const PATH_PATTERNS: readonly RegExp[] = [
   // Node: EPERM: operation not permitted, mkdir '/path'
   //       EROFS: read-only file system, open '/path'
-  /E(?:PERM|ROFS): (?:operation not permitted|read-only file system), \w+ '([^']+)'/g,
+  //       EACCES: permission denied, open '/path'（Landlock allow-list 拒绝方言）
+  /E(?:PERM|ROFS|ACCES): (?:operation not permitted|read-only file system|permission denied), \w+ '([^']+)'/g,
   // coreutils / shell: "mkdir: /path: Operation not permitted"
   //                    "sh: /path: Operation not permitted"
   //                    "touch: /path: Read-only file system"
-  /(?:^|\n)[^\n:]{0,48}?: (\/[^\n:]+): (?:Operation not permitted|Read-only file system)/g,
+  //                    "touch: /path: Permission denied"
+  /(?:^|\n)[^\n:]{0,48}?: (\/[^\n:]+): (?:Operation not permitted|Read-only file system|Permission denied)/g,
   // Rust / Go / generic: failed to create directory `/path`
   // {0,40} is greedy — the character class excludes quotes, so the gap can
   // never cross a delimiter and greedy/lazy are equivalent here.
   /(?:failed to|cannot|unable to) (?:create|open|write to|remove)[^\n'"`]{0,40}[`'"](\/[^`'"\n]+)[`'"]/g,
   // bwrap self-failure: "bwrap: Can't create file at /path: No such file…"
+  // landlock launcher self-failure: "landlock-run: cannot open rule path: /path: …"
+  //   （launcher CLI 契约：所有 launcher 级 fatal 都以 landlock-run: 前缀输出）
   // [^\s:,;]+ rather than \S+: \S+ swallows the trailing colon and yields
   // "/nonexistent/x:", a path that matches no real directory and makes the
   // request_path_access the model is told to call fail.
   /^bwrap: [^\n]*?(\/[^\s:,;]+)/gm,
+  /^landlock-run: [^\n]*?(\/[^\s:,;]+)/gm,
 ]
 
 /** Extract candidate absolute paths from a denial stderr, first-seen order. */

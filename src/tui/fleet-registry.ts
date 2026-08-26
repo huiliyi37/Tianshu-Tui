@@ -107,8 +107,7 @@ function usageTotal(usage: DelegationActivity['usage']): number {
 }
 
 const TERMINAL_STATUSES = new Set<DelegationActivity['status']>([
-  'passed',
-  'completed', // 审查拦截（rejected）——7cf506eb 引入，缺它则永不终态、卡 active 假象
+  'completed', // 跑完且通过；审查拦截（rejected）同态——7cf506eb 引入，缺它则永不终态、卡 active 假象
   'failed',
   'blocked',
   'escalated',
@@ -117,7 +116,7 @@ const TERMINAL_STATUSES = new Set<DelegationActivity['status']>([
 /** 把委派状态映射为 WorkerPanel 状态（blocked/escalated 归入 failed 显示）。 */
 function panelStatusOf(status: DelegationActivity['status']): WorkerPanelStatus {
   if (status === 'running') return 'running'
-  if (status === 'passed' || status === 'completed') return 'done'
+  if (status === 'completed') return 'done'
   return 'failed'
 }
 
@@ -309,8 +308,8 @@ export class FleetRegistry {
     const group = [...this.records.values()].filter(r => r.parentToolId === parentToolId)
     return {
       total: group.length,
-      done: group.filter(r => r.status === 'passed').length,
-      failed: group.filter(r => r.terminal && r.status !== 'passed').length,
+      done: group.filter(r => r.status === 'completed').length,
+      failed: group.filter(r => r.terminal && r.status !== 'completed').length,
       running: group.filter(r => !r.terminal).length,
     }
   }

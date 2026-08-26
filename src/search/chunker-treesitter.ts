@@ -28,7 +28,7 @@ const DEFINITION_PATTERNS: Record<string, RegExp[]> = {
   py: [/^\s*(async\s+)?def\s+\w+/, /^\s*class\s+\w+/],
   go: [/^\s*func\s+/, /^\s*type\s+\w+\s+/],
   rs: [/^\s*(pub\s+)?(async\s+)?fn\s+/, /^\s*(pub\s+)?(struct|enum|trait|impl|mod)\s/],
-  java: [/^\s*(public|private|protected|static|final|abstract|\s)*\s*(class|interface|enum)\s/, /^\s*(public|private|protected|static|final|abstract|synchronized|\s)+[\w<>\[\],\s]+\s+\w+\s*\(/],
+  java: [/^\s*(public|private|protected|static|final|abstract|\s)*\s*(class|interface|enum)\s/, /^\s*(public|private|protected|static|final|abstract|synchronized|\s)+[\w<>[\],\s]+\s+\w+\s*\(/],
   c: [/^\s*[\w*]+\s+[\w*]+\s*\([^;]*\)\s*\{?$/, /^\s*(struct|enum|union|class)\s+\w+/, /^\s*(public|private|protected):/],
   rb: [/^\s*(def|class|module)\s+/],
   php: [/^\s*(public|private|protected|static|abstract|final|\s)*\s*function\s+/, /^\s*(class|interface|trait)\s+/],

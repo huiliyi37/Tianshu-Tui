@@ -124,7 +124,7 @@ describe('buildWorkerFleetLines', () => {
   })
 
   it('状态 glyph：passed/failed/blocked/escalated', () => {
-    const statuses: FleetWorkerView['status'][] = ['passed', 'failed', 'blocked', 'escalated']
+    const statuses: FleetWorkerView['status'][] = ['completed', 'failed', 'blocked', 'escalated']
     for (const s of statuses) {
       const lines = buildWorkerFleetLines([worker({ status: s, activity: undefined })], undefined, 80)
       assert.ok(lines[1]!.match(/[✓✗⊗↑]/), `status ${s} 应有 glyph`)
@@ -133,7 +133,7 @@ describe('buildWorkerFleetLines', () => {
 
   it('汇总头含完成数（有完成时）', () => {
     const lines = buildWorkerFleetLines(
-      [worker({ status: 'passed', activity: undefined })],
+      [worker({ status: 'completed', activity: undefined })],
       { done: 1, total: 2, running: 1 },
       80,
     )
@@ -163,7 +163,7 @@ describe('buildWorkerFleetLines', () => {
 
 describe('formatWorkerFleet', () => {
   it('行数与 plain 一致（头 + worker 行 + 活动行 + 折叠）', () => {
-    const workers = [worker(), worker({ workerId: 'w2', shortLabel: 'T2', status: 'passed' })]
+    const workers = [worker(), worker({ workerId: 'w2', shortLabel: 'T2', status: 'completed' })]
     const colored = formatWorkerFleet(workers, theme, 80, { done: 1, total: 2, running: 1 })
     const plain = buildWorkerFleetLines(workers, { done: 1, total: 2, running: 1 }, 80)
     assert.equal(colored.length, plain.length)
@@ -178,7 +178,7 @@ describe('formatWorkerFleet', () => {
 
   it('状态词列：passed 状态词在续行；无在跑时无提示行', () => {
     const lines = buildWorkerFleetLines(
-      [worker({ status: 'passed' })],
+      [worker({ status: 'completed' })],
       { done: 1, total: 2, running: 0 },
       80,
     )
@@ -197,10 +197,10 @@ describe('formatWorkerFleet', () => {
     assert.notEqual(passRow, failRow, '普通完成绿 ≠ 系统失败红（ sanity ）')
   })
 
-  it('completed 无 failureReason（普通完成）与 passed 同色（success 绿）', () => {
+  it('completed 无 failureReason（普通完成）渲染 success 绿', () => {
     const completedRow = formatWorkerRow(worker({ status: 'completed', activity: undefined }), theme, 80)
-    const passedRow = formatWorkerRow(worker({ status: 'passed', activity: undefined }), theme, 80)
-    assert.equal(completedRow, passedRow, '普通 completed 应与 passed 同为 success 绿')
+    const failRow = formatWorkerRow(worker({ status: 'failed', activity: undefined }), theme, 80)
+    assert.notEqual(completedRow, failRow, '普通完成绿 ≠ 系统失败红')
   })
 })
 

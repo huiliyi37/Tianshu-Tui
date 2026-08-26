@@ -166,12 +166,13 @@ describe('scheduleMeridianBackfill', () => {
 
     const calls: string[] = []
     const handle = scheduleMeridianBackfill(fakeIndexer(calls), dir)
-    // 枚举与首个文件的 indexFile 在 schedule 内同步开跑；此处 stop 后
-    // 循环在下一个文件前检查 stopped 并退出。
+    // 枚举已异步化（git ls-files/execFile 不卡事件循环，2026-08-24）——
+    // schedule 返回时 IIFE 挂在枚举 await 上，此处同步 stop 必然先于任何
+    // indexFile 生效：0 次调用，一个文件都不进。
     handle.stop()
     await handle.done
 
-    assert.equal(calls.length, 1)
+    assert.equal(calls.length, 0)
   })
 
   it('每个 indexer 实例只调度一次（实例上挂 flag）', async () => {

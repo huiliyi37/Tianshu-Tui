@@ -65,7 +65,7 @@ export interface FlowHit {
 
 /** 未命名占位 id（`file:*:0`）判定——flow 两端 named 约束的核心谓词。 */
 export function isUnnamedSymbolId(id: string): boolean {
-  return /:\*:0$/.test(id)
+  return id.endsWith(':*:0')
 }
 
 /** named-symbol BFS：seed 必须是命名符号；返回的命中点也全是命名符号。 */

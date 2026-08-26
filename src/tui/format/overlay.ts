@@ -470,7 +470,7 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
 
 // ── Tasks ──────────────────────────────────────────────────────
 
-export type TasksWorkerStatus = 'running' | 'passed' | 'completed' | 'failed' | 'blocked' | 'escalated'
+export type TasksWorkerStatus = 'running' | 'completed' | 'failed' | 'blocked' | 'escalated'
 
 export interface TasksWorkerRow {
   /** 稳定的 per-worker id（work order id），用于进入 detail pager。 */
@@ -520,7 +520,6 @@ export interface TasksData {
 
 const TASK_STATUS_GLYPH: Record<TasksWorkerStatus, string> = {
   running: '◐',
-  passed: '✓',
   completed: '✓',
   failed: '✗',
   blocked: '⊘',
@@ -533,7 +532,7 @@ function taskStatusColor(status: TasksWorkerStatus, theme: RivetTheme, failureRe
   if (status === 'completed' && failureReason === 'review-findings') return theme.warning
   switch (status) {
     case 'running': return theme.primary
-    case 'passed': return theme.success
+    case 'completed': return theme.success
     case 'completed': return theme.success
     case 'failed': return theme.error ?? theme.warning
     default: return theme.warning
@@ -1480,7 +1479,7 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
     const shown = view.masked ? maskSecret(data.input) : data.input
     // 掩码步按码点展示，先把 UTF-16 位置换算成码点。
     const utf16Pos = Math.min(Math.max(data.cursorPos ?? data.input.length, 0), data.input.length)
-    const pos = view.masked ? [...data.input.slice(0, utf16Pos)].length : utf16Pos
+    const pos = view.masked ? data.input.slice(0, utf16Pos).length : utf16Pos
     // 光标是硬件 caret（格子边界、零占位），不在行内画任何字形；
     // 占位符仅空输入时显示，非实体。
     const body = shown.length > 0
@@ -1623,10 +1622,10 @@ export function renderFleetDetail(worker: FleetWorkerView, width: number, height
 
   // Title: status glyph + worker label + status word（同色，一眼判断终态）
   const statusGlyph = worker.terminal
-    ? (worker.status === 'passed' ? '✓' : worker.status === 'failed' ? '✗' : '⚠')
+    ? (worker.status === 'completed' ? '✓' : worker.status === 'failed' ? '✗' : '⚠')
     : '◐'
   const statusColor = worker.terminal
-    ? (worker.status === 'passed' ? theme.success : worker.status === 'failed' ? theme.error : theme.warning)
+    ? (worker.status === 'completed' ? theme.success : worker.status === 'failed' ? theme.error : theme.warning)
     : theme.primary
   lines.push(formatTitleLeft(
     `${color(`${statusGlyph} ${worker.shortLabel}`, statusColor, { bold: true })} ${color(`· ${worker.status}`, statusColor)}`,

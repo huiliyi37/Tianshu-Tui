@@ -56,7 +56,7 @@ export function terminalActivity(
     ...(opts?.omitProfile ? {} : { profile: result.profile ?? opts?.profileFallback }),
     authority,
     objective,
-    status: result.status,
+    status: result.status === 'passed' ? 'completed' : result.status,
     progressLine: progressSnippet(result.summary),
     summary: result.summary,
     failureReason: result.failureReason,

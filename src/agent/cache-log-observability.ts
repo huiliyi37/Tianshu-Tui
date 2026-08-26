@@ -105,7 +105,7 @@ export class TurnCacheObservability {
     this.pending = undefined
     return {
       ...(stream.ttftMs !== undefined ? { ttftMs: stream.ttftMs } : {}),
-      ...(pending ?? {}),
+      ...pending,
     }
   }
 }

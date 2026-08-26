@@ -53,3 +53,20 @@ export {
 
 // 证据摘要（CompletionCurtain / event-reducer 消费的 SSE 载荷类型）
 export type { EvidenceSummary, DeliveryVerificationStatus } from '../agent/evidence-types.js'
+
+// 对外权限词表（TUI / 桌面 / 插件同一套监督·自动·全自动）
+export {
+  PERMISSION_TIERS,
+  TIER_HINT,
+  TIER_LABEL,
+  TIER_TO_WIRE,
+  formatPermissionChrome,
+  formatPermissionLabel,
+  formatTierLabel,
+  modeToTier,
+  parsePermissionAlias,
+  tierToMode,
+  type ApprovalWireMode,
+  type PermissionLang,
+  type PermissionTier,
+} from '../agent/approval-vocabulary.js'

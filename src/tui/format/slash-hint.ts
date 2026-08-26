@@ -56,9 +56,22 @@ type ScoredEntry = { entry: SlashHintEntry; score: number }
  *   2 = name 有序子序列 fuzzy（如 "rvw" → /review）
  *   3 = description 子串匹配
  *
- * 同分时保持原始顺序（stable sort）。
+ * 同分时按 mruRank（可选）降序——最近使用优先；未提供或均未命中保持
+ * 原始顺序（stable sort）。mruRank 键为去 `/` 前缀的命令名。
  */
-export function filterSlashCommands(commands: readonly SlashHintEntry[], query: string): SlashHintEntry[] {
+export function filterSlashCommands(
+  commands: readonly SlashHintEntry[],
+  query: string,
+  mruRank?: ReadonlyMap<string, number>,
+): SlashHintEntry[] {
+  const mruFirst = <T extends { name: string }>(entries: T[]): T[] => {
+    if (mruRank === undefined) return entries
+    return [...entries].sort(
+      (a, b) =>
+        (mruRank.get(b.name.replace(/^\//, '')) ?? 0) -
+        (mruRank.get(a.name.replace(/^\//, '')) ?? 0),
+    )
+  }
   if (!query) {
     // 空 query（输入恰好 `/`）：只展示核心层。全量 65+ 条按定义序浏览对普通
     // 用户是噪音墙，常用命令被淹没；核心层（~20 条高频）+ footer 引导后，
@@ -66,7 +79,7 @@ export function filterSlashCommands(commands: readonly SlashHintEntry[], query: 
     // 不删任何命令。清单无 core 标注（如纯 skills 形态）时回退全量。
     // 键导航 / Tab 补全 / 渲染三处共用本函数，分层在此单点生效即整体一致。
     const core = commands.filter(c => c.tier === 'core')
-    return core.length > 0 ? core : [...commands]
+    return mruFirst(core.length > 0 ? core : [...commands])
   }
   const lower = query.toLowerCase()
   const scored: ScoredEntry[] = []
@@ -90,7 +103,16 @@ export function filterSlashCommands(commands: readonly SlashHintEntry[], query: 
     if (score === null && desc.includes(lower)) score = 3
     if (score !== null) scored.push({ entry: c, score })
   }
-  scored.sort((a, b) => a.score - b.score)
+  scored.sort((a, b) => {
+    const scoreDiff = a.score - b.score
+    if (scoreDiff !== 0) return scoreDiff
+    // 同分：MRU 命中优先（rank 高 = 最近使用）；未提供 mruRank 时保持稳定序
+    if (mruRank === undefined) return 0
+    return (
+      (mruRank.get(b.entry.name.replace(/^\//, '')) ?? 0) -
+      (mruRank.get(a.entry.name.replace(/^\//, '')) ?? 0)
+    )
+  })
   return scored.map(s => s.entry)
 }
 
@@ -101,47 +123,86 @@ export interface FormatSlashHintInput {
   commands: readonly SlashHintEntry[]
   /** 当前选中项（Tab 补全目标），默认 0 */
   selectedIdx?: number
+  /** 最大显示条数（预算钳制透传） */
+  maxVisible?: number
+  /** 预算不足时隐藏 footer 行（透传，TUI 钉底） */
+  hideFooter?: boolean
+}
+
+/** formatSlashMenu 输入：已过滤已排序的命令列表（由调用方保证顺序）。 */
+export interface FormatSlashMenuInput {
+  /** 已过滤列表（MRU 排序等由调用方完成） */
+  items: readonly SlashHintEntry[]
+  /** 当前选中项下标（越界 clamp 到合法范围） */
+  selected: number
   /** 最大显示条数 */
   maxVisible?: number
+  /** footer 中间插入的提示段（如核心层说明）；缺省不占位 */
+  footerNote?: string
+  /** 预算不足时隐藏 footer 行（TUI 钉底：菜单高度钳制到输入框上方可用空间） */
+  hideFooter?: boolean
+}
+
+/** 菜单高度钳制结果：可见项数 + 是否隐藏 footer。 */
+export interface SlashMenuBudget {
+  visibleItems: number
+  hideFooter: boolean
 }
 
 /**
- * 格式化 slash 提示为 ANSI 行数组。无匹配时返回空数组。
+ * 计算 slash 菜单可见项数（TUI 钉底）：
+ * 预算 = maxRows - chromeRows - inputRows（输入框上方可用 display rows）。
+ * - 预算 ≥ 2：visibleItems = min(design, budget-1)（留 footer 行）
+ * - 预算 = 1：1 项无 footer（最少可见反馈）
+ * - 预算 ≤ 0：菜单不显示（钉底优先——宁可无菜单也不超行触发终端滚动，
+ *   输入框位置跳动正是「宁可超行也不能让输入框消失」路径的根因）
  */
-export function formatSlashHint(input: FormatSlashHintInput, theme: RivetTheme): string[] {
-  if (!input.input.startsWith('/')) return []
-  const query = input.input.slice(1)
-  const filtered = filterSlashCommands(input.commands, query)
-  if (filtered.length === 0) return []
+export function computeSlashMenuBudget(opts: {
+  chromeRows: number
+  inputRows: number
+  maxRows: number
+  designMaxVisible: number
+}): SlashMenuBudget {
+  const budget = opts.maxRows - opts.chromeRows - opts.inputRows
+  if (budget <= 0) return { visibleItems: 0, hideFooter: true }
+  if (budget === 1) return { visibleItems: 1, hideFooter: true }
+  return {
+    visibleItems: Math.max(1, Math.min(opts.designMaxVisible, budget - 1)),
+    hideFooter: false,
+  }
+}
+
+/**
+ * 格式化 slash 命令菜单为 ANSI 行数组——纯渲染，不做过滤/排序。
+ * 输入为空列表返回空数组。
+ */
+export function formatSlashMenu(input: FormatSlashMenuInput, theme: RivetTheme): string[] {
+  const items = input.items
+  if (items.length === 0) return []
   const maxVisible = input.maxVisible ?? SLASH_HINT_MAX_VISIBLE
-  const selectedIdx = Math.min(input.selectedIdx ?? 0, filtered.length - 1)
+  const selectedIdx = Math.min(Math.max(input.selected, 0), items.length - 1)
 
   // Scroll window: follow the selected index so ↑↓ navigation always keeps
   // the cursor visible. Inspired by Claude Code's command palette scrolling.
   let scrollOffset = 0
-  if (filtered.length > maxVisible) {
+  if (items.length > maxVisible) {
     if (selectedIdx < maxVisible) {
       // Near top — show from beginning
       scrollOffset = 0
-    } else if (selectedIdx >= filtered.length - maxVisible) {
+    } else if (selectedIdx >= items.length - maxVisible) {
       // Near bottom — pin to end
-      scrollOffset = filtered.length - maxVisible
+      scrollOffset = items.length - maxVisible
     } else {
       // Middle — center the selection
       scrollOffset = selectedIdx - Math.floor(maxVisible / 2)
     }
   }
 
-  const visible = filtered.slice(scrollOffset, scrollOffset + maxVisible)
+  const visible = items.slice(scrollOffset, scrollOffset + maxVisible)
   const overflowAbove = scrollOffset
-  const overflowBelow = filtered.length - scrollOffset - visible.length
+  const overflowBelow = items.length - scrollOffset - visible.length
 
   const lines: string[] = []
-
-  // Scroll indicator: show "↑ N above" when scrolled past top
-  if (overflowAbove > 0) {
-    lines.push(color(`  ↑ ${overflowAbove} more above`, theme.dim))
-  }
 
   for (let i = 0; i < visible.length; i++) {
     const cmd = visible[i]!
@@ -153,19 +214,48 @@ export function formatSlashHint(input: FormatSlashHintInput, theme: RivetTheme):
     lines.push(`${marker}${name}${desc}`)
   }
 
-  // Scroll indicator: show "↓ N below" when more items remain
+  // Scroll indicators + navigation hints 全部并入 footer 单行——菜单总行数恒为
+  // visibleItems + (footer?1:0)，与预算数学闭合（↑ 独立行曾使滚动时输出超预算 1 行，
+  // 整帧超 maxRows → 终端滚动 → 输入框跳动，TUI 钉底审查 F1 变体）。
   const footerParts: string[] = []
-  if (overflowBelow > 0) {
-    footerParts.push(`↓ ${overflowBelow} more`)
+  if (!input.hideFooter) {
+    if (overflowAbove > 0) {
+      footerParts.push(`↑ ${overflowAbove} more above`)
+    }
+    if (overflowBelow > 0) {
+      footerParts.push(`↓ ${overflowBelow} more`)
+    }
+    if (input.footerNote !== undefined && input.footerNote !== '') {
+      footerParts.push(input.footerNote)
+    }
+    footerParts.push('↑↓ navigate', 'tab complete', '↵ run')
+    lines.push(color(`  ${footerParts.join(' · ')}`, theme.dim))
   }
+  return lines
+}
+
+/**
+ * 格式化 slash 提示为 ANSI 行数组。无匹配时返回空数组。
+ * 过滤（filterSlashCommands）+ 格式化（formatSlashMenu）的组合；
+ * 空 query 时追加核心层提示段。
+ */
+export function formatSlashHint(input: FormatSlashHintInput, theme: RivetTheme): string[] {
+  if (!input.input.startsWith('/')) return []
+  const query = input.input.slice(1)
+  const filtered = filterSlashCommands(input.commands, query)
+  if (filtered.length === 0) return []
   // 空 query = 核心层视图：给出「还有更多」的明确出口，否则用户不知道
   // 进阶命令的存在（65+ 条只露 20 条，发现性反而变差）。
-  if (!query && input.commands.length > filtered.length) {
-    footerParts.push(`核心 ${filtered.length}/${input.commands.length} · 输入即过滤全部 · ctrl+p 面板`)
-  }
-  footerParts.push('↑↓ navigate', 'tab complete', '↵ run')
-  lines.push(color(`  ${footerParts.join(' · ')}`, theme.dim))
-  return lines
+  const coreHint = !query && input.commands.length > filtered.length
+    ? `核心 ${filtered.length}/${input.commands.length} · 输入即过滤全部 · ctrl+p 面板`
+    : undefined
+  return formatSlashMenu({
+    items: filtered,
+    selected: input.selectedIdx ?? 0,
+    maxVisible: input.maxVisible,
+    footerNote: coreHint,
+    hideFooter: input.hideFooter,
+  }, theme)
 }
 
 /** Tab 补全目标：过滤结果中的选中项（无匹配返回 null） */

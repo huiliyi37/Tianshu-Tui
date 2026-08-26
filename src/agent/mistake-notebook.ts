@@ -16,7 +16,7 @@ function computeId(error: string, context: string): string {
 }
 
 function tokenize(text: string): string[] {
-  return text.toLowerCase().split(/[\s/\\.:,;()\[\]{}<>"'`]+/).filter(t => t.length > 2)
+  return text.toLowerCase().split(/[\s/\\.:,;()[\]{}<>"'`]+/).filter(t => t.length > 2)
 }
 
 function overlapScore(queryTokens: string[], entryTokens: string[]): number {

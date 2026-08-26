@@ -1,6 +1,7 @@
 /** Plan Mode — 只读探索→执行的二态控制 */
 
 import { resolve } from 'node:path'
+import { formatPermissionChrome } from './approval-vocabulary.js'
 import type { ApprovalMode } from './loop-types.js'
 
 /** Plan Mode 状态（两态：off / planning） */
@@ -50,17 +51,7 @@ export function nextShiftTabPlanToggle(state: ShiftTabPlanToggleState): ShiftTab
 
 /** 审批模式短标签（CLI 状态行 / Shift+Tab 提示） */
 export function approvalModeShortLabel(mode: ApprovalMode): string {
-  switch (mode) {
-    case 'dangerously-skip-permissions':
-      return 'yolo'
-    case 'auto-accept':
-      return 'auto-accept'
-    case 'manual':
-      return 'manual'
-    case 'auto-safe':
-    default:
-      return 'auto-safe'
-  }
+  return formatPermissionChrome(mode)
 }
 
 /** Shift+Tab 进入/退出 plan 后的状态提示 */
@@ -74,14 +65,14 @@ export function shiftTabPlanToggleHint(
   }
   switch (underlyingMode) {
     case 'dangerously-skip-permissions':
-      return '⏵ yolo mode — all tools auto-approved (use with caution)'
+      return '⏵ 全自动 — 工具免审批（写沙箱仍开）'
     case 'auto-accept':
-      return '⏵ auto-accept mode — edits auto-approved'
+      return '⏵ 自动 — 写操作也免审批（隐档）'
     case 'manual':
-      return '⏵ manual mode — approval required for all tools'
+      return '⏵ 监督 — 高风险工具都需确认'
     case 'auto-safe':
     default:
-      return '⏵ auto-safe mode — bash requires approval'
+      return '⏵ 自动 — 低风险自动，高风险仍确认'
   }
 }
 

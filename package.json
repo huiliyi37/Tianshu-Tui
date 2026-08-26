@@ -1,6 +1,6 @@
 {
   "name": "tianshu-tui",
-  "version": "3.5.1",
+  "version": "3.6.0",
   "description": "Terminal coding agent optimized for DeepSeek V4 prefix cache",
   "license": "Apache-2.0",
   "type": "module",
@@ -46,6 +46,9 @@
     "build:bundle": "tsup",
     "start": "node --expose-gc --max-old-space-size=4096 dist/main.js",
     "typecheck": "tsx scripts/typecheck-guard.ts",
+    "lint": "oxlint src scripts",
+    "budgets:check": "tsx scripts/verify-source-budgets.ts",
+    "lint:fix": "oxlint src scripts --fix",
     "typecheck:direct": "tsc --noEmit",
     "typecheck:baseline": "tsx scripts/typecheck-baseline.ts",
     "test": "tsx scripts/run-node-tests.ts",
@@ -78,6 +81,7 @@
     "web-tree-sitter": "^0.24.7"
   },
   "optionalDependencies": {
+    "@huiliyi37/node-addon-landlock-run": "^0.4.0",
     "better-sqlite3": "^12.10.0"
   },
   "overrides": {
@@ -95,6 +99,7 @@
     "diff": "^9.0.0",
     "exceljs": "^4.4.0",
     "get-east-asian-width": "^1.6.0",
+    "oxlint": "^1.80.0",
     "parquet-wasm": "^0.7.2",
     "parquetjs": "^0.11.2",
     "patch-package": "^8.0.0",

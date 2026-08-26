@@ -56,6 +56,21 @@ test('plan_mode / model_switched / domain_changed 更新会话状态', () => {
     { type: 'domain_changed', data: { key: 'tianquan', name: '天权' } },
   ])
   assert.equal(s.planMode, 'planning')
+  assert.equal(s.askMode, 'off')
   assert.equal(s.model, 'deepseek-chat')
   assert.equal(s.domain, '天权')
+})
+
+test('ask_mode 与 plan_mode 互斥', () => {
+  const asking = feed([
+    { type: 'plan_mode', data: { state: 'planning' } },
+    { type: 'ask_mode', data: { state: 'asking' } },
+  ])
+  assert.equal(asking.askMode, 'asking')
+  assert.equal(asking.planMode, 'off')
+  assert.equal(asking.planDrafting, false)
+
+  const planned = reduceEvent(asking, { seq: 9, ts: 9, type: 'plan_mode', data: { state: 'planning' } })
+  assert.equal(planned.planMode, 'planning')
+  assert.equal(planned.askMode, 'off')
 })

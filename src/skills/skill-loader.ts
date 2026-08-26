@@ -15,8 +15,9 @@
  */
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
-import { join, relative, dirname } from 'node:path'
+import { join, relative, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeFrontmatterSource } from '../utils/frontmatter.js'
 
@@ -340,7 +341,7 @@ export class SkillRegistry {
     }
 
     return [
-      '<invoked-skills note="These skills were explicitly invoked this session. Continue following their instructions unless the user says otherwise. When a skill workflow is fully finished, call skill(name=\"<name>\", complete=true) to release it.">',
+      '<invoked-skills note="These skills were explicitly invoked this session. Continue following their instructions unless the user says otherwise. When a skill workflow is fully finished, call skill(name="<name>", complete=true) to release it.">',
       ...blocks,
       '</invoked-skills>',
     ].join('\n')
@@ -893,6 +894,79 @@ export function seedBundledSkills(cwd: string): string[] {
 }
 
 /**
+ * Bundled skills retired from default distribution (2026-08-25 slim-down).
+ * Each entry stores the SHA-256 of the repo version's SKILL.md content,
+ * captured before removal. A project copy is deleted only when its content
+ * hashes to that exact repo version — user-modified copies stay untouched.
+ * Idempotent and best-effort; the list can be dropped once all projects
+ * have been visited.
+ */
+export const RETIRED_BUNDLED_SKILLS: ReadonlyArray<{ name: string; sha256: string }> = [
+  { name: 'writing-plans', sha256: 'f9380b0a39e90ca10db9dc74190bc904f309c253dbbde4d7dc49c8ea50c6f5a3' },
+  { name: 'executing-plans', sha256: 'a83e72402ed20a03df4d991524e5f46b1e1f7ceb078d7b4960d7f2d298e1aca7' },
+  { name: 'agent-harness-testing', sha256: 'd7648148c288c4bff527c871eee68d807aad95a7b1a9c78414af40d9d7d68cf0' },
+  { name: 'cognitive-alignment', sha256: 'a5a2783460feb2064dbed52ab8bfe2fe03683163425ba0762479f8c0f1936a44' },
+  { name: 'research-spec', sha256: '3600b944aa6f5cc7de7df9768492bef9d57b5657c366aa1cae91d29e695cbc18' },
+]
+
+/** Delete the project copy backing `skillFile`: the whole directory for
+ *  dir-shaped skills (`<name>/SKILL.md`), just the file for flat ones. */
+function removeRetiredSkillCopy(skillFile: string): void {
+  const parent = dirname(skillFile)
+  if (basename(skillFile) === 'SKILL.md' && basename(parent) !== 'skills') {
+    rmSync(parent, { recursive: true, force: true })
+  } else {
+    rmSync(skillFile, { force: true })
+  }
+}
+
+/** One-time cleanup of retired bundled skills from `<cwd>/.rivet/skills/`.
+ *  Handles both dir-shaped (`<name>/SKILL.md`) and flat (`<name>.md`) copies.
+ *  The retired table is injectable so tests can drive exact hashes. */
+export function retireMatchingSkillCopies(
+  cwd: string,
+  retired: ReadonlyArray<{ name: string; sha256: string }>,
+): string[] {
+  const destDir = join(cwd, '.rivet', 'skills')
+  const removed: string[] = []
+  for (const entry of retired) {
+    for (const candidate of [join(destDir, entry.name, 'SKILL.md'), join(destDir, `${entry.name}.md`)]) {
+      let content: Buffer
+      try {
+        content = readFileSync(candidate)
+      } catch {
+        continue // copy absent — nothing to clean
+      }
+      const hash = createHash('sha256').update(content).digest('hex')
+      if (hash !== entry.sha256) {
+        // User-modified or a different version — keep it.
+        if (process.env['RIVET_DEBUG']) {
+          console.log(`[skills] retired ${entry.name} copy kept (content differs from repo version): ${candidate}`)
+        }
+        continue
+      }
+      try {
+        removeRetiredSkillCopy(candidate)
+        removed.push(entry.name)
+        break
+      } catch {
+        /* best-effort — a read-only cwd just skips */
+      }
+    }
+  }
+  if (removed.length > 0 && process.env['RIVET_DEBUG']) {
+    console.log(`[skills] retired bundled skills cleaned: ${removed.join(', ')}`)
+  }
+  return removed
+}
+
+/** Production entry: retire copies matching the repo versions captured in
+ *  RETIRED_BUNDLED_SKILLS before removal (2026-08-25 slim-down). */
+export function retireRetiredBundledSkills(cwd: string): string[] {
+  return retireMatchingSkillCopies(cwd, RETIRED_BUNDLED_SKILLS)
+}
+
+/**
  * Load skills into the shared registry.
  *
  * Single runtime source: built-ins + `.rivet/skills/` (flat `name.md` AND
@@ -924,6 +998,13 @@ export function loadProjectSkills(
   // and stay readable (inside the workspace). Idempotent; project copies win.
   try {
     seedBundledSkills(cwd)
+  } catch {
+    /* best-effort */
+  }
+  // One-time cleanup: remove project copies of retired bundled skills whose
+  // content still matches the repo version (user-modified copies are kept).
+  try {
+    retireRetiredBundledSkills(cwd)
   } catch {
     /* best-effort */
   }

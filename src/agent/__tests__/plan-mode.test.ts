@@ -268,9 +268,9 @@ describe('nextShiftTabPlanToggle', () => {
   })
 
   it('hints name underlying mode on enter and restored mode on exit', () => {
-    assert.match(shiftTabPlanToggleHint('enter', 'dangerously-skip-permissions'), /yolo/)
-    assert.match(shiftTabPlanToggleHint('exit', 'dangerously-skip-permissions'), /yolo mode/)
-    assert.equal(approvalModeShortLabel('dangerously-skip-permissions'), 'yolo')
-    assert.equal(approvalModeShortLabel('auto-safe'), 'auto-safe')
+    assert.match(shiftTabPlanToggleHint('enter', 'dangerously-skip-permissions'), /全自动/)
+    assert.match(shiftTabPlanToggleHint('exit', 'dangerously-skip-permissions'), /全自动/)
+    assert.equal(approvalModeShortLabel('dangerously-skip-permissions'), '全自动')
+    assert.equal(approvalModeShortLabel('auto-safe'), '自动')
   })
 })

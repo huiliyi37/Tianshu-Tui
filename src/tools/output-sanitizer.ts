@@ -218,7 +218,7 @@ const LINE_FILTERS: Record<string, LineFilter> = {
   'pnpm-yarn': {
     matchCommand: /\b(?:pnpm|yarn)\s+(?:install|add|up|dlx|create)\b/,
     stripLines: [
-      /^\s*(?:Progress:|Packages:|●|\│|├|└|\s){2,}/,  // pnpm progress tree / yarn step prefix
+      /^\s*(?:Progress:|Packages:|●|│|├|└|\s){2,}/,  // pnpm progress tree / yarn step prefix
       /^Done in \d/,            // yarn "Done in 3.45s"
     ],
     shortCircuit: /Already up[ -]to[ -]date|Nothing to install/,

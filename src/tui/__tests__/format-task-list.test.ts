@@ -4,6 +4,7 @@ import { formatTaskList, shouldShowTaskPanel } from '../format/task-list.js'
 import { getTheme } from '../theme.js'
 import { displayWidth } from '../width.js'
 import type { TodoItem } from '../../tools/todo-store.js'
+import { resetSpinnerConfig } from '../format/spinner-status.js'
 
 const theme = getTheme()
 const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
@@ -23,8 +24,9 @@ describe('formatTaskList', () => {
     ], theme).map(stripAnsi)
     const body = lines.join('\n')
     assert.ok(body.includes('◐ current thing'), `in_progress: ${body}`)
-    assert.ok(body.includes('☐ future thing'), `pending: ${body}`)
-    assert.ok(!body.includes('☒ done thing'), 'completed should NOT be item-by-item')
+    assert.ok(body.includes('○ future thing'), `pending: ${body}`)
+    assert.ok(body.includes('✓ done thing'), 'single completed folds into summary')
+    assert.ok(!body.includes('○ done thing'), 'completed is not a pending-style row')
   })
 
   it('renders a header with done/total count', () => {
@@ -35,13 +37,14 @@ describe('formatTaskList', () => {
     assert.ok(lines[0]!.includes('1/2'), `header: ${lines[0]}`)
   })
 
-  it('highlights in_progress with ANSI styling', () => {
+  it('colors the in_progress glyph without bolding the whole line', () => {
     const lines = formatTaskList([
       mk('1', 'a', 'pending'),
       mk('2', 'b', 'in_progress'),
     ], theme)
-    const inProgressLine = lines[2]!
-    assert.ok(/\x1B\[1m/.test(inProgressLine), 'in_progress line is bold')
+    const inProgressLine = lines.find(l => stripAnsi(l).includes('b'))!
+    assert.ok(/\x1B\[/.test(inProgressLine), 'in_progress line is colored')
+    assert.ok(!/\x1B\[1m/.test(inProgressLine), 'in_progress line is not bold')
   })
 
   it('shows in_progress even when many completed items fill the list', () => {
@@ -62,7 +65,7 @@ describe('formatTaskList', () => {
     const body = lines.join('\n')
     assert.ok(body.includes('◐ ACTIVE task'), `in_progress must be visible: ${body}`)
     assert.ok(body.includes('6 done'), `completed summary: ${body}`)
-    assert.ok(body.includes('☐ pending task'), `pending must be visible: ${body}`)
+    assert.ok(body.includes('○ pending task'), `pending must be visible: ${body}`)
   })
 
   it('collapses completed items to a single summary line', () => {
@@ -76,7 +79,7 @@ describe('formatTaskList', () => {
     const body = lines.join('\n')
     // Should have "3 done" not individual completed items
     assert.ok(body.includes('3 done'), `summary line: ${body}`)
-    assert.ok(!body.includes('☒ task 1'), `completed item should not be shown individually: ${body}`)
+    assert.ok(!body.includes('task 1'), `completed item should not be shown individually: ${body}`)
   })
 
   it('shows single completed item content in summary', () => {
@@ -124,7 +127,7 @@ describe('formatTaskList', () => {
     // 8 pending + 0 completed, maxRows=6 → budget=5, visible=4, +4 more
     const items = Array.from({ length: 8 }, (_, i) => mk(String(i), `task ${i}`, 'pending'))
     const lines = formatTaskList(items, theme, { maxRows: 6 }).map(stripAnsi)
-    assert.ok(lines.some(l => /\+\d+ more/.test(l)), `has +N more: ${lines.join(' | ')}`)
+    assert.ok(lines.some(l => l.includes('…(+')), `has …(+N): ${lines.join(' | ')}`)
     assert.ok(lines.length <= 6, `lines ${lines.length} <= 6`)
   })
 
@@ -143,7 +146,7 @@ describe('formatTaskList', () => {
     // New impl: in_progress visible, completed collapsed to "6 done"
     assert.ok(body.includes('IMPORTANT active'), `new impl must show active: ${body}`)
     // Old impl would show "completed 0..4" + "+3 more" — in_progress invisible
-    assert.ok(!body.includes('+3 more'), `no overflow when budget suffices: ${body}`)
+    assert.ok(!body.includes('…(+'), `no overflow when budget suffices: ${body}`)
   })
 
   // ── P0: Progress bar + in_progress prefix ──
@@ -179,7 +182,7 @@ describe('formatTaskList', () => {
     assert.ok(!header.includes('░'), 'no empty cells when all done')
   })
 
-  it('in_progress line has ▸ prefix for visual focus', () => {
+  it('in_progress uses a moon glyph and never a ▸ cursor', () => {
     const items = [
       mk('1', 'done task', 'completed'),
       mk('2', 'active task', 'in_progress'),
@@ -188,20 +191,32 @@ describe('formatTaskList', () => {
     const lines = formatTaskList(items, theme, { width: 80 })
     const activeLine = lines.find(l => stripAnsi(l).includes('active task'))
     const pendingLine = lines.find(l => stripAnsi(l).includes('pending task'))
-    assert.ok(activeLine && stripAnsi(activeLine).includes('▸'), 'in_progress has ▸ prefix')
+    const activePlain = stripAnsi(activeLine ?? '')
+    assert.ok(/[◐◓◑◒]/.test(activePlain), `in_progress has moon glyph: ${activePlain}`)
+    assert.ok(!activePlain.includes('▸'), 'in_progress has no ▸')
     assert.ok(pendingLine && !stripAnsi(pendingLine).includes('▸'), 'pending does NOT have ▸ prefix')
   })
 
-  it('can hide progress bar for Claude Code-style compact header', () => {
+  it('can hide progress bar for compact header', () => {
     const items = [
       mk('1', 'task A', 'completed'),
       mk('2', 'task B', 'pending'),
     ]
     const lines = formatTaskList(items, theme, { width: 80, showProgressBar: false }).map(stripAnsi)
     const header = lines[0]!
-    assert.ok(header.includes('◇ 任务 (1/2)'), `compact header: ${header}`)
+    assert.ok(header.includes('≡ 任务 · 1/2'), `compact header: ${header}`)
     assert.ok(!header.includes('█'), 'no filled progress cells')
     assert.ok(!header.includes('░'), 'no empty progress cells')
+  })
+
+  it('in_progress moon glyph advances with tick', () => {
+    resetSpinnerConfig()
+    const items = [mk('1', 'spinning', 'in_progress')]
+    const a = stripAnsi(formatTaskList(items, theme, { tick: 0 })[1]!)
+    const b = stripAnsi(formatTaskList(items, theme, { tick: 3 })[1]!)
+    assert.notEqual(a[1], b[1], `glyph should change: ${a} vs ${b}`)
+    assert.match(a, /◐/)
+    assert.match(b, /◓/)
   })
 })
 

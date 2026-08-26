@@ -5,8 +5,8 @@
  * `ActivityItem`，经 `ActivityStore` 合并后交给 `formatActivityBand` 渲染。
  * 各 panel-model（fleet-registry / team-panel-model / council-panel-model /
  * todo-store）只新增只读出口，不改内部结构。
- * 第五源 jobs（JobRegistry）形态不同——单行实时条 `formatJobsBar`，
- * 只投影不进 band 合并。
+ * 第五源 jobs（JobRegistry）可并进 chrome 活动带（与子代理同一套计数头 /
+ * 行 / 入口），`formatJobsBar` 仍作宽屏侧栏时的单行条逃生门。
  *
  * 关键设计：council 席位同时来自 FleetRegistry（workOrderId 形如
  * `council:seat-<authority>`，round 2 加 `-r2`，复议加 `-retry/-reconvene`
@@ -24,6 +24,8 @@ import { formatElapsed } from './worker-panel-model.js'
 import { color } from './engine/ansi.js'
 import type { RivetTheme } from './theme.js'
 import { displayWidth, truncateToDisplayWidth } from './width.js'
+import { brailleSpinnerFrame } from './braille-spinner.js'
+import { formatTokenCount, isReducedMotion } from './format/spinner-status.js'
 
 export type ActivityKind = 'agent' | 'council-seat' | 'team-task' | 'todo' | 'background-job'
 export type ActivityStatus = 'pending' | 'running' | 'done' | 'failed'
@@ -46,6 +48,8 @@ export interface ActivityItem {
   round?: number
   /** council 席位实际派发模型（council 帧补 fleet 拿不到的字段）。 */
   modelUsed?: string
+  /** 最新活动行（子代理 ⎿ 子行；缺失则无投影源）。 */
+  activity?: string
 }
 
 // ── council seat key 规范化（去重合并键）─────────────────────────────
@@ -71,7 +75,6 @@ export function councilRoundOf(workOrderId: string): number {
 function fleetStatusOf(status: FleetWorkerView['status']): ActivityStatus {
   switch (status) {
     case 'running': return 'running'
-    case 'passed':
     case 'completed': return 'done'
     default: return 'failed'
   }
@@ -127,6 +130,7 @@ export function projectFleet(workers: readonly FleetWorkerView[]): ActivityItem[
         elapsedMs: w.elapsedMs,
         subLabel: identity,
         round: councilRoundOf(w.workerId),
+        ...(w.activity ? { activity: w.activity } : {}),
       })
     } else {
       items.push({
@@ -140,6 +144,7 @@ export function projectFleet(workers: readonly FleetWorkerView[]): ActivityItem[
         tokenCount: w.tokenCount,
         elapsedMs: w.elapsedMs,
         subLabel: identity,
+        ...(w.activity ? { activity: w.activity } : {}),
       })
     }
   }
@@ -267,8 +272,9 @@ export function mergeActivityItems(groups: readonly (readonly ActivityItem[])[])
 /**
  * 聚合四个活动源、投影并归一合并的只读容器。调用方在每次 live 重绘前
  * set* 最新快照，project() 返回去重后的 ActivityItem[]。
- * 第五源 jobs（setJobs）走独立出口 projectJobs()——chrome 段以单行实时条
- * 渲染，不进 project()/band 合并（单行条与 band 行形态不同，见 formatJobsBar）。
+ * 第五源 jobs（setJobs）走独立出口 projectJobs()——调用方决定并进活动带
+ * 还是走 formatJobsBar 单行条。不进 project() 合并，避免侧栏/测试把 jobs
+ * 当成第四活动源。
  */
 export class ActivityStore {
   private fleetWorkers: readonly FleetWorkerView[] = []
@@ -311,14 +317,40 @@ export class ActivityStore {
 }
 
 // ── formatActivityBand（chrome 段单一渲染出口）──────────────────────
+//
+// 对标 dsh-tui activity-band：只放 running；>1 条时一条统一计数头；
+// 每 item 恒 1 行（后缀从右丢）；仅最新子代理/席一条 `⎿`；常驻 /tasks 尾行。
+// 完成项塌进 scrollback 沉淀卡与 /tasks，不占 chrome 高度。
 
-const GROUP_ORDER: ActivityGroupId[] = ['council', 'team', 'fleet', 'todo']
+const KIND_ORDER: readonly ActivityKind[] = [
+  'agent',
+  'team-task',
+  'council-seat',
+  'background-job',
+  'todo',
+]
+
+const KIND_NAMES: Record<ActivityKind, string> = {
+  agent: '子代理',
+  'team-task': '编队',
+  'council-seat': '席',
+  'background-job': '后台任务',
+  todo: '待办',
+}
+
+const ENTRY_PLAIN = '/tasks 管理'
+const INITIALIZING = '启动中…'
+const ASCII_SPIN = ['-', '\\', '|', '/'] as const
 
 export interface ActivityBandOptions {
-  /** item 行数上限（不含分组头与折叠行），超出折叠为 `…(+N)`。默认 6。 */
+  /** item 行数上限（不含计数头 / ⎿ / 尾行），超出折叠为 `…(+N)`。默认 6。 */
   maxRows?: number
   /** 行宽预算（display-width 口径）。默认 80。 */
   width?: number
+  /** spinner 帧计数（running 子代理/席字形随 tick 旋转）。 */
+  tick?: number
+  /** ascii 降级（spinner → `-`/`|` 轮转）。 */
+  ascii?: boolean
 }
 
 const WIDE = { ambiguousAsWide: true }
@@ -326,38 +358,51 @@ const WIDE = { ambiguousAsWide: true }
 /** 省略号自身的显示宽度：`…` 在 ambiguous-wide 口径下占 2 列，预留 1 列会溢出。 */
 const ELLIPSIS_W = displayWidth('…', WIDE)
 
-function truncate(text: string, max: number): string {
-  if (max <= 0) return ''
-  const flat = text.replace(/\s+/g, ' ').trimEnd()
-  if (displayWidth(flat, WIDE) <= max) return flat
-  return `${truncateToDisplayWidth(flat, Math.max(1, max - ELLIPSIS_W), WIDE)}…`
+function truncateToLiveWidth(text: string, max: number): string {
+  if (max <= 1) return '…'
+  if (displayWidth(text, WIDE) <= max) return text
+  return `${truncateToDisplayWidth(text, Math.max(1, max - ELLIPSIS_W), WIDE)}…`
 }
 
-function statusGlyph(status: ActivityStatus): string {
-  switch (status) {
-    case 'running': return '◐'
-    case 'done': return '✓'
-    case 'failed': return '✗'
-    default: return '○'
+function assembleSuffixes(base: string, suffixes: readonly string[], width: number): string {
+  let out = base
+  for (const suffix of suffixes) {
+    const candidate = `${out} · ${suffix}`
+    if (displayWidth(candidate, WIDE) > width - 1) break
+    out = candidate
   }
+  return truncateToLiveWidth(out, width)
 }
 
-function groupHeader(gid: ActivityGroupId, group: readonly ActivityItem[]): string {
-  const done = group.filter(i => i.status === 'done').length
-  const running = group.filter(i => i.status === 'running').length
-  const total = group.length
-  switch (gid) {
-    case 'council': return ` ◐ 议事会 · ${done}/${total} 席`
-    case 'team': return ` ◐ 编队 · ${running} 执行中`
-    case 'fleet': return ` ◐ ${running} 子代理执行中`
-    case 'todo': return ` ◐ 待办 · ${done}/${total}`
-    // jobs 正常不进 band（chrome 单行条独立渲染），此分支仅为联合类型完备兜底。
-    case 'jobs': return ` ⚙ ${running} 后台任务`
+function runningGlyph(opts: ActivityBandOptions): string {
+  const ascii = opts.ascii === true
+  if (isReducedMotion()) return ascii ? '-' : '◐'
+  const tick = opts.tick ?? 0
+  if (ascii) {
+    const idx = ((tick % ASCII_SPIN.length) + ASCII_SPIN.length) % ASCII_SPIN.length
+    return ASCII_SPIN[idx] ?? '-'
   }
+  return brailleSpinnerFrame(tick)
 }
 
-function itemTail(item: ActivityItem): string {
+function itemGlyph(item: ActivityItem, opts: ActivityBandOptions): string {
+  if (item.kind === 'team-task') return opts.ascii === true ? '~' : '⏳'
+  if (item.kind === 'background-job' || item.kind === 'todo') return '›'
+  return runningGlyph(opts)
+}
+
+function isAgentLike(item: ActivityItem): boolean {
+  return item.kind === 'agent' || item.kind === 'council-seat'
+}
+
+function itemSuffixes(item: ActivityItem): string[] {
   const parts: string[] = []
+  if (item.toolUseCount !== undefined && item.toolUseCount > 0) {
+    parts.push(`${item.toolUseCount} 工具`)
+  }
+  if (item.tokenCount !== undefined && item.tokenCount > 0) {
+    parts.push(`${formatTokenCount(item.tokenCount)} tok`)
+  }
   if (item.subLabel) parts.push(item.subLabel)
   if (item.kind === 'council-seat' && item.round !== undefined) parts.push(`r${item.round}`)
   if (item.kind === 'council-seat' && item.modelUsed) parts.push(item.modelUsed)
@@ -366,51 +411,80 @@ function itemTail(item: ActivityItem): string {
     const elapsed = formatElapsed(item.elapsedMs)
     if (elapsed) parts.push(elapsed)
   }
-  return parts.length > 0 ? `  ${parts.join(' · ')}` : ''
+  return parts
+}
+
+function formatHeader(items: readonly ActivityItem[]): string {
+  const parts: string[] = []
+  for (const kind of KIND_ORDER) {
+    const count = items.filter(item => item.kind === kind).length
+    if (count > 0) parts.push(`${count} ${KIND_NAMES[kind]}`)
+  }
+  return `◐ ${parts.join(' · ')}`
+}
+
+function projectItemRow(item: ActivityItem, opts: ActivityBandOptions, theme?: RivetTheme): string {
+  const width = Math.max(20, opts.width ?? 80)
+  const glyph = itemGlyph(item, opts)
+  const label = item.label.replace(/\s+/g, ' ').trim()
+  const base = theme === undefined
+    ? ` ${glyph} ${label}`
+    : ` ${color(glyph, theme.primary as string)} ${label}`
+  const suffixes = itemSuffixes(item)
+  const painted = theme === undefined
+    ? suffixes
+    : suffixes.map(suffix => color(suffix, theme.muted as string))
+  return assembleSuffixes(base, painted, width)
+}
+
+function projectAgentSubline(item: ActivityItem, opts: ActivityBandOptions): string | null {
+  const width = Math.max(20, opts.width ?? 80)
+  if (item.activity) {
+    const flat = item.activity.replace(/\s+/g, ' ').trim()
+    return truncateToLiveWidth(` ⎿ ${flat}`, width)
+  }
+  if (item.toolUseCount === 0) return truncateToLiveWidth(` ⎿ ${INITIALIZING}`, width)
+  return null
+}
+
+function recencyMs(item: ActivityItem): number {
+  return item.elapsedMs ?? Number.POSITIVE_INFINITY
 }
 
 interface BandLine {
   text: string
-  kind: 'header' | 'item' | 'overflow'
-  status?: ActivityStatus
+  kind: 'header' | 'item' | 'subline' | 'footer'
 }
 
-function buildEntries(items: readonly ActivityItem[], opts: ActivityBandOptions): BandLine[] {
-  const maxRows = Math.max(1, opts.maxRows ?? 6)
-  const width = Math.max(20, opts.width ?? 80)
-  const rule = Math.min(Math.max(40, width), 80)
+function buildEntries(items: readonly ActivityItem[], opts: ActivityBandOptions, theme?: RivetTheme): BandLine[] {
+  const active = items
+    .filter(item => item.status === 'running')
+    .slice()
+    .sort((a, b) => recencyMs(a) - recencyMs(b))
+  if (active.length === 0) return []
 
-  const byGroup = new Map<ActivityGroupId, ActivityItem[]>()
-  for (const item of items) {
-    const gid = (item.groupId ?? 'fleet') as ActivityGroupId
-    if (!byGroup.has(gid)) byGroup.set(gid, [])
-    byGroup.get(gid)!.push(item)
-  }
+  const width = Math.max(20, opts.width ?? 80)
+  const maxRows = Math.max(1, opts.maxRows ?? 6)
+  const shown = active.slice(0, maxRows)
+  const newestAgentIdx = active.findIndex(isAgentLike)
+  const paint = (text: string, key: 'muted' | 'dim'): string =>
+    theme === undefined ? text : color(text, theme[key] as string)
 
   const lines: BandLine[] = []
-  let shown = 0
-  let hidden = 0
-  for (const gid of GROUP_ORDER) {
-    const group = byGroup.get(gid)
-    if (!group || group.length === 0) continue
-    // 预算已耗尽：整组计入折叠计数，**不渲染组头**——只剩一个「3 子代理执行中」
-    // 而底下一行内容都没有，是纯噪音，还白占一行。
-    if (shown >= maxRows) {
-      hidden += group.length
-      continue
-    }
-    lines.push({ text: groupHeader(gid, group), kind: 'header' })
-    for (const item of group) {
-      if (shown >= maxRows) {
-        hidden++
-        continue
-      }
-      const head = ` ├─ ${statusGlyph(item.status)} ${item.label}`
-      lines.push({ text: truncate(`${head}${itemTail(item)}`, rule), kind: 'item', status: item.status })
-      shown++
+  if (active.length > 1) {
+    lines.push({ text: paint(truncateToLiveWidth(formatHeader(active), width), 'muted'), kind: 'header' })
+  }
+  for (let i = 0; i < shown.length; i++) {
+    const item = shown[i]!
+    lines.push({ text: projectItemRow(item, opts, theme), kind: 'item' })
+    if (i === newestAgentIdx) {
+      const subline = projectAgentSubline(item, opts)
+      if (subline !== null) lines.push({ text: paint(subline, 'dim'), kind: 'subline' })
     }
   }
-  if (hidden > 0) lines.push({ text: ` └─ …(+${hidden})`, kind: 'overflow' })
+  const overflow = active.length - shown.length
+  const entry = overflow > 0 ? `└ …(+${overflow}) · ${ENTRY_PLAIN}` : ENTRY_PLAIN
+  lines.push({ text: paint(truncateToLiveWidth(entry, width), 'dim'), kind: 'footer' })
   return lines
 }
 
@@ -420,19 +494,11 @@ export function buildActivityBandLines(items: readonly ActivityItem[], opts: Act
 }
 
 /**
- * 带色 band 行（chrome 段）：头/折叠 muted，running → primary，done → success，
- * failed → error，pending → muted。
+ * 带色 band 行（chrome 段）：计数头 muted，item 字形 primary / 后缀 muted，
+ * ⎿ 与入口尾行 dim。
  */
 export function formatActivityBand(items: readonly ActivityItem[], theme: RivetTheme, opts: ActivityBandOptions = {}): string[] {
-  return buildEntries(items, opts).map(l => {
-    if (l.kind === 'item') {
-      if (l.status === 'running') return color(l.text, theme.primary as string)
-      if (l.status === 'done') return color(l.text, theme.success as string)
-      if (l.status === 'failed') return color(l.text, theme.error as string)
-      return color(l.text, theme.muted as string)
-    }
-    return color(l.text, theme.muted as string)
-  })
+  return buildEntries(items, opts, theme).map(l => l.text)
 }
 
 /**
@@ -445,7 +511,7 @@ export function formatJobsBar(items: readonly ActivityItem[], theme: RivetTheme)
   if (running.length === 0) return null
   const maxElapsed = Math.max(...running.map(i => i.elapsedMs ?? 0))
   const elapsed = formatElapsed(maxElapsed)
-  const cmd = truncate(running[0]!.label, 36)
+  const cmd = truncateToLiveWidth(running[0]!.label.replace(/\s+/g, ' ').trim(), 36)
   const head = ` ⚙ ${running.length} 后台任务`
   const tail = elapsed ? ` · ${cmd} · ${elapsed}` : ` · ${cmd}`
   return color(head, theme.primary as string) + color(tail, theme.muted as string)

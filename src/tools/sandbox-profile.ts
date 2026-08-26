@@ -34,6 +34,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { writeGrantedRoots } from './path-grants.js'
@@ -44,6 +45,7 @@ export type SandboxBackendKind =
   | 'seatbelt'
   | 'bwrap'
   | 'firejail'
+  | 'landlock'
   | 'none'
 
 export interface SandboxContext {
@@ -57,6 +59,9 @@ export interface SandboxContext {
   which?: (bin: string) => boolean
   /** Override for tests. Reads /proc/version for WSL detection. */
   readProcVersion?: () => string | null
+  /** Override for tests. Probes Landlock launcher enforcement on this host
+   *  (default: lazy-load the optional dep + real `--probe`, cached). */
+  landlockUsable?: () => boolean
 }
 
 export interface SandboxDecision {
@@ -244,6 +249,75 @@ export function buildFirejailCommand(command: string, writableRoots: string[]): 
   ].join(' ')
 }
 
+/**
+ * Wrap a command for the Landlock launcher（`@huiliyi37/node-addon-landlock-run`
+ * 的预编译二进制，npm optional dep 自带、Linux 5.13+ 内核原生）。bwrap 需要
+ * unprivileged userns/mount 且多数发行版不预装——landlock 是零外部依赖的可用
+ * 性兜底 rung：self-restrict-then-exec，规则跨 execve 继承，沙箱内进程不可
+ * 卸载。文件效果 allow-list（拒绝方言 EACCES），网络不隔离（与 bwrap 档同
+ * 语义——network on）。旗标拼写是 launcher CLI 契约（--ro/--rw/--）的本地
+ * 镜像，与包内 grantArgs 同源；此处保持纯函数（不耦合 optional dep），
+ * 测试无包也能跑。
+ */
+export function buildLandlockCommand(
+  command: string,
+  writableRoots: string[],
+  launcher: string = defaultLandlockLauncherPath(),
+): string {
+  // Filter out non-existent directories — 未创建的 root 拒绝授予（bwrap 同因：
+  // 对不存在路径建规则只会得到启动失败）。
+  const validRoots = writableRoots.filter(p => { try { return existsSync(p) } catch { return false } })
+  const grants = [
+    '--ro', '/',
+    // /dev/null 必须可写——大量 CLI 把它当默认重定向目标（DSH 同款映射）。
+    ...validRoots.flatMap(root => ['--rw', root] as const),
+    '--rw', '/dev/null',
+  ]
+    .map(a => (a.startsWith('--') ? a : shSingleQuote(a)))
+    .join(' ')
+  return [
+    shSingleQuote(launcher),
+    grants,
+    '--',
+    `sh -c ${shSingleQuote(command)}`,
+  ].join(' ')
+}
+
+/** Landlock 探测结果缓存：probe 是 spawnSync 短命子进程，进程内只跑一次。 */
+let _landlockUsable: boolean | null = null
+
+/** 惰性加载 optional dep 并真实探测（missing binary / 未装 / 内核不强制 →
+ *  false，fail-closed 不裸奔声明）。require(esm) 在 Node 24 可同步加载纯
+ *  ESM 包；安装被跳过（非 Linux 平台包）时 require 抛错 → false。 */
+function defaultLandlockUsable(): boolean {
+  if (_landlockUsable !== null) return _landlockUsable
+  _landlockUsable = false
+  if (process.platform !== 'linux') return false
+  try {
+    // mammoth 同款可选依赖模式：不进 RUNTIME_BUNDLED，缺失时静默降级。
+    const req = createRequire(import.meta.url)
+    const mod = req('@huiliyi37/node-addon-landlock-run') as {
+      probe: (launcher?: string, opts?: { timeoutMs?: number }) => 'full' | 'partial' | 'unusable'
+      launcherPath: () => string
+    }
+    _landlockUsable = mod.probe(mod.launcherPath()) !== 'unusable'
+  } catch {
+    _landlockUsable = false
+  }
+  return _landlockUsable
+}
+
+/** 惰性解析 launcher 二进制路径（探测通过后 wrap 时复用；不可用时不会被调）。 */
+function defaultLandlockLauncherPath(): string {
+  try {
+    const req = createRequire(import.meta.url)
+    const mod = req('@huiliyi37/node-addon-landlock-run') as { launcherPath: () => string }
+    return mod.launcherPath()
+  } catch {
+    return 'landlock-run'
+  }
+}
+
 /** Detect whether the current Linux kernel is actually WSL. */
 export function detectWsl(readProcVersion: () => string | null, env: NodeJS.ProcessEnv): boolean {
   if (env.WSL_DISTRO_NAME) return true
@@ -280,10 +354,14 @@ export function selectSandboxBackend(ctx: SandboxContext): SandboxBackendKind {
     return which('sandbox-exec') ? 'seatbelt' : 'none'
   }
 
-  // Linux and WSL share the same backend selection (bwrap > firejail).
+  // Linux and WSL share the same backend selection (bwrap > firejail > landlock).
   if (platform === 'linux') {
     if (which('bwrap')) return 'bwrap'
     if (which('firejail')) return 'firejail'
+    // landlock 兜底 rung：npm optional dep 自带预编译二进制，不依赖系统预装
+    // ——消灭"没装 bwrap 就无沙箱"。探测真实 enforcement（防有 syscall 但
+    // 拒绝强制的内核），探测失败回 none（fail-closed）。
+    if ((ctx.landlockUsable ?? defaultLandlockUsable)()) return 'landlock'
     return 'none'
   }
 
@@ -485,6 +563,14 @@ export function wrapSandboxCommand(command: string, ctx: SandboxContext): Sandbo
         sandboxed: true,
         backend,
         note: 'firejail (read-only root, writable workspace + caches, network on)',
+        writableRoots,
+      }
+    case 'landlock':
+      return {
+        command: buildLandlockCommand(command, writableRoots),
+        sandboxed: true,
+        backend,
+        note: 'Landlock (kernel-native allow-list, read-only root, writable workspace + caches, network on)',
         writableRoots,
       }
     case 'none':

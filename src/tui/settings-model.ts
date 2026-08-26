@@ -141,10 +141,9 @@ export interface SettingsCategory {
 }
 
 export const APPROVAL_OPTIONS: readonly SettingsOption[] = [
-  { id: 'auto-safe', label: 'auto-safe — 只读工具免审批，写操作要确认' },
-  { id: 'manual', label: 'manual — 每个工具都要确认' },
-  { id: 'auto-accept', label: 'auto-accept — 写操作也免审批' },
-  { id: 'dangerously-skip-permissions', label: 'dangerously-skip-permissions — 全免（危险）' },
+  { id: 'auto-safe', label: '自动 — 低/无风险自动，高风险仍确认（auto-safe）' },
+  { id: 'manual', label: '监督 — 每个高风险工具都确认（manual）' },
+  { id: 'dangerously-skip-permissions', label: '全自动 — 免审批，写沙箱仍开（dangerously-skip-permissions）' },
 ]
 
 export const TOOL_PRESET_OPTIONS: readonly SettingsOption[] = [
@@ -686,7 +685,7 @@ function basicsCategory(): SettingsCategory {
       label: '审批模式',
       block: 'approval',
       effect: 'immediate',
-      hint: '控制工具执行的审批力度：auto-safe 低风险自动/高风险确认；dangerously-skip 全免（危险）',
+      hint: '监督 / 自动 / 全自动。wire：manual / auto-safe / dangerously-skip-permissions',
       options: APPROVAL_OPTIONS,
       get: d => d.basics.approval,
       set: (d, value) => withBasics(d, { approval: value }),

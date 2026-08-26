@@ -56,7 +56,7 @@ const proComputerUseEntry = existsSync('src/pro/computer-use/index.ts') ? ['src/
 export default defineConfig({
   // src/pro/index.ts 作为独立 entry：闭源模块产物 dist/pro/index.js，
   // 供 loadProModule 的 dist 形态候选路径加载（桌面 sidecar 运行时）。
-  entry: ['src/main.ts', 'src/workers/cpu-worker.ts', ...proEntry, ...proComputerUseEntry],
+  entry: ['src/main.ts', 'src/workers/cpu-worker.ts', 'src/agent/worker-process/child.ts', ...proEntry, ...proComputerUseEntry],
   format: ['esm'],
   target: 'node24',
   // Inject the package version as a build-time constant so the packaged sidecar

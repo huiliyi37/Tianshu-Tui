@@ -264,7 +264,22 @@ export const workerResultSchema = z.object({
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
   /** worker 自报的研究覆盖规模，可审计性计数；两 schema 必须同时加，否则 ingest 入口 zod strip 剥掉 */
   sourcesReviewed: z.number().int().min(0).optional(),
-  /** Why the worker failed — enables recovery-strategy differentiation. */
+  /**
+   * Why the worker failed — enables recovery-strategy differentiation.
+   *
+   * status × failureReason 消费矩阵（2026-08-25 收口）：
+   * - caller_aborted → status 'blocked'：父会话主动取消，消费方不得重试、不得按完成态展示。
+   * - timeout / max_turns → 预算耗尽：可续跑信号（hands-session 内部先续跑，
+   *   放弃后才对外；消费方见二者不应自动再续）。
+   * - worker_blocked → 环境/闸门阻断：环境中性，不计能力惩罚。
+   * - circuit_open → 熔断：应退避而非立即重试。
+   * - claim_conflict → 文件归属冲突：换文件集或等待，重试同一集合无意义。
+   * - json_parse / schema_mismatch → 结果契约失败：已走 salvage 恢复，恢复
+   *   内容可信度降级（parseErrorKind 细分）。
+   * - stalled → 空转（几乎无工具调用耗尽预算）：诊断信号，非普通失败。
+   * - worker_crash → 进程级崩溃：coordinator 兜底归类（classifyWorkerError）。
+   * - policy_short_circuit → 策略短路；unknown → 无法归类。
+   */
   failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'max_turns', 'stalled', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'policy_short_circuit', 'unknown']).optional(),
   /** Runtime metadata: 派发时的 objective，由 coordinator 盖章。
    *

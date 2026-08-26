@@ -15,7 +15,8 @@
  * 默认（无 env）：启动路径不回填；on-demand（repo_graph / repo_map）可回填。
  * RIVET_MERIDIAN_BACKFILL=1：启动也回填。
  */
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { readdirSync, statSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 import type { MeridianIndexer } from './meridian-indexer.js'
@@ -52,17 +53,21 @@ export interface MeridianBackfillOptions {
 }
 
 /** `git ls-files --cached --others --exclude-standard`（gitignore 感知）。
- *  非 git 目录/命令失败/超时 → null，调用方回退 readdir。 */
-function enumerateViaGit(cwd: string): string[] | null {
+ *  非 git 目录/命令失败/超时 → null，调用方回退 readdir。
+ *  异步 execFile——回填由 repo_* 工具 on-demand 触发（scout 蜂群高频路径），
+ *  同步 spawn 在冷盘/杀毒扫描的 Windows 上最多卡事件循环整个超时窗（3s），
+ *  是 /scout 卡死事故线上的同步阻塞点之一（2026-08-24）。 */
+const execFileAsync = promisify(execFile)
+
+async function enumerateViaGit(cwd: string): Promise<string[] | null> {
   try {
-    const output = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+    const { stdout } = await execFileAsync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
       cwd,
-      encoding: 'utf-8',
       timeout: GIT_LS_FILES_TIMEOUT_MS,
-      stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      maxBuffer: 32 * 1024 * 1024,
     })
-    return output.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+    return stdout.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
   } catch {
     return null
   }
@@ -145,7 +150,7 @@ export function scheduleMeridianBackfill(
 
   const maxFiles = backfillMaxFiles()
   const done = (async (): Promise<void> => {
-    const enumerated = enumerateViaGit(cwd) ?? enumerateViaReaddir(cwd)
+    const enumerated = (await enumerateViaGit(cwd)) ?? enumerateViaReaddir(cwd)
     // 与懒建完全同规则过滤（isMeridianIndexablePath 单一来源，防漂移）
     const candidates = sortByMtimeDesc(cwd, enumerated.filter(isMeridianIndexablePath)).slice(0, maxFiles)
     debugLog(`[meridian-backfill] start: ${candidates.length} candidates (cwd=${cwd}, reason=${reason})`)

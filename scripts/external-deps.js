@@ -53,6 +53,11 @@ export const SCAN_ALLOWED = [
   'mammoth',
   // 可选剪贴板原生库，未安装时静默回退 shell 链；当前无消费点，仅预留。
   '@mariozechner/clipboard',
+  // Landlock 沙箱 launcher（Linux 预编译二进制经其自身 optionalDeps 分发）。
+  // 惰性 require + probe fail-closed：未安装/非 Linux/内核不强制 → 探测失败
+  // → 回退 bwrap/firejail 之后的 none（sandbox-profile.ts defaultLandlockUsable）。
+  // 不进 RUNTIME_BUNDLED（桌面 mac/win 用不到 Linux 二进制）。
+  '@huiliyi37/node-addon-landlock-run',
 ]
 
 /** 一致性校验。默认校验本模块导出的清单；测试可注入伪造清单。 */

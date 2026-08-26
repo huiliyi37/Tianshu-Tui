@@ -173,7 +173,7 @@ export function taskIdFromActivity(workOrderId: string): string | undefined {
 }
 
 function fleetViewToPanelStatus(view: FleetWorkerView): TeamPanelStatus {
-  if (view.status === 'passed') return 'done'
+  if (view.status === 'completed') return 'done'
   if (view.status === 'blocked') return 'blocked'
   if (view.terminal) return 'failed' // failed / escalated
   return 'running'

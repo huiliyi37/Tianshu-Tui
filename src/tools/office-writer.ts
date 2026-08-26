@@ -41,7 +41,7 @@ function markdownToHtml(md: string): string {
     const line = raw.trimEnd()
 
     // Fenced code block
-    if (/^```/.test(line) || /^~~~/.test(line)) {
+    if (line.startsWith('```') || line.startsWith('~~~')) {
       if (!inCodeBlock) {
         inCodeBlock = true
         codeBuf = []
@@ -71,11 +71,11 @@ function markdownToHtml(md: string): string {
     }
 
     // Unordered list item
-    const ulMatch = line.match(/^[\*\-\+]\s+(.+)/)
+    const ulMatch = line.match(/^[*\-+]\s+(.+)/)
     if (ulMatch) {
       out.push('<ul>')
-      while (i < lines.length && /^[\*\-\+]\s+/.test(lines[i]!.trimEnd())) {
-        out.push(`<li>${inlineMd(lines[i]!.trimEnd().replace(/^[\*\-\+]\s+/, ''))}</li>`)
+      while (i < lines.length && /^[*\-+]\s+/.test(lines[i]!.trimEnd())) {
+        out.push(`<li>${inlineMd(lines[i]!.trimEnd().replace(/^[*\-+]\s+/, ''))}</li>`)
         i++
       }
       out.push('</ul>')
@@ -83,11 +83,11 @@ function markdownToHtml(md: string): string {
     }
 
     // Ordered list item
-    const olMatch = line.match(/^\d+[\.)]\s+(.+)/)
+    const olMatch = line.match(/^\d+[.)]\s+(.+)/)
     if (olMatch) {
       out.push('<ol>')
-      while (i < lines.length && /^\d+[\.)]\s+/.test(lines[i]!.trimEnd())) {
-        out.push(`<li>${inlineMd(lines[i]!.trimEnd().replace(/^\d+[\.)]\s+/, ''))}</li>`)
+      while (i < lines.length && /^\d+[.)]\s+/.test(lines[i]!.trimEnd())) {
+        out.push(`<li>${inlineMd(lines[i]!.trimEnd().replace(/^\d+[.)]\s+/, ''))}</li>`)
         i++
       }
       out.push('</ol>')

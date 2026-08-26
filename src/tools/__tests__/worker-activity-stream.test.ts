@@ -146,11 +146,11 @@ describe('createDelegationActivityMapper', () => {
 
     map(ev({ workOrderId: 'wo_a', kind: 'text', detail: 'tail' }))
     const [timer] = scheduler.handles
-    map.finish({ workOrderId: 'wo_a', parentToolId: 'p', status: 'passed', summary: 'done' })
+    map.finish({ workOrderId: 'wo_a', parentToolId: 'p', status: 'completed', summary: 'done' })
 
     assert.deepEqual(acts.map(a => [a.status, a.eventKind, a.eventDetail]), [
       ['running', 'text', 'tail'],
-      ['passed', undefined, undefined],
+      ['completed', undefined, undefined],
     ])
     assert.equal(scheduler.size, 0)
     scheduler.runQueued(timer!)
@@ -238,7 +238,7 @@ describe('createDelegationActivityMapper', () => {
 
     map(ev({ workOrderId: 'team:planner-tianquan', attemptId: 'attempt-1', kind: 'tool_use' }))
     map.finish({
-      workOrderId: 'team:planner-tianquan', parentToolId: 'p', attemptId: 'attempt-1', status: 'passed',
+      workOrderId: 'team:planner-tianquan', parentToolId: 'p', attemptId: 'attempt-1', status: 'completed',
     })
     map(ev({ workOrderId: 'team:planner-tianquan', attemptId: 'attempt-2', kind: 'tool_use' }))
     map.finish({
@@ -247,7 +247,7 @@ describe('createDelegationActivityMapper', () => {
 
     assert.deepEqual(acts.map(a => [a.attemptId, a.status]), [
       ['attempt-1', 'running'],
-      ['attempt-1', 'passed'],
+      ['attempt-1', 'completed'],
       ['attempt-2', 'running'],
       ['attempt-2', 'failed'],
     ])

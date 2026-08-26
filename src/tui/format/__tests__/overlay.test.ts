@@ -158,7 +158,7 @@ describe('renderTasks: per-worker 舰队', () => {
         done: 1,
         failed: 0,
         running: 0,
-        workers: [{ workerId: 'wo_x', shortLabel: 'X', profile: 'patcher', status: 'passed', elapsedMs: 1200 }],
+        workers: [{ workerId: 'wo_x', shortLabel: 'X', profile: 'patcher', status: 'completed', elapsedMs: 1200 }],
       }],
       filter: 'completed',
       completedCount: 1,

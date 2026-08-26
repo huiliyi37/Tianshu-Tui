@@ -768,6 +768,7 @@ export function buildManagedAgent(
     // PlusMenu — star domain (delegate to the live agent).
     setSessionDomain: (domain) => agent.setSessionDomain(domain),
     resetSessionDomain: () => agent.resetSessionDomain(),
+    restoreAutoResolvedDomain: (domain) => agent.restoreAutoResolvedDomain(domain),
     getSessionDomain: () => agent.getSessionDomain(),
     // PlusMenu — skills (per-session discovery filter on the live agent).
     setDisabledSkills: (names) => agent.setDisabledSkills(names),
@@ -1092,7 +1093,7 @@ async function delegateWorkerOnCoordinator(
         ...(identity.attemptId ? { attemptId: identity.attemptId } : {}),
         ...(identity.parentAttemptId ? { parentAttemptId: identity.parentAttemptId } : {}),
         profile,
-        status: result.status,
+        status: result.status === 'passed' ? 'completed' : result.status,
         progressLine: result.summary ? result.summary.slice(0, 120) : undefined,
         failureReason: result.failureReason,
         summary: buildDelegateSummary(input, run),
@@ -1115,7 +1116,7 @@ async function delegateWorkerOnCoordinator(
         workOrderId: opts.workerId,
         parentToolId: opts.workerId,
         profile,
-        status: run.status === 'skipped' ? 'blocked' : 'passed',
+        status: run.status === 'skipped' ? 'blocked' : 'completed',
         summary: buildDelegateSummary(input, run),
       })
     }

@@ -1,4 +1,6 @@
-import { spawn, execFileSync } from 'child_process'
+import { spawn, execFile } from 'child_process'
+import { promisify } from 'node:util'
+const execFileAsync = promisify(execFile)
 import { existsSync } from 'fs'
 import { spawnHidden } from './spawn-hidden.js'
 import { createReadStream } from 'fs'
@@ -289,45 +291,66 @@ async function registerGrepFilesFromOutput(content: string, cwd: string, session
  * 结果缓存到 rgResolvedPath，同进程内不重复探活。
  */
 let rgResolvedPath: string | null | undefined
+let rgResolveInFlight: Promise<string | null> | undefined
 
-function resolveRgPath(): string | null {
+/** 清空 rg 解析缓存（测试用）——置回未解析态，下次调用重新探活。
+ *  模块级缓存跨测试存活：顺序依赖的测试（如"rg 不可用"回退路径）必须在
+ *  开头清缓存、结尾恢复，否则前面测试解析出的路径会污染断言（2026-08-25
+ *  grep.test.ts slow-fallback 顺序依赖失败）。 */
+export function resetRgResolvedPath(): void {
+  rgResolvedPath = undefined
+  rgResolveInFlight = undefined
+}
+
+/** 异步探活版 rg 解析——execFile 探 --version 不占事件循环。同步 execFileSync
+ *  探活（5s 超时）是蜂群冷启动路径上的阻塞点：冷盘/杀毒扫描的 Windows 上
+ *  单次即卡满超时窗（2026-08-24 /scout 卡死事故线）。结果仍进程级缓存
+ *  （成功与失败都缓存）；并发首调共享同一 in-flight promise。 */
+async function resolveRgPath(): Promise<string | null> {
   if (rgResolvedPath !== undefined) return rgResolvedPath
+  if (rgResolveInFlight) return rgResolveInFlight
+  rgResolveInFlight = (async () => {
+    const ext = process.platform === 'win32' ? '.exe' : ''
+    const candidates: { path: string; label: string }[] = []
 
-  const ext = process.platform === 'win32' ? '.exe' : ''
-  const candidates: { path: string; label: string }[] = []
-
-  // 1. RIVET_RIPGREP_PATH（显式覆盖，不探活——用户说啥是啥）
-  const override = process.env.RIVET_RIPGREP_PATH
-  if (override) {
-    rgResolvedPath = override
-    return override
-  }
-
-  // 2. 自带 rg（RIVET_BUNDLED_RIPGREP_DIR，桌面端打包注入）
-  const bundledDir = process.env.RIVET_BUNDLED_RIPGREP_DIR
-  if (bundledDir) {
-    const bundledRg = bundledDir + require('path').sep + 'rg' + ext
-    if (existsSync(bundledRg)) candidates.push({ path: bundledRg, label: 'bundled' })
-  }
-
-  // 3. 系统 PATH 的 rg（裸 'rg'，spawn 时由 PATH 解析）
-  candidates.push({ path: 'rg', label: 'system' })
-
-  // 探活：跑 rg --version，第一个成功的即为结果。
-  for (const c of candidates) {
-    try {
-      execFileSync(c.path, ['--version'], { encoding: 'utf8', timeout: 5_000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-      debugLog(`[grep] rg resolved: ${c.label} (${c.path})`)
-      rgResolvedPath = c.path
-      return c.path
-    } catch (err) {
-      debugLog(`[grep] rg candidate ${c.label} (${c.path}) failed probe: ${err instanceof Error ? err.message : String(err)}`)
+    // 1. RIVET_RIPGREP_PATH（显式覆盖，不探活——用户说啥是啥）
+    const override = process.env.RIVET_RIPGREP_PATH
+    if (override) {
+      rgResolvedPath = override
+      return override
     }
-  }
 
-  debugLog('[grep] no usable rg found after probing all candidates')
-  rgResolvedPath = null
-  return null
+    // 2. 自带 rg（RIVET_BUNDLED_RIPGREP_DIR，桌面端打包注入）
+    const bundledDir = process.env.RIVET_BUNDLED_RIPGREP_DIR
+    if (bundledDir) {
+      const bundledRg = bundledDir + require('path').sep + 'rg' + ext
+      if (existsSync(bundledRg)) candidates.push({ path: bundledRg, label: 'bundled' })
+    }
+
+    // 3. 系统 PATH 的 rg（裸 'rg'，spawn 时由 PATH 解析）
+    candidates.push({ path: 'rg', label: 'system' })
+
+    // 探活：跑 rg --version，第一个成功的即为结果。
+    for (const c of candidates) {
+      try {
+        await execFileAsync(c.path, ['--version'], { timeout: 5_000, windowsHide: true })
+        debugLog(`[grep] rg resolved: ${c.label} (${c.path})`)
+        rgResolvedPath = c.path
+        return c.path
+      } catch (err) {
+        debugLog(`[grep] rg candidate ${c.label} (${c.path}) failed probe: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
+    debugLog('[grep] no usable rg found after probing all candidates')
+    rgResolvedPath = null
+    return null
+  })()
+  try {
+    return await rgResolveInFlight
+  } finally {
+    rgResolveInFlight = undefined
+  }
 }
 
 async function tryRipgrep(
@@ -350,6 +373,8 @@ async function tryRipgrep(
   }
 
   return new Promise((resolve) => {
+    // 执行器体内 await rg 解析（异步探活）——包 async IIFE，resolve 闭包共用。
+    void (async () => {
     const args = [
       '--no-heading',
       '--line-number',
@@ -369,7 +394,7 @@ async function tryRipgrep(
 
     let child: ReturnType<typeof spawn>
     try {
-      const rgBin = resolveRgPath()
+      const rgBin = await resolveRgPath()
       if (!rgBin) {
         debugLog('[grep] no usable rg resolved — falling back to native search')
         resolve(null)
@@ -482,6 +507,7 @@ async function tryRipgrep(
         resolve({ content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
       })()
     })
+  })()
   })
 }
 

@@ -100,7 +100,7 @@ export function createTelemetryWriter(cwd: string, sessionId?: string): Telemetr
       }).catch(() => {})
     },
     async flush() {
-      await Promise.allSettled([...pendingWrites])
+      await Promise.allSettled(pendingWrites)
     },
   }
 }

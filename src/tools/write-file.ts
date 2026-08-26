@@ -173,7 +173,7 @@ export const WRITE_FILE_TOOL: Tool = {
     // 同一路径）。delegated 落地仅支持整篇覆盖 —— append 始终本地 appendFile。
     if (append) {
       if (fileExists) {
-        trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'write', toolCallId: params.toolUseId ?? 'write_file' })
+        await trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'write', toolCallId: params.toolUseId ?? 'write_file' })
       }
       const eol = fileExists ? await detectFileEol(filePath) : null
       const chunk = applyEol(content, chooseEol(filePath, eol, getTargetEol()))
@@ -213,7 +213,7 @@ export const WRITE_FILE_TOOL: Tool = {
 
     if (fileExists) {
       const relPath = relative(params.cwd, filePath)
-      trackFileChange(params.cwd, { filePath: relPath, action: 'write', toolCallId: params.toolUseId ?? 'write_file' })
+      await trackFileChange(params.cwd, { filePath: relPath, action: 'write', toolCallId: params.toolUseId ?? 'write_file' })
     }
 
     // Staleness check: warn if file was read earlier and has since been modified
@@ -258,7 +258,7 @@ export const WRITE_FILE_TOOL: Tool = {
           rollbackMsg = '自动回滚失败。'
         }
       } else {
-        const restored = restoreLatestBackup(params.cwd, relPath, params.sessionId)
+        const restored = await restoreLatestBackup(params.cwd, relPath, params.sessionId)
         rollbackMsg = restored ? '更改已自动回滚。' : '自动回滚失败。'
       }
       const fails = incrementEditFailCount(filePath)

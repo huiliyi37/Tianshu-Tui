@@ -22,6 +22,9 @@ export type StreamJsonEvent =
       type: 'worker'
       work_order_id: string
       parent_tool_id: string
+      /** 'passed' 是 2026-08-26 词汇统一前的历史值（新 CLI 只发 'completed'，
+       *  headless 直传 DelegationActivity.status）——为解析旧录制流保留，
+       *  勿当死代码清理。 */
       status: 'running' | 'passed' | 'completed' | 'failed' | 'blocked' | 'escalated'
       profile?: string
       authority?: string

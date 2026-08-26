@@ -72,7 +72,7 @@ export interface ResolvedProbeEndpoints {
 export function resolveProbeEndpoints(baseUrl: string, providerName?: string): ResolvedProbeEndpoints {
   const base = normalizeBaseUrl(baseUrl)
   const override = providerName ? PROVIDER_ENDPOINT_MAP[providerName] : undefined
-  const paths: EndpointPaths = { ...DEFAULT_ENDPOINT_PATHS, ...(override ?? {}) }
+  const paths: EndpointPaths = { ...DEFAULT_ENDPOINT_PATHS, ...override }
   const versioned = /\/v\d+$/i.test(base)
   const prefix = versioned ? '' : '/v1'
   return {

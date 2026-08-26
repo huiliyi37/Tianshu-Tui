@@ -217,7 +217,7 @@ test('顶框嵌 wordmark，版本号贴右', () => {
   assert.ok(head.includes('天枢'), '中文品牌名')
   assert.ok(head.includes('T I Ā N S H Ū'), '宽字距拼音')
   assert.ok(head.includes('Code'), '英文后缀')
-  assert.ok(/v2\.15\.1 ─╮$/.test(head), `版本号贴右边线: "${head}"`)
+  assert.ok(head.endsWith('v2.15.1 ─╮'), `版本号贴右边线: "${head}"`)
 })
 
 test('wordmark 在版本号过长时逐级降级', () => {
@@ -230,7 +230,7 @@ test('模型 / effort / 权限模式 / 路径 / 会话号各就其位', () => {
   const box = boxOf(render({ columns: 100, reasoningEffort: 'high', numericId: 7281 }))
   assert.ok(strip(box[4]!).includes('deepseek-v4'), '配置行含模型')
   assert.ok(strip(box[4]!).includes('◎high'), '配置行含 effort')
-  assert.ok(strip(box[4]!).includes('auto-safe'), '配置行含权限模式')
+  assert.ok(strip(box[4]!).includes('自动'), '配置行含对外权限主词')
   assert.ok(strip(box[5]!).includes('/tmp/x/proj'), '路径行含 cwd')
   assert.ok(strip(box[5]!).includes('#7281'), '路径行优先展示友好会话号')
   assert.ok(!strip(box[5]!).includes('878e2108'), '有 numericId 时不再显示会话前缀')
@@ -241,10 +241,10 @@ test('无 numericId 时路径行回落到会话前缀', () => {
   assert.ok(strip(box[5]!).includes('8938a88f'))
 })
 
-test('yolo 模式与 auto effort 正常显示', () => {
+test('全自动档与 auto effort 正常显示', () => {
   const box = boxOf(render({ columns: 100, approvalMode: 'dangerously-skip-permissions', reasoningEffort: 'auto' }))
   const config = strip(box[4]!)
-  assert.ok(config.includes('yolo'), 'dangerously-skip-permissions 简写为 yolo')
+  assert.ok(config.includes('全自动'), 'dangerously-skip-permissions 对外显示全自动')
   assert.ok(config.includes('◎auto'))
 })
 
@@ -265,18 +265,21 @@ test('home 下的 cwd 缩写为 ~', () => {
 
 test('上手行按框宽贪心装填，窄框只留装得下的条目', () => {
   const wide = strip(boxOf(render({ columns: 100 }))[7]!)
-  assert.ok(wide.includes('/init') && wide.includes('/domain') && wide.includes('/help'), '宽框斜杠命令齐上')
-  assert.ok(wide.includes('ctrl+p'), '宽框露出独立的 ctrl+p 引导')
+  assert.ok(wide.includes('/model') && wide.includes('/init') && wide.includes('/domain') && wide.includes('/help'), '宽框斜杠命令齐上')
+  assert.ok(wide.includes('中途会缓存碎'), '宽框标出中途 /model 会打碎前缀缓存')
+  assert.ok(!wide.includes('ctrl+p'), '首屏不再推销命令面板')
+  const standard = strip(boxOf(render({ columns: 80 }))[7]!)
+  assert.ok(standard.includes('/model') && standard.includes('中途会缓存碎'), '80 列也必须看得到切模型入口与缓存警告')
   const narrow = strip(boxOf(render({ columns: 56 }))[7]!)
-  assert.ok(narrow.includes('/init'), '窄框保留第一条')
+  assert.ok(narrow.includes('/model'), '窄框保留第一条（/model）')
   assert.ok(!narrow.includes('/help'), '装不下的条目整条略去，不截半句')
 })
 
-test('ctrl+p 与斜杠命令同走 brandColor，说明走 muted', () => {
+test('/model 与斜杠命令同走 brandColor，说明走 muted', () => {
   const joined = render({ columns: 120 }).join('\n')
-  assert.ok(joined.includes(color('ctrl+p', theme.brandColor)), 'ctrl+p 用 brandColor，与 /init 同档')
+  assert.ok(joined.includes(color('/model', theme.brandColor)), '/model 用 brandColor，与 /init 同档')
   assert.ok(joined.includes(color('/init', theme.brandColor)), '/init 用 brandColor')
-  assert.ok(joined.includes(color('命令面板', theme.muted)), '说明文字仍走 muted')
+  assert.ok(joined.includes(color('切换模型（中途会缓存碎）', theme.muted)), '说明文字仍走 muted')
 })
 
 // ── 降级 ────────────────────────────────────────────────────────────

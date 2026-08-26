@@ -117,7 +117,7 @@ interface FieldAudit {
 function scanFieldConsumers(fieldName: string, excludeFiles: string[]): string[] {
   const consumers: string[] = []
   const dotPattern = new RegExp(`\\.${fieldName}\\b`)
-  const bracketPattern = new RegExp(`\\[['\"\`]${fieldName}['\"\`]\\]`)
+  const bracketPattern = new RegExp(`\\[['"\`]${fieldName}['"\`]\\]`)
   for (const file of productionFiles) {
     if (excludeFiles.some(e => file.endsWith(e))) continue
     const content = readFileSync(file, 'utf8')

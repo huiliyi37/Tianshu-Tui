@@ -50,7 +50,7 @@ export function isDiffContent(text: string): boolean {
   const lines = text.split('\n')
   for (const line of lines.slice(0, 20)) {
     if (!line) continue
-    if (/^diff --git/.test(line)) { diffSignals += 2; continue }
+    if (line.startsWith('diff --git')) { diffSignals += 2; continue }
     if (/^(---|\+\+\+)\s/.test(line)) { diffSignals++; continue }
     if (/^@@[^@]+@@/.test(line)) { hasHunk = true; diffSignals++; continue }
   }

@@ -214,7 +214,7 @@ function bindPackedWrapper(selfPath: string, nativePath: string): any {
  */
 function bindNativeBinding(RealDatabase: any, nativePath: string): any {
   function BoundDatabase(this: unknown, filename?: unknown, options?: Record<string, unknown>) {
-    return new RealDatabase(filename, { nativeBinding: nativePath, ...(options ?? {}) })
+    return new RealDatabase(filename, { nativeBinding: nativePath, ...options })
   }
   BoundDatabase.prototype = RealDatabase.prototype
   return BoundDatabase

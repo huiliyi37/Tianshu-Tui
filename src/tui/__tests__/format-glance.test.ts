@@ -107,14 +107,14 @@ describe('formatGlanceBar', () => {
     assert.ok(plain.includes('160k/200k'), `has Xk/Yk: ${plain}`)
   })
 
-  // 高占用成本提示：≥70% 常驻建议开新会话（压缩成本高），与 HANDOFF_NUDGE_RATIO 同档。
-  it('shows new-session hint at ≥70% context (full + compact), hides below', () => {
-    const over = stripAnsi(formatGlanceBar({ width: 140, estimatedTokens: 146_000, maxTokens: 200_000 }, theme))
-    assert.ok(over.includes('上下文偏高建议开新会话'), `full density 73% shows hint: ${over}`)
-    const under = stripAnsi(formatGlanceBar({ width: 140, estimatedTokens: 104_000, maxTokens: 200_000 }, theme))
-    assert.ok(!under.includes('建议新会话'), `52% hides hint: ${under}`)
-    const compactOver = stripAnsi(formatGlanceBar({ width: 140, density: 'compact', estimatedTokens: 146_000, maxTokens: 200_000 }, theme))
-    assert.ok(compactOver.includes('建议新会话'), `compact 73% shows short hint: ${compactOver}`)
+  // 高占用成本提示：≥ HANDOFF_NUDGE_RATIO（60%）常驻建议开新会话，与交接提醒同档。
+  it('shows new-session hint at ≥60% context (full + compact), hides below', () => {
+    const over = stripAnsi(formatGlanceBar({ width: 140, estimatedTokens: 120_000, maxTokens: 200_000 }, theme))
+    assert.ok(over.includes('上下文偏高建议开新会话'), `full density 60% shows hint: ${over}`)
+    const under = stripAnsi(formatGlanceBar({ width: 140, estimatedTokens: 118_000, maxTokens: 200_000 }, theme))
+    assert.ok(!under.includes('建议新会话'), `59% hides hint: ${under}`)
+    const compactOver = stripAnsi(formatGlanceBar({ width: 140, density: 'compact', estimatedTokens: 120_000, maxTokens: 200_000 }, theme))
+    assert.ok(compactOver.includes('建议新会话'), `compact 60% shows short hint: ${compactOver}`)
   })
 
   it('renders 1.0M for 1M-context windows instead of 1000k', () => {
@@ -201,8 +201,8 @@ describe('formatGlanceRight density（Wave 2 减密分档）', () => {
     assert.ok(plain.includes('◧25%'), `上下文百分比保留: ${plain}`)
     assert.ok(plain.includes('1m5s'), '耗时保留')
     assert.ok(!plain.includes('¥'), 'cost 收起')
-    assert.ok(plain.includes('◇2/5'), 'todo 徽章（compact 档 ◇done/total）显示')
-    assert.ok(!plain.includes('☐'), '分态计数仅 full 档')
+    assert.ok(plain.includes('≡2/5'), 'todo 徽章（compact 档 ≡done/total）显示')
+    assert.ok(!plain.includes('○2'), '分态计数仅 full 档')
     assert.ok(!plain.includes('50k'), 'token 绝对值收起（只留百分比）')
   })
 
@@ -211,7 +211,7 @@ describe('formatGlanceRight density（Wave 2 减密分档）', () => {
     assert.ok(plain.includes('⚡80%'), 'cache 显示')
     assert.ok(plain.includes('¥1.23'), 'cost 显示')
     assert.ok(plain.includes('◎high'), 'effort 显示')
-    assert.ok(plain.includes('◐1 ☐2 ☒2'), 'todo 分态计数徽章显示')
+    assert.ok(plain.includes('◐1 ○2 ✓2'), 'todo 分态计数徽章显示')
   })
 
   it('compact 档缺 token 数据时不渲染 ◧', () => {
@@ -223,7 +223,7 @@ describe('formatGlanceRight density（Wave 2 减密分档）', () => {
 describe('formatPermissionModeLine（输入框下方权限模式行，CC parity）', () => {
   it('默认 auto-safe，含 shift+tab 提示', () => {
     const plain = stripAnsi(formatPermissionModeLine({}, theme))
-    assert.ok(plain.includes('⏵ auto-safe'), `should show auto-safe: ${plain}`)
+    assert.ok(plain.includes('⏵ 自动'), `should show 自动: ${plain}`)
     assert.ok(
       plain.includes('(shift+tab plan · /ask 问答)'),
       `should keep the shortcut hint compact: ${plain}`,
@@ -246,13 +246,19 @@ describe('formatPermissionModeLine（输入框下方权限模式行，CC parity�
     assert.ok(plain.includes('draft-1.md'), `draft path: ${plain}`)
   })
 
-  it('yolo 模式显示缩写标签', () => {
+  it('全自动显示对外主词', () => {
     const plain = stripAnsi(formatPermissionModeLine({ approvalMode: 'dangerously-skip-permissions' }, theme))
-    assert.ok(plain.includes('⏵ yolo'), `should abbreviate: ${plain}`)
+    assert.ok(plain.includes('⏵ 全自动'), `should show 全自动: ${plain}`)
   })
 
-  it('manual 模式原样显示', () => {
+  it('监督显示对外主词', () => {
     const plain = stripAnsi(formatPermissionModeLine({ approvalMode: 'manual' }, theme))
-    assert.ok(plain.includes('⏵ manual'))
+    assert.ok(plain.includes('⏵ 监督'))
+  })
+
+  it('auto-accept 对外显示自动，不显示全自动', () => {
+    const plain = stripAnsi(formatPermissionModeLine({ approvalMode: 'auto-accept' }, theme))
+    assert.ok(plain.includes('⏵ 自动'), `should show 自动: ${plain}`)
+    assert.ok(!plain.includes('全自动'), `must not impersonate 全自动: ${plain}`)
   })
 })

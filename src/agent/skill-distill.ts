@@ -145,7 +145,7 @@ function extractKeywords(objective: string | null | undefined, filesModified: st
 
 function buildDraftKey(steps: SkillDraftStep[], filesModified: string[]): string {
   const sig = steps.map(s => s.phase).join('>')
-    + '|' + [...filesModified.map(fileStem)].sort().join(',')
+    + '|' + filesModified.map(fileStem).sort().join(',')
   return createHash('sha256').update(sig).digest('hex').slice(0, 12)
 }
 

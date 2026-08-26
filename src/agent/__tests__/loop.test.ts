@@ -2125,27 +2125,34 @@ describe('AgentLoop — plan mode lifecycle (2026-07-03 缺陷复盘)', () => {
     return { agent, engine, cwd, cleanup: () => rmSync(cwd, { recursive: true, force: true }) }
   }
 
-  it('enterPlanMode pins writing-plans skill; exitPlanMode releases it', () => {
+  it('enterPlanMode mounts no skill pin and unmounts the <plan-executing> block on re-entry', () => {
     const { agent, engine, cleanup } = makeAgent()
     try {
+      // Approve a plan first to mount the execution advisory…
       agent.enterPlanMode()
-      assert.ok(engine.getInvokedSkillNames().includes('writing-plans'), 'skill pinned on enter')
-      agent.exitPlanMode()
+      agent.setActivePlan({ slug: 'p', title: 'P' })
+      assert.ok(engine.getPlanExecutingBlock(), 'execution advisory mounted on approval')
+      // …then re-enter plan mode: no skill pin, and the advisory unmounts
+      // (execution completion has no mechanical signal — re-entry is the
+      // documented unmount point).
+      agent.enterPlanMode()
       assert.ok(
         !engine.getInvokedSkillNames().includes('writing-plans'),
-        'skill must be released on exit — leaving it would re-inject the planning skill into every execution turn',
+        'no skill pin on enter — native <plan-mode> block replaced the writing-plans skill',
       )
+      assert.equal(engine.getPlanExecutingBlock(), null, 're-entering plan mode unmounts the execution advisory')
     } finally {
       cleanup()
     }
   })
 
-  it('setActivePlan (approval) also releases the writing-plans skill', () => {
+  it('setActivePlan (approval) mounts the native execution advisory and leaves plan mode', () => {
     const { agent, engine, cleanup } = makeAgent()
     try {
       agent.enterPlanMode()
       agent.setActivePlan({ slug: 'p', title: 'P' })
-      assert.ok(!engine.getInvokedSkillNames().includes('writing-plans'))
+      assert.ok(!engine.getInvokedSkillNames().includes('writing-plans'), 'no writing-plans pin remains')
+      assert.ok(engine.getPlanExecutingBlock()?.includes('<plan-executing>'), 'native execution advisory mounted')
       assert.equal(agent.getPlanModeState(), 'off')
       assert.equal(agent.getActivePlanFilePath(), null)
     } finally {

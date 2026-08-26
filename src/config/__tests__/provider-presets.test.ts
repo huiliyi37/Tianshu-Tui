@@ -35,4 +35,16 @@ describe('provider presets', () => {
     assert.equal(pro?.reasoningEffort, 'high')
     assert.equal(flash?.reasoningEffort, 'medium')
   })
+
+  it('deepseek-v4-flash-vision-exp: 1M 上下文 + 视觉 + 定价与 flash 同档', () => {
+    const deepseek = cloneProviderPreset('deepseek')
+    const vision = deepseek.models.find(m => m.id === 'deepseek-v4-flash-vision-exp')
+    assert.ok(vision, 'vision-exp 必须在 deepseek 预设模型列表')
+    assert.equal(vision.contextWindow, 1_000_000)
+    assert.equal(vision.maxTokens, 384_000)
+    assert.equal(vision.supportsVision, true)
+    assert.deepEqual(vision.pricing, { input: 1, output: 2, cacheRead: 0.02, cacheWrite: 1 })
+    assert.equal(vision.reasoningEffort, 'medium')
+    assert.equal(vision.tier, 'cheap')
+  })
 })

@@ -1,41 +1,53 @@
 /**
  * T9 格式化函数 — 常驻任务面板（todo task list）。
  *
- * Claude Code 风格三态 checklist，渲染为 ANSI 行数组：
- *   ☐ pending     — muted
- *   ◐ in_progress — primary 高亮 + bold（当前焦点）
- *   ☒ completed   — dim（已完成）
+ * 符号族与子代理 chrome 分开：标题 ≡、进行中月相旋转、待办 ○、完成 ✓。
+ * 着色纪律与活动带相同——只给字形一点色，不整行 primary + bold。
  *
- * 纯函数：空列表返回 `[]`（不渲染），限高（默认 ≤6 行 + "+N more"）。
+ *   ○ pending         — dim
+ *   ◐◓◑◒ in_progress — 月相随 tick 转，仅字形 primary
+ *   ✓ completed       — success 勾
+ *
+ * 纯函数：空列表返回 `[]`（不渲染），限高（默认 ≤6 行 + `└ …(+N)`）。
  *
  * 智能可见窗口：当条目数超过 maxRows 时，优先显示 in_progress 和 pending，
- * 折叠 completed 到摘要行，确保活跃任务永不被 "+N more" 吞掉。
+ * 折叠 completed 到摘要行，确保活跃任务永不被折叠行吞掉。
  */
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 import { displayWidth, truncateToDisplayWidth } from '../width.js'
+import { circleSpinnerFrame } from '../braille-spinner.js'
+import { isReducedMotion } from './spinner-status.js'
 
 /** 宽度口径：与 LiveEngine.rowsForLine 一致（CJK 终端把 ambiguous 符号按 2 列渲染）。
  *  task content 多为 CJK，按 narrow(.length/stringWidth) 截断会严重低估实际列宽 →
- *  单行任务溢出终端宽度折行 → rowsForLine 低估 → chrome 残留重影。box/glyph 恒 1 列。 */
+ *  单行任务溢出终端宽度折行 → rowsForLine 低估 → chrome 残留重影。 */
 const WIDE = { ambiguousAsWide: true }
+
+const ASCII_SPIN = ['-', '\\', '|', '/'] as const
+/** 主区 ticker 120ms；除 3 后约 360ms 一帧，清单旁不抢注意力。 */
+const TICK_DIVISOR = 3
 
 export interface TaskListOptions {
   /** 终端宽度（内容超宽截断） */
   width?: number
   /** 面板最大行数（含标题 + 摘要行），默认 6 */
   maxRows?: number
-  /** 是否显示标题里的 8-cell 进度条。默认 false（Claude Code 风格 compact 标题）。
+  /** 是否显示标题里的 8-cell 进度条。默认 false（compact 标题）。
    *  三个调用方（主区 live、side panel）都采用 compact 标题，故默认与之对齐；
    *  需要进度条的调用方显式传 true。 */
   showProgressBar?: boolean
-  /** 展开态：原序全量渲染（completed 也逐条 ☒ dim），不再折叠为 `✓ N done`
+  /** 展开态：原序全量渲染（completed 也逐条 ✓），不再折叠为 `✓ N done`
    *  摘要；调用方应同时调高 maxRows（12-15）。 */
   expanded?: boolean
   /** 展开态末尾的 dim 键位提示（如 "ctrl+x t 收起"）；仅 expanded 时渲染。 */
   expandHint?: string
+  /** 月相帧计数（in_progress 字形随 tick/3 旋转）。 */
+  tick?: number
+  /** ascii 降级（进行中 → `-`/`|` 轮转）。 */
+  ascii?: boolean
 }
 
 /**
@@ -53,12 +65,30 @@ export function shouldShowTaskPanel(items: readonly TodoItem[], phase: string, t
   return true
 }
 
-/** 三态字形（与 Claude Code 对齐）。 */
-function glyphFor(status: TodoItem['status']): string {
+function inProgressGlyph(opts: TaskListOptions): string {
+  const ascii = opts.ascii === true
+  if (isReducedMotion()) return ascii ? '*' : '◐'
+  const frame = Math.floor((opts.tick ?? 0) / TICK_DIVISOR)
+  if (ascii) {
+    const idx = ((frame % ASCII_SPIN.length) + ASCII_SPIN.length) % ASCII_SPIN.length
+    return ASCII_SPIN[idx] ?? '-'
+  }
+  return circleSpinnerFrame(frame)
+}
+
+function glyphFor(status: TodoItem['status'], opts: TaskListOptions): string {
   switch (status) {
-    case 'completed': return '☒'
-    case 'in_progress': return '◐'
-    default: return '☐'
+    case 'completed': return '✓'
+    case 'in_progress': return inProgressGlyph(opts)
+    default: return '○'
+  }
+}
+
+function glyphColor(status: TodoItem['status'], theme: RivetTheme): string {
+  switch (status) {
+    case 'in_progress': return theme.primary
+    case 'completed': return theme.success
+    default: return theme.dim
   }
 }
 
@@ -68,33 +98,39 @@ function progressBar(done: number, total: number): string {
   return '█'.repeat(filled) + '░'.repeat(8 - filled)
 }
 
-function renderLine(t: TodoItem, theme: RivetTheme, maxContentWidth: number): string {
-  const glyph = glyphFor(t.status)
-  const ELLIPSIS_W = displayWidth('…', WIDE)
+function splitLead(text: string): { lead: string; rest: string } | null {
+  const idx = text.search(/[:：]/)
+  if (idx <= 0) return null
+  return { lead: text.slice(0, idx), rest: text.slice(idx) }
+}
 
-  // 前缀按状态组合：
-  //  - pending/completed：`  ☐ `（CJK 终端 ☐ 是 ambiguous → 2 列）
-  //  - in_progress：`▸ ◐ `（◐ 同为 ambiguous → 2 列）
-  // 这些 ambiguous glyph 在 wide 口径下占 2 列，content 预算必须按前缀**实际显示
-  // 宽度**扣减而非硬编码，否则整行会溢出终端宽度折行 → rowsForLine 低估 → chrome 残留。
-  // caller 传入的 maxContentWidth 已扣 4 列 indent（= narrow 口径的前缀宽），
-  // 故 content 预算 = maxContentWidth 补回这 4 列再减前缀真实宽度。
-  const prefix = t.status === 'in_progress'
-    ? `${color('▸', theme.primary)} ${color(glyph, theme.primary, { bold: true })} `
-    : `  ${color(glyph, theme.muted)} `
+function paintContent(text: string, status: TodoItem['status'], theme: RivetTheme): string {
+  if (status === 'pending' || status === 'completed') {
+    return color(text, theme.muted)
+  }
+  const parts = splitLead(text)
+  if (!parts) return color(text, theme.secondary)
+  return `${color(parts.lead, theme.secondary)}${color(parts.rest, theme.muted)}`
+}
+
+function renderLine(t: TodoItem, theme: RivetTheme, width: number, opts: TaskListOptions): string {
+  const ELLIPSIS_W = displayWidth('…', WIDE)
+  const glyph = glyphFor(t.status, opts)
+  const prefix = ` ${color(glyph, glyphColor(t.status, theme))} `
   const prefixW = displayWidth(prefix, WIDE)
-  const contentBudget = maxContentWidth + 4 - prefixW
+  const contentBudget = Math.max(1, width - 1 - prefixW)
   // 进行中的项念现在时（activeForm），其余念祈使式的 content——面板读起来
   // 是「正在做什么 / 还要做什么」，而不是一列同构的祈使句。缺席时回退 content。
   const text = t.status === 'in_progress' ? (t.activeForm ?? t.content) : t.content
-  const content = displayWidth(text, WIDE) > contentBudget
-    ? `${truncateToDisplayWidth(text, contentBudget - ELLIPSIS_W, WIDE)}…`
-    : text
+  const flat = text.replace(/\s+/g, ' ').trim()
+  const content = displayWidth(flat, WIDE) > contentBudget
+    ? `${truncateToDisplayWidth(flat, Math.max(1, contentBudget - ELLIPSIS_W), WIDE)}…`
+    : flat
+  return `${prefix}${paintContent(content, t.status, theme)}`
+}
 
-  const styled = t.status === 'in_progress'
-    ? color(content, theme.primary, { bold: true })
-    : color(content, theme.muted)
-  return `${prefix}${styled}`
+function overflowLine(n: number, theme: RivetTheme): string {
+  return color(` └ …(+${n})`, theme.dim)
 }
 
 /**
@@ -104,92 +140,77 @@ function renderLine(t: TodoItem, theme: RivetTheme, maxContentWidth: number): st
  * 1. in_progress 永远可见
  * 2. pending 按 id 顺序填充剩余行
  * 3. completed 折叠为摘要（"✓ 3 done"），不逐条占用行
- * 4. 仅当 in_progress + pending 仍超行时才显示 "+N more"
+ * 4. 仅当 in_progress + pending 仍超行时才显示 `└ …(+N)`
  */
 export function formatTaskList(items: TodoItem[], theme: RivetTheme, opts: TaskListOptions = {}): string[] {
   if (items.length === 0) return []
   const width = opts.width ?? 80
   const maxRows = Math.max(3, opts.maxRows ?? 6)
   const showProgressBar = opts.showProgressBar === true
-  // 留 1 列安全边距（对齐 app.ts clampLine 的 maxWidth-1）：满列行在 CJK 终端
-  // 触发 wrap-pending，屏上折成 2 行而 rowsForLine 只按 1 行爬升——旧帧顶部
-  // （面板恰是 chrome 首元素）残留并被挤入 scrollback，形成面板副本。
-  const maxContentWidth = Math.max(8, width - 5)
 
   const lines: string[] = []
   const completed = items.filter(t => t.status === 'completed')
-  const active = items.filter(t => t.status === 'in_progress')
-  const pending = items.filter(t => t.status === 'pending')
   const done = completed.length
 
-  // 标题：◇ 任务 (done/total)，可选进度条
   const header = showProgressBar
-    ? `◇ 任务 [${progressBar(done, items.length)}] ${done}/${items.length}`
-    : `◇ 任务 (${done}/${items.length})`
-  lines.push(color(header, theme.secondary, { bold: true }))
+    ? `≡ 任务 [${progressBar(done, items.length)}] · ${done}/${items.length}`
+    : `≡ 任务 · ${done}/${items.length}`
+  lines.push(color(header, theme.muted))
 
-  // 展开态（ctrl+x t 切换）：原序全量渲染——completed 逐条 ☒ dim 可回看，
-  // 不再折叠为摘要；超预算才 +N more；末尾附 dim 键位提示。
+  // 展开态（ctrl+x t 切换）：原序全量渲染——completed 逐条 ✓ 可回看，
+  // 不再折叠为摘要；超预算才 …(+N)；末尾附 dim 键位提示。
   if (opts.expanded) {
     const hint = opts.expandHint
     const rowBudget = maxRows - 1 - (hint ? 1 : 0)
     let visibleCount = items.length
     let hasOverflow = false
     if (items.length > rowBudget) {
-      visibleCount = Math.max(0, rowBudget - 1) // 留 1 行给 +N more
+      visibleCount = Math.max(0, rowBudget - 1)
       hasOverflow = true
     }
     for (let i = 0; i < visibleCount; i++) {
-      lines.push(renderLine(items[i]!, theme, maxContentWidth))
+      lines.push(renderLine(items[i]!, theme, width, opts))
     }
     if (hasOverflow) {
-      lines.push(color(`  +${items.length - visibleCount} more`, theme.muted))
+      lines.push(overflowLine(items.length - visibleCount, theme))
     }
-    if (hint) lines.push(color(`  ⎿ ${hint}`, theme.dim))
+    if (hint) lines.push(color(` ⎿ ${hint}`, theme.dim))
     return lines
   }
 
   // 预算：标题已占 1 行，完成摘要占 1 行（当有完成项时）
-  let budget = maxRows - 1 // 去掉标题
-  if (done > 0) budget -= 1 // 完成摘要行
+  let budget = maxRows - 1
+  if (done > 0) budget -= 1
 
-  // 优先级：in_progress → pending（保持原 id 顺序合并）
   const unfinished = items.filter(t => t.status !== 'completed')
 
   let visibleCount: number
   let hasOverflow = false
 
   if (unfinished.length <= budget) {
-    // 全部未完成项都能显示
     visibleCount = unfinished.length
   } else {
-    // 超预算：in_progress 全显示，pending 填充剩余，溢出走 +N more
-    visibleCount = budget - 1 // 留 1 行给 +N more
+    visibleCount = budget - 1
     hasOverflow = true
   }
 
-  // 渲染可见的未完成项
   for (let i = 0; i < Math.min(visibleCount, unfinished.length); i++) {
-    lines.push(renderLine(unfinished[i]!, theme, maxContentWidth))
+    lines.push(renderLine(unfinished[i]!, theme, width, opts))
   }
 
   if (hasOverflow) {
-    const remaining = unfinished.length - visibleCount
-    lines.push(color(`  +${remaining} more`, theme.muted))
+    lines.push(overflowLine(unfinished.length - visibleCount, theme))
   }
 
-  // 完成项折叠摘要（不逐条显示，节省行数给活跃任务）
   if (done > 0) {
-    const sample = completed[0]!.content
-    const sampleBudget = maxContentWidth - 8
+    const sample = completed[0]!.content.replace(/\s+/g, ' ').trim()
+    const sampleBudget = Math.max(8, width - 10)
     const sampleText = displayWidth(sample, WIDE) > sampleBudget
       ? `${truncateToDisplayWidth(sample, sampleBudget - displayWidth('…', WIDE), WIDE)}…`
       : sample
-    if (done === 1) {
-      lines.push(color(`  ✓ ${sampleText}`, theme.muted))
-    } else {
-      lines.push(color(`  ✓ ${done} done`, theme.muted))
-    }
+    const mark = color('✓', theme.success)
+    const rest = done === 1 ? ` ${sampleText}` : ` ${done} done`
+    lines.push(` ${mark}${color(rest, theme.muted)}`)
   }
 
   return lines

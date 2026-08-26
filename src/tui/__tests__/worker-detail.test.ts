@@ -110,7 +110,7 @@ test('buildWorkerDetailContent includes header, result, and transcript', async (
     parentToolId: 'tool_a',
     profile: 'reviewer',
     authority: 'tianquan',
-    status: 'passed',
+    status: 'completed',
     panelStatus: 'done',
     terminal: true,
     activity: 'done',

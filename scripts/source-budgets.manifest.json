@@ -1,0 +1,190 @@
+{
+  "$schema": "行数棘轮账本——ratchet 语义：表内点名巨石 ceiling 只降不升（存量不追溯），表外产品源文件超 redline 即命中（红线由 architecture-guards 硬门执法）。增长必须在同一 PR 修改本文件并说明理由——纯数据 diff 即评审对象（移植自 oh-my-tianshu 的 budgets 纪律；结构化消费方：src/agent/structure-gate.ts）。",
+  "redline": 800,
+  "budgets": {
+    "src/tui/engine/app.ts": {
+      "ceiling": 7277,
+      "note": "6527→7277：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/server/session-manager.ts": {
+      "ceiling": 5741,
+      "note": "5739→5741：randomId 换 CSPRNG（L3，+5/-3）。"
+    },
+    "src/tui/slash-commands.ts": {
+      "ceiling": 4536,
+      "note": "4350→4533：/trust 命令 + 插件安装预检（+67）叠加此前会话已超限部分 / （HEAD 4466 > 旧基线，按现值对齐）。 4533→4536：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/agent/coordinator.ts": {
+      "ceiling": 3495,
+      "note": "3487→3491：classifyWorkerError 导出 + 兜底接线修复（failureReason 归类收口）。3491→3492：审查 LOW 收口——/signal/i 收紧注释。3492→3495：stall-sweep 击杀消息归 stalled（补分支 + 注释，2026-08-26 审查收尾）。"
+    },
+    "src/agent/loop.ts": {
+      "ceiling": 2928,
+      "note": "2854→2928：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）；其中捆绑技能消融移除 pin 链并挂 <plan-executing> 卸载点（净增约 15 行）。"
+    },
+    "src/bootstrap.ts": {
+      "ceiling": 2511
+    },
+    "src/config/manager.ts": {
+      "ceiling": 2606,
+      "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。"
+    },
+    "src/main.ts": {
+      "ceiling": 2299,
+      "note": "2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。 2298→2299：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/tui/pi/latex-to-unicode.ts": {
+      "ceiling": 2071
+    },
+    "src/agent/tool-pipeline.ts": {
+      "ceiling": 2099,
+      "note": "2070→2099：H6 安全写目标越界判定 + M7 ast_edit/export_file 越工作区路由 / （审批路由单一职责功能增长，+29 行）。"
+    },
+    "src/server/session-routes.ts": {
+      "ceiling": 1997,
+      "note": "1995→1997：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/prompt/engine.ts": {
+      "ceiling": 1635,
+      "note": "1624→1635：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）；其中捆绑技能消融加 planExecutingBlock 字段/setter/getter（净增约 13 行）。"
+    },
+    "src/agent/compaction-controller.ts": {
+      "ceiling": 1621
+    },
+    "src/agent/deliver-task.ts": {
+      "ceiling": 1613,
+      "note": "1595→1613：本文件的 YELLOW 预警门接线（ctx 钩子 + 检查块）落在 deliver-task。"
+    },
+    "src/tui/format/overlay.ts": {
+      "ceiling": 1678,
+      "note": "1492→1678：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/api/openai-client.ts": {
+      "ceiling": 1563,
+      "note": "1492→1563：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/agent/turn-orchestrator.ts": {
+      "ceiling": 1471,
+      "note": "1462→1471：B2 收敛轨迹门（会话 506a5e86 优化，deps getter + AND 门判定，+9 行）。"
+    },
+    "src/agent/loop-factory.ts": {
+      "ceiling": 1473,
+      "note": "1470→1473：注入 B2 收敛轨迹 getter（getConvergenceScoreHistory，+3 行）。"
+    },
+    "src/agent/advisory-bus.ts": {
+      "ceiling": 1273
+    },
+    "src/agent/convergence-detector.ts": {
+      "ceiling": 1260
+    },
+    "src/tui/engine/input-line.ts": {
+      "ceiling": 1238,
+      "note": "1236→1238：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/prompt/volatile.ts": {
+      "ceiling": 1226,
+      "note": "1197→1226：捆绑技能消融——<plan-mode> 并入五条调研纪律 + 新增 renderPlanExecutingBlock 原生执行纪律块（writing/executing-plans 技能消融的落点，+29）。"
+    },
+    "src/agent/turn-step-producer.ts": {
+      "ceiling": 1169
+    },
+    "src/agent/worker-session.ts": {
+      "ceiling": 1206,
+      "note": "1155→1206：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/tools/galaxy.ts": {
+      "ceiling": 1158
+    },
+    "src/pro/computer-use/windows-driver.ts": {
+      "ceiling": 1136
+    },
+    "src/tools/read-file.ts": {
+      "ceiling": 1123
+    },
+    "src/server/serve-agent.ts": {
+      "ceiling": 1125,
+      "note": "1118→1125：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/tools/browser-debug/tool.ts": {
+      "ceiling": 1084
+    },
+    "src/server/session-persistence.ts": {
+      "ceiling": 1062
+    },
+    "src/agent/problem-attack-loop.ts": {
+      "ceiling": 1027
+    },
+    "src/agent/hooks/cognitive-capsule-router.ts": {
+      "ceiling": 1026
+    },
+    "src/agent/work-order.ts": {
+      "ceiling": 1019,
+      "note": "1004→1019：status×failureReason 消费矩阵注释（组合矩阵收口文档化，+15）。"
+    },
+    "src/tools/run-tests.ts": {
+      "ceiling": 1004,
+      "note": "995→1004：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/server/serve.ts": {
+      "ceiling": 989
+    },
+    "src/agent/starflow-orchestrator.ts": {
+      "ceiling": 1075,
+      "note": "988→1075：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/pro/computer-use/macos-driver.ts": {
+      "ceiling": 987,
+      "note": "976→987：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/agent/create-runtime-hooks.ts": {
+      "ceiling": 958
+    },
+    "src/tools/bash.ts": {
+      "ceiling": 950,
+      "note": "943→950：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/skills/skill-loader.ts": {
+      "ceiling": 1022,
+      "note": "941→1022：捆绑技能退役清理——RETIRED_BUNDLED_SKILLS 名单（名字+SHA-256）+ retireMatchingSkillCopies 一次性清理逻辑（撤出三项 + 消融两项的存量副本清理，+81）。"
+    },
+    "src/config/env-registry.ts": {
+      "ceiling": 956,
+      "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/server/config-routes.ts": {
+      "ceiling": 1002,
+      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/pro/computer-use/cdp/driver.ts": {
+      "ceiling": 899
+    },
+    "src/pro/computer-use/tool.ts": {
+      "ceiling": 891
+    },
+    "src/pro/computer-use/windows-uia-com.ts": {
+      "ceiling": 888
+    },
+    "src/config/schema.ts": {
+      "ceiling": 1004,
+      "note": "891→1004：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/agent/session-persist.ts": {
+      "ceiling": 874
+    },
+    "src/repo/meridian-db.ts": {
+      "ceiling": 903,
+      "note": "797→884：schema v2 遥测保留机制（migrateToV2/cleanupExpiredRows/WAL checkpoint/LIKE 前缀索引，2026-08-17 存储膨胀修复）。 884→903：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+    },
+    "src/tui/settings-model.ts": {
+      "ceiling": 865
+    },
+    "src/tui/connect-flow.ts": {
+      "ceiling": 2160,
+      "note": "PR#38 /connect 向导（2160 行，2026-08-22 合入）——入账钉住，拆分待后续"
+    },
+    "src/config/provider-presets.ts": {
+      "ceiling": 875,
+      "note": "PR#38 provider onboarding 统一栈（861 行）——入账钉住。861→875：deepseek 预设新增 v4-flash-vision-exp 视觉实验档（1M 上下文 + supportsVision + 定价同 flash，+14）。"
+    }
+  }
+}

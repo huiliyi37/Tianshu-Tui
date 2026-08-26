@@ -19,6 +19,11 @@ function digestHonesty(failureReason?: string, evidenceStatus?: string): string 
     case 'timeout': return 'Worker 超时'
     case 'caller_aborted': return '已被取消'
     case 'worker_blocked': return 'Worker 被阻断'
+    case 'circuit_open': return '熔断开启 · 已退避'
+    case 'claim_conflict': return '文件归属冲突 · 已降级'
+    case 'schema_mismatch': return '结果形状不符 · 已降级'
+    case 'policy_short_circuit': return '策略短路'
+    case 'unknown': return '失败原因未归类'
     default: break
   }
   if (evidenceStatus === 'failed') return '验收证据验证失败'
@@ -26,7 +31,10 @@ function digestHonesty(failureReason?: string, evidenceStatus?: string): string 
 }
 
 export interface WorkerResultDigestInput {
-  status: 'passed' | 'completed' | 'failed' | 'blocked' | 'escalated'
+  /** 输入域 = WorkerResult.status（passed/failed/blocked/escalated）——三个生产
+   *  调用方（galaxy ×2、delegate-task、worker-detail）全传协议层结果。
+   *  收口后的 UI 词汇 'completed' 不经此接缝。 */
+  status: 'passed' | 'failed' | 'blocked' | 'escalated'
   summary: string
   findingsCount: number
   changedFilesCount: number
@@ -39,7 +47,7 @@ export interface WorkerResultDigestInput {
 /** 结果一句话摘要（detail 头部 + delegate_task uiContent 复用）。
  *  形态：`glyph summary · N 条发现 · M 个文件[· ⚠ 诚实标签]`。summary 压平换行。 */
 export function formatWorkerResultDigest(r: WorkerResultDigestInput): string {
-  const ok = r.status === 'passed' || r.status === 'completed'
+  const ok = r.status === 'passed'
   const glyph = ok ? '✓' : r.status === 'blocked' ? '⊗' : r.status === 'escalated' ? '↑' : '✗'
   const summary = r.summary.replace(/\s+/g, ' ').trim()
   const parts: string[] = [`${glyph} ${summary}`]

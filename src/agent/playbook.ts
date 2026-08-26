@@ -46,7 +46,7 @@ function clamp01(value: number): number {
 }
 
 function normalizeToken(token: string): string {
-  return token.trim().toLowerCase().replace(/^[-_*`"'“”‘’()\[\]{}:：,，.。]+|[-_*`"'“”‘’()\[\]{}:：,，.。]+$/g, '')
+  return token.trim().toLowerCase().replace(/^[-_*`"'“”‘’()[\]{}:：,，.。]+|[-_*`"'“”‘’()[\]{}:：,，.。]+$/g, '')
 }
 
 function unique(values: string[]): string[] {

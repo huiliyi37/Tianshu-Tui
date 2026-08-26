@@ -181,7 +181,7 @@ export const APPLY_PATCH_TOOL: Tool = {
     }
     for (const t of targets) {
       if (t.existedBefore) {
-        trackFileChange(params.cwd, { filePath: t.rel, action: 'edit', toolCallId: params.toolUseId ?? 'apply_patch' })
+        await trackFileChange(params.cwd, { filePath: t.rel, action: 'edit', toolCallId: params.toolUseId ?? 'apply_patch' })
       }
     }
 
@@ -328,7 +328,7 @@ async function firstFatalSyntax(targets: PatchTarget[]): Promise<{ rel: string; 
 async function rollbackTargets(cwd: string, targets: PatchTarget[], sessionId?: string): Promise<void> {
   for (const t of targets) {
     if (t.existedBefore) {
-      restoreLatestBackup(cwd, t.rel, sessionId)
+      await restoreLatestBackup(cwd, t.rel, sessionId)
     } else {
       try { await unlink(t.abs) } catch { /* already gone */ }
     }

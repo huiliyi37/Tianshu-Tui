@@ -5,6 +5,7 @@ import {
   buildSeatbeltCommand,
   buildBwrapCommand,
   buildFirejailCommand,
+  buildLandlockCommand,
   defaultWritableRoots,
   detectWsl,
   selectSandboxBackend,
@@ -157,6 +158,32 @@ describe('sandbox-profile: bwrap/firejail', () => {
   })
 })
 
+describe('sandbox-profile: landlock', () => {
+  const launcher = '/opt/landlock-run'
+  it('构造：--ro / + 每个 real root 一对 --rw + /dev/null + -- 分隔命令', () => {
+    const realRoot = process.cwd()
+    const cmd = buildLandlockCommand('make', [realRoot, '/definitely-not-a-real-dir-xyz'], launcher)
+    assert.ok(cmd.startsWith(`'${launcher}' `), `应以引号包裹的 launcher 路径开头: ${cmd}`)
+    assert.ok(cmd.includes(`--ro '/'`), '根只读授予（路径统一引号包裹）')
+    assert.ok(cmd.includes(`--rw '${realRoot}'`), '真实 root 授予可写（引号包裹路径）')
+    assert.ok(!cmd.includes('/definitely-not-a-real-dir-xyz'), '不存在的 root 静默丢弃')
+    assert.ok(cmd.includes(`--rw '/dev/null'`), '/dev/null 必须可写（CLI 默认重定向目标）')
+    assert.ok(cmd.includes(`-- sh -c 'make'`), '命令经 sh -c 在 -- 之后执行')
+  })
+  it('wrapSandboxCommand landlock 后端返回 sandboxed + note', () => {
+    const decision = wrapSandboxCommand('touch x', {
+      cwd: '/work/proj',
+      env: { HOME: '/home/u', RIVET_SANDBOX: '1' } as NodeJS.ProcessEnv,
+      platform: 'linux',
+      which: () => false,
+      landlockUsable: () => true,
+    })
+    assert.equal(decision.sandboxed, true)
+    assert.equal(decision.backend, 'landlock')
+    assert.ok(decision.writableRoots, 'writableRoots 必须带上（拒绝分类要用）')
+  })
+})
+
 describe('sandbox-profile: detectWsl', () => {
   it('detects via WSL_DISTRO_NAME', () => {
     assert.equal(detectWsl(() => null, { WSL_DISTRO_NAME: 'Ubuntu' }), true)
@@ -182,8 +209,26 @@ describe('sandbox-profile: selectSandboxBackend', () => {
   it('linux uses firejail when bwrap missing', () => {
     assert.equal(selectSandboxBackend({ cwd: '/w', platform: 'linux', which: (b) => b === 'firejail' }), 'firejail')
   })
+  it('linux falls back to landlock when bwrap/firejail missing and launcher enforces', () => {
+    assert.equal(
+      selectSandboxBackend({ cwd: '/w', platform: 'linux', which: () => false, landlockUsable: () => true }),
+      'landlock',
+    )
+  })
+  it('linux landlock probe unusable → none（fail-closed，绝不裸奔声明）', () => {
+    assert.equal(
+      selectSandboxBackend({ cwd: '/w', platform: 'linux', which: () => false, landlockUsable: () => false }),
+      'none',
+    )
+  })
+  it('linux bwrap 仍优先于 landlock（mount profile 语义更全）', () => {
+    assert.equal(
+      selectSandboxBackend({ cwd: '/w', platform: 'linux', which: (b) => b === 'bwrap', landlockUsable: () => true }),
+      'bwrap',
+    )
+  })
   it('linux without tools is none', () => {
-    assert.equal(selectSandboxBackend({ cwd: '/w', platform: 'linux', which: () => false }), 'none')
+    assert.equal(selectSandboxBackend({ cwd: '/w', platform: 'linux', which: () => false, landlockUsable: () => false }), 'none')
   })
   it('native windows is none', () => {
     assert.equal(selectSandboxBackend({ cwd: '/w', platform: 'win32', which: () => true }), 'none')

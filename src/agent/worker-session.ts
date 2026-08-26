@@ -59,6 +59,16 @@ export interface WorkerCheckpoint {
   completedTools: string[]
 }
 
+/** buildWorkerRuntime 的路由决策投影（子进程重建 client/promptEngine 的依据）。 */
+export interface WorkerRuntimeDecision {
+  providerName: string
+  model: string
+  maxTokens: number
+  contextWindow: number
+  thinkingBudget: number
+  isWrite: boolean
+}
+
 export interface WorkerSessionConfig {
   order: WorkOrder
   client: StreamClient
@@ -68,6 +78,15 @@ export interface WorkerSessionConfig {
   maxTurns: number
   contextWindow: number
   compact: CompactionConfig
+  /** 子代理块策略（subagentPromptBlocks）——loop 内描述档位/块预算消费。
+   *  历史上 bootstrap runtimeFactory 一直设置但接口漏声明（tsc 基线 3 条债），
+   *  worker-runtime.ts 抽出时补正。 */
+  blockPolicy?: import('../prompt/block-policy.js').PromptBlockPolicy
+  /** 子进程隔离协议（worker-process v1）：runtimeFactory 路由决策的可序列化
+   *  投影。buildWorkerRuntime 三分支盖戳；OOP 运行器据此让子进程忠实重建
+   *  client/promptEngine——子进程不重跑路由，防父/子两端决策漂移。
+   *  进程内路径不消费，缺席不影响行为。 */
+  runtimeDecision?: WorkerRuntimeDecision
   /** Provider key used for this worker run (e.g. 'deepseek', 'openai'). */
   providerName?: string
   /** Worker 端点 baseUrl 与显式慢思考声明——供 deriveWorkerStallMs 的

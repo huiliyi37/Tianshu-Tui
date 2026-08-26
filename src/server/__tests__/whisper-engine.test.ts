@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, chmod, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, chmod, rm, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createWhisperEngine } from '../whisper-engine.js'
@@ -17,6 +17,9 @@ import { writeFileSync } from 'node:fs'
 if (process.env.WHISPER_FAKE_FAIL) { process.exit(1) }
 if (process.env.WHISPER_FAKE_HANG) { setInterval(() => {}, 60_000); await new Promise(() => {}); }
 const argv = process.argv.slice(2)
+if (process.env.WHISPER_FAKE_DUMP_ARGS) {
+  writeFileSync(process.env.WHISPER_FAKE_DUMP_ARGS, JSON.stringify(argv), 'utf8')
+}
 const i = argv.indexOf('-f')
 if (i >= 0 && argv[i + 1]) writeFileSync(argv[i + 1] + '.txt', 'hello world', 'utf8')
 `
@@ -76,4 +79,56 @@ test('whisper-engine: 挂起 → 超时 SIGKILL reject', async () => {
   } finally {
     await rm(join(bin, '..'), { recursive: true, force: true })
   }
+})
+
+// ── 解码参数契约（whisper.cpp CLI 参数面）──
+// 中文错别字专项（2026-08 语音升级 A）：zh 转写必须带 --prompt（initial
+// prompt 中文先验，whisper 用它做文本偏好）与显式 -sns（suppress non-speech
+// tokens；该开关默认值随 whisper.cpp 版本漂移，显式钉住避免旧版默认关）。
+// beam size / temperature fallback 为 whisper.cpp 默认开启项（-bs 5 /
+// 无 -nf），不重复传。auto 检测时不带 prompt（prompt 会干扰语言检测）也不带 -l。
+
+async function transcribeWithArgs(opts: { lang?: string }): Promise<string[]> {
+  const bin = await makeFakeBin()
+  try {
+    const engine = createWhisperEngine({ binPath: bin, modelPath: '/tmp/model.bin' })
+    const dir = await mkdtemp(join(tmpdir(), 'rivet-whisper-wav-'))
+    const wav = join(dir, 'in.wav')
+    await writeFile(wav, Buffer.alloc(44))
+    const dump = join(dir, 'args.json')
+    process.env.WHISPER_FAKE_DUMP_ARGS = dump
+    try {
+      await engine.transcribe(wav, opts.lang ? { lang: opts.lang } : undefined)
+      return JSON.parse(await readFile(dump, 'utf8')) as string[]
+    } finally {
+      delete process.env.WHISPER_FAKE_DUMP_ARGS
+      await rm(dir, { recursive: true, force: true })
+    }
+  } finally {
+    await rm(join(bin, '..'), { recursive: true, force: true })
+  }
+}
+
+test('whisper-engine: zh 转写带 --prompt（中文先验）与显式 -sns', async () => {
+  const args = await transcribeWithArgs({ lang: 'zh' })
+  assert.ok(args.includes('-sns'), '显式开启非语音 token 抑制')
+  const promptIdx = args.indexOf('--prompt')
+  assert.ok(promptIdx >= 0, 'zh 转写必须带 --prompt')
+  assert.ok(promptIdx + 1 < args.length && /[\u4e00-\u9fff]/.test(args[promptIdx + 1]!), 'prompt 为中文文本')
+  assert.equal(args[args.indexOf('-l') + 1], 'zh', '语言参数仍传递')
+})
+
+test('whisper-engine: en 转写带英文 prompt 与 -sns', async () => {
+  const args = await transcribeWithArgs({ lang: 'en' })
+  assert.ok(args.includes('-sns'))
+  const promptIdx = args.indexOf('--prompt')
+  assert.ok(promptIdx >= 0, 'en 转写必须带 --prompt')
+  assert.equal(args[args.indexOf('-l') + 1], 'en')
+})
+
+test('whisper-engine: auto/无 lang 不带 --prompt 与 -l（prompt 会干扰语言检测）', async () => {
+  const args = await transcribeWithArgs({})
+  assert.ok(!args.includes('--prompt'), 'auto 检测不带 prompt')
+  assert.ok(!args.includes('-l'), 'auto 检测不带语言参数')
+  assert.ok(args.includes('-sns'), '-sns 独立于语言始终显式传入')
 })

@@ -297,7 +297,7 @@ describe('formatBatchStigmergyBlock', () => {
       await store.deposit({ path: `src/f${i}.ts`, signal: 'fragile', strength: 0.9 })
     }
     const block = await formatBatchStigmergyBlock(store)
-    const matches = block.match(/^\- /gm)?.length ?? 0
+    const matches = block.match(/^- /gm)?.length ?? 0
     assert.ok(matches <= 3, `最多 3 条，got ${matches}`)
   })
 })

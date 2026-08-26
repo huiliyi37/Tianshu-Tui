@@ -16,13 +16,30 @@ export interface WhisperEngineOptions {
   timeoutMs?: number
 }
 
+/**
+ * 按语言注入 initial prompt（--prompt）：whisper 用 prompt 做解码文本先验，
+ * 对中文同音字/领域词汇有轻度纠偏（2026-08 语音升级 A 实测项）。
+ * 只对显式语言注入——auto 检测时 prompt 会干扰语言判定，不传。
+ */
+const LANG_PROMPTS: Record<string, string> = {
+  zh: '以下是中文语音输入，可能是编程指令、代码片段、文件名或命令。',
+  en: 'This is a voice transcription of programming instructions, possibly containing code, file names, or commands.',
+}
+
 export function createWhisperEngine(opts: WhisperEngineOptions): SpeechEngine {
   const timeoutMs = opts.timeoutMs ?? 60_000
   return {
     transcribe(wavPath, o) {
       return new Promise((resolve, reject) => {
         const args = ['-m', opts.modelPath, '-f', wavPath, '-otxt', '-nt']
-        if (o?.lang && o.lang !== 'auto') args.push('-l', o.lang)
+        // 显式开启非语音 token 抑制（笑声/杂音 token）：该开关默认值随
+        // whisper.cpp 版本漂移（master 为 false），显式钉住避免旧版默认关。
+        args.push('-sns')
+        if (o?.lang && o.lang !== 'auto') {
+          args.push('-l', o.lang)
+          const prompt = LANG_PROMPTS[o.lang]
+          if (prompt !== undefined) args.push('--prompt', prompt)
+        }
         const child = spawn(opts.binPath, args, { stdio: ['ignore', 'pipe', 'pipe'] })
         let stderr = ''
         child.stderr.on('data', (d: Buffer) => {

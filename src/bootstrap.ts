@@ -78,6 +78,8 @@ import { loadProModule, proRegistry } from './api/pro-registry.js'
 import { anchorsFromMessages } from './agent/reasoning-anchors.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { buildReviewOverrideState } from './agent/review-model-override.js'
+import { buildWorkerRuntime } from './agent/worker-runtime.js'
+import { createOopRunnerWithFallback, workerIsolationEnabled } from './agent/worker-process/parent.js'
 import type { ResolvedReviewOverride } from './agent/review-model-override.js'
 import { createAuthProvider } from './auth/registry.js'
 import { resolveCapabilities } from './api/provider.js'
@@ -934,235 +936,26 @@ export function createAgentRuntime(deps: {
     for (const name of Object.keys(workerRouting.providers)) providerHealth.registerProvider(name)
   }
 
-  const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
-    const writeProfiles = profileRegistry.listWriteProfiles()
-    const isWrite = writeProfiles.includes(_order.profile)
-    // 子代理块策略：收紧 project-instructions 预算 + compact 描述档。三条分支
-    // （modelOverride / review-override / 常规）共用同一份——分头构造迟早跑偏。
-    const blocks = subagentPromptBlocks()
-    const subagentTools = () => applyDescriptionMode(workerRegistry.getDefinitions(), blocks.toolDescriptions)
-
-    // Per-order modelOverride: highest precedence (above review override and
-    // workers routing). Builds a dedicated client for the seat's provider/model
-    // so e.g. a council with one DeepSeek-Pro seat and one GLM seat runs each on
-    // its own server-side cache. Falls through to normal routing when the
-    // provider is unknown / lacks the model / has no credentials (silent
-    // fallback, consistent with the other routing layers).
-    if (_order.modelOverride) {
-      const ovProvider = config.provider.providers[_order.modelOverride.provider]
-      const ovModel = _order.modelOverride.model
-      const ovModelOk = ovProvider?.models.some(m => m.id === ovModel || m.alias === ovModel)
-      if (ovProvider && ovModelOk) {
-        let ovApiKey = ''
-        let ovAuth: ReturnType<typeof createAuthProvider> | undefined
-        let ovReady = false
-        try {
-          if (ovProvider.auth?.type === 'oauth') {
-            ovAuth = ovProvider.name === provider.name ? auth : createAuthProvider(ovProvider.auth, process.env)
-            ovReady = Boolean(ovAuth?.isAuthenticated())
-          } else {
-            ovApiKey = resolveApiKey(ovProvider)
-            ovReady = Boolean(ovApiKey)
-          }
-        } catch {
-          ovReady = false
-        }
-        if (ovReady) {
-          const ovSpec = ovProvider.models.find(m => m.id === ovModel || m.alias === ovModel)
-          const ovContextWindow = ovSpec?.contextWindow ?? card.contextWindow
-          const ovMaxTokens = isWrite
-            ? Math.min(16384, ovSpec?.maxTokens ?? ovContextWindow)
-            : Math.min(16384, ovSpec?.maxTokens ?? ovContextWindow)
-          const ovCapabilities = resolveCapabilities(ovProvider.name, ovProvider.capabilities, ovSpec?.capabilities)
-          debugLog(`[worker-model] modelOverride active: profile=${_order.profile} authority=${_order.authority} → ${ovProvider.name}/${ovModel} isWrite=${isWrite}`)
-          return {
-            order: _order,
-            providerName: ovProvider.name,
-            baseUrl: ovProvider.baseUrl,
-            slowThinking: ovProvider.slowThinking,
-            client: createProviderClient(ovProvider, ovCapabilities, {
-              apiKey: ovApiKey,
-              model: ovModel,
-              reasoningEffort: undefined,
-              maxTokens: ovMaxTokens,
-              thinkingBudget: isWrite ? 8192 : 4096,
-              auth: ovAuth,
-            }),
-            promptEngine: new PromptEngine({
-              model: ovModel,
-              maxTokens: ovMaxTokens,
-              staticCtx: { tools: subagentTools(), audience: 'subagent' },
-              volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock(), blockCaps: blocks.caps },
-            }),
-            toolRegistry: workerRegistry,
-            blockPolicy: blocks,
-            cwd,
-            maxTurns: 100,
-            contextWindow: ovContextWindow,
-            compact: { enabled: false, model: 'flash' },
-            activeClaims: claimStore.listActiveClaims(),
-            domainKnowledgeStore,
-            forceJsonRepair: ovCapabilities.supportsResponseFormat,
-          }
-        }
-        debugLog(`[worker-model] modelOverride skip: ${_order.modelOverride.provider}/${ovModel} no credentials → fallback`)
-      } else {
-        debugLog(`[worker-model] modelOverride skip: provider=${_order.modelOverride.provider} modelOk=${ovModelOk} → fallback`)
-      }
-    }
-
-    // Review override fast path: if the profile is configured for a different
-    // provider, use the pre-resolved override (different provider+model from
-    // session primary). This is the whole point of the override — review
-    // workers must NOT touch the session primary's server-side cache (GLM
-    // cache-killer mechanism). StreamClient is built lazily here (not at
-    // bootstrap) so maxTokens/thinkingBudget reflect this call's isWrite —
-    // 读写同档 16384（实测只读大报告在 4096 顶格截断触发整轮续跑，一次截断
-    // 的代价远超档位放宽的成本），matching the non-override worker path.
-    const overrideResolved = reviewOverrides.get(_order.profile)
-    if (overrideResolved) {
-      const overrideApiKey = reviewOverrideApiKeys.get(_order.profile)
-      if (!overrideApiKey) {
-        debugLog(`[review-override] skip ${_order.profile}: no cached API key (credential failure at bootstrap)`)
-      } else {
-        const overrideSpec = overrideResolved.providerConfig.models.find(
-          m => m.id === overrideResolved.modelId || m.alias === overrideResolved.modelId,
-        )
-        const overrideContextWindow = overrideSpec?.contextWindow ?? card.contextWindow
-        const overrideMaxTokens = isWrite
-          ? Math.min(16384, overrideSpec?.maxTokens ?? overrideContextWindow)
-          : Math.min(16384, overrideSpec?.maxTokens ?? overrideContextWindow)
-        debugLog(`[worker-model] review-override active: profile=${_order.profile} model=${overrideResolved.modelId} isWrite=${isWrite}`)
-        const overrideCapabilities = resolveCapabilities(overrideResolved.providerName, overrideResolved.providerConfig.capabilities, overrideSpec?.capabilities)
-        return {
-          order: _order,
-          providerName: overrideResolved.providerName,
-          baseUrl: overrideResolved.providerConfig.baseUrl,
-          slowThinking: overrideResolved.providerConfig.slowThinking,
-          client: createProviderClient(
-            overrideResolved.providerConfig,
-            overrideCapabilities,
-            {
-              apiKey: overrideApiKey,
-              model: overrideResolved.modelId,
-              reasoningEffort: undefined,
-              maxTokens: overrideMaxTokens,
-              thinkingBudget: isWrite ? 8192 : 4096,
-            },
-          ),
-          promptEngine: new PromptEngine({
-            model: overrideResolved.modelId,
-            maxTokens: overrideMaxTokens,
-            staticCtx: { tools: subagentTools(), audience: 'subagent' },
-            volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock(), blockCaps: blocks.caps },
-          }),
-          toolRegistry: workerRegistry,
-          blockPolicy: blocks,
-          cwd,
-          maxTurns: 100,
-          contextWindow: overrideContextWindow,
-          compact: { enabled: false, model: 'flash' },
-          activeClaims: claimStore.listActiveClaims(),
-          domainKnowledgeStore,
-          forceJsonRepair: overrideCapabilities.supportsResponseFormat,
-        }
-      }
-    }
-
-    let workerProvider = provider
-    let workerApiKey = apiKey
-    let workerAuth = auth
-    let workerModel = card.model
-
-    if (workerRouting) {
-      const routeName = workerRouting.routing[mapWorkOrderKindToCapabilityTask(_order.kind)]
-      if (routeName && workerRouting.profiles[routeName]) {
-        const routeProfile = workerRouting.profiles[routeName]
-        const resolved = config.provider.providers[routeProfile.provider]
-        // Route to the configured provider+model as long as the provider exists and
-        // actually offers the configured model. The previous guard required
-        // `routeProfile.model === card.model`, which defeated the whole point of
-        // worker routing (independent model → isolated server-side prefix cache):
-        // any profile configured with a DIFFERENT model was silently skipped and
-        // workers fell back to the primary model, competing with the primary
-        // session's cache entries. Now we allow a distinct model and set it on
-        // workerModel so the worker actually runs on the routed model.
-        if (resolved && resolved.models.some(m => m.id === routeProfile.model || m.alias === routeProfile.model)) {
-          try {
-            if (resolved.auth?.type === 'oauth') {
-              const routedAuth = resolved.name === provider.name
-                ? auth
-                : createAuthProvider(resolved.auth, process.env)
-              if (routedAuth?.isAuthenticated()) {
-                workerProvider = resolved
-                workerModel = routeProfile.model
-                workerApiKey = ''
-                workerAuth = routedAuth
-              }
-            } else {
-              workerProvider = resolved
-              workerModel = routeProfile.model
-              workerApiKey = resolveApiKey(resolved)
-              workerAuth = undefined
-            }
-          } catch {
-            workerProvider = provider
-            workerApiKey = apiKey
-            workerAuth = auth
-          }
-        }
-      }
-    }
-
-    if (!workerProvider.models.some(m => m.id === workerModel || m.alias === workerModel)) {
-      workerModel = currentModel.id
-    }
-    const workerModelSpec = workerProvider.models.find(m => m.id === workerModel || m.alias === workerModel)
-    const workerContextWindow = workerModelSpec?.contextWindow ?? card.contextWindow
-    const workerMaxTokens = isWrite
-      ? Math.min(16384, workerModelSpec?.maxTokens ?? workerContextWindow)
-      : Math.min(16384, workerModelSpec?.maxTokens ?? workerContextWindow)
-
-    debugLog(`[worker-model] runtimeFactory: kind=${_order.kind} profile=${_order.profile} model=${workerModel} provider=${workerProvider.name} contextWindow=${workerContextWindow}`)
-
-    const workerCapabilities = resolveCapabilities(workerProvider.name, workerProvider.capabilities, workerModelSpec?.capabilities)
-    return {
-      order: _order,
-      providerName: workerProvider.name,
-      baseUrl: workerProvider.baseUrl,
-      slowThinking: workerProvider.slowThinking,
-      client: createProviderClient(workerProvider, workerCapabilities, {
-        apiKey: workerApiKey,
-        model: workerModel,
-        reasoningEffort: undefined,
-        maxTokens: workerMaxTokens,
-        thinkingBudget: isWrite ? 8192 : 4096,
-        auth: workerAuth,
-      }),
-      promptEngine: new PromptEngine({
-        model: workerModel,
-        maxTokens: workerMaxTokens,
-        // audience:'subagent' — 分档精简的 system 段：删主控专属循环/契约，
-        // 工具耦合段按 worker 实际工具集门控。主控路径不传该字段，字节不变。
-        staticCtx: { tools: subagentTools(), audience: 'subagent' },
-        volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock(), blockCaps: blocks.caps },
-      }),
-      toolRegistry: workerRegistry,
-      blockPolicy: blocks,
+  const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => buildWorkerRuntime(
+    {
+      config,
       cwd,
-      maxTurns: 100,
-      contextWindow: workerContextWindow,
-      compact: { enabled: false, model: 'flash' },
-      activeClaims: claimStore.listActiveClaims(),
+      provider,
+      apiKey,
+      auth,
+      currentModelId: currentModel.id,
+      listActiveClaims: () => claimStore.listActiveClaims(),
+      sessionMemoryBlock: () => persist.buildMemoryBlock(),
       domainKnowledgeStore,
-      // Use response_format: json_object on repair turns when the provider
-      // supports it — forces valid JSON output, eliminating the most common
-      // worker-result parse-failure cause (free-text prose / truncation).
-      // Only applied to the tool-free repair turn, so it never conflicts with
-      // function calling on normal turns.
-      forceJsonRepair: workerCapabilities.supportsResponseFormat,
-    }
-  }
+      reviewOverrides,
+      reviewOverrideApiKeys,
+      workerRouting,
+      writeProfiles: profileRegistry.listWriteProfiles(),
+    },
+    _order,
+    card,
+    workerRegistry,
+  )
 
   // EFE routing pulls per-turn signals from the agent. Build the agent first so
   // its ArtifactStore can be wired into the coordinator for worker artifact fallback.
@@ -1254,6 +1047,13 @@ export function createAgentRuntime(deps: {
   refs.coordinator = new DelegationCoordinator({
     baseToolRegistry: toolRegistry,
     modelCards,
+    // worker 子进程隔离 v1（RIVET_WORKER_ISOLATION=1 显式开启，默认进程内）：
+    // 每次 worker 派发 spawn 独立子进程，sidecar 结构性免疫 worker 冻结/爆内存
+    // （/scout 蜂群卡死事故的结构解；协议与回退见 worker-process/parent.ts）。
+    // entry 缺失自动回退进程内——公开仓裁剪与 dev 场景零破坏。
+    ...(workerIsolationEnabled()
+      ? { runWorker: createOopRunnerWithFallback({ getMemoryBlock: () => persist.buildMemoryBlock() }) }
+      : {}),
     // P1-6 全局并发闸输入：不再硬编码 3，配置化（见 resolveCoordinatorMaxWorkers）。
     // 该值同时是 CoordinatorState 的并发上限与 WorkOrderQueue 的容量基准——
     // 全局信号量（activeWorkerCount ≤ maxWorkers）在 coordinator 层实施。
@@ -2154,9 +1954,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   const effectiveProviderName = opts.providerName ?? defaultModelParts?.provider
   const effectiveModelId = opts.modelId ?? defaultModelParts?.modelId
 
-  const { provider, apiKey, auth } = resolveProviderAndAuth(config, effectiveProviderName, {
-    ...(opts.allowMissingKey ? { allowMissingKey: true } : {}),
-  })
+  const { provider, apiKey, auth } = resolveProviderAndAuth(config, effectiveProviderName, (opts.allowMissingKey ? { allowMissingKey: true } : {}))
 
   // 4. Session infrastructure
   const { registry: sessionRegistry, sessionId, heartbeatInterval } = await createSessionInfrastructure()

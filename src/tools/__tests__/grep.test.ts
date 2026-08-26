@@ -1,14 +1,20 @@
-import { describe, it, before, after } from 'node:test'
+import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'fs'
 import { spawnSync } from 'child_process'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { GREP_TOOL, GREP_EMPTY_RESULT } from '../grep.js'
+import { GREP_TOOL, GREP_EMPTY_RESULT, resetRgResolvedPath } from '../grep.js'
 import { resetResolvedEnvCache } from '../resolved-env.js'
 
 describe('GREP_TOOL', () => {
   let testDir: string
+
+  // rg 解析缓存跨用例存活（成功与失败都缓存）：每个用例独立探活，
+  // 防「PATH 不可用」类用例把失败缓存泄给下游的 native 用例。
+  beforeEach(() => {
+    resetRgResolvedPath()
+  })
 
   before(() => {
     testDir = mkdtempSync(join(tmpdir(), 'grep-test-'))
@@ -162,6 +168,9 @@ describe('GREP_TOOL', () => {
     const fbDir = mkdtempSync(join(tmpdir(), 'grep-fallback-'))
     const savedPath = process.env.PATH
     try {
+      // 模块级 rg 解析缓存跨测试存活：前面用例解析出的 rg 路径会绕过本次
+      // 探活直接走 native 分支，回退提示永不出现。开头清缓存、结尾恢复。
+      resetRgResolvedPath()
       mkdirSync(join(fbDir, 'src'), { recursive: true })
       writeFileSync(join(fbDir, 'src', 'hit.ts'), 'const FALLBACK_NEEDLE = 1\n')
       writeFileSync(join(fbDir, '.rivet-config.json'), JSON.stringify({
@@ -185,6 +194,7 @@ describe('GREP_TOOL', () => {
     } finally {
       process.env.PATH = savedPath
       resetResolvedEnvCache()
+      resetRgResolvedPath()
       rmSync(fbDir, { recursive: true, force: true })
     }
   })

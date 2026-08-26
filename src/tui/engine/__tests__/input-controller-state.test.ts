@@ -87,7 +87,7 @@ test('idle 空输入双击 Esc → 激活 rewind overlay', async () => {
   await tick()
 })
 
-test('slash 命令 ↑↓ 选择改变 slashSelectedIdx（通过 render 不报错验证）', async () => {
+test('slash 命令 ↑↓ 选择移动菜单选中（通过 render 不报错验证）', async () => {
   const { app, stdin } = makeApp()
   app.start()
 
@@ -95,7 +95,7 @@ test('slash 命令 ↑↓ 选择改变 slashSelectedIdx（通过 render 不报�
   app.setInput('/mod')
   await tick()
 
-  // ↑ 键 — 不报错即表示 InputController.slashSelectedIdx 路径正常
+  // ↑ 键 — 不报错即表示 slashMenu 导航路径正常
   stdin.dataHandler!('\x1B[A') // ↑ 序列
   await tick()
 
@@ -239,4 +239,172 @@ test('slash 命令输入 /model 后 Enter 不自动扩展为 /model list', async
 
   assert.equal(slashInputs.length, 1, '应提交一次 slash 命令')
   assert.equal(slashInputs[0], '/model', '输入 /model 后 Enter 应提交 /model 本身')
+})
+
+// ── slash 菜单状态机（Wave 2 接线）：PageUp/Down 翻页、ESC 关闭、Tab 补全、MRU ──
+
+const MENU_COMMANDS = [
+  { name: '/help', description: 'Show all commands' },
+  { name: '/compact', description: 'Compact conversation context' },
+  { name: '/cost', description: 'Show session cost' },
+  { name: '/clear', description: 'Clear conversation' },
+  { name: '/effort', description: 'Set reasoning effort', argsHint: 'off|low|medium|high|max' },
+  { name: '/exit', description: 'Quit' },
+  { name: '/review', description: 'Run code review' },
+  { name: '/review max', description: 'Run full squadron review' },
+  { name: '/team', description: 'Run team-mode workflow' },
+  { name: '/team max', description: 'Run team-mode planning-first' },
+  { name: '/starmap', description: 'Open starmap' },
+  { name: '/chronicle', description: 'Replay session' },
+]
+
+test('菜单打开时 PageDown 滚动选中（clamp 不环绕），PageUp 回卷', async () => {
+  const { app, stdin } = makeApp()
+  app.setSlashCommands(MENU_COMMANDS)
+  app.start()
+
+  app.setInput('/')
+  await tick()
+  const c = app.getInputController()
+  assert.equal(c.slashMenu.open, true, '空 query 打开菜单')
+  assert.equal(c.slashMenu.selected, 0)
+
+  // PageDown：选中 +5（SLASH_HINT_MAX_VISIBLE），clamp 到末项
+  stdin.dataHandler!('\x1B[6~')
+  await tick()
+  assert.equal(c.slashMenu.selected, 5, 'PageDown 一次 +5')
+
+  // 连续 PageDown clamp 到末项
+  for (let i = 0; i < 5; i++) {
+    stdin.dataHandler!('\x1B[6~')
+    await tick()
+  }
+  assert.equal(c.slashMenu.selected, c.slashMenu.matches.length - 1, '向下翻页 clamp 到末项')
+
+  // PageUp 回卷再 clamp 到首项
+  for (let i = 0; i < 8; i++) {
+    stdin.dataHandler!('\x1B[5~')
+    await tick()
+  }
+  assert.equal(c.slashMenu.selected, 0, '向上翻页 clamp 到首项')
+})
+
+test('菜单打开时 ESC 关闭菜单且不清空输入', async () => {
+  const { app, stdin } = makeApp()
+  app.setSlashCommands(MENU_COMMANDS)
+  app.start()
+
+  app.setInput('/h')
+  await tick()
+  assert.equal(app.getInputController().slashMenu.open, true, '/h 有匹配菜单打开')
+
+  stdin.dataHandler!('\x1B')
+  await new Promise(r => setTimeout(r, 100)) // lone ESC 有解析延迟
+  assert.equal(app.getInputController().slashMenu.open, false, 'Esc 关闭菜单')
+  assert.equal(app.getInputValue(), '/h', 'Esc 不清空输入（再按一次才清空）')
+
+  // 再按 ESC（菜单已关）→ 走原语义清空输入
+  stdin.dataHandler!('\x1B')
+  await new Promise(r => setTimeout(r, 100))
+  assert.equal(app.getInputValue(), '', '菜单关闭后 Esc 恢复清空语义')
+})
+
+test('菜单打开时 Tab 补全选中命令（带尾空格）', async () => {
+  const { app, stdin } = makeApp()
+  app.setSlashCommands(MENU_COMMANDS)
+  app.start()
+
+  app.setInput('/e')
+  await tick()
+  // /e 匹配：/effort(prefix) /exit(prefix)
+  assert.equal(app.getInputController().slashMenu.open, true)
+
+  stdin.dataHandler!('\t')
+  await tick()
+  assert.equal(app.getInputValue(), '/effort ', 'Tab 补全首项 /effort 并留参数位')
+})
+
+test('命令执行后 MRU 生效：下次查询同分命令排前', async () => {
+  const { app, stdin } = makeApp()
+  const slashInputs: string[] = []
+  app.setSlashCommands(MENU_COMMANDS)
+  app.setSlashHandler((input) => { slashInputs.push(input); return true })
+  app.start()
+
+  // 执行 /exit（不通过 ↑↓ 选择，直接完整输入 + Enter）
+  app.setInput('/exit')
+  await tick()
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.equal(slashInputs[0], '/exit')
+
+  // 重新查询 '/'：/exit 应在 MRU 影响下排到同分组最前（无 tier 时全量注册序，
+  // /exit 是注册序第 6；MRU 后应提前）
+  app.setInput('/')
+  await tick()
+  const names = app.getInputController().slashMenu.matches.map(m => m.name)
+  assert.equal(names[0], '/exit', 'MRU 命令排首位')
+  assert.ok(app.getInputController().slashMru.includes('exit'), 'MRU 记录存在')
+})
+
+test('参数模式：/effort 尾空格 → 菜单保持单条（ghost 由渲染层消费）', async () => {
+  const { app, stdin } = makeApp()
+  app.setSlashCommands(MENU_COMMANDS)
+  app.start()
+
+  app.setInput('/effort ')
+  await tick()
+  const menu = app.getInputController().slashMenu
+  assert.equal(menu.open, true, '参数模式菜单保持打开')
+  assert.deepEqual(menu.matches.map(m => m.name), ['/effort'], '参数模式精确单条')
+
+  // 继续输入参数 → 菜单关闭
+  app.setInput('/effort high')
+  await tick()
+  assert.equal(app.getInputController().slashMenu.open, false, '参数输入后菜单关闭')
+})
+
+test('输入变化 carry：同 query 刷新保持选中，query 变化重置', async () => {
+  const { app, stdin } = makeApp()
+  app.setSlashCommands(MENU_COMMANDS)
+  app.start()
+
+  app.setInput('/')
+  await tick()
+  // ↑↓ 移动选中（↓ 三次）
+  stdin.dataHandler!('\x1B[B')
+  await tick()
+  stdin.dataHandler!('\x1B[B')
+  await tick()
+  stdin.dataHandler!('\x1B[B')
+  await tick()
+  const selectedAfterMove = app.getInputController().slashMenu.selected
+  assert.equal(selectedAfterMove, 3, '↓ 三次选中第 3 项')
+
+  // 输入变化（query 变）：/clear → /cl 仍匹配 /clear，但 query 变了 → 重置 0
+  app.setInput('/cl')
+  await tick()
+  assert.equal(app.getInputController().slashMenu.selected, 0, 'query 变化重置选中')
+})
+
+// ── 用户级验收：菜单打开输入框钉底（渲染级）──
+// 小终端（120x24，maxRows=23）：输入 / 唤起菜单 → 整帧行数 ≤ 终端高度、
+// 输入框行仍在（剥离 ANSI 后断言）。真实终端目视留用户。
+
+test('小终端菜单打开：整帧 ≤ 终端高度且输入框行仍在（钉底）', async () => {
+  const { app, out, stdin } = makeApp()
+  app.setSlashCommands(MENU_COMMANDS)
+  app.start()
+
+  app.setInput('/')
+  await tick()
+  assert.equal(app.getInputController().slashMenu.open, true, '菜单打开')
+
+  const plain = out.chunks.join('')
+    .replace(/\x1B\[[0-9;?]*[a-zA-Z]/g, '')
+    .replace(/\x1B\][^\x07]*\x07/g, '')
+    .split('\n')
+    .filter(l => l.trim().length > 0)
+  assert.ok(plain.some(l => l.includes('❯')), '输入框行存在')
+  assert.ok(plain.length <= 24, `整帧 ${plain.length} 行 ≤ 终端高度 24（钉底：不越底滚动）`)
 })

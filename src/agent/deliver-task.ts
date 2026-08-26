@@ -1339,7 +1339,7 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
                     // rejected = 审查正常走完并发现问题（已落地，不是系统失败）
                     const terminalStatus: DelegationActivity['status'] =
                       outcome.verdict === 'verified' || outcome.verdict === 'nudge'
-                        ? 'passed'
+                        ? 'completed'
                         : outcome.verdict === 'rejected'
                           ? 'completed'
                           : 'failed'

@@ -138,7 +138,7 @@ export function tapAgentCallbacks(
   }
   if (inner.onPhaseChange) {
     const fn = inner.onPhaseChange.bind(inner)
-    tapped.onPhaseChange = (phase, detail) => { emit('phase', { phase, ...(detail ?? {}) }); fn(phase, detail) }
+    tapped.onPhaseChange = (phase, detail) => { emit('phase', { phase, ...detail }); fn(phase, detail) }
   }
   if (inner.onIntentNote) {
     const fn = inner.onIntentNote.bind(inner)
@@ -152,6 +152,13 @@ export function tapAgentCallbacks(
     tapped.onDecisionShift = (shift) => {
       emit('decision_shift', redactValue(shift) as Record<string, unknown>)
       fn(shift)
+    }
+  }
+  if (inner.onDomainDrift) {
+    const fn = inner.onDomainDrift.bind(inner)
+    tapped.onDomainDrift = (drift) => {
+      emit('domain_drift', redactValue(drift) as Record<string, unknown>)
+      fn(drift)
     }
   }
   if (inner.onDelegationActivity) {

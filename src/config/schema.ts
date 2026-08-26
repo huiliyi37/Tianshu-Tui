@@ -380,7 +380,8 @@ export const agentSchema = z.object({
    * 格式校验在 setDefaultModelConfig 层完成（需要校验 provider + model 存在性）。 */
   defaultModel: z.string().optional(),
   /**
-   * 会话 Auto 星域是否按消息关键词匹配换域（仅 defaultDomain='auto' 时生效）。
+   * 会话 Auto 星域是否按消息关键词匹配换域（defaultDomain='auto' 或当前
+   * 会话显式选择 Auto 时生效）。
    * 默认 true：Auto 按首条消息在 auto 池（天权/开阳/瑶光/天梁 + 自定义域）
    * 内 matchDomain，未命中回退 DEFAULT_DOMAIN（天权）。池外特化域（含华盖）
    * 经 defaultDomain 钉定或 /domain 手工切换进入。显式 false 时 Auto 固定落到

@@ -36,7 +36,7 @@ describe('overlayFleetStatus', () => {
 
   it('maps passed→done and blocked→blocked', () => {
     const fleet = new FleetRegistry()
-    fleet.apply({ workOrderId: 'wo_team:t1', parentToolId: 'p1', status: 'passed' }, 0)
+    fleet.apply({ workOrderId: 'wo_team:t1', parentToolId: 'p1', status: 'completed' }, 0)
     fleet.apply({ workOrderId: 'wo_team:t2', parentToolId: 'p1', status: 'blocked' }, 0)
     const model = overlayFleetStatus(baseModel(), fleet.getWorkers(10))
     assert.equal(model.tasks.find(t => t.id === 't1')!.status, 'done')
@@ -45,7 +45,7 @@ describe('overlayFleetStatus', () => {
 
   it('marks a downstream waiting task ready once its deps are done', () => {
     const fleet = new FleetRegistry()
-    fleet.apply({ workOrderId: 'wo_team:t1', parentToolId: 'p1', status: 'passed' }, 0)
+    fleet.apply({ workOrderId: 'wo_team:t1', parentToolId: 'p1', status: 'completed' }, 0)
     const model = overlayFleetStatus(baseModel(), fleet.getWorkers(10))
     const t3 = model.tasks.find(t => t.id === 't3')!
     assert.equal(t3.status, 'waiting')
@@ -70,7 +70,7 @@ describe('overlayFleetStatus', () => {
 describe('buildTeamPanelLines progress + live rows', () => {
   it('renders a group progress bar and per-task live rows', () => {
     const fleet = new FleetRegistry()
-    fleet.apply({ workOrderId: 'wo_team:t1', parentToolId: 'p1', status: 'passed' }, 0)
+    fleet.apply({ workOrderId: 'wo_team:t1', parentToolId: 'p1', status: 'completed' }, 0)
     fleet.apply({ workOrderId: 'wo_team:t2', parentToolId: 'p1', status: 'running', progressLine: 'scanning' }, 0)
     const model = overlayFleetStatus(baseModel(), fleet.getWorkers(2500))
     const plain = buildTeamPanelLines(model, 80).join('\n')

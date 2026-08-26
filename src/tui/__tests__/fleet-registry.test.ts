@@ -17,9 +17,9 @@ test('FleetRegistry: worker_gone 推断终态可被真实终态覆盖（误杀�
   fleet.apply({ workOrderId: 'wo_w', parentToolId: 'tool_a', status: 'failed', failureReason: 'worker_gone' }, 6000)
   assert.equal(fleet.getWorkerById('wo_w')!.status, 'failed')
   // 真实终态到达：必须覆盖 worker_gone 占位
-  fleet.apply({ workOrderId: 'wo_w', parentToolId: 'tool_a', status: 'passed', progressLine: 'real done' }, 7000)
+  fleet.apply({ workOrderId: 'wo_w', parentToolId: 'tool_a', status: 'completed', progressLine: 'real done' }, 7000)
   const w = fleet.getWorkerById('wo_w')!
-  assert.equal(w.status, 'passed', '真实终态必须覆盖 worker_gone 推断终态')
+  assert.equal(w.status, 'completed', '真实终态必须覆盖 worker_gone 推断终态')
   assert.equal(w.panelStatus, 'done')
   assert.equal(w.failureReason, undefined)
   assert.equal(w.activity, 'real done')
@@ -32,7 +32,7 @@ test('FleetRegistry: 非 worker_gone 终态不被后续事件覆盖（终态冻�
   fleet.apply(running('wo_r', 'tool_a', 'reviewer'), 1000)
   fleet.apply({ workOrderId: 'wo_r', parentToolId: 'tool_a', status: 'failed', failureReason: 'review-findings' }, 2000)
   // 迟到 passed 不覆盖真实失败终态
-  fleet.apply({ workOrderId: 'wo_r', parentToolId: 'tool_a', status: 'passed' }, 3000)
+  fleet.apply({ workOrderId: 'wo_r', parentToolId: 'tool_a', status: 'completed' }, 3000)
   const w = fleet.getWorkerById('wo_r')!
   assert.equal(w.status, 'failed', '真实失败终态保持冻结')
   assert.equal(w.elapsedMs, 1000)
@@ -43,7 +43,7 @@ test('FleetRegistry: findGoneWorkers 只返回 running 且已不在跑的 worker
   fleet.apply(running('wo_gone', 'tool_a', 'patcher'), 1000)
   fleet.apply(running('wo_alive', 'tool_b', 'reviewer'), 1000)
   fleet.apply(running('wo_done', 'tool_c', 'verifier'), 1000)
-  fleet.apply({ workOrderId: 'wo_done', parentToolId: 'tool_c', status: 'passed' }, 2000)
+  fleet.apply({ workOrderId: 'wo_done', parentToolId: 'tool_c', status: 'completed' }, 2000)
 
   const isRunning = (id: string) => id === 'wo_alive'
   const gone = fleet.findGoneWorkers(isRunning, 3000)
@@ -87,13 +87,13 @@ test('FleetRegistry: 首见 running 进入 active，elapsed 自 startedAt 计', 
 test('FleetRegistry: running→terminal 归约，elapsed 在终态后冻结', () => {
   const fleet = new FleetRegistry()
   fleet.apply(running('wo_x', 'tool_a', 'patcher'), 1000)
-  fleet.apply({ workOrderId: 'wo_x', parentToolId: 'tool_a', status: 'passed', progressLine: 'done summary' }, 2000)
+  fleet.apply({ workOrderId: 'wo_x', parentToolId: 'tool_a', status: 'completed', progressLine: 'done summary' }, 2000)
   // 终态 worker 不在 active 列表
   assert.equal(fleet.getActiveWorkers(9999).length, 0)
   const all = fleet.getWorkers(9999)
   assert.equal(all.length, 1)
   const w = all[0]!
-  assert.equal(w.status, 'passed')
+  assert.equal(w.status, 'completed')
   assert.equal(w.panelStatus, 'done')
   assert.equal(w.terminal, true)
   // terminal 事件无 profile → 保留首见 profile
@@ -149,7 +149,7 @@ test('FleetRegistry: 分组进度按 parentToolId 计数派生', () => {
   fleet.apply(running('wo1', 'batchTool'), 0)
   fleet.apply(running('wo2', 'batchTool'), 0)
   fleet.apply(running('wo3', 'batchTool'), 0)
-  fleet.apply({ workOrderId: 'wo1', parentToolId: 'batchTool', status: 'passed' }, 1)
+  fleet.apply({ workOrderId: 'wo1', parentToolId: 'batchTool', status: 'completed' }, 1)
   fleet.apply({ workOrderId: 'wo2', parentToolId: 'batchTool', status: 'blocked' }, 1)
   const prog = fleet.getGroupProgress('batchTool')
   assert.deepEqual(prog, { total: 3, done: 1, failed: 1, running: 1 })
@@ -178,20 +178,20 @@ test('FleetRegistry: clearGroup 仅清理目标组', () => {
 test('FleetRegistry: clearGroup 归档终态记录，仍可通过 getWorkerById 查询', () => {
   const fleet = new FleetRegistry()
   fleet.apply(running('wo_x', 'toolA', 'patcher'), 0)
-  fleet.apply({ workOrderId: 'wo_x', parentToolId: 'toolA', status: 'passed', progressLine: 'done' }, 100)
+  fleet.apply({ workOrderId: 'wo_x', parentToolId: 'toolA', status: 'completed', progressLine: 'done' }, 100)
   fleet.clearGroup('toolA')
   assert.equal(fleet.size, 0)
   assert.equal(fleet.completedSize(), 1)
   const w = fleet.getWorkerById('wo_x', 200)
   assert.ok(w)
-  assert.equal(w!.status, 'passed')
+  assert.equal(w!.status, 'completed')
   assert.equal(w!.profile, 'patcher')
 })
 
 test('FleetRegistry: getCompletedWorkers / getAllWorkers 支持 filter', () => {
   const fleet = new FleetRegistry()
   fleet.apply(running('wo_active', 'toolA'), 0)
-  fleet.apply({ workOrderId: 'wo_done', parentToolId: 'toolA', status: 'passed' }, 0)
+  fleet.apply({ workOrderId: 'wo_done', parentToolId: 'toolA', status: 'completed' }, 0)
   assert.equal(fleet.getCompletedWorkers().length, 1)
   assert.equal(fleet.getAllWorkers(0, 'all').length, 2)
   assert.equal(fleet.getAllWorkers(0, 'active').length, 1)
@@ -224,7 +224,7 @@ test('FleetRegistry: 终态 usage/model 保留，tokenCount 从 usage 派生并�
   fleet.apply({
     workOrderId: 'wo_u',
     parentToolId: 'toolA',
-    status: 'passed',
+    status: 'completed',
     progressLine: 'done',
     model: 'deepseek-v4',
     usage: { input_tokens: 3000, output_tokens: 500, total_tokens: 3500 },
@@ -245,7 +245,7 @@ test('FleetRegistry: usage 缺 total_tokens 时 tokenCount 回退 input+output',
   fleet.apply({
     workOrderId: 'wo_v',
     parentToolId: 't',
-    status: 'passed',
+    status: 'completed',
     usage: { input_tokens: 100, output_tokens: 50 },
   }, 0)
   assert.equal(fleet.getWorkerById('wo_v', 1)!.tokenCount, 150)
@@ -287,7 +287,7 @@ const CONTRACT_B = { objective: '为 rewind 补回归测试', profile: 'reviewer
 test('FleetRegistry: 稳定 id 再派发 → 契约换成本轮的，不粘住第一轮', () => {
   const fleet = new FleetRegistry()
   fleet.apply({ workOrderId: 'batch:0', parentToolId: 'tool_1', status: 'running', contract: CONTRACT_A }, 0)
-  fleet.apply({ workOrderId: 'batch:0', parentToolId: 'tool_1', status: 'passed', summary: '第一轮结论' }, 100)
+  fleet.apply({ workOrderId: 'batch:0', parentToolId: 'tool_1', status: 'completed', summary: '第一轮结论' }, 100)
   fleet.apply({ workOrderId: 'batch:0', parentToolId: 'tool_2', status: 'running', contract: CONTRACT_B }, 200)
 
   const w = fleet.getWorkerById('batch:0', 300)!
@@ -301,7 +301,7 @@ test('FleetRegistry: 稳定 id 再派发 → 契约换成本轮的，不粘住�
 test('FleetRegistry: 稳定 id 再派发 → 计数与耗时从本轮重新起算', () => {
   const fleet = new FleetRegistry()
   fleet.apply({ workOrderId: 'team:T1', parentToolId: 'tool_1', status: 'running', toolUseCount: 7, tokenCount: 5000 }, 0)
-  fleet.apply({ workOrderId: 'team:T1', parentToolId: 'tool_1', status: 'passed' }, 100)
+  fleet.apply({ workOrderId: 'team:T1', parentToolId: 'tool_1', status: 'completed' }, 100)
   fleet.apply({ workOrderId: 'team:T1', parentToolId: 'tool_2', status: 'running' }, 1000)
 
   const w = fleet.getWorkerById('team:T1', 1500)!
@@ -313,7 +313,7 @@ test('FleetRegistry: 稳定 id 再派发 → 计数与耗时从本轮重新起�
 test('FleetRegistry: 归档后再派发同一 id → 走新记录，不复活归档记录', () => {
   const fleet = new FleetRegistry()
   fleet.apply({ workOrderId: 'batch:0', parentToolId: 'toolA', status: 'running', contract: CONTRACT_A }, 0)
-  fleet.apply({ workOrderId: 'batch:0', parentToolId: 'toolA', status: 'passed', summary: '旧结论' }, 100)
+  fleet.apply({ workOrderId: 'batch:0', parentToolId: 'toolA', status: 'completed', summary: '旧结论' }, 100)
   fleet.clearGroup('toolA')
   assert.equal(fleet.completedSize(), 1)
 
@@ -327,9 +327,9 @@ test('FleetRegistry: 归档后再派发同一 id → 走新记录，不复活归
 test('FleetRegistry: 同轮内的终态重放不被误判成新一轮', () => {
   const fleet = new FleetRegistry()
   fleet.apply({ workOrderId: 'batch:0', parentToolId: 'toolA', status: 'running', contract: CONTRACT_A }, 0)
-  fleet.apply({ workOrderId: 'batch:0', parentToolId: 'toolA', status: 'passed', summary: '结论' }, 100)
+  fleet.apply({ workOrderId: 'batch:0', parentToolId: 'toolA', status: 'completed', summary: '结论' }, 100)
   // settle 即时事件 + 批末兜底循环双发是设计使然
-  fleet.apply({ workOrderId: 'batch:0', parentToolId: 'toolA', status: 'passed', summary: '结论' }, 150)
+  fleet.apply({ workOrderId: 'batch:0', parentToolId: 'toolA', status: 'completed', summary: '结论' }, 150)
 
   const w = fleet.getWorkerById('batch:0', 200)!
   assert.equal(w.summary, '结论')
@@ -346,33 +346,33 @@ test('FleetRegistry: version — apply 新增与更新各递增一次', () => {
   assert.equal(fleet.version, 1, '新增记录')
   fleet.apply(running('wo_v1', 't', undefined, '⚙ grep'), 1)
   assert.equal(fleet.version, 2, '更新既有记录')
-  fleet.apply({ workOrderId: 'wo_v1', parentToolId: 't', status: 'passed' }, 2)
+  fleet.apply({ workOrderId: 'wo_v1', parentToolId: 't', status: 'completed' }, 2)
   assert.equal(fleet.version, 3, 'running→terminal 更新')
 })
 
 test('FleetRegistry: version — 终态重放无变化不递增，补缺 model/usage 才递增', () => {
   const fleet = new FleetRegistry()
   fleet.apply(running('wo_v2', 't'), 0)
-  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'passed' }, 1)
+  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'completed' }, 1)
   const v = fleet.version
   // 完全相同（无 model/usage 可补）的终态重放 → 版本不变
-  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'passed' }, 2)
+  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'completed' }, 2)
   assert.equal(fleet.version, v)
   // 重放补上此前缺失的 model → 真实状态变更
-  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'passed', model: 'm1' }, 3)
+  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'completed', model: 'm1' }, 3)
   assert.equal(fleet.version, v + 1)
   // model 已存在，重放无可补 → 不变
-  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'passed', model: 'm1' }, 4)
+  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'completed', model: 'm1' }, 4)
   assert.equal(fleet.version, v + 1)
   // 重放补上 usage → 递增
-  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'passed', usage: { input_tokens: 10, output_tokens: 5 } }, 5)
+  fleet.apply({ workOrderId: 'wo_v2', parentToolId: 't', status: 'completed', usage: { input_tokens: 10, output_tokens: 5 } }, 5)
   assert.equal(fleet.version, v + 2)
 })
 
 test('FleetRegistry: version — clearGroup / markSeen / clear 的递增时机', () => {
   const fleet = new FleetRegistry()
   fleet.apply(running('wo_v3', 'toolA'), 0)
-  fleet.apply({ workOrderId: 'wo_v3', parentToolId: 'toolA', status: 'passed' }, 1)
+  fleet.apply({ workOrderId: 'wo_v3', parentToolId: 'toolA', status: 'completed' }, 1)
   const v0 = fleet.version
 
   fleet.markSeen('wo_v3')
@@ -399,12 +399,12 @@ test('FleetRegistry: clearGroup — 归档区封顶 TERMINAL_RECORDS_CAP，按�
   const fleet = new FleetRegistry()
   const total = TERMINAL_RECORDS_CAP + 2
   for (let i = 0; i < total; i++) {
-    fleet.apply({ workOrderId: `wo_cap_${i}`, parentToolId: `tool_${i}`, status: 'passed' }, i)
+    fleet.apply({ workOrderId: `wo_cap_${i}`, parentToolId: `tool_${i}`, status: 'completed' }, i)
     const r = fleet.clearGroup(`tool_${i}`, i + total)
     // settled 内容不受封顶影响：本组刚归档的 worker 完整返回
     assert.equal(r.settled.length, 1)
     assert.equal(r.settled[0]!.workerId, `wo_cap_${i}`)
-    assert.equal(r.settled[0]!.status, 'passed')
+    assert.equal(r.settled[0]!.status, 'completed')
     if (i < TERMINAL_RECORDS_CAP) {
       assert.deepEqual(r.evictedIds, [], '未超上限不淘汰')
     } else {

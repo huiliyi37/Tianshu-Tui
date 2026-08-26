@@ -66,6 +66,6 @@ export function normalizeAntiAnchoringConfig(input: AntiAnchoringConfigInput): A
   return {
     ...DEFAULT_ANTI_ANCHORING_CONFIG,
     ...input,
-    anchorBreakScout: { ...DEFAULT_ANCHOR_BREAK_SCOUT_CONFIG, ...(input.anchorBreakScout ?? {}) },
+    anchorBreakScout: { ...DEFAULT_ANCHOR_BREAK_SCOUT_CONFIG, ...input.anchorBreakScout },
   }
 }

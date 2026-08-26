@@ -36,7 +36,7 @@ export function isValidGitUrl(url: string): boolean {
 
   // SCP-style: git@github.com:owner/repo.git (no scheme, starts with user@host:path)
   // This is the most common ssh shorthand — accept if it has the shape.
-  if (/^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[\w./-]+\.git(?:\/?|\#.*)$/.test(trimmed)) return true
+  if (/^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+:[\w./-]+\.git(?:\/?|#.*)$/.test(trimmed)) return true
 
   // URL-form: must parse and have an allowed scheme.
   try {

@@ -89,6 +89,10 @@ desktop/.rivet/
 .tmp-test-fixture
 .test-tmp/
 
+# 退役捆绑技能的本地备份（writing/executing-plans 消融 + 撤出三项——
+# 纯本地归档，不进提交、不进打包；git 历史与 docs/skills/optional/ 仍保有内容）
+skills-backup/
+
 # === Agent / tool 运行态（生成物，非源码）===
 # .rivet: 策展子目录(knowledge/skills/plans/agents/...)保持跟踪，仅忽略纯运行态
 .rivet/backups/

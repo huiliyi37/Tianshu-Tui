@@ -189,7 +189,7 @@ export const EDIT_FILE_TOOL: Tool = {
             if (dryRun) {
               return buildDryRunPreview(params.cwd, filePath, freshContent, newContent)
             }
-            trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
+            await trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
             {
               const land = await writeEditLanding(params, filePath, freshContent, newContent, freshEol)
               if ('delegatedRejectOrError' in land) return land.delegatedRejectOrError
@@ -214,7 +214,7 @@ export const EDIT_FILE_TOOL: Tool = {
           if (dryRun) {
             return buildDryRunPreview(params.cwd, filePath, freshContent, recovered)
           }
-          trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
+          await trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
           {
             const land = await writeEditLanding(params, filePath, freshContent, recovered, freshEol)
             if ('delegatedRejectOrError' in land) return land.delegatedRejectOrError
@@ -302,7 +302,7 @@ export const EDIT_FILE_TOOL: Tool = {
       if (dryRun) {
         return buildDryRunPreview(params.cwd, filePath, content, newContent)
       }
-      trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
+      await trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
       {
         const land = await writeEditLanding(params, filePath, content, newContent, eol)
         if ('delegatedRejectOrError' in land) return land.delegatedRejectOrError
@@ -332,7 +332,7 @@ export const EDIT_FILE_TOOL: Tool = {
         if (dryRun) {
           return buildDryRunPreview(params.cwd, filePath, content, recovered)
         }
-        trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
+        await trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
         {
           const land = await writeEditLanding(params, filePath, content, recovered, eol)
           if ('delegatedRejectOrError' in land) return land.delegatedRejectOrError
@@ -372,7 +372,7 @@ export const EDIT_FILE_TOOL: Tool = {
     if (dryRun) {
       return buildDryRunPreview(params.cwd, filePath, content, newContent)
     }
-    trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
+    await trackFileChange(params.cwd, { filePath: relative(params.cwd, filePath), action: 'edit', toolCallId: params.toolUseId ?? 'edit_file' })
     {
       const land = await writeEditLanding(params, filePath, content, newContent, eol)
       if ('delegatedRejectOrError' in land) return land.delegatedRejectOrError
@@ -496,7 +496,7 @@ async function finalizeEdit(
   const check = await checkSyntax(filePath, after)
   if (check.fatal) {
     const relPath = relative(cwd, filePath)
-    const restored = restoreLatestBackup(cwd, relPath, sessionId)
+    const restored = await restoreLatestBackup(cwd, relPath, sessionId)
     // 回滚后 mtime 会变（copyFileSync 不保留原始时间戳），但内容已恢复。
     // 刷新读文件 mtime 追踪器——否则后续 hash_edit 的仅位置锚点检查会误报
     // "文件已变化，请重新 read_file"，主控白费一轮重读。

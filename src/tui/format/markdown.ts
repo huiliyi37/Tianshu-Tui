@@ -351,7 +351,7 @@ export function guessLang(text: string): string | undefined {
   if (/\bdef\b|\bclass\b.*:$|import\s+\w+/m.test(sample)) return 'python'
   if (/\bfunc\b|\bpackage\b\s+\w+|:=/.test(sample)) return 'go'
   if (/\bfn\b|\blet\s+mut\b|\bimpl\b/.test(sample)) return 'rust'
-  if (/^#!/.test(sample) || /\bfi\b|\bdone\b|\besac\b/.test(sample)) return 'bash'
+  if (sample.startsWith('#!') || /\bfi\b|\bdone\b|\besac\b/.test(sample)) return 'bash'
   return undefined
 }
 
@@ -404,14 +404,14 @@ export function tryFormatGitCommitLine(line: string, theme: RivetTheme): string 
   if (!match) return null
 
   const [, hash, sep, rest] = match as unknown as [string, string, string, string]
-  if (!/\b\d+\s+files?|\+\d+|\-\d+|insertions?|deletions?/i.test(rest)) return null
+  if (!/\b\d+\s+files?|\+\d+|-\d+|insertions?|deletions?/i.test(rest)) return null
 
   const hashPart = color(`⎇ ${hash}`, theme.secondary, { bold: true, underline: true })
   const sepPart = color(` ${sep} `, theme.dim)
 
   const formattedRest = rest
     .replace(/\+(\d+)/g, color('+$1', theme.success, { bold: true }))
-    .replace(/\-(\d+)/g, color('-$1', theme.error, { bold: true }))
+    .replace(/-(\d+)/g, color('-$1', theme.error, { bold: true }))
     .replace(/(\d+)(\s+files?)/g, color('$1$2', theme.assistantColor))
 
   return `${indent}${hashPart}${sepPart}${formattedRest}`
@@ -428,7 +428,7 @@ export function highlightCodeLineNumber(renderedLine: string, theme: RivetTheme)
     return `${indent}${color(num, theme.warning, { bold: true })}${rest}`
   }
 
-  const digitNumRe = /^(\s*)(\d+[\.\)])(\s+.*)$/
+  const digitNumRe = /^(\s*)(\d+[.\)])(\s+.*)$/
   const digitMatch = digitNumRe.exec(renderedLine)
   if (digitMatch) {
     const [, indent, num, rest] = digitMatch as unknown as [string, string, string, string]
@@ -616,7 +616,7 @@ export function formatMarkdown(input: FormatMarkdownInput, theme: RivetTheme): s
     const plainLine = lineStr.replace(/\u001b\[[0-9;]*m/g, '').trim()
     if (!plainLine) continue
 
-    if (/[？\?]\s*$/.test(plainLine) && !plainLine.includes('⚡')) {
+    if (/[？?]\s*$/.test(plainLine) && !plainLine.includes('⚡')) {
       result[i] = `${color('⚡', theme.warning, { bold: true })} ${lineStr}`
     }
     break

@@ -21,7 +21,7 @@ import { spawnHidden } from '../tools/spawn-hidden.js'
  * `=` `,` 仅作普通 flag 字符放行（`--reporter=dot` / `pytest -k a,b`）：
  * 它们在 argv 定位处不具备命令链接或重定向能力。
  */
-const TOKEN_RE = /^[A-Za-z0-9@._+\/\\:=,-]+$/
+const TOKEN_RE = /^[A-Za-z0-9@._+/\\:=,-]+$/
 
 /** npm/pnpm/yarn 家族：`test` 或 `run <script>`（script 名必须存在）。 */
 function matchPackageRunner(argv: string[]): boolean {

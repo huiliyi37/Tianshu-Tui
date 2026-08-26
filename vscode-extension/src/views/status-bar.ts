@@ -14,7 +14,7 @@ export class StatusBarController implements vscode.Disposable {
 
   constructor() {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
-    this.item.command = 'tianshu.cockpit.focus'
+    this.item.command = 'tianshu.openInEditor'
     this.render()
     this.item.show()
   }

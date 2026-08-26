@@ -46,7 +46,7 @@ describe('派发契约卡 — 稳定 id 再派发', () => {
     const { app, out } = makeApp()
 
     send(app, { workOrderId: 'batch:0', parentToolId: 'tool_1', status: 'running', contract: contract('审查缓存边界') })
-    send(app, { workOrderId: 'batch:0', parentToolId: 'tool_1', status: 'passed', summary: '第一轮结论' })
+    send(app, { workOrderId: 'batch:0', parentToolId: 'tool_1', status: 'completed', summary: '第一轮结论' })
     const firstRound = stripAnsi(out.chunks.join(''))
     assert.match(firstRound, /审查缓存边界/, '第一轮本就该打卡')
 
@@ -75,7 +75,7 @@ describe('派发契约卡 — 稳定 id 再派发', () => {
   test('终态回放不补打派发卡', () => {
     const { app, out } = makeApp()
 
-    send(app, { workOrderId: 'batch:0', parentToolId: 'tool_1', status: 'passed', contract: contract('审查缓存边界'), summary: '结论' })
+    send(app, { workOrderId: 'batch:0', parentToolId: 'tool_1', status: 'completed', contract: contract('审查缓存边界'), summary: '结论' })
 
     assert.doesNotMatch(stripAnsi(out.chunks.join('')), /审查缓存边界/, '已结束的 worker 不该再打派发卡')
   })

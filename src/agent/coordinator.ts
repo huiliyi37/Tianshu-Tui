@@ -505,22 +505,30 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
-function classifyWorkerError(error: unknown): WorkerFailureReason {
+export function classifyWorkerError(error: unknown): WorkerFailureReason {
   const msg = error instanceof Error ? error.message : String(error)
   if (/timed out|timeout|exceeded.*time/i.test(msg)) return 'timeout'
   if (/JSON|parse.*fail|malformed|unexpected token|Unterminated string/i.test(msg)) return 'json_parse'
   if (/schema|validation.*fail|does not match/i.test(msg)) return 'schema_mismatch'
   if (/circuit.*open|breaker/i.test(msg)) return 'circuit_open'
-  if (/aborted|cancelled|signal/i.test(msg)) return 'caller_aborted'
+  // stall-sweep 击杀消息自带 "stalled:"（wrapAbort 构造）；置 caller_aborted 之前——
+  // 该消息同时含 "aborted by stall sweep"，空转语义优先于取消语义（2026-08-26 收尾）。
+  if (/stalled/i.test(msg)) return 'stalled'
+  if (/delegation aborted|aborted during|caller.*cancelled|cancelled.*caller/i.test(msg)) return 'caller_aborted'
   if (/claim.*conflict|claimed by/i.test(msg)) return 'claim_conflict'
-  if (/crash|killed|signal|ECONNRESET/i.test(msg)) return 'worker_crash'
+  // 不带裸 'signal'：含 signal 但非崩溃的消息（如"signal already used"）会
+  // 误判 worker_crash；"killed by signal 9" 由 killed 覆盖，漏归 unknown
+  // 比误判崩溃更诚实（审查 LOW 收口，2026-08-25）。
+  if (/crash|killed|ECONNRESET/i.test(msg)) return 'worker_crash'
   return 'unknown'
 }
 
-function workerFailureResult(order: WorkOrder, error: unknown, opts?: { nextActions?: string[]; failureReason?: WorkerFailureReason }): WorkerResult {
+export function workerFailureResult(order: WorkOrder, error: unknown, opts?: { nextActions?: string[]; failureReason?: WorkerFailureReason }): WorkerResult {
   const reason = error instanceof Error ? error.message : String(error)
   const nextActions = opts?.nextActions ?? ['Primary should continue without trusting this worker result']
-  const failureReason = opts?.failureReason ?? 'unknown'
+  // 兜底归类：未显式传 reason 时按错误消息推断（timeout/crash/parse 等），
+  // 不再一律盖 'unknown'——消费方可按 failureReason 差异化恢复。
+  const failureReason = opts?.failureReason ?? classifyWorkerError(error)
   return {
     workOrderId: order.id,
     status: 'blocked',

@@ -977,7 +977,7 @@ describe('/permission', () => {
       pushStatic: (entry) => entries.push(entry.content),
     }))
     assert.equal(handled, true)
-    assert.ok(entries[0]!.includes('当前权限: Manual (manual)'), entries[0])
+    assert.ok(entries[0]!.includes('当前权限: 监督 (manual)'), entries[0])
   })
 
   it('quick-switch to manual persists as default', async () => {
@@ -999,7 +999,7 @@ describe('/permission', () => {
     assert.equal(mode, 'manual')
     assert.equal(autoSafe, false)
     assert.equal(persisted, 'manual')
-    assert.ok(entries[0]!.includes('已切换至 Manual'), entries[0])
+    assert.ok(entries[0]!.includes('已切换至 监督'), entries[0])
   })
 
   it('quick-switch to auto persists as default', async () => {
@@ -1021,7 +1021,7 @@ describe('/permission', () => {
     assert.equal(mode, 'auto-safe')
     assert.equal(autoSafe, true)
     assert.equal(persisted, 'auto-safe')
-    assert.ok(entries[0]!.includes('已切换至 Auto'), entries[0])
+    assert.ok(entries[0]!.includes('已切换至 自动'), entries[0])
   })
 
   it('quick-switch to auto with checkpoint interval', async () => {
@@ -1056,8 +1056,47 @@ describe('/permission', () => {
     assert.equal(handled, true)
     // mode should NOT be changed without confirm
     assert.equal(mode, null)
-    assert.ok(entries[0]!.includes('YOLO 模式风险说明'), entries[0])
-    assert.ok(entries[0]!.includes('确认进入: /permission yolo confirm'), entries[0])
+    assert.ok(entries[0]!.includes('全自动风险说明'), entries[0])
+    assert.ok(entries[0]!.includes('/permission yolo confirm'), entries[0])
+    assert.ok(entries[0]!.includes('/permission unattended confirm'), entries[0])
+  })
+
+  it('quick-switch via supervise alias persists as default', async () => {
+    let mode: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'supervise'],
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+      } as any,
+      setAutoSafe: () => {},
+      persistApprovalMode: () => {},
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'manual')
+    assert.ok(entries[0]!.includes('已切换至 监督'), entries[0])
+  })
+
+  it('quick-switch via unattended confirm persists as default', async () => {
+    let mode: string | null = null
+    let persisted: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'unattended', 'confirm'],
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+      } as any,
+      setAutoSafe: () => {},
+      persistApprovalMode: (m: string) => { persisted = m },
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'dangerously-skip-permissions')
+    assert.equal(persisted, 'dangerously-skip-permissions')
+    assert.ok(entries[0]!.includes('已切换至 全自动'), entries[0])
   })
 
   it('quick-switch to yolo with confirm persists as default', async () => {
@@ -1079,7 +1118,7 @@ describe('/permission', () => {
     assert.equal(mode, 'dangerously-skip-permissions')
     assert.equal(autoSafe, false)
     assert.equal(persisted, 'dangerously-skip-permissions')
-    assert.ok(entries[0]!.includes('已切换至 YOLO'), entries[0])
+    assert.ok(entries[0]!.includes('已切换至 全自动'), entries[0])
   })
 
   it('quick-switch to yolo WITHOUT confirm does not persist', async () => {
@@ -1094,7 +1133,7 @@ describe('/permission', () => {
     }))
     assert.equal(handled, true)
     assert.equal(persisted, null)
-    assert.ok(entries[0]!.includes('YOLO 模式风险说明'), entries[0])
+    assert.ok(entries[0]!.includes('全自动风险说明'), entries[0])
   })
 
   it('switches approval mode via /permission mode', async () => {
@@ -1184,7 +1223,7 @@ describe('/yes — one-command YOLO shortcut', () => {
     assert.equal(mode, 'dangerously-skip-permissions')
     assert.equal(autoSafe, false)
     assert.equal(persisted, 'dangerously-skip-permissions')
-    assert.ok(entries[0]!.includes('YOLO 已开启'), entries[0])
+    assert.ok(entries[0]!.includes('全自动已开启'), entries[0])
   })
 
   it('/yes off returns to Auto and persists', async () => {
@@ -1203,7 +1242,7 @@ describe('/yes — one-command YOLO shortcut', () => {
     assert.equal(mode, 'auto-safe')
     assert.equal(autoSafe, true)
     assert.equal(persisted, 'auto-safe')
-    assert.ok(entries[0]!.includes('切回 Auto'), entries[0])
+    assert.ok(entries[0]!.includes('切回 自动'), entries[0])
   })
 
   it('/permission yolo risk text mentions /yes as confirm path', async () => {

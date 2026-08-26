@@ -18,6 +18,8 @@
  * - 逃生阀：RIVET_SKILL_GATE=0 整体禁用。
  */
 
+import { RETIRED_BUNDLED_SKILLS } from '../skills/skill-loader.js'
+
 /** 显式工具调用形状：skill(name="executing-plans") / skill(name=executing-plans) */
 const SKILL_CALL_RE = /skill\(\s*name\s*=\s*["'「]?([A-Za-z][\w-]*)/g
 
@@ -81,6 +83,9 @@ export interface SkillGateVerdict {
   missing: string[]
   /** 点名但本运行时无此 skill → 留痕不拦。 */
   unavailable: string[]
+  /** 点名但已退役为原生流程（writing-plans / executing-plans）→ 不拦，
+   *  执行方按原生 <plan-mode> / <plan-executing> 纪律执行。 */
+  native: string[]
 }
 
 /** 纯计算判定，全部名称比较大小写不敏感。 */
@@ -90,14 +95,23 @@ export function evaluateSkillGate(
 ): SkillGateVerdict {
   const available = new Set([...opts.availableNames].map(n => n.toLowerCase()))
   const invoked = new Set([...opts.invokedNames].map(n => n.toLowerCase()))
+  const retired = new Set(RETIRED_BUNDLED_SKILLS.map(e => e.name.toLowerCase()))
   const missing: string[] = []
   const unavailable: string[] = []
+  const native: string[] = []
   for (const name of required) {
     const k = name.toLowerCase()
-    if (!available.has(k)) unavailable.push(name)
-    else if (!invoked.has(k)) missing.push(name)
+    if (retired.has(k)) {
+      // Retired → native path: no skill file to load, mapped guidance handled
+      // by the skill tool's retired-name mapping.
+      native.push(name)
+    } else if (!available.has(k)) {
+      unavailable.push(name)
+    } else if (!invoked.has(k)) {
+      missing.push(name)
+    }
   }
-  return { missing, unavailable }
+  return { missing, unavailable, native }
 }
 
 /** 硬拦错误文案（executePlan 抛出用）。 */

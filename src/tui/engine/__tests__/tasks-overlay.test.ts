@@ -85,7 +85,7 @@ test('/tasks Tab cycles filter', () => {
 
   ;(app.callbacks as any).onToolUse('d1', 'delegate_batch', { objective: 'find bugs' })
   ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_1', parentToolId: 'd1', profile: 'reviewer', status: 'running' })
-  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_2', parentToolId: 'd1', profile: 'patcher', status: 'passed' })
+  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_2', parentToolId: 'd1', profile: 'patcher', status: 'completed' })
   ;(app.callbacks as any).onToolResult('d1', 'delegate_batch', JSON.stringify({ status: 'passed' }), false)
 
   app.activateOverlay('tasks')
@@ -133,7 +133,7 @@ test('unread：终态未查看标记，openWorkerDetail 后清除', () => {
   ;(app.callbacks as any).onToolUse('d1', 'delegate_batch', { objective: 'x' })
   ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_1', parentToolId: 'd1', profile: 'reviewer', status: 'running' })
   ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_2', parentToolId: 'd1', profile: 'patcher', status: 'running' })
-  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_1', parentToolId: 'd1', status: 'passed', progressLine: 'done' })
+  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_1', parentToolId: 'd1', status: 'completed', progressLine: 'done' })
 
   const before = app.getTasksData('all')
   const w1 = before.groups[0]!.workers.find(w => w.workerId === 'wo_1')!
@@ -150,7 +150,7 @@ test('worker 终态转变 → 主区完成通知行（含计数与耗时）', ()
   const { app, out } = makeApp()
 
   ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_n', parentToolId: 'd1', profile: 'reviewer', status: 'running', progressLine: '⚙ read_file', toolUseCount: 3, tokenCount: 1500 })
-  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_n', parentToolId: 'd1', status: 'passed', progressLine: 'all good' })
+  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_n', parentToolId: 'd1', status: 'completed', progressLine: 'all good' })
 
   const output = out.chunks.join('')
   assert.ok(output.includes('子代理完成'), `应有完成通知: ${output.slice(-300)}`)
@@ -161,7 +161,7 @@ test('worker 终态转变 → 主区完成通知行（含计数与耗时）', ()
 test('纯终态回放（未见 running）不触发通知', () => {
   const { app, out } = makeApp()
 
-  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_r', parentToolId: 'd1', status: 'passed', progressLine: 'replay' })
+  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_r', parentToolId: 'd1', status: 'completed', progressLine: 'replay' })
 
   const output = out.chunks.join('')
   assert.ok(!output.includes('子代理完成'), '不应通知')
@@ -213,7 +213,7 @@ test('worker 视图内 steer 未送达时提示警告', async () => {
   app.setWorkerSteer(() => false)
 
   ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_dead', parentToolId: 'd1', profile: 'reviewer', status: 'running' })
-  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_dead', parentToolId: 'd1', status: 'passed', progressLine: 'done' })
+  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_dead', parentToolId: 'd1', status: 'completed', progressLine: 'done' })
 
   app.enterWorkerView('wo_dead')
   app.setInput('太迟了')
@@ -229,7 +229,7 @@ test('completed workers are retained after delegation result', () => {
 
   ;(app.callbacks as any).onToolUse('d1', 'delegate_batch', { objective: 'find bugs' })
   ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_1', parentToolId: 'd1', profile: 'reviewer', status: 'running' })
-  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_1', parentToolId: 'd1', status: 'passed', progressLine: 'done' })
+  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_1', parentToolId: 'd1', status: 'completed', progressLine: 'done' })
   ;(app.callbacks as any).onToolResult('d1', 'delegate_batch', JSON.stringify({ status: 'passed' }), false)
 
   const data = app.getTasksData('completed')
@@ -243,7 +243,7 @@ test('/tasks ←/→ 与 Shift+Tab 反向循环 filter（统一 tab 键位语义
 
   ;(app.callbacks as any).onToolUse('d1', 'delegate_batch', { objective: 'x' })
   ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_1', parentToolId: 'd1', profile: 'reviewer', status: 'running' })
-  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_2', parentToolId: 'd1', profile: 'patcher', status: 'passed' })
+  ;(app.callbacks as any).onDelegationActivity({ workOrderId: 'wo_2', parentToolId: 'd1', profile: 'patcher', status: 'completed' })
   ;(app.callbacks as any).onToolResult('d1', 'delegate_batch', JSON.stringify({ status: 'passed' }), false)
 
   app.activateOverlay('tasks')

@@ -1,11 +1,18 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRouter } from '../index.js'
-import { buildSpeechRoutes, buildWhisperFetchChildEnv, type SpeechEngine } from '../speech-routes.js'
+import {
+  buildSpeechRoutes,
+  buildWhisperFetchChildEnv,
+  resolveActiveModel,
+  ACTIVE_MODEL_FILE,
+  INSTALLABLE_MODELS,
+  type SpeechEngine,
+} from '../speech-routes.js'
 
 const AUTH = { authorization: 'Bearer test-token' }
 
@@ -28,7 +35,7 @@ function minimalWav(): Buffer {
 }
 
 test('speech: engine 不可用 → 503 whisper-unavailable', async () => {
-  const router = createRouter(buildSpeechRoutes(null))
+  const router = createRouter(buildSpeechRoutes(() => null))
   const res = await router('POST', '/speech/transcribe', { audio: 'x' }, AUTH)
   assert.equal(res.status, 503)
   assert.deepEqual(res.body, { error: 'whisper-unavailable' })
@@ -42,7 +49,7 @@ test('speech: 有效 wav → 200 文本回填', async () => {
       return { text: '你好世界' }
     },
   }
-  const router = createRouter(buildSpeechRoutes(fake))
+  const router = createRouter(buildSpeechRoutes(() => fake))
   const res = await router('POST', '/speech/transcribe', { audio: minimalWav().toString('base64'), lang: 'zh' }, AUTH)
   assert.equal(res.status, 200)
   assert.deepEqual(res.body, { text: '你好世界' })
@@ -52,22 +59,22 @@ test('speech: 有效 wav → 200 文本回填', async () => {
 })
 
 test('speech: 缺 audio 字段 → 400', async () => {
-  const router = createRouter(buildSpeechRoutes({ transcribe: async () => ({ text: '' }) }))
+  const router = createRouter(buildSpeechRoutes(() => ({ transcribe: async () => ({ text: '' }) })))
   const res = await router('POST', '/speech/transcribe', {}, AUTH)
   assert.equal(res.status, 400)
 })
 
 test('speech: 非 wav 载荷（无 RIFF 头）→ 400 invalid-wav', async () => {
-  const router = createRouter(buildSpeechRoutes({ transcribe: async () => ({ text: '' }) }))
+  const router = createRouter(buildSpeechRoutes(() => ({ transcribe: async () => ({ text: '' }) })))
   const res = await router('POST', '/speech/transcribe', { audio: Buffer.from('not a wav file').toString('base64') }, AUTH)
   assert.equal(res.status, 400)
   assert.deepEqual(res.body, { error: 'invalid-wav' })
 })
 
 test('speech: 引擎失败 → 500 transcribe-failed', async () => {
-  const router = createRouter(buildSpeechRoutes({
+  const router = createRouter(buildSpeechRoutes(() => ({
     transcribe: async () => { throw new Error('spawn ENOENT') },
-  }))
+  })))
   const res = await router('POST', '/speech/transcribe', { audio: minimalWav().toString('base64') }, AUTH)
   assert.equal(res.status, 500)
   assert.deepEqual(res.body, { error: 'transcribe-failed' })
@@ -99,7 +106,7 @@ function withWhisperEnv(bin: string | undefined, model: string | undefined, fn: 
 
 test('speech: status — engine null 且 env 未配置 → 全 false', async () => {
   await withWhisperEnv(undefined, undefined, async () => {
-    const router = createRouter(buildSpeechRoutes(null))
+    const router = createRouter(buildSpeechRoutes(() => null))
     const res = await router('GET', '/speech/model/status', {}, AUTH)
     assert.equal(res.status, 200)
     assert.deepEqual(res.body, { binReady: false, modelReady: false, model: null, installing: false })
@@ -109,7 +116,7 @@ test('speech: status — engine null 且 env 未配置 → 全 false', async () 
 test('speech: status — fake engine，按 env 探测文件存在性', async () => {
   const selfPath = fileURLToPath(import.meta.url) // 真实存在的文件
   await withWhisperEnv(selfPath, join(selfPath, 'no-such-model.bin'), async () => {
-    const router = createRouter(buildSpeechRoutes({ transcribe: async () => ({ text: '' }) }))
+    const router = createRouter(buildSpeechRoutes(() => ({ transcribe: async () => ({ text: '' }) })))
     const res = await router('GET', '/speech/model/status', {}, AUTH)
     assert.equal(res.status, 200)
     assert.deepEqual(res.body, {
@@ -134,16 +141,16 @@ test('speech: install — fake 脚本成功 → 200 {ok:true}（fake engine）',
   const { dir, script } = fakeFetchScript('process.exit(0)\n')
   await withWhisperEnv(undefined, undefined, async () => {
     process.env.RIVET_WHISPER_FETCH_SCRIPT = script
-    const router = createRouter(buildSpeechRoutes({ transcribe: async () => ({ text: '' }) }))
+    const router = createRouter(buildSpeechRoutes(() => ({ transcribe: async () => ({ text: '' }) })))
     const res = await router('POST', '/speech/model/install', { model: 'tiny' }, AUTH)
     assert.equal(res.status, 200)
-    assert.deepEqual(res.body, { ok: true })
+    assert.deepEqual(res.body, { ok: true, modelReady: true })
   })
   rmSync(dir, { recursive: true, force: true })
 })
 
 test('speech: install — 非法 model → 400 invalid-model', async () => {
-  const router = createRouter(buildSpeechRoutes(null))
+  const router = createRouter(buildSpeechRoutes(() => null))
   const res = await router('POST', '/speech/model/install', { model: 'large' }, AUTH)
   assert.equal(res.status, 400)
   assert.deepEqual(res.body, { error: 'invalid-model' })
@@ -153,7 +160,7 @@ test('speech: install — 脚本失败 → 500 model-install-failed', async () =
   const { dir, script } = fakeFetchScript('console.error("boom"); process.exit(1)\n')
   await withWhisperEnv(undefined, undefined, async () => {
     process.env.RIVET_WHISPER_FETCH_SCRIPT = script
-    const router = createRouter(buildSpeechRoutes(null))
+    const router = createRouter(buildSpeechRoutes(() => null))
     const res = await router('POST', '/speech/model/install', { model: 'base' }, AUTH)
     assert.equal(res.status, 500)
     assert.deepEqual(res.body, { error: 'model-install-failed' })
@@ -192,7 +199,7 @@ test('speech: install — 安装进行中时 status.installing=true 且并发 in
   const { dir, script } = fakeFetchScript('setTimeout(() => process.exit(0), 800)\n')
   await withWhisperEnv(undefined, undefined, async () => {
     process.env.RIVET_WHISPER_FETCH_SCRIPT = script
-    const router = createRouter(buildSpeechRoutes(null))
+    const router = createRouter(buildSpeechRoutes(() => null))
     const installP = router('POST', '/speech/model/install', { model: 'tiny' }, AUTH)
     // 模块级 installing 已置位（spawn 前同步设置），status 应能观测到。
     const statusRes = await router('GET', '/speech/model/status', {}, AUTH)
@@ -205,10 +212,127 @@ test('speech: install — 安装进行中时 status.installing=true 且并发 in
     // 首个安装正常完成。
     const installRes = await installP
     assert.equal(installRes.status, 200)
-    assert.deepEqual(installRes.body, { ok: true })
+    assert.deepEqual(installRes.body, { ok: true, modelReady: true })
     // 完成后 installing 复位。
     const afterRes = await router('GET', '/speech/model/status', {}, AUTH)
     assert.equal((afterRes.body as { installing: boolean }).installing, false)
   })
   rmSync(dir, { recursive: true, force: true })
+})
+
+// ── 下载即切换（.active 持久化 + 引擎重建回调）──
+
+test('speech: install — small/turbo 白名单通过，成功后写 models/.active', async () => {
+  const { dir, script } = fakeFetchScript('process.exit(0)\n')
+  const modelDir = mkdtempSync(join(tmpdir(), 'rivet-speech-models-'))
+  // 不用 withWhisperEnv：其 try-finally 在 fn 首个 await 处即恢复 env，
+  // 多次 install（await 间隔）会丢失 RIVET_WHISPER_FETCH_SCRIPT。手动管理。
+  const prevScript = process.env.RIVET_WHISPER_FETCH_SCRIPT
+  try {
+    process.env.RIVET_WHISPER_FETCH_SCRIPT = script
+    let rebuilt = 0
+    const router = createRouter(buildSpeechRoutes(() => null, undefined, {
+      modelDir,
+      onModelInstalled: () => { rebuilt++; return true },
+    }))
+    for (const key of ['small', 'turbo'] as const) {
+      const res = await router('POST', '/speech/model/install', { model: key }, AUTH)
+      assert.equal(res.status, 200)
+      assert.deepEqual(res.body, { ok: true, modelReady: true }, `modelReady 反映重建成功`)
+      const active = readFileSync(join(modelDir, ACTIVE_MODEL_FILE), 'utf8')
+      assert.equal(active, INSTALLABLE_MODELS[key], `.active 指向 ${key} 的模型文件`)
+    }
+    assert.equal(rebuilt, 2, '每次 install 成功后回调引擎重建')
+  } finally {
+    if (prevScript === undefined) delete process.env.RIVET_WHISPER_FETCH_SCRIPT
+    else process.env.RIVET_WHISPER_FETCH_SCRIPT = prevScript
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(modelDir, { recursive: true, force: true })
+  }
+})
+
+test('speech: install — 引擎重建失败时 modelReady=false（信号不漂移）', async () => {
+  const { dir, script } = fakeFetchScript('process.exit(0)\n')
+  const modelDir = mkdtempSync(join(tmpdir(), 'rivet-speech-models-'))
+  const prevScript = process.env.RIVET_WHISPER_FETCH_SCRIPT
+  try {
+    process.env.RIVET_WHISPER_FETCH_SCRIPT = script
+    const router = createRouter(buildSpeechRoutes(() => null, undefined, {
+      modelDir,
+      onModelInstalled: () => false, // 模拟重建失败（如 bin 缺失）
+    }))
+    const res = await router('POST', '/speech/model/install', { model: 'small' }, AUTH)
+    assert.equal(res.status, 200)
+    assert.deepEqual(res.body, { ok: true, modelReady: false }, '重建失败必须显式暴露')
+  } finally {
+    if (prevScript === undefined) delete process.env.RIVET_WHISPER_FETCH_SCRIPT
+    else process.env.RIVET_WHISPER_FETCH_SCRIPT = prevScript
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(modelDir, { recursive: true, force: true })
+  }
+})
+
+test('speech: install — 脚本失败不写 .active、不回调', async () => {
+  const { dir, script } = fakeFetchScript('process.exit(1)\n')
+  const modelDir = mkdtempSync(join(tmpdir(), 'rivet-speech-models-'))
+  const prevScript = process.env.RIVET_WHISPER_FETCH_SCRIPT
+  try {
+    process.env.RIVET_WHISPER_FETCH_SCRIPT = script
+    let rebuilt = 0
+    const router = createRouter(buildSpeechRoutes(() => null, undefined, {
+      modelDir,
+      onModelInstalled: () => { rebuilt++; return true },
+    }))
+    const res = await router('POST', '/speech/model/install', { model: 'small' }, AUTH)
+    assert.equal(res.status, 500)
+    assert.equal(rebuilt, 0, '失败不触发重建')
+    assert.equal(existsSync(join(modelDir, ACTIVE_MODEL_FILE)), false, '失败不写 .active')
+  } finally {
+    if (prevScript === undefined) delete process.env.RIVET_WHISPER_FETCH_SCRIPT
+    else process.env.RIVET_WHISPER_FETCH_SCRIPT = prevScript
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(modelDir, { recursive: true, force: true })
+  }
+})
+
+// ── resolveActiveModel 纯函数：.active 优先于 env ──────────────────
+
+test('resolveActiveModel: .active 指向存在的模型 → 优先于 env', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-active-'))
+  try {
+    writeFileSync(join(dir, 'ggml-large-v3-turbo-q5_0.bin'), 'x')
+    writeFileSync(join(dir, ACTIVE_MODEL_FILE), 'ggml-large-v3-turbo-q5_0.bin')
+    const env = join(dir, 'ggml-tiny.bin')
+    writeFileSync(env, 'x')
+    const r = resolveActiveModel(env, dir)
+    assert.equal(r?.file, 'ggml-large-v3-turbo-q5_0.bin', '.active 覆盖 env')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('resolveActiveModel: 无 .active → 回退 env；env 文件缺失 → null', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-active-'))
+  try {
+    const env = join(dir, 'ggml-tiny.bin')
+    writeFileSync(env, 'x')
+    assert.equal(resolveActiveModel(env, dir)?.file, 'ggml-tiny.bin', 'env 回退')
+    assert.equal(resolveActiveModel(join(dir, 'missing.bin'), dir), null, 'env 文件不存在 → null')
+    assert.equal(resolveActiveModel(undefined, undefined), null, '无 env 无 dir → null')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('resolveActiveModel: .active 指向缺失文件 → 回退 env（防半写/被 prune）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-active-'))
+  try {
+    writeFileSync(join(dir, ACTIVE_MODEL_FILE), 'ggml-base.bin') // 指向不存在的文件
+    const env = join(dir, 'ggml-tiny.bin')
+    writeFileSync(env, 'x')
+    const r = resolveActiveModel(env, dir)
+    assert.equal(r?.file, 'ggml-tiny.bin', '.active 指向缺失 → env 兜底')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

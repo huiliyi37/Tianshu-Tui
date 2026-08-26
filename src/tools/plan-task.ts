@@ -153,7 +153,7 @@ function buildMethodologyGuidance(objective: string, files: string[]): string {
   // 默认使用 Superpowers-based 基础模板；只有明确极小（unit 深度 + 不超过一个文件）才降级为轻量版。
   const useLightweight = depth === 'unit' && files.length <= 1
   const templatePath = useLightweight ? LIGHTWEIGHT_TEMPLATE_PATH : BASE_TEMPLATE_PATH
-  const templateType = useLightweight ? '轻量版（5阶段）' : '基础模板（Superpowers writing-plans）'
+  const templateType = useLightweight ? '轻量版（5阶段）' : '基础模板（原生计划流程）'
   const note = useLightweight
     ? '本任务 scope 内聚，单模块边界内变更，聚焦核心改动与验证即可。'
     : '默认使用基础模板，强制四条纪律：① 至少一张 Mermaid 图；② TDD RED→GREEN；③ 探针先行；④ 瑶光反证（真实输入复现、取 exit code、方案 GREEN≠落地 GREEN）。安全/权限/沙箱/多 enforcement gate 任务追加安全附录。'
@@ -332,10 +332,16 @@ export function createPlanTaskTool(deps: {
               : undefined,
             onWorkerSettled: params.onWorkerActivity
               ? (result) => {
+                  // status×failureReason 矩阵：blocked（含 caller_aborted 取消 /
+                  // 环境阻断）不得伪装成 completed，如实透传给活动带。
+                  const status = result.status === 'failed' ? 'failed'
+                    : result.status === 'blocked' ? 'blocked'
+                    : result.status === 'escalated' ? 'escalated'
+                    : 'completed'
                   params.onWorkerActivity!({
                     workOrderId: result.workOrderId,
                     parentToolId: params.toolUseId,
-                    status: result.status === 'failed' ? 'failed' : 'completed',
+                    status,
                   })
                 }
               : undefined,

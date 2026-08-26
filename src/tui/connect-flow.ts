@@ -2134,7 +2134,7 @@ export class ConnectFlow {
       ...(metadata.tier ? { tier: metadata.tier } : {}),
       ...(metadata.pricing ? { pricing: metadata.pricing } : {}),
     }
-    const caps = { ...(metadata.capabilities ?? {}) }
+    const caps = { ...metadata.capabilities }
     // Thinking answer only fills models that declare nothing themselves —
     // alias-table metadata wins over the blanket wizard answer.
     if (this.collected.thinkingSplit && caps.thinkingBlock === undefined && caps.reasoningSplit === undefined) {

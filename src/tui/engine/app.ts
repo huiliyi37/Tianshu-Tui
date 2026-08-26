@@ -69,6 +69,13 @@ import { remainingSec, shouldFire } from '../plan-auto-approve.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import { formatTaskList, shouldShowTaskPanel } from '../format/task-list.js'
+import {
+  buildPlanReviewActions,
+  clampPlanReviewScroll,
+  formatPlanReview,
+  planReviewBodyRows,
+  recommendedPlanReviewAction,
+} from '../format/plan-review.js'
 import { formatContextHints } from '../format/context-hints.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
@@ -99,7 +106,7 @@ import {
   isDelegationTool,
 } from '../format/tool-domain.js'
 import { formatSpinnerStatus, formatTurnWorkSummary, formatJobAwaitWait, type JobAwaitCall } from '../format/spinner-status.js'
-import { formatSlashHint, slashCompletionTarget, filterSlashCommands, slashArgsHint, type SlashHintEntry } from '../format/slash-hint.js'
+import { formatSlashHint, formatSlashMenu, slashCompletionTarget, slashArgsHint, SLASH_HINT_MAX_VISIBLE, computeSlashMenuBudget, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
 import { resolve } from 'node:path'
@@ -109,6 +116,7 @@ import { parseMentions } from '../mention-parser.js'
 import { parseMissionDraft, shouldPreviewContract, formatContractPreview, type MissionDraft } from '../mission-draft.js'
 import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../width.js'
 import { boxCharsFor, boxInnerWidth } from '../box-chars.js'
+import { useAsciiGlyphs } from '../term-caps.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, followListWindow, renderChronicle, renderTasks, renderDomainPicker, renderDomainGenesisCard, genesisCardMaxScroll, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderInitFlow } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData, InitOverlayData } from '../format/overlay.js'
@@ -307,6 +315,7 @@ import { describeIntentNote } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { DelegationActivity } from '../../tools/types.js'
 import type { AutonomyCheckpointInfo } from '../../agent/loop-types.js'
+import type { DomainDriftResult } from '../../agent/domain-drift-detector.js'
 import { FleetRegistry } from '../fleet-registry.js'
 import { JobRegistry, type JobRow } from '../job-registry.js'
 import { renderJobsOverlay } from '../format/jobs-panel.js'
@@ -333,6 +342,7 @@ export interface AgentCallbacks {
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; voluntary?: boolean; source?: string }) => void
   onIntentNote?: (intent: IntentPreview) => void
+  onDomainDrift?: (drift: DomainDriftResult) => void
   onSteerDrain?: () => string | null
   /** C3 — autonomy checkpoint pause (cruise) / progress ping (unleashed). */
   onAutonomyCheckpoint?: (info: AutonomyCheckpointInfo) => void
@@ -617,6 +627,14 @@ export class TuiApp {
   pendingPlanApproval: PlanSubmittedInfo | undefined = undefined
   /** 待审批计划正文预览摘要（开面板时一次性提取；随面板关闭/重开更新）。 */
   planApprovalExcerpt: string | undefined = undefined
+  /** 钉底审阅卡正文（剥 chrome 后的全文；缺席则只画标题）。 */
+  planApprovalBody: string | undefined = undefined
+  /** 提交日期 YYYY-MM-DD。不标模型档。 */
+  planApprovalDate: string | undefined = undefined
+  /** 审阅卡正文滚动偏移（行）。 */
+  private planReviewScroll = 0
+  /** f 键反馈输入态：字打进输入框，Enter 驳回并提交。 */
+  private planReviewFeedbackMode = false
   /**
    * 计划全文预览（复用 pager overlay，仿 jobDetail 指针）：
    * slug 指正式计划（pager provider 用 readPlanSync 读盘）；draftPath 指
@@ -627,7 +645,7 @@ export class TuiApp {
   /** /handoff 登记的归档任务：交接 turn 完成（isFinal）后把项目内 .rivet/HANDOFF.md
    *  拷贝归档到会话目录 <id>.handoff.md（loadPrevHandoff 注入管线认的位置）。 */
   pendingHandoffCopy: { src: string; dest: string; sinceMs: number } | undefined = undefined
-  /** 50% 交接提醒每会话至多一次。 */
+  /** 60% 交接提醒每会话至多一次。 */
   private handoffNudgeShown = false
   /** Goal 计划倒计时自动批准（2026-07-24，与 sidecar 同语义）：
    *  goal 激活 + 计划提交 → 武装；到期守卫复核通过 → onPlanAutoApproveFire；
@@ -639,6 +657,8 @@ export class TuiApp {
   planAutoApproveDeadlineMs: number | undefined = undefined
   /** 到期触发回调（main.ts 装配：approvePlanAndKickoff + 通知）。 */
   onPlanAutoApproveFire?: (slug: string) => void
+  /** 审阅卡结算（与 choicePanelExec 同 id）。测试可直接挂；生产走 overlay 装配。 */
+  onPlanReviewSettle?: (id: string) => void
   /** 触发守卫探针（main.ts 装配：idle/goalActive/planStillSubmitted）。 */
   planAutoApproveGuardsProvider?: () => { idle: boolean; goalActive: boolean; planStillSubmitted: boolean }
 
@@ -682,7 +702,11 @@ export class TuiApp {
     const guards = this.planAutoApproveGuardsProvider?.()
     const fire = !!guards && shouldFire({ slug, deadlineMs }, Date.now(), guards)
     this.cancelPlanAutoApprove()
-    if (fire) this.onPlanAutoApproveFire?.(slug)
+    if (fire) {
+      this.clearPlanReviewState()
+      this.onPlanAutoApproveFire?.(slug)
+      this.renderLive()
+    }
   }
   /**
    * ask_user_question 多题流：当前题索引 + drafts。
@@ -750,7 +774,7 @@ export class TuiApp {
   private todoFlashTimer: ReturnType<typeof setTimeout> | null = null
   /** 本 run 是否写入过 todo（用户提交重置，updateTodos 检测到清单签名变化置位）。
    *  用于跨 run 陈旧显示 gate：新 run 未写 todo 前，上一轮**全部完成**的清单
-   *  不再占用任务面板与 GlanceBar 徽章（观感即「◇ 任务 (5/5) 不更新」——旧值
+   *  不再占用任务面板与 GlanceBar 徽章（观感即「≡ 任务 · 5/5 不更新」——旧值
    *  复活挂在新 run 头上，直到 AI 首次 todo write）。部分完成清单不受影响
    *  （AI 大概率续写）；守护中断的自动续跑视为同一任务的延续，不重置。 */
   private todosWrittenThisRun = false
@@ -846,6 +870,9 @@ export class TuiApp {
     this.inputLine = new InputLine({
       history: options.history,
       placeholder: '询问任何事，或 / 唤起命令',
+      // 输入变化（含 setValue 程序化写入）实时刷新 slash 菜单状态；
+      // 渲染仍由 handleKey 返回事件 / 显式 renderLive 驱动。
+      onChange: (value) => { this.inputController.refreshSlash(value) },
       onTabComplete: () => this.handleTabComplete(),
       // handleInputSubmit 是 async：回调内任何异常都会成为 rejected Promise，
       // 必须显式 catch 收口为一条警告行，否则 void 掉的是 unhandled rejection。
@@ -1095,6 +1122,9 @@ export class TuiApp {
         if (!isSearchOverlay && (this.isPrintableKey(key) || key.name === 'backspace' || key.name === 'return')) return
       }
 
+      // 计划审阅卡钉在 chrome：overlay 未开时先吃按键，避免漏进 slash / 输入框。
+      if (this.pendingPlanApproval && !this.overlay.isActive() && this.handlePlanReviewKey(key)) return
+
       // ── Global shortcuts (before input line processing) ──────
       if (key.name === 'shift_tab') {
         // plan-picker 打开时先关闭，再循环权限模式（不再从 Shift+Tab 打开 picker）。
@@ -1152,6 +1182,13 @@ export class TuiApp {
         return
       }
       if (key.name === 'escape') {
+        // slash 菜单打开时：Esc 优先关闭菜单——不触发 vim 切换/双击 rewind/
+        // 清空输入。再按一次 Esc 才走下方原语义（清空/确认窗口取消等）。
+        if (this.inputController.slashMenu.open) {
+          this.inputController.closeSlash()
+          this.renderLive()
+          return
+        }
         // Ctrl+C pending-exit 确认窗口内：Esc = 取消退出、恢复输入框。优先于
         // vim 切换 / 双击 rewind / overlay 关闭——屏幕处于退出提示态（输入框
         // 被隐藏），用户此刻按 Esc 的意图是「回到对话」。overlay 激活时的 Esc
@@ -1274,35 +1311,40 @@ export class TuiApp {
       const inputVal = this.inputLine.value
       const inputIsPath = looksLikeFilePath(inputVal, this.getCommandPredicate(), this.getCommandPrefixPredicate())
       if (inputVal.startsWith('/') && !inputIsPath) {
-        const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
-        if (key.name === 'up' && filtered.length > 0) {
-          this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx - 1 + filtered.length) % filtered.length
-          this.renderLive()
-          return
+        const menu = this.inputController.slashMenu
+        // PageUp/Down 翻页（菜单打开时；clamp 不环绕，滚动窗口跟随选中）
+        if (key.name === 'pageup' || key.name === 'pagedown') {
+          if (menu.open) {
+            this.inputController.scrollSlashSelection(key.name === 'pageup' ? -SLASH_HINT_MAX_VISIBLE : SLASH_HINT_MAX_VISIBLE)
+            this.renderLive()
+            return
+          }
         }
-        if (key.name === 'down' && filtered.length > 0) {
-          this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx + 1) % filtered.length
-          this.renderLive()
-          return
+        if (key.name === 'up' || key.name === 'down') {
+          if (menu.open) {
+            this.inputController.moveSlashSelection(key.name === 'up' ? -1 : 1)
+            this.renderLive()
+            return
+          }
         }
         // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
         if (key.name === 'return' && !key.shift) {
           // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
           // 若 ↑↓ 选中了命令，且选中命令名比当前输入长，则提交选中命令名。
           // 长度比较避免用户已输入完整命令+参数（如 /team max plan.md）时被截断。
-          const selected = filtered.length > 0
-            ? filtered[Math.min(this.inputController.slashSelectedIdx, filtered.length - 1)]
+          const selected = menu.open
+            ? menu.matches[Math.min(menu.selected, menu.matches.length - 1)]
             : undefined
           const submitVal = selected && selected.name.length > inputVal.length
             ? selected.name
             : inputVal
           this.inputLine.setValue('')
-          this.inputController.slashSelectedIdx = 0
+          this.inputController.closeSlash()
           void this.submitSlashCommand(submitVal)
           return
         }
       } else {
-        this.inputController.slashSelectedIdx = 0
+        this.inputController.closeSlash()
       }
       // ── W4a: Up 箭头取回最近 queued 消息到输入框编辑 ─────────
       if (key.name === 'up' && !this.inputLine.value && this.steerBuffer.hasPending()) {
@@ -1332,8 +1374,7 @@ export class TuiApp {
       if (event?.type === 'change') {
         // 输入变化使 @ 补全循环失效
         this.inputController.fileCompletion = null
-        // 普通文本输入重置 slash 选中项（避免选了第 3 项又打字导致选中越界）
-        this.inputController.slashSelectedIdx = 0
+        // slash 菜单状态已由 onChange 回调 refreshSlash 维护（含 carry 保持选中）
         // 批渲染：快速输入/分 chunk 到达时合并为单次 LiveEngine.render，
         // 避免逐 chunk 全量重写造成的闪烁/残影。
         this.writeBatcher.schedule()
@@ -1870,6 +1911,11 @@ export class TuiApp {
     return this.inputLine.value
   }
 
+  /** 读取输入状态控制器（测试检视 slash 菜单/MRU 状态用） */
+  getInputController(): InputController {
+    return this.inputController
+  }
+
   /** 读取当前输入框携带的图片附件数量（测试/外部检视用；plan 9e126c7c 漏的公共 getter） */
   getInputImagesCount(): number {
     return this.inputLine.images.length
@@ -2041,7 +2087,7 @@ export class TuiApp {
     if (closingId === 'pager' && preview) {
       this.planPreview = null
       if (preview.returnTo === 'approval' && this.pendingPlanApproval) {
-        this.openPlanApprovalPanel(this.pendingPlanApproval, this.planApprovalExcerpt)
+        this.openPlanApprovalPanel(this.pendingPlanApproval)
         return
       }
       if (preview.returnTo === 'plan-picker') {
@@ -2117,15 +2163,127 @@ export class TuiApp {
     this.activateOverlay('init')
   }
 
-  /** 打开计划审批选择面板（plan action=submit 成功后自动调用）。 */
-  openPlanApprovalPanel(info: PlanSubmittedInfo, excerpt?: string): void {
+  /** 打开计划审阅卡（钉在输入框上方 chrome，不进 overlay）。 */
+  openPlanApprovalPanel(info: PlanSubmittedInfo, view?: string | { body?: string; date?: string }): void {
     this.choicePanelKind = 'plan-approval'
     this.pendingPlanApproval = info
-    this.planApprovalExcerpt = excerpt
     this.choicePanelSubMode = 'select'
     this.choicePanelInputBuffer = ''
     this.choicePanelInputFor = undefined
-    this.activateOverlay('choice-panel')
+    this.planReviewFeedbackMode = false
+    this.planReviewScroll = 0
+    if (typeof view === 'string') {
+      this.planApprovalBody = view
+      this.planApprovalExcerpt = view
+    } else if (view) {
+      if (view.body !== undefined) {
+        this.planApprovalBody = view.body
+        this.planApprovalExcerpt = view.body
+      }
+      if (view.date !== undefined) this.planApprovalDate = view.date
+    }
+    this.input.setEscapeImmediate(true)
+    this.renderLive()
+  }
+
+  /** 收起钉底审阅卡（Esc 收起不改计划状态；结算后清场）。 */
+  clearPlanReviewState(): void {
+    this.pendingPlanApproval = undefined
+    this.planApprovalExcerpt = undefined
+    this.planApprovalBody = undefined
+    this.planApprovalDate = undefined
+    this.planReviewScroll = 0
+    this.planReviewFeedbackMode = false
+    this.choicePanelInputBuffer = ''
+    this.choicePanelInputFor = undefined
+    if (this.choicePanelKind === 'plan-approval') this.choicePanelKind = 'effort'
+    if (!this.overlay.isActive()) this.input.setEscapeImmediate(false)
+  }
+
+  private settlePlanReview(id: string): void {
+    this.cancelPlanAutoApprove()
+    if (id === '__reject_comment__') {
+      this.choicePanelInputBuffer = this.inputLine.value.trim()
+      this.choicePanelInputFor = 'plan-reject-comment'
+      this.inputLine.setValue('')
+    }
+    const exec = this.onPlanReviewSettle ?? this.overlayController.getChoicePanelExec()
+    exec?.(id)
+    this.clearPlanReviewState()
+    this.renderLive()
+  }
+
+  private handlePlanReviewKey(key: KeyPress): boolean {
+    if (!this.pendingPlanApproval || this.overlay.isActive()) return false
+    const c = key.char
+    const actions = buildPlanReviewActions(this.pendingPlanApproval)
+    const bodyRows = planReviewBodyRows(this.rows || 24)
+
+    if (this.planReviewFeedbackMode) {
+      if (key.name === 'return') {
+        this.settlePlanReview('__reject_comment__')
+        return true
+      }
+      if (key.name === 'escape') {
+        this.planReviewFeedbackMode = false
+        this.inputLine.setValue('')
+        this.renderLive()
+        return true
+      }
+      this.inputLine.handleKey(key.name, key.char, key.ctrl, key.meta, key.shift)
+      this.renderLive()
+      return true
+    }
+
+    if (key.name === 'escape') {
+      this.clearPlanReviewState()
+      this.renderLive()
+      return true
+    }
+    if (c === 'f' || c === 'F') {
+      this.cancelPlanAutoApprove()
+      this.planReviewFeedbackMode = true
+      this.inputLine.setValue('')
+      this.renderLive()
+      return true
+    }
+    if (c === 'v' || c === 'V') {
+      this.openPlanPreview(this.pendingPlanApproval.slug, 'approval')
+      return true
+    }
+    if (key.name === 'return') {
+      const rec = recommendedPlanReviewAction(actions)
+      if (rec) this.settlePlanReview(rec.id)
+      return true
+    }
+    if (key.name === 'up' || c === 'k') {
+      this.planReviewScroll = clampPlanReviewScroll(this.planReviewScroll - 1, Number.MAX_SAFE_INTEGER, bodyRows)
+      this.renderLive()
+      return true
+    }
+    if (key.name === 'down' || c === 'j') {
+      this.planReviewScroll += 1
+      this.renderLive()
+      return true
+    }
+    if (key.name === 'pageup') {
+      this.planReviewScroll = clampPlanReviewScroll(this.planReviewScroll - bodyRows, Number.MAX_SAFE_INTEGER, bodyRows)
+      this.renderLive()
+      return true
+    }
+    if (key.name === 'pagedown') {
+      this.planReviewScroll += bodyRows
+      this.renderLive()
+      return true
+    }
+    if (/^[1-9]$/.test(c)) {
+      const action = actions[Number(c) - 1]
+      if (action) this.settlePlanReview(action.id)
+      return true
+    }
+    // 可打印键吞掉，避免漏进输入框；Ctrl+C / Ctrl+P 等功能键继续走全局。
+    if (this.isPrintableKey(key) || key.name === 'backspace') return true
+    return false
   }
 
   /** 当前 pager 是否在预览某个计划文档（pagerContent provider 分支用；
@@ -2690,8 +2848,8 @@ export class TuiApp {
 
   private deriveGroupProgress(parentToolId: string, workers: TasksWorkerRow[]): import('../fleet-registry.js').FleetGroupProgress {
     const total = workers.length
-    const done = workers.filter(w => w.status === 'passed').length
-    const failed = workers.filter(w => w.status !== 'passed' && w.status !== 'running').length
+    const done = workers.filter(w => w.status === 'completed').length
+    const failed = workers.filter(w => w.status !== 'completed' && w.status !== 'running').length
     const running = workers.filter(w => w.status === 'running').length
     return { total, done, failed, running }
   }
@@ -4411,6 +4569,25 @@ export class TuiApp {
   }
 
   /**
+   * 接受 slash 菜单当前选中项（Tab 键路由，菜单打开时）。
+   * 补全命令名到输入行（统一带尾空格留参数位）；带 argsHint 的命令在
+   * setValue 触发的 onChange → refreshSlash 参数模式中保持菜单单条并显示
+   * ghost 参数提示，此处随后关闭收敛（对齐 tianshu-public 语义）。
+   */
+  private acceptSlashCompletion(): void {
+    const menu = this.inputController.slashMenu
+    const selected = menu.matches[Math.min(menu.selected, menu.matches.length - 1)]
+    if (selected === undefined) {
+      this.inputController.closeSlash()
+      this.renderLive()
+      return
+    }
+    this.inputLine.setValue(`${selected.name} `)
+    this.inputController.closeSlash()
+    this.renderLive()
+  }
+
+  /**
    * Tab 补全：
    * - 输入以 `/` 开头 → 补全为过滤结果首项
    * - 光标前有 `@token` → git 文件补全（多候选时 Tab 循环）
@@ -4421,10 +4598,14 @@ export class TuiApp {
 
     // slash 命令补全（排除 `/file/path` 这类绝对路径；支持 /skill <name> 等多 token）
     if (value.startsWith('/') && !looksLikeFilePath(value, this.getCommandPredicate(), this.getCommandPrefixPredicate())) {
-      const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
+      // 菜单打开：Tab 接受当前选中项（补全命令名，argsHint 命令补到 `cmd ` 留参数位）
+      if (this.inputController.slashMenu.open) {
+        this.acceptSlashCompletion()
+        return true
+      }
+      const target = slashCompletionTarget(value, this.inputController.slashCommands, 0)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
-        this.inputController.slashSelectedIdx = 0
         return true
       }
       return false
@@ -4913,7 +5094,7 @@ export class TuiApp {
     const elapsed = formatElapsed(w.elapsedMs)
     if (elapsed) stats.push(elapsed)
     const statsStr = stats.length > 0 ? `  ${stats.join(' · ')}` : ''
-    const ok = w.status === 'passed'
+    const ok = w.status === 'completed'
     const glyph = ok ? '✓' : w.status === 'failed' ? '✗' : '⊗'
     // 目标优先、身份次之、计数收尾——与 live 舰队带的紧凑行同构（形态恒定，
     // 用户视线能把「跑着的那一行」和「落进 scrollback 的这一行」连起来），
@@ -5365,7 +5546,7 @@ export class TuiApp {
         this.pendingHandoffCopy = undefined
       }
 
-      // 50% 交接提醒（每会话至多一次）：上下文过半时建议先 /handoff 再开新会话。
+      // 60% 交接提醒（每会话至多一次）：到达 HANDOFF_NUDGE_RATIO 时建议先 /handoff 再开新会话。
       if (!this.handoffNudgeShown) {
         try {
           const m = this.metricsGlanceController.metricsProvider?.()
@@ -6111,11 +6292,11 @@ export class TuiApp {
 
     // 2b. 队列预览已下移到输入框 chrome（贴底，不夹在 thinking/工具卡之间）。
 
-    // 2b2. 活动源归一：fleet / council / team / todo 四源投影到 ActivityStore，
-    //      经 formatActivityBand 输出 chrome 段统一 band（替代之前散落三处的 push）。
+    // 2b2. 活动源归一：fleet / council / team / todo 四源 + jobs 投影到
+    //      ActivityStore，经 formatActivityBand 输出 chrome 段统一活动带
+    //      （running 扁平行 / 最新 ⎿ / /tasks 尾行；对标 dsh-tui）。
     // 宽屏时这些汇总信息已移到右侧 side panel，避免主区重复。
-    // jobs 快照不受 side panel 影响——后台任务实时条只在主区 chrome 渲染，
-    // 侧栏不承载，每帧都必须刷新（elapsed 现算，靠帧重绘走动，不新增定时器）。
+    // jobs 快照每帧刷新（elapsed 现算）；窄屏并进 band，宽屏退回 jobs 单行条。
     this.activityStore.setJobs(this.jobsModel.rows(), Date.now())
     if (!showSidePanel) {
       // todo 刻意不进 band：chrome 段下方的 formatTaskList 常驻任务面板已经承载
@@ -6127,12 +6308,19 @@ export class TuiApp {
       this.activityStore.setCouncil(this.liveCouncilModel)
       this.activityStore.setTeam(this.liveTeamModel ? this.teamModelWithLiveStatus(this.liveTeamModel) : null)
       this.activityStore.setTodo([])
-      const bandItems = this.activityStore.project()
-      if (bandItems.length > 0) {
-        // width 必须传实际列数：默认 80 会在窄终端上折行，而 rowsForLine 按未折算，
-        // 欠擦的旧帧顶部会被后续 commit 顶进 scrollback（输入框重影）。
-        fleetStatusLines = formatActivityBand(bandItems, this.theme, { maxRows: 6, width: cols })
-      } else {
+      const bandItems = [
+        ...this.activityStore.project(),
+        ...this.activityStore.projectJobs(),
+      ]
+      // width 必须传实际列数：默认 80 会在窄终端上折行，而 rowsForLine 按未折算，
+      // 欠擦的旧帧顶部会被后续 commit 顶进 scrollback（输入框重影）。
+      fleetStatusLines = formatActivityBand(bandItems, this.theme, {
+        maxRows: LIVE_FLEET_MAX,
+        width: cols,
+        tick: this.streamRenderController.tick,
+        ascii: useAsciiGlyphs(),
+      })
+      if (fleetStatusLines.length === 0) {
         // 回退：派发已发出但首条 worker activity 未上行的窗口期，band 还是空的，
         // 而工具确实在跑——不给 pill 会是一片空白。
         const delegationTools = [...this.toolGroupController.getPendingEntries()]
@@ -6276,19 +6464,20 @@ export class TuiApp {
     //    一并并入 chrome——否则动态段出局时这两块纯本地 UI 被静默切掉。
     let chromeStart = this.screenReader ? gateStart : lines.length
 
-    // 3a2. 子代理带（CC 形态：运行中每 agent 一行排在输入框附近，详情按需展开）。
+    // 3a2. 子代理带（dsh activity-band：running 扁平行 + 最新 ⎿ + /tasks 尾行）。
     //     放在 chrome 段而非动态段——舰队规模不该转化成输入框上方的常驻空白。
-    //     管理入口并进汇总头，不再单独占一行。
     if (fleetStatusLines.length > 0) {
+      const bandHasEntry = fleetStatusLines.some(line => line.includes('/tasks'))
       for (const [i, line] of fleetStatusLines.entries()) {
-        lines.push({ text: this.clampLine(i === 0 ? `${line}${color('  · /tasks 管理', this.theme.dim)}` : line) })
+        const extra = !bandHasEntry && i === 0 ? color('  · /tasks 管理', this.theme.dim) : ''
+        lines.push({ text: this.clampLine(`${line}${extra}`) })
       }
     }
 
-    // 3a3. 后台任务实时条（CC 输入区下方任务条对标）：有 running 时单行
-    //     `⚙ N 后台任务 · 首个命令 · 最长已跑`，无 running 不渲染。与 side panel
-    //     无关（侧栏不承载 jobs），恒在主区 chrome 落位。
-    const jobsBar = formatJobsBar(this.activityStore.projectJobs(), this.theme)
+    // 3a3. 后台任务：窄屏已并进活动带（与子代理同一计数头）。宽屏侧栏不画
+    //     band，退回单行 `⚙ N 后台任务 · 首个命令 · 最长已跑`。
+    const jobsInBand = !showSidePanel && this.activityStore.projectJobs().length > 0
+    const jobsBar = jobsInBand ? null : formatJobsBar(this.activityStore.projectJobs(), this.theme)
     if (jobsBar) {
       lines.push({ text: this.clampLine(jobsBar) })
     }
@@ -6303,12 +6492,37 @@ export class TuiApp {
         showProgressBar: false,
         expanded: this.state.todoExpanded,
         expandHint: this.state.todoExpanded ? 'ctrl+x t 收起' : undefined,
+        tick: this.streamRenderController.tick,
+        ascii: useAsciiGlyphs(),
       })
       if (taskLines.length > 0) {
         lines.push({ text: '' })
         // 面板行走 clampLine（与其余 chrome 同口径）：满列行会在 CJK 终端折行，
         // rowsForLine 少算导致旧帧残留被提交进 scrollback。
         for (const taskLine of taskLines) lines.push({ text: this.clampLine(taskLine) })
+        lines.push({ text: '' })
+      }
+    }
+
+    // 3c. 计划审阅卡钉在输入框上方（对标 public plan-review chrome，不进 overlay）。
+    if (this.pendingPlanApproval && !this.overlay.isActive()) {
+      const countdown = this.planAutoApproveRemainSec
+      const reviewLines = formatPlanReview({
+        title: this.pendingPlanApproval.title,
+        ...(this.planApprovalDate ? { date: this.planApprovalDate } : {}),
+        body: this.planApprovalBody ?? '',
+        scroll: this.planReviewScroll,
+        width: cols,
+        bodyRows: planReviewBodyRows(this.rows || 24),
+        ...(countdown !== undefined
+          ? { countdown: `Goal 模式：${countdown}s 后自动批准（批准/驳回即取消；Esc 收起不取消）` }
+          : {}),
+        actions: buildPlanReviewActions(this.pendingPlanApproval),
+        feedbackMode: this.planReviewFeedbackMode,
+      }, this.theme)
+      if (reviewLines.length > 0) {
+        lines.push({ text: '' })
+        for (const line of reviewLines) lines.push({ text: this.clampLine(line) })
         lines.push({ text: '' })
       }
     }
@@ -6548,10 +6762,36 @@ export class TuiApp {
       }, this.theme)
       if (contextHint) lines.push({ text: this.clampLine(`  ${contextHint}`) })
 
-      // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）
+      // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）。
+      //     菜单打开：渲染已过滤已排序的 matches（MRU/参数模式由 refreshSlash 维护），
+      //     空 query 核心层视图补 footer 说明；菜单关（无匹配/Esc）：退回行内提示路径。
+      //     两条路径共用同一预算钳制（TUI 钉底）——菜单与行内提示都不超预算，
+      //     整帧 ≤ maxRows 不触发「宁可超行也不能让输入框消失」→ 终端滚动 → 输入框跳动。
+      const slashBudget = (): { visibleItems: number; hideFooter: boolean } => {
+        let chromeRows = 0
+        for (const line of lines.slice(chromeStart)) chromeRows += this.displayRowsFor(line.text, cols)
+        return computeSlashMenuBudget({
+          chromeRows,
+          inputRows: inputLines.length,
+          maxRows: liveMaxRowsFor(this.rows),
+          designMaxVisible: SLASH_HINT_MAX_VISIBLE,
+        })
+      }
       if (isSlash) {
-        for (const hintLine of formatSlashHint({ input: inputVal, commands: this.inputController.slashCommands, selectedIdx: this.inputController.slashSelectedIdx }, this.theme)) {
-          lines.push({ text: this.clampLine(hintLine) })
+        const menu = this.inputController.slashMenu
+        if (menu.open) {
+          const footerNote = menu.query === '' && this.inputController.slashCommands.length > menu.matches.length
+            ? `核心 ${menu.matches.length}/${this.inputController.slashCommands.length} · 输入即过滤全部 · ctrl+p 面板`
+            : undefined
+          const budget = slashBudget()
+          for (const menuLine of formatSlashMenu({ items: menu.matches, selected: menu.selected, footerNote, maxVisible: budget.visibleItems, hideFooter: budget.hideFooter }, this.theme)) {
+            lines.push({ text: this.clampLine(menuLine) })
+          }
+        } else {
+          const budget = slashBudget()
+          for (const hintLine of formatSlashHint({ input: inputVal, commands: this.inputController.slashCommands, selectedIdx: 0, maxVisible: budget.visibleItems, hideFooter: budget.hideFooter }, this.theme)) {
+            lines.push({ text: this.clampLine(hintLine) })
+          }
         }
       }
 
@@ -6895,6 +7135,8 @@ export class TuiApp {
    * 这修复了「async handler 一律视为已处理」吞掉透传命令的 bug。
    */
   private async submitSlashCommand(input: string): Promise<void> {
+    // MRU 排序数据源：命令执行即记录（含透传命令）；取首个 token（/team plan.md → /team）
+    this.inputController.recordSlashUse(input.split(/\s+/)[0] ?? input)
     let handled: boolean
     if (this.slashHandler) {
       try {

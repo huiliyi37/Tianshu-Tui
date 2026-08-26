@@ -322,7 +322,7 @@ export const AST_EDIT_TOOL: Tool = {
               const eol = chooseEol(filePath, detectEol(source), getTargetEol())
               // Back up before writing so a fatal post-write check can roll back.
               if (verify) {
-                trackFileChange(cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'ast_edit' })
+                await trackFileChange(cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'ast_edit' })
               }
               await writeFileAtomicAsync(filePath, applyEol(currentSource, eol))
 
@@ -334,7 +334,7 @@ export const AST_EDIT_TOOL: Tool = {
                 try {
                   const check = await checkSyntax(filePath, currentSource)
                   if (check.fatal) {
-                    restoreLatestBackup(cwd, relPath, params.sessionId)
+                    await restoreLatestBackup(cwd, relPath, params.sessionId)
                     incrementEditFailCount(filePath)
                     errors.push(`${filePath}: 写入后语法错误——已回滚：${check.fatal.split('\n')[0]}`)
                     rolledBack = true

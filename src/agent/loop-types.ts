@@ -22,6 +22,7 @@ import type { IntentPreview } from './intent-preview.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import type { DelegationActivity } from '../tools/types.js'
 import type { EvidenceSummary } from './evidence.js'
+import type { DomainDriftResult } from './domain-drift-detector.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
 
@@ -171,7 +172,8 @@ export interface AgentConfig {
    *  收敛检测以 v2 状态为准；缺省回退 v1（EvidenceState 推导）。 */
   deliveryGateV2?: (currentDirtyFiles?: string[]) => import('./delivery-gate-v2.js').DeliveryGateResult
   /**
-   * 会话 Auto 是否按消息关键词匹配换域（仅 defaultDomain='auto' 时生效）。
+   * 会话 Auto 是否按消息关键词匹配换域（defaultDomain='auto' 或当前会话
+   * 显式选择 Auto 时生效）。
    * 默认 true：按首条消息在 auto 池（DOMAIN_AUTO_POOL 四个均衡工程域 +
    * 自定义域）内 matchDomain，未命中回退天权。显式 false 时 Auto 固定落到
    * DEFAULT_DOMAIN（天权）。
@@ -340,6 +342,8 @@ export interface AgentCallbacks {
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string; voluntary?: boolean; source?: string }) => void
   /** Auto session domain resolved at the first bind; observability only. */
   onDomainResolved?: (payload: DomainResolvedPayload) => void
+  /** Auto domain drift is user-facing observability only; it never changes model state. */
+  onDomainDrift?: (drift: DomainDriftResult) => void
   /** R4 — structured course-correction signal surfaced to the desktop conversation. */
   onDecisionShift?: (shift: DecisionShift) => void
   /**
