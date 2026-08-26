@@ -1,19 +1,19 @@
 {
-  "version": "3.5.1",
-  "notes": "v3.5.0 更新内容：\n\n【CLI / TUI】\n- 计划文档全屏预览：审批卡按 v 看计划全文（翻页/搜索），q 返回审批；plan-picker 按 v 预览选中计划；新增 /plan-view 随时查看计划全文（含撰写中的草稿）\n- 排队消息在本轮结束后自动发出（多条按 FIFO 逐条），⏳ 条固定在输入框上方不随输出上漂；ESC 仍可取回编辑\n- 输入框钉住：slash 提示/权限行/任务面板开合不再让输入框上下跳动\n- 命令面板（Ctrl+P）列表跟随选中项滚动，超出屏幕不再丢高亮\n- starflow 写工预算按任务形状定价 + 历史回馈，多文件任务一次发准；worker 用量账本对齐\n- better-sqlite3 安装链修复：静默失败标记/自愈，不再随便降级内存模式（跨会话知识不再静默失能）\n\n【桌面端】\n- 滚动冷却窗过期重评：停手后无新事件也能恢复跟随（审查遗留项收口）\n\n【已知问题】\n- Windows x86_64 桌面包待该平台重打后 latest.json 自动补回条目，Windows 用户暂不会收到 3.5.0 桌面更新\n- macOS 包未公证：首次打开如提示「已损坏」请执行 xattr -cr /Applications/Tianshu.app\n- pager 搜索匹配计数为消息口径（计划文档全文显示 1/1 属正常，行级高亮不受影响）",
-  "pub_date": "2026-08-22T16:59:36.534Z",
+  "version": "3.6.0",
+  "notes": "v3.6.0 更新内容：\n\n【CLI / TUI】\n- 欢迎页用 /model 替换 ctrl+p；交接提醒 70% → 60%\n- DeepSeek 视觉实验档 deepseek-v4-flash-vision-exp（1M 上下文，定价与 flash 同档）\n- worker 结果协议收口（failureReason 12 值）+ 子进程隔离 opt-in\n- 计划审阅卡 / slash 菜单钉底，小终端不再顶飞输入框\n\n【桌面端】\n- WebView2 过旧静默回退三层修复 + 多视图取最高版本\n- /scout 蜂群卡死四修；语音模型四档下载即切换\n- 推理流式期拉不到底：end-anchor 跟随健康检查 + 滚动条拖拽下行交接\n- macOS 双架构 + Windows x86_64 安装包均已上架\n\n【已知问题】\n- macOS 包未公证：首次打开如提示「已损坏」请执行 xattr -cr /Applications/Tianshu.app",
+  "pub_date": "2026-08-26T01:55:57.534Z",
   "platforms": {
-    "windows-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.5.1/Tianshu_3.5.1_x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2RHUDR1eEQ2d2pSbDhaUGZLSFVNeHAvM3NKcm11eXdST0l4RkhtbjlQMmdoLzZEQWlCMXVJSHpBYkQvb0o3dXJEbzYyVmQwY29aNmpwdE80Tmp2YWdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NDE0NTIzCWZpbGU6VGlhbnNodV8zLjUuMV94NjQtc2V0dXAuZXhlCnF4VGNpVkgwdjRKaEY5WHlyWkppcmx6WFY1ZENuU1lXVVcra3d4U2c0RFpFVDd0VUh2M3RnOGFJYzc3U1pBMGkvNElkN2p3YXk5UEd1S1lDRU81bEJnPT0K"
-    },
     "darwin-aarch64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.5.1/Tianshu_3.5.1_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1cyK0x2ZmkxQ29pKzFmRHVVdndZSmtiTTlDZnI1ME93OXBvNWVMelIrNFU3eE9YVWdQTXRUTVYrbVVMK0pZU1N4OEtXTlFLRERNelZpYUd3YUFpM0FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NDE0ODQyCWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CjNjc2tpL0p0bG9zcVJOY0IzS2psdEhIcElJRlVpWVJUNDY4MStOTXgrVFBSaUxTbDhValI4N3lCR09OSDBGaWhGUERocnFKUHlyWEV5U1VMdWhXYkRBPT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.6.0/Tianshu_3.6.0_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1NKd0ROWUY5bm1abHVKbjNhNmQxNm5ybHJMRlp3UFBQWHRVMWhKQmlrcjE4ejBsUWg2TG1mTUpxRjg5eUlXYURPcUIvbC9LdEtPU2prd090dXJkM3dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Njg2MDAwCWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CkszUXRjT0plemVmSndadzZtL3A4QnRWQ3E0VUNqR21jaG5sc1VhYWlGWllWTWk0VWhvUWNTWHdCRitvR2JpMHoxaFE5eGJSbjdXcUkzVUZLUVpuaENnPT0K"
     },
     "darwin-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.5.1/Tianshu_3.5.1_x64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2IzdkdLc29lWldkcDRQSFlHQjZWUkdoV2MzRUtsNVgvR21EUnk1T1V3NXBxaGtVMUNpdUxzSUN0MFJESGpmVVl6amd6cHVsbjFZNy9wQWt2VXhKN1FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NDE3OTcyCWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CmNpUDgrMUF1WXg1MVJrNkxjNUJKMDJTR3lGY29RUFAyWHJNNEc2ZzB6UUF4cGszM0pTMXh2cGZIQ0FpalducWRSSkdLcHZ4L29hcnpJYTNoTzJaTkJBPT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.6.0/Tianshu_3.6.0_x64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2U1VVd0MlBZdzd6ZFdvK3U2Q3YvaGd1UjVoUXI0VWRiN0txeHhrellPTDduT3Bwd1RKQkxCMUpFdGloMHVKV3VKL3p0eHRGZkhIV1lZQitiZE8ycXdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Njg2NTE3CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CnovczZ1cFkxNHh2WGhLeFZ3dVJ4cytTc0Q1cVRpc1l5ZEFQQU52NlZRYkpJZzdSRCtJc1JXWjhsSVNKeThwQ2NQQzBRdi8vbkw5L1VLY1VlN3JXQkFRPT0K"
+    },
+    "windows-x86_64": {
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v3.6.0/Tianshu_3.6.0_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2ExVTJuc3dQd3dWSXVSL0ZtZ0tUVXNtbzZFTi9iOUxuTzMrTXR6NWhaU3RGamNmNVpRaEdJR2hpQllaa09SYU9tZ1pZdVdyenFTQXl0dFJVd3B2NUE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3NzA5MzU0CWZpbGU6VGlhbnNodV8zLjYuMF94NjQtc2V0dXAuZXhlCkpxOUlCN0Vwa0J5V2Q2cVRPUk53YVhLbXg1ZWlrTnhCV0lYRzBiOHJLc0QxdEl6eXkzNVA5eElHc1RMTkhkSlNxUkYzbGUwblpYZ1VtcjhMWlRTaURnPT0K"
     }
   }
 }
