@@ -2,7 +2,7 @@
   <img src="docs/brand/assets/tianshu-banner-dark.jpg" alt="天枢 Tianshu" width="100%">
 </p>
 
-<h1 align="center">天枢 <sub>Tianshu</sub></h1>
+<h1 align="center">天枢 <sub>Tianshu Harness</sub></h1>
 
 <p align="center">
   <b>把星辰带给每一位开发者 · Models as partners, not tools.</b>
