@@ -16,7 +16,7 @@
  *   ────────────────────────✦─────────────────────────    ← 基准线(唯一全幅元素)
  *   ''
  *   ⏜ /handoff 满60%交接新会话
- *   ✧ /team /scout /council 协同——并行施工 · 只读侦察 · 方案会诊
+ *   ✧ /team /scout 协同——并行施工 · 只读侦察
  *   ✧ 中途切 /model /domain 碎缓存
  *   ''
  *
@@ -91,8 +91,8 @@ const HINT_HANDOFF = '满60%交接新会话'
 const HINT_CACHE_A = '中途切'
 const HINT_CACHE_CMDS = '/model /domain'
 const HINT_CACHE_B = '碎缓存'
-const HINT_COLLAB_CMDS = '/team /scout /council'
-const HINT_COLLAB_DESC = '协同——并行施工 · 只读侦察 · 方案会诊'
+const HINT_COLLAB_CMDS = '/team /scout'
+const HINT_COLLAB_DESC = '协同——并行施工 · 只读侦察'
 const HINT_COLLAB_SHORT_CMDS = '/team /scout'
 const HINT_COLLAB_SHORT_DESC = '协同多代理'
 const WORDMARK_PINYIN = 'T I Ā N S H Ū'

@@ -14,7 +14,8 @@ export const HELP_TEXT = `Available commands:
 
 ▌▌ 多代理协同（派子代理干活）▌▌
 
-  选型口诀：并行写代码 → /team ｜ 只读体检诊断 → /scout ｜ 方案对抗评审 → /council ｜ 全流程贯通（评审→施工→攻坚）→ /starflow，不确定就从它起手
+  选型口诀：并行写代码 → /team ｜ 只读体检诊断 → /scout ｜ 方案对抗评审 → /council ｜ 全流程贯通 → /starflow
+  分量与开销：/scout 只读最轻；/team 按波次可控；/council 多席模型并行调用、token 开销大，够分量的方案再上；/starflow 最重（评审→施工→攻坚全流水线）——先用 /scout 摸底、由 /team 或 /galaxy 承接，别把 /starflow 当默认起手
 
 /team <task|plan> — Run team-mode workflow through team_orchestrate
 /team max <task> — Run team-mode max planning through team_orchestrate
@@ -50,6 +51,7 @@ export const HELP_TEXT = `Available commands:
 /effort [off|low|medium|high|max] — Set reasoning effort
 /permission [supervise|auto|unattended|manual|yolo|allow|deny|bash|remove|reset|test] — 权限模式：监督 / 自动 / 全自动
 /grant [path] [read|write] — 授权并记住工作区外目录（无参列出本工作区已记住的授权）
+/login [provider] — OAuth 登录（codex 等订阅型服务商，浏览器授权；/connect 选 codex 后的下一步）
 
 ▌▌ 会话与项目 ▌▌
 

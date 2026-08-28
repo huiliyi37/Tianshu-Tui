@@ -230,6 +230,7 @@ test('oauth preset commits immediately without asking for a key', () => {
   if (result.commit.mode !== 'preset') return
   assert.equal(result.commit.setup.apiKey, undefined)
   assert.match(result.summary, /OAuth|login|登录/i)
+  assert.equal(result.commit.needsLogin, true, 'OAuth 预设带 needsLogin——connectExec 据此跳过热切换并指引 /login')
 })
 
 test('diy path: url → key emits a probe request (empty key allowed for local endpoints)', () => {

@@ -1057,13 +1057,18 @@ export interface ChoicePanelData {
     label: string
     placeholder: string
     value: string
+    /** 光标位（value 内 UTF-16 偏移）；缺省 = 末尾（无光标态兼容旧调用）。 */
+    cursorPos?: number
   }
   /** Optional footer key hints; defaults to ↑↓/Enter/Esc. */
   footerHints?: Array<[string, string]>
+  /** 硬件光标落点（输入子模式渲染方回填，零占位不挤压文本——与 connect 同款）。 */
+  caret?: { row: number; col: number } | null
 }
 
 export function renderChoicePanel(data: ChoicePanelData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
+  data.caret = null
   lines.push(formatBorder(width, theme, 'subtle'))
   // Multi-line titles (ask pager): first line as title, rest as muted captions.
   // 附加行（计划审批 excerpt / 倒计时行等）钳制在 height-10 行以内：不钳制时
@@ -1144,11 +1149,22 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
   if (inputSubMode) {
     lines.push(frameDivider(width, theme))
     lines.push(padLine(` ${color(inputSubMode.label, theme.muted)}`, width, theme))
-    const cursor = color('▏', theme.primary, { bold: true })
-    const shown = inputSubMode.value.length > 0
-      ? color(truncateToDisplayWidth(inputSubMode.value, Math.max(1, width - 8)), theme.secondary)
+    // 光标是硬件 caret（格边界、零占位），与 connect overlay 同款——行内不画字形。
+    // 超宽窗口化：光标前缀超出可视宽时从行首丢弃（尾部锚定），保光标可见。
+    const value = inputSubMode.value
+    const pos = Math.min(Math.max(inputSubMode.cursorPos ?? value.length, 0), value.length)
+    const max = Math.max(1, width - 6)
+    let start = 0
+    while (start < pos && stringWidth(value.slice(start, pos)) > max - 1) {
+      start += value.codePointAt(start)! > 0xffff ? 2 : 1
+    }
+    let visible = value.slice(start)
+    if (stringWidth(visible) > max) visible = truncateToDisplayWidth(visible, max)
+    const shown = visible.length > 0
+      ? color(visible, theme.secondary)
       : color(inputSubMode.placeholder, theme.dim)
-    lines.push(padLine(` ${color('>', theme.primary, { bold: true })} ${shown}${cursor}`, width, theme))
+    data.caret = { row: lines.length + 1, col: 5 + stringWidth(value.slice(start, pos)) }
+    lines.push(padLine(` ${color('>', theme.primary, { bold: true })} ${shown}`, width, theme))
     lines.push(formatFooter(compactHints([['↵', '提交'], ['Esc', '返回选项']]), width, theme, 'subtle'))
   } else {
     const hints = data.footerHints ?? [['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']]

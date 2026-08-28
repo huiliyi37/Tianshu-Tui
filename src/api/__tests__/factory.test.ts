@@ -472,4 +472,24 @@ describe('resolveApiKey', () => {
       /No API key configured/,
     )
   })
+
+  it('keyless 端点（ollama 预设 / 无密钥材料自定义）返回空串而不抛错', () => {
+    // 预设 keyless：ollama 无 apiKey/apiKeyEnv/keyRef
+    const ollama: ProviderConfig = {
+      name: 'ollama', baseUrl: 'http://127.0.0.1:11434/v1', protocol: 'openai',
+      capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none', prefixCompletion: false },
+      thinking: 'enabled', maxTokens: 32768, models: [], unsupported: [],
+    }
+    assert.equal(resolveApiKey(ollama), '')
+    // 自定义 keyless（桌面表单 API Key 可空下有意不配）
+    const custom: ProviderConfig = { ...ollama, name: 'my-local-relay' }
+    assert.equal(resolveApiKey(custom), '')
+  })
+
+  it('keyless 豁免不误伤「需 key 而没配」：声明了 apiKeyEnv 但环境变量缺失仍抛错', () => {
+    const provider: ProviderConfig = { ...deepseekProvider, apiKeyEnv: 'DEFINITELY_MISSING_KEY_XYZ' }
+    delete process.env.DEFINITELY_MISSING_KEY_XYZ
+    delete process.env.DEEPSEEK_API_KEY
+    assert.throws(() => resolveApiKey(provider), /No API key configured/)
+  })
 })

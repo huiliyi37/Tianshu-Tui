@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
+import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, mcpStatusText, type SlashHandlerContext } from '../slash-commands.js'
 import { handleYoloToggle } from '../yolo-toggle.js'
 import { loadConstellation } from '../../constellation/store.js'
 import { DEFAULT_CONFIG } from '../../config/default.js'
@@ -1582,5 +1582,30 @@ describe('/yolo 与 /yes 覆盖版共享 handler（handleYoloToggle）', () => {
     const failMsg = calls.find(c => c.startsWith('commitStatic:') && c.includes('持久化失败'))
     assert.ok(failMsg, '应输出持久化失败提示')
     assert.ok(failMsg!.includes('disk readonly'), `提示应含原因: ${failMsg}`)
+  })
+})
+
+describe('mcpStatusText（/mcp 裸命令真实状态，与 /debug mcp 同源）', () => {
+  it('无 manager → 未初始化文案', () => {
+    assert.match(mcpStatusText(null), /not initialized/)
+    assert.match(mcpStatusText(undefined), /not initialized/)
+  })
+
+  it('有 manager → 逐 server 状态行 + 工具清单', () => {
+    const fakeMgr = {
+      getStates: () => [
+        { serverId: 'context7', status: 'connected', toolCount: 2 },
+        { serverId: 'broken', status: 'error', error: 'spawn npx ENOENT' },
+      ],
+      getAllTools: () => [
+        { definition: { name: 'mcp__context7__resolve' } },
+        { definition: { name: 'mcp__context7__docs' } },
+      ],
+    }
+    const text = mcpStatusText(fakeMgr as never)
+    assert.match(text, /2 server\(s\), 2 tool\(s\)/)
+    assert.match(text, /context7: connected — 2 tools/)
+    assert.match(text, /broken: error: spawn npx ENOENT/)
+    assert.match(text, /mcp__context7__resolve/)
   })
 })

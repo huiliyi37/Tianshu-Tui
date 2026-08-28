@@ -86,6 +86,7 @@ import { existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { join } from 'node:path'
 import { rivetHome } from '../config/paths.js'
+import { isKeylessProviderEntry } from '../config/provider-presets.js'
 import { allPresetKeys, resolvePreset, resolvePresetBaseUrl, resolvePresetLabel } from '../api/pro-registry.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
 import { queryDeepSeekBalance, type BalanceResult } from '../api/balance-client.js'
@@ -170,20 +171,22 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
 
       for (const [name, p] of Object.entries(cfg.provider.providers)) {
         const preset = resolvePreset(name)
-        const presetKeyless = preset
-          ? ('static' in preset ? preset.static.keyless : (preset as { keyless?: boolean }).keyless) === true
-          : false
         providers.push({
           name,
           label: resolvePresetLabel(name) ?? name,
           baseUrl: p.baseUrl,
           isDefault: name === defaultName,
           keyStatus: getApiKeyStatus(name),
-          // 自定义 provider 无任何密钥材料（apiKey/keyRef/apiKeyEnv 皆空）= 用户按
-          // keyless 端点有意保存；keyStatus 恒 none，靠本标记与「该配没配」区分。
-          keyless: presetKeyless || (!preset && !p.apiKey && !p.keyRef && !p.apiKeyEnv),
-          models: p.models.map(m => ({ id: m.id, alias: m.alias, contextWindow: m.contextWindow, maxTokens: m.maxTokens, supportsVision: m.supportsVision })),
+          // keyless 判定走 provider-presets 单一事实源（预设 keyless 或自定义无密钥材料）——
+          // keyStatus 恒 none 的 keyless 端点靠本标记与「该配没配」区分。
+          keyless: isKeylessProviderEntry(name, p),
+          models: p.models.map(m => ({ id: m.id, alias: m.alias, description: m.description, contextWindow: m.contextWindow, maxTokens: m.maxTokens, supportsVision: m.supportsVision })),
           isPreset: preset !== undefined,
+          // 预设模型全集——UI 标注「预设含 N 个模型」（配置快照经
+          // migratePresetModelBackfill 已对齐预设，此清单用于来源标注）。
+          ...(preset && 'static' in preset
+            ? { presetModelIds: preset.static.provider.models.map(m => m.id) }
+            : {}),
           allowProFallback: p.allowProFallback ?? false,
           ...(p.slowThinking !== undefined ? { slowThinking: p.slowThinking } : {}),
         })
@@ -204,7 +207,9 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
           const description = r && 'static' in r ? r.static.description : (r as { description?: string } | undefined)?.description
           const defaultModelId = r && 'static' in r ? r.static.defaultModelId : (r as { defaultModelId?: string } | undefined)?.defaultModelId
           const keyUrl = r && 'static' in r ? r.static.keyUrl : (r as { keyUrl?: string } | undefined)?.keyUrl
-          return { key: k, label: label ?? k, description, defaultModelId, keyUrl }
+          // 预设模型预览——配置前就能看到「配了会得到什么」（ZCode 对标）
+          const modelIds = r && 'static' in r ? r.static.provider.models.map(m => m.id) : undefined
+          return { key: k, label: label ?? k, description, defaultModelId, keyUrl, modelIds }
         })
 
       return { status: 200, body: { providers, unconfigured, presetKeys: allPresetKeys() } }

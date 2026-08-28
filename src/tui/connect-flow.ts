@@ -93,7 +93,13 @@ export interface ConnectView {
 
 /** Config mutation to perform once the wizard reaches a terminal state. */
 export type ConnectCommit =
-  | { mode: 'preset'; setup: SetupProviderOptions }
+  | {
+      mode: 'preset'
+      setup: SetupProviderOptions
+      /** OAuth 型预设（codex）：配置已写盘但需 /login 完成浏览器授权才能对话——
+       *  connectExec 据此跳过即时热切换并改指引登录（而不是「直接开始对话」）。 */
+      needsLogin?: boolean
+    }
   | {
       mode: 'custom'
       providerName: string
@@ -1763,12 +1769,12 @@ export class ConnectFlow {
       return { kind: 'error', message: `未知服务商：${id}`, view: this.view() }
     }
     // OAuth providers (codex) need no API key — commit the preset directly and
-    // point the user at the separate login step.
+    // point the user at the login step (/login 现已真实注册——此前是幽灵指引）。
     if (preset.provider.auth?.type === 'oauth') {
       return {
         kind: 'commit',
-        commit: { mode: 'preset', setup: { providerName: key, preset: key, makeDefault: true } },
-        summary: `已选择 ${preset.label} · ${preset.defaultModelId}（OAuth）。请运行 /login 完成登录。`,
+        commit: { mode: 'preset', setup: { providerName: key, preset: key, makeDefault: true }, needsLogin: true },
+        summary: `已选择 ${preset.label} · ${preset.defaultModelId}（OAuth）。`,
       }
     }
     // 免密钥端点（本地 Ollama）——跳过 key 步，先确认/修改服务地址再探测。

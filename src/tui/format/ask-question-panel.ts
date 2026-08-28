@@ -61,9 +61,13 @@ export interface AskQuestionPanelData {
     label: string
     placeholder: string
     value: string
+    /** 光标位（value 内 UTF-16 偏移）；缺省 = 末尾。 */
+    cursorPos?: number
   }
   /** 提交页字段：逐题答案汇总。 */
   review: AskReviewEntry[]
+  /** 硬件光标落点（输入子模式渲染方回填——与 connect/choice-panel 同款）。 */
+  caret?: { row: number; col: number } | null
 }
 
 /** 题页行数 = 选项数 + 2（Other 行 + 讨论行）。 */
@@ -139,6 +143,7 @@ function renderOptionRow(
 
 export function renderAskQuestionPanel(data: AskQuestionPanelData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
+  data.caret = null
   const innerWidth = width - 6
   const onSubmitTab = data.activeTab >= data.tabs.length
 
@@ -181,10 +186,22 @@ export function renderAskQuestionPanel(data: AskQuestionPanelData, width: number
     if (inputSubMode) {
       lines.push(frameDivider(width, theme))
       lines.push(frameLine(` ${color(inputSubMode.label, theme.muted)}`, width, theme))
-      const shown = inputSubMode.value.length > 0
-        ? color(truncateToDisplayWidth(inputSubMode.value, Math.max(1, width - 8)), theme.secondary)
+      // 光标是硬件 caret（格边界、零占位），与 connect/choice-panel 同款——行内不画字形。
+      // 超宽窗口化：光标前缀超出可视宽时从行首丢弃（尾部锚定），保光标可见。
+      const value = inputSubMode.value
+      const pos = Math.min(Math.max(inputSubMode.cursorPos ?? value.length, 0), value.length)
+      const max = Math.max(1, width - 8)
+      let start = 0
+      while (start < pos && displayWidth(value.slice(start, pos)) > max - 1) {
+        start += value.codePointAt(start)! > 0xffff ? 2 : 1
+      }
+      let visible = value.slice(start)
+      if (displayWidth(visible) > max) visible = truncateToDisplayWidth(visible, max)
+      const shown = visible.length > 0
+        ? color(visible, theme.secondary)
         : color(inputSubMode.placeholder, theme.dim)
-      lines.push(frameLine(` ${color(CURSOR, theme.primary, { bold: true })} ${shown}${color('▏', theme.primary, { bold: true })}`, width, theme))
+      data.caret = { row: lines.length + 1, col: 5 + displayWidth(value.slice(start, pos)) }
+      lines.push(frameLine(` ${color(CURSOR, theme.primary, { bold: true })} ${shown}`, width, theme))
       lines.push(frameFooter('↵:提交, Esc:返回选项', width, theme, 'subtle'))
     } else {
       const hints: Array<[string, string]> = data.tabs.length > 1

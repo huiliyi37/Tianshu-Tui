@@ -898,6 +898,20 @@ export function isProviderPresetKey(value: string): value is ProviderPresetKey {
 }
 
 /**
+ * keyless 端点判定（单一事实源）：预设声明 keyless（ollama），或自定义 provider
+ * 未配任何密钥材料（apiKey/keyRef/apiKeyEnv 皆空）——桌面表单 API Key 可选下
+ * 有意空着 = keyless 端点。消费方：resolveApiKey（免 key 不抛）、
+ * GET /config/providers（keyless 标记下发）、欢迎页模型列表（none 不等于未配）。
+ */
+export function isKeylessProviderEntry(
+  name: string,
+  entry?: { apiKey?: string; keyRef?: string; apiKeyEnv?: string },
+): boolean {
+  if (isProviderPresetKey(name)) return PROVIDER_PRESETS[name].keyless === true
+  return entry !== undefined && !entry.apiKey && !entry.keyRef && !entry.apiKeyEnv
+}
+
+/**
  * Look up a preset model's defaults by provider name and model id/alias.
  *
  * Used by CLI setup paths so that known models (e.g. deepseek-v4-pro)

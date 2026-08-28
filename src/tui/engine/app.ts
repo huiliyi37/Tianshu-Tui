@@ -124,9 +124,11 @@ import { renderPager, renderStarmap, renderCommandPalette, followListWindow, ren
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData, InitOverlayData } from '../format/overlay.js'
 import { ConnectFlow, DIY_PENDING_KEY_REF, type ConnectCommit, type ConnectProviderRef, type ConnectStepResult } from '../connect-flow.js'
 import { VisionOnboardingFlow, type VisionCandidate, type VisionOnboardingRequest, type VisionOnboardingResult } from '../vision-onboarding-flow.js'
+import { dismissOnboarding } from '../../onboarding.js'
 import { readConnectDraft, saveConnectDraft, clearConnectDraft } from '../connect-draft.js'
 import { readSecret, writeSecret, deleteSecret } from '../../config/secrets-store.js'
 import { probeProvider } from '../../api/provider-probe.js'
+import { errorRecoveryGuidance } from '../../api/error-classifier.js'
 import { InitFlow, probeInitFlowInput, type InitCommit, type InitStepResult } from '../init-flow.js'
 import { renderSettings } from '../format/settings.js'
 import type { SettingsFlow, SettingsSaveRequest, SettingsSaveResult, SettingsView } from '../settings-flow.js'
@@ -505,6 +507,9 @@ export class TuiApp {
    * writer。settle 只置 pendingQueueDispatch，等 complete 收尾后再发出。
    */
   private turnCompleteInFlight = 0
+  /** 最近一次真实提交的用户文本——run 报错时回填输入框（错误时刻的「未送达」兜底）。
+   *  成功 settle（handleTurnComplete isFinal）或中断（handleAbort 已有回填路径）时清空。 */
+  private lastSubmittedText: string | null = null
   private pendingQueueDispatch = false
   /**
    * 查询 agent 是否仍有未 settle 的 run（main.ts 注入 → `ctx.agent.isRunning()`）。
@@ -733,6 +738,10 @@ export class TuiApp {
   choicePanelSubMode: 'select' | 'input' = 'select'
   /** choice-panel 输入子模式下的实时缓冲。 */
   choicePanelInputBuffer: string = ''
+  /** 输入子模式光标位（buffer 内 UTF-16 偏移）——左右移动 / 插入 / 粘贴的落点。 */
+  choicePanelInputCursor = 0
+  /** choice-panel 输入子模式的硬件光标落点（渲染方回填，caret() 供引擎定位）。 */
+  private choicePanelCaret: { row: number; col: number } | null = null
   /** domain-picker 的创世碑文视图（g 键进入）。 */
   domainGenesisMode = false
   /** 碑文正文滚动偏移（行）。 */
@@ -998,6 +1007,18 @@ export class TuiApp {
       if (this.overlay.activeId() === 'settings' && this.settingsFlow?.isTextEditing()) {
         this.settingsFlow.typeChar(text.replaceAll('\n', ' '))
         this.overlay.rerender()
+        return
+      }
+      // choice-panel 输入子模式（自定义回答 / 驳回反馈）→ 粘贴进 overlay 缓冲光标处。
+      // 此前落到下方「其他 overlay 丢弃」分支被静默吞掉——用户粘贴无任何反馈。
+      if (this.overlay.activeId() === 'choice-panel' && this.choicePanelSubMode === 'input') {
+        const pasted = text.replaceAll('\r', '').replaceAll('\n', ' ')
+        if (pasted) {
+          const cur = Math.min(Math.max(this.choicePanelInputCursor, 0), this.choicePanelInputBuffer.length)
+          this.choicePanelInputBuffer = this.choicePanelInputBuffer.slice(0, cur) + pasted + this.choicePanelInputBuffer.slice(cur)
+          this.choicePanelInputCursor = cur + pasted.length
+          this.overlay.rerender()
+        }
         return
       }
       // Other overlays active → don't paste into main input
@@ -1619,6 +1640,8 @@ export class TuiApp {
       this.inputController.inputHistory = nextHistoryAfterSubmit(this.inputController.inputHistory, trimmed)
       this.inputLine.setHistory(this.inputController.inputHistory)
       appendHistoryAsync(trimmed).catch(() => { /* 持久化失败静默 */ })
+      // 记录最近真实提交——run 报错时 handleError 回填输入框用（slash 命令不算）。
+      if (!trimmed.startsWith('/')) this.lastSubmittedText = trimmed
     }
 
     // Worker 视图：输入直达该 worker 的 steer 队列，不进主 agent。
@@ -2504,6 +2527,15 @@ export class TuiApp {
     this.submitText(text)
   }
 
+  /** 进入 choice-panel 输入子模式——统一收口四个状态位（subMode/buffer/cursor/for）。 */
+  private enterChoicePanelInput(target: 'plan-reject-comment' | 'ask-other'): void {
+    this.choicePanelSubMode = 'input'
+    this.choicePanelInputBuffer = ''
+    this.choicePanelInputCursor = 0
+    this.choicePanelInputFor = target
+    this.overlay.rerender()
+  }
+
   /** choice-panel 输入子模式渲染数据（由 renderChoicePanel 读取）。 */
   getChoicePanelInputState(): ChoicePanelData['inputSubMode'] {
     if (this.choicePanelSubMode !== 'input') return undefined
@@ -2513,6 +2545,7 @@ export class TuiApp {
         label: '驳回反馈',
         placeholder: '输入反馈后回车（可留空）',
         value: this.choicePanelInputBuffer,
+        cursorPos: this.choicePanelInputCursor,
       }
     }
     if (this.choicePanelInputFor === 'ask-other') {
@@ -2521,6 +2554,7 @@ export class TuiApp {
         label: '自定义回答',
         placeholder: '输入你的回答后回车',
         value: this.choicePanelInputBuffer,
+        cursorPos: this.choicePanelInputCursor,
       }
     }
     return undefined
@@ -2787,11 +2821,15 @@ export class TuiApp {
       }
     }
     this.connectFlow = undefined
+    // 纯取消（无进展未落草稿）= 用户看过向导且选择不配——写首启哨兵，
+    // 新会话不再自动弹 /connect（手动 /connect 不受影响）。有草稿则说明在
+    // 配置中途，下次新会话仍应引导续配。
+    if (!savedDraft) dismissOnboarding()
     // Buffer the notice into scrollback before exiting the overlay, so the
     // deactivate repaint paints a single clean frame (no ghost of the overlay).
     this.commitStatic(savedDraft
       ? '已取消服务商配置。进度已存为草稿（密钥单独存于 secrets.json），下次 /connect 可恢复。'
-      : '已取消服务商配置。')
+      : '已取消服务商配置。新会话不再自动弹出本向导——/connect 可随时打开。')
     this.deactivateOverlay()
   }
 
@@ -3939,10 +3977,18 @@ export class TuiApp {
       const cur = this.overlayController.nav().choicePanelIndex
 
       // 输入子模式：在 overlay 内直接输入文字（反馈 / 自定义回答）。
+      // 与 connect overlay 同套光标编辑语义：左右/Home/End 移动、退格删光标前、
+      // Del 删光标处、Ctrl+U 清空、可打印字符插光标处；粘贴走 onPaste 路由分支。
       if (this.choicePanelSubMode === 'input') {
+        // 光标位兜底钳制：buffer 在多处被整体重置（重进子模式/提交清空），cursor 不逐点同步
+        const clampCursor = (): number => {
+          this.choicePanelInputCursor = Math.min(Math.max(this.choicePanelInputCursor, 0), this.choicePanelInputBuffer.length)
+          return this.choicePanelInputCursor
+        }
         if (key.name === 'escape') {
           this.choicePanelSubMode = 'select'
           this.choicePanelInputBuffer = ''
+          this.choicePanelInputCursor = 0
           this.choicePanelInputFor = undefined
           this.overlay.rerender()
           return true
@@ -3953,6 +3999,7 @@ export class TuiApp {
             const done = this.resolveAskChoice(targetId)
             this.choicePanelSubMode = 'select'
             this.choicePanelInputBuffer = ''
+            this.choicePanelInputCursor = 0
             this.choicePanelInputFor = undefined
             if (done) this.deactivateOverlay()
             else this.overlay.rerender()
@@ -3962,6 +4009,7 @@ export class TuiApp {
           if (exec) exec(targetId)
           this.choicePanelSubMode = 'select'
           this.choicePanelInputBuffer = ''
+          this.choicePanelInputCursor = 0
           this.choicePanelInputFor = undefined
           this.choicePanelKind = 'effort'
           this.pendingPlanApproval = undefined
@@ -3969,13 +4017,53 @@ export class TuiApp {
           this.deactivateOverlay()
           return true
         }
+        if (key.name === 'left') {
+          this.choicePanelInputCursor = Math.max(0, clampCursor() - 1)
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'right') {
+          this.choicePanelInputCursor = Math.min(this.choicePanelInputBuffer.length, clampCursor() + 1)
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'home' || (key.ctrl && c === 'a')) {
+          this.choicePanelInputCursor = 0
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'end' || (key.ctrl && c === 'e')) {
+          this.choicePanelInputCursor = this.choicePanelInputBuffer.length
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'delete') {
+          const cur = clampCursor()
+          if (cur < this.choicePanelInputBuffer.length) {
+            this.choicePanelInputBuffer = this.choicePanelInputBuffer.slice(0, cur) + this.choicePanelInputBuffer.slice(cur + 1)
+            this.overlay.rerender()
+          }
+          return true
+        }
         if (key.name === 'backspace' || key.name === 'ctrl_h') {
-          this.choicePanelInputBuffer = this.choicePanelInputBuffer.slice(0, -1)
+          const cur = clampCursor()
+          if (cur > 0) {
+            this.choicePanelInputBuffer = this.choicePanelInputBuffer.slice(0, cur - 1) + this.choicePanelInputBuffer.slice(cur)
+            this.choicePanelInputCursor = cur - 1
+            this.overlay.rerender()
+          }
+          return true
+        }
+        if (key.ctrl && c === 'u') {
+          this.choicePanelInputBuffer = ''
+          this.choicePanelInputCursor = 0
           this.overlay.rerender()
           return true
         }
         if (this.isPrintableKey(key)) {
-          this.choicePanelInputBuffer += key.char
+          const cur = clampCursor()
+          this.choicePanelInputBuffer = this.choicePanelInputBuffer.slice(0, cur) + key.char + this.choicePanelInputBuffer.slice(cur)
+          this.choicePanelInputCursor = cur + key.char.length
           this.overlay.rerender()
           return true
         }
@@ -4021,10 +4109,7 @@ export class TuiApp {
         const otherIdx = q.options.length
         const chatIdx = q.options.length + 1
         const enterOtherInput = (): void => {
-          this.choicePanelSubMode = 'input'
-          this.choicePanelInputBuffer = ''
-          this.choicePanelInputFor = 'ask-other'
-          this.overlay.rerender()
+          this.enterChoicePanelInput('ask-other')
         }
 
         if (key.name === 'down') {
@@ -4128,10 +4213,7 @@ export class TuiApp {
           return true
         }
         if (entry && q?.allowMultiple && entry.id === '__other__') {
-          this.choicePanelSubMode = 'input'
-          this.choicePanelInputBuffer = ''
-          this.choicePanelInputFor = 'ask-other'
-          this.overlay.rerender()
+          this.enterChoicePanelInput('ask-other')
           return true
         }
       }
@@ -4144,10 +4226,7 @@ export class TuiApp {
             // 用户正在撰写驳回反馈 = 参与——绝不能在打字中途触发自动批准
             this.cancelPlanAutoApprove()
           }
-          this.choicePanelSubMode = 'input'
-          this.choicePanelInputBuffer = ''
-          this.choicePanelInputFor = entry.id === '__reject_comment__' ? 'plan-reject-comment' : 'ask-other'
-          this.overlay.rerender()
+          this.enterChoicePanelInput(entry.id === '__reject_comment__' ? 'plan-reject-comment' : 'ask-other')
           return true
         }
         if (entry && this.overlayController.getChoicePanelExec()) this.overlayController.getChoicePanelExec()?.(entry.id)
@@ -4657,10 +4736,10 @@ export class TuiApp {
       return false
     }
 
-    // 协同建议行 Tab 采纳：`/team ` + 当前文本转入输入框（不直接发送），本会话关闭建议。
+    // 协同建议行 Tab 采纳：`/<kind> ` + 当前文本转入输入框（不直接发送），本会话关闭建议。
     // 位于 @ 补全之前：建议行激活时 Tab 的意图是把活派给蜂群；文件补全循环进行中让位。
     if (this.orchHint.active && !this.inputController.fileCompletion) {
-      this.inputLine.setValue(`/team ${value}`)
+      this.inputLine.setValue(`/${this.orchHint.kind} ${value}`)
       this.orchHint.adopt()
       return true
     }
@@ -5566,6 +5645,7 @@ export class TuiApp {
     if (isFinal) {
       // Reset state
       this.agentBusy = false
+      this.lastSubmittedText = null // 回合成功 settle——错误回填底料作废
       this.state.thinkingText = ''
       this.state.isStreaming = false
       this.state.isThinking = false
@@ -5669,12 +5749,30 @@ export class TuiApp {
     // 此时 pendingTools/toolAccumulator 可能持有半成品数据。只清 fleet 而漏清这两者，
     // 下一轮会读到上轮孤儿条目（live 区显示已死工具卡片、累加器跨 run 污染）。
     this.resetRunLocalState()
+    // 错误时刻三件套：①错误本体 ②分类终态指引（「下一步」）③上一条回填输入框
+    const refill = this.lastSubmittedText
+    this.lastSubmittedText = null
     this.commitAbove(() => {
       this.commit.write({
         text: color(`✗ Error: ${error.message}`, this.theme.error),
         trailingNewline: true,
       })
+      this.commit.write({
+        text: color(`  ${errorRecoveryGuidance(error)}`, this.theme.muted),
+        trailingNewline: true,
+      })
+      if (refill) {
+        this.commit.write({
+          text: color('  ↩ 上一条可能未被完整处理——已回填输入框，编辑后回车重发', this.theme.muted),
+          trailingNewline: true,
+        })
+      }
     })
+    // 输入框已有草稿时不抢写（用户正在输入的内容优先）
+    if (refill && !this.inputLine.value) {
+      this.inputLine.setValue(refill)
+      this.renderLive()
+    }
     this.flushPendingQueueDispatch()
   }
 
@@ -5819,6 +5917,8 @@ export class TuiApp {
   private handleAbort(reason?: string): void {
     // 用户主动 abort（非 watchdog 守护）= 参与——取消倒计时自动批准
     if (!reason?.startsWith('watchdog')) this.cancelPlanAutoApprove()
+    // 中断走自有回填路径（abortSettling backfill）——错误回填底料作废，防双份回填
+    this.lastSubmittedText = null
     // 世代自增：被中断的旧 run 的迟到回调（bridge 捕获旧 gen）将被丢弃
     this._runGen++
     // Capture approval-blocked state BEFORE resolveApproval(false) below clears
@@ -6826,7 +6926,7 @@ export class TuiApp {
       // 5a4. 协同建议行（orchestration hint）：输入命中多信号时给出 /team /scout
       //      /council 建议；Esc/Tab 采纳后本会话关闭，频率帽见 OrchestrationHint。
       if (this.orchHint.active) {
-        lines.push({ text: this.clampLine(formatOrchestrationHint(this.theme, useAsciiGlyphs())) })
+        lines.push({ text: this.clampLine(formatOrchestrationHint(this.theme, useAsciiGlyphs(), this.orchHint.kind)) })
       }
 
       // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）。
@@ -7479,18 +7579,26 @@ export class TuiApp {
 
     // Choice Panel — 通用选项选择弹窗；selectedIndex 由 overlayNav 注入。
     // ask-user-question 走 Tab 化专用渲染器（buildAskPanelData），不进通用 data 管线。
+    // 输入子模式与 connect overlay 同款 caret 接线：渲染方回填 data.caret，caret() 供引擎定位。
     this.overlay.register('choice-panel', {
       render: (_w, _h) => {
         if (this.choicePanelKind === 'ask-user-question' && this.pendingAskFlow) {
-          return renderAskQuestionPanel(this.buildAskPanelData(), this.columns, this.rows, this.theme)
+          const askData = this.buildAskPanelData()
+          const lines = renderAskQuestionPanel(askData, this.columns, this.rows, this.theme)
+          this.choicePanelCaret = askData.caret ?? null
+          return lines
         }
         const data = overlayData?.choicePanelData?.() ?? { title: '', choices: [], selectedIndex: 0 }
-        return renderChoicePanel({
+        const merged = {
           ...data,
           selectedIndex: this.overlayController.nav().choicePanelIndex,
           inputSubMode: this.getChoicePanelInputState(),
-        }, this.columns, this.rows, this.theme)
+        }
+        const lines = renderChoicePanel(merged, this.columns, this.rows, this.theme)
+        this.choicePanelCaret = merged.caret ?? null
+        return lines
       },
+      caret: () => (this.choicePanelSubMode === 'input' ? this.choicePanelCaret : null),
     })
 
     // Plan Picker — 待批计划选择器；回车批准并自动分波执行（selectedIndex 由 overlayNav 注入）

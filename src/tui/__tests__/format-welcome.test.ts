@@ -59,7 +59,7 @@ test(`定盘星全妆:${FULL_LINES} 行(立体字标 + 使命 + 基准线 + 进�
   assert.ok(strip(lines[dIdx]!).includes('工程能力'), '/domain 星域描述在场')
   assert.ok(cIdx > dIdx && cIdx < hIdx, `协同提示行在 /domain 与 /handoff 之间(${dIdx} < ${cIdx} < ${hIdx})`)
   assert.ok(strip(lines[cIdx]!).includes('并行施工'), '协同提示带选型描述')
-  assert.ok(strip(lines[cIdx]!).includes('/council'), '协同提示含 /council 入口')
+  assert.ok(!strip(lines[cIdx]!).includes('/council'), 'council 重（多席烧 token）不上首屏，发现性归 /help 协同组')
   assert.ok(strip(lines[hIdx + 1]!).includes('碎缓存'), '进入提示·缓存')
 })
 

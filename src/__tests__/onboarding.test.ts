@@ -7,7 +7,6 @@ import {
   dismissOnboarding,
   getOnboardingState,
   onboardingSentinelPath,
-  shouldHandleOnboardingInput,
 } from '../onboarding.js'
 
 function makeHome(): string {
@@ -15,10 +14,10 @@ function makeHome(): string {
 }
 
 describe('onboarding state', () => {
-  it('uses an explicit persisted sentinel path', () => {
+  it('uses an explicit persisted sentinel path（home 参数即 .rivet 根，RIVET_HOME 覆盖语义）', () => {
     const home = makeHome()
 
-    assert.equal(onboardingSentinelPath(home), join(home, '.rivet', 'onboarding-dismissed'))
+    assert.equal(onboardingSentinelPath(home), join(home, 'onboarding-dismissed'))
     assert.equal(getOnboardingState(home).shouldShow, true)
   })
 
@@ -28,11 +27,5 @@ describe('onboarding state', () => {
     dismissOnboarding(home)
 
     assert.equal(getOnboardingState(home).shouldShow, false)
-  })
-
-  it('handles only explicit onboarding dismissal input', () => {
-    assert.equal(shouldHandleOnboardingInput('/onboarding dismiss'), true)
-    assert.equal(shouldHandleOnboardingInput('hello agent'), false)
-    assert.equal(shouldHandleOnboardingInput('/help'), false)
   })
 })

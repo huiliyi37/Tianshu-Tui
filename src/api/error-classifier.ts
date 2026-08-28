@@ -431,6 +431,36 @@ export function classifyApiError(error: unknown): ClassifiedError {
 }
 
 /**
+ * 终态恢复指引（TUI handleError 用）——与 userMessage 的分工：userMessage 是
+ * 重试进行中的过程文案（"Retrying…"），本函数是重试耗尽后的「下一步」。
+ * 返回中文可行动指引（按 category 分流）；无法分类时给通用兜底。
+ */
+export function errorRecoveryGuidance(error: unknown): string {
+  const c = classifyApiError(error)
+  switch (c.category) {
+    case 'rate_limit':
+      return '限流/额度不足：稍等片刻再发，或 /model 切轻量档（如 deepseek-v4-flash）；持续 429 先查余额（桌面端 Insights 面板）'
+    case 'overloaded':
+    case 'server_error':
+      return '服务商暂时性故障：稍后重发，或 /model 切换服务商'
+    case 'timeout':
+      return '网络超时：检查网络/代理后重发；反复超时用 /doctor 体检'
+    case 'auth_error':
+      return '认证失败：/connect 检查 API Key；订阅型（codex）用 /login 重新授权'
+    case 'context_overflow':
+      return '上下文超限：/compact 压缩，或 /handoff 交接后开新会话'
+    case 'client_error':
+      return '请求被拒（模型 id 或端点路径错）：/model 确认模型；自定义端点检查 baseUrl 是否缺 /v1'
+    case 'image_strip':
+      return '图片负载超限：去掉部分图片后重发'
+    case 'stream_parse':
+      return '流解析失败：重发一次；反复出现用 /logs 打包日志提 issue'
+    default:
+      return '重发一次；持续失败：/doctor 体检 + /logs 看日志'
+  }
+}
+
+/**
  * Parse Retry-After header value (RFC 7231 §7.1.3).
  * Numeric string → seconds × 1000.
  * HTTP-date string → delta from now in ms.

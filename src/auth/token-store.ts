@@ -11,7 +11,7 @@ export interface TokenData {
 export class TokenStore {
   private filePath: string
 
-  constructor(private baseDir: string, private provider: string) {
+  constructor(private baseDir: string, provider: string) {
     this.filePath = join(baseDir, `${provider}.json`)
   }
 

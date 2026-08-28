@@ -100,14 +100,43 @@ test('state: plan/ask 模式与流式中不触发；slash 输入不触发；总�
   assert.ok(!off.evaluate(text, idle), 'enabled=false 不触发')
 })
 
-// ── 渲染行 ──────────────────────────────────────────────────────────
+// ── 渲染行（按 kind 分流，不全推） ──────────────────────────────────
 
-test('render: 建议行含三入口与采纳/抑制键位；ASCII 轨退化为 >', () => {
-  const line = strip(formatOrchestrationHint(theme, false))
-  assert.ok(line.includes('/team') && line.includes('/scout') && line.includes('/council'))
-  assert.ok(line.includes('Tab') && line.includes('Esc'))
-  assert.ok(line.includes('⚡'))
-  const asciiLine = strip(formatOrchestrationHint(theme, true))
+test('render: team 档推 /team+/scout（不推 council）；council 档带 token 开销警示', () => {
+  const teamLine = strip(formatOrchestrationHint(theme, false, 'team'))
+  assert.ok(teamLine.includes('/team') && teamLine.includes('/scout'), 'team 档含施工与侦察入口')
+  assert.ok(!teamLine.includes('/council'), 'team 档不推 council（不全推荐）')
+  assert.ok(teamLine.includes('Tab') && teamLine.includes('Esc'))
+
+  const councilLine = strip(formatOrchestrationHint(theme, false, 'council'))
+  assert.ok(councilLine.includes('/council'), 'council 档推议事会')
+  assert.ok(councilLine.includes('token 开销大'), 'council 档必须标注 token 开销（多席烧 Pro 额度）')
+
+  const scoutLine = strip(formatOrchestrationHint(theme, false, 'scout'))
+  assert.ok(scoutLine.includes('/scout') && !scoutLine.includes('/council'), 'scout 档只推侦察')
+
+  const asciiLine = strip(formatOrchestrationHint(theme, true, 'team'))
   assert.ok(!asciiLine.includes('⚡'), 'ASCII 无 ⚡')
   assert.ok(asciiLine.includes('>'), 'ASCII 退化为 >')
+})
+
+test('kind 分流：评审/方案词 → council；排查/诊断词 → scout；多模块施工 → team', () => {
+  assert.equal(detectOrchestrationFit('同时重构 auth 模块并补齐测试').kind, 'team')
+  assert.equal(
+    detectOrchestrationFit('这个迁移方案要不要上？帮我从架构和风险角度评审，分别看数据层和服务层的影响').kind,
+    'council',
+  )
+  assert.equal(
+    detectOrchestrationFit('排查一下为什么构建偶发失败，分别看依赖安装、类型检查和打包三个环节并给出归因').kind,
+    'scout',
+  )
+})
+
+test('state: kind 随命中更新，供 Tab 采纳组命令行', () => {
+  const h = new OrchestrationHint(true)
+  h.evaluate('同时重构 auth 模块并补齐测试', idle)
+  assert.equal(h.kind, 'team')
+  h.evaluate('改个注释', idle) // active=false，kind 保持
+  h.evaluate('同时从架构和风险角度评审这个迁移方案并给出权衡', idle)
+  assert.equal(h.kind, 'council')
 })

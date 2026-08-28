@@ -3,8 +3,8 @@
   "redline": 800,
   "budgets": {
     "src/tui/engine/app.ts": {
-      "ceiling": 7526,
-      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25） 7520→7526：协同建议行接线（onChange 评估 + 渲染槽 + Tab 采纳 + Esc 关闭；检测/渲染主体在 engine/orchestration-hint.ts 新模块）。"
+      "ceiling": 7558,
+      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25） 7520→7526：协同建议行接线（onChange 评估 + 渲染槽 + Tab 采纳 + Esc 关闭；检测/渲染主体在 engine/orchestration-hint.ts 新模块）。 7526→7553：错误时刻三件套（handleError 分类指引行 + 上一条回填输入框 + lastSubmittedText 生命周期，+27）。 7553→7558：onboarding 哨兵接线（向导纯取消后新会话不再自动弹 /connect，+5）。"
     },
     "src/server/session-manager.ts": {
       "ceiling": 5800,
@@ -26,12 +26,12 @@
       "ceiling": 2511
     },
     "src/config/manager.ts": {
-      "ceiling": 2648,
-      "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。 2606→2648：账本对齐实际行数（68a961c20 预设新增模型回流存量快照，已合入 HEAD 后超限）。"
+      "ceiling": 2664,
+      "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。 2606→2648：账本对齐实际行数（68a961c20 预设新增模型回流存量快照，已合入 HEAD 后超限）。 2648→2664：config login 子命令（OAuth 登录落地，/login 幽灵指引闭环）——case +12、帮助文本 +1、帮助示例区 +3。"
     },
     "src/main.ts": {
-      "ceiling": 2323,
-      "note": "2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。 2298→2299：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 2299→2323：账本对齐实际行数（HEAD 既有超限 2320 在先——此前两版提交均选择不抬；本轮 +3 为协同建议开关接线 orchestrationHint 入 TuiApp，一并登记对齐）。"
+      "ceiling": 2336,
+      "note": "2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。 2298→2299：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 2299→2323：账本对齐实际行数（HEAD 既有超限 2320 在先——此前两版提交均选择不抬；本轮 +3 为协同建议开关接线 orchestrationHint 入 TuiApp，一并登记对齐）。 2323→2330：connectExec needsLogin 分支（OAuth 预设不热切换、指引 /login，+7）。 2330→2336：首启自动弹 /connect 接哨兵抑制 + 抑制态单行提示（+6）。"
     },
     "src/tui/pi/latex-to-unicode.ts": {
       "ceiling": 2071
@@ -153,8 +153,8 @@
       "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 956→962：RIVET_ORCHESTRATION_HINT 登记（+6）。"
     },
     "src/server/config-routes.ts": {
-      "ceiling": 1048,
-      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。 1035→1048：欢迎页模型列表 keyless 放行——GET /config/providers 下发 keyless 标记（ollama 预设 / 无密钥材料自定义 provider），与「该配没配」区分（+13）。"
+      "ceiling": 1055,
+      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。 1035→1048：欢迎页模型列表 keyless 放行——GET /config/providers 下发 keyless 标记（ollama 预设 / 无密钥材料自定义 provider），与「该配没配」区分（+13）。 1048→1055：账本对齐实际行数（合并 defc472c0 模型设置优化轮——预设来源标注/配置前预览路由，+7 净增）。"
     },
     "src/pro/computer-use/cdp/driver.ts": {
       "ceiling": 899
@@ -180,12 +180,12 @@
       "ceiling": 865
     },
     "src/tui/connect-flow.ts": {
-      "ceiling": 2160,
-      "note": "PR#38 /connect 向导（2160 行，2026-08-22 合入）——入账钉住，拆分待后续"
+      "ceiling": 2166,
+      "note": "PR#38 /connect 向导（2160 行，2026-08-22 合入）——入账钉住，拆分待后续 2160→2166：ConnectCommit.needsLogin 标记 + oauth 分支（+6）。"
     },
     "src/config/provider-presets.ts": {
-      "ceiling": 925,
-      "note": "PR#38 provider onboarding 统一栈（861 行）——入账钉住。861→875：deepseek 预设新增 v4-flash-vision-exp 视觉实验档（1M 上下文 + supportsVision + 定价同 flash，+14）。875→900：glm 预设新增 glm-5.3 文本旗舰 + glm-5.3-flash 原生多模态（Coding Plan provider，均 1M/128K + pricing 全 0，+21）。 900→925：P0 获取 Key 直链——ProviderPreset 加 keyUrl 字段 + 13 个预设官方控制台 URL（纯数据 +16，先例 ffc6d2f66 纯数据调升）。"
+      "ceiling": 926,
+      "note": "PR#38 provider onboarding 统一栈（861 行）——入账钉住。861→875：deepseek 预设新增 v4-flash-vision-exp 视觉实验档（1M 上下文 + supportsVision + 定价同 flash，+14）。875→900：glm 预设新增 glm-5.3 文本旗舰 + glm-5.3-flash 原生多模态（Coding Plan provider，均 1M/128K + pricing 全 0，+21）。 900→925：P0 获取 Key 直链——ProviderPreset 加 keyUrl 字段 + 13 个预设官方控制台 URL（纯数据 +16，先例 ffc6d2f66 纯数据调升）。 925→926：isKeylessProviderEntry 单一事实源（keyless 判定收口，+14；注释行占大头）。"
     }
   }
 }

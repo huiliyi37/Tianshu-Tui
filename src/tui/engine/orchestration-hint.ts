@@ -38,10 +38,25 @@ const ENUM_RE = /(?:^|\n)\s*(?:\d+[.、]|[①-⑨])/
 /** 长文本多任务的下限长度（字符）。 */
 const LONG_MULTI_MIN = 120
 
+/** 推荐分流：评审/决策词 → council；排查/只读词 → scout；其余多模块施工 → team。
+ *  顺序有意：council 词最强（用户已在谈方案），scout 次之，施工兜底。 */
+const COUNCIL_RE = /评审|会诊|方案|选型|架构|风险|要不要|该不该|值不值|决策|权衡/
+const SCOUT_RE = /排查|诊断|体检|摸底|归因|定位|对账|调研|为什么|看不懂|陌生/
+
+export type OrchestrationKind = 'team' | 'scout' | 'council'
+
+function classifyKind(t: string): OrchestrationKind {
+  if (COUNCIL_RE.test(t)) return 'council'
+  if (SCOUT_RE.test(t)) return 'scout'
+  return 'team'
+}
+
 export interface OrchestrationFit {
   hit: boolean
   /** 命中的信号名（调试用，不上屏）。 */
   signals: string[]
+  /** 推荐承接命令（hit=false 时无意义，恒 'team'）。 */
+  kind: OrchestrationKind
 }
 
 /**
@@ -51,9 +66,9 @@ export interface OrchestrationFit {
 export function detectOrchestrationFit(text: string): OrchestrationFit {
   const signals: string[] = []
   const t = text.trim()
-  if (t.length === 0) return { hit: false, signals }
+  if (t.length === 0) return { hit: false, signals, kind: 'team' }
   // 纯疑问句：问答不是施工，不建议协同
-  if (/[?？]\s*$/.test(t) && !ACTION_RE.test(t)) return { hit: false, signals }
+  if (/[?？]\s*$/.test(t) && !ACTION_RE.test(t)) return { hit: false, signals, kind: 'team' }
 
   if (PARALLEL_RE.test(t)) signals.push('parallel-words')
   if (ACTION_RE.test(t) && VERIFY_RE.test(t)) signals.push('multi-stage')
@@ -62,20 +77,35 @@ export function detectOrchestrationFit(text: string): OrchestrationFit {
   const actionCount = t.match(ACTION_RE_G)?.length ?? 0
   if (t.length >= LONG_MULTI_MIN && (ENUM_RE.test(t) || actionCount >= 2)) signals.push('long-multi-task')
 
-  return { hit: signals.length >= 2, signals }
+  return { hit: signals.length >= 2, signals, kind: classifyKind(t) }
 }
 
-/** 建议行渲染（输入框上方瞬时行；ASCII 终端退化为纯文本箭头）。 */
-export function formatOrchestrationHint(theme: RivetTheme, ascii: boolean): string {
+/** 建议行渲染（输入框上方瞬时行；ASCII 终端退化为纯文本箭头）。
+ *  按 kind 分流推荐——不全推：施工推 /team（带 /scout 备选），只读推 /scout，
+ *  评审推 /council 并如实标注 token 开销（多席模型调用，烧的是 Pro 额度）。 */
+export function formatOrchestrationHint(theme: RivetTheme, ascii: boolean, kind: OrchestrationKind): string {
   const bolt = ascii ? '>' : '⚡'
-  return (
-    color(`  ${bolt} `, theme.secondary) +
-    color('这活可以派蜂群——', theme.secondary) +
-    color('/team', theme.warning) + color(' 并行施工 · ', theme.muted) +
-    color('/scout', theme.warning) + color(' 只读侦察 · ', theme.muted) +
-    color('/council', theme.warning) + color(' 方案会诊', theme.muted) +
-    color(' ｜ Tab 用 /team 发送 · Esc 本会话不再提示', theme.dim)
-  )
+  const head = color(`  ${bolt} `, theme.secondary)
+  const tail = color(' ｜ Tab 采纳 · Esc 本会话不再提示', theme.dim)
+  switch (kind) {
+    case 'scout':
+      return head +
+        color('先侦察再动手——', theme.secondary) +
+        color('/scout', theme.warning) + color(' 并行只读诊断（不写文件）', theme.muted) +
+        color(` ｜ Tab 用 /scout 发送 · Esc 本会话不再提示`, theme.dim)
+    case 'council':
+      return head +
+        color('这是决策活——', theme.secondary) +
+        color('/council', theme.warning) + color(' 方案会诊', theme.muted) +
+        color('（多席模型，token 开销大）', theme.warning) +
+        color(` ｜ Tab 用 /council 发送 · Esc 本会话不再提示`, theme.dim)
+    default:
+      return head +
+        color('这活可以派蜂群——', theme.secondary) +
+        color('/team', theme.warning) + color(' 并行施工 · ', theme.muted) +
+        color('/scout', theme.warning) + color(' 只读侦察', theme.muted) +
+        color(' ｜ Tab 用 /team 发送 · Esc 本会话不再提示', theme.dim)
+  }
 }
 
 export interface OrchestrationHintContext {
@@ -88,6 +118,8 @@ export interface OrchestrationHintContext {
 export class OrchestrationHint {
   /** 建议行当前是否应显示（渲染层每帧读取）。 */
   active = false
+  /** 当前推荐承接的命令（active=false 时无意义）。Tab 采纳用它组命令行。 */
+  kind: OrchestrationKind = 'team'
   private shows = 0
   /** Esc / Tab 采纳后本会话关闭（不可逆——用户已经学会了或明确不要）。 */
   private closed = false
@@ -108,7 +140,9 @@ export class OrchestrationHint {
     ) {
       this.active = false
     } else {
-      this.active = detectOrchestrationFit(text).hit
+      const fit = detectOrchestrationFit(text)
+      this.active = fit.hit
+      if (fit.hit) this.kind = fit.kind
     }
     if (this.active && !prev) this.shows++
     return prev !== this.active

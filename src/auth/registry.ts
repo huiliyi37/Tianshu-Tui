@@ -42,3 +42,14 @@ export function createAuthProvider(
 
   throw new Error(`Unknown auth type: ${(authConfig as { type: string }).type}`)
 }
+
+/**
+ * 登录流程专用构造器：带 onUserCode 钩子（浏览器打开授权 URL）的 OAuthAuth。
+ * 与 createAuthProvider 的运行时实例分开——登录是一次性用户动作，不进 agent 装配。
+ * （背景：authenticate() 曾长期零生产调用，connect-flow 指引的 /login 是幽灵命令。）
+ */
+export function createOAuthLoginAuth(provider: string, onUserCode?: (url: string) => void): OAuthAuth {
+  const base = provider === 'codex' ? CODEX_OAUTH_CONFIG : null
+  if (!base) throw new Error(`Unknown OAuth provider: ${provider}`)
+  return new OAuthAuth({ ...base, ...(onUserCode ? { onUserCode } : {}) })
+}

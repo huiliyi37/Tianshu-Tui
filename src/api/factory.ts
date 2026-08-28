@@ -8,6 +8,7 @@ import { getProviderProfile } from './provider-profile.js'
 import { getCatalogEntry } from './provider-catalog.js'
 import type { ProviderConfig } from '../config/schema.js'
 import { readSecret } from '../config/secrets-store.js'
+import { isKeylessProviderEntry } from '../config/provider-presets.js'
 import type { AuthProvider } from '../auth/types.js'
 
 /** Runtime parameters that vary per-model or per-call, not stored in config */
@@ -51,6 +52,9 @@ export function resolveApiKey(provider: ProviderConfig): string {
   const defaultEnvVar = `${provider.name.toUpperCase()}_API_KEY`
   const env = process.env[defaultEnvVar]
   if (env) return env
+  // keyless 端点（ollama / 未配密钥材料的自定义 provider）免 key——返回空串，
+  // 下游对本地端点本就不该带有效 Authorization。需 key 而没配的仍在下方抛错。
+  if (isKeylessProviderEntry(provider.name, provider)) return ''
   throw new Error(
     `No API key configured for provider "${provider.name}". ` +
     `Set apiKey in config or the ${provider.apiKeyEnv ?? defaultEnvVar} environment variable.`

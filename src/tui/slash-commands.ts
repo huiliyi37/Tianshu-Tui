@@ -300,6 +300,28 @@ export function formatVerificationStatus(agent: AgentLoop): string {
   return `Verification Status\n\nModified files:\n${lines.join('\n')}\n\nVerification: ${summary.verified}/${summary.total} (${percent}%)${lastLine}`
 }
 
+/** MCP 状态文本——/mcp（裸）与 /debug mcp 共用。
+ *  修复前 /mcp 的 subcmd 取 parts[0]（恒为 '/mcp' 本身）：auth/logs 分支不可达、
+ *  裸 /mcp 只打用法不打状态（排障页审计发现）。 */
+export function mcpStatusText(mgr: import('../mcp/manager.js').McpManager | null | undefined): string {
+  if (!mgr) return 'MCP not initialized (no servers configured or MCP disabled).'
+  const states = mgr.getStates()
+  const tools = mgr.getAllTools()
+  const lines = [`MCP Status (${states.length} server(s), ${tools.length} tool(s)):`]
+  for (const s of states) {
+    const detail = s.status === 'connected'
+      ? `connected — ${s.toolCount} tools`
+      : s.status === 'error'
+        ? `error: ${s.error}`
+        : s.status
+    lines.push(`  ${s.serverId}: ${detail}`)
+  }
+  if (tools.length > 0) {
+    lines.push('Tools: ' + tools.map(t => t.definition.name).join(', '))
+  }
+  return lines.join('\n')
+}
+
 function knowledgeDir(): string {
   return join(process.cwd(), '.rivet', 'knowledge')
 }
@@ -1189,7 +1211,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       }
 
       const guidance = formatEnvGuidance(env)
-      pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') + (guidance ? '\n\n' + guidance : '') }))
+      const footer = '更多排障：/logs（本会话日志落点）· 排障手册 github.com/huiliyi37/Tianshu-Tui/blob/main/docs/guides/troubleshooting.md'
+      pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') + (guidance ? '\n\n' + guidance : '') + '\n\n' + footer }))
       setIsStreaming(false)
       return true
     },
@@ -2209,26 +2232,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       } else if (subcmd === 'context-payload') {
         pushStatic(createLogEntry({ type: 'system', content: formatVolatilePayloadReport(info.volatilePayloadReport) }))
       } else if (subcmd === 'mcp') {
-        const mgr = ctx.mcpManagerRef.current
-        if (!mgr) {
-          pushStatic(createLogEntry({ type: 'system', content: 'MCP not initialized (no servers configured or MCP disabled).' }))
-        } else {
-          const states = mgr.getStates()
-          const tools = mgr.getAllTools()
-          const lines = [`MCP Status (${states.length} server(s), ${tools.length} tool(s)):`]
-          for (const s of states) {
-            const detail = s.status === 'connected'
-              ? `connected — ${s.toolCount} tools`
-              : s.status === 'error'
-                ? `error: ${s.error}`
-                : s.status
-            lines.push(`  ${s.serverId}: ${detail}`)
-          }
-          if (tools.length > 0) {
-            lines.push('Tools: ' + tools.map(t => t.definition.name).join(', '))
-          }
-          pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
-        }
+        pushStatic(createLogEntry({ type: 'system', content: mcpStatusText(ctx.mcpManagerRef.current) }))
       } else {
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /debug [prompt|fingerprint|cache|context-payload|mcp]' }))
       }
@@ -2775,8 +2779,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
-      const subcmd = parts[0]?.toLowerCase() ?? 'status'
-      const serverId = parts[1]
+      const subcmd = parts[1]?.toLowerCase() ?? 'status'
+      const serverId = parts[2]
 
       if (subcmd === 'auth' && serverId) {
         try {
@@ -2830,7 +2834,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
             setIsStreaming(false)
             return true
           }
-          const tail = Number.parseInt(parts[2] ?? '100', 10) || 100
+          const tail = Number.parseInt(parts[3] ?? '100', 10) || 100
           const entries = mgr.getLogs(serverId, tail)
           if (entries.length === 0) {
             pushStatic(createLogEntry({ type: 'system', content: `No log entries for server "${serverId}".` }))
@@ -2845,8 +2849,13 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
-      // Default: show status
-      pushStatic(createLogEntry({ type: 'system', content: 'Usage:\n  /mcp — show status\n  /mcp auth <serverId> — start OAuth flow\n  /mcp logs <serverId> [tail] — view stderr log buffer' }))
+      // Default：裸 /mcp（status）出真实状态（与 /debug mcp 同源）；未知子命令打用法
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: subcmd === 'status'
+          ? mcpStatusText(ctx.mcpManagerRef?.current)
+          : 'Usage:\n  /mcp — show status\n  /mcp auth <serverId> — start OAuth flow\n  /mcp logs <serverId> [tail] — view stderr log buffer',
+      }))
       setIsStreaming(false)
       return true
     },
@@ -4330,6 +4339,24 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       on: '✓ 全自动已开启 — 无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback',
       off: '✓ 已退出全自动，切回 自动 — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。',
     }),
+  })
+
+  register("/login", {
+    description: "OAuth 登录（codex 等订阅型服务商，浏览器完成授权；无参默认 codex）",
+    immediate: true,
+    handler: async ({ app, trimmed }) => {
+      // /connect 选 codex 后引导用户来此（此前引导的 /login 是幽灵命令——本注册即闭环）。
+      const provider = trimmed.split(/\s+/)[1]?.trim() || 'codex'
+      app.commitStatic(`正在为 ${provider} 发起 OAuth 登录——浏览器将打开授权页（5 分钟有效）…`)
+      // 动态 import：登录链路（auth/*）不进主装配，用到才加载
+      const { runOAuthLogin, openInBrowser } = await import('../auth/login-flow.js')
+      const res = await runOAuthLogin(provider, (url) => {
+        openInBrowser(url)
+        app.commitStatic(`若浏览器未自动打开，请手动访问：\n${url}`)
+      })
+      app.commitStatic(res.ok ? `✅ ${res.message}` : `⚠️ ${res.message}`)
+      return true
+    },
   })
 
   // Ecosystem workflow commands: resolve to agent prompt and submit directly.

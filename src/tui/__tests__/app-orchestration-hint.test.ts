@@ -17,7 +17,8 @@ test('e2e: 输入多信号任务文本 → 输入框上方出现协同建议行'
   await TICK()
   const out = stripAnsi(t.out.chunks.join(''))
   assert.ok(out.includes('派蜂群'), `建议行应上屏，实得：${out.slice(-400)}`)
-  assert.ok(out.includes('/team') && out.includes('/scout') && out.includes('/council'))
+  assert.ok(out.includes('/team') && out.includes('/scout'), 'team 档含施工与侦察入口')
+  assert.ok(!out.includes('/council'), 'team 档不推 council（不全推荐）')
 })
 
 test('e2e: 普通短输入不出建议行', async () => {
@@ -53,6 +54,19 @@ test('e2e: Esc 抑制 → 建议行消失且不计入 rewind 双击', async () =
   t.stdin.dataHandler!('\x1b')
   await TICK()
   assert.ok(!stripAnsi(t.out.chunks.join('')).includes('派蜂群'), 'Esc 后建议行消失')
+})
+
+test('e2e: 评审类任务 → council 档（带 token 警示），Tab 采纳组 /council 命令', async () => {
+  const t = makeApp()
+  t.stdin.dataHandler!('同时从架构和风险角度评审这个迁移方案并给出权衡')
+  await TICK()
+  const out = stripAnsi(t.out.chunks.join(''))
+  assert.ok(out.includes('/council'), '评审类任务出 council 档')
+  assert.ok(out.includes('token 开销大'), 'council 档带成本警示')
+  t.out.clear()
+  t.stdin.dataHandler!('\t')
+  await TICK()
+  assert.ok(stripAnsi(t.out.chunks.join('')).includes('/council 同时从架构'), 'Tab 采纳组 /council 命令')
 })
 
 test('e2e: agent 流式中（steer 输入）不触发建议行', async () => {

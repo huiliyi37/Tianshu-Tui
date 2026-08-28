@@ -27,6 +27,7 @@ assertStagedRuntimeIntact(dirname(fileURLToPath(import.meta.url)))
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { maybePrintStaticPromptCacheWarning } from './cli/prompt-version-warning.js'
+import { getOnboardingState } from './onboarding.js'
 import { loadConfig as loadRivetConfig, setupProvider, registerProvider, upsertProviderModel, removeProvider, setDefaultProvider, setUiConfig, setApprovalMode as persistApprovalDefault, setDefaultDomainConfig, setDefaultModelConfig } from './config/manager.js'
 import { isProFeatureEnabled } from './config/pro-license.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
@@ -1727,6 +1728,13 @@ async function main() {
       return false
     }
 
+    // OAuth 型（codex）：配置已落盘但 token 未就位——不热切换（切了也 401），
+    // 指引 /login 完成浏览器授权（此前文案写「直接开始对话」，与未登录事实矛盾）。
+    if (commit.mode === 'preset' && commit.needsLogin) {
+      tuiApp.commitStatic(`✅ ${summary}\n下一步：/login 完成浏览器登录（token 自动落盘并续期），然后再开始对话。`)
+      return true
+    }
+
     // Reload from disk and hot-swap the in-memory provider table so
     // switchAgentRuntime (which reads ctx.config) sees the new provider.
     let liveApplied = false
@@ -2266,9 +2274,14 @@ async function main() {
 
   // 首次启动引导：默认服务商没有可用密钥（且非 OAuth）→ 自动打开 /connect 向导，
   // 让新用户点选内置服务商 + 粘贴密钥即可开跑，无需手改 config.json。
+  // 用户纯取消过一次（无进展未落草稿）→ 哨兵抑制自动弹窗，降级为单行提示。
   if (ctx && !ctx.auth && (!ctx.apiKey || ctx.apiKey.trim() === '') && existingMsgCount === 0) {
-    app.commitStatic('尚未配置模型服务商的 API 密钥 — 正在打开配置向导（/connect 可随时再次打开）。')
-    app.startConnect(undefined, ctx?.config.provider.default)
+    if (getOnboardingState().shouldShow) {
+      app.commitStatic('尚未配置模型服务商的 API 密钥 — 正在打开配置向导（/connect 可随时再次打开）。')
+      app.startConnect(undefined, ctx?.config.provider.default)
+    } else {
+      app.commitStatic('尚未配置模型密钥——/connect 打开配置向导（自动弹窗已按你的选择关闭）。')
+    }
   }
 
   // 启动期主动环境体检：git 缺失时(尤其 Windows，Git Bash 是命令执行首选 shell)

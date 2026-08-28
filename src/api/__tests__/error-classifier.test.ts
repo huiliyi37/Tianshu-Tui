@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyApiError, fetchCauseDetail, parseRetryAfterMs } from '../error-classifier.js'
+import { classifyApiError, errorRecoveryGuidance, fetchCauseDetail, parseRetryAfterMs } from '../error-classifier.js'
 import type { ErrorCategory } from '../error-classifier.js'
 
 // ---------------------------------------------------------------------------
@@ -417,5 +417,39 @@ describe('parseRetryAfterMs', () => {
   it('handles zero as zero milliseconds', () => {
     const result = parseRetryAfterMs('0')
     assert.equal(result, 0)
+  })
+})
+
+describe('errorRecoveryGuidance（终态「下一步」，与重试中过程文案 userMessage 分工）', () => {
+  it('429 → 限流指引（等/降档/查余额）', () => {
+    const g = errorRecoveryGuidance({ status: 429, message: 'rate limited' })
+    assert.match(g, /限流|额度/)
+    assert.match(g, /\/model/)
+  })
+
+  it('401 → 认证指引（/connect 或 /login）', () => {
+    const g = errorRecoveryGuidance({ status: 401, message: 'unauthorized' })
+    assert.match(g, /\/connect/)
+    assert.match(g, /\/login/)
+  })
+
+  it('网络断连（cause 链 ECONNREFUSED）→ 超时/网络指引', () => {
+    const err = new Error('fetch failed', { cause: new Error('connect ECONNREFUSED') })
+    assert.match(errorRecoveryGuidance(err), /网络/)
+  })
+
+  it('上下文超限 → /compact 或 /handoff', () => {
+    const g = errorRecoveryGuidance(new Error('prompt is too long: context_length_exceeded'))
+    assert.match(g, /\/compact|\/handoff/)
+  })
+
+  it('404 → 模型/端点指引', () => {
+    assert.match(errorRecoveryGuidance({ status: 404, message: 'not found' }), /\/model/)
+  })
+
+  it('未知错误 → 通用兜底（重发 + /doctor /logs）', () => {
+    const g = errorRecoveryGuidance(new Error('weird'))
+    assert.match(g, /\/doctor/)
+    assert.match(g, /\/logs/)
   })
 })

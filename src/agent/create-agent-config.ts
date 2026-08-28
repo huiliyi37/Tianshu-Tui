@@ -22,6 +22,7 @@ import { gateToolDefinitions } from './tool-tiers.js'
 import { applyDescriptionMode } from '../tools/description-compact.js'
 import { inferModelTierFromName, type ModelTier } from './model-tier-policy.js'
 import { isRuntimeLeanForDomain } from '../config/runtime-lean.js'
+import { isKeylessProviderEntry } from '../config/provider-presets.js'
 
 export interface ModelSpec {
   id: string
@@ -562,10 +563,11 @@ function tryBuildVisionClientFrom(
   try {
     if (prov.auth?.type === 'oauth') {
       auth = prov.name === input.provider.name ? input.auth : createAuthProvider(prov.auth, process.env)
-      if (!auth?.isAuthenticated()) return { error: `${prov.name} 未完成 OAuth 登录` }
+      if (!auth?.isAuthenticated()) return { error: `${prov.name} 未完成 OAuth 登录——运行 /login（或 rivet config login ${prov.name}）完成浏览器授权` }
     } else {
       apiKey = resolveApiKey(prov)
-      if (!apiKey) return { error: `${prov.name} 的 API key 为空` }
+      // keyless 端点 resolveApiKey 返回空串是正常态（ollama 等本地端点无 key），非缺失
+      if (!apiKey && !isKeylessProviderEntry(prov.name, prov)) return { error: `${prov.name} 的 API key 为空` }
     }
   } catch {
     // resolveApiKey 拿不到 key 就抛。最常见的成因不是"没有 key"而是"key 只存在环境变量里，

@@ -2029,6 +2029,7 @@ Commands:
   show                         Show full config (JSON)
   providers                    List providers with key status
   setup <provider>             Create/update provider from built-in preset
+  login <provider>             OAuth login for subscription providers (codex) — opens browser
   set-url <provider> <url>     Set provider base URL
   set-model <provider> <id>    Set preferred model for provider
   set-key <p> <key>            Set API key for provider
@@ -2162,6 +2163,21 @@ export async function runConfigCLI(args: string[], io: ConfigCliIO = {}): Promis
           makeDefault: hasFlag(args, '--default'),
         })
         cliOut(io, formatSuccess(`Provider ${providerName} configured${hasFlag(args, '--default') ? ' and set as default' : ''}`, fmtOpts))
+        break
+      }
+
+      case 'login': {
+        // OAuth 登录（codex 等订阅型）：PKCE + 本机回环回调，token 落盘自动续期。
+        // 动态 import 破 manager ↔ login-flow 静态环（login-flow 依赖本模块 loadConfig）。
+        const providerName = args[1] ?? 'codex'
+        const { runOAuthLogin, openInBrowser } = await import('../auth/login-flow.js')
+        cliOut(io, `正在为 ${providerName} 发起 OAuth 登录——浏览器将打开授权页…`)
+        const res = await runOAuthLogin(providerName, (url) => {
+          openInBrowser(url)
+          cliOut(io, `若浏览器未自动打开，请手动访问：\n${url}`)
+        })
+        if (res.ok) cliOut(io, formatSuccess(res.message, fmtOpts))
+        else { cliErr(io, res.message); cliExit(io, 1) }
         break
       }
 

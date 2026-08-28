@@ -187,3 +187,59 @@ test('renderChoicePanel: selected choice stays visible in a short panel', () => 
   assert.ok(plain.includes('选项10'), 'option below the cursor visible (centered window)')
   assert.ok(lines.length <= 12, `frame fits height (${lines.length})`)
 })
+
+// ── Input sub-mode cursor（硬件 caret，对标 connect overlay）────────────
+
+test('renderChoicePanel: input sub-mode places hardware caret at cursorPos', () => {
+  const data = makeData({
+    inputSubMode: {
+      active: true,
+      label: '自定义回答',
+      placeholder: '输入你的回答',
+      value: 'abcdef',
+      cursorPos: 3,
+    },
+  })
+  renderChoicePanel(data, 60, 20, theme)
+  // 值前缀宽 3（ASCII）→ col = 值起始列 5（边框1 + " > "3）+ 3 = 8，与 connect 同公式
+  assert.deepEqual(data.caret, { row: data.caret?.row ?? 0, col: 8 })
+  assert.ok((data.caret?.row ?? 0) > 0, 'caret row set (1-based within overlay body)')
+})
+
+test('renderChoicePanel: caret col uses display width（CJK 双宽）', () => {
+  const data = makeData({
+    inputSubMode: { active: true, label: 'l', placeholder: 'p', value: '天枢abc', cursorPos: 2 },
+  })
+  renderChoicePanel(data, 60, 20, theme)
+  // 「天枢」UTF-16 偏移 0..2，显示宽 4 → col = 5 + 4 = 9
+  assert.equal(data.caret?.col, 9)
+})
+
+test('renderChoicePanel: empty value caret parks before placeholder, no trailing ▏ glyph', () => {
+  const data = makeData({
+    inputSubMode: { active: true, label: '自定义回答', placeholder: '输入你的回答', value: '', cursorPos: 0 },
+  })
+  const lines = renderChoicePanel(data, 60, 20, theme)
+  const plain = lines.map(stripAnsi).join('\n')
+  assert.equal(data.caret?.col, 5, 'caret at value start (border 1 + " > " 3)')
+  assert.ok(!plain.includes('▏'), 'no in-line cursor glyph — hardware caret only')
+})
+
+test('renderChoicePanel: long value windows head away to keep caret visible', () => {
+  const value = 'x'.repeat(80)
+  const data = makeData({
+    inputSubMode: { active: true, label: 'l', placeholder: 'p', value, cursorPos: value.length },
+  })
+  const lines = renderChoicePanel(data, 60, 20, theme)
+  const inputLine = stripAnsi(lines.find(l => l.includes('x')) ?? '')
+  // 宽 60：可视 max=54，光标在末尾 → 行首被丢弃，但 caret col 必须落在框内
+  renderChoicePanel(data, 60, 20, theme)
+  assert.ok((data.caret?.col ?? 0) <= 60, 'caret col within panel width')
+  assert.ok(inputLine.length > 0, 'input line renders')
+})
+
+test('renderChoicePanel: caret reset to null without input sub-mode', () => {
+  const data = makeData()
+  renderChoicePanel(data, 60, 20, theme)
+  assert.equal(data.caret, null)
+})

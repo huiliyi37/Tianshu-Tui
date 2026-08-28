@@ -90,7 +90,7 @@ export function createCouncilConveneTool(
     definition: {
       name: 'council_convene',
       description:
-        '召集星域多席审查（council）评审计划草稿。默认单轮咨询；传 rounds:2+ 启用反驳/辩论轮（第 2 轮仅在第 1 轮暴露冲突时触发）。向各席位专家 fanout（仅咨询，不执行），确定性裁决，返回可审计的 Markdown 计划。传 autoExecute:true 自动把批准的计划派发给 team_orchestrate——审查后立即执行，省去一次模型往返。COUNCIL=0 时禁用。',
+        '召集星域多席审查（council）评审计划草稿。默认单轮咨询；传 rounds:2+ 启用反驳/辩论轮（第 2 轮仅在第 1 轮暴露冲突时触发）。向各席位专家 fanout（仅咨询，不执行），确定性裁决，返回可审计的 Markdown 计划。传 autoExecute:true 自动把批准的计划派发给 team_orchestrate——审查后立即执行，省去一次模型往返。成本警示：多席模型并行调用，token 开销显著高于普通子代理——确实需要多视角评审的方案才召集，日常改动的审查走 review 门即可。COUNCIL=0 时禁用。',
       input_schema: {
         type: 'object',
         properties: {
