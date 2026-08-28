@@ -1,7 +1,7 @@
 {
   "generator": "scripts/docs-index.ts",
   "spec": "docs/README.md",
-  "count": 1035,
+  "count": 1034,
   "docs": [
     {
       "path": "docs/3.0/D1-3-cascade-tier-speculation.md",
@@ -12524,18 +12524,6 @@
     {
       "path": "docs/更新镜像部署技术实录.md",
       "title": "天枢桌面端更新镜像部署技术实录",
-      "type": "unclassified",
-      "typeSource": "inferred",
-      "status": null,
-      "statusSource": "none",
-      "date": null,
-      "related": [],
-      "supersedes": null,
-      "tags": []
-    },
-    {
-      "path": "docs/电网作业安全现场智能管控-AI模型应用情况报告.md",
-      "title": "电网作业安全现场智能管控——人工智能统推模块模型应用情况报告（初稿）",
       "type": "unclassified",
       "typeSource": "inferred",
       "status": null,
