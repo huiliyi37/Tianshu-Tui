@@ -16,6 +16,7 @@
  *   ────────────────────────✦─────────────────────────    ← 基准线(唯一全幅元素)
  *   ''
  *   ⏜ /handoff 满60%交接新会话
+ *   ✧ /team /scout /council 协同——并行施工 · 只读侦察 · 方案会诊
  *   ✧ 中途切 /model /domain 碎缓存
  *   ''
  *
@@ -65,8 +66,8 @@ export interface FormatWelcomeInput {
   logoStyle?: string
 }
 
-/** 全妆固定开销(呼吸空行×3 + 使命行 + 基准线 + 提醒行×2);总行数 = 此值 + 字标行数。 */
-const FULL_FIXED_ROWS = 7
+/** 全妆固定开销(呼吸空行×3 + 使命行 + 基准线 + 提醒行×3);总行数 = 此值 + 字标行数。 */
+const FULL_FIXED_ROWS = 8
 /** 输入框 + 底部 chrome 余量(与 app.ts 既有预留一致口径)。 */
 const RESERVED_ROWS = 5
 /** 身份块下限列数:低于此值单行更诚实。 */
@@ -90,6 +91,10 @@ const HINT_HANDOFF = '满60%交接新会话'
 const HINT_CACHE_A = '中途切'
 const HINT_CACHE_CMDS = '/model /domain'
 const HINT_CACHE_B = '碎缓存'
+const HINT_COLLAB_CMDS = '/team /scout /council'
+const HINT_COLLAB_DESC = '协同——并行施工 · 只读侦察 · 方案会诊'
+const HINT_COLLAB_SHORT_CMDS = '/team /scout'
+const HINT_COLLAB_SHORT_DESC = '协同多代理'
 const WORDMARK_PINYIN = 'T I Ā N S H Ū'
 
 /** 5×5 点阵字模(TIANSHU / RIVET 通用字形库)。 */
@@ -319,9 +324,15 @@ function entryHintLines(theme: RivetTheme, ascii: boolean, cols: number): string
   const domainFull = `${color(note, theme.secondary)} ${color(HINT_DOMAIN_CMD, theme.brandColor)} ${color(HINT_DOMAIN_DESC, theme.muted)}`
   const domainShort = `${color(note, theme.secondary)} ${color(HINT_DOMAIN_CMD, theme.brandColor)} ${color(HINT_DOMAIN_SHORT, theme.muted)}`
   const domainPlainW = (t: string) => displayWidth(t.replace(/\x1B\[[0-9;]*m/g, ''), WIDE)
+  /* 协同曝光(2026-08-28):/team /scout /council 是多代理能力的三条入口,
+   *  新用户首屏可见;与 domain 行同规则——全版/短版/过窄省略。 */
+  const collabFull = `${color(note, theme.secondary)} ${color(HINT_COLLAB_CMDS, theme.brandColor)} ${color(HINT_COLLAB_DESC, theme.muted)}`
+  const collabShort = `${color(note, theme.secondary)} ${color(HINT_COLLAB_SHORT_CMDS, theme.brandColor)} ${color(HINT_COLLAB_SHORT_DESC, theme.muted)}`
   const lines: string[] = []
   if (domainPlainW(domainFull) <= cols) lines.push(domainFull)
   else if (domainPlainW(domainShort) <= cols) lines.push(domainShort)
+  if (domainPlainW(collabFull) <= cols) lines.push(collabFull)
+  else if (domainPlainW(collabShort) <= cols) lines.push(collabShort)
   lines.push(
     `${color(handoff, theme.secondary)} ${color('/handoff', theme.brandColor)} ${color(HINT_HANDOFF, theme.muted)}`,
     `${color(note, theme.muted)} ${color(HINT_CACHE_A, theme.muted)} ${color(HINT_CACHE_CMDS, theme.secondary)} ${color(HINT_CACHE_B, theme.muted)}`,

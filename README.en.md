@@ -44,7 +44,7 @@ Tianshu Harness (天枢) is a high-performance coding agent runtime — one agen
 
 ### 1. Prerequisites
 
-- **Node.js 24.1.0** (recommended; 22+ may work) — required to run Tianshu. Verify with `node --version`.
+- **Node.js ≥ 24** (pinned in `engines`) — required to run Tianshu. Verify with `node --version`. Lower versions only warn during install but are unsupported; the one-line installer checks and stops with an upgrade hint.
 - **Git** — optional but strongly recommended. Without it Tianshu still runs (agents
   work in-place), but git unlocks delegated worktree isolation, checkpoint rollback,
   `commit`/`diff` review, and per-worker diff review. Install: <https://git-scm.com/downloads>.

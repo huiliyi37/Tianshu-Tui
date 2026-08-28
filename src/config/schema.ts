@@ -792,6 +792,9 @@ export const uiSchema = z.object({
   /** GlanceBar density on startup. 'compact' (default) = mode/model/context%/elapsed;
    *  'full' = everything (goal/todo/effort/cache/cost). Runtime `/glance` toggles. */
   glanceDensity: z.enum(['compact', 'full']).optional(),
+  /** 协同建议行（输入时提示 /team /scout /council）。默认开；false 永久关闭。
+   *  环境变量 RIVET_ORCHESTRATION_HINT=0 同效且优先。 */
+  orchestrationHint: z.boolean().optional(),
   /** Scriptable statusline (Claude Code protocol subset). The command receives a
    *  session-state JSON on stdin and its first stdout line renders above the input
    *  box. See src/tui/statusline.ts for the payload shape. */

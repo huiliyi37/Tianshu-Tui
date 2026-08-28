@@ -48,7 +48,7 @@
 
 ### 1. 环境要求
 
-- **Node.js 24.1.0**（推荐；22+ 通常可用）—— 用 `node --version` 检查。
+- **Node.js ≥ 24**（`engines` 钉定）—— 用 `node --version` 检查。低版本 npm 安装时仅告警但不在支持范围；一键安装脚本会直接拦截并给出升级指引。
 - **Git**（强烈建议）—— 可选。没有它天枢仍可运行（就地修改），但 git 能解锁：委派 worktree 隔离、检查点回滚、`commit`/`diff` 审查、每个 worker 的 diff 审查。安装：<https://git-scm.com/downloads>。
 
 ### 2. 安装（任选其一）

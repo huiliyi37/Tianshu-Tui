@@ -52,6 +52,7 @@ import { TIER_HINT, TIER_TO_WIRE, formatPermissionLabel, formatTierLabel } from 
 import { readFileSync, statSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { formatWelcome, isMissionLine, missionShimmer, MISSION_SHIMMER_FRAME_MS } from './tui/format/welcome.js'
+import { resolveOrchestrationHintEnabled } from './tui/engine/orchestration-hint.js'
 import { HANDOFF_NUDGE_RATIO, formatHandoffNudge } from './tui/handoff.js'
 import { formatDomainDriftNudge } from './tui/domain-drift-nudge.js'
 import { color } from './tui/engine/ansi.js'
@@ -804,6 +805,8 @@ async function main() {
     gitBranch,
     // 审批时判定工作区外路径，显示「批准并记住此目录」选项。
     cwd: ctx.cwd,
+    // 协同建议行（输入时提示 /team /scout /council）：env 优先，其次 ui.orchestrationHint。
+    orchestrationHint: resolveOrchestrationHintEnabled(process.env.RIVET_ORCHESTRATION_HINT, ctx.config.ui?.orchestrationHint),
     perfMonitor: new TuiPerfMonitor({ enabled: isTuiPerfEnabled(args) }),
     onPerfSummary: summary => {
       perfSummaryFlush = ctx!.flushTuiPerfSummary(summary)

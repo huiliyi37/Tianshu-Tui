@@ -103,7 +103,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/team', description: '团队模式：任务按文件拆分→多 patcher 写工分波并行实现→主控集成验证。适合多文件并行写的大改动（可传计划文件路径）', argsHint: '<任务|plan.md> | max', tier: 'core' },
     { name: '/team max', description: '团队强编队（Pro）：先多视角规划再分波落地，适合跨模块重构/高风险大改动——规划成本换安全性' },
     { name: '/scout', description: '巡天侦察：派多个只读子代理并行诊断，交付带证据的核对清单+runbook。不写文件不改代码，适合接手陌生仓库/上线前体检/接口对账', argsHint: '<诊断目标> [--dims 维度列表]', tier: 'core' },
-    { name: '/council', description: '议事会：多星域专家对抗会诊，只出计划不执行。--rounds 2+ 开多轮辩论，适合方案评审/风险研判', argsHint: '<目标> [--rounds N]' },
+    { name: '/council', description: '议事会：多星域专家对抗会诊，只出计划不执行。--rounds 2+ 开多轮辩论，适合方案评审/风险研判', argsHint: '<目标> [--rounds N]', tier: 'core' },
     { name: '/galaxy', description: '星河集群：按问题维度拆分（前端/后端/审查/测试），每维度派指定星域专家并行+末尾全局审查。适合跨层多维复合任务', argsHint: '<任务描述>' },
     { name: '/starflow', description: '星流编排（最重）：全流程贯通 council评审→team波次→galaxy攻坚，阶段间硬门禁兜底，可resume。不确定用哪个协同命令就从它开始', argsHint: '<任务描述>' },
     { name: '/plan', description: '规划模式：只读调研后产出带 Mermaid 图+TDD 步骤的实现计划（不写实现代码），存到 .rivet/plans/。复杂任务先进 plan 少走弯路', tier: 'core' },

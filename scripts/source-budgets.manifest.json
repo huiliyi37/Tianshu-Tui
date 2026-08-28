@@ -3,8 +3,8 @@
   "redline": 800,
   "budgets": {
     "src/tui/engine/app.ts": {
-      "ceiling": 7520,
-      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25）"
+      "ceiling": 7526,
+      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25） 7520→7526：协同建议行接线（onChange 评估 + 渲染槽 + Tab 采纳 + Esc 关闭；检测/渲染主体在 engine/orchestration-hint.ts 新模块）。"
     },
     "src/server/session-manager.ts": {
       "ceiling": 5800,
@@ -30,8 +30,8 @@
       "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。 2606→2648：账本对齐实际行数（68a961c20 预设新增模型回流存量快照，已合入 HEAD 后超限）。"
     },
     "src/main.ts": {
-      "ceiling": 2299,
-      "note": "2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。 2298→2299：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 2323,
+      "note": "2144→2298：--trust/--untrust 旗标（+7）叠加此前会话已超限部分（HEAD 2291）。 2298→2299：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 2299→2323：账本对齐实际行数（HEAD 既有超限 2320 在先——此前两版提交均选择不抬；本轮 +3 为协同建议开关接线 orchestrationHint 入 TuiApp，一并登记对齐）。"
     },
     "src/tui/pi/latex-to-unicode.ts": {
       "ceiling": 2071
@@ -149,8 +149,8 @@
       "note": "941→1022：捆绑技能退役清理——RETIRED_BUNDLED_SKILLS 名单（名字+SHA-256）+ retireMatchingSkillCopies 一次性清理逻辑（撤出三项 + 消融两项的存量副本清理，+81）。"
     },
     "src/config/env-registry.ts": {
-      "ceiling": 956,
-      "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 962,
+      "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 956→962：RIVET_ORCHESTRATION_HINT 登记（+6）。"
     },
     "src/server/config-routes.ts": {
       "ceiling": 1048,

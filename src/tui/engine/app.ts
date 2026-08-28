@@ -108,6 +108,7 @@ import {
 } from '../format/tool-domain.js'
 import { formatSpinnerStatus, formatTurnWorkSummary, formatJobAwaitWait, type JobAwaitCall } from '../format/spinner-status.js'
 import { formatSlashHint, formatSlashMenu, slashCompletionTarget, slashArgsHint, SLASH_HINT_MAX_VISIBLE, computeSlashMenuBudget, type SlashHintEntry } from '../format/slash-hint.js'
+import { OrchestrationHint, formatOrchestrationHint } from './orchestration-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
 import { resolve } from 'node:path'
@@ -792,6 +793,8 @@ export class TuiApp {
   // ── W4b: 输入辅助（W-B5: fields moved to InputController） ───
   /** W-B5: input state manager (slash/file-completion/history/ctrl+c/esc) */
   private inputController = new InputController()
+  /** 协同建议（/team /scout /council 输入时情境提示）——见 engine/orchestration-hint.ts。 */
+  private readonly orchHint: OrchestrationHint
   /** 输入框最近一次获得焦点的时间戳，用于 Ctrl+V 剪贴板图片防抖 */
   private lastInputFocusAt = 0
   /** overlay 退出回放排队的主屏 commit 时抑制每个条目的 renderLive，最后统一画一帧。 */
@@ -828,6 +831,8 @@ export class TuiApp {
     cwd?: string
     perfMonitor?: TuiPerfMonitor
     onPerfSummary?: (summary: TuiPerfSummary) => void
+    /** 协同建议开关（ui.orchestrationHint / RIVET_ORCHESTRATION_HINT 关闭时传 false；默认开）。 */
+    orchestrationHint?: boolean
   }) {
     // theme is now a dynamic getter — always reads current activeTheme
     this.stdout = options.stdout
@@ -838,6 +843,7 @@ export class TuiApp {
     this.sessionCwd = options.cwd
     this.perfMonitor = options.perfMonitor
     this.onPerfSummary = options.onPerfSummary
+    this.orchHint = new OrchestrationHint(options.orchestrationHint !== false)
 
     // Initialize engines
     this.commit = new CommitEngine({ stdout: options.stdout })
@@ -873,7 +879,15 @@ export class TuiApp {
       placeholder: '询问任何事，或 / 唤起命令',
       // 输入变化（含 setValue 程序化写入）实时刷新 slash 菜单状态；
       // 渲染仍由 handleKey 返回事件 / 显式 renderLive 驱动。
-      onChange: (value) => { this.inputController.refreshSlash(value) },
+      onChange: (value) => {
+        this.inputController.refreshSlash(value)
+        // 协同建议：本地启发式（微秒级纯函数），翻转时下一帧渲染自然带出。
+        this.orchHint.evaluate(value, {
+          planMode: (() => { try { return this.planModeProvider?.() ?? false } catch { return false } })(),
+          askMode: (() => { try { return this.askModeProvider?.() ?? false } catch { return false } })(),
+          streaming: this.isAgentActive(),
+        })
+      },
       onTabComplete: () => this.handleTabComplete(),
       // handleInputSubmit 是 async：回调内任何异常都会成为 rejected Promise，
       // 必须显式 catch 收口为一条警告行，否则 void 掉的是 unhandled rejection。
@@ -1203,6 +1217,14 @@ export class TuiApp {
         // 清空输入。再按一次 Esc 才走下方原语义（清空/确认窗口取消等）。
         if (this.inputController.slashMenu.open) {
           this.inputController.closeSlash()
+          this.renderLive()
+          return
+        }
+        // 协同建议行在场时：Esc 关闭建议并本会话不再提示。与 slash 菜单同级的
+        // 优先消费；不计入双击 rewind 计时（避免「关建议后立刻双击 Esc」误开 rewind）。
+        if (this.orchHint.active) {
+          this.orchHint.dismiss()
+          this.inputController.lastEscAt = 0
           this.renderLive()
           return
         }
@@ -4635,6 +4657,14 @@ export class TuiApp {
       return false
     }
 
+    // 协同建议行 Tab 采纳：`/team ` + 当前文本转入输入框（不直接发送），本会话关闭建议。
+    // 位于 @ 补全之前：建议行激活时 Tab 的意图是把活派给蜂群；文件补全循环进行中让位。
+    if (this.orchHint.active && !this.inputController.fileCompletion) {
+      this.inputLine.setValue(`/team ${value}`)
+      this.orchHint.adopt()
+      return true
+    }
+
     // @ 文件补全（Tab 循环候选）
     if (this.inputController.fileCompletion) {
       const fc = this.inputController.fileCompletion
@@ -6792,6 +6822,12 @@ export class TuiApp {
         viewingWorker: this.viewingWorkerId != null,
       }, this.theme)
       if (contextHint) lines.push({ text: this.clampLine(`  ${contextHint}`) })
+
+      // 5a4. 协同建议行（orchestration hint）：输入命中多信号时给出 /team /scout
+      //      /council 建议；Esc/Tab 采纳后本会话关闭，频率帽见 OrchestrationHint。
+      if (this.orchHint.active) {
+        lines.push({ text: this.clampLine(formatOrchestrationHint(this.theme, useAsciiGlyphs())) })
+      }
 
       // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）。
       //     菜单打开：渲染已过滤已排序的 matches（MRU/参数模式由 refreshSlash 维护），

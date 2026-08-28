@@ -33,9 +33,9 @@ const rawWith = (lines: string[], needle: string) => lines.find(l => strip(l).in
 
 const bodyW = (cols: number): number => Math.min(cols, 72)
 
-/** 全妆:'' + 字标×6(shadow 立体字)+ 使命 + 基准线 + '' + 提醒×2 + ''(使命省略 12 行)。 */
-const FULL_LINES = 14
-const FULL_LINES_NO_MISSION = 13
+/** 全妆:'' + 字标×6(shadow 立体字)+ 使命 + 基准线 + '' + 提醒×3 + ''(使命省略 13 行)。 */
+const FULL_LINES = 15
+const FULL_LINES_NO_MISSION = 14
 
 // ── 结构契约 ────────────────────────────────────────────────────────
 
@@ -54,8 +54,12 @@ test(`定盘星全妆:${FULL_LINES} 行(立体字标 + 使命 + 基准线 + 进�
   assert.equal(strip(lines[9]!), '', '身份块与提示区之间的呼吸')
   const dIdx = lines.findIndex(l => strip(l).includes('/domain'))
   const hIdx = lines.findIndex(l => strip(l).includes('/handoff'))
+  const cIdx = lines.findIndex(l => strip(l).includes('/team /scout'))
   assert.ok(dIdx > 0 && hIdx > dIdx, `R12:/domain 置于 /handoff 之前(${dIdx} < ${hIdx})`)
   assert.ok(strip(lines[dIdx]!).includes('工程能力'), '/domain 星域描述在场')
+  assert.ok(cIdx > dIdx && cIdx < hIdx, `协同提示行在 /domain 与 /handoff 之间(${dIdx} < ${cIdx} < ${hIdx})`)
+  assert.ok(strip(lines[cIdx]!).includes('并行施工'), '协同提示带选型描述')
+  assert.ok(strip(lines[cIdx]!).includes('/council'), '协同提示含 /council 入口')
   assert.ok(strip(lines[hIdx + 1]!).includes('碎缓存'), '进入提示·缓存')
 })
 
@@ -111,7 +115,7 @@ test('使命行:README 品牌句双语上屏;栏宽 <59 整行省略,绝不腰�
   assert.ok(wide.includes('Models as partners, not tools.'), '英文短语')
   assert.ok(!wide.includes('…'), '不截断')
   const narrow = render({ columns: 56 })
-  assert.equal(narrow.length, 12, '56 列自动 pixel 且使命行整行省略')
+  assert.equal(narrow.length, 13, '56 列自动 pixel 且使命行整行省略')
   assert.ok(!strip(narrow.join('\n')).includes('把星辰'), '窄栏无半句 slogan')
   assert.equal(render({ columns: 59 }).length, FULL_LINES, '59 列宽档(·计 2)恰好放下')
   assert.equal(render({ columns: 60 }).length, FULL_LINES, '60 列宽裕')
@@ -192,21 +196,21 @@ test('effort 徽章档位色:high→primary / auto→secondary', () => {
 
 // ── 降级 ────────────────────────────────────────────────────────────
 
-test('矮终端:shadow rows≥18 全妆;cols 50 自动降档 pixel 时 rows≥17 即全妆', () => {
-  assert.equal(render({ columns: 100, rows: 17 }).length, 1)
-  assert.equal(render({ columns: 100, rows: 18 }).length, FULL_LINES)
-  assert.equal(render({ columns: 50, rows: 17 }).length, 12, '50 列自动 pixel 且使命行让位(5 行字标)')
-  assert.equal(render({ columns: 50, rows: 16 }).length, 1)
+test('矮终端:shadow rows≥19 全妆;cols 50 自动降档 pixel 时 rows≥18 即全妆', () => {
+  assert.equal(render({ columns: 100, rows: 18 }).length, 1)
+  assert.equal(render({ columns: 100, rows: 19 }).length, FULL_LINES)
+  assert.equal(render({ columns: 50, rows: 18 }).length, 13, '50 列自动 pixel 且使命行让位(5 行字标)')
+  assert.equal(render({ columns: 50, rows: 17 }).length, 1)
 })
 
 test('字标风格可调:logoStyle / RIVET_WELCOME_LOGO 环境变量', () => {
   const pixel = render({ logoStyle: 'pixel' })
-  assert.equal(pixel.length, 13, 'pixel 5 行字标(含使命行)→ 13 行')
+  assert.equal(pixel.length, 14, 'pixel 5 行字标(含使命行)→ 14 行')
   assert.ok(stripAll(pixel.slice(1, 6)).every(l => l.includes('#')), '点阵 TIANSHU')
   const prev = process.env['RIVET_WELCOME_LOGO']
   try {
     process.env['RIVET_WELCOME_LOGO'] = 'pixel'
-    assert.equal(render().length, 13, 'env 切换生效(pixel 含使命行)')
+    assert.equal(render().length, 14, 'env 切换生效(pixel 含使命行)')
     process.env['RIVET_WELCOME_LOGO'] = 'shadow'
     assert.equal(render().length, FULL_LINES, 'env 切回 shadow')
   } finally {
@@ -218,7 +222,7 @@ test('字标风格可调:logoStyle / RIVET_WELCOME_LOGO 环境变量', () => {
 test('窄终端(cols<44)退单行;44 列起立体字标(使命行与原生词标让位)', () => {
   assert.equal(render({ columns: 43 }).length, 1)
   const c44 = render({ columns: 44 })
-  assert.equal(c44.length, 12, '44 列自动 pixel(使命行让位)')
+  assert.equal(c44.length, 13, '44 列自动 pixel(使命行让位)')
   assert.ok(strip(c44.join('\n')).includes('#'), '44 列点阵字标仍在')
   assert.ok(!strip(c44.join('\n')).includes('把星辰'), '44 列无使命句')
 })
@@ -245,6 +249,8 @@ test('R21 ASCII 环境:提示行小符号降级,品牌艺术字标恒为立体 T
     assert.equal(displayWidth(rule), 80, 'ASCII 基准线仍全幅')
     const hint = withLine(lines, '/handoff')
     assert.ok(strip(hint).startsWith('- '), 'handoff glyph 退为 -')
+    const collab = withLine(lines, '/team /scout')
+    assert.ok(strip(collab).startsWith('. '), '协同提示行 glyph 退为 .')
     // R24 双层豁免:艺术字母恒 Unicode,品牌段小星形单独跟随 tiny-symbol 降级
     const brand = withLine(lines, '天枢')
     assert.ok(strip(brand).includes('* 天枢'), 'ASCII 下品牌段星形退为 *')

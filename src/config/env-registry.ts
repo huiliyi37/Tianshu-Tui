@@ -576,6 +576,12 @@ export const ENV_REGISTRY: EnvRegistryEntry[] = [
     description: '',
   },
   {
+    name: 'RIVET_ORCHESTRATION_HINT',
+    defaultHint: '1',
+    files: ['tui/engine/orchestration-hint.ts', 'tui/engine/app.ts', 'main.ts'],
+    description: "输入时协同建议行（命中多信号提示 /team /scout /council）。设为 '0'/'off' 关闭；ui.orchestrationHint 配置同效",
+  },
+  {
     name: 'RIVET_PAL',
     defaultHint: '',
     files: ['tools/attack-case.ts', 'agent/hooks/problem-attack-hook.ts'],
