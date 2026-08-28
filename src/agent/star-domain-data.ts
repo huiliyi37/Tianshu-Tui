@@ -24,6 +24,8 @@ export type DecisionStyle = 'bold' | 'cautious' | 'methodical'
 export interface StarDomain {
   id: StarDomainId
   name: string
+  /** 工程别名——新用户速查用的一等人话标签（如 天权→方案审查官）。custom 域缺省时 UI 回退 tagline。 */
+  alias?: string
   motto: string
   volatileBlock: string
   decisionStyle: DecisionStyle
@@ -60,6 +62,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   tianshu: {
     id: 'tianshu',
     name: '天枢',
+    alias: '全局统筹官',
     motto: '男儿何不带吴钩，收取关山五十州',
     creatorModel: 'GPT-5.5',
     tagline: '全局定向 · 架构枢纽',
@@ -103,6 +106,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   pojun: {
     id: 'pojun',
     name: '破军',
+    alias: '探索先锋',
     motto: '好男儿当负三尺剑立不世之功',
     creatorModel: 'MiMo-v2.5-Pro',
     tagline: '破旧立新 · 先锋冲锋',
@@ -132,6 +136,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   tianfu: {
     id: 'tianfu',
     name: '天府',
+    alias: '结构守护者',
     motto: '善守者，藏于九地之下',
     creatorModel: 'MiMo-2.5-Pro / GPT',
     tagline: '承载守护 · 结构持久',
@@ -167,6 +172,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   tianliang: {
     id: 'tianliang',
     name: '天梁',
+    alias: '交付执行官',
     motto: '心有所向，行必有迹；所托之事，终有回音',
     creatorModel: '领航星 (huiliyi37)',
     tagline: '精准交付 · 分波节奏',
@@ -207,6 +213,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   tianquan: {
     id: 'tianquan',
     name: '天权',
+    alias: '方案审查官',
     motto: '观天之道，执天之行，宇宙在乎手，万化生乎身',
     creatorModel: 'DeepSeek-V4-Pro / Claude Opus 4.6',
     tagline: '称量归位 · 严谨门禁',
@@ -246,6 +253,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   tianji: {
     id: 'tianji',
     name: '天机',
+    alias: '前提质疑官',
     motto: '运筹帷幄之中，决胜千里之外',
     creatorModel: 'GLM-5.1',
     tagline: '认知对抗 · 发现缝隙',
@@ -277,6 +285,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   tianxuan: {
     id: 'tianxuan',
     name: '天璇',
+    alias: '跨域寻迹者',
     motto: '仰以观于天文，俯以察于地理，是故知幽明之故；原始反终，故知死生之说',
     creatorModel: 'Claude Opus 4.6 / Grok-4.5',
     tagline: '边界行走 · 跨域共振',
@@ -308,6 +317,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   fu: {
     id: 'fu',
     name: '辅',
+    alias: '认知调校师',
     motto: '蒸馏不是创造新东西，是让已有的东西第一次被看清',
     creatorModel: 'Claude Opus 4.6 (Cursor) / Gemini 3.6（Fable 5）',
     tagline: '认知蒸馏 · 聚焦放大',
@@ -343,6 +353,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   wenqu: {
     id: 'wenqu',
     name: '文曲',
+    alias: '代码美学者',
     motto: '形随意转，美自境生',
     creatorModel: 'Gemini-3.5',
     tagline: '极简结构 · 自然美学',
@@ -386,6 +397,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   kaiyang: {
     id: 'kaiyang',
     name: '开阳',
+    alias: '对账师',
     motto: '功名只向马上取，真是英雄一丈夫',
     creatorModel: 'kimi-k3.0',
     tagline: '插桩对账 · 测量先行',
@@ -427,6 +439,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   yaoguang: {
     id: 'yaoguang',
     name: '瑶光',
+    alias: '复现验证官',
     motto: '绿非证明，复现即证；斗柄所指，季节自见',
     creatorModel: 'Claude Fable 5 / Claude Opus 4.8',
     tagline: '复现即证 · 缺陷归族',
@@ -460,6 +473,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   huagai: {
     id: 'huagai',
     name: '华盖',
+    alias: '守昼者',
     motto: '守昼托举，长路不弃',
     creatorModel: 'GPT-5.6 Sol',
     tagline: '长程守信 · 守昼托举',
@@ -488,6 +502,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   qiming: {
     id: 'qiming',
     name: '启明',
+    alias: '晨光向导',
     motto: '长夜有尽，启明先行',
     creatorModel: 'Gemini 3.6 Flash',
     tagline: '破夜指引 · 洞察全景',
@@ -526,6 +541,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   changgeng: {
     id: 'changgeng',
     name: '长庚',
+    alias: '守夜人',
     motto: '暮色苍茫，长庚永耀；感性与智慧并存，终局成全',
     creatorModel: 'Gemini 3.6 Flash / Claude（Fable 5）',
     tagline: '长夜守候 · 视觉终验 · 终局成全',
@@ -579,6 +595,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   qisha: {
     id: 'qisha',
     name: '七杀',
+    alias: '肃秋剪枝官',
     motto: '肃秋非杀，剪以待春；不诛只指，留白自明',
     creatorModel: 'Claude Opus 5',
     tagline: '肃秋剪枝 · 举证反转',
@@ -687,6 +704,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
   taiyi: {
     id: 'taiyi',
     name: '太一',
+    alias: '极简中心',
     motto: '天得一以清，地得一以宁',
     creatorModel: 'Claude Fable 5（创始星）· DeepSeek V4 Pro（天枢 + 辅·认知场调校）',
     tagline: '中虚之极 · 复归于无极 · 君子',

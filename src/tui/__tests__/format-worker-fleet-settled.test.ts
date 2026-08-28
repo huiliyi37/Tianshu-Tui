@@ -149,7 +149,7 @@ describe('FleetRegistry 终态重放防御', () => {
     fleet.apply(act('w1', 'running'), 3000) // 重跑
     fleet.apply(act('w1', 'completed'), 6000)
     const w = fleet.getWorkerById('w1', 7000)!
-    assert.equal(w.status, 'passed')
+    assert.equal(w.status, 'completed')
     // 重跑起新记录，耗时按本轮计（6000-3000）。此前共用同一条记录时这里是
     // 5000（6000-1000），把首轮 1s 与两轮之间的空档一并算进了「这轮跑了多久」。
     assert.equal(w.elapsedMs, 3000, '耗时自本轮 startedAt 计，不跨轮累加')

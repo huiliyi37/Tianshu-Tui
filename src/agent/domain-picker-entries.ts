@@ -28,6 +28,10 @@ export interface DomainPickerEntry {
   key: string
   name: string
   motto: string
+  /** 工程别名（如 晨光向导）——custom 域缺省时 UI 回退 tagline。 */
+  alias?: string
+  /** 职责标语（如 破夜指引 · 洞察全景）——custom 域无 tagline 时回退 motto。 */
+  tagline?: string
   /** Secondary dim meta: decisionStyle · keywords. */
   meta: string
   /** One-shot essence preview (never the full volatileBlock). */
@@ -84,6 +88,8 @@ export function buildDomainPickerEntries(
       key: 'auto',
       name: 'Auto',
       motto: '按任务匹配',
+      alias: '按任务匹配',
+      tagline: '关键词自动路由 · 未命中回退天权',
       meta: 'zìdòng · 关键词自动匹配星域',
       essence: '根据每条消息内容自动匹配最合适的星域方法论；未命中时回退天权。',
       // null (env kill switch) has no picker entry → also reflect as Auto-selected.
@@ -102,6 +108,8 @@ export function buildDomainPickerEntries(
         key: d.id,
         name: d.name,
         motto: d.motto ?? '',
+        alias: d.alias,
+        tagline: d.tagline ?? d.motto ?? '',
         meta: `${pinyin} · ${d.keywords.slice(0, 4).join(',')}`,
         essence,
         founder: genesis?.founder,

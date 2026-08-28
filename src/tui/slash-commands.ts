@@ -24,6 +24,7 @@ import {
 import { PhaseTracker } from './phase-tracker.js'
 import { createLogEntry, type LogEntry } from './log-state.js'
 import { getPaletteCommands } from './command-palette.js'
+import { handleYoloToggle } from './yolo-toggle.js'
 import { openInEditor } from './external-editor.js'
 import { formatMissionStrip } from './mission.js'
 import { PANEL_LABELS, PANELS, type Panel } from './cockpit/types.js'
@@ -240,7 +241,7 @@ export interface SlashHandlerContext {
    *  draftPath 指撰写中的活动草稿（相对 cwd）。未注入时打印提示。 */
   openPlanPreview?: (opts: { slug?: string; draftPath?: string }) => void
   /** 设置 choice-panel 类型（effort / permission），供选择面板渲染器读取。 */
-  setChoicePanelKind?: (kind: 'effort' | 'permission') => void
+  setChoicePanelKind?: (kind: 'effort' | 'permission' | 'permission-yolo-confirm') => void
   surfacePop?: () => void
   pushStatic: (entry: LogEntry) => void
   setIsStreaming: (v: boolean) => void
@@ -3417,8 +3418,8 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     name: '/yes',
     immediate: true,
     handler(ctx) {
-      // 一键全自动（/permission 的捷径）。显式输入命令即视为确认，无需二次确认。
-      // /yes / /yes on → 全自动；/yes off → 回到自动。均持久化为默认，重启后仍生效。
+      // 一键全自动（/permission 的捷径，与 /yolo 同链覆盖版接管运行语义）。
+      // 显式输入命令即视为确认。/yes → 全自动；/yes off → 回到自动。均持久化为默认。
       const { parts, agent, pushStatic, setIsStreaming } = ctx
       const arg = parts[1]?.toLowerCase()
       if (arg === 'off') {
@@ -3809,6 +3810,11 @@ export function registerQueueCommand(app: TuiApp): void {
     },
   })
 }
+
+/**
+ * /yolo 与 /yes 覆盖版共享 handler——见 yolo-toggle.ts（R25 提取为独立模块，
+ * 避免本文件巨石继续膨胀；R24 两份复制是分叉根因）。
+ */
 
 export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): void {
   const autoSafeRef: MutableRefLike<boolean> = { current: true }
@@ -4387,38 +4393,32 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
-  // /yes：一键 YOLO。显式输入即确认；同步 TUI badge，planning 叠层时更新 stash。
+  // /yolo 与 /yes：同语义入口，共享 handleYoloToggle（R25 提取，杜绝复制分叉）。
+  // 显式输入即确认；off 退出；均持久化为默认（重启后仍生效）。
+  register("/yolo", {
+    description: "⚠ yolo 模式（跳过所有权限确认并持久化为默认）。与 /yes 同义；off 退出。高风险动作",
+    immediate: true,
+    handler: ({ trimmed }) => handleYoloToggle(trimmed, {
+      agent: ctx.agent,
+      app,
+      persistDefault: persistApprovalDefault,
+    }, {
+      on: '⚠ yolo 已开启 — 无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yolo off · 回滚: /rollback',
+      off: '✓ 已退出 yolo，切回 自动 — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。',
+    }),
+  })
+
   register("/yes", {
     description: "一键全自动（/yes off 回到自动）— 持久化为默认",
     immediate: true,
-    handler: ({ trimmed }) => {
-      const arg = trimmed.split(/\s+/)[1]?.toLowerCase()
-      const applyLive = (mode: 'dangerously-skip-permissions' | 'auto-safe') => {
-        ctx.agent.setApprovalMode(mode)
-        ctx.agent.config.maxTurns = mode === 'dangerously-skip-permissions' ? 0 : 200
-        app.setApprovalMode(mode)
-        // Plan 叠层期间改审批 → 同步 stash，Shift+Tab 退出时恢复用户最新意图
-        if (ctx.agent.planModeState === 'planning') {
-          app.approvalModeBeforePlan = mode
-        }
-        try { persistApprovalDefault(mode) } catch { /* best-effort */ }
-      }
-      // YOLO 确认面板打开时，/yes 视为确认并关掉面板
-      if (app.choicePanelKind === 'permission-yolo-confirm' && app.activeOverlayId() === 'choice-panel') {
-        app.choicePanelKind = 'effort'
-        app.deactivateOverlay()
-      }
-      if (arg === 'off') {
-        applyLive('auto-safe')
-        app.commitStatic('✓ 已退出全自动，切回 自动 — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。')
-        app.setStreamingState(false)
-        return true
-      }
-      applyLive('dangerously-skip-permissions')
-      app.commitStatic('✓ 全自动已开启 — 无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback')
-      app.setStreamingState(false)
-      return true
-    },
+    handler: ({ trimmed }) => handleYoloToggle(trimmed, {
+      agent: ctx.agent,
+      app,
+      persistDefault: persistApprovalDefault,
+    }, {
+      on: '✓ 全自动已开启 — 无限轮次，无刹车无打扰（已设为默认，重启后仍生效）。关闭: /yes off · 回滚: /rollback',
+      off: '✓ 已退出全自动，切回 自动 — 低/无风险自动，高风险仍确认（已设为默认，重启后仍生效）。',
+    }),
   })
 
   // Ecosystem workflow commands: resolve to agent prompt and submit directly.

@@ -13,9 +13,64 @@ export interface FormatDiffInput {
   content: string
   /** 最大显示行数 */
   maxLines?: number
+  /** 行内 word-level 高亮：配对相邻 del→add 行，差异 token 加粗（默认 true）。 */
+  inlineDiff?: boolean
 }
 
 const DEFAULT_MAX_LINES = 50
+
+/** 行内 diff 的行长上限（字符）：超长行跳过，避免 O(n²) 与视觉噪音。 */
+const MAX_INLINE_DIFF_CHARS = 400
+/** \w 实词公共比例下限：低于视为无关行对（删除一行 + 新增完全不同行）。 */
+const MIN_WORD_COMMON_RATIO = 0.3
+
+type WordSeg = [text: string, isDiff: 0 | 1]
+
+/** 按空白 / 实词（\w 含数字下划线，`5_000` 保持整 token）/ 单字符标点三类切分。 */
+function tokenizeWords(s: string): string[] {
+  return s.split(/(\s+|\w+|[^\w\s])/g).filter((t) => t.length > 0)
+}
+
+/** 自底向上 LCS 表（token 级）。 */
+function lcsTable(a: string[], b: string[]): number[][] {
+  const m = a.length
+  const n = b.length
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i]![j] = a[i] === b[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!)
+    }
+  }
+  return dp
+}
+
+/**
+ * 行内 word-level diff：返回两侧的分段列表（isDiff=1 为差异段）与 \w 实词公共比例。
+ * 比例只按 \w 实词计算——标点/空白太容易公共，会虚高（探针实证：`foo()` vs
+ * `bar baz qux()` 全 token 比例 67%，\w-only 0%）。
+ */
+function diffWords(oldStr: string, newStr: string): { oldSegs: WordSeg[]; newSegs: WordSeg[]; wordCommonRatio: number } {
+  const a = tokenizeWords(oldStr)
+  const b = tokenizeWords(newStr)
+  const dp = lcsTable(a, b)
+  const oldSegs: WordSeg[] = []
+  const newSegs: WordSeg[] = []
+  let i = 0
+  let j = 0
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      oldSegs.push([a[i]!, 0]); newSegs.push([b[j]!, 0]); i++; j++
+    } else if (j < b.length && (i >= a.length || dp[i + 1]![j]! <= dp[i]![j + 1]!)) {
+      newSegs.push([b[j]!, 1]); j++
+    } else {
+      oldSegs.push([a[i]!, 1]); i++
+    }
+  }
+  const wordTokens = (segs: WordSeg[]) => segs.filter(([t]) => /^\w/.test(t))
+  const common = wordTokens(oldSegs).filter(([, d]) => d === 0).length
+  const ratio = common / Math.max(wordTokens(oldSegs).length, wordTokens(newSegs).length, 1)
+  return { oldSegs, newSegs, wordCommonRatio: ratio }
+}
 
 /** diff 统计信息（adds/dels 不含文件头，hunks 为 @@ 头数量） */
 export interface DiffStats {
@@ -127,20 +182,47 @@ export function formatDiff(input: FormatDiffInput, theme: RivetTheme): string[] 
     ? [...rows.slice(0, headCount), { line: hiddenLinesMarker(allLines.length - maxLines), label: null }, ...rows.slice(-headCount)]
     : rows
 
+  // 配对相邻 del→add 行做行内 word diff：修改行典型形态为 `-old` 紧跟 `+new`。
+  // 截断插入的 hiddenLinesMarker 行类型为 context，天然阻断跨截断边界的配对。
+  const pairedSegs = new Map<number, WordSeg[]>()
+  const inlineEnabled = input.inlineDiff ?? true
+  if (inlineEnabled) {
+    for (let i = 1; i < displayRows.length; i++) {
+      const prev = displayRows[i - 1]!
+      const cur = displayRows[i]!
+      if (classifyLine(cur.line) !== 'add' || classifyLine(prev.line) !== 'del') continue
+      if (prev.line.length > MAX_INLINE_DIFF_CHARS || cur.line.length > MAX_INLINE_DIFF_CHARS) continue
+      const { oldSegs, newSegs, wordCommonRatio } = diffWords(prev.line.slice(1), cur.line.slice(1))
+      if (wordCommonRatio < MIN_WORD_COMMON_RATIO) continue
+      pairedSegs.set(i - 1, oldSegs)
+      pairedSegs.set(i, newSegs)
+    }
+  }
+
   const lines: string[] = []
 
   // Summary header
   lines.push(color(`diff: +${stats.adds} −${stats.dels}${truncated ? ` (${allLines.length} total, showing ${maxLines})` : ''}`, theme.secondary))
 
   // Content
-  for (const row of displayRows) {
+  for (let i = 0; i < displayRows.length; i++) {
+    const row = displayRows[i]!
     const type = classifyLine(row.line)
     const lineColor = getDiffColor(type, theme)
-    // 文件头 (---/+++) → OSC 8 可点击链接（不支持的终端纯文本降级）
-    let rendered = color(row.line, lineColor)
-    if (type === 'header') {
-      const filePath = extractHeaderPath(row.line)
-      if (filePath) rendered = fileLink(rendered, filePath)
+    let rendered: string
+    const segs = pairedSegs.get(i)
+    if (segs) {
+      // 行内高亮：差异 token 加粗，公共 token 保持行级颜色。
+      // slice(1) 切掉的 unified diff 行首标记（-/+）在此补回。
+      const prefix = type === 'add' ? '+' : '-'
+      rendered = color(prefix, lineColor) + segs.map(([text, isDiff]) => (isDiff ? color(text, lineColor, { bold: true }) : color(text, lineColor))).join('')
+    } else {
+      rendered = color(row.line, lineColor)
+      // 文件头 (---/+++) → OSC 8 可点击链接（不支持的终端纯文本降级）
+      if (type === 'header') {
+        const filePath = extractHeaderPath(row.line)
+        if (filePath) rendered = fileLink(rendered, filePath)
+      }
     }
     if (lineNumbers) {
       const gutter = color(`${(row.label ?? '').padStart(gutterWidth)}│`, theme.dim)

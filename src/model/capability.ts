@@ -57,11 +57,26 @@ const V4_FLASH_CARD = {
   recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'risky_refactor', 'planning', 'repo_summarization', 'compaction'],
 }
 
+/** glm-5.3-flash 去廉价化（2026-08-27）：GLM-5 系列首个原生多模态模型（320B/18B），
+ *  文档口径"超越 GLM-5.2 的更强智能"，视觉 Coding 是 Coding Plan 主力档（额度 3 倍）。
+ *  flash 命名会误入弱卡启发式，按 deepseek-v4-flash 先例白名单化；数值与 5.3 同档。 */
+const GLM53_FLASH_CARD = {
+  toolUseReliability: 0.8,
+  jsonStability: 0.8,
+  editSuccessRate: 0.7,
+  testRepairRate: 0.6,
+  cacheEconomics: 'strong' as const,
+  recommendedTasks: ['code_search', 'code_edit', 'test_failure_diagnosis', 'risky_refactor', 'planning', 'repo_summarization', 'compaction'],
+}
+
 /** 按模型产出能力卡。历史按名字一刀切（pro→强卡、flash→弱卡），
  *  deepseek-v4-flash 是第一个被打破的启发式特例。 */
 export function capabilityCardForModel(m: CapabilityModelInput): ModelCapabilityCard {
   if (m.id === 'deepseek-v4-flash' || m.alias === 'v4-flash') {
     return { model: m.id, contextWindow: m.contextWindow, ...V4_FLASH_CARD }
+  }
+  if (m.id === 'glm-5.3-flash' || m.alias === 'glm-53-flash') {
+    return { model: m.id, contextWindow: m.contextWindow, ...GLM53_FLASH_CARD }
   }
   const isPro = m.id.includes('pro') || m.alias?.includes('pro')
   const isFlash = m.id.includes('flash') || m.alias?.includes('flash')

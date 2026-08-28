@@ -51,7 +51,7 @@ import type { ApprovalMode } from './agent/loop-types.js'
 import { TIER_HINT, TIER_TO_WIRE, formatPermissionLabel, formatTierLabel } from './agent/approval-vocabulary.js'
 import { readFileSync, statSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
-import { formatWelcome } from './tui/format/welcome.js'
+import { formatWelcome, isMissionLine, missionShimmer, MISSION_SHIMMER_FRAME_MS } from './tui/format/welcome.js'
 import { HANDOFF_NUDGE_RATIO, formatHandoffNudge } from './tui/handoff.js'
 import { formatDomainDriftNudge } from './tui/domain-drift-nudge.js'
 import { color } from './tui/engine/ansi.js'
@@ -2186,8 +2186,30 @@ async function main() {
           : (ctx.agent.getReasoningEffort() ?? ctx.agent.config.reasoningEffort),
       separator: starDomainRegistry.list().find(d => d.id === sessionDomainId)?.uiPersona?.separator,
     }, theme)
-    for (const line of welcomeLines) {
-      stdout.write(line + '\n')
+    // R12 欢迎块渲染纪律:整块单次 flush——逐行 write 每次都是一次独立重绘,
+    // 是「一卡一卡」的第二个来源。扫光帧用 Atomics.wait 阻塞式微休眠播放:
+    // 禁抖动(setTimeout 有钳制与毛刺)、禁事件循环让出(启动期其他任务插队输出会打断光带)。
+    // TTY + RIVET_WELCOME_ANIM=0 可关;非 TTY(管道/CI)自动跳过,不污染管道输出。
+    const shimmer = missionShimmer(theme, stdout.columns || 80)
+    const animateMission = stdout.isTTY === true
+      && process.env.RIVET_WELCOME_ANIM !== '0'
+      && shimmer !== null
+    const missionIdx = animateMission ? welcomeLines.findIndex(l => isMissionLine(l)) : -1
+    const sleepSync = (ms: number): void => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+    }
+    if (animateMission && shimmer && missionIdx >= 0) {
+      const before = welcomeLines.slice(0, missionIdx)
+      const after = welcomeLines.slice(missionIdx + 1)
+      if (before.length > 0) stdout.write(before.join('\n') + '\n')
+      for (const frame of shimmer.frames) {
+        stdout.write(`\r\x1B[2K${frame}`)
+        sleepSync(MISSION_SHIMMER_FRAME_MS)
+      }
+      stdout.write(`\r\x1B[2K${shimmer.final}\n`)
+      if (after.length > 0) stdout.write(after.join('\n') + '\n')
+    } else {
+      stdout.write(welcomeLines.join('\n') + '\n')
     }
   }
 

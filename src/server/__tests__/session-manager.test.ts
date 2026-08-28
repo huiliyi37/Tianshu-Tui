@@ -895,7 +895,7 @@ test('T4: onDelegationActivity emits per-worker delegation with progress + elaps
   assert.equal(evs[0]!.data.status, 'running')
   assert.equal(evs[0]!.data.progressLine, '⚙ grep')
   assert.equal(typeof evs[0]!.data.elapsedMs, 'number')
-  assert.equal(evs[1]!.data.status, 'passed')
+  assert.equal(evs[1]!.data.status, 'completed')
 })
 
 test('T4: delegation events pass through counters, event mirror + failureReason', async () => {

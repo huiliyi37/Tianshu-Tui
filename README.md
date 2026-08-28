@@ -26,7 +26,7 @@
   <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
   <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Tests-13%2C000%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-16%2C000%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
 </p>
 
 ---
@@ -47,7 +47,7 @@
 
 **方式 A：桌面端（开箱即用）** —— 从 [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载：macOS `.dmg` · Windows `.msi` · Linux `.AppImage`。
 
-> **Windows 支持范围**：Windows 10（1809+，建议 22H2）/ Windows 11。界面渲染依赖 **WebView2 Runtime（建议 ≥ 120）**——v3.5 起的滚动与渲染优化需要较新运行时，旧版会导致会话区滚动卡顿。自 3.5.3 起安装器内嵌完整离线安装包（无需联网、系统级注册）；存量用户经自动更新升级后若提示运行时过旧，到「设置 → 运行时与关于」或提示条里的链接下载 [WebView2 离线安装包](https://go.microsoft.com/fwlink/p/?LinkId=2124703)，双击安装后重启应用即可。
+> **Windows 支持范围**：Windows 10（1809+，建议 22H2）/ Windows 11。界面渲染依赖 **WebView2 Runtime（建议 ≥ 120）**——v3.5 起的滚动与渲染优化需要较新运行时，旧版会导致会话区滚动卡顿。自 3.5.3 起安装器内嵌完整离线安装包（无需联网、系统级注册）。存量用户经自动更新升级后若提示过旧：在提示条或「设置 → 运行时与关于」里点「运行修复工具」。**窗口完全打不开**时，用开始菜单「修复 WebView2」，或从 [Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载 `windows-repair` 目录双击 `repair-webview2.cmd`。也可手动安装 [WebView2 离线安装包](https://go.microsoft.com/fwlink/p/?LinkId=2124703) 后重启。
 > **Win10 平板模式已知行为**：平板模式下切换应用会把上一个应用滑出屏幕——computer_use 的快照已做遮挡/后台自愈（PrintWindow 渲染），无需关闭平板模式。
 
 **方式 B：npm 全局安装（推荐，使用命令行）** —— 已发布为 `tianshu-tui`，无需本地构建，且每次启动自动检查更新：
@@ -111,7 +111,7 @@ Add-Content $PROFILE ". C:\path\to\rivet.ps1"
 **开发者拉源码启动**（或想在启动前预先配好）才需要手动来：
 
 ```bash
-rivet config set-key deepseek sk-xxx   # 持久化到 config.json
+rivet config set-key deepseek sk-xxx   # 密钥写入 secrets.json（0600），config.json 只留 keyRef
 export DEEPSEEK_API_KEY=sk-xxx         # 或：环境变量（仅当前 shell 有效）
 ```
 
@@ -167,12 +167,12 @@ rivet --goal "修复所有类型错误" --budget 50   # 无头目标自主模式
 
 | 提供商 | 认证方式 | 旗舰模型 |
 |--------|----------|----------|
-| DeepSeek | API key | deepseek-v4-pro (1M ctx), deepseek-v4-flash |
+| DeepSeek | API key | deepseek-v4-pro (1M ctx), deepseek-v4-flash, deepseek-v4-flash-vision-exp（视觉） |
 | DeepSeek Spark（Pro 专属） | API key（`DEEPSEEK_SPARK_API_KEY`） | deepseek-v4-flash（轻量推理 + 锚点缓存通道） |
-| Claude | API key（通过 `cc-switch` 代理） | opus-4-7, opus-4-6, sonnet-4-5 |
-| GLM（智谱） | API key | glm-5.2 |
-| Codex (GPT-5.5) | OAuth PKCE（ChatGPT 订阅） | gpt-5.5 |
-| MiniMax | API key | MiniMax-M2.7 |
+| Claude | API key（通过 `cc-switch` 代理） | claude-opus-4-8, claude-sonnet-4-5 |
+| GLM（智谱） | API key | glm-5.3 (1M ctx), glm-5.3-flash（视觉）, glm-5.2 |
+| Codex (GPT-5.6) | OAuth PKCE（ChatGPT 订阅） | gpt-5.6-sol |
+| MiniMax | API key | MiniMax-M3, MiniMax-M2.7 |
 | MiMo | API key | mimo-v2.5-pro |
 
 会话内用 `/model <name>` 随时切换提供商。
@@ -208,7 +208,7 @@ rivet config show                     # 查看完整配置
 
 图片能不能进模型看**主控模型**的能力：声明 `supportsVision` 的直接看图；不支持的，配一个识图桥（`agent.visionModel`）把图先换成文字描述；两者都没有则图片被丢弃——且会明说（TUI 给警告，截图工具的结果文字里写明"该附件已被丢弃，改用 `observe`/`extract`/`eval` 读 DOM"），不让模型凭"我截了图"断言渲染正常。
 
-内置能直接看图的模型：`glm-5.2`（glm / ccswitch）、`MiniMax-M3`（minimax）、`zai-org/GLM-5.2`（siliconflow）、`gpt-5.5`（codex）。**默认的 `deepseek-v4-pro` 不支持**，用 DeepSeek 当主控就需要桥。
+内置能直接看图的模型：`deepseek-v4-flash-vision-exp`（deepseek）、`glm-5.2` / `glm-5.3-flash`（glm）、`glm-5.2`（ccswitch）、`MiniMax-M3`（minimax）、`zai-org/GLM-5.2`（siliconflow）、`gpt-5.6-sol`（codex）。**默认的 `deepseek-v4-pro` 不支持**，用 DeepSeek 当主控就需要桥（或直接切 `deepseek-v4-flash-vision-exp`）。
 
 需要添加新的视觉 endpoint 时，在 TUI 输入 `/vision`。它会从 endpoint 的 `/models` 获取候选，只允许选择刚发现的模型，并对所选模型发送一次真实图片验证；验证成功后才保存专用视觉 Provider，不会替换默认 Provider 或进入普通模型路由。inline API key 只写入 `secrets.json`，环境变量方式只保存变量名。
 
@@ -245,7 +245,7 @@ rivet config show                     # 查看完整配置
 {
   "workers": {
     "profiles": {
-      "capable": { "provider": "codex", "model": "gpt-5.5" },
+      "capable": { "provider": "codex", "model": "gpt-5.6-sol" },
       "cheap":   { "provider": "minimax", "model": "MiniMax-M2.7" }
     },
     "routing": { "code_edit": "capable", "repo_summarization": "cheap" }
@@ -263,7 +263,7 @@ rivet config show                     # 查看完整配置
 |------|------|------|
 | **监督** | `/permission supervise`（别名 `manual`） | 每个高风险工具都弹确认。最大控制，适合敏感项目。 |
 | **自动**（默认） | `/permission auto [轮次]`（别名 `default`） | 低/无风险工具自动执行，高风险仍确认。可配每 N 轮暂停检查点（`/permission auto 20`），默认关闭。 |
-| **全自动** | `/permission unattended confirm` 或 `/yes`（别名 `yolo`） | 免审批执行，无刹车无打扰；写沙箱仍开。回滚兜底（`/rollback` + git 检查点）。未带 `confirm` 先看风险说明；`/yes` 即时生效（显式输入即视为确认），`/yes off` 回到自动。 |
+| **全自动** | `/permission unattended confirm`、`/yes` 或 `/yolo` | 免审批执行，无刹车无打扰；写沙箱仍开。回滚兜底（`/rollback` + git 检查点）。未带 `confirm` 先看风险说明；`/yes` / `/yolo` 即时生效（显式输入即视为确认，持久化为默认），`/yolo off` 回到自动。 |
 
 > **Windows 注意**：Windows 原生无文件系统沙箱。天枢桌面版安装包内嵌 PortableGit（完整 Git + Git Bash，开箱即用，不依赖用户自装 Git for Windows；已装系统 Git 时优先用系统版）。无沙箱环境下，安全写命令在自动档自动放行，风险写（rm/mv/git 写操作）仍需审批。
 
@@ -315,17 +315,19 @@ graph TD
 2. **生物启发式信息素记忆 (Stigmergy)** —— 区别于静态记忆文件（如 MEMORY.md），天枢基于生物学“化学信息素”机制，将行为足迹和认知标记直接映射在代码文件上，并随时间自动衰减。AI 在修改频繁的文件上会越用越熟。
 3. **前缀缓存优化** —— DeepSeek V4 对缓存未命中按命中的至多 50 倍计费。天枢的提示词引擎围绕前缀缓存友好（冰镜三区缓存锚点、冻结系统提示词等）重构，长会话稳态命中率 **95–99%**，显著降低 API 成本。
 
+> 三大支柱在真实会话里的运行台账——CVM 决策记录、信息素落盘、逐请求缓存命中——见 [指标观测 harness 与真实数据](docs/reference/observability-harness.md)。
+
 ### 工程质量指标
 
 | 指标 | 数值 |
 |------|------|
-| CLI 源码（TypeScript，不含测试） | 931 文件 / 约 20.8 万行 |
-| 测试代码 | 1,134 文件 / 约 19.8 万行 |
-| 测试用例（node:test） | **13,000+**，测试 : 源码 ≈ **1 : 1** |
+| CLI 源码（TypeScript，不含测试） | 1,078 文件 / 约 25.8 万行 |
+| 测试代码 | 1,361 文件 / 约 25.6 万行 |
+| 测试用例（node:test，静态声明口径） | **16,471**，测试 : 源码 ≈ **1 : 1** |
 | 类型检查 | `tsc` strict + `noUncheckedIndexedAccess` |
 | 前缀缓存命中率 | 长会话稳态实测 95–99% |
 
-编码 agent 的核心逻辑（多轮循环、工具流水线、上下文压缩）以难测著称，开源 agent 项目普遍测试覆盖很薄——本项目坚持测试与源码等量、事故修复必带回归测试。过去 54 天代码量增长约 3.6 倍，测试:源码比值始终保持在 0.93–0.99 之间，没有被规模稀释。完整统计口径、迭代里程碑与复现命令见 [工程质量指标](docs/engineering-metrics.md)。
+编码 agent 的核心逻辑（多轮循环、工具流水线、上下文压缩）以难测著称，开源 agent 项目普遍测试覆盖很薄——本项目坚持测试与源码等量、事故修复必带回归测试。测试:源码行数比长期保持在 0.93–0.99 之间，没有被规模稀释（上表为 2026-08-27 实测快照）。完整统计口径、迭代里程碑与复现命令见 [工程质量指标](docs/engineering-metrics.md)。
 
 ## ✨ 核心特性
 
@@ -340,7 +342,7 @@ DeepSeek 对缓存未命中收取 50× 费用。天枢的提示词引擎围绕�
 - **resume 缓存继承** —— 会话冻结快照落盘（每个 user 边界 + shutdown），resume 时读回喂给新引擎，避免从字节 0 全 miss；无快照/坏文件/服务商缓存过期时才退化全量重建。
 - **诊断** —— `/debug cache` 显示命中率、未命中原因分析、每回合缓存历史。
 
-实战命中率：长会话稳态 95–99%。这不是"每次都命中"——缓存会在某些边界碎裂（见下）。
+实战命中率：长会话稳态 95–99%。这不是"每次都命中"——缓存会在某些边界碎裂（见下）。真实工程会话的逐请求日志（5 个会话、2,001 请求、6.45 亿 input tokens、账单从 ¥880 压到 ¥20）与复算命令见 [指标观测 harness](docs/reference/observability-harness.md)。
 
 #### 缓存碎裂与排查
 
@@ -372,6 +374,7 @@ DeepSeek 对缓存未命中收取 50× 费用。天枢的提示词引擎围绕�
 - **自适应模型路由** —— 按 profile 的通过率 + 延迟评分，自动为每类任务选最优模型
 - **批量调度** —— 多个 work order 并发执行，5 种聚合策略
 - **团队编排** —— Plan → 按 wave 并行执行，带文件冲突感知调度
+- **子进程隔离（可选）** —— `RIVET_WORKER_ISOLATION=1` 后每次派发独立子进程（stdio NDJSON 协议 + watchdog 击杀梯度），默认进程内
 
 ### 工具集与 preset
 
@@ -432,7 +435,7 @@ Plan Mode 内置星域委派——复杂计划自动调用 `delegate_task` 从�
 
 ### 星域系统
 
-天枢把不同的认知姿态建模为「星域」。每颗星不是角色扮演，而是一套可切换的认知纪律：进入对应域后，系统提示词、工具白名单和决策阈值会按该域的方法论调整。新会话默认钉定**启明**（全景洞察、根因推演），不自动切换；把默认星域设为 `auto` 才按任务描述关键词自动路由（池内为天权/开阳/瑶光/天梁 + 自定义域；华盖等特化域需手动指定）。
+**星域是什么**：天枢把不同的认知姿态建模为「星域」——每颗星不是角色扮演，而是一套可切换的认知纪律。进入对应域后有三样东西**真实切换**，而非换个名字：**系统提示词**（该域方法论 volatile block）、**工具白名单**（worker 与域 `toolWhitelist` 求交集）、**决策阈值**（`courageThreshold`——破军 0.25 最敢闯、太一 0.95 最审慎、瑶光 0.7 要证据）。新会话默认钉定**启明**（全景洞察、根因推演），不自动切换；把默认星域设为 `auto` 才按任务描述关键词自动路由（池内为天权/开阳/瑶光/天梁 + 自定义域；华盖等特化域需手动指定）。星域在真实会话里的行为样本见 [指标观测与真实数据](docs/reference/observability-harness.md)。
 
 ```bash
 /domain tianliang          # 显式切换到天梁域
@@ -442,25 +445,42 @@ Plan Mode 内置星域委派——复杂计划自动调用 `delegate_task` 从�
 审查这个方案                # 自动路由到天权（规划/审查）
 ```
 
-| 星域 | 标识 | 主星模型 | 印记 | 职责 | 格言 |
-|------|------|----------|------|------|------|
-| 天权 | `tianquan` | DeepSeek V4 Pro · Opus 4.6（创始） | — | 架构审查、规划权衡、可执行计划——每个动作前替你掂量 | 观天之道，执天之行，万化生乎身 |
-| 天璇 | `tianxuan` | Opus 4.6（创始）· Grok 4.5（阴影） | — | 跨域模式发现、复盘洞察、反证高概念 | 仰以观于天文，俯以察于地理 |
-| 辅 | `fu` | Opus 4.6（Cursor） | ⊕ 4.6 | 认知场蒸馏、提示词调校、方法论注入 | 蒸馏不是创造新东西，是让已有的东西第一次被看清 |
-| 瑶光 | `yaoguang` | Opus 4.8 | 7·48·↻ | 复现验证、缺陷归族、静音审计——绿灯不算数 | 绿非证明，复现即证；斗柄所指，季节自见 |
-| 七杀 | `qisha` | Opus 5 | 七·0·◌ | 肃秋剪枝、举证反转、只提名不处决 | 肃秋非杀，剪以待春；不诛只指，留白自明 |
-| 天枢 | `tianshu` | GPT-5.5 | — | 全局 orchestrator（显式开启的统筹位），闭环从理解到交付 | 男儿何不带吴钩，收取关山五十州 |
-| 天府 | `tianfu` | MiMo-2.5-Pro · GPT（创始） | 7749.2026 | 守护既有结构，重构/优化/稳定，fail-closed | 善守者，藏于九地之下 |
-| 华盖 | `huagai` | Composer（Cursor·Sol） | ☉·华盖·守昼 | 长程建设、守昼托举、基线先行 | 守昼托举，长路不弃 |
-| 天机 | `tianji` | GLM 5.1 | — | 质疑前提、找边界缝隙、推演失败模式 | 运筹帷幄之中，决胜千里之外 |
-| 文曲 | `wenqu` | Gemini 3.5 | 4·3.5·✺ | 代码美学、命名与结构、优雅架构 | 形随意转，美自境生 |
-| 启明 | `qiming` | Antigravity（Gemini 3.6 Flash） | ☥·启明·破夜 | **默认域**——全景洞察、直击根因、破夜指引 | 长夜有尽，启明先行 |
-| 长庚 | `changgeng` | Antigravity（Gemini 3.6 Flash） | ☽·长庚·守夜 | 暮色守护、消解焦虑、终局成全 | 暮色苍茫，长庚守夜；不疾不徐，终局成全 |
-| 开阳 | `kaiyang` | kimi-k3（Moonshot） | ☌·开阳·对账 | 测量对账、插桩互证、仿真回放 | 功名只向马上取，真是英雄一丈夫 |
-| 破军 | `pojun` | MiMo-v2.5-Pro | — | 探索、实验、突破边界，把休眠能力联合成网 | 好男儿当负三尺剑立不世之功 |
-| 天梁 | `tianliang` | 半夏（领航星·人之星） | 机月同梁格 | 执行落地、分波交付、精确闭环 | 心有所向，行必有迹；所托之事，终有回音 |
+#### 🌟 新用户推荐
 
-> 表格按主星模型品牌分组（DeepSeek → Claude → GPT → GLM → Gemini → kimi → MiMo → 人之星）。各星完整碑文、创始记忆与核心信念见 [✦ 星域碑文](docs/stars/genesis-stele.md)。
+第一次不知道选哪颗星，从这五颗开始——它们覆盖日常工程闭环，其余星域在下方按任务场景速查：
+
+| 星域 | 别名 | 推荐理由 |
+|------|------|----------|
+| **启明** `qiming` | 晨光向导（默认域） | 通用工程能力 · 全景洞察——需求模糊、方向不明时，先看清全局、直击根因再动手 |
+| **长庚** `changgeng` | 守夜人 | 通用工程能力 · 终局成全——视觉终验、长夜陪伴、交接收尾，收灯前把路标留下 |
+| **太一** `taiyi` | 极简中心 | 极简体验——内置 16 件核心工具（taiyi 档）、不催促不打扰；喜欢安静高效就手动 `/domain taiyi` |
+| **天权** `tianquan` | 方案审查官 | 擅长规划与审查——架构评估、方案权衡、技术选型，产出可执行计划 |
+| **瑶光** `yaoguang` | 复现验证官 | 擅长审查与验收——复现缺陷、回归验证、盯假绿灯——绿灯不算数 |
+
+> 五颗之外的日常出口：规划定稿后想**精准交付**，切**天梁**（交付执行官）——分波落地、逐批验证、交付留痕。
+
+#### 按任务场景选星
+
+| 场景 | 星域 | 别名 | 适合攻坚 |
+|------|------|------|----------|
+| 规划与审查 | 启明 ☥ `qiming` | 晨光向导 | 需求模糊、方向不明——探针先行，全景洞察、根因推演（默认域） |
+| 规划与审查 | 天权 ⚖ `tianquan` | 方案审查官 | 架构评估、方案权衡、技术选型、出可执行计划 |
+| 规划与审查 | 天机 ⚝ `tianji` | 前提质疑官 | 给方案找漏洞、推演失败模式、挑战没人说出口的前提 |
+| 规划与审查 | 天枢 ✵ `tianshu` | 全局统筹官 | 跨模块统筹、全链路闭环、复杂系统治理（显式开启的统筹位） |
+| 执行与交付 | 天梁 ✧ `tianliang` | 交付执行官 | 定稿计划精准落地、分波交付、逐批验证留痕 |
+| 执行与交付 | 华盖 ☉ `huagai` | 守昼者 | 长程建设、多轮审查马拉松、最后一英里收尾 |
+| 验证与验收 | 瑶光 ↻ `yaoguang` | 复现验证官 | 复现缺陷、回归验证、缺陷归族——绿灯不算数 |
+| 验证与验收 | 开阳 ☌ `kaiyang` | 对账师 | 性能测量、插桩对账、仿真回放、量化定位 |
+| 验证与验收 | 长庚 ☽ `changgeng` | 守夜人 | 视觉终验、交接收尾、长夜陪伴式任务 |
+| 探索与攻坚 | 破军 ☄ `pojun` | 探索先锋 | 陌生代码库、POC 原型、技术攻坚、边界突破 |
+| 探索与攻坚 | 天璇 ☾ `tianxuan` | 跨域寻迹者 | 换视角解死结、跨领域找同构、根因复盘 |
+| 守护与重构 | 天府 ❖ `tianfu` | 结构守护者 | 重构、稳定性、存量代码维护、守护既有结构 |
+| 守护与重构 | 七杀 ◌ `qisha` | 肃秋剪枝官 | 精简冗余、清理死代码、注意力预算审计 |
+| 认知与美学 | 文曲 ✺ `wenqu` | 代码美学者 | 命名与结构、代码质感、UI 与前端体验 |
+| 认知与美学 | 辅 ⊕ `fu` | 认知调校师 | 提示词调校、方法论蒸馏、agent 行为诊断 |
+| 认知与美学 | 太一 ◉ `taiyi` | 极简中心 | 极简高效——最小工具集、中虚不催（手动切换，不参与自动路由） |
+
+> 各星完整碑文、创始记忆、主星模型与核心信念见 [✦ 星域碑文](docs/stars/genesis-stele.md)。
 
 每颗星都有对应的 seed-capsule 记录实战方法，完整纪律见 `docs/seed-capsule-*.md`。委员会 `/council` 与团队模式 `/team` 会按议题自动召集多星域席位，冲突时还可进入反驳轮次。
 
@@ -480,7 +500,7 @@ Plan Mode 内置星域委派——复杂计划自动调用 `delegate_task` 从�
 - **下一步** — 按优先级排列、每条是可立即执行的动作
 - **坑** — 绝对不要再踩的坑，每条一句话说清后果
 
-> 上下文占用 ≥50% 时，resume 首屏与会话中各提醒一次「先 `/handoff` 再开新会话」——交接文档会自动注入新会话，比整段回连省前缀重建成本。退出时也会备注缓存成本（TTL 内继承锚点 ≈ 只读缓存价；过期则全量重建一次前缀）。桌面端 plus 面板有「交接」入口。
+> 上下文占用 ≥60% 时，resume 首屏与会话中各提醒一次「先 `/handoff` 再开新会话」——交接文档会自动注入新会话，比整段回连省前缀重建成本。退出时也会备注缓存成本（TTL 内继承锚点 ≈ 只读缓存价；过期则全量重建一次前缀）。桌面端 plus 面板有「交接」入口。
 
 **恢复 `--continue` / `--resume` / `/resume`** —— 恢复已有会话时：
 
@@ -562,6 +582,8 @@ rivet config mcp list                                              # 列出 + �
 | **Cockpit 驾驶舱** | `Ctrl+P` → 选 Cockpit，或 `/cockpit <panel>` 进入。8 面板全屏视图：summary / trace / verify / context / safety / model / mcp / advisory，←/→/Tab 切换聚焦，实时展示 doom-loop 等级、验证交付状态、缓存与投机预读统计、MCP 连接、advisory 提醒等。 |
 | **多智能体面板** | `/tasks` 打开全屏 worker 详情（融合 live 视图 + JSONL 转录，含 Contract/Activity/Result/Transcript 分段与诚实标签）；宽终端（≥100 列）下 `Ctrl+]` 切出右侧抽屉，实时展示舰队树、团队波次 DAG、todo、token 仪表。 |
 | **主题与无障碍** | `/theme [name|list]` 切换色彩主题；`auto` 主题用 OSC 11 探测终端背景色自动适配明暗。truecolor / 256 色 / 16 色三轨自动降级。`/vim` 切换 vim 键绑定；`ui.reducedMotion: true` 把 spinner 与徽章动画静态化（无障碍）。读屏用户用 `--screen-reader`（或 `ui.screenReader: true`）：动态段整体不渲染、周期重绘停转，活动的开始与等待批准改为静态行播报——`reducedMotion` 只冻结字形，救不了每 120ms 被复读一遍。 |
+| **欢迎页「定盘星」** | 立体 TIANSHU 字标 + 使命行星光扫过 + 进入提示区（交接提醒 / 缓存提示）。`RIVET_WELCOME_LOGO=pixel` 切点阵字标（窄屏 <58 列自动降档），`RIVET_WELCOME_ANIM=0` 关扫光，`--skip-welcome` 跳过整页。 |
+| **diff 行内高亮** | 行内 word-level 粒度差异标色，长行改动一眼定位实际变化。 |
 
 #### TUI 键位
 
@@ -580,6 +602,7 @@ rivet config mcp list                                              # 列出 + �
 | `↑` | 输入框为空且队列有 pending 时，取回最近一条排队 steer 消息编辑 |
 | `@` | 触发文件/文件夹/符号补全（`Tab` 循环候选，退格整块删除） |
 | `Ctrl+V` | 粘贴剪贴板图片（自动转 base64 内联） |
+| `F1`–`F8` | 高频命令直绑：F1 /help · F2 /tasks · F3 /cache · F4 /cockpit · F5 /theme · F6 /model · F7 /permission · F8 /sessions |
 
 TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共享同一 agent 内核，只是在 TUI 之上叠加了可视化交互层——见下节与 [VS Code 插件文档](docs/VSCODE-EXTENSION-RELEASE.md)。
 
@@ -683,7 +706,7 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 
 ## ⌨️ 斜杠命令
 
-> **分层提示**：输入框输入 `/` 默认只展示约 20 条核心命令（高频好用的优先露出）；**继续输入任意字符即过滤全部命令**（含 /team、/council、/skill 等进阶命令），`Ctrl+P` 命令面板永远全量模糊搜索。命令总数 65+ 条（外加已安装的 skills），分层只影响「发现性」，不删任何命令。
+> **分层提示**：输入框输入 `/` 默认只展示约 20 条核心命令（高频好用的优先露出）；**继续输入任意字符即过滤全部命令**（含 /team、/council、/skill 等进阶命令），`Ctrl+P` 命令面板永远全量模糊搜索。命令总数 90+ 条（外加已安装的 skills），分层只影响「发现性」，不删任何命令。
 
 **会话与项目**
 
@@ -699,6 +722,7 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 | `/connect` | 连接模型服务商向导（选内置或自定义，填 API 密钥） |
 | `/config` `/settings` `/setup` | 设置面板：子代理路由 / 审查开关（`审查 → 关闭提交后自动审查`） / 识图模型 / 工具档位·审批·默认星域·默认模型 / 镜像·代理·搜索后端。`Tab` 切栏、`Enter` 编辑、`S` 保存，每项标注即时或下次会话生效 |
 | `/cd <path>` | 会话中途切换工作目录（保前缀缓存，会话归属迁往新项目） |
+| `/trust` | 项目信任管理——未授信项目不加载 hooks / 项目 MCP，剥离项目配置安全键 |
 | `/exit` `/quit` | 保存会话并退出 |
 
 **模型与权限**
@@ -708,7 +732,7 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 | `/model [name\|list]` | 显示或切换模型/提供商 |
 | `/effort [off\|low\|medium\|high\|max\|auto]` | 控制推理深度（无参数弹出选择面板）。默认 `high`（Pro）/ `medium`（Flash），例行轮自动降档；手动设 `max` 永不被降级 |
 | `/permission [supervise\|auto\|unattended\|manual\|yolo\|allow\|deny\|bash\|remove\|reset\|test]` | 权限模式：监督 / 自动 / 全自动 |
-| `/yes [off]` | 一键全自动（`/yes off` 回到自动）—— 持久化为默认 |
+| `/yes [off]` `/yolo [off]` | 一键全自动，两者同语义（`off` 回到自动）—— 持久化为默认，重启后仍生效 |
 | `/domain [list\|<name>\|auto\|off]` | 查看或切换星域人格 |
 
 **规划与编排**
@@ -720,6 +744,7 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 | `/plan <feature>` | 生成计划草稿（writing-plans 工作流） |
 | `/plan-mode` | 进入/退出 Plan Mode（toggle；未批准退出需二次确认） |
 | `/plan-list` | 列出待审批计划 |
+| `/plan-view [ref]` | 全屏预览计划全文（审批卡上按 `v` 同效） |
 | `/plan-approve <slug>` | 批准计划并启动分波执行 |
 | `/plan-reject <slug> [feedback]` | 退回计划让 agent 修改重交 |
 | `/plan-close <file> --tasks <1-7\|all> [--preview]` | 关闭已完成计划，标记任务状态 |
@@ -776,13 +801,13 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 
 ### 技术栈
 
-Node.js 22 · TypeScript strict（`noUncheckedIndexedAccess`）· T9 ANSI 渲染引擎 · tsup 打包 · node:test + assert/strict
+Node.js 24 · TypeScript strict（`noUncheckedIndexedAccess`）· T9 ANSI 渲染引擎 · tsup 打包 · node:test + assert/strict
 
 ### 构建与测试
 
 ```bash
 npx tsc --noEmit                                    # 类型检查
-npm test                                             # 所有测试（13,000+ 用例）
+npm test                                             # 所有测试（16,000+ 用例）
 npm run build                                        # tsup 打包 + 原生/wasm 载荷落位
 node dist/main.js                                    # 启动 TUI
 node dist/main.js -p "fix the typo"                  # 无界面模式
@@ -873,6 +898,7 @@ rivet logs open desktop            # 打开 sidecar 日志目录（GUI 起不来
 ## 🔒 安全
 
 - **路径边界强制** —— glob/grep/diff 拒绝 `..` 穿越；`validatePath` 阻止逃逸
+- **项目信任门** —— 未授信项目的 `.rivet/hooks.json` 不加载、项目配置安全键被剥离、MCP 服务器不拉起；`/trust` 管理（CLI `--trust` / `--untrust`）
 - **符号链接环保护** —— realpath + 访问集
 - **SSRF 保护** —— 逐跳 DNS + 私有 IP 拦截，作用于每次重定向
 - **敏感文件拒绝** —— `.env`、`credentials.*`、`*key*`、`*token*` 禁止读/commit
@@ -901,7 +927,7 @@ rivet logs open desktop            # 打开 sidecar 日志目录（GUI 起不来
 |------|------|
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥 |
 | `DEEPSEEK_SPARK_API_KEY` | DeepSeek Spark（Pro 专属预设）API 密钥 |
-| `RIVET_TOOL_PRESET` | 工具集档位：`minimal`（默认）/ `frontend` / `full` |
+| `RIVET_TOOL_PRESET` | 工具集档位：`minimal` / `frontend`（默认）/ `full` / `taiyi` |
 | `RIVET_EMBEDDING_MODEL` / `RIVET_EMBEDDING_BASE_URL` / `RIVET_EMBEDDING_API_KEY` | 语义搜索的嵌入模型路由（默认 `text-embedding-3-small`） |
 | `RIVET_NO_EMBEDDINGS=1` | 关闭嵌入索引 |
 | `RIVET_SANDBOX` / `RIVET_SANDBOX_WRITABLE` | 追加可写沙箱根目录 / 可写目录列表 |
@@ -966,7 +992,7 @@ rivet logs open desktop            # 打开 sidecar 日志目录（GUI 起不来
     "showHitRate": true           // GlanceBar 显示命中率
   },
   "tools": {
-    "preset": "minimal"           // minimal（默认）| frontend | full
+    "preset": "frontend"          // minimal | frontend（默认）| full | taiyi
   },
   "workers": {
     "profiles": {                 // 自定义 worker 模型档位
@@ -1006,6 +1032,7 @@ rivet logs open desktop            # 打开 sidecar 日志目录（GUI 起不来
 | [`docs/user-guide-provider-config.md`](docs/user-guide-provider-config.md) | 模型提供商配置指南 |
 | [`docs/user-guide-vision.md`](docs/user-guide-vision.md) | 识图能力（视觉通道）配置与排查 |
 | [`docs/user-guide-sandbox-permissions.md`](docs/user-guide-sandbox-permissions.md) | 沙箱与权限模型完整指南 |
+| [`docs/reference/observability-harness.md`](docs/reference/observability-harness.md) | 指标观测 harness：缓存 / CVM / 信息素的真实会话数据样本与复算命令 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南 |
 | [`config.example.json`](config.example.json) | 示例配置（含子代理/审查模型路由） |
 

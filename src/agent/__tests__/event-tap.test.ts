@@ -223,8 +223,8 @@ describe('event-tap — 与 sidecar 的字段口径一致', () => {
     })
     tap.onDelegationActivity!({ workOrderId: 'w1', parentToolId: 't1', status: 'completed', summary: 'done' })
     const d = at(rec, 0)
-    assert.equal(d.data.phase, 'passed')
-    assert.equal(d.data.status, 'passed')
+    assert.equal(d.data.phase, 'completed')
+    assert.equal(d.data.status, 'completed')
   })
 })
 

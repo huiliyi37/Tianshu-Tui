@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { createRouter } from '../index.js'
 import { buildConfigRoutes } from '../config-routes.js'
 import { readSecret, writeSecret } from '../../config/secrets-store.js'
+import { PROVIDER_PRESETS, type ProviderPresetKey } from '../../config/provider-presets.js'
 
 const TOKEN = 'secret-token'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
@@ -795,5 +796,122 @@ describe('POST /config/providers/tunables', () => {
     const router = createRouter(buildConfigRoutes(TOKEN))
     const res = await router('POST', '/config/providers/tunables', { providerName: 'deepseek', fields: { slowThinking: true } }, {})
     assert.equal(res.status, 401)
+  })
+})
+
+describe('GET /config/providers — unconfigured 预设透传 keyUrl（获取 API Key 直链）', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-config-routes-keyurl-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  // 不钉死「deepseek 必须出现在 unconfigured」——RIVET_HOME 指向的临时目录缺
+  // config.json 时 loadConfig 会兜底读真实 ~/.rivet（开发者本机多半已配置主流
+  // 预设），环境相关断言会飘。改为与预设表对照：凡出现在 unconfigured 且预设
+  // 带 keyUrl 的，透传值必须与预设一致（CI 干净环境下覆盖全部预设）。
+  it('静态预设的 keyUrl 原样透传；keyless / 中转站不带', async () => {
+    writeConfig(home, { enabled: false, features: {} })
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router('GET', '/config/providers', {}, AUTH)
+    assert.equal(res.status, 200)
+    const body = res.body as { unconfigured: { key: string; keyUrl?: string }[] }
+    assert.ok(body.unconfigured.length > 0, 'empty providers config must surface unconfigured presets')
+    const byKey = new Map(body.unconfigured.map((u) => [u.key, u]))
+    for (const [key, u] of byKey) {
+      const preset = PROVIDER_PRESETS[key as ProviderPresetKey]
+      if (!preset) continue
+      assert.equal(u.keyUrl, preset.keyUrl, `${key} keyUrl must pass through from the preset`)
+    }
+    // keyless（ollama）无 keyUrl 可透传——无论配置与否，预设本身不携带。
+    if (byKey.has('ollama')) {
+      assert.equal(byKey.get('ollama')?.keyUrl, undefined)
+    }
+  })
+})
+
+describe('POST /config/providers — models 批量回填（「每行一个」/ 拉取勾选导入）', () => {
+  const prevHome = process.env.RIVET_HOME
+  let home: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-config-routes-models-'))
+    process.env.RIVET_HOME = home
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('一次落盘多个模型，读回全部可见', async () => {
+    writeConfig(home, { enabled: false, features: {} })
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const add = await router('POST', '/config/providers', {
+      providerName: 'deepseek',
+      models: [
+        { id: 'batch-model-a', contextWindow: 64_000, maxTokens: 8_000 },
+        { id: 'batch-model-b', contextWindow: 128_000, maxTokens: 16_000 },
+      ],
+    }, AUTH)
+    assert.equal(add.status, 200)
+
+    const get = await router('GET', '/config/providers', {}, AUTH)
+    assert.equal(get.status, 200)
+    const providers = (get.body as { providers: { name: string; models: { id: string }[] }[] }).providers
+    const ds = providers.find((p) => p.name === 'deepseek')
+    assert.ok(ds, 'deepseek provider must exist after batch add')
+    const ids = ds.models.map((m) => m.id)
+    assert.ok(ids.includes('batch-model-a'), 'batch-model-a must persist')
+    assert.ok(ids.includes('batch-model-b'), 'batch-model-b must persist')
+  })
+
+  it('重复 id 合并不产生重复条目', async () => {
+    writeConfig(home, { enabled: false, features: {} })
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    await router('POST', '/config/providers', {
+      providerName: 'kimi',
+      models: [{ id: 'dup-model', contextWindow: 64_000, maxTokens: 8_000 }],
+    }, AUTH)
+    await router('POST', '/config/providers', {
+      providerName: 'kimi',
+      models: [{ id: 'dup-model', contextWindow: 128_000, maxTokens: 16_000 }],
+    }, AUTH)
+
+    const get = await router('GET', '/config/providers', {}, AUTH)
+    const providers = (get.body as { providers: { name: string; models: { id: string; contextWindow: number }[] }[] }).providers
+    const kimi = providers.find((p) => p.name === 'kimi')
+    const dup = kimi?.models.filter((m) => m.id === 'dup-model') ?? []
+    assert.equal(dup.length, 1, 'same id must merge, not duplicate')
+    assert.equal(dup[0]?.contextWindow, 128_000, 'merge keeps the latest value')
+  })
+
+  it('非法条目整单 400——批量路径不做部分落盘', async () => {
+    writeConfig(home, { enabled: false, features: {} })
+    const router = createRouter(buildConfigRoutes(TOKEN))
+    const res = await router('POST', '/config/providers', {
+      providerName: 'glm',
+      models: [
+        { id: 'would-partially-save', contextWindow: 64_000, maxTokens: 8_000 },
+        // schema 的 id 只是 z.string()（无 min(1)），空串可过——用类型错误构造真非法项
+        { id: 'bad-entry', contextWindow: 'not-a-number', maxTokens: 8_000 },
+      ],
+    }, AUTH)
+    assert.equal(res.status, 400)
+    assert.match((res.body as { error: string }).error, /Invalid model in models\[\]/)
+
+    const get = await router('GET', '/config/providers', {}, AUTH)
+    const providers = (get.body as { providers: { name: string; models: { id: string }[] }[] }).providers
+    const glm = providers.find((p) => p.name === 'glm')
+    assert.ok(!glm?.models.some((m) => m.id === 'would-partially-save'), 'rejected batch must not persist anything')
   })
 })

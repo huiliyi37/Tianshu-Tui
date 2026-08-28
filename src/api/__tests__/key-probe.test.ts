@@ -116,3 +116,61 @@ describe('probeProviderKey', () => {
     assert.equal(capturedHeaders.Authorization, 'Bearer sk-trimmed')
   })
 })
+
+describe('probeProviderKey — models 列表（批量添加「从接口拉取」的数据源）', () => {
+  let originalFetch: typeof global.fetch
+
+  beforeEach(() => {
+    originalFetch = global.fetch
+  })
+
+  afterEach(() => {
+    global.fetch = originalFetch
+  })
+
+  it('200 响应解析 data[].id 按序返回', async () => {
+    global.fetch = mock.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: 'model-a' }, { id: 'model-b' }, { id: 'model-c' }] }), { status: 200 })
+    ) as any
+    const result = await probeProviderKey('sk-test', 'https://api.example.com/v1')
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.models, ['model-a', 'model-b', 'model-c'])
+  })
+
+  it('响应没有 data 数组时 models 缺省——探测语义不变', async () => {
+    global.fetch = mock.fn(async () =>
+      new Response(JSON.stringify({ id: 'test' }), { status: 200 })
+    ) as any
+    const result = await probeProviderKey('sk-test', 'https://api.example.com/v1')
+    assert.equal(result.ok, true)
+    assert.equal(result.models, undefined)
+  })
+
+  it('条目缺 id 或非字符串跳过，id 去重', async () => {
+    global.fetch = mock.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: 'model-a' }, { object: 'model' }, { id: 'model-a' }, { id: '  ' }, null, { id: 42 }] }), { status: 200 })
+    ) as any
+    const result = await probeProviderKey('sk-test', 'https://api.example.com/v1')
+    assert.deepEqual(result.models, ['model-a'])
+  })
+
+  it('超长列表截断到 200（聚合端点巨列表防护）', async () => {
+    const data = Array.from({ length: 500 }, (_, i) => ({ id: `model-${i}` }))
+    global.fetch = mock.fn(async () =>
+      new Response(JSON.stringify({ data }), { status: 200 })
+    ) as any
+    const result = await probeProviderKey('sk-test', 'https://api.example.com/v1')
+    assert.equal(result.models?.length, 200)
+    assert.equal(result.models?.[0], 'model-0')
+    assert.equal(result.models?.[199], 'model-199')
+  })
+
+  it('ok=false 时不带 models', async () => {
+    global.fetch = mock.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: 'model-a' }] }), { status: 401 })
+    ) as any
+    const result = await probeProviderKey('sk-bad', 'https://api.example.com/v1')
+    assert.equal(result.ok, false)
+    assert.equal(result.models, undefined)
+  })
+})

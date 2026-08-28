@@ -67,7 +67,7 @@ describe('checkStructureGate', () => {
     assert.ok(text.includes(monolith), 'must name the file')
     assert.ok(text.includes(`${ceiling + 1} 行`), 'must show the current line count')
     assert.ok(text.includes('拆分'), 'must suggest splitting, not just report numbers')
-    assert.ok(text.includes('MAX_LINES_BASELINE'), 'must point at the baseline table for intentional growth')
+    assert.ok(text.includes('scripts/source-budgets.manifest.json'), 'must point at the baseline manifest for intentional growth')
     assert.ok(text.includes('npm run structure:check'), 'must give the verify command')
   })
 

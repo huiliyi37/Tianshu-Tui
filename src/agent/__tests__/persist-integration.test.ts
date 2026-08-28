@@ -174,7 +174,15 @@ describe('SessionContext → SessionPersist integration', () => {
 
     await drain()
 
-    // Re-open the session file as if we restarted the process.
+    // 批写语义（session-batch-writer）：新会话首条 flushSync 落盘——crash 在
+    // 200ms 窗口内也不会丢整场；其余行需 flush barrier（timer 或显式调用）。
+    const afterCrash = new SessionPersist('integration-test-crash', tempDir)
+    const first = afterCrash.loadOai()
+    assert.equal(first.length, 1, '首条消息 flushSync——crash 不丢整场')
+    assert.equal(first[0]!.content, 'what is the bug?')
+
+    // flush barrier 后全部消息可恢复（等价 200ms timer 已触发或退出路径 flush）。
+    await persist.flushSessionBuffer()
     const reopened = new SessionPersist('integration-test-crash', tempDir)
     const recovered = reopened.loadOai()
     assert.equal(recovered.length, 3)

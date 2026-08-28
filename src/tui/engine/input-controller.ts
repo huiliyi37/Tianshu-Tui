@@ -42,6 +42,8 @@ export class InputController {
   inputHistory: string[] = []
   /** Ctrl+C double-press window start timestamp (ms), 0 = inactive */
   ctrlCPendingSince = 0
+  /** Ctrl+C 清空输入后的恢复提示截止时间 (ms)——渲染层显示 "Ctrl+Z to restore"。 */
+  clearedHintUntil = 0
   /** ESC double-press: last ESC timestamp (ms), 0 = inactive */
   lastEscAt = 0
 

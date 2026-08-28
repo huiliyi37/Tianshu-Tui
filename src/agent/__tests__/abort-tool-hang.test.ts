@@ -153,8 +153,17 @@ describe('AgentLoop — abort path drains pending persist writes (finally)', () 
     let drained = 0
     ;(agent as any)._persistDrain = async () => { drained++ }
 
-    const p = agent.run('do it', cbs({ onApprovalRequired: () => new Promise<boolean>(() => {}) }))
-    await new Promise(r => setTimeout(r, 80))
+    // 等 run 真正挂到审批悬挂点再 abort——80ms 魔数在全量并行负载下时序漂移，
+    // 可能跑到 run 尚未进入审批悬挂就 abort，走不到 drain 断言覆盖的路径。
+    let approvalHit: (() => void) | null = null
+    let hit = false
+    const approvalGate = new Promise<void>(r => {
+      approvalHit = () => { if (!hit) { hit = true; r() } }
+    })
+    const p = agent.run('do it', cbs({
+      onApprovalRequired: () => { approvalHit?.(); return new Promise<boolean>(() => {}) },
+    }))
+    await approvalGate
     agent.abort()
     await p
 

@@ -265,6 +265,62 @@ describe('formatDiff', () => {
   })
 })
 
+describe('formatDiff inline word highlighting', () => {
+  const PAIR = '-const timeout = 5_000\n+const TIMEOUT = 60_000'
+  const boldCount = (s: string) => (s.match(/\x1B\[1m/g) ?? []).length
+  const findLine = (lines: string[], plainPrefix: string) =>
+    lines.find(l => stripAnsi(l).startsWith(plainPrefix))
+
+  it('bolds changed tokens on paired del/add lines (≥2 bold segments, not whole-line bold)', () => {
+    const lines = formatDiff({ content: PAIR }, theme)
+    const delLine = findLine(lines, '-const')
+    const addLine = findLine(lines, '+const')
+    assert.ok(delLine, 'finds del line')
+    assert.ok(addLine, 'finds add line')
+    // 两个差异 token（timeout / 5_000）各一段 bold——若实现退化为整行加粗只会有 1 段
+    assert.ok(boldCount(delLine!) >= 2, `del line has per-token bold, got ${boldCount(delLine!)}`)
+    assert.ok(boldCount(addLine!) >= 2, `add line has per-token bold, got ${boldCount(addLine!)}`)
+  })
+
+  it('bold segments do not alter visible text (stripAnsi identical to whole line)', () => {
+    const lines = formatDiff({ content: PAIR }, theme)
+    assert.equal(stripAnsi(findLine(lines, '-const')!), '-const timeout = 5_000')
+    assert.equal(stripAnsi(findLine(lines, '+const')!), '+const TIMEOUT = 60_000')
+  })
+
+  it('unrelated line pairs (word-common < 30%) skip inline highlighting', () => {
+    // foo() 与 bar baz qux() 的 \w 实词公共数为 0 → 整行着色，无 bold 段
+    const lines = formatDiff({ content: '-foo()\n+bar baz qux()' }, theme)
+    const delLine = findLine(lines, '-foo')
+    const addLine = findLine(lines, '+bar')
+    assert.ok(delLine && addLine, 'finds both lines')
+    assert.equal(boldCount(delLine!), 0, 'del line has no bold')
+    assert.equal(boldCount(addLine!), 0, 'add line has no bold')
+  })
+
+  it('non-adjacent del/add lines do not pair', () => {
+    // del 行与 add 行之间隔了 context 行 → 不配对，不加粗
+    const lines = formatDiff({ content: '-const timeout = 5_000\n unchanged\n+const TIMEOUT = 60_000' }, theme)
+    assert.equal(boldCount(findLine(lines, '-const')!), 0, 'del not paired across context')
+    assert.equal(boldCount(findLine(lines, '+const')!), 0, 'add not paired across context')
+  })
+
+  it('inlineDiff: false disables highlighting (output matches legacy)', () => {
+    const withInline = formatDiff({ content: PAIR }, theme)
+    const withoutInline = formatDiff({ content: PAIR, inlineDiff: false }, theme)
+    assert.deepEqual(withoutInline.map(stripAnsi), withInline.map(stripAnsi), 'visible text identical')
+    assert.equal(boldCount(findLine(withoutInline, '-const')!), 0, 'no bold when disabled')
+    // 旧行为 = 整行单段着色：color() 恒以 RESET 结尾 → 每行恰 1 个 RESET
+    // （inline 版按 token 拆多段，RESET 数 = 段数）。只查内容行，summary 头也单段。
+    for (const l of withoutInline) {
+      const plain = stripAnsi(l)
+      if (!plain.startsWith('-') && !plain.startsWith('+')) continue
+      const resetCount = (l.match(/\x1B\[0m/g) ?? []).length
+      assert.equal(resetCount, 1, `legacy line has single color segment, got ${resetCount}: ${plain}`)
+    }
+  })
+})
+
 describe('formatThinking', () => {
   it('returns empty when no text', () => {
     const lines = formatThinking({ text: '', elapsedMs: 5000 }, theme)

@@ -213,6 +213,33 @@ test('小终端（rows=10）预算收缩，live region 不超屏', async () => {
  * 总高度 = 动态高水位 + 当前 chrome —— chrome 一关，输入框就上跳。
  * 用户观感：有时钉在屏底，有时又浮起来。总高度必须只涨不缩。
  */
+test('欢迎页 slash 开合后高度不回缩——输入框下落一次后钉住，取消不再弹回', async () => {
+  const { app } = makeApp({ cols: 80, rows: 24 })
+  app.setSlashCommands(
+    Array.from({ length: 8 }, (_, i) => ({
+      name: `/cmd${i}`,
+      description: `desc ${i}`,
+      tier: 'core' as const,
+    })),
+  )
+  await flush()
+  const idle = liveRows(app)
+  assert.ok(idle > 0, `欢迎首帧应已画出 live region: ${idle}`)
+
+  app.setInput('/')
+  await flush()
+  const open = liveRows(app)
+  assert.ok(open > idle, `slash 打开应撑高（输入框下落）: open=${open} idle=${idle}`)
+
+  app.setInput('')
+  await flush()
+  const closed = liveRows(app)
+  assert.ok(
+    closed >= open,
+    `欢迎页取消 slash 后高度回缩（输入框上弹）: closed=${closed} open=${open} idle=${idle}`,
+  )
+})
+
 test('slash 提示开合时 live region 高度不回缩（输入框不上跳）', async () => {
   const { app } = makeApp({ cols: 80, rows: 24 })
   app.setSlashCommands(

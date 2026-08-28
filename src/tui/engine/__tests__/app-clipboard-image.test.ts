@@ -154,3 +154,35 @@ test('RED #6: at MAX_IMAGES cap → no addImage, warning committed', async () =>
   const visible = out.chunks.join('').replace(/\x1B\[[0-9;?]*[a-zA-Z]/g, '')
   assert.ok(visible.includes('最多附加 4 张图片'), 'warning "最多附加 4 张图片" must be committed')
 })
+
+// ── RED: Ctrl+C 清空输入必须连同图片附件一起清（2026-08 用户反馈）──
+test('RED: Ctrl+C with only image attachments clears them (no exit hint)', async () => {
+  const { app, stdin } = makeApp()
+  app.start()
+  ;(app as any).lastInputFocusAt = Date.now() - 2_000
+  // 直接灌入图片（Ctrl+V 路径已有 RED#2 覆盖）
+  ;(app as any).inputLine.addImage(PNG_DATA_URL)
+  assert.equal((app as any).getInputImagesCount(), 1, '前置：有 1 张图')
+  assert.equal(app.getInputValue(), '', '前置：无文本')
+
+  stdin.dataHandler!('\x03') // Ctrl+C
+  await tick(20)
+
+  assert.equal((app as any).getInputImagesCount(), 0, 'Ctrl+C 应清掉图片')
+  assert.equal(app.getInputValue(), '', '文本仍空')
+})
+
+test('RED: Ctrl+C with text+images clears both and shows restore hint', async () => {
+  const { app, out, stdin } = makeApp()
+  app.start()
+  ;(app as any).lastInputFocusAt = Date.now() - 2_000
+  app.setInput('hi')
+  ;(app as any).inputLine.addImage(PNG_DATA_URL)
+
+  stdin.dataHandler!('\x03') // Ctrl+C
+  await tick(20)
+
+  assert.equal(app.getInputValue(), '', '文本被清')
+  assert.equal((app as any).getInputImagesCount(), 0, '图片被清')
+  assert.ok(out.chunks.join('').includes('Ctrl+Z to restore'), '清空提示告知恢复途径')
+})

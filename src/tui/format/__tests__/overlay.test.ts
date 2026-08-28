@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import stringWidth from 'string-width'
 import { getTheme } from '../../theme.js'
-import { renderPager, renderTasks } from '../overlay.js'
+import { renderPager, renderTasks, scrollWindowWithIndicators } from '../overlay.js'
 import type { TasksData } from '../overlay.js'
 
 // stringWidth strips ANSI and measures CJK/emoji as 2 cells — exactly the
@@ -280,5 +280,47 @@ describe('renderTasks: objective 子行', () => {
     const width = 58
     const long = '在 src/tui/format/ 下定位舰队行的渲染函数与列宽计算，确认窄屏降级策略的实际实现位置'
     assertAllWidth(renderTasks(dataWith(2, long), width, 16, theme), width)
+  })
+})
+
+// ── scrollWindowWithIndicators：窗口行数 + 上下截断指示行必须 ≤ budget ──────
+// 回归：两趟收敛不收敛——第二轮预算缩减后指示行反而增多（1→2），
+// 渲染方 push ↑/↓ 指示行后总行数超预算，底边框被 overlay-engine 截断。
+// 复现场景：entries=6（全高 1），sel=3，budget=5：
+//   第一轮 win=(1,6) 仅 ↑；两趟后 win=(1,5)，↑↓ 同时出现 → 6 行 > 5。
+describe('scrollWindowWithIndicators 收敛性', () => {
+  const winRows = (heights: number[], win: { start: number; end: number }): number =>
+    heights.slice(win.start, win.end).reduce((a, b) => a + b, 0)
+
+  it('窗口行数 + 指示行数不超过 budget（两趟不收敛回归）', () => {
+    const heights = [1, 1, 1, 1, 1, 1]
+    const budget = 5
+    const win = scrollWindowWithIndicators(heights, 3, budget)
+    const indicators = (win.start > 0 ? 1 : 0) + (win.end < heights.length ? 1 : 0)
+    assert.ok(
+      winRows(heights, win) + indicators <= budget,
+      `窗口 ${winRows(heights, win)} 行 + 指示 ${indicators} 行 = ${winRows(heights, win) + indicators} > budget ${budget}`,
+    )
+    assert.ok(win.start <= 3 && 3 < win.end, '选中项必须仍在窗口内')
+  })
+
+  it('变高条目（description 折行）同样收敛——按行数而非项数判据', () => {
+    // connect 列表：每项 2 行（label+description），budget=9 时旧判据
+    // （项数差）误判 (8,13) 5 项=10 行可放下，实际超 1 行。
+    const heights = Array.from({ length: 19 }, () => 2)
+    const budget = 9
+    const win = scrollWindowWithIndicators(heights, 10, budget)
+    const indicators = (win.start > 0 ? 1 : 0) + (win.end < heights.length ? 1 : 0)
+    assert.ok(
+      winRows(heights, win) + indicators <= budget,
+      `窗口 ${winRows(heights, win)} 行 + 指示 ${indicators} 行超 budget ${budget}`,
+    )
+    // 邻居仍可见（不贴边）：两侧各至少 1 项
+    assert.ok(win.start <= 9 && 11 < win.end, `选中项 10 的邻居应可见: (${win.start},${win.end})`)
+  })
+
+  it('budget=1 且选中项两侧都有条目时不退化到不可见（宁超勿丢选中）', () => {
+    const win = scrollWindowWithIndicators([1, 1, 1], 1, 1)
+    assert.ok(win.start <= 1 && 1 < win.end, '选中项可见')
   })
 })

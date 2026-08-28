@@ -3,16 +3,16 @@
   "redline": 800,
   "budgets": {
     "src/tui/engine/app.ts": {
-      "ceiling": 7277,
-      "note": "6527→7277：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 7520,
+      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25）"
     },
     "src/server/session-manager.ts": {
-      "ceiling": 5741,
-      "note": "5739→5741：randomId 换 CSPRNG（L3，+5/-3）。"
+      "ceiling": 5800,
+      "note": "5741→5800：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/tui/slash-commands.ts": {
-      "ceiling": 4536,
-      "note": "4350→4533：/trust 命令 + 插件安装预检（+67）叠加此前会话已超限部分 / （HEAD 4466 > 旧基线，按现值对齐）。 4533→4536：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 4620,
+      "note": "4536→4620：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/agent/coordinator.ts": {
       "ceiling": 3495,
@@ -78,15 +78,16 @@
       "ceiling": 1260
     },
     "src/tui/engine/input-line.ts": {
-      "ceiling": 1238,
-      "note": "1236→1238：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 1278,
+      "note": "1270→1278：图片附件编辑闭环——undo 快照纳入 images（UndoUnit+undo/redo 恢复）、backspace 空文本删最后一张图、clearAll 原子清空（+8，2026-08-26）"
     },
     "src/prompt/volatile.ts": {
       "ceiling": 1226,
       "note": "1197→1226：捆绑技能消融——<plan-mode> 并入五条调研纪律 + 新增 renderPlanExecutingBlock 原生执行纪律块（writing/executing-plans 技能消融的落点，+29）。"
     },
     "src/agent/turn-step-producer.ts": {
-      "ceiling": 1169
+      "ceiling": 1200,
+      "note": "1169→1200：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/agent/worker-session.ts": {
       "ceiling": 1206,
@@ -102,8 +103,8 @@
       "ceiling": 1123
     },
     "src/server/serve-agent.ts": {
-      "ceiling": 1125,
-      "note": "1118→1125：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 1150,
+      "note": "1125→1150：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/tools/browser-debug/tool.ts": {
       "ceiling": 1084
@@ -152,8 +153,8 @@
       "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/server/config-routes.ts": {
-      "ceiling": 1002,
-      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 1035,
+      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。"
     },
     "src/pro/computer-use/cdp/driver.ts": {
       "ceiling": 899
@@ -165,8 +166,8 @@
       "ceiling": 888
     },
     "src/config/schema.ts": {
-      "ceiling": 1004,
-      "note": "891→1004：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
+      "ceiling": 1025,
+      "note": "1004→1025：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/agent/session-persist.ts": {
       "ceiling": 874
@@ -183,8 +184,8 @@
       "note": "PR#38 /connect 向导（2160 行，2026-08-22 合入）——入账钉住，拆分待后续"
     },
     "src/config/provider-presets.ts": {
-      "ceiling": 875,
-      "note": "PR#38 provider onboarding 统一栈（861 行）——入账钉住。861→875：deepseek 预设新增 v4-flash-vision-exp 视觉实验档（1M 上下文 + supportsVision + 定价同 flash，+14）。"
+      "ceiling": 925,
+      "note": "PR#38 provider onboarding 统一栈（861 行）——入账钉住。861→875：deepseek 预设新增 v4-flash-vision-exp 视觉实验档（1M 上下文 + supportsVision + 定价同 flash，+14）。875→900：glm 预设新增 glm-5.3 文本旗舰 + glm-5.3-flash 原生多模态（Coding Plan provider，均 1M/128K + pricing 全 0，+21）。 900→925：P0 获取 Key 直链——ProviderPreset 加 keyUrl 字段 + 13 个预设官方控制台 URL（纯数据 +16，先例 ffc6d2f66 纯数据调升）。"
     }
   }
 }

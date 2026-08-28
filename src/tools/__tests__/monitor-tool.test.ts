@@ -96,6 +96,10 @@ describe('monitor 工具', () => {
   })
 
   it('command 模式的 spawn env 含 mirrorEnv（与 bash 同款）', async () => {
+    // 信任门：项目级 mirrors 对未授信 cwd 被剥离（fail-closed），本用例须显式授信。
+    const PREV_TRUST = process.env.RIVET_TRUST_PROJECT
+    process.env.RIVET_TRUST_PROJECT = '1'
+    try {
     // 项目级配置启用镜像（loadConfig 走 .rivet-config.json 分层）。
     writeFileSync(join(dir, '.rivet-config.json'), JSON.stringify({ mirrors: { enabled: true, preset: 'china' } }))
     let capturedEnv: Record<string, string | undefined> | undefined
@@ -121,5 +125,9 @@ describe('monitor 工具', () => {
     assert.equal(capturedEnv!.PIP_INDEX_URL, 'https://pypi.tuna.tsinghua.edu.cn/simple', 'mirrorEnv 应注入 PIP_INDEX_URL')
     assert.ok(capturedEnv!.npm_config_registry, 'mirrorEnv 应注入 npm registry')
     stubRegistry.dispose()
+    } finally {
+      if (PREV_TRUST === undefined) delete process.env.RIVET_TRUST_PROJECT
+      else process.env.RIVET_TRUST_PROJECT = PREV_TRUST
+    }
   })
 })

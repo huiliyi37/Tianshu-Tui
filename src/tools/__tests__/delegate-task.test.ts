@@ -52,7 +52,7 @@ describe('DELEGATE_TASK_TOOL', () => {
 
     assert.deepEqual(events.map(event => [event.status, event.eventKind, event.eventDetail]), [
       ['running', 'text', 'tail'],
-      ['passed', undefined, undefined],
+      ['completed', undefined, undefined],
     ])
     await sleep(150)
     assert.equal(events.length, 2)

@@ -1,45 +1,44 @@
 /**
- * T9 格式化函数 — 首屏欢迎（概念 D「星阁」定稿：圆角框 + 北斗刊头 + 单列正文）。
+ * R7 定稿渲染器 —「定盘星」:输入框上方 = 身份块 + 进入提示区。
  *
- * 渲染结构（10 行）：
- *   ╭─ 天枢  T I Ā N S H Ū  Code ───────────────────────────── v2.28.0 ─╮
- *   │ ✦────────∙─────✦────✧──────✧──────────────────────────────       │
- *   │ ╰─✧────✧─╯                                                       │
- *   │                                                                  │
- *   │ deepseek-v4 · ◎high · auto-safe                                  │
- *   │ ~/app/deepseek-tui/opencode-tui · #7281                          │
- *   │                                                                  │
- *   │ /model 切换模型（中途会缓存碎）   /init 生成项目说明   /domain 切换星域   /help 全部命令   │
- *   │ ⏜ /handoff 上下文 60% 后交接给新会话                          │
- *   ╰──────────────────────────────────────────────────────────────────╯
+ * 设计规格:.rivet/plans/欢迎页重设计-v2-定盘星-对标gemini-codex-claude.md(R7)。
+ * 范围边界(R7 拍板):本渲染器只产出输入框上方内容;输入框以下(状态栏/活信息)
+ * 归 app.ts 既有底部 chrome,本文件零涉及。
  *
- * 设计纪律：
- * - **北斗占两行，不压成一行。** 单行只是把星点当刻度，斗身四边形与斗柄折点
- *   全丢了；两行让斗身作为勺子挂在刊头线下，「斗 + 柄」的轮廓才立得住。
- *   顶行 = 斗身上边（天枢–天权）接斗柄，尾部续线兼作刊头分隔。
- * - **亮度编码真视星等**：✦ 天枢 1.79 / 玉衡 1.77（实心），✧ 天璇 2.37 /
- *   天玑 2.44 / 开阳 2.23 / 瑶光 1.86（空心），∙ 天权 3.31（微点）。
- *   列距按真实天区的水平投影配比。品牌星 ✦ 在这里回到本义——天枢就是最亮星。
- * - **字形宽度必须恒定**：`★`(U+2605) 与 `·`(U+00B7) 是 East-Asian Ambiguous，
- *   CJK 终端按 2 列渲染，会让右边线随终端参差。选用的 ✦ ✧ ∙ 三档在 narrow /
- *   wide / full 三档下恒 1 列，星图在任何终端都逐列对齐。
- * - **单一 accent**：只有最亮档带品牌色，其余走 muted / dim / pulseQuiet 明度阶梯。
- * - **框宽与输入框逐列咬合**：几何取自 `box-chars.ts`，与 `app.ts` 的输入框
- *   同一公式同一构造，两个框上下叠放时左右边线必须对齐。
- * - 行数纪律：框体 9 行 + 首尾各一空行 = 11 行；矮终端 / 恢复会话 / 窄终端
- *   走 compact 单行降级。
+ * 全妆形态(fresh,cols≥44,rows≥阈值;shadow 58 列 6 行字标 → 13 行,pixel 41 列 5 行 → 12 行):
+ *   ''
+ *   ##### ##### .###. #...# .#### #...# #...#
+ *   ..#.. ..#.. #...# ##..# #.... #...# #...#  ✦ 天枢 · v3.6.0
+ *   ..#.. ..#.. ##### #.#.# .###. ##### #...#
+ *   ..#.. ..#.. #...# #..## ....# #...# #...#
+ *   ..#.. ..#.. #...# #...# ####. #...# .###.
+ *      把星辰带给每一位开发者 · Models as partners, not tools.  ← 使命行
+ *   ────────────────────────✦─────────────────────────    ← 基准线(唯一全幅元素)
+ *   ''
+ *   ⏜ /handoff 满60%交接新会话
+ *   ✧ 中途切 /model /domain 碎缓存
+ *   ''
+ *
+ * compact(恢复会话 / cols<44 / rows<17)单行:
+ *   ✦ 天枢 · model ◎eff · ~/dir · ↑续N轮(#id) · v3.6.0
+ *
+ * 设计纪律:
+ * - **内容栏**:除基准线外,右端预算以 bodyW = min(cols,72) 为界,宽终端多出的列全是留白;
+ * - **单一 accent**:chroma 只在 brandColor(品牌星/词标/「/handoff」)与 effort 徽章;
+ * - **字形宽度**:✦ ✧ ⏜ ∙ 均为 Ambiguous 安全档(各终端恒 1 列);全部产出行按
+ *   ambiguous=2 的上界兜底截断,CJK 终端绝不折行;
+ * - **星域个性**:基准线横线取 separator 档(thin─/thick━/dots┄),与输入框线框同源;
+ * - **整行省略**:使命行装不下整行消失,绝不腰斩 slogan;
+ * - **渐变**:「天枢」在 brandColor 为 hex 时做同色相微渐变(首字向白混 45%),非彩虹;
+ *   fallback 轨命名色自动回退纯色 bold。
  */
 
 import { homedir } from 'node:os'
-import { formatPermissionChrome } from '../../agent/approval-vocabulary.js'
 import { color } from '../engine/ansi.js'
-import { displayWidth, truncateToDisplayWidth, ambiguousWideEnabled } from '../width.js'
-import { boxCharsFor, boxInnerWidth, type BoxCharSet } from '../box-chars.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
+import { boxCharsFor } from '../box-chars.js'
 import { useAsciiBorders } from '../term-caps.js'
 import type { RivetTheme } from '../theme.js'
-
-/** ambiguous 恒按 2 列的上界口径（用于「绝不超宽」的兜底判断）。 */
-const WIDE = { ambiguousAsWide: true }
 
 export interface FormatWelcomeInput {
   modelName: string
@@ -47,273 +46,338 @@ export interface FormatWelcomeInput {
   sessionId: string
   priorMsgCount: number
   columns: number
-  /** Ephemeral per-session numeric id (e.g. 7281). Shown in compact mode. */
+  /** Ephemeral per-session numeric id (e.g. 7281)。compact 行优先展示。 */
   numericId?: number
-  /** 折叠为单行极简版（用于非首次启动/恢复会话）。 */
+  /** 折叠为单行极简版(用于非首次启动/恢复会话)。 */
   compact?: boolean
-  /** 终端可视高度（行）。极矮终端降级为 compact 单行。 */
+  /** 终端可视高度(行)。低于 FULL_MIN_ROWS 降级 compact。 */
   rows?: number
-  /** Tianshu Code 版本号（来自安装根 package.json），无则不显示。 */
+  /** 版本号(安装根 package.json),无则不显示。 */
   version?: string | null
-  /** 当前权限模式（auto-safe / manual / dangerously-skip-permissions …）。 */
+  /** 权限模式(compact 行不再展示,保留入参兼容)。 */
   approvalMode?: string
-  /** 当前推理 effort 档位（low / medium / high / max）。 */
+  /** 推理 effort 档位(compact 行徽章)。 */
   reasoningEffort?: string
-  /** 星域线框风格（thin / thick / dots / kimi），与输入框同源；缺省 thin。 */
+  /** 星域线框风格(thin/thick/dots/kimi),基准线横线与其同源。 */
   separator?: string
+  /** 字标风格:shadow=ANSI Shadow 立体字 RIVET(默认)/ pixel=点阵 TIANSHU。
+   *  亦可经 RIVET_WELCOME_LOGO 环境变量切换。 */
+  logoStyle?: string
 }
 
-/** 星阁框 + 首尾呼吸空行 2 行 + 输入框 3 行 + 底部状态栏余量。
- *  框体行数动态：北斗 3 行（含空行）+ 配置/位置 2 行 + 引导 1 行 + handoff 提示 1 行 = 7 内容行 + 顶底框 2 = 9 框体行。 */
-const BANNER_ROWS = 11
+/** 全妆固定开销(呼吸空行×3 + 使命行 + 基准线 + 提醒行×2);总行数 = 此值 + 字标行数。 */
+const FULL_FIXED_ROWS = 7
+/** 输入框 + 底部 chrome 余量(与 app.ts 既有预留一致口径)。 */
 const RESERVED_ROWS = 5
+/** 身份块下限列数:低于此值单行更诚实。 */
+const MIN_COLS = 44
+/** 内容栏上限:除基准线外一切行右端预算(宽终端多出的列全是留白)。 */
+const CONTENT_MAX = 72
+/** 基准线亮星落点:全幅的 38%(构图黄金比左倾)。 */
+const STAR_AT = 0.38
+/** 字标与右侧品牌段「✦ 天枢 · vN」的间隔列数(R11:2 → 6,离太近)。 */
+const TAG_GAP = 6
 
-/** 窄于此列数时星阁不成立（正文挤不下），退 compact 单行。 */
-const MIN_BOX_COLS = 48
+const WIDE = { ambiguousAsWide: true }
 
-/** 刊头线右侧留白，chrome 后退，不让线铺满整框。 */
-const TAIL_GAP = 6
+// ── 文案(定稿,见规格 §五)──────────────────────────────────────────
+const MISSION_ZH = '把星辰带给每一位开发者'
+const MISSION_EN = 'Models as partners, not tools.'
+const HINT_DOMAIN_CMD = '/domain'
+const HINT_DOMAIN_DESC = '查看星域描述与切换 · 不同星域工程能力不同'
+const HINT_DOMAIN_SHORT = '星域描述与切换'
+const HINT_HANDOFF = '满60%交接新会话'
+const HINT_CACHE_A = '中途切'
+const HINT_CACHE_CMDS = '/model /domain'
+const HINT_CACHE_B = '碎缓存'
+const WORDMARK_PINYIN = 'T I Ā N S H Ū'
 
-// ── 北斗七星 ──────────────────────────────────────────────────────────
-// 星等取真实视星等（Dubhe 1.79 / Merak 2.37 / Phecda 2.44 / Megrez 3.31 /
-// Alioth 1.77 / Mizar 2.23 / Alkaid 1.86）。列距是真实天区的水平投影配比：
-// 斗身窄，斗柄按 5:4:6 依次舒展（实际角距 6.1° / 4.7° / 6.6°）。
-/** 顶行：斗身上边 + 斗柄。gap = 该星之后的连线列数。 */
-const DIPPER_TOP = [
-  { name: '天枢', mag: 1.79, gap: 8 },   // Dubhe   斗身左上
-  { name: '天权', mag: 3.31, gap: 5 },   // Megrez  斗身右上，斗柄起点
-  { name: '玉衡', mag: 1.77, gap: 4 },   // Alioth
-  { name: '开阳', mag: 2.23, gap: 6 },   // Mizar
-  { name: '瑶光', mag: 1.86, gap: 0 },   // Alkaid
-] as const
-/** 次行：斗身下边。at = 在「天枢→天权」跨距上的相对位置。 */
-const DIPPER_BOWL = [
-  { name: '天璇', mag: 2.37, at: 0.22 }, // Merak   斗身左下
-  { name: '天玑', mag: 2.44, at: 0.78 }, // Phecda  斗身右下
-] as const
+/** 5×5 点阵字模(TIANSHU / RIVET 通用字形库)。 */
+const BLOCK_FONT: Record<string, string[]> = {
+  T: ['#####', '..#..', '..#..', '..#..', '..#..'],
+  I: ['#####', '..#..', '..#..', '..#..', '#####'],
+  A: ['.###.', '#...#', '#####', '#...#', '#...#'],
+  N: ['#...#', '##..#', '#.#.#', '#..##', '#...#'],
+  S: ['.####', '#....', '.###.', '....#', '####.'],
+  H: ['#...#', '#...#', '#####', '#...#', '#...#'],
+  U: ['#...#', '#...#', '#...#', '#...#', '.###.'],
+  R: ['####.', '#...#', '####.', '#..#.', '#...#'],
+  V: ['#...#', '#...#', '#...#', '.#.#.', '..#..'],
+  E: ['#####', '#....', '####.', '#....', '#####'],
+}
 
-/** 首屏引导：按框宽贪心装填，装不下的整条不显示。
- *  `/model` 置顶——用户不知道怎么切模型是真实投诉；ctrl+p 命令面板
- *  可从输入框 slash 菜单进，不占首屏。中途切换会打碎前缀缓存，必须写上。 */
-const TIPS = [
-  { cmd: '/model', desc: '切换模型（中途会缓存碎）' },
-  { cmd: '/init', desc: '生成项目说明' },
-  { cmd: '/domain', desc: '切换星域' },
-  { cmd: '/help', desc: '全部命令' },
-] as const
+/** ANSI Shadow 立体字(TIANSHU 拼写):双线自带阴影的 3D 艺术字,58 列 × 6 行。
+ *  字形来源:figlet「ANSI Shadow」字体(终端社区公共字形);宽栏专属。 */
+const SHADOW_FONT: Record<string, string[]> = {
+  T: ['████████╗', '╚══██╔══╝', '   ██║   ', '   ██║   ', '   ██║   ', '   ╚═╝   '],
+  I: ['██╗ ', '██║ ', '██║ ', '██║ ', '██║ ', '╚═╝ '],
+  A: [' █████╗ ', '██╔══██╗', '███████║', '██╔══██║', '██║  ██║', '╚═╝  ╚═╝'],
+  N: ['███╗   ██╗', '████╗  ██║', '██╔██╗ ██║', '██║╚██╗██║', '██║ ╚████║', '╚═╝  ╚═══╝'],
+  S: ['███████╗', '██╔════╝', '███████╗', '╚════██║', '███████║', '╚══════╝'],
+  H: ['██╗  ██╗', '██║  ██║', '███████║', '██║  ██║', '██║  ██║', '╚═╝  ╚═╝'],
+  U: ['██╗   ██╗', '██║   ██║', '██║   ██║', '██║   ██║', '╚██████╔╝', ' ╚═════╝ '],
+}
+/** 立体字最窄栖身列数(58):低于此自动换点阵小字标。 */
+const SHADOW_MIN_COLS = 58
 
-function truncateToWidth(text: string, maxWidth: number): string {
+export type LogoStyle = 'shadow' | 'pixel'
+const DEFAULT_LOGO_STYLE: LogoStyle = 'shadow'
+
+interface LogoSpec { word: string; font: Record<string, string[]>; cols: number; rows: number; /** 字形间分隔(shadow 自带尾随空格故为 '',点阵补一个空格) */ gap: string }
+
+/**
+ * 字标方案:默认恒为 shadow 立体字 TIANSHU(R21 用户实锤:# 点阵降级被终端用户
+ * 视为「坏掉了」——品牌艺术字是发布物的脸面,不参与 ASCII 降级;█ ╔ ═ 属
+ * CP437 血统块/框线字符,现代终端覆盖率极高,ZCode 同类艺术字亦无条件输出,
+ * 唯一小例外见 logoRows 的品牌段星形降级)。pixel 点阵有两个来源:
+ * 显式 style='pixel',或窄屏(cols<SHADOW_MIN_COLS=58)自动降档——
+ * R21 注释「仅显式选择」与此不符已修正;cols 由字模拼接行宽动态量测。
+ */
+function logoSpec(style: LogoStyle): LogoSpec {
+  const measured = (word: string, font: Record<string, string[]>, gap: string): LogoSpec => {
+    const glyphRows = [...word].map(ch => font[ch] ?? [])
+    const rowCount = glyphRows[0]?.length ?? 0
+    const joined: string[] = []
+    for (let r = 0; r < rowCount; r++) joined.push(glyphRows.map(g => g[r] ?? '').join(gap))
+    return { word, font, cols: Math.max(...joined.map(j => displayWidth(j))), rows: rowCount, gap }
+  }
+  return style === 'pixel'
+    ? measured('TIANSHU', BLOCK_FONT, ' ')
+    : measured('TIANSHU', SHADOW_FONT, '')
+}
+
+/** 字标风格解析:显式入参 > RIVET_WELCOME_LOGO 环境变量 > 默认 shadow;
+ *  cols 不足以容纳立体字时强制 pixel(auto 降档,显式 pixel 不受影响)。 */
+function resolveLogoSpec(explicit: string | undefined, cols: number): { spec: LogoSpec; style: LogoStyle } {
+  let style = resolveLogoStyle(explicit)
+  if (style === 'shadow' && cols < SHADOW_MIN_COLS) style = 'pixel' /* 窄屏自动降档保留 */
+  return { spec: logoSpec(style), style }
+}
+
+/** 字标风格解析:显式入参 > RIVET_WELCOME_LOGO 环境变量 > 默认 shadow。 */
+function resolveLogoStyle(explicit?: string): LogoStyle {
+  const raw = explicit ?? process.env['RIVET_WELCOME_LOGO']
+  return raw === 'pixel' || raw === 'tianshu' ? 'pixel' : DEFAULT_LOGO_STYLE
+}
+
+const bodyW = (cols: number): number => Math.min(cols, CONTENT_MAX)
+
+/** ambiguous=2 上界截断(兜底口径:宁可右边留白,不可 CJK 终端折行)。 */
+function truncateWide(text: string, maxWidth: number): string {
   const ellW = displayWidth('…', WIDE)
   return displayWidth(text, WIDE) > maxWidth
     ? `${truncateToDisplayWidth(text, Math.max(0, maxWidth - ellW), WIDE)}…`
     : text
 }
 
-/** cwd 的 `~` 缩写（Claude Code 同款展示口径）。 */
+/** home 下的 cwd 缩写。 */
 function tildify(cwd: string): string {
   const home = homedir()
   return home && cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd
 }
 
-/**
- * 星阁渲染器 —— 把框几何、字形档位与主题色绑定成一组闭包。
- * 拆出来是因为北斗两行要跨行对齐列位，必须共用同一把宽度尺。
- */
-function starLoft(
-  theme: RivetTheme,
-  chars: BoxCharSet,
-  ascii: boolean,
-  cal: { ambiguousAsWide?: boolean },
-  frame: string,
-  frameOpts: { bold: true },
-) {
-  /** 框线档：色 = theme.muted（提亮一档带色相偏移，避免纯中性灰的"表格感"），
-   *  视觉权重 = bold（让框线在暗底上有"压"住的份量，避免纯色色块感）。
-   *  与 app.ts 输入框静息档形成可读层次：输入框 = dim（更退），欢迎框 = muted + bold（更精致）。
-   *  pulseQuiet 在深底上近乎隐形（实测回归），不能用作 chrome。 */
-  /** 连线：按显示列数产出，字符宽 >1 时用空格补足余数，保证列位精确。 */
-  const rule = (cols: number): string => {
-    if (cols <= 0) return ''
-    const hw = displayWidth(chars.h, cal) || 1
-    const n = Math.floor(cols / hw)
-    return chars.h.repeat(n) + ' '.repeat(cols - n * hw)
-  }
-  const glyph = (mag: number): string =>
-    mag < 1.8 ? (ascii ? '*' : '✦')
-    : mag < 3.0 ? (ascii ? '+' : '✧')
-    : (ascii ? '.' : '∙')
-  const tone = (mag: number): string =>
-    mag < 1.8 ? theme.brandColor : mag < 3.0 ? theme.muted : theme.dim
+// ── 颜色小件 ─────────────────────────────────────────────────────────
 
-  /** 顶行。返回天权的显示起列，供次行收口对齐。 */
-  const top = (width: number): { text: string; bowlRight: number; natural: number } => {
-    let text = ''
-    let col = 0
-    let bowlRight = 0
-    DIPPER_TOP.forEach((star, i) => {
-      if (star.name === '天权') bowlRight = col
-      const g = glyph(star.mag)
-      text += color(g, tone(star.mag), i === 0 ? { bold: true } : undefined)
-      col += displayWidth(g, cal)
-      if (star.gap > 0) {
-        text += color(rule(star.gap), frame, frameOpts)
-        col += star.gap
-      }
-    })
-    const natural = col
-    if (width > col) text += color(rule(width - col), frame, frameOpts)
-    return { text, bowlRight, natural }
-  }
-
-  /** 次行：`╰─✧────✧─╯`，右角落在天权正下方。 */
-  const bowl = (bowlRight: number): string => {
-    const [bl, br] = ascii ? ['\\', '/'] : [chars.bl, chars.br]
-    let text = color(bl, frame, frameOpts)
-    let col = displayWidth(bl, cal)
-    for (const star of DIPPER_BOWL) {
-      const target = Math.round(bowlRight * star.at)
-      if (target > col) {
-        text += color(rule(target - col), frame, frameOpts)
-        col = target
-      }
-      const g = glyph(star.mag)
-      text += color(g, tone(star.mag))
-      col += displayWidth(g, cal)
-    }
-    if (bowlRight > col) {
-      text += color(rule(bowlRight - col), frame, frameOpts)
-      col = bowlRight
-    }
-    return text + color(br, frame, frameOpts)
-  }
-
-  return { rule, top, bowl }
+function hexToRgb(hex: string): [number, number, number] | null {
+  const m = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(hex)
+  if (!m) return null
+  return [Number.parseInt(m[1]!, 16), Number.parseInt(m[2]!, 16), Number.parseInt(m[3]!, 16)]
 }
+
+const toHex = (r: number, g: number, b: number): string =>
+  `#${[r, g, b].map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')}`
+
+/**
+ * 品牌词同色相微渐变(移植 kimi-code gradient-text 思路,收敛为单字档):
+ * 首字符向白混 45%,其余原色——光落在星上的观感,不是彩虹。
+ * brandColor 非 hex(fallback 轨命名色)时整体回退纯色 bold。
+ */
+function brandWord(text: string, brandColor: string): string {
+  const rgb = hexToRgb(brandColor)
+  if (!rgb) return color(text, brandColor, { bold: true })
+  const chars = [...text]
+  return chars.map((ch, i) => {
+    const t = chars.length > 1 ? i / (chars.length - 1) : 0
+    const lift = (1 - t) * 0.45
+    const mixed = toHex(rgb[0] + (255 - rgb[0]) * lift, rgb[1] + (255 - rgb[1]) * lift, rgb[2] + (255 - rgb[2]) * lift)
+    return color(ch, mixed, { bold: true })
+  }).join('')
+}
+
+function effortBadge(effort: string | undefined, theme: RivetTheme): string {
+  if (!effort) return ''
+  const short = effort === 'medium' ? 'med' : effort
+  const c = effort === 'max' || effort === 'auto' ? theme.secondary
+    : effort === 'high' ? theme.primary
+    : effort === 'off' ? theme.dim
+    : theme.muted
+  return color(`◎${short}`, c)
+}
+
+// ── 区块渲染 ─────────────────────────────────────────────────────────
+
+/**
+ * 块字符大字标:星金单色;第 2 行右侧并挂「✦ 天枢 · vN」原生词标
+ * (内容栏放得下才挂,字标独立成立)。ASCII 终端字模本就是 # 空格,无需降级。
+ */
+function logoRows(theme: RivetTheme, cols: number, version?: string | null, spec?: LogoSpec, degradeTinySymbols = false): string[] {
+  spec = spec ?? logoSpec(resolveLogoStyle(undefined))
+  const glyphs = [...spec.word].map(ch => spec.font[ch]!)
+  const rows: string[] = []
+  /* R24 双层豁免落地:艺术字母恒 Unicode(# 字标点阵事故教训);品牌段的小星形
+     单独跟随 tiny-symbol 降级——✦(U+2726 钉饰区)覆盖率弱于 █ ╔,纯 ASCII
+     终端会豆腐,退为 '*' 后仍是「星压轨道」的视觉语义。 */
+  const star = degradeTinySymbols ? '*' : '✦'
+  const brandSeg = version
+    ? `${color(star, theme.brandColor, { bold: true })} ${brandWord('天枢', theme.brandColor)}${color(' · ', theme.dim)}${color(`v${version}`, theme.dim)}`
+    : `${color(star, theme.brandColor, { bold: true })} ${brandWord('天枢', theme.brandColor)}`
+  for (let r = 0; r < spec.rows; r++) {
+    const line = glyphs.map(g => g[r]!).join(spec.gap)
+    if (r === 1 && spec.cols + TAG_GAP + displayWidth(brandSeg, WIDE) <= cols) {
+      rows.push(`${color(line, theme.brandColor, { bold: true })}${' '.repeat(TAG_GAP)}${brandSeg}`)
+    } else {
+      rows.push(color(line, theme.brandColor, { bold: true }))
+    }
+  }
+  return rows
+}
+
+/** 保留导出给测试与潜在调用方:小词标(进入提示区/compact 之外的窄用场景预留)。 */
+export function smallWordmark(theme: RivetTheme, ascii: boolean): string {
+  const star = ascii ? '*' : '✦'
+  return `${color(star, theme.brandColor, { bold: true })}  ${brandWord('天枢', theme.brandColor)}  ${color(WORDMARK_PINYIN, theme.muted)}`
+}
+
+/** 使命行(静态终态):整行装不下就整体消失,绝不腰斩 slogan。
+ *  宽度按 ambiguous=2 上界判定(CJK 终端不折行)。R11 澄清:此行不做字距扩张——
+ *  「离太近」指的是字标与右侧品牌段,见 logoRows 的 TAG_GAP。 */
+function missionLine(theme: RivetTheme, cols: number): string | null {
+  const plain = `   ${MISSION_ZH} · ${MISSION_EN}`
+  if (displayWidth(plain) <= bodyW(cols) && displayWidth(plain, WIDE) <= cols) {
+    return `${'   '}${color(MISSION_ZH, theme.muted)}${color(' · ', theme.dim)}${color(MISSION_EN, theme.dim)}`
+  }
+  return null
+}
+
+/** 使命行定位针(供调用方在 welcomeLines 中找到需播放扫光的行)。 */
+export function isMissionLine(line: string): boolean {
+  return line.replace(/\x1B\[[0-9;]*m/g, '').includes(MISSION_ZH)
+}
+
+export interface MissionShimmer { final: string; frames: string[] }
+
+/** 扫光帧间休眠(调用方参考值,毫秒)。 */
+export const MISSION_SHIMMER_FRAME_MS = 16
+
+/**
+ * 使命行「星光扫过」:光带从左到右行进一次(~8 帧 ≈ 130ms,「闪一下」而非「闪半天」),
+ *  末帧=静态终态,零跳变。调用方应以阻塞式微休眠播放(见 main.ts sleepSync),
+ *  禁用 setTimeout——异步让出会给启动期其他任务插队输出的机会,正是「一卡一卡」的来源。
+ * - 色彩纪律:扫过段 = primary bold(瞬态 chroma,与 effort 徽章同级的受控位),扫过即回 muted/dim;
+ * - ASCII / 窄屏(使命行不存在)→ null,调用方直接写静态行;
+ * - 帧由调用方播放(\r\x1B[2K + 帧 + MISSION_SHIMMER_FRAME_MS 休眠),RIVET_WELCOME_ANIM=0 时应跳过。
+ */
+export function missionShimmer(theme: RivetTheme, cols: number): MissionShimmer | null {
+  const finalLine = missionLine(theme, cols)
+  if (!finalLine) return null
+  const cells: { ch: string; base: string }[] = []
+  for (const ch of `   ${MISSION_ZH} · `) cells.push({ ch, base: ch === ' ' || ch === '·' ? theme.dim : theme.muted })
+  for (const ch of MISSION_EN) cells.push({ ch, base: theme.dim })
+  const WIN = 4
+  const frameCount = Math.min(10, Math.max(6, Math.ceil(cells.length / 6)))
+  const step = (cells.length + WIN) / frameCount
+  const frames: string[] = []
+  for (let f = 0; f < frameCount; f++) {
+    const head = Math.round(f * step)
+    const rendered = cells.map((c, i) => {
+      const d = head - i
+      if (d >= 0 && d < WIN && c.ch !== ' ') return color(c.ch, theme.primary, { bold: true })
+      return color(c.ch, c.base)
+    }).join('')
+    frames.push(rendered)
+  }
+  frames.push(finalLine)
+  return { final: finalLine, frames }
+}
+
+/** 基准线:唯一全幅元素,✦ 压在 ⌊cols×0.38⌋;横线取星域 separator 档。 */
+function datumLine(theme: RivetTheme, ascii: boolean, cols: number, separator?: string): string {
+  const h = ascii ? '-' : boxCharsFor(separator ?? 'thin').h
+  const star = ascii ? '*' : '✦'
+  const k = Math.max(1, Math.floor(cols * STAR_AT))
+  const rest = Math.max(0, cols - k - displayWidth(star, WIDE))
+  return color(h.repeat(k), theme.muted, { bold: true })
+    + color(star, theme.brandColor, { bold: true })
+    + color(h.repeat(rest), theme.muted, { bold: true })
+}
+
+/** 进入提示区:新会话一次性短提醒(竖排,规格 §三 中层)。 */
+function entryHintLines(theme: RivetTheme, ascii: boolean, cols: number): string[] {
+  const handoff = ascii ? '-' : '⏜'
+  const note = ascii ? '.' : '✧'
+  /* /domain 置首(R12):查看星域描述与切换;全版 ≥52 列,中栏短版,再窄省略 */
+  const domainFull = `${color(note, theme.secondary)} ${color(HINT_DOMAIN_CMD, theme.brandColor)} ${color(HINT_DOMAIN_DESC, theme.muted)}`
+  const domainShort = `${color(note, theme.secondary)} ${color(HINT_DOMAIN_CMD, theme.brandColor)} ${color(HINT_DOMAIN_SHORT, theme.muted)}`
+  const domainPlainW = (t: string) => displayWidth(t.replace(/\x1B\[[0-9;]*m/g, ''), WIDE)
+  const lines: string[] = []
+  if (domainPlainW(domainFull) <= cols) lines.push(domainFull)
+  else if (domainPlainW(domainShort) <= cols) lines.push(domainShort)
+  lines.push(
+    `${color(handoff, theme.secondary)} ${color('/handoff', theme.brandColor)} ${color(HINT_HANDOFF, theme.muted)}`,
+    `${color(note, theme.muted)} ${color(HINT_CACHE_A, theme.muted)} ${color(HINT_CACHE_CMDS, theme.secondary)} ${color(HINT_CACHE_B, theme.muted)}`,
+  )
+  return lines
+}
+
+/** compact 单行:✦ 天枢 · model ◎eff · ~/dir · ↑续N(#id) · v3.6.0(贪心装填,超宽截断)。 */
+function compactLine(input: FormatWelcomeInput, theme: RivetTheme, ascii: boolean): string {
+  const star = ascii ? '*' : '✦'
+  const sep = color(' · ', theme.dim)
+  const out: string[] = [color(`${star} 天枢`, theme.brandColor, { bold: true })]
+  const resume = input.priorMsgCount > 0
+  const eff = effortBadge(input.reasoningEffort, theme)
+  const modelPart = eff ? `${color(input.modelName, theme.secondary)} ${eff}` : color(input.modelName, theme.secondary)
+  const items: string[] = []
+  if (resume) {
+    items.push(color(`↑续${input.priorMsgCount}轮`, theme.secondary), modelPart)
+  } else {
+    items.push(modelPart, color(tildify(input.cwd), theme.muted))
+    items.push(input.numericId ? color(`#${input.numericId}`, theme.dim) : color(input.sessionId.slice(0, 8), theme.dim))
+  }
+  if (input.version) items.push(color(`v${input.version}`, theme.dim))
+  let acc = displayWidth('✦ 天枢', WIDE)
+  for (const item of items) {
+    const need = displayWidth(' · ', WIDE) + displayWidth(item, WIDE)
+    if (acc + need > input.columns) break
+    acc += need
+    out.push(sep, item)
+  }
+  return truncateWide(out.join(''), input.columns)
+}
+
+// ── 入口 ─────────────────────────────────────────────────────────────
 
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
   const cols = input.columns > 0 ? input.columns : 80
-
-  const dir = input.cwd.replace(/^.*\//, '')
-  const session = input.priorMsgCount > 0
-    ? `${input.sessionId.slice(0, 8)} (${input.priorMsgCount} prior)`
-    : input.sessionId.slice(0, 8)
-
-  const effortColor = input.reasoningEffort === 'max' || input.reasoningEffort === 'auto' ? theme.secondary
-    : input.reasoningEffort === 'high' ? theme.primary
-    : input.reasoningEffort === 'off' ? theme.dim
-    : theme.muted
-  const effortShort = input.reasoningEffort === 'medium' ? 'med' : input.reasoningEffort
-  const effortBadge = input.reasoningEffort ? color(`◎${effortShort}`, effortColor) : ''
-  const effortLabel = effortBadge ? ` ${color('·', theme.dim)} ${effortBadge}` : ''
-
-  const compactLine = (): string => {
-    const numeric = input.numericId ? ` · #${input.numericId}` : ''
-    const line = `${color('✦', theme.brandColor, { bold: true })} ${color('天枢', theme.brandColor, { bold: true })}${numeric}  ${color('·', theme.dim)}  ${color(input.modelName, theme.secondary)}${effortLabel}  ${color('·', theme.dim)}  ${color(dir + '/', theme.muted)}  ${color('·', theme.dim)}  ${color(session, theme.muted)}  ${color('·', theme.dim)}  ${color('/help', theme.secondary)}`
-    return truncateToWidth(line, cols)
-  }
-
-  // 折叠模式：单行极简提示，适合恢复会话或非首次启动
-  if (input.compact) return [compactLine()]
-
-  // 高度自适应：极矮终端（放不下星阁 + 输入框）退单行。
-  const rows = input.rows && input.rows > 0 ? input.rows : Number.POSITIVE_INFINITY
-  if (rows < BANNER_ROWS + RESERVED_ROWS) return [compactLine()]
-
-  // 宽度自适应：框内挤不下正文时，星阁不如单行诚实。
-  if (cols < MIN_BOX_COLS) return [compactLine()]
-
-  // ── 星阁 ──────────────────────────────────────────────────────────
   const ascii = useAsciiBorders()
-  const chars = boxCharsFor(input.separator ?? 'thin')
-  const inner = boxInnerWidth(cols)
-  const outer = inner + 4
-  // 度量口径取探测档（同 input-line.ts / live-tail-cap.ts）：这是静态 scrollback
-  // 块，不参与 LiveEngine 回顶计算，按终端实际渲染宽度对齐右边线即可，
-  // 不必像 live region 那样一律取 wide 上界（那会让右边线在多数终端内缩数列）。
-  const cal = { ambiguousAsWide: ambiguousWideEnabled() }
-  // 框线档提到外层——vBar、顶底框、starLoft 内的框线衍生（斗身边线、尾随续线）
-  // 全部走同一种色 + 视觉权重（muted + bold），确保"框"作为一个整体立得住。
-  const frameOpts = { bold: true } as const
-  const frame = theme.muted
-  const loft = starLoft(theme, chars, ascii, cal, frame, frameOpts)
-  const vBar = color(chars.v, frame, frameOpts)
+  const { spec: logoSpecResolved } = resolveLogoSpec(input.logoStyle, cols)
+  const logoRowCount = logoSpecResolved.rows
 
-  /** 框内一行：内容截断/补齐到 inner，两侧竖边线。 */
-  const row = (content: string): string => {
-    const clipped = displayWidth(content, cal) > inner
-      ? truncateToDisplayWidth(content, inner, cal)
-      : content
-    // 补齐量同时受 wide 上界约束：万一探测失准（CJK 终端开了 ambiguous
-    // double-width 却没设 RIVET_AMBIGUOUS_WIDTH），宁可右边线内缩一两列，
-    // 也不能整行超出 cols 折行。框外宽 = cols-2，正好留 2 列冗余。
-    const gap = Math.min(
-      inner - displayWidth(clipped, cal),
-      cols - 4 - displayWidth(clipped, WIDE),
-    )
-    return `${vBar} ${clipped}${' '.repeat(Math.max(0, gap))} ${vBar}`
-  }
+  const compactLine0 = (): string[] => [compactLine(input, theme, ascii)]
 
-  // 顶框：`╭─ 天枢 T I Ā N S H Ū Code ──…── v2.23.0 ─╮`
-  // wordmark 三档降级——宽字距拼音是最完整形态，窄了退回英文品牌名，再窄只留中文。
-  const wordmarkFor = (plain: string): string => {
-    if (plain === '天枢') return color('天枢', theme.brandColor, { bold: true })
-    if (plain === '天枢 Tianshu Code') {
-      return `${color('天枢', theme.brandColor, { bold: true })} ${color('Tianshu Code', theme.muted)}`
-    }
-    return `${color('天枢', theme.brandColor, { bold: true })}  ${color('T I Ā N S H Ū', theme.secondary)}  ${color('Code', theme.muted)}`
-  }
-  const versionText = input.version ? `v${input.version}` : ''
-  const wordmarkPlain = ['天枢  T I Ā N S H Ū  Code', '天枢 Tianshu Code', '天枢'].find(
-    plain => outer - 8 - displayWidth(plain, cal) - displayWidth(versionText, cal) >= 2,
-  ) ?? '天枢'
-  const wordmarkW = displayWidth(wordmarkPlain, cal)
-  const fill = outer - 8 - wordmarkW - displayWidth(versionText, cal)
-  const topBorder = versionText && fill >= 2
-    ? color(`${chars.tl}${chars.h} `, frame, frameOpts) + wordmarkFor(wordmarkPlain)
-      + ` ${color(loft.rule(fill), frame, frameOpts)} ${color(versionText, theme.dim)}`
-      + color(` ${chars.h}${chars.tr}`, frame, frameOpts)
-    : color(`${chars.tl}${chars.h} `, frame, frameOpts) + wordmarkFor(wordmarkPlain)
-      + color(` ${loft.rule(Math.max(0, outer - 5 - wordmarkW))}${chars.tr}`, frame, frameOpts)
+  if (input.compact) return compactLine0()
+  const rows = input.rows && input.rows > 0 ? input.rows : Number.POSITIVE_INFINITY
+  if (rows < logoRowCount + FULL_FIXED_ROWS + RESERVED_ROWS) return compactLine0()
+  if (cols < MIN_COLS) return compactLine0()
 
-  const bottomBorder = color(`${chars.bl}${chars.h.repeat(inner + 2)}${chars.br}`, frame, frameOpts)
-
-  // 北斗两行：装不下整幅就整块省掉，不画半只勺子。
-  const probe = loft.top(0)
-  const body: string[] = []
-  if (inner >= probe.natural + TAIL_GAP) {
-    const top = loft.top(inner - TAIL_GAP)
-    body.push(top.text, loft.bowl(top.bowlRight), '')
-  }
-
-  // 配置行 + 位置行（沿用概念 A 的信息设计）。
-  const modeLabel = input.approvalMode ? formatPermissionChrome(input.approvalMode) : input.approvalMode
-  const modeSuffix = modeLabel ? ` ${color('·', theme.dim)} ${color(modeLabel, theme.muted)}` : ''
-  const idLabel = input.numericId ? `#${input.numericId}` : session
-  // 框内不用 `·` 隔开 model 与 effort（effort 本就是模型属性）：`·` 与 `◎` 都是
-  // East-Asian Ambiguous，一行超过 2 个就吃光框的冗余、逼右边线内缩一列。
-  body.push(`${color(input.modelName, theme.muted)}${effortBadge ? ` ${effortBadge}` : ''}${modeSuffix}`)
-  body.push(`${color(tildify(input.cwd), theme.muted)} ${color('·', theme.dim)} ${color(idLabel, theme.dim)}`)
-
-  // 引导行：贪心装填，一条都装不下就不占行。
-  let tipsPlain = ''
-  let tipsText = ''
-  for (const tip of TIPS) {
-    const piece = `${tip.cmd} ${tip.desc}`
-    const next = tipsPlain ? `${tipsPlain}   ${piece}` : piece
-    if (displayWidth(next, cal) > inner) break
-    tipsText += (tipsPlain ? '   ' : '') + `${color(tip.cmd, theme.brandColor)} ${color(tip.desc, theme.muted)}`
-    tipsPlain = next
-  }
-  if (tipsText) body.push('', tipsText)
-
-  // handoff 提示行：使用中提醒（非启动引导），独立成行避免贪心装填挤压。
-  // 与会话中 formatHandoffNudge 同口径——首屏先埋一次认知，≥60% 时再提醒。
-  // 内容不带边线（row() 统一加），超宽时 truncateToDisplayWidth 安全截断带色串。
-  const handoffFull = `${color('⏜', theme.secondary)} ${color('/handoff', theme.brandColor)} ${color('上下文 60% 后交接给新会话（文档自动注入，比续跑省前缀重建）', theme.muted)}`
-  const handoffShort = `${color('⏜', theme.secondary)} ${color('/handoff', theme.brandColor)} ${color('上下文 60% 后交接给新会话', theme.muted)}`
-  body.push(displayWidth(handoffFull, cal) > inner ? handoffShort : handoffFull)
-
-  // 首尾空行是呼吸位：清屏后不贴顶边，底框也不与输入框顶框直接粘连
-  // （main.ts 把输入框 append 在欢迎页正下方）。
-  return ['', topBorder, ...body.map(row), bottomBorder, '']
+  const mission = missionLine(theme, cols)
+  return [
+    '',
+    ...logoRows(theme, cols, input.version, logoSpecResolved, ascii),
+    ...(mission ? [mission] : []),
+    datumLine(theme, ascii, cols, input.separator),
+    '',
+    ...entryHintLines(theme, ascii, cols),
+    '',
+  ]
 }

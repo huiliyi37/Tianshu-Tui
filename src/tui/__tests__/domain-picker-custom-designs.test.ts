@@ -76,8 +76,9 @@ describe('renderDomainPicker Star Domain Custom Designs', () => {
     const hasThinDivider = lines.some(l => stripAnsi(l).includes('───') && !stripAnsi(l).includes('✹'))
     assert.ok(hasThinDivider)
 
-    // Verify preview area renders the glyph and motto
-    assert.ok(lines.some(l => stripAnsi(l).includes('✹') && stripAnsi(l).includes('执中调度')))
+    // 新布局（32b39edfe）：详情区徽章行带 glyph+星名，motto 独立成行
+    assert.ok(lines.some(l => stripAnsi(l).includes('✹') && stripAnsi(l).includes('天枢')), '徽章行应含 glyph 与星名')
+    assert.ok(lines.some(l => stripAnsi(l).includes('「执中调度')), 'motto 独立行保留')
   })
 
   it('adapts divider line for Pojun style (thick / ━)', () => {

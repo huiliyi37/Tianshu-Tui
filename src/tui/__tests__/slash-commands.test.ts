@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
+import { handleYoloToggle } from '../yolo-toggle.js'
 import { loadConstellation } from '../../constellation/store.js'
 import { DEFAULT_CONFIG } from '../../config/default.js'
 import type { Config } from '../../config/schema.js'
@@ -1477,4 +1478,109 @@ describe('/logs', () => {
 
   // `open` 的真实行为（目标选择、opener 调用）在 logs-cli 那层用注入的 opener
   // 测，这里不重复——在 TUI 层跑它会真的拉起文件管理器。
+})
+
+describe('/yolo 与 /yes 覆盖版共享 handler（handleYoloToggle）', () => {
+  function makeEnv(overrides: Record<string, unknown> = {}) {
+    const calls: string[] = []
+    const state = {
+      maxTurns: 200,
+      planning: false,
+      panelKind: 'effort',
+      overlayActive: false,
+      approvalModeBeforePlan: null as string | null,
+      persisted: null as string | null,
+      persistError: null as Error | null,
+    }
+    const env = {
+      agent: {
+        setApprovalMode: (m: string) => calls.push(`agent.setApprovalMode:${m}`),
+        config: { maxTurns: 200 },
+        planModeState: null as string | null,
+      },
+      app: {
+        setApprovalMode: (m: string) => calls.push(`app.setApprovalMode:${m}`),
+        approvalModeBeforePlan: null as string | null,
+        choicePanelKind: 'effort',
+        activeOverlayId: () => (state.overlayActive ? 'choice-panel' : null),
+        deactivateOverlay: () => calls.push('deactivateOverlay'),
+        commitStatic: (t: string) => calls.push(`commitStatic:${t}`),
+        setStreamingState: (v: boolean) => calls.push(`setStreamingState:${v}`),
+      },
+      persistDefault: (m: string) => {
+        if (state.persistError) throw state.persistError
+        state.persisted = m
+        calls.push(`persistDefault:${m}`)
+      },
+    } as any
+    // 应用 overrides 到对应层级
+    if (overrides.planning) env.agent.planModeState = 'planning'
+    if (overrides.panelOpen) {
+      env.app.choicePanelKind = 'permission-yolo-confirm'
+      state.overlayActive = true
+    }
+    if (overrides.persistError) state.persistError = overrides.persistError as Error
+    return { env, calls, state }
+  }
+
+  const TEXTS = {
+    on: '⚠ yolo 已开启 — 无限轮次，无刹车无打扰（已设为默认）。关闭: /yolo off · 回滚: /rollback',
+    off: '✓ 已退出 yolo，切回 自动 — 低/无风险自动，高风险仍确认（已设为默认）。',
+  }
+
+  it('无参 → 开启全自动：agent+app 同步、maxTurns 0、持久化、返回 true', () => {
+    const { env, calls, state } = makeEnv()
+    const handled = handleYoloToggle('/yolo', env, TEXTS)
+    assert.equal(handled, true)
+    assert.ok(calls.includes('agent.setApprovalMode:dangerously-skip-permissions'))
+    assert.ok(calls.includes('app.setApprovalMode:dangerously-skip-permissions'))
+    assert.ok(calls.includes('persistDefault:dangerously-skip-permissions'))
+    assert.equal(env.agent.config.maxTurns, 0)
+    assert.ok(calls.some(c => c === `commitStatic:${TEXTS.on}`))
+    assert.ok(calls.includes('setStreamingState:false'))
+    assert.equal(state.persisted, 'dangerously-skip-permissions')
+  })
+
+  it('on 显式参数与无参同语义', () => {
+    const { env, calls } = makeEnv()
+    handleYoloToggle('/yolo on', env, TEXTS)
+    assert.ok(calls.includes('agent.setApprovalMode:dangerously-skip-permissions'))
+    assert.equal(env.agent.config.maxTurns, 0)
+  })
+
+  it('off → 关闭全自动：auto-safe、maxTurns 200、持久化 auto-safe', () => {
+    const { env, calls, state } = makeEnv()
+    const handled = handleYoloToggle('/yolo off', env, TEXTS)
+    assert.equal(handled, true)
+    assert.ok(calls.includes('agent.setApprovalMode:auto-safe'))
+    assert.ok(calls.includes('persistDefault:auto-safe'))
+    assert.equal(env.agent.config.maxTurns, 200)
+    assert.ok(calls.some(c => c === `commitStatic:${TEXTS.off}`))
+    assert.equal(state.persisted, 'auto-safe')
+  })
+
+  it('YOLO 确认面板打开时 → 视为确认并关闭面板', () => {
+    const { env, calls } = makeEnv({ panelOpen: true })
+    handleYoloToggle('/yolo', env, TEXTS)
+    assert.ok(calls.includes('deactivateOverlay'))
+    assert.equal(env.app.choicePanelKind, 'effort')
+  })
+
+  it('planning 叠层期间 → approvalModeBeforePlan 同步为最新意图', () => {
+    const { env } = makeEnv({ planning: true })
+    handleYoloToggle('/yolo off', env, TEXTS)
+    assert.equal(env.app.approvalModeBeforePlan, 'auto-safe')
+    const { env: env2 } = makeEnv({ planning: true })
+    handleYoloToggle('/yolo', env2, TEXTS)
+    assert.equal(env2.app.approvalModeBeforePlan, 'dangerously-skip-permissions')
+  })
+
+  it('持久化失败 → 输出可见提示（不静默），切换本身仍生效', () => {
+    const { env, calls } = makeEnv({ persistError: new Error('disk readonly') })
+    handleYoloToggle('/yolo', env, TEXTS)
+    assert.ok(calls.includes('agent.setApprovalMode:dangerously-skip-permissions'), '切换仍生效')
+    const failMsg = calls.find(c => c.startsWith('commitStatic:') && c.includes('持久化失败'))
+    assert.ok(failMsg, '应输出持久化失败提示')
+    assert.ok(failMsg!.includes('disk readonly'), `提示应含原因: ${failMsg}`)
+  })
 })

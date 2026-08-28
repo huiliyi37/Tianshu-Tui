@@ -40,11 +40,11 @@ import {
 
 
 /** 紧凑快捷键提示（逗号分隔，类似 fzf 风格）。 */
-function compactHints(pairs: [key: string, action: string][]): string {
+export function compactHints(pairs: [key: string, action: string][]): string {
   return pairs.map(([k, a]) => `${k}:${a}`).join(', ')
 }
 
-function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
+export function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
   const tabDomain = activeTab === 'domain' ? color('Domain', theme.primary, { bold: true }) : color(' Domain ', theme.dim)
   const tabModel = activeTab === 'model' ? color('Model', theme.primary, { bold: true }) : color(' Model ', theme.dim)
   const tabTheme = activeTab === 'theme' ? color('Theme', theme.primary, { bold: true }) : color(' Theme ', theme.dim)
@@ -533,7 +533,6 @@ function taskStatusColor(status: TasksWorkerStatus, theme: RivetTheme, failureRe
   switch (status) {
     case 'running': return theme.primary
     case 'completed': return theme.success
-    case 'completed': return theme.success
     case 'failed': return theme.error ?? theme.warning
     default: return theme.warning
   }
@@ -594,38 +593,13 @@ export interface ThemePickerData {
 }
 
 // ── Domain Picker ──────────────────────────────────────────────
+// 渲染与类型已沿接缝拆至 domain-picker.ts（overlay.ts 行数棘轮）；此处 re-export 保持消费方 API 不变。
 
-export interface DomainPickerEntry {
-  /** 选择键：'auto' | domain id */
-  key: string
-  /** 展示名（中文星域名或 Auto 标签） */
-  name: string
-  /** 座右铭（可空） */
-  motto: string
-  /** 次要元信息（dim）：decisionStyle · keywords */
-  meta: string
-  /** 选中项的一段式 essence 预览（不转储整段 volatileBlock） */
-  essence: string
-  /** 创始星短名（来自 star-genesis-data；auto / custom 域缺省） */
-  founder?: string
-  /** 一句话核心专长（来自 star-genesis-data；auto / custom 域缺省） */
-  expertise?: string
-  /** 是否为当前生效项 */
-  current: boolean
-  uiPersona?: {
-    separator: 'thin' | 'thick' | 'dots'
-    accent: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'dim'
-    glyph: string
-  }
-}
-
-export interface DomainPickerData {
-  entries: DomainPickerEntry[]
-  selectedIndex: number
-}
+export { renderDomainPicker } from './domain-picker.js'
+export type { DomainPickerEntry, DomainPickerData } from './domain-picker.js'
 
 /** 按显示宽度（CJK 感知）软换行为多行，最多 maxLines 行。 */
-function wrapToWidth(text: string, width: number, maxLines: number): string[] {
+export function wrapToWidth(text: string, width: number, maxLines: number): string[] {
   if (width <= 0 || maxLines <= 0) return []
   const out: string[] = []
   let line = ''
@@ -676,92 +650,31 @@ function scrollWindow(heights: number[], selectedIndex: number, budget: number):
   return { start, end }
 }
 
-/** scrollWindow + 为上下截断指示行预留行预算（两趟收敛即可）。 */
-function scrollWindowWithIndicators(heights: number[], selectedIndex: number, budget: number): { start: number; end: number } {
+/** scrollWindow + 为上下截断指示行预留行预算。
+ * 收敛判据用「窗口占用行数（项高累计）+ 指示行 ≤ budget」——scrollWindow 以
+ * 行预算扩展窗口时可能因放不下整项而覆盖超预算行数（如 description 折行的
+ * connect 列表），单趟预算缩减也可能因指示行增减不收敛（2026-08 回归）。
+ * 超预算时从离选中项远的一端逐项收缩（两侧等距收上方），保持选中可见与邻居
+ * 可见；预算不足以放下选中项+指示行时宁超勿丢选中。 */
+export function scrollWindowWithIndicators(heights: number[], selectedIndex: number, budget: number): { start: number; end: number } {
   let win = scrollWindow(heights, selectedIndex, budget)
-  const indicators = (win.start > 0 ? 1 : 0) + (win.end < heights.length ? 1 : 0)
-  if (indicators > 0) win = scrollWindow(heights, selectedIndex, Math.max(1, budget - indicators))
+  while (win.end - win.start > 1) {
+    const winRows = heights.slice(win.start, win.end).reduce((a, b) => a + b, 0)
+    const indicators = (win.start > 0 ? 1 : 0) + (win.end < heights.length ? 1 : 0)
+    if (winRows + indicators <= budget) break
+    const distStart = selectedIndex - win.start
+    const distEnd = win.end - 1 - selectedIndex
+    const canStart = win.start > 0 && distStart >= 1
+    const canEnd = win.end < heights.length && distEnd >= 1
+    if (canStart && (!canEnd || distStart >= distEnd)) {
+      win = { start: win.start + 1, end: win.end }
+    } else if (canEnd) {
+      win = { start: win.start, end: win.end - 1 }
+    } else {
+      break
+    }
+  }
   return win
-}
-
-/**
- * 渲染 Domain Picker overlay（CC 风星域选择器）。
- *
- * 列表（cursor + current 标记 + name + dim meta）→ 分隔线 → 选中项 essence 预览。
- * 应用后只写单行确认，完整方法论照常由引擎注入（UI 不转储 volatileBlock）。
- */
-export function renderDomainPicker(data: DomainPickerData, width: number, height: number, theme: RivetTheme): string[] {
-  const lines: string[] = []
-  lines.push(formatBorder(width, theme, 'subtle'))
-  lines.push(renderTabBar('domain', width, theme))
-
-  const innerWidth = width - 4 // padLine 占 2，左右各留 1 空隙
-  const contentRows = Math.max(3, height - 4) // border + title + footer + bottom
-  const previewRows = Math.min(4, Math.max(2, contentRows - data.entries.length - 1))
-  const listRows = Math.max(1, contentRows - previewRows - 2) // 分隔线 + 缓存备注行
-
-  const sel = data.selectedIndex
-  const current = data.entries[sel]
-  const currentAccentKey = current?.uiPersona?.accent ?? 'primary'
-  const currentAccent = (theme as any)[currentAccentKey] ?? theme.primary
-
-  const visible = data.entries.slice(0, listRows)
-  for (let i = 0; i < visible.length; i++) {
-    const e = visible[i]!
-    const selected = i === sel
-    const eAccentKey = e.uiPersona?.accent ?? 'primary'
-    const eAccent = (theme as any)[eAccentKey] ?? theme.primary
-    const eGlyph = e.uiPersona?.glyph ?? '●'
-
-    const cursor = selected ? color(CURSOR, currentAccent, { bold: true }) : ' '
-    const mark = e.current ? color(eGlyph, eAccent, { bold: true }) : selected ? color(eGlyph, currentAccent) : color(eGlyph, theme.dim)
-    const name = selected ? color(e.name, currentAccent, { bold: true }) : color(e.name, theme.secondary)
-    // 行内简短信息：创始星（创世碑文数据源），比 keywords meta 更可读。
-    const founder = e.founder ? `  ${e.founder}` : ''
-    const head = `${cursor} ${mark} ${name}${color(founder, theme.dim)}`
-    lines.push(padLine(head, width, theme))
-  }
-  for (let i = visible.length; i < listRows; i++) {
-    lines.push(padLine('', width, theme))
-  }
-
-  // 分隔线自适应强调色与样式
-  const sepChar = current?.uiPersona?.separator === 'dots' 
-    ? '·' 
-    : current?.uiPersona?.separator === 'thick' 
-      ? '━' 
-      : '─'
-  lines.push(padLine(` ${color(sepChar.repeat(Math.max(0, innerWidth - 1)), currentAccent)}`, width, theme))
-
-  // 选中项预览：创始星 → 核心专长（小白可读）→ motto。
-  const previewLines: string[] = []
-  if (current) {
-    const glyph = current.uiPersona?.glyph ?? '●'
-    const founderLine = current.founder ? `  ${glyph}  创始星：${current.founder}` : `  ${glyph}  ${current.motto}`
-    previewLines.push(color(founderLine, currentAccent, { bold: true }))
-
-    const plainDesc = current.expertise || current.essence || ''
-    const wrappedDesc = wrapToWidth(plainDesc, innerWidth - 1, previewRows - 2)
-    for (const d of wrappedDesc) {
-      if (previewLines.length < previewRows - 1) {
-        previewLines.push(` ${color(d, theme.muted)}`)
-      }
-    }
-    if (current.founder && current.motto) {
-      previewLines.push(` ${color(`「${current.motto}」`, theme.dim)}`)
-    }
-  }
-
-  for (let i = 0; i < previewRows; i++) {
-    lines.push(padLine(previewLines[i] ?? '', width, theme))
-  }
-
-  // 常驻备注：切换星域的缓存代价（预防性提示，切换后的忠告见 slash-commands）。
-  lines.push(padLine(` ${color(DOMAIN_SWITCH_CACHE_NOTE, theme.dim)}`, width, theme))
-
-  lines.push(formatFooter(compactHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['g', '碑文'], ['S', '设为默认'], ['Esc', '取消']]), width, theme, 'subtle'))
-  lines.push(formatBottomBorder(width, theme, 'subtle'))
-  return lines
 }
 
 // ── Domain Genesis Card（创世碑文 tab）─────────────────────────────

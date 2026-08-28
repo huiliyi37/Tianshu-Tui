@@ -79,19 +79,43 @@ test('/undo 与 /resume 在核心清单（原为隐藏命令）', () => {
   assert.ok(core.some(c => c.name === '/resume'), '/resume 进入核心层')
 })
 
-test('端到端：输入 / 显示核心层，继续输入切换全量过滤', async () => {
+test('端到端：输入 / 显示核心层（授权命令置顶可见）', async () => {
   const t = makeApp()
   t.app.setSlashCommands(paletteHints())
   t.out.clear()
   t.stdin.dataHandler!('/')
   await new Promise(r => setTimeout(r, 30))
   const idle = stripAnsi(t.out.chunks.join(''))
-  assert.ok(idle.includes('/model'), '核心序靠前的 /model 可见')
+  // R25 契约更新：R23 授权命令置顶（/yolo /yes 紧邻 /help）后，前 5 可见位为
+  // /help /yolo /yes /queue /compact——/model 不再在空 query 可见集（第 6 位），
+  // 经输入过滤可达（下方过滤断言）。旧断言「/model 可见」钉的是置顶前的排序。
+  assert.ok(idle.includes('/yolo'), '授权命令 /yolo 置顶可见')
+  assert.ok(idle.includes('/yes'), '授权命令 /yes 置顶可见')
   assert.ok(!idle.includes('/btw'), '进阶命令不在空 query 可见集')
+})
 
+test('端到端：输入 b 过滤出进阶 /btw（全量过滤）', async () => {
+  const t = makeApp()
+  t.app.setSlashCommands(paletteHints())
+  t.out.clear()
+  t.stdin.dataHandler!('/')
+  await new Promise(r => setTimeout(r, 30))
   t.out.clear()
   t.stdin.dataHandler!('b')
   await new Promise(r => setTimeout(r, 30))
   const filtered = stripAnsi(t.out.chunks.join(''))
   assert.ok(filtered.includes('/btw'), '继续输入 b 过滤出进阶 /btw（全量过滤）')
+})
+
+test('端到端：输入 model 过滤出核心 /model（置顶后经过滤可达）', async () => {
+  const t = makeApp()
+  t.app.setSlashCommands(paletteHints())
+  t.out.clear()
+  t.stdin.dataHandler!('/')
+  await new Promise(r => setTimeout(r, 30))
+  t.out.clear()
+  t.stdin.dataHandler!('model')
+  await new Promise(r => setTimeout(r, 30))
+  const filtered = stripAnsi(t.out.chunks.join(''))
+  assert.ok(filtered.includes('/model'), '输入 model 过滤出核心 /model')
 })

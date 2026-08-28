@@ -41,6 +41,37 @@ describe('InputLine multi-line (W4b)', () => {
     assert.equal(submitted, null)
   })
 
+  // ── newlineMode 粘滞换行（对齐公开仓）：开启后 Enter=换行、关闭恢复提交 ──
+  it('newlineMode 开启后 Enter 插入换行且不提交', () => {
+    let submitted: string | null = null
+    const input = new InputLine({ value: 'hello', onSubmit: (v) => { submitted = v } })
+    input.setNewlineMode(true)
+    assert.equal(input.newlineMode, true)
+    const ev = input.handleKey('return', '', false, false)
+    assert.equal(ev?.type, 'change')
+    assert.equal(input.value, 'hello\n')
+    assert.equal(submitted, null, '换行模式下 Enter 不得触发提交')
+  })
+
+  it('newlineMode 关闭后 Enter 恢复提交语义', () => {
+    let submitted: string | null = null
+    const input = new InputLine({ value: 'hello', onSubmit: (v) => { submitted = v } })
+    input.setNewlineMode(true)
+    input.setNewlineMode(false)
+    assert.equal(input.newlineMode, false)
+    const ev = input.handleKey('return', '', false, false)
+    assert.equal(ev?.type, 'submit')
+    assert.equal(submitted, 'hello')
+  })
+
+  it('newlineMode 开启时 \\+Enter 续行仍优先（既有语义不变）', () => {
+    const input = new InputLine({ value: 'first\\' })
+    input.setNewlineMode(true)
+    const ev = input.handleKey('return', '', false, false)
+    assert.equal(ev?.type, 'change')
+    assert.equal(input.value, 'first\n')
+  })
+
   it('insertText inserts at cursor and advances cursor', () => {
     const input = new InputLine({ value: 'AB' })
     input.handleKey('left', '', false, false) // cursor at A|B

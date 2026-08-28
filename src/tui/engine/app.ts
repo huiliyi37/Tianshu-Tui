@@ -64,6 +64,7 @@ import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBa
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
+import { formatPromptFooter } from '../format/prompt-footer.js'
 import { formatGlanceBar, resolveStarDomainDisplay, formatGlanceLeft, formatGlanceRight, formatPermissionModeLine } from '../format/glance-bar.js'
 import { remainingSec, shouldFire } from '../plan-auto-approve.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
@@ -1038,6 +1039,14 @@ export class TuiApp {
       this.writeBatcher.schedule()
     })
 
+    // F 键增强路径：f1-f8 映射高频命令，经 slash 管线分发（与打字输入等价）。
+    // overlay 激活时不路由——面板内按键归 overlay 导航，避免面板叠加/误触关闭。
+    // f9-f12 留空扩展位。键位提示回填在 command-palette.ts 的 PaletteCommand.hotkey。
+    const FKEY_SLASH: Record<string, string> = {
+      f1: '/help', f2: '/tasks', f3: '/cache', f4: '/cockpit',
+      f5: '/theme', f6: '/model', f7: '/permission', f8: '/sessions',
+    }
+
     // Wire input: character input → inputLine → live region update
     this.input.onAnyKey((key) => {
       // ── Approval mode short-circuit (顶部，先于一切普通输入) ──
@@ -1138,9 +1147,9 @@ export class TuiApp {
         if (this.isAgentActive()) {
           // Agent active (含首 token 前/纯工具窗口): abort current agent run
           this.handleAbort()
-        } else if (this.inputController.ctrlCPendingSince > 0 && !this.inputLine.value.trim()) {
-          // Second Ctrl+C within window → exit（有输入时不退出——窗口内
-          // 打过字说明用户在继续对话，退化为清空输入，见下方分支）
+        } else if (this.inputController.ctrlCPendingSince > 0 && !this.inputLine.value.trim() && this.inputLine.images.length === 0) {
+          // Second Ctrl+C within window → exit（有输入/附件时不退出——窗口内
+          // 打过字或贴过图说明用户在继续对话，退化为清空输入，见下方分支）
           this.inputController.ctrlCPendingSince = 0
           this.dispose()
           if (this.onExitCallback) {
@@ -1148,11 +1157,14 @@ export class TuiApp {
           } else {
             process.exit(0)
           }
-        } else if (this.inputLine.value.trim()) {
-          // Idle with input: clear input line, don't exit（同时取消可能
-          // 残留的确认窗口——清空输入后提示行没有理由继续显示）
-          this.inputLine.setValue('')
+        } else if (this.inputLine.value.trim() || this.inputLine.images.length > 0) {
+          // Idle with input (text or image attachments): clear everything,
+          // don't exit。同时取消可能残留的确认窗口——清空输入后提示行没有
+          // 理由继续显示。图片附件必须一并清（2026-08 用户反馈：Ctrl+C
+          // 清不掉图片）；clearAll 记单个 undo 单元，Ctrl+Z 可整体恢复。
+          this.inputLine.clearAll()
           this.inputController.ctrlCPendingSince = 0
+          this.inputController.clearedHintUntil = Date.now() + 2000
           this.renderLive()
         } else {
           // Idle with empty input: first Ctrl+C → show hint, start 2s window
@@ -1160,6 +1172,11 @@ export class TuiApp {
           this.renderLive()
           setTimeout(() => { this.inputController.ctrlCPendingSince = 0 }, 2000)
         }
+        return
+      }
+      const fkeyCmd = FKEY_SLASH[key.name]
+      if (fkeyCmd && !this.overlay.isActive()) {
+        void this.tryDispatchSlash(fkeyCmd)
         return
       }
       if (key.name === 'ctrl_p') {
@@ -1345,6 +1362,13 @@ export class TuiApp {
         }
       } else {
         this.inputController.closeSlash()
+      }
+      // Shift+Enter 翻转粘滞换行模式（对齐公开仓 newlineMode）：开启后 Enter=换行，
+      // 再按 Shift+Enter 退出。任何状态下生效（slash 块之外，同公开仓 app.ts:4582）。
+      if (key.name === 'return' && key.shift) {
+        this.inputLine.setNewlineMode(!this.inputLine.newlineMode)
+        this.renderLive()
+        return
       }
       // ── W4a: Up 箭头取回最近 queued 消息到输入框编辑 ─────────
       if (key.name === 'up' && !this.inputLine.value && this.steerBuffer.hasPending()) {
@@ -5995,10 +6019,15 @@ export class TuiApp {
    * 就等于没有，故取消——压峰值的活见
    * docs/plans/2026-08-03-tui-subagent-workflow-display-cc-parity.md。
    *
-   * turn 0 例外返回 0：欢迎屏尚在屏上，垫高会在它与输入框之间撑开空白。
+   * turn 0 欢迎首帧仍返回 0：尚未开过 slash、高水位也是 0 时不垫——欢迎屏与
+   * 输入框之间凭空空白比自然流难看。一旦 slash 菜单/提示入场（或高水位已抬），
+   * 与 tianshu-public 同口径：抬高水位并用垫行吸收开合差额，输入框下落一次后
+   * 钉住，取消命令不再弹回。
    */
   private getDynamicBudget(chromeRows: number, dynamicRows: number): number {
-    if (this.state.phase === 'idle' && this.state.turnNumber === 0) return 0
+    const welcomeIdle = this.state.phase === 'idle' && this.state.turnNumber === 0
+    const slashOverlay = this.inputController.slashMenu.open || this.inputLine.value.startsWith('/')
+    if (welcomeIdle && this.liveRowsHighWater === 0 && !slashOverlay) return 0
     const cap = liveMaxRowsFor(this.rows || 24)
     const total = dynamicRows + chromeRows
     this.liveRowsHighWater = Math.min(cap, Math.max(this.liveRowsHighWater, total))
@@ -6544,7 +6573,9 @@ export class TuiApp {
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
     // 渲染防御：输入框有内容时永远显示输入框——提示行只在空输入时取代它，
     // 兜住一切未取消 pending 的漏网路径（粘贴竞态等），杜绝幽灵输入。
-    if (this.inputController.ctrlCPendingSince > 0 && !this.inputLine.value) {
+    if (this.inputController.clearedHintUntil > Date.now() && !this.inputLine.value && this.inputLine.images.length === 0) {
+      lines.push({ text: '(input cleared · Ctrl+Z to restore · Ctrl+C again to exit)' })
+    } else if (this.inputController.ctrlCPendingSince > 0 && !this.inputLine.value && this.inputLine.images.length === 0) {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
       const inputVal = this.inputLine.value
@@ -6838,6 +6869,16 @@ export class TuiApp {
         }
       }
       lines.push({ text: botBorder })
+
+      // prompt footer：输入框下方键位提示行（对齐公开仓）——换行模式/打断/
+      // 审批态提示。审批态的 JSON 编辑分支在 renderLive 更早处 return，不重叠。
+      const footerLines = formatPromptFooter({
+        width: cols,
+        newlineMode: this.inputLine.newlineMode,
+        agentBusy: this.agentBusy && !this.isAgentRunSettling(),
+        approvalPending: this.approvalIntentController.approvalPending != null,
+      }, this.theme)
+      for (const line of footerLines) lines.push({ text: this.clampLine(line) })
     }
 
     if (this.screenReader) {
@@ -6847,7 +6888,7 @@ export class TuiApp {
       chromeStart = 0
     } else {
       // ── 定高视口：动态段垫到「总高度高水位 − chrome」，slash/todo 等 chrome
-      //    关掉后垫行补上，输入框不上跳。turn 0 仍 budget=0（欢迎屏不撑空白）。
+      //    关掉后垫行补上，输入框不上跳。欢迎首帧（未开 slash、水位 0）仍不垫。
       //    度量与 LiveEngine.rowsForLine 同口径。
       let chromeRows = 0
       for (let i = chromeStart; i < lines.length; i++) {

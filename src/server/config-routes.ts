@@ -8,7 +8,7 @@
  *   DELETE /config/providers/:name          remove a provider
  *   DELETE /config/providers/:name/models/:modelId  remove a model from a provider
  *   POST   /config/providers/:name/key      set API key (inline or env)
- *   POST   /config/providers/test-key       probe a key against a provider's /models (setup-time validation)
+ *   POST   /config/providers/test-key       probe a key against a provider's /models (setup-time validation; apiKey optional → falls back to the provider's stored key; ok responses carry the fetched model id list)
  *   POST   /config/providers/:name/default  set as default provider
  *   GET    /config/balance                  query DeepSeek account balance (official API)
  *   GET    /config/autonomy                 autonomy brake mode + checkpoint interval (C3)
@@ -91,6 +91,7 @@ import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
 import { queryDeepSeekBalance, type BalanceResult } from '../api/balance-client.js'
 import { discoverVisionModels, validateVisionModel } from '../api/vision-model-onboarding.js'
 import { probeProviderKey } from '../api/key-probe.js'
+import { resolveApiKey } from '../api/factory.js'
 import { getDeepSeekUserSummary, getDeepSeekCostReport } from '../api/deepseek-platform-client.js'
 import { listGrantedApps, revokeApp } from '../tools/computer-use/app-grants.js'
 import { computerUseModulePresent, isComputerUseSupportedPlatform, loadComputerUseImpl } from '../tools/computer-use/bridge.js'
@@ -191,20 +192,24 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
           const label = r && 'static' in r ? r.static.label : (r as { label?: string } | undefined)?.label
           const description = r && 'static' in r ? r.static.description : (r as { description?: string } | undefined)?.description
           const defaultModelId = r && 'static' in r ? r.static.defaultModelId : (r as { defaultModelId?: string } | undefined)?.defaultModelId
-          return { key: k, label: label ?? k, description, defaultModelId }
+          const keyUrl = r && 'static' in r ? r.static.keyUrl : (r as { keyUrl?: string } | undefined)?.keyUrl
+          return { key: k, label: label ?? k, description, defaultModelId, keyUrl }
         })
 
       return { status: 200, body: { providers, unconfigured, presetKeys: allPresetKeys() } }
     }, apiToken),
 
     'POST /config/providers': withAuth((body) => {
-      const { providerName, apiKey, apiKeyEnv, baseUrl, makeDefault, model, allowProFallback } = body as {
+      const { providerName, apiKey, apiKeyEnv, baseUrl, makeDefault, model, models, allowProFallback } = body as {
         providerName?: string
         apiKey?: string
         apiKeyEnv?: string
         baseUrl?: string
         makeDefault?: boolean
         model?: ModelConfig
+        /** 批量模型回填（桌面端「每行一个」批量粘贴 / 拉取勾选导入）——
+         *  每项走与 model 相同的 modelConfigSchema 校验与合并语义。 */
+        models?: Array<Partial<ModelConfig> & { id: string }>
         allowProFallback?: boolean
       }
       if (!providerName) return { status: 400, body: { error: 'providerName is required' } }
@@ -218,8 +223,24 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         parsedModel = result.data
       }
 
+      // 与 /custom 的 models 校验同构：逐项 safeParse，任何一项不合法整单 400——
+      // 批量路径不做部分落盘（半批入库的「哪些成功了」对 UI 是坏状态）。
+      let parsedModels: Array<Partial<ModelConfig> & { id: string }> | undefined
+      if (models !== undefined) {
+        if (!Array.isArray(models) || models.length === 0) {
+          return { status: 400, body: { error: 'models must be a non-empty array when provided' } }
+        }
+        for (const m of models) {
+          const result = modelConfigSchema.safeParse(m)
+          if (!result.success) {
+            return { status: 400, body: { error: `Invalid model in models[]: ${result.error.message}` } }
+          }
+        }
+        parsedModels = models
+      }
+
       try {
-        setupProvider({ providerName, apiKey, apiKeyEnv, baseUrl, model: parsedModel, makeDefault, allowProFallback })
+        setupProvider({ providerName, apiKey, apiKeyEnv, baseUrl, model: parsedModel, models: parsedModels, makeDefault, allowProFallback })
         return { status: 200, body: { ok: true, providerName } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
@@ -361,7 +382,16 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
     'POST /config/providers/test-key': withAuth(async (body) => {
       const { provider, apiKey, baseUrl: override } = body as { provider?: string; apiKey?: string; baseUrl?: string }
       if (!provider) return { status: 400, body: { error: 'provider is required' } }
-      if (!apiKey) return { status: 400, body: { error: 'apiKey is required' } }
+      // apiKey 可选：缺省时用该 provider 的存储 Key（keyRef 物化 / apiKeyEnv）——
+      // 已配置 provider 上的「从接口拉取模型列表」不应要求用户重输 Key。
+      let resolvedKey = apiKey
+      if (!resolvedKey) {
+        const stored = loadConfig().provider.providers[provider]
+        if (stored) {
+          try { resolvedKey = resolveApiKey(stored) } catch { resolvedKey = undefined }
+        }
+      }
+      if (!resolvedKey) return { status: 400, body: { error: 'apiKey is required (or set a key on the provider first)' } }
       // Resolve baseUrl: explicit override (custom provider being created) wins,
       // then stored config, then preset (preset has the right endpoint per provider
       // — e.g. zhipu-vision uses api/paas/v4, not the coding endpoint).
@@ -372,7 +402,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         baseUrl = stored?.baseUrl ?? resolvePresetBaseUrl(provider)
       }
       if (!baseUrl) return { status: 400, body: { error: `cannot resolve baseUrl for provider "${provider}"` } }
-      const result = await probeProviderKey(apiKey, baseUrl)
+      const result = await probeProviderKey(resolvedKey, baseUrl)
       return { status: 200, body: result }
     }, apiToken),
 

@@ -303,7 +303,7 @@ describe('GALAXY_TOOL', () => {
 
     assert.equal(result.isError, undefined, `unexpected error: ${result.content}`)
     assert.equal(terminalEvents.length, 2, '每个 worker 落定必须发一条终态事件')
-    assert.ok(terminalEvents.every(e => e.status === 'passed'))
+    assert.ok(terminalEvents.every(e => e.status === 'completed'))
     // 终态必须带派发侧身份——否则 worker 完成后面板星域信息断流（回退机器 ID 脸）。
     const authorities = terminalEvents.map(e => e.authority).sort()
     assert.deepEqual(authorities, ['tianji', 'wenqu'], '终态事件必须透传 authority')

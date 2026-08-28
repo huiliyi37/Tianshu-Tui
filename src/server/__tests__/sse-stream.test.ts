@@ -28,7 +28,7 @@ function fakeRes(opts: { throwOnWrite?: boolean } = {}) {
 
 test('sets text/event-stream + CORS headers so the Tauri webview is not blocked', () => {
   const { res, getHeaders } = fakeRes()
-  new SseStream(res)
+  new SseStream(res, undefined, '*')
   const h = getHeaders()
   assert.equal(h['Content-Type'], 'text/event-stream')
   // Regression: the SSE response bypasses the router's CORS header (handled:true),

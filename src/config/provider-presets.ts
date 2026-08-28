@@ -23,6 +23,9 @@ export interface ProviderPreset {
   billingModes?: ProviderBillingMode[]
   provider: ProviderConfig
   defaultModelId: string
+  /** 官方 API Key 控制台页——桌面端预设卡「获取 API Key ↗」直链（ZCode 对标）。
+   *  keyless（ollama）/ OAuth（codex）/ 中转站（ccswitch、relay）不配。 */
+  keyUrl?: string
 }
 
 export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
@@ -31,6 +34,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: 'DeepSeek',
     description: '官方旗舰：1M 上下文 + 深度推理，适合重活主控',
     defaultModelId: 'deepseek-v4-pro',
+    keyUrl: 'https://platform.deepseek.com/api_keys',
     provider: {
       name: 'deepseek',
       apiKeyEnv: 'DEEPSEEK_API_KEY',
@@ -94,6 +98,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: 'GLM',
     description: '智谱 Coding 订阅：1M 上下文 + 视觉支持',
     defaultModelId: 'glm-5.2',
+    keyUrl: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
     provider: {
       name: 'glm',
       apiKeyEnv: 'ZHIPU_API_KEY',
@@ -128,6 +133,27 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           // 避免界面显示误导性的"花费金额"(用量/缓存命中率等真实指标不受影响)。
           pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         },
+        {
+          id: 'glm-5.3',
+          description: '文本旗舰，1M 上下文（Coding Plan 已上线）',
+          alias: 'glm-53',
+          contextWindow: 1_000_000,
+          maxTokens: 131072,
+          reasoningEffort: 'max',
+          tier: 'strong',
+          pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        },
+        {
+          id: 'glm-5.3-flash',
+          description: '原生多模态，1M 上下文（视觉 Coding）',
+          alias: 'glm-53-flash',
+          contextWindow: 1_000_000,
+          maxTokens: 131072,
+          reasoningEffort: 'max',
+          tier: 'strong',
+          supportsVision: true,
+          pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        },
       ],
       unsupported: ['stream_options'],
     },
@@ -137,6 +163,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: 'Moonshot Kimi',
     description: '月之暗面：K3 旗舰推理 + K2.7 代码档',
     defaultModelId: 'kimi-k3',
+    keyUrl: 'https://platform.moonshot.cn/console/api-keys',
     provider: {
       name: 'kimi',
       apiKeyEnv: 'MOONSHOT_API_KEY',
@@ -181,6 +208,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: 'MiMo',
     description: '小米 MiMo：1M 上下文，性价比推理',
     defaultModelId: 'mimo-v2.5-pro',
+    keyUrl: 'https://mimo.mi.com/',
     provider: {
       name: 'mimo',
       apiKeyEnv: 'MIMO_API_KEY',
@@ -223,6 +251,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: 'MiMo API (新)',
     description: '小米 MiMo 按量 API，超速档',
     defaultModelId: 'mimo-v2.5-pro-ultraspeed',
+    keyUrl: 'https://mimo.mi.com/',
     provider: {
       name: 'mimo-api',
       apiKeyEnv: 'MIMO_PAY_API_KEY',
@@ -256,6 +285,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: 'MiniMax',
     description: 'MiniMax：多档模型，旗舰带视觉',
     defaultModelId: 'MiniMax-M2.7',
+    keyUrl: 'https://platform.minimaxi.com/',
     provider: {
       name: 'minimax',
       apiKeyEnv: 'MINIMAX_API_KEY',
@@ -300,6 +330,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     description: '聚合站：多模型可选，含 DeepSeek/GLM/Kimi/Qwen',
     aggregator: true,
     defaultModelId: 'deepseek-ai/DeepSeek-V4-Pro',
+    keyUrl: 'https://cloud.siliconflow.cn/account/ak',
     provider: {
       name: 'siliconflow',
       apiKeyEnv: 'SILICONFLOW_API_KEY',
@@ -376,6 +407,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: 'OpenAI',
     description: 'OpenAI 官方 API：GPT-5.6 系列（Sol 旗舰 / Terra 均衡 / Luna 轻量）',
     defaultModelId: 'gpt-5.6-sol',
+    keyUrl: 'https://platform.openai.com/api-keys',
     provider: {
       name: 'openai',
       apiKeyEnv: 'OPENAI_API_KEY',
@@ -469,6 +501,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: 'LongCat (美团龙猫)',
     description: '美团龙猫：1M 上下文，缓存读取免费',
     defaultModelId: 'LongCat-2.0',
+    keyUrl: 'https://longcat.chat/platform/',
     provider: {
       name: 'longcat',
       apiKeyEnv: 'LONGCAT_API_KEY',
@@ -591,6 +624,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: '智谱视觉 (GLM-4V-Flash 免费)',
     description: '智谱免费视觉桥：只适合识图，不适合主控',
     defaultModelId: 'glm-4v-flash',
+    keyUrl: 'https://bigmodel.cn/usercenter/proj-mgmt/apikeys',
     provider: {
       name: 'zhipu-vision',
       apiKeyEnv: 'ZHIPU_API_KEY',
@@ -629,6 +663,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: '阿里云百炼 (DashScope)',
     description: '阿里 DashScope：Qwen 系列官方端点，OpenAI 兼容协议',
     defaultModelId: 'qwen3.8-max',
+    keyUrl: 'https://bailian.console.aliyun.com/',
     billingModes: [
       {
         id: 'payg',
@@ -706,6 +741,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     description: 'OpenRouter 聚合：OpenAI / Claude / Gemini / 开源模型',
     aggregator: true,
     defaultModelId: 'anthropic/claude-sonnet-4.5',
+    keyUrl: 'https://openrouter.ai/settings/keys',
     provider: {
       name: 'openrouter',
       apiKeyEnv: 'OPENROUTER_API_KEY',
@@ -774,6 +810,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     label: '火山方舟 (豆包)',
     description: '火山引擎方舟：豆包 Doubao 系列，OpenAI 兼容端点',
     defaultModelId: 'doubao-seed-2.0-pro',
+    keyUrl: 'https://console.volcengine.com/ark',
     provider: {
       name: 'volc',
       apiKeyEnv: 'VOLC_API_KEY',

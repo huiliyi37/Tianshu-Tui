@@ -56,7 +56,7 @@ describe('DELEGATE_BATCH_TOOL', () => {
 
     assert.deepEqual(events.map(event => [event.status, event.eventKind, event.eventDetail]), [
       ['running', 'text', 'tail'],
-      ['passed', undefined, undefined],
+      ['completed', undefined, undefined],
     ])
     await sleep(150)
     assert.equal(events.length, 2)
@@ -220,7 +220,7 @@ describe('DELEGATE_BATCH_TOOL', () => {
     assert.ok(w0.length >= 1, 'settled worker 必须收到终态')
     // batch:0 的终态序列不得出现 passed→blocked 翻转：最后一个状态仍是 passed。
     const lastW0 = w0[w0.length - 1]!
-    assert.equal(lastW0.status, 'passed', '已 settle 的 worker 不被异常补发覆盖（防翻转）')
+    assert.equal(lastW0.status, 'completed', '已 settle 的 worker 不被异常补发覆盖（防翻转）')
     // 未 settle 的 worker 1 仍要补发终态（不卡 running）。
     const w1 = events.filter(e => e.workOrderId === 'batch:1')
     assert.ok(w1.length >= 1, '未 settle 的 worker 必须补发终态')

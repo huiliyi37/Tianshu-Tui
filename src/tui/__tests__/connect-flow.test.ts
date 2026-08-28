@@ -131,8 +131,8 @@ test('preset path: 6 steps — key → endpoint → connectivity → models → 
   const modelsView = flow.view()
   assert.equal(modelsView.kind, 'multi-choice')
   assert.equal(modelsView.stepLabel, '步骤 4 / 6')
-  assert.deepEqual(modelsView.options?.map(o => o.label), ['deepseek-v4-pro', 'deepseek-v4-flash'])
-  assert.deepEqual(modelsView.options?.map(o => o.checked), [true, true])
+  assert.deepEqual(modelsView.options?.map(o => o.label), ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'])
+  assert.deepEqual(modelsView.options?.map(o => o.checked), [true, true, true])
   assert.match(modelsView.options?.[0]?.description ?? '', /预设/)
 
   // [5/6] Capability check — measured rows + metadata inferences.
@@ -1470,7 +1470,7 @@ test('D1: aggregator preset defaults ALL models to unchecked (template + discove
   plain.submitInput('')
   plain.applyProbe(report({ models: ['deepseek-v4-pro'] }))
   plain.submitChoice('continue')
-  assert.deepEqual(plain.view().options?.map(o => o.checked), [true, true])
+  assert.deepEqual(plain.view().options?.map(o => o.checked), [true, true, true])
 })
 
 test('D1: aggregator with nothing checked cannot confirm (guarded error)', () => {
@@ -1688,7 +1688,7 @@ test('D2: preset path also stops at advanced steps for discovered unknowns', () 
   assert.equal(mysteryOpt!.checked, false)
   flow.toggle('0')
   flow.toggle('1')
-  flow.toggle('2')
+  flow.toggle('3')
   assert.equal(flow.confirm().kind, 'next')
   assert.match(flow.view().title, /模型补参/)
   answerUnknownModels(flow)

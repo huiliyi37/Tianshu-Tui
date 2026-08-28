@@ -12,9 +12,16 @@ process.env.TMPDIR = FAKE_TMP
 process.env.TMP = FAKE_TMP
 process.env.TEMP = FAKE_TMP
 
+// 信任门：项目级 verify 声明对未授信 cwd 被 project-trust 剥离（fail-closed）。
+// 本套件专门测声明命令的加载与执行，须显式授信（同 verify-config.test.ts 约定）。
+const PREV_TRUST = process.env.RIVET_TRUST_PROJECT
+process.env.RIVET_TRUST_PROJECT = '1'
+
 after(() => {
   rmSync(FAKE_TMP, { recursive: true, force: true })
   invalidateVerifyConfig()
+  if (PREV_TRUST === undefined) delete process.env.RIVET_TRUST_PROJECT
+  else process.env.RIVET_TRUST_PROJECT = PREV_TRUST
 })
 
 function makeParams(input: Record<string, unknown>, cwd: string): Record<string, unknown> {

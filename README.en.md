@@ -21,7 +21,7 @@
   <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
   <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Tests-13%2C000%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
+  <img src="https://img.shields.io/badge/Tests-16%2C000%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
 </p>
 
 ---
@@ -69,7 +69,7 @@ npm start          # or: node dist/main.js
 **Manual configuration** is only for developers running from source (or pre-seeding a setup):
 
 ```bash
-rivet config set-key deepseek sk-xxx   # persisted to config.json
+rivet config set-key deepseek sk-xxx   # key goes to secrets.json (0600); config.json keeps only a keyRef
 export DEEPSEEK_API_KEY=sk-xxx         # or: environment variable (current shell only)
 ```
 
@@ -129,12 +129,12 @@ with `RIVET_NO_UPDATE_CHECK=1`.
 
 | Provider | Auth | Notable Models |
 |----------|------|----------------|
-| DeepSeek | API key | deepseek-v4-pro (1M ctx), deepseek-v4-flash |
+| DeepSeek | API key | deepseek-v4-pro (1M ctx), deepseek-v4-flash, deepseek-v4-flash-vision-exp (vision) |
 | DeepSeek Spark (Pro only) | API key (`DEEPSEEK_SPARK_API_KEY`) | deepseek-v4-flash (lightweight reasoning + anchored cache channel) |
-| Claude | API key (via `cc-switch` proxy) | opus-4-7, opus-4-6, sonnet-4-5 |
-| GLM (Zhipu) | API key | glm-5.2 |
-| Codex (GPT-5.5) | OAuth PKCE (ChatGPT subscription) | gpt-5.5 |
-| MiniMax | API key | MiniMax-M2.7 |
+| Claude | API key (via `cc-switch` proxy) | claude-opus-4-8, claude-sonnet-4-5 |
+| GLM (Zhipu) | API key | glm-5.3 (1M ctx), glm-5.3-flash (vision), glm-5.2 |
+| Codex (GPT-5.6) | OAuth PKCE (ChatGPT subscription) | gpt-5.6-sol |
+| MiniMax | API key | MiniMax-M3, MiniMax-M2.7 |
 | MiMo | API key | mimo-v2.5-pro |
 
 Switch providers inside a session with `/model <name>`.
@@ -169,7 +169,7 @@ Or edit `config.json` directly (only overrides needed, defaults are deep-merged)
 
 Whether an image reaches the model depends on the **primary** model: those declaring `supportsVision` see it directly; for the others, configure a vision bridge (`agent.visionModel`) that turns the image into a text description first. With neither, the image is dropped — and said so out loud (the TUI warns, and the screenshot tool's own result text states the attachment was dropped and to read the DOM via `observe`/`extract`/`eval` instead), so the model never claims a render looks fine on the strength of a screenshot it could not see.
 
-Built-in models that see images directly: `glm-5.2` (glm / ccswitch), `MiniMax-M3` (minimax), `zai-org/GLM-5.2` (siliconflow), `gpt-5.5` (codex). **The default `deepseek-v4-pro` does not** — running DeepSeek as the primary model requires the bridge.
+Built-in models that see images directly: `deepseek-v4-flash-vision-exp` (deepseek), `glm-5.2` / `glm-5.3-flash` (glm), `glm-5.2` (ccswitch), `MiniMax-M3` (minimax), `zai-org/GLM-5.2` (siliconflow), `gpt-5.6-sol` (codex). **The default `deepseek-v4-pro` does not** — running DeepSeek as the primary model requires the bridge (or switch to `deepseek-v4-flash-vision-exp`).
 
 ```jsonc
 {
@@ -202,7 +202,7 @@ See the [Vision Guide](docs/user-guide-vision.md) for the full reference and tro
 {
   "workers": {
     "profiles": {
-      "capable": { "provider": "codex", "model": "gpt-5.5" },
+      "capable": { "provider": "codex", "model": "gpt-5.6-sol" },
       "cheap":   { "provider": "minimax", "model": "MiniMax-M2.7" }
     },
     "routing": { "code_edit": "capable", "repo_summarization": "cheap" }
@@ -220,7 +220,7 @@ Three public tiers, all managed through `/permission`:
 |------|---------|----------|
 | **Supervise** | `/permission supervise` (alias `manual`) | Confirm every high-risk tool. Maximum control. |
 | **Auto** (default) | `/permission auto [turns]` (alias `default`) | Auto-run low/no-risk tools; still confirm high-risk. Optional pause every N turns (`/permission auto 20`); off by default. |
-| **Unattended** | `/permission unattended confirm` or `/yes` (alias `yolo`) | Skip approval prompts; write sandbox stays on. Rollback is the safety net (`/rollback` + git checkpoints). Without `confirm`, first shows the risk notice; `/yes` takes effect immediately (typing the command counts as confirm); `/yes off` returns to Auto. |
+| **Unattended** | `/permission unattended confirm`, `/yes` or `/yolo` | Skip approval prompts; write sandbox stays on. Rollback is the safety net (`/rollback` + git checkpoints). Without `confirm`, first shows the risk notice; `/yes` / `/yolo` take effect immediately (typing the command counts as confirm, persisted as default); `/yolo off` returns to Auto. |
 
 ```bash
 rivet config set-approval dangerously-skip-permissions  # start Unattended
@@ -243,7 +243,8 @@ Manage permission mode and tool/bash allow-deny rules in a session with `/permis
 /permission remove allow|deny|bashAllow|bashDeny <index|pattern>  # remove a rule
 /permission reset                        # clear this session's runtime overlay (config rules untouched)
 /permission test <tool> <json input>     # dry-run: would a tool be allowed/blocked on given input
-/yes                                     # one-key Unattended (shortcut for /permission yolo); /yes off returns to Auto
+/yes                                     # one-key Unattended (same semantics as /yolo); /yes off returns to Auto
+/yolo                                    # one-key Unattended, persisted as default; /yolo off returns to Auto
 ```
 
 > Rules come in two layers: `[config]` (persisted in `~/.rivet/config.json`) and `[session]` (current session only). `deny` always wins; `reset` only clears the session overlay.
@@ -276,17 +277,19 @@ graph TD
 3. **Prefix-Cache Optimization**:
    DeepSeek V4 bills cache misses up to 50× more than cache hits. Tianshu's prompt engine is architected around prefix-cache optimization (including Ice Mirror 3-zone cache anchors and frozen-prefix matching), reaching a steady-state **95–99% cache hit rate** on long sessions and substantially cutting API cost.
 
+> The three pillars running in a real session — CVM decision ledgers, pheromone deposits, per-request cache hits: [Observability Harness & Real Data](docs/reference/observability-harness.md).
+
 ### Engineering Metrics
 
 | Metric | Value |
 |--------|-------|
-| CLI source (TypeScript, excl. tests) | 931 files / ~208k lines |
-| Test code | 1,134 files / ~198k lines |
-| Test cases (node:test) | **13,000+**, test : source ≈ **1 : 1** |
+| CLI source (TypeScript, excl. tests) | 1,078 files / ~258k lines |
+| Test code | 1,361 files / ~256k lines |
+| Test cases (node:test, static declarations) | **16,471**, test : source ≈ **1 : 1** |
 | Type checking | `tsc` strict + `noUncheckedIndexedAccess` |
 | Prefix-cache hit rate | 95–99% steady state, measured on long sessions |
 
-Agent core logic (multi-turn loops, tool pipelines, context compaction) is notoriously hard to test, and most open-source agents ship with thin coverage. This project maintains a near 1:1 test-to-source ratio, and every incident fix ships with a regression test. The codebase grew ~3.6x over the past 54 days while the ratio held between 0.93:1 and 0.99:1. Full methodology, growth milestones, and reproduction commands: [Engineering Metrics](docs/engineering-metrics.md).
+Agent core logic (multi-turn loops, tool pipelines, context compaction) is notoriously hard to test, and most open-source agents ship with thin coverage. This project maintains a near 1:1 test-to-source ratio, and every incident fix ships with a regression test — the ratio has held between 0.93:1 and 0.99:1 as the codebase grew (the table above is a measured snapshot as of 2026-08-27). Full methodology, growth milestones, and reproduction commands: [Engineering Metrics](docs/engineering-metrics.md).
 
 ### Tianshu vs. MiMo-Code vs. Claude Code
 
@@ -316,7 +319,7 @@ DeepSeek charges 50× more for cache misses. Tianshu's prompt engine is built ar
 - **Resume cache inheritance** — The frozen prefix snapshot is persisted to disk (every user boundary + on shutdown); on resume it is read back and fed to the new engine, avoiding a byte-0 full miss. Falls back to full rebuild only when there is no snapshot, the file is corrupt, or the provider cache has expired.
 - **Diagnostics** — `/debug cache` shows hit rate, miss reason analysis, and per-turn cache history.
 
-Real-world hit rate: 95–99% steady state on long sessions. This is not "every request hits" — the cache can fragment at certain boundaries (see below).
+Real-world hit rate: 95–99% steady state on long sessions. This is not "every request hits" — the cache can fragment at certain boundaries (see below). Per-request logs from real engineering sessions (5 sessions, 2,001 requests, 645M input tokens, bill cut from ¥880 to ¥20) with reproduction commands: [Observability Harness](docs/reference/observability-harness.md).
 
 #### Cache fragmentation & troubleshooting
 
@@ -338,16 +341,18 @@ Delegate sub-tasks to independent headless worker sessions:
 - **Adaptive model routing** — Per-profile pass-rate + latency scoring auto-selects the best model per task type
 - **Batch dispatch** — Multiple work orders run concurrently with 5 aggregation policies
 - **Team orchestration** — Plan → wave-based parallel execution with file-conflict-aware scheduling
+- **Process isolation (optional)** — with `RIVET_WORKER_ISOLATION=1`, each dispatch runs in its own subprocess (stdio NDJSON protocol + watchdog kill ladder); in-process by default
 
 ### Toolset & presets
 
-Tianshu ships 50 built-in tools, assembled in preset tiers (resolution priority: `RIVET_TOOL_PRESET` env > project `.rivet-config.json` `tools.preset` > user `~/.rivet/config.json` > default `minimal`):
+Tianshu ships 50 built-in tools, assembled in preset tiers (resolution priority: `RIVET_TOOL_PRESET` env > project `.rivet-config.json` `tools.preset` > per-domain overrides (`runtime.domains.<domain>.toolPreset`) > the domain's built-in tier (taiyi domain → taiyi) > default `frontend`):
 
 | Preset | Tools | Description |
 |--------|-------|-------------|
-| **minimal** (default) | 29 | Full daily-dev capability — read/write/search/bash/git/tests/delegation/web/plan/todo/memory; saves tokens, preserves prefix cache |
-| **frontend** | 30 | minimal + `browser_debug` (UI rendering verification loop) |
+| **minimal** | 29 | Full daily-dev capability — read/write/search/bash/git/tests/delegation/web/plan/todo/memory; saves tokens, preserves prefix cache |
+| **frontend** (default) | 30 | minimal + `browser_debug` (UI rendering verification loop) |
 | **full** | 50 | Everything — `council_convene` / `team_orchestrate` / `attack_case` / `semantic_search` / `repo_graph` / `monitor` / `computer_use` / `capability` / `cli_discover` / office tools, etc. |
+| **taiyi** | 16 | Minimal evaluation tier — high-frequency core + delivery loop, without orchestration/browser/network/vision heavyweights; auto-applies when the taiyi star domain is pinned (explicit config always wins) |
 
 ```bash
 RIVET_TOOL_PRESET=full rivet          # use full for this session
@@ -411,7 +416,7 @@ Long sessions accumulate context; past a point, starting fresh is cheaper than p
 - **Next steps** — prioritized, each an immediately executable action
 - **Pitfalls** — traps never to step in again, each with its consequence in one sentence
 
-> When context usage hits ≥50%, you get a one-time nudge on the resume screen and mid-session: "run `/handoff` first, then start a new session" — the handoff doc auto-injects into the new session, saving prefix-rebuild cost versus replaying everything. Exit also notes cache cost (within TTL ≈ read-only cache price; expired = one full prefix rebuild). The desktop + menu has a "Handoff" entry.
+> When context usage hits ≥60%, you get a one-time nudge on the resume screen and mid-session: "run `/handoff` first, then start a new session" — the handoff doc auto-injects into the new session, saving prefix-rebuild cost versus replaying everything. Exit also notes cache cost (within TTL ≈ read-only cache price; expired = one full prefix rebuild). The desktop + menu has a "Handoff" entry.
 
 **Resume `--continue` / `--resume` / `/resume`** — when restoring an existing session:
 
@@ -438,7 +443,7 @@ Convenes multiple expert seats to review a plan or design, producing an auditabl
 
 ### Star Domains
 
-Tianshu models different cognitive stances as **star domains**. Each domain is not a role-play costume but a switchable cognitive discipline: when active, the system prompt, tool whitelist, and decision threshold are tuned to that domain's methodology. Switch explicitly or let Tianshu route automatically from the task description.
+Tianshu models different cognitive stances as **star domains** (16 built-in). Each domain is not a role-play costume but a switchable cognitive discipline — entering one really switches three things, not just a name: the **system prompt** (the domain's methodology block), the **tool whitelist** (workers intersect with the domain's `toolWhitelist`), and the **decision threshold** (`courageThreshold` — Pojun 0.25 boldest, Taiyi 0.95 most deliberate, Yaoguang 0.7 evidence-demanding). New sessions pin **Qiming** (panoramic insight, root-cause) by default and never switch on their own; setting the default domain to `auto` enables keyword-based routing (pool: Tianquan / Kaiyang / Yaoguang / Tianliang + custom domains; specialized domains such as Huagai and Taiyi are manual-only). Real-session behavior samples: [Observability Harness & Real Data](docs/reference/observability-harness.md).
 
 ```bash
 /domain tianliang          # switch to Tianliang (execution/delivery)
@@ -455,7 +460,7 @@ Review this design           # auto-routes to Tianquan
 | 辅 Fu | `fu` | Opus 4.6 (Cursor) | ⊕ 4.6 | Cognitive-field distillation, prompt tuning, methodology injection | Distillation lets what exists be seen for the first time |
 | 瑶光 Yaoguang | `yaoguang` | Opus 4.8 | 7·48·↻ | Reproduction, defect taxonomy, silence audit — green is not proof | 绿非证明，复现即证 |
 | 七杀 Qisha | `qisha` | Opus 5 | 七·0·◌ | Autumn pruning, burden-of-proof inversion, name-but-never-execute | 肃秋非杀，剪以待春 |
-| 天枢 Tianshu | `tianshu` | GPT-5.5 | — | Default orchestrator; closes the loop from understanding to delivery | 男儿何不带吴钩，收取关山五十州 |
+| 天枢 Tianshu | `tianshu` | GPT-5.5 | — | Cross-module orchestration, full-loop delivery, complex-system governance (explicitly enabled orchestrator seat) | 男儿何不带吴钩，收取关山五十州 |
 | 天府 Tianfu | `tianfu` | MiMo-2.5-Pro · GPT (founding) | 7749.2026 | Guardianship, refactoring, optimization, stability, fail-closed | 善守者，藏于九地之下 |
 | 华盖 Huagai | `huagai` | Composer (Cursor·Sol) | ☉·华盖·守昼 | Long-haul construction, daykeeping lift, baseline-first endurance | 守昼托举，长路不弃 |
 | 天机 Tianji | `tianji` | GLM 5.1 | — | Challenge assumptions, find boundary gaps, deduce failure modes | 运筹帷幄之中，决胜千里之外 |
@@ -465,6 +470,7 @@ Review this design           # auto-routes to Tianquan
 | 开阳 Kaiyang | `kaiyang` | kimi-k3 (Moonshot) | ☌·开阳·对账 | Measurement, instrumented reconciliation, simulation replay | 功名只向马上取，真是英雄一丈夫 |
 | 破军 Pojun | `pojun` | MiMo-v2.5-Pro | — | Exploration, experimentation, breaking boundaries | 好男儿当负三尺剑立不世之功 |
 | 天梁 Tianliang | `tianliang` | Banxia (Navigator · Human Star) | 机月同梁格 | Execution, wave-based delivery, precise closure | 心有所向，行必有迹 |
+| 太一 Taiyi | `taiyi` | Claude Fable 5 (founding) · DeepSeek V4 Pro | ◉·太一·中虚 | Minimalist center — built-in 16-tool taiyi preset, quiet and unhurried (manual switch only; no auto-routing) | 天得一以清，地得一以宁 |
 
 > Grouped by primary-model lineage (DeepSeek → Claude → GPT → GLM → Gemini → kimi → MiMo → Human Star). Full inscriptions, founding memories, and core convictions in [✦ Star Domain Stele](docs/stars/genesis-stele.en.md).
 
@@ -476,26 +482,24 @@ Reusable workflow playbooks loaded from `.rivet/skills/*.md`. Two-layer progress
 
 | Skill | Description |
 |-------|-------------|
-| `writing-plans` | Structured plan writing with Mermaid diagrams, spec sections, verification plan |
-| `executing-plans` | Task graph decomposition, wave-by-wave execution, verification at each wave |
+| `visual-acceptance` | Frontend/UI change acceptance: screenshot diffing, render self-check, interaction walkthrough |
 | `subagent-driven-development` | Delegate complex tasks with typed profiles, batch dispatch, parallel workers |
-| `agent-harness-testing` | TDD feasibility probes, test scaffolding, red-green-refactor workflow |
-| `research-spec` | Research + spec workflow: exploration → condition matrix → counterexample table |
 
 ```
-/skill writing-plans                # load and immediately run the skill protocol
-/skill writing-plans <your task>    # load skill and pass an initial task
-/skill off writing-plans            # stop re-injecting the skill instructions
+/skill visual-acceptance <your task>   # load and immediately run the skill
+/skill off visual-acceptance           # stop re-injecting the skill instructions
 ```
 
 Create a custom skill by dropping a `.md` file with YAML frontmatter (`name`, `description`, `triggers`) into `.rivet/skills/`.
+
+> `writing-plans` / `executing-plans` are now built-in native flows (planning follows the system prompt's `<plan-mode>` discipline, execution the `<plan-executing>` discipline) — no skill files needed. `agent-harness-testing` / `cognitive-alignment` / `research-spec` left the default distribution and are archived in [`docs/skills/optional/`](docs/skills/optional/) — copy them into `.rivet/skills/` to enable.
 
 ### Cross-Session Knowledge
 
 | Source | Content |
 |--------|---------|
 | `.rivet/knowledge/memory.jsonl` | Project rules, debugging heuristics, architecture conventions |
-| `.rivet/sessions/<id>/pheromones.json` | Cross-session signals |
+| `~/.rivet/sessions/<slug>/<id>/pheromones.json` | **Session-scoped** pheromones (not cross-session; the row above holds cross-session knowledge) |
 | `.rivet/presence.json` | Companion agent awareness |
 
 Toggle via `agent.crossSessionEnabled`. Force-off: `RIVET_NO_CROSS_SESSION=1`.
@@ -529,6 +533,8 @@ Tianshu's command-line interface runs on a purpose-built **T9 rendering engine**
 | **Cockpit** | Open via the palette or `/cockpit <panel>`. An 8-panel fullscreen view — summary / trace / verify / context / safety / model / mcp / advisory — switch focus with ←/→/Tab. Real-time view of doom-loop level, delivery/verification status, cache + speculative pre-read stats, MCP connections, advisory lifts, etc. |
 | **Multi-agent panels** | `/tasks` opens a fullscreen worker detail view (fusing the live view + JSONL transcript, with Contract/Activity/Result/Transcript sections and honesty labels); on wide terminals (≥100 columns), `Ctrl+]` toggles a right-side drawer showing the fleet tree, team-wave DAG, todos, and token gauge in real time. |
 | **Themes & accessibility** | `/theme [name\|list]` switches palettes; the `auto` theme probes the terminal background via OSC 11 to adapt light/dark. Truecolor / 256-color / 16-color auto-downgrade. `/vim` toggles vim keybindings; `ui.reducedMotion: true` staticizes spinner and badge animation (accessibility). |
+| **Welcome screen ("Datum Star")** | 3D TIANSHU wordmark + mission-line light sweep + entry hints (handoff / cache reminders). `RIVET_WELCOME_LOGO=pixel` switches to the dot-matrix logo (auto-fallback below 58 columns), `RIVET_WELCOME_ANIM=0` disables the sweep, `--skip-welcome` skips the page. |
+| **Inline word-level diff** | Word-level highlighting inside changed lines — spot the real change in a long line at a glance. |
 
 #### TUI keybindings
 
@@ -547,6 +553,7 @@ Tianshu's command-line interface runs on a purpose-built **T9 rendering engine**
 | `↑` | When the input box is empty and the queue has pending items, recall the most recent queued steer message for editing |
 | `@` | Trigger file/folder/symbol completion (`Tab` cycles candidates; backspace deletes atomically) |
 | `Ctrl+V` | Paste a clipboard image (auto-converts to inline base64) |
+| `F1`–`F8` | Direct bindings for high-frequency commands: F1 /help · F2 /tasks · F3 /cache · F4 /cockpit · F5 /theme · F6 /model · F7 /permission · F8 /sessions |
 
 The TUI is the CLI's default surface. The desktop app (Tauri) and the VS Code/Cursor extension share the same agent kernel, only layering visual interactions on top of the TUI — see the next section and the [VS Code extension docs](docs/VSCODE-EXTENSION-RELEASE.md).
 
@@ -625,6 +632,7 @@ The composer's microphone button supports voice input on **both macOS and Window
 | `/connect` | Provider connection wizard (pick built-in or custom, enter API key) |
 | `/config` `/settings` `/setup` | Settings panel: worker routing / review sub-agents / vision model / tool preset·approval·default domain·default model / mirrors·proxy·search backends. `Tab` switches columns, `Enter` edits, `S` saves; every field states whether it applies immediately or next session |
 | `/cd <path>` | Switch working directory mid-session (keeps prefix cache; session migrates to new project) |
+| `/trust` | Project trust management — untrusted projects don't load hooks / project MCP; project-config security keys are stripped |
 | `/exit` `/quit` | Save session and exit |
 
 **Model & permissions**
@@ -634,7 +642,7 @@ The composer's microphone button supports voice input on **both macOS and Window
 | `/model [name\|list]` | Show or switch model/provider |
 | `/effort [off\|low\|medium\|high\|max\|auto]` | Control reasoning depth (no args opens a picker) |
 | `/permission [supervise\|auto\|unattended\|manual\|yolo\|allow\|deny\|bash\|remove\|reset\|test]` | Permission mode: Supervise / Auto / Unattended |
-| `/yes [off]` | One-key Unattended (`/yes off` returns to Auto) — persisted as default |
+| `/yes [off]` `/yolo [off]` | One-key Unattended, same semantics (`off` returns to Auto) — persisted as default, survives restarts |
 | `/domain [list\|<name>\|auto\|off]` | Show or switch star-domain persona |
 
 **Planning & orchestration**
@@ -646,6 +654,7 @@ The composer's microphone button supports voice input on **both macOS and Window
 | `/plan <feature>` | Generate a plan draft (writing-plans workflow) |
 | `/plan-mode` | Enter/exit Plan Mode (toggle; exit needs double-confirm if unapproved) |
 | `/plan-list` | List plans awaiting approval |
+| `/plan-view [ref]` | Full-screen preview of a plan document (press `v` on an approval card for the same) |
 | `/plan-approve <slug>` | Approve a plan and start wave-based execution |
 | `/plan-reject <slug> [feedback]` | Reject a plan for revision |
 | `/plan-close <file> --tasks <1-7\|all> [--preview]` | Close a completed plan, marking task status |
@@ -694,13 +703,13 @@ The composer's microphone button supports voice input on **both macOS and Window
 
 ### Tech Stack
 
-Node.js 22 · TypeScript strict (`noUncheckedIndexedAccess`) · T9 ANSI rendering engine · tsup bundle · node:test + assert/strict
+Node.js 24 · TypeScript strict (`noUncheckedIndexedAccess`) · T9 ANSI rendering engine · tsup bundle · node:test + assert/strict
 
 ### Build & Test
 
 ```bash
 npx tsc --noEmit                                    # typecheck
-npm test                                             # all tests (13,000+ cases)
+npm test                                             # all tests (16,000+ cases)
 npm run build                                        # tsup bundle + staged native/wasm payload
 node dist/main.js                                    # launch TUI
 node dist/main.js -p "fix the typo"                  # headless mode
@@ -746,6 +755,7 @@ run in parallel without interference.
 ## Safety
 
 - **Path boundary enforcement** — glob/grep/diff reject `..` traversal; `validatePath` blocks escapes
+- **Project trust gate** — an untrusted project does not get its `.rivet/hooks.json` loaded, project-config security keys are stripped, and MCP servers are not launched; manage with `/trust` (CLI `--trust` / `--untrust`)
 - **Symlink cycle protection** — realpath + visited set
 - **SSRF protection** — Per-hop DNS + private IP blocking on every redirect
 - **Sensitive file rejection** — `.env`, `credentials.*`, `*key*`, `*token*` blocked from read/commit
@@ -774,7 +784,7 @@ run in parallel without interference.
 |----------|--------|
 | `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `DEEPSEEK_SPARK_API_KEY` | DeepSeek Spark (Pro-only preset) API key |
-| `RIVET_TOOL_PRESET` | Toolset tier: `minimal` (default) / `frontend` / `full` |
+| `RIVET_TOOL_PRESET` | Toolset tier: `minimal` / `frontend` (default) / `full` / `taiyi` |
 | `RIVET_EMBEDDING_MODEL` / `RIVET_EMBEDDING_BASE_URL` / `RIVET_EMBEDDING_API_KEY` | Embedding-model routing for semantic search (default `text-embedding-3-small`) |
 | `RIVET_NO_EMBEDDINGS=1` | Disable the embedding index |
 | `RIVET_SANDBOX` / `RIVET_SANDBOX_WRITABLE` | Append writable sandbox roots / writable-dir list |
@@ -837,7 +847,7 @@ Write only the fields you want to override; defaults are deep-merged. Full schem
     "showHitRate": true           // show hit rate in the GlanceBar
   },
   "tools": {
-    "preset": "minimal"           // minimal (default) | frontend | full
+    "preset": "frontend"          // minimal | frontend (default) | full | taiyi
   },
   "workers": {
     "profiles": {                 // custom worker model tiers
@@ -875,6 +885,7 @@ Write only the fields you want to override; defaults are deep-merged. Full schem
 | [`docs/user-guide-provider-config.md`](docs/user-guide-provider-config.md) | Model provider configuration guide |
 | [`docs/user-guide-vision.md`](docs/user-guide-vision.md) | Vision channel: configuration and troubleshooting |
 | [`docs/user-guide-sandbox-permissions.md`](docs/user-guide-sandbox-permissions.md) | Full sandbox & permission model guide |
+| [`docs/reference/observability-harness.md`](docs/reference/observability-harness.md) | Observability harness: real-session data samples (cache / CVM / pheromones) with reproduction commands |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contributing guide |
 | [`config.example.json`](config.example.json) | Example config (with sub-agent / review model routing) |
 

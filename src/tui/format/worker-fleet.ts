@@ -28,7 +28,6 @@ function statusGlyph(status: FleetWorkerView['status']): string {
   switch (status) {
     case 'running': return '◐'
     case 'completed': return '✓'
-    case 'completed': return '✓'
     case 'failed': return '✗'
     case 'blocked': return '⊗'
     case 'escalated': return '↑'
@@ -46,7 +45,6 @@ function statusColorKey(status: FleetWorkerView['status'], failureReason?: strin
   if (status === 'completed' && failureReason === 'review-findings') return 'warning'
   switch (status) {
     case 'running': return 'primary'
-    case 'completed': return 'success'
     case 'completed': return 'success'
     case 'failed': return 'error'
     default: return 'warning'

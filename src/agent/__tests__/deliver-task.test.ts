@@ -817,7 +817,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     const terminal = activities.filter(a => a.status !== 'running')
     assert.equal(terminal.length, 1, '有始必须有终：detached 审查结束要补终态事件')
     assert.equal(terminal[0]!.workOrderId, running[0]!.workOrderId)
-    assert.equal(terminal[0]!.status, 'passed')
+    assert.equal(terminal[0]!.status, 'completed')
     assert.match(terminal[0]!.progressLine ?? '', /审查通过 \(auto\)/)
     assert.equal(terminal[0]!.failureReason, undefined)
   })

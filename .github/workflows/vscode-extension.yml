@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths: ['vscode-extension/**']
+  pull_request:
+    paths: ['vscode-extension/**']
   release:
     types: [published]
 

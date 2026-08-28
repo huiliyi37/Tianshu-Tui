@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,6 +12,15 @@ import type { OaiMessage } from '../../api/oai-types.js'
 
 const TOKEN = 'secret-token'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
+
+// 信任门：loadHooksConfig 对未授信 cwd 恒返回 { hooks: [] }（fail-closed）。
+// 本套件验证 PUT/GET 读写往返，须显式授信（同 verify-config.test.ts 约定）。
+const PREV_TRUST = process.env.RIVET_TRUST_PROJECT
+process.env.RIVET_TRUST_PROJECT = '1'
+after(() => {
+  if (PREV_TRUST === undefined) delete process.env.RIVET_TRUST_PROJECT
+  else process.env.RIVET_TRUST_PROJECT = PREV_TRUST
+})
 
 class FakeAgent implements ManagedAgent {
   run(_p: string, _cb: AgentCallbacks) { return Promise.resolve() }

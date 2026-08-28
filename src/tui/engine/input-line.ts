@@ -74,6 +74,8 @@ interface UndoUnit {
   value: string
   cursor: number
   kind: UndoKind
+  /** 图片附件快照（引用拷贝，data URL 字符串不可变）——Ctrl+C 清空/退格删图后可整体恢复。 */
+  images: string[]
 }
 
 /** CJK 统一表意/扩展A/兼容/假名/谚文——与 \w 一起视为 word 字符。
@@ -352,6 +354,9 @@ export class InputLine {
   /** 待 app 写出 OSC52 的剪贴文本（takeClipboardOut 取走后清空）。 */
   private _clipboardOut: string | null = null
 
+  /** 粘滞换行模式（对齐公开仓 newlineMode）：开启后 Enter=插入换行。 */
+  private _newlineMode = false
+
   constructor(options: InputLineOptions = {}) {
     this._value = options.value ?? ''
     this._cursor = this._value.length
@@ -382,6 +387,12 @@ export class InputLine {
     this._vimEnabled = enabled
     this._vimMode = 'insert'
     this._visualLineWise = false
+  }
+
+  /** 粘滞换行模式（对齐公开仓 newlineMode）。 */
+  get newlineMode(): boolean { return this._newlineMode }
+  setNewlineMode(enabled: boolean): void {
+    this._newlineMode = enabled
   }
 
   /** visual 模式是否为 linewise（V 进入；charwise v 为 false）。渲染 `-- VISUAL LINE --` 用。 */
@@ -488,9 +499,20 @@ export class InputLine {
     this.onImagesChangeCallback?.([...this._images])
   }
 
-  /** 清空图片附件。 */
+  /** 清空图片附件（记 undo——Ctrl+C 清空后 Ctrl+Z 可整体恢复）。 */
   clearImages(): void {
     if (this._images.length === 0) return
+    this.recordUndo('delete')
+    this._images = []
+    this.onImagesChangeCallback?.([])
+  }
+
+  /** 清空文本与图片附件（单个 undo 单元——Ctrl+C 后 Ctrl+Z 一键恢复两者）。 */
+  clearAll(): void {
+    this.recordUndo('replace')
+    this._value = ''
+    this._cursor = 0
+    this.onChangeCallback?.(this._value, this._cursor)
     this._images = []
     this.onImagesChangeCallback?.([])
   }
@@ -613,6 +635,11 @@ export class InputLine {
         this.onChangeCallback?.(this._value, this._cursor)
         return { type: 'change', value: this._value, cursor: this._cursor }
       }
+      // 粘滞换行模式（对齐公开仓 newlineMode）：Enter 语义是「插入换行」，
+      // 发送用 Shift+Enter 退出模式后按 Enter（app 路由层拦截 shift 翻转）。
+      if (this._newlineMode) {
+        return this.insertChar('\n')
+      }
       const submitted = this.expandPastes(this._value)
       const submittedImages = [...this._images]
       this.clearAfterSubmit()
@@ -732,7 +759,7 @@ export class InputLine {
       && this._undoOpen === kind
       && this._undoExpectCursor === this._cursor
     if (!canMerge) {
-      this._undoStack.push({ value: this._value, cursor: this._cursor, kind })
+      this._undoStack.push({ value: this._value, cursor: this._cursor, kind, images: [...this._images] })
       this._undoChars += this._value.length
       while (this._undoStack.length > UNDO_STACK_MAX || this._undoChars > UNDO_TOTAL_CHARS_MAX) {
         const dropped = this._undoStack.shift()
@@ -756,7 +783,7 @@ export class InputLine {
     this.sealUndo()
     if (!unit) return null
     this._undoChars -= unit.value.length
-    this._redoStack.push({ value: this._value, cursor: this._cursor, kind: unit.kind })
+    this._redoStack.push({ value: this._value, cursor: this._cursor, kind: unit.kind, images: [...this._images] })
     this._redoChars += this._value.length
     while (this._redoStack.length > UNDO_STACK_MAX || this._redoChars > UNDO_TOTAL_CHARS_MAX) {
       const dropped = this._redoStack.shift()
@@ -765,7 +792,9 @@ export class InputLine {
     }
     this._value = unit.value
     this._cursor = Math.min(unit.cursor, this._value.length)
+    this._images = [...unit.images]
     this.onChangeCallback?.(this._value, this._cursor)
+    this.onImagesChangeCallback?.([...this._images])
     return { type: 'change', value: this._value, cursor: this._cursor }
   }
 
@@ -775,11 +804,13 @@ export class InputLine {
     this.sealUndo()
     if (!unit) return null
     this._redoChars -= unit.value.length
-    this._undoStack.push({ value: this._value, cursor: this._cursor, kind: unit.kind })
+    this._undoStack.push({ value: this._value, cursor: this._cursor, kind: unit.kind, images: [...this._images] })
     this._undoChars += this._value.length
     this._value = unit.value
     this._cursor = Math.min(unit.cursor, this._value.length)
+    this._images = [...unit.images]
     this.onChangeCallback?.(this._value, this._cursor)
+    this.onImagesChangeCallback?.([...this._images])
     return { type: 'change', value: this._value, cursor: this._cursor }
   }
 
@@ -818,7 +849,16 @@ export class InputLine {
   }
 
   private backspace(): InputLineEvent | null {
-    if (this._cursor <= 0) return null
+    if (this._cursor <= 0) {
+      // 文本已空：退格删除最后一张图片附件（2026-08 用户反馈：粘贴后删不掉）。
+      if (this._images.length > 0) {
+        this.recordUndo('delete')
+        this._images.pop()
+        this.onImagesChangeCallback?.([...this._images])
+        return { type: 'change', value: this._value, cursor: this._cursor }
+      }
+      return null
+    }
     this.recordUndo('delete')
     // @mention 节点原子删除：光标左侧紧邻完整 token 时整体删除（@file 节点化 v1）。
     // 右侧字符必须是空白或行尾——否则光标其实在 token 中间（如 'fix @file:sr|c'），

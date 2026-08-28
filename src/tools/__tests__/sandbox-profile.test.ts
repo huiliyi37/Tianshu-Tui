@@ -114,14 +114,22 @@ describe('sandbox-profile: Seatbelt', () => {
     const profile = buildSeatbeltProfile(['/not/created/yet'], () => { throw new Error('ENOENT') })
     assert.ok(profile.includes('(subpath "/not/created/yet")'), profile)
   })
-  it('darwin: the real default profile actually permits mkdtemp under $TMPDIR', { skip: process.platform !== 'darwin' }, () => {
+  it('darwin: the real default profile actually permits mkdtemp under $TMPDIR', { skip: process.platform !== 'darwin' }, (t) => {
     const profile = buildSeatbeltProfile(defaultWritableRoots({ cwd: process.cwd() }))
     assert.ok(
       profile.includes(`(subpath "${realpathSync(tmpdir())}")`),
       'canonical temp dir must be writable or the whole toolchain gets EPERM',
     )
     // Kernel-level proof, not just a string assertion — this is the exact call
-    // (mkdtemp under $TMPDIR) that regressed.
+    // (mkdtemp under $TMPDIR) that regressed. Nested Seatbelt（本测试自身跑在
+    // 沙箱内）直接拒绝 sandbox-exec（exit 71 sandbox_apply: Operation not
+    // permitted）：冒烟探针失败即跳过 kernel 级验证，保留字符串断言。
+    try {
+      execFileSync('sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true'], { stdio: 'ignore' })
+    } catch {
+      t.skip('sandbox-exec unavailable: nested Seatbelt denies sandbox_apply')
+      return
+    }
     const made = execFileSync('sandbox-exec', ['-p', profile, '/usr/bin/mktemp', '-d'], { encoding: 'utf8' }).trim()
     rmSync(made, { recursive: true, force: true })
   })
