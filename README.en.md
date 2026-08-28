@@ -2,7 +2,7 @@
   <img src="docs/brand/assets/tianshu-banner-dark.jpg" alt="天枢 Tianshu" width="100%">
 </p>
 
-<h1 align="center">天枢 <sub>Tianshu</sub></h1>
+<h1 align="center">天枢 <sub>Tianshu Harness</sub></h1>
 
 <p align="center">
   <b>把星辰带给每一位开发者 · Models as partners, not tools.</b>
@@ -26,7 +26,15 @@
 
 ---
 
-Tianshu (天枢) is a high-performance terminal coding agent runtime featuring a robust **Cognitive Virtual Machine (CVM)**, a continuous self-perception engine, stigmergic file-based memory, and deep prefix-cache optimization (a measured steady-state **95–99% prefix-cache hit rate** on DeepSeek V4). It is designed to act as an autonomous developmental partner rather than a passive code editing utility.
+Tianshu Harness (天枢) is a high-performance coding agent runtime — one agent kernel shared by two surfaces: a **terminal TUI** (pure-ANSI in-house rendering engine) and a **desktop GUI** (Tauri; macOS / Windows / Linux). It features a robust **Cognitive Virtual Machine (CVM)**, a continuous self-perception engine, stigmergic file-based memory, and deep prefix-cache optimization (a measured steady-state **95–99% prefix-cache hit rate** on DeepSeek V4). It is designed to act as an autonomous developmental partner rather than a passive code editing utility.
+
+<p align="center">
+  <img src="docs/brand/assets/tianshu-tui-screenshot.png" alt="Tianshu TUI (terminal)" width="49%">
+  <img src="docs/brand/assets/tianshu-gui-screenshot.jpg" alt="Tianshu desktop GUI" width="49%">
+</p>
+<p align="center">
+  <sub>Left: terminal TUI (v3.8.0, welcome screen + GlanceBar status line) · Right: desktop GUI (session sidebar + star-domain quick picks, custom wallpaper via Theme Studio) — same agent kernel</sub>
+</p>
 
 > [!NOTE]
 > The project was originally codenamed **Rivet**; the installed CLI binary is still

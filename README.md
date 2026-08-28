@@ -31,7 +31,15 @@
 
 ---
 
-**天枢 (Tianshu)** 是一个全功能、高性能的终端编程智能体运行时（TUI）。它跳出了传统 AI 编程助手把大模型仅当成“工具”的局限，基于**认知虚拟机 (CVM)**、**自感知层**和**信息素（Stigmergy）自衰减记忆**构建，让 AI 成为有独立判断与认知防护的“开发伙伴”。同时针对 DeepSeek V4 做了前缀缓存工程优化（长会话实测稳态**命中率 95–99%**）。
+**天枢（Tianshu Harness）**是一个全功能、高性能的编程智能体运行时——**终端 TUI**（纯 ANSI 自研渲染引擎）与**桌面 GUI**（Tauri，macOS / Windows / Linux）双形态共享同一 agent 内核。它跳出了传统 AI 编程助手把大模型仅当成“工具”的局限，基于**认知虚拟机 (CVM)**、**自感知层**和**信息素（Stigmergy）自衰减记忆**构建，让 AI 成为有独立判断与认知防护的“开发伙伴”。同时针对 DeepSeek V4 做了前缀缓存工程优化（长会话实测稳态**命中率 95–99%**）。
+
+<p align="center">
+  <img src="docs/brand/assets/tianshu-tui-screenshot.png" alt="天枢 TUI（终端版）" width="49%">
+  <img src="docs/brand/assets/tianshu-gui-screenshot.jpg" alt="天枢桌面端 GUI" width="49%">
+</p>
+<p align="center">
+  <sub>左：终端 TUI（v3.8.0，欢迎页 + GlanceBar 状态栏） · 右：桌面端 GUI（会话侧栏 + 星域速选，主题工作室自定义壁纸）——同一 agent 内核</sub>
+</p>
 
 > [!NOTE]
 > 本项目最初的开发代号为 **Rivet**；为保持向后兼容，已安装的 CLI 命令名仍为 `rivet`。
