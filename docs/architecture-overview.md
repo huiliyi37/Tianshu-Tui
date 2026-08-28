@@ -1,9 +1,9 @@
 # 天枢 Architecture Overview
 
-> v2.23.0 · Node.js 24+ / TypeScript strict / 纯 ANSI TUI（`src/tui/engine/`）+ Tauri 桌面端 / node:test / ESM
+> v3.8.0 · Node.js 24+ / TypeScript strict / 纯 ANSI TUI（`src/tui/engine/`）+ Tauri 桌面端 / node:test / ESM
 >
-> 规模：CLI 源码 931 文件 / 20.8 万行，测试 1,134 文件 / 19.8 万行（13,125 用例 / 2,251 suites 实测），68 个 hook 模块。
-> 逐期数据与迭代里程碑见 [`engineering-metrics.md`](./engineering-metrics.md)（数据截至 2026-07-26）。
+> 规模：CLI 源码 1,078 文件 / 25.8 万行，测试 1,361 文件 / 25.6 万行（16,471 用例静态声明），72 个 hook 模块。
+> 逐期数据与迭代里程碑见 [`engineering-metrics.md`](./engineering-metrics.md)（数据截至 2026-08-28）。
 >
 > 开发代号曾用 **Rivet**；CLI 命令仍为 `rivet`。Agent 导航索引见根目录 [`AGENTS.md`](../AGENTS.md)。
 
@@ -101,7 +101,7 @@ System = static.ts（会话内冻结） + volatile（动态区） + appendixDelt
 
 | 机制 | 作用 |
 |------|------|
-| `/domain` + 自动路由 | 切换 12 星域的提示词后缀 / 决策风格 / 勇气阈值 |
+| `/domain` + 自动路由 | 切换 16 星域的提示词后缀 / 决策风格 / 勇气阈值 |
 | Plan Mode | 调研 → 结构化计划 → 审批 → 分波执行（wave-gate） |
 | `/team` | 多 worker 并行，文件冲突感知调度 |
 | `/council` | 多席位审查，可选反驳轮 |

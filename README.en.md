@@ -286,10 +286,11 @@ graph TD
 | CLI source (TypeScript, excl. tests) | 1,078 files / ~258k lines |
 | Test code | 1,361 files / ~256k lines |
 | Test cases (node:test, static declarations) | **16,471**, test : source ≈ **1 : 1** |
+| Total commits | **6,178** on main (repo created 2026-05-15, 105 days in) |
 | Type checking | `tsc` strict + `noUncheckedIndexedAccess` |
 | Prefix-cache hit rate | 95–99% steady state, measured on long sessions |
 
-Agent core logic (multi-turn loops, tool pipelines, context compaction) is notoriously hard to test, and most open-source agents ship with thin coverage. This project maintains a near 1:1 test-to-source ratio, and every incident fix ships with a regression test — the ratio has held between 0.93:1 and 0.99:1 as the codebase grew (the table above is a measured snapshot as of 2026-08-27). Full methodology, growth milestones, and reproduction commands: [Engineering Metrics](docs/engineering-metrics.md).
+Agent core logic (multi-turn loops, tool pipelines, context compaction) is notoriously hard to test, and most open-source agents ship with thin coverage. This project maintains a near 1:1 test-to-source ratio, and every incident fix ships with a regression test — the ratio has held between 0.93:1 and 0.99:1 as the codebase grew (the table above is a measured snapshot as of 2026-08-28). Full methodology, growth milestones, and reproduction commands: [Engineering Metrics](docs/engineering-metrics.md).
 
 ### Tianshu vs. MiMo-Code vs. Claude Code
 
