@@ -174,3 +174,36 @@ describe('probeProviderKey — models 列表（批量添加「从接口拉取」
     assert.equal(result.models, undefined)
   })
 })
+
+// ── 协议感知鉴权头 ──────────────────────────────────────────────────────
+
+describe('probeProviderKey — protocol', () => {
+  let originalFetch: typeof global.fetch
+  beforeEach(() => { originalFetch = global.fetch })
+  afterEach(() => { global.fetch = originalFetch })
+
+  it('anthropic 协议发 x-api-key + anthropic-version，不发 Bearer', async () => {
+    let capturedHeaders: Record<string, string> | undefined
+    global.fetch = mock.fn(async (_url: string, init?: { headers?: Record<string, string> }) => {
+      capturedHeaders = init?.headers
+      return new Response(JSON.stringify({ data: [{ id: 'claude-x' }] }), { status: 200 })
+    }) as any
+    const result = await probeProviderKey('sk-ant-test', 'https://api.example.com/v1', 'anthropic')
+    assert.equal(result.ok, true)
+    assert.equal(capturedHeaders?.['x-api-key'], 'sk-ant-test')
+    assert.ok(capturedHeaders?.['anthropic-version'])
+    assert.equal(capturedHeaders?.['Authorization'], undefined)
+  })
+
+  it('openai 协议（默认）发 Authorization Bearer，不发 x-api-key', async () => {
+    let capturedHeaders: Record<string, string> | undefined
+    global.fetch = mock.fn(async (_url: string, init?: { headers?: Record<string, string> }) => {
+      capturedHeaders = init?.headers
+      return new Response('{}', { status: 200 })
+    }) as any
+    const result = await probeProviderKey('sk-test', 'https://api.example.com/v1')
+    assert.equal(result.ok, true)
+    assert.equal(capturedHeaders?.['Authorization'], 'Bearer sk-test')
+    assert.equal(capturedHeaders?.['x-api-key'], undefined)
+  })
+})

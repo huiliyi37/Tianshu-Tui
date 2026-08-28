@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { providerSchema } from '../schema.js'
 import { PROVIDER_PRESETS, cloneProviderPreset, providerPresetKeys } from '../provider-presets.js'
+import { migratePresetModelBackfill } from '../manager.js'
 
 describe('provider presets', () => {
   it('contains required built-in provider modes', () => {
@@ -76,5 +77,41 @@ describe('provider presets', () => {
     assert.equal(flash.supportsVision, true, '原生多模态声明视觉')
     assert.equal(flash.contextWindow, 1_000_000)
     assert.deepEqual(flash.pricing, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+  })
+})
+
+// ── migratePresetModelBackfill：预设新增模型回流进存量 provider 快照 ────────
+
+describe('migratePresetModelBackfill', () => {
+  it('缺 glm-5.3/glm-5.3-flash 的存量快照被补齐（幂等，已有条目不动）', () => {
+    const raw = {
+      provider: {
+        providers: {
+          glm: {
+            name: 'glm',
+            models: [{ id: 'glm-5.2', contextWindow: 1_000_000, maxTokens: 131072 }],
+          },
+        },
+      },
+    } as unknown as Record<string, unknown>
+    const changed = migratePresetModelBackfill(raw)
+    assert.equal(changed, true)
+    const models = (raw as { provider: { providers: { glm: { models: Array<{ id: string; supportsVision?: boolean }> } } } }).provider.providers.glm.models
+    assert.deepEqual(models.map(m => m.id), ['glm-5.2', 'glm-5.3', 'glm-5.3-flash'])
+    assert.equal(models[2]?.supportsVision, true, 'glm-5.3-flash carries vision')
+    // 幂等
+    assert.equal(migratePresetModelBackfill(raw), false)
+  })
+
+  it('非预设 provider 与无 models 字段不触碰', () => {
+    const raw = {
+      provider: {
+        providers: {
+          custom: { name: 'custom', models: [{ id: 'x' }] },
+          broken: { name: 'broken' },
+        },
+      },
+    } as unknown as Record<string, unknown>
+    assert.equal(migratePresetModelBackfill(raw), false)
   })
 })

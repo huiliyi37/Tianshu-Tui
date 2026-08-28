@@ -53,14 +53,28 @@ Tianshu Harness (天枢) is a high-performance coding agent runtime — one agen
 
 **A. Desktop app (ready to use)** — download from [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest): macOS `.dmg` · Windows `.msi` · Linux `.AppImage`.
 
-**B. npm global install (recommended for the CLI)** — published as `tianshu-tui`, no local build needed, with auto update checks on startup:
+**B. One-line installer (recommended)** — checks Node ≥ 24 → installs `tianshu-tui` globally (npmmirror registry by default; override via `NPM_CONFIG_REGISTRY`) → launches `rivet`; idempotent, safe to re-run:
+
+```bash
+# macOS / Linux (bash)
+bash <(curl -fsSL https://raw.githubusercontent.com/huiliyi37/Tianshu-Tui/main/scripts/install-tui.sh)
+# install without launching:
+bash <(curl -fsSL https://raw.githubusercontent.com/huiliyi37/Tianshu-Tui/main/scripts/install-tui.sh) --no-launch
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/huiliyi37/Tianshu-Tui/main/scripts/install-tui.ps1 | iex"
+# install without launching (after cloning the repo):
+powershell -ExecutionPolicy Bypass -File scripts\install-tui.ps1 -NoLaunch
+```
+
+**C. npm manual install (for the CLI)** — published as `tianshu-tui`, no local build needed, with auto update checks on startup:
 
 ```bash
 npm install -g tianshu-tui
 rivet
 ```
 
-**C. Build from source**:
+**D. Build from source**:
 
 ```bash
 git clone https://github.com/huiliyi37/Tianshu-Tui.git

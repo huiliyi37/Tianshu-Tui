@@ -295,6 +295,47 @@ function migrateAnthropicProtocol(raw: Record<string, unknown>): boolean {
 }
 
 /**
+ * 预设新增模型回流（2026-08-28）：provider 配置是应用预设时的全量快照，
+ * deepMerge 对数组整组替换——新版本预设追加的模型永远不会出现在老用户的
+ * 已配置 provider 里（实测：glm-5.3/glm-5.3-flash 进了预设，配置里只有
+ * glm-5.2 快照，设置页/`/model` 看不到新模型）。
+ *
+ * 对每个「当前预设仍存在」的 provider：把预设 models 中配置缺失的条目
+ * 追加到末尾（预设序）。用户已删的模型会随新预设版本回流——这是接受的
+ * 代价（换来新模型无感升级），删除是可重做的幂等操作。Mutates `raw`,
+ * returns true if changed.
+ */
+export function migratePresetModelBackfill(raw: Record<string, unknown>): boolean {
+  const provider = raw.provider as Record<string, unknown> | undefined
+  const providers = provider?.providers as Record<string, unknown> | undefined
+  if (!providers) return false
+  let changed = false
+  for (const [name, entry] of Object.entries(providers)) {
+    if (!entry || typeof entry !== 'object') continue
+    const preset = resolvePreset(name)
+    if (!preset || !('static' in preset)) continue
+    const presetModels = preset.static.provider.models
+    const prov = entry as Record<string, unknown>
+    const models = prov.models
+    if (!Array.isArray(models)) continue
+    const known = new Set(models.map((m) => (m as { id?: unknown })?.id))
+    for (const pm of presetModels) {
+      if (known.has(pm.id)) continue
+      models.push({
+        id: pm.id,
+        ...(pm.alias ? { alias: pm.alias } : {}),
+        contextWindow: pm.contextWindow,
+        maxTokens: pm.maxTokens,
+        ...(pm.supportsVision ? { supportsVision: true } : {}),
+        pricing: { ...pm.pricing },
+      })
+      changed = true
+    }
+  }
+  return changed
+}
+
+/**
  * Load config with 3-layer resolution: user → project → session overlay.
  *
  * Priority (highest wins):
@@ -326,9 +367,10 @@ export function loadConfig(options?: {
     const keysMoved = migrateInlineApiKeys(cpMigrated)
     const capsChanged = migrateLegacyCapabilities(cpMigrated)
     const protoChanged = migrateAnthropicProtocol(cpMigrated)
+    const backfillChanged = migratePresetModelBackfill(cpMigrated)
     // Write back if any migration modified the raw config so the fix
     // persists across restarts (one-shot, idempotent).
-    if (cpMigrated !== raw || dsChanged || flashChanged || keysMoved || capsChanged || protoChanged) {
+    if (cpMigrated !== raw || dsChanged || flashChanged || keysMoved || capsChanged || protoChanged || backfillChanged) {
       try {
         writeFileAtomicSync(configPath, JSON.stringify(cpMigrated, null, 2) + '\n')
       } catch {

@@ -26,8 +26,8 @@
       "ceiling": 2511
     },
     "src/config/manager.ts": {
-      "ceiling": 2606,
-      "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。"
+      "ceiling": 2648,
+      "note": "2219→2606：hooks 配置 Wave 3a 等配置面增长（先于本调整已在 HEAD 超限）+ / 项目信任门接线（未授信剥离，+9 行）——按现值对齐。 2606→2648：账本对齐实际行数（68a961c20 预设新增模型回流存量快照，已合入 HEAD 后超限）。"
     },
     "src/main.ts": {
       "ceiling": 2299,
@@ -153,8 +153,8 @@
       "note": "944→956：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25）"
     },
     "src/server/config-routes.ts": {
-      "ceiling": 1035,
-      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。"
+      "ceiling": 1048,
+      "note": "899→1002：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） 1002→1003：P0 获取 Key 直链——unconfigured 组装透传 keyUrl（+1）。 1003→1035：P0 模型批量添加——POST /config/providers 接 models[] 逐项校验（+22）与 test-key 存储 Key 兜底解析（+7）。 1035→1048：欢迎页模型列表 keyless 放行——GET /config/providers 下发 keyless 标记（ollama 预设 / 无密钥材料自定义 provider），与「该配没配」区分（+13）。"
     },
     "src/pro/computer-use/cdp/driver.ts": {
       "ceiling": 899

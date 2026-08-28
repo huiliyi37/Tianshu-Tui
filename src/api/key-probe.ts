@@ -43,18 +43,27 @@ function parseModelIds(payload: unknown): string[] | undefined {
  *
  * @param apiKey 待验证的 key（明文，仅在 sidecar 进程内使用，不落盘不外发）
  * @param baseUrl provider 的 OpenAI 兼容 baseUrl（如 `https://api.deepseek.com/v1`）
+ * @param protocol 鉴权头语义：'openai'（默认）发 `Authorization: Bearer`；
+ *   'anthropic' 发 `x-api-key` + `anthropic-version`——messages 系端点不认
+ *   Bearer，协议不匹配会把有效 key 误判为 auth-failed。
  */
 export async function probeProviderKey(
   apiKey: string,
   baseUrl: string,
+  protocol: 'openai' | 'anthropic' = 'openai',
 ): Promise<KeyProbeResult> {
   const key = apiKey.trim()
   if (!key) return { ok: false, error: 'API key is empty' }
   const url = `${baseUrl.replace(/\/+$/, '')}/models`
   try {
-    const res = await fetchWithTimeout(url, {
-      headers: { Authorization: `Bearer ${key}`, Accept: 'application/json' },
-    }, 12_000)
+    const headers: Record<string, string> = { Accept: 'application/json' }
+    if (protocol === 'anthropic') {
+      headers['x-api-key'] = key
+      headers['anthropic-version'] = '2023-06-01'
+    } else {
+      headers['Authorization'] = `Bearer ${key}`
+    }
+    const res = await fetchWithTimeout(url, { headers }, 12_000)
     if (res.ok) {
       // 顺手把 /models 列表带回来——探测本来就在拉这个端点，丢弃列表是浪费。
       // body 非 JSON / 形状不对都不影响 ok 结论。

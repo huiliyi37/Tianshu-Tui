@@ -58,7 +58,21 @@
 > **Windows 支持范围**：Windows 10（1809+，建议 22H2）/ Windows 11。界面渲染依赖 **WebView2 Runtime（建议 ≥ 120）**——v3.5 起的滚动与渲染优化需要较新运行时，旧版会导致会话区滚动卡顿。自 3.5.3 起安装器内嵌完整离线安装包（无需联网、系统级注册）。存量用户经自动更新升级后若提示过旧：在提示条或「设置 → 运行时与关于」里点「运行修复工具」。**窗口完全打不开**时，用开始菜单「修复 WebView2」，或从 [Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载 `windows-repair` 目录双击 `repair-webview2.cmd`。也可手动安装 [WebView2 离线安装包](https://go.microsoft.com/fwlink/p/?LinkId=2124703) 后重启。
 > **Win10 平板模式已知行为**：平板模式下切换应用会把上一个应用滑出屏幕——computer_use 的快照已做遮挡/后台自愈（PrintWindow 渲染），无需关闭平板模式。
 
-**方式 B：npm 全局安装（推荐，使用命令行）** —— 已发布为 `tianshu-tui`，无需本地构建，且每次启动自动检查更新：
+**方式 B：一键安装脚本（推荐）** —— 校验 Node ≥ 24 → 全局安装 `tianshu-tui`（默认 npmmirror 镜像加速，`NPM_CONFIG_REGISTRY` 可覆盖）→ 启动 `rivet`；幂等可重复执行：
+
+```bash
+# macOS / Linux（bash）
+bash <(curl -fsSL https://raw.githubusercontent.com/huiliyi37/Tianshu-Tui/main/scripts/install-tui.sh)
+# 只安装不启动：
+bash <(curl -fsSL https://raw.githubusercontent.com/huiliyi37/Tianshu-Tui/main/scripts/install-tui.sh) --no-launch
+
+# Windows（PowerShell）
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/huiliyi37/Tianshu-Tui/main/scripts/install-tui.ps1 | iex"
+# 只安装不启动（克隆仓库后本地跑）：
+powershell -ExecutionPolicy Bypass -File scripts\install-tui.ps1 -NoLaunch
+```
+
+**方式 C：npm 手动安装（使用命令行）** —— 已发布为 `tianshu-tui`，无需本地构建，且每次启动自动检查更新：
 
 ```bash
 npm install -g tianshu-tui
@@ -67,7 +81,7 @@ rivet
 
 > **Windows 提示**：装完提示 `rivet 无法识别` 时——先**新开一个终端**（装 Node 时开着的窗口拿的是旧 PATH）；仍不行，把 `npm prefix -g` 输出的目录加进用户 PATH 再开新终端。官方安装器装的 Node 默认无此问题，nvm/fnm/scoop 安装的需手动加一次。
 
-**方式 C：从源码构建**：
+**方式 D：从源码构建**：
 
 ```bash
 git clone https://github.com/huiliyi37/Tianshu-Tui.git

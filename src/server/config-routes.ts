@@ -147,6 +147,10 @@ export interface ProviderListItem {
   baseUrl: string
   isDefault: boolean
   keyStatus: { source: 'inline' | 'env' | 'none'; ref: string }
+  /** 无需 API key 的端点：keyless 预设（ollama），或未配任何密钥材料的自定义
+   *  provider（桌面表单 API Key 可选，用户有意空着 = keyless 端点）。
+   *  模型选择器据此区分「keyless」与「该配 key 而没配」——前者照常列出。 */
+  keyless: boolean
   models: { id: string; alias?: string; supportsVision?: boolean }[]
   isPreset: boolean
   allowProFallback: boolean
@@ -165,14 +169,21 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       const providers: ProviderListItem[] = []
 
       for (const [name, p] of Object.entries(cfg.provider.providers)) {
+        const preset = resolvePreset(name)
+        const presetKeyless = preset
+          ? ('static' in preset ? preset.static.keyless : (preset as { keyless?: boolean }).keyless) === true
+          : false
         providers.push({
           name,
           label: resolvePresetLabel(name) ?? name,
           baseUrl: p.baseUrl,
           isDefault: name === defaultName,
           keyStatus: getApiKeyStatus(name),
+          // 自定义 provider 无任何密钥材料（apiKey/keyRef/apiKeyEnv 皆空）= 用户按
+          // keyless 端点有意保存；keyStatus 恒 none，靠本标记与「该配没配」区分。
+          keyless: presetKeyless || (!preset && !p.apiKey && !p.keyRef && !p.apiKeyEnv),
           models: p.models.map(m => ({ id: m.id, alias: m.alias, contextWindow: m.contextWindow, maxTokens: m.maxTokens, supportsVision: m.supportsVision })),
-          isPreset: resolvePreset(name) !== undefined,
+          isPreset: preset !== undefined,
           allowProFallback: p.allowProFallback ?? false,
           ...(p.slowThinking !== undefined ? { slowThinking: p.slowThinking } : {}),
         })
@@ -380,7 +391,12 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
     // Body: { provider: string, apiKey: string }. Provider resolved to baseUrl
     // from preset (zhipu-vision uses PaaS endpoint, not coding) or stored config.
     'POST /config/providers/test-key': withAuth(async (body) => {
-      const { provider, apiKey, baseUrl: override } = body as { provider?: string; apiKey?: string; baseUrl?: string }
+      const { provider, apiKey, baseUrl: override, protocol } = body as {
+        provider?: string
+        apiKey?: string
+        baseUrl?: string
+        protocol?: 'openai' | 'anthropic'
+      }
       if (!provider) return { status: 400, body: { error: 'provider is required' } }
       // apiKey 可选：缺省时用该 provider 的存储 Key（keyRef 物化 / apiKeyEnv）——
       // 已配置 provider 上的「从接口拉取模型列表」不应要求用户重输 Key。
@@ -402,7 +418,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         baseUrl = stored?.baseUrl ?? resolvePresetBaseUrl(provider)
       }
       if (!baseUrl) return { status: 400, body: { error: `cannot resolve baseUrl for provider "${provider}"` } }
-      const result = await probeProviderKey(resolvedKey, baseUrl)
+      const result = await probeProviderKey(resolvedKey, baseUrl, protocol ?? 'openai')
       return { status: 200, body: result }
     }, apiToken),
 
