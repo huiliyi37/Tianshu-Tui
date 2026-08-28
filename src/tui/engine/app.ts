@@ -6666,9 +6666,12 @@ export class TuiApp {
     // 3c. 计划审阅卡钉在输入框上方（对标 public plan-review chrome，不进 overlay）。
     if (this.pendingPlanApproval && !this.overlay.isActive()) {
       const countdown = this.planAutoApproveRemainSec
+      // 审批卡边框与输入框同族——同一 separator 风格，两个框上下叠放才成一套 chrome
+      const activeDomainId2 = this.state.domainName ? Object.keys(STAR_DOMAINS).find(k => (STAR_DOMAINS as any)[k].name === this.state.domainName) : null
       const reviewLines = formatPlanReview({
         title: this.pendingPlanApproval.title,
         ...(this.planApprovalDate ? { date: this.planApprovalDate } : {}),
+        separator: (activeDomainId2 ? (STAR_DOMAINS as any)[activeDomainId2]?.uiPersona?.separator : undefined) ?? 'thin',
         body: this.planApprovalBody ?? '',
         scroll: this.planReviewScroll,
         width: cols,

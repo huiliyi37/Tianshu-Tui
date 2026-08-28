@@ -6,12 +6,17 @@
 
 | 文档 | 一句话 | 状态 |
 |------|--------|------|
-| [2026-08-05-desktop-scroll-stream-follow.md](2026-08-05-desktop-scroll-stream-follow.md) | 桌面端滚动 S2「完成后划不到底」两条候选根因待实机验证 | active |
-| [2026-08-15-desktop-scroll-timeline-collapse-tug.md](2026-08-15-desktop-scroll-timeline-collapse-tug.md) | 桌面滚动时间线塌陷/拉扯——thinking 休眠遗留未动 | in-progress |
-| [2026-06-07-volatile-test-hang-待办.md](2026-06-07-volatile-test-hang-待办.md) | volatile.test.ts fire-and-forget git spawn 死锁拖垮 `npm test`（开发者侧） | 待安排 |
+| [2026-08-05-desktop-scroll-stream-follow.md](2026-08-05-desktop-scroll-stream-follow.md) | 桌面端滚动 S1 修复已落地（`4c952c3a5`）；剩 S2 两候选假设的实机取证 | 代码已修，待 Windows/macOS 实机验收 |
+| [2026-08-15-desktop-scroll-timeline-collapse-tug.md](2026-08-15-desktop-scroll-timeline-collapse-tug.md) | 桌面滚动拉锯：A'/B + 对标三件 + 遗留①均已落地（遗留②症状路径 end-anchor 下已停用）；剩 Windows 真实 WebView2 两档复验 | 代码已修，待 Windows 实机验收 |
 
-> 桌面滚动线（前两条）的共同外部依赖：Windows/macOS 实机验收，见
-> [2026-08-12-windows-session-stability-refactor.md](2026-08-12-windows-session-stability-refactor.md) 的验收待办。
+> 桌面滚动线（两条）的共同外部依赖：Windows/macOS 实机验收，见
+> [2026-08-12-windows-session-stability-refactor.md](2026-08-12-windows-session-stability-refactor.md) 的验收待办——**代码侧无剩余工作，别再按「未修」排期**。
+
+## 近期关闭（2026-08-28 复验关闭潮）
+
+- `volatile-test-hang`：已在 `405fa18b9` + `289c21929` 修复（复验单跑 15/15 绿 <90s）
+- `tui-duplicate-render-and-scroll`：Ink 栈已删，已失效
+- `2026-07-26-domain-pinning-only-in-tui-main`：钉定已下沉 loop.ts，已修复
 
 ## 状态口径
 

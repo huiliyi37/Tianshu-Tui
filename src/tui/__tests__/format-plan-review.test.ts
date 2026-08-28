@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme } from '../theme.js'
+import stringWidth from 'string-width'
 import {
   buildPlanReviewActions,
   clampPlanReviewScroll,
@@ -23,10 +24,10 @@ describe('formatPlanReviewDate', () => {
 })
 
 describe('planReviewBodyRows / clampPlanReviewScroll', () => {
-  it('clamps body window between 4 and 10', () => {
+  it('clamps body window between 4 and 9（边框+决策区比旧无框布局多占 2 行预算）', () => {
     assert.equal(planReviewBodyRows(16), 4)
-    assert.equal(planReviewBodyRows(24), 10)
-    assert.equal(planReviewBodyRows(40), 10)
+    assert.equal(planReviewBodyRows(24), 9)
+    assert.equal(planReviewBodyRows(40), 9)
   })
 
   it('clamps scroll to remaining lines', () => {
@@ -70,15 +71,51 @@ describe('formatPlanReview', () => {
       actions,
     }, theme))
     assert.match(text, /计划审批/)
-    assert.match(text, /「修缓存」/)
-    assert.match(text, /2026-08-26/)
     assert.match(text, /修缓存/)
+    assert.match(text, /2026-08-26/)
     assert.match(text, /✓ 1 批准并执行/)
     assert.match(text, /✗ 2 驳回修订/)
     assert.match(text, /✗ 3 驳回并退出/)
     assert.doesNotMatch(text, /低阶/)
     assert.doesNotMatch(text, /cheap/i)
     assert.doesNotMatch(text, /Model:/)
+  })
+
+  it('framed container: top/bottom border with title in the border line', () => {
+    const lines = formatPlanReview({
+      title: '修缓存', date: '2026-08-26', body: '第一步', width: 60, bodyRows: 4, actions,
+    }, theme)
+    const first = stripAnsi(lines[0]!)
+    const last = stripAnsi(lines[lines.length - 1]!)
+    assert.match(first, /^╭─/, 'top border opens the card')
+    assert.match(first, /计划审批/, 'label lives in the border (wayfinding)')
+    assert.match(first, /1\/1/, 'scroll position right-anchored in border')
+    assert.match(last, /^╰─/, 'bottom border closes the card')
+    assert.match(last, /\[1\]批准/, 'keycap hints embedded in bottom border')
+    // 每行等宽（右边线对齐、框体不折行）——口径与构建侧一致（stringWidth，
+    // 框线/歧义字符按物理 1 列；displayWidth(WIDE) 会把框线算 2 列量不准）
+    const widths = lines.map(l => stringWidth(stripAnsi(l)))
+    for (const w of widths) assert.equal(w, 60, `line width ${w} != 60: ${lines[widths.indexOf(w)]!.slice(0, 40)}`)
+  })
+
+  it('decision zone separated from body by a divider line', () => {
+    const lines = formatPlanReview({
+      title: 't', body: '第一步', width: 60, bodyRows: 4, actions,
+    }, theme)
+    const plainLines = lines.map(stripAnsi)
+    const dividerIdx = plainLines.findIndex(l => /^│─+│$/.test(l))
+    assert.ok(dividerIdx > 0, 'divider exists between body and actions')
+    const approveIdx = plainLines.findIndex(l => l.includes('批准并执行'))
+    assert.ok(approveIdx > dividerIdx, 'actions live below the divider')
+  })
+
+  it('recommended action carries ❯ marker; long plan title truncates, marker survives', () => {
+    const text = plain(formatPlanReview({
+      title: 'x'.repeat(120), body: 'hello', width: 60, bodyRows: 4, actions,
+    }, theme))
+    assert.match(text, /❯/, 'recommended marker present')
+    assert.match(text, /计划审批/, 'identity label survives truncation')
+    assert.ok(!text.includes('xxxxx「'), 'raw title not dumped')
   })
 
   it('scroll advances the window and shows overflow', () => {

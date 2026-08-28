@@ -3,8 +3,8 @@
   "redline": 800,
   "budgets": {
     "src/tui/engine/app.ts": {
-      "ceiling": 7558,
-      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25） 7520→7526：协同建议行接线（onChange 评估 + 渲染槽 + Tab 采纳 + Esc 关闭；检测/渲染主体在 engine/orchestration-hint.ts 新模块）。 7526→7553：错误时刻三件套（handleError 分类指引行 + 上一条回填输入框 + lastSubmittedText 生命周期，+27）。 7553→7558：onboarding 哨兵接线（向导纯取消后新会话不再自动弹 /connect，+5）。"
+      "ceiling": 7637,
+      "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25） 7520→7526：协同建议行接线（onChange 评估 + 渲染槽 + Tab 采纳 + Esc 关闭；检测/渲染主体在 engine/orchestration-hint.ts 新模块）。 7526→7553：错误时刻三件套（handleError 分类指引行 + 上一条回填输入框 + lastSubmittedText 生命周期，+27）。 7553→7558：onboarding 哨兵接线（向导纯取消后新会话不再自动弹 /connect，+5）。 7558→7637：choice-panel 输入子模式补光标编辑与粘贴（choicePanelInputCursor/按键光标语义全套/onPaste 路由分支/caret 接线 +73）+ 计划审批卡 separator 传参（+6）——输入子模式状态与 app.ts 现有 choicePanel* 字段族强耦合，拆分收益负；账本随债对齐。"
     },
     "src/server/session-manager.ts": {
       "ceiling": 5800,
