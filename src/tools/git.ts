@@ -245,6 +245,48 @@ function parseWorkingTreeFiles(numstat: string, statusPorcelain: string): Workin
   return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
 }
 
+export interface GitBranchEntry {
+  name: string
+  current: boolean
+}
+
+/**
+ * P4 补线 — 列出 cwd 仓库的真实本地分支（Codex 对标：branch picker 来自
+ * `git for-each-ref`，而非任何硬编码预设）。当前分支由
+ * `git rev-parse --abbrev-ref HEAD` 解析；detached HEAD 时 current 缺省。
+ */
+export async function listGitBranches(cwd: string): Promise<{
+  branches: GitBranchEntry[]
+  current?: string
+  notARepo: boolean
+}> {
+  try {
+    const [listRaw, currentRaw] = await Promise.all([
+      runGit(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], cwd),
+      runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd),
+    ])
+    const current = currentRaw.trim()
+    const names = listRaw
+      .split('\n')
+      .map((n) => n.trim())
+      .filter((n) => n.length > 0 && n !== 'HEAD')
+    const seen = new Set<string>()
+    const branches: GitBranchEntry[] = []
+    for (const name of names) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      branches.push({ name, current: name === current })
+    }
+    return {
+      branches,
+      ...(current && current !== 'HEAD' ? { current } : {}),
+      notARepo: false,
+    }
+  } catch {
+    return { branches: [], notARepo: true }
+  }
+}
+
 /**
  * List working-tree changes relative to `baseRef` (default HEAD) for the
  * desktop "changes" tab.

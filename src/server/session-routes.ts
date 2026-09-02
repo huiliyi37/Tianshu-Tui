@@ -12,6 +12,13 @@
  *   POST   /sessions/:id/prompt                        start a run
  *   POST   /sessions/:id/steer                         queue mid-run guidance (T3)
  *   POST   /sessions/:id/fork                          fork conversation (P1-1)
+ *   GET    /sessions/:id/comments                      list line comments (P1-2)
+ *   POST   /sessions/:id/comments                      add line comment (P1-2)
+ *   POST   /sessions/:id/comments/:commentId/resolve   resolve line comment (P1-2)
+ *   DELETE /sessions/:id/comments/:commentId           delete line comment (P1-2)
+ *   POST   /sessions/:id/pin                           toggle session pin (P1-3)
+ *   POST   /sessions/:id/snapshot/export               build redacted snapshot (P1-4)
+ *   POST   /sessions/:id/snapshot/import               validate local snapshot (P1-4)
  *   POST   /sessions/:id/abort                         abort
  *   GET    /sessions/:id/events?since=N                replay tail (B3)
  *   GET    /sessions/:id/files?q=&limit=                @file mention picker (D2)
@@ -25,6 +32,7 @@
  *   GET    /sessions/:id/jobs/:jobId/logs              background job output
  *   POST   /sessions/:id/jobs/:jobId/kill              terminate a background job
  *   GET    /worktrees                                  list git worktrees
+ *   GET    /git/branches?cwd=...                       list real local branches (P4)
  *   GET    /github/prs                                 list open PRs (via gh CLI)
  *   GET    /github/prs/:number                         PR detail with comments/files
  *   GET    /github/prs/:number/checks                  CI checks overview (gh pr checks)
@@ -52,7 +60,7 @@ import { resolveAppPromptInput } from '../tui/slash-commands.js'
 import { getPaletteCommands } from '../tui/command-palette.js'
 import { RECOMMENDED_MAX_SKILLS } from '../skills/skill-loader.js'
 import { validatePath } from '../tools/path-validate.js'
-import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { extname, relative, join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -62,6 +70,7 @@ import { loadHooksConfig, VALID_EVENTS } from '../hooks/user-hooks-runner.js'
 import { buildDistillPrompt } from '../prompt/rpa-distill.js'
 import { isProFeatureEnabled } from '../config/pro-license.js'
 import { searchSessionTranscripts } from './session-search.js'
+import { buildSessionSnapshot, SNAPSHOT_VERSION } from './session-snapshot.js'
 import { listCheckpoints, loadCheckpoint, buildResumeFromCheckpoint } from '../agent/wave-checkpoint.js'
 import { storePlan } from '../agent/plan-store.js'
 import {
@@ -88,6 +97,8 @@ const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 
 /** Cap on a single CI check log payload returned to the desktop (tail-kept). */
 const MAX_CHECK_LOG_CHARS = 200_000
+/** P1-4 — imported snapshot files must be small enough to preview synchronously. */
+const MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024
 /** Per-image decoded byte cap (safety net; the client compresses to ~256KB). */
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024
 const ACCEPTED_IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp|gif);base64,.+$/i
@@ -1728,6 +1739,113 @@ export function buildSessionRoutes(
       }
     }, apiToken),
 
+    // ── P1-2: persistent diff line comments ──
+    'GET /sessions/:id/comments': withAuth((_body, params) => {
+      const comments = manager.listLineComments(params!.id!)
+      if (!comments) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { comments } }
+    }, apiToken),
+
+    'POST /sessions/:id/comments': withAuth((body, params) => {
+      const data = (body ?? {}) as {
+        file?: string
+        oldLine?: number
+        newLine?: number
+        comment?: string
+        kind?: 'user' | 'agent'
+        author?: string
+      }
+      if (!data.file || !data.comment) {
+        return { status: 400, body: { error: 'Missing "file" or "comment"' } }
+      }
+      const comment = manager.addLineComment(params!.id!, {
+        file: data.file,
+        oldLine: data.oldLine,
+        newLine: data.newLine,
+        comment: data.comment,
+        kind: data.kind,
+        author: data.author,
+      })
+      if (!comment) {
+        const rec = manager.getSession(params!.id!)
+        if (!rec) return { status: 404, body: { error: 'Session not found' } }
+        return { status: 400, body: { error: 'Comment must anchor on oldLine or newLine' } }
+      }
+      return { status: 200, body: { comment } }
+    }, apiToken),
+
+    'POST /sessions/:id/comments/:commentId/resolve': withAuth((_body, params) => {
+      const ok = manager.resolveLineComment(params!.id!, params!.commentId!)
+      if (!ok) {
+        const rec = manager.getSession(params!.id!)
+        if (!rec) return { status: 404, body: { error: 'Session not found' } }
+        return { status: 404, body: { error: 'Comment not found' } }
+      }
+      return { status: 200, body: { ok: true } }
+    }, apiToken),
+
+    'DELETE /sessions/:id/comments/:commentId': withAuth((_body, params) => {
+      const ok = manager.deleteLineComment(params!.id!, params!.commentId!)
+      if (!ok) {
+        const rec = manager.getSession(params!.id!)
+        if (!rec) return { status: 404, body: { error: 'Session not found' } }
+        return { status: 404, body: { error: 'Comment not found' } }
+      }
+      return { status: 200, body: { ok: true } }
+    }, apiToken),
+
+    // ── P1-3: toggle session pin (sorting only — never enters agent context) ──
+    'POST /sessions/:id/pin': withAuth((body, params) => {
+      const data = (body ?? {}) as { pinned?: boolean }
+      if (typeof data.pinned !== 'boolean') {
+        return { status: 400, body: { error: 'Missing or invalid "pinned" (boolean)' } }
+      }
+      const record = manager.setSessionPinned(params!.id!, data.pinned)
+      if (!record) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { ok: true, ...record } }
+    }, apiToken),
+
+    // ── P1-4: redacted read-only snapshot export/import ──
+    'POST /sessions/:id/snapshot/export': withAuth(async (body, params) => {
+      const id = params!.id!
+      const record = manager.getSession(id)
+      if (!record) return { status: 404, body: { error: 'Session not found' } }
+      const data = (body ?? {}) as { includeReasoning?: boolean; includeFileChanges?: boolean }
+      const events = manager.getEvents(id, 0)?.events ?? []
+      const { snapshot, findings } = await buildSessionSnapshot(record, events, {
+        includeReasoning: data.includeReasoning === true,
+        includeFileChanges: data.includeFileChanges === true,
+      })
+      return { status: 200, body: { snapshot, findings } }
+    }, apiToken),
+
+    'POST /sessions/:id/snapshot/import': withAuth((body, params) => {
+      const record = manager.getSession(params!.id!)
+      if (!record) return { status: 404, body: { error: 'Session not found' } }
+      const data = (body ?? {}) as { path?: string }
+      const path = typeof data.path === 'string' ? data.path.trim() : ''
+      if (!path) return { status: 400, body: { error: 'Missing "path"' } }
+      let stat: ReturnType<typeof statSync>
+      try { stat = statSync(path) } catch { return { status: 400, body: { error: 'Snapshot file not found or unreadable' } } }
+      if (!stat.isFile() || stat.size > MAX_SNAPSHOT_BYTES) {
+        return { status: 400, body: { error: 'Snapshot file invalid or too large' } }
+      }
+      let parsed: { version?: unknown; meta?: unknown; messages?: unknown; redaction?: unknown }
+      try {
+        parsed = JSON.parse(readFileSync(path, 'utf8')) as typeof parsed
+      } catch {
+        return { status: 400, body: { error: 'Snapshot file is not valid JSON' } }
+      }
+      if (
+        parsed.version !== SNAPSHOT_VERSION ||
+        typeof parsed.meta !== 'object' || parsed.meta === null ||
+        !Array.isArray(parsed.messages)
+      ) {
+        return { status: 400, body: { error: 'Unsupported snapshot version or shape' } }
+      }
+      return { status: 200, body: { snapshot: parsed } }
+    }, apiToken),
+
     // ── Precise rewind: preview the agent-edited files a per-message code
     // rewind would restore/delete (from FileHistory). available=false lets the
     // caller fall back to the coarse checkpoint rollback. ──
@@ -1762,6 +1880,14 @@ export function buildSessionRoutes(
       status: 200,
       body: { worktrees: manager.getWorktrees() },
     }), apiToken),
+
+    // P4 补线 — real local branches for the project picker / welcome composer.
+    'GET /git/branches': withAuth(async (_body, params) => {
+      const cwd = typeof params?.cwd === 'string' ? params.cwd.trim() : ''
+      if (!cwd) return { status: 400, body: { error: 'Missing "cwd" query param' } }
+      const result = await manager.getGitBranches(cwd)
+      return { status: 200, body: result }
+    }, apiToken),
 
     // Git branch graph — ASCII graph for the repo root.
     'GET /git/graph': withAuth(async (_body, params) => {

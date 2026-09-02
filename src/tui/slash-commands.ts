@@ -73,6 +73,7 @@ import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
 import { switchAgentRuntime, switchAgentSession, switchAgentCwd, restorePlanModeFromMeta } from '../bootstrap.js'
 import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { rememberUserNote, listUserNotes } from '../memory/user-remember.js'
+import { invalidateMemoryEntry, isCurrentEntry, readMemoryEntries } from '../memory/unified-memory.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { formatPermissionLabel, parsePermissionAlias, tierToMode } from '../agent/approval-vocabulary.js'
@@ -1155,6 +1156,37 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         const result = rememberUserNote(agent.cwd, text, ctx.currentSessionId)
         lines.push(result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}`)
         if (result.ok) lines.push('（source=user 直写，不过质量闸门；新会话经跨会话记忆块自动携带）')
+      }
+      pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/forget',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming, agent } = ctx
+      const args = parts.slice(1).filter(Boolean)
+      const entryId = args.find(arg => !arg.startsWith('-'))
+      const reason = args.includes('resolved') ? 'resolved' as const : 'forgotten' as const
+      const lines: string[] = []
+      if (!entryId) {
+        const current = readMemoryEntries(agent.cwd)
+          .filter(isCurrentEntry)
+          .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : 1))
+          .slice(0, 5)
+        lines.push('用法：/forget <entryId> [resolved]（显式失效一条项目长期记忆）')
+        lines.push('resolved = 标记旧问题已解决；缺省 = 主动遗忘。')
+        if (current.length > 0) {
+          lines.push('', `最近可失效的记忆（${current.length} 条）：`)
+          for (const entry of current) lines.push(`- [${entry.id}] [${entry.kind}] ${entry.text.slice(0, 90)}`)
+        } else {
+          lines.push('', '当前没有可失效的记忆条目。')
+        }
+      } else {
+        const result = invalidateMemoryEntry(agent.cwd, entryId, reason)
+        lines.push(result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}`)
       }
       pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
       setIsStreaming(false)

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { debugLog } from '../utils/debug.js'
-import { getKnowledgeIndex, type KnowledgeHit } from './knowledge-index.js'
+import { getKnowledgeIndex, type KnowledgeHit, type KnowledgeSearchOptions } from './knowledge-index.js'
 import { tokenizeRecallQuery } from './query-terms.js'
+import type { MemoryKind } from './unified-memory.js'
 
 export type AdaptiveMemoryMode = 'off' | 'shadow' | 'on'
 export type AdaptiveMemoryRefreshReason =
@@ -32,7 +33,7 @@ export interface AdaptiveMemoryReviewInput {
   intentText: string
   userInput: string
   mode?: AdaptiveMemoryMode
-  index?: { search(query: string, options?: { limit?: number; excludeSessionIds?: readonly string[]; includeMarkdown?: boolean }): Promise<KnowledgeHit[]> }
+  index?: { search(query: string, options?: KnowledgeSearchOptions): Promise<KnowledgeHit[]> }
   /** 并行工作区隔离：排除这些会话写入的条目。 */
   excludeSessionIds?: readonly string[]
 }
@@ -48,6 +49,15 @@ const MAX_STATES = 256
 const MAX_ENTRIES = 6
 const MAX_BLOCK_CHARS = 1_400
 const states = new Map<string, AdaptiveMemoryState>()
+
+/**
+ * 自动 STM 只注入「治理/约束/偏好」类条目。failure_pattern / finding /
+ * 会话摘要等按需走 memory recall——自动把这些旧问题灌进新任务，正是
+ * 「问新问题却跑去排查旧问题」的主要来源。
+ */
+export const AUTO_STM_KINDS: readonly MemoryKind[] = [
+  'project_rule', 'constraint', 'preference', 'user_constraint', 'user_preference',
+]
 
 /**
  * 记忆模式解析。默认 `on`：新会话启动即注入长期记忆要点（用户需求——
@@ -143,12 +153,13 @@ export async function reviewAdaptiveMemory(input: AdaptiveMemoryReviewInput): Pr
   const key = intentKey(input.intentText)
   const nextEntities = entities(`${input.intentText}\n${input.userInput}`)
   const index = input.index ?? getKnowledgeIndex(input.cwd)
-  // 自动注入只选结构化记忆条目与 playbook 教训；knowledge/*.md 是旧排查文档/
-  // 复盘，不是「当前任务相关记忆」，否则新问题会被旧文档劫持（记忆幻觉治理）。
+  // 自动注入只选治理/约束/偏好类结构化条目；knowledge/*.md 与
+  // failure_pattern/finding 一律走显式 recall，避免旧问题记忆劫持新任务。
   const hits = (await index.search(input.intentText, {
     limit: MAX_ENTRIES * 2,
     excludeSessionIds: input.excludeSessionIds,
     includeMarkdown: false,
+    kind: AUTO_STM_KINDS,
   }))
     .slice(0, MAX_ENTRIES)
   const signature = hitSignature(hits)

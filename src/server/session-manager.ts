@@ -67,9 +67,9 @@ import type { MissionStore } from './mission-store.js'
 import { join, resolve, dirname } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { existsSync, copyFileSync, statSync, mkdirSync, readFileSync } from 'node:fs'
-import { createWorktree, removeWorktree, listWorktrees, hasUnlandedWork, commitAll, revParseHead, squashMergeBranch, pushBranch, type WorktreeEntry } from '../agent/worktree.js'
+import { createWorktree, createWorktreeAtBranch, removeWorktree, listWorktrees, hasUnlandedWork, commitAll, revParseHead, getCurrentGitRef, squashMergeBranch, pushBranch, type WorktreeEntry } from '../agent/worktree.js'
 import { createPr } from './gh-cli.js'
-import { getGitGraph, getWorkingTreeFiles, getFileDiff, getFileAtBase } from '../tools/git.js'
+import { getGitGraph, getWorkingTreeFiles, getFileDiff, getFileAtBase, listGitBranches } from '../tools/git.js'
 import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
 import { parseAskUserQuestions } from '../tools/ask-user-question.js'
@@ -94,6 +94,7 @@ import type {
   SessionRecord,
   ResolvedDomainRecord,
   PlanDraft,
+  LineComment,
 } from './protocol.js'
 import { redactValue, redactText, truncateUtf16Safe } from './redact.js'
 
@@ -506,6 +507,10 @@ export interface CreateSessionInput {
   domain?: string
   /** Create an isolated git worktree for this session (parallel work without conflict). */
   isolatedWorktree?: boolean
+  /** P4 补线 — 会话关联的真实分支名（搜索索引/展示；普通会话不 checkout）。 */
+  branch?: string
+  /** P4 补线 — 隔离 worktree 的基分支：真实分支名 → detached worktree。 */
+  worktreeBaseBranch?: string
   /**
    * 无人值守运行（付费版 v1 · T2，auto-proceed 定时任务）：审批请求不挂起等人，
    * 立即拒绝并 fail-closed 中止本次运行（中止原因入事件流 + 走查工件）。
@@ -2092,7 +2097,12 @@ export class RuntimeSessionManager {
 
     if (input.isolatedWorktree) {
       try {
-        const wt = createWorktree(cwd, id)
+        // P4 补线 — 指定基分支时创建 detached worktree（真实分支名保留在
+        // worktreeBranch 供搜索/展示）；未指定沿用唯一 rivet-hands 分支。
+        const baseBranch = input.worktreeBaseBranch?.trim()
+        const wt = baseBranch
+          ? createWorktreeAtBranch(cwd, baseBranch, id)
+          : createWorktree(cwd, id)
         worktreeBranch = wt.branch
         worktreePath = wt.path
         cwd = wt.path
@@ -2125,6 +2135,14 @@ export class RuntimeSessionManager {
     if (input.model) sessionModel = input.model
     if (input.domain) sessionDomain = input.domain
 
+    // P1-3 — branch index for cross-session search. 显式选择优先（P4 补线）；
+    // worktree sessions carry their branch; normal sessions cache the current
+    // git ref once at creation (best-effort: detached HEAD falls back to hash).
+    let branch = input.branch?.trim() || worktreeBranch
+    if (!branch) {
+      try { branch = getCurrentGitRef(cwd) } catch { /* non-git cwd → no branch index */ }
+    }
+
     const session: InternalSession = {
       record: {
         id,
@@ -2141,6 +2159,7 @@ export class RuntimeSessionManager {
         worktreeBranch,
         worktreePath,
         baselineHead,
+        branch,
         // P1b：随 record 持久化，sidecar 重启/rehydrate 后由恢复路径读回——
         // 否则重启后静默失去倒计时自动批准（fail-closed 但前后不一致）。
         ...(input.planAutoApproveUi === true ? { planAutoApproveUi: true } : {}),
@@ -4175,6 +4194,11 @@ export class RuntimeSessionManager {
     return getGitGraph(cwd ?? this.defaultCwd, maxCount)
   }
 
+  /** P4 补线 — real local branches for a project cwd (welcome branch picker). */
+  async getGitBranches(cwd?: string): Promise<ReturnType<typeof listGitBranches>> {
+    return listGitBranches(cwd ?? this.defaultCwd)
+  }
+
   /** Working-tree changes relative to HEAD for the desktop "changes" tab. */
   async getWorkingTreeFiles(cwd?: string, includeIgnored = false): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
     return getWorkingTreeFiles(cwd ?? this.defaultCwd, 'HEAD', includeIgnored)
@@ -4786,7 +4810,15 @@ export class RuntimeSessionManager {
     // Model-side history: read the OAI transcript directly (works for
     // rehydrated sessions whose agent hasn't been rebuilt yet).
     const sourcePersist = new SessionPersist(id, src.record.cwd)
-    const oaiAll = sourcePersist.loadOai()
+    let oaiAll: OaiMessage[]
+    try {
+      oaiAll = sourcePersist.loadOai()
+    } catch {
+      // Unreadable transcript → fork with an empty model context. The child
+      // still carries the UI history; warnIfHistoryLost will flag the mismatch
+      // on first run instead of the fork call crashing.
+      oaiAll = []
+    }
     let oaiPrefix: OaiMessage[]
 
     if (opts.messageIndex !== undefined) {
@@ -4943,7 +4975,7 @@ export class RuntimeSessionManager {
     let cursor: string | undefined = sourceId
     while (cursor && !seen.has(cursor)) {
       seen.add(cursor)
-      const rec = this.sessions.get(cursor)?.record
+      const rec: SessionRecord | undefined = this.sessions.get(cursor)?.record
       if (!rec) break
       const m = re.exec(rec.title ?? '')
       if (m) {
@@ -4956,6 +4988,95 @@ export class RuntimeSessionManager {
     }
     // First fork is (2); (1) is reserved for the original conversation.
     return Math.max(2, max + 1)
+  }
+
+  /** P1-2 — project line_comment events into the live comment list. */
+  listLineComments(id: string): LineComment[] | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    this.ensureEvents(s)
+    const live = new Map<string, LineComment>()
+    for (const ev of s.events) {
+      if (ev.type !== 'line_comment') continue
+      const data = ev.data as { op?: unknown; comment?: LineComment }
+      if (data.op === 'add' && data.comment && typeof data.comment.id === 'string') {
+        live.set(data.comment.id, data.comment)
+      } else if (data.op === 'resolve' && typeof data.comment?.id === 'string') {
+        const cur = live.get(data.comment.id)
+        if (cur) live.set(cur.id, { ...cur, resolved: true })
+      } else if (data.op === 'delete' && typeof data.comment?.id === 'string') {
+        live.delete(data.comment.id)
+      }
+    }
+    return [...live.values()].sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  /** P1-2 — append a persistent user/agent line comment to the event log. */
+  addLineComment(
+    id: string,
+    input: { file: string; oldLine?: number; newLine?: number; comment: string; kind?: 'user' | 'agent'; author?: string },
+  ): LineComment | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    this.ensureEvents(s)
+    const file = input.file.trim()
+    const text = input.comment.trim()
+    if (!file || !text) return undefined
+    if (input.oldLine === undefined && input.newLine === undefined) return undefined
+    const comment: LineComment = {
+      id: randomUUID(),
+      file,
+      oldLine: input.oldLine,
+      newLine: input.newLine,
+      comment: text,
+      kind: input.kind === 'agent' ? 'agent' : 'user',
+      ...(input.author?.trim() ? { author: input.author.trim() } : {}),
+      createdAt: this.now(),
+    }
+    this.append(s, 'line_comment', { op: 'add', comment })
+    return { ...comment }
+  }
+
+  /** P1-2 — resolve a line comment (kept in the log, rendered as done). */
+  resolveLineComment(id: string, commentId: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s) return false
+    this.ensureEvents(s)
+    const exists = s.events.some(
+      (e) => e.type === 'line_comment' &&
+        (e.data as { op?: unknown }).op === 'add' &&
+        ((e.data as { comment?: { id?: string } }).comment?.id === commentId),
+    )
+    if (!exists) return false
+    this.append(s, 'line_comment', { op: 'resolve', comment: { id: commentId } })
+    return true
+  }
+
+  /** P1-2 — delete a line comment from the live projection (append-only log keeps the add). */
+  deleteLineComment(id: string, commentId: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s) return false
+    this.ensureEvents(s)
+    const exists = s.events.some(
+      (e) => e.type === 'line_comment' &&
+        (e.data as { op?: unknown }).op === 'add' &&
+        ((e.data as { comment?: { id?: string } }).comment?.id === commentId),
+    )
+    if (!exists) return false
+    this.append(s, 'line_comment', { op: 'delete', comment: { id: commentId } })
+    return true
+  }
+
+  /** P1-3 — toggle session pin (record + append-only event for multi-window sync). */
+  setSessionPinned(id: string, pinned: boolean): SessionRecord | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    this.ensureEvents(s)
+    if (s.record.pinned === pinned) return this.enrichRecord(s)
+    s.record.pinned = pinned
+    this.append(s, 'session_pinned', { pinned })
+    this.persistRecord(s)
+    return this.enrichRecord(s)
   }
 
   /** Best-effort file rollback for rewind. Surfaces result via event log. */

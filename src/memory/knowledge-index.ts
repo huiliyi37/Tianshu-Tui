@@ -27,7 +27,7 @@ import { readMemoryEntries, isCurrentEntry, validateKnowledgeChains, type Memory
 
 export interface KnowledgeSearchOptions {
   limit?: number
-  kind?: MemoryKind | MemoryKind[]
+  kind?: MemoryKind | readonly MemoryKind[]
   /** topic 子串过滤（结构化预过滤层）。 */
   topic?: string
   /** 默认只检索 current 叶子；true 含已封口历史。 */

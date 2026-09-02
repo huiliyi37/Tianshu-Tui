@@ -18,7 +18,7 @@ export interface SQLiteKnowledgeDocument {
 }
 
 export interface SQLiteKnowledgeSearchOptions {
-  kind?: MemoryKind | MemoryKind[]
+  kind?: MemoryKind | readonly MemoryKind[]
   topic?: string
   includeHistory?: boolean
   source?: 'playbook'

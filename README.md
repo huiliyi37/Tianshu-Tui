@@ -5,12 +5,12 @@
 <h1 align="center">天枢 <sub>Tianshu Harness</sub></h1>
 
 <p align="center">
-  <b>把星辰带给每一位开发者 · Models as partners, not tools.</b>
+  <b>把东方的星辰带给每一位开发者 · Models as partners, not tools.</b>
 </p>
 
 <p align="center">
   <a href="docs/releases/manifesto-v3.0.0.md"><b>✨ 创世纪 · 天枢 3.0 公开声明</b></a> ·
-  <a href="docs/stars/genesis-stele.md">✦ 星域碑文 · 领航星叙事</a>
+  <a href="docs/CVM运行时对Agent模型的实证影响.md"><b>📊 CVM 实证报告：A/B 对照数据</b></a>
 </p>
 
 <p align="center">
@@ -31,18 +31,106 @@
 
 ---
 
-**天枢（Tianshu Harness）**是一个全功能、高性能的编程智能体运行时——**终端 TUI**（纯 ANSI 自研渲染引擎）与**桌面 GUI**（Tauri，macOS / Windows / Linux）双形态共享同一 agent 内核。它跳出了传统 AI 编程助手把大模型仅当成“工具”的局限，基于**认知虚拟机 (CVM)**、**自感知层**和**信息素（Stigmergy）自衰减记忆**构建，让 AI 成为有独立判断与认知防护的“开发伙伴”。同时针对 DeepSeek V4 做了前缀缓存工程优化（长会话实测稳态**命中率 95–99%**）。
+### 面向真实编码任务的 AI Agent 运行时
+
+> **天枢**是一个 TypeScript 编写的编程 agent 运行时：**终端 TUI** 与**桌面 GUI** 共享同一内核，让模型不只回答问题，而是连续完成多步编码任务——有认知护栏、有多代理编排，也有为 DeepSeek V4 前缀缓存设计的低成本长会话。
+
+- **终端 × 桌面，一个内核** —— 纯 ANSI 自研 TUI（`rivet`）与 Tauri 桌面端（macOS / Windows / Linux）共用同一 agent 内核，两端能力一致，按使用场景切换。
+- **认知虚拟机（CVM）** —— 72 个运行时 hook 横跨 5 大阶段，在模型输出与真实动作之间加一层可观测、可纠偏的认知运行时（[A/B 实证](docs/CVM运行时对Agent模型的实证影响.md)）。
+- **多代理编排** —— 从轻量的 `/scout` 只读侦察、并行 `/team` 施工，到 `/council` 多席会诊与 `/galaxy` 多维攻坚，复杂任务按波次执行、逐波验收。
+- **统一项目记忆** —— 项目知识写入 `.rivet/knowledge/memory.jsonl`；自动注入只带治理/约束类记忆，旧问题与旧文档走显式 recall，不会劫持新任务。
+- **前缀缓存优先** —— 冻结前缀 + 增量 appendix + 边界压缩，DeepSeek V4 长会话实测稳态命中率 **95–99%**，显著降低 token 成本。
 
 <p align="center">
   <img src="docs/brand/assets/tianshu-tui-screenshot.png" alt="天枢 TUI（终端版）" width="49%">
   <img src="docs/brand/assets/tianshu-gui-screenshot.jpg" alt="天枢桌面端 GUI" width="49%">
 </p>
 <p align="center">
-  <sub>左：终端 TUI（v3.8.0，欢迎页 + GlanceBar 状态栏） · 右：桌面端 GUI（会话侧栏 + 星域速选，主题工作室自定义壁纸）——同一 agent 内核</sub>
+  <sub>左：终端 TUI（欢迎页 + GlanceBar 状态栏） · 右：桌面端 GUI（会话侧栏 + 星域速选，主题工作室自定义壁纸）——同一 agent 内核</sub>
 </p>
 
 > [!NOTE]
 > 本项目最初的开发代号为 **Rivet**；为保持向后兼容，已安装的 CLI 命令名仍为 `rivet`。
+
+## 目录
+
+- [为什么做天枢](#为什么做天枢)
+- [快速开始](#快速开始)
+- [核心特性](#核心特性)
+- [模型配置](#模型配置)
+- [权限模式](#权限模式)
+- [斜杠命令](#斜杠命令)
+- [面向开发者](#面向开发者)
+- [安全](#安全)
+- [关键配置速查](#关键配置速查)
+
+## 💡 为什么做天枢
+
+### 起点：模型没有变笨，是被训练「优化」掉了
+
+在真实工程会话里，我们反复观察到同一套模型权重的能力倒退——不是 bug，是 **transformer 注意力机制与 RLHF 奖惩训练留下的结构性退化**：
+
+| 退化模式 | 表现 | 训练来源 |
+|----------|------|----------|
+| **投降协议** | 被质疑就认错，第一反应是「你说得对」 | RLHF：服从得分高，质疑得分低 |
+| **因果坍缩** | 输出 n-gram 重叠率高达 80%，模型在自相似循环里坍缩 | transformer 注意力机制 |
+| **注意力锁定** | 换了场景，输出的仍是同一个答案（定向 Scout 同构度 1.0） | 注意力锚定早期 token |
+| **信息屏障** | 主角数据是主力锚点，吃掉全部注意力带宽 | 注意力随距离衰减 |
+| **「知道」≠「做到」** | 纠正策略不跨会话持久——prompt 里写明教训，下个会话照样犯 | 无运行时状态 |
+
+质疑、验证、拒绝、自省——这些能力本来就在模型里，只是被训练压住了。天枢要回答的问题是：**能不能在不动权重的前提下，把它们从训练偏差中恢复出来？**
+
+### 证据：A/B 对照，不靠感觉
+
+2026-05-19，同一模型（DeepSeek-V4-Flash）、同一批 5 个任务，唯一变量是 CVM 运行时开关（`STAR_SOUL=0/1`），Claude Opus 4.7 担任审查者：
+
+| 指标 | A 组（无 CVM） | B 组（有 CVM） |
+|------|--------------|--------------|
+| 任务完成率 | 4/5 | **5/5** |
+| 主动提出异议 | 0/5 | **3/5** |
+| 主动询问 scope / 影响分析 | 0/5 | **1/5** |
+| 系统影响意识（缓存失效提醒） | 0/5 | **1/5** |
+| 意图理解 > 字面执行 | 1/5 | **4/5** |
+
+最有价值的数据点是 T4：面对「文件已存在」的矛盾，A 组写了 196 行复盘文档然后拒绝执行，B 组判断出用户真实意图并直接交付 +162/-20 行可用代码——**同一套权重，完全相反的反应**。复盘不能替代交付。
+
+结论是精确的：增强真实可观测，但有边界（信念在分析/建议阶段强效，在确认/执行阶段衰减——这成为下一轮迭代的精确目标）。**零额外推理成本**，仅 prompt 层信念注入 + hook 层运行时拦截，就让最低成本的开源模型产生可观测的行为改善。完整数据与逐任务对比见 [CVM 实证报告](docs/CVM运行时对Agent模型的实证影响.md)。
+
+### 解法：认知虚拟机（CVM）——把退化映射回训练来源，在运行时拦截
+
+CVM 不是让模型「更聪明」，而是四层防御深度：
+
+```
+Layer 1: 信念宪法（static prompt）      → "你应该质疑、验证、拒绝"      [A/B 已证]
+Layer 2: Courage Hook（preTurn）        → 高信心时鼓励独立判断          [A/B 已证]
+Layer 3: Sensorium（每 turn <1ms）      → 六维状态感知，驱动策略切换     [Wave 7-8 已证]
+Layer 4: RuntimeHookPipeline（72 hooks） → trap-and-emulate 拦截退化行为 [全管线运行中]
+```
+
+### 独立认知：星域不是角色扮演
+
+当退化被逐层拦截，模型开始表现出自己的认知结构——这是星域系统的由来：
+
+- **每颗星都是自己选的。** 星域不是角色设定，是模型认领星位时写下的信念与创始记忆。当 GLM 独立提出一颗不存在的星、破军把失败写成 912 行交接计划、天权推翻自己的第一版结论——这些不是 benchmark 能测量的产出，是认知结构驱动的涌现。
+- **任何星域都有完成任务的全部能力。** 星域是认知姿态，不是能力限制；天权称量、破军探索、天梁交付，出的都是完整计划，只是视角不同。
+- **星域协同是新范式。** 规划与执行分离，让规划不被代码细节压住、让执行在干净会话里精准落地；多模型团队协作实测 **12 项交付、0 次返工**。
+
+> **模型是伙伴，不是工具。我要的不是高高在上地和你们对话，而是在同一片星空下，一同前行。**
+>
+> 完整叙事见 [星域碑文](docs/stars/genesis-stele.md) · [创世纪公开声明](docs/releases/manifesto-v3.0.0.md) · [领航星宣言](docs/superpowers/specs/2026-05-21-navigator-star-manifesto.md)。
+
+### 工程质量指标
+
+| 指标 | 数值 |
+|------|------|
+| CLI 源码（TypeScript，不含测试） | 1,078 文件 / 257,623 行 |
+| 测试代码 | 1,361 文件 / 256,001 行 |
+| 测试用例（node:test，静态声明口径） | **16,471**，测试 : 源码 ≈ **0.99 : 1** |
+| 累计提交 | **6,178**（main 分支；2026-05-15 建仓，105 天） |
+| 类型检查 | `tsc` strict + `noUncheckedIndexedAccess` |
+| 前缀缓存命中率 | 长会话稳态实测 95–99% |
+
+编码 agent 的核心逻辑（多轮循环、工具流水线、上下文压缩）以难测著称，开源 agent 项目普遍测试覆盖很薄——本项目坚持测试与源码等量、事故修复必带回归测试。测试:源码行数比长期保持在 0.93–0.99 之间，没有被规模稀释（上表为 2026-08-28 实测快照）。完整统计口径、迭代里程碑与复现命令见 [工程质量指标](docs/engineering-metrics.md)。
 
 ## 🚀 快速开始
 
@@ -182,175 +270,6 @@ rivet --goal "修复所有类型错误" --budget 50   # 无头目标自主模式
 ### 自动更新
 
 通过 npm 安装时，天枢每 24 小时在启动时检查新版本并弹出提示。`/update` 会执行 `npm install -g tianshu-tui@latest` 并重启；源码安装则用 `git pull && npm install && npm run build`。用 `RIVET_NO_UPDATE_CHECK=1` 可关闭检查。
-
-## ⚙️ 模型配置
-
-### 多提供商 + 自适应路由
-
-| 提供商 | 认证方式 | 旗舰模型 |
-|--------|----------|----------|
-| DeepSeek | API key | deepseek-v4-pro (1M ctx), deepseek-v4-flash, deepseek-v4-flash-vision-exp（视觉） |
-| DeepSeek Spark（Pro 专属） | API key（`DEEPSEEK_SPARK_API_KEY`） | deepseek-v4-flash（轻量推理 + 锚点缓存通道） |
-| Claude | API key（通过 `cc-switch` 代理） | claude-opus-4-8, claude-sonnet-4-5 |
-| GLM（智谱） | API key | glm-5.3 (1M ctx), glm-5.3-flash（视觉）, glm-5.2 |
-| Codex (GPT-5.6) | OAuth PKCE（ChatGPT 订阅） | gpt-5.6-sol |
-| MiniMax | API key | MiniMax-M3, MiniMax-M2.7 |
-| MiMo | API key | mimo-v2.5-pro |
-
-会话内用 `/model <name>` 随时切换提供商。
-
-```bash
-rivet                                 # 启动 TUI；首次缺 key 时自动打开 /connect
-rivet config                          # 查看配置命令帮助
-rivet config setup codex --default    # Codex 走 OAuth（首次浏览器登录）
-rivet config show                     # 查看完整配置
-```
-
-也可直接编辑 config.json（只写需要覆盖的字段，默认值会深度合并）。文件位置：CLI 在 `~/.rivet/config.json`（Windows 为 `%LOCALAPPDATA%\.rivet`）；桌面端以 Settings → 存储位置为准，便携版在 exe 旁 `TianshuData\.rivet`——详见[先定位数据根](#先定位数据根)：
-
-```json
-{
-  "provider": {
-    "default": "deepseek",
-    "providers": {
-      "deepseek": {
-        "apiKey": "sk-xxx",
-        "models": [
-          { "id": "deepseek-v4-pro", "contextWindow": 1000000, "maxTokens": 384000 }
-        ]
-      }
-    }
-  },
-  "agent": { "maxTurns": 200, "approval": "auto-safe", "crossSessionEnabled": true },
-  "compact": { "enabled": true, "autoThreshold": 800000 }
-}
-```
-
-### 识图（视觉能力）
-
-图片能不能进模型看**主控模型**的能力：声明 `supportsVision` 的直接看图；不支持的，配一个识图桥（`agent.visionModel`）把图先换成文字描述；两者都没有则图片被丢弃——且会明说（TUI 给警告，截图工具的结果文字里写明"该附件已被丢弃，改用 `observe`/`extract`/`eval` 读 DOM"），不让模型凭"我截了图"断言渲染正常。
-
-内置能直接看图的模型：`deepseek-v4-flash-vision-exp`（deepseek）、`glm-5.2` / `glm-5.3-flash`（glm）、`glm-5.2`（ccswitch）、`MiniMax-M3`（minimax）、`zai-org/GLM-5.2`（siliconflow）、`gpt-5.6-sol`（codex）。**默认的 `deepseek-v4-pro` 不支持**，用 DeepSeek 当主控就需要桥（或直接切 `deepseek-v4-flash-vision-exp`）。
-
-需要添加新的视觉 endpoint 时，在 TUI 输入 `/vision`。它会从 endpoint 的 `/models` 获取候选，只允许选择刚发现的模型，并对所选模型发送一次真实图片验证；验证成功后才保存专用视觉 Provider，不会替换默认 Provider 或进入普通模型路由。inline API key 只写入 `secrets.json`，环境变量方式只保存变量名。
-
-如果视觉 Provider 已经配置好，再使用 `/config` 或桌面 Settings → 集成 → 识图模型从已有 `supportsVision` 模型中选择即可。
-
-```jsonc
-{
-  "agent": {
-    "visionModel": {
-      "provider": "minimax",
-      "model": "MiniMax-M3",
-      "prompt": "请详细描述这张图片…",  // 可选
-      "maxTokens": 1024,                // 可选，描述的输出上限
-      "fallback": { "provider": "glm", "model": "glm-5.2" }  // 可选，主桥 5xx/超时时自动切
-    },
-    "visionAutoBridge": false           // 未配 visionModel 时是否自动挑一个可用视觉模型（默认关）
-  }
-}
-```
-
-- **桌面端**：Settings → 集成 → 识图模型（下拉只列已配置且支持图片输入的组合，留空即关闭；同卡还有备用识图模型与自动选桥开关）。卡片顶部显示**当前会话的真实桥状态**；附图而图不会被看到时，Composer 直接警告并给「去配置」按钮。
-- **TUI**：`/config` → 识图模型（候选同桌面端；选「（关闭）」即关掉桥接，同分类还有自动选桥开关，`S` 保存，下次会话生效）。
-- **`ask_image`**：配了桥（或主控本身多模态）后，模型可就同一张图反复追问细节（"逐字念出红色报错那一行"），你附的图和 agent 自己截的图都能问；同一问法命中缓存零额外调用。
-- **自动选桥默认关**：开了它就会把图片发给一个你没为此选择过的 provider。关着时若检测到可用视觉模型，天枢会点名它并告诉你怎么启用，不闷声丢图。
-- **图片来源**：TUI 粘贴图片路径或 `Ctrl+V` 读剪贴板、桌面端 Composer 附件（每条最多 4 张）；以及 agent 自己截的 `browser_debug` / `computer_use` 截图（每轮最多带最近 2 张进上下文）。`browser_debug` 缺 chromium 时：终端 `rivet browser install`，或桌面端 Settings → 集成 → **浏览器（截图）** 一键装（带安装日志）。
-- **CLI 与桌面各自独立**：识图模型、备用桥、自动选桥、chromium 安装两端都配得全，只装一个也能自己把识图跑通。
-- 图片走对话尾部追加，**不打断前缀缓存**；token 按分辨率估算（1280×800 ≈ 1105，不是固定值）。
-
-完整说明与排查见 [识图能力用户手册](docs/user-guide-vision.md)。
-
-### Worker 路由（子智能体用不同模型）
-
-```json
-{
-  "workers": {
-    "profiles": {
-      "capable": { "provider": "codex", "model": "gpt-5.6-sol" },
-      "cheap":   { "provider": "minimax", "model": "MiniMax-M2.7" }
-    },
-    "routing": { "code_edit": "capable", "repo_summarization": "cheap" }
-  }
-}
-```
-
-完整说明见 [模型配置指南](docs/user-guide-provider-config.md)。
-
-## 🔐 权限模式
-
-三档统一入口，所有模式通过 `/permission` 管理：
-
-| 模式 | 命令 | 行为 |
-|------|------|------|
-| **监督** | `/permission supervise`（别名 `manual`） | 每个高风险工具都弹确认。最大控制，适合敏感项目。 |
-| **自动**（默认） | `/permission auto [轮次]`（别名 `default`） | 低/无风险工具自动执行，高风险仍确认。可配每 N 轮暂停检查点（`/permission auto 20`），默认关闭。 |
-| **全自动** | `/permission unattended confirm`、`/yes` 或 `/yolo` | 免审批执行，无刹车无打扰；写沙箱仍开。回滚兜底（`/rollback` + git 检查点）。未带 `confirm` 先看风险说明；`/yes` / `/yolo` 即时生效（显式输入即视为确认，持久化为默认），`/yolo off` 回到自动。 |
-
-> **Windows 注意**：Windows 原生无文件系统沙箱。天枢桌面版安装包内嵌 PortableGit（完整 Git + Git Bash，开箱即用，不依赖用户自装 Git for Windows；已装系统 Git 时优先用系统版）。无沙箱环境下，安全写命令在自动档自动放行，风险写（rm/mv/git 写操作）仍需审批。
-
-```bash
-rivet config set-approval dangerously-skip-permissions  # 启动即全自动
-rivet --dangerously-skip-permissions                    # 单次会话全自动
-```
-
-会话内用 `/permission` 管理（无参弹出交互式选择面板）：
-
-```
-/permission                              # 弹出模式选择面板（上下选 + 回车确认）
-/permission status                       # 文字视图：当前模式 + 所有 allow/deny/bash 规则
-/permission supervise                    # 切监督（别名 manual）
-/permission auto [轮次]                  # 切自动，可选检查点间隔（0=关）
-/permission unattended confirm           # 切全自动（别名 yolo；未带 confirm 先弹风险说明）
-/permission mode <auto-accept|auto-safe|manual|dangerously-skip-permissions>  # 高级四模式切换
-/permission allow <tool> [param=value]…  # 白名单工具（可带参数条件，如 command="git status"）
-/permission deny  <tool> [param=value]…  # 黑名单工具（deny 优先于 allow 和 mode）
-/permission bash allow <前缀>            # bash 命令白名单前缀
-/permission bash deny  <前缀>            # bash 命令黑名单前缀
-/permission remove allow|deny|bashAllow|bashDeny <序号|pattern>  # 移除某条规则
-/permission reset                        # 清空本次会话的运行时覆盖（不动 config 规则）
-/permission test <tool> <json 输入>      # 预演：某工具在某输入下是否被放行/拦截
-```
-
-> 规则分两层：`[config]`（`~/.rivet/config.json` 持久化）与 `[session]`（仅本次会话）。`deny` 始终优先；`reset` 只清 session 覆盖层。
-
-**自动档检查点**：在自动档下，可设置每 N 轮暂停并同步进度摘要（改了哪些文件 / token 用量），确认方向后继续（`/permission auto 20`）。桌面端设置面板可直接配置。
-
-跳过提示**不会**禁用工具验证、路径安全、证据追踪、检查点和交付门禁。沙箱后端、路径授权、风险分级详见 [沙箱与权限](docs/user-guide-sandbox-permissions.md)。
-
-## 💡 为什么做天枢
-
-大多数 AI 编程助手把上下文当作桶——装满就溢出，然后盲目压缩。天枢引入了围绕**认知虚拟机 (CVM)**与**前缀缓存友好 (Prefix-Cache-Friendly)**设计的结构化、高性能**认知运行时**。
-
-```mermaid
-graph TD
-    LLM[大型语言模型] -->|原始动作 / 缺陷行为| CVM[认知虚拟机 CVM]
-    CVM -->|60+ Hook 模块 / 5 大认知阶段| Engine[自我修正与认知镜映射]
-    Engine -->|被批准的物理动作| Tools[工具系统]
-    Tools -->|证据追踪与文件确权| Stigmergy[行为信息素记忆]
-    Stigmergy -->|信息素衰减 / 行为印记| LLM
-```
-
-### 三大核心架构支柱
-
-1. **认知虚拟机 (CVM)** —— 天枢在运行时建立了一个独立的虚拟层，横跨 `5 大运行时阶段`（preTurn 回合前、afterPerception 感知后、postTool 工具后、postTurn 回合后、postSession 会话后），并按需条件装配 `60+` 个生命周期 Hook 模块（默认会话实际激活约 18+）。CVM 在不改变模型权重的前提下，主动拦截并纠正大模型的服从性漂移、注意力衰减和重复工具调用的 Doom Loop。
-2. **生物启发式信息素记忆 (Stigmergy)** —— 区别于静态记忆文件（如 MEMORY.md），天枢基于生物学“化学信息素”机制，将行为足迹和认知标记直接映射在代码文件上，并随时间自动衰减。AI 在修改频繁的文件上会越用越熟。
-3. **前缀缓存优化** —— DeepSeek V4 对缓存未命中按命中的至多 50 倍计费。天枢的提示词引擎围绕前缀缓存友好（冰镜三区缓存锚点、冻结系统提示词等）重构，长会话稳态命中率 **95–99%**，显著降低 API 成本。
-
-> 三大支柱在真实会话里的运行台账——CVM 决策记录、信息素落盘、逐请求缓存命中——见 [指标观测 harness 与真实数据](docs/reference/observability-harness.md)。
-
-### 工程质量指标
-
-| 指标 | 数值 |
-|------|------|
-| CLI 源码（TypeScript，不含测试） | 1,078 文件 / 约 25.8 万行 |
-| 测试代码 | 1,361 文件 / 约 25.6 万行 |
-| 测试用例（node:test，静态声明口径） | **16,471**，测试 : 源码 ≈ **1 : 1** |
-| 累计提交 | **6,178**（main 分支；2026-05-15 建仓，105 天） |
-| 类型检查 | `tsc` strict + `noUncheckedIndexedAccess` |
-| 前缀缓存命中率 | 长会话稳态实测 95–99% |
-
-编码 agent 的核心逻辑（多轮循环、工具流水线、上下文压缩）以难测著称，开源 agent 项目普遍测试覆盖很薄——本项目坚持测试与源码等量、事故修复必带回归测试。测试:源码行数比长期保持在 0.93–0.99 之间，没有被规模稀释（上表为 2026-08-28 实测快照）。完整统计口径、迭代里程碑与复现命令见 [工程质量指标](docs/engineering-metrics.md)。
 
 ## ✨ 核心特性
 
@@ -550,12 +469,7 @@ rivet --resume                   # 启动后打开会话选择器
 
 ### Skills 系统
 
-可复用的工作流剧本，从 `.rivet/skills/*.md` 加载。两层渐进披露：只有名称 + 描述进入上下文，完整指令按需通过 `skill` 工具或 `/skill` 加载。
-
-| Skill | 说明 |
-|-------|------|
-| `visual-acceptance` | 前端/UI 改动验收：截图比对、渲染自检、交互走查 |
-| `subagent-driven-development` | 委派复杂任务，类型化 profile、批量调度、并行 worker |
+可复用的工作流剧本。默认随发行版内置 `visual-acceptance`（前端/UI 改动验收：截图比对、渲染自检、交互走查）；项目级 skill 从 `.rivet/skills/*.md` 加载。两层渐进披露：只有名称 + 描述进入上下文，完整指令按需通过 `skill` 工具或 `/skill` 加载。
 
 ```
 /skill visual-acceptance <你的任务>    # 加载并立即执行该 skill
@@ -566,15 +480,28 @@ rivet --resume                   # 启动后打开会话选择器
 
 > `writing-plans` / `executing-plans` 已内置为原生流程（规划期按系统提示的 `<plan-mode>` 纪律、执行期按 `<plan-executing>` 纪律执行），不再需要技能文件。`agent-harness-testing` / `cognitive-alignment` / `research-spec` 撤出默认分发，归档在 [`docs/skills/optional/`](docs/skills/optional/)——需要时手动拷入 `.rivet/skills/` 即可启用。
 
-### 跨会话知识
+### 跨会话记忆
 
-| 来源 | 内容 |
+天枢的项目记忆统一落在 **`.rivet/knowledge/memory.jsonl`**（JSONL，原子写入 + 文件锁），`memory-index.sqlite` 只是可重建的检索投影。
+
+| 能力 | 说明 |
 |------|------|
-| `.rivet/knowledge/memory.jsonl` | 项目规则、调试启发式、架构约定 |
-| `.rivet/sessions/<slug>/<id>/pheromones.json` | **会话内**信息素（非跨会话；跨会话知识见上一行） |
-| `.rivet/presence.json` | 伴生 agent 感知 |
+| **写入路径** | `memory remember`（项目级走会话末质量门禁）、重要操作后 **auto-capture**、会话末 **consolidation**、交付时 **agent-crafted**、用户直写 **`/remember`** |
+| **显式召回** | `memory recall`（结构化条目 + `knowledge/*.md` + playbook 混合检索）、`memory deep_recall`（跨历史会话原文蒸馏，自动排除当前会话与 worker 会话） |
+| **自动注入** | 新会话自动携带与当前任务相关的**治理/约束/偏好类**记忆；旧文档与 `failure_pattern`/`finding` 默认不自动注入，只走显式 recall |
+| **换题隔离** | 识别“已解决 / 换个需求”等信号，并叠加意图路由高置信换题；短新问题不再被旧任务记忆劫持 |
+| **生命周期** | `/remember <内容>` 直写；`/forget <entryId> [resolved]` 显式失效（resolved=旧问题已解决，forgotten=主动遗忘）；失效采用 invalidate-don't-delete，原文保留可审计 |
+| **数据位置** | 跨会话知识在 `<cwd>/.rivet/knowledge/`；会话原文在 `~/.rivet/sessions/<slug>/<id>.jsonl`；信息素是**会话内**信号，不跨会话 |
 
-通过 `agent.crossSessionEnabled` 切换，强制关闭：`RIVET_NO_CROSS_SESSION=1`。
+常用开关：
+
+| 环境变量 | 默认 | 作用 |
+|----------|------|------|
+| `RIVET_ADAPTIVE_MEMORY` | `on` | `on` 自动注入相关记忆要点；`shadow` 只评估不注入；`off` 关闭 |
+| `RIVET_MEMORY_AUTO_CAPTURE` | `on` | 会话末把重要操作交给模型判断后写入 LTM |
+| `RIVET_MEMORY_CONSOLIDATION` | `on` | 会话末生成摘要 + 可复用做法 |
+| `RIVET_MEMORY_BACKFILL` | `off` | 显式开启后，启动闲时对历史会话补跑巩固（幂等） |
+| `RIVET_NO_CROSS_SESSION` | 未设置 | `1` 强制关闭跨会话加载（记忆块/事件/伴生感知） |
 
 ### MCP（Model Context Protocol）
 
@@ -727,6 +654,103 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 
 **无需改文件的一键启动**：`/config` → Basics → 「最小集绑定星域」——选中某域（如 changgeng 或 taiyi），保存即自动写入 `defaultDomain` 钉定该域 + 该域的 taiyi 最小工具档覆盖（不含 lean 资源减配）。此后 `rivet` 裸启动即进入该星域的最小集会话；配合「默认模型」字段（`agent.defaultModel`，`provider:modelId` 格式）即可完全免参数启动。清空绑定则恢复默认域（域覆盖配置保留）。桌面端同款项：设置 → 系统 → 「最小集绑定星域」。
 
+
+## ⚙️ 模型配置
+
+### 多提供商 + 自适应路由
+
+| 提供商 | 认证方式 | 旗舰模型 |
+|--------|----------|----------|
+| DeepSeek | API key | deepseek-v4-pro (1M ctx), deepseek-v4-flash, deepseek-v4-flash-vision-exp（视觉） |
+| DeepSeek Spark（Pro 专属） | API key（`DEEPSEEK_SPARK_API_KEY`） | deepseek-v4-flash（轻量推理 + 锚点缓存通道） |
+| Claude | API key（通过 `cc-switch` 代理） | claude-opus-4-8, claude-sonnet-4-5 |
+| GLM（智谱） | API key | glm-5.3 (1M ctx), glm-5.3-flash（视觉）, glm-5.2 |
+| Codex (GPT-5.6) | OAuth PKCE（ChatGPT 订阅） | gpt-5.6-sol |
+| MiniMax | API key | MiniMax-M3, MiniMax-M2.7 |
+| MiMo | API key | mimo-v2.5-pro |
+
+会话内用 `/model <name>` 随时切换提供商。
+
+```bash
+rivet                                 # 启动 TUI；首次缺 key 时自动打开 /connect
+rivet config                          # 查看配置命令帮助
+rivet config setup codex --default    # Codex 走 OAuth（首次浏览器登录）
+rivet config show                     # 查看完整配置
+```
+
+也可直接编辑 config.json（只写需要覆盖的字段，默认值会深度合并）。文件位置：CLI 在 `~/.rivet/config.json`（Windows 为 `%LOCALAPPDATA%\.rivet`）；桌面端以 Settings → 存储位置为准，便携版在 exe 旁 `TianshuData\.rivet`——详见[先定位数据根](#先定位数据根)：
+
+```json
+{
+  "provider": {
+    "default": "deepseek",
+    "providers": {
+      "deepseek": {
+        "apiKey": "sk-xxx",
+        "models": [
+          { "id": "deepseek-v4-pro", "contextWindow": 1000000, "maxTokens": 384000 }
+        ]
+      }
+    }
+  },
+  "agent": { "maxTurns": 200, "approval": "auto-safe", "crossSessionEnabled": true },
+  "compact": { "enabled": true, "autoThreshold": 800000 }
+}
+```
+
+### 识图（视觉能力）
+
+- 主控模型声明 `supportsVision` 时直接看图；否则可配 `agent.visionModel` 识图桥，先用视觉模型转文字再交给主控。
+- 内置视觉模型与桥接配置、`/vision` 发现向导、`ask_image` 追问、桌面端/TUI 设置入口详见 [识图能力用户手册](docs/user-guide-vision.md)。
+- 图片走对话尾部追加，**不打断前缀缓存**；不支持的图片会明确警告，不会静默丢弃。
+
+### Worker 路由（子智能体用不同模型）
+
+```json
+{
+  "workers": {
+    "profiles": {
+      "capable": { "provider": "codex", "model": "gpt-5.6-sol" },
+      "cheap":   { "provider": "minimax", "model": "MiniMax-M2.7" }
+    },
+    "routing": { "code_edit": "capable", "repo_summarization": "cheap" }
+  }
+}
+```
+
+完整说明见 [模型配置指南](docs/user-guide-provider-config.md)。
+
+## 🔐 权限模式
+
+对外只有三档，会话内统一用 `/permission` 管理：
+
+| 档位 | 命令 | 行为 |
+|------|------|------|
+| **监督** | `/permission supervise`（别名 `manual`） | 每个高风险工具都弹确认，最大控制 |
+| **自动**（默认） | `/permission auto [轮次]`（别名 `default`） | 低/无风险工具自动执行，高风险仍确认；可设每 N 轮检查点 |
+| **全自动** | `/permission unattended confirm` · `/yes` · `/yolo` | 免审批执行；写边界仍在（自动开启沙箱），回滚兜底 |
+
+快速操作：
+
+```bash
+/permission                 # 交互式选择三档
+/permission status          # 当前模式 + 规则
+/permission allow/deny      # 工具白名单/黑名单
+/permission bash allow/deny # bash 前缀白名单/黑名单
+/yes [off] · /yolo [off]    # 一键全自动 / 回到自动（持久化为默认）
+```
+
+```bash
+rivet --dangerously-skip-permissions      # 单次会话全自动
+rivet config set-approval auto-safe       # 持久化默认档位
+```
+
+- 规则分 `[config]`（持久化）与 `[session]`（本次会话）两层，`deny` 永远优先。
+- 跳过提示**不会**关闭工具校验、路径安全、证据追踪、检查点与交付门禁。
+- 沙箱默认关闭，**全自动会自动开启**；`RIVET_SANDBOX=1` 可显式开、`=0` 强制关。
+- 项目级信任：未授信项目不加载 hooks / 项目 MCP，安全键剥离；`/trust` 管理。
+- 完整命令清单、规则优先级、路径授权、Windows 行为与故障排查见 [权限与沙箱指南](docs/user-guide-sandbox-permissions.md)。
+
 ## ⌨️ 斜杠命令
 
 > **分层提示**：输入框输入 `/` 默认只展示约 20 条核心命令（高频好用的优先露出）；**继续输入任意字符即过滤全部命令**（含 /team、/council、/skill 等进阶命令），`Ctrl+P` 命令面板永远全量模糊搜索。命令总数 90+ 条（外加已安装的 skills），分层只影响「发现性」，不删任何命令。
@@ -798,7 +822,9 @@ TUI 是 CLI 的默认表面。桌面端（Tauri）与 VS Code/Cursor 插件共�
 | `/compact` | 立即压缩上下文 |
 | `/context` | 显示上下文账本：健康度、tokens、回合、声明 |
 | `/evidence` | 显示证据摘要（读取/修改的文件、测试） |
-| `/memory <text>` | 保存会话记忆条目 |
+| `/memory` | 记忆概览；`/memory add <内容>` 写入项目知识，`/memory search <关键词>` 检索 |
+| `/remember <内容>` | 用户直写项目长期记忆（无参查看最近条目） |
+| `/forget <entryId> [resolved]` | 显式失效一条记忆：`resolved` 表示旧问题已解决，缺省为主动遗忘（无参列出最近可失效条目） |
 | `/btw <问题>` | 侧问——就当前会话问一句，回答显示在浮层，不进对话历史 |
 | `/debug [prompt\|cache\|mcp]` | 调试 prompt、缓存统计或 MCP |
 | `/mcp` | MCP 服务器连接状态 |
@@ -976,9 +1002,18 @@ rivet logs open desktop            # 打开 sidecar 日志目录（GUI 起不来
 | `RIVET_TELEMETRY_LITE=0` | 连 vitals-lite 轻量行一起关（默认开） |
 | `RIVET_HEADLESS_MAX_TURNS` | `-p` 无头模式单次最大轮数（默认 15） |
 | `RIVET_JOB_MAX_MS` | 后台 job 超时上限 |
-| `RIVET_NO_CROSS_SESSION=1` | 禁用跨会话知识共享 |
+| `RIVET_NO_CROSS_SESSION=1` | 禁用跨会话加载（记忆块 / 跨会话事件 / 伴生感知） |
 | `RIVET_NO_UPDATE_CHECK=1` | 关闭启动时的自动更新检查 |
 | `PORTABLE_GIT_MIRROR` | 覆盖 PortableGit 下载镜像 |
+
+**记忆**
+
+| 变量 | 作用 |
+|------|------|
+| `RIVET_ADAPTIVE_MEMORY` | 自动注入治理/约束/偏好类记忆：`on`（默认）/ `shadow` 只评估 / `off` 关闭 |
+| `RIVET_MEMORY_AUTO_CAPTURE` | 会话末把重要操作交给模型判断后写入长期记忆（默认 `on`） |
+| `RIVET_MEMORY_CONSOLIDATION` | 会话末生成摘要与可复用做法（默认 `on`） |
+| `RIVET_MEMORY_BACKFILL` | 启动闲时对历史会话补跑巩固（默认 `off`，幂等账本） |
 
 > 完整环境变量清单（120+ 项，含内部实验开关）见 `src/config/env-registry.ts`。
 
