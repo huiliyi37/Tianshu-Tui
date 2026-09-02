@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { buildSettingsIntentRoutes, SETTINGS_INTENT_SCHEMA, type SettingsIntentResponse } from '../settings-intent-route.js'
 
 // POST /settings/intent 端点契约（Wave 3）——stub global fetch 四用例：
@@ -127,9 +127,11 @@ test('LLM 输出含前缀噪音/多 JSON 对象：取第一个完整对象', asy
   assert.equal(r.body.value, 'large')
 })
 
-test('SCHEMA 双源一致：server SETTINGS_INTENT_SCHEMA 与 desktop schema.ts key+values 对齐', () => {
+const DESKTOP_SCHEMA_URL = new URL('../../../desktop/src/lib/settings-intent/schema.ts', import.meta.url)
+
+test('SCHEMA 双源一致：server SETTINGS_INTENT_SCHEMA 与 desktop schema.ts key+values 对齐', { skip: !existsSync(DESKTOP_SCHEMA_URL) ? '公开仓无 desktop/（闭源面），双源校验仅在开发仓可执行' : false }, () => {
   // desktop 端 schema.ts 的 key 列表与每个 key 的 values 键集合
-  const desktopSrc = readFileSync(new URL('../../../desktop/src/lib/settings-intent/schema.ts', import.meta.url), 'utf8')
+  const desktopSrc = readFileSync(DESKTOP_SCHEMA_URL, 'utf8')
   const keyMatches = [...desktopSrc.matchAll(/^\s+key: '([a-zA-Z]+)',/gm)].map((m) => m[1])
   const serverKeys = SETTINGS_INTENT_SCHEMA.map((s) => s.key)
   assert.deepEqual(serverKeys.sort(), [...new Set(keyMatches)].sort(), '两端 key 列表必须一致（新增设置项同步双源）')
