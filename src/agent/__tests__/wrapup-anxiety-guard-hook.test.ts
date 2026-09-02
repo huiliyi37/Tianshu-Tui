@@ -11,15 +11,17 @@ function makeCtx(turn: number): RuntimeHookContext {
   } as unknown as RuntimeHookContext
 }
 
-function setup(opts: { text: string; estimated: number; window: number }) {
+function setup(opts: { text: string; estimated: number; window: number; withSr?: boolean }) {
   const submitted: AdvisoryEntry[] = []
+  const reminders: Array<{ content: string; cls?: string }> = []
   const hook = createWrapupAnxietyGuardHook({
     advisoryBus: { submit: s => { submitted.push(s) } },
     getStreamedText: () => opts.text,
     getEstimatedTokens: () => opts.estimated,
     getContextWindow: () => opts.window,
+    ...(opts.withSr ? { addSystemReminder: (content: string, cls?: string) => { reminders.push({ content, cls }) } } : {}),
   })
-  return { submitted, run: (turn: number) => hook.run(makeCtx(turn)) }
+  return { submitted, reminders, run: (turn: number) => hook.run(makeCtx(turn)) }
 }
 
 describe('detectWrapupPhrase — 正则两组', () => {
@@ -64,6 +66,41 @@ describe('detectWrapupPhrase — 正则两组', () => {
     // "剩余"与"新会话"分属两句 —— 不应命中间接组；且无其他直接措辞
     const text = '剩余测试全部通过。后续如果用户想开新会话再说。'
     assert.equal(detectWrapupPhrase(text), null)
+  })
+
+  it('matches English phrasings (2026-08-29 evidence: English had zero coverage)', () => {
+    for (const text of [
+      'The context is running low, let me summarize here.',
+      'Context window nearly full.',
+      'I suggest we start a new session for the remaining tasks.',
+      'Let us continue this in a new conversation.',
+      'Due to context limits, I will stop here.',
+      'Let me hand this over to a new session.',
+    ]) {
+      assert.ok(detectWrapupPhrase(text), `expected match: ${text}`)
+    }
+  })
+
+  it('matches added Chinese variants', () => {
+    for (const text of [
+      '剩下的不多了，新开个会话吧。',
+      '对话太长了，先到这里。',
+      'Token 快用完了。',
+      '上下文不多了，先总结。',
+    ]) {
+      assert.ok(detectWrapupPhrase(text), `expected match: ${text}`)
+    }
+  })
+
+  it('does not match neutral mentions of sessions/context', () => {
+    for (const text of [
+      'New sessions inherit the frozen snapshot.',
+      'We have plenty of context left, continuing W3.',
+      'The context of this project is a pure ANSI engine.',
+      '上下文充足，继续推进。',
+    ]) {
+      assert.equal(detectWrapupPhrase(text), null, `expected no match: ${text}`)
+    }
   })
 })
 
@@ -113,5 +150,24 @@ describe('wrapup-anxiety-guard — 三段 ctxRatio 阈值', () => {
     const h = setup({ text: anxious, estimated: 0, window: 1_000_000 })
     h.run(1)
     assert.equal(h.submitted.length, 0)
+  })
+
+  it('delivers the refutation via the functional SR channel (must-deliver, unthrottled)', () => {
+    const h = setup({ text: anxious, estimated: 100_000, window: 1_000_000, withSr: true })
+    h.run(1)
+    assert.equal(h.reminders.length, 1)
+    assert.equal(h.reminders[0]!.cls, 'functional', 'must bypass the 1-per-turn discipline cap')
+    assert.ok(h.reminders[0]!.content.includes('10%'), 'SR cites the measured ratio')
+    assert.ok(h.reminders[0]!.content.includes('习惯性焦虑'))
+  })
+
+  it('functional SR respects the same cooldown latch', () => {
+    const h = setup({ text: anxious, estimated: 100_000, window: 1_000_000, withSr: true })
+    h.run(1)
+    h.run(2)
+    h.run(3)
+    assert.equal(h.reminders.length, 1, 'cooldown suppresses SR re-fire too')
+    h.run(6)
+    assert.equal(h.reminders.length, 2)
   })
 })

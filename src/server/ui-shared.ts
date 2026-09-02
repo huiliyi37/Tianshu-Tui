@@ -21,6 +21,15 @@ export {
   type DecisionStyle,
 } from '../agent/star-domain-data.js'
 
+// 星域产品分层——第一档四颗默认星域与进阶星域（零依赖叶子，欢迎页选择器用）
+export {
+  STARTER_DOMAIN_IDS,
+  getStarDomainTier,
+  partitionDomainsByTier,
+  type StarDomainTier,
+  type StarDomainTierPartition,
+} from '../agent/domain-tiers.js'
+
 // 创世碑文（Genesis Stele）——各星域主星模型与碑文记录（纯数据叶子；
 // 桌面端「星域图谱 → 创世碑文」页的数据源。单一事实源是仓库根 star.md）
 export {

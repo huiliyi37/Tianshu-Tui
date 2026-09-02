@@ -26,6 +26,15 @@ assertStagedRuntimeIntact(dirname(fileURLToPath(import.meta.url)))
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime, restorePlanModeFromMeta } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
+import { resolveCapabilities } from './api/provider.js'
+
+/** /model 面板带来的 effort 应用（s=仅会话；Enter 路径先应用再随默认持久化）。
+ *  值域校验内联——面板 draft 是封闭枚举，防御性兜底而非业务校验。 */
+function applyPickerEffort(ctx: BootstrapContext, e: string | undefined): void {
+  if (!e) return
+  const valid = ['auto', 'off', 'low', 'medium', 'high', 'max'] as const
+  if ((valid as readonly string[]).includes(e)) ctx.agent.setReasoningEffort(e as (typeof valid)[number])
+}
 import { maybePrintStaticPromptCacheWarning } from './cli/prompt-version-warning.js'
 import { getOnboardingState } from './onboarding.js'
 import { loadConfig as loadRivetConfig, setupProvider, registerProvider, upsertProviderModel, removeProvider, setDefaultProvider, setUiConfig, setApprovalMode as persistApprovalDefault, setDefaultDomainConfig, setDefaultModelConfig } from './config/manager.js'
@@ -96,7 +105,8 @@ import { computeUsageCost, findModelPricing } from './utils/pricing.js'
 import { projectCacheTelemetry } from './tui/cache-telemetry.js'
 import { CachePanelSource } from './tui/cache-panel-source.js'
 import { sessionsDir } from './config/paths.js'
-import { trustProject, untrustProject, isProjectTrusted } from './config/project-trust.js'
+import { trustProject, untrustProject, isProjectTrusted, isTrustPromptDismissed, detectProjectTrustStakes, dismissProjectTrustPrompt } from './config/project-trust.js'
+import { promptProjectTrust } from './cli/project-trust-prompt.js'
 import { fetchOfficialUsage } from './cache/deepseek-official-usage.js'
 import type { CacheStatus } from './tui/status-types.js'
 import { TuiPerfMonitor, isTuiPerfEnabled } from './tui/engine/perf-monitor.js'
@@ -687,6 +697,27 @@ async function main() {
   process.stderr.write('[T9] Initializing agent runtime...\n')
   maybePrintStaticPromptCacheWarning()
 
+  // ── 项目授信前置提示（配置加载前）────────────────────────────
+  // 信任门会在 loadConfig 时剥离未授信项目的安全敏感键——等到那会才告知，
+  // 用户只会在会话中段发现 yolo/hooks "神秘失效"。此处（bootstrap 消费项目
+  // 配置之前）有赌注就主动问一次；授信当次生效，无需重启。
+  if (!forceRecoveryCli
+    && !process.env.RIVET_TRUST_PROJECT
+    && !isProjectTrusted(process.cwd())
+    && !isTrustPromptDismissed(process.cwd())) {
+    const stakes = detectProjectTrustStakes(process.cwd())
+    if (stakes.sensitiveKeys.length > 0 || stakes.hasHooks) {
+      const decision = await promptProjectTrust(stakes)
+      if (decision === 'trust') {
+        trustProject(process.cwd())
+        process.stderr.write('[rivet] 已授信本项目——安全敏感配置键当次会话生效；项目 hooks 即刻可用。\n')
+      } else if (decision === 'dismiss') {
+        dismissProjectTrustPrompt(process.cwd())
+        process.stderr.write('[rivet] 已关闭本项目的授信提示（安全键仍被忽略）；随时可用 /trust 授信。\n')
+      }
+    }
+  }
+
   try {
     ctx = await bootstrapInteractiveSession({
       cwd: process.cwd(),
@@ -818,6 +849,12 @@ async function main() {
   // app 在此处必定非 null（前有 app = new TuiApp 赋值，无重赋 null 路径）
   const tuiApp = app!
   tuiApp.setApprovalMode(ctx!.config.agent.approval ?? 'auto-safe')
+  // routing nudge 数据源：workers.profiles 或 review.profiles 任一非空 = 已配置。
+  tuiApp.setRoutingConfiguredProvider(() => {
+    const cfg = ctx!.config
+    return Object.keys(cfg.workers?.profiles ?? {}).length > 0
+      || Object.keys(cfg.agent.review?.profiles ?? {}).length > 0
+  })
   // 资源压力状态行回填：agent 在 bootstrap 里已把 onStatusLine 晚绑定到
   // ctx.setStatusLine，此刻 TUI 就绪，把 sink 接到状态行渲染。
   ctx.setStatusLine = text => tuiApp.setStatusLine(text)
@@ -1191,7 +1228,7 @@ async function main() {
     modelPickerData: () => {
       const activeModelId = ctx?.agent.config.promptEngine.getModel()
       const activeProvider = ctx?.provider.name
-      const entries: { id: string; alias: string; provider: string; current: boolean; contextWindow: number }[] = []
+      const entries: { id: string; alias: string; provider: string; current: boolean; contextWindow: number; effortSupported: boolean }[] = []
       // 只显示用户已保存的 provider（userSaved）——内置预设舰队不进切换器。
       for (const [provName, prov] of Object.entries(ctx?.config.provider.providers ?? {})) {
         if (!prov.userSaved) continue
@@ -1202,6 +1239,8 @@ async function main() {
             provider: provName,
             current: isCurrentModelSelection(provName, m.id, activeProvider, activeModelId),
             contextWindow: m.contextWindow,
+            // effort 行可用性（CC 对标）：effortFormat 'none' = 模型不吃推理等级信号
+            effortSupported: resolveCapabilities(provName, prov.capabilities, m.capabilities).effortFormat !== 'none',
           })
         }
       }
@@ -1445,14 +1484,16 @@ async function main() {
       }
     }
     if (midSession) tuiApp.commitStatic(DOMAIN_SWITCH_CACHE_WARNING)
-  }, /* modelPickerExec: */ (provider: string, modelId: string) => {
-    // Model Picker Enter 回调：执行模型切换。
+  }, /* modelPickerExec: */ (provider: string, modelId: string, effort?: string) => {
+    // Model Picker s 键回调：仅本会话切换（不落盘）。effort 有显式改动时一并生效。
+    applyPickerEffort(ctx!, effort)
     try { ctx!.agent.abort() } catch {}
     const res = switchAgentRuntime(ctx!, modelId, provider)
     if (res.ok && res.modelName) {
+      applyPickerEffort(ctx!, effort)
       tuiApp.setModelInfo(res.modelName, res.contextWindow)
       attachJobSubscription()
-      tuiApp.commitStatic(`Model switched to: ${res.modelName}`)
+      tuiApp.commitStatic(`Model switched to: ${res.modelName}${effort ? `（effort → ${effort}，仅本会话）` : ''}`)
     } else {
       tuiApp.commitStatic(`⚠️ Model switch failed: ${res.error ?? 'unknown error'}`)
     }
@@ -1481,11 +1522,13 @@ async function main() {
       tuiApp.commitStatic(`⚠️ 设置默认失败: ${(err as Error).message}`)
     }
     if (midSession) tuiApp.commitStatic(DOMAIN_SWITCH_CACHE_WARNING)
-  }, /* modelPickerSaveDefaultExec: */ (provider: string, modelId: string) => {
-    // Model Picker S 键回调：切换模型 + 设为默认并持久化。
+  }, /* modelPickerSaveDefaultExec: */ (provider: string, modelId: string, effort?: string) => {
+    // Model Picker Enter 键回调（CC 对标主键）：切换模型 + 设为默认并持久化。
+    // effort 有显式改动时：会话即时生效 + 随默认持久化（'auto' = 清字段回自动）。
     try { ctx!.agent.abort() } catch {}
     const res = switchAgentRuntime(ctx!, modelId, provider)
     if (res.ok && res.modelName) {
+      applyPickerEffort(ctx!, effort)
       tuiApp.setModelInfo(res.modelName, res.contextWindow)
       attachJobSubscription()
       tuiApp.commitStatic(`Model switched to: ${res.modelName}`)
@@ -1496,8 +1539,8 @@ async function main() {
     // "Model switched to: X"），用户无从判断"设为默认"到底有没有落盘，
     // 实测写入一直是好的、只是没说——照 permission 面板的样板补确认。
     try {
-      setDefaultModelConfig({ defaultModel: `${provider}:${modelId}` })
-      tuiApp.commitStatic(`已设为默认模型：${provider}:${modelId}（新会话起始生效）`)
+      setDefaultModelConfig({ defaultModel: `${provider}:${modelId}`, ...(effort ? { defaultEffort: effort } : {}) })
+      tuiApp.commitStatic(`已设为默认模型：${provider}:${modelId}（新会话起始生效）${effort ? ` · effort → ${effort}` : ''}`)
     } catch (err) {
       tuiApp.commitStatic(`⚠️ 设置默认失败: ${(err as Error).message}`)
     }
@@ -2015,6 +2058,9 @@ async function main() {
 
   // 中断收尾窗口靠它对着真相校验，而不是只信 notifyRunSettled 那一条信号。
   app.setAgentRunningProbe(() => ctx?.agent.isRunning() === true)
+
+  // Zen Mode（禅模式）相位徽章：读面收窄期间状态栏常驻「禅」，晋升后消失。
+  app.setZenBadgeProvider(() => (ctx?.agent.zenController.isZen ? '禅' : undefined))
 
   // ── Wire abort ───────────────────────────────────────────────
   app.onAbort(() => {

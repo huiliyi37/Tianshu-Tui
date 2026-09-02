@@ -4,6 +4,7 @@ import { taskGraphToUnifiedPlan, unifiedPlanToTeamTasks, serializeUnifiedPlan, r
 import type { DelegationCoordinator } from '../agent/coordinator.js'
 import { executePlanWaves, type PlanExecutorDeps, type PlanExecutorWavesResult } from '../agent/plan-executor.js'
 import { extractRequiredSkills } from '../agent/skill-gate.js'
+import { extractPlanConstraints } from '../agent/plan-constraints.js'
 import { storePlan } from '../agent/plan-store.js'
 import { classifyTaskDepth, type TaskContract } from '../context/task-contract.js'
 import { setTodos } from './todo.js'
@@ -105,8 +106,43 @@ export function parseChecklistSections(markdown: string): Array<{
   return out
 }
 
+/**
+ * T9 段落级契约提取：parseChecklistSections 只取 checkbox 项——段落级契约
+ * （「接口契约」「瑶光反证」等独立段落，zen 案例实证：契约在段落里 worker
+ * 看不到 → 各自发挥）丢失。检测语义标记段落，提取标题+正文（预算截断）供
+ * 注入任务 objective。
+ * 标记口径：`**接口契约**` 或 `**接口契约（` 开头的行 / `### 接口契约` 标题。
+ */
+const CONTRACT_MARKER = /^\*\*(接口契约|瑶光反证|反证\/复现|需求提炼)[^*]*\*\*|^#{2,4}\s*(接口契约|瑶光反证)/m
+const CONTRACT_BUDGET = 2000
+
+export function extractContractBlocks(markdown: string): string[] {
+  const blocks: string[] = []
+  const lines = markdown.split('\n')
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]!
+    if (CONTRACT_MARKER.test(line)) {
+      const buf: string[] = [line.trim()]
+      i++
+      while (i < lines.length) {
+        const l = lines[i]!
+        if (/^#{2,3}\s+/.test(l) || CONTRACT_MARKER.test(l)) break
+        if (l.trim() !== '') buf.push(l.trim())
+        i++
+      }
+      const text = buf.join('\n')
+      blocks.push(text.length > CONTRACT_BUDGET ? `${text.slice(0, CONTRACT_BUDGET)}…` : text)
+      continue
+    }
+    i++
+  }
+  return blocks
+}
+
 /** 章节感知建图：每个含 checklist 的章节 → 一个 patcher 任务（正交分片）。
- *  任务 objective 携带章节标题 + 全部 checklist 项，worker 逐条执行。 */
+ *  任务 objective 携带章节标题 + 全部 checklist 项 + 段落级契约块，worker
+ *  逐条执行。 */
 function buildTasksFromSections(
   sections: Array<{
     heading: string
@@ -114,13 +150,17 @@ function buildTasksFromSections(
     files: string[]
   }>,
   objective: string,
+  contractBlocks: string[] = [],
 ): TaskGraph {
+  const contractText = contractBlocks.length > 0
+    ? `\n\n段落级契约（以计划全文为准）：\n${contractBlocks.join('\n\n')}`
+    : ''
   const nodes: TaskGraphNode[] = sections.map((sec, i) => {
     const checklistText = sec.items.map(it => `- [ ] ${it.text}`).join('\n')
     return {
       id: `P${i + 1}`,
       title: sec.heading.slice(0, 80),
-      objective: `${sec.heading}\n\n${checklistText}\n\n只执行本 task，不扩展范围，不重写计划。`,
+      objective: `${sec.heading}\n\n${checklistText}${contractText}\n\n只执行本 task，不扩展范围，不重写计划。`,
       profile: 'patcher' as const,
       kind: 'patch_proposal' as const,
       files: sec.files,
@@ -220,18 +260,29 @@ export function createPlanTaskTool(deps: {
       // 技能门禁：读到计划文件时提取点名 skill，透传给 executePlan 入口硬拦
       // （tasks 路径没有 planMarkdown，executePlan 无从自行提取）。
       let requiredSkills: string[] | undefined
+      // T5/T8：计划文件命中时顺带提取计划指针与「待验证假设」——planRef 注入工单
+      // （worker read_file 自取计划原文），assumptions 挂 UnifiedPlan 结构化载体
+      // （planJson 路径经 constraintsFromUnifiedPlan 成为工单约束）。
+      let planFileRef: string | undefined
+      let planAssumptions: string[] | undefined
       const planPath = extractPlanPath(objective, files)
       if (planPath) {
         try {
           const markdown = await readFile(planPath, 'utf-8')
+          planFileRef = planPath
           requiredSkills = extractRequiredSkills(markdown)
+          planAssumptions = extractPlanConstraints(markdown)
+            .filter(c => c.kind === 'assumption')
+            .map(c => c.text)
           // 章节感知切分（2026-07-26 用户指令：不再按 checklist 逐项切）：
           // 有 H2/H3 章节 → 每章节一个正交任务；无章节 → 通用规划路径。
           // 逐项 checklist 切分已移除——碎片化会导致同文件任务串行与
           // scope.files 缺失（coordinator 派发闸拦截）。
           const sections = parseChecklistSections(markdown)
           if (sections.length > 0) {
-            graph = buildTasksFromSections(sections, objective)
+            // T9：段落级契约（接口契约/瑶光反证等）注入任务 objective——修复
+            // checkbox-only 提取导致的契约丢失（worker 各自发挥的断点之一）。
+            graph = buildTasksFromSections(sections, objective, extractContractBlocks(markdown))
           } else {
             graph = decomposeObjective({ objective, files })
           }
@@ -259,6 +310,9 @@ export function createPlanTaskTool(deps: {
 
       // Step 2: convert to UnifiedPlan
       const plan = taskGraphToUnifiedPlan(graph)
+      // T8：假设走结构化载体随 JSON 落盘（storePlan）与展示（renderUnifiedPlanSummary
+      // 之外的消费方）——team_orchestrate 自动消费 planJson 时假设不再丢失。
+      if (planAssumptions && planAssumptions.length > 0) plan.assumptions = planAssumptions
 
       // Step 3: validate
       const validation = validateUnifiedPlan(plan)
@@ -314,6 +368,8 @@ export function createPlanTaskTool(deps: {
             objective,
             tasks,
             requiredSkills,
+            // T5：计划文件命中时注入计划指针，worker 收到「计划全文见：<path>」。
+            ...(planFileRef ? { planRef: planFileRef } : {}),
             startWave: 0,
             autoAdvance: true,
             maxParallel: 3,

@@ -387,7 +387,7 @@ describe('plan tool submit', () => {
       { sessionModel: 'gemini-2.5-flash' },
     )
     assert.ok(!result.isError, result.content)
-    assert.ok(result.content.includes('低阶模型'), 'cheap-tier warning surfaced in tool output')
+    assert.ok(!result.content.includes('低阶模型'), 'no cheap-tier stigma in tool output')
 
     const written = readFileSync(join(dir, '.rivet/plans/provenance-plan.md'), 'utf-8')
     const provenance = parsePlanModel(written)

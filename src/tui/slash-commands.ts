@@ -5,13 +5,13 @@ import { SessionPersist, getSessionDir } from '../agent/session-persist.js'
 import { forkSession, listBranches, countMessageLines } from '../agent/session-fork.js'
 import { type StarDomainId } from '../agent/star-domain.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
-import { DOMAIN_SWITCH_CACHE_WARNING } from '../agent/domain-picker-entries.js'
+import { DOMAIN_SHARED_CAPABILITY_NOTE, DOMAIN_SWITCH_CACHE_WARNING } from '../agent/domain-picker-entries.js'
 import { getCapsuleByStar, listCapsuleStars } from '../agent/seed-capsule-store.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { resolveCustomCommand } from '../commands/loader.js'
-import { trustProject, untrustProject, isProjectTrusted, listTrustedProjects } from '../config/project-trust.js'
+import { trustProject, untrustProject, isProjectTrusted, listTrustedProjects, isTrustPromptDismissed } from '../config/project-trust.js'
 import { getTheme, setTheme, getActiveThemeName, THEMES, listCustomThemes } from './theme.js'
 import {
   checkForUpdate,
@@ -72,6 +72,7 @@ import { parseManifest } from '../plugins/manifest.js'
 import { PLUGIN_PRESETS } from '../plugins/plugin-presets.js'
 import { switchAgentRuntime, switchAgentSession, switchAgentCwd, restorePlanModeFromMeta } from '../bootstrap.js'
 import { loadTodos, setTodoSession } from '../tools/todo.js'
+import { rememberUserNote, listUserNotes } from '../memory/user-remember.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { formatPermissionLabel, parsePermissionAlias, tierToMode } from '../agent/approval-vocabulary.js'
@@ -507,15 +508,14 @@ export async function approvePlanAndKickoff(
     }
     return false
   }
-  const { approved, driftNote, kickoff, tierWarning } = result
+  const { approved, driftNote, kickoff } = result
   deps.agent.setActivePlan({ slug, title: approved.title, selectedApproach: resolvedApproach })
   const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
   const driftLine = driftNote
     ? `\n\n⚠ 锚点漂移复查:计划中有引用与当前工作区不符(已注入执行提示,执行方将以现实为准):\n${driftNote}`
     : ''
-  const tierWarnLine = tierWarning ? `\n\n${tierWarning}` : ''
   deps.notify(
-    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。${tierWarnLine}${driftLine}`,
+    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。${driftLine}`,
   )
   deps.submitToAgent?.(kickoff)
   return true
@@ -669,6 +669,24 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       } else {
         ctx.askSideQuestion(question)
       }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    // 禅模式用户跳过：立即晋升 full（全量工具面）。可选参数为提示语，不进对话历史。
+    name: '/fast',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const note = parts.slice(1).join(' ').trim()
+      const promoted = ctx.agent.promoteZen('user')
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: promoted
+          ? `禅模式已解除：全量工具面恢复。${note ? `（${note}）` : ''}`
+          : `禅模式未激活或已解除。${note ? `（${note}）` : ''}`,
+      }))
       setIsStreaming(false)
       return true
     },
@@ -1120,6 +1138,30 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     },
   },
   {
+    name: '/remember',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming, agent } = ctx
+      const text = parts.slice(1).join(' ').trim()
+      const lines: string[] = []
+      if (!text) {
+        const notes = listUserNotes(agent.cwd, 5)
+        lines.push('用法：/remember <要记住的事>（直写项目长期记忆，跨会话生效）')
+        if (notes.length > 0) {
+          lines.push('', `最近的用户记忆（${notes.length} 条，全量用 memory recall query=... topic=user）：`)
+          for (const note of notes) lines.push(`- [${note.id}] ${note.text}`)
+        }
+      } else {
+        const result = rememberUserNote(agent.cwd, text, ctx.currentSessionId)
+        lines.push(result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}`)
+        if (result.ok) lines.push('（source=user 直写，不过质量闸门；新会话经跨会话记忆块自动携带）')
+      }
+      pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
     name: '/trust',
     immediate: true,
     async handler(ctx) {
@@ -1135,6 +1177,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       } else if (action === 'status') {
         lines.push(
           `项目信任状态：${isProjectTrusted(agent.cwd) ? '已授信' : '未授信'}`,
+          `启动授信提示：${isTrustPromptDismissed(agent.cwd) ? '已关闭（/trust 授信即恢复）' : '开启'}`,
           `已授信项目数：${listTrustedProjects().length}（清单存于 ~/.rivet/project-trust.json）`,
           '未授信时：项目 hooks 不执行；项目配置的 permissions/mcp/hooks/providers/env/ui.statusLine/agent.approval 等安全键被忽略。',
         )
@@ -1521,16 +1564,21 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         } else if (current === null) {
           pushStatic(createLogEntry({ type: 'system', content: '星域\n\n当前无星域（自动匹配未命中）。\n使用 /domain <名称> 手动指定，或 /domain auto 重置为自动检测。' }))
         } else {
-          pushStatic(createLogEntry({ type: 'system', content: `星域\n\n当前: ${current.name} (${current.id})\n座右铭: ${current.motto}\n\n${current.volatileBlock}` }))
+          const def = starDomainRegistry.get(current.id)
+          const identity = def?.alias ? `\n身份: ${def.name} · ${def.alias}` : ''
+          const plain = def?.plain ? `\n特质说明: ${def.plain}` : ''
+          pushStatic(createLogEntry({ type: 'system', content: `星域\n\n当前: ${current.name} (${current.id})${identity}\n${DOMAIN_SHARED_CAPABILITY_NOTE}\n座右铭: ${current.motto}${plain}\n\n${current.volatileBlock}` }))
         }
       } else if (sub === 'list' || sub === 'ls') {
         const current = ctx.agent.getSessionDomain()
         const currentId = current?.id
-        const lines = (starDomainRegistry.list() as Array<{ id: StarDomainId; name: string; keywords: string[]; decisionStyle: string; motto: string }>).map(d => {
+        const lines = (starDomainRegistry.list() as Array<{ id: StarDomainId; name: string; keywords: string[]; decisionStyle: string; motto: string; alias?: string; plain?: string }>).map(d => {
           const marker = d.id === currentId ? ' ← current' : ''
-          return `  ${d.name} (${d.id}) [${d.decisionStyle}]${marker}\n    ${d.motto}\n    keywords: ${d.keywords.join(', ')}`
+          const role = d.alias ? `\n    ${d.name} · ${d.alias}` : ''
+          const plain = d.plain ? `\n    特质说明: ${d.plain}` : ''
+          return `  ${d.name} (${d.id}) [${d.decisionStyle}]${marker}${role}\n    座右铭: ${d.motto}${plain}\n    keywords: ${d.keywords.join(', ')}`
         })
-        pushStatic(createLogEntry({ type: 'system', content: `星域一览\n\n${lines.join('\n\n')}\n\n使用 /domain <id|名称> 切换，/domain auto 恢复自动检测。` }))
+        pushStatic(createLogEntry({ type: 'system', content: `星域一览（${DOMAIN_SHARED_CAPABILITY_NOTE}）\n\n${lines.join('\n\n')}\n\n使用 /domain <id|名称> 切换，/domain auto 恢复自动检测。` }))
       } else if (sub === 'auto') {
         const midSession = ctx.agent.getSessionTurnCount() > 0
         ctx.agent.resetSessionDomain()
@@ -1979,8 +2027,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       } else {
         const lines = plans.map(p => {
           const statusIcon = p.status === 'approved' ? '✅' : p.status === 'rejected' ? '❌' : p.status === 'executed' ? '🏁' : '📋'
-          const tierTag = p.modelTier === 'cheap' ? ' ⚠低阶模型产出' : ''
-          return `  ${statusIcon} \`${p.slug}\` — ${p.title} (${p.status}, ${p.createdAt.toLocaleString()})${tierTag}`
+          return `  ${statusIcon} \`${p.slug}\` — ${p.title} (${p.status}, ${p.createdAt.toLocaleString()})`
         })
         pushStatic(createLogEntry({ type: 'system', content: `Plans (.rivet/plans/):\n\n${lines.join('\n')}\n\nUse /plan-approve <slug> to approve, /plan-reject <slug> to reject.` }))
       }
@@ -3317,6 +3364,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         // 无参数 → 重置面板类型后打开交互式选择面板（上下选、回车确认）。
         // 不重置的话，先开过 /permission 等面板后 choicePanelKind 残留，
         // 选择面板会按旧类型渲染（PR #29 移植）。
+        pushStatic(createLogEntry({ type: 'system', content: '也可在 /model 面板用 </> 随模型一起调整推理等级（Enter 可随默认持久化）。' }))
         ctx.setChoicePanelKind?.('effort')
         surfacePush?.('choice-panel')
         setIsStreaming(false)

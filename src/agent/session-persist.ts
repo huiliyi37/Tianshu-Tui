@@ -142,6 +142,26 @@ function parseSessionLine(line: string): unknown | null {
   return parsed
 }
 
+/** 只读历史会话转录（memory backfill / deep-recall 共用）：zstd 解码 + 校验和
+ *  过滤，只取 user/assistant 文本行。不写不建目录——与 SessionPersist 写路径解耦。 */
+export function readHistoricalTranscript(filePath: string): Array<{ role: string; content: string }> {
+  if (!existsSync(filePath)) return []
+  let lines: string[]
+  try {
+    lines = decodeTranscriptText(readFileSync(filePath)).trim().split('\n').filter(Boolean)
+  } catch { return [] }
+  const messages: Array<{ role: string; content: string }> = []
+  for (const line of verifyLines(lines).validLines) {
+    try {
+      const parsed = parseSessionLine(line) as { role?: unknown; content?: unknown } | null
+      if (parsed && (parsed.role === 'user' || parsed.role === 'assistant') && typeof parsed.content === 'string') {
+        messages.push({ role: parsed.role, content: parsed.content })
+      }
+    } catch { /* skip malformed rows */ }
+  }
+  return messages
+}
+
 export class SessionPersist {
   private filePath: string
   private metadataPath: string

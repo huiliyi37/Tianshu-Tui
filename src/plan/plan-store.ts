@@ -30,7 +30,7 @@ export interface PlanDocument {
   options?: PlanOption[]
   /** 产出模型留痕（submit 时写入）。缺失 = 旧计划或未知模型。 */
   model?: string
-  /** 产出模型 tier（名字推断）。cheap 时审批面显示低阶模型警告。 */
+  /** 产出模型 tier（名字推断）。中性留痕元数据，不驱动任何差异化提示。 */
   modelTier?: 'cheap' | 'balanced' | 'strong' | null
 }
 

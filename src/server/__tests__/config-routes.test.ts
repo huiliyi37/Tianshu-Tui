@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRouter } from '../index.js'
@@ -913,5 +913,125 @@ describe('POST /config/providers — models 批量回填（「每行一个」/ �
     const providers = (get.body as { providers: { name: string; models: { id: string }[] }[] }).providers
     const glm = providers.find((p) => p.name === 'glm')
     assert.ok(!glm?.models.some((m) => m.id === 'would-partially-save'), 'rejected batch must not persist anything')
+  })
+})
+describe('project-trust routes', () => {
+  const prevHome = process.env.RIVET_HOME
+  const prevTrustEnv = process.env.RIVET_TRUST_PROJECT
+  let home: string
+  let proj: string
+
+  before(() => {
+    home = mkdtempSync(join(tmpdir(), 'rivet-trust-routes-'))
+    proj = mkdtempSync(join(tmpdir(), 'rivet-trust-routes-proj-'))
+    process.env.RIVET_HOME = home
+    delete process.env.RIVET_TRUST_PROJECT
+  })
+
+  after(() => {
+    if (prevHome === undefined) delete process.env.RIVET_HOME
+    else process.env.RIVET_HOME = prevHome
+    if (prevTrustEnv === undefined) delete process.env.RIVET_TRUST_PROJECT
+    else process.env.RIVET_TRUST_PROJECT = prevTrustEnv
+    rmSync(home, { recursive: true, force: true })
+    rmSync(proj, { recursive: true, force: true })
+  })
+
+  const router = () => createRouter(buildConfigRoutes(TOKEN))
+
+  it('rejects unauthorized requests', async () => {
+    const res = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, {})
+    assert.equal(res.status, 401)
+  })
+
+  it('requires an absolute cwd on GET/PUT/DELETE', async () => {
+    const res = await router()('GET', '/config/project-trust?cwd=relative', {}, AUTH)
+    assert.equal(res.status, 400)
+    const put = await router()('PUT', '/config/project-trust', { cwd: 'relative', action: 'trust' }, AUTH)
+    assert.equal(put.status, 400)
+    const del = await router()('DELETE', '/config/project-trust?cwd=', {}, AUTH)
+    assert.equal(del.status, 400)
+  })
+
+  it('reports untrusted with no stakes and no dismissal by default', async () => {
+    const res = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+    assert.equal(res.status, 200)
+    const body = res.body as { trusted: boolean; envOverride: boolean | null; promptDismissed: boolean; stakes: { sensitiveKeys: string[]; hasHooks: boolean } }
+    assert.equal(body.trusted, false)
+    assert.equal(body.envOverride, null)
+    assert.equal(body.promptDismissed, false)
+    assert.deepEqual(body.stakes, { sensitiveKeys: [], hasHooks: false })
+  })
+
+  it('detects sensitive keys in the project config as stakes', async () => {
+    writeFileSync(join(proj, '.rivet-config.json'), JSON.stringify({ agent: { approval: 'auto-safe' }, theme: 'dark' }))
+    const res = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+    const body = res.body as { stakes: { sensitiveKeys: string[]; hasHooks: boolean } }
+    assert.deepEqual(body.stakes.sensitiveKeys, ['agent.approval'])
+    assert.equal(body.stakes.hasHooks, false)
+  })
+
+  it('trust roundtrip: PUT trust → GET trusted, DELETE → untrusted', async () => {
+    const put = await router()('PUT', '/config/project-trust', { cwd: proj, action: 'trust' }, AUTH)
+    assert.equal(put.status, 200)
+    const get = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+    assert.equal((get.body as { trusted: boolean }).trusted, true)
+
+    const del = await router()('DELETE', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+    assert.equal(del.status, 200)
+    const get2 = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+    assert.equal((get2.body as { trusted: boolean }).trusted, false)
+  })
+
+  it('dismiss roundtrip and trust clears the dismissal', async () => {
+    const put = await router()('PUT', '/config/project-trust', { cwd: proj, action: 'dismiss' }, AUTH)
+    assert.equal(put.status, 200)
+    const get = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+    assert.equal((get.body as { promptDismissed: boolean }).promptDismissed, true)
+
+    await router()('PUT', '/config/project-trust', { cwd: proj, action: 'trust' }, AUTH)
+    const get2 = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+    assert.equal((get2.body as { promptDismissed: boolean }).promptDismissed, false, 're-trust re-engages the prompt')
+  })
+
+  it('rejects an unknown action', async () => {
+    const res = await router()('PUT', '/config/project-trust', { cwd: proj, action: 'maybe' }, AUTH)
+    assert.equal(res.status, 400)
+  })
+
+  it('lists trusted workspaces and reflects untrust', async () => {
+    await router()('PUT', '/config/project-trust', { cwd: proj, action: 'trust' }, AUTH)
+    const list = await router()('GET', '/config/project-trust/list', {}, AUTH)
+    assert.equal(list.status, 200)
+    const body = list.body as { trusted: { path: string; trustedAt: string }[] }
+    const entry = body.trusted.find((t) => t.path === realpathSync(proj))
+    assert.ok(entry, 'trusted list contains the project realpath')
+    assert.match(entry!.trustedAt, /^\d{4}-\d{2}-\d{2}T/)
+
+    await router()('DELETE', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+    const list2 = await router()('GET', '/config/project-trust/list', {}, AUTH)
+    const body2 = list2.body as { trusted: { path: string }[] }
+    assert.ok(!body2.trusted.some((t) => t.path === realpathSync(proj)))
+  })
+
+  it('env override surfaces in the status and beats the store', async () => {
+    process.env.RIVET_TRUST_PROJECT = '1'
+    try {
+      const get = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+      const body = get.body as { trusted: boolean; envOverride: boolean | null }
+      assert.equal(body.trusted, true, 'env=1 forces trusted regardless of the store')
+      assert.equal(body.envOverride, true)
+    } finally {
+      process.env.RIVET_TRUST_PROJECT = '0'
+      try {
+        await router()('PUT', '/config/project-trust', { cwd: proj, action: 'trust' }, AUTH)
+        const get = await router()('GET', `/config/project-trust?cwd=${encodeURIComponent(proj)}`, {}, AUTH)
+        const body = get.body as { trusted: boolean; envOverride: boolean | null }
+        assert.equal(body.trusted, false, 'env=0 forces untrusted even after a store trust')
+        assert.equal(body.envOverride, false)
+      } finally {
+        delete process.env.RIVET_TRUST_PROJECT
+      }
+    }
   })
 })

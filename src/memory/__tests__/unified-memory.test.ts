@@ -293,10 +293,10 @@ describe('renderMemoryBlock sourceFilter — 虚空仓库 P0', () => {
     try { rmSync(memoryDir(projectHash(DIR)), { recursive: true }) } catch {}
   }
 
-  function addCrafted(text: string, ts: number): MemoryEntry {
+  function addCrafted(text: string, ts: number, sessionId?: string): MemoryEntry {
     return appendMemoryEntry(DIR, {
       text, kind: 'verified_pattern', confidence: 0.95, source: 'agent-crafted',
-      status: 'verified', tags: ['agent-learned'], ts,
+      status: 'verified', tags: ['agent-learned'], ts, sessionId,
     })
   }
 
@@ -355,6 +355,35 @@ describe('renderMemoryBlock sourceFilter — 虚空仓库 P0', () => {
     assert.ok(block!.includes('新版模式'))
     assert.equal(block!.includes('旧版模式'), false)
   })
+
+    it('queryGatedSource: 与当前问题无关的 agent-crafted 记忆不注入（旧问题不背新问题）', () => {
+      reset()
+      addCrafted('登录页曾因 token 刷新失败而崩溃', 100)
+      const unrelated = renderMemoryBlock(DIR, '写一个新的数据导出功能', 2000, 'agent-crafted', { queryGatedSource: true })
+      assert.equal(unrelated, null, '新问题不应看到旧问题的 agent-crafted 记忆')
+      const related = renderMemoryBlock(DIR, '登录页又报 token 错误了', 2000, 'agent-crafted', { queryGatedSource: true })
+      assert.ok(related!.includes('token'), '相关问题时仍可召回')
+    })
+
+    it('excludeSessionId: 当前会话自己写的记忆不作为 cross-session 重复注入', () => {
+      reset()
+      addCrafted('当前会话刚收敛的旧案件', 100, 'session-current')
+      addCrafted('其他会话沉淀的模式', 200, 'session-other')
+      const block = renderMemoryBlock(DIR, '新问题', 2000, 'agent-crafted', { excludeSessionId: 'session-current' })
+      assert.ok(block!.includes('其他会话沉淀'))
+      assert.equal(block!.includes('当前会话刚收敛'), false)
+    })
+
+      it('excludeSessionIds: 并行在线会话的在途记忆互相不注入', () => {
+        reset()
+        addCrafted('会话 A 的进行中结论', 100, 'session-a')
+        addCrafted('会话 B 的进行中结论', 200, 'session-b')
+        addCrafted('已结束会话的稳定模式', 300, 'session-idle')
+        const block = renderMemoryBlock(DIR, '并行会话', 2000, 'agent-crafted', { excludeSessionIds: ['session-a', 'session-b'] })
+        assert.ok(block!.includes('已结束会话的稳定模式'))
+        assert.equal(block!.includes('会话 A 的进行中结论'), false)
+        assert.equal(block!.includes('会话 B 的进行中结论'), false)
+      })
 
   it('向后兼容：不传 sourceFilter 且空 query → null（评分路径行为不变）', () => {
     reset()

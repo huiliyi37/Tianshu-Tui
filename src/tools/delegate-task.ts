@@ -108,6 +108,7 @@ export function formatUiContent(run: CoordinatorRun): string {
       sourcesReviewedCount: r.sourcesReviewed,
       failureReason: r.failureReason,
       evidenceStatus: r.evidenceStatus,
+      salvagedFindingsCount: r.findings?.filter(f => f.salvaged === true).length ?? 0,
     })
   })
   const body = rows.length > 0 ? '\n' + rows.join('\n') : ''
@@ -120,6 +121,11 @@ export function createDelegateTaskTool(
   getClaimStore?: () => ContextClaimStore | undefined,
   getSessionId?: () => string | undefined,
   getProblemAttackStore?: () => import('../agent/problem-attack-loop.js').ProblemAttackStore | null,
+  /** B1 worker 归属回流：passed worker 的 changedFiles 写回主控 ledger +
+   *  ownership（bootstrap 注入）——修复 worker 写入不在主控 owned 集、
+   *  交付需 adopt 补交的机制根因（ledger 记 file_write，deliver 时
+   *  autoOwnFromLedger 自动认领）。未注入 = 旧行为（不写回）。 */
+  backfillOwnedFiles?: (changedFiles: string[]) => void,
 ): Tool {
   return {
     definition: {
@@ -232,6 +238,16 @@ export function createDelegateTaskTool(
 
         // Extract worker findings into claim store
         if (run.status === 'completed') {
+          // B1 worker 归属回流：passed 的 changedFiles 写回主控 ledger +
+          // ownership（autoOwnFromLedger 在交付时自动认领）。只认 passed——
+          // failed/blocked 的写入不构成归属证据。
+          if (backfillOwnedFiles) {
+            for (const result of run.results) {
+              if (result.status === 'passed' && result.changedFiles.length > 0) {
+                backfillOwnedFiles(result.changedFiles)
+              }
+            }
+          }
           const claimStore = getClaimStore?.()
           const sid = getSessionId?.()
           if (claimStore && sid) {

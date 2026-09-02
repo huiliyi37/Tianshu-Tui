@@ -43,7 +43,18 @@ const LONG_MULTI_MIN = 120
 const COUNCIL_RE = /评审|会诊|方案|选型|架构|风险|要不要|该不该|值不值|决策|权衡/
 const SCOUT_RE = /排查|诊断|体检|摸底|归因|定位|对账|调研|为什么|看不懂|陌生/
 
-export type OrchestrationKind = 'team' | 'scout' | 'council'
+export type OrchestrationKind = 'team' | 'scout' | 'council' | 'routing'
+
+/** 派发类命令——子代理即将出动，routing 未配置时这是 nudge 的触发窗口。 */
+const DISPATCH_COMMAND_RE = /^\/(?:team|scout|council|review|galaxy)\b/
+
+/**
+ * routing nudge 检测：用户正在输入派发命令（/team /scout /council /review /galaxy）。
+ * 与 detectOrchestrationFit 不同——这是确定性命令匹配，不是启发式。
+ */
+export function detectRoutingNudge(text: string): boolean {
+  return DISPATCH_COMMAND_RE.test(text.trim())
+}
 
 function classifyKind(t: string): OrchestrationKind {
   if (COUNCIL_RE.test(t)) return 'council'
@@ -105,6 +116,12 @@ export function formatOrchestrationHint(theme: RivetTheme, ascii: boolean, kind:
         color('/team', theme.warning) + color(' 并行施工 · ', theme.muted) +
         color('/scout', theme.warning) + color(' 只读侦察', theme.muted) +
         color(' ｜ Tab 用 /team 发送 · Esc 本会话不再提示', theme.dim)
+    case 'routing':
+      return head +
+        color('子代理将跟随主模型——', theme.secondary) +
+        color('/config', theme.warning) + color(' 可为审查/子代理席配更便宜的模型', theme.muted) +
+        color('（跨供应商均可）', theme.muted) +
+        color(' ｜ Tab 去配置 · Esc 本会话不再提示', theme.dim)
   }
 }
 
@@ -112,6 +129,9 @@ export interface OrchestrationHintContext {
   planMode: boolean
   askMode: boolean
   streaming: boolean
+  /** 子代理模型路由是否已配置（workers.profiles 或 review.profiles 任一非空）。
+   *  缺省 = 已配置（宁可不提示，不可误提示）。 */
+  routingConfigured?: boolean
 }
 
 /** 会话级建议状态：激活标记 + 频率帽 + 关闭语义。 */
@@ -123,6 +143,8 @@ export class OrchestrationHint {
   private shows = 0
   /** Esc / Tab 采纳后本会话关闭（不可逆——用户已经学会了或明确不要）。 */
   private closed = false
+  /** routing nudge 独立频控：每会话至多 1 次（协同建议的 shows=2 与它无关）。 */
+  private routingShown = false
 
   constructor(private readonly enabled: boolean) {}
 
@@ -134,8 +156,28 @@ export class OrchestrationHint {
     const prev = this.active
     if (
       !this.enabled || this.closed ||
+      ctx.planMode || ctx.askMode || ctx.streaming
+    ) {
+      this.active = false
+      return prev !== this.active
+    }
+    // routing nudge：派发命令 + 路由未配置 → 一次性提示（放在 / 抑制门之前——
+    // 协同建议对 slash 输入沉默，routing nudge 恰恰只对特定 slash 输入说话）。
+    if (text.startsWith('/')) {
+      const nudgeHit = !this.routingShown
+        && ctx.routingConfigured === false
+        && detectRoutingNudge(text)
+      if (nudgeHit) {
+        this.routingShown = true
+        this.kind = 'routing'
+        this.active = true
+      } else {
+        this.active = false
+      }
+      return prev !== this.active
+    }
+    if (
       this.shownCount >= ORCHESTRATION_HINT_MAX_SHOWS ||
-      ctx.planMode || ctx.askMode || ctx.streaming ||
       text.startsWith('/')
     ) {
       this.active = false

@@ -318,7 +318,7 @@ function verificationMatchesTargets(meta: VerificationMetadata, targets: readonl
   const normalizedTargets = targets.map(t => t.replaceAll('\\', '/'))
   const metaFiles = (meta.targetFiles ?? []).map(t => t.replaceAll('\\', '/'))
   if (metaFiles.some(f => normalizedTargets.some(t => f.includes(t) || t.includes(f)))) return true
-  const command = (meta.resolvedCommand ?? meta.command).replaceAll('\\', '/')
+  const command = (meta.resolvedCommand ?? meta.command ?? '').replaceAll('\\', '/')
   return normalizedTargets.some(t => {
     if (command.includes(t)) return true
     const base = t.split('/').pop() ?? t

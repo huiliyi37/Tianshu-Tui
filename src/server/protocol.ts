@@ -132,6 +132,9 @@ export type SessionEventType =
   // started 事件、sidecar 重启后注册表更是全空——前端据此 upsert 并摘除
   // 本地仍 running 但服务端已消失的任务（重启悬挂对账）。
   | 'job_snapshot'
+  // Zen Mode（禅模式）相位镜像：data: { phase:'zen'|'full', reason?, armed,
+  // zenTurns }。run 开始与每次晋升各发一次——桌面端据此渲染读面徽章。
+  | 'zen_phase'
 
 export interface SessionEvent {
   seq: number

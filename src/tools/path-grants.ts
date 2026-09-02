@@ -85,10 +85,20 @@ function foldCase(p: string): string {
  * True when `child` is the same as `root` or nested under it, using a
  * separator boundary so `/a/b` does NOT match `/a/bc`. Exposed with an
  * explicit case-sensitivity flag for unit testing win32 semantics on any host.
+ *
+ * win32 accepts `/` and `\` interchangeably, so both fold to the host
+ * separator before the boundary check — a mixed-separator path can neither
+ * slip past nor falsely fail containment (posix-style test data must work on
+ * a win32 host too). On posix `\` is a legal filename character and stays
+ * literal.
  */
 export function isPathUnder(root: string, child: string, caseInsensitive: boolean = CASE_INSENSITIVE_FS): boolean {
-  const r = caseInsensitive ? root.toLowerCase() : root
-  const c = caseInsensitive ? child.toLowerCase() : child
+  const fold = (p: string): string => {
+    const norm = sep === '\\' ? p.replace(/\//g, '\\') : p
+    return caseInsensitive ? norm.toLowerCase() : norm
+  }
+  const r = fold(root)
+  const c = fold(child)
   if (c === r) return true
   const prefix = r.endsWith(sep) ? r : r + sep
   return c.startsWith(prefix)

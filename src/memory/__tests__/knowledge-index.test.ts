@@ -142,4 +142,22 @@ describe('knowledge-index', () => {
     const hits = await idx.search('lazily rebuilt entry')
     assert.ok(hits.length >= 1)
   })
+
+  it('excludes entries written by live parallel sessions (parallel workspace isolation)', async () => {
+    appendMemoryEntry(cwd, {
+      text: 'In-flight conclusion from session A about pagination bounds',
+      kind: 'finding', confidence: 0.9, source: 'auto-capture', status: 'observed', tags: [],
+      sessionId: 'session-a', topic: 'pagination',
+    })
+    appendMemoryEntry(cwd, {
+      text: 'Stable cross-session rule about pagination bounds',
+      kind: 'project_rule', confidence: 1, source: 'manual', status: 'verified', tags: [],
+      sessionId: 'session-idle', topic: 'pagination',
+    })
+
+    const idx = new KnowledgeIndex(cwd)
+    const hits = await idx.search('pagination bounds', { excludeSessionIds: ['session-a'] })
+    assert.ok(hits.length >= 1)
+    assert.ok(hits.every(h => h.entry?.sessionId !== 'session-a'), '在线会话条目不得进入召回')
+  })
 })

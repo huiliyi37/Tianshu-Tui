@@ -380,6 +380,12 @@ export const agentSchema = z.object({
    * 格式校验在 setDefaultModelConfig 层完成（需要校验 provider + model 存在性）。 */
   defaultModel: z.string().optional(),
   /**
+   * 默认推理等级（CC 对标：/model 面板 </> 调整后随「设为默认」持久化）。
+   * 显式档位覆盖模型 preset 的 reasoningEffort 默认；未配置（或缺省）= auto——
+   * 由 auto-reasoning 按任务关键词自动选档。取值不含 'auto'：持久化 auto 即删字段。
+   */
+  defaultEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
+  /**
    * 会话 Auto 星域是否按消息关键词匹配换域（defaultDomain='auto' 或当前
    * 会话显式选择 Auto 时生效）。
    * 默认 true：Auto 按首条消息在 auto 池（天权/开阳/瑶光/天梁 + 自定义域）
@@ -938,6 +944,26 @@ export const configSchema = z.object({
    *  会话启动期解析，会话内冻结（前缀缓存安全）；RIVET_TOOL_PRESET env 优先于此配置。 */
   tools: z.object({
     preset: z.enum(['minimal', 'frontend', 'full', 'taiyi']).optional(),
+    /** Zen Mode（禅模式）：读专注开局，动手即解锁。字段全可选——bootstrap 经
+     *  resolveZenConfig 物化默认并 fail-loud（空 face/重复名等在此层校验）。
+     *  【默认行为注意】未配置时 enabled 默认 **true**：所有新顶层会话以只读
+     *  工具面 + zen_unlock 开局（首次写类动作自动晋升，一次性缓存断点）；
+     *  显式 `tools.zen.enabled: false` 全局关闭。
+     *  strict() 让未知键（如 appendixlean 拼写错误）在加载期抛错而非被 zod
+     *  静默 strip——否则 resolveZenConfig 的未知键检查是死代码。 */
+    zen: z.object({
+      enabled: z.boolean().optional(),
+      face: z.array(z.string()).optional(),
+      /** minimal = 四件套；structuredRead = + file_info/related_tests/
+       *  repo_graph/semantic_search/read_section。显式 face 优先。 */
+      faceMode: z.enum(['minimal', 'structuredRead']).optional(),
+      timeoutSteps: z.number().int().nonnegative().optional(),
+      triage: z.object({
+        enabled: z.boolean().optional(),
+        maxChars: z.number().int().positive().optional(),
+      }).strict().optional(),
+      appendixLean: z.boolean().optional(),
+    }).strict().optional(),
   }).default({}),
   prompt: promptSchema,
   /**
@@ -979,7 +1005,16 @@ export type Config = {
   env: EnvConfig
   ui: UiConfig
   verify: VerifyConfig
-  tools: { preset?: 'minimal' | 'frontend' | 'full' | 'taiyi' | undefined }
+  tools: { preset?: 'minimal' | 'frontend' | 'full' | 'taiyi' | undefined; zen?: {
+    enabled?: boolean
+    face?: string[]
+    /** minimal = 四件套；structuredRead = + file_info/related_tests/
+     *  repo_graph/semantic_search/read_section。显式 face 优先。 */
+    faceMode?: 'minimal' | 'structuredRead'
+    timeoutSteps?: number
+    triage?: { enabled?: boolean; maxChars?: number }
+    appendixLean?: boolean
+  } | undefined }
   prompt: PromptConfig
   runtime: RuntimeConfig
   pro: ProConfig

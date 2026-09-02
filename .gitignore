@@ -153,5 +153,17 @@ todo-cli/
 src/**/__tests__/.scoped-commit-tmp/
 src/**/__tests__/.undo-test-backup/
 
+# 2026-09-02 历史清理：以下文件曾被 f81e319e3 误扫入仓（已从历史剔除），
+# 均为运行时数据/二进制/个人文件，停止跟踪但保留磁盘副本
+.dsh/
+.rivet/dsh-meridian.db*
+.rivet/knowledge/memory-index.sqlite
+.rivet/tianshu-ide/
+promo-data/
+resume/
+tianshu-showcase/
+tianshu-welcome-*.html
+调整
+
 # 公开仓：禁止 knowledge 回灌（私有仓策略不同；仅保留 .rivet/SELF）
 .rivet/knowledge/

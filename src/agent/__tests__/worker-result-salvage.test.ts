@@ -13,8 +13,12 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   buildBlockedWorkerResult,
+  checkEvidenceRefs,
   createReadOnlyWorkOrder,
   parseWorkerResult,
   salvageWorkerResult,
@@ -115,6 +119,90 @@ describe('salvageWorkerResult (field-level terminal tier)', () => {
     assert.equal(salvaged.failureReason, 'json_parse')
     assert.ok(salvaged.summary.includes('主控 Agent'), 'worker\'s own summary is carried')
     assert.ok(salvaged.risks.some(r => r.includes('parse-salvaged')))
+  })
+
+  it('marks every salvaged finding with salvaged: true (provenance)', () => {
+    const salvaged = salvageWorkerResult(TIANQUAN_MALFORMED_REPORT, 'batch:0')
+    assert.ok(salvaged)
+    assert.ok(salvaged.findings.length > 0)
+    for (const finding of salvaged.findings) {
+      assert.equal(finding.salvaged, true, `finding "${finding.claim.slice(0, 20)}…" must be provenance-marked`)
+    }
+  })
+
+  it('does not set evidenceRefsMissing without evidenceRoots (back-compat)', () => {
+    const salvaged = salvageWorkerResult(TIANQUAN_MALFORMED_REPORT, 'batch:0')
+    assert.ok(salvaged)
+    for (const finding of salvaged.findings) {
+      assert.equal(finding.evidenceRefsMissing, undefined, 'no roots → no mechanical check')
+    }
+  })
+
+  it('fills evidenceRefsMissing when evidenceRoots are provided and refs do not exist (hallucination check)', () => {
+    // 复现 T1 实案：salvage 打捞的 finding 引用不存在的 src/a.py（模型幻觉）。
+    // 真实文件 src/real.ts 在临时 root 下存在，不应进 missing。
+    const root = mkdtempSync(join(tmpdir(), 'dsh-evidence-check-'))
+    try {
+      mkdirSync(join(root, 'src'), { recursive: true })
+      writeFileSync(join(root, 'src', 'real.ts'), '// real\n')
+      const text = JSON.stringify({
+        findings: [
+          { claim: 'hallucinated ref', evidence: 'fabricated', confidence: 'high', evidenceRefs: ['src/a.py:1', 'src/real.ts:2'] },
+        ],
+      })
+      const salvaged = salvageWorkerResult(text, 'wo1', undefined, [root])
+      assert.ok(salvaged, 'finding-level salvage must succeed')
+      const finding = salvaged.findings[0]
+      assert.ok(finding, 'one finding recovered')
+      assert.deepEqual(finding.evidenceRefsMissing, ['src/a.py:1'],
+        'missing refs must name exactly the nonexistent file; real file passes')
+      assert.equal(finding.salvaged, true, 'provenance mark survives the check')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('skips cmd: refs and bare refs in the existence check', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-evidence-check-'))
+    try {
+      const text = JSON.stringify({
+        findings: [
+          {
+            claim: 'mixed refs',
+            evidence: 'x',
+            confidence: 'medium',
+            evidenceRefs: ['cmd: node --test exit=0', 'bare-ref-without-line', 'missing.ts:5'],
+          },
+        ],
+      })
+      const salvaged = salvageWorkerResult(text, 'wo1', undefined, [root])
+      assert.ok(salvaged)
+      assert.deepEqual(salvaged.findings[0]?.evidenceRefsMissing, ['missing.ts:5'],
+        'cmd: and bare refs are not mechanically checkable and must be skipped')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('checkEvidenceRefs 纯函数：存在/缺失/cmd/裸引用/空 roots 边界', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-evidence-check-'))
+    try {
+      mkdirSync(join(root, 'src'), { recursive: true })
+      writeFileSync(join(root, 'src', 'real.ts'), '// real\n')
+      // 存在 + 缺失混合
+      assert.deepEqual(checkEvidenceRefs(['src/real.ts:2', 'src/a.py:1'], [root]), ['src/a.py:1'])
+      // cmd: 前缀跳过
+      assert.deepEqual(checkEvidenceRefs(['cmd: node --test exit=0'], [root]), [])
+      // 无冒号裸引用跳过（非 path:line 形态）
+      assert.deepEqual(checkEvidenceRefs(['README'], [root]), [])
+      // 空 refs / undefined 不报错
+      assert.deepEqual(checkEvidenceRefs([], [root]), [])
+      assert.deepEqual(checkEvidenceRefs(undefined, [root]), [])
+      // 空 roots 跳过校验（不抛错）
+      assert.deepEqual(checkEvidenceRefs(['src/a.py:1'], []), [])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('deduplicates identical claims across candidates', () => {

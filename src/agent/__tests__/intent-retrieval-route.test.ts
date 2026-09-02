@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { extractTaskContract } from '../../context/task-contract.js'
 import {
   buildHeuristicRetrievalRoute,
+  detectQuizLike,
+  detectReviewOnlyLike,
   extractAskLine,
   normalizeRetrievalRoute,
   renderIntentRetrievalRoute,
@@ -272,5 +274,55 @@ describe('intent retrieval route normalization and rendering', () => {
     assert.match(rendered, /bug &amp; scope/)
     assert.match(rendered, /项目规则、工具权限、实际证据优先于本路由/)
     assert.ok(!rendered.includes('<bug>'))
+  })
+})
+
+describe('quiz / review-only shape guards (2026-08-31 benchmark misclassification)', () => {
+  const quizPrompt = `这是一道知识评测题。请回答以下关于 DSH 插件迁移的单选题：
+A. 直接读 v0.1.2-alpha.2.md
+B. 按文件名字典序依次读
+C. 按 from→to 有向边读
+D. 只读 rollup`
+
+  const reviewPrompt = '这是一道静态审查/审计评测题（只读 review/audit 性质）：你不需要修改或修复任何 fixture 文件（有校验和守护），只需输出分析报告。请只读分析并报告写到 docs/agent-output/x/report.md。'
+
+  it('quiz shape detects strong quiz prompts and ignores plain coding asks', () => {
+    assert.equal(detectQuizLike(quizPrompt), true)
+    assert.equal(detectQuizLike('修复 src/agent/loop.ts 的登录回归'), false)
+    assert.equal(detectQuizLike('请回答：这个 bug 是什么原因？'), true)
+    assert.equal(detectQuizLike('A. 修复 B. 重构 两个方案选一个'), false, '选项词出现但无题型词 → 不是 quiz')
+  })
+
+  it('quiz prompts route to usage_question in the heuristic path', () => {
+    const route = routeFor(quizPrompt)
+    assert.deepEqual(route.taskKinds, ['usage_question'])
+  })
+
+  it('LLM-route override: quiz shape beats a bug_fix classification', () => {
+    const route = normalizeRetrievalRoute(
+      { taskKinds: ['bug_fix'], confidence: 0.9, directions: [] },
+      { userMessage: quizPrompt },
+    )
+    assert.deepEqual(route.taskKinds, ['usage_question'])
+  })
+
+  it('LLM-route override: review-only shape beats bug_fix/refactor but leaves real bugfixes alone', () => {
+    const overridden = normalizeRetrievalRoute(
+      { taskKinds: ['bug_fix'], confidence: 0.8, directions: [] },
+      { userMessage: reviewPrompt },
+    )
+    assert.deepEqual(overridden.taskKinds, ['review_audit'])
+
+    const untouched = normalizeRetrievalRoute(
+      { taskKinds: ['bug_fix'], confidence: 0.8, directions: [] },
+      { userMessage: '修复 src/agent/loop.ts 的登录回归' },
+    )
+    assert.deepEqual(untouched.taskKinds, ['bug_fix'])
+  })
+
+  it('review-only detector requires both the read-only marker and a report sink', () => {
+    assert.equal(detectReviewOnlyLike(reviewPrompt), true)
+    assert.equal(detectReviewOnlyLike('只读代码，然后修复 bug'), false)
+    assert.equal(detectReviewOnlyLike('把报告写到 /tmp/x.md'), false)
   })
 })

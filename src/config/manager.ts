@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join, dirname } from 'path'
-import { isProjectTrusted, stripUntrustedProjectKeys, notifyUntrustedOnce } from './project-trust.js'
+import { isProjectTrusted, stripUntrustedProjectKeys, notifyUntrustedOnce, findSensitiveProjectKeys } from './project-trust.js'
 import { z } from 'zod'
 import { resolveProfileName, resolveProfileOverlay, resolveHookDisabledEnv } from './profile.js'
 import { configSchema, providerBaseSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, prDefaultsSchema, envSchema, uiSchema, permissionsSchema, networkSchema, fetchSchema, searchSchema, modelConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ProviderCapabilitiesConfig, type ProviderAdvancedConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type PrDefaultsConfig, type UiConfig } from './schema.js'
@@ -9,7 +9,7 @@ import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 import { cloneResolvedPreset, resolvePreset } from '../api/pro-registry.js'
-import { backfillPresetModelFields } from './preset-model-backfill.js'
+import { backfillPresetModelFields, migratePresetModelBackfill } from './preset-model-backfill.js'
 import { writeSecret, readSecret, deleteSecret } from './secrets-store.js'
 import { invalidateToolPreset } from '../tools/tool-preset.js'
 import { invalidatePromptBlocks } from '../prompt/block-policy.js'
@@ -295,47 +295,6 @@ function migrateAnthropicProtocol(raw: Record<string, unknown>): boolean {
 }
 
 /**
- * 预设新增模型回流（2026-08-28）：provider 配置是应用预设时的全量快照，
- * deepMerge 对数组整组替换——新版本预设追加的模型永远不会出现在老用户的
- * 已配置 provider 里（实测：glm-5.3/glm-5.3-flash 进了预设，配置里只有
- * glm-5.2 快照，设置页/`/model` 看不到新模型）。
- *
- * 对每个「当前预设仍存在」的 provider：把预设 models 中配置缺失的条目
- * 追加到末尾（预设序）。用户已删的模型会随新预设版本回流——这是接受的
- * 代价（换来新模型无感升级），删除是可重做的幂等操作。Mutates `raw`,
- * returns true if changed.
- */
-export function migratePresetModelBackfill(raw: Record<string, unknown>): boolean {
-  const provider = raw.provider as Record<string, unknown> | undefined
-  const providers = provider?.providers as Record<string, unknown> | undefined
-  if (!providers) return false
-  let changed = false
-  for (const [name, entry] of Object.entries(providers)) {
-    if (!entry || typeof entry !== 'object') continue
-    const preset = resolvePreset(name)
-    if (!preset || !('static' in preset)) continue
-    const presetModels = preset.static.provider.models
-    const prov = entry as Record<string, unknown>
-    const models = prov.models
-    if (!Array.isArray(models)) continue
-    const known = new Set(models.map((m) => (m as { id?: unknown })?.id))
-    for (const pm of presetModels) {
-      if (known.has(pm.id)) continue
-      models.push({
-        id: pm.id,
-        ...(pm.alias ? { alias: pm.alias } : {}),
-        contextWindow: pm.contextWindow,
-        maxTokens: pm.maxTokens,
-        ...(pm.supportsVision ? { supportsVision: true } : {}),
-        pricing: { ...pm.pricing },
-      })
-      changed = true
-    }
-  }
-  return changed
-}
-
-/**
  * Load config with 3-layer resolution: user → project → session overlay.
  *
  * Priority (highest wins):
@@ -397,7 +356,11 @@ export function loadConfig(options?: {
     const effective = trusted
       ? cpMigrated
       : stripUntrustedProjectKeys(cpMigrated)
-    if (!trusted) notifyUntrustedOnce('config', projectDir)
+    if (!trusted) {
+      // 仅在实际剥到键时提示——无敏感键的项目零打扰。
+      const stripped = findSensitiveProjectKeys(cpMigrated)
+      if (stripped.length > 0) notifyUntrustedOnce('config', projectDir, stripped)
+    }
     // NOTE: no write-back for project configs — they may be version-controlled.
     base = deepMerge(base, effective)
   }
@@ -1215,6 +1178,8 @@ export function setDefaultDomainConfig(input: { defaultDomain?: unknown; domainK
 export interface DefaultModelConfigSnapshot {
   /** "provider:modelId" 格式；未配置时为 null。 */
   defaultModel: string | null
+  /** 默认推理等级；未配置（=auto）时为 null。 */
+  defaultEffort: 'off' | 'low' | 'medium' | 'high' | 'max' | null
 }
 
 /** Snapshot of the default model config for the TUI model picker 's' key. */
@@ -1222,6 +1187,7 @@ export function getDefaultModelConfig(): DefaultModelConfigSnapshot {
   const cfg = loadConfig()
   return {
     defaultModel: cfg.agent.defaultModel ?? null,
+    defaultEffort: cfg.agent.defaultEffort ?? null,
   }
 }
 
@@ -1255,7 +1221,9 @@ export function setModelSupportsVision(providerName: string, modelId: string, va
   saveConfig(cfg)
 }
 
-export function setDefaultModelConfig(input: { defaultModel?: unknown }): DefaultModelConfigSnapshot {
+const DEFAULT_EFFORT_VALUES = ['off', 'low', 'medium', 'high', 'max'] as const
+
+export function setDefaultModelConfig(input: { defaultModel?: unknown; defaultEffort?: unknown }): DefaultModelConfigSnapshot {
   const cfg = loadConfig()
   if (input.defaultModel !== undefined) {
     if (typeof input.defaultModel !== 'string' || input.defaultModel.trim() === '') {
@@ -1277,9 +1245,21 @@ export function setDefaultModelConfig(input: { defaultModel?: unknown }): Defaul
     }
     cfg.agent.defaultModel = trimmed
   }
+  // defaultEffort（CC 对标）：undefined = 不动；null / 'auto' = 删字段回自动；
+  // 显式档位 = 覆盖（desktop 与 TUI /model 面板共用此入口）。
+  if (input.defaultEffort !== undefined) {
+    if (input.defaultEffort === null || input.defaultEffort === 'auto') {
+      delete cfg.agent.defaultEffort
+    } else if (typeof input.defaultEffort === 'string' && (DEFAULT_EFFORT_VALUES as readonly string[]).includes(input.defaultEffort)) {
+      cfg.agent.defaultEffort = input.defaultEffort as (typeof DEFAULT_EFFORT_VALUES)[number]
+    } else {
+      throw new Error('defaultEffort must be one of off|low|medium|high|max (or null/auto to reset)')
+    }
+  }
   saveConfig(cfg)
   return {
     defaultModel: cfg.agent.defaultModel ?? null,
+    defaultEffort: cfg.agent.defaultEffort ?? null,
   }
 }
 
@@ -1970,6 +1950,9 @@ export function removeModel(providerName: string, modelId: string): void {
   }
 
   provider.models = provider.models.filter(m => m.id !== modelId)
+  // 删除是编辑行为——打 userSaved 标记，让 migratePresetModelBackfill 尊重
+  // 删减（否则下次 loadConfig 会把删除的预设模型回流，删除被静默撤销）。
+  provider.userSaved = true
   saveConfig(cfg)
 }
 

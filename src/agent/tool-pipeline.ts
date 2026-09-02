@@ -216,6 +216,8 @@ async function emitToolResultTrace(input: {
   isError: boolean | undefined
   contentLen: number
   source: 'pipeline' | 'bridge' | 'tui'
+  durationMs?: number
+  cu?: import('../tools/types.js').ComputerUseActionMetrics
 }): Promise<void> {
   try {
     const sessionDir = input.sessionId
@@ -229,6 +231,8 @@ async function emitToolResultTrace(input: {
       isError: input.isError,
       contentLen: input.contentLen,
       source: input.source,
+      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.name === 'computer_use' && input.cu ? { cu: input.cu } : {}),
     })
     await appendFile(join(sessionDir, 'tool-result-trace.jsonl'), `${line}\n`, 'utf8')
   } catch {
@@ -308,6 +312,11 @@ function buildOwnershipGuard(deps: {
   return makeOwnershipGuard(registry, sessionId, deps.cwd)
 }
 
+/** T11 超时恢复指引（withToolTimeout 超时错误文案的一部分）——主控要知道
+ *  超时不等于执行停止：worker 可能仍在写盘（超时中断不回滚），可查证后续跑。 */
+export const TOOL_TIMEOUT_RECOVERY_HINT =
+  '— 底层执行可能仍在后台继续（worker 部分写入可能已落盘，以 git status / 会话 checkpoint 实查为准）；可用 executePlanWaves fromWave=N 续跑或 deliver 已完成的波次'
+
 function withToolTimeout<T>(
   promise: Promise<T>,
   toolName: string,
@@ -326,7 +335,7 @@ function withToolTimeout<T>(
       // Cascade abort to the underlying op (child proc / fetch) BEFORE rejecting,
       // so the tool stops consuming resources instead of orphaning.
       try { timeoutController?.abort() } catch { /* noop */ }
-      reject(new Error(`Tool ${toolName} timed out after ${timeoutMs / 1000}s`))
+      reject(new Error(`Tool ${toolName} timed out after ${timeoutMs / 1000}s ${TOOL_TIMEOUT_RECOVERY_HINT}`))
     }, timeoutMs)
     const onAbort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')) }
     signal?.addEventListener('abort', onAbort, { once: true })
@@ -342,6 +351,8 @@ export interface ToolPipelineDeps {
   config: AgentConfig
   cwd: string
   harness: TurnHarness
+  /** sensorium LITE 遥测出口（computer_use 动作指标默认落盘）。可缺省（测试）。 */
+  telemetryWriter?: import('./telemetry-writer.js').TelemetryWriter
   prewarm: PrewarmCache
   evidence: EvidenceTrackerPublic
   /** 证据义务状态机：pre-tool RED 编辑门 + post-tool probe/失败归账。可缺省（测试/worker）。 */
@@ -438,6 +449,8 @@ export interface ToolPipelineDeps {
   onGateBlocked?: (kind: string) => void
   /** P1b: TDD gate 同 target 被拦计数回调 */
   onTddBlocked?: (target?: string) => void
+  /** Zen 相位下未注册工具报错的行动指引（loop 注入；worker/未接 zen 时缺省）。 */
+  getZenUnregisteredHint?: (toolName: string) => string | undefined
 }
 
 export interface ToolExecResult {
@@ -1170,14 +1183,21 @@ export async function executeToolUse(
 
     // YOLO mode intelligent fallback: auto-grant write access for file-tool
     // paths already covered by a read grant. This eliminates the validatePath →
-    // request_path_access → unconditional popup chain that makes "完全访问"
+    // request_path_access → unconditional popup chain that makes "项目外只读"
     // (yolo + additionalReadDirs: ["/"]) meaningless for writes outside the
     // workspace. The kernel sandbox still blocks writes to ungranted paths;
     // unattended runs can pre-authorize via additionalWriteDirs.
+    //
+    // Session-scoped by design: the escalation is the model's own doing, not a
+    // user decision, so it must NOT outlive the session — a persisted escalation
+    // would silently widen every future session of this workspace (even in
+    // supervised mode, where validatePathSafe trusts the grant store without
+    // prompting). request_path_access with remember=true stays the only path to
+    // a persistent out-of-workspace write grant.
     if (skipAllApproval && pathGrantNeed) {
       for (const p of pathGrantNeed.paths) {
         if (pathGrantNeed.mode === 'write' && isReadGranted(p)) {
-          grantPath(dirname(p), 'write', { persist: true, cwd: deps.cwd })
+          grantPath(dirname(p), 'write')
         }
       }
     }
@@ -1385,6 +1405,7 @@ export async function executeToolUse(
       preAbortHead = await gitHeadQuiet(deps.cwd)
     }
 
+    const __traceT0 = Date.now()
     const harnessResult = await deps.harness.executeTool({
       id: tu.id,
       name: tu.name,
@@ -1404,8 +1425,18 @@ export async function executeToolUse(
         const composedSignal = deps.abortSignal
           ? AbortSignal.any([deps.abortSignal, toolAbort.signal])
           : toolAbort.signal
+        // Zen 相位下未注册工具（幻觉调用）不晋升，但把 registry 的裸
+        // Unknown tool 报错变成可行动的 zen_unlock 指引，避免死路重试。
+        const execution = deps.config.toolRegistry.execute(tu.name, { ...params, abortSignal: composedSignal })
+        const zenGuardedExecution = execution.catch(err => {
+          const zenHint = deps.getZenUnregisteredHint?.(tu.name)
+          if (zenHint) {
+            throw new Error(`${err instanceof Error ? err.message : String(err)}\n${zenHint}`)
+          }
+          throw err
+        })
         const r = await withToolTimeout(
-          deps.config.toolRegistry.execute(tu.name, { ...params, abortSignal: composedSignal }),
+          zenGuardedExecution,
           tu.name,
           toolTimeout,
           deps.abortSignal,
@@ -1617,7 +1648,28 @@ export async function executeToolUse(
     // commits to scrollback. Force false so terminal results render.
     // DEBUG: unconditional trace for TUI rendering-loss investigation.
     // Log file: ~/.rivet/sessions/<project-slug>/<sessionId>/tool-result-trace.jsonl
-    void emitToolResultTrace({ cwd: deps.cwd, sessionId: deps.sessionId, id: tu.id, name: tu.name, isError: harnessResult.isError, contentLen: finalContent.length, source: 'pipeline' })
+    void emitToolResultTrace({
+      cwd: deps.cwd,
+      sessionId: deps.sessionId,
+      id: tu.id,
+      name: tu.name,
+      isError: harnessResult.isError,
+      contentLen: finalContent.length,
+      source: 'pipeline',
+      durationMs: harnessResult.durationMs ?? (Date.now() - __traceT0),
+      cu: harnessResult.metrics,
+    })
+    // computer_use 执行指标 → sensorium LITE 遥测（默认落盘，<200B/条）：
+    // 动作耗时/成功率/树规模是 W3 性能项唯一的验证依据。
+    if (tu.name === 'computer_use' && harnessResult.metrics) {
+      try {
+        deps.telemetryWriter?.write({
+          kind: 'computer-use-action',
+          ts: new Date().toISOString(),
+          ...harnessResult.metrics,
+        })
+      } catch { /* telemetry is best-effort */ }
+    }
     callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError ?? false, rawToolResult?.rawPath, rawToolResult?.uiContent)
 
     deps.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content, rawToolResult?.errorClass, rawToolResult?.errorKind)

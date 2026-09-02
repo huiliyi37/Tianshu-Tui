@@ -428,7 +428,47 @@ function profileOptions(draft: SettingsDraft): SettingsOption[] {
   })
 }
 
-function workerCategory(draft: SettingsDraft): SettingsCategory {
+/**
+ * 推荐路由目标探测（desktop 一键推荐同逻辑）：模型 id/alias 含 flash 优先，
+ * 其次 deepseek 系，最后第一个已配置模型。只在已配置 provider 里找——
+ * 没有任何已配置模型时返回 null（调用方转空态引导）。
+ */
+export function findRecommendedRoutingTarget(env: SettingsEnv): { provider: string; model: string } | null {
+  if (env.models.length === 0) return null
+  const flash = env.models.find(m => /flash/i.test(m.id) || /flash/i.test(m.alias ?? ''))
+  if (flash) return { provider: flash.provider, model: flash.id }
+  const deepseek = env.models.find(m => /deepseek/i.test(m.provider) || /deepseek/i.test(m.id))
+  if (deepseek) return { provider: deepseek.provider, model: deepseek.id }
+  const first = env.models[0]!
+  return { provider: first.provider, model: first.id }
+}
+
+/** 一键推荐应用的 review 席位——council_expert 例外（会诊席刻意保持主模型异构性）。 */
+const RECOMMENDED_REVIEW_PROFILES: readonly string[] = REVIEW_PROFILE_KEYS.filter(k => k !== 'council_expert')
+
+/**
+ * 一键应用推荐：cheap-flash 档位 + 全部非会诊审查席指向推荐目标。
+ * 纯函数——只 patch draft，落盘仍走面板保存（用户可先微调再保存）。
+ */
+export function applyRoutingRecommendation(draft: SettingsDraft, target: { provider: string; model: string }): SettingsDraft {
+  const workersProfiles = { ...draft.workers.profiles, 'cheap-flash': { provider: target.provider, model: target.model } }
+  const reviewProfiles = { ...draft.review.profiles }
+  for (const name of RECOMMENDED_REVIEW_PROFILES) {
+    reviewProfiles[name] = { provider: target.provider, model: target.model }
+  }
+  return {
+    ...draft,
+    workers: { ...draft.workers, profiles: workersProfiles },
+    review: { ...draft.review, profiles: reviewProfiles },
+  }
+}
+
+/** 路由目标存在性校验（⚠ 警告 hint 用）——provider 已配置且 models 含该 id/alias。 */
+function routingTargetResolves(env: SettingsEnv, provider: string, model: string): boolean {
+  return env.models.some(m => m.provider === provider && (m.id === model || m.alias === model))
+}
+
+function workerCategory(draft: SettingsDraft, env: SettingsEnv): SettingsCategory {
   const taskKeys = [...new Set([...WORKER_TASK_KEYS, ...Object.keys(draft.workers.routing)])]
   const fields: SettingsField[] = taskKeys.map(task => ({
     id: `workers.routing.${task}`,
@@ -446,12 +486,16 @@ function workerCategory(draft: SettingsDraft): SettingsCategory {
   // Editing an existing profile's model. Adding/removing profiles is out of
   // scope for v1 — routing can only point at names that already exist.
   for (const name of Object.keys(draft.workers.profiles).sort()) {
+    const p = draft.workers.profiles[name]
+    const broken = p && !routingTargetResolves(env, p.provider, p.model)
+      ? ` ⚠ ${p.provider} 未配置或无此模型——当前会静默回退主模型`
+      : ''
     fields.push(modelField({
       id: `workers.profiles.${name}`,
       label: `档位 ${name}`,
       block: 'workers',
       effect: 'next-session',
-      hint: `「${name}」档位用哪个 provider/模型（路由按任务类型指向档位）`,
+      hint: `「${name}」档位用哪个 provider/模型（路由按任务类型指向档位）${broken}`,
       get: d => {
         const p = d.workers.profiles[name]
         return p ? modelRef(p.provider, p.model) : ''
@@ -465,6 +509,32 @@ function workerCategory(draft: SettingsDraft): SettingsCategory {
         })
       },
     }))
+  }
+
+  // 一键推荐（CC/desktop 对标）：探测到可用模型时置顶一条 action——一次填好
+  // cheap-flash 档位与全部非会诊审查席。run 只 patch draft，落盘走面板保存。
+  const recommended = findRecommendedRoutingTarget(env)
+  if (recommended) {
+    fields.unshift({
+      id: 'workers.applyRecommendation',
+      label: `⚡ 一键推荐：审查/子代理 → ${recommended.provider} · ${recommended.model}`,
+      kind: 'action',
+      block: 'workers',
+      effect: 'next-session',
+      hint: '回车应用推荐路由（应用后仍需保存落盘；可再逐项微调）',
+      display: () => '↵ 应用推荐配置',
+      run: d => applyRoutingRecommendation(d, recommended),
+    })
+  } else {
+    fields.unshift({
+      id: 'workers.recommendationEmpty',
+      label: '⚡ 一键推荐（暂不可用）',
+      kind: 'action',
+      block: 'workers',
+      effect: 'next-session',
+      hint: '尚无已配置的模型——先运行 /connect 接入供应商（如 DeepSeek Flash），再回来应用推荐',
+      display: () => '（无可推荐模型）',
+    })
   }
 
   fields.push(enumField({
@@ -491,27 +561,33 @@ function workerCategory(draft: SettingsDraft): SettingsCategory {
   return { id: 'workers', label: '子代理模型路由', fields }
 }
 
-function reviewCategory(draft: SettingsDraft): SettingsCategory {
+function reviewCategory(draft: SettingsDraft, env: SettingsEnv): SettingsCategory {
   const names = [...new Set([...REVIEW_PROFILE_KEYS, ...Object.keys(draft.review.profiles)])]
-  const fields: SettingsField[] = names.map(name => modelField({
-    id: `review.profiles.${name}`,
-    label: name,
-    block: 'review',
-    effect: 'next-session',
-    hint: REVIEW_PROFILE_HINTS[name] ?? `「${name}」类子代理用哪个模型；留空回退主控`,
-    sentinel: { id: INHERIT, label: INHERIT_LABEL },
-    get: d => {
-      const p = d.review.profiles[name]
-      return p ? modelRef(p.provider, p.model) : INHERIT
-    },
-    set: (d, ref) => {
-      const next = { ...d.review.profiles }
-      const parts = ref ? splitModelRef(ref) : null
-      if (parts) next[name] = { provider: parts.provider, model: parts.model }
-      else delete next[name]
-      return withReview(d, { ...d.review, profiles: next })
-    },
-  }))
+  const fields: SettingsField[] = names.map(name => {
+    const p = draft.review.profiles[name]
+    const broken = p && !routingTargetResolves(env, p.provider, p.model)
+      ? ` ⚠ ${p.provider} 未配置或无此模型——当前会静默回退主模型`
+      : ''
+    return modelField({
+      id: `review.profiles.${name}`,
+      label: name,
+      block: 'review',
+      effect: 'next-session',
+      hint: (REVIEW_PROFILE_HINTS[name] ?? `「${name}」类子代理用哪个模型；留空回退主控`) + broken,
+      sentinel: { id: INHERIT, label: INHERIT_LABEL },
+      get: d => {
+        const p = d.review.profiles[name]
+        return p ? modelRef(p.provider, p.model) : INHERIT
+      },
+      set: (d, ref) => {
+        const next = { ...d.review.profiles }
+        const parts = ref ? splitModelRef(ref) : null
+        if (parts) next[name] = { provider: parts.provider, model: parts.model }
+        else delete next[name]
+        return withReview(d, { ...d.review, profiles: next })
+      },
+    })
+  })
 
   fields.push(boolField({
     id: 'review.skipAuto',
@@ -813,8 +889,8 @@ function netCategory(): SettingsCategory {
  */
 export function buildCategories(draft: SettingsDraft, env: SettingsEnv): SettingsCategory[] {
   return [
-    workerCategory(draft),
-    reviewCategory(draft),
+    workerCategory(draft, env),
+    reviewCategory(draft, env),
     visionCategory(env),
     basicsCategory(),
     netCategory(),

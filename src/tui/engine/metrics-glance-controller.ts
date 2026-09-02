@@ -13,10 +13,9 @@ export class MetricsGlanceController {
   contextWindow?: number
   /** git 分支（启动时读取一次） */
   gitBranch?: string
-  /** /domain 或 agent 自动匹配的会话星域（GlanceBar 常态显示） */
+  /** /domain 或 agent 自动匹配的会话星域（GlanceBar 常态显示）。
+   *  单一来源——派发阶段不再覆盖（天机是编排阶段标记，不是会话星域）。 */
   sessionStarDomainName?: string
-  /** 子代理编排期间的临时 domain override（turn 结束清除） */
-  delegationDomainOverride?: { glyph: string; name: string }
   /** streaming 期间从 agent 同步星域（对齐 Ink 1Hz sync） */
   domainSyncProvider?: () => string | undefined
   /** 当前生效的推理 effort 提供者（读 agent 实时 effort，回退 config floor） */

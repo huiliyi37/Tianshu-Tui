@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { z } from 'zod'
 import type { CapabilityTask } from '../model/capability.js'
 import type { VerificationMetadata } from '../tools/types.js'
@@ -6,6 +8,7 @@ import { profileRegistry, tierTimeoutMultiplier } from './profile-registry.js'
 import { starDomainRegistry } from './star-domain-registry.js'
 import { resolveAuthorityReason } from './star-domain.js'
 import { progressiveTimeout } from './timeout-ladder.js'
+import { PLAN_CONSTRAINT_PREFIX } from './plan-constraints.js'
 import { repairInvalidJsonEscapes } from '../api/json-escape-repair.js'
 
 export const READ_ONLY_WORKER_TOOLS = ['read_file', 'read_section', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'repo_graph', 'related_tests'] as const
@@ -166,6 +169,11 @@ const workOrderSchema = z.object({
   delegationDepth: z.number().int().min(0).default(0),
   /** Star domain authority for cognitive injection (V3 Component A). */
   authority: z.string().optional(),
+  /** 计划文件路径（plan_task/team_orchestrate 派发时注入）——worker 上下文
+   *  渲染「计划全文见 <path>」，执行语义以计划为准，超出 objective 的细节
+   *  （接口契约/反目标等段落）read_file 自取。修复契约传导断点：objective
+   *  只携带 checklist 摘要、worker 无路径取回计划原文（T5，2026-08-30）。 */
+  planRef: z.string().optional(),
   /** Why this authority was chosen (≤60 chars). Omitted when authority unset. */
   authorityReason: z.string().max(60).optional(),
   /** Team planner risk tier for shadow-only model tier recommendation. */
@@ -211,6 +219,15 @@ export const workerFindingSchema = z.object({
    *  defect——confirmation 单独汇总为「已核实清单」，不进 blocking 文案。
    *  审查/验证类 worker 用，其他 worker 省略。 */
   polarity: z.enum(['defect', 'confirmation']).optional(),
+  /** true = 本条 finding 由 salvageWorkerResult 从畸形报告中字段级打捞恢复
+   *  （非 worker 完整报告解析所得）。打捞内容可能含模型幻觉（如不存在的
+   *  file:line 引用），消费方必须按「未经核实的线索」处理，不得与正常解析的
+   *  findings 同等采信。正常解析路径不带此字段。 */
+  salvaged: z.boolean().optional(),
+  /** salvage 打捞后机械校验发现的缺失引用（file:line 形式但文件不存在，如
+   *  "src/a.py:1"）。存在即表明该 finding 的 evidenceRefs 里有幻觉引用，消费
+   *  方应先核实再引用。仅打捞路径填充；正常解析路径不校验（不设此字段）。 */
+  evidenceRefsMissing: z.array(z.string().min(1)).optional(),
 })
 
 const workerArtifactSchema = z.object({
@@ -426,6 +443,8 @@ export interface CreateReadOnlyWorkOrderInput {
   delegationDepth?: number
   /** Star domain authority for cognitive injection (V3 Component A). */
   authority?: string
+  /** 计划文件路径——worker 上下文注入「计划全文见 <path>」（T5）。 */
+  planRef?: string
   /** Team planner risk tier for shadow-only model tier recommendation. */
   riskTier?: 'low' | 'medium' | 'high'
   /** B2: current session turn for progressive timeout calculation. */
@@ -434,6 +453,8 @@ export interface CreateReadOnlyWorkOrderInput {
   modelOverride?: { provider: string; model: string }
   /** 瑶光门 tier 下限：路由结果不得低于此档。只抬升不降级。 */
   tierFloor?: 'cheap' | 'balanced' | 'strong'
+  /** 专家席在 profile 工具面之上追加的工具（仍过 authority 白名单）。 */
+  extraAllowedTools?: string[]
   /** 写工显式 opt-in 批级共享信息素（星河收编 #3）。 */
   batchStigmergy?: boolean
 }
@@ -464,6 +485,19 @@ const MAX_TASK_CONSTRAINTS = 12
  *  渲染器必须自己保证产出 ≤ 此值并带截断指针，避免此处无声再切一刀。 */
 export const MAX_TASK_CONSTRAINT_CHARS = 400
 
+/** 证据类约束（summon_expert 的 [evidence] 包）单条上限——与 summon-expert
+ *  侧切片同一口径（单源，防两层裁剪互相缩水）。独立于任务级 400/12 条预算：
+ *  证据包是多行整体，按任务级切会把 10 条线索砍成 ~370 字符。 */
+export const MAX_EVIDENCE_CONSTRAINT_CHARS = 4000
+const EVIDENCE_CONSTRAINT_PREFIX = '[evidence]'
+
+/** extraAllowedTools 不可解除的默认禁用核心：写/执行通道（bash/write/edit）
+ *  与自召（delegate_*）。专家授予只能解除「读 flavored」限制（如 run_tests），
+ *  不能借 toolGrants 打通写通道——写行为仍只走 write 工单 + worktree 隔离。 */
+const NON_OVERRIDABLE_DISALLOWED: ReadonlySet<string> = new Set([
+  'bash', 'write_file', 'edit_file', 'delegate_task', 'delegate_batch',
+])
+
 /**
  * Profile discipline plus the dispatcher's task-level constraints.
  *
@@ -471,23 +505,60 @@ export const MAX_TASK_CONSTRAINT_CHARS = 400
  * report-shape discipline, and a caller supplying task constraints is adding a
  * requirement, not waiving those. Blank and duplicate entries are dropped so a
  * caller echoing a boilerplate line cannot double it.
+ *
+ * 约束分三级预算：计划级（[计划 前缀，不截断不计数）、证据级（[evidence] 前缀，
+ * 独立 4000 上限带截断指针）、任务级（400 字符 × 12 条）。
  */
 function withTaskConstraints(base: string[], task?: string[]): string[] {
   if (!task?.length) return base
   const seen = new Set(base)
   const extra: string[] = []
+  // T7 预算分级两遍扫描：计划级条目（[计划 前缀）独立预算——不参与任务级
+  // 12 条限制、不截断（计划级契约是执行语义的权威来源，截断会丢反目标/
+  // 待验证假设）。先全收计划级，再任务级（限 12 条）——顺序无关。
   for (const raw of task) {
+    if (!raw.startsWith(PLAN_CONSTRAINT_PREFIX)) continue
+    if (!seen.has(raw)) {
+      seen.add(raw)
+      extra.push(raw)
+    }
+  }
+  // 证据级：独立预算。超限切一刀并留截断指针（不无声消失）。
+  for (const raw of task) {
+    if (!raw.startsWith(EVIDENCE_CONSTRAINT_PREFIX)) continue
+    const item = raw.length > MAX_EVIDENCE_CONSTRAINT_CHARS
+      ? `${raw.slice(0, MAX_EVIDENCE_CONSTRAINT_CHARS)}…[evidence 截断@${MAX_EVIDENCE_CONSTRAINT_CHARS}]`
+      : raw
+    if (!seen.has(item)) {
+      seen.add(item)
+      extra.push(item)
+    }
+  }
+  let taskCount = 0
+  for (const raw of task) {
+    if (raw.startsWith(PLAN_CONSTRAINT_PREFIX) || raw.startsWith(EVIDENCE_CONSTRAINT_PREFIX)) continue
     const item = raw.trim().slice(0, MAX_TASK_CONSTRAINT_CHARS)
     if (!item || seen.has(item)) continue
     seen.add(item)
     extra.push(item)
-    if (extra.length >= MAX_TASK_CONSTRAINTS) break
+    if (++taskCount >= MAX_TASK_CONSTRAINTS) break
   }
   return [...base, ...extra]
 }
 
 export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): WorkOrder {
   const id = input.id ?? `wo_${randomUUID()}`
+  // 约束样板与禁用清单都要认 extraAllowedTools：显式授予的读 flavored 工具
+  // （如 root_cause 席的 run_tests）不能在 prompt 里同时出现在「允许」和
+  // 「禁止」两份清单——模型会自律放弃，授予变死字。写/执行/自召核心不可解除。
+  const grants = new Set(input.extraAllowedTools ?? [])
+  const testsGranted = grants.has('run_tests')
+  const disallowedBase = input.profile === 'adversarial_verifier'
+    ? ['bash', 'write_file', 'edit_file', 'delegate_task', 'delegate_batch'] // run_tests NOT disallowed — it's the verifier's primary weapon
+    : [...PHASE1_DISALLOWED_WORKER_TOOLS]
+  // 授予在 union 前就过滤不可解除核心——执行侧只按 allowedTools 过滤，光留在
+  // disallowedTools（prompt 层）挡不住注册表执行。
+  const grantable = [...grants].filter(t => !NON_OVERRIDABLE_DISALLOWED.has(t))
   return workOrderSchema.parse({
     id,
     parentTurnId: input.parentTurnId,
@@ -506,18 +577,18 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
         : [
             'Return only evidence-backed claims.',
             'Do not suggest edits as completed changes.',
-            'Do not request write, edit, bash, or test execution tools.',
+            testsGranted
+              ? 'Do not request write, edit, or bash tools.'
+              : 'Do not request write, edit, bash, or test execution tools.',
           ],
       input.constraints,
     ),
     allowedTools: (() => {
       const profileDef = profileRegistry.get(input.profile)
       const tools = profileDef?.allowedTools ? [...profileDef.allowedTools] : [...READ_ONLY_WORKER_TOOLS]
-      return toolsForAuthority(tools, input.authority)
+      return toolsForAuthority([...new Set([...tools, ...grantable])], input.authority)
     })(),
-    disallowedTools: input.profile === 'adversarial_verifier'
-      ? ['bash', 'write_file', 'edit_file', 'delegate_task', 'delegate_batch'] // run_tests NOT disallowed — it's the verifier's primary weapon
-      : [...PHASE1_DISALLOWED_WORKER_TOOLS],
+    disallowedTools: disallowedBase.filter(t => NON_OVERRIDABLE_DISALLOWED.has(t) || !grants.has(t)),
     dedupeKey: input.groupId
       ? `${input.kind}:group:${input.groupId}:${input.authority ?? 'default'}:${input.parentTurnId}:${input.scope.files?.join(',') || input.objective}`
       : `${input.kind}:${input.scope.files?.join(',') || input.objective}`,
@@ -541,6 +612,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     delegationDepth: input.delegationDepth ?? 0,
     authority: input.authority,
     authorityReason: resolveAuthorityReason(input.objective, input.authority),
+    planRef: input.planRef,
     riskTier: input.riskTier,
     modelOverride: input.modelOverride,
     tierFloor: input.tierFloor,
@@ -569,7 +641,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
       const writeProfile = input.profile ?? 'patcher'
       const profileDef = profileRegistry.get(writeProfile)
       const tools = profileDef?.allowedTools ? [...profileDef.allowedTools] : [...WRITE_WORKER_TOOLS]
-      return toolsForAuthority(tools, input.authority)
+      return toolsForAuthority([...new Set([...tools, ...(input.extraAllowedTools ?? [])])], input.authority)
     })(),
     disallowedTools: ['delegate_task', 'delegate_batch'],
     dedupeKey: input.groupId
@@ -602,6 +674,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     delegationDepth: input.delegationDepth ?? 0,
     authority: input.authority,
     authorityReason: resolveAuthorityReason(input.objective, input.authority),
+    planRef: input.planRef,
     riskTier: input.riskTier,
     modelOverride: input.modelOverride,
     tierFloor: input.tierFloor,
@@ -881,7 +954,43 @@ export function parseWorkerResult(text: string, expectedWorkOrderId: string): Wo
  *     schema; tier 2 recovered them.)
  *  Both tiers share one `seenClaims` set so the same finding isn't counted
  *  twice when a balanced candidate already captured it at tier 1. */
-export function salvageWorkerResult(text: string, expectedWorkOrderId: string, parseError?: unknown): WorkerResult | null {
+/**
+ * 机械校验 evidenceRefs 的文件存在性（幻觉引用检测）。
+ *
+ * 只校验 `path:line` 形式（如 `src/foo.ts:42`，行号可缺省处理为最后冒号后
+ * 为数字）；跳过 `cmd:` 前缀（命令 exit code 引用）与无冒号裸引用。roots 为
+ * 候选根目录（worker 的 cwd 优先——evidenceRefs 相对被侦察项目而非本体），
+ * 任一 root 下文件存在即通过。返回缺失引用列表，不抛错；roots 为空跳过校验。
+ */
+export function checkEvidenceRefs(refs: string[] | undefined, roots: string[]): string[] {
+  if (!refs || refs.length === 0 || roots.length === 0) return []
+  const missing: string[] = []
+  for (const ref of refs) {
+    if (ref.startsWith('cmd:')) continue
+    const m = /^(.*?):(\d+)$/.exec(ref)
+    if (!m) continue
+    const path = m[1]!
+    if (path === '') continue
+    const exists = roots.some((root) => existsSync(join(root, path)))
+    if (!exists) missing.push(ref)
+  }
+  return missing
+}
+
+/** 打捞标记：salvaged=true + 机械校验 evidenceRefs 缺失引用（幻觉检测）。
+ *  缺省不校验（roots 为空）时仅打 salvaged 标，保持向后兼容。 */
+function markSalvaged(finding: z.infer<typeof workerFindingSchema>, evidenceRoots?: string[]): z.infer<typeof workerFindingSchema> {
+  const missing = evidenceRoots !== undefined && evidenceRoots.length > 0
+    ? checkEvidenceRefs(finding.evidenceRefs, evidenceRoots)
+    : []
+  return {
+    ...finding,
+    salvaged: true,
+    ...(missing.length > 0 ? { evidenceRefsMissing: missing } : {}),
+  }
+}
+
+export function salvageWorkerResult(text: string, expectedWorkOrderId: string, parseError?: unknown, evidenceRoots?: string[]): WorkerResult | null {
   let candidates: string[]
   try {
     candidates = extractJsonCandidates(text)
@@ -904,7 +1013,7 @@ export function salvageWorkerResult(text: string, expectedWorkOrderId: string, p
     if (finding.success) {
       if (!seenClaims.has(finding.data.claim)) {
         seenClaims.add(finding.data.claim)
-        findings.push(finding.data)
+        findings.push(markSalvaged(finding.data, evidenceRoots))
       }
       continue
     }
@@ -918,7 +1027,7 @@ export function salvageWorkerResult(text: string, expectedWorkOrderId: string, p
           const inner = workerFindingSchema.safeParse(element)
           if (inner.success && !seenClaims.has(inner.data.claim)) {
             seenClaims.add(inner.data.claim)
-            findings.push(inner.data)
+            findings.push(markSalvaged(inner.data, evidenceRoots))
             recoveredFromWrapper++
           }
         }

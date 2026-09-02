@@ -138,6 +138,17 @@ describe('RED semantics (Wave 1 hard gate cases)', () => {
     assert.equal(ob.state, 'open', 'unrelated verification does not even count as an attempt on this obligation')
   })
 
+  it('verification with neither command nor resolvedCommand does not throw (2026-08-31 crash)', () => {
+    // 2026-08-31 benchmark 实测：验证元数据两个 command 字段都缺时，
+    // verificationMatchesTargets 对 undefined.replaceAll 抛 TypeError，
+    // 整个会话以 agent_failed 收尾。回归钉死空值防御。
+    const bare = verification({}) as unknown as Record<string, unknown>
+    delete bare.command
+    delete bare.resolvedCommand
+    const store = applyVerificationEvent(storeWith(bugfix), bare as unknown as VerificationMetadata)
+    assert.equal(store.obligations[0]!.state, 'open', 'no target match, no crash, obligation stays open')
+  })
+
   it('target-matched failure records RED; subsequent matching pass turns GREEN → satisfied', () => {
     let store = storeWith(bugfix)
     store = applyVerificationEvent(store, verification({

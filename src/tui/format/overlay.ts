@@ -571,11 +571,31 @@ export interface ModelPickerEntry {
   provider: string
   current: boolean
   contextWindow?: number
+  /** 选中模型是否支持推理等级调节（resolveCapabilities effortFormat !== 'none'）。
+   *  缺省 = 支持（与 openai-client 的非 'none' 即发送语义一致）。 */
+  effortSupported?: boolean
+}
+
+/** 推理等级档位（CC 对标 effort 行的取值域）。'auto' 为 UI 哨兵=未显式钉档。 */
+export const MODEL_PICKER_EFFORT_LEVELS = ['auto', 'off', 'low', 'medium', 'high', 'max'] as const
+export type ModelPickerEffort = (typeof MODEL_PICKER_EFFORT_LEVELS)[number]
+
+/** effort 档位循环步进（`>` 向重档、`<` 向轻档，末端回绕）。纯函数供测试。 */
+export function stepModelPickerEffort(current: ModelPickerEffort, dir: '>' | '<'): ModelPickerEffort {
+  const seq = MODEL_PICKER_EFFORT_LEVELS
+  const at = Math.max(0, seq.indexOf(current))
+  return seq[(at + (dir === '>' ? 1 : seq.length - 1)) % seq.length] ?? 'auto'
 }
 
 export interface ModelPickerData {
   entries: ModelPickerEntry[]
   selectedIndex: number
+  /** effort 行（CC 对标）：面板底部 `● <档位> effort </> 调整`。缺省不渲染该行。 */
+  effort?: {
+    value: ModelPickerEffort
+    /** false = 选中模型不支持调节（灰化，</> 不响应）。 */
+    supported: boolean
+  }
 }
 
 // ── Theme Picker ───────────────────────────────────────────────
@@ -911,8 +931,9 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
 
   const innerWidth = width - 4
   const contentRows = Math.max(3, height - 4)
-  const previewRows = Math.min(4, Math.max(2, contentRows - data.entries.length - 1))
-  const listRows = Math.max(1, contentRows - previewRows - 1)
+  const effortRows = data.effort ? 1 : 0
+  const previewRows = Math.min(4, Math.max(2, contentRows - data.entries.length - 1 - effortRows))
+  const listRows = Math.max(1, contentRows - previewRows - 1 - effortRows)
 
   const sel = data.selectedIndex
   const visible = data.entries.slice(0, listRows)
@@ -960,12 +981,30 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
       }
     }
   }
-  
+
   for (let i = 0; i < previewRows; i++) {
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter(compactHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['S', '设为默认'], ['Esc', '取消']]), width, theme, 'subtle'))
+  // effort 行（CC 对标）：`● high effort </> 调整`。档位着色分三层——
+  // off=muted（关）、low/medium=text（常规）、high/max=primary（重档）、auto=dim；
+  // 选中模型不支持时整行灰化并明说，</> 在按键层不响应。
+  if (data.effort) {
+    if (data.effort.supported) {
+      const v = data.effort.value
+      const dotColor = v === 'off' ? theme.muted : v === 'auto' ? theme.dim : (v === 'high' || v === 'max') ? theme.primary : theme.secondary
+      const label = v === 'auto' ? 'auto（按任务自动）' : `${v} effort`
+      lines.push(padLine(` ${color('●', dotColor)} ${color(label, v === 'off' ? theme.muted : theme.secondary)} ${color('</> 调整', theme.dim)}`, width, theme))
+    } else {
+      lines.push(padLine(` ${color('○ 此模型不支持推理等级调节', theme.muted)}`, width, theme))
+    }
+  }
+
+  // footer：effort 行存在时才带 </> 提示（提示与可做的动作恒一致）
+  const hints: Array<[string, string]> = [['←/→', '切换'], ['↑↓', '选择'], ['Enter', '设为默认'], ['s', '仅本会话']]
+  if (data.effort) hints.push(['</>', '推理等级'])
+  hints.push(['Esc', '取消'])
+  lines.push(formatFooter(compactHints(hints), width, theme, 'subtle'))
   lines.push(formatBottomBorder(width, theme, 'subtle'))
   return lines
 }

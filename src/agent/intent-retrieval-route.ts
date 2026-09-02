@@ -203,6 +203,18 @@ export function normalizeRetrievalRoute(raw: unknown, fallbackInput?: RetrievalR
     .sort((a, b) => KIND_RANK[a] - KIND_RANK[b])
     .slice(0, MAX_TASK_KINDS)
 
+  // LLM 分类兜底（2026-08-31 benchmark 实测）：quiz 题干/选项里的"修复/迁移"
+  // 字样会诱导分类器给出 bug_fix；只读审查形状同理。确定性形状压过分类结果——
+  // quiz → usage_question，只读审查 + bug_fix/refactor → review_audit。
+  {
+    const userMessage = fallbackInput?.userMessage ?? ''
+    if (detectQuizLike(userMessage)) {
+      taskKinds.splice(0, taskKinds.length, 'usage_question')
+    } else if (detectReviewOnlyLike(userMessage) && taskKinds.some(kind => kind === 'bug_fix' || kind === 'refactor')) {
+      taskKinds.splice(0, taskKinds.length, 'review_audit')
+    }
+  }
+
   if (taskKinds.length === 0) {
     return fallbackInput ? buildHeuristicRetrievalRoute(fallbackInput) : buildHeuristicRetrievalRoute({ userMessage: '' })
   }
@@ -310,7 +322,34 @@ function isTrivialInput(sanitized: string): boolean {
   return isSocialOrTrivial(sanitized)
 }
 
+const QUIZ_TERM_RE = /(单选题|多选题|选择题|判断题|问答题|请回答|请选择|请选出|选出正确|以下哪(?:个|项)|哪(?:个|项)(?:正确|符合|是)|请作答)/
+const OPTION_LINE_RE = /(?:^|\n)\s*[A-E][.、．:：)]\s*\S/g
+const QUESTION_END_RE = /[？?]\s*$/m
+
+/**
+ * 问答/评测题形状检测（2026-08-31 benchmark 实测）：LLM 分类器与启发式都会把
+ * 含"迁移/失效/修复"字样的 quiz 误判成 bug_fix——选项与题干里的词触发了
+ * bug_fix 正则。判定要求"题型词 +（≥2 个选项行 或 问号收尾）"，双信号才成立，
+ * 避免把真实编码请求误伤。
+ */
+export function detectQuizLike(text: string): boolean {
+  if (!QUIZ_TERM_RE.test(text)) return false
+  const optionLines = (text.match(OPTION_LINE_RE) ?? []).length
+  return optionLines >= 2 || QUESTION_END_RE.test(text)
+}
+
+const READONLY_MARKER_RE = /(只读|不要(?:修改|改动|改)|禁止(?:修改|改动)|不许(?:修改|改动)|请勿(?:修改|改动))/
+const REPORT_SINK_RE = /(报告|结论|判定|审查|审计)[^。\n]{0,20}(写到|输出到|写入)/
+
+/** 只读审查形状：显式只读约束 + 报告落点双信号（评测类 review 任务的常见形态）。 */
+export function detectReviewOnlyLike(text: string): boolean {
+  return READONLY_MARKER_RE.test(text) && REPORT_SINK_RE.test(text)
+}
+
 function inferTaskKinds(userMessage: string, lastAssistantMessage?: string, taskList?: readonly TaskListItem[]): IntentTaskKind[] {
+  // 题型形状短路：quiz 就是 usage_question，不参与任何 bug_fix/refactor 正则
+  // 匹配——题干选项里的"修复/迁移"字样不是任务动词。
+  if (detectQuizLike(userMessage)) return ['usage_question']
   // Step 1: 解析上一轮回复中的关联任务计划（如 P1/P2/T1 等），含持久化 taskList 回溯
   const resolvedContexts = resolveContextualIdentifier(userMessage, lastAssistantMessage, taskList)
   // Step 2: 将任务详情富化到用户输入中，为正则提供强意图信号

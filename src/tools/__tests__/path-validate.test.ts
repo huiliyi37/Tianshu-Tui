@@ -2,19 +2,19 @@ import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve as resolvePath } from 'node:path'
 import { validatePath, validatePathSafe } from '../path-validate.js'
 import { grantPath, _resetGrantsForTest } from '../path-grants.js'
 
 describe('validatePath', () => {
   it('allows files within cwd', () => {
     const result = validatePath('/home/user/project', 'src/file.ts')
-    assert.equal(result, '/home/user/project/src/file.ts')
+    assert.equal(result, resolvePath('/home/user/project', 'src/file.ts'))
   })
 
   it('allows cwd itself', () => {
     const result = validatePath('/home/user/project', '.')
-    assert.equal(result, '/home/user/project')
+    assert.equal(result, resolvePath('/home/user/project', '.'))
   })
 
   it('rejects parent directory traversal', () => {
@@ -40,7 +40,7 @@ describe('validatePath', () => {
 
   it('normalizes path with double slashes', () => {
     const result = validatePath('/home/user/project', 'src//file.ts')
-    assert.equal(result, '/home/user/project/src/file.ts')
+    assert.equal(result, resolvePath('/home/user/project', 'src//file.ts'))
   })
 
   it('rejects path that resolves outside via symlink-like traversal', () => {
@@ -52,14 +52,14 @@ describe('validatePath', () => {
 
   it('allows deeply nested files within cwd', () => {
     const result = validatePath('/home/user/project', 'a/b/c/d/e/file.ts')
-    assert.equal(result, '/home/user/project/a/b/c/d/e/file.ts')
+    assert.equal(result, resolvePath('/home/user/project', 'a/b/c/d/e/file.ts'))
   })
 })
 
 describe('validatePathSafe', () => {
   it('returns ok for valid paths', () => {
     const result = validatePathSafe('/home/user/project', 'src/file.ts')
-    assert.deepEqual(result, { ok: true, path: '/home/user/project/src/file.ts' })
+    assert.deepEqual(result, { ok: true, path: resolvePath('/home/user/project', 'src/file.ts') })
   })
 
   it('returns error for traversal', () => {

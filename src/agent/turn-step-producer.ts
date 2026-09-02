@@ -16,7 +16,11 @@ import { detectWorktreeReality, type InjectedWorktreeContext } from './worktree-
 import { advanceContractStatus, classifyPlanMethodology, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, mergeFollowUpIntoContract, type TurnMode } from '../context/task-contract.js'
 import { shouldSuggestPlanMode, buildPlanModeSuggestAdvisory, buildPlanModeAutoEnterAdvisory, buildStructureFlowPlanAdvisory, planModeSuggestMode } from './plan-mode-advisor.js'
 import { skillRegistry } from '../skills/skill-loader.js'
+import { detectQuizLike } from './intent-retrieval-route.js'
 import { renderMemoryBlock } from '../memory/unified-memory.js'
+import { reviewAdaptiveMemory } from '../memory/adaptive-stm.js'
+import { combineMemoryBlocks, crossSessionDisabled, crossSessionMemoryPushEnabled } from './cross-session-memory-config.js'
+export { combineMemoryBlocks, crossSessionDisabled, crossSessionMemoryPushEnabled } from './cross-session-memory-config.js'
 import { parseMentions, renderMentionContext, normalizeMentionRefs } from '../tui/mention-parser.js'
 import { renderPlanCacheAdvisory } from './plan-cache-advisory.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
@@ -65,49 +69,6 @@ export function resolveHardStallMs(config: { providerName?: string; reasoningEff
   const effort = config.reasoningEffort
   const deepReasoning = effort === 'high' || effort === 'max'
   return deepReasoning ? 480_000 : 240_000
-}
-
-/**
- * Cross-session loading check — prefers config over env var.
- *
- * - Env RIVET_NO_CROSS_SESSION=1/true → force-off (disabled=true)
- * - Env RIVET_NO_CROSS_SESSION=0/false → force-on (disabled=false)
- * - No env → uses config.crossSessionEnabled (default true = enabled = NOT disabled)
- * - No config and no env → disabled (backward compat for callers without config)
- */
-export function crossSessionDisabled(configEnabled?: boolean): boolean {
-  const v = process.env.RIVET_NO_CROSS_SESSION
-  if (v === '1' || v === 'true') return true
-  if (v === '0' || v === 'false') return false
-  if (configEnabled !== undefined) return !configEnabled
-  return true
-}
-
-/**
- * Wave 1（知识重构）：`<cross-session-memory>` 每轮推送注入**默认退位**。
- *
- * Store B（unified-memory）的正则观察噪声曾经此通道每个用户边界推给模型；
- * 按"召回是主通道"原则，跨会话知识只经 memory recall 工具按需取。
- * 显式回退口：env RIVET_CROSS_SESSION_INJECT=1 恢复推送（对照实验用）。
- *
- * 注意与 crossSessionDisabled 的分工：后者门控另外三个点位
- * （warmup / 跨会话事件 / 伙伴 presence——多会话协作功能，不是知识推送），
- * 本开关只管记忆块推送，默认关。
- *
- * 虚空仓库 P0 例外：source='agent-crafted' 的条目（agent 交付时主动标记）
- * **默认注入**、不受本开关门控——那是 agent 自己确认的精选知识，不是
- * 正则提取噪声；选集恒定（忽略 query、ts 取最近）保证附录字节稳定。
- */
-export function crossSessionMemoryPushEnabled(): boolean {
-  const v = process.env.RIVET_CROSS_SESSION_INJECT
-  return v === '1' || v === 'true'
-}
-
-/** 虚空仓库 P0：合并双路记忆块（默认 agent-crafted 块在前，opt-in 全量块在后）。
- *  两路都空 → null（附录零占用）。导出供契约测试锁定合并语义。 */
-export function combineMemoryBlocks(agentCrafted: string | null, full: string | null): string | null {
-  if (agentCrafted && full) return `${agentCrafted}\n${full}`
-  return agentCrafted ?? full
 }
 
 /**
@@ -382,9 +343,15 @@ export class TurnStepProducer {
       // 幂等（稳定 ID），followUp 轮重复调用不改变状态。
       if (turnMode === 'task') {
         const targets = this.self.taskContract.scope.mentionedFiles
+        // 无代码目标（问答/审查被误分类为 bug_fix/refactor 的常见形状——文件
+        // 提取失败时 mentionedFiles 为空）不创建代码类义务：RED 复现与
+        // baseline 回归对纯文本/报告类任务无意义，只会把义务提醒循环
+        // 顶到会话超时（2026-08-31 benchmark 实测）。题型形状再兜底一层。
+        const noCodeTargets = targets.length === 0 || isDocOrConfigOnly(targets)
+        const quizLike = detectQuizLike(userInput)
         if (routeKinds?.includes('bug_fix')) {
           // 跳过纯文档/注释/配置变更——RED 复现不适用于非代码任务。
-          if (!isDocOrConfigOnly(targets)) {
+          if (!noCodeTargets && !quizLike) {
             // bugfix → RED 复现优先（动作矩阵第一列）。high：final gate 参与方。
             this.self.obligations.upsert({
               family: 'bugfix',
@@ -394,7 +361,7 @@ export class TurnStepProducer {
             })
           }
         }
-        if (routeKinds?.includes('refactor')) {
+        if (routeKinds?.includes('refactor') && !noCodeTargets && !quizLike) {
           // 重构的风险形态是回归。medium：提供 baseline_diff 升级阶梯与
           // 状态可见性，但不拦 natural-finish（回归权威仍是 B1 delivery gate
           // + regressionInventory 核验）。
@@ -477,18 +444,33 @@ export class TurnStepProducer {
     this.self.config.promptEngine.setSkillAdvisoryBlock(
       skillRegistry.renderDiscoveryBlock(userInput, { exclude: this.self.getDisabledSkills() }),
     )
-    // 虚空仓库 P0 双路注入：
-    //   默认路径——agent-crafted 知识（deliver_task learned / PAL 自动收割）
-    //   无条件注入。选集完全忽略 query（ts 降序取最近 8 条）——评分选集随
-    //   userInput 漂移是附录字节 churner；恒定选集下 memory.jsonl 不变则
-    //   字节不变，满足 appendixDelta 稳定纪律。
-    //   opt-in 路径——全量记忆按 query 评分（RIVET_CROSS_SESSION_INJECT=1，
-    //   行为不变，对照实验用）。
+    // 三路都走 appendixDelta，永不改 frozen prefix：精选常驻、意图门控 STM、
+    // 显式 A/B 全量注入。adaptive-memory 默认 shadow，RIVET_ADAPTIVE_MEMORY=on 开启。
+    const crossSessionOff = crossSessionDisabled(this.self.config.crossSessionEnabled)
+    // 2026-09 记忆幻觉治理：agent-crafted 不再无条件按「最近写入」注入。
+    // 新任务用新问题做 query；followUp 沿用当前契约目标。排除当前会话与
+    // 所有在线并行会话的条目——前者避免旧任务回声，后者避免并行工作区
+    // 在途记忆互相污染（presence TTL 内视为在线）。
+    const memoryIntentText = turnMode === 'task' ? userInput : (this.self.taskContract?.objective ?? userInput)
+    const liveSessionIds = crossSessionOff
+      ? []
+      : loadPresence(this.self.cwd, this.self.config.sessionId).map(e => e.sessionId)
+    const excludedSessionIds = [this.self.config.sessionId, ...liveSessionIds].filter((id): id is string => Boolean(id))
+    const craftedMemory = crossSessionOff
+      ? null
+      : renderMemoryBlock(this.self.cwd, memoryIntentText, 1000, 'agent-crafted', {
+          queryGatedSource: true,
+          excludeSessionIds: excludedSessionIds,
+        })
+    const adaptiveMemory = crossSessionOff ? null : (await reviewAdaptiveMemory({
+      cwd: this.self.cwd, sessionId: this.self.config.sessionId,
+      turn: this.self.session.getTurnCount(), intentText: memoryIntentText, userInput,
+      excludeSessionIds: excludedSessionIds,
+    })).block
     this.self.config.promptEngine.setCrossSessionMemoryBlock(combineMemoryBlocks(
-      renderMemoryBlock(this.self.cwd, '', 1000, 'agent-crafted'),
-      crossSessionMemoryPushEnabled() && !crossSessionDisabled(this.self.config.crossSessionEnabled)
-        ? renderMemoryBlock(this.self.cwd, userInput)
-        : null,
+      craftedMemory,
+      adaptiveMemory,
+      crossSessionMemoryPushEnabled() && !crossSessionOff ? renderMemoryBlock(this.self.cwd, userInput, 2000, undefined, { excludeSessionIds: excludedSessionIds }) : null,
     ))
     this.self.config.promptEngine.setMentionContextBlock(
       renderMentionContext(normalizeMentionRefs(parseMentions(userInput), this.self.cwd)),

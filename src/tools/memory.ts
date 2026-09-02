@@ -16,6 +16,10 @@ import { getRecallTracker } from '../memory/recall-efficacy.js'
 import { renderGateFeedbackHint } from '../memory/gate-ledger.js'
 import { readCommitFacts } from '../context/project-memory-writer.js'
 import { tokenizeRecallQuery } from '../memory/query-terms.js'
+import { createEmbeddingProvider, type EmbeddingProvider } from '../search/embedding-provider.js'
+import {
+  collectTranscriptCandidates, buildDeepRecallPrompt, parseDeepRecallOutput, renderDeepRecallText,
+} from '../memory/deep-recall.js'
 
 // ── recall helpers ──
 
@@ -25,6 +29,7 @@ const DEFINITION: ToolDefinition = {
 
 ### Actions
 - recall: 对项目知识库做混合检索（结构化条目 + knowledge/*.md + playbook 教训）。支持 kind/topic/source 过滤；默认只返回当前有效的条目（已被取代的知识需要 includeHistory）。
+- deep_recall: 跨历史会话**原文**的深召回——需要知识库里没有的细节（某次会话里的具体操作/报错/决定）时用；侧路蒸馏成答案 + 证据引用，原文不占上下文。费用高于 recall，优先 recall。
 - remember: 持久化一条 claim（决策、观察、验证事实、失败模式或项目规则）。session 作用域立即生效；project 作用域先入队，由会话结束时的质量门禁准入——返回 "pending quality gate" 表示该 claim 已被记录，不要重试。
 
 ### Claim kinds（remember 用）
@@ -36,7 +41,7 @@ const DEFINITION: ToolDefinition = {
   input_schema: {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['recall', 'remember', 'recall_feedback'], description: 'recall: 搜索记忆；remember: 存储一条 claim；recall_feedback: 记录召回是否被采纳' },
+      action: { type: 'string', enum: ['recall', 'remember', 'recall_feedback', 'deep_recall'], description: 'recall: 搜索记忆；remember: 存储一条 claim；recall_feedback: 记录召回是否被采纳；deep_recall: 跨历史会话原文的深召回（侧路蒸馏，答案+证据引用）' },
       // recall params
       query: { type: 'string', description: '搜索关键词（对项目知识库做 BM25 + 结构化过滤的混合检索）。recall 必填。' },
       kind: { type: 'string', enum: ['user_constraint', 'user_preference', 'decision', 'file_observation', 'verification_fact', 'failure_pattern', 'security_finding', 'worker_finding', 'project_rule'], description: '按 claim 类型过滤' },
@@ -61,6 +66,14 @@ export interface MemoryContext {
   sessionId: string
   getTurn: () => number
   cwd?: string
+  /** Optional injection for tests/hosts; defaults to configured provider. */
+  embeddingProvider?: EmbeddingProvider
+  /** deep_recall 侧路 LLM 通道（宿主接线，同 essence-gate 廉价路由）；未接线时 deep_recall 报错降级。 */
+  deepRecallComplete?: (prompt: string, timeoutMs: number) => Promise<string>
+  /** 历史会话目录（getSessionDir(cwd)）；deep_recall 扫描范围。 */
+  sessionDir?: string
+  /** 剔除当前会话（避免把本会话原文又蒸馏回来）。 */
+  excludeSessionId?: string
 }
 
 const REMEMBER_KINDS: ContextClaimKind[] = [
@@ -69,6 +82,8 @@ const REMEMBER_KINDS: ContextClaimKind[] = [
 ]
 
 export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext): Tool {
+  const configuredEmbedder = ctx?.embeddingProvider ?? createEmbeddingProvider()
+  const embedder = configuredEmbedder.isAvailable() ? configuredEmbedder : undefined
   return {
     definition: DEFINITION,
 
@@ -89,7 +104,8 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
 
         // Hybrid 检索（Wave 3）：BM25 + 结构过滤 + 时间加权，统一覆盖
         // 知识条目、knowledge/*.md 分块与 playbook 教训。默认只返回 current 叶子。
-        const hits = await getKnowledgeIndex(cwd).search(query, { limit, kind, topic, includeHistory, source })
+        const index = getKnowledgeIndex(cwd, embedder)
+        const hits = await index.search(query, { limit, kind, topic, includeHistory, source })
 
         // commit_fact 侧车：显式请求或 query 形如 commit hash 时才查
         const looksLikeCommitHash = /\b[0-9a-f]{7,40}\b/i.test(query)
@@ -113,7 +129,7 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
         const lines: string[] = []
 
         // Wave 5（反馈闭环）：supersede 链结构告警（模型可见，不影响检索结果）
-        const chainIssues = getKnowledgeIndex(cwd).chainIssues
+        const chainIssues = index.chainIssues
         if (chainIssues.length > 0) {
           lines.push(`⚠ 知识链完整性问题（${chainIssues.length}）：`)
           for (const issue of chainIssues.slice(0, 3)) {
@@ -161,6 +177,30 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
           lines.push(`未找到与「${query}」相关的记忆。`)
         }
         return { content: lines.join('\n') }
+      }
+
+      if (action === 'deep_recall') {
+        const query = typeof params.input.query === 'string' ? params.input.query.trim() : ''
+        if (!query) return { content: '错误：deep_recall 需要提供 query', isError: true }
+        if (!ctx?.deepRecallComplete || !ctx.sessionDir) {
+          return { content: '错误：当前宿主未接线深召回的侧路模型通道——请改用 recall（知识库检索）。', isError: true }
+        }
+        // 原文不进主上下文：检索候选 → 侧路蒸馏 → 只回紧凑结果。
+        const candidates = collectTranscriptCandidates(ctx.sessionDir, query)
+        if (candidates.length === 0) {
+          return { content: `历史会话中没有与「${query}」相关的片段——deep_recall 无可蒸馏素材。` }
+        }
+        let raw: string
+        try {
+          raw = await ctx.deepRecallComplete(buildDeepRecallPrompt(query, candidates), 20_000)
+        } catch {
+          return { content: '深召回失败（侧路模型不可用/超时）——fail-closed 不编造，可改用 recall。', isError: true }
+        }
+        const result = parseDeepRecallOutput(raw)
+        if (!result) {
+          return { content: '深召回失败（蒸馏输出不可解析）——fail-closed 不编造，可改用 recall。', isError: true }
+        }
+        return { content: renderDeepRecallText(result) }
       }
 
       if (action === 'recall_feedback') {

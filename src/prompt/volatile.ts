@@ -385,6 +385,11 @@ export interface VolatileContext {
   tersenessEnabled?: boolean
   /** When true, render a stricter terseness nudge (e.g. doom-loop / storm turns). */
   tersenessEscalate?: boolean
+  /** Zen mode（禅模式）: 裁剪 CVM 动态注入块（sensorium / 策略 profile /
+   *  知识碎片 / 星域提醒 / 遥测摘要 —— 全部以 CvmInjectionSource 计量）。
+   *  保留 git-status / recent-commits / 项目指令(frozen) / 计划指针。
+   *  Cache-safe: 只影响 dynamic appendix；非 zenLean 时行为字节级不变。 */
+  zenLean?: boolean
   /**
    * Cognitive projection (task-contract + verification gap + cognitive mirror +
    * uncertainty framing). Cache-safe: rendered ONLY into the dynamic appendix.
@@ -570,6 +575,11 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   const parts: Array<{ content: string; source?: CvmInjectionSource }> = []
   /** Collect an ordinary appendix block; pass a source only for CVM-metered ones. */
   const push = (content: string, source?: CvmInjectionSource): void => {
+    // Zen mode（禅模式）: 裁剪 CVM 动态注入块（sensorium / 策略 profile /
+    // 知识碎片 / 星域提醒 / 遥测摘要 —— 全部以 CvmInjectionSource 计量）。
+    // 保留 git-status / recent-commits / 项目指令(frozen) / 计划指针 ——
+    // 这些块不挂 source，不受此开关影响。非 zenLean 时条件恒假 → 字节级不变。
+    if (ctx.zenLean && source !== undefined) return
     parts.push({ content, source })
   }
 

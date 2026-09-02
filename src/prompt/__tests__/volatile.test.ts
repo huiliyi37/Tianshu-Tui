@@ -225,4 +225,44 @@ describe('volatile context layers', () => {
     }
   })
 })
+
+describe('zenLean — 禅模式 appendix 裁剪 CVM 动态注入块', () => {
+  /** CVM 动态注入块 + keep-list 齐备的上下文。gitStatus 用短格式 + Recent
+   *  commits 行，让 appendix 侧拆出 <git-status> 与 <recent-commits> 两块。 */
+  const cvmCtx = (over: Partial<VolatileContext> = {}): VolatileContext => ({
+    cwd: '/repo',
+    gitStatus: 'M  src/main.tsx\n?? src/new.ts\n\nRecent commits:\n  1234abcd fix: zen\n',
+    activePlanPointer: '<active-plan pointer="zen-plan">执行中计划: zen-plan</active-plan>',
+    cognitiveProjection: '<cognitive-mirror>projection</cognitive-mirror>',
+    toolContext: '<tool-context>strategy</tool-context>',
+    harnessAdvisoryBlock: '<星域-advisory>advisory</星域-advisory>',
+    controlPlaneBlock: '<control-plane>telemetry</control-plane>',
+    ...over,
+  })
+
+  it('zenLean 裁剪 CVM 动态注入块，保留 git-status / recent-commits / 计划指针', () => {
+    const appendix = buildDynamicAppendix(cvmCtx({ zenLean: true }))
+    // keep-list: git-status / recent-commits / 计划指针 仍在
+    assert.match(appendix, /<git-status>/)
+    assert.match(appendix, /<recent-commits>/)
+    assert.match(appendix, /<active-plan/)
+    // CVM 动态注入块（sensorium=projection / 策略 profile=tool-context /
+    // 星域提醒=advisory-appendix / 遥测摘要=control-appendix）被裁剪
+    assert.doesNotMatch(appendix, /<cognitive-mirror>/)
+    assert.doesNotMatch(appendix, /<tool-context>/)
+    assert.doesNotMatch(appendix, /<星域-advisory>/)
+    assert.doesNotMatch(appendix, /<control-plane>/)
+  })
+
+  it('非 zenLean 时 CVM 块照常渲染（回归锚：行为与既有 appendix 一致）', () => {
+    const appendix = buildDynamicAppendix(cvmCtx())
+    assert.match(appendix, /<cognitive-mirror>/)
+    assert.match(appendix, /<tool-context>/)
+    assert.match(appendix, /<星域-advisory>/)
+    assert.match(appendix, /<control-plane>/)
+    assert.match(appendix, /<git-status>/)
+    assert.match(appendix, /<recent-commits>/)
+    assert.match(appendix, /<active-plan/)
+  })
+})
       

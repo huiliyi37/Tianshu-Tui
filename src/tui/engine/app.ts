@@ -120,7 +120,7 @@ import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../w
 import { boxCharsFor, boxInnerWidth } from '../box-chars.js'
 import { useAsciiGlyphs } from '../term-caps.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, followListWindow, renderChronicle, renderTasks, renderDomainPicker, renderDomainGenesisCard, genesisCardMaxScroll, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderInitFlow } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, followListWindow, renderChronicle, renderTasks, renderDomainPicker, renderDomainGenesisCard, genesisCardMaxScroll, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect, renderInitFlow, MODEL_PICKER_EFFORT_LEVELS, stepModelPickerEffort, type ModelPickerEffort } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData, InitOverlayData } from '../format/overlay.js'
 import { ConnectFlow, DIY_PENDING_KEY_REF, type ConnectCommit, type ConnectProviderRef, type ConnectStepResult } from '../connect-flow.js'
 import { VisionOnboardingFlow, type VisionCandidate, type VisionOnboardingRequest, type VisionOnboardingResult } from '../vision-onboarding-flow.js'
@@ -742,6 +742,10 @@ export class TuiApp {
   choicePanelInputCursor = 0
   /** choice-panel 输入子模式的硬件光标落点（渲染方回填，caret() 供引擎定位）。 */
   private choicePanelCaret: { row: number; col: number } | null = null
+  /** model-picker effort draft（CC 对标）：面板打开时初始化为当前生效档，
+   *  </> 循环步进；提交时与 initial 比对——有显式改动才随模型一起生效。 */
+  modelPickerEffortDraft?: import('../format/overlay.js').ModelPickerEffort
+  modelPickerEffortInitial?: import('../format/overlay.js').ModelPickerEffort
   /** domain-picker 的创世碑文视图（g 键进入）。 */
   domainGenesisMode = false
   /** 碑文正文滚动偏移（行）。 */
@@ -895,6 +899,7 @@ export class TuiApp {
           planMode: (() => { try { return this.planModeProvider?.() ?? false } catch { return false } })(),
           askMode: (() => { try { return this.askModeProvider?.() ?? false } catch { return false } })(),
           streaming: this.isAgentActive(),
+          routingConfigured: (() => { try { return this.routingConfiguredProvider?.() ?? true } catch { return true } })(),
         })
       },
       onTabComplete: () => this.handleTabComplete(),
@@ -1817,6 +1822,15 @@ export class TuiApp {
     this.agentRunningProbe = probe
   }
 
+  /** 注入 Zen Mode（禅模式）相位徽章探针（main.ts 接线到
+   *  `ctx.agent.zenController.isZen ? '禅' : undefined`）——读面收窄期间
+   *  状态栏常驻「禅」徽章，晋升后消失。未注入 → undefined（保守降级）。 */
+  private zenBadgeProvider: (() => string | undefined) | undefined
+
+  setZenBadgeProvider(provider: () => string | undefined): void {
+    this.zenBadgeProvider = provider
+  }
+
   notifyRunSettled(): void {
     this.abortSettling = false
     const backfill = this.abortSteerBackfill
@@ -2084,6 +2098,11 @@ export class TuiApp {
         const entries = this.overlayController.getData()?.modelPickerData?.().entries ?? []
         const curIdx = entries.findIndex(e => e.current)
         if (curIdx >= 0) this.overlayController.nav().modelPickerIndex = curIdx
+        // effort draft 初始化为当前生效档（CC 对标：面板内 </> 调整，提交才生效）
+        const cur = this.metricsGlanceController.reasoningEffortProvider?.()
+        const init = (MODEL_PICKER_EFFORT_LEVELS as readonly string[]).includes(cur ?? '') ? cur as ModelPickerEffort : 'auto'
+        this.modelPickerEffortDraft = init
+        this.modelPickerEffortInitial = init
         return this.overlay.activate(id)
       }
       case 'theme-picker': {
@@ -3917,7 +3936,8 @@ export class TuiApp {
     }
 
     if (id === 'model-picker') {
-      const count = this.overlayController.getData()?.modelPickerData?.().entries.length ?? 0
+      const data = this.overlayController.getData()?.modelPickerData?.()
+      const count = data?.entries.length ?? 0
       const cur = this.overlayController.nav().modelPickerIndex
       if (key.name === 'down') {
         if (count > 0) { this.overlayController.nav().modelPickerIndex = (cur + 1) % count; this.overlay.rerender() }
@@ -3927,16 +3947,31 @@ export class TuiApp {
         if (count > 0) { this.overlayController.nav().modelPickerIndex = (cur - 1 + count) % count; this.overlay.rerender() }
         return true
       }
+      // </> effort 步进（CC 对标）：循环切换档位 draft；选中模型不支持时不响应
+      // （渲染层 supported 判定按当前选中条目——翻到不支持模型后 effort 行自然灰化）。
+      if ((c === '<' || c === '>') && data?.effort?.supported !== false) {
+        this.modelPickerEffortDraft = stepModelPickerEffort(this.modelPickerEffortDraft ?? 'auto', c)
+        this.overlay.rerender()
+        return true
+      }
+      // 提交语义（CC 对标）：Enter=设为默认（持久化）、s=仅本会话。
+      // effort 只在有显式改动（draft ≠ 打开时初值）时随提交传递。
+      const effortChange = this.modelPickerEffortDraft !== undefined
+        && this.modelPickerEffortDraft !== this.modelPickerEffortInitial
+        ? this.modelPickerEffortDraft
+        : undefined
       if (key.name === 'return') {
-        const entry = count > 0 ? this.overlayController.getData()?.modelPickerData?.().entries[cur] : undefined
-        if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.provider, entry.id)
+        const entry = count > 0 ? data?.entries[cur] : undefined
+        if (entry && this.overlayController.getModelPickerSaveDefaultExec()) {
+          this.overlayController.getModelPickerSaveDefaultExec()?.(entry.provider, entry.id, effortChange)
+        }
         this.deactivateOverlay()
         return true
       }
       if (c === 's') {
-        const entry = count > 0 ? this.overlayController.getData()?.modelPickerData?.().entries[cur] : undefined
-        if (entry && this.overlayController.getModelPickerSaveDefaultExec()) {
-          this.overlayController.getModelPickerSaveDefaultExec()?.(entry.provider, entry.id)
+        const entry = count > 0 ? data?.entries[cur] : undefined
+        if (entry && this.overlayController.getModelPickerExec()) {
+          this.overlayController.getModelPickerExec()?.(entry.provider, entry.id, effortChange)
         }
         this.deactivateOverlay()
         return true
@@ -4738,8 +4773,9 @@ export class TuiApp {
 
     // 协同建议行 Tab 采纳：`/<kind> ` + 当前文本转入输入框（不直接发送），本会话关闭建议。
     // 位于 @ 补全之前：建议行激活时 Tab 的意图是把活派给蜂群；文件补全循环进行中让位。
+    // routing nudge 特例：采纳 = 转入 /config（不携带任务文本——去配置，不是派活）。
     if (this.orchHint.active && !this.inputController.fileCompletion) {
-      this.inputLine.setValue(`/${this.orchHint.kind} ${value}`)
+      this.inputLine.setValue(this.orchHint.kind === 'routing' ? '/config ' : `/${this.orchHint.kind} ${value}`)
       this.orchHint.adopt()
       return true
     }
@@ -4926,9 +4962,7 @@ export class TuiApp {
    */
   setSessionStarDomain(domainName: string | undefined): void {
     this.metricsGlanceController.sessionStarDomainName = domainName
-    if (!this.metricsGlanceController.delegationDomainOverride) {
-      this.applyGlanceDomainDisplay()
-    }
+    this.applyGlanceDomainDisplay()
     this.forceRedraw()
   }
 
@@ -4942,12 +4976,15 @@ export class TuiApp {
     this.metricsGlanceController.reasoningEffortProvider = provider
   }
 
+  /** 注册子代理路由配置状态提供者（routing nudge 的 onChange 读取；缺省视为已配置）。 */
+  private routingConfiguredProvider?: () => boolean
+  setRoutingConfiguredProvider(provider: () => boolean): void {
+    this.routingConfiguredProvider = provider
+  }
+
   private applyGlanceDomainDisplay(): void {
-    if (this.metricsGlanceController.delegationDomainOverride) {
-      this.state.domainGlyph = this.metricsGlanceController.delegationDomainOverride.glyph
-      this.state.domainName = this.metricsGlanceController.delegationDomainOverride.name
-      return
-    }
+    // 会话星域显示单一来源：/domain 设定（sessionStarDomainName）。派发阶段不再
+    // 覆盖显示——「天机」是编排阶段的内部路由标记，不上主面板（用户实锤）。
     const display = resolveStarDomainDisplay(this.metricsGlanceController.sessionStarDomainName)
     if (display) {
       this.state.domainGlyph = display.glyph
@@ -4963,9 +5000,7 @@ export class TuiApp {
     const next = this.metricsGlanceController.domainSyncProvider()
     if (next === this.metricsGlanceController.sessionStarDomainName) return
     this.metricsGlanceController.sessionStarDomainName = next
-    if (!this.metricsGlanceController.delegationDomainOverride) {
-      this.applyGlanceDomainDisplay()
-    }
+    this.applyGlanceDomainDisplay()
   }
 
   /**
@@ -5130,15 +5165,10 @@ export class TuiApp {
     this.setPhase('analyzing')
     this.markActivity()
     this.toolGroupController.setPending(id, { name, input, startMs: Date.now(), _approvalMode: this._approvalMode })
-    // 子代理编排（delegate_* / team_orchestrate）切 GlanceBar domain 到天机。
-    if (isDelegationTool(name)) {
-      const badge = domainBadge(name)
-      if (badge) {
-        this.metricsGlanceController.delegationDomainOverride = { glyph: badge.glyph, name: badge.name }
-        this.state.domainGlyph = badge.glyph
-        this.state.domainName = badge.name
-      }
-    }
+    // 注意：派发类工具（delegate_*/team_orchestrate/galaxy）不再切换 GlanceBar 星域——
+    // 「天机」是子代理编排阶段的内部路由标记，不是用户可选的会话星域；把它顶到
+    // 主面板星域位会让用户误以为 /domain 切了域（还牵连缓存语义），且顺带改变了
+    // 输入框边框的星域 persona separator。会话星域显示恒随 /domain 设定。
 
     // 工具折叠组：read/search 与可折叠 bash 各走各的 buffer，互相打断。
     // non-collapsible（含变更型 bash）到达时 flush 两个组。
@@ -5651,8 +5681,6 @@ export class TuiApp {
       this.state.isThinking = false
       this.setPhase('idle')
       this.state.thinkStartMs = 0
-      // 清除委派 override，恢复 /domain 设定的会话星域
-      this.metricsGlanceController.delegationDomainOverride = undefined
       this.applyGlanceDomainDisplay()
 
       // 回合耗时文案：✦ Worked for 1m 6s · 12.3k in / 890 out
@@ -6745,6 +6773,8 @@ export class TuiApp {
         workerBadge: this.viewingWorkerId
           ? `→ ${shortOrderLabel(this.viewingWorkerId)}`
           : undefined,
+        // Zen 相位徽章：读面收窄期间常驻「禅」，晋升后消失（探针未注入 = 无）
+        zenBadge: this.zenBadgeProvider?.(),
       }, this.theme)
 
       const rightStr = formatGlanceRight({
@@ -7564,11 +7594,21 @@ export class TuiApp {
       },
     })
 
-    // Model Picker — 裸 /model 打开模型选择器；selectedIndex 由 overlayNav 注入
+    // Model Picker — 裸 /model 打开模型选择器；selectedIndex 由 overlayNav 注入。
+    // effort 行数据在此组装：value 取 draft，supported 按当前选中条目（翻页即变）。
     this.overlay.register('model-picker', {
       render: (_w, _h) => {
         const data = overlayData?.modelPickerData?.() ?? { entries: [], selectedIndex: 0 }
-        return renderModelPicker({ ...data, selectedIndex: this.overlayController.nav().modelPickerIndex }, this.columns, this.rows, this.theme)
+        const sel = this.overlayController.nav().modelPickerIndex
+        const selEntry = data.entries[sel]
+        return renderModelPicker({
+          ...data,
+          selectedIndex: sel,
+          effort: {
+            value: this.modelPickerEffortDraft ?? 'auto',
+            supported: selEntry?.effortSupported !== false,
+          },
+        }, this.columns, this.rows, this.theme)
       },
     })
 

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderModelPicker, renderThemePicker } from '../format/overlay.js'
+import { renderModelPicker, renderThemePicker, stepModelPickerEffort } from '../format/overlay.js'
 import type { ModelPickerData, ThemePickerData } from '../format/overlay.js'
 import { getTheme, THEMES } from '../theme.js'
 
@@ -89,3 +89,77 @@ describe('renderThemePicker', () => {
     assert.ok(/\x1B\[/.test(swatchLine), 'swatch preview row has ANSI color sequences')
   })
 })
+
+// ── effort 行（CC 对标：/model 面板内随模型调整推理等级）─────────────
+
+describe('renderModelPicker effort row', () => {
+  const baseEntries = [
+    { id: 'deepseek-v4-pro', alias: 'v4-pro', provider: 'deepseek', current: true, contextWindow: 64000, effortSupported: true },
+  ]
+
+  it('renders effort row with level and adjust hint when supported', () => {
+    const data: ModelPickerData = {
+      entries: baseEntries,
+      selectedIndex: 0,
+      effort: { value: 'high', supported: true },
+    }
+    const lines = renderModelPicker(data, 80, 20, theme)
+    const text = lines.map(stripAnsi).join('\n')
+    assert.match(text, /high effort/)
+    assert.match(text, /<\/> 调整/)
+  })
+
+  it('renders auto sentinel with explanation', () => {
+    const data: ModelPickerData = {
+      entries: baseEntries,
+      selectedIndex: 0,
+      effort: { value: 'auto', supported: true },
+    }
+    const text = lines0(renderModelPicker(data, 80, 20, theme))
+    assert.match(text, /auto（按任务自动）/)
+    assert.doesNotMatch(text, /auto effort/)
+  })
+
+  it('renders unsupported models with a muted notice instead of the adjust hint', () => {
+    const data: ModelPickerData = {
+      entries: [{ ...baseEntries[0]!, effortSupported: false }],
+      selectedIndex: 0,
+      effort: { value: 'high', supported: false },
+    }
+    const text = lines0(renderModelPicker(data, 80, 20, theme))
+    assert.match(text, /此模型不支持推理等级调节/)
+    assert.doesNotMatch(text, /<\/> 调整/)
+  })
+
+  it('flips footer semantics to CC style: Enter=set default, s=session only', () => {
+    const data: ModelPickerData = { entries: baseEntries, selectedIndex: 0 }
+    const text = lines0(renderModelPicker(data, 80, 20, theme))
+    assert.match(text, /Enter:设为默认/)
+    assert.match(text, /s:仅本会话/)
+  })
+
+  it('omits the effort row entirely when data.effort is absent', () => {
+    const data: ModelPickerData = { entries: baseEntries, selectedIndex: 0 }
+    const text = lines0(renderModelPicker(data, 80, 20, theme))
+    assert.doesNotMatch(text, /effort/)
+    assert.doesNotMatch(text, /推理等级/)
+  })
+})
+
+describe('stepModelPickerEffort', () => {
+  it('steps toward heavier levels on > and wraps max→auto', () => {
+    assert.equal(stepModelPickerEffort('auto', '>'), 'off')
+    assert.equal(stepModelPickerEffort('low', '>'), 'medium')
+    assert.equal(stepModelPickerEffort('max', '>'), 'auto')
+  })
+
+  it('steps toward lighter levels on < and wraps auto→max', () => {
+    assert.equal(stepModelPickerEffort('off', '<'), 'auto')
+    assert.equal(stepModelPickerEffort('medium', '<'), 'low')
+    assert.equal(stepModelPickerEffort('auto', '<'), 'max')
+  })
+})
+
+function lines0(lines: string[]): string {
+  return lines.map(stripAnsi).join('\n')
+}

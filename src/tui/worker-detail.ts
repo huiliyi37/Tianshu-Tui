@@ -150,6 +150,7 @@ export function buildWorkerDetailContent(
       sourcesReviewedCount: result.sourcesReviewed,
       failureReason: result.failureReason,
       evidenceStatus: result.evidenceStatus,
+      salvagedFindingsCount: result.findings?.filter(f => f.salvaged === true).length ?? 0,
     }))
     if (result.findings && result.findings.length > 0) {
       lines.push('发现：')

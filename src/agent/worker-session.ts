@@ -1086,7 +1086,9 @@ async function runWorkerSessionImpl(config: WorkerSessionConfig): Promise<Worker
           // Terminal tier ladder: repair retries exhausted → field-level salvage
           // (recover independently parseable findings from the malformed report)
           // → empty blocked only when nothing is salvageable.
-          const salvaged = salvageWorkerResult(latestText, config.order.id, error)
+          // evidenceRoots = worker cwd：打捞 findings 的 evidenceRefs 相对被侦察
+          // 项目（幻觉引用检测的机械校验根）。
+          const salvaged = salvageWorkerResult(latestText, config.order.id, error, [config.cwd])
           if (salvaged) {
             mbox?.progress(config.order.budget.maxRetries + 1, config.order.budget.maxRetries + 1, 'parse-salvaged')
             return {

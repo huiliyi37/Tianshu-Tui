@@ -64,21 +64,29 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Upload DMG + signature
+      - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
           name: tianshu-macos-dmg
           path: |
             desktop/src-tauri/target/release/bundle/dmg/*.dmg
-            desktop/src-tauri/target/release/bundle/dmg/*.dmg.sig
           if-no-files-found: warn
+
+      - name: Upload updater artifact (app.tar.gz + sig)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tianshu-macos-updater
+          path: |
+            desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+            desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: error
 
       - name: Upload macOS app
         uses: actions/upload-artifact@v4
         with:
           name: tianshu-macos-app
           path: |
-            desktop/src-tauri/target/release/bundle/macos/天枢.app
+            desktop/src-tauri/target/release/bundle/macos/Tianshu.app
           if-no-files-found: warn
 
       - name: Publish to GitHub Release
@@ -87,6 +95,7 @@ jobs:
         with:
           files: |
             desktop/src-tauri/target/release/bundle/dmg/*.dmg
-            desktop/src-tauri/target/release/bundle/dmg/*.dmg.sig
+            desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+            desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
           draft: true
           generate_release_notes: true

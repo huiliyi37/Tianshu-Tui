@@ -19,6 +19,8 @@ import {
   removeProvider,
   runConfigCLI,
   setModelSupportsVision,
+  setDefaultModelConfig,
+  getDefaultModelConfig,
 } from '../manager.js'
 import { readSecret, writeSecret, secretsPath } from '../secrets-store.js'
 import { DEFAULT_CONFIG } from '../default.js'
@@ -710,5 +712,52 @@ describe('removeProvider secret cleanup（一个 key 一个模型组）', () => 
     assert.equal(result.keyRef, undefined)
     assert.equal(result.secretDeleted, false)
     assert.equal(result.modelCount, 1)
+  })
+})
+
+describe('setDefaultModelConfig defaultEffort（CC 对标：/model 面板 effort 随默认持久化）', () => {
+  let dir = ''
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-default-effort-'))
+    process.env.RIVET_CONFIG_PATH = join(dir, 'config.json')
+  })
+
+  afterEach(() => {
+    delete process.env.RIVET_CONFIG_PATH
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('显式档位落盘并可读回', () => {
+    const snap = setDefaultModelConfig({ defaultModel: 'deepseek:deepseek-v4-pro', defaultEffort: 'high' })
+    assert.equal(snap.defaultEffort, 'high')
+    assert.equal(loadConfig().agent.defaultEffort, 'high')
+  })
+
+  it("'auto' 与 null 删字段回自动；undefined 不动", () => {
+    setDefaultModelConfig({ defaultModel: 'deepseek:deepseek-v4-pro', defaultEffort: 'max' })
+    assert.equal(loadConfig().agent.defaultEffort, 'max')
+    setDefaultModelConfig({ defaultEffort: 'auto' })
+    assert.equal(loadConfig().agent.defaultEffort, undefined)
+    setDefaultModelConfig({ defaultEffort: 'low' })
+    assert.equal(loadConfig().agent.defaultEffort, 'low')
+    setDefaultModelConfig({ defaultEffort: null })
+    assert.equal(loadConfig().agent.defaultEffort, undefined)
+    // undefined = 不触碰该字段
+    setDefaultModelConfig({ defaultEffort: 'high' })
+    setDefaultModelConfig({ defaultModel: 'deepseek:deepseek-v4-flash' })
+    assert.equal(loadConfig().agent.defaultEffort, 'high')
+  })
+
+  it('非法档位抛错且不落盘', () => {
+    setDefaultModelConfig({ defaultModel: 'deepseek:deepseek-v4-pro' })
+    assert.throws(() => setDefaultModelConfig({ defaultEffort: 'xhigh' }), /off\|low\|medium\|high\|max/)
+    assert.equal(loadConfig().agent.defaultEffort, undefined)
+  })
+
+  it('snapshot 带 defaultEffort', () => {
+    assert.equal(getDefaultModelConfig().defaultEffort, null)
+    setDefaultModelConfig({ defaultEffort: 'medium' })
+    assert.equal(getDefaultModelConfig().defaultEffort, 'medium')
   })
 })

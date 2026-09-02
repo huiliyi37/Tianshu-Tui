@@ -140,3 +140,71 @@ test('state: kind 随命中更新，供 Tab 采纳组命令行', () => {
   h.evaluate('同时从架构和风险角度评审这个迁移方案并给出权衡', idle)
   assert.equal(h.kind, 'council')
 })
+
+// ── routing nudge：派发命令 + 路由未配置 → 一次性引导 ─────────────────
+
+import { detectRoutingNudge } from '../engine/orchestration-hint.js'
+
+test('detectRoutingNudge: 派发命令命中（含带参数与前后空格）', () => {
+  for (const cmd of ['/team 修三个模块', '/scout', '/council 评审方案', '/review max', '/galaxy 重构']) {
+    assert.ok(detectRoutingNudge(cmd), cmd)
+  }
+})
+
+test('detectRoutingNudge: 非派发命令不命中', () => {
+  for (const cmd of ['/model', '/help', '/config 路由', '/effort max', 'team 修一下', '/teamfoo']) {
+    assert.ok(!detectRoutingNudge(cmd), cmd)
+  }
+})
+
+test('routing nudge: 派发命令 + routingConfigured=false → 激活', () => {
+  const hint = new OrchestrationHint(true)
+  const flipped = hint.evaluate('/team 修登录', { ...idle, routingConfigured: false })
+  assert.ok(flipped)
+  assert.ok(hint.active)
+  assert.equal(hint.kind, 'routing')
+})
+
+test('routing nudge: 路由已配置时不触发', () => {
+  const hint = new OrchestrationHint(true)
+  hint.evaluate('/team 修登录', { ...idle, routingConfigured: true })
+  assert.ok(!hint.active, 'guard lives on the routingConfigured side — detection still hits')
+})
+
+test('routing nudge: 每会话至多 1 次（关掉输入框再输也不弹）', () => {
+  const hint = new OrchestrationHint(true)
+  hint.evaluate('/team a', { ...idle, routingConfigured: false })
+  assert.ok(hint.active)
+  hint.evaluate('/team b', { ...idle, routingConfigured: false })
+  assert.ok(!hint.active, 'second dispatch command must not re-show')
+})
+
+test('routing nudge: Esc 后本会话彻底关闭（含协同建议）', () => {
+  const hint = new OrchestrationHint(true)
+  hint.evaluate('/team a', { ...idle, routingConfigured: false })
+  hint.dismiss()
+  hint.evaluate('/team b', { ...idle, routingConfigured: false })
+  assert.ok(!hint.active)
+})
+
+test('routing nudge: streaming 中不触发', () => {
+  const hint = new OrchestrationHint(true)
+  hint.evaluate('/team a', { ...idle, streaming: true, routingConfigured: false })
+  assert.ok(!hint.active)
+})
+
+test('routing nudge: 配置后不再拦住协同建议——普通文本仍可命中 team 建议', () => {
+  const hint = new OrchestrationHint(true)
+  hint.evaluate('/team a', { ...idle, routingConfigured: false })
+  hint.dismiss()
+  const text = '同时重构 auth 模块并补齐测试'
+  hint.evaluate(text, { ...idle, routingConfigured: true })
+  assert.ok(!hint.active, 'closed blocks orchestration hints too (shared close semantics)')
+})
+
+test('formatOrchestrationHint: routing 分支渲染 /config 指引与 Tab 去配置', () => {
+  const line = strip(formatOrchestrationHint(theme, false, 'routing'))
+  assert.match(line, /子代理将跟随主模型/)
+  assert.match(line, /\/config/)
+  assert.match(line, /Tab 去配置/)
+})

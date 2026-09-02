@@ -29,9 +29,12 @@ import { isProFeatureEnabled } from './config/pro-license.js'
 import { lastSessionPointerDir, rivetHome, stateDir } from './config/paths.js'
 import { setTargetConventions, applyConfiguredGitBashPath } from './platform.js'
 import { AgentLoop } from './agent/loop.js'
+import { resolveZenConfig } from './agent/zen-mode.js'
 import { createAgentConfig, createMainAgentConfigInput } from './agent/create-agent-config.js'
 import { SessionContext } from './agent/context.js'
 import { SessionPersist, evictOldSessions, getSessionDir } from './agent/session-persist.js'
+import { runGateCompletion } from './agent/gate-completion.js'
+import { memoryBackfillEnabled, runMemoryBackfill } from './memory/backfill.js'
 import { migrateSessionFiles } from './agent/session-cd.js'
 import { decideStartupSession, RESUME_FRESHNESS_MS } from './agent/session-recovery.js'
 import { runResumePreflightOai } from './context/resume-preflight.js'
@@ -46,6 +49,7 @@ import { BROWSER_DEBUG_TOOL } from './tools/browser-debug/tool.js'
 import { defaultStore as defaultTodoStore } from './tools/todo.js'
 import { TodoStore } from './tools/todo-store.js'
 import { createCoordinatorDelegateAdapter, createDelegateTaskTool } from './tools/delegate-task.js'
+import { createSummonExpertTool } from './tools/summon-expert.js'
 import { createUndoTool } from './tools/undo.js'
 import { maybeWarnNoSandbox, applySandboxPolicyForApprovalMode } from './tools/sandbox-profile.js'
 import { applyConfiguredPathGrants, applyDefaultDependencyReadGrants, applyRivetRuntimeReadGrants, loadPersistedGrants } from './tools/path-grants.js'
@@ -465,8 +469,12 @@ export function createInteractiveToolRegistry(
   // 域工具档位：defaultDomain 钉定某域且该域配置了 toolPreset 时按域装配
   // （如 taiyi 域默认 taiyi 档）。运行期 /domain 切换不改（装配已过）。
   const toolPreset = resolveToolPreset(cwd, config.agent.defaultDomain)
+  // zen structuredRead 读面：显式配置时面内结构化读工具不受 preset 排除
+  // （默认 minimal → false → 装配字节零变化，frozen 前缀缓存安全）。
+  const zenStructuredRead = config.tools?.zen?.faceMode === 'structuredRead'
   const reg = createDefaultToolRegistry([], {
     preset: toolPreset,
+    zenStructuredRead,
     desktopTools: config.agent.desktopTools,
     todoStore: refs.todoStore,
     // Computer Use（桌面 GUI 自动化）：EXTENDED 层，注册≠主控可见（tool gating
@@ -496,6 +504,26 @@ export function createInteractiveToolRegistry(
       () => refs.claimStore ?? undefined,
       () => refs.sessionId ?? undefined,
       () => refs.getProblemAttackStore?.() ?? null,
+      // B1 worker 归属回流：passed 的 changedFiles 写回主控 ledger + ownership——
+      // 修复 worker 写入不在 owned 集（交付需 adopt 补交）的机制根因。
+      (files) => {
+        for (const f of files) {
+          refs.taskLedger?.record({ type: 'file_write', path: f })
+          refs.ownershipLedger?.registerOwned(f)
+        }
+      },
+    ))
+  }
+
+  // summon_expert —— 强专家代理（SEA）：full 档专属 + EXTENDED 层。
+  // 首批只开放只读诊断席；surgeon 写席 fail-closed。
+  if (presetIncludes(toolPreset, 'summon_expert')) {
+    reg.register(createSummonExpertTool(
+      createCoordinatorDelegateAdapter(() => refs.coordinator),
+      {
+        allowSurgeon: false,
+        routingStore: refs.meridianIndexer?.getDb(),
+      },
     ))
   }
 
@@ -513,6 +541,13 @@ export function createInteractiveToolRegistry(
       () => refs.claimStore ?? undefined,
       () => refs.sessionId ?? undefined,
       () => refs.getProblemAttackStore?.() ?? null,
+      // B1 worker 归属回流（同 delegate_task 语义）。
+      (files) => {
+        for (const f of files) {
+          refs.taskLedger?.record({ type: 'file_write', path: f })
+          refs.ownershipLedger?.registerOwned(f)
+        }
+      },
     ))
   }
 
@@ -661,17 +696,18 @@ export function createInteractiveToolRegistry(
     reg.register(BROWSER_DEBUG_TOOL)
   }
 
-  // repo_graph — meridian 图查询。preset full 含；RIVET_REPO_GRAPH=1 强制开启。
-  if (presetIncludes(toolPreset, 'repo_graph') || process.env.RIVET_REPO_GRAPH === '1') {
+  // repo_graph — meridian 图查询。preset full 含；RIVET_REPO_GRAPH=1 强制开启；
+  // zen structuredRead 读面豁免（面内工具必须在注册表里，否则读面名存实亡）。
+  if (presetIncludes(toolPreset, 'repo_graph') || process.env.RIVET_REPO_GRAPH === '1' || zenStructuredRead) {
     reg.register(createRepoGraphTool(() => refs.meridianIndexer))
   }
 
   // related_tests — override the no-indexer default with a meridian-aware factory
-  if (presetIncludes(toolPreset, 'related_tests')) {
+  if (presetIncludes(toolPreset, 'related_tests') || zenStructuredRead) {
     reg.register(createRelatedTestsTool(() => refs.meridianIndexer))
   }
 
-  if (presetIncludes(toolPreset, 'semantic_search')) reg.register(SEMANTIC_SEARCH_TOOL)
+  if (presetIncludes(toolPreset, 'semantic_search') || zenStructuredRead) reg.register(SEMANTIC_SEARCH_TOOL)
   // APPLY_PATCH: EXTENDED layer — overlap with hash_edit covers >90% of
   // use cases; kept here (interactive) for edge cases (e.g. git-format patches).
   // taiyi 排除（16 核心集已有 edit_file/hash_edit 覆盖编辑面）。
@@ -877,7 +913,9 @@ export function createAgentRuntime(deps: {
       id: currentModel.id,
       maxTokens: currentModel.maxTokens,
       contextWindow: currentModel.contextWindow,
-      reasoningEffort: currentModel.reasoningEffort,
+      // 用户显式 defaultEffort（/model 面板随「设为默认」持久化）压过 preset 默认档；
+      // 未配置时沿用 preset/模型的 reasoningEffort（auto-reasoning 仍可在其上动态调）。
+      reasoningEffort: config.agent.defaultEffort ?? currentModel.reasoningEffort,
       supportsVision: currentModel.supportsVision,
     },
     cwd,
@@ -990,10 +1028,17 @@ export function createAgentRuntime(deps: {
     totalShadowSamples: g.evidence.totalShadowSamples,
   }))
 
+  // Zen Mode 配置解析接线：config.tools.zen（schema 已声明 zen 键——zod 校验
+  // 结构错误在加载期 fail-loud，不再 strip 静默吞没）。未配置 → resolveZenConfig
+  // (undefined) = 默认开启（读面四件套 + 8 turn 预算 + 短消息分诊 + appendix
+  // 收敛）；关闭方式：tools.zen.enabled = false（生产路径生效，2026-08-29 HIGH 修复）。
+  const zenConfig = resolveZenConfig((config.tools as { zen?: unknown }).zen)
+
   const agent = new AgentLoop(
     {
       ...agentCfg,
       toolRegistry,
+      zen: zenConfig,
       // P2: CVM 管线装配配置——磁盘 Config.hooks 填入 AgentLoop 选项
       // （createRuntimeHooksPipeline 经 resolveDisabledHookIds 消费；
       // 交互模式热更见 config-watcher）。
@@ -2115,11 +2160,20 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   // 10. Tool registry
   const { registry: toolRegistry } = createInteractiveToolRegistry(refs, config, cwd)
 
-  // 11. Memory tool (unified recall + remember)
+  // 11. Memory tool (unified recall + remember + deep_recall)
+  // deep_recall 的侧路通道晚绑定到 step 12 的 agent（compact 廉价路由同源）。
+  let runtimeAgent: ReturnType<typeof createAgentRuntime>['agent'] | undefined
   toolRegistry.register(createMemoryTool(claimStore, {
     sessionId,
     getTurn: () => session.getTurnCount(),
     cwd,
+    deepRecallComplete: async (prompt, timeoutMs) => {
+      const client = runtimeAgent?.config.compactClient ?? runtimeAgent?.config.primaryClient ?? runtimeAgent?.config.client
+      if (!client) throw new Error('deep recall: no client')
+      return runGateCompletion(client, () => {}, prompt, timeoutMs)
+    },
+    sessionDir: getSessionDir(cwd),
+    excludeSessionId: sessionId,
   }))
 
   // 12. Agent runtime
@@ -2147,6 +2201,22 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     onStatusLine: text => ctx.setStatusLine?.(text),
   })
   refs.promptEngine = agent.config.promptEngine
+  runtimeAgent = agent
+  // 记忆回填（opt-in：RIVET_MEMORY_BACKFILL=1，对齐 dsh memory-pipeline）：
+  // 启动 30s 后闲时补采历史会话——ledger 幂等，每轮至多 5 个会话。
+  if (memoryBackfillEnabled()) {
+    const backfillTimer = setTimeout(() => {
+      const client = agent.config.compactClient ?? agent.config.primaryClient ?? agent.config.client
+      if (!client) return
+      void runMemoryBackfill({
+        cwd,
+        sessionDir: getSessionDir(cwd),
+        currentSessionId: sessionId,
+        complete: (prompt, timeoutMs) => runGateCompletion(client, () => {}, prompt, timeoutMs),
+      }).catch(() => { /* 回填是尽力而为 */ })
+    }, 30_000)
+    backfillTimer.unref?.()
+  }
   wireFrozenSnapshotPersist(persist, agent.config.promptEngine)
   // 锚点补课（spec 3c 动作 B · 缺口 3）：恢复会话的历史消息在 wire 上
   // 同样被截断，惰性重建锚点（与逐轮增量同粒度，并集确定性等价）。

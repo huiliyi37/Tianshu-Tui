@@ -297,7 +297,7 @@ export interface ToolCallParams {
    *  AgentLoop.exitPlanMode；worker/非 agent 上下文缺席 → 不退出。
    *  「未执行时退出归用户」原则不变——此处只承载闭环自动退出。 */
   exitPlanMode?: () => void
-  /** 当前会话模型名 —— plan submit 用于产出模型留痕（低阶模型计划警告）。 */
+  /** 当前会话模型名 —— plan submit 用于产出模型留痕。 */
   sessionModel?: string
   /** AbortSignal from the tool pipeline — fires when the tool-level timeout
    *  rejects. Delegate tools propagate this to the coordinator so zombie
@@ -428,6 +428,27 @@ export interface ToolResult {
    *  starflow 门禁优先读它，缺席才回退 formatter 文案正则——文案改动
    *  不应让门禁静默失效（见 2026-08-01 TEAM_DISPATCHED_RE 事故）。 */
   orchestration?: OrchestrationOutcome
+  /** computer_use 执行指标（仅 computer_use 上报）：进 tool-result-trace.jsonl
+   *  与 sensorium LITE 遥测，为性能/可靠性优化提供基线数据。其余工具不设。 */
+  metrics?: ComputerUseActionMetrics
+}
+
+/** computer_use 单动作执行指标（W2 遥测，2026-08-31）。 */
+export interface ComputerUseActionMetrics {
+  action: string
+  /** 目标应用（list_apps/wait/check_permissions 无）。 */
+  app?: string
+  /** 工具内部耗时（不含审批/超时等待）。 */
+  durationMs: number
+  ok: boolean
+  /** 树行数（snapshot/find/wait_for/feedback 采集时）。 */
+  treeLines?: number
+  /** 截图字节数（snapshot，PNG 原始字节）。 */
+  pngBytes?: number
+  /** 走树触顶截断（partial view）。 */
+  truncated?: boolean
+  /** stale ref 自动修复成功。 */
+  healed?: boolean
 }
 
 export interface Tool {

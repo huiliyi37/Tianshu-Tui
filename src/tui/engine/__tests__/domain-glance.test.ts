@@ -60,17 +60,17 @@ test('turnComplete 后保留 /domain 设定的星域（不清回默认）', asyn
   assert.ok(plain.includes('天权'), `session domain persists: ${plain.slice(0, 200)}`)
 })
 
-test('委派期间显示天机，turn 结束恢复会话星域', async () => {
+test('委派期间会话星域保持不变（天机是编排阶段标记，不上主面板）', async () => {
   const { app, out } = makeApp()
   app.start()
   app.setSessionStarDomain('天权')
-  app.callbacks.onToolUse('d1', 'delegate_task', { objective: 'explore' })
-  assert.ok(glanceFromOutput(out).includes('天机'))
-
   out.chunks.length = 0
+  app.callbacks.onToolUse('d1', 'delegate_task', { objective: 'explore' })
+  const plain = glanceFromOutput(out)
+  assert.ok(plain.includes('天权'), `session domain must persist during delegation: ${plain.slice(0, 200)}`)
+  assert.ok(!plain.includes('天机'), 'no tianji override on the main panel')
+
   app.callbacks.onTurnComplete({ input_tokens: 10, output_tokens: 5 }, 1, true)
   await new Promise(r => setTimeout(r, 20))
-  const plain = glanceFromOutput(out)
-  assert.ok(plain.includes('天权'), `restored to 天权: ${plain}`)
-  assert.ok(!plain.includes('天机'), 'delegation override cleared')
+  assert.ok(glanceFromOutput(out).includes('天权'), 'still 天权 after turn completes')
 })

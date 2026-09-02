@@ -19,6 +19,8 @@ import { writeFileAtomicSync } from '../fs-atomic.js'
 interface TrustStore {
   /** realpath(项目目录) → 授信时间（ISO 字符串）。 */
   trusted: Record<string, string>
+  /** realpath(项目目录) → 关闭启动授信提示的时间（ISO 字符串）。 */
+  dismissed: Record<string, string>
 }
 
 const ENV_OVERRIDE = 'RIVET_TRUST_PROJECT'
@@ -38,13 +40,16 @@ function canonicalProjectDir(cwd: string): string {
 function readTrustStore(): TrustStore {
   try {
     const raw = JSON.parse(readFileSync(trustStorePath(), 'utf-8')) as Partial<TrustStore>
-    if (raw && typeof raw === 'object' && raw.trusted && typeof raw.trusted === 'object') {
-      return { trusted: raw.trusted }
+    if (raw && typeof raw === 'object') {
+      return {
+        trusted: raw.trusted && typeof raw.trusted === 'object' ? raw.trusted : {},
+        dismissed: raw.dismissed && typeof raw.dismissed === 'object' ? raw.dismissed : {},
+      }
     }
   } catch {
     // 缺失/坏文件按未授信处理——fail-closed
   }
-  return { trusted: {} }
+  return { trusted: {}, dismissed: {} }
 }
 
 function writeTrustStore(store: TrustStore): void {
@@ -61,11 +66,16 @@ export function isProjectTrusted(cwd: string): boolean {
   return Object.prototype.hasOwnProperty.call(readTrustStore().trusted, canonicalProjectDir(cwd))
 }
 
-/** 授信当前项目（幂等）。 */
+/** 授信当前项目（幂等；同时清除"不再提示"标记——重新授信即重新参与启动提示语义）。 */
 export function trustProject(cwd: string): void {
   const key = canonicalProjectDir(cwd)
   const store = readTrustStore()
-  if (Object.prototype.hasOwnProperty.call(store.trusted, key)) return
+  const hadDismissed = Object.prototype.hasOwnProperty.call(store.dismissed, key)
+  if (hadDismissed) delete store.dismissed[key]
+  if (Object.prototype.hasOwnProperty.call(store.trusted, key)) {
+    if (hadDismissed) writeTrustStore(store)
+    return
+  }
   store.trusted[key] = new Date().toISOString()
   writeTrustStore(store)
 }
@@ -79,21 +89,43 @@ export function untrustProject(cwd: string): void {
   writeTrustStore(store)
 }
 
+/** 关闭当前项目的启动授信提示（幂等）。不授信——安全键仍被剥离。 */
+export function dismissProjectTrustPrompt(cwd: string): void {
+  const key = canonicalProjectDir(cwd)
+  const store = readTrustStore()
+  if (Object.prototype.hasOwnProperty.call(store.dismissed, key)) return
+  store.dismissed[key] = new Date().toISOString()
+  writeTrustStore(store)
+}
+
+/** 当前项目是否已关闭启动授信提示。 */
+export function isTrustPromptDismissed(cwd: string): boolean {
+  return Object.prototype.hasOwnProperty.call(readTrustStore().dismissed, canonicalProjectDir(cwd))
+}
+
 /** 列出已授信项目（realpath 数组，调试/命令面板用）。 */
 export function listTrustedProjects(): string[] {
   return Object.keys(readTrustStore().trusted)
 }
 
+/** 列出已授信项目及授信时间（realpath → ISO；桌面端总览/管理 UI 用）。 */
+export function listTrustedProjectEntries(): Array<{ path: string; trustedAt: string }> {
+  return Object.entries(readTrustStore().trusted).map(([path, trustedAt]) => ({ path, trustedAt }))
+}
+
 /** 单次进程内提示去重——hooks 每事件读取、config 可能 HMR 重载，避免刷屏。 */
 const noticed = new Set<string>()
-export function notifyUntrustedOnce(kind: 'hooks' | 'config', projectDir: string): void {
+export function notifyUntrustedOnce(kind: 'hooks' | 'config', projectDir: string, strippedKeys?: string[]): void {
   const key = `${kind}:${projectDir}`
   if (noticed.has(key)) return
   noticed.add(key)
   const how = `TUI 执行 /trust 授信（或启动加 --trust / 设 RIVET_TRUST_PROJECT=1）`
+  const keyList = strippedKeys && strippedKeys.length > 0
+    ? strippedKeys.join('/')
+    : 'permissions/mcp/hooks/providers/env/plugins/mirrors/ui.statusLine/agent.approval 等'
   const what = kind === 'hooks'
     ? `检测到项目 hooks（${join(projectDir, '.rivet', 'hooks.json')}），项目未授信，已跳过执行`
-    : `检测到项目配置（${join(projectDir, '.rivet-config.json')}），项目未授信，其中安全敏感键（permissions/mcp/hooks/providers/env/plugins/mirrors/ui.statusLine/agent.approval 等）已忽略`
+    : `检测到项目配置（${join(projectDir, '.rivet-config.json')}），项目未授信，其中安全敏感键（${keyList}）已忽略`
   console.error(`[rivet] ${what}——${how}。信任决策存于 ${trustStorePath()}，绝不写回仓库。`)
 }
 
@@ -137,4 +169,44 @@ export function stripUntrustedProjectKeys(raw: Record<string, unknown>): Record<
     }
   }
   return out
+}
+
+/** 列出项目层配置中实际存在、未授信时会被剥离的敏感键（嵌套键报点路径）。 */
+export function findSensitiveProjectKeys(raw: Record<string, unknown>): string[] {
+  const found: string[] = []
+  for (const key of Object.keys(raw)) {
+    if (UNTRUSTED_TOP_LEVEL_KEYS.has(key)) found.push(key)
+  }
+  for (const [parent, child] of UNTRUSTED_NESTED_KEYS) {
+    const node = raw[parent]
+    if (node && typeof node === 'object' && !Array.isArray(node)
+      && Object.prototype.hasOwnProperty.call(node, child)) {
+      found.push(`${parent}.${child}`)
+    }
+  }
+  return found
+}
+
+export interface ProjectTrustStakes {
+  /** 项目配置中实际会被剥离的敏感键（点路径）。 */
+  sensitiveKeys: string[]
+  /** 是否存在项目级 hooks（.rivet/hooks.json）。 */
+  hasHooks: boolean
+}
+
+/**
+ * 启动授信提示的赌注检测：项目里有没有"未授信就会失效"的东西。
+ * 配置文件读失败/无敏感键且无 hooks → 无赌注，不该打扰用户。
+ */
+export function detectProjectTrustStakes(cwd: string): ProjectTrustStakes {
+  let sensitiveKeys: string[] = []
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(cwd, PROJECT_CONFIG_FILE_NAME), 'utf-8'))
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      sensitiveKeys = findSensitiveProjectKeys(raw as Record<string, unknown>)
+    }
+  } catch {
+    // 配置文件缺失/坏 JSON → 无配置侧赌注
+  }
+  return { sensitiveKeys, hasHooks: existsSync(join(cwd, '.rivet', 'hooks.json')) }
 }

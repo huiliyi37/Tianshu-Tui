@@ -26,6 +26,7 @@ export const HELP_TEXT = `Available commands:
 /tasks — 子代理任务面板（查看运行中/已完成，切入 f / 停止 x）
 /enter <orderId> [prompt] — 恢复一个子代理会话继续跑
 /team-resume [groupId] — Resume team execution from wave checkpoint
+/config — 子代理模型路由：审查/侦察席可配其他供应商模型（如 DeepSeek Flash 省钱）
 
 ▌▌ 计划与目标 ▌▌
 

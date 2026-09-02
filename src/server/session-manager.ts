@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto'
 import { debugLog } from '../utils/debug.js'
 import { collectPostBoundaryEditIds } from '../agent/file-history.js'
 import { loadConfig } from '../config/manager.js'
+import { applySandboxPolicyForApprovalMode } from '../tools/sandbox-profile.js'
 import type { DelegationActivity, Tool } from '../tools/types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
@@ -55,6 +56,7 @@ import { containsRegisteredFrame } from '../tui/frame-codec.js'
 import { buildHandoffPrompt } from '../tui/handoff.js'
 import { handoffRecoveries } from '../agent/recovery-journal.js'
 import { getSessionDir } from '../agent/session-persist.js'
+import { parseSessionPerformanceAsync } from '../cache/session-performance.js'
 import { WatchdogRecoveryPolicy } from '../agent/watchdog-recovery-policy.js'
 import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domain-picker-entries.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
@@ -64,7 +66,7 @@ import { skillRegistry, loadProjectSkills, listInstallableSkills, importSkillsIn
 import type { MissionStore } from './mission-store.js'
 import { join, resolve, dirname } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { existsSync, copyFileSync, statSync, mkdirSync } from 'node:fs'
+import { existsSync, copyFileSync, statSync, mkdirSync, readFileSync } from 'node:fs'
 import { createWorktree, removeWorktree, listWorktrees, hasUnlandedWork, commitAll, revParseHead, squashMergeBranch, pushBranch, type WorktreeEntry } from '../agent/worktree.js'
 import { createPr } from './gh-cli.js'
 import { getGitGraph, getWorkingTreeFiles, getFileDiff, getFileAtBase } from '../tools/git.js'
@@ -72,6 +74,7 @@ import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
 import { parseAskUserQuestions } from '../tools/ask-user-question.js'
 import { grantApp as grantComputerUseApp } from '../tools/computer-use/app-grants.js'
+import { loadComputerUseImpl } from '../tools/computer-use/bridge.js'
 import { outOfWorkspaceFilePaths } from '../agent/tool-pipeline.js'
 import {
   DELEGATE_CAPABILITY_TTL_MS,
@@ -3000,6 +3003,12 @@ export class RuntimeSessionManager {
     session.approvalMode = mode
     session.record.approvalMode = mode
     try { session.agent?.setApprovalMode?.(mode) } catch { /* non-fatal */ }
+    // 沙箱联动与 bootstrap 同一口径（applySandboxPolicyForApprovalMode：显式
+    // RIVET_SANDBOX 恒优先、幂等）：sidecar 以默认档启动、会话中途切到自治/
+    // 项目外只读时，内核写边界此刻才补上——否则整进程生命周期都无边界，mac/linux
+    // 上「沙箱 + 回滚兜底」的承诺落空。切回低档不撤销（fail-safe 方向，与
+    // bootstrap 的显式值优先语义一致）。
+    try { applySandboxPolicyForApprovalMode(mode) } catch { /* non-fatal */ }
     this.touch(session)
     this.persistRecord(session)
     return true
@@ -4281,6 +4290,49 @@ export class RuntimeSessionManager {
    * Returns the mount status, or undefined if the session/agent lacks enableTool
    * (lightweight doubles). No-op if gating is off (tool already visible).
    */
+  /**
+   * W4-15：@Computer 挂载后的后台系统权限探测。缺失「辅助功能 / 屏幕录制」
+   * 时经 steer 通道注入指引（下一 turn 边界送达模型，由模型转达用户）——
+   * 不再等截图/点击失败才发现。fire-and-forget：绝不阻塞 run，任何失败静默。
+   */
+  probeComputerUsePermissions(id: string): void {
+    void (async () => {
+      try {
+        const impl = await loadComputerUseImpl()
+        if (!impl) return
+        const perm = await impl.createPlatformDriver().checkPermissions()
+        if (perm.accessibility && perm.screenRecording) return
+        const missing = [
+          ...(perm.accessibility ? [] : ['辅助功能 (Accessibility)']),
+          ...(perm.screenRecording ? [] : ['屏幕录制 (Screen Recording)']),
+        ]
+        this.steer(
+          id,
+          `[系统提示] 当前缺少系统权限：${missing.join('、')}。computer_use 的截图/点击会失败或拿不到画面——请告知用户到 系统设置 → 隐私与安全性 授权后重启应用再试（详见 设置 → 集成 → 计算机控制）。`,
+        )
+      } catch { /* 权限探测是 best-effort——绝不影响 run */ }
+    })()
+  }
+
+  /**
+   * W-stats：单会话性能视图——直读 `<sid>/cache-log.jsonl`（解析/聚合在
+   * cache/session-performance.ts 纯模块）。轮尾注回放补数据与 Insights
+   * 会话下钻共用。读不到日志返回 undefined（路由层转 404）。
+   * 异步读 + 分片解析（2026-09-01 审查）：数 MB 日志不再把请求线程上的
+   * SSE/REST 饿死。
+   */
+  async getPerformance(id: string) {
+    const record = this.getSession(id)
+    if (!record) return undefined
+    let content = ''
+    try {
+      content = await readFile(join(getSessionDir(record.cwd), record.id, 'cache-log.jsonl'), 'utf8')
+    } catch {
+      return undefined
+    }
+    return { sessionId: record.id, cwd: record.cwd, ...await parseSessionPerformanceAsync(content) }
+  }
+
   async enableTool(id: string, name: string): Promise<{ status: string; cacheImpact: string } | undefined> {
     const session = this.sessions.get(id)
     if (!session) return undefined
@@ -4993,10 +5045,17 @@ export class RuntimeSessionManager {
         }
         this.scanArtifacts(session)
       },
-      onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
+      onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary, metrics) => {
         if (!isActive()) return
         session.watchdogPolicy?.recordTurnComplete()
-        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) })
+        this.append(session, 'turn_complete', {
+          usage,
+          turnNumber,
+          isFinal: !!isFinal,
+          ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}),
+          // W-stats：最近一次模型请求的首字/输出速度（桌面 StatsLine 展示）。
+          ...(metrics ? { ttftMs: metrics.ttftMs, tokensPerSecond: metrics.tokensPerSecond, outputTokens: metrics.outputTokens } : {}),
+        })
       },
       onError: (err) => {
         if (!isActive()) return
@@ -5018,6 +5077,14 @@ export class RuntimeSessionManager {
         if (!isActive()) return
         session.record.currentPhase = phase
         this.append(session, 'phase', { phase, ...detail })
+      },
+      onZenPhaseChange: (phase, reason, stats) => {
+        if (!isActive()) return
+        this.append(session, 'zen_phase', {
+          phase,
+          ...(reason ? { reason } : {}),
+          ...(stats ? { armed: stats.armed, zenTurns: stats.zenTurns } : {}),
+        })
       },
       // R5 — structured course-correction → its own event so the desktop can
       // render a "改道" card inline (selective externalization of star-domain).

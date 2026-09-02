@@ -72,9 +72,9 @@ export class OverlayController {
   private rewindExec?: (messageIndex: number, mode: RewindMode) => void
   private chronicleExec?: (id: string) => void
   private domainPickerExec?: (key: string) => void
-  private modelPickerExec?: (provider: string, modelId: string) => void
+  private modelPickerExec?: (provider: string, modelId: string, effort?: string) => void
   private domainPickerSaveDefaultExec?: (key: string) => void
-  private modelPickerSaveDefaultExec?: (provider: string, modelId: string) => void
+  private modelPickerSaveDefaultExec?: (provider: string, modelId: string, effort?: string) => void
   private themePickerExec?: (key: string) => void
   private themePickerSaveDefaultExec?: (key: string) => void
   private choicePanelExec?: (id: string) => void
@@ -150,12 +150,12 @@ export class OverlayController {
   setChronicleExec(fn: ((id: string) => void) | undefined): void { this.chronicleExec = fn }
   getDomainPickerExec(): ((key: string) => void) | undefined { return this.domainPickerExec }
   setDomainPickerExec(fn: ((key: string) => void) | undefined): void { this.domainPickerExec = fn }
-  getModelPickerExec(): ((provider: string, modelId: string) => void) | undefined { return this.modelPickerExec }
-  setModelPickerExec(fn: ((provider: string, modelId: string) => void) | undefined): void { this.modelPickerExec = fn }
+  getModelPickerExec(): ((provider: string, modelId: string, effort?: string) => void) | undefined { return this.modelPickerExec }
+  setModelPickerExec(fn: ((provider: string, modelId: string, effort?: string) => void) | undefined): void { this.modelPickerExec = fn }
   getDomainPickerSaveDefaultExec(): ((key: string) => void) | undefined { return this.domainPickerSaveDefaultExec }
   setDomainPickerSaveDefaultExec(fn: ((key: string) => void) | undefined): void { this.domainPickerSaveDefaultExec = fn }
-  getModelPickerSaveDefaultExec(): ((provider: string, modelId: string) => void) | undefined { return this.modelPickerSaveDefaultExec }
-  setModelPickerSaveDefaultExec(fn: ((provider: string, modelId: string) => void) | undefined): void { this.modelPickerSaveDefaultExec = fn }
+  getModelPickerSaveDefaultExec(): ((provider: string, modelId: string, effort?: string) => void) | undefined { return this.modelPickerSaveDefaultExec }
+  setModelPickerSaveDefaultExec(fn: ((provider: string, modelId: string, effort?: string) => void) | undefined): void { this.modelPickerSaveDefaultExec = fn }
   getThemePickerExec(): ((key: string) => void) | undefined { return this.themePickerExec }
   setThemePickerExec(fn: ((key: string) => void) | undefined): void { this.themePickerExec = fn }
   getThemePickerSaveDefaultExec(): ((key: string) => void) | undefined { return this.themePickerSaveDefaultExec }

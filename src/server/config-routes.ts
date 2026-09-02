@@ -19,6 +19,7 @@
  *   PUT    /config/permission-dirs          set standing directory grants; additions apply immediately
  *   GET    /config/path-grants              approval-time remembered dirs for a workspace (?cwd=)
  *   DELETE /config/path-grants              revoke one remembered dir (?cwd=&path=); effective immediately
+ *   （project-trust 四端点见 config-routes-project-trust.ts——子模块外提）
  *   GET    /config/vision-model             vision bridge model (provider/model/prompt/maxTokens/fallback)
  *   PUT    /config/vision-model             set/clear the vision bridge
  *   GET    /config/vision-auto-bridge       auto-pick a vision bridge when unconfigured (opt-in)
@@ -94,10 +95,11 @@ import { discoverVisionModels, validateVisionModel } from '../api/vision-model-o
 import { probeProviderKey } from '../api/key-probe.js'
 import { resolveApiKey } from '../api/factory.js'
 import { getDeepSeekUserSummary, getDeepSeekCostReport } from '../api/deepseek-platform-client.js'
-import { listGrantedApps, revokeApp } from '../tools/computer-use/app-grants.js'
+import { listGrantedApps, revokeApp, isGrantsFileCorrupted } from '../tools/computer-use/app-grants.js'
 import { computerUseModulePresent, isComputerUseSupportedPlatform, loadComputerUseImpl } from '../tools/computer-use/bridge.js'
 import { isProFeatureEnabled } from '../config/pro-license.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
+import { buildProjectTrustRoutes } from './config-routes-project-trust.js'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -161,6 +163,8 @@ export interface ProviderListItem {
 
 export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandler> {
   return {
+    // project-trust 授权路由子模块（见 config-routes-project-trust.ts）
+    ...buildProjectTrustRoutes(apiToken),
     'GET /config/providers': withAuth(() => {
       const cfg = loadConfig()
       const defaultName = cfg.provider.default
@@ -651,7 +655,14 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
         return { status: 400, body: { error: 'approval is required' } }
       }
       try {
-        return { status: 200, body: { ok: true, ...setApprovalConfig({ approval, unsandboxed }) } }
+        const snapshot = setApprovalConfig({ approval, unsandboxed })
+        // 活体沙箱联动（与 bootstrap 的 config→env 同语义，立即生效不用重启）：
+        // unsandboxed 显式 true → RIVET_SANDBOX=0 关内核边界；显式 false → 撤掉
+        // 显式值回退到按档策略（applySandboxPolicyForApprovalMode 在切 yolo 时
+        // 重新置 1）。undefined = 不动该维度。
+        if (unsandboxed === true) process.env.RIVET_SANDBOX = '0'
+        else if (unsandboxed === false) delete process.env.RIVET_SANDBOX
+        return { status: 200, body: { ok: true, ...snapshot } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }
@@ -763,15 +774,17 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       const proRequired = platformOk && !proEnabled
       const available = platformOk && proEnabled
       const grants = listGrantedApps().map(g => ({ app: g.app, grantedAt: g.grantedAt }))
+      // 授权文件曾损坏（读取 fail-closed 当空表）——UI 据此提示「始终允许」可能丢失。
+      const grantsFileCorrupted = isGrantsFileCorrupted()
       if (!available) {
-        return { status: 200, body: { available: false, proRequired, platform: process.platform, permissions: null, grants } }
+        return { status: 200, body: { available: false, proRequired, platform: process.platform, permissions: null, grants, grantsFileCorrupted } }
       }
       let permissions: { accessibility: boolean; screenRecording: boolean; detail: string } | null = null
       try {
         const impl = await loadComputerUseImpl()
         if (impl) permissions = await impl.createPlatformDriver().checkPermissions()
       } catch { /* probe failure → permissions unknown, UI shows a hint */ }
-      return { status: 200, body: { available: true, proRequired: false, platform: process.platform, permissions, grants } }
+      return { status: 200, body: { available: true, proRequired: false, platform: process.platform, permissions, grants, grantsFileCorrupted } }
     }, apiToken),
 
     // Codex-style standing directory grants for the desktop settings UI.

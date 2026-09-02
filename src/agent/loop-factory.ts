@@ -171,6 +171,15 @@ export function createTurnStreamController(self: AgentLoop): TurnStreamControlle
             .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
         }).catch(() => {})
       },
+      onTurnMetrics: (m) => {
+        self.lastTurnMetrics = m
+        // cockpit 平均输出速度累计：tps 已知时计解码段时长
+        if (m.tokensPerSecond !== undefined && m.tokensPerSecond > 0) {
+          self.decodeTokensSum += m.outputTokens
+          // 优先用未舍入的精确解码时长——tokensPerSecond 已按 0.1 舍入，反推有偏差。
+          self.decodeMsSum += m.decodeMs ?? (m.outputTokens / m.tokensPerSecond) * 1000
+        }
+      },
       recordTurnCache: (turn, usage, streamObservability) => {
         self.session.recordTurnCache(turn, usage)
         const hitRateNum = usage.input_tokens > 0
@@ -327,6 +336,7 @@ export function createTurnCompletionController(self: AgentLoop, callbacks?: Agen
         try { self.config.meridianIndexer?.getDb()?.saveBanditState(kind, json) } catch { /* append-only evidence — never disrupt turn */ }
       },
       getDoomLoopLevel: () => self.getDoomLoopLevel(),
+      getTurnMetrics: () => self.lastTurnMetrics ?? undefined,
     })
 }
 export function createToolExecutionController(self: AgentLoop): ToolExecutionController {
@@ -334,6 +344,7 @@ export function createToolExecutionController(self: AgentLoop): ToolExecutionCon
       config: self.config,
       cwd: self.cwd,
       harness: self.harness,
+      telemetryWriter: self.telemetryWriter,
       prewarm: self.prewarm,
       evidence: self.evidence,
       obligations: self.obligations,
@@ -350,6 +361,12 @@ export function createToolExecutionController(self: AgentLoop): ToolExecutionCon
       getDoomLoopLevel: () => self.getDoomLoopLevel(),
       isGoalActive: () => self.isGoalActive(),
       getPhaseHint: () => self.config.promptEngine.getPhaseHint(),
+      // Zen 解锁点：分派前上报面外工具名——loop 侧判定面外 → 晋升 full + 放行。
+      onZenEscape: name => self.onZenEscape(name),
+      // Zen 解锁声明（zen_unlock 虚拟工具被调用）：直接晋升 full（reason=tool）。
+      onZenUnlock: () => self.promoteZen('tool'),
+      // Zen 相位下未注册工具报错的可行动指引（幻觉调用不晋升）。
+      getZenUnregisteredHint: name => self.getZenUnregisteredHint(name),
       getSessionTurnCount: () => self.session.getTurnCount(),
       getSessionId: () => self.config.sessionId,
       addToolResults: results => { self.session.addToolResults(results) },
@@ -851,6 +868,42 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         .map(m => m.content as string)
         .join('\n'),
     } : undefined,
+    // 记忆形成侧：重要操作后模型判断 + 写入 LTM。复用 essence-gate 的廉价
+    // LLM 通道（side-path 记账）与 session id。无 client 时不装配（fail-closed）。
+    autoCapture: (() => {
+      const captureClient = self.config.compactClient ?? self.config.primaryClient ?? self.config.client
+      // worker 子会话不写主项目 LTM（隔离边界，防 worker 观察污染）。
+      const isWorker = self.config.sessionId?.startsWith('worker-') ?? false
+      if (!captureClient || !self.config.sessionId || isWorker) return undefined
+      const recordSidePath = createSidePathUsageRecorder(self)
+      return {
+        cwd: self.cwd,
+        sessionId: self.config.sessionId,
+        complete: async (prompt: string, timeoutMs: number) => {
+          return runGateCompletion(captureClient, recordSidePath, prompt, timeoutMs)
+        },
+      }
+    })(),
+    // 会话结束巩固：复用 essence-gate 廉价 LLM 通道，生成摘要 + procedure 写 LTM。
+    sessionConsolidation: (() => {
+      const consolidateClient = self.config.compactClient ?? self.config.primaryClient ?? self.config.client
+      // worker 子会话不做会话级巩固（隔离边界）。
+      const isWorker = self.config.sessionId?.startsWith('worker-') ?? false
+      if (!consolidateClient || !self.config.sessionId || isWorker) return undefined
+      const recordSidePath = createSidePathUsageRecorder(self)
+      return {
+        cwd: self.cwd,
+        sessionId: self.config.sessionId,
+        getTranscript: () => self.session.getMessages()
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => typeof m.content === 'string' ? m.content : '')
+          .join('\n'),
+        getObjective: () => self.taskContract?.objective ?? self.initialUserMessage ?? null,
+        complete: async (prompt: string, timeoutMs: number) => {
+          return runGateCompletion(consolidateClient, recordSidePath, prompt, timeoutMs)
+        },
+      }
+    })(),
     userHooksBridge: userBridgeDeps,
     advisoryBus: self.advisoryBus,
     getJobs: () => self.jobs,

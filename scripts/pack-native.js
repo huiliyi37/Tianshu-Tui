@@ -12,7 +12,7 @@
  * ── 构建期 ABI 断言（防「静默丢持久化」）────────────────────────────────
  * dist/native/ 的二进制 **只被桌面 sidecar 加载**（npm 发布的 CLI 把 dist/native
  * 排除在 files 外，靠用户安装时 npm rebuild 自己的 better-sqlite3）。桌面 sidecar
- * 跑的是 fetch-node-runtime.js 打包进去的固定 Node（默认 24.1.0 → ABI 137），
+ * 跑的是 fetch-node-runtime.js 打包进去的固定 Node（默认 24.18.0 → ABI 137），
  * **不是**构建机的 Node。若构建机在 Node 24（ABI 137）下打包，二进制 ABI 与运行时
  * 不匹配 → 加载失败 → 退化成 nullDb → 跨会话知识/claims/registry 全部静默失能。
  *
@@ -39,7 +39,7 @@ const TARGET = join(TARGET_DIR, 'better_sqlite3.node')
 // 目标运行时版本与 desktop/scripts/fetch-node-runtime.js 单一同源：直接 import 其
 // DEFAULT_NODE_VERSION，杜绝两处常量漂移（漂移会让本断言失去意义）。import 失败
 // （脚本被移动/单独取用）时退回硬编码兜底，并打一行提示。
-let DEFAULT_TARGET_NODE_VERSION = '24.1.0'
+let DEFAULT_TARGET_NODE_VERSION = '24.18.0'
 try {
   const mod = await import('../desktop/scripts/fetch-node-runtime.js')
   if (mod && typeof mod.DEFAULT_NODE_VERSION === 'string') {

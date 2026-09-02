@@ -43,11 +43,19 @@ describe('sandbox-profile: defaultWritableRoots', () => {
   })
   it('includes package caches under HOME', () => {
     const roots = defaultWritableRoots({ cwd: '/w', env: { HOME: '/home/u' } })
-    assert.ok(roots.includes('/home/u/.npm'))
-    assert.ok(roots.includes('/home/u/.cargo'))
+    // Production joins HOME-relative cache roots with the HOST path module, so
+    // the expected spelling follows the host too (backslashes on win32).
+    assert.ok(roots.includes(join('/home/u', '.npm')))
+    assert.ok(roots.includes(join('/home/u', '.cargo')))
   })
   it('honors RIVET_SANDBOX_WRITABLE extra roots', () => {
-    const roots = defaultWritableRoots({ cwd: '/w', env: { HOME: '/home/u', RIVET_SANDBOX_WRITABLE: '/data:/scratch' } })
+    // Posix delimiter contract — pinned via the injected platform knob (the
+    // win32 ';' contract has its own test below).
+    const roots = defaultWritableRoots({
+      cwd: '/w',
+      platform: 'linux',
+      env: { HOME: '/home/u', RIVET_SANDBOX_WRITABLE: '/data:/scratch' },
+    })
     assert.ok(roots.includes('/data'))
     assert.ok(roots.includes('/scratch'))
   })

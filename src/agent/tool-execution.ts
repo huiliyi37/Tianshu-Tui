@@ -28,6 +28,7 @@ import type { ImmuneHook } from './immune-hook.js'
 import type { LspManager } from '../lsp/manager.js'
 import { classifyFailure, isReadProbeInvocation, isTestRunInvocation, type FailureClass } from './failure-classifier.js'
 import { ToolAccumulator } from './tool-accumulator.js'
+import { ZEN_UNLOCK, ZEN_UNLOCK_RESULT, ZEN_UNLOCK_NOT_ZEN } from './zen-mode.js'
 import { guardLossyToolResult } from './negative-fact-detector.js'
 import { getToolStormLevel, type ToolStormLevel } from './trace-store.js'
 import { extractTrailingArtifactId, tierToolResult } from './tool-result-tiering.js'
@@ -48,6 +49,8 @@ export interface ToolExecutionDeps {
   config: AgentConfig
   cwd: string
   harness: TurnHarness
+  /** sensorium LITE 遥测出口（computer_use 动作指标默认落盘）。可缺省（测试）。 */
+  telemetryWriter?: import('./telemetry-writer.js').TelemetryWriter
   prewarm: PrewarmCache
   evidence: EvidenceTracker
   /** 证据义务状态机——tool pipeline 把 probe/失败/RED 编辑门接进义务状态。 */
@@ -155,6 +158,15 @@ export interface ToolExecutionDeps {
   onTddBlocked?: (target?: string) => void
   /** 遥测写入(缺口 B 输出裁剪计数等)。 */
   writeTelemetry?: (record: { kind: string } & Record<string, unknown>) => void
+  /** Zen 解锁点：分派前逐个上报 tool_use 名——zen 相位下面外调用由 loop 侧
+   *  晋升 full 并放行。依赖注入（未注入或 zen 禁用时恒放行）。 */
+  onZenEscape?: (toolName: string) => void
+  /** Zen 解锁声明（zen_unlock）：虚拟工具被调用时触发——loop 侧 promote('tool')。
+   *  与 onZenEscape 互斥触发（zen_unlock 不走面外上报）。 */
+  onZenUnlock?: (toolUseId: string) => boolean | void
+  /** Zen 相位下未注册工具报错的行动指引：返回非空文本时附加到 registry
+   *  Unknown tool 报错后面（幻觉调用不晋升，但给模型 zen_unlock 出路）。 */
+  getZenUnregisteredHint?: (toolName: string) => string | undefined
   beginToolBatchObservability?: (outputMeasured: boolean) => void
   recordSanitizedOutput?: (rawContent: string, sanitizedContent: string, filterId?: string) => void
   recordToolUiEvent?: () => void
@@ -250,6 +262,7 @@ export class ToolExecutionController {
       config: this.deps.config,
       cwd: this.deps.cwd,
       harness: this.deps.harness,
+      telemetryWriter: this.deps.telemetryWriter,
       prewarm: this.deps.prewarm,
       evidence: this.deps.evidence,
       obligations: this.deps.obligations,
@@ -308,6 +321,7 @@ export class ToolExecutionController {
       destructiveGate: this.deps.destructiveGate,
       onGateBlocked: this.deps.onGateBlocked,
       onTddBlocked: this.deps.onTddBlocked,
+      getZenUnregisteredHint: this.deps.getZenUnregisteredHint,
     }
   }
 
@@ -340,6 +354,24 @@ export class ToolExecutionController {
     // 结构化失败分类侧信道：wire 块（tool_result）不携带 errorKind，
     // 按 tool_use_id 记录，postTool hook 的 vigor failureClass 优先消费。
     const errorKindByToolUse = new Map<string, FailureClass>()
+
+    // Zen 解锁点：分派循环前，逐个上报 tool_use——zen 相位下面外调用触发
+    // 晋升 full 后照常执行（放行语义）。promote 是同步状态翻转 + updateTools，
+    // 不阻断本批工具执行；onZenEscape 未注入或 zen 禁用时恒放行。
+    // zen_unlock 是虚拟工具（不在 registry）：收集其 id 供分派时拦截，触发
+    // onZenUnlock（晋升）而非面外上报。
+    const unlockIds = new Set<string>()
+    // 记录真正发生晋升的 id——full 相位幻觉调用 zen_unlock 时 promote 返回
+    // false，结果文案须区分（否则对模型谎报「禅模式已解除」）。
+    const unlockedToFull = new Set<string>()
+    for (const tu of input.toolUses) {
+      if (tu.name === ZEN_UNLOCK) {
+        unlockIds.add(tu.id)
+        if (this.deps.onZenUnlock?.(tu.id) !== false) unlockedToFull.add(tu.id)
+      } else {
+        this.deps.onZenEscape?.(tu.name)
+      }
+    }
 
     // Partition tools into concurrency-safe (parallelizable) and sequential groups.
     // Run contiguous blocks of safe tools in parallel for latency savings.
@@ -379,6 +411,17 @@ export class ToolExecutionController {
         // Sequential execution for non-safe tools
         const { tu } = indexed[cursor]!
         cursor++
+
+        // zen_unlock：虚拟解锁声明工具——不经过 executeToolUse（registry 无此工具），
+        // 直接构造成功结果（解锁已在分派前经 onZenUnlock 完成），并走与正常执行
+        // 一致的 onToolResult 回调（UI/遥测消费方可见解锁确认）。
+        if (unlockIds.has(tu.id)) {
+          const unlockMsg = unlockedToFull.has(tu.id) ? ZEN_UNLOCK_RESULT : ZEN_UNLOCK_NOT_ZEN
+          const unlockBlock: ContentBlock = { type: 'tool_result', tool_use_id: tu.id, content: unlockMsg }
+          toolResults.push(unlockBlock)
+          callbacks.onToolResult(tu.id, tu.name, unlockMsg)
+          continue
+        }
 
         const result = await executeToolUse(
           tu,
@@ -621,6 +664,12 @@ export class ToolExecutionController {
     // flood the context with megapixel base64.
     if (pendingImages.length > 0) {
       const images = pendingImages.slice(-2)
+      // W4-16 截尾信号：被丢弃的截图此前无任何痕迹——agent「截了图却看不见」
+      // 对模型与用户都不可解释。送达数 < 采集数时在注入文案里明示。
+      const droppedCount = pendingImages.length - images.length
+      const dropNote = droppedCount > 0
+        ? ` ${droppedCount} earlier screenshot(s) in this batch were dropped (only the 2 most recent are delivered).`
+        : ''
       // 寄存进会话 registry，这样 ask_image 能就**agent 自己截的图**追问，而不是只能
       // 问用户手动附的图。少了这一步，「截图 → 逐字念出报错那一行」在浏览器验证闭环
       // 里就断了（工具描述承诺可以问"本会话已发送的图片"，registry 里却没有它）。
@@ -632,7 +681,7 @@ export class ToolExecutionController {
       if (this.deps.getSupportsVision?.() === true && this.deps.addUserMessageWithImages) {
         this.deps.addUserMessageWithImages(
           '<system-reminder>Screenshot(s) from the tool call(s) above are attached. Use them to visually confirm UI state alongside any accessibility tree or DOM measurements; do not describe them back to the user unless asked.'
-          + `${askHint}</system-reminder>`,
+          + `${askHint}${dropNote}</system-reminder>`,
           images,
         )
       } else if (this.deps.describeToolImages && !input.abortSignal.aborted) {
@@ -649,12 +698,20 @@ export class ToolExecutionController {
         if (description) {
           this.deps.addUserMessageWithImages?.(
             `<system-reminder>Screenshot(s) from the tool call(s) above, described by the configured vision model:\n${description}`
-            + `${askHint}</system-reminder>`,
+            + `${askHint}${dropNote}</system-reminder>`,
             [],
           )
         }
       }
       // No vision and no bridge: images are dropped, byte-identical to legacy.
+      // W4-16：无视觉通道时的静默丢弃要留痕——在最后一个 tool_result 文本尾部
+      // 追加一行，让「截了图但模型看不见」在对话里可解释（图仍是 artifact 可查）。
+      if (this.deps.getSupportsVision?.() !== true && !this.deps.describeToolImages) {
+        const lastResult = [...toolResults].reverse().find(r => r.type === 'tool_result')
+        if (lastResult && lastResult.type === 'tool_result') {
+          lastResult.content = `${lastResult.content}\n\n[vision] ${pendingImages.length} screenshot(s) from this batch were NOT delivered to the model (no vision channel). They remain viewable as artifacts; use ask_image with a vision model configured to interrogate them.`
+        }
+      }
     }
 
     const level = getInterventionLevel(this.deps.getPredictionAccumulator())

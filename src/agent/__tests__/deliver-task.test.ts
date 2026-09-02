@@ -329,6 +329,20 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.ok(result.content.includes('(none)'))
   })
 
+  it('treats commit with zero owned files as advisory, not fatal (2026-08-31 benchmark quiz crash)', async () => {
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: [],
+      commitOwnedFiles: () => {
+        throw new Error('commit must not be invoked with an empty file list')
+      },
+    })
+
+    const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: nothing' } })
+    assert.equal(result.isError ?? false, false, 'empty commit is advisory — a quiz/review session must not die on deliver_task')
+    assert.match(result.content, /无可提交文件/)
+  })
+
   it('reports failed verification details', async () => {
     const { tool, params } = makeContext({
       taskId: 't1',
@@ -1204,19 +1218,21 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /git commit failed/)
   })
 
-  it('reports commit=true with no owned files as scoped commit failure', async () => {
+  it('reports commit=true with no owned files as advisory, not scoped commit failure (2026-08-31 benchmark quiz crash)', async () => {
     const { tool, params } = makeContext({
       taskId: 't1',
       ownedFiles: [],
       verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
-      commitOwnedFiles: () => ({ ok: false, output: 'No owned files to commit.' }),
+      commitOwnedFiles: () => {
+        throw new Error('commitOwnedFiles must not be called for an empty file list')
+      },
     })
 
     const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: empty' } })
 
-    assert.equal(result.isError, true)
+    assert.equal(result.isError ?? false, false, 'empty commit is advisory — a quiz/review session must not die on deliver_task')
     assert.match(result.content, /Delivery Gate: GREEN/)
-    assert.match(result.content, /No owned files to commit/)
+    assert.match(result.content, /无可提交文件/)
   })
 
   it('does not require approval for status-only delivery report', () => {

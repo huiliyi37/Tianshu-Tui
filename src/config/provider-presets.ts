@@ -1,4 +1,5 @@
 import type { ModelConfig, ProviderConfig } from './schema.js'
+import { isLoopbackBaseUrl } from './local-endpoint.js'
 
 export type ProviderPresetKey = 'deepseek' | 'glm' | 'kimi' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'openai' | 'siliconflow' | 'longcat' | 'ccswitch' | 'zhipu-vision' | 'dashscope' | 'volc' | 'openrouter' | 'relay' | 'ollama'
 
@@ -897,18 +898,17 @@ export function isProviderPresetKey(value: string): value is ProviderPresetKey {
   return Object.prototype.hasOwnProperty.call(PROVIDER_PRESETS, value)
 }
 
-/**
- * keyless 端点判定（单一事实源）：预设声明 keyless（ollama），或自定义 provider
- * 未配任何密钥材料（apiKey/keyRef/apiKeyEnv 皆空）——桌面表单 API Key 可选下
- * 有意空着 = keyless 端点。消费方：resolveApiKey（免 key 不抛）、
- * GET /config/providers（keyless 标记下发）、欢迎页模型列表（none 不等于未配）。
- */
+/** keyless 判定（单一事实源）：预设声明 keyless，或自定义 provider 未配密钥材料
+ * 且 baseUrl 指向 loopback。云端 baseUrl 无 key 不算 keyless——忘配 key 必须
+ * fail-closed 而非放行撞 401。消费方：resolveApiKey、config/providers、欢迎页。 */
 export function isKeylessProviderEntry(
   name: string,
-  entry?: { apiKey?: string; keyRef?: string; apiKeyEnv?: string },
+  entry?: { apiKey?: string; keyRef?: string; apiKeyEnv?: string; baseUrl?: string },
 ): boolean {
   if (isProviderPresetKey(name)) return PROVIDER_PRESETS[name].keyless === true
-  return entry !== undefined && !entry.apiKey && !entry.keyRef && !entry.apiKeyEnv
+  if (!entry) return false
+  if (entry.apiKey || entry.keyRef || entry.apiKeyEnv) return false
+  return isLoopbackBaseUrl(entry.baseUrl)
 }
 
 /**

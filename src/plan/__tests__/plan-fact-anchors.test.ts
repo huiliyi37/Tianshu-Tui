@@ -110,4 +110,121 @@ describe('checkPlanFactAnchors', () => {
     assert.match(text, /^- /)
     assert.match(text, /engine\/core\/gone\.ts/)
   })
+
+  it('reports root-mismatch with the actual location when the file lives in a cwd subdirectory', async () => {
+    mkdirSync(join(dir, 'app/ui'), { recursive: true })
+    writeFileSync(join(dir, 'app/ui/panel.ts'), 'export {}\n', 'utf-8')
+    const report = await checkPlanFactAnchors('修改 `ui/panel.ts` 的布局。', dir)
+    assert.equal(report.drifts.length, 1)
+    assert.equal(report.drifts[0]!.kind, 'root-mismatch')
+    assert.match(report.drifts[0]!.detail, /app\/ui\/panel\.ts/)
+  })
+
+  it('reports root-mismatch for parent and sibling roots (cross-project plans)', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'rivet-anchors-reroot-'))
+    const proj = join(base, 'proj')
+    const sib = join(base, 'sib')
+    mkdirSync(proj, { recursive: true })
+    mkdirSync(join(sib, 'engine'), { recursive: true })
+    mkdirSync(join(base, 'docs'), { recursive: true })
+    writeFileSync(join(sib, 'engine/core.ts'), 'export {}\n', 'utf-8')
+    writeFileSync(join(base, 'docs/notes.md'), '# n\n', 'utf-8')
+    try {
+      const report = await checkPlanFactAnchors('修改 `engine/core.ts` 与 `docs/notes.md`。', proj)
+      assert.equal(report.drifts.length, 2)
+      const byPath = new Map(report.drifts.map(d => [d.path, d]))
+      assert.equal(byPath.get('engine/core.ts')!.kind, 'root-mismatch')
+      assert.match(byPath.get('engine/core.ts')!.detail, /\.\.\/sib\/engine\/core\.ts/)
+      assert.equal(byPath.get('docs/notes.md')!.kind, 'root-mismatch')
+      assert.match(byPath.get('docs/notes.md')!.detail, /\.\.\/docs\/notes\.md/)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('does not line-check re-rooted files (existence-only probing)', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'rivet-anchors-noline-'))
+    const proj = join(base, 'proj')
+    const sib = join(base, 'sib')
+    mkdirSync(proj, { recursive: true })
+    mkdirSync(join(sib, 'engine'), { recursive: true })
+    writeFileSync(join(sib, 'engine/core.ts'), '// 1\n// 2\n', 'utf-8')
+    try {
+      const report = await checkPlanFactAnchors('修改 `engine/core.ts:999`。', proj)
+      assert.equal(report.drifts.length, 1)
+      assert.equal(report.drifts[0]!.kind, 'root-mismatch')
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('skips placeholder-shaped example anchors missing at every root', async () => {
+    const report = await checkPlanFactAnchors('幻觉引用如 `src/foo.ts:42`、`src/a.py` 会被自动暴露。', dir)
+    assert.deepEqual(report.drifts, [])
+  })
+
+  it('checks a placeholder-named file normally when it actually exists', async () => {
+    mkdirSync(join(dir, 'src'), { recursive: true })
+    writeFileSync(join(dir, 'src/foo.ts'), '// 1\n// 2\n', 'utf-8')
+    const report = await checkPlanFactAnchors('修改 `src/foo.ts:99`。', dir)
+    assert.equal(report.drifts.length, 1)
+    assert.equal(report.drifts[0]!.kind, 'line-out-of-range')
+  })
+
+  it('does not extract enumeration-glued path tokens', () => {
+    const anchors = extractPlanAnchors('同步 `README.md/README.zh.md/README.i18n.yaml` 三处描述。')
+    assert.deepEqual(anchors, [])
+  })
+
+  it('bounds reroot probing on huge directories (budget cap, fail-open to missing-file)', async () => {
+    // 300 子目录 + 50 个同首段 miss 锚点：换根探测 syscall 总数必须封顶，
+    // 与目录规模解耦——渐进式探测的核心承诺。预算耗尽后剩余锚点 fail-open
+    // 报 missing-file，不崩溃、不卡顿。
+    const base = mkdtempSync(join(tmpdir(), 'rivet-anchors-budget-'))
+    const proj = join(base, 'proj')
+    mkdirSync(proj, { recursive: true })
+    for (let i = 0; i < 300; i++) mkdirSync(join(proj, 'pkg-' + i), { recursive: true })
+    try {
+      const anchors = Array.from({ length: 50 }, (_, i) => `engine/mod${i}.ts`).join('`、`')
+      const report = await checkPlanFactAnchors(`修改 \`${anchors}\`。`, proj)
+      assert.ok(report.rerootProbes !== undefined, 'rerootProbes 统计字段存在')
+      assert.ok(report.rerootProbes <= 128, `reroot probes bounded: ${report.rerootProbes}`)
+      assert.equal(report.drifts.length, 50)
+      assert.ok(report.drifts.every(d => d.kind === 'missing-file'), '预算耗尽降级为 missing-file')
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('shares root first-level enumeration across same-segment anchors', async () => {
+    // 多个同首段锚点共享同一份 root readdir 结果：每个候选根只枚举一次，
+    // 各锚点独立命中（首段过滤缓存不破坏逐锚点探测语义）。
+    mkdirSync(join(dir, 'app/ui'), { recursive: true })
+    writeFileSync(join(dir, 'app/ui/panel.ts'), 'export {}\n', 'utf-8')
+    writeFileSync(join(dir, 'app/ui/panel2.ts'), 'export {}\n', 'utf-8')
+    const report = await checkPlanFactAnchors('修改 `ui/panel.ts` 与 `ui/panel2.ts`。', dir)
+    assert.equal(report.drifts.length, 2)
+    assert.ok(report.drifts.every(d => d.kind === 'root-mismatch'), '两个锚点都应命中 root-mismatch')
+    assert.ok(report.rerootProbes <= 128)
+  })
+
+  it('reports zero reroot probes when no reroot is needed', async () => {
+    const report = await checkPlanFactAnchors('修改 `engine/core/alpha.ts`。', dir)
+    assert.equal(report.rerootProbes, 0, '全部锚点直接命中时不做换根探测')
+    assert.deepEqual(report.drifts, [])
+  })
+
+  it('skips placeholder-shaped anchors silently when reroot budget is exhausted', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'rivet-anchors-placeholder-budget-'))
+    const proj = join(base, 'proj')
+    mkdirSync(proj, { recursive: true })
+    for (let i = 0; i < 300; i++) mkdirSync(join(proj, 'pkg-' + i), { recursive: true })
+    try {
+      const report = await checkPlanFactAnchors('幻觉引用如 `src/foo.ts:42` 会被静默跳过。', proj)
+      assert.deepEqual(report.drifts, [], '占位锚点在预算压力下静默跳过而非误报')
+      assert.ok(report.rerootProbes <= 128)
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
 })

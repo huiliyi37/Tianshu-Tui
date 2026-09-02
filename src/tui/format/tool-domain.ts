@@ -1,8 +1,9 @@
 /**
  * T9 工具 → 星域映射（框架无关，移植自 surface/tool-domain.ts，去掉 GlanceBus 依赖）。
  *
- * 用于 GlanceBar 的 domain zone：执行某工具时切到对应星域的 glyph/name。
- * 子代理编排（delegate_* / team_orchestrate）归天机域。
+ * 消费方：运行中 worker 列表的域 glyph 徽章（app.ts）、工具卡样式判定。
+ * 注意：派发类工具归天机域只用于列表徽章——GlanceBar 会话星域不再随派发切换
+ * （天机是编排阶段的内部路由标记，不是会话星域，不上主面板）。
  */
 
 import { DEFAULT_DELEGATE_PROFILE } from '../../agent/profile-registry.js'

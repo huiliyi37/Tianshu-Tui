@@ -526,7 +526,7 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
           '',
           formatAnchorDrifts(anchorReport.drifts),
           '',
-          '用 read/grep 核实后 edit_file 修正活动计划文件中的引用；确认新建则标注「新增」。',
+          '用 read/grep 核实后 edit_file 修正活动计划文件中的引用；确认新建则标注「新增」；根错位（实际位于子目录/兄弟项目）的引用补全根前缀。',
         ].join('\n'))
       } else {
         anchorDriftNote = `\n⚠ 锚点残留提示：${anchorReport.drifts.length} 个引用仍与当前工作区不符（已放行）。执行时以现实为准并在交付报告留痕。`
@@ -571,15 +571,12 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
   }
 
   // 产出模型留痕：记录本计划由哪个模型写出（H1 前标记行，PlanDocument 解析为
-  // model/modelTier）。低阶模型产出的计划在审批面显示复核警告。
+  // model/modelTier）。纯中性元数据，不在任何审批面产生差异化提示。
   const producerModel = params.sessionModel?.trim()
   const producerTier = producerModel ? inferModelTierFromName(producerModel) : null
   const contentToPersist = producerModel
     ? insertPlanModelMarker(fullContent, producerModel, producerTier)
     : fullContent
-  const cheapModelNote = producerTier === 'cheap'
-    ? `\n⚠ 本计划由低阶模型（${producerModel}）产出，审批面会提示用户复核。`
-    : ''
 
   try {
     const relativePath = await writePlan(params.cwd, slug, contentToPersist, submitOptions)
@@ -604,7 +601,6 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
         optionsHint,
         anchorDriftNote,
         scaleNote,
-        cheapModelNote,
         '',
         '',
         `审批请求已推送给用户（桌面端会话内审批卡 / TUI 审批面板；若卡片未弹出，用户可在计划面板找到该计划批准）——批准即开始执行，也可附修订意见驳回。批准从不要求用户手输任何命令。`,

@@ -20,6 +20,7 @@ import { buildMissionRoutes } from './mission-routes.js'
 import { MissionStore } from './mission-store.js'
 import { buildHealthRoute } from './health-route.js'
 import { buildGreetingRoute } from './greeting-route.js'
+import { buildSettingsIntentRoutes } from './settings-intent-route.js'
 import { isAuthorizedRequest } from './auth.js'
 import { LoopHealthMonitor } from './loop-health.js'
 import { buildScheduleRoutes } from './schedule-routes.js'
@@ -764,6 +765,19 @@ export async function runServe(opts: RunServeOptions = {}): Promise<RunningServe
   Object.assign(
     routes,
     buildGreetingRoute(greetingBaseUrl, greetingApiKey, () => getGreetingConfig(), apiToken),
+  )
+
+  // Settings intent (Wave 3): natural-language → setting action fallback.
+  // 规则引擎未命中时由桌面端设置窗调用；默认 provider 单次 chat。
+  Object.assign(
+    routes,
+    buildSettingsIntentRoutes({
+      baseUrl: ctx.provider.baseUrl,
+      apiKey: ctx.apiKey,
+      // 请求时解析：模型配置运行中变化时兜底即时跟随（resolveServeContext 每次读 config）
+      getModel: () => resolveServeContext().model.id,
+      apiToken,
+    }),
   )
 
   // N3: async orchestration — cron scheduler → task registry → runtime pool that

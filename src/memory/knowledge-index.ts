@@ -20,6 +20,7 @@ import { BM25Index } from '../search/text-index.js'
 import { VectorIndex } from '../search/vector-index.js'
 import { reciprocalRankFusion } from '../search/hybrid-search.js'
 import type { EmbeddingProvider } from '../search/embedding-provider.js'
+import { SQLiteKnowledgeIndex, type SQLiteKnowledgeDocument } from './sqlite-knowledge-index.js'
 import { readMemoryEntries, isCurrentEntry, validateKnowledgeChains, type MemoryEntry, type MemoryKind, type ChainIssue } from './unified-memory.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -33,6 +34,8 @@ export interface KnowledgeSearchOptions {
   includeHistory?: boolean
   /** 来源过滤：'playbook' 只返回 playbook 教训（Wave 4 撤出 appendix 后的 recall 通道）。 */
   source?: 'playbook'
+  /** 并行工作区隔离：排除这些会话写入的条目。 */
+  excludeSessionIds?: readonly string[]
   /** 可选 LLM rerank（默认无——注入函数即启用）。 */
   rerank?: (query: string, hits: KnowledgeHit[]) => Promise<KnowledgeHit[]>
 }
@@ -67,7 +70,8 @@ export class KnowledgeIndex {
   private vectors = new VectorIndex()
   private entriesById = new Map<string, MemoryEntry>()
   private mdChunksById = new Map<string, { file: string; text: string }>()
-  private playbookById = new Map<string, { text: string }>()
+  private playbookById = new Map<string, { text: string; indexText: string }>()
+  private readonly persistent: SQLiteKnowledgeIndex
   private lastFingerprint = ''
   /** Wave 5: supersede 链完整性校验结果（rebuild 时刷新，recall 工具返回警告）。 */
   private _chainIssues: ChainIssue[] = []
@@ -75,7 +79,9 @@ export class KnowledgeIndex {
   constructor(
     private readonly cwd: string,
     private readonly embedder?: EmbeddingProvider,
-  ) {}
+  ) {
+    this.persistent = new SQLiteKnowledgeIndex(cwd)
+  }
 
   /** 源数据指纹：memory.jsonl mtime+size + md 文件列表 mtimes。变化才重建。 */
   private fingerprint(): string {
@@ -87,7 +93,7 @@ export class KnowledgeIndex {
       parts.push(`m:${st.mtimeMs}:${st.size}`)
     } catch { parts.push('m:-') }
     try {
-      for (const f of readdirSync(dir)) {
+      for (const f of readdirSync(dir).sort()) {
         if (!f.endsWith('.md')) continue
         try {
           // mtime + size 双因子：NAS/SMB 挂载的 mtime 精度不可靠，size 兜底
@@ -156,8 +162,8 @@ export class KnowledgeIndex {
           if (!b.id || !b.lesson) continue
           const id = `${PLAYBOOK_PREFIX}:${b.id}`
           const text = [b.lesson, b.details ?? ''].filter(Boolean).join(' — ')
-          this.playbookById.set(id, { text })
           const indexText = [b.lesson, b.context ?? '', b.details ?? '', (b.keywords ?? []).join(' ')].join(' ')
+          this.playbookById.set(id, { text, indexText })
           this.bm25.addChunk(id, 0, 0, indexText)
         } catch { /* malformed line */ }
       }
@@ -169,6 +175,29 @@ export class KnowledgeIndex {
 
   /** Supersede 链完整性校验结果（rebuild 后可用）。 */
   get chainIssues(): ChainIssue[] { return this._chainIssues }
+
+  private documents(): SQLiteKnowledgeDocument[] {
+    const documents: SQLiteKnowledgeDocument[] = []
+    for (const [id, entry] of this.entriesById) {
+      documents.push({
+        id,
+        text: entry.text,
+        indexText: [entry.text, entry.topic ?? '', entry.tags.join(' ')].join(' '),
+        source: 'entry',
+        kind: entry.kind,
+        topic: entry.topic,
+        current: isCurrentEntry(entry),
+        ts: entry.ts,
+      })
+    }
+    for (const [id, chunk] of this.mdChunksById) {
+      documents.push({ id, text: chunk.text, indexText: chunk.text, source: 'markdown', current: true, ts: 0 })
+    }
+    for (const [id, playbook] of this.playbookById) {
+      documents.push({ id, text: playbook.text, indexText: playbook.indexText, source: 'playbook', current: true, ts: 0 })
+    }
+    return documents.sort((a, b) => a.id.localeCompare(b.id))
+  }
 
   /** 可选向量层：provider 可用时为缺向量的 chunk 补 embedding。失败静默降级 BM25。 */
   async ensureVectors(): Promise<void> {
@@ -197,6 +226,8 @@ export class KnowledgeIndex {
     const isPlaybook = this.playbookById.has(id)
     if (options.source === 'playbook') return isPlaybook
     const entry = this.entriesById.get(id)
+    const excludedSessions = new Set(options.excludeSessionIds ?? [])
+    if (entry && entry.sessionId && excludedSessions.has(entry.sessionId)) return false
     if (!entry) {
       // md chunk / playbook：无结构化元数据——kind 过滤显式指定时只要结构化条目
       return !options.kind
@@ -215,15 +246,33 @@ export class KnowledgeIndex {
     const limit = options.limit ?? 5
     const now = Date.now()
 
-    // BM25 层（多取余量，过滤后再截断）+ 时间邻近加权
-    const bm25Hits = this.bm25.search(query, limit * 4)
+    // 持久化 SQLite/FTS5 是 JSONL/Markdown 的可重建投影；不可用时严格
+    // 降级到既有内存 BM25，不让原生能力影响 recall 正确性。
+    // 并行工作区隔离在 documents 进入 SQLite 前执行，保证 FTS 与内存 BM25
+    // 两条召回路径都不带在线其他会话的在途条目。
+    const excludedSessions = new Set(options.excludeSessionIds ?? [])
+    const documents = excludedSessions.size > 0
+      ? this.documents().filter(doc => {
+          const entry = this.entriesById.get(doc.id)
+          return !(entry && entry.sessionId && excludedSessions.has(entry.sessionId))
+        })
+      : this.documents()
+    const sqliteHits = await this.persistent.search(
+      documents,
+      this.lastFingerprint,
+      query,
+      limit * 4,
+      options,
+    )
+    const bm25Hits = (sqliteHits ?? this.bm25.search(query, limit * 4)
       .filter(h => this.passesFilters(h.file, options))
+      .map(h => ({ id: h.file, score: h.score })))
       .map(h => {
-        const entry = this.entriesById.get(h.file)
+        const entry = this.entriesById.get(h.id)
         const boost = entry ? recencyBoost(entry.ts, now) : 1
-        return { id: h.file, score: h.score * boost }
+        return { id: h.id, score: h.score * boost }
       })
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
 
     // 向量层（可选）→ RRF 融合
     let rankedIds: Array<{ id: string; score: number }> = bm25Hits
@@ -267,15 +316,16 @@ export class KnowledgeIndex {
 const indexCache = new Map<string, KnowledgeIndex>()
 
 export function getKnowledgeIndex(cwd: string, embedder?: EmbeddingProvider): KnowledgeIndex {
-  let idx = indexCache.get(cwd)
+  const key = `${cwd}\0${embedder?.id ?? 'lexical'}`
+  let idx = indexCache.get(key)
   if (!idx) {
     idx = new KnowledgeIndex(cwd, embedder)
-    indexCache.set(cwd, idx)
+    indexCache.set(key, idx)
   }
   return idx
 }
 
-/** 测试用：清空 per-cwd 缓存。 */
+/** 测试用：清空 per-cwd/provider 缓存。 */
 export function resetKnowledgeIndexCache(): void {
   indexCache.clear()
 }

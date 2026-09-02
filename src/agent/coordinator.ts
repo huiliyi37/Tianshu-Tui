@@ -48,7 +48,7 @@ import { buildContractProjection, type ContractProjection } from './contract-pro
 import { reconcileWithObjective } from './worker-objective-gate.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
 import { runWorkerSession, type WorkerActivityKind, type WorkerCheckpoint, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
-import { saveWorkerSession, loadWorkerSession, consumeCheckpointOnce } from './worker-session-persist.js'
+import { saveWorkerSession, loadWorkerSession, consumeCheckpointOnce, trimMessagesToTokenBudget } from './worker-session-persist.js'
 import { buildContinuationObjective, decideContinuation, markContinued, mergeUsage, MAX_BUDGET_CONTINUATIONS } from './worker-continuation.js'
 import {
   buildRevisionObjective,
@@ -173,7 +173,7 @@ function emitLifecycle(workerConfig: WorkerSessionConfig, detail: string): void 
  * 取末两段（slice(-2)）以容忍 `prefix:team:T1` / `prefix:council:seat-x` 形态。
  */
 export function deriveStableWorkOrderId(parentTurnId: string): string | undefined {
-  return /\b(team|council|batch):/.test(parentTurnId)
+  return /\b(team|council|batch|expert):/.test(parentTurnId)
     ? parentTurnId.split(':').slice(-2).join(':')
     : undefined
 }
@@ -225,6 +225,11 @@ export interface DelegationRequest {
    *  existed — the plan's anti-goals died in the orchestrator's paraphrase
    *  (see docs/design/2026-08-02-工单约束通道.md). */
   constraints?: string[]
+  /** 计划文件路径（T5）：plan_task / team_orchestrate 派发时注入，经 WorkOrder.planRef
+   *  渲染为 worker 提示词的「计划全文见：<path>」——objective 只携带摘要，段落级
+   *  契约（接口契约/反目标/待验证假设）worker 用 read_file 自取。无文件源（council
+   *  planJson 契约）时不带——契约内容已由 planConstraints 内联。 */
+  planRef?: string
   /** Review-router re-entrancy depth to pass into worker tool contexts. */
   reviewDepth?: number
   /** B3: delegation nesting depth (0 = primary → worker). Requests at
@@ -269,6 +274,8 @@ export interface DelegationRequest {
   /** 瑶光门 tier 下限：路由结果不得低于此档（council 席位 tierHint+noDowngrade）。
    *  只抬升不降级；modelOverride 仍然最高优先。 */
   tierFloor?: ModelTier
+  /** 专家席在 profile 工具面之上追加的工具（strong-expert manifest 展开）。 */
+  extraAllowedTools?: string[]
   /** B2: current session turn for progressive timeout alignment. */
   sessionTurn?: number
   /** Per-request budget overrides (timeout/turns/tokens/retries). Takes
@@ -1639,6 +1646,7 @@ export class DelegationCoordinator {
             objective: request.objective,
             scope: request.scope,
             constraints: withPlanConstraints(request.constraints, request.objective, this.config),
+            planRef: request.planRef,
             reviewDepth: request.reviewDepth,
             delegationDepth: (request.delegationDepth ?? 0) + 1,
             dependencies: request.dependencies,
@@ -1648,6 +1656,7 @@ export class DelegationCoordinator {
             budget: isWrite ? this.budgetWithHistory(request) : request.budget,
             modelOverride: request.modelOverride,
             tierFloor: request.tierFloor,
+            extraAllowedTools: request.extraAllowedTools,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -1657,6 +1666,7 @@ export class DelegationCoordinator {
             objective: request.objective,
             scope: request.scope,
             constraints: withPlanConstraints(request.constraints, request.objective, this.config),
+            planRef: request.planRef,
             reviewDepth: request.reviewDepth,
             delegationDepth: (request.delegationDepth ?? 0) + 1,
             dependencies: request.dependencies,
@@ -1665,6 +1675,7 @@ export class DelegationCoordinator {
             sessionTurn: request.sessionTurn,
             modelOverride: request.modelOverride,
             tierFloor: request.tierFloor,
+            extraAllowedTools: request.extraAllowedTools,
             budget: request.budget,
           })
 
@@ -1679,8 +1690,16 @@ export class DelegationCoordinator {
       if (request.resumeWorkOrderId) {
         const record = loadWorkerSession(request.resumeWorkOrderId)
         if (record) {
-          this.resumeMessages.set(order.id, record.messages)
-          debugLog(`[worker-resume] loaded ${record.messages.length} messages from ${request.resumeWorkOrderId} for ${order.id}`)
+          // 专家驻场的 budget.maxTokens 在这里兑现「上下文上限」语义：载入超限
+          // 从最旧侧裁剪（保最新上下文）。非专家委派不带该语义，历史原样续跑。
+          const expertContextBudget = request.resumeWorkOrderId.startsWith('expert:')
+            ? request.budget?.maxTokens
+            : undefined
+          const resumeMsgs = expertContextBudget !== undefined
+            ? trimMessagesToTokenBudget(record.messages, expertContextBudget)
+            : record.messages
+          this.resumeMessages.set(order.id, resumeMsgs)
+          debugLog(`[worker-resume] loaded ${record.messages.length} messages from ${request.resumeWorkOrderId} for ${order.id}${resumeMsgs.length !== record.messages.length ? ` (trimmed to ${resumeMsgs.length} by expert context budget ${expertContextBudget})` : ''}`)
         } else {
           debugLog(`[worker-resume] no prior session for ${request.resumeWorkOrderId} — starting fresh`)
         }
@@ -2236,9 +2255,17 @@ export class DelegationCoordinator {
     const tierInfluence = this.evaluateTierInfluence(tierRecommendation)
     // 瑶光门 tierFloor：调用方声明的「不得低于」硬地板，对规则推荐与 bandit gate
     // 的结果统一生效（只抬升不降级）。modelOverride 仍然最高优先。
+    // 成本护栏：profile tierLock 是硬上限——专家席 tierFloor 不得借专家身份
+    // 顶穿（tierLock 只挡 escalation 不挡 floor 是漏洞，2026-09-02 审查修复）。
+    // lock 命中时 floor 收敛到 lock 本身，「只抬升不降级」语义不变。
+    const profileTierLock = profileRegistry.get(order.profile)?.tierLock
+    const effectiveFloor = order.tierFloor && profileTierLock
+      && TIER_FLOOR_RANK[order.tierFloor] > TIER_FLOOR_RANK[profileTierLock]
+      ? profileTierLock
+      : order.tierFloor
     const preferredTier = applyTierFloor(
       tierInfluence.gate.applied ? tierInfluence.gate.effectiveTier : tierRecommendation.tier,
-      order.tierFloor,
+      effectiveFloor,
     )
     // Per-order modelOverride wins over all routing (review override, workers
     // routing, EFE, tier). The card is mostly telemetry/reporting (the real
@@ -3248,6 +3275,7 @@ export class DelegationCoordinator {
             objective: r.objective,
             scope: r.scope,
             constraints: withPlanConstraints(r.constraints, r.objective, this.config),
+            planRef: r.planRef,
             reviewDepth: r.reviewDepth,
             delegationDepth: (r.delegationDepth ?? 0) + 1,
             dependencies: r.dependencies,
@@ -3261,6 +3289,7 @@ export class DelegationCoordinator {
             // 瑶光门：batch 路径曾丢弃 tierFloor（只传 modelOverride），护栏席
             // 声明 strong 实际可能跑低档——与单发 delegate() 路径对齐补传。
             tierFloor: r.tierFloor,
+            extraAllowedTools: r.extraAllowedTools,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -3270,6 +3299,7 @@ export class DelegationCoordinator {
             objective: r.objective,
             scope: r.scope,
             constraints: withPlanConstraints(r.constraints, r.objective, this.config),
+            planRef: r.planRef,
             reviewDepth: r.reviewDepth,
             delegationDepth: (r.delegationDepth ?? 0) + 1,
             dependencies: r.dependencies,
@@ -3281,6 +3311,7 @@ export class DelegationCoordinator {
             budget: r.budget,
             modelOverride: r.modelOverride,
             tierFloor: r.tierFloor,
+            extraAllowedTools: r.extraAllowedTools,
           })
       if (queue.enqueue(order)) {
         orders.push(order)

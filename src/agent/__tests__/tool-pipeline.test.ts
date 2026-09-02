@@ -10,7 +10,7 @@ import { createPermissionOverlay } from '../permissions.js'
 import type { EvidenceTrackerPublic } from '../evidence.js'
 import { ArtifactStore } from '../../artifact/store.js'
 import { _setSandboxBackendForTest, _resetSandboxBackendCache } from '../../tools/sandbox-profile.js'
-import { isWriteGranted, _resetGrantsForTest, loadPersistedGrants, revokeGrant } from '../../tools/path-grants.js'
+import { isWriteGranted, grantPath, _resetGrantsForTest, loadPersistedGrants, revokeGrant } from '../../tools/path-grants.js'
 import { rivetHome } from '../../config/paths.js'
 
 /** Sandbox-safe temp directory — macOS sandbox blocks os.tmpdir() /var/folders/...
@@ -1791,6 +1791,51 @@ describe('executeToolUse', () => {
       const slug = resolvePath(workspace).replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
       rmSync(join(rivetHome(), `path-grants-${slug}.json`), { force: true })
       for (const d of [workspace, external, external2]) rmSync(d, { recursive: true, force: true })
+    }
+  })
+
+  it('YOLO read→write escalation is session-scoped — never persisted to the per-workspace store', async () => {
+    _resetGrantsForTest()
+    const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))
+    const external = mkdtempSync(join(testTmp(), 'rivet-ext-'))
+    try {
+      // 项目外只读形态：外部目录只有 READ grant（等价 additionalReadDirs 根授权）。
+      grantPath(external, 'read')
+      const target = join(external, 'out.txt')
+      let approvalCalls = 0
+      const deps = makeDeps({
+        cwd: workspace,
+        config: {
+          ...makeDeps().config,
+          approvalMode: 'dangerously-skip-permissions',
+          permissions: { allow: [] },
+          toolRegistry: {
+            execute: async () => ({ content: 'wrote', isError: false }),
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+            resolveName: (n: string) => n,
+          },
+        } as any,
+      })
+      const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return true } }
+      const result = await executeToolUse(
+        { id: 'tu-yolo-esc', name: 'write_file', input: { file_path: target, content: 'x' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approvalCalls, 0, 'YOLO must not prompt for a read-granted path')
+      assert.equal((result.toolResult as any).is_error, false)
+      assert.equal(isWriteGranted(target), true, 'escalated write grant active in-process')
+
+      // 模拟新会话：清内存后从 per-workspace store 回灌——升级授权必须消失，
+      // 否则一次 YOLO 会话会永久加宽该工作区后续所有会话（含监督档）的权限。
+      _resetGrantsForTest()
+      loadPersistedGrants(workspace)
+      assert.equal(isWriteGranted(target), false, 'escalated write grant must NOT hydrate from disk')
+    } finally {
+      _resetGrantsForTest()
+      const slug = resolvePath(workspace).replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
+      rmSync(join(rivetHome(), `path-grants-${slug}.json`), { force: true })
+      for (const d of [workspace, external]) rmSync(d, { recursive: true, force: true })
     }
   })
 

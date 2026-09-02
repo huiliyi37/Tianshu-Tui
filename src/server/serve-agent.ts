@@ -9,6 +9,8 @@ import { createDelegationActivityMapper } from '../tools/worker-activity-stream.
 import type { DelegationActivity, DelegationIdentity } from '../tools/types.js'
 import type { DelegateWorkerInput, DelegateActivityUpdate, ManagedAgent, RuntimeSessionManager } from './session-manager.js'
 import { SessionPersist, getSessionDir } from '../agent/session-persist.js'
+import { runGateCompletion } from '../agent/gate-completion.js'
+import { memoryBackfillEnabled, runMemoryBackfill } from '../memory/backfill.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { FileHistory } from '../agent/file-history.js'
 import { loadProjectRules } from '../context/rules-loader.js'
@@ -216,9 +218,12 @@ interface SessionStores {
    *  when the UI shows history but the model context came back empty. */
   historyRestore: HistoryRestoreInfo
   /** RuntimeRefs 在 createInteractiveToolRegistry 中被工具体内闭包持有；
-   *  Wave C: assembleAgentLoop 通过 createAgentRuntime 装配 coordinator 后
-   *  回写 refs.coordinator，让 5 个 coordinator 依赖工具激活。 */
+ *  Wave C: assembleAgentLoop 通过 createAgentRuntime 装配 coordinator 后
+ *  回写 refs.coordinator，让 5 个 coordinator 依赖工具激活。 */
   refs: RuntimeRefs
+  /** deep_recall 侧路晚绑定盒：stores 构建期被 memory 工具闭包捕获，
+   *  assembleAgentLoop 产出 agent 后回填（per-session，switchModel 重建覆盖）。 */
+  deepRecallAgentRef?: { current?: AgentLoop }
 }
 
 /**
@@ -387,12 +392,23 @@ function buildSessionStores(
     }
   }
 
-  // memory (unified recall + remember)：bootstrap 在 createInteractiveToolRegistry 外装的工具，
-  // 这里复用 sidecar 已有的 claimStore + session 完成对齐。
+  // memory (unified recall + remember + deep_recall)：bootstrap 在 createInteractiveToolRegistry 外装的工具，
+  // 这里复用 sidecar 已有的 claimStore + session 完成对齐。deep_recall 侧路通道
+  // 经 deepRecallAgentRef 晚绑定到 assembleAgentLoop 产出的当次 agent（与 TUI 同构）。
+  const deepRecallAgentRef: { current?: AgentLoop } = {}
   toolRegistry.register(createMemoryTool(claimStore, {
     sessionId,
     getTurn: () => session.getTurnCount(),
     cwd,
+    deepRecallComplete: async (prompt, timeoutMs) => {
+      const client = deepRecallAgentRef.current?.config.compactClient
+        ?? deepRecallAgentRef.current?.config.primaryClient
+        ?? deepRecallAgentRef.current?.config.client
+      if (!client) throw new Error('deep recall: no client')
+      return runGateCompletion(client, () => {}, prompt, timeoutMs)
+    },
+    sessionDir,
+    excludeSessionId: sessionId,
   }))
 
   // taskLedger / ownershipLedger 由 createInteractiveToolRegistry 的 B1 装配段
@@ -414,7 +430,7 @@ function buildSessionStores(
     }
   }
 
-  return { persist, claimStore, fileHistory, toolRegistry, session, taskLedger, ownershipLedger, refs, historyRestore }
+  return { persist, claimStore, fileHistory, toolRegistry, session, taskLedger, ownershipLedger, refs, historyRestore, deepRecallAgentRef }
 }
 
 /**
@@ -531,6 +547,22 @@ function assembleAgentLoop(
     // Per-session 工具白名单（蒸馏回放等自动化场景）。
     allowedTools,
   })
+  stores.deepRecallAgentRef!.current = agent
+  // 记忆回填（opt-in：RIVET_MEMORY_BACKFILL=1）：sidecar 场景桌面端常驻、更适合
+  // 闲时补采；与 TUI bootstrap 同门（30s debounce + ledger 幂等 + 每轮 ≤5 会话）。
+  if (memoryBackfillEnabled()) {
+    const backfillTimer = setTimeout(() => {
+      const client = agent.config.compactClient ?? agent.config.primaryClient ?? agent.config.client
+      if (!client) return
+      void runMemoryBackfill({
+        cwd,
+        sessionDir: getSessionDir(cwd),
+        currentSessionId: sessionId,
+        complete: (prompt, timeoutMs) => runGateCompletion(client, () => {}, prompt, timeoutMs),
+      }).catch(() => { /* 回填是尽力而为 */ })
+    }, 30_000)
+    backfillTimer.unref?.()
+  }
 
   // approvalMode 在 createAgentRuntime 内部未接收；构造后立即覆盖
   // （setApprovalMode 直接 mutate config.approvalMode，与构造时设等价）。

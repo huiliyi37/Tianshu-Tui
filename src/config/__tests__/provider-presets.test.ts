@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { providerSchema } from '../schema.js'
 import { PROVIDER_PRESETS, cloneProviderPreset, providerPresetKeys } from '../provider-presets.js'
-import { migratePresetModelBackfill } from '../manager.js'
+import { migratePresetModelBackfill } from '../preset-model-backfill.js'
 
 describe('provider presets', () => {
   it('contains required built-in provider modes', () => {
@@ -113,5 +113,23 @@ describe('migratePresetModelBackfill', () => {
       },
     } as unknown as Record<string, unknown>
     assert.equal(migratePresetModelBackfill(raw), false)
+  })
+
+  it('userSaved 的 provider 尊重用户删减——不回填缺失的预设模型', () => {
+    const raw = {
+      provider: {
+        providers: {
+          // 用户删过模型的预设 provider（userSaved 由 removeModel/setupProvider 落盘）
+          glm: {
+            name: 'glm',
+            userSaved: true,
+            models: [{ id: 'glm-5.3', contextWindow: 1_000_000, maxTokens: 131072 }],
+          },
+        },
+      },
+    } as unknown as Record<string, unknown>
+    assert.equal(migratePresetModelBackfill(raw), false)
+    const models = (raw as { provider: { providers: { glm: { models: Array<{ id: string }> } } } }).provider.providers.glm.models
+    assert.deepEqual(models.map(m => m.id), ['glm-5.3'])
   })
 })

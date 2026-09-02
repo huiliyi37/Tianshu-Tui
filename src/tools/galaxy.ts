@@ -422,6 +422,7 @@ function formatGalaxyResult(
       sourcesReviewedCount: r.sourcesReviewed,
       failureReason: r.failureReason,
       evidenceStatus: r.evidenceStatus,
+      salvagedFindingsCount: r.findings?.filter(f => f.salvaged === true).length ?? 0,
     })
 
     const actualModel = actualModelById.get(target.workOrderId) ?? r.model
@@ -448,6 +449,7 @@ function formatGalaxyResult(
       sourcesReviewedCount: r.sourcesReviewed,
       failureReason: r.failureReason,
       evidenceStatus: r.evidenceStatus,
+      salvagedFindingsCount: r.findings?.filter(f => f.salvaged === true).length ?? 0,
     })
     lines.push(`  未映射 worker ${r.workOrderId}: ${digest}`)
     lines.push('')
@@ -1119,6 +1121,22 @@ export function createGalaxyTool(coordinator: GalaxyCoordinator): Tool {
           skipped: emptiedWriteDims,
           parallelism: plannedParallelism,
           dimensions: { passed: galaxyPassed, total: galaxyTotal, failed: failedDimensions },
+          // MoE P0 路由轨迹：每个派发路由的 planned label + 请求模型 + 实际模型
+          // + 终态——「为什么这样路由/实际发生了什么」进结构化 result，消费方
+          // 不再解析散文（对齐 galaxy-team-moe-routing.md 横切面 B）。
+          routes: targets.map(route => {
+            const result = resultByWorkOrderId.get(route.workOrderId)
+            // 实际模型缺失时不再伪装成「实际=请求」——置空 + modelFallback 标记，
+            // 消费方可区分「真实路由」与「未知」（2026-09-02 审查修复）。
+            const actualModel = run.workerModels?.find(w => w.workOrderId === route.workOrderId)?.model
+            return {
+              workOrderId: route.workOrderId,
+              label: route.label,
+              requestedModel: route.requestedModel,
+              ...(actualModel !== undefined ? { model: actualModel } : { modelFallback: true }),
+              status: result?.status ?? 'missing',
+            }
+          }),
         },
       }
     },

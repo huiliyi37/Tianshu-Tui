@@ -814,6 +814,8 @@ export function buildSessionRoutes(
       // 非 darwin 平台工具未注册，enableTool 静默 no-op。
       if (/@computer\b/i.test(prompt)) {
         await manager.enableTool(params!.id!, 'computer_use')
+        // W4-15：后台权限探测——缺失时经 steer 注入指引（不阻塞 run）。
+        manager.probeComputerUsePermissions(params!.id!)
       }
 
       // 文档附件：落盘 → extractDocumentText 抽取文本 → 前置进 prompt。
@@ -947,6 +949,15 @@ export function buildSessionRoutes(
     // Cockpit snapshot — aggregated runtime state (safety/verify/context/model)
     // for the desktop cockpit panel. Reads agent in-memory state via the pure
     // buildCockpitSnapshot function (same source as the TUI /cockpit command).
+    // W-stats：单会话性能视图（cache-log 轮级 TTFT/输出速度/命中率）——
+    // 轮尾注回放补数据与 Insights 会话下钻共用。读不到日志 → 404。
+    // getPerformance 为异步（大日志分片解析，不阻塞事件循环）。
+    'GET /sessions/:id/performance': withAuth(async (_body, params) => {
+      const perf = await manager.getPerformance(params!.id!)
+      if (!perf) return { status: 404, body: { error: 'Performance log not found' } }
+      return { status: 200, body: perf }
+    }, apiToken),
+
     'GET /sessions/:id/cockpit': withAuth((_body, params) => {
       const agent = manager.getAgentForSession(params!.id!)
       if (!agent) return { status: 404, body: { error: 'Session agent not built yet' } }

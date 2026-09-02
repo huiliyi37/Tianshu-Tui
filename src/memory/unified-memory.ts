@@ -52,6 +52,12 @@ export type MemoryKind =
 export type MemorySource = 'auto' | 'manual' | 'claim' | 'verification' | 'dream' | 'essence-gate'
   // 虚空仓库 P0：agent 主动标记（deliver_task learned 参数 / PAL 自动收割），区分被动提取
   | 'agent-crafted'
+  // 记忆形成侧：重要操作后模型自主判断值得、截取摘要写入（auto-capture）
+  | 'auto-capture'
+  // 会话结束巩固：模型生成会话摘要 + 可复用做法（consolidation）
+  | 'consolidation'
+  // 历史会话回填：对存量会话转录补跑巩固提取器（backfill pipeline）
+  | 'backfill'
 
 export type MemoryStatus = 'observed' | 'claimed' | 'verified' | 'rejected' | 'expired'
 
@@ -253,6 +259,60 @@ export function supersedeMemoryEntry(cwd: string, oldId: string, newId: string):
   }
 }
 
+// ── 维护（阶段6 管理）────────────────────────────────────────────────────
+
+export interface PruneOptions {
+  /** 已封口条目（isCurrentEntry=false）距 validTo 超过该天数才退役。默认 90。 */
+  retentionDays?: number
+  /** 物理文件上限字节（超出触发压缩，复用 compact 语义）。默认 16KB。 */
+  maxFileBytes?: number
+}
+
+/**
+ * 长期记忆退役（管理员视角的维护，非运行时路径）。
+ *
+ * 语义（invalidate-don't-delete 的落地执行）：不删除任何 current 条目；只把
+ * 「早已封口（validTo 已过期 + superseded/expired）且距封口超过 retentionDays」
+ * 的历史从主存储移除——它们已退出召回（isCurrentEntry 已挡），保留只徒增文件。
+ * 同时压缩到 maxFileBytes 上限。current 条目、supersede 链的现存叶子永不删。
+ *
+ * @returns 移除的历史条目数。
+ */
+export function pruneMemoryStore(cwd: string, options: PruneOptions = {}): number {
+  const path = memoryPath(cwd)
+  if (!existsSync(path)) return 0
+  const retentionMs = (options.retentionDays ?? 90) * 86_400_000
+
+  const lockPath = join(cwd, '.rivet', 'knowledge', 'memory.jsonl.lock')
+  const release = acquireLock(lockPath)
+  try {
+    const raw = readFileSync(path, 'utf-8')
+    const lines = raw.split('\n').filter(Boolean)
+    const now = Date.now()
+    const kept: string[] = []
+    let pruned = 0
+    for (const line of lines) {
+      let parsed: Record<string, unknown> | null = null
+      try { parsed = JSON.parse(line) as Record<string, unknown> } catch { kept.push(line); continue }
+      if (!parsed?.id || (!parsed.text && parsed.kind !== 'tombstone')) { kept.push(line); continue }
+      const validTo = typeof parsed.validTo === 'number' ? parsed.validTo : undefined
+      // 已封口（validTo 停在过去）且距封口超过保留期 → 退役。
+      if (validTo !== undefined && validTo <= now - retentionMs) {
+        pruned++
+        continue
+      }
+      kept.push(line)
+    }
+    if (pruned === 0 && raw.length <= (options.maxFileBytes ?? 16_384)) return 0
+    writeFileAtomicSync(path, (pruned > 0 ? kept : lines).join('\n') + '\n')
+    return pruned
+  } catch {
+    return 0
+  } finally {
+    release()
+  }
+}
+
 // ── Read ───────────────────────────────────────────────────────────────────
 
 /**
@@ -282,6 +342,11 @@ export interface RecallOptions {
   topic?: string
   /** 默认只返回 current 叶子；true 时包含已封口/被取代的历史。 */
   includeHistory?: boolean
+  /** 排除某会话写入的条目——当前会话的记忆已在历史里，不应再作为
+   *  cross-session 知识重复注入，否则会放大旧任务/旧问题。 */
+  excludeSessionId?: string
+  /** 排除一组会话（并行工作区隔离：在线的其他会话也不互相注入）。 */
+  excludeSessionIds?: readonly string[]
 }
 
 /** Keyword recall — score entries by term overlap with query.
@@ -300,10 +365,15 @@ export function recallMemoryEntries(
     ? (Array.isArray(kindFilter) ? kindFilter : [kindFilter])
     : undefined
 
+  const excludedSessionIds = new Set<string>()
+  if (options?.excludeSessionId) excludedSessionIds.add(options.excludeSessionId)
+  for (const id of options?.excludeSessionIds ?? []) excludedSessionIds.add(id)
+
   const candidates = readMemoryEntries(cwd)
     .filter(e => !kinds || kinds.includes(e.kind))
     .filter(e => options?.includeHistory || isCurrentEntry(e))
     .filter(e => !options?.topic || (e.topic ?? '').toLowerCase().includes(options.topic.toLowerCase()))
+    .filter(e => !excludedSessionIds.has(e.sessionId ?? ''))
 
   const scored = candidates
     .map(entry => {
@@ -323,22 +393,48 @@ export function recallMemoryEntries(
   return scored.slice(0, limit).map(s => s.entry)
 }
 
+export interface RenderMemoryBlockOptions {
+  /** sourceFilter 存在时也要求 query 词项命中（默认 false 保持旧的恒定选集）。
+   *  true 时旧问题/旧任务的记忆不会因为「最近写入」而无条件注入新问题。 */
+  queryGatedSource?: boolean
+  /** 排除某会话写入的条目（当前会话记忆不应作为 cross-session 重复注入）。 */
+  excludeSessionId?: string
+  /** 排除一组会话（并行工作区隔离：在线的其他会话也不互相注入）。 */
+  excludeSessionIds?: readonly string[]
+}
+
 /** Render memory entries as XML block for prompt injection.
  *  Wave 1 起默认不再每轮推送（见 turn-step-producer.crossSessionMemoryPushEnabled）。
  *
- *  虚空仓库 P0：`sourceFilter` 存在时**完全脱离 query 评分**——按 ts 降序取该
- *  source 的最近 8 条 current 条目。理由（缓存纪律）：评分选集随 userInput
- *  逐用户边界漂移 → 附录字节 churn（historical-lessons 同款遗留问题）；且
- *  `split(/\W+/)` 对纯中文输入词项为零，评分/旁路双模式会随输入语言振荡。
- *  恒定选集保证 memory.jsonl 不变 → 输出字节不变 → 跨边界前缀缓存命中。 */
-export function renderMemoryBlock(cwd: string, query: string, maxChars = 2000, sourceFilter?: MemorySource): string | null {
+ *  虚空仓库 P0：`sourceFilter` 存在时默认**完全脱离 query 评分**——按 ts 降序取
+ *  该 source 的最近 8 条 current 条目。理由（缓存纪律）：评分选集随 userInput
+ *  逐用户边界漂移 → 附录字节 churn；恒定选集保证 memory.jsonl 不变 → 输出字节
+ *  不变。`queryGatedSource: true` 是为新问题不背旧任务记忆保留的正确性逃生口。 */
+export function renderMemoryBlock(
+  cwd: string,
+  query: string,
+  maxChars = 2000,
+  sourceFilter?: MemorySource,
+  options?: RenderMemoryBlockOptions,
+): string | null {
+  const excludedSessionIds = new Set<string>()
+  if (options?.excludeSessionId) excludedSessionIds.add(options.excludeSessionId)
+  for (const id of options?.excludeSessionIds ?? []) excludedSessionIds.add(id)
+  const excluded = (e: MemoryEntry) => !excludedSessionIds.has(e.sessionId ?? '')
+  const excludeOptions = { excludeSessionIds: [...excludedSessionIds] }
   const recalled = sourceFilter
-    ? readMemoryEntries(cwd)
-        .filter(e => e.source === sourceFilter)
-        .filter(isCurrentEntry)
-        .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-        .slice(0, 8)
-    : recallMemoryEntries(cwd, query, 8)
+    ? (options?.queryGatedSource
+        ? recallMemoryEntries(cwd, query, 100, undefined, excludeOptions)
+            .filter(e => e.source === sourceFilter)
+            .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+            .slice(0, 8)
+        : readMemoryEntries(cwd)
+            .filter(e => e.source === sourceFilter)
+            .filter(excluded)
+            .filter(isCurrentEntry)
+            .sort((a, b) => b.ts - a.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+            .slice(0, 8))
+    : recallMemoryEntries(cwd, query, 8, undefined, excludeOptions)
   if (recalled.length === 0) return null
 
   const lines = ['<cross-session-memory>']

@@ -1,11 +1,10 @@
 /**
  * Plan Approval — 批准闭环共享内核（TUI slash 命令与 server 桌面路由共用）。
  *
- * 闭环四层守卫（缺一即是 TUI/桌面行为分叉）：
+ * 闭环三层守卫（缺一即是 TUI/桌面行为分叉）：
  * 1. 内容校验：空计划/占位符草稿在批准边界硬拒（绝不把被掏空的文件标 APPROVED）。
  * 2. 锚点漂移复查：非阻断——计划写成后代码可能已变化，漂移注入 kickoff 让执行方以现实为准。
  * 3. 分波 kickoff：指示 read_file → plan_task(execute=true)/team_orchestrate 逐波过审查门 → plan_close。
- * 4. 低阶模型留痕：cheap tier 产出的计划在 kickoff 里明示，提醒复核关键改动点。
  *
  * 缓存纪律：kickoff 是用户边界的 append 消息，纯追加不碰前缀；本模块不注入任何 prompt 块。
  */
@@ -38,8 +37,6 @@ export interface PlanApprovalSuccess {
   driftNote?: string
   /** 分波执行 kickoff 提示词（已含 approach/漂移注入），作为下一轮用户消息提交。 */
   kickoff: string
-  /** cheap tier 产出计划的复核警告（非 cheap 时 undefined）。 */
-  tierWarning?: string
   /** 计划点名且本运行时可加载的流程 skill（技能契约，已注入 kickoff）。 */
   requiredSkills?: string[]
 }
@@ -94,12 +91,6 @@ export async function approvePlanWithGuards(
     return { ok: false, code: 'not-found', reason: `Plan not found: "${slug}".` }
   }
 
-  // 低阶模型留痕警告：flash 出的计划真实度不可控（事故链：大重构计划丢功能），
-  // 批准时明示产出模型，提醒复核关键改动点。不阻断——用户已看过计划正文。
-  const tierWarning = existing.modelTier === 'cheap'
-    ? `⚠ 本计划由低阶模型产出（${existing.model}），建议对关键改动点复核后再放行执行。`
-    : undefined
-
   // 技能契约：提取计划点名的 skill，过滤到本运行时可加载的（点名了但注册表
   // 没有的不指示加载——skill() 调不到只会白费一轮）。best-effort，提取失败不
   // 影响批准。
@@ -119,7 +110,6 @@ export async function approvePlanWithGuards(
     existing,
     driftNote,
     kickoff: buildPlanKickoff(slug, approved.title, resolvedApproach, driftNote, requiredSkills),
-    tierWarning,
     ...(requiredSkills ? { requiredSkills } : {}),
   }
 }

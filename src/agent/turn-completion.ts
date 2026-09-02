@@ -9,10 +9,14 @@ import { processTurnEnd } from './turn-end.js'
 
 export interface TurnCompletionCallbacks {
   onTextDelta: (text: string) => void
-  onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean, evidenceSummary?: EvidenceSummary) => void
+  /** metrics = 最近一次模型请求的 TTFT/输出速度（W-stats，桌面 turn_complete 展示）。 */
+  onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean, evidenceSummary?: EvidenceSummary, metrics?: { turn: number; ttftMs?: number; tokensPerSecond?: number; outputTokens: number }) => void
 }
 
 export interface TurnCompletionDeps {
+  /** 最近一次模型请求指标（AgentLoop.lastTurnMetrics）。可缺省（测试）。
+   *  轮开始由 run() 清空——失败的轮不带上一轮的 ttft/tps。 */
+  getTurnMetrics?: () => { turn: number; ttftMs?: number; tokensPerSecond?: number; outputTokens: number; decodeMs?: number } | undefined
   config: AgentConfig
   session: SessionContext
   trajectory: TrajectoryRecorder
@@ -76,6 +80,7 @@ export class TurnCompletionController {
       this.deps.session.getTurnCount(),
       input.isFinal,
       evidenceSummary,
+      this.deps.getTurnMetrics?.(),
     )
   }
 

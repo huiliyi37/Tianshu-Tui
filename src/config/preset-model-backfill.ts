@@ -1,4 +1,5 @@
 import { findPresetModel, isProviderPresetKey } from './provider-presets.js'
+import { resolvePreset } from '../api/pro-registry.js'
 import type { Config, ModelConfig, ProviderConfig } from './schema.js'
 
 /**
@@ -84,4 +85,47 @@ export function backfillPresetModelFields(config: Config): Config {
   }
   if (!changed) return config
   return { ...config, provider: { ...config.provider, providers: next } }
+}
+
+/**
+ * 预设新增模型回流（2026-08-28）：provider 配置是应用预设时的全量快照，
+ * deepMerge 对数组整组替换——新版本预设追加的模型永远不会出现在老用户的
+ * 已配置 provider 里（实测：glm-5.3/glm-5.3-flash 进了预设，配置里只有
+ * glm-5.2 快照，设置页/`/model` 看不到新模型）。
+ *
+ * 对每个「当前预设仍存在」的 provider：把预设 models 中配置缺失的条目
+ * 追加到末尾（预设序）。用户编辑过的 provider（userSaved=true，
+ * setupProvider/removeModel 落盘）尊重用户的模型列表——删减不回流；
+ * 回填只服务「从未编辑过的预设快照」无感升级。Mutates `raw`,
+ * returns true if changed.
+ */
+export function migratePresetModelBackfill(raw: Record<string, unknown>): boolean {
+  const provider = raw.provider as Record<string, unknown> | undefined
+  const providers = provider?.providers as Record<string, unknown> | undefined
+  if (!providers) return false
+  let changed = false
+  for (const [name, entry] of Object.entries(providers)) {
+    if (!entry || typeof entry !== 'object') continue
+    const preset = resolvePreset(name)
+    if (!preset || !('static' in preset)) continue
+    const presetModels = preset.static.provider.models
+    const prov = entry as Record<string, unknown>
+    if (prov.userSaved === true) continue
+    const models = prov.models
+    if (!Array.isArray(models)) continue
+    const known = new Set(models.map((m) => (m as { id?: unknown })?.id))
+    for (const pm of presetModels) {
+      if (known.has(pm.id)) continue
+      models.push({
+        id: pm.id,
+        ...(pm.alias ? { alias: pm.alias } : {}),
+        contextWindow: pm.contextWindow,
+        maxTokens: pm.maxTokens,
+        ...(pm.supportsVision ? { supportsVision: true } : {}),
+        pricing: { ...pm.pricing },
+      })
+      changed = true
+    }
+  }
+  return changed
 }

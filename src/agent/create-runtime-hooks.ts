@@ -46,6 +46,8 @@ import { createEditFailureRecoveryHook } from './hooks/edit-failure-recovery-hoo
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createCompactionAmnesiaHook, type CompactionAmnesiaHookDeps } from './hooks/compaction-amnesia-hook.js'
 import { createSearchPodHook, type SearchPodHookDeps } from './hooks/search-pod-hook.js'
+import { createAutoCaptureHooks, type AutoCaptureHookDeps } from './hooks/auto-capture-hook.js'
+import { createSessionConsolidationHook, type SessionConsolidationHookDeps } from './hooks/session-consolidation-hook.js'
 import { createPointerRegurgitationHook } from './hooks/pointer-regurgitation-hook.js'
 import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
@@ -134,6 +136,10 @@ export interface RuntimeHookDeps {
   }
   /** Essence-gate（postSession 知识准入闸）。缺省不装配 = fail-closed 无写入。 */
   essenceGate?: EssenceGateHookDeps
+  /** 记忆形成侧（重要操作后模型判断 + 写入 LTM）。缺省不装配。 */
+  autoCapture?: AutoCaptureHookDeps
+  /** 会话结束巩固（摘要 + 可复用做法写入 LTM）。缺省不装配。 */
+  sessionConsolidation?: SessionConsolidationHookDeps
   /** 召回健康账本（postSession 聚合落盘）。 */
   recallEfficacy?: RecallEfficacyHookDeps
   playbookStore?: PlaybookStore
@@ -458,6 +464,18 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // deps-gated——没有廉价 LLM complete 通道就不装配（fail-closed：无闸即无写入）。
   if (deps.essenceGate) {
     hooks.push(createEssenceGateHook(deps.essenceGate))
+  }
+
+  // 记忆形成侧：postTool 缓冲候选，postSession 模型判断冲销（写入 LTM）。
+  if (deps.autoCapture) {
+    const hooksPair = createAutoCaptureHooks(deps.autoCapture)
+    hooks.push(hooksPair.postTool)
+    hooks.push(hooksPair.postSession)
+  }
+
+  // 会话结束巩固：postSession 生成整体摘要 + 可复用做法（写入 LTM）。
+  if (deps.sessionConsolidation) {
+    hooks.push(createSessionConsolidationHook(deps.sessionConsolidation))
   }
 
   // 召回健康账本（Wave 3 知识重构）：postSession 聚合空召回率/引用率落盘。
@@ -862,6 +880,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Wrapup-Anxiety Guard: postTurn hook — 收尾/新会话话术 × 实测 ctxRatio
   // 对照。ratio < 0.5 时注入硬数据反驳（焦虑话术不基于物理事实）；
   // 0.5-0.7 灰区不注入；≥0.7 不触发（context-pressure 的收束建议合法）。
+  // 反驳双通道：advisory 留痕 + addSystemReminder functional 必达。
   // Gated by RIVET_WRAPUP_ANXIETY_GUARD (default on; set to '0' to disable).
   if (deps.advisoryBus && deps.getStreamedText && deps.getEstimatedTokens && deps.getContextWindow
     && process.env.RIVET_WRAPUP_ANXIETY_GUARD !== '0') {
@@ -870,6 +889,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getStreamedText: deps.getStreamedText,
       getEstimatedTokens: deps.getEstimatedTokens,
       getContextWindow: deps.getContextWindow,
+      addSystemReminder: deps.addSystemReminder,
     }))
   }
 

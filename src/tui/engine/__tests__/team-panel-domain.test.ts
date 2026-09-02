@@ -3,7 +3,8 @@
  *
  * 契约：
  *  1. team_orchestrate 工具结果的编码串解码渲染为面板，而非裸编码串。
- *  2. delegate_* / team_orchestrate 触发 GlanceBar domain 切到天机；turn 结束复位。
+ *  2. delegate_* / team_orchestrate 不切换 GlanceBar 会话星域（天机是编排阶段
+ *     标记不是会话星域，不上主面板——2026-08-29 用户实锤修正）。
  */
 
 import { test } from 'node:test'
@@ -67,17 +68,16 @@ test('team_orchestrate 编码串解码渲染为面板而非裸串', () => {
   assert.ok(!plain.includes('rivet:team-panel:v1:'), 'raw encoded string must not leak')
 })
 
-test('delegate_task 触发 domain 切到天机，turn 结束复位', async () => {
+test('delegate_task 不再切换 GlanceBar 星域（天机是阶段标记不上主面板）', async () => {
   const { app, out } = makeApp()
   app.callbacks.onToolUse('d1', 'delegate_task', { objective: 'explore' })
   let plain = stripAnsi(out.chunks.join(''))
-  assert.ok(plain.includes('天机'), `domain switched to 天机: ${plain}`)
+  assert.ok(!plain.includes('天机'), `no tianji on the main panel: ${plain.slice(0, 200)}`)
 
-  out.chunks.length = 0
-  // 最终回合完成 → domain 复位默认（天枢）
+  // 最终回合完成 → 星域显示保持默认（天枢），全程不变
   app.callbacks.onTurnComplete({ input_tokens: 10, output_tokens: 5 }, 1, true)
   await tick()
   plain = stripAnsi(out.chunks.join(''))
-  assert.ok(plain.includes('天枢'), `domain reset to default: ${plain}`)
-  assert.ok(!plain.includes('天机'), 'domain no longer 天机 after idle')
+  assert.ok(plain.includes('天枢'), `domain stays default: ${plain}`)
+  assert.ok(!plain.includes('天机'), 'domain never 天机')
 })

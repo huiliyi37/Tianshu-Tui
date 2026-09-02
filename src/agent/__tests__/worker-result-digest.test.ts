@@ -53,6 +53,20 @@ describe('formatWorkerResultDigest', () => {
     const dU = formatWorkerResultDigest({ status: 'passed', summary: 'x', findingsCount: 0, changedFilesCount: 0 })
     assert.doesNotMatch(dU, /个来源/)
   })
+
+  it('salvagedFindingsCount > 0 时追加「未经核实」警告', () => {
+    const d = formatWorkerResultDigest({
+      status: 'blocked', summary: 'salvaged', findingsCount: 3, changedFilesCount: 0, salvagedFindingsCount: 2,
+    })
+    assert.match(d, /2 条打捞发现未经核实（引用可能为幻觉）/)
+  })
+
+  it('salvagedFindingsCount 缺失或为 0 时不显示打捞警告', () => {
+    const d0 = formatWorkerResultDigest({ status: 'passed', summary: 'x', findingsCount: 1, changedFilesCount: 0, salvagedFindingsCount: 0 })
+    assert.doesNotMatch(d0, /打捞发现未经核实/)
+    const dU = formatWorkerResultDigest({ status: 'passed', summary: 'x', findingsCount: 1, changedFilesCount: 0 })
+    assert.doesNotMatch(dU, /打捞发现未经核实/)
+  })
 })
 
 describe('formatWorkerResultDigest — failureReason 12 值全映射（组合矩阵收口）', () => {

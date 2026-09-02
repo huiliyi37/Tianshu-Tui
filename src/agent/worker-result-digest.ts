@@ -42,6 +42,10 @@ export interface WorkerResultDigestInput {
   evidenceStatus?: string
   /** Worker 自报的研究覆盖规模（sourcesReviewed 透传），存在且 >0 时展示。 */
   sourcesReviewedCount?: number
+  /** 打捞恢复的 findings 条数（findings 中 salvaged===true 的计数）。>0 时
+   *  追加「未经核实」警告——打捞内容可能含模型幻觉引用，必须与正常 findings
+   *  区分对待（见 work-order.ts salvageWorkerResult 的 provenance 标记）。 */
+  salvagedFindingsCount?: number
 }
 
 /** 结果一句话摘要（detail 头部 + delegate_task uiContent 复用）。
@@ -56,5 +60,8 @@ export function formatWorkerResultDigest(r: WorkerResultDigestInput): string {
   if (r.sourcesReviewedCount !== undefined && r.sourcesReviewedCount > 0) parts.push(`${r.sourcesReviewedCount} 个来源`)
   const honesty = digestHonesty(r.failureReason, r.evidenceStatus)
   if (honesty) parts.push(`⚠ ${honesty}`)
+  if (r.salvagedFindingsCount !== undefined && r.salvagedFindingsCount > 0) {
+    parts.push(`⚠ ${r.salvagedFindingsCount} 条打捞发现未经核实（引用可能为幻觉）`)
+  }
   return parts.join(' · ')
 }

@@ -1,5 +1,5 @@
 import type { TeamTask } from './team-plan.js'
-import { dependencyId } from './work-order.js'
+import { dependencyId, type DependencyEdge } from './work-order.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -146,13 +146,58 @@ function isTestFor(testFile: string, sourceFile: string): boolean {
   return base === testBase
 }
 
+/** Deduplicate dependency edges while preserving order (object edges are keyed
+ *  by their full shape so two identical conditional edges collapse). */
+function dedupeDependencyRefs(deps: Array<string | DependencyEdge>): Array<string | DependencyEdge> {
+  const seen = new Set<string>()
+  const out: Array<string | DependencyEdge> = []
+  for (const dep of deps) {
+    const key = typeof dep === 'string'
+      ? `id:${dep}`
+      : `edge:${dependencyId(dep)}:${dep.onFailure ?? ''}:${dep.alternateOrderId ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(dep)
+  }
+  return out
+}
+
+/**
+ * Rewrite dependencies that pointed at tasks consumed by a source+test merge.
+ * Unknown ids are left untouched (later validation surfaces them as dangling).
+ */
+function remapDependencyRefs(
+  deps: Array<string | DependencyEdge>,
+  mergedInto: Map<string, string>,
+): Array<string | DependencyEdge> {
+  return dedupeDependencyRefs(deps.map(dep => {
+    if (typeof dep === 'string') return mergedInto.get(dep) ?? dep
+    return {
+      dependsOn: mergedInto.get(dep.dependsOn) ?? dep.dependsOn,
+      ...(dep.onFailure ? { onFailure: dep.onFailure } : {}),
+      ...(dep.alternateOrderId
+        ? { alternateOrderId: mergedInto.get(dep.alternateOrderId) ?? dep.alternateOrderId }
+        : {}),
+    }
+  }))
+}
+
+interface BoundTeamTasks {
+  tasks: TeamTask[]
+  /** consumed test-task id → surviving source-task id (used to rewrite dependents). */
+  mergedInto: Map<string, string>
+}
+
 /**
  * Bind source+test pairs: if a patcher task's files are all test files
- * for another patcher task's source files, merge them.
+ * for another patcher task's source files, merge them. Dependencies pointing
+ * at the consumed test task are remapped to the merged survivor so ordering
+ * is preserved instead of silently dispatching dependents in the same wave.
  */
-function bindSourceTestPairs(tasks: TeamTask[]): TeamTask[] {
+function bindSourceTestPairs(tasks: TeamTask[]): BoundTeamTasks {
   const result: TeamTask[] = []
   const consumed = new Set<string>()
+  const mergedInto = new Map<string, string>()
 
   for (const task of tasks) {
     if (consumed.has(task.id)) continue
@@ -178,6 +223,7 @@ function bindSourceTestPairs(tasks: TeamTask[]): TeamTask[] {
       )
       if (allTestPairs) {
         consumed.add(other.id)
+        mergedInto.set(other.id, task.id)
         const mergedFiles = [...new Set([...files, ...otherFiles])]
         result.push({
           ...task,
@@ -185,6 +231,9 @@ function bindSourceTestPairs(tasks: TeamTask[]): TeamTask[] {
           touchSet: mergedFiles,
           verification: [...task.verification, ...other.verification],
           objective: [task.objective, other.objective].join('\n'),
+          // The consumed test task's own dependencies must not be dropped
+          // (e.g. "write tests after the fixture lands" still needs the fixture).
+          dependsOn: dedupeDependencyRefs([...task.dependsOn, ...other.dependsOn]),
         })
         merged = true
         break
@@ -196,7 +245,7 @@ function bindSourceTestPairs(tasks: TeamTask[]): TeamTask[] {
     }
   }
 
-  return result
+  return { tasks: result, mergedInto }
 }
 
 // ── Main grouping function ─────────────────────────────────────────────────
@@ -215,13 +264,20 @@ export function groupTeamTasks(tasks: TeamTask[], options?: GroupingOptions): Te
   const maxWrite = options?.maxWriteWorkers ?? MAX_WRITE_WORKERS
   const maxRead = options?.maxReadWorkers ?? MAX_READ_WORKERS
 
-  // Bind source+test pairs
+  // Bind source+test pairs, then rewrite dependencies that pointed at a consumed
+  // test task to the merged survivor (dropping self-edges created when the test
+  // task depended on its own source task).
   const bound = bindSourceTestPairs(tasks)
-  const taskMap = new Map(bound.map(t => [t.id, t]))
+  const boundTasks = bound.tasks.map(task => ({
+    ...task,
+    dependsOn: remapDependencyRefs(task.dependsOn, bound.mergedInto)
+      .filter(dep => dependencyId(dep) !== task.id),
+  }))
+  const taskMap = new Map(boundTasks.map(t => [t.id, t]))
 
   // Validate dependency graph up front so cycles/dangling refs become visible
   // in wave reasons instead of being silently absorbed by the scheduler.
-  const diag = validateTaskDependencies(bound)
+  const diag = validateTaskDependencies(boundTasks)
   const danglingByTask = new Map<string, string[]>()
   for (const d of diag.dangling) {
     const arr = danglingByTask.get(d.taskId) ?? []
@@ -230,7 +286,7 @@ export function groupTeamTasks(tasks: TeamTask[], options?: GroupingOptions): Te
   }
 
   // Topological order
-  const topoOrder = topologicalSort(bound)
+  const topoOrder = topologicalSort(boundTasks)
 
   const waves: TeamWave[] = []
   let waveCounter = 0
