@@ -2466,7 +2466,12 @@ export class RuntimeSessionManager {
     if (!pending) return
     session.pendingHandoff = undefined
     try {
-      if (existsSync(pending.src) && statSync(pending.src).mtimeMs > pending.sinceMs) {
+      // 「文档晚于登记写入」的判定带容差：mtimeMs 是亚毫秒精度、sinceMs 是
+      // Date.now() 整数毫秒，ext4 等文件系统时间戳还有粒度量化——严格 > 会在
+      // 毫秒边界偶发翻转（2026-09-03 CI 三次实证：mtime 262.618 < sinceMs 263，
+      // 交接 run 收尾静默跳过归档）。2s 容差不改「陈旧文档跳过」语义
+      // （陈旧指上一任务遗留的小时级旧文档），只消除边界抖动。
+      if (existsSync(pending.src) && statSync(pending.src).mtimeMs >= pending.sinceMs - 2_000) {
         // dest 父目录在真实 agent 路径下由 SessionPersist 构造创建；但 best-effort
         // 不依赖那个时序（懒构建/异常会话里可能尚无目录）。
         mkdirSync(dirname(pending.dest), { recursive: true })
