@@ -50,16 +50,24 @@ jobs:
         working-directory: desktop
         run: node scripts/fetch-node-runtime.js
 
+      - name: Resolve signing env (非空才导出——空串证书 env 会让 tauri 尝试空证书签名而失败)
+        shell: bash
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          for v in WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD; do
+            val="$(eval echo \$$v)"
+            if [ -n "$val" ]; then echo "$v=$val" >> "$GITHUB_ENV"; fi
+          done
+
       - name: Build Tauri app (Windows)
         working-directory: desktop
         run: npx tauri build
         env:
-          # 未配置签名证书时构建未签名安装包；配置 secrets 后自动签名。
+          # Tauri updater 签名（createUpdaterArtifacts: true 时产出 .sig）
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Windows 代码签名（可选）
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
       - name: Upload installer + signature
         uses: actions/upload-artifact@v4

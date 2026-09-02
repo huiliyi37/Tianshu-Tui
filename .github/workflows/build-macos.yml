@@ -50,17 +50,25 @@ jobs:
         working-directory: desktop
         run: node scripts/fetch-node-runtime.js
 
+      - name: Resolve signing env (非空才导出——空串 env 会让 tauri 尝试空身份签名而失败)
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: |
+          for v in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD; do
+            val="$(eval echo \$$v)"
+            if [ -n "$val" ]; then echo "$v=$val" >> "$GITHUB_ENV"; fi
+          done
+
       - name: Build Tauri app (macOS)
         working-directory: desktop
         run: npx tauri build
         env:
           # 未配置 Apple Developer ID 时使用 ad-hoc 签名，产出未公证的 .app/.dmg。
-          # 配置以下 secrets 后自动签名并公证：
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # Tauri updater 签名（createUpdaterArtifacts: true 时产出 .sig）
+          # 配置以下 secrets 后自动签名并公证（经上一步过滤，空 secret 不导出）：
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
