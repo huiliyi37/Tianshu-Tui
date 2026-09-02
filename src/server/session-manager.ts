@@ -55,7 +55,7 @@ import { COUNCIL_PANEL_UI_PREFIX } from '../tui/council-panel-model.js'
 import { containsRegisteredFrame } from '../tui/frame-codec.js'
 import { buildHandoffPrompt } from '../tui/handoff.js'
 import { handoffRecoveries } from '../agent/recovery-journal.js'
-import { getSessionDir } from '../agent/session-persist.js'
+import { getSessionDir, SessionPersist } from '../agent/session-persist.js'
 import { parseSessionPerformanceAsync } from '../cache/session-performance.js'
 import { WatchdogRecoveryPolicy } from '../agent/watchdog-recovery-policy.js'
 import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domain-picker-entries.js'
@@ -492,6 +492,8 @@ export interface GoalSnapshot {
 }
 
 export interface CreateSessionInput {
+  /** Explicit session id (P1-1 fork pre-generates it so worktree branches/owners can use it). */
+  id?: string
   cwd?: string
   title?: string
   prompt?: string
@@ -521,6 +523,23 @@ export interface CreateSessionInput {
    */
   planAutoApproveUi?: boolean
 }
+
+/** P1-1 — where a forked conversation should live. */
+export type ForkDestination = 'local' | 'same-worktree' | 'new-worktree'
+
+/** P1-1 — discriminated fork outcome so routes can map reasons onto 400/404/409. */
+export type ForkSessionResult =
+  | { ok: true; record: SessionRecord }
+  | {
+      ok: false
+      reason:
+        | 'not_found'
+        | 'running'
+        | 'invalid_message_index'
+        | 'same_worktree_unavailable'
+        | 'worktree_failed'
+      detail?: string
+    }
 
 /** Persisted snapshot of a session: a record + its full event log. */
 export interface PersistedSession {
@@ -2065,7 +2084,7 @@ export class RuntimeSessionManager {
   }
 
   createSession(input: CreateSessionInput = {}): SessionRecord {
-    const id = this.idGenerator()
+    const id = input.id ?? this.idGenerator()
     let cwd = input.cwd ?? this.defaultCwd
     let worktreeBranch: string | undefined
     let worktreePath: string | undefined
@@ -4718,6 +4737,225 @@ export class RuntimeSessionManager {
     }
 
     return true
+  }
+
+  /**
+   * P1-1 — fork a conversation into a new session.
+   *
+   * The new session owns a COPY of the source history prefix (events.jsonl +
+   * the model transcript `<id>.jsonl`), so it starts idle with full context and
+   * the next prompt continues from the fork point instead of starting cold.
+   * The source session is never mutated — only its buffered deltas are flushed
+   * so the copied prefix is durable.
+   *
+   * messageIndex semantics match listRewindPoints(): an index into the OAI
+   * message list, and the chosen message must be user-role. Omitted = header
+   * fork (prefix through the latest user event, i.e. the whole conversation).
+   */
+  async forkSession(
+    id: string,
+    opts: {
+      messageIndex?: number
+      destination?: ForkDestination
+      title?: string
+      source?: NonNullable<SessionRecord['forkSource']>
+    } = {},
+  ): Promise<ForkSessionResult> {
+    const src = this.sessions.get(id)
+    if (!src) return { ok: false, reason: 'not_found' }
+    if (src.running) return { ok: false, reason: 'running' }
+
+    // Make the copy boundary durable: drain coalescing buffers, then load the
+    // full disk log (bounded by maxEvents for the in-memory ring only).
+    this.ensureEvents(src)
+    this.flushDeltaBuf(src)
+    this.flushToolResultBuf(src)
+    this.persistence?.flushSync?.()
+
+    let allEvents = src.events
+    try {
+      const disk = this.persistence?.loadEvents?.(id)
+      if (disk && disk.length > 0) allEvents = disk
+    } catch { /* in-memory fallback below */ }
+    allEvents = [...allEvents].sort((a, b) => a.seq - b.seq)
+
+    const userEvents = allEvents.filter((e) => e.type === 'user')
+    let cutSeq: number | undefined
+    let anchorPrompt = ''
+
+    // Model-side history: read the OAI transcript directly (works for
+    // rehydrated sessions whose agent hasn't been rebuilt yet).
+    const sourcePersist = new SessionPersist(id, src.record.cwd)
+    const oaiAll = sourcePersist.loadOai()
+    let oaiPrefix: OaiMessage[]
+
+    if (opts.messageIndex !== undefined) {
+      const idx = opts.messageIndex
+      const target = oaiAll[idx]
+      if (!target || target.role !== 'user') return { ok: false, reason: 'invalid_message_index' }
+      let userOrdinal = 0
+      for (let i = 0; i < idx; i++) {
+        if (oaiAll[i]?.role === 'user') userOrdinal++
+      }
+      const anchor = userEvents[userOrdinal]
+      if (!anchor) return { ok: false, reason: 'invalid_message_index' }
+      cutSeq = anchor.seq
+      anchorPrompt = String((anchor.data as { text?: unknown }).text ?? '')
+      oaiPrefix = oaiAll.slice(0, idx + 1)
+    } else {
+      const anchor = userEvents[userEvents.length - 1]
+      cutSeq = anchor?.seq
+      anchorPrompt = anchor ? String((anchor.data as { text?: unknown }).text ?? '') : ''
+      oaiPrefix = oaiAll
+    }
+
+    const eventsPrefix = cutSeq === undefined
+      ? []
+      : allEvents.filter((e) => e.seq <= cutSeq)
+
+    // Destination + title before creating the child so failures never leave
+    // a half-registered session behind.
+    const newId = this.idGenerator()
+    const destination = opts.destination ?? 'local'
+    let newCwd = src.record.cwd
+    let worktreeBranch: string | undefined
+    let worktreePath: string | undefined
+    let baselineHead: string | undefined
+
+    if (destination === 'same-worktree') {
+      if (!src.record.worktreePath || !existsSync(src.record.worktreePath)) {
+        return { ok: false, reason: 'same_worktree_unavailable' }
+      }
+      newCwd = src.record.worktreePath
+      worktreeBranch = src.record.worktreeBranch
+      worktreePath = src.record.worktreePath
+      try { baselineHead = revParseHead(newCwd) } catch { /* baseline stays undefined */ }
+    } else if (destination === 'new-worktree') {
+      const repoRoot = src.record.worktreePath ?? src.record.cwd
+      let wt: ReturnType<typeof createWorktree>
+      try {
+        wt = createWorktree(repoRoot, newId)
+      } catch (err) {
+        return { ok: false, reason: 'worktree_failed', detail: (err as Error)?.message ?? String(err) }
+      }
+      newCwd = wt.path
+      worktreeBranch = wt.branch
+      worktreePath = wt.path
+      try { baselineHead = revParseHead(newCwd) } catch { /* baseline stays undefined */ }
+    }
+
+    const rawBaseTitle = opts.title?.trim() || src.record.title?.trim() || src.record.id.slice(0, 8)
+    // Normalize away an existing "(n)" suffix so fork-of-fork chains number
+    // against the same base ("Foo (2)" → next is "Foo (3)", not "Foo (2) (2)").
+    const suffixMatch = /^(.*) \((\d+)\)$/.exec(rawBaseTitle)
+    const baseTitle = suffixMatch ? suffixMatch[1]! : rawBaseTitle
+    const forkTitleNumber = this.nextForkTitleNumber(baseTitle, id)
+    const title = `${baseTitle} (${forkTitleNumber})`
+
+    const created = this.createSession({
+      id: newId,
+      cwd: newCwd,
+      title,
+      approvalMode: src.record.approvalMode,
+      model: src.record.model,
+      domain: src.record.domain,
+      allowedTools: src.record.allowedTools,
+      planAutoApproveUi: src.record.planAutoApproveUi,
+    })
+    const child = this.sessions.get(created.id)
+    if (!child) {
+      // createSession registers synchronously — a missing child means an
+      // internal invariant broke. Report honestly instead of guessing.
+      return { ok: false, reason: 'worktree_failed', detail: 'forked session registration failed' }
+    }
+
+    child.record.forkedFromId = id
+    if (cutSeq !== undefined) child.record.forkedFromTurnSeq = cutSeq
+    child.record.forkTitleNumber = forkTitleNumber
+    child.record.forkSource = opts.source ?? 'header'
+    child.record.worktreeBranch = worktreeBranch
+    child.record.worktreePath = worktreePath
+    child.record.baselineHead = baselineHead
+
+    // 1) Desktop event log: persist the copied prefix under the new id, then
+    //    mirror it into the in-memory ring (tail-capped like any other session).
+    const maxSeq = eventsPrefix.length > 0 ? eventsPrefix[eventsPrefix.length - 1]!.seq : 0
+    child.seq = maxSeq
+    child.diskFirstSeq = eventsPrefix[0]?.seq ?? 1
+    child.events = eventsPrefix.length > this.maxEvents
+      ? eventsPrefix.slice(-this.maxEvents)
+      : [...eventsPrefix]
+    child.eventsLoaded = true
+    for (const ev of eventsPrefix) {
+      try { this.persistence?.appendEvent(created.id, ev) } catch { /* best-effort: live state is already set */ }
+    }
+    this.copyForkImages(id, created.id, eventsPrefix)
+    child.record.lastSeq = maxSeq
+
+    // 2) Timeline marker in the CHILD only (source log stays untouched).
+    this.append(child, 'fork', {
+      forkedFromId: id,
+      ...(cutSeq !== undefined ? { forkedFromTurnSeq: cutSeq } : {}),
+      anchorPrompt,
+      destination,
+    })
+    this.persistRecord(child)
+    this.persistence?.flushSync?.()
+
+    // 3) Model transcript: the agent restores from `<newCwd>/<newId>.jsonl`.
+    //    Write the prefix through the checksummed OAI path so the first run
+    //    carries real context instead of tripping warnIfHistoryLost.
+    const childPersist = new SessionPersist(created.id, newCwd)
+    for (const message of oaiPrefix) {
+      await childPersist.appendOaiWithChecksum(message)
+    }
+    await childPersist.flushSessionBuffer()
+
+    return { ok: true, record: { ...child.record } }
+  }
+
+  /** Best-effort copy of referenced vision attachments from source → child session. */
+  private copyForkImages(sourceId: string, childId: string, events: SessionEvent[]): void {
+    const images = new Set<string>()
+    for (const ev of events) {
+      const ids = (ev.data as { imageIds?: unknown }).imageIds
+      if (Array.isArray(ids)) {
+        for (const img of ids) {
+          if (typeof img === 'string') images.add(img)
+        }
+      }
+    }
+    for (const imgId of images) {
+      try {
+        const img = this.persistence?.readImage?.(sourceId, imgId)
+        if (!img) continue
+        this.persistence?.saveImage?.(childId, imgId, img.bytes.toString('base64'), img.mime)
+      } catch { /* best-effort: fork still succeeds without the attachment */ }
+    }
+  }
+
+  /** P1-1 — Codex-style fork title numbering: walk the forkedFrom chain and
+   *  return the next `base (n)` suffix. First fork is always (2). */
+  private nextForkTitleNumber(base: string, sourceId: string): number {
+    const re = /^(.*) \((\d+)\)$/
+    let max = 0
+    const seen = new Set<string>()
+    let cursor: string | undefined = sourceId
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor)
+      const rec = this.sessions.get(cursor)?.record
+      if (!rec) break
+      const m = re.exec(rec.title ?? '')
+      if (m) {
+        const n = Number(m[2])
+        if (m[1] === base && Number.isFinite(n) && n > max) max = n
+      } else if (rec.title === base) {
+        max = Math.max(max, 1)
+      }
+      cursor = rec.forkedFromId
+    }
+    // First fork is (2); (1) is reserved for the original conversation.
+    return Math.max(2, max + 1)
   }
 
   /** Best-effort file rollback for rewind. Surfaces result via event log. */

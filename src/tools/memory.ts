@@ -186,7 +186,10 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
           return { content: '错误：当前宿主未接线深召回的侧路模型通道——请改用 recall（知识库检索）。', isError: true }
         }
         // 原文不进主上下文：检索候选 → 侧路蒸馏 → 只回紧凑结果。
-        const candidates = collectTranscriptCandidates(ctx.sessionDir, query)
+        // 当前会话绝不作为 deep_recall 的「历史会话」证据（排除本会话回声）。
+        const candidates = collectTranscriptCandidates(ctx.sessionDir, query, {
+          excludeSessionIds: ctx.excludeSessionId ? [ctx.excludeSessionId] : [],
+        })
         if (candidates.length === 0) {
           return { content: `历史会话中没有与「${query}」相关的片段——deep_recall 无可蒸馏素材。` }
         }

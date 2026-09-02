@@ -10,6 +10,9 @@ on:
       - 'src/**'
       - '.github/workflows/build-macos.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest

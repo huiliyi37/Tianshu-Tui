@@ -11,6 +11,7 @@
  *   GET    /sessions/:id                               one record
  *   POST   /sessions/:id/prompt                        start a run
  *   POST   /sessions/:id/steer                         queue mid-run guidance (T3)
+ *   POST   /sessions/:id/fork                          fork conversation (P1-1)
  *   POST   /sessions/:id/abort                         abort
  *   GET    /sessions/:id/events?since=N                replay tail (B3)
  *   GET    /sessions/:id/files?q=&limit=                @file mention picker (D2)
@@ -1682,6 +1683,49 @@ export function buildSessionRoutes(
         return { status: 409, body: { error: 'Session is running, has no agent, or index out of range' } }
       }
       return { status: 200, body: { ok: true, ...manager.getSession(params!.id!) } }
+    }, apiToken),
+
+    // ── Fork (P1-1): copy the conversation into a new idle session ──
+    'POST /sessions/:id/fork': withAuth(async (body, params) => {
+      const data = (body ?? {}) as {
+        messageIndex?: number
+        destination?: 'local' | 'same-worktree' | 'new-worktree'
+        title?: string
+        source?: 'header' | 'message' | 'slash' | 'command'
+      }
+      if (
+        data.messageIndex !== undefined &&
+        (typeof data.messageIndex !== 'number' || data.messageIndex < 0)
+      ) {
+        return { status: 400, body: { error: 'Missing or invalid "messageIndex"' } }
+      }
+      if (
+        data.destination !== undefined &&
+        data.destination !== 'local' &&
+        data.destination !== 'same-worktree' &&
+        data.destination !== 'new-worktree'
+      ) {
+        return { status: 400, body: { error: 'Invalid "destination" (local | same-worktree | new-worktree)' } }
+      }
+      const result = await manager.forkSession(params!.id!, {
+        ...(data.messageIndex !== undefined ? { messageIndex: data.messageIndex } : {}),
+        ...(data.destination !== undefined ? { destination: data.destination } : {}),
+        ...(data.title !== undefined ? { title: data.title } : {}),
+        ...(data.source !== undefined ? { source: data.source } : {}),
+      })
+      if (result.ok) return { status: 200, body: { session: result.record } }
+      switch (result.reason) {
+        case 'not_found':
+          return { status: 404, body: { error: 'Session not found' } }
+        case 'running':
+          return { status: 409, body: { error: 'Session is running — stop it before forking' } }
+        case 'invalid_message_index':
+          return { status: 400, body: { error: 'messageIndex does not point at a user message' } }
+        case 'same_worktree_unavailable':
+          return { status: 409, body: { error: 'Source session has no worktree to fork into' } }
+        case 'worktree_failed':
+          return { status: 409, body: { error: 'Failed to create worktree for fork', detail: result.detail } }
+      }
     }, apiToken),
 
     // ── Precise rewind: preview the agent-edited files a per-message code

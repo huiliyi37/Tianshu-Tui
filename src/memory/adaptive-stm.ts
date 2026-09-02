@@ -32,7 +32,7 @@ export interface AdaptiveMemoryReviewInput {
   intentText: string
   userInput: string
   mode?: AdaptiveMemoryMode
-  index?: { search(query: string, options?: { limit?: number; excludeSessionIds?: readonly string[] }): Promise<KnowledgeHit[]> }
+  index?: { search(query: string, options?: { limit?: number; excludeSessionIds?: readonly string[]; includeMarkdown?: boolean }): Promise<KnowledgeHit[]> }
   /** 并行工作区隔离：排除这些会话写入的条目。 */
   excludeSessionIds?: readonly string[]
 }
@@ -143,7 +143,13 @@ export async function reviewAdaptiveMemory(input: AdaptiveMemoryReviewInput): Pr
   const key = intentKey(input.intentText)
   const nextEntities = entities(`${input.intentText}\n${input.userInput}`)
   const index = input.index ?? getKnowledgeIndex(input.cwd)
-  const hits = (await index.search(input.intentText, { limit: MAX_ENTRIES * 2, excludeSessionIds: input.excludeSessionIds }))
+  // 自动注入只选结构化记忆条目与 playbook 教训；knowledge/*.md 是旧排查文档/
+  // 复盘，不是「当前任务相关记忆」，否则新问题会被旧文档劫持（记忆幻觉治理）。
+  const hits = (await index.search(input.intentText, {
+    limit: MAX_ENTRIES * 2,
+    excludeSessionIds: input.excludeSessionIds,
+    includeMarkdown: false,
+  }))
     .slice(0, MAX_ENTRIES)
   const signature = hitSignature(hits)
 

@@ -65,6 +65,9 @@ export type SessionEventType =
   | 'error'
   | 'decision_shift'
   | 'rewind'
+  // P1-1 — conversation fork. data: { forkedFromId, forkedFromTurnSeq?,
+  // anchorPrompt }. Appended to the NEW session only (source log untouched).
+  | 'fork'
   // T2 — structured active task list (mirrors the `todo` tool's write payload).
   | 'todo_state'
   // T3 — mid-run user guidance accepted into the steer buffer.
@@ -241,6 +244,14 @@ export interface SessionRecord {
    *  getOrCreate（显式路径）或 maybeAutoTitle 起标题成功时隐式创建。
    *  absent → 旧 session / 未接线，桌面端回退 session.title || shortId。 */
   missionId?: string
+  /** P1-1 fork — 源会话 id。沿链回溯可定位 root（对齐 Codex forkedFromId）。 */
+  forkedFromId?: string
+  /** P1-1 fork — 分叉锚点：源会话 user 事件的 seq（消息级分叉；header 分叉 = 最后一个 user 事件）。 */
+  forkedFromTurnSeq?: number
+  /** P1-1 fork — 标题去重编号（2,3,…），落盘避免重启后重号。 */
+  forkTitleNumber?: number
+  /** P1-1 fork — 触发入口，仅观测/展示用。 */
+  forkSource?: 'header' | 'message' | 'slash' | 'command'
 }
 
 /** Live plan-mode draft surfaced to the desktop — a growing working document,

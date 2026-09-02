@@ -47,6 +47,24 @@ describe('adaptive STM', () => {
     assert.deepEqual(result.selectedIds, ['memory'])
   })
 
+  it('automatic STM search excludes knowledge markdown docs', async () => {
+    const calls: Array<{ limit?: number; excludeSessionIds?: readonly string[]; includeMarkdown?: boolean }> = []
+    const index = {
+      search: async (
+        _query: string,
+        options?: { limit?: number; excludeSessionIds?: readonly string[]; includeMarkdown?: boolean },
+      ): Promise<KnowledgeHit[]> => {
+        calls.push(options ?? {})
+        return []
+      },
+    }
+    await reviewAdaptiveMemory({
+      cwd: '/project', sessionId: 'session-md', turn: 1,
+      intentText: 'ask a new question', userInput: 'ask a new question', mode: 'on', index,
+    })
+    assert.equal(calls[0]?.includeMarkdown, false, '旧 md 文档不得进入自动 STM 注入')
+  })
+
   it('emits an explicit empty replacement when a new intent has no hits', async () => {
     let hits: KnowledgeHit[] = [{ id: 'old', text: 'old task memory', score: 1 }]
     const index = { search: async () => hits }
