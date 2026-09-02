@@ -15,7 +15,8 @@ describe('TurnHeartbeat', () => {
       onHeartbeat: (elapsed, activity) => events.push({ elapsed, activity }),
     })
     hb.start()
-    await delay(80)
+    // CI runner 满载时事件循环可被饿 100ms+，80ms 单发判定会脆断（2026-09-03 实证）——5 倍余量轮询窗
+    await delay(250)
     hb.stop()
     assert.ok(events.length >= 1, `expected at least 1 heartbeat, got ${events.length}`)
     assert.equal(events[0]!.activity, 'starting')

@@ -7,8 +7,8 @@
       "note": "7500→7520：换行模式对齐（footer 行 + shift 路由 +23 行，2026-08-25） 7520→7526：协同建议行接线（onChange 评估 + 渲染槽 + Tab 采纳 + Esc 关闭；检测/渲染主体在 engine/orchestration-hint.ts 新模块）。 7526→7553：错误时刻三件套（handleError 分类指引行 + 上一条回填输入框 + lastSubmittedText 生命周期，+27）。 7553→7558：onboarding 哨兵接线（向导纯取消后新会话不再自动弹 /connect，+5）。 7558→7637：choice-panel 输入子模式补光标编辑与粘贴（choicePanelInputCursor/按键光标语义全套/onPaste 路由分支/caret 接线 +73）+ 计划审批卡 separator 传参（+6）——输入子模式状态与 app.ts 现有 choicePanel* 字段族强耦合，拆分收益负；账本随债对齐。 7637→7675：/model 面板对标 CC：effort draft 状态 + </> 步进按键 + Enter/s 语义翻转 + 注册处 effort 数据组装（+38）。 7675→7682：routing nudge 接线（routingConfiguredProvider 字段/setter + onChange ctx + Tab 采纳 /config 特例，+7）。"
     },
     "src/server/session-manager.ts": {
-      "ceiling": 5832,
-      "note": "5741→5800：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） →5804：turn_complete 带 ttft/tokS 指标（W-stats，2026-08-31）。 →5822：getPerformance 薄读面（解析在 cache/session-performance.ts 纯模块，2026-09-01）。 →5824：getPerformance 改异步读 + parseSessionPerformanceAsync 分片解析（大日志不阻塞事件循环，2026-09-01 审查收口）。 →5832：Zen P1——onZenPhaseChange 回调接 zen_phase 会话事件（桌面读面徽章，+8，2026-09-01）。"
+      "ceiling": 6191,
+      "note": "5741→5800：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） →5804：turn_complete 带 ttft/tokS 指标（W-stats，2026-08-31）。 →5822：getPerformance 薄读面（解析在 cache/session-performance.ts 纯模块，2026-09-01）。 →5824：getPerformance 改异步读 + parseSessionPerformanceAsync 分片解析（大日志不阻塞事件循环，2026-09-01 审查收口）。 →5832：Zen P1——onZenPhaseChange 回调接 zen_phase 会话事件（桌面读面徽章，+8，2026-09-01）。 5832→6191：Codex 基线潮服务端增长（fork 转录容错/交接/会话生命周期，+359，2026-09-03 对齐）。"
     },
     "src/tui/slash-commands.ts": {
       "ceiling": 4620,
@@ -45,8 +45,8 @@
       "note": "810→814：Zen P0——ToolExecutionDeps.getZenUnregisteredHint 字段 + buildDeps 转发（+4，2026-09-01）。810 为入账时存量，已超 800 红线但未登记；本次随改动一并纳入点名棘轮收口（纯数据 diff 即评审对象）。"
     },
     "src/server/session-routes.ts": {
-      "ceiling": 2008,
-      "note": "1995→1997：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） →1999：账本对齐——@Computer 挂载后台权限探测（W4-15，+2，2026-08-31）。 →2007：GET /sessions/:id/performance 端点（W-stats P1-3，2026-09-01）。 →2008：performance 路由改 await 异步 getPerformance（大日志分片解析，+1，2026-09-01 审查收口）。"
+      "ceiling": 2178,
+      "note": "1995→1997：账本对齐实际行数（多会话功能增长欠账收口，2026-08-25） →1999：账本对齐——@Computer 挂载后台权限探测（W4-15，+2，2026-08-31）。 →2007：GET /sessions/:id/performance 端点（W-stats P1-3，2026-09-01）。 →2008：performance 路由改 await 异步 getPerformance（大日志分片解析，+1，2026-09-01 审查收口）。 →2178：Codex 基线潮路由增长（fork/diff 评论/置顶/分支搜索端点，+170，2026-09-03 对齐）。"
     },
     "src/prompt/engine.ts": {
       "ceiling": 1645,
