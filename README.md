@@ -142,7 +142,8 @@ Layer 4: RuntimeHookPipeline（72 hooks） → trap-and-emulate 拦截退化行�
 
 ### 2. 安装（任选其一）
 
-**方式 A：桌面端（开箱即用）** —— 从 [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载：macOS `.dmg` · Windows `.msi` · Linux `.AppImage`。
+**方式 A：桌面端（开箱即用）** —— 从 [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载：macOS `.dmg`（Apple Silicon / Intel 双架构）· Windows `.exe` 安装向导 · Linux `.AppImage`。
+> **Linux 支持范围（3.11.2 首发）**：x64 AppImage 免安装——`chmod +x Tianshu_*.AppImage` 后直接运行；要求 glibc ≥ 2.35（Ubuntu 22.04+ / Debian 12+ 等主流发行版），推荐 X11 会话（Wayland 未验）。已知限制：语音输入暂不可用（whisper 社区构建缺位，自动降级浏览器语音）；桌面自动更新对 Linux 同样生效。
 
 > **Windows 支持范围**：Windows 10（1809+，建议 22H2）/ Windows 11。界面渲染依赖 **WebView2 Runtime（建议 ≥ 120）**——v3.5 起的滚动与渲染优化需要较新运行时，旧版会导致会话区滚动卡顿。自 3.5.3 起安装器内嵌完整离线安装包（无需联网、系统级注册）。存量用户经自动更新升级后若提示过旧：在提示条或「设置 → 运行时与关于」里点「运行修复工具」。**窗口完全打不开**时，用开始菜单「修复 WebView2」，或从 [Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载 `windows-repair` 目录双击 `repair-webview2.cmd`。也可手动安装 [WebView2 离线安装包](https://go.microsoft.com/fwlink/p/?LinkId=2124703) 后重启。
 > **Win10 平板模式已知行为**：平板模式下切换应用会把上一个应用滑出屏幕——computer_use 的快照已做遮挡/后台自愈（PrintWindow 渲染），无需关闭平板模式。

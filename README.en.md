@@ -155,7 +155,8 @@ Agent core logic (multi-turn loops, tool pipelines, context compaction) is notor
 
 ### 2. Install (pick one)
 
-**A. Desktop app (ready to use)** — download from [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest): macOS `.dmg` · Windows `.msi` · Linux `.AppImage`.
+**A. Desktop app (ready to use)** — download from [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest): macOS `.dmg` (Apple Silicon / Intel) · Windows `.exe` setup wizard · Linux `.AppImage`.
+> **Linux support scope (new in 3.11.2)**: x64 AppImage, no install needed — `chmod +x Tianshu_*.AppImage` and run; requires glibc ≥ 2.35 (Ubuntu 22.04+ / Debian 12+ and other mainstream distros); X11 recommended (Wayland untested). Known limitation: voice input is unavailable on Linux for now (no community whisper build — falls back to browser speech); desktop auto-update works on Linux too.
 
 **B. One-line installer (recommended)** — checks Node ≥ 24 → installs `tianshu-tui` globally (npmmirror registry by default; override via `NPM_CONFIG_REGISTRY`) → launches `rivet`; idempotent, safe to re-run:
 
