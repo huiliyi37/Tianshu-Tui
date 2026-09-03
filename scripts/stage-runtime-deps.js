@@ -226,6 +226,57 @@ console.log(
   skippedForeign,
 )
 
+// ── @ast-grep/lang-* 多架构 prebuilds 裁剪 ─────────────────────────────────
+// lang-python/json 等包自带 5 份 prebuild（Linux/macOS/Windows × arch），目标平台
+// 只加载其中一份。残留的异架构 .so 在 macOS/Windows 包里是纯体积浪费，在 Linux
+// AppImage 打包时更会让 linuxdeploy 对 ARM64 二进制跑 ldd 直接崩（Failed to run
+// ldd: exited with code 1，2026-09-03 CI 三轮实证）。
+const AST_GREP_PREBUILD_KEEP = {
+  'linux:x64': 'prebuild-Linux-X64',
+  'linux:arm64': 'prebuild-Linux-ARM64',
+  'darwin:arm64': 'prebuild-macOS-ARM64',
+  'darwin:x64': 'prebuild-macOS-X64',
+  'win32:x64': 'prebuild-Windows-X64',
+}
+
+function resolveTargetOS() {
+  const triple = (process.env.TAURI_ENV_TARGET_TRIPLE || '').trim()
+  if (triple) {
+    if (triple.includes('linux')) return 'linux'
+    if (triple.includes('darwin')) return 'darwin'
+    if (triple.includes('windows')) return 'win32'
+  }
+  return process.platform
+}
+
+function pruneAstGrepLangPrebuilds() {
+  const keep = AST_GREP_PREBUILD_KEEP[`${resolveTargetOS()}:${keepArch}`]
+  const removed = []
+  const langRoot = join(destModules, '@ast-grep')
+  if (!existsSync(langRoot)) return { removed }
+  for (const dir of readdirSync(langRoot)) {
+    if (!dir.startsWith('lang-')) continue
+    const prebuilds = join(langRoot, dir, 'prebuilds')
+    if (!existsSync(prebuilds)) continue
+    for (const variant of readdirSync(prebuilds)) {
+      if (variant === keep) continue
+      rmSync(join(prebuilds, variant), { recursive: true, force: true })
+      removed.push(`${dir}/${variant}`)
+    }
+  }
+  return { removed }
+}
+
+const prebuildPrune = pruneAstGrepLangPrebuilds()
+if (prebuildPrune.removed.length > 0) {
+  console.log(
+    '✅ Pruned ast-grep lang prebuilds (keep=%s): removed %d variant(s) → %dMB',
+    AST_GREP_PREBUILD_KEEP[`${resolveTargetOS()}:${keepArch}`],
+    prebuildPrune.removed.length,
+    dirSizeMb(join(destModules, '@ast-grep')),
+  )
+}
+
 // ── better-sqlite3: lean JS wrapper + zero-degrade load assertion ──
 writeStagingMarker(join(repoRoot, 'dist'), 'better-sqlite3 wrapper + native load assertion')
 stageBetterSqlite3Wrapper()

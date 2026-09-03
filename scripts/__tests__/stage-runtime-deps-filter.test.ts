@@ -13,6 +13,10 @@ test('isForeignPlatformPackage detects @ast-grep napi pkgs', () => {
   assert.equal(isForeignPlatformPackage('@ast-grep/napi-darwin-x64', 'arm64'), true)
   assert.equal(isForeignPlatformPackage('@ast-grep/napi-darwin-arm64', 'arm64'), false)
   assert.equal(isForeignPlatformPackage('@ast-grep/napi', 'arm64'), false)
+  // musl 变体永远 foreign（桌面 glibc 基准;linuxdeploy 对 musl .node 跑 ldd 会崩）
+  assert.equal(isForeignPlatformPackage('@ast-grep/napi-linux-x64-musl', 'x64'), true)
+  assert.equal(isForeignPlatformPackage('@ast-grep/napi-linux-x64-gnu', 'x64'), false)
+  assert.equal(isForeignPlatformPackage('napi-linux-x64-musl', 'x64'), true)
 })
 
 test('isForeignPlatformPackage leaves non-platform packages alone', () => {
