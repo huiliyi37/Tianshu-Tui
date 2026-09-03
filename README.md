@@ -1101,6 +1101,11 @@ rivet logs open desktop            # 打开 sidecar 日志目录（GUI 起不来
 - **安全漏洞** → [私密报告](https://github.com/huiliyi37/Tianshu-Tui/security/advisories/new)（不要开公开 issue）
 - **贡献代码** → 见 [CONTRIBUTING.md](CONTRIBUTING.md)
 - **求助指南** → 见 [SUPPORT.md](SUPPORT.md)
+- **微信交流群** → 「天枢 harness 交流群」，扫码加入，日常讨论 / 反馈 / 第一时间获取发版动态：
+
+<img src="docs/brand/assets/wechat-group-qr.png" width="280" alt="天枢 harness 交流群微信群二维码">
+
+> 微信群二维码有有效期（7 天），过期请在 [Discussions](https://github.com/huiliyi37/Tianshu-Tui/discussions) 或 Issue 留言，维护者会补新码。
 
 > 提示：需要先由仓库维护者在 `Settings → General → Discussions` 中开启 Discussions 功能。
 
