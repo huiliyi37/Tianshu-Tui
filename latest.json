@@ -1,6 +1,6 @@
 {
   "version": "3.11.1",
-  "notes": "v3.11.1——桌面端布局与交互对齐 Codex/ChatGPT 基线（P1-P4）+ 记忆隔离 P0-P2 + README 实证重写；捆绑 Node runtime 24.18.0。",
+  "notes": "天枢 v3.11.1——桌面端布局/交互对齐 Codex/ChatGPT 基线（P1-P4：fork 收尾/diff 行级评论/分支搜索置顶/欢迎页真实分支）；记忆隔离 P0-P2（STM/deep_recall 排除在途会话，handoff 归档毫秒边界修复）；捆绑 Node runtime 升级 24.18.0（消除集成终端跑测试 100% CPU 挂起）；CLI tianshu-tui@3.11.1 同版发 npm；README 实证叙事重写。\n\n📦 安装：macOS M 系列 → Tianshu_3.11.1_aarch64.dmg；macOS Intel → Tianshu_3.11.1_x64.dmg；Windows → Tianshu_3.11.1_x64-setup.exe。macOS 首开被 Gatekeeper 拦时执行 xattr -cr /Applications/Tianshu.app。CLI：npm i -g tianshu-tui@3.11.1（Node ≥ 24）。已装 3.9.0+ 可应用内自动更新（国内 OSS 源）。完整说明见 Release 页。",
   "pub_date": "2026-09-02T21:56:30.000Z",
   "platforms": {
     "darwin-aarch64": {
