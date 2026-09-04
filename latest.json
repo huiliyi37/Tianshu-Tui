@@ -1,23 +1,19 @@
 {
-  "version": "3.11.2",
-  "notes": "天枢 v3.11.2——修复 Base UI #31 菜单报错（星域/授权菜单+选择文件夹死点击）、启动窗口尺寸回退最小值（平台覆盖配置漏改，现为 1090×760）、侧栏「打开即缩回」、handoff 归档毫秒边界容差。含 3.11.0/3.11.1 全部并版内容。安装：macOS M 系列 _aarch64.dmg、Intel _x64.dmg、Windows _x64-setup.exe；CLI npm i -g tianshu-tui@3.11.2。完整说明见 Release 页。",
-  "pub_date": "2026-09-03T04:16:56.000Z",
+  "version": "3.12.0",
+  "notes": "v3.11.1——桌面端布局与交互对齐 Codex/ChatGPT 基线（P1-P4）+ 记忆隔离 P0-P2 + README 实证重写；捆绑 Node runtime 24.18.0。",
+  "pub_date": "2026-09-04T03:25:02.545Z",
   "platforms": {
     "darwin-aarch64": {
-      "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.11.2/Tianshu_3.11.2_aarch64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1h5SHVJZkk0cE1NZjR6RGkzcFdDeE5UUzRVL2NyUWZCU0gzM3U4QzBuQ3lxSmk4REFSTVlsQnJqUFUvV3V1WFhjVmtkK0tIUEoxNHNnLzBFUy8wdkE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDA3MjY1CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CjZwS2d0SS9FMVRVQXA4WGJJSlRrcDlycjl2YnVjMXZmU1ZBYkxYeGhrQy9Dc0N3RjJPR1JJUTY3alIxUTFVUXFZQUtjTTMwUGtSK3RDMjU3QU8xL0NnPT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.12.0/Tianshu_3.12.0_aarch64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2JSYitNM2UrMnhmbGp2dEpGK3Y1aWhsRVRXZit3WEF5MUNPOCtwRjl4NUNZSytDTGpxSEFPVm96LzI4blU0eGExNTRRWGdlS2RES08xUXFQd1dFRUEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDkxODY5CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CmJ3NnlFWlNhc2hLcnRZbSttc0pMeWtFTmhPa2xsSmVzOFEvTkJQcTlPL0QzV0lwMDAvS2NnVzQ3MVkrZVB3SHRIajBqZGVPemkwS3NGcWVTZGtJVkNnPT0K"
     },
     "darwin-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.11.2/Tianshu_3.11.2_x64.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1d6UDM5Tk1nUkdObTEzSzdBVGpCREk4N25YVzRQUnppMjRoNDU4VXMwdSsrMDRGRnJkL3hGQ3h2SHJid25CMjJkZ0FkZis3a0ZtL1hvbDNLZGhzQ0F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDA3Mjc0CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6ClczR2FCSkNHM2ZLY2dXRjlmUHFUSndHN1ZWeU5selcwdHlVcnBJK05WcldjaXBsTjB6bEFiY01oMEJHT3FHQUdsaXI0cFk1WlZtcG9BWlIvaFJZekJRPT0K"
+      "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.12.0/Tianshu_3.12.0_x64.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1ZkYlhCa0tvQ1RWRlhSK2h6SlUwSmo4UEVDcTdPVktWdm1PNjM2R3hpVURrNlZyckI4YWZVZlFzb2hlVUhycEFSMk9NMmhZdVB6NTlaMkxsVm54emcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDkyMzAwCWZpbGU6VGlhbnNodS5hcHAudGFyLmd6ClpCK2FRUFBTc0RDcDQ1OUU3SHRVdzRSTkRJbXJENnMrY2xkM21teWo0RE1sZkpqZTVJeWRJckp2UHVSM01wK3FqZ2wrR3dSWitKR204a1k2UHR0c0JRPT0K"
     },
     "windows-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.11.2/Tianshu_3.11.2_x64-setup.exe",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1o5aTRkVTZXZTgyYzh4M3RGNTRVS1dzSGJwelM2T29mU3JlUklIa2MrK2NJQkg0NUY0RzN3eHNCZ0pRelZOeldXdmtNRW9vTll3aFFaNmdod3UyMEFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDA3OTYzCWZpbGU6VGlhbnNodV8zLjExLjJfeDY0LXNldHVwLmV4ZQp1YWhIWU1nd2FwZlVTSVBmY1VpQVpkN3pZK0lwTGNBbmJkN0piRzhEY3hvNXkrd0hMaWQ0Q2orbXlTTUJjWVFNSlJ4djg4YWNiTXlRazNrNTFaZUhEQT09Cg=="
-    },
-    "linux-x86_64": {
-      "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.11.2/Tianshu_3.11.2_amd64.AppImage",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1l4TXhodVN0UU9NZTVLaHREVTlDZ1NPQ2htZ3FJYXcvSEhqM2dFNlJBRnMySFBZcUM2cFU3UVFLeURVWWtpUXNnS0NSVm5UMm53S1pNSjU3ZFVwalFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDM3NzYxCWZpbGU6VGlhbnNodV8zLjExLjJfYW1kNjQuQXBwSW1hZ2UKMU5HT09Cdng0enlaMERCaDFtOVBnOGdmbHM4TnY2bnZRK0gxU0RQRUsrN00zcXRVanNSSXRzNWVFRE5rQUEvZFgxQm12OGwyV0Q0Q2o5S2Q1TEhYRGc9PQo="
+      "url": "https://github.com/huiliyi37/Tianshu-harness/releases/download/v3.12.0/Tianshu_3.12.0_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1oxUzdrSTQ0d2h0TVg4eDRBWmtidlVBTmdBVzZtL3BYM3g5M2pQZHJCWXpvM2VnNHQzdXJaSnQ5SHRzMDJTakNpb2IwQ3RzM1NEQTBiZVJDU0JuUlFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg4NDk1NDIzCWZpbGU6VGlhbnNodV8zLjEyLjBfeDY0LXNldHVwLmV4ZQpQN3h5cTNBVG9UUEVTaVNMeGtPUUMvZnRwaWQ2Tzk5ZGljRklDd3R6L0I4TnlWTHhqS0JLSm1wV3RISkJKdXpqQWpOL0t4RnRDblhBeEpUOEN5K25CQT09Cg=="
     }
   }
 }
